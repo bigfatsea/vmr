@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"vmr/internal/adapter"
+	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/health"
@@ -167,8 +168,9 @@ func (rt *Router) Concurrency() (limit int, inFlight, waiting int64) {
 
 // Serve routes one chat request through the failover loop. protocol is the
 // ingress protocol ("openai" or "anthropic"); a model bound to the other
-// protocol is rejected — VMR never converts between protocols.
-func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string) {
+// protocol is rejected — VMR never converts between protocols. rec (nilable)
+// collects the per-attempt audit trail.
+func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
 	start := time.Now()
 	snap := rt.snap.Load()
 	route, ok := snap.Models[creq.Model]
@@ -194,10 +196,13 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	}
 	strategy.Sort(candidates, route.Dims)
 
+	// Failover walks the whole candidate sequence: keep trying until one
+	// endpoint succeeds or every available endpoint has been tried once.
+	// max_attempts (>0) optionally caps the walk to bound tail latency.
 	attempts := 0
 	var last *upstreamError
 	for _, ep := range candidates {
-		if attempts >= snap.Cfg.MaxAttempts {
+		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
 		// Acquire enforces the single-flight probe for half-open endpoints.
@@ -205,7 +210,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			continue
 		}
 		attempts++
-		done, uerr := rt.tryOne(w, r, creq, ep, snap, attempts, start)
+		done, uerr := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
 		if done {
 			return
 		}
@@ -237,9 +242,17 @@ type upstreamError struct {
 // tryOne sends the request to a single endpoint. It returns done=true when a
 // response (success or non-retryable error) has been written to the client.
 func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest,
-	ep *core.Endpoint, snap *Snapshot, attempt int, start time.Time) (bool, *upstreamError) {
+	ep *core.Endpoint, snap *Snapshot, attempt int, start time.Time, rec *audit.Record) (bool, *upstreamError) {
 
 	key := ep.HealthKey()
+	attemptStart := time.Now()
+	var att *audit.Attempt
+	if rec != nil {
+		rec.Attempts = append(rec.Attempts, audit.Attempt{Endpoint: ep.Name()})
+		att = &rec.Attempts[len(rec.Attempts)-1]
+		defer func() { att.DurMS = time.Since(attemptStart).Milliseconds() }()
+	}
+
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok { // validated at config load; defensive only
 		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
@@ -250,16 +263,36 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	if err != nil {
 		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("model=%s ep=%s attempt=%d build_error=%v", creq.Model, ep.Name(), attempt, err)
+		if att != nil {
+			att.Error = "build: " + err.Error()
+		}
 		return false, nil
+	}
+	if att != nil {
+		att.URL = req.URL.String()
+		var outBody []byte
+		if req.GetBody != nil {
+			if rc, err := req.GetBody(); err == nil {
+				outBody, _ = io.ReadAll(io.LimitReader(rc, audit.MaxBodyBytes+1))
+				rc.Close()
+			}
+		}
+		att.Request = audit.NewMessage(req.Header, outBody)
 	}
 
 	resp, err := snap.client.Do(req)
 	if err != nil {
 		if r.Context().Err() != nil {
+			if att != nil {
+				att.Error = "canceled by client"
+			}
 			return true, nil // client went away; nothing to write, don't punish the endpoint
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("model=%s ep=%s attempt=%d net_error=%v cooldown=%s", creq.Model, ep.Name(), attempt, err, cd)
+		if att != nil {
+			att.Error = "network: " + err.Error()
+		}
 		return false, nil
 	}
 
@@ -268,6 +301,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		resp.Body.Close()
 		class := ad.ClassifyError(resp.StatusCode, body)
 		uerr := &upstreamError{resp.StatusCode, resp.Header.Get("Content-Type"), body}
+		if att != nil {
+			m := audit.NewMessage(resp.Header, body)
+			m.Status = resp.StatusCode
+			att.Response = &m
+			att.Error = class.String()
+		}
 		if class == core.ErrClient {
 			// Bad request: every endpoint would fail the same way. Return as-is.
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
@@ -289,6 +328,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	// Success: report health, then forward. From the first byte written the
 	// response is committed — no failover past this point.
 	rt.Health.ReportSuccess(key)
+	if att != nil {
+		// Body omitted: passthrough makes it byte-identical to the client
+		// response body, which the server layer records.
+		att.Response = &audit.Message{Status: resp.StatusCode, Headers: audit.Redact(resp.Header)}
+	}
 	body := ad.TransformBody(resp.Body, creq.Stream)
 	defer body.Close()
 

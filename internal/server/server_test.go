@@ -68,7 +68,7 @@ func newRouterServer(t *testing.T, yaml string) *httptest.Server {
 		t.Fatal(err)
 	}
 	rt.Install(snap)
-	ts := httptest.NewServer(New(rt).Handler())
+	ts := httptest.NewServer(New(rt, nil).Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

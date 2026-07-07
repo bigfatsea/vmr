@@ -4,7 +4,7 @@
 
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer)
-# max_attempts: 3                # failover attempts per request
+# max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_body_mb: 8                 # request body buffer limit
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
 # timeouts:
@@ -35,6 +35,10 @@ providers:
     type: anthropic
     base_url: https://api.deepseek.com/anthropic/v1
     api_key: ${DEEPSEEK_API_KEY}
+  openrouter_a: # OpenRouter also speaks Anthropic; same base, /messages appended
+    type: anthropic
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
 
 models:
   coding:
@@ -68,3 +72,6 @@ models:
       - provider: deepseek_a
         model: deepseek-v4-pro
         priority: 2
+      - provider: openrouter_a # any OpenRouter model, spoken over Anthropic protocol
+        model: minimax/minimax-m3
+        priority: 3

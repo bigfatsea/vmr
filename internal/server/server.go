@@ -9,47 +9,57 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/health"
 	"vmr/internal/router"
 )
 
 type Server struct {
-	rt *router.Router
+	rt    *router.Router
+	audit *audit.Logger // nil = auditing disabled
 }
 
-func New(rt *router.Router) *Server { return &Server{rt: rt} }
+func New(rt *router.Router, auditLog *audit.Logger) *Server {
+	return &Server{rt: rt, audit: auditLog}
+}
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/chat/completions", s.auth(s.chatHandler("openai")))
-	mux.HandleFunc("POST /v1/messages", s.auth(s.chatHandler("anthropic")))
+	mux.HandleFunc("POST /v1/chat/completions", s.chatHandler("openai"))
+	mux.HandleFunc("POST /v1/messages", s.chatHandler("anthropic"))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
 	mux.HandleFunc("GET /admin/status", s.adminStatus)
 	return mux
 }
 
-// auth enforces the router's own optional API key on /v1/*. Both credential
+// checkAuth enforces the router's own optional API key. Both credential
 // conventions are accepted: Authorization: Bearer (OpenAI) and x-api-key
 // (Anthropic SDKs send only this).
+func (s *Server) checkAuth(r *http.Request) bool {
+	key := s.rt.Snapshot().Cfg.APIKey
+	if key == "" {
+		return true
+	}
+	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if got == "" {
+		got = r.Header.Get("x-api-key")
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1
+}
+
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := s.rt.Snapshot().Cfg.APIKey
-		if key != "" {
-			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if got == "" {
-				got = r.Header.Get("x-api-key")
-			}
-			if subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
-				writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
-				return
-			}
+		if !s.checkAuth(r) {
+			writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
+			return
 		}
 		next(w, r)
 	}
@@ -60,6 +70,40 @@ var protocolHeaders = []string{"anthropic-version", "anthropic-beta"}
 
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var rec *audit.Record
+		if s.audit != nil {
+			rec = &audit.Record{
+				TS:       time.Now(),
+				Protocol: protocol,
+				Client: audit.Exchange{
+					Addr:    r.RemoteAddr,
+					Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
+				},
+			}
+			rw := newRecorder(w)
+			w = rw
+			defer func() {
+				rec.DurMS = time.Since(rec.TS).Milliseconds()
+				rec.Client.Response = rw.message()
+				switch {
+				case rw.status == 0 && r.Context().Err() != nil:
+					rec.Outcome = "canceled"
+				case rw.status < 400:
+					rec.Outcome = "ok"
+				default:
+					rec.Outcome = "error"
+				}
+				if err := s.audit.Write(rec); err != nil {
+					log.Printf("audit: %v", err)
+				}
+			}()
+		}
+
+		if !s.checkAuth(r) {
+			writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
+			return
+		}
+
 		// Global concurrency gate: excess requests park here until a slot
 		// frees, or the client goes away.
 		release, ok := s.rt.AcquireSlot(r.Context())
@@ -72,6 +116,9 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxBodyBytes()))
+		if rec != nil {
+			rec.Client.Request.Body, rec.Client.Request.BodyTruncated = audit.EncodeBody(body)
+		}
 		if err != nil {
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
@@ -94,6 +141,9 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
 			return
 		}
+		if rec != nil {
+			rec.Model, rec.Stream = probe.Model, probe.Stream
+		}
 
 		hdr := http.Header{}
 		for _, name := range protocolHeaders {
@@ -102,7 +152,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			}
 		}
 
-		s.rt.Serve(w, r, &core.CanonicalRequest{Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr}, protocol)
+		s.rt.Serve(w, r, &core.CanonicalRequest{Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr}, protocol, rec)
 	}
 }
 

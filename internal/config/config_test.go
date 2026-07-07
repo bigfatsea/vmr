@@ -33,8 +33,8 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if got := cfg.Providers["p1"].APIKey; got != "sk-test-123" {
 		t.Errorf("env expansion: got %q", got)
 	}
-	if cfg.MaxAttempts != 3 || cfg.MaxBodyMB != 8 {
-		t.Errorf("defaults: attempts=%d body=%d", cfg.MaxAttempts, cfg.MaxBodyMB)
+	if cfg.MaxAttempts != 0 || cfg.MaxBodyMB != 8 {
+		t.Errorf("defaults: attempts=%d (want 0 = unlimited) body=%d", cfg.MaxAttempts, cfg.MaxBodyMB)
 	}
 	if cfg.Timeouts.Connect.D() != 10*time.Second {
 		t.Errorf("default connect timeout: %v", cfg.Timeouts.Connect.D())

@@ -108,3 +108,36 @@
 - [x] 全部加入 config.yaml（虚拟模型名 = OpenRouter slug，单端点透传），逐个最小请求实测（"Say OK"，max_tokens 16–512）
 - [x] 实测通过 10 个：deepseek-v4-flash / xiaomi-mimo-v2.5 / minimax-m3 / tencent-hy3-preview / z-ai-glm-5.2 / deepseek-v4-pro / stepfun-step-3.7-flash / nvidia-nemotron-3-ultra:free / poolside laguna-xs.2:free + laguna-m.1:free
 - [x] Google 三个（gemini-3-flash-preview / 2.5-flash / 2.5-flash-lite）403 "provider ToS"——直连 OpenRouter 复现，确认为账号/上游策略层拦截，非 vmr 问题；已注释保留于配置并附原因
+
+---
+
+# M13 — OpenRouter 双协议接入 + 审计日志（2026-07-07）
+
+## 13a OpenRouter Anthropic 口（纯配置）
+- [x] 实测确认：`https://openrouter.ai/api/v1/messages`，x-api-key 与 Bearer 均可（已完成探测）
+- [x] config.yaml / config.example.yaml：新增 `openrouter_a` provider；`claude` 增加 OR 兜底端点；新增 `claude-or` 演示模型
+- [x] E2E：/v1/messages 经 openrouter_a 真实调用通过
+
+## 13b 审计日志（internal/audit）
+- [x] Record 结构：双层 request/response（client 层 + attempts[] 逐次上游尝试），时间戳、时延、headers（凭证掩码）、body（JSON 原样嵌入/非 JSON 字符串，1MiB 截断标记）
+- [x] 成功尝试的上游 body 不重复存（与 client.response.body 相同，透传恒等）
+- [x] Logger：JSONL 追加、按天分文件 `vmr-audit-YYYY-MM-DD.jsonl`、目录取 `VMR_LOG_DIR` 缺省系统临时目录、写失败不影响请求
+- [x] 集成：server 包 ResponseWriter 录制器（保留 Flusher）、router 填充 attempts；覆盖被拒请求（鉴权/413/坏 JSON/协议不符）
+- [x] CLI：`vmr start -audit=false` 关闭（默认开启）；启动日志打印审计文件路径
+- [x] 单测：轮转、掩码、截断、JSON/非 JSON body；集成测：failover 双 attempt 记录、流式 SSE body、禁用时无文件
+- [x] E2E：真实请求后检查 JSONL 记录完整性
+
+## 13c 文档全面重写
+- [x] 设计文档：去 changelog 化，重写为当前态完整方案（架构、协议模型、Adapter、调度健康、并发、审计格式 spec、配置参考、关键决策及逻辑、不做清单、路线图）
+- [x] README：精简，快速上手 + 运维视角；补双协议 OpenRouter 与审计日志；与设计文档去重
+- [x] 回归：`go test -race ./...` 全绿；`vmr check` 通过
+
+---
+
+# M14 — 穷尽式 failover + 全面核查 + 首次 commit（2026-07-07）
+
+- [x] failover 语义：max_attempts 缺省 0 = 不限（每个可用候选各试一次直到成功或耗尽）；正数为可选上限
+- [x] 测试：4 端点前 3 个失败 → 第 4 个接住（旧默认下会被截断的场景）；config 默认值断言更新
+- [x] 文档同步：设计文档 §4.1/§9/决策表、config.example.yaml 注释
+- [x] 全面核查：通读核心代码、回归 go vet + test -race、vmr check 两份配置、E2E 冒烟
+- [x] git commit 当前版本

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/router"
 	"vmr/internal/server"
@@ -66,13 +67,27 @@ func configFlag(args []string, cmd string) (string, error) {
 }
 
 func cmdStart(args []string) error {
-	path, err := configFlag(args, "start")
-	if err != nil {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	path := fs.String("c", "config.yaml", "path to config file")
+	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from $VMR_LOG_DIR or system temp)")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 
-	cfg, err := config.Load(path)
+	var auditLog *audit.Logger
+	if *auditOn {
+		var err error
+		if auditLog, err = audit.New(audit.Dir()); err != nil {
+			return fmt.Errorf("audit log: %w", err)
+		}
+		defer auditLog.Close()
+		logger.Printf("audit log: %s", auditLog.Path())
+	} else {
+		logger.Printf("audit log disabled (-audit=false)")
+	}
+
+	cfg, err := config.Load(*path)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -85,7 +100,7 @@ func cmdStart(args []string) error {
 
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
 	reload := func(trigger string) {
-		newCfg, err := config.Load(path)
+		newCfg, err := config.Load(*path)
 		if err != nil {
 			logger.Printf("reload(%s) rejected, keeping current config: %v", trigger, err)
 			return
@@ -98,7 +113,7 @@ func cmdStart(args []string) error {
 		rt.Install(newSnap)
 		logger.Printf("reload(%s) ok: %d models, %d providers", trigger, len(newSnap.Models), len(newCfg.Providers))
 	}
-	stopWatch, err := config.Watch(path, func() { reload("fsnotify") })
+	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })
 	if err != nil {
 		logger.Printf("config watch disabled: %v (SIGHUP still works)", err)
 	} else {
@@ -112,7 +127,7 @@ func cmdStart(args []string) error {
 		}
 	}()
 
-	srv := &http.Server{Addr: cfg.Listen, Handler: server.New(rt).Handler()}
+	srv := &http.Server{Addr: cfg.Listen, Handler: server.New(rt, auditLog).Handler()}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(snap.Models))
 	return srv.ListenAndServe()
 }

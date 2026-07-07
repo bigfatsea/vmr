@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	DefaultMaxAttempts    = 3
 	DefaultMaxBodyMB      = 8
 	DefaultConnectTimeout = 10 * time.Second
 	DefaultHeaderTimeout  = 120 * time.Second
@@ -70,7 +69,7 @@ type Timeouts struct {
 type Config struct {
 	Listen         string                 `yaml:"listen"`
 	APIKey         string                 `yaml:"api_key"`
-	MaxAttempts    int                    `yaml:"max_attempts"`
+	MaxAttempts    int                    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
 	MaxBodyMB      int                    `yaml:"max_body_mb"`
 	MaxConcurrency int                    `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
 	Timeouts       Timeouts               `yaml:"timeouts"`
@@ -114,8 +113,8 @@ func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1:8800"
 	}
-	if c.MaxAttempts <= 0 {
-		c.MaxAttempts = DefaultMaxAttempts
+	if c.MaxAttempts < 0 {
+		c.MaxAttempts = 0
 	}
 	if c.MaxBodyMB <= 0 {
 		c.MaxBodyMB = DefaultMaxBodyMB
