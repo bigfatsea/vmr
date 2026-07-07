@@ -86,6 +86,20 @@ models:
 
 上游失败即按优先级顺序逐个尝试下一端点，直到成功或所有可用端点耗尽（`max_attempts` 可选设上限）。失败驱动的被动健康：网络/5xx 短冷却指数退避，401/额度耗尽/模型不存在长冷却，429/503 尊重 `Retry-After`；冷却到期放行单个探针请求验证恢复。两类特殊处理：400 类客户端错误不切换、直接返回；**内容合规拦截**（各厂审核标准不一，如 OpenRouter 的 403 moderation、DeepSeek 的内容风险 400）会继续切换下一端点但**不惩罚**被拦端点——它只是拒绝这一条请求，并没有坏。全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。机制详见设计文档 §5–6。
 
+## 响应归一化
+
+VMR 透传上游响应时做 5 步归一化，确保客户端拿到的内容与「直连上游」时**字节级一致**：
+
+| 步 | 做什么 | 原因 |
+| --- | --- | --- |
+| 1 | 把响应每个 chunk 的 `"model":"<upstream>"` 改回 `"model":"<client_virtual_model>"` | OpenAI/Anthropic JS SDK 按 `response.model === request.model` 做 prompt cache 关联 + per-model hook，**不一致会静默丢消息** |
+| 2 | 剥离 content 里的 `<think>...</think>` 块 | MiniMax M3 thinking 模式下把推理放在 content 里，不剥会被持久化进 assistant message，下轮 prompt 含上轮思考 → **模型陷入反馈循环** |
+| 3 | trim `</think>\n\n` 末尾的两个换行 | 避免助手消息每轮以两个空行起头 |
+| 4 | 剥离 MiniMax thinking=medium 下的纯文本「Thinking Process:」结构化思考 | OpenClaw 的 `Reasoning: off` 是 UI 开关不影响模型行为；不剥用户会看到「思考过程 + 草稿迭代」 |
+| 5 | 流式响应末尾追加 `data: [DONE]\n\n` | MiniMax 偶尔不发 [DONE]；客户端 SDK 靠 [DONE] 标记收尾以避免 idle abort |
+
+完整逻辑见设计文档 §5.5。**所有 5 步只对上游 2xx 响应生效**，4xx/5xx 走原样透传保留厂商错误结构。
+
 ## 请求图片自动降采样
 
 可选功能，默认关闭。开启后，请求里超过设定长边像素的内联图片附件（截图/照片）会被等比缩小、统一转 JPEG 再转发上游——降低 vision token 消耗，只影响请求，不碰响应，也不 fetch 远程图片 URL：

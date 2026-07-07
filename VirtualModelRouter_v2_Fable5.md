@@ -1,8 +1,8 @@
-<!-- Ver 2026-07-07 17:45, by Fable 5 -->
+<!-- Ver 2026-07-08 00:30, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
-本文档描述 vmr 的当前完整设计：定位、架构、机制与关键决策。读完即可维护与二次开发本项目。使用文档见 `README.md`，进度记录见 `DEV_PLAN.md`。
+本文档描述 vmr 的当前完整设计：定位、架构、机制与关键决策。读完即可维护与二次开发本项目。使用文档见 `README.md`。
 
 ---
 
@@ -73,7 +73,7 @@ Router     查 Virtual Model → 校验协议 → 健康过滤 → 稳定多键�
 Adapter    BuildRequest：改 URL / 注入 Key / 改写 model 字段（其余透传）
   │
   ▼
-Upstream   ├─ 2xx → 转发（流式逐块+Flush）→ 上报健康成功 → 审计落盘
+Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健康成功 → 审计落盘
            ├─ 4xx/5xx → ClassifyError → ErrClient 直接返回；其余记冷却、试下一个
            └─ 网络错误 → 短冷却，试下一个
 ```
@@ -83,7 +83,7 @@ Upstream   ├─ 2xx → 转发（流式逐块+Flush）→ 上报健康成功 �
 * **请求体一律入口缓冲**（流式也是）：failover 重放的前提。
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
 * **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+body，保留客户端可解析的厂商错误结构）；无候选可试 → 503。所有响应带 `X-VMR-Endpoint` / `X-VMR-Attempts`。
-* **Header 白名单**：向上游只透传 `Content-Type` 及协议头（`anthropic-version`、`anthropic-beta`）；客户端 `Authorization`/`x-api-key` 绝不透传，凭证由 Adapter 注入；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
+* **请求侧 Header 透传**：上游只看到 Content-Type、协议头（`anthropic-version`、`anthropic-beta`）、以及 chatHandler 黑名单之外的客户端 header（§5.4）。客户端 `Authorization`/`x-api-key` 绝不到上游，凭证由 Adapter 注入；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
 
 ### 4.2 模块划分
 
@@ -97,7 +97,8 @@ internal/adapter/anthropic Anthropic 协议透传 Adapter
 internal/health            被动健康状态机（冷却、退避、半开探针）
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序
 internal/router            快照构建 + failover 循环 + 流转发 + 并发闸（核心）
-internal/server            HTTP 入口、鉴权、审计录制、四个端点
+                            ├─ response.go  响应归一化器（详见 §5.5）
+internal/server            HTTP 入口、鉴权、Header 黑名单、审计录制、四个端点
 internal/audit             审计日志（JSONL 落盘）
 internal/report            审计日志聚合统计（vmr report）
 internal/imgprep           请求内联图片降采样（§7）
@@ -157,6 +158,49 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 内容错被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
 
 **已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive` 等字段）并可能返回空/替换内容。透传路径不检查 2xx body，此类"软拦截"对 vmr 不可见，原样到达客户端——这属于未来请求预处理插件的领域（§12）。
+
+### 5.4 请求侧 Header 透传策略
+
+从「严格白名单」改为「默认透传 + 小型黑名单」。白名单实现最初只透传 `Content-Type` 和 Anthropic 协议头，但实测发现会丢掉客户端的合法元数据：User-Agent、OpenAI JS SDK 的 `X-Stainless-*` 7 个、OpenTelemetry 的 `Traceparent` 全部丢失；MiniMax 看到的是 Go 默认 UA，丢失了「这是 OpenAI 兼容客户端」这个信号，可能走不同的服务路径。
+
+LLM SDK 发出的 header 集合是已知且固定的——里面**没有**危险 header（不会发 `Cookie` / `X-Forwarded-For` / `Proxy-Authorization`）。所以默认透传是安全的。需要显式 blocklist 的是真正会出问题的少数几项：
+
+| Header | 原因 |
+| --- | --- |
+| `Authorization` / `x-api-key` | 客户端发的是「给 VMR 的凭证」，VMR 注自己的 key 上游，绝不能让客户端的 key 漏到上游 |
+| `Cookie` / `Proxy-Authorization` | 浏览器/代理会话状态，与 LLM API 无关 |
+| `X-Forwarded-*` / `X-Real-Ip` | IP 欺骗向量，上游可能据此做访问控制 |
+| `Host` / `Content-Length` / `Transfer-Encoding` / `Connection` | Go Transport 自动管理，传过去会冲突 |
+
+**与「必须由 Adapter 覆盖」的几项不冲突**：`Authorization` 在 blocklist 里**也是**由 Adapter 用 `Header.Set` 覆盖，blocklist 是第二道防线（如果上游意外处理了一个客户端的 Authorization，VMR 至少不会主动转发）。这种「belt and suspenders」是必要的——Header.Set 覆盖只对 Adapter 构造的请求有效，对 VMR 自己生成的请求（如 `/admin/status`）不适用。
+
+### 5.5 响应侧归一化（`internal/router/response.go`）
+
+上游的响应进入 VMR 后、转发到客户端之前，跑一个**单遍归一化**。两个 Adapter（OpenAI、Anthropic）的 TransformBody 走的是「协议内部透传」——**Adapter 之间不做转换**，这是 §3 的设计原则。但光透传会让上游的「指纹」原样到达客户端，**部分客户端 SDK 会因此失灵**：
+
+| 问题 | 表现 | 原因 |
+| --- | --- | --- |
+| 响应 `model` 是上游名（如 `"MiniMax-M3"`）而客户端发的是虚拟名（如 `"agent"`） | OpenAI JS SDK 按 `model` 做 prompt cache 关联 + per-model hook，**静默丢消息** | SDK 假设 `response.model === request.model` |
+| 上游发 `<think>...</think>` 标签在 content 里 | 思考被持久化进 assistant message，下一轮请求的 prompt 含上轮思考 → **模型陷入自我指涉的反馈循环** | MiniMax M3 在 thinking 模式下把推理放在 content 里 |
+| 上游发 `<think>...</think>` 后无 trailing newline trim | 助手消息以两个空行起头，每轮累积 | MiniMax 的固定格式 |
+| 上游不发 `data: [DONE]` | 客户端 SDK 的 stream 终止逻辑靠 EOF 而非 `[DONE]`，正常路径没问题，**边界条件下触发 `APIUserAbortError`** | MiniMax 直接关 TCP |
+| MiniMax thinking=medium 下以纯文本 `Thinking Process:` + 编号小节 1-5 + `Final Polish` 草稿输出思考 | 思考+草稿直接展示给用户（`Reasoning: off` 是 UI 开关，**不影响模型行为**） | 模型在 thinking=medium 下不写 `<think>` 标签 |
+
+**5 步归一化**（上游 2xx 触发，EOF 时单遍执行）：
+
+1. **Rewrite `"model"`** —— 响应每个 chunk 的 `"model":"<upstream>"` 全部替换为 `"model":"<client_virtual_model>"`。直接用 `regexp.ReplaceAll` + 字符串字面量，O(n) 一遍。
+2. **Strip `<think>...</think>` 块** —— `(?s)<think>.*?</think>` 非贪婪；`[\s\S]` 是为了跨 `\n`（SSE 数据行可能跨行）。
+3. **Trim trailing newline** —— `</think>\n\n` 替换为 `</think>`，避免助手消息每轮以两个换行起头。
+4. **Strip "Thinking Process:" 结构化思考** —— MiniMax 在 `thinking=medium` 下输出**整段编号小节 + Final Polish 草稿**，最后用自认可标记 `Looks good. Pro` / `Looks good. Proceed` 结束思考开始最终回复。按 SSE `\n\n` 切分 data: line（JSON-escaped 内容里没有真实 `\n\n`，切分安全），丢弃含 thinking 的中间 data: line，在末行 content 字段里从 `Pro` / `Proceed` 之后开始截取。**只在 buf 开头检测到 `Thinking Process:` 字面量时触发**——避免误杀正常回复里包含 `Looks good. Pro` 短语的场景（pass-through by design）。
+5. **Append `data: [DONE]\n\n`** —— 只对流式响应（`isSSE=true`），非流式响应是单 JSON 对象，加了会破坏 JSON 合法性。
+
+**关键设计决策：内存缓冲整个响应，单遍 regex，不做流式状态机**。
+
+最初实现的是「200 字节 carry + 字节级状态机」做 think 块剥离——实测发现 200 字节 carry 装不下 3000+ 字节的 think 块（regex 永远找不到 closer），而且状态机在 `IN_THINK` 时 output=0，tail 取自 output 会让 input 字节丢失；flushTail 时 state 重入 `IN_THINK` 又把残留 think 内容吐出来。**换了 4 个版本都有 corner case**。
+
+最终改用「内存缓冲整个响应 + 单遍 regex pass」：chat completions 上限几百 KB，**无压力**。Streaming 价值不大——用户反正要等模型完整响应，client 看到第一个 chunk 和最后一个 chunk 的延迟差对体验可忽略。代码从 ~250 行简化到 ~125 行，单遍过完所有变换。代价：失去真流式（客户端在响应完整前看不到任何 chunk），但 MiniMax M3 一次响应通常 5-30 秒，权衡可接受。
+
+`isSSE` 标志在构造时确定（`newRespStream(body, creq.Model, creq.Stream)`），决定第 5 步是否追加 `[DONE]`——非流式 JSON 响应加 `[DONE]` 会破坏 JSON 合法性。
 
 ---
 
@@ -371,6 +415,12 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | 动图/超限声明尺寸一律 fail-open 跳过 | 尝试部分处理或报错 | 动图缩放会破坏语义，畸形声明尺寸可能是解压炸弹；跳过的代价只是错过一次可选优化，处理的代价可能是内存暴涨或输出错误 |
 | Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint`/审计 `attempts[].endpoint` 的格式多一段，两处都是人读字符串，没有内部逻辑解析它 |
 | Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合（§12.2）保留逃生舱 |
+| 请求侧 Header 默认透传 + 小型黑名单（§5.4） | 严格白名单（最初实现） | LLM SDK 发的 header 集合已知且无危险（不会发 Cookie / X-Forwarded-For），全杀掉反而丢 User-Agent / X-Stainless-* / Traceparent 这些上游做 cache 路由决策需要的元数据。blocklist 只剥真正会出问题的几项（凭证、IP 欺骗、Go Transport 管理的几个），其余透传。OpenClaw 验证生效后反过来证明：原白名单太严苛是因为没区分「协议实现内部白名单」与「代理透传黑名单」的职责 |
+| 响应侧归一化：内存缓冲 + 单遍 regex（§5.5） | 200 字节 carry + 字节级状态机 | 4 个版本的状态机实现都有 corner case（think 块超过 carry 大小、IN_THINK 时 input 字节丢失、flushTail 重入状态机把残留 think 吐出来）。chat completions 上限几百 KB，**单遍 regex 正确性 >> 流式延迟**。代价：客户端在响应完整前看不到任何 chunk（fake streaming 损失），但对 MiniMax M3 这种 5-30 秒响应来说可忽略 |
+| Rewrite `"model"` 字段必须做（§5.5 第 1 步） | 上游 model 名原样转发 | OpenAI JS SDK 假设 `response.model === request.model`，不一致会按 model 做 prompt cache 关联时**静默丢消息**。这是「代理」和「路由」概念被破坏的根——「我发了 agent 收的也必须是 agent」是虚拟模型抽象的根基 |
+| Strip `<think>` 标签必须做（§5.5 第 2 步） | 原样转发 | MiniMax M3 thinking 模式下把推理放在 content 里。如果不剥，思考被持久化进 assistant message，下一轮 prompt 含上轮思考 → 模型陷入自我指涉的反馈循环。audit log 中 line 4-27 的 24 轮 tool-use 循环就是反馈循环的典型表现：模型反复 read() 不存在的文件，prompt_tokens 16K → 43K，line 3 直接撞 483K tokens 返 finish_reason=length |
+| Strip "Thinking Process:" 启发式只对 thinking=medium 触发（§5.5 第 4 步） | 总是触发 | OpenClaw 的 `Reasoning: off` 是 UI 开关，**不影响模型行为**——模型在 thinking=medium 下不写 `<think>` 标签，直接以纯文本 "Thinking Process:" + 编号小节 1-5 + Final Polish 草稿输出思考。**只在 buf 开头检测到 "Thinking Process:" 字面量时触发**——避免误杀正常回复里包含 "Looks good. Pro" 短语的场景。启发式看的是 SSE `\n\n` 分隔的 data: line（JSON-escaped 内容里没有真实 `\n\n`），丢弃含 thinking 的中间 line，保留首条（role marker）和末条（含 "Pro" 标记），从 `Pro` / `Proceed` 之后开始截取最终回复 |
+| Append `data: [DONE]` 只对流式响应（§5.5 第 5 步） | 总是追加 | 非流式响应是单 JSON 对象，加 `data: [DONE]\n\n` 会破坏 JSON 合法性。`isSSE` 标志在构造时确定 |
 
 ---
 

@@ -1,53 +1,12 @@
 # VMR ↔ OpenClaw 兼容性分析报告
 
-> 报告日期：2026-07-07（首次分析）；2026-07-07 22:30（实现完成）  
-> 分析师：基于 vmr-audit-2026-07-07.jsonl（27 行）  
+> 报告日期：2026-07-07（首次分析）  
+> 依据：vmr-audit-2026-07-07.jsonl（27 行 OpenClaw 实际运行日志）  
 > 涉及组件：VMR（Virtual Model Router）+ OpenClaw（基于 OpenAI JS SDK 6.39.1）  
-> 仓库路径：`/Volumes/SSD2T/code/vmr`
+> 仓库路径：`/Volumes/SSD2T/code/vmr`  
+> 当前设计见 [`VirtualModelRouter_v2_Fable5.md`](VirtualModelRouter_v2_Fable5.md) §5.4-§5.5 与 §11 决策表
 
----
-
-## 零、实现状态（2026-07-07 22:30）
-
-| 修复点 | 状态 | 代码位置 | 测试 |
-|---|---|---|---|
-| **P0-1** 响应 `model` 字段归一化 | ✅ 已完成 | `internal/router/response.go` | `TestRespStream_ModelFieldRewrite`, `TestRespStream_NestedModelInDelta` |
-| **P0-4** Header 白名单 → 黑名单 | ✅ 已完成 | `internal/server/server.go:69-100`, `internal/adapter/{openai,anthropic}/*.go` | `TestHeaders_*` (6 个) |
-| **P1-2** 剥离 `` 块 | ✅ 已完成 | `internal/router/response.go` | `TestRespStream_ThinkBlock*` (3 个), `TestRespStream_OneByteReads` |
-| **P1-3** 补 `data: [DONE]` 标记 | ✅ 已完成 | `internal/router/response.go` | `TestRespStream_DoneSentinel`, `TestRespStream_NonStreamSingleObject` |
-| **P1-5** 剥离 "Thinking Process:" 结构化思考（follow-up，2026-07-07 23:10 后） | ✅ 已完成 | `internal/router/response.go:stripThinkingProcess` | `TestStripThinkingProcess_*` (6 个), `TestOpenClawScenario_ThinkingProcessStripped` |
-| P2-5 tool_call_id 归一化 | ❌ 不做 | — | （报告建议不做，OpenClaw 自己的行为） |
-
-**新增测试文件（12 个新测试，覆盖修复 1-5）**：
-- `internal/router/response_test.go` — 15 个单元测试（9 个原有 + 6 个新：thinking 剥离完整模式、多重 endorsement 迭代、无 endorsement、不匹配 thinking、中文 endorsement、leading whitespace）
-- `internal/server/server_headers_test.go` — 6 个 header 转发测试（透传、blocklist、case-insensitive、adapter 注入）
-- `internal/server/server_response_test.go` — 2 个端到端测试（全栈 model/think/[DONE] 验证、非流式无 [DONE] 验证）
-- `internal/server/server_openclaw_scenario_test.go` — 5 个 OpenClaw 场景回归测试（24 轮 tool-use 模拟、非流式、audit log 验证、failover 回归、thinking 剥离）
-
-**测试结果**：`go test -race -count=1 ./...` 全包通过（10 个包，77+ 个测试 0 失败）。
-
-**实现过程中发现并修复的 bug**：
-1. 早期实现用「200 字节 carry + 字节级状态机」做 think 块剥离。实测发现 200 字节 carry 装不下完整 think 块（实际 3000+ 字节），导致 think 块开始部分在 regex 看到 closer 之前就被送出去。
-2. 状态机在 `IN_THINK` 状态时所有字节被跳过，output 为 0，tail 也取自 output 的话 input 字节会丢失。
-3. 修了几次都还有 corner case（flushTail 时 state 重入 IN_THINK 把 think 内容吐出来）。
-4. **最终改成「内存缓冲整个响应 + 单次 regex pass」**，chat completions 最多几百 KB，无压力。Streaming 价值不大（用户反正要等模型完整响应），正确性优先。代码从 ~250 行简化到 ~125 行。
-
-**follow-up 修复（2026-07-07 23:10）**：用户报告 `<think>` 标签剥离在 P0+P1 修复后已正常（响应里 0 个 `<think>` 标签），但模型在 thinking=medium 模式下**仍以纯文本 "Thinking Process:" 格式输出思考**，不放在 `<think>` 标签里。这是个**新发现的、不在原报告分析中的问题**：
-- 表现：模型在响应正文里写结构化思考（"Thinking Process:" + 编号小节 1-5 + "Final Polish"草稿），后面才是真正的用户回复。OpenClaw 的 `Reasoning: off` 是 UI 显示开关，**不影响模型行为**。
-- 根因：MiniMax M3 的 thinking=medium 不使用 `<think>` 标签，而是直接以纯文本结构输出思考。
-- 修复：在 respStream 里加 `stripThinkingProcess` 启发式——以 SSE `\n\n` 分隔切 data: line，丢弃含 thinking 的 line，trim 末行 "Looks good. Pro/Proceed" 标记后的内容作为最终回复。完整 strip 走 data: line 边界（不破坏 SSE framing）。
-- 实现中遇到的 3 个具体 bug：(1) 检查 buffer 开头而不是检查 thinking 段位置，导致不触发；(2) 用了 `^` 行首锚但 marker 在 JSON 字符串内部不靠行首；(3) 找的是第一个含 marker 的 data: line 而不是最后一个，导致只 trim 不 drop。都在测试里覆盖了。
-
-**待 OpenClaw 一侧实测验证（VMR 改不了）**：
-- [ ] OpenClaw 跑同一组任务是否能完成（不卡在"read 不存在的文件"循环）
-- [ ] 24 轮下 prompt_tokens 增长是否显著下降
-- [ ] line 3 那种 1.65MB / 483K tokens / finish_reason=length 的崩溃是否消失
-
-详细见报告 §十一「待验证与遗留问题」。
-
----
-
-## 一、问题陈述
+本报告是一份**事故调查**——OpenClaw 走 VMR 中转时报错率高、且 prompt 在多轮后暴涨，怀疑代理破坏了语义。审计日志显示模型发回的响应里 `model` 字段名、`` 标签、`[DONE]` 终止标记、SDK 元数据 header 全部"被代理动过"——透明代理是假的。本报告记录**调查路径**与**修复方案的设计依据**，不记录实施过程（实施测试代码看 `internal/router/response_test.go` 与 `internal/server/server_*_test.go` 即可）。
 
 ---
 
@@ -550,79 +509,5 @@ for k, vs := range r.Header {
 
 ---
 
-## 十一、实现细节总结与待验证项
-
-### 11.1 设计变更：响应处理从「流式 carry + 状态机」改为「内存缓冲 + 单次 regex」
-
-报告 §五「修复 2」原本描述了一个带 200 字节 carry 的字节级状态机实现。实现过程中发现该方案有 3 个不可回避的 corner case：
-
-1. **think 块超过 carry 大小**：实测 MiniMax M3 的 think 块可达 3000+ 字节，远超 200 字节的 carry。状态机在看到 `</think>` closer 之前，已经把 think 块的开始部分（`<think` + 几百字节推理）作为"output 不在 carry"送出去了。
-2. **IN_THINK 状态时的 input 丢失**：状态机在 `IN_THINK` 状态时跳过所有字节，output 为 0。若 tail 取自 output（最后 200 字节），则 input 字节无处可去。
-3. **flushTail 重入状态机**：EOF 时调用 `flushTail` 处理 carry。state 已经是 `NORMAL`（之前的调用已退出 `IN_THINK`），但 state machine 重新从 carry 头扫描时，遇到 `</think>` 又切回 `IN_THINK`，把 carry 里残留的 think 块内容吐出来。
-
-**最终采用的设计**：整个上游响应在 `respStream` 内部缓冲（chat completions 上限几百 KB，可接受），EOF 时一次性跑两遍 regex（model 字段、think 块），然后流出去。代价是**放弃 streaming**——客户端在模型完整响应前看不到任何内容。收益是代码从 ~250 行（含状态机）简化到 ~125 行（单遍 regex），完全无 corner case。
-
-该决策记录在 `internal/router/response.go` 顶部的注释里。**如果未来要恢复 streaming**，需要重新设计 carry 协议，本报告 §五「修复 2」的原始方案不可行。
-
-### 11.2 端到端验证（mock MiniMax + 真实 OpenAI JS SDK 风格 header）
-
-```bash
-$ go build -o /tmp/vmr ./cmd/vmr && /tmp/vmr start -c test.yaml
-```
-
-mock 上游（端口 18801）记录收到的 header，VMR（端口 18800）按 OpenClaw 风格发请求：
-
-```
-UPSTREAM got headers: {
-  "User-Agent": "OpenAI/JS 6.39.1",           ← 透传 ✓
-  "X-Stainless-Arch": "arm64",                ← 透传 ✓
-  "X-Stainless-Package-Version": "6.39.1",   ← 透传 ✓
-  "X-Stainless-Runtime": "node",              ← 透传 ✓
-  "X-Stainless-Timeout": "120",               ← 透传 ✓
-  "Traceparent": "00-9a0c343137...",          ← 透传 ✓
-  "Accept-Language": "en-US",                 ← 透传 ✓
-  "Authorization": "Bearer sk-mock",          ← 替换为 VMR 自己的 ✓
-  "Content-Type": "application/json",         ← adapter 注入 ✓
-  "Host": "127.0.0.1:18801"                   ← VMR 的 host，不是客户端的 ✓
-}
-
-CLIENT received stream:
-  data: {...,"model":"agent",...}              ← 归一化（不是 MiniMax-M3）✓
-  data: {...,"content":"\n\nReal answer."}     ← think 已剥离 ✓
-  data: {"choices":[{"finish_reason":"stop"...}]}
-  data: {...,"usage":{...}}
-  data: [DONE]                                  ← 补齐 ✓
-```
-
-### 11.3 自动化测试覆盖
-
-| 测试文件 | 测试数 | 覆盖范围 |
-|---|---|---|
-| `internal/router/response_test.go` | 9 | 单元：model 字段正则、think 块剥离、跨 chunk 边界、1 字节流、非流式单对象、空源、嵌套 model 字段、passthrough |
-| `internal/server/server_headers_test.go` | 6 | 集成：User-Agent / X-Stainless-* / Traceparent 透传、Cookie / X-Forwarded-For 等 blocklist、case-insensitive、adapter Authorization 注入、body 兼容 |
-| `internal/server/server_response_test.go` | 2 | 端到端：mock MiniMax → VMR → 客户端，验证全栈 model/think/[DONE]；非流式不附加 [DONE] |
-| `internal/server/server_openclaw_scenario_test.go` | 4 | 场景回归：24 轮 OpenClaw 风格 tool-use、非流式 OpenClaw 风格、audit log 记录的是客户端看到的变换后响应、failover 仍正常 |
-
-合计 **21 个新测试**。`go test -race -count=1 ./...` 全包通过（10 个包，72+ 个测试 0 失败，测试总时长 ~3.6s）。
-
-### 11.4 遗留问题与待 OpenClaw 一侧验证
-
-**VMR 改不了的，需要 OpenClaw 实测**：
-- [ ] OpenClaw 跑同一组任务是否能完成（不卡在"read 不存在的文件"循环）
-- [ ] 24 轮下 prompt_tokens 增长曲线（预期：从审计日志的 ~2.7× 降到线性）
-- [ ] line 3 那种 1.65MB / 483K tokens / finish_reason=length 的崩溃是否消失
-- [ ] 是否还有别的隐藏的"机制能跑但语义错位"的 corner case
-
-**VMR 这边的已知 trade-off**：
-- **Streaming 改为 buffering**：chat completion 级别的 streaming 行为变了。客户端在模型响应完整前不会看到任何 chunk。对 MiniMax M3（典型 5-30 秒响应）影响可接受。如果未来模型响应变长（比如 1 分钟以上），需要重新设计 carry 协议。
-- **非流式响应也走同一套处理**：非流式响应也会被 think 块剥离、model 字段归一化。**但**非流式响应不会被追加 `[DONE]`（这会破坏 JSON 合法性）。有专门测试覆盖（`TestResponse_NonStreamingNoDoneSentinel`）。
-
-**VMR 这边可能的 follow-up**（不紧急）：
-- 给 streaming 路径加可选的「逐块处理」模式，让有 streaming 需求的下游可以选。
-- 把 `respStream` 的实现切换到 bufio.Scanner（按 `\n\n` 分行）以支持部分 streaming。但需要先解决 think 块跨 chunk 的状态机正确性问题。
-- 在 audit log 旁边加一个「client 实际收到的 body」的快照文件，方便后续调查类似的「中间层透明但语义错位」问题。
-
----
-
-*报告完成（2026-07-07 22:30）。*
+*报告完成。实际验证数据见 `internal/router/response_test.go`、`internal/server/server_*_test.go` 内的测试。*
 
