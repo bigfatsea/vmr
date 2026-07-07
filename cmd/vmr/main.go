@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:15, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -23,9 +23,11 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/core"
 	"vmr/internal/report"
 	"vmr/internal/router"
 	"vmr/internal/server"
+	"vmr/internal/strategy"
 
 	// Adding a provider type = one blank import here.
 	_ "vmr/internal/adapter/anthropic"
@@ -169,7 +171,7 @@ func cmdStart(args []string) error {
 			return
 		}
 		rt.Install(newSnap)
-		logger.Printf("reload(%s) ok: %d models, %d providers", trigger, len(newSnap.Models), len(newCfg.Providers))
+		logger.Printf("reload(%s) ok: %d models, %d providers", trigger, countNested(newCfg.Models), countNested(newCfg.Providers))
 	}
 	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })
 	if err != nil {
@@ -186,8 +188,16 @@ func cmdStart(args []string) error {
 	}()
 
 	srv := &http.Server{Addr: cfg.Listen, Handler: server.New(rt, auditLog).Handler()}
-	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(snap.Models))
+	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, countNested(cfg.Models))
 	return srv.ListenAndServe()
+}
+
+func countNested[V any](m map[string]map[string]V) int {
+	n := 0
+	for _, byName := range m {
+		n += len(byName)
+	}
+	return n
 }
 
 func cmdCheck(args []string) error {
@@ -199,25 +209,40 @@ func cmdCheck(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := router.BuildSnapshot(cfg); err != nil {
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("OK  listen=%s  providers=%d  models=%d\n", cfg.Listen, len(cfg.Providers), len(cfg.Models))
-	names := make([]string, 0, len(cfg.Models))
-	for name := range cfg.Models {
-		names = append(names, name)
+	fmt.Printf("OK  listen=%s  providers=%d  models=%d\n", cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models))
+	protocols := make([]string, 0, len(cfg.Models))
+	for protocol := range cfg.Models {
+		protocols = append(protocols, protocol)
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		m := cfg.Models[name]
-		fmt.Printf("  %s (strategy=%v)\n", name, m.Strategy)
-		for _, ep := range m.Endpoints {
-			key := cfg.Providers[ep.Provider].APIKey
-			keyState := "key:set"
-			if key == "" {
-				keyState = "key:EMPTY"
+	sort.Strings(protocols)
+	for _, protocol := range protocols {
+		names := make([]string, 0, len(cfg.Models[protocol]))
+		for name := range cfg.Models[protocol] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			m := cfg.Models[protocol][name]
+			fmt.Printf("  %s [%s] (strategy=%v)\n", name, protocol, m.Strategy)
+			// Print endpoints in the order they'd actually be tried (health
+			// ignored — this is a static preview), not raw config priority
+			// numbers: with priority omitted (the common case) that order is
+			// exactly config-file order, which is the whole point.
+			route := snap.Models[protocol][name]
+			ordered := append([]*core.Endpoint(nil), route.Endpoints...)
+			strategy.Sort(ordered, route.Dims)
+			for i, ep := range ordered {
+				key := cfg.Providers[protocol][ep.Provider].APIKey
+				keyState := "key:set"
+				if key == "" {
+					keyState = "key:EMPTY"
+				}
+				fmt.Printf("    %d. %s/%s  [%s]\n", i+1, ep.Provider, ep.Model, keyState)
 			}
-			fmt.Printf("    p%-3d %s/%s  [%s]\n", ep.Priority, ep.Provider, ep.Model, keyState)
 		}
 	}
 	return nil

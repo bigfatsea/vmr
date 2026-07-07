@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // V2.2 integration tests: Anthropic ingress, protocol isolation, concurrency gate.
 package server
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"vmr/internal/config"
-	"vmr/internal/router"
 
 	_ "vmr/internal/adapter/anthropic"
 )
@@ -66,17 +65,21 @@ func dualProtocolYAML(oai, anth1, anth2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  oai: {type: openai, base_url: %s, api_key: k0}
-  a1: {type: anthropic, base_url: %s, api_key: ka1}
-  a2: {type: anthropic, base_url: %s, api_key: ka2}
+  openai:
+    oai: {base_url: %s, api_key: k0}
+  anthropic:
+    a1: {base_url: %s, api_key: ka1}
+    a2: {base_url: %s, api_key: ka2}
 models:
-  vm-openai:
-    endpoints:
-      - {provider: oai, model: model-one, priority: 1}
-  vm-anth:
-    endpoints:
-      - {provider: a1, model: real-a, priority: 1}
-      - {provider: a2, model: real-b, priority: 2}
+  openai:
+    vm-openai:
+      endpoints:
+        - {provider: oai, model: model-one, priority: 1}
+  anthropic:
+    vm-anth:
+      endpoints:
+        - {provider: a1, model: real-a, priority: 1}
+        - {provider: a2, model: real-b, priority: 2}
 `, extra, oai, anth1, anth2)
 }
 
@@ -119,7 +122,7 @@ func TestAnthropicIngressFailoverAndHeaders(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "a2/real-b" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic/a2/real-b" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -155,24 +158,66 @@ func TestProtocolIsolation(t *testing.T) {
 	}
 }
 
-func TestMixedProtocolModelRejectedAtLoad(t *testing.T) {
+// Mixing protocols within one model used to be a runtime "mixes protocols"
+// error (checked after the fact). Nesting providers/models by protocol
+// removes the syntax for it entirely: an endpoint can only ever name a
+// provider from its own model's protocol group, so referencing the other
+// group's provider is just "unknown provider" — the same error class as any
+// other typo, not a special case.
+func TestCrossProtocolProviderRefRejectedAtLoad(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  oai: {type: openai, base_url: https://x.example/v1, api_key: k}
-  anth: {type: anthropic, base_url: https://y.example/v1, api_key: k}
+  openai:
+    oai: {base_url: https://x.example/v1, api_key: k}
+  anthropic:
+    anth: {base_url: https://y.example/v1, api_key: k}
 models:
-  bad:
-    endpoints:
-      - {provider: oai, model: a, priority: 1}
-      - {provider: anth, model: b, priority: 2}
+  openai:
+    bad:
+      endpoints:
+        - {provider: oai, model: a}
+        - {provider: anth, model: b}
 `
-	cfg, err := config.Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
+	_, err := config.Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("want unknown-provider error (cross-protocol ref has no valid syntax), got %v", err)
 	}
-	if _, err := router.BuildSnapshot(cfg); err == nil || !strings.Contains(err.Error(), "mixes protocols") {
-		t.Errorf("want mixed-protocol error, got %v", err)
+}
+
+// A model name can now exist under both protocol groups at once — nesting by
+// protocol means the two entries are looked up independently, no artificial
+// "-a" suffix needed to give one virtual model both an OpenAI and an
+// Anthropic face.
+func TestSameModelNameReachableUnderBothProtocols(t *testing.T) {
+	o, a := newUpstream(t), newAnthUpstream(t)
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  openai:
+    oai: {base_url: %s, api_key: k0}
+  anthropic:
+    anth: {base_url: %s, api_key: ka}
+models:
+  openai:
+    coding:
+      endpoints: [{provider: oai, model: model-one}]
+  anthropic:
+    coding:
+      endpoints: [{provider: anth, model: real-a}]
+`, o.srv.URL, a.srv.URL)
+	ts := newRouterServer(t, yaml)
+
+	resp, _ := chat(t, ts, `{"model":"coding","messages":[{"role":"user","content":"hi"}]}`, nil)
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/oai/model-one" {
+		t.Errorf("openai-face coding: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
+	}
+	resp, body := messages(t, ts, `{"model":"coding","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, nil)
+	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
+		t.Errorf("anthropic-face coding: status=%d body=%s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic/anth/real-a" {
+		t.Errorf("anthropic-face endpoint: %s", got)
 	}
 }
 
@@ -244,11 +289,13 @@ func TestConcurrencyGate(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 2
 providers:
-  p: {type: openai, base_url: %s, api_key: k}
+  openai:
+    p: {base_url: %s, api_key: k}
 models:
-  vm:
-    endpoints:
-      - {provider: p, model: m, priority: 1}
+  openai:
+    vm:
+      endpoints:
+        - {provider: p, model: m}
 `, slow.URL))
 
 	var wg sync.WaitGroup
@@ -288,10 +335,12 @@ func TestConcurrencyWaiterCanceled(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 1
 providers:
-  p: {type: openai, base_url: %s, api_key: k}
+  openai:
+    p: {base_url: %s, api_key: k}
 models:
-  vm:
-    endpoints: [{provider: p, model: m, priority: 1}]
+  openai:
+    vm:
+      endpoints: [{provider: p, model: m}]
 `, slow.URL))
 
 	// Occupy the only slot.

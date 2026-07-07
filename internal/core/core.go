@@ -1,4 +1,4 @@
-// Ver 2026-07-07 01:55, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 package core
 
 import (
@@ -68,13 +68,17 @@ type Endpoint struct {
 }
 
 // HealthKey identifies this endpoint in the health registry. It is stable
-// across config reloads so cooldown state survives a hot reload.
+// across config reloads so cooldown state survives a hot reload. AdapterType
+// is part of the key because a provider name can now be reused across
+// protocol groups (e.g. the same "openrouter" name under both providers.openai
+// and providers.anthropic) — without it, two genuinely different endpoints
+// sharing a name, API key, and upstream model string would collide.
 func (e *Endpoint) HealthKey() string {
 	sum := sha256.Sum256([]byte(e.APIKey))
-	return e.Provider + "/" + e.Model + "/" + hex.EncodeToString(sum[:4])
+	return e.AdapterType + "/" + e.Provider + "/" + e.Model + "/" + hex.EncodeToString(sum[:4])
 }
 
 // Name is the human-readable endpoint label used in logs and status output.
 func (e *Endpoint) Name() string {
-	return e.Provider + "/" + e.Model
+	return e.AdapterType + "/" + e.Provider + "/" + e.Model
 }

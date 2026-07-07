@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:05, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -27,55 +27,61 @@ import (
 	"vmr/internal/strategy"
 )
 
-// ModelRoute is the runtime routing table entry for one virtual model.
-// Protocol is inferred from the endpoints' adapters; VMR never converts
-// between protocols, so all endpoints of a model must share one.
+// ModelRoute is the runtime routing table entry for one virtual model. It
+// carries no protocol field: a route only ever exists inside
+// Snapshot.Models[protocol], so the protocol is positional, not stored data —
+// there is no "protocol" value here that could disagree with where the route
+// lives.
 type ModelRoute struct {
-	Protocol  string
 	Dims      []strategy.Dimension
 	Endpoints []*core.Endpoint
 }
 
 // Snapshot is an immutable view of the config; hot reload swaps the whole
 // thing atomically, so in-flight requests keep the version they started with.
+// Models is keyed protocol -> name, mirroring config.Config.Models.
 type Snapshot struct {
 	Cfg    *config.Config
-	Models map[string]*ModelRoute
+	Models map[string]map[string]*ModelRoute
 
 	client *http.Client // built in Install; travels with the snapshot to avoid races
 }
 
-// BuildSnapshot resolves provider references into concrete endpoints.
+// BuildSnapshot resolves provider references into concrete endpoints. Because
+// an endpoint's provider is looked up within its own model's protocol group
+// (cfg.Providers[protocol]), every endpoint of a model is guaranteed to share
+// one adapter/protocol by construction — there is no "mixed protocol" case
+// left to detect.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
-	snap := &Snapshot{Cfg: cfg, Models: map[string]*ModelRoute{}}
-	for name, m := range cfg.Models {
-		dims, err := strategy.Build(m.Strategy)
-		if err != nil {
-			return nil, fmt.Errorf("model %q: %w", name, err)
+	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
+	for protocol, models := range cfg.Models {
+		if _, ok := adapter.Get(protocol); !ok { // defensive; config.validate already checked this
+			return nil, fmt.Errorf("protocol %q: unknown adapter type (available: %v)", protocol, adapter.Names())
 		}
-		route := &ModelRoute{Dims: dims}
-		for _, ec := range m.Endpoints {
-			p := cfg.Providers[ec.Provider]
-			ad, ok := adapter.Get(p.Type)
-			if !ok {
-				return nil, fmt.Errorf("model %q: provider %q has unknown adapter type %q", name, ec.Provider, p.Type)
+		byName := make(map[string]*ModelRoute, len(models))
+		for name, m := range models {
+			dims, err := strategy.Build(m.Strategy)
+			if err != nil {
+				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
-			if route.Protocol == "" {
-				route.Protocol = ad.Protocol()
-			} else if route.Protocol != ad.Protocol() {
-				return nil, fmt.Errorf("model %q mixes protocols %q and %q (endpoint %s/%s): VMR does not convert between protocols, split into separate models",
-					name, route.Protocol, ad.Protocol(), ec.Provider, ec.Model)
+			route := &ModelRoute{Dims: dims}
+			for _, ec := range m.Endpoints {
+				p, ok := cfg.Providers[protocol][ec.Provider]
+				if !ok { // defensive; config.validate already checked this
+					return nil, fmt.Errorf("model %q: unknown provider %q in the %s protocol group", name, ec.Provider, protocol)
+				}
+				route.Endpoints = append(route.Endpoints, &core.Endpoint{
+					Provider:    ec.Provider,
+					AdapterType: protocol,
+					BaseURL:     p.BaseURL,
+					APIKey:      p.APIKey,
+					Model:       ec.Model,
+					Priority:    ec.Priority,
+				})
 			}
-			route.Endpoints = append(route.Endpoints, &core.Endpoint{
-				Provider:    ec.Provider,
-				AdapterType: p.Type,
-				BaseURL:     p.BaseURL,
-				APIKey:      p.APIKey,
-				Model:       ec.Model,
-				Priority:    ec.Priority,
-			})
+			byName[name] = route
 		}
-		snap.Models[name] = route
+		snap.Models[protocol] = byName
 	}
 	return snap, nil
 }
@@ -173,16 +179,16 @@ func (rt *Router) Concurrency() (limit int, inFlight, waiting int64) {
 func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
 	start := time.Now()
 	snap := rt.snap.Load()
-	route, ok := snap.Models[creq.Model]
+	route, ok := snap.Models[protocol][creq.Model]
 	if !ok {
+		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
+			writeError(w, http.StatusNotFound, "not_found_error",
+				fmt.Sprintf("model %q speaks the %s protocol; call it via %s", creq.Model, other, ingressPath(other)))
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found_error",
 			fmt.Sprintf("model %q not found; models on this endpoint: %s",
 				creq.Model, strings.Join(modelNames(snap, protocol), ", ")))
-		return
-	}
-	if route.Protocol != protocol {
-		writeError(w, http.StatusNotFound, "not_found_error",
-			fmt.Sprintf("model %q speaks the %s protocol; call it via %s", creq.Model, route.Protocol, ingressPath(route.Protocol)))
 		return
 	}
 
@@ -444,14 +450,28 @@ func parseRetryAfter(h http.Header) time.Duration {
 }
 
 func modelNames(s *Snapshot, protocol string) []string {
-	names := make([]string, 0, len(s.Models))
-	for n, route := range s.Models {
-		if route.Protocol == protocol {
-			names = append(names, n)
-		}
+	byName := s.Models[protocol]
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
 	}
 	sort.Strings(names)
 	return names
+}
+
+// otherProtocolFor reports which protocol group (other than protocol) defines
+// name, or "" if none does. Used to give a helpful "wrong entry point" 404
+// instead of a bare "not found" when the client hit the wrong ingress path.
+func otherProtocolFor(s *Snapshot, protocol, name string) string {
+	for p, byName := range s.Models {
+		if p == protocol {
+			continue
+		}
+		if _, ok := byName[name]; ok {
+			return p
+		}
+	}
+	return ""
 }
 
 func ingressPath(protocol string) string {

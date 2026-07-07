@@ -180,3 +180,21 @@
 - [x] 回归：`go vet` + `go test -race ./...` 全绿；`vmr check` 验证新字段
 - [x] 文档：设计文档新增 §7（原 §7–§11 順延为 §8–§12，含全部交叉引用与决策表新增三行）；README 新增用法小节并修正 §引用；config.example.yaml 注释
 - [x] 真实 E2E：取本地 8 张真实图片（JPG/PNG/WEBP 混合，含 2 张本就 <512px 的对照组）经 vmr 打 MiniMax-M3 真实接口，对比 `image_downscale` 开/关两组的 `usage.prompt_tokens`——6 张超阈值图降幅 36%–87.5%，2 张对照组请求字节与 token 数不变（确认零副作用跳过路径生效）；全程无 failover、无异常
+
+---
+
+# M18 — config.yaml 按协议分组重构（2026-07-07）
+
+用户提案：`providers`/`models` 都按协议（openai/anthropic）分两层 map，不再用 `type:` 字段；endpoints 省略 `priority:` 靠列表顺序排优先级。分析后判定合理并落实（细节见设计文档 §10、§11 决策表新增两行）：
+
+- [x] 关键发现：`strategy.Sort` 本来就是 `sort.SliceStable`，省略 priority（全员缺省 0）早就等价于文件顺序——这部分不用改 schema，只需要文档鼓励这个写法；`vmr check` 改为按 `strategy.Sort` 后的生效顺序打印 `1. 2. 3.` 而非回显原始 priority 数字
+- [x] `internal/config`：Provider 去掉 `Type` 字段；`Providers`/`Models` 改 `map[string]map[string]V`（协议→名字）；validate 重写（协议 key 校验走 `adapter.Get`，endpoint provider 引用限定在同协议分组内查找，删除"跨协议不一致"校验——结构上已经写不出这种配置）
+- [x] `internal/core`：`Endpoint.HealthKey()`/`Name()` 加协议前缀（`protocol/provider/model`）——必要的配套修复：允许同名 provider 跨协议复用后，两段式键在"同 Key 同上游模型串"场景下会把两个真实不同的端点撞成一个健康状态实体
+- [x] `internal/router`：`ModelRoute` 去掉 `Protocol` 字段（协议变成纯粹的 map 位置，不再是可能与实际不符的存储值）；`Snapshot.Models` 改双层 map；`BuildSnapshot` 按协议分组重写，删除"推断协议+矛盾检测"循环；`Serve` 查找改双层 map，404 提示改为跨协议查找命名冲突
+- [x] `internal/server`：`/v1/models`、`/admin/status` 改双层遍历，**运行时 JSON 输出形状不变**（只改内部收集逻辑，不破坏任何现有客户端）
+- [x] `cmd/vmr/main.go`：`cmdCheck` 改双层遍历统计；发现并修复一个连带 bug——`cmdStart`/reload 日志的 "N models"/"N providers" 原来直接 `len(snap.Models)`/`len(cfg.Providers)`，双层 map 化后这俩现在数的是协议分组数（2），不是真实总数；改用 `countNested` 辅助函数
+- [x] 测试：config_test.go 全部 YAML 夹具改新格式，新增"跨协议引用报 unknown provider"“同名 provider 跨协议复用”“省略 priority 靠文件顺序”三个专项用例；server 侧 5 个测试文件的 YAML 夹具与 `X-VMR-Endpoint`/审计 `endpoint` 字段断言全部改三段式；`TestMixedProtocolModelRejectedAtLoad` 改写为 `TestCrossProtocolProviderRefRejectedAtLoad`（错误类别从"混协议"变成普通的"未知 provider"）；新增 `TestSameModelNameReachableUnderBothProtocols`（同一 model 名两协议分组各存一份，两个入口独立可达）
+- [x] 回归：`go vet` + `go test -race ./...` 全绿
+- [x] 文档：设计文档 §2 Provider 定义、§3 厂商表去 `_a` 后缀、§10 配置参考重写（含"两层 map 而非扁平+字段""priority 可选逃生舱"两段说明）、§9.2 审计示例端点字段改三段式、§11 决策表新增两行；README 配置示例重写；config.example.yaml 全量重写（endpoints 全部省略 priority，演示新写法）
+- [x] 本地 config.yaml（gitignored，真实 key）：备份后按新格式重写，`_a` 后缀全部消失，`vmr check` 验证 8 providers/16 models 全部解析正确
+- [x] 真实 E2E：新配置对 MiniMax 真实发请求，openai 面（`cheap`）与 anthropic 面（`claude`，两者共用同一个 `minimax` provider 名）各成功一次，`X-VMR-Endpoint` 分别为 `openai/minimax/MiniMax-M3` 与 `anthropic/minimax/MiniMax-M3`，验证同名复用不冲突

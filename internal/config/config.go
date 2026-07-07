@@ -1,4 +1,4 @@
-// Ver 2026-07-07 16:30, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -25,12 +25,24 @@ const (
 	DefaultIdleTimeout    = 120 * time.Second
 )
 
+// Provider has no protocol field: it lives under providers.<protocol>.<name>,
+// so the outer map key IS the adapter type. This also lets the same short
+// name (e.g. "openrouter") appear once per protocol group without collision —
+// no more "_a" suffix hack for a provider's second protocol face.
 type Provider struct {
-	Type    string `yaml:"type"`
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
 }
 
+// EndpointConfig.Provider resolves within the enclosing model's own protocol
+// group (models.<protocol>.<name>.endpoints[].provider -> providers.<protocol>.<provider>),
+// so an endpoint can never reference a provider of the wrong protocol — that
+// mistake has no syntax to express, rather than being caught by validation.
+//
+// Priority is optional and defaults to 0. Endpoints of equal priority (the
+// common case: nobody sets it) keep their config-file order because Sort is
+// stable — so listing endpoints in the order you want them tried is enough;
+// there is no need to number them.
 type EndpointConfig struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
@@ -66,16 +78,20 @@ type Timeouts struct {
 	StreamIdle     Duration `yaml:"stream_idle"`
 }
 
+// Providers and Models are both keyed protocol -> name. The protocol key is
+// validated against the adapter registry (same rule that used to apply to
+// Provider.Type), so adding a new ingress protocol is still just "register
+// an adapter" — no schema change here.
 type Config struct {
-	Listen              string                 `yaml:"listen"`
-	APIKey              string                 `yaml:"api_key"`
-	MaxAttempts         int                    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
-	MaxBodyMB           int                    `yaml:"max_body_mb"`
-	MaxConcurrency      int                    `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
-	ImageDownscaleMaxPx int                    `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images
-	Timeouts            Timeouts               `yaml:"timeouts"`
-	Providers           map[string]Provider    `yaml:"providers"`
-	Models              map[string]ModelConfig `yaml:"models"`
+	Listen              string                            `yaml:"listen"`
+	APIKey              string                            `yaml:"api_key"`
+	MaxAttempts         int                               `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
+	MaxBodyMB           int                               `yaml:"max_body_mb"`
+	MaxConcurrency      int                               `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
+	ImageDownscaleMaxPx int                               `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images
+	Timeouts            Timeouts                          `yaml:"timeouts"`
+	Providers           map[string]map[string]Provider    `yaml:"providers"`
+	Models              map[string]map[string]ModelConfig `yaml:"models"`
 }
 
 // Load reads, expands, parses, defaults and validates the config file.
@@ -132,10 +148,12 @@ func (c *Config) applyDefaults() {
 	if c.Timeouts.StreamIdle <= 0 {
 		c.Timeouts.StreamIdle = Duration(DefaultIdleTimeout)
 	}
-	for name, m := range c.Models {
-		if len(m.Strategy) == 0 {
-			m.Strategy = []string{"priority"}
-			c.Models[name] = m
+	for _, byName := range c.Models {
+		for name, m := range byName {
+			if len(m.Strategy) == 0 {
+				m.Strategy = []string{"priority"}
+				byName[name] = m
+			}
 		}
 	}
 }
@@ -144,35 +162,50 @@ func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
 	}
-	if len(c.Providers) == 0 {
+	if countNested(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
-	if len(c.Models) == 0 {
+	if countNested(c.Models) == 0 {
 		return fmt.Errorf("no models defined")
 	}
-	for name, p := range c.Providers {
-		if _, ok := adapter.Get(p.Type); !ok {
-			return fmt.Errorf("provider %q: unknown adapter type %q (available: %v)", name, p.Type, adapter.Names())
+	for protocol, byName := range c.Providers {
+		if _, ok := adapter.Get(protocol); !ok {
+			return fmt.Errorf("providers.%s: unknown adapter type (available: %v)", protocol, adapter.Names())
 		}
-		u, err := url.Parse(p.BaseURL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("provider %q: invalid base_url %q", name, p.BaseURL)
+		for name, p := range byName {
+			u, err := url.Parse(p.BaseURL)
+			if err != nil || u.Scheme == "" || u.Host == "" {
+				return fmt.Errorf("provider %q: invalid base_url %q", name, p.BaseURL)
+			}
 		}
 	}
-	for name, m := range c.Models {
-		if len(m.Endpoints) == 0 {
-			return fmt.Errorf("model %q: no endpoints", name)
+	for protocol, byName := range c.Models {
+		if _, ok := adapter.Get(protocol); !ok {
+			return fmt.Errorf("models.%s: unknown adapter type (available: %v)", protocol, adapter.Names())
 		}
-		for i, ep := range m.Endpoints {
-			if _, ok := c.Providers[ep.Provider]; !ok {
-				return fmt.Errorf("model %q endpoint #%d: unknown provider %q", name, i+1, ep.Provider)
+		for name, m := range byName {
+			if len(m.Endpoints) == 0 {
+				return fmt.Errorf("model %q: no endpoints", name)
 			}
-			if ep.Model == "" {
-				return fmt.Errorf("model %q endpoint #%d: missing model", name, i+1)
+			for i, ep := range m.Endpoints {
+				if _, ok := c.Providers[protocol][ep.Provider]; !ok {
+					return fmt.Errorf("model %q endpoint #%d: unknown provider %q in the %s protocol group", name, i+1, ep.Provider, protocol)
+				}
+				if ep.Model == "" {
+					return fmt.Errorf("model %q endpoint #%d: missing model", name, i+1)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func countNested[V any](m map[string]map[string]V) int {
+	n := 0
+	for _, byName := range m {
+		n += len(byName)
+	}
+	return n
 }
 
 func (c *Config) MaxBodyBytes() int64 { return int64(c.MaxBodyMB) << 20 }

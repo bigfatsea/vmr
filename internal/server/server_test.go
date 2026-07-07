@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:30, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // Integration tests: full handler + mock upstreams over real HTTP.
 package server
@@ -83,13 +83,15 @@ func twoEndpointYAML(u1, u2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  p1: {type: openai, base_url: %s, api_key: k1}
-  p2: {type: openai, base_url: %s, api_key: k2}
+  openai:
+    p1: {base_url: %s, api_key: k1}
+    p2: {base_url: %s, api_key: k2}
 models:
-  vm:
-    endpoints:
-      - {provider: p1, model: model-one, priority: 1}
-      - {provider: p2, model: model-two, priority: 2}
+  openai:
+    vm:
+      endpoints:
+        - {provider: p1, model: model-one, priority: 1}
+        - {provider: p2, model: model-two, priority: 2}
 `, extra, u1, u2)
 }
 
@@ -119,7 +121,7 @@ func TestFailoverOn5xxAndModelRewrite(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -158,7 +160,7 @@ func TestRateLimitCooldownAndRecovery(t *testing.T) {
 
 	// 1st request: 429 on p1 → served by p2; p1 enters cooldown.
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
 		t.Fatalf("first request: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	// 2nd request immediately: p1 filtered by cooldown, p2 hit directly.
@@ -170,7 +172,7 @@ func TestRateLimitCooldownAndRecovery(t *testing.T) {
 	u1.status.Store(200)
 	time.Sleep(1200 * time.Millisecond)
 	resp, _ = chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
 		t.Errorf("p1 should have recovered, got %s", got)
 	}
 }
@@ -323,11 +325,11 @@ func TestAdminStatus(t *testing.T) {
 	}
 	for _, ep := range eps {
 		switch ep.Endpoint {
-		case "p1/model-one":
+		case "openai/p1/model-one":
 			if ep.Available || ep.Fails != 1 {
 				t.Errorf("p1 should be cooling down: %+v", ep)
 			}
-		case "p2/model-two":
+		case "openai/p2/model-two":
 			if !ep.Available {
 				t.Errorf("p2 should be available: %+v", ep)
 			}

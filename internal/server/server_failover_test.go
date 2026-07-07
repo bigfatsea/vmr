@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // Exhaustive failover: by default the router walks every available endpoint
 // until one succeeds; max_attempts (>0) is an optional cap.
@@ -9,22 +9,26 @@ import (
 	"testing"
 )
 
+// Priority is deliberately omitted below: this is the idiom the schema is
+// designed around — file order alone decides try-order via stable sort.
 func fourEndpointYAML(u1, u2, u3, u4, extra string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 %s
 providers:
-  p1: {type: openai, base_url: %s, api_key: k1}
-  p2: {type: openai, base_url: %s, api_key: k2}
-  p3: {type: openai, base_url: %s, api_key: k3}
-  p4: {type: openai, base_url: %s, api_key: k4}
+  openai:
+    p1: {base_url: %s, api_key: k1}
+    p2: {base_url: %s, api_key: k2}
+    p3: {base_url: %s, api_key: k3}
+    p4: {base_url: %s, api_key: k4}
 models:
-  vm:
-    endpoints:
-      - {provider: p1, model: m1, priority: 1}
-      - {provider: p2, model: m2, priority: 2}
-      - {provider: p3, model: m3, priority: 3}
-      - {provider: p4, model: m4, priority: 4}
+  openai:
+    vm:
+      endpoints:
+        - {provider: p1, model: m1}
+        - {provider: p2, model: m2}
+        - {provider: p3, model: m3}
+        - {provider: p4, model: m4}
 `, extra, u1, u2, u3, u4)
 }
 
@@ -42,7 +46,7 @@ func TestFailoverExhaustsAllEndpointsByDefault(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "p4/m4" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p4/m4" {
 		t.Errorf("endpoint: %s (the 4th endpoint must be reached)", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "4" {

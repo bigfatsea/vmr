@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-07 16:30, by Fable 5 -->
+<!-- Ver 2026-07-07 17:45, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -19,7 +19,7 @@
 | 概念 | 职责 |
 | --- | --- |
 | **Virtual Model** | 对外暴露的模型名，代表能力而非厂商；对应一组 Endpoint，绑定一种协议 |
-| **Provider** | 一个可复用的上游定义：type（用哪个 Adapter）+ base_url + api_key |
+| **Provider** | 一个可复用的上游定义：base_url + api_key；归属哪个协议由它在配置里的位置决定（`providers.<protocol>.<name>`），不再是自带的字段 |
 | **Endpoint** | 最小调度单位：Provider × 实际模型名 × 调度属性；同厂不同 Key / 不同协议面即不同 Provider→不同 Endpoint |
 | **Adapter** | 协议插件：构造上游请求、转换响应、归类错误；声明自己的协议 |
 | **Strategy** | 候选排序器：健康过滤后按维度序列做稳定多键排序 |
@@ -41,22 +41,19 @@ POST /v1/messages           Anthropic 协议 → 只路由到 Anthropic 兼容�
 
 落实机制：
 
-* 协议是 Adapter 的属性（`Protocol() string`）。Virtual Model 的协议由其全部 endpoints 的 Adapter 推断，混协议在配置加载期报错——不设显式配置字段，消灭"声明与实际不符"这类错误而非校验它。
+* 协议是 Adapter 的属性（`Protocol() string`），也是配置里 `providers`/`models` 的外层 key。一个 Virtual Model 的 endpoints 只能引用同一协议分组下的 provider——跨协议混用没有语法能表达它，不是"配置了会被校验拒绝"，而是"配置这个东西本身写不出来"（§10）。
 * 模型存在但协议不符 → 404，message 指明正确入口。
 * 恰好两种协议的请求体都是顶层 `model` + `stream` 字段，路由解析层（`CanonicalRequest`）天然协议无关。
 * vmr 自产的错误体为两种客户端都能解析的合并形态：`{"type":"error","error":{"type","message"}}`（OpenAI SDK 读 `error.message`，Anthropic SDK 认 `type:"error"` 信封）。`GET /v1/models` 同理（`object:"list"` + `has_more` + `type:"model"` 并存）。
 * 新增协议入口（如 gemini）= 新 Adapter + 新路由行，同样透传。
 
-已接入的厂商协议面（均实测）：
+已接入的厂商协议面（均实测）。同一账号的两个协议面现在共用同一个 provider 名（分属 `providers.openai`/`providers.anthropic`），不再需要 `_a` 后缀区分：
 
-| Provider 配置 | base_url | 协议 |
-| --- | --- | --- |
-| minimax | `https://api.minimaxi.com/v1` | openai |
-| minimax_a | `https://api.minimaxi.com/anthropic/v1` | anthropic |
-| deepseek | `https://api.deepseek.com/v1` | openai |
-| deepseek_a | `https://api.deepseek.com/anthropic/v1` | anthropic |
-| openrouter | `https://openrouter.ai/api/v1` | openai |
-| openrouter_a | `https://openrouter.ai/api/v1`（同一 base，Adapter 拼 `/messages`） | anthropic |
+| Provider 名 | base_url（openai 面 / anthropic 面） |
+| --- | --- |
+| minimax | `https://api.minimaxi.com/v1` / `https://api.minimaxi.com/anthropic/v1` |
+| deepseek | `https://api.deepseek.com/v1` / `https://api.deepseek.com/anthropic/v1` |
+| openrouter | `https://openrouter.ai/api/v1`（同一 base，anthropic 面由 Adapter 拼 `/messages`） |
 
 ---
 
@@ -265,7 +262,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
   },
   "attempts": [                           // 第二层：vmr ↔ 上游，每次 failover 尝试一条，按序
     {
-      "endpoint": "minimax_a_badkey/MiniMax-M3",   // provider/实际模型
+      "endpoint": "anthropic/minimax_badkey/MiniMax-M3",   // protocol/provider/实际模型
       "url": "https://api.minimaxi.com/anthropic/v1/messages",
       "dur_ms": 543,
       "request":  { "headers": {...}, "body": {...} },   // 出站请求（model 已改写）
@@ -273,7 +270,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
       "error": "auth"                     // 失败原因：错误类别 | "network: …" | "build: …" | "canceled by client"
     },
     {
-      "endpoint": "deepseek_a/deepseek-v4-flash",
+      "endpoint": "anthropic/deepseek/deepseek-v4-flash",
       "url": "https://api.deepseek.com/anthropic/v1/messages",
       "dur_ms": 320,
       "request":  { "headers": {...}, "body": {...} },
@@ -325,22 +322,27 @@ timeouts:
   response_header: 120s       # 上游首字节（缺省 120s）
   stream_idle: 120s           # 流静默看门狗（缺省 120s）
 
-providers:                    # "我有什么"
-  <name>:
-    type: openai | anthropic  # Adapter（即协议）
-    base_url: https://...     # openai 型拼 /chat/completions；anthropic 型拼 /messages
-    api_key: ${ENV_VAR}       # 支持 ${VAR} 展开；未设置的变量展开为空串
+providers:                       # "我有什么"——按协议分组，两层 map
+  <protocol>:                    # openai | anthropic | 未来任何已注册的 adapter 名
+    <name>:
+      base_url: https://...      # openai 型拼 /chat/completions；anthropic 型拼 /messages
+      api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串
 
-models:                       # "对外叫什么、按什么顺序用"
-  <virtual-model-name>:
-    strategy: [priority]      # 缺省 [priority]
-    endpoints:
-      - provider: <name>      # 必须引用已定义 provider
-        model: <上游真实模型名>
-        priority: 1           # 数字小优先；缺省 0；平手按文件顺序
+models:                          # "对外叫什么、按什么顺序用"——同样按协议分组
+  <protocol>:
+    <virtual-model-name>:
+      strategy: [priority]       # 缺省 [priority]
+      endpoints:
+        - provider: <name>       # 必须引用同协议分组下已定义的 provider
+          model: <上游真实模型名>
+          priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
 ```
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在、adapter type 已注册、base_url 合法、endpoint.model 非空、同一 model 的 endpoints 协议一致；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
+**两层 map 而非扁平 map + 显式字段**：provider 不再有 `type:` 字段，协议就是它在配置里所处的位置（`providers.<protocol>.<name>`）；一个 model 的 endpoints 只能引用同一 `<protocol>` 分组下的 provider，跨协议引用没有语法能表达它。带来两个直接好处：同一账号的两个协议面可以复用同一个 provider 短名（`openrouter` 在 `providers.openai` 和 `providers.anthropic` 下各存一份），不必再造 `_a` 后缀；同一个 virtual model 名也可以在两个协议分组下各存一份，两个入口各自独立可达（§3）。副作用：`Endpoint` 的 `HealthKey()`/`Name()`（进而 `X-VMR-Endpoint` 响应头、审计日志 `attempts[].endpoint`）改为三段式 `<protocol>/<provider>/<model>`——如果两个协议面复用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。
+
+**Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
+
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
 ---
 
@@ -354,7 +356,7 @@ models:                       # "对外叫什么、按什么顺序用"
 | 调度 = 过滤+多键排序 | 策略类枚举（Priority/RR/Weighted 各一套） | 组合能力来自排序键叠加；新策略不改主流程 |
 | 被动健康 + 半开单飞探针 | 定期主动探测 | 探测 LLM API 每次都花钱；单飞探针把恢复试错成本压到一个请求并防惊群 |
 | 错误分类含 body 嗅探 | 严格按 HTTP status 映射 | 实测各家 status 习惯不一（400 当 404 用等）；漏判 = 永不 failover，误判只是一次无害切换 |
-| 协议归属自动推断 | models 显式 protocol 字段 | 显式字段要么冗余要么矛盾；推断消灭这类错误本身 |
+| providers/models 按协议分两层 map，协议即配置位置 | 扁平 map + provider.type / model.protocol 显式字段 | 显式字段要么冗余（与 endpoint 实际协议重复）要么矛盾（写错/漏改）；把协议变成 map 的外层 key 之后，"一个 model 混用两种协议" 连语法都写不出来，不是运行时校验能不能查到，是从设计上不给它写的机会 |
 | 全败透传最后上游错误 | 合成统一 502 | 保留客户端 SDK 可解析的厂商错误结构；聚合信息在日志里 |
 | 健康状态跨热重载保留 | 重载清零 | 清零会把冷却中的端点放出来重打；carry-over 仅十几行 |
 | 并发闸：全局、无等待上限 | 每端点限流 / 排队超时 | 全局闸覆盖"保护本机与总用量"诉求且实现极简；客户端自有超时 |
@@ -367,6 +369,8 @@ models:                       # "对外叫什么、按什么顺序用"
 | 图片降采样跳过判定用真实像素尺寸（`DecodeConfig`） | 按字节数估算换算像素 | 压缩率随内容剧烈波动，字节数与像素尺寸不是稳定映射；读文件头一样便宜且没有换算误差 |
 | 图片降采样直接实现为函数调用 | 复用/预建 §12.1 的通用请求预处理插件框架 | 插件框架的词库形态、按 Provider 差异化等问题还未定型，图片降采样是具体确定的处理，不该为一个未来设计买单 |
 | 动图/超限声明尺寸一律 fail-open 跳过 | 尝试部分处理或报错 | 动图缩放会破坏语义，畸形声明尺寸可能是解压炸弹；跳过的代价只是错过一次可选优化，处理的代价可能是内存暴涨或输出错误 |
+| Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint`/审计 `attempts[].endpoint` 的格式多一段，两处都是人读字符串，没有内部逻辑解析它 |
+| Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合（§12.2）保留逃生舱 |
 
 ---
 

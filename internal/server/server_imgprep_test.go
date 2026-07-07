@@ -1,4 +1,4 @@
-// Ver 2026-07-07 15:30, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // End-to-end check that image downscaling (internal/imgprep) is wired into
 // the real request path: client -> server -> router -> adapter -> upstream.
@@ -53,11 +53,13 @@ func TestImageDownscaleAppliedBeforeUpstream(t *testing.T) {
 listen: 127.0.0.1:0
 image_downscale: 512
 providers:
-  p1: {type: openai, base_url: %s, api_key: k1}
+  openai:
+    p1: {base_url: %s, api_key: k1}
 models:
-  vm:
-    endpoints:
-      - {provider: p1, model: model-one, priority: 1}
+  openai:
+    vm:
+      endpoints:
+        - {provider: p1, model: model-one}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

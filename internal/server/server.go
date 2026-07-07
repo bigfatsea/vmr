@@ -1,4 +1,4 @@
-// Ver 2026-07-07 16:30, by Fable 5
+// Ver 2026-07-07 17:45, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -178,9 +178,11 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 		OwnedBy  string `json:"owned_by"`
 		Protocol string `json:"vmr_protocol"`
 	}
-	list := make([]model, 0, len(snap.Models))
-	for name, route := range snap.Models {
-		list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: route.Protocol})
+	var list []model
+	for protocol, byName := range snap.Models {
+		for name := range byName {
+			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: protocol})
+		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list, "has_more": false})
@@ -202,14 +204,16 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 		health.Status
 	}
 	out := map[string][]epStatus{}
-	for name, route := range snap.Models {
-		for _, ep := range route.Endpoints {
-			out[name] = append(out[name], epStatus{
-				Endpoint: ep.Name(),
-				Protocol: route.Protocol,
-				Priority: ep.Priority,
-				Status:   s.rt.Health.Status(ep.HealthKey(), now),
-			})
+	for protocol, byName := range snap.Models {
+		for name, route := range byName {
+			for _, ep := range route.Endpoints {
+				out[name] = append(out[name], epStatus{
+					Endpoint: ep.Name(),
+					Protocol: protocol,
+					Priority: ep.Priority,
+					Status:   s.rt.Health.Status(ep.HealthKey(), now),
+				})
+			}
 		}
 	}
 	limit, inFlight, waiting := s.rt.Concurrency()

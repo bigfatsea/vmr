@@ -1,6 +1,10 @@
-# Ver 2026-07-07 16:30, by Fable 5
+# Ver 2026-07-07 17:45, by Fable 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
+# Both are nested protocol -> name: the outer key is the adapter/protocol
+# ("openai" | "anthropic"), so a model's endpoints can only ever reference a
+# provider from its own protocol group — mixing protocols in one model has no
+# syntax to write, rather than being a config error to catch.
 
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer)
@@ -14,65 +18,54 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # abort a stream silent for this long
 
 providers:
-  minimax:
-    type: openai # adapter type; MiniMax is OpenAI-compatible
-    base_url: https://api.minimaxi.com/v1
-    api_key: ${MINIMAX_PLAN_KEY}
-  openrouter:
-    type: openai
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
-  deepseek:
-    type: openai
-    base_url: https://api.deepseek.com/v1
-    api_key: ${DEEPSEEK_API_KEY}
-  # Anthropic-protocol providers: callers use POST /v1/messages.
-  # VMR never converts protocols — a model's endpoints must all share one protocol.
-  minimax_a:
-    type: anthropic
-    base_url: https://api.minimaxi.com/anthropic/v1
-    api_key: ${MINIMAX_PLAN_KEY}
-  deepseek_a:
-    type: anthropic
-    base_url: https://api.deepseek.com/anthropic/v1
-    api_key: ${DEEPSEEK_API_KEY}
-  openrouter_a: # OpenRouter also speaks Anthropic; same base, /messages appended
-    type: anthropic
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
+  openai:
+    minimax:
+      base_url: https://api.minimaxi.com/v1
+      api_key: ${MINIMAX_PLAN_KEY}
+    openrouter:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+    deepseek:
+      base_url: https://api.deepseek.com/v1
+      api_key: ${DEEPSEEK_API_KEY}
+  # Anthropic-protocol providers: callers use POST /v1/messages. Same short
+  # names as above are reused on purpose — nesting by protocol means
+  # "openrouter" here and "openrouter" under providers.openai are two
+  # unambiguous, independent entries (same account, different API surface).
+  anthropic:
+    minimax:
+      base_url: https://api.minimaxi.com/anthropic/v1
+      api_key: ${MINIMAX_PLAN_KEY}
+    deepseek:
+      base_url: https://api.deepseek.com/anthropic/v1
+      api_key: ${DEEPSEEK_API_KEY}
+    openrouter: # OpenRouter also speaks Anthropic; same base, /messages appended
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
 
 models:
-  coding:
-    strategy: [priority] # MVP dimension; ties keep file order
-    endpoints:
-      - provider: openrouter
-        model: z-ai/glm-5.2
-        priority: 2
-      - provider: deepseek
-        model: deepseek-v4-pro
-        priority: 3
+  openai:
+    coding:
+      # strategy defaults to [priority]; endpoints below have no explicit
+      # priority — ties (everyone defaults to 0) keep this file order, so
+      # listing them in the order you want them tried is enough.
+      endpoints:
+        - {provider: openrouter, model: z-ai/glm-5.2}
+        - {provider: deepseek, model: deepseek-v4-pro}
 
-  cheap:
-    endpoints: # strategy defaults to [priority]
-      - provider: minimax
-        model: MiniMax-M3
-        priority: 1
-      - provider: openrouter
-        model: tencent/hy3-preview
-        priority: 2
-      - provider: deepseek
-        model: deepseek-v4-flash
-        priority: 3
+    cheap:
+      endpoints:
+        - {provider: minimax, model: MiniMax-M3}
+        - {provider: openrouter, model: tencent/hy3-preview}
+        - {provider: deepseek, model: deepseek-v4-flash}
 
-  # Anthropic-protocol virtual model: reachable only via POST /v1/messages.
-  claude:
-    endpoints:
-      - provider: minimax_a
-        model: MiniMax-M3
-        priority: 1
-      - provider: deepseek_a
-        model: deepseek-v4-pro
-        priority: 2
-      - provider: openrouter_a # any OpenRouter model, spoken over Anthropic protocol
-        model: minimax/minimax-m3
-        priority: 3
+  # Anthropic-protocol virtual models: reachable only via POST /v1/messages.
+  # "claude" only needs to exist here; nothing under models.openai references
+  # it, and models.openai.coding above can't accidentally reach these
+  # providers even by typo, since anthropic.* isn't in its lookup scope.
+  anthropic:
+    claude:
+      endpoints:
+        - {provider: minimax, model: MiniMax-M3}
+        - {provider: deepseek, model: deepseek-v4-pro}
+        - {provider: openrouter, model: minimax/minimax-m3} # any OpenRouter model, spoken over Anthropic protocol

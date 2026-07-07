@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-07 16:30, by Fable 5 -->
+<!-- Ver 2026-07-07 17:45, by Fable 5 -->
 
 # vmr — Virtual Model Router
 
@@ -37,7 +37,7 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
 
 ## 配置
 
-`providers` 定义"我有什么"（type 即协议：`openai` / `anthropic`），`models` 定义"对外叫什么、按什么顺序用"：
+`providers`/`models` 都按协议分两层：外层 key 是协议（`openai` / `anthropic`），内层才是名字。一个 model 的 endpoints 只能引用同协议分组下的 provider——想让同一账号同时有 OpenAI 和 Anthropic 两个面，就在两个协议分组下各写一份同名 provider，不需要后缀区分：
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -46,22 +46,24 @@ listen: 127.0.0.1:8800
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省不限（关闭）
 
 providers:
-  openrouter:
-    type: openai
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
-  openrouter_a:                # 同一服务的 Anthropic 协议面是另一个 provider
-    type: anthropic
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
+  openai:
+    openrouter:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+  anthropic:
+    openrouter:                # 同一服务的 Anthropic 面，同名不冲突（两层 map 天然隔离）
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
 
 models:
-  coding:                      # 协议由 endpoints 自动推断，混协议报错
-    endpoints:
-      - {provider: openrouter, model: z-ai/glm-5.2, priority: 1}
-  claude:                      # anthropic 协议 → 走 /v1/messages
-    endpoints:
-      - {provider: openrouter_a, model: minimax/minimax-m3, priority: 1}
+  openai:
+    coding:
+      endpoints:
+        - {provider: openrouter, model: z-ai/glm-5.2}   # 不写 priority：endpoints 列表顺序就是尝试顺序
+  anthropic:
+    claude:                    # anthropic 协议 → 走 /v1/messages
+      endpoints:
+        - {provider: openrouter, model: minimax/minimax-m3}
 ```
 
 全部字段与校验规则见设计文档 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。
@@ -129,4 +131,4 @@ jq '.model, .outcome, .dur_ms' vmr-audit-2026-07-07.jsonl   # body 为合法 JSO
 go test -race ./...
 ```
 
-新增 Provider：OpenAI/Anthropic 兼容的厂商直接配 `type: openai|anthropic`，零代码。新协议 = `internal/adapter/<name>/` 实现四方法接口 + `cmd/vmr/main.go` 一行 blank import（设计文档 §5）。
+新增 Provider：OpenAI/Anthropic 兼容的厂商直接在对应协议分组下加一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现四方法接口 + `cmd/vmr/main.go` 一行 blank import，之后 `providers.<name>`/`models.<name>` 自动可用（设计文档 §5）。
