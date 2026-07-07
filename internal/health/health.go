@@ -1,0 +1,150 @@
+// Ver 2026-07-07 01:55, by Fable 5
+
+// Package health implements the passive health state machine:
+// failure-driven cooldown with exponential backoff and half-open recovery
+// where a single real request acts as the probe (no paid active probing).
+package health
+
+import (
+	"sync"
+	"time"
+
+	"vmr/internal/core"
+)
+
+const (
+	transientBase = 2 * time.Second
+	transientCap  = 5 * time.Minute
+	longBase      = 10 * time.Minute
+	longCap       = time.Hour
+)
+
+type state struct {
+	fails         int
+	cooldownUntil time.Time
+	lastClass     core.ErrorClass
+	probing       bool
+}
+
+// Registry keeps health state keyed by Endpoint.HealthKey(). It lives outside
+// the config snapshot, so cooldowns survive hot reloads.
+type Registry struct {
+	mu sync.Mutex
+	m  map[string]*state
+}
+
+func New() *Registry { return &Registry{m: map[string]*state{}} }
+
+func (r *Registry) get(key string) *state {
+	s, ok := r.m[key]
+	if !ok {
+		s = &state{}
+		r.m[key] = s
+	}
+	return s
+}
+
+// Available reports whether the endpoint would be tried now, without side effects.
+func (r *Registry) Available(key string, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.m[key]
+	if !ok {
+		return true
+	}
+	if now.Before(s.cooldownUntil) {
+		return false
+	}
+	// Half-open with a probe already in flight: skip.
+	return !(s.fails > 0 && s.probing)
+}
+
+// Acquire claims the right to send a real request. Healthy endpoints always
+// pass. A half-open endpoint (cooldown expired after failures) admits exactly
+// one caller — the probe — until that probe reports success or failure.
+func (r *Registry) Acquire(key string, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.get(key)
+	if now.Before(s.cooldownUntil) {
+		return false
+	}
+	if s.fails > 0 {
+		if s.probing {
+			return false
+		}
+		s.probing = true
+	}
+	return true
+}
+
+func (r *Registry) ReportSuccess(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.get(key)
+	s.fails = 0
+	s.cooldownUntil = time.Time{}
+	s.probing = false
+}
+
+// ReportFailure records a failure, deepens the backoff and returns the cooldown applied.
+func (r *Registry) ReportFailure(key string, class core.ErrorClass, retryAfter time.Duration, now time.Time) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.get(key)
+	s.probing = false
+	s.fails++
+	s.lastClass = class
+
+	var d time.Duration
+	switch class {
+	case core.ErrAuth, core.ErrEndpoint:
+		d = backoff(longBase, longCap, s.fails)
+	case core.ErrRateLimit:
+		if retryAfter > 0 {
+			d = retryAfter
+		} else {
+			d = backoff(transientBase, transientCap, s.fails)
+		}
+	default:
+		d = backoff(transientBase, transientCap, s.fails)
+	}
+	s.cooldownUntil = now.Add(d)
+	return d
+}
+
+func backoff(base, cap time.Duration, fails int) time.Duration {
+	d := base
+	for i := 1; i < fails; i++ {
+		d *= 2
+		if d >= cap {
+			return cap
+		}
+	}
+	return d
+}
+
+// Status is one endpoint's health as exposed by /admin/status.
+type Status struct {
+	Fails         int       `json:"consecutive_failures"`
+	CooldownUntil time.Time `json:"cooldown_until,omitzero"`
+	LastError     string    `json:"last_error,omitempty"`
+	Available     bool      `json:"available"`
+}
+
+func (r *Registry) Status(key string, now time.Time) Status {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.m[key]
+	if !ok {
+		return Status{Available: true}
+	}
+	st := Status{Fails: s.fails, Available: !now.Before(s.cooldownUntil)}
+	if !s.cooldownUntil.IsZero() && now.Before(s.cooldownUntil) {
+		st.CooldownUntil = s.cooldownUntil
+	}
+	if s.fails > 0 {
+		st.LastError = s.lastClass.String()
+	}
+	return st
+}

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-07 00:53, by Fable 5 -->
+<!-- Ver 2026-07-07 (V2.2 增量：Anthropic 协议入口 + 并发限制), by Fable 5 -->
 
 # Virtual Model Router — 设计方案 V2
 
@@ -34,6 +34,60 @@ V1 把 Priority / Round Robin / Weighted / Sticky 列为并列策略，每加一
 
 **⑥ V1 缺失多个决定成败的工程细节。**
 包括：流式请求的 failover 时机（首字节发出后不可切换）、非流式请求体缓冲（failover 重放的前提）、错误分类（哪些错误该切换、哪些该直接返回）、Router 自身鉴权、`/v1/models` 端点（很多客户端启动时必查）、超时定义。V2 全部落实。
+
+## 0.5 动工前终审修订（V2.1）
+
+动工前对 V2 做了最后一轮审核，并用真实 Provider（MiniMax / DeepSeek / OpenRouter）实测了错误行为。修订八处，均已合入正文：
+
+**(a) 请求体缓冲统一到所有请求。** 流式请求在首字节发出前同样允许 failover，而 failover 的前提是请求体可重放。因此不区分流式/非流式，所有请求体在入口处缓冲（默认上限 8MB，超限返回 413）。原 3.1 "仅非流式缓冲"的表述是漏洞。
+
+**(b) ErrorClass 扩容：`ErrQuota` 改为 `ErrEndpoint`。** 实测发现 MiniMax 对"未知模型"返回 **400**（OpenAI 惯例是 404），OpenRouter 余额不足返回 **402**。若 400 一律判为 ErrClient 不切换，配错模型名的端点将永远无法 failover。因此：额度耗尽、模型不存在（404 或 400+body 嗅探）、402 等"该端点持续不可用但换端点可解"的错误统一归入 `ErrEndpoint`（长冷却 + 切换）；Adapter 的 ClassifyError 对 400 做关键词嗅探（"unknown model" / "model_not_found" 等）。
+
+**(c) 全部候选失败的返回语义。** 有真实上游尝试 → 原样返回最后一次上游错误（原 status + 原 body），让客户端看到真实原因；无候选可试（全部冷却或列表为空）→ 返回 503 + OpenAI 风格错误 JSON。所有响应带 `X-VMR-Attempts` 头便于排查。
+
+**(d) Header 白名单策略。** 客户端请求头只透传 `Content-Type` 与 `Accept`；`Authorization` 绝不透传（由 Adapter 注入 Provider Key）；不透传 `Accept-Encoding`（让 Go Transport 做透明 gzip）。响应侧透传 `Content-Type` 及状态码。
+
+**(e) model 字段改写机制。** 请求体解析为 `map[string]json.RawMessage`，仅替换 `model` 键后重编码：未知字段原样保留（对上游新参数前向兼容），代价是不保证 JSON 键序（无语义影响）。
+
+**(f) 健康状态跨热重载保留。** 健康注册表以 `provider/model/key指纹` 为稳定键、独立于配置快照存活。否则每次改配置都会把冷却中的端点放出来重打一轮 429。
+
+**(g) `/v1/models` 响应格式。** OpenAI list 格式：`{"object":"list","data":[{"id":"coding","object":"model","owned_by":"vmr"}]}`。
+
+**(h) 默认 Provider 组合更新为 MiniMax / OpenRouter / DeepSeek**（三家均已实测可用，MiniMax 与 DeepSeek 同时提供 OpenAI 兼容接口，走透传路径）。见第 4 节配置示例。
+
+---
+
+## 0.6 增量设计 V2.2：Anthropic 协议入口 + 并发限制（MVP 完成后新增）
+
+### 0.6.1 多协议入口，永不翻译
+
+原 Phase 2 计划写一个"翻译型" anthropic Adapter（`/v1/messages` ↔ Chat Completions 双向转换）。**这个计划作废**：双向流式翻译（Anthropic 的 `message_start` / `content_block_delta` 事件流 vs OpenAI 的 chunk 流、tool-use / thinking 块的语义映射）正是 0-③ 警告过的复杂度黑洞；且 MiniMax、DeepSeek 等厂商已原生提供 Anthropic 兼容端点，翻译不再创造任何价值。替代原则：
+
+> **VMR 不做协议转换。** 调用方用 OpenAI 协议（`POST /v1/chat/completions`），只在 OpenAI 兼容端点间路由；用 Anthropic 协议（`POST /v1/messages`），只在 Anthropic 兼容端点间路由。每个协议族内部都是零转换透传。
+
+落实机制：
+
+* **Protocol 是 Adapter 的属性**：接口新增 `Protocol() string`（`openai` Adapter → `"openai"`，`anthropic` Adapter → `"anthropic"`）。
+* **Virtual Model 的协议自动推断**：由其全部 endpoints 的 Adapter 推断；混协议的模型在配置校验期直接报错。不新增配置字段——消灭"声明与实际不符"这类错误，而不是校验它。
+* **入口按协议路由**：`/v1/chat/completions` 只接受 OpenAI 协议模型，`/v1/messages` 只接受 Anthropic 协议模型；模型存在但协议不符 → 404 并在 message 里说明该用哪个入口。
+* `CanonicalRequest` 结构不变（两种协议的请求体都是顶层 `model` + `stream` 字段），新增 `Header`：服务端白名单透传的协议头（目前只有 `anthropic-version`、`anthropic-beta`）经由它传给 Adapter。
+* **anthropic Adapter 也是透传型**：拼 `{base_url}/messages`、注入 `x-api-key`（Anthropic 惯例，实测 MiniMax 强制要求）、缺省补 `anthropic-version: 2023-06-01`、改写 model 字段。错误分类与 openai 共用一张默认分类表，另加 529（overloaded）→ ErrTransient。
+* Router 自身鉴权同时接受 `Authorization: Bearer` 与 `x-api-key`（Anthropic SDK 只会发后者）。
+* `/v1/models` 返回两种客户端都能解析的合并形态（同时带 OpenAI 的 `object:"list"` 与 Anthropic 的 `has_more`、`type:"model"` 字段），列出全部协议的模型。
+
+实测备注（2026-07-07）：MiniMax / DeepSeek 的 Anthropic 兼容口分别为 `https://api.minimaxi.com/anthropic/v1` 与 `https://api.deepseek.com/anthropic/v1`（Adapter 追加 `/messages`）；DeepSeek 对未知模型返回 400 且措辞为 "The supported API model names are …"，错误嗅探词表需覆盖（"supported" + "model"）。
+
+### 0.6.2 全局并发限制（挂起等待，不排队）
+
+新增可选配置 `max_concurrency`（缺省 0 = 不限制）。语义：
+
+* 两个聊天入口共用一个全局信号量；超限请求**在内存中挂起等待**（Go channel 阻塞，唤醒近似 FIFO），前面的请求完成即放行。不引入队列结构、不设等待上限。
+* 等待中的请求若客户端断开（context 取消），立即出队，不占坑。
+* 只闸聊天入口；`/v1/models`、`/admin/status` 不受限。
+* 热重载时仅当容量变化才更换信号量（换闸瞬间新旧持有者叠加、短暂超额，属可接受的边界行为，日志可见）。
+* `/admin/status` 暴露 `in_flight` / `limit` 便于观察。
+
+每 Endpoint 的 rpm/并发精细限流仍留在 Phase 2，与本全局闸互不冲突。
 
 ---
 
@@ -82,8 +136,10 @@ Upstream      发送；流式则边收边转发
 
 两条硬规则：
 
-* **非流式**：请求体在入口处缓冲（默认上限 8MB），failover 时原样重放；每个候选只试一次，总尝试数默认 3。
-* **流式**：只有在**首个数据块转发给客户端之前**才允许 failover；首字节已发出后发生错误只能断流并记录。这是流式代理的物理约束，必须写进设计而不是留给实现者踩坑。
+* **请求体一律在入口处缓冲**（默认上限 8MB，超限 413），failover 时原样重放；每个候选只试一次，总尝试数默认 3。流式请求同样缓冲——首字节前的 failover 也需要重放请求体。
+* **流式**：只有在**首个数据块转发给客户端之前**才允许 failover；首字节已发出后发生错误只能断流并记录。这是流式代理的物理约束，必须写进设计而不是留给实现者踩坑。实现上该约束自然成立：只有上游返回 2xx 才开始向客户端转发，非 2xx / 网络错误都发生在写出之前。
+
+失败语义（0.5-c）：有真实上游尝试 → 原样返回最后一次上游错误；无候选可试 → 503 + OpenAI 风格错误 JSON；响应带 `X-VMR-Attempts`。
 
 ### 3.2 模块划分
 
@@ -116,11 +172,11 @@ type CanonicalRequest struct {
 
 type ErrorClass int
 const (
-    ErrClient    ErrorClass = iota // 400 请求本身有问题：直接返回客户端，不切换
+    ErrClient    ErrorClass = iota // 请求本身有问题：直接返回客户端，不切换
     ErrAuth                        // 401/403：该 Endpoint 长冷却，切换
     ErrRateLimit                   // 429：按 Retry-After 冷却，切换
-    ErrQuota                       // 额度耗尽：长冷却，切换
-    ErrTransient                   // 5xx/超时/网络：短冷却，切换
+    ErrEndpoint                    // 端点持续不可用（额度耗尽/402、模型不存在/404、400+嗅探）：长冷却，切换
+    ErrTransient                   // 5xx/408/超时/网络：短冷却，切换
 )
 
 type Adapter interface {
@@ -155,7 +211,7 @@ import (
 
 **新增一个 Provider 的完整工作量 = 一个包（实现三个方法）+ 一行 import。** 配置里 `type: anthropic` 即可引用。写法完全统一，互不影响。
 
-错误分类（ClassifyError）是最容易被忽略但决定 failover 质量的部分：400 类错误换哪个 Endpoint 都会失败，必须直接返回客户端；401 是这个 Key 的问题，应该切换并长冷却。把这个判断放进 Adapter 是因为各家错误格式不同（有的额度耗尽也返回 429，需要看 body 区分）。
+错误分类（ClassifyError）是最容易被忽略但决定 failover 质量的部分：400 类错误通常换哪个 Endpoint 都会失败，必须直接返回客户端；401 是这个 Key 的问题，应该切换并长冷却。把这个判断放进 Adapter 是因为各家错误格式不同——实测：MiniMax 对未知模型返回 400（需嗅探 body 中的 "unknown model" 归入 ErrEndpoint），OpenRouter 余额不足返回 402，有的厂商额度耗尽也返回 429（需看 body 区分 ErrRateLimit 与 ErrEndpoint）。
 
 ### 3.4 调度模型：过滤 + 多键排序
 
@@ -183,21 +239,22 @@ type Dimension interface {
 
 每个 Endpoint 维护两个字段：`consecutiveFailures int`、`cooldownUntil time.Time`。
 
-* 失败 → 按错误类别计冷却：`ErrTransient` 基础 2s，指数退避（×2，封顶 5min）；`ErrRateLimit` 优先尊重 `Retry-After`；`ErrAuth`/`ErrQuota` 直接 10min 起。
+* 失败 → 按错误类别计冷却：`ErrTransient` 基础 2s，指数退避（×2，封顶 5min）；`ErrRateLimit` 优先尊重 `Retry-After`（支持秒数与 HTTP-date 两种格式）；`ErrAuth`/`ErrEndpoint` 直接 10min 起。
 * 冷却期内被健康过滤器剔除。
-* 冷却到期 → 半开：放行真实请求当探针，成功清零计数，失败重新冷却并加深退避。
+* 冷却到期 → 半开：**单飞探针**——只放行一个真实请求充当探针（其余请求继续跳过该端点），成功清零计数，失败重新冷却并加深退避。
 * 成功 → 计数清零。
 
-不做主动探测（每次探测都花钱）；不持久化健康状态（重启即重置，符合无状态原则）。
+健康注册表以 `provider/model/key指纹` 为稳定键，独立于配置快照存活，热重载不清零（0.5-f）。不做主动探测（每次探测都花钱）；不持久化到磁盘（重启即重置，符合无状态原则）。
 
 ### 3.6 其他工程决策
 
-* **Router 自身鉴权**：配置可选 `api_key`，客户端以标准 `Authorization: Bearer` 传入。默认监听 `127.0.0.1` 时可不设。
-* **`/v1/models`**：返回 Virtual Model 列表。成本极低，但很多客户端（各类 ChatUI、IDE 插件）启动时必查，MVP 必须有。
-* **超时**：连接超时 10s；首字节超时默认 120s（LLM 排队可能很慢，需可配）；流式 idle 超时 120s。
+* **Router 自身鉴权**：配置可选 `api_key`，客户端以标准 `Authorization: Bearer` 传入，作用于 `/v1/*`。默认监听 `127.0.0.1` 时可不设。
+* **Header 白名单**：向上游只透传 `Content-Type`、`Accept`；客户端 `Authorization` 绝不透传，由 Adapter 注入 Provider Key；不透传 `Accept-Encoding`，让 Go Transport 做透明 gzip。
+* **`/v1/models`**：返回 Virtual Model 列表，OpenAI list 格式（`{"object":"list","data":[{"id":...,"object":"model","owned_by":"vmr"}]}`）。成本极低，但很多客户端（各类 ChatUI、IDE 插件）启动时必查，MVP 必须有。
+* **超时**：连接超时 10s；首字节（响应头）超时默认 120s（LLM 排队可能很慢，需可配）；流式 idle 超时 120s；不设整请求硬上限（长流式由客户端控制）。以上均为单次尝试粒度。
 * **热加载**：fsnotify 监听 + SIGHUP 兜底；新配置先完整校验，失败则保留旧配置并打日志——绝不带病上线。运行中的请求继续用旧路由表（原子指针交换）。
 * **日志**：stderr，每请求一行：virtual model、命中的 endpoint、尝试次数、时延、状态。无持久化。
-* **可观测**：`GET /admin/status` 返回各 Endpoint 健康状态 JSON（仅本机），CLI `vmr status` 读它渲染。
+* **可观测**：`GET /admin/status` 返回各 Endpoint 健康状态 JSON（仅接受 loopback 来源连接），CLI `vmr status` 读它渲染。
 
 ---
 
@@ -208,37 +265,40 @@ listen: 127.0.0.1:8800
 # api_key: sk-vmr-local-xxx        # 可选：保护 Router 自身
 
 providers:
+  minimax:
+    type: openai                    # 使用哪个 Adapter（MiniMax 提供 OpenAI 兼容接口，透传即可）
+    base_url: https://api.minimaxi.com/v1
+    api_key: ${MINIMAX_PLAN_KEY}    # 支持环境变量展开
   openrouter:
-    type: openai                    # 使用哪个 Adapter
+    type: openai
     base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}  # 支持环境变量展开
+    api_key: ${OPENROUTER_API_KEY}
   deepseek:
     type: openai
     base_url: https://api.deepseek.com/v1
     api_key: ${DEEPSEEK_API_KEY}
-  siliconflow:
-    type: openai
-    base_url: https://api.siliconflow.cn/v1
-    api_key: ${SILICONFLOW_API_KEY}
 
 models:
   coding:
     strategy: [priority]            # MVP 唯一维度；Phase 2 可写 [priority, weight]
     endpoints:
+      - provider: minimax
+        model: MiniMax-M2
+        priority: 1
       - provider: openrouter
         model: anthropic/claude-sonnet-4.5
-        priority: 1
+        priority: 2
       - provider: deepseek
         model: deepseek-chat
-        priority: 2
+        priority: 3
 
   cheap:
     endpoints:                      # strategy 缺省即 [priority]
       - provider: deepseek
         model: deepseek-chat
         priority: 1
-      - provider: siliconflow
-        model: Qwen/Qwen2.5-72B-Instruct
+      - provider: openrouter
+        model: deepseek/deepseek-chat-v3.1
         priority: 2
 ```
 
@@ -282,7 +342,7 @@ models:
 
 按需排序，每一项都不改动 router 主流程：
 
-* **Adapter**：`anthropic`（`/v1/messages` 与 Chat Completions 双向转换，这是第一个真正的"翻译型" Adapter，用来验证接口设计）、`gemini`。
+* **Adapter**：~~`anthropic` 翻译型~~（已按 V2.2 原则作废并以透传型实现，见 0.6.1）；后续按需加 `gemini` 等新**协议入口**（同样透传，不翻译）。
 * **排序维度**：`weight`（加权随机）、`round_robin`、`latency`（滑动窗口实测时延）、`cost`（按配置单价）。
 * **Endpoint 限流**：每 Endpoint 可选 rpm / 并发上限（内存令牌桶），主动避免打出 429。
 * **直连语法**：`model: "openrouter:gpt-5"` 绕过 Virtual Model 直达指定 Provider，便于调试。
@@ -302,4 +362,4 @@ models:
 
 ## 7. 明确不做（继承 V1，永久有效）
 
-Dashboard、数据库（Phase 3 的可选统计除外）、用户管理、计费、Prompt 管理、Workflow、运行时插件系统、MCP 框架、企业级 AI Gateway。每个新需求先过一道门：**它增加的是能力，还是复杂度？**
+Dashboard、数据库（Phase 3 的可选统计除外）、用户管理、计费、Prompt 管理、Workflow、运行时插件系统、MCP 框架、企业级 AI Gateway、**跨协议转换**（OpenAI ↔ Anthropic ↔ Gemini 的任何方向翻译——协议内透传是本项目的边界，见 0.6.1）。每个新需求先过一道门：**它增加的是能力，还是复杂度？**

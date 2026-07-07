@@ -1,0 +1,23 @@
+# Ver 2026-07-07 01:55, by Fable 5
+
+# Binaries
+/vmr
+/bin/
+*.exe
+
+# Local config with real keys (use config.example.yaml as template)
+/config.yaml
+/config.local.yaml
+
+# Test & coverage
+*.test
+*.out
+coverage.html
+
+# Scratch
+/_tmp/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
