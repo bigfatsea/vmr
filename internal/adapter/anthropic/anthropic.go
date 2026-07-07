@@ -35,17 +35,24 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	if err != nil {
 		return nil, err
 	}
+	// Copy the protocol+passthrough headers assembled by the server
+	// layer (see chatHandler). These include the Anthropic version
+	// negotiation headers plus any other client metadata that wasn't
+	// on the blocklist.
+	for k, vs := range req.Header {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
+	// Content-Type and x-api-key must come from the adapter, not the
+	// client — see OpenAI adapter for the same reasoning.
 	httpReq.Header.Set("Content-Type", "application/json")
 	if ep.APIKey != "" {
 		httpReq.Header.Set("x-api-key", ep.APIKey)
 	}
-	version := req.HeaderGet("anthropic-version")
-	if version == "" {
-		version = defaultVersion
-	}
-	httpReq.Header.Set("anthropic-version", version)
-	if beta := req.HeaderGet("anthropic-beta"); beta != "" {
-		httpReq.Header.Set("anthropic-beta", beta)
+	// Default anthropic-version if the client didn't send one.
+	if httpReq.Header.Get("anthropic-version") == "" {
+		httpReq.Header.Set("anthropic-version", defaultVersion)
 	}
 	return httpReq, nil
 }

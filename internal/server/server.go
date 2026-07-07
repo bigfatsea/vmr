@@ -66,8 +66,37 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// protocolHeaders is the whitelist of client headers forwarded to adapters.
+// protocolHeaders is the whitelist of client headers forwarded to adapters
+// for their protocol-semantic value (Anthropic version negotiation). All
+// other client headers are passed through unless they appear in
+// headerBlocklist — see chatHandler for the forwarding loop.
 var protocolHeaders = []string{"anthropic-version", "anthropic-beta"}
+
+// headerBlocklist is the set of client headers VMR never forwards to the
+// upstream. The pass-through policy is the inverse of the prior strict
+// whitelist: most client headers (User-Agent, X-Stainless-*, Traceparent,
+// Accept-Language, etc.) are legitimate metadata and are forwarded as-is,
+// so SDK upgrades and tracing work without VMR code changes. The items
+// here are the ones that would cause a security or protocol-correctness
+// problem if leaked to the upstream.
+//
+// "Must override" headers (Authorization, Host, Content-Length, etc.) are
+// also listed here as a defense in depth, but the primary mechanism is
+// adapter.BuildRequest using httpReq.Header.Set to replace them.
+var headerBlocklist = map[string]struct{}{
+	"authorization":       {}, // credential — adapter injects its own
+	"x-api-key":           {}, // Anthropic credential — same reason
+	"cookie":              {}, // browser/session state — never belongs in LLM API
+	"x-forwarded-for":     {},
+	"x-forwarded-proto":   {},
+	"x-forwarded-host":    {},
+	"x-real-ip":           {},
+	"proxy-authorization": {},
+	"host":                {}, // Go http.Request.Host follows URL, but block anyway
+	"content-length":      {}, // Go Transport recomputes
+	"transfer-encoding":   {}, // Go Transport manages
+	"connection":          {}, // Go Transport manages
+}
 
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -156,9 +185,25 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 
 		hdr := http.Header{}
+		// Protocol-semantic headers (Anthropic version/beta) come first
+		// and are always passed through.
 		for _, name := range protocolHeaders {
 			if v := r.Header.Get(name); v != "" {
 				hdr.Set(name, v)
+			}
+		}
+		// Everything else: pass through unless on the blocklist. The
+		// rationale is that LLM SDKs (OpenAI JS, Anthropic) only emit a
+		// known fixed set of headers and none of them are dangerous, so
+		// a strict whitelist is more brittle than necessary — it strips
+		// legitimate metadata (User-Agent, X-Stainless-*, Traceparent)
+		// and needs code updates when SDKs add new headers.
+		for k, vs := range r.Header {
+			if _, blocked := headerBlocklist[strings.ToLower(k)]; blocked {
+				continue
+			}
+			for _, v := range vs {
+				hdr.Add(k, v)
 			}
 		}
 

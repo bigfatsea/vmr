@@ -22,12 +22,13 @@ import (
 
 // upstream is a scriptable mock provider.
 type upstream struct {
-	srv        *httptest.Server
-	hits       atomic.Int32
-	status     atomic.Int32 // response status; 200 = success
-	lastModel  atomic.Value // model name seen in the last request
-	errBody    atomic.Value // optional custom error body (string)
-	retryAfter string
+	srv         *httptest.Server
+	hits        atomic.Int32
+	status      atomic.Int32 // response status; 200 = success
+	lastModel   atomic.Value // model name seen in the last request
+	lastHeaders atomic.Value // http.Header received in the last request
+	errBody     atomic.Value // optional custom error body (string)
+	retryAfter  string
 }
 
 func newUpstream(t *testing.T) *upstream {
@@ -41,6 +42,7 @@ func newUpstream(t *testing.T) *upstream {
 		}
 		json.Unmarshal(body, &m)
 		u.lastModel.Store(m.Model)
+		u.lastHeaders.Store(r.Header.Clone())
 		st := int(u.status.Load())
 		if st != 200 {
 			if u.retryAfter != "" {

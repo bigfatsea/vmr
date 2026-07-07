@@ -359,10 +359,15 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	w.WriteHeader(resp.StatusCode)
 
 	var copyErr error
+	// Wrap the upstream body with the response normalizer: rewrite
+	// the model field to the virtual model name, strip <think> blocks,
+	// and (for streaming only) append data: [DONE] on EOF. See
+	// response.go for why.
+	rbody := newRespStream(body, creq.Model, creq.Stream)
 	if creq.Stream {
-		copyErr = copyFlush(w, body, snap.Cfg.Timeouts.StreamIdle.D())
+		copyErr = copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	} else {
-		_, copyErr = io.Copy(w, body)
+		_, copyErr = io.Copy(w, rbody)
 	}
 	status := "ok"
 	if copyErr != nil && r.Context().Err() == nil {

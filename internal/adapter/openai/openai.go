@@ -32,6 +32,20 @@ func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.Can
 	if err != nil {
 		return nil, err
 	}
+	// Copy the protocol+passthrough headers assembled by the server
+	// layer (see chatHandler). These carry the OpenAI/Anthropic
+	// protocol semantics plus any client metadata the chatHandler
+	// didn't put on the blocklist (User-Agent, X-Stainless-*,
+	// Traceparent, Accept-Language, etc.).
+	for k, vs := range req.Header {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
+	// Content-Type and Authorization must come from the adapter, not
+	// the client — the client's Authorization is the VMR credential
+	// (used to authenticate against VMR, not the upstream) and the
+	// client-supplied Content-Type could in theory be wrong.
 	httpReq.Header.Set("Content-Type", "application/json")
 	if ep.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+ep.APIKey)
