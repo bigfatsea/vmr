@@ -84,6 +84,35 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 	}
 }
 
+func TestTransientHonorsRetryAfter(t *testing.T) {
+	r := New()
+	// OpenRouter sends Retry-After on 503 (classified transient).
+	if got := r.ReportFailure("e", core.ErrTransient, 30*time.Second, t0); got != 30*time.Second {
+		t.Errorf("transient retry-after: %v", got)
+	}
+}
+
+func TestReportNeutralReleasesProbeOnly(t *testing.T) {
+	r := New()
+	r.ReportFailure("e", core.ErrTransient, 0, t0) // cooldown 2s, fails=1
+	after := t0.Add(3 * time.Second)               // half-open
+
+	if !r.Acquire("e", after) {
+		t.Fatal("should win probe slot")
+	}
+	// Probe hit a content flag: neutral outcome.
+	r.ReportNeutral("e")
+	// Probe slot released — the next caller may probe again immediately…
+	if !r.Acquire("e", after) {
+		t.Error("probe slot must be released after neutral report")
+	}
+	// …and failure count was not deepened: a subsequent failure backs off to
+	// 4s (fails=2), not 8s (which fails=3 would give).
+	if got := r.ReportFailure("e", core.ErrTransient, 0, after); got != 4*time.Second {
+		t.Errorf("neutral must not deepen backoff: %v", got)
+	}
+}
+
 func TestSuccessResets(t *testing.T) {
 	r := New()
 	for i := 0; i < 5; i++ {

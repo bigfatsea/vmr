@@ -141,3 +141,27 @@
 - [x] 文档同步：设计文档 §4.1/§9/决策表、config.example.yaml 注释
 - [x] 全面核查：通读核心代码、回归 go vet + test -race、vmr check 两份配置、E2E 冒烟
 - [x] git commit 当前版本
+
+---
+
+# M15 — 统计分析工具 vmr report（2026-07-07）
+
+- [x] internal/report：JSONL 解析（复用 audit.Record）、usage 提取（OpenAI/Anthropic × JSON/SSE 四种形态）、按 日期×模型 与 日期×端点 聚合、p50/p95
+- [x] 输出：vmr-report.json（meta+rows+endpoints，format 版本号）+ vmr-report.md（T1+T2 表）
+- [x] CLI：`vmr report [-o dir] <file|glob>...`
+- [x] 单测：usage 四形态、聚合正确性、百分位、fallback/可用度、坏行容错
+- [x] E2E：对本机真实审计日志跑一遍，人工核对输出
+- [x] 文档：README 用法章节；设计文档 §8.4（逻辑、维度、输入契约、与日志格式的同步义务）；路线图去掉"审计统计脚本"
+- [x] 回归：go vet + test -race 全绿
+
+---
+
+# M16 — 内容合规错误处理 + 插件空间规划（2026-07-07）
+
+- [x] core：新增 ErrContent（切换但不惩罚端点健康）；调研结论：OpenRouter 403=moderation/guardrail、DeepSeek 内容风险=400+文本、MiniMax 1026/1027 与 200+sensitive 标记
+- [x] classify：451→content；403 嗅探（moderation/flagged/guardrail）分流 content vs auth；400 系内容嗅探（含中英文关键词）优先于 model 嗅探
+- [x] health：ReportNeutral（释放半开探针但不动冷却/计数）；ErrTransient 也尊重 Retry-After（OpenRouter 503 会带）
+- [x] router：ErrContent → 继续 failover + ReportNeutral + 日志 class=content
+- [x] 测试：分类新用例、ReportNeutral、transient Retry-After、集成（403-flagged 切换成功且端点不进冷却）
+- [x] 文档：设计文档 §5/§6.2/§10 决策表；§11 敏感词过滤插件扩展缝规划（本轮不预留接口的理由与未来改动点）；README failover 一句话；配额窗口 vs 余额决策落文档
+- [x] 回归 + commit

@@ -16,12 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/report"
 	"vmr/internal/router"
 	"vmr/internal/server"
 
@@ -43,6 +45,8 @@ func main() {
 		err = cmdCheck(os.Args[2:])
 	case "status":
 		err = cmdStatus(os.Args[2:])
+	case "report":
+		err = cmdReport(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -54,7 +58,61 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]`)
+	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
+       vmr report [-o dir] <audit.jsonl|glob>...`)
+}
+
+// cmdReport aggregates audit JSONL files into vmr-report.json + vmr-report.md.
+func cmdReport(args []string) error {
+	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	outDir := fs.String("o", ".", "output directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 {
+		return fmt.Errorf("no input files; usage: vmr report [-o dir] <audit.jsonl|glob>...")
+	}
+	seen := map[string]bool{}
+	var paths []string
+	for _, arg := range fs.Args() {
+		matches, err := filepath.Glob(arg)
+		if err != nil {
+			return fmt.Errorf("bad pattern %q: %w", arg, err)
+		}
+		if len(matches) == 0 {
+			return fmt.Errorf("no files match %q", arg)
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				paths = append(paths, m)
+			}
+		}
+	}
+	sort.Strings(paths)
+
+	rep, err := report.Build(paths, time.Now())
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		return err
+	}
+	jsonPath := filepath.Join(*outDir, "vmr-report.json")
+	mdPath := filepath.Join(*outDir, "vmr-report.md")
+	data, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(jsonPath, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	return nil
 }
 
 func configFlag(args []string, cmd string) (string, error) {

@@ -78,6 +78,18 @@ func (r *Registry) Acquire(key string, now time.Time) bool {
 	return true
 }
 
+// ReportNeutral releases a half-open probe slot without touching failure
+// counts or cooldown. Used for request-specific outcomes (content-policy
+// flags) that say nothing about the endpoint's health: the probe neither
+// confirms recovery nor deepens the backoff.
+func (r *Registry) ReportNeutral(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.m[key]; ok {
+		s.probing = false
+	}
+}
+
 func (r *Registry) ReportSuccess(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -100,14 +112,13 @@ func (r *Registry) ReportFailure(key string, class core.ErrorClass, retryAfter t
 	switch class {
 	case core.ErrAuth, core.ErrEndpoint:
 		d = backoff(longBase, longCap, s.fails)
-	case core.ErrRateLimit:
+	default:
+		// Retry-After is honored beyond 429: OpenRouter sends it on 503 too.
 		if retryAfter > 0 {
 			d = retryAfter
 		} else {
 			d = backoff(transientBase, transientCap, s.fails)
 		}
-	default:
-		d = backoff(transientBase, transientCap, s.fails)
 	}
 	s.cooldownUntil = now.Add(d)
 	return d

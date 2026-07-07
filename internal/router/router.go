@@ -307,6 +307,15 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			att.Response = &m
 			att.Error = class.String()
 		}
+		if class == core.ErrContent {
+			// Content-policy flag: specific to this request, not this endpoint.
+			// Keep failing over (vendors differ in sensitivity) but leave the
+			// endpoint's health untouched — only release a probe slot if held.
+			rt.Health.ReportNeutral(key)
+			rt.logf("model=%s ep=%s attempt=%d status=%d class=content (no cooldown)",
+				creq.Model, ep.Name(), attempt, resp.StatusCode)
+			return false, uerr
+		}
 		if class == core.ErrClient {
 			// Bad request: every endpoint would fail the same way. Return as-is.
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))

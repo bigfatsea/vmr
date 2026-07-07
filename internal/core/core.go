@@ -37,6 +37,7 @@ const (
 	ErrRateLimit                   // 429: honor Retry-After, switch
 	ErrEndpoint                    // endpoint persistently unusable (quota/402, unknown model/404): long cooldown, switch
 	ErrTransient                   // 5xx/408/timeouts/network: short cooldown, switch
+	ErrContent                     // content policy/moderation flag: request-specific, switch WITHOUT health penalty
 )
 
 func (c ErrorClass) String() string {
@@ -49,6 +50,8 @@ func (c ErrorClass) String() string {
 		return "rate_limit"
 	case ErrEndpoint:
 		return "endpoint"
+	case ErrContent:
+		return "content"
 	default:
 		return "transient"
 	}

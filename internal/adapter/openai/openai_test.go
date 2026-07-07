@@ -56,6 +56,13 @@ func TestClassifyError(t *testing.T) {
 		{413, `{"error":{"message":"payload too large"}}`, core.ErrClient},
 		{422, `{"error":{"message":"model does not exist"}}`, core.ErrEndpoint},
 		{429, `{"error":{"message":"rate limit exceeded, slow down"}}`, core.ErrRateLimit},
+		// Content-policy flags: switch endpoints but never punish health.
+		{403, `{"error":{"message":"Your input was flagged","metadata":{"reasons":["hate"],"flagged_input":"..."}}}`, core.ErrContent}, // OpenRouter moderation
+		{403, `{"error":{"message":"Request blocked by guardrail: prompt-injection"}}`, core.ErrContent},                              // OpenRouter guardrail
+		{400, `{"error":{"message":"Content Exists Risk"}}`, core.ErrContent},                                                          // DeepSeek content filter
+		{400, `{"type":"error","error":{"message":"invalid params, output content violation (1027)"}}`, core.ErrContent},              // MiniMax style
+		{400, `{"error":{"message":"输入包含敏感内容，请修改后重试"}}`, core.ErrContent},
+		{451, `{}`, core.ErrContent},
 		{429, `{"error":{"message":"you have exceeded your quota"}}`, core.ErrEndpoint},
 		{429, `{"error":{"message":"insufficient balance"}}`, core.ErrEndpoint},
 		{500, `{}`, core.ErrTransient},

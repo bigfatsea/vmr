@@ -21,3 +21,7 @@ coverage.html
 .DS_Store
 .idea/
 .vscode/
+
+# Generated reports
+/vmr-report.json
+/vmr-report.md

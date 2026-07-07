@@ -139,13 +139,25 @@ type Adapter interface {
 
 ```go
 ErrClient     请求本身有问题 → 直接返回客户端，不切换
-ErrAuth       401/403 → 长冷却（10min 起），切换
+ErrAuth       401 / 403（非内容类）→ 长冷却（10min 起），切换
 ErrRateLimit  429 → 尊重 Retry-After（秒/HTTP-date），切换
 ErrEndpoint   端点持续不可用（额度耗尽/402、模型不存在/404 或 400+嗅探）→ 长冷却，切换
-ErrTransient  5xx/408/529/超时/网络 → 短冷却（2s 指数退避），切换
+ErrTransient  5xx/408/529/超时/网络 → 短冷却（2s 指数退避；带 Retry-After 则从其值），切换
+ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷却）
 ```
 
-分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic 的 529）。**必须做 body 嗅探**，因为实测各家错误习惯不一：MiniMax 未知模型返回 400（非 404）；DeepSeek Anthropic 口的措辞是 "The supported API model names are …"；OpenRouter 余额不足返回 402；有厂商额度耗尽也发 429。嗅探词表：`model` × {unknown, not found, not_found, does not exist, invalid model, supported}；429 body × {insufficient, quota, balance, credit} → ErrEndpoint。误判的代价只是一次无害切换，漏判的代价是永不 failover——宁可宽。
+`ErrContent` 是"按请求"而非"按端点"的错误：各厂对内容的敏感度不同，换端点常能成功，所以必须继续 failover；但被拦的端点本身完全健康，绝不能因此进冷却（否则一条敏感请求就会把健康端点打下线）。若该端点恰处半开探针中，以 `health.ReportNeutral` 只释放探针、不加深退避。全部候选都被拦时，客户端原样收到最后一次内容错误。
+
+分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic 的 529）。**必须做 body 嗅探**，因为实测/官方文档显示各家习惯不一：
+
+* MiniMax 未知模型返回 400（非 404）；内容违规错误码 1026/1027；
+* DeepSeek Anthropic 口对错模型名的措辞是 "The supported API model names are …"；内容风险走 400 + "risk" 类消息（其官方错误码表 400/401/402/422/429/500/503 中无内容专码）；
+* OpenRouter：402 余额不足；**403 = moderation flag / guardrail 拦截**（body 带 "flagged"、`metadata.reasons`）；429 与 503 都可能带 Retry-After；
+* 有厂商额度耗尽也发 429（body 见 insufficient/quota/balance/credit）。
+
+嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 内容错被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
+
+**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive` 等字段）并可能返回空/替换内容。透传路径不检查 2xx body，此类"软拦截"对 vmr 不可见，原样到达客户端——这属于未来请求预处理插件的领域（§11）。
 
 ---
 
@@ -167,9 +179,10 @@ Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意�
 
 对 LLM API 主动探测每次都是计费请求，故全部被动：
 
-* 失败按类别计冷却：Transient 2s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 优先 `Retry-After`。
-* 冷却中被健康过滤剔除；到期进入半开：**只放行一个真实请求当探针**（避免惊群），成功清零、失败退避加深。
+* 失败按类别计冷却：Transient 2s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 与 Transient 优先 `Retry-After`（429/503 都可能携带）。内容合规（ErrContent）零冷却（§5）。
+* 冷却中被健康过滤剔除；到期进入半开：**只放行一个真实请求当探针**（避免惊群），成功清零、失败退避加深、内容拦截等中性结果只释放探针（`ReportNeutral`）。
 * 客户端主动断连不计入端点失败（与上游健康无关，防状态污染）。
+* **配额窗口 vs 余额耗尽不做区分**：两者都归 ErrEndpoint（10min 起指数退避封顶 1h）。曾考虑对"N 小时窗口配额"设更长冷却（如 5h 后再试），否决——厂商错误信号无法可靠区分两种耗尽，且现行封顶 1h 意味着最坏情况每小时只花一次失败探针请求，充值/窗口刷新后一小时内自动回归；专设长冷却省下的探针成本可忽略，代价却是恢复迟钝。
 * 健康注册表以 `provider/model/key指纹` 为稳定键、独立于配置快照存活——**热重载不清零冷却**（否则每次改配置都会把 429 中的端点放出来重打）。重启即重置，不持久化。
 
 ### 6.3 热加载
@@ -252,6 +265,22 @@ fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 
 
 `internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限即 1MiB）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
 
+### 8.4 统计分析工具 `vmr report`
+
+读取 §8.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §8.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
+
+```
+vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
+```
+
+* **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
+* **JSON 输出**（`meta.format` 版本号随结构变更递增）：
+  * `rows[]` — 粒度 **日期×Virtual Model**：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、bytes in/out、时延 sum/p50/p95/max、吞吐（tok/s、bytes/s）。
+  * `endpoints[]` — 粒度 **日期×上游端点**：尝试/成功/失败、可用度、错误类别分布、时延 p50/p95。
+  * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
+* **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。
+* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度）与 T2（按日趋势、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算）。
+
 ---
 
 ## 9. 配置参考
@@ -282,7 +311,7 @@ models:                       # "对外叫什么、按什么顺序用"
         priority: 1           # 数字小优先；缺省 0；平手按文件顺序
 ```
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在、adapter type 已注册、base_url 合法、endpoint.model 非空、同一 model 的 endpoints 协议一致。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在、adapter type 已注册、base_url 合法、endpoint.model 非空、同一 model 的 endpoints 协议一致。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§8.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
 ---
 
@@ -301,6 +330,8 @@ models:                       # "对外叫什么、按什么顺序用"
 | 健康状态跨热重载保留 | 重载清零 | 清零会把冷却中的端点放出来重打；carry-over 仅十几行 |
 | 并发闸：全局、无等待上限 | 每端点限流 / 排队超时 | 全局闸覆盖"保护本机与总用量"诉求且实现极简；客户端自有超时 |
 | failover 默认穷尽全部候选 | 固定尝试上限（旧默认 3） | 配了兜底端点就该兜到底，固定上限会让后位端点永远轮不到；尾延迟由可选 max_attempts 与各超时约束 |
+| 内容合规错误：切换但零惩罚（ErrContent） | 当普通 4xx 处理 | 该错误按请求不按端点：不切换会中断长程任务，惩罚健康会让一条敏感请求打掉整个端点；靠 403/451 + 中英文词表嗅探识别 |
+| 配额窗口与余额耗尽同罪同罚 | 按窗口设 5h 级长冷却 | 厂商信号无法可靠区分两者；封顶 1h 的探针成本 ≤1 失败请求/小时/端点，恢复及时性优先 |
 | 审计双层结构、成功 body 去重 | 每层完整存两份 | 透传恒等，重复存储只膨胀文件；失败 body 各自保留因为各不相同 |
 | 审计凭证掩码（留末 4 位） | 完整记录 header | 密钥落盘外泄风险 > 取证价值；末 4 位足以区分 Key |
 | 无中心 IR、router 只做循环 | —— | router 包（含并发闸与流转发）约 500 行；若显著变大，说明抽象错了 |
@@ -309,11 +340,25 @@ models:                       # "对外叫什么、按什么顺序用"
 
 ## 11. 路线图
 
+### 11.1 请求预处理插件（敏感词过滤，已规划未实现）
+
+目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截（§5 ErrContent）的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）也是唯一的事前防线。
+
+**本轮明确不预留接口**。理由：插件的词库形态、替换策略、是否需要按 Provider 差异化都未定，先挖的接口大概率与真实插件对不上；预留即负债。待插件设计定型后与其一起实现。
+
+届时的架构改动点（缝已经存在，改动是局部的）：
+
+* **接入位置**：`server.chatHandler` 中 body 解析之后、`router.Serve` 之前——此处已持有完整缓冲的 `CanonicalRequest.Raw`，改写后 failover 重放自然用的是改写后内容。若需按 Provider 差异化处理，则下沉到 `router.tryOne` 的 `BuildRequest` 之前（每次尝试各改一次）。
+* **注册方式**：沿用编译期注册（`filter.Register` + blank import），与 Adapter/Dimension 同构；配置里按 virtual model 或全局启用。
+* **需要一并决策的问题**：审计日志记原文还是改写后（或两层都记）；改写是否影响 `stream` 等路由字段（不应）；词库热加载是否走同一 fsnotify 通道；过滤失败（词库损坏）时 fail-open 还是 fail-close。
+
+### 11.2 其他方向
+
 * **排序维度**：`weight`（加权随机）、`round_robin`、`latency`（滑动窗口实测）、`cost`（按配置单价）。
 * **Endpoint 级限流**：每端点 rpm/并发（内存令牌桶），主动避免 429。
 * **直连语法**：`model: "openrouter:gpt-5"` 绕过 Virtual Model 直达指定 Provider（调试用）。
 * **模型改写**：Endpoint 级参数覆盖（强制 temperature、注入 OpenRouter `provider` 路由参数等）。
-* **审计统计脚本**：读取 §8.2 JSONL 出日/模型/端点维度的请求数、Token、成本报表（独立脚本，不进 vmr 二进制）。
+* **报表增强**：在 `vmr report` 之上做成本核算（按配置单价）、图表/HTML Dashboard（以 report JSON 为数据源二次开发）。
 * **可观测**：`/metrics`（Prometheus 文本格式，手写无依赖）、`vmr test <model>`（对每候选发最小请求）。
 * **更多协议入口**：gemini；embeddings / images 的同构路由。
 * **发布**：goreleaser + Homebrew tap；届时 module 名改为完整仓库路径。
