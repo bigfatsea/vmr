@@ -395,6 +395,107 @@ models:
 	_ = rec
 }
 
+// TestOpenClawScenario_ThinkingProcessStripped covers the case
+// that surfaced on 2026-07-07 23:10: MiniMax M3 with thinking=medium
+// emits a structured "Thinking Process:" section (numbered
+// subsections, "Final Polish" drafts, "Looks good. Pro"
+// self-endorsement) followed by the actual final response on the
+// same line. Without the strip the user sees the chain-of-thought
+// inline in the UI.
+func TestOpenClawScenario_ThinkingProcessStripped(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.WriteHeader(200)
+		flusher, _ := w.(http.Flusher)
+		writeSSE(w, flusher, `{"id":"x","choices":[{"index":0,"delta":{"role":"assistant"}}],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":null,"service_tier":"standard"}`)
+		writeSSE(w, flusher, `{"id":"x","choices":[{"index":0,"delta":{"content":"Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **User Message:** \"hi\""}}],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":null,"service_tier":"standard"}`)
+		writeSSE(w, flusher, `{"id":"x","choices":[{"index":0,"delta":{"content":"\n2.  **Final Polish:**\n    draft 1\n    Looks good. Proactual reply here"}}],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":null,"service_tier":"standard"}`)
+		writeSSE(w, flusher, `{"id":"x","choices":[{"finish_reason":"stop","index":0,"delta":{"role":"assistant"}}],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":null,"service_tier":"standard"}`)
+		writeSSE(w, flusher, `{"id":"x","choices":[],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":{"total_tokens":100,"prompt_tokens":50,"completion_tokens":50},"service_tier":"standard"}`)
+	}))
+	defer up.Close()
+	cfg, _ := config.Parse([]byte(`
+listen: 127.0.0.1:0
+providers:
+  openai:
+    p1: {base_url: ` + up.URL + `, api_key: k1}
+models:
+  openai:
+    agent:
+      endpoints:
+        - {provider: p1, model: MiniMax-M3}
+`))
+	rt := router.New(nil)
+	snap, _ := router.BuildSnapshot(cfg)
+	rt.Install(snap)
+	ts := httptest.NewServer(New(rt, nil).Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions",
+		bytes.NewReader([]byte(`{"model":"agent","stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var dataLines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(dataLines) == 0 {
+		t.Fatal("no data lines")
+	}
+
+	// Concat all non-DONE data: lines
+	var fullContent strings.Builder
+	for _, l := range dataLines {
+		if l == "[DONE]" {
+			continue
+		}
+		var d map[string]any
+		if err := json.Unmarshal([]byte(l), &d); err == nil {
+			if choices, ok := d["choices"].([]any); ok && len(choices) > 0 {
+				if ch, ok := choices[0].(map[string]any); ok {
+					if delta, ok := ch["delta"].(map[string]any); ok {
+						if c, ok := delta["content"].(string); ok {
+							fullContent.WriteString(c)
+						}
+					}
+				}
+			}
+		}
+	}
+	got := fullContent.String()
+
+	// The "Thinking Process:" section must be gone.
+	if strings.Contains(got, "Thinking Process:") {
+		t.Errorf("Thinking Process: header leaked: %q", got)
+	}
+	if strings.Contains(got, "Analyze the Request") {
+		t.Errorf("numbered section leaked: %q", got)
+	}
+	if strings.Contains(got, "Final Polish") {
+		t.Errorf("Final Polish subsection leaked: %q", got)
+	}
+	if strings.Contains(got, "draft 1") {
+		t.Errorf("draft text leaked: %q", got)
+	}
+	// The actual final response must be present.
+	if !strings.Contains(got, "actual reply here") {
+		t.Errorf("final response missing: %q", got)
+	}
+}
+
 // TestResponseNormalizer_FailoverStillWorks is a regression test for
 // the new response wrapper. Before the fix, tryOne used copyFlush
 // directly. Now it wraps the body in respStream before forwarding.

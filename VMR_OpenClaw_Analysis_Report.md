@@ -15,21 +15,28 @@
 | **P0-4** Header 白名单 → 黑名单 | ✅ 已完成 | `internal/server/server.go:69-100`, `internal/adapter/{openai,anthropic}/*.go` | `TestHeaders_*` (6 个) |
 | **P1-2** 剥离 `` 块 | ✅ 已完成 | `internal/router/response.go` | `TestRespStream_ThinkBlock*` (3 个), `TestRespStream_OneByteReads` |
 | **P1-3** 补 `data: [DONE]` 标记 | ✅ 已完成 | `internal/router/response.go` | `TestRespStream_DoneSentinel`, `TestRespStream_NonStreamSingleObject` |
+| **P1-5** 剥离 "Thinking Process:" 结构化思考（follow-up，2026-07-07 23:10 后） | ✅ 已完成 | `internal/router/response.go:stripThinkingProcess` | `TestStripThinkingProcess_*` (6 个), `TestOpenClawScenario_ThinkingProcessStripped` |
 | P2-5 tool_call_id 归一化 | ❌ 不做 | — | （报告建议不做，OpenClaw 自己的行为） |
 
-**新增测试文件（11 个新测试）**：
-- `internal/router/response_test.go` — 9 个单元测试（model 字段、think 块剥离、跨 chunk、1 字节流、嵌套 model、空源、非流式单对象等边界条件）
+**新增测试文件（12 个新测试，覆盖修复 1-5）**：
+- `internal/router/response_test.go` — 15 个单元测试（9 个原有 + 6 个新：thinking 剥离完整模式、多重 endorsement 迭代、无 endorsement、不匹配 thinking、中文 endorsement、leading whitespace）
 - `internal/server/server_headers_test.go` — 6 个 header 转发测试（透传、blocklist、case-insensitive、adapter 注入）
 - `internal/server/server_response_test.go` — 2 个端到端测试（全栈 model/think/[DONE] 验证、非流式无 [DONE] 验证）
-- `internal/server/server_openclaw_scenario_test.go` — 4 个 OpenClaw 场景回归测试（24 轮 tool-use 模拟、非流式、audit log 验证、failover 回归）
+- `internal/server/server_openclaw_scenario_test.go` — 5 个 OpenClaw 场景回归测试（24 轮 tool-use 模拟、非流式、audit log 验证、failover 回归、thinking 剥离）
 
-**测试结果**：`go test -race -count=1 ./...` 全包通过（10 个包，72+ 个测试 0 失败）。
+**测试结果**：`go test -race -count=1 ./...` 全包通过（10 个包，77+ 个测试 0 失败）。
 
 **实现过程中发现并修复的 bug**：
 1. 早期实现用「200 字节 carry + 字节级状态机」做 think 块剥离。实测发现 200 字节 carry 装不下完整 think 块（实际 3000+ 字节），导致 think 块开始部分在 regex 看到 closer 之前就被送出去。
 2. 状态机在 `IN_THINK` 状态时所有字节被跳过，output 为 0，tail 也取自 output 的话 input 字节会丢失。
 3. 修了几次都还有 corner case（flushTail 时 state 重入 IN_THINK 把 think 内容吐出来）。
 4. **最终改成「内存缓冲整个响应 + 单次 regex pass」**，chat completions 最多几百 KB，无压力。Streaming 价值不大（用户反正要等模型完整响应），正确性优先。代码从 ~250 行简化到 ~125 行。
+
+**follow-up 修复（2026-07-07 23:10）**：用户报告 `<think>` 标签剥离在 P0+P1 修复后已正常（响应里 0 个 `<think>` 标签），但模型在 thinking=medium 模式下**仍以纯文本 "Thinking Process:" 格式输出思考**，不放在 `<think>` 标签里。这是个**新发现的、不在原报告分析中的问题**：
+- 表现：模型在响应正文里写结构化思考（"Thinking Process:" + 编号小节 1-5 + "Final Polish"草稿），后面才是真正的用户回复。OpenClaw 的 `Reasoning: off` 是 UI 显示开关，**不影响模型行为**。
+- 根因：MiniMax M3 的 thinking=medium 不使用 `<think>` 标签，而是直接以纯文本结构输出思考。
+- 修复：在 respStream 里加 `stripThinkingProcess` 启发式——以 SSE `\n\n` 分隔切 data: line，丢弃含 thinking 的 line，trim 末行 "Looks good. Pro/Proceed" 标记后的内容作为最终回复。完整 strip 走 data: line 边界（不破坏 SSE framing）。
+- 实现中遇到的 3 个具体 bug：(1) 检查 buffer 开头而不是检查 thinking 段位置，导致不触发；(2) 用了 `^` 行首锚但 marker 在 JSON 字符串内部不靠行首；(3) 找的是第一个含 marker 的 data: line 而不是最后一个，导致只 trim 不 drop。都在测试里覆盖了。
 
 **待 OpenClaw 一侧实测验证（VMR 改不了）**：
 - [ ] OpenClaw 跑同一组任务是否能完成（不卡在"read 不存在的文件"循环）

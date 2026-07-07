@@ -173,6 +173,123 @@ func (r oneByteReader) Read(p []byte) (int, error) {
 	return r.src.Read(p[:1])
 }
 
+func TestStripThinkingProcess_FullPattern(t *testing.T) {
+	// Real-world pattern from the 2026-07-07 audit log. The
+	// buffer is the raw upstream body with SSE framing. The
+	// thinking lives in a separate data: line from the final
+	// response — the strip must drop the thinking line and
+	// trim the marker's line content.
+	roleLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+	thinkingLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Thinking Process:\\n\\n1.  **Analyze the Request:**\\n    *   **User Message:** \\\"hi\\\"\\n2.  **Examine:**\\n    *   ...\\n3.  **Drafting:**\\n    *   ...\\n4.  **Review:**\\n    *   No emojis? Checked.\\n5.  **Final Polish:**\\n    draft 1\\n    Looks good. Pro draft 2\\n    draft 3\\n    Looks good. Proceed final answer here\"}}]}\n\n"
+	finalLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n5. **Final Polish:**\\n    draft 1\\n    Looks good. Proactual reply here\"}}]}\n\n"
+	finishLine := "data: {\"id\":\"x\",\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n"
+
+	in := roleLine + thinkingLine + finalLine + finishLine
+
+	out := stripThinkingProcess([]byte(in))
+	got := string(out)
+
+	// The thinking line must be dropped.
+	if strings.Contains(got, "Thinking Process:") {
+		t.Errorf("Thinking Process: header should be stripped, got %q", got)
+	}
+	if strings.Contains(got, "Analyze the Request") {
+		t.Errorf("numbered thinking section should be stripped, got %q", got)
+	}
+	// The marker ("Looks good. Pro" / "Proceed") must be gone.
+	if strings.Contains(got, "Looks good") {
+		t.Errorf("self-endorsement marker should be stripped, got %q", got)
+	}
+	// The actual final response must survive.
+	if !strings.Contains(got, "actual reply here") {
+		t.Errorf("final response missing: %q", got)
+	}
+	// The role line and finish line must be preserved.
+	if !strings.Contains(got, "\"role\":\"assistant\"") {
+		t.Errorf("role line should be preserved: %q", got)
+	}
+	if !strings.Contains(got, "\"finish_reason\":\"stop\"") {
+		t.Errorf("finish line should be preserved: %q", got)
+	}
+}
+
+func TestStripThinkingProcess_MultipleEndorsements(t *testing.T) {
+	// The model iterates — emits "Looks good. Pro" once in
+	// the thinking line, then "Looks good. Proceed" at the
+	// actual transition in the final response line. We must
+	// take the LAST one in the LAST data: line.
+	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
+	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\\n2. **Final Polish:**\\n    draft 1\\n    Looks good. Pro draft 2\\n    draft 3\"}}\n\n"
+	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed final response here\"}}\n\n"
+
+	in := roleLine + thinkingLine + finalLine
+
+	out := stripThinkingProcess([]byte(in))
+	got := string(out)
+
+	if !strings.Contains(got, "final response here") {
+		t.Errorf("expected final response to be preserved, got %q", got)
+	}
+	if strings.Contains(got, "draft 3") {
+		t.Errorf("earlier draft should be stripped, got %q", got)
+	}
+	if strings.Contains(got, "Looks good") {
+		t.Errorf("self-endorsement marker should be stripped, got %q", got)
+	}
+}
+
+func TestStripThinkingProcess_NoEndorsement(t *testing.T) {
+	// Content mentions "Thinking Process" but lacks the
+	// "Looks good. Pro" self-endorsement marker. Pass through
+	// rather than drop the response.
+	in := "data: {\"delta\":{\"content\":\"Thinking Process: 1. step one 2. step two. Final response here.\"}}\n\n"
+	out := stripThinkingProcess([]byte(in))
+	if string(out) != in {
+		t.Errorf("no-endorsement case: should pass through, got %q", string(out))
+	}
+}
+
+func TestStripThinkingProcess_NotThinkingProcess(t *testing.T) {
+	// Content has no "Looks good. Pro" self-endorsement marker —
+	// pass through.
+	in := "data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"Hello world\"}}]}\n\n"
+	out := stripThinkingProcess([]byte(in))
+	if string(out) != in {
+		t.Errorf("no-marker case: should pass through unchanged, got %q", string(out))
+	}
+}
+
+func TestStripThinkingProcess_ChineseEndorsement(t *testing.T) {
+	// Future-proofing: the model might use Chinese self-endorsement
+	// markers. For now we only support the English ones, so this
+	// should pass through.
+	in := "Thinking Process:\n\n1. 思考\n\n好。\n\n收到。"
+	out := stripThinkingProcess([]byte(in))
+	// No "Looks good. Pro" — pass through.
+	if string(out) != in {
+		t.Errorf("Chinese endorsement (unsupported): should pass through, got %q", string(out))
+	}
+}
+
+func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
+	// The self-endorsement line is indented (Final Polish
+	// drafts are indented). The regex must eat the leading
+	// whitespace.
+	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
+	finalLine := "data: {\"delta\":{\"content\":\"...\\n    Looks good. Profinal answer here\\n\"}}\n\n"
+
+	in := roleLine + finalLine
+
+	out := stripThinkingProcess([]byte(in))
+	got := string(out)
+	if !strings.Contains(got, "final answer here") {
+		t.Errorf("expected 'final answer here' to be preserved, got %q", got)
+	}
+	if strings.Contains(got, "Looks good") {
+		t.Errorf("self-endorsement marker should be stripped, got %q", got)
+	}
+}
+
 func TestRespStream_EmptySource(t *testing.T) {
 	// Empty source: just the [DONE] sentinel should be emitted.
 	out := readAll(t, newRespStream(strings.NewReader(""), "agent", true))
