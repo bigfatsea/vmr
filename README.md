@@ -1,8 +1,8 @@
-<!-- Ver 2026-07-07 15:10, by Fable 5 -->
+<!-- Ver 2026-07-07 16:30, by Fable 5 -->
 
 # vmr — Virtual Model Router
 
-本地运行、单二进制、配置驱动的 LLM 路由器。客户端只连稳定的 Virtual Model 名（如 `coding` / `claude`），Provider、Key、优先级、故障切换全部由 vmr 隐藏。零数据库、零 Web UI，依赖仅 `yaml.v3` + `fsnotify`。
+本地运行、单二进制、配置驱动的 LLM 路由器。客户端只连稳定的 Virtual Model 名（如 `coding` / `claude`），Provider、Key、优先级、故障切换全部由 vmr 隐藏。零数据库、零 Web UI，依赖仅 `yaml.v3` + `fsnotify` + `golang.org/x/image`（图片降采样用）。
 
 ```
 OpenAI 客户端    ──(/v1/chat/completions)──┐        ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI 兼容口)
@@ -43,6 +43,7 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-xxx          # 可选：保护 vmr（Bearer 或 x-api-key）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
+# image_downscale: 512         # 请求内联图片长边像素上限，缺省不限（关闭）
 
 providers:
   openrouter:
@@ -63,7 +64,7 @@ models:
       - {provider: openrouter_a, model: minimax/minimax-m3, priority: 1}
 ```
 
-全部字段与校验规则见设计文档 §9。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。
+全部字段与校验规则见设计文档 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。
 
 ## 端点与 CLI
 
@@ -83,6 +84,16 @@ models:
 
 上游失败即按优先级顺序逐个尝试下一端点，直到成功或所有可用端点耗尽（`max_attempts` 可选设上限）。失败驱动的被动健康：网络/5xx 短冷却指数退避，401/额度耗尽/模型不存在长冷却，429/503 尊重 `Retry-After`；冷却到期放行单个探针请求验证恢复。两类特殊处理：400 类客户端错误不切换、直接返回；**内容合规拦截**（各厂审核标准不一，如 OpenRouter 的 403 moderation、DeepSeek 的内容风险 400）会继续切换下一端点但**不惩罚**被拦端点——它只是拒绝这一条请求，并没有坏。全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。机制详见设计文档 §5–6。
 
+## 请求图片自动降采样
+
+可选功能，默认关闭。开启后，请求里超过设定长边像素的内联图片附件（截图/照片）会被等比缩小、统一转 JPEG 再转发上游——降低 vision token 消耗，只影响请求，不碰响应，也不 fetch 远程图片 URL：
+
+```yaml
+image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
+```
+
+不带图片的请求只多付出一次字符串扫描的开销；动图与解析失败一律原样透传（fail-open）。机制详见设计文档 §7。
+
 ## 审计日志
 
 默认开启，每个聊天请求记一行 JSONL：调用方与上游两层的完整 request/response（凭证掩码、单 body 上限 1MiB），供事后统计脚本使用。
@@ -94,7 +105,7 @@ ls "$TMPDIR"/vmr-audit-*.jsonl            # 每天一个文件
 jq '.model, .outcome, .dur_ms' vmr-audit-2026-07-07.jsonl   # body 为合法 JSON 时可直接 jq 查询
 ```
 
-记录格式契约见设计文档 §8。
+记录格式契约见设计文档 §9。
 
 ## 统计分析（vmr report）
 
@@ -110,7 +121,7 @@ jq '.model, .outcome, .dur_ms' vmr-audit-2026-07-07.jsonl   # body 为合法 JSO
 * `vmr-report.json` — 细粒度数据表：按 日期×模型 的用量/延迟/吞吐/成功率/fallback（`rows`），按 日期×端点 的可用度与错误分布（`endpoints`）。图表、Dashboard 等二次开发以它为数据源。
 * `vmr-report.md` — 人读版：总览、按模型汇总、端点可用度、按日趋势、错误分布。
 
-字段定义与格式契约见设计文档 §8.4（与审计日志格式联动更新）。
+字段定义与格式契约见设计文档 §9.4（与审计日志格式联动更新）。
 
 ## 开发
 

@@ -1,4 +1,4 @@
-# Ver 2026-07-07 02:15, by Fable 5
+# Ver 2026-07-07 16:30, by Fable 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 
@@ -7,6 +7,7 @@ listen: 127.0.0.1:8800
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_body_mb: 8                 # request body buffer limit
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
+# image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off)
 # timeouts:
 #   connect: 10s
 #   response_header: 120s        # time to first byte from upstream

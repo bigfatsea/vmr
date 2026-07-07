@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:10, by Fable 5
+// Ver 2026-07-07 16:30, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -19,6 +19,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/health"
+	"vmr/internal/imgprep"
 	"vmr/internal/router"
 )
 
@@ -127,6 +128,15 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 				writeError(w, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
 			}
 			return
+		}
+
+		// Request-only image downscaling: shrinks oversized inline
+		// attachments before routing so vision-token cost doesn't scale
+		// with screenshot resolution. Response bodies are never touched.
+		// Disabled (n<=0) is a single int comparison; enabled-but-no-image
+		// requests cost one cheap substring scan (imgprep.HasImageMarker).
+		if n := snap.Cfg.ImageDownscaleMaxPx; n > 0 {
+			body = imgprep.Downscale(body, protocol, n)
 		}
 
 		var probe struct {

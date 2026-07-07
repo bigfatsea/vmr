@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-07 15:00, by Fable 5 -->
+<!-- Ver 2026-07-07 16:30, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -24,7 +24,7 @@
 | **Adapter** | 协议插件：构造上游请求、转换响应、归类错误；声明自己的协议 |
 | **Strategy** | 候选排序器：健康过滤后按维度序列做稳定多键排序 |
 
-Health 与并发闸不是独立概念，而是运行时状态（§6、§7）。
+Health 与并发闸不是独立概念，而是运行时状态（§6、§8）。
 
 ---
 
@@ -102,9 +102,11 @@ internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排�
 internal/router            快照构建 + failover 循环 + 流转发 + 并发闸（核心）
 internal/server            HTTP 入口、鉴权、审计录制、四个端点
 internal/audit             审计日志（JSONL 落盘）
+internal/report            审计日志聚合统计（vmr report）
+internal/imgprep           请求内联图片降采样（§7）
 ```
 
-约 1950 行（不含测试约 1300 行）。依赖仅 `gopkg.in/yaml.v3` 与 `fsnotify`，其余标准库——不用 Web/CLI 框架、不用任何 Provider SDK（透传路由只需"改 URL、注 Key、改 model 字段"，SDK 只带来二进制膨胀与版本纠缠）。
+依赖 `gopkg.in/yaml.v3`、`fsnotify`、`golang.org/x/image`（图片降采样的 WEBP/BMP 解码与缩放，Go 官方扩展库），其余标准库——不用 Web/CLI 框架、不用任何 Provider SDK（透传路由只需"改 URL、注 Key、改 model 字段"，SDK 只带来二进制膨胀与版本纠缠）。
 
 ### 4.3 端点一览
 
@@ -157,7 +159,7 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 
 嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 内容错被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
 
-**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive` 等字段）并可能返回空/替换内容。透传路径不检查 2xx body，此类"软拦截"对 vmr 不可见，原样到达客户端——这属于未来请求预处理插件的领域（§11）。
+**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive` 等字段）并可能返回空/替换内容。透传路径不检查 2xx body，此类"软拦截"对 vmr 不可见，原样到达客户端——这属于未来请求预处理插件的领域（§12）。
 
 ---
 
@@ -191,7 +193,33 @@ fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 
 
 ---
 
-## 7. 并发闸
+## 7. 请求图片自动降采样
+
+Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需要原始分辨率——图越大，vision token 消耗越高。vmr 提供一个可选开关，在入口把超限的内联图片等比缩小、统一转码，上游收到的是缩小后的版本。
+
+**范围**：只处理请求里的内联 base64 图片（OpenAI `image_url` 的 data URI／Anthropic `source.type=base64`）；不处理 response，也不 fetch 远程图片 URL——两者都超出"改写本地已有字节"的边界。与 §12.1 规划的敏感词过滤插件共享同一接入点（body 解析后、`router.Serve` 之前），但不是同一套机制：图片降采样是具体、确定的处理，不经过预留的插件注册表。
+
+**开关**：配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。
+
+**检测分层，越靠前越便宜**：
+
+1. **无图请求**（预期占比 95%+）：对已缓冲的请求体做一次 `bytes.Contains` 子串扫描（找 `` "image `` 标记），不解析 JSON——这是唯一的常态开销。
+2. **命中标记的请求**：反序列化为 `map[string]json.RawMessage`（与 §5 `adapter.RewriteModel` 同一模式），只识别 `messages[].content[]` 里 `image_url`/`image` 类型块，未知字段字节不动。
+3. **单张图片是否需要处理**：`image.DecodeConfig` 读文件头拿到真实像素宽高（不解码像素数据），长边 ≤ 上限则跳过。用真实尺寸判断而非按字节数估算——同样便宜（只读文件头），但没有"压缩率不同导致误判"的问题：512px 的照片可能是 30KB 或 300KB，字节数阈值在两者间必然选错一个。
+
+**处理**：解码 → 等比缩放（`golang.org/x/image/draw`，`BiLinear`）→ 透明通道摊平到白底 → 统一编码为 JPEG（quality 85）。格式支持 JPEG/PNG/GIF（标准库）+ WEBP/BMP（`golang.org/x/image`，Go 官方扩展库而非第三方野包），格式以文件头嗅探为准，不信任声明的 mime type。
+
+**安全边界**：
+
+* 动图（GIF 多帧）直接跳过——缩放会把动画塌缩成单帧，语义改变；`golang.org/x/image/webp` 本身不支持动图解析，遇到动图 WEBP 通常直接解码失败，副作用上也是跳过。
+* 解压炸弹防护：`DecodeConfig` 拿到的声明像素总数超过 64MP 的图片拒绝解码，原样透传（一张几十字节的畸形 PNG 足以声明出几亿像素）。
+* **fail-open**：解析/解码/编码路径上任何失败（含 panic，`recover` 兜底）都回退到原始字节——这一步的 bug 绝不能让本可成功的请求失败。
+
+**对现有机制的影响**：改动点在 `server.chatHandler` 里，`rec.Client.Request.Body` 记录**之后**、`probe` 解析**之前**——审计的"客户端层"仍记录原始请求；"上游尝试层"（`attempts[].request`）自然记录降采样后的实际出站内容，语义与既有的 model 字段改写一致，无需改动审计结构。并发闸（§8）天然限制了图片处理的并发数，不引入新的无界并发。
+
+---
+
+## 8. 并发闸
 
 可选全局上限 `max_concurrency`（缺省 0 = 不限）：
 
@@ -205,11 +233,11 @@ fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 
 
 ---
 
-## 8. 审计日志
+## 9. 审计日志
 
 **目标**：原始、完整、可追溯地记录每一个聊天请求的两层往返（调用方↔vmr、vmr↔上游），只记录不分析；请求数、Token 用量等统计由**外部脚本**事后读取 JSONL 完成——本节格式即该脚本的输入契约。
 
-### 8.1 运行行为
+### 9.1 运行行为
 
 | 项 | 行为 |
 | --- | --- |
@@ -220,7 +248,7 @@ fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 
 | 失败 | 写盘失败仅打 stderr 日志，绝不影响请求服务 |
 | 覆盖 | 两个聊天入口的所有请求，含被 vmr 拒绝的（401/413/坏 JSON/未知模型/协议不符）；`/v1/models`、`/admin/status` 不记 |
 
-### 8.2 记录结构（JSONL，每行一个 Record）
+### 9.2 记录结构（JSONL，每行一个 Record）
 
 ```jsonc
 {
@@ -261,13 +289,13 @@ fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 
 2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 超过 1MiB 截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。
 
-### 8.3 实现要点
+### 9.3 实现要点
 
 `internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限即 1MiB）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
 
-### 8.4 统计分析工具 `vmr report`
+### 9.4 统计分析工具 `vmr report`
 
-读取 §8.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §8.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
+读取 §9.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §9.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
 
 ```
 vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
@@ -283,7 +311,7 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
 
 ---
 
-## 9. 配置参考
+## 10. 配置参考
 
 ```yaml
 listen: 127.0.0.1:8800        # 缺省 127.0.0.1:8800
@@ -291,6 +319,7 @@ api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
 max_body_mb: 8                # 请求体缓冲上限（缺省 8，超限 413）
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
+image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭
 timeouts:
   connect: 10s                # 连接上游（缺省 10s）
   response_header: 120s       # 上游首字节（缺省 120s）
@@ -311,11 +340,11 @@ models:                       # "对外叫什么、按什么顺序用"
         priority: 1           # 数字小优先；缺省 0；平手按文件顺序
 ```
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在、adapter type 已注册、base_url 合法、endpoint.model 非空、同一 model 的 endpoints 协议一致。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§8.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在、adapter type 已注册、base_url 合法、endpoint.model 非空、同一 model 的 endpoints 协议一致；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
 ---
 
-## 10. 关键决策与取舍
+## 11. 关键决策与取舍
 
 | 决策 | 备选 | 取舍逻辑 |
 | --- | --- | --- |
@@ -335,16 +364,19 @@ models:                       # "对外叫什么、按什么顺序用"
 | 审计双层结构、成功 body 去重 | 每层完整存两份 | 透传恒等，重复存储只膨胀文件；失败 body 各自保留因为各不相同 |
 | 审计凭证掩码（留末 4 位） | 完整记录 header | 密钥落盘外泄风险 > 取证价值；末 4 位足以区分 Key |
 | 无中心 IR、router 只做循环 | —— | router 包（含并发闸与流转发）约 500 行；若显著变大，说明抽象错了 |
+| 图片降采样跳过判定用真实像素尺寸（`DecodeConfig`） | 按字节数估算换算像素 | 压缩率随内容剧烈波动，字节数与像素尺寸不是稳定映射；读文件头一样便宜且没有换算误差 |
+| 图片降采样直接实现为函数调用 | 复用/预建 §12.1 的通用请求预处理插件框架 | 插件框架的词库形态、按 Provider 差异化等问题还未定型，图片降采样是具体确定的处理，不该为一个未来设计买单 |
+| 动图/超限声明尺寸一律 fail-open 跳过 | 尝试部分处理或报错 | 动图缩放会破坏语义，畸形声明尺寸可能是解压炸弹；跳过的代价只是错过一次可选优化，处理的代价可能是内存暴涨或输出错误 |
 
 ---
 
-## 11. 路线图
+## 12. 路线图
 
-### 11.1 请求预处理插件（敏感词过滤，已规划未实现）
+### 12.1 请求预处理插件（敏感词过滤，已规划未实现）
 
 目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截（§5 ErrContent）的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）也是唯一的事前防线。
 
-**本轮明确不预留接口**。理由：插件的词库形态、替换策略、是否需要按 Provider 差异化都未定，先挖的接口大概率与真实插件对不上；预留即负债。待插件设计定型后与其一起实现。
+**本轮明确不预留接口**。理由：插件的词库形态、替换策略、是否需要按 Provider 差异化都未定，先挖的接口大概率与真实插件对不上；预留即负债。待插件设计定型后与其一起实现。§7 的图片降采样已经证明这个接入点可用，但走的是直接函数调用而非插件注册表——两者不是同一套机制。
 
 届时的架构改动点（缝已经存在，改动是局部的）：
 
@@ -352,7 +384,7 @@ models:                       # "对外叫什么、按什么顺序用"
 * **注册方式**：沿用编译期注册（`filter.Register` + blank import），与 Adapter/Dimension 同构；配置里按 virtual model 或全局启用。
 * **需要一并决策的问题**：审计日志记原文还是改写后（或两层都记）；改写是否影响 `stream` 等路由字段（不应）；词库热加载是否走同一 fsnotify 通道；过滤失败（词库损坏）时 fail-open 还是 fail-close。
 
-### 11.2 其他方向
+### 12.2 其他方向
 
 * **排序维度**：`weight`（加权随机）、`round_robin`、`latency`（滑动窗口实测）、`cost`（按配置单价）。
 * **Endpoint 级限流**：每端点 rpm/并发（内存令牌桶），主动避免 429。

@@ -165,3 +165,18 @@
 - [x] 测试：分类新用例、ReportNeutral、transient Retry-After、集成（403-flagged 切换成功且端点不进冷却）
 - [x] 文档：设计文档 §5/§6.2/§10 决策表；§11 敏感词过滤插件扩展缝规划（本轮不预留接口的理由与未来改动点）；README failover 一句话；配额窗口 vs 余额决策落文档
 - [x] 回归 + commit
+
+---
+
+# M17 — 请求图片自动降采样（2026-07-07）
+
+- [x] 新包 `internal/imgprep`：`bytes.Contains` 快速探测无图请求（零解析开销）；命中后用 `adapter.RewriteModel` 同款 `map[string]json.RawMessage` 模式局部改写 OpenAI `image_url`（data URI）/ Anthropic `source.type=base64` 图片块，未知字段字节不动
+- [x] 判定用 `image.DecodeConfig` 读真实像素尺寸（而非字节数估算换算）；超限才解码 → `golang.org/x/image/draw` `BiLinear` 等比缩放 → 透明摊平白底 → 统一编码 JPEG(quality 85)
+- [x] 安全边界：动图（GIF 多帧）跳过不处理；声明像素数超 64MP 的解压炸弹防护；解析/解码全链路 fail-open（含 panic recover），绝不因这一步的 bug 影响正常请求
+- [x] 格式支持：标准库 JPEG/PNG/GIF + `golang.org/x/image` 的 WEBP/BMP（Go 官方扩展库，非第三方野包）
+- [x] `config`：新增 `image_downscale`（int，长边像素上限；0/缺省=关闭；负数钳制为 0）
+- [x] `server`：接入点在 `chatHandler` 里 `rec.Client.Request.Body` 记录之后、`probe` 解析之前——审计客户端层记原文，上游尝试层自然记降采样后内容，复用既有两层审计语义
+- [x] 单测：imgprep 包 16 用例（各格式、阈值上下边界、动图跳过、损坏数据/畸形 JSON fail-open、解压炸弹守卫、两种协议、remote URL 不 fetch）；config 默认值与负数钳制；server 集成测（真实 httptest 上游验证出站图片确实变小/关闭时原样不动）
+- [x] 回归：`go vet` + `go test -race ./...` 全绿；`vmr check` 验证新字段
+- [x] 文档：设计文档新增 §7（原 §7–§11 順延为 §8–§12，含全部交叉引用与决策表新增三行）；README 新增用法小节并修正 §引用；config.example.yaml 注释
+- [x] 真实 E2E：取本地 8 张真实图片（JPG/PNG/WEBP 混合，含 2 张本就 <512px 的对照组）经 vmr 打 MiniMax-M3 真实接口，对比 `image_downscale` 开/关两组的 `usage.prompt_tokens`——6 张超阈值图降幅 36%–87.5%，2 张对照组请求字节与 token 数不变（确认零副作用跳过路径生效）；全程无 failover、无异常

@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:00, by Fable 5
+// Ver 2026-07-07 16:30, by Fable 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -67,14 +67,15 @@ type Timeouts struct {
 }
 
 type Config struct {
-	Listen         string                 `yaml:"listen"`
-	APIKey         string                 `yaml:"api_key"`
-	MaxAttempts    int                    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
-	MaxBodyMB      int                    `yaml:"max_body_mb"`
-	MaxConcurrency int                    `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
-	Timeouts       Timeouts               `yaml:"timeouts"`
-	Providers      map[string]Provider    `yaml:"providers"`
-	Models         map[string]ModelConfig `yaml:"models"`
+	Listen              string                 `yaml:"listen"`
+	APIKey              string                 `yaml:"api_key"`
+	MaxAttempts         int                    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
+	MaxBodyMB           int                    `yaml:"max_body_mb"`
+	MaxConcurrency      int                    `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
+	ImageDownscaleMaxPx int                    `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images
+	Timeouts            Timeouts               `yaml:"timeouts"`
+	Providers           map[string]Provider    `yaml:"providers"`
+	Models              map[string]ModelConfig `yaml:"models"`
 }
 
 // Load reads, expands, parses, defaults and validates the config file.
@@ -115,6 +116,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxAttempts < 0 {
 		c.MaxAttempts = 0
+	}
+	if c.ImageDownscaleMaxPx < 0 {
+		c.ImageDownscaleMaxPx = 0
 	}
 	if c.MaxBodyMB <= 0 {
 		c.MaxBodyMB = DefaultMaxBodyMB

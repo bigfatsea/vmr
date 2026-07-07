@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:20, by Fable 5
+// Ver 2026-07-07 16:30, by Fable 5
 package config
 
 import (
@@ -36,6 +36,9 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if cfg.MaxAttempts != 0 || cfg.MaxBodyMB != 8 {
 		t.Errorf("defaults: attempts=%d (want 0 = unlimited) body=%d", cfg.MaxAttempts, cfg.MaxBodyMB)
 	}
+	if cfg.ImageDownscaleMaxPx != 0 {
+		t.Errorf("default image_downscale: got %d, want 0 (disabled)", cfg.ImageDownscaleMaxPx)
+	}
 	if cfg.Timeouts.Connect.D() != 10*time.Second {
 		t.Errorf("default connect timeout: %v", cfg.Timeouts.Connect.D())
 	}
@@ -66,6 +69,28 @@ func TestCustomTimeouts(t *testing.T) {
 	}
 	if cfg.Timeouts.StreamIdle.D() != 120*time.Second {
 		t.Errorf("stream_idle default: %v", cfg.Timeouts.StreamIdle.D())
+	}
+}
+
+func TestImageDownscaleConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_downscale: 512", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ImageDownscaleMaxPx != 512 {
+		t.Errorf("image_downscale: got %d, want 512", cfg.ImageDownscaleMaxPx)
+	}
+}
+
+func TestImageDownscaleNegativeClampsToDisabled(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_downscale: -1", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ImageDownscaleMaxPx != 0 {
+		t.Errorf("negative image_downscale must clamp to 0 (disabled), got %d", cfg.ImageDownscaleMaxPx)
 	}
 }
 
