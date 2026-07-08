@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-08 15:30, by Sonnet 5
 package report
 
 import (
@@ -11,23 +11,40 @@ import (
 
 func TestExtractUsage(t *testing.T) {
 	cases := []struct {
-		name    string
-		body    any
-		in, out int64
-		ok      bool
+		name                           string
+		body                           any
+		in, out, cacheRead, cacheWrite int64
+		ok                             bool
 	}{
-		{"openai json", map[string]any{"usage": map[string]any{"prompt_tokens": 10.0, "completion_tokens": 20.0}}, 10, 20, true},
-		{"anthropic json", map[string]any{"usage": map[string]any{"input_tokens": 5.0, "output_tokens": 7.0}}, 5, 7, true},
-		{"no usage", map[string]any{"choices": []any{}}, 0, 0, false},
-		{"anthropic sse", "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":41,\"output_tokens\":1}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":9}}\n\ndata: [DONE]\n", 41, 9, true},
-		{"openai sse with usage chunk", "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":3}}\n\ndata: [DONE]\n", 6, 3, true},
-		{"sse without usage", "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n", 0, 0, false},
+		{"openai json", map[string]any{"usage": map[string]any{"prompt_tokens": 10.0, "completion_tokens": 20.0}}, 10, 20, 0, 0, true},
+		{"anthropic json", map[string]any{"usage": map[string]any{"input_tokens": 5.0, "output_tokens": 7.0}}, 5, 7, 0, 0, true},
+		{"no usage", map[string]any{"choices": []any{}}, 0, 0, 0, 0, false},
+		{"anthropic sse", "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":41,\"output_tokens\":1}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":9}}\n\ndata: [DONE]\n", 41, 9, 0, 0, true},
+		{"openai sse with usage chunk", "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":3}}\n\ndata: [DONE]\n", 6, 3, 0, 0, true},
+		{"sse without usage", "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n", 0, 0, 0, 0, false},
+		// Anthropic: input_tokens excludes cache counters — total In sums all three.
+		{"anthropic cache json", map[string]any{"usage": map[string]any{
+			"input_tokens": 5.0, "output_tokens": 7.0,
+			"cache_read_input_tokens": 100.0, "cache_creation_input_tokens": 20.0,
+		}}, 125, 7, 100, 20, true},
+		{"anthropic cache sse", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":1,\"cache_read_input_tokens\":100,\"cache_creation_input_tokens\":20}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":9}}\n", 125, 9, 100, 20, true},
+		// OpenAI: prompt_tokens_details.cached_tokens is a subset already inside prompt_tokens.
+		{"openai cache json", map[string]any{"usage": map[string]any{
+			"prompt_tokens": 110.0, "completion_tokens": 20.0,
+			"prompt_tokens_details": map[string]any{"cached_tokens": 90.0},
+		}}, 110, 20, 90, 0, true},
+		// DeepSeek: prompt_cache_hit_tokens is likewise a subset of prompt_tokens.
+		{"deepseek cache json", map[string]any{"usage": map[string]any{
+			"prompt_tokens": 110.0, "completion_tokens": 20.0,
+			"prompt_cache_hit_tokens": 80.0, "prompt_cache_miss_tokens": 30.0,
+		}}, 110, 20, 80, 0, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			in, out, ok := ExtractUsage(c.body)
-			if in != c.in || out != c.out || ok != c.ok {
-				t.Errorf("got in=%d out=%d ok=%v, want %d/%d/%v", in, out, ok, c.in, c.out, c.ok)
+			u, ok := ExtractUsage(c.body)
+			if u.In != c.in || u.Out != c.out || u.CacheRead != c.cacheRead || u.CacheWrite != c.cacheWrite || ok != c.ok {
+				t.Errorf("got %+v ok=%v, want in=%d out=%d cacheRead=%d cacheWrite=%d ok=%v",
+					u, ok, c.in, c.out, c.cacheRead, c.cacheWrite, c.ok)
 			}
 		})
 	}
@@ -129,6 +146,7 @@ func TestMarkdownRendering(t *testing.T) {
 	md := Markdown(rep)
 	for _, want := range []string{
 		"# VMR 用量报告",
+		"输入缓存命中", "缓存写入",
 		"## 按模型", "| cheap |", "| claude |",
 		"## 端点可用度", "| p1/m1 | 4 | 2 |", "rate_limit×1", // rolled up across both days
 		"## 按日趋势", "| 2026-07-07 |", "| 2026-07-08 |",
@@ -137,6 +155,36 @@ func TestMarkdownRendering(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q\n---\n%s", want, md)
 		}
+	}
+}
+
+func TestBuild_CacheTokens(t *testing.T) {
+	// Anthropic response with cache_read + cache_creation, one record.
+	lines := `{"ts":"2026-07-08T10:00:00+08:00","dur_ms":100,"model":"claude","protocol":"anthropic","outcome":"ok","client":{"request":{"body":{}},"response":{"status":200,"body":{"usage":{"input_tokens":5,"output_tokens":7,"cache_read_input_tokens":100,"cache_creation_input_tokens":20}}}}}
+`
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Build([]string{path}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rep.Rows))
+	}
+	r := rep.Rows[0]
+	// total in = 5 (fresh) + 100 (cache read) + 20 (cache write) = 125
+	if r.TokensIn != 125 || r.TokensInCached != 100 || r.TokensInCacheWrite != 20 || r.TokensOut != 7 {
+		t.Errorf("cache tokens: %+v", r)
+	}
+
+	md := Markdown(rep)
+	if !strings.Contains(md, "80.0% (100)") { // cache read share of total in: 100/125
+		t.Errorf("markdown missing cache-read share\n---\n%s", md)
+	}
+	if !strings.Contains(md, " 20 |") { // cache-write absolute count column
+		t.Errorf("markdown missing cache-write count\n---\n%s", md)
 	}
 }
 

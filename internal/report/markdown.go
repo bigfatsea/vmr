@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-08 15:30, by Sonnet 5
 package report
 
 import (
@@ -22,19 +22,20 @@ func Markdown(rep *Report) string {
 	w("# VMR 用量报告\n\n")
 	w("时段 %s — %s · 生成于 %s · 解析 %d 条记录（%d 条坏行跳过）\n\n",
 		cut(rep.Meta.From, 10), cut(rep.Meta.To, 10), cut(rep.Meta.GeneratedAt, 10), rep.Meta.Records, rep.Meta.ParseErrors)
-	w("| 请求 | 成功率 | Fallback | Tokens in/out | 字节 in/out | 平均吞吐 |\n|---|---|---|---|---|---|\n")
-	w("| %d | %s | %d 次 | %s / %s | %s / %s | %.1f tok/s |\n\n",
+	w("| 请求 | 成功率 | Fallback | Tokens in/out | 输入缓存命中 | 缓存写入 | 字节 in/out | 平均吞吐 |\n|---|---|---|---|---|---|---|---|\n")
+	w("| %d | %s | %d 次 | %s / %s | %s | %s | %s / %s | %.1f tok/s |\n\n",
 		t.requests, pct(t.ok, t.requests), t.fallbacks,
-		fmtN(t.tokensIn), fmtN(t.tokensOut), fmtN(t.bytesIn), fmtN(t.bytesOut), t.tokPerSec())
+		fmtN(t.tokensIn), fmtN(t.tokensOut), cacheStr(t.tokensInCached, t.tokensIn), cacheAbs(t.tokensInCacheWrite),
+		fmtN(t.bytesIn), fmtN(t.bytesOut), t.tokPerSec())
 
 	// ---- Tier 1: per-model summary (rows rolled up over dates) ----
 	w("## 按模型\n\n")
-	w("| 模型 | 协议 | 请求 | 成功率 | Fallback | Tokens in/out | 字节 out | p50/p95 延迟 | tok/s |\n")
-	w("|---|---|---|---|---|---|---|---|---|\n")
+	w("| 模型 | 协议 | 请求 | 成功率 | Fallback | Tokens in/out | 输入缓存命中 | 缓存写入 | 字节 out | p50/p95 延迟 | tok/s |\n")
+	w("|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, m := range rollupModels(rep.Rows) {
-		w("| %s | %s | %d | %s | %d | %s / %s | %s | %s / %s | %.1f |\n",
+		w("| %s | %s | %d | %s | %d | %s / %s | %s | %s | %s | %s / %s | %.1f |\n",
 			m.Model, m.Protocol, m.requests, pct(m.ok, m.requests), m.fallbacks,
-			fmtN(m.tokensIn), fmtN(m.tokensOut), fmtN(m.bytesOut),
+			fmtN(m.tokensIn), fmtN(m.tokensOut), cacheStr(m.tokensInCached, m.tokensIn), cacheAbs(m.tokensInCacheWrite), fmtN(m.bytesOut),
 			ms(m.p50), ms(m.p95), m.tokPerSec())
 	}
 	w("\n")
@@ -49,10 +50,10 @@ func Markdown(rep *Report) string {
 
 	// ---- Tier 2: daily trend ----
 	if days := rollupDates(rep.Rows); len(days) > 1 {
-		w("## 按日趋势\n\n| 日期 | 请求 | 成功率 | Tokens in/out | 字节 out | p95 延迟 |\n|---|---|---|---|---|---|\n")
+		w("## 按日趋势\n\n| 日期 | 请求 | 成功率 | Tokens in/out | 输入缓存命中 | 字节 out | p95 延迟 |\n|---|---|---|---|---|---|---|\n")
 		for _, d := range days {
-			w("| %s | %d | %s | %s / %s | %s | %s |\n",
-				d.Date, d.requests, pct(d.ok, d.requests), fmtN(d.tokensIn), fmtN(d.tokensOut), fmtN(d.bytesOut), ms(d.p95))
+			w("| %s | %d | %s | %s / %s | %s | %s | %s |\n",
+				d.Date, d.requests, pct(d.ok, d.requests), fmtN(d.tokensIn), fmtN(d.tokensOut), cacheStr(d.tokensInCached, d.tokensIn), fmtN(d.bytesOut), ms(d.p95))
 		}
 		w("\n")
 	}
@@ -79,13 +80,14 @@ func Markdown(rep *Report) string {
 // ---- roll-ups (JSON keeps date×model; markdown re-aggregates) ----
 
 type total struct {
-	requests, ok, fallbacks int
-	tokensIn, tokensOut     int64
-	bytesIn, bytesOut       int64
-	tokDurWeightMS          int64
-	Model, Protocol, Date   string
-	durs                    []int64
-	p50, p95                int64
+	requests, ok, fallbacks            int
+	tokensIn, tokensOut                int64
+	tokensInCached, tokensInCacheWrite int64
+	bytesIn, bytesOut                  int64
+	tokDurWeightMS                     int64
+	Model, Protocol, Date              string
+	durs                               []int64
+	p50, p95                           int64
 }
 
 func (t *total) add(r Row) {
@@ -94,6 +96,8 @@ func (t *total) add(r Row) {
 	t.fallbacks += r.Fallbacks
 	t.tokensIn += r.TokensIn
 	t.tokensOut += r.TokensOut
+	t.tokensInCached += r.TokensInCached
+	t.tokensInCacheWrite += r.TokensInCacheWrite
 	t.bytesIn += r.BytesIn
 	t.bytesOut += r.BytesOut
 	if r.TokOutPerSec > 0 {
@@ -212,6 +216,24 @@ func fmtN(n int64) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
+}
+
+// cacheStr renders a cache-read share as "35.2% (420k)"; "-" when there's no
+// tokens_in to compute a share against.
+func cacheStr(cached, tokensIn int64) string {
+	if tokensIn == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%s (%s)", pct(int(cached), int(tokensIn)), fmtN(cached))
+}
+
+// cacheAbs renders an absolute cache-write token count; "-" when zero
+// (the common case for non-Anthropic-only traffic).
+func cacheAbs(n int64) string {
+	if n == 0 {
+		return "-"
+	}
+	return fmtN(n)
 }
 
 func ms(v int64) string {

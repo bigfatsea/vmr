@@ -1,4 +1,4 @@
-// Ver 2026-07-08 12:40, by Fable 5
+// Ver 2026-07-08 15:30, by Sonnet 5
 
 // Package report turns audit JSONL files (design doc §9.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -20,7 +20,10 @@ import (
 // Format is bumped whenever the report JSON structure changes.
 // 2: rows are grained date × protocol × model (a virtual-model name may
 // exist in both protocol groups; merging them mixed two real models).
-const Format = 2
+// 3: tokens_in now includes Anthropic's cache_read/cache_creation tokens
+// (previously excluded, since Anthropic reports them as separate counters
+// from input_tokens) and gains tokens_in_cached/tokens_in_cache_write.
+const Format = 3
 
 // Report is the top-level JSON output. Grains: Rows = date × protocol ×
 // virtual model (roll up freely to coarser cuts); Endpoints = date × upstream
@@ -56,9 +59,17 @@ type Row struct {
 	Attempts  int `json:"attempts"`  // upstream tries across all requests
 	Fallbacks int `json:"fallbacks"` // requests that needed >1 attempt
 
-	TokensIn    int64 `json:"tokens_in"` // summed over records with usage
+	TokensIn    int64 `json:"tokens_in"` // summed over records with usage; includes cached tokens
 	TokensOut   int64 `json:"tokens_out"`
 	TokensKnown int   `json:"tokens_known"` // #records where usage was extractable
+
+	// TokensIn split by cache: TokensInCached is the cache-hit portion (Anthropic
+	// cache_read_input_tokens / OpenAI prompt_tokens_details.cached_tokens /
+	// DeepSeek prompt_cache_hit_tokens); TokensInCacheWrite is Anthropic-only
+	// (cache_creation_input_tokens, billed at a premium, not a hit). Both are
+	// subsets already counted in TokensIn — fresh tokens = TokensIn - the two.
+	TokensInCached     int64 `json:"tokens_in_cached"`
+	TokensInCacheWrite int64 `json:"tokens_in_cache_write"`
 
 	BytesIn  int64 `json:"bytes_in"`  // client request body bytes (as recorded)
 	BytesOut int64 `json:"bytes_out"` // client response body bytes (as recorded)
@@ -219,9 +230,11 @@ func addRecord(row *Row, rec *audit.Record) {
 	}
 
 	if rec.Client.Response != nil {
-		if in, out, ok := ExtractUsage(rec.Client.Response.Body); ok {
-			row.TokensIn += in
-			row.TokensOut += out
+		if u, ok := ExtractUsage(rec.Client.Response.Body); ok {
+			row.TokensIn += u.In
+			row.TokensOut += u.Out
+			row.TokensInCached += u.CacheRead
+			row.TokensInCacheWrite += u.CacheWrite
 			row.TokensKnown++
 			if rec.DurMS > 0 {
 				row.tokDurMS += rec.DurMS
