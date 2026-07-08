@@ -1,4 +1,4 @@
-// Ver 2026-07-08 20:15, by Sonnet 5 (post-audit 2026-07-08 fixes)
+// Ver 2026-07-08 22:00, by Fable 5
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -7,6 +7,7 @@ package router
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -658,6 +659,65 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	if !strings.Contains(string(rs.out), `"model":"MiniMax-M3"`) {
 		t.Errorf("post-overflow bytes must pass through raw (no model rewrite), got tail=%q",
 			string(rs.out[len(rs.out)-200:]))
+	}
+}
+
+// TestRespStream_ManyPingsThenContent exercises the decide() scan-offset:
+// a long run of non-decisive events (Anthropic-style pings) followed by a
+// decisive content event must settle into passthrough with every withheld
+// ping released in order — the offset must not skip or duplicate events.
+func TestRespStream_ManyPingsThenContent(t *testing.T) {
+	var in strings.Builder
+	for i := 0; i < 500; i++ {
+		in.WriteString(`event: ping` + "\n" + `data: {"type":"ping"}` + "\n\n")
+	}
+	in.WriteString(`data: {"delta":{"content":"hello"}}` + "\n\n")
+	rs := newRespStream(oneByteReader{strings.NewReader(in.String())}, "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if c := strings.Count(out, `{"type":"ping"}`); c != 500 {
+		t.Errorf("expected all 500 withheld pings released exactly once, got %d", c)
+	}
+	if !strings.Contains(out, `"content":"hello"`) {
+		t.Errorf("decisive content event missing: tail=%q", out[len(out)-120:])
+	}
+	if strings.Contains(out, "}data:") || strings.Contains(out, "}event:") {
+		t.Errorf("SSE framing corrupted around the release boundary")
+	}
+}
+
+// dataThenErrReader returns its payload together with a non-EOF error in the
+// first Read — the "TCP delivered final bytes along with the reset" shape.
+type dataThenErrReader struct {
+	data   []byte
+	err    error
+	served bool
+}
+
+func (r *dataThenErrReader) Read(p []byte) (int, error) {
+	if !r.served {
+		r.served = true
+		return copy(p, r.data), r.err
+	}
+	return 0, r.err
+}
+
+// TestRespStream_DeliversBytesBeforeSrcError: bytes made deliverable by the
+// same Read that produced a mid-stream error must reach the client before
+// the error surfaces — a direct connection would have handed them over too.
+func TestRespStream_DeliversBytesBeforeSrcError(t *testing.T) {
+	ev := "data: {\"delta\":{\"content\":\"hi\"}}\n\n"
+	rs := newRespStream(&dataThenErrReader{data: []byte(ev), err: errors.New("conn reset")}, "agent", true, "openai", false)
+
+	buf := make([]byte, 4096)
+	n, err := rs.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("first read must deliver the ingested bytes, got n=%d err=%v", n, err)
+	}
+	if !strings.Contains(string(buf[:n]), `"content":"hi"`) {
+		t.Errorf("delivered bytes wrong: %q", buf[:n])
+	}
+	if _, err := rs.Read(buf); err == nil || err.Error() != "conn reset" {
+		t.Errorf("second read must surface the source error, got %v", err)
 	}
 }
 

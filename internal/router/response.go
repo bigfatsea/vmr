@@ -1,4 +1,4 @@
-// Ver 2026-07-08 20:15, by Sonnet 5
+// Ver 2026-07-08 22:00, by Fable 5
 //
 // Response normalizer. Guiding principle: what the client receives through
 // VMR must match what it would receive calling the provider directly, except
@@ -150,8 +150,10 @@ type respStream struct {
 
 	mode           int
 	pending        []byte // undecided: withheld bytes; passthrough: partial-event tail
+	scanned        int    // undecided only: pending[:scanned] holds events already classified undecided — decide resumes after them instead of rescanning (keeps a ping-heavy stream linear, not quadratic)
 	buf            []byte // buffered-mode accumulation
 	out            []byte // processed bytes ready for the client
+	srcErr         error  // non-EOF src error, surfaced after out drains
 	done           bool   // src hit EOF and out holds the final bytes
 	sawDone        bool   // upstream emitted its own data: [DONE]
 	tailNL         bool   // last emitted bytes ended with the SSE separator
@@ -180,6 +182,9 @@ func (s *respStream) Read(p []byte) (int, error) {
 		s.out = s.out[n:]
 		return n, nil
 	}
+	if s.srcErr != nil {
+		return 0, s.srcErr
+	}
 	if s.done {
 		return 0, io.EOF
 	}
@@ -193,13 +198,20 @@ func (s *respStream) Read(p []byte) (int, error) {
 		s.finish()
 		s.done = true
 	} else if err != nil {
-		return 0, err
+		// Deliver whatever the ingest above made deliverable before
+		// surfacing the error (a direct connection would have handed the
+		// client those TCP-delivered bytes too); the error is returned on
+		// the next call once out is drained.
+		s.srcErr = err
 	}
 
 	if len(s.out) > 0 {
 		n := copy(p, s.out)
 		s.out = s.out[n:]
 		return n, nil
+	}
+	if s.srcErr != nil {
+		return 0, s.srcErr
 	}
 	// Nothing deliverable yet (mid-event, or withheld pending a mode
 	// decision). Zero-length reads let the caller's idle watchdog tick.
@@ -259,6 +271,7 @@ func (s *respStream) ingest(b []byte) {
 			s.noteApplied("overflow_raw_passthrough")
 			s.out = append(s.out, s.pending...)
 			s.pending = nil
+			s.scanned = 0
 		}
 	case modePassthrough:
 		s.pending = append(s.pending, b...)
@@ -271,10 +284,14 @@ func (s *respStream) ingest(b []byte) {
 // and empty-content chunks don't decide; they stay withheld (a few tiny
 // events at most) and are released or buffered with everything else.
 func (s *respStream) decide() {
-	rest := s.pending
+	rest := s.pending[s.scanned:]
 	for {
 		i := bytes.Index(rest, eventSep)
 		if i < 0 {
+			// No more complete events; remember how far classification got
+			// so the next chunk resumes here instead of rescanning every
+			// already-undecided event from the start of pending.
+			s.scanned = len(s.pending) - len(rest)
 			return
 		}
 		ev := rest[:i]
@@ -282,6 +299,7 @@ func (s *respStream) decide() {
 		switch classifyEvent(ev) {
 		case verdictBuffered:
 			s.mode = modeBuffered
+			s.scanned = 0
 			if s.isSSE {
 				s.noteApplied("buffered")
 			}
@@ -291,6 +309,7 @@ func (s *respStream) decide() {
 			return
 		case verdictPassthrough:
 			s.mode = modePassthrough
+			s.scanned = 0
 			s.emitComplete()
 			return
 		}

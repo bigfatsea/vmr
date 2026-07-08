@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 19:30, by Sonnet 5 -->
+<!-- Ver 2026-07-08 21:00, by Fable 5 -->
 <!-- keywords: LLM router, LLM gateway, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -18,7 +18,7 @@ English | [简体中文](README.zh.md)
 - **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
 - **Flight-recorder audit log** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, error classes, and the exact list of normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics, including a cache-hit breakdown of input tokens. Old days auto-compress to `.zst` (20–75× smaller, `vmr report` reads it transparently) and can auto-expire via `audit_retention_days`.
 - **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; one config knob, off by default, fail-open.
-- **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Dependencies: `yaml.v3`, `fsnotify`, `golang.org/x/image`. That's the whole list.
+- **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Dependencies: `yaml.v3`, `fsnotify`, `golang.org/x/image`, `klauspost/compress` (zstd for audit-log compression). That's the whole list.
 
 ```
 OpenAI client    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI face)
@@ -79,7 +79,7 @@ listen: 127.0.0.1:8800
 # timeouts:
 #   connect: 10s               # upstream dial
 #   response_header: 120s      # upstream time-to-first-byte
-#   stream_idle: 120s          # abort a stream silent for this long
+#   stream_idle: 120s          # abort any upstream body (stream, JSON, error) silent for this long
 
 providers:
   openai:
@@ -173,8 +173,8 @@ go test -race ./...
 
 Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the three-method interface + one blank import in `cmd/vmr/main.go`.
 
-Architecture and every design decision (with the war stories behind them): [design doc](VirtualModelRouter_v2_Fable5.md) (Chinese).
+Architecture and every design decision (with the war stories behind them): [design doc](docs/VirtualModelRouter_v2_Fable5.md) (Chinese).
 
 ## License
 
-[MIT](../LICENSE)
+[MIT](LICENSE)

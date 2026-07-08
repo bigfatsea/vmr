@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 19:30, by Sonnet 5 -->
+<!-- Ver 2026-07-08 21:00, by Fable 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -18,7 +18,7 @@
 - **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
 - **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计，含输入 token 的缓存命中细分。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍，`vmr report` 透明读取），也可用 `audit_retention_days` 设置自动过期。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；一个配置项，默认关闭，fail-open。
-- **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。依赖只有 `yaml.v3`、`fsnotify`、`golang.org/x/image`，就这些。
+- **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。依赖只有 `yaml.v3`、`fsnotify`、`golang.org/x/image`、`klauspost/compress`（zstd，审计日志压缩），就这些。
 
 ```
 OpenAI 客户端    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI 面)
@@ -78,7 +78,7 @@ listen: 127.0.0.1:8800
 # timeouts:
 #   connect: 10s               # 连接上游
 #   response_header: 120s      # 上游首字节
-#   stream_idle: 120s          # 流静默看门狗
+#   stream_idle: 120s          # 上游 body 静默看门狗（流式/非流式/错误体都覆盖）
 
 providers:
   openai:
@@ -172,8 +172,8 @@ go test -race ./...
 
 新增 Provider：OpenAI/Anthropic 兼容的厂商只是一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现三方法接口 + `cmd/vmr/main.go` 一行 blank import。
 
-架构与全部设计决策（含每条背后的事故账本）：[设计文档](VirtualModelRouter_v2_Fable5.md)。
+架构与全部设计决策（含每条背后的事故账本）：[设计文档](docs/VirtualModelRouter_v2_Fable5.md)。
 
 ## 开源协议
 
-[MIT](../LICENSE)
+[MIT](LICENSE)

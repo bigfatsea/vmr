@@ -1,4 +1,4 @@
-# Ver 2026-07-08 16:20, by Sonnet 5
+# Ver 2026-07-08 22:00, by Fable 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -16,7 +16,7 @@ listen: 127.0.0.1:8800
 # timeouts:
 #   connect: 10s
 #   response_header: 120s        # time to first byte from upstream
-#   stream_idle: 120s            # abort a stream silent for this long
+#   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
 providers:
   openai:

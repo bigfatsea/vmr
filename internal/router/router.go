@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:40, by Fable 5
+// Ver 2026-07-08 22:00, by Fable 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -326,10 +326,15 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	resp, err := snap.client.Do(req)
 	if err != nil {
 		if r.Context().Err() != nil {
+			// Client went away; nothing to write, don't punish the endpoint.
+			// But DO release a half-open probe slot if this attempt held one:
+			// without this, a client canceling mid-probe leaves probing=true
+			// forever and the endpoint is locked out until process restart.
+			rt.Health.ReportNeutral(key)
 			if att != nil {
 				att.Error = "canceled by client"
 			}
-			return true, nil // client went away; nothing to write, don't punish the endpoint
+			return true, nil
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("model=%s ep=%s attempt=%d net_error=%v cooldown=%s", creq.Model, ep.Name(), attempt, err, cd)
@@ -340,7 +345,14 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	}
 
 	if resp.StatusCode >= 400 {
+		// The error body is read with a deadline: ResponseHeaderTimeout only
+		// covers the headers, and an upstream that stalls after sending error
+		// headers would otherwise park this read — and with it the whole
+		// failover walk — until the client gives up. Reuses stream_idle as
+		// the bound; 64KB within that window is generous.
+		watchdog := time.AfterFunc(snap.Cfg.Timeouts.StreamIdle.D(), func() { resp.Body.Close() })
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		watchdog.Stop()
 		resp.Body.Close()
 		class := ad.ClassifyError(resp.StatusCode, body)
 		uerr := &upstreamError{resp.StatusCode, resp.Header, body}
@@ -361,6 +373,9 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		}
 		if class == core.ErrClient {
 			// Bad request: every endpoint would fail the same way. Return as-is.
+			// Says nothing about the endpoint's health — release a probe slot
+			// if this attempt held one (same lockout hazard as client cancel).
+			rt.Health.ReportNeutral(key)
 			copyRespHeaders(w.Header(), uerr.header)
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 			w.WriteHeader(uerr.status)
@@ -402,12 +417,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	opaque := resp.Header.Get("Content-Encoding") != ""
 	rbody := newRespStream(body, creq.Model, isSSE, ep.AdapterType, opaque)
 
-	var copyErr error
-	if isSSE {
-		copyErr = copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
-	} else {
-		_, copyErr = io.Copy(w, rbody)
-	}
+	// Both SSE and non-SSE bodies go through copyFlush so the stream_idle
+	// watchdog covers every upstream response body: a 200 whose body stalls
+	// mid-transfer must abort instead of parking the request forever (the
+	// old non-SSE io.Copy had no watchdog at all). The per-chunk Flush is a
+	// no-op concern for JSON bodies — Content-Length is stripped anyway.
+	copyErr := copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	status := "ok"
 	if copyErr != nil && r.Context().Err() == nil {
 		status = "truncated" // upstream died mid-stream; the response is already committed

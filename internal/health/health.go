@@ -1,4 +1,4 @@
-// Ver 2026-07-07 01:55, by Fable 5
+// Ver 2026-07-08 21:20, by Fable 5
 
 // Package health implements the passive health state machine:
 // failure-driven cooldown with exponential backoff and half-open recovery
@@ -79,9 +79,11 @@ func (r *Registry) Acquire(key string, now time.Time) bool {
 }
 
 // ReportNeutral releases a half-open probe slot without touching failure
-// counts or cooldown. Used for request-specific outcomes (content-policy
-// flags) that say nothing about the endpoint's health: the probe neither
-// confirms recovery nor deepens the backoff.
+// counts or cooldown. Used for request-specific outcomes — content-policy
+// flags, client cancellation, ErrClient responses — that say nothing about
+// the endpoint's health: the probe neither confirms recovery nor deepens
+// the backoff. Every acquired probe must end in exactly one of Success /
+// Failure / Neutral, or the endpoint stays locked out forever.
 func (r *Registry) ReportNeutral(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
