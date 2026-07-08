@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 07:50, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -158,6 +159,8 @@ func cmdStart(args []string) error {
 	}
 	rt.Install(snap)
 
+	logConfigSummary(logger, cfg, snap)
+
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
 	reload := func(trigger string) {
 		newCfg, err := config.Load(*path)
@@ -171,7 +174,8 @@ func cmdStart(args []string) error {
 			return
 		}
 		rt.Install(newSnap)
-		logger.Printf("reload(%s) ok: %d models, %d providers", trigger, countNested(newCfg.Models), countNested(newCfg.Providers))
+		logger.Printf("reload(%s) ok", trigger)
+		logConfigSummary(logger, newCfg, newSnap)
 	}
 	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })
 	if err != nil {
@@ -198,6 +202,58 @@ func countNested[V any](m map[string]map[string]V) int {
 		n += len(byName)
 	}
 	return n
+}
+
+// logConfigSummary prints what the running instance is actually configured
+// to do: limits, timeouts, and every virtual model's endpoints in their
+// effective try order with key state. Printed at startup and after each
+// successful hot reload, so the console always reflects the live config.
+func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snapshot) {
+	orNoLimit := func(v int, unit string) string {
+		if v <= 0 {
+			return "unlimited"
+		}
+		return fmt.Sprintf("%d%s", v, unit)
+	}
+	auth := "off"
+	if cfg.APIKey != "" {
+		auth = "on"
+	}
+	imgScale := "off"
+	if cfg.ImageDownscaleMaxPx > 0 {
+		imgScale = fmt.Sprintf("%dpx", cfg.ImageDownscaleMaxPx)
+	}
+	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s",
+		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale)
+	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
+		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
+
+	protocols := make([]string, 0, len(cfg.Models))
+	for protocol := range cfg.Models {
+		protocols = append(protocols, protocol)
+	}
+	sort.Strings(protocols)
+	for _, protocol := range protocols {
+		names := make([]string, 0, len(cfg.Models[protocol]))
+		for name := range cfg.Models[protocol] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			route := snap.Models[protocol][name]
+			ordered := append([]*core.Endpoint(nil), route.Endpoints...)
+			strategy.Sort(ordered, route.Dims)
+			parts := make([]string, len(ordered))
+			for i, ep := range ordered {
+				key := "key:set"
+				if ep.APIKey == "" {
+					key = "key:EMPTY"
+				}
+				parts[i] = fmt.Sprintf("%d.%s/%s(%s)", i+1, ep.Provider, ep.Model, key)
+			}
+			logger.Printf("config: model %s [%s] -> %s", name, protocol, strings.Join(parts, " "))
+		}
+	}
 }
 
 func cmdCheck(args []string) error {

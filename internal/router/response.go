@@ -1,50 +1,45 @@
-// Ver 2026-07-07 22:30, by Fable 5 (post-audit 2026-07-07 fixes)
+// Ver 2026-07-08 07:40, by Fable 5
 //
-// Response stream processor: the three transformations VMR applies to
-// the upstream response body before forwarding to the client.
+// Response normalizer. Guiding principle: what the client receives through
+// VMR must match what it would receive calling the provider directly, except
+// for the virtual-model abstraction (the "model" field is rewritten back to
+// the client's virtual name) and two MiniMax-M3-specific repairs that only
+// engage when their exact upstream shape is detected:
 //
-//   1. Rewrite the "model" field in each SSE chunk from the upstream's
-//      actual model name (e.g. "MiniMax-M3") back to the virtual model
-//      name the client sent (e.g. "agent"). Without this, clients that
-//      track the model per-message (OpenAI SDK does — see
-//      ChatCompletionStream.accumulateChatCompletion, line 250) see a
-//      mismatch with their request and either fail cache lookups, route
-//      hooks off the wrong branch, or — in OpenClaw's case — silently
-//      drop tool-call roundtrips.
+//   - inline <think>...</think> reasoning inside content (thinking mode):
+//     if persisted into the assistant history it feeds the model its own
+//     reasoning next turn and locks it into a feedback loop;
+//   - plain-text "Thinking Process:" + numbered sections + "Final Polish"
+//     drafts (thinking=medium): chain-of-thought shown to the user.
 //
-//   2. Strip <think>...</think> blocks from the content. MiniMax M3
-//      emits its reasoning as inline <think>...</think> text inside
-//      delta.content (not in a separate reasoning_content field like
-//      DeepSeek/Anthropic). When this gets persisted into the
-//      assistant message history and sent back on the next request,
-//      the model sees its own previous reasoning and locks into a
-//      feedback loop (the audit log's lines 4-27 show this exact
-//      pattern — repeated read() on non-existent files, prompt_tokens
-//      growing 16K → 43K across 24 turns, line 3 hitting 483K tokens
-//      and finish_reason=length). Stripping the think blocks at the
-//      response boundary breaks the loop without forcing clients to
-//      change.
+// Two transport modes, chosen per response:
 //
-//      The think block can be thousands of bytes long, so a
-//      streaming carry-based approach is unsafe — a 200-byte carry
-//      is smaller than most think blocks, and the state machine
-//      hits corner cases (bytes inside an open think block get
-//      "lost" when the output is empty). Instead, we buffer the
-//      entire response in memory, apply the transformations as a
-//      single regex pass, then stream the result. Chat completions
-//      are bounded (a few hundred KB at most) so the memory cost
-//      is acceptable, and the simpler logic eliminates a class of
-//      bugs. Streaming was nice-to-have, correctness is must-have.
+//	passthrough (default for SSE): events are forwarded to the client as
+//	they arrive — true streaming, byte-identical except the model-field
+//	rewrite. The mode is chosen as soon as the first payload-bearing SSE
+//	event proves the response is NOT one of the MiniMax thinking shapes.
 //
-//   3. Append `data: [DONE]\n\n` on EOF for streaming responses
-//      only. MiniMax closes the SSE stream without sending the
-//      OpenAI-spec-required [DONE] sentinel. The OpenAI JS SDK's
-//      fromSSEResponse checks for [DONE] to set done=true
-//      (streaming.mjs:31); without it, the SDK relies on TCP EOF,
-//      which is fine in the happy path but races with the
-//      stream_idle watchdog and X-Stainless-Timeout under load.
-//      Non-streaming responses are single JSON objects, not SSE
-//      streams, so [DONE] is suppressed there.
+//	buffered: the whole body is accumulated and normalized in one regex
+//	pass at EOF. Used for (a) non-SSE responses (single JSON object — the
+//	client waits for the full body either way), (b) SSE responses whose
+//	first payload event starts with <think> or "Thinking Process:" (the
+//	client would see nothing during the thinking phase anyway, so buffering
+//	costs no perceived latency), and (c) SSE responses that hit EOF before
+//	any payload event (tiny or malformed streams).
+//
+// A response with a Content-Encoding header (upstream compressed it in a
+// coding Go's Transport didn't transparently decode) is opaque: forwarded
+// raw, no transforms — running regexes over compressed bytes can only
+// corrupt them.
+//
+// The [DONE] sentinel is appended only for openai-protocol SSE responses
+// where the upstream didn't send one (MiniMax closes the TCP stream
+// without it; the OpenAI SDK's terminator logic wants it). Anthropic SSE
+// has no [DONE] concept — never appended there. An upstream that already
+// sent [DONE] never gets a second one.
+//
+// Every transform actually applied is recorded (applied list) so the audit
+// log can explain any byte difference between upstream and client.
 package router
 
 import (
@@ -53,172 +48,399 @@ import (
 	"regexp"
 )
 
-// modelFieldPattern matches the SSE chunk's top-level "model" field
-// value. The capture groups preserve the `"model":"` opener and the
-// closing `"` so the value between can be replaced without disturbing
-// the surrounding JSON. `[^"]*` is greedy by Go regex semantics, but
-// the surrounding `"` anchors force it to stop at the next quote.
+// Transport modes. A stream starts undecided (SSE) or buffered (non-SSE)
+// and settles once; the only later transition is buffered→passthrough when
+// an inline <think> block closes and streaming can safely resume.
+const (
+	modeUndecided = iota
+	modeBuffered
+	modePassthrough
+)
+
+// bufferedCap bounds the buffered mode's memory: a runaway upstream that
+// keeps sending forever would otherwise grow the buffer without limit
+// (the stream-idle watchdog only catches silence, not endless data).
+// Past the cap the accumulated bytes are flushed raw and the response
+// degrades to opaque passthrough — direct-connection behavior.
+const bufferedCap = 32 << 20
+
+// modelFieldPattern matches the top-level "model" field value. The capture
+// group preserves the `"model":"` opener; `[^"]*` stops at the closing
+// quote. JSON-escaped quotes inside string values (\") never match the
+// bare `"` the pattern requires, so content that merely *mentions* a
+// model field is not rewritten.
 var modelFieldPattern = regexp.MustCompile(`("model":\s*")[^"]*"`)
 
-// thinkPattern matches a complete <think>...</think> block, non-greedy
-// so the first closing </think> ends the block. (?s) makes `.` match
-// newlines so the regex works across SSE message boundaries (each
-// data: line is one JSON message, but the regex sees the whole
-// buffered response as a single byte stream).
-var thinkPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
+// thinkPattern matches a complete <think>...</think> block plus the
+// newline padding MiniMax appends after the closer. Content inside SSE
+// data lines is JSON-escaped, so the padding is the two-character
+// sequence `\n` (backslash-n, matched by `\\n`); real newlines (`\n`)
+// are also accepted for non-escaped contexts. Without eating the
+// padding, the assistant message starts with two blank lines every turn.
+var thinkPattern = regexp.MustCompile(`(?s)<think>.*?</think>(?:\\n|\n)*`)
 
-// thinkTrailingNewline trims the literal "\n\n" that MiniMax appends
-// after every </think> close. Without this, the assistant content
-// starts with two stray newlines on every turn.
-var thinkTrailingNewline = regexp.MustCompile(`</think>\n\n`)
+// thinkingProcessEndorsement matches the self-endorsement marker the
+// model uses to signal "end of thinking, start of final response".
+var thinkingProcessEndorsement = regexp.MustCompile(`Looks good\.[ \t]+Pro(?:ceed)?`)
 
-// thinkingProcessEndorsement matches the self-endorsement markers
-// the model uses to signal "end of thinking, start of final
-// response". The model emits these at the end of a "Final Polish"
-// subsection, immediately followed by the actual response text
-// on the same line.
-var thinkingProcessEndorsement = regexp.MustCompile(`Looks good\.[ \t]+Pro(?:ceed|ceed)?`)
+// thinkingProcessFullMatch captures the endorsement and the rest of its
+// line; the final response starts on the same line right after the
+// marker.
+var thinkingProcessFullMatch = regexp.MustCompile(`[ \t]*Looks good\.[ \t]+Pro(?:ceed)?[^\n]*`)
 
-// thinkingProcessFullMatch captures the entire self-endorsement
-// line so the final response (which starts on the same line right
-// after the marker) is preserved. The regex does NOT anchor at
-// `^` (line start) because the buffer is the raw upstream body
-// including SSE framing — the "Looks good. Pro" marker lives
-// INSIDE the content of one of the data: lines (i.e., after
-// several hundred bytes of JSON escaping), never at a line
-// start. Optional leading whitespace is allowed to handle the
-// model's indentation of "Final Polish" draft content.
-var thinkingProcessFullMatch = regexp.MustCompile(`[ \t]*Looks good\.[ \t]+Pro(?:ceed|ceed)?[^\n]*`)
+var (
+	contentFieldMarker    = []byte(`"content":"`)
+	thinkingProcessPrefix = []byte("Thinking Process:")
+	thinkOpenMarker       = []byte("<think>")
+	thinkCloseMarker      = []byte("</think>")
+	doneSentinel          = []byte("data: [DONE]")
+	eventSep              = []byte("\n\n")
+)
 
-// respStream is an io.Reader wrapper that buffers the upstream
-// response in memory, applies the three transformations as a
-// single regex pass, and streams the result to the client. The
-// buffer size is bounded by the upstream's own response size — a
-// chat completion is at most a few hundred KB.
+// passthroughStringMarkers / passthroughTokenMarkers are event contents
+// that prove the response carries well-behaved payload: reasoning in a
+// dedicated field, anthropic text/thinking deltas, or tool-call
+// arguments. Any of these settles the stream into passthrough mode.
+var passthroughStringMarkers = [][]byte{
+	[]byte(`"text":"`),
+	[]byte(`"reasoning_content":"`),
+	[]byte(`"thinking":"`),
+}
+
+var passthroughTokenMarkers = [][]byte{
+	[]byte(`"tool_calls"`),
+	[]byte(`"partial_json"`),
+}
+
 type respStream struct {
 	src         io.Reader
 	clientModel string
 	isSSE       bool
+	protocol    string // ingress protocol: decides [DONE] policy
+	opaque      bool   // Content-Encoding present: no transforms at all
 
-	buf  []byte // accumulated raw bytes from src
-	done bool   // src has returned io.EOF and the buffer is finalized
-	out  []byte // pending processed bytes to deliver to the client
+	mode           int
+	pending        []byte // undecided: withheld bytes; passthrough: partial-event tail
+	buf            []byte // buffered-mode accumulation
+	out            []byte // processed bytes ready for the client
+	done           bool   // src hit EOF and out holds the final bytes
+	sawDone        bool   // upstream emitted its own data: [DONE]
+	tailNL         bool   // last emitted bytes ended with the SSE separator
+	thinkTriggered bool   // buffering was caused by an inline <think> block
+	applied        []string
 }
 
-func newRespStream(src io.Reader, clientModel string, isSSE bool) *respStream {
-	return &respStream{src: src, clientModel: clientModel, isSSE: isSSE}
+func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol string, opaque bool) *respStream {
+	rs := &respStream{src: src, clientModel: clientModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true}
+	switch {
+	case opaque:
+		rs.applied = append(rs.applied, "opaque")
+	case !isSSE:
+		rs.mode = modeBuffered
+	}
+	return rs
 }
 
-// Read implements io.Reader. It drains any pending processed
-// bytes, then pulls more from src. On the first io.EOF from src,
-// it finalizes the buffer (runs both regex passes), appends
-// "data: [DONE]\n\n" for streaming, and signals EOF on the
-// next call after draining.
-func (s *respStream) Read(out []byte) (int, error) {
-	// 1. Drain any pending processed bytes.
+// Applied reports which transforms ran, for the audit trail. Valid after
+// the stream has been fully copied.
+func (s *respStream) Applied() []string { return s.applied }
+
+func (s *respStream) Read(p []byte) (int, error) {
 	if len(s.out) > 0 {
-		n := copy(out, s.out)
+		n := copy(p, s.out)
 		s.out = s.out[n:]
 		return n, nil
 	}
-
-	// 2. If we're done, return EOF.
 	if s.done {
 		return 0, io.EOF
 	}
 
-	// 3. Pull more from src.
-	var scratch [4096]byte
+	var scratch [32 << 10]byte
 	n, err := s.src.Read(scratch[:])
 	if n > 0 {
-		s.buf = append(s.buf, scratch[:n]...)
+		s.ingest(scratch[:n])
 	}
 	if err == io.EOF {
+		s.finish()
 		s.done = true
-		// Finalize: apply transformations to the whole buffer.
-		// Model field rewrite first (it's a literal replace, cheap).
-		s.buf = modelFieldPattern.ReplaceAll(s.buf, []byte(`${1}`+s.clientModel+`"`))
-		// Think-strip second (regex scan over the full buffer).
-		s.buf = thinkPattern.ReplaceAll(s.buf, nil)
-		// Trim the trailing "\n\n" MiniMax appends after every
-		// </think> so the assistant content doesn't start with
-		// two stray newlines.
-		if bytes.Contains(s.buf, []byte("</think>\n\n")) {
-			s.buf = thinkTrailingNewline.ReplaceAll(s.buf, []byte("</think>"))
-		}
-		// Thinking Process: heuristic — MiniMax M3 with
-		// thinking=medium emits a structured plain-text thinking
-		// section before the actual final response. The
-		// self-endorsement marker "Looks good. Pro" / "Proceed"
-		// is the boundary between the thinking and the final
-		// response. Without this strip the user sees the
-		// model's chain-of-thought inline.
-		s.buf = stripThinkingProcess(s.buf)
-		// Append [DONE] for streaming responses.
-		if s.isSSE {
-			s.buf = append(s.buf, []byte("data: [DONE]\n\n")...)
-		}
-		s.out = s.buf
-		s.buf = nil
 	} else if err != nil {
 		return 0, err
 	}
 
-	// 4. Deliver pending or signal EOF.
 	if len(s.out) > 0 {
-		n := copy(out, s.out)
+		n := copy(p, s.out)
 		s.out = s.out[n:]
 		return n, nil
 	}
+	// Nothing deliverable yet (mid-event, or withheld pending a mode
+	// decision). Zero-length reads let the caller's idle watchdog tick.
 	return 0, nil
 }
 
+func (s *respStream) ingest(b []byte) {
+	if s.opaque {
+		s.out = append(s.out, b...)
+		return
+	}
+	switch s.mode {
+	case modeBuffered:
+		s.buf = append(s.buf, b...)
+		// <think>-triggered buffering can resume streaming: once the
+		// closing tag is inside complete events, strip the block and
+		// stream the rest live — the client waited only through the
+		// thinking phase, during which there was nothing to show anyway.
+		// (Thinking Process: buffering can't resume — its end marker is
+		// only recognizable at the very end of the response.)
+		if s.isSSE && s.thinkTriggered {
+			if i := bytes.LastIndex(s.buf, eventSep); i >= 0 {
+				block := s.buf[:i+len(eventSep)]
+				if bytes.Contains(block, thinkCloseMarker) {
+					tail := append([]byte(nil), s.buf[i+len(eventSep):]...)
+					s.buf = nil
+					if thinkPattern.Match(block) {
+						block = thinkPattern.ReplaceAll(block, nil)
+						s.noteApplied("think_strip")
+					}
+					s.mode = modePassthrough
+					s.noteApplied("resumed_stream")
+					s.emitBlock(block)
+					s.pending = tail
+					return
+				}
+			}
+		}
+		if len(s.buf) > bufferedCap {
+			// Runaway stream: give up on normalization, flush raw and
+			// degrade to opaque passthrough (= direct behavior).
+			s.opaque = true
+			s.noteApplied("overflow_raw_passthrough")
+			s.out = append(s.out, s.buf...)
+			s.buf = nil
+		}
+	case modeUndecided:
+		s.pending = append(s.pending, b...)
+		s.decide()
+	case modePassthrough:
+		s.pending = append(s.pending, b...)
+		s.emitComplete()
+	}
+}
+
+// decide scans the complete events withheld so far and settles the mode
+// on the first payload-bearing one. Role markers, pings, message_start
+// and empty-content chunks don't decide; they stay withheld (a few tiny
+// events at most) and are released or buffered with everything else.
+func (s *respStream) decide() {
+	rest := s.pending
+	for {
+		i := bytes.Index(rest, eventSep)
+		if i < 0 {
+			return
+		}
+		ev := rest[:i]
+		rest = rest[i+len(eventSep):]
+		switch classifyEvent(ev) {
+		case verdictBuffered:
+			s.mode = modeBuffered
+			if s.isSSE {
+				s.noteApplied("buffered")
+			}
+			s.buf = s.pending
+			s.pending = nil
+			s.thinkTriggered = bytes.Contains(s.buf, thinkOpenMarker)
+			return
+		case verdictPassthrough:
+			s.mode = modePassthrough
+			s.emitComplete()
+			return
+		}
+	}
+}
+
+// emitComplete releases every complete event in pending, keeping only the
+// partial tail. The block boundary is always an event separator, so the
+// model-field rewrite never straddles a JSON string.
+func (s *respStream) emitComplete() {
+	i := bytes.LastIndex(s.pending, eventSep)
+	if i < 0 {
+		return
+	}
+	block := s.pending[:i+len(eventSep)]
+	tail := append([]byte(nil), s.pending[i+len(eventSep):]...)
+	s.emitBlock(block)
+	s.pending = tail
+}
+
+func (s *respStream) emitBlock(block []byte) {
+	if len(block) == 0 {
+		return
+	}
+	if !s.sawDone && bytes.Contains(block, doneSentinel) {
+		s.sawDone = true
+	}
+	if modelFieldPattern.Match(block) {
+		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
+		s.noteApplied("model_rewrite")
+	}
+	s.tailNL = bytes.HasSuffix(block, eventSep)
+	s.out = append(s.out, block...)
+}
+
+func (s *respStream) finish() {
+	if s.opaque {
+		return
+	}
+	switch s.mode {
+	case modeUndecided:
+		// EOF before any payload event: tiny stream, non-\n\n framing,
+		// or not SSE-shaped at all. Whole-body pass, same as buffered.
+		s.buf = s.pending
+		s.pending = nil
+		s.finalizeBuffered()
+	case modeBuffered:
+		s.finalizeBuffered()
+	case modePassthrough:
+		s.emitBlock(s.pending) // partial tail: stream cut mid-event
+		s.pending = nil
+		s.appendDone()
+	}
+}
+
+func (s *respStream) finalizeBuffered() {
+	b := s.buf
+	s.buf = nil
+	if modelFieldPattern.Match(b) {
+		b = modelFieldPattern.ReplaceAll(b, []byte(`${1}`+s.clientModel+`"`))
+		s.noteApplied("model_rewrite")
+	}
+	if thinkPattern.Match(b) {
+		b = thinkPattern.ReplaceAll(b, nil)
+		s.noteApplied("think_strip")
+	}
+	if stripped := stripThinkingProcess(b); !bytes.Equal(stripped, b) {
+		b = stripped
+		s.noteApplied("thinking_process_strip")
+	}
+	if bytes.Contains(b, doneSentinel) {
+		s.sawDone = true
+	}
+	s.tailNL = len(b) == 0 || bytes.HasSuffix(b, eventSep)
+	s.out = append(s.out, b...)
+	s.appendDone()
+}
+
+// appendDone adds the [DONE] sentinel when — and only when — the client
+// speaks the OpenAI protocol, the response is SSE, and the upstream
+// didn't send its own. Anthropic streams have no [DONE] concept.
+func (s *respStream) appendDone() {
+	if !s.isSSE || s.protocol != "openai" || s.sawDone {
+		return
+	}
+	if !s.tailNL && len(s.out) > 0 {
+		s.out = append(s.out, eventSep...)
+	}
+	s.out = append(s.out, doneSentinel...)
+	s.out = append(s.out, eventSep...)
+	s.noteApplied("done_appended")
+}
+
+func (s *respStream) noteApplied(step string) {
+	for _, a := range s.applied {
+		if a == step {
+			return
+		}
+	}
+	s.applied = append(s.applied, step)
+}
+
+type verdict int
+
+const (
+	verdictUndecided verdict = iota
+	verdictBuffered
+	verdictPassthrough
+)
+
+// classifyEvent inspects one complete SSE event and reports whether it
+// proves the response needs buffering (MiniMax thinking shapes), proves
+// it can stream through untouched, or proves nothing yet.
+func classifyEvent(ev []byte) verdict {
+	if bytes.Contains(ev, thinkOpenMarker) {
+		return verdictBuffered
+	}
+	if v, ok := afterMarker(ev, contentFieldMarker); ok {
+		v = trimEscapedWS(v)
+		if len(v) > 0 && v[0] != '"' { // non-empty content value
+			if bytes.HasPrefix(v, thinkingProcessPrefix) {
+				return verdictBuffered
+			}
+			return verdictPassthrough
+		}
+	}
+	for _, m := range passthroughStringMarkers {
+		if v, ok := afterMarker(ev, m); ok {
+			if v = trimEscapedWS(v); len(v) > 0 && v[0] != '"' {
+				return verdictPassthrough
+			}
+		}
+	}
+	for _, m := range passthroughTokenMarkers {
+		if bytes.Contains(ev, m) {
+			return verdictPassthrough
+		}
+	}
+	return verdictUndecided
+}
+
+// afterMarker returns the bytes following the first occurrence of marker.
+func afterMarker(ev, marker []byte) ([]byte, bool) {
+	i := bytes.Index(ev, marker)
+	if i < 0 {
+		return nil, false
+	}
+	return ev[i+len(marker):], true
+}
+
+// trimEscapedWS strips leading spaces and JSON-escaped whitespace
+// sequences (the two-character forms \n, \t, \r) so prefix checks see
+// the first meaningful character of a string value.
+func trimEscapedWS(v []byte) []byte {
+	for {
+		switch {
+		case len(v) > 0 && v[0] == ' ':
+			v = v[1:]
+		case len(v) >= 2 && v[0] == '\\' && (v[1] == 'n' || v[1] == 't' || v[1] == 'r'):
+			v = v[2:]
+		default:
+			return v
+		}
+	}
+}
+
 // stripThinkingProcess removes MiniMax M3's "Thinking Process:"
-// structured thinking section from the response, preserving the
-// SSE framing of every other data: line. Returns b unchanged if
-// the pattern is not detected — better to pass through than to
-// drop the actual response.
+// structured thinking section from a fully buffered response, preserving
+// the SSE framing of every other data: line. Returns b unchanged if the
+// pattern is not detected — better to pass through than to drop the
+// actual response.
 //
-// The pattern MiniMax emits under thinking=medium is:
-//
-//   Thinking Process:
-//
-//   1. **Analyze the Request:**
-//      *   ...
-//   2. **Examine the Runtime Context:**
-//      *   ...
-//   ...
-//   N. **Final Polish:**
-//      <draft 1>
-//      <blank>
-//      <draft 2>
-//      <blank>
-//      ...
-//      Looks good. Pro<final response line 1>
-//
-//   <final response paragraphs>
-//
-// The boundary between the thinking and the final response is
-// the "Looks good. Pro" (or "Looks good. Proceed") self-endorsement
-// marker. The actual final response starts on the SAME line,
-// immediately after "Pro".
-//
-// Important: the thinking content and the final response are in
-// DIFFERENT data: lines (the second and third respectively in
-// the audit log). The strip must (a) drop the data: line(s)
-// between the role marker and the marker line, AND (b) trim
-// the "Looks good. Pro" prefix from the content of the marker
-// line. Just trimming the latter — as an earlier version did
-// — leaves the thinking in place because the model wrote it as
-// a separate content chunk.
-//
-// Strategy: split the buffer into data: lines on "\n\n" (safe
-// because the content is JSON-escaped so embedded newlines are
-// "\\n" not "\n"). Find the line containing the LAST
-// self-endorsement marker. Drop every line between the first
-// (role) line and the marker line. Then trim the marker's
-// content to start after the "Pro" / "Proceed" word.
+// The shape MiniMax emits under thinking=medium is a plain-text thinking
+// section starting with "Thinking Process:", numbered subsections, a
+// "Final Polish" draft area, and a "Looks good. Pro"/"Looks good.
+// Proceed" self-endorsement marker; the final response starts on the
+// marker's own line, right after the marker. Thinking and final response
+// usually live in different data: lines, so the strip drops the lines
+// between the role marker and the marker line, then trims the marker
+// line's content up to the end of the endorsement.
 func stripThinkingProcess(b []byte) []byte {
+	// Trigger guard: only fire when the response's FIRST content value
+	// begins with the literal "Thinking Process:". Without this, any
+	// legitimate reply containing "Looks good. Pro…" (a code review
+	// saying "Looks good. Proceed with the merge") would have the
+	// chunks before the marker silently dropped.
+	cf := bytes.Index(b, contentFieldMarker)
+	if cf < 0 || !bytes.HasPrefix(trimEscapedWS(b[cf+len(contentFieldMarker):]), thinkingProcessPrefix) {
+		return b
+	}
 	// Find the LAST self-endorsement marker.
 	loc := thinkingProcessFullMatch.FindAllIndex(b, -1)
 	if len(loc) == 0 {
@@ -229,58 +451,44 @@ func stripThinkingProcess(b []byte) []byte {
 	if endorseLoc == nil {
 		return b
 	}
-	// cut is the byte offset immediately after "Pro" /
-	// "Proceed" — the start of the actual final response
-	// text within the marker's data: line.
+	// cut is the byte offset immediately after "Pro" / "Proceed" — the
+	// start of the actual final response text within the marker's line.
 	cut := last[0] + endorseLoc[1]
 
-	// Split into data: lines on "\n\n" (the SSE separator).
-	// Each line is a "data: <json>".
-	lines := bytes.Split(b, []byte("\n\n"))
-	// Find the LAST data: line that contains the marker. The
-	// model may emit "Looks good. Pro" inside the thinking
-	// section too (e.g., as a self-endorsement of an early
-	// draft), so we need the actual final-response line, not
-	// any of the thinking lines. The global regex match
-	// position in `last` is in the buffer; map it back to
-	// the line index.
+	// Split into data: lines on the SSE separator (JSON-escaped content
+	// contains no real "\n\n", so the split is safe).
+	lines := bytes.Split(b, eventSep)
+	// Locate the LAST line containing the marker — the model may emit
+	// "Looks good. Pro" inside the thinking section too.
 	markerLineIdx := -1
 	for i, line := range lines {
 		if thinkingProcessFullMatch.FindIndex(line) != nil {
-			markerLineIdx = i // overwrite so we end up at the LAST one
+			markerLineIdx = i
 		}
 	}
 	if markerLineIdx < 0 || markerLineIdx >= len(lines) {
-		// Shouldn't happen — the global regex already found
-		// the marker. Pass through.
 		return b
 	}
 
-	// Drop lines between the first line and the marker line
-	// (inclusive of the thinking-only content). The first
-	// line is always kept (it's the role marker).
+	// Drop lines between the first line and the marker line (the
+	// thinking-only content). The first line (role marker) is kept —
+	// unless the marker IS the first line (non-streaming JSON is a
+	// single "line"), where keeping it would duplicate the whole body.
 	keep := make([][]byte, 0, len(lines)-markerLineIdx+1)
-	keep = append(keep, lines[0])
-	// Trim the marker's content to start after the "Pro" /
-	// "Proceed" word. The cut offset is relative to the
-	// whole buffer; compute the offset within the marker's
-	// line.
+	if markerLineIdx > 0 {
+		keep = append(keep, lines[0])
+	}
+	// Trim the marker line's content to start after "Pro"/"Proceed".
 	lineStart := 0
 	for i := 0; i < markerLineIdx; i++ {
-		lineStart += len(lines[i]) + 2 // +2 for the "\n\n" separator
+		lineStart += len(lines[i]) + len(eventSep)
 	}
 	cutInLine := cut - lineStart
 	markerLine := lines[markerLineIdx]
 	if cutInLine > 0 && cutInLine < len(markerLine) {
-		// Find the content field start within the marker
-		// line. We trim everything between the start of
-		// the content VALUE and `cutInLine` — that range
-		// is the thinking prefix and the "Looks good.
-		// Pro" marker.
-		contentField := []byte(`"content":"`)
-		cfIdx := bytes.Index(markerLine, contentField)
+		cfIdx := bytes.Index(markerLine, contentFieldMarker)
 		if cfIdx >= 0 {
-			contentValueStart := cfIdx + len(contentField)
+			contentValueStart := cfIdx + len(contentFieldMarker)
 			if contentValueStart <= cutInLine {
 				newLine := make([]byte, 0, len(markerLine))
 				newLine = append(newLine, markerLine[:contentValueStart]...)
@@ -290,19 +498,9 @@ func stripThinkingProcess(b []byte) []byte {
 		}
 	}
 	keep = append(keep, markerLine)
-	// Keep all lines after the marker line (finish_reason,
-	// usage, [DONE] sentinel — everything VMR appends after
-	// the data: lines).
-	for i := markerLineIdx + 1; i < len(lines); i++ {
-		// Skip the trailing empty element from a final "\n\n"
-		// split.
-		if len(lines[i]) == 0 {
-			continue
-		}
-		keep = append(keep, lines[i])
-	}
-	// Re-join. The trailing "\n\n" is preserved by joining
-	// with the separator, so the client gets a well-formed
-	// SSE stream.
-	return bytes.Join(keep, []byte("\n\n"))
+	// Keep all lines after the marker line verbatim — including a
+	// trailing empty element from splitting a body that ends in "\n\n",
+	// so the final SSE separator survives the re-join.
+	keep = append(keep, lines[markerLineIdx+1:]...)
+	return bytes.Join(keep, eventSep)
 }

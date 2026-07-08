@@ -27,3 +27,6 @@ coverage.html
 /vmr-report.md
 
 *.jsonl
+
+# Runtime logs (vmr.sh daemon + audit)
+/logs/

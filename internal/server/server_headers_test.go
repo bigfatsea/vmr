@@ -1,4 +1,4 @@
-// Ver 2026-07-07 21:50, by Fable 5 (post-audit 2026-07-07 fixes)
+// Ver 2026-07-08 07:15, by Fable 5 (post-audit 2026-07-08 fixes)
 //
 // Tests for the header pass-through policy. The prior implementation
 // used a strict whitelist that forwarded only Content-Type and the
@@ -11,9 +11,13 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -65,13 +69,13 @@ func TestHeaders_ClientMetadataForwarded(t *testing.T) {
 	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
 
 	chatHeaders(t, ts.URL, map[string]string{
-		"User-Agent":                "OpenAI/JS 6.39.1",
-		"X-Stainless-Arch":          "arm64",
+		"User-Agent":                  "OpenAI/JS 6.39.1",
+		"X-Stainless-Arch":            "arm64",
 		"X-Stainless-Package-Version": "6.39.1",
-		"X-Stainless-Runtime":       "node",
-		"X-Stainless-Timeout":       "120",
-		"Traceparent":               "00-9a0c343137ba6cb4bc3f9204261980a1-1c433829747c4112-01",
-		"Accept-Language":           "en-US",
+		"X-Stainless-Runtime":         "node",
+		"X-Stainless-Timeout":         "120",
+		"Traceparent":                 "00-9a0c343137ba6cb4bc3f9204261980a1-1c433829747c4112-01",
+		"Accept-Language":             "en-US",
 	})
 
 	got := headersReceived(t, u)
@@ -230,4 +234,156 @@ func TestHeaders_BodyUnaffected(t *testing.T) {
 		t.Errorf("User-Agent not forwarded alongside body rewrite")
 	}
 	_ = json.Valid // keep import used if a later test needs it
+}
+
+func TestHeaders_AcceptEncodingNotForwarded(t *testing.T) {
+	// Regression (2026-07-08 audit): forwarding the client's
+	// Accept-Encoding disables Go Transport's transparent gzip, so a
+	// compressing upstream would hand the response normalizer gzip
+	// bytes and the client a compressed body without a
+	// Content-Encoding header. The blocklist must drop it; the
+	// Transport then negotiates gzip itself ("gzip", set by Go).
+	u := newUpstream(t)
+	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
+
+	chatHeaders(t, ts.URL, map[string]string{
+		"Accept-Encoding": "identity, br, zstd", // distinctive: must not reach upstream
+	})
+
+	got := headersReceived(t, u)
+	if v := got.Get("Accept-Encoding"); v == "identity, br, zstd" {
+		t.Errorf("client Accept-Encoding leaked to upstream: %q", v)
+	}
+	if v := got.Get("Accept-Encoding"); v != "gzip" {
+		t.Errorf("transparent gzip not active, upstream saw Accept-Encoding=%q, want %q", v, "gzip")
+	}
+}
+
+func TestHeaders_UpstreamGzipDecodedTransparently(t *testing.T) {
+	// End-to-end proof of the chain the blocklist entry protects: a
+	// gzip-compressing upstream, a client that itself advertises
+	// Accept-Encoding. The client must receive plaintext JSON with the
+	// model field rewritten — i.e. the Transport decompressed before
+	// the normalizer ran.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("upstream expected gzip negotiation, got Accept-Encoding=%q", r.Header.Get("Accept-Encoding"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		fmt.Fprint(gz, `{"id":"x","object":"chat.completion","model":"upstream-model","choices":[]}`)
+		gz.Close()
+	}))
+	t.Cleanup(up.Close)
+	ts := newRouterServer(t, oneProviderYAML(up.URL))
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions",
+		bytes.NewReader([]byte(`{"model":"vm","messages":[{"role":"user","content":"hi"}]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	// Plain transport (no auto-decompression on the client side): what
+	// arrives is exactly what VMR sent.
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var out struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("client received non-JSON body (still compressed?): %v, body=%q", err, body)
+	}
+	if out.Model != "vm" {
+		t.Errorf("model not rewritten to virtual name: %q", out.Model)
+	}
+}
+
+func TestHeaders_UpstreamResponseHeadersForwarded(t *testing.T) {
+	// Direct-equivalence on the response side: rate-limit headers,
+	// request IDs and the like must reach the client exactly as a
+	// direct call would deliver them. Hop-by-hop headers must not.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-Id", "req-12345")
+		w.Header().Set("X-Ratelimit-Remaining-Tokens", "9999")
+		w.Header().Set("Keep-Alive", "timeout=5")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","model":"upstream-model","choices":[]}`)
+	}))
+	t.Cleanup(up.Close)
+	ts := newRouterServer(t, oneProviderYAML(up.URL))
+
+	resp := chatHeaders(t, ts.URL, nil)
+	if got := resp.Header.Get("X-Request-Id"); got != "req-12345" {
+		t.Errorf("X-Request-Id not forwarded to client: %q", got)
+	}
+	if got := resp.Header.Get("X-Ratelimit-Remaining-Tokens"); got != "9999" {
+		t.Errorf("rate-limit header not forwarded to client: %q", got)
+	}
+	if got := resp.Header.Get("Keep-Alive"); got != "" {
+		t.Errorf("hop-by-hop header leaked to client: %q", got)
+	}
+	if resp.Header.Get("X-Vmr-Endpoint") == "" {
+		t.Errorf("X-VMR-Endpoint missing")
+	}
+}
+
+func TestHeaders_ErrorRetryAfterForwarded(t *testing.T) {
+	// When every candidate fails, the last upstream error is returned
+	// verbatim — including Retry-After, which client SDKs use for
+	// their own backoff.
+	u := newUpstream(t)
+	u.status.Store(429)
+	u.retryAfter = "17"
+	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
+
+	resp := chatHeaders(t, ts.URL, nil)
+	if resp.StatusCode != 429 {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "17" {
+		t.Errorf("Retry-After not forwarded on error path: %q", got)
+	}
+}
+
+func TestHeaders_AnthropicVersionNotDuplicated(t *testing.T) {
+	// Regression: the old protocol-header pre-loop Set anthropic-version,
+	// then the general passthrough loop Add-ed the client's copy again —
+	// real Anthropic clients (which always send anthropic-version) made
+	// the upstream see the header twice.
+	u := newUpstream(t)
+	ts := newRouterServer(t, `
+listen: 127.0.0.1:0
+providers:
+  anthropic:
+    p1: {base_url: `+u.srv.URL+`, api_key: k1}
+models:
+  anthropic:
+    vm:
+      endpoints:
+        - {provider: p1, model: upstream-model}
+`)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader([]byte(`{"model":"vm"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	got := headersReceived(t, u)
+	if vs := got.Values("Anthropic-Version"); len(vs) != 1 {
+		t.Errorf("anthropic-version sent %d times (%v), want exactly 1", len(vs), vs)
+	}
+	if vs := got.Values("Anthropic-Beta"); len(vs) != 1 {
+		t.Errorf("anthropic-beta sent %d times (%v), want exactly 1", len(vs), vs)
+	}
 }

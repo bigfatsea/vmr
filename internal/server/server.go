@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 07:15, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -66,12 +66,6 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// protocolHeaders is the whitelist of client headers forwarded to adapters
-// for their protocol-semantic value (Anthropic version negotiation). All
-// other client headers are passed through unless they appear in
-// headerBlocklist — see chatHandler for the forwarding loop.
-var protocolHeaders = []string{"anthropic-version", "anthropic-beta"}
-
 // headerBlocklist is the set of client headers VMR never forwards to the
 // upstream. The pass-through policy is the inverse of the prior strict
 // whitelist: most client headers (User-Agent, X-Stainless-*, Traceparent,
@@ -96,6 +90,13 @@ var headerBlocklist = map[string]struct{}{
 	"content-length":      {}, // Go Transport recomputes
 	"transfer-encoding":   {}, // Go Transport manages
 	"connection":          {}, // Go Transport manages
+	// Forwarding the client's Accept-Encoding disables Go Transport's
+	// transparent gzip: the upstream may then answer compressed, the
+	// response normalizer (response.go) would run its regexes over gzip
+	// bytes, and the client would receive them without a Content-Encoding
+	// header (only Content-Type is forwarded back). Blocking it lets the
+	// Transport negotiate gzip itself and hand every layer plaintext.
+	"accept-encoding": {},
 }
 
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
@@ -184,20 +185,15 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.Model, rec.Stream = probe.Model, probe.Stream
 		}
 
+		// Pass client headers through unless on the blocklist — this
+		// includes the Anthropic protocol headers (anthropic-version,
+		// anthropic-beta). The rationale is that LLM SDKs (OpenAI JS,
+		// Anthropic) only emit a known fixed set of headers and none of
+		// them are dangerous, so a strict whitelist is more brittle than
+		// necessary — it strips legitimate metadata (User-Agent,
+		// X-Stainless-*, Traceparent) and needs code updates when SDKs
+		// add new headers.
 		hdr := http.Header{}
-		// Protocol-semantic headers (Anthropic version/beta) come first
-		// and are always passed through.
-		for _, name := range protocolHeaders {
-			if v := r.Header.Get(name); v != "" {
-				hdr.Set(name, v)
-			}
-		}
-		// Everything else: pass through unless on the blocklist. The
-		// rationale is that LLM SDKs (OpenAI JS, Anthropic) only emit a
-		// known fixed set of headers and none of them are dangerous, so
-		// a strict whitelist is more brittle than necessary — it strips
-		// legitimate metadata (User-Agent, X-Stainless-*, Traceparent)
-		// and needs code updates when SDKs add new headers.
 		for k, vs := range r.Header {
 			if _, blocked := headerBlocklist[strings.ToLower(k)]; blocked {
 				continue

@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 08:30, by Fable 5
 package core
 
 import (
@@ -17,15 +17,7 @@ type CanonicalRequest struct {
 	Model  string
 	Stream bool
 	Raw    json.RawMessage
-	Header http.Header // whitelisted protocol headers (anthropic-version, anthropic-beta)
-}
-
-// HeaderGet returns a whitelisted header value, tolerating a nil Header.
-func (r *CanonicalRequest) HeaderGet(key string) string {
-	if r.Header == nil {
-		return ""
-	}
-	return r.Header.Get(key)
+	Header http.Header // client headers after the server's blocklist filter (credentials removed)
 }
 
 // ErrorClass drives failover and cooldown decisions.

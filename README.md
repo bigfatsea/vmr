@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-07 17:45, by Fable 5 -->
+<!-- Ver 2026-07-08 08:15, by Fable 5 -->
 
 # vmr — Virtual Model Router
 
@@ -20,7 +20,13 @@ go build -o vmr ./cmd/vmr
 
 cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 ./vmr check -c config.yaml           # 校验配置并打印路由表
-./vmr start -c config.yaml
+./vmr start -c config.yaml           # 前台运行；启动时打印完整配置摘要
+
+# 或用 vmr.sh 以 daemon 方式管理（先 check 再拉起，日志/审计缺省落 logs/）：
+./vmr.sh start        # 后台启动
+./vmr.sh status       # 进程 + 端点健康
+./vmr.sh logs         # tail -f 服务日志
+./vmr.sh stop         # 停止
 ```
 
 把客户端的 Base URL 指向 vmr 即可：
@@ -86,19 +92,17 @@ models:
 
 上游失败即按优先级顺序逐个尝试下一端点，直到成功或所有可用端点耗尽（`max_attempts` 可选设上限）。失败驱动的被动健康：网络/5xx 短冷却指数退避，401/额度耗尽/模型不存在长冷却，429/503 尊重 `Retry-After`；冷却到期放行单个探针请求验证恢复。两类特殊处理：400 类客户端错误不切换、直接返回；**内容合规拦截**（各厂审核标准不一，如 OpenRouter 的 403 moderation、DeepSeek 的内容风险 400）会继续切换下一端点但**不惩罚**被拦端点——它只是拒绝这一条请求，并没有坏。全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。机制详见设计文档 §5–6。
 
-## 响应归一化
+## 透传与归一化
 
-VMR 透传上游响应时做 5 步归一化，确保客户端拿到的内容与「直连上游」时**字节级一致**：
+**原则：直连等价**。客户端经 VMR 收到的内容（数据、头部、传输节奏）应与直连上游一致。仅有的偏离：
 
-| 步 | 做什么 | 原因 |
-| --- | --- | --- |
-| 1 | 把响应每个 chunk 的 `"model":"<upstream>"` 改回 `"model":"<client_virtual_model>"` | OpenAI/Anthropic JS SDK 按 `response.model === request.model` 做 prompt cache 关联 + per-model hook，**不一致会静默丢消息** |
-| 2 | 剥离 content 里的 `<think>...</think>` 块 | MiniMax M3 thinking 模式下把推理放在 content 里，不剥会被持久化进 assistant message，下轮 prompt 含上轮思考 → **模型陷入反馈循环** |
-| 3 | trim `</think>\n\n` 末尾的两个换行 | 避免助手消息每轮以两个空行起头 |
-| 4 | 剥离 MiniMax thinking=medium 下的纯文本「Thinking Process:」结构化思考 | OpenClaw 的 `Reasoning: off` 是 UI 开关不影响模型行为；不剥用户会看到「思考过程 + 草稿迭代」 |
-| 5 | 流式响应末尾追加 `data: [DONE]\n\n` | MiniMax 偶尔不发 [DONE]；客户端 SDK 靠 [DONE] 标记收尾以避免 idle abort |
+* `model` 字段——请求侧改成上游真实名，响应侧改回虚拟名（OpenAI/Anthropic SDK 假设 `response.model === request.model`，不一致会静默丢消息）；
+* 两个 **MiniMax-M3 专属修复**，只在确认命中其确切形态时触发：剥 content 里的 `<think>...</think>` 推理块（不剥会持久化进历史 → 模型陷入反馈循环）、剥 thinking=medium 的纯文本「Thinking Process:」思考段（守卫：首个 content 值以该字面量开头）；
+* `data: [DONE]` 哨兵——**仅 openai 协议 + 流式 + 上游未发**时补（MiniMax 直接关流），已发绝不重复，anthropic 流永不追加。
 
-完整逻辑见设计文档 §5.5。**所有 5 步只对上游 2xx 响应生效**，4xx/5xx 走原样透传保留厂商错误结构。
+**真流式**：正常响应逐 SSE 事件实时转发；只有命中思考形态才缓冲，且 `<think>` 关闭后立即恢复流式（思考期间客户端本就无正文可看）。带 `Content-Encoding` 的压缩响应零变换原样转发。
+
+**响应头**与请求头同一策略：默认全透传（`x-ratelimit-*`、request id、`Retry-After`…），只剥 hop-by-hop；错误响应连头带体原样返回。每个请求实际生效的归一化步骤记录在审计日志 `attempts[].norm` 里，上游与客户端的任何字节差异都可追溯。完整逻辑见设计文档 §5.5。归一化只对上游 2xx 生效。
 
 ## 请求图片自动降采样
 
@@ -112,7 +116,7 @@ image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
 
 ## 审计日志
 
-默认开启，每个聊天请求记一行 JSONL：调用方与上游两层的完整 request/response（凭证掩码、单 body 上限 1MiB），供事后统计脚本使用。
+默认开启，每个聊天请求记一行 JSONL：调用方与上游两层的完整 request/response（凭证掩码、单 body 上限 1MiB）、每次上游尝试的错误类别与实际生效的归一化步骤（`attempts[].norm`），供事后 debug 与统计脚本使用。
 
 ```bash
 ./vmr start -c config.yaml                # 写入 $VMR_LOG_DIR（未设置则系统临时目录）

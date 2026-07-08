@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 07:40, by Fable 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -224,15 +224,16 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	}
 
 	// All candidates failed or none were available.
-	w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
 	if last != nil {
-		// Return the last upstream error verbatim so the client sees the real cause.
-		if last.contentType != "" {
-			w.Header().Set("Content-Type", last.contentType)
-		}
+		// Return the last upstream error verbatim — status, headers
+		// (Retry-After included) and body — so the client sees exactly
+		// what a direct call would have shown.
+		copyRespHeaders(w.Header(), last.header)
+		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
 		w.WriteHeader(last.status)
 		w.Write(last.body)
 	} else {
+		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
 		writeError(w, http.StatusServiceUnavailable, "vmr_no_candidates",
 			fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model))
 	}
@@ -240,9 +241,39 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 }
 
 type upstreamError struct {
-	status      int
-	contentType string
-	body        []byte
+	status int
+	header http.Header
+	body   []byte
+}
+
+// respHeaderBlocklist is the set of upstream response headers VMR does NOT
+// forward to the client: hop-by-hop headers (they describe the VMR↔upstream
+// connection, not the client↔VMR one) plus Content-Length (normalization
+// can change the body size; Go recomputes framing). Everything else —
+// Retry-After, x-ratelimit-*, request IDs, Date, Content-Encoding — passes
+// through so the client sees what a direct call would have shown.
+var respHeaderBlocklist = map[string]struct{}{
+	"connection":         {},
+	"keep-alive":         {},
+	"proxy-authenticate": {},
+	"proxy-connection":   {},
+	"te":                 {},
+	"trailer":            {},
+	"transfer-encoding":  {},
+	"upgrade":            {},
+	"content-length":     {},
+}
+
+// copyRespHeaders forwards upstream response headers minus the blocklist.
+func copyRespHeaders(dst http.Header, src http.Header) {
+	for k, vs := range src {
+		if _, blocked := respHeaderBlocklist[strings.ToLower(k)]; blocked {
+			continue
+		}
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
 }
 
 // tryOne sends the request to a single endpoint. It returns done=true when a
@@ -306,7 +337,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		resp.Body.Close()
 		class := ad.ClassifyError(resp.StatusCode, body)
-		uerr := &upstreamError{resp.StatusCode, resp.Header.Get("Content-Type"), body}
+		uerr := &upstreamError{resp.StatusCode, resp.Header, body}
 		if att != nil {
 			m := audit.NewMessage(resp.Header, body)
 			m.Status = resp.StatusCode
@@ -324,10 +355,8 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		}
 		if class == core.ErrClient {
 			// Bad request: every endpoint would fail the same way. Return as-is.
+			copyRespHeaders(w.Header(), uerr.header)
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
-			if uerr.contentType != "" {
-				w.Header().Set("Content-Type", uerr.contentType)
-			}
 			w.WriteHeader(uerr.status)
 			w.Write(uerr.body)
 			rt.logf("model=%s ep=%s attempt=%d status=%d class=client dur=%s",
@@ -351,20 +380,24 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	body := ad.TransformBody(resp.Body, creq.Stream)
 	defer body.Close()
 
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
+	// Forward the upstream's response headers (minus hop-by-hop) so the
+	// client sees what a direct call would have shown — rate-limit
+	// headers, request IDs, Date, Retry-After. VMR's own headers go on top.
+	copyRespHeaders(w.Header(), resp.Header)
 	w.Header().Set("X-VMR-Endpoint", ep.Name())
 	w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 	w.WriteHeader(resp.StatusCode)
 
+	// Wrap the upstream body with the response normalizer (response.go):
+	// true streaming by default, buffered only when a MiniMax thinking
+	// shape is detected, raw passthrough when the body is compressed.
+	ct := resp.Header.Get("Content-Type")
+	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
+	opaque := resp.Header.Get("Content-Encoding") != ""
+	rbody := newRespStream(body, creq.Model, isSSE, ep.AdapterType, opaque)
+
 	var copyErr error
-	// Wrap the upstream body with the response normalizer: rewrite
-	// the model field to the virtual model name, strip <think> blocks,
-	// and (for streaming only) append data: [DONE] on EOF. See
-	// response.go for why.
-	rbody := newRespStream(body, creq.Model, creq.Stream)
-	if creq.Stream {
+	if isSSE {
 		copyErr = copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	} else {
 		_, copyErr = io.Copy(w, rbody)
@@ -372,6 +405,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	status := "ok"
 	if copyErr != nil && r.Context().Err() == nil {
 		status = "truncated" // upstream died mid-stream; the response is already committed
+		if att != nil {
+			att.Error = "truncated: " + copyErr.Error()
+		}
+	}
+	if att != nil {
+		att.Norm = rbody.Applied()
 	}
 	rt.logf("model=%s ep=%s attempt=%d status=%s stream=%v dur=%s",
 		creq.Model, ep.Name(), attempt, status, creq.Stream, time.Since(start).Round(time.Millisecond))

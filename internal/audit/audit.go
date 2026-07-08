@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-08 07:40, by Fable 5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. Analysis
@@ -23,12 +23,12 @@ const MaxBodyBytes = 1 << 20
 // Record is one audit line. Two layers: Client is the caller↔vmr exchange,
 // Attempts are the vmr↔provider exchanges (one entry per failover attempt).
 type Record struct {
-	TS       time.Time `json:"ts"`             // request arrival
-	DurMS    int64     `json:"dur_ms"`         // total wall time
-	Model    string    `json:"model"`          // virtual model ("" if rejected before parsing)
-	Protocol string    `json:"protocol"`       // ingress protocol: openai | anthropic
+	TS       time.Time `json:"ts"`       // request arrival
+	DurMS    int64     `json:"dur_ms"`   // total wall time
+	Model    string    `json:"model"`    // virtual model ("" if rejected before parsing)
+	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic
 	Stream   bool      `json:"stream"`
-	Outcome  string    `json:"outcome"`        // ok | error | canceled
+	Outcome  string    `json:"outcome"` // ok | error | canceled
 	Client   Exchange  `json:"client"`
 	Attempts []Attempt `json:"attempts,omitempty"`
 }
@@ -40,14 +40,18 @@ type Exchange struct {
 }
 
 // Attempt is one upstream try. On the successful attempt the response body is
-// omitted: passthrough means it is byte-identical to Client.Response.Body.
+// omitted: passthrough means it is byte-identical to Client.Response.Body —
+// except for the normalization steps listed in Norm, which are the complete
+// explanation of any byte difference between the upstream body and what the
+// client received.
 type Attempt struct {
-	Endpoint string   `json:"endpoint"` // provider/model
+	Endpoint string   `json:"endpoint"` // protocol/provider/model
 	URL      string   `json:"url"`
 	DurMS    int64    `json:"dur_ms"`
 	Request  Message  `json:"request"`
 	Response *Message `json:"response,omitempty"`
-	Error    string   `json:"error,omitempty"` // error class or network error
+	Error    string   `json:"error,omitempty"` // error class, or "network: …" / "build: …" / "truncated: …" / "canceled by client"
+	Norm     []string `json:"norm,omitempty"`  // normalization steps applied to the forwarded response
 }
 
 type Message struct {

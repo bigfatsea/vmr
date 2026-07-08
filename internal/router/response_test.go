@@ -1,4 +1,4 @@
-// Ver 2026-07-07 21:50, by Fable 5 (post-audit 2026-07-07 fixes)
+// Ver 2026-07-08 07:15, by Fable 5 (post-audit 2026-07-08 fixes)
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -40,7 +40,7 @@ func TestRespStream_ModelFieldRewrite(t *testing.T) {
 		`data: {"id":"a","model":"MiniMax-M3","object":"chunk"}` + "\n\n" +
 			`data: {"id":"b","model":"MiniMax-M3","object":"chunk"}` + "\n\n",
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 
 	if strings.Contains(out, "MiniMax-M3") {
 		t.Errorf("upstream model name leaked: %q", out)
@@ -58,7 +58,7 @@ func TestRespStream_ThinkBlockStripped(t *testing.T) {
 			`<think>The user said hi, so I will respond with a greeting.</think>\n\n` +
 			`Hi there!"}}]}` + "\n\n",
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 
 	if strings.Contains(out, "<think>") {
 		t.Errorf("think block start leaked: %q", out)
@@ -80,7 +80,7 @@ func TestRespStream_ThinkBlockCrossChunk(t *testing.T) {
 		`data: {"choices":[{"delta":{"content":"<think>step 1. step 2. step` + "\n\n" +
 			`data: {"choices":[{"delta":{"content":" 3. step 4.</think>real"}}]}` + "\n\n",
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 
 	if strings.Contains(out, "step 1") {
 		t.Errorf("think content not stripped across SSE messages: %q", out)
@@ -99,7 +99,7 @@ func TestRespStream_DoneSentinel(t *testing.T) {
 	src := strings.NewReader(
 		`data: {"id":"x","choices":[],"model":"MiniMax-M3","object":"chunk"}` + "\n\n",
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 
 	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
 		t.Errorf("missing [DONE] sentinel, tail=%q", out)
@@ -107,14 +107,14 @@ func TestRespStream_DoneSentinel(t *testing.T) {
 }
 
 func TestRespStream_NonStreamSingleObject(t *testing.T) {
-	// Non-streaming response (single JSON object, no SSE framing).
-	// The processor should still rewrite the model field. The
-	// non-streaming path doesn't append [DONE] (caller logic decides
-	// that), but the carry semantics are the same.
+	// A single JSON object with no SSE framing: no event separator ever
+	// appears, so the stream stays undecided until EOF and goes through
+	// the buffered whole-body pass (model rewrite + think strip). isSSE
+	// is passed as true here to also exercise the [DONE] append.
 	src := strings.NewReader(
 		`{"id":"x","model":"MiniMax-M3","choices":[{"message":{"role":"assistant","content":"<think>hello</think>\n\nHi"}}]}`,
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 
 	if !strings.Contains(out, `"model":"agent"`) {
 		t.Errorf("non-stream model rewrite failed: %q", out)
@@ -134,19 +134,19 @@ func TestRespStream_NoThinkBlockPassthrough(t *testing.T) {
 	// Normal content without any think markers should be untouched.
 	// The trailing newlines in delta.content are preserved.
 	in := `data: {"choices":[{"delta":{"content":"plain reply"}}]}` + "\n\n"
-	out := readAll(t, newRespStream(strings.NewReader(in), "agent", true))
+	out := readAll(t, newRespStream(strings.NewReader(in), "agent", true, "openai", false))
 	if !strings.Contains(out, "plain reply") {
 		t.Errorf("plain content lost: %q", out)
 	}
 }
 
 func TestRespStream_OneByteReads(t *testing.T) {
-	// Pathological: read one byte at a time from the source. The
-	// carry must still let the regex see markers. This is the
-	// worst-case for cross-chunk boundary detection.
+	// Pathological: read one byte at a time from the source. Event
+	// assembly and the mode decision must be unaffected by how the
+	// bytes are chunked on the wire.
 	srcStr := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"` +
 		`<think>step 1. step 2. step 3.</think>result"}}]}` + "\n\n"
-	out := readAll(t, newRespStream(oneByteReader{src: strings.NewReader(srcStr)}, "agent", true))
+	out := readAll(t, newRespStream(oneByteReader{src: strings.NewReader(srcStr)}, "agent", true, "openai", false))
 
 	if strings.Contains(out, "MiniMax-M3") {
 		t.Errorf("upstream model name leaked under 1-byte reads: %q", out)
@@ -163,7 +163,7 @@ func TestRespStream_OneByteReads(t *testing.T) {
 }
 
 // oneByteReader is a test helper: yields one byte per Read call,
-// exercising the worst case for the carry buffer.
+// exercising the worst case for event assembly.
 type oneByteReader struct{ src io.Reader }
 
 func (r oneByteReader) Read(p []byte) (int, error) {
@@ -274,11 +274,13 @@ func TestStripThinkingProcess_ChineseEndorsement(t *testing.T) {
 func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
 	// The self-endorsement line is indented (Final Polish
 	// drafts are indented). The regex must eat the leading
-	// whitespace.
+	// whitespace. The first content line carries the
+	// "Thinking Process:" prefix that arms the trigger guard.
 	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
+	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
 	finalLine := "data: {\"delta\":{\"content\":\"...\\n    Looks good. Profinal answer here\\n\"}}\n\n"
 
-	in := roleLine + finalLine
+	in := roleLine + thinkingLine + finalLine
 
 	out := stripThinkingProcess([]byte(in))
 	got := string(out)
@@ -288,11 +290,80 @@ func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
 	if strings.Contains(got, "Looks good") {
 		t.Errorf("self-endorsement marker should be stripped, got %q", got)
 	}
+	if strings.Contains(got, "Thinking Process") {
+		t.Errorf("thinking line should be dropped, got %q", got)
+	}
+}
+
+func TestStripThinkingProcess_LooksGoodInNormalStream(t *testing.T) {
+	// Regression (2026-07-08 audit): a NORMAL reply whose text
+	// legitimately contains "Looks good. Proceed" — e.g. a code
+	// review verdict — must pass through untouched. Before the
+	// trigger guard, every chunk before the marker was silently
+	// dropped.
+	in := `data: {"id":"1","choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n" +
+		`data: {"id":"1","choices":[{"index":0,"delta":{"content":"I reviewed the PR carefully."}}]}` + "\n\n" +
+		`data: {"id":"1","choices":[{"index":0,"delta":{"content":"Everything checks out."}}]}` + "\n\n" +
+		`data: {"id":"1","choices":[{"index":0,"delta":{"content":"Looks good. Proceed with the merge."}}]}` + "\n\n" +
+		`data: {"id":"1","choices":[{"finish_reason":"stop","index":0,"delta":{}}]}` + "\n\n"
+	out := stripThinkingProcess([]byte(in))
+	if string(out) != in {
+		t.Errorf("normal reply with endorsement phrase must pass through, got %q", string(out))
+	}
+}
+
+func TestStripThinkingProcess_LooksGoodInNormalNonStream(t *testing.T) {
+	// Regression (2026-07-08 audit): non-streaming JSON whose content
+	// contains the endorsement phrase. Before the fix the single-line
+	// body was DUPLICATED (marker line == first line), corrupting the
+	// JSON the client parses.
+	in := `{"id":"1","choices":[{"message":{"role":"assistant","content":"Looks good. Proceed with step 2."}}],"model":"m"}`
+	out := stripThinkingProcess([]byte(in))
+	if string(out) != in {
+		t.Errorf("normal non-stream reply must pass through, got %q", string(out))
+	}
+}
+
+func TestStripThinkingProcess_MarkerInFirstLine(t *testing.T) {
+	// The real thinking=medium shape in a NON-STREAMING response:
+	// thinking and final response share one content value in one JSON
+	// object — the marker line IS the first line. The strip must trim
+	// in place without duplicating the body.
+	in := `{"id":"1","choices":[{"message":{"role":"assistant","content":"Thinking Process:\n\n1. **Drafting**\n2. **Final Polish:**\n    draft\n    Looks good. Proceed the actual answer."}}],"model":"m"}`
+	out := stripThinkingProcess([]byte(in))
+	got := string(out)
+	if c := strings.Count(got, `"id":"1"`); c != 1 {
+		t.Errorf("body duplicated: id appears %d times in %q", c, got)
+	}
+	if strings.Contains(got, "Thinking Process") || strings.Contains(got, "Looks good") {
+		t.Errorf("thinking prefix should be trimmed, got %q", got)
+	}
+	if !strings.Contains(got, "the actual answer.") {
+		t.Errorf("final response missing: %q", got)
+	}
+}
+
+func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
+	// When the strip fires, the surviving lines must stay separated by
+	// "\n\n" — including the boundary before the appended [DONE]
+	// sentinel. Before the fix the trailing empty split element was
+	// dropped, gluing the last data: line to "data: [DONE]".
+	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
+	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
+	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed the reply\"}}\n\n"
+	out := readAll(t, newRespStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", true, "openai", false))
+
+	if !strings.HasSuffix(out, "\n\ndata: [DONE]\n\n") {
+		t.Errorf("[DONE] not separated from the last data line, tail=%q", out)
+	}
+	if strings.Contains(out, "}data:") {
+		t.Errorf("SSE framing corrupted (glued lines): %q", out)
+	}
 }
 
 func TestRespStream_EmptySource(t *testing.T) {
 	// Empty source: just the [DONE] sentinel should be emitted.
-	out := readAll(t, newRespStream(strings.NewReader(""), "agent", true))
+	out := readAll(t, newRespStream(strings.NewReader(""), "agent", true, "openai", false))
 	if out != "data: [DONE]\n\n" {
 		t.Errorf("empty source produced %q, want only [DONE]", out)
 	}
@@ -305,8 +376,246 @@ func TestRespStream_NestedModelInDelta(t *testing.T) {
 	src := strings.NewReader(
 		`data: {"id":"x","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n",
 	)
-	out := readAll(t, newRespStream(src, "agent", true))
+	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
 	if !strings.Contains(out, `"model":"agent"`) {
 		t.Errorf("top-level model not rewritten: %q", out)
+	}
+}
+
+// scriptReader delivers one scripted chunk per Read call, then EOF. It
+// lets tests observe output produced BEFORE the source is exhausted —
+// the definition of true streaming.
+type scriptReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (r *scriptReader) Read(p []byte) (int, error) {
+	if r.i >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.i])
+	r.i++
+	return n, nil
+}
+
+func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
+	// A normal content event must be forwarded as soon as it arrives —
+	// after a single source read, before the upstream stream ends.
+	ev1 := `data: {"id":"1","model":"MiniMax-M3","choices":[{"delta":{"content":"hello"}}]}` + "\n\n"
+	ev2 := `data: {"id":"1","model":"MiniMax-M3","choices":[{"finish_reason":"stop","delta":{}}]}` + "\n\n"
+	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
+	rs := newRespStream(sr, "agent", true, "openai", false)
+
+	buf := make([]byte, 64<<10)
+	n, err := rs.Read(buf)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	first := string(buf[:n])
+	if sr.i != 1 {
+		t.Fatalf("expected exactly 1 source read before first output, got %d", sr.i)
+	}
+	if !strings.Contains(first, "hello") {
+		t.Errorf("first event not forwarded immediately: %q", first)
+	}
+	if !strings.Contains(first, `"model":"agent"`) {
+		t.Errorf("model not rewritten in streamed event: %q", first)
+	}
+
+	rest := readAll(t, rs)
+	full := first + rest
+	if c := strings.Count(full, "data: [DONE]"); c != 1 {
+		t.Errorf("expected exactly one [DONE], got %d in %q", c, full)
+	}
+	if !strings.HasSuffix(full, "data: [DONE]\n\n") {
+		t.Errorf("missing [DONE] terminator: tail=%q", full)
+	}
+}
+
+func TestRespStream_NoDoubleDone(t *testing.T) {
+	// Upstream already sends [DONE] (DeepSeek, OpenRouter): VMR must
+	// not append a second one.
+	in := `data: {"id":"1","model":"M","choices":[{"delta":{"content":"hi"}}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	out := readAll(t, newRespStream(strings.NewReader(in), "agent", true, "openai", false))
+	if c := strings.Count(out, "data: [DONE]"); c != 1 {
+		t.Errorf("expected exactly one [DONE], got %d in %q", c, out)
+	}
+}
+
+func TestRespStream_AnthropicNoDoneAppended(t *testing.T) {
+	// Anthropic SSE has no [DONE] concept — appending one is protocol
+	// pollution. The model field (message_start) is still rewritten.
+	in := `event: message_start` + "\n" +
+		`data: {"type":"message_start","message":{"id":"m1","model":"MiniMax-M3","content":[]}}` + "\n\n" +
+		`event: content_block_delta` + "\n" +
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}` + "\n\n" +
+		`event: message_stop` + "\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+	out := readAll(t, newRespStream(strings.NewReader(in), "claude", true, "anthropic", false))
+	if strings.Contains(out, "[DONE]") {
+		t.Errorf("anthropic stream polluted with [DONE]: %q", out)
+	}
+	if !strings.Contains(out, `"model":"claude"`) {
+		t.Errorf("model not rewritten in anthropic stream: %q", out)
+	}
+	if !strings.Contains(out, "Hello") {
+		t.Errorf("anthropic content lost: %q", out)
+	}
+}
+
+func TestRespStream_OpaquePassthrough(t *testing.T) {
+	// Content-Encoding responses are forwarded raw: no rewrite, no
+	// strip, no [DONE] — running transforms over compressed bytes can
+	// only corrupt them.
+	in := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"<think>x</think>hi"}}]}` + "\n\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", true)
+	out := readAll(t, rs)
+	if out != in {
+		t.Errorf("opaque body modified:\n got %q\nwant %q", out, in)
+	}
+	if a := rs.Applied(); len(a) != 1 || a[0] != "opaque" {
+		t.Errorf("applied = %v, want [opaque]", a)
+	}
+}
+
+func TestRespStream_AppliedTracking(t *testing.T) {
+	// The applied list must name every transform that ran, so the audit
+	// log can explain any upstream/client byte difference.
+	in := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"<think>reason</think>\n\nreply"}}]}` + "\n\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if !strings.Contains(out, "reply") {
+		t.Fatalf("content lost: %q", out)
+	}
+	want := map[string]bool{"buffered": true, "model_rewrite": true, "think_strip": true, "done_appended": true}
+	got := map[string]bool{}
+	for _, a := range rs.Applied() {
+		got[a] = true
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("applied missing %q: %v", k, rs.Applied())
+		}
+	}
+}
+
+func TestRespStream_ReasoningContentStreams(t *testing.T) {
+	// DeepSeek-style reasoning in a dedicated field is well-behaved:
+	// the stream must settle into passthrough on the first
+	// reasoning_content delta, not wait for regular content.
+	ev1 := `data: {"model":"deepseek-v4","choices":[{"delta":{"reasoning_content":"thinking..."}}]}` + "\n\n"
+	ev2 := `data: {"model":"deepseek-v4","choices":[{"delta":{"content":"answer"}}]}` + "\n\n"
+	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
+	rs := newRespStream(sr, "agent", true, "openai", false)
+
+	buf := make([]byte, 64<<10)
+	n, err := rs.Read(buf)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	if sr.i != 1 || !strings.Contains(string(buf[:n]), "thinking...") {
+		t.Errorf("reasoning_content delta not streamed immediately (reads=%d, out=%q)", sr.i, buf[:n])
+	}
+	rest := readAll(t, rs)
+	if !strings.Contains(rest, "answer") {
+		t.Errorf("content lost: %q", rest)
+	}
+}
+
+func TestRespStream_ToolCallOnlyStreams(t *testing.T) {
+	// Pure tool-call responses (no text content at all) are the bread
+	// and butter of agent loops — they must stream, not buffer.
+	ev1 := `data: {"model":"M","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":""}}]}}]}` + "\n\n"
+	ev2 := `data: {"model":"M","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"x\"}"}}]}}]}` + "\n\n"
+	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
+	rs := newRespStream(sr, "agent", true, "openai", false)
+
+	buf := make([]byte, 64<<10)
+	n, err := rs.Read(buf)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	if sr.i != 1 || !strings.Contains(string(buf[:n]), `"name":"read"`) {
+		t.Errorf("tool-call delta not streamed immediately (reads=%d, out=%q)", sr.i, buf[:n])
+	}
+}
+
+func TestRespStream_ThinkingProcessBuffered(t *testing.T) {
+	// thinking=medium shape through the full pipeline: detected on the
+	// first content event, buffered, stripped, [DONE] appended with
+	// intact SSE framing.
+	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
+	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
+	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed the reply\"}}\n\n"
+	rs := newRespStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if strings.Contains(out, "Thinking Process") || strings.Contains(out, "Looks good") {
+		t.Errorf("thinking leaked: %q", out)
+	}
+	if !strings.Contains(out, "the reply") {
+		t.Errorf("final response lost: %q", out)
+	}
+	got := map[string]bool{}
+	for _, a := range rs.Applied() {
+		got[a] = true
+	}
+	if !got["buffered"] || !got["thinking_process_strip"] {
+		t.Errorf("applied = %v, want buffered + thinking_process_strip", rs.Applied())
+	}
+}
+
+func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
+	// M3 thinking mode: buffering must last only through the think
+	// block. Once </think> arrives, the stripped prefix is emitted and
+	// the remaining events stream live — before the source is drained.
+	ev1 := `data: {"model":"M","choices":[{"delta":{"role":"assistant"}}]}` + "\n\n"
+	ev2 := `data: {"model":"M","choices":[{"delta":{"content":"<think>step 1."}}]}` + "\n\n"
+	ev3 := `data: {"model":"M","choices":[{"delta":{"content":" step 2.</think>\n\nanswer starts"}}]}` + "\n\n"
+	ev4 := `data: {"model":"M","choices":[{"delta":{"content":" and continues"}}]}` + "\n\n"
+	sr := &scriptReader{chunks: [][]byte{[]byte(ev1 + ev2), []byte(ev3), []byte(ev4)}}
+	rs := newRespStream(sr, "agent", true, "openai", false)
+
+	// Drive reads until the first output appears; remember how many
+	// source chunks had been consumed at that moment.
+	buf := make([]byte, 64<<10)
+	var first string
+	for i := 0; i < 10 && first == ""; i++ {
+		n, err := rs.Read(buf)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if n > 0 {
+			first = string(buf[:n])
+		}
+	}
+	if first == "" {
+		t.Fatal("no output produced")
+	}
+	if sr.i > 2 {
+		t.Errorf("output only appeared after %d source chunks; want resume right after </think> (2)", sr.i)
+	}
+	if strings.Contains(first, "step 1") || strings.Contains(first, "<think>") {
+		t.Errorf("think content leaked on resume: %q", first)
+	}
+	if !strings.Contains(first, "answer starts") {
+		t.Errorf("post-think content missing from resumed stream: %q", first)
+	}
+
+	rest := readAll(t, rs)
+	full := first + rest
+	if !strings.Contains(full, "and continues") {
+		t.Errorf("streamed continuation lost: %q", full)
+	}
+	if c := strings.Count(full, "data: [DONE]"); c != 1 {
+		t.Errorf("expected exactly one [DONE], got %d", c)
+	}
+	got := map[string]bool{}
+	for _, a := range rs.Applied() {
+		got[a] = true
+	}
+	if !got["think_strip"] || !got["resumed_stream"] {
+		t.Errorf("applied = %v, want think_strip + resumed_stream", rs.Applied())
 	}
 }

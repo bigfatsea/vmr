@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 00:30, by Fable 5 -->
+<!-- Ver 2026-07-08 08:10, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -82,8 +82,9 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 
 * **请求体一律入口缓冲**（流式也是）：failover 重放的前提。
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
-* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+body，保留客户端可解析的厂商错误结构）；无候选可试 → 503。所有响应带 `X-VMR-Endpoint` / `X-VMR-Attempts`。
-* **请求侧 Header 透传**：上游只看到 Content-Type、协议头（`anthropic-version`、`anthropic-beta`）、以及 chatHandler 黑名单之外的客户端 header（§5.4）。客户端 `Authorization`/`x-api-key` 绝不到上游，凭证由 Adapter 注入；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
+* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503。所有响应带 `X-VMR-Attempts`（成功另带 `X-VMR-Endpoint`）。
+* **请求侧 Header 透传**：黑名单之外的客户端 header 全部透传（含 `anthropic-version`/`anthropic-beta` 协议头，§5.4），Content-Type 与凭证由 Adapter 统一设置。客户端 `Authorization`/`x-api-key` 绝不到上游；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
+* **响应侧 Header 透传**：与请求侧对称——上游响应头默认全部透传（`x-ratelimit-*`、request id、`Date`、`Retry-After`、`Content-Encoding`…），只剥 hop-by-hop（Connection/Keep-Alive/TE/Trailer/Transfer-Encoding/Upgrade/Proxy-*）与 `Content-Length`（归一化可能改变长度，Go 重新成帧）。客户端看到的头与直连一致，仅多出 `X-VMR-*`。
 
 ### 4.2 模块划分
 
@@ -133,7 +134,7 @@ type Adapter interface {
 // 新增 Provider 协议 = internal/adapter/<name>/ 一个包 + main.go 一行 blank import
 ```
 
-`CanonicalRequest{Model, Stream, Raw, Header}`：只解析路由所需字段，`Raw` 保留原始字节（前向兼容）；`Header` 是服务端白名单后的协议头子集。model 改写：`map[string]json.RawMessage` 局部替换 `model` 键，未知字段字节原样（不保证键序，无语义影响）。
+`CanonicalRequest{Model, Stream, Raw, Header}`：只解析路由所需字段，`Raw` 保留原始字节（前向兼容）；`Header` 是黑名单过滤后的客户端 header（凭证已剥除，含 `anthropic-version` 等协议头，§5.4）。model 改写：`map[string]json.RawMessage` 局部替换 `model` 键，未知字段字节原样（不保证键序，无语义影响）。
 
 ### 错误分类（决定 failover 质量的关键）
 
@@ -171,12 +172,13 @@ LLM SDK 发出的 header 集合是已知且固定的——里面**没有**危险
 | `Cookie` / `Proxy-Authorization` | 浏览器/代理会话状态，与 LLM API 无关 |
 | `X-Forwarded-*` / `X-Real-Ip` | IP 欺骗向量，上游可能据此做访问控制 |
 | `Host` / `Content-Length` / `Transfer-Encoding` / `Connection` | Go Transport 自动管理，传过去会冲突 |
+| `Accept-Encoding` | 手工设置会关闭 Go Transport 的透明 gzip：上游若返回压缩体，响应归一化的 regex 会在 gzip 字节上跑，且客户端只收到 Content-Type（拿不到 Content-Encoding）——必须让 Transport 自己协商并解压，各层始终处理明文 |
 
 **与「必须由 Adapter 覆盖」的几项不冲突**：`Authorization` 在 blocklist 里**也是**由 Adapter 用 `Header.Set` 覆盖，blocklist 是第二道防线（如果上游意外处理了一个客户端的 Authorization，VMR 至少不会主动转发）。这种「belt and suspenders」是必要的——Header.Set 覆盖只对 Adapter 构造的请求有效，对 VMR 自己生成的请求（如 `/admin/status`）不适用。
 
 ### 5.5 响应侧归一化（`internal/router/response.go`）
 
-上游的响应进入 VMR 后、转发到客户端之前，跑一个**单遍归一化**。两个 Adapter（OpenAI、Anthropic）的 TransformBody 走的是「协议内部透传」——**Adapter 之间不做转换**，这是 §3 的设计原则。但光透传会让上游的「指纹」原样到达客户端，**部分客户端 SDK 会因此失灵**：
+上游的响应进入 VMR 后、转发到客户端之前，经过一个**归一化层**。两个 Adapter（OpenAI、Anthropic）的 TransformBody 走的是「协议内部透传」——**Adapter 之间不做转换**，这是 §3 的设计原则。但光透传会让上游的「指纹」原样到达客户端，**部分客户端 SDK 会因此失灵**：
 
 | 问题 | 表现 | 原因 |
 | --- | --- | --- |
@@ -186,21 +188,26 @@ LLM SDK 发出的 header 集合是已知且固定的——里面**没有**危险
 | 上游不发 `data: [DONE]` | 客户端 SDK 的 stream 终止逻辑靠 EOF 而非 `[DONE]`，正常路径没问题，**边界条件下触发 `APIUserAbortError`** | MiniMax 直接关 TCP |
 | MiniMax thinking=medium 下以纯文本 `Thinking Process:` + 编号小节 1-5 + `Final Polish` 草稿输出思考 | 思考+草稿直接展示给用户（`Reasoning: off` 是 UI 开关，**不影响模型行为**） | 模型在 thinking=medium 下不写 `<think>` 标签 |
 
-**5 步归一化**（上游 2xx 触发，EOF 时单遍执行）：
+**指导原则：直连等价**。客户端经 VMR 收到的字节应与直连上游一致，仅有的偏离是（a）`model` 字段改回虚拟名（虚拟模型抽象的根基），（b）两个 MiniMax-M3 专属修复——且只在**确认命中其确切形态**时才触发，失手时的行为=直连行为，永不更差。
 
-1. **Rewrite `"model"`** —— 响应每个 chunk 的 `"model":"<upstream>"` 全部替换为 `"model":"<client_virtual_model>"`。直接用 `regexp.ReplaceAll` + 字符串字面量，O(n) 一遍。
-2. **Strip `<think>...</think>` 块** —— `(?s)<think>.*?</think>` 非贪婪；`[\s\S]` 是为了跨 `\n`（SSE 数据行可能跨行）。
-3. **Trim trailing newline** —— `</think>\n\n` 替换为 `</think>`，避免助手消息每轮以两个换行起头。
-4. **Strip "Thinking Process:" 结构化思考** —— MiniMax 在 `thinking=medium` 下输出**整段编号小节 + Final Polish 草稿**，最后用自认可标记 `Looks good. Pro` / `Looks good. Proceed` 结束思考开始最终回复。按 SSE `\n\n` 切分 data: line（JSON-escaped 内容里没有真实 `\n\n`，切分安全），丢弃含 thinking 的中间 data: line，在末行 content 字段里从 `Pro` / `Proceed` 之后开始截取。**只在 buf 开头检测到 `Thinking Process:` 字面量时触发**——避免误杀正常回复里包含 `Looks good. Pro` 短语的场景（pass-through by design）。
-5. **Append `data: [DONE]\n\n`** —— 只对流式响应（`isSSE=true`），非流式响应是单 JSON 对象，加了会破坏 JSON 合法性。
+**双传输模式**（按响应逐个决定）：
 
-**关键设计决策：内存缓冲整个响应，单遍 regex，不做流式状态机**。
+* **passthrough（SSE 缺省）**：逐 SSE 事件实时转发——真流式，除 model 改写外字节一致。首个承载有效载荷的事件（非空 `content`/`text`/`reasoning_content`/`thinking` 值、`tool_calls`、`partial_json`）一旦证明响应**不是** MiniMax 思考形态，立即定型为透传；此前仅暂扣 role marker/ping 等零载荷小事件。
+* **buffered**：整体缓冲，EOF 时单遍 regex 归一化。用于：非 SSE 响应（单 JSON，客户端本来就等完整体）；首个载荷事件含 `<think>` 或 content 以 `Thinking Process:` 开头的 SSE（思考期间客户端本就无正文可看，缓冲无体验损失）；未及判定即 EOF 的小流。**`<think>` 触发的缓冲在 closer 到达后恢复流式**（剥掉 think 块、已缓冲部分一次吐出、其余实时转发）——客户端只等了思考阶段；`Thinking Process:` 形态的结束标记在响应末尾才可识别，无法恢复，只能全缓冲。缓冲上限 32MB，超限放弃归一化降级为原样透传（=直连行为）。
+* **opaque**：上游响应带 `Content-Encoding`（Go Transport 未透明解压的压缩形态）→ 原样转发零变换——对压缩字节跑 regex 只会损坏它。
 
-最初实现的是「200 字节 carry + 字节级状态机」做 think 块剥离——实测发现 200 字节 carry 装不下 3000+ 字节的 think 块（regex 永远找不到 closer），而且状态机在 `IN_THINK` 时 output=0，tail 取自 output 会让 input 字节丢失；flushTail 时 state 重入 `IN_THINK` 又把残留 think 内容吐出来。**换了 4 个版本都有 corner case**。
+**变换清单**（每项触发条件独立，实际生效的集合记入审计 `attempts[].norm`）：
 
-最终改用「内存缓冲整个响应 + 单遍 regex pass」：chat completions 上限几百 KB，**无压力**。Streaming 价值不大——用户反正要等模型完整响应，client 看到第一个 chunk 和最后一个 chunk 的延迟差对体验可忽略。代码从 ~250 行简化到 ~125 行，单遍过完所有变换。代价：失去真流式（客户端在响应完整前看不到任何 chunk），但 MiniMax M3 一次响应通常 5-30 秒，权衡可接受。
+| 变换 | 触发条件 | norm 标记 |
+| --- | --- | --- |
+| `"model"` 改写回虚拟名 | 事件/响应体中出现顶层 `"model":"…"`（JSON 转义的 `\"` 不会误命中 content 内文本） | `model_rewrite` |
+| 剥 `<think>...</think>` 块 + closer 后的 `\n` 填充（转义与真实换行都收） | 缓冲模式且 regex 命中 | `think_strip` |
+| 剥 "Thinking Process:" 结构化思考 | **守卫：首个 `"content":"` 值以 `Thinking Process:` 开头**（前导转义空白可跳过）+ 存在 `Looks good. Pro(ceed)` 自认可标记；按 `\n\n` 切 data: line，弃中间思考行、末行从标记后截取；marker 即首行时原地截取不复制 | `thinking_process_strip` |
+| 追加 `data: [DONE]\n\n` | **仅 openai 协议 + SSE + 上游未发**（MiniMax 直接关流；上游已发绝不重复；Anthropic 协议无此哨兵，永不追加） | `done_appended` |
 
-`isSSE` 标志在构造时确定（`newRespStream(body, creq.Model, creq.Stream)`），决定第 5 步是否追加 `[DONE]`——非流式 JSON 响应加 `[DONE]` 会破坏 JSON 合法性。
+`isSSE` 由上游响应的 `Content-Type` 判定（含 `text/event-stream`；缺失时回退到客户端的 `stream` 字段），而非盲信请求参数——上游若忽略 `stream` 返回 JSON，原样透传。
+
+**历史教训**：v1 的「200 字节 carry + 字节级状态机」换了 4 个版本都有 corner case（carry 装不下 3000+ 字节 think 块、IN_THINK 时 input 字节丢失、flushTail 重入吐残留）；v2 的「全量缓冲 + 单遍 regex」正确但假流式——TTFB=完整生成时长，逼近 OpenAI SDK 的 `X-Stainless-Timeout: 120` 预算（实测 97K prompt 的请求生成 59s）。v3（现行）以**完整 SSE 事件**为处理单位：事件内 JSON 完整，model 改写无跨界问题；跨事件的 think 块只在确认命中后进入缓冲，缓冲的正确性 = v2 的单遍 regex。状态机的复杂度病灶在「字节级切分」，不在「模式切换」。
 
 ---
 
@@ -318,17 +325,19 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
       "url": "https://api.deepseek.com/anthropic/v1/messages",
       "dur_ms": 320,
       "request":  { "headers": {...}, "body": {...} },
-      "response": { "status": 200, "headers": {...} }    // 见下：成功尝试不存 body
+      "response": { "status": 200, "headers": {...} },   // 见下：成功尝试不存 body
+      "norm": ["model_rewrite", "done_appended"]         // 实际生效的响应归一化步骤（§5.5）
     }
   ]
 }
 ```
 
-三条约定（统计脚本必须知道）：
+四条约定（统计脚本必须知道）：
 
-1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份。失败尝试的错误 body（≤64KB）存在 attempt 内。
+1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
 2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 超过 1MiB 截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。
+4. **`attempts[].error` 的形态**：错误类别裸词（`auth`/`rate_limit`/…）或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`。`vmr report` 聚合时按首个 `:` 前缀归桶，保证错误分布表的基数有界。
 
 ### 9.3 实现要点
 
@@ -388,6 +397,8 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
+**启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。仓库根的 `vmr.sh` 提供 daemon 化的 start/stop/restart/status/logs（无 PID 文件，按二进制绝对路径 `pgrep -f` 匹配；start 前先 `vmr check`，坏配置拒绝拉起；日志与审计缺省落 `logs/`）。
+
 ---
 
 ## 11. 关键决策与取舍
@@ -416,11 +427,13 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint`/审计 `attempts[].endpoint` 的格式多一段，两处都是人读字符串，没有内部逻辑解析它 |
 | Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合（§12.2）保留逃生舱 |
 | 请求侧 Header 默认透传 + 小型黑名单（§5.4） | 严格白名单（最初实现） | LLM SDK 发的 header 集合已知且无危险（不会发 Cookie / X-Forwarded-For），全杀掉反而丢 User-Agent / X-Stainless-* / Traceparent 这些上游做 cache 路由决策需要的元数据。blocklist 只剥真正会出问题的几项（凭证、IP 欺骗、Go Transport 管理的几个），其余透传。OpenClaw 验证生效后反过来证明：原白名单太严苛是因为没区分「协议实现内部白名单」与「代理透传黑名单」的职责 |
-| 响应侧归一化：内存缓冲 + 单遍 regex（§5.5） | 200 字节 carry + 字节级状态机 | 4 个版本的状态机实现都有 corner case（think 块超过 carry 大小、IN_THINK 时 input 字节丢失、flushTail 重入状态机把残留 think 吐出来）。chat completions 上限几百 KB，**单遍 regex 正确性 >> 流式延迟**。代价：客户端在响应完整前看不到任何 chunk（fake streaming 损失），但对 MiniMax M3 这种 5-30 秒响应来说可忽略 |
-| Rewrite `"model"` 字段必须做（§5.5 第 1 步） | 上游 model 名原样转发 | OpenAI JS SDK 假设 `response.model === request.model`，不一致会按 model 做 prompt cache 关联时**静默丢消息**。这是「代理」和「路由」概念被破坏的根——「我发了 agent 收的也必须是 agent」是虚拟模型抽象的根基 |
-| Strip `<think>` 标签必须做（§5.5 第 2 步） | 原样转发 | MiniMax M3 thinking 模式下把推理放在 content 里。如果不剥，思考被持久化进 assistant message，下一轮 prompt 含上轮思考 → 模型陷入自我指涉的反馈循环。audit log 中 line 4-27 的 24 轮 tool-use 循环就是反馈循环的典型表现：模型反复 read() 不存在的文件，prompt_tokens 16K → 43K，line 3 直接撞 483K tokens 返 finish_reason=length |
-| Strip "Thinking Process:" 启发式只对 thinking=medium 触发（§5.5 第 4 步） | 总是触发 | OpenClaw 的 `Reasoning: off` 是 UI 开关，**不影响模型行为**——模型在 thinking=medium 下不写 `<think>` 标签，直接以纯文本 "Thinking Process:" + 编号小节 1-5 + Final Polish 草稿输出思考。**只在 buf 开头检测到 "Thinking Process:" 字面量时触发**——避免误杀正常回复里包含 "Looks good. Pro" 短语的场景。启发式看的是 SSE `\n\n` 分隔的 data: line（JSON-escaped 内容里没有真实 `\n\n`），丢弃含 thinking 的中间 line，保留首条（role marker）和末条（含 "Pro" 标记），从 `Pro` / `Proceed` 之后开始截取最终回复 |
-| Append `data: [DONE]` 只对流式响应（§5.5 第 5 步） | 总是追加 | 非流式响应是单 JSON 对象，加 `data: [DONE]\n\n` 会破坏 JSON 合法性。`isSSE` 标志在构造时确定 |
+| 响应侧归一化：双模式——事件级透传缺省，确认命中思考形态才缓冲（§5.5） | 全量缓冲单遍 regex（v2）/ 字节级状态机（v1） | v1 换 4 版都有 corner case（病灶在字节级切分）；v2 正确但假流式，TTFB=完整生成时长，逼近 OpenAI SDK 120s 超时预算，且对不需要修复的 provider（DeepSeek/OpenRouter）也失去流式。v3 以完整 SSE 事件为单位：事件内 JSON 完整、regex 无跨界；think 缓冲在 closer 后恢复流式；失手时=直连行为，永不更差 |
+| 响应头默认透传 + hop-by-hop 黑名单（§4.1） | 只转发 Content-Type（旧实现） | 与请求侧同一逻辑：白名单丢 `Retry-After`（客户端 SDK 自身退避失效）、`x-ratelimit-*`、request id（找厂商排障的唯一凭据）。错误路径同样透传，全败时最后一次上游错误连头带体原样返回 |
+| [DONE] 仅 openai 协议且上游缺失时补 | 无条件追加（旧实现） | 旧实现对已发 [DONE] 的上游（DeepSeek/OpenRouter）产生双哨兵、对 Anthropic 流注入协议外内容（stainless SDK 恰好容忍属于运气）。条件化后与直连字节一致 |
+| 归一化痕迹记入审计 `attempts[].norm` | 不记录 | 成功尝试不存 body 的约定建立在"透传恒等"上，归一化打破了恒等；norm 列表让"上游发的和客户端收的差在哪"在日志里自解释，debug 不用猜 |
+| Rewrite `"model"` 字段必须做（§5.5） | 上游 model 名原样转发 | OpenAI JS SDK 假设 `response.model === request.model`，不一致会按 model 做 prompt cache 关联时**静默丢消息**。这是「代理」和「路由」概念被破坏的根——「我发了 agent 收的也必须是 agent」是虚拟模型抽象的根基 |
+| Strip `<think>` 标签必须做（§5.5） | 原样转发 | MiniMax M3 thinking 模式下把推理放在 content 里。如果不剥，思考被持久化进 assistant message，下一轮 prompt 含上轮思考 → 模型陷入自我指涉的反馈循环。audit log 中 line 4-27 的 24 轮 tool-use 循环就是反馈循环的典型表现：模型反复 read() 不存在的文件，prompt_tokens 16K → 43K，line 3 直接撞 483K tokens 返 finish_reason=length |
+| Strip "Thinking Process:" 启发式只对 thinking=medium 触发（§5.5） | 总是触发 | OpenClaw 的 `Reasoning: off` 是 UI 开关，**不影响模型行为**——模型在 thinking=medium 下不写 `<think>` 标签，直接以纯文本 "Thinking Process:" + 编号小节 1-5 + Final Polish 草稿输出思考。**触发守卫：首个 `"content":"` 值以 "Thinking Process:" 字面量开头**——避免误杀正常回复里包含 "Looks good. Pro" 短语的场景（2026-07-08 审计实测：无守卫时此类回复的前置 chunk 被静默丢弃、非流式 body 被复制成两个 JSON 对象）。启发式看的是 SSE `\n\n` 分隔的 data: line（JSON-escaped 内容里没有真实 `\n\n`），丢弃含 thinking 的中间 line，保留首条（role marker）和末条（含 "Pro" 标记），从 `Pro` / `Proceed` 之后开始截取最终回复；marker 即首行时原地截取不复制，重组时保留末尾空元素以维持 `[DONE]` 前的 SSE 分隔 |
 
 ---
 

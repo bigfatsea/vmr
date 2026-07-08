@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-08 07:40, by Fable 5
 
 // Package report turns audit JSONL files (design doc §8.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"vmr/internal/audit"
@@ -228,6 +229,11 @@ func addAttempt(ep *EndpointRow, a *audit.Attempt) {
 		cls := a.Error
 		if cls == "" {
 			cls = "unknown"
+		}
+		// Detail-carrying errors ("network: dial tcp …", "truncated: …")
+		// are bucketed by their prefix so the class table stays bounded.
+		if i := strings.IndexByte(cls, ':'); i > 0 {
+			cls = cls[:i]
 		}
 		ep.ErrorClasses[cls]++
 	}

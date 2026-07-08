@@ -134,7 +134,7 @@ func TestAuditRecordsRejectedAndErrorRequests(t *testing.T) {
 	u := newUpstream(t)
 	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_key: sk-vmr"))
 
-	chat(t, ts, simpleReq, nil)                                              // 401 unauthorized
+	chat(t, ts, simpleReq, nil)                                                  // 401 unauthorized
 	chat(t, ts, `not json`, map[string]string{"Authorization": "Bearer sk-vmr"}) // 400 bad json
 
 	recs := readRecords(t, al)

@@ -370,8 +370,8 @@ models:
 		Stream   bool   `json:"stream"`
 		Client   struct {
 			Response struct {
-				Status  int               `json:"status"`
-				Body    json.RawMessage   `json:"body"`
+				Status  int                 `json:"status"`
+				Body    json.RawMessage     `json:"body"`
 				Headers map[string][]string `json:"headers"`
 			} `json:"response"`
 		} `json:"client"`
