@@ -14,11 +14,27 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// MaxBodyBytes caps every recorded body; longer bodies are cut and flagged.
-const MaxBodyBytes = 1 << 20
+// maxBodyBytes caps every recorded body; longer bodies are cut and flagged.
+// It tracks the router's max_body_mb (set at startup and on hot reload) so a
+// request VMR accepts is never truncated in its own audit trail; responses
+// get the same allowance. Atomic because hot reload writes while requests read.
+var maxBodyBytes atomic.Int64
+
+func init() { maxBodyBytes.Store(1 << 20) }
+
+// SetMaxBodyBytes updates the recording cap; non-positive values are ignored.
+func SetMaxBodyBytes(n int64) {
+	if n > 0 {
+		maxBodyBytes.Store(n)
+	}
+}
+
+// MaxBodyBytes reports the current recording cap.
+func MaxBodyBytes() int64 { return maxBodyBytes.Load() }
 
 // Record is one audit line. Two layers: Client is the caller↔vmr exchange,
 // Attempts are the vmr↔provider exchanges (one entry per failover attempt).
@@ -77,8 +93,8 @@ func EncodeBody(body []byte) (any, bool) {
 		return nil, false
 	}
 	truncated := false
-	if len(body) > MaxBodyBytes {
-		body, truncated = body[:MaxBodyBytes], true
+	if cap := int(MaxBodyBytes()); len(body) > cap {
+		body, truncated = body[:cap], true
 	}
 	if !truncated && json.Valid(body) {
 		return json.RawMessage(append([]byte(nil), body...)), false

@@ -158,6 +158,9 @@ func cmdStart(args []string) error {
 		return fmt.Errorf("build routes: %w", err)
 	}
 	rt.Install(snap)
+	// Audit recording cap tracks the request-body limit so a request VMR
+	// accepts is never truncated in its own audit trail.
+	audit.SetMaxBodyBytes(cfg.MaxBodyBytes())
 
 	logConfigSummary(logger, cfg, snap)
 
@@ -174,6 +177,7 @@ func cmdStart(args []string) error {
 			return
 		}
 		rt.Install(newSnap)
+		audit.SetMaxBodyBytes(newCfg.MaxBodyBytes())
 		logger.Printf("reload(%s) ok", trigger)
 		logConfigSummary(logger, newCfg, newSnap)
 	}
@@ -191,7 +195,11 @@ func cmdStart(args []string) error {
 		}
 	}()
 
-	srv := &http.Server{Addr: cfg.Listen, Handler: server.New(rt, auditLog).Handler()}
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           server.New(rt, auditLog).Handler(),
+		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
+	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, countNested(cfg.Models))
 	return srv.ListenAndServe()
 }
@@ -351,11 +359,7 @@ func cmdStatus(args []string) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		proto := ""
-		if eps := st.Models[name]; len(eps) > 0 {
-			proto = " [" + eps[0].Protocol + "]"
-		}
-		fmt.Println(name + proto)
+		fmt.Println(name) // key is already "name [protocol]"
 		for _, ep := range st.Models[name] {
 			state := "ok"
 			if !ep.Available {

@@ -31,7 +31,7 @@ func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
 	}
-	if room := audit.MaxBodyBytes - r.buf.Len(); room > 0 {
+	if room := int(audit.MaxBodyBytes()) - r.buf.Len(); room > 0 {
 		r.buf.Write(p[:min(len(p), room)])
 	}
 	r.written += int64(len(p))

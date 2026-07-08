@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -52,8 +51,6 @@ func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.Can
 	}
 	return httpReq, nil
 }
-
-func (OpenAI) TransformBody(body io.ReadCloser, stream bool) io.ReadCloser { return body }
 
 func (OpenAI) ClassifyError(status int, body []byte) core.ErrorClass {
 	return adapter.DefaultClassify(status, body)

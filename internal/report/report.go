@@ -106,7 +106,9 @@ func Build(paths []string, now time.Time) (*Report, error) {
 			return nil, err
 		}
 		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 1<<20), 16<<20) // audit lines can be large (1MiB bodies ×N)
+		// One line can hold several bodies, each capped at max_body_mb
+		// (default 8MiB) — size the scanner generously.
+		sc.Buffer(make([]byte, 1<<20), 128<<20)
 		for sc.Scan() {
 			var rec audit.Record
 			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {

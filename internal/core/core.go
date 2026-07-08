@@ -2,11 +2,27 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 )
+
+// MarshalNoEscape is json.Marshal without HTML escaping and without the
+// trailing newline json.Encoder adds. Every place VMR re-serializes client
+// JSON (model rewrite, image downscaling) uses this: the default marshal
+// would rewrite < > & in message content to \uXXXX — semantically identical,
+// but a gratuitous byte-level deviation from what a direct call would send.
+func MarshalNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
 
 // CanonicalRequest is the routing view of a chat request. Both supported
 // ingress protocols (OpenAI chat completions, Anthropic messages) carry

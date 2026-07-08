@@ -42,9 +42,9 @@ func TestEncodeBody(t *testing.T) {
 	if b, tr := EncodeBody(nil); b != nil || tr {
 		t.Errorf("empty body: %v %v", b, tr)
 	}
-	big := strings.Repeat("x", MaxBodyBytes+100)
+	big := strings.Repeat("x", int(MaxBodyBytes())+100)
 	b, tr := EncodeBody([]byte(big))
-	if !tr || len(b.(string)) != MaxBodyBytes {
+	if !tr || len(b.(string)) != int(MaxBodyBytes()) {
 		t.Errorf("truncation: tr=%v len=%d", tr, len(b.(string)))
 	}
 }

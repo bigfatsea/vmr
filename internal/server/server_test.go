@@ -321,7 +321,7 @@ func TestAdminStatus(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	eps := out.Models["vm"]
+	eps := out.Models["vm [openai]"]
 	if len(eps) != 2 {
 		t.Fatalf("endpoints: %+v", eps)
 	}

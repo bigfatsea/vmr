@@ -135,14 +135,6 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			return
 		}
 
-		// Global concurrency gate: excess requests park here until a slot
-		// frees, or the client goes away.
-		release, ok := s.rt.AcquireSlot(r.Context())
-		if !ok {
-			return // client canceled while waiting; nothing to write
-		}
-		defer release()
-
 		snap := s.rt.Snapshot()
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
@@ -159,6 +151,17 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			}
 			return
 		}
+
+		// Global concurrency gate: excess requests park here until a slot
+		// frees, or the client goes away. Acquired AFTER the body is
+		// buffered so a slow upload never occupies a slot — the gate
+		// covers the CPU-and-upstream phase (image downscaling included),
+		// not client I/O.
+		release, ok := s.rt.AcquireSlot(r.Context())
+		if !ok {
+			return // client canceled while waiting; nothing to write
+		}
+		defer release()
 
 		// Request-only image downscaling: shrinks oversized inline
 		// attachments before routing so vision-token cost doesn't scale
@@ -244,11 +247,15 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 		Priority int    `json:"priority"`
 		health.Status
 	}
+	// Keyed "name [protocol]": the same virtual-model name may exist in
+	// both protocol groups (§10), and mixing their endpoints under one
+	// key reads as one model with double the endpoints.
 	out := map[string][]epStatus{}
 	for protocol, byName := range snap.Models {
 		for name, route := range byName {
+			key := name + " [" + protocol + "]"
 			for _, ep := range route.Endpoints {
-				out[name] = append(out[name], epStatus{
+				out[key] = append(out[key], epStatus{
 					Endpoint: ep.Name(),
 					Protocol: protocol,
 					Priority: ep.Priority,

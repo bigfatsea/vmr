@@ -24,6 +24,8 @@ import (
 	_ "image/png"
 	"strings"
 
+	"vmr/internal/core"
+
 	"golang.org/x/image/draw"
 
 	_ "golang.org/x/image/bmp"
@@ -101,12 +103,12 @@ func rewriteBody(body []byte, protocol string, maxPx int) ([]byte, bool, error) 
 	if !changed {
 		return nil, false, nil
 	}
-	newMsgs, err := json.Marshal(msgs)
+	newMsgs, err := core.MarshalNoEscape(msgs)
 	if err != nil {
 		return nil, false, err
 	}
 	top["messages"] = newMsgs
-	out, err := json.Marshal(top)
+	out, err := core.MarshalNoEscape(top)
 	if err != nil {
 		return nil, false, err
 	}
@@ -138,12 +140,12 @@ func rewriteMessage(raw json.RawMessage, protocol string, maxPx int) (json.RawMe
 	if !changed {
 		return raw, false, nil
 	}
-	newContent, err := json.Marshal(blocks)
+	newContent, err := core.MarshalNoEscape(blocks)
 	if err != nil {
 		return raw, false, err
 	}
 	msg["content"] = newContent
-	out, err := json.Marshal(msg)
+	out, err := core.MarshalNoEscape(msg)
 	if err != nil {
 		return raw, false, err
 	}
@@ -187,17 +189,17 @@ func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, m
 		return raw, false, nil
 	}
 	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
-	uv, err := json.Marshal(newURL)
+	uv, err := core.MarshalNoEscape(newURL)
 	if err != nil {
 		return raw, false, err
 	}
 	iu["url"] = uv
-	ib, err := json.Marshal(iu)
+	ib, err := core.MarshalNoEscape(iu)
 	if err != nil {
 		return raw, false, err
 	}
 	block["image_url"] = ib
-	out, err := json.Marshal(block)
+	out, err := core.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, err
 	}
@@ -225,22 +227,22 @@ func rewriteAnthropicImage(raw json.RawMessage, block map[string]json.RawMessage
 	if err != nil || !changed {
 		return raw, false, nil
 	}
-	mv, err := json.Marshal(newMime)
+	mv, err := core.MarshalNoEscape(newMime)
 	if err != nil {
 		return raw, false, err
 	}
-	dv, err := json.Marshal(base64.StdEncoding.EncodeToString(newData))
+	dv, err := core.MarshalNoEscape(base64.StdEncoding.EncodeToString(newData))
 	if err != nil {
 		return raw, false, err
 	}
 	src["media_type"] = mv
 	src["data"] = dv
-	sb, err := json.Marshal(src)
+	sb, err := core.MarshalNoEscape(src)
 	if err != nil {
 		return raw, false, err
 	}
 	block["source"] = sb
-	out, err := json.Marshal(block)
+	out, err := core.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, err
 	}

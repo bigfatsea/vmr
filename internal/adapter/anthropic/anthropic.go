@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -56,8 +55,6 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	}
 	return httpReq, nil
 }
-
-func (Anthropic) TransformBody(body io.ReadCloser, stream bool) io.ReadCloser { return body }
 
 func (Anthropic) ClassifyError(status int, body []byte) core.ErrorClass {
 	if status == 529 { // Anthropic-specific: overloaded_error

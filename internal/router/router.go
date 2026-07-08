@@ -107,9 +107,15 @@ func (rt *Router) Install(s *Snapshot) {
 		DialContext:           (&net.Dialer{Timeout: s.Cfg.Timeouts.Connect.D()}).DialContext,
 		ResponseHeaderTimeout: s.Cfg.Timeouts.ResponseHeader.D(),
 		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
 	}}
 	rt.installLimiter(s.Cfg.MaxConcurrency)
-	rt.snap.Store(s)
+	if old := rt.snap.Swap(s); old != nil && old.client != nil {
+		// Release the previous pool's idle connections now instead of
+		// waiting for GC. In-flight requests still holding the old
+		// snapshot are unaffected — their connections are active.
+		old.client.CloseIdleConnections()
+	}
 }
 
 func (rt *Router) Snapshot() *Snapshot { return rt.snap.Load() }
@@ -310,7 +316,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		var outBody []byte
 		if req.GetBody != nil {
 			if rc, err := req.GetBody(); err == nil {
-				outBody, _ = io.ReadAll(io.LimitReader(rc, audit.MaxBodyBytes+1))
+				outBody, _ = io.ReadAll(io.LimitReader(rc, audit.MaxBodyBytes()+1))
 				rc.Close()
 			}
 		}
@@ -377,7 +383,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// response body, which the server layer records.
 		att.Response = &audit.Message{Status: resp.StatusCode, Headers: audit.Redact(resp.Header)}
 	}
-	body := ad.TransformBody(resp.Body, creq.Stream)
+	body := resp.Body
 	defer body.Close()
 
 	// Forward the upstream's response headers (minus hop-by-hop) so the

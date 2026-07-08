@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 08:10, by Fable 5 -->
+<!-- Ver 2026-07-08 12:15, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -64,8 +64,8 @@ POST /v1/messages           Anthropic 协议 → 只路由到 Anthropic 兼容�
 ```
 Client ── POST /v1/chat/completions | /v1/messages
   │
-Server     审计记录开始 → 鉴权(可选) → 并发闸 → 缓冲请求体(≤8MB,413)
-  │        → 解析 model/stream，其余字节不动
+Server     审计记录开始 → 鉴权(可选) → 缓冲请求体(≤8MB,413) → 并发闸
+  │        → 图片降采样(可选) → 解析 model/stream，其余字节不动
   ▼
 Router     查 Virtual Model → 校验协议 → 健康过滤 → 稳定多键排序 → 候选序列
   │
@@ -122,13 +122,12 @@ internal/imgprep           请求内联图片降采样（§7）
 
 ## 5. Adapter 机制（扩展性核心）
 
-接口四个方法；注册用 `database/sql` 驱动模式（编译期注册，非运行时插件）：
+接口三个方法；注册用 `database/sql` 驱动模式（编译期注册，非运行时插件）。响应体不经过 Adapter——协议内透传是硬原则，仅有的响应处理（§5.5 归一化）在 router 层，曾经预留的 `TransformBody` 恒等方法从未有过第二种实现，已删（预留即负债）：
 
 ```go
 type Adapter interface {
     Protocol() string          // "openai" | "anthropic"：该 Adapter 服务的入口协议
     BuildRequest(ctx, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error)
-    TransformBody(body io.ReadCloser, stream bool) io.ReadCloser   // 透传型恒等返回
     ClassifyError(status int, body []byte) core.ErrorClass
 }
 // 新增 Provider 协议 = internal/adapter/<name>/ 一个包 + main.go 一行 blank import
@@ -207,6 +206,8 @@ LLM SDK 发出的 header 集合是已知且固定的——里面**没有**危险
 
 `isSSE` 由上游响应的 `Content-Type` 判定（含 `text/event-stream`；缺失时回退到客户端的 `stream` 字段），而非盲信请求参数——上游若忽略 `stream` 返回 JSON，原样透传。
 
+**已知边界：quirk 修复靠全局嗅探而非按端点声明**。think-strip / Thinking Process strip 对所有 provider 的响应做形态检测，而不是只对声明了该 quirk 的 endpoint 启用。理论误伤面：某个模型合法地以 `<think>` 或 `Thinking Process:` 开头输出正文（比如复述用户给的模板），会被误剥。选择嗅探的理由：误伤需要「响应开头恰好命中触发形态」这个低概率前提，而 endpoint 级 `quirks:` 配置是一个新概念 + 新配置面 + 用户须理解各厂内部行为才能填对——目前的守卫（首个载荷事件的前缀判定）已把误伤面压到足够小，为它引入配置维度不划算。若未来实际发生误伤，升级路径是加 endpoint 级开关，嗅探逻辑可整体复用。
+
 **历史教训**：v1 的「200 字节 carry + 字节级状态机」换了 4 个版本都有 corner case（carry 装不下 3000+ 字节 think 块、IN_THINK 时 input 字节丢失、flushTail 重入吐残留）；v2 的「全量缓冲 + 单遍 regex」正确但假流式——TTFB=完整生成时长，逼近 OpenAI SDK 的 `X-Stainless-Timeout: 120` 预算（实测 97K prompt 的请求生成 59s）。v3（现行）以**完整 SSE 事件**为处理单位：事件内 JSON 完整，model 改写无跨界问题；跨事件的 think 块只在确认命中后进入缓冲，缓冲的正确性 = v2 的单遍 regex。状态机的复杂度病灶在「字节级切分」，不在「模式切换」。
 
 ---
@@ -272,6 +273,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 可选全局上限 `max_concurrency`（缺省 0 = 不限）：
 
 * 两个聊天入口共用一个信号量；超限请求**在内存中挂起等待**（channel 阻塞，近似 FIFO），不排队列、不设等待超时（客户端自有超时，服务端再加一层是重复机制）。
+* **闸在请求体缓冲完成之后获取**：慢客户端的上传阶段不占槽，闸覆盖的是 CPU（图片降采样）与上游往返阶段——否则几个慢 POST 就能占满全局并发饿死正常请求。
 * 等待期间客户端断开 → 立即出队。
 * 只闸聊天入口；`/v1/models`、`/admin/status` 不受限。
 * 热重载仅当容量变化才换信号量；换闸瞬间新旧持有者叠加、短暂超额（秒级边界行为，可接受）。
@@ -335,13 +337,13 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 四条约定（统计脚本必须知道）：
 
 1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
-2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 超过 1MiB 截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
+2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 的记录上限**联动 `max_body_mb`**（缺省 8MiB，热重载同步）——VMR 接受的请求绝不会在自己的审计里被截断，响应享有同等额度；超限截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。
 4. **`attempts[].error` 的形态**：错误类别裸词（`auth`/`rate_limit`/…）或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`。`vmr report` 聚合时按首个 `:` 前缀归桶，保证错误分布表的基数有界。
 
 ### 9.3 实现要点
 
-`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限即 1MiB）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
+`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限联动 `max_body_mb`）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
 
 ### 9.4 统计分析工具 `vmr report`
 

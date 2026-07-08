@@ -116,7 +116,7 @@ image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
 
 ## 审计日志
 
-默认开启，每个聊天请求记一行 JSONL：调用方与上游两层的完整 request/response（凭证掩码、单 body 上限 1MiB）、每次上游尝试的错误类别与实际生效的归一化步骤（`attempts[].norm`），供事后 debug 与统计脚本使用。
+默认开启，每个聊天请求记一行 JSONL：调用方与上游两层的完整 request/response（凭证掩码、单 body 记录上限联动 `max_body_mb`）、每次上游尝试的错误类别与实际生效的归一化步骤（`attempts[].norm`），供事后 debug 与统计脚本使用。
 
 ```bash
 ./vmr start -c config.yaml                # 写入 $VMR_LOG_DIR（未设置则系统临时目录）
@@ -149,4 +149,4 @@ jq '.model, .outcome, .dur_ms' vmr-audit-2026-07-07.jsonl   # body 为合法 JSO
 go test -race ./...
 ```
 
-新增 Provider：OpenAI/Anthropic 兼容的厂商直接在对应协议分组下加一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现四方法接口 + `cmd/vmr/main.go` 一行 blank import，之后 `providers.<name>`/`models.<name>` 自动可用（设计文档 §5）。
+新增 Provider：OpenAI/Anthropic 兼容的厂商直接在对应协议分组下加一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现三方法接口 + `cmd/vmr/main.go` 一行 blank import，之后 `providers.<name>`/`models.<name>` 自动可用（设计文档 §5）。

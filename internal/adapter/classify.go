@@ -70,18 +70,21 @@ func contentHint(snippet string) bool {
 
 // RewriteModel replaces only the "model" key, keeping every other field's raw
 // bytes intact so unknown upstream parameters stay forward-compatible.
-// (JSON key order is not preserved; that carries no semantics.)
+// (JSON key order is not preserved; that carries no semantics.) HTML escaping
+// is disabled: the default json.Marshal would rewrite every < > & in message
+// content to \uXXXX — semantically identical, but a gratuitous byte-level
+// deviation from what a direct call would send.
 func RewriteModel(raw json.RawMessage, model string) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, err
 	}
-	mv, err := json.Marshal(model)
+	mv, err := core.MarshalNoEscape(model)
 	if err != nil {
 		return nil, err
 	}
 	m["model"] = mv
-	return json.Marshal(m)
+	return core.MarshalNoEscape(m)
 }
 
 func containsAny(s string, subs ...string) bool {

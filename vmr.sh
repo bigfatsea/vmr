@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-08 07:55, by Fable 5
+# Ver 2026-07-08 12:15, by Fable 5
 #
 # vmr.sh — start/stop the VMR daemon.
 #
@@ -19,6 +19,8 @@ cd "$(dirname "$0")"
 BIN="$PWD/vmr"
 CFG="$PWD/config.yaml"
 LOG_DIR="${VMR_LOG_DIR:-$PWD/logs}"   # audit JSONL + server log; override via env
+# Audit files rotate daily but are never deleted. Prune old ones with e.g.:
+#   find "$LOG_DIR" -name 'vmr-audit-*.jsonl' -mtime +30 -delete
 SERVER_LOG="$LOG_DIR/vmr.log"
 MATCH="$BIN start"                    # absolute path → unambiguous process match
 

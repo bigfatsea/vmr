@@ -1,10 +1,9 @@
-// Ver 2026-07-07 01:55, by Fable 5
+// Ver 2026-07-08 12:15, by Fable 5
 package adapter
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -15,7 +14,9 @@ import (
 // Adapter carries requests to one provider protocol family and back.
 // Adding a provider = one package implementing these methods + one blank import.
 // VMR never converts between protocols: an adapter's Protocol() names the
-// ingress protocol it serves, and routing stays within that protocol.
+// ingress protocol it serves, and routing stays within that protocol —
+// response bodies flow back untouched (the router's normalizer handles the
+// few guarded quirk repairs; see internal/router/response.go).
 type Adapter interface {
 	// Protocol names the ingress protocol this adapter speaks ("openai", "anthropic").
 	// A virtual model's endpoints must all share one protocol.
@@ -24,10 +25,6 @@ type Adapter interface {
 	// BuildRequest turns the canonical request into the provider's HTTP request
 	// (URL, headers, body rewrite). It must inject the provider's credentials.
 	BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error)
-
-	// TransformBody converts the provider response body to the ingress format.
-	// Compatible providers return the body unchanged (zero copy).
-	TransformBody(body io.ReadCloser, stream bool) io.ReadCloser
 
 	// ClassifyError maps a provider error response to a unified class that
 	// drives failover and cooldown.
