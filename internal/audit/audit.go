@@ -36,6 +36,23 @@ func SetMaxBodyBytes(n int64) {
 // MaxBodyBytes reports the current recording cap.
 func MaxBodyBytes() int64 { return maxBodyBytes.Load() }
 
+// retentionDays gates the delete side of housekeeping (see housekeep.go).
+// 0 = disabled: compression on rotation still happens, files just never get
+// deleted. Deliberately opt-in rather than defaulting to a "reasonable"
+// number — audit logs are the only source for vmr report cost accounting,
+// and silently deleting them is not a mistake worth defaulting into.
+var retentionDays atomic.Int64
+
+// SetRetentionDays updates the retention window; negative values are ignored.
+func SetRetentionDays(n int) {
+	if n >= 0 {
+		retentionDays.Store(int64(n))
+	}
+}
+
+// RetentionDays reports the current retention window (0 = keep forever).
+func RetentionDays() int { return int(retentionDays.Load()) }
+
 // Record is one audit line. Two layers: Client is the caller↔vmr exchange,
 // Attempts are the vmr↔provider exchanges (one entry per failover attempt).
 type Record struct {
@@ -147,6 +164,9 @@ type Logger struct {
 	date string
 	f    *os.File
 	now  func() time.Time // injectable for tests
+
+	housekeeping atomic.Bool    // guards against overlapping sweeps
+	hkWG         sync.WaitGroup // lets Close (and tests) wait for a sweep to finish
 }
 
 // Dir resolves the audit directory: $VMR_LOG_DIR, or the system temp dir.
@@ -161,7 +181,34 @@ func New(dir string) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Logger{dir: dir, now: time.Now}, nil
+	l := &Logger{dir: dir, now: time.Now}
+	// Catch up on anything left uncompressed/unpurged by a previous run
+	// (crash, restart, or simply not having been up when a day rolled over).
+	l.scheduleHousekeeping()
+	return l, nil
+}
+
+// scheduleHousekeeping runs housekeep in the background: never on the
+// request-serving or audit-write path, and never more than one sweep at a
+// time. A no-op if a sweep is already in flight — the next trigger (daily
+// rotation, or the next process start) will catch anything missed.
+//
+// Callers must hold l.mu or otherwise guarantee l.dir/l.now aren't
+// concurrently mutated (true both in New, before the Logger escapes, and in
+// Write's locked rotation branch) — dir and now are snapshotted here so the
+// spawned goroutine never touches Logger fields directly, only its own
+// copies plus the housekeeping/hkWG synchronization primitives.
+func (l *Logger) scheduleHousekeeping() {
+	if !l.housekeeping.CompareAndSwap(false, true) {
+		return
+	}
+	dir, now := l.dir, l.now()
+	l.hkWG.Add(1)
+	go func() {
+		defer l.hkWG.Done()
+		defer l.housekeeping.Store(false)
+		housekeep(dir, now)
+	}()
 }
 
 // Path returns the file the next write would go to.
@@ -192,6 +239,9 @@ func (l *Logger) Write(rec *Record) error {
 			return fmt.Errorf("audit open: %w", err)
 		}
 		l.f, l.date = f, date
+		// Rotated to a new day: the file(s) just left behind are done being
+		// written to and are fair game for compression/retention.
+		l.scheduleHousekeeping()
 	}
 	_, err = l.f.Write(append(line, '\n'))
 	return err

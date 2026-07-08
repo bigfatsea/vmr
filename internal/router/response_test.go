@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:15, by Fable 5 (post-audit 2026-07-08 fixes)
+// Ver 2026-07-08 20:15, by Sonnet 5 (post-audit 2026-07-08 fixes)
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -617,5 +617,105 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 	}
 	if !got["think_strip"] || !got["resumed_stream"] {
 		t.Errorf("applied = %v, want think_strip + resumed_stream", rs.Applied())
+	}
+}
+
+// TestRespStream_UndecidedOverflowDegradesToOpaque is a regression test:
+// bufferedCap used to guard only modeBuffered. A stream that never produces
+// a decisive event — e.g. Anthropic's periodic "ping" keepalive events sent
+// during a long wait before the first real content — would grow s.pending
+// without bound while stuck in modeUndecided. Large chunks (rather than many
+// tiny simulated pings) keep this test fast: what's under test is the byte
+// count crossing bufferedCap, not the shape of any one event.
+func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
+	rs := newRespStream(strings.NewReader(""), "agent", true, "openai", false)
+	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"
+	for i := 0; i < 40 && !rs.opaque; i++ {     // 40MB > bufferedCap (32MB)
+		rs.ingest(filler)
+	}
+	if !rs.opaque {
+		t.Fatal("expected the stream to degrade to opaque after crossing bufferedCap while undecided")
+	}
+	if rs.pending != nil {
+		t.Errorf("pending should be drained into out on overflow, got %d bytes left", len(rs.pending))
+	}
+	if len(rs.out) < bufferedCap {
+		t.Errorf("accumulated bytes should have been flushed to out, got %d", len(rs.out))
+	}
+	found := false
+	for _, a := range rs.Applied() {
+		if a == "overflow_raw_passthrough" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("applied should record overflow_raw_passthrough, got %v", rs.Applied())
+	}
+
+	// Once opaque, further bytes pass raw with no attempted normalization —
+	// direct-connection behavior, same contract as the modeBuffered overflow path.
+	rs.ingest([]byte(`data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"hi"}}]}` + "\n\n"))
+	if !strings.Contains(string(rs.out), `"model":"MiniMax-M3"`) {
+		t.Errorf("post-overflow bytes must pass through raw (no model rewrite), got tail=%q",
+			string(rs.out[len(rs.out)-200:]))
+	}
+}
+
+// TestSoftBlockDetected_NonStreaming covers the buffered path (finalizeBuffered):
+// a MiniMax 2xx body embedding input_sensitive must be recorded in Applied()
+// as an observation, with the client-visible bytes left untouched.
+func TestSoftBlockDetected_NonStreaming(t *testing.T) {
+	in := `{"id":"1","input_sensitive":true,"choices":[{"message":{"role":"assistant","content":""}}],"model":"MiniMax-M3"}`
+	rs := newRespStream(strings.NewReader(in), "agent", false, "openai", false)
+	out := readAll(t, rs)
+	if !strings.Contains(out, `"input_sensitive":true`) {
+		t.Errorf("soft-block marker must reach the client unchanged (detection-only), got %q", out)
+	}
+	if !strings.Contains(out, `"model":"agent"`) {
+		t.Errorf("model rewrite must still apply alongside detection, got %q", out)
+	}
+	found := false
+	for _, a := range rs.Applied() {
+		if a == "soft_block_detected" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("applied should record soft_block_detected, got %v", rs.Applied())
+	}
+}
+
+// TestSoftBlockDetected_Streaming covers the passthrough path (emitBlock):
+// the marker can arrive inside an ordinary SSE data: line and must still be
+// flagged without altering transport mode or bytes.
+func TestSoftBlockDetected_Streaming(t *testing.T) {
+	roleLine := `data: {"delta":{"role":"assistant"}}` + "\n\n"
+	textLine := `data: {"delta":{"content":"hi"},"output_sensitive":true}` + "\n\n"
+	rs := newRespStream(strings.NewReader(roleLine+textLine), "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if !strings.Contains(out, `"output_sensitive":true`) {
+		t.Errorf("soft-block marker must reach the client unchanged, got %q", out)
+	}
+	found := false
+	for _, a := range rs.Applied() {
+		if a == "soft_block_detected" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("applied should record soft_block_detected, got %v", rs.Applied())
+	}
+}
+
+// TestSoftBlockDetected_NoFalsePositive is a control: an ordinary response
+// with neither marker must never gain the norm entry.
+func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
+	in := `{"id":"1","choices":[{"message":{"content":"all good"}}],"model":"m"}`
+	rs := newRespStream(strings.NewReader(in), "agent", false, "openai", false)
+	readAll(t, rs)
+	for _, a := range rs.Applied() {
+		if a == "soft_block_detected" {
+			t.Errorf("false positive: applied=%v for a clean response", rs.Applied())
+		}
 	}
 }

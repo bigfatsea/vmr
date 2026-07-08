@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 20:15, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -87,8 +87,9 @@ type Config struct {
 	APIKey              string                            `yaml:"api_key"`
 	MaxAttempts         int                               `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
 	MaxBodyMB           int                               `yaml:"max_body_mb"`
-	MaxConcurrency      int                               `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
-	ImageDownscaleMaxPx int                               `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images
+	MaxConcurrency      int                               `yaml:"max_concurrency"`      // 0 = unlimited; excess requests wait in memory
+	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images
+	AuditRetentionDays  int                               `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
 	Timeouts            Timeouts                          `yaml:"timeouts"`
 	Providers           map[string]map[string]Provider    `yaml:"providers"`
 	Models              map[string]map[string]ModelConfig `yaml:"models"`
@@ -133,8 +134,14 @@ func (c *Config) applyDefaults() {
 	if c.MaxAttempts < 0 {
 		c.MaxAttempts = 0
 	}
+	if c.MaxConcurrency < 0 {
+		c.MaxConcurrency = 0
+	}
 	if c.ImageDownscaleMaxPx < 0 {
 		c.ImageDownscaleMaxPx = 0
+	}
+	if c.AuditRetentionDays < 0 {
+		c.AuditRetentionDays = 0
 	}
 	if c.MaxBodyMB <= 0 {
 		c.MaxBodyMB = DefaultMaxBodyMB

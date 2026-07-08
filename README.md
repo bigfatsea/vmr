@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 15:40, by Fable 5 -->
+<!-- Ver 2026-07-08 19:30, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -16,7 +16,7 @@ English | [简体中文](README.zh.md)
 - **Byte-faithful passthrough** — no intermediate representation, no protocol translation, ever. Requests and responses match a direct provider call byte-for-byte, headers included, except the virtual↔real model-name rewrite and a few guarded, evidence-based provider quirk repairs. Unknown API parameters pass through untouched — new provider features work the day they ship.
 - **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
 - **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
-- **Flight-recorder audit log** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, error classes, and the exact list of normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics.
+- **Flight-recorder audit log** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, error classes, and the exact list of normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics, including a cache-hit breakdown of input tokens. Old days auto-compress to `.zst` (20–75× smaller, `vmr report` reads it transparently) and can auto-expire via `audit_retention_days`.
 - **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; one config knob, off by default, fail-open.
 - **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Dependencies: `yaml.v3`, `fsnotify`, `golang.org/x/image`. That's the whole list.
 
@@ -75,6 +75,7 @@ listen: 127.0.0.1:8800
 # max_body_mb: 8               # request body buffer limit; also caps audit body recording
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
 # image_downscale: 512         # long-side px cap for inline request images (default: off)
+# audit_retention_days: 30     # delete audit files older than this (default: keep forever)
 # timeouts:
 #   connect: 10s               # upstream dial
 #   response_header: 120s      # upstream time-to-first-byte
@@ -133,10 +134,12 @@ On by default: one JSONL line per request with both layers (client↔vmr and eve
 ./vmr start -c config.yaml -audit=false    # off
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report logs/vmr-audit-*.jsonl        # → vmr-report.json + vmr-report.md
+./vmr report 'logs/vmr-audit-*.jsonl*'     # → vmr-report.json + vmr-report.md (plain + .zst mix ok)
 ```
 
-`vmr report` aggregates tokens *and* bytes (bytes as the fallback when a provider omits usage): per date × protocol × model rows, per-endpoint availability and error distribution, latency percentiles, throughput. The JSON is the data source for any dashboarding you want to build on top.
+`vmr report` aggregates tokens *and* bytes (bytes as the fallback when a provider omits usage): per date × protocol × model rows, per-endpoint availability and error distribution, latency percentiles, throughput. Token totals also split out cache-read and (Anthropic) cache-write tokens, so you can see how much of your input-token bill is actually cache hits. The JSON is the data source for any dashboarding you want to build on top.
+
+Agent workloads resend the full conversation on every turn, so a day's log can run into gigabytes — mostly repeated across lines, not within one. Each day's file rotates and compresses automatically once it's no longer "today": zstd on the whole file (not per-line) catches that cross-line repetition, typically 20–75× smaller in practice — far beyond what compressing each record on its own could reach, since a single record never sees the previous turn's near-duplicate body. `vmr report` reads `.jsonl` and `.jsonl.zst` interchangeably, so point it at a glob covering both. Set `audit_retention_days` to also delete files past a given age (default: keep forever — nothing is deleted unless you opt in); either way, deletion and compression are both keyed off the date in the filename, so housekeeping never needs to scan or `stat` the whole log directory. Details and the numbers behind this: `docs/AuditLogCompression_Analysis_Sonnet5.md`.
 
 ## Request image downscaling
 
@@ -156,7 +159,7 @@ image_downscale: 512   # long-side px cap; 0 or absent = off
 | `GET /admin/status` | endpoint health + concurrency metrics (loopback only) |
 | `vmr check -c config.yaml` | validate config, print routing table and key status |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
-| `vmr report [-o dir] <glob>` | audit logs → usage statistics (JSON + Markdown) |
+| `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics (JSON + Markdown) |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |
 

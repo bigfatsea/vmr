@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-08 14:40, by Fable 5
+# Ver 2026-07-08 20:15, by Sonnet 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -36,8 +36,10 @@ cd "$(dirname "$0")"
 BIN="$PWD/vmr"
 CFG="$PWD/config.yaml"
 LOG_DIR="${VMR_LOG_DIR:-$PWD/logs}"   # audit JSONL + server log; override via env
-# Audit files rotate daily but are never deleted. Prune old ones with e.g.:
-#   find "$LOG_DIR" -name 'vmr-audit-*.jsonl' -mtime +30 -delete
+# Audit files rotate daily and auto-compress to .zst on rotation (20-75x
+# smaller; vmr report reads both transparently). They're kept forever unless
+# you set audit_retention_days in config.yaml — that's the supported way to
+# expire them; see docs/AuditLogCompression_Analysis_Sonnet5.md.
 SERVER_LOG="$LOG_DIR/vmr.log"
 MATCH="$BIN start"                    # absolute path → unambiguous process match
 

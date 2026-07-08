@@ -67,6 +67,9 @@ func usage() {
 }
 
 // cmdReport aggregates audit JSONL files into vmr-report.json + vmr-report.md.
+// Inputs may freely mix live plain .jsonl files and .jsonl.zst files that the
+// audit logger's housekeeping sweep has since compressed (internal/report
+// decompresses transparently) — e.g. `vmr report 'vmr-audit-*.jsonl*'`.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	outDir := fs.String("o", ".", "output directory")
@@ -137,9 +140,20 @@ func cmdStart(args []string) error {
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
+	// reads the retention window at the moment it runs — SetRetentionDays
+	// (and SetMaxBodyBytes, same reasoning) must land before New, not after,
+	// or that first sweep compresses old files but never purges them.
+	audit.SetMaxBodyBytes(cfg.MaxBodyBytes())
+	audit.SetRetentionDays(cfg.AuditRetentionDays)
+
 	var auditLog *audit.Logger
 	if *auditOn {
-		var err error
 		if auditLog, err = audit.New(audit.Dir()); err != nil {
 			return fmt.Errorf("audit log: %w", err)
 		}
@@ -149,19 +163,12 @@ func cmdStart(args []string) error {
 		logger.Printf("audit log disabled (-audit=false)")
 	}
 
-	cfg, err := config.Load(*path)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
 	rt := router.New(logger)
 	snap, err := router.BuildSnapshot(cfg)
 	if err != nil {
 		return fmt.Errorf("build routes: %w", err)
 	}
 	rt.Install(snap)
-	// Audit recording cap tracks the request-body limit so a request VMR
-	// accepts is never truncated in its own audit trail.
-	audit.SetMaxBodyBytes(cfg.MaxBodyBytes())
 
 	logConfigSummary(logger, cfg, snap)
 
@@ -179,6 +186,7 @@ func cmdStart(args []string) error {
 		}
 		rt.Install(newSnap)
 		audit.SetMaxBodyBytes(newCfg.MaxBodyBytes())
+		audit.SetRetentionDays(newCfg.AuditRetentionDays)
 		logger.Printf("reload(%s) ok", trigger)
 		logConfigSummary(logger, newCfg, newSnap)
 	}
@@ -232,8 +240,12 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	if cfg.ImageDownscaleMaxPx > 0 {
 		imgScale = fmt.Sprintf("%dpx", cfg.ImageDownscaleMaxPx)
 	}
-	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s",
-		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale)
+	retention := "forever"
+	if cfg.AuditRetentionDays > 0 {
+		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
+	}
+	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s audit_retention=%s",
+		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, retention)
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
 

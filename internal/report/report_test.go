@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestExtractUsage(t *testing.T) {
@@ -200,6 +202,63 @@ func TestPercentiles(t *testing.T) {
 	p50, p95 = percentiles(durs)
 	if p50 != 500 || p95 != 950 {
 		t.Errorf("100 samples: p50=%d p95=%d", p50, p95)
+	}
+}
+
+// TestBuild_ReadsCompressedInput proves Build can consume a .zst file
+// exactly like a plain one — the companion half of the audit package's
+// housekeeping sweep (internal/audit/housekeep.go), which compresses
+// rotated-out days to .zst. Without this, compressing old logs would make
+// them invisible to `vmr report`.
+func TestBuild_ReadsCompressedInput(t *testing.T) {
+	dir := t.TempDir()
+	zstPath := filepath.Join(dir, "vmr-audit-2026-07-07.jsonl.zst")
+	f, err := os.OpenFile(zstPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := zstd.NewWriter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enc.Write([]byte(day1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Build([]string{zstPath}, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same fixture as buildTestReport's day1 half: 4 valid lines, 1 bad line.
+	if rep.Meta.Records != 4 || rep.Meta.ParseErrors != 1 {
+		t.Errorf("meta: %+v", rep.Meta)
+	}
+	var cheap7 *Row
+	for i := range rep.Rows {
+		if rep.Rows[i].Date == "2026-07-07" && rep.Rows[i].Model == "cheap" {
+			cheap7 = &rep.Rows[i]
+		}
+	}
+	if cheap7 == nil || cheap7.TokensIn != 30 || cheap7.TokensOut != 400 {
+		t.Fatalf("cheap7 from compressed input: %+v", cheap7)
+	}
+}
+
+// TestOpenAuditFile_RejectsGarbageZst confirms a malformed .zst input surfaces
+// as an error from Build rather than silently reading garbage or panicking.
+func TestOpenAuditFile_RejectsGarbageZst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vmr-audit-2026-07-07.jsonl.zst")
+	if err := os.WriteFile(path, []byte("not a zstd frame"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build([]string{path}, time.Now()); err == nil {
+		t.Error("expected an error reading a non-zstd .zst file, got nil")
 	}
 }
 

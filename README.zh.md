@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 15:40, by Fable 5 -->
+<!-- Ver 2026-07-08 19:30, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -16,7 +16,7 @@
 - **字节级透传** —— 没有中间表示，永不做协议翻译。请求与响应和直连供应商字节一致（含响应头），仅有的例外是虚拟名↔真实名的 model 字段改写和几个有触发守卫、有实证依据的厂商怪癖修复。未知 API 参数原样通过——上游新功能上线当天即可用。
 - **真流式** —— SSE 事件到达即转发。归一化器只在检测到厂商"思考内联"病理形态时才缓冲，且 `</think>` 闭合后立即恢复实时流。
 - **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
-- **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计。
+- **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计，含输入 token 的缓存命中细分。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍，`vmr report` 透明读取），也可用 `audit_retention_days` 设置自动过期。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；一个配置项，默认关闭，fail-open。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。依赖只有 `yaml.v3`、`fsnotify`、`golang.org/x/image`，就这些。
 
@@ -74,6 +74,7 @@ listen: 127.0.0.1:8800
 # max_body_mb: 8               # 请求体缓冲上限；同时决定审计 body 记录上限
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭
+# audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
 # timeouts:
 #   connect: 10s               # 连接上游
 #   response_header: 120s      # 上游首字节
@@ -132,10 +133,12 @@ models:
 ./vmr start -c config.yaml -audit=false    # 关闭
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report logs/vmr-audit-*.jsonl        # → vmr-report.json + vmr-report.md
+./vmr report 'logs/vmr-audit-*.jsonl*'     # → vmr-report.json + vmr-report.md（明文/.zst 混着传也行）
 ```
 
-`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）：按 日期×协议×模型 的行、按端点的可用度与错误分布、延迟分位、吞吐。JSON 是二次开发（图表/Dashboard）的数据源。
+`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）：按 日期×协议×模型 的行、按端点的可用度与错误分布、延迟分位、吞吐。Token 统计还拆出了缓存读取（以及 Anthropic 的缓存写入）部分，方便看清输入 token 里有多少是缓存命中。JSON 是二次开发（图表/Dashboard）的数据源。
+
+Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见 `docs/AuditLogCompression_Analysis_Sonnet5.md`。
 
 ## 请求图片自动降采样
 
@@ -155,7 +158,7 @@ image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
 | `GET /admin/status` | 端点健康 + 并发指标（仅 loopback） |
 | `vmr check -c config.yaml` | 校验配置、打印路由表与 Key 状态 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
-| `vmr report [-o dir] <glob>` | 审计日志 → 用量统计（JSON + Markdown） |
+| `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计（JSON + Markdown） |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 

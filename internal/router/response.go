@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:40, by Fable 5
+// Ver 2026-07-08 20:15, by Sonnet 5
 //
 // Response normalizer. Guiding principle: what the client receives through
 // VMR must match what it would receive calling the provider directly, except
@@ -40,6 +40,14 @@
 //
 // Every transform actually applied is recorded (applied list) so the audit
 // log can explain any byte difference between upstream and client.
+//
+// One entry in that list is detection-only, not a transform: a MiniMax 2xx
+// response can embed a compliance flag (input_sensitive/output_sensitive)
+// instead of erroring — a "soft block" the failover loop cannot see because
+// it never sees a non-2xx status. When spotted, "soft_block_detected" is
+// added to the audit norm trail; the bytes reaching the client are
+// unchanged and health/failover are untouched (see design doc §5 known
+// boundary, and docs/SensitiveWordFilter_Analysis_Fable5.md §3.6 phase 1).
 package router
 
 import (
@@ -96,6 +104,27 @@ var (
 	doneSentinel          = []byte("data: [DONE]")
 	eventSep              = []byte("\n\n")
 )
+
+// softBlockMarkers flag MiniMax's "soft" content-policy block: a 2xx
+// response that embeds a compliance flag instead of erroring, per the design
+// doc §5 known-boundary note. Detection is observation-only — the byte
+// stream to the client is never altered, health/failover are untouched — it
+// only adds "soft_block_detected" to the audit norm trail (§9.2) so these
+// otherwise-invisible blocks become greppable instead of silently reaching
+// the client as an empty or substituted response.
+var softBlockMarkers = [][]byte{
+	[]byte(`"input_sensitive":true`),
+	[]byte(`"output_sensitive":true`),
+}
+
+func containsSoftBlockMarker(b []byte) bool {
+	for _, m := range softBlockMarkers {
+		if bytes.Contains(b, m) {
+			return true
+		}
+	}
+	return false
+}
 
 // passthroughStringMarkers / passthroughTokenMarkers are event contents
 // that prove the response carries well-behaved payload: reasoning in a
@@ -220,6 +249,17 @@ func (s *respStream) ingest(b []byte) {
 	case modeUndecided:
 		s.pending = append(s.pending, b...)
 		s.decide()
+		// A stream that never produces a decisive event (e.g. Anthropic's
+		// periodic keepalive "ping" events during a long wait) would
+		// otherwise grow s.pending without limit — the bufferedCap guard
+		// below only covered modeBuffered. Same degrade-to-opaque response
+		// as that overflow path: give up on normalization, flush raw.
+		if s.mode == modeUndecided && len(s.pending) > bufferedCap {
+			s.opaque = true
+			s.noteApplied("overflow_raw_passthrough")
+			s.out = append(s.out, s.pending...)
+			s.pending = nil
+		}
 	case modePassthrough:
 		s.pending = append(s.pending, b...)
 		s.emitComplete()
@@ -278,6 +318,9 @@ func (s *respStream) emitBlock(block []byte) {
 	if !s.sawDone && bytes.Contains(block, doneSentinel) {
 		s.sawDone = true
 	}
+	if containsSoftBlockMarker(block) {
+		s.noteApplied("soft_block_detected")
+	}
 	if modelFieldPattern.Match(block) {
 		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
@@ -323,6 +366,9 @@ func (s *respStream) finalizeBuffered() {
 	}
 	if bytes.Contains(b, doneSentinel) {
 		s.sawDone = true
+	}
+	if containsSoftBlockMarker(b) {
+		s.noteApplied("soft_block_detected")
 	}
 	s.tailNL = len(b) == 0 || bytes.HasSuffix(b, eventSep)
 	s.out = append(s.out, b...)

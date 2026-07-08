@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 15:30, by Sonnet 5 -->
+<!-- Ver 2026-07-08 20:15, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -101,11 +101,12 @@ internal/router            快照构建 + failover 循环 + 流转发 + 并发�
                             ├─ response.go  响应归一化器（详见 §5.5）
 internal/server            HTTP 入口、鉴权、Header 黑名单、审计录制、四个端点
 internal/audit             审计日志（JSONL 落盘）
-internal/report            审计日志聚合统计（vmr report）
+                            ├─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理（详见 §9.5）
+internal/report            审计日志聚合统计（vmr report，透明读取明文/.zst）
 internal/imgprep           请求内联图片降采样（§7）
 ```
 
-依赖 `gopkg.in/yaml.v3`、`fsnotify`、`golang.org/x/image`（图片降采样的 WEBP/BMP 解码与缩放，Go 官方扩展库），其余标准库——不用 Web/CLI 框架、不用任何 Provider SDK（透传路由只需"改 URL、注 Key、改 model 字段"，SDK 只带来二进制膨胀与版本纠缠）。
+依赖 `gopkg.in/yaml.v3`、`fsnotify`、`golang.org/x/image`（图片降采样的 WEBP/BMP 解码与缩放，Go 官方扩展库）、`github.com/klauspost/compress/zstd`（审计历史文件压缩，纯 Go 无 cgo，§9.5），其余标准库——不用 Web/CLI 框架、不用任何 Provider SDK（透传路由只需"改 URL、注 Key、改 model 字段"，SDK 只带来二进制膨胀与版本纠缠）。
 
 ### 4.3 端点一览
 
@@ -157,7 +158,7 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 
 嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 内容错被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
 
-**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive` 等字段）并可能返回空/替换内容。透传路径不检查 2xx body，此类"软拦截"对 vmr 不可见，原样到达客户端——这属于未来请求预处理插件的领域（§12）。
+**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器现在会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，§5.5），但**仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康——这是 `docs/SensitiveWordFilter_Analysis_Fable5.md` §3.6 建议的"第一阶段"（先把频率变成可量化的数字，再决定要不要做请求预处理插件，§12.1）。把这类响应变成主动拦截或自动 failover 仍是未实现的未来方向。
 
 ### 5.4 请求侧 Header 透传策略
 
@@ -203,6 +204,7 @@ LLM SDK 发出的 header 集合是已知且固定的——里面**没有**危险
 | 剥 `<think>...</think>` 块 + closer 后的 `\n` 填充（转义与真实换行都收） | 缓冲模式且 regex 命中 | `think_strip` |
 | 剥 "Thinking Process:" 结构化思考 | **守卫：首个 `"content":"` 值以 `Thinking Process:` 开头**（前导转义空白可跳过）+ 存在 `Looks good. Pro(ceed)` 自认可标记；按 `\n\n` 切 data: line，弃中间思考行、末行从标记后截取；marker 即首行时原地截取不复制 | `thinking_process_strip` |
 | 追加 `data: [DONE]\n\n` | **仅 openai 协议 + SSE + 上游未发**（MiniMax 直接关流；上游已发绝不重复；Anthropic 协议无此哨兵，永不追加） | `done_appended` |
+| 软拦截标记嗅探（**不改字节，仅记录**） | 响应体（buffered 整体或 passthrough 单个事件块）内出现 `"input_sensitive":true` 或 `"output_sensitive":true` | `soft_block_detected` |
 
 `isSSE` 由上游响应的 `Content-Type` 判定（含 `text/event-stream`；缺失时回退到客户端的 `stream` 字段），而非盲信请求参数——上游若忽略 `stream` 返回 JSON，原样透传。
 
@@ -336,21 +338,21 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 四条约定（统计脚本必须知道）：
 
-1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
+1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`**（§5.5）：它是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
 2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 的记录上限**联动 `max_body_mb`**（缺省 8MiB，热重载同步）——VMR 接受的请求绝不会在自己的审计里被截断，响应享有同等额度；超限截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。
 4. **`attempts[].error` 的形态**：错误类别裸词（`auth`/`rate_limit`/…）或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`。`vmr report` 聚合时按首个 `:` 前缀归桶，保证错误分布表的基数有界。
 
 ### 9.3 实现要点
 
-`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限联动 `max_body_mb`）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
+`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转，轮转时异步触发 §9.5 的压缩/保留扫描）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限联动 `max_body_mb`）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
 
 ### 9.4 统计分析工具 `vmr report`
 
 读取 §9.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §9.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
 
 ```
-vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
+vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst）
 ```
 
 * **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
@@ -361,6 +363,16 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
 * **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。
 * **tokens_in 缓存细分**（`internal/report/usage.go`）：`tokens_in` 是全部输入 token（含缓存），另拆出两个子集——`tokens_in_cached` 是缓存命中（Anthropic `cache_read_input_tokens` / OpenAI `usage.prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens`），`tokens_in_cache_write` 是仅 Anthropic 有的缓存新写入（`cache_creation_input_tokens`，按溢价计费，不算命中）。两者都已含在 `tokens_in` 里；新鲜（未命中）部分 = `tokens_in - tokens_in_cached - tokens_in_cache_write`，消费方按需自行相减，JSON 不重复存储比例。**两家上游对"总输入"的定义不同，提取时已做归一**：Anthropic 的 `input_tokens` 不含缓存两项，是分开计数的三个字段相加；OpenAI/DeepSeek 的 `prompt_tokens` 本身已含缓存命中，`cached_tokens`/`prompt_cache_hit_tokens` 只是从中圈出的子集，不可再相加。判据是 usage 对象里是否存在 `input_tokens` 键（Anthropic 独有字段名）。审计日志本身不需要改动——完整原始 body 早已落盘，这些字段只是之前没被读取。
 * **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度）与 T2（按日趋势、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算）。总览/按模型/按日趋势三张表新增"输入缓存命中"（命中占比 + 绝对量）与"缓存写入"（仅总览/按模型，Anthropic 专属，多数行为 `-`）两列。
+
+### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
+
+Agent 场景每轮请求都重发完整对话历史，单日审计文件可达 1~2GB，且体积主因是**跨行**冗余（相邻甚至相隔很远的记录之间大段重复），不是单行内部冗余——分析见 `docs/AuditLogCompression_Analysis_Sonnet5.md`（含本机真实日志的压缩比实测）。据此只压缩**已经轮转完毕、不再写入**的历史文件，且用能看到跨行重复的算法：
+
+* **触发时机**：复用 `Logger.Write` 已有的"日期变化即轮转"判断（无新增定时器/轮询）——检测到 `date != l.date` 时，除了切到新文件，额外对目录做一次 housekeeping 扫描；`New()` 也在启动时扫一次，补上进程重启期间错过的轮转。两处都异步执行（独立 goroutine，`atomic.Bool` 防止扫描重叠），绝不阻塞审计写入或请求服务。
+* **压缩**：zstd（`github.com/klauspost/compress/zstd`，纯 Go、无 cgo；库默认压缩级别，未手工调参）。选它是因为 stdlib 的 `compress/gzip` 只有 32KB 滑动窗口，看不到相隔几十万到百万字节的跨行重复，实测压缩比被死死摁在 ~3.3×；zstd 默认窗口是 MB 级别，天然覆盖这种重复模式，实测压缩比 20~75×（同一份日志换算不同压缩粒度的完整数据见分析报告 §2.3）。写入临时文件（`.zst.tmp`）→ 校验 → `rename` 落地 → 确认落地后才删除原文件，中途崩溃不会丢数据也不会留半截 `.zst`；重启后遇到"明文+`.zst` 同时存在"（rename 后、删除原文件前崩溃）视为续跑，直接补删原文件，不重新压缩。
+* **保留**：配置项 `audit_retention_days`（缺省 **0 = 永久保留，不清理**）。默认关闭是刻意的产品判断——审计日志是 `vmr report` 成本核算的唯一数据源，静默按天数删除对没读文档的用户是数据丢失风险，需要显式设置天数才启用。
+* **零全盘扫描**：审计文件名自带日期（`vmr-audit-YYYY-MM-DD.jsonl[.zst]`），压缩/保留判定只需一次 `os.ReadDir`（目录内条目数 = 保留的天数，不是磁盘总量）+ 文件名正则取日期比较，不解析文件内容、不 `stat` 全盘。同一次目录扫描里，一个文件如果"既该压缩又已过保留期"，本轮就直接压缩后立即删除，不用等到下一天的扫描才清理。
+* **`vmr report` 的配套**：§9.4 的 `Build` 按扩展名分支，`.zst` 输入透明解压后再喂给同一套 JSONL 解析——历史压缩文件与当天明文文件可以混在同一次 glob 里（`vmr report 'vmr-audit-*.jsonl*'`），调用方不需要关心哪个是哪个。
 
 ---
 
@@ -373,6 +385,7 @@ max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试�
 max_body_mb: 8                # 请求体缓冲上限（缺省 8，超限 413）
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
 image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭
+audit_retention_days: 0       # 审计文件保留天数（§9.5）；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
 timeouts:
   connect: 10s                # 连接上游（缺省 10s）
   response_header: 120s       # 上游首字节（缺省 120s）
@@ -398,7 +411,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
@@ -439,6 +452,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | Rewrite `"model"` 字段必须做（§5.5） | 上游 model 名原样转发 | OpenAI JS SDK 假设 `response.model === request.model`，不一致会按 model 做 prompt cache 关联时**静默丢消息**。这是「代理」和「路由」概念被破坏的根——「我发了 agent 收的也必须是 agent」是虚拟模型抽象的根基 |
 | Strip `<think>` 标签必须做（§5.5） | 原样转发 | MiniMax M3 thinking 模式下把推理放在 content 里。如果不剥，思考被持久化进 assistant message，下一轮 prompt 含上轮思考 → 模型陷入自我指涉的反馈循环。audit log 中 line 4-27 的 24 轮 tool-use 循环就是反馈循环的典型表现：模型反复 read() 不存在的文件，prompt_tokens 16K → 43K，line 3 直接撞 483K tokens 返 finish_reason=length |
 | Strip "Thinking Process:" 启发式只对 thinking=medium 触发（§5.5） | 总是触发 | OpenClaw 的 `Reasoning: off` 是 UI 开关，**不影响模型行为**——模型在 thinking=medium 下不写 `<think>` 标签，直接以纯文本 "Thinking Process:" + 编号小节 1-5 + Final Polish 草稿输出思考。**触发守卫：首个 `"content":"` 值以 "Thinking Process:" 字面量开头**——避免误杀正常回复里包含 "Looks good. Pro" 短语的场景（2026-07-08 审计实测：无守卫时此类回复的前置 chunk 被静默丢弃、非流式 body 被复制成两个 JSON 对象）。启发式看的是 SSE `\n\n` 分隔的 data: line（JSON-escaped 内容里没有真实 `\n\n`），丢弃含 thinking 的中间 line，保留首条（role marker）和末条（含 "Pro" 标记），从 `Pro` / `Proceed` 之后开始截取最终回复；marker 即首行时原地截取不复制，重组时保留末尾空元素以维持 `[DONE]` 前的 SSE 分隔 |
+| 审计历史文件压缩用 zstd（整文件、轮转时触发），不做单条记录压缩（§9.5） | 逐条记录 base64/zip 编码 | 本机真实日志实测：单条记录粒度的压缩（无论 gzip 还是 zip+base64）天花板只有 ~3.3×，因为 Agent 场景的冗余主要在跨记录（同一会话每轮重发历史），压缩窗口锁在一条记录内根本看不见；整文件 zstd（默认窗口已是 MB 级）实测 20~75×。逐条压缩还会打破 §9.2"合法 JSON 原样嵌入、可直接 jq 查询"的契约，且落在写路径上；整文件压缩挂在轮转边界，只碰不再写入的历史文件，当天文件保持明文可查询 |
+| 压缩/保留复用 Logger 已有的按日轮转边界触发，不设独立 ticker/cron（§9.5） | 周期性 timer 扫描 / 依赖外部 logrotate | 审计文件名自带日期，一次 `os.ReadDir` 即可判定压缩与保留对象，不需要周期性触发就能保证"至多晚一天生效"；新增 ticker 是额外的 goroutine 生命周期管理，外部 logrotate 依赖破坏 vmr"单二进制自包含"的定位（§1） |
+| `audit_retention_days` 缺省 0（永久保留） | 缺省一个"合理"天数（如 30） | 审计日志是 `vmr report` 成本核算的唯一数据源，非用户主动设置就被静默删除的风险 > 磁盘空间收益；压缩（§9.5 无条件发生）已经解决了大头的磁盘占用问题，保留期清理是可选的第二层 |
 
 ---
 
@@ -446,7 +462,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 ### 12.1 请求预处理插件（敏感词过滤，已规划未实现）
 
-目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截（§5 ErrContent）的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）也是唯一的事前防线。
+目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截（§5 ErrContent）的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）也是唯一的**事前**防线——响应侧现在能**事后观测**到这类拦截（`soft_block_detected`，§5.5），但不能阻止它发生，也不自动 failover。
 
 **本轮明确不预留接口**。理由：插件的词库形态、替换策略、是否需要按 Provider 差异化都未定，先挖的接口大概率与真实插件对不上；预留即负债。待插件设计定型后与其一起实现。§7 的图片降采样已经证明这个接入点可用，但走的是直接函数调用而非插件注册表——两者不是同一套机制。
 

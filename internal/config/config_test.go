@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-08 20:15, by Sonnet 5
 package config
 
 import (
@@ -93,6 +93,49 @@ func TestImageDownscaleNegativeClampsToDisabled(t *testing.T) {
 	}
 	if cfg.ImageDownscaleMaxPx != 0 {
 		t.Errorf("negative image_downscale must clamp to 0 (disabled), got %d", cfg.ImageDownscaleMaxPx)
+	}
+}
+
+func TestMaxConcurrencyNegativeClampsToUnlimited(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nmax_concurrency: -3", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxConcurrency != 0 {
+		t.Errorf("negative max_concurrency must clamp to 0 (unlimited), got %d", cfg.MaxConcurrency)
+	}
+}
+
+func TestAuditRetentionDaysDefaultsToDisabled(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuditRetentionDays != 0 {
+		t.Errorf("audit_retention_days: default must be 0 (never delete), got %d", cfg.AuditRetentionDays)
+	}
+}
+
+func TestAuditRetentionDaysConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\naudit_retention_days: 30", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuditRetentionDays != 30 {
+		t.Errorf("audit_retention_days: got %d, want 30", cfg.AuditRetentionDays)
+	}
+}
+
+func TestAuditRetentionDaysNegativeClampsToDisabled(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\naudit_retention_days: -5", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuditRetentionDays != 0 {
+		t.Errorf("negative audit_retention_days must clamp to 0 (disabled), got %d", cfg.AuditRetentionDays)
 	}
 }
 

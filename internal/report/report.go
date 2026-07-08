@@ -9,10 +9,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"vmr/internal/audit"
 )
@@ -114,11 +117,11 @@ func Build(paths []string, now time.Time) (*Report, error) {
 	var from, to time.Time
 
 	for _, path := range paths {
-		f, err := os.Open(path)
+		rc, err := openAuditFile(path)
 		if err != nil {
 			return nil, err
 		}
-		sc := bufio.NewScanner(f)
+		sc := bufio.NewScanner(rc)
 		// One line can hold several bodies, each capped at max_body_mb
 		// (default 8MiB) — size the scanner generously.
 		sc.Buffer(make([]byte, 1<<20), 128<<20)
@@ -161,7 +164,7 @@ func Build(paths []string, now time.Time) (*Report, error) {
 				addAttempt(ep, &a)
 			}
 		}
-		f.Close()
+		rc.Close()
 		if err := sc.Err(); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -195,6 +198,41 @@ func Build(paths []string, now time.Time) (*Report, error) {
 		return rep.Endpoints[i].Endpoint < rep.Endpoints[j].Endpoint
 	})
 	return rep, nil
+}
+
+// openAuditFile opens an audit JSONL file, transparently decompressing it if
+// the audit package's housekeeping sweep (internal/audit/housekeep.go) has
+// since rotated it into a .zst — historical and live files can be mixed in
+// the same glob without the caller caring which is which.
+func openAuditFile(path string) (io.ReadCloser, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(path, ".zst") {
+		return f, nil
+	}
+	dec, err := zstd.NewReader(f)
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return zstdReadCloser{dec, f}, nil
+}
+
+// zstdReadCloser adapts *zstd.Decoder — whose Close takes no error and
+// doesn't own the underlying reader — to io.ReadCloser over the file it
+// reads from.
+type zstdReadCloser struct {
+	dec *zstd.Decoder
+	f   *os.File
+}
+
+func (z zstdReadCloser) Read(p []byte) (int, error) { return z.dec.Read(p) }
+
+func (z zstdReadCloser) Close() error {
+	z.dec.Close()
+	return z.f.Close()
 }
 
 func addRecord(row *Row, rec *audit.Record) {
