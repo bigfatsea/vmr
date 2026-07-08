@@ -155,3 +155,7 @@ go test -race ./...
 Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the three-method interface + one blank import in `cmd/vmr/main.go`.
 
 Architecture and every design decision (with the war stories behind them): [design doc](VirtualModelRouter_v2_Fable5.md) (Chinese).
+
+## License
+
+[MIT](LICENSE)

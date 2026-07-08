@@ -155,3 +155,7 @@ go test -race ./...
 新增 Provider：OpenAI/Anthropic 兼容的厂商只是一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现三方法接口 + `cmd/vmr/main.go` 一行 blank import。
 
 架构与全部设计决策（含每条背后的事故账本）：[设计文档](VirtualModelRouter_v2_Fable5.md)。
+
+## 开源协议
+
+[MIT](LICENSE)
