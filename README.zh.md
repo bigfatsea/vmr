@@ -36,12 +36,19 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 ./vmr check -c config.yaml           # 校验配置并打印路由表
 ./vmr start -c config.yaml           # 前台运行；启动时打印完整配置摘要
 
-# 或用 vmr.sh 以 daemon 方式管理（先校验再拉起，日志/审计缺省落 logs/）：
-./vmr.sh start
-./vmr.sh status
-./vmr.sh logs
-./vmr.sh stop
+# dev 模式 —— 快速后台运行，你自己监督（先校验再拉起，日志落 logs/）：
+./vmr.sh start          # 另有 stop / restart / status / logs
+
+# service 模式 —— 交给操作系统 init 系统监督：崩溃自动重启 + 登录自启。
+# macOS → launchd user agent；Linux → systemd 用户单元。install 会渲染并注册
+# 服务描述文件，同时从当前 shell 抓取 config.yaml 引用的全部 ${VAR} 与代理变量
+# 生成 ~/.config/vmr/env（0600）——init 系统的环境是干净的，否则 key 全为空。
+./vmr.sh service install     # 注册并启动（幂等，改路径/配置后重跑即更新）
+./vmr.sh service status      # 另有 start / stop / restart / logs
+./vmr.sh service uninstall   # 停止并注销
 ```
+
+两种模式同一时间只用一种——`service install`/`start` 会自动停掉 dev 模式进程。macOS 下 service 模式的服务日志在 `~/Library/Logs/vmr.log`（TCC 不允许 launchd 对外置卷做文件操作）；审计日志照常跟随 `VMR_LOG_DIR`。
 
 把客户端的 Base URL 指向 vmr 即可：
 
@@ -142,7 +149,8 @@ image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
 | `vmr check -c config.yaml` | 校验配置、打印路由表与 Key 状态 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志 → 用量统计（JSON + Markdown） |
-| `./vmr.sh start\|stop\|restart\|status\|logs` | daemon 生命周期 |
+| `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
+| `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 
 经路由的响应带 `X-VMR-Endpoint`（实际命中端点）与 `X-VMR-Attempts`（尝试次数）。
 

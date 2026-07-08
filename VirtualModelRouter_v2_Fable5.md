@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 12:40, by Fable 5 -->
+<!-- Ver 2026-07-08 14:40, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -399,7 +399,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale` 负数在加载期钳制为 0（拒绝配置不如静默纠正——这不是一个能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
 
-**启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。仓库根的 `vmr.sh` 提供 daemon 化的 start/stop/restart/status/logs（无 PID 文件，按二进制绝对路径 `pgrep -f` 匹配；start 前先 `vmr check`，坏配置拒绝拉起；日志与审计缺省落 `logs/`）。
+**启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
+
+**vmr.sh（唯一脚本入口，双模式）**：dev 模式（`start/stop/restart/status/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置；service 模式（`service install/uninstall/start/stop/restart/status/logs`）把监督交给 init 系统——macOS 渲染 launchd user agent（`~/Library/LaunchAgents/com.vmr.plist`，KeepAlive+RunAtLoad，stop 走 `bootout` 避免 KeepAlive 复活被杀进程），Linux 渲染 systemd 用户单元（`Restart=always`；系统级部署把 unit 拷到 `/etc/systemd/system` 去掉 `--user` 即可）。模板内嵌于脚本（heredoc 注入绝对路径），不设独立模板目录。**环境是 service 模式的第一大坑**：init 系统不继承 shell 的 export，`install` 自动从当前 shell 抓取 config 引用的 `${VAR}` 与代理变量生成 `~/.config/vmr/env`（0600，存在则不覆盖），launchd 经 `set -a; . env` 加载（不 `set -a` 则 source 的变量不会进入 exec 后的进程环境），systemd 经 `EnvironmentFile=`。macOS 第二坑：TCC 禁止 launchd/sh 对外置卷做文件操作（spawn 报 EX_CONFIG / Operation not permitted），但 vmr 进程自身写卷不受限——故 plist 的 WorkingDirectory 指 `$HOME`、服务日志落 `~/Library/Logs/vmr.log`（macOS 惯例），审计照常写 `VMR_LOG_DIR`。两模式互斥：service install/start 自动停 dev 进程。均经 macOS 实机全周期验证（install→E2E→kill -9 自愈→stop→start→uninstall）。
 
 ---
 

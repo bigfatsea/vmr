@@ -36,12 +36,20 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 ./vmr check -c config.yaml           # validate config, print the routing table
 ./vmr start -c config.yaml           # foreground; prints a full config summary
 
-# or manage it as a daemon (validates first, logs/audit under logs/):
-./vmr.sh start
-./vmr.sh status
-./vmr.sh logs
-./vmr.sh stop
+# dev mode — quick background run, you supervise (validates first, logs under logs/):
+./vmr.sh start          # also: stop / restart / status / logs
+
+# service mode — the OS init system supervises: crash auto-restart + start at login.
+# macOS → launchd user agent; Linux → systemd user unit. `install` renders and
+# registers the unit, and generates ~/.config/vmr/env (0600) from your current
+# shell for every ${VAR} in config.yaml plus proxy vars — init systems start
+# with a clean environment and would otherwise see empty keys.
+./vmr.sh service install     # register + start (idempotent; rerun to update)
+./vmr.sh service status      # also: start / stop / restart / logs
+./vmr.sh service uninstall   # stop + unregister
 ```
+
+Pick one mode at a time — `service install`/`start` stops a dev-mode process automatically. On macOS the service-mode server log lives at `~/Library/Logs/vmr.log` (TCC keeps launchd file ops off external volumes); the audit log follows `VMR_LOG_DIR` as usual.
 
 Point your client's base URL at vmr and you're done:
 
@@ -142,7 +150,8 @@ image_downscale: 512   # long-side px cap; 0 or absent = off
 | `vmr check -c config.yaml` | validate config, print routing table and key status |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs → usage statistics (JSON + Markdown) |
-| `./vmr.sh start\|stop\|restart\|status\|logs` | daemon lifecycle |
+| `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
+| `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |
 
 Routed responses carry `X-VMR-Endpoint` (the endpoint that served it) and `X-VMR-Attempts` (tries used).
 
