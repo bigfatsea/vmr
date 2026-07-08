@@ -1,4 +1,4 @@
-# Ver 2026-07-07 01:55, by Fable 5
+# Ver 2026-07-08 22:40, by Fable 5
 
 # Binaries
 /vmr
@@ -26,7 +26,9 @@ coverage.html
 /vmr-report.json
 /vmr-report.md
 
+# Audit data (may contain full conversation bodies — never commit)
 *.jsonl
+*.jsonl.zst
 
 # Runtime logs (vmr.sh daemon + audit)
 /logs/
