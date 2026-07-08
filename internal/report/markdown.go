@@ -124,10 +124,13 @@ func (t *total) finish() {
 func rollupModels(rows []Row) []*total {
 	m := map[string]*total{}
 	for _, r := range rows {
-		g, ok := m[r.Model]
+		// Model + protocol: the same name in both protocol groups is two
+		// distinct models (mirrors the report row grain).
+		key := r.Model + "\x00" + r.Protocol
+		g, ok := m[key]
 		if !ok {
 			g = &total{Model: r.Model, Protocol: r.Protocol}
-			m[r.Model] = g
+			m[key] = g
 		}
 		g.add(r)
 	}

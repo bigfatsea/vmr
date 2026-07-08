@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 12:15, by Fable 5 -->
+<!-- Ver 2026-07-08 12:40, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -82,14 +82,14 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 
 * **请求体一律入口缓冲**（流式也是）：failover 重放的前提。
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
-* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503。所有响应带 `X-VMR-Attempts`（成功另带 `X-VMR-Endpoint`）。
+* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503。凡进入 failover 循环的响应带 `X-VMR-Attempts`（成功另带 `X-VMR-Endpoint`）；路由之前被拒的请求（401/404/413/坏 JSON）不带。
 * **请求侧 Header 透传**：黑名单之外的客户端 header 全部透传（含 `anthropic-version`/`anthropic-beta` 协议头，§5.4），Content-Type 与凭证由 Adapter 统一设置。客户端 `Authorization`/`x-api-key` 绝不到上游；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
 * **响应侧 Header 透传**：与请求侧对称——上游响应头默认全部透传（`x-ratelimit-*`、request id、`Date`、`Retry-After`、`Content-Encoding`…），只剥 hop-by-hop（Connection/Keep-Alive/TE/Trailer/Transfer-Encoding/Upgrade/Proxy-*）与 `Content-Length`（归一化可能改变长度，Go 重新成帧）。客户端看到的头与直连一致，仅多出 `X-VMR-*`。
 
 ### 4.2 模块划分
 
 ```
-cmd/vmr/main.go            CLI（stdlib flag）：start / check / status；Adapter 的 blank import 注册点
+cmd/vmr/main.go            CLI（stdlib flag）：start / check / status / report；Adapter 的 blank import 注册点
 internal/core              CanonicalRequest、ErrorClass、Endpoint（无依赖的共享类型）
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch
 internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写
@@ -238,7 +238,7 @@ Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意�
 
 ### 6.3 热加载
 
-fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 兜底。新配置完整校验，失败保留旧配置并打日志——绝不带病上线。路由表（含 http.Client）随快照原子指针交换，运行中请求持有旧快照直至完成。
+fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 兜底。新配置完整校验，失败保留旧配置并打日志——绝不带病上线。路由表（含 http.Client）随快照原子指针交换，运行中请求持有旧快照直至完成；换入时关闭旧连接池的 idle 连接（in-flight 连接不受影响），重载成功后打印配置摘要。
 
 ---
 
@@ -355,7 +355,7 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md
 
 * **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
 * **JSON 输出**（`meta.format` 版本号随结构变更递增）：
-  * `rows[]` — 粒度 **日期×Virtual Model**：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、bytes in/out、时延 sum/p50/p95/max、吞吐（tok/s、bytes/s）。
+  * `rows[]` — 粒度 **日期×协议×Virtual Model**（同名模型可同时存在于两个协议组，是两个不同的模型，不可合并）：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、bytes in/out、时延 sum/p50/p95/max、吞吐（tok/s、bytes/s）。
   * `endpoints[]` — 粒度 **日期×上游端点**：尝试/成功/失败、可用度、错误类别分布、时延 p50/p95。
   * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
 * **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。

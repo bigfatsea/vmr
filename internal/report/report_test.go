@@ -154,3 +154,31 @@ func TestPercentiles(t *testing.T) {
 		t.Errorf("100 samples: p50=%d p95=%d", p50, p95)
 	}
 }
+
+func TestBuild_ProtocolSplitsRows(t *testing.T) {
+	// The same virtual-model name in both protocol groups is two distinct
+	// models — the report must not merge them into one row (format 2).
+	lines := `{"ts":"2026-07-08T10:00:00+08:00","dur_ms":100,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{}},"response":{"status":200}}}
+{"ts":"2026-07-08T10:01:00+08:00","dur_ms":100,"model":"agent","protocol":"anthropic","outcome":"ok","client":{"request":{"body":{}},"response":{"status":200}}}`
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Build([]string{path}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (one per protocol); rows: %+v", len(rep.Rows), rep.Rows)
+	}
+	protos := map[string]int{}
+	for _, r := range rep.Rows {
+		if r.Model != "agent" || r.Requests != 1 {
+			t.Errorf("unexpected row: %+v", r)
+		}
+		protos[r.Protocol]++
+	}
+	if protos["openai"] != 1 || protos["anthropic"] != 1 {
+		t.Errorf("protocol split wrong: %v", protos)
+	}
+}

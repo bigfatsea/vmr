@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:40, by Fable 5
+// Ver 2026-07-08 12:40, by Fable 5
 
 // Package report turns audit JSONL files (design doc §8.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -18,10 +18,12 @@ import (
 )
 
 // Format is bumped whenever the report JSON structure changes.
-const Format = 1
+// 2: rows are grained date × protocol × model (a virtual-model name may
+// exist in both protocol groups; merging them mixed two real models).
+const Format = 2
 
-// Report is the top-level JSON output. Grains: Rows = date × virtual model
-// (roll up freely to model-only or date-only); Endpoints = date × upstream
+// Report is the top-level JSON output. Grains: Rows = date × protocol ×
+// virtual model (roll up freely to coarser cuts); Endpoints = date × upstream
 // endpoint (availability and error view). Finer grains stay in the raw logs.
 type Report struct {
 	Meta      Meta          `json:"meta"`
@@ -39,7 +41,7 @@ type Meta struct {
 	To          string   `json:"to,omitempty"`   // latest ts
 }
 
-// Row aggregates requests for one (date, virtual model) pair.
+// Row aggregates requests for one (date, protocol, virtual model) triple.
 type Row struct {
 	Date     string `json:"date"`
 	Model    string `json:"model"`
@@ -128,7 +130,9 @@ func Build(paths []string, now time.Time) (*Report, error) {
 			if model == "" {
 				model = "(rejected)" // failed before model parsing: auth/413/bad json
 			}
-			key := date + "\x00" + model
+			// Protocol is part of the grain: the same virtual-model name
+			// may exist in both protocol groups and those are two models.
+			key := date + "\x00" + rec.Protocol + "\x00" + model
 			row, ok := rows[key]
 			if !ok {
 				row = &Row{Date: date, Model: model, Protocol: rec.Protocol}
@@ -164,10 +168,14 @@ func Build(paths []string, now time.Time) (*Report, error) {
 		rep.Endpoints = append(rep.Endpoints, *e)
 	}
 	sort.Slice(rep.Rows, func(i, j int) bool {
-		if rep.Rows[i].Date != rep.Rows[j].Date {
-			return rep.Rows[i].Date < rep.Rows[j].Date
+		a, b := rep.Rows[i], rep.Rows[j]
+		if a.Date != b.Date {
+			return a.Date < b.Date
 		}
-		return rep.Rows[i].Model < rep.Rows[j].Model
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		return a.Protocol < b.Protocol
 	})
 	sort.Slice(rep.Endpoints, func(i, j int) bool {
 		if rep.Endpoints[i].Date != rep.Endpoints[j].Date {

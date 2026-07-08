@@ -5,6 +5,7 @@
 //	vmr start  -c config.yaml   run the router
 //	vmr check  -c config.yaml   validate config and print a summary
 //	vmr status -c config.yaml   show endpoint health of a running instance
+//	vmr report <audit.jsonl>    aggregate audit logs into usage statistics
 package main
 
 import (
