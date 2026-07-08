@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 13:10, by Fable 5 -->
+<!-- Ver 2026-07-08 15:40, by Fable 5 -->
 <!-- keywords: LLM router, LLM gateway, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -47,6 +47,7 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 ./vmr.sh service install     # register + start (idempotent; rerun to update)
 ./vmr.sh service status      # also: start / stop / restart / logs
 ./vmr.sh service uninstall   # stop + unregister
+# Linux: run `loginctl enable-linger $USER` once if the service must survive logout.
 ```
 
 Pick one mode at a time — `service install`/`start` stops a dev-mode process automatically. On macOS the service-mode server log lives at `~/Library/Logs/vmr.log` (TCC keeps launchd file ops off external volumes); the audit log follows `VMR_LOG_DIR` as usual.
@@ -70,8 +71,14 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
 ```yaml
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-xxx          # optional: protect vmr itself (Bearer or x-api-key)
+# max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
+# max_body_mb: 8               # request body buffer limit; also caps audit body recording
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
 # image_downscale: 512         # long-side px cap for inline request images (default: off)
+# timeouts:
+#   connect: 10s               # upstream dial
+#   response_header: 120s      # upstream time-to-first-byte
+#   stream_idle: 120s          # abort a stream silent for this long
 
 providers:
   openai:
@@ -167,4 +174,4 @@ Architecture and every design decision (with the war stories behind them): [desi
 
 ## License
 
-[MIT](LICENSE)
+[MIT](../LICENSE)

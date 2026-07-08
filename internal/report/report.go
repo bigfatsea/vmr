@@ -1,6 +1,6 @@
 // Ver 2026-07-08 12:40, by Fable 5
 
-// Package report turns audit JSONL files (design doc §8.2) into aggregate
+// Package report turns audit JSONL files (design doc §9.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
 // rendering. It is coupled to the audit format — change one, change both.
 package report

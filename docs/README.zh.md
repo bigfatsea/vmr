@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 13:10, by Fable 5 -->
+<!-- Ver 2026-07-08 15:40, by Fable 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -46,6 +46,7 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 ./vmr.sh service install     # 注册并启动（幂等，改路径/配置后重跑即更新）
 ./vmr.sh service status      # 另有 start / stop / restart / logs
 ./vmr.sh service uninstall   # 停止并注销
+# Linux：若需注销登录后服务仍运行，执行一次 loginctl enable-linger $USER
 ```
 
 两种模式同一时间只用一种——`service install`/`start` 会自动停掉 dev 模式进程。macOS 下 service 模式的服务日志在 `~/Library/Logs/vmr.log`（TCC 不允许 launchd 对外置卷做文件操作）；审计日志照常跟随 `VMR_LOG_DIR`。
@@ -69,8 +70,14 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
 ```yaml
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-xxx          # 可选：保护 vmr（Bearer 或 x-api-key）
+# max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
+# max_body_mb: 8               # 请求体缓冲上限；同时决定审计 body 记录上限
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭
+# timeouts:
+#   connect: 10s               # 连接上游
+#   response_header: 120s      # 上游首字节
+#   stream_idle: 120s          # 流静默看门狗
 
 providers:
   openai:
@@ -166,4 +173,4 @@ go test -race ./...
 
 ## 开源协议
 
-[MIT](LICENSE)
+[MIT](../LICENSE)
