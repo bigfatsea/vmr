@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:50, by Fable 5
+// Ver 2026-07-09 13:30, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -131,6 +132,48 @@ func configFlag(args []string, cmd string) (string, error) {
 	return *path, nil
 }
 
+// vmrBanner is a fixed-width, pure-ASCII block-letter "VMR" mark (no
+// unicode box-drawing glyphs, so it renders identically in any terminal,
+// log viewer, or `less`/`grep` pipeline). Printed once per process start —
+// scanning a log file top to bottom, it's the unmistakable marker of "a new
+// vmr process began writing here", distinct from the ordinary timestamped
+// lines around it.
+const vmrBanner = `
+==================================================
+  ##      ##      ##      ##      ########
+  ##      ##      ##      ##      ########
+  ##      ##      ####  ####      ##      ##
+  ##      ##      ####  ####      ##      ##
+  ##      ##      ##  ##  ##      ##      ##
+  ##      ##      ##  ##  ##      ##      ##
+  ##      ##      ##      ##      ########
+  ##      ##      ##      ##      ########
+  ##      ##      ##      ##      ##  ##
+  ##      ##      ##      ##      ##  ##
+    ##  ##        ##      ##      ##    ##
+    ##  ##        ##      ##      ##    ##
+      ##          ##      ##      ##      ##
+      ##          ##      ##      ##      ##
+==================================================
+`
+
+// logStart prints the hero banner followed by one timestamped, greppable
+// marker line carrying the facts that matter for a support/incident
+// timeline: pid, config path, listen address.
+func logStart(logger *log.Logger, path string, listen string) {
+	fmt.Fprint(logger.Writer(), vmrBanner)
+	logger.Printf("VMR START pid=%d config=%s listen=%s", os.Getpid(), path, listen)
+}
+
+// logStop prints one timestamped, greppable marker line on the way out —
+// clean shutdown or abnormal exit alike — so "how long did this process
+// run and why did it stop" is answerable from the log file alone.
+func logStop(logger *log.Logger, reason string, uptime time.Duration) {
+	logger.Printf("==================================================")
+	logger.Printf("VMR STOP  pid=%d reason=%q uptime=%s", os.Getpid(), reason, uptime.Round(time.Second))
+	logger.Printf("==================================================")
+}
+
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
@@ -139,11 +182,13 @@ func cmdStart(args []string) error {
 		return err
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
+	startTime := time.Now()
 
 	cfg, err := config.Load(*path)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	logStart(logger, *path, cfg.Listen)
 
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
@@ -210,7 +255,35 @@ func cmdStart(args []string) error {
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, countNested(cfg.Models))
-	return srv.ListenAndServe()
+
+	// vmr.sh (and systemd/launchd) stop the process with SIGTERM; Go doesn't
+	// catch that by default, so without this the process just dies mid-request
+	// with no trace in the log. Catching it here buys a graceful drain (existing
+	// requests finish, srv.Shutdown waits for them) and — the point of this
+	// function — a "VMR STOP" marker so the log file shows exactly when and why
+	// the process went away, matching every "VMR START" with a corresponding stop.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+
+	select {
+	case sig := <-sigCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			logger.Printf("shutdown: forced close after 10s drain timeout: %v", err)
+		}
+		logStop(logger, sig.String(), time.Since(startTime))
+		return nil
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			logStop(logger, "error: "+err.Error(), time.Since(startTime))
+			return err
+		}
+		logStop(logger, "server closed", time.Since(startTime))
+		return nil
+	}
 }
 
 func countNested[V any](m map[string]map[string]V) int {
