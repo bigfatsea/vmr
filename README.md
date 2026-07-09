@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 21:00, by Fable 5 -->
+<!-- Ver 2026-07-09 00:40, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -17,7 +17,7 @@ English | [简体中文](README.zh.md)
 - **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
 - **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
 - **Flight-recorder audit log** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, error classes, and the exact list of normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics, including a cache-hit breakdown of input tokens. Old days auto-compress to `.zst` (20–75× smaller, `vmr report` reads it transparently) and can auto-expire via `audit_retention_days`.
-- **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; one config knob, off by default, fail-open.
+- **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; a global knob plus a per-virtual-model override, off by default, fail-open; downscaled results are content-hash cached on disk so the same image is never reprocessed and never breaks an upstream prompt cache.
 - **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Dependencies: `yaml.v3`, `fsnotify`, `golang.org/x/image`, `klauspost/compress` (zstd for audit-log compression). That's the whole list.
 
 ```
@@ -56,12 +56,22 @@ Point your client's base URL at vmr and you're done:
 
 ```bash
 # OpenAI-protocol client (OPENAI_BASE_URL=http://127.0.0.1:8800/v1)
+# add -H "Authorization: Bearer <api_key>" if vmr's own api_key is set in config.yaml
 curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 
 # Anthropic-protocol client (e.g. Claude Code: ANTHROPIC_BASE_URL=http://127.0.0.1:8800)
+# Anthropic clients send x-api-key instead of Authorization — vmr accepts either
 curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
+  -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+# List virtual models (same optional api_key as above)
+curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"
+
+# Per-endpoint health + concurrency (loopback-only; no api_key required even if one is set)
+curl http://127.0.0.1:8800/admin/status
 ```
 
 ## Configuration
@@ -74,7 +84,8 @@ listen: 127.0.0.1:8800
 # max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
 # max_body_mb: 8               # request body buffer limit; also caps audit body recording
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
-# image_downscale: 512         # long-side px cap for inline request images (default: off)
+# image_downscale: 512         # long-side px cap for inline request images (default: off; a model's own setting overrides this, see below)
+# image_cache_ttl_days: 7      # eviction age for cached downscale results (default: 7 days)
 # audit_retention_days: 30     # delete audit files older than this (default: keep forever)
 # timeouts:
 #   connect: 10s               # upstream dial
@@ -146,8 +157,24 @@ Agent workloads resend the full conversation on every turn, so a day's log can r
 Optional, off by default. When enabled, inline base64 image attachments exceeding the configured long-side limit are proportionally resized and re-encoded as JPEG before hitting the upstream — cutting vision-token cost for screenshot-heavy agent workflows. Requests only, never responses, never remote URLs; animated images and anything that fails to decode pass through untouched (fail-open).
 
 ```yaml
-image_downscale: 512   # long-side px cap; 0 or absent = off
+image_downscale: 512      # global long-side px cap; 0 or absent = off
+image_cache_ttl_days: 7   # eviction age for the on-disk downscale cache (default 7 days, see below)
+
+models:
+  openai:
+    coding:
+      image_downscale: 1024   # overrides the global value, only for this virtual model
+      endpoints: [...]
+    cheap:
+      image_downscale: 0      # explicitly off, even though the global setting is on
+      endpoints: [...]
 ```
+
+**Per-model override**: any virtual model can set its own `image_downscale`, which always wins over the global value; omitting it inherits the global setting. `image_downscale: 0` on a model is an explicit "off" — even with the global setting on — because "not set" and "set to 0" mean different things (inherit vs. force-disable).
+
+**Downscale result cache**: the first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by content hash, under `$VMR_IMG_CACHE_DIR` (or a `vmr-imgcache` subdirectory of the system temp dir). A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session), swept lazily off normal cache access rather than a dedicated timer.
+
+Note for `service` mode: unlike `VMR_LOG_DIR`, `VMR_IMG_CACHE_DIR` is not auto-captured into `~/.config/vmr/env` by `service install` (it isn't referenced as `${VAR}` in config.yaml, so the capture logic never sees it) and isn't force-exported into the plist/unit either. A launchd/systemd-supervised vmr always falls back to the system temp dir for the cache unless you add `VMR_IMG_CACHE_DIR=...` to that env file by hand. `vmr.sh start` (dev mode) inherits your shell's env normally.
 
 ## Endpoints & CLI
 

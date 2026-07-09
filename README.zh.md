@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 21:00, by Fable 5 -->
+<!-- Ver 2026-07-09 00:40, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -17,7 +17,7 @@
 - **真流式** —— SSE 事件到达即转发。归一化器只在检测到厂商"思考内联"病理形态时才缓冲，且 `</think>` 闭合后立即恢复实时流。
 - **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
 - **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计，含输入 token 的缓存命中细分。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍，`vmr report` 透明读取），也可用 `audit_retention_days` 设置自动过期。
-- **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；一个配置项，默认关闭，fail-open。
+- **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；全局开关 + 逐虚拟模型覆盖，默认关闭，fail-open；降采样结果按内容哈希落盘缓存，避免重复处理并保住上游 prompt cache。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。依赖只有 `yaml.v3`、`fsnotify`、`golang.org/x/image`、`klauspost/compress`（zstd，审计日志压缩），就这些。
 
 ```
@@ -55,12 +55,22 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 
 ```bash
 # OpenAI 协议客户端（OPENAI_BASE_URL=http://127.0.0.1:8800/v1）
+# 如果 config.yaml 里设置了 vmr 自己的 api_key，加上 -H "Authorization: Bearer <api_key>"
 curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 
 # Anthropic 协议客户端（如 Claude Code：ANTHROPIC_BASE_URL=http://127.0.0.1:8800）
+# Anthropic 客户端发送的是 x-api-key 而非 Authorization——vmr 两种都认
 curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
+  -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+# 列出虚拟模型（认证规则同上，用的是 vmr 自己的 api_key）
+curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"
+
+# 各 endpoint 的健康状态 + 并发情况（仅限本机回环访问；即使配了 api_key 也不需要）
+curl http://127.0.0.1:8800/admin/status
 ```
 
 ## 配置
@@ -73,7 +83,8 @@ listen: 127.0.0.1:8800
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
 # max_body_mb: 8               # 请求体缓冲上限；同时决定审计 body 记录上限
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
-# image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭
+# image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
+# image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
 # audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
 # timeouts:
 #   connect: 10s               # 连接上游
@@ -145,8 +156,24 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
 可选，默认关闭。开启后，超过设定长边的内联 base64 图片附件会被等比缩小、转 JPEG 再发上游——为截图密集的 agent 工作流削减 vision token 成本。只处理请求，不碰响应，不抓远程 URL；动图与解码失败一律原样透传（fail-open）。
 
 ```yaml
-image_downscale: 512   # 长边像素上限；0 或缺省 = 关闭
+image_downscale: 512   # 全局长边像素上限；0 或缺省 = 关闭
+image_cache_ttl_days: 7   # 降采样结果缓存的失效期（缺省 7 天，见下）
+
+models:
+  openai:
+    coding:
+      image_downscale: 1024   # 覆盖全局值，只对这一个虚拟模型生效
+      endpoints: [...]
+    cheap:
+      image_downscale: 0      # 显式关闭：即使全局开启，这个模型也不降采样
+      endpoints: [...]
 ```
+
+**模型级覆盖**：每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
+
+**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）按内容哈希缓存到磁盘（`$VMR_IMG_CACHE_DIR` 或系统临时目录下的 `vmr-imgcache` 子目录）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
+
+service 模式下的一个坑：跟 `VMR_LOG_DIR` 不同，`VMR_IMG_CACHE_DIR` 不会被 `service install` 自动抓进 `~/.config/vmr/env`（它不是 config.yaml 里的 `${VAR}` 引用，抓取逻辑看不到它），也没有像 `VMR_LOG_DIR` 那样被强制写进 plist/unit。所以在 launchd/systemd 托管下，图片缓存目录始终落在系统临时目录，除非你手动把 `VMR_IMG_CACHE_DIR=...` 加进那份 env 文件。`vmr.sh start`（dev 模式）是正常继承当前 shell 环境的，不受影响。
 
 ## 端点与 CLI
 

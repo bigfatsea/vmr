@@ -1,4 +1,4 @@
-// Ver 2026-07-07 15:30, by Fable 5
+// Ver 2026-07-09 00:00, by Sonnet 5
 
 // Package imgprep optionally downscales inline base64 image attachments in
 // request bodies before they reach the router, to cut vision-token cost on
@@ -11,10 +11,21 @@
 // pay no JSON-parsing cost. Any parse/decode failure anywhere in the path
 // falls back to the original bytes unchanged (fail-open): a bug here must
 // never turn an otherwise-good request into a failure.
+//
+// An optional on-disk cache (cache.go) lets a source image that has already
+// been downscaled to a given target size be reused byte-for-byte on a later
+// request, instead of being re-decoded/re-scaled/re-encoded. This matters
+// for two reasons: it avoids repeating CPU work when an agent conversation
+// resends the same screenshot every turn, and it keeps the re-encoded bytes
+// identical across requests — upstream prompt caches are keyed on exact
+// byte/token match, and a general-purpose JPEG encoder is not guaranteed to
+// produce identical output on every run, so skipping re-encoding entirely is
+// the only way to guarantee the upstream cache never silently misses.
 package imgprep
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -23,6 +34,7 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"strings"
+	"time"
 
 	"vmr/internal/core"
 
@@ -43,6 +55,26 @@ const maxDecodePixels = 64_000_000 // ~64MP, comfortably above any real screensh
 // second parameter nobody asked for.
 const jpegQuality = 85
 
+// Options bundles the per-request knobs Downscale needs. CacheDir/CacheTTLDays
+// are process-wide config values (from config.Config), threaded through
+// explicitly rather than held as package-level mutable state: Downscale is
+// called once per chat request, and the caller (server.chatHandler) already
+// has the resolved config snapshot in hand, so there's no singleton to wire
+// up and tests can point CacheDir at a t.TempDir() without touching global
+// state shared across other tests.
+type Options struct {
+	MaxPx int // longer-side pixel cap; <=0 disables downscaling entirely
+
+	// CacheDir, if non-empty, enables the on-disk downscale cache (cache.go):
+	// a source image already downscaled to MaxPx is reused instead of being
+	// reprocessed. Empty disables caching — every request is processed fresh.
+	CacheDir string
+	// CacheTTLDays bounds how long an unused cache entry survives (evicted by
+	// last-use mtime, refreshed on every hit). Only consulted when CacheDir
+	// is set; <=0 disables the eviction sweep (entries are kept forever).
+	CacheTTLDays int
+}
+
 // HasImageMarker is a cheap pre-check so non-image requests (the large
 // majority) never pay for JSON parsing. False positives (matching "images"
 // or similar) just fall through to a parse that finds nothing to rewrite.
@@ -51,14 +83,15 @@ func HasImageMarker(body []byte) bool {
 }
 
 // Downscale rewrites inline base64 images in body whose longer side exceeds
-// maxPx, re-encoding them as JPEG scaled to fit within maxPx. protocol
-// selects which content-block shape to look for ("openai": content[].
-// image_url.url data URI; "anthropic": content[].source with type "base64").
-// maxPx<=0 disables the feature. On any failure, or when nothing needed
-// resizing, the original body is returned unchanged (same backing array).
-func Downscale(body []byte, protocol string, maxPx int) (result []byte) {
+// opts.MaxPx, re-encoding them as JPEG scaled to fit within opts.MaxPx.
+// protocol selects which content-block shape to look for ("openai":
+// content[].image_url.url data URI; "anthropic": content[].source with type
+// "base64"). opts.MaxPx<=0 disables the feature. On any failure, or when
+// nothing needed resizing, the original body is returned unchanged (same
+// backing array).
+func Downscale(body []byte, protocol string, opts Options) (result []byte) {
 	result = body
-	if maxPx <= 0 || !HasImageMarker(body) {
+	if opts.MaxPx <= 0 || !HasImageMarker(body) {
 		return
 	}
 	// Defensive belt on top of careful error handling below: this function
@@ -70,7 +103,7 @@ func Downscale(body []byte, protocol string, maxPx int) (result []byte) {
 			result = body
 		}
 	}()
-	rewritten, changed, err := rewriteBody(body, protocol, maxPx)
+	rewritten, changed, err := rewriteBody(body, protocol, opts)
 	if err != nil || !changed {
 		return
 	}
@@ -78,7 +111,7 @@ func Downscale(body []byte, protocol string, maxPx int) (result []byte) {
 	return
 }
 
-func rewriteBody(body []byte, protocol string, maxPx int) ([]byte, bool, error) {
+func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, false, nil
@@ -93,7 +126,7 @@ func rewriteBody(body []byte, protocol string, maxPx int) ([]byte, bool, error) 
 	}
 	changed := false
 	for i, m := range msgs {
-		nm, mChanged, err := rewriteMessage(m, protocol, maxPx)
+		nm, mChanged, err := rewriteMessage(m, protocol, opts)
 		if err != nil || !mChanged {
 			continue
 		}
@@ -115,7 +148,7 @@ func rewriteBody(body []byte, protocol string, maxPx int) ([]byte, bool, error) 
 	return out, true, nil
 }
 
-func rewriteMessage(raw json.RawMessage, protocol string, maxPx int) (json.RawMessage, bool, error) {
+func rewriteMessage(raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, error) {
 	var msg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return raw, false, nil
@@ -130,7 +163,7 @@ func rewriteMessage(raw json.RawMessage, protocol string, maxPx int) (json.RawMe
 	}
 	changed := false
 	for i, b := range blocks {
-		nb, bChanged, err := rewriteBlock(b, protocol, maxPx)
+		nb, bChanged, err := rewriteBlock(b, protocol, opts)
 		if err != nil || !bChanged {
 			continue
 		}
@@ -152,7 +185,7 @@ func rewriteMessage(raw json.RawMessage, protocol string, maxPx int) (json.RawMe
 	return out, true, nil
 }
 
-func rewriteBlock(raw json.RawMessage, protocol string, maxPx int) (json.RawMessage, bool, error) {
+func rewriteBlock(raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, error) {
 	var block map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &block); err != nil {
 		return raw, false, nil
@@ -163,15 +196,15 @@ func rewriteBlock(raw json.RawMessage, protocol string, maxPx int) (json.RawMess
 	}
 	switch {
 	case protocol == "openai" && typ == "image_url":
-		return rewriteOpenAIImage(raw, block, maxPx)
+		return rewriteOpenAIImage(raw, block, opts)
 	case protocol == "anthropic" && typ == "image":
-		return rewriteAnthropicImage(raw, block, maxPx)
+		return rewriteAnthropicImage(raw, block, opts)
 	default:
 		return raw, false, nil
 	}
 }
 
-func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, maxPx int) (json.RawMessage, bool, error) {
+func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, error) {
 	var iu map[string]json.RawMessage
 	if err := json.Unmarshal(block["image_url"], &iu); err != nil {
 		return raw, false, nil
@@ -184,7 +217,7 @@ func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, m
 	if !ok {
 		return raw, false, nil // remote URL: vmr never fetches it
 	}
-	newData, newMime, changed, err := processImage(data, maxPx)
+	newData, newMime, changed, err := processImage(data, opts)
 	if err != nil || !changed {
 		return raw, false, nil
 	}
@@ -206,7 +239,7 @@ func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, m
 	return out, true, nil
 }
 
-func rewriteAnthropicImage(raw json.RawMessage, block map[string]json.RawMessage, maxPx int) (json.RawMessage, bool, error) {
+func rewriteAnthropicImage(raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, error) {
 	var src map[string]json.RawMessage
 	if err := json.Unmarshal(block["source"], &src); err != nil {
 		return raw, false, nil
@@ -223,7 +256,7 @@ func rewriteAnthropicImage(raw json.RawMessage, block map[string]json.RawMessage
 	if err != nil {
 		return raw, false, nil
 	}
-	newData, newMime, changed, err := processImage(data, maxPx)
+	newData, newMime, changed, err := processImage(data, opts)
 	if err != nil || !changed {
 		return raw, false, nil
 	}
@@ -269,14 +302,21 @@ func parseDataURI(u string) ([]byte, bool) {
 }
 
 // processImage decodes data (format auto-detected from content, not from any
-// caller-supplied mime type), and if its longer side exceeds maxPx, resizes
-// it to fit and re-encodes as JPEG. changed=false (with a nil error) covers
-// every "leave it alone" case: already small enough, animated (GIF with more
-// than one frame — resizing would collapse it to a still), unrecognized
-// format, corrupt data, or oversized declared dimensions (decompression-bomb
-// guard). Output is always JPEG; alpha is flattened onto white first since
-// JPEG has no transparency.
-func processImage(data []byte, maxPx int) (out []byte, mime string, changed bool, err error) {
+// caller-supplied mime type), and if its longer side exceeds opts.MaxPx,
+// resizes it to fit and re-encodes as JPEG. changed=false (with a nil error)
+// covers every "leave it alone" case: already small enough, animated (GIF
+// with more than one frame — resizing would collapse it to a still),
+// unrecognized format, corrupt data, or oversized declared dimensions
+// (decompression-bomb guard). Output is always JPEG; alpha is flattened onto
+// white first since JPEG has no transparency.
+//
+// When opts.CacheDir is set, a cache lookup happens only after the
+// need-to-process decision is made (longSide > MaxPx, not a decompression
+// bomb) — most requests don't need any processing at all, and hashing the
+// full image on every request would tax exactly the common case caching is
+// meant to help least. A hit skips decode/scale/encode entirely; a miss
+// falls through to full processing and stores the result before returning.
+func processImage(data []byte, opts Options) (out []byte, mime string, changed bool, err error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", false, nil
@@ -285,11 +325,20 @@ func processImage(data []byte, maxPx int) (out []byte, mime string, changed bool
 	if cfg.Height > longSide {
 		longSide = cfg.Height
 	}
-	if longSide <= maxPx {
+	if longSide <= opts.MaxPx {
 		return nil, "", false, nil
 	}
 	if cfg.Width*cfg.Height > maxDecodePixels {
 		return nil, "", false, nil
+	}
+
+	var hash [32]byte
+	if opts.CacheDir != "" {
+		hash = sha256.Sum256(data)
+		maybeSweepCache(opts.CacheDir, opts.CacheTTLDays, time.Now())
+		if cached, ok := cacheLookup(opts.CacheDir, hash, opts.MaxPx); ok {
+			return cached, "image/jpeg", true, nil
+		}
 	}
 
 	var src image.Image
@@ -310,7 +359,7 @@ func processImage(data []byte, maxPx int) (out []byte, mime string, changed bool
 	}
 
 	sb := src.Bounds()
-	newW, newH := scaledSize(sb.Dx(), sb.Dy(), maxPx)
+	newW, newH := scaledSize(sb.Dx(), sb.Dy(), opts.MaxPx)
 
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
@@ -320,7 +369,11 @@ func processImage(data []byte, maxPx int) (out []byte, mime string, changed bool
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: jpegQuality}); err != nil {
 		return nil, "", false, nil
 	}
-	return buf.Bytes(), "image/jpeg", true, nil
+	result := buf.Bytes()
+	if opts.CacheDir != "" {
+		cacheStore(opts.CacheDir, hash, opts.MaxPx, result)
+	}
+	return result, "image/jpeg", true, nil
 }
 
 // scaledSize returns the largest w×h with the same aspect ratio as the

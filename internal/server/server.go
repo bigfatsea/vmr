@@ -152,26 +152,10 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			return
 		}
 
-		// Global concurrency gate: excess requests park here until a slot
-		// frees, or the client goes away. Acquired AFTER the body is
-		// buffered so a slow upload never occupies a slot — the gate
-		// covers the CPU-and-upstream phase (image downscaling included),
-		// not client I/O.
-		release, ok := s.rt.AcquireSlot(r.Context())
-		if !ok {
-			return // client canceled while waiting; nothing to write
-		}
-		defer release()
-
-		// Request-only image downscaling: shrinks oversized inline
-		// attachments before routing so vision-token cost doesn't scale
-		// with screenshot resolution. Response bodies are never touched.
-		// Disabled (n<=0) is a single int comparison; enabled-but-no-image
-		// requests cost one cheap substring scan (imgprep.HasImageMarker).
-		if n := snap.Cfg.ImageDownscaleMaxPx; n > 0 {
-			body = imgprep.Downscale(body, protocol, n)
-		}
-
+		// Probe the routing fields before acquiring the concurrency gate or
+		// downscaling images: both of the latter are per-model (image
+		// downscale can be overridden per virtual model, §7) and cheap JSON
+		// parsing shouldn't wait behind either.
 		var probe struct {
 			Model  string `json:"model"`
 			Stream bool   `json:"stream"`
@@ -186,6 +170,34 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 		if rec != nil {
 			rec.Model, rec.Stream = probe.Model, probe.Stream
+		}
+
+		// Global concurrency gate: excess requests park here until a slot
+		// frees, or the client goes away. Acquired AFTER the body is
+		// buffered so a slow upload never occupies a slot — the gate
+		// covers the CPU-and-upstream phase (image downscaling included),
+		// not client I/O.
+		release, ok := s.rt.AcquireSlot(r.Context())
+		if !ok {
+			return // client canceled while waiting; nothing to write
+		}
+		defer release()
+
+		// Request-only image downscaling: shrinks oversized inline
+		// attachments before routing so vision-token cost doesn't scale
+		// with screenshot resolution. Response bodies are never touched.
+		// The effective cap is the virtual model's own override if it set
+		// one (even 0, which force-disables it for that model), else the
+		// global default (§7). Disabled (n<=0) is a single int comparison;
+		// enabled-but-no-image requests cost one cheap substring scan
+		// (imgprep.HasImageMarker).
+		route := snap.Models[protocol][probe.Model]
+		if n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx); n > 0 {
+			body = imgprep.Downscale(body, protocol, imgprep.Options{
+				MaxPx:        n,
+				CacheDir:     imgprep.CacheDir(),
+				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+			})
 		}
 
 		// Pass client headers through unless on the blocklist — this

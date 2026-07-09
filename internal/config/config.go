@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	DefaultMaxBodyMB      = 8
-	DefaultConnectTimeout = 10 * time.Second
-	DefaultHeaderTimeout  = 120 * time.Second
-	DefaultIdleTimeout    = 120 * time.Second
+	DefaultMaxBodyMB         = 8
+	DefaultConnectTimeout    = 10 * time.Second
+	DefaultHeaderTimeout     = 120 * time.Second
+	DefaultIdleTimeout       = 120 * time.Second
+	DefaultImageCacheTTLDays = 7 // downscaled-image cache entries unused this many days get evicted
 )
 
 // Provider has no protocol field: it lives under providers.<protocol>.<name>,
@@ -49,9 +50,14 @@ type EndpointConfig struct {
 	Priority int    `yaml:"priority"`
 }
 
+// ImageDownscaleMaxPx is a pointer so "unset" (inherit the global
+// image_downscale) and "explicitly 0" (force-disable for this model, even
+// if the global setting is on) are distinguishable — a plain int can't
+// represent that distinction (§7 image downscale, priority: model > global).
 type ModelConfig struct {
-	Strategy  []string         `yaml:"strategy"`
-	Endpoints []EndpointConfig `yaml:"endpoints"`
+	Strategy            []string         `yaml:"strategy"`
+	Endpoints           []EndpointConfig `yaml:"endpoints"`
+	ImageDownscaleMaxPx *int             `yaml:"image_downscale"`
 }
 
 // Duration accepts Go duration strings ("90s", "2m") in YAML.
@@ -88,7 +94,8 @@ type Config struct {
 	MaxAttempts         int                               `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
 	MaxBodyMB           int                               `yaml:"max_body_mb"`
 	MaxConcurrency      int                               `yaml:"max_concurrency"`      // 0 = unlimited; excess requests wait in memory
-	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images
+	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, §7)
+	ImageCacheTTLDays   int                               `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int                               `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
 	Timeouts            Timeouts                          `yaml:"timeouts"`
 	Providers           map[string]map[string]Provider    `yaml:"providers"`
@@ -140,6 +147,9 @@ func (c *Config) applyDefaults() {
 	if c.ImageDownscaleMaxPx < 0 {
 		c.ImageDownscaleMaxPx = 0
 	}
+	if c.ImageCacheTTLDays <= 0 {
+		c.ImageCacheTTLDays = DefaultImageCacheTTLDays
+	}
 	if c.AuditRetentionDays < 0 {
 		c.AuditRetentionDays = 0
 	}
@@ -157,8 +167,17 @@ func (c *Config) applyDefaults() {
 	}
 	for _, byName := range c.Models {
 		for name, m := range byName {
+			changed := false
 			if len(m.Strategy) == 0 {
 				m.Strategy = []string{"priority"}
+				changed = true
+			}
+			if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
+				zero := 0
+				m.ImageDownscaleMaxPx = &zero
+				changed = true
+			}
+			if changed {
 				byName[name] = m
 			}
 		}

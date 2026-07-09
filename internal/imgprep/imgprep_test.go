@@ -1,8 +1,9 @@
-// Ver 2026-07-07 15:30, by Fable 5
+// Ver 2026-07-09 00:00, by Sonnet 5
 package imgprep
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -12,7 +13,10 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func solidJPEG(t *testing.T, w, h int) []byte {
@@ -212,7 +216,7 @@ func TestHasImageMarker(t *testing.T) {
 
 func TestDownscaleDisabledIsNoop(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
-	got := Downscale(body, "openai", 0)
+	got := Downscale(body, "openai", Options{MaxPx: 0})
 	if &got[0] != &body[0] {
 		t.Error("maxPx<=0 must return the exact same slice, not a copy")
 	}
@@ -220,7 +224,7 @@ func TestDownscaleDisabledIsNoop(t *testing.T) {
 
 func TestDownscaleNoMarkerIsNoop(t *testing.T) {
 	body := []byte(`{"model":"coding","messages":[{"role":"user","content":"just text"}]}`)
-	got := Downscale(body, "openai", 512)
+	got := Downscale(body, "openai", Options{MaxPx: 512})
 	if &got[0] != &body[0] {
 		t.Error("a request with no image marker must return the exact same slice")
 	}
@@ -228,7 +232,7 @@ func TestDownscaleNoMarkerIsNoop(t *testing.T) {
 
 func TestOpenAIImageAboveThresholdIsResized(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	img, format := extractOpenAIImage(t, out)
 	b := img.Bounds()
 	if format != "jpeg" {
@@ -241,7 +245,7 @@ func TestOpenAIImageAboveThresholdIsResized(t *testing.T) {
 
 func TestOpenAIImageBelowThresholdUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 300, 200)))
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("an image already within the pixel cap must not be rewritten")
 	}
@@ -249,7 +253,7 @@ func TestOpenAIImageBelowThresholdUntouched(t *testing.T) {
 
 func TestOpenAIRemoteURLNotFetched(t *testing.T) {
 	body := openAIReq(t, "https://example.com/some-huge-photo.jpg")
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("remote image URLs must never be fetched or rewritten")
 	}
@@ -257,7 +261,7 @@ func TestOpenAIRemoteURLNotFetched(t *testing.T) {
 
 func TestAnthropicImageAboveThresholdIsResizedAndFlattened(t *testing.T) {
 	body := anthropicReq(t, "image/png", transparentPNG(t, 1200, 1200))
-	out := Downscale(body, "anthropic", 512)
+	out := Downscale(body, "anthropic", Options{MaxPx: 512})
 	img, format, mediaType := extractAnthropicImage(t, out)
 	b := img.Bounds()
 	if format != "jpeg" || mediaType != "image/jpeg" {
@@ -276,7 +280,7 @@ func TestAnthropicImageAboveThresholdIsResizedAndFlattened(t *testing.T) {
 
 func TestAnthropicImageBelowThresholdUntouched(t *testing.T) {
 	body := anthropicReq(t, "image/png", transparentPNG(t, 100, 100))
-	out := Downscale(body, "anthropic", 512)
+	out := Downscale(body, "anthropic", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("an image already within the pixel cap must not be rewritten")
 	}
@@ -301,7 +305,7 @@ func TestAnthropicNonBase64SourceUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := Downscale(body, "anthropic", 512)
+	out := Downscale(body, "anthropic", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("url-sourced Anthropic images must never be fetched or rewritten")
 	}
@@ -309,7 +313,7 @@ func TestAnthropicNonBase64SourceUntouched(t *testing.T) {
 
 func TestAnimatedGIFUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/gif", animatedGIF(t, 1000, 1000)))
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("animated GIFs must be left untouched, not collapsed to a still frame")
 	}
@@ -317,7 +321,7 @@ func TestAnimatedGIFUntouched(t *testing.T) {
 
 func TestCorruptImageDataFailsOpen(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", []byte("not actually an image")))
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("corrupt image data must fail open (leave request unchanged), not error out")
 	}
@@ -326,7 +330,7 @@ func TestCorruptImageDataFailsOpen(t *testing.T) {
 func TestMalformedRequestBodyFailsOpen(t *testing.T) {
 	// Has the marker substring but isn't shaped like a real chat request at all.
 	body := []byte(`{"image_url_but_not_json_object`)
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("malformed JSON must fail open and return the input unchanged")
 	}
@@ -336,7 +340,7 @@ func TestDecompressionBombGuard(t *testing.T) {
 	// 30000x30000 = 900M declared pixels, far past maxDecodePixels, but the
 	// "file" itself is a few dozen bytes — DecodeConfig reads only IHDR.
 	huge := fakePNGHeader(t, 30000, 30000)
-	out, mime, changed, err := processImage(huge, 512)
+	out, mime, changed, err := processImage(huge, Options{MaxPx: 512})
 	if err != nil || changed || out != nil || mime != "" {
 		t.Errorf("declared-oversized image must be left alone: changed=%v err=%v", changed, err)
 	}
@@ -358,7 +362,7 @@ func TestScaledSize(t *testing.T) {
 
 func TestNoImageBlocksIsNoop(t *testing.T) {
 	body := []byte(`{"model":"coding","messages":[{"role":"user","content":[{"type":"text","text":"hi image lovers"}]}]}`)
-	out := Downscale(body, "openai", 512)
+	out := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("a marker false-positive with no actual image block must leave the body unchanged")
 	}
@@ -366,8 +370,161 @@ func TestNoImageBlocksIsNoop(t *testing.T) {
 
 func TestUnsupportedProtocolIsNoop(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
-	out := Downscale(body, "carrier-pigeon", 512)
+	out := Downscale(body, "carrier-pigeon", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("an unrecognized protocol must not attempt any block rewrite")
+	}
+}
+
+// --- on-disk cache (cache.go) ---
+
+// TestCacheHitReusesStoredBytesInsteadOfReprocessing proves a second
+// Downscale call for the same source image + maxPx returns exactly what's
+// on disk rather than recomputing: it primes the cache with a real pass,
+// then overwrites the cache entry with a distinguishable "poisoned" image
+// that a fresh downscale would never produce. If the second call returns
+// the poisoned bytes, the cache path — not reprocessing — served it.
+func TestCacheHitReusesStoredBytesInsteadOfReprocessing(t *testing.T) {
+	dir := t.TempDir()
+	raw := solidJPEG(t, 2000, 1000)
+	body := openAIReq(t, dataURI("image/jpeg", raw))
+	opts := Options{MaxPx: 512, CacheDir: dir, CacheTTLDays: 7}
+
+	out1 := Downscale(body, "openai", opts)
+	img1, _ := extractOpenAIImage(t, out1)
+	if b := img1.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
+		t.Fatalf("first pass not downscaled as expected: %dx%d", b.Dx(), b.Dy())
+	}
+
+	hash := sha256.Sum256(raw)
+	cachePath := filepath.Join(dir, cacheFileName(hash, 512))
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("expected a cache file at %s: %v", cachePath, err)
+	}
+
+	poison := solidJPEG(t, 64, 64) // a shape real downscaling to maxPx=512 would never produce
+	if err := os.WriteFile(cachePath, poison, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out2 := Downscale(body, "openai", opts)
+	img2, _ := extractOpenAIImage(t, out2)
+	if b := img2.Bounds(); b.Dx() != 64 || b.Dy() != 64 {
+		t.Errorf("second pass did not reuse the (poisoned) cache entry: got %dx%d, want 64x64 — image was reprocessed instead of read from cache", b.Dx(), b.Dy())
+	}
+}
+
+// TestCacheKeyDependsOnMaxPx guards against two different per-model targets
+// colliding on the same cache entry for the same source image.
+func TestCacheKeyDependsOnMaxPx(t *testing.T) {
+	dir := t.TempDir()
+	raw := solidJPEG(t, 2000, 1000)
+	body := openAIReq(t, dataURI("image/jpeg", raw))
+
+	out256 := Downscale(body, "openai", Options{MaxPx: 256, CacheDir: dir})
+	out512 := Downscale(body, "openai", Options{MaxPx: 512, CacheDir: dir})
+
+	img256, _ := extractOpenAIImage(t, out256)
+	img512, _ := extractOpenAIImage(t, out512)
+	if b := img256.Bounds(); b.Dx() != 256 {
+		t.Errorf("maxPx=256 result is %dx%d, want long side 256", b.Dx(), b.Dy())
+	}
+	if b := img512.Bounds(); b.Dx() != 512 {
+		t.Errorf("maxPx=512 result is %dx%d, want long side 512", b.Dx(), b.Dy())
+	}
+}
+
+func TestCacheLookupTouchesMTimeOnHit(t *testing.T) {
+	dir := t.TempDir()
+	var hash [32]byte
+	hash[0] = 0xAB
+	cacheStore(dir, hash, 256, []byte("fake-jpeg-bytes"))
+	path := filepath.Join(dir, cacheFileName(hash, 256))
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := cacheLookup(dir, hash, 256); !ok {
+		t.Fatal("expected a cache hit")
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(info.ModTime()) > 5*time.Second {
+		t.Errorf("cache hit should refresh mtime to now, got mtime=%v", info.ModTime())
+	}
+}
+
+func TestSweepCacheDirEvictsStaleEntriesOnly(t *testing.T) {
+	dir := t.TempDir()
+	var freshHash, staleHash [32]byte
+	freshHash[0], staleHash[0] = 1, 2
+	cacheStore(dir, freshHash, 100, []byte("fresh"))
+	cacheStore(dir, staleHash, 100, []byte("stale"))
+
+	freshPath := filepath.Join(dir, cacheFileName(freshHash, 100))
+	stalePath := filepath.Join(dir, cacheFileName(staleHash, 100))
+	now := time.Now()
+	if err := os.Chtimes(stalePath, now.AddDate(0, 0, -10), now.AddDate(0, 0, -10)); err != nil {
+		t.Fatal(err)
+	}
+
+	sweepCacheDir(dir, 7, now)
+
+	if _, err := os.Stat(freshPath); err != nil {
+		t.Errorf("fresh entry should survive a 7-day sweep: %v", err)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Errorf("stale entry (10 days old, ttl 7d) should have been evicted, stat err=%v", err)
+	}
+}
+
+func TestSweepCacheDirTTLDisabledKeepsEverything(t *testing.T) {
+	dir := t.TempDir()
+	var hash [32]byte
+	hash[0] = 9
+	cacheStore(dir, hash, 100, []byte("data"))
+	path := filepath.Join(dir, cacheFileName(hash, 100))
+	old := time.Now().AddDate(-1, 0, 0)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	sweepCacheDir(dir, 0, time.Now())
+
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("ttlDays<=0 must disable eviction entirely: %v", err)
+	}
+}
+
+func TestSweepCacheDirRemovesStrayTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	stray := filepath.Join(dir, ".deadbeef-100.jpg.tmp-12345")
+	if err := os.WriteFile(stray, []byte("half-written"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().AddDate(0, 0, -10)
+	if err := os.Chtimes(stray, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	sweepCacheDir(dir, 7, time.Now())
+
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("a stale leftover .tmp- file from a crashed write should be cleaned up, stat err=%v", err)
+	}
+}
+
+func TestCacheMissWithoutCacheDirNeverTouchesDisk(t *testing.T) {
+	// opts.CacheDir == "" must disable caching entirely, not just no-op
+	// lookups: no directory should be created as a side effect.
+	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
+	out := Downscale(body, "openai", Options{MaxPx: 512})
+	img, _ := extractOpenAIImage(t, out)
+	if b := img.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
+		t.Errorf("downscale without a cache dir should still work: got %dx%d", b.Dx(), b.Dy())
 	}
 }

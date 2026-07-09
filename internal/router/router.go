@@ -35,6 +35,25 @@ import (
 type ModelRoute struct {
 	Dims      []strategy.Dimension
 	Endpoints []*core.Endpoint
+
+	// ImageDownscaleMaxPx mirrors config.ModelConfig.ImageDownscaleMaxPx: nil
+	// = this model has no override and inherits the global image_downscale;
+	// non-nil (including a pointer to 0) = this model's explicit setting,
+	// which always wins over the global one (§7 image downscale).
+	ImageDownscaleMaxPx *int
+}
+
+// EffectiveImageDownscaleMaxPx resolves the image-downscale cap that
+// actually applies to this model: its own override if set (even 0, which
+// force-disables downscaling for this model regardless of the global
+// setting), else globalMaxPx. Safe to call on a nil receiver (an unknown
+// model whose route lookup failed) — callers don't need a separate nil
+// check before falling back to the global setting.
+func (r *ModelRoute) EffectiveImageDownscaleMaxPx(globalMaxPx int) int {
+	if r != nil && r.ImageDownscaleMaxPx != nil {
+		return *r.ImageDownscaleMaxPx
+	}
+	return globalMaxPx
 }
 
 // Snapshot is an immutable view of the config; hot reload swaps the whole
@@ -64,7 +83,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 			if err != nil {
 				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
-			route := &ModelRoute{Dims: dims}
+			route := &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx}
 			for _, ec := range m.Endpoints {
 				p, ok := cfg.Providers[protocol][ec.Provider]
 				if !ok { // defensive; config.validate already checked this

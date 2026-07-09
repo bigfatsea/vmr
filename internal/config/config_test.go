@@ -96,6 +96,103 @@ func TestImageDownscaleNegativeClampsToDisabled(t *testing.T) {
 	}
 }
 
+// TestModelImageDownscaleUnsetInheritsGlobal documents that a model with no
+// image_downscale key parses to a nil pointer — the signal BuildSnapshot and
+// ModelRoute.EffectiveImageDownscaleMaxPx use to fall back to the global
+// setting, as opposed to an explicit 0 which force-disables the feature for
+// that model regardless of the global value.
+func TestModelImageDownscaleUnsetInheritsGlobal(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx; got != nil {
+		t.Errorf("unset per-model image_downscale must parse to nil (inherit global), got %v", *got)
+	}
+}
+
+func TestModelImageDownscaleOverride(t *testing.T) {
+	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: 256\n      endpoints:", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	if got == nil || *got != 256 {
+		t.Errorf("model image_downscale override: got %v, want 256", got)
+	}
+}
+
+// TestModelImageDownscaleExplicitZeroDiffersFromUnset is the whole point of
+// the pointer type: an explicit 0 must remain distinguishable from "not
+// set" all the way through parsing, so it can force-disable the feature for
+// this model even when the global default is on (§7).
+func TestModelImageDownscaleExplicitZeroDiffersFromUnset(t *testing.T) {
+	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: 0\n      endpoints:", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	if got == nil {
+		t.Fatal("explicit image_downscale: 0 must not parse to nil (that would mean 'unset')")
+	}
+	if *got != 0 {
+		t.Errorf("explicit image_downscale: 0, got %d", *got)
+	}
+}
+
+func TestModelImageDownscaleNegativeClampsToZero(t *testing.T) {
+	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: -1\n      endpoints:", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	if got == nil || *got != 0 {
+		t.Errorf("negative per-model image_downscale must clamp to 0 (force-disabled), got %v", got)
+	}
+}
+
+func TestImageCacheTTLDaysDefaultsToSevenDays(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ImageCacheTTLDays != DefaultImageCacheTTLDays {
+		t.Errorf("default image_cache_ttl_days: got %d, want %d", cfg.ImageCacheTTLDays, DefaultImageCacheTTLDays)
+	}
+}
+
+func TestImageCacheTTLDaysConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_cache_ttl_days: 14", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ImageCacheTTLDays != 14 {
+		t.Errorf("image_cache_ttl_days: got %d, want 14", cfg.ImageCacheTTLDays)
+	}
+}
+
+// TestImageCacheTTLDaysNonPositiveClampsToDefault differs from
+// audit_retention_days's "0 = keep forever" convention on purpose: the image
+// cache is a pure performance optimization with no audit/compliance value,
+// so silently growing it forever is not a safer default than actively
+// pruning it (§10 decision table).
+func TestImageCacheTTLDaysNonPositiveClampsToDefault(t *testing.T) {
+	for _, v := range []string{"0", "-5"} {
+		yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_cache_ttl_days: "+v, 1)
+		cfg, err := Parse([]byte(yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ImageCacheTTLDays != DefaultImageCacheTTLDays {
+			t.Errorf("image_cache_ttl_days: %s must clamp to default %d, got %d", v, DefaultImageCacheTTLDays, cfg.ImageCacheTTLDays)
+		}
+	}
+}
+
 func TestMaxConcurrencyNegativeClampsToUnlimited(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nmax_concurrency: -3", 1)
 	cfg, err := Parse([]byte(yaml))

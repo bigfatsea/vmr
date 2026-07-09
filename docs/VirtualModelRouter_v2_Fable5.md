@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-08 22:40, by Fable 5 -->
+<!-- Ver 2026-07-09 00:40, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -250,7 +250,9 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 **范围**：只处理请求里的内联 base64 图片（OpenAI `image_url` 的 data URI／Anthropic `source.type=base64`）；不处理 response，也不 fetch 远程图片 URL——两者都超出"改写本地已有字节"的边界。与 §12.1 规划的敏感词过滤插件共享同一接入点（body 解析后、`router.Serve` 之前），但不是同一套机制：图片降采样是具体、确定的处理，不经过预留的插件注册表。
 
-**开关**：配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。
+**开关，全局 + 逐虚拟模型覆盖**：全局配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。每个 virtual model 也可以在 `models.<protocol>.<name>.image_downscale` 单独设置，**模型自身的值优先于全局值**；不写则继承全局。`config.ModelConfig.ImageDownscaleMaxPx` 是 `*int` 而非 `int`：nil 代表"未设置，继承全局"，非 nil（含指向 0 的指针）代表"模型显式设置"，0 在模型层面是明确的"强制关闭"——即使全局开着，这个模型也不降采样。用 `int` 存不下这个区分（0 到底是"没写"还是"写了 0"），这是选指针类型的唯一原因。负数（全局或模型级）在 `applyDefaults` 里一律钳制为 0，与既有惯例一致。
+
+运行时对应关系：`router.ModelRoute` 携带同名的 `ImageDownscaleMaxPx *int` 字段（`BuildSnapshot` 从 `ModelConfig` 透传），并提供 `EffectiveImageDownscaleMaxPx(globalMaxPx int) int` 方法解出对某个模型实际生效的上限——nil 接收者安全（未知模型直接回退全局，调用方不用先判空）。`server.chatHandler` 因此需要在做降采样之前先解出 `probe.Model`：JSON 探测解析（`model`/`stream` 两个字段）被挪到了并发闸获取与图片降采样**之前**（原先在两者之后）——探测本身够便宜，不需要等并发闸，这个顺序调整也让"坏 JSON / 缺 model"这两类 400 提前返回，不再白占一个并发槽位。
 
 **检测分层，越靠前越便宜**：
 
@@ -266,7 +268,27 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 * 解压炸弹防护：`DecodeConfig` 拿到的声明像素总数超过 64MP 的图片拒绝解码，原样透传（一张几十字节的畸形 PNG 足以声明出几亿像素）。
 * **fail-open**：解析/解码/编码路径上任何失败（含 panic，`recover` 兜底）都回退到原始字节——这一步的 bug 绝不能让本可成功的请求失败。
 
-**对现有机制的影响**：改动点在 `server.chatHandler` 里，`rec.Client.Request.Body` 记录**之后**、`probe` 解析**之前**——审计的"客户端层"仍记录原始请求；"上游尝试层"（`attempts[].request`）自然记录降采样后的实际出站内容，语义与既有的 model 字段改写一致，无需改动审计结构。并发闸（§8）天然限制了图片处理的并发数，不引入新的无界并发。
+**对现有机制的影响**：改动点仍在 `server.chatHandler` 里，`rec.Client.Request.Body` 记录**之后**——审计的"客户端层"仍记录原始请求；"上游尝试层"（`attempts[].request`）自然记录降采样后的实际出站内容，语义与既有的 model 字段改写一致，无需改动审计结构。并发闸（§8）天然限制了图片处理的并发数，不引入新的无界并发。
+
+### 7.1 降采样结果磁盘缓存
+
+**动机**：同一张源图片在同一个目标像素上限下，降采样结果是确定的——没有理由重复计算。更重要的是字节一致性：上游（尤其是 Anthropic）的 prompt cache 按精确字节/token 匹配，如果同一张图片每次请求都重新走一遍 JPEG 编码，编码器不保证逐字节输出相同，任何细微差异都会让上游缓存静默失效，而这类失效在日志里几乎不可见——只会看到 `tokens_in_cached` 莫名其妙地低。有缓存的话，同一张图第二次发出的就是完全相同的字节，上游缓存才谈得上稳定命中。
+
+**Key**：`sha256(原始图片字节)` + 目标 `maxPx`。maxPx 必须入 key——同一张图对不同虚拟模型可能用不同的降采样目标（§7 的逐模型覆盖），两者是两份不同的结果，不能共享一个缓存条目。文件名 `<hex>-<maxPx>.jpg`，值就是降采样后的 JPEG 字节（输出格式固定为 JPEG，见上文）。
+
+**目录**：`imgprep.CacheDir()` 解析 `$VMR_IMG_CACHE_DIR`，未设置则退回 `os.TempDir()/vmr-imgcache`——固定加一层子目录（不同于 `audit.Dir()` 直接用根目录），因为缓存是大量按内容哈希命名的小文件，不该和临时目录里其它东西混在一起。
+
+**查找时机**：只在"确认需要处理"（`longSide > maxPx` 且未触发解压炸弹防护）之后才计算哈希、查缓存——绝大多数图片根本不需要降采样，在这条路径之外查缓存只会给最常见的场景白加一次哈希开销。命中则直接返回缓存字节，跳过解码/缩放/编码整段；未命中则走原有全量处理，处理完成后再写入缓存。
+
+**失效策略：按最近命中时间（mtime）的 TTL，不设容量上限**。命中时 `os.Chtimes` 把 mtime 刷新到当前时间——语义是"最近使用"而非"创建时间"，避免一个长会话里反复引用的截图，仅仅因为会话跑得久就被 TTL 判定过期。容量上限被有意省略：类比 §9.5 审计日志的取舍（当时也只做了按天数的 retention，没做体积上限），图片缓存的体积由"不同源图片数 × 不同 maxPx 数 × TTL 窗口"共同界定，实践中量级有限（典型部署里 maxPx 的取值种类是个位数——一个全局值加少数几个模型覆盖）；真出现磁盘占用问题，再按 §12 的路线图补一个容量上限，不为一个尚未出现的问题预先加复杂度。
+
+配置项 `image_cache_ttl_days`（int，缺省/非正数 → 7 天）。和 `audit_retention_days` 的"0=永久保留"刻意不同：审计日志有取证/成本核算价值，删除是数据丢失风险，需要用户显式选择清理；图片缓存纯粹是性能优化，没有对应的"数据丢失"属性，主动清理是更安全的默认值，不需要用户显式开启。
+
+**触发时机**：不额外起 ticker/goroutine。仿照 §9.5 审计 housekeeping 的"事件触发 + 节流"思路，每次命中"确认需要处理"分支时调用一次节流检查——按缓存目录各自记录"今天是否已经扫过"，每个目录每天最多触发一次异步清理（单次 `os.ReadDir` + 按文件 mtime 判断，顺带清理因进程崩溃遗留的 `.tmp-*` 半写文件）。
+
+**写入**：`os.CreateTemp` + `os.Rename`，与 §9.5 审计压缩落盘同一套 crash-safety 模式；失败一律静默忽略（fail-open——缓存只是优化，写盘失败不该让一个已经处理成功的请求失败）。
+
+**已知限制：service 模式下 `VMR_IMG_CACHE_DIR` 不会被自动继承**。§10 描述的 `write_env_file` 只抓两类变量：config.yaml 里出现的 `${VAR}` 引用、以及固定的几个 proxy 变量；`VMR_LOG_DIR` 是唯一被显式强制写进 plist/systemd unit 的例外。`VMR_IMG_CACHE_DIR` 两类都不占，所以 launchd/systemd 托管下的 vmr 永远看不到当前 shell 里设的这个变量，缓存固定落在系统临时目录，除非手动把它加进生成的 `~/.config/vmr/env`。不算 bug（temp dir 本来就是安全的兜底默认值，缓存丢了顶多重新计算），但没在文档里提前说明容易让人诧异——已在 README 补充说明。
 
 ---
 
@@ -384,7 +406,8 @@ api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
 max_body_mb: 8                # 请求体缓冲上限（缺省 8，超限 413）
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
-image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭
+image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
+image_cache_ttl_days: 7       # 降采样结果缓存的失效期（§7.1）；缺省/非正数 = 7 天
 audit_retention_days: 0       # 审计文件保留天数（§9.5）；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
 timeouts:
   connect: 10s                # 连接上游（缺省 10s）
@@ -401,6 +424,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
   <protocol>:
     <virtual-model-name>:
       strategy: [priority]       # 缺省 [priority]
+      image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效（§7）；写 0 表示对这个模型强制关闭，即使全局开着
       endpoints:
         - provider: <name>       # 必须引用同协议分组下已定义的 provider
           model: <上游真实模型名>
@@ -411,7 +435,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、配置内 `${VAR}` 展开引用的任意变量。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）。环境变量：`VMR_LOG_DIR`（审计目录）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省为系统临时目录下的 `vmr-imgcache` 子目录）、配置内 `${VAR}` 展开引用的任意变量。
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
@@ -442,6 +466,10 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | 图片降采样跳过判定用真实像素尺寸（`DecodeConfig`） | 按字节数估算换算像素 | 压缩率随内容剧烈波动，字节数与像素尺寸不是稳定映射；读文件头一样便宜且没有换算误差 |
 | 图片降采样直接实现为函数调用 | 复用/预建 §12.1 的通用请求预处理插件框架 | 插件框架的词库形态、按 Provider 差异化等问题还未定型，图片降采样是具体确定的处理，不该为一个未来设计买单 |
 | 动图/超限声明尺寸一律 fail-open 跳过 | 尝试部分处理或报错 | 动图缩放会破坏语义，畸形声明尺寸可能是解压炸弹；跳过的代价只是错过一次可选优化，处理的代价可能是内存暴涨或输出错误 |
+| 模型级 `image_downscale` 用 `*int` 区分"未设置"与"显式 0"（§7） | 用 `int`，0 统一当"关闭/继承" | 需求明确要求"模型自己没设置就跟随全局"和"模型显式设为 0"是两种不同状态；`int` 存不下这个区分，只有指针能让"没写"在解析后仍可判定 |
+| 降采样缓存 key 含 `maxPx`（§7.1） | 只按源图片哈希建 key | 同一张源图对不同虚拟模型可能配了不同的降采样目标；只按图片哈希会让后写入的结果覆盖或误命中前一个模型的缓存，返回错误尺寸的图片 |
+| 降采样缓存只做按 mtime 的 TTL，不设容量上限（§7.1） | TTL + 容量双重限制 | 类比 §9.5 审计 retention 的取舍：先上最简单、可预测的单一机制；图片缓存的体积由源图片种类 × maxPx 种类 × TTL 窗口共同界定，实践中量级有限，真出现磁盘问题再加容量上限，不为未发生的问题预先加复杂度 |
+| 降采样缓存目录/失效期通过显式参数传入 `imgprep.Downscale`，不用包级可变状态 | 仿照 `audit` 包用 Set* 全局单例 | `Downscale` 每请求调用一次，调用方（`server.chatHandler`）本来就持有解析好的配置快照；显式传参没有额外成本，还让测试能用 `t.TempDir()` 互相隔离，不用担心跨测试的全局状态污染。唯一必要的包级状态是"缓存目录今天是否已经扫过"的节流簿记，与配置无关，纯粹是防抖动 |
 | Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint`/审计 `attempts[].endpoint` 的格式多一段，两处都是人读字符串，没有内部逻辑解析它 |
 | Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合（§12.2）保留逃生舱 |
 | 请求侧 Header 默认透传 + 小型黑名单（§5.4） | 严格白名单（最初实现） | LLM SDK 发的 header 集合已知且无危险（不会发 Cookie / X-Forwarded-For），全杀掉反而丢 User-Agent / X-Stainless-* / Traceparent 这些上游做 cache 路由决策需要的元数据。blocklist 只剥真正会出问题的几项（凭证、IP 欺骗、Go Transport 管理的几个），其余透传。OpenClaw 验证生效后反过来证明：原白名单太严苛是因为没区分「协议实现内部白名单」与「代理透传黑名单」的职责 |

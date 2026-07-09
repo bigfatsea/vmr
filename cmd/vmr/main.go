@@ -317,8 +317,8 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	if cfg.AuditRetentionDays > 0 {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
-	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s audit_retention=%s",
-		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, retention)
+	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s",
+		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
 
@@ -345,7 +345,11 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 				}
 				parts[i] = fmt.Sprintf("%d.%s/%s(%s)", i+1, ep.Provider, ep.Model, key)
 			}
-			logger.Printf("config: model %s [%s] -> %s", name, protocol, strings.Join(parts, " "))
+			imgOverride := ""
+			if route.ImageDownscaleMaxPx != nil {
+				imgOverride = fmt.Sprintf(" image_downscale=%dpx", *route.ImageDownscaleMaxPx)
+			}
+			logger.Printf("config: model %s [%s]%s -> %s", name, protocol, imgOverride, strings.Join(parts, " "))
 		}
 	}
 }
@@ -363,7 +367,8 @@ func cmdCheck(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("OK  listen=%s  providers=%d  models=%d\n", cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models))
+	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd\n",
+		cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
 	protocols := make([]string, 0, len(cfg.Models))
 	for protocol := range cfg.Models {
 		protocols = append(protocols, protocol)
@@ -377,7 +382,11 @@ func cmdCheck(args []string) error {
 		sort.Strings(names)
 		for _, name := range names {
 			m := cfg.Models[protocol][name]
-			fmt.Printf("  %s [%s] (strategy=%v)\n", name, protocol, m.Strategy)
+			imgOverride := ""
+			if m.ImageDownscaleMaxPx != nil {
+				imgOverride = fmt.Sprintf("  image_downscale=%dpx", *m.ImageDownscaleMaxPx)
+			}
+			fmt.Printf("  %s [%s] (strategy=%v)%s\n", name, protocol, m.Strategy, imgOverride)
 			// Print endpoints in the order they'd actually be tried (health
 			// ignored — this is a static preview), not raw config priority
 			// numbers: with priority omitted (the common case) that order is

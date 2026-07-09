@@ -1,4 +1,4 @@
-# Ver 2026-07-08 22:00, by Fable 5
+# Ver 2026-07-09 00:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -11,7 +11,8 @@ listen: 127.0.0.1:8800
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_body_mb: 8                 # request body buffer limit
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
-# image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off)
+# image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
+# image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
 # audit_retention_days: 30       # delete audit files older than this; 0/absent = keep forever (rotation always compresses old days to .zst regardless)
 # timeouts:
 #   connect: 10s
@@ -55,6 +56,9 @@ models:
         - {provider: deepseek, model: deepseek-v4-pro}
 
     cheap:
+      # image_downscale: 0        # per-model override example: force this model
+                                   # to skip downscaling even if the global
+                                   # setting above is on (omit to inherit it)
       endpoints:
         - {provider: minimax, model: MiniMax-M3}
         - {provider: openrouter, model: tencent/hy3-preview}
