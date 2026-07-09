@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"vmr/internal/rundir"
 )
 
 // maxBodyBytes caps every recorded body; longer bodies are cut and flagged.
@@ -169,12 +171,13 @@ type Logger struct {
 	hkWG         sync.WaitGroup // lets Close (and tests) wait for a sweep to finish
 }
 
-// Dir resolves the audit directory: $VMR_LOG_DIR, or the system temp dir.
+// Dir resolves the audit directory: $VMR_LOG_DIR if set (used exactly as
+// given), else a vmr_logs subdirectory of the system temp dir — see
+// internal/rundir for the full fallback chain, shared with
+// imgprep.CacheDir so dev mode and service mode always agree on the
+// default without vmr.sh keeping its own copy of this formula.
 func Dir() string {
-	if d := os.Getenv("VMR_LOG_DIR"); d != "" {
-		return d
-	}
-	return os.TempDir()
+	return rundir.Resolve("VMR_LOG_DIR", "vmr_logs", "logs")
 }
 
 func New(dir string) (*Logger, error) {

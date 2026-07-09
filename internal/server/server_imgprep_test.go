@@ -347,9 +347,11 @@ func TestImageDownscaleCacheWiredEndToEnd(t *testing.T) {
 	var gotBody atomic.Value
 	up := mockUpstream(t, &gotBody)
 
-	cacheBase := t.TempDir()
-	t.Setenv("VMR_IMG_CACHE_DIR", cacheBase)
-	cacheDir := filepath.Join(cacheBase, "vmr-imgcache")
+	// An explicit VMR_IMG_CACHE_DIR is used exactly as given, no subdir
+	// appended (internal/rundir) — unlike the unset-default, which does add
+	// one.
+	cacheDir := t.TempDir()
+	t.Setenv("VMR_IMG_CACHE_DIR", cacheDir)
 
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0

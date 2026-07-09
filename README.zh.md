@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-09 00:40, by Sonnet 5 -->
+<!-- Ver 2026-07-10 00:30, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -140,11 +140,11 @@ models:
 默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、错误类别、生效的归一化清单。body 记录上限联动 `max_body_mb`——vmr 接受的请求绝不会在自己的审计里被截断。
 
 ```bash
-./vmr start -c config.yaml                 # 写入 $VMR_LOG_DIR（未设置则系统临时目录）
+./vmr start -c config.yaml                 # 写入 $VMR_LOG_DIR，未设置则用 `vmr dirs log` 的解析结果
 ./vmr start -c config.yaml -audit=false    # 关闭
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report 'logs/vmr-audit-*.jsonl*'     # → vmr-report.json + vmr-report.md（明文/.zst 混着传也行）
+./vmr report "$(./vmr dirs log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md（明文/.zst 混着传也行）
 ```
 
 `vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）：按 日期×协议×模型 的行、按端点的可用度与错误分布、延迟分位、吞吐。Token 统计还拆出了缓存读取（以及 Anthropic 的缓存写入）部分，方便看清输入 token 里有多少是缓存命中。JSON 是二次开发（图表/Dashboard）的数据源。
@@ -171,9 +171,9 @@ models:
 
 **模型级覆盖**：每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
 
-**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）按内容哈希缓存到磁盘（`$VMR_IMG_CACHE_DIR` 或系统临时目录下的 `vmr-imgcache` 子目录）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
+**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）按内容哈希缓存到磁盘（`$VMR_IMG_CACHE_DIR` 有设置就用它，否则用 `vmr dirs cache` 的解析结果）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
 
-service 模式下的一个坑：跟 `VMR_LOG_DIR` 不同，`VMR_IMG_CACHE_DIR` 不会被 `service install` 自动抓进 `~/.config/vmr/env`（它不是 config.yaml 里的 `${VAR}` 引用，抓取逻辑看不到它），也没有像 `VMR_LOG_DIR` 那样被强制写进 plist/unit。所以在 launchd/systemd 托管下，图片缓存目录始终落在系统临时目录，除非你手动把 `VMR_IMG_CACHE_DIR=...` 加进那份 env 文件。`vmr.sh start`（dev 模式）是正常继承当前 shell 环境的，不受影响。
+**审计目录和缓存目录到底落在哪**：两者默认规则统一——`$VMR_LOG_DIR`/`$VMR_IMG_CACHE_DIR` 有设置就原样使用，否则落在系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，再否则（只有系统连临时目录都给不出来这种极端情况）落在二进制所在目录的 `./logs`/`./image_cache`。想知道实际解析出来的路径，直接跑 `vmr dirs log` / `vmr dirs cache`，不用真的启动服务。`vmr.sh` 用的是同一套规则——它自己也是调用 `vmr dirs` 去问，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。
 
 ## 端点与 CLI
 
@@ -186,6 +186,7 @@ service 模式下的一个坑：跟 `VMR_LOG_DIR` 不同，`VMR_IMG_CACHE_DIR` �
 | `vmr check -c config.yaml` | 校验配置、打印路由表与 Key 状态 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计（JSON + Markdown） |
+| `vmr dirs log\|cache` | 打印默认审计/缓存目录的解析结果（`vmr.sh` 内部就是问这个） |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 

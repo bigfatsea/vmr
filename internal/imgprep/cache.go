@@ -1,4 +1,4 @@
-// Ver 2026-07-09 00:00, by Sonnet 5
+// Ver 2026-07-10 00:00, by Sonnet 5
 
 package imgprep
 
@@ -10,20 +10,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"vmr/internal/rundir"
 )
 
-// CacheDir resolves the on-disk downscale cache directory: $VMR_IMG_CACHE_DIR,
-// or a "vmr-imgcache" subdirectory of the system temp dir. Unlike
-// audit.Dir() (which writes directly into the resolved directory — audit
-// filenames are self-identifying so nothing collides), a cache holds many
-// small content-hash-named files and always gets its own subdirectory so it
-// never mixes with unrelated temp-dir litter.
+// CacheDir resolves the on-disk downscale cache directory: $VMR_IMG_CACHE_DIR
+// if set (used exactly as given), else a vmr_image_cache subdirectory of the
+// system temp dir — see internal/rundir for the full fallback chain, shared
+// with audit.Dir so dev mode and service mode always agree on the default
+// without vmr.sh keeping its own copy of this formula.
 func CacheDir() string {
-	base := os.Getenv("VMR_IMG_CACHE_DIR")
-	if base == "" {
-		base = os.TempDir()
-	}
-	return filepath.Join(base, "vmr-imgcache")
+	return rundir.Resolve("VMR_IMG_CACHE_DIR", "vmr_image_cache", "image_cache")
 }
 
 // cacheFileName is the cache key: sha256 of the original (pre-downscale)

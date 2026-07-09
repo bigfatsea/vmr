@@ -1,4 +1,4 @@
-// Ver 2026-07-09 13:30, by Sonnet 5
+// Ver 2026-07-10 00:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -6,6 +6,7 @@
 //	vmr check  -c config.yaml   validate config and print a summary
 //	vmr status -c config.yaml   show endpoint health of a running instance
 //	vmr report <audit.jsonl>    aggregate audit logs into usage statistics
+//	vmr dirs {log|cache}        print the resolved default audit/cache dir (vmr.sh uses this)
 package main
 
 import (
@@ -27,6 +28,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/imgprep"
 	"vmr/internal/report"
 	"vmr/internal/router"
 	"vmr/internal/server"
@@ -52,6 +54,8 @@ func main() {
 		err = cmdStatus(os.Args[2:])
 	case "report":
 		err = cmdReport(os.Args[2:])
+	case "dirs":
+		err = cmdDirs(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -64,7 +68,30 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
-       vmr report [-o dir] <audit.jsonl|glob>...`)
+       vmr report [-o dir] <audit.jsonl|glob>...
+       vmr dirs {log|cache}`)
+}
+
+// cmdDirs prints the resolved runtime directory for "log" (audit.Dir) or
+// "cache" (imgprep.CacheDir) — the single source of truth for the
+// env-var-or-temp-dir-or-cwd default formula (internal/rundir). vmr.sh
+// queries this instead of keeping its own copy of the fallback logic, so
+// dev mode and service mode can never disagree with what the running
+// process actually resolves. Independent of config — these two directories
+// never depend on config.yaml content.
+func cmdDirs(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: vmr dirs {log|cache}")
+	}
+	switch args[0] {
+	case "log":
+		fmt.Println(audit.Dir())
+	case "cache":
+		fmt.Println(imgprep.CacheDir())
+	default:
+		return fmt.Errorf("usage: vmr dirs {log|cache}")
+	}
+	return nil
 }
 
 // cmdReport aggregates audit JSONL files into vmr-report.json + vmr-report.md.
@@ -177,7 +204,7 @@ func logStop(logger *log.Logger, reason string, uptime time.Duration) {
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
-	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from $VMR_LOG_DIR or system temp)")
+	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from $VMR_LOG_DIR or 'vmr dirs log')")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

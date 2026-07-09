@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-08 20:15, by Sonnet 5
+# Ver 2026-07-10 00:30, by Sonnet 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -25,6 +25,9 @@
 # (API keys) are NOT inherited. Service mode loads ~/.config/vmr/env instead;
 # `service install` generates it (0600) from the current shell for every
 # ${VAR} referenced in config.yaml, and never overwrites an existing one.
+# VMR_LOG_DIR/VMR_IMG_CACHE_DIR are handled separately from that scan (see
+# LOG_DIR/CACHE_DIR below) — both modes get the same resolved value because
+# this script always asks the vmr binary, never guesses.
 #
 # No PID file in dev mode: the daemon is found by matching the absolute
 # binary path in the process table (pgrep -f), which cannot collide with
@@ -35,13 +38,31 @@ cd "$(dirname "$0")"
 
 BIN="$PWD/vmr"
 CFG="$PWD/config.yaml"
-LOG_DIR="${VMR_LOG_DIR:-$PWD/logs}"   # audit JSONL + server log; override via env
+MATCH="$BIN start"                    # absolute path → unambiguous process match
+
+ensure_bin() {
+  if [[ ! -x "$BIN" ]]; then
+    echo "building vmr..."
+    go build -o "$BIN" ./cmd/vmr
+  fi
+}
+ensure_bin   # both dirs below query the binary, so it must exist first
+
+# LOG_DIR (audit JSONL + server log) and CACHE_DIR (image-downscale cache)
+# both come from `vmr dirs` — the binary's own env-var-or-temp-dir-or-cwd
+# default formula (internal/rundir) — instead of a bash copy of that logic,
+# so dev mode and service mode can never disagree with what the running
+# process actually resolves. Override via VMR_LOG_DIR / VMR_IMG_CACHE_DIR in
+# the environment this script runs in; `vmr dirs` picks them up the same way
+# `vmr start` itself would.
+#
 # Audit files rotate daily and auto-compress to .zst on rotation (20-75x
 # smaller; vmr report reads both transparently). They're kept forever unless
 # you set audit_retention_days in config.yaml — that's the supported way to
 # expire them; see docs/AuditLogCompression_Analysis_Sonnet5.md.
+LOG_DIR="$("$BIN" dirs log)"
+CACHE_DIR="$("$BIN" dirs cache)"
 SERVER_LOG="$LOG_DIR/vmr.log"
-MATCH="$BIN start"                    # absolute path → unambiguous process match
 
 ENV_FILE="$HOME/.config/vmr/env"
 LABEL="com.vmr"
@@ -57,13 +78,6 @@ esac
 
 running_pids() { pgrep -f "$MATCH" 2>/dev/null || true; }
 
-ensure_bin() {
-  if [[ ! -x "$BIN" ]]; then
-    echo "building vmr..."
-    go build -o "$BIN" ./cmd/vmr
-  fi
-}
-
 # ---------- dev mode (manual supervision) ----------
 
 cmd_start() {
@@ -71,10 +85,10 @@ cmd_start() {
     echo "vmr already running (pid $(running_pids | tr '\n' ' '))"
     exit 0
   fi
-  ensure_bin
   "$BIN" check -c "$CFG" >/dev/null   # refuse to daemonize a broken config
-  mkdir -p "$LOG_DIR"
-  VMR_LOG_DIR="$LOG_DIR" nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
+  mkdir -p "$LOG_DIR" "$CACHE_DIR"
+  VMR_LOG_DIR="$LOG_DIR" VMR_IMG_CACHE_DIR="$CACHE_DIR" \
+    nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
   disown
   sleep 0.5
   if [[ -n "$(running_pids)" ]]; then
@@ -170,7 +184,7 @@ render_plist() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>set -a; . "$ENV_FILE" 2>/dev/null; set +a; export VMR_LOG_DIR="$LOG_DIR"; exec "$BIN" start -c "$CFG"</string>
+        <string>set -a; . "$ENV_FILE" 2>/dev/null; set +a; export VMR_LOG_DIR="$LOG_DIR" VMR_IMG_CACHE_DIR="$CACHE_DIR"; exec "$BIN" start -c "$CFG"</string>
     </array>
     <key>WorkingDirectory</key><string>$HOME</string>
     <key>StandardOutPath</key><string>$SVC_LOG</string>
@@ -194,6 +208,7 @@ ExecStart=$BIN start -c $CFG
 WorkingDirectory=$PWD
 EnvironmentFile=-$ENV_FILE
 Environment=VMR_LOG_DIR=$LOG_DIR
+Environment=VMR_IMG_CACHE_DIR=$CACHE_DIR
 StandardOutput=append:$SERVER_LOG
 StandardError=append:$SERVER_LOG
 Restart=always
@@ -205,9 +220,8 @@ EOF
 }
 
 svc_install() {
-  ensure_bin
   "$BIN" check -c "$CFG" >/dev/null
-  mkdir -p "$LOG_DIR"
+  mkdir -p "$LOG_DIR" "$CACHE_DIR"
   write_env_file
   # A dev-mode process would fight the service over the listen port.
   if [[ -n "$(running_pids)" ]]; then
