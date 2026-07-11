@@ -111,10 +111,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 					Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
 				},
 			}
-			rw := newRecorder(w)
+			rw := newRecorder(w, rec.TS)
 			w = rw
 			defer func() {
 				rec.DurMS = time.Since(rec.TS).Milliseconds()
+				rec.TTFTMS = rw.ttftMS
 				rec.Client.Response = rw.message()
 				switch {
 				case rw.status == 0 && r.Context().Err() != nil:

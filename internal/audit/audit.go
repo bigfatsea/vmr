@@ -58,9 +58,14 @@ func RetentionDays() int { return int(retentionDays.Load()) }
 // Record is one audit line. Two layers: Client is the caller↔vmr exchange,
 // Attempts are the vmr↔provider exchanges (one entry per failover attempt).
 type Record struct {
-	TS       time.Time `json:"ts"`       // request arrival
-	DurMS    int64     `json:"dur_ms"`   // total wall time
-	Model    string    `json:"model"`    // virtual model ("" if rejected before parsing)
+	TS       time.Time `json:"ts"`     // request arrival
+	DurMS    int64     `json:"dur_ms"` // total wall time
+	// TTFTMS is the client-view first-token latency: arrival → first response
+	// body byte written back. 0 (omitted) when nothing was written or the
+	// response was instant (<1ms local rejects) — consumers treat 0 as "no
+	// measurement", which conveniently excludes those rejects from averages.
+	TTFTMS   int64  `json:"ttft_ms,omitempty"`
+	Model    string `json:"model"` // virtual model ("" if rejected before parsing)
 	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic
 	Stream   bool      `json:"stream"`
 	Outcome  string    `json:"outcome"` // ok | error | canceled

@@ -150,6 +150,8 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
 `vmr report` aggregates tokens *and* bytes (bytes as the fallback when a provider omits usage): per date × protocol × model rows, per-endpoint availability and error distribution, latency percentiles, throughput. Token totals also split out cache-read and (Anthropic) cache-write tokens, so you can see how much of your input-token bill is actually cache hits. The JSON is the data source for any dashboarding you want to build on top.
 
+`vmr report` also exports every record as one human-readable Markdown file under `{out}/details/` (plus an `INDEX.md`), for drilling into a single request: the full message list and tool schemas (long content collapsed by default, images as size placeholders), every upstream attempt with a full side-by-side listing of headers and body fields where changes are emoji-marked (🟢 added / 🔴 removed / 🔶 changed), and the client response with the SSE stream reassembled into the actual model output next to the raw event log. Filenames start with a zero-padded timestamp, so name order is time order. Disable with `-details=false`.
+
 Agent workloads resend the full conversation on every turn, so a day's log can run into gigabytes — mostly repeated across lines, not within one. Each day's file rotates and compresses automatically once it's no longer "today": zstd on the whole file (not per-line) catches that cross-line repetition, typically 20–75× smaller in practice — far beyond what compressing each record on its own could reach, since a single record never sees the previous turn's near-duplicate body. `vmr report` reads `.jsonl` and `.jsonl.zst` interchangeably, so point it at a glob covering both. Set `audit_retention_days` to also delete files past a given age (default: keep forever — nothing is deleted unless you opt in); either way, deletion and compression are both keyed off the date in the filename, so housekeeping never needs to scan or `stat` the whole log directory. Details and the numbers behind this: `docs/AuditLogCompression_Analysis_Sonnet5.md`.
 
 ## Request image downscaling
@@ -186,7 +188,7 @@ models:
 | `GET /admin/status` | endpoint health + concurrency metrics (loopback only) |
 | `vmr check -c config.yaml` | validate config, print routing table and key status |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
-| `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics (JSON + Markdown) |
+| `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + per-request detail files (`-details=false` to skip) |
 | `vmr dirs log\|cache` | print the resolved default audit/cache directory (what `vmr.sh` queries internally) |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |

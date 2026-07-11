@@ -22,20 +22,24 @@ func Markdown(rep *Report) string {
 	w("# VMR 用量报告\n\n")
 	w("时段 %s — %s · 生成于 %s · 解析 %d 条记录（%d 条坏行跳过）\n\n",
 		cut(rep.Meta.From, 10), cut(rep.Meta.To, 10), cut(rep.Meta.GeneratedAt, 10), rep.Meta.Records, rep.Meta.ParseErrors)
-	w("| 请求 | 成功率 | Fallback | Tokens in/out | 输入缓存命中 | 缓存写入 | 字节 in/out | 平均吞吐 |\n|---|---|---|---|---|---|---|---|\n")
-	w("| %d | %s | %d 次 | %s / %s | %s | %s | %s / %s | %.1f tok/s |\n\n",
+	w("| 请求 | 成功率 | Fallback | Tokens In/CacheHit/Out | 请求均值 In/CacheHit/Out | 缓存写入 | 平均消息数 | 平均首字延迟 | 字节 in/out | 平均吞吐 |\n|---|---|---|---|---|---|---|---|---|---|\n")
+	w("| %d | %s | %d 次 | %s | %s | %s | %s | %s | %s / %s | %.1f tok/s |\n\n",
 		t.requests, pct(t.ok, t.requests), t.fallbacks,
-		fmtN(t.tokensIn), fmtN(t.tokensOut), cacheStr(t.tokensInCached, t.tokensIn), cacheAbs(t.tokensInCacheWrite),
+		tokTriple(t.tokensIn, t.tokensInCached, t.tokensOut), t.avgTriple(), cacheAbs(t.tokensInCacheWrite),
+		t.avgMessages(), t.avgTTFT(),
 		fmtN(t.bytesIn), fmtN(t.bytesOut), t.tokPerSec())
+	if line := roleStatLine(t.roleChars, false); line != "" {
+		w("请求消息字符占比（按角色，汇总 %d 条请求）：%s\n\n", t.messagesKnown, line)
+	}
 
 	// ---- Tier 1: per-model summary (rows rolled up over dates) ----
 	w("## 按模型\n\n")
-	w("| 模型 | 协议 | 请求 | 成功率 | Fallback | Tokens in/out | 输入缓存命中 | 缓存写入 | 字节 out | p50/p95 延迟 | tok/s |\n")
-	w("|---|---|---|---|---|---|---|---|---|---|---|\n")
+	w("| 模型 | 协议 | 请求 | 成功率 | Fallback | Tokens In/CacheHit/Out | 缓存写入 | 字节 out | p50/p95 延迟 | tok/s |\n")
+	w("|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, m := range rollupModels(rep.Rows) {
-		w("| %s | %s | %d | %s | %d | %s / %s | %s | %s | %s | %s / %s | %.1f |\n",
+		w("| %s | %s | %d | %s | %d | %s | %s | %s | %s / %s | %.1f |\n",
 			m.Model, m.Protocol, m.requests, pct(m.ok, m.requests), m.fallbacks,
-			fmtN(m.tokensIn), fmtN(m.tokensOut), cacheStr(m.tokensInCached, m.tokensIn), cacheAbs(m.tokensInCacheWrite), fmtN(m.bytesOut),
+			tokTriple(m.tokensIn, m.tokensInCached, m.tokensOut), cacheAbs(m.tokensInCacheWrite), fmtN(m.bytesOut),
 			ms(m.p50), ms(m.p95), m.tokPerSec())
 	}
 	w("\n")
@@ -50,10 +54,10 @@ func Markdown(rep *Report) string {
 
 	// ---- Tier 2: daily trend ----
 	if days := rollupDates(rep.Rows); len(days) > 1 {
-		w("## 按日趋势\n\n| 日期 | 请求 | 成功率 | Tokens in/out | 输入缓存命中 | 字节 out | p95 延迟 |\n|---|---|---|---|---|---|---|\n")
+		w("## 按日趋势\n\n| 日期 | 请求 | 成功率 | Tokens In/CacheHit/Out | 字节 out | p95 延迟 |\n|---|---|---|---|---|---|\n")
 		for _, d := range days {
-			w("| %s | %d | %s | %s / %s | %s | %s | %s |\n",
-				d.Date, d.requests, pct(d.ok, d.requests), fmtN(d.tokensIn), fmtN(d.tokensOut), cacheStr(d.tokensInCached, d.tokensIn), fmtN(d.bytesOut), ms(d.p95))
+			w("| %s | %d | %s | %s | %s | %s |\n",
+				d.Date, d.requests, pct(d.ok, d.requests), tokTriple(d.tokensIn, d.tokensInCached, d.tokensOut), fmtN(d.bytesOut), ms(d.p95))
 		}
 		w("\n")
 	}
@@ -83,8 +87,14 @@ type total struct {
 	requests, ok, fallbacks            int
 	tokensIn, tokensOut                int64
 	tokensInCached, tokensInCacheWrite int64
+	tokensKnown                        int
 	bytesIn, bytesOut                  int64
 	tokDurWeightMS                     int64
+	messages                           int64
+	messagesKnown                      int
+	roleChars                          map[string]int64
+	ttftSumMS                          int64
+	ttftKnown                          int
 	Model, Protocol, Date              string
 	durs                               []int64
 	p50, p95                           int64
@@ -98,8 +108,19 @@ func (t *total) add(r Row) {
 	t.tokensOut += r.TokensOut
 	t.tokensInCached += r.TokensInCached
 	t.tokensInCacheWrite += r.TokensInCacheWrite
+	t.tokensKnown += r.TokensKnown
 	t.bytesIn += r.BytesIn
 	t.bytesOut += r.BytesOut
+	t.messages += r.Messages
+	t.messagesKnown += r.MessagesKnown
+	for role, c := range r.RoleChars {
+		if t.roleChars == nil {
+			t.roleChars = map[string]int64{}
+		}
+		t.roleChars[role] += c
+	}
+	t.ttftSumMS += r.TTFTMSSum
+	t.ttftKnown += r.TTFTKnown
 	if r.TokOutPerSec > 0 {
 		t.tokDurWeightMS += int64(float64(r.TokensOut) / r.TokOutPerSec * 1000)
 	}
@@ -118,6 +139,34 @@ func (t *total) tokPerSec() float64 {
 		return 0
 	}
 	return float64(t.tokensOut) / (float64(t.tokDurWeightMS) / 1000)
+}
+
+// avgTriple renders per-request average tokens In/CacheHit/Out over the
+// records with extractable usage; "-" when there are none.
+func (t *total) avgTriple() string {
+	if t.tokensKnown == 0 {
+		return "-"
+	}
+	n := int64(t.tokensKnown)
+	return tokTriple(t.tokensIn/n, t.tokensInCached/n, t.tokensOut/n)
+}
+
+// avgMessages renders the mean message count per request with a parseable
+// chat body; "-" when none parsed (e.g. all-rejected traffic).
+func (t *total) avgMessages() string {
+	if t.messagesKnown == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", float64(t.messages)/float64(t.messagesKnown))
+}
+
+// avgTTFT renders the mean first-token latency over records that carry
+// ttft_ms; "-" when none do (logs predating the field).
+func (t *total) avgTTFT() string {
+	if t.ttftKnown == 0 {
+		return "-"
+	}
+	return ms(t.ttftSumMS / int64(t.ttftKnown))
 }
 
 func (t *total) finish() {
@@ -212,19 +261,19 @@ func fmtN(n int64) string {
 	case n >= 1_000_000:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 	case n >= 10_000:
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
 	default:
 		return fmt.Sprintf("%d", n)
 	}
 }
 
-// cacheStr renders a cache-read share as "35.2% (420k)"; "-" when there's no
-// tokens_in to compute a share against.
-func cacheStr(cached, tokensIn int64) string {
-	if tokensIn == 0 {
+// tokTriple renders tokens as one "In / CacheHit(share%) / Out" cell, e.g.
+// "41.0M / 38.8M(94.7%) / 86.9K"; "-" when there are no tokens at all.
+func tokTriple(in, cached, out int64) string {
+	if in == 0 && out == 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%s (%s)", pct(int(cached), int(tokensIn)), fmtN(cached))
+	return fmt.Sprintf("%s / %s(%s) / %s", fmtN(in), fmtN(cached), pct(int(cached), int(in)), fmtN(out))
 }
 
 // cacheAbs renders an absolute cache-write token count; "-" when zero

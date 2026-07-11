@@ -335,6 +335,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 {
   "ts": "2026-07-07T12:15:20.123+08:00",  // 请求到达时刻（RFC3339 毫秒）
   "dur_ms": 864,                          // 总耗时（含并发闸等待与流式全程）
+  "ttft_ms": 120,                         // 首字延迟：到达 → 首个响应 body 字节写回客户端；未写出或 <1ms 本地拒绝时省略（0 值视为"无测量"）
   "model": "claude-failtest",             // Virtual Model；解析前被拒则为 ""
   "protocol": "anthropic",                // 入口协议：openai | anthropic
   "stream": false,
@@ -381,7 +382,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 读取 §9.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §9.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
 
 ```
-vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst）
+vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md + {out}/details/ 逐请求详单（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst；-details=false 关闭详单）
 ```
 
 * **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
@@ -391,7 +392,8 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md�
   * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
 * **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。
 * **tokens_in 缓存细分**（`internal/report/usage.go`）：`tokens_in` 是全部输入 token（含缓存），另拆出两个子集——`tokens_in_cached` 是缓存命中（Anthropic `cache_read_input_tokens` / OpenAI `usage.prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens`），`tokens_in_cache_write` 是仅 Anthropic 有的缓存新写入（`cache_creation_input_tokens`，按溢价计费，不算命中）。两者都已含在 `tokens_in` 里；新鲜（未命中）部分 = `tokens_in - tokens_in_cached - tokens_in_cache_write`，消费方按需自行相减，JSON 不重复存储比例。**两家上游对"总输入"的定义不同，提取时已做归一**：Anthropic 的 `input_tokens` 不含缓存两项，是分开计数的三个字段相加；OpenAI/DeepSeek 的 `prompt_tokens` 本身已含缓存命中，`cached_tokens`/`prompt_cache_hit_tokens` 只是从中圈出的子集，不可再相加。判据是 usage 对象里是否存在 `input_tokens` 键（Anthropic 独有字段名）。审计日志本身不需要改动——完整原始 body 早已落盘，这些字段只是之前没被读取。
-* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度）与 T2（按日趋势、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算）。总览/按模型/按日趋势三张表新增"输入缓存命中"（命中占比 + 绝对量）与"缓存写入"（仅总览/按模型，Anthropic 专属，多数行为 `-`）两列。
+* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度）与 T2（按日趋势、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算）。Token 三列合并为一格 "Tokens In/CacheHit/Out"（如 `41.0M / 38.8M(94.7%) / 86.9K`，三张表统一）；"缓存写入"单列保留（Anthropic 专属，多数行为 `-`）。总览表另有：请求均值 In/CacheHit/Out（除以 tokens_known）、平均消息数（messages/messages_known）、平均首字延迟（ttft_ms_sum/ttft_known，旧日志无 ttft_ms 时为 `-`），及表下一行按角色的请求消息字符占比（role_chars 汇总占比；Anthropic 的 tool_result part 计入 tool 角色以与 OpenAI 对齐）。
+* **逐请求详单**（`internal/report/detail.go` + `render.go`，默认开启，`-details=false` 关闭）：每条审计记录导出一个 Markdown 文件到 `{out}/details/`，附 `INDEX.md` 索引。文件名 `{YYYYMMDD-HHMMSS.mmm}_{虚拟模型}_{真实模型}_{outcome[-错误类]}.md`，零填充时间戳开头，按名字排序即按时间排序；同毫秒冲突加数字后缀，重跑幂等覆盖。文档按请求物理路径分三段：① Client→VMR（headers/参数/tools/messages，长内容 `<details>` 折叠、summary 带长度与预览，base64 图片以媒体类型+尺寸占位；Messages 标题下附按角色的字符数与占比统计行，概要表含首字延迟）、② VMR→上游每次 attempt（headers 与 body 字段**全量对照**，变化项标 🟢 新增/🔴 删除/🔶 变化，未变化照常列出不突出；messages/tools 逐条对照，变化条目附上游侧全文；成功 attempt 的响应 body 依 §9.2 省略语义标注"透传"，并把 `norm` 步骤翻译成人话）、③ VMR→Client 响应（headers 相对上游响应对照；SSE 流重组为模型实际输出——reasoning 折叠、content 展开、tool_calls 拼装完整——原始 SSE 全文折叠保留）。SSE 重组覆盖两种协议（OpenAI delta 累加 / Anthropic content_block 事件），与 §9.2 审计格式同样强耦合。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 

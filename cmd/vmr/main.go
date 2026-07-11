@@ -68,7 +68,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
-       vmr report [-o dir] <audit.jsonl|glob>...
+       vmr report [-o dir] [-details=false] <audit.jsonl|glob>...
        vmr dirs {log|cache}`)
 }
 
@@ -101,6 +101,7 @@ func cmdDirs(args []string) error {
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	outDir := fs.String("o", ".", "output directory")
+	detailsOn := fs.Bool("details", true, "also export one Markdown file per request into {out}/details/")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -147,6 +148,14 @@ func cmdReport(args []string) error {
 	}
 	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
 		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	if *detailsOn {
+		detailDir := filepath.Join(*outDir, "details")
+		n, err := report.WriteDetails(paths, detailDir)
+		if err != nil {
+			return fmt.Errorf("details: %w", err)
+		}
+		fmt.Printf("%d detail file(s) + INDEX.md in %s\n", n, detailDir)
+	}
 	return nil
 }
 

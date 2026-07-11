@@ -22,9 +22,10 @@ coverage.html
 .idea/
 .vscode/
 
-# Generated reports
+# Generated reports (details/ carries full conversation bodies — never commit)
 /vmr-report.json
 /vmr-report.md
+/details/
 
 # Audit data (may contain full conversation bodies — never commit)
 *.jsonl

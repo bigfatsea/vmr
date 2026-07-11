@@ -1,24 +1,30 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-10, by Fable 5
 package server
 
 import (
 	"bytes"
 	"net/http"
+	"time"
 
 	"vmr/internal/audit"
 )
 
 // recorder tees the client-side response into the audit record: status,
-// headers, and up to audit.MaxBodyBytes of body. Flush passes through so
-// streaming latency is unaffected.
+// headers, up to audit.MaxBodyBytes of body, and the first-body-byte time
+// (the client-view TTFT). Flush passes through so streaming latency is
+// unaffected.
 type recorder struct {
 	http.ResponseWriter
+	start   time.Time
+	ttftMS  int64 // arrival → first body byte; 0 until the first Write
 	status  int
 	written int64
 	buf     bytes.Buffer
 }
 
-func newRecorder(w http.ResponseWriter) *recorder { return &recorder{ResponseWriter: w} }
+func newRecorder(w http.ResponseWriter, start time.Time) *recorder {
+	return &recorder{ResponseWriter: w, start: start}
+}
 
 func (r *recorder) WriteHeader(status int) {
 	if r.status == 0 {
@@ -30,6 +36,9 @@ func (r *recorder) WriteHeader(status int) {
 func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
+	}
+	if r.ttftMS == 0 && len(p) > 0 {
+		r.ttftMS = time.Since(r.start).Milliseconds()
 	}
 	if room := int(audit.MaxBodyBytes()) - r.buf.Len(); room > 0 {
 		r.buf.Write(p[:min(len(p), room)])

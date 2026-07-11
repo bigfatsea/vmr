@@ -148,7 +148,7 @@ func TestMarkdownRendering(t *testing.T) {
 	md := Markdown(rep)
 	for _, want := range []string{
 		"# VMR 用量报告",
-		"输入缓存命中", "缓存写入",
+		"Tokens In/CacheHit/Out", "请求均值 In/CacheHit/Out", "缓存写入", "平均消息数", "平均首字延迟",
 		"## 按模型", "| cheap |", "| claude |",
 		"## 端点可用度", "| p1/m1 | 4 | 2 |", "rate_limit×1", // rolled up across both days
 		"## 按日趋势", "| 2026-07-07 |", "| 2026-07-08 |",
@@ -182,11 +182,53 @@ func TestBuild_CacheTokens(t *testing.T) {
 	}
 
 	md := Markdown(rep)
-	if !strings.Contains(md, "80.0% (100)") { // cache read share of total in: 100/125
-		t.Errorf("markdown missing cache-read share\n---\n%s", md)
+	if !strings.Contains(md, "125 / 100(80.0%) / 7") { // merged In/CacheHit(share)/Out cell
+		t.Errorf("markdown missing merged token triple\n---\n%s", md)
 	}
 	if !strings.Contains(md, " 20 |") { // cache-write absolute count column
 		t.Errorf("markdown missing cache-write count\n---\n%s", md)
+	}
+}
+
+func TestBuild_ShapeStatsAndTTFT(t *testing.T) {
+	// Two records with chat bodies + ttft_ms, one legacy record without either.
+	lines := `{"ts":"2026-07-08T10:00:00+08:00","dur_ms":1000,"ttft_ms":200,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m","messages":[{"role":"system","content":"ss"},{"role":"user","content":"uuuu"}]}},"response":{"status":200,"body":{"usage":{"prompt_tokens":10,"completion_tokens":5}}}}}
+{"ts":"2026-07-08T10:01:00+08:00","dur_ms":1000,"ttft_ms":400,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m","messages":[{"role":"user","content":"uu"},{"role":"assistant","content":"aaaa"},{"role":"tool","content":"tttttt","tool_call_id":"c"}]}},"response":{"status":200,"body":{"usage":{"prompt_tokens":30,"completion_tokens":15}}}}}
+{"ts":"2026-07-08T10:02:00+08:00","dur_ms":1000,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m"}},"response":{"status":200}}}
+`
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Build([]string{path}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rep.Rows))
+	}
+	r := rep.Rows[0]
+	if r.Messages != 5 || r.MessagesKnown != 2 {
+		t.Errorf("messages = %d/%d, want 5/2", r.Messages, r.MessagesKnown)
+	}
+	if r.RoleChars["system"] != 2 || r.RoleChars["user"] != 6 || r.RoleChars["assistant"] != 4 || r.RoleChars["tool"] != 6 {
+		t.Errorf("role chars = %v", r.RoleChars)
+	}
+	if r.TTFTMSSum != 600 || r.TTFTKnown != 2 {
+		t.Errorf("ttft = %d/%d, want 600/2", r.TTFTMSSum, r.TTFTKnown)
+	}
+
+	md := Markdown(rep)
+	for _, want := range []string{
+		"| 2.5 |",               // avg messages: 5 msgs / 2 known
+		"| 300ms |",             // avg TTFT: 600 / 2
+		"| 20 / 0(0.0%) / 10 |", // per-request avg tokens: 40/2, 0, 20/2
+		"system 11.1%",          // share: 2 of 18 total chars
+		"tool 33.3%",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown missing %q\n---\n%s", want, md)
+		}
 	}
 }
 

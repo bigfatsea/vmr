@@ -26,7 +26,10 @@ import (
 // 3: tokens_in now includes Anthropic's cache_read/cache_creation tokens
 // (previously excluded, since Anthropic reports them as separate counters
 // from input_tokens) and gains tokens_in_cached/tokens_in_cache_write.
-const Format = 3
+// 4: rows gain request-shape stats (messages/messages_known/role_chars)
+// and first-token latency (ttft_ms_sum/ttft_known, from the audit
+// record's ttft_ms field — absent in logs written before it existed).
+const Format = 4
 
 // Report is the top-level JSON output. Grains: Rows = date × protocol ×
 // virtual model (roll up freely to coarser cuts); Endpoints = date × upstream
@@ -76,6 +79,20 @@ type Row struct {
 
 	BytesIn  int64 `json:"bytes_in"`  // client request body bytes (as recorded)
 	BytesOut int64 `json:"bytes_out"` // client response body bytes (as recorded)
+
+	// Request-shape stats over records whose request body parsed as a chat
+	// object (MessagesKnown counts them): total message count and displayed
+	// characters per role. Anthropic tool_result parts count as "tool" to
+	// stay comparable with openai's dedicated tool role.
+	Messages      int64            `json:"messages"`
+	MessagesKnown int              `json:"messages_known"`
+	RoleChars     map[string]int64 `json:"role_chars,omitempty"`
+
+	// First-token latency (client view: request arrival → first response
+	// body byte), summed over the TTFTKnown records that carry ttft_ms —
+	// logs written before the field existed contribute nothing.
+	TTFTMSSum int64 `json:"ttft_ms_sum"`
+	TTFTKnown int   `json:"ttft_known"`
 
 	DurMSSum int64 `json:"dur_ms_sum"`
 	DurMSP50 int64 `json:"dur_ms_p50"`
@@ -256,6 +273,21 @@ func addRecord(row *Row, rec *audit.Record) {
 	row.BytesIn += bodyBytes(rec.Client.Request.Body)
 	if rec.Client.Response != nil {
 		row.BytesOut += bodyBytes(rec.Client.Response.Body)
+	}
+
+	if n, ok := messageCount(rec.Client.Request.Body); ok {
+		row.Messages += int64(n)
+		row.MessagesKnown++
+		for role, c := range roleChars(rec.Client.Request.Body) {
+			if row.RoleChars == nil {
+				row.RoleChars = map[string]int64{}
+			}
+			row.RoleChars[role] += c
+		}
+	}
+	if rec.TTFTMS > 0 {
+		row.TTFTMSSum += rec.TTFTMS
+		row.TTFTKnown++
 	}
 
 	row.DurMSSum += rec.DurMS

@@ -149,6 +149,8 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
 `vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）：按 日期×协议×模型 的行、按端点的可用度与错误分布、延迟分位、吞吐。Token 统计还拆出了缓存读取（以及 Anthropic 的缓存写入）部分，方便看清输入 token 里有多少是缓存命中。JSON 是二次开发（图表/Dashboard）的数据源。
 
+`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单，落在 `{out}/details/` 下（附 `INDEX.md` 索引），用于深挖单个请求：完整消息列表与工具 schema（长内容默认折叠、图片以尺寸占位）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化，未变化的照常列出不突出）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。加 `-details=false` 可关闭。
+
 Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见 `docs/AuditLogCompression_Analysis_Sonnet5.md`。
 
 ## 请求图片自动降采样
@@ -185,7 +187,7 @@ models:
 | `GET /admin/status` | 端点健康 + 并发指标（仅 loopback） |
 | `vmr check -c config.yaml` | 校验配置、打印路由表与 Key 状态 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
-| `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计（JSON + Markdown） |
+| `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 逐请求详单（`-details=false` 关闭） |
 | `vmr dirs log\|cache` | 打印默认审计/缓存目录的解析结果（`vmr.sh` 内部就是问这个） |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
