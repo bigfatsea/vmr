@@ -1,4 +1,4 @@
-// Ver 2026-07-10 01:10, by Fable 5
+// Ver 2026-07-12 03:10, by Fable 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -38,8 +38,10 @@ var normDescriptions = map[string]string{
 
 // WriteDetails renders every record in the given audit files into dir (one
 // .md per record plus INDEX.md) and returns the number of record files
-// written. Reruns overwrite deterministically.
-func WriteDetails(paths []string, dir string) (int, error) {
+// written. Reruns overwrite deterministically. sess (optional, nil = plain
+// mode) supplies the session grouping: detail headers gain session/task
+// coordinates and a delta section, INDEX gains a grouped view.
+func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err
 	}
@@ -53,6 +55,7 @@ func WriteDetails(paths []string, dir string) (int, error) {
 		attempts int
 		usage    Usage
 		usageOK  bool
+		info     *ReqInfo
 	}
 	var entries []indexEntry
 	used := map[string]int{}
@@ -64,19 +67,28 @@ func WriteDetails(paths []string, dir string) (int, error) {
 		}
 		sc := bufio.NewScanner(rc)
 		sc.Buffer(make([]byte, 1<<20), 128<<20)
+		line := 0
 		for sc.Scan() {
+			line++
 			var rec audit.Record
 			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
 				continue // Build already counts parse errors
 			}
-			name := detailFileName(&rec, used)
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec)), 0o644); err != nil {
+			info := sess.Lookup(path, line)
+			name := ""
+			if info != nil {
+				name = info.DetailFile // assigned in ts order by the analysis
+			}
+			if name == "" {
+				name = detailFileName(&rec, used)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec, info)), 0o644); err != nil {
 				rc.Close()
 				return len(entries), err
 			}
 			e := indexEntry{ts: rec.TS, file: name, model: displayModel(&rec),
 				endpoint: lastEndpoint(&rec), outcome: rec.Outcome,
-				durMS: rec.DurMS, attempts: len(rec.Attempts)}
+				durMS: rec.DurMS, attempts: len(rec.Attempts), info: info}
 			if rec.Client.Response != nil {
 				e.usage, e.usageOK = ExtractUsage(rec.Client.Response.Body)
 			}
@@ -96,20 +108,129 @@ func WriteDetails(paths []string, dir string) (int, error) {
 	})
 	var b strings.Builder
 	fmt.Fprintf(&b, "# VMR 请求详单索引\n\n共 %d 条记录\n\n", len(entries))
-	b.WriteString("| 时间 | 模型 | 上游 | 结果 | 耗时 | 尝试 | tokens in/out | 文件 |\n|---|---|---|---|---|---|---|---|\n")
+
+	// Grouped view first: sessions → tasks → turns (analysis mode only).
+	if sess != nil && len(sess.Sessions) > 0 {
+		fileOf := map[*ReqInfo]string{}
+		for _, e := range entries {
+			if e.info != nil {
+				fileOf[e.info] = e.file
+			}
+		}
+		b.WriteString("## 按会话分组\n\n")
+		for _, s := range sess.Sessions {
+			cont := ""
+			if s.ContinuedFrom != "" {
+				cont = fmt.Sprintf("（%s 经 compaction 续接）", s.ContinuedFrom)
+			} else if s.IsContinuation {
+				cont = "（续接自输入之外的会话）"
+			}
+			chat := ""
+			if s.ChatID != "" {
+				chat = " · chat " + escapeCell(truncCell(s.ChatID, 24))
+			}
+			fmt.Fprintf(&b, "### 会话 %s%s · 「%s」 · %d 轮 %d 任务%s\n\n",
+				s.ID, cont, escapeCell(truncCell(s.Title, 60)), len(s.Recs), len(s.Tasks), chat)
+			for _, t := range s.Tasks {
+				fmt.Fprintf(&b, "**%s · 「%s」 · %d 轮**\n\n", t.ID, escapeCell(truncCell(t.Title, 60)), len(t.Recs))
+				b.WriteString("| 轮 | 时间 | 增量 | 本轮调用 | finish | 结果 | 耗时 | tokens in/out | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
+				for _, r := range t.Recs {
+					fmt.Fprintf(&b, "| %d | %s | +%d | %s | %s | %s | %s | %s | [%s](./%s) |\n",
+						r.TaskSeq, r.TS.Format("15:04:05"), r.Msgs-r.DeltaStart,
+						escapeCell(callsCell(r.ToolCalls)), dash(r.Finish), reqMark(r),
+						ms(r.durMS), usageCell(r), fileOf[r], fileOf[r])
+				}
+				b.WriteString("\n")
+			}
+		}
+		if len(sess.Compactions) > 0 {
+			b.WriteString("### Compaction 调用\n\n| 时间 | 压缩对象 | 续接为 | 文件 |\n|---|---|---|---|\n")
+			for _, c := range sess.Compactions {
+				fmt.Fprintf(&b, "| %s | %s | %s | [%s](./%s) |\n",
+					c.TS.Format("15:04:05"), dash(c.Summarizes), dash(c.ContinuesTo),
+					c.DetailFile, c.DetailFile)
+			}
+			b.WriteString("\n")
+		}
+		if len(sess.Ungrouped) > 0 {
+			fmt.Fprintf(&b, "### 未分组 · %d 条（非聊天体/被拒请求）\n\n| 时间 | 模型 | 结果 | 文件 |\n|---|---|---|---|\n", len(sess.Ungrouped))
+			for _, u := range sess.Ungrouped {
+				fmt.Fprintf(&b, "| %s | %s | %s | [%s](./%s) |\n",
+					u.TS.Format("01-02 15:04:05"), escapeCell(displayModelName(u.Model)),
+					outcomeMark(u.Outcome), u.DetailFile, u.DetailFile)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("## 全部请求（时间序）\n\n")
+	}
+
+	b.WriteString("| 时间 | 会话/任务 | 模型 | 上游 | 结果 | 耗时 | 尝试 | tokens in/out | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, e := range entries {
 		tok := "-"
 		if e.usageOK {
 			tok = fmtN(e.usage.In) + " / " + fmtN(e.usage.Out)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %s | [%s](./%s) |\n",
-			e.ts.Format("01-02 15:04:05.000"), escapeCell(e.model), escapeCell(e.endpoint),
+		st := "-"
+		if e.info != nil && e.info.SessionID != "" {
+			st = e.info.SessionID + "/" + e.info.TaskID
+		} else if e.info != nil && e.info.Compaction {
+			st = "compaction"
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %d | %s | [%s](./%s) |\n",
+			e.ts.Format("01-02 15:04:05.000"), st, escapeCell(e.model), escapeCell(e.endpoint),
 			outcomeMark(e.outcome), ms(e.durMS), e.attempts, tok, e.file, e.file)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "INDEX.md"), []byte(b.String()), 0o644); err != nil {
 		return len(entries), err
 	}
 	return len(entries), nil
+}
+
+// callsCell compacts a turn's tool calls ("exec×2, write"); "-" when none.
+func callsCell(calls []string) string {
+	if len(calls) == 0 {
+		return "-"
+	}
+	counts := map[string]int{}
+	var order []string
+	for _, c := range calls {
+		if counts[c] == 0 {
+			order = append(order, c)
+		}
+		counts[c]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, c := range order {
+		if counts[c] > 1 {
+			parts = append(parts, fmt.Sprintf("%s×%d", c, counts[c]))
+		} else {
+			parts = append(parts, c)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// reqMark renders a request's outcome, flagging ok-but-truncated streams.
+func reqMark(r *ReqInfo) string {
+	m := outcomeMark(r.Outcome)
+	if r.Truncated {
+		m += " ⚠️截断"
+	}
+	return m
+}
+
+func usageCell(r *ReqInfo) string {
+	if !r.UsageOK {
+		return "-"
+	}
+	return fmtN(r.Usage.In) + " / " + fmtN(r.Usage.Out)
 }
 
 // unsafeName matches filename characters we replace; keeps letters, digits,
@@ -197,7 +318,7 @@ func outcomeMark(outcome string) string {
 
 // ---- document skeleton ----
 
-func renderDetail(rec *audit.Record) string {
+func renderDetail(rec *audit.Record, info *ReqInfo) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 
@@ -205,6 +326,7 @@ func renderDetail(rec *audit.Record) string {
 	w("# %s [%s] · %s · %s · %s\n\n",
 		displayModel(rec), rec.Protocol, outcomeMark(rec.Outcome), ms(rec.DurMS),
 		rec.TS.Format("2006-01-02 15:04:05.000 -07:00"))
+	renderSessionHeader(&b, info)
 	stream := "否"
 	if rec.Stream {
 		stream = "是"
@@ -227,14 +349,126 @@ func renderDetail(rec *audit.Record) string {
 		escapeCell(displayModel(rec)), escapeCell(lastEndpoint(rec)), outcomeMark(rec.Outcome),
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
 
-	renderClientRequest(&b, rec)
+	renderClientRequest(&b, rec, info)
 	renderAttempts(&b, rec)
 	renderClientResponse(&b, rec)
 	return b.String()
 }
 
+// renderSessionHeader emits the grouping coordinates line and, when this
+// turn diverged from its parent, the notable events (replaced tail, system
+// prompt change, truncation).
+func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
+	if info == nil {
+		return
+	}
+	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	switch {
+	case info.Compaction:
+		w("> **[compaction 调用]**")
+		if info.Summarizes != "" {
+			w(" 压缩会话 %s 的历史", info.Summarizes)
+		}
+		if info.ContinuesTo != "" {
+			w(" → 其摘要续接为会话 %s", info.ContinuesTo)
+		}
+		w("\n")
+	case info.SessionID != "":
+		w("> **会话 %s** · **任务 %s** · 任务内第 %d 轮 / 会话内第 %d 轮",
+			info.SessionID, info.TaskID, info.TaskSeq, info.SessSeq)
+		if info.Parent != nil {
+			w(" · 上一轮: [%s](./%s)", info.Parent.TS.Format("15:04:05.000"), info.Parent.DetailFile)
+		}
+		w("\n")
+		var meta []string
+		if len(info.ToolCalls) > 0 {
+			meta = append(meta, "本轮调用: "+callsCell(info.ToolCalls))
+		}
+		if info.TraceID != "" {
+			meta = append(meta, "trace "+capStr(info.TraceID, 16))
+		}
+		if info.ChatID != "" {
+			meta = append(meta, "chat "+info.ChatID)
+		}
+		if info.ToolsSig != "" {
+			meta = append(meta, info.ToolsSig)
+		}
+		if len(info.Tags) > 0 {
+			meta = append(meta, "tags: "+strings.Join(info.Tags, ","))
+		}
+		if len(meta) > 0 {
+			w("> %s\n", strings.Join(meta, " · "))
+		}
+	default:
+		return
+	}
+	if info.Truncated {
+		w("> ⚠️ **客户端收到 2xx 但流中途断开**——内容不完整（attempts 内有 truncated 错误）\n")
+	}
+	b.WriteString("\n")
+}
+
+// deltaFoldThreshold: delta messages are the turn's real payload and render
+// expanded up to this many characters; beyond it they fold like history
+// (a multi-MB tool result inline would drown the document).
+const deltaFoldThreshold = 4000
+
+// renderDelta emits the「本轮增量」section: the messages this request added
+// relative to its parent, expanded — the part worth reading — plus what got
+// replaced or changed along the way.
+func renderDelta(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
+	if info == nil || info.SessionID == "" || info.Parent == nil {
+		return
+	}
+	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	msgs := chatMessages(rec.Client.Request.Body)
+	n := len(msgs) - info.DeltaStart
+	w("### 本轮增量（相对上一轮,+%d 条,#1–#%d 为历史上下文）\n\n", n, info.DeltaStart)
+
+	if info.NewInstruction != "" {
+		w("🎯 **最新指令**：%s\n\n", escapeCell(info.NewInstruction))
+	} else {
+		w("🔁 工具循环延续,本轮无新用户指令——新信息是下方的工具结果。\n\n")
+	}
+	if info.SysChanged {
+		w("⚠️ system prompt 相对上一轮有变化\n\n")
+	}
+	if info.ReplacedTail > 0 {
+		p := info.Parent
+		w("🔴 上一轮尾部 %d 条消息被替换/改写：\n\n", info.ReplacedTail)
+		// The parent kept previews of its last few messages; show the ones
+		// past the common prefix when the window reaches back far enough.
+		tailStart := len(p.keys) + p.leadSys - len(p.tailPrev)     // absolute idx of first kept preview
+		replacedFrom := info.DeltaStart - info.leadSys + p.leadSys // parent-absolute divergence point
+		for i, prev := range p.tailPrev {
+			if tailStart+i >= replacedFrom {
+				w("- ~~%s~~\n", escapeCell(truncCell(prev, 120)))
+			}
+		}
+		if info.ReplacedTail > len(p.tailPrev) {
+			w("- （更早的 %d 条改写超出记录窗口,仅计数）\n", info.ReplacedTail-len(p.tailPrev))
+		}
+		w("\n")
+	}
+	for i := info.DeltaStart; i < len(msgs); i++ {
+		m := msgs[i]
+		head := fmt.Sprintf("🆕 #%d %s", i+1, m.Role)
+		switch {
+		case m.Text == "":
+			w("**%s** · (空)\n\n", head)
+		case len([]rune(m.Text)) <= deltaFoldThreshold:
+			w("**%s**\n\n%s\n", head, codeFence(m.Text))
+		default:
+			b.WriteString(details(fmt.Sprintf("<b>%s</b> · %s 字符 · %s", head,
+				fmtCount(len([]rune(m.Text))), escapeHTML(preview(m.Text))), codeFence(m.Text)))
+			b.WriteString("\n")
+		}
+	}
+	w("\n")
+}
+
 // renderClientRequest emits section ①: what the caller sent to vmr.
-func renderClientRequest(b *strings.Builder, rec *audit.Record) {
+func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	req := rec.Client.Request
 	w("## ① Client → VMR 请求\n\n")
@@ -281,10 +515,14 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record) {
 		}
 		b.WriteString(details(fmt.Sprintf("Tools (%d): %s", len(arr), escapeHTML(preview(strings.Join(tools, ", ")))), tb.String()))
 	}
+	renderDelta(b, rec, info)
 	if len(msgs) > 0 {
 		w("\n### Messages (%d)\n\n", len(msgs))
 		if line := roleStatLine(roleChars(req.Body), true); line != "" {
 			w("角色字符统计：%s\n\n", line)
+		}
+		if info != nil && info.SessionID != "" && info.Parent != nil && info.DeltaStart > 0 {
+			w("#1–#%d 为历史上下文（↺）,#%d 起为本轮新增（🆕,全文见上方增量区）\n\n", info.DeltaStart, info.DeltaStart+1)
 		}
 		for i, m := range msgs {
 			b.WriteString(renderMessageSection(i+1, m))

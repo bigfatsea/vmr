@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-10 00:30, by Sonnet 5 -->
+<!-- Ver 2026-07-12 03:10, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -104,6 +104,7 @@ internal/server            HTTP 入口、鉴权、Header 黑名单、审计录�
 internal/audit             审计日志（JSONL 落盘）
                             ├─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理（详见 §9.5）
 internal/report            审计日志聚合统计（vmr report，透明读取明文/.zst）
+                            ├─ session.go/export.go  Agent 会话/任务分组 + 逐请求特征提取（§9.4）
 internal/imgprep           请求内联图片降采样（§7）
 ```
 
@@ -382,18 +383,21 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 读取 §9.2 的 JSONL，输出聚合统计。**与审计格式强耦合：改 §9.2 必须同步改 `internal/report` 及其测试**（复用 `audit.Record` 类型，编译期即绑定）。
 
 ```
-vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md + {out}/details/ 逐请求详单（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst；-details=false 关闭详单）
+vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md + vmr-requests.jsonl + {out}/details/ 逐请求详单（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst；-details=false 关闭详单）
 ```
 
 * **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
 * **JSON 输出**（`meta.format` 版本号随结构变更递增）：
-  * `rows[]` — 粒度 **日期×协议×Virtual Model**（同名模型可同时存在于两个协议组，是两个不同的模型，不可合并）：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、tokens in 的缓存细分（`tokens_in_cached`/`tokens_in_cache_write`，见下）、bytes in/out、时延 sum/p50/p95/max、吞吐（tok/s、bytes/s）。
+  * `rows[]` — 粒度 **日期×协议×Virtual Model**（同名模型可同时存在于两个协议组，是两个不同的模型，不可合并）：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、tokens in 的缓存细分（`tokens_in_cached`/`tokens_in_cache_write`，见下）、`tokens_reasoning`（输出中的 thinking 子集,上游回报时）、`finish_reasons` 分布（`length` = 输出被 token 上限截断的健康信号）、`truncated`（outcome=ok 但流中途断掉——OK/Errors 都看不见它,单列）、bytes in/out、时延 sum/p50/p95/max 与 **TTFT p50/p95**、吞吐（tok/s、bytes/s）。
   * `endpoints[]` — 粒度 **日期×上游端点**：尝试/成功/失败、可用度、错误类别分布、时延 p50/p95。
-  * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
+  * `hours[]` — 粒度 **日期×本地小时**：请求/ok/errors、tokens in/cached/out、bytes out——活跃度画像,服务于限流与触发时段规划。
+  * `workloads[]`（会话分析产物）— 按负载类型（interactive / heartbeat / dream_diary / compaction）切分请求数、tokens、累计耗时、tool 调用数——回答"账单里多少是真实工作、多少是定时脚手架"。
+  * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志或 `vmr-requests.jsonl`。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
 * **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。
 * **tokens_in 缓存细分**（`internal/report/usage.go`）：`tokens_in` 是全部输入 token（含缓存），另拆出两个子集——`tokens_in_cached` 是缓存命中（Anthropic `cache_read_input_tokens` / OpenAI `usage.prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens`），`tokens_in_cache_write` 是仅 Anthropic 有的缓存新写入（`cache_creation_input_tokens`，按溢价计费，不算命中）。两者都已含在 `tokens_in` 里；新鲜（未命中）部分 = `tokens_in - tokens_in_cached - tokens_in_cache_write`，消费方按需自行相减，JSON 不重复存储比例。**两家上游对"总输入"的定义不同，提取时已做归一**：Anthropic 的 `input_tokens` 不含缓存两项，是分开计数的三个字段相加；OpenAI/DeepSeek 的 `prompt_tokens` 本身已含缓存命中，`cached_tokens`/`prompt_cache_hit_tokens` 只是从中圈出的子集，不可再相加。判据是 usage 对象里是否存在 `input_tokens` 键（Anthropic 独有字段名）。审计日志本身不需要改动——完整原始 body 早已落盘，这些字段只是之前没被读取。
-* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度）与 T2（按日趋势、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算）。Token 三列合并为一格 "Tokens In/CacheHit/Out"（如 `41.0M / 38.8M(94.7%) / 86.9K`，三张表统一）；"缓存写入"单列保留（Anthropic 专属，多数行为 `-`）。总览表另有：请求均值 In/CacheHit/Out（除以 tokens_known）、平均消息数（messages/messages_known）、平均首字延迟（ttft_ms_sum/ttft_known，旧日志无 ttft_ms 时为 `-`），及表下一行按角色的请求消息字符占比（role_chars 汇总占比；Anthropic 的 tool_result part 计入 tool 角色以与 OpenAI 对齐）。
+* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度、工作负载、Agent 会话、工具使用）与 T2（按日趋势、每小时活跃度、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分、日期×小时原始行）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算，TTFT 同法）。Token 三列合并为一格 "Tokens In/CacheHit/Out"（如 `41.0M / 38.8M(94.7%) / 86.9K`，三张表统一）；"缓存写入"单列保留（Anthropic 专属，多数行为 `-`）。总览表另有：截断计数（⚠️ 标注）、请求均值 In/CacheHit/Out（除以 tokens_known）、平均消息数（messages/messages_known）、平均首字延迟（ttft_ms_sum/ttft_known，旧日志无 ttft_ms 时为 `-`），表下附按角色的请求消息字符占比（role_chars 汇总占比；Anthropic 的 tool_result part 计入 tool 角色以与 OpenAI 对齐）、finish_reason 分布行（`length` 加 ⚠️）与 reasoning tokens 行。按模型表增列截断与 TTFT p50。每小时活跃度按"跨日汇总的本地小时"渲染,附请求数条形。Agent 会话表把单请求的定时会话（heartbeat/dream 每次触发都是新会话）按类合并成一行,避免刷屏。
 * **逐请求详单**（`internal/report/detail.go` + `render.go`，默认开启，`-details=false` 关闭）：每条审计记录导出一个 Markdown 文件到 `{out}/details/`，附 `INDEX.md` 索引。文件名 `{YYYYMMDD-HHMMSS.mmm}_{虚拟模型}_{真实模型}_{outcome[-错误类]}.md`，零填充时间戳开头，按名字排序即按时间排序；同毫秒冲突加数字后缀，重跑幂等覆盖。文档按请求物理路径分三段：① Client→VMR（headers/参数/tools/messages，长内容 `<details>` 折叠、summary 带长度与预览，base64 图片以媒体类型+尺寸占位；Messages 标题下附按角色的字符数与占比统计行，概要表含首字延迟）、② VMR→上游每次 attempt（headers 与 body 字段**全量对照**，变化项标 🟢 新增/🔴 删除/🔶 变化，未变化照常列出不突出；messages/tools 逐条对照，变化条目附上游侧全文；成功 attempt 的响应 body 依 §9.2 省略语义标注"透传"，并把 `norm` 步骤翻译成人话）、③ VMR→Client 响应（headers 相对上游响应对照；SSE 流重组为模型实际输出——reasoning 折叠、content 展开、tool_calls 拼装完整——原始 SSE 全文折叠保留）。SSE 重组覆盖两种协议（OpenAI delta 累加 / Anthropic content_block 事件），与 §9.2 审计格式同样强耦合。
+* **Agent 会话分析**（`internal/report/session.go` + `export.go`，方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：离线、纯规则、不调 LLM，把审计记录按「会话 → 任务 → 轮次」分组并提取逐请求特征。核心算法协议通用——首条非 system 消息 hash 做会话指纹（Claude Code `metadata.user_id` 存在时优先），组内对「非 system 消息序列」做 max-LCP 选父,`messages[lcp:]` 即本轮增量;任务边界 = Traceparent trace-id 变化（有则用）|| 增量尾部出现真实用户指令（通用兜底,`newUserWindow` 防原地改写误切）。compaction 调用按三重特征识别（summarization system 头 / 无 Traceparent 无 tools / 独有 `max_completion_tokens`），其输入/输出与新旧会话锚点做**确定性子串匹配**双向链接。OpenClaw 特定信号（runtime wrapper 过滤、`chat_id` 提取、heartbeat/dream 模板标签）失配无害——标不出就不标。产物落在三处：报表 JSON 的 `tools[]`（按请求形态：声明工具 vs **当轮实际调用**——从响应提取,历史重发零重复计数——及 never_called 清单与声明字节成本,服务于工具裁剪）与 `sessions[]` 段；**`vmr-requests.jsonl`** 逐请求特征明细（会话/任务/轮次坐标、trace/chat id、形态签名、标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning_tokens 的用量细分、增量大小、最新指令预览）；详单侧 INDEX 增加会话分组视图,每个详单头部加定位行与「本轮增量」区（最新指令高亮、被替换尾部删除线列出、system 变更与截断告警）。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 

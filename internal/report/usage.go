@@ -1,4 +1,4 @@
-// Ver 2026-07-08, by Sonnet 5
+// Ver 2026-07-12 03:10, by Fable 5
 package report
 
 import (
@@ -19,6 +19,10 @@ import (
 type Usage struct {
 	In, Out               int64
 	CacheRead, CacheWrite int64
+	// Reasoning is the thinking-token portion of Out when the provider
+	// reports it (usage.completion_tokens_details.reasoning_tokens); 0 when
+	// absent — consumers treat 0 as "not reported".
+	Reasoning int64
 }
 
 // ExtractUsage pulls token usage from a recorded client response body.
@@ -69,6 +73,7 @@ func mergeUsage(obj map[string]any, u Usage) Usage {
 		u.Out = max(u.Out, o.Out)
 		u.CacheRead = max(u.CacheRead, o.CacheRead)
 		u.CacheWrite = max(u.CacheWrite, o.CacheWrite)
+		u.Reasoning = max(u.Reasoning, o.Reasoning)
 	}
 	return u
 }
@@ -101,7 +106,51 @@ func usageFromObj(m map[string]any) Usage {
 		u.In = num(m["prompt_tokens"])
 	}
 	u.Out = max(num(m["completion_tokens"]), num(m["output_tokens"]))
+	u.Reasoning = num(nested(m, "completion_tokens_details", "reasoning_tokens"))
 	return u
+}
+
+// extractFinish pulls the response's finish_reason (openai) / stop_reason
+// (anthropic) from a recorded client response body — JSON object or SSE
+// stream. "" when the response never carried one (errors, canceled, or
+// mid-stream breaks). Cheap on purpose: SSE lines are JSON-parsed only when
+// they mention the field.
+func extractFinish(body any) string {
+	finish := ""
+	fromObj := func(obj map[string]any) {
+		if choices, _ := obj["choices"].([]any); len(choices) > 0 {
+			ch, _ := choices[0].(map[string]any)
+			if fr, _ := ch["finish_reason"].(string); fr != "" {
+				finish = fr
+			}
+		}
+		if sr, _ := obj["stop_reason"].(string); sr != "" {
+			finish = sr
+		}
+		if sr, _ := nested(obj, "delta", "stop_reason").(string); sr != "" {
+			finish = sr
+		}
+	}
+	switch b := body.(type) {
+	case map[string]any:
+		fromObj(b)
+	case string:
+		for _, line := range strings.Split(b, "\n") {
+			if !strings.Contains(line, "finish_reason") && !strings.Contains(line, "stop_reason") {
+				continue
+			}
+			data, found := strings.CutPrefix(strings.TrimSpace(line), "data:")
+			if !found {
+				continue
+			}
+			var obj map[string]any
+			if json.Unmarshal([]byte(strings.TrimSpace(data)), &obj) != nil {
+				continue
+			}
+			fromObj(obj)
+		}
+	}
+	return finish
 }
 
 func nested(obj map[string]any, keys ...string) any {

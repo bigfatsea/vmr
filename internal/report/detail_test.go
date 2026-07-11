@@ -312,7 +312,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out)
+	n, err := WriteDetails([]string{src}, out, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

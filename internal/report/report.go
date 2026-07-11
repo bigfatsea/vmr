@@ -1,4 +1,4 @@
-// Ver 2026-07-08 15:30, by Sonnet 5
+// Ver 2026-07-12 03:10, by Fable 5
 
 // Package report turns audit JSONL files (design doc §9.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -29,7 +29,13 @@ import (
 // 4: rows gain request-shape stats (messages/messages_known/role_chars)
 // and first-token latency (ttft_ms_sum/ttft_known, from the audit
 // record's ttft_ms field — absent in logs written before it existed).
-const Format = 4
+// 5: adds the session-analysis sections — tools[] (per request-shape tool
+// declaration vs. actual per-turn use) and sessions[] (agent-session
+// summaries) — attached from AnalyzeSessions by the report command.
+// 6: rows gain finish_reasons/truncated/tokens_reasoning and TTFT
+// percentiles; adds hours[] (date × hour activity) and workloads[]
+// (traffic split by workload class: interactive vs. scheduled scaffolding).
+const Format = 6
 
 // Report is the top-level JSON output. Grains: Rows = date × protocol ×
 // virtual model (roll up freely to coarser cuts); Endpoints = date × upstream
@@ -38,6 +44,29 @@ type Report struct {
 	Meta      Meta          `json:"meta"`
 	Rows      []Row         `json:"rows"`
 	Endpoints []EndpointRow `json:"endpoints"`
+	Hours     []HourRow     `json:"hours,omitempty"`
+	// Tools, Sessions and Workloads come from the session analysis
+	// (session.go) and are attached by the report command after Build;
+	// empty when analysis is off.
+	Tools     []ToolShapeRow `json:"tools,omitempty"`
+	Sessions  []SessionRow   `json:"sessions,omitempty"`
+	Workloads []WorkloadRow  `json:"workloads,omitempty"`
+}
+
+// HourRow aggregates requests for one (date, local hour) pair — the
+// activity profile for spotting load peaks and planning around provider
+// rate limits.
+type HourRow struct {
+	Date     string `json:"date"`
+	Hour     int    `json:"hour"` // 0-23, record's local timezone
+	Requests int    `json:"requests"`
+	OK       int    `json:"ok"`
+	Errors   int    `json:"errors"`
+
+	TokensIn       int64 `json:"tokens_in"`
+	TokensInCached int64 `json:"tokens_in_cached"`
+	TokensOut      int64 `json:"tokens_out"`
+	BytesOut       int64 `json:"bytes_out"`
 }
 
 type Meta struct {
@@ -93,6 +122,20 @@ type Row struct {
 	// logs written before the field existed contribute nothing.
 	TTFTMSSum int64 `json:"ttft_ms_sum"`
 	TTFTKnown int   `json:"ttft_known"`
+	TTFTMSP50 int64 `json:"ttft_ms_p50,omitempty"`
+	TTFTMSP95 int64 `json:"ttft_ms_p95,omitempty"`
+
+	// FinishReasons distributes records by the response's finish_reason /
+	// stop_reason ("length" = output truncated by the token cap — a health
+	// signal); records without one (errors, canceled) count under "".
+	FinishReasons map[string]int `json:"finish_reasons,omitempty"`
+	// Truncated counts ok-outcome records whose stream broke mid-flight
+	// (attempt error "truncated: …"): the client got a 2xx but incomplete
+	// bytes — invisible in OK/Errors, so it gets its own counter.
+	Truncated int `json:"truncated,omitempty"`
+	// TokensReasoning sums the thinking-token portion of TokensOut where the
+	// provider reports it (a subset of TokensOut, not additive).
+	TokensReasoning int64 `json:"tokens_reasoning,omitempty"`
 
 	DurMSSum int64 `json:"dur_ms_sum"`
 	DurMSP50 int64 `json:"dur_ms_p50"`
@@ -105,6 +148,7 @@ type Row struct {
 	BytesOutPerSec float64 `json:"bytes_out_per_sec"`
 
 	durs       []int64 // working state, not serialized
+	ttfts      []int64
 	tokDurMS   int64
 	bytesDurMS int64
 }
@@ -131,6 +175,7 @@ func Build(paths []string, now time.Time) (*Report, error) {
 	rep := &Report{Meta: Meta{Format: Format, GeneratedAt: now.Format(time.RFC3339), Inputs: paths}}
 	rows := map[string]*Row{}
 	eps := map[string]*EndpointRow{}
+	hours := map[string]*HourRow{}
 	var from, to time.Time
 
 	for _, path := range paths {
@@ -169,7 +214,20 @@ func Build(paths []string, now time.Time) (*Report, error) {
 				row = &Row{Date: date, Model: model, Protocol: rec.Protocol}
 				rows[key] = row
 			}
-			addRecord(row, &rec)
+			var usage Usage
+			usageOK := false
+			if rec.Client.Response != nil {
+				usage, usageOK = ExtractUsage(rec.Client.Response.Body)
+			}
+			addRecord(row, &rec, usage, usageOK)
+
+			hk := fmt.Sprintf("%s\x00%02d", date, rec.TS.Hour())
+			hr, ok := hours[hk]
+			if !ok {
+				hr = &HourRow{Date: date, Hour: rec.TS.Hour()}
+				hours[hk] = hr
+			}
+			addHour(hr, &rec, usage, usageOK)
 
 			for _, a := range rec.Attempts {
 				k := date + "\x00" + a.Endpoint
@@ -198,6 +256,15 @@ func Build(paths []string, now time.Time) (*Report, error) {
 		finishEndpoint(e)
 		rep.Endpoints = append(rep.Endpoints, *e)
 	}
+	for _, h := range hours {
+		rep.Hours = append(rep.Hours, *h)
+	}
+	sort.Slice(rep.Hours, func(i, j int) bool {
+		if rep.Hours[i].Date != rep.Hours[j].Date {
+			return rep.Hours[i].Date < rep.Hours[j].Date
+		}
+		return rep.Hours[i].Hour < rep.Hours[j].Hour
+	})
 	sort.Slice(rep.Rows, func(i, j int) bool {
 		a, b := rep.Rows[i], rep.Rows[j]
 		if a.Date != b.Date {
@@ -252,7 +319,7 @@ func (z zstdReadCloser) Close() error {
 	return z.f.Close()
 }
 
-func addRecord(row *Row, rec *audit.Record) {
+func addRecord(row *Row, rec *audit.Record, usage Usage, usageOK bool) {
 	row.Requests++
 	switch rec.Outcome {
 	case "ok":
@@ -288,6 +355,24 @@ func addRecord(row *Row, rec *audit.Record) {
 	if rec.TTFTMS > 0 {
 		row.TTFTMSSum += rec.TTFTMS
 		row.TTFTKnown++
+		row.ttfts = append(row.ttfts, rec.TTFTMS)
+	}
+
+	if row.FinishReasons == nil {
+		row.FinishReasons = map[string]int{}
+	}
+	var finish string
+	if rec.Client.Response != nil {
+		finish = extractFinish(rec.Client.Response.Body)
+	}
+	row.FinishReasons[finish]++
+	if rec.Outcome == "ok" {
+		for _, a := range rec.Attempts {
+			if strings.HasPrefix(a.Error, "truncated") {
+				row.Truncated++
+				break
+			}
+		}
 	}
 
 	row.DurMSSum += rec.DurMS
@@ -299,17 +384,35 @@ func addRecord(row *Row, rec *audit.Record) {
 		row.bytesDurMS += rec.DurMS
 	}
 
-	if rec.Client.Response != nil {
-		if u, ok := ExtractUsage(rec.Client.Response.Body); ok {
-			row.TokensIn += u.In
-			row.TokensOut += u.Out
-			row.TokensInCached += u.CacheRead
-			row.TokensInCacheWrite += u.CacheWrite
-			row.TokensKnown++
-			if rec.DurMS > 0 {
-				row.tokDurMS += rec.DurMS
-			}
+	if usageOK {
+		row.TokensIn += usage.In
+		row.TokensOut += usage.Out
+		row.TokensInCached += usage.CacheRead
+		row.TokensInCacheWrite += usage.CacheWrite
+		row.TokensReasoning += usage.Reasoning
+		row.TokensKnown++
+		if rec.DurMS > 0 {
+			row.tokDurMS += rec.DurMS
 		}
+	}
+}
+
+func addHour(h *HourRow, rec *audit.Record, usage Usage, usageOK bool) {
+	h.Requests++
+	switch rec.Outcome {
+	case "ok":
+		h.OK++
+	case "canceled":
+	default:
+		h.Errors++
+	}
+	if rec.Client.Response != nil {
+		h.BytesOut += bodyBytes(rec.Client.Response.Body)
+	}
+	if usageOK {
+		h.TokensIn += usage.In
+		h.TokensInCached += usage.CacheRead
+		h.TokensOut += usage.Out
 	}
 }
 
@@ -335,13 +438,14 @@ func addAttempt(ep *EndpointRow, a *audit.Attempt) {
 
 func finishRow(r *Row) {
 	r.DurMSP50, r.DurMSP95 = percentiles(r.durs)
+	r.TTFTMSP50, r.TTFTMSP95 = percentiles(r.ttfts)
 	if r.tokDurMS > 0 {
 		r.TokOutPerSec = round2(float64(r.TokensOut) / (float64(r.tokDurMS) / 1000))
 	}
 	if r.bytesDurMS > 0 {
 		r.BytesOutPerSec = round2(float64(r.BytesOut) / (float64(r.bytesDurMS) / 1000))
 	}
-	r.durs = nil
+	r.durs, r.ttfts = nil, nil
 }
 
 func finishEndpoint(e *EndpointRow) {

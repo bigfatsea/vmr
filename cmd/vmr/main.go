@@ -1,4 +1,4 @@
-// Ver 2026-07-10 00:00, by Sonnet 5
+// Ver 2026-07-12 03:10, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -131,11 +131,22 @@ func cmdReport(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Session analysis (grouping, per-request features, tool usage) feeds
+	// the report's tools/sessions sections, the requests export, and the
+	// detail files' grouped view.
+	sess, err := report.AnalyzeSessions(paths)
+	if err != nil {
+		return fmt.Errorf("session analysis: %w", err)
+	}
+	rep.Tools = sess.ToolShapes()
+	rep.Sessions = sess.SessionRows()
+	rep.Workloads = sess.Workloads()
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
 	mdPath := filepath.Join(*outDir, "vmr-report.md")
+	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return err
@@ -146,11 +157,15 @@ func cmdReport(args []string) error {
 	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
-		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	nReq, err := report.WriteRequests(sess, reqPath)
+	if err != nil {
+		return fmt.Errorf("requests export: %w", err)
+	}
+	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n%s (%d rows)\n",
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath, reqPath, nReq)
 	if *detailsOn {
 		detailDir := filepath.Join(*outDir, "details")
-		n, err := report.WriteDetails(paths, detailDir)
+		n, err := report.WriteDetails(paths, detailDir, sess)
 		if err != nil {
 			return fmt.Errorf("details: %w", err)
 		}
