@@ -139,9 +139,9 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		snap := s.rt.Snapshot()
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxBodyBytes()))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxRequestBodyBytes()))
 		if rec != nil {
-			rec.Client.Request.Body, rec.Client.Request.BodyTruncated = audit.EncodeBody(body)
+			rec.Client.Request.Body = audit.EncodeBody(body)
 		}
 		if err != nil {
 			var tooBig *http.MaxBytesError
@@ -189,16 +189,36 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// with screenshot resolution. Response bodies are never touched.
 		// The effective cap is the virtual model's own override if it set
 		// one (even 0, which force-disables it for that model), else the
-		// global default (§7). Disabled (n<=0) is a single int comparison;
-		// enabled-but-no-image requests cost one cheap substring scan
-		// (imgprep.HasImageMarker).
+		// global default (§7). Metadata is always collected (n<=0 just
+		// skips the resize/cache path inside imgprep) so the audit trail
+		// describes every request's images regardless of compression
+		// settings; enabled-but-no-image requests still cost only one
+		// cheap substring scan (imgprep.HasImageMarker).
 		route := snap.Models[protocol][probe.Model]
-		if n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx); n > 0 {
-			body = imgprep.Downscale(body, protocol, imgprep.Options{
-				MaxPx:        n,
-				CacheDir:     imgprep.CacheDir(),
-				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
-			})
+		n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
+		var images []imgprep.ImageInfo
+		body, images = imgprep.Downscale(body, protocol, imgprep.Options{
+			MaxPx:        n,
+			CacheDir:     imgprep.CacheDir(),
+			CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+		})
+		if rec != nil && len(images) > 0 {
+			rec.Images = make([]audit.ImageInfo, len(images))
+			for i, img := range images {
+				rec.Images[i] = audit.ImageInfo{
+					MessageIndex:     img.MessageIndex,
+					Format:           img.Format,
+					Bytes:            img.Bytes,
+					Width:            img.Width,
+					Height:           img.Height,
+					Remote:           img.Remote,
+					Downscaled:       img.Downscaled,
+					DownscaledWidth:  img.DownscaledWidth,
+					DownscaledHeight: img.DownscaledHeight,
+					DownscaledBytes:  img.DownscaledBytes,
+					CacheHit:         img.CacheHit,
+				}
+			}
 		}
 
 		// Pass client headers through unless on the blocklist — this

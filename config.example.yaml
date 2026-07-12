@@ -9,7 +9,7 @@
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer)
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
-# max_body_mb: 8                 # request body buffer limit
+# max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)

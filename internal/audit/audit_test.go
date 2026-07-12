@@ -36,19 +36,19 @@ func TestRedactMasksCredentials(t *testing.T) {
 }
 
 func TestEncodeBody(t *testing.T) {
-	if b, tr := EncodeBody([]byte(`{"a":1}`)); tr || string(b.(json.RawMessage)) != `{"a":1}` {
-		t.Errorf("json body: %v %v", b, tr)
+	if b := EncodeBody([]byte(`{"a":1}`)); string(b.(json.RawMessage)) != `{"a":1}` {
+		t.Errorf("json body: %v", b)
 	}
-	if b, tr := EncodeBody([]byte("data: hello\n\n")); tr || b.(string) != "data: hello\n\n" {
-		t.Errorf("sse body: %v %v", b, tr)
+	if b := EncodeBody([]byte("data: hello\n\n")); b.(string) != "data: hello\n\n" {
+		t.Errorf("sse body: %v", b)
 	}
-	if b, tr := EncodeBody(nil); b != nil || tr {
-		t.Errorf("empty body: %v %v", b, tr)
+	if b := EncodeBody(nil); b != nil {
+		t.Errorf("empty body: %v", b)
 	}
-	big := strings.Repeat("x", int(MaxBodyBytes())+100)
-	b, tr := EncodeBody([]byte(big))
-	if !tr || len(b.(string)) != int(MaxBodyBytes()) {
-		t.Errorf("truncation: tr=%v len=%d", tr, len(b.(string)))
+	big := strings.Repeat("x", 10<<20)
+	b := EncodeBody([]byte(big))
+	if len(b.(string)) != len(big) {
+		t.Errorf("large body must be recorded in full, unmodified: got len=%d want %d", len(b.(string)), len(big))
 	}
 }
 

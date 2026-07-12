@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-12 03:10, by Fable 5 -->
+<!-- Ver 2026-07-12 05:30, by Fable 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -16,7 +16,7 @@
 - **字节级透传** —— 没有中间表示，永不做协议翻译。请求与响应和直连供应商字节一致（含响应头），仅有的例外是虚拟名↔真实名的 model 字段改写和几个有触发守卫、有实证依据的厂商怪癖修复。未知 API 参数原样通过——上游新功能上线当天即可用。
 - **真流式** —— SSE 事件到达即转发。归一化器只在检测到厂商"思考内联"病理形态时才缓冲，且 `</think>` 闭合后立即恢复实时流。
 - **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
-- **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计（含缓存命中细分），而且读得懂 Agent 流量：请求自动分组为 会话 → 任务 → 轮次，每份详单只展开当轮增量，按请求形态的工具使用报告直接告诉你哪些声明的工具从未被调用。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍，`vmr report` 透明读取），也可用 `audit_retention_days` 设置自动过期。
+- **飞行记录仪式审计日志** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、错误类别、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计（含缓存命中细分），而且读得懂 Agent 流量：请求自动分组为 会话 → 任务 → 轮次（INDEX 按 Chat User 分桶），每份详单用 🆕 前缀标记本轮新增，按请求形态的工具使用报告直接告诉你哪些声明的工具从未被调用。每个维度独立成桶，所以每个表的 p50/p95 都是真值，不是跨桶近似。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍，`vmr report` 透明读取），也可用 `audit_retention_days` 设置自动过期。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；全局开关 + 逐虚拟模型覆盖，默认关闭，fail-open；降采样结果按内容哈希落盘缓存，避免重复处理并保住上游 prompt cache。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。依赖只有 `yaml.v3`、`fsnotify`、`golang.org/x/image`、`klauspost/compress`（zstd，审计日志压缩），就这些。
 
@@ -81,7 +81,7 @@ curl http://127.0.0.1:8800/admin/status
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-xxx          # 可选：保护 vmr（Bearer 或 x-api-key）
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
-# max_body_mb: 8               # 请求体缓冲上限；同时决定审计 body 记录上限
+# max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
 # image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
@@ -137,7 +137,7 @@ models:
 
 ## 审计日志与用量报表
 
-默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、错误类别、生效的归一化清单。body 记录上限联动 `max_body_mb`——vmr 接受的请求绝不会在自己的审计里被截断。
+默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、生效的归一化清单，以及请求内联图片的元数据（格式/宽高/字节数，以及是否触发压缩/是否命中缓存——不论该虚拟模型是否开启了图片压缩，都会采集）。body 一律原样全量记录，不设审计侧截断上限（上面的 `max_request_body_mb` 只管入站请求体大小，与审计记录无关）。每次上游尝试同时携带一个人类可读的 `endpoint` 标签（`protocol:provider:model`）和拆开的三个结构化字段（`protocol`/`provider`/`model`），并在自由文本 `error` 之外新增一个类型化的 `error_class`。
 
 ```bash
 ./vmr start -c config.yaml                 # 写入 $VMR_LOG_DIR，未设置则用 `vmr dirs log` 的解析结果
@@ -147,21 +147,23 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 ./vmr report "$(./vmr dirs log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl（明文/.zst 混着传也行）
 ```
 
-`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）：按 日期×协议×模型 的行、按端点的可用度与错误分布、延迟与 TTFT 分位、吞吐，以及按模型的健康信号——finish_reason 分布（`length` = 输出被 token 上限截断）和"ok 但截断"计数（2xx 背后流中途断掉的请求）。Token 统计还拆出缓存读取、（Anthropic）缓存写入与 reasoning tokens。另有每小时活跃度（`hours[]`）和工作负载切分（`workloads[]`：交互工作 vs heartbeat/日记 cron 这类定时脚手架），一眼看清请求和账单到底来自哪里。JSON 是二次开发（图表/Dashboard）的数据源。
+`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。每条 record 在一次遍历内被同步 push 到**所有相关桶**（`Rows` 按日期×协议×模型、`Overall`、`ByModel`、`ByDate`，加原有的 `Hours`/`Endpoints` 及其"全部日期合并"版本 `HoursOfDay`/`EndpointsAll`）——每个桶都在这一趟遍历里直接收自己的原始值、各自算自己的 p50/p95，所以每个表格里的分位都是**真值**，没有跨桶近似。`HoursOfDay`/`EndpointsAll` 是独立收原始值的桶，不是拿逐日的 `Hours`/`Endpoints` 二次合并出来的——合并"已经算完的"桶算不出真百分位，因为每个桶算完自己的分位后就会把原始值释放掉，再合并时已经没有东西可算了。（这不是假设性的边界情况，是真拿生产日志跑通全流程才发现的真实 bug：端点可用度表和每小时活跃度表的延迟列此前**任何情况下**都显示 `-/-`，不是数据稀疏才这样。）Markdown 表格共享统一的列定义（`Req/Fall/Trunc / 成功率 / Tokens In/CacheHit/Out / 图片/压缩 / 平均Tokens In/Out / 字节 In / Out / 平均消息数 / p50/p95 首字延迟 / p50/p95 请求耗时 / 平均吞吐 (tok/s)`）——请求数、Fallback 数、截断数合并进一个单元格（全 0 时显示 `-`），`图片/压缩` 显示该行的内联图片总数与其中触发压缩的数量（无图片时显示 `-`）。各表再加自己的主键列与特异列（`Tool 调用`，工作负载表里带"发生过调用的请求占比" / `错误分布`）。每模型的健康信号：finish_reason 分布（`length` = 输出被 token 上限截断）。Token 统计还拆出缓存读取、（Anthropic）缓存写入与 reasoning tokens。另有每小时活跃度（`hours_of_day[]`）和工作负载切分（`workloads[]`：交互工作 vs heartbeat/日记 cron 这类定时脚手架），一眼看清请求和账单到底来自哪里。运行进度写到 stdout，每个文件一行（`[i/N] <path>  done: M records, K parse errors (Ts)`）。JSON 是二次开发（图表/Dashboard）的数据源。
 
 `vmr report` 还能读懂 Agent 工作负载——全部离线、纯规则、不调用 LLM（方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：
 
 - **会话 → 任务 → 轮次分组**。每轮重发同一段渐增对话的请求以首条非 system 消息做指纹（Claude Code 的 `metadata.user_id` 存在时优先），按最长公共前缀成链——多个 Agent 会话即使在时间上互相穿插也能干净分开。任务边界来自 Traceparent trace-id 变化与增量中的新用户指令，两个信号互为交叉验证。Compaction 调用被识别并双向链接，会话与其压缩后的续接体串成同一条线程。
 - **`vmr-requests.jsonl`** —— 每请求一行特征（会话/任务/轮次、trace 与 chat id、请求形态、`heartbeat` 等标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning 的 token 细分、增量大小、最新指令），jq / DuckDB / pandas 直接可用。
-- **工具使用报告** —— 按请求形态列出：声明的工具 vs **当轮实际调用**的工具（从响应中提取,历史重发绝不重复计数），外加"声明但从未调用"清单及其每请求字节成本——为从 Agent 配置里裁掉没用的工具提供直接依据。
+- **工具使用报告** —— 按请求形态列出：声明的工具 vs **当轮实际调用**的工具（从响应中提取,历史重发绝不重复计数），外加"声明但从未调用"清单（**numbered list + 字母序，自然让 `feishu_*` 同前缀聚类**）及其每请求字节成本——为从 Agent 配置里裁掉没用的工具提供直接依据。
 
-`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单，落在 `{out}/details/` 下（附 `INDEX.md` 索引，含会话分组视图与全量时间序表两种入口），用于深挖单个请求：头部一行定位（会话 · 任务 · 轮次 · 上一轮链接 · 本轮 tool 调用），**「本轮增量」区**只展示这一轮新增的内容——最新指令高亮、被替换的临时尾部消息以删除线列出——之后才是完整消息列表与工具 schema（长内容默认折叠、图片以尺寸占位）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化，未变化的照常列出不突出）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。加 `-details=false` 可关闭。
+`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（仅对本次改动后新采集的日志生效，历史日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。`vmr-requests-index.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）按 **Chat User** 分组（`chat_id` 字段剥掉 `user:` 前缀）：每个用户一段 `## Chat User xxx`，下辖每个任务的首条用户指令引用块 + 轮次表（`轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件`——`Message` 是 `M+N` 格式（M = 历史消息数，N = 本轮新增数），`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>`，`耗时` 吸收了原来独立的 结果/尝试次数 两列，以尾注形式追加（`❌<结果>` / `🚫取消` / `⚠️截断` / `🔄尝试x{n}`，可并存），文件列是 `md`/`json` 两个短链接）。"全部请求（时间序）"表把模型和上游合并成一个 `VM/API` 列（`protocol | 虚拟模型 | provider:model`，例如 `openai | agent | minimax:MiniMax-M3`——用 `:` 而非 `/` 分隔供应商和上游模型名，因为 OpenRouter 这类供应商的模型名本身就带 `/`）。Compaction 调用、定时任务（heartbeat/dream_diary）与非聊天体/被拒请求一律归入 `## Chat User (unresolved)`，折叠成紧凑的子分组（`### 压缩任务 · compaction 会话 × N`、`### 定时任务 · <class> 单发会话 × N`、`### 其他 · 非聊天体/被拒请求 × N`），不再一次触发就单占一段，也不再单独占一个顶级标题。加 `-details=false` 可关闭详单导出。
 
 Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见 `docs/AuditLogCompression_Analysis_Sonnet5.md`。
 
 ## 请求图片自动降采样
 
 可选，默认关闭。开启后，超过设定长边的内联 base64 图片附件会被等比缩小、转 JPEG 再发上游——为截图密集的 agent 工作流削减 vision token 成本。只处理请求，不碰响应，不抓远程 URL；动图与解码失败一律原样透传（fail-open）。
+
+图片检测始终开启，与这个开关无关：不论该虚拟模型是否开启了降采样，请求里的每张内联图片都会做一次廉价的头部解析（格式/宽高/字节数，不解码像素）并写入审计日志，所以即使某个模型关闭了压缩，`vmr report` 的 `图片/压缩` 列也能反映真实的图片流量。
 
 ```yaml
 image_downscale: 512   # 全局长边像素上限；0 或缺省 = 关闭

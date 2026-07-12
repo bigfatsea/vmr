@@ -127,7 +127,7 @@ func cmdReport(args []string) error {
 	}
 	sort.Strings(paths)
 
-	rep, err := report.Build(paths, time.Now())
+	rep, err := report.Build(paths, time.Now(), os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,8 @@ func cmdReport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("details: %w", err)
 		}
-		fmt.Printf("%d detail file(s) + INDEX.md in %s\n", n, detailDir)
+		fmt.Printf("%d detail file(s) (.md + .json) in %s\n%s\n", n, detailDir,
+			filepath.Join(*outDir, "vmr-requests-index.md"))
 	}
 	return nil
 }
@@ -243,9 +244,8 @@ func cmdStart(args []string) error {
 
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
-	// (and SetMaxBodyBytes, same reasoning) must land before New, not after,
-	// or that first sweep compresses old files but never purges them.
-	audit.SetMaxBodyBytes(cfg.MaxBodyBytes())
+	// must land before New, not after, or that first sweep compresses old
+	// files but never purges them.
 	audit.SetRetentionDays(cfg.AuditRetentionDays)
 
 	var auditLog *audit.Logger
@@ -281,7 +281,6 @@ func cmdStart(args []string) error {
 			return
 		}
 		rt.Install(newSnap)
-		audit.SetMaxBodyBytes(newCfg.MaxBodyBytes())
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
 		logger.Printf("reload(%s) ok", trigger)
 		logConfigSummary(logger, newCfg, newSnap)
@@ -368,8 +367,8 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	if cfg.AuditRetentionDays > 0 {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
-	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s",
-		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
+	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_request_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s",
+		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
 

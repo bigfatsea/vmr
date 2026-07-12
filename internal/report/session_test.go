@@ -59,7 +59,7 @@ func mkRec(ts time.Time, trace string, msgs []any, tools []string, respBody any)
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: h, Body: body},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: respBody},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai/prov/real-1", URL: "https://x/v1", DurMS: 90,
+		Attempts: []audit.Attempt{{Endpoint: "openai:prov:real-1", Protocol: "openai", Provider: "prov", Model: "real-1", URL: "https://x/v1", DurMS: 90,
 			Request:  audit.Message{Headers: http.Header{}},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}},
 			Norm:     []string{"model_rewrite"}}},
@@ -130,7 +130,7 @@ func fixture(t *testing.T) (string, []audit.Record) {
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: compBody},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: sseText("## Goal 调研 X 的总结摘要")},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai/prov/real-1", Response: &audit.Message{Status: 200, Headers: http.Header{}}}},
+		Attempts: []audit.Attempt{{Endpoint: "openai:prov:real-1", Protocol: "openai", Provider: "prov", Model: "real-1", Response: &audit.Message{Status: 200, Headers: http.Header{}}}},
 	}
 
 	// session A2: continuation whose anchor embeds the compaction output.
@@ -140,6 +140,7 @@ func fixture(t *testing.T) (string, []audit.Record) {
 	// truncated stream: ok outcome, truncated attempt error.
 	r5 := mkRec(at(4, 0), "3333cccc3333cccc3333cccc3333cccc", []any{sys, uc, a1, t1, wrap1, wrap2}, tools, sseText("部分输出"))
 	r5.Attempts[0].Error = "truncated: stream idle timeout"
+	r5.Attempts[0].ErrorClass = "truncated"
 
 	recs := []audit.Record{r1, r2, r3, comp, r4, r5}
 	return writeJSONL(t, recs), recs
@@ -292,6 +293,46 @@ func TestWriteRequestsExport(t *testing.T) {
 	}
 }
 
+// TestUngroupedFoldedIntoUnresolved covers a non-chat/rejected record (no
+// "messages" field, so it never gets a SessKey): it must render as a small
+// "其他" sub-section nested under "## Chat User (unresolved)", not as its
+// own top-level "## 未分组" heading.
+func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
+	line := `{"ts":"2026-07-09T08:00:00+08:00","dur_ms":10,"model":"","protocol":"openai","outcome":"error","client":{"request":{"method":"POST","path":"/v1/chat/completions","body":null}}}` + "\n"
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(src, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := AnalyzeSessions([]string{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Ungrouped) != 1 {
+		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
+	}
+	out := filepath.Join(dir, "details")
+	if _, err := WriteDetails([]string{src}, out, a); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(idx), "## 未分组") {
+		t.Error("Ungrouped must no longer render as its own top-level ## 未分组 section")
+	}
+	if !strings.Contains(string(idx), "## Chat User (unresolved)") {
+		t.Errorf("missing unresolved user section:\n%s", idx)
+	}
+	if !strings.Contains(string(idx), "### 其他 · 非聊天体/被拒请求 × 1") {
+		t.Errorf("missing folded 其他 sub-section:\n%s", idx)
+	}
+	if i, j := strings.Index(string(idx), "## Chat User (unresolved)"), strings.Index(string(idx), "### 其他"); i < 0 || j < i {
+		t.Error("其他 sub-section must sit inside the (unresolved) user section")
+	}
+}
+
 func TestWriteDetailsGroupedIndex(t *testing.T) {
 	path, _ := fixture(t)
 	a, err := AnalyzeSessions([]string{path})
@@ -306,16 +347,18 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 	if n != 6 {
 		t.Fatalf("n = %d, want 6", n)
 	}
-	idx, err := os.ReadFile(filepath.Join(dir, "INDEX.md"))
+	idx, err := os.ReadFile(filepath.Join(filepath.Dir(dir), "vmr-requests-index.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## 按会话分组",
-		"### 会话 s01",
-		"任务A开始",
-		"### 会话 s02（s01 经 compaction 续接）",
-		"### Compaction 调用",
+		"## Chat User ou_test123",
+		"### s01 · 2 任务", // Session heading keeps the id, drops the "Session" label word
+		"**t01 · 2 轮",    // Task heading keeps the id, drops the "Task" label word
+		"任务A开始",          // user instruction appears in a quote block under the task heading
+		"### s02",
+		"## Chat User (unresolved)",
+		"### 压缩任务 · compaction 会话 × 1",
 		"## 全部请求（时间序）",
 		"s01/t02",
 		"⚠️截断",
@@ -323,6 +366,9 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		if !strings.Contains(string(idx), want) {
 			t.Errorf("INDEX missing %q", want)
 		}
+	}
+	if strings.Contains(string(idx), "### Session s01") || strings.Contains(string(idx), "**Task t01") {
+		t.Error("headings should drop the \"Session\"/\"Task\" label word, keeping only the id")
 	}
 
 	// The r3 detail file carries the session header and delta section.
@@ -333,11 +379,9 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 	}
 	for _, want := range []string{
 		"**会话 s01** · **任务 t02**",
-		"### 本轮增量",
-		"🎯 **最新指令**",
-		"换个方向",
-		"🔴 上一轮尾部 2 条消息被替换/改写",
-		"🆕 #7 user",
+		"🆕 #7 user",       // per-message emoji on the increment
+		"换个方向",            // NewInstruction still surfaces in meta line
+		"本轮增量（相对上一轮,+5 条", // footer summary on the message list (5 msgs in this r3 delta)
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("r3 detail missing %q", want)
@@ -415,13 +459,72 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 	}
 }
 
+// TestCollapsedSessionRowShowsRealAverages covers a regression found
+// manually against real production logs: vmr-report.md's Agent 会话 table
+// hardcoded "-" for the merged/collapsed scheduled-session row's avg
+// tokens, avg messages, TTFT and duration columns, even though
+// mergeIntoCollapsed correctly accumulates TokensKnown/MessagesKnown/
+// TTFTMSSum/DurMSSum across the merged sessions — the render code just
+// never read them. Two single-request heartbeat firings (different content,
+// so they land in separate 1-request sessions and both qualify for
+// collapsing) with distinct token/message/latency values, verifying the
+// merged row shows real computed values instead of placeholder dashes.
+func TestCollapsedSessionRowShowsRealAverages(t *testing.T) {
+	lines := `{"ts":"2026-07-09T09:00:00+08:00","dur_ms":4000,"ttft_ms":1000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat A [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":10}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
+{"ts":"2026-07-09T10:00:00+08:00","dur_ms":6000,"ttft_ms":3000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat B [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":200,"completion_tokens":20}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2 (distinct content must not group together)", len(a.Sessions))
+	}
+	rep, err := Build([]string{path}, time.Now(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.Sessions = a.SessionRows()
+	md := Markdown(rep)
+
+	row := ""
+	for _, line := range strings.Split(md, "\n") {
+		if strings.Contains(line, "heartbeat 单发会话") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("collapsed heartbeat row not found in:\n%s", md)
+	}
+	for _, want := range []string{
+		"×2",            // both firings merged into one row
+		"150 / 15",      // avg tokens in/out: (100+200)/2, (10+20)/2
+		"| 2.0 |",       // avg messages: (2+2)/2 — system+user each record
+		"1000ms / 3.0s", // TTFT p50/p95: raw values 1000,3000 (not "-/-")
+		"4.0s / 6.0s",   // duration p50/p95: raw values 4000,6000 (not "-/-")
+	} {
+		if !strings.Contains(row, want) {
+			t.Errorf("collapsed row missing %q:\n%s", want, row)
+		}
+	}
+	if strings.Contains(row, "| - | - | -/- | -/- |") {
+		t.Error("collapsed row still has the hardcoded placeholder dashes")
+	}
+}
+
 func TestMarkdownToolsAndSessions(t *testing.T) {
 	path, _ := fixture(t)
 	a, err := AnalyzeSessions([]string{path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, err := Build([]string{path}, time.Now())
+	rep, err := Build([]string{path}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,16 +534,21 @@ func TestMarkdownToolsAndSessions(t *testing.T) {
 	md := Markdown(rep)
 	for _, want := range []string{
 		"## Agent 会话",
-		"| s01 |",
+		"[s01]",
+		"[s02](./details/", " ← s01",
+		"Req/Fall/Trunc", "图片/压缩",
 		"## 工具使用",
-		"| exec | 2 |",
-		"从未调用（1 个）**：write",
+		"调用过的工具",
+		"exec",
+		"从未调用（1 个，",
+		"1. write", // numbered list
 		"## 工作负载",
+		"Tool 调用",
 		"| interactive |",
 		"| compaction |",
 		"## 每小时活跃度",
 		"| 10:00 |",
-		"finish_reason 分布：",
+		"**finish_reason 数量及占比**",
 		"tool_calls×",
 	} {
 		if !strings.Contains(md, want) {
@@ -451,7 +559,7 @@ func TestMarkdownToolsAndSessions(t *testing.T) {
 
 func TestBuildRowHealthFields(t *testing.T) {
 	path, _ := fixture(t)
-	rep, err := Build([]string{path}, time.Now())
+	rep, err := Build([]string{path}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,5 +631,65 @@ func TestIsRealUserScaffolding(t *testing.T) {
 	}
 	if !isRealUser(chatMessage{Role: "user", Text: "帮我修个 bug"}, nil, -1) {
 		t.Error("real instruction not recognized")
+	}
+}
+
+// TestRealUserTextStripsEnvelope covers the real-log bug: OpenClaw glues its
+// "Conversation info (untrusted metadata)" / "Sender (untrusted metadata)"
+// JSON routing blocks onto the FRONT of genuine asks, not just onto pure
+// scaffolding pings. Discarding the whole message lost the actual instruction
+// and made task titles fall back to an unrelated earlier message.
+func TestRealUserTextStripsEnvelope(t *testing.T) {
+	wrapped := "[Thu 2026-07-09 06:48 GMT+8] Conversation info (untrusted metadata):\n" +
+		"```json\n{\"chat_id\":\"user:ou_x\"}\n```\n\n" +
+		"Sender (untrusted metadata):\n```json\n{\"id\":\"ou_x\"}\n```\n\n" +
+		"OK，基于你为每个风格设计的提示词，调用 ai-script 批量生成 logo 设计图。"
+	text, ok := realUserText(chatMessage{Role: "user", Text: wrapped}, nil, -1)
+	if !ok {
+		t.Fatal("envelope-wrapped real instruction not recognized")
+	}
+	if !strings.Contains(text, "OK，基于你为每个风格设计的提示词") {
+		t.Errorf("stripped text lost the real instruction: %q", text)
+	}
+	if strings.Contains(text, "chat_id") {
+		t.Errorf("stripped text still carries the JSON envelope: %q", text)
+	}
+}
+
+// TestNoReplyMergesRetryIntoSameTask covers OpenClaw's skip-on-memory-flush
+// pattern: when a turn's assistant reply is empty or just "NO_REPLY", the
+// LLM never actually acted on the user's instruction. The next turn (even
+// though it adds a genuinely new real-user message near the end, which would
+// normally open a new task) must stay in the SAME task — it's a continuation
+// of the instruction the parent skipped, not a fresh ask.
+func TestNoReplyMergesRetryIntoSameTask(t *testing.T) {
+	zone := time.FixedZone("CST", 8*3600)
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
+	sys := msg("system", "You are a personal assistant.")
+	u1 := msg("user", "[Thu 2026-07-09 10:00 GMT+8] 任务开始：写日报")
+	r1 := mkRec(at(0), "1111aaaa1111aaaa1111aaaa1111aaaa", []any{sys, u1}, nil, sseText("NO_REPLY"))
+	u2 := msg("user", "[Thu 2026-07-09 10:06 GMT+8] 继续，把日报写完")
+	r2 := mkRec(at(6), "1111aaaa1111aaaa1111aaaa1111aaaa", []any{sys, u1, u2}, nil, sseText("好的，日报如下"))
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	a, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(a.Sessions))
+	}
+	s := a.Sessions[0]
+	if len(s.Tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1 (NO_REPLY parent should keep the retry in the same task): %+v", len(s.Tasks), s.Tasks)
+	}
+	if len(s.Tasks[0].Recs) != 2 {
+		t.Fatalf("task recs = %d, want 2", len(s.Tasks[0].Recs))
+	}
+	if !s.Tasks[0].Recs[0].NoReply {
+		t.Error("r1 should be flagged NoReply")
+	}
+	if got := s.Tasks[0].Recs[1].TaskSeq; got != 2 {
+		t.Errorf("r2 task seq = %d, want 2", got)
 	}
 }

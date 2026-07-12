@@ -1,16 +1,21 @@
 // Ver 2026-07-09 00:00, by Sonnet 5
 
-// Package imgprep optionally downscales inline base64 image attachments in
-// request bodies before they reach the router, to cut vision-token cost on
-// oversized screenshots/photos. It never fetches remote image URLs and never
-// touches response bodies — only inline (data-URI / base64-source) images in
-// the request are candidates.
+// Package imgprep detects inline image attachments in request bodies and,
+// when configured, downscales the oversized ones before they reach the
+// router — to cut vision-token cost on large screenshots/photos. It never
+// fetches remote image URLs and never touches response bodies — only inline
+// (data-URI / base64-source) images in the request are candidates.
 //
-// Disabled unless a positive max pixel side is configured. Detection is a
-// cheap substring scan so text-only requests (the overwhelming majority)
-// pay no JSON-parsing cost. Any parse/decode failure anywhere in the path
-// falls back to the original bytes unchanged (fail-open): a bug here must
-// never turn an otherwise-good request into a failure.
+// Detection (format/dimensions/byte size) always runs when the request has
+// an image, regardless of whether downscaling is configured — audit metadata
+// shouldn't depend on a resize feature being turned on. Only the actual
+// decode/scale/re-encode/cache path is gated on a positive max pixel side;
+// detection itself is a cheap header-only image.DecodeConfig read (no pixel
+// decode), and requests with no image marker at all (the overwhelming
+// majority) pay no JSON-parsing cost either way. Any parse/decode failure
+// anywhere in the path falls back to the original bytes unchanged
+// (fail-open): a bug here must never turn an otherwise-good request into a
+// failure.
 //
 // An optional on-disk cache (cache.go) lets a source image that has already
 // been downscaled to a given target size be reused byte-for-byte on a later
@@ -63,7 +68,7 @@ const jpegQuality = 85
 // up and tests can point CacheDir at a t.TempDir() without touching global
 // state shared across other tests.
 type Options struct {
-	MaxPx int // longer-side pixel cap; <=0 disables downscaling entirely
+	MaxPx int // longer-side pixel cap; <=0 disables resizing (images are still detected and described, just never rewritten)
 
 	// CacheDir, if non-empty, enables the on-disk downscale cache (cache.go):
 	// a source image already downscaled to MaxPx is reused instead of being
@@ -82,16 +87,35 @@ func HasImageMarker(body []byte) bool {
 	return bytes.Contains(body, []byte(`"image`))
 }
 
+// ImageInfo describes one image block found in a request — mirrors
+// audit.ImageInfo field-for-field. Kept as a separate type so this package
+// (a self-contained image utility) doesn't need to import internal/audit
+// just for a struct shape; the caller (internal/server) converts.
+type ImageInfo struct {
+	MessageIndex     int    // which message this image's content block was in (0-based)
+	Format           string // jpeg/png/gif/webp/bmp; empty for a remote URL never fetched
+	Bytes            int64  // original (pre-downscale) byte count; 0 for a remote URL
+	Width            int
+	Height           int
+	Remote           bool // http(s) image_url/url-sourced image vmr never fetched; every other field stays zero
+	Downscaled       bool
+	DownscaledWidth  int
+	DownscaledHeight int
+	DownscaledBytes  int64
+	CacheHit         bool // downscaled bytes reused byte-for-byte from the on-disk cache
+}
+
 // Downscale rewrites inline base64 images in body whose longer side exceeds
-// opts.MaxPx, re-encoding them as JPEG scaled to fit within opts.MaxPx.
-// protocol selects which content-block shape to look for ("openai":
-// content[].image_url.url data URI; "anthropic": content[].source with type
-// "base64"). opts.MaxPx<=0 disables the feature. On any failure, or when
-// nothing needed resizing, the original body is returned unchanged (same
-// backing array).
-func Downscale(body []byte, protocol string, opts Options) (result []byte) {
+// opts.MaxPx, re-encoding them as JPEG scaled to fit within opts.MaxPx, and
+// always returns a description of every image it found (see ImageInfo) —
+// detection doesn't depend on opts.MaxPx being positive. protocol selects
+// which content-block shape to look for ("openai": content[].image_url.url
+// data URI; "anthropic": content[].source with type "base64"). On any
+// rewrite failure, or when nothing needed resizing, the returned body is the
+// original unchanged (same backing array) — images is still populated.
+func Downscale(body []byte, protocol string, opts Options) (result []byte, images []ImageInfo) {
 	result = body
-	if opts.MaxPx <= 0 || !HasImageMarker(body) {
+	if !HasImageMarker(body) {
 		return
 	}
 	// Defensive belt on top of careful error handling below: this function
@@ -100,10 +124,11 @@ func Downscale(body []byte, protocol string, opts Options) (result []byte) {
 	// down the request.
 	defer func() {
 		if recover() != nil {
-			result = body
+			result, images = body, nil
 		}
 	}()
-	rewritten, changed, err := rewriteBody(body, protocol, opts)
+	rewritten, changed, imgs, err := rewriteBody(body, protocol, opts)
+	images = imgs
 	if err != nil || !changed {
 		return
 	}
@@ -111,22 +136,24 @@ func Downscale(body []byte, protocol string, opts Options) (result []byte) {
 	return
 }
 
-func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, error) {
+func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, []ImageInfo, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	rawMsgs, ok := top["messages"]
 	if !ok {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	var msgs []json.RawMessage
 	if err := json.Unmarshal(rawMsgs, &msgs); err != nil {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	changed := false
+	var images []ImageInfo
 	for i, m := range msgs {
-		nm, mChanged, err := rewriteMessage(m, protocol, opts)
+		nm, mChanged, imgs, err := rewriteMessage(i, m, protocol, opts)
+		images = append(images, imgs...)
 		if err != nil || !mChanged {
 			continue
 		}
@@ -134,36 +161,40 @@ func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, erro
 		changed = true
 	}
 	if !changed {
-		return nil, false, nil
+		return nil, false, images, nil
 	}
 	newMsgs, err := core.MarshalNoEscape(msgs)
 	if err != nil {
-		return nil, false, err
+		return nil, false, images, err
 	}
 	top["messages"] = newMsgs
 	out, err := core.MarshalNoEscape(top)
 	if err != nil {
-		return nil, false, err
+		return nil, false, images, err
 	}
-	return out, true, nil
+	return out, true, images, nil
 }
 
-func rewriteMessage(raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, error) {
+func rewriteMessage(msgIndex int, raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, []ImageInfo, error) {
 	var msg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	rawContent, ok := msg["content"]
 	if !ok {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	var blocks []json.RawMessage
 	if err := json.Unmarshal(rawContent, &blocks); err != nil {
-		return raw, false, nil // content is a plain string: no image blocks possible
+		return raw, false, nil, nil // content is a plain string: no image blocks possible
 	}
 	changed := false
+	var images []ImageInfo
 	for i, b := range blocks {
-		nb, bChanged, err := rewriteBlock(b, protocol, opts)
+		nb, bChanged, info, err := rewriteBlock(msgIndex, b, protocol, opts)
+		if info != nil {
+			images = append(images, *info)
+		}
 		if err != nil || !bChanged {
 			continue
 		}
@@ -171,115 +202,125 @@ func rewriteMessage(raw json.RawMessage, protocol string, opts Options) (json.Ra
 		changed = true
 	}
 	if !changed {
-		return raw, false, nil
+		return raw, false, images, nil
 	}
 	newContent, err := core.MarshalNoEscape(blocks)
 	if err != nil {
-		return raw, false, err
+		return raw, false, images, err
 	}
 	msg["content"] = newContent
 	out, err := core.MarshalNoEscape(msg)
 	if err != nil {
-		return raw, false, err
+		return raw, false, images, err
 	}
-	return out, true, nil
+	return out, true, images, nil
 }
 
-func rewriteBlock(raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, error) {
+func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
 	var block map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &block); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	var typ string
 	if err := json.Unmarshal(block["type"], &typ); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	switch {
 	case protocol == "openai" && typ == "image_url":
-		return rewriteOpenAIImage(raw, block, opts)
+		return rewriteOpenAIImage(msgIndex, raw, block, opts)
 	case protocol == "anthropic" && typ == "image":
-		return rewriteAnthropicImage(raw, block, opts)
+		return rewriteAnthropicImage(msgIndex, raw, block, opts)
 	default:
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 }
 
-func rewriteOpenAIImage(raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, error) {
+func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
 	var iu map[string]json.RawMessage
 	if err := json.Unmarshal(block["image_url"], &iu); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	var url string
 	if err := json.Unmarshal(iu["url"], &url); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	data, ok := parseDataURI(url)
 	if !ok {
-		return raw, false, nil // remote URL: vmr never fetches it
+		// Remote URL: vmr never fetches it, but it's still an image
+		// reference worth recording.
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
 	}
-	newData, newMime, changed, err := processImage(data, opts)
+	newData, newMime, changed, info, err := processImage(data, opts)
+	info.MessageIndex = msgIndex
 	if err != nil || !changed {
-		return raw, false, nil
+		return raw, false, &info, nil
 	}
 	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
 	uv, err := core.MarshalNoEscape(newURL)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
 	iu["url"] = uv
 	ib, err := core.MarshalNoEscape(iu)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
 	block["image_url"] = ib
 	out, err := core.MarshalNoEscape(block)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
-	return out, true, nil
+	return out, true, &info, nil
 }
 
-func rewriteAnthropicImage(raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, error) {
+func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
 	var src map[string]json.RawMessage
 	if err := json.Unmarshal(block["source"], &src); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	var srcType string
-	if err := json.Unmarshal(src["type"], &srcType); err != nil || srcType != "base64" {
-		return raw, false, nil // url-sourced image, or shape we don't recognize
+	if err := json.Unmarshal(src["type"], &srcType); err != nil {
+		return raw, false, nil, nil
+	}
+	if srcType != "base64" {
+		// url-sourced image, or a shape we don't recognize: vmr never
+		// fetches/decodes it, but it's still an image reference worth
+		// recording.
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
 	}
 	var b64 string
 	if err := json.Unmarshal(src["data"], &b64); err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return raw, false, nil
+		return raw, false, nil, nil
 	}
-	newData, newMime, changed, err := processImage(data, opts)
+	newData, newMime, changed, info, err := processImage(data, opts)
+	info.MessageIndex = msgIndex
 	if err != nil || !changed {
-		return raw, false, nil
+		return raw, false, &info, nil
 	}
 	mv, err := core.MarshalNoEscape(newMime)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
 	dv, err := core.MarshalNoEscape(base64.StdEncoding.EncodeToString(newData))
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
 	src["media_type"] = mv
 	src["data"] = dv
 	sb, err := core.MarshalNoEscape(src)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
 	block["source"] = sb
 	out, err := core.MarshalNoEscape(block)
 	if err != nil {
-		return raw, false, err
+		return raw, false, &info, err
 	}
-	return out, true, nil
+	return out, true, &info, nil
 }
 
 // parseDataURI extracts the decoded payload of a "data:<mime>;base64,<data>"
@@ -301,14 +342,17 @@ func parseDataURI(u string) ([]byte, bool) {
 	return data, true
 }
 
-// processImage decodes data (format auto-detected from content, not from any
-// caller-supplied mime type), and if its longer side exceeds opts.MaxPx,
-// resizes it to fit and re-encodes as JPEG. changed=false (with a nil error)
-// covers every "leave it alone" case: already small enough, animated (GIF
+// processImage decodes data's header (format auto-detected from content, not
+// from any caller-supplied mime type) to describe the image — this much
+// always runs, independent of opts.MaxPx. If opts.MaxPx is positive and the
+// longer side exceeds it, the image is fully decoded, resized to fit, and
+// re-encoded as JPEG. changed=false (with a nil error) covers every "leave
+// it alone" case: resizing disabled, already small enough, animated (GIF
 // with more than one frame — resizing would collapse it to a still),
 // unrecognized format, corrupt data, or oversized declared dimensions
-// (decompression-bomb guard). Output is always JPEG; alpha is flattened onto
-// white first since JPEG has no transparency.
+// (decompression-bomb guard) — info is still populated in all of these
+// except a header-decode failure. Output is always JPEG; alpha is flattened
+// onto white first since JPEG has no transparency.
 //
 // When opts.CacheDir is set, a cache lookup happens only after the
 // need-to-process decision is made (longSide > MaxPx, not a decompression
@@ -316,20 +360,22 @@ func parseDataURI(u string) ([]byte, bool) {
 // full image on every request would tax exactly the common case caching is
 // meant to help least. A hit skips decode/scale/encode entirely; a miss
 // falls through to full processing and stores the result before returning.
-func processImage(data []byte, opts Options) (out []byte, mime string, changed bool, err error) {
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, "", false, nil
+func processImage(data []byte, opts Options) (out []byte, mime string, changed bool, info ImageInfo, err error) {
+	cfg, format, cerr := image.DecodeConfig(bytes.NewReader(data))
+	if cerr != nil {
+		return nil, "", false, ImageInfo{}, nil
 	}
+	info = ImageInfo{Format: format, Bytes: int64(len(data)), Width: cfg.Width, Height: cfg.Height}
+
 	longSide := cfg.Width
 	if cfg.Height > longSide {
 		longSide = cfg.Height
 	}
-	if longSide <= opts.MaxPx {
-		return nil, "", false, nil
+	if opts.MaxPx <= 0 || longSide <= opts.MaxPx {
+		return nil, "", false, info, nil
 	}
 	if cfg.Width*cfg.Height > maxDecodePixels {
-		return nil, "", false, nil
+		return nil, "", false, info, nil
 	}
 
 	var hash [32]byte
@@ -337,7 +383,10 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 		hash = sha256.Sum256(data)
 		maybeSweepCache(opts.CacheDir, opts.CacheTTLDays, time.Now())
 		if cached, ok := cacheLookup(opts.CacheDir, hash, opts.MaxPx); ok {
-			return cached, "image/jpeg", true, nil
+			newW, newH := scaledSize(cfg.Width, cfg.Height, opts.MaxPx)
+			info.Downscaled, info.DownscaledWidth, info.DownscaledHeight = true, newW, newH
+			info.DownscaledBytes, info.CacheHit = int64(len(cached)), true
+			return cached, "image/jpeg", true, info, nil
 		}
 	}
 
@@ -345,16 +394,16 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 	if format == "gif" {
 		g, gerr := gif.DecodeAll(bytes.NewReader(data))
 		if gerr != nil {
-			return nil, "", false, nil
+			return nil, "", false, info, nil
 		}
 		if len(g.Image) != 1 {
-			return nil, "", false, nil // animated: resizing would destroy the animation
+			return nil, "", false, info, nil // animated: resizing would destroy the animation
 		}
 		src = g.Image[0]
 	} else {
 		src, _, err = image.Decode(bytes.NewReader(data))
 		if err != nil {
-			return nil, "", false, nil
+			return nil, "", false, info, nil
 		}
 	}
 
@@ -367,13 +416,15 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, "", false, nil
+		return nil, "", false, info, nil
 	}
 	result := buf.Bytes()
 	if opts.CacheDir != "" {
 		cacheStore(opts.CacheDir, hash, opts.MaxPx, result)
 	}
-	return result, "image/jpeg", true, nil
+	info.Downscaled, info.DownscaledWidth, info.DownscaledHeight = true, newW, newH
+	info.DownscaledBytes = int64(len(result))
+	return result, "image/jpeg", true, info, nil
 }
 
 // scaledSize returns the largest w×h with the same aspect ratio as the

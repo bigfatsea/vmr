@@ -35,8 +35,8 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if got := cfg.Providers["openai"]["p1"].APIKey; got != "sk-test-123" {
 		t.Errorf("env expansion: got %q", got)
 	}
-	if cfg.MaxAttempts != 0 || cfg.MaxBodyMB != 8 {
-		t.Errorf("defaults: attempts=%d (want 0 = unlimited) body=%d", cfg.MaxAttempts, cfg.MaxBodyMB)
+	if cfg.MaxAttempts != 0 || cfg.MaxRequestBodyMB != 8 {
+		t.Errorf("defaults: attempts=%d (want 0 = unlimited) body=%d", cfg.MaxAttempts, cfg.MaxRequestBodyMB)
 	}
 	if cfg.ImageDownscaleMaxPx != 0 {
 		t.Errorf("default image_downscale: got %d, want 0 (disabled)", cfg.ImageDownscaleMaxPx)

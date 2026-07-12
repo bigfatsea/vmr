@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	DefaultMaxBodyMB         = 8
+	DefaultMaxRequestBodyMB  = 8
 	DefaultConnectTimeout    = 10 * time.Second
 	DefaultHeaderTimeout     = 120 * time.Second
 	DefaultIdleTimeout       = 120 * time.Second
@@ -89,10 +89,14 @@ type Timeouts struct {
 // Provider.Type), so adding a new ingress protocol is still just "register
 // an adapter" — no schema change here.
 type Config struct {
-	Listen              string                            `yaml:"listen"`
-	APIKey              string                            `yaml:"api_key"`
-	MaxAttempts         int                               `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
-	MaxBodyMB           int                               `yaml:"max_body_mb"`
+	Listen      string `yaml:"listen"`
+	APIKey      string `yaml:"api_key"`
+	MaxAttempts int    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
+	// MaxRequestBodyMB bounds the inbound client request body vmr will read
+	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
+	// audit logging (the audit trail records every request in full,
+	// whatever size vmr accepted).
+	MaxRequestBodyMB    int                               `yaml:"max_request_body_mb"`
 	MaxConcurrency      int                               `yaml:"max_concurrency"`      // 0 = unlimited; excess requests wait in memory
 	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, §7)
 	ImageCacheTTLDays   int                               `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
@@ -153,8 +157,8 @@ func (c *Config) applyDefaults() {
 	if c.AuditRetentionDays < 0 {
 		c.AuditRetentionDays = 0
 	}
-	if c.MaxBodyMB <= 0 {
-		c.MaxBodyMB = DefaultMaxBodyMB
+	if c.MaxRequestBodyMB <= 0 {
+		c.MaxRequestBodyMB = DefaultMaxRequestBodyMB
 	}
 	if c.Timeouts.Connect <= 0 {
 		c.Timeouts.Connect = Duration(DefaultConnectTimeout)
@@ -234,4 +238,4 @@ func countNested[V any](m map[string]map[string]V) int {
 	return n
 }
 
-func (c *Config) MaxBodyBytes() int64 { return int64(c.MaxBodyMB) << 20 }
+func (c *Config) MaxRequestBodyBytes() int64 { return int64(c.MaxRequestBodyMB) << 20 }

@@ -25,6 +25,7 @@ coverage.html
 # Generated reports (details/ carries full conversation bodies — never commit)
 /vmr-report.json
 /vmr-report.md
+/vmr-requests-index.md
 /details/
 
 # Audit data (may contain full conversation bodies — never commit)

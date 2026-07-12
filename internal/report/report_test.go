@@ -9,7 +9,39 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+
+	"vmr/internal/audit"
 )
+
+// TestAttemptErrorClassFallback covers backward compatibility with audit
+// logs written before Attempt.ErrorClass existed: the class must still be
+// recoverable from the free-text Error field alone, exactly matching what
+// the old prefix-parsing logic used to produce.
+func TestAttemptErrorClassFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    audit.Attempt
+		want string
+	}{
+		{"new log: ErrorClass wins even if Error looks parseable",
+			audit.Attempt{Error: "network: dial tcp refused", ErrorClass: "network"}, "network"},
+		{"old log: HTTP-classified error has no colon, used verbatim",
+			audit.Attempt{Error: "rate_limit"}, "rate_limit"},
+		{"old log: non-HTTP failure uses the class:detail prefix",
+			audit.Attempt{Error: "network: dial tcp: connection refused"}, "network"},
+		{"old log: canceled has no colon at all, used verbatim",
+			audit.Attempt{Error: "canceled by client"}, "canceled by client"},
+		{"old log: truncated uses the prefix",
+			audit.Attempt{Error: "truncated: stream idle timeout"}, "truncated"},
+		{"success attempt: no error, no class", audit.Attempt{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := attemptErrorClass(tc.a); got != tc.want {
+				t.Errorf("attemptErrorClass(%+v) = %q, want %q", tc.a, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestExtractUsage(t *testing.T) {
 	cases := []struct {
@@ -55,8 +87,8 @@ func TestExtractUsage(t *testing.T) {
 // Synthetic audit lines covering: ok with usage, failover rescue, hard error,
 // stream, and a second day. Shapes mirror design doc §8.2.
 const day1 = `{"ts":"2026-07-07T10:00:00+08:00","dur_ms":1000,"model":"cheap","protocol":"openai","stream":false,"outcome":"ok","client":{"request":{"body":{"model":"cheap"}},"response":{"status":200,"body":{"usage":{"prompt_tokens":10,"completion_tokens":100}}}},"attempts":[{"endpoint":"p1/m1","dur_ms":900,"response":{"status":200}}]}
-{"ts":"2026-07-07T11:00:00+08:00","dur_ms":2000,"model":"cheap","protocol":"openai","stream":false,"outcome":"ok","client":{"request":{"body":{"model":"cheap"}},"response":{"status":200,"body":{"usage":{"prompt_tokens":20,"completion_tokens":300}}}},"attempts":[{"endpoint":"p1/m1","dur_ms":500,"error":"rate_limit","response":{"status":429,"body":{"error":"slow"}}},{"endpoint":"p2/m2","dur_ms":1400,"response":{"status":200}}]}
-{"ts":"2026-07-07T12:00:00+08:00","dur_ms":300,"model":"cheap","protocol":"openai","stream":false,"outcome":"error","client":{"request":{"body":{"model":"cheap"}},"response":{"status":503,"body":{"error":"down"}}},"attempts":[{"endpoint":"p1/m1","dur_ms":100,"error":"transient","response":{"status":500,"body":{"e":1}}},{"endpoint":"p2/m2","dur_ms":100,"error":"transient","response":{"status":500,"body":{"e":1}}}]}
+{"ts":"2026-07-07T11:00:00+08:00","dur_ms":2000,"model":"cheap","protocol":"openai","stream":false,"outcome":"ok","client":{"request":{"body":{"model":"cheap"}},"response":{"status":200,"body":{"usage":{"prompt_tokens":20,"completion_tokens":300}}}},"attempts":[{"endpoint":"p1/m1","dur_ms":500,"error":"rate_limit","error_class":"rate_limit","response":{"status":429,"body":{"error":"slow"}}},{"endpoint":"p2/m2","dur_ms":1400,"response":{"status":200}}]}
+{"ts":"2026-07-07T12:00:00+08:00","dur_ms":300,"model":"cheap","protocol":"openai","stream":false,"outcome":"error","client":{"request":{"body":{"model":"cheap"}},"response":{"status":503,"body":{"error":"down"}}},"attempts":[{"endpoint":"p1/m1","dur_ms":100,"error":"transient","error_class":"transient","response":{"status":500,"body":{"e":1}}},{"endpoint":"p2/m2","dur_ms":100,"error":"transient","error_class":"transient","response":{"status":500,"body":{"e":1}}}]}
 {"ts":"2026-07-07T13:00:00+08:00","dur_ms":1500,"model":"claude","protocol":"anthropic","stream":true,"outcome":"ok","client":{"request":{"body":{"model":"claude"}},"response":{"status":200,"body":"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":40,\"output_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":60}}\n"}},"attempts":[{"endpoint":"a1/mm","dur_ms":1400,"response":{"status":200}}]}
 bad line not json
 `
@@ -72,7 +104,7 @@ func buildTestReport(t *testing.T) *Report {
 		}
 	}
 	rep, err := Build([]string{filepath.Join(dir, "a.jsonl"), filepath.Join(dir, "b.jsonl")},
-		time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+		time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,20 +175,98 @@ func TestBuildAggregation(t *testing.T) {
 	}
 }
 
+// TestEndpointsAllAndHoursOfDayMergeAcrossDates covers the exact regression
+// found manually against real production logs: vmr-report.md's 端点可用度
+// and 每小时活跃度 tables always showed "-/-" for 首字延迟/请求耗时, even
+// though every record carries dur_ms. Root cause: those tables used to
+// merge already-`finish*`-processed per-date buckets (rep.Endpoints /
+// rep.Hours), and finishEndpoint/finishHour free the raw dur_ms/ttft_ms
+// slices right after computing that bucket's own per-date percentiles — so
+// re-merging "finished" buckets across dates had nothing left to compute a
+// true percentile from, no matter how much data existed. The fix adds
+// genuinely independent EndpointsAll/HoursOfDay buckets that accumulate raw
+// values directly during Build's single pass, exactly like Overall does for
+// Rows. Two records at the same endpoint / same local hour on different
+// calendar dates is the minimal case that exercises the merge.
+func TestEndpointsAllAndHoursOfDayMergeAcrossDates(t *testing.T) {
+	lines := `{"ts":"2026-07-07T10:00:00+08:00","dur_ms":1000,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m"}},"response":{"status":200}},"attempts":[{"endpoint":"p1/m1","dur_ms":1000,"response":{"status":200}}]}
+{"ts":"2026-07-08T10:30:00+08:00","dur_ms":2000,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m"}},"response":{"status":200}},"attempts":[{"endpoint":"p1/m1","dur_ms":2000,"response":{"status":200}}]}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Build([]string{path}, time.Now(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rep.EndpointsAll) != 1 {
+		t.Fatalf("EndpointsAll = %d rows, want 1 (same endpoint, both dates merged)", len(rep.EndpointsAll))
+	}
+	e := rep.EndpointsAll[0]
+	if e.Attempts != 2 || e.OK != 2 {
+		t.Errorf("EndpointsAll[0] counts = %+v", e)
+	}
+	if e.DurMSP50 != 1000 || e.DurMSP95 != 2000 {
+		t.Errorf("EndpointsAll[0] duration percentiles = p50=%d p95=%d, want p50=1000 p95=2000 (both cross-date requests present, not \"-/-\")", e.DurMSP50, e.DurMSP95)
+	}
+
+	if len(rep.HoursOfDay) != 1 {
+		t.Fatalf("HoursOfDay = %d rows, want 1 (both records fall in local hour 10)", len(rep.HoursOfDay))
+	}
+	h := rep.HoursOfDay[0]
+	if h.Hour != 10 || h.Requests != 2 {
+		t.Errorf("HoursOfDay[0] = %+v", h)
+	}
+	if h.DurMSP50 != 1000 || h.DurMSP95 != 2000 {
+		t.Errorf("HoursOfDay[0] duration percentiles = p50=%d p95=%d, want p50=1000 p95=2000 (both cross-date requests present, not \"-/-\")", h.DurMSP50, h.DurMSP95)
+	}
+
+	// The per-date buckets (JSON granularity) must still exist independently.
+	if len(rep.Endpoints) != 2 || len(rep.Hours) != 2 {
+		t.Errorf("per-date buckets: endpoints=%d hours=%d, want 2 each (one per date)", len(rep.Endpoints), len(rep.Hours))
+	}
+}
+
 func TestMarkdownRendering(t *testing.T) {
 	rep := buildTestReport(t)
 	md := Markdown(rep)
 	for _, want := range []string{
 		"# VMR 用量报告",
-		"Tokens In/CacheHit/Out", "请求均值 In/CacheHit/Out", "缓存写入", "平均消息数", "平均首字延迟",
+		"详单见 [vmr-requests-index.md](./vmr-requests-index.md)",
+		"Tokens In/CacheHit/Out", "平均Tokens In/Out", "p50/p95 首字延迟", "p50/p95 请求耗时", "平均吞吐 (tok/s)",
+		"Req/Fall/Trunc", "图片/压缩",
 		"## 按模型", "| cheap |", "| claude |",
-		"## 端点可用度", "| p1/m1 | 4 | 2 |", "rate_limit×1", // rolled up across both days
+		"## 端点可用度",
+		// p1/m1 has successful requests on both 07-07 (dur_ms=1000) and
+		// 07-08 (dur_ms=800): a real cross-date p50/p95 must show here, not
+		// "-/-" — this is the endpoint-rollup regression check.
+		"800ms / 1000ms",
+		"## 上游错误分布", "**p1/m1**", "- rate_limit × 1", "- transient × 1", "**p2/m2**",
 		"## 按日趋势", "| 2026-07-07 |", "| 2026-07-08 |",
-		"## 上游错误分布", "| transient | 2 |",
+		"## 每小时活跃度",
+		// Hour 10 has exactly one request (07-07 10:00, dur_ms=1000): its
+		// merged-across-dates duration percentile must show a real value,
+		// not "-/-" — this is the hourly-rollup regression check.
+		"| 10:00 | 1/-/- |",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q\n---\n%s", want, md)
 		}
+	}
+	// The link at the top must appear before the per-model table, and the
+	// error distribution must sit right after endpoint availability, ahead
+	// of the daily-trend section.
+	if strings.Index(md, "详单见") > strings.Index(md, "## 按模型") {
+		t.Error("vmr-requests-index.md link should be near the top, not after ## 按模型")
+	}
+	if i, j, k := strings.Index(md, "## 端点可用度"), strings.Index(md, "## 上游错误分布"), strings.Index(md, "## 按日趋势"); !(i < j && j < k) {
+		t.Errorf("expected 端点可用度 < 上游错误分布 < 按日趋势 in document order, got positions %d/%d/%d", i, j, k)
+	}
+	if strings.Contains(md, "错误分布 |") {
+		t.Error("端点可用度 table should no longer have an 错误分布 column")
 	}
 }
 
@@ -168,7 +278,7 @@ func TestBuild_CacheTokens(t *testing.T) {
 	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := Build([]string{path}, time.Now())
+	rep, err := Build([]string{path}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,11 +292,8 @@ func TestBuild_CacheTokens(t *testing.T) {
 	}
 
 	md := Markdown(rep)
-	if !strings.Contains(md, "125 / 100(80.0%) / 7") { // merged In/CacheHit(share)/Out cell
-		t.Errorf("markdown missing merged token triple\n---\n%s", md)
-	}
-	if !strings.Contains(md, " 20 |") { // cache-write absolute count column
-		t.Errorf("markdown missing cache-write count\n---\n%s", md)
+	if !strings.Contains(md, "125 / 100(80.0%) / 7") { // 3-tuple: In / CacheHit(share) / Out
+		t.Errorf("markdown missing 3-tuple token cell\n---\n%s", md)
 	}
 }
 
@@ -200,7 +307,7 @@ func TestBuild_ShapeStatsAndTTFT(t *testing.T) {
 	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := Build([]string{path}, time.Now())
+	rep, err := Build([]string{path}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,11 +327,11 @@ func TestBuild_ShapeStatsAndTTFT(t *testing.T) {
 
 	md := Markdown(rep)
 	for _, want := range []string{
-		"| 2.5 |",               // avg messages: 5 msgs / 2 known
-		"| 300ms |",             // avg TTFT: 600 / 2
-		"| 20 / 0(0.0%) / 10 |", // per-request avg tokens: 40/2, 0, 20/2
-		"system 11.1%",          // share: 2 of 18 total chars
-		"tool 33.3%",
+		"| 2.5 |",             // avg messages: 5 msgs / 2 known
+		"| 200ms / 400ms |",   // p50/p95 TTFT: 200/400 from 2 values
+		"| 1000ms / 1000ms |", // p50/p95 dur_ms
+		"system 2 (11.1%)",    // share with absolute counts: 2 of 18 total chars
+		"tool 6 (33.3%)",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q\n---\n%s", want, md)
@@ -273,7 +380,7 @@ func TestBuild_ReadsCompressedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := Build([]string{zstPath}, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	rep, err := Build([]string{zstPath}, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +406,7 @@ func TestOpenAuditFile_RejectsGarbageZst(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not a zstd frame"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build([]string{path}, time.Now()); err == nil {
+	if _, err := Build([]string{path}, time.Now(), nil); err == nil {
 		t.Error("expected an error reading a non-zstd .zst file, got nil")
 	}
 }
@@ -313,7 +420,7 @@ func TestBuild_ProtocolSplitsRows(t *testing.T) {
 	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := Build([]string{path}, time.Now())
+	rep, err := Build([]string{path}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

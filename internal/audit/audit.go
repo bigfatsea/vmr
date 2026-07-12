@@ -20,24 +20,6 @@ import (
 	"vmr/internal/rundir"
 )
 
-// maxBodyBytes caps every recorded body; longer bodies are cut and flagged.
-// It tracks the router's max_body_mb (set at startup and on hot reload) so a
-// request VMR accepts is never truncated in its own audit trail; responses
-// get the same allowance. Atomic because hot reload writes while requests read.
-var maxBodyBytes atomic.Int64
-
-func init() { maxBodyBytes.Store(1 << 20) }
-
-// SetMaxBodyBytes updates the recording cap; non-positive values are ignored.
-func SetMaxBodyBytes(n int64) {
-	if n > 0 {
-		maxBodyBytes.Store(n)
-	}
-}
-
-// MaxBodyBytes reports the current recording cap.
-func MaxBodyBytes() int64 { return maxBodyBytes.Load() }
-
 // retentionDays gates the delete side of housekeeping (see housekeep.go).
 // 0 = disabled: compression on rotation still happens, files just never get
 // deleted. Deliberately opt-in rather than defaulting to a "reasonable"
@@ -58,19 +40,45 @@ func RetentionDays() int { return int(retentionDays.Load()) }
 // Record is one audit line. Two layers: Client is the caller↔vmr exchange,
 // Attempts are the vmr↔provider exchanges (one entry per failover attempt).
 type Record struct {
-	TS       time.Time `json:"ts"`     // request arrival
-	DurMS    int64     `json:"dur_ms"` // total wall time
+	TS    time.Time `json:"ts"`     // request arrival
+	DurMS int64     `json:"dur_ms"` // total wall time
 	// TTFTMS is the client-view first-token latency: arrival → first response
 	// body byte written back. 0 (omitted) when nothing was written or the
 	// response was instant (<1ms local rejects) — consumers treat 0 as "no
 	// measurement", which conveniently excludes those rejects from averages.
-	TTFTMS   int64  `json:"ttft_ms,omitempty"`
-	Model    string `json:"model"` // virtual model ("" if rejected before parsing)
+	TTFTMS   int64     `json:"ttft_ms,omitempty"`
+	Model    string    `json:"model"`    // virtual model ("" if rejected before parsing)
 	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic
 	Stream   bool      `json:"stream"`
 	Outcome  string    `json:"outcome"` // ok | error | canceled
 	Client   Exchange  `json:"client"`
 	Attempts []Attempt `json:"attempts,omitempty"`
+	// Images lists every inline image found in the request (request only —
+	// vmr never generates images). Populated whenever imgprep detects an
+	// image, regardless of whether downscaling is configured for this
+	// virtual model: Downscaled/DownscaledWidth/... stay zero-valued when
+	// downscaling never ran (disabled) or wasn't needed (already small).
+	Images []ImageInfo `json:"images,omitempty"`
+}
+
+// ImageInfo is one inline (or remote-referenced) image found in a request.
+type ImageInfo struct {
+	MessageIndex int    `json:"message_index"`    // which message (0-based, aligned with the chat message list)
+	Format       string `json:"format,omitempty"` // jpeg/png/gif/webp/bmp; empty for a remote URL vmr never fetched
+	Bytes        int64  `json:"bytes"`            // original (pre-downscale) byte count; 0 for a remote URL
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	// Remote is true for an http(s) image_url vmr never fetches (imgprep
+	// only ever touches inline data-URI/base64 images) — every other field
+	// stays zero-valued in that case.
+	Remote           bool  `json:"remote,omitempty"`
+	Downscaled       bool  `json:"downscaled,omitempty"`
+	DownscaledWidth  int   `json:"downscaled_width,omitempty"`
+	DownscaledHeight int   `json:"downscaled_height,omitempty"`
+	DownscaledBytes  int64 `json:"downscaled_bytes,omitempty"`
+	// CacheHit is true when the downscaled bytes were reused byte-for-byte
+	// from imgprep's on-disk cache instead of being re-encoded.
+	CacheHit bool `json:"cache_hit,omitempty"`
 }
 
 type Exchange struct {
@@ -85,45 +93,54 @@ type Exchange struct {
 // explanation of any byte difference between the upstream body and what the
 // client received.
 type Attempt struct {
-	Endpoint string   `json:"endpoint"` // protocol/provider/model
+	Endpoint string   `json:"endpoint"`           // protocol:provider:model, human-readable label (see Protocol/Provider/Model for the structured form)
+	Protocol string   `json:"protocol,omitempty"` // == the endpoint's adapter type (openai | anthropic)
+	Provider string   `json:"provider,omitempty"` // provider name as configured
+	Model    string   `json:"model,omitempty"`    // real upstream model name (as opposed to Record.Model, the virtual name)
 	URL      string   `json:"url"`
 	DurMS    int64    `json:"dur_ms"`
 	Request  Message  `json:"request"`
 	Response *Message `json:"response,omitempty"`
-	Error    string   `json:"error,omitempty"` // error class, or "network: …" / "build: …" / "truncated: …" / "canceled by client"
-	Norm     []string `json:"norm,omitempty"`  // normalization steps applied to the forwarded response
+	Error    string   `json:"error,omitempty"` // human-readable detail: "network: …" / "build: …" / "truncated: …" / "canceled by client", or the classify-error message for a >=400 response
+	// ErrorClass is the single typed category behind Error — always set
+	// alongside Error, one of: client/auth/rate_limit/endpoint/transient/
+	// content (mirrors core.ErrorClass for >=400 responses) or build/
+	// network/canceled/truncated (the non-HTTP failure paths). Consumers
+	// should read this instead of parsing Error's prefix.
+	ErrorClass string   `json:"error_class,omitempty"`
+	Norm       []string `json:"norm,omitempty"` // normalization steps applied to the forwarded response
+	// RawPreStrip holds the upstream bytes exactly as received, from just
+	// before a think_strip/thinking_process_strip rewrite ran — nil unless
+	// one of those fired. It is the buffered segment only (whatever the
+	// normalizer had accumulated at that moment), not a second copy of the
+	// whole response body.
+	RawPreStrip any `json:"raw_pre_strip,omitempty"`
 }
 
 type Message struct {
-	Method        string      `json:"method,omitempty"`
-	Path          string      `json:"path,omitempty"`
-	Status        int         `json:"status,omitempty"`
-	Headers       http.Header `json:"headers,omitempty"`
-	Body          any         `json:"body,omitempty"` // json.RawMessage if valid JSON, else string
-	BodyTruncated bool        `json:"body_truncated,omitempty"`
+	Method  string      `json:"method,omitempty"`
+	Path    string      `json:"path,omitempty"`
+	Status  int         `json:"status,omitempty"`
+	Headers http.Header `json:"headers,omitempty"`
+	Body    any         `json:"body,omitempty"` // json.RawMessage if valid JSON, else string
 }
 
-// NewMessage builds a Message with redacted headers and a size-capped body.
+// NewMessage builds a Message with redacted headers and the full body — no
+// size cap; whatever vmr actually saw is what gets recorded.
 func NewMessage(headers http.Header, body []byte) Message {
-	m := Message{Headers: Redact(headers)}
-	m.Body, m.BodyTruncated = EncodeBody(body)
-	return m
+	return Message{Headers: Redact(headers), Body: EncodeBody(body)}
 }
 
 // EncodeBody returns the body as raw JSON when it is valid JSON (kept
 // queryable for analysis scripts), otherwise as a plain string (e.g. SSE).
-func EncodeBody(body []byte) (any, bool) {
+func EncodeBody(body []byte) any {
 	if len(body) == 0 {
-		return nil, false
+		return nil
 	}
-	truncated := false
-	if cap := int(MaxBodyBytes()); len(body) > cap {
-		body, truncated = body[:cap], true
+	if json.Valid(body) {
+		return json.RawMessage(append([]byte(nil), body...))
 	}
-	if !truncated && json.Valid(body) {
-		return json.RawMessage(append([]byte(nil), body...)), false
-	}
-	return string(body), truncated
+	return string(body)
 }
 
 // credentialHeaders are recorded masked: only the last 4 characters survive.

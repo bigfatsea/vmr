@@ -24,6 +24,11 @@ import (
 	"vmr/internal/audit"
 )
 
+// toolArgsInlineThreshold: tool-call args shorter than this render inline
+// in the model output summary; longer ones go in a <details> fold (a multi-KB
+// JSON blob would drown the document otherwise).
+const toolArgsInlineThreshold = 600
+
 // normDescriptions translates audit norm-trail steps (internal/router
 // response normalizer) into human language for the detail files.
 var normDescriptions = map[string]string{
@@ -37,25 +42,30 @@ var normDescriptions = map[string]string{
 }
 
 // WriteDetails renders every record in the given audit files into dir (one
-// .md per record plus INDEX.md) and returns the number of record files
-// written. Reruns overwrite deterministically. sess (optional, nil = plain
-// mode) supplies the session grouping: detail headers gain session/task
-// coordinates and a delta section, INDEX gains a grouped view.
+// .md + one same-named .json per record) and writes vmr-requests-index.md
+// one level above dir. Returns the number of record files written. Reruns
+// overwrite deterministically. sess (optional, nil = plain mode) supplies
+// the session grouping: detail headers gain session/task coordinates and a
+// delta section, the index gains a grouped view.
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err
 	}
 	type indexEntry struct {
-		ts       time.Time
-		file     string
-		model    string
-		endpoint string
-		outcome  string
-		durMS    int64
-		attempts int
-		usage    Usage
-		usageOK  bool
-		info     *ReqInfo
+		ts               time.Time
+		file             string
+		model            string
+		protocol         string
+		provider         string
+		upstreamModel    string
+		outcome          string
+		truncated        bool
+		durMS            int64
+		attempts         int
+		images, imgsComp int
+		usage            Usage
+		usageOK          bool
+		info             *ReqInfo
 	}
 	var entries []indexEntry
 	used := map[string]int{}
@@ -86,9 +96,28 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 				rc.Close()
 				return len(entries), err
 			}
+			// Same-named .json alongside the .md: the raw record, for
+			// readers who want to jq/query a single request instead of
+			// parsing the Markdown.
+			if raw, err := json.MarshalIndent(&rec, "", "  "); err == nil {
+				jsonName := strings.TrimSuffix(name, ".md") + ".json"
+				if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o644); err != nil {
+					rc.Close()
+					return len(entries), err
+				}
+			}
 			e := indexEntry{ts: rec.TS, file: name, model: displayModel(&rec),
-				endpoint: lastEndpoint(&rec), outcome: rec.Outcome,
+				protocol: rec.Protocol, outcome: rec.Outcome,
 				durMS: rec.DurMS, attempts: len(rec.Attempts), info: info}
+			if n := len(rec.Attempts); n > 0 {
+				_, e.provider, e.upstreamModel = attemptUpstream(rec.Attempts[n-1])
+			}
+			for _, at := range rec.Attempts {
+				if attemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
+					e.truncated = true
+				}
+			}
+			e.images, e.imgsComp = countImages(rec.Images)
 			if rec.Client.Response != nil {
 				e.usage, e.usageOK = ExtractUsage(rec.Client.Response.Body)
 			}
@@ -107,68 +136,167 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 		return entries[i].file < entries[j].file
 	})
 	var b strings.Builder
-	fmt.Fprintf(&b, "# VMR 请求详单索引\n\n共 %d 条记录\n\n", len(entries))
+	// Header — count unique chat users when session analysis is on so the
+	// reader sees how many distinct callers the traffic came from.
+	chatUsers := map[string]bool{}
+	if sess != nil {
+		for _, s := range sess.Sessions {
+			if s.ChatID != "" {
+				chatUsers[s.ChatID] = true
+			}
+		}
+	}
+	fmt.Fprintf(&b, "# VMR 请求详单索引\n\n共 %d 条记录", len(entries))
+	if len(chatUsers) > 0 {
+		fmt.Fprintf(&b, "（%d 个 Chat User）", len(chatUsers))
+	}
+	b.WriteString("\n\n")
+	if sess != nil && (len(sess.Sessions) > 0 || len(sess.Ungrouped) > 0 || len(sess.Compactions) > 0) {
+		b.WriteString("每条记录 = 一次 vmr 请求；下方按 Chat User → Session → Task 分组，一个 Task 通常" +
+			"包含多条记录（一次用户指令触发的多轮工具调用）——记录数远大于 Task 数是正常的，" +
+			"Task/Compaction/定时任务表的记录之和才等于上面的总数。\n\n")
+	}
 
-	// Grouped view first: sessions → tasks → turns (analysis mode only).
-	if sess != nil && len(sess.Sessions) > 0 {
+	// Grouped view: Chat User → Session → Task → Turn (analysis mode only).
+	// Headings drop the "Session"/"Task" label word but keep the id itself
+	// (s04, t01, …) as the heading text.
+	if sess != nil && (len(sess.Sessions) > 0 || len(sess.Ungrouped) > 0 || len(sess.Compactions) > 0) {
 		fileOf := map[*ReqInfo]string{}
 		for _, e := range entries {
 			if e.info != nil {
 				fileOf[e.info] = e.file
 			}
 		}
-		b.WriteString("## 按会话分组\n\n")
-		for _, s := range sess.Sessions {
-			cont := ""
-			if s.ContinuedFrom != "" {
-				cont = fmt.Sprintf("（%s 经 compaction 续接）", s.ContinuedFrom)
-			} else if s.IsContinuation {
-				cont = "（续接自输入之外的会话）"
+		// Scheduled one-shot sessions (heartbeat/dream_diary: each trigger
+		// opens its own single-record "session") and compaction calls both
+		// fold into compact tables under "(unresolved)" regardless of
+		// whatever chat_id they might carry — they're scaffolding, not
+		// conversations, and a dozens-strong run of near-identical Task
+		// blocks would bury the real ones. This also keeps INDEX and
+		// vmr-report.md's Agent 会话 table (which already collapses these)
+		// in agreement.
+		scheduled := map[string][]*SessionInfo{}
+		var scheduledOrder []string
+		byUser := map[string][]*SessionInfo{}
+		var userOrder []string
+		for i := range sess.Sessions {
+			s := sess.Sessions[i]
+			if len(s.Recs) == 1 && workloadClass(s.Recs[0]) != "interactive" {
+				cls := workloadClass(s.Recs[0])
+				if _, ok := scheduled[cls]; !ok {
+					scheduledOrder = append(scheduledOrder, cls)
+				}
+				scheduled[cls] = append(scheduled[cls], s)
+				continue
 			}
-			chat := ""
-			if s.ChatID != "" {
-				chat = " · chat " + escapeCell(truncCell(s.ChatID, 24))
+			uid := chatUserLabel(s.ChatID)
+			if _, ok := byUser[uid]; !ok {
+				userOrder = append(userOrder, uid)
 			}
-			fmt.Fprintf(&b, "### 会话 %s%s · 「%s」 · %d 轮 %d 任务%s\n\n",
-				s.ID, cont, escapeCell(truncCell(s.Title, 60)), len(s.Recs), len(s.Tasks), chat)
-			for _, t := range s.Tasks {
-				fmt.Fprintf(&b, "**%s · 「%s」 · %d 轮**\n\n", t.ID, escapeCell(truncCell(t.Title, 60)), len(t.Recs))
-				b.WriteString("| 轮 | 时间 | 增量 | 本轮调用 | finish | 结果 | 耗时 | tokens in/out | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
-				for _, r := range t.Recs {
-					fmt.Fprintf(&b, "| %d | %s | +%d | %s | %s | %s | %s | %s | [%s](./%s) |\n",
-						r.TaskSeq, r.TS.Format("15:04:05"), r.Msgs-r.DeltaStart,
-						escapeCell(callsCell(r.ToolCalls)), dash(r.Finish), reqMark(r),
-						ms(r.durMS), usageCell(r), fileOf[r], fileOf[r])
+			byUser[uid] = append(byUser[uid], s)
+		}
+		sort.Strings(userOrder)
+		const unresolvedUID = "(unresolved)"
+		hasUnresolved := false
+		for _, u := range userOrder {
+			if u == unresolvedUID {
+				hasUnresolved = true
+			}
+		}
+		if !hasUnresolved && (len(scheduledOrder) > 0 || len(sess.Compactions) > 0 || len(sess.Ungrouped) > 0) {
+			userOrder = append(userOrder, unresolvedUID)
+			sort.Strings(userOrder)
+		}
+
+		for _, uid := range userOrder {
+			fmt.Fprintf(&b, "## Chat User %s\n\n", escapeCell(uid))
+
+			for _, s := range byUser[uid] {
+				cont := ""
+				if s.ContinuedFrom != "" {
+					cont = fmt.Sprintf("（%s 经 compaction 续接）", s.ContinuedFrom)
+				} else if s.IsContinuation {
+					cont = "（续接自输入之外的会话）"
+				}
+				tsLabel := ""
+				if len(s.Recs) > 0 {
+					tsLabel = s.Recs[0].TS.Format("2006-01-02 15:04:05")
+				}
+				fmt.Fprintf(&b, "### %s · %d 任务 %d 轮 · %s%s\n\n",
+					s.ID, len(s.Tasks), len(s.Recs), tsLabel, cont)
+
+				for _, t := range s.Tasks {
+					tsTask := ""
+					if len(t.Recs) > 0 {
+						tsTask = t.Recs[0].TS.Format("2006-01-02 15:04:05")
+					}
+					fmt.Fprintf(&b, "**%s · %d 轮 · %s**\n\n", t.ID, len(t.Recs), tsTask)
+
+					// The task's first user instruction as a quote block —
+					// tells the reader what this burst of turns was about.
+					if len(t.Recs) > 0 && t.Recs[0].NewInstruction != "" {
+						fmt.Fprintf(&b, "> %s\n\n", escapeCell(t.Recs[0].NewInstruction))
+					}
+
+					b.WriteString("| 轮 | 时间 | Message | finish | 耗时 | 首字延迟 | Tokens In/CacheHit/Out | 图片/压缩 | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
+					for _, r := range t.Recs {
+						fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+							r.TaskSeq, r.TS.Format("15:04:05"), msgCell(r),
+							finishCell(r), durationCell(r), ttftCell(r),
+							tokensTripleCell(r), imagesCell(r.Images, r.ImagesCompressed), fileLinksCell(fileOf[r]))
+					}
+					b.WriteString("\n")
+				}
+			}
+
+			if uid != unresolvedUID {
+				continue
+			}
+			if len(sess.Compactions) > 0 {
+				fmt.Fprintf(&b, "### 压缩任务 · compaction 会话 × %d\n\n", len(sess.Compactions))
+				b.WriteString("| 时间 | 压缩对象 | 续接为 | 结果 | 耗时 | Tokens In/CacheHit/Out | 文件 |\n|---|---|---|---|---|---|---|\n")
+				for _, c := range sess.Compactions {
+					tok := "-"
+					if c.UsageOK {
+						tok = tokensTriple(c.Usage.In, c.Usage.CacheRead, c.Usage.Out)
+					}
+					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n",
+						c.TS.Format("15:04:05"), dash(c.Summarizes), dash(c.ContinuesTo),
+						outcomeMark(c.Outcome), ms(c.durMS), tok, fileLinksCell(c.DetailFile))
+				}
+				b.WriteString("\n")
+			}
+			for _, cls := range scheduledOrder {
+				list := scheduled[cls]
+				fmt.Fprintf(&b, "### 定时任务 · %s 单发会话 × %d\n\n", escapeCell(cls), len(list))
+				b.WriteString("| 时间 | 结果 | 耗时 | Tokens In/CacheHit/Out | 文件 |\n|---|---|---|---|---|\n")
+				for _, s := range list {
+					r := s.Recs[0]
+					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+						r.TS.Format("01-02 15:04:05"), reqMark(r), ms(r.durMS),
+						tokensTripleCell(r), fileLinksCell(fileOf[r]))
+				}
+				b.WriteString("\n")
+			}
+			if len(sess.Ungrouped) > 0 {
+				fmt.Fprintf(&b, "### 其他 · 非聊天体/被拒请求 × %d\n\n", len(sess.Ungrouped))
+				b.WriteString("| 时间 | 模型 | 结果 | 文件 |\n|---|---|---|---|\n")
+				for _, u := range sess.Ungrouped {
+					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
+						u.TS.Format("01-02 15:04:05"), escapeCell(displayModelName(u.Model)),
+						outcomeMark(u.Outcome), fileLinksCell(u.DetailFile))
 				}
 				b.WriteString("\n")
 			}
 		}
-		if len(sess.Compactions) > 0 {
-			b.WriteString("### Compaction 调用\n\n| 时间 | 压缩对象 | 续接为 | 文件 |\n|---|---|---|---|\n")
-			for _, c := range sess.Compactions {
-				fmt.Fprintf(&b, "| %s | %s | %s | [%s](./%s) |\n",
-					c.TS.Format("15:04:05"), dash(c.Summarizes), dash(c.ContinuesTo),
-					c.DetailFile, c.DetailFile)
-			}
-			b.WriteString("\n")
-		}
-		if len(sess.Ungrouped) > 0 {
-			fmt.Fprintf(&b, "### 未分组 · %d 条（非聊天体/被拒请求）\n\n| 时间 | 模型 | 结果 | 文件 |\n|---|---|---|---|\n", len(sess.Ungrouped))
-			for _, u := range sess.Ungrouped {
-				fmt.Fprintf(&b, "| %s | %s | %s | [%s](./%s) |\n",
-					u.TS.Format("01-02 15:04:05"), escapeCell(displayModelName(u.Model)),
-					outcomeMark(u.Outcome), u.DetailFile, u.DetailFile)
-			}
-			b.WriteString("\n")
-		}
 		b.WriteString("## 全部请求（时间序）\n\n")
 	}
 
-	b.WriteString("| 时间 | 会话/任务 | 模型 | 上游 | 结果 | 耗时 | 尝试 | tokens in/out | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| 时间 | 会话/任务 | VM/API | 耗时 | 首字延迟 | Tokens In/CacheHit/Out | 图片/压缩 | 文件 |\n|---|---|---|---|---|---|---|---|\n")
 	for _, e := range entries {
 		tok := "-"
 		if e.usageOK {
-			tok = fmtN(e.usage.In) + " / " + fmtN(e.usage.Out)
+			tok = tokensTriple(e.usage.In, e.usage.CacheRead, e.usage.Out)
 		}
 		st := "-"
 		if e.info != nil && e.info.SessionID != "" {
@@ -176,14 +304,52 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 		} else if e.info != nil && e.info.Compaction {
 			st = "compaction"
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %d | %s | [%s](./%s) |\n",
-			e.ts.Format("01-02 15:04:05.000"), st, escapeCell(e.model), escapeCell(e.endpoint),
-			outcomeMark(e.outcome), ms(e.durMS), e.attempts, tok, e.file, e.file)
+		ttft := "-"
+		if e.info != nil && e.info.ttftMS > 0 {
+			ttft = ms(e.info.ttftMS)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			e.ts.Format("01-02 15:04:05.000"), st,
+			escapeCell(vmAPICell(e.protocol, e.model, e.provider, e.upstreamModel)),
+			durationCellFields(e.durMS, e.outcome, e.truncated, e.attempts), ttft, tok,
+			imagesCell(e.images, e.imgsComp), fileLinksCell(e.file))
 	}
-	if err := os.WriteFile(filepath.Join(dir, "INDEX.md"), []byte(b.String()), 0o644); err != nil {
+	// vmr-requests-index.md lives one level above details/, alongside
+	// vmr-report.md — the per-record .md/.json files stay inside details/.
+	indexPath := filepath.Join(filepath.Dir(dir), "vmr-requests-index.md")
+	if err := os.WriteFile(indexPath, []byte(b.String()), 0o644); err != nil {
 		return len(entries), err
 	}
 	return len(entries), nil
+}
+
+// chatUserLabel strips the OpenClaw "user:" prefix off a ChatID so it
+// reads as a real user identifier in the INDEX heading. Unresolved sessions
+// ("") land in their own "Chat User (unresolved)" section via the caller.
+func chatUserLabel(chatID string) string {
+	if chatID == "" {
+		return "(unresolved)"
+	}
+	return strings.TrimPrefix(chatID, "user:")
+}
+
+// ttftCell renders the first-token latency cell for the INDEX turn table.
+// "-" when the record didn't carry ttft_ms.
+func ttftCell(r *ReqInfo) string {
+	if r.ttftMS <= 0 {
+		return "-"
+	}
+	return ms(r.ttftMS)
+}
+
+// tokensTripleCell renders the per-record 3-tuple cell, falling back to the
+// raw Usage (e.g. for entries where ReqInfo wasn't built — rejected/parse-
+// error records whose INDEX row still benefits from showing token totals).
+func tokensTripleCell(r *ReqInfo) string {
+	if !r.UsageOK {
+		return "-"
+	}
+	return tokensTriple(r.Usage.In, r.Usage.CacheRead, r.Usage.Out)
 }
 
 // callsCell compacts a turn's tool calls ("exec×2, write"); "-" when none.
@@ -217,6 +383,24 @@ func dash(s string) string {
 	return s
 }
 
+// finishCell renders the turn table's finish-reason cell. "tool_calls"
+// expands to the actual tool name(s) called this turn — folding in what the
+// removed "本轮调用" column used to show, instead of needing its own column.
+func finishCell(r *ReqInfo) string {
+	if r.Finish == "tool_calls" && len(r.ToolCalls) > 0 {
+		return escapeCell("tool_call:" + callsCell(r.ToolCalls))
+	}
+	return dash(r.Finish)
+}
+
+// fileLinksCell renders a detail record's file column as two short HTML
+// links instead of the full filename — INDEX now lives one level above
+// details/, so every link needs that prefix regardless.
+func fileLinksCell(mdName string) string {
+	base := strings.TrimSuffix(mdName, ".md")
+	return fmt.Sprintf(`<a href=details/%s.md>Ⓜ️ Markdown</a> <a href=details/%s.json>JSON</a>`, base, base)
+}
+
 // reqMark renders a request's outcome, flagging ok-but-truncated streams.
 func reqMark(r *ReqInfo) string {
 	m := outcomeMark(r.Outcome)
@@ -226,11 +410,56 @@ func reqMark(r *ReqInfo) string {
 	return m
 }
 
-func usageCell(r *ReqInfo) string {
-	if !r.UsageOK {
-		return "-"
+// msgCell renders the turn table's message-count cell as "M+N": M = messages
+// already in history before this turn, N = messages this turn added (the
+// former standalone "+Msg" column's number).
+func msgCell(r *ReqInfo) string {
+	return fmt.Sprintf("%d+%d", r.DeltaStart, r.Msgs-r.DeltaStart)
+}
+
+// durationCellFields renders the duration cell shared by the turn and flat
+// request tables: the plain latency, plus space-separated annotations for
+// whatever's notable about the request — folding in what used to be a
+// separate 结果/尝试次数 column so a real error or a retried request never
+// reads identically to a clean single-shot success.
+func durationCellFields(durMS int64, outcome string, truncated bool, attempts int) string {
+	cell := ms(durMS)
+	var marks []string
+	switch outcome {
+	case "canceled":
+		marks = append(marks, "🚫取消")
+	case "ok":
+		// no mark
+	default:
+		marks = append(marks, "❌"+outcome)
 	}
-	return fmtN(r.Usage.In) + " / " + fmtN(r.Usage.Out)
+	if truncated {
+		marks = append(marks, "⚠️截断")
+	}
+	if attempts > 1 {
+		marks = append(marks, fmt.Sprintf("🔄尝试x%d", attempts))
+	}
+	if len(marks) > 0 {
+		cell += " " + strings.Join(marks, " ")
+	}
+	return cell
+}
+
+// durationCell is the ReqInfo-typed wrapper for the turn table.
+func durationCell(r *ReqInfo) string {
+	return durationCellFields(r.durMS, r.Outcome, r.Truncated, r.attempts)
+}
+
+// vmAPICell merges the virtual model, protocol and upstream provider:model
+// into one compact cell, e.g. "openai | agent | minimax:MiniMax-M3". The
+// upstream half uses ":" (not "/") since some providers (OpenRouter) put a
+// "/" inside the model name itself.
+func vmAPICell(protocol, virtualModel, provider, upstreamModel string) string {
+	upstream := "-"
+	if provider != "" || upstreamModel != "" {
+		upstream = fmt.Sprintf("%s:%s", provider, upstreamModel)
+	}
+	return fmt.Sprintf("%s | %s | %s", protocol, virtualModel, upstream)
 }
 
 // unsafeName matches filename characters we replace; keeps letters, digits,
@@ -250,7 +479,8 @@ func displayModel(rec *audit.Record) string {
 }
 
 // lastEndpoint is the endpoint of the final attempt (the one whose outcome
-// the client saw), or "-" when the request never reached an upstream.
+// the client saw, "protocol:provider:model"), or "-" when the request never
+// reached an upstream.
 func lastEndpoint(rec *audit.Record) string {
 	if len(rec.Attempts) == 0 {
 		return "-"
@@ -258,17 +488,33 @@ func lastEndpoint(rec *audit.Record) string {
 	return rec.Attempts[len(rec.Attempts)-1].Endpoint
 }
 
-// realModel is the model segment of the final attempt's endpoint
-// ("openai/minimax/MiniMax-M3" → "MiniMax-M3").
+// realModel is the upstream model of the final attempt.
 func realModel(rec *audit.Record) string {
-	ep := lastEndpoint(rec)
-	if ep == "-" {
+	if len(rec.Attempts) == 0 {
 		return "none"
 	}
-	if i := strings.LastIndexByte(ep, '/'); i >= 0 {
-		return ep[i+1:]
+	if _, _, m := attemptUpstream(rec.Attempts[len(rec.Attempts)-1]); m != "" {
+		return m
 	}
-	return ep
+	return "none"
+}
+
+// attemptUpstream returns the attempt's protocol/provider/model, preferring
+// the structured fields (new logs) and falling back to splitting Endpoint
+// for logs written before they existed — Endpoint was "/"-joined
+// protocol/provider/model back then (":"-joined now). SplitN(…, 3) rather
+// than a plain Split: the model segment can itself contain "/" (OpenRouter
+// names like "z-ai/glm-5.2", a documented config example), so only the
+// first two separators are structural — anything after them, slashes
+// included, belongs to the model name.
+func attemptUpstream(a audit.Attempt) (protocol, provider, model string) {
+	if a.Protocol != "" || a.Provider != "" || a.Model != "" {
+		return a.Protocol, a.Provider, a.Model
+	}
+	if parts := strings.SplitN(a.Endpoint, "/", 3); len(parts) == 3 {
+		return parts[0], parts[1], parts[2]
+	}
+	return "", "", ""
 }
 
 // detailFileName builds "{20060102-150405.000}_{virtual}_{real}_{outcome}.md".
@@ -291,15 +537,11 @@ func detailFileName(rec *audit.Record, used map[string]int) string {
 	return base + ".md"
 }
 
-// errorClass buckets the last attempt error by its prefix, mirroring
-// addAttempt's classing ("network: dial tcp…" → "network").
+// errorClass returns the last attempt's structured error class.
 func errorClass(rec *audit.Record) string {
 	for i := len(rec.Attempts) - 1; i >= 0; i-- {
-		if e := rec.Attempts[i].Error; e != "" {
-			if j := strings.IndexByte(e, ':'); j > 0 {
-				return e[:j]
-			}
-			return e
+		if cls := attemptErrorClass(rec.Attempts[i]); cls != "" {
+			return cls
 		}
 	}
 	return ""
@@ -334,17 +576,14 @@ func renderDetail(rec *audit.Record, info *ReqInfo) string {
 	tok := "-"
 	if rec.Client.Response != nil {
 		if u, ok := ExtractUsage(rec.Client.Response.Body); ok {
-			tok = fmt.Sprintf("%s / %s", fmtN(u.In), fmtN(u.Out))
-			if u.CacheRead > 0 {
-				tok += fmt.Sprintf("（缓存命中 %s）", fmtN(u.CacheRead))
-			}
+			tok = tokensTriple(u.In, u.CacheRead, u.Out)
 		}
 	}
 	ttft := "-"
 	if rec.TTFTMS > 0 {
 		ttft = ms(rec.TTFTMS)
 	}
-	w("| 虚拟模型 | 上游端点 | 结果 | 耗时 | 首字延迟 | 尝试 | stream | tokens in/out | 客户端 |\n|---|---|---|---|---|---|---|---|---|\n")
+	w("| 虚拟模型 | 上游端点 | 结果 | 耗时 | 首字延迟 | 尝试次数 | stream | Tokens In/CacheHit/Out | 客户端 |\n|---|---|---|---|---|---|---|---|---|\n")
 	w("| %s | %s | %s | %s | %s | %d | %s | %s | %s |\n\n",
 		escapeCell(displayModel(rec)), escapeCell(lastEndpoint(rec)), outcomeMark(rec.Outcome),
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
@@ -382,20 +621,21 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
 		w("\n")
 		var meta []string
 		if len(info.ToolCalls) > 0 {
-			meta = append(meta, "本轮调用: "+callsCell(info.ToolCalls))
+			meta = append(meta, "本轮调用: <strong>"+callsCell(info.ToolCalls)+"</strong>")
 		}
 		if info.TraceID != "" {
-			meta = append(meta, "trace "+capStr(info.TraceID, 16))
+			meta = append(meta, "trace <strong>"+capStr(info.TraceID, 16)+"</strong>")
 		}
 		if info.ChatID != "" {
-			meta = append(meta, "chat "+info.ChatID)
+			meta = append(meta, "chat <strong>"+info.ChatID+"</strong>")
 		}
 		if info.ToolsSig != "" {
-			meta = append(meta, info.ToolsSig)
+			meta = append(meta, "<strong>"+info.ToolsSig+"</strong>")
 		}
-		if len(info.Tags) > 0 {
-			meta = append(meta, "tags: "+strings.Join(info.Tags, ","))
-		}
+		// Tags are intentionally NOT shown in the header: per-record tags
+		// like "compacted_session" fire on every turn after compaction
+		// (the OpenClaw summary message re-injects it), so they look like
+		// noise.
 		if len(meta) > 0 {
 			w("> %s\n", strings.Join(meta, " · "))
 		}
@@ -405,66 +645,19 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
 	if info.Truncated {
 		w("> ⚠️ **客户端收到 2xx 但流中途断开**——内容不完整（attempts 内有 truncated 错误）\n")
 	}
+	if info.NoReply {
+		w("> ⏭️ **LLM 主动跳过回复**（response 为空或 NO_REPLY）——本轮指令未实际处理，下一条可能是重试。\n")
+	}
 	b.WriteString("\n")
 }
 
-// deltaFoldThreshold: delta messages are the turn's real payload and render
-// expanded up to this many characters; beyond it they fold like history
-// (a multi-MB tool result inline would drown the document).
-const deltaFoldThreshold = 4000
-
-// renderDelta emits the「本轮增量」section: the messages this request added
-// relative to its parent, expanded — the part worth reading — plus what got
-// replaced or changed along the way.
+// renderDelta is now a no-op stub kept for backward compatibility with
+// other callers. The increment summary is rendered directly at the end of
+// the Messages block by the per-message 🆕 prefix and a one-line footer.
 func renderDelta(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
-	if info == nil || info.SessionID == "" || info.Parent == nil {
-		return
-	}
-	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
-	msgs := chatMessages(rec.Client.Request.Body)
-	n := len(msgs) - info.DeltaStart
-	w("### 本轮增量（相对上一轮,+%d 条,#1–#%d 为历史上下文）\n\n", n, info.DeltaStart)
-
-	if info.NewInstruction != "" {
-		w("🎯 **最新指令**：%s\n\n", escapeCell(info.NewInstruction))
-	} else {
-		w("🔁 工具循环延续,本轮无新用户指令——新信息是下方的工具结果。\n\n")
-	}
-	if info.SysChanged {
-		w("⚠️ system prompt 相对上一轮有变化\n\n")
-	}
-	if info.ReplacedTail > 0 {
-		p := info.Parent
-		w("🔴 上一轮尾部 %d 条消息被替换/改写：\n\n", info.ReplacedTail)
-		// The parent kept previews of its last few messages; show the ones
-		// past the common prefix when the window reaches back far enough.
-		tailStart := len(p.keys) + p.leadSys - len(p.tailPrev)     // absolute idx of first kept preview
-		replacedFrom := info.DeltaStart - info.leadSys + p.leadSys // parent-absolute divergence point
-		for i, prev := range p.tailPrev {
-			if tailStart+i >= replacedFrom {
-				w("- ~~%s~~\n", escapeCell(truncCell(prev, 120)))
-			}
-		}
-		if info.ReplacedTail > len(p.tailPrev) {
-			w("- （更早的 %d 条改写超出记录窗口,仅计数）\n", info.ReplacedTail-len(p.tailPrev))
-		}
-		w("\n")
-	}
-	for i := info.DeltaStart; i < len(msgs); i++ {
-		m := msgs[i]
-		head := fmt.Sprintf("🆕 #%d %s", i+1, m.Role)
-		switch {
-		case m.Text == "":
-			w("**%s** · (空)\n\n", head)
-		case len([]rune(m.Text)) <= deltaFoldThreshold:
-			w("**%s**\n\n%s\n", head, codeFence(m.Text))
-		default:
-			b.WriteString(details(fmt.Sprintf("<b>%s</b> · %s 字符 · %s", head,
-				fmtCount(len([]rune(m.Text))), escapeHTML(preview(m.Text))), codeFence(m.Text)))
-			b.WriteString("\n")
-		}
-	}
-	w("\n")
+	_ = b
+	_ = rec
+	_ = info
 }
 
 // renderClientRequest emits section ①: what the caller sent to vmr.
@@ -482,9 +675,6 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 		w(" · %d tools", len(tools))
 	}
 	w("\n\n")
-	if req.BodyTruncated {
-		w("⚠️ body 在记录时被截断（超出 audit 上限），以下内容不完整\n\n")
-	}
 	b.WriteString(details(fmt.Sprintf("Headers (%d)", len(req.Headers)), headerTable(req.Headers)))
 
 	obj, isObj := req.Body.(map[string]any)
@@ -518,15 +708,26 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 	renderDelta(b, rec, info)
 	if len(msgs) > 0 {
 		w("\n### Messages (%d)\n\n", len(msgs))
-		if line := roleStatLine(roleChars(req.Body), true); line != "" {
+		if line := roleStatLine(roleChars(req.Body), true, true); line != "" {
 			w("角色字符统计：%s\n\n", line)
 		}
 		if info != nil && info.SessionID != "" && info.Parent != nil && info.DeltaStart > 0 {
-			w("#1–#%d 为历史上下文（↺）,#%d 起为本轮新增（🆕,全文见上方增量区）\n\n", info.DeltaStart, info.DeltaStart+1)
+			w("#1–#%d 为历史上下文（↺）,#%d 起为本轮新增（🆕）\n\n", info.DeltaStart, info.DeltaStart+1)
 		}
 		for i, m := range msgs {
-			b.WriteString(renderMessageSection(i+1, m))
+			prefix := ""
+			if info != nil && info.SessionID != "" && info.Parent != nil && i >= info.DeltaStart {
+				prefix = "🆕 "
+			}
+			b.WriteString(renderMessageSection(i+1, m, prefix))
 			b.WriteString("\n")
+		}
+		// Increment summary at the end of the message list.
+		if info != nil && info.SessionID != "" && info.Parent != nil {
+			n := len(msgs) - info.DeltaStart
+			if n > 0 {
+				w("\n🆕 **本轮增量（相对上一轮,+%d 条,#1–#%d 为历史上下文）**\n", n, info.DeltaStart)
+			}
 		}
 	}
 }
@@ -568,9 +769,6 @@ func renderAttempts(b *strings.Builder, rec *audit.Record) {
 		case a.Response == nil:
 			w("（无响应——请求未完成）\n\n")
 		default:
-			if a.Response.BodyTruncated {
-				w("⚠️ 响应 body 在记录时被截断\n\n")
-			}
 			b.WriteString(details(fmt.Sprintf("响应 Headers (%d)", len(a.Response.Headers)), headerTable(a.Response.Headers)))
 			if a.Response.Body == nil && a.Error == "" && a.Response.Status < 400 {
 				w("body：**透传** —— 与 ③ 客户端收到的字节一致，仅差以下归一化步骤：\n\n")
@@ -585,8 +783,35 @@ func renderAttempts(b *strings.Builder, rec *audit.Record) {
 				w("归一化步骤：\n\n")
 				writeNorms(b, a.Norm)
 			}
+			renderRawPreStrip(b, &a)
 		}
 	}
+}
+
+// renderRawPreStrip shows the upstream bytes exactly as received, from
+// before a think_strip/thinking_process_strip rewrite ran — the reasoning
+// content (and the raw SSE events that carried it) that never reaches the
+// client. Captured only going forward (internal/router/response.go); older
+// logs have the norm step listed with no raw bytes to show.
+func renderRawPreStrip(b *strings.Builder, a *audit.Attempt) {
+	stripped := false
+	for _, n := range a.Norm {
+		if n == "think_strip" || n == "thinking_process_strip" {
+			stripped = true
+		}
+	}
+	if !stripped {
+		return
+	}
+	if a.RawPreStrip == nil {
+		b.WriteString("⚠️ 该记录采集时未保留剥离前原始内容（think_strip 归一化步骤名有记录，原始 SSE 未保留）\n\n")
+		return
+	}
+	if s, ok := a.RawPreStrip.(string); ok {
+		b.WriteString(details(fmt.Sprintf("剥离前原始内容（%s，含完整 &lt;think&gt; 块与对应原始 SSE）", fmtBytes(int64(len(s)))), codeFence(s)))
+		return
+	}
+	b.WriteString(details("剥离前原始内容（含完整 &lt;think&gt; 块与对应原始 SSE）", codeFence(jsonIndent(a.RawPreStrip))))
 }
 
 func writeNorms(b *strings.Builder, norms []string) {
@@ -616,9 +841,6 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record) {
 	}
 	w("%s HTTP %d · %s · body %s\n\n", mark, resp.Status,
 		strings.Join(resp.Headers.Values("Content-Type"), ", "), fmtBytes(bodyBytes(resp.Body)))
-	if resp.BodyTruncated {
-		w("⚠️ body 在记录时被截断，以下内容不完整\n\n")
-	}
 
 	// Headers compared against the upstream response they were derived from
 	// (the successful attempt) — the "received vs sent" view on headers.
@@ -679,7 +901,7 @@ func renderStreamSummary(b *strings.Builder, s *streamSummary) {
 		if pretty := prettyJSONString(args); pretty != "" {
 			args = pretty
 		}
-		if len(args) <= foldThreshold {
+		if len(args) <= toolArgsInlineThreshold {
 			w("🔧 **tool_call** `%s` [id=%s]\n\n%s\n", tc.Name, tc.ID, codeFence(args))
 		} else {
 			b.WriteString(details(fmt.Sprintf("🔧 tool_call <code>%s</code> [id=%s] · args %s 字符",

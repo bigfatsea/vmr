@@ -46,6 +46,21 @@ const (
 	ErrEndpoint                    // endpoint persistently unusable (quota/402, unknown model/404): long cooldown, switch
 	ErrTransient                   // 5xx/408/timeouts/network: short cooldown, switch
 	ErrContent                     // content policy/moderation flag: request-specific, switch WITHOUT health penalty
+
+	// The four below never reach Health.ReportFailure/ReportNeutral — they
+	// occur before a response classification is possible (build/network) or
+	// after the health outcome for this attempt was already reported
+	// (canceled, truncated). They exist purely so audit.Attempt.ErrorClass
+	// has a single typed category for every Attempt.Error shape router.go
+	// produces, instead of the report package inferring one by string-prefix
+	// parsing. Router health/cooldown logic keeps classifying these as
+	// ErrTransient (build/network) or skipping ReportFailure entirely
+	// (canceled/truncated) exactly as before — adding these values changes
+	// no failover behavior.
+	ErrBuild     // adapter failed to build the outbound request
+	ErrNetwork   // dial/write/read failure before any response arrived
+	ErrCanceled  // client disconnected while this attempt was in flight
+	ErrTruncated // response was already committed to the client when the upstream connection died mid-stream
 )
 
 func (c ErrorClass) String() string {
@@ -60,6 +75,14 @@ func (c ErrorClass) String() string {
 		return "endpoint"
 	case ErrContent:
 		return "content"
+	case ErrBuild:
+		return "build"
+	case ErrNetwork:
+		return "network"
+	case ErrCanceled:
+		return "canceled"
+	case ErrTruncated:
+		return "truncated"
 	default:
 		return "transient"
 	}

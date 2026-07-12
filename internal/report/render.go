@@ -15,10 +15,6 @@ import (
 	"strings"
 )
 
-// foldThreshold: message content at or below this many characters (and few
-// lines) is shown inline; anything longer goes inside <details>.
-const foldThreshold = 600
-
 // previewLen bounds the one-line preview shown in a <details> summary.
 const previewLen = 80
 
@@ -297,7 +293,7 @@ var roleOrder = []string{"system", "user", "assistant", "tool"}
 // roleStatLine renders per-role character stats as one line, e.g.
 // "system 62.3k (18.2%) · user 45.1k (13.2%)"; withChars=false drops the
 // absolute counts and keeps only the shares.
-func roleStatLine(chars map[string]int64, withChars bool) string {
+func roleStatLine(chars map[string]int64, withChars, bold bool) string {
 	var total int64
 	for _, c := range chars {
 		total += c
@@ -325,11 +321,14 @@ func roleStatLine(chars map[string]int64, withChars bool) string {
 	parts := make([]string, 0, len(order))
 	for _, r := range order {
 		share := fmt.Sprintf("%.1f%%", float64(chars[r])/float64(total)*100)
+		val := share
 		if withChars {
-			parts = append(parts, fmt.Sprintf("%s %s (%s)", r, fmtCount(int(chars[r])), share))
-		} else {
-			parts = append(parts, fmt.Sprintf("%s %s", r, share))
+			val = fmt.Sprintf("%s (%s)", fmtCount(int(chars[r])), share)
 		}
+		if bold {
+			val = "<strong>" + val + "</strong>"
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", r, val))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -356,18 +355,20 @@ func toolCallList(v any) []toolCall {
 	return out
 }
 
-// renderMessageSection renders one message: inline when short, folded with a
-// role + size + preview summary when long.
-func renderMessageSection(idx int, m chatMessage) string {
+// renderMessageSection renders one message. All messages are folded by
+// default (no length-based inline branch) so the document has uniform
+// rhythm — a reader can scan a 300-message conversation without parsing
+// "is this expanded or folded?". prefix is prepended to the summary line
+// (🆕 for messages added by this turn vs the parent) and is "" for
+// historical context.
+func renderMessageSection(idx int, m chatMessage, prefix string) string {
 	head := fmt.Sprintf("#%d %s", idx, m.Role)
 	if m.Text == "" {
-		return fmt.Sprintf("**%s** · (空)\n", head)
+		return fmt.Sprintf("%s**%s** · (空)\n", prefix, head)
 	}
 	chars := len([]rune(m.Text))
-	if chars <= foldThreshold && strings.Count(m.Text, "\n") <= 8 {
-		return fmt.Sprintf("**%s**\n\n%s", head, codeFence(m.Text))
-	}
-	summary := fmt.Sprintf("<b>%s</b> · %s 字符 · %s", head, fmtCount(chars), escapeHTML(preview(m.Text)))
+	summary := fmt.Sprintf("<b>%s%s</b> · %s 字符 · %s",
+		prefix, head, fmtCount(chars), escapeHTML(preview(m.Text)))
 	return details(summary, codeFence(m.Text))
 }
 

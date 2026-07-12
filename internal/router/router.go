@@ -310,7 +310,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	attemptStart := time.Now()
 	var att *audit.Attempt
 	if rec != nil {
-		rec.Attempts = append(rec.Attempts, audit.Attempt{Endpoint: ep.Name()})
+		rec.Attempts = append(rec.Attempts, audit.Attempt{
+			Endpoint: strings.Join([]string{ep.AdapterType, ep.Provider, ep.Model}, ":"),
+			Protocol: ep.AdapterType,
+			Provider: ep.Provider,
+			Model:    ep.Model,
+		})
 		att = &rec.Attempts[len(rec.Attempts)-1]
 		defer func() { att.DurMS = time.Since(attemptStart).Milliseconds() }()
 	}
@@ -327,6 +332,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		rt.logf("model=%s ep=%s attempt=%d build_error=%v", creq.Model, ep.Name(), attempt, err)
 		if att != nil {
 			att.Error = "build: " + err.Error()
+			att.ErrorClass = core.ErrBuild.String()
 		}
 		return false, nil
 	}
@@ -335,7 +341,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		var outBody []byte
 		if req.GetBody != nil {
 			if rc, err := req.GetBody(); err == nil {
-				outBody, _ = io.ReadAll(io.LimitReader(rc, audit.MaxBodyBytes()+1))
+				outBody, _ = io.ReadAll(rc)
 				rc.Close()
 			}
 		}
@@ -352,6 +358,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			rt.Health.ReportNeutral(key)
 			if att != nil {
 				att.Error = "canceled by client"
+				att.ErrorClass = core.ErrCanceled.String()
 			}
 			return true, nil
 		}
@@ -359,6 +366,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		rt.logf("model=%s ep=%s attempt=%d net_error=%v cooldown=%s", creq.Model, ep.Name(), attempt, err, cd)
 		if att != nil {
 			att.Error = "network: " + err.Error()
+			att.ErrorClass = core.ErrNetwork.String()
 		}
 		return false, nil
 	}
@@ -380,6 +388,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			m.Status = resp.StatusCode
 			att.Response = &m
 			att.Error = class.String()
+			att.ErrorClass = class.String()
 		}
 		if class == core.ErrContent {
 			// Content-policy flag: specific to this request, not this endpoint.
@@ -447,10 +456,14 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		status = "truncated" // upstream died mid-stream; the response is already committed
 		if att != nil {
 			att.Error = "truncated: " + copyErr.Error()
+			att.ErrorClass = core.ErrTruncated.String()
 		}
 	}
 	if att != nil {
 		att.Norm = rbody.Applied()
+		if raw := rbody.RawPreStrip(); len(raw) > 0 {
+			att.RawPreStrip = audit.EncodeBody(raw)
+		}
 	}
 	rt.logf("model=%s ep=%s attempt=%d status=%s stream=%v dur=%s",
 		creq.Model, ep.Name(), attempt, status, creq.Stream, time.Since(start).Round(time.Millisecond))

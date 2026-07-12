@@ -159,6 +159,7 @@ type respStream struct {
 	tailNL         bool   // last emitted bytes ended with the SSE separator
 	thinkTriggered bool   // buffering was caused by an inline <think> block
 	applied        []string
+	rawPreStrip    []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
 }
 
 func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol string, opaque bool) *respStream {
@@ -175,6 +176,15 @@ func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol strin
 // Applied reports which transforms ran, for the audit trail. Valid after
 // the stream has been fully copied.
 func (s *respStream) Applied() []string { return s.applied }
+
+// RawPreStrip returns the upstream bytes exactly as received, from the point
+// just before a think_strip/thinking_process_strip rewrite ran — nil when
+// neither fired. It is the buffered segment only (whatever was accumulated
+// at that moment), not a second copy of the whole response: the buffered
+// mode already holds these bytes in memory for the regex pass, so this just
+// keeps that reference alive instead of discarding it. Valid after the
+// stream has been fully copied.
+func (s *respStream) RawPreStrip() []byte { return s.rawPreStrip }
 
 func (s *respStream) Read(p []byte) (int, error) {
 	if len(s.out) > 0 {
@@ -239,6 +249,7 @@ func (s *respStream) ingest(b []byte) {
 					tail := append([]byte(nil), s.buf[i+len(eventSep):]...)
 					s.buf = nil
 					if thinkPattern.Match(block) {
+						s.rawPreStrip = block
 						block = thinkPattern.ReplaceAll(block, nil)
 						s.noteApplied("think_strip")
 					}
@@ -371,15 +382,20 @@ func (s *respStream) finish() {
 func (s *respStream) finalizeBuffered() {
 	b := s.buf
 	s.buf = nil
+	raw := b // pre-strip snapshot; only kept (below) if a strip actually fires
 	if modelFieldPattern.Match(b) {
 		b = modelFieldPattern.ReplaceAll(b, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
 	}
 	if thinkPattern.Match(b) {
+		s.rawPreStrip = raw
 		b = thinkPattern.ReplaceAll(b, nil)
 		s.noteApplied("think_strip")
 	}
 	if stripped := stripThinkingProcess(b); !bytes.Equal(stripped, b) {
+		if s.rawPreStrip == nil {
+			s.rawPreStrip = raw
+		}
 		b = stripped
 		s.noteApplied("thinking_process_strip")
 	}

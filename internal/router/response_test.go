@@ -500,6 +500,9 @@ func TestRespStream_AppliedTracking(t *testing.T) {
 			t.Errorf("applied missing %q: %v", k, rs.Applied())
 		}
 	}
+	if raw := string(rs.RawPreStrip()); !strings.Contains(raw, "<think>reason</think>") {
+		t.Errorf("RawPreStrip lost the think block: %q", raw)
+	}
 }
 
 func TestRespStream_ReasoningContentStreams(t *testing.T) {
@@ -618,6 +621,9 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 	}
 	if !got["think_strip"] || !got["resumed_stream"] {
 		t.Errorf("applied = %v, want think_strip + resumed_stream", rs.Applied())
+	}
+	if raw := string(rs.RawPreStrip()); !strings.Contains(raw, "<think>step 1.") || !strings.Contains(raw, "step 2.</think>") {
+		t.Errorf("RawPreStrip lost the think block: %q", raw)
 	}
 }
 

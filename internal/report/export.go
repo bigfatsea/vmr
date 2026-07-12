@@ -35,16 +35,47 @@ type SessionRow struct {
 	ContinuedFrom string `json:"continued_from,omitempty"`
 	// Class is the session's workload class (see workloadClass): scheduled
 	// scaffolding ("heartbeat"/"dream_diary") vs. "interactive" work.
-	Class          string `json:"class,omitempty"`
-	Requests       int    `json:"requests"`
-	Tasks          int    `json:"tasks"`
-	From           string `json:"from"`
-	To             string `json:"to"`
-	TokensIn       int64  `json:"tokens_in"`
-	TokensInCached int64  `json:"tokens_in_cached,omitempty"`
-	TokensOut      int64  `json:"tokens_out"`
-	DurMSSum       int64  `json:"dur_ms_sum"`
-	Truncated      int    `json:"truncated,omitempty"`
+	Class    string `json:"class,omitempty"`
+	Link     string `json:"link,omitempty"` // relative path to the first request's detail file
+	Requests int    `json:"requests"`
+	Tasks    int    `json:"tasks"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+
+	TokensIn           int64 `json:"tokens_in"`
+	TokensInCached     int64 `json:"tokens_in_cached,omitempty"`
+	TokensInCacheWrite int64 `json:"tokens_in_cache_write,omitempty"`
+	TokensOut          int64 `json:"tokens_out"`
+	TokensKnown        int   `json:"tokens_known,omitempty"`
+
+	BytesIn  int64 `json:"bytes_in,omitempty"`
+	BytesOut int64 `json:"bytes_out,omitempty"`
+
+	Messages      int64            `json:"messages,omitempty"`
+	MessagesKnown int              `json:"messages_known,omitempty"`
+	RoleChars     map[string]int64 `json:"role_chars,omitempty"`
+
+	TTFTMSSum int64 `json:"ttft_ms_sum,omitempty"`
+	TTFTKnown int   `json:"ttft_known,omitempty"`
+	TTFTMSP50 int64 `json:"ttft_ms_p50,omitempty"`
+	TTFTMSP95 int64 `json:"ttft_ms_p95,omitempty"`
+
+	DurMSSum int64 `json:"dur_ms_sum"`
+	DurMSP50 int64 `json:"dur_ms_p50,omitempty"`
+	DurMSP95 int64 `json:"dur_ms_p95,omitempty"`
+	DurMSMax int64 `json:"dur_ms_max,omitempty"`
+
+	Attempts        int     `json:"attempts,omitempty"`
+	Fallbacks       int     `json:"fallbacks,omitempty"`
+	OK              int     `json:"ok,omitempty"`
+	Errors          int     `json:"errors,omitempty"`
+	Canceled        int     `json:"canceled,omitempty"`
+	RequestsWithDur int     `json:"requests_with_dur,omitempty"`
+	TokOutPerSec    float64 `json:"tok_out_per_sec,omitempty"`
+	Truncated       int     `json:"truncated,omitempty"`
+
+	Images           int `json:"images,omitempty"`            // inline request images detected
+	ImagesCompressed int `json:"images_compressed,omitempty"` // subset that triggered downscaling
 }
 
 // WorkloadRow splits traffic by workload class, answering "how much of the
@@ -52,13 +83,44 @@ type SessionRow struct {
 // resend a full system prompt every fire, which is invisible in per-model
 // totals but obvious here.
 type WorkloadRow struct {
-	Class          string `json:"class"` // interactive | heartbeat | dream_diary | compaction
-	Requests       int    `json:"requests"`
-	TokensIn       int64  `json:"tokens_in"`
-	TokensInCached int64  `json:"tokens_in_cached"`
-	TokensOut      int64  `json:"tokens_out"`
-	DurMSSum       int64  `json:"dur_ms_sum"`
-	ToolCalls      int    `json:"tool_calls"`
+	Class    string `json:"class"` // interactive | heartbeat | dream_diary | compaction
+	Requests int    `json:"requests"`
+
+	TokensIn           int64 `json:"tokens_in"`
+	TokensInCached     int64 `json:"tokens_in_cached"`
+	TokensInCacheWrite int64 `json:"tokens_in_cache_write,omitempty"`
+	TokensOut          int64 `json:"tokens_out"`
+	TokensKnown        int   `json:"tokens_known,omitempty"`
+
+	BytesIn  int64 `json:"bytes_in,omitempty"`
+	BytesOut int64 `json:"bytes_out,omitempty"`
+
+	Messages      int64            `json:"messages,omitempty"`
+	MessagesKnown int              `json:"messages_known,omitempty"`
+	RoleChars     map[string]int64 `json:"role_chars,omitempty"`
+
+	TTFTMSSum int64 `json:"ttft_ms_sum,omitempty"`
+	TTFTKnown int   `json:"ttft_known,omitempty"`
+	TTFTMSP50 int64 `json:"ttft_ms_p50,omitempty"`
+	TTFTMSP95 int64 `json:"ttft_ms_p95,omitempty"`
+
+	DurMSSum        int64   `json:"dur_ms_sum"`
+	DurMSP50        int64   `json:"dur_ms_p50,omitempty"`
+	DurMSP95        int64   `json:"dur_ms_p95,omitempty"`
+	DurMSMax        int64   `json:"dur_ms_max,omitempty"`
+	Attempts        int     `json:"attempts,omitempty"`
+	RequestsWithDur int     `json:"requests_with_dur,omitempty"`
+	TokOutPerSec    float64 `json:"tok_out_per_sec,omitempty"`
+
+	Images           int `json:"images,omitempty"`            // inline request images detected
+	ImagesCompressed int `json:"images_compressed,omitempty"` // subset that triggered downscaling
+
+	ToolCalls             int `json:"tool_calls"`
+	RequestsWithToolCalls int `json:"requests_with_tool_calls,omitempty"`
+
+	// Working state (not serialized; cleared in Workloads after percentiles).
+	dursDur  []int64
+	dursTTFT []int64
 }
 
 // workloadClass buckets one request by its tags. Compaction wins over
@@ -91,9 +153,52 @@ func (a *SessionAnalysis) Workloads() []WorkloadRow {
 		row.Requests++
 		row.TokensIn += r.Usage.In
 		row.TokensInCached += r.Usage.CacheRead
+		row.TokensInCacheWrite += r.Usage.CacheWrite
 		row.TokensOut += r.Usage.Out
+		row.TokensKnown++
+		row.BytesIn += r.bytesIn
+		row.BytesOut += r.bytesOut
+		if n := r.Msgs; n > 0 {
+			row.Messages += int64(n)
+			row.MessagesKnown++
+		}
+		for role, c := range r.RoleChars {
+			if row.RoleChars == nil {
+				row.RoleChars = map[string]int64{}
+			}
+			row.RoleChars[role] += c
+		}
+		if r.ttftMS > 0 {
+			row.TTFTMSSum += r.ttftMS
+			row.TTFTKnown++
+			row.dursTTFT = append(row.dursTTFT, r.ttftMS)
+		}
 		row.DurMSSum += r.durMS
+		if r.durMS > row.DurMSMax {
+			row.DurMSMax = r.durMS
+		}
+		if r.durMS > 0 {
+			row.RequestsWithDur++
+			row.dursDur = append(row.dursDur, r.durMS)
+		}
+		row.Attempts += r.attempts
 		row.ToolCalls += len(r.ToolCalls)
+		if len(r.ToolCalls) > 0 {
+			row.RequestsWithToolCalls++
+		}
+		row.Images += r.Images
+		row.ImagesCompressed += r.ImagesCompressed
+	}
+	for _, row := range byClass {
+		row.DurMSP50, row.DurMSP95 = percentiles(row.dursDur)
+		row.TTFTMSP50, row.TTFTMSP95 = percentiles(row.dursTTFT)
+		if row.DurMSSum > 0 {
+			row.TokOutPerSec = round2(float64(row.TokensOut) / (float64(row.DurMSSum) / 1000))
+		}
+		if len(row.RoleChars) == 0 {
+			row.RoleChars = nil
+		}
+		row.dursDur, row.dursTTFT = nil, nil
 	}
 	out := make([]WorkloadRow, 0, len(byClass))
 	for _, row := range byClass {
@@ -153,15 +258,67 @@ func (a *SessionAnalysis) SessionRows() []SessionRow {
 			row.From = s.Recs[0].TS.Format(time.RFC3339)
 			row.To = s.Recs[len(s.Recs)-1].TS.Format(time.RFC3339)
 			row.Class = workloadClass(s.Recs[0])
+			if s.Recs[0].DetailFile != "" {
+				row.Link = "details/" + s.Recs[0].DetailFile
+			}
 		}
+		var dursDur, dursTTFT []int64
 		for _, r := range s.Recs {
+			switch r.Outcome {
+			case "ok":
+				row.OK++
+			case "canceled":
+				row.Canceled++
+			default:
+				row.Errors++
+			}
 			row.TokensIn += r.Usage.In
 			row.TokensInCached += r.Usage.CacheRead
+			row.TokensInCacheWrite += r.Usage.CacheWrite
 			row.TokensOut += r.Usage.Out
+			if r.UsageOK {
+				row.TokensKnown++
+			}
+			row.BytesIn += r.bytesIn
+			row.BytesOut += r.bytesOut
+			row.Messages += int64(r.Msgs)
+			row.MessagesKnown++
+			for role, c := range r.RoleChars {
+				if row.RoleChars == nil {
+					row.RoleChars = map[string]int64{}
+				}
+				row.RoleChars[role] += c
+			}
+			if r.ttftMS > 0 {
+				row.TTFTMSSum += r.ttftMS
+				row.TTFTKnown++
+				dursTTFT = append(dursTTFT, r.ttftMS)
+			}
 			row.DurMSSum += r.durMS
+			if r.durMS > row.DurMSMax {
+				row.DurMSMax = r.durMS
+			}
+			if r.durMS > 0 {
+				row.RequestsWithDur++
+				dursDur = append(dursDur, r.durMS)
+			}
+			row.Attempts += r.attempts
 			if r.Truncated {
 				row.Truncated++
 			}
+			if r.Fallbacks > 0 {
+				row.Fallbacks++
+			}
+			row.Images += r.Images
+			row.ImagesCompressed += r.ImagesCompressed
+		}
+		row.DurMSP50, row.DurMSP95 = percentiles(dursDur)
+		row.TTFTMSP50, row.TTFTMSP95 = percentiles(dursTTFT)
+		if row.DurMSSum > 0 {
+			row.TokOutPerSec = round2(float64(row.TokensOut) / (float64(row.DurMSSum) / 1000))
+		}
+		if len(row.RoleChars) == 0 {
+			row.RoleChars = nil
 		}
 		out = append(out, row)
 	}

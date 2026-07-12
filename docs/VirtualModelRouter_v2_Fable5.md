@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-12 03:10, by Fable 5 -->
+<!-- Ver 2026-07-12 05:00, by Fable 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -148,6 +148,8 @@ ErrEndpoint   端点持续不可用（额度耗尽/402、模型不存在/404 或
 ErrTransient  5xx/408/529/超时/网络 → 短冷却（2s 指数退避；带 Retry-After 则从其值），切换
 ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷却）
 ```
+
+`core.ErrorClass` 还有四个值只在审计侧使用（`ErrBuild`/`ErrNetwork`/`ErrCanceled`/`ErrTruncated`，字符串分别是 `build`/`network`/`canceled`/`truncated`）：它们对应 HTTP 响应到达之前就失败的路径（构建上游请求出错、拨号失败、客户端中途取消、成功后流断），从不经过 `ClassifyError`，也从不传给 `Health.ReportFailure`/`ReportNeutral`——健康/failover 逻辑完全不知道它们存在，纯粹是给 `internal/audit`（`Attempt.ErrorClass`，§9.2 约定 4）提供一套统一取值，不必另造一套字符串。
 
 `ErrContent` 是"按请求"而非"按端点"的错误：各厂对内容的敏感度不同，换端点常能成功，所以必须继续 failover；但被拦的端点本身完全健康，绝不能因此进冷却（否则一条敏感请求就会把健康端点打下线）。若该端点恰处半开探针中，以 `health.ReportNeutral` 只释放探针、不加深退避。全部候选都被拦时，客户端原样收到最后一次内容错误。
 
@@ -346,17 +348,25 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
     "request":  { "method": "POST", "path": "/v1/messages", "headers": {...}, "body": {...} },
     "response": { "status": 200, "headers": {...}, "body": {...} }   // 未写出时缺省
   },
+  "images": [                             // 请求内联图片（仅请求侧，vmr 不生成图片）；无图片时省略
+    { "message_index": 3, "format": "jpeg", "bytes": 812000, "width": 3024, "height": 4032,
+      "downscaled": true, "downscaled_width": 1024, "downscaled_height": 1365, "downscaled_bytes": 96000,
+      "cache_hit": false }                // 元数据字段：仅头部解析（DecodeConfig），不论该虚拟模型是否开启降采样都会采集；remote:true 的远程 URL 图片其余字段皆为零值
+  ],
   "attempts": [                           // 第二层：vmr ↔ 上游，每次 failover 尝试一条，按序
     {
-      "endpoint": "anthropic/minimax_badkey/MiniMax-M3",   // protocol/provider/实际模型
+      "endpoint": "anthropic:minimax_badkey:MiniMax-M3",   // 展示用标签，protocol:provider:实际模型（":" 分隔，见下方三段式说明）
+      "protocol": "anthropic", "provider": "minimax_badkey", "model": "MiniMax-M3",  // 同样三段，但结构化——读侧不必再解析 endpoint 字符串（历史日志没有这三个字段时，internal/report 的 attemptUpstream() 回退到按 "/" 切分旧版 endpoint，见 §7 的 Endpoint 讨论）
       "url": "https://api.minimaxi.com/anthropic/v1/messages",
       "dur_ms": 543,
       "request":  { "headers": {...}, "body": {...} },   // 出站请求（model 已改写）
       "response": { "status": 401, "headers": {...}, "body": {...} },
-      "error": "auth"                     // 失败原因：错误类别 | "network: …" | "build: …" | "canceled by client"
+      "error": "auth",                    // 失败原因：错误类别 | "network: …" | "build: …" | "canceled by client" | "truncated: …"
+      "error_class": "auth"               // 与 error 同步设置的类型化枚举值，见下方约定 5
     },
     {
-      "endpoint": "anthropic/deepseek/deepseek-v4-flash",
+      "endpoint": "anthropic:deepseek:deepseek-v4-flash",
+      "protocol": "anthropic", "provider": "deepseek", "model": "deepseek-v4-flash",
       "url": "https://api.deepseek.com/anthropic/v1/messages",
       "dur_ms": 320,
       "request":  { "headers": {...}, "body": {...} },
@@ -367,16 +377,17 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 }
 ```
 
-四条约定（统计脚本必须知道）：
+五条约定（统计脚本必须知道）：
 
 1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`**（§5.5）：它是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
-2. **body 编码**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。单个 body 的记录上限**联动 `max_body_mb`**（缺省 8MiB，热重载同步）——VMR 接受的请求绝不会在自己的审计里被截断，响应享有同等额度；超限截断并标记 `body_truncated: true`。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
+2. **body 编码，不截断**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。**审计侧不设记录上限**——不论原始 body 有多大都原样记录，没有 `max_body_mb` 这类联动配置，也没有 `body_truncated` 标记（这两者已随本次改动一并移除）。入站请求体大小仍有一个独立的、纯粹为稳定性考虑的上限（`max_request_body_mb`，缺省 8MiB，超限 413）——它只决定 vmr 愿不愿意接受这个请求，与审计记录是否完整无关：只要 vmr 接受了，审计里就是完整的那一份。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。
-4. **`attempts[].error` 的形态**：错误类别裸词（`auth`/`rate_limit`/…）或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`。`vmr report` 聚合时按首个 `:` 前缀归桶，保证错误分布表的基数有界。
+4. **`attempts[].error` / `error_class` 的形态**：`error` 是自由文本（错误类别裸词、或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`），供人读；`error_class` 是与它同步设置的类型化枚举字符串（复用 `core.ErrorClass.String()`：`client`/`auth`/`rate_limit`/`endpoint`/`transient`/`content`，加上四个只在 HTTP 响应之前的失败路径出现的值 `build`/`network`/`canceled`/`truncated`），新写入的记录 `vmr report` 直接按这个字段归桶。**向后兼容**：`error_class` 字段是本次改动新增的，此前写入的历史日志没有它——`internal/report` 的 `attemptErrorClass()` 辅助函数在 `error_class` 为空时回退到解析 `error`（旧的 6 种 HTTP 分类错误本来就是不带冒号的裸类名，直接原样使用；`build`/`network`/`canceled`/`truncated` 这四种非 HTTP 路径本来就是 `"class: 详情"` 前缀，取冒号前半部分），使历史日志的错误分布、`truncated` 计数（`vmr-report.md`/`vmr-requests-index.md`）在混用新旧日志时依然正确，而不是全部退化成 `unknown`（这曾是一个真实的回归——最初实现只读 `error_class`，用真实历史日志跑 `vmr report` 时错误分布表整栏显示 `unknown × N`，`Trunc` 列全部归零，后来加上这层回退才发现并修复）。`internal/audit` 仍是无外部依赖的叶子包，`Attempt.ErrorClass` 类型是 `string` 而非 `core.ErrorClass` 本身，只是复用同一组取值。
+5. **`images[]` 的采集范围**：只记录请求侧的内联图片（vmr 不生成图片，响应侧不采集）；`message_index` 是该图片所在消息在 `chatMessages` 里的 0-based 下标。检测**始终进行**，与该虚拟模型是否开启了 `image_downscale` 无关——只做一次廉价的 `image.DecodeConfig`（只读文件头拿 format/width/height，不解码像素），`downscaled`/`downscaled_*`/`cache_hit` 只在实际触发了压缩路径时才有意义。远程 URL 图片（vmr 未拉取内容）记一条 `remote:true`，其余字段皆为零值。
 
 ### 9.3 实现要点
 
-`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转，轮转时异步触发 §9.5 的压缩/保留扫描）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，body 记录上限联动 `max_body_mb`）；router 层在 failover 循环中逐次填充 attempts。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
+`internal/audit`：Record 类型 + Logger（互斥追加、按日期轮转，轮转时异步触发 §9.5 的压缩/保留扫描）。server 层用包装 `ResponseWriter` 的录制器捕获 client 层响应（保留 `Flusher`，流式时延零影响，`bytes.Buffer` 无上限增长——不再有审计侧截断）；router 层在 failover 循环中逐次填充 attempts，包括 `protocol`/`provider`/`model`/`error_class` 四个结构化字段。Record 经 `Serve` 参数显式传递（nil = 关闭，零开销）。
 
 ### 9.4 统计分析工具 `vmr report`
 
@@ -386,18 +397,48 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md + vmr-requests.jsonl + {out}/details/ 逐请求详单（输入可混合明文 .jsonl 与 §9.5 产生的 .jsonl.zst；-details=false 关闭详单）
 ```
 
-* **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。
-* **JSON 输出**（`meta.format` 版本号随结构变更递增）：
-  * `rows[]` — 粒度 **日期×协议×Virtual Model**（同名模型可同时存在于两个协议组，是两个不同的模型，不可合并）：请求数、ok/error/canceled、流式数、attempts、fallbacks（>1 次尝试的请求数）、tokens in/out 与 tokens_known（可提取 usage 的记录数）、tokens in 的缓存细分（`tokens_in_cached`/`tokens_in_cache_write`，见下）、`tokens_reasoning`（输出中的 thinking 子集,上游回报时）、`finish_reasons` 分布（`length` = 输出被 token 上限截断的健康信号）、`truncated`（outcome=ok 但流中途断掉——OK/Errors 都看不见它,单列）、bytes in/out、时延 sum/p50/p95/max 与 **TTFT p50/p95**、吞吐（tok/s、bytes/s）。
-  * `endpoints[]` — 粒度 **日期×上游端点**：尝试/成功/失败、可用度、错误类别分布、时延 p50/p95。
-  * `hours[]` — 粒度 **日期×本地小时**：请求/ok/errors、tokens in/cached/out、bytes out——活跃度画像,服务于限流与触发时段规划。
-  * `workloads[]`（会话分析产物）— 按负载类型（interactive / heartbeat / dream_diary / compaction）切分请求数、tokens、累计耗时、tool 调用数——回答"账单里多少是真实工作、多少是定时脚手架"。
-  * 该粒度可向上卷（仅按模型/仅按日期），不可向下切；更细的问题回原始日志或 `vmr-requests.jsonl`。二次开发（图表/Dashboard/HTML）以此 JSON 为数据源。
+* **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）。全内存聚合，几十 MB 日志无压力。运行过程**按文件输出进度**到 stdout（`[i/N] <path>  done: M records, K parse errors (Ts)`），让操作者确认大文件扫描没有挂住。
+* **架构：每维度一个独立桶（format 7 起）**。每条 audit record 在 `Build()` 内一次遍历中同步 push 到**所有相关桶**，每个桶自己收原始 `rec.DurMS` / `rec.TTFTMS`，各自在 `finishRow()` / `finishHour()` / `finishEndpoint()` 里算 p50/p95。这种"多桶各算各的"消除了早期"跨行加权展开近似"的所有问题——百分位不可加，跨桶重新算出的 p95 必然退化为 `max(row.p95)`（之前是 BUG）。本架构下：
+  * `Rows` (`date × protocol × model`) ——最细粒度
+  * `Overall` ——所有 record，单桶
+  * `ByModel` (`model × protocol`)
+  * `ByDate` (`date`)
+  * `Hours` (`date × local hour`)
+  * `HoursOfDay` (`local hour`，全部日期合并；format 9 新增)
+  * `Endpoints` (`date × endpoint`)
+  * `EndpointsAll` (`endpoint`，全部日期合并；format 9 新增)
+  
+  **`HoursOfDay`/`EndpointsAll` 为什么要单独开一份桶，而不是从 `Hours`/`Endpoints` 汇总**：这正是上面那句"之前是 BUG"点名的同一类问题的一个变种，且在真实生产日志上复现过——`vmr-report.md` 的"端点可用度"和"每小时活跃度"两张表需要"全部日期合并"的视图，早期实现是拿已经跑完 `finishHour`/`finishEndpoint` 的**逐日**桶再做一次跨日合并；但 `finishHour`/`finishEndpoint` 算完那个桶自己的 p50/p95 后，会把原始的 `durs`/`ttfts` 切片清空（`h.hoursDurs, h.hoursTTFTs = nil, nil`，`e.durs, e.ttfts = nil, nil`——这是好文明，避免每个 Row 都背一份不再需要的原始值），于是跨日合并阶段再想读这些切片时，读到的永远是 `nil`。结果是：不管这个端点/这个小时到底攒了多少条真实的 `dur_ms`/`ttft_ms`，合并后的 p50/p95 永远算出 `(0, 0)`，渲染层看到零值就打 `-/-`——**不是数据稀疏，是这两张表的"首字延迟"和"请求耗时"列在所有场景下都会显示空值**，这个 bug 在用真实生产日志跑通整个流程之前完全没有暴露，因为单元测试的合成数据从没让同一个 endpoint / 同一个小时横跨两个日期。修法是让 `HoursOfDay`/`EndpointsAll` 在 `Build()` 的同一趟遍历里独立收自己的原始值（`addHour`/`addAttempt`/`addEndpointRequest` 各调用两次，一次喂逐日桶，一次喂全局桶），跟 `Overall` 之于 `Rows`是完全一样的思路——不是从别的桶"求"出来的，是从头到尾自己攒出来的。
+  
+  内存代价：每条 record 的 raw 值存 4 份（Row + Overall + ByModel + ByDate）加上 Hour/Endpoint 各自两份（逐日 + 全局），518 records 量级仍在几十 KB；100 万 records ≈ 64 MB 左右，可接受；1000 万 ≈ 640 MB，紧绷——届时考虑按时间段二级聚合。
+* **JSON 输出**（`meta.format` 当前 = **9**）：
+  * `meta` ——格式号、生成时间、输入文件清单、记录数、坏行数、最早/最晚时间戳
+  * `rows[]` / `overall` / `by_model[]` / `by_date[]` ——每个 Row 包含：请求数 / ok / errors / canceled / streams、attempts / fallbacks、tokens in/out/known + cache 分项（`tokens_in_cached`/`tokens_in_cache_write`）、bytes in/out、messages/known + role_chars、TTFT sum/known/p50/p95、dur sum/p50/p95/max、truncated、finish_reasons、tokens_reasoning、tok_out_per_sec / bytes_out_per_sec、**images / images_compressed**（该桶内的内联图片总数与其中触发降采样的数量，来自 `rec.images`）。**所有 p50/p95 都是真值**（每个桶从自己的 raw 数据算），不再有"近似"。
+  * `endpoints[]` ——每条 (date × endpoint)；`endpoints_all[]` ——每个 endpoint 一条，全部日期合并（format 9 新增，`vmr-report.md` 的"端点可用度"表读这个，不是 `endpoints[]`）。两者字段一致：attempts / ok / failed / availability / error_classes / tokens / bytes / TTFT / dur / tok_per_sec / images / images_compressed（`error_classes` 直接来自各 attempt 的 `error_class` 字段，不再靠 `error` 前缀猜）
+  * `hours[]` ——每条 (date × hour)；`hours_of_day[]` ——每个本地小时（0-23）一条，全部日期合并（format 9 新增，`vmr-report.md` 的"每小时活跃度"表读这个，不是 `hours[]`）。两者字段一致：requests / ok / errors / fallbacks / truncated / tokens / bytes / TTFT / dur / tok_per_sec / attempts / images / images_compressed（format 7 时 `fallbacks`/`truncated`/`images`/`images_compressed` 还没有；format 8 补齐，使这张桶和 Row/SessionRow 的字段集一致）
+  * `workloads[]` / `sessions[]` / `tools[]` ——会话分析产物，同 §9.4 早期描述但字段更全（见下）
 * **双指标原则**：tokens 与 bytes 并行统计。usage 提取覆盖四种形态——OpenAI/Anthropic 的 JSON 与 SSE 流（Anthropic 取 `message_start` 的 input + `message_delta` 累计 output，OpenAI 取末尾 usage chunk，字段取最大值以兼容累计流）；无 usage 的记录（上游不回报、请求失败）落在 bytes 与 tokens_known 缺口里，bytes 是它们唯一的用量参考。
-* **tokens_in 缓存细分**（`internal/report/usage.go`）：`tokens_in` 是全部输入 token（含缓存），另拆出两个子集——`tokens_in_cached` 是缓存命中（Anthropic `cache_read_input_tokens` / OpenAI `usage.prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens`），`tokens_in_cache_write` 是仅 Anthropic 有的缓存新写入（`cache_creation_input_tokens`，按溢价计费，不算命中）。两者都已含在 `tokens_in` 里；新鲜（未命中）部分 = `tokens_in - tokens_in_cached - tokens_in_cache_write`，消费方按需自行相减，JSON 不重复存储比例。**两家上游对"总输入"的定义不同，提取时已做归一**：Anthropic 的 `input_tokens` 不含缓存两项，是分开计数的三个字段相加；OpenAI/DeepSeek 的 `prompt_tokens` 本身已含缓存命中，`cached_tokens`/`prompt_cache_hit_tokens` 只是从中圈出的子集，不可再相加。判据是 usage 对象里是否存在 `input_tokens` 键（Anthropic 独有字段名）。审计日志本身不需要改动——完整原始 body 早已落盘，这些字段只是之前没被读取。
-* **Markdown 输出**：从 JSON 再聚合的人读版，收录 T1（总览、按模型、端点可用度、工作负载、Agent 会话、工具使用）与 T2（按日趋势、每小时活跃度、上游错误分布）；T3 细分（日期×模型交叉、协议/流式切分、日期×小时原始行）只在 JSON 里。跨组百分位为近似值（以组 p50 按请求数加权重算，TTFT 同法）。Token 三列合并为一格 "Tokens In/CacheHit/Out"（如 `41.0M / 38.8M(94.7%) / 86.9K`，三张表统一）；"缓存写入"单列保留（Anthropic 专属，多数行为 `-`）。总览表另有：截断计数（⚠️ 标注）、请求均值 In/CacheHit/Out（除以 tokens_known）、平均消息数（messages/messages_known）、平均首字延迟（ttft_ms_sum/ttft_known，旧日志无 ttft_ms 时为 `-`），表下附按角色的请求消息字符占比（role_chars 汇总占比；Anthropic 的 tool_result part 计入 tool 角色以与 OpenAI 对齐）、finish_reason 分布行（`length` 加 ⚠️）与 reasoning tokens 行。按模型表增列截断与 TTFT p50。每小时活跃度按"跨日汇总的本地小时"渲染,附请求数条形。Agent 会话表把单请求的定时会话（heartbeat/dream 每次触发都是新会话）按类合并成一行,避免刷屏。
-* **逐请求详单**（`internal/report/detail.go` + `render.go`，默认开启，`-details=false` 关闭）：每条审计记录导出一个 Markdown 文件到 `{out}/details/`，附 `INDEX.md` 索引。文件名 `{YYYYMMDD-HHMMSS.mmm}_{虚拟模型}_{真实模型}_{outcome[-错误类]}.md`，零填充时间戳开头，按名字排序即按时间排序；同毫秒冲突加数字后缀，重跑幂等覆盖。文档按请求物理路径分三段：① Client→VMR（headers/参数/tools/messages，长内容 `<details>` 折叠、summary 带长度与预览，base64 图片以媒体类型+尺寸占位；Messages 标题下附按角色的字符数与占比统计行，概要表含首字延迟）、② VMR→上游每次 attempt（headers 与 body 字段**全量对照**，变化项标 🟢 新增/🔴 删除/🔶 变化，未变化照常列出不突出；messages/tools 逐条对照，变化条目附上游侧全文；成功 attempt 的响应 body 依 §9.2 省略语义标注"透传"，并把 `norm` 步骤翻译成人话）、③ VMR→Client 响应（headers 相对上游响应对照；SSE 流重组为模型实际输出——reasoning 折叠、content 展开、tool_calls 拼装完整——原始 SSE 全文折叠保留）。SSE 重组覆盖两种协议（OpenAI delta 累加 / Anthropic content_block 事件），与 §9.2 审计格式同样强耦合。
-* **Agent 会话分析**（`internal/report/session.go` + `export.go`，方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：离线、纯规则、不调 LLM，把审计记录按「会话 → 任务 → 轮次」分组并提取逐请求特征。核心算法协议通用——首条非 system 消息 hash 做会话指纹（Claude Code `metadata.user_id` 存在时优先），组内对「非 system 消息序列」做 max-LCP 选父,`messages[lcp:]` 即本轮增量;任务边界 = Traceparent trace-id 变化（有则用）|| 增量尾部出现真实用户指令（通用兜底,`newUserWindow` 防原地改写误切）。compaction 调用按三重特征识别（summarization system 头 / 无 Traceparent 无 tools / 独有 `max_completion_tokens`），其输入/输出与新旧会话锚点做**确定性子串匹配**双向链接。OpenClaw 特定信号（runtime wrapper 过滤、`chat_id` 提取、heartbeat/dream 模板标签）失配无害——标不出就不标。产物落在三处：报表 JSON 的 `tools[]`（按请求形态：声明工具 vs **当轮实际调用**——从响应提取,历史重发零重复计数——及 never_called 清单与声明字节成本,服务于工具裁剪）与 `sessions[]` 段；**`vmr-requests.jsonl`** 逐请求特征明细（会话/任务/轮次坐标、trace/chat id、形态签名、标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning_tokens 的用量细分、增量大小、最新指令预览）；详单侧 INDEX 增加会话分组视图,每个详单头部加定位行与「本轮增量」区（最新指令高亮、被替换尾部删除线列出、system 变更与截断告警）。
+* **tokens_in 缓存细分**（`internal/report/usage.go`）：`tokens_in` 是全部输入 token（含缓存），另拆出两个子集——`tokens_in_cached` 是缓存命中（Anthropic `cache_read_input_tokens` / OpenAI `usage.prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens`），`tokens_in_cache_write` 是仅 Anthropic 有的缓存新写入（`cache_creation_input_tokens`，按溢价计费，不算命中）。两者都已含在 `tokens_in` 里；新鲜（未命中）部分 = `tokens_in - tokens_in_cached - tokens_in_cache_write`。**两家上游对"总输入"的定义不同，提取时已做归一**：Anthropic 的 `input_tokens` 不含缓存两项，是分开计数的三个字段相加；OpenAI/DeepSeek 的 `prompt_tokens` 本身已含缓存命中，`cached_tokens`/`prompt_cache_hit_tokens` 只是从中圈出的子集，不可再相加。判据是 usage 对象里是否存在 `input_tokens` 键（Anthropic 独有字段名）。
+* **Markdown 输出**：从 JSON 渲染的人读版。所有表共享一套列名 + 列序。表格 7 张：
+  1. **总表**（来自 `Overall`）——单行
+  2. **按模型**（来自 `ByModel`）——每个 model 一行
+  3. **端点可用度**（来自 `EndpointsAll`，即上面新增的"全部日期合并"桶，不是逐日的 `Endpoints`）——每个 endpoint 一行
+  4. **按日趋势**（来自 `ByDate`）
+  5. **每小时活跃度**（来自 `HoursOfDay`，即上面新增的"全部日期合并"桶，不是逐日的 `Hours`）
+  6. **工作负载**（来自 `Workloads`）
+  7. **Agent 会话**（来自 `Sessions`，定时单发会话合并到 `（合并）` 行）
+  
+  各表表头共享的核心列（总表/按模型/按日趋势/每小时活跃度四张表完全一致）：`Req/Fall/Trunc`（请求数/Fallback 数/truncated 数合并成一个单元格，格式 `%d/%s/%s`，Fallback、truncated 复用 `warnCount` 的"非零才标"哲学，全 0 时整格显示 `-`）/ `成功率` / `Tokens In/CacheHit/Out`（3-tuple 例：`94.4M / 86.8M(92.0%) / 322.8K`；cache-write 字段仍在 JSON 里，但markdown 渲染统一去掉了它——这套部署里始终为 0）/ `图片/压缩`（该行内联图片总数/其中触发降采样的数量，格式 `N/M`，无图片显示 `-`）/ `平均Tokens In/Out`（每请求均值，分母 = tokens_known）/ `字节 In / Out`（2-tuple）/ `平均消息数` / `p50/p95 首字延迟` / `p50/p95 请求耗时` / `平均吞吐 (tok/s)`。端点可用度表沿用自己原有的 `尝试`/`成功`/`可用度`（不做 Req/Fall/Trunc 合并——这张表本来就没有 Fallback/truncated 概念），同样插入 `图片/压缩`。工作负载表删掉了 `累计耗时`/`In 占比` 两列（后者的分母定义此前就跟其余表不一致，删掉比修复更简单），`Tool 调用` 改成 `N (占比%)`——占比 = 该行发生过至少一次工具调用的请求数 ÷ 该行请求数，不是该行工具调用次数占全表工具调用总数的比例（后者只要某个 class 独占全部工具调用就会恒等于 100%，读不出实际频率）。Agent 会话表删掉了 `字节 In/Out` 与 `累计耗时`，`续接自` 折进 `会话` 列本身渲染成 `[s03](...) ← s02`（不再单独占一列），同样应用 `Req/Fall/Trunc` 合并（这张表的 `Fallbacks` 字段其实一直都在，只是先前 markdown 只渲染了 `Truncated`）。**定时单发会话合并行**（`（合并）` 那一行，来自 `mergeIntoCollapsed`）：`mergeIntoCollapsed` 本来就正确累加了 `TokensKnown`/`MessagesKnown`/`TTFTMSSum`/`DurMSSum` 等字段，但渲染那一行的代码曾把"平均Tokens In/Out"/"平均消息数"/"首字延迟"/"请求耗时"四列硬编码成 `"-"`，没有真正读这些已经算好的聚合值——这是又一处只在真实生产日志上才会被发现的问题（合成测试数据没凑出过两条以上会被折叠的单发会话）。修法：平均值两列直接调用 `avgTokensInOutSession`/`avgMessagesSession`（均值，不需要原始值，`mergeIntoCollapsed` 累加的 sum/count 已经够用）；p50/p95 两列则利用"折叠候选本来就是每会话恰好 1 条请求"这个前提——那条请求自己的 `DurMSSum`/`TTFTMSSum`（`RequestsWithDur`/`TTFTKnown` 为 1 时）本身就是它的原始 dur_ms/ttft_ms，折叠时把这些原始值收进一个临时切片，渲染前再跑一次 `percentiles()`，就能算出这一类别（如全部 22 次 heartbeat 触发）真正的 p50/p95，而不是回退成占位符或粗暴的算术平均。
+  
+  总表另有三行汇总：按角色的请求消息字符及占比（含绝对数 + 占比）、`finish_reason 数量及占比`（含绝对数 + 占比）、`thinking tokens 数量及占比`。工具使用改 numbered list：`1. exec (270 次)` / `2. process (32 次)` …… 未调用工具同样 numbered list（按字母序，自然让 `feishu_*` 同前缀聚类）。`vmr-report.md` 页脚加 `详单见 [vmr-requests-index.md]` 链接。
+* **逐请求详单**（`internal/report/detail.go` + `render.go`，默认开启，`-details=false` 关闭）：每条审计记录导出一个 Markdown 文件**及同名 JSON 文件**（原始 record，供 jq/脚本查询）到 `{out}/details/`，索引落在上一级目录的 `vmr-requests-index.md`（与 `vmr-report.md` 并列）。文件名 `{YYYYMMDD-HHMMSS.mmm}_{虚拟模型}_{真实模型}_{outcome[-错误类]}.md`（`.json` 同名），零填充时间戳开头，按名字排序即按时间排序；同毫秒冲突加数字后缀，重跑幂等覆盖。
+  * 单条详单头部：`虚拟模型 / 上游端点 / 结果 / 耗时 / 首字延迟 / 尝试次数 / stream / Tokens In/CacheHit/Out / 客户端`；下方 `trace / chat user / tools` 元信息行取值加粗（`<strong>`）
+  * 文档按请求物理路径分三段：① Client→VMR（headers/参数/tools/messages）、② VMR→上游每次 attempt（headers 与 body 字段**全量对照**，变化项标 🟢/🔴/🔶；若该次尝试命中 `think_strip`/`thinking_process_strip`，额外展示剥离前的完整原始内容与对应原始 SSE——`internal/router/response.go` 在归一化前把这段缓冲字节存进 `audit.Attempt.RawPreStrip`，仅对本次改动后新采集的日志生效，历史日志显示"未保留"提示）、③ VMR→Client 响应（headers 相对上游响应对照；SSE 流重组为模型实际输出）
+  * Messages 区每条消息默认折叠（`<details>`），无长度阈值；角色字符统计行取值加粗。增量区移到消息列表末尾，仅以 🆕 前缀 + 一行汇总 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 标识，不重复展开内容
+  * header 行不再展示 `tags:` ——OpenClaw 的 `compacted_session` 标签会在 compaction 之后**每条** detail 都触发（因 OpenClaw 每轮重发 compaction summary 用户消息），渲染上会变成噪声
+* **Agent 会话分析**（`internal/report/session.go` + `export.go`，方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：离线、纯规则、不调 LLM，按「会话 → 任务 → 轮次」分组并提取逐请求特征。核心算法协议通用——首条非 system 消息 hash 做会话指纹（Claude Code `metadata.user_id` 存在时优先），组内对「非 system 消息序列」做 max-LCP 选父,`messages[lcp:]` 即本轮增量；任务边界 = Traceparent trace-id 变化（有则用）|| 增量尾部出现真实用户指令（通用兜底,`newUserWindow` 防原地改写误切,且按内容 hash 核对该指令是否已在父记录出现过——防止历史裁剪把同一条指令"挪"进 tail window 而二次触发新任务）|| 父记录 NO_REPLY 收尾时不开新任务（视为对同一指令的重试）。`isRealUser` 会剥离 OpenClaw 粘在真实指令前面的 `Conversation info (untrusted metadata)` / `Sender (untrusted metadata)` JSON 路由头,保留并使用剥离后的正文，而不是把整条消息当 scaffolding 丢弃。compaction 调用按三重特征识别（summarization system 头 / 无 Traceparent 无 tools / 独有 `max_completion_tokens`），其输入/输出与新旧会话锚点做**确定性子串匹配**双向链接。OpenClaw 特定信号（runtime wrapper 过滤、`chat_id` 提取、heartbeat/dream 模板标签）失配无害——标不出就不标。产物落在三处：报表 JSON 的 `tools[]`（按请求形态：声明工具 vs **当轮实际调用**——从响应提取,历史重发零重复计数——及 never_called 清单与声明字节成本,服务于工具裁剪）与 `sessions[]` 段（**新增 `link` 字段**指向首个请求的 detail 文件）；**`vmr-requests.jsonl`** 逐请求特征明细（会话/任务/轮次坐标、trace/chat id、形态签名、标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning_tokens 的用量细分、增量大小、最新指令预览）。
+  * **详单侧索引按 Chat User 分组**（`vmr-requests-index.md`）：每条 `SessionInfo` 的 `ChatID`（OpenClaw `chat_id` 字段，剥掉 `user:` 前缀）作分桶 key；同一用户聚合为一个 `## Chat User xxx` 区块，Session/Task 编号不再单独起标题行——每个任务直接是一段引用块（`NewInstruction` 预览）+ 轮次表（每行：轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件）。`Message` 取代原先的 `+Msg`，格式 `M+N`（M = 本轮之前的历史消息数 = `DeltaStart`，N = 本轮新增数）。`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>` 而非裸值。原来独立的 `结果`/`尝试次数` 两列删掉，信息折进 `耗时` 列的尾注（`durationCellFields`，可并存、空格分隔）：`❌<outcome>`（真错误，canceled 除外）、`⚠️截断`（ok 但流中途断）、`🚫取消`（outcome=canceled）、`🔄尝试x{n}`（attempts>1）——干净的单次成功请求只显示纯耗时数字，不需要在一堆 `✅ ok` 里找例外。文件列是 `md`/`json` 两个短 `<a>` 链接，不再显示完整文件名。"全部请求（时间序）"这张扁平表额外把 `模型`/`上游` 两列合并成一个 `VM/API` 列，格式 `{protocol} | {virtual_model} | {provider}:{model}`（例：`openai | agent | minimax:MiniMax-M3`；三段之间用 ` | ` 分隔，upstream 内部用 `:` 而非 `/`——OpenRouter 这类供应商的模型名本身带 `/`，用 `/` 分隔会有歧义），数据直接读最后一个 attempt 的 `protocol`/`provider`/`model` 三个结构化字段，不再靠字符串解析 `endpoint`。Compaction 调用（`### 压缩任务 · compaction 会话 × N`，含 Tokens/结果/耗时列）、定时单发会话（`### 定时任务 · <class> 单发会话 × N`）与非聊天体/被拒请求（`### 其他 · 非聊天体/被拒请求 × N`，原先是独立的顶级 `## 未分组` 标题）一律折叠进 `## Chat User (unresolved)` 的三个子分组，不再一次触发就单占一段、也不再单独起顶级标题——与 `vmr-report.md` 的 Agent 会话表collapse 逻辑保持一致。这张"其他"小表本身列结构不变（时间/模型/结果/文件），没有应用"删结果列"的规则——那条规则只针对轮次表和全部请求表这两张大表，这张小表信息量小、本来就没有耗时列，删除指令未点名到它。
+* **session.Link 字段**：每条 `SessionRow` 现在带一个 `Link` 字段（值如 `details/20260709-003106.804_agent_MiniMax-M3_ok.md`），Markdown 表格里会话 ID 列渲染为 `[s01](./details/20260709-003106.804_..._ok.md)`，点击直达首个详单。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 
@@ -417,7 +458,7 @@ Agent 场景每轮请求都重发完整对话历史，单日审计文件可达 1
 listen: 127.0.0.1:8800        # 缺省 127.0.0.1:8800
 api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key）
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
-max_body_mb: 8                # 请求体缓冲上限（缺省 8，超限 413）
+max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 413）；仅为稳定性考虑，与审计记录无关——vmr 接受的请求，审计里永远是完整的那一份
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
 image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
 image_cache_ttl_days: 7       # 降采样结果缓存的失效期（§7.1）；缺省/非正数 = 7 天
@@ -444,7 +485,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
           priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
 ```
 
-**两层 map 而非扁平 map + 显式字段**：provider 不再有 `type:` 字段，协议就是它在配置里所处的位置（`providers.<protocol>.<name>`）；一个 model 的 endpoints 只能引用同一 `<protocol>` 分组下的 provider，跨协议引用没有语法能表达它。带来两个直接好处：同一账号的两个协议面可以复用同一个 provider 短名（`openrouter` 在 `providers.openai` 和 `providers.anthropic` 下各存一份），不必再造 `_a` 后缀；同一个 virtual model 名也可以在两个协议分组下各存一份，两个入口各自独立可达（§3）。副作用：`Endpoint` 的 `HealthKey()`/`Name()`（进而 `X-VMR-Endpoint` 响应头、审计日志 `attempts[].endpoint`）改为三段式 `<protocol>/<provider>/<model>`——如果两个协议面复用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。
+**两层 map 而非扁平 map + 显式字段**：provider 不再有 `type:` 字段，协议就是它在配置里所处的位置（`providers.<protocol>.<name>`）；一个 model 的 endpoints 只能引用同一 `<protocol>` 分组下的 provider，跨协议引用没有语法能表达它。带来两个直接好处：同一账号的两个协议面可以复用同一个 provider 短名（`openrouter` 在 `providers.openai` 和 `providers.anthropic` 下各存一份），不必再造 `_a` 后缀；同一个 virtual model 名也可以在两个协议分组下各存一份，两个入口各自独立可达（§3）。副作用：`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）改为三段式 `<protocol>/<provider>/<model>`——如果两个协议面复用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 不复用这个方法**：它是 router.go 在填充 attempt 时本地拼接的独立展示字符串，同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧同一批改动还新增了三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不必再解析任何分隔符。两处的三段式含义相同，分隔符不同纯粹是历史原因（`Name()` 早于这次改动就已存在，改它的分隔符会牵动健康 key 和 `X-VMR-Endpoint`，不在这次改动范围内）。**向后兼容**：`protocol`/`provider`/`model` 三个结构化字段是本次改动新增的，历史日志的 attempt 只有旧版 `endpoint`（`/` 分隔）——`internal/report` 的 `attemptUpstream()` 在三个新字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧日志时都不会退化成 `none`/`-`（同样是在用真实历史日志实测 `vmr report` 时发现的真实回归，而不是假设性的边界情况）。
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
@@ -485,7 +526,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | 降采样缓存目录/失效期通过显式参数传入 `imgprep.Downscale`，不用包级可变状态 | 仿照 `audit` 包用 Set* 全局单例 | `Downscale` 每请求调用一次，调用方（`server.chatHandler`）本来就持有解析好的配置快照；显式传参没有额外成本，还让测试能用 `t.TempDir()` 互相隔离，不用担心跨测试的全局状态污染。唯一必要的包级状态是"缓存目录今天是否已经扫过"的节流簿记，与配置无关，纯粹是防抖动 |
 | `audit.Dir()`/`imgprep.CacheDir()` 的默认目录公式下沉到 `internal/rundir`，`vmr.sh` 靠新增的 `vmr dirs {log\|cache}` 子命令查询，不在 bash 里重写一份（§7.1） | bash 自己复刻同一套 env-var→temp-dir→cwd 判断逻辑 | 两份独立实现迟早会跑偏——这正是修复前的实际情况：`VMR_LOG_DIR` 被 `vmr.sh` 显式强制注入两种模式，`VMR_IMG_CACHE_DIR` 却完全没有对应逻辑，service 模式下永远看不到它。公式只写一遍、bash 只负责问答，结构上排除了再次跑偏的可能，`vmr dirs` 的开销是每次 vmr.sh 调用多两次几毫秒的子进程 |
 | `VMR_IMG_CACHE_DIR`/`VMR_LOG_DIR` 有设置时原样返回，不追加子目录；未设置时才追加 `vmr_logs`/`vmr_image_cache` | 无论是否设置都统一追加子目录（`imgprep.CacheDir()` 改前的行为） | 用户显式设置这个变量，语义就是"这是我要的目录"，再悄悄拼一层子目录会让人诧异；子目录命名空间只在"我们自己选的默认值"这个场景下才有意义（避免和临时目录里其它进程的文件混在一起） |
-| Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint`/审计 `attempts[].endpoint` 的格式多一段，两处都是人读字符串，没有内部逻辑解析它 |
+| Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint` 的格式多一段，是人读字符串，没有内部逻辑解析它（审计 `attempts[].endpoint` 后来改成了独立拼接的 `:` 分隔三段式，不再共用这个方法，见 §9.2） |
 | Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合（§12.2）保留逃生舱 |
 | 请求侧 Header 默认透传 + 小型黑名单（§5.4） | 严格白名单（最初实现） | LLM SDK 发的 header 集合已知且无危险（不会发 Cookie / X-Forwarded-For），全杀掉反而丢 User-Agent / X-Stainless-* / Traceparent 这些上游做 cache 路由决策需要的元数据。blocklist 只剥真正会出问题的几项（凭证、IP 欺骗、Go Transport 管理的几个），其余透传。OpenClaw 验证生效后反过来证明：原白名单太严苛是因为没区分「协议实现内部白名单」与「代理透传黑名单」的职责 |
 | 响应侧归一化：双模式——事件级透传缺省，确认命中思考形态才缓冲（§5.5） | 全量缓冲单遍 regex（v2）/ 字节级状态机（v1） | v1 换 4 版都有 corner case（病灶在字节级切分）；v2 正确但假流式，TTFB=完整生成时长，逼近 OpenAI SDK 120s 超时预算，且对不需要修复的 provider（DeepSeek/OpenRouter）也失去流式。v3 以完整 SSE 事件为单位：事件内 JSON 完整、regex 无跨界；think 缓冲在 closer 后恢复流式；失手时=直连行为，永不更差 |

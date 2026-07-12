@@ -84,6 +84,13 @@ type ReqInfo struct {
 
 	DetailFile string // deterministic detail filename (assigned in ts order)
 
+	// Aggregates that the SessionRows / Workloads consumers need to roll up.
+	MessagesKnown    int              // requests whose body parsed as a chat object
+	RoleChars        map[string]int64 // per-role displayed-character totals
+	Fallbacks        int              // requests that needed >1 attempt
+	Images           int              // inline request images detected
+	ImagesCompressed int              // subset that triggered downscaling
+
 	// working state (analysis only, dropped from JSON)
 	leadSys   int      // leading system messages (absolute offset of keys[0])
 	keys      []string // per non-system message content hash
@@ -93,10 +100,18 @@ type ReqInfo struct {
 	realUsers map[int]string // absolute idx → preview, real user instructions
 	firstText string         // first non-system message text (capped)
 	respText  string         // reassembled response content (compaction linking)
-	errClass  string         // last attempt error class (filename suffix)
-	realModel string         // model segment of the final attempt's endpoint
-	declBytes int64          // serialized size of the declared tools array
-	endpoint  string         // final attempt endpoint
+	// NoReply is true when the assistant's reply was empty or just "NO_REPLY"
+	// (OpenClaw's skip-on-memory-flush pattern). Such records are typically
+	// retried by the client a few minutes later; the retry carries the
+	// user's actual instruction and is the one that gets processed. The
+	// session analyzer treats NoReply parents as NOT opening a new task
+	// boundary — the next record's "new instruction" is a retry of
+	// the skipped one, not a fresh user intent.
+	NoReply   bool
+	errClass  string // last attempt error class (filename suffix)
+	realModel string // model segment of the final attempt's endpoint
+	declBytes int64  // serialized size of the declared tools array
+	endpoint  string // final attempt endpoint
 	attempts  int
 	durMS     int64
 	ttftMS    int64
@@ -195,14 +210,19 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 	}
 	for _, at := range rec.Attempts {
-		if strings.HasPrefix(at.Error, "truncated") && rec.Outcome == "ok" {
+		if attemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
 			r.Truncated = true
 		}
 	}
 	r.errClass = errorClass(rec)
 	r.realModel = realModel(rec)
 	r.endpoint = lastEndpoint(rec)
+	n, compressed := countImages(rec.Images)
+	r.Images, r.ImagesCompressed = n, compressed
 	r.attempts = len(rec.Attempts)
+	if r.attempts > 1 {
+		r.Fallbacks = 1
+	}
 	r.durMS, r.ttftMS, r.stream = rec.DurMS, rec.TTFTMS, rec.Stream
 	r.bytesIn = bodyBytes(rec.Client.Request.Body)
 	if rec.Client.Response != nil {
@@ -224,6 +244,20 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 				}
 			}
 			r.respText = capStr(strings.TrimSpace(s.Content), 256<<10)
+			// Detect OpenClaw's "no-reply" pattern: an empty content block,
+			// or content that ends with the explicit "NO_REPLY" marker
+			// (memory-flush acknowledgement, or post-compaction turn).
+			// Such records are sent successfully but the LLM skipped the
+			// reply — the next record carrying the same user instruction
+			// is a retry of THIS one, not a new task.
+			if r.Finish == "stop" || r.Finish == "end_turn" {
+				trimmed := strings.TrimSpace(r.respText)
+				if trimmed == "" {
+					r.NoReply = true
+				} else if strings.HasSuffix(trimmed, "NO_REPLY") {
+					r.NoReply = true
+				}
+			}
 		}
 	}
 
@@ -249,6 +283,13 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 
 	msgs := chatMessages(body) // anthropic system becomes message #0 — same shape both protocols
 	r.Msgs = len(msgs)
+	r.MessagesKnown = 1 // body parsed as chat object
+	for role, c := range roleChars(body) {
+		if r.RoleChars == nil {
+			r.RoleChars = map[string]int64{}
+		}
+		r.RoleChars[role] += c
+	}
 	rawMsgs, _ := body["messages"].([]any)
 	sysHash := md5.New()
 	var lastUser string
@@ -272,8 +313,8 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 		if m.Role == "user" {
 			lastUser = m.Text
-			if isRealUser(m, rawMsgs, i-msgOffset(body)) {
-				r.realUsers[i] = preview(m.Text)
+			if text, ok := realUserText(m, rawMsgs, i-msgOffset(body)); ok {
+				r.realUsers[i] = preview(text)
 			}
 		}
 	}
@@ -324,18 +365,48 @@ func msgOffset(body map[string]any) int {
 	return 0
 }
 
-// isRealUser reports whether a user message is an actual instruction rather
-// than transport scaffolding: OpenClaw runtime wrappers, tool-produced image
-// attachments, compaction summaries, and anthropic messages that are purely
-// tool_result parts don't count. Misclassifying scaffolding as instructions
-// over-splits tasks and pollutes titles (both observed in real logs).
-func isRealUser(m chatMessage, rawMsgs []any, rawIdx int) bool {
+// openClawEnvelopeRe matches OpenClaw's "Conversation info (untrusted
+// metadata)" / "Sender (untrusted metadata)" JSON blocks. OpenClaw glues
+// these routing headers onto the front of real inbound messages (not just
+// onto pure scaffolding pings) — a message can be 90% JSON envelope and
+// still carry the actual ask in its last line.
+var openClawEnvelopeRe = regexp.MustCompile(`(?s)(?:Conversation info|Sender) \(untrusted metadata\):\s*` + "```" + `(?:json)?\n.*?` + "```" + `\s*`)
+
+// stripOpenClawEnvelope removes OpenClaw's metadata-wrapper blocks, leaving
+// whatever real text (if any) precedes or follows them.
+func stripOpenClawEnvelope(text string) string {
+	return strings.TrimSpace(openClawEnvelopeRe.ReplaceAllString(text, ""))
+}
+
+// leadingBracketRe matches OpenClaw's "[Day Mon DD HH:MM TZ]" user-typed-time
+// prefix, so a message that's just a timestamp plus an (already-stripped)
+// envelope — no real ask — doesn't get mistaken for one.
+var leadingBracketRe = regexp.MustCompile(`^\[[^\]]*\]\s*`)
+
+// realUserText returns a user message's real-instruction text and whether it
+// counts as one at all. Transport scaffolding doesn't: OpenClaw runtime
+// wrappers, tool-produced image attachments, compaction summaries, and
+// anthropic messages that are purely tool_result parts. OpenClaw's metadata
+// envelope (chat_id/sender JSON) is stripped rather than disqualifying the
+// whole message — the real ask is often glued right behind it, and
+// discarding it entirely made task titles fall back to an earlier, unrelated
+// message (observed in real logs: a 06:48 launch instruction wrapped in the
+// envelope was dropped, so the task title showed an unrelated "continue"
+// ping from 6 minutes earlier instead). A message that's PURELY the
+// envelope — nothing real left after stripping — still doesn't count.
+func realUserText(m chatMessage, rawMsgs []any, rawIdx int) (string, bool) {
 	head := capStr(m.Text, 200)
 	if strings.HasPrefix(head, "OpenClaw runtime context") ||
-		strings.Contains(head, "Conversation info (untrusted metadata)") ||
 		strings.HasPrefix(head, "Attached image(s) from tool result") ||
 		strings.HasPrefix(head, "The conversation history before this point was compacted") {
-		return false
+		return "", false
+	}
+	text := m.Text
+	if strings.Contains(head, "Conversation info (untrusted metadata)") {
+		text = stripOpenClawEnvelope(text)
+		if leadingBracketRe.ReplaceAllString(text, "") == "" {
+			return "", false // just a timestamp bracket, nothing real left
+		}
 	}
 	if rawIdx >= 0 && rawIdx < len(rawMsgs) {
 		if rm, ok := rawMsgs[rawIdx].(map[string]any); ok {
@@ -349,12 +420,22 @@ func isRealUser(m chatMessage, rawMsgs []any, rawIdx int) bool {
 					}
 				}
 				if allToolResult {
-					return false
+					return "", false
 				}
 			}
 		}
 	}
-	return strings.TrimSpace(m.Text) != ""
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// isRealUser reports whether a user message is an actual instruction rather
+// than transport scaffolding. See realUserText for the classification rules.
+func isRealUser(m chatMessage, rawMsgs []any, rawIdx int) bool {
+	_, ok := realUserText(m, rawMsgs, rawIdx)
+	return ok
 }
 
 // templateTags classifies known message shapes. Unknown shapes get no tag —
@@ -471,7 +552,13 @@ func attach(s *SessionInfo, r *ReqInfo) {
 		r.ReplacedTail = len(p.keys) - bestLCP
 		r.SysChanged = p.sysKey != r.sysKey
 		traceChanged := r.TraceID != "" && p.TraceID != "" && r.TraceID != p.TraceID
-		newTask = traceChanged || r.deltaHasNewInstruction()
+		// If the parent record ended in NO_REPLY (the LLM skipped its
+		// reply), the user's instruction in this record is a RETRY of the
+		// parent's skipped instruction, not a new user intent. We treat
+		// the retry as the same task to keep task boundaries aligned with
+		// actual user actions (a user types once → one task; multiple
+		// records may result from retries / streaming re-sends).
+		newTask = traceChanged || (!p.NoReply && r.deltaHasNewInstruction())
 	} else {
 		r.DeltaStart = 0 // whole request is "new" for the session's first record
 	}
@@ -489,11 +576,33 @@ func attach(s *SessionInfo, r *ReqInfo) {
 
 // deltaHasNewInstruction reports whether the delta contains a real user
 // instruction near the request's end (see newUserWindow).
+//
+// A message only counts as new if its content wasn't already present
+// SOMEWHERE in the parent (not just its LCP-matched prefix). LCP diffing is
+// positional: pruning or reordering earlier in the history breaks the prefix
+// match at that point, so everything after it — including a real-user
+// message the parent already had verbatim, just at a different offset —
+// looks "new" by position alone. Without this check, a single instruction
+// that survives a mid-task context prune reopens as a fresh 1-turn task
+// quoting itself (observed in real logs after fixing isRealUser to see
+// envelope-wrapped instructions: pruning shifted the same "OK，基于你…"
+// message into the tail window a second time).
 func (r *ReqInfo) deltaHasNewInstruction() bool {
-	for idx := range r.realUsers {
-		if idx >= r.DeltaStart && idx >= r.Msgs-newUserWindow {
-			return true
+	var parentKeys map[string]bool
+	if r.Parent != nil {
+		parentKeys = make(map[string]bool, len(r.Parent.keys))
+		for _, k := range r.Parent.keys {
+			parentKeys[k] = true
 		}
+	}
+	for idx := range r.realUsers {
+		if idx < r.DeltaStart || idx < r.Msgs-newUserWindow {
+			continue
+		}
+		if ki := idx - r.leadSys; parentKeys != nil && ki >= 0 && ki < len(r.keys) && parentKeys[r.keys[ki]] {
+			continue // identical content already existed in the parent — shifted, not new
+		}
+		return true
 	}
 	return false
 }

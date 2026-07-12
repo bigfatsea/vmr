@@ -292,7 +292,7 @@ func TestUnknownModelAndBadRequests(t *testing.T) {
 
 func TestBodyTooLarge(t *testing.T) {
 	u := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "max_body_mb: 1"))
+	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "max_request_body_mb: 1"))
 	big := fmt.Sprintf(`{"model":"vm","messages":[{"role":"user","content":"%s"}]}`, strings.Repeat("x", 2<<20))
 	resp, _ := chat(t, ts, big, nil)
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
