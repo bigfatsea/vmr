@@ -125,6 +125,19 @@ All fields and validation rules: design doc §10. Config edits hot-reload within
 
 **Upstream proxy — explicit config only**: a provider's own `proxy: false` always wins (that provider connects directly — the domestic-plus-foreign provider mix this exists for); otherwise the global `http_proxy`/`https_proxy` above applies (chosen by the base_url's scheme); otherwise direct. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching global proxy is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
+### Environment variables
+
+The complete list — vmr reads nothing else from the environment:
+
+| Variable | Effect |
+| --- | --- |
+| `VMR_LOG_DIR` | Audit log directory. Used exactly as given (no subdirectory appended). Unset → persistent `~/.vmr/logs` (fallback chain: temp-dir subdir → `./logs`; run `vmr dirs log` to see the resolved path). |
+| `VMR_IMG_CACHE_DIR` | Image-downscale cache directory. Same rule. Unset → `~/.vmr/image_cache` (`vmr dirs cache`). |
+| Any `${VAR}` referenced in `config.yaml` | Expanded when the config is loaded (and on every hot reload). Unset variables expand to the empty string. This is how API keys — and, if you choose, `${HTTPS_PROXY}` — get in. |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` | **Ignored.** Proxies are explicit config (`http_proxy`/`https_proxy` above); reference `${HTTPS_PROXY}` in the config to opt in. |
+
+In service mode, `vmr.sh service install` snapshots every `${VAR}` your config references from the current shell into `~/.config/vmr/env` (0600, never overwritten), and injects `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` into the unit explicitly — init systems start with a clean environment.
+
 ## Passthrough & normalization
 
 **Principle: direct-connection equivalence.** What a client receives through vmr — bytes, headers, transfer pacing — matches a direct provider call. The only deviations:
@@ -192,7 +205,7 @@ models:
 
 **Per-model override**: any virtual model can set its own `image_downscale`, which always wins over the global value; omitting it inherits the global setting. `image_downscale: 0` on a model is an explicit "off" — even with the global setting on — because "not set" and "set to 0" mean different things (inherit vs. force-disable).
 
-**Downscale result cache**: the first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by content hash, under `$VMR_IMG_CACHE_DIR` if set, else `vmr dirs cache`'s default. A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session), swept lazily off normal cache access rather than a dedicated timer.
+**Downscale result cache**: the first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by **content hash plus target size** — the filename is `<sha256-of-original-bytes>-<maxPx>.jpg`, so the same image downscaled to 512px and 256px (different per-model overrides) are two independent entries that can never collide — under `$VMR_IMG_CACHE_DIR` if set, else `vmr dirs cache`'s default. A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session), swept lazily off normal cache access rather than a dedicated timer.
 
 **Where the audit and cache directories actually land**: both default to `$VMR_LOG_DIR`/`$VMR_IMG_CACHE_DIR` if set (used exactly as given), else the persistent `~/.vmr/logs`/`~/.vmr/image_cache`, else (no resolvable home directory) a `vmr_logs`/`vmr_image_cache` subdirectory of the system temp dir, else `./logs`/`./image_cache` next to the binary. Persistent by default on purpose: macOS purges temp-dir entries not accessed for ~3 days, which silently deletes audit history — the only data source `vmr report` has. Run `vmr dirs log` / `vmr dirs cache` to see the resolved path without starting the server. `vmr.sh` uses this same formula — by calling `vmr dirs` itself rather than guessing — for **both** dev mode and `service install`, so a launchd/systemd-supervised vmr never disagrees with a manually-started one about where its data lives.
 
