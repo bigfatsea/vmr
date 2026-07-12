@@ -4,7 +4,34 @@ package adapter
 import (
 	"strings"
 	"testing"
+
+	"vmr/internal/core"
 )
+
+func TestDefaultClassify_MarkerBeyond2KB(t *testing.T) {
+	// Vendors may attach verbose debug payloads before the actual error
+	// message; a marker past the old 2 KB cutoff must still be sniffed —
+	// a miss classifies as ErrClient, which never fails over.
+	padding := strings.Repeat(`{"debug":"xxxxxxxxxxxxxxxx"},`, 200) // ~5.6 KB
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		{"model not found late", `{"trace":[` + padding + `],"error":{"message":"model gpt-x not found"}}`, core.ErrEndpoint},
+		{"content flag late", `{"trace":[` + padding + `],"error":{"message":"output data may contain inappropriate content (1027)"}}`, core.ErrContent},
+	}
+	for _, tc := range cases {
+		if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// Beyond the 32 KB bound the marker is invisible by design.
+	huge := strings.Repeat("x", classifySnippetBytes) + "model not found"
+	if got := DefaultClassify(400, []byte(huge)); got != core.ErrClient {
+		t.Errorf("marker past bound: got %v, want %v", got, core.ErrClient)
+	}
+}
 
 func TestRewriteModel_NoHTMLEscaping(t *testing.T) {
 	// Direct-equivalence: re-serialization must not rewrite < > & in
