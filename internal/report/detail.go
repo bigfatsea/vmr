@@ -46,6 +46,13 @@ var normDescriptions = map[string]string{
 // overwrite deterministically. sess (optional, nil = plain mode) supplies
 // the session grouping: detail headers gain session/task coordinates and a
 // delta section, the index gains a grouped view.
+//
+// Callers must pass the same paths (same order) here and to AnalyzeSessions:
+// filenames come from the analysis pass (assignNames, ts order — stable
+// regardless of path order), but the per-record lookup is keyed path:line,
+// and the no-analysis fallback (sess == nil, or a record the analysis never
+// saw) numbers same-millisecond collisions in read order. cmd/vmr sorts the
+// glob expansion once and feeds both — keep it that way.
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err

@@ -147,3 +147,41 @@ func TestDirEnv(t *testing.T) {
 		t.Errorf("default dir: got %s, want %s", Dir(), want)
 	}
 }
+
+func TestWriteAfterCloseIsRefusedAndNeverReopens(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.hkWG.Wait()
+	if err := l.Write(&Record{Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	path := l.Path()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A handler that outlived the shutdown drain writes late: must be refused
+	// (error for the caller to log), must not touch the closed fd, and must
+	// not reopen/create any file — even across a simulated midnight boundary.
+	l.now = func() time.Time { return time.Now().AddDate(0, 0, 1) }
+	if err := l.Write(&Record{Model: "late"}); err == nil {
+		t.Error("post-Close Write must return an error, got nil")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("post-Close Write modified the audit file")
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("post-Close Write created extra files: %d entries", len(entries))
+	}
+}

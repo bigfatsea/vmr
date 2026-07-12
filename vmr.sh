@@ -107,7 +107,9 @@ cmd_stop() {
     echo "vmr not running"
     return 0
   fi
-  pkill -f "$MATCH"
+  # || true: the process can exit between the running_pids check above and
+  # this pkill; a no-match exit 1 must not kill the script under set -e.
+  pkill -f "$MATCH" || true
   for _ in $(seq 1 20); do
     [[ -z "$(running_pids)" ]] && { echo "vmr stopped"; return 0; }
     sleep 0.25

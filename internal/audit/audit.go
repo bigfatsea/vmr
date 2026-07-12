@@ -187,11 +187,12 @@ func mask(v string) string {
 // Logger appends records to one JSONL file per day:
 // {dir}/vmr-audit-YYYY-MM-DD.jsonl. A nil *Logger is a no-op sink.
 type Logger struct {
-	mu   sync.Mutex
-	dir  string
-	date string
-	f    *os.File
-	now  func() time.Time // injectable for tests
+	mu     sync.Mutex
+	dir    string
+	date   string
+	f      *os.File
+	closed bool             // set by Close; late Writes are dropped, never reopen a file
+	now    func() time.Time // injectable for tests
 
 	housekeeping atomic.Bool    // guards against overlapping sweeps
 	hkWG         sync.WaitGroup // lets tests wait for a sweep to finish (Close deliberately doesn't: compression is crash-safe, shutdown shouldn't block on it)
@@ -259,6 +260,12 @@ func (l *Logger) Write(rec *Record) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		// Shutdown edge: a handler that outlived the drain timeout is trying
+		// to record after Close. Refuse rather than write to a closed fd (or,
+		// across a midnight boundary, silently reopen a new day file).
+		return fmt.Errorf("audit: logger closed, record dropped")
+	}
 	date := l.now().Format("2006-01-02")
 	if l.f == nil || date != l.date {
 		if l.f != nil {
@@ -278,14 +285,22 @@ func (l *Logger) Write(rec *Record) error {
 	return err
 }
 
+// Close closes the current file and marks the logger closed (later Writes
+// are refused). It deliberately does NOT wait for an in-flight housekeeping
+// sweep: compression is crash-safe (temp file + rename + resume-on-restart),
+// housekeeping only ever touches already-rotated files — never the fd being
+// closed here — and blocking shutdown on a multi-GB zstd pass buys nothing.
 func (l *Logger) Close() error {
 	if l == nil {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.closed = true
 	if l.f != nil {
-		return l.f.Close()
+		err := l.f.Close()
+		l.f = nil
+		return err
 	}
 	return nil
 }
