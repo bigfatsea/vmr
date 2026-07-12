@@ -42,8 +42,8 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 # service mode — the OS init system supervises: crash auto-restart + start at login.
 # macOS → launchd user agent; Linux → systemd user unit. `install` renders and
 # registers the unit, and generates ~/.config/vmr/env (0600) from your current
-# shell for every ${VAR} in config.yaml plus proxy vars — init systems start
-# with a clean environment and would otherwise see empty keys.
+# shell for every ${VAR} referenced in config.yaml — init systems start with a
+# clean environment and would otherwise see empty keys.
 ./vmr.sh service install     # register + start (idempotent; rerun to update)
 ./vmr.sh service status      # also: start / stop / restart / logs
 ./vmr.sh service uninstall   # stop + unregister
@@ -84,6 +84,9 @@ listen: 127.0.0.1:8800
 # max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
 # max_request_body_mb: 8       # inbound request body size cap (stability only; the audit trail always records requests in full, whatever size vmr accepted)
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
+# https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy
+#                                      # (env vars are ignored; write ${HTTPS_PROXY} to reference one explicitly)
+# http_proxy: http://127.0.0.1:7890    # same for http base_urls (e.g. a LAN llama.cpp server); unset = all direct
 # image_downscale: 512         # long-side px cap for inline request images (default: off; a model's own setting overrides this, see below)
 # image_cache_ttl_days: 7      # eviction age for cached downscale results (default: 7 days)
 # audit_retention_days: 30     # delete audit files older than this (default: keep forever)
@@ -97,6 +100,11 @@ providers:
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}
+    minimax:
+      base_url: https://api.minimaxi.com/v1
+      api_key: ${MINIMAX_API_KEY}
+      proxy: false             # always connect directly, whatever https_proxy/env says —
+                               # typical when the proxy exists only for foreign providers
   anthropic:
     openrouter:                # same account's Anthropic face; same name, no conflict
       base_url: https://openrouter.ai/api/v1
@@ -115,7 +123,7 @@ models:
 
 All fields and validation rules: design doc §10. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one.
 
-Upstream connections honor the standard proxy environment variables (`HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`) — set them where vmr runs (dev shell, or the generated `~/.config/vmr/env` in service mode) if your providers are only reachable through a proxy.
+**Upstream proxy — explicit config only**: a provider's own `proxy: false` always wins (that provider connects directly — the domestic-plus-foreign provider mix this exists for); otherwise the global `http_proxy`/`https_proxy` above applies (chosen by the base_url's scheme); otherwise direct. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching global proxy is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
 ## Passthrough & normalization
 
@@ -196,7 +204,7 @@ models:
 | `POST /v1/messages` | Anthropic-protocol ingress (streaming + non-streaming) |
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
 | `GET /admin/status` | endpoint health + concurrency metrics (loopback only) |
-| `vmr check -c config.yaml` | validate config, print routing table and key status |
+| `vmr check -c config.yaml` | validate config, print routing table, key status and per-provider effective proxy |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip) |
 | `vmr dirs log\|cache` | print the resolved default audit/cache directory (what `vmr.sh` queries internally) |

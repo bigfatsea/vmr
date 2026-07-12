@@ -41,7 +41,7 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 
 # service 模式 —— 交给操作系统 init 系统监督：崩溃自动重启 + 登录自启。
 # macOS → launchd user agent；Linux → systemd 用户单元。install 会渲染并注册
-# 服务描述文件，同时从当前 shell 抓取 config.yaml 引用的全部 ${VAR} 与代理变量
+# 服务描述文件，同时从当前 shell 抓取 config.yaml 引用的全部 ${VAR}
 # 生成 ~/.config/vmr/env（0600）——init 系统的环境是干净的，否则 key 全为空。
 ./vmr.sh service install     # 注册并启动（幂等，改路径/配置后重跑即更新）
 ./vmr.sh service status      # 另有 start / stop / restart / logs
@@ -83,6 +83,9 @@ listen: 127.0.0.1:8800
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
 # max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
+# https_proxy: http://127.0.0.1:7890   # https 型 base_url 的上游代理——vmr 用代理的唯一途径
+#                                      # （环境变量被忽略；要引用就显式写 ${HTTPS_PROXY}）
+# http_proxy: http://127.0.0.1:7890    # http 型 base_url 同理（如局域网 llama.cpp）；都不设 = 全部直连
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
 # image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
 # audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
@@ -96,6 +99,11 @@ providers:
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}
+    minimax:
+      base_url: https://api.minimaxi.com/v1
+      api_key: ${MINIMAX_API_KEY}
+      proxy: false             # 该 provider 永远直连，无视 https_proxy 与环境变量——
+                               # 代理只为海外厂商而设、国内厂商直连的典型写法
   anthropic:
     openrouter:                # 同一账号的 Anthropic 面，同名不冲突（两层 map 天然隔离）
       base_url: https://openrouter.ai/api/v1
@@ -114,7 +122,7 @@ models:
 
 全部字段与校验规则见设计文档 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。
 
-上游连接遵循标准代理环境变量（`HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`）——若供应商只能经代理访问，在 vmr 运行的环境里设置即可（dev 模式的 shell，或 service 模式自动生成的 `~/.config/vmr/env`）。
+**上游代理——只认显式配置**：provider 自己的 `proxy: false` 最高优先（该 provider 永远直连——这正是"国内厂商直连 + 海外厂商走代理"混配场景的解法）；其次是上面的全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但全局没配对应代理是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
 
 ## 透传与归一化
 
@@ -195,7 +203,7 @@ models:
 | `POST /v1/messages` | Anthropic 协议入口（流式 + 非流式） |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /admin/status` | 端点健康 + 并发指标（仅 loopback） |
-| `vmr check -c config.yaml` | 校验配置、打印路由表与 Key 状态 |
+| `vmr check -c config.yaml` | 校验配置、打印路由表、Key 状态与每个 provider 的生效代理 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭） |
 | `vmr dirs log\|cache` | 打印默认审计/缓存目录的解析结果（`vmr.sh` 内部就是问这个） |

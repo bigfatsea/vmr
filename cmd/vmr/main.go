@@ -1,4 +1,4 @@
-// Ver 2026-07-12 03:10, by Fable 5
+// Ver 2026-07-13 00:30, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -17,6 +17,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -371,6 +372,9 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
+	for _, line := range providerProxyLines(cfg) {
+		logger.Printf("config: %s", line)
+	}
 
 	protocols := make([]string, 0, len(cfg.Models))
 	for protocol := range cfg.Models {
@@ -404,6 +408,47 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	}
 }
 
+// providerProxyLines renders one line per provider describing the proxy it
+// will actually use (a config proxy, or direct) — the answer to "why did
+// this provider('s traffic) go through the proxy" without tcpdump.
+// Credentials inside proxy URLs are masked (url.Redacted). Proxy
+// environment variables play no part: proxies are explicit config, and
+// "proxy: true with nothing configured" is a validation error long before
+// this renders.
+func providerProxyLines(cfg *config.Config) []string {
+	redact := func(raw string) string {
+		if u, err := url.Parse(raw); err == nil {
+			return u.Redacted()
+		}
+		return raw
+	}
+	var lines []string
+	protocols := make([]string, 0, len(cfg.Providers))
+	for protocol := range cfg.Providers {
+		protocols = append(protocols, protocol)
+	}
+	sort.Strings(protocols)
+	for _, protocol := range protocols {
+		names := make([]string, 0, len(cfg.Providers[protocol]))
+		for name := range cfg.Providers[protocol] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			p := cfg.Providers[protocol][name]
+			desc := "direct"
+			if p.Proxy != nil && !*p.Proxy {
+				desc = "direct (proxy: false)"
+			}
+			if mode, proxyURL := cfg.ProxySpecFor(p); mode == config.ProxyURL {
+				desc = redact(proxyURL)
+			}
+			lines = append(lines, fmt.Sprintf("provider %s/%s proxy=%s", protocol, name, desc))
+		}
+	}
+	return lines
+}
+
 func cmdCheck(args []string) error {
 	path, err := configFlag(args, "check")
 	if err != nil {
@@ -419,6 +464,9 @@ func cmdCheck(args []string) error {
 	}
 	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd\n",
 		cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
+	for _, line := range providerProxyLines(cfg) {
+		fmt.Println("  " + line)
+	}
 	protocols := make([]string, 0, len(cfg.Models))
 	for protocol := range cfg.Models {
 		protocols = append(protocols, protocol)
@@ -466,7 +514,11 @@ func cmdStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + cfg.Listen + "/admin/status")
+	// Bare Transport (nil Proxy): this is a local diagnostic call to vmr's
+	// own admin endpoint — it must never route through a proxy, and vmr
+	// ignores proxy environment variables everywhere by design (§10).
+	statusClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
+	resp, err := statusClient.Get("http://" + cfg.Listen + "/admin/status")
 	if err != nil {
 		return fmt.Errorf("is vmr running on %s? %w", cfg.Listen, err)
 	}

@@ -31,8 +31,8 @@ func stallingUpstream(t *testing.T, status int, bodyPrefix string) *httptest.Ser
 		w.(http.Flusher).Flush()
 		<-release
 	}))
-	t.Cleanup(srv.Close)                       // runs second (LIFO)
-	t.Cleanup(func() { close(release) })       // runs first: unparks handlers so Close returns
+	t.Cleanup(srv.Close)                 // runs second (LIFO)
+	t.Cleanup(func() { close(release) }) // runs first: unparks handlers so Close returns
 	return srv
 }
 

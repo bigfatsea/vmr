@@ -1,4 +1,4 @@
-// Ver 2026-07-08 20:15, by Sonnet 5
+// Ver 2026-07-12 17:30, by Fable 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -30,9 +30,21 @@ const (
 // so the outer map key IS the adapter type. This also lets the same short
 // name (e.g. "openrouter") appear once per protocol group without collision —
 // no more "_a" suffix hack for a provider's second protocol face.
+//
+// Proxy is a tri-state switch over this provider's upstream connections:
+// false = always direct, whatever the global proxy settings say (the
+// domestic-provider case: MiniMax/DeepSeek are reachable directly and a
+// proxy would only slow them down or break them); true or absent = follow
+// the global http_proxy/https_proxy settings. There is no environment
+// fallback anywhere — proxies are explicit config. The difference between
+// true and absent: true with no matching global proxy is a validation
+// error (a contradiction the config can state on its own), absent just
+// means direct when nothing is configured. Note yaml.v3 is YAML 1.2:
+// write true/false, not on/off.
 type Provider struct {
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
+	Proxy   *bool  `yaml:"proxy"`
 }
 
 // EndpointConfig.Provider resolves within the enclosing model's own protocol
@@ -96,8 +108,19 @@ type Config struct {
 	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
 	// audit logging (the audit trail records every request in full,
 	// whatever size vmr accepted).
-	MaxRequestBodyMB    int                               `yaml:"max_request_body_mb"`
-	MaxConcurrency      int                               `yaml:"max_concurrency"`      // 0 = unlimited; excess requests wait in memory
+	MaxRequestBodyMB int `yaml:"max_request_body_mb"`
+	MaxConcurrency   int `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
+	// HTTPProxy/HTTPSProxy are the global upstream proxy settings, selected
+	// by the provider base_url's scheme. These are the ONLY way vmr ever
+	// uses a proxy: proxy environment variables are deliberately ignored —
+	// an implicit knob that silently changes where traffic flows is exactly
+	// the kind of surprise a router shouldn't have. To feed a value from
+	// the environment, reference it explicitly (https_proxy: ${HTTPS_PROXY});
+	// ${VAR} expansion applies like everywhere else in the file. Unset =
+	// every provider connects directly. Per-provider exclusion is
+	// Provider.Proxy: false, not a second exclusion list.
+	HTTPProxy           string                            `yaml:"http_proxy"`
+	HTTPSProxy          string                            `yaml:"https_proxy"`
 	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, §7)
 	ImageCacheTTLDays   int                               `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int                               `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
@@ -192,6 +215,15 @@ func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
 	}
+	for name, val := range map[string]string{"http_proxy": c.HTTPProxy, "https_proxy": c.HTTPSProxy} {
+		if val == "" {
+			continue
+		}
+		u, err := url.Parse(val)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", name, val)
+		}
+	}
 	if countNested(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
@@ -206,6 +238,14 @@ func (c *Config) validate() error {
 			u, err := url.Parse(p.BaseURL)
 			if err != nil || u.Scheme == "" || u.Host == "" {
 				return fmt.Errorf("provider %q: invalid base_url %q", name, p.BaseURL)
+			}
+			// proxy: true with nothing to follow is a contradiction the
+			// config states entirely on its own (no environment involved),
+			// so it is rejected here rather than warned about at startup.
+			if p.Proxy != nil && *p.Proxy {
+				if mode, _ := c.ProxySpecFor(p); mode != ProxyURL {
+					return fmt.Errorf("provider %q: proxy: true but no global proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", name, u.Scheme)
+				}
 			}
 		}
 	}
@@ -239,3 +279,31 @@ func countNested[V any](m map[string]map[string]V) int {
 }
 
 func (c *Config) MaxRequestBodyBytes() int64 { return int64(c.MaxRequestBodyMB) << 20 }
+
+// Proxy resolution modes returned by ProxySpecFor.
+const (
+	ProxyDirect = "direct" // no proxy applies (provider opted out, or none configured)
+	ProxyURL    = "url"    // a global http_proxy/https_proxy from this config applies
+)
+
+// ProxySpecFor resolves which proxy applies to p's upstream connections:
+// the provider's own proxy: false wins (always direct); otherwise the
+// global config proxy matching the base_url's scheme, when set; otherwise
+// direct. There is no environment fallback — proxies are explicit config
+// only (reference ${HTTPS_PROXY} in the yaml to opt into an env value).
+// proxyURL is only non-empty for ProxyURL. The decision is static per
+// provider — the router builds one shared http.Client per distinct
+// resolution, not a per-request proxy callback.
+func (c *Config) ProxySpecFor(p Provider) (mode, proxyURL string) {
+	if p.Proxy != nil && !*p.Proxy {
+		return ProxyDirect, ""
+	}
+	cfgProxy := c.HTTPSProxy
+	if u, err := url.Parse(p.BaseURL); err == nil && u.Scheme == "http" {
+		cfgProxy = c.HTTPProxy
+	}
+	if cfgProxy != "" {
+		return ProxyURL, cfgProxy
+	}
+	return ProxyDirect, ""
+}

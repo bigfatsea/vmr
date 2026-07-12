@@ -18,6 +18,7 @@ import (
 //   - OpenRouter reports insufficient credits as 402 and moderation/guardrail
 //     blocks as 403 with "flagged"/"guardrail" in the body;
 //   - some providers report exhausted quota/balance as 429.
+//
 // classifySnippetBytes bounds the body sniff. Some vendors attach verbose
 // debug payloads to 4xx bodies; a marker past the cutoff would misclassify a
 // failover-able error as ErrClient (which never fails over), so lean large —

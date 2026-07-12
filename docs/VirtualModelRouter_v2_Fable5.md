@@ -461,6 +461,8 @@ api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
 max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 413）；仅为稳定性考虑，与审计记录无关——vmr 接受的请求，审计里永远是完整的那一份
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
+https_proxy: http://...       # 可选：https 型 base_url 的上游代理。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}
+http_proxy: http://...        # 可选：http 型 base_url 同理（如局域网 llama.cpp）；按 base_url 的 scheme 选用。都不设 = 全部直连
 image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
 image_cache_ttl_days: 7       # 降采样结果缓存的失效期（§7.1）；缺省/非正数 = 7 天
 audit_retention_days: 0       # 审计文件保留天数（§9.5）；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
@@ -474,6 +476,11 @@ providers:                       # "我有什么"——按协议分组，两层 
     <name>:
       base_url: https://...      # openai 型拼 /chat/completions；anthropic 型拼 /messages
       api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串
+      proxy: false               # 可选三态开关：false = 该 provider 永远直连（无视全局 http(s)_proxy，
+                                 # 国内厂商的典型写法）；true/缺省 = 跟随全局 http(s)_proxy。没有环境变量
+                                 # 回退。显式 true 与缺省的区别：true 但全局没配对应 scheme 的代理是校验
+                                 # 错误（拒绝加载），缺省则安静直连。yaml.v3 是 YAML 1.2，必须写
+                                 # true/false（on/off 不是 bool）
 
 models:                          # "对外叫什么、按什么顺序用"——同样按协议分组
   <protocol>:
@@ -490,11 +497,13 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs {log|cache}`（打印 `audit.Dir()`/`imgprep.CacheDir()` 的解析结果，不依赖 config，`vmr.sh` 内部用它代替自己算一份公式，见 §7.1）。环境变量：`VMR_LOG_DIR`（审计目录，缺省 `~/.vmr/logs`）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省 `~/.vmr/image_cache`）、配置内 `${VAR}` 展开引用的任意变量、标准代理变量 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`（上游连接遵循 `http.ProxyFromEnvironment`；2026-07-12 修复——此前手工构造的 Transport 未设 Proxy 字段，代理变量被静默忽略，与 vmr.sh 特意把代理变量注入 service 环境的行为自相矛盾）。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但全局没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记与每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs {log|cache}`（打印 `audit.Dir()`/`imgprep.CacheDir()` 的解析结果，不依赖 config，`vmr.sh` 内部用它代替自己算一份公式，见 §7.1）。环境变量：`VMR_LOG_DIR`（审计目录，缺省 `~/.vmr/logs`）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省 `~/.vmr/image_cache`）、配置内 `${VAR}` 展开引用的任意变量。**代理环境变量（`HTTPS_PROXY` 等）被有意忽略**——见下段。
 
-**启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
+**上游代理：显式配置，两层解析**（2026-07-12）：① provider 自己的 `proxy: false` 最高优先——永远直连（国内厂商 + 海外厂商混配是它的目标场景：代理只为海外厂商而设，国内厂商走代理只会变慢甚至不通）；② 全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到（曾经的实际形态就是"设过一次 HTTPS_PROXY 的 shell 里启动的 vmr 悄悄把全部上游流量导进了代理"），vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，且 vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境（专门抓代理变量的逻辑已随之删除）。`proxy: true` 但全局没配对应 scheme 的代理是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
 
-**vmr.sh（唯一脚本入口，双模式）**：dev 模式（`start/stop/restart/status/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置；service 模式（`service install/uninstall/start/stop/restart/status/logs`）把监督交给 init 系统——macOS 渲染 launchd user agent（`~/Library/LaunchAgents/com.vmr.plist`，KeepAlive+RunAtLoad，stop 走 `bootout` 避免 KeepAlive 复活被杀进程），Linux 渲染 systemd 用户单元（`Restart=always`；系统级部署把 unit 拷到 `/etc/systemd/system` 去掉 `--user` 即可）。模板内嵌于脚本（heredoc 注入绝对路径），不设独立模板目录。**环境是 service 模式的第一大坑**：init 系统不继承 shell 的 export，`install` 自动从当前 shell 抓取 config 引用的 `${VAR}` 与代理变量生成 `~/.config/vmr/env`（0600，存在则不覆盖），launchd 经 `set -a; . env` 加载（不 `set -a` 则 source 的变量不会进入 exec 后的进程环境），systemd 经 `EnvironmentFile=`。`VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 不走这条 `${VAR}` 抓取路径（两者都不是 config.yaml 里的引用）——脚本单独用 `"$BIN" dirs log`/`"$BIN" dirs cache` 查出解析结果，再通过 plist 的 `export`/systemd 的 `Environment=` 显式注入，dev 模式的 `nohup` 前缀同理，两个变量待遇完全对称（§7.1）。macOS 第二坑：TCC 禁止 launchd/sh 对外置卷做文件操作（spawn 报 EX_CONFIG / Operation not permitted），但 vmr 进程自身写卷不受限——故 plist 的 WorkingDirectory 指 `$HOME`、服务日志落 `~/Library/Logs/vmr.log`（macOS 惯例），审计照常写 `VMR_LOG_DIR`。两模式互斥：service install/start 自动停 dev 进程。均经 macOS 实机全周期验证（install→E2E→kill -9 自愈→stop→start→uninstall）。
+**启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 provider 的生效代理（凭证掩码）、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
+
+**vmr.sh（唯一脚本入口，双模式）**：dev 模式（`start/stop/restart/status/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置；service 模式（`service install/uninstall/start/stop/restart/status/logs`）把监督交给 init 系统——macOS 渲染 launchd user agent（`~/Library/LaunchAgents/com.vmr.plist`，KeepAlive+RunAtLoad，stop 走 `bootout` 避免 KeepAlive 复活被杀进程），Linux 渲染 systemd 用户单元（`Restart=always`；系统级部署把 unit 拷到 `/etc/systemd/system` 去掉 `--user` 即可）。模板内嵌于脚本（heredoc 注入绝对路径），不设独立模板目录。**环境是 service 模式的第一大坑**：init 系统不继承 shell 的 export，`install` 自动从当前 shell 抓取 config 引用的 `${VAR}` 生成 `~/.config/vmr/env`（0600，存在则不覆盖；只抓 config 显式引用的变量，不隐式抓代理变量——代理是 config 字段，config 里写了 `${HTTPS_PROXY}` 这条通用抓取自然覆盖），launchd 经 `set -a; . env` 加载（不 `set -a` 则 source 的变量不会进入 exec 后的进程环境），systemd 经 `EnvironmentFile=`。`VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 不走这条 `${VAR}` 抓取路径（两者都不是 config.yaml 里的引用）——脚本单独用 `"$BIN" dirs log`/`"$BIN" dirs cache` 查出解析结果，再通过 plist 的 `export`/systemd 的 `Environment=` 显式注入，dev 模式的 `nohup` 前缀同理，两个变量待遇完全对称（§7.1）。macOS 第二坑：TCC 禁止 launchd/sh 对外置卷做文件操作（spawn 报 EX_CONFIG / Operation not permitted），但 vmr 进程自身写卷不受限——故 plist 的 WorkingDirectory 指 `$HOME`、服务日志落 `~/Library/Logs/vmr.log`（macOS 惯例），审计照常写 `VMR_LOG_DIR`。两模式互斥：service install/start 自动停 dev 进程。均经 macOS 实机全周期验证（install→E2E→kill -9 自愈→stop→start→uninstall）。
 
 ---
 
@@ -544,6 +553,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | `audit_retention_days` 缺省 0（永久保留） | 缺省一个"合理"天数（如 30） | 审计日志是 `vmr report` 成本核算的唯一数据源，非用户主动设置就被静默删除的风险 > 磁盘空间收益；压缩（§9.5 无条件发生）已经解决了大头的磁盘占用问题，保留期清理是可选的第二层 |
 | model 改写用字节 splice，只动顶层 `model` 值（§5，2026-07-12） | `map[string]json.RawMessage` 全量 unmarshal + 重新序列化（旧实现） | 旧路径每次 failover attempt 都要把整个 body 解析再重排序列化——主路径最大的单项 CPU 成本（200KB 实测 1.33ms/attempt），且键序/空白被改写，偏离"直连等价"。splice 单趟免分配扫描 + 三段拼接，快约 13 倍、分配减半，客户端原文除 model 值外逐字节保留；扫不动的形态回退旧路径，行为不变 |
 | `BuildRequest` 一并返回出站 body；`audit.EncodeBody` 引用不克隆（2026-07-12） | router 用 `GetBody()+io.ReadAll` 再读一份；EncodeBody 防御性拷贝 | 改写后的 body 本来就在 adapter 手里，为审计再拷两份纯属浪费（大 body 每 attempt 多两次全量拷贝）。代价是一条所有权契约：交给 EncodeBody 的 slice 此后不得改写——五个调用点（client 请求缓冲、recorder 响应缓冲、attempt 出站 body、上游错误 body、归一化 pre-strip 快照）都是终态字节，契约天然成立 |
+| 代理纯显式两层解析：provider 级 `proxy: false` > 全局 `http(s)_proxy`，**无环境变量回退**；按解析结果分组建 Client（§10，2026-07-12） | 单一 `ProxyFromEnvironment`（旧实现）/ config 优先 + env 回退（同日上一版）/ 每请求动态 Proxy 回调 / config 级 `no_proxy` 清单 | 纯环境变量是全有全无：国内直连 + 海外走代理混配时只能靠 `NO_PROXY` 在 vmr 之外绕。env 回退随后也被砍掉：隐式旋钮悄悄决定流量走向，最容易被忽略、排障时最难想到——流量去哪必须在 config.yaml 里读得出来，要引用 env 就显式写 `${HTTPS_PROXY}`。provider 级布尔开关粒度恰好（provider ≙ base_url ≙ host），config 级 `no_proxy` 因此多余。全显式的附带收益：`proxy: true` 无代理可跟从这个矛盾变成静态可判，从启动 WARNING 升级为校验错误；解析不再依赖运行环境，热重载语义完整。每请求回调换取不到任何灵活性——解析对 provider 是静态的，快照期分组建 Client（典型 1~2 组，连接池按组共享，请求期零开销） |
 
 ---
 

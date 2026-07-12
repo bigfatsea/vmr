@@ -1,4 +1,4 @@
-# Ver 2026-07-09 00:00, by Sonnet 5
+# Ver 2026-07-12 17:30, by Fable 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -11,6 +11,10 @@ listen: 127.0.0.1:8800
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
+# https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy (env vars are
+#                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly); a provider's own
+#                                      # `proxy: false` always wins; unset = every provider connects directly
+# http_proxy: http://127.0.0.1:7890    # same, for http base_urls (e.g. a LAN llama.cpp server)
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
 # audit_retention_days: 30       # delete audit files older than this; 0/absent = keep forever (rotation always compresses old days to .zst regardless)
@@ -24,6 +28,13 @@ providers:
     minimax:
       base_url: https://api.minimaxi.com/v1
       api_key: ${MINIMAX_PLAN_KEY}
+      # proxy: false               # per-provider switch: false = always connect
+      #                            # directly, whatever https_proxy says (typical
+      #                            # for domestic providers when the proxy only
+      #                            # exists for the foreign ones); true/absent =
+      #                            # follow https_proxy above. No env fallback;
+      #                            # true without a global proxy fails validation.
+      #                            # YAML 1.2: write true/false, not on/off.
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}

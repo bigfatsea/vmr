@@ -637,7 +637,7 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	rs := newRespStream(strings.NewReader(""), "agent", true, "openai", false)
 	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"
-	for i := 0; i < 40 && !rs.opaque; i++ {     // 40MB > bufferedCap (32MB)
+	for i := 0; i < 40 && !rs.opaque; i++ {    // 40MB > bufferedCap (32MB)
 		rs.ingest(filler)
 	}
 	if !rs.opaque {

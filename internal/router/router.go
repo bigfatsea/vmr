@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-13 00:30, by Fable 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,7 +64,21 @@ type Snapshot struct {
 	Cfg    *config.Config
 	Models map[string]map[string]*ModelRoute
 
-	client *http.Client // built in Install; travels with the snapshot to avoid races
+	// clients maps "<protocol>/<provider>" to the http.Client serving that
+	// provider. Built in Install (travels with the snapshot to avoid races);
+	// providers with the same effective proxy resolution (§config.ProxySpecFor)
+	// share one client, so connection pooling stays per proxy group —
+	// typically one or two clients per snapshot. clientSet is the distinct
+	// set, kept for closing idle connections when the snapshot is replaced.
+	clients   map[string]*http.Client
+	clientSet []*http.Client
+}
+
+// clientFor returns the http.Client that carries this endpoint's provider.
+// Coverage is guaranteed by construction: BuildSnapshot resolves endpoints
+// from the same Cfg.Providers map Install builds clients from.
+func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
+	return s.clients[ep.AdapterType+"/"+ep.Provider]
 }
 
 // BuildSnapshot resolves provider references into concrete endpoints. Because
@@ -121,25 +136,52 @@ func New(logger *log.Logger) *Router {
 }
 
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.
+// One http.Client is built per distinct proxy resolution (direct, or a config
+// proxy URL) and shared by every provider that resolves the same way — the
+// per-provider proxy switch never costs a per-request check.
 func (rt *Router) Install(s *Snapshot) {
-	s.client = &http.Client{Transport: &http.Transport{
-		// A hand-built Transport starts with a nil Proxy — unlike
-		// http.DefaultTransport — which silently ignores HTTPS_PROXY/
-		// HTTP_PROXY/NO_PROXY. vmr.sh deliberately propagates those
-		// variables into the service environment, so honor them.
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: s.Cfg.Timeouts.Connect.D()}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
-		ResponseHeaderTimeout: s.Cfg.Timeouts.ResponseHeader.D(),
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
-	}}
+	mkClient := func(proxy func(*http.Request) (*url.URL, error)) *http.Client {
+		return &http.Client{Transport: &http.Transport{
+			Proxy:                 proxy,
+			DialContext:           (&net.Dialer{Timeout: s.Cfg.Timeouts.Connect.D()}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
+			ResponseHeaderTimeout: s.Cfg.Timeouts.ResponseHeader.D(),
+			MaxIdleConnsPerHost:   16,
+			IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
+		}}
+	}
+	byResolution := map[string]*http.Client{}
+	s.clients = map[string]*http.Client{}
+	for protocol, byName := range s.Cfg.Providers {
+		for name, p := range byName {
+			mode, proxyURL := s.Cfg.ProxySpecFor(p)
+			key := mode + "|" + proxyURL
+			c, ok := byResolution[key]
+			if !ok {
+				// nil Proxy = direct. Proxy environment variables are
+				// deliberately not consulted — proxies are explicit config
+				// (config.Config.HTTPProxy/HTTPSProxy), nothing implicit.
+				var proxyFn func(*http.Request) (*url.URL, error)
+				if mode == config.ProxyURL {
+					if u, err := url.Parse(proxyURL); err == nil { // validated at config load
+						proxyFn = http.ProxyURL(u)
+					}
+				}
+				c = mkClient(proxyFn)
+				byResolution[key] = c
+				s.clientSet = append(s.clientSet, c)
+			}
+			s.clients[protocol+"/"+name] = c
+		}
+	}
 	rt.installLimiter(s.Cfg.MaxConcurrency)
-	if old := rt.snap.Swap(s); old != nil && old.client != nil {
-		// Release the previous pool's idle connections now instead of
+	if old := rt.snap.Swap(s); old != nil {
+		// Release the previous pools' idle connections now instead of
 		// waiting for GC. In-flight requests still holding the old
 		// snapshot are unaffected — their connections are active.
-		old.client.CloseIdleConnections()
+		for _, c := range old.clientSet {
+			c.CloseIdleConnections()
+		}
 	}
 }
 
@@ -359,7 +401,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		att.Request = audit.NewMessage(req.Header, outBody)
 	}
 
-	resp, err := snap.client.Do(req)
+	resp, err := snap.clientFor(ep).Do(req)
 	if err != nil {
 		if r.Context().Err() != nil {
 			// Client went away; nothing to write, don't punish the endpoint.

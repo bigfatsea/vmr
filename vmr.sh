@@ -140,10 +140,12 @@ platform() {
   esac
 }
 
-# write_env_file: collect every ${VAR} referenced in config.yaml — plus any
-# proxy variables (upstreams may be unreachable without them) — from the
-# current shell into ENV_FILE (0600). Never overwrites an existing file —
-# edit it by hand after the first install.
+# write_env_file: collect every ${VAR} referenced in config.yaml from the
+# current shell into ENV_FILE (0600). Nothing is grabbed implicitly — proxy
+# settings live in config.yaml (http_proxy/https_proxy fields), and if the
+# config references ${HTTPS_PROXY} explicitly, this generic scrape picks it
+# up like any other variable. Never overwrites an existing file — edit it
+# by hand after the first install.
 write_env_file() {
   if [[ -f "$ENV_FILE" ]]; then
     echo "env file kept: $ENV_FILE (edit it if keys changed)"
@@ -159,9 +161,6 @@ write_env_file() {
     else
       missing+=("$var")
     fi
-  done
-  for var in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy; do
-    [[ -n "${!var:-}" ]] && printf '%s=%s\n' "$var" "${!var}" >> "$ENV_FILE"
   done
   echo "env file written: $ENV_FILE ($(grep -c . "$ENV_FILE" || true) vars)"
   if [[ ${#missing[@]} -gt 0 ]]; then
