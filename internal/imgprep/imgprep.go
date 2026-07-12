@@ -251,6 +251,9 @@ func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json
 		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
 	}
 	newData, newMime, changed, info, err := processImage(data, opts)
+	if info.Format == "" { // header decode failed: nothing meaningful to record
+		return raw, false, nil, nil
+	}
 	info.MessageIndex = msgIndex
 	if err != nil || !changed {
 		return raw, false, &info, nil
@@ -297,6 +300,9 @@ func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]j
 		return raw, false, nil, nil
 	}
 	newData, newMime, changed, info, err := processImage(data, opts)
+	if info.Format == "" { // header decode failed: nothing meaningful to record
+		return raw, false, nil, nil
+	}
 	info.MessageIndex = msgIndex
 	if err != nil || !changed {
 		return raw, false, &info, nil

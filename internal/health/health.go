@@ -116,8 +116,11 @@ func (r *Registry) ReportFailure(key string, class core.ErrorClass, retryAfter t
 		d = backoff(longBase, longCap, s.fails)
 	default:
 		// Retry-After is honored beyond 429: OpenRouter sends it on 503 too.
+		// Capped at longCap: it is upstream-controlled input, and a bogus
+		// huge value must not lock an endpoint out until process restart —
+		// the same "recovery promptness over precision" call as ErrEndpoint.
 		if retryAfter > 0 {
-			d = retryAfter
+			d = min(retryAfter, longCap)
 		} else {
 			d = backoff(transientBase, transientCap, s.fails)
 		}

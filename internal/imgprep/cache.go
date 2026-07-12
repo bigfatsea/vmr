@@ -15,12 +15,15 @@ import (
 )
 
 // CacheDir resolves the on-disk downscale cache directory: $VMR_IMG_CACHE_DIR
-// if set (used exactly as given), else a vmr_image_cache subdirectory of the
-// system temp dir — see internal/rundir for the full fallback chain, shared
-// with audit.Dir so dev mode and service mode always agree on the default
-// without vmr.sh keeping its own copy of this formula.
+// if set (used exactly as given), else the persistent ~/.vmr/image_cache —
+// see internal/rundir for the full fallback chain, shared with audit.Dir so
+// dev mode and service mode always agree on the default without vmr.sh
+// keeping its own copy of this formula. Persistent rather than the system
+// temp dir: the cache's whole value is byte-stable reuse across days
+// (upstream prompt caches key on exact bytes), and macOS purges temp
+// entries after ~3 days of no access.
 func CacheDir() string {
-	return rundir.Resolve("VMR_IMG_CACHE_DIR", "vmr_image_cache", "image_cache")
+	return rundir.Resolve("VMR_IMG_CACHE_DIR", "image_cache", "vmr_image_cache", "image_cache")
 }
 
 // cacheFileName is the cache key: sha256 of the original (pre-downscale)

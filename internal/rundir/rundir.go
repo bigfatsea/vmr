@@ -1,4 +1,4 @@
-// Ver 2026-07-10 00:00, by Sonnet 5
+// Ver 2026-07-12 12:00, by Fable 5
 
 // Package rundir resolves the on-disk directories vmr picks by default when
 // the caller hasn't named one explicitly (audit logs, image-downscale
@@ -15,31 +15,48 @@ import (
 	"path/filepath"
 )
 
-// Resolve applies the three-tier default, most to least specific:
+// Resolve applies the four-tier default, most to least specific:
 //
 //  1. $<envVar>, if set — used exactly as given, no subdir appended. An
 //     explicit path is the caller's own choice; adding a subdir under it
 //     would surprise anyone who set the variable expecting it to be the
 //     directory, not a parent of it.
-//  2. os.TempDir()/<tmpSubdir> — the common case when the variable is
-//     unset. Namespaced under a vmr_-prefixed subdir because the system
-//     temp dir is shared with every other process on the machine.
-//  3. <cwd>/<pwdSubdir> — only reached if os.TempDir() itself returns "",
-//     which none of Go's supported platforms actually do (unix falls back
-//     to /tmp, Windows/Plan9 have their own built-in defaults). Kept as a
+//  2. ~/.vmr/<homeSubdir> — the common case when the variable is unset.
+//     A persistent per-user dotdir, NOT the system temp dir: macOS purges
+//     $TMPDIR entries not accessed for ~3 days (and on reboot), which
+//     silently deleted audit history in practice — fatal for data whose
+//     whole point is long-term cost accounting (§9.5: audit files are the
+//     only data source for vmr report).
+//  3. os.TempDir()/<tmpSubdir> — only when the home directory cannot be
+//     resolved (no $HOME in a stripped-down service environment).
+//     Namespaced under a vmr_-prefixed subdir because the system temp dir
+//     is shared with every other process on the machine.
+//  4. <cwd>/<pwdSubdir> — only reached if os.TempDir() itself returns "",
+//     which none of Go's supported platforms actually do. Kept as a
 //     defensive last resort, not a realistic path in practice.
-func Resolve(envVar, tmpSubdir, pwdSubdir string) string {
-	return resolve(os.Getenv(envVar), os.TempDir(), tmpSubdir, cwd(), pwdSubdir)
+func Resolve(envVar, homeSubdir, tmpSubdir, pwdSubdir string) string {
+	return resolve(os.Getenv(envVar), home(), homeSubdir, os.TempDir(), tmpSubdir, cwd(), pwdSubdir)
 }
 
-func resolve(envVal, tmpDir, tmpSubdir, wd, pwdSubdir string) string {
+func resolve(envVal, homeDir, homeSubdir, tmpDir, tmpSubdir, wd, pwdSubdir string) string {
 	if envVal != "" {
 		return envVal
+	}
+	if homeDir != "" {
+		return filepath.Join(homeDir, ".vmr", homeSubdir)
 	}
 	if tmpDir != "" {
 		return filepath.Join(tmpDir, tmpSubdir)
 	}
 	return filepath.Join(wd, pwdSubdir)
+}
+
+func home() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return h
 }
 
 func cwd() string {

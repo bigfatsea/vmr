@@ -438,3 +438,45 @@ func TestBuild_ProtocolSplitsRows(t *testing.T) {
 		t.Errorf("protocol split wrong: %v", protos)
 	}
 }
+
+func TestForEachLineSkipsOversizedLines(t *testing.T) {
+	input := "short1\n" + strings.Repeat("x", 100) + "\nshort2\n"
+	var got []string
+	skipped := 0
+	err := forEachLine(strings.NewReader(input), 32, func(line []byte) {
+		got = append(got, string(line))
+	}, func() { skipped++ })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped = %d, want 1", skipped)
+	}
+	if len(got) != 2 || got[0] != "short1" || got[1] != "short2" {
+		t.Errorf("lines = %q, want [short1 short2]", got)
+	}
+}
+
+func TestForEachLineHandlesFinalLineWithoutNewline(t *testing.T) {
+	var got []string
+	err := forEachLine(strings.NewReader("a\nb"), 32, func(line []byte) {
+		got = append(got, string(line))
+	}, nil)
+	if err != nil || len(got) != 2 || got[1] != "b" {
+		t.Errorf("got %q err=%v, want [a b]", got, err)
+	}
+}
+
+func TestWorkloadsTokensKnownCountsUsageBearingRecordsOnly(t *testing.T) {
+	a := &SessionAnalysis{Recs: []*ReqInfo{
+		{Usage: Usage{In: 100, Out: 10}, UsageOK: true},
+		{}, // no extractable usage: must not dilute the per-request averages
+	}}
+	rows := a.Workloads()
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Requests != 2 || rows[0].TokensKnown != 1 {
+		t.Errorf("requests=%d tokens_known=%d, want 2 and 1", rows[0].Requests, rows[0].TokensKnown)
+	}
+}

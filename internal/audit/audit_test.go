@@ -138,7 +138,11 @@ func TestDirEnv(t *testing.T) {
 		t.Errorf("env dir: %s", Dir())
 	}
 	t.Setenv("VMR_LOG_DIR", "")
-	want := filepath.Join(os.TempDir(), "vmr_logs")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir in this environment")
+	}
+	want := filepath.Join(home, ".vmr", "logs")
 	if Dir() != want {
 		t.Errorf("default dir: got %s, want %s", Dir(), want)
 	}

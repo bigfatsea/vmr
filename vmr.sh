@@ -49,7 +49,7 @@ ensure_bin() {
 ensure_bin   # both dirs below query the binary, so it must exist first
 
 # LOG_DIR (audit JSONL + server log) and CACHE_DIR (image-downscale cache)
-# both come from `vmr dirs` — the binary's own env-var-or-temp-dir-or-cwd
+# both come from `vmr dirs` — the binary's own env-var-or-~/.vmr-or-temp-dir
 # default formula (internal/rundir) — instead of a bash copy of that logic,
 # so dev mode and service mode can never disagree with what the running
 # process actually resolves. Override via VMR_LOG_DIR / VMR_IMG_CACHE_DIR in

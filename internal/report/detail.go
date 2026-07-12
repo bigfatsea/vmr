@@ -9,7 +9,6 @@
 package report
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -75,14 +74,16 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 		if err != nil {
 			return len(entries), err
 		}
-		sc := bufio.NewScanner(rc)
-		sc.Buffer(make([]byte, 1<<20), 128<<20)
 		line := 0
-		for sc.Scan() {
+		var writeErr error
+		scanErr := forEachLine(rc, maxAuditLine, func(lineBytes []byte) {
 			line++
+			if writeErr != nil {
+				return
+			}
 			var rec audit.Record
-			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
-				continue // Build already counts parse errors
+			if err := json.Unmarshal(lineBytes, &rec); err != nil {
+				return // Build already counts parse errors
 			}
 			info := sess.Lookup(path, line)
 			name := ""
@@ -93,8 +94,8 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 				name = detailFileName(&rec, used)
 			}
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec, info)), 0o644); err != nil {
-				rc.Close()
-				return len(entries), err
+				writeErr = err
+				return
 			}
 			// Same-named .json alongside the .md: the raw record, for
 			// readers who want to jq/query a single request instead of
@@ -102,8 +103,8 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 			if raw, err := json.MarshalIndent(&rec, "", "  "); err == nil {
 				jsonName := strings.TrimSuffix(name, ".md") + ".json"
 				if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o644); err != nil {
-					rc.Close()
-					return len(entries), err
+					writeErr = err
+					return
 				}
 			}
 			e := indexEntry{ts: rec.TS, file: name, model: displayModel(&rec),
@@ -122,10 +123,13 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 				e.usage, e.usageOK = ExtractUsage(rec.Client.Response.Body)
 			}
 			entries = append(entries, e)
-		}
+		}, func() { line++ }) // skipped lines still advance the counter so sess.Lookup keys stay aligned with AnalyzeSessions
 		rc.Close()
-		if err := sc.Err(); err != nil {
-			return len(entries), fmt.Errorf("%s: %w", path, err)
+		if writeErr != nil {
+			return len(entries), writeErr
+		}
+		if scanErr != nil {
+			return len(entries), fmt.Errorf("%s: %w", path, scanErr)
 		}
 	}
 

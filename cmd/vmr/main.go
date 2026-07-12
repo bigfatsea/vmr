@@ -74,7 +74,7 @@ func usage() {
 
 // cmdDirs prints the resolved runtime directory for "log" (audit.Dir) or
 // "cache" (imgprep.CacheDir) — the single source of truth for the
-// env-var-or-temp-dir-or-cwd default formula (internal/rundir). vmr.sh
+// env-var-or-~/.vmr-or-temp-dir default formula (internal/rundir). vmr.sh
 // queries this instead of keeping its own copy of the fallback logic, so
 // dev mode and service mode can never disagree with what the running
 // process actually resolves. Independent of config — these two directories

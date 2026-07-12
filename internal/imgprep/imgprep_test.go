@@ -618,7 +618,11 @@ func TestCacheDirEnv(t *testing.T) {
 		t.Errorf("env dir: %s", CacheDir())
 	}
 	t.Setenv("VMR_IMG_CACHE_DIR", "")
-	want := filepath.Join(os.TempDir(), "vmr_image_cache")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir in this environment")
+	}
+	want := filepath.Join(home, ".vmr", "image_cache")
 	if CacheDir() != want {
 		t.Errorf("default dir: got %s, want %s", CacheDir(), want)
 	}

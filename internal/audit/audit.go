@@ -144,7 +144,11 @@ func EncodeBody(body []byte) any {
 }
 
 // credentialHeaders are recorded masked: only the last 4 characters survive.
-var credentialHeaders = []string{"Authorization", "X-Api-Key", "Api-Key", "X-Auth-Token"}
+// Cookie/Proxy-Authorization never reach the upstream (server blocklist),
+// but they arrive on the client request and would otherwise sit in the
+// audit file in cleartext; Set-Cookie covers upstream/CDN session tokens
+// on the response side.
+var credentialHeaders = []string{"Authorization", "X-Api-Key", "Api-Key", "X-Auth-Token", "Cookie", "Set-Cookie", "Proxy-Authorization"}
 
 // Redact copies headers, masking credential values ("Bearer sk-…" → "***c1d4").
 func Redact(h http.Header) http.Header {
@@ -190,16 +194,18 @@ type Logger struct {
 	now  func() time.Time // injectable for tests
 
 	housekeeping atomic.Bool    // guards against overlapping sweeps
-	hkWG         sync.WaitGroup // lets Close (and tests) wait for a sweep to finish
+	hkWG         sync.WaitGroup // lets tests wait for a sweep to finish (Close deliberately doesn't: compression is crash-safe, shutdown shouldn't block on it)
 }
 
 // Dir resolves the audit directory: $VMR_LOG_DIR if set (used exactly as
-// given), else a vmr_logs subdirectory of the system temp dir — see
-// internal/rundir for the full fallback chain, shared with
-// imgprep.CacheDir so dev mode and service mode always agree on the
-// default without vmr.sh keeping its own copy of this formula.
+// given), else the persistent ~/.vmr/logs — see internal/rundir for the
+// full fallback chain, shared with imgprep.CacheDir so dev mode and
+// service mode always agree on the default without vmr.sh keeping its own
+// copy of this formula. Persistent (not the system temp dir) on purpose:
+// macOS purges temp entries after ~3 days of no access, which is silent
+// data loss for the only source vmr report has.
 func Dir() string {
-	return rundir.Resolve("VMR_LOG_DIR", "vmr_logs", "logs")
+	return rundir.Resolve("VMR_LOG_DIR", "logs", "vmr_logs", "logs")
 }
 
 func New(dir string) (*Logger, error) {

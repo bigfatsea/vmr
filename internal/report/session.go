@@ -14,7 +14,6 @@
 package report
 
 import (
-	"bufio"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
@@ -166,22 +165,20 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 		if err != nil {
 			return nil, err
 		}
-		sc := bufio.NewScanner(rc)
-		sc.Buffer(make([]byte, 1<<20), 128<<20)
 		line := 0
-		for sc.Scan() {
+		scanErr := forEachLine(rc, maxAuditLine, func(lineBytes []byte) {
 			line++
 			var rec audit.Record
-			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
-				continue
+			if err := json.Unmarshal(lineBytes, &rec); err != nil {
+				return
 			}
 			r := collect(&rec, path, line)
 			a.Recs = append(a.Recs, r)
 			a.byKey[fmt.Sprintf("%s\x00%d", path, line)] = r
-		}
+		}, func() { line++ }) // skipped oversized lines still advance the physical line number
 		rc.Close()
-		if err := sc.Err(); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+		if scanErr != nil {
+			return nil, fmt.Errorf("%s: %w", path, scanErr)
 		}
 	}
 

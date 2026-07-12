@@ -155,7 +155,9 @@ func (a *SessionAnalysis) Workloads() []WorkloadRow {
 		row.TokensInCached += r.Usage.CacheRead
 		row.TokensInCacheWrite += r.Usage.CacheWrite
 		row.TokensOut += r.Usage.Out
-		row.TokensKnown++
+		if r.UsageOK { // denominator of the per-request averages: usage-bearing records only
+			row.TokensKnown++
+		}
 		row.BytesIn += r.bytesIn
 		row.BytesOut += r.bytesOut
 		if n := r.Msgs; n > 0 {

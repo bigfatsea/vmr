@@ -135,3 +135,15 @@ func TestStatus(t *testing.T) {
 		t.Errorf("status: %+v", st)
 	}
 }
+
+func TestRetryAfterCappedAtOneHour(t *testing.T) {
+	r := New()
+	// Retry-After is upstream-controlled input; a bogus huge value must not
+	// lock the endpoint out beyond the long-cooldown cap (1h).
+	if got := r.ReportFailure("e", core.ErrRateLimit, 48*time.Hour, t0); got != time.Hour {
+		t.Errorf("retry-after must be capped at 1h, got %v", got)
+	}
+	if !r.Available("e", t0.Add(time.Hour+time.Second)) {
+		t.Error("should be half-open after the capped cooldown expires")
+	}
+}

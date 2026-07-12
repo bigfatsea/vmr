@@ -7,6 +7,7 @@ package report
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -308,16 +309,12 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 		if err != nil {
 			return nil, err
 		}
-		sc := bufio.NewScanner(rc)
-		// One line can hold several bodies recorded in full — size the
-		// scanner generously.
-		sc.Buffer(make([]byte, 1<<20), 128<<20)
-		for sc.Scan() {
+		scanErr := forEachLine(rc, maxAuditLine, func(lineBytes []byte) {
 			var rec audit.Record
-			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			if err := json.Unmarshal(lineBytes, &rec); err != nil {
 				rep.Meta.ParseErrors++
 				fileErrors++
-				continue
+				return
 			}
 			rep.Meta.Records++
 			fileRecords++
@@ -420,10 +417,13 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 					addEndpointRequest(epAll, &rec, usage, usageOK)
 				}
 			}
-		}
+		}, func() { // oversized line: skipped with bounded memory, counted as a parse error
+			rep.Meta.ParseErrors++
+			fileErrors++
+		})
 		rc.Close()
-		if err := sc.Err(); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+		if scanErr != nil {
+			return nil, fmt.Errorf("%s: %w", path, scanErr)
 		}
 		if progress != nil {
 			fmt.Fprintf(progress, "[%d/%d] %s  done: %d records, %d parse errors (%s)\n",
@@ -503,6 +503,52 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 		return rep.ByDate[i].Date < rep.ByDate[j].Date
 	})
 	return rep, nil
+}
+
+// maxAuditLine bounds how much of one JSONL line is held in memory while
+// scanning (bodies are recorded in full, so lines can be large). A line
+// beyond the cap is skipped — reported through onSkip and counted as a
+// parse error by Build — instead of aborting the whole aggregation, which
+// is what the previous bufio.Scanner did on ErrTooLong.
+const maxAuditLine = 128 << 20
+
+// forEachLine invokes fn for every non-empty line in r (trailing \n
+// stripped). Lines longer than maxLine are drained with bounded memory and
+// reported via onSkip (nilable) instead of failing the scan. The line slice
+// is reused between calls — fn must not retain it.
+func forEachLine(r io.Reader, maxLine int, fn func(line []byte), onSkip func()) error {
+	br := bufio.NewReaderSize(r, 1<<20)
+	var buf []byte
+	tooLong := false
+	for {
+		frag, err := br.ReadSlice('\n')
+		if !tooLong {
+			if len(buf)+len(frag) > maxLine {
+				tooLong, buf = true, buf[:0]
+			} else {
+				buf = append(buf, frag...)
+			}
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return err
+		}
+		line := bytes.TrimSuffix(buf, []byte("\n"))
+		switch {
+		case tooLong:
+			if onSkip != nil {
+				onSkip()
+			}
+		case len(line) > 0:
+			fn(line)
+		}
+		buf, tooLong = buf[:0], false
+		if err == io.EOF {
+			return nil
+		}
+	}
 }
 
 // openAuditFile opens an audit JSONL file, transparently decompressing it if
