@@ -1,4 +1,4 @@
-// Ver 2026-07-08 22:00, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 //
 // Response normalizer. Guiding principle: what the client receives through
 // VMR must match what it would receive calling the provider directly, except
@@ -160,6 +160,7 @@ type respStream struct {
 	thinkTriggered bool   // buffering was caused by an inline <think> block
 	applied        []string
 	rawPreStrip    []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
+	scratch        []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 }
 
 func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol string, opaque bool) *respStream {
@@ -199,10 +200,12 @@ func (s *respStream) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	var scratch [32 << 10]byte
-	n, err := s.src.Read(scratch[:])
+	if s.scratch == nil {
+		s.scratch = make([]byte, 32<<10)
+	}
+	n, err := s.src.Read(s.scratch)
 	if n > 0 {
-		s.ingest(scratch[:n])
+		s.ingest(s.scratch[:n])
 	}
 	if err == io.EOF {
 		s.finish()

@@ -2,8 +2,10 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"vmr/internal/core"
@@ -12,7 +14,7 @@ import (
 func TestBuildRequestRewritesModelAndKeepsUnknownFields(t *testing.T) {
 	raw := []byte(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}],"some_future_param":{"x":[1,2]}}`)
 	ep := &core.Endpoint{Provider: "p", BaseURL: "https://api.example.com/v1/", APIKey: "sk-1", Model: "real-model"}
-	req, err := OpenAI{}.BuildRequest(context.Background(), ep, &core.CanonicalRequest{Model: "coding", Stream: true, Raw: raw})
+	req, outBody, err := OpenAI{}.BuildRequest(context.Background(), ep, &core.CanonicalRequest{Model: "coding", Stream: true, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +39,11 @@ func TestBuildRequestRewritesModelAndKeepsUnknownFields(t *testing.T) {
 	}
 	if string(m["stream"]) != "true" {
 		t.Errorf("stream field mangled: %s", m["stream"])
+	}
+	// The returned body must be exactly what the request will send.
+	sent, _ := io.ReadAll(func() io.Reader { r, _ := req.GetBody(); return r }())
+	if !bytes.Equal(outBody, sent) {
+		t.Errorf("returned body differs from request body:\n%s\nvs\n%s", outBody, sent)
 	}
 }
 

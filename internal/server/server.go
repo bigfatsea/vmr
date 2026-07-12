@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:15, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -197,11 +197,16 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		route := snap.Models[protocol][probe.Model]
 		n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
 		var images []imgprep.ImageInfo
-		body, images = imgprep.Downscale(body, protocol, imgprep.Options{
-			MaxPx:        n,
-			CacheDir:     imgprep.CacheDir(),
-			CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
-		})
+		// Skip entirely when there is no consumer: image metadata only goes
+		// into the audit record, so with auditing off and downscaling
+		// disabled the scan/parse would be pure waste.
+		if rec != nil || n > 0 {
+			body, images = imgprep.Downscale(body, protocol, imgprep.Options{
+				MaxPx:        n,
+				CacheDir:     imgprep.CacheDir(),
+				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+			})
+		}
 		if rec != nil && len(images) > 0 {
 			rec.Images = make([]audit.ImageInfo, len(images))
 			for i, img := range images {

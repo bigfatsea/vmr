@@ -114,11 +114,13 @@ models:
 
 全部字段与校验规则见设计文档 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。
 
+上游连接遵循标准代理环境变量（`HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`）——若供应商只能经代理访问，在 vmr 运行的环境里设置即可（dev 模式的 shell，或 service 模式自动生成的 `~/.config/vmr/env`）。
+
 ## 透传与归一化
 
 **原则：直连等价**。客户端经 vmr 收到的内容——字节、头部、传输节奏——与直连供应商一致。仅有的偏离：
 
-- `model` 字段——请求侧改成上游真实名，响应侧改回虚拟名（SDK 假设 `response.model === request.model`）；
+- `model` 字段——请求侧改成上游真实名，响应侧改回虚拟名（SDK 假设 `response.model === request.model`）。请求侧改写是只针对顶层 `model` 值的字节 splice：其余每一个字节——键序、空白、未知参数——都按客户端原文逐字节到达上游；
 - 两个 **MiniMax-M3 专属修复**，各自只在确认命中其确切形态时触发：剥 content 里的内联 `<think>…</think>` 推理（不剥会持久化进历史，把模型锁进反馈循环），以及剥 `thinking=medium` 下的纯文本「Thinking Process:」思考段；
 - `data: [DONE]` 哨兵——**仅** OpenAI 协议流式且上游未发时补；绝不重复，绝不注入 Anthropic 流。
 

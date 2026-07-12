@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 
 // Package anthropic is the passthrough adapter for Anthropic-compatible
 // providers (Anthropic, MiniMax, DeepSeek, …): append /messages to the base
@@ -24,15 +24,15 @@ type Anthropic struct{}
 
 func (Anthropic) Protocol() string { return "anthropic" }
 
-func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error) {
+func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
 	body, err := adapter.RewriteModel(req.Raw, ep.Model)
 	if err != nil {
-		return nil, fmt.Errorf("rewrite model: %w", err)
+		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
 	url := strings.TrimRight(ep.BaseURL, "/") + "/messages"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Copy the protocol+passthrough headers assembled by the server
 	// layer (see chatHandler). These include the Anthropic version
@@ -53,7 +53,7 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	if httpReq.Header.Get("anthropic-version") == "" {
 		httpReq.Header.Set("anthropic-version", defaultVersion)
 	}
-	return httpReq, nil
+	return httpReq, body, nil
 }
 
 func (Anthropic) ClassifyError(status int, body []byte) core.ErrorClass {

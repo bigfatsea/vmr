@@ -130,13 +130,13 @@ internal/imgprep           请求内联图片降采样（§7）
 ```go
 type Adapter interface {
     Protocol() string          // "openai" | "anthropic"：该 Adapter 服务的入口协议
-    BuildRequest(ctx, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error)
+    BuildRequest(ctx, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error)  // 第二个返回值 = 出站 body 字节，审计直接引用，省掉 GetBody+ReadAll 再拷一份
     ClassifyError(status int, body []byte) core.ErrorClass
 }
 // 新增 Provider 协议 = internal/adapter/<name>/ 一个包 + main.go 一行 blank import
 ```
 
-`CanonicalRequest{Model, Stream, Raw, Header}`：只解析路由所需字段，`Raw` 保留原始字节（前向兼容）；`Header` 是黑名单过滤后的客户端 header（凭证已剥除，含 `anthropic-version` 等协议头，§5.4）。model 改写：`map[string]json.RawMessage` 局部替换 `model` 键，未知字段字节原样（不保证键序，无语义影响）。
+`CanonicalRequest{Model, Stream, Raw, Header}`：只解析路由所需字段，`Raw` 保留原始字节（前向兼容）；`Header` 是黑名单过滤后的客户端 header（凭证已剥除，含 `anthropic-version` 等协议头，§5.4）。model 改写（2026-07-12 改为字节 splice）：单趟免分配扫描定位**顶层** `model` 键的值区间（字符串跳跃走 `bytes.IndexByte`，多 MB content 也是 memchr 速度；嵌套在 messages/tool schema 里的 `model` 键不受影响），然后前缀 + 新值 + 后缀三段拼接——除 model 值外**逐字节保留客户端原文**（键序、空白全保留），比旧的"`map[string]json.RawMessage` 全量 unmarshal + 重新序列化"快约 13 倍（200KB body 实测 99µs vs 1.33ms/attempt，分配减半）。虚拟名与上游名相同时零拷贝直接返回原 slice。扫描器搞不定的形态（非对象、无顶层 model 键、语法异常）回退到旧的 map 重建路径，语义不变（含"缺键则补"）。
 
 ### 错误分类（决定 failover 质量的关键）
 
@@ -490,7 +490,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs {log|cache}`（打印 `audit.Dir()`/`imgprep.CacheDir()` 的解析结果，不依赖 config，`vmr.sh` 内部用它代替自己算一份公式，见 §7.1）。环境变量：`VMR_LOG_DIR`（审计目录，缺省 `~/.vmr/logs`）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省 `~/.vmr/image_cache`）、配置内 `${VAR}` 展开引用的任意变量。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs {log|cache}`（打印 `audit.Dir()`/`imgprep.CacheDir()` 的解析结果，不依赖 config，`vmr.sh` 内部用它代替自己算一份公式，见 §7.1）。环境变量：`VMR_LOG_DIR`（审计目录，缺省 `~/.vmr/logs`）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省 `~/.vmr/image_cache`）、配置内 `${VAR}` 展开引用的任意变量、标准代理变量 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`（上游连接遵循 `http.ProxyFromEnvironment`；2026-07-12 修复——此前手工构造的 Transport 未设 Proxy 字段，代理变量被静默忽略，与 vmr.sh 特意把代理变量注入 service 环境的行为自相矛盾）。
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
@@ -542,6 +542,8 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | 审计历史文件压缩用 zstd（整文件、轮转时触发），不做单条记录压缩（§9.5） | 逐条记录 base64/zip 编码 | 本机真实日志实测：单条记录粒度的压缩（无论 gzip 还是 zip+base64）天花板只有 ~3.3×，因为 Agent 场景的冗余主要在跨记录（同一会话每轮重发历史），压缩窗口锁在一条记录内根本看不见；整文件 zstd（默认窗口已是 MB 级）实测 20~75×。逐条压缩还会打破 §9.2"合法 JSON 原样嵌入、可直接 jq 查询"的契约，且落在写路径上；整文件压缩挂在轮转边界，只碰不再写入的历史文件，当天文件保持明文可查询 |
 | 压缩/保留复用 Logger 已有的按日轮转边界触发，不设独立 ticker/cron（§9.5） | 周期性 timer 扫描 / 依赖外部 logrotate | 审计文件名自带日期，一次 `os.ReadDir` 即可判定压缩与保留对象，不需要周期性触发就能保证"至多晚一天生效"；新增 ticker 是额外的 goroutine 生命周期管理，外部 logrotate 依赖破坏 vmr"单二进制自包含"的定位（§1） |
 | `audit_retention_days` 缺省 0（永久保留） | 缺省一个"合理"天数（如 30） | 审计日志是 `vmr report` 成本核算的唯一数据源，非用户主动设置就被静默删除的风险 > 磁盘空间收益；压缩（§9.5 无条件发生）已经解决了大头的磁盘占用问题，保留期清理是可选的第二层 |
+| model 改写用字节 splice，只动顶层 `model` 值（§5，2026-07-12） | `map[string]json.RawMessage` 全量 unmarshal + 重新序列化（旧实现） | 旧路径每次 failover attempt 都要把整个 body 解析再重排序列化——主路径最大的单项 CPU 成本（200KB 实测 1.33ms/attempt），且键序/空白被改写，偏离"直连等价"。splice 单趟免分配扫描 + 三段拼接，快约 13 倍、分配减半，客户端原文除 model 值外逐字节保留；扫不动的形态回退旧路径，行为不变 |
+| `BuildRequest` 一并返回出站 body；`audit.EncodeBody` 引用不克隆（2026-07-12） | router 用 `GetBody()+io.ReadAll` 再读一份；EncodeBody 防御性拷贝 | 改写后的 body 本来就在 adapter 手里，为审计再拷两份纯属浪费（大 body 每 attempt 多两次全量拷贝）。代价是一条所有权契约：交给 EncodeBody 的 slice 此后不得改写——五个调用点（client 请求缓冲、recorder 响应缓冲、attempt 出站 body、上游错误 body、归一化 pre-strip 快照）都是终态字节，契约天然成立 |
 
 ---
 

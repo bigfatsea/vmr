@@ -14,9 +14,12 @@ func TestBuildRequest(t *testing.T) {
 	raw := []byte(`{"model":"claude","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}],"future_param":1}`)
 	ep := &core.Endpoint{Provider: "p", BaseURL: "https://api.deepseek.com/anthropic/v1/", APIKey: "sk-1", Model: "deepseek-v4-pro"}
 
-	req, err := Anthropic{}.BuildRequest(context.Background(), ep, &core.CanonicalRequest{Model: "claude", Stream: true, Raw: raw})
+	req, outBody, err := Anthropic{}.BuildRequest(context.Background(), ep, &core.CanonicalRequest{Model: "claude", Stream: true, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(outBody) == 0 {
+		t.Fatal("BuildRequest returned empty outbound body")
 	}
 	if req.URL.String() != "https://api.deepseek.com/anthropic/v1/messages" {
 		t.Errorf("url: %s", req.URL)
@@ -47,7 +50,7 @@ func TestBuildRequestForwardsProtocolHeaders(t *testing.T) {
 	hdr.Set("anthropic-version", "2024-10-22")
 	hdr.Set("anthropic-beta", "context-1m-2025-08-07")
 	ep := &core.Endpoint{Provider: "p", BaseURL: "https://x.example/v1", APIKey: "k", Model: "m"}
-	req, err := Anthropic{}.BuildRequest(context.Background(), ep,
+	req, _, err := Anthropic{}.BuildRequest(context.Background(), ep,
 		&core.CanonicalRequest{Model: "vm", Raw: []byte(`{"model":"vm"}`), Header: hdr})
 	if err != nil {
 		t.Fatal(err)

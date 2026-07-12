@@ -1,4 +1,4 @@
-// Ver 2026-07-08 22:00, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -123,7 +123,13 @@ func New(logger *log.Logger) *Router {
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.
 func (rt *Router) Install(s *Snapshot) {
 	s.client = &http.Client{Transport: &http.Transport{
+		// A hand-built Transport starts with a nil Proxy — unlike
+		// http.DefaultTransport — which silently ignores HTTPS_PROXY/
+		// HTTP_PROXY/NO_PROXY. vmr.sh deliberately propagates those
+		// variables into the service environment, so honor them.
+		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: s.Cfg.Timeouts.Connect.D()}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
 		ResponseHeaderTimeout: s.Cfg.Timeouts.ResponseHeader.D(),
 		MaxIdleConnsPerHost:   16,
 		IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
@@ -245,7 +251,13 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		if done {
 			return
 		}
-		last = uerr
+		// Build/network failures return no HTTP response (uerr == nil).
+		// Keep the last real upstream error instead of wiping it: "return
+		// the last upstream error verbatim" means the last one that HAS a
+		// status/headers/body to return.
+		if uerr != nil {
+			last = uerr
+		}
 	}
 
 	// All candidates failed or none were available.
@@ -259,8 +271,11 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		w.Write(last.body)
 	} else {
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
-		writeError(w, http.StatusServiceUnavailable, "vmr_no_candidates",
-			fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model))
+		msg := fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model)
+		if attempts > 0 {
+			msg = fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
+		}
+		writeError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
 	rt.logf("model=%s status=all_failed attempts=%d dur=%s", creq.Model, attempts, time.Since(start).Round(time.Millisecond))
 }
@@ -326,7 +341,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		return false, nil
 	}
 
-	req, err := ad.BuildRequest(r.Context(), ep, creq)
+	req, outBody, err := ad.BuildRequest(r.Context(), ep, creq)
 	if err != nil {
 		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("model=%s ep=%s attempt=%d build_error=%v", creq.Model, ep.Name(), attempt, err)
@@ -338,13 +353,9 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	}
 	if att != nil {
 		att.URL = req.URL.String()
-		var outBody []byte
-		if req.GetBody != nil {
-			if rc, err := req.GetBody(); err == nil {
-				outBody, _ = io.ReadAll(rc)
-				rc.Close()
-			}
-		}
+		// outBody comes straight from BuildRequest (immutable by contract),
+		// so the audit trail references it directly — no GetBody+ReadAll
+		// round trip duplicating the whole body per attempt.
 		att.Request = audit.NewMessage(req.Header, outBody)
 	}
 

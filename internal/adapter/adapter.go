@@ -1,4 +1,4 @@
-// Ver 2026-07-08 12:15, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 package adapter
 
 import (
@@ -24,7 +24,11 @@ type Adapter interface {
 
 	// BuildRequest turns the canonical request into the provider's HTTP request
 	// (URL, headers, body rewrite). It must inject the provider's credentials.
-	BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error)
+	// The outbound body bytes are returned alongside the request so the caller
+	// (the router's audit trail) can reference them directly instead of
+	// re-reading req.GetBody into a second copy; the returned slice must not
+	// be mutated after BuildRequest returns.
+	BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error)
 
 	// ClassifyError maps a provider error response to a unified class that
 	// drives failover and cooldown.

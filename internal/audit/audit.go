@@ -1,4 +1,4 @@
-// Ver 2026-07-08 07:40, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. Analysis
@@ -133,12 +133,19 @@ func NewMessage(headers http.Header, body []byte) Message {
 
 // EncodeBody returns the body as raw JSON when it is valid JSON (kept
 // queryable for analysis scripts), otherwise as a plain string (e.g. SSE).
+//
+// Ownership contract: the slice is referenced, not cloned — callers hand
+// the bytes over and must not mutate them afterwards. Every current caller
+// (client request buffer, recorder response buffer, rewritten attempt body,
+// upstream error body, normalizer pre-strip capture) already owns its slice
+// outright; cloning here would only re-copy multi-MB bodies on the tail of
+// every audited request.
 func EncodeBody(body []byte) any {
 	if len(body) == 0 {
 		return nil
 	}
 	if json.Valid(body) {
-		return json.RawMessage(append([]byte(nil), body...))
+		return json.RawMessage(body)
 	}
 	return string(body)
 }

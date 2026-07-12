@@ -1,4 +1,4 @@
-// Ver 2026-07-07, by Fable 5
+// Ver 2026-07-12 16:30, by Fable 5
 
 // Package openai is the passthrough adapter for OpenAI-compatible providers:
 // rewrite URL, inject key, swap the model field; the body is otherwise untouched.
@@ -21,15 +21,15 @@ type OpenAI struct{}
 
 func (OpenAI) Protocol() string { return "openai" }
 
-func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, error) {
+func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
 	body, err := adapter.RewriteModel(req.Raw, ep.Model)
 	if err != nil {
-		return nil, fmt.Errorf("rewrite model: %w", err)
+		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
 	url := strings.TrimRight(ep.BaseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Copy the protocol+passthrough headers assembled by the server
 	// layer (see chatHandler). These carry the OpenAI/Anthropic
@@ -49,7 +49,7 @@ func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.Can
 	if ep.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+ep.APIKey)
 	}
-	return httpReq, nil
+	return httpReq, body, nil
 }
 
 func (OpenAI) ClassifyError(status int, body []byte) core.ErrorClass {

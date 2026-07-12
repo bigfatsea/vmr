@@ -115,11 +115,13 @@ models:
 
 All fields and validation rules: design doc §10. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one.
 
+Upstream connections honor the standard proxy environment variables (`HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`) — set them where vmr runs (dev shell, or the generated `~/.config/vmr/env` in service mode) if your providers are only reachable through a proxy.
+
 ## Passthrough & normalization
 
 **Principle: direct-connection equivalence.** What a client receives through vmr — bytes, headers, transfer pacing — matches a direct provider call. The only deviations:
 
-- the `model` field — rewritten to the real upstream name on the way out, back to your virtual name on the way in (SDKs assume `response.model === request.model`);
+- the `model` field — rewritten to the real upstream name on the way out, back to your virtual name on the way in (SDKs assume `response.model === request.model`). The outbound rewrite is a byte splice on the top-level `model` value only: every other request byte — key order, whitespace, unknown parameters — reaches the provider exactly as your client sent it;
 - two **MiniMax-M3-specific repairs**, each gated on detecting its exact upstream shape: stripping inline `<think>…</think>` reasoning from content (left in place, it gets persisted into history and locks the model into a feedback loop), and stripping the plain-text "Thinking Process:" section emitted under `thinking=medium`;
 - the `data: [DONE]` sentinel — appended **only** for OpenAI-protocol SSE when the upstream omitted it; never duplicated, never injected into Anthropic streams.
 
