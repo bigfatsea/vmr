@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-13 02:00, by Fable 5
+# Ver 2026-07-14 00:05, by Sonnet 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -42,6 +42,17 @@ MATCH="$BIN start"                    # absolute path → unambiguous process ma
 ensure_bin() {
   if [[ ! -x "$BIN" ]]; then
     echo "building vmr..."
+    go build -o "$BIN" ./cmd/vmr
+    return
+  fi
+  # Rebuild when source is newer than the binary, so a stale binary left
+  # over from before a code change never silently keeps running old
+  # behavior (go build's own cache makes a no-op rebuild near-instant).
+  # Gated on `go` actually being installed — a service-mode deployment may
+  # ship only the built binary, with no toolchain present, and must keep
+  # working unmodified in that case.
+  if command -v go >/dev/null 2>&1 && find . -name '*.go' -newer "$BIN" -print -quit | grep -q .; then
+    echo "rebuilding vmr (source changed)..."
     go build -o "$BIN" ./cmd/vmr
   fi
 }
@@ -96,6 +107,32 @@ esac
 
 running_pids() { pgrep -f "$MATCH" 2>/dev/null || true; }
 
+# describe_pids PIDS: one "pid  command line" per line, for diagnostic output.
+describe_pids() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && ps -o pid=,command= -p "$pid" 2>/dev/null
+  done <<<"$1"
+}
+
+# port_holder ADDR: prints "pid command" for whatever process (if any) is
+# listening on ADDR ("host:port", as printed by `vmr check`'s listen=...),
+# or nothing. Best-effort — silently no-ops if lsof isn't installed (some
+# minimal Linux images lack it) rather than failing the whole script over a
+# diagnostic aid; IPv6 listen addresses (with colons of their own) aren't
+# handled, since this project's configs only ever use IPv4 host:port.
+port_holder() {
+  local port="${1##*:}"
+  command -v lsof >/dev/null 2>&1 || return 0
+  # lsof exits 1 (not an error) when nothing matches — under this script's
+  # set -e -o pipefail, that would otherwise silently abort the whole
+  # script from inside a `holder="$(port_holder ...)"` assignment. The
+  # trailing `return 0` makes this function's own exit status always
+  # reflect "ran fine", independent of whether it found something to print.
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $2, $1}'
+  return 0
+}
+
 # ---------- dev mode (manual supervision) ----------
 
 cmd_start() {
@@ -103,7 +140,24 @@ cmd_start() {
     echo "vmr already running (pid $(running_pids | tr '\n' ' '))"
     exit 0
   fi
-  "$BIN" check -c "$CFG" >/dev/null   # refuse to daemonize a broken config
+  local check_out
+  check_out="$("$BIN" check -c "$CFG")"   # refuse to daemonize a broken config
+  # Catch "something else already has this port" before spawning at all —
+  # it's a different checkout/deployment sharing the same listen address,
+  # invisible to running_pids' own-binary-path match (see MATCH above), and
+  # the raw bind error from vmr itself doesn't explain that.
+  local listen_addr holder
+  listen_addr="$(sed -n 's/.*listen=\([^ ]*\).*/\1/p' <<<"$check_out" | head -1)"
+  if [[ -n "$listen_addr" ]]; then
+    holder="$(port_holder "$listen_addr")"
+    if [[ -n "$holder" ]]; then
+      echo "vmr failed to start: $listen_addr is already in use by pid ${holder%% *}" >&2
+      echo "  $(ps -o pid=,command= -p "${holder%% *}" 2>/dev/null)" >&2
+      echo "that process isn't managed by this script (different vmr checkout or deployment?)." >&2
+      echo "stop it directly, or point this checkout's config.yaml 'listen' at a different port." >&2
+      exit 1
+    fi
+  fi
   resolve_log_dir
   mkdir -p "$LOG_DIR"
   nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
@@ -122,18 +176,28 @@ cmd_stop() {
   local pids
   pids="$(running_pids)"
   if [[ -z "$pids" ]]; then
-    echo "vmr not running"
+    echo "vmr not running (no process matches: $MATCH)"
     return 0
   fi
+  echo "found $(wc -l <<<"$pids" | tr -d ' ') matching process(es):"
+  describe_pids "$pids" | sed 's/^/  /'
+  echo "sending SIGTERM (pkill -f \"$MATCH\")..."
   # || true: the process can exit between the running_pids check above and
   # this pkill; a no-match exit 1 must not kill the script under set -e.
   pkill -f "$MATCH" || true
   for _ in $(seq 1 20); do
-    [[ -z "$(running_pids)" ]] && { echo "vmr stopped"; return 0; }
+    [[ -z "$(running_pids)" ]] && { echo "vmr stopped (pid $(tr '\n' ' ' <<<"$pids"))"; return 0; }
     sleep 0.25
   done
   echo "vmr did not exit after 5s, sending SIGKILL" >&2
   pkill -9 -f "$MATCH" || true
+  sleep 0.25
+  if [[ -z "$(running_pids)" ]]; then
+    echo "vmr stopped via SIGKILL (pid $(tr '\n' ' ' <<<"$pids"))"
+  else
+    echo "vmr still running after SIGKILL — inspect manually: pgrep -f \"$MATCH\"" >&2
+    exit 1
+  fi
 }
 
 cmd_status() {
