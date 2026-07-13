@@ -1,4 +1,4 @@
-// Ver 2026-07-08 16:20, by Sonnet 5
+// Ver 2026-07-13 02:00, by Fable 5
 package audit
 
 import (
@@ -129,22 +129,6 @@ func TestNilLoggerNoop(t *testing.T) {
 	}
 	if err := l.Close(); err != nil {
 		t.Error(err)
-	}
-}
-
-func TestDirEnv(t *testing.T) {
-	t.Setenv("VMR_LOG_DIR", "/some/dir")
-	if Dir() != "/some/dir" {
-		t.Errorf("env dir: %s", Dir())
-	}
-	t.Setenv("VMR_LOG_DIR", "")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home dir in this environment")
-	}
-	want := filepath.Join(home, ".vmr", "logs")
-	if Dir() != want {
-		t.Errorf("default dir: got %s, want %s", Dir(), want)
 	}
 }
 

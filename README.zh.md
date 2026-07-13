@@ -49,7 +49,7 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 # Linux：若需注销登录后服务仍运行，执行一次 loginctl enable-linger $USER
 ```
 
-两种模式同一时间只用一种——`service install`/`start` 会自动停掉 dev 模式进程。macOS 下 service 模式的服务日志在 `~/Library/Logs/vmr.log`（TCC 不允许 launchd 对外置卷做文件操作）；审计日志照常跟随 `VMR_LOG_DIR`。
+两种模式同一时间只用一种——`service install`/`start` 会自动停掉 dev 模式进程。macOS 下 service 模式的服务日志在 `~/Library/Logs/vmr.log`（TCC 不允许 launchd 对外置卷做文件操作）；审计日志照常跟随 config 的 `log_dir`。
 
 把客户端的 Base URL 指向 vmr 即可：
 
@@ -130,12 +130,10 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 
 | 变量 | 作用 |
 | --- | --- |
-| `VMR_LOG_DIR` | 审计日志目录。设置了就原样使用（不追加子目录）。未设置 → 持久的 `~/.vmr/logs`（后续兜底链：系统临时目录子目录 → `./logs`；跑 `vmr dirs log` 可直接看到解析结果）。 |
-| `VMR_IMG_CACHE_DIR` | 图片降采样缓存目录。规则同上。未设置 → `~/.vmr/image_cache`（`vmr dirs cache`）。 |
-| config.yaml 里引用的任意 `${VAR}` | 加载配置时展开（每次热重载重新展开）；未设置的变量展开为空串。API Key 就是靠它注入——想用代理环境变量也是同一机制（显式写 `${HTTPS_PROXY}`）。 |
+| config.yaml 里引用的任意 `${VAR}` | 加载配置时展开（每次热重载重新展开）；未设置的变量展开为空串。这是环境变量进入 vmr 的**唯一**通道——API Key、可选的 `${HTTPS_PROXY}`、可选的目录路径，都走这一条。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` | **被忽略。** 代理只认上面的 `http_proxy`/`https_proxy` 配置项；要用环境变量的值，在 config 里显式引用 `${HTTPS_PROXY}`。 |
 
-service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VAR}` 从当前 shell 快照进 `~/.config/vmr/env`（0600，已存在则不覆盖），并把 `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 显式注入服务单元——init 系统的干净环境里什么都不会自动继承。
+目录（`log_dir`/`image_cache_dir`，见下）和代理曾经都是环境变量（`VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR`），现在都改成了 config 字段——理由一致：vmr 往哪写、怎么连网络，不该依赖隐式的运行环境。service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VAR}` 从当前 shell 快照进 `~/.config/vmr/env`（0600，已存在则不覆盖）——不需要再注入任何别的东西，二进制自己读 config。
 
 ## 透传与归一化
 
@@ -163,11 +161,11 @@ service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VA
 默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、生效的归一化清单，以及请求内联图片的元数据（格式/宽高/字节数，以及是否触发压缩/是否命中缓存——不论该虚拟模型是否开启了图片压缩，都会采集）。body 一律原样全量记录，不设审计侧截断上限（上面的 `max_request_body_mb` 只管入站请求体大小，与审计记录无关）。每次上游尝试同时携带一个人类可读的 `endpoint` 标签（`protocol:provider:model`）和拆开的三个结构化字段（`protocol`/`provider`/`model`），并在自由文本 `error` 之外新增一个类型化的 `error_class`。
 
 ```bash
-./vmr start -c config.yaml                 # 写入 $VMR_LOG_DIR，未设置则用 `vmr dirs log` 的解析结果
+./vmr start -c config.yaml                 # 写入 config 的 log_dir（`vmr dirs -c config.yaml log` 可核对）
 ./vmr start -c config.yaml -audit=false    # 关闭
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report "$(./vmr dirs log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl（明文/.zst 混着传也行）
+./vmr report "$(./vmr dirs -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl（明文/.zst 混着传也行）
 ```
 
 `vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。每条 record 在一次遍历内被同步 push 到**所有相关桶**（`Rows` 按日期×协议×模型、`Overall`、`ByModel`、`ByDate`，加原有的 `Hours`/`Endpoints` 及其"全部日期合并"版本 `HoursOfDay`/`EndpointsAll`）——每个桶都在这一趟遍历里直接收自己的原始值、各自算自己的 p50/p95，所以每个表格里的分位都是**真值**，没有跨桶近似。`HoursOfDay`/`EndpointsAll` 是独立收原始值的桶，不是拿逐日的 `Hours`/`Endpoints` 二次合并出来的——合并"已经算完的"桶算不出真百分位，因为每个桶算完自己的分位后就会把原始值释放掉，再合并时已经没有东西可算了。（这不是假设性的边界情况，是真拿生产日志跑通全流程才发现的真实 bug：端点可用度表和每小时活跃度表的延迟列此前**任何情况下**都显示 `-/-`，不是数据稀疏才这样。）Markdown 表格共享统一的列定义（`Req/Fall/Trunc / 成功率 / Tokens In/CacheHit/Out / 图片/压缩 / 平均Tokens In/Out / 字节 In / Out / 平均消息数 / p50/p95 首字延迟 / p50/p95 请求耗时 / 平均吞吐 (tok/s)`）——请求数、Fallback 数、截断数合并进一个单元格（全 0 时显示 `-`），`图片/压缩` 显示该行的内联图片总数与其中触发压缩的数量（无图片时显示 `-`）。各表再加自己的主键列与特异列（`Tool 调用`，工作负载表里带"发生过调用的请求占比" / `错误分布`）。每模型的健康信号：finish_reason 分布（`length` = 输出被 token 上限截断）。Token 统计还拆出缓存读取、（Anthropic）缓存写入与 reasoning tokens。另有每小时活跃度（`hours_of_day[]`）和工作负载切分（`workloads[]`：交互工作 vs heartbeat/日记 cron 这类定时脚手架），一眼看清请求和账单到底来自哪里。运行进度写到 stdout，每个文件一行（`[i/N] <path>  done: M records, K parse errors (Ts)`）。JSON 是二次开发（图表/Dashboard）的数据源。
@@ -204,9 +202,16 @@ models:
 
 **模型级覆盖**：每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
 
-**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）缓存到磁盘。缓存 key 是**内容哈希 + 目标尺寸**——文件名为 `<原始字节的 sha256>-<maxPx>.jpg`，所以同一张图降到 512px 和 256px（不同模型的不同覆盖值）是两个互相独立的条目，绝不会串（目录取 `$VMR_IMG_CACHE_DIR`，未设置则用 `vmr dirs cache` 的解析结果）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
+**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）缓存到磁盘。缓存 key 是**内容哈希 + 目标尺寸**——文件名为 `<原始字节的 sha256>-<maxPx>.jpg`，所以同一张图降到 512px 和 256px（不同模型的不同覆盖值）是两个互相独立的条目，绝不会串（目录取配置项 `image_cache_dir`，见下）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
 
-**审计目录和缓存目录到底落在哪**：两者默认规则统一——`$VMR_LOG_DIR`/`$VMR_IMG_CACHE_DIR` 有设置就原样使用，否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，审计历史会被静默删掉——而它是 `vmr report` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr dirs log` / `vmr dirs cache`，不用真的启动服务。`vmr.sh` 用的是同一套规则——它自己也是调用 `vmr dirs` 去问，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。
+**审计目录和缓存目录到底落在哪**：两者都是 config 字段——
+
+```yaml
+# log_dir: ~/.vmr/logs                  # 审计 JSONL 目录；有设置就原样使用（~/ 会展开）；改动需要重启才生效
+# image_cache_dir: ~/.vmr/image_cache   # 降采样缓存目录；规则同上；随热重载即时生效
+```
+
+——有设置就原样使用（开头的 `~/` 展开为 home 目录），否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，审计历史会被静默删掉——而它是 `vmr report` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr dirs -c config.yaml log` / `vmr dirs -c config.yaml cache`（`vmr check` 与启动摘要也会打印），不用真的启动服务。`vmr.sh` 只查询 `vmr dirs` 来定位 server log 落点，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。已经没有 `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 这两个环境变量了——想从环境注入，在 `log_dir`/`image_cache_dir` 里显式写 `${VAR}` 即可。
 
 ## 端点与 CLI
 
@@ -219,7 +224,7 @@ models:
 | `vmr check -c config.yaml` | 校验配置、打印路由表、Key 状态与每个 provider 的生效代理 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭） |
-| `vmr dirs log\|cache` | 打印默认审计/缓存目录的解析结果（`vmr.sh` 内部就是问这个） |
+| `vmr dirs [-c config.yaml] log\|cache` | 打印生效的审计/缓存目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 

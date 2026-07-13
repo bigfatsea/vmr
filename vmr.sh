@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-10 00:30, by Sonnet 5
+# Ver 2026-07-13 02:00, by Fable 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -25,9 +25,8 @@
 # (API keys) are NOT inherited. Service mode loads ~/.config/vmr/env instead;
 # `service install` generates it (0600) from the current shell for every
 # ${VAR} referenced in config.yaml, and never overwrites an existing one.
-# VMR_LOG_DIR/VMR_IMG_CACHE_DIR are handled separately from that scan (see
-# LOG_DIR/CACHE_DIR below) — both modes get the same resolved value because
-# this script always asks the vmr binary, never guesses.
+# Directories (audit log, image cache) are config.yaml fields (log_dir /
+# image_cache_dir) read by the binary itself — nothing to inject here.
 #
 # No PID file in dev mode: the daemon is found by matching the absolute
 # binary path in the process table (pgrep -f), which cannot collide with
@@ -48,32 +47,51 @@ ensure_bin() {
 }
 ensure_bin   # both dirs below query the binary, so it must exist first
 
-# LOG_DIR (audit JSONL + server log) and CACHE_DIR (image-downscale cache)
-# both come from `vmr dirs` — the binary's own env-var-or-~/.vmr-or-temp-dir
-# default formula (internal/rundir) — instead of a bash copy of that logic,
-# so dev mode and service mode can never disagree with what the running
-# process actually resolves. Override via VMR_LOG_DIR / VMR_IMG_CACHE_DIR in
-# the environment this script runs in; `vmr dirs` picks them up the same way
-# `vmr start` itself would.
+# LOG_DIR (where this script drops the server stderr log, next to the audit
+# JSONL) comes from `vmr dirs -c $CFG log` — the binary's own resolution of
+# the config's log_dir field — instead of a bash copy of that logic, so this
+# script can never disagree with where the running process actually writes.
+# The image cache dir is the binary's business alone now (config
+# image_cache_dir); the script no longer needs it.
+#
+# Resolved LAZILY (resolve_log_dir, called only by the commands that actually
+# need it: start, service install, logs) rather than up here unconditionally:
+# `vmr dirs` now loads and validates config.yaml (it reads log_dir from it),
+# so resolving it eagerly would make `stop`/`status`/`service uninstall` fail
+# whenever config.yaml is temporarily broken — exactly when you most need to
+# be able to stop a bad deploy without first fixing the config.
 #
 # Audit files rotate daily and auto-compress to .zst on rotation (20-75x
 # smaller; vmr report reads both transparently). They're kept forever unless
 # you set audit_retention_days in config.yaml — that's the supported way to
 # expire them; see docs/AuditLogCompression_Analysis_Sonnet5.md.
-LOG_DIR="$("$BIN" dirs log)"
-CACHE_DIR="$("$BIN" dirs cache)"
-SERVER_LOG="$LOG_DIR/vmr.log"
+resolve_log_dir() {
+  # NOT `[[ cond ]] && action`: with that form, a false test as the LAST
+  # statement of a function makes the function return non-zero, and under
+  # set -e a bare `resolve_log_dir` call at the call site then aborts the
+  # whole script — the short-circuit exemption only covers the && list
+  # itself, not the function-call boundary around it.
+  if [[ -z "${LOG_DIR:-}" ]]; then
+    LOG_DIR="$("$BIN" dirs -c "$CFG" log)"
+    SERVER_LOG="$LOG_DIR/vmr.log"
+    if [[ -z "$SVC_LOG" ]]; then
+      SVC_LOG="$SERVER_LOG"
+    fi
+  fi
+}
 
 ENV_FILE="$HOME/.config/vmr/env"
 LABEL="com.vmr"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="$UNIT_DIR/vmr.service"
-# Service-mode server log. On macOS it must be home-local (TCC blocks
-# launchd file ops on external volumes); on Linux the dev-mode path is fine.
+# Service-mode server log. On macOS it's home-local (TCC blocks launchd file
+# ops on external volumes) and needs no config, so it's set here; on Linux
+# it's the same path as the dev-mode server log, filled in by resolve_log_dir
+# (empty until then — only commands that call it need SVC_LOG on Linux).
 case "$(uname -s)" in
   Darwin) SVC_LOG="$HOME/Library/Logs/vmr.log" ;;
-  *)      SVC_LOG="$SERVER_LOG" ;;
+  *)      SVC_LOG="" ;;
 esac
 
 running_pids() { pgrep -f "$MATCH" 2>/dev/null || true; }
@@ -86,9 +104,9 @@ cmd_start() {
     exit 0
   fi
   "$BIN" check -c "$CFG" >/dev/null   # refuse to daemonize a broken config
-  mkdir -p "$LOG_DIR" "$CACHE_DIR"
-  VMR_LOG_DIR="$LOG_DIR" VMR_IMG_CACHE_DIR="$CACHE_DIR" \
-    nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
+  resolve_log_dir
+  mkdir -p "$LOG_DIR"
+  nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
   disown
   sleep 0.5
   if [[ -n "$(running_pids)" ]]; then
@@ -185,7 +203,7 @@ render_plist() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>set -a; . "$ENV_FILE" 2>/dev/null; set +a; export VMR_LOG_DIR="$LOG_DIR" VMR_IMG_CACHE_DIR="$CACHE_DIR"; exec "$BIN" start -c "$CFG"</string>
+        <string>set -a; . "$ENV_FILE" 2>/dev/null; set +a; exec "$BIN" start -c "$CFG"</string>
     </array>
     <key>WorkingDirectory</key><string>$HOME</string>
     <key>StandardOutPath</key><string>$SVC_LOG</string>
@@ -208,8 +226,6 @@ After=network-online.target
 ExecStart=$BIN start -c $CFG
 WorkingDirectory=$PWD
 EnvironmentFile=-$ENV_FILE
-Environment=VMR_LOG_DIR=$LOG_DIR
-Environment=VMR_IMG_CACHE_DIR=$CACHE_DIR
 StandardOutput=append:$SERVER_LOG
 StandardError=append:$SERVER_LOG
 Restart=always
@@ -222,7 +238,8 @@ EOF
 
 svc_install() {
   "$BIN" check -c "$CFG" >/dev/null
-  mkdir -p "$LOG_DIR" "$CACHE_DIR"
+  resolve_log_dir
+  mkdir -p "$LOG_DIR"
   write_env_file
   # A dev-mode process would fight the service over the listen port.
   if [[ -n "$(running_pids)" ]]; then
@@ -316,7 +333,7 @@ svc_cmd() {
     stop)      svc_stop ;;
     restart)   svc_stop; sleep 0.5; svc_start ;;
     status)    svc_status ;;
-    logs)      exec tail -f "$SVC_LOG" ;;
+    logs)      resolve_log_dir; exec tail -f "$SVC_LOG" ;;
     *) echo "usage: $0 service {install|uninstall|start|stop|restart|status|logs}" >&2; exit 2 ;;
   esac
 }
@@ -326,7 +343,7 @@ case "${1:-}" in
   stop)    cmd_stop ;;
   restart) cmd_stop; cmd_start ;;
   status)  cmd_status ;;
-  logs)    exec tail -f "$SERVER_LOG" ;;
+  logs)    resolve_log_dir; exec tail -f "$SERVER_LOG" ;;
   service) shift; svc_cmd "$@" ;;
   *)
     echo "usage: $0 {start|stop|restart|status|logs}                      # dev mode (you supervise)" >&2

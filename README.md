@@ -50,7 +50,7 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 # Linux: run `loginctl enable-linger $USER` once if the service must survive logout.
 ```
 
-Pick one mode at a time — `service install`/`start` stops a dev-mode process automatically. On macOS the service-mode server log lives at `~/Library/Logs/vmr.log` (TCC keeps launchd file ops off external volumes); the audit log follows `VMR_LOG_DIR` as usual.
+Pick one mode at a time — `service install`/`start` stops a dev-mode process automatically. On macOS the service-mode server log lives at `~/Library/Logs/vmr.log` (TCC keeps launchd file ops off external volumes); the audit log follows the config's `log_dir` as usual.
 
 Point your client's base URL at vmr and you're done:
 
@@ -131,12 +131,10 @@ The complete list — vmr reads nothing else from the environment:
 
 | Variable | Effect |
 | --- | --- |
-| `VMR_LOG_DIR` | Audit log directory. Used exactly as given (no subdirectory appended). Unset → persistent `~/.vmr/logs` (fallback chain: temp-dir subdir → `./logs`; run `vmr dirs log` to see the resolved path). |
-| `VMR_IMG_CACHE_DIR` | Image-downscale cache directory. Same rule. Unset → `~/.vmr/image_cache` (`vmr dirs cache`). |
-| Any `${VAR}` referenced in `config.yaml` | Expanded when the config is loaded (and on every hot reload). Unset variables expand to the empty string. This is how API keys — and, if you choose, `${HTTPS_PROXY}` — get in. |
+| Any `${VAR}` referenced in `config.yaml` | Expanded when the config is loaded (and on every hot reload). Unset variables expand to the empty string. This is the *only* way anything from the environment reaches vmr — API keys, and, if you choose, `${HTTPS_PROXY}` or a directory path. |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` | **Ignored.** Proxies are explicit config (`http_proxy`/`https_proxy` above); reference `${HTTPS_PROXY}` in the config to opt in. |
 
-In service mode, `vmr.sh service install` snapshots every `${VAR}` your config references from the current shell into `~/.config/vmr/env` (0600, never overwritten), and injects `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` into the unit explicitly — init systems start with a clean environment.
+Directories (`log_dir`, `image_cache_dir` — see below) and proxies used to be environment variables (`VMR_LOG_DIR`, `VMR_IMG_CACHE_DIR`); they are config fields now, for the same reason: where vmr writes and how it reaches the network shouldn't depend on implicit environment state. In service mode, `vmr.sh service install` snapshots every `${VAR}` your config references from the current shell into `~/.config/vmr/env` (0600, never overwritten) — nothing else needs injecting, since the binary reads its own config directly.
 
 ## Passthrough & normalization
 
@@ -164,11 +162,11 @@ All-candidates-failed returns the last upstream error verbatim. Streams only fai
 On by default: one JSONL line per request with both layers (client↔vmr and every vmr↔upstream attempt), credential-masked headers, applied normalizations, and inline request image metadata (format/dimensions/bytes, plus downscale/cache-hit outcome — captured for every image regardless of whether downscaling is enabled). Bodies are recorded in full, whatever size vmr accepted — there is no separate audit-side truncation cap (`max_request_body_mb` above only bounds what vmr accepts from the client in the first place). Each upstream attempt carries both a human-readable `endpoint` label (`protocol:provider:model`) and the same three fields structured (`protocol`/`provider`/`model`), plus a typed `error_class` alongside the free-text `error`.
 
 ```bash
-./vmr start -c config.yaml                 # writes to $VMR_LOG_DIR, or `vmr dirs log` if unset
+./vmr start -c config.yaml                 # writes to config's log_dir (`vmr dirs -c config.yaml log` to check)
 ./vmr start -c config.yaml -audit=false    # off
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report "$(./vmr dirs log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl (plain + .zst mix ok)
+./vmr report "$(./vmr dirs -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl (plain + .zst mix ok)
 ```
 
 `vmr report` aggregates tokens *and* bytes (bytes as the fallback when a provider omits usage). Each record is pushed once into **every relevant bucket** (`Rows` per date×protocol×model, `Overall`, `ByModel`, `ByDate`, plus the pre-existing `Hours`/`Endpoints` and their all-dates-merged counterparts `HoursOfDay`/`EndpointsAll`) — each bucket computes its own p50/p95 from raw values it collects directly during the single pass, so every table is true rather than approximated. `HoursOfDay`/`EndpointsAll` exist as their own independently-tracked buckets rather than being derived by re-merging the per-date `Hours`/`Endpoints` rows — merging already-finalized buckets doesn't work, since each one frees its raw values right after computing its own percentiles; there'd be nothing left to recompute a cross-date percentile from. (This was a real bug caught by running against real logs, not a hypothetical: the endpoint-availability and hourly-activity tables' latency columns silently read `-/-` in every case, not just when data happened to be sparse.) Markdown tables share a common column set (`Req/Fall/Trunc / 成功率 / Tokens In/CacheHit/Out / 图片/压缩 / 平均Tokens In/Out / 字节 In / Out / 平均消息数 / p50/p95 首字延迟 / p50/p95 请求耗时 / 平均吞吐 (tok/s)`) — request count, fallback count and truncated-stream count merge into one cell (`-` when zero), and `图片/压缩` shows inline request images seen vs. the subset that triggered downscaling (`-` when the row saw no images). Table-specific columns: `Tool 调用` (工作负载 table, with the share of requests that made at least one call), `错误分布`. Health signals per model: `finish_reason` distribution (`length` = output hit the token cap). Token totals split out cache-read, (Anthropic) cache-write, and reasoning tokens. The hourly activity profile (`hours_of_day[]`) and the workload split (`workloads[]`: interactive work vs. scheduled scaffolding like heartbeats and diary crons) show where the requests and the bill actually come from. Run progress goes to stdout as a file-level line per processed file (`[i/N] <path>  done: M records, K parse errors (Ts)`). The JSON is the data source for any dashboarding you want to build on top.
@@ -205,9 +203,16 @@ models:
 
 **Per-model override**: any virtual model can set its own `image_downscale`, which always wins over the global value; omitting it inherits the global setting. `image_downscale: 0` on a model is an explicit "off" — even with the global setting on — because "not set" and "set to 0" mean different things (inherit vs. force-disable).
 
-**Downscale result cache**: the first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by **content hash plus target size** — the filename is `<sha256-of-original-bytes>-<maxPx>.jpg`, so the same image downscaled to 512px and 256px (different per-model overrides) are two independent entries that can never collide — under `$VMR_IMG_CACHE_DIR` if set, else `vmr dirs cache`'s default. A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session), swept lazily off normal cache access rather than a dedicated timer.
+**Downscale result cache**: the first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by **content hash plus target size** — the filename is `<sha256-of-original-bytes>-<maxPx>.jpg`, so the same image downscaled to 512px and 256px (different per-model overrides) are two independent entries that can never collide — under the configured `image_cache_dir` (see below). A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session), swept lazily off normal cache access rather than a dedicated timer.
 
-**Where the audit and cache directories actually land**: both default to `$VMR_LOG_DIR`/`$VMR_IMG_CACHE_DIR` if set (used exactly as given), else the persistent `~/.vmr/logs`/`~/.vmr/image_cache`, else (no resolvable home directory) a `vmr_logs`/`vmr_image_cache` subdirectory of the system temp dir, else `./logs`/`./image_cache` next to the binary. Persistent by default on purpose: macOS purges temp-dir entries not accessed for ~3 days, which silently deletes audit history — the only data source `vmr report` has. Run `vmr dirs log` / `vmr dirs cache` to see the resolved path without starting the server. `vmr.sh` uses this same formula — by calling `vmr dirs` itself rather than guessing — for **both** dev mode and `service install`, so a launchd/systemd-supervised vmr never disagrees with a manually-started one about where its data lives.
+**Where the audit and cache directories actually land**: both are config fields —
+
+```yaml
+# log_dir: ~/.vmr/logs                  # audit JSONL directory; used exactly as given (~/ expands); changing it needs a restart
+# image_cache_dir: ~/.vmr/image_cache   # downscale-cache directory; same rule; follows hot reload
+```
+
+— used exactly as given when set (a leading `~/` expands to the home directory), else the persistent `~/.vmr/logs`/`~/.vmr/image_cache`, else (no resolvable home directory) a `vmr_logs`/`vmr_image_cache` subdirectory of the system temp dir, else `./logs`/`./image_cache` next to the binary. Persistent by default on purpose: macOS purges temp-dir entries not accessed for ~3 days, which silently deletes audit history — the only data source `vmr report` has. Run `vmr dirs -c config.yaml log` / `vmr dirs -c config.yaml cache` to see the resolved path without starting the server (also printed by `vmr check` and the startup summary). `vmr.sh` queries `vmr dirs` itself for the server-log path rather than guessing, so a launchd/systemd-supervised vmr never disagrees with a manually-started one about where its data lives. There are no `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` environment variables — reference `${VAR}` inside `log_dir`/`image_cache_dir` if you want a value from the environment.
 
 ## Endpoints & CLI
 
@@ -220,7 +225,7 @@ models:
 | `vmr check -c config.yaml` | validate config, print routing table, key status and per-provider effective proxy |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip) |
-| `vmr dirs log\|cache` | print the resolved default audit/cache directory (what `vmr.sh` queries internally) |
+| `vmr dirs [-c config.yaml] log\|cache` | print the effective audit/cache directory (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |
 

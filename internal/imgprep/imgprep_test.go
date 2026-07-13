@@ -1,4 +1,4 @@
-// Ver 2026-07-09 00:00, by Sonnet 5
+// Ver 2026-07-13 02:00, by Fable 5
 package imgprep
 
 import (
@@ -604,26 +604,5 @@ func TestCacheMissWithoutCacheDirNeverTouchesDisk(t *testing.T) {
 	img, _ := extractOpenAIImage(t, out)
 	if b := img.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
 		t.Errorf("downscale without a cache dir should still work: got %dx%d", b.Dx(), b.Dy())
-	}
-}
-
-// TestCacheDirEnv mirrors audit.TestDirEnv: an explicit VMR_IMG_CACHE_DIR is
-// used exactly as given (no subdir appended — that would surprise anyone
-// who set it expecting it to be the cache directory itself), and the
-// unset-default now matches audit.Dir's formula (internal/rundir), just
-// with its own vmr_image_cache subdir name.
-func TestCacheDirEnv(t *testing.T) {
-	t.Setenv("VMR_IMG_CACHE_DIR", "/some/dir")
-	if CacheDir() != "/some/dir" {
-		t.Errorf("env dir: %s", CacheDir())
-	}
-	t.Setenv("VMR_IMG_CACHE_DIR", "")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home dir in this environment")
-	}
-	want := filepath.Join(home, ".vmr", "image_cache")
-	if CacheDir() != want {
-		t.Errorf("default dir: got %s, want %s", CacheDir(), want)
 	}
 }

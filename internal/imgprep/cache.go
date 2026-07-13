@@ -1,4 +1,4 @@
-// Ver 2026-07-10 00:00, by Sonnet 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 package imgprep
 
@@ -10,21 +10,15 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"vmr/internal/rundir"
 )
 
-// CacheDir resolves the on-disk downscale cache directory: $VMR_IMG_CACHE_DIR
-// if set (used exactly as given), else the persistent ~/.vmr/image_cache —
-// see internal/rundir for the full fallback chain, shared with audit.Dir so
-// dev mode and service mode always agree on the default without vmr.sh
-// keeping its own copy of this formula. Persistent rather than the system
-// temp dir: the cache's whole value is byte-stable reuse across days
-// (upstream prompt caches key on exact bytes), and macOS purges temp
-// entries after ~3 days of no access.
-func CacheDir() string {
-	return rundir.Resolve("VMR_IMG_CACHE_DIR", "image_cache", "vmr_image_cache", "image_cache")
-}
+// The cache directory comes from config.yaml's image_cache_dir (default:
+// the persistent ~/.vmr/image_cache, resolved in config.applyDefaults via
+// internal/rundir) and reaches this file through Options.CacheDir — there
+// is no environment variable for it anymore. Persistent rather than the
+// system temp dir on purpose: the cache's whole value is byte-stable reuse
+// across days (upstream prompt caches key on exact bytes), and macOS
+// purges temp entries after ~3 days of no access.
 
 // cacheFileName is the cache key: sha256 of the original (pre-downscale)
 // image bytes, plus the target maxPx — the same source image downscaled for

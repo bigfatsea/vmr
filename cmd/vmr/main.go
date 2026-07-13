@@ -1,4 +1,4 @@
-// Ver 2026-07-13 00:30, by Fable 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -6,7 +6,7 @@
 //	vmr check  -c config.yaml   validate config and print a summary
 //	vmr status -c config.yaml   show endpoint health of a running instance
 //	vmr report <audit.jsonl>    aggregate audit logs into usage statistics
-//	vmr dirs {log|cache}        print the resolved default audit/cache dir (vmr.sh uses this)
+//	vmr dirs {log|cache}        print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
 package main
 
 import (
@@ -29,7 +29,6 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/core"
-	"vmr/internal/imgprep"
 	"vmr/internal/report"
 	"vmr/internal/router"
 	"vmr/internal/server"
@@ -70,27 +69,35 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
        vmr report [-o dir] [-details=false] <audit.jsonl|glob>...
-       vmr dirs {log|cache}`)
+       vmr dirs [-c config.yaml] {log|cache}`)
 }
 
-// cmdDirs prints the resolved runtime directory for "log" (audit.Dir) or
-// "cache" (imgprep.CacheDir) — the single source of truth for the
-// env-var-or-~/.vmr-or-temp-dir default formula (internal/rundir). vmr.sh
-// queries this instead of keeping its own copy of the fallback logic, so
-// dev mode and service mode can never disagree with what the running
-// process actually resolves. Independent of config — these two directories
-// never depend on config.yaml content.
+// cmdDirs prints the effective runtime directory for "log" (config
+// log_dir) or "cache" (config image_cache_dir) — the resolved value after
+// defaults, exactly what a `vmr start` with the same config would use.
+// vmr.sh queries this instead of keeping its own copy of the resolution
+// logic, so its server-log placement can never disagree with where the
+// running process actually writes.
 func cmdDirs(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: vmr dirs {log|cache}")
+	fs := flag.NewFlagSet("dirs", flag.ExitOnError)
+	path := fs.String("c", "config.yaml", "path to config file")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	switch args[0] {
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: vmr dirs [-c config.yaml] {log|cache}")
+	}
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	switch fs.Arg(0) {
 	case "log":
-		fmt.Println(audit.Dir())
+		fmt.Println(cfg.LogDir)
 	case "cache":
-		fmt.Println(imgprep.CacheDir())
+		fmt.Println(cfg.ImageCacheDir)
 	default:
-		return fmt.Errorf("usage: vmr dirs {log|cache}")
+		return fmt.Errorf("usage: vmr dirs [-c config.yaml] {log|cache}")
 	}
 	return nil
 }
@@ -230,7 +237,7 @@ func logStop(logger *log.Logger, reason string, uptime time.Duration) {
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
-	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from $VMR_LOG_DIR or 'vmr dirs log')")
+	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from config log_dir, see 'vmr dirs log')")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -251,7 +258,7 @@ func cmdStart(args []string) error {
 
 	var auditLog *audit.Logger
 	if *auditOn {
-		if auditLog, err = audit.New(audit.Dir()); err != nil {
+		if auditLog, err = audit.New(cfg.LogDir); err != nil {
 			return fmt.Errorf("audit log: %w", err)
 		}
 		defer auditLog.Close()
@@ -259,6 +266,10 @@ func cmdStart(args []string) error {
 	} else {
 		logger.Printf("audit log disabled (-audit=false)")
 	}
+	// The audit logger keeps the directory it opened with for the process
+	// lifetime; remember it so a hot reload that moves log_dir can say
+	// "restart required" instead of silently keeping the old directory.
+	auditDirInUse := cfg.LogDir
 
 	rt := router.New(logger)
 	snap, err := router.BuildSnapshot(cfg)
@@ -283,6 +294,10 @@ func cmdStart(args []string) error {
 		}
 		rt.Install(newSnap)
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
+		if newCfg.LogDir != auditDirInUse {
+			logger.Printf("reload(%s): log_dir changed (%s -> %s) — takes effect on restart; audit keeps writing to the old directory until then",
+				trigger, auditDirInUse, newCfg.LogDir)
+		}
 		logger.Printf("reload(%s) ok", trigger)
 		logConfigSummary(logger, newCfg, newSnap)
 	}
@@ -372,6 +387,7 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
+	logger.Printf("config: dirs log=%s image_cache=%s", cfg.LogDir, cfg.ImageCacheDir)
 	for _, line := range providerProxyLines(cfg) {
 		logger.Printf("config: %s", line)
 	}
@@ -464,6 +480,7 @@ func cmdCheck(args []string) error {
 	}
 	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd\n",
 		cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
+	fmt.Printf("  dirs log=%s image_cache=%s\n", cfg.LogDir, cfg.ImageCacheDir)
 	for _, line := range providerProxyLines(cfg) {
 		fmt.Println("  " + line)
 	}

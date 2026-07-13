@@ -1,7 +1,8 @@
-// Ver 2026-07-08 20:15, by Sonnet 5
+// Ver 2026-07-13 02:00, by Sonnet 5
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +56,59 @@ func TestCmdCheck_MissingFile(t *testing.T) {
 	if err := cmdCheck([]string{"-c", filepath.Join(t.TempDir(), "does-not-exist.yaml")}); err == nil {
 		t.Error("cmdCheck on a missing file should return an error")
 	}
+}
+
+// TestCmdDirs_ValidConfig locks in that `vmr dirs` prints the config's
+// resolved log_dir/image_cache_dir (post-defaults) rather than an
+// env-var-derived path — log_dir and image_cache_dir moved from environment
+// variables to config fields (design doc §7.1, 2026-07-13).
+func TestCmdDirs_ValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, "config.yaml", minimalConfigYAML+"log_dir: "+dir+"/logs\n")
+	got := captureStdout(t, func() {
+		if err := cmdDirs([]string{"-c", path, "log"}); err != nil {
+			t.Fatalf("cmdDirs log: %v", err)
+		}
+	})
+	if want := dir + "/logs\n"; got != want {
+		t.Errorf("cmdDirs log: got %q, want %q", got, want)
+	}
+}
+
+// TestCmdDirs_RequiresValidConfig documents a real behavior change: unlike
+// the pre-2026-07-13 implementation (which resolved log_dir/cache_dir from
+// an environment variable, independent of config.yaml), `vmr dirs` now loads
+// and validates the full config — a missing or malformed config.yaml makes
+// it fail. vmr.sh must never call this unconditionally for commands (stop/
+// status/logs) that have to keep working when config.yaml is broken; see
+// resolve_log_dir's lazy resolution in vmr.sh.
+func TestCmdDirs_RequiresValidConfig(t *testing.T) {
+	if err := cmdDirs([]string{"-c", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "log"}); err == nil {
+		t.Error("cmdDirs on a missing config should return an error, not resolve a default")
+	}
+	bad := writeTempFile(t, "config.yaml", "not: valid: yaml: [\n")
+	if err := cmdDirs([]string{"-c", bad, "log"}); err == nil {
+		t.Error("cmdDirs on an unparseable config should return an error")
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	fn()
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around

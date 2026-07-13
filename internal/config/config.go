@@ -1,4 +1,4 @@
-// Ver 2026-07-12 17:30, by Fable 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -10,12 +10,15 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"vmr/internal/adapter"
+	"vmr/internal/rundir"
 )
 
 const (
@@ -119,8 +122,20 @@ type Config struct {
 	// ${VAR} expansion applies like everywhere else in the file. Unset =
 	// every provider connects directly. Per-provider exclusion is
 	// Provider.Proxy: false, not a second exclusion list.
-	HTTPProxy           string                            `yaml:"http_proxy"`
-	HTTPSProxy          string                            `yaml:"https_proxy"`
+	HTTPProxy  string `yaml:"http_proxy"`
+	HTTPSProxy string `yaml:"https_proxy"`
+	// LogDir is where audit JSONL files land; ImageCacheDir holds the
+	// image-downscale result cache. Explicit values are used exactly as
+	// given (a leading "~/" expands to the home directory; ${VAR} expansion
+	// applies too). Unset → the persistent defaults ~/.vmr/logs and
+	// ~/.vmr/image_cache (internal/rundir fallback chain). These were
+	// VMR_LOG_DIR/VMR_IMG_CACHE_DIR environment variables once — moved into
+	// the config for the same reason the proxy settings are config-only:
+	// nothing about where vmr writes should depend on implicit environment
+	// state. Note: a log_dir change needs a restart (the audit logger opens
+	// its directory once at startup); image_cache_dir follows hot reloads.
+	LogDir              string                            `yaml:"log_dir"`
+	ImageCacheDir       string                            `yaml:"image_cache_dir"`
 	ImageDownscaleMaxPx int                               `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, §7)
 	ImageCacheTTLDays   int                               `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int                               `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
@@ -161,6 +176,22 @@ func expandEnv(s string) string {
 	})
 }
 
+// expandTilde resolves a leading "~/" (or a bare "~") to the user's home
+// directory — the spelling everyone reaches for in a path field. Anything
+// else, including "~user" forms, is returned untouched; if the home
+// directory cannot be resolved the value stays literal rather than being
+// silently rewritten.
+func expandTilde(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	return filepath.Join(home, strings.TrimPrefix(p[1:], "/"))
+}
+
 func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1:8800"
@@ -182,6 +213,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxRequestBodyMB <= 0 {
 		c.MaxRequestBodyMB = DefaultMaxRequestBodyMB
+	}
+	c.LogDir = expandTilde(c.LogDir)
+	if c.LogDir == "" {
+		c.LogDir = rundir.Resolve("logs", "vmr_logs", "logs")
+	}
+	c.ImageCacheDir = expandTilde(c.ImageCacheDir)
+	if c.ImageCacheDir == "" {
+		c.ImageCacheDir = rundir.Resolve("image_cache", "vmr_image_cache", "image_cache")
 	}
 	if c.Timeouts.Connect <= 0 {
 		c.Timeouts.Connect = Duration(DefaultConnectTimeout)

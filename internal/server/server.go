@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -203,7 +203,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		if rec != nil || n > 0 {
 			body, images = imgprep.Downscale(body, protocol, imgprep.Options{
 				MaxPx:        n,
-				CacheDir:     imgprep.CacheDir(),
+				CacheDir:     snap.Cfg.ImageCacheDir,
 				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
 			})
 		}

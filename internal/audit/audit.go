@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. Analysis
@@ -16,8 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"vmr/internal/rundir"
 )
 
 // retentionDays gates the delete side of housekeeping (see housekeep.go).
@@ -205,17 +203,10 @@ type Logger struct {
 	hkWG         sync.WaitGroup // lets tests wait for a sweep to finish (Close deliberately doesn't: compression is crash-safe, shutdown shouldn't block on it)
 }
 
-// Dir resolves the audit directory: $VMR_LOG_DIR if set (used exactly as
-// given), else the persistent ~/.vmr/logs — see internal/rundir for the
-// full fallback chain, shared with imgprep.CacheDir so dev mode and
-// service mode always agree on the default without vmr.sh keeping its own
-// copy of this formula. Persistent (not the system temp dir) on purpose:
-// macOS purges temp entries after ~3 days of no access, which is silent
-// data loss for the only source vmr report has.
-func Dir() string {
-	return rundir.Resolve("VMR_LOG_DIR", "logs", "vmr_logs", "logs")
-}
-
+// New opens (or creates) the audit directory. The directory comes from
+// config.yaml's log_dir (default: the persistent ~/.vmr/logs, resolved in
+// config.applyDefaults via internal/rundir) — there is no environment
+// variable for it anymore.
 func New(dir string) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err

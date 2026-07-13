@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-13 02:00, by Fable 5
 
 // End-to-end check that image downscaling (internal/imgprep) is wired into
 // the real request path: client -> server -> router -> adapter -> upstream.
@@ -347,15 +347,14 @@ func TestImageDownscaleCacheWiredEndToEnd(t *testing.T) {
 	var gotBody atomic.Value
 	up := mockUpstream(t, &gotBody)
 
-	// An explicit VMR_IMG_CACHE_DIR is used exactly as given, no subdir
-	// appended (internal/rundir) — unlike the unset-default, which does add
-	// one.
+	// An explicit image_cache_dir is used exactly as given, no subdir
+	// appended — unlike the unset-default, which does add one.
 	cacheDir := t.TempDir()
-	t.Setenv("VMR_IMG_CACHE_DIR", cacheDir)
 
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 image_downscale: 512
+image_cache_dir: %s
 providers:
   openai:
     p1: {base_url: %s, api_key: k1}
@@ -363,7 +362,7 @@ models:
   openai:
     vm:
       endpoints: [{provider: p1, model: model-one}]
-`, up.URL))
+`, cacheDir, up.URL))
 
 	uri := bigJPEGDataURI(t) // 1600x900
 	reqBody := fmt.Sprintf(`{"model":"vm","messages":[{"role":"user","content":[

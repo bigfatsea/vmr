@@ -662,15 +662,6 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
 	b.WriteString("\n")
 }
 
-// renderDelta is now a no-op stub kept for backward compatibility with
-// other callers. The increment summary is rendered directly at the end of
-// the Messages block by the per-message 🆕 prefix and a one-line footer.
-func renderDelta(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
-	_ = b
-	_ = rec
-	_ = info
-}
-
 // renderClientRequest emits section ①: what the caller sent to vmr.
 func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
@@ -716,7 +707,6 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 		}
 		b.WriteString(details(fmt.Sprintf("Tools (%d): %s", len(arr), escapeHTML(preview(strings.Join(tools, ", ")))), tb.String()))
 	}
-	renderDelta(b, rec, info)
 	if len(msgs) > 0 {
 		w("\n### Messages (%d)\n\n", len(msgs))
 		if line := roleStatLine(roleChars(req.Body), true, true); line != "" {

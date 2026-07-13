@@ -91,7 +91,7 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 ```
 cmd/vmr/main.go            CLI（stdlib flag）：start / check / status / report / dirs；Adapter 的 blank import 注册点
 internal/core              CanonicalRequest、ErrorClass、Endpoint（无依赖的共享类型）
-internal/rundir            默认目录解析公式（env var → ~/.vmr → 系统临时目录 → cwd），audit 与 imgprep 共用（§7.1）
+internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用（§7.1）
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch
 internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写
 internal/adapter/openai    OpenAI 协议透传 Adapter
@@ -280,14 +280,13 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 **Key**：`sha256(原始图片字节)` + 目标 `maxPx`。maxPx 必须入 key——同一张图对不同虚拟模型可能用不同的降采样目标（§7 的逐模型覆盖），两者是两份不同的结果，不能共享一个缓存条目。文件名 `<hex>-<maxPx>.jpg`，值就是降采样后的 JPEG 字节（输出格式固定为 JPEG，见上文）。
 
-**目录**：`imgprep.CacheDir()` 与 `audit.Dir()`（§9.1）共享同一套四层默认规则，实现下沉到 `internal/rundir.Resolve(envVar, homeSubdir, tmpSubdir, pwdSubdir)`：
+**目录**：缓存目录来自配置项 `image_cache_dir`，审计目录来自 `log_dir`（§9.1）——**都是 config.yaml 字段，不再有 `VMR_IMG_CACHE_DIR`/`VMR_LOG_DIR` 环境变量**（2026-07-13 移除：目录属于"vmr 把数据写到哪"这类必须在 config 里读得出来的事实，与代理同理不留隐式旋钮；要从环境注入就显式写 `log_dir: ${VMR_LOG_DIR}`，`${VAR}` 展开一视同仁）。显式值原样使用、不追加子目录（开头的 `~/` 展开为 home）；未设置时走 `internal/rundir.Resolve(homeSubdir, tmpSubdir, pwdSubdir)` 的三层默认：
 
-1. `$<envVar>` 有设置就原样返回，不加任何子目录——显式设置的路径是调用方自己的选择，不该被悄悄加一层。
-2. 否则 `~/.vmr/<homeSubdir>`——最常见的情况，**持久目录而非系统临时目录**。此前的默认值是 `os.TempDir()` 下的子目录，实测在 macOS 上是数据丢失路径：系统会清理约 3 天未访问的用户临时目录条目（重启也会清），本机 07-09~07-11 产生的审计日志已被静默删光——而审计日志是 `vmr report` 成本核算的唯一数据源（§9.5），"默认永久保留"与"默认放在会被 OS 清理的目录"是自相矛盾的。缓存对应 `~/.vmr/image_cache`，审计对应 `~/.vmr/logs`（2026-07-12 修复）。
-3. 否则 `os.TempDir()/<tmpSubdir>`——只有解析不出 home 目录（如被剥空环境的 service 场景）才会走到；加 `vmr_` 前缀子目录是因为系统临时目录是全机器共享的。缓存对应 `vmr_image_cache`，审计对应 `vmr_logs`。
-4. `<cwd>/<pwdSubdir>`——只有 `os.TempDir()` 本身返回空字符串才会走到这里；Go 支持的平台实际上不会触发，纯粹是防御性兜底。缓存对应 `./image_cache`，审计对应 `./logs`。
+1. `~/.vmr/<homeSubdir>`——最常见的情况，**持久目录而非系统临时目录**。更早的默认值是 `os.TempDir()` 下的子目录，实测在 macOS 上是数据丢失路径：系统会清理约 3 天未访问的用户临时目录条目（重启也会清），本机 07-09~07-11 产生的审计日志已被静默删光——而审计日志是 `vmr report` 成本核算的唯一数据源（§9.5），"默认永久保留"与"默认放在会被 OS 清理的目录"是自相矛盾的。缓存对应 `~/.vmr/image_cache`，审计对应 `~/.vmr/logs`（2026-07-12 修复）。
+2. 否则 `os.TempDir()/<tmpSubdir>`——只有解析不出 home 目录（如被剥空环境的 service 场景）才会走到；加 `vmr_` 前缀子目录是因为系统临时目录是全机器共享的。缓存对应 `vmr_image_cache`，审计对应 `vmr_logs`。
+3. `<cwd>/<pwdSubdir>`——只有 `os.TempDir()` 本身返回空字符串才会走到这里；Go 支持的平台实际上不会触发，纯粹是防御性兜底。缓存对应 `./image_cache`，审计对应 `./logs`。
 
-`vmr dirs log` / `vmr dirs cache` 直接打印解析结果，不依赖 config；`vmr.sh` 用这两个子命令代替自己算一遍公式（见 §10 的 vmr.sh 部分），这样 dev 模式和 service 模式对"数据到底落在哪"永远给出同一个答案，不会出现只有一边强制写了 env、另一边悄悄退回临时目录的情况——这正是这条规则统一之前的实际问题（`VMR_LOG_DIR` 被 `service install` 显式塞进 plist/unit，`VMR_IMG_CACHE_DIR` 却没有，导致 service 模式下老是落在临时目录，即使 shell 里设置了变量也不生效；已修复，见下）。
+`vmr dirs [-c config.yaml] {log|cache}` 打印生效值（缺省后的 `cfg.LogDir`/`cfg.ImageCacheDir`），`vmr check` 与启动摘要也各打印一行 `dirs log=… image_cache=…`；`vmr.sh` 用 `vmr dirs -c $CFG log` 查询 server log 的落点，而不是在 bash 里复刻公式。生效语义：`image_cache_dir` 随快照热重载即时生效；`log_dir` 在启动时打开一次，热重载改它会打"需重启"提示、审计继续写旧目录。
 
 **查找时机**：只在"确认需要处理"（`longSide > maxPx` 且未触发解压炸弹防护）之后才计算哈希、查缓存——绝大多数图片根本不需要降采样，在这条路径之外查缓存只会给最常见的场景白加一次哈希开销。命中则直接返回缓存字节，跳过解码/缩放/编码整段；未命中则走原有全量处理，处理完成后再写入缓存。
 
@@ -299,7 +298,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 **写入**：`os.CreateTemp` + `os.Rename`，与 §9.5 审计压缩落盘同一套 crash-safety 模式；失败一律静默忽略（fail-open——缓存只是优化，写盘失败不该让一个已经处理成功的请求失败）。
 
-**vmr.sh 对齐方式**：`LOG_DIR`/`CACHE_DIR` 两个 bash 变量都通过 `"$BIN" dirs log` / `"$BIN" dirs cache` 查询得到，而不是 bash 自己拿 `${VMR_LOG_DIR:-...}` 算一份公式——单一实现来源在 Go 里，bash 只负责问答。`service install` 把查到的值分别通过 `Environment=VMR_LOG_DIR=…` / `Environment=VMR_IMG_CACHE_DIR=…`（systemd）或 plist 里的 `export`（launchd）显式注入，两个变量待遇完全对称；dev 模式的 `nohup` 前缀同样两个都传。之前 `VMR_IMG_CACHE_DIR` 没有这层显式注入、只有 `VMR_LOG_DIR` 有的不对称，是本轮修的问题——现在两者规则统一之后，这个不对称本身也不存在了：即使不做任何显式注入，dev 模式和 service 模式各自独立调用同一份确定性公式也会得到相同结果，显式注入只是把这个保证也做到"依赖 vmr.sh 自己的行为"这一层，双保险。
+**vmr.sh 对齐方式**（2026-07-13 起大幅简化）：目录改为 config 字段之后，vmr.sh 对目录的全部参与只剩一件事——用 `"$BIN" dirs -c "$CFG" log` 查出 `log_dir`，把自己的 server stderr 日志放在旁边（`$LOG_DIR/vmr.log`）。曾经的 `Environment=VMR_LOG_DIR=…`/plist `export`/nohup 前缀这一整套双通道注入（以及它引出过的"`VMR_IMG_CACHE_DIR` 忘了注入导致 service 模式缓存落错地方"的真实 bug）随环境变量一起被删除了：二进制自己读 config,不存在"环境没带对"这个失败模式。**代价需要显式管理**：`vmr dirs` 现在会完整加载并校验 config.yaml,不再是纯函数式的目录解析——vmr.sh 因此把这次查询做成惰性的（`resolve_log_dir`,只在真正要用到 `$LOG_DIR`/`$SERVER_LOG` 的分支才调用:`start`、`service install`、`logs`),不在脚本顶层无条件跑一遍。否则 config.yaml 正在编辑出现语法错误的几秒钟里,连 `./vmr.sh stop` 都会先于任何停止逻辑就因为 `vmr dirs` 报错而整体退出——这恰好是最需要能停掉进程的时刻(2026-07-13 review 发现并修复)。
 
 ---
 
@@ -327,7 +326,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 | 项 | 行为 |
 | --- | --- |
 | 开关 | 默认开启；`vmr start -audit=false` 关闭 |
-| 目录 | `audit.Dir()`，即 `$VMR_LOG_DIR`（有设置则原样使用）否则持久的 `~/.vmr/logs`（§7.1 `internal/rundir` 的四层默认规则，与 `imgprep.CacheDir()` 共用同一套公式；不用系统临时目录——macOS 会清理它，审计会被静默删除）；启动日志打印实际路径，`vmr dirs log` 也可单独查询 |
+| 目录 | 配置项 `log_dir`（有设置则原样使用，`~/` 展开）否则持久的 `~/.vmr/logs`（§7.1 `internal/rundir` 的三层默认规则，与 `image_cache_dir` 共用同一套公式；不用系统临时目录——macOS 会清理它，审计会被静默删除）；不再有 `VMR_LOG_DIR` 环境变量（2026-07-13）。启动日志打印实际路径，`vmr dirs -c <cfg> log` 也可单独查询；改 `log_dir` 需重启生效（热重载会打提示） |
 | 文件 | 每天一个：`vmr-audit-YYYY-MM-DD.jsonl`（本地时区，写入时轮转），权限 0600 |
 | 时机 | 请求完成后追加一行（含流式全程），不影响 TTFB |
 | 失败 | 写盘失败仅打 stderr 日志，绝不影响请求服务 |
@@ -463,6 +462,8 @@ max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
 https_proxy: http://...       # 可选：https 型 base_url 的上游代理。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}
 http_proxy: http://...        # 可选：http 型 base_url 同理（如局域网 llama.cpp）；按 base_url 的 scheme 选用。都不设 = 全部直连
+log_dir: ~/.vmr/logs          # 可选：审计日志目录（§9.1）。显式值原样使用（~/ 展开）；缺省 ~/.vmr/logs（§7.1 三层默认）。改动需重启生效
+image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录（§7.1）。规则同上，缺省 ~/.vmr/image_cache；随热重载即时生效
 image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
 image_cache_ttl_days: 7       # 降采样结果缓存的失效期（§7.1）；缺省/非正数 = 7 天
 audit_retention_days: 0       # 审计文件保留天数（§9.5）；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
@@ -497,13 +498,13 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但全局没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记与每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs {log|cache}`（打印 `audit.Dir()`/`imgprep.CacheDir()` 的解析结果，不依赖 config，`vmr.sh` 内部用它代替自己算一份公式，见 §7.1）。环境变量：`VMR_LOG_DIR`（审计目录，缺省 `~/.vmr/logs`）、`VMR_IMG_CACHE_DIR`（图片降采样缓存目录，§7.1，缺省 `~/.vmr/image_cache`）、配置内 `${VAR}` 展开引用的任意变量。**代理环境变量（`HTTPS_PROXY` 等）被有意忽略**——见下段。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但全局没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记与每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点，见 §7.1）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：**代理环境变量（`HTTPS_PROXY` 等）被有意忽略**（见下段），曾经的 `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 已改为配置项 `log_dir`/`image_cache_dir`（§7.1，2026-07-13）。
 
 **上游代理：显式配置，两层解析**（2026-07-12）：① provider 自己的 `proxy: false` 最高优先——永远直连（国内厂商 + 海外厂商混配是它的目标场景：代理只为海外厂商而设，国内厂商走代理只会变慢甚至不通）；② 全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到（曾经的实际形态就是"设过一次 HTTPS_PROXY 的 shell 里启动的 vmr 悄悄把全部上游流量导进了代理"），vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，且 vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境（专门抓代理变量的逻辑已随之删除）。`proxy: true` 但全局没配对应 scheme 的代理是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 provider 的生效代理（凭证掩码）、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
-**vmr.sh（唯一脚本入口，双模式）**：dev 模式（`start/stop/restart/status/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置；service 模式（`service install/uninstall/start/stop/restart/status/logs`）把监督交给 init 系统——macOS 渲染 launchd user agent（`~/Library/LaunchAgents/com.vmr.plist`，KeepAlive+RunAtLoad，stop 走 `bootout` 避免 KeepAlive 复活被杀进程），Linux 渲染 systemd 用户单元（`Restart=always`；系统级部署把 unit 拷到 `/etc/systemd/system` 去掉 `--user` 即可）。模板内嵌于脚本（heredoc 注入绝对路径），不设独立模板目录。**环境是 service 模式的第一大坑**：init 系统不继承 shell 的 export，`install` 自动从当前 shell 抓取 config 引用的 `${VAR}` 生成 `~/.config/vmr/env`（0600，存在则不覆盖；只抓 config 显式引用的变量，不隐式抓代理变量——代理是 config 字段，config 里写了 `${HTTPS_PROXY}` 这条通用抓取自然覆盖），launchd 经 `set -a; . env` 加载（不 `set -a` 则 source 的变量不会进入 exec 后的进程环境），systemd 经 `EnvironmentFile=`。`VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 不走这条 `${VAR}` 抓取路径（两者都不是 config.yaml 里的引用）——脚本单独用 `"$BIN" dirs log`/`"$BIN" dirs cache` 查出解析结果，再通过 plist 的 `export`/systemd 的 `Environment=` 显式注入，dev 模式的 `nohup` 前缀同理，两个变量待遇完全对称（§7.1）。macOS 第二坑：TCC 禁止 launchd/sh 对外置卷做文件操作（spawn 报 EX_CONFIG / Operation not permitted），但 vmr 进程自身写卷不受限——故 plist 的 WorkingDirectory 指 `$HOME`、服务日志落 `~/Library/Logs/vmr.log`（macOS 惯例），审计照常写 `VMR_LOG_DIR`。两模式互斥：service install/start 自动停 dev 进程。均经 macOS 实机全周期验证（install→E2E→kill -9 自愈→stop→start→uninstall）。
+**vmr.sh（唯一脚本入口，双模式）**：dev 模式（`start/stop/restart/status/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置；service 模式（`service install/uninstall/start/stop/restart/status/logs`）把监督交给 init 系统——macOS 渲染 launchd user agent（`~/Library/LaunchAgents/com.vmr.plist`，KeepAlive+RunAtLoad，stop 走 `bootout` 避免 KeepAlive 复活被杀进程），Linux 渲染 systemd 用户单元（`Restart=always`；系统级部署把 unit 拷到 `/etc/systemd/system` 去掉 `--user` 即可）。模板内嵌于脚本（heredoc 注入绝对路径），不设独立模板目录。**环境是 service 模式的第一大坑**：init 系统不继承 shell 的 export，`install` 自动从当前 shell 抓取 config 引用的 `${VAR}` 生成 `~/.config/vmr/env`（0600，存在则不覆盖；只抓 config 显式引用的变量，不隐式抓代理变量——代理是 config 字段，config 里写了 `${HTTPS_PROXY}` 这条通用抓取自然覆盖），launchd 经 `set -a; . env` 加载（不 `set -a` 则 source 的变量不会进入 exec 后的进程环境），systemd 经 `EnvironmentFile=`。目录（`log_dir`/`image_cache_dir`）是 config 字段、二进制自己读取，脚本不注入任何目录变量——只用 `"$BIN" dirs -c "$CFG" log` 查出 `log_dir` 来放自己的 server stderr 日志（§7.1）。macOS 第二坑：TCC 禁止 launchd/sh 对外置卷做文件操作（spawn 报 EX_CONFIG / Operation not permitted），但 vmr 进程自身写卷不受限——故 plist 的 WorkingDirectory 指 `$HOME`、服务日志落 `~/Library/Logs/vmr.log`（macOS 惯例），审计照常写 `log_dir`。两模式互斥：service install/start 自动停 dev 进程。均经 macOS 实机全周期验证（install→E2E→kill -9 自愈→stop→start→uninstall）。
 
 ---
 
@@ -534,8 +535,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | 降采样缓存 key 含 `maxPx`（§7.1） | 只按源图片哈希建 key | 同一张源图对不同虚拟模型可能配了不同的降采样目标；只按图片哈希会让后写入的结果覆盖或误命中前一个模型的缓存，返回错误尺寸的图片 |
 | 降采样缓存只做按 mtime 的 TTL，不设容量上限（§7.1） | TTL + 容量双重限制 | 类比 §9.5 审计 retention 的取舍：先上最简单、可预测的单一机制；图片缓存的体积由源图片种类 × maxPx 种类 × TTL 窗口共同界定，实践中量级有限，真出现磁盘问题再加容量上限，不为未发生的问题预先加复杂度 |
 | 降采样缓存目录/失效期通过显式参数传入 `imgprep.Downscale`，不用包级可变状态 | 仿照 `audit` 包用 Set* 全局单例 | `Downscale` 每请求调用一次，调用方（`server.chatHandler`）本来就持有解析好的配置快照；显式传参没有额外成本，还让测试能用 `t.TempDir()` 互相隔离，不用担心跨测试的全局状态污染。唯一必要的包级状态是"缓存目录今天是否已经扫过"的节流簿记，与配置无关，纯粹是防抖动 |
-| `audit.Dir()`/`imgprep.CacheDir()` 的默认目录公式下沉到 `internal/rundir`，`vmr.sh` 靠新增的 `vmr dirs {log\|cache}` 子命令查询，不在 bash 里重写一份（§7.1） | bash 自己复刻同一套 env-var→temp-dir→cwd 判断逻辑 | 两份独立实现迟早会跑偏——这正是修复前的实际情况：`VMR_LOG_DIR` 被 `vmr.sh` 显式强制注入两种模式，`VMR_IMG_CACHE_DIR` 却完全没有对应逻辑，service 模式下永远看不到它。公式只写一遍、bash 只负责问答，结构上排除了再次跑偏的可能，`vmr dirs` 的开销是每次 vmr.sh 调用多两次几毫秒的子进程 |
-| `VMR_IMG_CACHE_DIR`/`VMR_LOG_DIR` 有设置时原样返回，不追加子目录；未设置时才落到 `~/.vmr/logs`/`~/.vmr/image_cache` | 无论是否设置都统一追加子目录（`imgprep.CacheDir()` 改前的行为） | 用户显式设置这个变量，语义就是"这是我要的目录"，再悄悄拼一层子目录会让人诧异；子目录命名空间只在"我们自己选的默认值"这个场景下才有意义 |
+| 默认目录公式（~/.vmr → temp → cwd）单点实现于 `internal/rundir`，`vmr.sh` 靠 `vmr dirs -c <cfg> {log\|cache}` 查询生效值，不在 bash 里重写一份（§7.1） | bash 自己复刻同一套判断逻辑 | 两份独立实现迟早会跑偏——env 时代的实际事故：`VMR_LOG_DIR` 被 `vmr.sh` 显式强制注入两种模式，`VMR_IMG_CACHE_DIR` 却完全没有对应逻辑，service 模式下永远看不到它。公式只写一遍、bash 只负责问答，结构上排除了再次跑偏的可能 |
+| `log_dir`/`image_cache_dir` 显式值原样使用，不追加子目录（开头 `~/` 展开）；未设置才落到 `~/.vmr/logs`/`~/.vmr/image_cache` | 无论是否设置都统一追加子目录 | 用户显式设置这个字段，语义就是"这是我要的目录"，再悄悄拼一层子目录会让人诧异；子目录命名空间只在"我们自己选的默认值"这个场景下才有意义 |
+| 目录改为 config 字段 `log_dir`/`image_cache_dir`，删除 `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 环境变量（§7.1，2026-07-13） | 保留环境变量（或 env 覆盖 config 的双通道） | 与代理同一判断：vmr 往哪写数据必须在 config.yaml 里读得出来，隐式环境状态是排障时最难想到的旋钮。附带把 vmr.sh 的整套目录注入（plist export / systemd Environment / nohup 前缀）连根删掉——"环境没带对"这个失败模式对目录不复存在；service 模式 env 文件只剩 config 显式引用的 `${VAR}` 一条通道。代价：`vmr dirs` 从此依赖 config（加 `-c`）；`log_dir` 热重载改不动（audit logger 启动时打开一次，重载打"需重启"提示），`image_cache_dir` 照常热生效 |
 | 默认目录用持久的 `~/.vmr/`，不用系统临时目录（§7.1，2026-07-12） | 系统临时目录（旧默认） | macOS 定期清理约 3 天未访问的临时目录条目，本机审计日志已实际丢失过一轮；"审计默认永久保留"（§9.5）与"默认目录会被 OS 清理"自相矛盾。图片缓存同迁——它的价值就在跨天的字节级复用（上游 prompt cache 按字节匹配） |
 | Retry-After 冷却封顶 1h（§6.2，2026-07-12） | 无条件信任上游值 | Retry-After 是上游可控输入；封顶与 Auth/Endpoint 的 longCap 一致，最坏情况每小时一次失败探针，恢复及时性优先 |
 | Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint` 的格式多一段，是人读字符串，没有内部逻辑解析它（审计 `attempts[].endpoint` 后来改成了独立拼接的 `:` 分隔三段式，不再共用这个方法，见 §9.2） |

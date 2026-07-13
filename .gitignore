@@ -33,7 +33,9 @@ coverage.html
 *.jsonl.zst
 
 # Runtime logs (vmr.sh daemon + audit) and image-downscale cache — only
-# populated here when $TMPDIR is unavailable (internal/rundir's last-resort
-# fallback); the normal default lives under the system temp dir instead.
+# populated here as internal/rundir's last-resort fallback, reached when
+# neither the home directory nor the system temp dir can be resolved; the
+# normal default is the persistent ~/.vmr/logs and ~/.vmr/image_cache
+# (config.yaml's log_dir/image_cache_dir, unset).
 /logs/
 /image_cache/
