@@ -1,9 +1,11 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-13 23:20, by Sonnet 5
 
 // Package audit writes one JSONL record per chat request: the client-side
-// exchange plus every upstream attempt, raw and unaggregated. Analysis
-// (request counts, token usage, …) is done later by external scripts reading
-// these files — vmr itself only records.
+// exchange plus every upstream attempt, raw and unaggregated. This package
+// itself only records and provides shared low-level reading (OpenLogFile,
+// ForEachLine) — aggregation (`vmr report`) and request reconstruction
+// (`vmr replay`) build on top of it, in their own packages, alongside
+// whatever external scripts (jq, DuckDB, …) also read these files directly.
 package audit
 
 import (
@@ -57,6 +59,28 @@ type Record struct {
 	// virtual model: Downscaled/DownscaledWidth/... stay zero-valued when
 	// downscaling never ran (disabled) or wasn't needed (already small).
 	Images []ImageInfo `json:"images,omitempty"`
+	// ReplayOf identifies the source record ("path:line") when this record
+	// was produced by `vmr replay --record`, not live traffic. Empty for
+	// every ordinary request — vmr itself never sets this field.
+	ReplayOf string `json:"replay_of,omitempty"`
+}
+
+// OutcomeFor decides a Record's Outcome from the client-facing HTTP status
+// and whether the client disconnected before one was ever written
+// (status == 0 alone doesn't imply that — canceled must be asserted
+// explicitly by the caller, since a caller with no concept of client
+// disconnection, like internal/replay, always has a concrete status).
+// Shared so every writer of Outcome (the live server, `vmr replay
+// --record`) agrees on where the ok/error boundary sits.
+func OutcomeFor(status int, canceled bool) string {
+	switch {
+	case canceled:
+		return "canceled"
+	case status < 400:
+		return "ok"
+	default:
+		return "error"
+	}
 }
 
 // ImageInfo is one inline (or remote-referenced) image found in a request.
@@ -154,6 +178,21 @@ func EncodeBody(body []byte) any {
 // audit file in cleartext; Set-Cookie covers upstream/CDN session tokens
 // on the response side.
 var credentialHeaders = []string{"Authorization", "X-Api-Key", "Api-Key", "X-Auth-Token", "Cookie", "Set-Cookie", "Proxy-Authorization"}
+
+// IsCredentialHeader reports whether h is one of the header names Redact
+// masks. A stored audit record's value for such a header is a placeholder
+// ("Bearer ***c1d4"), never the real credential — a consumer that
+// reconstructs a request from an audit record (internal/replay) must strip
+// these in addition to whatever headers it would otherwise block, or it
+// forwards the masked placeholder to a live upstream as if it were real.
+func IsCredentialHeader(h string) bool {
+	for _, k := range credentialHeaders {
+		if strings.EqualFold(k, h) {
+			return true
+		}
+	}
+	return false
+}
 
 // Redact copies headers, masking credential values ("Bearer sk-…" → "***c1d4").
 func Redact(h http.Header) http.Header {

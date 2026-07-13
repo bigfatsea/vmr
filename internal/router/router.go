@@ -1,4 +1,4 @@
-// Ver 2026-07-13 00:30, by Fable 5
+// Ver 2026-07-13 19:00, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -42,6 +42,19 @@ type ModelRoute struct {
 	// non-nil (including a pointer to 0) = this model's explicit setting,
 	// which always wins over the global one (§7 image downscale).
 	ImageDownscaleMaxPx *int
+}
+
+// EffectiveOrder returns route's endpoints in the order they would actually
+// be tried — health ignored, a static preview only — by copying and running
+// the same strategy.Sort every real request goes through (see Serve).
+// Shared by every command that previews routing (vmr start's startup log,
+// vmr check, vmr diagnose) so they can't silently disagree about try-order
+// for the same config: each held its own copy of "append then sort" before
+// this was factored out.
+func (r *ModelRoute) EffectiveOrder() []*core.Endpoint {
+	ordered := append([]*core.Endpoint(nil), r.Endpoints...)
+	strategy.Sort(ordered, r.Dims)
+	return ordered
 }
 
 // EffectiveImageDownscaleMaxPx resolves the image-downscale cap that
@@ -135,21 +148,38 @@ func New(logger *log.Logger) *Router {
 	return &Router{Health: health.New(), Logger: logger}
 }
 
+// NewUpstreamClient builds an *http.Client configured exactly like Install
+// would for connections to p: same dial/response-header/idle timeouts, same
+// proxy resolution (config.ProxySpecFor). Standalone one-shot tools (replay,
+// diagnose) that need to speak to a single provider without running a Router
+// use this instead of duplicating Install's Transport setup — Install itself
+// calls this per distinct proxy resolution.
+func NewUpstreamClient(cfg *config.Config, p config.Provider) *http.Client {
+	mode, proxyURL := cfg.ProxySpecFor(p)
+	// nil Proxy = direct. Proxy environment variables are deliberately not
+	// consulted — proxies are explicit config (config.Config.HTTPProxy/
+	// HTTPSProxy), nothing implicit.
+	var proxyFn func(*http.Request) (*url.URL, error)
+	if mode == config.ProxyURL {
+		if u, err := url.Parse(proxyURL); err == nil { // validated at config load
+			proxyFn = http.ProxyURL(u)
+		}
+	}
+	return &http.Client{Transport: &http.Transport{
+		Proxy:                 proxyFn,
+		DialContext:           (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
+		ResponseHeaderTimeout: cfg.Timeouts.ResponseHeader.D(),
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
+	}}
+}
+
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.
 // One http.Client is built per distinct proxy resolution (direct, or a config
 // proxy URL) and shared by every provider that resolves the same way — the
 // per-provider proxy switch never costs a per-request check.
 func (rt *Router) Install(s *Snapshot) {
-	mkClient := func(proxy func(*http.Request) (*url.URL, error)) *http.Client {
-		return &http.Client{Transport: &http.Transport{
-			Proxy:                 proxy,
-			DialContext:           (&net.Dialer{Timeout: s.Cfg.Timeouts.Connect.D()}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
-			ResponseHeaderTimeout: s.Cfg.Timeouts.ResponseHeader.D(),
-			MaxIdleConnsPerHost:   16,
-			IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
-		}}
-	}
 	byResolution := map[string]*http.Client{}
 	s.clients = map[string]*http.Client{}
 	for protocol, byName := range s.Cfg.Providers {
@@ -158,16 +188,7 @@ func (rt *Router) Install(s *Snapshot) {
 			key := mode + "|" + proxyURL
 			c, ok := byResolution[key]
 			if !ok {
-				// nil Proxy = direct. Proxy environment variables are
-				// deliberately not consulted — proxies are explicit config
-				// (config.Config.HTTPProxy/HTTPSProxy), nothing implicit.
-				var proxyFn func(*http.Request) (*url.URL, error)
-				if mode == config.ProxyURL {
-					if u, err := url.Parse(proxyURL); err == nil { // validated at config load
-						proxyFn = http.ProxyURL(u)
-					}
-				}
-				c = mkClient(proxyFn)
+				c = NewUpstreamClient(s.Cfg, p)
 				byResolution[key] = c
 				s.clientSet = append(s.clientSet, c)
 			}
@@ -256,7 +277,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
 			writeError(w, http.StatusNotFound, "not_found_error",
-				fmt.Sprintf("model %q speaks the %s protocol; call it via %s", creq.Model, other, ingressPath(other)))
+				fmt.Sprintf("model %q speaks the %s protocol; call it via POST %s", creq.Model, other, IngressPath(other)))
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found_error",
@@ -624,11 +645,19 @@ func otherProtocolFor(s *Snapshot, protocol, name string) string {
 	return ""
 }
 
-func ingressPath(protocol string) string {
+// IngressPath is the vmr entry point for protocol — what a live client
+// actually POSTs to ("openai" -> chat completions, anything else ->
+// Anthropic messages, mirroring every other protocol switch in this
+// codebase). Exported so every consumer that needs to name a protocol's
+// ingress route (this package's own 404 redirect message, and
+// internal/replay's reconstructed Client.Request.Path) shares one mapping
+// instead of each keeping its own copy that could drift if a third
+// protocol is ever registered.
+func IngressPath(protocol string) string {
 	if protocol == "anthropic" {
-		return "POST /v1/messages"
+		return "/v1/messages"
 	}
-	return "POST /v1/chat/completions"
+	return "/v1/chat/completions"
 }
 
 // writeError emits an error body that both OpenAI clients (error.message)

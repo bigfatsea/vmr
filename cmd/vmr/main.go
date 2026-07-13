@@ -1,12 +1,14 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-13 23:20, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
-//	vmr start  -c config.yaml   run the router
-//	vmr check  -c config.yaml   validate config and print a summary
-//	vmr status -c config.yaml   show endpoint health of a running instance
-//	vmr report <audit.jsonl>    aggregate audit logs into usage statistics
-//	vmr dirs {log|cache}        print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
+//	vmr start    -c config.yaml   run the router
+//	vmr check    -c config.yaml   validate config and print a summary
+//	vmr status   -c config.yaml   show endpoint health of a running instance
+//	vmr report   <audit.jsonl>    aggregate audit logs into usage statistics
+//	vmr dirs     {log|cache}      print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
+//	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
+//	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
 package main
 
 import (
@@ -22,17 +24,18 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
-	"vmr/internal/core"
+	"vmr/internal/diagnose"
+	"vmr/internal/replay"
 	"vmr/internal/report"
 	"vmr/internal/router"
 	"vmr/internal/server"
-	"vmr/internal/strategy"
 
 	// Adding a provider type = one blank import here.
 	_ "vmr/internal/adapter/anthropic"
@@ -56,6 +59,10 @@ func main() {
 		err = cmdReport(os.Args[2:])
 	case "dirs":
 		err = cmdDirs(os.Args[2:])
+	case "replay":
+		err = cmdReplay(os.Args[2:])
+	case "diagnose":
+		err = cmdDiagnose(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -69,7 +76,10 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
        vmr report [-o dir] [-details=false] <audit.jsonl|glob>...
-       vmr dirs [-c config.yaml] {log|cache}`)
+       vmr dirs [-c config.yaml] {log|cache}
+       vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
+       vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
+       vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]`)
 }
 
 // cmdDirs prints the effective runtime directory for "log" (config
@@ -179,6 +189,92 @@ func cmdReport(args []string) error {
 		}
 		fmt.Printf("%d detail file(s) (.md + .json) in %s\n%s\n", n, detailDir,
 			filepath.Join(*outDir, "vmr-requests-index.md"))
+	}
+	return nil
+}
+
+// cmdReplay rebuilds and resends one request from an audit record — see
+// internal/replay for the mechanics (same adapter.BuildRequest path vmr
+// itself uses, so the replayed request matches what vmr originally sent).
+func cmdReplay(args []string) error {
+	fs := flag.NewFlagSet("replay", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "path to config file")
+	line := fs.Int("line", 0, "1-based line number to replay (default: the last parsable record in the file); mutually exclusive with -ts and -detail")
+	ts := fs.String("ts", "", "replay the record whose timestamp matches this (millisecond precision; accepts either vmr-requests.jsonl's \"ts\" or the raw audit.jsonl \"ts\" field verbatim); mutually exclusive with -line and -detail")
+	detail := fs.String("detail", "", "replay the one record in this vmr-report details/*.json file — no audit file argument needed; mutually exclusive with -line and -ts")
+	provider := fs.String("provider", "", "provider to replay against (required; providers.<protocol>.<name>)")
+	model := fs.String("model", "", "override the upstream model name (default: resolved from config for -provider under the record's virtual model)")
+	protocol := fs.String("protocol", "", "override the protocol (default: the record's own protocol)")
+	streamFlag := fs.String("stream", "", "force stream on/off: true|false (default: the record's own value)")
+	dryRun := fs.Bool("dry-run", false, "print the request that would be sent, without sending it")
+	recordPath := fs.String("record", "", "append the replay's request/response to this audit JSONL file")
+	maxTime := fs.Duration("max-time", 0, "upstream timeout for this replay (default: config timeouts.response_header/stream_idle)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *detail != "" {
+		if fs.NArg() != 0 {
+			return fmt.Errorf("usage: vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]  (no audit file argument — -detail already selects one record)")
+		}
+	} else if fs.NArg() != 1 {
+		return fmt.Errorf("usage: vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>")
+	}
+	opts := replay.Options{
+		ConfigPath: *cfgPath,
+		Line:       *line,
+		TS:         *ts,
+		DetailPath: *detail,
+		Provider:   *provider,
+		Model:      *model,
+		Protocol:   *protocol,
+		DryRun:     *dryRun,
+		RecordPath: *recordPath,
+		MaxTime:    *maxTime,
+	}
+	if fs.NArg() == 1 {
+		opts.AuditPath = fs.Arg(0)
+	}
+	if *streamFlag != "" {
+		b, err := strconv.ParseBool(*streamFlag)
+		if err != nil {
+			return fmt.Errorf("-stream: %w", err)
+		}
+		opts.Stream = &b
+	}
+	return replay.Run(context.Background(), opts, os.Stdout)
+}
+
+// cmdDiagnose validates config and, unless -no-test-routing is set, dials
+// every configured provider with a real minimal request — see
+// internal/diagnose for what vmr check (a static preview) doesn't cover.
+func cmdDiagnose(args []string) error {
+	fs := flag.NewFlagSet("diagnose", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "path to config file")
+	noTestRouting := fs.Bool("no-test-routing", false, "skip phase 3 (real connectivity test); only validate config and environment")
+	testTimeout := fs.Duration("test-timeout", 10*time.Second, "per-endpoint timeout for the connectivity test")
+	jsonOut := fs.Bool("json", false, "print results as a JSON array instead of the human-readable listing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rep, err := diagnose.Run(context.Background(), diagnose.Options{
+		ConfigPath:  *cfgPath,
+		TestRouting: !*noTestRouting,
+		TestTimeout: *testTimeout,
+	})
+	if rep == nil {
+		return err // config load itself failed; nothing to print
+	}
+	if *jsonOut {
+		data, err := json.MarshalIndent(rep.Results, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+	} else {
+		fmt.Print(diagnose.FormatTable(rep))
+	}
+	if n := rep.FailCount(); n > 0 {
+		return fmt.Errorf("%d failing check(s)", n)
 	}
 	return nil
 }
@@ -405,8 +501,7 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		sort.Strings(names)
 		for _, name := range names {
 			route := snap.Models[protocol][name]
-			ordered := append([]*core.Endpoint(nil), route.Endpoints...)
-			strategy.Sort(ordered, route.Dims)
+			ordered := route.EffectiveOrder()
 			parts := make([]string, len(ordered))
 			for i, ep := range ordered {
 				key := "key:set"
@@ -507,8 +602,7 @@ func cmdCheck(args []string) error {
 			// numbers: with priority omitted (the common case) that order is
 			// exactly config-file order, which is the whole point.
 			route := snap.Models[protocol][name]
-			ordered := append([]*core.Endpoint(nil), route.Endpoints...)
-			strategy.Sort(ordered, route.Dims)
+			ordered := route.EffectiveOrder()
 			for i, ep := range ordered {
 				key := cfg.Providers[protocol][ep.Provider].APIKey
 				keyState := "key:set"

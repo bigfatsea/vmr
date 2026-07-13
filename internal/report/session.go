@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-13 22:45, by Sonnet 5
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
@@ -161,12 +161,12 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
 	for _, path := range paths {
-		rc, err := openAuditFile(path)
+		rc, err := audit.OpenLogFile(path)
 		if err != nil {
 			return nil, err
 		}
 		line := 0
-		scanErr := forEachLine(rc, maxAuditLine, func(lineBytes []byte) {
+		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
 			line++
 			var rec audit.Record
 			if err := json.Unmarshal(lineBytes, &rec); err != nil {

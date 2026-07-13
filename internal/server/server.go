@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-13 19:00, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -99,6 +99,24 @@ var headerBlocklist = map[string]struct{}{
 	"accept-encoding": {},
 }
 
+// FilterClientHeaders returns a copy of h with headerBlocklist entries
+// removed — the same filtering chatHandler applies to a live request before
+// handing headers to an adapter. Exported so `vmr replay` (internal/replay)
+// can reconstruct the exact header set a live request would have carried
+// when rebuilding one from an audit record.
+func FilterClientHeaders(h http.Header) http.Header {
+	out := http.Header{}
+	for k, vs := range h {
+		if _, blocked := headerBlocklist[strings.ToLower(k)]; blocked {
+			continue
+		}
+		for _, v := range vs {
+			out.Add(k, v)
+		}
+	}
+	return out
+}
+
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var rec *audit.Record
@@ -117,14 +135,8 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 				rec.DurMS = time.Since(rec.TS).Milliseconds()
 				rec.TTFTMS = rw.ttftMS
 				rec.Client.Response = rw.message()
-				switch {
-				case rw.status == 0 && r.Context().Err() != nil:
-					rec.Outcome = "canceled"
-				case rw.status < 400:
-					rec.Outcome = "ok"
-				default:
-					rec.Outcome = "error"
-				}
+				canceled := rw.status == 0 && r.Context().Err() != nil
+				rec.Outcome = audit.OutcomeFor(rw.status, canceled)
 				if err := s.audit.Write(rec); err != nil {
 					log.Printf("audit: %v", err)
 				}
@@ -234,15 +246,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// necessary — it strips legitimate metadata (User-Agent,
 		// X-Stainless-*, Traceparent) and needs code updates when SDKs
 		// add new headers.
-		hdr := http.Header{}
-		for k, vs := range r.Header {
-			if _, blocked := headerBlocklist[strings.ToLower(k)]; blocked {
-				continue
-			}
-			for _, v := range vs {
-				hdr.Add(k, v)
-			}
-		}
+		hdr := FilterClientHeaders(r.Header)
 
 		s.rt.Serve(w, r, &core.CanonicalRequest{Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr}, protocol, rec)
 	}

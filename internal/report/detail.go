@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-13 22:45, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -77,13 +77,13 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 	used := map[string]int{}
 
 	for _, path := range paths {
-		rc, err := openAuditFile(path)
+		rc, err := audit.OpenLogFile(path)
 		if err != nil {
 			return len(entries), err
 		}
 		line := 0
 		var writeErr error
-		scanErr := forEachLine(rc, maxAuditLine, func(lineBytes []byte) {
+		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
 			line++
 			if writeErr != nil {
 				return

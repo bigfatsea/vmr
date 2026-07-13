@@ -146,6 +146,8 @@ Directories (`log_dir`, `image_cache_dir` — see below) and proxies are config 
 
 Streaming is real: events forward as they arrive; buffering engages only for detected thinking shapes and resumes live streaming once `</think>` closes. Compressed (`Content-Encoding`) bodies pass through untouched. Response headers follow the same policy as request headers — everything forwarded except hop-by-hop; error responses return verbatim with status, headers (`Retry-After` included), and body. Every normalization actually applied is recorded in the audit log (`attempts[].norm`), so any byte difference between upstream and client is explained, per request.
 
+Because passthrough is byte-level, a new request/response field on either protocol needs no vmr change to reach the upstream or the client — that's the whole point. What vmr does **not** do: it only routes `POST /v1/chat/completions` and `POST /v1/messages`. Other OpenAI/Anthropic surfaces (`/v1/responses`, `/v1/realtime`, `/v1/images`, `/v1/audio`, …) aren't in scope — point a client at the provider's own base URL for those.
+
 ## Failover & health
 
 On upstream failure vmr walks the endpoint list in order until one succeeds or all are exhausted (`max_attempts` optionally caps the walk). Health is failure-driven — no paid active probing:
@@ -226,10 +228,35 @@ models:
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip) |
 | `vmr dirs [-c config.yaml] log\|cache` | print the effective audit/cache directory (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
+| `vmr diagnose [-c config.yaml]` | beyond `check`'s static preview: DNS/TLS/proxy reachability per provider, then a real minimal request per configured endpoint (run concurrently, `-test-timeout` per check, default 10s), plus a routing-order preview annotated with what it found (`-no-test-routing` to skip the live requests, `-json` for scripting; exits non-zero if anything failed) |
+| `vmr replay -provider NAME <audit.jsonl>` | rebuild and resend one request from an audit record through the exact same request-building path vmr itself uses — `-dry-run` to print without sending, `-record path` to save the replay as its own audit line, `-model`/`-protocol` to override what the record itself says, `-stream true\|false` to force streaming on/off, `-max-time` to cap the upstream wait. Pick the record with `-detail file` (a `vmr report` `details/*.json` file — no line-counting needed), `-ts <timestamp>` (matches either `vmr-requests.jsonl`'s or the raw audit log's `ts` field), or `-line N` (default: the last one in the file) — the three are mutually exclusive |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |
 
 Routed responses carry `X-VMR-Endpoint` (the endpoint that served it) and `X-VMR-Attempts` (tries used).
+
+```bash
+# Something's misconfigured — find out what before staring at 401s in the logs.
+./vmr diagnose -c config.yaml
+
+# A request failed; see exactly what vmr would send without sending it.
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+
+# Same request, actually sent, response printed to stdout.
+./vmr replay -c config.yaml -provider openrouter \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+
+# Found the failing request in vmr-requests-index.md or vmr-report.md instead?
+# Point -detail straight at its details/*.json — no line-counting needed.
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    -detail out/details/20260713-153042.100_coding_z-ai-glm-5.2_error.json
+
+# Or replay by the exact timestamp shown in vmr-requests.jsonl / vmr-report.md.
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    -ts 2026-07-13T15:30:42.100+08:00 \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+```
 
 ## Development
 

@@ -145,6 +145,8 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 
 流式是真的：事件到达即转发；只有检测到思考形态才缓冲，`</think>` 闭合后立即恢复实时流。带 `Content-Encoding` 的压缩体零变换直通。响应头与请求头同一策略——除 hop-by-hop 外全部透传；错误响应连状态、头（含 `Retry-After`）、体原样返回。每个请求实际生效的归一化记录在审计日志 `attempts[].norm`，上游与客户端之间的任何字节差异都有逐请求的解释。
 
+正因为透传是字节级的，两个协议任何一侧新增的请求/响应字段都不需要 vmr 改代码就能到达上游或客户端——这正是透传的意义所在。vmr **不做**的事：只路由 `POST /v1/chat/completions` 和 `POST /v1/messages` 两个入口，其他 OpenAI/Anthropic surface（`/v1/responses`、`/v1/realtime`、`/v1/images`、`/v1/audio` 等）不在范围内——这类需求请直接把客户端指向供应商自己的 base URL。
+
 ## 故障切换与健康
 
 上游失败即按端点列表顺序逐个尝试，直到成功或全部耗尽（`max_attempts` 可选设上限）。健康完全由失败驱动——不做花钱的主动探测：
@@ -225,10 +227,35 @@ models:
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭） |
 | `vmr dirs [-c config.yaml] log\|cache` | 打印生效的审计/缓存目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
+| `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点（并发执行，`-test-timeout` 控制单项超时，默认 10s），并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
+| `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.jsonl` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 
 经路由的响应带 `X-VMR-Endpoint`（实际命中端点）与 `X-VMR-Attempts`（尝试次数）。
+
+```bash
+# 怀疑配置有问题——先诊断一遍，而不是对着日志里的 401 干瞪眼。
+./vmr diagnose -c config.yaml
+
+# 某个请求失败了，先看看 vmr 本来会发出什么，不真的发送。
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+
+# 同一个请求，真的发送，把上游响应打印到 stdout。
+./vmr replay -c config.yaml -provider openrouter \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+
+# 是在 vmr-requests-index.md / vmr-report.md 里找到的那条失败请求？
+# 直接指向它的 details/*.json，不用数行号。
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    -detail out/details/20260713-153042.100_coding_z-ai-glm-5.2_error.json
+
+# 或者用 vmr-requests.jsonl / vmr-report.md 里看到的精确时间戳来定位。
+./vmr replay -c config.yaml -provider openrouter -dry-run \
+    -ts 2026-07-13T15:30:42.100+08:00 \
+    "$(./vmr dirs -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+```
 
 ## 开发
 

@@ -1,0 +1,450 @@
+// Ver 2026-07-13 19:00, by Sonnet 5
+
+// Package replay implements `vmr replay`: rebuild and resend one request
+// from an audit JSONL record, using the exact same adapter.BuildRequest vmr
+// itself uses — so the replayed request is byte-for-byte what vmr would
+// have sent, not an approximation of it.
+package replay
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	"vmr/internal/adapter"
+	"vmr/internal/audit"
+	"vmr/internal/config"
+	"vmr/internal/core"
+	"vmr/internal/router"
+	"vmr/internal/server"
+)
+
+// Options configures one replay run. There are three ways to pick which
+// record to replay — DetailPath (a single-record file `vmr report` already
+// wrote), TS (an exact-enough timestamp match within AuditPath), or Line (a
+// raw line number within AuditPath, the least ergonomic but zero-ambiguity
+// fallback) — and they're mutually exclusive; Run validates that.
+type Options struct {
+	ConfigPath string
+	AuditPath  string // a single audit .jsonl or .jsonl.zst file; required unless DetailPath is set
+	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS
+	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line
+	DetailPath string // a `vmr report` details/*.json file, read directly as the one record it holds — AuditPath/Line/TS unused
+	Provider   string // required: providers.<protocol>.<name> to replay against
+	Model      string // override the upstream model name; "" = resolved from config
+	Protocol   string // override the protocol; "" = the record's own protocol
+	Stream     *bool  // nil = use the record's own stream value
+	DryRun     bool   // print the request without sending it
+	RecordPath string // "" = don't write a replay audit record
+	MaxTime    time.Duration
+}
+
+// recordView pulls only the fields replay needs out of an audit.Record line.
+// It can't reuse audit.Record directly: Message.Body is typed `any`, so
+// json.Unmarshal decodes an object body into map[string]interface{} and the
+// original bytes are lost — replay needs the raw bytes to resend unchanged.
+// TS stays a string (not time.Time) so loadRecordByTS controls parsing
+// itself instead of silently absorbing whatever encoding/json does with a
+// malformed timestamp.
+type recordView struct {
+	TS       string `json:"ts"`
+	Model    string `json:"model"`
+	Protocol string `json:"protocol"`
+	Stream   bool   `json:"stream"`
+	Client   struct {
+		Request struct {
+			Headers http.Header     `json:"headers"`
+			Body    json.RawMessage `json:"body"`
+		} `json:"request"`
+	} `json:"client"`
+}
+
+// Run replays one audit record end to end: load config, locate the record,
+// resolve which endpoint to hit, rebuild the request via the same adapter
+// path `vmr start` uses, then either print it (DryRun) or send it and print
+// the upstream response to stdout.
+func Run(ctx context.Context, opts Options, stdout io.Writer) error {
+	if opts.Provider == "" {
+		return fmt.Errorf("-provider is required")
+	}
+	if opts.Line < 0 {
+		return fmt.Errorf("-line must be >= 0")
+	}
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		return err
+	}
+	rv, replayOf, err := selectRecord(opts)
+	if err != nil {
+		return err
+	}
+	if len(rv.Client.Request.Body) == 0 || rv.Client.Request.Body[0] != '{' {
+		return fmt.Errorf("%s: client request body is not a JSON object; only JSON chat/messages requests can be replayed", replayOf)
+	}
+
+	protocol := opts.Protocol
+	if protocol == "" {
+		protocol = rv.Protocol
+	}
+	ad, ok := adapter.Get(protocol)
+	if !ok {
+		return fmt.Errorf("unknown protocol %q (available: %v)", protocol, adapter.Names())
+	}
+	providerCfg, ok := cfg.Providers[protocol][opts.Provider]
+	if !ok {
+		return fmt.Errorf("provider %q not found under providers.%s in %s", opts.Provider, protocol, opts.ConfigPath)
+	}
+
+	model := opts.Model
+	if model == "" {
+		if model, err = resolveModel(cfg, protocol, rv.Model, opts.Provider); err != nil {
+			return err
+		}
+	}
+
+	ep := &core.Endpoint{
+		Provider:    opts.Provider,
+		AdapterType: protocol,
+		BaseURL:     providerCfg.BaseURL,
+		APIKey:      providerCfg.APIKey,
+		Model:       model,
+	}
+
+	stream := rv.Stream
+	if opts.Stream != nil {
+		stream = *opts.Stream
+	}
+
+	creq := &core.CanonicalRequest{
+		Model:  rv.Model, // virtual name — BuildRequest rewrites it to ep.Model, same as live traffic
+		Stream: stream,
+		Raw:    rv.Client.Request.Body,
+		Header: replayHeaders(rv.Client.Request.Headers),
+	}
+
+	httpReq, outBody, err := ad.BuildRequest(ctx, ep, creq)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+
+	if opts.DryRun {
+		printDryRun(stdout, ep, httpReq, outBody)
+		return nil
+	}
+
+	if opts.MaxTime > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.MaxTime)
+		defer cancel()
+	}
+	httpReq = httpReq.WithContext(ctx)
+
+	client := router.NewUpstreamClient(cfg, providerCfg)
+	fmt.Fprintf(stdout, "-> %s %s\n", httpReq.Method, httpReq.URL)
+	start := time.Now()
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	fmt.Fprintf(stdout, "<- %d %s\n", resp.StatusCode, http.StatusText(resp.StatusCode))
+
+	// Tee to stdout as it arrives (real streaming for SSE) while also
+	// buffering it, so a non-empty -record path can still write the full
+	// response without a second round trip.
+	var respBuf bytes.Buffer
+	if _, err := io.Copy(io.MultiWriter(stdout, &respBuf), resp.Body); err != nil {
+		fmt.Fprintf(stdout, "\n(response ended early: %v)\n", err)
+	}
+	// Measured after the full body transfer, not just headers — matches
+	// audit.Record.DurMS's "total wall time" meaning everywhere else
+	// (server.go/router.go both measure through the end of the body too).
+	// A response whose body trickles in after fast headers would otherwise
+	// be recorded as far quicker than it actually was.
+	dur := time.Since(start).Round(time.Millisecond)
+	fmt.Fprintf(stdout, "(%s)\n", dur)
+
+	if opts.RecordPath != "" {
+		if err := writeReplayRecord(opts.RecordPath, rv, ep, httpReq, outBody, resp, respBuf.Bytes(), replayOf, dur); err != nil {
+			return fmt.Errorf("write -record: %w", err)
+		}
+	}
+	return nil
+}
+
+// selectRecord dispatches to whichever of Options' three locators is set —
+// DetailPath, TS or Line — after checking that at most one is (Run's -line
+// default is 0, so "not set" and "explicitly line 0" aren't distinguishable,
+// but line 0 was never a valid 1-based line number anyway). It returns the
+// record plus a provenance string (used for -record's ReplayOf and in error
+// messages) that reads the same regardless of which locator found it.
+func selectRecord(opts Options) (*recordView, string, error) {
+	set := 0
+	for _, v := range []bool{opts.DetailPath != "", opts.TS != "", opts.Line != 0} {
+		if v {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, "", fmt.Errorf("-detail, -ts and -line are mutually exclusive; pass only one")
+	}
+
+	if opts.DetailPath != "" {
+		if opts.AuditPath != "" {
+			return nil, "", fmt.Errorf("-detail already selects one record; don't also pass an audit file")
+		}
+		rv, err := loadDetailFile(opts.DetailPath)
+		if err != nil {
+			return nil, "", err
+		}
+		return rv, opts.DetailPath, nil
+	}
+
+	if opts.AuditPath == "" {
+		return nil, "", fmt.Errorf("an audit file argument is required (or pass -detail)")
+	}
+	if opts.TS != "" {
+		rv, lineNo, err := loadRecordByTS(opts.AuditPath, opts.TS)
+		if err != nil {
+			return nil, "", err
+		}
+		return rv, fmt.Sprintf("%s:%d", opts.AuditPath, lineNo), nil
+	}
+	rv, lineNo, err := loadRecordByLine(opts.AuditPath, opts.Line)
+	if err != nil {
+		return nil, "", err
+	}
+	return rv, fmt.Sprintf("%s:%d", opts.AuditPath, lineNo), nil
+}
+
+// loadDetailFile reads a `vmr report` details/*.json file directly as one
+// record — no scanning needed, since WriteDetails (internal/report/detail.go)
+// always writes exactly one audit.Record per such file (json.MarshalIndent,
+// no surrounding array or extra lines), unlike an audit .jsonl which packs
+// many records one per line.
+func loadDetailFile(path string) (*recordView, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rv recordView
+	if err := json.Unmarshal(data, &rv); err != nil {
+		return nil, fmt.Errorf("%s: not a valid record: %w", path, err)
+	}
+	return &rv, nil
+}
+
+// loadRecordByTS scans path for the record whose arrival timestamp matches
+// ts at millisecond resolution — the precision `vmr-requests.jsonl`'s own
+// "ts" column uses (internal/report/export.go), so a value copied from
+// either that file or the raw audit.jsonl's full nanosecond "ts" field
+// locates the same record. time.Parse(time.RFC3339, ...) accepts a
+// fractional-second component of any length regardless of the layout given,
+// so both precisions parse through the same call. Errors if no record
+// matches, or if more than one shares that millisecond (rare, but a debug
+// tool guessing which one you meant would be worse than asking you to use
+// -line instead).
+func loadRecordByTS(path, ts string) (*recordView, int, error) {
+	want, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return nil, 0, fmt.Errorf("-ts %q: %w", ts, err)
+	}
+	want = want.Truncate(time.Millisecond)
+
+	rc, err := audit.OpenLogFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rc.Close()
+
+	var found *recordView
+	foundN, matches := 0, 0
+	n := 0
+	scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lb []byte) {
+		n++
+		var rv recordView
+		if err := json.Unmarshal(lb, &rv); err != nil {
+			return // malformed line: skip rather than abort the whole scan
+		}
+		got, err := time.Parse(time.RFC3339, rv.TS)
+		if err != nil || !got.Truncate(time.Millisecond).Equal(want) {
+			return
+		}
+		matches++
+		found, foundN = &rv, n
+	}, nil)
+	if scanErr != nil {
+		return nil, 0, scanErr
+	}
+	if matches == 0 {
+		return nil, 0, fmt.Errorf("no record with ts=%q (millisecond match) found in %s", ts, path)
+	}
+	if matches > 1 {
+		return nil, 0, fmt.Errorf("%d records match ts=%q within the same millisecond in %s; use -line to disambiguate", matches, ts, path)
+	}
+	return found, foundN, nil
+}
+
+// loadRecordByLine reads path (transparently decompressing .zst) and
+// returns the record at the given 1-based line, or the last parsable record
+// when line is 0 — the common "replay whatever just failed" workflow
+// doesn't require counting lines first. lineNo is the actual 1-based line
+// the record came from (useful for -record's ReplayOf provenance and for
+// error messages).
+func loadRecordByLine(path string, line int) (*recordView, int, error) {
+	rc, err := audit.OpenLogFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rc.Close()
+
+	var last *recordView
+	lastN := 0
+	n := 0
+	scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lb []byte) {
+		n++
+		if line > 0 && n != line {
+			return
+		}
+		var rv recordView
+		if err := json.Unmarshal(lb, &rv); err != nil {
+			return // malformed line: skip rather than abort the whole scan
+		}
+		last, lastN = &rv, n
+	}, nil)
+	if scanErr != nil {
+		return nil, 0, scanErr
+	}
+	if last == nil {
+		if line > 0 {
+			return nil, 0, fmt.Errorf("line %d not found (or not a parsable record) in %s", line, path)
+		}
+		return nil, 0, fmt.Errorf("no parsable records found in %s", path)
+	}
+	return last, lastN, nil
+}
+
+// resolveModel looks up the real upstream model name for provider under the
+// virtual model the record was sent to — the same lookup config.yaml itself
+// encodes (models.<protocol>.<virtualModel>.endpoints[].{provider,model}).
+func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (string, error) {
+	mc, ok := cfg.Models[protocol][virtualModel]
+	if !ok {
+		return "", fmt.Errorf("virtual model %q not found in config under protocol %q; pass -model to specify the upstream model explicitly", virtualModel, protocol)
+	}
+	for _, ep := range mc.Endpoints {
+		if ep.Provider == provider {
+			return ep.Model, nil
+		}
+	}
+	return "", fmt.Errorf("provider %q has no endpoint under virtual model %q; pass -model to specify the upstream model explicitly", provider, virtualModel)
+}
+
+func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte) {
+	fmt.Fprintf(w, "DRY-RUN  protocol=%s provider=%s model=%s\n", ep.AdapterType, ep.Provider, ep.Model)
+	fmt.Fprintf(w, "-> %s %s\n", req.Method, req.URL)
+	redacted := audit.Redact(req.Header)
+	for _, k := range sortedHeaderKeys(redacted) {
+		for _, v := range redacted[k] {
+			fmt.Fprintf(w, "   %s: %s\n", k, v)
+		}
+	}
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, body, "", "  ") == nil {
+		fmt.Fprintln(w, pretty.String())
+	} else {
+		w.Write(body)
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintf(w, "(%d bytes)\n", len(body))
+}
+
+// replayHeaders reconstructs the header set a live request would have
+// carried. server.FilterClientHeaders alone isn't enough here: its
+// blocklist and audit.Redact's separate credentialHeaders list are
+// independently maintained and don't fully overlap (e.g. "Api-Key"/
+// "X-Auth-Token" are masked by Redact but not blocked from forwarding on
+// live traffic, since live headers are always real). The stored value for
+// any audit.IsCredentialHeader entry is a masked placeholder like
+// "***c1d4", never the real credential — forwarding it to a live upstream
+// would send garbage where FilterClientHeaders alone wouldn't catch it, so
+// every such header is stripped here too.
+func replayHeaders(h http.Header) http.Header {
+	out := server.FilterClientHeaders(h)
+	for k := range out {
+		if audit.IsCredentialHeader(k) {
+			out.Del(k)
+		}
+	}
+	return out
+}
+
+func sortedHeaderKeys(h http.Header) []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// writeReplayRecord appends one audit.Record describing this replay to
+// path, independent of the main audit chain (`vmr report` never sees it
+// unless the caller explicitly points a glob at it). Field layout mirrors
+// what a live request produces (server.go/router.go), so a replay record
+// reads correctly through the same tools (jq, vmr report, another vmr
+// replay): Client.Request.Body is the pre-rewrite body actually replayed
+// (virtual model name intact, exactly like live traffic — NOT ep.Model's
+// rewritten outBody, which belongs on the Attempt instead); Client.Response
+// is what this replay ultimately produced; the attempt's own response body
+// is populated only on failure, since on success it is byte-identical to
+// Client.Response.Body (same omission router.go's tryOne makes).
+func writeReplayRecord(path string, rv *recordView, ep *core.Endpoint, req *http.Request, outBody []byte, resp *http.Response, respBody []byte, replayOf string, dur time.Duration) error {
+	attemptResp := &audit.Message{Status: resp.StatusCode, Headers: audit.Redact(resp.Header)}
+	if resp.StatusCode >= 400 {
+		attemptResp.Body = audit.EncodeBody(respBody)
+	}
+	durMS := dur.Milliseconds()
+	rec := audit.Record{
+		TS:       time.Now(),
+		DurMS:    durMS,
+		Protocol: ep.AdapterType,
+		Model:    rv.Model,
+		Stream:   rv.Stream,
+		Outcome:  audit.OutcomeFor(resp.StatusCode, false), // replay always has a concrete status by the time it writes a record; no cancellation concept here
+		ReplayOf: replayOf,
+		Client: audit.Exchange{
+			Request:  audit.Message{Method: http.MethodPost, Path: router.IngressPath(ep.AdapterType), Body: audit.EncodeBody(rv.Client.Request.Body)},
+			Response: &audit.Message{Status: resp.StatusCode, Headers: audit.Redact(resp.Header), Body: audit.EncodeBody(respBody)},
+		},
+		Attempts: []audit.Attempt{{
+			Endpoint: strings.Join([]string{ep.AdapterType, ep.Provider, ep.Model}, ":"),
+			Protocol: ep.AdapterType,
+			Provider: ep.Provider,
+			Model:    ep.Model,
+			URL:      req.URL.String(),
+			DurMS:    durMS,
+			Request:  audit.Message{Headers: audit.Redact(req.Header), Body: audit.EncodeBody(outBody)},
+			Response: attemptResp,
+		}},
+	}
+	line, err := json.Marshal(&rec)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return err
+}
+
