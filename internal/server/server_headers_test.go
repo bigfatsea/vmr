@@ -1,12 +1,11 @@
-// Ver 2026-07-08 07:15, by Fable 5 (post-audit 2026-07-08 fixes)
+// Ver 2026-07-13 04:00, by Sonnet 5
 //
-// Tests for the header pass-through policy. The prior implementation
-// used a strict whitelist that forwarded only Content-Type and the
-// Anthropic protocol headers, which stripped legitimate client
-// metadata (User-Agent, X-Stainless-*, Traceparent). The fix is
-// "default pass + small blocklist": forward everything except
-// headers that would cause a security or protocol-correctness
-// problem if leaked to the upstream.
+// Tests for the header pass-through policy: "default pass + small
+// blocklist" — forward every client header except the ones that would
+// cause a security or protocol-correctness problem if leaked to the
+// upstream. A strict whitelist would be simpler to write but strips
+// legitimate client metadata (User-Agent, X-Stainless-*, Traceparent)
+// that the client and upstream may both depend on.
 package server
 
 import (
@@ -62,9 +61,8 @@ func headersReceived(t *testing.T, u *upstream) http.Header {
 }
 
 func TestHeaders_ClientMetadataForwarded(t *testing.T) {
-	// The fix: SDK metadata (User-Agent, X-Stainless-*, Traceparent)
-	// must reach the upstream. This is the regression test for the
-	// 2026-07-07 OpenClaw audit finding.
+	// SDK metadata (User-Agent, X-Stainless-*, Traceparent) must reach the
+	// upstream — a strict header whitelist would otherwise strip it.
 	u := newUpstream(t)
 	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
 
@@ -208,8 +206,8 @@ func headerKeys(h http.Header) []string {
 
 func TestHeaders_BodyUnaffected(t *testing.T) {
 	// Sanity: the model field in the body is still rewritten to the
-	// upstream model name (adapter.RewriteModel) — the header fix
-	// didn't break request body transformation.
+	// upstream model name (adapter.RewriteModel) — header pass-through
+	// is independent of request body transformation.
 	u := newUpstream(t)
 	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
 
@@ -237,12 +235,11 @@ func TestHeaders_BodyUnaffected(t *testing.T) {
 }
 
 func TestHeaders_AcceptEncodingNotForwarded(t *testing.T) {
-	// Regression (2026-07-08 audit): forwarding the client's
-	// Accept-Encoding disables Go Transport's transparent gzip, so a
-	// compressing upstream would hand the response normalizer gzip
-	// bytes and the client a compressed body without a
-	// Content-Encoding header. The blocklist must drop it; the
-	// Transport then negotiates gzip itself ("gzip", set by Go).
+	// Forwarding the client's Accept-Encoding disables Go Transport's
+	// transparent gzip, so a compressing upstream would hand the response
+	// normalizer gzip bytes and the client a compressed body without a
+	// Content-Encoding header. The blocklist must drop it; the Transport
+	// then negotiates gzip itself ("gzip", set by Go).
 	u := newUpstream(t)
 	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))
 
@@ -351,10 +348,9 @@ func TestHeaders_ErrorRetryAfterForwarded(t *testing.T) {
 }
 
 func TestHeaders_AnthropicVersionNotDuplicated(t *testing.T) {
-	// Regression: the old protocol-header pre-loop Set anthropic-version,
-	// then the general passthrough loop Add-ed the client's copy again —
-	// real Anthropic clients (which always send anthropic-version) made
-	// the upstream see the header twice.
+	// A client-sent anthropic-version must reach the upstream exactly once —
+	// real Anthropic clients always send this header, and passthrough plus a
+	// default-value fallback must not add a second copy of it.
 	u := newUpstream(t)
 	ts := newRouterServer(t, `
 listen: 127.0.0.1:0

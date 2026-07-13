@@ -1,11 +1,11 @@
-// Ver 2026-07-08 21:00, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 //
-// Regression tests for half-open probe slot leaks. Acquire hands the one
-// probe slot of a half-open endpoint to a real request; every outcome of
-// that request must release the slot (success, failure, neutral). Two
-// outcomes used to release nothing — client cancel mid-probe and an
-// ErrClient-classified upstream response — leaving probing=true forever
-// and locking the endpoint out until process restart.
+// Tests that every outcome of a half-open probe request releases its slot.
+// Acquire hands the one probe slot of a half-open endpoint to a real
+// request; every outcome of that request must release the slot (success,
+// failure, neutral — including client cancel mid-probe and an
+// ErrClient-classified upstream response). Missing any of these leaves
+// probing=true forever and locks the endpoint out until process restart.
 package server
 
 import (

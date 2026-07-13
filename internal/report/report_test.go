@@ -1,4 +1,4 @@
-// Ver 2026-07-08 15:30, by Sonnet 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 package report
 
 import (
@@ -14,9 +14,8 @@ import (
 )
 
 // TestAttemptErrorClassFallback covers backward compatibility with audit
-// logs written before Attempt.ErrorClass existed: the class must still be
-// recoverable from the free-text Error field alone, exactly matching what
-// the old prefix-parsing logic used to produce.
+// logs that lack Attempt.ErrorClass: the class must still be recoverable
+// from the free-text Error field alone.
 func TestAttemptErrorClassFallback(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -175,19 +174,14 @@ func TestBuildAggregation(t *testing.T) {
 	}
 }
 
-// TestEndpointsAllAndHoursOfDayMergeAcrossDates covers the exact regression
-// found manually against real production logs: vmr-report.md's 端点可用度
-// and 每小时活跃度 tables always showed "-/-" for 首字延迟/请求耗时, even
-// though every record carries dur_ms. Root cause: those tables used to
-// merge already-`finish*`-processed per-date buckets (rep.Endpoints /
-// rep.Hours), and finishEndpoint/finishHour free the raw dur_ms/ttft_ms
-// slices right after computing that bucket's own per-date percentiles — so
-// re-merging "finished" buckets across dates had nothing left to compute a
-// true percentile from, no matter how much data existed. The fix adds
-// genuinely independent EndpointsAll/HoursOfDay buckets that accumulate raw
-// values directly during Build's single pass, exactly like Overall does for
-// Rows. Two records at the same endpoint / same local hour on different
-// calendar dates is the minimal case that exercises the merge.
+// TestEndpointsAllAndHoursOfDayMergeAcrossDates locks in that EndpointsAll
+// and HoursOfDay compute true cross-date percentiles: they must accumulate
+// raw dur_ms/ttft_ms values directly during Build's single pass — exactly
+// like Overall does for Rows — rather than being derived by re-merging
+// already-`finish*`-processed per-date buckets (rep.Endpoints / rep.Hours),
+// whose raw value slices are freed right after each bucket computes its own
+// per-date percentiles. Two records at the same endpoint / same local hour
+// on different calendar dates is the minimal case that exercises this.
 func TestEndpointsAllAndHoursOfDayMergeAcrossDates(t *testing.T) {
 	lines := `{"ts":"2026-07-07T10:00:00+08:00","dur_ms":1000,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m"}},"response":{"status":200}},"attempts":[{"endpoint":"p1/m1","dur_ms":1000,"response":{"status":200}}]}
 {"ts":"2026-07-08T10:30:00+08:00","dur_ms":2000,"model":"m","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"m"}},"response":{"status":200}},"attempts":[{"endpoint":"p1/m1","dur_ms":2000,"response":{"status":200}}]}

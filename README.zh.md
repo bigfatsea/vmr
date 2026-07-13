@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-12 05:30, by Fable 5 -->
+<!-- Ver 2026-07-13 04:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -133,7 +133,7 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 | config.yaml 里引用的任意 `${VAR}` | 加载配置时展开（每次热重载重新展开）；未设置的变量展开为空串。这是环境变量进入 vmr 的**唯一**通道——API Key、可选的 `${HTTPS_PROXY}`、可选的目录路径，都走这一条。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` | **被忽略。** 代理只认上面的 `http_proxy`/`https_proxy` 配置项；要用环境变量的值，在 config 里显式引用 `${HTTPS_PROXY}`。 |
 
-目录（`log_dir`/`image_cache_dir`，见下）和代理曾经都是环境变量（`VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR`），现在都改成了 config 字段——理由一致：vmr 往哪写、怎么连网络，不该依赖隐式的运行环境。service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VAR}` 从当前 shell 快照进 `~/.config/vmr/env`（0600，已存在则不覆盖）——不需要再注入任何别的东西，二进制自己读 config。
+目录（`log_dir`/`image_cache_dir`，见下）和代理都是 config 字段，不是环境变量——理由一致：vmr 往哪写、怎么连网络，不该依赖隐式的运行环境。service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VAR}` 从当前 shell 快照进 `~/.config/vmr/env`（0600，已存在则不覆盖）——不需要再注入任何别的东西，二进制自己读 config。
 
 ## 透传与归一化
 
@@ -168,7 +168,7 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 ./vmr report "$(./vmr dirs -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl（明文/.zst 混着传也行）
 ```
 
-`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。每条 record 在一次遍历内被同步 push 到**所有相关桶**（`Rows` 按日期×协议×模型、`Overall`、`ByModel`、`ByDate`，加原有的 `Hours`/`Endpoints` 及其"全部日期合并"版本 `HoursOfDay`/`EndpointsAll`）——每个桶都在这一趟遍历里直接收自己的原始值、各自算自己的 p50/p95，所以每个表格里的分位都是**真值**，没有跨桶近似。`HoursOfDay`/`EndpointsAll` 是独立收原始值的桶，不是拿逐日的 `Hours`/`Endpoints` 二次合并出来的——合并"已经算完的"桶算不出真百分位，因为每个桶算完自己的分位后就会把原始值释放掉，再合并时已经没有东西可算了。（这不是假设性的边界情况，是真拿生产日志跑通全流程才发现的真实 bug：端点可用度表和每小时活跃度表的延迟列此前**任何情况下**都显示 `-/-`，不是数据稀疏才这样。）Markdown 表格共享统一的列定义（`Req/Fall/Trunc / 成功率 / Tokens In/CacheHit/Out / 图片/压缩 / 平均Tokens In/Out / 字节 In / Out / 平均消息数 / p50/p95 首字延迟 / p50/p95 请求耗时 / 平均吞吐 (tok/s)`）——请求数、Fallback 数、截断数合并进一个单元格（全 0 时显示 `-`），`图片/压缩` 显示该行的内联图片总数与其中触发压缩的数量（无图片时显示 `-`）。各表再加自己的主键列与特异列（`Tool 调用`，工作负载表里带"发生过调用的请求占比" / `错误分布`）。每模型的健康信号：finish_reason 分布（`length` = 输出被 token 上限截断）。Token 统计还拆出缓存读取、（Anthropic）缓存写入与 reasoning tokens。另有每小时活跃度（`hours_of_day[]`）和工作负载切分（`workloads[]`：交互工作 vs heartbeat/日记 cron 这类定时脚手架），一眼看清请求和账单到底来自哪里。运行进度写到 stdout，每个文件一行（`[i/N] <path>  done: M records, K parse errors (Ts)`）。JSON 是二次开发（图表/Dashboard）的数据源。
+`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。每条 record 在一次遍历内被同步 push 到**所有相关桶**（`Rows` 按日期×协议×模型、`Overall`、`ByModel`、`ByDate`，加原有的 `Hours`/`Endpoints` 及其"全部日期合并"版本 `HoursOfDay`/`EndpointsAll`）——每个桶都在这一趟遍历里直接收自己的原始值、各自算自己的 p50/p95，所以每个表格里的分位都是**真值**，没有跨桶近似。`HoursOfDay`/`EndpointsAll` 是独立收原始值的桶，不是拿逐日的 `Hours`/`Endpoints` 二次合并出来的——合并"已经算完的"桶算不出真百分位，因为每个桶算完自己的分位后就会把原始值释放掉，再合并时已经没有东西可算了。Markdown 表格共享统一的列定义（`Req/Fall/Trunc / 成功率 / Tokens In/CacheHit/Out / 图片/压缩 / 平均Tokens In/Out / 字节 In / Out / 平均消息数 / p50/p95 首字延迟 / p50/p95 请求耗时 / 平均吞吐 (tok/s)`）——请求数、Fallback 数、截断数合并进一个单元格（全 0 时显示 `-`），`图片/压缩` 显示该行的内联图片总数与其中触发压缩的数量（无图片时显示 `-`）。各表再加自己的主键列与特异列（`Tool 调用`，工作负载表里带"发生过调用的请求占比" / `错误分布`）。每模型的健康信号：finish_reason 分布（`length` = 输出被 token 上限截断）。Token 统计还拆出缓存读取、（Anthropic）缓存写入与 reasoning tokens。另有每小时活跃度（`hours_of_day[]`）和工作负载切分（`workloads[]`：交互工作 vs heartbeat/日记 cron 这类定时脚手架），一眼看清请求和账单到底来自哪里。运行进度写到 stdout，每个文件一行（`[i/N] <path>  done: M records, K parse errors (Ts)`）。JSON 是二次开发（图表/Dashboard）的数据源。
 
 `vmr report` 还能读懂 Agent 工作负载——全部离线、纯规则、不调用 LLM（方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：
 
@@ -176,7 +176,7 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 - **`vmr-requests.jsonl`** —— 每请求一行特征（会话/任务/轮次、trace 与 chat id、请求形态、`heartbeat` 等标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning 的 token 细分、增量大小、最新指令），jq / DuckDB / pandas 直接可用。
 - **工具使用报告** —— 按请求形态列出：声明的工具 vs **当轮实际调用**的工具（从响应中提取,历史重发绝不重复计数），外加"声明但从未调用"清单（**numbered list + 字母序，自然让 `feishu_*` 同前缀聚类**）及其每请求字节成本——为从 Agent 配置里裁掉没用的工具提供直接依据。
 
-`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（仅对本次改动后新采集的日志生效，历史日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。`vmr-requests-index.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）按 **Chat User** 分组（`chat_id` 字段剥掉 `user:` 前缀）：每个用户一段 `## Chat User xxx`，下辖每个任务的首条用户指令引用块 + 轮次表（`轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件`——`Message` 是 `M+N` 格式（M = 历史消息数，N = 本轮新增数），`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>`，`耗时` 吸收了原来独立的 结果/尝试次数 两列，以尾注形式追加（`❌<结果>` / `🚫取消` / `⚠️截断` / `🔄尝试x{n}`，可并存），文件列是 `md`/`json` 两个短链接）。"全部请求（时间序）"表把模型和上游合并成一个 `VM/API` 列（`protocol | 虚拟模型 | provider:model`，例如 `openai | agent | minimax:MiniMax-M3`——用 `:` 而非 `/` 分隔供应商和上游模型名，因为 OpenRouter 这类供应商的模型名本身就带 `/`）。Compaction 调用、定时任务（heartbeat/dream_diary）与非聊天体/被拒请求一律归入 `## Chat User (unresolved)`，折叠成紧凑的子分组（`### 压缩任务 · compaction 会话 × N`、`### 定时任务 · <class> 单发会话 × N`、`### 其他 · 非聊天体/被拒请求 × N`），不再一次触发就单占一段，也不再单独占一个顶级标题。加 `-details=false` 可关闭详单导出。
+`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（字段缺失的旧格式日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。`vmr-requests-index.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）按 **Chat User** 分组（`chat_id` 字段剥掉 `user:` 前缀）：每个用户一段 `## Chat User xxx`，下辖每个任务的首条用户指令引用块 + 轮次表（`轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件`——`Message` 是 `M+N` 格式（M = 历史消息数，N = 本轮新增数），`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>`，`耗时` 把结果/尝试次数信息以尾注形式追加，不单占两列（`❌<结果>` / `🚫取消` / `⚠️截断` / `🔄尝试x{n}`，可并存），文件列是 `md`/`json` 两个短链接）。"全部请求（时间序）"表把模型和上游合并成一个 `VM/API` 列（`protocol | 虚拟模型 | provider:model`，例如 `openai | agent | minimax:MiniMax-M3`——用 `:` 而非 `/` 分隔供应商和上游模型名，因为 OpenRouter 这类供应商的模型名本身就带 `/`）。Compaction 调用、定时任务（heartbeat/dream_diary）与非聊天体/被拒请求一律归入 `## Chat User (unresolved)`，折叠成紧凑的子分组（`### 压缩任务 · compaction 会话 × N`、`### 定时任务 · <class> 单发会话 × N`、`### 其他 · 非聊天体/被拒请求 × N`），不再一次触发就单占一段，也不再单独占一个顶级标题。加 `-details=false` 可关闭详单导出。
 
 Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见 `docs/AuditLogCompression_Analysis_Sonnet5.md`。
 
@@ -211,7 +211,7 @@ models:
 # image_cache_dir: ~/.vmr/image_cache   # 降采样缓存目录；规则同上；随热重载即时生效
 ```
 
-——有设置就原样使用（开头的 `~/` 展开为 home 目录），否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，审计历史会被静默删掉——而它是 `vmr report` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr dirs -c config.yaml log` / `vmr dirs -c config.yaml cache`（`vmr check` 与启动摘要也会打印），不用真的启动服务。`vmr.sh` 只查询 `vmr dirs` 来定位 server log 落点，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。已经没有 `VMR_LOG_DIR`/`VMR_IMG_CACHE_DIR` 这两个环境变量了——想从环境注入，在 `log_dir`/`image_cache_dir` 里显式写 `${VAR}` 即可。
+——有设置就原样使用（开头的 `~/` 展开为 home 目录），否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，会静默删掉审计数据——而它是 `vmr report` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr dirs -c config.yaml log` / `vmr dirs -c config.yaml cache`（`vmr check` 与启动摘要也会打印），不用真的启动服务。`vmr.sh` 只查询 `vmr dirs` 来定位 server log 落点，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。两个目录都没有对应的环境变量——想从环境注入，在 `log_dir`/`image_cache_dir` 里显式写 `${VAR}` 即可。
 
 ## 端点与 CLI
 

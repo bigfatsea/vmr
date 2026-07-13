@@ -1,4 +1,4 @@
-// Ver 2026-07-08 22:00, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -175,11 +175,10 @@ func (r oneByteReader) Read(p []byte) (int, error) {
 }
 
 func TestStripThinkingProcess_FullPattern(t *testing.T) {
-	// Real-world pattern from the 2026-07-07 audit log. The
-	// buffer is the raw upstream body with SSE framing. The
-	// thinking lives in a separate data: line from the final
-	// response — the strip must drop the thinking line and
-	// trim the marker's line content.
+	// The full MiniMax M3 thinking=medium shape: the buffer is the raw
+	// upstream body with SSE framing, and the thinking lives in a separate
+	// data: line from the final response — the strip must drop the
+	// thinking line and trim the marker's line content.
 	roleLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
 	thinkingLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Thinking Process:\\n\\n1.  **Analyze the Request:**\\n    *   **User Message:** \\\"hi\\\"\\n2.  **Examine:**\\n    *   ...\\n3.  **Drafting:**\\n    *   ...\\n4.  **Review:**\\n    *   No emojis? Checked.\\n5.  **Final Polish:**\\n    draft 1\\n    Looks good. Pro draft 2\\n    draft 3\\n    Looks good. Proceed final answer here\"}}]}\n\n"
 	finalLine := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n5. **Final Polish:**\\n    draft 1\\n    Looks good. Proactual reply here\"}}]}\n\n"
@@ -297,11 +296,10 @@ func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
 }
 
 func TestStripThinkingProcess_LooksGoodInNormalStream(t *testing.T) {
-	// Regression (2026-07-08 audit): a NORMAL reply whose text
-	// legitimately contains "Looks good. Proceed" — e.g. a code
-	// review verdict — must pass through untouched. Before the
-	// trigger guard, every chunk before the marker was silently
-	// dropped.
+	// A NORMAL reply whose text legitimately contains "Looks good. Proceed"
+	// — e.g. a code review verdict — must pass through untouched. Without
+	// the trigger guard (first content value must start with "Thinking
+	// Process:"), every chunk before the marker would be silently dropped.
 	in := `data: {"id":"1","choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n" +
 		`data: {"id":"1","choices":[{"index":0,"delta":{"content":"I reviewed the PR carefully."}}]}` + "\n\n" +
 		`data: {"id":"1","choices":[{"index":0,"delta":{"content":"Everything checks out."}}]}` + "\n\n" +
@@ -314,10 +312,10 @@ func TestStripThinkingProcess_LooksGoodInNormalStream(t *testing.T) {
 }
 
 func TestStripThinkingProcess_LooksGoodInNormalNonStream(t *testing.T) {
-	// Regression (2026-07-08 audit): non-streaming JSON whose content
-	// contains the endorsement phrase. Before the fix the single-line
-	// body was DUPLICATED (marker line == first line), corrupting the
-	// JSON the client parses.
+	// Non-streaming JSON whose content contains the endorsement phrase as
+	// part of a normal reply must pass through unchanged — the single-line
+	// body must never get duplicated (marker line == first line), which
+	// would corrupt the JSON the client parses.
 	in := `{"id":"1","choices":[{"message":{"role":"assistant","content":"Looks good. Proceed with step 2."}}],"model":"m"}`
 	out := stripThinkingProcess([]byte(in))
 	if string(out) != in {
@@ -346,9 +344,9 @@ func TestStripThinkingProcess_MarkerInFirstLine(t *testing.T) {
 
 func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
 	// When the strip fires, the surviving lines must stay separated by
-	// "\n\n" — including the boundary before the appended [DONE]
-	// sentinel. Before the fix the trailing empty split element was
-	// dropped, gluing the last data: line to "data: [DONE]".
+	// "\n\n" — including the boundary before the appended [DONE] sentinel.
+	// The trailing empty element from splitting a body that ends in "\n\n"
+	// must be kept, or the last data: line glues onto "data: [DONE]".
 	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
 	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
 	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed the reply\"}}\n\n"
@@ -627,13 +625,14 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 	}
 }
 
-// TestRespStream_UndecidedOverflowDegradesToOpaque is a regression test:
-// bufferedCap used to guard only modeBuffered. A stream that never produces
-// a decisive event — e.g. Anthropic's periodic "ping" keepalive events sent
-// during a long wait before the first real content — would grow s.pending
-// without bound while stuck in modeUndecided. Large chunks (rather than many
-// tiny simulated pings) keep this test fast: what's under test is the byte
-// count crossing bufferedCap, not the shape of any one event.
+// TestRespStream_UndecidedOverflowDegradesToOpaque locks in that bufferedCap
+// also bounds modeUndecided, not just modeBuffered: a stream that never
+// produces a decisive event — e.g. Anthropic's periodic "ping" keepalive
+// events sent during a long wait before the first real content — must not
+// grow s.pending without bound while stuck in modeUndecided. Large chunks
+// (rather than many tiny simulated pings) keep this test fast: what's under
+// test is the byte count crossing bufferedCap, not the shape of any one
+// event.
 func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	rs := newRespStream(strings.NewReader(""), "agent", true, "openai", false)
 	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"

@@ -1,22 +1,21 @@
-// Ver 2026-07-07 22:30, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 //
-// End-to-end test that reproduces the actual OpenClaw audit-log
-// scenario from 2026-07-07: 24 rounds of tool-use where the model
-// emits <think>...</think> blocks before each tool call. Without the
-// response normalizer:
+// End-to-end test for a long OpenClaw-style agent conversation: 24 rounds of
+// tool-use where the model emits <think>...</think> blocks before each tool
+// call. Without the response normalizer, this shape is pathological:
 //
-//   - Each round's response model field was "MiniMax-M3" but the
-//     client sent "agent" — model mismatch on every round.
-//   - Each round's think content (~3K chars) was stored as the
-//     assistant message, bloating the next request's prompt_tokens
-//     from 16K (line 4) to 43K (line 27), with one request hitting
-//     483K tokens and finish_reason=length, 1 token (line 3).
+//   - Each round's response model field is the upstream name (e.g.
+//     "MiniMax-M3") while the client sent the virtual name ("agent") —
+//     model mismatch on every round.
+//   - Each round's think content (~3K chars) would get stored as the
+//     assistant message and resent next turn, compounding prompt_tokens
+//     round over round until the context limit is hit and the response is
+//     cut off mid-generation (finish_reason=length).
 //
-// This test asserts that with the normalizer, none of these
-// regressions occur: every round's response model is the virtual
-// model the client sent, no think content is in the round-trip
-// history, and prompt_tokens grow linearly with the tool-result
-// content, not super-linearly with stale reasoning text.
+// This test asserts that with the normalizer, none of this happens: every
+// round's response model is the virtual model the client sent, no think
+// content is in the round-trip history, and prompt_tokens grow linearly with
+// the tool-result content, not super-linearly with stale reasoning text.
 package server
 
 import (
@@ -41,11 +40,10 @@ import (
 	_ "vmr/internal/adapter/openai"
 )
 
-// openclawScenarioUpstream is a scriptable mock that emulates the
-// actual MiniMax M3 streaming pattern observed in the audit log:
-// every turn opens with <think>... reasoning, closes with
-// </think>\n\n, then emits a tool_call chunk and a finish_reason
-// chunk. The mock can be told which tool to call each turn.
+// openclawScenarioUpstream is a scriptable mock that emulates MiniMax M3's
+// thinking-mode streaming pattern: every turn opens with <think>...
+// reasoning, closes with </think>\n\n, then emits a tool_call chunk and a
+// finish_reason chunk. The mock can be told which tool to call each turn.
 type openclawScenarioUpstream struct {
 	srv         *httptest.Server
 	hits        atomic.Int32
@@ -224,10 +222,9 @@ models:
 	}
 }
 
-// TestOpenClawScenario_NonStreaming exercises the same normalizer
-// over the non-streaming response path (io.Copy, not copyFlush). The
-// audit log shows line 1 (a non-streaming "Hi" probe) and various
-// compact / summarize calls take this path.
+// TestOpenClawScenario_NonStreaming exercises the same normalizer over the
+// non-streaming response path (io.Copy, not copyFlush) — a small probe
+// request or a compact/summarize call typically takes this path.
 func TestOpenClawScenario_NonStreaming(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -309,8 +306,9 @@ models:
 // TestOpenClawScenario_AuditLogCapturesTransformedResponse verifies
 // the audit log records the response that the CLIENT saw (with
 // normalized model field, think stripped, [DONE] appended) — not the
-// raw upstream bytes. This is what the audit log is for, and the
-// 2026-07-07 audit file is the basis for this whole investigation.
+// raw upstream bytes. This is the client-response half of the audit
+// contract (§9.2): the upstream half is captured separately in each
+// attempt's own record.
 func TestOpenClawScenario_AuditLogCapturesTransformedResponse(t *testing.T) {
 	up := newOpenclawScenarioUpstream(t)
 
@@ -395,13 +393,12 @@ models:
 	_ = rec
 }
 
-// TestOpenClawScenario_ThinkingProcessStripped covers the case
-// that surfaced on 2026-07-07 23:10: MiniMax M3 with thinking=medium
-// emits a structured "Thinking Process:" section (numbered
-// subsections, "Final Polish" drafts, "Looks good. Pro"
-// self-endorsement) followed by the actual final response on the
-// same line. Without the strip the user sees the chain-of-thought
-// inline in the UI.
+// TestOpenClawScenario_ThinkingProcessStripped covers the case where
+// MiniMax M3 with thinking=medium emits a structured "Thinking Process:"
+// section (numbered subsections, "Final Polish" drafts, "Looks good. Pro"
+// self-endorsement) followed by the actual final response on the same
+// line. Without the strip the user sees the chain-of-thought inline in
+// the UI.
 func TestOpenClawScenario_ThinkingProcessStripped(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -496,11 +493,11 @@ models:
 	}
 }
 
-// TestResponseNormalizer_FailoverStillWorks is a regression test for
-// the new response wrapper. Before the fix, tryOne used copyFlush
-// directly. Now it wraps the body in respStream before forwarding.
-// If the wrapper mishandles io.EOF or errors, failover (which
-// depends on clean error propagation) would silently break.
+// TestResponseNormalizer_FailoverStillWorks verifies that wrapping the
+// upstream body in respStream (the response normalizer) before forwarding
+// does not disturb failover: failover depends on clean error propagation
+// out of the body-copy path, and a wrapper that mishandles io.EOF or errors
+// would silently break it.
 func TestResponseNormalizer_FailoverStillWorks(t *testing.T) {
 	// Bad upstream returns 500 (fails), good upstream returns 200.
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

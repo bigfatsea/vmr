@@ -1,4 +1,4 @@
-// Ver 2026-07-12 03:10, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 
 // Package report turns audit JSONL files (design doc §9.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -50,11 +50,10 @@ import (
 // 9: adds endpoints_all (endpoint, all dates merged) and hours_of_day (local
 // hour 0-23, all dates merged) — each a genuinely independent bucket with
 // its own raw dur_ms/ttft_ms values, not a re-aggregation of the per-date
-// Endpoints/Hours buckets. The Markdown 端点可用度 and 每小时活跃度 tables
-// now read these directly: they used to merge already-`finish*`-processed
-// per-date buckets, whose raw-value slices had already been freed, so every
-// merged p50/p95 silently came out as zero (always "-/-", not just when
-// data happened to be sparse — the bug this format bump fixes).
+// Endpoints/Hours buckets (those buckets free their raw-value slices right
+// after computing their own per-date percentiles, so a cross-date merge
+// derived from them has nothing left to compute a true percentile from).
+// The Markdown 端点可用度 and 每小时活跃度 tables read these directly.
 const Format = 9
 
 // Report is the top-level JSON output. Grains: Rows = date × protocol ×

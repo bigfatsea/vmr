@@ -1,4 +1,4 @@
-// Ver 2026-07-12 02:00, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 package report
 
 import (
@@ -459,16 +459,15 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 	}
 }
 
-// TestCollapsedSessionRowShowsRealAverages covers a regression found
-// manually against real production logs: vmr-report.md's Agent 会话 table
-// hardcoded "-" for the merged/collapsed scheduled-session row's avg
-// tokens, avg messages, TTFT and duration columns, even though
-// mergeIntoCollapsed correctly accumulates TokensKnown/MessagesKnown/
-// TTFTMSSum/DurMSSum across the merged sessions — the render code just
-// never read them. Two single-request heartbeat firings (different content,
-// so they land in separate 1-request sessions and both qualify for
-// collapsing) with distinct token/message/latency values, verifying the
-// merged row shows real computed values instead of placeholder dashes.
+// TestCollapsedSessionRowShowsRealAverages locks in that the merged/collapsed
+// scheduled-session row in vmr-report.md's Agent 会话 table renders real
+// computed values — avg tokens, avg messages, TTFT, duration — instead of
+// placeholder dashes: mergeIntoCollapsed accumulates TokensKnown/
+// MessagesKnown/TTFTMSSum/DurMSSum across the merged sessions, and the
+// render code must actually read them. Two single-request heartbeat firings
+// (different content, so they land in separate 1-request sessions and both
+// qualify for collapsing) with distinct token/message/latency values verify
+// the merged row shows real computed values.
 func TestCollapsedSessionRowShowsRealAverages(t *testing.T) {
 	lines := `{"ts":"2026-07-09T09:00:00+08:00","dur_ms":4000,"ttft_ms":1000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat A [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":10}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
 {"ts":"2026-07-09T10:00:00+08:00","dur_ms":6000,"ttft_ms":3000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat B [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":200,"completion_tokens":20}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
@@ -634,11 +633,13 @@ func TestIsRealUserScaffolding(t *testing.T) {
 	}
 }
 
-// TestRealUserTextStripsEnvelope covers the real-log bug: OpenClaw glues its
-// "Conversation info (untrusted metadata)" / "Sender (untrusted metadata)"
-// JSON routing blocks onto the FRONT of genuine asks, not just onto pure
-// scaffolding pings. Discarding the whole message lost the actual instruction
-// and made task titles fall back to an unrelated earlier message.
+// TestRealUserTextStripsEnvelope locks in that a genuine user instruction
+// survives OpenClaw's envelope: OpenClaw glues its "Conversation info
+// (untrusted metadata)" / "Sender (untrusted metadata)" JSON routing blocks
+// onto the FRONT of genuine asks, not just onto pure scaffolding pings, so
+// the envelope must be stripped rather than the whole message discarded —
+// discarding it would lose the actual instruction and make task titles fall
+// back to an unrelated earlier message.
 func TestRealUserTextStripsEnvelope(t *testing.T) {
 	wrapped := "[Thu 2026-07-09 06:48 GMT+8] Conversation info (untrusted metadata):\n" +
 		"```json\n{\"chat_id\":\"user:ou_x\"}\n```\n\n" +

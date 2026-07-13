@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -100,9 +100,8 @@ type Timeouts struct {
 }
 
 // Providers and Models are both keyed protocol -> name. The protocol key is
-// validated against the adapter registry (same rule that used to apply to
-// Provider.Type), so adding a new ingress protocol is still just "register
-// an adapter" — no schema change here.
+// validated against the adapter registry, so adding a new ingress protocol
+// is just "register an adapter" — no schema change here.
 type Config struct {
 	Listen      string `yaml:"listen"`
 	APIKey      string `yaml:"api_key"`

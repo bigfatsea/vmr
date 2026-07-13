@@ -1,11 +1,11 @@
-// Ver 2026-07-08 22:00, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 //
-// Liveness regression tests: no upstream behavior may park a request forever.
+// Liveness tests: no upstream behavior may park a request forever.
 // ResponseHeaderTimeout covers time-to-headers; these tests pin down the two
-// paths that used to have no timeout at all after the headers arrived —
-// an error body that stalls (blocking the whole failover walk), and a
-// non-SSE 200 body that stalls (the SSE path had the stream_idle watchdog,
-// the io.Copy path had none).
+// paths after the headers arrive that also need a bound — an error body
+// that stalls (blocking the whole failover walk), and a non-SSE 200 body
+// that stalls (stream_idle must watch both the SSE and non-SSE body paths,
+// not just SSE).
 package server
 
 import (
@@ -38,8 +38,8 @@ func stallingUpstream(t *testing.T, status int, bodyPrefix string) *httptest.Ser
 
 func TestErrorBodyStallStillFailsOver(t *testing.T) {
 	// u1 sends 500 headers then stalls the error body. The error-body read
-	// must give up within stream_idle and move on to u2 — before the fix it
-	// parked the whole failover walk until the client gave up.
+	// must give up within stream_idle and move on to u2, instead of parking
+	// the whole failover walk until the client gives up.
 	u1 := stallingUpstream(t, 500, "")
 	u2 := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u1.URL, u2.srv.URL, "timeouts: {stream_idle: 300ms}"))
@@ -57,9 +57,8 @@ func TestErrorBodyStallStillFailsOver(t *testing.T) {
 
 func TestNonSSEBodyStallAborts(t *testing.T) {
 	// A 200 whose (non-SSE) body stalls mid-transfer: the stream_idle
-	// watchdog must abort the copy so the request finishes — before the fix
-	// the io.Copy path had no watchdog and the request hung until the
-	// client's own timeout.
+	// watchdog must abort the copy so the request finishes, instead of
+	// hanging until the client's own timeout.
 	u := stallingUpstream(t, 200, `{"id":"x","model":"m","choices":`)
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0

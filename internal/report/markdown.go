@@ -1,4 +1,4 @@
-// Ver 2026-07-12 03:10, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 package report
 
 import (
@@ -7,12 +7,13 @@ import (
 	"strings"
 )
 
-// Markdown renders the report's most-consulted views. With the per-bucket
-// architecture (format 7), every table iterates its own pre-aggregated
-// bucket directly — no cross-bucket roll-up, no p95-from-max bug, no
-// weighted-expansion approximation. Tier 1 (overview, per-model summary,
-// endpoint availability) and tier 2 (daily trend, error classes) come
-// from the pre-aggregated buckets; finer cuts live in the JSON.
+// Markdown renders the report's most-consulted views. Every table iterates
+// its own pre-aggregated bucket directly — no cross-bucket roll-up, no
+// weighted-expansion approximation, no percentile derived by taking the max
+// of other percentiles (percentiles aren't additive; only a true per-bucket
+// computation from raw values is correct). Tier 1 (overview, per-model
+// summary, endpoint availability) and tier 2 (daily trend, error classes)
+// come from the pre-aggregated buckets; finer cuts live in the JSON.
 func Markdown(rep *Report) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }

@@ -1,4 +1,4 @@
-// Ver 2026-07-08 12:05, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 package adapter
 
 import (
@@ -8,10 +8,11 @@ import (
 	"vmr/internal/core"
 )
 
-func TestDefaultClassify_MarkerBeyond2KB(t *testing.T) {
+func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 	// Vendors may attach verbose debug payloads before the actual error
-	// message; a marker past the old 2 KB cutoff must still be sniffed —
-	// a miss classifies as ErrClient, which never fails over.
+	// message; a marker several KB into the body must still be sniffed
+	// within the snippet cutoff — a miss classifies as ErrClient, which
+	// never fails over.
 	padding := strings.Repeat(`{"debug":"xxxxxxxxxxxxxxxx"},`, 200) // ~5.6 KB
 	cases := []struct {
 		name string

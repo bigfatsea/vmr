@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 
 // V2.2 integration tests: Anthropic ingress, protocol isolation, concurrency gate.
 package server
@@ -158,9 +158,8 @@ func TestProtocolIsolation(t *testing.T) {
 	}
 }
 
-// Mixing protocols within one model used to be a runtime "mixes protocols"
-// error (checked after the fact). Nesting providers/models by protocol
-// removes the syntax for it entirely: an endpoint can only ever name a
+// Nesting providers/models by protocol removes the syntax for mixing
+// protocols within one model entirely: an endpoint can only ever name a
 // provider from its own model's protocol group, so referencing the other
 // group's provider is just "unknown provider" — the same error class as any
 // other typo, not a special case.

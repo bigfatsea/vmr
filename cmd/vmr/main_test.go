@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Sonnet 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 package main
 
 import (
@@ -59,9 +59,8 @@ func TestCmdCheck_MissingFile(t *testing.T) {
 }
 
 // TestCmdDirs_ValidConfig locks in that `vmr dirs` prints the config's
-// resolved log_dir/image_cache_dir (post-defaults) rather than an
-// env-var-derived path — log_dir and image_cache_dir moved from environment
-// variables to config fields (design doc §7.1, 2026-07-13).
+// resolved log_dir/image_cache_dir (post-defaults) — these are config
+// fields, not environment variables (design doc §7.1).
 func TestCmdDirs_ValidConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML+"log_dir: "+dir+"/logs\n")
@@ -75,13 +74,12 @@ func TestCmdDirs_ValidConfig(t *testing.T) {
 	}
 }
 
-// TestCmdDirs_RequiresValidConfig documents a real behavior change: unlike
-// the pre-2026-07-13 implementation (which resolved log_dir/cache_dir from
-// an environment variable, independent of config.yaml), `vmr dirs` now loads
-// and validates the full config — a missing or malformed config.yaml makes
-// it fail. vmr.sh must never call this unconditionally for commands (stop/
-// status/logs) that have to keep working when config.yaml is broken; see
-// resolve_log_dir's lazy resolution in vmr.sh.
+// TestCmdDirs_RequiresValidConfig locks in that `vmr dirs` loads and
+// validates the full config — a missing or malformed config.yaml makes it
+// fail, rather than resolving a default independent of config.yaml. vmr.sh
+// must never call this unconditionally for commands (stop/status/logs) that
+// have to keep working when config.yaml is broken; see resolve_log_dir's
+// lazy resolution in vmr.sh.
 func TestCmdDirs_RequiresValidConfig(t *testing.T) {
 	if err := cmdDirs([]string{"-c", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "log"}); err == nil {
 		t.Error("cmdDirs on a missing config should return an error, not resolve a default")

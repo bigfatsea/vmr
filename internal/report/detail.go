@@ -1,4 +1,4 @@
-// Ver 2026-07-12 03:10, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -395,8 +395,8 @@ func dash(s string) string {
 }
 
 // finishCell renders the turn table's finish-reason cell. "tool_calls"
-// expands to the actual tool name(s) called this turn — folding in what the
-// removed "本轮调用" column used to show, instead of needing its own column.
+// expands to the actual tool name(s) called this turn, so the tool-call
+// information doesn't need a separate column.
 func finishCell(r *ReqInfo) string {
 	if r.Finish == "tool_calls" && len(r.ToolCalls) > 0 {
 		return escapeCell("tool_call:" + callsCell(r.ToolCalls))
@@ -405,8 +405,8 @@ func finishCell(r *ReqInfo) string {
 }
 
 // fileLinksCell renders a detail record's file column as two short HTML
-// links instead of the full filename — INDEX now lives one level above
-// details/, so every link needs that prefix regardless.
+// links instead of the full filename — the index lives one level above
+// details/, so every link needs that prefix.
 func fileLinksCell(mdName string) string {
 	base := strings.TrimSuffix(mdName, ".md")
 	return fmt.Sprintf(`<a href=details/%s.md>Ⓜ️ Markdown</a> <a href=details/%s.json>JSON</a>`, base, base)
@@ -422,17 +422,16 @@ func reqMark(r *ReqInfo) string {
 }
 
 // msgCell renders the turn table's message-count cell as "M+N": M = messages
-// already in history before this turn, N = messages this turn added (the
-// former standalone "+Msg" column's number).
+// already in history before this turn, N = messages this turn added.
 func msgCell(r *ReqInfo) string {
 	return fmt.Sprintf("%d+%d", r.DeltaStart, r.Msgs-r.DeltaStart)
 }
 
 // durationCellFields renders the duration cell shared by the turn and flat
 // request tables: the plain latency, plus space-separated annotations for
-// whatever's notable about the request — folding in what used to be a
-// separate 结果/尝试次数 column so a real error or a retried request never
-// reads identically to a clean single-shot success.
+// whatever's notable about the request (outcome, truncation, attempt count)
+// so a real error or a retried request never reads identically to a clean
+// single-shot success.
 func durationCellFields(durMS int64, outcome string, truncated bool, attempts int) string {
 	cell := ms(durMS)
 	var marks []string
