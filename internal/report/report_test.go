@@ -260,7 +260,7 @@ func TestMarkdownRendering(t *testing.T) {
 		t.Errorf("expected 端点可用度 < 上游错误分布 < 按日趋势 in document order, got positions %d/%d/%d", i, j, k)
 	}
 	if strings.Contains(md, "错误分布 |") {
-		t.Error("端点可用度 table should no longer have an 错误分布 column")
+		t.Error("端点可用度 table should not have an 错误分布 column")
 	}
 }
 

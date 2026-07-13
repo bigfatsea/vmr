@@ -320,7 +320,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(idx), "## 未分组") {
-		t.Error("Ungrouped must no longer render as its own top-level ## 未分组 section")
+		t.Error("Ungrouped must not render as its own top-level ## 未分组 section")
 	}
 	if !strings.Contains(string(idx), "## Chat User (unresolved)") {
 		t.Errorf("missing unresolved user section:\n%s", idx)

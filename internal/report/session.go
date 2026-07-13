@@ -1,4 +1,4 @@
-// Ver 2026-07-12 01:20, by Fable 5
+// Ver 2026-07-13 04:00, by Sonnet 5
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
@@ -749,8 +749,9 @@ func capStr(s string, n int) string {
 // ---- filename (shared with detail.go) ----
 
 // detailFileNameFromInfo mirrors detailFileName for the analysis pass, which
-// no longer holds the full record. Endpoint/error class come from features
-// captured in collect; both passes therefore produce identical names.
+// only has the features captured in collect (not the full record). Endpoint/
+// error class come from those captured features; both passes therefore
+// produce identical names.
 func detailFileNameFromInfo(r *ReqInfo, used map[string]int) string {
 	outcome := r.Outcome
 	if outcome == "error" && r.errClass != "" {
