@@ -468,7 +468,7 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		return fmt.Sprintf("%d%s", v, unit)
 	}
 	auth := "off"
-	if cfg.APIKey != "" {
+	if cfg.APIKey != "" || len(cfg.APIKeys) > 0 {
 		auth = "on"
 	}
 	imgScale := "off"

@@ -1,4 +1,4 @@
-# Ver 2026-07-13 02:00, by Fable 5
+# Ver 2026-07-15 05:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -7,7 +7,47 @@
 # syntax to write, rather than being a config error to catch.
 
 listen: 127.0.0.1:8800
-# api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer)
+# api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer or x-api-key). Works
+#                                # alongside api_keys below (both are valid simultaneously) — this one
+#                                # is a catch-all credential, never tagged in reports.
+# api_keys:                      # optional: additional named-by-convention credentials, for telling
+#                                # different callers apart after the fact. Each request that matches
+#                                # one of these gets tagged with that key's own tail — `vmr report`
+#                                # then automatically writes one extra vmr-requests-<tag>.jsonl /
+#                                # vmr-requests-index-<tag>.md pair per distinct tag observed, next to
+#                                # the usual (still full, still unaffected) vmr-requests.jsonl /
+#                                # vmr-requests-index.md / vmr-report.md / details/. No config flag
+#                                # needed — nothing changes at all until you actually configure this.
+#                                #
+#                                # Tag derivation: take the key's last 6 characters, then, if that
+#                                # window contains a "-", keep only what follows the LAST "-" inside
+#                                # it. So end each key in "-<a short, readable word>" and the tag
+#                                # reads as intentional:
+#                                #   ...-alice   -> tag "alice"   (5 chars fit the 6-char window)
+#                                #   ...-t2      -> tag "t2"      (short suffixes are kept whole, not
+#                                #                                 padded with whatever preceded them)
+#                                #   ...-openclaw-> tag "enclaw"  (a suffix longer than 6 chars just
+#                                #                                 loses its "-" and everything before
+#                                #                                 it once the window can't reach that
+#                                #                                 far back — keep suffixes <= 6 chars)
+#                                # Aim for >= 3-4 meaningful characters: shorter suffixes collide with
+#                                # each other more easily (two unrelated keys landing on the same tag
+#                                # would have their traffic merged, indistinguishably, into one file).
+#                                # Each key must be >= 16 characters — short enough to make the tag
+#                                # window the WHOLE key would otherwise write your secret, in the
+#                                # clear, into every report and filename; vmr refuses to start with a
+#                                # shorter entry here.
+#   - ${VMR_KEY_ALICE}
+#   - ${VMR_KEY_OPENCLAW}
+#
+# Private network, no auth wanted at all? Leave BOTH api_key and api_keys
+# unset — the door stays fully open (unchanged), but whatever value a
+# client chooses to send as Authorization/x-api-key still gets the same
+# tag derivation applied and recorded, so callers can self-identify to
+# `vmr report` with zero config here: just end each client's own value in
+# "-<label>" (no 16-char minimum in this mode — it's not a secret, there's
+# nothing to leak). A client sending nothing still gets an untagged record,
+# exactly like today.
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)

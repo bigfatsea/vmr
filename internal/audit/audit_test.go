@@ -35,6 +35,30 @@ func TestRedactMasksCredentials(t *testing.T) {
 	}
 }
 
+func TestKeyTag(t *testing.T) {
+	cases := []struct {
+		name, key, want string
+	}{
+		{"hyphen at window start", "sk-vmr-team-alice", "alice"},
+		{"hyphen mid-window, short suffix", "sk-vmr-proj-al", "al"},
+		{"hyphen mid-window, four-char suffix", "sk-vmr-teamx-abcd", "abcd"},
+		{"suffix longer than window loses hyphen", "sk-vmr-team-abcdefgh", "cdefgh"},
+		{"no hyphen anywhere", "sk-vmr-team9k3f7a", "9k3f7a"},
+		{"hyphen is the window's last char", "sk-vmr-teamabcde-", "abcde-"},
+		{"key shorter than window, hyphen present", "ab-cd", "cd"},
+		{"key shorter than window, no hyphen", "abcd", "abcd"},
+		{"key exactly window length, no hyphen", "abcdef", "abcdef"},
+		{"multiple hyphens in window: last one wins", "sk-vmr-a-b-cd", "cd"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := KeyTag(c.key); got != c.want {
+				t.Errorf("KeyTag(%q) = %q, want %q", c.key, got, c.want)
+			}
+		})
+	}
+}
+
 func TestEncodeBody(t *testing.T) {
 	if b := EncodeBody([]byte(`{"a":1}`)); string(b.(json.RawMessage)) != `{"a":1}` {
 		t.Errorf("json body: %v", b)

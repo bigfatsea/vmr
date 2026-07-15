@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-13 04:00, by Sonnet 5 -->
+<!-- Ver 2026-07-15 05:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -80,6 +80,9 @@ curl http://127.0.0.1:8800/admin/status
 ```yaml
 listen: 127.0.0.1:8800
 # api_key: sk-vmr-xxx          # 可选：保护 vmr（Bearer 或 x-api-key）
+# api_keys:                    # 可选：额外的多把 key，`vmr report` 会按各自的尾部打标签分组统计
+#   - ${VMR_KEY_ALICE}          # （见下文"多调用方场景"）；和 api_key 可以同时配置，互不冲突——
+#   - ${VMR_KEY_OPENCLAW}       # api_key 依旧是一把有效但不打标签的万能钥匙
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
 # max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
@@ -179,6 +182,10 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 - **工具使用报告** —— 按请求形态列出：声明的工具 vs **当轮实际调用**的工具（从响应中提取,历史重发绝不重复计数），外加"声明但从未调用"清单（**numbered list + 字母序，自然让 `feishu_*` 同前缀聚类**）及其每请求字节成本——为从 Agent 配置里裁掉没用的工具提供直接依据。
 
 `vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（字段缺失的旧格式日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。`vmr-requests-index.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）按 **Chat User** 分组（`chat_id` 字段剥掉 `user:` 前缀）：每个用户一段 `## Chat User xxx`，下辖每个任务的首条用户指令引用块 + 轮次表（`轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件`——`Message` 是 `M+N` 格式（M = 历史消息数，N = 本轮新增数），`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>`，`耗时` 把结果/尝试次数信息以尾注形式追加，不单占两列（`❌<结果>` / `🚫取消` / `⚠️截断` / `🔄尝试x{n}`，可并存），文件列是 `md`/`json` 两个短链接）。"全部请求（时间序）"表把模型和上游合并成一个 `VM/API` 列（`protocol | 虚拟模型 | provider:model`，例如 `openai | agent | minimax:MiniMax-M3`——用 `:` 而非 `/` 分隔供应商和上游模型名，因为 OpenRouter 这类供应商的模型名本身就带 `/`）。Compaction 调用、定时任务（heartbeat/dream_diary）与非聊天体/被拒请求一律归入 `## Chat User (unresolved)`，折叠成紧凑的子分组（`### 压缩任务 · compaction 会话 × N`、`### 定时任务 · <class> 单发会话 × N`、`### 其他 · 非聊天体/被拒请求 × N`），不再一次触发就单占一段，也不再单独占一个顶级标题。加 `-details=false` 可关闭详单导出。
+
+**多调用方场景。** 如果一个 vmr 实例被多个调用方共用（队友、另一个 Agent、CI 任务），想在事后统计里把各自的用量分开看，就给每个调用方在 `api_keys` 下各配一把 key（见上文 Configuration），不要都塞进共享的 `api_key`。每个请求会用命中的那把 key 自身的尾部给审计记录打标签（`client_key_tag`，取法见 `KeyTag`：末 6 个字符，若这 6 个字符里有 `-`，只保留最后一个 `-` 之后的部分——所以 key 以 `...-alice` 结尾时标签就读作 `alice`；建议有意义的部分留 ≥3-4 位，太短容易和别的调用方撞标签）。`vmr report` 会自动识别，不需要加参数：每观测到一个不同的标签，就在原有产物旁多写一份 `vmr-requests-<tag>.jsonl` 和 `vmr-requests-index-<tag>.md`——同目录下，标签文件里 `details/…` 链接不用做任何调整。`vmr-report.md`/`.json` 和 `details/` 本身永远不分组、不重复：单条请求的详单只写一份，与调用方无关；汇总报告永远覆盖所有人。不配置 `api_keys` 就什么都不会变——不多一个文件，不多一列。完整设计说明见 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md`。
+
+纯内网、根本不想要真实鉴权？`api_key`/`api_keys` 都不配置——门照样完全敞开，和今天一样——但客户端自愿发来的任意 Authorization/x-api-key 值依旧会走同一套标签提取逻辑并记录下来，vmr 侧不需要配置任何东西：每个客户端自己把发出去的值末尾带上 `-<标签>` 即可对 `vmr report` 自报家门。这个模式下没有 16 字符下限（本来就不是要保护的秘钥）；什么都不发的客户端依旧是未打标签的记录。
 
 Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见 `docs/AuditLogCompression_Analysis_Sonnet5.md`。
 

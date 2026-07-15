@@ -250,6 +250,81 @@ func TestRouterAuth(t *testing.T) {
 	}
 }
 
+// TestRouterAuthMultiKeyTagsRequests confirms that (a) the legacy api_key
+// keeps working as an untagged catch-all alongside api_keys, (b) each
+// api_keys entry authenticates independently and tags the audit record with
+// its own KeyTag, and (c) a request that matches nothing is still audited,
+// untagged, with a 401.
+func TestRouterAuthMultiKeyTagsRequests(t *testing.T) {
+	u := newUpstream(t)
+	extra := "api_key: sk-vmr-legacy-catchall\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby"
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, extra))
+
+	cases := []struct {
+		name    string
+		key     string
+		wantTag string
+	}{
+		{"catch-all", "sk-vmr-legacy-catchall", ""},
+		{"tagged alice", "sk-vmr-team-alice", "alice"},
+		{"tagged bobby", "sk-vmr-team-bobby", "bobby"},
+	}
+	for _, c := range cases {
+		resp, _ := chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer " + c.key})
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: status=%d", c.name, resp.StatusCode)
+		}
+	}
+	resp, _ := chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer wrong"})
+	if resp.StatusCode != 401 {
+		t.Fatalf("unmatched key: status=%d", resp.StatusCode)
+	}
+
+	recs := readRecords(t, al)
+	if len(recs) != len(cases)+1 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	for i, c := range cases {
+		if got := recs[i].ClientKeyTag; got != c.wantTag {
+			t.Errorf("%s: client_key_tag = %q, want %q", c.name, got, c.wantTag)
+		}
+	}
+	if last := recs[len(recs)-1]; last.ClientKeyTag != "" || last.Outcome != "error" {
+		t.Errorf("unmatched key record: tag=%q outcome=%q, want empty tag + error", last.ClientKeyTag, last.Outcome)
+	}
+}
+
+// TestNoAuthConfiguredSelfDeclaredTag covers the private-network shortcut:
+// with neither api_key nor api_keys configured, the door stays fully open
+// (no config change from today), but a client that voluntarily sends an
+// Authorization value still gets it KeyTag-derived and recorded, letting it
+// self-identify to `vmr report` with zero vmr-side config. A client sending
+// nothing must still get an untagged, unaffected record (backward compat).
+func TestNoAuthConfiguredSelfDeclaredTag(t *testing.T) {
+	u := newUpstream(t)
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "")) // no api_key/api_keys at all
+
+	resp, _ := chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer anything-alice"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("self-declared tag: status=%d", resp.StatusCode)
+	}
+	resp, _ = chat(t, ts, simpleReq, nil) // no credential sent at all
+	if resp.StatusCode != 200 {
+		t.Fatalf("no credential: status=%d", resp.StatusCode)
+	}
+
+	recs := readRecords(t, al)
+	if len(recs) != 2 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	if got := recs[0].ClientKeyTag; got != "alice" {
+		t.Errorf("self-declared: client_key_tag = %q, want %q", got, "alice")
+	}
+	if got := recs[1].ClientKeyTag; got != "" {
+		t.Errorf("no credential: client_key_tag = %q, want empty", got)
+	}
+}
+
 func TestModelsEndpoint(t *testing.T) {
 	u := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))

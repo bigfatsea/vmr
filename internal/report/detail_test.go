@@ -423,6 +423,100 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	}
 }
 
+// TestWriteDetailsByTag covers the per-client-key sibling indices: records
+// tagged "alice"/"bob" each get their own vmr-requests-index-<tag>.md
+// (same directory as the global index, so its "details/…" links need no
+// adjustment), restricted to that tag's records, while details/ itself
+// stays one shared, unfiltered, un-duplicated pool for every tag.
+func TestWriteDetailsByTag(t *testing.T) {
+	zone := time.FixedZone("CST", 8*3600)
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
+	sys := msg("system", "sys")
+
+	// Distinct opening user messages so each record anchors its own
+	// session — three unrelated callers, not three turns of one
+	// conversation (identical content would collapse them into a single
+	// shared session, and a session's grouped-view turn table isn't
+	// itself filtered by tag — see filterSessByTag's doc comment).
+	r1 := mkRec(at(0), "", []any{sys, msg("user", "alice's question")}, nil, sseText("a1"))
+	r1.ClientKeyTag = "alice"
+	r2 := mkRec(at(1), "", []any{sys, msg("user", "bob's question")}, nil, sseText("b1"))
+	r2.ClientKeyTag = "bob"
+	r3 := mkRec(at(2), "", []any{sys, msg("user", "an untagged question")}, nil, sseText("untagged"))
+	// r3.ClientKeyTag left "" — legacy/catch-all/no-auth traffic.
+
+	src := writeJSONL(t, []audit.Record{r1, r2, r3})
+	a, err := AnalyzeSessions([]string{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	out := filepath.Join(dir, "details")
+	n, err := WriteDetails([]string{src}, out, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("n = %d, want 3", n)
+	}
+
+	// details/ holds all three records' files, unfiltered, exactly once.
+	detailFiles, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detailFiles) != 6 { // 3 records × (.md + .json)
+		t.Fatalf("details/ entries = %d, want 6: %v", len(detailFiles), detailFiles)
+	}
+
+	// The global index and both tag siblings all live next to each other.
+	topEntries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, e := range topEntries {
+		names[e.Name()] = true
+	}
+	for _, want := range []string{"details", "vmr-requests-index.md", "vmr-requests-index-alice.md", "vmr-requests-index-bob.md"} {
+		if !names[want] {
+			t.Errorf("missing %q in %v", want, names)
+		}
+	}
+	if len(topEntries) != 4 {
+		t.Errorf("top-level entries = %v, want exactly details/ + global index + 2 tag siblings", names)
+	}
+
+	aliceIdx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index-alice.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(aliceIdx), "共 1 条记录") {
+		t.Errorf("alice index should count exactly 1 record:\n%s", aliceIdx)
+	}
+	if strings.Contains(string(aliceIdx), "10:01:00") || strings.Contains(string(aliceIdx), "10:02:00") {
+		t.Errorf("alice index leaked another tag's record:\n%s", aliceIdx)
+	}
+	// Its detail-file link still points at the shared details/ directory,
+	// same prefix as the global index.
+	if !strings.Contains(string(aliceIdx), "details/") {
+		t.Errorf("alice index missing details/ link:\n%s", aliceIdx)
+	}
+
+	bobIdx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index-bob.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bobIdx), "共 1 条记录") {
+		t.Errorf("bob index should count exactly 1 record:\n%s", bobIdx)
+	}
+
+	// No sibling ever gets created for the untagged ("") bucket.
+	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-index-.md")); !os.IsNotExist(err) {
+		t.Errorf("must not create a sibling index for the untagged bucket")
+	}
+}
+
 // TestRenderDetail_RawPreStrip covers both states of the "② VMR → 上游" raw
 // pre-strip display: full content when the audit record captured it
 // (RawPreStrip populated — see internal/router/response.go), and a graceful

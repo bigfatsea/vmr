@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-15 03:00, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -27,6 +27,12 @@ const (
 	DefaultHeaderTimeout     = 120 * time.Second
 	DefaultIdleTimeout       = 120 * time.Second
 	DefaultImageCacheTTLDays = 7 // downscaled-image cache entries unused this many days get evicted
+	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
+	// solely so audit.KeyTag's trailing-6-character window can never be
+	// the whole key — a short key would otherwise have its full secret
+	// value written, in the clear, into every report and filename its tag
+	// ends up in.
+	minAPIKeyLen = 16
 )
 
 // Provider has no protocol field: it lives under providers.<protocol>.<name>,
@@ -103,9 +109,17 @@ type Timeouts struct {
 // validated against the adapter registry, so adding a new ingress protocol
 // is just "register an adapter" — no schema change here.
 type Config struct {
-	Listen      string `yaml:"listen"`
-	APIKey      string `yaml:"api_key"`
-	MaxAttempts int    `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
+	Listen string `yaml:"listen"`
+	APIKey string `yaml:"api_key"`
+	// APIKeys is an additional list of valid credentials, alongside APIKey
+	// (both work simultaneously — APIKey, if set, stays a valid catch-all).
+	// Each entry gets tagged in the audit trail via audit.KeyTag (the key's
+	// own tail, not a separately configured name) so `vmr report` can group
+	// a shared instance's traffic by caller after the fact — see
+	// config.example.yaml for the naming convention. minAPIKeyLen guards
+	// against a key short enough that its whole value becomes the tag.
+	APIKeys     []string `yaml:"api_keys"`
+	MaxAttempts int      `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
 	// MaxRequestBodyMB bounds the inbound client request body vmr will read
 	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
 	// audit logging (the audit trail records every request in full,
@@ -252,6 +266,11 @@ func (c *Config) applyDefaults() {
 func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
+	}
+	for i, k := range c.APIKeys {
+		if len(k) < minAPIKeyLen {
+			return fmt.Errorf("api_keys[%d]: too short (min %d characters) — its tail becomes a report label (see audit.KeyTag), so short keys would expose the whole key", i, minAPIKeyLen)
+		}
 	}
 	for name, val := range map[string]string{"http_proxy": c.HTTPProxy, "https_proxy": c.HTTPSProxy} {
 		if val == "" {

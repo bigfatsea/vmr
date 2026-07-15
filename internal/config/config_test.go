@@ -337,6 +337,31 @@ func TestUnknownProtocolKeyRejected(t *testing.T) {
 	}
 }
 
+func TestAPIKeysParsedAlongsideLegacyAPIKey(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\napi_key: sk-vmr-legacy-catchall\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKey != "sk-vmr-legacy-catchall" {
+		t.Errorf("legacy api_key: got %q", cfg.APIKey)
+	}
+	if want := []string{"sk-vmr-team-alice", "sk-vmr-team-bobby"}; len(cfg.APIKeys) != len(want) ||
+		cfg.APIKeys[0] != want[0] || cfg.APIKeys[1] != want[1] {
+		t.Errorf("api_keys: got %v, want %v", cfg.APIKeys, want)
+	}
+}
+
+func TestAPIKeysTooShortRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\napi_keys:\n  - sk-short", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "too short") {
+		t.Errorf("want a too-short api_keys error, got %v", err)
+	}
+}
+
 func TestEmptySections(t *testing.T) {
 	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {openai: {m: {endpoints: [{provider: x, model: y}]}}}")); err == nil {
 		t.Error("want error for no providers")

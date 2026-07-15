@@ -1,4 +1,4 @@
-// Ver 2026-07-12 01:40, by Fable 5
+// Ver 2026-07-15 03:00, by Sonnet 5
 
 // Structured exports derived from the session analysis: the per-request
 // feature file (vmr-requests.jsonl — the raw material for ad-hoc statistics
@@ -9,8 +9,11 @@ package report
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -368,19 +371,54 @@ type requestRow struct {
 
 	Norm       []string `json:"norm,omitempty"`
 	DetailFile string   `json:"detail_file,omitempty"`
+
+	// ClientKey is audit.Record.ClientKeyTag (see audit.KeyTag), letting
+	// even the full vmr-requests.jsonl be filtered by caller with jq/DuckDB.
+	// "" for every record until config.yaml's api_keys is used.
+	ClientKey string `json:"client_key_tag,omitempty"`
 }
 
-// WriteRequests exports one JSONL feature line per record (ts order) and
-// returns the line count.
+// WriteRequests exports one JSONL feature line per record (ts order) to
+// path, then — for every distinct non-empty ClientKeyTag observed in a —
+// exports the same records filtered to that one caller into a sibling file
+// next to path (e.g. vmr-requests.jsonl → vmr-requests-alice.jsonl), fully
+// automatic: absent entirely when nobody's using tagged api_keys (see
+// docs/ClientAPIKeyGrouping_Design_Sonnet5.md). Returns the full record
+// count.
 func WriteRequests(a *SessionAnalysis, path string) (int, error) {
+	if err := writeRequestRows(a.Recs, path); err != nil {
+		return 0, err
+	}
+	byTag := map[string][]*ReqInfo{}
+	for _, r := range a.Recs {
+		if r.ClientKeyTag != "" {
+			byTag[r.ClientKeyTag] = append(byTag[r.ClientKeyTag], r)
+		}
+	}
+	dir := filepath.Dir(path)
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	for tag, recs := range byTag {
+		p := filepath.Join(dir, fmt.Sprintf("%s-%s.jsonl", base, sanitizeName(tag)))
+		if err := writeRequestRows(recs, p); err != nil {
+			return 0, fmt.Errorf("client key %q: %w", tag, err)
+		}
+	}
+	return len(a.Recs), nil
+}
+
+// writeRequestRows is WriteRequests' encode loop, parameterized over which
+// records to write (ts order assumed already, true both for a.Recs and any
+// ClientKeyTag-filtered subset of it) — called once for the full set and
+// once more per observed tag.
+func writeRequestRows(recs []*ReqInfo, path string) error {
 	f, err := os.Create(path)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)
-	for _, r := range a.Recs {
+	for _, r := range recs {
 		row := requestRow{
 			TS:      r.TS.Format("2006-01-02T15:04:05.000Z07:00"),
 			Session: r.SessionID, Task: r.TaskID, Turn: r.TaskSeq, SessTurn: r.SessSeq,
@@ -393,6 +431,7 @@ func WriteRequests(a *SessionAnalysis, path string) (int, error) {
 			Truncated: r.Truncated, ToolCalls: r.ToolCalls, ToolsDeclared: len(r.ToolsDeclared),
 			BytesIn: r.bytesIn, BytesOut: r.bytesOut,
 			Norm: r.norm, DetailFile: r.DetailFile,
+			ClientKey: r.ClientKeyTag,
 		}
 		if r.SessionID != "" {
 			row.DeltaMsgs = r.Msgs - r.DeltaStart
@@ -407,13 +446,10 @@ func WriteRequests(a *SessionAnalysis, path string) (int, error) {
 			row.TokensReasoning = r.Usage.Reasoning
 		}
 		if err := enc.Encode(row); err != nil {
-			return 0, err
+			return err
 		}
 	}
-	if err := w.Flush(); err != nil {
-		return 0, err
-	}
-	return len(a.Recs), nil
+	return w.Flush()
 }
 
 func nonDash(s string) string {

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 23:20, by Sonnet 5
+// Ver 2026-07-15 03:00, by Sonnet 5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. This package
@@ -63,6 +63,13 @@ type Record struct {
 	// was produced by `vmr replay --record`, not live traffic. Empty for
 	// every ordinary request — vmr itself never sets this field.
 	ReplayOf string `json:"replay_of,omitempty"`
+	// ClientKeyTag identifies which config.APIKeys entry authenticated this
+	// request — KeyTag(the matched key), so it's a short non-secret label
+	// derived from the key itself rather than a separately configured name.
+	// "" when auth is disabled, the request matched the catch-all
+	// Config.APIKey instead, no key matched at all, or (vmr replay) the
+	// record wasn't produced by a live authenticated request.
+	ClientKeyTag string `json:"client_key_tag,omitempty"`
 }
 
 // OutcomeFor decides a Record's Outcome from the client-facing HTTP status
@@ -226,6 +233,56 @@ func mask(v string) string {
 		return prefix + "***"
 	}
 	return prefix + "***" + cred[len(cred)-4:]
+}
+
+// keyTagLen bounds how many trailing characters of a matched config.APIKeys
+// entry ever become its ClientKeyTag. 6 (vs. mask()'s 4) trades a couple
+// more characters of exposure for a label that reads as deliberate — see
+// config.example.yaml's "end your key in -something-readable" convention.
+// This is independent of mask()'s redaction length: mask() protects every
+// credential header generically; KeyTag only ever runs on vmr's own
+// api_keys entries, whose minimum length config.Config.validate already
+// enforces specifically so this never exposes a whole key (see keyTagLen's
+// config-side counterpart, the 16-char minimum).
+const keyTagLen = 6
+
+// KeyTag derives a short, non-secret label from one api_keys entry's tail —
+// the caller-facing "who sent this" identity for `vmr report` grouping.
+//
+// Rule: take the last keyTagLen raw characters first, then, if that window
+// contains a hyphen, keep only what follows the LAST hyphen inside it —
+// this lets a meaningful suffix shorter than keyTagLen (e.g. "-al", 2
+// chars) survive intact instead of being padded with whatever unrelated
+// characters preceded it in the fixed-length window. A suffix longer than
+// keyTagLen simply loses its hyphen and everything before it once the
+// window no longer reaches back that far — capped, never longer.
+//
+// Examples (keyTagLen = 6):
+//
+//	...-alice    → window "-alice" → tag "alice"  (5 chars, hyphen at 0)
+//	...proj-al   → window "roj-al" → tag "al"      (2 chars, hyphen at 3)
+//	...X-abcd    → window "X-abcd" → tag "abcd"    (4 chars, hyphen at 1)
+//	...-abcdefgh → window "cdefgh" → tag "cdefgh"  (hyphen 8 back, outside the window — none found, window kept whole)
+//	...9k3f7a    → window "9k3f7a" → tag "9k3f7a"  (no hyphen anywhere — window kept whole)
+//
+// Assumes the key is ASCII (true for every real bearer-token format). A key
+// shorter than keyTagLen is used whole as the window, then the same hyphen
+// rule applies — which is why config validation rejects api_keys entries
+// under 16 characters: short enough for the window to be the entire secret
+// would otherwise leak it into every report and filename this tag ends up
+// in.
+func KeyTag(key string) string {
+	window := key
+	if len(key) > keyTagLen {
+		window = key[len(key)-keyTagLen:]
+	}
+	// i+1 < len(window) excludes a hyphen that is itself the window's last
+	// character (nothing follows it) — trimming there would produce an
+	// empty tag, so the whole window is kept instead.
+	if i := strings.LastIndexByte(window, '-'); i >= 0 && i+1 < len(window) {
+		return window[i+1:]
+	}
+	return window
 }
 
 // Logger appends records to one JSONL file per day:

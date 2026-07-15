@@ -293,6 +293,103 @@ func TestWriteRequestsExport(t *testing.T) {
 	}
 }
 
+// TestWriteRequestsExportNoTagsProducesNoSiblings pins backward
+// compatibility: when no record carries a ClientKeyTag (today's status quo
+// for every existing config), WriteRequests must not create any sibling
+// file next to the one it's always written.
+func TestWriteRequestsExportNoTagsProducesNoSiblings(t *testing.T) {
+	path, _ := fixture(t)
+	a, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	out := filepath.Join(dir, "vmr-requests.jsonl")
+	if _, err := WriteRequests(a, out); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "vmr-requests.jsonl" {
+		t.Fatalf("want exactly vmr-requests.jsonl, got %v", entries)
+	}
+}
+
+// TestWriteRequestsExportByTag covers the per-client-key sibling exports:
+// records tagged "alice"/"bob" land only in their own vmr-requests-<tag>.jsonl
+// (in ts order, a strict subset of the full file), untagged records never do.
+func TestWriteRequestsExportByTag(t *testing.T) {
+	zone := time.FixedZone("CST", 8*3600)
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
+	sys := msg("system", "sys")
+	u := msg("user", "hi")
+
+	r1 := mkRec(at(0), "", []any{sys, u}, nil, sseText("a1"))
+	r1.ClientKeyTag = "alice"
+	r2 := mkRec(at(1), "", []any{sys, u}, nil, sseText("b1"))
+	r2.ClientKeyTag = "bob"
+	r3 := mkRec(at(2), "", []any{sys, u}, nil, sseText("a2"))
+	r3.ClientKeyTag = "alice"
+	r4 := mkRec(at(3), "", []any{sys, u}, nil, sseText("untagged"))
+	// r4.ClientKeyTag left "" — legacy/catch-all/no-auth traffic.
+
+	path := writeJSONL(t, []audit.Record{r1, r2, r3, r4})
+	a, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	out := filepath.Join(dir, "vmr-requests.jsonl")
+	n, err := WriteRequests(a, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Fatalf("total rows = %d, want 4", n)
+	}
+
+	readTags := func(p string) []string {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		var out []string
+		for _, l := range lines {
+			var row map[string]any
+			if err := json.Unmarshal([]byte(l), &row); err != nil {
+				t.Fatal(err)
+			}
+			tag, _ := row["client_key_tag"].(string)
+			out = append(out, tag)
+		}
+		return out
+	}
+
+	if got := readTags(out); len(got) != 4 {
+		t.Fatalf("full file rows = %v", got)
+	}
+
+	aliceOut := filepath.Join(dir, "vmr-requests-alice.jsonl")
+	if got := readTags(aliceOut); len(got) != 2 || got[0] != "alice" || got[1] != "alice" {
+		t.Errorf("alice sibling rows = %v, want [alice alice]", got)
+	}
+	bobOut := filepath.Join(dir, "vmr-requests-bob.jsonl")
+	if got := readTags(bobOut); len(got) != 1 || got[0] != "bob" {
+		t.Errorf("bob sibling rows = %v, want [bob]", got)
+	}
+	// No sibling ever gets created for the untagged ("") bucket.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("dir entries = %v, want exactly vmr-requests.jsonl + alice + bob siblings", entries)
+	}
+}
+
 // TestUngroupedFoldedIntoUnresolved covers a non-chat/rejected record (no
 // "messages" field, so it never gets a SessKey): it must render as a small
 // "其他" sub-section nested under "## Chat User (unresolved)", not as its

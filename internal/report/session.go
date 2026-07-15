@@ -1,4 +1,4 @@
-// Ver 2026-07-13 22:45, by Sonnet 5
+// Ver 2026-07-15 03:00, by Sonnet 5
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
@@ -52,6 +52,12 @@ type ReqInfo struct {
 	TS   time.Time
 
 	Model, Protocol, Outcome string
+
+	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim: "" when
+	// auth was disabled, the request matched the catch-all Config.APIKey,
+	// or nothing matched. Drives the by-tag sibling exports in export.go/
+	// detail.go — see docs/ClientAPIKeyGrouping_Design_Sonnet5.md.
+	ClientKeyTag string
 
 	// grouping
 	SessKey      string // metadata session id or anchor hash; "" = ungrouped
@@ -199,7 +205,8 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	r := &ReqInfo{
 		Path: path, Line: line, TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
-		realUsers: map[int]string{},
+		ClientKeyTag: rec.ClientKeyTag,
+		realUsers:    map[int]string{},
 	}
 	if tp := rec.Client.Request.Headers.Get("Traceparent"); tp != "" {
 		if parts := strings.Split(tp, "-"); len(parts) >= 2 {

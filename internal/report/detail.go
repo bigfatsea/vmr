@@ -1,4 +1,4 @@
-// Ver 2026-07-13 22:45, by Sonnet 5
+// Ver 2026-07-15 03:00, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -42,10 +42,13 @@ var normDescriptions = map[string]string{
 
 // WriteDetails renders every record in the given audit files into dir (one
 // .md + one same-named .json per record) and writes vmr-requests-index.md
-// one level above dir. Returns the number of record files written. Reruns
-// overwrite deterministically. sess (optional, nil = plain mode) supplies
-// the session grouping: detail headers gain session/task coordinates and a
-// delta section, the index gains a grouped view.
+// one level above dir, plus one vmr-requests-index-<tag>.md sibling per
+// distinct non-empty ClientKeyTag observed (see renderIndex/filterSessByTag)
+// — dir itself is never split or duplicated by tag. Returns the number of
+// record files written. Reruns overwrite deterministically. sess (optional,
+// nil = plain mode) supplies the session grouping: detail headers gain
+// session/task coordinates and a delta section, the index gains a grouped
+// view.
 //
 // Callers must pass the same paths (same order) here and to AnalyzeSessions:
 // filenames come from the analysis pass (assignNames, ts order — stable
@@ -53,25 +56,31 @@ var normDescriptions = map[string]string{
 // and the no-analysis fallback (sess == nil, or a record the analysis never
 // saw) numbers same-millisecond collisions in read order. cmd/vmr sorts the
 // glob expansion once and feeds both — keep it that way.
+
+// indexEntry is one row's worth of pre-extracted data for the requests
+// index, collected once while WriteDetails writes the detail files and then
+// reused (filtered by ClientKeyTag where needed) by renderIndex — package
+// scope because renderIndex isn't a WriteDetails-local closure.
+type indexEntry struct {
+	ts               time.Time
+	file             string
+	model            string
+	protocol         string
+	provider         string
+	upstreamModel    string
+	outcome          string
+	truncated        bool
+	durMS            int64
+	attempts         int
+	images, imgsComp int
+	usage            Usage
+	usageOK          bool
+	info             *ReqInfo
+}
+
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err
-	}
-	type indexEntry struct {
-		ts               time.Time
-		file             string
-		model            string
-		protocol         string
-		provider         string
-		upstreamModel    string
-		outcome          string
-		truncated        bool
-		durMS            int64
-		attempts         int
-		images, imgsComp int
-		usage            Usage
-		usageOK          bool
-		info             *ReqInfo
 	}
 	var entries []indexEntry
 	used := map[string]int{}
@@ -146,6 +155,75 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 		}
 		return entries[i].file < entries[j].file
 	})
+
+	indexPath := filepath.Join(filepath.Dir(dir), "vmr-requests-index.md")
+	if err := os.WriteFile(indexPath, []byte(renderIndex(entries, sess)), 0o644); err != nil {
+		return len(entries), err
+	}
+
+	// Sibling per-client-key indices: same automatic rule as
+	// WriteRequests — one vmr-requests-index-<tag>.md per distinct
+	// non-empty ClientKeyTag observed, in the same directory as the
+	// global index above (so its relative "details/…" links need no
+	// adjustment). The shared details/*.md|json files themselves are
+	// never filtered or duplicated — a request's detail pair belongs to
+	// exactly one caller regardless of who's asking, so mixing tags in
+	// dir costs nothing (see docs/ClientAPIKeyGrouping_Design_Sonnet5.md).
+	byTag := map[string]bool{}
+	for _, e := range entries {
+		if e.info != nil && e.info.ClientKeyTag != "" {
+			byTag[e.info.ClientKeyTag] = true
+		}
+	}
+	for tag := range byTag {
+		var tagEntries []indexEntry
+		for _, e := range entries {
+			if e.info != nil && e.info.ClientKeyTag == tag {
+				tagEntries = append(tagEntries, e)
+			}
+		}
+		tagIndexPath := filepath.Join(filepath.Dir(dir), fmt.Sprintf("vmr-requests-index-%s.md", sanitizeName(tag)))
+		if err := os.WriteFile(tagIndexPath, []byte(renderIndex(tagEntries, filterSessByTag(sess, tag))), 0o644); err != nil {
+			return len(entries), fmt.Errorf("client key %q: %w", tag, err)
+		}
+	}
+	return len(entries), nil
+}
+
+// filterSessByTag builds the Sessions/Compactions/Ungrouped subset
+// renderIndex needs for one client key's grouped view — the input to a
+// vmr-requests-index-<tag>.md sibling. Recs isn't filtered (renderIndex
+// never reads it directly; entries, filtered separately by the caller,
+// carries the per-record data instead).
+func filterSessByTag(sess *SessionAnalysis, tag string) *SessionAnalysis {
+	if sess == nil {
+		return nil
+	}
+	out := &SessionAnalysis{}
+	for _, s := range sess.Sessions {
+		if len(s.Recs) > 0 && s.Recs[0].ClientKeyTag == tag {
+			out.Sessions = append(out.Sessions, s)
+		}
+	}
+	for _, c := range sess.Compactions {
+		if c.ClientKeyTag == tag {
+			out.Compactions = append(out.Compactions, c)
+		}
+	}
+	for _, u := range sess.Ungrouped {
+		if u.ClientKeyTag == tag {
+			out.Ungrouped = append(out.Ungrouped, u)
+		}
+	}
+	return out
+}
+
+// renderIndex builds vmr-requests-index.md's Markdown from already-collected
+// entries (WriteDetails' file-writing pass) and the session analysis they
+// came from — a pure function so both the global index and each
+// client-key-filtered sibling (see filterSessByTag) can share it without
+// re-scanning the audit files or re-deriving entries.
+func renderIndex(entries []indexEntry, sess *SessionAnalysis) string {
 	var b strings.Builder
 	// Header — count unique chat users when session analysis is on so the
 	// reader sees how many distinct callers the traffic came from.
@@ -325,13 +403,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 			durationCellFields(e.durMS, e.outcome, e.truncated, e.attempts), ttft, tok,
 			imagesCell(e.images, e.imgsComp), fileLinksCell(e.file))
 	}
-	// vmr-requests-index.md lives one level above details/, alongside
-	// vmr-report.md — the per-record .md/.json files stay inside details/.
-	indexPath := filepath.Join(filepath.Dir(dir), "vmr-requests-index.md")
-	if err := os.WriteFile(indexPath, []byte(b.String()), 0o644); err != nil {
-		return len(entries), err
-	}
-	return len(entries), nil
+	return b.String()
 }
 
 // chatUserLabel strips the OpenClaw "user:" prefix off a ChatID so it

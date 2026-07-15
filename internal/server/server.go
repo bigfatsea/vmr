@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-15 05:00, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -41,19 +41,45 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// checkAuth enforces the router's own optional API key. Both credential
-// conventions are accepted: Authorization: Bearer (OpenAI) and x-api-key
-// (Anthropic SDKs send only this).
-func (s *Server) checkAuth(r *http.Request) bool {
-	key := s.rt.Snapshot().Cfg.APIKey
-	if key == "" {
-		return true
-	}
+// authenticate enforces the router's own optional API key(s) and reports
+// which one matched. Both credential conventions are accepted:
+// Authorization: Bearer (OpenAI) and x-api-key (Anthropic SDKs send only
+// this). tag is audit.KeyTag(the matched Cfg.APIKeys entry) — "" when auth
+// is disabled entirely, the request matched the catch-all Cfg.APIKey, or
+// (ok == false) nothing matched at all.
+//
+// Self-declared tag, no config needed: when neither APIKey nor APIKeys is
+// set, the door stays fully open (unchanged), but whatever credential-shaped
+// value the client chooses to send still gets KeyTag-derived and recorded —
+// a private-network caller can identify itself to `vmr report` just by
+// ending its own Authorization/x-api-key value in "-<label>", with zero
+// vmr-side config. A client sending nothing (the common case today) still
+// gets "" — see docs/ClientAPIKeyGrouping_Design_Sonnet5.md.
+func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
+	cfg := s.rt.Snapshot().Cfg
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if got == "" {
 		got = r.Header.Get("x-api-key")
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1
+	if cfg.APIKey == "" && len(cfg.APIKeys) == 0 {
+		return audit.KeyTag(got), true // no key configured: auth disabled, tag self-declared
+	}
+	if cfg.APIKey != "" && subtle.ConstantTimeCompare([]byte(got), []byte(cfg.APIKey)) == 1 {
+		return "", true // catch-all key: valid, untagged
+	}
+	for _, key := range cfg.APIKeys {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1 {
+			return audit.KeyTag(key), true
+		}
+	}
+	return "", false
+}
+
+// checkAuth is the tag-less wrapper for endpoints that only need a pass/
+// fail decision, not the caller's identity.
+func (s *Server) checkAuth(r *http.Request) bool {
+	_, ok := s.authenticate(r)
+	return ok
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -143,7 +169,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			}()
 		}
 
-		if !s.checkAuth(r) {
+		tag, authed := s.authenticate(r)
+		if rec != nil {
+			rec.ClientKeyTag = tag
+		}
+		if !authed {
 			writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}

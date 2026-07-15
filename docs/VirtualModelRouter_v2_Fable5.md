@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-13 04:00, by Sonnet 5 -->
+<!-- Ver 2026-07-15 05:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -123,7 +123,7 @@ internal/imgprep           请求内联图片降采样（§7）
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
 | `GET /admin/status` | 端点健康 + 并发指标 JSON；仅接受 loopback 来源 |
 
-鉴权（可选 `api_key`）同时接受 `Authorization: Bearer` 与 `x-api-key`，作用于 `/v1/*`。
+鉴权（可选 `api_key`）同时接受 `Authorization: Bearer` 与 `x-api-key`，作用于 `/v1/*`。可选的 `api_keys`（字符串列表）在 `api_key` 之外再接受任意多把额外凭证，两者可同时配置——`api_key` 命中永远不打标签，`api_keys` 命中则用 `audit.KeyTag`（命中的那把 key 自身的尾部）给这次请求打上 `client_key_tag`，供 `vmr report` 事后按调用方分组导出（§9.4"按调用方分组导出"一条）。两者都不配置时鉴权整体关闭（沿用旧行为），但 `authenticate()` 仍会对客户端自愿发来的 `Authorization`/`x-api-key` 值调用同一个 `audit.KeyTag`（无 16 字符下限——这个模式下它不是需要保护的密钥），让纯内网场景下客户端可以零 vmr 侧配置地自报身份标签；不发任何凭证的请求依旧是未打标签的记录，字节级向后兼容。设计取舍与实现细节见 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md`（§六）。
 
 ---
 
@@ -442,6 +442,7 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md 
 * **Agent 会话分析**（`internal/report/session.go` + `export.go`，方法与实证见 `docs/AgentSessionGrouping_Analysis_Fable5.md`）：离线、纯规则、不调 LLM，按「会话 → 任务 → 轮次」分组并提取逐请求特征。核心算法协议通用——首条非 system 消息 hash 做会话指纹（Claude Code `metadata.user_id` 存在时优先），组内对「非 system 消息序列」做 max-LCP 选父,`messages[lcp:]` 即本轮增量；任务边界 = Traceparent trace-id 变化（有则用）|| 增量尾部出现真实用户指令（通用兜底,`newUserWindow` 防原地改写误切,且按内容 hash 核对该指令是否已在父记录出现过——防止历史裁剪把同一条指令"挪"进 tail window 而二次触发新任务）|| 父记录 NO_REPLY 收尾时不开新任务（视为对同一指令的重试）。`isRealUser` 会剥离 OpenClaw 粘在真实指令前面的 `Conversation info (untrusted metadata)` / `Sender (untrusted metadata)` JSON 路由头,保留并使用剥离后的正文，而不是把整条消息当 scaffolding 丢弃。compaction 调用按三重特征识别（summarization system 头 / 无 Traceparent 无 tools / 独有 `max_completion_tokens`），其输入/输出与新旧会话锚点做**确定性子串匹配**双向链接。OpenClaw 特定信号（runtime wrapper 过滤、`chat_id` 提取、heartbeat/dream 模板标签）失配无害——标不出就不标。产物落在三处：报表 JSON 的 `tools[]`（按请求形态：声明工具 vs **当轮实际调用**——从响应提取,历史重发零重复计数——及 never_called 清单与声明字节成本,服务于工具裁剪）与 `sessions[]` 段（**新增 `link` 字段**指向首个请求的 detail 文件）；**`vmr-requests.jsonl`** 逐请求特征明细（会话/任务/轮次坐标、trace/chat id、形态签名、标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning_tokens 的用量细分、增量大小、最新指令预览）。
   * **详单侧索引按 Chat User 分组**（`vmr-requests-index.md`）：每条 `SessionInfo` 的 `ChatID`（OpenClaw `chat_id` 字段，剥掉 `user:` 前缀）作分桶 key；同一用户聚合为一个 `## Chat User xxx` 区块，Session/Task 编号不再单独起标题行——每个任务直接是一段引用块（`NewInstruction` 预览）+ 轮次表（每行：轮 / 时间 / Message / finish / 耗时 / 首字延迟 / Tokens In/CacheHit/Out / 图片/压缩 / 文件）。`Message` 列格式 `M+N`（M = 本轮之前的历史消息数 = `DeltaStart`，N = 本轮新增数）。`finish` 为 `tool_calls` 时显示 `tool_call:<工具名>` 而非裸值。轮次表没有单独的 `结果`/`尝试次数` 两列——这两项信息折进 `耗时` 列的尾注（`durationCellFields`，可并存、空格分隔）：`❌<outcome>`（真错误，canceled 除外）、`⚠️截断`（ok 但流中途断）、`🚫取消`（outcome=canceled）、`🔄尝试x{n}`（attempts>1）——干净的单次成功请求只显示纯耗时数字，不需要在一堆 `✅ ok` 里找例外。文件列是 `md`/`json` 两个短 `<a>` 链接，不显示完整文件名。"全部请求（时间序）"这张扁平表把 `模型`/`上游` 两列合并成一个 `VM/API` 列，格式 `{protocol} | {virtual_model} | {provider}:{model}`（例：`openai | agent | minimax:MiniMax-M3`；三段之间用 ` | ` 分隔，upstream 内部用 `:` 而非 `/`——OpenRouter 这类供应商的模型名本身带 `/`，用 `/` 分隔会有歧义），数据直接读最后一个 attempt 的 `protocol`/`provider`/`model` 三个结构化字段。Compaction 调用（`### 压缩任务 · compaction 会话 × N`，含 Tokens/结果/耗时列）、定时单发会话（`### 定时任务 · <class> 单发会话 × N`）与非聊天体/被拒请求（`### 其他 · 非聊天体/被拒请求 × N`）一律折叠进 `## Chat User (unresolved)` 的三个子分组，不单占一段、不单独起顶级标题——与 `vmr-report.md` 的 Agent 会话表 collapse 逻辑保持一致。这张"其他"小表列结构是时间/模型/结果/文件，没有耗时列（信息量小，不需要）。
 * **session.Link 字段**：每条 `SessionRow` 现在带一个 `Link` 字段（值如 `details/20260709-003106.804_agent_MiniMax-M3_ok.md`），Markdown 表格里会话 ID 列渲染为 `[s01](./details/20260709-003106.804_..._ok.md)`，点击直达首个详单。
+* **按调用方（`client_key_tag`）分组导出**（`config.APIKeys` + `audit.KeyTag` + `ReqInfo.ClientKeyTag`，详见 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md`）：`WriteRequests`/`WriteDetails` 各自内部检测 `a.Recs`/`entries` 里出现过的 `ClientKeyTag` 去重集合，每一个非空 tag 都在原有产物旁多写一份同目录的 sibling —— `vmr-requests-<tag>.jsonl`（`WriteRequests` 抽出的 `writeRequestRows` helper，仅按记录集合不同，字段与全量文件完全一致，含 `client_key_tag` 字段本身）与 `vmr-requests-index-<tag>.md`（`WriteDetails` 抽出的 `renderIndex` 纯函数，输入是过滤后的 `entries` + `filterSessByTag` 过滤出的 `Sessions`/`Compactions`/`Ungrouped` 子集）。**`details/*.md`/`*.json`、`vmr-report.md`/`.json` 三者完全不受影响**——前者本来就不区分调用方地混放（同一份文件属于哪个调用方与内容无关，不值得为此复制或建子目录），后者是唯一一份跨调用方的综合汇总，语义上就不该被切分。sibling 与全量索引同目录，是刻意选择：全量索引里 `details/…` 相对链接前缀对 sibling 天然复用，不需要因为"深了一层"重新计算相对路径。不配置 `api_keys` 时这套逻辑整体不产生任何文件，字节级向后兼容。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 
@@ -459,7 +460,10 @@ Agent 场景每轮请求都重发完整对话历史，单日审计文件可达 1
 
 ```yaml
 listen: 127.0.0.1:8800        # 缺省 127.0.0.1:8800
-api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key）
+api_key: sk-vmr-xxx           # 可选：vmr 自身鉴权（Bearer 或 x-api-key）；与 api_keys 可同时配置，命中永远不打 client_key_tag
+api_keys:                     # 可选：额外的多把凭证列表（字符串数组，非具名映射）；每把 ≥16 字符（校验强制，
+  - ${VMR_KEY_ALICE}          #   否则 KeyTag 的末 6 位窗口可能就是整把密钥）。命中的那把给请求打上
+  - ${VMR_KEY_OPENCLAW}       #   client_key_tag = audit.KeyTag(该 key)，供 vmr report 按调用方分组导出（见 §9.4"按调用方分组导出"一条）
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
 max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 413）；仅为稳定性考虑，与审计记录无关——vmr 接受的请求，审计里永远是完整的那一份
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
@@ -501,7 +505,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但全局没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记与每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点，见 §7.1）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`，§7.1）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
+校验规则：listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但全局没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 6 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义，见 §7.1）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale 覆盖标记与每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（§9.4）、`vmr dirs [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点，见 §7.1）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`，§7.1）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
 **上游代理：显式配置，两层解析**：① provider 自己的 `proxy: false` 最高优先——永远直连（国内厂商 + 海外厂商混配是它的目标场景：代理只为海外厂商而设，国内厂商走代理只会变慢甚至不通）；② 全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到——一个只在某次交互式 shell 里临时设置过的 `HTTPS_PROXY`，一旦被 vmr 悄悄读取，就会让接下来启动的所有实例在不知情的情况下把全部上游流量导进代理。vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境。`proxy: true` 但全局没配对应 scheme 的代理是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
 
