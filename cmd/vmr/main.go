@@ -75,7 +75,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
-       vmr report [-o dir] [-details=false] <audit.jsonl|glob>...
+       vmr report [-o dir] [-details=false] <audit.jsonl|glob>...   (default -o: ./reports)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
@@ -118,7 +118,7 @@ func cmdDirs(args []string) error {
 // decompresses transparently) — e.g. `vmr report 'vmr-audit-*.jsonl*'`.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	outDir := fs.String("o", ".", "output directory")
+	outDir := fs.String("o", "reports", "output directory (default: ./reports; an explicit -o is used as-is, no reports/ subdir added)")
 	detailsOn := fs.Bool("details", true, "also export one Markdown file per request into {out}/details/")
 	if err := fs.Parse(args); err != nil {
 		return err
