@@ -246,8 +246,14 @@ func mask(v string) string {
 // config-side counterpart, the 16-char minimum).
 const keyTagLen = 6
 
-// KeyTag derives a short, non-secret label from one api_keys entry's tail —
-// the caller-facing "who sent this" identity for `vmr report` grouping.
+// KeyTag derives a short, non-secret label from a credential's tail — the
+// caller-facing "who sent this" identity for `vmr report` grouping. Called
+// on a matched config.APIKeys entry, and (server.authenticate, when neither
+// APIKey nor APIKeys is configured at all) on whatever unvalidated value a
+// client voluntarily sends — KeyTag itself doesn't care which; either way
+// the input is just a string, and the 16-character minimum that keeps the
+// former case safe (see below) simply doesn't apply to the latter, since an
+// unconfigured, unvalidated value was never a secret to begin with.
 //
 // Rule: take the last keyTagLen raw characters first, then, if that window
 // contains a hyphen, keep only what follows the LAST hyphen inside it —
