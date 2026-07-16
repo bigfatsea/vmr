@@ -194,11 +194,11 @@
 
 | 成功条件 | 状态 | 证据 |
 |---|---|---|
-| 1. README 头版明确 agent-first/byte-faithful | ⚠️ 半完成 | README 的 "Why vmr" 部分已经把 byte-faithful 放在第一条重点讲，措辞也已是"point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK"（不是"built for OpenClaw"，§4.4 提到的风险已规避）；但没有出现 "agent-first" 这个词本身，也没有单独的 "Why vmr over LiteLLM" 章节 |
-| 2. 出现在 Claude Code/OpenClaw/Hermes/Cline/Cursor 的 setup docs 里 | ❌ 未开始 | 没有证据表明任何外部项目的文档引用了 vmr |
-| 3. Agent-focused 例子文档 | ❌ 未开始 | README Quick Start 只有通用 curl 示例，没有"如何在 Claude Code 里用 VMR 增强 failover"这类专门文档 |
+| 1. README 头版明确 agent-first/byte-faithful | ✅ 2026-07-16 已完成 | README 头版标语改为"The transparent LLM router for AI agents"，开场段直接讲"agent 无人值守、供应商出问题时没人盯着"这个 agent-first 的核心论据；新增 `docs/Why_vmr_over_LiteLLM.md`（中英双语，短、直接、带对比表）从 README 首段起就有链接 |
+| 2. 出现在 Claude Code/OpenClaw/Hermes/Cline/Cursor 的 setup docs 里 | ❌ 未开始 | 没有证据表明任何外部项目的文档引用了 vmr——这条不是 vmr 自己能单方面完成的，依赖对外联系（§6.2 长期行动项 2） |
+| 3. Agent-focused 例子文档 | ⚠️ 部分完成 | 仍然没有"如何在 Claude Code 里用 vmr 增强 failover"这类专门教程；但 README 首段已经把"无人值守 agent 遇到限流/宕机"这个场景讲清楚，`Why_vmr_over_LiteLLM.md` 里也举了具体例子（MiniMax thinking 模式修复）——比之前的纯 Quick Start 更贴近 agent 场景，只是还不是一篇独立教程 |
 
-条件 1 走在正确方向上但没做全；条件 2/3 完全没有启动——这与 §6.2 当时定下的"Q1 立即启动"的传播计划是同一批遗留项，见本文档 §6 的复核批注。
+条件 1 已完成；条件 3 从"未开始"推进到"部分完成"；条件 2 依赖外部项目采纳，vmr 自己单方面做不了，留给 §6.2 长期行动项处理。
 
 #### 形态 4：「本地 AI Gateway 平台」
 
@@ -609,13 +609,13 @@
 
 | 行动项 | 状态 | 说明 |
 |---|---|---|
-| 1. 重新设计 README，明确定位 | ⚠️ 半完成 | 见 §2 复核：byte-faithful 已是头版重点，但没有独立的 "Why vmr over LiteLLM" / "OpenClaw setup guide" 章节 |
+| 1. 重新设计 README，明确定位 | ✅ 2026-07-16 已完成 | README 重写为"agent-first + byte-faithful"头版定位，加了 `docs/Why_vmr_over_LiteLLM.md`（中英双语）；细节配置/CLI 参考拆到新建的 `docs/UserGuide.md`（中英双语），README 本身只留首屏定位 + Quick Start + 指路链接，不再有大段设计文档级别的详细说明混在首屏。"OpenClaw setup guide" 单独章节没做——README 里已经把 OpenClaw 列进"点一次就用"的客户端清单，专门的分平台接入教程判断优先级不如"先把定位讲清楚"，未来有需要再补 |
 | 2. `vmr diagnose` + `vmr replay` | ✅ 已完成 | 2026-07-13，且通过了 2026-07-15 的独立全量审计 |
 | 3. cost aggregation（token→费用） | ❌ 未完成 | 设计文档 §12.2 已有一轮价目表方案（key 格式约束已定），未实现；不算高优先——`tokens_in/out` 统计本身已经相当完整，费用换算是价目表维护成本 vs 便利性的取舍，Stanford 没有反馈说这是当前阻塞项 |
-| 4. 社区发声（HN/Reddit） | ❌ 未开始 | `gh repo view` 确认仍是 1 star |
+| 4. 社区发声（HN/Reddit） | ❌ 未开始 | `gh repo view` 确认仍是 1 star——行动项 1 做完后现在有了发声素材（重定位后的 README + Why 文档），这条是目前唯一还没启动的 Q1 行动项 |
 | 5. 1.0 release（预计 Q3 2026） | 未到时间点，不评估 | 距 Q1 结束还有时间，节奏暂不需要调整 |
 
-**判断**：路径 B（Agent-first 主动叙事）在"叙事"这一半完全没有执行，"Agent-first"目前只体现在代码和设计文档里，还没体现在任何面向外部的表达里。§3.6 已经给出更具体的近期特性节奏，但**特性不是这里的瓶颈**——按当前证据，继续埋头加特性只会让"代码质量 vs 传播执行"的落差进一步拉大。下一步最高杠杆的动作是行动项 1 和 4，而不是任何新特性；§3.6 第 4 条建议把两者穿插进行（做完一批可演示的特性就顺手发声，不等到攒够素材或等到 1.0）。
+**判断（2026-07-16 更新）**：路径 B（Agent-first 主动叙事）原本"叙事"这一半完全没有执行，今天把行动项 1 补上了——README 现在有了明确的 agent-first 头版定位、一篇专门对比 LiteLLM 的短文、以及拆分出去的详细参考文档，不再是"定位淹没在大段配置说明里"的状态。**剩下唯一没做的 Q1 行动项是第 4 条社区发声**——素材已经具备（重定位后的 README 首屏可以直接当 HN/Reddit 帖子的开场，`Why_vmr_over_LiteLLM.md` 可以直接当帖子正文的骨架），执行门槛比之前低了很多，下一步最高杠杆的动作就是这一条。
 
 ---
 
