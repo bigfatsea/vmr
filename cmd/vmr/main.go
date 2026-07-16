@@ -1,4 +1,4 @@
-// Ver 2026-07-13 23:20, by Sonnet 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -151,20 +151,26 @@ func cmdReport(args []string) error {
 	}
 	// Session analysis (grouping, per-request features, tool usage) feeds
 	// the report's tools/sessions sections, the requests export, and the
-	// detail files' grouped view.
+	// detail files' grouped view. It is a value-add on top of the aggregate
+	// stats report.Build already computed, not a prerequisite for them — a
+	// bug in the session-grouping heuristics (a real risk given how much
+	// pattern-matching it does, see internal/report/session.go) must not
+	// take down the basic cost/usage numbers along with it. A nil sess
+	// below skips only the sections that need it.
 	sess, err := report.AnalyzeSessions(paths)
 	if err != nil {
-		return fmt.Errorf("session analysis: %w", err)
+		fmt.Fprintf(os.Stderr, "vmr report: session analysis failed, continuing without sessions/tools/workloads/requests export: %v\n", err)
+		sess = nil
+	} else {
+		rep.Tools = sess.ToolShapes()
+		rep.Sessions = sess.SessionRows()
+		rep.Workloads = sess.Workloads()
 	}
-	rep.Tools = sess.ToolShapes()
-	rep.Sessions = sess.SessionRows()
-	rep.Workloads = sess.Workloads()
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
 	mdPath := filepath.Join(*outDir, "vmr-report.md")
-	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return err
@@ -175,12 +181,17 @@ func cmdReport(args []string) error {
 	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o644); err != nil {
 		return err
 	}
+	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	if sess == nil {
+		return nil
+	}
+	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
 	nReq, err := report.WriteRequests(sess, reqPath)
 	if err != nil {
 		return fmt.Errorf("requests export: %w", err)
 	}
-	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n%s (%d rows)\n",
-		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath, reqPath, nReq)
+	fmt.Printf("%s (%d rows)\n", reqPath, nReq)
 	if *detailsOn {
 		detailDir := filepath.Join(*outDir, "details")
 		n, err := report.WriteDetails(paths, detailDir, sess)

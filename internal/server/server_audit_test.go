@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 
 // Audit integration: every chat request produces one JSONL line with both
 // layers (client exchange + per-attempt upstream trail).
@@ -133,6 +133,57 @@ func TestAuditRecordsFailoverBothLayers(t *testing.T) {
 	json.Unmarshal(raw, &out)
 	if out.Model != "model-two" {
 		t.Errorf("outbound body model: %v", a2.Request.Body)
+	}
+}
+
+// TestErrorBodyCappedAndAuditMarksTruncation locks in router.errBodyCap's
+// two-copy split: the client gets an untouched, capped prefix of the
+// upstream body (byte-faithful, §1 — no marker ever leaks into what a real
+// caller sees), while the audit trail's copy gets a truncation marker
+// appended so a human reading vmr-audit-*.jsonl knows the body was cut, not
+// that the upstream really sent something that short.
+func TestErrorBodyCappedAndAuditMarksTruncation(t *testing.T) {
+	const cap = 128 << 10 // mirrors router.errBodyCap; not exported, so duplicated here
+	big := strings.Repeat("x", cap+5000)
+
+	u := newUpstream(t)
+	u.status.Store(503)
+	u.errBody.Store(big)
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))
+
+	resp, body := chat(t, ts, simpleReq, nil)
+	if resp.StatusCode != 503 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if len(body) != cap {
+		t.Errorf("client body length: got %d, want %d", len(body), cap)
+	}
+	if body != strings.Repeat("x", cap) {
+		t.Error("client body must be an untouched prefix of the upstream body — no marker appended")
+	}
+
+	recs := readRecords(t, al)
+	if len(recs) != 1 || len(recs[0].Attempts) == 0 {
+		t.Fatalf("records: %+v", recs)
+	}
+	a := recs[0].Attempts[len(recs[0].Attempts)-1]
+	if a.Response == nil {
+		t.Fatal("attempt response missing")
+	}
+	auditBody, ok := a.Response.Body.(string)
+	if !ok {
+		t.Fatalf("attempt body: want string (non-JSON), got %T", a.Response.Body)
+	}
+	wantSuffix := fmt.Sprintf("...(truncated at %d bytes)", cap)
+	if !strings.HasSuffix(auditBody, wantSuffix) {
+		end := auditBody
+		if len(end) > 60 {
+			end = end[len(end)-60:]
+		}
+		t.Errorf("audit body missing truncation marker, tail=%q", end)
+	}
+	if !strings.HasPrefix(auditBody, strings.Repeat("x", 100)) {
+		t.Error("audit body must still start with the actual upstream content")
 	}
 }
 

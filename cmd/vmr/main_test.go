@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 package main
 
 import (
@@ -111,7 +111,10 @@ func captureStdout(t *testing.T, fn func()) string {
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
 // report.Build: glob expansion, output directory creation, and writing both
-// the JSON and Markdown artifacts (design doc §9.4).
+// the JSON and Markdown artifacts (design doc §9.4). It also locks in the
+// session-analysis outputs (vmr-requests.jsonl + details/) on the happy
+// path — the branch that must stay reachable now that a session-analysis
+// failure only skips these rather than failing the whole command (§11).
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
@@ -124,10 +127,13 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	if err := cmdReport([]string{"-o", outDir, auditPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md"} {
+	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.jsonl"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("expected %s to be written: %v", name, err)
 		}
+	}
+	if fi, err := os.Stat(filepath.Join(outDir, "details")); err != nil || !fi.IsDir() {
+		t.Errorf("expected details/ directory to be written: %v", err)
 	}
 }
 

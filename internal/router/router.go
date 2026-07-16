@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -6,7 +6,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -276,11 +275,11 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	route, ok := snap.Models[protocol][creq.Model]
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
-			writeError(w, http.StatusNotFound, "not_found_error",
+			core.WriteError(w, http.StatusNotFound, "not_found_error",
 				fmt.Sprintf("model %q speaks the %s protocol; call it via POST %s", creq.Model, other, IngressPath(other)))
 			return
 		}
-		writeError(w, http.StatusNotFound, "not_found_error",
+		core.WriteError(w, http.StatusNotFound, "not_found_error",
 			fmt.Sprintf("model %q not found; models on this endpoint: %s",
 				creq.Model, strings.Join(modelNames(snap, protocol), ", ")))
 		return
@@ -338,7 +337,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		if attempts > 0 {
 			msg = fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
 		}
-		writeError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
+		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
 	rt.logf("model=%s status=all_failed attempts=%d dur=%s", creq.Model, attempts, time.Since(start).Round(time.Millisecond))
 }
@@ -378,6 +377,11 @@ func copyRespHeaders(dst http.Header, src http.Header) {
 		}
 	}
 }
+
+// errBodyCap bounds how much of an upstream >=400 response body tryOne reads
+// into memory (and forwards to the client / audit trail). See the read site
+// below for why 128KB.
+const errBodyCap = 128 << 10
 
 // tryOne sends the request to a single endpoint. It returns done=true when a
 // response (success or non-retryable error) has been written to the client.
@@ -450,15 +454,33 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// covers the headers, and an upstream that stalls after sending error
 		// headers would otherwise park this read — and with it the whole
 		// failover walk — until the client gives up. Reuses stream_idle as
-		// the bound; 64KB within that window is generous.
+		// the bound; 128KB within that window is generous (most vendors stay
+		// under 8KB; a few — e.g. Anthropic-shaped errors[] arrays — run
+		// longer, hence the headroom over the read itself being cheap).
 		watchdog := time.AfterFunc(snap.Cfg.Timeouts.StreamIdle.D(), func() { resp.Body.Close() })
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap+1)) // +1 to detect truncation without reading past the cap
 		watchdog.Stop()
 		resp.Body.Close()
+		truncated := len(body) > errBodyCap
+		if truncated {
+			body = body[:errBodyCap]
+		}
 		class := ad.ClassifyError(resp.StatusCode, body)
+		// uerr.body is forwarded to the client verbatim (byte-faithful, §1) —
+		// any truncation marker must go only into the audit copy below, never
+		// into this slice.
 		uerr := &upstreamError{resp.StatusCode, resp.Header, body}
 		if att != nil {
-			m := audit.NewMessage(resp.Header, body)
+			auditBody := body
+			if truncated {
+				// A fresh slice, never touched again — safe to hand to
+				// EncodeBody under its "referenced, not cloned" ownership
+				// contract (audit.go). Reports the cap, not upstream's true
+				// size: the LimitReader above deliberately never reads past
+				// it, so the real total is unknown.
+				auditBody = append(append([]byte(nil), body...), []byte(fmt.Sprintf("\n...(truncated at %d bytes)", errBodyCap))...)
+			}
+			m := audit.NewMessage(resp.Header, auditBody)
 			m.Status = resp.StatusCode
 			att.Response = &m
 			att.Error = class.String()
@@ -658,17 +680,6 @@ func IngressPath(protocol string) string {
 		return "/v1/messages"
 	}
 	return "/v1/chat/completions"
-}
-
-// writeError emits an error body that both OpenAI clients (error.message)
-// and Anthropic clients (type:"error" envelope) can parse.
-func writeError(w http.ResponseWriter, status int, errType, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
-		"type":  "error",
-		"error": map[string]string{"type": errType, "message": msg},
-	})
 }
 
 func (rt *Router) logf(format string, args ...any) {

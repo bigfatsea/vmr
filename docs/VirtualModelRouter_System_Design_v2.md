@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-15 05:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -382,7 +382,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 五条约定（统计脚本必须知道）：
 
-1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`**（§5.5）：它是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同。失败尝试的错误 body（≤64KB）存在 attempt 内。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
+1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`**（§5.5）：它是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同。失败尝试的错误 body（≤128KB，`router.errBodyCap`）存在 attempt 内；超出上限时转发给客户端的字节仍是未改动的截断前缀（byte-faithful，§1 对客户端始终成立），只有 attempt 内的审计副本会在末尾追加 `...(truncated at N bytes)` 标记（N = 上限本身，不是上游真实大小——`io.LimitReader` 故意不读过上限，真实大小未知）。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
 2. **body 编码，不截断**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。**审计侧不设记录上限**——不论原始 body 有多大都原样记录，没有 `max_body_mb` 这类联动配置，也没有 `body_truncated` 标记。入站请求体大小仍有一个独立的、纯粹为稳定性考虑的上限（`max_request_body_mb`，缺省 8MiB，超限 413）——它只决定 vmr 愿不愿意接受这个请求，与审计记录是否完整无关：只要 vmr 接受了，审计里就是完整的那一份。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。后三项虽然被 server 层黑名单挡在上游之外（§5.4），但客户端发来时会进入审计的 client 层记录，明文落盘同样有外泄风险。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。这份列表与 `server.headerBlocklist`（§5.4）是两张独立维护、故意不完全重合的表：前者决定"记审计时要不要打码"，后者决定"转发给上游前要不要剔除"，`Api-Key`/`X-Auth-Token` 在前者但不在后者（活的客户端流量里这两个 header 是真值，vmr 默认放行转发；但审计记录里存的是打过码的占位符）。`internal/audit` 导出了 `IsCredentialHeader(name string) bool` 判定函数，`vmr replay`（§14）重建请求头时用它把这批 header 额外剔除一遍——否则会把打码占位符当真实凭据发给上游。
 4. **`attempts[].error` / `error_class` 的形态**：`error` 是自由文本（错误类别裸词、或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`），供人读；`error_class` 是与它同步设置的类型化枚举字符串（复用 `core.ErrorClass.String()`：`client`/`auth`/`rate_limit`/`endpoint`/`transient`/`content`，加上四个只在 HTTP 响应之前的失败路径出现的值 `build`/`network`/`canceled`/`truncated`），`vmr report` 直接按这个字段归桶。**必须容忍缺失该字段的日志文件**：一部分历史留存的审计文件没有 `error_class`（只有 `error` 自由文本）——`internal/report` 的 `attemptErrorClass()` 辅助函数在 `error_class` 为空时回退到解析 `error`（6 种 HTTP 分类错误本来就是不带冒号的裸类名，直接原样使用；`build`/`network`/`canceled`/`truncated` 这四种非 HTTP 路径本来就是 `"class: 详情"` 前缀，取冒号前半部分），使错误分布、`truncated` 计数（`vmr-report.md`/`vmr-requests-index.md`）在混用新旧格式日志时依然正确，而不是退化成 `unknown`。`internal/audit` 仍是无外部依赖的叶子包，`Attempt.ErrorClass` 类型是 `string` 而非 `core.ErrorClass` 本身，只是复用同一组取值。
@@ -401,6 +401,7 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md 
 ```
 
 * **输入**：一个或多个审计 JSONL 路径/通配符；坏行跳过并计数（`meta.parse_errors`）；超过 128MB 的单行同样跳过并计入坏行（有界内存排空，单行畸形不会让整次 report 失败）。全内存聚合，几十 MB 日志无压力。运行过程**按文件输出进度**到 stdout（`[i/N] <path>  done: M records, K parse errors (Ts)`），让操作者确认大文件扫描没有挂住。
+* **会话分析失败不拖累主报告**：`AnalyzeSessions`（Agent 会话分组，见下）出错时 `cmdReport` 只打印一行 stderr 警告并跳过 `tools[]`/`sessions[]`/`workloads[]`、`vmr-requests.jsonl`、`{out}/details/` 这些依赖它的产物——`vmr-report.json`/`.md`（基础聚合统计）仍然正常写出并返回成功。这两部分职责不同：`Build()` 是纯粹的逐条计数聚合，`AnalyzeSessions` 是启发式分组（LCP 分组、compaction 子串匹配等），后者的一个 bug 不应该让前者的确定性统计也拿不到。
 * **架构：每维度一个独立桶，各自从原始值算自己的百分位**。百分位不可加——跨桶用已经算好的 p95 再汇总，只能退化成 `max(row.p95)` 这种错误近似。所以每条 audit record 在 `Build()` 内一次遍历中同步 push 到**所有相关桶**，每个桶自己收原始 `rec.DurMS` / `rec.TTFTMS`，各自在 `finishRow()` / `finishHour()` / `finishEndpoint()` 里从自己的原始值算 p50/p95；桶与桶之间不互相派生。当前的桶集合：
   * `Rows` (`date × protocol × model`) ——最细粒度
   * `Overall` ——所有 record，单桶
@@ -568,7 +569,10 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | `vmr replay` 定位记录支持 `-line`/`-ts`/`-detail` 三种互斥方式 | 只保留 `-line`（原始设计） | `-line` 要求用户先数出目标记录在文件里是第几行，这个坐标在 jq/vmr report 等实际排障工作流里根本拿不到，文件按天轮转后也对不上；`-ts` 匹配 `ts` 字段（容忍 `vmr-requests.jsonl` 的毫秒精度与原始审计日志的纳秒精度），`-detail` 直接读 `vmr report` 已生成的 `details/*.json`（一文件一条记录，天然无歧义）——两者都是用户真实拿在手上的定位符；`-line` 保留作为脚本化场景的兜底，不删 |
 | `vmr replay --record` 写出的记录字段布局模仿真实流量的约定（`Client.Response` 存全量，`Attempts[0].Response.Body` 仅失败时存） | 无条件把响应体存两份 | 让 replay 产出的记录能被 `vmr report`/`jq`/再次 `vmr replay` 当作普通审计记录正确消费，不需要为"这是 replay 产出的"开一条特殊解析路径；`Client.Request.Body` 存的是回放前的原文（虚拟模型名），不是改写后发给上游的字节——同一约定，读侧不用区分来源 |
 | `vmr replay` 重建请求头时，在 `server.FilterClientHeaders` 之外再按 `audit.IsCredentialHeader` 剔除一遍 | 只用 `FilterClientHeaders`（与 chatHandler 共用同一份逻辑） | 两张表故意不同源：`headerBlocklist` 决定"活的请求转发前要不要剔除"，`credentialHeaders` 决定"记审计时要不要打码"，交集不是全集（`Api-Key`/`X-Auth-Token` 只在后者）。replay 的输入是**审计记录里已经打码的值**，不是活的请求——直接套用 `FilterClientHeaders` 会把打码占位符当真实凭据转发给上游 |
-| `router.ModelRoute.EffectiveOrder()` / `router.IngressPath` / `audit.OutcomeFor` 从各命令各自实现改为导出共享 | 维持 §13 "各自一份、不值得统一"的既有先例 | 与 §13 列的 `writeError`/`countNested` 不同：这三处不是"恰好长得像"的独立实现，是`vmr diagnose`/`vmr replay` 新增后同一段路由排序/协议路径/结果判定逻辑第三、四次被复制——多份拷贝下次协议/排序规则变化时会不同步漂移，且提取成本低（纯函数，无状态），故这三处选择统一，其余仍按 §13 的既有判断维持现状 |
+| `router.ModelRoute.EffectiveOrder()` / `router.IngressPath` / `audit.OutcomeFor` 从各命令各自实现改为导出共享 | 维持 §13 "各自一份、不值得统一"的既有先例 | 与 §13 列的 `countNested` 不同：这三处不是"恰好长得像"的独立实现，是`vmr diagnose`/`vmr replay` 新增后同一段路由排序/协议路径/结果判定逻辑第三、四次被复制——多份拷贝下次协议/排序规则变化时会不同步漂移，且提取成本低（纯函数,无状态），故这三处选择统一，其余仍按 §13 的既有判断维持现状 |
+| `writeError`/`writeJSON` 从 `router`/`server` 两包各一份改为 `core.WriteError`/`core.WriteJSON` 导出共享（原 §13 记录为"不值得统一"，此处反转该判断） | 维持原判断（两处各留一份） | 两处是字节级相同的错误信封实现，而不是"恰好长得像"——这是跨层必须一致的客户端可见契约（OpenAI/Anthropic 客户端都按这个形状解析）；`core` 已经是 router/server 共同依赖的底层包（`CanonicalRequest`/`ErrorClass` 都在那），加两个函数不引入新耦合。原判断成立的前提"消除重复的耦合成本 > 省下的 8 行"没有变——变的是重新评估后认为这个耦合本来就该在 `core` 里付，因为 `core` 存在的意义就是"router/server 都要认的东西放这" |
+| `cmdReport` 中 `AnalyzeSessions` 失败降级为 stderr 警告，`vmr-report.json`/`.md` 仍正常写出（§9.4） | 失败即整个 `vmr report` 返回错误（原实现） | `Build()`（确定性聚合）与 `AnalyzeSessions`（启发式分组）是两类不同可靠度的代码，前者不应该被后者的 bug 拖累；成本核算这种日常要用的基础数字不该因为 session 分组的一个 edge case 就拿不到。**已知局限**：当前两者读取同一批文件、走同一套 `audit.OpenLogFile`/`ForEachLine` 原语，`AnalyzeSessions` 目前只会在文件 I/O 失败时报错——这与 `Build()` 的失败面完全重合，意味着这条 warning 分支目前实际上只在外部竞态（如 `vmr report` 运行期间另一个进程的 housekeeping 清理了正在读的文件）下才会独立触发；它首先是为 `AnalyzeSessions` 内部未来新增独立校验/错误路径挖好的口子 |
+| `router.tryOne` 的 4xx 错误体上限 64KB→128KB（`errBodyCap`），审计副本超限时追加截断标记，转发给客户端的字节不变（§9.2 约定 1） | 维持 64KB，或调大但不加标记 | 单纯调大数字没有实测证据支撑（没有观察到过真实截断案例），但双倍的内存/时间成本在 4xx 非热路径上可忽略,且给审计标记本来就该做——一个未来看审计文件的人不该把"body 只有这么长"和"body 被截断了"混淆。转发给客户端的字节必须保持原判断（不能加标记）：那是 byte-faithful 承诺覆盖的路径,标记只允许进审计专用的副本 |
 
 ---
 
@@ -607,7 +611,6 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 | 项 | 现状 | 不动的理由 |
 | --- | --- | --- |
-| `writeError` 在 `router` 与 `server` 两包各有一份相同实现 | 8 行 × 2，注释互相引用 | 消除重复需在 `core` 增加 HTTP 写出的导出函数，引入的耦合大于省下的 8 行；出现第三份时再统一 |
 | `countNested` 在 `config`（未导出）、`cmd/vmr`、`internal/diagnose` 各有一份 | 7 行泛型函数 × 3（`vmr diagnose` 新增后从两份变三份） | 导出它只为省 7 行，扩大 config 的 API 面；`cmd/vmr`（`package main`）本来就不能被其他包 import，第三份是 `internal/diagnose` 独立同构实现——不值 |
 | `cmdCheck`/`cmdStart` 与 `vmr diagnose` Phase 4 曾各自实现"按生效顺序打印路由表" | **排序部分已统一**为 `router.ModelRoute.EffectiveOrder()`（三处调用同一份 `append+strategy.Sort`）；**打印格式仍分别实现**（输出目标 stdout/logger 不同，且 diagnose 要额外标注 Phase 3 连通性结果） | 统一打印格式需要 writer+格式抽象，比各自 10 来行的格式化代码更复杂；排序逻辑本身（会随协议/策略演进）已经不重复了，剩下的纯格式化差异不值得再抽象 |
 | `respStream.Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |

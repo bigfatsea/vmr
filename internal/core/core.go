@@ -1,4 +1,4 @@
-// Ver 2026-07-08 08:30, by Fable 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 package core
 
 import (
@@ -22,6 +22,26 @@ func MarshalNoEscape(v any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// WriteJSON writes v as the JSON response body with the given status.
+// Shared by router and server so every JSON response (success or error)
+// goes through one encoding path.
+func WriteJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+// WriteError emits an error body that both OpenAI clients (error.message)
+// and Anthropic clients (type:"error" envelope) can parse. Shared by router
+// and server — before this both packages carried their own byte-identical
+// copy, which meant a format change had to be remembered in two places.
+func WriteError(w http.ResponseWriter, status int, errType, msg string) {
+	WriteJSON(w, status, map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": errType, "message": msg},
+	})
 }
 
 // CanonicalRequest is the routing view of a chat request. Both supported
