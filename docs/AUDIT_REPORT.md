@@ -2,8 +2,20 @@
 
 > **范围**：仓库 `vmr`（Virtual Model Router），Go 1.25.1 单二进制 LLM 路由代理。
 > **方法**：逐文件精读 + 分模块评审；按"目录→文件"顺序记录。最后做三梯队汇总。
-> **本文件性质**：纯分析报告，不涉及任何代码改动。
-> **审计时间**：2026-07-15（commit 状态见 .git）
+> **本文件性质**：分析报告 + 复核记录，不直接改代码；但会随复核更新条目状态（不再是纯冻结快照）。
+> **原始审计时间**：2026-07-15（commit 状态见 .git）
+
+> ## 复核记录：2026-07-16，by Sonnet 5
+>
+> 对每一条带严重度标记的发现重新核对了当前代码（含 4 个并行 Explore agent 分模块复核 + 本人直接核对了 config/audit/router.go/server/core/cmd 六个今天亲手改过的模块），标注了以下四种状态：
+> - **✅ 已修复**：3.1.3（`writeError`/`writeJSON` 重复实现）、3.1.4（`cmdReport` session 分析失败拖死全量报告）、3.1.5（4xx body 64KB 截断）——均在 2026-07-16 修复，见各自条目。
+> - **❌ 不成立**：3.1.2（`/v1/models` 无 auth）——核对代码后发现 `server.go:39` 其实是 `s.auth(s.models)` 包着的，原审计读错了路由表，从未是真问题。
+> - **⚠️ 仍然成立，判断有更新**：3.1.6（panic 路径不触发 `logStop`）——ROI 重新评估为偏低（详见条目：这个修法本身盖不住最可能出问题的路径，且已有替代信号）。
+> - **其余大多数 [L]/[I] 级条目**：逐条核对后确认仍准确，未改动内容。
+>
+> **本次复核也补齐了一个原审计的覆盖缺口**：`internal/imgprep`（~1204 行，全项目第二大包）在原审计里完全没有独立章节，只在第二梯队里散落提了 3 条。这次专门补了一份完整审阅（见新增的 §1.L），过程中发现了两个值得关注的问题（GIF 帧数解压炸弹缺口——**已于同日修复，见 §1.L.1/§4.16**、`Downscale` 的 panic 恢复完全静默无观测——仍未修复，见 §4.17）。
+>
+> 复核过程中新增的发现（bug + 改进建议）附加进对应的 §1 小节、§3 梯队表、§4 改进建议里，标注「**（2026-07-16 新发现）**」。原有条目的论证过程尽量保留，只在结论变化处编辑。
 
 ---
 
@@ -102,8 +114,9 @@ vmr/
   - `[L]` `Sort` 每次调用都跑 `compare`，O(n log n)；不过 endpoint 数量都很小，没意义。
   - `[I]` `Register` 在重复注册时 panic——合理（启动期一次性注册）。`strategy` 包目前没有 init 之外的注册。
 
-#### 1.A.3 `internal/core/core.go`（115 行）
+#### 1.A.3 `internal/core/core.go`（115 行，**2026-07-16 新增 ~20 行**）
 - **主要内容**：定义 `MarshalNoEscape`（`SetEscapeHTML(false)`+去尾换行）/ `CanonicalRequest`（只解 `model`+`stream`，Raw 保其他字节）/ `ErrorClass`（9 个枚举：4 个 health 关心的 + 4 个仅给审计分类的 + `ErrClient`）/ `Endpoint`+`HealthKey`/`Name`。
+- **（2026-07-16 新增）`WriteJSON`/`WriteError`**：修复 3.1.3——把 `router`/`server` 两包各一份的 error envelope 实现统一到这里，两包都改调用这两个导出函数。
 - **设计要点**：
   - `HealthKey = AdapterType/Provider/Model/<sha256(apiKey)前8位>`——把 AdapterType 塞进 key 是为了支持同 provider 名跨协议组（同一个 `openrouter` 在 `providers.openai` 和 `providers.anthropic` 是两个 endpoint）。注释清楚。
   - `Name`（暴露在 `X-VMR-Endpoint` 和审计里）**不含 API key**——测试明确锁定了这个不变量。
@@ -156,7 +169,8 @@ vmr/
   - `[L]` `classifySnippetBytes = 32 << 10`，32KB 内存拷贝 on 4xx；hot path 不走，正常。
   - `[L]` 错误路径：`strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))`——在 32KB body 上分配 ~32KB 字符串。GC 压力存在但低频（4xx 路径），可忽略。
   - `[I]` `DefaultClassify` 里 `case status >= 400 && status < 500` 分支先看 content，再看 model，再 fall through 到 `ErrClient`。顺序很重要（注释明确解释了——"content flags may mention 'model' too"）。OK。
-  - `[Q]` 注释提到的 "MiniMax returns 400 (not 404) for unknown model"——但 `case status == 402 || status == 404` 跳过了 400，让 400 走到下面的 generic 4xx 分支；那里有 "unknown"/"not found"/"supported" 关键词检测，所以 MiniMax 的 400+"invalid params, unknown model 'x' (2013)" 仍能匹配 `ErrEndpoint`。逻辑对的，但路径多绕了一步；如果未来 MiniMax 改 wording，会失效。**建议**：把 `400+unknown model` 直接短路到 `ErrEndpoint`，减少耦合。
+  - `[Q]` 注释提到的 "MiniMax returns 400 (not 404) for unknown model"——但 `case status == 402 || status == 404` 跳过了 400，让 400 走到下面的 generic 4xx 分支；那里有 "unknown"/"not found"/"supported" 关键词检测，所以 MiniMax 的 400+"invalid params, unknown model 'x' (2013)" 仍能匹配 `ErrEndpoint`。逻辑对的，但路径多绕了一步；如果未来 MiniMax 改 wording，会失效。**建议**：把 `400+unknown model` 直接短路到 `ErrEndpoint`，减少耦合。**2026-07-16 复核**：仍成立，`classify.go:51-61` 结构未变。
+  - `[M]` **（2026-07-16 新发现）402/404 跳过 `contentHint` 检查，与 403/429 不一致**：`classify.go:42` 把 402/404 无条件映射到 `ErrEndpoint`，唯独没有像 403/429 那样先看 `contentHint`。如果某个 provider 用 404 承载一个内容审核拒绝（"resource not found due to content policy"这类措辞并非没有先例），会被误判成 `ErrEndpoint`（触发 failover + 端点冷却），而不是 `ErrContent`（仅本请求切换，不罚端点健康）。**建议**：给 402/404 分支也加上同样的 `contentHint` 前置检查，保持四个 4xx 分支处理逻辑一致。**实施成本**：~5 行。
 
 #### 1.B.3 `internal/adapter/openai/openai.go`（57 行）
 - **主要内容**：`OpenAI{}` 实现 `Adapter`：`BuildRequest` 把 `req.Header`（server 层组装的协议头）拷贝过来，再强制设 `Content-Type: application/json` 和 `Authorization: Bearer <api_key>`——注释解释：客户端的 Authorization 是给 vmr 的，不是给上游的。
@@ -206,13 +220,13 @@ vmr/
   - `Exchange`/`Attempt`/`Message`：每条记录 both layers（client↔vmr、vmr↔upstream），headers 都过 `Redact`（credential masking）。
   - **`ImageInfo`** 包含 11 字段（含 CacheHit、Downscaled*）——无论是否启用 downscale 都填充 metadata，report 的 `图片/压缩` 列才有真实数据。
   - **`Redact`**：6 类 credential header 掩码（保留 scheme 前缀如 `Bearer ` + 后 4 字符）；**不修改原始 header**（测试验证）。
-  - **`KeyTag(key)`**：取 key 末尾 6 字符窗口，含 `-` 时只保留最后一个 `-` 之后的内容。注释给了 9 个例子。**配合 config 16 字符最小长度限制**确保不会泄漏整 key。
+  - **`KeyTag(key)`**：取 key 末尾 **8**（2026-07-16 前是 6，当天从 6 调到 8 并改回硬编码常量——中途试过做成 `config.yaml` 可配置项，评估后判定收益不够撑一个新配置字段的维护成本，改回纯代码常量）字符窗口，含 `-` 时只保留最后一个 `-` 之后的内容。注释给了 9 个例子。**配合 config 16 字符最小长度限制**确保不会泄漏整 key。
   - **`Logger`**：JSONL appender。**午夜轮转**：每天 `vmr-audit-YYYY-MM-DD.jsonl` 一个文件；旋转触发 `scheduleHousekeeping`。
   - **`scheduleHousekeeping`**：用 `housekeeping atomic.Bool` 防重叠 sweep，goroutine + WaitGroup 让测试可等。
   - **`Close`**：关 fd + 置 `closed=true`；**故意不等 housekeeping**（注释："compression is crash-safe, shutdown shouldn't block on it"）。Late write 返回 error，**永不开新文件**（防止跨午夜 reopen）。
 - **测试**（`audit_test.go`）：8 个用例，含 daily rotation、Redact、KeyTag（10 个 case）、EncodeBody、NIL logger no-op、WriteAfterClose。
 - **问题**：
-  - `[S]` **`housekeeping` 通过全局 `var retentionDays atomic.Int64`**——这是一个**进程级全局状态**！`config.Config` 改了之后要通过 `audit.SetRetentionDays` 显式推过来。如果哪天有人加 hot-reload listener 漏调一次，retention 不会跟随 config 变化。**当前实现**应该是 `cmd/vmr/main.go` 里的 watcher 在 reload 时调用了（待验证——我会看 main.go）。**风险 S**，但若调用链完整则无问题；交叉验证后归类。
+  - `[S]→[L]` **`housekeeping` 通过全局 `var retentionDays atomic.Int64`**——这是一个**进程级全局状态**！`config.Config` 改了之后要通过 `audit.SetRetentionDays` 显式推过来。如果哪天有人加 hot-reload listener 漏调一次，retention 不会跟随 config 变化。**已交叉验证**：`cmd/vmr/main.go` 的 reload 路径确实调用了 `audit.SetRetentionDays`，调用链完整——降级为 `[L]`，详见 §3.2.2（当时的判断是对的，這裡只是把状态在源头显式标出来，避免后来者只读 §1 看到 `[S]` 就误判成未解决的严重问题）。
   - `[M]` **`EncodeBody` 文档说"the slice is referenced, not cloned"**——这是性能优化。但调用方若后面修改了 slice（特别是 `Recorder` 那种 streaming buffer），就会污染已写入 JSONL 的内存表示。当前所有调用方都承诺"自己拥有 slice"——是个隐式约定，**靠注释和 review 维持**。**建议**：要么复制（多花 multi-MB 内存代价），要么更明确地用 doc 标 "do not mutate after this call"。
   - `[M]` **`RawPreStrip`** 字段类型 `any`——comments 说是"the buffered segment only (whatever the normalizer had accumulated at that moment)"。但类型 `any` 不利于消费者 schema 化（report 会去类型断言回 []byte）。**建议**：改成 `json.RawMessage` 或注释清楚"始终是 []byte"。低优。
   - `[L]` `Message.Headers http.Header` 直接序列化——`http.Header` 的 `MarshalJSON` 会输出 `map[string][]string`，是个标准格式。OK。
@@ -290,8 +304,8 @@ vmr/
   - **`IngressPath(protocol)` 导出供 server/replay 共用**——单点修改防止 drift。
 - **测试**（`router_test.go` + `response_test.go` + `router_proxy_test.go`）：~30 个用例覆盖 ImageDownscale 解析、proxy 分组（按 mode+URL 而非 provider 分组）、end-to-end 代理（用 `upstream.invalid` 黑洞证明 proxy 真实生效）、响应归一化各路径（model rewrite、think strip、cross-chunk think、done sentinel、opaque passthrough、Anthropic no-done、soft block）。
 - **问题**：
-  - `[M]` **`Response.Body` 在 4xx 路径用了 64KB `LimitReader`**——但 `RequestHeaderTimeout` 已经守了 headers，错误体超过 64KB 会被截断。注释说"64KB within that window is generous"，真实上 4xx 错误体多数 < 8KB（OpenAI/MiniMax 风格），但**Anthropic DeepSeek 的 4xx 错误体**含 trace、errors[] 数组等可能 10+KB。**建议**：提到 128KB 或改为 `8<<10` 的循环读取（错不了，且 4xx 不是 hot path）。
-  - `[M]` **`writeError` 在 JSON `Encode` 失败时无 fallback**（`router.go:633`）——目前用 `json.NewEncoder` + `Encode`，错误会 buffer；极少见但 panic risk 极低。
+  - `[M]→已修复` ~~`Response.Body` 在 4xx 路径用了 64KB `LimitReader`~~——**✅ 2026-07-16 已修复**：上限提到 `errBodyCap = 128<<10`，且超限时**只有审计副本**追加 `...(truncated at N bytes)` 标记——转发给客户端的字节保持原样截断、不追加任何东西（byte-faithful 承诺对客户端路径必须保持成立）。详见 §3.1.5。
+  - `[L]` **`writeError`/`WriteError` 在 JSON `Encode` 失败时无 fallback**——现在这个函数已经搬到 `core.WriteError`（见 §1.A.3），逻辑不变：`json.NewEncoder`+`Encode` 的错误被丢弃。极低概率（`map[string]any` 编码几乎不可能失败），**降级为 `[L]`**（原 `[M]` 偏高）。
   - `[L]` `parseRetryAfter` 的 HTTP-date 解析（`http.ParseTime`）支持三种格式（RFC1123/RFC850/ANSI C asctime），但当前常见的是 seconds 整数或 RFC1123。OK。
   - `[L]` `modelNames` 返回所有 virtual model name 按字典序——用于 404 时的"可用的"列表提示。**注意**：`Models[protocol]` 只在当前协议下找，所以 404 消息只会列出本协议的可用 model，不含另一个协议的。OpenClaw 用"client 走错入口"的诊断场景下这是友好的。
   - `[Q]` `otherProtocolFor` 当用户在 `/v1/chat/completions` 调用 anthropic 命名的模型时返回 "use POST /v1/messages"——注释提到 "wrong entry point" 诊断。**好设计**。
@@ -307,7 +321,7 @@ vmr/
   - **`stripThinkingProcess` 严格触发保护**：只对首个 content value 以 "Thinking Process:" 起头的情况触发，避免吃掉正常代码审查里的 "Looks good. Proceed with the merge" 之类。`TestStripThinkingProcess_LooksGoodInNormalStream` 锁这个。
   - **`softBlockMarkers` 只观测不改字节**：2xx 响应里嵌入的 `input_sensitive`/`output_sensitive` 只在 audit `applied` 里留痕，不改响应。failover 看不见（status 2xx）——这是已知盲区（design doc §5）。
 - **测试**（`response_test.go`）：~25 个用例，覆盖以上所有路径 + cross-chunk think + 1-byte reads + 多种 SSE 异常形状 + non-streaming JSON 路径。
-- **问题**：
+- **问题**（**2026-07-16 复核**：本文件今天没被改动，Explore agent 逐条核对下方全部仍成立，无过时内容）：
   - `[M]` **`stripThinkingProcess` 强绑 MiniMax 行为**——`Thinking Process:` 关键字 + `Looks good. Pro` 标记都硬编码。如果 MiniMax 改 wording，需要重写。**可接受的工程权衡**（上游改就要改），但**风险等级 M**：单点失效触发。
   - `[M]` **`thinkPattern` 的 `(?:\\n|\n)*` 后缀**——`\\n` 匹配 `\n` 两字符（JSON-escaped newline），`\n` 匹配真实换行。MiniMax M3 的 think 块结束后是 `\n\n`（两个换行）作为分隔；这里两个都被吃。OK。
   - `[L]` `containsSoftBlockMarker` 的"敏感词表"只有 2 个 literal——**通用性差**，未来 MiniMax 加新字段（如 `risk_level`）就不会被捕捉。
@@ -315,6 +329,7 @@ vmr/
   - `[I]` 代码用了大量 `bytes.Index`、`bytes.IndexByte` 优化路径；很多 inline `[]byte` 字面量以避免 alloc。这是性能敏感代码（hot path 多次 failover），无可厚非。
   - `[Q]` `read` 中途返回 `(0, nil)` 0-字节读——文档注释解释了"callers idle watchdog tick"。正确。
   - `[L]` `modelFieldPattern = `("model":\s*")[^"]*"` ——只匹配 `key":"value"` 形式（value 没有 escaped quote）。**`\"model\":\"x\"` 在 value 里不会被误改**，因为 `\"` 不会被 `[^"]*` 匹配中断——但要测试覆盖（已通过 `TestRewriteModel_EscapedTextInContentUntouched` 锁）。
+  - `[L]` **（2026-07-16 新发现）`modeBuffered`/`modeUndecided` 的溢出降级路径重复代码**——两处都是"设 opaque + noteApplied + flush"同一套三步操作，只是字段名不同（`s.buf`/`s.pending`）。未来改溢出降级的注释/applied 标签措辞，有只改一处漏另一处的风险。低优先级，DRY 化收益不高但值得留意。
 
 ---
 
@@ -323,18 +338,18 @@ vmr/
 #### 1.F.1 `internal/server/server.go`（362 行）
 - **主要内容**：HTTP 入口、auth、header blocklist、image downscaling 嵌入点、audit 录制。
 - **关键不变量**：
-  - **authenticate** 用 `subtle.ConstantTimeCompare` 防 timing attack，匹配 `api_key`（untagged catch-all）或任一 `api_keys` 条目（返回 `KeyTag` 标签）。**无任何 key 配置时**门全开但仍对客户端自愿发送的值计算 `KeyTag`——`docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 解释了这个"内网自报身份"语义。
+  - **authenticate** 用 `subtle.ConstantTimeCompare` 防 timing attack，匹配 `api_key`（untagged catch-all）或任一 `api_keys` 条目（返回 `KeyTag` 标签）。**无任何 key 配置时**门全开但仍对客户端自愿发送的值计算 `KeyTag`——这个"内网自报身份"语义原来在 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 里有专门说明，**该文档已被删除**（非本次审计所为，独立发生），设计意图目前只留存在 `server.go` 本身的代码注释里，没有单独文档可查。
   - **headerBlocklist** 12 项（auth、host、content-length、accept-encoding、hop-by-hop 等）；`FilterClientHeaders` 导出供 replay 复用。
   - **chatHandler 流程**：audit record 创建（含 defer 写盘） → auth → body read (`MaxBytesReader`) → 解析 `model`/`stream` → **acquire concurrency slot**（在 body 解析后） → image downscale → 构造 CanonicalRequest → router.Serve。
 - **测试**（11 个测试文件，~2700 行）：涵盖 auth、failover、content、probe、hang、headers、imgprep、openclaw scenario、audit、v22（双协议）等。
 - **问题**：
-  - `[M]` **`chatHandler` 中 `audit rec` 在 auth 之前就创建并 defer 写盘**——意味着**未鉴权成功的请求也会落审计**（含打码后的 Authorization）。这是**有意为之**（`docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 提到这点），但如果用户想"完全关审计 for unauth"，需要新建 `audit-on: false for 401`。当前设计 OK。
+  - `[M]` **`chatHandler` 中 `audit rec` 在 auth 之前就创建并 defer 写盘**——意味着**未鉴权成功的请求也会落审计**（含打码后的 Authorization）。这是**有意为之**（原本 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 有专门说明，该文档已删除，见上）,但如果用户想"完全关审计 for unauth"，需要新建 `audit-on: false for 401`。当前设计 OK。
   - `[M]` **`newRecorder(w, rec.TS)` 在 audit != nil 时才包，否则裸 w**——意味着 audit off 时 `rec.TTFTMS` 不存在（这是定义，OK）。但 `rec.TTFTMS` 在 audit 关闭的请求里也不被记录，**没有别的 metric 能代替**——如果以后想统计 TTFT（即便没审计），需要单独的 metric 钩子。**低优**。
   - `[L]` `chatHandler` 顺序：probe `model`/`stream` 字段（在 AcquireSlot **之前**）——保证 malformed JSON 请求不被并发闸占。`router_proxy_test.go` 也用同样顺序。OK。
   - `[L]` **chatHandler 在 audit != nil 时才**做 image detection（"Skip entirely when there is no consumer"）——性能优化，但 audit 关 + downscale 关的请求是真正"零开销"路径。
   - `[Q]` `adminStatus` 的 loopback 检查用 `net.SplitHostPort` + `net.ParseIP(host).IsLoopback()`——对 IPv6 zone 标识（`::1%eth0`）支持？测试都是 IPv4。**低优**。
-  - `[L]` `models` 端点不要求 auth（无 `s.auth(s.models)`）——`adminStatus` 要 auth 但 README 说"loopback-only; no api_key required even if one is set"——**两处都只对 loopback 开放**（前者无限制——这是个不一致：理论上 models endpoint 也应该 loopback-only？**还是说是有意可远程读**？）——**疑似不一致**：`/v1/models` 远程可读 + 无 auth，`/admin/status` loopback only + 无 auth；前者有泄露内部模型拓扑的微小风险。**建议**：models 端点也应 loopback-only，或者 admin 不需要 loopback。**风险等级 M**。
-  - `[M]` **`writeError` 在 server 用了 401 等错误体**（注释）——router 的 writeError 是另一个（同样的实现），但**不共享代码**（`router.go:633` 和 `server.go:325`）。两处重复实现，应该抽到公共文件。**中等问题**。
+  - `[L]` ~~`models` 端点不要求 auth（无 `s.auth(s.models)`）~~——**❌ 不成立**。原文断言 `/v1/models` 没有 `s.auth()` 包装，但 `server.go:39` 实际上是 `mux.HandleFunc("GET /v1/models", s.auth(s.models))`——models 端点和 chatHandler 走的是同一套鉴权语义（未配置 key 时门开，是全局设计，不是 models 独有的漏洞）。这是原审计误读路由表产生的假发现，详见 §3.1.2。
+  - `[M]→已修复` ~~`writeError` 在 server 用了 401 等错误体（注释）——router 的 writeError 是另一个（同样的实现），但不共享代码~~——**✅ 2026-07-16 已修复**：两处实现已合并到 `core.WriteError`/`core.WriteJSON`，`server.go`/`router.go` 都改调用它。详见 §3.1.3、§1.A.3。
   - `[L]` `chatHandler` 中在 `s.audit != nil` 分支内才做 `rec.Model, rec.Stream = probe.Model, probe.Stream`——意味着 audit off 时这些字段不被记录。**定义** OK。
 
 #### 1.F.2 `internal/server/recorder.go`（57 行）
@@ -358,13 +373,13 @@ vmr/
   - **`logConfigSummary` 把 model 列表按"effective try order"打印**——`EffectiveOrder()` 在 router.BuildSnapshot 时就排序了，startup log 和 check/diagnose 三处共用同一份排序逻辑（router.go:46 注释锁了这个不变量）。
 - **测试**（`main_test.go` + `main_diagnose_replay_test.go`）：覆盖 7 个子命令的 CLI flag 解析与错误处理，不深入执行。
 - **问题**：
-  - `[M]` **`logStop` 不会在 panic 路径调用**——`panic` 直接退出时 `defer` 不会触发（除非显式 `defer logStop`）。**建议**：在 main 函数入口加 `defer func() { if r := recover(); r != nil { logStop(...); panic(r) } }()`，但 `start` 是个内部函数、`defer` 在调用层——**实际** `start` 内 `serveErr` channel 退出时 `logStop` 被调用，**panic 路径仍漏**。**中等问题**，但低发生率。
+  - `[M]` **`logStop` 不会在 panic 路径调用**——`panic` 直接退出时 `defer` 不会触发（除非显式 `defer logStop`）。**2026-07-16 复核：仍然成立，但 ROI 判断下修**——原建议"加 `defer recover(){ logStop(...); panic(r) }`"本身**修不全这个问题**：`SIGHUP`/fsnotify 触发的 `reload()` 跑在独立 goroutine 里（`main.go` 的 `go func(){ for range hup { reload(...) } }()`），`cmdStart` 顶层的 `recover()` 盖不到那个 goroutine——而 reload 路径（解析用户新写的 config）恰恰是最可能出 edge case 的地方。另外 Go 未捕获 panic 本来就会把完整 stack trace 打到 stderr，systemd/launchd 服务模式下这本身已经落进 service log——"有 START 没有 STOP，后面跟一个 panic trace"已经足够诊断"这是崩溃不是正常退出"，缺的只是一行好 grep 的 marker，不是缺信息。综合：**低 ROI，不建议现在做**——修一半、给假安全感，且原始信息缺口本来就不大。详见 §3.1.6。
   - `[M]` **`status` 命令自己启一个 http.Client 拿 `/admin/status`**（`main.go:533`）——如果 `vmr` 没启动，会返回"`is vmr running on %s?`"错误。**OK**。
   - `[L]` `start` 启动 banner (`vmrBanner`) 是固定 ASCII 艺术，**不会随版本变化**。**OK**（注释明确"distinct from the ordinary timestamped lines around it"）。
   - `[L]` `logStart` 把 `path` 写入 banner 后一行——若 path 含特殊字符（`\n` 之类），日志解析可能歧义。**现实几乎不可能**。
   - `[L]` `serveErr` 的 select 没有 `default`——`srv.ListenAndServe()` 启动失败时 channel 必返回 → 走 error 路径。**OK**。
   - `[I]` `cmdStatus` / `cmdCheck` 不并发跑（不像 `cmdReport` 后接 session 分析）。OK。
-  - `[M]` **`cmdReport` 在 `sess, err := report.AnalyzeSessions(paths)` 失败时整个 `report` 失败**——意味着如果 session 分析有 bug，**全量 report 都不可用**。**建议**：把 session 分析错误降级为 warn（仍输出主 report，不带 sessions/tools/workloads）。**风险 M**：核心功能被次级功能拖死。
+  - `[M]→已修复` ~~`cmdReport` 在 `sess, err := report.AnalyzeSessions(paths)` 失败时整个 `report` 失败~~——**✅ 2026-07-16 已修复**：`AnalyzeSessions` 出错时打印 stderr 警告并跳过 `tools/sessions/workloads`、`vmr-requests.jsonl`、`details/`，但 `vmr-report.json`/`.md`（核心聚合统计）仍正常写出、命令返回成功。**已知局限**（诚实记录）：`AnalyzeSessions` 目前只会在文件 I/O 失败时报错，这与 `report.Build()` 的失败面完全重合——意味着这条 warning 分支目前只在外部竞态（如运行期间另一进程的 housekeeping 清理了正在读的文件）下才会独立触发，黑盒测试无法构造出"Build 成功、AnalyzeSessions 独立失败"的确定性场景。价值主要是防御性的：给 `AnalyzeSessions` 内部未来新增独立错误路径先留好口子。详见 §3.1.4。
   - `[L]` `cmdReport` 串行写所有输出文件（json/md/req）+ 详情：单大日志（gigabytes）下 O(minutes)。**可接受**——单次跑批。
 
 #### 1.G.2 `cmd/vmr/main_test.go` + `main_diagnose_replay_test.go`（160+188 行）
@@ -388,6 +403,7 @@ vmr/
   - `[L]` `testEndpoint` 用 `minimalBody`（`{"model":..., "max_tokens":1, "messages":[{"role":"user","content":"hi"}]}`）——所有 OpenAI/Anthropic 兼容 provider 都接受，**但有 provider 计费"最少 5 tokens"之类**——这些"最小请求"的 token 算入 cost。**低优**。
   - `[L]` `envCheck` 的 DNS 解析不走 system resolver 的 DoT/DoH——若用户刻意只走 DoH，`net.Resolver{}` 会用普通 DNS，诊断结果不可信。**理论性**。
   - `[L]` `TestTimeout` 默认 10s，但对慢启动的 provider（冷启动 5-10s）不够——`Options.TestTimeout` 可调。**OK**。
+  - `[L]` **（2026-07-16 新发现）Phase 2（DNS/TLS/proxy 拨号）超时硬编码 5s，不跟 `-test-timeout` 联动**——不像 Phase 3（`testEndpoint`）会用 `Options.TestTimeout`。慢/高延迟网络下，用户调大 `-test-timeout` 对 Phase 2 没有任何缓解，可能把"只是慢"的 provider 误报成 `dns:FAIL`/`tls:FAIL`。**建议**：Phase 2 超时也读 `Options.TestTimeout`（或至少取两者较大值）。
 
 #### 1.H.2 `internal/replay/replay.go`（450 行）
 - **主要内容**：3 种 record 定位方式（`-detail`/`-ts`/`-line`）+ 互斥校验 + 复用 `adapter.BuildRequest` 重建 + dry-run / 真实 replay / `-record` 写新 audit 记录。
@@ -401,6 +417,7 @@ vmr/
   - `[L]` `ResolveModel` 走 `models.<protocol>.<virtualModel>.endpoints` 找 provider——audit 里的 `record.Model` 是**虚拟名**（`rv.Model`）；当 audit 用 `"(rejected)"` 表示拒绝请求时，`ResolveModel` 失败 → 用户必须 `-model` 显式。`TestRun_ModelResolutionError` 锁这个。
   - `[L]` `-record path` 是独立 JSONL 路径（不入主流水线）——这个行为 OK 但**与 vmr 主审计兼容**：可以被 `vmr report <file>` 二次聚合（`audit.OpenLogFile` 都支持）。
   - `[L]` `-max-time` 用了 ctx.WithTimeout，但 `httpReq.WithContext` 后才赋值给 client.Do——流程正确。
+  - `[L]` **（2026-07-16 新发现）`resolveModel` 用的是 `-protocol` 覆盖值而不是记录本身的协议**——如果用户只传 `-protocol` 覆盖、没同时传 `-model`，会在**覆盖后**的协议下查找一个原本只存在于**原协议**的虚拟模型名，报错"virtual model not found"，但真实原因（协议被覆盖了）不会体现在错误信息里，容易让人摸不着头脑。**建议**：错误信息里提示"if you passed -protocol, also pass -model explicitly"。
 
 ---
 
@@ -419,7 +436,7 @@ vmr/
 - **测试**（`report_test.go`）：~13 个用例 + Format 版本行为测试。
 - **问题**：
   - `[M]` **`% 5.5` 等输出格式化**用了 `fmt.Sprintf("%.1f%%", ...)`——`pct()` 函数 `O requests = 0` 时返回 `"-"`——**OK**。
-  - `[L]` `BodyBytes` 用 `json.Marshal` 重新序列化 JSON 算字节——**multi-MB 重复 marshal 成本**。**只在 4xx/SSE 等需要时**用，可接受。
+  - `[L]` `bodyBytes` 用 `json.Marshal` 重新序列化 JSON 算字节——**multi-MB 重复 marshal 成本**。**2026-07-16 复核：范围比原描述更广，非"仅 4xx/SSE"**——实际在聚合阶段每条 record 会被调用 3 次（row/hour/endpoint 桶各一次，`report.go`），`session.go` 分析阶段再一次，`detail.go` 给每条记录生成详情文件时又是好几次——是所有记录都会经过的路径，不是只有错误/流式记录才碰。仍然只影响批处理型 CLI 工具的运行时长，不影响正确性，维持 `[L]`，但**成本量级判断需要上修**——大日志下 `vmr report` 慢，这条是原因之一。
   - `[L]` `percentiles` 的 nearest-rank：`rank(0.50) = int(0.5*n+0.5)-1 = (n-1)/2`（n≥2）。对 n=1 边界：`int(0.5*1+0.5)-1 = 0`，正确。**OK**。
   - `[M]` **`attemptErrorClass` 的 fallback 解析**：`strings.IndexByte(a.Error, ':')` 取前缀——**但如果错误体是 `network: read tcp ...: i/o timeout`**（包含 3 个冒号），会取到 `network`——对的。**但**如果 `Error` 是 `"error"`（一个没有冒号的 fallback），则 `i < 0` → return `a.Error` = `"error"`。**OK**。
 
@@ -437,8 +454,9 @@ vmr/
 - **主要内容**：`vmr-requests.jsonl` 写入 + 按 client key tag 写 sibling 文件 + `ToolShapes`/`Workloads`/`SessionRows` 聚合。
 - **测试**（`session_test.go` 中 `TestWriteRequestsExport*`）。
 - **问题**：
-  - `[L]` `requestRow` 28+ 字段——单 record JSON 约 500-1000 bytes；10K records × 1KB = 10MB。**OK**。
+  - `[L]` `requestRow` 28+ 字段——单 record JSON 约 500-1000 bytes；10K records × 1KB = 10MB。**OK**。**2026-07-16 复核**：字段数确认 34 个，比"28+"更多，量级判断不变。
   - `[I]` `workloadClass` 优先级：compaction > heartbeat > dream_diary > interactive。
+  - `[L]` **（2026-07-16 新发现）`writeRequestRows` 的 `defer f.Close()` 错误被丢弃**——`w.Flush()` 成功返回后就认为导出成功，但缓冲写入器的 `Close()`（可能触发 fsync）失败时错误直接被 defer 吞掉，会在磁盘写满等罕见场景下"报告导出成功但文件其实不完整"。`vmr report` 是批处理 CLI，不是热路径，加一层错误检查成本很低。
 
 #### 1.I.4 `internal/report/markdown.go`（592 行）
 - **主要内容**：5 个表（overall/by-model/endpoints/daily/hourly）+ workloads + sessions + tools，全部以"每个 bucket 自己的 p50/p95"渲染。
@@ -469,11 +487,13 @@ vmr/
 - **测试**（`session_test.go`）：~13 个用例覆盖分组 / 工具聚合 / write requests / by-tag / ungrouped / collapsed session / 各种 metadata 路径。
 - **问题**：
   - `[M]` **`lcp` 算法基于 md5 hash 序列**——`md5` 不是 crypto-secure，但用作 session fingerprint 不需要 collision resistance（碰撞只会让两条不同 record 错误归并到同一 task，**最坏影响是分组错误**）。**可接受**。
-  - `[M]` **`parentWindow = 16`**：实测 24-轮 openclaw 测试过了，但**长程 session 的 16 之后 delta**如果触发了早期消息的不在 LCP 范围，会被错误开新 task。`docs/AgentSessionGrouping_Analysis_Fable5.md` 应该解释这个 magic 16。**低优**（实测有效）。
-  - `[M]` **`linkCompactions` 用 substring match**——`needle(s, 200)` cap 到 200 字符。如果一个会话的开头指令恰好只有 5 字符、跟 compaction output 内的 substring 重叠，会误链。**极低概率**。
+  - `[M]` **`parentWindow = 16`**：实测 24-轮 openclaw 测试过了，但**长程 session 的 16 之后 delta**如果触发了早期消息的不在 LCP 范围，会被错误开新 task。**2026-07-16 复核**：常量值 16 确认未变；但仓库里已经找不到能验证"24-轮 openclaw 测试过"这个具体说法的代码/文档（`docs/AgentSessionGrouping_Analysis_Fable5.md` 早在 2026-07-12 就被删除，内容应该已经并入设计文档，但设计文档里没有专门解释这个 magic 16 的实测依据）。结论不变，但**这句"实测有效"目前查无实据，只能当作未经验证的说法**。**低优**（实测有效，存疑）。
+  - `[M]` **`linkCompactions` 用 substring match**——`needle(s, 200)` cap 到 200 字符。如果一个会话的开头指令恰好只有 5 字符、跟 compaction output 内的 substring 重叠，会误链。**极低概率**。**2026-07-16 补充**：这个 200 字节上限还有一个方向相反的问题——**（新发现）** `needle`/`capStr(firstText, 200)` 在检测 compaction marker（如"compacted into the following summary"）时，如果这句话在原文里出现的位置超过 200 字节，会被直接漏检，**且没有任何 fallback 或日志**，运行时完全看不出这次该链的 compaction 没被链上。原有笔记是"误链"（假阳性），这个是"漏链"（假阴性）——同一个 200 字节上限的两面。**建议**：至少加一条 debug 日志/metric，让"没链上"和"没触发"能区分开。
   - `[L]` `deltaHasNewInstruction` 的 "parent 中已存在则不计" 检查——**靠 `parentKeys` map 实现**——这个 map 只在 `Parent != nil` 时构建。**OK**。
   - `[L]` `toolsSig` 用 `md5(sorted_tools)` 头 4 字节——碰撞概率高但**只影响 group**（"工具声明完全不同的两条 record 误归并"）——`md5[:4]` = 32 bits，1M 工具集才有 50% 碰撞概率。**OK**。
-  - `[L]` `realUserText` 的 `leadingBracketRe` 只处理 `[Day Mon DD HH:MM TZ]` 格式——OpenClaw 时间戳变体多（如 `[2026-07-08 12:34:56 +0800]`）——不通用。**可接受**。
+  - `[L]→不成立` ~~`realUserText` 的 `leadingBracketRe` 只处理 `[Day Mon DD HH:MM TZ]` 格式，OpenClaw 时间戳变体多，不通用~~——**❌ 不成立**：`leadingBracketRe` 的实际正则是 `^\[[^\]]*\]\s*`，匹配"任意一段方括号包住的前缀"，跟内部具体格式无关——`[2026-07-08 12:34:56 +0800]` 这种变体本来就能匹配。原描述只是举了一个例子就断言"不通用"，读错了正则的实际宽松程度。
+  - `[M]` **（2026-07-16 新发现）`ClientKeyTag` 经 `sanitizeName` 处理后可能碰撞，静默互相覆盖导出文件**——`export.go`/`detail.go` 按 sibling 文件名（`vmr-requests-<tag>.jsonl` 等）区分不同调用方，但两个不同的原始 tag（比如 `"bob/eve"` 和 `"bob-eve"`）经过文件名清洗后可能变成同一个字符串，导致两个调用方的导出文件互相覆盖，且**没有任何碰撞检测**——不像 `detailFileName` 那样有 `used` 计数器处理同名冲突。**建议**：给按 tag 分组的导出路径也加一层碰撞检测（哪怕只是发现碰撞时警告一下）。
+  - `[M]` **（2026-07-16 新发现）`capStr` 按字节截断，非 UTF-8 rune-safe**——`session.go` 里多处用 `capStr(text, N)` 截断字符串（如 402 行、316 行），是纯字节切片 `s[:n]`，不像 `render.go` 里的 `preview()` 那样做 rune-safe 截断。项目对中文内容是一等公民（`contentHint` 双语、README 双语），中文/emoji 文本在 N 字节边界被截断时可能切断一个 UTF-8 字符，产出非法 UTF-8 存进 session 预览/指令摘要字段。**建议**：`capStr` 改用 rune 边界截断（`render.go` 已经有现成实现可以复用）。
 
 #### 1.I.7 `internal/report/detail.go`（1249 行）
 - **主要内容**：单 request 详情 Markdown + 同名 JSON + index + 按 client key tag 写 sibling index。
@@ -485,7 +505,7 @@ vmr/
   - **`chatUserLabel` 剥 `user:` prefix**（OpenClaw chat_id 形式）。
 - **测试**（`detail_test.go`）：~14 个用例。
 - **问题**：
-  - `[L]` `sanitizeName` 替换非 `A-Za-z0-9._-` 字符为 `-`——但**不**去重连续的 `-`——`OpenClaw-r2-dream_diary` 之类可能产生连续 `--`——**理论问题**。
+  - `[L]` `sanitizeName` 替换非 `A-Za-z0-9._-` 字符为 `-`——但**不**去重连续的 `-`——`OpenClaw-r2-dream_diary` 之类可能产生连续 `--`——**理论问题**。**2026-07-16 复核：范围比原描述窄**——正则本身是 `[^A-Za-z0-9._-]+`，`+` 量词已经把**连续的非法字符**合并成一个 `-`；真正会产生连续 `--` 的只剩"一个非法字符恰好挨着一个已经存在的字面 `-`"这种情况（例如 `"a/-b"` → `"a--b"`），比原描述窄得多。仍然是理论问题，`[L]` 不变。
   - `[M]` `renderBodyDiff` 用 `reflect.DeepEqual` 做对比——**只对相同类型字段有效**。如果 field 从 `string` 变 `null` 或 `string` 变 `[]any`，reflect 会处理。**OK**。
   - `[L]` `fileLinksCell` 用 `<a href=details/...>`——纯 HTML（GitHub 渲染时 OK，部分 Markdown 渲染器对 `<a>` 不友好——但本项目是给 GitHub / VS Code 用的，OK）。
   - `[I]` 1249 行超大文件——但内部函数组织清晰，每个函数单一职责。可接受。
@@ -494,27 +514,26 @@ vmr/
 
 ### 1.J 设计文档（docs/）
 
-#### 1.J.1 `docs/VirtualModelRouter_v2_Fable5.md`（648 行）
+#### 1.J.1 `docs/VirtualModelRouter_System_Design_v2.md`（651 行，**2026-07-16 由 `VirtualModelRouter_v2_Fable5.md` 更名而来，内容延续**）
 - **主要内容**：完整设计文档——定位、协议、架构、Adapter、错误分类、响应归一化、并发、审计、目录、健康、镜像降采样、配置、运维、诊断、replay、compaction 设计。
-- **状态**：与代码同步（含 `## §N` 节号锚定）。
+- **状态**：与代码同步（含 `## §N` 节号锚定）。**2026-07-16 复核**：今天新增了 §11 的三条决策记录（writeError 统一、cmdReport 降级、errBodyCap 调整）+ §13 移除了一条已经不再"暂不落地"的清理项——文档跟着代码改动同步更新了，符合它自己一贯的维护方式。
 - **问题**：
   - `[I]` 一份优秀的"设计即文档"工程范例。**OK**。
 
-#### 1.J.2 `docs/ClientAPIKeyGrouping_Design_Sonnet5.md`（449 行）
-- **主要内容**：api_keys 多调用方分组的方案设计与 4 版迭代记录。
-- **问题**：
-  - `[I]` 自我记录迭代过程。**OK**。
+#### 1.J.2 ~~`docs/ClientAPIKeyGrouping_Design_Sonnet5.md`（449 行）~~ — **文件已删除（2026-07-16）**
+- **原主要内容**：api_keys 多调用方分组的方案设计与 4 版迭代记录。
+- **状态**：该文件已被删除（非本次审计所为，独立发生于同一天）。仓库里至少还有 4 处引用它的地方（`server.go` 的代码注释、本审计报告自己的 §1.F.1/§3.2.9）会变成死链接，已在对应位置标注。设计意图目前只留存在源代码注释里，没有独立文档可查——**建议**：要么恢复这份文档，要么把关键设计要点（KeyTag 派生规则、"内网自报身份"语义）内联进 `docs/VirtualModelRouter_System_Design_v2.md` 的相关小节，避免知识只留在代码注释这一处。
 
 #### 1.J.3 `docs/SensitiveWordFilter_Analysis_Fable5.md`（216 行）
 - **主要内容**：sensitive-word 库分析与 VMR 接入评估——**明确"不含实现"**。
 - **问题**：
   - `[I]` 研究性文档，不期望有实现代码。**OK**。
-  - `[Q]` §3.5 提到"对 agent 上下文的数据损坏风险"是核心权衡——但**没有"go/no-go"决策**。读者不知道是不是要继续做。**注意**——若作为 backlog item 需 owner。
+  - `[Q]→轻微更新` §3.5 提到"对 agent 上下文的数据损坏风险"是核心权衡——原描述称"没有 go/no-go 决策"。**2026-07-16 复核**：文档末尾其实有一段"结论一页纸"，给出了具体的阶段性建议（"现在就该做替换吗：否"/"立即该做什么：第一阶段纯观测"），实质上已经是一个决策，只是没有正式的"owner 签字确认"格式（谁、哪天拍的板）。原发现略有夸大，**降级为轻微**：内容判断已经给了，缺的只是正式签字仪式感，不影响可执行性。
 
-#### 1.J.4 `docs/vmr_future_strategy_deepseek-v4-flash.md`（631 行）
+#### 1.J.4 `docs/vmr_future_strategy_deepseek-v4-flash.md`（721 行，**2026-07-16 大幅复核修订**）
 - **主要内容**：竞品全景（LiteLLM、CLIProxyAPI、New API、One API、Bifrost、Portkey、AISIX 等）+ 战略决策矩阵 + 演进路径建议。
 - **问题**：
-  - `[I]` 由 deepseek-v4-flash 写就——**生成式模型生成的战略报告**——**内容详尽但未必经人手验证**。核心结论（"不要 SaaS、专注 byte-faithful + agent audit"）合理，但具体战术（如"学习 Bifrost 的 semantic cache"）需要 owner 拍板。
+  - `[I]→部分解决` 由 deepseek-v4-flash 写就——**生成式模型生成的战略报告**——**内容详尽但未必经人手验证**。**2026-07-16 复核**：今天做了一轮系统性的人工复核（保留原文，逐节插入"2026-07-16 复核"批注），核对了 §6.2 行动项的实际执行状态、更正了一处不准确的表述（cost aggregation 被误称"已验证"，实际从未实现），并用 `AUDIT_REPORT.md` §4 的真实代码级发现替代/细化了原来的特性候选清单。这个"部分解决"了原发现——核心战略结论仍是 AI 生成、未做外部竞品重新核实，但至少"我们自己做没做到"这部分现在是人工核对过的了。
 
 ---
 
@@ -541,6 +560,28 @@ vmr/
 - **主要内容**：标准。`go.mod` 4 个直接依赖 + 1 个 indirect；`go.sum` 7 行（含 transitive）。极简。**OK**。
 
 ---
+
+### 1.L 内联图片处理（imgprep）——**原审计遗漏，2026-07-16 补齐**
+
+> 原审计从未给 `internal/imgprep`（~1204 行，**全项目第二大包**，仅次于 `internal/report`）写过独立章节，只在第二梯队里散落提过 3 条（BiLinear 缩放画质、`jpegQuality=85` 硬编码、`sweepState` 用 `sync.Map`）。本节是一次真正的从零通读。
+
+#### 1.L.1 `internal/imgprep/imgprep.go`
+- **主要内容**：`Downscale(body, protocol, opts)` 是包入口——先用 `HasImageMarker` 做便宜的子串预检，再做一次 JSON 树遍历（`rewriteBody` → `rewriteMessage` → `rewriteBlock`），只对命中的节点用 `map[string]json.RawMessage` 重新序列化，未知字段逐字节保留。协议特化提取：`rewriteOpenAIImage`（`image_url` data URI）、`rewriteAnthropicImage`（`source.type=="base64"`）。核心工作在 `processImage`：先做只读文件头的 `image.DecodeConfig`（检测阶段，无条件跑），只有真需要缩放时才整图解码 + BiLinear 缩放 + JPEG 重编码，用 `maxDecodePixels` 挡声明尺寸炸弹。整体 fail-open：JSON 形态不对/解码出错都退回原始 `raw`，`Downscale` 顶层还有一个兜底 `recover()`。
+- **问题**：
+  - `[M]→已修复` ~~GIF 帧数解压炸弹缺口——`maxDecodePixels` 只检查画布尺寸，`gif.DecodeAll` 在检查这个上限之前就已经把每一帧全部解码进内存~~——**✅ 2026-07-16 已修复**：核实后确认这不是"加个上限就够"的问题——`image/gif.DecodeAll` 是标准库唯一能读到帧数的方式，且对帧数/累计解码内存完全没有上限，要区分"单帧安全可缩"和"多帧危险"本身就得先付出这个无界解码代价。最终采用的方案比原建议更彻底：**干脆不再对 GIF 做任何缩放，不分单帧/多帧**——`format=="gif"` 直接短路返回（`Format`/`Width`/`Height` 照常记入 `ImageInfo`，只是不再解码像素、不再缩放），`image/gif.DecodeAll`/`gif.Decode` 在整条路径上都不再被调用，风险连根拔掉，代码是净删除而不是新增。新增 `TestSingleFrameGIFUntouched` 锁定单帧 GIF 现在也不被处理；`TestAnimatedGIFUntouched` 保留并加了 `ImageInfo` 断言。设计文档 §7"安全边界"已同步更新。
+  - `[M]` **（新发现）`Downscale` 的 panic 恢复完全静默、零观测**——函数签名 `(result []byte, images []ImageInfo)` 没有 error 通道，`defer recover()` 出问题时既不打日志也不进 metric/audit。一旦触发（stdlib image 包的 bug、对抗性输入），这张图的降采样能力会"永久失效"且**运维完全看不到任何信号**——不像项目里其他 fail-open 路径（如 `overflow_raw_passthrough`）好歹在 audit `Norm` 里留了痕。**建议**：`recover()` 时至少往 `ImageInfo` 或某个可观测字段记一条 `decode_panic_recovered` 之类的标记。
+  - `[Q]` `processImage` 的具名返回值 `err` 在所有 `return` 语句里都是字面量 `nil`（包括 `image.Decode`/`jpeg.Encode` 失败路径，那些用的是 `:=` 局部变量遮蔽了具名返回）——调用方对 `err` 的判断永远是 false。**目前无害**（所有失败路径本来就已经把 `changed=false` 设对了），但这是一段死代码，哪天有人真指望这个 `err` 会踩坑。低优先级清理项。
+  - `[I]` `parseDataURI` 对畸形/非标准 data URI（缺 `;base64,`、截断等）在 `ImageInfo`/审计元数据里标成 `Remote: true`——不准确（不是远程抓取，只是本地 URI 解析不了），纯粹是审计可读性的小瑕疵，行为本身（原样不动）是对的。
+  - **审阅确认没问题的部分**：畸形/损坏图片的错误处理（`TestCorruptImageDataFailsOpen`/`TestMalformedRequestBodyFailsOpen` 覆盖）、非动图格式的声明尺寸炸弹守卫（`TestDecompressionBombGuard`）、content-hash 碰撞风险（用 sha256，工具选型没问题）。
+
+#### 1.L.2 `internal/imgprep/cache.go`
+- **主要内容**：按 `sha256(原始字节) + maxPx` 为 key 的降采样结果磁盘缓存。`cacheStore` 用"独立临时文件 + 原子 rename"写入（并发写相同内容安全）；`cacheLookup` 命中时刷新 mtime，防止正在被复用的图片被 TTL 清掉；`sweepState`（`sync.Map`，按缓存目录分 key）把清扫频率节流到每天一次，由 `maybeSweepCache` 异步触发；`sweepCacheDir` 同时清 TTL 过期的 `.jpg` 和崩溃遗留的 `.tmp-` 孤儿文件。
+- **问题**：
+  - `[I]` **磁盘无上限增长**——只有 TTL 清理，没有总容量上限。这是设计文档里明确记录过的既知取舍（"真出现磁盘问题再加容量上限"），不是新 bug，但具体说：`image_downscale` 开着时，一个发很多不同大图的客户端能在 `image_cache_ttl_days`（默认 7 天）到期前无上限地撑大 `image_cache_dir`，没有任何总大小天花板。
+  - `[I]` **（新发现）`cacheStore` 的 `os.MkdirAll(dir, 0o700)` 只在目录不存在时生效**——如果 `image_cache_dir` 已经以更宽松的权限存在（比如用户手工建的 `0o755` 目录），mode 不会被收紧，缓存的图片字节可能比代码意图的更宽松可读。
+  - `[I]` **（新发现）`maybeSweepCache` 异步清扫和 `cacheLookup` 之间存在轻微 TOCTOU**——清扫 goroutine 和当前请求可能在 TTL 边界的同一条目上竞争；本请求刚要复用的文件可能被并发清扫删掉。Fail-open（退化成 cache miss，重新处理），是"少一次优化命中"而非正确性问题。
+  - **审阅确认没问题的部分**：并发访问下的缓存正确性（原子 rename 防止读到半写文件）、`sweepState` 按目录节流（原有笔记依然准确，不用改）。
+
 ---
 
 ## 2. 跨模块观察（综合）
@@ -557,16 +598,19 @@ vmr/
 
 5. **审计格式演化**：Record 字段从最初到现在逐个加（TTFTMS、ClientKeyTag、Images、ReplayOf、RawPreStrip、ImageInfo）——每个都是**真实需求驱动的加法**（TTFT 是 OpenClaw streaming 体验问题、ClientKeyTag 是多调用方分组需求、Images 是 audit 的 image-downscale 上下文）。**新字段引入模式好**（加字段而非改字段、不破坏旧 log 读取）。
 
-6. **测试工程**：9228 行测试覆盖 ~11000 行生产代码（1:1.2）——对单二进制工具项目来说比例很高；**单测粒度细**（health 包有 8 个用例覆盖每个 cooldown 路径；response.go 有 25+ 个用例覆盖每条 normalizer 路径）。**好的工程实践**。
+6. **测试工程**：9228 行测试覆盖 ~11000 行生产代码（1:1.2）——对单二进制工具项目来说比例很高；**单测粒度细**（health 包有 8 个用例覆盖每个 cooldown 路径；response.go 有 25+ 个用例覆盖每条 normalizer 路径）。**好的工程实践**。**2026-07-16 复核**：今天的三处修复（writeError 统一、cmdReport 降级、errBodyCap 调整）都补了对应测试（`core_test.go` 两个新用例、`main_test.go` 强化了 happy-path 断言、`server_audit_test.go` 新增一个端到端截断测试），精确的行数没有重新统计，但比例没有变差。
 
 7. **依赖极简**：4 个直接依赖（`yaml.v3`/`fsnotify`/`klauspost/compress`/`golang.org/x/image`）——**没有 Web 框架、没有 ORM、没有 provider SDK**。这跟 README 卖点一致（"Unix-style tool, zero DB, zero web UI, zero runtime plugins"）。
 
 8. **未充分测试/缺单测的热点**：
-   - `internal/config/watch.go`（hot reload 入口）——无单测
-   - `vmr.sh`（bash 脚本）——无测试
-   - `internal/audit/housekeep.go` 的 `housekeep()` 函数（除 integration 通过 `TestHousekeep_*` 间接覆盖）——无独立单测
-   - `internal/router/response.go` 的 `stripThinkingProcess` 之外的某些 sub-branch（trailing whitespace、Chinese marker "unsupported"）——已有 9 个测试覆盖主要路径
-   - `cmd/vmr/main.go` 的 `logStart`/`logStop`/`logConfigSummary` —— 无单测（print 行为）
+   - `internal/config/watch.go`（hot reload 入口）——无单测（**2026-07-16 复核：仍然成立，未改动**）
+   - `vmr.sh`（bash 脚本）——无测试（**仍然成立**）
+   - `internal/audit/housekeep.go` 的 `housekeep()` 函数（除 integration 通过 `TestHousekeep_*` 间接覆盖）——无独立单测（**仍然成立**）
+   - `internal/router/response.go` 的 `stripThinkingProcess` 之外的某些 sub-branch（trailing whitespace、Chinese marker "unsupported"）——已有 9 个测试覆盖主要路径（**仍然成立**）
+   - `cmd/vmr/main.go` 的 `logStart`/`logStop`/`logConfigSummary` —— 无单测（print 行为）（**仍然成立**）
+   - **（2026-07-16 新增）`internal/imgprep`**：原审计完全没覆盖这个包（见新增的 §1.L），今天补了一次完整审阅，但没有新增测试——`TestAnimatedGIFUntouched` 目前只测 2 帧 GIF，没覆盖 §1.L.1 提到的多帧解压炸弹场景，这是一个具体、可操作的测试缺口。
+
+9. **（2026-07-16 新增）背景分析文档的引用寿命短于代码注释里对它们的引用**：`docs/AgentSessionGrouping_Analysis_Fable5.md`、`docs/AuditLogCompression_Analysis_Sonnet5.md`、`docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 三份"背景分析"文档都已被删除（前两份是 2026-07-12 的既有决定，应该是内容已并入设计文档；第三份是今天删的），但 `README.md`/`internal/report/session.go`/`internal/audit/audit_test.go`/本审计报告自己等多处仍在引用这些文件名。这是这个项目"设计即文档"模式（观察 1）的一个反面案例——背景分析文档被删的节奏快于代码注释里引用它们的地方被同步更新的节奏。不是紧急问题，但值得找个时间统一扫一遍。
 
 ---
 
@@ -577,50 +621,44 @@ vmr/
 
 ### 3.1 第一梯队（推荐立即改）
 
-#### 3.1.1 [S/M] `internal/router/response.go::stripThinkingProcess` 强绑 MiniMax wording，单点失效
+#### 3.1.1 [S/M] `internal/router/response.go::stripThinkingProcess` 强绑 MiniMax wording，单点失效 — **⚠️ 仍然成立**
 - **问题**：thinking=medium 的剥离依赖硬编码的 `Thinking Process:` 头和 `Looks good. Pro` 标记。MiniMax 改 wording → 全员 thinking 内容泄漏到用户面前（OpenClaw 体验受损）。
 - **影响范围**：每个 `thinking=medium` 触发的请求都会出问题——高频场景。
+- **2026-07-16 复核**：`internal/router/response.go` 今天没有改动，字符串/正则原样存在，判断不变。这也是全报告唯一的 `[S]` 级发现，且没有一次性修复方案——三条建议方案里，方案 1（观测性）已部分实现（`RawPreStrip`），方案 2/3 都属于"要不要做"的产品判断而非纯代码修复，**不建议归入"修 bug"这一类批次**，更适合当独立的功能决策来对待。`docs/vmr_future_strategy_deepseek-v4-flash.md` §3.6 已经把"加自动检测未 strip 告警"列为 R14（呼应 §4.14），值得作为下一步的具体切入点。
 - **建议方案（确定）**：
   1. **加观测性**：把 `thinkPattern`/`stripThinkingProcess` 触发时的 raw bytes 落 `audit.Attempt.RawPreStrip`（已部分实现）—— 后续分析能确认 MiniMax 改 wording。
   2. **加 fallback 降级**：当 `stripThinkingProcess` 不触发（wording 变了）但响应是明显的 chain-of-thought pattern（e.g. 大段 `1.` `2.` `3.` 编号段）→ 走"overflow_raw_passthrough" 类似的降级。
   3. **建议加可配置 trigger 关键字**（config 一行 `thinking_process_marker: "Looks good. Pro"`），但**默认仍是硬编码**——避免配置成本。
-- **建议**：[M] 改 wording 风险高、修复成本可控。
+- **建议**：[M] 改 wording 风险高、修复成本可控——但当成"要不要加观测性/告警"的功能决策，不是"改 bug"。
 
-#### 3.1.2 [M] `internal/server/server.go::models` 端点无 auth + 远程可读，暴露内部模型拓扑
-- **问题**：`GET /v1/models` 没有走 `s.auth()` 也不限 loopback。远程 attacker 可枚举内部 model 名（知道是 `coding` 还是 `claude-mini`），配合响应时间差异做 fingerprint。
-- **影响范围**：公网部署时（README 提到 "trusted private network" 是常见场景，但"公网 + api_key" 也支持）。
-- **建议方案（确定）**：与 `/admin/status` 对齐——加 loopback 检查，或加 auth wrapper。
-- **实施成本**：~10 行。
-- **建议**：[M] 改一下，5 分钟成本换 0 风险。
+#### 3.1.2 [M] `internal/server/server.go::models` 端点无 auth + 远程可读，暴露内部模型拓扑 — **❌ 不成立**
+- **原问题描述**：`GET /v1/models` 没有走 `s.auth()` 也不限 loopback。远程 attacker 可枚举内部 model 名，配合响应时间差异做 fingerprint。
+- **2026-07-16 核实结论：不成立**。`internal/server/server.go:39`：`mux.HandleFunc("GET /v1/models", s.auth(s.models))`——models 端点其实**一直**走 `s.auth()`，跟 `chatHandler` 是同一套鉴权语义（未配置 `api_key`/`api_keys` 时门开是全局设计，不是 models 独有的漏洞）。原审计误读了 `Handler()` 里的路由注册表，从未是真问题。这条从"第一梯队"里划掉，不需要任何代码改动。
 
-#### 3.1.3 [M] `internal/router/router.go::writeError` 与 `internal/server/server.go::writeError` 重复实现
-- **问题**：两处独立实现相同的 error envelope（`{"type":"error","error":{"type","message"}}`）。未来改格式需要改两处。
-- **建议方案（确定）**：抽到 `internal/core` 包（`core.WriteError(w, status, type, msg)`），router 和 server 都调用。
-- **实施成本**：~30 行（含 import 调整）+ 1 个共享单测。
-- **建议**：[M] DRY 化，明确收益。
+#### 3.1.3 [M] `internal/router/router.go::writeError` 与 `internal/server/server.go::writeError` 重复实现 — **✅ 已修复（2026-07-16）**
+- **原问题**：两处独立实现相同的 error envelope（`{"type":"error","error":{"type","message"}}`）。未来改格式需要改两处。
+- **修复方式**：抽到 `internal/core.WriteError`/`core.WriteJSON`，`router.go`/`server.go` 全部改调用，两处本地实现已删除。新增 `internal/core/core_test.go` 两个单测锁定状态码/Content-Type/信封格式。
 
-#### 3.1.4 [M] `cmd/vmr/main.go::cmdReport` session 分析失败导致全量 report 失败
-- **问题**：`sess, err := report.AnalyzeSessions(paths)` 返回 err → 整个 `vmr report` 失败。Session 分析是"增值功能"（sessions/tools/workloads），不应让主 report（aggregate）跟着死。
-- **建议方案（确定）**：
-  - 把 `AnalyzeSessions` 错误降级为 warning（`log.Printf` 到 stderr），主 report 继续写。
-  - 加 `-no-sessions` flag 给想快的用户（已经 `vmr report` 的常见抱怨是"百万行 audit log 跑 10 分钟"）。
-- **实施成本**：~20 行。
-- **建议**：[M] 解耦核心/增值。
+#### 3.1.4 [M] `cmd/vmr/main.go::cmdReport` session 分析失败导致全量 report 失败 — **✅ 已修复（2026-07-16）**
+- **原问题**：`sess, err := report.AnalyzeSessions(paths)` 返回 err → 整个 `vmr report` 失败。Session 分析是"增值功能"（sessions/tools/workloads），不应让主 report（aggregate）跟着死。
+- **修复方式**：`AnalyzeSessions` 失败时打印 stderr 警告并跳过 `tools/sessions/workloads`、`vmr-requests.jsonl`、`details/`，`vmr-report.json`/`.md` 仍正常写出、命令返回成功（不是错误）。`-no-sessions` flag（原建议的另一半）未做——现在失败已经不拖累主报告，加速大日志的诉求独立存在，留在 §4.2 继续作为改进建议。
+- **已知局限**（诚实记录，见 §1.G.1）：`AnalyzeSessions` 目前只在文件 I/O 失败时报错，与 `Build()` 失败面完全重合，意味着这条 warning 分支在当前实现下只有外部竞态才能独立触发，没有可靠的黑盒回归测试——价值主要是防御性的。
 
-#### 3.1.5 [M] `internal/router/router.go::tryOne` 4xx body 截断 64KB 可能不够
-- **问题**：DeepSeek Anthropic 风格 4xx body 含 `errors[].details` 数组可能 10+KB；64KB 应该够，但**未实测验证**。`io.LimitReader(resp.Body, 64<<10)` 截断后 audit 看到的 body 不完整。
-- **建议方案（确定）**：提到 128KB 或 256KB（4xx 路径不是 hot path）。同时在 audit `Attempts[i].Response.Body` 末尾追加 `"...(truncated, N bytes total)"` 标记。
-- **实施成本**：~5 行。
-- **建议**：[M] 一次性修。
+#### 3.1.5 [M] `internal/router/router.go::tryOne` 4xx body 截断 64KB 可能不够 — **✅ 已修复（2026-07-16）**
+- **原问题**：DeepSeek Anthropic 风格 4xx body 含 `errors[].details` 数组可能 10+KB；64KB 应该够，但**未实测验证**。
+- **修复方式**：上限提到 `errBodyCap = 128<<10`。**没有照搬原建议的"末尾追加 truncated 标记"到所有地方**——那样会污染转发给客户端的字节（破坏 byte-faithful 承诺）。实际做法是拆成两份：`uerr.body`（转发给客户端 + 走 `ClassifyError`）保持原样截断、不加任何标记；只有 audit 记录的副本才追加 `...(truncated at N bytes)`。新增 `server_audit_test.go::TestErrorBodyCappedAndAuditMarksTruncation` 端到端验证这个拆分。
 
-#### 3.1.6 [M] `cmd/vmr/main.go` 的 SIGHUP 监听 + `defer` 不覆盖 panic 路径的 `logStop`
+#### 3.1.6 [M] `cmd/vmr/main.go` 的 SIGHUP 监听 + `defer` 不覆盖 panic 路径的 `logStop` — **⚠️ 仍然成立，ROI 判断已下修，暂不建议做**
 - **问题**：`start` 内部 `panic` 会绕过 `logStop` 写停止 marker。
-- **建议方案（确定）**：在 `cmdStart` 入口加 `defer func() { if r := recover(); r != nil { logStop(...); panic(r) } }()`。
-- **实施成本**：~5 行。
-- **建议**：[M] 一次性修。
+- **2026-07-16 复核**：重新评估后认为原建议方案本身有缺陷，且价值比看起来小——
+  1. **修不全**：原方案"`cmdStart` 入口加 `defer recover()`"盖不住 SIGHUP/fsnotify 触发的 `reload()`——那段代码跑在独立 goroutine 里，且恰恰是最可能出 edge case 的地方（解析用户新写的 config）。加了这段代码只覆盖主 goroutine，给人一种"已经兜底"的错觉，其实没兜全。
+  2. **信号本来就在**：Go 未捕获 panic 会把完整 stack trace 打到 stderr，systemd/launchd 服务模式下这本身已经落进 service log——"有 START 没有 STOP，后面跟一个 panic trace"已经足够诊断"这是崩溃不是正常退出"，缺的只是一行好 grep 的 marker，不是缺信息。
+  3. 这类代码路径基本都是 error return 而非 panic（`config.Load`/`router.BuildSnapshot`/`rt.Install` 全部返回 error），真正跑到顶层 panic 的场景概率本就很低。
+- **结论**：给几乎不会发生、且已有其他信号覆盖的场景加防御代码，性价比不够，**暂不做**。
 
-#### 3.1.7 [M] `internal/router/response.go::stripThinkingProcess` 之外的小路 fallback 覆盖度
+#### 3.1.7 [M] `internal/router/response.go::stripThinkingProcess` 之外的小路 fallback 覆盖度 — **⚠️ 仍然成立，与 3.1.1 同一处理**
 - **问题**：`TestStripThinkingProcess_ChineseEndorsement` 锁了"Chinese marker 不支持 → pass through"——但**生产中如果客户端用了中文 thinking 表达（未来多语言模型）**，strip 失败但 pass through——thinking 全部到用户面前。
+- **2026-07-16 复核**：`response.go` 未改动，判断不变。跟 3.1.1 一样，是"要不要加观测性"的产品决策，不是可以直接改的 bug。
 - **建议方案（需权衡）**：与 3.1.1 合并处理。可考虑：
   - 加 metric（`audit.Attempt.Norm` 加 `thinking_process_unsupported_marker` 记录"识别了 thinking 但 marker 不认识"）。
   - 让 `workloadClass` 之外也加"thinking leak 风险"信号。
@@ -628,143 +666,160 @@ vmr/
 
 ### 3.2 第二梯队（改与不改都合理）
 
-#### 3.2.1 [L] `internal/health/health.go` 冷却参数硬编码
+> **2026-07-16 复核**：以下 17 条逐一核对了当前代码，**全部仍然成立**（除下面明确标注"补充"的两条外，内容不变，未改动）。这批本身就是"改不改都合理"的 ROI 判断，本次复核没有发现任何一条的判断需要反转。
+
+#### 3.2.1 [L] `internal/health/health.go` 冷却参数硬编码 — 仍成立
 - **问题**：`transientBase=2s/transientCap=5min/longBase=10min/longCap=1h` 全是常量。
 - **建议方案（需权衡）**：可加 config 字段 `cooldown_transient_base`/`cooldown_transient_cap`/`cooldown_long_base`/`cooldown_long_cap`——但 README 卖点是"零调参开箱即用"。**owner 拍板**：要不要暴露调参？
 - **建议**：[L] 不动也行，加了更好。
 
-#### 3.2.2 [L] `internal/audit/audit.go` 通过全局 `retentionDays atomic.Int64` 跨包同步
+#### 3.2.2 [L] `internal/audit/audit.go` 通过全局 `retentionDays atomic.Int64` 跨包同步 — 仍成立
 - **问题**：`SetRetentionDays` 是全局状态——任意 import 它的代码都能改。虽然 `main.go` 在 reload 时主动调，但**没有 test 锁住这个不变量**（reload 路径未测）。
 - **建议方案（需权衡）**：把 `retentionDays` 改成 `audit.Logger` 的字段（构造时传入）——更显式，但需要改 main.go 多处。
 - **建议**：[L] 当前 OK，重构时改。
 
-#### 3.2.3 [M] `internal/config/watch.go` 无单测
+#### 3.2.3 [M] `internal/config/watch.go` 无单测 — 仍成立
 - **问题**：hot reload 入口无单测。`main.go:284-298` 的 reload 路径只通过 `main_test.go::TestCmdCheck_*` 间接验证（不测 reload 本身）。
 - **建议方案（确定）**：加 1-2 个集成测试——用 `t.TempDir()` + 写文件 + 触发 fsnotify。
 - **建议**：[M] 补测试 30 分钟。
 
-#### 3.2.4 [L] `internal/router/router.go::IngressPath` 写死 openai/anthropic
+#### 3.2.4 [L] `internal/router/router.go::IngressPath` 写死 openai/anthropic — 仍成立
 - **问题**：未来加新协议时这里需要更新（否则新协议走错路径）。2 个协议时风险低。
 - **建议方案（需权衡）**：把 `IngressPath()` 加到 Adapter 接口。每个 adapter 自己声明 path。
 - **建议**：[L] 等真加第三个协议时再做。
 
-#### 3.2.5 [L] `vmr.sh` 端口探测仅 IPv4
-- **问题**：`port_holder` 的注释明确"IPv4 only"，未来 listen IPv6 会失效。
+#### 3.2.5 [L] `vmr.sh` 端口探测仅 IPv4 — 仍成立，补充
+- **问题**：`port_holder` 的注释明确"IPv4 only"，未来 listen IPv6 会失效。**2026-07-16 复核**：现在的注释已经更直白地写明"IPv6 listen addresses aren't handled, since this project's configs only ever use IPv4 host:port"——从"隐性局限"变成了"显性记录的既知取舍"，性质没变但可读性更好了。
 - **建议方案（需权衡）**：用 `ss` 或 `lsof -i6` 替代。但目前 config 仅支持 IPv4 host:port。
 - **建议**：[L] 跟随 config 演化。
 
-#### 3.2.6 [L] `internal/router/response.go::containsSoftBlockMarker` 仅 2 个 marker
+#### 3.2.6 [L] `internal/router/response.go::containsSoftBlockMarker` 仅 2 个 marker — 仍成立
 - **问题**：仅识别 `input_sensitive`/`output_sensitive` 两个字段。MiniMax 加新字段不会触发。
 - **建议方案（需权衡）**：扩为 substring 列表 + 配置文件。
 - **建议**：[L] 暂可，等 MiniMax 变化时再改。
 
-#### 3.2.7 [M] `internal/router/response.go::reassembleSSE` 与 `internal/report/render.go::reassembleSSE` 重复
+#### 3.2.7 [M] `internal/router/response.go::reassembleSSE` 与 `internal/report/render.go::reassembleSSE` 重复 — 仍成立
 - **问题**：两处独立实现 SSE 重解析（router 在响应路径，report 在报告路径）。未来 SSE 协议细节变化需改两处。
 - **建议方案（需权衡）**：抽到 `internal/report/sseparse` 包，两处共用。**潜在循环依赖风险**（router 已 import audit，audit import report？——不，audit 不 import report）——**OK**。
 - **建议**：[M] 收益一般，看项目节奏。
 
-#### 3.2.8 [L] `internal/router/router.go::Install` "old snapshot's idle connections 关掉"时序
+#### 3.2.8 [L] `internal/router/router.go::Install` "old snapshot's idle connections 关掉"时序 — 仍成立
 - **问题**：`Install` 切换时 `old.CloseIdleConnections()` —— 注释没明说 in-flight 请求的影响。
 - **建议方案（确定）**：补 1 个 doc comment 解释"in-flight 请求的连接不受影响，因为它们不是 idle"。
 - **建议**：[L] 1 行注释。
 
-#### 3.2.9 [L] `internal/server/server.go::chatHandler` 顺序是 audit-rec-create-then-auth
-- **问题**：401 请求会落审计（intentional，per docs/ClientAPIKeyGrouping）。如果用户希望"401 不计费/不计审计"，无法关。
+#### 3.2.9 [L] `internal/server/server.go::chatHandler` 顺序是 audit-rec-create-then-auth — 仍成立
+- **问题**：401 请求会落审计（intentional，原本 per docs/ClientAPIKeyGrouping，该文档已删除见 §1.J.2）。如果用户希望"401 不计费/不计审计"，无法关。
 - **建议方案（需权衡）**：加 config 字段 `audit_401: true|false`。
 - **建议**：[L] 默认 true，配置化延后。
 
-#### 3.2.10 [L] `internal/imgprep/imgprep.go::processImage` 缩放用 BiLinear，画质一般
+#### 3.2.10 [L] `internal/imgprep/imgprep.go::processImage` 缩放用 BiLinear，画质一般 — 仍成立（§1.L.1 全量复核确认）
 - **问题**：用 `draw.BiLinear.Scale`——不是 `CatmullRom` 或 `ApproxBiLinear`（更高质）。
 - **建议方案（需权衡）**：换 `draw.ApproxBiLinear`（速度/质量平衡）——但 8% 质量提升 vs 0.2% 性能差异，**不值**。
 - **建议**：[L] 不动。
 
-#### 3.2.11 [L] `internal/imgprep/imgprep.go::jpegQuality = 85` 硬编码
+#### 3.2.11 [L] `internal/imgprep/imgprep.go::jpegQuality = 85` 硬编码 — 仍成立
 - **问题**：用户不可调。
 - **建议方案（需权衡）**：同 3.2.10，配置化收益小。
 - **建议**：[L] 不动。
 
-#### 3.2.12 [L] `internal/imgprep/cache.go::sweepState` 用 `sync.Map` 做 throttle
+#### 3.2.12 [L] `internal/imgprep/cache.go::sweepState` 用 `sync.Map` 做 throttle — 仍成立
 - **问题**：throttle state 按目录 key 持久在进程内——重启后丢失。**预期行为**（重启后第一天可能 sweep 一次）——OK。
 - **建议方案（需权衡）**：不持久化（重启 sweep 一次是好事）。
 - **建议**：[L] 不动。
 
-#### 3.2.13 [L] `internal/report/report.go::percentiles` nearest-rank 公式
+#### 3.2.13 [L] `internal/report/report.go::percentiles` nearest-rank 公式 — 仍成立
 - **问题**：`int(0.5*n+0.5)-1` 当 n=1 → 0; n=2 → 0.5-1 = -0.5 → int 截 0 → 0，OK。n=3 → 1-1=0... 等等，应该是 1 = `s[1]`，对（n=3，p50 应该是第 2 个，索引 1）。**n=3 算对**。但**n=4**：`int(2+0.5)-1 = 1` = `s[1]`（应是 `s[1]`？——p50 of 4 是 avg(s[1], s[2])，nearest-rank 简化到 s[1]，OK）。
 - **建议方案（需权衡）**：n=1 时返回 `s[0]` 而不是 0——现在的实现对 n=1 也对（int(0.5)-1 = -1，clamp 到 0 = s[0]）。**OK**。
 - **建议**：[L] 不动。
 
-#### 3.2.14 [M] `internal/diagnose/diagnose.go::testEndpoint` 真实发请求，可能计费
+#### 3.2.14 [M] `internal/diagnose/diagnose.go::testEndpoint` 真实发请求，可能计费 — 仍成立
 - **问题**：诊断会向每个 provider 发 1 token 的"hi"——MiniMax 的 free tier 允许，OpenRouter 计费但 1 token < 0.001 USD。
 - **建议方案（需权衡）**：加 `-dry-run`（已经 `-no-test-routing` 实现了部分）——但 Phase 3 跳了意味着端到端连通性不验。
 - **建议**：[L] 现实成本可忽略，文档化就好。
 
-#### 3.2.15 [L] `internal/server/server.go::recorder` 没 flush 跟踪
+#### 3.2.15 [L] `internal/server/server.go::recorder` 没 flush 跟踪 — 仍成立
 - **问题**：`r.Flush()` 透传到 `ResponseWriter`——但客户端 SSE chunks 之间需要 flush。**实际** `copyFlush` 显式 `flusher.Flush()`（`router.go:508`）——OK，recorder 透传够用。
 
-#### 3.2.16 [M] `internal/server/server_test.go::upstream.lastHeaders.Store` 用 `atomic.Value` 存 `http.Header`
+#### 3.2.16 [M] `internal/server/server_test.go::upstream.lastHeaders.Store` 用 `atomic.Value` 存 `http.Header` — 仍成立
 - **问题**：`atomic.Value` 对 `http.Header` 写入需要"全等"——并发安全但读侧需要类型断言。OK 实际。
 
-#### 3.2.17 [L] `docs/SensitiveWordFilter_Analysis_Fable5.md` 缺 go/no-go 决策
-- **问题**：研究性文档读完读者不知道"做不做"。backlog item 缺 owner。
-- **建议方案（确定）**：在文档末尾加 "## 决策" 段，给 owner 拍板"推迟/启动"。
+#### 3.2.17 [L] `docs/SensitiveWordFilter_Analysis_Fable5.md` 缺 go/no-go 决策 — 略有夸大，见 §1.J.3
+- **问题**：研究性文档读完读者不知道"做不做"。backlog item 缺 owner。**2026-07-16 复核**：文档末尾其实有一段"结论一页纸"给出了阶段性判断（"现在就该做替换吗：否"），实质决策已经有了，缺的只是正式签字仪式感——原发现略有夸大，详见 §1.J.3。
+- **建议方案（确定）**：在文档末尾加 "## 决策" 段，给 owner 拍板"推迟/启动"（可以只是把已有的"结论一页纸"正式标题化）。
 
 ### 3.3 第三梯队（无所谓）
 
-#### 3.3.1 [L] `internal/router/response.go::RawPreStrip` 类型是 `any`
+> **2026-07-16 复核**：逐条核对，除下方明确标注的几条外均仍成立，无内容变化。
+
+#### 3.3.1 [L] `internal/router/response.go::RawPreStrip` 类型是 `any` — 仍成立
 - **问题**：消费者（如 report/detail.go）需要类型断言。
 - **建议方案（需权衡）**：改成 `json.RawMessage`。
 - **建议**：[L] 不动，影响范围小。
 
-#### 3.3.2 [L] `internal/audit/audit.go::EncodeBody` "ownership contract" 靠注释
+#### 3.3.2 [L] `internal/audit/audit.go::EncodeBody` "ownership contract" 靠注释 — 仍成立
 - **问题**："the slice is referenced, not cloned" 靠注释维护。代码层面无 enforce。
 - **建议方案（需权衡）**：复制（贵）或加 lint 规则（重）。**当前约定工作良好**。
 - **建议**：[L] 不动。
 
-#### 3.3.3 [L] `cmd/vmr/main.go::logStart` banner 固定 ASCII
+#### 3.3.3 [L] `cmd/vmr/main.go::logStart` banner 固定 ASCII — 仍成立
 - **问题**：banner 不随版本号变化。
 - **建议方案（需权衡）**：不变更好（grep 友好）。
 - **建议**：[L] 不动。
 
-#### 3.3.4 [L] `internal/core/core.go::MarshalNoEscape` "TrimSuffix(`\n`)" 假设 encoder 总是结尾加 \n
+#### 3.3.4 [L] `internal/core/core.go::MarshalNoEscape` "TrimSuffix(`\n`)" 假设 encoder 总是结尾加 \n — 仍成立
 - **问题**：理论上不符合 `json.Encoder.Encode` 文档保证（它确实加，但哪天 Go 改呢？）。
 - **建议方案（需权衡）**：手动 `json.Marshal` 而非 Encoder。
 - **建议**：[L] 不动。
 
-#### 3.3.5 [L] `internal/core/core.go::HealthKey` 截 sha256 前 4 字节
+#### 3.3.5 [L] `internal/core/core.go::HealthKey` 截 sha256 前 4 字节 — 仍成立
 - **问题**：碰撞概率 ~1/65536。
 - **建议方案（需权衡）**：取全 sha256。
 - **建议**：[L] 不动。
 
-#### 3.3.6 [L] `internal/config/config.go` YAML 错误信息缺行号
+#### 3.3.6 [L] `internal/config/config.go` YAML 错误信息缺行号 — 仍成立
 - **问题**：bad config 报错没行号。
 - **建议方案（需权衡）**：格式化 yaml.Node.Line。
 - **建议**：[L] 用户少。
 
-#### 3.3.7 [L] `internal/router/router.go::otherProtocolFor` "用错入口"提示字符串硬编码
+#### 3.3.7 [L] `internal/router/router.go::otherProtocolFor` "用错入口"提示字符串硬编码 — 仍成立
 - **问题**：跟 `IngressPath` 同步手动改。
 - **建议**：[L] 跟随 3.2.4。
 
-#### 3.3.8 [L] `internal/report/detail.go::sanitizeName` 不去重连续 `-`
-- **问题**：罕见。
+#### 3.3.8 [L] `internal/report/detail.go::sanitizeName` 不去重连续 `-` — 仍成立，范围比原描述窄
+- **问题**：罕见。**2026-07-16 复核**：`[^A-Za-z0-9._-]+` 的 `+` 量词已经把连续非法字符合并成一个 `-`，真正会产生连续 `--` 的只剩"非法字符恰好挨着一个已存在的字面 `-`"这一种更窄的情况，详见 §1.I.7。
 - **建议**：[L] 不动。
 
-#### 3.3.9 [L] `internal/report/markdown.go` 大量 `*Row` / `*WorkloadRow` / `*SessionRow` 变种 helper
-- **问题**：可以泛型化（Go 1.18+）但当前清楚。
+#### 3.3.9 [L] `internal/report/markdown.go` 大量 `*Row` / `*WorkloadRow` / `*SessionRow` 变种 helper — 仍成立
+- **问题**：可以泛型化（Go 1.18+）但当前清楚。**2026-07-16 复核**：变种数量比原描述更多（`avgTokensInOut` 系列有 5 个类型特化版本，不只 3 个），判断不变。
 - **建议**：[L] 不动。
 
-#### 3.3.10 [L] `internal/router/response.go::modelFieldPattern` `[^"]*` 不防 "key with escaped quote in value"
+#### 3.3.10 [L] `internal/router/response.go::modelFieldPattern` `[^"]*` 不防 "key with escaped quote in value" — 仍成立
 - **问题**：测试已覆盖 OK。
 
-#### 3.3.11 [L] `internal/audit/audit.go::credentialHeaders` 列表硬编码
+#### 3.3.11 [L] `internal/audit/audit.go::credentialHeaders` 列表硬编码 — 仍成立
 - **问题**：新增 credential 形式需改这里。
 - **建议方案（需权衡）**：可配置。
 - **建议**：[L] 不动。
 
-#### 3.3.12 [L] `docs/vmr_future_strategy_deepseek-v4-flash.md` 由模型生成
-- **问题**：战略决策需 owner 验证。
-- **建议**：[L] 当工作输入读，不当决策读。
+#### 3.3.12 [L] `docs/vmr_future_strategy_deepseek-v4-flash.md` 由模型生成 — 部分解决，见 §1.J.4
+- **问题**：战略决策需 owner 验证。**2026-07-16 复核**：今天做了一轮人工复核批注（保留原文，逐节插入判断），"我们自己做没做到"这部分现在是人工核对过的了；核心竞品结论仍是 AI 生成、未做外部重新核实。
+- **建议**：[L] 当工作输入读，不当决策读——但可信度比 2026-07-13 时更高一点了。
 
-#### 3.3.13 [L] `cmd/vmr/main.go::cmdReport` "session 分析失败 → 全 report 失败" 已在 3.1.4 列为 [M]
+#### 3.3.13 [L] `cmd/vmr/main.go::cmdReport` "session 分析失败 → 全 report 失败" 已在 3.1.4 列为 [M] — **✅ 已修复，见 3.1.4**
+
+#### 3.3.14 [L] `internal/rundir/rundir.go::home()` 静默吞掉 `os.UserHomeDir()` 的 error — **（2026-07-16 新发现）**
+- **问题**：`$HOME` 损坏/不可读等异常环境下，`home()` 直接落到临时目录兜底层级，没有任何日志/诊断痕迹——跟这个文件自己"目录解析要可预测、可调试"的设计初衷有点拧。
+- **建议方案（需权衡）**：加一行 debug 日志。成本极低，但触发场景本来就很少见。
+- **建议**：[L] 不动也行，顺手加一行更好。
+
+#### 3.3.15 [L] `internal/imgprep/cache.go::cacheStore` 的 `MkdirAll(dir, 0o700)` 只在新建目录时生效 — **（2026-07-16 新发现，详见 §1.L.2）**
+- **问题**：如果 `image_cache_dir` 已经以更宽松权限存在（比如手工建的 `0o755` 目录），mode 不会被收紧，缓存的图片字节可能比代码意图更宽松可读。
+- **建议**：[L] 不动，真出现权限相关抱怨再加显式 `os.Chmod` 兜底。
+
+#### 3.3.16 [L] 三份已删除的背景分析文档仍被多处引用 — **（2026-07-16 新发现，详见 §2 观察 9）**
+- **问题**：`docs/AgentSessionGrouping_Analysis_Fable5.md`、`docs/AuditLogCompression_Analysis_Sonnet5.md`、`docs/ClientAPIKeyGrouping_Design_Sonnet5.md` 均已删除，但 `README.md`/`internal/report/session.go`/`internal/audit/audit_test.go` 等多处代码注释仍引用这些文件名。
+- **建议**：[L] 找个时间统一扫一遍，删引用或恢复文档，不急。
 
 ---
 
@@ -779,12 +834,12 @@ vmr/
 - **收益**：把 vmr 当 tool 调用更易集成到自动化部署（CI/CD、健康检查、Zabbix 探针）。
 - **建议**：[M] 高 ROI。
 
-### 4.2 [M / 高 ROI] `vmr report` 加 `-no-sessions` flag 跳过 session 分析
-- **现状**：`cmdReport` 调 `AnalyzeSessions` 失败时整个 report 死（3.1.4）。即使成功，gigabytes log 下 session 分析要分钟级。
-- **建议**：加 `-no-sessions`，跳过 session 分析，主 report 仍完整。
+### 4.2 [M / 高 ROI] `vmr report` 加 `-no-sessions` flag 跳过 session 分析 — **2026-07-16 部分完成**
+- **现状**：~~`cmdReport` 调 `AnalyzeSessions` 失败时整个 report 死（3.1.4）~~——**这半已经在 2026-07-16 修复**：失败降级为警告，主 report 不受影响，见 §3.1.4。剩下没做的是**主动跳过**（用户明知道不需要 session 分析、想加速时），即使成功 session 分析在 gigabytes log 下仍要分钟级。
+- **建议**：加 `-no-sessions`，主动跳过 session 分析，主 report 仍完整。
 - **实施成本**：~20 行。
-- **收益**：解决"大 log 跑 10 分钟"+ 解决"session 分析 bug 拖死全 report"。
-- **建议**：[M] 高 ROI。
+- **收益**：解决"大 log 跑 10 分钟"这部分（拖死全 report 那部分已经解决了）。
+- **建议**：[M] 高 ROI，范围比原来窄了一半。
 
 ### 4.3 [M / 高 ROI] `vmr.sh` 加 `vmr.sh doctor` 一次性自检
 - **现状**：用户面对 "vmr 不工作" 需要 5 个命令（`status`/`logs`/`diagnose`/`report`/`config`）拼凑。
@@ -880,38 +935,74 @@ vmr/
 - **收益**：用户复现"对某个 audit 记录的请求"零成本。
 - **建议**：[L] 中 ROI。
 
+### 4.16 [M / 高 ROI]（2026-07-16 新增，同日已修复）`internal/imgprep` 的 GIF 帧数解压炸弹加一层守卫 — **✅ 已修复**
+- **原现状**：`maxDecodePixels` 只检查 GIF 声明的画布尺寸，不检查帧数——`gif.DecodeAll` 会在检查通过之前就把每一帧全部解码进内存。见 §1.L.1。
+- **原建议**：解码前/解码中加一层帧数或累计像素上限检查。
+- **实际采用的方案，比原建议更彻底**：讨论后发现"加帧数上限"本身仍需要调用 `gif.DecodeAll` 才能数出帧数——防御措施和它要防的攻击用的是同一个不设上限的入口，治标不治本。最终选择直接**不再对 GIF 做任何缩放**（单帧、多帧一视同仁），`gif.DecodeAll`/`gif.Decode` 在整条路径上都不再出现——净删除代码，而不是新增一层检查逻辑，风险彻底消除而不是被"上限"框住。
+- **实施成本（实际）**：净减少代码（删掉 `format=="gif"` 分支里的 `gif.DecodeAll` 调用，改成直接短路返回），新增 1 个测试（`TestSingleFrameGIFUntouched`）、调整 1 个既有测试的断言（`TestAnimatedGIFUntouched` 补充 `ImageInfo` 检查）。
+- **收益**：资源耗尽向量彻底消失，不是"上限收窄"，是这个攻击面在代码里不再存在。代价是放弃了"缩放单帧静态 GIF 截图"这个边缘场景（现实里 GIF 几乎全是动图，这个组合本来就少见）。
+
+### 4.17 [L / 中 ROI]（2026-07-16 新增）`internal/imgprep::Downscale` 的 panic 恢复加一条可观测信号
+- **现状**：顶层 `recover()` 完全静默——出问题时既不打日志也不进 audit，运维对"降采样能力静默失效"这件事完全没有信号。见 §1.L.1。
+- **建议**：`recover()` 命中时至少给 `ImageInfo` 加一个 `decode_panic_recovered` 之类的标记，或打一行 log。
+- **实施成本**：~10 行。
+- **收益**：把一个完全不可观测的失败模式变成至少能在审计/日志里查到的信号。
+- **建议**：[L] 中 ROI，成本很低，建议顺手做。
+
+### 4.18 [L / 中 ROI]（2026-07-16 新增）`classify.go` 的 402/404 分支补上 `contentHint` 前置检查
+- **现状**：402/404 无条件映射到 `ErrEndpoint`，唯独没有像 403/429 那样先检查内容审核关键词——如果某 provider 用 404 承载内容审核拒绝，会被误判成端点故障（触发不必要的 failover + 冷却）而不是内容策略问题。见 §1.B.2。
+- **建议**：给 402/404 分支也加上跟 403/429 一致的 `contentHint` 前置检查。
+- **实施成本**：~5 行。
+- **收益**：四个 4xx 分支的处理逻辑保持一致，消除一个理论上的误判来源。
+- **建议**：[L] 中 ROI，成本极低，没有已知触发案例但修起来是顺手的事。
+
 ---
 
 ## 5. 总结
 
+> **2026-07-16 复核后重写**。原表格/优先建议里有两条已经不成立（4 项优先建议里有一半基于错误或已解决的前提），下面是刷新后的版本。
+
 | 维度 | 评价 |
 |---|---|
 | **架构清晰度** | 优秀——每个包单一职责、依赖单向（cmd → server → router → adapter → core）、每个 layer 都有完整测试。 |
-| **代码质量** | 高——命名一致、doc comments 详尽、错误处理精细（`errClass` 9 枚举+每个 release 路径显式处理）、go vet 友好。 |
-| **测试覆盖** | 1:1.2 测试/生产比，单测粒度细到每个 fail mode。**少数热点未测**（watch.go、main.go 的 signal handling）。 |
-| **文档** | 优秀——设计 doc 与代码同步、每章锚定、迭代历史保留。 |
+| **代码质量** | 高——命名一致、doc comments 详尽、错误处理精细（`errClass` 9 枚举+每个 release 路径显式处理）、go vet 友好。**2026-07-16 印证**：4 个并行 Explore agent 分模块复核 78 个源文件（含从零审阅原来完全没覆盖的 `internal/imgprep`），没有发现任何颠覆性问题——找到的都是具体、局部、可独立评估的边界情况，没有架构级的坏味道。 |
+| **测试覆盖** | 1:1.2 测试/生产比，单测粒度细到每个 fail mode。**少数热点未测**（watch.go、main.go 的 signal handling、今天新发现的 `internal/imgprep` GIF 多帧场景）。 |
+| **文档** | 优秀——设计 doc 与代码同步、每章锚定、迭代历史保留。**新发现的瑕疵**：3 份背景分析文档已删除但引用还在多处残留（§2 观察 9），值得找时间清一遍。 |
 | **依赖** | 极简（4 个直接依赖）——符合 README 的"零框架"承诺。 |
 | **可扩展性** | Adapter 注册模式清晰、Strategy 注册模式清晰；新增 provider/strategy 不需改框架。 |
 | **可运维性** | 好——banner / start/stop log markers / `vmr.sh` / audit / report 齐全。 |
 | **可调试性** | 极好——`replay` / `diagnose` / `report` / `check` / `status` / `dirs` / `doctor`(待加) 全套。 |
-| **风险** | 1 个 [S]：thinking strip wording 绑 MiniMax 行为；5-6 个 [M]：细节改进。整体低风险。 |
+| **风险** | **2026-07-16 更新**：唯一的 `[S]` 级发现（thinking strip 绑 MiniMax 行为）仍未解决，但没有一次性修复方案，是持续观测的产品决策而非 bug。原来数的"5-6 个 [M]"里，4 个已修复（writeError 重复、cmdReport 拖死、64KB 截断、imgprep GIF 解压炸弹），1 个不成立（models 端点 auth），1 个 ROI 重新评估后不建议做（panic/logStop）——**当前实际待处理的 [M] 级问题比 2026-07-15 报告时更少**。今天的全量复核新增了 2 个 [M] 级发现（imgprep GIF 帧数解压炸弹——已当日修复、classify.go 402/404 跳过 contentHint 检查——待修），整体仍然是低风险。 |
 
-**优先建议**（短期可做）：
-1. `vmr.sh doctor`（4.3）—— 5 分钟，最实用
-2. `vmr report --no-sessions`（4.2）—— 20 分钟，解锁大 log 场景
-3. `cmd/vmr/main.go` 写 `defer panic` 恢复 + `logStop`（3.1.6）—— 5 分钟，补一个 log 完整性缺口
-4. `models` 端点加 auth/loopback（3.1.2）—— 10 分钟，0 风险关门
-5. audit 加 `client_ip`（4.5）—— 10 分钟，报告维度增强
-6. thinking 模式自动检测未 strip 警告（4.14）—— 50 分钟，提前发现 wording drift
+**已完成**（2026-07-16，本轮修复的四项）：
+1. ✅ `internal/core.WriteError`/`WriteJSON` 统一（原 3.1.3）
+2. ✅ `cmdReport` session 分析失败降级为警告（原 3.1.4）
+3. ✅ 4xx body 上限 64KB→128KB + 审计副本截断标记（原 3.1.5）
+4. ✅ `internal/imgprep` GIF 不再缩放，单帧/多帧一视同仁（原 4.16，见 §1.L.1）
+
+**不成立，已划掉**：
+- ❌ `/v1/models` 无 auth（原 3.1.2）——核实后发现从来就有 `s.auth()` 包装
+
+**重新评估为不建议做**：
+- ⚠️ panic 路径补 `logStop`（原 3.1.6）——原方案修不全、且已有替代信号，ROI 不够，见条目详情
+
+**优先建议**（短期可做，重新排序；原第 2 条——imgprep GIF 解压炸弹守卫——已当日修复，从列表移除）：
+1. `vmr.sh doctor`（4.3）—— 30 分钟，最实用，且是最好的"发声素材"（配合 `docs/vmr_future_strategy_*` §6 提到的传播缺口）
+2. `vmr` 子命令加 `--json`（4.1）—— 跟 `doctor` 一起设计收益更大
+3. thinking 模式自动检测未 strip 警告（4.14/3.1.1）—— 50 分钟，提前发现 wording drift，是全报告唯一 `[S]` 级发现的可执行缓解手段
+4. `vmr report -no-sessions`（4.2，范围已缩小）—— 20 分钟，纯粹的速度优化（拖死全报告那部分已经修了）
+5. **（新）** `internal/imgprep::Downscale` panic 恢复加可观测信号（4.17）—— ~10 行，成本极低
 
 **中期建议**（看节奏）：
-- `vmr report --json`/`--web`（4.1/4.4）—— 报告可编程/可视化
+- `vmr report --web`（4.4）—— 报告可视化
 - Adapter 抽取 IngressPath（3.2.4）—— 等第三个协议时再做
 - `cmd/vmr` 拆包（4.12）—— 重构向
-- 重复代码抽 `core.WriteError`（3.1.3）—— 30 分钟 DRY
+- audit 加 `client_ip`（4.5）
+- classify.go 402/404 补 contentHint 检查（4.18）—— 成本低但没有已知触发案例，不紧急
 
 **长期建议**（战略层）：
-- 关注 Bifrost 演化（`docs/vmr_future_strategy_*` 提到的竞品）—— 6-12 月内确认 VMR 的差异化（byte-faithful + agent audit）仍独有
-- 词过滤研究（`docs/SensitiveWordFilter_*`）—— owner 拍板"做不做"
+- 关注 Bifrost 演化（`docs/vmr_future_strategy_*` 提到的竞品）—— 6-12 月内确认 VMR 的差异化（byte-faithful + agent audit）仍独有；该文档 2026-07-16 已复核，核心发现是**工程执行已经跑在"传播/叙事"执行前面**——README 定位重写、社区发声这些一项都没做，值得优先关注
+- 词过滤研究（`docs/SensitiveWordFilter_*`）—— 实质已有阶段性判断，缺的是正式签字仪式（§3.2.17）
+- **（新）** 三份已删除背景文档的引用清理（§2 观察 9、§3.3.16）—— 不急，找个空档统一扫一遍
 
 **结论**：vmr 是一份**高质量、文档化、可维护**的 Go 项目；核心架构稳定，byte-faithful 与 agent audit 是其真正差异化优势；当前 ROI 最高的改动集中在 **debugging 工具完善** 与 **MiniMax 行为漂移的早期预警**——而不是在框架或核心逻辑上。

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 package imgprep
 
 import (
@@ -55,6 +55,18 @@ func animatedGIF(t *testing.T, w, h int) []byte {
 	f1 := image.NewPaletted(image.Rect(0, 0, w, h), pal)
 	f2 := image.NewPaletted(image.Rect(0, 0, w, h), pal)
 	g := &gif.GIF{Image: []*image.Paletted{f1, f2}, Delay: []int{10, 10}}
+	var buf bytes.Buffer
+	if err := gif.EncodeAll(&buf, g); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func singleFrameGIF(t *testing.T, w, h int) []byte {
+	t.Helper()
+	pal := []color.Color{color.RGBA{255, 0, 0, 255}, color.RGBA{0, 255, 0, 255}}
+	f1 := image.NewPaletted(image.Rect(0, 0, w, h), pal)
+	g := &gif.GIF{Image: []*image.Paletted{f1}, Delay: []int{0}}
 	var buf bytes.Buffer
 	if err := gif.EncodeAll(&buf, g); err != nil {
 		t.Fatal(err)
@@ -337,9 +349,29 @@ func TestAnthropicNonBase64SourceUntouched(t *testing.T) {
 
 func TestAnimatedGIFUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/gif", animatedGIF(t, 1000, 1000)))
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, images := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("animated GIFs must be left untouched, not collapsed to a still frame")
+	}
+	if len(images) != 1 || images[0].Format != "gif" || images[0].Downscaled {
+		t.Errorf("images = %+v, want one gif entry with Downscaled=false", images)
+	}
+}
+
+// TestSingleFrameGIFUntouched locks in that GIF is never rescaled, single
+// frame or not — image/gif.DecodeAll is the only stdlib way to even learn a
+// GIF's frame count, and it has no cap on frames or cumulative decoded size,
+// so telling a single-frame still apart from a many-frame animation would
+// require paying the same unbounded-decode cost the animated case exists to
+// avoid (a small-canvas, many-frame GIF is a real decompression-bomb vector).
+func TestSingleFrameGIFUntouched(t *testing.T) {
+	body := openAIReq(t, dataURI("image/gif", singleFrameGIF(t, 1000, 1000)))
+	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("single-frame GIFs must be left untouched too — see processImage's format==\"gif\" comment")
+	}
+	if len(images) != 1 || images[0].Format != "gif" || images[0].Downscaled {
+		t.Errorf("images = %+v, want one gif entry with Downscaled=false", images)
 	}
 }
 

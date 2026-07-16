@@ -1,4 +1,4 @@
-// Ver 2026-07-09 00:00, by Sonnet 5
+// Ver 2026-07-16 00:00, by Sonnet 5
 
 // Package imgprep detects inline image attachments in request bodies and,
 // when configured, downscales the oversized ones before they reach the
@@ -35,7 +35,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
-	"image/gif"
+	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
 	"strings"
@@ -353,12 +353,12 @@ func parseDataURI(u string) ([]byte, bool) {
 // always runs, independent of opts.MaxPx. If opts.MaxPx is positive and the
 // longer side exceeds it, the image is fully decoded, resized to fit, and
 // re-encoded as JPEG. changed=false (with a nil error) covers every "leave
-// it alone" case: resizing disabled, already small enough, animated (GIF
-// with more than one frame — resizing would collapse it to a still),
-// unrecognized format, corrupt data, or oversized declared dimensions
-// (decompression-bomb guard) — info is still populated in all of these
-// except a header-decode failure. Output is always JPEG; alpha is flattened
-// onto white first since JPEG has no transparency.
+// it alone" case: resizing disabled, already small enough, GIF (never
+// rescaled — see the format=="gif" branch below for why), unrecognized
+// format, corrupt data, or oversized declared dimensions (decompression-bomb
+// guard) — info is still populated in all of these except a header-decode
+// failure. Output is always JPEG; alpha is flattened onto white first since
+// JPEG has no transparency.
 //
 // When opts.CacheDir is set, a cache lookup happens only after the
 // need-to-process decision is made (longSide > MaxPx, not a decompression
@@ -396,21 +396,20 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 		}
 	}
 
-	var src image.Image
 	if format == "gif" {
-		g, gerr := gif.DecodeAll(bytes.NewReader(data))
-		if gerr != nil {
-			return nil, "", false, info, nil
-		}
-		if len(g.Image) != 1 {
-			return nil, "", false, info, nil // animated: resizing would destroy the animation
-		}
-		src = g.Image[0]
-	} else {
-		src, _, err = image.Decode(bytes.NewReader(data))
-		if err != nil {
-			return nil, "", false, info, nil
-		}
+		// Never rescaled, animated or not: an animated GIF would collapse
+		// to a still (semantic change), and a single-frame GIF isn't worth
+		// special-casing to still frame-decode it — image/gif.DecodeAll is
+		// the only stdlib way to even learn the frame count, and it has no
+		// cap on frames or cumulative decoded size, so distinguishing
+		// "single frame, safe to scale" from "many frames" would require
+		// paying the same unbounded decode cost this branch exists to
+		// avoid. Detection (Format/Width/Height above) already ran either way.
+		return nil, "", false, info, nil
+	}
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", false, info, nil
 	}
 
 	sb := src.Bounds()
