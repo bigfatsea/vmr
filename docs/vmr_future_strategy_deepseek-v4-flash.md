@@ -1,12 +1,23 @@
-// Ver 2026-07-13 16:10, by deepseek-v4-flash
+// Ver 2026-07-16 00:00, by Sonnet 5
 
 # VMR 未来发展战略规划 — 调研报告
 
-> **本调研时间**：2026-07-13
+> **原始调研时间**：2026-07-13，by deepseek-v4-flash
 > **核心问题**：VMR 继续往下走，要面对什么？应该往哪些方向考虑？有哪些值得重点关注的？
 > **方法**：先以 VMR 为基线做大量竞品扫描，建立全景；再分别从 **定位/形态**、**特性扩展**、**战略退出** 三个角度分析。
 > **范围**：VMR 项目的所有可能未来，覆盖开源延续、云端 SaaS、商业化、特性扩展、退出迁移等。
 > **信源**：GitHub 公开仓库 + LiteLLM/Bifrost/Portkey/CLIProxyAPI/AISIX 等公开 README + Stanford 个人使用数据
+
+> ## 复核记录：2026-07-16，by Sonnet 5
+>
+> 距原始调研仅 3 天，**竞品格局（§1）不重新扫描**——3 天内 LiteLLM/Bifrost 等大项目的哲学级定位不会变化，下次按 §8 原定的 6 个月节奏做才有意义。这次复核的依据是**我们自己这 3 天实际做了什么**：`git log`（2026-07-13 起共 7 次提交，含 `vmr diagnose`/`replay`、`audit.KeyTag` 常量整理、`writeError` 去重、`vmr report` 容错降级、4xx body 上限调整等）、`docs/AUDIT_REPORT.md`（2026-07-15 全量代码审计，78 个 Go 源文件、~19863 行代码逐文件评审）、README 现状、`gh repo view`（仓库已公开，1 star，持续在推）。
+>
+> **三行结论**：
+> 1. 原路线图的 P0/P1 项（`vmr diagnose`/`vmr replay`）已按计划完成，且通过了一次独立全量审计——**工程质量这条腿已经跑到了原计划"6 个月观察期"该有的水平，只用了 3 天**。
+> 2. §6.2 写好但**从未执行**的"叙事/传播"行动项（README 定位重写、"Why vmr over LiteLLM"、HN/Reddit 发声）**一项都没做**——`gh repo view` 显示仍是 1 star。这是当前最大的执行缺口，不是代码问题。
+> 3. `docs/AUDIT_REPORT.md` §4 基于真实代码给出了一批比原 A1-A26 更具体、更可信的候选特性（`--json`/`-no-sessions`/`vmr.sh doctor`/thinking-strip 未触发告警等）——§3 已用它们重新校准优先级，原 A 系列清单保留作历史记录，不再是唯一依据。
+>
+> 下文保留原文不动，仅在需要更新处插入本次复核的段落（标注「**2026-07-16 复核**」），不删改原始调研的论证过程——这份文档本身要延续"设计资产不因单点作者而丢失"的原则（§7 已经这么说过）。
 
 ---
 
@@ -20,6 +31,8 @@
 | **该不该停掉 VMR 迁移到现有产品** | ❌ **不应该** — 没有任何现有成熟产品同时支持 byte-faithful + agent audit |
 | **核心演进方向** | 在 Go-minimalist 哲学下，专注于 VMR 真正擅长的："Agent runtime 旁边的透明 LLM 路由器 + 可调试的审计" |
 | **明确不做** | Web UI / Dashboard / DB 后端 / RBAC / SDK 跨语言 / 协议翻译 / Auto Router |
+
+**2026-07-16 复核**：以上结论全部维持不变，无一条被推翻。唯一要补的是执行状态——"是否值得继续做"从一个前瞻判断变成了已经部分验证的事实：`docs/AUDIT_REPORT.md` 独立审计给出的评价是"架构清晰度优秀、代码质量高、测试覆盖 1:1.2、依赖极简"，说明"核心演进方向"这一行走的路是对的。真正需要现在决策的不是方向，是**节奏**——见下方各节的复核批注，尤其是 §6/§7。
 
 ---
 
@@ -176,6 +189,16 @@
   3. Agent-focused 例子文档（"如何在 Claude Code 里用 VMR 增强 failover"）
 - **推荐度**：✅ **强烈推荐**——这是 VMR **唯一能赢的赛道**
 - **真实依据**：LiteLLM 等是 "for any application"，VMR 可以是 "specifically for AI agents"，定位差异真实存在
+
+**2026-07-16 复核 · 成功条件执行状态**：
+
+| 成功条件 | 状态 | 证据 |
+|---|---|---|
+| 1. README 头版明确 agent-first/byte-faithful | ⚠️ 半完成 | README 的 "Why vmr" 部分已经把 byte-faithful 放在第一条重点讲，措辞也已是"point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK"（不是"built for OpenClaw"，§4.4 提到的风险已规避）；但没有出现 "agent-first" 这个词本身，也没有单独的 "Why vmr over LiteLLM" 章节 |
+| 2. 出现在 Claude Code/OpenClaw/Hermes/Cline/Cursor 的 setup docs 里 | ❌ 未开始 | 没有证据表明任何外部项目的文档引用了 vmr |
+| 3. Agent-focused 例子文档 | ❌ 未开始 | README Quick Start 只有通用 curl 示例，没有"如何在 Claude Code 里用 VMR 增强 failover"这类专门文档 |
+
+条件 1 走在正确方向上但没做全；条件 2/3 完全没有启动——这与 §6.2 当时定下的"Q1 立即启动"的传播计划是同一批遗留项，见本文档 §6 的复核批注。
 
 #### 形态 4：「本地 AI Gateway 平台」
 
@@ -347,7 +370,7 @@
 ### 3.5 简化版的 12 个月路线图
 
 **Q1 (现在 → 9月底)**：
-- ✅ A5 `vmr diagnose` 命令（已完成，2026-07-13；设计细节见 `docs/VirtualModelRouter_v2_Fable5.md` §14.1）
+- ✅ A5 `vmr diagnose` 命令（已完成，2026-07-13；设计细节见 `docs/VirtualModelRouter_System_Design_v2.md` §14.1）
 - ✅ A22 `vmr replay` 命令（已完成，2026-07-13，含 `-line`/`-ts`/`-detail` 三种定位方式；设计细节见同上 §14.2）
 - 修补 audit JSONL 的已知问题（如 routing zstd 在大型 dataset 上的内存）——未启动
 
@@ -371,6 +394,50 @@
 - 引入 A16 loadable Go plugin（如果社区需要）
 - A19 OpenTelemetry/Prometheus 集成
 - 重新评估 商业化（SCL/BSL 模式）应急需求
+
+### 3.6 2026-07-16 复核：候选特性重新校准
+
+**已完成，比原计划提前**：
+
+| 项 | 原计划位置 | 完成日期 |
+|---|---|---|
+| `vmr diagnose` | Q1 / A5 | 2026-07-13 |
+| `vmr replay`（`-line`/`-ts`/`-detail`） | Q1 / A22 | 2026-07-13 |
+| `writeError`/`writeJSON` 从 router/server 两份重复实现合并到 `core` | 不在原清单 | 2026-07-16 |
+| `vmr report` 的 `AnalyzeSessions`（会话分组）失败不再拖死整份报告，降级为警告 | 不在原清单，但直接部分解决了下方 R2 想解决的问题 | 2026-07-16 |
+| 4xx 错误 body 上限 64KB→128KB，审计副本超限追加截断标记（转发给客户端的字节保持原样，不追加标记） | 不在原清单 | 2026-07-16 |
+
+后三项来自 `docs/AUDIT_REPORT.md`（2026-07-15，一次独立全量代码审计）的第一批修复，不是本文档原 A 系列预判到的——这说明**审计驱动的可靠性修复**已经成为一条与"路线图驱动的新特性"并行的真实工作流，下面的候选清单把两者合并考虑。
+
+**候选清单重新校准**：原 A1-A26 是 2026-07-13 在没有全量代码审计支撑下的预判，部分已经被 `docs/AUDIT_REPORT.md` §4（基于真实代码逐文件读出来的机会点）取代或细化。以下按来源标注、去重后重排优先级——`R#` 编号对应 `AUDIT_REPORT.md` §4 的原编号，方便对照：
+
+| # | 特性 | 来源 | 必要性 | 建议优先级 |
+|---|---|---|---|---|
+| R3 | `vmr.sh doctor`——一次性跑 check+diagnose+status 给红绿灯摘要 | AUDIT §4.3 | 高（新用户/自己排障的第一入口，原 A 系列没有等价项） | **P0** |
+| R2 | `vmr report -no-sessions`——跳过会话分析，加速大日志场景 | AUDIT §4.2，呼应原 A4 | 中（"失败拖死整份报告"的痛点已在今天解决；剩下的是纯粹的速度诉求，百万行日志下 session 分析仍要跑分钟级） | P1 |
+| R14 | thinking-strip 未触发时自动打标（`Attempt.Norm` 加 `thinking_process_pattern_detected`） | AUDIT §4.14，呼应原 3.1.1/A20 | 高——`stripThinkingProcess` 硬绑 MiniMax wording 是 `AUDIT_REPORT.md` 唯一标 `[S]` 严重级的发现，观测性是目前唯一低成本缓解手段 | P1 |
+| R1 | `check`/`status`/`dirs` 加 `--json` | AUDIT §4.1，呼应原 A3（`report --json` 已有） | 中（脚本化编排；`vmr.sh doctor` 做出来后价值更高，两者最好一起设计） | P1 |
+| R6 | `vmr diagnose --diff-config`——热重载失败时对比"哪个字段导致拒绝" | AUDIT §4.6 | 中（排障体验，非新用户高频路径） | P2 |
+| R9 | audit `Record` 加 `client_ip`（剥端口的 `Addr`） | AUDIT §4.5 | 中（`vmr report` 按来源 IP 聚合） | P2 |
+| A24 | Provider health score 精细化 | 原清单 | 中 | P2 |
+| A1 | `priority`/`weight` 字段 | 原清单 | 中 | P2 |
+| R7 | `vmr replay -list`——不解码全部内容，只列摘要表 | AUDIT §4.7 | 中（1GB 日志里定位 replay 目标） | P2 |
+| R15 | `vmr replay --format=curl` | AUDIT §4.15 | 低（体验糖，成本很低，可以和 R7 一起做） | P2 |
+| R9b | `vmr report --diff baseline.json` | AUDIT §4.9 | 中（检测 provider 性能退化/用量变化，暂无真实用户反馈驱动） | P3 |
+| R11 | `vmr admin replay`（loopback，生产进程内回放） | AUDIT §4.11 | 低（`vmr replay` 离线已覆盖核心场景，生产内回放是锦上添花） | P3 |
+| R8 | `audit_rotate_interval: hour｜day` | AUDIT §4.8 | 低（Stanford 当前流量级别，天级轮转够用） | P3 |
+| A18 | 用户 hook（OnResponse 脚本注入） | 原清单 | 中 | P3（哲学风险最低但收益也未经验证需求确认） |
+| R4/R13 | `--web` 报告模式 / `-pprof` flag | AUDIT §4.4/4.13/4.10 | 低（没有真实痛点驱动，纯粹"锦上添花"） | P3 |
+| R12 | `cmd/vmr` 拆包（`internal/cli/*`） | AUDIT §4.12 | 低——纯重构，`main.go` 目前 683 行但职责边界清楚，`AUDIT_REPORT.md` 自己评价"内部函数组织清晰"，不算技术债 | 不急，等文件继续长胖再做 |
+
+**明确仍然不做**（与原判断一致，`AUDIT_REPORT.md` 没有发现任何理由推翻）：A7 LiteLLM bypass mode、A13 distributed mode、A14 远程管理、A16 `.so` plugin、A23 request signing。
+
+**近期节奏建议（取代 3.5 的 Q1/Q2 划分——项目实际进度是"天"不是"季度"，继续用季度框架会掩盖真实节奏）**：
+
+1. **下一批（本周内，成本都在 30-60 分钟级）**：R3 `vmr.sh doctor` + R1 `--json`（两者一起设计，`doctor` 内部就是拼接 check/diagnose/status 的机器可读输出）。
+2. **第二批**：R14 thinking-strip 未触发告警——这是 `AUDIT_REPORT.md` 里唯一的 `[S]` 级发现，观测性缺口拖得越久，MiniMax wording 漂移时越难第一时间发现。
+3. **第三批**：R2 `-no-sessions` + R9 `client_ip`——都是 `vmr report` 的增量改进，可以合并成一次"report 可用性"迭代。
+4. **传播动作应该并行推进，而不是排在特性后面**——见 §6 的复核批注：R3/R1 做完后就有了"一条命令看清一切"的演示素材，正好是发 HN/Reddit 帖子的钩子，没有必要等到 1.0。
 
 ---
 
@@ -397,6 +464,8 @@
 | 范式转移 | ❌ 不满足 | AI Agent 仍以 LLM API 为核心 |
 
 **结论**：**当前所有退出条件都不满足**，VMR 应该继续。
+
+**2026-07-16 复核**：`gh repo view` 确认仓库已公开（`bigfatsea/vmr`，创建于 2026-07-06），1 star，持续在推（最后一次 push 就是今天）。四个条件重新核对一遍，结论不变，唯一更新的是第一条的证据更扎实了——`docs/AUDIT_REPORT.md` 的独立全量审计再次确认没有任何现有项目同时具备 byte-faithful + agent-aware + 零依赖三者。
 
 ### 4.3 如果未来退出怎么办
 
@@ -427,6 +496,8 @@
 - 避免 VMR 在 README 里说 "built for OpenClaw" 而应说 "designed for any LLM-based agent runtime, OpenClaw-first"
 - 维护 LiteLLM / Claude Code / Hermes 等其他 agent runtime 的兼容
 
+**2026-07-16 复核**：第一条已经落地——现在的 README 措辞是"point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK at vmr"，没有"built for OpenClaw"这类排他表述，风险已规避。第二条（协议兼容）本来就是设计层面的既有事实，不需要额外动作。
+
 ---
 
 ## 5. 风险矩阵与缓解策略
@@ -443,6 +514,7 @@
 | OpenAI/Anthropic 协议大更新（OpenAI Responses / Anthropic Skills 等）| 中 | 中 | 协议跟随是 P0 任务 |
 | Stanford 健康/家庭变化 | / | / | 设计文档化 |
 | Go 生态与 AI Agent 整合受阻（出现更好原生语言）| 极低 | 中 | Go 已成 AI infra 默认语言之一 |
+| **（2026-07-16 新增）工程执行领先于传播执行** | 高（已发生） | 中 | `docs/AUDIT_REPORT.md` 证实代码质量已经达标，但 §6.2 定的传播动作（README 重写定位、HN/Reddit 发声）3 天过去一项没做，`gh repo view` 仍是 1 star。风险不是"代码不够好"，是"好代码没人看见"——缓解手段是把传播动作从"1.0 之后"提前到"每完成一批可演示的特性就做"，见 §3.6 近期节奏建议第 4 条 |
 
 ### 5.2 三大核心风险深度分析
 
@@ -453,7 +525,7 @@
 **预防措施**：
 
 1. **设计文档化**（**已经完成**）：
-   - `VirtualModelRouter_v2_Fable5.md` ~100KB（设计文档）
+   - `VirtualModelRouter_System_Design_v2.md` ~100KB（设计文档，2026-07-16 更名，内容延续原 `VirtualModelRouter_v2_Fable5.md`）
    - README（中/英 双语）~30KB（用户文档）
    - 加上每次 commit message 详细（已执行）
    - **结论**：任何新人接手可读懂设计
@@ -533,6 +605,18 @@
 2. **对外联结**：与 OpenClaw / Claude Code / Hermes 等 agent 维护者建立非正式联系
 3. **决策点**：1k stars（如果达到）时，评估是否招外部贡献者、是否启 source-available
 
+### 6.3 2026-07-16 复核：Q1 行动项执行进度
+
+| 行动项 | 状态 | 说明 |
+|---|---|---|
+| 1. 重新设计 README，明确定位 | ⚠️ 半完成 | 见 §2 复核：byte-faithful 已是头版重点，但没有独立的 "Why vmr over LiteLLM" / "OpenClaw setup guide" 章节 |
+| 2. `vmr diagnose` + `vmr replay` | ✅ 已完成 | 2026-07-13，且通过了 2026-07-15 的独立全量审计 |
+| 3. cost aggregation（token→费用） | ❌ 未完成 | 设计文档 §12.2 已有一轮价目表方案（key 格式约束已定），未实现；不算高优先——`tokens_in/out` 统计本身已经相当完整，费用换算是价目表维护成本 vs 便利性的取舍，Stanford 没有反馈说这是当前阻塞项 |
+| 4. 社区发声（HN/Reddit） | ❌ 未开始 | `gh repo view` 确认仍是 1 star |
+| 5. 1.0 release（预计 Q3 2026） | 未到时间点，不评估 | 距 Q1 结束还有时间，节奏暂不需要调整 |
+
+**判断**：路径 B（Agent-first 主动叙事）在"叙事"这一半完全没有执行，"Agent-first"目前只体现在代码和设计文档里，还没体现在任何面向外部的表达里。§3.6 已经给出更具体的近期特性节奏，但**特性不是这里的瓶颈**——按当前证据，继续埋头加特性只会让"代码质量 vs 传播执行"的落差进一步拉大。下一步最高杠杆的动作是行动项 1 和 4，而不是任何新特性；§3.6 第 4 条建议把两者穿插进行（做完一批可演示的特性就顺手发声，不等到攒够素材或等到 1.0）。
+
 ---
 
 ## 7. 最终判断（一次性总结）
@@ -554,10 +638,12 @@
 | **1** | byte-faithful 哲学坚守 | VMR 唯一存在的理由 |
 | **2** | agent-first 定位叙事 | 与 LiteLLM/Bifrost 差异化的唯一支点 |
 | **3** | 与 OpenClaw / Claude Code 生态深度集成 | 真实需求 + 现实生态 |
-| **4** | 关键 debug 工具（diagnose, replay, watch）| 把 byte-faithful 的副产品转为可见价值 |
-| **5** | cost aggregation（已有 v1.3 验证）| 用户实际关切 |
+| **4** | 关键 debug 工具（diagnose ✅ / replay ✅ / `vmr.sh doctor`，见 §3.6 R3）| 把 byte-faithful 的副产品转为可见价值 |
+| **5** | cost aggregation（$ 费用换算，见下方 2026-07-16 更正） | 用户实际关切，但目前只是设计，未实现 |
 | **6** | 协议前向兼容（已有，但持续 P0）| 不可失去 |
 | ❌ | Web UI / DB / RBAC / SaaS | 违反哲学，且被现有产品占据 |
+
+**2026-07-16 更正**：原表第 5 行称 cost aggregation "已有 v1.3 验证、Stanford 已经在用"——核对代码后这个说法不准确。`internal/report` 目前只统计 **token 数量**（in/out/cache-hit 等），没有任何 `$` 费用换算/价目表逻辑；设计文档 §12.2 只记录了"价目表设计过一轮"的方案（含 key 格式约束），从未实现。原文很可能把"token 用量统计"（真实存在）和"$ 成本核算"（不存在）搞混了。这不影响本节的方向判断，但既然要基于"当前版本最新情况"复核，这处不实之处应该更正，避免以讹传讹。
 
 ### 不被思路局限的提醒
 
@@ -597,8 +683,11 @@
 | Stanford 个人时间长尾 5 年可用 | ⭐⭐⭐ | 推测（无定量数据）|
 | VMR 当前设计文档质量 | ⭐⭐⭐⭐⭐ | 本地代码完整掌握 |
 | VMR 真实需求 | ⭐⭐⭐⭐⭐ | Stanford 实测使用（config.yaml、audit JSONL 已使用中）|
+| （2026-07-16 新增）VMR 仓库已公开，1 star，创建于 2026-07-06 | ⭐⭐⭐⭐⭐ | `gh repo view bigfatsea/vmr` |
+| （2026-07-16 新增）VMR 代码质量（架构/测试覆盖/依赖极简）| ⭐⭐⭐⭐⭐ | `docs/AUDIT_REPORT.md`，78 个 Go 源文件逐文件独立审计，非自评 |
+| （2026-07-16 新增）§6.2 传播行动项执行率 0/2（README 定位重写半完成、社区发声未开始）| ⭐⭐⭐⭐⭐ | 直接读 README 现状 + `gh repo view` 星数 |
 
-**未覆盖 / 待核实**：
+**未覆盖 / 待核实**（原样保留，3 天内没有新信息可以填补）：
 - OpenRouter 真实成本结构（决定 SaaS 商业化天花板）
 - Bifrost 团队的目标（决定 Go-side 未来威胁 VMR 的程度）
 - New API / One API 的 fork 关系（影响 China 市场预测）
@@ -607,9 +696,10 @@
 
 **更新建议**：
 
-- 每 6 个月重新做竞品扫描（格局可能大变化）
+- 每 6 个月重新做竞品扫描（格局可能大变化）——**下次窗口约 2027-01**，这次 2026-07-16 复核不提前触发它，因为触发条件是"格局变化"而不是"时间到了就该看"，3 天内竞品格局不可能变化
 - 1.0 release 前重写本报告
 - 若 Stanford 进入商业化讨论，重新评估 SaaS 路径的可能性
+- （2026-07-16 新增）**下次复核的触发条件改为"里程碑驱动"而非"日期驱动"**：完成 §3.6 近期节奏建议的第 1-3 批特性后，或 §6.2 传播行动项任一项落地后，都值得回来更新一次本文档——那时会有新的、真实的执行结果可以核对，比按固定周期重读更有信息量
 
 ---
 

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-15 05:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -272,7 +272,7 @@ go test -race ./...
 
 新增 Provider：OpenAI/Anthropic 兼容的厂商只是一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现三方法接口 + `cmd/vmr/main.go` 一行 blank import。
 
-架构与全部设计决策（含每条背后的事故账本）：[设计文档](docs/VirtualModelRouter_v2_Fable5.md)。
+架构与全部设计决策（含每条背后的事故账本）：[设计文档](docs/VirtualModelRouter_System_Design_v2.md)。
 
 ## 开源协议
 

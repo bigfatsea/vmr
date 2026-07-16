@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-15 05:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -273,7 +273,7 @@ go test -race ./...
 
 Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the three-method interface + one blank import in `cmd/vmr/main.go`.
 
-Architecture and every design decision (with the war stories behind them): [design doc](docs/VirtualModelRouter_v2_Fable5.md) (Chinese).
+Architecture and every design decision (with the war stories behind them): [design doc](docs/VirtualModelRouter_System_Design_v2.md) (Chinese).
 
 ## License
 
