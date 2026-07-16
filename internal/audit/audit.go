@@ -236,7 +236,7 @@ func mask(v string) string {
 }
 
 // keyTagLen bounds how many trailing characters of a matched config.APIKeys
-// entry ever become its ClientKeyTag. 6 (vs. mask()'s 4) trades a couple
+// entry ever become its ClientKeyTag. 8 (vs. mask()'s 4) trades a couple
 // more characters of exposure for a label that reads as deliberate — see
 // config.example.yaml's "end your key in -something-readable" convention.
 // This is independent of mask()'s redaction length: mask() protects every
@@ -244,7 +244,7 @@ func mask(v string) string {
 // api_keys entries, whose minimum length config.Config.validate already
 // enforces specifically so this never exposes a whole key (see keyTagLen's
 // config-side counterpart, the 16-char minimum).
-const keyTagLen = 6
+const keyTagLen = 8
 
 // KeyTag derives a short, non-secret label from a credential's tail — the
 // caller-facing "who sent this" identity for `vmr report` grouping. Called
@@ -263,13 +263,13 @@ const keyTagLen = 6
 // keyTagLen simply loses its hyphen and everything before it once the
 // window no longer reaches back that far — capped, never longer.
 //
-// Examples (keyTagLen = 6):
+// Examples (keyTagLen = 8):
 //
-//	...-alice    → window "-alice" → tag "alice"  (5 chars, hyphen at 0)
-//	...proj-al   → window "roj-al" → tag "al"      (2 chars, hyphen at 3)
-//	...X-abcd    → window "X-abcd" → tag "abcd"    (4 chars, hyphen at 1)
-//	...-abcdefgh → window "cdefgh" → tag "cdefgh"  (hyphen 8 back, outside the window — none found, window kept whole)
-//	...9k3f7a    → window "9k3f7a" → tag "9k3f7a"  (no hyphen anywhere — window kept whole)
+//	...am-alice   → window "am-alice"   → tag "alice"     (5 chars, hyphen at 2)
+//	...roj-al     → window "roj-al" (key shorter than window, so window = whole key) → tag "al" (2 chars, hyphen at 3)
+//	...x-abcd     → window "x-abcd" (key shorter than window, so window = whole key) → tag "abcd" (4 chars, hyphen at 1)
+//	...-abcdefghi → window "bcdefghi"   → tag "bcdefghi"  (hyphen 9 back, outside the window — none found, window kept whole)
+//	...am9k3f7a   → window "am9k3f7a"   → tag "am9k3f7a"  (no hyphen anywhere — window kept whole)
 //
 // Assumes the key is ASCII (true for every real bearer-token format). A key
 // shorter than keyTagLen is used whole as the window, then the same hyphen

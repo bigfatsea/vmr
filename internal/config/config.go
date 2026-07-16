@@ -28,7 +28,7 @@ const (
 	DefaultIdleTimeout       = 120 * time.Second
 	DefaultImageCacheTTLDays = 7 // downscaled-image cache entries unused this many days get evicted
 	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
-	// solely so audit.KeyTag's trailing-6-character window can never be
+	// solely so audit.KeyTag's trailing 8-character window can never be
 	// the whole key — a short key would otherwise have its full secret
 	// value written, in the clear, into every report and filename its tag
 	// ends up in.

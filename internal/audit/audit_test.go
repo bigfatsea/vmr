@@ -42,12 +42,12 @@ func TestKeyTag(t *testing.T) {
 		{"hyphen at window start", "sk-vmr-team-alice", "alice"},
 		{"hyphen mid-window, short suffix", "sk-vmr-proj-al", "al"},
 		{"hyphen mid-window, four-char suffix", "sk-vmr-teamx-abcd", "abcd"},
-		{"suffix longer than window loses hyphen", "sk-vmr-team-abcdefgh", "cdefgh"},
-		{"no hyphen anywhere", "sk-vmr-team9k3f7a", "9k3f7a"},
-		{"hyphen is the window's last char", "sk-vmr-teamabcde-", "abcde-"},
+		{"suffix longer than window loses hyphen", "sk-vmr-team-abcdefghi", "bcdefghi"},
+		{"no hyphen anywhere", "sk-vmr-team9k3f7a", "am9k3f7a"},
+		{"hyphen is the window's last char", "sk-vmr-teamabcde-", "amabcde-"},
 		{"key shorter than window, hyphen present", "ab-cd", "cd"},
 		{"key shorter than window, no hyphen", "abcd", "abcd"},
-		{"key exactly window length, no hyphen", "abcdef", "abcdef"},
+		{"key exactly window length, no hyphen", "abcdefgh", "abcdefgh"},
 		{"multiple hyphens in window: last one wins", "sk-vmr-a-b-cd", "cd"},
 	}
 	for _, c := range cases {

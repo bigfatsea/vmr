@@ -19,17 +19,20 @@ listen: 127.0.0.1:8800
 #                                # vmr-requests-index.md / vmr-report.md / details/. No config flag
 #                                # needed — nothing changes at all until you actually configure this.
 #                                #
-#                                # Tag derivation: take the key's last 6 characters, then, if that
+#                                # Tag derivation: take the key's last 8 characters, then, if that
 #                                # window contains a "-", keep only what follows the LAST "-" inside
 #                                # it. So end each key in "-<a short, readable word>" and the tag
 #                                # reads as intentional:
-#                                #   ...-alice   -> tag "alice"   (5 chars fit the 6-char window)
-#                                #   ...-t2      -> tag "t2"      (short suffixes are kept whole, not
-#                                #                                 padded with whatever preceded them)
-#                                #   ...-openclaw-> tag "enclaw"  (a suffix longer than 6 chars just
-#                                #                                 loses its "-" and everything before
-#                                #                                 it once the window can't reach that
-#                                #                                 far back — keep suffixes <= 6 chars)
+#                                #   ...-alice     -> tag "alice"     (5 chars fit the 8-char window)
+#                                #   ...-t2        -> tag "t2"        (short suffixes are kept whole,
+#                                #                                     not padded with whatever
+#                                #                                     preceded them)
+#                                #   ...-openclaw  -> tag "openclaw"  (8 chars exactly fill the window
+#                                #                                     — one more and it'd lose its
+#                                #                                     "-" and everything before it,
+#                                #                                     the same way a 9+ char suffix
+#                                #                                     does once the window can't
+#                                #                                     reach the hyphen anymore)
 #                                # Aim for >= 3-4 meaningful characters: shorter suffixes collide with
 #                                # each other more easily (two unrelated keys landing on the same tag
 #                                # would have their traffic merged, indistinguishably, into one file).
