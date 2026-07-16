@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -21,6 +21,7 @@ Point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK at one stable virtual m
 - **Flight-recorder audit log, agent-shaped** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, and the exact normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics — and it understands agent traffic specifically: requests group into sessions → tasks → turns, each turn's delta gets a 🆕 marker, and a tool-usage report tells you which declared tools are never actually called. Old days auto-compress to `.zst` (20–75× smaller) and can auto-expire.
 - **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; off by default, fail-open, content-hash cached on disk so the same image is never reprocessed.
 - **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Four direct dependencies, full list in `go.mod`.
+- **Measured, not assumed** — load-tested at up to 150 req/s: sub-6ms p95 routing/passthrough overhead on 9 of 11 tested scenarios; the only real cost is optional image downscaling. See [`loadtest/`](loadtest/).
 
 ```
 OpenAI client    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI face)

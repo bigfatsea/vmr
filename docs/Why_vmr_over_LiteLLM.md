@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
 
 # Why vmr over LiteLLM (or Portkey, or any other translation gateway)
 
@@ -33,6 +33,8 @@ This isn't hypothetical. This very codebase has two narrow, explicitly-scoped re
 | Agent-session awareness | Built in: groups requests into sessions → tasks → turns, flags unused declared tools, tracks per-turn deltas | Not a design focus |
 | Audit trail | Every request, every failover attempt, every byte-level normalization applied — one JSONL line, replayable | Logging exists, not agent-session-shaped |
 | Best fit | One (or a few) agent runtimes you trust, running unattended, where byte fidelity matters more than provider count | Centralized team gateway serving many providers/users with spend management and RBAC out of the box |
+
+Simplicity isn't just a design preference here — it's cheap in practice too: load-tested at up to 150 req/s, vmr's own routing overhead sits at single-digit milliseconds (p95) on 9 of 11 tested scenarios ([`loadtest/`](../loadtest/)).
 
 ## When you actually want LiteLLM instead
 

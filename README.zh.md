@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -21,6 +21,7 @@ Agent 是无人值守跑的：凌晨三点某家供应商限流、欠费、宕�
 - **飞行记录仪式审计日志，为 agent 场景而设计** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计——而且专门读得懂 Agent 流量：请求自动分组为会话 → 任务 → 轮次，每份详单用 🆕 前缀标记本轮新增，工具使用报告直接告诉你哪些声明的工具从未被调用。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍），也可以设置自动过期。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；默认关闭，fail-open；降采样结果按内容哈希落盘缓存，避免重复处理。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。只有 4 个直接依赖，完整清单见 `go.mod`。
+- **性能是量出来的，不是猜的** —— 压测至 150 req/s：11 个测试场景中有 9 个路由/透传开销 p95 在 6ms 以内，唯一有实质成本的是可选的图片降采样。细节见 [`loadtest/`](loadtest/)。
 
 ```
 OpenAI 客户端    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI 面)
