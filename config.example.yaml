@@ -1,4 +1,4 @@
-# Ver 2026-07-17 00:00, by Sonnet 5
+# Ver 2026-07-17 03:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -7,62 +7,27 @@
 # syntax to write, rather than being a config error to catch.
 
 listen: 127.0.0.1:8800
-# api_keys:                      # optional: protect the router itself (Bearer or x-api-key accepted).
-#                                # The single credential per request also identifies the caller: each
-#                                # request that matches one of these gets tagged with that key's own
-#                                # tail — `vmr report`
-#                                # then automatically writes one extra vmr-requests-<tag>.jsonl /
-#                                # vmr-requests-index-<tag>.md pair per distinct tag observed, next to
-#                                # the usual (still full, still unaffected) vmr-requests.jsonl /
-#                                # vmr-requests-index.md / vmr-report.md / details/. No config flag
-#                                # needed — nothing changes at all until you actually configure this.
+# api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
+#                                # tail also tags its caller: `vmr report` then auto-writes a
+#                                # vmr-requests-<tag>.jsonl / vmr-requests-index-<tag>.md pair per
+#                                # tag, alongside the usual full files. No flag needed for this.
 #                                #
-#                                # Tag derivation: take the key's last 8 characters, then, if that
-#                                # window contains a "-", keep only what follows the LAST "-" inside
-#                                # it. So end each key in "-<a short, readable word>" and the tag
-#                                # reads as intentional:
-#                                #   ...-alice     -> tag "alice"     (5 chars fit the 8-char window)
-#                                #   ...-t2        -> tag "t2"        (short suffixes are kept whole,
-#                                #                                     not padded with whatever
-#                                #                                     preceded them)
-#                                #   ...-openclaw  -> tag "openclaw"  (8 chars exactly fill the window
-#                                #                                     — one more and it'd lose its
-#                                #                                     "-" and everything before it,
-#                                #                                     the same way a 9+ char suffix
-#                                #                                     does once the window can't
-#                                #                                     reach the hyphen anymore)
-#                                # Aim for >= 3-4 meaningful characters: shorter suffixes collide with
-#                                # each other more easily (two unrelated keys landing on the same tag
-#                                # would have their traffic merged, indistinguishably, into one file).
-#                                #
-#                                # The tag also becomes a filename (vmr-requests-<tag>.jsonl,
-#                                # vmr-requests-index-<tag>.md), so vmr sanitizes it first: anything
-#                                # outside A-Za-z0-9._- is replaced with "-". vmr does NOT detect or
-#                                # warn about two DIFFERENT tags collapsing to the SAME sanitized
-#                                # filename (e.g. "bob/eve" and "bob-eve" both become "bob-eve") — that
-#                                # would silently merge their reports, one overwriting the other. Avoiding
-#                                # this is on you: pick suffixes that are already filename-safe
-#                                # (letters/digits/hyphen/underscore only) and distinct from each other
-#                                # after that substitution.
-#                                # Each key must be >= 16 characters — short enough to make the tag
-#                                # window the WHOLE key would otherwise write your secret, in the
-#                                # clear, into every report and filename; vmr refuses to start with a
-#                                # shorter entry here.
+#                                # Tag = last 8 chars of the key, cut to after the last "-" in that
+#                                # window — so end each key "-<label>" (e.g. ...-alice -> tag
+#                                # "alice"). Use >= 3-4 chars so two keys don't land on the same tag.
+#                                # The tag becomes a filename (sanitized: non A-Za-z0-9._- -> "-"),
+#                                # and vmr does NOT detect two DIFFERENT tags colliding after that —
+#                                # pick suffixes that are already filename-safe and stay distinct.
+#                                # Each key must be >= 16 chars, else the tag window is the whole key.
 #   - ${VMR_KEY_ALICE}
 #   - ${VMR_KEY_OPENCLAW}
 #
-# Private network, no auth wanted at all? Leave api_keys unset — the door
-# stays fully open, but whatever value a client chooses to send as
-# Authorization/x-api-key still gets the same tag derivation applied and
-# recorded, so callers can self-identify to `vmr report` with zero config
-# here: just end each client's own value in "-<label>" (no 16-char minimum
-# in this mode — it's not a secret, there's nothing to leak). A client
-# sending nothing still gets an untagged record.
+# No api_keys configured: the door stays open, but each client's own Authorization/x-api-key
+# value still gets the same tag treatment (no 16-char minimum here — it's not a secret). A
+# client sending nothing stays untagged.
 #
-# (The old singular `api_key` catch-all was removed — a config still using
-# it is rejected at load with a migration message: move the value into
-# api_keys. Unknown/misspelled config keys are likewise load errors now,
-# never silently ignored.)
+# (Singular `api_key` was removed — a config still using it fails to load with a migration
+# message. Unknown/misspelled keys are load errors too, never silently ignored.)
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
