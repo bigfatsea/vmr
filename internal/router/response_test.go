@@ -784,3 +784,47 @@ func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
 		}
 	}
 }
+
+// TestRespStream_ThinkQuotedMidTextUntouched locks in the strip guard: a
+// reply that merely QUOTES a <think>…</think> block mid-text (user asking
+// about the tag format, a code sample echoing it) is NOT the MiniMax
+// thinking shape — the quoted span must reach the client intact, streamed.
+func TestRespStream_ThinkQuotedMidTextUntouched(t *testing.T) {
+	in := `data: {"choices":[{"delta":{"content":"The tag format is <think>reasoning goes here</think> followed by the reply."}}]}` + "\n\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if !strings.Contains(out, "<think>reasoning goes here</think>") {
+		t.Errorf("quoted think block was stripped from a normal reply: %q", out)
+	}
+	for _, a := range rs.Applied() {
+		if a == "think_strip" || a == "buffered" {
+			t.Errorf("normal reply must stream untouched, applied = %v", rs.Applied())
+		}
+	}
+}
+
+// TestRespStream_ThinkQuotedMidTextNonStreamUntouched is the buffered-path
+// counterpart: a single JSON body quoting <think> mid-content must survive
+// finalizeBuffered's guarded strip.
+func TestRespStream_ThinkQuotedMidTextNonStreamUntouched(t *testing.T) {
+	in := `{"model":"M","choices":[{"message":{"role":"assistant","content":"Explanation: models emit <think>steps</think> before answering."}}]}`
+	out := readAll(t, newRespStream(strings.NewReader(in), "agent", false, "openai", false))
+	if !strings.Contains(out, "<think>steps</think>") {
+		t.Errorf("quoted think block stripped from JSON body: %q", out)
+	}
+}
+
+// TestRespStream_AnthropicTextThinkStripped keeps the anthropic-face
+// coverage the guard refactor must not lose: a text delta OPENING with
+// <think> is the same MiniMax pathology and is still buffered + stripped.
+func TestRespStream_AnthropicTextThinkStripped(t *testing.T) {
+	in := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<think>internal</think>\n\nvisible"}}` + "\n\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "anthropic", false)
+	out := readAll(t, rs)
+	if strings.Contains(out, "internal") {
+		t.Errorf("anthropic-face think block leaked: %q", out)
+	}
+	if !strings.Contains(out, "visible") {
+		t.Errorf("post-think content lost: %q", out)
+	}
+}

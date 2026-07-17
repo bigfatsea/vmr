@@ -1,4 +1,4 @@
-// Ver 2026-07-15 03:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Structured exports derived from the session analysis: the per-request
 // feature file (vmr-requests.jsonl — the raw material for ad-hoc statistics
@@ -382,9 +382,8 @@ type requestRow struct {
 // path, then — for every distinct non-empty ClientKeyTag observed in a —
 // exports the same records filtered to that one caller into a sibling file
 // next to path (e.g. vmr-requests.jsonl → vmr-requests-alice.jsonl), fully
-// automatic: absent entirely when nobody's using tagged api_keys (see
-// docs/ClientAPIKeyGrouping_Design_Sonnet5.md). Returns the full record
-// count.
+// automatic: absent entirely when nobody's using tagged api_keys (design
+// doc §9.4 "按调用方分组导出"). Returns the full record count.
 func WriteRequests(a *SessionAnalysis, path string) (int, error) {
 	if err := writeRequestRows(a.Recs, path); err != nil {
 		return 0, err
@@ -411,7 +410,9 @@ func WriteRequests(a *SessionAnalysis, path string) (int, error) {
 // ClientKeyTag-filtered subset of it) — called once for the full set and
 // once more per observed tag.
 func writeRequestRows(recs []*ReqInfo, path string) error {
-	f, err := os.Create(path)
+	// 0o600 for the same reason detail.go uses it: full request/response
+	// bodies, same sensitivity as the 0600 audit files they came from.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

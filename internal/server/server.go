@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -41,31 +41,30 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// authenticate enforces the router's own optional API key(s) and reports
+// authenticate enforces the router's own optional API keys and reports
 // which one matched. Both credential conventions are accepted:
 // Authorization: Bearer (OpenAI) and x-api-key (Anthropic SDKs send only
 // this). tag is audit.KeyTag(the matched Cfg.APIKeys entry) — "" when auth
-// is disabled entirely, the request matched the catch-all Cfg.APIKey, or
-// (ok == false) nothing matched at all.
+// is disabled entirely or (ok == false) nothing matched at all. api_keys is
+// the only auth surface (the singular api_key catch-all was removed: it
+// added nothing this list can't express, at the cost of a second code path
+// here and a second config field to document — config.validate rejects it
+// with a migration message).
 //
-// Self-declared tag, no config needed: when neither APIKey nor APIKeys is
-// set, the door stays fully open (unchanged), but whatever credential-shaped
-// value the client chooses to send still gets KeyTag-derived and recorded —
-// a private-network caller can identify itself to `vmr report` just by
-// ending its own Authorization/x-api-key value in "-<label>", with zero
-// vmr-side config. A client sending nothing (the common case today) still
-// gets "" — see docs/ClientAPIKeyGrouping_Design_Sonnet5.md.
+// Self-declared tag, no config needed: when APIKeys is empty, the door
+// stays fully open, but whatever credential-shaped value the client chooses
+// to send still gets KeyTag-derived and recorded — a private-network caller
+// can identify itself to `vmr report` just by ending its own
+// Authorization/x-api-key value in "-<label>", with zero vmr-side config.
+// A client sending nothing still gets "" (design doc §4.3/§9.4).
 func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
 	cfg := s.rt.Snapshot().Cfg
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if got == "" {
 		got = r.Header.Get("x-api-key")
 	}
-	if cfg.APIKey == "" && len(cfg.APIKeys) == 0 {
+	if len(cfg.APIKeys) == 0 {
 		return audit.KeyTag(got), true // no key configured: auth disabled, tag self-declared
-	}
-	if cfg.APIKey != "" && subtle.ConstantTimeCompare([]byte(got), []byte(cfg.APIKey)) == 1 {
-		return "", true // catch-all key: valid, untagged
 	}
 	for _, key := range cfg.APIKeys {
 		if subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1 {

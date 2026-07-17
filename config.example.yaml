@@ -1,4 +1,4 @@
-# Ver 2026-07-15 05:00, by Sonnet 5
+# Ver 2026-07-16 21:00, by Fable 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -7,12 +7,10 @@
 # syntax to write, rather than being a config error to catch.
 
 listen: 127.0.0.1:8800
-# api_key: sk-vmr-local-xxx      # optional: protect the router itself (Bearer or x-api-key). Works
-#                                # alongside api_keys below (both are valid simultaneously) — this one
-#                                # is a catch-all credential, never tagged in reports.
-# api_keys:                      # optional: additional named-by-convention credentials, for telling
-#                                # different callers apart after the fact. Each request that matches
-#                                # one of these gets tagged with that key's own tail — `vmr report`
+# api_keys:                      # optional: protect the router itself (Bearer or x-api-key accepted).
+#                                # The single credential per request also identifies the caller: each
+#                                # request that matches one of these gets tagged with that key's own
+#                                # tail — `vmr report`
 #                                # then automatically writes one extra vmr-requests-<tag>.jsonl /
 #                                # vmr-requests-index-<tag>.md pair per distinct tag observed, next to
 #                                # the usual (still full, still unaffected) vmr-requests.jsonl /
@@ -43,14 +41,18 @@ listen: 127.0.0.1:8800
 #   - ${VMR_KEY_ALICE}
 #   - ${VMR_KEY_OPENCLAW}
 #
-# Private network, no auth wanted at all? Leave BOTH api_key and api_keys
-# unset — the door stays fully open (unchanged), but whatever value a
-# client chooses to send as Authorization/x-api-key still gets the same
-# tag derivation applied and recorded, so callers can self-identify to
-# `vmr report` with zero config here: just end each client's own value in
-# "-<label>" (no 16-char minimum in this mode — it's not a secret, there's
-# nothing to leak). A client sending nothing still gets an untagged record,
-# exactly like today.
+# Private network, no auth wanted at all? Leave api_keys unset — the door
+# stays fully open, but whatever value a client chooses to send as
+# Authorization/x-api-key still gets the same tag derivation applied and
+# recorded, so callers can self-identify to `vmr report` with zero config
+# here: just end each client's own value in "-<label>" (no 16-char minimum
+# in this mode — it's not a secret, there's nothing to leak). A client
+# sending nothing still gets an untagged record.
+#
+# (The old singular `api_key` catch-all was removed — a config still using
+# it is rejected at load with a migration message: move the value into
+# api_keys. Unknown/misspelled config keys are likewise load errors now,
+# never silently ignored.)
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)

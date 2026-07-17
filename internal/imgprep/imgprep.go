@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package imgprep detects inline image attachments in request bodies and,
 // when configured, downscales the oversized ones before they reach the
@@ -33,11 +33,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"os"
 	"strings"
 	"time"
 
@@ -121,9 +123,14 @@ func Downscale(body []byte, protocol string, opts Options) (result []byte, image
 	// Defensive belt on top of careful error handling below: this function
 	// processes attacker-influenced image bytes through decoders that were
 	// not written with adversarial input in mind. A panic here must not take
-	// down the request.
+	// down the request — but it must not vanish either: every other fail-open
+	// path in this package leaves a trace (audit metadata, skipped-image
+	// info), so a recovered panic logs one stderr line. Without it, a decoder
+	// bug (or adversarial input) would permanently disable downscaling for an
+	// image with zero operator-visible signal.
 	defer func() {
-		if recover() != nil {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "imgprep: panic recovered, request passed through unmodified: %v\n", r)
 			result, images = body, nil
 		}
 	}()

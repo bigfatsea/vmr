@@ -1,4 +1,4 @@
-// Ver 2026-07-13 22:45, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package report turns audit JSONL files (design doc §9.2) into aggregate
 // statistics: a fine-grained JSON data table plus a human-readable Markdown
@@ -329,6 +329,21 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 			if rec.Client.Response != nil {
 				usage, usageOK = ExtractUsage(rec.Client.Response.Body)
 			}
+			// Request-shape stats are computed ONCE per record and shared by
+			// every bucket below: bodyBytes re-marshals the whole decoded
+			// body and messageCount/roleChars walk the full message tree —
+			// with 4 Row buckets + 2 Hour buckets + up to 2 Endpoint buckets
+			// each doing it independently, the same multi-MB body used to be
+			// parsed 6-8 times per record, the dominant cost of `vmr report`
+			// on large logs. st.roleChars is shared read-only.
+			st := recStats{bytesIn: bodyBytes(rec.Client.Request.Body)}
+			if rec.Client.Response != nil {
+				st.bytesOut = bodyBytes(rec.Client.Response.Body)
+			}
+			if n, ok := messageCount(rec.Client.Request.Body); ok {
+				st.msgs, st.msgsOK = n, true
+				st.roleChars = roleChars(rec.Client.Request.Body)
+			}
 
 			// 1. Rows: date × protocol × model (finest grain)
 			key := date + "\x00" + rec.Protocol + "\x00" + model
@@ -337,10 +352,10 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 				row = &Row{Date: date, Model: model, Protocol: rec.Protocol}
 				rows[key] = row
 			}
-			addRecord(row, &rec, usage, usageOK)
+			addRecord(row, &rec, usage, usageOK, &st)
 
 			// 2. Overall: every record contributes (single bucket, no key).
-			addRecord(&rep.Overall, &rec, usage, usageOK)
+			addRecord(&rep.Overall, &rec, usage, usageOK, &st)
 
 			// 3. ByModel: keyed by (model, protocol).
 			mKey := model + "\x00" + rec.Protocol
@@ -349,7 +364,7 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 				mr = &Row{Model: model, Protocol: rec.Protocol}
 				byModel[mKey] = mr
 			}
-			addRecord(mr, &rec, usage, usageOK)
+			addRecord(mr, &rec, usage, usageOK, &st)
 
 			// 4. ByDate: keyed by date only (protocol merged).
 			dr, ok := byDate[date]
@@ -357,7 +372,7 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 				dr = &Row{Date: date}
 				byDate[date] = dr
 			}
-			addRecord(dr, &rec, usage, usageOK)
+			addRecord(dr, &rec, usage, usageOK, &st)
 
 			// 5. HourRow: (date, local hour), plus an hour-of-day-only bucket
 			// (all dates merged) computed independently — NOT derived from
@@ -370,13 +385,13 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 				hr = &HourRow{Date: date, Hour: hour}
 				hours[hk] = hr
 			}
-			addHour(hr, &rec, usage, usageOK)
+			addHour(hr, &rec, usage, usageOK, &st)
 			hod, ok := hoursOfDay[hour]
 			if !ok {
 				hod = &HourRow{Hour: hour}
 				hoursOfDay[hour] = hod
 			}
-			addHour(hod, &rec, usage, usageOK)
+			addHour(hod, &rec, usage, usageOK, &st)
 
 			// 6. EndpointRow: one per (date, endpoint) from the attempts loop,
 			// plus an endpoint-only bucket (all dates merged) computed
@@ -407,8 +422,8 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 				addAttempt(epAll, &a)
 
 				if a.Endpoint == successEp {
-					addEndpointRequest(ep, &rec, usage, usageOK)
-					addEndpointRequest(epAll, &rec, usage, usageOK)
+					addEndpointRequest(ep, &rec, usage, usageOK, &st)
+					addEndpointRequest(epAll, &rec, usage, usageOK, &st)
 				}
 			}
 		}, func() { // oversized line: skipped with bounded memory, counted as a parse error
@@ -499,7 +514,17 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 	return rep, nil
 }
 
-func addRecord(row *Row, rec *audit.Record, usage Usage, usageOK bool) {
+// recStats carries the per-record values that are derived from the (possibly
+// multi-MB) request/response bodies, computed once in Build's record loop and
+// shared read-only by every bucket the record lands in.
+type recStats struct {
+	bytesIn, bytesOut int64
+	msgs              int
+	msgsOK            bool
+	roleChars         map[string]int64
+}
+
+func addRecord(row *Row, rec *audit.Record, usage Usage, usageOK bool, st *recStats) {
 	row.Requests++
 	switch rec.Outcome {
 	case "ok":
@@ -520,15 +545,13 @@ func addRecord(row *Row, rec *audit.Record, usage Usage, usageOK bool) {
 	row.Images += n
 	row.ImagesCompressed += compressed
 
-	row.BytesIn += bodyBytes(rec.Client.Request.Body)
-	if rec.Client.Response != nil {
-		row.BytesOut += bodyBytes(rec.Client.Response.Body)
-	}
+	row.BytesIn += st.bytesIn
+	row.BytesOut += st.bytesOut
 
-	if n, ok := messageCount(rec.Client.Request.Body); ok {
-		row.Messages += int64(n)
+	if st.msgsOK {
+		row.Messages += int64(st.msgs)
 		row.MessagesKnown++
-		for role, c := range roleChars(rec.Client.Request.Body) {
+		for role, c := range st.roleChars {
 			if row.RoleChars == nil {
 				row.RoleChars = map[string]int64{}
 			}
@@ -581,7 +604,7 @@ func addRecord(row *Row, rec *audit.Record, usage Usage, usageOK bool) {
 	}
 }
 
-func addHour(h *HourRow, rec *audit.Record, usage Usage, usageOK bool) {
+func addHour(h *HourRow, rec *audit.Record, usage Usage, usageOK bool, st *recStats) {
 	h.Requests++
 	switch rec.Outcome {
 	case "ok":
@@ -605,14 +628,12 @@ func addHour(h *HourRow, rec *audit.Record, usage Usage, usageOK bool) {
 	n, compressed := countImages(rec.Images)
 	h.Images += n
 	h.ImagesCompressed += compressed
-	h.BytesIn += bodyBytes(rec.Client.Request.Body)
-	if rec.Client.Response != nil {
-		h.BytesOut += bodyBytes(rec.Client.Response.Body)
-	}
-	if n, ok := messageCount(rec.Client.Request.Body); ok {
-		h.Messages += int64(n)
+	h.BytesIn += st.bytesIn
+	h.BytesOut += st.bytesOut
+	if st.msgsOK {
+		h.Messages += int64(st.msgs)
 		h.MessagesKnown++
-		for role, c := range roleChars(rec.Client.Request.Body) {
+		for role, c := range st.roleChars {
 			if h.RoleChars == nil {
 				h.RoleChars = map[string]int64{}
 			}
@@ -648,14 +669,12 @@ func addHour(h *HourRow, rec *audit.Record, usage Usage, usageOK bool) {
 // ttft / dur_ms) to the endpoint that actually served the client — i.e.
 // the successful attempt's endpoint. This is what the client experienced.
 // Called once per request, only on the successful attempt's row.
-func addEndpointRequest(ep *EndpointRow, rec *audit.Record, usage Usage, usageOK bool) {
+func addEndpointRequest(ep *EndpointRow, rec *audit.Record, usage Usage, usageOK bool, st *recStats) {
 	n, compressed := countImages(rec.Images)
 	ep.Images += n
 	ep.ImagesCompressed += compressed
-	ep.BytesIn += bodyBytes(rec.Client.Request.Body)
-	if rec.Client.Response != nil {
-		ep.BytesOut += bodyBytes(rec.Client.Response.Body)
-	}
+	ep.BytesIn += st.bytesIn
+	ep.BytesOut += st.bytesOut
 	if usageOK {
 		ep.TokensIn += usage.In
 		ep.TokensInCached += usage.CacheRead

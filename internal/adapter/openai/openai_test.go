@@ -69,6 +69,8 @@ func TestClassifyError(t *testing.T) {
 		{400, `{"error":{"message":"Content Exists Risk"}}`, core.ErrContent},                                                          // DeepSeek content filter
 		{400, `{"type":"error","error":{"message":"invalid params, output content violation (1027)"}}`, core.ErrContent},               // MiniMax style
 		{400, `{"error":{"message":"输入包含敏感内容，请修改后重试"}}`, core.ErrContent},
+		{402, `{"error":{"message":"request rejected by content moderation"}}`, core.ErrContent},             // content wording wins over the bare 402→ErrEndpoint rule
+		{404, `{"error":{"message":"resource not found due to content policy violation"}}`, core.ErrContent}, // same for 404
 		{451, `{}`, core.ErrContent},
 		{429, `{"error":{"message":"you have exceeded your quota"}}`, core.ErrEndpoint},
 		{429, `{"error":{"message":"insufficient balance"}}`, core.ErrEndpoint},

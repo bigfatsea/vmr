@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package diagnose implements `vmr diagnose`: config validation plus a
 // series of read-only checks (DNS/TLS/proxy reachability, then a real
@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"vmr/internal/adapter"
 	"vmr/internal/config"
@@ -305,7 +306,13 @@ func snippet(body []byte) string {
 	s := strings.TrimSpace(string(body))
 	s = strings.Join(strings.Fields(s), " ") // collapse whitespace/newlines for a one-line detail
 	if len(s) > 120 {
-		s = s[:120] + "…"
+		// Rune-boundary cut: domestic providers answer with Chinese error
+		// text, and a mid-rune byte slice would print invalid UTF-8.
+		n := 120
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n] + "…"
 	}
 	return s
 }

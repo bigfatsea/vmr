@@ -421,6 +421,23 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	if _, err := os.ReadFile(filepath.Join(out, "20260709-100001.000_agent_real-1_ok.json")); err != nil {
 		t.Errorf("ok record missing .json sibling: %v", err)
 	}
+
+	// Exports carry the same conversation bodies as the 0600 audit source —
+	// they must not loosen its permissions (owner-only, no group/other bits).
+	for _, p := range []string{
+		out,
+		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.md"),
+		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.json"),
+		filepath.Join(dir, "vmr-requests-index.md"),
+	} {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			t.Errorf("%s: perm %o leaks group/other access, want owner-only", p, st.Mode().Perm())
+		}
+	}
 }
 
 // TestWriteDetailsByTag covers the per-client-key sibling indices: records

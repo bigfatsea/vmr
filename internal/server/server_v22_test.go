@@ -222,17 +222,17 @@ models:
 
 func TestXAPIKeyAuth(t *testing.T) {
 	o, a1, a2 := newUpstream(t), newAnthUpstream(t), newAnthUpstream(t)
-	ts := newRouterServer(t, dualProtocolYAML(o.srv.URL, a1.srv.URL, a2.srv.URL, "api_key: sk-vmr"))
+	ts := newRouterServer(t, dualProtocolYAML(o.srv.URL, a1.srv.URL, a2.srv.URL, "api_keys:\n  - sk-vmr-dual-key01"))
 
 	resp, _ := messages(t, ts, anthReq, nil)
 	if resp.StatusCode != 401 {
 		t.Errorf("no key: %d", resp.StatusCode)
 	}
-	resp, _ = messages(t, ts, anthReq, map[string]string{"x-api-key": "sk-vmr"})
+	resp, _ = messages(t, ts, anthReq, map[string]string{"x-api-key": "sk-vmr-dual-key01"})
 	if resp.StatusCode != 200 {
 		t.Errorf("x-api-key auth failed: %d", resp.StatusCode)
 	}
-	resp, _ = messages(t, ts, anthReq, map[string]string{"Authorization": "Bearer sk-vmr"})
+	resp, _ = messages(t, ts, anthReq, map[string]string{"Authorization": "Bearer sk-vmr-dual-key01"})
 	if resp.StatusCode != 200 {
 		t.Errorf("bearer on anthropic ingress failed: %d", resp.StatusCode)
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:00, by Fable 5
+// Ver 2026-07-16 21:00, by Fable 5
 package adapter
 
 import (
@@ -40,6 +40,12 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		}
 		return core.ErrAuth
 	case status == 402 || status == 404:
+		// Same content-first rule as 403/429/generic 4xx: a vendor that
+		// carries a moderation rejection on one of these codes must fail
+		// over without cooling the (healthy) endpoint down.
+		if contentHint(snippet) {
+			return core.ErrContent
+		}
 		return core.ErrEndpoint
 	case status == 408:
 		return core.ErrTransient
@@ -97,21 +103,48 @@ func RewriteModel(raw json.RawMessage, model string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	ranges, ok := topLevelModelValues(raw)
+	ranges, ok := topLevelValues(raw, modelKeyLiteral)
 	if !ok || len(ranges) == 0 {
 		return rewriteModelGeneric(raw, mv)
 	}
-	if len(ranges) == 1 && bytes.Equal(raw[ranges[0][0]:ranges[0][1]], mv) {
-		return raw, nil // already the target name: zero-copy
+	return spliceValues(raw, ranges, mv), nil
+}
+
+// RewriteStream replaces (or, via the generic fallback, adds) the top-level
+// "stream" value with the given boolean, using the same byte-splice scanner
+// as RewriteModel so every other byte is preserved. Used by `vmr replay
+// -stream` — live traffic never rewrites this field.
+func RewriteStream(raw json.RawMessage, stream bool) ([]byte, error) {
+	sv := []byte("false")
+	if stream {
+		sv = []byte("true")
 	}
-	out := make([]byte, 0, len(raw)+len(mv))
+	ranges, ok := topLevelValues(raw, streamKeyLiteral)
+	if !ok || len(ranges) == 0 {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		m["stream"] = sv
+		return core.MarshalNoEscape(m)
+	}
+	return spliceValues(raw, ranges, sv), nil
+}
+
+// spliceValues replaces every [start,end) range in raw with newVal,
+// returning raw itself (zero-copy) when nothing would change.
+func spliceValues(raw []byte, ranges [][2]int, newVal []byte) []byte {
+	if len(ranges) == 1 && bytes.Equal(raw[ranges[0][0]:ranges[0][1]], newVal) {
+		return raw // already the target value: zero-copy
+	}
+	out := make([]byte, 0, len(raw)+len(newVal))
 	prev := 0
 	for _, r := range ranges {
 		out = append(out, raw[prev:r[0]]...)
-		out = append(out, mv...)
+		out = append(out, newVal...)
 		prev = r[1]
 	}
-	return append(out, raw[prev:]...), nil
+	return append(out, raw[prev:]...)
 }
 
 // rewriteModelGeneric is the pre-splice implementation, kept as the fallback
@@ -129,15 +162,19 @@ func rewriteModelGeneric(raw json.RawMessage, mv []byte) ([]byte, error) {
 	return core.MarshalNoEscape(m)
 }
 
-var modelKeyLiteral = []byte(`"model"`)
+var (
+	modelKeyLiteral  = []byte(`"model"`)
+	streamKeyLiteral = []byte(`"stream"`)
+)
 
-// topLevelModelValues scans raw as a JSON object and returns the [start,end)
-// byte range of the value of every top-level "model" key. Duplicate keys are
-// pathological but legal JSON — rewriting all of them keeps the guarantee
-// regardless of which duplicate the upstream honors. ok=false means the
-// scanner declined (not an object, or malformed) and the caller should use
-// the generic path; it is not a validation verdict.
-func topLevelModelValues(raw []byte) (ranges [][2]int, ok bool) {
+// topLevelValues scans raw as a JSON object and returns the [start,end)
+// byte range of the value of every top-level key matching keyLiteral (the
+// quoted key, e.g. `"model"`). Duplicate keys are pathological but legal
+// JSON — rewriting all of them keeps the guarantee regardless of which
+// duplicate the upstream honors. ok=false means the scanner declined (not
+// an object, or malformed) and the caller should use the generic path; it
+// is not a validation verdict.
+func topLevelValues(raw, keyLiteral []byte) (ranges [][2]int, ok bool) {
 	i := skipJSONWS(raw, 0)
 	if i >= len(raw) || raw[i] != '{' {
 		return nil, false
@@ -164,7 +201,7 @@ func topLevelModelValues(raw []byte) (ranges [][2]int, ok bool) {
 		if !ok {
 			return nil, false
 		}
-		isModel := bytes.Equal(raw[keyStart:i], modelKeyLiteral)
+		isMatch := bytes.Equal(raw[keyStart:i], keyLiteral)
 		i = skipJSONWS(raw, i)
 		if i >= len(raw) || raw[i] != ':' {
 			return nil, false
@@ -175,7 +212,7 @@ func topLevelModelValues(raw []byte) (ranges [][2]int, ok bool) {
 		if !ok {
 			return nil, false
 		}
-		if isModel {
+		if isMatch {
 			ranges = append(ranges, [2]int{valStart, i})
 		}
 	}

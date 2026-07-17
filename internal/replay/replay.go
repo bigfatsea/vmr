@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package replay implements `vmr replay`: rebuild and resend one request
 // from an audit JSONL record, using the exact same adapter.BuildRequest vmr
@@ -118,7 +118,19 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	}
 
 	stream := rv.Stream
-	if opts.Stream != nil {
+	if opts.Stream != nil && *opts.Stream != rv.Stream {
+		// -stream must change the bytes actually sent, not just local
+		// bookkeeping: the upstream reads the body's own "stream" field, so
+		// force it there with the same top-level byte splice RewriteModel
+		// uses (adds the key when the record's body never had one). rv is
+		// updated in place so everything downstream — the outbound request,
+		// the -record audit line — sees the request as replayed.
+		newRaw, err := adapter.RewriteStream(rv.Client.Request.Body, *opts.Stream)
+		if err != nil {
+			return fmt.Errorf("-stream: rewrite body: %w", err)
+		}
+		rv.Client.Request.Body = newRaw
+		rv.Stream = *opts.Stream
 		stream = *opts.Stream
 	}
 
@@ -447,4 +459,3 @@ func writeReplayRecord(path string, rv *recordView, ep *core.Endpoint, req *http
 	_, err = f.Write(append(line, '\n'))
 	return err
 }
-

@@ -1,4 +1,4 @@
-// Ver 2026-07-15 03:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -110,12 +111,16 @@ type Timeouts struct {
 // is just "register an adapter" — no schema change here.
 type Config struct {
 	Listen string `yaml:"listen"`
-	APIKey string `yaml:"api_key"`
-	// APIKeys is an additional list of valid credentials, alongside APIKey
-	// (both work simultaneously — APIKey, if set, stays a valid catch-all).
-	// Each entry gets tagged in the audit trail via audit.KeyTag (the key's
-	// own tail, not a separately configured name) so `vmr report` can group
-	// a shared instance's traffic by caller after the fact — see
+	// RemovedAPIKey exists only to catch configs still using the removed
+	// singular `api_key` field with a migration message instead of the
+	// generic strict-decoding error. api_keys is the one auth surface now:
+	// the untagged catch-all added nothing api_keys can't do, at the cost of
+	// a second code path in authenticate and a second thing to document.
+	RemovedAPIKey string `yaml:"api_key"`
+	// APIKeys is the list of credentials vmr itself accepts (empty = auth
+	// disabled). Each entry gets tagged in the audit trail via audit.KeyTag
+	// (the key's own tail, not a separately configured name) so `vmr report`
+	// can group a shared instance's traffic by caller after the fact — see
 	// config.example.yaml for the naming convention. minAPIKeyLen guards
 	// against a key short enough that its whole value becomes the tag.
 	APIKeys     []string `yaml:"api_keys"`
@@ -169,7 +174,12 @@ func Load(path string) (*Config, error) {
 func Parse(raw []byte) (*Config, error) {
 	expanded := expandEnv(string(raw))
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+	// KnownFields: a misspelled key (max_concurency, image_downscale_px, …)
+	// must be a load error, not a silently ignored no-op the user believes
+	// is in effect — the same fail-fast contract as the rest of validation.
+	dec := yaml.NewDecoder(strings.NewReader(expanded))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && err != io.EOF { // io.EOF = empty file; validate reports "no providers" below
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	cfg.applyDefaults()
@@ -266,6 +276,9 @@ func (c *Config) applyDefaults() {
 func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
+	}
+	if c.RemovedAPIKey != "" {
+		return fmt.Errorf("api_key has been removed: move the credential into the api_keys list instead (each entry must be >= %d characters — its tail becomes the caller tag in vmr report)", minAPIKeyLen)
 	}
 	for i, k := range c.APIKeys {
 		if len(k) < minAPIKeyLen {

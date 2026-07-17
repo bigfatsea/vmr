@@ -337,19 +337,49 @@ func TestUnknownProtocolKeyRejected(t *testing.T) {
 	}
 }
 
-func TestAPIKeysParsedAlongsideLegacyAPIKey(t *testing.T) {
+func TestAPIKeysParsed(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
-		"listen: 127.0.0.1:9900\napi_key: sk-vmr-legacy-catchall\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby", 1)
+		"listen: 127.0.0.1:9900\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.APIKey != "sk-vmr-legacy-catchall" {
-		t.Errorf("legacy api_key: got %q", cfg.APIKey)
-	}
 	if want := []string{"sk-vmr-team-alice", "sk-vmr-team-bobby"}; len(cfg.APIKeys) != len(want) ||
 		cfg.APIKeys[0] != want[0] || cfg.APIKeys[1] != want[1] {
 		t.Errorf("api_keys: got %v, want %v", cfg.APIKeys, want)
+	}
+}
+
+// TestLegacyAPIKeyRejectedWithMigrationMessage locks in the removal of the
+// singular api_key: a config still carrying it must fail to load with a
+// message that names api_keys as the replacement, not a generic yaml error.
+func TestLegacyAPIKeyRejectedWithMigrationMessage(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\napi_key: sk-vmr-legacy-catchall", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "api_key has been removed") ||
+		!strings.Contains(err.Error(), "api_keys") {
+		t.Errorf("want migration error mentioning api_keys, got %v", err)
+	}
+}
+
+// TestUnknownFieldRejected locks in strict decoding: a misspelled key must be
+// a load error, not a silently ignored no-op the user believes is in effect.
+func TestUnknownFieldRejected(t *testing.T) {
+	cases := []string{
+		"max_concurency: 8",       // misspelled top-level field
+		"image_downscale_px: 512", // plausible-but-wrong field name
+	}
+	for _, extra := range cases {
+		yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\n"+extra, 1)
+		if _, err := Parse([]byte(yaml)); err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("%s: want a field-not-found error, got %v", extra, err)
+		}
+	}
+	// Nested typo inside a provider entry is caught too.
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_kye: x", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("nested provider typo accepted")
 	}
 }
 

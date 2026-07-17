@@ -177,3 +177,53 @@ func BenchmarkRewriteModelGeneric(b *testing.B) {
 		}
 	}
 }
+
+func TestRewriteStream(t *testing.T) {
+	cases := []struct {
+		name, raw, want string
+		stream          bool
+	}{
+		{"false to true, bytes otherwise preserved",
+			`{"messages":[{"role":"user","content":"hi"}],  "stream" : false , "model":"m"}`,
+			`{"messages":[{"role":"user","content":"hi"}],  "stream" : true , "model":"m"}`, true},
+		{"true to false",
+			`{"stream":true,"model":"m"}`, `{"stream":false,"model":"m"}`, false},
+		{"nested stream key untouched",
+			`{"stream":false,"metadata":{"stream":true}}`, `{"stream":true,"metadata":{"stream":true}}`, true},
+		{"escaped mention in content untouched",
+			`{"content":"set {\"stream\":false} please","stream":false}`,
+			`{"content":"set {\"stream\":false} please","stream":true}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := RewriteStream([]byte(c.raw), c.stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(out) != c.want {
+				t.Errorf("got %s\nwant %s", out, c.want)
+			}
+		})
+	}
+}
+
+func TestRewriteStream_SameValueZeroCopy(t *testing.T) {
+	raw := []byte(`{"stream":true,"model":"m"}`)
+	out, err := RewriteStream(raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &out[0] != &raw[0] {
+		t.Error("expected zero-copy return when the value already matches")
+	}
+}
+
+func TestRewriteStream_MissingKeyAdded(t *testing.T) {
+	out, err := RewriteStream([]byte(`{"model":"m","messages":[]}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"stream":true`) {
+		t.Errorf("stream key not added: %s", out)
+	}
+}

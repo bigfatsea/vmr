@@ -106,7 +106,7 @@ func TestDailyRotation(t *testing.T) {
 
 	// day1 is no longer "today" as of the day2 write: the rotation sweep
 	// compresses it to .zst (Layer 2 of the audit log compression design —
-	// docs/AuditLogCompression_Analysis_Sonnet5.md — runs unconditionally,
+	// the audit-compression analysis, folded into design doc §9.5 — runs unconditionally,
 	// independent of retention).
 	if _, err := os.Stat(filepath.Join(dir, "vmr-audit-2026-07-07.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("day1 plain file should have been compressed away, stat err=%v", err)

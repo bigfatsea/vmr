@@ -629,3 +629,66 @@ func TestRun_MissingLocatorRequiresAuditPath(t *testing.T) {
 		t.Error("expected an error when neither -detail nor an audit file argument is given")
 	}
 }
+
+// TestRun_StreamOverrideRewritesBody locks in that -stream changes the bytes
+// the upstream actually receives (the body's own top-level "stream" field),
+// not just replay-local bookkeeping — the flag used to be silently inert.
+func TestRun_StreamOverrideRewritesBody(t *testing.T) {
+	dir := t.TempDir()
+	var gotBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody = nil
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"resp1","choices":[]}`)
+	}))
+	defer upstream.Close()
+
+	cfgPath := writeConfig(t, dir, upstream.URL, true)
+	rec := chatRecord("vm", "hi") // record body has no "stream" key; rec.Stream=false
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", rec)
+
+	streamOn := true
+	recordPath := filepath.Join(dir, "replay-record.jsonl")
+	var out bytes.Buffer
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1",
+		Stream: &streamOn, RecordPath: recordPath,
+	}, &out)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, ok := gotBody["stream"].(bool); !ok || !v {
+		t.Errorf(`upstream body "stream" = %v, want true (flag must rewrite the body)`, gotBody["stream"])
+	}
+	// The -record line reflects the request as replayed, override included.
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written audit.Record
+	if err := json.Unmarshal(bytes.TrimSpace(data), &written); err != nil {
+		t.Fatal(err)
+	}
+	if !written.Stream {
+		t.Error("-record line must carry the overridden stream=true")
+	}
+	if !strings.Contains(string(data), `\"stream\":true`) && !strings.Contains(string(data), `"stream":true`) {
+		t.Errorf("-record client body missing rewritten stream field: %s", data)
+	}
+
+	// Explicit -stream false against a body that already says true.
+	rec2 := chatRecord("vm", "hi2")
+	rec2.Stream = true
+	rec2.Client.Request.Body = audit.EncodeBody([]byte(`{"model":"vm","stream":true,"messages":[{"role":"user","content":"hi2"}]}`))
+	auditPath2 := writeAuditLine(t, dir, "audit2.jsonl", rec2)
+	streamOff := false
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath2, Provider: "p1", Stream: &streamOff,
+	}, &out); err != nil {
+		t.Fatalf("Run(off): %v", err)
+	}
+	if v, ok := gotBody["stream"].(bool); !ok || v {
+		t.Errorf(`upstream body "stream" = %v, want false`, gotBody["stream"])
+	}
+}

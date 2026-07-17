@@ -1,4 +1,4 @@
-// Ver 2026-07-15 03:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -79,7 +79,10 @@ type indexEntry struct {
 }
 
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// 0o700/0o600 throughout: detail files and indices carry the same full
+	// conversation bodies as the audit JSONL they were derived from, which is
+	// deliberately written 0600 — the exports must not silently loosen that.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, err
 	}
 	var entries []indexEntry
@@ -109,7 +112,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 			if name == "" {
 				name = detailFileName(&rec, used)
 			}
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec, info)), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec, info)), 0o600); err != nil {
 				writeErr = err
 				return
 			}
@@ -118,7 +121,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 			// parsing the Markdown.
 			if raw, err := json.MarshalIndent(&rec, "", "  "); err == nil {
 				jsonName := strings.TrimSuffix(name, ".md") + ".json"
-				if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o600); err != nil {
 					writeErr = err
 					return
 				}
@@ -157,7 +160,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 	})
 
 	indexPath := filepath.Join(filepath.Dir(dir), "vmr-requests-index.md")
-	if err := os.WriteFile(indexPath, []byte(renderIndex(entries, sess)), 0o644); err != nil {
+	if err := os.WriteFile(indexPath, []byte(renderIndex(entries, sess)), 0o600); err != nil {
 		return len(entries), err
 	}
 
@@ -168,7 +171,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 	// adjustment). The shared details/*.md|json files themselves are
 	// never filtered or duplicated — a request's detail pair belongs to
 	// exactly one caller regardless of who's asking, so mixing tags in
-	// dir costs nothing (see docs/ClientAPIKeyGrouping_Design_Sonnet5.md).
+	// dir costs nothing (design doc §9.4 "按调用方分组导出").
 	byTag := map[string]bool{}
 	for _, e := range entries {
 		if e.info != nil && e.info.ClientKeyTag != "" {
@@ -183,7 +186,7 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 			}
 		}
 		tagIndexPath := filepath.Join(filepath.Dir(dir), fmt.Sprintf("vmr-requests-index-%s.md", sanitizeName(tag)))
-		if err := os.WriteFile(tagIndexPath, []byte(renderIndex(tagEntries, filterSessByTag(sess, tag))), 0o644); err != nil {
+		if err := os.WriteFile(tagIndexPath, []byte(renderIndex(tagEntries, filterSessByTag(sess, tag))), 0o600); err != nil {
 			return len(entries), fmt.Errorf("client key %q: %w", tag, err)
 		}
 	}

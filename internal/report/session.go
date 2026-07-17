@@ -1,8 +1,9 @@
-// Ver 2026-07-15 03:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
-// Method and evidence: docs/AgentSessionGrouping_Analysis_Fable5.md.
+// Method and evidence: design doc §9.4 "Agent 会话分析" (the standalone
+// analysis document was folded into that section and deleted).
 //
 // The core signal is protocol-generic — agent clients resend the whole
 // conversation each turn, so the first non-system message fingerprints the
@@ -21,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"vmr/internal/audit"
 )
@@ -54,9 +56,9 @@ type ReqInfo struct {
 	Model, Protocol, Outcome string
 
 	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim: "" when
-	// auth was disabled, the request matched the catch-all Config.APIKey,
-	// or nothing matched. Drives the by-tag sibling exports in export.go/
-	// detail.go — see docs/ClientAPIKeyGrouping_Design_Sonnet5.md.
+	// auth was disabled and the client sent no credential, or nothing
+	// matched. Drives the by-tag sibling exports in export.go/detail.go —
+	// see design doc §9.4 "按调用方分组导出".
 	ClientKeyTag string
 
 	// grouping
@@ -746,11 +748,19 @@ func stripBracketPrefix(s string) string {
 	return s
 }
 
+// capStr caps s at n BYTES (the callers' budgets are byte budgets — 200B
+// containment needles, 512KB previews) but never cuts through a UTF-8
+// sequence: the cut point backs up to the nearest rune boundary, so Chinese/
+// emoji content near the cap can't produce invalid UTF-8 in session titles,
+// instruction previews, or compaction needles.
 func capStr(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // ---- filename (shared with detail.go) ----

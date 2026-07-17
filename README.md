@@ -59,7 +59,7 @@ Point your client's base URL at vmr and you're done:
 
 ```bash
 # OpenAI-protocol client (OPENAI_BASE_URL=http://127.0.0.1:8800/v1)
-# add -H "Authorization: Bearer <api_key>" if vmr's own api_key is set in config.yaml
+# add -H "Authorization: Bearer <key>" if vmr's own api_keys is set in config.yaml
 curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}'
@@ -70,10 +70,10 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
   -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
 
-# List virtual models (same optional api_key as above)
+# List virtual models (same optional api_keys auth as above)
 curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"
 
-# Per-endpoint health + concurrency (loopback-only; no api_key required even if one is set)
+# Per-endpoint health + concurrency (loopback-only; no api_keys auth required even if configured)
 curl http://127.0.0.1:8800/admin/status
 ```
 

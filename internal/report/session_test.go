@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"vmr/internal/audit"
 )
@@ -789,5 +790,24 @@ func TestNoReplyMergesRetryIntoSameTask(t *testing.T) {
 	}
 	if got := s.Tasks[0].Recs[1].TaskSeq; got != 2 {
 		t.Errorf("r2 task seq = %d, want 2", got)
+	}
+}
+
+// TestCapStrRuneSafe locks in that capStr's byte cap never cuts through a
+// UTF-8 sequence — Chinese/emoji session titles and compaction needles near
+// the cap must stay valid UTF-8.
+func TestCapStrRuneSafe(t *testing.T) {
+	s := strings.Repeat("审", 100) // 3 bytes per rune
+	for n := 0; n <= 12; n++ {
+		got := capStr(s, n)
+		if !utf8.ValidString(got) {
+			t.Errorf("capStr(…, %d) produced invalid UTF-8: %q", n, got)
+		}
+		if len(got) > n {
+			t.Errorf("capStr(…, %d) exceeded the byte cap: %d bytes", n, len(got))
+		}
+	}
+	if got := capStr("ascii only", 200); got != "ascii only" {
+		t.Errorf("short string must be returned whole: %q", got)
 	}
 }

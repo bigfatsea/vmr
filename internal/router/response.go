@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-16 21:00, by Fable 5
 //
 // Response normalizer. Guiding principle: what the client receives through
 // VMR must match what it would receive calling the provider directly, except
@@ -98,12 +98,47 @@ var thinkingProcessFullMatch = regexp.MustCompile(`[ \t]*Looks good\.[ \t]+Pro(?
 
 var (
 	contentFieldMarker    = []byte(`"content":"`)
+	textFieldMarker       = []byte(`"text":"`)
 	thinkingProcessPrefix = []byte("Thinking Process:")
 	thinkOpenMarker       = []byte("<think>")
 	thinkCloseMarker      = []byte("</think>")
 	doneSentinel          = []byte("data: [DONE]")
 	eventSep              = []byte("\n\n")
 )
+
+// thinkGuardMarkers are the payload fields whose value can carry MiniMax's
+// inline-think pathology: openai delta/message content and anthropic text.
+// Dedicated reasoning fields (reasoning_content, thinking) are well-behaved
+// by construction and never guard-checked.
+var thinkGuardMarkers = [][]byte{contentFieldMarker, textFieldMarker}
+
+// thinkShapeGuard reports whether the FIRST non-empty content/text value in b
+// starts with <think> — the only shape the think-strip repair targets
+// (MiniMax-M3 thinking mode opens the reply with the tag). Without this
+// guard, a reply that merely QUOTES a <think>…</think> block mid-text (a
+// user asking about the tag format, a code sample echoing it) would have the
+// quoted span silently deleted. Symmetric with stripThinkingProcess's own
+// first-content-prefix guard; kept as cheap byte scans, same as the rest of
+// this file.
+func thinkShapeGuard(b []byte) bool {
+	for off := 0; off < len(b); {
+		idx, mlen := -1, 0
+		for _, m := range thinkGuardMarkers {
+			if j := bytes.Index(b[off:], m); j >= 0 && (idx < 0 || off+j < idx) {
+				idx, mlen = off+j, len(m)
+			}
+		}
+		if idx < 0 {
+			return false
+		}
+		v := trimEscapedWS(b[idx+mlen:])
+		if len(v) > 0 && v[0] != '"' { // first non-empty value decides
+			return bytes.HasPrefix(v, thinkOpenMarker)
+		}
+		off = idx + mlen
+	}
+	return false
+}
 
 // softBlockMarkers flag MiniMax's "soft" content-policy block: a 2xx
 // response that embeds a compliance flag instead of erroring, per the design
@@ -319,7 +354,7 @@ func (s *respStream) decide() {
 			}
 			s.buf = s.pending
 			s.pending = nil
-			s.thinkTriggered = bytes.Contains(s.buf, thinkOpenMarker)
+			s.thinkTriggered = thinkShapeGuard(s.buf)
 			return
 		case verdictPassthrough:
 			s.mode = modePassthrough
@@ -390,7 +425,10 @@ func (s *respStream) finalizeBuffered() {
 		b = modelFieldPattern.ReplaceAll(b, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
 	}
-	if thinkPattern.Match(b) {
+	// Guarded like the streaming path: only a response whose first non-empty
+	// content/text value STARTS with <think> is the MiniMax thinking shape;
+	// a body that merely quotes the tag mid-text passes through untouched.
+	if thinkShapeGuard(b) && thinkPattern.Match(b) {
 		s.rawPreStrip = raw
 		b = thinkPattern.ReplaceAll(b, nil)
 		s.noteApplied("think_strip")
@@ -447,15 +485,15 @@ const (
 
 // classifyEvent inspects one complete SSE event and reports whether it
 // proves the response needs buffering (MiniMax thinking shapes), proves
-// it can stream through untouched, or proves nothing yet.
+// it can stream through untouched, or proves nothing yet. Both thinking
+// shapes are detected by the same rule — the first non-empty content/text
+// value STARTS with the shape's marker — so a reply that merely mentions
+// <think> or "Thinking Process:" mid-text streams through untouched.
 func classifyEvent(ev []byte) verdict {
-	if bytes.Contains(ev, thinkOpenMarker) {
-		return verdictBuffered
-	}
 	if v, ok := afterMarker(ev, contentFieldMarker); ok {
 		v = trimEscapedWS(v)
 		if len(v) > 0 && v[0] != '"' { // non-empty content value
-			if bytes.HasPrefix(v, thinkingProcessPrefix) {
+			if bytes.HasPrefix(v, thinkOpenMarker) || bytes.HasPrefix(v, thinkingProcessPrefix) {
 				return verdictBuffered
 			}
 			return verdictPassthrough
@@ -464,6 +502,12 @@ func classifyEvent(ev []byte) verdict {
 	for _, m := range passthroughStringMarkers {
 		if v, ok := afterMarker(ev, m); ok {
 			if v = trimEscapedWS(v); len(v) > 0 && v[0] != '"' {
+				// anthropic text deltas can carry the same inline-think
+				// pathology as openai content; the dedicated reasoning
+				// fields (reasoning_content, thinking) cannot.
+				if bytes.Equal(m, textFieldMarker) && bytes.HasPrefix(v, thinkOpenMarker) {
+					return verdictBuffered
+				}
 				return verdictPassthrough
 			}
 		}

@@ -13,6 +13,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -636,5 +637,30 @@ func TestCacheMissWithoutCacheDirNeverTouchesDisk(t *testing.T) {
 	img, _ := extractOpenAIImage(t, out)
 	if b := img.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
 		t.Errorf("downscale without a cache dir should still work: got %dx%d", b.Dx(), b.Dy())
+	}
+}
+
+// panickyReader backs a registered fake image format whose DecodeConfig
+// panics — simulating a stdlib/x-image decoder bug on adversarial input, the
+// exact class of failure Downscale's recover() exists for.
+func init() {
+	image.RegisterFormat("panicfmt", "PANICFMT",
+		func(io.Reader) (image.Image, error) { panic("panicfmt: decode") },
+		func(io.Reader) (image.Config, error) { panic("panicfmt: decode config") })
+}
+
+// TestDownscalePanicRecoveredFailsOpen locks in the recover() contract: a
+// decoder panic must neither escape (crashing the request goroutine) nor
+// alter the request — the original bytes pass through unmodified with no
+// image metadata. The stderr trace it emits is deliberately not asserted
+// (logging, not behavior).
+func TestDownscalePanicRecoveredFailsOpen(t *testing.T) {
+	body := openAIReq(t, dataURI("image/png", []byte("PANICFMT-then-garbage")))
+	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("panic path must return the original bytes unmodified")
+	}
+	if images != nil {
+		t.Errorf("panic path must not report image metadata, got %v", images)
 	}
 }

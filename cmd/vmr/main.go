@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-16 21:00, by Fable 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -166,7 +166,9 @@ func cmdReport(args []string) error {
 		rep.Sessions = sess.SessionRows()
 		rep.Workloads = sess.Workloads()
 	}
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+	// 0o700/0o600: report outputs embed full conversation bodies from the
+	// 0600 audit files — the derived copies must not loosen that.
+	if err := os.MkdirAll(*outDir, 0o700); err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
@@ -175,10 +177,10 @@ func cmdReport(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(jsonPath, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(jsonPath, append(data, '\n'), 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o644); err != nil {
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
@@ -479,7 +481,7 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		return fmt.Sprintf("%d%s", v, unit)
 	}
 	auth := "off"
-	if cfg.APIKey != "" || len(cfg.APIKeys) > 0 {
+	if len(cfg.APIKeys) > 0 {
 		auth = "on"
 	}
 	imgScale := "off"

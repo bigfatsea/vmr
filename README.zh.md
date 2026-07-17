@@ -58,7 +58,7 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 
 ```bash
 # OpenAI 协议客户端（OPENAI_BASE_URL=http://127.0.0.1:8800/v1）
-# 如果 config.yaml 里设置了 vmr 自己的 api_key，加上 -H "Authorization: Bearer <api_key>"
+# 如果 config.yaml 里设置了 vmr 自己的 api_keys，加上 -H "Authorization: Bearer <key>"
 curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}'
@@ -69,10 +69,10 @@ curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
   -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
 
-# 列出虚拟模型（认证规则同上，用的是 vmr 自己的 api_key）
+# 列出虚拟模型（认证规则同上，用的是 vmr 自己的 api_keys）
 curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"
 
-# 各 endpoint 的健康状态 + 并发情况（仅限本机回环访问；即使配了 api_key 也不需要）
+# 各 endpoint 的健康状态 + 并发情况（仅限本机回环访问；即使配了 api_keys 也不需要）
 curl http://127.0.0.1:8800/admin/status
 ```
 

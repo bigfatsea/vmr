@@ -66,9 +66,9 @@ type Record struct {
 	// ClientKeyTag identifies which config.APIKeys entry authenticated this
 	// request — KeyTag(the matched key), so it's a short non-secret label
 	// derived from the key itself rather than a separately configured name.
-	// "" when auth is disabled, the request matched the catch-all
-	// Config.APIKey instead, no key matched at all, or (vmr replay) the
-	// record wasn't produced by a live authenticated request.
+	// "" when auth is disabled and the client sent no credential, no key
+	// matched at all, or (vmr replay) the record wasn't produced by a live
+	// authenticated request.
 	ClientKeyTag string `json:"client_key_tag,omitempty"`
 }
 
@@ -248,8 +248,8 @@ const keyTagLen = 8
 
 // KeyTag derives a short, non-secret label from a credential's tail — the
 // caller-facing "who sent this" identity for `vmr report` grouping. Called
-// on a matched config.APIKeys entry, and (server.authenticate, when neither
-// APIKey nor APIKeys is configured at all) on whatever unvalidated value a
+// on a matched config.APIKeys entry, and (server.authenticate, when
+// APIKeys is not configured at all) on whatever unvalidated value a
 // client voluntarily sends — KeyTag itself doesn't care which; either way
 // the input is just a string, and the 16-character minimum that keeps the
 // former case safe (see below) simply doesn't apply to the latter, since an

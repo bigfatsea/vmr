@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"vmr/internal/config"
 	"vmr/internal/core"
@@ -413,5 +414,21 @@ func TestRun_BadConfigReturnsNilReport(t *testing.T) {
 	}
 	if rep != nil {
 		t.Errorf("rep = %+v, want nil on config failure", rep)
+	}
+}
+
+// TestSnippetRuneSafe: provider error bodies are frequently Chinese; the
+// 120-byte cut must land on a rune boundary, never mid-character.
+func TestSnippetRuneSafe(t *testing.T) {
+	body := []byte(strings.Repeat("错", 100)) // 300 bytes of 3-byte runes
+	got := snippet(body)
+	if !utf8.ValidString(got) {
+		t.Errorf("snippet produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("long body must be truncated with an ellipsis: %q", got)
+	}
+	if short := snippet([]byte("plain")); short != "plain" {
+		t.Errorf("short body must pass through: %q", short)
 	}
 }

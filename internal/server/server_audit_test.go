@@ -189,10 +189,10 @@ func TestErrorBodyCappedAndAuditMarksTruncation(t *testing.T) {
 
 func TestAuditRecordsRejectedAndErrorRequests(t *testing.T) {
 	u := newUpstream(t)
-	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_key: sk-vmr"))
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_keys:\n  - sk-vmr-audit-key1"))
 
-	chat(t, ts, simpleReq, nil)                                                  // 401 unauthorized
-	chat(t, ts, `not json`, map[string]string{"Authorization": "Bearer sk-vmr"}) // 400 bad json
+	chat(t, ts, simpleReq, nil)                                                             // 401 unauthorized
+	chat(t, ts, `not json`, map[string]string{"Authorization": "Bearer sk-vmr-audit-key1"}) // 400 bad json
 
 	recs := readRecords(t, al)
 	if len(recs) != 2 {

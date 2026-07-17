@@ -234,7 +234,7 @@ func TestStreamingPassthrough(t *testing.T) {
 
 func TestRouterAuth(t *testing.T) {
 	u := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_key: sk-vmr-secret"))
+	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_keys:\n  - sk-vmr-secret-key01"))
 
 	resp, _ := chat(t, ts, simpleReq, nil)
 	if resp.StatusCode != 401 {
@@ -244,20 +244,20 @@ func TestRouterAuth(t *testing.T) {
 	if resp.StatusCode != 401 {
 		t.Errorf("wrong key: status=%d", resp.StatusCode)
 	}
-	resp, _ = chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer sk-vmr-secret"})
+	resp, _ = chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer sk-vmr-secret-key01"})
 	if resp.StatusCode != 200 {
 		t.Errorf("right key: status=%d", resp.StatusCode)
 	}
 }
 
-// TestRouterAuthMultiKeyTagsRequests confirms that (a) the legacy api_key
-// keeps working as an untagged catch-all alongside api_keys, (b) each
-// api_keys entry authenticates independently and tags the audit record with
-// its own KeyTag, and (c) a request that matches nothing is still audited,
+// TestRouterAuthMultiKeyTagsRequests confirms that (a) each api_keys entry
+// authenticates independently and tags the audit record with its own KeyTag
+// (api_keys is the only auth surface — the untagged api_key catch-all was
+// removed), and (b) a request that matches nothing is still audited,
 // untagged, with a 401.
 func TestRouterAuthMultiKeyTagsRequests(t *testing.T) {
 	u := newUpstream(t)
-	extra := "api_key: sk-vmr-legacy-catchall\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby"
+	extra := "api_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby"
 	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, extra))
 
 	cases := []struct {
@@ -265,7 +265,6 @@ func TestRouterAuthMultiKeyTagsRequests(t *testing.T) {
 		key     string
 		wantTag string
 	}{
-		{"catch-all", "sk-vmr-legacy-catchall", ""},
 		{"tagged alice", "sk-vmr-team-alice", "alice"},
 		{"tagged bobby", "sk-vmr-team-bobby", "bobby"},
 	}
