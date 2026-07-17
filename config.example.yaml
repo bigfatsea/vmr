@@ -1,4 +1,4 @@
-# Ver 2026-07-16 21:00, by Fable 5
+# Ver 2026-07-17 00:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -34,6 +34,16 @@ listen: 127.0.0.1:8800
 #                                # Aim for >= 3-4 meaningful characters: shorter suffixes collide with
 #                                # each other more easily (two unrelated keys landing on the same tag
 #                                # would have their traffic merged, indistinguishably, into one file).
+#                                #
+#                                # The tag also becomes a filename (vmr-requests-<tag>.jsonl,
+#                                # vmr-requests-index-<tag>.md), so vmr sanitizes it first: anything
+#                                # outside A-Za-z0-9._- is replaced with "-". vmr does NOT detect or
+#                                # warn about two DIFFERENT tags collapsing to the SAME sanitized
+#                                # filename (e.g. "bob/eve" and "bob-eve" both become "bob-eve") — that
+#                                # would silently merge their reports, one overwriting the other. Avoiding
+#                                # this is on you: pick suffixes that are already filename-safe
+#                                # (letters/digits/hyphen/underscore only) and distinct from each other
+#                                # after that substitution.
 #                                # Each key must be >= 16 characters — short enough to make the tag
 #                                # window the WHOLE key would otherwise write your secret, in the
 #                                # clear, into every report and filename; vmr refuses to start with a

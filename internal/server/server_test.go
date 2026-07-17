@@ -250,6 +250,21 @@ func TestRouterAuth(t *testing.T) {
 	}
 }
 
+// TestRouterAuthBearerCaseInsensitive locks RFC 7235's requirement that the
+// auth-scheme token is case-insensitive — a client sending "bearer" or
+// "BEARER" must authenticate exactly like "Bearer" does.
+func TestRouterAuthBearerCaseInsensitive(t *testing.T) {
+	u := newUpstream(t)
+	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_keys:\n  - sk-vmr-secret-key01"))
+
+	for _, scheme := range []string{"bearer", "BEARER", "BeArEr"} {
+		resp, _ := chat(t, ts, simpleReq, map[string]string{"Authorization": scheme + " sk-vmr-secret-key01"})
+		if resp.StatusCode != 200 {
+			t.Errorf("scheme %q: status=%d, want 200", scheme, resp.StatusCode)
+		}
+	}
+}
+
 // TestRouterAuthMultiKeyTagsRequests confirms that (a) each api_keys entry
 // authenticates independently and tags the audit record with its own KeyTag
 // (api_keys is the only auth surface — the untagged api_key catch-all was

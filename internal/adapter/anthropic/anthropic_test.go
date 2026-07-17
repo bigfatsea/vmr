@@ -27,8 +27,10 @@ func TestBuildRequest(t *testing.T) {
 	if got := req.Header.Get("x-api-key"); got != "sk-1" {
 		t.Errorf("x-api-key: %q", got)
 	}
-	if got := req.Header.Get("anthropic-version"); got != "2023-06-01" {
-		t.Errorf("default version: %q", got)
+	// The client sent no anthropic-version, and BuildRequest must not
+	// invent one — omitting it is what a direct connection would see too.
+	if got := req.Header.Get("anthropic-version"); got != "" {
+		t.Errorf("anthropic-version should be left unset when the client omits it, got %q", got)
 	}
 	var m map[string]json.RawMessage
 	body, _ := req.GetBody()

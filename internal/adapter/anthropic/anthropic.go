@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-17 00:00, by Sonnet 5
 
 // Package anthropic is the passthrough adapter for Anthropic-compatible
 // providers (Anthropic, MiniMax, DeepSeek, …): append /messages to the base
@@ -15,8 +15,6 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/core"
 )
-
-const defaultVersion = "2023-06-01"
 
 func init() { adapter.Register("anthropic", Anthropic{}) }
 
@@ -49,10 +47,10 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	if ep.APIKey != "" {
 		httpReq.Header.Set("x-api-key", ep.APIKey)
 	}
-	// Default anthropic-version if the client didn't send one.
-	if httpReq.Header.Get("anthropic-version") == "" {
-		httpReq.Header.Set("anthropic-version", defaultVersion)
-	}
+	// No default anthropic-version: a client that omits it gets exactly
+	// what a direct connection to the provider would see — the provider's
+	// own default, not one vmr picks on its behalf. Forwarding nothing
+	// here is a deliberate passthrough choice (§5.4), not an oversight.
 	return httpReq, body, nil
 }
 

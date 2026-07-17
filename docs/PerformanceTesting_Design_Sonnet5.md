@@ -52,11 +52,11 @@
 
 跟前一版方案一样，mock 上游没有现成工具能替代——没有任何通用压测工具会假装自己是一个 LLM provider，更不用说模拟 vmr 已知要应对的具体怪癖形态（MiniMax 的 thinking 泄漏文本、SSE 分块节奏）。这部分依然要写，但复用现有测试代码里已经验证过的模式（`internal/server/server_test.go::newUpstream`、`server_hang_test.go::stallingUpstream`），量不大（预计 100-150 行）：一个 `httptest.NewServer`，按收到请求的 `model` 字段分发到几种预先写死的响应形态。
 
-## 3. 整体流程（全部是命令行操作，没有新的 Go 程序入口）
+## 3. 整体流程（v1 设计稿，已被 §6 实际落地扩展覆盖，仅作决策记录保留——命令与路径以 §6 和 `loadtest/README.md` 为准）
 
 ```bash
 # 1. 起 mock 上游（一个小 Go 程序，唯一需要新写的代码）
-go run tools/loadtest/mockupstream.go   # 监听某个端口，按 model 名分发响应形态
+go run ./loadtest/mockupstream   # 监听某个端口，按 model 名分发响应形态
 
 # 2. 用一份专门的 loadtest config.yaml 起真实的 vmr——就是正常的 `vmr start`，
 #    不是什么特殊模式；provider 的 base_url 指向上一步起的 mock
@@ -70,7 +70,7 @@ vegeta attack -targets=loadtest/targets.json -rate=20 -duration=30s | vegeta rep
 ./vmr report "$(./vmr dirs -c loadtest/config.yaml log)/vmr-audit-*.jsonl"
 ```
 
-`loadtest/` 目录下只有三样东西：`config.yaml`（loadtest 专用配置，各虚拟模型指向 mock 上游）、`targets.json`（Vegeta 的场景定义）、`mockupstream.go`（唯一的自定义代码）。不放 `cmd/` 下（不进 `go build ./cmd/vmr` 的产物，不影响"单二进制"这个卖点），也不需要一个专门的 `tools/loadtest/main.go` 编排程序——Vegeta 和 `vmr report` 已经是编排本身。
+`loadtest/` 目录下最初设想只有三样东西：`config.yaml`（loadtest 专用配置，各虚拟模型指向 mock 上游）、`targets.json`（Vegeta 的场景定义）、`mockupstream.go`（唯一的自定义代码）。**这个设想已被 §6 的第二轮扩展取代**：现在是 `.gitignore`/`README.md`/`config.yaml` 三个文件 + `mockupstream/`/`gentargets/`/`runner/` 三个子目录（`targets.json` 改由 `gentargets` 生成，且新增了 `runner/main.go` 编排程序——§6 有说明为何这不违反本节原判断）。
 
 ## 4. 场景矩阵（沿用 v1 的判断，覆盖开销特征明显不同的几条路径）
 

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-17 02:00, by Sonnet 5
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -369,15 +369,26 @@ func TestRespStream_EmptySource(t *testing.T) {
 }
 
 func TestRespStream_NestedModelInDelta(t *testing.T) {
-	// Defensive: if a chunk ever has a nested "model" field (it
-	// shouldn't per OpenAI spec, but we shouldn't break if it
-	// does), the rewrite still applies at the top level only.
+	// modelFieldPattern is a plain regex with no JSON-depth tracking: it
+	// rewrites every unescaped `"model":"..."` occurrence in the block,
+	// nested or not — unlike the request-side RewriteModel, which is a
+	// structural scanner limited to the top-level key. In practice this is
+	// harmless (OpenAI/Anthropic-shaped responses only ever carry "model"
+	// at the top level), but a chunk with a genuinely nested "model" field
+	// — e.g. a vendor extension echoed inside a tool call — has that value
+	// rewritten too. This test documents the actual (not the hoped-for)
+	// behavior; it previously claimed "top level only" without ever
+	// constructing a nested field to check it.
 	src := strings.NewReader(
-		`data: {"id":"x","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n",
+		`data: {"id":"x","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant",` +
+			`"tool_calls":[{"function":{"name":"x","model":"nested-value"}}]}}]}` + "\n\n",
 	)
 	out := readAll(t, newRespStream(src, "agent", true, "openai", false))
-	if !strings.Contains(out, `"model":"agent"`) {
-		t.Errorf("top-level model not rewritten: %q", out)
+	if got := strings.Count(out, `"model":"agent"`); got != 2 {
+		t.Errorf("expected both the top-level AND the nested model field rewritten to the client model (regex has no depth awareness), got %d rewrites in: %q", got, out)
+	}
+	if strings.Contains(out, `"model":"nested-value"`) {
+		t.Errorf("nested model field survived unrewritten — modelFieldPattern's depth-blindness changed, update this test's assumption: %q", out)
 	}
 }
 
@@ -664,6 +675,62 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	if !strings.Contains(string(rs.out), `"model":"MiniMax-M3"`) {
 		t.Errorf("post-overflow bytes must pass through raw (no model rewrite), got tail=%q",
 			string(rs.out[len(rs.out)-200:]))
+	}
+}
+
+// TestRespStream_CRLFFramingSuspectedAtEOF covers an upstream that frames
+// SSE events with "\r\n\r\n" instead of "\n\n" (SSE-spec-legal, but unlike
+// anything any currently integrated vendor sends). eventSep never finds a
+// boundary, so the stream stays modeUndecided until EOF and falls back to
+// the whole-body path — content still comes through correct and complete
+// (model rewritten, no corruption), just without incremental streaming.
+// The only observable difference from a plain buffered response should be
+// the crlf_framing_suspected marker, added purely for `vmr report`
+// visibility into why this response never streamed.
+func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
+	in := "data: {\"model\":\"MiniMax-M3\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	out := readAll(t, rs)
+	if !strings.Contains(out, `"model":"agent"`) {
+		t.Errorf("model not rewritten despite CRLF framing: %q", out)
+	}
+	if !strings.Contains(out, `"content":"hi"`) {
+		t.Errorf("content lost despite CRLF framing: %q", out)
+	}
+	found := false
+	for _, a := range rs.Applied() {
+		if a == "crlf_framing_suspected" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("applied should record crlf_framing_suspected, got %v", rs.Applied())
+	}
+}
+
+// TestRespStream_CRLFFramingSuspectedOnOverflow is the CRLF-framing
+// counterpart to TestRespStream_UndecidedOverflowDegradesToOpaque: a
+// response that never resolves out of modeUndecided (no "\n\n" anywhere)
+// AND crosses bufferedCap should carry both overflow_raw_passthrough and
+// crlf_framing_suspected — the two conditions are independent and can
+// co-occur.
+func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
+	rs := newRespStream(strings.NewReader(""), "agent", true, "openai", false)
+	rs.ingest([]byte("data: {\"model\":\"MiniMax-M3\"}\r\n\r\n")) // the only CRLF boundary in the whole stream
+	filler := bytes.Repeat([]byte("x"), 1<<20)                  // 1MB, contains no "\n\n" or "\r\n\r\n"
+	for i := 0; i < 40 && !rs.opaque; i++ {                     // 40MB > bufferedCap (32MB)
+		rs.ingest(filler)
+	}
+	if !rs.opaque {
+		t.Fatal("expected the stream to degrade to opaque after crossing bufferedCap while undecided")
+	}
+	var sawOverflow, sawCRLF bool
+	for _, a := range rs.Applied() {
+		sawOverflow = sawOverflow || a == "overflow_raw_passthrough"
+		sawCRLF = sawCRLF || a == "crlf_framing_suspected"
+	}
+	if !sawOverflow || !sawCRLF {
+		t.Errorf("applied should record both overflow_raw_passthrough and crlf_framing_suspected, got %v", rs.Applied())
 	}
 }
 

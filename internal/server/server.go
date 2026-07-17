@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 00:00, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -59,7 +59,7 @@ func (s *Server) Handler() http.Handler {
 // A client sending nothing still gets "" (design doc §4.3/§9.4).
 func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
 	cfg := s.rt.Snapshot().Cfg
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	got := trimBearerPrefix(r.Header.Get("Authorization"))
 	if got == "" {
 		got = r.Header.Get("x-api-key")
 	}
@@ -72,6 +72,19 @@ func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// bearerPrefix is the auth-scheme token from the Authorization header.
+// RFC 7235 defines auth-scheme as case-insensitive, so "bearer " and
+// "BEARER " must strip the same as "Bearer " — clients that get this
+// technically-correct-but-nonstandard-casing right shouldn't get a 401.
+const bearerPrefix = "Bearer "
+
+func trimBearerPrefix(auth string) string {
+	if len(auth) >= len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+		return auth[len(bearerPrefix):]
+	}
+	return auth
 }
 
 // checkAuth is the tag-less wrapper for endpoints that only need a pass/

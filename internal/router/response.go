@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 02:00, by Sonnet 5
 //
 // Response normalizer. Guiding principle: what the client receives through
 // VMR must match what it would receive calling the provider directly, except
@@ -72,7 +72,13 @@ const (
 // degrades to opaque passthrough — direct-connection behavior.
 const bufferedCap = 32 << 20
 
-// modelFieldPattern matches the top-level "model" field value. The capture
+// modelFieldPattern matches every unescaped "model" field value in the
+// block — not just the top-level one; it has no JSON-depth tracking, so a
+// genuinely nested "model" key (not inside an escaped string) would be
+// rewritten too (see TestRespStream_NestedModelInDelta). This differs from
+// the request-side RewriteModel, which is a structural scanner limited to
+// the top-level key. Harmless in practice: every provider shape this
+// package targets only ever carries "model" at the top level. The capture
 // group preserves the `"model":"` opener; `[^"]*` stops at the closing
 // quote. JSON-escaped quotes inside string values (\") never match the
 // bare `"` the pattern requires, so content that merely *mentions* a
@@ -104,6 +110,7 @@ var (
 	thinkCloseMarker      = []byte("</think>")
 	doneSentinel          = []byte("data: [DONE]")
 	eventSep              = []byte("\n\n")
+	crlfEventSepHint      = []byte("\r\n\r\n")
 )
 
 // thinkGuardMarkers are the payload fields whose value can carry MiniMax's
@@ -316,6 +323,7 @@ func (s *respStream) ingest(b []byte) {
 		// below only covered modeBuffered. Same degrade-to-opaque response
 		// as that overflow path: give up on normalization, flush raw.
 		if s.mode == modeUndecided && len(s.pending) > bufferedCap {
+			s.noteCRLFFramingIfSuspected(s.pending)
 			s.opaque = true
 			s.noteApplied("overflow_raw_passthrough")
 			s.out = append(s.out, s.pending...)
@@ -325,6 +333,22 @@ func (s *respStream) ingest(b []byte) {
 	case modePassthrough:
 		s.pending = append(s.pending, b...)
 		s.emitComplete()
+	}
+}
+
+// noteCRLFFramingIfSuspected is called only where s.mode is still
+// modeUndecided despite s.isSSE (guaranteed here: a non-SSE response is
+// forced into modeBuffered at construction, so reaching modeUndecided means
+// isSSE was true) — i.e. every "\n\n" this package looks for was scanned for
+// and never found. eventSep only recognizes bare-LF event boundaries; an
+// upstream framing SSE with "\r\n\r\n" (spec-legal, but unobserved from any
+// currently integrated vendor) would land here too. This doesn't change
+// behavior — the whole-body fallback already handles it correctly, just
+// without incremental streaming — it only leaves a trail so `vmr report`
+// can tell a genuinely tiny/malformed response apart from CRLF framing.
+func (s *respStream) noteCRLFFramingIfSuspected(b []byte) {
+	if bytes.Contains(b, crlfEventSepHint) {
+		s.noteApplied("crlf_framing_suspected")
 	}
 }
 
@@ -405,6 +429,7 @@ func (s *respStream) finish() {
 	case modeUndecided:
 		// EOF before any payload event: tiny stream, non-\n\n framing,
 		// or not SSE-shaped at all. Whole-body pass, same as buffered.
+		s.noteCRLFFramingIfSuspected(s.pending)
 		s.buf = s.pending
 		s.pending = nil
 		s.finalizeBuffered()
