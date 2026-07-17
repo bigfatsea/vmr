@@ -1,11 +1,10 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 package adapter
 
 import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"sync"
 
 	"vmr/internal/core"
@@ -61,10 +60,5 @@ func Get(name string) (Adapter, bool) {
 func Names() []string {
 	mu.RLock()
 	defer mu.RUnlock()
-	names := make([]string, 0, len(registry))
-	for n := range registry {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
+	return core.SortedKeys(registry)
 }

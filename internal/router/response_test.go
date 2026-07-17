@@ -717,8 +717,8 @@ func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
 func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
 	rs := newRespStream(strings.NewReader(""), "agent", true, "openai", false)
 	rs.ingest([]byte("data: {\"model\":\"MiniMax-M3\"}\r\n\r\n")) // the only CRLF boundary in the whole stream
-	filler := bytes.Repeat([]byte("x"), 1<<20)                  // 1MB, contains no "\n\n" or "\r\n\r\n"
-	for i := 0; i < 40 && !rs.opaque; i++ {                     // 40MB > bufferedCap (32MB)
+	filler := bytes.Repeat([]byte("x"), 1<<20)                    // 1MB, contains no "\n\n" or "\r\n\r\n"
+	for i := 0; i < 40 && !rs.opaque; i++ {                       // 40MB > bufferedCap (32MB)
 		rs.ingest(filler)
 	}
 	if !rs.opaque {

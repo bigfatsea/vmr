@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -31,6 +31,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/core"
 	"vmr/internal/diagnose"
 	"vmr/internal/replay"
 	"vmr/internal/report"
@@ -429,7 +430,7 @@ func cmdStart(args []string) error {
 		Handler:           server.New(rt, auditLog).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
-	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, countNested(cfg.Models))
+	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, config.CountNested(cfg.Models))
 
 	// vmr.sh (and systemd/launchd) stop the process with SIGTERM; Go doesn't
 	// catch that by default, so without this the process just dies mid-request
@@ -459,14 +460,6 @@ func cmdStart(args []string) error {
 		logStop(logger, "server closed", time.Since(startTime))
 		return nil
 	}
-}
-
-func countNested[V any](m map[string]map[string]V) int {
-	n := 0
-	for _, byName := range m {
-		n += len(byName)
-	}
-	return n
 }
 
 // logConfigSummary prints what the running instance is actually configured
@@ -501,18 +494,8 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		logger.Printf("config: %s", line)
 	}
 
-	protocols := make([]string, 0, len(cfg.Models))
-	for protocol := range cfg.Models {
-		protocols = append(protocols, protocol)
-	}
-	sort.Strings(protocols)
-	for _, protocol := range protocols {
-		names := make([]string, 0, len(cfg.Models[protocol]))
-		for name := range cfg.Models[protocol] {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
+	for _, protocol := range core.SortedKeys(cfg.Models) {
+		for _, name := range core.SortedKeys(cfg.Models[protocol]) {
 			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
 			parts := make([]string, len(ordered))
@@ -547,18 +530,8 @@ func providerProxyLines(cfg *config.Config) []string {
 		return raw
 	}
 	var lines []string
-	protocols := make([]string, 0, len(cfg.Providers))
-	for protocol := range cfg.Providers {
-		protocols = append(protocols, protocol)
-	}
-	sort.Strings(protocols)
-	for _, protocol := range protocols {
-		names := make([]string, 0, len(cfg.Providers[protocol]))
-		for name := range cfg.Providers[protocol] {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
+	for _, protocol := range core.SortedKeys(cfg.Providers) {
+		for _, name := range core.SortedKeys(cfg.Providers[protocol]) {
 			p := cfg.Providers[protocol][name]
 			desc := "direct"
 			if p.Proxy != nil && !*p.Proxy {
@@ -587,23 +560,13 @@ func cmdCheck(args []string) error {
 		return err
 	}
 	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd\n",
-		cfg.Listen, countNested(cfg.Providers), countNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
+		cfg.Listen, config.CountNested(cfg.Providers), config.CountNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
 	fmt.Printf("  dirs log=%s image_cache=%s\n", cfg.LogDir, cfg.ImageCacheDir)
 	for _, line := range providerProxyLines(cfg) {
 		fmt.Println("  " + line)
 	}
-	protocols := make([]string, 0, len(cfg.Models))
-	for protocol := range cfg.Models {
-		protocols = append(protocols, protocol)
-	}
-	sort.Strings(protocols)
-	for _, protocol := range protocols {
-		names := make([]string, 0, len(cfg.Models[protocol]))
-		for name := range cfg.Models[protocol] {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
+	for _, protocol := range core.SortedKeys(cfg.Models) {
+		for _, name := range core.SortedKeys(cfg.Models[protocol]) {
 			m := cfg.Models[protocol][name]
 			imgOverride := ""
 			if m.ImageDownscaleMaxPx != nil {
@@ -674,12 +637,7 @@ func cmdStatus(args []string) error {
 		fmt.Printf("concurrency: %d/%d in flight, %d waiting\n",
 			st.Concurrency.InFlight, st.Concurrency.Limit, st.Concurrency.Waiting)
 	}
-	names := make([]string, 0, len(st.Models))
-	for name := range st.Models {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range core.SortedKeys(st.Models) {
 		fmt.Println(name) // key is already "name [protocol]"
 		for _, ep := range st.Models[name] {
 			state := "ok"

@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 package core
 
 import (
@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sort"
 )
 
 // MarshalNoEscape is json.Marshal without HTML escaping and without the
@@ -103,7 +104,15 @@ func (c ErrorClass) String() string {
 		return "canceled"
 	case ErrTruncated:
 		return "truncated"
+	case ErrTransient:
+		return "transient"
 	default:
+		// Every declared ErrorClass has an explicit case above; this is only
+		// reached by a value outside the declared set, which never happens
+		// in practice (ErrorClass is only ever constructed from the consts
+		// above). Falls back to "transient" rather than a distinct label so
+		// report's error_classes bucketing degrades safely instead of
+		// growing an unbounded set of unknown keys.
 		return "transient"
 	}
 }
@@ -132,4 +141,17 @@ func (e *Endpoint) HealthKey() string {
 // Name is the human-readable endpoint label used in logs and status output.
 func (e *Endpoint) Name() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model
+}
+
+// SortedKeys returns m's keys in sorted order. A recurring need across
+// packages that print or iterate a map deterministically (config summaries,
+// adapter/model registries, header tables) — before this, half a dozen
+// call sites each carried their own byte-identical copy of this loop.
+func SortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

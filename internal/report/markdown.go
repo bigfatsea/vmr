@@ -1,10 +1,12 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 package report
 
 import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"vmr/internal/core"
 )
 
 // Markdown renders the report's most-consulted views. Every table iterates
@@ -119,7 +121,7 @@ func Markdown(rep *Report) string {
 					continue
 				}
 				w("**%s**\n\n", e.Endpoint)
-				for _, k := range sortedKeys(e.ErrorClasses) {
+				for _, k := range core.SortedKeys(e.ErrorClasses) {
 					w("- %s × %d\n", k, e.ErrorClasses[k])
 				}
 				w("\n")
@@ -511,7 +513,7 @@ func finishLine(m map[string]int, totalReq int) string {
 		return ""
 	}
 	parts := make([]string, 0, len(m))
-	for _, k := range sortedKeys(m) {
+	for _, k := range core.SortedKeys(m) {
 		label := k
 		switch k {
 		case "":
@@ -565,15 +567,6 @@ func mergeIntoCollapsed(agg, s *SessionRow) {
 	agg.TokensKnown += s.TokensKnown
 	agg.To = s.To
 	agg.Title = fmt.Sprintf("%s ×N 单发会话", s.Class)
-}
-
-func sortedKeys(m map[string]int) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func cut(s string, n int) string {

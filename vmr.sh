@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-14 00:05, by Sonnet 5
+# Ver 2026-07-17 13:00, by Sonnet 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -31,6 +31,11 @@
 # No PID file in dev mode: the daemon is found by matching the absolute
 # binary path in the process table (pgrep -f), which cannot collide with
 # this script or other vmr checkouts.
+#
+# Build is never implicit: this script never runs `go build`, so a code
+# change only takes effect once you rebuild ./vmr yourself. `start` and
+# `service install` print a one-line warning (not a rebuild, not a refusal
+# to start) when source under cmd/vmr or internal/ is newer than ./vmr.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -39,24 +44,43 @@ BIN="$PWD/vmr"
 CFG="$PWD/config.yaml"
 MATCH="$BIN start"                    # absolute path → unambiguous process match
 
-ensure_bin() {
+# This script never builds vmr itself — build (or rebuild after a code
+# change) is always an explicit, separate step, so nothing here can trigger
+# an unexpected `go build` or depend on a Go toolchain being installed. A
+# service-mode deployment routinely ships only the compiled binary.
+require_bin() {
   if [[ ! -x "$BIN" ]]; then
-    echo "building vmr..."
-    go build -o "$BIN" ./cmd/vmr
-    return
-  fi
-  # Rebuild when source is newer than the binary, so a stale binary left
-  # over from before a code change never silently keeps running old
-  # behavior (go build's own cache makes a no-op rebuild near-instant).
-  # Gated on `go` actually being installed — a service-mode deployment may
-  # ship only the built binary, with no toolchain present, and must keep
-  # working unmodified in that case.
-  if command -v go >/dev/null 2>&1 && find . -name '*.go' -newer "$BIN" -print -quit | grep -q .; then
-    echo "rebuilding vmr (source changed)..."
-    go build -o "$BIN" ./cmd/vmr
+    echo "vmr binary not found: $BIN" >&2
+    echo "build it first: go build -o vmr ./cmd/vmr" >&2
+    exit 1
   fi
 }
-ensure_bin   # both dirs below query the binary, so it must exist first
+require_bin   # both dirs below query the binary, so it must exist first
+
+# warn_if_stale: a nudge, not a gate — prints one line if any source file
+# that actually feeds this binary is newer than it, but never blocks or
+# rebuilds. Called only from the two places that launch something new
+# (cmd_start, svc_install), not from require_bin itself: stop/status/logs
+# don't care whether the binary is stale, and warning there would just be
+# noise on every invocation.
+#
+# Scoped to cmd/vmr and internal/ — what `go build ./cmd/vmr` actually
+# compiles — rather than the whole tree: loadtest/, docs/, test fixtures
+# etc. touch mtimes constantly (edits, branch switches, stash pops) with no
+# bearing on this binary, and the old auto-build this replaced used to
+# rebuild on exactly that kind of unrelated change. A false positive here
+# costs one spurious line; it must never cost a blocked start (see the
+# no-auto-build rationale above: an implicit rebuild silently upgrades a
+# running service's behavior, which is the actual danger — a printed
+# warning that a human reads before restarting is not).
+warn_if_stale() {
+  local newer
+  newer="$(find cmd/vmr internal -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)"
+  if [[ -n "$newer" ]]; then
+    echo "warning: $BIN may be older than the current source (e.g. $newer changed since it was built)" >&2
+    echo "  rebuild with: go build -o vmr ./cmd/vmr" >&2
+  fi
+}
 
 # LOG_DIR (where this script drops the server stderr log, next to the audit
 # JSONL) comes from `vmr dirs -c $CFG log` — the binary's own resolution of
@@ -158,6 +182,7 @@ cmd_start() {
       exit 1
     fi
   fi
+  warn_if_stale
   resolve_log_dir
   mkdir -p "$LOG_DIR"
   nohup "$BIN" start -c "$CFG" >>"$SERVER_LOG" 2>&1 &
@@ -301,6 +326,7 @@ EOF
 }
 
 svc_install() {
+  warn_if_stale
   "$BIN" check -c "$CFG" >/dev/null
   resolve_log_dir
   mkdir -p "$LOG_DIR"

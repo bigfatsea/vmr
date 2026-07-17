@@ -53,6 +53,11 @@ func TestNameOmitsAPIKey(t *testing.T) {
 	}
 }
 
+// TestErrorClassString locks every declared ErrorClass to its string, not
+// just the ones classify.go itself produces — the four audit-only values
+// (Build/Network/Canceled/Truncated) never reach Health.ReportFailure, but
+// report.go buckets error_classes by these exact strings, so a rename here
+// would silently fragment that report without any test catching it.
 func TestErrorClassString(t *testing.T) {
 	cases := map[ErrorClass]string{
 		ErrClient:    "client",
@@ -61,6 +66,10 @@ func TestErrorClassString(t *testing.T) {
 		ErrEndpoint:  "endpoint",
 		ErrTransient: "transient",
 		ErrContent:   "content",
+		ErrBuild:     "build",
+		ErrNetwork:   "network",
+		ErrCanceled:  "canceled",
+		ErrTruncated: "truncated",
 	}
 	for class, want := range cases {
 		if got := class.String(); got != want {

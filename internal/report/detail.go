@@ -1,4 +1,4 @@
-// Ver 2026-07-17 02:00, by Sonnet 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/core"
 )
 
 // toolArgsInlineThreshold: tool-call args shorter than this render inline
@@ -1017,11 +1018,7 @@ func headerTable(h http.Header) string {
 	if len(h) == 0 {
 		return "（无）\n"
 	}
-	keys := make([]string, 0, len(h))
-	for k := range h {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := core.SortedKeys(h)
 	var b strings.Builder
 	b.WriteString("| Header | 值 |\n|---|---|\n")
 	for _, k := range keys {
@@ -1040,11 +1037,7 @@ func diffHeaderTable(base, other http.Header) (string, int) {
 	for k := range other {
 		keys[k] = true
 	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
+	sorted := core.SortedKeys(keys)
 
 	var b strings.Builder
 	changed := 0
@@ -1052,17 +1045,20 @@ func diffHeaderTable(base, other http.Header) (string, int) {
 	for _, k := range sorted {
 		bv, inBase := base[k]
 		ov, inOther := other[k]
-		bs, os := strings.Join(bv, ", "), strings.Join(ov, ", ")
+		// Named bs/ovs, not bs/os: "os" would shadow the imported os package
+		// for the rest of this function — harmless today (nothing here calls
+		// it), but a footgun for whoever adds an os.* call here next.
+		bs, ovs := strings.Join(bv, ", "), strings.Join(ov, ", ")
 		switch {
 		case !inBase:
 			changed++
-			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, escapeCell(truncCell(os, 120)))
+			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, escapeCell(truncCell(ovs, 120)))
 		case !inOther:
 			changed++
 			fmt.Fprintf(&b, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(truncCell(bs, 120)))
-		case bs != os:
+		case bs != ovs:
 			changed++
-			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, escapeCell(truncCell(bs, 60)), escapeCell(truncCell(os, 60)))
+			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, escapeCell(truncCell(bs, 60)), escapeCell(truncCell(ovs, 60)))
 		default:
 			fmt.Fprintf(&b, "| | %s | %s |\n", k, escapeCell(truncCell(bs, 120)))
 		}

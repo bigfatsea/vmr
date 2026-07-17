@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-17 06:00, by Sonnet 5
 package imgprep
 
 import (
@@ -397,9 +397,9 @@ func TestDecompressionBombGuard(t *testing.T) {
 	// 30000x30000 = 900M declared pixels, far past maxDecodePixels, but the
 	// "file" itself is a few dozen bytes — DecodeConfig reads only IHDR.
 	huge := fakePNGHeader(t, 30000, 30000)
-	out, mime, changed, info, err := processImage(huge, Options{MaxPx: 512})
-	if err != nil || changed || out != nil || mime != "" {
-		t.Errorf("declared-oversized image must be left alone: changed=%v err=%v", changed, err)
+	out, mime, changed, info := processImage(huge, Options{MaxPx: 512})
+	if changed || out != nil || mime != "" {
+		t.Errorf("declared-oversized image must be left alone: changed=%v", changed)
 	}
 	if info.Downscaled {
 		t.Errorf("info = %+v, want Downscaled=false (guard fired before any resize)", info)

@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 
 // Package diagnose implements `vmr diagnose`: config validation plus a
 // series of read-only checks (DNS/TLS/proxy reachability, then a real
@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -98,7 +97,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	rep := &Report{}
 	rep.Results = append(rep.Results, Result{
 		Phase: "config", Target: opts.ConfigPath, Status: StatusOK,
-		Detail: fmt.Sprintf("%d provider(s), %d model(s)", countNested(cfg.Providers), countNested(cfg.Models)),
+		Detail: fmt.Sprintf("%d provider(s), %d model(s)", config.CountNested(cfg.Providers), config.CountNested(cfg.Models)),
 	})
 
 	// Phase 2: DNS/TLS/proxy/api_key per provider, up to checkConcurrency at
@@ -110,8 +109,8 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		p              config.Provider
 	}
 	var providerChecks []providerCheck
-	for _, protocol := range sortedKeys(cfg.Providers) {
-		for _, name := range sortedKeys(cfg.Providers[protocol]) {
+	for _, protocol := range core.SortedKeys(cfg.Providers) {
+		for _, name := range core.SortedKeys(cfg.Providers[protocol]) {
 			providerChecks = append(providerChecks, providerCheck{protocol, name, cfg.Providers[protocol][name]})
 		}
 	}
@@ -132,8 +131,8 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		seen := map[epKey]bool{}
 		var keys []epKey
 		var endpoints []*core.Endpoint
-		for _, protocol := range sortedKeys(cfg.Models) {
-			for _, name := range sortedKeys(cfg.Models[protocol]) {
+		for _, protocol := range core.SortedKeys(cfg.Models) {
+			for _, name := range core.SortedKeys(cfg.Models[protocol]) {
 				for _, ec := range cfg.Models[protocol][name].Endpoints {
 					k := epKey{protocol, ec.Provider, ec.Model}
 					if seen[k] {
@@ -157,8 +156,8 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 
 	// Phase 4: static route preview per virtual model, annotated with
 	// whatever Phase 3 found for each endpoint in *this* run.
-	for _, protocol := range sortedKeys(snap.Models) {
-		for _, name := range sortedKeys(snap.Models[protocol]) {
+	for _, protocol := range core.SortedKeys(snap.Models) {
+		for _, name := range core.SortedKeys(snap.Models[protocol]) {
 			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
 			for i, ep := range ordered {
@@ -342,23 +341,6 @@ func runConcurrent[T, R any](items []T, concurrency int, fn func(T) R) []R {
 	}
 	wg.Wait()
 	return results
-}
-
-func countNested[V any](m map[string]map[string]V) int {
-	n := 0
-	for _, byName := range m {
-		n += len(byName)
-	}
-	return n
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // FormatTable renders a Report as simple line-based text, matching the

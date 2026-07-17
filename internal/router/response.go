@@ -173,7 +173,7 @@ func containsSoftBlockMarker(b []byte) bool {
 // dedicated field, anthropic text/thinking deltas, or tool-call
 // arguments. Any of these settles the stream into passthrough mode.
 var passthroughStringMarkers = [][]byte{
-	[]byte(`"text":"`),
+	textFieldMarker, // same literal as thinkGuardMarkers' entry — reused, not retyped
 	[]byte(`"reasoning_content":"`),
 	[]byte(`"thinking":"`),
 }

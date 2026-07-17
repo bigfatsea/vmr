@@ -1,6 +1,11 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-17 10:00, by Sonnet 5
 
-// V2.2 integration tests: Anthropic ingress, protocol isolation, concurrency gate.
+// Integration tests for two features that shipped in the same batch and
+// have shared this file ever since: Anthropic ingress (protocol isolation,
+// x-api-key auth, the merged /v1/models shape) and the concurrency gate.
+// No relation to this repo's audit-report version numbering (V1.0/2.0/V3/V4)
+// — the filename used to say "v2.2", an internal milestone label from
+// before that numbering existed, which read as if it did.
 package server
 
 import (

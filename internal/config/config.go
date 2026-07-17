@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 06:30, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -285,19 +285,26 @@ func (c *Config) validate() error {
 			return fmt.Errorf("api_keys[%d]: too short (min %d characters) — its tail becomes a report label (see audit.KeyTag), so short keys would expose the whole key", i, minAPIKeyLen)
 		}
 	}
-	for name, val := range map[string]string{"http_proxy": c.HTTPProxy, "https_proxy": c.HTTPSProxy} {
-		if val == "" {
+	// A slice, not a map: map iteration order is randomized, and a name+value
+	// pair here is only ever checked for "is this one URL valid" — nothing
+	// depends on the order between http_proxy and https_proxy, but the error
+	// message when validation fails should still be deterministic.
+	for _, proxy := range [...]struct{ name, val string }{
+		{"http_proxy", c.HTTPProxy},
+		{"https_proxy", c.HTTPSProxy},
+	} {
+		if proxy.val == "" {
 			continue
 		}
-		u, err := url.Parse(val)
+		u, err := url.Parse(proxy.val)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", name, val)
+			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", proxy.name, proxy.val)
 		}
 	}
-	if countNested(c.Providers) == 0 {
+	if CountNested(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
-	if countNested(c.Models) == 0 {
+	if CountNested(c.Models) == 0 {
 		return fmt.Errorf("no models defined")
 	}
 	for protocol, byName := range c.Providers {
@@ -340,7 +347,12 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func countNested[V any](m map[string]map[string]V) int {
+// CountNested totals the inner maps of a protocol -> name -> V structure
+// (Config.Providers, Config.Models) — exported because validate() isn't the
+// only place that needs "how many providers/models total": diagnose and
+// cmd/vmr both report the same count in their own output and previously
+// each carried a byte-identical private copy of this function.
+func CountNested[V any](m map[string]map[string]V) int {
 	n := 0
 	for _, byName := range m {
 		n += len(byName)

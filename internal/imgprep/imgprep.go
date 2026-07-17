@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 06:00, by Sonnet 5
 
 // Package imgprep detects inline image attachments in request bodies and,
 // when configured, downscales the oversized ones before they reach the
@@ -257,12 +257,12 @@ func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json
 		// reference worth recording.
 		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
 	}
-	newData, newMime, changed, info, err := processImage(data, opts)
+	newData, newMime, changed, info := processImage(data, opts)
 	if info.Format == "" { // header decode failed: nothing meaningful to record
 		return raw, false, nil, nil
 	}
 	info.MessageIndex = msgIndex
-	if err != nil || !changed {
+	if !changed {
 		return raw, false, &info, nil
 	}
 	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
@@ -306,12 +306,12 @@ func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]j
 	if err != nil {
 		return raw, false, nil, nil
 	}
-	newData, newMime, changed, info, err := processImage(data, opts)
+	newData, newMime, changed, info := processImage(data, opts)
 	if info.Format == "" { // header decode failed: nothing meaningful to record
 		return raw, false, nil, nil
 	}
 	info.MessageIndex = msgIndex
-	if err != nil || !changed {
+	if !changed {
 		return raw, false, &info, nil
 	}
 	mv, err := core.MarshalNoEscape(newMime)
@@ -359,13 +359,16 @@ func parseDataURI(u string) ([]byte, bool) {
 // from any caller-supplied mime type) to describe the image — this much
 // always runs, independent of opts.MaxPx. If opts.MaxPx is positive and the
 // longer side exceeds it, the image is fully decoded, resized to fit, and
-// re-encoded as JPEG. changed=false (with a nil error) covers every "leave
-// it alone" case: resizing disabled, already small enough, GIF (never
-// rescaled — see the format=="gif" branch below for why), unrecognized
-// format, corrupt data, or oversized declared dimensions (decompression-bomb
-// guard) — info is still populated in all of these except a header-decode
-// failure. Output is always JPEG; alpha is flattened onto white first since
-// JPEG has no transparency.
+// re-encoded as JPEG. changed=false covers every "leave it alone" case:
+// resizing disabled, already small enough, GIF (never rescaled — see the
+// format=="gif" branch below for why), unrecognized format, corrupt data, or
+// oversized declared dimensions (decompression-bomb guard) — info is still
+// populated in all of these except a header-decode failure. There is no
+// error return: every failure mode here is deliberately absorbed into
+// changed=false (fail-open, per the package doc comment) rather than
+// propagated, so a caller has nothing to check beyond changed/info.Format.
+// Output is always JPEG; alpha is flattened onto white first since JPEG has
+// no transparency.
 //
 // When opts.CacheDir is set, a cache lookup happens only after the
 // need-to-process decision is made (longSide > MaxPx, not a decompression
@@ -373,10 +376,10 @@ func parseDataURI(u string) ([]byte, bool) {
 // full image on every request would tax exactly the common case caching is
 // meant to help least. A hit skips decode/scale/encode entirely; a miss
 // falls through to full processing and stores the result before returning.
-func processImage(data []byte, opts Options) (out []byte, mime string, changed bool, info ImageInfo, err error) {
-	cfg, format, cerr := image.DecodeConfig(bytes.NewReader(data))
-	if cerr != nil {
-		return nil, "", false, ImageInfo{}, nil
+func processImage(data []byte, opts Options) (out []byte, mime string, changed bool, info ImageInfo) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", false, ImageInfo{}
 	}
 	info = ImageInfo{Format: format, Bytes: int64(len(data)), Width: cfg.Width, Height: cfg.Height}
 
@@ -385,10 +388,10 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 		longSide = cfg.Height
 	}
 	if opts.MaxPx <= 0 || longSide <= opts.MaxPx {
-		return nil, "", false, info, nil
+		return nil, "", false, info
 	}
 	if cfg.Width*cfg.Height > maxDecodePixels {
-		return nil, "", false, info, nil
+		return nil, "", false, info
 	}
 
 	var hash [32]byte
@@ -399,7 +402,7 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 			newW, newH := scaledSize(cfg.Width, cfg.Height, opts.MaxPx)
 			info.Downscaled, info.DownscaledWidth, info.DownscaledHeight = true, newW, newH
 			info.DownscaledBytes, info.CacheHit = int64(len(cached)), true
-			return cached, "image/jpeg", true, info, nil
+			return cached, "image/jpeg", true, info
 		}
 	}
 
@@ -412,11 +415,11 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 		// "single frame, safe to scale" from "many frames" would require
 		// paying the same unbounded decode cost this branch exists to
 		// avoid. Detection (Format/Width/Height above) already ran either way.
-		return nil, "", false, info, nil
+		return nil, "", false, info
 	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, "", false, info, nil
+		return nil, "", false, info
 	}
 
 	sb := src.Bounds()
@@ -428,7 +431,7 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, "", false, info, nil
+		return nil, "", false, info
 	}
 	result := buf.Bytes()
 	if opts.CacheDir != "" {
@@ -436,7 +439,7 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 	}
 	info.Downscaled, info.DownscaledWidth, info.DownscaledHeight = true, newW, newH
 	info.DownscaledBytes = int64(len(result))
-	return result, "image/jpeg", true, info, nil
+	return result, "image/jpeg", true, info
 }
 
 // scaledSize returns the largest w×h with the same aspect ratio as the

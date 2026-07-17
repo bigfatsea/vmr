@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 
 // Package replay implements `vmr replay`: rebuild and resend one request
 // from an audit JSONL record, using the exact same adapter.BuildRequest vmr
@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -363,7 +362,7 @@ func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte)
 	fmt.Fprintf(w, "DRY-RUN  protocol=%s provider=%s model=%s\n", ep.AdapterType, ep.Provider, ep.Model)
 	fmt.Fprintf(w, "-> %s %s\n", req.Method, req.URL)
 	redacted := audit.Redact(req.Header)
-	for _, k := range sortedHeaderKeys(redacted) {
+	for _, k := range core.SortedKeys(redacted) {
 		for _, v := range redacted[k] {
 			fmt.Fprintf(w, "   %s: %s\n", k, v)
 		}
@@ -396,15 +395,6 @@ func replayHeaders(h http.Header) http.Header {
 		}
 	}
 	return out
-}
-
-func sortedHeaderKeys(h http.Header) []string {
-	keys := make([]string, 0, len(h))
-	for k := range h {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // writeReplayRecord appends one audit.Record describing this replay to

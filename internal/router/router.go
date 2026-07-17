@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-17 08:00, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -643,13 +642,7 @@ func parseRetryAfter(h http.Header) time.Duration {
 }
 
 func modelNames(s *Snapshot, protocol string) []string {
-	byName := s.Models[protocol]
-	names := make([]string, 0, len(byName))
-	for n := range byName {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
+	return core.SortedKeys(s.Models[protocol])
 }
 
 // otherProtocolFor reports which protocol group (other than protocol) defines

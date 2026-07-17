@@ -1,4 +1,4 @@
-// Ver 2026-07-08 20:15, by Sonnet 5
+// Ver 2026-07-17 06:30, by Sonnet 5
 package config
 
 import (
@@ -398,5 +398,21 @@ func TestEmptySections(t *testing.T) {
 	}
 	if _, err := Parse([]byte("providers: {openai: {p: {base_url: https://x.com}}}")); err == nil {
 		t.Error("want error for no models")
+	}
+}
+
+// TestCountNested locks the shared helper directly: validate() only checks
+// it against zero, but diagnose and cmd/vmr both print the actual count, so
+// the arithmetic itself needs its own coverage, not just the boundary case.
+func TestCountNested(t *testing.T) {
+	m := map[string]map[string]int{
+		"a": {"x": 1, "y": 2},
+		"b": {"z": 3},
+	}
+	if got := CountNested(m); got != 3 {
+		t.Errorf("CountNested = %d, want 3", got)
+	}
+	if got := CountNested(map[string]map[string]int{}); got != 0 {
+		t.Errorf("CountNested(empty) = %d, want 0", got)
 	}
 }

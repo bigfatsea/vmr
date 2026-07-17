@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-17 06:30, by Sonnet 5
 package main
 
 import (
@@ -149,18 +149,5 @@ func TestCmdReport_NoMatches(t *testing.T) {
 func TestCmdReport_NoInputFiles(t *testing.T) {
 	if err := cmdReport(nil); err == nil {
 		t.Error("cmdReport with no input files should return an error")
-	}
-}
-
-func TestCountNested(t *testing.T) {
-	m := map[string]map[string]int{
-		"a": {"x": 1, "y": 2},
-		"b": {"z": 3},
-	}
-	if got := countNested(m); got != 3 {
-		t.Errorf("countNested = %d, want 3", got)
-	}
-	if got := countNested(map[string]map[string]int{}); got != 0 {
-		t.Errorf("countNested(empty) = %d, want 0", got)
 	}
 }
