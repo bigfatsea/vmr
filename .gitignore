@@ -39,3 +39,4 @@ coverage.html
 # (config.yaml's log_dir/image_cache_dir, unset).
 /logs/
 /image_cache/
+/reports/
