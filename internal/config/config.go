@@ -28,12 +28,26 @@ const (
 	DefaultHeaderTimeout     = 120 * time.Second
 	DefaultIdleTimeout       = 120 * time.Second
 	DefaultImageCacheTTLDays = 7 // downscaled-image cache entries unused this many days get evicted
+	// DefaultProbeTimeout bounds one active-probe HTTP call (see ProbeMode).
+	// Deliberately far under DefaultHeaderTimeout: the whole point of an
+	// active probe is a fast, cheap liveness check that never makes real
+	// traffic wait on it — if a provider can't answer a one-line prompt
+	// within this window, it isn't going to look "recovered" by waiting
+	// longer, so there's no reason to borrow the same budget a real request gets.
+	DefaultProbeTimeout = 15 * time.Second
 	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
 	// solely so audit.KeyTag's trailing 8-character window can never be
 	// the whole key — a short key would otherwise have its full secret
 	// value written, in the clear, into every report and filename its tag
 	// ends up in.
 	minAPIKeyLen = 16
+)
+
+// ProbeMode values (Config.ProbeMode). Unexported validity list lives next to
+// validate() below.
+const (
+	ProbeModeActive  = "active"
+	ProbeModePassive = "passive"
 )
 
 // Provider has no protocol field: it lives under providers.<protocol>.<name>,
@@ -125,6 +139,17 @@ type Config struct {
 	// against a key short enough that its whole value becomes the tag.
 	APIKeys     []string `yaml:"api_keys"`
 	MaxAttempts int      `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
+	// ProbeMode selects how a half-open endpoint (past its cooldown, but not
+	// yet confirmed recovered) gets re-verified: "active" (default) fires a
+	// small dedicated probe request in the background and never lets real
+	// traffic touch the endpoint until that probe succeeds; "passive" is the
+	// original behavior — the next real request IS the probe, so its own
+	// size/duration determines how long the single-flight probe slot (and,
+	// under concurrent load, every other request's access to this endpoint)
+	// stays locked. See reports/incident-20260718-console-go-400-failover_
+	// Sonnet5.md §2.4 for the failure mode "active" exists to close.
+	ProbeMode    string   `yaml:"probe_mode"`
+	ProbeTimeout Duration `yaml:"probe_timeout"` // active mode only: per-probe upper bound; default DefaultProbeTimeout
 	// MaxRequestBodyMB bounds the inbound client request body vmr will read
 	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
 	// audit logging (the audit trail records every request in full,
@@ -222,6 +247,12 @@ func (c *Config) applyDefaults() {
 	if c.MaxAttempts < 0 {
 		c.MaxAttempts = 0
 	}
+	if c.ProbeMode == "" {
+		c.ProbeMode = ProbeModeActive
+	}
+	if c.ProbeTimeout <= 0 {
+		c.ProbeTimeout = Duration(DefaultProbeTimeout)
+	}
 	if c.MaxConcurrency < 0 {
 		c.MaxConcurrency = 0
 	}
@@ -279,6 +310,9 @@ func (c *Config) validate() error {
 	}
 	if c.RemovedAPIKey != "" {
 		return fmt.Errorf("api_key has been removed: move the credential into the api_keys list instead (each entry must be >= %d characters — its tail becomes the caller tag in vmr report)", minAPIKeyLen)
+	}
+	if c.ProbeMode != ProbeModeActive && c.ProbeMode != ProbeModePassive {
+		return fmt.Errorf("probe_mode %q: must be %q or %q", c.ProbeMode, ProbeModeActive, ProbeModePassive)
 	}
 	for i, k := range c.APIKeys {
 		if len(k) < minAPIKeyLen {

@@ -485,8 +485,8 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	if cfg.AuditRetentionDays > 0 {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
-	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_request_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s",
-		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention)
+	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_request_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s probe_mode=%s probe_timeout=%s",
+		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention, cfg.ProbeMode, cfg.ProbeTimeout.D())
 	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
 		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
 	logger.Printf("config: dirs log=%s image_cache=%s", cfg.LogDir, cfg.ImageCacheDir)
@@ -559,8 +559,8 @@ func cmdCheck(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd\n",
-		cfg.Listen, config.CountNested(cfg.Providers), config.CountNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays)
+	fmt.Printf("OK  listen=%s  providers=%d  models=%d  image_downscale=%dpx  image_cache_ttl=%dd  probe_mode=%s  probe_timeout=%s\n",
+		cfg.Listen, config.CountNested(cfg.Providers), config.CountNested(cfg.Models), cfg.ImageDownscaleMaxPx, cfg.ImageCacheTTLDays, cfg.ProbeMode, cfg.ProbeTimeout.D())
 	fmt.Printf("  dirs log=%s image_cache=%s\n", cfg.LogDir, cfg.ImageCacheDir)
 	for _, line := range providerProxyLines(cfg) {
 		fmt.Println("  " + line)
@@ -623,6 +623,7 @@ func cmdStatus(args []string) error {
 			CooldownUntil time.Time `json:"cooldown_until"`
 			LastError     string    `json:"last_error"`
 			Available     bool      `json:"available"`
+			Probing       bool      `json:"probing"`
 		} `json:"models"`
 		Concurrency struct {
 			Limit    int   `json:"limit"`
@@ -645,7 +646,11 @@ func cmdStatus(args []string) error {
 				state = fmt.Sprintf("COOLDOWN until %s (%s, fails=%d)",
 					ep.CooldownUntil.Local().Format("15:04:05"), ep.LastError, ep.Fails)
 			} else if ep.Fails > 0 {
-				state = fmt.Sprintf("half-open (%s, fails=%d)", ep.LastError, ep.Fails)
+				probing := ""
+				if ep.Probing {
+					probing = ", probing" // a passive-mode real request or an active-mode background probe currently holds this endpoint's single-flight recovery check
+				}
+				state = fmt.Sprintf("half-open (%s, fails=%d%s)", ep.LastError, ep.Fails, probing)
 			}
 			fmt.Printf("  p%-3d %-40s %s\n", ep.Priority, ep.Endpoint, state)
 		}

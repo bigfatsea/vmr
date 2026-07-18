@@ -17,7 +17,6 @@ package diagnose
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +30,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/probe"
 	"vmr/internal/router"
 )
 
@@ -249,7 +249,8 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 	if !ok {
 		return Result{Phase: "connect", Target: target, Status: StatusFail, Detail: "unknown adapter " + ep.AdapterType}
 	}
-	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: minimalBody(ep.Model), Header: http.Header{}}
+	probeBody, nonce := probe.Request(ep.Model)
+	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: probeBody, Header: http.Header{}}
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {
 		return Result{Phase: "connect", Target: target, Status: StatusFail, Detail: "build request: " + err.Error()}
@@ -270,7 +271,18 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		return Result{Phase: "connect", Target: target, Status: StatusOK, Detail: fmt.Sprintf("200 OK (%s)", latency)}
+		// A 200 alone doesn't prove the model actually ran: a relay/gateway
+		// hop can answer with a cached or canned response while the request
+		// never really reached the model. probe.Request asked for a specific
+		// nonce back; its absence downgrades to a warning (not a failure —
+		// the endpoint IS reachable and DID answer, just not verifiably from
+		// a fresh completion) rather than blocking `vmr diagnose` on a vendor
+		// that, say, trims or paraphrases short outputs.
+		if !probe.Echoed(body, nonce) {
+			return Result{Phase: "connect", Target: target, Status: StatusWarn,
+				Detail: fmt.Sprintf("200 OK but echo not verified — response may not be a fresh completion (%s): %s", latency, snippet(body))}
+		}
+		return Result{Phase: "connect", Target: target, Status: StatusOK, Detail: fmt.Sprintf("200 OK, echo verified (%s)", latency)}
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return Result{Phase: "connect", Target: target, Status: StatusFail,
 			Detail: fmt.Sprintf("%d auth failed — check api_key (%s)", resp.StatusCode, latency)}
@@ -287,18 +299,6 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 		return Result{Phase: "connect", Target: target, Status: StatusFail,
 			Detail: fmt.Sprintf("%d: %s (%s)", resp.StatusCode, snippet(body), latency)}
 	}
-}
-
-// minimalBody is a one-token request valid on both supported protocols
-// (model/messages/max_tokens are recognized by every OpenAI- and
-// Anthropic-compatible provider vmr targets).
-func minimalBody(model string) json.RawMessage {
-	b, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": 1,
-		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
-	})
-	return b
 }
 
 func snippet(body []byte) string {

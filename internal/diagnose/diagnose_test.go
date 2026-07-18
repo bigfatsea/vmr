@@ -3,7 +3,9 @@ package diagnose
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +25,31 @@ import (
 func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endpoint {
 	p := cfg.Providers[protocol][provider]
 	return &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: model}
+}
+
+// echoUpstream returns an httptest.Server that answers a probe.Request-shaped
+// body with a 200 whose content echoes back the nonce it was asked for — the
+// mock stand-in for "a real, working provider" used by every test that needs
+// testEndpoint to classify an endpoint as StatusOK now that a bare 200 is no
+// longer enough (see TestTestEndpoint_EchoVerification).
+func echoUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		reply := ""
+		if err := json.Unmarshal(body, &req); err == nil && len(req.Messages) > 0 {
+			content := req.Messages[0].Content
+			const prefix = "Reply with exactly this token and nothing else: "
+			if i := strings.Index(content, prefix); i >= 0 {
+				reply = content[i+len(prefix):]
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%q}}]}`, reply)
+	}))
 }
 
 func writeConfig(t *testing.T, yaml string) string {
@@ -185,7 +212,6 @@ func TestTestEndpoint_StatusClassification(t *testing.T) {
 		wantStatus Status
 		wantSubstr string
 	}{
-		{"ok", http.StatusOK, `{}`, StatusOK, "200 OK"},
 		{"unauthorized", http.StatusUnauthorized, `{}`, StatusFail, "auth failed"},
 		{"not_found", http.StatusNotFound, `{}`, StatusFail, "model not found"},
 		{"rate_limited", http.StatusTooManyRequests, `{}`, StatusWarn, "rate-limited"},
@@ -219,6 +245,50 @@ models:
 	}
 }
 
+// TestTestEndpoint_EchoVerification covers the two 200-OK outcomes the nonce
+// echo check distinguishes: a server that genuinely echoes probe.Request's
+// nonce back (real, fresh completion — StatusOK) versus one that returns 200
+// with unrelated content, as a relay/gateway serving a cached or canned
+// response would (StatusWarn, not StatusFail — the endpoint IS reachable).
+func TestTestEndpoint_EchoVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		echo       bool
+		wantStatus Status
+	}{
+		{"nonce echoed back: verified live completion", true, StatusOK},
+		{"200 but nonce absent: unverified, not a hard failure", false, StatusWarn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ts *httptest.Server
+			if tc.echo {
+				ts = echoUpstream(t)
+			} else {
+				ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"I can't help with that."}}]}`)
+				}))
+			}
+			defer ts.Close()
+			cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  openai: {p1: {base_url: %q, api_key: k}}
+models:
+  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+`, ts.URL)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ep := mkEndpoint(cfg, "openai", "p1", "m")
+			r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+			if r.Status != tc.wantStatus {
+				t.Errorf("status = %s, want %s (detail=%q)", r.Status, tc.wantStatus, r.Detail)
+			}
+		})
+	}
+}
+
 func TestTestEndpoint_NetworkError(t *testing.T) {
 	// Nothing listens here: a closed local listener's former address.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -246,9 +316,7 @@ models:
 }
 
 func TestRun_FullReport(t *testing.T) {
-	goodUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{}`)
-	}))
+	goodUp := echoUpstream(t)
 	defer goodUp.Close()
 	badUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-19 00:00, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -17,6 +17,8 @@ listen: 127.0.0.1:8800
 #   - ${VMR_KEY_OPENCLAW}       # "Multiple callers, one instance" below). The old singular api_key
 #                               # was removed — configs still using it are rejected with a migration hint
 # max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
+# probe_mode: active            # active (default) | passive — how a cooled-down endpoint gets re-verified before real traffic returns to it, see Failover & health below
+# probe_timeout: 15s            # active mode only: upper bound on one background recovery probe
 # max_request_body_mb: 8       # inbound request body size cap (stability only; the audit trail always records requests in full, whatever size vmr accepted)
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
 # https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy
@@ -85,12 +87,21 @@ Because passthrough is byte-level, a new request/response field on either protoc
 
 ## Failover & health
 
-On upstream failure vmr walks the endpoint list in order until one succeeds or all are exhausted (`max_attempts` optionally caps the walk). Health is failure-driven — no paid active probing:
+On upstream failure vmr walks the endpoint list in order until one succeeds or all are exhausted (`max_attempts` optionally caps the walk). Health is failure-driven, classified per response so a failure gets the right penalty and the right verdict on whether to keep failing over:
 
-- network/5xx: short cooldown with exponential backoff; 401/quota-exhausted/unknown-model: long cooldown; 429/503: `Retry-After` honored;
-- expired cooldowns admit a **single probe request** (no thundering herd);
-- 400-class client errors return immediately — no pointless retries;
+- network/5xx: short cooldown with exponential backoff; 401/quota-exhausted/unknown-model/a relay or gateway reporting its own forwarding failure (as opposed to something wrong with the request itself): long cooldown; 429/503: `Retry-After` honored;
+- 400-class **client** errors — a genuinely bad request — return immediately, no failover, no cooldown: every endpoint would reject the same request the same way, so there's nothing switching providers would fix;
 - **content-policy blocks** fail over to the next provider but do **not** penalize the blocked endpoint — it rejected one request; it isn't down.
+
+**Recovering a cooled-down endpoint** (`probe_mode`, default `active`):
+
+- `active` (default): once an endpoint's cooldown expires, vmr fires one small dedicated probe request in the background (bounded by `probe_timeout`, default 15s) instead of letting the next real request find out the hard way. Real traffic never touches — and never waits behind — an endpoint that hasn't been confirmed recovered yet; it's simply routed to the next candidate until the probe reports back, however long that takes. The probe asks the model to echo back a one-time token, so a relay/gateway answering with a cached or canned "success" doesn't count as recovered.
+- `passive`: the classic behavior — the next real request past the cooldown *is* the probe (single-flight, so a thundering herd can't pile onto a just-recovering endpoint). Its own size and duration decide how long that recovery check takes; under concurrent load, every other request targeting the same endpoint is diverted to the next candidate for as long as it runs. Switch to this if you'd rather not spend the extra probe request, or you never run vmr under heavy concurrent load in the first place.
+
+```yaml
+probe_mode: active      # active (default) | passive
+probe_timeout: 15s      # active mode only: upper bound on one background probe
+```
 
 All-candidates-failed returns the last upstream error verbatim. Streams only fail over before the first byte is written.
 
@@ -162,12 +173,12 @@ models:
 | `POST /v1/chat/completions` | OpenAI-protocol ingress (streaming + non-streaming) |
 | `POST /v1/messages` | Anthropic-protocol ingress (streaming + non-streaming) |
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
-| `GET /admin/status` | endpoint health + concurrency metrics (loopback only) |
+| `GET /admin/status` | endpoint health + concurrency metrics, including whether a recovery probe (passive or active) currently has an endpoint's single-flight slot (loopback only) |
 | `vmr check -c config.yaml` | validate config, print routing table, key status and per-provider effective proxy |
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip) |
 | `vmr dirs [-c config.yaml] log\|cache` | print the effective audit/cache directory (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
-| `vmr diagnose [-c config.yaml]` | beyond `check`'s static preview: DNS/TLS/proxy reachability per provider, then a real minimal request per configured endpoint (run concurrently, `-test-timeout` per check, default 10s), plus a routing-order preview annotated with what it found (`-no-test-routing` to skip the live requests, `-json` for scripting; exits non-zero if anything failed) |
+| `vmr diagnose [-c config.yaml]` | beyond `check`'s static preview: DNS/TLS/proxy reachability per provider, then a real minimal request per configured endpoint asking for a one-time token echoed back (run concurrently, `-test-timeout` per check, default 10s) — a 200 that doesn't echo it warns instead of passing, catching a relay/gateway that answers with a cached or canned response instead of a fresh completion — plus a routing-order preview annotated with what it found (`-no-test-routing` to skip the live requests, `-json` for scripting; exits non-zero if anything failed) |
 | `vmr replay -provider NAME <audit.jsonl>` | rebuild and resend one request from an audit record through the exact same request-building path vmr itself uses — `-dry-run` to print without sending, `-record path` to save the replay as its own audit line, `-model`/`-protocol` to override what the record itself says, `-stream true\|false` to force streaming on/off, `-max-time` to cap the upstream wait. Pick the record with `-detail file` (a `vmr report` `details/*.json` file — no line-counting needed), `-ts <timestamp>` (matches either `vmr-requests.jsonl`'s or the raw audit log's `ts` field), or `-line N` (default: the last one in the file) — the three are mutually exclusive |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |

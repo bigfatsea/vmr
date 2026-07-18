@@ -27,12 +27,14 @@ type probeUpstream struct {
 	mode    atomic.Value  // "429" | "400" | "block" | "ok"
 	entered chan struct{} // signaled when a "block" request has arrived
 	release chan struct{} // closed by the test to unpark "block" handlers
+	hits    atomic.Int32  // total requests received, any mode — for tests that need to know a request (e.g. a background probe) landed without it being "block" mode
 }
 
 func newProbeUpstream(t *testing.T) *probeUpstream {
 	u := &probeUpstream{entered: make(chan struct{}, 4), release: make(chan struct{})}
 	u.mode.Store("ok")
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u.hits.Add(1)
 		switch u.mode.Load() {
 		case "429":
 			w.Header().Set("Retry-After", "1")
@@ -41,6 +43,14 @@ func newProbeUpstream(t *testing.T) *probeUpstream {
 		case "400":
 			w.WriteHeader(400)
 			fmt.Fprint(w, `{"error":{"message":"bad request"}}`)
+		case "console_go":
+			// The literal body from reports/incident-20260718-console-go-400-
+			// failover_Sonnet5.md: classifies as ErrEndpoint (a relay/gateway
+			// reporting its own forwarding failure), not ErrClient — must
+			// deepen the endpoint's cooldown via ReportFailure, unlike "400"
+			// above which is a genuine bad request (ReportNeutral only).
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"message":"Error from provider (Console Go): Upstream request failed","type":"invalid_request_error","param":null,"code":"invalid_request_error"}`)
 		case "block":
 			select {
 			case u.entered <- struct{}{}:
@@ -65,9 +75,15 @@ func newProbeUpstream(t *testing.T) *probeUpstream {
 	return u
 }
 
+// probe_mode: passive — this file is specifically about the passive
+// single-request-is-the-probe contract (every outcome must release the probe
+// slot); probe_mode: active's equivalent invariants (an async probe always
+// resolves, never leaves an endpoint locked) are covered separately in
+// server_active_probe_test.go.
 func singleEndpointYAML(u string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
+probe_mode: passive
 providers:
   openai:
     p1: {base_url: %s, api_key: k1}

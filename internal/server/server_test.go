@@ -154,11 +154,92 @@ func TestClientErrorDoesNotFailover(t *testing.T) {
 	}
 }
 
+// TestUpstreamGatewayFailureContinuesFailover reproduces reports/incident-
+// 20260718-console-go-400-failover_Sonnet5.md end to end through the real
+// Serve()/tryOne() path: an upstream relay reports its own forwarding
+// failure (the literal body vmr actually saw, byte for byte), and that must
+// classify as ErrEndpoint — continue failing over instead of stopping dead
+// the way an ErrClient (genuine bad request) correctly does — AND the failed
+// endpoint must get ErrEndpoint's long cooldown (health.longBase, minutes),
+// not ErrTransient's short one, since a relay failure that returns
+// immediately (not a timeout) still means "don't retry this soon". This is
+// the test that would have caught internal/adapter/classify.go's
+// misclassification bug directly, wired through the whole stack rather than
+// just the classifier in isolation (see classify_test.go for that).
+func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
+	u1, u2 := newUpstream(t), newUpstream(t)
+	u1.status.Store(400)
+	u1.errBody.Store(`{"message":"Error from provider (Console Go): Upstream request failed","type":"invalid_request_error","param":null,"code":"invalid_request_error"}`)
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
+
+	resp, body := chat(t, ts, simpleReq, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s (must fail over past the relay failure, not return it to the client)", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+		t.Errorf("endpoint=%s, want p2 (p1's relay failure must not stop the failover walk)", got)
+	}
+	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
+		t.Errorf("attempts=%s, want 2", got)
+	}
+	if u2.hits.Load() != 1 {
+		t.Errorf("p2 hits=%d, want 1 (failover must have reached it)", u2.hits.Load())
+	}
+
+	// The classification must also carry a real health consequence:
+	// ErrEndpoint's long cooldown, not ErrClient's "say nothing about
+	// health" or ErrTransient's short one.
+	statusResp, err := http.Get(ts.URL + "/admin/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer statusResp.Body.Close()
+	var out struct {
+		Models map[string][]struct {
+			Endpoint      string    `json:"endpoint"`
+			Available     bool      `json:"available"`
+			Fails         int       `json:"consecutive_failures"`
+			LastError     string    `json:"last_error"`
+			CooldownUntil time.Time `json:"cooldown_until"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(statusResp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	var p1 *struct {
+		Endpoint      string    `json:"endpoint"`
+		Available     bool      `json:"available"`
+		Fails         int       `json:"consecutive_failures"`
+		LastError     string    `json:"last_error"`
+		CooldownUntil time.Time `json:"cooldown_until"`
+	}
+	for i, ep := range out.Models["vm [openai]"] {
+		if ep.Endpoint == "openai/p1/model-one" {
+			p1 = &out.Models["vm [openai]"][i]
+		}
+	}
+	if p1 == nil {
+		t.Fatal("p1 missing from /admin/status")
+	}
+	if p1.Available || p1.Fails != 1 || p1.LastError != "endpoint" {
+		t.Errorf("p1 health = %+v, want cooling down, fails=1, last_error=endpoint", p1)
+	}
+	if wantMin := time.Now().Add(5 * time.Minute); p1.CooldownUntil.Before(wantMin) {
+		t.Errorf("p1 cooldown_until=%s, want at least 5min out (ErrEndpoint's long cooldown, not a short transient one)", p1.CooldownUntil)
+	}
+}
+
+// TestRateLimitCooldownAndRecovery pins probe_mode: passive because it
+// checks recovery via the passive contract — the request sent right after
+// cooldown expiry IS the probe and is itself served by the recovered
+// endpoint. probe_mode: active's recovery (async, off the request path) is
+// covered by TestActiveProbe_RecoversInBackgroundWithoutServingRealTraffic
+// in server_active_probe_test.go.
 func TestRateLimitCooldownAndRecovery(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(429)
 	u1.retryAfter = "1"
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_mode: passive"))
 
 	// 1st request: 429 on p1 → served by p2; p1 enters cooldown.
 	resp, _ := chat(t, ts, simpleReq, nil)

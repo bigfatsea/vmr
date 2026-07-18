@@ -146,6 +146,14 @@ type Status struct {
 	CooldownUntil time.Time `json:"cooldown_until,omitzero"`
 	LastError     string    `json:"last_error,omitempty"`
 	Available     bool      `json:"available"`
+	// Probing is true while a single-flight probe holds this endpoint's
+	// slot — the next real request in passive mode, or a background probe_
+	// mode: active probe (see internal/router/probe.go) — is currently
+	// deciding whether the endpoint has recovered. Purely observational:
+	// nothing reads this field to make a routing decision, it exists so
+	// `vmr status` and /admin/status can show *why* a half-open endpoint
+	// (Available==true, Fails>0) isn't being tried right this moment.
+	Probing bool `json:"probing,omitempty"`
 }
 
 func (r *Registry) Status(key string, now time.Time) Status {
@@ -155,7 +163,7 @@ func (r *Registry) Status(key string, now time.Time) Status {
 	if !ok {
 		return Status{Available: true}
 	}
-	st := Status{Fails: s.fails, Available: !now.Before(s.cooldownUntil)}
+	st := Status{Fails: s.fails, Available: !now.Before(s.cooldownUntil), Probing: s.probing}
 	if !s.cooldownUntil.IsZero() && now.Before(s.cooldownUntil) {
 		st.CooldownUntil = s.cooldownUntil
 	}

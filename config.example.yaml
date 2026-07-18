@@ -29,6 +29,13 @@ listen: 127.0.0.1:8800
 # (Singular `api_key` was removed — a config still using it fails to load with a migration
 # message. Unknown/misspelled keys are load errors too, never silently ignored.)
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
+# probe_mode: active             # "active" (default): a half-open endpoint gets a small dedicated background probe
+#                                 # request before real traffic is allowed back onto it — real requests never wait on
+#                                 # or get diverted by someone else's slow recovery check. "passive": the old
+#                                 # behavior — the next real request IS the probe, so its own size/duration decides
+#                                 # how long that single-flight probe slot (and, under concurrent load, every other
+#                                 # request's access to this endpoint) stays locked.
+# probe_timeout: 15s             # active mode only: upper bound on one background probe call
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
 # https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy (env vars are

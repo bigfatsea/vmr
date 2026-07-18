@@ -47,6 +47,36 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if got := cfg.Models["openai"]["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
 		t.Errorf("default strategy: %v", got)
 	}
+	if cfg.ProbeMode != ProbeModeActive {
+		t.Errorf("default probe_mode: got %q, want %q", cfg.ProbeMode, ProbeModeActive)
+	}
+	if cfg.ProbeTimeout.D() != DefaultProbeTimeout {
+		t.Errorf("default probe_timeout: got %v, want %v", cfg.ProbeTimeout.D(), DefaultProbeTimeout)
+	}
+}
+
+func TestProbeModeConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\nprobe_mode: passive\nprobe_timeout: 5s", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ProbeMode != ProbeModePassive {
+		t.Errorf("probe_mode: got %q, want %q", cfg.ProbeMode, ProbeModePassive)
+	}
+	if cfg.ProbeTimeout.D() != 5*time.Second {
+		t.Errorf("probe_timeout: got %v, want 5s", cfg.ProbeTimeout.D())
+	}
+}
+
+func TestProbeModeInvalidValueRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\nprobe_mode: sometimes", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "probe_mode") {
+		t.Errorf("expected a probe_mode validation error, got %v", err)
+	}
 }
 
 func TestUnsetEnvExpandsEmpty(t *testing.T) {

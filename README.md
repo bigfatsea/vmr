@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
+<!-- Ver 2026-07-19 00:00, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -15,7 +15,7 @@ Point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK at one stable virtual m
 
 - **One name, every provider** — swap and reorder upstreams (MiniMax, DeepSeek, OpenRouter, anything protocol-compatible) in a YAML file, hot-reloaded in seconds, no client changes ever.
 - **Byte-faithful passthrough** — no intermediate representation, no protocol translation, ever. Requests and responses match a direct provider call byte-for-byte, headers included, except the virtual↔real model-name rewrite and a couple of guarded, evidence-based provider quirk repairs. Unknown API parameters pass through untouched — new provider features work the day they ship, with zero vmr changes.
-- **Failover that actually fails over** — passive health tracking with per-error-class cooldowns (rate limit ≠ dead key ≠ content flag), exponential backoff, `Retry-After` respected, single-flight recovery probes. Content-policy rejections switch providers *without* punishing a healthy endpoint.
+- **Failover that actually fails over** — health tracking with per-error-class cooldowns (rate limit ≠ dead key ≠ content flag ≠ a relay reporting its own forwarding failure), exponential backoff, `Retry-After` respected. Recovery checks default to a background probe decoupled from real traffic, so one slow or oversized request never blocks concurrent callers waiting on a recovering endpoint (single-flight passive probing still available via `probe_mode: passive`). Content-policy rejections switch providers *without* punishing a healthy endpoint.
 - **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
 - **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
 - **Flight-recorder audit log, agent-shaped** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, and the exact normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics — and it understands agent traffic specifically: requests group into sessions → tasks → turns, each turn's delta gets a 🆕 marker, and a tool-usage report tells you which declared tools are never actually called. Old days auto-compress to `.zst` (20–75× smaller) and can auto-expire.

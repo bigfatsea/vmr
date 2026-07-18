@@ -136,6 +136,26 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+func TestStatusReportsProbing(t *testing.T) {
+	r := New()
+	r.ReportFailure("e", core.ErrTransient, 0, t0)
+	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+
+	if st := r.Status("e", after); st.Probing {
+		t.Errorf("half-open with no probe in flight should report Probing=false: %+v", st)
+	}
+	if !r.Acquire("e", after) {
+		t.Fatal("should win the probe slot")
+	}
+	if st := r.Status("e", after); !st.Probing {
+		t.Errorf("with the probe slot held, Status should report Probing=true: %+v", st)
+	}
+	r.ReportSuccess("e")
+	if st := r.Status("e", after); st.Probing {
+		t.Errorf("after the probe resolves, Probing must be released: %+v", st)
+	}
+}
+
 func TestRetryAfterCappedAtOneHour(t *testing.T) {
 	r := New()
 	// Retry-After is upstream-controlled input; a bogus huge value must not

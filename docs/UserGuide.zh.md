@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-19 00:00, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -16,6 +16,8 @@ listen: 127.0.0.1:8800
 #   - ${VMR_KEY_ALICE}          # `vmr report` 里按各自的尾部打标签分组统计（见下文"多调用方场景"）。
 #   - ${VMR_KEY_OPENCLAW}       # 旧的单把 api_key 已移除——配置里还写着它会在加载时被拒绝并提示迁移
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
+# probe_mode: active            # active（缺省）| passive —— 端点冷却到期后如何重新验证恢复，再放行真实流量，见下文"故障切换与健康"
+# probe_timeout: 15s            # 仅 active 模式生效：一次后台恢复探测的超时上限
 # max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
 # https_proxy: http://127.0.0.1:7890   # https 型 base_url 的上游代理——vmr 用代理的唯一途径
@@ -84,12 +86,21 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 
 ## 故障切换与健康
 
-上游失败即按端点列表顺序逐个尝试，直到成功或全部耗尽（`max_attempts` 可选设上限）。健康完全由失败驱动——不做花钱的主动探测：
+上游失败即按端点列表顺序逐个尝试，直到成功或全部耗尽（`max_attempts` 可选设上限）。健康完全由失败驱动，按响应逐条分类，确保每次失败既受到匹配的惩罚，也得到正确的"还要不要继续切换"的判断：
 
-- 网络/5xx：短冷却指数退避；401/额度耗尽/模型不存在：长冷却；429/503：尊重 `Retry-After`；
-- 冷却到期只放行**一个探针请求**验证恢复（防惊群）；
-- 400 类客户端错误直接返回——不做无意义的重试；
+- 网络/5xx：短冷却指数退避；401/额度耗尽/模型不存在/某个网关或中转层报告了它自己的转发失败（而不是请求本身有问题）：长冷却；429/503：尊重 `Retry-After`；
+- 400 类**客户端**错误——确实是请求本身写错了——直接返回，不切换、不冷却：换哪个端点都会被同样拒绝，切换解决不了任何问题；
 - **内容合规拦截**切换下一家，但**不惩罚**被拦端点——它只是拒绝了这一条请求，并没有坏。
+
+**冷却端点如何恢复**（`probe_mode`，缺省 `active`）：
+
+- `active`（缺省）：端点冷却一到期，vmr 立刻在后台发一个专门的轻量探测请求（受 `probe_timeout` 约束，缺省 15s），而不是让下一个真实请求自己去踩一脚。真实流量在端点被确认恢复之前**完全不会碰到它、也不会等它**——探测没出结果之前，请求照样路由到下一个候选，不管探测本身要跑多久。探测会要求模型原样回显一个一次性 token，所以网关返回一个缓存/兜底的"假成功"不会被当成恢复。
+- `passive`：更早期的行为——冷却到期后**第一个真实请求就是探针**（单飞，防止大量并发请求同时涌向刚恢复的端点）。这个探针请求本身跑多久、多大，就决定了这次恢复检测要花多久；并发场景下，其他打向同一端点的请求在这段时间里都会被导流到下一个候选。不想多花这一次探测请求，或者本来就不会有高并发场景，可以切回这个模式。
+
+```yaml
+probe_mode: active      # active（缺省）| passive
+probe_timeout: 15s      # 仅 active 模式生效：一次后台探测的时间上限
+```
 
 全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。
 
@@ -161,12 +172,12 @@ models:
 | `POST /v1/chat/completions` | OpenAI 协议入口（流式 + 非流式） |
 | `POST /v1/messages` | Anthropic 协议入口（流式 + 非流式） |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
-| `GET /admin/status` | 端点健康 + 并发指标（仅 loopback） |
+| `GET /admin/status` | 端点健康 + 并发指标，含某个端点当前是否正被一次恢复探测（被动或主动）占着单飞名额（仅 loopback） |
 | `vmr check -c config.yaml` | 校验配置、打印路由表、Key 状态与每个 provider 的生效代理 |
 | `vmr status -c config.yaml` | 渲染运行实例的健康与并发占用 |
 | `vmr report [-o dir] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭） |
 | `vmr dirs [-c config.yaml] log\|cache` | 打印生效的审计/缓存目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
-| `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点（并发执行，`-test-timeout` 控制单项超时，默认 10s），并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
+| `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 10s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
 | `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.jsonl` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |

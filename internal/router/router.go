@@ -285,10 +285,32 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	}
 
 	// Health filter (read-only) + stable multi-key sort.
+	//
+	// probe_mode: active (default) never lets real traffic touch a half-open
+	// endpoint (fails>0, cooldown expired) at all — instead the first caller
+	// to notice it's unprobed claims the single-flight slot (Acquire, same
+	// method passive mode's per-candidate loop below uses) and hands it to a
+	// background probe goroutine, then treats the endpoint as unavailable
+	// for THIS request exactly as if Acquire had failed. Real requests never
+	// wait on that probe and are never diverted for as long as it takes to
+	// resolve — only for as long as it takes to notice it needs to run.
+	// probe_mode: passive skips this and falls through to the original
+	// behavior: any request may land on a half-open endpoint and become the
+	// probe itself via Acquire in the per-candidate loop below. See
+	// docs/ActiveProbeAndFailoverFix_Sonnet5.md and reports/incident-
+	// 20260718-console-go-400-failover_Sonnet5.md §2.4 for why active exists.
 	now := time.Now()
 	candidates := make([]*core.Endpoint, 0, len(route.Endpoints))
+	activeProbing := snap.Cfg.ProbeMode == config.ProbeModeActive
 	for _, ep := range route.Endpoints {
-		if rt.Health.Available(ep.HealthKey(), now) {
+		key := ep.HealthKey()
+		if activeProbing && rt.Health.Status(key, now).Fails > 0 {
+			if rt.Health.Acquire(key, now) {
+				go rt.runProbe(ep, snap)
+			}
+			continue
+		}
+		if rt.Health.Available(key, now) {
 			candidates = append(candidates, ep)
 		}
 	}
@@ -303,7 +325,10 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
-		// Acquire enforces the single-flight probe for half-open endpoints.
+		// Acquire enforces the single-flight probe for half-open endpoints
+		// (probe_mode: passive — active mode's half-open endpoints were
+		// already filtered out above, so every candidate reaching this line
+		// under active mode has fails==0 and this is always a no-op true).
 		if !rt.Health.Acquire(ep.HealthKey(), time.Now()) {
 			continue
 		}

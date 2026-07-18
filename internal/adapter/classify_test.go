@@ -34,6 +34,40 @@ func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 	}
 }
 
+// TestDefaultClassify_UpstreamGatewayFailure locks in the fix for the
+// incident documented in reports/incident-20260718-console-go-400-failover_
+// Sonnet5.md: a relay hop reporting its own forwarding failure must not
+// dead-end the failover walk the way a genuine bad-request 400 correctly
+// does.
+func TestDefaultClassify_UpstreamGatewayFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		{
+			"opencode Console Go relay failure (the actual incident body)",
+			`{"message":"Error from provider (Console Go): Upstream request failed","type":"invalid_request_error","param":null,"code":"invalid_request_error"}`,
+			core.ErrEndpoint,
+		},
+		{"bad gateway wording", `{"error":{"message":"502 Bad Gateway from upstream"}}`, core.ErrEndpoint},
+		{"gateway timeout wording", `{"error":{"message":"Gateway Timeout while contacting upstream"}}`, core.ErrEndpoint},
+		// Genuine request-content errors must still classify as ErrClient —
+		// upstreamHint must not swallow these just because "model" or generic
+		// wording appears nearby.
+		{"missing field is still ErrClient", `{"error":{"message":"missing required field: messages"}}`, core.ErrClient},
+		{"malformed json is still ErrClient", `{"error":{"message":"invalid JSON payload"}}`, core.ErrClient},
+		// contentHint and the model-not-found rule still take priority over
+		// upstreamHint when both could apply.
+		{"content flag beats upstream wording", `{"error":{"message":"upstream request failed: content_policy violation"}}`, core.ErrContent},
+	}
+	for _, tc := range cases {
+		if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestRewriteModel_NoHTMLEscaping(t *testing.T) {
 	// Direct-equivalence: re-serialization must not rewrite < > & in
 	// message content to their \uXXXX escape forms — a direct call

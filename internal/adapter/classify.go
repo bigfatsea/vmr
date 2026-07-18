@@ -65,10 +65,35 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 			containsAny(snippet, "unknown", "not found", "not_found", "does not exist", "invalid model", "supported") {
 			return core.ErrEndpoint
 		}
+		// A relay/gateway hop reporting its own forwarding failure — it names
+		// the failure as coming from "upstream"/"provider"/"gateway", not from
+		// anything about the request (no field name, no "invalid X" wording).
+		// This is per-endpoint (that specific hop choking, e.g. on a request
+		// size it can't forward), not a request every endpoint would reject
+		// identically — switching helps, so keep failing over instead of
+		// handing this straight back to the client (see reports/incident-
+		// 20260718-console-go-400-failover_Sonnet5.md for the case that
+		// motivated this: an opencode.ai relay's "Upstream request failed"
+		// silently dead-ended an otherwise-recoverable failover walk).
+		if upstreamHint(snippet) {
+			return core.ErrEndpoint
+		}
 		return core.ErrClient
 	default:
 		return core.ErrTransient
 	}
+}
+
+// upstreamHint spots a relay/gateway reporting its own forwarding failure
+// rather than describing a problem with the request. Deliberately narrow
+// (unlike contentHint's "lean wide"): "upstream"/"gateway" alone would also
+// match legitimate request-content errors that happen to mention those words,
+// so this only fires on phrasing that names the failure as belonging to the
+// hop itself.
+func upstreamHint(snippet string) bool {
+	return containsAny(snippet,
+		"upstream request failed", "upstream error", "upstream connect error",
+		"error from provider", "bad gateway", "gateway timeout")
 }
 
 // contentHint spots content-policy rejections across vendors (EN + ZH wording).
