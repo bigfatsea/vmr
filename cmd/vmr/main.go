@@ -274,6 +274,11 @@ func cmdDiagnose(args []string) error {
 		ConfigPath:  *cfgPath,
 		TestRouting: !*noTestRouting,
 		TestTimeout: *testTimeout,
+		// Progress always goes to stderr, in both output modes: it's pure
+		// "this is still running" narration, never part of the reported
+		// data, so it can't corrupt -json's stdout even when both streams
+		// share a terminal. Redirect stderr away (2>/dev/null) to silence it.
+		Progress: os.Stderr,
 	})
 	if rep == nil {
 		return err // config load itself failed; nothing to print
