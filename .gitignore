@@ -1,4 +1,4 @@
-# Ver 2026-07-10 00:00, by Sonnet 5
+# Ver 2026-07-20 00:05, by Sonnet 5
 
 # Binaries
 /vmr
@@ -36,7 +36,14 @@ coverage.html
 # populated here as internal/rundir's last-resort fallback, reached when
 # neither the home directory nor the system temp dir can be resolved; the
 # normal default is the persistent ~/.vmr/logs and ~/.vmr/image_cache
-# (config.yaml's log_dir/image_cache_dir, unset).
+# (config.yaml's log_dir/image_cache_dir, unset). /logs/ also covers
+# logs/loadtest/ (loadtest/config.yaml's log_dir) — no separate rule needed.
 /logs/
 /image_cache/
 /reports/
+
+# loadtest (loadtest/README.md): generated output lands in the /logs/ and
+# /reports/ rules above (namespaced: logs/loadtest/, reports/loadtest-*).
+# targets.json is regenerated every run and deleted when the run finishes —
+# this only catches it if a run gets interrupted mid-way.
+/loadtest/targets.json

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 16:30, by Sonnet 5 -->
+<!-- Ver 2026-07-20 00:05, by Sonnet 5 -->
 
 # vmr load test — runbook
 
@@ -19,7 +19,9 @@ go build -o vmr ./cmd/vmr                     # from the repo root
 go run ./loadtest/runner
 ```
 
-This one command does everything: builds and starts `mockupstream`, starts `./vmr` against `loadtest/config.yaml`, generates `targets.json`, then fires three escalating Vegeta load rounds — `light` (10 req/s × 10s), `moderate` (50 req/s × 20s), `heavy` (150 req/s × 20s) — at all 11 scenarios combined. After the last round it stops both processes, runs `./vmr report` on the combined audit log, and writes everything — Vegeta's client-side percentiles per round, plus vmr's own per-scenario `按模型`/`端点可用度` tables — into a single **`loadtest/report.md`**. That file (and `loadtest/report_data/`, `loadtest/targets.json`, `loadtest/logs/*`) is gitignored — regenerate on demand, don't hand-edit or commit it.
+This one command does everything: builds and starts `mockupstream`, starts `./vmr` against `loadtest/config.yaml`, generates `targets.json`, then fires three escalating Vegeta load rounds — `light` (10 req/s × 10s), `moderate` (50 req/s × 20s), `heavy` (150 req/s × 20s) — at all 11 scenarios combined. After the last round it stops both processes, runs `./vmr report` on the combined audit log, and writes everything — Vegeta's client-side percentiles per round, plus vmr's own per-scenario `按模型`/`端点可用度` tables — into a single **`reports/loadtest-report.md`**.
+
+Generated files live in the same `logs/`/`reports/` directories a real vmr instance uses — not scattered under `loadtest/` — but namespaced so they can never mix with or overwrite real data: the audit log goes to `logs/loadtest/` (its own subdirectory, wiped clean before every run), and the only file written under `reports/` is `reports/loadtest-report.md` (the `loadtest-` prefix is deliberate: `vmr report`'s own output filenames are fixed and unprefixed, so this runner stages that raw output in a throwaway temp dir and never lets it touch `reports/` directly). `loadtest/targets.json` is deleted again as soon as the run finishes — it's regenerated (with fresh synthetic images) every time, never worth keeping around. Nothing this produces is committed; don't hand-edit or commit any of it.
 
 To change the load profiles (e.g. push `heavy` further), edit the `profiles` slice at the top of [`runner/main.go`](runner/main.go) — there's nothing else to configure.
 
@@ -52,8 +54,11 @@ vegeta attack -targets=loadtest/targets.json -format=json -rate=20 -duration=30s
 
 # 5. vmr's own per-scenario view — no new tooling needed, it already buckets
 #    by virtual model and every request already has ttft_ms/dur_ms in the audit log.
-./vmr report loadtest/logs/vmr-audit-*.jsonl
-cat reports/vmr-report.md   # "按模型" (ByModel) table = per-scenario p50/p95
+#    -o an explicit scratch dir here, not the default ./reports — that's
+#    where real report data lives, and vmr report's output filenames are
+#    fixed (vmr-report.md etc.), so an unqualified run would overwrite it.
+./vmr report -o /tmp/vmr-loadtest-manual logs/loadtest/vmr-audit-*.jsonl
+cat /tmp/vmr-loadtest-manual/vmr-report.md   # "按模型" (ByModel) table = per-scenario p50/p95
 ```
 
 ## Cleanup
@@ -62,5 +67,8 @@ The runner cleans up its own subprocesses and stops on its own; nothing to kill 
 
 ```bash
 # Ctrl-C the mockupstream and vmr processes from steps 1-2.
-rm -rf loadtest/logs/* loadtest/targets.json reports/   # reports/ is vmr report's default -o
+rm -rf logs/loadtest loadtest/targets.json /tmp/vmr-loadtest-manual
+# Only remove reports/loadtest-report.md, never the whole reports/ dir —
+# that's where real vmr report output lives too.
+rm -f reports/loadtest-report.md
 ```

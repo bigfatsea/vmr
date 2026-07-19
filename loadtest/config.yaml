@@ -1,11 +1,13 @@
-# Ver 2026-07-16 00:00, by Sonnet 5 — vmr config for load testing (docs/PerformanceTesting_Design_Sonnet5.md).
+# Ver 2026-07-19 23:55, by Sonnet 5 — vmr config for load testing (docs/PerformanceTesting_Design_Sonnet5.md).
 # Not the same as config.yaml/config.example.yaml at the repo root — this points
 # at loadtest/mockupstream, never a real provider, and listens on a different
 # port so it can run alongside a real dev instance without clashing.
 
 listen: 127.0.0.1:8801
 max_concurrency: 0          # unlimited — we want to see vmr's natural ceiling, not an artificial gate
-log_dir: ./loadtest/logs    # kept separate from the normal ~/.vmr/logs
+log_dir: ./logs/loadtest    # own subdirectory under logs/ — separate from ~/.vmr/logs and from
+                            # any real vmr instance's logs/*.jsonl (runner.go wipes this dir clean
+                            # before every run; must never point at a shared/real log directory)
 audit_retention_days: 0     # keep forever; this is a small, throwaway log directory anyway
 
 providers:

@@ -1,4 +1,4 @@
-// Ver 2026-07-16 16:30, by Sonnet 5
+// Ver 2026-07-20 00:05, by Sonnet 5
 
 # vmr 性能测试方案设计（v2，已落地，含第二轮扩展）
 
@@ -106,7 +106,7 @@ vegeta attack -targets=loadtest/targets.json -rate=20 -duration=30s | vegeta rep
 - **场景矩阵从 6 个扩到 11 个**：新增 `think_tag`（`<think>` 标签形态——先缓冲后恢复流式的路径，跟 `thinking_leak` 的"全程缓冲到底"是两条不同代码路径）、`big_response`（大体积非流式响应，压测响应侧而非请求侧）、`multi_image`（一条消息里 3 张不同尺寸的图，含跨阈值和不跨阈值混合）、`gif`（确认 GIF 的"永不缩放"快速跳过路径在压力下依然便宜）、`anthropic_baseline`（Anthropic 协议适配器，此前只测了 openai 协议——§5 原判断"两个协议共用同一套归一化代码，没必要翻倍"，用户要求后按"反正成本很低"补上了）。
 - **新增 `loadtest/runner/main.go`**：一个编排程序（Go 标准库 `os/exec`，无新依赖），把此前需要手动跑的四步（起 mock → 起 vmr → 生成 targets → `vegeta attack`）和读数（`vmr report`）串成一条命令 `go run ./loadtest/runner`。这不违反 §3 "没有新的 Go 程序入口"的原判断——原判断针对的是"要不要一个特殊的压测模式"，`runner` 只是把命令行步骤脚本化，Vegeta 和 `vmr report` 仍然是真正做事的工具，没有重新发明。
 - **"几个典型组合"落地为三档递增负载**：`light`（10 req/s × 10s）/`moderate`（50 req/s × 20s）/`heavy`（150 req/s × 20s），一次运行里依次跑完三档，而不是只跑一个固定的 `-rate`。
-- **报告落地为 `loadtest/report.md`**（Markdown，gitignored，按需重新生成）：第一段是三档负载各自的 Vegeta 客户端视角表（p50/p95/p99/max、成功率）；第二段直接把 `vmr report` 生成的 `按模型`/`端点可用度` 两张表原样嵌入——没有另写一套报告渲染代码，复用 `vmr report` 自己的 Markdown 输出。
+- **报告落地为 `reports/loadtest-report.md`**（Markdown，gitignored，按需重新生成）：第一段是三档负载各自的 Vegeta 客户端视角表（p50/p95/p99/max、成功率）；第二段直接把 `vmr report` 生成的 `按模型`/`端点可用度` 两张表原样嵌入——没有另写一套报告渲染代码，复用 `vmr report` 自己的 Markdown 输出。**2026-07-20 追加整理**：生成物统一挪进项目原有的 `logs/`/`reports/` 目录体系,不再散落在 `loadtest/` 源码目录下——但不是直接复用同名文件:审计日志写到 `logs/loadtest/`(独立子目录,而非共享的 `logs/` 顶层——审计文件名 `vmr-audit-YYYY-MM-DD.jsonl` 不可加前缀区分,且每次跑之前会清空该目录,直接指向共享目录会有把真实数据一起清空/混入的风险);`vmr report` 自己的固定文件名输出（`vmr-report.md` 等）改成先落一个临时目录,只把最终合成的 `reports/loadtest-report.md` 一个文件写进共享的 `reports/`,避免覆盖真实报告。`loadtest/targets.json` 跑完即删(本来就是每次重新生成、不提交的产物)。`loadtest/report_data/`(旧的中间产物目录)不再使用。`loadtest/.gitignore` 因此不再需要,规则并入项目根 `.gitignore`。
 
 **实测跑通的结果**（三档负载共 4100 个请求，11 个场景 × 3 轮）：三档全部 100% 成功率；客户端视角 p95 分别是 51ms/47ms/23ms（`heavy` 档反而更低，是三档共享同一批"探测阶段"冷启动开销被摊薄的正常现象，不是变快了）。服务端视角（`vmr report` 按模型表）：`big_image` p50/p95 请求耗时 20ms/47ms、`multi_image` 11ms/23ms，其余九个场景全部在 0-6ms 之间——跟 §0 的预期一致：**vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计，唯一有实质成本的是图片降采样，且随图片数量线性增长（`multi_image` 三张图的开销约等于 `big_image` 一张大图的一半，量级上说得通）**。`端点可用度` 表确认 `failover` 场景的 `mock_fail1`/`mock_fail2`/`mock_ok` 三个端点都被走到。结论没变：**跑一次，数字都正常，不需要再往下细分（Tier 1 微基准继续不做）**。
 
