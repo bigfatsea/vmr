@@ -85,6 +85,8 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 * **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503。凡进入 failover 循环的响应带 `X-VMR-Attempts`（成功另带 `X-VMR-Endpoint`）；路由之前被拒的请求（401/404/413/坏 JSON）不带。
 * **请求侧 Header 透传**：黑名单之外的客户端 header 全部透传（含 `anthropic-version`/`anthropic-beta` 协议头，§5.4），Content-Type 与凭证由 Adapter 统一设置。客户端 `Authorization`/`x-api-key` 绝不到上游；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
 * **响应侧 Header 透传**：与请求侧对称——上游响应头默认全部透传（`x-ratelimit-*`、request id、`Date`、`Retry-After`、`Content-Encoding`…），只剥 hop-by-hop（Connection/Keep-Alive/TE/Trailer/Transfer-Encoding/Upgrade/Proxy-*）与 `Content-Length`（归一化可能改变长度，Go 重新成帧）。客户端看到的头与直连一致，仅多出 `X-VMR-*`。
+* **3xx 重定向不跟随**：`NewUpstreamClient` 构造的 `http.Client` 设 `CheckRedirect` 返回 `http.ErrUseLastResponse`——上游 3xx 原样到达客户端（status + `Location` + body），与直连一致。Go `http.Client` 默认策略会把 POST 301/302/303 静默改写成 GET，这会破坏字节级保真。LLM API 几乎不发 3xx，但一旦发了，vmr 的行为与直连完全一致。
+* **base_url 路径重叠消除**：`BuildSnapshot` 在初始化时将每个 provider 的 `base_url` 与 adapter 的路径后缀（OpenAI `/v1/chat/completions`、Anthropic `/v1/messages`）拼接，检测并消除重叠部分——`base_url` 尾部与后缀头部的最长公共子串只保留一次。用户写不写 `/v1`、甚至写完整路径，结果都正确。完整 URL 存入 `core.Endpoint.FullURL`，adapter 的 `BuildRequest` 直接使用，不在请求时重复构造。
 
 ### 4.2 模块划分
 
@@ -493,7 +495,7 @@ timeouts:
 providers:                       # "我有什么"——按协议分组，两层 map
   <protocol>:                    # openai | anthropic | 未来任何已注册的 adapter 名
     <name>:
-      base_url: https://...      # openai 型拼 /chat/completions；anthropic 型拼 /messages
+      base_url: https://...      # openai 型拼 /v1/chat/completions；anthropic 型拼 /v1/messages；写不写 /v1 都行，vmr 自动消除重叠（§4.1）
       api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串
       proxy: false               # 可选三态开关：false = 该 provider 永远直连（无视全局 http(s)_proxy，
                                  # 国内厂商的典型写法）；true/缺省 = 跟随全局 http(s)_proxy。没有环境变量

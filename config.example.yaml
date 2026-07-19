@@ -53,6 +53,11 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
 providers:
+  # base_url + path overlap elimination: vmr joins the provider's base_url
+  # with the protocol's path suffix (/v1/chat/completions for OpenAI,
+  # /v1/messages for Anthropic), detecting and removing any overlap so
+  # path segments are never duplicated. Write base_url with or without /v1,
+  # or even the full path — vmr always produces the correct URL.
   openai:
     minimax:
       base_url: https://api.minimaxi.com/v1

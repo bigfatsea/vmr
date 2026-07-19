@@ -192,7 +192,12 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		endpoints := make([]*core.Endpoint, len(keys))
 		for i, k := range keys {
 			p := cfg.Providers[k.protocol][k.provider]
-			endpoints[i] = &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: k.model}
+			ad, _ := adapter.Get(k.protocol)
+			ep := &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: k.model}
+			if ad != nil {
+				ep.FullURL = ad.ResolveURL(p.BaseURL)
+			}
+			endpoints[i] = ep
 		}
 		if opts.Progress != nil {
 			fmt.Fprintf(opts.Progress, "Connectivity: probing %d endpoint(s) (timeout %s each)...\n", len(endpoints), opts.TestTimeout)

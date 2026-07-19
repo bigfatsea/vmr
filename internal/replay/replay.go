@@ -115,6 +115,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		APIKey:      providerCfg.APIKey,
 		Model:       model,
 	}
+	ep.FullURL = ad.ResolveURL(providerCfg.BaseURL)
 
 	stream := rv.Stream
 	if opts.Stream != nil && *opts.Stream != rv.Stream {

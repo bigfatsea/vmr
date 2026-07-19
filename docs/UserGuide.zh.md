@@ -61,6 +61,8 @@ models:
 
 **上游代理——只认显式配置**：provider 自己的 `proxy: false` 最高优先（该 provider 永远直连——这正是"国内厂商直连 + 海外厂商走代理"混配场景的解法）；其次是上面的全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但全局没配对应代理是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
 
+**base_url 路径重叠消除**：vmr 在初始化时预计算每个 provider 的完整上游 URL——将 `base_url` 与协议路径后缀（OpenAI 为 `/v1/chat/completions`，Anthropic 为 `/v1/messages`）拼接，检测并消除 `base_url` 尾部与后缀头部的重叠部分。所以 `https://api.example.com/v1` + `/v1/chat/completions` → `https://api.example.com/v1/chat/completions`（不会变成 `…/v1/v1/…`）。`base_url` 写不写 `/v1`、甚至写完整路径，结果都正确。同时覆盖 OpenAI 兼容和 Anthropic 兼容两种协议——两者都用 `/v1`。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
+
 ### 环境变量
 
 vmr 涉及的环境变量全部在此——除此之外不读任何环境变量：
@@ -80,7 +82,7 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 - 两个 **MiniMax-M3 专属修复**，各自只在确认命中其确切形态时触发：剥 content 里的内联 `<think>…</think>` 推理（不剥会持久化进历史，把模型锁进反馈循环），以及剥 MiniMax 某个思考模式下（这个模式不写 `<think>` 标签）以纯文本输出的「Thinking Process:」思考段；
 - `data: [DONE]` 哨兵——**仅** OpenAI 协议流式且上游未发时补；绝不重复，绝不注入 Anthropic 流。
 
-流式是真的：事件到达即转发；只有检测到思考形态才缓冲，`</think>` 闭合后立即恢复实时流。带 `Content-Encoding` 的压缩体零变换直通。响应头与请求头同一策略——除 hop-by-hop 外全部透传；错误响应连状态、头（含 `Retry-After`）、体原样返回。每个请求实际生效的归一化记录在审计日志 `attempts[].norm`，上游与客户端之间的任何字节差异都有逐请求的解释。
+流式是真的：事件到达即转发；只有检测到思考形态才缓冲，`</think>` 闭合后立即恢复实时流。带 `Content-Encoding` 的压缩体零变换直通。上游 3xx 重定向绝不跟随——301/302/303 帟始状态、`Location` 头、体原样到达客户端，和直连一模一样（`http.Client` 默认策略会把 POST 301/302/303 静默改写成 GET，这会破坏字节级保真）。响应头与请求头同一策略——除 hop-by-hop 外全部透传；错误响应连状态、头（含 `Retry-After`）、体原样返回。每个请求实际生效的归一化记录在审计日志 `attempts[].norm`，上游与客户端之间的任何字节差异都有逐请求的解释。
 
 正因为透传是字节级的，两个协议任何一侧新增的请求/响应字段都不需要 vmr 改代码就能到达上游或客户端——这正是透传的意义所在。vmr **不做**的事：只路由 `POST /v1/chat/completions` 和 `POST /v1/messages` 两个入口，其他 OpenAI/Anthropic surface（`/v1/responses`、`/v1/realtime`、`/v1/images`、`/v1/audio` 等）不在范围内——这类需求请直接把客户端指向供应商自己的 base URL。
 

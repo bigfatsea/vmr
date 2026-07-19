@@ -100,7 +100,8 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
 	for protocol, models := range cfg.Models {
-		if _, ok := adapter.Get(protocol); !ok { // defensive; config.validate already checked this
+		ad, ok := adapter.Get(protocol)
+		if !ok { // defensive; config.validate already checked this
 			return nil, fmt.Errorf("protocol %q: unknown adapter type (available: %v)", protocol, adapter.Names())
 		}
 		byName := make(map[string]*ModelRoute, len(models))
@@ -115,14 +116,16 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 				if !ok { // defensive; config.validate already checked this
 					return nil, fmt.Errorf("model %q: unknown provider %q in the %s protocol group", name, ec.Provider, protocol)
 				}
-				route.Endpoints = append(route.Endpoints, &core.Endpoint{
+				ep := &core.Endpoint{
 					Provider:    ec.Provider,
 					AdapterType: protocol,
 					BaseURL:     p.BaseURL,
+					FullURL:     ad.ResolveURL(p.BaseURL),
 					APIKey:      p.APIKey,
 					Model:       ec.Model,
 					Priority:    ec.Priority,
-				})
+				}
+				route.Endpoints = append(route.Endpoints, ep)
 			}
 			byName[name] = route
 		}
@@ -163,14 +166,24 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider) *http.Client {
 			proxyFn = http.ProxyURL(u)
 		}
 	}
-	return &http.Client{Transport: &http.Transport{
-		Proxy:                 proxyFn,
-		DialContext:           (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
-		ResponseHeaderTimeout: cfg.Timeouts.ResponseHeader.D(),
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
-	}}
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 proxyFn,
+			DialContext:           (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
+			ResponseHeaderTimeout: cfg.Timeouts.ResponseHeader.D(),
+			MaxIdleConnsPerHost:   16,
+			IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
+		},
+		// Never follow upstream redirects: POST 301/302/303 would be
+		// silently rewritten to GET by the default policy, violating
+		// byte-faithful passthrough (§1). LLM APIs almost never send 3xx,
+		// but if one does the client sees exactly what a direct call would
+		// — the 3xx status, Location header, and body, untouched.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.

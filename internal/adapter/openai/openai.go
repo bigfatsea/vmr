@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
@@ -20,14 +19,16 @@ func init() { adapter.Register("openai", OpenAI{}) }
 type OpenAI struct{}
 
 func (OpenAI) Protocol() string { return "openai" }
+func (OpenAI) ResolveURL(baseURL string) string {
+	return adapter.ResolveURL(baseURL, "/v1/chat/completions")
+}
 
 func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
 	body, err := adapter.RewriteModel(req.Raw, ep.Model)
 	if err != nil {
 		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
-	url := strings.TrimRight(ep.BaseURL, "/") + "/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}

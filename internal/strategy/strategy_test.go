@@ -2,6 +2,7 @@
 package strategy
 
 import (
+	"math"
 	"testing"
 
 	"vmr/internal/core"
@@ -24,6 +25,23 @@ func TestPrioritySortStableOnTies(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("order: got %v want %v", got, want)
 		}
+	}
+}
+
+func TestPriorityCompareNoOverflow(t *testing.T) {
+	// cmp.Compare avoids the subtraction overflow that a-b produces
+	// when the two values are at opposite extremes of int.
+	d := priority{}
+	a := &core.Endpoint{Priority: math.MaxInt32}
+	b := &core.Endpoint{Priority: math.MinInt32}
+	if got := d.Compare(a, b); got <= 0 {
+		t.Errorf("MaxInt32 vs MinInt32: got %d, want > 0", got)
+	}
+	if got := d.Compare(b, a); got >= 0 {
+		t.Errorf("MinInt32 vs MaxInt32: got %d, want < 0", got)
+	}
+	if got := d.Compare(a, a); got != 0 {
+		t.Errorf("equal priorities: got %d, want 0", got)
 	}
 }
 

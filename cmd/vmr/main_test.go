@@ -2,10 +2,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
+	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"vmr/internal/config"
+	"vmr/internal/router"
 )
 
 const minimalConfigYAML = `
@@ -149,5 +159,346 @@ func TestCmdReport_NoMatches(t *testing.T) {
 func TestCmdReport_NoInputFiles(t *testing.T) {
 	if err := cmdReport(nil); err == nil {
 		t.Error("cmdReport with no input files should return an error")
+	}
+}
+
+// --- logConfigSummary tests ---
+
+// TestLogConfigSummary_Output verifies that logConfigSummary emits the
+// key config fields a operator would scan at startup: listen address, auth
+// state, limits, timeouts, directories, per-model endpoints in try order,
+// and proxy resolution per provider.
+func TestLogConfigSummary_Output(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+api_keys: ["sk-vmr-local-test-key-001"]
+max_attempts: 3
+max_concurrency: 8
+image_downscale: 512
+audit_retention_days: 30
+probe_mode: active
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: key-aaaa}
+    p2: {base_url: https://b.example/v1, api_key: key-bbbb, proxy: false}
+models:
+  openai:
+    vm:
+      endpoints:
+        - {provider: p1, model: real-a, priority: 1}
+        - {provider: p2, model: real-b, priority: 2}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	// Core config line.
+	checks := []string{
+		"listen=127.0.0.1:8800",
+		"auth=on",
+		"max_attempts=3",
+		"max_concurrency=8",
+		"image_downscale=512px",
+		"audit_retention=30d",
+		"probe_mode=active",
+	}
+	for _, want := range checks {
+		if !strings.Contains(out, want) {
+			t.Errorf("logConfigSummary output missing %q in:\n%s", want, out)
+		}
+	}
+
+	// Timeout line.
+	if !strings.Contains(out, "timeouts connect=") {
+		t.Errorf("output missing timeouts line:\n%s", out)
+	}
+
+	// Model line with endpoints in try order.
+	if !strings.Contains(out, "model vm [openai]") {
+		t.Errorf("output missing model line:\n%s", out)
+	}
+	if !strings.Contains(out, "1.p1/real-a(key:set)") {
+		t.Errorf("output missing first endpoint:\n%s", out)
+	}
+	if !strings.Contains(out, "2.p2/real-b(key:set)") {
+		t.Errorf("output missing second endpoint:\n%s", out)
+	}
+
+	// Proxy lines.
+	if !strings.Contains(out, "provider openai/p1 proxy=direct") {
+		t.Errorf("output missing p1 proxy line:\n%s", out)
+	}
+	if !strings.Contains(out, "provider openai/p2 proxy=direct (proxy: false)") {
+		t.Errorf("output missing p2 proxy: false line:\n%s", out)
+	}
+}
+
+// TestLogConfigSummary_AuthOffAndDefaults verifies the default-value
+// rendering: auth=off when no api_keys, max_attempts=unlimited, etc.
+func TestLogConfigSummary_AuthOffAndDefaults(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: k}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	if !strings.Contains(out, "auth=off") {
+		t.Errorf("auth should be off: %s", out)
+	}
+	if !strings.Contains(out, "max_attempts=unlimited") {
+		t.Errorf("max_attempts should be unlimited: %s", out)
+	}
+	if !strings.Contains(out, "max_concurrency=unlimited") {
+		t.Errorf("max_concurrency should be unlimited: %s", out)
+	}
+	if !strings.Contains(out, "image_downscale=off") {
+		t.Errorf("image_downscale should be off: %s", out)
+	}
+	if !strings.Contains(out, "audit_retention=forever") {
+		t.Errorf("audit_retention should be forever: %s", out)
+	}
+}
+
+// TestLogConfigSummary_ImageDownscaleOverride verifies per-model
+// image_downscale override is rendered.
+func TestLogConfigSummary_ImageDownscaleOverride(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+image_downscale: 1024
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: k}
+models:
+  openai:
+    plain: {endpoints: [{provider: p1, model: m}]}
+    custom: {image_downscale: 256, endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	if !strings.Contains(out, "model plain [openai]") || strings.Contains(out, "model plain [openai] image_downscale=") {
+		t.Errorf("plain model should not have image_downscale override: %s", out)
+	}
+	if !strings.Contains(out, "model custom [openai] image_downscale=256px") {
+		t.Errorf("custom model should show image_downscale=256px: %s", out)
+	}
+}
+
+// TestLogConfigSummary_EmptyAPIKey verifies that an endpoint with no API
+// key is rendered as key:EMPTY.
+func TestLogConfigSummary_EmptyAPIKey(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: ""}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	if !strings.Contains(out, "key:EMPTY") {
+		t.Errorf("endpoint with empty API key should show key:EMPTY: %s", out)
+	}
+}
+
+// --- providerProxyLines tests ---
+
+func TestProviderProxyLines_Direct(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: k}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := providerProxyLines(cfg)
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "proxy=direct") {
+		t.Errorf("expected direct, got %q", lines[0])
+	}
+}
+
+func TestProviderProxyLines_ProxyFalse(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+https_proxy: http://127.0.0.1:7890
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: k, proxy: false}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := providerProxyLines(cfg)
+	if !strings.Contains(lines[0], "proxy: false") {
+		t.Errorf("expected proxy: false, got %q", lines[0])
+	}
+}
+
+func TestProviderProxyLines_ProxyURL(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+https_proxy: http://user:pass@127.0.0.1:7890
+providers:
+  openai:
+    p1: {base_url: https://a.example/v1, api_key: k}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := providerProxyLines(cfg)
+	// Credentials in the proxy URL must be redacted.
+	if strings.Contains(lines[0], "user:pass") {
+		t.Errorf("proxy URL credentials not redacted: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "127.0.0.1:7890") {
+		t.Errorf("proxy URL host missing: %q", lines[0])
+	}
+}
+
+// --- cmdStatus tests ---
+
+// TestCmdStatus_WithMockServer starts a mock admin endpoint, points a
+// config at it, and verifies cmdStatus parses the JSON and prints
+// human-readable status lines.
+func TestCmdStatus_WithMockServer(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": map[string]any{
+				"vm [openai]": []map[string]any{
+					{
+						"endpoint":             "openai/p1/m",
+						"protocol":             "openai",
+						"priority":             1,
+						"consecutive_failures": 0,
+						"available":            true,
+					},
+				},
+			},
+			"concurrency": map[string]any{
+				"limit":     8,
+				"in_flight": 2,
+				"waiting":   0,
+			},
+			"time": "2026-07-19T12:00:00Z",
+		})
+	}))
+	defer ts.Close()
+
+	yaml := fmt.Sprintf(`
+listen: %s
+providers:
+  openai:
+    p1: {base_url: https://example.com/v1, api_key: k}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`, ts.Listener.Addr().String())
+
+	path := writeTempFile(t, "config.yaml", yaml)
+	got := captureStdout(t, func() {
+		if err := cmdStatus([]string{"-c", path}); err != nil {
+			t.Fatalf("cmdStatus: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "concurrency: 2/8") {
+		t.Errorf("output should show concurrency 2/8: %q", got)
+	}
+	if !strings.Contains(got, "vm [openai]") {
+		t.Errorf("output should show model name: %q", got)
+	}
+	if !strings.Contains(got, "openai/p1/m") {
+		t.Errorf("output should show endpoint: %q", got)
+	}
+	if !strings.Contains(got, "ok") {
+		t.Errorf("endpoint state should be ok: %q", got)
+	}
+}
+
+// TestCmdStatus_ServerNotRunning verifies that cmdStatus returns a clear
+// error when no vmr instance is listening.
+func TestCmdStatus_ServerNotRunning(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:1
+providers:
+  openai:
+    p1: {base_url: https://example.com/v1, api_key: k}
+models:
+  openai:
+    vm: {endpoints: [{provider: p1, model: m}]}
+`
+	path := writeTempFile(t, "config.yaml", yaml)
+	if err := cmdStatus([]string{"-c", path}); err == nil {
+		t.Error("cmdStatus should return an error when no server is running")
 	}
 }

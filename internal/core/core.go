@@ -118,10 +118,14 @@ func (c ErrorClass) String() string {
 }
 
 // Endpoint is the smallest schedulable unit: provider × real model × scheduling attrs.
+// FullURL is the complete upstream URL (base_url + protocol path, with
+// overlap eliminated) pre-computed once at initialization so the adapter's
+// BuildRequest never needs to construct or normalize a URL per request.
 type Endpoint struct {
 	Provider    string // provider name as written in config
 	AdapterType string
-	BaseURL     string
+	BaseURL     string // as written in config (for diagnostics: DNS/TLS checks, display)
+	FullURL     string // complete upstream URL, pre-computed at init via adapter.ResolveURL
 	APIKey      string
 	Model       string
 	Priority    int

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-17 12:00, by Sonnet 5 -->
+<!-- Ver 2026-07-19 14:00, by Sonnet 5 -->
 # vmr — 遗留问题清单(Outstanding Issues)
 
 > **性质**:本文档汇总自四份历史审计——`AUDIT_REPORT.md`(1.0)、`AUDIT_REPORT_2_Fable5.md`/`AUDIT_SUMMARY_2_Fable5.md`(2.0,Fable 5)、`audit_report_v2_logs_pi_agent.md`/`audit_report_v2_summary_pi_agent.md`(2.0,Pi Agent)、`AUDIT_REPORT_V3_Sonnet5.md`(V3,前三份的交叉核实定稿)——只保留经本次核对**截至今天(commit HEAD,`internal/server/server_v22_test.go` 重命名之后)仍然成立**的问题。
@@ -6,6 +6,8 @@
 > **不再收录的条目**:已修复、已核实为非问题、或经审阅判定为"有意为之的设计决策"的条目不再出现在这里(它们的完整论证过程、修复记录留在 git 历史里——四份历史审计文档已在本次整理中删除,可用 `git log --all --diff-filter=D -- docs/AUDIT_REPORT*.md docs/audit_report*.md` 找到,再用 `git show <commit>^:<path>` 取回全文)。归纳起来,历史上共有约 21 项被确认修复、3 项被确认为非问题或设计决策,不再列出。
 >
 > **本次额外核实的变化**:`core.ErrorClass.String()` 的 `default` 分支此前既没有 `ErrTransient` 的显式 `case`、也没有测试锁定 4 个审计专用值的字符串——这两点已在后续的代码整理中补齐(见 `internal/core/core.go`/`core_test.go`),原本归在第二梯队的这一条相应降级,详见 §3 第一条。
+>
+> **2026-07-19**:`priority.Compare` 溢出与 3xx 重定向未处理(原第二梯队第 4、5 条)已修复并删除;同日一份独立的 `docs/Codebase_Review_Report.md` 全项目审查已完成,其中仍然成立、且本文档尚未收录的问题已并入本文档(§3),已修复/与本文档重复的条目不再另存——该报告随后已删除,完整内容见 git 历史(`git log --all --diff-filter=A -- docs/Codebase_Review_Report.md`)。往后同理:每轮审查后只把**仍然成立**的新问题并进这里,不留存独立报告文件。
 >
 > 严重度:`[S]` 严重 / `[M]` 中等 / `[L]` 轻微。梯队标准沿用历史审计:**第一梯队** = 推荐尽快处理(问题+方案+工作量);**第二梯队** = 改与不改都合理(问题+简要方案);**第三梯队** = 点出即可,附一句建议方向。
 
@@ -15,7 +17,7 @@
 
 - 没有 `[S]` 级别之外的严重缺陷,没有会导致数据丢失、凭证泄漏或服务不可用的问题。项目可以继续放心用于生产。
 - 第一梯队只有 2 项,且都是"先加观测、暂不改行为"的低风险方案,合计工作量 <1 天。
-- 第二梯队 8 项、第三梯队约 25 项,均为"改与不改都合理"或"点出即可"级别,没有时间压力。
+- 第二梯队 7 项、第三梯队约 28 项,均为"改与不改都合理"或"点出即可"级别,没有时间压力。
 
 ---
 
@@ -50,15 +52,13 @@
 
 3. **[L] `audit.Attempt.RawPreStrip` 字段类型仍为 `any`**——`internal/audit/audit.go:146`,消费端要类型断言,不利 schema 化。**方案**:改成 `json.RawMessage`(需要同步检查所有读取该字段的消费方,尤其是 `report/detail.go` 的渲染逻辑)。
 
-4. **[L] `strategy.priority.Compare` 用减法比较 `Priority`,极端值可溢出反转排序**——`internal/strategy/strategy.go:75`(`a.Priority - b.Priority`)。config 对 `Priority` 取值无范围校验,联动风险同源。**方案**:改 `cmp.Compare(a.Priority, b.Priority)`,零成本消除;或至少给 config 的 `Priority` 字段加合理范围校验。
+4. **[L] `writeRequestRows` 的 `defer f.Close()` 错误被吞**——`internal/report/export.go:419`。磁盘写满时"导出成功"但文件不完整不会报错。**方案**:改成具名返回 + defer 里合并 Close 错误(参考同文件 `housekeep.go::compressFile` 已有的模式)。
 
-5. **[L] 上游 3xx 重定向未显式处理**——`internal/router/router.go` 全文无 `CheckRedirect`。`http.Client` 默认跟随重定向,POST 301/302/303 会被静默改写成 GET,与"直连等价"的设计原则相悖。LLM API 现实中几乎不发 3xx,是休眠风险。**方案**:构造 `http.Client` 时给 `Transport` 配 `CheckRedirect: 不跟随`,3xx 当普通响应透传给客户端。
+5. **[L] `reassembleSSE`(语义重组,`internal/report/render.go`)与 `router/response.go` 的 SSE 状态机是两套独立实现**——核实历次审计一致维持"暂不合并"判断:一个是字节级转发(必须保真、增量处理),一个是语义重组(为渲染服务、可以整体处理),关注点不同,合并成本高于收益。**方案**:暂不处理;如果未来两边的 SSE 解析规则出现不一致的 bug,再考虑抽取共享的"事件切分"层(不含语义提取部分)。
 
-6. **[L] `writeRequestRows` 的 `defer f.Close()` 错误被吞**——`internal/report/export.go:419`。磁盘写满时"导出成功"但文件不完整不会报错。**方案**:改成具名返回 + defer 里合并 Close 错误(参考同文件 `housekeep.go::compressFile` 已有的模式)。
+6. **[L] `vmr report` 对同一批文件 `Build` 与 `AnalyzeSessions` 各完整读一遍**——`cmd/vmr/main.go::cmdReport` 是两次独立调用,各自完整扫描一遍输入文件(含 zst 解压)。GB 级日志下批处理时间翻倍。**方案**:合并成一趟遍历,让两个分析器共享同一次 `ForEachLine` 扫描——改动量较大(>200 行,两个分析器的内部状态需要重新组织成"单趟喂入"的形状),ROI 不如第一梯队条目,建议只在真的遇到"报告跑太慢"的实际投诉时再做。
 
-7. **[L] `reassembleSSE`(语义重组,`internal/report/render.go`)与 `router/response.go` 的 SSE 状态机是两套独立实现**——核实历次审计一致维持"暂不合并"判断:一个是字节级转发(必须保真、增量处理),一个是语义重组(为渲染服务、可以整体处理),关注点不同,合并成本高于收益。**方案**:暂不处理;如果未来两边的 SSE 解析规则出现不一致的 bug,再考虑抽取共享的"事件切分"层(不含语义提取部分)。
-
-8. **[L] `vmr report` 对同一批文件 `Build` 与 `AnalyzeSessions` 各完整读一遍**——`cmd/vmr/main.go::cmdReport` 是两次独立调用,各自完整扫描一遍输入文件(含 zst 解压)。GB 级日志下批处理时间翻倍。**方案**:合并成一趟遍历,让两个分析器共享同一次 `ForEachLine` 扫描——改动量较大(>200 行,两个分析器的内部状态需要重新组织成"单趟喂入"的形状),ROI 不如第一梯队条目,建议只在真的遇到"报告跑太慢"的实际投诉时再做。
+7. **[L] `router` 包身兼路由 + 响应规范化(`response.go`,659 行)+ 探针三项职责**——单文件体量偏大,拉低 `router` 包整体可读性。**方案**:把 `response.go` 独立成 `internal/normalize` 包,`router` 只保留失败转移循环本身;纯搬迁重构,行为不变,ROI 一般,不紧急。
 
 ---
 
@@ -98,6 +98,9 @@
 | loadtest 出错中断走 `Process.Kill()`(SIGKILL)而非 Interrupt | 留下"有 START 无 STOP"的假崩溃日志痕迹,不影响压测结果本身 | 改用 `os.Interrupt`,给几秒优雅退出窗口后再 Kill |
 | `loadtest/gentargets/main.go` 的 `out.Write`/`out.Close()` 错误被忽略 | 磁盘满时 `targets.json` 可能静默截断 | 补错误检查,~5 行 |
 | README 的 `admin/status` 示例"无需 api_key"与实现一致 | 意味着同机其他用户可读健康拓扑,单机单用户场景可接受,已文档化 | 不建议改 |
+| 缺少 `CHANGELOG.md`/`CONTRIBUTING.md` | ≤3 人内部项目,目前靠 commit message 追踪变更,无外部贡献者 | 需要对外开放贡献或正式发版时再补,当前优先级低 |
+| 无 CI/CD 配置 | 本地 `go build`/`go vet`/`go test -race` 手动跑,无自动化流水线 | 单人项目可接受;真需要时加一个跑 `go vet` + `go test -race` 的 GitHub Actions workflow 即可,几十行 |
+| `vmr.sh`(442 行,含 dev/service 双模式)无脚本测试,仅关键路径靠人工验证 | 与上面"`ExecStart` 未加引号"是同一文件的不同问题维度:那条是具体 bug,这条是"整体缺测试网" | 优先级不高;真要做可以给几条关键路径(启动/停止/状态检测)补 bats/shellspec 测试 |
 
 ---
 

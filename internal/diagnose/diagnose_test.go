@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
 
@@ -25,7 +26,11 @@ import (
 
 func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endpoint {
 	p := cfg.Providers[protocol][provider]
-	return &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: model}
+	ep := &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: model}
+	if ad, ok := adapter.Get(protocol); ok {
+		ep.FullURL = ad.ResolveURL(p.BaseURL)
+	}
+	return ep
 }
 
 // echoUpstream returns an httptest.Server that answers a probe.Request-shaped

@@ -27,11 +27,11 @@ func main() {
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/chat/completions", handleScenario)
-	mux.HandleFunc("/ok/chat/completions", handleScenario)
-	mux.HandleFunc("/fail1/chat/completions", handleFail)
-	mux.HandleFunc("/fail2/chat/completions", handleFail)
-	mux.HandleFunc("/messages", handleAnthropicScenario) // Anthropic-protocol ingress (anthropic_baseline)
+	mux.HandleFunc("/v1/chat/completions", handleScenario)
+	mux.HandleFunc("/ok/v1/chat/completions", handleScenario)
+	mux.HandleFunc("/fail1/v1/chat/completions", handleFail)
+	mux.HandleFunc("/fail2/v1/chat/completions", handleFail)
+	mux.HandleFunc("/v1/messages", handleAnthropicScenario) // Anthropic-protocol ingress (anthropic_baseline)
 
 	log.Printf("mockupstream listening on %s (scenarios dispatch on the request's model field)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))

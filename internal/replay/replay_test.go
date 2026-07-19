@@ -134,7 +134,7 @@ func TestRun_RealReplayRewritesModelAndInjectsCredentials(t *testing.T) {
 	var gotAuth string
 	var gotModel string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
+		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("unexpected upstream path: %s", r.URL.Path)
 		}
 		gotAuth = r.Header.Get("Authorization")

@@ -7,6 +7,7 @@
 package strategy
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"sync"
@@ -72,5 +73,5 @@ type priority struct{}
 
 func (priority) Name() string { return "priority" }
 func (priority) Compare(a, b *core.Endpoint) int {
-	return a.Priority - b.Priority
+	return cmp.Compare(a.Priority, b.Priority)
 }
