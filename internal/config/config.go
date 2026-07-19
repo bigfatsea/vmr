@@ -66,9 +66,10 @@ const (
 // means direct when nothing is configured. Note yaml.v3 is YAML 1.2:
 // write true/false, not on/off.
 type Provider struct {
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key"`
-	Proxy   *bool  `yaml:"proxy"`
+	BaseURL string            `yaml:"base_url"`
+	APIKey  string            `yaml:"api_key"`
+	Proxy   *bool             `yaml:"proxy"`
+	RoleMap map[string]string `yaml:"role_map"`
 }
 
 // EndpointConfig.Provider resolves within the enclosing model's own protocol

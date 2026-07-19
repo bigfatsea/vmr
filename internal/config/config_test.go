@@ -104,6 +104,30 @@ func TestCustomTimeouts(t *testing.T) {
 	}
 }
 
+func TestRoleMapConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n      role_map:\n        developer: system", 1)
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Providers["openai"]["p1"].RoleMap
+	if len(got) != 1 || got["developer"] != "system" {
+		t.Errorf("role_map: got %v, want map[developer:system]", got)
+	}
+}
+
+func TestRoleMapUnsetIsNil(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Providers["openai"]["p1"].RoleMap != nil {
+		t.Errorf("role_map should be nil when omitted, got %v", cfg.Providers["openai"]["p1"].RoleMap)
+	}
+}
+
 func TestImageDownscaleConfig(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_downscale: 512", 1)
 	cfg, err := Parse([]byte(yaml))

@@ -75,6 +75,18 @@ providers:
     deepseek:
       base_url: https://api.deepseek.com/v1
       api_key: ${DEEPSEEK_API_KEY}
+    # A provider whose API doesn't accept all OpenAI roles can remap them:
+    # role_map is a plain old→new mapping applied to "role" values inside the
+    # top-level "messages" array before the body is sent upstream. The canonical
+    # use case: some providers (e.g. DashScope/Qianwen) reject the "developer"
+    # role OpenAI introduced for o1/o3-series models — mapping it back to "system"
+    # makes those clients work without any client-side change. Only the specific
+    # roles listed are affected; every other byte of the request is preserved.
+    # dashscope:
+    #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    #   api_key: ${DASHSCOPE_PLAN_KEY}
+    #   role_map:
+    #     developer: system
   # Anthropic-protocol providers: callers use POST /v1/messages. Same short
   # names as above are reused on purpose — nesting by protocol means
   # "openrouter" here and "openrouter" under providers.openai are two

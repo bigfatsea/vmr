@@ -2,6 +2,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -64,6 +65,25 @@ func TestBuildRequestForwardsProtocolHeaders(t *testing.T) {
 	}
 	if got := req.Header.Get("anthropic-beta"); got != "context-1m-2025-08-07" {
 		t.Errorf("beta not forwarded: %q", got)
+	}
+}
+
+// TestBuildRequestAppliesRoleMap closes the gap between classify_test.go's
+// coverage of RewriteRoles itself and its actual wiring into BuildRequest.
+func TestBuildRequestAppliesRoleMap(t *testing.T) {
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"user","content":"hi"}]}`)
+	ep := &core.Endpoint{Provider: "p", BaseURL: "https://x.example/v1", APIKey: "k", Model: "m", RoleMap: map[string]string{"developer": "system"}}
+	ep.FullURL = Anthropic{}.ResolveURL(ep.BaseURL)
+
+	_, outBody, err := Anthropic{}.BuildRequest(context.Background(), ep, &core.CanonicalRequest{Model: "vm", Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(outBody, []byte(`"role":"system"`)) {
+		t.Errorf("developer role not remapped: %s", outBody)
+	}
+	if bytes.Contains(outBody, []byte(`"developer"`)) {
+		t.Errorf("developer role still present: %s", outBody)
 	}
 }
 

@@ -124,6 +124,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 					APIKey:      p.APIKey,
 					Model:       ec.Model,
 					Priority:    ec.Priority,
+					RoleMap:     p.RoleMap,
 				}
 				route.Endpoints = append(route.Endpoints, ep)
 			}

@@ -29,6 +29,9 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	if err != nil {
 		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
+	if body, err = adapter.RewriteRoles(body, ep.RoleMap); err != nil {
+		return nil, nil, fmt.Errorf("rewrite roles: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err

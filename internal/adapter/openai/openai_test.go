@@ -48,6 +48,37 @@ func TestBuildRequestRewritesModelAndKeepsUnknownFields(t *testing.T) {
 	}
 }
 
+// TestBuildRequestAppliesRoleMap closes the gap between classify_test.go's
+// coverage of RewriteRoles itself and its actual wiring into BuildRequest —
+// an endpoint with a configured RoleMap must see it applied to the outbound
+// body, and one without must not.
+func TestBuildRequestAppliesRoleMap(t *testing.T) {
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"user","content":"hi"}]}`)
+
+	mapped := &core.Endpoint{Provider: "p", BaseURL: "https://api.example.com/v1", APIKey: "sk-1", Model: "m", RoleMap: map[string]string{"developer": "system"}}
+	mapped.FullURL = OpenAI{}.ResolveURL(mapped.BaseURL)
+	_, outBody, err := OpenAI{}.BuildRequest(context.Background(), mapped, &core.CanonicalRequest{Model: "vm", Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(outBody, []byte(`"role":"system"`)) {
+		t.Errorf("developer role not remapped: %s", outBody)
+	}
+	if bytes.Contains(outBody, []byte(`"developer"`)) {
+		t.Errorf("developer role still present: %s", outBody)
+	}
+
+	plain := &core.Endpoint{Provider: "p", BaseURL: "https://api.example.com/v1", APIKey: "sk-1", Model: "m"} // no RoleMap
+	plain.FullURL = OpenAI{}.ResolveURL(plain.BaseURL)
+	_, outBody, err = OpenAI{}.BuildRequest(context.Background(), plain, &core.CanonicalRequest{Model: "vm", Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(outBody, []byte(`"role":"developer"`)) {
+		t.Errorf("without a configured RoleMap, developer role must pass through untouched: %s", outBody)
+	}
+}
+
 func TestClassifyError(t *testing.T) {
 	cases := []struct {
 		status int

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-19 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-20 01:00, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -63,6 +63,8 @@ All fields and validation rules: design doc §10. Config edits hot-reload within
 **Upstream proxy — explicit config only**: a provider's own `proxy: false` always wins (that provider connects directly — the domestic-plus-foreign provider mix this exists for); otherwise the global `http_proxy`/`https_proxy` above applies (chosen by the base_url's scheme); otherwise direct. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching global proxy is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
 **base_url path overlap elimination**: vmr pre-computes each provider's complete upstream URL at initialization by joining the `base_url` with the protocol's path suffix (`/v1/chat/completions` for OpenAI, `/v1/messages` for Anthropic), detecting and removing any overlap between the tail of `base_url` and the head of the suffix. So `https://api.example.com/v1` + `/v1/chat/completions` → `https://api.example.com/v1/chat/completions` (not `…/v1/v1/…`). Write `base_url` with or without `/v1`, or even the full path — the result is always correct. This covers both OpenAI-compatible and Anthropic-compatible endpoints, since both use the `/v1` convention. The URL is computed once at config load and stored on the endpoint; the adapter uses it directly, never constructing or normalizing a URL per request.
+
+**`role_map` — per-provider role remapping**: some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a provider rewrites matching `"role"` values inside the top-level `messages` array before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the provider (like `base_url`/`api_key`), not the virtual model, since rejecting a role is normally a property of the upstream gateway itself, not of any one model behind it; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for providers that accept every role as-is — the default.
 
 ### Environment variables
 

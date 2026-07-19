@@ -74,3 +74,41 @@ models:
 		}
 	}
 }
+
+// TestBuildSnapshotCarriesProviderRoleMap documents that a provider's
+// role_map (e.g. remapping "developer" to "system" for providers that
+// reject the former) reaches the endpoint BuildRequest actually sees —
+// closing the gap between classify_test.go's coverage of the RewriteRoles
+// byte-splice itself and the config->snapshot->endpoint wiring around it.
+func TestBuildSnapshotCarriesProviderRoleMap(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+providers:
+  openai:
+    mapped: {base_url: https://example.com, api_key: k1, role_map: {developer: system}}
+    plain: {base_url: https://example.com, api_key: k2}
+models:
+  openai:
+    vm:
+      endpoints:
+        - {provider: mapped, model: m1}
+        - {provider: plain, model: m2}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eps := snap.Models["openai"]["vm"].Endpoints
+	mapped, plain := eps[0], eps[1]
+	if got := mapped.RoleMap["developer"]; got != "system" {
+		t.Errorf("mapped endpoint: RoleMap[developer] = %q, want %q", got, "system")
+	}
+	if plain.RoleMap != nil {
+		t.Errorf("plain endpoint: RoleMap should be nil (provider has no role_map), got %v", plain.RoleMap)
+	}
+}

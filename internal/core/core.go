@@ -129,6 +129,7 @@ type Endpoint struct {
 	APIKey      string
 	Model       string
 	Priority    int
+	RoleMap     map[string]string // per-provider role remapping (e.g. {"developer":"system"}); nil = no remapping
 }
 
 // HealthKey identifies this endpoint in the health registry. It is stable

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-19 00:00, by Sonnet 5 -->
+<!-- Ver 2026-07-20 01:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -87,6 +87,7 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 * **响应侧 Header 透传**：与请求侧对称——上游响应头默认全部透传（`x-ratelimit-*`、request id、`Date`、`Retry-After`、`Content-Encoding`…），只剥 hop-by-hop（Connection/Keep-Alive/TE/Trailer/Transfer-Encoding/Upgrade/Proxy-*）与 `Content-Length`（归一化可能改变长度，Go 重新成帧）。客户端看到的头与直连一致，仅多出 `X-VMR-*`。
 * **3xx 重定向不跟随**：`NewUpstreamClient` 构造的 `http.Client` 设 `CheckRedirect` 返回 `http.ErrUseLastResponse`——上游 3xx 原样到达客户端（status + `Location` + body），与直连一致。Go `http.Client` 默认策略会把 POST 301/302/303 静默改写成 GET，这会破坏字节级保真。LLM API 几乎不发 3xx，但一旦发了，vmr 的行为与直连完全一致。
 * **base_url 路径重叠消除**：`BuildSnapshot` 在初始化时将每个 provider 的 `base_url` 与 adapter 的路径后缀（OpenAI `/v1/chat/completions`、Anthropic `/v1/messages`）拼接，检测并消除重叠部分——`base_url` 尾部与后缀头部的最长公共子串只保留一次。用户写不写 `/v1`、甚至写完整路径，结果都正确。完整 URL 存入 `core.Endpoint.FullURL`，adapter 的 `BuildRequest` 直接使用，不在请求时重复构造。
+* **`role_map`：按 provider 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。provider 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 provider 一级而非虚拟模型——拒收哪个 role 是网关本身的特性，不是某个具体模型的特性；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.Provider.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
 ### 4.2 模块划分
 
@@ -502,6 +503,8 @@ providers:                       # "我有什么"——按协议分组，两层 
                                  # 回退。显式 true 与缺省的区别：true 但全局没配对应 scheme 的代理是校验
                                  # 错误（拒绝加载），缺省则安静直连。yaml.v3 是 YAML 1.2，必须写
                                  # true/false（on/off 不是 bool）
+      role_map:                  # 可选；provider 拒收的 role → 改写成什么（§4.1），缺省不改写
+        developer: system        # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
 
 models:                          # "对外叫什么、按什么顺序用"——同样按协议分组
   <protocol>:

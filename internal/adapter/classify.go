@@ -188,8 +188,10 @@ func rewriteModelGeneric(raw json.RawMessage, mv []byte) ([]byte, error) {
 }
 
 var (
-	modelKeyLiteral  = []byte(`"model"`)
-	streamKeyLiteral = []byte(`"stream"`)
+	modelKeyLiteral    = []byte(`"model"`)
+	streamKeyLiteral   = []byte(`"stream"`)
+	messagesKeyLiteral = []byte(`"messages"`)
+	roleKeyLiteral     = []byte(`"role"`)
 )
 
 // topLevelValues scans raw as a JSON object and returns the [start,end)
@@ -319,6 +321,125 @@ func skipJSONValue(b []byte, i int) (int, bool) {
 		}
 		return 0, false
 	}
+}
+
+// RewriteRoles replaces "role" values inside the top-level "messages" array
+// according to roleMap (e.g. {"developer":"system"}). Only the string values
+// of "role" keys within message objects are rewritten; every other byte —
+// key order, whitespace, unknown parameters, message content — is preserved
+// exactly as the client sent it, consistent with RewriteModel's byte-splice
+// philosophy.
+//
+// The scan is JSON-aware: it descends into the top-level "messages" array,
+// visits each element object, and checks for a "role" key. This avoids false
+// positives from the string "developer" appearing in message content (JSON
+// string escaping ensures unescaped "role":"developer" only occurs as a
+// key-value pair, but the scanner also skips string values correctly). An
+// empty roleMap returns the input unchanged (zero-copy).
+func RewriteRoles(raw json.RawMessage, roleMap map[string]string) ([]byte, error) {
+	if len(roleMap) == 0 {
+		return raw, nil
+	}
+
+	// Locate the top-level "messages" value.
+	msgRanges, ok := topLevelValues(raw, messagesKeyLiteral)
+	if !ok || len(msgRanges) == 0 {
+		return raw, nil // not a JSON object or no messages key
+	}
+
+	arrStart, arrEnd := msgRanges[0][0], msgRanges[0][1]
+	i := skipJSONWS(raw, arrStart)
+	if i >= len(raw) || raw[i] != '[' {
+		return raw, nil // messages value is not an array
+	}
+	i++ // skip '['
+
+	type replacement struct {
+		start, end int
+		newVal     []byte
+	}
+	var reps []replacement
+
+	for i < arrEnd {
+		i = skipJSONWS(raw, i)
+		if i >= arrEnd || raw[i] == ']' {
+			break
+		}
+		if raw[i] == ',' {
+			i++
+			continue
+		}
+		// Each element should be a JSON object; skip anything else.
+		if raw[i] != '{' {
+			i, ok = skipJSONValue(raw, i)
+			if !ok {
+				break
+			}
+			continue
+		}
+
+		// Scan the message object for a "role" key.
+		i++ // skip '{'
+		for i < arrEnd {
+			i = skipJSONWS(raw, i)
+			if i >= arrEnd {
+				break
+			}
+			if raw[i] == '}' {
+				i++
+				break
+			}
+			if raw[i] == ',' {
+				i++
+				continue
+			}
+			if raw[i] != '"' {
+				break // malformed
+			}
+			keyStart := i
+			i, ok = skipJSONString(raw, i)
+			if !ok {
+				break
+			}
+			isRole := bytes.Equal(raw[keyStart:i], roleKeyLiteral)
+			i = skipJSONWS(raw, i)
+			if i >= arrEnd || raw[i] != ':' {
+				break
+			}
+			i = skipJSONWS(raw, i+1)
+			valStart := i
+			i, ok = skipJSONValue(raw, i)
+			if !ok {
+				break
+			}
+			if isRole {
+				// The value should be a JSON string; unquote and look up.
+				var roleStr string
+				if err := json.Unmarshal(raw[valStart:i], &roleStr); err == nil {
+					if newRole, exists := roleMap[roleStr]; exists {
+						nv, _ := core.MarshalNoEscape(newRole)
+						if !bytes.Equal(raw[valStart:i], nv) {
+							reps = append(reps, replacement{valStart, i, nv})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(reps) == 0 {
+		return raw, nil
+	}
+
+	// Apply replacements via forward splice (offsets are absolute in raw).
+	out := make([]byte, 0, len(raw))
+	prev := 0
+	for _, r := range reps {
+		out = append(out, raw[prev:r.start]...)
+		out = append(out, r.newVal...)
+		prev = r.end
+	}
+	return append(out, raw[prev:]...), nil
 }
 
 func containsAny(s string, subs ...string) bool {
