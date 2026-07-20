@@ -454,6 +454,66 @@ models:
 	}
 }
 
+// --- Serve: BuildRequest failure does not cool the endpoint down ---
+
+// TestServe_BuildErrorDoesNotCooldownEndpoint locks in tryOne's build-error
+// branch reporting ReportNeutral (not ReportFailure) to health, matching
+// runProbe's treatment of the same error class: a malformed client body is
+// vmr/the client's problem, not the endpoint's, and must not cool the
+// endpoint down for every other client's traffic.
+func TestServe_BuildErrorDoesNotCooldownEndpoint(t *testing.T) {
+	u := newMockUpstream(t, 200, `{"id":"ok"}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  openai:
+    p1: {base_url: %s, api_key: k1}
+models:
+  openai:
+    vm:
+      endpoints:
+        - {provider: p1, model: m1}
+`, u.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	// Not valid JSON at all — adapter.RewriteModel's fallback path fails to
+	// unmarshal it, so OpenAI.BuildRequest returns an error before any HTTP
+	// call is made (u.hits stays 0).
+	w := serveReq(rt, "vm", []byte(`not json`))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503 (build error, no upstream response to return)", w.Code)
+	}
+	if u.hits != 0 {
+		t.Errorf("upstream hits=%d, want 0 (BuildRequest must fail before any HTTP call)", u.hits)
+	}
+
+	ep := cfg.Models["openai"]["vm"].Endpoints[0]
+	endpoint := &core.Endpoint{
+		Provider:    ep.Provider,
+		AdapterType: "openai",
+		BaseURL:     cfg.Providers["openai"][ep.Provider].BaseURL,
+		APIKey:      cfg.Providers["openai"][ep.Provider].APIKey,
+		Model:       ep.Model,
+	}
+	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
+		t.Error("endpoint should still be available after a build error (no cooldown)")
+	}
+
+	// A subsequent, well-formed request must reach the upstream normally —
+	// proof the endpoint was never actually cooled down, not just that
+	// Available() says so in isolation.
+	w2 := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second request status=%d, want 200", w2.Code)
+	}
+	if u.hits != 1 {
+		t.Errorf("upstream hits=%d, want 1 (second request should reach the upstream)", u.hits)
+	}
+}
+
 // --- copyFlush: normal data flows through ---
 
 func TestCopyFlush_NormalData(t *testing.T) {

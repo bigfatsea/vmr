@@ -1,4 +1,4 @@
-# Ver 2026-07-20 00:05, by Sonnet 5
+# Ver 2026-07-20 08:00, by Sonnet 5
 
 # Binaries
 /vmr
@@ -44,6 +44,7 @@ coverage.html
 
 # loadtest (loadtest/README.md): generated output lands in the /logs/ and
 # /reports/ rules above (namespaced: logs/loadtest/, reports/loadtest-*).
-# targets.json is regenerated every run and deleted when the run finishes —
-# this only catches it if a run gets interrupted mid-way.
-/loadtest/targets.json
+# targets*.json (the combined file plus its plain/image cost-regime subsets,
+# see loadtest/gentargets) is regenerated every run and deleted when the run
+# finishes — this only catches it if a run gets interrupted mid-way.
+/loadtest/targets*.json

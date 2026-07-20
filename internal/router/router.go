@@ -448,7 +448,13 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 
 	req, outBody, err := ad.BuildRequest(r.Context(), ep, creq)
 	if err != nil {
-		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+		// A build failure is about vmr's own request construction (or the
+		// client's malformed body), not the endpoint — same call runProbe
+		// makes for this class of error (see probe.go). Must not cool the
+		// endpoint down: a single malformed client request would otherwise
+		// lock out every other client's traffic to it via a bogus transient
+		// cooldown.
+		rt.Health.ReportNeutral(key)
 		rt.logf("model=%s ep=%s attempt=%d build_error=%v", creq.Model, ep.Name(), attempt, err)
 		if att != nil {
 			att.Error = "build: " + err.Error()

@@ -1,9 +1,13 @@
-// Ver 2026-07-19 23:55, by Sonnet 5
+// Ver 2026-07-20 08:00, by Sonnet 5
 
 // runner is the one-command version of the manual steps in loadtest/README.md:
-// starts loadtest/mockupstream and vmr, generates targets.json, fires each
-// load profile in profiles through Vegeta, runs `vmr report` once at the
-// end, and writes a combined Markdown report to reports/loadtest-report.md.
+// starts loadtest/mockupstream and vmr, generates targets.json (and its two
+// cost-regime subsets, see gentargets), fires each load profile in profiles
+// through Vegeta — as two separate attacks, plain-request scenarios and
+// image-processing scenarios, so image decode/scale/encode's real cost
+// doesn't get blended into everyone else's percentiles — runs `vmr report`
+// once at the end, and writes a combined Markdown report to
+// reports/loadtest-report.md.
 // The audit log lives under logs/loadtest/ — a subdirectory of the same
 // logs/ tree real vmr instances use, not the shared top level: the audit
 // filename (vmr-audit-YYYY-MM-DD.jsonl) has no prefix knob, and this run
@@ -52,10 +56,19 @@ const (
 	mockAddr      = "127.0.0.1:9900"
 	vmrBinary     = "./vmr"
 	configPath    = "loadtest/config.yaml"
-	targetsPath   = "loadtest/targets.json"
 	logDir        = "logs/loadtest" // must match loadtest/config.yaml's log_dir
 	reportsDir    = "reports"
 	reportOutPath = "reports/loadtest-report.md"
+
+	// gentargets splits its 11 scenarios into two Vegeta targets files by
+	// cost regime — image decode/scale/encode (big_image/multi_image/gif)
+	// vs everything else — plus the combined file (kept for manual poking,
+	// see loadtest/README.md; unused by this runner).
+	targetsPath      = "loadtest/targets.json"
+	targetsPlainPath = "loadtest/targets-plain.json"
+	targetsImagePath = "loadtest/targets-image.json"
+	plainScenarios   = 8 // must match gentargets' non-image scenario count
+	imageScenarios   = 3 // must match gentargets' image scenario count
 )
 
 func main() {
@@ -115,17 +128,33 @@ func run() error {
 		return fmt.Errorf("gentargets: %w\n%s", err, out)
 	}
 	// Regenerated fresh every run (embeds synthetic images/GIFs, never
-	// identical twice) — never leave it behind in the source directory.
-	defer os.Remove(targetsPath)
+	// identical twice) — never leave any of the three behind in the source
+	// directory.
+	defer func() {
+		os.Remove(targetsPath)
+		os.Remove(targetsPlainPath)
+		os.Remove(targetsImagePath)
+	}()
 
 	var results []roundResult
 	for _, p := range profiles {
-		fmt.Printf("== round %q: rate=%d/s duration=%s ==\n", p.name, p.rate, p.duration)
-		rep, err := attack(p)
+		// Two separate attacks, not one against the combined file: each
+		// scenario's own share of the round's rate is kept the same as a
+		// single 11-way attack would give it (scaleRate), so splitting the
+		// report doesn't also silently change how hard this round hits
+		// vmr — only which bucket each result's percentiles land in.
+		plainRate := scaleRate(p.rate, plainScenarios)
+		imageRate := scaleRate(p.rate, imageScenarios)
+		fmt.Printf("== round %q: plain=%d/s image=%d/s duration=%s ==\n", p.name, plainRate, imageRate, p.duration)
+		plainRep, err := attack(targetsPlainPath, plainRate, p.duration)
 		if err != nil {
-			return fmt.Errorf("round %s: %w", p.name, err)
+			return fmt.Errorf("round %s (plain): %w", p.name, err)
 		}
-		results = append(results, roundResult{profile: p, report: rep})
+		imageRep, err := attack(targetsImagePath, imageRate, p.duration)
+		if err != nil {
+			return fmt.Errorf("round %s (image): %w", p.name, err)
+		}
+		results = append(results, roundResult{profile: p, plain: plainRep, image: imageRep})
 	}
 
 	fmt.Println("== stopping vmr and mockupstream ==")
@@ -181,7 +210,24 @@ func waitReady(addr string, timeout time.Duration) error {
 
 type roundResult struct {
 	profile loadProfile
-	report  vegetaReport
+	plain   vegetaReport // baseline/stream_normal/.../failover/anthropic_baseline — no image processing
+	image   vegetaReport // big_image/multi_image/gif — the one genuinely expensive code path
+}
+
+const totalScenarios = plainScenarios + imageScenarios
+
+// scaleRate gives a group of groupScenarios (out of totalScenarios) the same
+// per-scenario request rate a single combined attack across all 11 would
+// have given it — round's nominal rate * groupScenarios/totalScenarios,
+// rounded to nearest. Keeps the two-attacks split from silently changing how
+// hard a round actually hits vmr; only the reporting is split, not the load
+// itself. Minimum 1 so a light round never rounds a group down to zero.
+func scaleRate(roundRate, groupScenarios int) int {
+	r := (roundRate*groupScenarios + totalScenarios/2) / totalScenarios
+	if r < 1 {
+		r = 1
+	}
+	return r
 }
 
 // vegetaReport mirrors the subset of `vegeta report -type=json`'s schema we
@@ -201,10 +247,10 @@ type vegetaReport struct {
 	Errors      []string       `json:"errors"`
 }
 
-func attack(p loadProfile) (vegetaReport, error) {
+func attack(targetsPath string, rate int, duration time.Duration) (vegetaReport, error) {
 	attackCmd := exec.Command("vegeta", "attack",
 		"-targets="+targetsPath, "-format=json",
-		fmt.Sprintf("-rate=%d", p.rate), "-duration="+p.duration.String())
+		fmt.Sprintf("-rate=%d", rate), "-duration="+duration.String())
 	var attackOut bytes.Buffer
 	attackCmd.Stdout = &attackOut
 	attackCmd.Stderr = os.Stderr
@@ -268,20 +314,22 @@ func writeReport(results []roundResult, byModel, endpoints string) error {
 	fmt.Fprintf(&b, "Design and how to read this: [`docs/PerformanceTesting_Design_Sonnet5.md`](../docs/PerformanceTesting_Design_Sonnet5.md), [`loadtest/README.md`](../loadtest/README.md). %d load rounds against the same 11 scenarios.\n\n", len(results))
 
 	fmt.Fprint(&b, "## Client-side view (Vegeta), by load round\n\n")
-	fmt.Fprint(&b, "All 11 scenarios mixed together within each round — this is what an external caller experiences as load increases.\n\n")
-	fmt.Fprint(&b, "| Round | Rate | Duration | Requests | Success | p50 | p95 | p99 | Max |\n")
-	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|---|\n")
+	fmt.Fprintf(&b, "Fired as two separate attacks per round — **plain** (%d scenarios: everything except image processing) and **image** (%d scenarios: big_image/multi_image/gif, the only code path that actually decodes/scales/encodes) — each at its proportional share of the round's nominal rate, so this split changes nothing about how hard vmr is hit, only how the results are bucketed. Blending them into one number would let image processing's real cost quietly drag up the \"plain\" p95/p99 for everything else.\n\n", plainScenarios, imageScenarios)
+	fmt.Fprint(&b, "| Round | Group | Rate | Duration | Requests | Success | p50 | p95 | p99 | Max |\n")
+	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
-		fmt.Fprintf(&b, "| %s | %d/s | %s | %d | %.1f%% | %s | %s | %s | %s |\n",
-			r.profile.name, r.profile.rate, r.profile.duration,
-			r.report.Requests, r.report.Success*100,
-			fmtMS(r.report.Latencies.P50), fmtMS(r.report.Latencies.P95),
-			fmtMS(r.report.Latencies.P99), fmtMS(r.report.Latencies.Max))
+		writeClientRow(&b, r.profile, "plain", scaleRate(r.profile.rate, plainScenarios), r.plain)
+		writeClientRow(&b, r.profile, "image", scaleRate(r.profile.rate, imageScenarios), r.image)
 	}
 	b.WriteString("\n")
 	for _, r := range results {
-		if r.report.Success < 1.0 {
-			fmt.Fprintf(&b, "⚠️ round %q had non-100%% success — status codes: %v, errors: %v\n\n", r.profile.name, r.report.StatusCodes, r.report.Errors)
+		for _, g := range []struct {
+			name string
+			rep  vegetaReport
+		}{{"plain", r.plain}, {"image", r.image}} {
+			if g.rep.Success < 1.0 {
+				fmt.Fprintf(&b, "⚠️ round %q (%s) had non-100%% success — status codes: %v, errors: %v\n\n", r.profile.name, g.name, g.rep.StatusCodes, g.rep.Errors)
+			}
 		}
 	}
 
@@ -297,4 +345,12 @@ func writeReport(results []roundResult, byModel, endpoints string) error {
 
 func fmtMS(ns int64) string {
 	return fmt.Sprintf("%.1fms", float64(ns)/1e6)
+}
+
+func writeClientRow(b *strings.Builder, p loadProfile, group string, rate int, rep vegetaReport) {
+	fmt.Fprintf(b, "| %s | %s | %d/s | %s | %d | %.1f%% | %s | %s | %s | %s |\n",
+		p.name, group, rate, p.duration,
+		rep.Requests, rep.Success*100,
+		fmtMS(rep.Latencies.P50), fmtMS(rep.Latencies.P95),
+		fmtMS(rep.Latencies.P99), fmtMS(rep.Latencies.Max))
 }

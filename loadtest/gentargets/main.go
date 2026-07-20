@@ -1,9 +1,17 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-20 08:00, by Sonnet 5
 
 // gentargets writes loadtest/targets.json — one Vegeta attack target per
-// scenario (see docs/PerformanceTesting_Design_Sonnet5.md §4). Not checked
-// in (it embeds several generated images, sized to be real payloads rather
-// than repo-bloating fixtures) — regenerate on demand:
+// scenario (see docs/PerformanceTesting_Design_Sonnet5.md §4) — plus two
+// subset files, targets-plain.json and targets-image.json, split by
+// whether the scenario exercises image downscaling. Image decode/scale/
+// encode is by far the most expensive code path vmr has (§6 of the design
+// doc); mixed into one combined percentile figure it silently drags up the
+// p95/p99/max for every *other*, genuinely-cheap scenario. runner.go fires
+// the two subsets as separate Vegeta attacks so the client-side report
+// shows "plain request" and "image request" latency as what they actually
+// are — two different cost regimes — instead of one blended number. Not
+// checked in (embeds several generated images, sized to be real payloads
+// rather than repo-bloating fixtures) — regenerate on demand:
 //
 //	go run ./loadtest/gentargets
 //
@@ -50,6 +58,18 @@ type reqBody struct {
 type scenario struct {
 	path string
 	body reqBody
+}
+
+// imageScenarios are the ones with image_downscale enabled in
+// loadtest/config.yaml (big_image/multi_image/gif) — the only code path
+// that does real decode/scale/encode work. Everything else, including
+// large-but-non-image payloads like long_history/big_response, goes in the
+// "plain" bucket: this is a split by cost regime (image processing vs
+// not), not by request size.
+var imageScenarios = map[string]bool{
+	"big_image":   true,
+	"multi_image": true,
+	"gif":         true,
 }
 
 func main() {
@@ -111,18 +131,31 @@ func main() {
 		}},
 	}
 
-	out, err := os.Create("loadtest/targets.json")
+	all, err := os.Create("loadtest/targets.json")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gentargets:", err)
 		os.Exit(1)
 	}
-	defer out.Close()
+	defer all.Close()
+	plain, err := os.Create("loadtest/targets-plain.json")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gentargets:", err)
+		os.Exit(1)
+	}
+	defer plain.Close()
+	image, err := os.Create("loadtest/targets-image.json")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gentargets:", err)
+		os.Exit(1)
+	}
+	defer image.Close()
 
 	// Deterministic order so a diff of two generated files is meaningful.
 	order := []string{
 		"baseline", "stream_normal", "thinking_leak", "think_tag", "big_response",
 		"big_image", "multi_image", "gif", "long_history", "failover", "anthropic_baseline",
 	}
+	var plainCount, imageCount int
 	for _, name := range order {
 		s := scenarios[name]
 		body, err := json.Marshal(s.body)
@@ -137,10 +170,18 @@ func main() {
 			Body:   base64.StdEncoding.EncodeToString(body),
 		}
 		line, _ := json.Marshal(t)
-		out.Write(line)
-		out.Write([]byte("\n"))
+		line = append(line, '\n')
+		all.Write(line)
+		if imageScenarios[name] {
+			image.Write(line)
+			imageCount++
+		} else {
+			plain.Write(line)
+			plainCount++
+		}
 	}
-	fmt.Fprintf(os.Stderr, "wrote loadtest/targets.json (%d scenarios)\n", len(order))
+	fmt.Fprintf(os.Stderr, "wrote loadtest/targets.json (%d scenarios), targets-plain.json (%d), targets-image.json (%d)\n",
+		len(order), plainCount, imageCount)
 }
 
 // solidJPEGDataURI synthesizes a wxh JPEG. Used at 3000x2000 (well over any

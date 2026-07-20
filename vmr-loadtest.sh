@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-20 00:05, by Sonnet 5
+# Ver 2026-07-20 08:00, by Sonnet 5
 #
 # vmr-loadtest.sh — one-command wrapper around loadtest/runner. Pure glue,
 # no new logic: rebuild ./vmr fresh, make sure vegeta is on PATH, then hand
@@ -58,7 +58,7 @@ cmd_show() {
 cmd_clean() {
   # Scoped to exactly what this tool writes — never `rm -rf reports/` or
   # `rm -rf logs/`, both hold real, non-loadtest data too.
-  rm -rf logs/loadtest loadtest/targets.json
+  rm -rf logs/loadtest loadtest/targets.json loadtest/targets-plain.json loadtest/targets-image.json
   rm -f "$REPORT"
   echo "cleaned loadtest artifacts"
 }

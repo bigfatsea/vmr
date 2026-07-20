@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-20 00:05, by Sonnet 5 -->
+<!-- Ver 2026-07-20 08:00, by Sonnet 5 -->
 
 # vmr load test — runbook
 
@@ -19,7 +19,9 @@ go build -o vmr ./cmd/vmr                     # from the repo root
 go run ./loadtest/runner
 ```
 
-This one command does everything: builds and starts `mockupstream`, starts `./vmr` against `loadtest/config.yaml`, generates `targets.json`, then fires three escalating Vegeta load rounds — `light` (10 req/s × 10s), `moderate` (50 req/s × 20s), `heavy` (150 req/s × 20s) — at all 11 scenarios combined. After the last round it stops both processes, runs `./vmr report` on the combined audit log, and writes everything — Vegeta's client-side percentiles per round, plus vmr's own per-scenario `按模型`/`端点可用度` tables — into a single **`reports/loadtest-report.md`**.
+This one command does everything: builds and starts `mockupstream`, starts `./vmr` against `loadtest/config.yaml`, generates `targets.json` (plus its `targets-plain.json`/`targets-image.json` subsets, see below), then fires three escalating Vegeta load rounds — `light` (10 req/s × 10s), `moderate` (50 req/s × 20s), `heavy` (150 req/s × 20s) — at all 11 scenarios. After the last round it stops both processes, runs `./vmr report` on the combined audit log, and writes everything — Vegeta's client-side percentiles per round, plus vmr's own per-scenario `按模型`/`端点可用度` tables — into a single **`reports/loadtest-report.md`**.
+
+**Client-side percentiles are reported as two groups, not one blended number**: `plain` (8 scenarios — everything except image processing) and `image` (`big_image`/`multi_image`/`gif`, the only code path that actually decodes/scales/encodes). Image processing is by far the most expensive thing vmr does (§6 of the design doc); mixed into one combined figure it silently drags the p95/p99/max up for every other, genuinely-cheap scenario too — a `heavy` round's "p95" would mostly be telling you about the 3 image scenarios, not the 8 plain ones sharing the same number. Each round fires the two groups as **separate Vegeta attacks**, each at its proportional share of the round's nominal rate (`plain` gets 8/11, `image` gets 3/11) — so this only changes how the results are bucketed for reporting, not how hard vmr is actually hit; total load per round is the same as before the split.
 
 Generated files live in the same `logs/`/`reports/` directories a real vmr instance uses — not scattered under `loadtest/` — but namespaced so they can never mix with or overwrite real data: the audit log goes to `logs/loadtest/` (its own subdirectory, wiped clean before every run), and the only file written under `reports/` is `reports/loadtest-report.md` (the `loadtest-` prefix is deliberate: `vmr report`'s own output filenames are fixed and unprefixed, so this runner stages that raw output in a throwaway temp dir and never lets it touch `reports/` directly). `loadtest/targets.json` is deleted again as soon as the run finishes — it's regenerated (with fresh synthetic images) every time, never worth keeping around. Nothing this produces is committed; don't hand-edit or commit any of it.
 
@@ -27,7 +29,7 @@ To change the load profiles (e.g. push `heavy` further), edit the `profiles` sli
 
 ## Reading the numbers
 
-- **`report.md`'s first table (client-side) is what an external caller experiences** as load increases round over round. Its second half (server-side, from `vmr report`) is where the per-scenario cost breakdown lives — `thinking_leak`/`big_image`/`multi_image` should stand out from the ~1ms floor everything else sits at; that gap is vmr's real, measured CPU cost for those code paths, not noise.
+- **`loadtest-report.md`'s first table (client-side) is what an external caller experiences** as load increases round over round — now split into `plain`/`image` rows per round; expect `image` to sit visibly higher than `plain`, that's the point of the split, not a regression. Its second half (server-side, from `vmr report`) is where the per-scenario cost breakdown lives — `thinking_leak`/`big_image`/`multi_image` should stand out from the ~1ms floor everything else sits at; that gap is vmr's real, measured CPU cost for those code paths, not noise.
 - **`thinking_leak` should show close to zero TTFB benefit from streaming** (`stream: true` in the request, but the response only shows up once fully generated) — that's the known, accepted cost documented in the design doc, not a bug. Compare its `dur_ms` p50/p95 against `stream_normal`'s to see the gap in absolute terms.
 - **`failover`'s numbers reflect steady state, not "every request pays for 3 attempts."** `mock_fail1`/`mock_fail2` always return 500, so after the first failure each enters a short exponential-backoff cooldown (health.go) and gets skipped by later requests until it expires — a sustained run mostly measures both failing endpoints cooling down, most requests going straight to `mock_ok`. That's realistic (a genuinely dead endpoint shouldn't be retried every single request either).
 - **Zero errors expected everywhere** except the two `mock_fail*` endpoints (which are supposed to fail — that's the failover scenario's setup, not a bug). Any other non-zero error rate is a correctness signal worth investigating on its own, not just a performance one.
@@ -45,11 +47,13 @@ go run ./loadtest/mockupstream
 ./vmr start -c loadtest/config.yaml
 
 # 3. Generate the attack targets (embeds synthetic images/GIFs — this is why
-#    targets.json isn't checked in).
+#    targets*.json isn't checked in). Also writes targets-plain.json/
+#    targets-image.json, the same two files the runner attacks separately.
 go run ./loadtest/gentargets
 
 # 4. Fire at everything, or edit targets.json down to one line first to
-#    isolate a single scenario.
+#    isolate a single scenario (or use targets-image.json to isolate just
+#    big_image/multi_image/gif without editing anything).
 vegeta attack -targets=loadtest/targets.json -format=json -rate=20 -duration=30s | vegeta report
 
 # 5. vmr's own per-scenario view — no new tooling needed, it already buckets
@@ -67,7 +71,7 @@ The runner cleans up its own subprocesses and stops on its own; nothing to kill 
 
 ```bash
 # Ctrl-C the mockupstream and vmr processes from steps 1-2.
-rm -rf logs/loadtest loadtest/targets.json /tmp/vmr-loadtest-manual
+rm -rf logs/loadtest loadtest/targets*.json /tmp/vmr-loadtest-manual
 # Only remove reports/loadtest-report.md, never the whole reports/ dir —
 # that's where real vmr report output lives too.
 rm -f reports/loadtest-report.md
