@@ -314,22 +314,13 @@ func configFlag(args []string, cmd string) (string, error) {
 // vmr process began writing here", distinct from the ordinary timestamped
 // lines around it.
 const vmrBanner = `
-==================================================
-  ##      ##      ##      ##      ########
-  ##      ##      ##      ##      ########
-  ##      ##      ####  ####      ##      ##
-  ##      ##      ####  ####      ##      ##
-  ##      ##      ##  ##  ##      ##      ##
-  ##      ##      ##  ##  ##      ##      ##
-  ##      ##      ##      ##      ########
-  ##      ##      ##      ##      ########
-  ##      ##      ##      ##      ##  ##
-  ##      ##      ##      ##      ##  ##
-    ##  ##        ##      ##      ##    ##
-    ##  ##        ##      ##      ##    ##
-      ##          ##      ##      ##      ##
-      ##          ##      ##      ##      ##
-==================================================
+ _    ____  _______
+| |  / /  |/  / __ \
+| | / / /|_/ / /_/ /
+| |/ / /  / / _, _/
+|___/_/  /_/_/ |_|
+
+  Virtual Model Router
 `
 
 // stampWriter prepends a "YYYY-MM-DD HH:MM:SS " timestamp (ISO-ish, unlike
