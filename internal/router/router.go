@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-21 01:15, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -310,9 +310,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	// resolve — only for as long as it takes to notice it needs to run.
 	// probe_mode: passive skips this and falls through to the original
 	// behavior: any request may land on a half-open endpoint and become the
-	// probe itself via Acquire in the per-candidate loop below. See
-	// docs/ActiveProbeAndFailoverFix_Sonnet5.md and reports/incident-
-	// 20260718-console-go-400-failover_Sonnet5.md §2.4 for why active exists.
+	// probe itself via Acquire in the per-candidate loop below.
 	now := time.Now()
 	candidates := make([]*core.Endpoint, 0, len(route.Endpoints))
 	activeProbing := snap.Cfg.ProbeMode == config.ProbeModeActive
@@ -377,7 +375,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		}
 		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
-	rt.logf("model=%s status=all_failed attempts=%d dur=%s", creq.Model, attempts, time.Since(start).Round(time.Millisecond))
+	rt.logf("%s %s status=all_failed attempts=%d dur=%s", clientTag(rec), creq.Model, attempts, fmtDur(time.Since(start)))
 }
 
 type upstreamError struct {
@@ -428,6 +426,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 
 	key := ep.HealthKey()
 	attemptStart := time.Now()
+	// logPrefix carries the fields every log line in this attempt shares
+	// (client tag, model, endpoint, attempt number) so each call site below
+	// only spells out what actually differs about its outcome. Gains the
+	// req= size once BuildRequest succeeds — every line after that point
+	// reuses the extended prefix.
+	logPrefix := fmt.Sprintf("%s %s %s attempt=%d", clientTag(rec), creq.Model, epLabel(ep, creq.Stream), attempt)
 	var att *audit.Attempt
 	if rec != nil {
 		rec.Attempts = append(rec.Attempts, audit.Attempt{
@@ -455,13 +459,14 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// lock out every other client's traffic to it via a bogus transient
 		// cooldown.
 		rt.Health.ReportNeutral(key)
-		rt.logf("model=%s ep=%s attempt=%d build_error=%v", creq.Model, ep.Name(), attempt, err)
+		rt.logf("%s error=build:%v", logPrefix, err)
 		if att != nil {
 			att.Error = "build: " + err.Error()
 			att.ErrorClass = core.ErrBuild.String()
 		}
 		return false, nil
 	}
+	logPrefix += " req=" + core.FmtBytes(int64(len(outBody)))
 	if att != nil {
 		att.URL = req.URL.String()
 		// outBody comes straight from BuildRequest (immutable by contract),
@@ -485,7 +490,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			return true, nil
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		rt.logf("model=%s ep=%s attempt=%d net_error=%v cooldown=%s", creq.Model, ep.Name(), attempt, err, cd)
+		rt.logf("%s error=network:%v cooldown=%s", logPrefix, err, cd)
 		if att != nil {
 			att.Error = "network: " + err.Error()
 			att.ErrorClass = core.ErrNetwork.String()
@@ -535,8 +540,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			// Keep failing over (vendors differ in sensitivity) but leave the
 			// endpoint's health untouched — only release a probe slot if held.
 			rt.Health.ReportNeutral(key)
-			rt.logf("model=%s ep=%s attempt=%d status=%d class=content (no cooldown)",
-				creq.Model, ep.Name(), attempt, resp.StatusCode)
+			rt.logf("%s status=%d class=content (no cooldown)", logPrefix, resp.StatusCode)
 			return false, uerr
 		}
 		if class == core.ErrClient {
@@ -548,13 +552,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 			w.WriteHeader(uerr.status)
 			w.Write(uerr.body)
-			rt.logf("model=%s ep=%s attempt=%d status=%d class=client dur=%s",
-				creq.Model, ep.Name(), attempt, resp.StatusCode, time.Since(start).Round(time.Millisecond))
+			rt.logf("%s status=%d class=client dur=%s", logPrefix, resp.StatusCode, fmtDur(time.Since(start)))
 			return true, nil
 		}
 		cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
-		rt.logf("model=%s ep=%s attempt=%d status=%d class=%s cooldown=%s",
-			creq.Model, ep.Name(), attempt, resp.StatusCode, class, cd)
+		rt.logf("%s status=%d class=%s cooldown=%s", logPrefix, resp.StatusCode, class, cd)
 		return false, uerr
 	}
 
@@ -587,9 +589,9 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 
 	// Both SSE and non-SSE bodies go through copyFlush so the stream_idle
 	// watchdog covers every upstream response body: a 200 whose body stalls
-	// mid-transfer must abort instead of parking the request forever (the
-	// old non-SSE io.Copy had no watchdog at all). The per-chunk Flush is a
-	// no-op concern for JSON bodies — Content-Length is stripped anyway.
+	// mid-transfer must abort instead of parking the request forever. The
+	// per-chunk Flush is a no-op concern for JSON bodies — Content-Length is
+	// stripped anyway.
 	copyErr := copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	status := "ok"
 	if copyErr != nil && r.Context().Err() == nil {
@@ -605,8 +607,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			att.RawPreStrip = audit.EncodeBody(raw)
 		}
 	}
-	rt.logf("model=%s ep=%s attempt=%d status=%s stream=%v dur=%s",
-		creq.Model, ep.Name(), attempt, status, creq.Stream, time.Since(start).Round(time.Millisecond))
+	rt.logf("%s status=%s dur=%s", logPrefix, status, fmtDur(time.Since(start)))
 	return true, nil
 }
 
@@ -724,4 +725,48 @@ func (rt *Router) logf(format string, args ...any) {
 	if rt.Logger != nil {
 		rt.Logger.Printf(format, args...)
 	}
+}
+
+// Logf is logf, exported so callers outside this package (internal/server,
+// for the handful of lines it logs itself — e.g. audit write failures) go
+// through the same nil-safe path and pick up the same timestamp/format
+// instead of falling back to the unstamped global "log" package.
+func (rt *Router) Logf(format string, args ...any) {
+	rt.logf(format, args...)
+}
+
+// tagCol pads s to a fixed 8-char, left-aligned column — every log line
+// starts with one so the fields after it stay vertically aligned regardless
+// of how long the actor name is.
+func tagCol(s string) string {
+	return fmt.Sprintf("%-8s", s)
+}
+
+// clientTag is the tagCol value for a real client request: the audit key
+// tag that identifies who sent it, or "-" when auditing is off (rec == nil)
+// or the request carried no matching key.
+func clientTag(rec *audit.Record) string {
+	tag := "-"
+	if rec != nil && rec.ClientKeyTag != "" {
+		tag = rec.ClientKeyTag
+	}
+	return tagCol(tag)
+}
+
+// epLabel is the log-only endpoint label — colon-joined protocol:provider:model
+// (as opposed to Endpoint.Name()'s slash form, which is a stable identifier
+// used in the admin status API and the X-VMR-Endpoint header and must not
+// change shape) — with a "(stream)" suffix when the request is streaming.
+func epLabel(ep *core.Endpoint, stream bool) string {
+	label := ep.AdapterType + ":" + ep.Provider + ":" + ep.Model
+	if stream {
+		label += "(stream)"
+	}
+	return label
+}
+
+// fmtDur renders an elapsed duration for the dur= column — see
+// core.FmtSeconds; 2 decimals is this log's fixed precision.
+func fmtDur(d time.Duration) string {
+	return core.FmtSeconds(d, 2)
 }

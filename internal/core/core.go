@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
+	"time"
 )
 
 // MarshalNoEscape is json.Marshal without HTML escaping and without the
@@ -36,8 +38,7 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 
 // WriteError emits an error body that both OpenAI clients (error.message)
 // and Anthropic clients (type:"error" envelope) can parse. Shared by router
-// and server — before this both packages carried their own byte-identical
-// copy, which meant a format change had to be remembered in two places.
+// and server so a format change only has to be made once.
 func WriteError(w http.ResponseWriter, status int, errType, msg string) {
 	WriteJSON(w, status, map[string]any{
 		"type":  "error",
@@ -150,8 +151,7 @@ func (e *Endpoint) Name() string {
 
 // SortedKeys returns m's keys in sorted order. A recurring need across
 // packages that print or iterate a map deterministically (config summaries,
-// adapter/model registries, header tables) — before this, half a dozen
-// call sites each carried their own byte-identical copy of this loop.
+// adapter/model registries, header tables).
 func SortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -159,4 +159,30 @@ func SortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// FmtBytes renders a byte count human-readably (B/KB/MB) — request/response
+// bodies range from a few hundred bytes to several MB (inline images), so a
+// fixed unit would be either unreadable or falsely precise at one end.
+// Shared by every place that prints a body size (live router log, `vmr
+// report` rendering) so they don't each carry their own copy of this
+// threshold logic.
+func FmtBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
+
+// FmtSeconds renders d as fixed-decimal seconds ("6.32s") instead of
+// Duration.String()'s mixed units (ms/s/m) — a column where some rows read
+// "141ms" and others "1m4s" doesn't scan as a column; one unit throughout
+// does. decimals lets callers trade precision for width (2 for the live
+// router log, 3 for `vmr diagnose`'s sub-10ms-sensitive latency columns).
+func FmtSeconds(d time.Duration, decimals int) string {
+	return fmt.Sprintf("%.*fs", decimals, d.Seconds())
 }

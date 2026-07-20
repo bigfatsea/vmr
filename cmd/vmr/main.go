@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-21 01:15, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -332,11 +332,28 @@ const vmrBanner = `
 ==================================================
 `
 
+// stampWriter prepends a "YYYY-MM-DD HH:MM:SS " timestamp (ISO-ish, unlike
+// log.LstdFlags' fixed "2006/01/02 15:04:05") to every write. log.Logger
+// calls Write exactly once per line — the fully formatted message, already
+// newline-terminated — so wrapping the writer stamps every logger.Printf
+// call site uniformly without editing any of them individually.
+type stampWriter struct{ w io.Writer }
+
+func (s stampWriter) Write(p []byte) (int, error) {
+	line := append([]byte(time.Now().Format("2006-01-02 15:04:05")+" "), p...)
+	if _, err := s.w.Write(line); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // logStart prints the hero banner followed by one timestamped, greppable
 // marker line carrying the facts that matter for a support/incident
-// timeline: pid, config path, listen address.
+// timeline: pid, config path, listen address. The banner is written
+// straight to stderr (bypassing the logger's stamping) — ASCII art doesn't
+// want a timestamp glued to its first line.
 func logStart(logger *log.Logger, path string, listen string) {
-	fmt.Fprint(logger.Writer(), vmrBanner)
+	fmt.Fprint(os.Stderr, vmrBanner)
 	logger.Printf("VMR START pid=%d config=%s listen=%s", os.Getpid(), path, listen)
 }
 
@@ -356,7 +373,7 @@ func cmdStart(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	logger := log.New(os.Stderr, "", log.LstdFlags)
+	logger := log.New(stampWriter{os.Stderr}, "", 0)
 	startTime := time.Now()
 
 	cfg, err := config.Load(*path)
@@ -396,24 +413,34 @@ func cmdStart(args []string) error {
 	logConfigSummary(logger, cfg, snap)
 
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
+	// Every attempt — rejected or not — gets the same banner treatment (same
+	// idiom logStop uses for its own marker) so a reload is never lost in
+	// the steady drip of per-request log lines around it; a rejected reload
+	// especially so, since that's the one that needs a human's attention.
+	// The bar alone (through the normal timestamped logger, not a raw
+	// stderr write) is enough separation — no need for blank lines too.
 	reload := func(trigger string) {
+		bar := strings.Repeat("=", 50)
+		logger.Printf("%s", bar)
+		logger.Printf("CONFIG RELOAD  trigger=%s", trigger)
+		defer logger.Printf("%s", bar)
+
 		newCfg, err := config.Load(*path)
 		if err != nil {
-			logger.Printf("reload(%s) rejected, keeping current config: %v", trigger, err)
+			logger.Printf("rejected, keeping current config: %v", err)
 			return
 		}
 		newSnap, err := router.BuildSnapshot(newCfg)
 		if err != nil {
-			logger.Printf("reload(%s) rejected, keeping current config: %v", trigger, err)
+			logger.Printf("rejected, keeping current config: %v", err)
 			return
 		}
 		rt.Install(newSnap)
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
 		if newCfg.LogDir != auditDirInUse {
-			logger.Printf("reload(%s): log_dir changed (%s -> %s) — takes effect on restart; audit keeps writing to the old directory until then",
-				trigger, auditDirInUse, newCfg.LogDir)
+			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
+				auditDirInUse, newCfg.LogDir)
 		}
-		logger.Printf("reload(%s) ok", trigger)
 		logConfigSummary(logger, newCfg, newSnap)
 	}
 	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })

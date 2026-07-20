@@ -331,11 +331,11 @@ func buildWithProgress(paths []string, now time.Time, progress io.Writer) (*Repo
 			}
 			// Request-shape stats are computed ONCE per record and shared by
 			// every bucket below: bodyBytes re-marshals the whole decoded
-			// body and messageCount/roleChars walk the full message tree —
-			// with 4 Row buckets + 2 Hour buckets + up to 2 Endpoint buckets
-			// each doing it independently, the same multi-MB body used to be
-			// parsed 6-8 times per record, the dominant cost of `vmr report`
-			// on large logs. st.roleChars is shared read-only.
+			// body and messageCount/roleChars walk the full message tree.
+			// With 4 Row buckets + 2 Hour buckets + up to 2 Endpoint buckets,
+			// computing this independently per bucket would re-parse the
+			// same multi-MB body 6-8 times per record — the dominant cost of
+			// `vmr report` on large logs. st.roleChars is shared read-only.
 			st := recStats{bytesIn: bodyBytes(rec.Client.Request.Body)}
 			if rec.Client.Response != nil {
 				st.bytesOut = bodyBytes(rec.Client.Response.Body)

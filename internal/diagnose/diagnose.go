@@ -163,11 +163,9 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	}
 	if opts.TestRouting {
 		// Collect every distinct (protocol, provider, model) triple first,
-		// then sort — not "whichever virtual model happened to reference it
-		// first" (the old order, since it fell out of iterating models, not
-		// endpoints). Sorted by protocol/provider/model so the same provider's
-		// endpoints land next to each other in the report instead of scattered
-		// across wherever each virtual model listed them.
+		// then sort by protocol/provider/model — so the same provider's
+		// endpoints land next to each other in the report instead of
+		// scattered across wherever each virtual model listed them.
 		seen := map[epKey]bool{}
 		for _, protocol := range core.SortedKeys(cfg.Models) {
 			for _, name := range core.SortedKeys(cfg.Models[protocol]) {
@@ -366,9 +364,11 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 // "1.068s") — one unit for every Connectivity/Routing latency, instead of
 // Duration.String()'s default of switching to "141ms" below one second and
 // "1.068s" above it. A column where some rows read "141ms" and others
-// "1.068s" doesn't scan as a column; same unit throughout does.
+// "1.068s" doesn't scan as a column; same unit throughout does. Thin local
+// alias for core.FmtSeconds (3 decimals — diagnose cares about sub-10ms
+// differences the live router log's 2-decimal dur= column doesn't).
 func formatSeconds(d time.Duration) string {
-	return fmt.Sprintf("%.3fs", d.Seconds())
+	return core.FmtSeconds(d, 3)
 }
 
 func snippet(body []byte) string {

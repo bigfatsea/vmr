@@ -18,29 +18,23 @@ import (
 // Request builds a minimal chat-completion body that asks the model to echo
 // back a one-time nonce, and returns the nonce alongside it for the caller to
 // verify against the raw response. The shape (model/messages/max_tokens) is
-// recognized by every OpenAI- and Anthropic-compatible provider vmr targets —
-// the same shape internal/diagnose used before this package existed, just
-// with instructable content instead of a throwaway "hi" and enough
-// max_tokens for the nonce to fit.
+// recognized by every OpenAI- and Anthropic-compatible provider vmr targets.
 //
-// Asking for an echo (rather than just checking the HTTP status, as the
-// original diagnose check did) catches a class of failure a bare 200 can't:
-// a relay/gateway layer answering with a cached or canned response while the
-// real model never ran. A plain substring match on the raw response body is
-// enough to verify it — see Echoed.
+// Asking for an echo (rather than just checking the HTTP status) catches a
+// class of failure a bare 200 can't: a relay/gateway layer answering with a
+// cached or canned response while the real model never ran. A plain
+// substring match on the raw response body is enough to verify it — see
+// Echoed.
 func Request(model string) (body json.RawMessage, nonce string) {
 	nonce = newNonce()
 	b, err := json.Marshal(map[string]any{
 		"model": model,
-		// 300, not just enough room for the nonce: live testing against this
-		// project's actual configured providers (see docs/
-		// ActiveProbeAndFailoverFix_Sonnet5.md §5) showed several
-		// reasoning-style models spend their whole token budget on a
-		// <think>...</think> block before ever reaching the answer — a
-		// smaller max_tokens made most real, healthy endpoints hit
-		// finish_reason:"length" mid-thought and come back with no nonce at
-		// all, which is a false "unverified", not a real problem with the
-		// endpoint.
+		// 300, not just enough room for the nonce: several reasoning-style
+		// models spend their whole token budget on a <think>...</think>
+		// block before ever reaching the answer — a smaller max_tokens made
+		// real, healthy endpoints hit finish_reason:"length" mid-thought and
+		// come back with no nonce at all, a false "unverified" rather than a
+		// real endpoint problem.
 		"max_tokens": 300,
 		"messages": []map[string]string{
 			{"role": "user", "content": "Reply with exactly this token and nothing else: " + nonce},

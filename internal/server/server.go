@@ -1,4 +1,4 @@
-// Ver 2026-07-17 00:00, by Sonnet 5
+// Ver 2026-07-21 01:15, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sort"
@@ -176,7 +175,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 				canceled := rw.status == 0 && r.Context().Err() != nil
 				rec.Outcome = audit.OutcomeFor(rw.status, canceled)
 				if err := s.audit.Write(rec); err != nil {
-					log.Printf("audit: %v", err)
+					s.rt.Logf("audit: %v", err)
 				}
 			}()
 		}

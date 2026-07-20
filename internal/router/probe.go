@@ -1,4 +1,4 @@
-// Ver 2026-07-18 23:00, by Sonnet 5
+// Ver 2026-07-21 01:15, by Sonnet 5
 
 // probe_mode: active's background half of Serve (see router.go) — a
 // dedicated, lightweight request that verifies a half-open endpoint without
@@ -42,23 +42,28 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	ctx, cancel := context.WithTimeout(context.Background(), snap.Cfg.ProbeTimeout.D())
 	defer cancel()
 
+	// logPrefix mirrors tryOne's: shared fields once, per-outcome fields at
+	// each call site. No req= size here — probe.Request's body is a fixed
+	// few dozen tokens, never worth reporting per-probe.
+	logPrefix := tagCol("probe") + " " + epLabel(ep, false)
+
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {
 		// A build failure is about vmr's own request construction, not the
 		// endpoint — same "says nothing about health" call tryOne makes for
 		// this class of error, just without a health penalty since there was
 		// never a real request behind this one to have failed either.
-		rt.logf("probe ep=%s build_error=%v", ep.Name(), err)
+		rt.logf("%s error=build:%v", logPrefix, err)
 		rt.Health.ReportNeutral(key)
 		return
 	}
 
 	start := time.Now()
 	resp, err := snap.clientFor(ep).Do(req)
-	dur := time.Since(start).Round(time.Millisecond)
+	dur := time.Since(start)
 	if err != nil {
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		rt.logf("probe ep=%s net_error=%v dur=%s cooldown=%s", ep.Name(), err, dur, cd)
+		rt.logf("%s error=network:%v dur=%s cooldown=%s", logPrefix, err, fmtDur(dur), cd)
 		return
 	}
 	defer resp.Body.Close()
@@ -71,20 +76,20 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 			// flagged/rejected — say nothing about the endpoint's health,
 			// same rule tryOne applies to these two classes for real traffic.
 			rt.Health.ReportNeutral(key)
-			rt.logf("probe ep=%s status=%d class=%s dur=%s (no cooldown)", ep.Name(), resp.StatusCode, class, dur)
+			rt.logf("%s status=%d class=%s dur=%s (no cooldown)", logPrefix, resp.StatusCode, class, fmtDur(dur))
 			return
 		}
 		cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
-		rt.logf("probe ep=%s status=%d class=%s dur=%s cooldown=%s", ep.Name(), resp.StatusCode, class, dur, cd)
+		rt.logf("%s status=%d class=%s dur=%s cooldown=%s", logPrefix, resp.StatusCode, class, fmtDur(dur), cd)
 		return
 	}
 
 	// 2xx: the endpoint answered — that alone is enough to mark it healthy
 	// again. Whether it echoed the nonce is logged for observability only;
-	// it never turns a reachable, responding endpoint back into a failure
-	// (see docs/ActiveProbeAndFailoverFix_Sonnet5.md §1.1 for why the
-	// runtime probe is deliberately more lenient here than `vmr diagnose`,
-	// which does warn on a missing echo).
+	// it never turns a reachable, responding endpoint back into a failure.
+	// Deliberately more lenient than `vmr diagnose`, which does warn on a
+	// missing echo — diagnose is a one-shot human check, this is a
+	// background health signal that must not flap on a borderline vendor.
 	rt.Health.ReportSuccess(key)
-	rt.logf("probe ep=%s status=%d echoed=%v dur=%s", ep.Name(), resp.StatusCode, probe.Echoed(respBody, nonce), dur)
+	rt.logf("%s status=%d echoed=%v dur=%s", logPrefix, resp.StatusCode, probe.Echoed(respBody, nonce), fmtDur(dur))
 }

@@ -143,12 +143,11 @@ type Config struct {
 	// ProbeMode selects how a half-open endpoint (past its cooldown, but not
 	// yet confirmed recovered) gets re-verified: "active" (default) fires a
 	// small dedicated probe request in the background and never lets real
-	// traffic touch the endpoint until that probe succeeds; "passive" is the
-	// original behavior — the next real request IS the probe, so its own
-	// size/duration determines how long the single-flight probe slot (and,
-	// under concurrent load, every other request's access to this endpoint)
-	// stays locked. See reports/incident-20260718-console-go-400-failover_
-	// Sonnet5.md §2.4 for the failure mode "active" exists to close.
+	// traffic touch the endpoint until that probe succeeds; "passive" lets
+	// the next real request BE the probe, so its own size/duration
+	// determines how long the single-flight probe slot (and, under
+	// concurrent load, every other request's access to this endpoint) stays
+	// locked.
 	ProbeMode    string   `yaml:"probe_mode"`
 	ProbeTimeout Duration `yaml:"probe_timeout"` // active mode only: per-probe upper bound; default DefaultProbeTimeout
 	// MaxRequestBodyMB bounds the inbound client request body vmr will read
@@ -385,8 +384,7 @@ func (c *Config) validate() error {
 // CountNested totals the inner maps of a protocol -> name -> V structure
 // (Config.Providers, Config.Models) — exported because validate() isn't the
 // only place that needs "how many providers/models total": diagnose and
-// cmd/vmr both report the same count in their own output and previously
-// each carried a byte-identical private copy of this function.
+// cmd/vmr both report the same count in their own output.
 func CountNested[V any](m map[string]map[string]V) int {
 	n := 0
 	for _, byName := range m {

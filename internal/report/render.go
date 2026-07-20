@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"vmr/internal/core"
 )
 
 // previewLen bounds the one-line preview shown in a <details> summary.
@@ -83,16 +85,11 @@ func truncCell(s string, n int) string {
 	return fmt.Sprintf("%s… (共 %d 字符)", string(r[:n]), len(r))
 }
 
-// fmtBytes renders a byte count human-readably.
+// fmtBytes renders a byte count human-readably — thin local alias for
+// core.FmtBytes so the ~10 call sites across this package (detail.go,
+// render.go) don't all need the "core." qualifier.
 func fmtBytes(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%dB", n)
-	}
+	return core.FmtBytes(n)
 }
 
 // jsonIndent pretty-prints any decoded JSON value.

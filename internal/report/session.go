@@ -2,8 +2,7 @@
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
-// Method and evidence: design doc §9.4 "Agent 会话分析" (the standalone
-// analysis document was folded into that section and deleted).
+// Method and evidence: design doc §9.4 "Agent 会话分析".
 //
 // The core signal is protocol-generic — agent clients resend the whole
 // conversation each turn, so the first non-system message fingerprints the

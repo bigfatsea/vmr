@@ -71,10 +71,9 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		// This is per-endpoint (that specific hop choking, e.g. on a request
 		// size it can't forward), not a request every endpoint would reject
 		// identically — switching helps, so keep failing over instead of
-		// handing this straight back to the client (see reports/incident-
-		// 20260718-console-go-400-failover_Sonnet5.md for the case that
-		// motivated this: an opencode.ai relay's "Upstream request failed"
-		// silently dead-ended an otherwise-recoverable failover walk).
+		// handing this straight back to the client (motivating case: an
+		// opencode.ai relay's "Upstream request failed" dead-ending an
+		// otherwise-recoverable failover walk).
 		if upstreamHint(snippet) {
 			return core.ErrEndpoint
 		}
@@ -113,16 +112,14 @@ func contentHint(snippet string) bool {
 // parameters — reaches the provider exactly as the client sent it, which is
 // as close to direct-connection equivalence as a model rewrite can get. The
 // locate step is a single allocation-free scan (strings are skipped at
-// bytes.IndexByte speed), replacing the previous full
-// unmarshal-into-map + re-serialize round trip that cost a parse and a copy
-// of the whole body on every failover attempt.
+// bytes.IndexByte speed) — no unmarshal-into-map + re-serialize round trip
+// paying for a parse and a copy of the whole body on every failover attempt.
 //
 // Nested "model" keys (inside messages, tool schemas, metadata objects) are
 // not touched — only top-level values are rewritten. Inputs the scanner
 // can't handle (not a JSON object, no literal top-level "model" key, or a
 // syntax problem) fall back to the generic parse-and-rebuild path, which
-// preserves the historical semantics for those shapes, including adding the
-// key when absent.
+// handles those shapes the same way, including adding the key when absent.
 func RewriteModel(raw json.RawMessage, model string) ([]byte, error) {
 	mv, err := core.MarshalNoEscape(model)
 	if err != nil {

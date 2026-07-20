@@ -46,8 +46,7 @@
 // instead of erroring — a "soft block" the failover loop cannot see because
 // it never sees a non-2xx status. When spotted, "soft_block_detected" is
 // added to the audit norm trail; the bytes reaching the client are
-// unchanged and health/failover are untouched (see design doc §5 known
-// boundary, and docs/SensitiveWordFilter_Analysis_Fable5.md §3.6 phase 1).
+// unchanged and health/failover are untouched.
 package router
 
 import (
@@ -148,12 +147,11 @@ func thinkShapeGuard(b []byte) bool {
 }
 
 // softBlockMarkers flag MiniMax's "soft" content-policy block: a 2xx
-// response that embeds a compliance flag instead of erroring, per the design
-// doc §5 known-boundary note. Detection is observation-only — the byte
-// stream to the client is never altered, health/failover are untouched — it
-// only adds "soft_block_detected" to the audit norm trail (§9.2) so these
-// otherwise-invisible blocks become greppable instead of silently reaching
-// the client as an empty or substituted response.
+// response that embeds a compliance flag instead of erroring. Detection is
+// observation-only (see package doc) — it only adds "soft_block_detected"
+// to the audit norm trail so these otherwise-invisible blocks become
+// greppable instead of silently reaching the client as an empty or
+// substituted response.
 var softBlockMarkers = [][]byte{
 	[]byte(`"input_sensitive":true`),
 	[]byte(`"output_sensitive":true`),
