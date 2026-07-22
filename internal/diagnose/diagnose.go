@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-22 22:10, by Sonnet 5
 
 // Package diagnose implements `vmr diagnose`: config validation plus a
 // series of read-only checks (DNS/TLS/proxy reachability, then a real
@@ -159,7 +159,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	// run with up to checkConcurrency in flight, same reasoning as Phase 2.
 	connResults := map[epKey]Result{}
 	if opts.TestTimeout <= 0 {
-		opts.TestTimeout = 10 * time.Second
+		opts.TestTimeout = 15 * time.Second
 	}
 	if opts.TestRouting {
 		// Collect every distinct (protocol, provider, model) triple first,

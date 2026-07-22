@@ -1,4 +1,4 @@
-// Ver 2026-07-21 01:15, by Sonnet 5
+// Ver 2026-07-22 22:10, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -265,7 +265,7 @@ func cmdDiagnose(args []string) error {
 	fs := flag.NewFlagSet("diagnose", flag.ExitOnError)
 	cfgPath := fs.String("c", "config.yaml", "path to config file")
 	noTestRouting := fs.Bool("no-test-routing", false, "skip phase 3 (real connectivity test); only validate config and environment")
-	testTimeout := fs.Duration("test-timeout", 10*time.Second, "per-endpoint timeout for the connectivity test")
+	testTimeout := fs.Duration("test-timeout", 15*time.Second, "per-endpoint timeout for the connectivity test")
 	jsonOut := fs.Bool("json", false, "print results as a JSON array instead of the human-readable listing")
 	if err := fs.Parse(args); err != nil {
 		return err

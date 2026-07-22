@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-22 21:00, by Sonnet 5 -->
+<!-- Ver 2026-07-22 22:10, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -182,7 +182,7 @@ models:
 | `vmr status -c config.yaml` | render a running instance's health and concurrency |
 | `vmr report [-o dir] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip) |
 | `vmr dirs [-c config.yaml] log\|cache` | print the effective audit/cache directory (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
-| `vmr diagnose [-c config.yaml]` | beyond `check`'s static preview: DNS/TLS/proxy reachability per provider, then a real minimal request per configured endpoint asking for a one-time token echoed back (run concurrently, `-test-timeout` per check, default 10s) — a 200 that doesn't echo it warns instead of passing, catching a relay/gateway that answers with a cached or canned response instead of a fresh completion — plus a routing-order preview annotated with what it found (`-no-test-routing` to skip the live requests, `-json` for scripting; exits non-zero if anything failed) |
+| `vmr diagnose [-c config.yaml]` | beyond `check`'s static preview: DNS/TLS/proxy reachability per provider, then a real minimal request per configured endpoint asking for a one-time token echoed back (run concurrently, `-test-timeout` per check, default 15s) — a 200 that doesn't echo it warns instead of passing, catching a relay/gateway that answers with a cached or canned response instead of a fresh completion — plus a routing-order preview annotated with what it found (`-no-test-routing` to skip the live requests, `-json` for scripting; exits non-zero if anything failed) |
 | `vmr replay -provider NAME <audit.jsonl>` | rebuild and resend one request from an audit record through the exact same request-building path vmr itself uses — `-dry-run` to print without sending, `-record path` to save the replay as its own audit line, `-model`/`-protocol` to override what the record itself says, `-stream true\|false` to force streaming on/off, `-max-time` to cap the upstream wait. Pick the record with `-detail file` (a `vmr report` `details/*.json` file — no line-counting needed), `-ts <timestamp>` (matches either `vmr-requests.jsonl`'s or the raw audit log's `ts` field), or `-line N` (default: the last one in the file) — the three are mutually exclusive |
 | `./vmr.sh start\|stop\|…` | dev-mode lifecycle (you supervise) |
 | `./vmr.sh service install\|uninstall\|start\|…` | init-system service (launchd/systemd: crash restart, start at login) |
