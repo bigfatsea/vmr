@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-20 01:00, by Sonnet 5 -->
+<!-- Ver 2026-07-22 21:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -86,7 +86,7 @@ Upstream   ├─ 2xx → 响应归一化（见 §5）→ 转发 → 上报健�
 * **请求侧 Header 透传**：黑名单之外的客户端 header 全部透传（含 `anthropic-version`/`anthropic-beta` 协议头，§5.4），Content-Type 与凭证由 Adapter 统一设置。客户端 `Authorization`/`x-api-key` 绝不到上游；不透传 `Accept-Encoding`（Go Transport 透明 gzip）。
 * **响应侧 Header 透传**：与请求侧对称——上游响应头默认全部透传（`x-ratelimit-*`、request id、`Date`、`Retry-After`、`Content-Encoding`…），只剥 hop-by-hop（Connection/Keep-Alive/TE/Trailer/Transfer-Encoding/Upgrade/Proxy-*）与 `Content-Length`（归一化可能改变长度，Go 重新成帧）。客户端看到的头与直连一致，仅多出 `X-VMR-*`。
 * **3xx 重定向不跟随**：`NewUpstreamClient` 构造的 `http.Client` 设 `CheckRedirect` 返回 `http.ErrUseLastResponse`——上游 3xx 原样到达客户端（status + `Location` + body），与直连一致。Go `http.Client` 默认策略会把 POST 301/302/303 静默改写成 GET，这会破坏字节级保真。LLM API 几乎不发 3xx，但一旦发了，vmr 的行为与直连完全一致。
-* **base_url 路径重叠消除**：`BuildSnapshot` 在初始化时将每个 provider 的 `base_url` 与 adapter 的路径后缀（OpenAI `/v1/chat/completions`、Anthropic `/v1/messages`）拼接，检测并消除重叠部分——`base_url` 尾部与后缀头部的最长公共子串只保留一次。用户写不写 `/v1`、甚至写完整路径，结果都正确。完整 URL 存入 `core.Endpoint.FullURL`，adapter 的 `BuildRequest` 直接使用，不在请求时重复构造。
+* **base_url 必须自带版本号**：`BuildSnapshot` 在初始化时把每个 provider 的 `base_url` 与 adapter 的裸路径后缀（OpenAI `/chat/completions`、Anthropic `/messages`）直接拼接，不做归一化、不做重叠检测——`base_url` 必须已经带上该 provider 自己的完整 API 版本号（`/v1`、`/v3`，随 provider 自己叫法），因为不同 provider 给 OpenAI/Anthropic 兼容面定的版本号并不统一（例如火山引擎 coding plan 的 OpenAI 端点是 `/v3`），vmr 不替用户猜版本号。完整 URL 存入 `core.Endpoint.FullURL`，adapter 的 `BuildRequest` 直接使用，不在请求时重复构造。
 * **`role_map`：按 provider 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。provider 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 provider 一级而非虚拟模型——拒收哪个 role 是网关本身的特性，不是某个具体模型的特性；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.Provider.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
 ### 4.2 模块划分
@@ -496,7 +496,7 @@ timeouts:
 providers:                       # "我有什么"——按协议分组，两层 map
   <protocol>:                    # openai | anthropic | 未来任何已注册的 adapter 名
     <name>:
-      base_url: https://...      # openai 型拼 /v1/chat/completions；anthropic 型拼 /v1/messages；写不写 /v1 都行，vmr 自动消除重叠（§4.1）
+      base_url: https://...      # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages（§4.1）
       api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串
       proxy: false               # 可选三态开关：false = 该 provider 永远直连（无视全局 http(s)_proxy，
                                  # 国内厂商的典型写法）；true/缺省 = 跟随全局 http(s)_proxy。没有环境变量

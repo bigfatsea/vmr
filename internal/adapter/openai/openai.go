@@ -1,4 +1,4 @@
-// Ver 2026-07-12 16:30, by Fable 5
+// Ver 2026-07-22 21:00, by Sonnet 5
 
 // Package openai is the passthrough adapter for OpenAI-compatible providers:
 // rewrite URL, inject key, swap the model field; the body is otherwise untouched.
@@ -16,11 +16,15 @@ import (
 
 func init() { adapter.Register("openai", OpenAI{}) }
 
+// chatCompletionsPath is the bare protocol path; base_url must already
+// carry the provider's own API version (see adapter.ResolveURL).
+const chatCompletionsPath = "/chat/completions"
+
 type OpenAI struct{}
 
 func (OpenAI) Protocol() string { return "openai" }
 func (OpenAI) ResolveURL(baseURL string) string {
-	return adapter.ResolveURL(baseURL, "/v1/chat/completions")
+	return adapter.ResolveURL(baseURL, chatCompletionsPath)
 }
 
 func (OpenAI) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {

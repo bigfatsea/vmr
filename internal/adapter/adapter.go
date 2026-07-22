@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-22 21:00, by Sonnet 5
 package adapter
 
 import (
@@ -22,11 +22,12 @@ type Adapter interface {
 	// A virtual model's endpoints must all share one protocol.
 	Protocol() string
 
-	// ResolveURL returns the complete upstream URL for a given base_url,
-	// with any overlap between the base_url's tail and this adapter's path
-	// suffix eliminated. Called once at initialization (BuildSnapshot,
-	// diagnose, replay) — not per request — so BuildRequest just uses the
-	// pre-computed ep.FullURL.
+	// ResolveURL returns the complete upstream URL for a given base_url.
+	// Convention: base_url always carries the provider's own full API
+	// version (/v1, /v3, whatever the provider calls it) — this adapter's
+	// path suffix is only the bare protocol path, never a version. Called
+	// once at initialization (BuildSnapshot, diagnose, replay) — not per
+	// request — so BuildRequest just uses the pre-computed ep.FullURL.
 	ResolveURL(baseURL string) string
 
 	// BuildRequest turns the canonical request into the provider's HTTP request
@@ -71,34 +72,21 @@ func Names() []string {
 	return core.SortedKeys(registry)
 }
 
-// ResolveURL joins baseURL and suffix into a single URL, eliminating any
-// overlap between the tail of baseURL and the head of suffix so path
-// segments are never duplicated. This is the shared implementation every
-// adapter's ResolveURL method delegates to.
+// ResolveURL joins baseURL and suffix into the complete upstream URL.
+// The provider's own API version is expected to already be part of
+// baseURL (e.g. "https://api.example.com/v1", ".../api/coding/v3") —
+// suffix is only the bare protocol path ("/chat/completions",
+// "/messages") and never carries a version, so the two never need
+// de-duplicating against each other. A trailing slash on baseURL is
+// trimmed first. This is the shared implementation every adapter's
+// ResolveURL method delegates to. Called once at initialization — never
+// per request.
 //
-// Examples (suffix = "/v1/chat/completions"):
+// Examples (suffix = "/chat/completions"):
 //
-//	"https://api.example.com"		→ "https://api.example.com/v1/chat/completions"
-//	"https://api.example.com/v1"	→ "https://api.example.com/v1/chat/completions"  (overlap /v1)
-//	"https://api.example.com/v1/"	→ "https://api.example.com/v1/chat/completions"  (trailing / trimmed)
-//	"https://a.co/v1/chat/completions"	→ "https://a.co/v1/chat/completions"  (full overlap, no dup)
-//	"https://a.co/anthropic/v1"		→ "https://a.co/anthropic/v1/chat/completions"  (suffix = /v1/messages)
-//	"https://a.co/anthropic"		→ "https://a.co/anthropic/v1/messages"
-//
-// The algorithm finds the longest suffix of (trimmed) baseURL that is also
-// a prefix of suffix, then concatenates base + suffix[overlap:], so the
-// overlapping segment appears exactly once. A trailing slash on baseURL is
-// trimmed first. Called once at initialization — never per request.
+//	"https://api.example.com/v1"		→ "https://api.example.com/v1/chat/completions"
+//	"https://api.example.com/v1/"		→ "https://api.example.com/v1/chat/completions"  (trailing / trimmed)
+//	"https://ark.example.com/coding/v3"	→ "https://ark.example.com/coding/v3/chat/completions"
 func ResolveURL(baseURL, suffix string) string {
-	s := strings.TrimRight(baseURL, "/")
-	max := len(s)
-	if len(suffix) < max {
-		max = len(suffix)
-	}
-	for i := max; i > 0; i-- {
-		if strings.HasSuffix(s, suffix[:i]) {
-			return s + suffix[i:]
-		}
-	}
-	return s + suffix
+	return strings.TrimRight(baseURL, "/") + suffix
 }

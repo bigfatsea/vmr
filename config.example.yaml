@@ -1,4 +1,4 @@
-# Ver 2026-07-17 03:00, by Sonnet 5
+# Ver 2026-07-22 21:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -53,11 +53,13 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
 providers:
-  # base_url + path overlap elimination: vmr joins the provider's base_url
-  # with the protocol's path suffix (/v1/chat/completions for OpenAI,
-  # /v1/messages for Anthropic), detecting and removing any overlap so
-  # path segments are never duplicated. Write base_url with or without /v1,
-  # or even the full path — vmr always produces the correct URL.
+  # base_url must include the provider's own full API version (/v1, /v3,
+  # whatever it calls it) — vmr just appends the protocol's bare path
+  # (/chat/completions for OpenAI, /messages for Anthropic) with no
+  # normalization. Providers that don't version their OpenAI/Anthropic
+  # surface as "v1" (e.g. Volcengine's coding-plan endpoint uses /v3)
+  # are exactly why: hardcoding "/v1" into the suffix would silently
+  # produce the wrong URL for them.
   openai:
     minimax:
       base_url: https://api.minimaxi.com/v1

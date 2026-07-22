@@ -50,7 +50,7 @@ listen: 127.0.0.1:0
 providers:
   openai:
     p1: {base_url: %q, api_key: real-provider-key}
-`, upstreamURL) + models
+`, upstreamURL+"/v1") + models
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)

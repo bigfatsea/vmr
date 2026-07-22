@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-20 01:00, by Sonnet 5 -->
+<!-- Ver 2026-07-22 21:00, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -61,7 +61,7 @@ models:
 
 **上游代理——只认显式配置**：provider 自己的 `proxy: false` 最高优先（该 provider 永远直连——这正是"国内厂商直连 + 海外厂商走代理"混配场景的解法）；其次是上面的全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但全局没配对应代理是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
 
-**base_url 路径重叠消除**：vmr 在初始化时预计算每个 provider 的完整上游 URL——将 `base_url` 与协议路径后缀（OpenAI 为 `/v1/chat/completions`，Anthropic 为 `/v1/messages`）拼接，检测并消除 `base_url` 尾部与后缀头部的重叠部分。所以 `https://api.example.com/v1` + `/v1/chat/completions` → `https://api.example.com/v1/chat/completions`（不会变成 `…/v1/v1/…`）。`base_url` 写不写 `/v1`、甚至写完整路径，结果都正确。同时覆盖 OpenAI 兼容和 Anthropic 兼容两种协议——两者都用 `/v1`。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
+**base_url 必须自带版本号**：vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI 为 `/chat/completions`，Anthropic 为 `/messages`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
 
 **`role_map`——按 provider 做 role 改写**：有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 provider 一级（跟 `base_url`/`api_key` 同级），不是挂在虚拟模型上——因为"拒收某个 role"通常是上游网关本身的特性，不是它背后某一个模型的特性；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。
 

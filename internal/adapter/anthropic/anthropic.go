@@ -1,4 +1,4 @@
-// Ver 2026-07-17 00:00, by Sonnet 5
+// Ver 2026-07-22 21:00, by Sonnet 5
 
 // Package anthropic is the passthrough adapter for Anthropic-compatible
 // providers (Anthropic, MiniMax, DeepSeek, …): append /messages to the base
@@ -17,11 +17,15 @@ import (
 
 func init() { adapter.Register("anthropic", Anthropic{}) }
 
+// messagesPath is the bare protocol path; base_url must already carry
+// the provider's own API version (see adapter.ResolveURL).
+const messagesPath = "/messages"
+
 type Anthropic struct{}
 
 func (Anthropic) Protocol() string { return "anthropic" }
 func (Anthropic) ResolveURL(baseURL string) string {
-	return adapter.ResolveURL(baseURL, "/v1/messages")
+	return adapter.ResolveURL(baseURL, messagesPath)
 }
 
 func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {

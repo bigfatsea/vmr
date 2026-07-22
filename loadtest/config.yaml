@@ -1,4 +1,4 @@
-# Ver 2026-07-19 23:55, by Sonnet 5 — vmr config for load testing (docs/PerformanceTesting_Design_Sonnet5.md).
+# Ver 2026-07-22 21:00, by Sonnet 5 — vmr config for load testing (docs/PerformanceTesting_Design_Sonnet5.md).
 # Not the same as config.yaml/config.example.yaml at the repo root — this points
 # at loadtest/mockupstream, never a real provider, and listens on a different
 # port so it can run alongside a real dev instance without clashing.
@@ -13,20 +13,20 @@ audit_retention_days: 0     # keep forever; this is a small, throwaway log direc
 providers:
   openai:
     mock:
-      base_url: http://127.0.0.1:9900
+      base_url: http://127.0.0.1:9900/v1
       api_key: sk-loadtest-mock-key
     mock_fail1:
-      base_url: http://127.0.0.1:9900/fail1   # loadtest/mockupstream always answers 500 on this path
+      base_url: http://127.0.0.1:9900/fail1/v1   # loadtest/mockupstream always answers 500 on this path
       api_key: sk-loadtest-mock-key
     mock_fail2:
-      base_url: http://127.0.0.1:9900/fail2   # same, second failing endpoint for the failover scenario
+      base_url: http://127.0.0.1:9900/fail2/v1   # same, second failing endpoint for the failover scenario
       api_key: sk-loadtest-mock-key
     mock_ok:
-      base_url: http://127.0.0.1:9900/ok      # succeeds — the failover scenario's third, winning endpoint
+      base_url: http://127.0.0.1:9900/ok/v1      # succeeds — the failover scenario's third, winning endpoint
       api_key: sk-loadtest-mock-key
   anthropic:
     mock:
-      base_url: http://127.0.0.1:9900
+      base_url: http://127.0.0.1:9900/v1
       api_key: sk-loadtest-mock-key
 
 models:
