@@ -5,7 +5,7 @@
 // recently, successfully served it, used to keep a multi-turn agent
 // conversation on the same upstream endpoint so the provider's prompt
 // cache stays warm. See
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2 for the full
+// docs/VirtualModelRouter_System_Design_v3.md §6.5 for the full
 // design — in particular why this package deliberately knows nothing about
 // config, endpoints, or TTL values: validity is a per-endpoint property
 // (internal/core.Endpoint.StickyTTL) the caller resolves, not something

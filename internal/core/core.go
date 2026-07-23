@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 package core
 
 import (
@@ -61,8 +61,8 @@ type CanonicalRequest struct {
 
 // RequestFacts are cheap, request-derived signals computed once per request
 // (never per candidate endpoint) and consulted by strategy.Condition
-// implementations — see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
-// §1.2. WantsThinking/HasAudio/HasVideo are typed placeholders only: no
+// implementations — see docs/VirtualModelRouter_System_Design_v3.md §6.4.
+// WantsThinking/HasAudio/HasVideo are typed placeholders only: no
 // detection logic populates them yet (protocol shapes for audio/video input
 // and MiniMax's thinking parameter aren't confirmed), so they are always
 // false until a later change adds the corresponding detection.

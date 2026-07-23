@@ -48,4 +48,4 @@ If none of those describe your situation — if what you actually have is one ag
 
 ---
 
-See also: [design doc](VirtualModelRouter_System_Design_v2.md) for the full architecture and every design decision behind it, [User Guide](UserGuide.md) for configuration and CLI reference.
+See also: [design doc](VirtualModelRouter_System_Design_v3.md) for the full architecture and every design decision behind it, [User Guide](UserGuide.md) for configuration and CLI reference.

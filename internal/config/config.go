@@ -1,4 +1,4 @@
-// Ver 2026-07-24 10:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -33,8 +33,8 @@ const (
 	// affinity preference stays valid, absent an explicit sticky_ttl.
 	// Calibrated to the shortest common upstream prompt-cache lifetime
 	// (Anthropic's 5-minute default, OpenAI's 5-10 minute window) with a
-	// little headroom — see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
-	// §2.4. Endpoints backed by a longer-lived cache (e.g. DeepSeek's disk
+	// little headroom — see docs/VirtualModelRouter_System_Design_v3.md
+	// §6.5. Endpoints backed by a longer-lived cache (e.g. DeepSeek's disk
 	// cache, hours to days) should override it per-endpoint.
 	DefaultStickyTTL = 10 * time.Minute
 	// DefaultProbeTimeout bounds one active-probe HTTP call (see ProbeMode).
@@ -96,7 +96,7 @@ type EndpointConfig struct {
 	Priority int    `yaml:"priority"`
 
 	// Capabilities and MaxContextTokens drive condition-based routing (see
-	// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.1). Both
+	// docs/VirtualModelRouter_System_Design_v3.md §6.4). Both
 	// are optional and default to "unconstrained" when absent — a request
 	// needing a capability or context size this endpoint doesn't declare
 	// simply isn't filtered by that dimension, so configs written before
@@ -124,9 +124,9 @@ type ModelConfig struct {
 	ImageDownscaleMaxPx *int             `yaml:"image_downscale"`
 
 	// Sticky enables session-affinity routing for this virtual model (see
-	// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2). A *bool,
+	// docs/VirtualModelRouter_System_Design_v3.md §6.5). A *bool,
 	// not bool: nil (field absent) defaults to true — the hashing cost is
-	// negligible (§2.3) and multi-turn agent traffic is VMR's primary
+	// negligible and multi-turn agent traffic is VMR's primary
 	// audience, so stickiness should apply without the user having to
 	// remember to opt in. Explicit false opts a genuinely one-shot virtual
 	// model out.
@@ -215,12 +215,12 @@ type Config struct {
 	// its directory once at startup); image_cache_dir follows hot reloads.
 	LogDir              string `yaml:"log_dir"`
 	ImageCacheDir       string `yaml:"image_cache_dir"`
-	ImageDownscaleMaxPx int    `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, §7)
+	ImageDownscaleMaxPx int    `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, see design doc §7)
 	ImageCacheTTLDays   int    `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int    `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
 	// StickyTTL is the global default for how long a Sticky Model affinity
-	// preference stays valid (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
-	// §2.4); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
+	// preference stays valid (see docs/VirtualModelRouter_System_Design_v3.md
+	// §6.5); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
 	// EndpointConfig.StickyTTL overrides this for endpoints whose upstream
 	// cache lifetime differs (e.g. DeepSeek's disk cache).
 	StickyTTL Duration                          `yaml:"sticky_ttl"`

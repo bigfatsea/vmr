@@ -83,7 +83,7 @@ curl http://127.0.0.1:8800/admin/status
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传/归一化行为、故障切换与健康细节、审计日志与 `vmr report`、图片降采样、完整 CLI 参考。
 - **[为什么选 vmr 而不是 LiteLLM](docs/Why_vmr_over_LiteLLM.zh.md)** —— 字节级透传跟翻译型网关比到底差在哪，以及什么时候你其实该选翻译型网关。
-- **[设计文档](docs/VirtualModelRouter_System_Design_v2.md)** —— 完整架构与每条设计决策，附带取舍理由。
+- **[设计文档](docs/VirtualModelRouter_System_Design_v3.md)** —— 完整架构与每条设计决策，附带取舍理由。
 
 ## 开发
 

@@ -1,11 +1,11 @@
-// Ver 2026-07-20 08:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // gentargets writes loadtest/targets.json — one Vegeta attack target per
-// scenario (see docs/PerformanceTesting_Design_Sonnet5.md §4) — plus two
+// scenario (see docs/VirtualModelRouter_System_Design_v3.md §12) — plus two
 // subset files, targets-plain.json and targets-image.json, split by
 // whether the scenario exercises image downscaling. Image decode/scale/
-// encode is by far the most expensive code path vmr has (§6 of the design
-// doc); mixed into one combined percentile figure it silently drags up the
+// encode is by far the most expensive code path vmr has (design doc §7);
+// mixed into one combined percentile figure it silently drags up the
 // p95/p99/max for every *other*, genuinely-cheap scenario. runner.go fires
 // the two subsets as separate Vegeta attacks so the client-side report
 // shows "plain request" and "image request" latency as what they actually

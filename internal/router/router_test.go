@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 package router
 
 import (
@@ -118,7 +118,7 @@ models:
 // capabilities/max_context_tokens reach core.Endpoint unchanged from
 // config, and that an endpoint not declaring them ends up unconstrained
 // (nil Capabilities, 0 MaxContextTokens) — see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.1.
+// docs/VirtualModelRouter_System_Design_v3.md §6.4.
 func TestBuildSnapshotCarriesConditionRoutingFields(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
@@ -164,7 +164,7 @@ models:
 // TestBuildSnapshotResolvesStickyDefaultAndOverride locks the *bool ->
 // bool resolution (nil = true) plus the endpoint-level StickyTTL
 // inherit/override split — see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2.4-2.5.
+// docs/VirtualModelRouter_System_Design_v3.md §6.5.
 func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0

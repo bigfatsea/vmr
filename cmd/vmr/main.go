@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -612,8 +612,8 @@ func cmdCheck(args []string) error {
 				// when they actually constrain something — an endpoint with
 				// none of these set behaves exactly as before they existed,
 				// and the check output should look exactly as before too
-				// (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
-				// §1.1: absent = unconstrained/inherit, never a new limit).
+				// (see docs/VirtualModelRouter_System_Design_v3.md §6.4:
+				// absent = unconstrained/inherit, never a new limit).
 				extra := ""
 				if len(ep.Capabilities) > 0 {
 					extra += fmt.Sprintf("  capabilities=%v", ep.Capabilities)

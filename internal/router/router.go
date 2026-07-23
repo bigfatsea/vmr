@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -47,7 +47,7 @@ type ModelRoute struct {
 	// Sticky mirrors config.ModelConfig.Sticky, resolved at BuildSnapshot
 	// time: nil (field absent in config) defaults to true, so Sticky Model
 	// affinity applies unless a virtual model explicitly opts out. See
-	// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2.5.
+	// docs/VirtualModelRouter_System_Design_v3.md §6.5.
 	Sticky bool
 }
 
@@ -355,11 +355,13 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		}
 	}
 
-	// Context length is an estimate, not a certainty (see design doc §1.4),
-	// so it never gets to empty a non-empty hardFiltered set on its own —
-	// if every declared max_context_tokens looks too small, fall back to
-	// hardFiltered and let a real attempt (backed by the ErrContextLimit
-	// failover) make the call instead of refusing on a guess (§1.5).
+	// Context length is an estimate, not a certainty (see
+	// docs/VirtualModelRouter_System_Design_v3.md §6.4), so it never gets to
+	// empty a non-empty hardFiltered set on its own — if every declared
+	// max_context_tokens looks too small, fall back to hardFiltered and let
+	// a real attempt (backed by the ordinary failover loop once the
+	// upstream returns a real 400) make the call instead of refusing on a
+	// guess.
 	candidates := make([]*core.Endpoint, 0, len(hardFiltered))
 	for _, ep := range hardFiltered {
 		if strategy.WithinContext(ep, creq.Facts) {
@@ -373,10 +375,10 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 
 	// Sticky Model: prefer whichever endpoint most recently, successfully
 	// served this same conversation, so the upstream prompt cache stays
-	// warm (design doc §2). Only ever reorders within the already-filtered
-	// candidates — an endpoint that's unhealthy or fails a hard condition
-	// this turn is never resurrected just because it was the sticky pick
-	// last time.
+	// warm (docs/VirtualModelRouter_System_Design_v3.md §6.5). Only ever
+	// reorders within the already-filtered candidates — an endpoint that's
+	// unhealthy or fails a hard condition this turn is never resurrected
+	// just because it was the sticky pick last time.
 	var stickyKey string
 	if route.Sticky {
 		if sysHash, firstMsgHash, ok := adapter.SessionFingerprint(creq.Raw, protocol); ok {
@@ -415,7 +417,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			if success && stickyKey != "" {
 				// Every successful completion moves the pointer — including
 				// a failover success — so it always follows wherever the
-				// conversation's cache is actually warm (design doc §2.5).
+				// conversation's cache is actually warm (design doc §6.5).
 				rt.Sticky.Set(stickyKey, ep.HealthKey())
 			}
 			return
@@ -446,7 +448,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		} else if len(healthOK) > 0 {
 			// Health had candidates; a Condition rejected every one of
 			// them — name which one(s) so the operator doesn't have to
-			// guess (see design doc §1.2).
+			// guess (see docs/VirtualModelRouter_System_Design_v3.md §6.4).
 			msg = fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
 		}
 		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)

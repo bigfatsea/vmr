@@ -472,7 +472,7 @@ func TestCountNested(t *testing.T) {
 }
 
 // --- Condition routing / Sticky Model fields (see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.1/§2) ---
+// docs/VirtualModelRouter_System_Design_v3.md §6.4/§6.5) ---
 
 func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
 	// The base fixture declares neither field on its one endpoint — this is
@@ -616,8 +616,8 @@ func TestModelStickyDefaultsToTrue(t *testing.T) {
 		t.Errorf("expected Sticky to be nil (unset) when not declared, got %v", *m.Sticky)
 	}
 	// nil is the config-level representation; router.BuildSnapshot resolves
-	// nil -> true (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
-	// §2.5) — that resolution is covered in internal/router's own tests.
+	// nil -> true (see docs/VirtualModelRouter_System_Design_v3.md
+	// §6.5) — that resolution is covered in internal/router's own tests.
 }
 
 func TestModelStickyExplicitFalse(t *testing.T) {

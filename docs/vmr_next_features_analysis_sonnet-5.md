@@ -1,4 +1,4 @@
-// Ver 2026-07-23 02:00, by Sonnet 5（第二次修订：把第 6 项从"能力过滤"这一个具体特性，重新提炼为一个可扩展的"条件路由框架"，响应用户对架构统筹的追问）
+// Ver 2026-07-24 12:00, by Sonnet 5（第三次修订：第 6 项——条件路由框架 + Sticky Model——已实现并合并进 docs/VirtualModelRouter_System_Design_v3.md，本文档对应章节压缩为指向该文档的简述；其余 5 项仍是未开工的候选分析，原样保留）
 
 # VMR 下一步特性候选分析 — 6 项推荐 + 落地方案初评
 
@@ -18,12 +18,12 @@
 | 3 | 上下文超限（context length exceeded）独立错误类 + failover | extensions.md 分析项3 | 可靠性 | 小（0.5-1 人天） |
 | 4 | `vmr.sh doctor` + `check`/`status` 补齐 `--json`（对应 R3+R1） | strategy.md §3.6 | 易用性/可脚本化 | 小（0.5-1 人天） |
 | 5 | per-virtual-model 预算硬闸（token/成本日预算，触顶拒绝） | extensions.md 分析项4 后半 | 安全/防呆 | 中（1.5-2 人天） |
-| 6 | 条件路由框架 + Sticky Model（可插拔端点过滤条件 + 会话亲和路由，详见独立文档） | 用户 2026-07-23 三轮追问，原两份输入文档未覆盖；设计文档 §12.2 路线图有一行未展开的"能力/标签路由"远期条目 | 架构/可靠性/调度 | 约 3.8-4.9 人天（第一期范围，详见 §6.3 指向的独立文档） |
+| 6 | ✅ **已完成**——条件路由框架 + Sticky Model（可插拔端点过滤条件 + 会话亲和路由） | 用户三轮追问，原两份输入文档未覆盖；设计文档路线图有一行未展开的"能力/标签路由"远期条目 | 架构/可靠性/调度 | 实际交付：框架 + `image`/`tools` 能力 + `max_context_tokens` + 完整 Sticky Model；详见 `docs/VirtualModelRouter_System_Design_v3.md`「调度与健康」一节 |
 
 选择原则：优先挑"两份文档都指向、且已经对照真实代码收窄过范围"的项——即 `extensions.md` 里编号 1-4 的那组分析（它本身已经是对更早的 Policy Router / Cost-aware Router / Capability Router 三个"★★★★★"构想做过一轮基于代码的批判性收窄，明确反对把成本/能力接入实时路由决策）。第 4 项另取自 strategy.md 的审计驱动清单,因为它是"本周内、成本 30-60 分钟级"的最高杠杆动作,理应和前四项一起排产。
 
 **明确不选的原因**（避免遗漏交代）：
-- **Policy Router / Capability Router / Cost-aware Router**（extensions.md 早期"★★★★★"构想）：本质是规则引擎/能力抽象层，和 vmr"透明路由器"定位摩擦大，`extensions.md` 自己的后续分析（项1）也已经否决了"让价目表影响实时路由"这一步，只保留报表侧。**这个判断没有被 §6 推翻**——§6 提议的"条件路由框架"解决的是同一类问题（端点能力差异化调度），但刻意选择"Go 代码层可插拔 Condition + 配置里只填声明式字段"的形态，不是给用户一门条件表达式语言；price 条件即使做，判断逻辑也不读实时价目表（§6.3 ⑤），与这里否决的"规则引擎"/"价目表进实时路径"是两回事。
+- **Policy Router / Capability Router / Cost-aware Router**（extensions.md 早期"★★★★★"构想）：本质是规则引擎/能力抽象层，和 vmr"透明路由器"定位摩擦大，`extensions.md` 自己的后续分析（项1）也已经否决了"让价目表影响实时路由"这一步，只保留报表侧。**这个判断没有被 §6 推翻**——§6 提议的"条件路由框架"解决的是同一类问题（端点能力差异化调度），但刻意选择"Go 代码层可插拔 Condition + 配置里只填声明式字段"的形态，不是给用户一门条件表达式语言；price 条件最终也确实没做（归入排序维度，不是过滤条件），与这里否决的"规则引擎"/"价目表进实时路径"是两回事。
 - **端点级 RPM/并发限流**（extensions.md TOP3）：`extensions.md` 分析项4 自己给出的结论是"价值中等,vmr 的 failover 已经把 429 的用户可见伤害压得很低",相比之下预算硬闸价值更高,所以本文档选了后者、放弃了前者。
 - **thinking-strip 未触发告警（R14）**：audit 报告里唯一的 `[S]` 级发现,值得做,但和上面 5 项相比是纯观测性小修（预计 <0.5 人天）,建议作为"顺手做"的第 6 项,不占 5 个名额。
 
@@ -180,101 +180,14 @@
 
 ---
 
-## 6. 条件路由框架(Condition-based Routing)——统一 vision / 上下文长度 / tools / thinking / price 等可扩展过滤条件
+## 6. 条件路由框架(Condition-based Routing)+ Sticky Model —— ✅ 已完成
 
-> 本项经历了两轮追问。第一轮用户问"能否按图像输入能力自动跳过不支持的端点",分析给出了一个针对 vision 的具体实现。第二轮用户指出:vision 只是"条件路由"这一类模式的一个实例——上下文长度、价格、是否支持 thinking mode 都是同一类问题,要求统筹设计成一个可持续扩展的独立能力,而不是每来一个新条件就在 `router.go` 里加一段特判代码。本节是通读 `docs/VirtualModelRouter_System_Design_v2.md` 全文后的架构级重新分析,取代原来那个仅针对 vision 的方案。
-
-### 6.1 架构评估:现有抽象为什么接不住这个需求
-
-设计文档 §6.1 把"调度"定义为"过滤 + 稳定多键排序":
-
-```go
-type Dimension interface {
-    Name() string
-    Compare(a, b *core.Endpoint) int   // <0: a 优先；0: 平手交给下一维度
-}
-候选序列 = 稳定多键排序( 健康过滤(endpoints), 配置的维度列表 )
-```
-
-设计文档 §12.2 路线图里其实已经写过一句远期条目:"能力/标签路由(按 context 长度、vision、tool-use 过滤)"——但从未展开设计。这次的分析就是把这行远期条目变成一个具体方案。
-
-**关键发现**:`Dimension.Compare(a, b *core.Endpoint) int`(`internal/strategy/strategy.go:20-23`)**完全看不到请求**——它只比较两个端点,连 `core.CanonicalRequest` 都不在参数里。这不是疏忽,是正确的设计:`priority`/未来的 `weight`/`round_robin`/`latency`(§6.1、§12.2 列出的排序维度路线图)全都不需要知道请求内容,只需要知道端点之间怎么排序。但这意味着:**vision/上下文长度/thinking/price 这类"这个端点能不能接这条具体请求"的判断,天生不属于 Dimension 能表达的范畴**——不是"扩展一下 Dimension 接口就行",而是这类条件在语义上就不是排序,是准入(eligibility)。把它们硬塞进 `Compare` 会导致每个排序维度都要被迫感知请求(哪怕 90% 的维度用不到),污染一个本来干净的接口。
-
-现有代码里唯一真正做"过滤"的地方是 `router.go Serve()` 里的健康过滤(315-328行),但它是硬编码的、和 `internal/health.Registry` 的运行时状态强绑定,不是一个可插拔机制。**结论:需要一个新的、与 Dimension 平行的抽象——一个"过滤条件"(Condition)接口,专门表达"给定请求的某些特征 + 端点声明的静态属性,判断这个端点是否有资格参与本次候选"**,和 Dimension 一起构成设计文档 §6.1 说的"过滤 + 排序"两段式调度,只是"过滤"这半段从只有健康检查一种,变成健康检查 + 一组可插拔的 Condition。
-
-### 6.2 提议架构:Condition 接口 + 编译期注册(与 Adapter/Dimension 同构)
-
-**明确不做规则引擎/DSL**。用户要的"可扩展",读作"未来能方便地加新条件维度",不等于"给最终用户一门条件表达式语言"(如 `if prompt_tokens > 50000: route to X`)——那正是 `extensions.md` 里"Policy Router"构想(★★★★★,但已在 §0 里明确排除)的形态,本文档在原版分析里已经论证过这类规则引擎和 vmr"透明路由器、零运行时插件"的定位摩擦大。**这次的"可扩展"落在 Go 代码层,不落在配置语言层**——延续 `internal/adapter`(Adapter 接口 + `database/sql` 驱动式编译期注册,设计文档 §5)和 `internal/strategy`(Dimension 接口 + 同样的注册模式,§6.1)已经验证过的模式:新条件 = 写一个新的 Go 文件实现接口 + `init()` 里注册一行,配置侧只新增声明式字段(不是表达式),不是新语法。
-
-**核心接口**(建议放在 `internal/strategy` 包,与 `Dimension` 平行——两者都属于设计文档 §6.1 定义的"调度"概念,只是语义不同:一个排序、一个准入):
-
-```go
-// Condition tests whether one endpoint may serve a request at all, based on
-// facts derived from the request and static properties the endpoint
-// declares in config. Unlike Dimension (endpoint-vs-endpoint ordering, no
-// request access), a Condition is request-aware and elimination-only — it
-// never reorders candidates, it only says yes or no.
-type Condition interface {
-    Name() string
-    Eligible(ep *core.Endpoint, facts core.RequestFacts) bool
-}
-```
-
-**`core.RequestFacts`**:请求侧廉价、预计算一次的特征集合(不是原始 body,是提炼过的信号),仿照 `imgprep.HasImageMarker` 已经验证过的"廉价子串扫描,命中才细看"模式:
-
-```go
-type RequestFacts struct {
-    HasImage        bool  // 已有 imgprep.HasImageMarker，只是没接给 router
-    HasTools        bool  // 顶层 "tools" 非空数组
-    WantsThinking   bool  // Anthropic: 顶层 thinking.type=="enabled"；OpenAI: 顶层 reasoning_effort 存在
-    EstimatedTokens int64 // 粗略估算，非精确计数——见 6.3 上下文长度条件
-}
-```
-
-在 `server.go` 里(已经缓冲好请求体、已经算出 `images` 的那个位置,250-262 行附近)算一次,存进 `core.CanonicalRequest`(新增 `Facts RequestFacts` 字段,`server.go:292` 构造处顺手赋值)。**关键设计取舍:每个 Condition 都不需要在配置里显式"启用"**——不像 `ModelConfig.Strategy []string` 那样需要一份名字列表去 `Build`(因为排序顺序有意义、用户要能控制组合顺序),Condition 之间是纯 AND 语义、顺序无关,而且"端点没声明某个能力字段"天然等价于"对这个条件不设限"(见 6.3 每条的默认值约定)。所以**已注册的 Condition 全部无条件参与过滤**,新增一个条件不需要用户在 `models.*.*.strategy` 或任何地方手动开启——用户只需要开始在需要的端点上填新字段。这比 Dimension 的注册消费模型更简单,因为语义更简单(纯过滤,没有"要不要参与排序、参与顺序"这类选择)。
-
-**端点侧**(`core.Endpoint`,`config.EndpointConfig`)按需新增声明字段,随 `BuildSnapshot` 从配置流入运行时结构,与现有 `Priority`/`RoleMap` 走的是同一条路径(config.go → router.go BuildSnapshot → core.Endpoint)。
-
-**接入点**(`router.go Serve()`,315-328 行的候选过滤循环):
-
-```go
-for _, ep := range route.Endpoints {
-    if !healthy(ep) { continue }              // 既有：健康过滤
-    if !strategy.Eligible(ep, creq.Facts) { continue }  // 新增：条件过滤
-    candidates = append(candidates, ep)
-}
-```
-
-一行接入,改动面极小——这正是"框架搭好之后,单个条件的边际成本很低"这个论点的证据。
-
-**诊断**:过滤后候选集为空是最容易让用户困惑的情形("为什么明明配了好几个端点却说没有可用的")。建议只在这条"空候选集"的失败路径上(不在热路径上)额外跑一遍,找出是哪个 Condition 淘汰了最后剩下的端点,把原因写进错误消息(如 `no endpoint for model "agent" accepts this request: rejected by condition "vision"`),而不是复用现有"all cooling down or none configured"这句容易误导的话(router.go:372 附近)。`vmr check` 也应该把每个端点声明的条件字段打印出来,方便核对配置——这是原 vision 方案就提议过的展示增量,泛化后覆盖全部条件。
-
-### 6.3 条件维度、Sticky Model：详见独立深度设计文档
-
-用户在这版分析交付后又给了两轮反馈：(1) 对五个条件维度逐一提出修正——多模态能力(image/audio/video)应合并进 `capabilities`、上下文长度要按"宁可高估不可低估"的非对称安全规则设计、tools 在 vmr 这一层无法区分 MCP 来源还是原生声明(只需要单一标记)、thinking 的协议形状需要逐家总结、**price 予以移除**(用户指出这本质是排序问题不是过滤问题,与设计文档 §6.1 已经把 `Cost` 列为未来排序维度的判断吻合)；(2) 指出条件路由(尤其上下文长度维度)如果不配一个"会话亲和"机制,在长会话场景下可能因为打掉上游 prompt cache 而净增成本——这是初版分析完全没覆盖的独立问题。
-
-这两块的完整分析(config.yaml 字段设计、协议形状总结、会话识别方案的可行性论证、架构落地)篇幅较大,已经整理进独立文档:
-
-**→ `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md`**
-
-原 6.3-6.5 节(vision-only 命名、含 price 维度)已被该文档取代,不再维护于此。
+原本节是"能否按图像输入能力自动跳过不支持的端点"这一具体问题的分析，经过几轮反馈后被提炼为一个可扩展的过滤框架，并因为条件路由（尤其上下文长度维度）会打掉上游 prompt cache 的副作用而追加了 Sticky Model 会话亲和路由配套。两者作为一次连续迭代已经实现并上线，完整设计（`Condition` 接口与 `Dimension` 平行而非扩展、`image`/`tools`/上下文长度三个维度的最终定义与估算公式、`thinking`/`audio`/`video` 为何暂不注册、Sticky Model 的会话指纹识别与 TTL 设计、`sticky_ttl` 24 小时硬上限校验等）已经合并进 `docs/VirtualModelRouter_System_Design_v3.md`「调度与健康」一节，本文档不再重复维护这部分内容。price 维度按分析结论未做——它是排序（Dimension）关注点，不是准入（Condition）关注点。
 
 ---
 
-## 7. 综合建议
+## 7. 综合建议 / 实际执行结果
 
-**本轮范围声明**：用户在第三轮反馈里明确"这一次重点就是分析条件路由和 sticky model 这样的一个特性...其他的特性我们暂时不做"。因此 #1（成本核算）、#2（软拦截 failover）、#5（预算硬闸）本轮**暂缓**，不在下面的排序建议里——它们的分析仍然有效、仍然是有价值的候选，只是当前的执行焦点收窄到 #3（作为 #6 的兜底前置）、#4（作为顺手做的低成本项）与 #6（本轮的核心）。
+原计划顺序是 #3（上下文超限独立错误类，作为 #6 的兜底前置）→ #4（`vmr.sh doctor` + `--json`，顺手做的低成本项）→ #6（条件路由框架 + Sticky Model，当轮核心）。**实际只交付了 #6**：条件路由框架 + `image`/`tools` 能力 + `max_context_tokens` + 完整 Sticky Model 已实现并上线（见「条件路由框架 + Sticky Model」一节）。#3、#4 连同 #1（成本核算报表）、#2（软拦截升级 failover）、#5（预算硬闸）一样，仍然是**未开工的候选分析**——包括原本打算作为 #6 前置项的 #3，也没有真正落地；#6 最终没有依赖它也顺利完成（条件路由的上下文长度维度自身已经有「估算过高时回退到 `hardFiltered`」的降级规则兜底，不依赖 #3 那个独立错误类）。
 
-### 排序依据
-
-1. **#3 上下文超限独立错误类** — 改动最小、复用度最高、无架构风险,建议**第一个做**,当天可完成可验证。它同时是 #6 里"上下文长度条件"的兜底安全网,两者顺序上谁先做不影响正确性,但 #3 更小更快,先做能更早拿到收益,且是 #6 安全上线的前提之一(见独立文档 §1.2②)。
-2. **#4 `vmr.sh doctor` + `--json` 补齐** — 同样小,且是最好的"对外可演示"素材,建议紧跟 #3 之后,两者可以合并成一次迭代(strategy.md §3.6 原文建议)。这一项不阻塞 #6,顺序上可以并行,列在这里只是因为成本足够低,顺手做掉。
-3. **#6 条件路由框架 + Sticky Model（本轮核心，第一期范围）** — 独立文档 §3 已经给出建议:条件路由和 Sticky Model 应该作为一次连续迭代一起上线,不要间隔太久——条件路由(尤其上下文长度维度)如果没有 Sticky Model 配套,在长会话场景下有净负收益风险。第一期范围:框架 + `image`/`tools` 能力 + `max_context_tokens` + 完整的 Sticky Model,预估约 3.8-4.9 人天,详见独立文档 §3。
-
-**暂缓项**(待本轮完成后再评估是否推进,分析内容保留在本文档 §1/§2/§5 供参考):#1 成本核算报表、#5 预算硬闸(token 版)、#2 软拦截升级 failover。
-
-### 总工作量粗估
-本轮范围(#3 + #4 + #6 第一期)合计约 **4.3-6.4 人天**。暂缓项(#1/#2/#5)合计约 6.5-9.8 人天,留待下一轮决定是否启动。
-
-### 下一步
-按上面的排序依次开工:#3 → #4 →(条件路由 + Sticky Model 作为一次连续迭代,参见独立文档 §3 的两个前置确认事项)。暂缓项本轮不安排。
+**下一步候选**（按原分析的相对优先级排序，尚未安排具体排期）：#3 上下文超限独立错误类（改动小、复用度高）→ #4 `vmr.sh doctor` + `--json` 补齐（低成本、易演示）→ #1 成本核算报表 → #2 软拦截升级 failover → #5 预算硬闸。各项分析内容见本文档对应章节，工作量估算未随本次修订重新核实。

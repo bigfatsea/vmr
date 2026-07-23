@@ -1,4 +1,4 @@
-// Ver 2026-07-23 10:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 package adapter
 
@@ -13,7 +13,7 @@ var systemKeyLiteral = []byte(`"system"`)
 // SessionFingerprint locates the system prompt (if any) and the first
 // non-system message in raw, and returns the md5 of each as separate
 // values. This is Sticky Model's own extraction (see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2.2) — a
+// docs/VirtualModelRouter_System_Design_v3.md §6.5) — a
 // standalone byte-range scan, no full unmarshal. It is deliberately NOT
 // shared with internal/report/session.go's offline session-grouping
 // anchor: session.go tolerates system-prompt drift within one conversation

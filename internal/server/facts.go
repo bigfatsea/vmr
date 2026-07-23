@@ -1,15 +1,14 @@
-// Ver 2026-07-23 10:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // RequestFacts computation for condition-based routing (see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1). Every
-// estimate here is a coarse, deliberately-conservative approximation, not a
-// precise accounting: the guiding cost principle (§0 of that doc) is to
-// infer from length/presence rather than parse content, accept imprecision,
-// and lean toward overestimating — a wasted preference for a bigger-context
-// endpoint is a cheap mistake; #3 (the ErrContextLimit failover, see
-// docs/vmr_next_features_analysis_sonnet-5.md) is the real safety net for
-// whatever this estimate gets wrong. §1.5 of the condition-routing doc is
-// the other half of that safety net: an overestimate here can never, by
+// docs/VirtualModelRouter_System_Design_v3.md §6.4). Every estimate here is
+// a coarse, deliberately-conservative approximation, not a precise
+// accounting: the guiding cost principle is to infer from length/presence
+// rather than parse content, accept imprecision, and lean toward
+// overestimating — a wasted preference for a bigger-context endpoint is a
+// cheap mistake; a real upstream 400 and the ordinary failover loop is the
+// safety net for whatever this estimate gets wrong. The §6.4 fallback rule
+// is the other half of that safety net: an overestimate here can never, by
 // itself, empty an otherwise-non-empty candidate set.
 package server
 

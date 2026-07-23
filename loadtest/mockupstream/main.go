@@ -1,7 +1,7 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // mockupstream stands in for a real LLM provider during vmr load testing
-// (see docs/PerformanceTesting_Design_Sonnet5.md). It never talks to a real
+// (see docs/VirtualModelRouter_System_Design_v3.md §12). It never talks to a real
 // provider — the whole point is to measure vmr's own overhead, not a
 // provider's response time. Response shape is chosen by the incoming
 // request's "model" field (vmr has already rewritten it to whatever real

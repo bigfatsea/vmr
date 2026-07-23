@@ -84,7 +84,7 @@ That's the whole surface a first request needs. Everything past this point — f
 
 - **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, image downscaling, complete CLI reference.
 - **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** — how byte-faithful passthrough compares to translation-based gateways, and when you'd actually want a translation gateway instead.
-- **[Design doc](docs/VirtualModelRouter_System_Design_v2.md)** (Chinese) — full architecture and every design decision, with the reasoning behind it.
+- **[Design doc](docs/VirtualModelRouter_System_Design_v3.md)** (Chinese) — full architecture and every design decision, with the reasoning behind it.
 
 ## Development
 

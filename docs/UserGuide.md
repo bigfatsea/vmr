@@ -135,7 +135,7 @@ Two different kinds of condition:
 - **`image` / `tools`** — hard requirements. A request needing one and finding no eligible candidate fails fast with a `vmr_no_candidates` error naming the missing capability, instead of wasting an attempt on an endpoint guaranteed to reject it. (`thinking`/`audio`/`video` aren't checked yet — request-side detection for those isn't confirmed across providers, so declaring them today has no effect.)
 - **context length** — a coarse, deliberately conservative *estimate*, not a certainty: request bytes classified ASCII (~4 bytes/token) vs. multi-byte UTF-8/CJK (~2 bytes/token, intentionally pessimistic), a flat ~3000 tokens per detected inline image, and detected document/PDF attachments sized by their base64 payload length ÷ 20 — no parsing beyond cheap structural markers. Because it's only an estimate, it can never by itself refuse a request: if every endpoint's declared `max_context_tokens` looks too small, vmr falls back to trying the capability-eligible candidates anyway rather than returning an error on a guess — an overestimate costs at most a wasted attempt, never a request that would have worked.
 
-Full design and the token-estimate calibration: `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §1.
+Full design and the token-estimate calibration: `docs/VirtualModelRouter_System_Design_v3.md`, "Condition-based Routing" section.
 
 ## Sticky Model (session affinity)
 
@@ -164,7 +164,7 @@ models:
 - Affinity only ever reorders within the endpoints that already passed health and condition filtering — an endpoint that's since become unhealthy or lost a required capability is never resurrected just because it was the sticky pick last time.
 - The pointer moves on every successful completion, including a failover success, so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
 
-Full design (identity choice, TTL research behind the defaults, why this fingerprint is a separate implementation from `vmr report`'s offline session grouping below): `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §2.
+Full design (identity choice, TTL research behind the defaults, why this fingerprint is a separate implementation from `vmr report`'s offline session grouping below): `docs/VirtualModelRouter_System_Design_v3.md`, "Sticky Model" section.
 
 ## Audit log & usage reports
 

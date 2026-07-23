@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 
 // Package strategy implements scheduling as filter + stable multi-key sort.
 // Every scheduling behavior (priority, weight, round_robin, …) is just a
@@ -82,7 +82,7 @@ func (priority) Compare(a, b *core.Endpoint) int {
 // (endpoint-vs-endpoint ordering, no request access), a Condition is
 // request-aware and elimination-only — it never reorders candidates, it
 // only says yes or no. See
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.2 for the
+// docs/VirtualModelRouter_System_Design_v3.md §6.4 for the
 // architectural rationale (Dimension.Compare structurally can't see the
 // request; this is a parallel, differently-shaped interface, not an
 // extension of Dimension).

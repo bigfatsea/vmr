@@ -1,7 +1,7 @@
-// Ver 2026-07-23 11:00, by Sonnet 5
+// Ver 2026-07-24 12:00, by Sonnet 5
 //
 // End-to-end tests for Sticky Model (see
-// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2): once a
+// docs/VirtualModelRouter_System_Design_v3.md §6.5): once a
 // conversation successfully lands on an endpoint, follow-up turns of the
 // SAME conversation should keep going there even if plain priority would
 // otherwise prefer a different endpoint — but only for the same

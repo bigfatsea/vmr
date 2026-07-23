@@ -134,7 +134,7 @@ models:
 - **`image` / `tools`**——确定性的硬要求。请求需要某个能力但找不到任何候选声明支持时，直接快速失败，返回 `vmr_no_candidates` 并点名缺失的能力，而不是白白浪费一次必然被拒绝的尝试。（`thinking`/`audio`/`video` 暂不检测——这几项的请求侧探测逻辑在各厂协议上还没有确认，现在声明它们也不会有任何效果。）
 - **上下文长度**——一个刻意保守的**粗估**，不是确定值：请求字节按 ASCII（约 4 字节/token）和多字节 UTF-8/中文等（约 2 字节/token，故意估得偏高）分类估算，每张检测到的内联图片按固定约 3000 token 计，检测到的文档/PDF 附件按其 base64 载荷长度 ÷ 20 估算——全程只做廉价的结构标记扫描，不解析内容。因为只是估算，它永远不会单独把一条请求拒之门外：如果所有端点声明的 `max_context_tokens` 看起来都不够，vmr 不会直接报错，而是照样在能力匹配的候选里尝试——高估的代价最多是浪费一次尝试，不会是一条本该成功的请求被拒。
 
-完整设计与 token 估算的调研依据：`docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §1。
+完整设计与 token 估算的调研依据：`docs/VirtualModelRouter_System_Design_v3.md`「条件路由」一节。
 
 ## Sticky Model（会话亲和）
 
@@ -163,7 +163,7 @@ models:
 - 亲和性只会在已经通过健康检查和条件过滤的端点里重新排序——一个之后变得不健康、或者不再满足某项必要能力的端点，不会仅仅因为它是上次的粘性选择就被复活。
 - 每次成功完成请求（含 failover 后的成功）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
 
-完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文 `vmr report` 离线会话分组是两套独立实现）：`docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §2。
+完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文 `vmr report` 离线会话分组是两套独立实现）：`docs/VirtualModelRouter_System_Design_v3.md`「Sticky Model」一节。
 
 ## 审计日志与用量报表
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-20 08:00, by Sonnet 5
+# Ver 2026-07-24 12:00, by Sonnet 5
 #
 # vmr-loadtest.sh — one-command wrapper around loadtest/runner. Pure glue,
 # no new logic: rebuild ./vmr fresh, make sure vegeta is on PATH, then hand
@@ -13,7 +13,7 @@
 # not loadtest/ itself — namespaced (logs/loadtest/, reports/loadtest-*) so
 # they can never mix with or overwrite real data living in those same dirs.
 #
-# Design/rationale: docs/PerformanceTesting_Design_Sonnet5.md
+# Design/rationale: docs/VirtualModelRouter_System_Design_v3.md §12
 # Full manual steps + how to read the numbers: loadtest/README.md
 #
 # This is a one-off sanity check (e.g. before a release push), not a CI

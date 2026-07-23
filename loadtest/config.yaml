@@ -1,4 +1,4 @@
-# Ver 2026-07-22 21:00, by Sonnet 5 — vmr config for load testing (docs/PerformanceTesting_Design_Sonnet5.md).
+# Ver 2026-07-24 12:00, by Sonnet 5 — vmr config for load testing (docs/VirtualModelRouter_System_Design_v3.md §12).
 # Not the same as config.yaml/config.example.yaml at the repo root — this points
 # at loadtest/mockupstream, never a real provider, and listens on a different
 # port so it can run alongside a real dev instance without clashing.
@@ -31,7 +31,7 @@ providers:
 
 models:
   openai:
-    # One virtual model per scenario in docs/PerformanceTesting_Design_Sonnet5.md §4 —
+    # One virtual model per scenario in docs/VirtualModelRouter_System_Design_v3.md §12 —
     # doubles as the scenario label in `vmr report`'s per-model breakdown.
     baseline:
       endpoints: [{provider: mock, model: "scenario:baseline"}]
