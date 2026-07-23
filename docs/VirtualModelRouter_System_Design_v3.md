@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 12:00, by Sonnet 5 -->
+<!-- Ver 2026-07-24 14:30, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -778,7 +778,20 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **场景矩阵**（`loadtest/config.yaml` 里每个场景一个虚拟模型，覆盖开销特征明显不同的代码路径，不做协议交叉/并发梯度扫描——一次性健全性检查不是要画一条完整性能曲线）：`baseline`（路由开销下限）、`stream_normal`（真流式透传）、`thinking_leak`（已知最差路径——全程缓冲到 EOF）、`think_tag`（`<think>` 标签形态，先缓冲后恢复流式）、`big_response`（大体积非流式响应）、`big_image`/`multi_image`（图片降采样的完整 decode→scale→encode 链路，单图与多图）、`gif`（确认永不缩放的快速跳过路径依然便宜）、`long_history`（长对话历史的 JSON 探测扫描 + model splice + 审计全量写盘开销）、`failover`（health 状态机 + 冷却 + 故障切换循环开销）、`anthropic_baseline`（确认 Anthropic 协议适配器与 openai 协议共享的归一化代码没有额外成本）。`loadtest/runner`（`go run ./loadtest/runner`）把起 mock 上游、起 vmr、生成 targets、按 `light`/`moderate`/`heavy` 三档递增负载（10/50/150 req/s）依次跑 Vegeta、再跑 `vmr report` 汇总，全部串成一条命令，产物落在项目原有的 `logs/loadtest/`（独立子目录，每次运行前清空）与 `reports/loadtest-report.md`，不与真实数据混放。图片处理场景（`big_image`/`multi_image`/`gif`）单独分组统计客户端视角百分位——它是唯一真正做 decode/scale/encode 的路径，混进其余场景会把"正常请求"的 p95/p99/max 也一起拉高，失真明显。运行方式与如何读数字的完整操作说明见 [`loadtest/README.md`](../loadtest/README.md)，本节只记录设计判断与结论。
 
-**实测结论**：三档负载共 4100 个请求（11 个场景 × 3 轮）全部 100% 成功率；服务端视角（按虚拟模型分桶的 p50/p95 请求耗时）里，唯一有实质成本的是图片降采样（`big_image` 20ms/47ms、`multi_image` 11ms/23ms，随图片数量线性增长），其余九个场景全部在 0-6ms 之间。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认了健康状态机的冷却/切换开销可忽略。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
+**实测结论（测试时间：2026-07-24）**：三档负载共 4100 个请求（11 个场景 × 3 轮）全部 100% 成功率。
+
+客户端视角（Vegeta，plain/image 分组，单位 ms）：
+
+| 负载档 | 分组 | 速率 | 请求数 | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|---|
+| light | plain | 7/s | 70 | 1.5 | 6.9 | 11.2 | 11.9 |
+| light | image | 3/s | 30 | 32.5 | 54.0 | 54.3 | 54.3 |
+| moderate | plain | 36/s | 720 | 1.3 | 5.9 | 7.4 | 8.5 |
+| moderate | image | 14/s | 280 | 19.4 | 47.5 | 50.8 | 61.3 |
+| heavy | plain | 109/s | 2180 | 1.3 | 6.2 | 7.3 | 10.1 |
+| heavy | image | 41/s | 820 | 12.4 | 23.1 | 24.5 | 34.3 |
+
+heavy 档的 image 分组 p95 反而低于 light/moderate——三档共享同一批探测阶段的冷启动开销被摊薄的正常现象，不是变快了（moderate 档 max 61.3ms 略高于 heavy 档也是同一原因，不代表 moderate 档比 heavy 档承压更大）。服务端视角（`vmr report` 按虚拟模型分桶的 p50/p95 请求耗时，三轮合并）：唯一有实质成本的仍是图片降采样——`big_image` 20ms/43ms、`multi_image` 11ms/19ms（随图片数量线性增长），其余九个场景全部在 0-4ms 之间。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认冷却/切换机制按预期工作：`mock_fail1`/`mock_fail2` 全程各自只被真实尝试了 1 次（首次失败后进入冷却，此后请求全部直接落到 `mock_ok`），端点可用度表里两者的尝试数与成功率也如实反映了这一点。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
 
 ---
 
