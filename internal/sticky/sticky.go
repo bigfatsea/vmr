@@ -1,4 +1,4 @@
-// Ver 2026-07-23 10:00, by Sonnet 5
+// Ver 2026-07-24 10:00, by Sonnet 5
 
 // Package sticky implements the Sticky Model affinity registry: an
 // in-memory map from a session fingerprint to the endpoint that most
@@ -17,13 +17,21 @@ import (
 	"time"
 )
 
-// backstopTTL bounds memory growth independent of any per-endpoint
+// BackstopTTL bounds memory growth independent of any per-endpoint
 // validity TTL, which can range from minutes (Anthropic/OpenAI/MiniMax) to
 // days (DeepSeek's disk cache) — see design doc §2.4. It only governs when
 // a stale entry is dropped from the map; it has no bearing on whether a
 // still-present entry is "valid" for a routing decision, which Peek leaves
 // entirely to the caller.
-const backstopTTL = 24 * time.Hour
+//
+// Exported so internal/config can reject a configured sticky_ttl (global or
+// per-endpoint) above this value at load time: such a setting would look
+// accepted but silently stop working the moment an entry goes quiet for
+// longer than BackstopTTL, since Set's sweep would have already dropped it
+// from the map — a routing decision that quietly degrades from "sticky"
+// to "not sticky" with no error is exactly the kind of surprise vmr's
+// fail-fast config philosophy exists to catch before it ships.
+const BackstopTTL = 24 * time.Hour
 
 // sweepInterval throttles the opportunistic sweep so Set doesn't walk the
 // whole map on every call — same event-triggered-and-throttled shape as
@@ -76,7 +84,7 @@ func (r *Registry) Set(key, endpointKey string) {
 	}
 	r.lastSweep = now
 	for k, e := range r.entries {
-		if now.Sub(e.lastUsed) > backstopTTL {
+		if now.Sub(e.lastUsed) > BackstopTTL {
 			delete(r.entries, k)
 		}
 	}

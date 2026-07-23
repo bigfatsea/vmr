@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 10:00, by Sonnet 5
 package config
 
 import (
@@ -571,6 +571,38 @@ func TestStickyTTLNonPositiveRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 0s", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("sticky_ttl: 0s must be rejected at load (a zero-duration affinity window is meaningless)")
+	}
+}
+
+// TestStickyTTLGlobalAboveBackstopRejected and
+// TestStickyTTLPerEndpointAboveBackstopRejected lock the fix for the gap
+// flagged in the previous review: internal/sticky.Registry evicts an idle
+// entry from its map after sticky.BackstopTTL (24h) independent of any
+// endpoint's own StickyTTL, so a configured sticky_ttl above that value
+// would load successfully but silently stop taking effect once a
+// conversation goes quiet for longer than the backstop — a "no error but
+// the feature stops working" trap. validate() must catch it at load time.
+func TestStickyTTLGlobalAboveBackstopRejected(t *testing.T) {
+	yaml := "sticky_ttl: 25h\n" + validYAML
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("global sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
+	}
+}
+
+func TestStickyTTLPerEndpointAboveBackstopRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 48h", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("per-endpoint sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
+	}
+}
+
+func TestStickyTTLAtBackstopBoundaryAccepted(t *testing.T) {
+	// Exactly the backstop value is still safe (the backstop only evicts
+	// entries idle STRICTLY LONGER than itself — see internal/sticky.Set),
+	// so this must not be rejected as an off-by-one.
+	yaml := "sticky_ttl: 24h\n" + validYAML
+	if _, err := Parse([]byte(yaml)); err != nil {
+		t.Errorf("sticky_ttl exactly at the backstop (24h) should be accepted, got %v", err)
 	}
 }
 

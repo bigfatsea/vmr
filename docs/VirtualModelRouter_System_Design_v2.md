@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-23 12:00, by Sonnet 5 -->
+<!-- Ver 2026-07-24 10:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -305,7 +305,7 @@ type RequestFacts struct {
 
 **Key 组成**：`client_key_tag`（既有的 `audit.KeyTag` 机制，见 §4.3）作为命名空间，不是主键——`sticky_key = client_key_tag + ":" + hex(sysHash) + ":" + hex(firstMsgHash)`。
 
-**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointConfig.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。淘汰用一个粗粒度的 24 小时兜底（`internal/sticky` 包内部），比任何端点声明的 TTL 都宽松，只负责内存卫生；"这条粘性记录对这次路由决策是否仍然有效"完全是调用方（`router.Serve`）拿到 `endpointKey` 后，用**那个端点自己的** `StickyTTL` 现算的——`internal/sticky.Registry` 本身不知道任何端点/配置细节，只是一个带 mtime 的 `Peek`/`Set` 键值存储，同 `internal/health.Registry` 一样简单。
+**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointConfig.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。淘汰用一个粗粒度的 24 小时兜底（`internal/sticky.BackstopTTL`），只负责内存卫生；"这条粘性记录对这次路由决策是否仍然有效"完全是调用方（`router.Serve`）拿到 `endpointKey` 后，用**那个端点自己的** `StickyTTL` 现算的——`internal/sticky.Registry` 本身不知道任何端点/配置细节，只是一个带 mtime 的 `Peek`/`Set` 键值存储，同 `internal/health.Registry` 一样简单。**这个兜底值现在由 `config.validate()` 强制保证"比任何端点声明的 TTL 都宽松"**（2026-07-24 补），不再只是文档里的一句设计意图：全局 `sticky_ttl` 与任意端点的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录在写入的 TTL 到期前，就先被内存清理兜底删掉了）。`vmr check`／`vmr start`／热加载共用同一个 `validate()`，三处都会挡住这类配置。
 
 **`Sticky` 默认开启**（`ModelConfig.Sticky *bool`，`nil` 视为 `true`）：§6.4/§6.5 引入之前的做法通常是新特性默认关闭，但这里的计算成本（两次 md5，system prompt+首条消息通常几 KB 到几十 KB）相对一次真实的上游请求往返可以忽略，多轮 agent 会话又是 vmr 的核心场景，让用户必须记得手动开启不划算；真正的单次调用场景显式 `sticky: false` 关闭。
 
