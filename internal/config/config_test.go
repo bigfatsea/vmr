@@ -1,4 +1,4 @@
-// Ver 2026-07-17 06:30, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 package config
 
 import (
@@ -468,5 +468,134 @@ func TestCountNested(t *testing.T) {
 	}
 	if got := CountNested(map[string]map[string]int{}); got != 0 {
 		t.Errorf("CountNested(empty) = %d, want 0", got)
+	}
+}
+
+// --- Condition routing / Sticky Model fields (see
+// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.1/§2) ---
+
+func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
+	// The base fixture declares neither field on its one endpoint — this is
+	// the zero-config-migration case every existing config.yaml is in.
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := cfg.Models["openai"]["m1"].Endpoints[0]
+	if len(ep.Capabilities) != 0 {
+		t.Errorf("expected no declared capabilities, got %v", ep.Capabilities)
+	}
+	if ep.MaxContextTokens != 0 {
+		t.Errorf("expected MaxContextTokens 0 (unconstrained), got %d", ep.MaxContextTokens)
+	}
+}
+
+func TestCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
+	yaml := strings.Replace(validYAML, "priority: 1",
+		"priority: 1\n          capabilities: [text, image, tools]\n          max_context_tokens: 200000", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := cfg.Models["openai"]["m1"].Endpoints[0]
+	want := []string{"text", "image", "tools"}
+	if len(ep.Capabilities) != len(want) {
+		t.Fatalf("Capabilities = %v, want %v", ep.Capabilities, want)
+	}
+	for i, c := range want {
+		if ep.Capabilities[i] != c {
+			t.Errorf("Capabilities[%d] = %q, want %q", i, ep.Capabilities[i], c)
+		}
+	}
+	if ep.MaxContextTokens != 200000 {
+		t.Errorf("MaxContextTokens = %d, want 200000", ep.MaxContextTokens)
+	}
+}
+
+func TestMaxContextTokensNegativeRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          max_context_tokens: -1", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("negative max_context_tokens must be rejected at load, not silently clamped")
+	}
+}
+
+func TestStickyTTLGlobalDefault(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StickyTTL.D() != DefaultStickyTTL {
+		t.Errorf("StickyTTL default = %v, want %v", cfg.StickyTTL.D(), DefaultStickyTTL)
+	}
+}
+
+func TestStickyTTLGlobalOverride(t *testing.T) {
+	yaml := "sticky_ttl: 30m\n" + validYAML
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StickyTTL.D() != 30*time.Minute {
+		t.Errorf("StickyTTL = %v, want 30m", cfg.StickyTTL.D())
+	}
+}
+
+func TestStickyTTLPerEndpointOverride(t *testing.T) {
+	// nil (unset) vs. an explicit override must both be representable —
+	// same *Duration pattern as ImageDownscaleMaxPx.
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 2h", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := cfg.Models["openai"]["m1"].Endpoints[0]
+	if ep.StickyTTL == nil {
+		t.Fatal("expected a non-nil per-endpoint StickyTTL override")
+	}
+	if ep.StickyTTL.D() != 2*time.Hour {
+		t.Errorf("endpoint StickyTTL = %v, want 2h", ep.StickyTTL.D())
+	}
+
+	// The base fixture's endpoint doesn't set it — nil means "inherit the
+	// global default", not "zero".
+	base, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Models["openai"]["m1"].Endpoints[0].StickyTTL != nil {
+		t.Error("expected a nil per-endpoint StickyTTL when not set (inherit global)")
+	}
+}
+
+func TestStickyTTLNonPositiveRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 0s", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("sticky_ttl: 0s must be rejected at load (a zero-duration affinity window is meaningless)")
+	}
+}
+
+func TestModelStickyDefaultsToTrue(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Models["openai"]["m1"]
+	if m.Sticky != nil {
+		t.Errorf("expected Sticky to be nil (unset) when not declared, got %v", *m.Sticky)
+	}
+	// nil is the config-level representation; router.BuildSnapshot resolves
+	// nil -> true (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
+	// §2.5) — that resolution is covered in internal/router's own tests.
+}
+
+func TestModelStickyExplicitFalse(t *testing.T) {
+	yaml := strings.Replace(validYAML, "endpoints:", "sticky: false\n      endpoints:", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Models["openai"]["m1"]
+	if m.Sticky == nil || *m.Sticky != false {
+		t.Errorf("expected Sticky to be an explicit false, got %v", m.Sticky)
 	}
 }

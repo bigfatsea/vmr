@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 
 // Integration tests: full handler + mock upstreams over real HTTP.
 package server
@@ -80,6 +80,12 @@ func newRouterServer(t *testing.T, yaml string) *httptest.Server {
 	return ts
 }
 
+// twoEndpointYAML is the shared fixture for failover/health/probe tests,
+// which repeatedly send the byte-identical simpleReq and expect each call
+// to be freshly routed by health/priority — sticky: false so Sticky
+// Model's default-on affinity (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
+// §2.5) never pins repeated calls to whichever endpoint last succeeded and
+// masks the health/priority behavior these tests exist to pin down.
 func twoEndpointYAML(u1, u2 string, extra string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
@@ -91,6 +97,7 @@ providers:
 models:
   openai:
     vm:
+      sticky: false
       endpoints:
         - {provider: p1, model: model-one, priority: 1}
         - {provider: p2, model: model-two, priority: 2}

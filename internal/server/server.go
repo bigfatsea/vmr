@@ -1,4 +1,4 @@
-// Ver 2026-07-21 01:15, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -289,7 +289,10 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// add new headers.
 		hdr := FilterClientHeaders(r.Header)
 
-		s.rt.Serve(w, r, &core.CanonicalRequest{Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr}, protocol, rec)
+		s.rt.Serve(w, r, &core.CanonicalRequest{
+			Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr,
+			Facts: computeRequestFacts(body, protocol),
+		}, protocol, rec)
 	}
 }
 

@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 package core
 
 import (
@@ -56,6 +56,23 @@ type CanonicalRequest struct {
 	Stream bool
 	Raw    json.RawMessage
 	Header http.Header // client headers after the server's blocklist filter (credentials removed)
+	Facts  RequestFacts
+}
+
+// RequestFacts are cheap, request-derived signals computed once per request
+// (never per candidate endpoint) and consulted by strategy.Condition
+// implementations — see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
+// §1.2. WantsThinking/HasAudio/HasVideo are typed placeholders only: no
+// detection logic populates them yet (protocol shapes for audio/video input
+// and MiniMax's thinking parameter aren't confirmed), so they are always
+// false until a later change adds the corresponding detection.
+type RequestFacts struct {
+	HasImage        bool
+	HasAudio        bool
+	HasVideo        bool
+	HasTools        bool
+	WantsThinking   bool
+	EstimatedTokens int64
 }
 
 // ErrorClass drives failover and cooldown decisions.
@@ -131,6 +148,37 @@ type Endpoint struct {
 	Model       string
 	Priority    int
 	RoleMap     map[string]string // per-provider role remapping (e.g. {"developer":"system"}); nil = no remapping
+
+	// Capabilities is a free-form allowlist (e.g. "image", "tools",
+	// "thinking") declared in config.EndpointConfig.Capabilities. Empty/nil
+	// means unconstrained — every capability is assumed supported — so
+	// existing configs that don't set this field see no behavior change.
+	// Once non-empty it is exhaustive: a capability the endpoint actually
+	// supports but omits here is treated as unsupported (see design doc
+	// §1.1 for the tradeoff).
+	Capabilities []string
+	// MaxContextTokens is the declared context-window ceiling in tokens;
+	// 0 (the zero value, same as "unset") means unconstrained.
+	MaxContextTokens int64
+	// StickyTTL is how long a sticky preference for this endpoint stays
+	// valid, resolved at BuildSnapshot time from the endpoint's own
+	// config.EndpointConfig.StickyTTL override or, absent that, the global
+	// config.Config.StickyTTL default.
+	StickyTTL time.Duration
+}
+
+// HasCapability reports whether e declares support for name. An endpoint
+// that declares no capabilities at all is unconstrained (see Capabilities).
+func (e *Endpoint) HasCapability(name string) bool {
+	if len(e.Capabilities) == 0 {
+		return true
+	}
+	for _, c := range e.Capabilities {
+		if c == name {
+			return true
+		}
+	}
+	return false
 }
 
 // HealthKey identifies this endpoint in the health registry. It is stable

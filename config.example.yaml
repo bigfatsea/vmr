@@ -1,4 +1,4 @@
-# Ver 2026-07-22 21:00, by Sonnet 5
+# Ver 2026-07-23 12:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -44,6 +44,8 @@ listen: 127.0.0.1:8800
 # http_proxy: http://127.0.0.1:7890    # same, for http base_urls (e.g. a LAN llama.cpp server)
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
+# sticky_ttl: 10m                # global default for Sticky Model's affinity window (0/absent = default 10m);
+#                                 # each endpoint below can override it — see the "cheap" model for an example
 # audit_retention_days: 30       # delete audit files older than this; 0/absent = keep forever (rotation always compresses old days to .zst regardless)
 # log_dir: ~/.vmr/logs           # audit JSONL directory; used exactly as given (~/ expands); absent = ~/.vmr/logs. Changing it needs a restart
 # image_cache_dir: ~/.vmr/image_cache  # downscale-result cache directory; same rule; absent = ~/.vmr/image_cache; follows hot reload
@@ -110,6 +112,15 @@ models:
       # strategy defaults to [priority]; endpoints below have no explicit
       # priority — ties (everyone defaults to 0) keep this file order, so
       # listing them in the order you want them tried is enough.
+      #
+      # capabilities/max_context_tokens (condition routing) and sticky_ttl
+      # (Sticky Model) are all optional and default to "unconstrained" /
+      # "inherit the global default" — omitting them, as every endpoint
+      # below does, is identical to how this file behaved before these
+      # fields existed. sticky itself (session affinity) defaults to true
+      # per virtual model; see the "cheap" model below for the opt-out and
+      # per-endpoint override forms. Full reference: docs/UserGuide.md
+      # "Condition-based routing" / "Sticky Model".
       endpoints:
         - {provider: openrouter, model: z-ai/glm-5.2}
         - {provider: deepseek, model: deepseek-v4-pro}
@@ -118,10 +129,18 @@ models:
       # image_downscale: 0        # per-model override example: force this model
                                    # to skip downscaling even if the global
                                    # setting above is on (omit to inherit it)
+      # sticky: false              # opt out of session affinity for a model that's
+                                    # genuinely one-shot (no multi-turn value to protect)
       endpoints:
-        - {provider: minimax, model: MiniMax-M3}
+        - provider: minimax
+          model: MiniMax-M3
+          # capabilities: [text, image, tools]   # declare once you want vmr to skip this
+          # max_context_tokens: 1000000          # endpoint for requests it can't actually serve
         - {provider: openrouter, model: tencent/hy3-preview}
-        - {provider: deepseek, model: deepseek-v4-flash}
+        - provider: deepseek
+          model: deepseek-v4-flash
+          # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
+                              # override the global sticky_ttl for just this endpoint
 
   # Anthropic-protocol virtual models: reachable only via POST /v1/messages.
   # "claude" only needs to exist here; nothing under models.openai references

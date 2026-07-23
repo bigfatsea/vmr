@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-22 21:00, by Sonnet 5 -->
+<!-- Ver 2026-07-23 12:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -96,18 +96,20 @@ cmd/vmr/main.go            CLI（stdlib flag）：start / check / status / repor
 internal/core              CanonicalRequest、ErrorClass、Endpoint（无依赖的共享类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用（§7.1）
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch
-internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写
+internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写；fingerprint.go：SessionFingerprint（§6.5）、HasNonEmptyTopLevelArray（§6.4）
 internal/adapter/openai    OpenAI 协议透传 Adapter
 internal/adapter/anthropic Anthropic 协议透传 Adapter
 internal/health            被动健康状态机（冷却、退避、半开单飞名额）——核心状态机本身不区分主动/被动探测模式，见 §6.2
 internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import，见 §6.2/§14.1）
-internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序
+internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext（§6.4）
+internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节（§6.5）
 internal/router            快照构建 + failover 循环 + 流转发 + 并发闸（核心）
                             ├─ response.go  响应归一化器（详见 §5.5）
                             ├─ probe.go  probe_mode: active 的后台探测 goroutine（§6.2）
                             ├─ NewUpstreamClient  独立于 Router 的 upstream http.Client 构造（diagnose/replay 复用，见 §14）
                             ├─ ModelRoute.EffectiveOrder  给定路由返回按 strategy 排好序的端点列表（start/check/diagnose 三处共用，见 §14）
 internal/server            HTTP 入口、鉴权、Header 黑名单（FilterClientHeaders 导出供 replay 复用）、审计录制、四个端点
+                            ├─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估、tools 检测（§6.4）
 internal/audit             审计日志（JSONL 落盘）+ 共享的日志文件读取（OpenLogFile/ForEachLine，report/replay 共用）+ OutcomeFor（server/replay 共用的 outcome 判定）
                             ├─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理（详见 §9.5）
 internal/report            审计日志聚合统计（vmr report，透明读取明文/.zst）
@@ -258,6 +260,58 @@ Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意�
 ### 6.3 热加载
 
 fsnotify（监听目录，兼容编辑器原子替换，300ms 防抖）+ SIGHUP 兜底。新配置完整校验，失败保留旧配置并打日志——绝不带病上线。路由表（含 http.Client）随快照原子指针交换，运行中请求持有旧快照直至完成；换入时关闭旧连接池的 idle 连接（in-flight 连接不受影响），重载成功后打印配置摘要。
+
+### 6.4 条件路由（Condition-based Routing）
+
+同一个虚拟模型背后的端点不一定等价——有的支持图像输入，有的不支持；不同厂商的上下文窗口也可能相差一个数量级。§6.1 的 `Dimension.Compare(a, b *core.Endpoint) int` 只比较两个端点，看不到请求本身，这对 priority/未来的 weight/latency 是对的（它们本来就不需要知道请求内容），但表达不出"这个端点能不能处理这条具体请求"——这是一个准入（elimination）判断，不是排序（ordering）判断，需要一个与 `Dimension` 平行的新接口：
+
+```go
+// internal/strategy
+type Condition interface {
+    Name() string
+    Eligible(ep *core.Endpoint, facts core.RequestFacts) bool
+}
+```
+
+`core.RequestFacts`（挂在 `core.CanonicalRequest.Facts`）是请求侧廉价、预计算一次的信号集合，`internal/server/facts.go` 的 `computeRequestFacts` 在请求体缓冲完成后算一次：
+
+```go
+type RequestFacts struct {
+    HasImage, HasAudio, HasVideo, HasTools, WantsThinking bool
+    EstimatedTokens int64
+}
+```
+
+**已实现两类硬条件**（`internal/strategy/conditions.go`，编译期注册，与 Adapter 同一模式）：
+
+- `image` —— 复用 `imgprep.HasImageMarker`，零新增探测成本。
+- `tools` —— 顶层 `tools` 数组非空，复用 `internal/adapter` 的 `topLevelValues` 扫描器（`HasNonEmptyTopLevelArray`），不做全量 unmarshal。
+
+`thinking`/`audio`/`video` 只在 `RequestFacts` 里留了字段占位，**未注册对应 Condition**——两家协议的音视频输入形状、MiniMax 的 thinking 请求参数形状目前都没有确认，注册一个永远不触发的条件不如不注册。
+
+端点在 `EndpointConfig.Capabilities []string` 里自由声明支持哪些能力，**未声明 = 不限制**（假设支持一切，保证旧配置零改动迁移）；一旦声明就是穷尽式的 allowlist，`vmr check` 会把每个端点声明的 `capabilities`/`max_context_tokens` 打印出来，避免遗漏声明在运行时才暴露成误路由。
+
+**上下文长度是估算，不是能力条件**：`EndpointConfig.MaxContextTokens`（0 = 不限制）对照 `RequestFacts.EstimatedTokens`——纯文本按字节分类估算（ASCII 约 4 字节/token，多字节 UTF-8/CJK 故意保守估到 2 字节/token）、每张检测到的内联图片按固定 3000 token、检测到文档/PDF 附件时按其 base64 载荷长度 ÷ 20，全程只做廉价的结构标记扫描，不解析 JSON 结构、不解码图片。完整的公式推导和信息来源见独立文档 `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §1.4。
+
+**估算可能出错，所以它不能拥有和硬条件一样的否决权**——`router.Serve` 把过滤拆成两步：先用 `image`/`tools` 等确定性 Condition 过滤出 `hardFiltered`；再用 `strategy.WithinContext`（独立函数，**不**注册进 `Condition` 接口）在其上进一步筛。**如果这一步筛完是空的，但 `hardFiltered` 本身非空，直接回退用 `hardFiltered`**——宁可让一个"看起来太大"的请求真的打到某个端点上，也不让 vmr 自己凭一个可能错得离谱的估算把路堵死。这是本节唯一需要特殊处理的地方：能力条件是确定的，全体拒绝就应该直接拒绝；上下文长度是概率性的，全体拒绝时必须留一条退路。候选集为空时的诊断信息（`rejectionSummary`）会点名是哪个 Condition 拒绝了所有候选，而不是复用容易误导的"全部冷却中"文案。
+
+### 6.5 Sticky Model（会话亲和路由）
+
+上游 prompt cache 按精确字节前缀匹配。条件路由一旦上线，尤其是上下文长度这一维——agent 压缩上下文后，同一条对话的估算体积可能突然小到另一个更便宜/更快的端点也能接，若因此换端点，会打掉正在累积的缓存，"选了更合适的模型、总成本反而更高"。Sticky Model 让同一条对话优先留在最近一次成功服务过它的端点上，抵消这个副作用。
+
+**识别"同一条对话"**：`internal/adapter.SessionFingerprint(raw, protocol)` 对 system prompt（若存在）和第一条非 system 消息分别算 md5，返回两个独立哈希，不合并、不解析其余内容——只做字节范围定位（复用 `topLevelValues` 定位 Anthropic 的顶层 `system` 字段；OpenAI 侧复用 `RewriteRoles` 同款的消息数组遍历骨架，只扫到第一个非 system 元素为止，代价与对话历史长度无关）。**必须包含 system prompt**：prompt cache 前缀从请求最前面开始比较，system prompt 排在 messages 之前，两个 system 不同的对话即使后续消息逐字相同，上游前缀匹配也早已分道扬镳——只哈希首条用户消息会把不同 Agent 的相同开场白误判成同一条对话。**不包含 `tools`**：`tools` 是结构化数据，若客户端动态枚举工具列表，同一批工具在不同请求里可能序列化出不同字节，会让锚点无谓跳变；`system` 和首条消息都是纯文本，没有这个风险。
+
+**这套指纹计算与 `internal/report/session.go` 的离线会话分组算法是两套独立实现，不共用代码，也不落审计日志**：两者虽然都是"对首条消息取哈希"的思路，但风险取舍相反——`session.go` 服务的是事后报表分组，容忍 system prompt 逐轮漂移（用独立的 `SysChanged` 字段记录，不拿它拆分组）；Sticky Model 服务的是路由决策，必须把 system 算进去才能避免误判。`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来任何速度收益；反过来把这套字节扫描结果写进审计日志给 `session.go` 读，也没有一个真实消费者会用到它。两边保持独立，互不牵制。
+
+**Key 组成**：`client_key_tag`（既有的 `audit.KeyTag` 机制，见 §4.3）作为命名空间，不是主键——`sticky_key = client_key_tag + ":" + hex(sysHash) + ":" + hex(firstMsgHash)`。
+
+**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointConfig.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。淘汰用一个粗粒度的 24 小时兜底（`internal/sticky` 包内部），比任何端点声明的 TTL 都宽松，只负责内存卫生；"这条粘性记录对这次路由决策是否仍然有效"完全是调用方（`router.Serve`）拿到 `endpointKey` 后，用**那个端点自己的** `StickyTTL` 现算的——`internal/sticky.Registry` 本身不知道任何端点/配置细节，只是一个带 mtime 的 `Peek`/`Set` 键值存储，同 `internal/health.Registry` 一样简单。
+
+**`Sticky` 默认开启**（`ModelConfig.Sticky *bool`，`nil` 视为 `true`）：§6.4/§6.5 引入之前的做法通常是新特性默认关闭，但这里的计算成本（两次 md5，system prompt+首条消息通常几 KB 到几十 KB）相对一次真实的上游请求往返可以忽略，多轮 agent 会话又是 vmr 的核心场景，让用户必须记得手动开启不划算；真正的单次调用场景显式 `sticky: false` 关闭。
+
+**接入点**（`router.Serve`，紧接 §6.4 的条件过滤和 §6.1 的排序之后）：亲和性重排只在已经通过健康与条件过滤的候选集里生效（找不到匹配端点、或找到但已过 TTL，都直接跳过，什么都不做）——这保证它永远不会把一个当前不健康或不满足本次请求硬性条件的端点复活。粘性指针在**每一次成功完成请求后都更新**，包括 failover 后的成功，不只是第一次建立时——这样一次故障转移会让指针自动跟着移动到"实际生效缓存"真正所在的端点，是自愈设计，不需要额外的失效检测逻辑。
+
+设计全过程（含四轮反馈迭代、TTL 调研数据源、token 估算调研）：`docs/vmr_condition_routing_and_sticky_model_sonnet-5.md`。
 
 ---
 
@@ -488,6 +542,7 @@ image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录（§7.1）
 image_downscale: 0            # 请求内联图片长边像素上限（§7）；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
 image_cache_ttl_days: 7       # 降采样结果缓存的失效期（§7.1）；缺省/非正数 = 7 天
 audit_retention_days: 0       # 审计文件保留天数（§9.5）；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
+sticky_ttl: 10m                # Sticky Model（§6.5）粘性偏好的全局默认有效期；缺省/非正数 = 10 分钟。按端点可覆盖（下方 endpoints.sticky_ttl）
 timeouts:
   connect: 10s                # 连接上游（缺省 10s）
   response_header: 120s       # 上游首字节（缺省 120s）
@@ -511,10 +566,18 @@ models:                          # "对外叫什么、按什么顺序用"——�
     <virtual-model-name>:
       strategy: [priority]       # 缺省 [priority]
       image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效（§7）；写 0 表示对这个模型强制关闭，即使全局开着
+      sticky: true                # 可选；Sticky Model 开关（§6.5），*bool，缺省（不写）视为 true；只有确实不需要
+                                   # 会话亲和的单次调用场景才需要显式写 false
       endpoints:
         - provider: <name>       # 必须引用同协议分组下已定义的 provider
           model: <上游真实模型名>
           priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
+          capabilities: [text, image, tools]   # 可选；条件路由（§6.4）——这个端点声明支持的能力，
+                                                # 缺省 = 不限制（假设全部支持）；一旦声明就是穷尽式的
+          max_context_tokens: 200000           # 可选；条件路由（§6.4）——声明的上下文窗口上限（token 数量级）；
+                                                # 缺省/0 = 不限制
+          sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效（§6.5）——挂在端点而不是
+                                   # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性
 ```
 
 **两层 map 而非扁平 map + 显式字段**：provider 没有 `type:` 字段，协议就是它在配置里所处的位置（`providers.<protocol>.<name>`）；一个 model 的 endpoints 只能引用同一 `<protocol>` 分组下的 provider，跨协议引用没有语法能表达它。带来两个直接好处：同一账号的两个协议面可以复用同一个 provider 短名（`openrouter` 在 `providers.openai` 和 `providers.anthropic` 下各存一份），不需要额外的后缀区分；同一个 virtual model 名也可以在两个协议分组下各存一份，两个入口各自独立可达（§3）。这带来一个约束：`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）必须是三段式 `<protocol>/<provider>/<model>`——如果两个协议面复用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
@@ -593,6 +656,11 @@ models:                          # "对外叫什么、按什么顺序用"——�
 | think_strip 触发加前缀守卫：首个非空 content/text 值以 `<think>` 开头才认定思考形态（2026-07-16） | 任意位置出现 `<think>` 即触发（旧行为） | 旧行为对"正文合法引用 think 标签"（用户问标签格式、代码示例复现它）会静默删掉引用片段——真实的数据损坏向量,且与 Thinking Process 形态的前缀守卫不对称。MiniMax 真实思考输出永远以标记开头,收紧触发条件不丢任何真实修复场景（回归测试锁定两个方向） |
 | `vmr replay -stream` 改写出站 body 的顶层 `stream` 字段（复用 splice 扫描器,缺键则补） | 只改 replay 本地簿记（旧实现,flag 实际无效） | 上游读的是 body 里的 `stream` 字段,不改字节等于没改——旧实现挂着 flag 不干活。改写走与 model 改写同一条 `topLevelValues` splice 路径,除该字段外逐字节保留;`--record` 产出的记录同步反映覆盖后的请求 |
 | `vmr report` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755（旧行为） | details/、索引、报表与 vmr-requests.jsonl 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600,派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异,单用户机器上无感知 |
+| 条件路由用新接口 `Condition`（elimination，感知请求），不扩展 `Dimension` | 给 `Dimension.Compare` 加一个 request 参数 | `Dimension` 的现有实现（priority）和未来实现（weight/latency）本来就不需要看请求，硬塞一个参数会强迫每个排序维度都感知请求；`Condition` 语义上是准入不是排序，混进同一个接口是把两种不同的事情绑在一起。两个接口平行存在，`router.Serve` 分两步跑，互不干扰（§6.4） |
+| 上下文长度条件（`WithinContext`）不注册进 `Condition` 接口，单独一个函数 | 也注册成一个普通 Condition | 唯一需要"全体拒绝时不能真的拒绝"这个降级行为的条件，其余（image/tools）都是确定性的，全体拒绝就该直接拒绝——为一个目前只有一个成员的特例改动整个接口的语义不划算，`router.Serve` 里两行代码就能表达清楚这个特例（§6.4） |
+| `sticky_ttl` 挂在 `EndpointConfig`，不是 `ModelConfig` | 挂在虚拟模型层级（Sticky Model 初版设计曾经这样做） | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 的属性，不是虚拟模型的属性；模型级设计会逼着用户把不同缓存寿命的端点拆成不同虚拟模型才能各自配置 TTL（初版设计的示例配置就吃过这个亏），端点级消除了这个别扭（§6.5） |
+| Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者（§6.5） |
+| Sticky Model 默认开启（`ModelConfig.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in（新特性的一般默认） | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益（§6.5） |
 
 ---
 
@@ -621,7 +689,8 @@ models:                          # "对外叫什么、按什么顺序用"——�
 * **更多协议入口**：gemini；embeddings / images 的同构路由。
 * **发布**：goreleaser + Homebrew tap；届时 module 名改为完整仓库路径。
 * **`vmr replay` 的输出对比**：产出"原始响应 vs 本次回放响应"的结构化 diff 视图（现状：只打印新响应，对比靠用户自己 `diff`/`delta`）。
-* 远期：能力/标签路由（按 context 长度、vision、tool-use 过滤）、会话粘性维度、本地用量统计（可选嵌 SQLite）。
+* ~~远期：能力/标签路由（按 context 长度、vision、tool-use 过滤）、会话粘性维度~~ ——已实现，见 §6.4（条件路由）、§6.5（Sticky Model）。`thinking`/`audio`/`video` 能力条件仍未注册（协议形状未确认，见 §6.4）；price 条件明确不做，价格是排序（Dimension）关注点，不是准入（Condition）关注点，等 `weight`/`cost` 排序维度真正要做时再按上面的 Dimension 模式加。
+* 远期：本地用量统计（可选嵌 SQLite）。
 
 ---
 

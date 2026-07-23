@@ -1,8 +1,9 @@
-// Ver 2026-07-09 00:00, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 package router
 
 import (
 	"testing"
+	"time"
 
 	"vmr/internal/config"
 
@@ -110,5 +111,103 @@ models:
 	}
 	if plain.RoleMap != nil {
 		t.Errorf("plain endpoint: RoleMap should be nil (provider has no role_map), got %v", plain.RoleMap)
+	}
+}
+
+// TestBuildSnapshotCarriesConditionRoutingFields checks that
+// capabilities/max_context_tokens reach core.Endpoint unchanged from
+// config, and that an endpoint not declaring them ends up unconstrained
+// (nil Capabilities, 0 MaxContextTokens) — see
+// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §1.1.
+func TestBuildSnapshotCarriesConditionRoutingFields(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+providers:
+  openai:
+    p1: {base_url: https://example.com, api_key: k1}
+models:
+  openai:
+    vm:
+      endpoints:
+        - provider: p1
+          model: m1
+          capabilities: [text, image, tools]
+          max_context_tokens: 200000
+        - provider: p1
+          model: m2
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eps := snap.Models["openai"]["vm"].Endpoints
+	declared, undeclared := eps[0], eps[1]
+
+	if !declared.HasCapability("image") {
+		t.Error("declared endpoint should report HasCapability(\"image\") = true")
+	}
+	if declared.MaxContextTokens != 200000 {
+		t.Errorf("declared endpoint: MaxContextTokens = %d, want 200000", declared.MaxContextTokens)
+	}
+	if !undeclared.HasCapability("image") {
+		t.Error("an endpoint with no declared capabilities must be unconstrained (HasCapability true for anything)")
+	}
+	if undeclared.MaxContextTokens != 0 {
+		t.Errorf("undeclared endpoint: MaxContextTokens = %d, want 0 (unconstrained)", undeclared.MaxContextTokens)
+	}
+}
+
+// TestBuildSnapshotResolvesStickyDefaultAndOverride locks the *bool ->
+// bool resolution (nil = true) plus the endpoint-level StickyTTL
+// inherit/override split — see
+// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2.4-2.5.
+func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+sticky_ttl: 10m
+providers:
+  openai:
+    p1: {base_url: https://example.com, api_key: k1}
+models:
+  openai:
+    defaulted:
+      endpoints:
+        - provider: p1
+          model: m1
+    disabled:
+      sticky: false
+      endpoints:
+        - provider: p1
+          model: m1
+    overridden:
+      endpoints:
+        - provider: p1
+          model: m1
+          sticky_ttl: 2h
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !snap.Models["openai"]["defaulted"].Sticky {
+		t.Error("Sticky should default to true when unset")
+	}
+	if snap.Models["openai"]["disabled"].Sticky {
+		t.Error("explicit sticky: false must resolve to false")
+	}
+	if got := snap.Models["openai"]["defaulted"].Endpoints[0].StickyTTL; got != 10*time.Minute {
+		t.Errorf("endpoint with no override: StickyTTL = %v, want the global 10m default", got)
+	}
+	if got := snap.Models["openai"]["overridden"].Endpoints[0].StickyTTL; got != 2*time.Hour {
+		t.Errorf("endpoint with an override: StickyTTL = %v, want 2h", got)
 	}
 }

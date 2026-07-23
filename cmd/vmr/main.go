@@ -1,4 +1,4 @@
-// Ver 2026-07-22 22:10, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -595,12 +595,12 @@ func cmdCheck(args []string) error {
 			if m.ImageDownscaleMaxPx != nil {
 				imgOverride = fmt.Sprintf("  image_downscale=%dpx", *m.ImageDownscaleMaxPx)
 			}
-			fmt.Printf("  %s [%s] (strategy=%v)%s\n", name, protocol, m.Strategy, imgOverride)
+			route := snap.Models[protocol][name]
+			fmt.Printf("  %s [%s] (strategy=%v sticky=%v)%s\n", name, protocol, m.Strategy, route.Sticky, imgOverride)
 			// Print endpoints in the order they'd actually be tried (health
 			// ignored — this is a static preview), not raw config priority
 			// numbers: with priority omitted (the common case) that order is
 			// exactly config-file order, which is the whole point.
-			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
 			for i, ep := range ordered {
 				key := cfg.Providers[protocol][ep.Provider].APIKey
@@ -608,7 +608,23 @@ func cmdCheck(args []string) error {
 				if key == "" {
 					keyState = "key:EMPTY"
 				}
-				fmt.Printf("    %d. %s/%s  [%s]\n", i+1, ep.Provider, ep.Model, keyState)
+				// Condition-routing/Sticky Model declarations, printed only
+				// when they actually constrain something — an endpoint with
+				// none of these set behaves exactly as before they existed,
+				// and the check output should look exactly as before too
+				// (see docs/vmr_condition_routing_and_sticky_model_sonnet-5.md
+				// §1.1: absent = unconstrained/inherit, never a new limit).
+				extra := ""
+				if len(ep.Capabilities) > 0 {
+					extra += fmt.Sprintf("  capabilities=%v", ep.Capabilities)
+				}
+				if ep.MaxContextTokens > 0 {
+					extra += fmt.Sprintf("  max_context_tokens=%d", ep.MaxContextTokens)
+				}
+				if route.Sticky {
+					extra += fmt.Sprintf("  sticky_ttl=%s", ep.StickyTTL)
+				}
+				fmt.Printf("    %d. %s/%s  [%s]%s\n", i+1, ep.Provider, ep.Model, keyState, extra)
 			}
 		}
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-07-21 01:15, by Sonnet 5
+// Ver 2026-07-23 12:00, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -6,6 +6,7 @@ package router
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,6 +25,7 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/health"
+	"vmr/internal/sticky"
 	"vmr/internal/strategy"
 )
 
@@ -40,6 +43,12 @@ type ModelRoute struct {
 	// non-nil (including a pointer to 0) = this model's explicit setting,
 	// which always wins over the global one (§7 image downscale).
 	ImageDownscaleMaxPx *int
+
+	// Sticky mirrors config.ModelConfig.Sticky, resolved at BuildSnapshot
+	// time: nil (field absent in config) defaults to true, so Sticky Model
+	// affinity applies unless a virtual model explicitly opts out. See
+	// docs/vmr_condition_routing_and_sticky_model_sonnet-5.md §2.5.
+	Sticky bool
 }
 
 // EffectiveOrder returns route's endpoints in the order they would actually
@@ -110,21 +119,28 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 			if err != nil {
 				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
-			route := &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx}
+			route := &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: m.Sticky == nil || *m.Sticky}
 			for _, ec := range m.Endpoints {
 				p, ok := cfg.Providers[protocol][ec.Provider]
 				if !ok { // defensive; config.validate already checked this
 					return nil, fmt.Errorf("model %q: unknown provider %q in the %s protocol group", name, ec.Provider, protocol)
 				}
+				stickyTTL := cfg.StickyTTL.D()
+				if ec.StickyTTL != nil {
+					stickyTTL = ec.StickyTTL.D()
+				}
 				ep := &core.Endpoint{
-					Provider:    ec.Provider,
-					AdapterType: protocol,
-					BaseURL:     p.BaseURL,
-					FullURL:     ad.ResolveURL(p.BaseURL),
-					APIKey:      p.APIKey,
-					Model:       ec.Model,
-					Priority:    ec.Priority,
-					RoleMap:     p.RoleMap,
+					Provider:         ec.Provider,
+					AdapterType:      protocol,
+					BaseURL:          p.BaseURL,
+					FullURL:          ad.ResolveURL(p.BaseURL),
+					APIKey:           p.APIKey,
+					Model:            ec.Model,
+					Priority:         ec.Priority,
+					RoleMap:          p.RoleMap,
+					Capabilities:     ec.Capabilities,
+					MaxContextTokens: ec.MaxContextTokens,
+					StickyTTL:        stickyTTL,
 				}
 				route.Endpoints = append(route.Endpoints, ep)
 			}
@@ -137,6 +153,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 
 type Router struct {
 	Health *health.Registry
+	Sticky *sticky.Registry
 	Logger *log.Logger
 
 	snap atomic.Pointer[Snapshot]
@@ -147,7 +164,7 @@ type Router struct {
 }
 
 func New(logger *log.Logger) *Router {
-	return &Router{Health: health.New(), Logger: logger}
+	return &Router{Health: health.New(), Sticky: sticky.New(), Logger: logger}
 }
 
 // NewUpstreamClient builds an *http.Client configured exactly like Install
@@ -312,7 +329,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	// behavior: any request may land on a half-open endpoint and become the
 	// probe itself via Acquire in the per-candidate loop below.
 	now := time.Now()
-	candidates := make([]*core.Endpoint, 0, len(route.Endpoints))
+	healthOK := make([]*core.Endpoint, 0, len(route.Endpoints))
 	activeProbing := snap.Cfg.ProbeMode == config.ProbeModeActive
 	for _, ep := range route.Endpoints {
 		key := ep.HealthKey()
@@ -323,10 +340,58 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			continue
 		}
 		if rt.Health.Available(key, now) {
+			healthOK = append(healthOK, ep)
+		}
+	}
+
+	// Hard capability conditions (image/tools/…, see internal/strategy) are
+	// certainties — a request either needs a capability or it doesn't, an
+	// endpoint either declares it or doesn't — so rejecting every candidate
+	// here is a correct "give up" signal, not a bug.
+	hardFiltered := make([]*core.Endpoint, 0, len(healthOK))
+	for _, ep := range healthOK {
+		if strategy.Eligible(ep, creq.Facts) {
+			hardFiltered = append(hardFiltered, ep)
+		}
+	}
+
+	// Context length is an estimate, not a certainty (see design doc §1.4),
+	// so it never gets to empty a non-empty hardFiltered set on its own —
+	// if every declared max_context_tokens looks too small, fall back to
+	// hardFiltered and let a real attempt (backed by the ErrContextLimit
+	// failover) make the call instead of refusing on a guess (§1.5).
+	candidates := make([]*core.Endpoint, 0, len(hardFiltered))
+	for _, ep := range hardFiltered {
+		if strategy.WithinContext(ep, creq.Facts) {
 			candidates = append(candidates, ep)
 		}
 	}
+	if len(candidates) == 0 && len(hardFiltered) > 0 {
+		candidates = hardFiltered
+	}
 	strategy.Sort(candidates, route.Dims)
+
+	// Sticky Model: prefer whichever endpoint most recently, successfully
+	// served this same conversation, so the upstream prompt cache stays
+	// warm (design doc §2). Only ever reorders within the already-filtered
+	// candidates — an endpoint that's unhealthy or fails a hard condition
+	// this turn is never resurrected just because it was the sticky pick
+	// last time.
+	var stickyKey string
+	if route.Sticky {
+		if sysHash, firstMsgHash, ok := adapter.SessionFingerprint(creq.Raw, protocol); ok {
+			var clientKeyTag string
+			if rec != nil {
+				clientKeyTag = rec.ClientKeyTag
+			}
+			stickyKey = clientKeyTag + ":" + hex.EncodeToString(sysHash[:]) + ":" + hex.EncodeToString(firstMsgHash[:])
+			if epKey, lastUsed, found := rt.Sticky.Peek(stickyKey); found {
+				if ep := findByHealthKey(candidates, epKey); ep != nil && time.Since(lastUsed) < ep.StickyTTL {
+					moveToFront(candidates, ep)
+				}
+			}
+		}
+	}
 
 	// Failover walks the whole candidate sequence: keep trying until one
 	// endpoint succeeds or every available endpoint has been tried once.
@@ -345,8 +410,14 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			continue
 		}
 		attempts++
-		done, uerr := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
+		done, uerr, success := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
 		if done {
+			if success && stickyKey != "" {
+				// Every successful completion moves the pointer — including
+				// a failover success — so it always follows wherever the
+				// conversation's cache is actually warm (design doc §2.5).
+				rt.Sticky.Set(stickyKey, ep.HealthKey())
+			}
 			return
 		}
 		// Build/network failures return no HTTP response (uerr == nil).
@@ -372,10 +443,64 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		msg := fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model)
 		if attempts > 0 {
 			msg = fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
+		} else if len(healthOK) > 0 {
+			// Health had candidates; a Condition rejected every one of
+			// them — name which one(s) so the operator doesn't have to
+			// guess (see design doc §1.2).
+			msg = fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
 		}
 		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
 	rt.logf("%s %s status=all_failed attempts=%d dur=%s", clientTag(rec), creq.Model, attempts, fmtDur(time.Since(start)))
+}
+
+// findByHealthKey returns the endpoint in candidates whose HealthKey
+// matches key, or nil if none does — e.g. a sticky pointer recorded before
+// this turn's health/condition filtering ran, for an endpoint that's since
+// become unhealthy or no longer meets a hard condition.
+func findByHealthKey(candidates []*core.Endpoint, key string) *core.Endpoint {
+	for _, ep := range candidates {
+		if ep.HealthKey() == key {
+			return ep
+		}
+	}
+	return nil
+}
+
+// moveToFront reorders candidates in place so ep is tried first, preserving
+// the relative order of everything else.
+func moveToFront(candidates []*core.Endpoint, ep *core.Endpoint) {
+	for i, e := range candidates {
+		if e == ep {
+			if i == 0 {
+				return
+			}
+			copy(candidates[1:i+1], candidates[:i])
+			candidates[0] = ep
+			return
+		}
+	}
+}
+
+// rejectionSummary names every Condition that rejected at least one of
+// endpoints, for the "no endpoint accepts this request" error message.
+// Called only on that failure path, never on the hot path.
+func rejectionSummary(endpoints []*core.Endpoint, facts core.RequestFacts) string {
+	seen := map[string]bool{}
+	var names []string
+	for _, ep := range endpoints {
+		for _, name := range strategy.RejectedBy(ep, facts) {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return "rejected by an unspecified condition"
+	}
+	sort.Strings(names)
+	return "rejected by condition(s): " + strings.Join(names, ", ")
 }
 
 type upstreamError struct {
@@ -420,9 +545,12 @@ func copyRespHeaders(dst http.Header, src http.Header) {
 const errBodyCap = 128 << 10
 
 // tryOne sends the request to a single endpoint. It returns done=true when a
-// response (success or non-retryable error) has been written to the client.
+// response (success or non-retryable error) has been written to the client;
+// success=true only for a genuine 2xx completion (never for a client-error
+// passthrough or a canceled request, both of which are also done=true) —
+// Serve uses it to decide whether to update the Sticky Model registry.
 func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest,
-	ep *core.Endpoint, snap *Snapshot, attempt int, start time.Time, rec *audit.Record) (bool, *upstreamError) {
+	ep *core.Endpoint, snap *Snapshot, attempt int, start time.Time, rec *audit.Record) (done bool, uerr *upstreamError, success bool) {
 
 	key := ep.HealthKey()
 	attemptStart := time.Now()
@@ -447,7 +575,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok { // validated at config load; defensive only
 		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		return false, nil
+		return false, nil, false
 	}
 
 	req, outBody, err := ad.BuildRequest(r.Context(), ep, creq)
@@ -464,7 +592,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			att.Error = "build: " + err.Error()
 			att.ErrorClass = core.ErrBuild.String()
 		}
-		return false, nil
+		return false, nil, false
 	}
 	logPrefix += " req=" + core.FmtBytes(int64(len(outBody)))
 	if att != nil {
@@ -487,7 +615,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 				att.Error = "canceled by client"
 				att.ErrorClass = core.ErrCanceled.String()
 			}
-			return true, nil
+			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("%s error=network:%v cooldown=%s", logPrefix, err, cd)
@@ -495,7 +623,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			att.Error = "network: " + err.Error()
 			att.ErrorClass = core.ErrNetwork.String()
 		}
-		return false, nil
+		return false, nil, false
 	}
 
 	if resp.StatusCode >= 400 {
@@ -541,7 +669,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			// endpoint's health untouched — only release a probe slot if held.
 			rt.Health.ReportNeutral(key)
 			rt.logf("%s status=%d class=content (no cooldown)", logPrefix, resp.StatusCode)
-			return false, uerr
+			return false, uerr, false
 		}
 		if class == core.ErrClient {
 			// Bad request: every endpoint would fail the same way. Return as-is.
@@ -553,11 +681,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			w.WriteHeader(uerr.status)
 			w.Write(uerr.body)
 			rt.logf("%s status=%d class=client dur=%s", logPrefix, resp.StatusCode, fmtDur(time.Since(start)))
-			return true, nil
+			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
 		rt.logf("%s status=%d class=%s cooldown=%s", logPrefix, resp.StatusCode, class, cd)
-		return false, uerr
+		return false, uerr, false
 	}
 
 	// Success: report health, then forward. From the first byte written the
@@ -608,7 +736,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		}
 	}
 	rt.logf("%s status=%s dur=%s", logPrefix, status, fmtDur(time.Since(start)))
-	return true, nil
+	return true, nil, true
 }
 
 // copyFlush forwards the body chunk by chunk, flushing after every read so

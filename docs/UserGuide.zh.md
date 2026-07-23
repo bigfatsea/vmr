@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-22 22:10, by Sonnet 5 -->
+<!-- Ver 2026-07-23 12:00, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -107,6 +107,62 @@ probe_timeout: 15s      # 仅 active 模式生效：一次后台探测的时间�
 ```
 
 全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。
+
+## 条件路由
+
+同一个虚拟模型背后挂的端点不必是完全等价的。声明每个端点实际支持什么,一条请求需要而某个端点没声明的能力,该端点会被直接跳过——而不是照样把请求打过去,得到一个必然失败的结果:
+
+```yaml
+models:
+  openai:
+    agent:
+      endpoints:
+        - provider: minimax
+          model: MiniMax-M3
+          capabilities: [text, image, tools]   # 自由字符串标签：这个端点接受什么
+          max_context_tokens: 1000000          # 声明的上下文窗口
+        - provider: deepseek
+          model: deepseek-chat
+          capabilities: [text, tools]           # 没有 "image"——带图片的请求会跳过这个端点
+          max_context_tokens: 128000
+```
+
+两个字段都是可选的，缺省即**不限制**：端点不声明 `capabilities` 就视为什么都支持，不声明 `max_context_tokens` 就没有上限——现有配置文件行为完全不变。`capabilities` 一旦声明就是穷尽式的（把端点真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）；`vmr check` 会把每个端点声明的能力和上下文上限打印出来，配置遗漏在这里一眼可见。
+
+两类条件性质不同：
+
+- **`image` / `tools`**——确定性的硬要求。请求需要某个能力但找不到任何候选声明支持时，直接快速失败，返回 `vmr_no_candidates` 并点名缺失的能力，而不是白白浪费一次必然被拒绝的尝试。（`thinking`/`audio`/`video` 暂不检测——这几项的请求侧探测逻辑在各厂协议上还没有确认，现在声明它们也不会有任何效果。）
+- **上下文长度**——一个刻意保守的**粗估**，不是确定值：请求字节按 ASCII（约 4 字节/token）和多字节 UTF-8/中文等（约 2 字节/token，故意估得偏高）分类估算，每张检测到的内联图片按固定约 3000 token 计，检测到的文档/PDF 附件按其 base64 载荷长度 ÷ 20 估算——全程只做廉价的结构标记扫描，不解析内容。因为只是估算，它永远不会单独把一条请求拒之门外：如果所有端点声明的 `max_context_tokens` 看起来都不够，vmr 不会直接报错，而是照样在能力匹配的候选里尝试——高估的代价最多是浪费一次尝试，不会是一条本该成功的请求被拒。
+
+完整设计与 token 估算的调研依据：`docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §1。
+
+## Sticky Model（会话亲和）
+
+上游的 prompt cache 是按精确字节前缀匹配的。如果一条多轮 agent 对话在中途被路由到不同端点，上游的缓存就会失效，一次"看起来更合适"的路由选择反而可能让总成本更高——上面的条件路由本身就可能触发这种情况（比如 agent 压缩上下文后，估算出的长度缩小到低于另一个端点声明的上限）。Sticky Model 会把一条对话尽量留在最近一次成功服务过它的端点上：
+
+```yaml
+sticky_ttl: 10m              # 全局默认：粘性偏好保持有效的时长
+
+models:
+  openai:
+    agent:
+      # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
+      # 才需要显式写 sticky: false
+      endpoints:
+        - provider: minimax
+          model: MiniMax-M3
+          # 继承全局的 10 分钟 sticky_ttl
+        - provider: deepseek
+          model: deepseek-chat
+          sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
+```
+
+- **身份识别**：对话锚点取自 system prompt **和**第一条非 system 消息的哈希——两者都只哈希、从不记录或以其他方式暴露。两个恰好用同一句话开场的不同 Agent 不会被混同，因为它们的 system prompt（进而它们在上游真正的缓存前缀）不同；如果只哈希首条用户消息、不含 system prompt，恰好会漏掉这个场景。
+- **`sticky_ttl` 是端点级的，不是模型级的**——缓存寿命是上游厂商的属性（Anthropic/OpenAI/MiniMax 大约 5-10 分钟；DeepSeek 数小时到数天），所以同一个虚拟模型下的不同端点可以各自声明自己的窗口，不必强行统一成一个值。全局 `sticky_ttl`（默认 10 分钟）是没有显式覆盖的端点的兜底值。
+- 亲和性只会在已经通过健康检查和条件过滤的端点里重新排序——一个之后变得不健康、或者不再满足某项必要能力的端点，不会仅仅因为它是上次的粘性选择就被复活。
+- 每次成功完成请求（含 failover 后的成功）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
+
+完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文 `vmr report` 离线会话分组是两套独立实现）：`docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §2。
 
 ## 审计日志与用量报表
 

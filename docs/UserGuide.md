@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-22 22:10, by Sonnet 5 -->
+<!-- Ver 2026-07-23 12:00, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -108,6 +108,62 @@ probe_timeout: 15s      # active mode only: upper bound on one background probe
 ```
 
 All-candidates-failed returns the last upstream error verbatim. Streams only fail over before the first byte is written.
+
+## Condition-based routing
+
+Endpoints behind one virtual model don't have to be interchangeable. Declare what each one actually supports, and a request that needs something a given endpoint doesn't declare skips it — rather than being tried against an endpoint that's certain to reject it:
+
+```yaml
+models:
+  openai:
+    agent:
+      endpoints:
+        - provider: minimax
+          model: MiniMax-M3
+          capabilities: [text, image, tools]   # free-form tags: what this endpoint accepts
+          max_context_tokens: 1000000          # declared context window
+        - provider: deepseek
+          model: deepseek-chat
+          capabilities: [text, tools]           # no "image" — an image request skips this endpoint
+          max_context_tokens: 128000
+```
+
+Both fields are optional and default to **unconstrained**: an endpoint that doesn't set `capabilities` is assumed to support everything, and one without `max_context_tokens` has no declared ceiling — existing configs behave exactly as before. Once `capabilities` is set it's exhaustive (list everything the endpoint actually supports, not just what you want checked); `vmr check` prints each endpoint's declared capabilities and context ceiling so a gap is visible before it causes a misroute.
+
+Two different kinds of condition:
+
+- **`image` / `tools`** — hard requirements. A request needing one and finding no eligible candidate fails fast with a `vmr_no_candidates` error naming the missing capability, instead of wasting an attempt on an endpoint guaranteed to reject it. (`thinking`/`audio`/`video` aren't checked yet — request-side detection for those isn't confirmed across providers, so declaring them today has no effect.)
+- **context length** — a coarse, deliberately conservative *estimate*, not a certainty: request bytes classified ASCII (~4 bytes/token) vs. multi-byte UTF-8/CJK (~2 bytes/token, intentionally pessimistic), a flat ~3000 tokens per detected inline image, and detected document/PDF attachments sized by their base64 payload length ÷ 20 — no parsing beyond cheap structural markers. Because it's only an estimate, it can never by itself refuse a request: if every endpoint's declared `max_context_tokens` looks too small, vmr falls back to trying the capability-eligible candidates anyway rather than returning an error on a guess — an overestimate costs at most a wasted attempt, never a request that would have worked.
+
+Full design and the token-estimate calibration: `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §1.
+
+## Sticky Model (session affinity)
+
+Upstream prompt caches are keyed on an exact byte prefix. If a multi-turn agent conversation gets routed to a different endpoint mid-conversation, the provider's cache goes cold and a "better" routing choice can end up costing more, not less — condition-based routing above is one thing that can trigger this (e.g. a context estimate that shrinks below another endpoint's declared ceiling after the agent compacts its history). Sticky Model keeps a conversation on whichever endpoint most recently, successfully served it:
+
+```yaml
+sticky_ttl: 10m              # global default: how long a sticky preference stays valid
+
+models:
+  openai:
+    agent:
+      # sticky: true is the default — omit it. Only a genuinely one-shot
+      # virtual model (no multi-turn value to protect) needs sticky: false.
+      endpoints:
+        - provider: minimax
+          model: MiniMax-M3
+          # inherits the global 10-minute sticky_ttl
+        - provider: deepseek
+          model: deepseek-chat
+          sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
+```
+
+- **Identity**: a conversation is fingerprinted from its system prompt *and* first non-system message — both hashed, never logged or otherwise exposed. Two different agents that happen to open with the same line don't collide, because their system prompts (and therefore their actual upstream cache prefixes) differ; hashing only the first user message, without the system prompt, would have missed exactly that case.
+- **`sticky_ttl` is per-endpoint, not per-model** — cache lifetime is a property of the upstream provider (Anthropic/OpenAI/MiniMax: roughly 5–10 minutes; DeepSeek: hours to days), so endpoints behind the same virtual model can each declare their own window instead of forcing one value on all of them. The global `sticky_ttl` (default 10 minutes) is the fallback for endpoints that don't override it.
+- Affinity only ever reorders within the endpoints that already passed health and condition filtering — an endpoint that's since become unhealthy or lost a required capability is never resurrected just because it was the sticky pick last time.
+- The pointer moves on every successful completion, including a failover success, so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
+
+Full design (identity choice, TTL research behind the defaults, why this fingerprint is a separate implementation from `vmr report`'s offline session grouping below): `docs/vmr_condition_routing_and_sticky_model_sonnet-5.md` §2.
 
 ## Audit log & usage reports
 
