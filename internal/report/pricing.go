@@ -1,4 +1,4 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
 // Optional pricing sidecar (V2 §4). A local hand-maintained YAML file mapping
 // each endpoint (provider:real-model) to per-1M-token unit prices. When absent
@@ -14,7 +14,7 @@
 // historical requests actually ran" - so an old report's $ column can't be
 // mistaken for a real bill.
 
-package report2
+package report
 
 import (
 	"fmt"

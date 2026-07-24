@@ -1,4 +1,4 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
 // The redesigned per-request drill-down (V2 §7): vmr-requests.jsonl (the data)
 // + vmr-requests.md (the view, grouped Chat User -> Session -> Task -> Turn).
@@ -12,7 +12,7 @@
 // record's own offset. Per-tag siblings reuse the exact same renderer on a
 // pre-filtered row set, so each is self-contained without the main report.
 
-package report2
+package report
 
 import (
 	"bufio"
@@ -24,8 +24,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"vmr/internal/report"
 )
 
 // utc8 is China Standard Time — no DST since 1991, so a fixed offset is
@@ -59,7 +57,7 @@ func WriteRequestsJSONL(rows []RequestRow, path string) (int, error) {
 // Session -> Task -> Turn view) plus one vmr-requests-<tag>.md sibling per
 // distinct non-empty ClientKey, each pre-filtered to that client's rows and
 // carrying a one-line summary header. Titles come from sess.
-func WriteRequestsIndex(rep *Report2, sess *report.SessionAnalysis, dir string) error {
+func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 	rows := rep.RequestRows()
 	sessionTitle, taskTitle := titleMaps(sess)
 	sessionMeta := map[string]SessionRow{}
@@ -143,7 +141,7 @@ func filterByTag(rows []RequestRow, tag string) []RequestRow {
 	return out
 }
 
-func titleMaps(sess *report.SessionAnalysis) (sessionTitle, taskTitle map[string]string) {
+func titleMaps(sess *SessionAnalysis) (sessionTitle, taskTitle map[string]string) {
 	sessionTitle = map[string]string{}
 	taskTitle = map[string]string{}
 	if sess == nil {
@@ -313,7 +311,7 @@ func renderIndex(title string, rows []RequestRow, sessionTitle, taskTitle map[st
 		w("| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n")
 		for _, r := range occ {
 			w("| %s | %s | %s | %s | %s | %s |\n",
-				fmtUTC8Full(r.TS), finishCell(r), ms(r.DurMS), tokensTriple(r), cacheEffTurn(r), detailLink(r.DetailFile))
+				fmtUTC8Full(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 		}
 		w("\n---\n\n")
 	}
@@ -326,7 +324,7 @@ func renderIndex(title string, rows []RequestRow, sessionTitle, taskTitle map[st
 	for _, r := range all {
 		w("| %s | %s | %s/%s | %s | %s | %s | %s | %s |\n",
 			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
-			outcomeCell(r), ms(r.DurMS), tokensTriple(r), cacheEffTurn(r), detailLink(r.DetailFile))
+			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 	}
 	w("\n")
 	return b.String()
@@ -373,8 +371,8 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 		for _, r := range trows {
 			w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 				turnCell(r.Turn), fmtUTC8Time(r.TS), msgsCell(r.Msgs),
-				finishCell(r), ms(r.DurMS), msOrDash(r.TTFTMS),
-				tokensTriple(r), cacheEffTurn(r), detailLink(r.DetailFile))
+				finishCell(r), fmtDurMS(r.DurMS), msOrDash(r.TTFTMS),
+				freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 		}
 		w("\n")
 	}
@@ -426,7 +424,7 @@ func msOrDash(v int64) string {
 	if v <= 0 {
 		return "-"
 	}
-	return ms(v)
+	return fmtDurMS(v)
 }
 
 func finishCell(r RequestRow) string {
@@ -439,7 +437,7 @@ func finishCell(r RequestRow) string {
 	return orDash(r.Finish)
 }
 
-func tokensTriple(r RequestRow) string {
+func freshCachedOut(r RequestRow) string {
 	if r.TokensIn == 0 && r.TokensOut == 0 {
 		return "-"
 	}

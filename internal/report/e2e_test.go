@@ -1,6 +1,6 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
-package report2
+package report
 
 import (
 	"math"
@@ -13,9 +13,9 @@ var realLogPath = "../../logs/vmr-audit-2026-07-24.jsonl"
 
 // TestRealLogE2E runs against the actual audit file (if present) and verifies
 // internal invariants and design-doc anchors. This used to also cross-
-// validate raw totals against the legacy `vmr report` aggregator
-// (report.Build) before that command was removed; the invariant and anchor
-// checks below are what's left to catch a real regression.
+// validate raw totals against a since-deleted, independently-implemented
+// legacy aggregator; the invariant and anchor checks below are what's left
+// to catch a real regression.
 func TestRealLogE2E(t *testing.T) {
 	if _, err := os.Stat(realLogPath); os.IsNotExist(err) {
 		t.Skip("real audit log not present; skipping e2e test on this clone")
@@ -29,7 +29,7 @@ func TestRealLogE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ---- report2 internal invariants ----
+	// ---- internal invariants ----
 	// fresh = in - cached - cache_write
 	if new.Overall.TokensInFresh != new.Overall.TokensIn-new.Overall.TokensInCached-new.Overall.TokensInCacheWrite {
 		t.Errorf("fresh invariant broken: %d != %d - %d - %d",

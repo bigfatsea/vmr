@@ -3,7 +3,7 @@
 // Tests for small shared helpers that used to live in report.go/usage.go's
 // test file before the old aggregate-report code (report.go/markdown.go)
 // was removed; attemptErrorClass now lives in render.go, ExtractUsage in
-// usage.go — both still load-bearing for report2 via session.go/detail.go.
+// usage.go — both still load-bearing via session.go/detail.go.
 package report
 
 import (

@@ -1,17 +1,19 @@
 // Ver 2026-07-25, by Sonnet 5
 
-// ToolShapeRow/ToolShapes: per declared-tool-set usage aggregation, reused
-// by report2's §7 tool-waste section (internal/report2 converts every field
-// into its own richer ToolShapeRow — see report2.go's buildTools).
+// ToolShapeStats/ToolShapes: per declared-tool-set usage aggregation,
+// consumed by the report §7 tool-waste section (buildTools converts every
+// field into the report's own richer ToolShapeRow — see aggregate.go).
 package report
 
 import "sort"
 
-// ToolShapeRow aggregates tool declaration vs. actual use for one request
+// ToolShapeStats aggregates tool declaration vs. actual use for one request
 // shape (a distinct declared-tool set). "Actual use" counts only each
 // request's own turn — extracted from the response, so tool calls repeated
-// through resent history are never double-counted.
-type ToolShapeRow struct {
+// through resent history are never double-counted. Named distinctly from
+// the package's own richer ToolShapeRow (aggregate.go) — that one adds
+// derived waste/utilization fields on top of these raw counts.
+type ToolShapeStats struct {
 	Shape         string         `json:"shape"`
 	Requests      int            `json:"requests"`
 	Declared      []string       `json:"declared"`
@@ -22,8 +24,8 @@ type ToolShapeRow struct {
 
 // ToolShapes aggregates the analysis into per-shape tool usage rows,
 // most-used shape first. Shapeless records (no tools field) are skipped.
-func (a *SessionAnalysis) ToolShapes() []ToolShapeRow {
-	byShape := map[string]*ToolShapeRow{}
+func (a *SessionAnalysis) ToolShapes() []ToolShapeStats {
+	byShape := map[string]*ToolShapeStats{}
 	for _, r := range a.Recs {
 		if r.ToolsSig == "" && len(r.ToolCalls) == 0 {
 			continue
@@ -34,7 +36,7 @@ func (a *SessionAnalysis) ToolShapes() []ToolShapeRow {
 		}
 		row := byShape[sig]
 		if row == nil {
-			row = &ToolShapeRow{Shape: sig, Declared: r.ToolsDeclared,
+			row = &ToolShapeStats{Shape: sig, Declared: r.ToolsDeclared,
 				Calls: map[string]int{}, DeclaredBytes: r.declBytes}
 			byShape[sig] = row
 		}
@@ -43,7 +45,7 @@ func (a *SessionAnalysis) ToolShapes() []ToolShapeRow {
 			row.Calls[name]++
 		}
 	}
-	out := make([]ToolShapeRow, 0, len(byShape))
+	out := make([]ToolShapeStats, 0, len(byShape))
 	for _, row := range byShape {
 		for _, name := range row.Declared {
 			if row.Calls[name] == 0 {

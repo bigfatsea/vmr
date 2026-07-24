@@ -254,7 +254,7 @@ func TestToolShapesAggregation(t *testing.T) {
 // AnalyzeSessions' Ungrouped bucket, and WriteDetails must still render its
 // detail file without erroring (the old grouped vmr-requests-index.md this
 // used to also assert on was removed with the old `vmr report` command —
-// report2's own vmr-requests.md covers that view now).
+// the current vmr-requests.md, tested elsewhere, covers that view now).
 func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 	line := `{"ts":"2026-07-09T08:00:00+08:00","dur_ms":10,"model":"","protocol":"openai","outcome":"error","client":{"request":{"method":"POST","path":"/v1/chat/completions","body":null}}}` + "\n"
 	dir := t.TempDir()

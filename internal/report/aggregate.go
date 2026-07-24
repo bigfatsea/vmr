@@ -1,33 +1,24 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
-// Package report2 is the aggregator behind the `vmr report` command: it
-// turns audit JSONL into a Markdown + JSON pair organized around nine
-// numbered sections (§0-§8, see docs/VirtualModelRouter_System_Design_v3.md
-// §9.4; the original design rationale is in REPORT_REDESIGN_V2.zh.md, kept
-// as a historical record — its "eight sections" and "format 9" numbering
-// predate the pricing/cost-estimate section added since). The package name
-// predates a CLI rename (it shipped as `vmr report2` alongside a since-
-// deleted `vmr report`; both the command and this package are now simply
-// "report") and is kept as-is — renaming it would touch every import for no
-// functional benefit.
+// This file (aggregate.go) is the aggregator behind the `vmr report`
+// command: it turns audit JSONL into a Markdown + JSON pair organized
+// around nine numbered sections (§0-§8, see
+// docs/VirtualModelRouter_System_Design_v3.md §9.4; the original design
+// rationale predates the pricing/cost-estimate section and is kept as a
+// historical record in REPORT_REDESIGN_V2.zh.md — that doc's "eight
+// sections"/"format 9" numbering is superseded here).
 //
-// Reused from internal/report (read-only foundation, not superseded):
-//   - report.AnalyzeSessions  -> session/task grouping, compaction chains,
-//     workload tags, tool signatures (the 791-line heuristic core this
-//     package does not reimplement).
-//   - report.ExtractUsage     -> the four provider usage shapes.
-//   - report.WriteDetails     -> per-request detail files under details/.
-//   - report.ReqInfo / SessionAnalysis / SessionInfo / Usage / ToolShapeRow
-//     -> reading the analysis output.
-//
-// internal/report's own former standalone aggregator/renderer (report.Build,
-// report.Markdown, report.WriteRequests, and WriteDetails' legacy index
-// side effect) has been deleted; this package is the only aggregator left.
-//
-// Everything else - bucket aggregation, derived metrics (fresh tokens, cache
-// efficiency, true stream_ms percentiles, slow-request counts, tool-schema
-// waste, context growth, by-client, cost estimate), Markdown rendering, the
-// requests index, and the pricing sidecar - lives here.
+// It shares the package with session.go/export.go (AnalyzeSessions: 791-
+// line session/task-grouping heuristic, compaction chains, workload tags,
+// tool signatures) and detail.go/render.go (WriteDetails: per-request
+// Markdown+JSON detail files under details/) — those pieces, plus
+// usage.go's ExtractUsage, are the foundation every request-level and
+// session-level field in this file's Build() reads. aggregate.go/
+// aggregate_render.go/metrics.go/requests.go/pricing.go are what's actually
+// new relative to that foundation: bucket aggregation, derived metrics
+// (fresh tokens, cache efficiency, true stream_ms percentiles, slow-request
+// counts, tool-schema waste, context growth, by-client, cost estimate),
+// Markdown rendering, the requests index, and the pricing sidecar.
 //
 // Format 10 (Meta.Format / const Format below) is the only format; the
 // invariant it encodes: every bucket keeps its own raw dur_ms / ttft_ms /
@@ -35,7 +26,7 @@
 // roll-up, no percentile-of-percentiles. stream_ms (dur-ttft) is collected
 // as its own per-request slice for the same reason:
 // P95(dur)-P95(ttft) != P95(dur-ttft).
-package report2
+package report
 
 import (
 	"encoding/json"
@@ -46,10 +37,9 @@ import (
 	"time"
 
 	"vmr/internal/audit"
-	"vmr/internal/report"
 )
 
-// Format is the report2 JSON structure version. 10 continues the legacy
+// Format is the aggregate report's JSON structure version. 10 continues the legacy
 // sequence (9 = legacy report) and marks the redesigned layout.
 const Format = 10
 
@@ -408,7 +398,7 @@ type PricingRate struct {
 	OutPer1M        float64 `json:"out_per_1m" yaml:"out_per_1m"`
 }
 
-// rec2 is report2's per-record working struct: raw fields from audit.Record
+// rec2 is Build's per-record working struct: raw fields from audit.Record
 // joined to ReqInfo's grouping/features. Built once per record, shared
 // read-only by every bucket.
 type rec2 struct {
@@ -420,7 +410,7 @@ type rec2 struct {
 	durMS, ttftMS            int64
 	streamMS                 int64
 	streamOK                 bool
-	usage                    report.Usage
+	usage                    Usage
 	usageOK                  bool
 	msgs                     int
 	bytesIn, bytesOut        int64
@@ -449,7 +439,7 @@ type rec2 struct {
 }
 
 // Build reads audit JSONL files and aggregates them into a Report2. It calls
-// report.AnalyzeSessions for grouping (one read), then does its own pass
+// AnalyzeSessions for grouping (one read), then does its own pass
 // (second read) joining each record to its ReqInfo via sess.Lookup.
 //
 // Unlike the old (now removed) `vmr report` aggregator — which ran its
@@ -467,8 +457,8 @@ type rec2 struct {
 // long-running `vmr start` compressing/deleting a log file out from under
 // a concurrently running `vmr report` — not a code bug, so the message
 // below names that possibility explicitly.
-func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) (*Report2, *report.SessionAnalysis, error) {
-	sess, err := report.AnalyzeSessions(paths)
+func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) (*Report2, *SessionAnalysis, error) {
+	sess, err := AnalyzeSessions(paths)
 	if err != nil {
 		return nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
 			"This step reads every input file a second time; the most common real-world cause "+
@@ -478,7 +468,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 			"rotated files to .zst) and that it isn't corrupt", err)
 	}
 	// valid session IDs (for SessionRow accumulation) + lookup by id
-	sessionInfo := map[string]*report.SessionInfo{}
+	sessionInfo := map[string]*SessionInfo{}
 	for _, s := range sess.Sessions {
 		sessionInfo[s.ID] = s
 	}
@@ -622,7 +612,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 			e.OK++
 		} else {
 			e.Failed++
-			cls := attemptErrClass(a)
+			cls := attemptErrorClass(a)
 			if cls == "" {
 				cls = "unknown"
 			}
@@ -1067,9 +1057,9 @@ func sortRows(rows []Row, key string) {
 	})
 }
 
-// buildRec2 extracts report2's per-record fields from an audit.Record joined
+// buildRec2 extracts the aggregator's per-record fields from an audit.Record joined
 // to its ReqInfo (which may be nil for records the analyzer skipped).
-func buildRec2(arec *audit.Record, ri *report.ReqInfo, path string, line int) *rec2 {
+func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 	r := &rec2{
 		ts:       arec.TS,
 		date:     arec.TS.Format("2006-01-02"),
@@ -1115,7 +1105,7 @@ func buildRec2(arec *audit.Record, ri *report.ReqInfo, path string, line int) *r
 	// truncated: ok outcome with a truncated attempt error
 	if arec.Outcome == "ok" {
 		for _, a := range arec.Attempts {
-			if attemptErrClass(a) == "truncated" {
+			if attemptErrorClass(a) == "truncated" {
 				r.truncated = true
 				break
 			}
@@ -1158,14 +1148,14 @@ func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
 		}
 	}
 	if len(arec.Attempts) > 0 {
-		errClass = attemptErrClass(arec.Attempts[len(arec.Attempts)-1])
+		errClass = attemptErrorClass(arec.Attempts[len(arec.Attempts)-1])
 	}
 	return successEp, errClass
 }
 
-// workloadClassOf replicates report.workloadClass (unexported) using the
-// exported ReqInfo fields Compaction + Tags.
-func workloadClassOf(ri *report.ReqInfo) string {
+// workloadClassOf derives the workload class from a ReqInfo's Compaction +
+// Tags fields.
+func workloadClassOf(ri *ReqInfo) string {
 	if ri == nil {
 		return "interactive"
 	}
@@ -1198,7 +1188,7 @@ func costFor(pr PricingRate, rc *rec2) float64 {
 }
 
 // buildTools derives the tool-waste fields from the analysis's ToolShapes.
-func buildTools(sess *report.SessionAnalysis) []ToolShapeRow {
+func buildTools(sess *SessionAnalysis) []ToolShapeRow {
 	shapes := sess.ToolShapes()
 	out := make([]ToolShapeRow, 0, len(shapes))
 	for _, t := range shapes {

@@ -35,7 +35,6 @@ import (
 	"vmr/internal/diagnose"
 	"vmr/internal/replay"
 	"vmr/internal/report"
-	"vmr/internal/report2"
 	"vmr/internal/router"
 	"vmr/internal/server"
 
@@ -114,13 +113,12 @@ func cmdDirs(args []string) error {
 	return nil
 }
 
-// cmdReport aggregates audit JSONL into the report2-generation aggregator
-// (internal/report2; package name predates this rename — see that package's
-// doc comment): vmr-report.json/.md, vmr-requests.jsonl/.md (+ per-tag
-// siblings), and one details/*.md+.json per request. Inputs may freely mix
-// live plain .jsonl files and .jsonl.zst files that the audit logger's
-// housekeeping sweep has since compressed (internal/report decompresses
-// transparently) — e.g. `vmr report 'vmr-audit-*.jsonl*'`.
+// cmdReport aggregates audit JSONL into internal/report's output:
+// vmr-report.json/.md, vmr-requests.jsonl/.md (+ per-tag siblings), and one
+// details/*.md+.json per request. Inputs may freely mix live plain .jsonl
+// files and .jsonl.zst files that the audit logger's housekeeping sweep has
+// since compressed (internal/report decompresses transparently) — e.g.
+// `vmr report 'vmr-audit-*.jsonl*'`.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
@@ -151,11 +149,11 @@ func cmdReport(args []string) error {
 	}
 	sort.Strings(paths)
 
-	pricing, err := report2.LoadPricing(*pricingPath)
+	pricing, err := report.LoadPricing(*pricingPath)
 	if err != nil {
 		return err
 	}
-	rep, sess, err := report2.Build(paths, time.Now(), os.Stdout, pricing)
+	rep, sess, err := report.Build(paths, time.Now(), os.Stdout, pricing)
 	if err != nil {
 		return err
 	}
@@ -166,10 +164,10 @@ func cmdReport(args []string) error {
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
 	mdPath := filepath.Join(*outDir, "vmr-report.md")
-	if err := report2.WriteJSON(rep, jsonPath); err != nil {
+	if err := report.WriteJSON(rep, jsonPath); err != nil {
 		return err
 	}
-	if err := os.WriteFile(mdPath, []byte(report2.Markdown(rep)), 0o600); err != nil {
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
@@ -187,12 +185,12 @@ func cmdReport(args []string) error {
 	// Requests index (+ per-tag siblings) + jsonl.
 	rows := rep.RequestRows()
 	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
-	nReq, err := report2.WriteRequestsJSONL(rows, reqPath)
+	nReq, err := report.WriteRequestsJSONL(rows, reqPath)
 	if err != nil {
 		return fmt.Errorf("requests export: %w", err)
 	}
 	fmt.Printf("%s (%d rows)\n", reqPath, nReq)
-	if err := report2.WriteRequestsIndex(rep, sess, *outDir); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, *outDir); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Printf("%s\n", filepath.Join(*outDir, "vmr-requests.md"))

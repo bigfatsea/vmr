@@ -1,4 +1,4 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
 // Derived-metric helpers, true per-bucket percentiles, and the small
 // per-record extraction helpers shared by Build. Every finish* computes the
@@ -6,16 +6,12 @@
 // true stream_ms percentiles) from raw sums/slices the accumulation pass
 // already populated - no new I/O, no cross-bucket approximation.
 
-package report2
+package report
 
 import (
 	"encoding/json"
 	"sort"
 	"strconv"
-	"strings"
-
-	"vmr/internal/audit"
-	"vmr/internal/report"
 )
 
 // freshTokens returns in - cached - cacheWrite, floored at 0.
@@ -47,8 +43,7 @@ func cacheHitRate(cached, in int64) float64 {
 	return round2(float64(cached) / float64(in))
 }
 
-// percentiles returns nearest-rank p50 and p95 from a raw slice. Identical
-// semantics to the legacy report.percentiles so cross-validation holds.
+// percentiles returns nearest-rank p50 and p95 from a raw slice.
 func percentiles(xs []int64) (p50, p95 int64) {
 	if len(xs) == 0 {
 		return 0, 0
@@ -155,7 +150,7 @@ func finishWorkload(w *WorkloadRow) {
 	w.durs, w.streamMS = nil, nil
 }
 
-func finishSession(s *SessionRow, info *report.SessionInfo) {
+func finishSession(s *SessionRow, info *SessionInfo) {
 	s.DurMSP95 = p95Only(s.durs)
 	s.TTFTMSP95 = p95Only(s.ttfts)
 	s.TokensInFresh = freshTokens(s.TokensIn, s.TokensInCached, s.TokensInCacheWrite)
@@ -195,7 +190,7 @@ func buildFindings(rep *Report2) []Finding {
 	for _, t := range rep.Tools {
 		if t.DeclareUtilization < 0.20 && t.SchemaBytesShipped > 0 {
 			add("工具 schema 浪费", "schema_bytes_shipped",
-				fmtBytes(t.SchemaBytesShipped),
+				fmtBytesGB(t.SchemaBytesShipped),
 				t.Shape+"/"+strconv.Itoa(t.Requests)+" 请求",
 				"裁剪未用工具；利用率 "+strconv.FormatFloat(float64(t.DeclareUtilization)*100, 'f', 1, 64)+"%")
 			break // one finding per report (the worst shape)
@@ -272,23 +267,9 @@ func buildFindings(rep *Report2) []Finding {
 
 // ---- per-record extraction helpers (recompute fields ReqInfo keeps
 //      unexported: bytes, tool-decl bytes, endpoint, error class) ----
-
-// bodyBytes sizes a recorded body: JSON bodies by re-serialization, string
-// bodies (SSE) by length. Mirrors the legacy report.bodyBytes.
-func bodyBytes(body any) int64 {
-	switch b := body.(type) {
-	case nil:
-		return 0
-	case string:
-		return int64(len(b))
-	default:
-		raw, err := json.Marshal(b)
-		if err != nil {
-			return 0
-		}
-		return int64(len(raw))
-	}
-}
+//
+// bodyBytes (sizing a recorded body) is shared with render.go — same
+// package now, one definition.
 
 // toolDeclInfo returns (count, serializedBytes) of the request's "tools"
 // array. Mirrors what ReqInfo.declBytes captures (unexported).
@@ -308,22 +289,6 @@ func toolDeclInfo(body any) (count int, bytes int64) {
 	return len(tools), int64(len(raw))
 }
 
-// attemptErrClass returns an attempt's typed error class, falling back to
-// parsing the free-text Error field for logs written before ErrorClass
-// existed. Replicates the legacy report.attemptErrorClass (unexported).
-func attemptErrClass(a audit.Attempt) string {
-	if a.ErrorClass != "" {
-		return a.ErrorClass
-	}
-	if a.Error == "" {
-		return ""
-	}
-	if i := strings.IndexByte(a.Error, ':'); i > 0 {
-		return a.Error[:i]
-	}
-	return a.Error
-}
-
 // ---- formatting helpers (shared by render + findings) ----
 
 func fmtTokens(n int64) string {
@@ -339,7 +304,7 @@ func fmtTokens(n int64) string {
 	}
 }
 
-func fmtBytes(n int64) string {
+func fmtBytesGB(n int64) string {
 	switch {
 	case n >= 1_000_000_000:
 		return strconv.FormatFloat(float64(n)/1e9, 'f', 2, 64) + " GB"

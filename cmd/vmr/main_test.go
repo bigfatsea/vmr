@@ -120,7 +120,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
-// report2.Build: glob expansion, output directory creation, and writing both
+// report.Build: glob expansion, output directory creation, and writing both
 // the JSON and Markdown artifacts (design doc §9.4), plus the session-
 // analysis outputs (vmr-requests.jsonl/.md + details/).
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {

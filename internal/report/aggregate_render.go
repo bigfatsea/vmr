@@ -1,4 +1,4 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
 // Markdown rendering of Report2, organized around nine numbered sections
 // (§0-§8: summary, token economics, cost estimate, reliability, latency,
@@ -11,7 +11,7 @@
 // total requests get a footnote; hourly series render as mermaid
 // xychart-beta charts.
 
-package report2
+package report
 
 import (
 	"fmt"
@@ -20,7 +20,7 @@ import (
 	"strings"
 )
 
-// Markdown renders the full report2 Markdown document.
+// Markdown renders the full vmr-report.md document.
 func Markdown(rep *Report2) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
@@ -85,7 +85,7 @@ func highlights(rep *Report2) []string {
 	for _, t := range rep.Tools {
 		if t.Requests > 0 && t.DeclareUtilization < 0.20 && t.SchemaBytesShipped > 0 {
 			out = append(out, fmt.Sprintf("⚠️ **工具声明 %s** - 跨 %d 请求发送 %s schema，利用率 %s（%d 个从未调用）",
-				t.Shape, t.Requests, fmtBytes(t.SchemaBytesShipped),
+				t.Shape, t.Requests, fmtBytesGB(t.SchemaBytesShipped),
 				pctStr(t.DeclareUtilization), len(t.NeverCalled)))
 			break
 		}
@@ -331,7 +331,7 @@ func renderLatency(w func(string, ...any), rep *Report2, o Row) {
 			tokPerSec(m.TokOutPerSec))
 	}
 	w("\n> 全局 p95 dur %s，max %s。stream_ms = dur − ttft（每请求独立切片算真百分位，非两百分位相减）。\n",
-		ms(o.DurMSP95), ms(o.DurMSMax))
+		fmtDurMS(o.DurMSP95), fmtDurMS(o.DurMSMax))
 	w("> 若 coding 的慢主要来自长流式输出（stream p95 大），而非首字延迟，即为流式归因。\n\n")
 }
 
@@ -344,7 +344,7 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 		w("| %s | %s | %d | %s | %s / %s / %s | %s |\n",
 			m.Model, m.Protocol, m.Requests, pctStr2(m.OK, m.Requests),
 			fmtTokens(m.TokensInFresh), fmtTokens(m.TokensInCached), fmtTokens(m.TokensOut),
-			ms(m.DurMSP95))
+			fmtDurMS(m.DurMSP95))
 	}
 	w("\n")
 	// by workload class (6)
@@ -357,7 +357,7 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 		w("| %s | %d | %s | %s%s | %s | %s |\n",
 			wl.Class, wl.Requests, fmtTokens(wl.TokensInFresh),
 			cacheEffCell(wl.CacheEfficiency, wl.TokensKnown, wl.Requests), flag,
-			pctStr(wl.ToolCallRate), ms(wl.DurMSP95))
+			pctStr(wl.ToolCallRate), fmtDurMS(wl.DurMSP95))
 	}
 	w("\n")
 	// by hour: dual sparkline + narrow table
@@ -379,7 +379,7 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 			if h.Requests == 0 {
 				continue
 			}
-			w("| %02d | %d | %s | %d |\n", h.Hour, h.Requests, ms(h.DurMSP95), h.SlowRequests)
+			w("| %02d | %d | %s | %d |\n", h.Hour, h.Requests, fmtDurMS(h.DurMSP95), h.SlowRequests)
 		}
 		w("\n")
 	}
@@ -391,7 +391,7 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 				c.ClientKey, c.Requests, pctStr2(c.OK, c.Requests),
 				fmtTokens(c.TokensInFresh),
 				cacheEffCell(c.CacheEfficiency, c.TokensKnown, c.Requests),
-				ms(c.DurMSP95))
+				fmtDurMS(c.DurMSP95))
 		}
 		w("\n")
 	}
@@ -528,7 +528,7 @@ func renderEfficiency(w func(string, ...any), rep *Report2, o Row) {
 		for _, t := range top {
 			w("| %s | %d | %d | %d | %s | %s |\n",
 				t.Shape, t.Requests, len(t.Declared), t.DistinctCalled,
-				pctStr(t.DeclareUtilization), fmtBytes(t.SchemaWasteBytes))
+				pctStr(t.DeclareUtilization), fmtBytesGB(t.SchemaWasteBytes))
 		}
 		w("\n")
 		for _, t := range top {
@@ -618,7 +618,7 @@ func cut(s string, n int) string {
 	return s
 }
 
-func ms(v int64) string {
+func fmtDurMS(v int64) string {
 	if v <= 0 {
 		return "-"
 	}
@@ -659,9 +659,9 @@ func ppCell(p50, p95, max int64, n int) string {
 		flag = " ⚠️low-n"
 	}
 	if max > 0 {
-		return fmt.Sprintf("%s / %s / %s (n=%d%s)", ms(p50), ms(p95), ms(max), n, flag)
+		return fmt.Sprintf("%s / %s / %s (n=%d%s)", fmtDurMS(p50), fmtDurMS(p95), fmtDurMS(max), n, flag)
 	}
-	return fmt.Sprintf("%s / %s (n=%d%s)", ms(p50), ms(p95), n, flag)
+	return fmt.Sprintf("%s / %s (n=%d%s)", fmtDurMS(p50), fmtDurMS(p95), n, flag)
 }
 
 func streamCell(p95 int64, n int) string {
@@ -672,7 +672,7 @@ func streamCell(p95 int64, n int) string {
 	if n < 20 {
 		flag = " ⚠️low-n"
 	}
-	return fmt.Sprintf("%s (n=%d%s)", ms(p95), n, flag)
+	return fmt.Sprintf("%s (n=%d%s)", fmtDurMS(p95), n, flag)
 }
 
 func durCell(p95 int64, n int) string {
@@ -683,7 +683,7 @@ func durCell(p95 int64, n int) string {
 	if n < 20 {
 		flag = " ⚠️low-n"
 	}
-	return fmt.Sprintf("%s (n=%d%s)", ms(p95), n, flag)
+	return fmt.Sprintf("%s (n=%d%s)", fmtDurMS(p95), n, flag)
 }
 
 func tokPerSec(f float64) string {

@@ -1,6 +1,6 @@
-// Ver 2026-07-25, report2
+// Ver 2026-07-25, by Sonnet 5
 
-package report2
+package report
 
 import (
 	"encoding/json"
