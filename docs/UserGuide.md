@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->
+<!-- Ver 2026-07-24 23:30, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -21,9 +21,14 @@ listen: 127.0.0.1:8800
 # probe_timeout: 15s            # active mode only: upper bound on one background recovery probe
 # max_request_body_mb: 8       # inbound request body size cap (stability only; the audit trail always records requests in full, whatever size vmr accepted)
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
-# https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy
-#                                      # (env vars are ignored; write ${HTTPS_PROXY} to reference one explicitly)
-# http_proxy: http://127.0.0.1:7890    # same for http base_urls (e.g. a LAN llama.cpp server); unset = all direct
+# https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy
+#                                      # (env vars are ignored; write ${HTTPS_PROXY} to reference one explicitly).
+#                                      # Declaring this URL does NOT turn proxying on by itself — see `proxy` below
+# http_proxy: http://127.0.0.1:7890    # same for http base_urls (e.g. a LAN llama.cpp server)
+# proxy: false                  # global default for providers with no proxy switch of their own (default false).
+#                                # Recommended: leave this off and opt individual providers in with their own
+#                                # proxy: true (see below) — explicit per-provider intent beats a global switch
+#                                # silently deciding for providers added later
 # image_downscale: 512         # long-side px cap for inline request images (default: off; a model's own setting overrides this, see below)
 # image_cache_ttl_days: 7      # eviction age for cached downscale results (default: 7 days)
 # audit_retention_days: 30     # delete audit files older than this (default: keep forever)
@@ -37,11 +42,14 @@ providers:
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}
+      proxy: true              # always go through https_proxy/http_proxy above, whatever the
+                               # global proxy default says — the recommended way to opt a
+                               # foreign provider in
     minimax:
       base_url: https://api.minimaxi.com/v1
       api_key: ${MINIMAX_API_KEY}
-      proxy: false             # always connect directly, whatever https_proxy/env says —
-                               # typical when the proxy exists only for foreign providers
+      # proxy: false           # not needed here — the recommended baseline (global proxy
+                               # left off) is already direct-by-default for this provider
   anthropic:
     openrouter:                # same account's Anthropic face; same name, no conflict
       base_url: https://openrouter.ai/api/v1
@@ -60,7 +68,7 @@ models:
 
 All fields and validation rules: design doc §10. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one. Parsing is strict: an unknown or misspelled key (`max_concurency: 8`) is a load error, never a silently ignored no-op you believe is in effect.
 
-**Upstream proxy — explicit config only**: a provider's own `proxy: false` always wins (that provider connects directly — the domestic-plus-foreign provider mix this exists for); otherwise the global `http_proxy`/`https_proxy` above applies (chosen by the base_url's scheme); otherwise direct. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching global proxy is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
+**Upstream proxy — explicit config only, default off**: `http_proxy`/`https_proxy` above only declare *where* the proxy lives — they don't turn it on for anyone by themselves. Whether a provider actually uses it is decided by a three-way resolution: a provider's own `proxy: true`/`false` always wins; absent that, it follows the global `proxy` switch (also `false` by default); if that resolves to "on", the base_url's scheme picks `https_proxy` or `http_proxy`. **Recommended shape**: leave the global `proxy` off and opt individual providers in with their own `proxy: true` — explicit per-provider intent, so a provider added later doesn't silently inherit a stale global default. (Flip the global `proxy` to `true` only if you want "proxied" to be the default and carve out exceptions with a provider's own `proxy: false` instead.) Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` (global or per-provider) with no matching proxy URL configured is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
 **base_url must include the version**: vmr pre-computes each provider's complete upstream URL at initialization by appending the protocol's bare path (`/chat/completions` for OpenAI, `/messages` for Anthropic) directly to `base_url` — no normalization, no overlap detection. `base_url` must therefore already carry the provider's own full API version, whatever that provider calls it: `https://api.example.com/v1`, `https://api.minimaxi.com/anthropic/v1`, `https://ark.example.com/api/coding/v3`. This matters because not every provider versions its OpenAI/Anthropic-compatible surface as `v1` — Volcengine's coding-plan OpenAI endpoint is `v3`, for instance — so vmr never assumes a version on your behalf; get it wrong and the 404 shows up immediately against the exact base_url you wrote. The URL is computed once at config load and stored on the endpoint; the adapter uses it directly, never constructing or normalizing a URL per request.
 

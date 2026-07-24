@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->
+<!-- Ver 2026-07-24 23:30, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -20,9 +20,13 @@ listen: 127.0.0.1:8800
 # probe_timeout: 15s            # 仅 active 模式生效：一次后台恢复探测的超时上限
 # max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
-# https_proxy: http://127.0.0.1:7890   # https 型 base_url 的上游代理——vmr 用代理的唯一途径
-#                                      # （环境变量被忽略；要引用就显式写 ${HTTPS_PROXY}）
-# http_proxy: http://127.0.0.1:7890    # http 型 base_url 同理（如局域网 llama.cpp）；都不设 = 全部直连
+# https_proxy: http://127.0.0.1:7890   # https 型 base_url 的代理服务器地址——vmr 用代理的唯一途径
+#                                      # （环境变量被忽略；要引用就显式写 ${HTTPS_PROXY}）。
+#                                      # 只是声明代理在哪，不代表默认开启——见下面的 `proxy`
+# http_proxy: http://127.0.0.1:7890    # http 型 base_url 同理（如局域网 llama.cpp）
+# proxy: false                  # 全局默认值：没有自己 proxy 开关的 provider 走这个（缺省 false）。
+#                                # 推荐写法：全局保持关闭，个别需要代理的 provider 自己写 proxy: true——
+#                                # 显式的单点意图，不会让以后新加的 provider 悄悄被一个全局开关决定
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
 # image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
 # audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
@@ -36,11 +40,13 @@ providers:
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}
+      proxy: true              # 永远走 https_proxy/http_proxy，无视全局 proxy 默认值——
+                               # 给海外 provider 开代理的推荐写法
     minimax:
       base_url: https://api.minimaxi.com/v1
       api_key: ${MINIMAX_API_KEY}
-      proxy: false             # 该 provider 永远直连，无视 https_proxy 与环境变量——
-                               # 代理只为海外厂商而设、国内厂商直连的典型写法
+      # proxy: false           # 这里不需要写——推荐的基线（全局 proxy 关闭）本来就对
+                               # 这个 provider 默认直连
   anthropic:
     openrouter:                # 同一账号的 Anthropic 面，同名不冲突（两层 map 天然隔离）
       base_url: https://openrouter.ai/api/v1
@@ -59,7 +65,7 @@ models:
 
 全部字段与校验规则见设计文档 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
 
-**上游代理——只认显式配置**：provider 自己的 `proxy: false` 最高优先（该 provider 永远直连——这正是"国内厂商直连 + 海外厂商走代理"混配场景的解法）；其次是上面的全局 `http_proxy`/`https_proxy`（按 base_url 的 scheme 选用）；都没设 = 直连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但全局没配对应代理是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
+**上游代理——只认显式配置，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器**在哪**，本身不会替任何 provider 打开代理。一个 provider 是否真的走代理，由三层解析决定：provider 自己的 `proxy: true`/`false` 最高优先；没写就跟随全局 `proxy` 开关（缺省同样是 `false`）；解析结果是"开"时，才按 base_url 的 scheme 选用 `https_proxy`/`http_proxy`。**推荐写法**：全局 `proxy` 保持关闭，个别需要代理的 provider（通常是海外厂商）自己写 `proxy: true`——这是显式的单点意图，不会让以后新增的 provider 悄悄继承一个已经过时的全局默认值。（只有想让"默认走代理"成为基线、再用个别 provider 的 `proxy: false` 挖例外时，才把全局 `proxy` 设为 `true`。）**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true`（不管全局还是 provider 级）但没配对应的代理地址是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
 
 **base_url 必须自带版本号**：vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI 为 `/chat/completions`，Anthropic 为 `/messages`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
 

@@ -1,4 +1,4 @@
-// Ver 2026-07-12 17:00, by Fable 5
+// Ver 2026-07-24 23:20, by Sonnet 5
 package router
 
 import (
@@ -21,6 +21,7 @@ import (
 func TestProxyResolutionGrouping(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
+proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
   openai:
@@ -96,6 +97,7 @@ func TestProxyEndToEnd(t *testing.T) {
 	// transport hands it to the proxy instead of dialing the host itself.
 	cfg, err := config.Parse(fmt.Appendf(nil, `
 listen: 127.0.0.1:0
+proxy: true
 http_proxy: %s
 providers:
   openai:

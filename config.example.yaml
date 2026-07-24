@@ -1,4 +1,4 @@
-# Ver 2026-07-24 10:00, by Sonnet 5
+# Ver 2026-07-24 23:20, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have; models = what clients see and in which order to use it.
 # Both are nested protocol -> name: the outer key is the adapter/protocol
@@ -38,10 +38,17 @@ listen: 127.0.0.1:8800
 # probe_timeout: 15s             # active mode only: upper bound on one background probe call
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
-# https_proxy: http://127.0.0.1:7890   # upstream proxy for https base_urls — the ONLY way vmr uses a proxy (env vars are
-#                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly); a provider's own
-#                                      # `proxy: false` always wins; unset = every provider connects directly
+# https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy (env vars are
+#                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly). Declaring this URL
+#                                      # does NOT turn proxying on by itself — see `proxy` below.
 # http_proxy: http://127.0.0.1:7890    # same, for http base_urls (e.g. a LAN llama.cpp server)
+# proxy: false                   # global default for providers with no proxy switch of their own (default false:
+#                                 # http_proxy/https_proxy above only declare where the proxy lives, they opt nobody
+#                                 # in). Recommended: leave this false and opt individual providers in with their own
+#                                 # `proxy: true` (see openrouter below) — explicit per-provider intent, so a provider
+#                                 # added later doesn't silently inherit a stale global default. Flip this to true only
+#                                 # if you want "proxied" to be the default and carve out exceptions with a provider's
+#                                 # own `proxy: false` instead.
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
 # sticky_ttl: 10m                # global default for Sticky Model's affinity window (0/absent = default 10m);
@@ -68,16 +75,21 @@ providers:
     minimax:
       base_url: https://api.minimaxi.com/v1
       api_key: ${MINIMAX_PLAN_KEY}
-      # proxy: false               # per-provider switch: false = always connect
-      #                            # directly, whatever https_proxy says (typical
-      #                            # for domestic providers when the proxy only
-      #                            # exists for the foreign ones); true/absent =
-      #                            # follow https_proxy above. No env fallback;
-      #                            # true without a global proxy fails validation.
-      #                            # YAML 1.2: write true/false, not on/off.
+      # proxy: false               # no-op here — the recommended baseline (global
+      #                            # `proxy` absent/false) is already direct-by-default.
+      #                            # Only needed if you flip the global default to true
+      #                            # and this domestic provider needs to opt back out.
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key: ${OPENROUTER_API_KEY}
+      proxy: true                  # per-provider switch: true = always go through
+                                    # https_proxy/http_proxy above, whatever the global
+                                    # `proxy` default says (recommended way to opt a
+                                    # foreign provider in); false = always direct; absent
+                                    # = follow the global `proxy` default. No env
+                                    # fallback; true with no matching global proxy URL
+                                    # fails validation. YAML 1.2: write true/false, not
+                                    # on/off.
     deepseek:
       base_url: https://api.deepseek.com/v1
       api_key: ${DEEPSEEK_API_KEY}

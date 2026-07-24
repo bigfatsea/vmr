@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-24 23:20, by Sonnet 5
 package diagnose
 
 import (
@@ -151,6 +151,7 @@ func TestEnvCheck_ProxyReachability(t *testing.T) {
 
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
+proxy: true
 http_proxy: "http://%s"
 providers:
   openai: {p1: {base_url: %q, api_key: k}}
@@ -192,6 +193,7 @@ func TestEnvCheck_ProxiedProviderSkipsDirectDNS(t *testing.T) {
 
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
+proxy: true
 http_proxy: "http://%s"
 providers:
   openai: {p1: {base_url: "http://this-host-does-not-exist.invalid", api_key: k}}

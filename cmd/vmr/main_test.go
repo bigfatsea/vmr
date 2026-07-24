@@ -1,4 +1,4 @@
-// Ver 2026-07-24 15:00, by Sonnet 5
+// Ver 2026-07-24 23:20, by Sonnet 5
 package main
 
 import (
@@ -253,6 +253,7 @@ models:
 func TestLogConfigSummary_ProxyMarker(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
+proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
   openai:
@@ -456,6 +457,7 @@ models:
 func TestProviderProxyLines_ProxyURL(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
+proxy: true
 https_proxy: http://user:pass@127.0.0.1:7890
 providers:
   openai:

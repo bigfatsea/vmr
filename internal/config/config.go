@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 23:20, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -65,15 +65,15 @@ const (
 // no more "_a" suffix hack for a provider's second protocol face.
 //
 // Proxy is a tri-state switch over this provider's upstream connections:
-// false = always direct, whatever the global proxy settings say (the
-// domestic-provider case: MiniMax/DeepSeek are reachable directly and a
-// proxy would only slow them down or break them); true or absent = follow
-// the global http_proxy/https_proxy settings. There is no environment
-// fallback anywhere — proxies are explicit config. The difference between
-// true and absent: true with no matching global proxy is a validation
-// error (a contradiction the config can state on its own), absent just
-// means direct when nothing is configured. Note yaml.v3 is YAML 1.2:
-// write true/false, not on/off.
+// true = always proxied via http_proxy/https_proxy (the foreign-provider
+// case, opted in explicitly — the recommended way to turn proxying on);
+// false = always direct, whatever Config.Proxy or the global proxy URLs say
+// (the domestic-provider case: MiniMax/DeepSeek are reachable directly and
+// a proxy would only slow them down or break them); absent = follow
+// Config.Proxy's global default. There is no environment fallback anywhere
+// — proxies are explicit config. true with no matching global proxy URL
+// configured is a validation error (a contradiction the config can state
+// on its own). Note yaml.v3 is YAML 1.2: write true/false, not on/off.
 type Provider struct {
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
@@ -192,17 +192,29 @@ type Config struct {
 	// whatever size vmr accepted).
 	MaxRequestBodyMB int `yaml:"max_request_body_mb"`
 	MaxConcurrency   int `yaml:"max_concurrency"` // 0 = unlimited; excess requests wait in memory
-	// HTTPProxy/HTTPSProxy are the global upstream proxy settings, selected
-	// by the provider base_url's scheme. These are the ONLY way vmr ever
-	// uses a proxy: proxy environment variables are deliberately ignored —
-	// an implicit knob that silently changes where traffic flows is exactly
-	// the kind of surprise a router shouldn't have. To feed a value from
-	// the environment, reference it explicitly (https_proxy: ${HTTPS_PROXY});
-	// ${VAR} expansion applies like everywhere else in the file. Unset =
-	// every provider connects directly. Per-provider exclusion is
-	// Provider.Proxy: false, not a second exclusion list.
+	// HTTPProxy/HTTPSProxy only declare the proxy server's URL, selected by
+	// the provider base_url's scheme — they do NOT by themselves turn
+	// proxying on for anyone. Whether a provider actually uses that URL is
+	// decided by Proxy (below) and Provider.Proxy. These are the ONLY way
+	// vmr ever learns of a proxy: proxy environment variables are
+	// deliberately ignored — an implicit knob that silently changes where
+	// traffic flows is exactly the kind of surprise a router shouldn't
+	// have. To feed a value from the environment, reference it explicitly
+	// (https_proxy: ${HTTPS_PROXY}); ${VAR} expansion applies like
+	// everywhere else in the file.
 	HTTPProxy  string `yaml:"http_proxy"`
 	HTTPSProxy string `yaml:"https_proxy"`
+	// Proxy is the global default for whether a provider without its own
+	// Provider.Proxy setting uses http_proxy/https_proxy above. Default
+	// false: setting http_proxy/https_proxy only declares where the proxy
+	// lives, it opts nothing in on its own. Flip this to true to make
+	// "proxied" the default for every provider, then carve out exceptions
+	// with a provider's own proxy: false. The recommended shape is the
+	// opposite of that, though: leave this false and opt individual
+	// providers in with their own proxy: true — explicit per-provider
+	// intent beats a global switch silently deciding for providers added
+	// later. Provider.Proxy (true or false) always overrides this default.
+	Proxy bool `yaml:"proxy"`
 	// LogDir is where audit JSONL files land; ImageCacheDir holds the
 	// image-downscale result cache. Explicit values are used exactly as
 	// given (a leading "~/" expands to the home directory; ${VAR} expansion
@@ -391,6 +403,12 @@ func (c *Config) validate() error {
 			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", proxy.name, proxy.val)
 		}
 	}
+	// proxy: true globally with nothing to follow is the same self-stated
+	// contradiction as a provider's own proxy: true below — reject at load
+	// rather than have every provider quietly resolve to direct.
+	if c.Proxy && c.HTTPProxy == "" && c.HTTPSProxy == "" {
+		return fmt.Errorf("proxy: true but neither http_proxy nor https_proxy is configured")
+	}
 	if CountNested(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
@@ -470,15 +488,22 @@ const (
 )
 
 // ProxySpecFor resolves which proxy applies to p's upstream connections:
-// the provider's own proxy: false wins (always direct); otherwise the
-// global config proxy matching the base_url's scheme, when set; otherwise
+// p's own Proxy switch (true/false) wins outright; absent, it follows the
+// global Config.Proxy default (also false by default — http_proxy/
+// https_proxy alone only declare a proxy URL, they don't opt anyone in).
+// Only when the resolved switch is on does the base_url's scheme pick
+// http_proxy or https_proxy; no configured URL for that scheme still means
 // direct. There is no environment fallback — proxies are explicit config
 // only (reference ${HTTPS_PROXY} in the yaml to opt into an env value).
 // proxyURL is only non-empty for ProxyURL. The decision is static per
 // provider — the router builds one shared http.Client per distinct
 // resolution, not a per-request proxy callback.
 func (c *Config) ProxySpecFor(p Provider) (mode, proxyURL string) {
-	if p.Proxy != nil && !*p.Proxy {
+	useProxy := c.Proxy
+	if p.Proxy != nil {
+		useProxy = *p.Proxy
+	}
+	if !useProxy {
 		return ProxyDirect, ""
 	}
 	cfgProxy := c.HTTPSProxy
