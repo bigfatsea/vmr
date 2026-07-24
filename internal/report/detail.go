@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -18,7 +18,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
@@ -45,14 +44,10 @@ var normDescriptions = map[string]string{
 }
 
 // WriteDetails renders every record in the given audit files into dir (one
-// .md + one same-named .json per record) and writes vmr-requests-index.md
-// one level above dir, plus one vmr-requests-index-<tag>.md sibling per
-// distinct non-empty ClientKeyTag observed (see renderIndex/filterSessByTag)
-// — dir itself is never split or duplicated by tag. Returns the number of
-// record files written. Reruns overwrite deterministically. sess (optional,
-// nil = plain mode) supplies the session grouping: detail headers gain
-// session/task coordinates and a delta section, the index gains a grouped
-// view.
+// .md + one same-named .json per record). Returns the number of record files
+// written. Reruns overwrite deterministically. sess (optional, nil = plain
+// mode) supplies the session grouping: detail headers gain session/task
+// coordinates and a delta section.
 //
 // Callers must pass the same paths (same order) here and to AnalyzeSessions:
 // filenames come from the analysis pass (assignNames, ts order — stable
@@ -60,42 +55,20 @@ var normDescriptions = map[string]string{
 // and the no-analysis fallback (sess == nil, or a record the analysis never
 // saw) numbers same-millisecond collisions in read order. cmd/vmr sorts the
 // glob expansion once and feeds both — keep it that way.
-
-// indexEntry is one row's worth of pre-extracted data for the requests
-// index, collected once while WriteDetails writes the detail files and then
-// reused (filtered by ClientKeyTag where needed) by renderIndex — package
-// scope because renderIndex isn't a WriteDetails-local closure.
-type indexEntry struct {
-	ts               time.Time
-	file             string
-	model            string
-	protocol         string
-	provider         string
-	upstreamModel    string
-	outcome          string
-	truncated        bool
-	durMS            int64
-	attempts         int
-	images, imgsComp int
-	usage            Usage
-	usageOK          bool
-	info             *ReqInfo
-}
-
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
-	// 0o700/0o600 throughout: detail files and indices carry the same full
-	// conversation bodies as the audit JSONL they were derived from, which is
+	// 0o700/0o600 throughout: detail files carry the same full conversation
+	// bodies as the audit JSONL they were derived from, which is
 	// deliberately written 0600 — the exports must not silently loosen that.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, err
 	}
-	var entries []indexEntry
 	used := map[string]int{}
+	n := 0
 
 	for _, path := range paths {
 		rc, err := audit.OpenLogFile(path)
 		if err != nil {
-			return len(entries), err
+			return n, err
 		}
 		line := 0
 		var writeErr error
@@ -130,316 +103,17 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 					return
 				}
 			}
-			e := indexEntry{ts: rec.TS, file: name, model: displayModel(&rec),
-				protocol: rec.Protocol, outcome: rec.Outcome,
-				durMS: rec.DurMS, attempts: len(rec.Attempts), info: info}
-			if n := len(rec.Attempts); n > 0 {
-				_, e.provider, e.upstreamModel = attemptUpstream(rec.Attempts[n-1])
-			}
-			for _, at := range rec.Attempts {
-				if attemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
-					e.truncated = true
-				}
-			}
-			e.images, e.imgsComp = countImages(rec.Images)
-			if rec.Client.Response != nil {
-				e.usage, e.usageOK = ExtractUsage(rec.Client.Response.Body)
-			}
-			entries = append(entries, e)
+			n++
 		}, func() { line++ }) // skipped lines still advance the counter so sess.Lookup keys stay aligned with AnalyzeSessions
 		rc.Close()
 		if writeErr != nil {
-			return len(entries), writeErr
+			return n, writeErr
 		}
 		if scanErr != nil {
-			return len(entries), fmt.Errorf("%s: %w", path, scanErr)
+			return n, fmt.Errorf("%s: %w", path, scanErr)
 		}
 	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		if !entries[i].ts.Equal(entries[j].ts) {
-			return entries[i].ts.Before(entries[j].ts)
-		}
-		return entries[i].file < entries[j].file
-	})
-
-	indexPath := filepath.Join(filepath.Dir(dir), "vmr-requests-index.md")
-	if err := os.WriteFile(indexPath, []byte(renderIndex(entries, sess)), 0o600); err != nil {
-		return len(entries), err
-	}
-
-	// Sibling per-client-key indices: same automatic rule as
-	// WriteRequests — one vmr-requests-index-<tag>.md per distinct
-	// non-empty ClientKeyTag observed, in the same directory as the
-	// global index above (so its relative "details/…" links need no
-	// adjustment). The shared details/*.md|json files themselves are
-	// never filtered or duplicated — a request's detail pair belongs to
-	// exactly one caller regardless of who's asking, so mixing tags in
-	// dir costs nothing (design doc §9.4 "按调用方分组导出").
-	byTag := map[string]bool{}
-	for _, e := range entries {
-		if e.info != nil && e.info.ClientKeyTag != "" {
-			byTag[e.info.ClientKeyTag] = true
-		}
-	}
-	for tag := range byTag {
-		var tagEntries []indexEntry
-		for _, e := range entries {
-			if e.info != nil && e.info.ClientKeyTag == tag {
-				tagEntries = append(tagEntries, e)
-			}
-		}
-		tagIndexPath := filepath.Join(filepath.Dir(dir), fmt.Sprintf("vmr-requests-index-%s.md", sanitizeName(tag)))
-		if err := os.WriteFile(tagIndexPath, []byte(renderIndex(tagEntries, filterSessByTag(sess, tag))), 0o600); err != nil {
-			return len(entries), fmt.Errorf("client key %q: %w", tag, err)
-		}
-	}
-	return len(entries), nil
-}
-
-// filterSessByTag builds the Sessions/Compactions/Ungrouped subset
-// renderIndex needs for one client key's grouped view — the input to a
-// vmr-requests-index-<tag>.md sibling. Recs isn't filtered (renderIndex
-// never reads it directly; entries, filtered separately by the caller,
-// carries the per-record data instead).
-func filterSessByTag(sess *SessionAnalysis, tag string) *SessionAnalysis {
-	if sess == nil {
-		return nil
-	}
-	out := &SessionAnalysis{}
-	for _, s := range sess.Sessions {
-		if len(s.Recs) > 0 && s.Recs[0].ClientKeyTag == tag {
-			out.Sessions = append(out.Sessions, s)
-		}
-	}
-	for _, c := range sess.Compactions {
-		if c.ClientKeyTag == tag {
-			out.Compactions = append(out.Compactions, c)
-		}
-	}
-	for _, u := range sess.Ungrouped {
-		if u.ClientKeyTag == tag {
-			out.Ungrouped = append(out.Ungrouped, u)
-		}
-	}
-	return out
-}
-
-// renderIndex builds vmr-requests-index.md's Markdown from already-collected
-// entries (WriteDetails' file-writing pass) and the session analysis they
-// came from — a pure function so both the global index and each
-// client-key-filtered sibling (see filterSessByTag) can share it without
-// re-scanning the audit files or re-deriving entries.
-func renderIndex(entries []indexEntry, sess *SessionAnalysis) string {
-	var b strings.Builder
-	// Header — count unique chat users when session analysis is on so the
-	// reader sees how many distinct callers the traffic came from.
-	chatUsers := map[string]bool{}
-	if sess != nil {
-		for _, s := range sess.Sessions {
-			if s.ChatID != "" {
-				chatUsers[s.ChatID] = true
-			}
-		}
-	}
-	fmt.Fprintf(&b, "# VMR 请求详单索引\n\n共 %d 条记录", len(entries))
-	if len(chatUsers) > 0 {
-		fmt.Fprintf(&b, "（%d 个 Chat User）", len(chatUsers))
-	}
-	b.WriteString("\n\n")
-	if sess != nil && (len(sess.Sessions) > 0 || len(sess.Ungrouped) > 0 || len(sess.Compactions) > 0) {
-		b.WriteString("每条记录 = 一次 vmr 请求；下方按 Chat User → Session → Task 分组，一个 Task 通常" +
-			"包含多条记录（一次用户指令触发的多轮工具调用）——记录数远大于 Task 数是正常的，" +
-			"Task/Compaction/定时任务表的记录之和才等于上面的总数。\n\n")
-	}
-
-	// Grouped view: Chat User → Session → Task → Turn (analysis mode only).
-	// Headings drop the "Session"/"Task" label word but keep the id itself
-	// (s04, t01, …) as the heading text.
-	if sess != nil && (len(sess.Sessions) > 0 || len(sess.Ungrouped) > 0 || len(sess.Compactions) > 0) {
-		fileOf := map[*ReqInfo]string{}
-		for _, e := range entries {
-			if e.info != nil {
-				fileOf[e.info] = e.file
-			}
-		}
-		// Scheduled one-shot sessions (heartbeat/dream_diary: each trigger
-		// opens its own single-record "session") and compaction calls both
-		// fold into compact tables under "(unresolved)" regardless of
-		// whatever chat_id they might carry — they're scaffolding, not
-		// conversations, and a dozens-strong run of near-identical Task
-		// blocks would bury the real ones. This also keeps INDEX and
-		// vmr-report.md's Agent 会话 table (which already collapses these)
-		// in agreement.
-		scheduled := map[string][]*SessionInfo{}
-		var scheduledOrder []string
-		byUser := map[string][]*SessionInfo{}
-		var userOrder []string
-		for i := range sess.Sessions {
-			s := sess.Sessions[i]
-			if len(s.Recs) == 1 && workloadClass(s.Recs[0]) != "interactive" {
-				cls := workloadClass(s.Recs[0])
-				if _, ok := scheduled[cls]; !ok {
-					scheduledOrder = append(scheduledOrder, cls)
-				}
-				scheduled[cls] = append(scheduled[cls], s)
-				continue
-			}
-			uid := chatUserLabel(s.ChatID)
-			if _, ok := byUser[uid]; !ok {
-				userOrder = append(userOrder, uid)
-			}
-			byUser[uid] = append(byUser[uid], s)
-		}
-		sort.Strings(userOrder)
-		const unresolvedUID = "(unresolved)"
-		hasUnresolved := false
-		for _, u := range userOrder {
-			if u == unresolvedUID {
-				hasUnresolved = true
-			}
-		}
-		if !hasUnresolved && (len(scheduledOrder) > 0 || len(sess.Compactions) > 0 || len(sess.Ungrouped) > 0) {
-			userOrder = append(userOrder, unresolvedUID)
-			sort.Strings(userOrder)
-		}
-
-		for _, uid := range userOrder {
-			fmt.Fprintf(&b, "## Chat User %s\n\n", escapeCell(uid))
-
-			for _, s := range byUser[uid] {
-				cont := ""
-				if s.ContinuedFrom != "" {
-					cont = fmt.Sprintf("（%s 经 compaction 续接）", s.ContinuedFrom)
-				} else if s.IsContinuation {
-					cont = "（续接自输入之外的会话）"
-				}
-				tsLabel := ""
-				if len(s.Recs) > 0 {
-					tsLabel = s.Recs[0].TS.Format("2006-01-02 15:04:05")
-				}
-				fmt.Fprintf(&b, "### %s · %d 任务 %d 轮 · %s%s\n\n",
-					s.ID, len(s.Tasks), len(s.Recs), tsLabel, cont)
-
-				for _, t := range s.Tasks {
-					tsTask := ""
-					if len(t.Recs) > 0 {
-						tsTask = t.Recs[0].TS.Format("2006-01-02 15:04:05")
-					}
-					fmt.Fprintf(&b, "**%s · %d 轮 · %s**\n\n", t.ID, len(t.Recs), tsTask)
-
-					// The task's first user instruction as a quote block —
-					// tells the reader what this burst of turns was about.
-					if len(t.Recs) > 0 && t.Recs[0].NewInstruction != "" {
-						fmt.Fprintf(&b, "> %s\n\n", escapeCell(t.Recs[0].NewInstruction))
-					}
-
-					b.WriteString("| 轮 | 时间 | Message | finish | 耗时 | 首字延迟 | Tokens In/CacheHit/Out | 图片/压缩 | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
-					for _, r := range t.Recs {
-						fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-							r.TaskSeq, r.TS.Format("15:04:05"), msgCell(r),
-							finishCell(r), durationCell(r), ttftCell(r),
-							tokensTripleCell(r), imagesCell(r.Images, r.ImagesCompressed), fileLinksCell(fileOf[r]))
-					}
-					b.WriteString("\n")
-				}
-			}
-
-			if uid != unresolvedUID {
-				continue
-			}
-			if len(sess.Compactions) > 0 {
-				fmt.Fprintf(&b, "### 压缩任务 · compaction 会话 × %d\n\n", len(sess.Compactions))
-				b.WriteString("| 时间 | 压缩对象 | 续接为 | 结果 | 耗时 | Tokens In/CacheHit/Out | 文件 |\n|---|---|---|---|---|---|---|\n")
-				for _, c := range sess.Compactions {
-					tok := "-"
-					if c.UsageOK {
-						tok = tokensTriple(c.Usage.In, c.Usage.CacheRead, c.Usage.Out)
-					}
-					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n",
-						c.TS.Format("15:04:05"), dash(c.Summarizes), dash(c.ContinuesTo),
-						outcomeMark(c.Outcome), ms(c.durMS), tok, fileLinksCell(c.DetailFile))
-				}
-				b.WriteString("\n")
-			}
-			for _, cls := range scheduledOrder {
-				list := scheduled[cls]
-				fmt.Fprintf(&b, "### 定时任务 · %s 单发会话 × %d\n\n", escapeCell(cls), len(list))
-				b.WriteString("| 时间 | 结果 | 耗时 | Tokens In/CacheHit/Out | 文件 |\n|---|---|---|---|---|\n")
-				for _, s := range list {
-					r := s.Recs[0]
-					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-						r.TS.Format("01-02 15:04:05"), reqMark(r), ms(r.durMS),
-						tokensTripleCell(r), fileLinksCell(fileOf[r]))
-				}
-				b.WriteString("\n")
-			}
-			if len(sess.Ungrouped) > 0 {
-				fmt.Fprintf(&b, "### 其他 · 非聊天体/被拒请求 × %d\n\n", len(sess.Ungrouped))
-				b.WriteString("| 时间 | 模型 | 结果 | 文件 |\n|---|---|---|---|\n")
-				for _, u := range sess.Ungrouped {
-					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-						u.TS.Format("01-02 15:04:05"), escapeCell(displayModelName(u.Model)),
-						outcomeMark(u.Outcome), fileLinksCell(u.DetailFile))
-				}
-				b.WriteString("\n")
-			}
-		}
-		b.WriteString("## 全部请求（时间序）\n\n")
-	}
-
-	b.WriteString("| 时间 | 会话/任务 | VM/API | 耗时 | 首字延迟 | Tokens In/CacheHit/Out | 图片/压缩 | 文件 |\n|---|---|---|---|---|---|---|---|\n")
-	for _, e := range entries {
-		tok := "-"
-		if e.usageOK {
-			tok = tokensTriple(e.usage.In, e.usage.CacheRead, e.usage.Out)
-		}
-		st := "-"
-		if e.info != nil && e.info.SessionID != "" {
-			st = e.info.SessionID + "/" + e.info.TaskID
-		} else if e.info != nil && e.info.Compaction {
-			st = "compaction"
-		}
-		ttft := "-"
-		if e.info != nil && e.info.ttftMS > 0 {
-			ttft = ms(e.info.ttftMS)
-		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			e.ts.Format("01-02 15:04:05.000"), st,
-			escapeCell(vmAPICell(e.protocol, e.model, e.provider, e.upstreamModel)),
-			durationCellFields(e.durMS, e.outcome, e.truncated, e.attempts), ttft, tok,
-			imagesCell(e.images, e.imgsComp), fileLinksCell(e.file))
-	}
-	return b.String()
-}
-
-// chatUserLabel strips the OpenClaw "user:" prefix off a ChatID so it
-// reads as a real user identifier in the INDEX heading. Unresolved sessions
-// ("") land in their own "Chat User (unresolved)" section via the caller.
-func chatUserLabel(chatID string) string {
-	if chatID == "" {
-		return "(unresolved)"
-	}
-	return strings.TrimPrefix(chatID, "user:")
-}
-
-// ttftCell renders the first-token latency cell for the INDEX turn table.
-// "-" when the record didn't carry ttft_ms.
-func ttftCell(r *ReqInfo) string {
-	if r.ttftMS <= 0 {
-		return "-"
-	}
-	return ms(r.ttftMS)
-}
-
-// tokensTripleCell renders the per-record 3-tuple cell, falling back to the
-// raw Usage (e.g. for entries where ReqInfo wasn't built — rejected/parse-
-// error records whose INDEX row still benefits from showing token totals).
-func tokensTripleCell(r *ReqInfo) string {
-	if !r.UsageOK {
-		return "-"
-	}
-	return tokensTriple(r.Usage.In, r.Usage.CacheRead, r.Usage.Out)
+	return n, nil
 }
 
 // callsCell compacts a turn's tool calls ("exec×2, write"); "-" when none.
@@ -464,91 +138,6 @@ func callsCell(calls []string) string {
 		}
 	}
 	return strings.Join(parts, ", ")
-}
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-// finishCell renders the turn table's finish-reason cell. "tool_calls"
-// expands to the actual tool name(s) called this turn, so the tool-call
-// information doesn't need a separate column.
-func finishCell(r *ReqInfo) string {
-	if r.Finish == "tool_calls" && len(r.ToolCalls) > 0 {
-		return escapeCell("tool_call:" + callsCell(r.ToolCalls))
-	}
-	return dash(r.Finish)
-}
-
-// fileLinksCell renders a detail record's file column as two short HTML
-// links instead of the full filename — the index lives one level above
-// details/, so every link needs that prefix.
-func fileLinksCell(mdName string) string {
-	base := strings.TrimSuffix(mdName, ".md")
-	return fmt.Sprintf(`<a href=details/%s.md>Ⓜ️ Markdown</a> <a href=details/%s.json>JSON</a>`, base, base)
-}
-
-// reqMark renders a request's outcome, flagging ok-but-truncated streams.
-func reqMark(r *ReqInfo) string {
-	m := outcomeMark(r.Outcome)
-	if r.Truncated {
-		m += " ⚠️截断"
-	}
-	return m
-}
-
-// msgCell renders the turn table's message-count cell as "M+N": M = messages
-// already in history before this turn, N = messages this turn added.
-func msgCell(r *ReqInfo) string {
-	return fmt.Sprintf("%d+%d", r.DeltaStart, r.Msgs-r.DeltaStart)
-}
-
-// durationCellFields renders the duration cell shared by the turn and flat
-// request tables: the plain latency, plus space-separated annotations for
-// whatever's notable about the request (outcome, truncation, attempt count)
-// so a real error or a retried request never reads identically to a clean
-// single-shot success.
-func durationCellFields(durMS int64, outcome string, truncated bool, attempts int) string {
-	cell := ms(durMS)
-	var marks []string
-	switch outcome {
-	case "canceled":
-		marks = append(marks, "🚫取消")
-	case "ok":
-		// no mark
-	default:
-		marks = append(marks, "❌"+outcome)
-	}
-	if truncated {
-		marks = append(marks, "⚠️截断")
-	}
-	if attempts > 1 {
-		marks = append(marks, fmt.Sprintf("🔄尝试x%d", attempts))
-	}
-	if len(marks) > 0 {
-		cell += " " + strings.Join(marks, " ")
-	}
-	return cell
-}
-
-// durationCell is the ReqInfo-typed wrapper for the turn table.
-func durationCell(r *ReqInfo) string {
-	return durationCellFields(r.durMS, r.Outcome, r.Truncated, r.attempts)
-}
-
-// vmAPICell merges the virtual model, protocol and upstream provider:model
-// into one compact cell, e.g. "openai | agent | minimax:MiniMax-M3". The
-// upstream half uses ":" (not "/") since some providers (OpenRouter) put a
-// "/" inside the model name itself.
-func vmAPICell(protocol, virtualModel, provider, upstreamModel string) string {
-	upstream := "-"
-	if provider != "" || upstreamModel != "" {
-		upstream = fmt.Sprintf("%s:%s", provider, upstreamModel)
-	}
-	return fmt.Sprintf("%s | %s | %s", protocol, virtualModel, upstream)
 }
 
 // unsafeName matches filename characters we replace; keeps letters, digits,
@@ -699,14 +288,36 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record) {
 	if f == nil {
 		return
 	}
-	yn := func(v bool) string {
-		if v {
-			return "是"
-		}
-		return "否"
+	var caps []string
+	if f.HasImage {
+		caps = append(caps, "`image`")
 	}
-	fmt.Fprintf(b, "> **VMR 路由前判断**（基于原始请求推断，供路由决策使用，非上游实际 token 用量）：图片 %s · Tools %s · 预估 Tokens %s\n\n",
-		yn(f.HasImage), yn(f.HasTools), core.FmtTokens(f.EstimatedTokens))
+	if f.HasTools {
+		caps = append(caps, "`tools`")
+	}
+	capsText := "无"
+	if len(caps) > 0 {
+		capsText = strings.Join(caps, "、")
+	}
+	fmt.Fprintf(b, "> **VMR 路由前判断**：\n> 请求所需能力：%s\n> 预估Token数量：%s\n\n",
+		capsText, fmtTokensPlain(f.EstimatedTokens))
+}
+
+// fmtTokensPlain renders an estimated token count for human-facing detail
+// pages ("27.3 KT") — same K/M scaling as core.FmtTokens but without its
+// "EST" unit marker (that marker exists to keep the live router log's
+// req=xxxKB/xxxESTKT column from being mistaken for billed usage at a
+// glance; a labeled "预估Token数量" field on a detail page already carries
+// that context, so the terser unit reads better here).
+func fmtTokensPlain(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1f MT", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1f KT", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d T", n)
+	}
 }
 
 // renderSessionHeader emits the grouping coordinates line and, when this
@@ -813,8 +424,8 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 	}
 	if len(msgs) > 0 {
 		w("\n### Messages (%d)\n\n", len(msgs))
-		if line := roleStatLine(roleChars(req.Body), true, true); line != "" {
-			w("角色字符统计：%s\n\n", line)
+		if line := roleStatLine(roleTokens(req.Body), true, true); line != "" {
+			w("角色 Token 估算占比：%s\n\n", line)
 		}
 		if info != nil && info.SessionID != "" && info.Parent != nil && info.DeltaStart > 0 {
 			w("#1–#%d 为历史上下文（↺）,#%d 起为本轮新增（🆕）\n\n", info.DeltaStart, info.DeltaStart+1)

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 package report
 
 import (
@@ -249,152 +249,12 @@ func TestToolShapesAggregation(t *testing.T) {
 	}
 }
 
-func TestWriteRequestsExport(t *testing.T) {
-	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := filepath.Join(t.TempDir(), "vmr-requests.jsonl")
-	n, err := WriteRequests(a, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 6 {
-		t.Fatalf("rows = %d, want 6", n)
-	}
-	raw, _ := os.ReadFile(out)
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("lines = %d", len(lines))
-	}
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"ts", "session", "task", "trace_id", "chat_id", "shape",
-		"tool_calls", "finish_reason", "tokens_in", "detail_file"} {
-		if _, ok := first[key]; !ok {
-			t.Errorf("first row missing %q: %s", key, lines[0])
-		}
-	}
-	if first["session"] != "s01" || first["task"] != "t01" {
-		t.Errorf("first row coords: session=%v task=%v", first["session"], first["task"])
-	}
-	// The compaction row carries no session coordinates.
-	var comp map[string]any
-	if err := json.Unmarshal([]byte(lines[3]), &comp); err != nil {
-		t.Fatal(err)
-	}
-	if _, hasSession := comp["session"]; hasSession {
-		t.Errorf("compaction row should have no session: %s", lines[3])
-	}
-	if tags, _ := comp["tags"].([]any); len(tags) == 0 {
-		t.Errorf("compaction row should be tagged: %s", lines[3])
-	}
-}
-
-// TestWriteRequestsExportNoTagsProducesNoSiblings pins backward
-// compatibility: when no record carries a ClientKeyTag (today's status quo
-// for every existing config), WriteRequests must not create any sibling
-// file next to the one it's always written.
-func TestWriteRequestsExportNoTagsProducesNoSiblings(t *testing.T) {
-	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	out := filepath.Join(dir, "vmr-requests.jsonl")
-	if _, err := WriteRequests(a, out); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Name() != "vmr-requests.jsonl" {
-		t.Fatalf("want exactly vmr-requests.jsonl, got %v", entries)
-	}
-}
-
-// TestWriteRequestsExportByTag covers the per-client-key sibling exports:
-// records tagged "alice"/"bob" land only in their own vmr-requests-<tag>.jsonl
-// (in ts order, a strict subset of the full file), untagged records never do.
-func TestWriteRequestsExportByTag(t *testing.T) {
-	zone := time.FixedZone("CST", 8*3600)
-	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
-	sys := msg("system", "sys")
-	u := msg("user", "hi")
-
-	r1 := mkRec(at(0), "", []any{sys, u}, nil, sseText("a1"))
-	r1.ClientKeyTag = "alice"
-	r2 := mkRec(at(1), "", []any{sys, u}, nil, sseText("b1"))
-	r2.ClientKeyTag = "bob"
-	r3 := mkRec(at(2), "", []any{sys, u}, nil, sseText("a2"))
-	r3.ClientKeyTag = "alice"
-	r4 := mkRec(at(3), "", []any{sys, u}, nil, sseText("untagged"))
-	// r4.ClientKeyTag left "" — legacy/catch-all/no-auth traffic.
-
-	path := writeJSONL(t, []audit.Record{r1, r2, r3, r4})
-	a, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	out := filepath.Join(dir, "vmr-requests.jsonl")
-	n, err := WriteRequests(a, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 4 {
-		t.Fatalf("total rows = %d, want 4", n)
-	}
-
-	readTags := func(p string) []string {
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		var out []string
-		for _, l := range lines {
-			var row map[string]any
-			if err := json.Unmarshal([]byte(l), &row); err != nil {
-				t.Fatal(err)
-			}
-			tag, _ := row["client_key_tag"].(string)
-			out = append(out, tag)
-		}
-		return out
-	}
-
-	if got := readTags(out); len(got) != 4 {
-		t.Fatalf("full file rows = %v", got)
-	}
-
-	aliceOut := filepath.Join(dir, "vmr-requests-alice.jsonl")
-	if got := readTags(aliceOut); len(got) != 2 || got[0] != "alice" || got[1] != "alice" {
-		t.Errorf("alice sibling rows = %v, want [alice alice]", got)
-	}
-	bobOut := filepath.Join(dir, "vmr-requests-bob.jsonl")
-	if got := readTags(bobOut); len(got) != 1 || got[0] != "bob" {
-		t.Errorf("bob sibling rows = %v, want [bob]", got)
-	}
-	// No sibling ever gets created for the untagged ("") bucket.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 3 {
-		t.Fatalf("dir entries = %v, want exactly vmr-requests.jsonl + alice + bob siblings", entries)
-	}
-}
-
 // TestUngroupedFoldedIntoUnresolved covers a non-chat/rejected record (no
-// "messages" field, so it never gets a SessKey): it must render as a small
-// "其他" sub-section nested under "## Chat User (unresolved)", not as its
-// own top-level "## 未分组" heading.
+// "messages" field, so it never gets a SessKey): it must group into
+// AnalyzeSessions' Ungrouped bucket, and WriteDetails must still render its
+// detail file without erroring (the old grouped vmr-requests-index.md this
+// used to also assert on was removed with the old `vmr report` command —
+// report2's own vmr-requests.md covers that view now).
 func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 	line := `{"ts":"2026-07-09T08:00:00+08:00","dur_ms":10,"model":"","protocol":"openai","outcome":"error","client":{"request":{"method":"POST","path":"/v1/chat/completions","body":null}}}` + "\n"
 	dir := t.TempDir()
@@ -410,24 +270,10 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
 	}
 	out := filepath.Join(dir, "details")
-	if _, err := WriteDetails([]string{src}, out, a); err != nil {
+	if n, err := WriteDetails([]string{src}, out, a); err != nil {
 		t.Fatal(err)
-	}
-	idx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(idx), "## 未分组") {
-		t.Error("Ungrouped must not render as its own top-level ## 未分组 section")
-	}
-	if !strings.Contains(string(idx), "## Chat User (unresolved)") {
-		t.Errorf("missing unresolved user section:\n%s", idx)
-	}
-	if !strings.Contains(string(idx), "### 其他 · 非聊天体/被拒请求 × 1") {
-		t.Errorf("missing folded 其他 sub-section:\n%s", idx)
-	}
-	if i, j := strings.Index(string(idx), "## Chat User (unresolved)"), strings.Index(string(idx), "### 其他"); i < 0 || j < i {
-		t.Error("其他 sub-section must sit inside the (unresolved) user section")
+	} else if n != 1 {
+		t.Fatalf("n = %d, want 1", n)
 	}
 }
 
@@ -444,29 +290,6 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 	}
 	if n != 6 {
 		t.Fatalf("n = %d, want 6", n)
-	}
-	idx, err := os.ReadFile(filepath.Join(filepath.Dir(dir), "vmr-requests-index.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"## Chat User ou_test123",
-		"### s01 · 2 任务", // Session heading keeps the id, drops the "Session" label word
-		"**t01 · 2 轮",    // Task heading keeps the id, drops the "Task" label word
-		"任务A开始",          // user instruction appears in a quote block under the task heading
-		"### s02",
-		"## Chat User (unresolved)",
-		"### 压缩任务 · compaction 会话 × 1",
-		"## 全部请求（时间序）",
-		"s01/t02",
-		"⚠️截断",
-	} {
-		if !strings.Contains(string(idx), want) {
-			t.Errorf("INDEX missing %q", want)
-		}
-	}
-	if strings.Contains(string(idx), "### Session s01") || strings.Contains(string(idx), "**Task t01") {
-		t.Error("headings should drop the \"Session\"/\"Task\" label word, keeping only the id")
 	}
 
 	// The r3 detail file carries the session header and delta section.
@@ -554,144 +377,6 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 	}
 	if s.Title != "写个函数" {
 		t.Errorf("title = %q", s.Title)
-	}
-}
-
-// TestCollapsedSessionRowShowsRealAverages locks in that the merged/collapsed
-// scheduled-session row in vmr-report.md's Agent 会话 table renders real
-// computed values — avg tokens, avg messages, TTFT, duration — instead of
-// placeholder dashes: mergeIntoCollapsed accumulates TokensKnown/
-// MessagesKnown/TTFTMSSum/DurMSSum across the merged sessions, and the
-// render code must actually read them. Two single-request heartbeat firings
-// (different content, so they land in separate 1-request sessions and both
-// qualify for collapsing) with distinct token/message/latency values verify
-// the merged row shows real computed values.
-func TestCollapsedSessionRowShowsRealAverages(t *testing.T) {
-	lines := `{"ts":"2026-07-09T09:00:00+08:00","dur_ms":4000,"ttft_ms":1000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat A [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":10}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
-{"ts":"2026-07-09T10:00:00+08:00","dur_ms":6000,"ttft_ms":3000,"model":"agent","protocol":"openai","outcome":"ok","client":{"request":{"body":{"model":"agent","messages":[{"role":"system","content":"sys"},{"role":"user","content":"heartbeat B [OpenClaw heartbeat poll]"}]}},"response":{"status":200,"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":200,"completion_tokens":20}}}},"attempts":[{"endpoint":"openai/prov/real-1","response":{"status":200}}]}
-`
-	dir := t.TempDir()
-	path := filepath.Join(dir, "audit.jsonl")
-	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	a, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(a.Sessions) != 2 {
-		t.Fatalf("sessions = %d, want 2 (distinct content must not group together)", len(a.Sessions))
-	}
-	rep, err := Build([]string{path}, time.Now(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep.Sessions = a.SessionRows()
-	md := Markdown(rep)
-
-	row := ""
-	for _, line := range strings.Split(md, "\n") {
-		if strings.Contains(line, "heartbeat 单发会话") {
-			row = line
-			break
-		}
-	}
-	if row == "" {
-		t.Fatalf("collapsed heartbeat row not found in:\n%s", md)
-	}
-	for _, want := range []string{
-		"×2",            // both firings merged into one row
-		"150 / 15",      // avg tokens in/out: (100+200)/2, (10+20)/2
-		"| 2.0 |",       // avg messages: (2+2)/2 — system+user each record
-		"1000ms / 3.0s", // TTFT p50/p95: raw values 1000,3000 (not "-/-")
-		"4.0s / 6.0s",   // duration p50/p95: raw values 4000,6000 (not "-/-")
-	} {
-		if !strings.Contains(row, want) {
-			t.Errorf("collapsed row missing %q:\n%s", want, row)
-		}
-	}
-	if strings.Contains(row, "| - | - | -/- | -/- |") {
-		t.Error("collapsed row still has the hardcoded placeholder dashes")
-	}
-}
-
-func TestMarkdownToolsAndSessions(t *testing.T) {
-	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep, err := Build([]string{path}, time.Now(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep.Tools = a.ToolShapes()
-	rep.Sessions = a.SessionRows()
-	rep.Workloads = a.Workloads()
-	md := Markdown(rep)
-	for _, want := range []string{
-		"## Agent 会话",
-		"[s01]",
-		"[s02](./details/", " ← s01",
-		"Req/Fall/Trunc", "图片/压缩",
-		"## 工具使用",
-		"调用过的工具",
-		"exec",
-		"从未调用（1 个，",
-		"1. write", // numbered list
-		"## 工作负载",
-		"Tool 调用",
-		"| interactive |",
-		"| compaction |",
-		"## 每小时活跃度",
-		"| 10:00 |",
-		"**finish_reason 数量及占比**",
-		"tool_calls×",
-	} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown missing %q", want)
-		}
-	}
-}
-
-func TestBuildRowHealthFields(t *testing.T) {
-	path, _ := fixture(t)
-	rep, err := Build([]string{path}, time.Now(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var agent *Row
-	for i := range rep.Rows {
-		if rep.Rows[i].Model == "agent" {
-			agent = &rep.Rows[i]
-		}
-	}
-	if agent == nil {
-		t.Fatal("no agent row")
-	}
-	// fixture: r1/r2/r4 finish tool_calls; r3/r5 stop; compaction stop.
-	if agent.FinishReasons["tool_calls"] != 3 || agent.FinishReasons["stop"] != 3 {
-		t.Errorf("finish reasons = %v", agent.FinishReasons)
-	}
-	if agent.Truncated != 1 {
-		t.Errorf("truncated = %d, want 1", agent.Truncated)
-	}
-	// r1/r2/r4 carry reasoning_tokens=4 each in their usage chunk.
-	if agent.TokensReasoning != 12 {
-		t.Errorf("reasoning tokens = %d, want 12", agent.TokensReasoning)
-	}
-	if len(rep.Hours) == 0 {
-		t.Fatal("no hours rows")
-	}
-	var reqs int
-	for _, h := range rep.Hours {
-		if h.Date != "2026-07-09" || h.Hour != 10 {
-			t.Errorf("unexpected hour row %+v", h)
-		}
-		reqs += h.Requests
-	}
-	if reqs != 6 {
-		t.Errorf("hourly requests = %d, want 6", reqs)
 	}
 }
 

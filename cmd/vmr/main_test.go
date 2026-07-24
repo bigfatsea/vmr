@@ -1,4 +1,4 @@
-// Ver 2026-07-24 23:20, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 package main
 
 import (
@@ -120,11 +120,9 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
-// report.Build: glob expansion, output directory creation, and writing both
-// the JSON and Markdown artifacts (design doc §9.4). It also locks in the
-// session-analysis outputs (vmr-requests.jsonl + details/) on the happy
-// path — the branch that must stay reachable now that a session-analysis
-// failure only skips these rather than failing the whole command (§11).
+// report2.Build: glob expansion, output directory creation, and writing both
+// the JSON and Markdown artifacts (design doc §9.4), plus the session-
+// analysis outputs (vmr-requests.jsonl/.md + details/).
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")

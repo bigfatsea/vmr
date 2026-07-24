@@ -1,11 +1,11 @@
-// Ver 2026-07-24 15:00, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
 //	vmr start    -c config.yaml   run the router
 //	vmr check    -c config.yaml   validate config and print a summary
 //	vmr status   -c config.yaml   show endpoint health of a running instance
-//	vmr report   <audit.jsonl>    aggregate audit logs into usage statistics
+//	vmr report   <audit.jsonl>    aggregate audit logs into usage statistics (default -o: ./reports)
 //	vmr dirs     {log|cache}      print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
@@ -35,6 +35,7 @@ import (
 	"vmr/internal/diagnose"
 	"vmr/internal/replay"
 	"vmr/internal/report"
+	"vmr/internal/report2"
 	"vmr/internal/router"
 	"vmr/internal/server"
 
@@ -76,7 +77,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
-       vmr report [-o dir] [-details=false] <audit.jsonl|glob>...   (default -o: ./reports)
+       vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <audit.jsonl|glob>...   (default -o: ./reports)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
@@ -113,19 +114,23 @@ func cmdDirs(args []string) error {
 	return nil
 }
 
-// cmdReport aggregates audit JSONL files into vmr-report.json + vmr-report.md.
-// Inputs may freely mix live plain .jsonl files and .jsonl.zst files that the
-// audit logger's housekeeping sweep has since compressed (internal/report
-// decompresses transparently) — e.g. `vmr report 'vmr-audit-*.jsonl*'`.
+// cmdReport aggregates audit JSONL into the report2-generation aggregator
+// (internal/report2; package name predates this rename — see that package's
+// doc comment): vmr-report.json/.md, vmr-requests.jsonl/.md (+ per-tag
+// siblings), and one details/*.md+.json per request. Inputs may freely mix
+// live plain .jsonl files and .jsonl.zst files that the audit logger's
+// housekeeping sweep has since compressed (internal/report decompresses
+// transparently) — e.g. `vmr report 'vmr-audit-*.jsonl*'`.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	outDir := fs.String("o", "reports", "output directory (default: ./reports; an explicit -o is used as-is, no reports/ subdir added)")
-	detailsOn := fs.Bool("details", true, "also export one Markdown file per request into {out}/details/")
+	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
+	detailsOn := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/")
+	pricingPath := fs.String("pricing", "", "optional pricing sidecar yaml (per-endpoint unit prices); absent => no $ estimates")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return fmt.Errorf("no input files; usage: vmr report [-o dir] <audit.jsonl|glob>...")
+		return fmt.Errorf("no input files; usage: vmr report [-o dir] [-pricing pricing.yaml] <audit.jsonl|glob>...")
 	}
 	seen := map[string]bool{}
 	var paths []string
@@ -146,64 +151,51 @@ func cmdReport(args []string) error {
 	}
 	sort.Strings(paths)
 
-	rep, err := report.Build(paths, time.Now(), os.Stdout)
+	pricing, err := report2.LoadPricing(*pricingPath)
 	if err != nil {
 		return err
 	}
-	// Session analysis (grouping, per-request features, tool usage) feeds
-	// the report's tools/sessions sections, the requests export, and the
-	// detail files' grouped view. It is a value-add on top of the aggregate
-	// stats report.Build already computed, not a prerequisite for them — a
-	// bug in the session-grouping heuristics (a real risk given how much
-	// pattern-matching it does, see internal/report/session.go) must not
-	// take down the basic cost/usage numbers along with it. A nil sess
-	// below skips only the sections that need it.
-	sess, err := report.AnalyzeSessions(paths)
+	rep, sess, err := report2.Build(paths, time.Now(), os.Stdout, pricing)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vmr report: session analysis failed, continuing without sessions/tools/workloads/requests export: %v\n", err)
-		sess = nil
-	} else {
-		rep.Tools = sess.ToolShapes()
-		rep.Sessions = sess.SessionRows()
-		rep.Workloads = sess.Workloads()
+		return err
 	}
 	// 0o700/0o600: report outputs embed full conversation bodies from the
-	// 0600 audit files — the derived copies must not loosen that.
+	// 0600 audit files - the derived copies must not loosen that.
 	if err := os.MkdirAll(*outDir, 0o700); err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
 	mdPath := filepath.Join(*outDir, "vmr-report.md")
-	data, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
+	if err := report2.WriteJSON(rep, jsonPath); err != nil {
 		return err
 	}
-	if err := os.WriteFile(jsonPath, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o600); err != nil {
+	if err := os.WriteFile(mdPath, []byte(report2.Markdown(rep)), 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
 		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
-	if sess == nil {
-		return nil
-	}
-	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
-	nReq, err := report.WriteRequests(sess, reqPath)
-	if err != nil {
-		return fmt.Errorf("requests export: %w", err)
-	}
-	fmt.Printf("%s (%d rows)\n", reqPath, nReq)
+
 	if *detailsOn {
 		detailDir := filepath.Join(*outDir, "details")
 		n, err := report.WriteDetails(paths, detailDir, sess)
 		if err != nil {
 			return fmt.Errorf("details: %w", err)
 		}
-		fmt.Printf("%d detail file(s) (.md + .json) in %s\n%s\n", n, detailDir,
-			filepath.Join(*outDir, "vmr-requests-index.md"))
+		fmt.Printf("%d detail file(s) (.md + .json) in %s\n", n, detailDir)
 	}
+
+	// Requests index (+ per-tag siblings) + jsonl.
+	rows := rep.RequestRows()
+	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
+	nReq, err := report2.WriteRequestsJSONL(rows, reqPath)
+	if err != nil {
+		return fmt.Errorf("requests export: %w", err)
+	}
+	fmt.Printf("%s (%d rows)\n", reqPath, nReq)
+	if err := report2.WriteRequestsIndex(rep, sess, *outDir); err != nil {
+		return fmt.Errorf("requests index: %w", err)
+	}
+	fmt.Printf("%s\n", filepath.Join(*outDir, "vmr-requests.md"))
 	return nil
 }
 

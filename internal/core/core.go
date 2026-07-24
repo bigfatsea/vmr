@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 package core
 
 import (
@@ -248,6 +248,36 @@ func FmtTokens(n int64) string {
 	default:
 		return fmt.Sprintf("%dESTT", n)
 	}
+}
+
+// asciiBytesPerToken/wideBytesPerToken split EstimateTextTokens' byte count
+// by script: ASCII (mostly English) tokenizes at roughly 4 bytes/token
+// across mainstream BPE tokenizers; CJK and other multi-byte UTF-8 content
+// is denser and deliberately overestimated at 2 bytes/token — higher than
+// any tokenizer this was checked against actually costs, on purpose (see
+// design doc §1.4).
+const (
+	asciiBytesPerToken = 4
+	wideBytesPerToken  = 2
+)
+
+// EstimateTextTokens scans body byte-for-byte (JSON structure included — its
+// overhead only pushes the estimate up, which is the safe direction)
+// classifying by UTF-8 lead byte, no rune decoding. Originally the pre-
+// routing estimator behind RequestFacts.EstimatedTokens (see
+// server/facts.go); exported here so any caller needing a cheap, consistent
+// token estimate from raw text/bytes — not just the routing path — shares
+// the same formula instead of growing its own copy.
+func EstimateTextTokens(body []byte) int64 {
+	var ascii, wide int64
+	for _, b := range body {
+		if b < 0x80 {
+			ascii++
+		} else {
+			wide++
+		}
+	}
+	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
 }
 
 // FmtSeconds renders d as fixed-decimal seconds ("6.32s") instead of

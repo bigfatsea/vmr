@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 
 // RequestFacts computation for condition-based routing (see
 // docs/VirtualModelRouter_System_Design_v3.md §6.4). Every estimate here is
@@ -20,15 +20,6 @@ import (
 )
 
 const (
-	// asciiBytesPerToken/wideBytesPerToken split the text estimate by
-	// script: ASCII (mostly English) tokenizes at roughly 4 bytes/token
-	// across mainstream BPE tokenizers; CJK and other multi-byte UTF-8
-	// content is denser and deliberately overestimated at 2 bytes/token —
-	// higher than any tokenizer this was checked against actually costs,
-	// on purpose (see design doc §1.4).
-	asciiBytesPerToken = 4
-	wideBytesPerToken  = 2
-
 	// imageTokenEstimate is a flat per-detected-image estimate (no pixel
 	// decoding — see design doc §1.4's image section), calibrated to a
 	// 1920x1080 screenshot's cost on Claude's high-resolution tier (2691
@@ -75,23 +66,8 @@ func computeRequestFacts(body []byte, imageCount int) core.RequestFacts {
 	return core.RequestFacts{
 		HasImage:        imageCount > 0,
 		HasTools:        adapter.HasNonEmptyTopLevelArray(body, "tools"),
-		EstimatedTokens: estimateTextTokens(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
+		EstimatedTokens: core.EstimateTextTokens(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
 	}
-}
-
-// estimateTextTokens scans the whole raw body byte-for-byte (JSON
-// structure included — its overhead only pushes the estimate up, which is
-// the safe direction) classifying by UTF-8 lead byte, no rune decoding.
-func estimateTextTokens(body []byte) int64 {
-	var ascii, wide int64
-	for _, b := range body {
-		if b < 0x80 {
-			ascii++
-		} else {
-			wide++
-		}
-	}
-	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
 }
 
 // documentMarkers are cheap, wide-net signals that the request carries a

@@ -4,6 +4,7 @@ package core
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,36 @@ func TestNameOmitsAPIKey(t *testing.T) {
 // (Build/Network/Canceled/Truncated) never reach Health.ReportFailure, but
 // report.go buckets error_classes by these exact strings, so a rename here
 // would silently fragment that report without any test catching it.
+// TestEstimateTextTokens locks in the ascii/wide byte-classification split
+// (4 bytes/token ascii, 2 bytes/token wide-UTF-8) this is now the single
+// shared implementation for: internal/server/facts.go's pre-routing
+// RequestFacts.EstimatedTokens, and internal/report's per-role token
+// estimate in detail pages (roleTokens). A regression here silently changes
+// both a live routing signal and a reporting number.
+func TestEstimateTextTokens(t *testing.T) {
+	if got := EstimateTextTokens(nil); got != 0 {
+		t.Errorf("empty input = %d, want 0", got)
+	}
+	// 8 ascii bytes / 4 bytes-per-token = 2.
+	if got := EstimateTextTokens([]byte("abcdefgh")); got != 2 {
+		t.Errorf("ascii = %d, want 2", got)
+	}
+	// "中" is 3 UTF-8 bytes, all wide (lead byte >= 0x80); repeated 4x = 12
+	// wide bytes / 2 bytes-per-token = 6.
+	wide := []byte("中中中中")
+	if got := EstimateTextTokens(wide); got != 6 {
+		t.Errorf("wide utf-8 = %d, want 6", got)
+	}
+	// Mixed: wide text must cost more tokens per byte than ascii, not less
+	// — this is the "CJK deliberately overestimated" invariant the
+	// asciiBytesPerToken/wideBytesPerToken split exists for.
+	asciiPerByte := float64(EstimateTextTokens([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))) / 32
+	widePerByte := float64(EstimateTextTokens([]byte(strings.Repeat("中", 32)))) / (32 * 3)
+	if widePerByte <= asciiPerByte {
+		t.Errorf("wide text should estimate more tokens/byte than ascii: wide=%.4f ascii=%.4f", widePerByte, asciiPerByte)
+	}
+}
+
 func TestErrorClassString(t *testing.T) {
 	cases := map[ErrorClass]string{
 		ErrClient:    "client",

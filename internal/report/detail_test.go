@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-25, by Sonnet 5
 package report
 
 import (
@@ -271,7 +271,7 @@ func TestChatMessagesAnthropicSystem(t *testing.T) {
 	}
 }
 
-func TestRoleCharsAndMessageCount(t *testing.T) {
+func TestRoleChars(t *testing.T) {
 	// openai shape: roles taken as-is, tool_calls counted to assistant.
 	openai := map[string]any{
 		"messages": []any{
@@ -284,9 +284,6 @@ func TestRoleCharsAndMessageCount(t *testing.T) {
 	rc := roleChars(openai)
 	if rc["system"] != 10 || rc["user"] != 30 || rc["assistant"] != 20 || rc["tool"] != 40 {
 		t.Errorf("openai roleChars = %v", rc)
-	}
-	if n, ok := messageCount(openai); !ok || n != 4 {
-		t.Errorf("messageCount = %d %v", n, ok)
 	}
 
 	// anthropic shape: top-level system counts as one message; tool_result
@@ -304,16 +301,30 @@ func TestRoleCharsAndMessageCount(t *testing.T) {
 	if rc["system"] != 5 || rc["user"] != 7 || rc["tool"] == 0 {
 		t.Errorf("anthropic roleChars = %v", rc)
 	}
-	if n, ok := messageCount(anthropic); !ok || n != 2 {
-		t.Errorf("messageCount = %d %v", n, ok)
-	}
 
 	// Non-chat bodies yield nothing.
 	if rc := roleChars("not json"); rc != nil {
 		t.Errorf("string body roleChars = %v", rc)
 	}
-	if _, ok := messageCount(map[string]any{"model": "x"}); ok {
-		t.Error("body without messages/system should not count")
+}
+
+// TestRoleTokens locks in that roleTokens shares roleChars' traversal (same
+// per-role attribution) but sizes each fragment with core.EstimateTextTokens
+// instead of a rune count — ascii text should divide down by ~4x, not equal
+// the character count.
+func TestRoleTokens(t *testing.T) {
+	body := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": strings.Repeat("u", 40)},
+			map[string]any{"role": "assistant", "content": strings.Repeat("a", 80)},
+		},
+	}
+	rt := roleTokens(body)
+	if rt["user"] != 10 || rt["assistant"] != 20 {
+		t.Errorf("roleTokens = %v, want user=10 assistant=20 (ascii/4)", rt)
+	}
+	if rc := roleTokens("not json"); rc != nil {
+		t.Errorf("string body roleTokens = %v", rc)
 	}
 }
 
@@ -369,25 +380,6 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("n = %d, want 2", n)
 	}
-	idx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Sorted by ts: the 09:00 error row precedes the 10:00 ok row.
-	errPos := strings.Index(string(idx), "09:00:00")
-	okPos := strings.Index(string(idx), "10:00:01")
-	if errPos < 0 || okPos < 0 || errPos > okPos {
-		t.Errorf("INDEX not time-sorted:\n%s", idx)
-	}
-	for _, want := range []string{
-		"VM/API",
-		`openai \| agent \| prov:real-1`, // merged column: protocol | virtual model | provider:upstream-model (escaped for the markdown table)
-		"100ms ❌error",                   // duration cell absorbs the removed 结果 column
-	} {
-		if !strings.Contains(string(idx), want) {
-			t.Errorf("INDEX missing %q:\n%s", want, idx)
-		}
-	}
 
 	okFile, err := os.ReadFile(filepath.Join(out, "20260709-100001.000_agent_real-1_ok.md"))
 	if err != nil {
@@ -429,7 +421,6 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		out,
 		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.md"),
 		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.json"),
-		filepath.Join(dir, "vmr-requests-index.md"),
 	} {
 		st, err := os.Stat(p)
 		if err != nil {
@@ -441,11 +432,11 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	}
 }
 
-// TestWriteDetailsByTag covers the per-client-key sibling indices: records
-// tagged "alice"/"bob" each get their own vmr-requests-index-<tag>.md
-// (same directory as the global index, so its "details/…" links need no
-// adjustment), restricted to that tag's records, while details/ itself
-// stays one shared, unfiltered, un-duplicated pool for every tag.
+// TestWriteDetailsByTag covers that ClientKeyTag never affects
+// WriteDetails' own output: details/ stays one shared, unfiltered,
+// un-duplicated pool of per-request files regardless of how many distinct
+// tags the records carry (per-tag *views* over this data are report2's
+// job now — vmr-requests-<tag>.md — not WriteDetails').
 func TestWriteDetailsByTag(t *testing.T) {
 	zone := time.FixedZone("CST", 8*3600)
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
@@ -454,8 +445,8 @@ func TestWriteDetailsByTag(t *testing.T) {
 	// Distinct opening user messages so each record anchors its own
 	// session — three unrelated callers, not three turns of one
 	// conversation (identical content would collapse them into a single
-	// shared session, and a session's grouped-view turn table isn't
-	// itself filtered by tag — see filterSessByTag's doc comment).
+	// shared session, which would defeat the point of this test: three
+	// independently-tagged records writing to the same shared details/).
 	r1 := mkRec(at(0), "", []any{sys, msg("user", "alice's question")}, nil, sseText("a1"))
 	r1.ClientKeyTag = "alice"
 	r2 := mkRec(at(1), "", []any{sys, msg("user", "bob's question")}, nil, sseText("b1"))
@@ -483,55 +474,18 @@ func TestWriteDetailsByTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detailFiles) != 6 { // 3 records × (.md + .json)
+	if len(detailFiles) != 6 { // 3 records × (.md + .json), tags notwithstanding
 		t.Fatalf("details/ entries = %d, want 6: %v", len(detailFiles), detailFiles)
 	}
 
-	// The global index and both tag siblings all live next to each other.
+	// Nothing else gets written next to details/ — WriteDetails no longer
+	// produces any tag-aware output of its own.
 	topEntries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := map[string]bool{}
-	for _, e := range topEntries {
-		names[e.Name()] = true
-	}
-	for _, want := range []string{"details", "vmr-requests-index.md", "vmr-requests-index-alice.md", "vmr-requests-index-bob.md"} {
-		if !names[want] {
-			t.Errorf("missing %q in %v", want, names)
-		}
-	}
-	if len(topEntries) != 4 {
-		t.Errorf("top-level entries = %v, want exactly details/ + global index + 2 tag siblings", names)
-	}
-
-	aliceIdx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index-alice.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(aliceIdx), "共 1 条记录") {
-		t.Errorf("alice index should count exactly 1 record:\n%s", aliceIdx)
-	}
-	if strings.Contains(string(aliceIdx), "10:01:00") || strings.Contains(string(aliceIdx), "10:02:00") {
-		t.Errorf("alice index leaked another tag's record:\n%s", aliceIdx)
-	}
-	// Its detail-file link still points at the shared details/ directory,
-	// same prefix as the global index.
-	if !strings.Contains(string(aliceIdx), "details/") {
-		t.Errorf("alice index missing details/ link:\n%s", aliceIdx)
-	}
-
-	bobIdx, err := os.ReadFile(filepath.Join(dir, "vmr-requests-index-bob.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(bobIdx), "共 1 条记录") {
-		t.Errorf("bob index should count exactly 1 record:\n%s", bobIdx)
-	}
-
-	// No sibling ever gets created for the untagged ("") bucket.
-	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-index-.md")); !os.IsNotExist(err) {
-		t.Errorf("must not create a sibling index for the untagged bucket")
+	if len(topEntries) != 1 || topEntries[0].Name() != "details" {
+		t.Errorf("top-level entries = %v, want exactly details/", topEntries)
 	}
 }
 
@@ -589,11 +543,30 @@ func TestRenderDetail_FactsLine(t *testing.T) {
 	if !strings.Contains(withFacts, "VMR 路由前判断") {
 		t.Errorf("facts line missing:\n%s", withFacts)
 	}
-	if !strings.Contains(withFacts, "图片 是") || !strings.Contains(withFacts, "Tools 否") {
-		t.Errorf("facts line should show 图片=是, Tools=否:\n%s", withFacts)
+	if !strings.Contains(withFacts, "请求所需能力：`image`") {
+		t.Errorf("facts line should list only the detected capability `image`:\n%s", withFacts)
+	}
+	if strings.Contains(withFacts, "`tools`") {
+		t.Errorf("facts line should not list tools when HasTools is false:\n%s", withFacts)
 	}
 	if factsIdx, reqIdx := strings.Index(withFacts, "VMR 路由前判断"), strings.Index(withFacts, "① Client"); factsIdx < 0 || reqIdx < 0 || factsIdx > reqIdx {
 		t.Errorf("facts line must appear before section ①, got factsIdx=%d reqIdx=%d", factsIdx, reqIdx)
+	}
+	if !strings.Contains(withFacts, "预估Token数量：1.2 KT") {
+		t.Errorf("facts line should render the plain (non-EST-suffixed) token estimate:\n%s", withFacts)
+	}
+
+	both := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), nil)
+	if !strings.Contains(both, "请求所需能力：`image`、`tools`") {
+		t.Errorf("facts line should list both detected capabilities joined by 、:\n%s", both)
+	}
+	if !strings.Contains(both, "预估Token数量：500 T") {
+		t.Errorf("facts line should render sub-1000 estimate as plain T:\n%s", both)
+	}
+
+	neither := renderDetail(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), nil)
+	if !strings.Contains(neither, "请求所需能力：无") {
+		t.Errorf("facts line should show 无 when no capability is detected:\n%s", neither)
 	}
 
 	withoutFacts := renderDetail(base(nil), nil)

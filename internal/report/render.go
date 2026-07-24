@@ -1,4 +1,4 @@
-// Ver 2026-07-10 01:10, by Fable 5
+// Ver 2026-07-25, by Sonnet 5
 
 // Markdown rendering primitives for per-request detail files (detail.go):
 // collapsible sections, dynamic code fences, chat-message rendering for both
@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"vmr/internal/audit"
 	"vmr/internal/core"
 )
 
@@ -218,6 +219,23 @@ func chatMessages(body any) []chatMessage {
 // "tool" role so both protocols yield comparable shares. Returns nil when
 // the body isn't a chat object.
 func roleChars(body any) map[string]int64 {
+	return roleMeasure(body, func(s string) int64 { return int64(len([]rune(s))) })
+}
+
+// roleTokens is roleChars' token-estimate sibling: same per-role traversal,
+// but each text fragment is sized with core.EstimateTextTokens (the same
+// formula behind RequestFacts.EstimatedTokens) instead of a raw rune count —
+// a token share is a much closer proxy for "what's actually costing money in
+// this conversation" than a character share.
+func roleTokens(body any) map[string]int64 {
+	return roleMeasure(body, func(s string) int64 { return core.EstimateTextTokens([]byte(s)) })
+}
+
+// roleMeasure walks a request body's conversation once, calling measure on
+// every role's displayed text and summing the result per role. Shared by
+// roleChars (rune count) and roleTokens (estimated token count) so the two
+// only differ in how a text fragment is sized, not how the tree is walked.
+func roleMeasure(body any, measure func(string) int64) map[string]int64 {
 	obj, ok := body.(map[string]any)
 	if !ok {
 		return nil
@@ -225,7 +243,7 @@ func roleChars(body any) map[string]int64 {
 	out := map[string]int64{}
 	add := func(role, text string) {
 		if text != "" {
-			out[role] += int64(len([]rune(text)))
+			out[role] += measure(text)
 		}
 	}
 	if sys, ok := obj["system"]; ok {
@@ -261,26 +279,6 @@ func roleChars(body any) map[string]int64 {
 		}
 	}
 	return out
-}
-
-// messageCount counts conversation messages in a request body (a top-level
-// anthropic system prompt counts as one); ok=false when the body isn't a
-// chat object.
-func messageCount(body any) (int, bool) {
-	obj, ok := body.(map[string]any)
-	if !ok {
-		return 0, false
-	}
-	msgs, hasMsgs := obj["messages"].([]any)
-	_, hasSys := obj["system"]
-	if !hasMsgs && !hasSys {
-		return 0, false
-	}
-	n := len(msgs)
-	if hasSys {
-		n++
-	}
-	return n, true
 }
 
 // roleOrder fixes the display order of the well-known roles; anything else
@@ -588,4 +586,96 @@ func finalMessage(body any) (*streamSummary, bool) {
 		return s, true
 	}
 	return nil, false
+}
+
+// ---- small formatting/extraction helpers shared with session.go and
+// detail.go's per-request rendering (relocated here from the old report.go/
+// markdown.go aggregate-report code when that code was removed) ----
+
+// attemptErrorClass returns the attempt's structured error class, falling
+// back to parsing the free-text Error field for logs written before
+// ErrorClass existed: HTTP-classified failures stored the bare class name
+// (no colon) directly in Error, and the four non-HTTP failure paths
+// (build/network/canceled/truncated) used a "class: detail" prefix — both
+// forms are still exactly recoverable from Error alone. New logs always
+// carry ErrorClass and never touch this fallback.
+func attemptErrorClass(a audit.Attempt) string {
+	if a.ErrorClass != "" {
+		return a.ErrorClass
+	}
+	if a.Error == "" {
+		return ""
+	}
+	if i := strings.IndexByte(a.Error, ':'); i > 0 {
+		return a.Error[:i]
+	}
+	return a.Error
+}
+
+// countImages tallies a record's inline request images and the subset that
+// triggered downscaling.
+func countImages(images []audit.ImageInfo) (total, compressed int) {
+	total = len(images)
+	for _, img := range images {
+		if img.Downscaled {
+			compressed++
+		}
+	}
+	return total, compressed
+}
+
+// bodyBytes sizes a recorded body: JSON bodies by re-serialization, string
+// bodies (SSE etc.) by length. Truncated bodies undercount; that matches
+// what was recorded.
+func bodyBytes(body any) int64 {
+	switch b := body.(type) {
+	case nil:
+		return 0
+	case string:
+		return int64(len(b))
+	default:
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return 0
+		}
+		return int64(len(raw))
+	}
+}
+
+// pct renders n/total as a percentage string ("-" when total is 0).
+func pct(n, total int) string {
+	if total == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", float64(n)/float64(total)*100)
+}
+
+// fmtN renders a count compactly (K/M-scaled above 10k/1M).
+func fmtN(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 10_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// tokensTriple renders the 3-tuple (In / CacheHit(share%) / Out).
+func tokensTriple(in, hit, out int64) string {
+	if in == 0 && out == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%s / %s(%s) / %s",
+		fmtN(in), fmtN(hit), pct(int(hit), int(in)), fmtN(out))
+}
+
+// ms renders a millisecond duration as fixed-decimal seconds above 1000ms,
+// or plain milliseconds below.
+func ms(v int64) string {
+	if v > 1000 {
+		return fmt.Sprintf("%.1fs", float64(v)/1000)
+	}
+	return fmt.Sprintf("%dms", v)
 }
