@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-24 15:00, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -552,7 +552,11 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		var provider strings.Builder
 		provider.WriteString("provider config:")
 		for _, e := range entries {
-			fmt.Fprintf(&provider, "\n    %-*s proxy=%s", nameWidth, e.Name, e.Proxy)
+			marker := ""
+			if e.IsProxied {
+				marker = " (proxy)"
+			}
+			fmt.Fprintf(&provider, "\n    %-*s base_url=%s%s", nameWidth, e.Name, e.BaseURL, marker)
 		}
 		logger.Printf("%s", provider.String())
 	}
@@ -568,22 +572,50 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 			}
 			fmt.Fprintf(&model, "\n    %s/%s%s", protocol, name, imgOverride)
 			for i, ep := range route.EffectiveOrder() {
-				key := "key:set"
-				if ep.APIKey == "" {
-					key = "key:EMPTY"
-				}
-				fmt.Fprintf(&model, "\n        %d.%s/%s(%s)", i+1, ep.Provider, ep.Model, key)
+				fmt.Fprintf(&model, "\n        %d.%s/%s, max_context_tokens=%s, capabilities=%s",
+					i+1, ep.Provider, ep.Model, fmtMaxContextTokens(ep.MaxContextTokens), fmtCapabilities(ep.Capabilities))
 			}
 		}
 	}
 	logger.Printf("%s", model.String())
 }
 
+// fmtMaxContextTokens renders an endpoint's declared context ceiling for the
+// "model config:" block — "<empty>" for the unconstrained zero value (see
+// core.Endpoint.MaxContextTokens), "<N>k" for the common round-thousands
+// case (128000 -> "128k"), the raw integer otherwise (an odd, non-round
+// value is rare enough not to deserve special-casing).
+func fmtMaxContextTokens(n int64) string {
+	if n <= 0 {
+		return "<empty>"
+	}
+	if n%1000 == 0 {
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// fmtCapabilities renders an endpoint's declared capabilities for the
+// "model config:" block — "<empty>" when unset (unconstrained: this
+// endpoint is assumed to support everything, see core.Endpoint.HasCapability),
+// else the declared list joined with "/".
+func fmtCapabilities(caps []string) string {
+	if len(caps) == 0 {
+		return "<empty>"
+	}
+	return strings.Join(caps, "/")
+}
+
 // providerProxyEntry is one provider's resolved proxy setting, keyed by its
-// "protocol/name" for display.
+// "protocol/name" for display. BaseURL/IsProxied feed logConfigSummary's
+// "provider config:" block (base_url=<url>, "(proxy)" marker only); Proxy is
+// the older human-readable description (direct / direct (proxy: false) /
+// redacted proxy URL) providerProxyLines still renders for `vmr check`.
 type providerProxyEntry struct {
-	Name  string
-	Proxy string
+	Name      string
+	BaseURL   string
+	Proxy     string
+	IsProxied bool
 }
 
 // providerProxyEntries resolves the proxy each provider will actually use (a
@@ -607,10 +639,14 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 			if p.Proxy != nil && !*p.Proxy {
 				desc = "direct (proxy: false)"
 			}
+			isProxied := false
 			if mode, proxyURL := cfg.ProxySpecFor(p); mode == config.ProxyURL {
 				desc = redact(proxyURL)
+				isProxied = true
 			}
-			entries = append(entries, providerProxyEntry{Name: protocol + "/" + name, Proxy: desc})
+			entries = append(entries, providerProxyEntry{
+				Name: protocol + "/" + name, BaseURL: p.BaseURL, Proxy: desc, IsProxied: isProxied,
+			})
 		}
 	}
 	return entries

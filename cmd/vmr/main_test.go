@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-07-24 15:00, by Sonnet 5
 package main
 
 import (
@@ -227,19 +227,63 @@ models:
 	if !strings.Contains(out, "openai/vm") {
 		t.Errorf("output missing model group:\n%s", out)
 	}
-	if !strings.Contains(out, "1.p1/real-a(key:set)") {
+	if !strings.Contains(out, "1.p1/real-a, max_context_tokens=<empty>, capabilities=<empty>") {
 		t.Errorf("output missing first endpoint:\n%s", out)
 	}
-	if !strings.Contains(out, "2.p2/real-b(key:set)") {
+	if !strings.Contains(out, "2.p2/real-b, max_context_tokens=<empty>, capabilities=<empty>") {
 		t.Errorf("output missing second endpoint:\n%s", out)
 	}
 
-	// Proxy lines (in the "provider config:" group, no "provider" prefix per line).
-	if !strings.Contains(out, "openai/p1 proxy=direct") {
-		t.Errorf("output missing p1 proxy line:\n%s", out)
+	// Provider lines (in the "provider config:" group, no "provider" prefix per line).
+	if !strings.Contains(out, "openai/p1 base_url=https://a.example/v1") {
+		t.Errorf("output missing p1 base_url line:\n%s", out)
 	}
-	if !strings.Contains(out, "openai/p2 proxy=direct (proxy: false)") {
-		t.Errorf("output missing p2 proxy: false line:\n%s", out)
+	if !strings.Contains(out, "openai/p2 base_url=https://b.example/v1") {
+		t.Errorf("output missing p2 base_url line:\n%s", out)
+	}
+	if strings.Contains(out, "openai/p1 base_url=https://a.example/v1 (proxy)") {
+		t.Errorf("p1 has no proxy configured, must not show (proxy) marker:\n%s", out)
+	}
+}
+
+// TestLogConfigSummary_ProxyMarker verifies the "provider config:" block
+// shows base_url= always and appends the "(proxy)" marker only for a
+// provider whose traffic actually resolves to a configured proxy — not for
+// one that's direct because no proxy was ever configured at all.
+func TestLogConfigSummary_ProxyMarker(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+https_proxy: http://127.0.0.1:7890
+providers:
+  openai:
+    proxied: {base_url: https://a.example/v1, api_key: k}
+    direct: {base_url: https://b.example/v1, api_key: k, proxy: false}
+models:
+  openai:
+    vm:
+      endpoints:
+        - {provider: proxied, model: m1}
+        - {provider: direct, model: m2}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	if !strings.Contains(out, "openai/proxied base_url=https://a.example/v1 (proxy)") {
+		t.Errorf("proxied provider missing (proxy) marker: %s", out)
+	}
+	if !strings.Contains(out, "openai/direct  base_url=https://b.example/v1\n") {
+		t.Errorf("direct provider must not show (proxy) marker: %s", out)
 	}
 }
 
@@ -322,17 +366,24 @@ models:
 	}
 }
 
-// TestLogConfigSummary_EmptyAPIKey verifies that an endpoint with no API
-// key is rendered as key:EMPTY.
-func TestLogConfigSummary_EmptyAPIKey(t *testing.T) {
+// TestLogConfigSummary_MaxContextTokensAndCapabilities verifies the
+// "model config:" block's per-endpoint line renders declared
+// max_context_tokens (round-thousands as "Nk") and capabilities (declared
+// list joined with "/"), and falls back to "<empty>" for an endpoint that
+// declares neither — the unconstrained default (core.Endpoint.HasCapability),
+// not an error state.
+func TestLogConfigSummary_MaxContextTokensAndCapabilities(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
 providers:
   openai:
-    p1: {base_url: https://a.example/v1, api_key: ""}
+    p1: {base_url: https://a.example/v1, api_key: k}
 models:
   openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+    vm:
+      endpoints:
+        - {provider: p1, model: declared, max_context_tokens: 128000, capabilities: [text, image, tools]}
+        - {provider: p1, model: bare}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -348,8 +399,11 @@ models:
 	logConfigSummary(logger, cfg, snap)
 	out := buf.String()
 
-	if !strings.Contains(out, "key:EMPTY") {
-		t.Errorf("endpoint with empty API key should show key:EMPTY: %s", out)
+	if !strings.Contains(out, "p1/declared, max_context_tokens=128k, capabilities=text/image/tools") {
+		t.Errorf("declared endpoint not rendered correctly: %s", out)
+	}
+	if !strings.Contains(out, "p1/bare, max_context_tokens=<empty>, capabilities=<empty>") {
+		t.Errorf("bare (unconstrained) endpoint not rendered correctly: %s", out)
 	}
 }
 
