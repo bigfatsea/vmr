@@ -1,4 +1,4 @@
-// Ver 2026-07-15 03:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. This package
@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"vmr/internal/core"
 )
 
 // retentionDays gates the delete side of housekeeping (see housekeep.go).
@@ -59,6 +61,17 @@ type Record struct {
 	// virtual model: Downscaled/DownscaledWidth/... stay zero-valued when
 	// downscaling never ran (disabled) or wasn't needed (already small).
 	Images []ImageInfo `json:"images,omitempty"`
+	// Facts is vmr's own pre-routing analysis of this request — the exact
+	// core.RequestFacts value server.go computed once (image/tools
+	// detection, estimated token count) before any routing/failover
+	// decision, carried through unchanged rather than recomputed. It is
+	// deliberately a sibling of Client.Request, never merged into it:
+	// Client.Request stays byte-faithful to exactly what the client sent
+	// (that contract must never bend to carry vmr's own derived data), and
+	// Facts is what vmr derived from it, recorded next to it. nil only for
+	// requests that never reached fact computation — rejected on auth or
+	// unparseable/model-less JSON, before a route was even looked up.
+	Facts *core.RequestFacts `json:"facts,omitempty"`
 	// ReplayOf identifies the source record ("path:line") when this record
 	// was produced by `vmr replay --record`, not live traffic. Empty for
 	// every ordinary request — vmr itself never sets this field.

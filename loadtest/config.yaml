@@ -1,4 +1,4 @@
-# Ver 2026-07-24 12:00, by Sonnet 5 — vmr config for load testing (docs/VirtualModelRouter_System_Design_v3.md §12).
+# Ver 2026-07-24 13:30, by Sonnet 5 — vmr config for load testing (docs/VirtualModelRouter_System_Design_v3.md §12).
 # Not the same as config.yaml/config.example.yaml at the repo root — this points
 # at loadtest/mockupstream, never a real provider, and listens on a different
 # port so it can run alongside a real dev instance without clashing.
@@ -9,6 +9,13 @@ log_dir: ./logs/loadtest    # own subdirectory under logs/ — separate from ~/.
                             # any real vmr instance's logs/*.jsonl (runner.go wipes this dir clean
                             # before every run; must never point at a shared/real log directory)
 audit_retention_days: 0     # keep forever; this is a small, throwaway log directory anyway
+image_cache_dir: ./logs/loadtest/image_cache  # own subdirectory, same reasoning as log_dir above —
+                            # runner.go wipes this clean before every run too. Without this it would
+                            # default to the same ~/.vmr/image_cache a real vmr instance uses, and
+                            # since gentargets' cache-busting variants are deterministic (same seeds
+                            # every run, no true randomness), every run after the first would find
+                            # its own "fresh" variants already warm from the previous run — quietly
+                            # defeating the whole point of generating them.
 
 providers:
   openai:

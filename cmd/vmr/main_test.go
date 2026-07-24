@@ -1,4 +1,4 @@
-// Ver 2026-07-17 06:30, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 package main
 
 import (
@@ -202,15 +202,15 @@ models:
 	logConfigSummary(logger, cfg, snap)
 	out := buf.String()
 
-	// Core config line.
+	// Core config fields.
 	checks := []string{
-		"listen=127.0.0.1:8800",
-		"auth=on",
-		"max_attempts=3",
-		"max_concurrency=8",
-		"image_downscale=512px",
-		"audit_retention=30d",
-		"probe_mode=active",
+		"listen            = 127.0.0.1:8800",
+		"auth              = on",
+		"max_attempts      = 3",
+		"max_concurrency   = 8",
+		"image_downscale   = 512px",
+		"audit_retention   = 30d",
+		"probe_mode        = active",
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {
@@ -218,14 +218,14 @@ models:
 		}
 	}
 
-	// Timeout line.
-	if !strings.Contains(out, "timeouts connect=") {
-		t.Errorf("output missing timeouts line:\n%s", out)
+	// Timeouts block.
+	if !strings.Contains(out, "timeouts") || !strings.Contains(out, "connect           = 10s") {
+		t.Errorf("output missing timeouts block:\n%s", out)
 	}
 
-	// Model line with endpoints in try order.
-	if !strings.Contains(out, "model vm [openai]") {
-		t.Errorf("output missing model line:\n%s", out)
+	// Model group with endpoints in try order.
+	if !strings.Contains(out, "openai/vm") {
+		t.Errorf("output missing model group:\n%s", out)
 	}
 	if !strings.Contains(out, "1.p1/real-a(key:set)") {
 		t.Errorf("output missing first endpoint:\n%s", out)
@@ -234,11 +234,11 @@ models:
 		t.Errorf("output missing second endpoint:\n%s", out)
 	}
 
-	// Proxy lines.
-	if !strings.Contains(out, "provider openai/p1 proxy=direct") {
+	// Proxy lines (in the "provider config:" group, no "provider" prefix per line).
+	if !strings.Contains(out, "openai/p1 proxy=direct") {
 		t.Errorf("output missing p1 proxy line:\n%s", out)
 	}
-	if !strings.Contains(out, "provider openai/p2 proxy=direct (proxy: false)") {
+	if !strings.Contains(out, "openai/p2 proxy=direct (proxy: false)") {
 		t.Errorf("output missing p2 proxy: false line:\n%s", out)
 	}
 }
@@ -269,19 +269,19 @@ models:
 	logConfigSummary(logger, cfg, snap)
 	out := buf.String()
 
-	if !strings.Contains(out, "auth=off") {
+	if !strings.Contains(out, "auth              = off") {
 		t.Errorf("auth should be off: %s", out)
 	}
-	if !strings.Contains(out, "max_attempts=unlimited") {
+	if !strings.Contains(out, "max_attempts      = unlimited") {
 		t.Errorf("max_attempts should be unlimited: %s", out)
 	}
-	if !strings.Contains(out, "max_concurrency=unlimited") {
+	if !strings.Contains(out, "max_concurrency   = unlimited") {
 		t.Errorf("max_concurrency should be unlimited: %s", out)
 	}
-	if !strings.Contains(out, "image_downscale=off") {
+	if !strings.Contains(out, "image_downscale   = off") {
 		t.Errorf("image_downscale should be off: %s", out)
 	}
-	if !strings.Contains(out, "audit_retention=forever") {
+	if !strings.Contains(out, "audit_retention   = forever") {
 		t.Errorf("audit_retention should be forever: %s", out)
 	}
 }
@@ -314,10 +314,10 @@ models:
 	logConfigSummary(logger, cfg, snap)
 	out := buf.String()
 
-	if !strings.Contains(out, "model plain [openai]") || strings.Contains(out, "model plain [openai] image_downscale=") {
+	if !strings.Contains(out, "openai/plain\n") {
 		t.Errorf("plain model should not have image_downscale override: %s", out)
 	}
-	if !strings.Contains(out, "model custom [openai] image_downscale=256px") {
+	if !strings.Contains(out, "openai/custom (image_downscale=256px)") {
 		t.Errorf("custom model should show image_downscale=256px: %s", out)
 	}
 }

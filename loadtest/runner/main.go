@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 13:30, by Sonnet 5
 
 // runner is the one-command version of the manual steps in loadtest/README.md:
 // starts loadtest/mockupstream and vmr, generates targets.json (and its two
@@ -109,6 +109,13 @@ func run() error {
 	}
 
 	fmt.Println("== resetting", logDir, "==")
+	// image_cache_dir (loadtest/config.yaml) is deliberately nested under
+	// logDir, so this same wipe also clears it — necessary now that
+	// gentargets' cache-busting image variants are deterministic (same
+	// content every run): without a clean cache dir, a second run would
+	// find its own "fresh" variants already warm from the previous run.
+	// imgprep.cacheStore recreates the subdirectory on first write, so
+	// there's nothing else to set up here.
 	os.RemoveAll(logDir)
 	os.MkdirAll(logDir, 0o755)
 
@@ -127,9 +134,11 @@ func run() error {
 	if out, err := exec.Command("go", "run", "./loadtest/gentargets").CombinedOutput(); err != nil {
 		return fmt.Errorf("gentargets: %w\n%s", err, out)
 	}
-	// Regenerated fresh every run (embeds synthetic images/GIFs, never
-	// identical twice) — never leave any of the three behind in the source
-	// directory.
+	// Regenerated fresh every run (embeds synthetic images/GIFs — big_image/
+	// multi_image each as a pool of distinct variants, see gentargets'
+	// cacheBustVariants doc comment for why one fixed image would hide the
+	// decode/scale/encode cost these two scenarios exist to measure) —
+	// never leave any of the three behind in the source directory.
 	defer func() {
 		os.Remove(targetsPath)
 		os.Remove(targetsPlainPath)

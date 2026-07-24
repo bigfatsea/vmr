@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // RequestFacts computation for condition-based routing (see
 // docs/VirtualModelRouter_System_Design_v3.md §6.4). Every estimate here is
@@ -17,7 +17,6 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
-	"vmr/internal/imgprep"
 )
 
 const (
@@ -46,13 +45,37 @@ const (
 // computeRequestFacts derives core.RequestFacts from a request's already-
 // buffered body. It never fails: every sub-estimate degrades to zero on
 // any shape it doesn't recognize, matching the fail-open posture of the
-// scanners it's built from (imgprep.HasImageMarker,
-// adapter.HasNonEmptyTopLevelArray).
-func computeRequestFacts(body []byte, protocol string) core.RequestFacts {
+// scanner it's built from (adapter.HasNonEmptyTopLevelArray).
+//
+// imageCount is NOT derived here from a body scan — it comes from the
+// caller's single imgprep.Downscale call (server.go), which walks the
+// actual message/content-block structure (protocol-aware: openai
+// content[].image_url, anthropic content[].source) rather than doing a raw
+// substring search. Threading the already-computed count through, instead
+// of re-detecting images here, serves two purposes at once:
+//
+//  1. Correctness: HasImage (imageCount > 0) feeds a hard, unconditional
+//     capability Condition (internal/strategy/conditions.go) with no
+//     fallback — unlike the rest of EstimatedTokens (deliberately
+//     over-inclusive, see the package comment above, and only ever nudges a
+//     soft preference), a false positive here can zero out every candidate
+//     endpoint. A text-only request that merely mentions a quoted
+//     "image..." word (e.g. a coding agent quoting a test assertion like
+//     "image_downscale=512px" back from a tool result) must never be
+//     misrouted as one that actually needs image support — a real incident
+//     this replaced a naive imgprep.HasImageMarker byte-scan to fix.
+//  2. Cost: a request with no image should pay for exactly one
+//     presence check (imgprep.HasImageMarker, inside Downscale) across the
+//     whole request — not that check plus a second, independent
+//     marker-count scan here for the token estimate. Reusing the same
+//     count for both HasImage and the image portion of EstimatedTokens
+//     means the common no-image case never does the image-related work
+//     twice.
+func computeRequestFacts(body []byte, imageCount int) core.RequestFacts {
 	return core.RequestFacts{
-		HasImage:        imgprep.HasImageMarker(body),
+		HasImage:        imageCount > 0,
 		HasTools:        adapter.HasNonEmptyTopLevelArray(body, "tools"),
-		EstimatedTokens: estimateTextTokens(body) + estimateImageTokens(body, protocol) + estimateDocumentTokens(body),
+		EstimatedTokens: estimateTextTokens(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
 	}
 }
 
@@ -69,30 +92,6 @@ func estimateTextTokens(body []byte) int64 {
 		}
 	}
 	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
-}
-
-// imageCountMarkers approximate "how many images" without decoding any of
-// them: a cheap occurrence count of the shape-specific field each protocol
-// uses per inline image. This can over- or under-count relative to the
-// true image count (message text mentioning the marker, or an unusual
-// shape); it exists only to scale imageTokenEstimate, not to describe the
-// request precisely.
-var (
-	openaiImageMarker    = []byte(`"image_url"`)
-	anthropicImageMarker = []byte(`"type":"image"`)
-)
-
-func estimateImageTokens(body []byte, protocol string) int64 {
-	var n int
-	if protocol == "anthropic" {
-		n = bytes.Count(body, anthropicImageMarker)
-	} else {
-		n = bytes.Count(body, openaiImageMarker)
-	}
-	if n == 0 && imgprep.HasImageMarker(body) {
-		n = 1 // the cheap presence marker fired but the shape-specific count missed it; assume at least one
-	}
-	return int64(n) * imageTokenEstimate
 }
 
 // documentMarkers are cheap, wide-net signals that the request carries a

@@ -1,4 +1,4 @@
-// Ver 2026-07-23 12:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /admin/status. Anything else is 404.
@@ -242,24 +242,37 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// with screenshot resolution. Response bodies are never touched.
 		// The effective cap is the virtual model's own override if it set
 		// one (even 0, which force-disables it for that model), else the
-		// global default (§7). Metadata is always collected (n<=0 just
-		// skips the resize/cache path inside imgprep) so the audit trail
-		// describes every request's images regardless of compression
-		// settings; enabled-but-no-image requests still cost only one
-		// cheap substring scan (imgprep.HasImageMarker).
+		// global default (§7). Detection (format/dimensions/count) always
+		// runs regardless of that cap (n<=0 just skips the resize/cache path
+		// inside imgprep) — a plain-text request with no image marker at all
+		// still costs only one cheap substring scan (imgprep.HasImageMarker)
+		// before Downscale returns.
+		//
+		// This one call is now the single source of truth for "does this
+		// request have images" across the whole request, not just the audit
+		// trail: images/len(images) feeds both rec.Images below AND
+		// computeRequestFacts' imageCount argument, which drives
+		// RequestFacts.HasImage — consulted by a hard capability Condition
+		// (internal/strategy/conditions.go) with no fallback — and the image
+		// portion of EstimatedTokens. Neither of those re-derives anything
+		// from body; there is exactly one image-detection pass per request,
+		// reused three ways, so a request with no image never pays for a
+		// second scan. That reuse is also why this call can no longer be
+		// skipped when rec==nil && n<=0 (as it once was, purely as an audit-
+		// metadata cost optimization): routing correctness now depends on
+		// it. The condition needs the real, structurally-detected answer
+		// (imgprep walks actual message/content-block shapes) — a plain-text
+		// request that merely quotes something like "image_downscale=512px"
+		// must never be misrouted as needing image support, which is exactly
+		// what the cheap imgprep.HasImageMarker byte-scan this replaced as
+		// the routing signal would do.
 		route := snap.Models[protocol][probe.Model]
 		n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
-		var images []imgprep.ImageInfo
-		// Skip entirely when there is no consumer: image metadata only goes
-		// into the audit record, so with auditing off and downscaling
-		// disabled the scan/parse would be pure waste.
-		if rec != nil || n > 0 {
-			body, images = imgprep.Downscale(body, protocol, imgprep.Options{
-				MaxPx:        n,
-				CacheDir:     snap.Cfg.ImageCacheDir,
-				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
-			})
-		}
+		body, images := imgprep.Downscale(body, protocol, imgprep.Options{
+			MaxPx:        n,
+			CacheDir:     snap.Cfg.ImageCacheDir,
+			CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+		})
 		if rec != nil && len(images) > 0 {
 			rec.Images = make([]audit.ImageInfo, len(images))
 			for i, img := range images {
@@ -289,9 +302,19 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// add new headers.
 		hdr := FilterClientHeaders(r.Header)
 
+		// Computed once, used twice: the routing layer consults it via
+		// CanonicalRequest.Facts, and the audit trail records the exact
+		// same value (rec.Facts) — never a second, independent computation
+		// at write time. See audit.Record.Facts's doc comment for why it's
+		// a sibling of Client.Request rather than folded into it.
+		facts := computeRequestFacts(body, len(images))
+		if rec != nil {
+			rec.Facts = &facts
+		}
+
 		s.rt.Serve(w, r, &core.CanonicalRequest{
 			Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr,
-			Facts: computeRequestFacts(body, protocol),
+			Facts: facts,
 		}, protocol, rec)
 	}
 }

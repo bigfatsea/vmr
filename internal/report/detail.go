@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -676,11 +676,37 @@ func renderDetail(rec *audit.Record, info *ReqInfo) string {
 	w("| %s | %s | %s | %s | %s | %d | %s | %s | %s |\n\n",
 		escapeCell(displayModel(rec)), escapeCell(lastEndpoint(rec)), outcomeMark(rec.Outcome),
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
+	renderFactsLine(&b, rec)
 
 	renderClientRequest(&b, rec, info)
 	renderAttempts(&b, rec)
 	renderClientResponse(&b, rec)
 	return b.String()
+}
+
+// renderFactsLine surfaces vmr's own pre-routing analysis of this request —
+// core.RequestFacts, computed once in server.go before any routing decision
+// and carried through unchanged into audit.Record.Facts (never recomputed
+// here from the stored body; see that field's doc comment). Placed right
+// after the overview table, before the detailed sections: it's an overall
+// judgment about the whole request, the same kind of "at a glance" fact the
+// overview table already gives, not something scoped to any one section
+// below. Silently omitted when Facts is nil — the request was rejected
+// before fact computation ever ran (bad auth, unparseable JSON, missing
+// model field), so there is nothing to show.
+func renderFactsLine(b *strings.Builder, rec *audit.Record) {
+	f := rec.Facts
+	if f == nil {
+		return
+	}
+	yn := func(v bool) string {
+		if v {
+			return "是"
+		}
+		return "否"
+	}
+	fmt.Fprintf(b, "> **VMR 路由前判断**（基于原始请求推断，供路由决策使用，非上游实际 token 用量）：图片 %s · Tools %s · 预估 Tokens %s\n\n",
+		yn(f.HasImage), yn(f.HasTools), core.FmtTokens(f.EstimatedTokens))
 }
 
 // renderSessionHeader emits the grouping coordinates line and, when this

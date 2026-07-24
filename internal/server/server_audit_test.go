@@ -1,4 +1,4 @@
-// Ver 2026-07-16 00:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // Audit integration: every chat request produces one JSONL line with both
 // layers (client exchange + per-attempt upstream trail).
@@ -133,6 +133,56 @@ func TestAuditRecordsFailoverBothLayers(t *testing.T) {
 	json.Unmarshal(raw, &out)
 	if out.Model != "model-two" {
 		t.Errorf("outbound body model: %v", a2.Request.Body)
+	}
+}
+
+// TestAuditRecordsFacts locks in that audit.Record.Facts carries the exact
+// same core.RequestFacts value server.go computed for routing — not a
+// separate, independently re-derived one — and that it's nil (not a
+// zero-value struct) for a request rejected before fact computation ever
+// ran, so a reader can tell "we don't know" apart from "we checked and it's
+// false".
+func TestAuditRecordsFacts(t *testing.T) {
+	u := newUpstream(t)
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))
+
+	chat(t, ts, simpleReq, nil)
+	chat(t, ts, imageReq, nil)
+	chat(t, ts, toolsReq, nil)
+
+	recs := readRecords(t, al)
+	if len(recs) != 3 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	plain, img, tools := recs[0], recs[1], recs[2]
+
+	if plain.Facts == nil || plain.Facts.HasImage || plain.Facts.HasTools || plain.Facts.EstimatedTokens <= 0 {
+		t.Errorf("plain text record facts: %+v", plain.Facts)
+	}
+	if img.Facts == nil || !img.Facts.HasImage {
+		t.Errorf("image record facts should have HasImage=true: %+v", img.Facts)
+	}
+	if tools.Facts == nil || !tools.Facts.HasTools {
+		t.Errorf("tools record facts should have HasTools=true: %+v", tools.Facts)
+	}
+}
+
+// TestAuditRecordsFacts_NilWhenRejectedBeforeParsing locks in that a request
+// rejected before body parsing ever ran (bad auth here) gets Facts == nil,
+// not a zero-value core.RequestFacts — there's a real difference between
+// "never computed" and "computed and everything came back false".
+func TestAuditRecordsFacts_NilWhenRejectedBeforeParsing(t *testing.T) {
+	u := newUpstream(t)
+	ts, al := newAuditedServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, "api_keys:\n  - sk-vmr-audit-key1"))
+
+	chat(t, ts, simpleReq, nil) // no credential: 401 before body is ever parsed for facts
+
+	recs := readRecords(t, al)
+	if len(recs) != 1 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	if recs[0].Facts != nil {
+		t.Errorf("a request rejected on auth must have Facts == nil, got %+v", recs[0].Facts)
 	}
 }
 

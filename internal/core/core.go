@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 package core
 
 import (
@@ -66,13 +66,18 @@ type CanonicalRequest struct {
 // detection logic populates them yet (protocol shapes for audio/video input
 // and MiniMax's thinking parameter aren't confirmed), so they are always
 // false until a later change adds the corresponding detection.
+//
+// JSON tags exist so this same value (computed once in server.go) can be
+// persisted verbatim into audit.Record.Facts — vmr's own pre-routing
+// analysis, sitting alongside the raw request rather than recomputed later
+// from it (see audit.Record.Facts's doc comment).
 type RequestFacts struct {
-	HasImage        bool
-	HasAudio        bool
-	HasVideo        bool
-	HasTools        bool
-	WantsThinking   bool
-	EstimatedTokens int64
+	HasImage        bool  `json:"has_image,omitempty"`
+	HasAudio        bool  `json:"has_audio,omitempty"`
+	HasVideo        bool  `json:"has_video,omitempty"`
+	HasTools        bool  `json:"has_tools,omitempty"`
+	WantsThinking   bool  `json:"wants_thinking,omitempty"`
+	EstimatedTokens int64 `json:"estimated_tokens"`
 }
 
 // ErrorClass drives failover and cooldown decisions.
@@ -223,6 +228,25 @@ func FmtBytes(n int64) string {
 		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
 	default:
 		return fmt.Sprintf("%dB", n)
+	}
+}
+
+// FmtTokens renders RequestFacts.EstimatedTokens — a pre-call estimate
+// derived from the request body's byte length (see server/facts.go), never
+// the provider's actual post-response usage count — the same way FmtBytes
+// renders a byte count: K/M-scaled above 1000/1e6, raw below. The "EST"
+// marker on the unit itself (not just a comment) is deliberate: this number
+// explains a routing decision made before the call, and must never be
+// mistaken for billed/actual usage at a glance in the live router log's
+// req=xxxKB/xxxESTKT column.
+func FmtTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fESTMT", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fESTKT", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%dESTT", n)
 	}
 }
 

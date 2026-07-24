@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 12:05, by Sonnet 5
 //
 // End-to-end tests for condition-based routing (see
 // docs/VirtualModelRouter_System_Design_v3.md §6.4): a request's
@@ -38,7 +38,14 @@ models:
 `, u1, u2, declP1, declP2)
 }
 
-const imageReq = `{"model":"vm","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`
+// tiny1x1PNGDataURI is a real, decodable 1x1 PNG — used instead of a fake
+// base64 payload purely for realism (imgprep.Downscale counts any
+// structurally-shaped image_url/source block toward HasImage regardless of
+// whether the payload decodes, so a fake payload would work here too, but
+// a real one is a truer stand-in for what an actual client sends).
+const tiny1x1PNGDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+const imageReq = `{"model":"vm","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"` + tiny1x1PNGDataURI + `"}}]}]}`
 const toolsReq = `{"model":"vm","tools":[{"name":"x"}],"messages":[{"role":"user","content":"hi"}]}`
 
 func TestCondition_ImageRoutesAwayFromNonCapableHigherPriority(t *testing.T) {

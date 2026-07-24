@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -557,11 +557,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	key := ep.HealthKey()
 	attemptStart := time.Now()
 	// logPrefix carries the fields every log line in this attempt shares
-	// (client tag, model, endpoint, attempt number) so each call site below
-	// only spells out what actually differs about its outcome. Gains the
-	// req= size once BuildRequest succeeds — every line after that point
-	// reuses the extended prefix.
-	logPrefix := fmt.Sprintf("%s %s %s attempt=%d", clientTag(rec), creq.Model, epLabel(ep, creq.Stream), attempt)
+	// (client tag, virtual model, physical endpoint, cap=, attempt number)
+	// so each call site below only spells out what actually differs about
+	// its outcome. Gains the req= size once BuildRequest succeeds — a build
+	// failure never learns one, so it logs the -1 (no req=) form.
+	logPrefix := attemptPrefix(rec, creq, ep, attempt, -1)
 	var att *audit.Attempt
 	if rec != nil {
 		rec.Attempts = append(rec.Attempts, audit.Attempt{
@@ -589,14 +589,14 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// lock out every other client's traffic to it via a bogus transient
 		// cooldown.
 		rt.Health.ReportNeutral(key)
-		rt.logf("%s error=build:%v", logPrefix, err)
+		rt.logf("%s, error=build:%v", logPrefix, err)
 		if att != nil {
 			att.Error = "build: " + err.Error()
 			att.ErrorClass = core.ErrBuild.String()
 		}
 		return false, nil, false
 	}
-	logPrefix += " req=" + core.FmtBytes(int64(len(outBody)))
+	logPrefix = attemptPrefix(rec, creq, ep, attempt, int64(len(outBody)))
 	if att != nil {
 		att.URL = req.URL.String()
 		// outBody comes straight from BuildRequest (immutable by contract),
@@ -620,7 +620,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		rt.logf("%s error=network:%v cooldown=%s", logPrefix, err, cd)
+		rt.logf("%s, error=network:%v, cooldown=%s", logPrefix, err, cd)
 		if att != nil {
 			att.Error = "network: " + err.Error()
 			att.ErrorClass = core.ErrNetwork.String()
@@ -670,7 +670,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			// Keep failing over (vendors differ in sensitivity) but leave the
 			// endpoint's health untouched — only release a probe slot if held.
 			rt.Health.ReportNeutral(key)
-			rt.logf("%s status=%d class=content (no cooldown)", logPrefix, resp.StatusCode)
+			rt.logf("%s, status=%d, class=content (no cooldown)", logPrefix, resp.StatusCode)
 			return false, uerr, false
 		}
 		if class == core.ErrClient {
@@ -682,11 +682,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 			w.WriteHeader(uerr.status)
 			w.Write(uerr.body)
-			rt.logf("%s status=%d class=client dur=%s", logPrefix, resp.StatusCode, fmtDur(time.Since(start)))
+			rt.logf("%s, status=%d, class=client, dur=%s", logPrefix, resp.StatusCode, fmtDur(time.Since(start)))
 			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
-		rt.logf("%s status=%d class=%s cooldown=%s", logPrefix, resp.StatusCode, class, cd)
+		rt.logf("%s, status=%d, class=%s, cooldown=%s", logPrefix, resp.StatusCode, class, cd)
 		return false, uerr, false
 	}
 
@@ -737,7 +737,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			att.RawPreStrip = audit.EncodeBody(raw)
 		}
 	}
-	rt.logf("%s status=%s dur=%s", logPrefix, status, fmtDur(time.Since(start)))
+	rt.logf("%s, status=%s, dur=%s", logPrefix, strings.ToUpper(status), fmtDur(time.Since(start)))
 	return true, nil, true
 }
 
@@ -899,4 +899,50 @@ func epLabel(ep *core.Endpoint, stream bool) string {
 // core.FmtSeconds; 2 decimals is this log's fixed precision.
 func fmtDur(d time.Duration) string {
 	return core.FmtSeconds(d, 2)
+}
+
+// capField renders the live router log's cap= column: which capabilities
+// this specific request actually exercised (RequestFacts, computed once at
+// ingress from the raw body), not what the endpoint declares support for —
+// that's config.yaml's job, and repeating it here per line would just be
+// noise. "-" when the request used none of the tracked capabilities.
+func capField(f core.RequestFacts) string {
+	var caps []string
+	if f.HasImage {
+		caps = append(caps, "image")
+	}
+	if f.HasAudio {
+		caps = append(caps, "audio")
+	}
+	if f.HasVideo {
+		caps = append(caps, "video")
+	}
+	if f.HasTools {
+		caps = append(caps, "tools")
+	}
+	if f.WantsThinking {
+		caps = append(caps, "think")
+	}
+	if len(caps) == 0 {
+		return "-"
+	}
+	return strings.Join(caps, ",")
+}
+
+// attemptPrefix renders the fixed lead-in shared by every tryOne outcome
+// line: client tag, virtual model routed to physical endpoint, what the
+// request actually used, and the attempt number. reqBytes is the built
+// request's on-wire size; pass -1 before BuildRequest has produced one (the
+// req=.../...ESTKT column is then omitted entirely rather than printed as 0).
+func attemptPrefix(rec *audit.Record, creq *core.CanonicalRequest, ep *core.Endpoint, attempt int, reqBytes int64) string {
+	stream := ""
+	if creq.Stream {
+		stream = "(stream)"
+	}
+	req := ""
+	if reqBytes >= 0 {
+		req = fmt.Sprintf(", req=%s/%s", core.FmtBytes(reqBytes), core.FmtTokens(creq.Facts.EstimatedTokens))
+	}
+	return fmt.Sprintf("%s%s:%s -> %s:%s%s%s, cap=%s, attempt=%d",
+		clientTag(rec), ep.AdapterType, creq.Model, ep.Provider, ep.Model, stream, req, capField(creq.Facts), attempt)
 }

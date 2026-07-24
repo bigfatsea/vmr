@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -489,6 +489,13 @@ func cmdStart(args []string) error {
 // to do: limits, timeouts, and every virtual model's endpoints in their
 // effective try order with key state. Printed at startup and after each
 // successful hot reload, so the console always reflects the live config.
+//
+// Each of the three sections (global/provider/model) is built as one
+// multi-line string and emitted through a single logger.Printf call.
+// log.Logger writes its formatted message in exactly one Write, and
+// stampWriter stamps once per Write — so the timestamp lands only on the
+// section header line, while the indented detail lines stay unstamped and
+// readable as a block.
 func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snapshot) {
 	orNoLimit := func(v int, unit string) string {
 		if v <= 0 {
@@ -508,51 +515,91 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	if cfg.AuditRetentionDays > 0 {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
-	logger.Printf("config: listen=%s auth=%s max_attempts=%s max_request_body=%dMB max_concurrency=%s image_downscale=%s image_cache_ttl=%dd audit_retention=%s probe_mode=%s probe_timeout=%s",
-		cfg.Listen, auth, orNoLimit(cfg.MaxAttempts, ""), cfg.MaxRequestBodyMB, orNoLimit(cfg.MaxConcurrency, ""), imgScale, cfg.ImageCacheTTLDays, retention, cfg.ProbeMode, cfg.ProbeTimeout.D())
-	logger.Printf("config: timeouts connect=%s response_header=%s stream_idle=%s",
-		cfg.Timeouts.Connect.D(), cfg.Timeouts.ResponseHeader.D(), cfg.Timeouts.StreamIdle.D())
-	logger.Printf("config: dirs log=%s image_cache=%s", cfg.LogDir, cfg.ImageCacheDir)
-	for _, line := range providerProxyLines(cfg) {
-		logger.Printf("config: %s", line)
+
+	const globalKeyWidth = 17 // len("max_request_body"), the widest field name below
+	field := func(indent int, key string, val any) string {
+		return fmt.Sprintf("\n%s%-*s = %v", strings.Repeat(" ", indent), globalKeyWidth, key, val)
 	}
 
+	var global strings.Builder
+	global.WriteString("global config:")
+	global.WriteString(field(4, "listen", cfg.Listen))
+	global.WriteString(field(4, "auth", auth))
+	global.WriteString(field(4, "max_attempts", orNoLimit(cfg.MaxAttempts, "")))
+	global.WriteString(field(4, "max_request_body", fmt.Sprintf("%dMB", cfg.MaxRequestBodyMB)))
+	global.WriteString(field(4, "max_concurrency", orNoLimit(cfg.MaxConcurrency, "")))
+	global.WriteString(field(4, "image_downscale", imgScale))
+	global.WriteString(field(4, "image_cache_ttl", fmt.Sprintf("%dd", cfg.ImageCacheTTLDays)))
+	global.WriteString(field(4, "audit_retention", retention))
+	global.WriteString(field(4, "probe_mode", cfg.ProbeMode))
+	global.WriteString(field(4, "probe_timeout", cfg.ProbeTimeout.D()))
+	global.WriteString("\n    timeouts")
+	global.WriteString(field(8, "connect", cfg.Timeouts.Connect.D()))
+	global.WriteString(field(8, "response_header", cfg.Timeouts.ResponseHeader.D()))
+	global.WriteString(field(8, "stream_idle", cfg.Timeouts.StreamIdle.D()))
+	global.WriteString("\n    dirs")
+	global.WriteString(field(8, "log", cfg.LogDir))
+	global.WriteString(field(8, "image_cache", cfg.ImageCacheDir))
+	logger.Printf("%s", global.String())
+
+	if entries := providerProxyEntries(cfg); len(entries) > 0 {
+		nameWidth := 0
+		for _, e := range entries {
+			if len(e.Name) > nameWidth {
+				nameWidth = len(e.Name)
+			}
+		}
+		var provider strings.Builder
+		provider.WriteString("provider config:")
+		for _, e := range entries {
+			fmt.Fprintf(&provider, "\n    %-*s proxy=%s", nameWidth, e.Name, e.Proxy)
+		}
+		logger.Printf("%s", provider.String())
+	}
+
+	var model strings.Builder
+	model.WriteString("model config:")
 	for _, protocol := range core.SortedKeys(cfg.Models) {
 		for _, name := range core.SortedKeys(cfg.Models[protocol]) {
 			route := snap.Models[protocol][name]
-			ordered := route.EffectiveOrder()
-			parts := make([]string, len(ordered))
-			for i, ep := range ordered {
+			imgOverride := ""
+			if route.ImageDownscaleMaxPx != nil {
+				imgOverride = fmt.Sprintf(" (image_downscale=%dpx)", *route.ImageDownscaleMaxPx)
+			}
+			fmt.Fprintf(&model, "\n    %s/%s%s", protocol, name, imgOverride)
+			for i, ep := range route.EffectiveOrder() {
 				key := "key:set"
 				if ep.APIKey == "" {
 					key = "key:EMPTY"
 				}
-				parts[i] = fmt.Sprintf("%d.%s/%s(%s)", i+1, ep.Provider, ep.Model, key)
+				fmt.Fprintf(&model, "\n        %d.%s/%s(%s)", i+1, ep.Provider, ep.Model, key)
 			}
-			imgOverride := ""
-			if route.ImageDownscaleMaxPx != nil {
-				imgOverride = fmt.Sprintf(" image_downscale=%dpx", *route.ImageDownscaleMaxPx)
-			}
-			logger.Printf("config: model %s [%s]%s -> %s", name, protocol, imgOverride, strings.Join(parts, " "))
 		}
 	}
+	logger.Printf("%s", model.String())
 }
 
-// providerProxyLines renders one line per provider describing the proxy it
-// will actually use (a config proxy, or direct) — the answer to "why did
-// this provider('s traffic) go through the proxy" without tcpdump.
-// Credentials inside proxy URLs are masked (url.Redacted). Proxy
-// environment variables play no part: proxies are explicit config, and
-// "proxy: true with nothing configured" is a validation error long before
-// this renders.
-func providerProxyLines(cfg *config.Config) []string {
+// providerProxyEntry is one provider's resolved proxy setting, keyed by its
+// "protocol/name" for display.
+type providerProxyEntry struct {
+	Name  string
+	Proxy string
+}
+
+// providerProxyEntries resolves the proxy each provider will actually use (a
+// config proxy, or direct) — the answer to "why did this provider('s
+// traffic) go through the proxy" without tcpdump. Credentials inside proxy
+// URLs are masked (url.Redacted). Proxy environment variables play no part:
+// proxies are explicit config, and "proxy: true with nothing configured" is
+// a validation error long before this renders.
+func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 	redact := func(raw string) string {
 		if u, err := url.Parse(raw); err == nil {
 			return u.Redacted()
 		}
 		return raw
 	}
-	var lines []string
+	var entries []providerProxyEntry
 	for _, protocol := range core.SortedKeys(cfg.Providers) {
 		for _, name := range core.SortedKeys(cfg.Providers[protocol]) {
 			p := cfg.Providers[protocol][name]
@@ -563,8 +610,19 @@ func providerProxyLines(cfg *config.Config) []string {
 			if mode, proxyURL := cfg.ProxySpecFor(p); mode == config.ProxyURL {
 				desc = redact(proxyURL)
 			}
-			lines = append(lines, fmt.Sprintf("provider %s/%s proxy=%s", protocol, name, desc))
+			entries = append(entries, providerProxyEntry{Name: protocol + "/" + name, Proxy: desc})
 		}
+	}
+	return entries
+}
+
+// providerProxyLines renders providerProxyEntries as flat "provider a/b
+// proxy=c" lines, kept for cmdCheck's one-line-per-provider "vmr check" output.
+func providerProxyLines(cfg *config.Config) []string {
+	entries := providerProxyEntries(cfg)
+	lines := make([]string, len(entries))
+	for i, e := range entries {
+		lines[i] = fmt.Sprintf("provider %s proxy=%s", e.Name, e.Proxy)
 	}
 	return lines
 }

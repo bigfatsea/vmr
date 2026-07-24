@@ -1,4 +1,4 @@
-// Ver 2026-07-17 06:00, by Sonnet 5
+// Ver 2026-07-24 12:05, by Sonnet 5
 package imgprep
 
 import (
@@ -261,6 +261,30 @@ func TestDownscaleNoMarkerIsNoop(t *testing.T) {
 	}
 }
 
+// TestDownscaleTextMentioningMarkerIsNotAnImage locks in a real incident: a
+// coding agent's tool output quoted a Go test assertion containing the
+// literal string `"image_downscale=512px"`. Once that text landed in a later
+// turn's plain-text content, HasImageMarker's cheap substring pre-check
+// fired (correctly, per its own contract — it's not supposed to be
+// precise), but the structural scan below must still find zero real image
+// content blocks. RequestFacts.HasImage is wired to this function's result
+// (not to HasImageMarker) specifically so this case can never again trip
+// the hard "image" capability Condition and wrongly eliminate every
+// endpoint for a plain-text request.
+func TestDownscaleTextMentioningMarkerIsNotAnImage(t *testing.T) {
+	body := []byte(`{"model":"coding","messages":[{"role":"user","content":"please check the test assertion \"image_downscale=512px\" in main_test.go"}]}`)
+	if !HasImageMarker(body) {
+		t.Fatal("test setup: body must trip the cheap presence marker for this test to be meaningful")
+	}
+	got, images := Downscale(body, "openai", Options{MaxPx: 512})
+	if &got[0] != &body[0] {
+		t.Error("a request with no real image block must return the exact same slice")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %v, want none — the marker fired on quoted text, not a real image content block", images)
+	}
+}
+
 func TestOpenAIImageAboveThresholdIsResized(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
 	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
@@ -381,6 +405,39 @@ func TestCorruptImageDataFailsOpen(t *testing.T) {
 	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("corrupt image data must fail open (leave request unchanged), not error out")
+	}
+}
+
+// TestUndecodableImageStillCounted locks in that a structurally real image
+// reference (type=="image_url", a valid data URI) whose payload vmr's
+// stdlib decoders can't read (corrupt bytes, or a real format Go's image
+// package doesn't register — HEIC/AVIF being the common real-world case)
+// still contributes an ImageInfo entry. Before this fix, a decode failure
+// made the block vanish from images entirely, which — now that
+// RequestFacts.HasImage is sourced from len(images) — would have
+// misclassified a request that genuinely has an image (just not one vmr
+// can describe) as HasImage=false, and misrouted it to an endpoint that
+// doesn't declare image support.
+func TestUndecodableImageStillCounted(t *testing.T) {
+	openaiBody := openAIReq(t, dataURI("image/heic", []byte("not a format Go's image package can decode")))
+	out, images := Downscale(openaiBody, "openai", Options{MaxPx: 512})
+	if !bytes.Equal(out, openaiBody) {
+		t.Error("an undecodable image must still fail open (leave request unchanged)")
+	}
+	if len(images) != 1 {
+		t.Fatalf("images = %+v, want exactly one entry for the undecodable-but-real image reference", images)
+	}
+	if images[0].Format != "" || images[0].Downscaled || images[0].Remote {
+		t.Errorf("images[0] = %+v, want Format empty (genuinely unknown) and Downscaled/Remote both false", images[0])
+	}
+	if images[0].Bytes == 0 {
+		t.Errorf("images[0].Bytes should still record the decoded payload length even though the format is unknown, got 0")
+	}
+
+	anthropicBody := anthropicReq(t, "image/heic", []byte("not a format Go's image package can decode"))
+	_, anthropicImages := Downscale(anthropicBody, "anthropic", Options{MaxPx: 512})
+	if len(anthropicImages) != 1 {
+		t.Fatalf("anthropic images = %+v, want exactly one entry", anthropicImages)
 	}
 }
 

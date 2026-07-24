@@ -1,4 +1,4 @@
-// Ver 2026-07-17 06:00, by Sonnet 5
+// Ver 2026-07-24 12:05, by Sonnet 5
 
 // Package imgprep detects inline image attachments in request bodies and,
 // when configured, downscales the oversized ones before they reach the
@@ -115,6 +115,20 @@ type ImageInfo struct {
 // data URI; "anthropic": content[].source with type "base64"). On any
 // rewrite failure, or when nothing needed resizing, the returned body is the
 // original unchanged (same backing array) — images is still populated.
+//
+// "Detected" and "decodable" are deliberately independent: len(images) is
+// the count of content blocks that are structurally image references (the
+// type field matched), full stop — it does not depend on whether this
+// package's decoder could actually read the pixel header. A block whose
+// type matches but whose payload fails to decode (unrecognized/corrupt
+// format) still gets an ImageInfo entry (Format/Width/Height left zero —
+// genuinely unknown — but MessageIndex/Bytes set), and is passed through
+// byte-for-byte unchanged, never dropped. This matters because callers use
+// len(images) as an authoritative "does this request have an image"
+// signal (RequestFacts.HasImage feeds a hard routing Condition with no
+// fallback) — a format vmr's stdlib decoders don't recognize is still a
+// real image as far as the upstream provider is concerned, and must not be
+// misclassified as "no image" just because vmr itself can't describe it.
 func Downscale(body []byte, protocol string, opts Options) (result []byte, images []ImageInfo) {
 	result = body
 	if !HasImageMarker(body) {
@@ -258,8 +272,15 @@ func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json
 		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
 	}
 	newData, newMime, changed, info := processImage(data, opts)
-	if info.Format == "" { // header decode failed: nothing meaningful to record
-		return raw, false, nil, nil
+	if info.Format == "" {
+		// Header decode failed (unrecognized/corrupt format) — but this is
+		// still structurally a real image reference (we got past
+		// json.Unmarshal + parseDataURI above), so it must still count
+		// toward HasImage/the image tally. Only Format/Width/Height are
+		// genuinely unknown; Bytes is not — record that much rather than
+		// dropping the reference entirely. See design note on Downscale
+		// for why "detected" must never depend on "decodable".
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Bytes: int64(len(data))}, nil
 	}
 	info.MessageIndex = msgIndex
 	if !changed {
@@ -307,8 +328,12 @@ func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]j
 		return raw, false, nil, nil
 	}
 	newData, newMime, changed, info := processImage(data, opts)
-	if info.Format == "" { // header decode failed: nothing meaningful to record
-		return raw, false, nil, nil
+	if info.Format == "" {
+		// Same reasoning as rewriteOpenAIImage's identical branch: header
+		// decode failed, but this is still a real, structurally-confirmed
+		// image reference — must still count, just without Format/Width/
+		// Height (genuinely unknown).
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Bytes: int64(len(data))}, nil
 	}
 	info.MessageIndex = msgIndex
 	if !changed {

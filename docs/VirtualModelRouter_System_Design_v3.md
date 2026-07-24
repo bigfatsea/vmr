@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 14:30, by Sonnet 5 -->
+<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案
 
@@ -277,7 +277,7 @@ type Condition interface {
 
 已注册的 Condition **全部无条件参与过滤**，不需要像 `ModelConfig.Strategy` 那样在配置里声明一份名字列表——Condition 之间是纯 AND 语义、顺序无关，且"端点没声明某个能力字段"天然等价于"对这个条件不设限"，没有 Dimension 那种"要不要参与排序、参与顺序"的选择要做。
 
-**`core.RequestFacts`**（挂在 `core.CanonicalRequest.Facts`）是请求侧廉价、预计算一次的信号集合，`internal/server/facts.go` 的 `computeRequestFacts` 在请求体缓冲完成后算一次，仿照 `imgprep.HasImageMarker` 已经验证过的"廉价子串扫描，命中才细看"模式：
+**`core.RequestFacts`**（挂在 `core.CanonicalRequest.Facts`）是请求侧廉价、预计算一次的信号集合，`internal/server/facts.go` 的 `computeRequestFacts(body []byte, imageCount int) core.RequestFacts` 在请求体缓冲完成后算一次。`imageCount` 由调用方（`server.chatHandler`）传入，不在 `computeRequestFacts` 内部重新扫描请求体——它就是「请求图片自动降采样」（§7）里 `imgprep.Downscale` 那一次调用已经算出来的 `len(images)`，这一次结构化遍历（走 `messages[].content[]`，识别真正的 `image_url`/`source` 图片块）同时喂给三个消费者：审计的 `images[]`、这里的 `HasImage`（`imageCount > 0`）、以及下文 `EstimatedTokens` 里图片那部分的常量项——一次探测，三处复用，一条没有图片的请求全程只付一次探测成本，不会因为三个消费者各自扫一遍而扫三次。`HasImage` 刻意不再走"子串扫描命中即认为有图"这条路径：这个字段要喂给下文的硬性淘汰条件，子串扫描对一句引用了类似 `"image_downscale=512px"` 的纯文本内容一样会命中，曾经真实导致一个不含任何图片的请求被硬性条件误判、把候选端点全部淘汰（无 fallback，直接 503）——`imgprep.Downscale` 的结构化遍历只认 JSON 结构上真正的图片块，不受消息文本内容影响。**"检测到"与"解得出格式"是两件独立的事**：一个结构上确认是图片引用、但 payload 解不出真实格式（不认识的格式、数据损坏）的块，仍然计入 `imageCount`——vmr 自己的解码器认不出，不代表上游也认不出，这个块对上游而言仍是一张真图片，不能因为 vmr 解不出就误判成"没有图片"。
 
 ```go
 type RequestFacts struct {
@@ -321,7 +321,7 @@ models:
 
 **四类条件的最终定义**：
 
-**① 多模态能力**（`image`/`audio`/`video`/`text`，`capabilities` 数组）——`image` 直接复用 `imgprep.HasImageMarker`，零新增探测成本；`audio`/`video` 只保留 `RequestFacts` 里的骨架字段，探测逻辑未实现——两家协议目前都没有成熟稳定的内联音视频输入形状，过早锁定一个探测正则，协议下次小版本更新就要重写，等字段形状稳定后再补，符合响应归一化 quirk 检测"只在确认命中确切形态才触发"的既有克制原则。`text` 恒真，不需要检测。
+**① 多模态能力**（`image`/`audio`/`video`/`text`，`capabilities` 数组）——`image` 复用 `imgprep.Downscale` 结构化遍历的结果（见上文 `RequestFacts` 小节），零新增探测成本；`audio`/`video` 只保留 `RequestFacts` 里的骨架字段，探测逻辑未实现——两家协议目前都没有成熟稳定的内联音视频输入形状，过早锁定一个探测正则，协议下次小版本更新就要重写，等字段形状稳定后再补，符合响应归一化 quirk 检测"只在确认命中确切形态才触发"的既有克制原则。`text` 恒真，不需要检测。
 
 **② 上下文长度**（`max_context_tokens`，单个数值）——核心设计约束：**估算宁可偏大，不可偏小**。低估的后果是把请求路由到一个放不下的端点，触发 400，此时上游会用一个明确的 400 拒绝，交由普通的 failover 兜底（浪费一次尝试，不是灾难）；高估的后果是跳过了一个其实能处理的端点，代价是次优而非错误。两种误差不对称，估算公式因此必须偏保守，见下文估算公式。
 
@@ -351,7 +351,7 @@ models:
   EstimatedTokens = asciiBytes/4 + wideBytes/2
   ```
   直接扫整个原始请求体字节（含 JSON 结构符号），不特意抽取 message content——结构性开销本身也会被计入分子，进一步把估算往偏高的方向推。
-* **图片**：不解析像素，按检测到的图片数量乘一个固定常量——每张 3000 token，取自"1920×1080 全高清截图"（agent/coding 工具最常见的附件尺寸）在高分辨率档的实测开销（约 2691 token）留一点余量。检测复用 `imgprep.HasImageMarker`，零新增成本。
+* **图片**：不解析像素，按检测到的图片数量乘一个固定常量——每张 3000 token，取自"1920×1080 全高清截图"（agent/coding 工具最常见的附件尺寸）在高分辨率档的实测开销（约 2691 token）留一点余量。图片数量复用 `imgprep.Downscale` 结构化遍历算出的 `imageCount`（同一个值也驱动上文①的 `HasImage`），零新增成本。
 * **文档类附件（PDF 及其他未识别的二进制附件）**：DOCX/XLSX 在 vmr 实际代理的原始 API 层不会被当作独立二进制附件编码进请求体——两家协议官方文档都要求客户端"转换成纯文本后直接放进消息内容"，已经被文本估算覆盖。真正需要单独处理的只有 PDF（两家协议原生支持内联 PDF）和"检测到某种文件附件但格式未识别"的兜底场景。不做页数解析，直接按体积折算：`EstimatedTokens += 附件字段的原始 base64 字节数 / 20`——常量 20 校准自 PDF 每页开销 1500-3000 token、常见页面 50-150KB 原始体积的比例区间，不区分格式，统一用同一个保守常量处理，检测走与图片同一模式的廉价标记扫描。已知偏差：对图片/扫描件密集的 PDF 会大幅高估，是可接受的方向性偏差（无非多倾向大上下文端点）。唯一无法解决的盲区：客户端若用 Files API 模式（先上传拿 `file_id`，后续消息只带引用），真正的文件字节根本不在 vmr 看到的请求体里，无法估算，由 failover 兜底。
 * **音频/视频**：不做数值估算，只做能力判定（见①）——两家官方都未公布精确的时长换算公式，且从字节里可靠拿到时长还需要解码容器格式，不是廉价操作。
 
@@ -526,6 +526,12 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
       "downscaled": true, "downscaled_width": 1024, "downscaled_height": 1365, "downscaled_bytes": 96000,
       "cache_hit": false }                // 元数据字段：仅头部解析（DecodeConfig），不论该虚拟模型是否开启降采样都会采集；remote:true 的远程 URL 图片其余字段皆为零值
   ],
+  "facts": {                              // vmr 自己的路由前判断（core.RequestFacts 原样落盘，见「调度与健康」§6.4）；
+                                           // 是 client.request 的兄弟字段，不嵌入其中——client.request 必须对客户端原始请求保持字节忠实，
+                                           // 这里记的是 vmr 从中推导出的东西，放在旁边，不污染原始记录。请求在拿到 model 字段之前就被拒绝
+                                           // （鉴权失败、坏 JSON）时整个字段省略，不是零值——"没算过"和"算过、结果是 false"是两回事
+    "has_image": false, "has_tools": true, "estimated_tokens": 1280
+  },
   "attempts": [                           // 第二层：vmr ↔ 上游，每次 failover 尝试一条，按序
     {
       "endpoint": "anthropic:minimax_badkey:MiniMax-M3",   // 展示用标签，protocol:provider:实际模型（":" 分隔，见下方三段式说明）
@@ -550,13 +556,14 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 }
 ```
 
-五条约定（统计脚本必须知道）：
+六条约定（统计脚本必须知道）：
 
 1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`和 `crlf_framing_suspected`**：两者都是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同（见「响应侧归一化」）。失败尝试的错误 body（≤128KB，`router.errBodyCap`）存在 attempt 内；超出上限时转发给客户端的字节仍是未改动的截断前缀（byte-faithful 对客户端始终成立），只有 attempt 内的审计副本会在末尾追加 `...(truncated at N bytes)` 标记（N = 上限本身，不是上游真实大小——`io.LimitReader` 故意不读过上限，真实大小未知）。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
 2. **body 编码，不截断**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。**审计侧不设记录上限**——不论原始 body 有多大都原样记录，没有 `max_body_mb` 这类联动配置，也没有 `body_truncated` 标记。入站请求体大小仍有一个独立的、纯粹为稳定性考虑的上限（`max_request_body_mb`，缺省 8MiB，超限 413）——它只决定 vmr 愿不愿意接受这个请求，与审计记录是否完整无关：只要 vmr 接受了，审计里就是完整的那一份。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。后三项虽然被 server 层黑名单挡在上游之外，但客户端发来时会进入审计的 client 层记录，明文落盘同样有外泄风险。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。这份列表与 `server.headerBlocklist` 是两张独立维护、故意不完全重合的表：前者决定"记审计时要不要打码"，后者决定"转发给上游前要不要剔除"，`Api-Key`/`X-Auth-Token` 在前者但不在后者（活的客户端流量里这两个 header 是真值，vmr 默认放行转发；但审计记录里存的是打过码的占位符）。`internal/audit` 导出了 `IsCredentialHeader(name string) bool` 判定函数，`vmr replay` 重建请求头时用它把这批 header 额外剔除一遍——否则会把打码占位符当真实凭据发给上游。
 4. **`attempts[].error` / `error_class` 的形态**：`error` 是自由文本（错误类别裸词、或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`），供人读；`error_class` 是与它同步设置的类型化枚举字符串（复用 `core.ErrorClass.String()`：`client`/`auth`/`rate_limit`/`endpoint`/`transient`/`content`，加上四个只在 HTTP 响应之前的失败路径出现的值 `build`/`network`/`canceled`/`truncated`），`vmr report` 直接按这个字段归桶。**必须容忍缺失该字段的日志文件**：一部分历史留存的审计文件没有 `error_class`（只有 `error` 自由文本）——`internal/report` 的 `attemptErrorClass()` 辅助函数在 `error_class` 为空时回退到解析 `error`（6 种 HTTP 分类错误本来就是不带冒号的裸类名，直接原样使用；`build`/`network`/`canceled`/`truncated` 这四种非 HTTP 路径本来就是 `"class: 详情"` 前缀，取冒号前半部分），使错误分布、`truncated` 计数在混用新旧格式日志时依然正确，而不是退化成 `unknown`。`internal/audit` 仍是无外部依赖的叶子包，`Attempt.ErrorClass` 类型是 `string` 而非 `core.ErrorClass` 本身，只是复用同一组取值。
 5. **`images[]` 的采集范围**：只记录请求侧的内联图片（vmr 不生成图片，响应侧不采集）；`message_index` 是该图片所在消息在 `chatMessages` 里的 0-based 下标。检测**始终进行**，与该虚拟模型是否开启了 `image_downscale` 无关——只做一次廉价的 `image.DecodeConfig`（只读文件头拿 format/width/height，不解码像素），`downscaled`/`downscaled_*`/`cache_hit` 只在实际触发了压缩路径时才有意义。远程 URL 图片（vmr 未拉取内容）记一条 `remote:true`，其余字段皆为零值。
+6. **`facts` 是原样落盘，不是事后重新计算**：`server.go` 只算一次 `core.RequestFacts`（喂给路由决策），把同一个值原样存进 `rec.Facts` 再写审计；`internal/replay`/`internal/report` 都不会、也不需要从存下来的请求体反推一份新的 `facts`——这类衍生字段的原则是"算一次、到处传"，不是"谁要用谁自己再算一遍"。字段整体省略（不是每个子字段为零值的对象）代表这条请求在拿到 `model` 字段、真正开始算 `facts` 之前就被拒绝了。
 
 ### 9.3 实现要点
 
@@ -607,6 +614,7 @@ vmr report [-o dir] <file|glob>...     # 输出 vmr-report.json + vmr-report.md 
   总表另有三行汇总：按角色的请求消息字符及占比（含绝对数 + 占比）、`finish_reason 数量及占比`（含绝对数 + 占比）、`thinking tokens 数量及占比`。工具使用改 numbered list：`1. exec (270 次)` / `2. process (32 次)` …… 未调用工具同样 numbered list（按字母序，自然让 `feishu_*` 同前缀聚类）。`vmr-report.md` 页脚加 `详单见 [vmr-requests-index.md]` 链接。
 * **逐请求详单**（`internal/report/detail.go` + `render.go`，默认开启，`-details=false` 关闭）：每条审计记录导出一个 Markdown 文件**及同名 JSON 文件**（原始 record，供 jq/脚本查询）到 `{out}/details/`（**全部报表产物文件 0600、目录 0700**——与审计 JSONL 同权限，派生副本不放宽源头的保护），索引落在上一级目录的 `vmr-requests-index.md`（与 `vmr-report.md` 并列）。文件名 `{YYYYMMDD-HHMMSS.mmm}_{虚拟模型}_{真实模型}_{outcome[-错误类]}.md`（`.json` 同名），零填充时间戳开头，按名字排序即按时间排序；同毫秒冲突加数字后缀，重跑幂等覆盖。
   * 单条详单头部：`虚拟模型 / 上游端点 / 结果 / 耗时 / 首字延迟 / 尝试次数 / stream / Tokens In/CacheHit/Out / 客户端`；下方 `trace / chat user / tools` 元信息行取值加粗（`<strong>`）
+  * 头部表格下紧跟一行 `VMR 路由前判断`（`renderFactsLine`，读 `rec.Facts`，原样展示，不重新计算）：图片/Tools 是否命中、预估 token 数——这是对整条请求的整体判断，放在最前面、三段详细内容之前；`rec.Facts` 为空（请求在拿到 `facts` 之前就被拒绝）时这一行整体不出现，不是留一行空的
   * 文档按请求物理路径分三段：① Client→VMR（headers/参数/tools/messages）、② VMR→上游每次 attempt（headers 与 body 字段**全量对照**，变化项标 🟢/🔴/🔶；若该次尝试命中 `think_strip`/`thinking_process_strip`，额外展示剥离前的完整原始内容与对应原始 SSE——`internal/router/response.go` 在归一化前把这段缓冲字节存进 `audit.Attempt.RawPreStrip`；字段缺失的旧格式日志（没有这个字段）显示"未保留"提示，而不是报错或留空白）、③ VMR→Client 响应（headers 相对上游响应对照；SSE 流重组为模型实际输出）
   * Messages 区每条消息默认折叠（`<details>`），无长度阈值；角色字符统计行取值加粗。增量区移到消息列表末尾，仅以 🆕 前缀 + 一行汇总 `🆕 本轮增量（相对上一轮，+N 条，#1–#M 为历史上下文）` 标识，不重复展开内容
   * header 行不再展示 `tags:` ——OpenClaw 的 `compacted_session` 标签会在 compaction 之后**每条** detail 都触发（因 OpenClaw 每轮重发 compaction summary 用户消息），渲染上会变成噪声
@@ -776,22 +784,28 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **工具选型：Vegeta**（`github.com/tsenart/vegeta`）。核心诉求是"配置文件驱动"（不为测个性能再学一门脚本语言）和"能应对 SSE 流式响应"；调研过 k6（功能最全但要学 JS + 自己编译 SSE 扩展）、oha/hey（命令行参数驱动，不支持按请求变化 body）、Artillery（引入 Node.js 依赖）。Vegeta 是 Go 原生、JSON-lines targets 文件、内置延迟百分位统计，与项目技术栈最贴合。**一个关键简化**：不需要压测工具懂 TTFB/流式细节——vmr 自己的审计日志已经把每条请求的 `ttft_ms`/`dur_ms` 记下来，`vmr report` 已经会按虚拟模型分桶算出 p50/p95。于是分工很清楚：Vegeta 只负责"客户端视角的总延迟/吞吐/成功率"，"是不是因为全缓冲变慢了"这类更细的归因直接事后跑一次 `vmr report`；场景区分也顺势用虚拟模型名当标签，mock 上游按 model 名决定要模拟哪种响应形态。唯一需要自己写的是这个 mock 上游（`loadtest/mockupstream`）——没有任何通用压测工具会假装自己是一个 LLM provider，更不用说模拟已知的具体怪癖形态（MiniMax 的 thinking 泄漏文本、SSE 分块节奏）。
 
-**场景矩阵**（`loadtest/config.yaml` 里每个场景一个虚拟模型，覆盖开销特征明显不同的代码路径，不做协议交叉/并发梯度扫描——一次性健全性检查不是要画一条完整性能曲线）：`baseline`（路由开销下限）、`stream_normal`（真流式透传）、`thinking_leak`（已知最差路径——全程缓冲到 EOF）、`think_tag`（`<think>` 标签形态，先缓冲后恢复流式）、`big_response`（大体积非流式响应）、`big_image`/`multi_image`（图片降采样的完整 decode→scale→encode 链路，单图与多图）、`gif`（确认永不缩放的快速跳过路径依然便宜）、`long_history`（长对话历史的 JSON 探测扫描 + model splice + 审计全量写盘开销）、`failover`（health 状态机 + 冷却 + 故障切换循环开销）、`anthropic_baseline`（确认 Anthropic 协议适配器与 openai 协议共享的归一化代码没有额外成本）。`loadtest/runner`（`go run ./loadtest/runner`）把起 mock 上游、起 vmr、生成 targets、按 `light`/`moderate`/`heavy` 三档递增负载（10/50/150 req/s）依次跑 Vegeta、再跑 `vmr report` 汇总，全部串成一条命令，产物落在项目原有的 `logs/loadtest/`（独立子目录，每次运行前清空）与 `reports/loadtest-report.md`，不与真实数据混放。图片处理场景（`big_image`/`multi_image`/`gif`）单独分组统计客户端视角百分位——它是唯一真正做 decode/scale/encode 的路径，混进其余场景会把"正常请求"的 p95/p99/max 也一起拉高，失真明显。运行方式与如何读数字的完整操作说明见 [`loadtest/README.md`](../loadtest/README.md)，本节只记录设计判断与结论。
+**场景矩阵**（`loadtest/config.yaml` 里每个场景一个虚拟模型，覆盖开销特征明显不同的代码路径，不做协议交叉/并发梯度扫描——一次性健全性检查不是要画一条完整性能曲线）：`baseline`（路由开销下限）、`stream_normal`（真流式透传）、`thinking_leak`（已知最差路径——全程缓冲到 EOF）、`think_tag`（`<think>` 标签形态，先缓冲后恢复流式）、`big_response`（大体积非流式响应）、`big_image`/`multi_image`（图片降采样的完整 decode→scale→encode 链路，单图与多图）、`gif`（确认永不缩放的快速跳过路径依然便宜）、`long_history`（长对话历史的 JSON 探测扫描 + model splice + 审计全量写盘开销）、`failover`（health 状态机 + 冷却 + 故障切换循环开销）、`anthropic_baseline`（确认 Anthropic 协议适配器与 openai 协议共享的归一化代码没有额外成本）。`loadtest/runner`（`go run ./loadtest/runner`）把起 mock 上游、起 vmr、生成 targets、按 `light`/`moderate`/`heavy` 三档递增负载（10/50/150 req/s）依次跑 Vegeta、再跑 `vmr report` 汇总，全部串成一条命令，产物落在项目原有的 `logs/loadtest/`（独立子目录，每次运行前清空）与 `reports/loadtest-report.md`，不与真实数据混放。图片处理场景（`big_image`/`multi_image`/`gif`）单独分组统计客户端视角百分位——它是唯一真正做 decode/scale/encode 的路径，混进其余场景会把"正常请求"的 p95/p99/max 也一起拉高，失真明显。
 
-**实测结论（测试时间：2026-07-24）**：三档负载共 4100 个请求（11 个场景 × 3 轮）全部 100% 成功率。
+**`big_image`/`multi_image` 用一批变体图片，不是同一张图反复发送**：`internal/imgprep` 的降采样磁盘缓存按内容哈希 + 目标像素上限做 key（见「请求图片自动降采样」§7.1），如果三档负载全程只用同一张固定图，除了全程第一次，其余请求都会命中缓存——真正的 decode→scale→encode 反而被缓存挡在外面，测不到这两个场景本该测的东西。`loadtest/gentargets` 因此给这两个场景各生成 `cacheBustVariants`（50）张内容不同、但尺寸/复杂度相同的变体，Vegeta 按目标文件的行序循环发送；`gif` 场景虽不需要变体（`imgprep` 从不缩放 GIF，没有缓存可言），但同样重复写 50 行——Vegeta 按目标文件的**行数**而非 scenario 名字均分流量，行数不对齐会让 `gif` 拿不到它该有的 1/3 份额。**`loadtest/config.yaml` 单独声明 `image_cache_dir`（`logs/loadtest` 下的子目录，随 `logs/loadtest` 一起在每次运行前清空）**：这批变体图片是确定性生成的（同样的 seed 每次产出同样的字节），如果和真实部署共用默认的 `~/.vmr/image_cache`，第二次跑测试时上一次生成的"新"变体早就被缓存预热过，测试会在不知不觉间悄悄退回"全程命中缓存"的老问题。
+
+运行方式与如何读数字的完整操作说明见 [`loadtest/README.md`](../loadtest/README.md)，本节只记录设计判断与结论。
+
+**实测结论（测试时间：2026-07-24，独立、清空过的 `image_cache_dir`）**：三档负载共 4100 个请求（11 个场景 × 3 轮）全部 100% 成功率。
 
 客户端视角（Vegeta，plain/image 分组，单位 ms）：
 
 | 负载档 | 分组 | 速率 | 请求数 | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|---|---|
-| light | plain | 7/s | 70 | 1.5 | 6.9 | 11.2 | 11.9 |
-| light | image | 3/s | 30 | 32.5 | 54.0 | 54.3 | 54.3 |
-| moderate | plain | 36/s | 720 | 1.3 | 5.9 | 7.4 | 8.5 |
-| moderate | image | 14/s | 280 | 19.4 | 47.5 | 50.8 | 61.3 |
-| heavy | plain | 109/s | 2180 | 1.3 | 6.2 | 7.3 | 10.1 |
-| heavy | image | 41/s | 820 | 12.4 | 23.1 | 24.5 | 34.3 |
+| light | plain | 7/s | 70 | 1.5 | 7.5 | 8.7 | 8.8 |
+| light | image | 3/s | 30 | 118.5 | 131.8 | 146.9 | 146.9 |
+| moderate | plain | 36/s | 720 | 1.4 | 7.1 | 8.6 | 9.1 |
+| moderate | image | 14/s | 280 | 23.5 | 89.0 | 91.7 | 92.6 |
+| heavy | plain | 109/s | 2180 | 1.2 | 6.5 | 8.1 | 13.0 |
+| heavy | image | 41/s | 820 | 12.1 | 22.2 | 34.1 | 54.5 |
 
-heavy 档的 image 分组 p95 反而低于 light/moderate——三档共享同一批探测阶段的冷启动开销被摊薄的正常现象，不是变快了（moderate 档 max 61.3ms 略高于 heavy 档也是同一原因，不代表 moderate 档比 heavy 档承压更大）。服务端视角（`vmr report` 按虚拟模型分桶的 p50/p95 请求耗时，三轮合并）：唯一有实质成本的仍是图片降采样——`big_image` 20ms/43ms、`multi_image` 11ms/19ms（随图片数量线性增长），其余九个场景全部在 0-4ms 之间。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认冷却/切换机制按预期工作：`mock_fail1`/`mock_fail2` 全程各自只被真实尝试了 1 次（首次失败后进入冷却，此后请求全部直接落到 `mock_ok`），端点可用度表里两者的尝试数与成功率也如实反映了这一点。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
+**image 分组这一档比一档"看起来更快"，是变体池大小相对每档样本量的直接结果，不是错觉也不是变快了**：50 个变体里，`light` 档 image 组总共只有 30 个请求（3 个场景各 10 个左右），全部落在变体池范围内，等于这一档**全部**是真·decode→scale→encode，没有一次缓存命中——它测的是"缓存完全没预热"的最坏情形。`moderate`（280 个请求）与 `heavy`（820 个请求）里，头 50 次是真实 miss，之后开始循环、命中缓存，档位越重、真实处理占比越低——`heavy` 只有约 6% 的请求是真实 miss，其余都是廉价的磁盘读，p50 自然被摊薄；但 p95/p99/max 三档都还留着真实处理的尾巴（`heavy` 档 max 54.5ms，同量级的真实成本依然可见）。三档测的其实是同一件事在不同缓存命中率下的样子，不是三次独立的性能测量，读数字时不要拿 p50 跨档直接比较"谁更快"。
+
+服务端视角（`vmr report` 按虚拟模型分桶的 p50/p95 请求耗时，三轮合并，混合了真实处理与缓存命中）：`big_image` 19ms/111ms、`multi_image` 10ms/44ms（三图，含一张过阈值触发降采样的）、`gif` 1ms/1ms（确认永不缩放的快速跳过路径确实便宜，不受变体数量影响），其余八个场景全部在 0-4ms 之间。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认冷却/切换机制按预期工作：`mock_fail1`/`mock_fail2` 全程各自只被真实尝试了 1 次（首次失败后进入冷却，此后请求全部直接落到 `mock_ok`），端点可用度表里两者的尝试数与成功率也如实反映了这一点。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
 
 ---
 

@@ -1,4 +1,4 @@
-// Ver 2026-07-10 01:40, by Fable 5
+// Ver 2026-07-24 12:35, by Sonnet 5
 package report
 
 import (
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/core"
 )
 
 // TestAttemptUpstreamFallback covers backward compatibility with audit
@@ -565,5 +566,38 @@ func TestRenderDetail_RawPreStrip(t *testing.T) {
 	withoutRaw := renderDetail(base(nil), nil)
 	if !strings.Contains(withoutRaw, "未保留剥离前原始内容") {
 		t.Errorf("missing graceful fallback note when RawPreStrip is nil:\n%s", withoutRaw)
+	}
+}
+
+// TestRenderDetail_FactsLine locks in that the detail Markdown surfaces
+// audit.Record.Facts (vmr's own pre-routing analysis) verbatim — no
+// recomputation from the stored request body — and that it appears near
+// the top of the document (before section ① renders the full request),
+// not buried after the detailed sections. A nil Facts (request rejected
+// before fact computation ran) must render nothing, not a blank/zero line.
+func TestRenderDetail_FactsLine(t *testing.T) {
+	base := func(facts *core.RequestFacts) *audit.Record {
+		return &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok",
+			Client: audit.Exchange{
+				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: map[string]any{}},
+			},
+			Facts: facts,
+		}
+	}
+
+	withFacts := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), nil)
+	if !strings.Contains(withFacts, "VMR 路由前判断") {
+		t.Errorf("facts line missing:\n%s", withFacts)
+	}
+	if !strings.Contains(withFacts, "图片 是") || !strings.Contains(withFacts, "Tools 否") {
+		t.Errorf("facts line should show 图片=是, Tools=否:\n%s", withFacts)
+	}
+	if factsIdx, reqIdx := strings.Index(withFacts, "VMR 路由前判断"), strings.Index(withFacts, "① Client"); factsIdx < 0 || reqIdx < 0 || factsIdx > reqIdx {
+		t.Errorf("facts line must appear before section ①, got factsIdx=%d reqIdx=%d", factsIdx, reqIdx)
+	}
+
+	withoutFacts := renderDetail(base(nil), nil)
+	if strings.Contains(withoutFacts, "VMR 路由前判断") {
+		t.Errorf("nil Facts must render nothing:\n%s", withoutFacts)
 	}
 }
