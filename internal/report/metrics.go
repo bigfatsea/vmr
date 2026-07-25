@@ -91,6 +91,9 @@ func finishRow(r *Row) {
 	if len(r.RoleChars) == 0 {
 		r.RoleChars = nil
 	}
+	if len(r.RoleTokens) == 0 {
+		r.RoleTokens = nil
+	}
 	r.durs, r.ttfts, r.streamMS = nil, nil, nil
 }
 
@@ -109,10 +112,15 @@ func finishEndpoint(e *EndpointRow) {
 	e.DurMSP50, e.DurMSP95 = percentiles(e.durs)
 	e.TTFTMSP50, e.TTFTMSP95 = percentiles(e.ttfts)
 	_, e.StreamMSP95 = percentiles(e.streamMS)
+	e.InTokP50, e.InTokP95 = percentiles(e.inToks)
+	e.OutTokP50, e.OutTokP95 = percentiles(e.outToks)
 	e.TokensInFresh = freshTokens(e.TokensIn, e.TokensInCached, e.TokensInCacheWrite)
 	if e.Attempts > 0 {
 		e.Availability = round2(float64(e.OK) / float64(e.Attempts))
 		e.ErrorRate = round2(float64(e.Failed) / float64(e.Attempts) * 100)
+	}
+	if e.Requests > 0 {
+		e.SuccessRate = round2(float64(e.RequestsOK) / float64(e.Requests))
 	}
 	if e.TokensKnown > 0 {
 		e.CacheEfficiency = cacheEff(e.TokensInCached, e.TokensInFresh)
@@ -123,11 +131,13 @@ func finishEndpoint(e *EndpointRow) {
 	if len(e.ErrorClasses) == 0 {
 		e.ErrorClasses = nil
 	}
-	e.durs, e.ttfts, e.streamMS = nil, nil, nil
+	e.durs, e.ttfts, e.streamMS, e.inToks, e.outToks = nil, nil, nil, nil, nil
 }
 
 func finishClient(c *ClientRow) {
 	c.DurMSP50, c.DurMSP95 = percentiles(c.durs)
+	c.InTokP50, c.InTokP95 = percentiles(c.inToks)
+	c.OutTokP50, c.OutTokP95 = percentiles(c.outToks)
 	c.TokensInFresh = freshTokens(c.TokensIn, c.TokensInCached, c.TokensInCacheWrite)
 	if c.Requests > 0 {
 		c.SuccessRate = round2(float64(c.OK) / float64(c.Requests))
@@ -135,7 +145,7 @@ func finishClient(c *ClientRow) {
 	if c.TokensKnown > 0 {
 		c.CacheEfficiency = cacheEff(c.TokensInCached, c.TokensInFresh)
 	}
-	c.durs, c.ttfts, c.streamMS = nil, nil, nil
+	c.durs, c.ttfts, c.streamMS, c.inToks, c.outToks = nil, nil, nil, nil, nil
 }
 
 func finishWorkload(w *WorkloadRow) {

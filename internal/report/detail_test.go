@@ -373,7 +373,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, nil)
+	n, err := WriteDetails([]string{src}, out, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, a)
+	n, err := WriteDetails([]string{src}, out, a, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,5 +572,73 @@ func TestRenderDetail_FactsLine(t *testing.T) {
 	withoutFacts := renderDetail(base(nil), nil)
 	if strings.Contains(withoutFacts, "VMR 路由前判断") {
 		t.Errorf("nil Facts must render nothing:\n%s", withoutFacts)
+	}
+}
+
+// TestBuildOnRecordMatchesWriteDetails is the regression test for merging
+// Build's aggregation pass with detail export: Build's onRecord hook
+// (DetailWriter.Submit called inline, one pass over the audit source) must
+// produce byte-identical output to the old two-pass path
+// (AnalyzeSessions -> a separate WriteDetails pass, an independent second
+// read of the same file). Runs both over the same input and diffs every
+// file in both details/ directories.
+func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
+	dir := t.TempDir()
+	records := smallAuditRecords()
+	path := writeTempJSONL(t, dir, records)
+
+	sess, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldDir := filepath.Join(dir, "old-details")
+	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newDir := filepath.Join(dir, "new-details")
+	dw, err := NewDetailWriter(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Build([]string{path}, time.Now(), nil, nil, dw.Submit); err != nil {
+		t.Fatal(err)
+	}
+	newN, err := dw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if oldN != newN {
+		t.Fatalf("record count mismatch: old=%d new=%d", oldN, newN)
+	}
+	if oldN == 0 {
+		t.Fatal("expected at least one detail file written; test fixture produced none")
+	}
+
+	oldFiles, err := os.ReadDir(oldDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newFiles, err := os.ReadDir(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oldFiles) != len(newFiles) {
+		t.Fatalf("file count mismatch: old=%d new=%d", len(oldFiles), len(newFiles))
+	}
+	for _, fi := range oldFiles {
+		oldBytes, err := os.ReadFile(filepath.Join(oldDir, fi.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		newBytes, err := os.ReadFile(filepath.Join(newDir, fi.Name()))
+		if err != nil {
+			t.Fatalf("missing in new-details: %s", fi.Name())
+		}
+		if string(oldBytes) != string(newBytes) {
+			t.Fatalf("content mismatch for %s:\n--- old ---\n%s\n--- new ---\n%s", fi.Name(), oldBytes, newBytes)
+		}
 	}
 }

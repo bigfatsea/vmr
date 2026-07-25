@@ -270,7 +270,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
 	}
 	out := filepath.Join(dir, "details")
-	if n, err := WriteDetails([]string{src}, out, a); err != nil {
+	if n, err := WriteDetails([]string{src}, out, a, nil); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatalf("n = %d, want 1", n)
@@ -284,7 +284,7 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(t.TempDir(), "details")
-	n, err := WriteDetails([]string{path}, dir, a)
+	n, err := WriteDetails([]string{path}, dir, a, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

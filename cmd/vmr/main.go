@@ -76,7 +76,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
-       vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <audit.jsonl|glob>...   (default -o: ./reports)
+       vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <audit.jsonl|glob>...   (default -o: ./reports; auto-loads ./pricing.yaml if -pricing omitted)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
@@ -113,6 +113,33 @@ func cmdDirs(args []string) error {
 	return nil
 }
 
+// timestampWriter prefixes every line written through it with
+// "2006-01-02 15:04:05.000 " (local time, millisecond precision) — `vmr
+// report`'s progress output otherwise has no way to show how long each
+// phase/file actually took. One Write() call is assumed to be one
+// already-formatted line (true for every fmt.Fprintf call site this wraps),
+// so the timestamp lands at the true start of that line, not buffered
+// alongside unrelated output.
+type timestampWriter struct{ w io.Writer }
+
+func (tw timestampWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(tw.w, time.Now().Format("2006-01-02 15:04:05.000")+" "); err != nil {
+		return 0, err
+	}
+	if _, err := tw.w.Write(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// defaultPricingFile is the pricing sidecar `vmr report` auto-loads when
+// -pricing is not given — the same relative-to-cwd convention config.yaml
+// itself uses with -c. Auto-load is silently skipped (no error, no $
+// estimates) when this file doesn't exist; an explicit -pricing always wins
+// and is used exactly as given, existent or not (report.LoadPricing already
+// treats a missing explicit path as "no pricing" rather than an error).
+const defaultPricingFile = "pricing.yaml"
+
 // cmdReport aggregates audit JSONL into internal/report's output:
 // vmr-report.json/.md, vmr-requests.jsonl/.md (+ per-tag siblings), and one
 // details/*.md+.json per request. Inputs may freely mix live plain .jsonl
@@ -123,7 +150,7 @@ func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	detailsOn := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/")
-	pricingPath := fs.String("pricing", "", "optional pricing sidecar yaml (per-endpoint unit prices); absent => no $ estimates")
+	pricingPath := fs.String("pricing", "", "pricing sidecar yaml (per-endpoint unit prices); absent => auto-load ./pricing.yaml if present, else no $ estimates")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -149,17 +176,58 @@ func cmdReport(args []string) error {
 	}
 	sort.Strings(paths)
 
-	pricing, err := report.LoadPricing(*pricingPath)
+	tw := timestampWriter{w: os.Stdout}
+
+	resolvedPricingPath := *pricingPath
+	if resolvedPricingPath == "" {
+		if _, err := os.Stat(defaultPricingFile); err == nil {
+			resolvedPricingPath = defaultPricingFile
+			fmt.Fprintf(tw, "pricing: auto-loaded %s (pass -pricing to override)\n", defaultPricingFile)
+		}
+	}
+	pricing, err := report.LoadPricing(resolvedPricingPath)
 	if err != nil {
 		return err
 	}
-	rep, sess, err := report.Build(paths, time.Now(), os.Stdout, pricing)
-	if err != nil {
-		return err
-	}
+
 	// 0o700/0o600: report outputs embed full conversation bodies from the
-	// 0600 audit files - the derived copies must not loosen that.
+	// 0600 audit files - the derived copies must not loosen that. Created
+	// up front now (used to happen after Build succeeded): the detail
+	// writer below needs its output directory to exist before Build's
+	// aggregation pass starts feeding it records, since detail rendering
+	// now happens inside that same pass instead of as a separate step
+	// afterward.
 	if err := os.MkdirAll(*outDir, 0o700); err != nil {
+		return err
+	}
+
+	// Build's onRecord hook (nil when -details=false) renders+writes each
+	// record's detail page during the aggregation pass itself, on its own
+	// worker pool — no separate third read of the audit source for detail
+	// export anymore. Build's own success/failure never depends on this:
+	// a detail-write failure surfaces only when dw.Close() is checked below,
+	// well after vmr-report.json/md are already safely on disk — same
+	// robustness the old separate-WriteDetails-step had, just without the
+	// extra pass.
+	var dw *report.DetailWriter
+	detailDir := filepath.Join(*outDir, "details")
+	var onRecord func(*audit.Record, *report.ReqInfo)
+	if *detailsOn {
+		dw, err = report.NewDetailWriter(detailDir)
+		if err != nil {
+			return err
+		}
+		onRecord = dw.Submit
+		fmt.Fprintf(tw, "detail export: writing into %s (runs concurrently with the pass below)\n", detailDir)
+	}
+
+	// The gap between this line's timestamp and the first "[1/N]" line below
+	// is session analysis (AnalyzeSessions) — a full, currently silent pass
+	// over every input file that Build() always runs before its own
+	// per-file aggregation loop starts printing.
+	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
+	rep, sess, err := report.Build(paths, time.Now(), tw, pricing, onRecord)
+	if err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(*outDir, "vmr-report.json")
@@ -170,16 +238,16 @@ func cmdReport(args []string) error {
 	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
-		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
+	fmt.Fprintf(tw, "%s\n", jsonPath)
+	fmt.Fprintf(tw, "%s\n", mdPath)
 
-	if *detailsOn {
-		detailDir := filepath.Join(*outDir, "details")
-		n, err := report.WriteDetails(paths, detailDir, sess)
+	if dw != nil {
+		n, err := dw.Close()
 		if err != nil {
 			return fmt.Errorf("details: %w", err)
 		}
-		fmt.Printf("%d detail file(s) (.md + .json) in %s\n", n, detailDir)
+		fmt.Fprintf(tw, "%d detail file(s) (.md + .json) in %s\n", n, detailDir)
 	}
 
 	// Requests index (+ per-tag siblings) + jsonl.
@@ -189,11 +257,11 @@ func cmdReport(args []string) error {
 	if err != nil {
 		return fmt.Errorf("requests export: %w", err)
 	}
-	fmt.Printf("%s (%d rows)\n", reqPath, nReq)
+	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
 	if err := report.WriteRequestsIndex(rep, sess, *outDir); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
-	fmt.Printf("%s\n", filepath.Join(*outDir, "vmr-requests.md"))
+	fmt.Fprintf(tw, "%s\n", filepath.Join(*outDir, "vmr-requests.md"))
 	return nil
 }
 

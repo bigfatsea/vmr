@@ -11,13 +11,18 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
@@ -43,6 +48,162 @@ var normDescriptions = map[string]string{
 	"crlf_framing_suspected":   "疑似 CRLF（`\\r\\n\\r\\n`）分帧的 SSE 响应——归一化器只识别 `\\n\\n` 事件边界，未找到时整段响应会被当作一次性缓冲处理（内容仍正确，仅逐 token 流式效果退化）",
 }
 
+// detailWorkerCount bounds how many records get rendered+written
+// concurrently in WriteDetails. Capped well below NumCPU on large machines:
+// each job is two small-file writes, and past a point more goroutines just
+// contend on the filesystem/GC instead of finishing faster.
+func detailWorkerCount() int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		n = 1
+	}
+	if n > 16 {
+		n = 16
+	}
+	return n
+}
+
+// detailJob is one record's render-and-write work, queued for a worker. wg
+// (optional) is Done() by the worker that processes this job — see
+// detailWriter.submit.
+type detailJob struct {
+	rec  *audit.Record
+	info *ReqInfo
+	name string
+	wg   *sync.WaitGroup
+}
+
+// writeOneDetail renders and writes one record's .md + .json pair. Errors
+// are reported through recordErr rather than returned, since this runs on a
+// worker goroutine, not the caller's.
+func writeOneDetail(dir string, j detailJob, n *int64, recordErr func(error)) {
+	if err := os.WriteFile(filepath.Join(dir, j.name), []byte(renderDetail(j.rec, j.info)), 0o600); err != nil {
+		recordErr(err)
+		return
+	}
+	// Same-named .json alongside the .md: the raw record, for readers who
+	// want to jq/query a single request instead of parsing the Markdown.
+	if raw, err := json.MarshalIndent(j.rec, "", "  "); err == nil {
+		jsonName := strings.TrimSuffix(j.name, ".md") + ".json"
+		if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o600); err != nil {
+			recordErr(err)
+			return
+		}
+	}
+	atomic.AddInt64(n, 1)
+}
+
+// DetailWriter is a bounded worker pool that renders and writes one .md +
+// one .json per submitted record — the reusable half of what used to be
+// WriteDetails' own, self-contained implementation. It has two callers now:
+// WriteDetails itself (drives it from its own file-scanning loop, one
+// submit per record, batched per file via a *sync.WaitGroup so its progress
+// line still reports real per-file elapsed time), and Build's onRecord hook
+// (cmd/vmr constructs one and passes its Submit method — driven directly
+// during Build's existing aggregation pass, no file scan of its own at all;
+// see Build's doc comment for why). Every record's detail page depends only
+// on that record's own (audit.Record, *ReqInfo) pair, so there's no
+// cross-record ordering constraint either caller needs to preserve.
+//
+// Submit/submit are safe to call from multiple goroutines concurrently —
+// the fallback-naming `used` map is mutex-guarded — even though both
+// current callers happen to drive it from a single goroutine each
+// (WriteDetails' own scan loop; Build's per-record loop).
+type DetailWriter struct {
+	dir      string
+	usedMu   sync.Mutex
+	used     map[string]int
+	jobs     chan detailJob
+	poolWG   sync.WaitGroup
+	n        int64
+	errMu    sync.Mutex
+	firstErr error
+}
+
+// NewDetailWriter creates dir and starts the worker pool (detailWorkerCount
+// goroutines). Callers must eventually call Close to drain it.
+func NewDetailWriter(dir string) (*DetailWriter, error) {
+	// 0o700/0o600 throughout: detail files carry the same full conversation
+	// bodies as the audit JSONL they were derived from, which is
+	// deliberately written 0600 — the exports must not silently loosen that.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	numWorkers := detailWorkerCount()
+	dw := &DetailWriter{
+		dir:  dir,
+		used: map[string]int{},
+		jobs: make(chan detailJob, numWorkers*4),
+	}
+	dw.poolWG.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer dw.poolWG.Done()
+			for j := range dw.jobs {
+				writeOneDetail(dw.dir, j, &dw.n, dw.recordErr)
+				if j.wg != nil {
+					j.wg.Done()
+				}
+			}
+		}()
+	}
+	return dw, nil
+}
+
+func (dw *DetailWriter) recordErr(err error) {
+	dw.errMu.Lock()
+	if dw.firstErr == nil {
+		dw.firstErr = err
+	}
+	dw.errMu.Unlock()
+}
+
+func (dw *DetailWriter) hasErr() bool {
+	dw.errMu.Lock()
+	defer dw.errMu.Unlock()
+	return dw.firstErr != nil
+}
+
+// submit queues one record's render+write. wg is optional: pass one to wait
+// for a batch to finish (WriteDetails waits per file); pass nil for
+// fire-and-forget, relying on a later Close to drain everything (Build's
+// hook, via Submit below — it has no natural "batch" boundary of its own).
+func (dw *DetailWriter) submit(rec *audit.Record, info *ReqInfo, wg *sync.WaitGroup) {
+	name := ""
+	if info != nil {
+		name = info.DetailFile // assigned in ts order by the analysis
+	}
+	if name == "" {
+		dw.usedMu.Lock()
+		name = detailFileName(rec, dw.used)
+		dw.usedMu.Unlock()
+	}
+	if wg != nil {
+		wg.Add(1)
+	}
+	dw.jobs <- detailJob{rec: rec, info: info, name: name, wg: wg}
+}
+
+// Submit queues one record's render+write, fire-and-forget — the exported
+// entry point for a caller (e.g. Build's onRecord hook) with no per-batch
+// wait of its own. A no-op once a prior job has already failed, matching
+// WriteDetails' own short-circuit, so a broken output directory (e.g. disk
+// full) doesn't queue thousands more doomed jobs once it's known bad.
+func (dw *DetailWriter) Submit(rec *audit.Record, info *ReqInfo) {
+	if dw.hasErr() {
+		return
+	}
+	dw.submit(rec, info, nil)
+}
+
+// Close drains the pool and returns the total records written and the
+// first error encountered, if any.
+func (dw *DetailWriter) Close() (int, error) {
+	close(dw.jobs)
+	dw.poolWG.Wait()
+	return int(atomic.LoadInt64(&dw.n)), dw.firstErr
+}
+
 // WriteDetails renders every record in the given audit files into dir (one
 // .md + one same-named .json per record). Returns the number of record files
 // written. Reruns overwrite deterministically. sess (optional, nil = plain
@@ -55,26 +216,34 @@ var normDescriptions = map[string]string{
 // and the no-analysis fallback (sess == nil, or a record the analysis never
 // saw) numbers same-millisecond collisions in read order. cmd/vmr sorts the
 // glob expansion once and feeds both — keep it that way.
-func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error) {
-	// 0o700/0o600 throughout: detail files carry the same full conversation
-	// bodies as the audit JSONL they were derived from, which is
-	// deliberately written 0600 — the exports must not silently loosen that.
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+//
+// This is a standalone alternative to Build's onRecord hook — a second,
+// independent read of the same audit files, for callers that want detail
+// export without running the full aggregation pass. `vmr report` itself no
+// longer calls this (Build's hook covers it in one pass instead); it stays
+// for tests and any other standalone use.
+//
+// progress (optional, nil = silent) gets one line per input file.
+func WriteDetails(paths []string, dir string, sess *SessionAnalysis, progress io.Writer) (int, error) {
+	dw, err := NewDetailWriter(dir)
+	if err != nil {
 		return 0, err
 	}
-	used := map[string]int{}
-	n := 0
 
-	for _, path := range paths {
+	var outerErr error
+	for fileIdx, path := range paths {
+		fileStart := time.Now()
+		before := atomic.LoadInt64(&dw.n)
 		rc, err := audit.OpenLogFile(path)
 		if err != nil {
-			return n, err
+			outerErr = err
+			break
 		}
 		line := 0
-		var writeErr error
+		var fileWG sync.WaitGroup
 		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
 			line++
-			if writeErr != nil {
+			if dw.hasErr() {
 				return
 			}
 			var rec audit.Record
@@ -82,38 +251,28 @@ func WriteDetails(paths []string, dir string, sess *SessionAnalysis) (int, error
 				return // Build already counts parse errors
 			}
 			info := sess.Lookup(path, line)
-			name := ""
-			if info != nil {
-				name = info.DetailFile // assigned in ts order by the analysis
-			}
-			if name == "" {
-				name = detailFileName(&rec, used)
-			}
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(renderDetail(&rec, info)), 0o600); err != nil {
-				writeErr = err
-				return
-			}
-			// Same-named .json alongside the .md: the raw record, for
-			// readers who want to jq/query a single request instead of
-			// parsing the Markdown.
-			if raw, err := json.MarshalIndent(&rec, "", "  "); err == nil {
-				jsonName := strings.TrimSuffix(name, ".md") + ".json"
-				if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o600); err != nil {
-					writeErr = err
-					return
-				}
-			}
-			n++
+			dw.submit(&rec, info, &fileWG)
 		}, func() { line++ }) // skipped lines still advance the counter so sess.Lookup keys stay aligned with AnalyzeSessions
 		rc.Close()
-		if writeErr != nil {
-			return n, writeErr
+		fileWG.Wait() // drain this file's jobs so the progress line below reflects real elapsed time
+		if progress != nil {
+			fmt.Fprintf(progress, "[%d/%d] %s  done: %d detail file pairs (%s)\n",
+				fileIdx+1, len(paths), path, atomic.LoadInt64(&dw.n)-before, time.Since(fileStart).Round(time.Millisecond))
 		}
 		if scanErr != nil {
-			return n, fmt.Errorf("%s: %w", path, scanErr)
+			outerErr = fmt.Errorf("%s: %w", path, scanErr)
+			break
+		}
+		if dw.hasErr() {
+			break
 		}
 	}
-	return n, nil
+
+	n, err := dw.Close()
+	if outerErr != nil {
+		return n, outerErr
+	}
+	return n, err
 }
 
 // callsCell compacts a turn's tool calls ("exec×2, write"); "-" when none.
@@ -236,6 +395,22 @@ func outcomeMark(outcome string) string {
 	}
 }
 
+// recordUsage returns this record's extracted token usage, preferring the
+// already-computed info.Usage/info.UsageOK — session.go's collect() already
+// ran ExtractUsage once for this exact record during session analysis — over
+// recomputing it from the response body a second time. Recompute only
+// happens when info is nil (ungrouped/rejected records, or detail rendering
+// with no session analysis at all).
+func recordUsage(rec *audit.Record, info *ReqInfo) (Usage, bool) {
+	if info != nil {
+		return info.Usage, info.UsageOK
+	}
+	if rec.Client.Response == nil {
+		return Usage{}, false
+	}
+	return ExtractUsage(rec.Client.Response.Body)
+}
+
 // ---- document skeleton ----
 
 func renderDetail(rec *audit.Record, info *ReqInfo) string {
@@ -252,10 +427,8 @@ func renderDetail(rec *audit.Record, info *ReqInfo) string {
 		stream = "是"
 	}
 	tok := "-"
-	if rec.Client.Response != nil {
-		if u, ok := ExtractUsage(rec.Client.Response.Body); ok {
-			tok = tokensTriple(u.In, u.CacheRead, u.Out)
-		}
+	if u, ok := recordUsage(rec, info); ok {
+		tok = tokensTriple(u.In, u.CacheRead, u.Out)
 	}
 	ttft := "-"
 	if rec.TTFTMS > 0 {
@@ -424,7 +597,19 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 	}
 	if len(msgs) > 0 {
 		w("\n### Messages (%d)\n\n", len(msgs))
-		if line := roleStatLine(roleTokens(req.Body), true, true); line != "" {
+		// info.RoleTokens is the exact same computation over the exact same
+		// body (session.go's collect() already ran roleTokens(body) for
+		// this record during session analysis) — reuse it instead of
+		// re-walking the whole message tree here. Recompute only when there
+		// is no ReqInfo at all (ungrouped/rejected records, or no session
+		// analysis).
+		var roleTok map[string]int64
+		if info != nil {
+			roleTok = info.RoleTokens
+		} else {
+			roleTok = roleTokens(req.Body)
+		}
+		if line := roleStatLine(roleTok, true, true); line != "" {
 			w("角色 Token 估算占比：%s\n\n", line)
 		}
 		if info != nil && info.SessionID != "" && info.Parent != nil && info.DeltaStart > 0 {

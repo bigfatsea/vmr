@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -93,6 +95,7 @@ type ReqInfo struct {
 	// Aggregates that the SessionRows / Workloads consumers need to roll up.
 	MessagesKnown    int              // requests whose body parsed as a chat object
 	RoleChars        map[string]int64 // per-role displayed-character totals
+	RoleTokens       map[string]int64 // per-role estimated-token totals (core.EstimateTextTokens)
 	Fallbacks        int              // requests that needed >1 attempt
 	Images           int              // inline request images detected
 	ImagesCompressed int              // subset that triggered downscaling
@@ -122,8 +125,6 @@ type ReqInfo struct {
 	durMS     int64
 	ttftMS    int64
 	stream    bool
-	bytesIn   int64
-	bytesOut  int64
 	norm      []string
 }
 
@@ -165,27 +166,55 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // AnalyzeSessions reads the audit files and produces the session grouping
 // plus per-request features. Unparseable lines are skipped (Build counts
 // them); records without a chat body land in Ungrouped.
+//
+// Each file is read and collect()ed independently — collect() is a pure
+// function of one record, with no shared mutable state across records or
+// files (verified: every package-level var it reaches is a constant or a
+// compiled *regexp.Regexp, both safe for concurrent use) — so the per-file
+// work runs on a bounded worker pool (analysisWorkerCount goroutines)
+// instead of strictly one file after another. This was measured as the
+// single largest phase of `vmr report` on an 11-day/6663-record corpus
+// (~48s), so it's the highest-value target for parallelizing this command.
+//
+// This is safe specifically because the only genuinely cross-record step —
+// sort by timestamp, then assignNames/group/linkCompactions — still runs
+// serially afterward, once every file's records are merged back together in
+// original path order (and each file's own records stay in their original
+// line order — ForEachLine within one file is untouched, still a plain
+// sequential scan). A stable sort by TS over that merged, correctly-ordered
+// slice produces byte-identical results to the old strictly-sequential
+// version, tie-breaks included: parallelizing which file gets read first
+// never changes what the final sort sees.
+//
+// On error, every already-dispatched file still finishes reading (unlike
+// the old version, which stopped at the first failing file) before the
+// first error in path order is returned — wasted work on a path that's
+// rare and not performance-sensitive, traded for not needing goroutine
+// cancellation machinery.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
-	for _, path := range paths {
-		rc, err := audit.OpenLogFile(path)
-		if err != nil {
-			return nil, err
+
+	results := make([]fileAnalysisResult, len(paths))
+	sem := make(chan struct{}, analysisWorkerCount(len(paths)))
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, path string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = analyzeFile(path)
+		}(i, path)
+	}
+	wg.Wait()
+
+	for _, res := range results {
+		if res.err != nil {
+			return nil, res.err
 		}
-		line := 0
-		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
-			line++
-			var rec audit.Record
-			if err := json.Unmarshal(lineBytes, &rec); err != nil {
-				return
-			}
-			r := collect(&rec, path, line)
+		for _, r := range res.recs {
 			a.Recs = append(a.Recs, r)
-			a.byKey[fmt.Sprintf("%s\x00%d", path, line)] = r
-		}, func() { line++ }) // skipped oversized lines still advance the physical line number
-		rc.Close()
-		if scanErr != nil {
-			return nil, fmt.Errorf("%s: %w", path, scanErr)
+			a.byKey[fmt.Sprintf("%s\x00%d", r.Path, r.Line)] = r
 		}
 	}
 
@@ -194,6 +223,57 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	group(a)
 	linkCompactions(a)
 	return a, nil
+}
+
+// analysisWorkerCount bounds how many files AnalyzeSessions reads
+// concurrently: zstd decompression is CPU-bound, so more workers than
+// cores (or than there are files to read) just adds scheduling overhead.
+func analysisWorkerCount(files int) int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		n = 1
+	}
+	if files > 0 && n > files {
+		n = files
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// fileAnalysisResult is one file's independently-collected records — see
+// AnalyzeSessions for why computing this on its own goroutine is safe.
+type fileAnalysisResult struct {
+	recs []*ReqInfo
+	err  error
+}
+
+// analyzeFile reads and collect()s every record in one audit file. Error
+// formatting matches exactly what the old sequential AnalyzeSessions
+// returned for each failure mode (OpenLogFile's own error already names the
+// path; a scan error gets path-wrapped here) — callers must not wrap
+// res.err again.
+func analyzeFile(path string) fileAnalysisResult {
+	rc, err := audit.OpenLogFile(path)
+	if err != nil {
+		return fileAnalysisResult{err: err}
+	}
+	defer rc.Close()
+	var recs []*ReqInfo
+	line := 0
+	scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
+		line++
+		var rec audit.Record
+		if err := json.Unmarshal(lineBytes, &rec); err != nil {
+			return
+		}
+		recs = append(recs, collect(&rec, path, line))
+	}, func() { line++ }) // skipped oversized lines still advance the physical line number
+	if scanErr != nil {
+		return fileAnalysisResult{err: fmt.Errorf("%s: %w", path, scanErr)}
+	}
+	return fileAnalysisResult{recs: recs}
 }
 
 // ---- per-record collection ----
@@ -229,10 +309,12 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		r.Fallbacks = 1
 	}
 	r.durMS, r.ttftMS, r.stream = rec.DurMS, rec.TTFTMS, rec.Stream
-	r.bytesIn = bodyBytes(rec.Client.Request.Body)
-	if rec.Client.Response != nil {
-		r.bytesOut = bodyBytes(rec.Client.Response.Body)
-	}
+	// bytesIn/bytesOut are NOT computed here even though they're cheap to
+	// derive from rec.Client.*.Body: nothing in this package ever reads
+	// them off ReqInfo (Build's own pass computes its own copy, into rec2,
+	// since that's the one that actually feeds the aggregate report) — this
+	// used to duplicate that same json.Marshal-based sizing on every
+	// record's full body for no reason.
 	for i := len(rec.Attempts) - 1; i >= 0; i-- {
 		if len(rec.Attempts[i].Norm) > 0 {
 			r.norm = rec.Attempts[i].Norm
@@ -294,6 +376,12 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 			r.RoleChars = map[string]int64{}
 		}
 		r.RoleChars[role] += c
+	}
+	for role, t := range roleTokens(body) {
+		if r.RoleTokens == nil {
+			r.RoleTokens = map[string]int64{}
+		}
+		r.RoleTokens[role] += t
 	}
 	rawMsgs, _ := body["messages"].([]any)
 	sysHash := md5.New()

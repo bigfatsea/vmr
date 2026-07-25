@@ -32,8 +32,9 @@ func Markdown(rep *Report2) string {
 		strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
 		cut(rep.Meta.From, 19), cut(rep.Meta.To, 19))
 	w("详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json")
-	if len(rep.ByClient) > 0 {
-		for _, c := range rep.ByClient {
+	withSibling := clientsWithSiblingFile(rep)
+	for _, c := range rep.ByClient {
+		if withSibling[c.ClientKey] {
 			w(" · [-%s](./vmr-requests-%s.md)", c.ClientKey, sanitize(c.ClientKey))
 		}
 	}
@@ -164,19 +165,21 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row) {
 	}
 	w("\n")
 
-	// role chars (D-family)
+	// role chars + estimated tokens (D-family)
 	if len(o.RoleChars) > 0 {
-		w("**请求消息字符及占比**\n\n| 角色 | 字符 | 占比 |\n|---|---|---|\n")
-		total := sumRoleChars(o.RoleChars)
+		w("**请求消息字符、预估Token及占比**\n\n| 角色 | 字符 | 预估Token⭐ | 占比⭐ |\n|---|---|---|---|\n")
+		totalTok := sumRoleChars(o.RoleTokens)
 		for _, role := range sortedRoles(o.RoleChars) {
 			c := o.RoleChars[role]
+			t := o.RoleTokens[role]
 			share := 0.0
-			if total > 0 {
-				share = float64(c) / float64(total)
+			if totalTok > 0 {
+				share = float64(t) / float64(totalTok)
 			}
-			w("| %s | %s | %s |\n", role, fmtTokens(c), pctStr(share))
+			w("| %s | %s | %s | %s |\n", role, fmtTokens(c), fmtTokens(t), pctStr(share))
 		}
-		w("\n> takeaway: tool 结果占比最大时，上下文优化的首要杠杆是压缩 tool 返回，而非 system prompt。\n\n")
+		w("\n> 预估Token⭐：上游 usage 不按角色拆分，无法拿到真实值，这里用粗估口径（ASCII ~4B/token，多字节 UTF-8 ~2B/token，同 §1 计费口径）；占比按预估Token 计算。\n")
+		w("> takeaway: tool 结果占比最大时，上下文优化的首要杠杆是压缩 tool 返回，而非 system prompt。\n\n")
 	}
 }
 
@@ -247,6 +250,14 @@ func renderCostEstimate(w func(string, ...any), rep *Report2) {
 	if !hasModel && !hasEndpoint && !hasClient {
 		w("配置了定价，但没有请求命中已配置的端点，暂无成本数据。\n\n")
 	}
+
+	// Freeze the exact pricing.yaml used for this report, collapsed by
+	// default — pricing.yaml can keep changing after the fact; embedding it
+	// verbatim means a later reader of this report is never left guessing
+	// which price snapshot the $ figures above actually came from.
+	if len(rep.Pricing.Raw) > 0 {
+		w("%s\n", details("本次使用的定价配置（冻结快照，点击展开）", codeFence(string(rep.Pricing.Raw))))
+	}
 }
 
 // ---- §3 可靠性 ----
@@ -255,23 +266,26 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 	w("**结果分布**\n\n| ok | error | canceled | truncated | fallback(恢复/失败)⭐ |\n|---|---|---|---|---|\n")
 	w("| %d | %d | %d | %d | %d (%d/%d) |\n\n", o.OK, o.Errors, o.Canceled, o.Truncated, o.Fallbacks, o.FallbackRecovered, o.FallbackFailed)
 
-	// endpoint health (6 cols) - use EndpointsAll for cross-date view
+	// endpoint health (6 cols) - use EndpointsAll for cross-date view, split by protocol
 	if len(rep.EndpointsAll) > 0 {
-		w("**端点健康**（跨日合并）\n\n| 端点 | 尝试 | 成功 | 可用度 | 错误率/100⭐ | 首要错误 |\n|---|---|---|---|---|---|\n")
-		for _, e := range rep.EndpointsAll {
-			marker := ""
-			if e.ErrorRate > 10 {
-				marker = " ⚠️"
+		w("**端点健康**（跨日合并）\n\n")
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		for _, p := range protocols {
+			w("*%s*\n\n| 端点 | 尝试 | 成功 | 可用度 | 错误率⭐ | 首要错误 |\n|---|---|---|---|---|---|\n", p)
+			for _, e := range byProto[p] {
+				marker := ""
+				if e.ErrorRate > 10 {
+					marker = " ⚠️"
+				}
+				w("| %s | %d | %d | %s | %s%s | %s |\n", e.Endpoint, e.Attempts, e.OK,
+					pctStr(e.Availability), pctHundred(e.ErrorRate), marker,
+					topErrorClassShort(e))
 			}
-			w("| %s | %d | %d | %s | %s%s | %s |\n", e.Endpoint, e.Attempts, e.OK,
-				pctStr(e.Availability),
-				strconv.FormatFloat(float64(e.ErrorRate), 'f', 1, 64), marker,
-				topErrorClassShort(e))
+			w("\n")
 		}
-		w("\n")
 	}
 
-	// error class × endpoint (only non-zero), top entries
+	// error class × endpoint (only non-zero), split by protocol
 	nonzero := false
 	for _, e := range rep.EndpointsAll {
 		if len(e.ErrorClasses) > 0 {
@@ -280,18 +294,33 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 		}
 	}
 	if nonzero {
-		w("**错误类别 × 端点**（仅非零）\n\n| 端点 | 类别 | 计数 | 速率/100 |\n|---|---|---|---|\n")
-		for _, e := range rep.EndpointsAll {
-			for _, cls := range sortedKeysInt(e.ErrorClasses) {
-				n := e.ErrorClasses[cls]
-				rate := 0.0
-				if e.Attempts > 0 {
-					rate = float64(n) / float64(e.Attempts) * 100
+		w("**错误类别 × 端点**（仅非零）\n\n")
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		for _, p := range protocols {
+			rows := byProto[p]
+			hasAny := false
+			for _, e := range rows {
+				if len(e.ErrorClasses) > 0 {
+					hasAny = true
+					break
 				}
-				w("| %s | %s | %d | %s |\n", e.Endpoint, cls, n, strconv.FormatFloat(rate, 'f', 1, 64))
 			}
+			if !hasAny {
+				continue
+			}
+			w("*%s*\n\n| 端点 | 类别 | 计数 |\n|---|---|---|\n", p)
+			for _, e := range rows {
+				for _, cls := range sortedKeysInt(e.ErrorClasses) {
+					n := e.ErrorClasses[cls]
+					rate := 0.0
+					if e.Attempts > 0 {
+						rate = float64(n) / float64(e.Attempts) * 100
+					}
+					w("| %s | %s | %d(%s) |\n", e.Endpoint, cls, n, pctHundred(rate))
+				}
+			}
+			w("\n")
 		}
-		w("\n")
 	}
 
 	// error timeline sparkline (per hour error counts from HoursOfDay)
@@ -319,36 +348,59 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 // ---- §4 延迟与吞吐 ----
 func renderLatency(w func(string, ...any), rep *Report2, o Row) {
 	w("## §4 延迟与吞吐\n\n")
-	w("| 模型 | 协议 | ttft p50/p95 (n) | dur p50/p95/max (n) | stream p95 (n)⭐ | slow>%ds⭐ | tok/s |\n|---|---|---|---|---|---|---|\n",
+	w("| 模型 | 协议 | ttft p50/p95 (n) | dur p50/p95/max (n) | slow>%ds⭐ | tok/s |\n|---|---|---|---|---|---|\n",
 		SlowThresholdMS/1000)
-	for _, m := range rep.ByModel {
-		w("| %s | %s | %s | %s | %s | %d | %s |\n",
+	byModelSpeed := append([]Row(nil), rep.ByModel...)
+	sort.SliceStable(byModelSpeed, func(i, j int) bool { return byModelSpeed[i].TokOutPerSec > byModelSpeed[j].TokOutPerSec })
+	for _, m := range byModelSpeed {
+		w("| %s | %s | %s | %s | %d | %s |\n",
 			m.Model, m.Protocol,
 			ppCell(m.TTFTMSP50, m.TTFTMSP95, 0, m.TTFTKnown),
 			ppCell(m.DurMSP50, m.DurMSP95, m.DurMSMax, m.RequestsWithDur),
-			streamCell(m.StreamMSP95, m.StreamKnown),
 			m.SlowRequests,
 			tokPerSec(m.TokOutPerSec))
 	}
-	w("\n> 全局 p95 dur %s，max %s。stream_ms = dur − ttft（每请求独立切片算真百分位，非两百分位相减）。\n",
+	w("\n> 全局 p95 dur %s，max %s。按 tok/s 降序排列。\n",
 		fmtDurMS(o.DurMSP95), fmtDurMS(o.DurMSMax))
-	w("> 若 coding 的慢主要来自长流式输出（stream p95 大），而非首字延迟，即为流式归因。\n\n")
+	w("> 若 coding 的慢主要来自长流式输出，而非首字延迟，参见每模型的 ttft vs dur 差值。\n\n")
+
+	// by endpoint, split by protocol (跨日合并, same basis as §3 端点健康), each
+	// group sorted by tok/s descending
+	if len(rep.EndpointsAll) > 0 {
+		w("**按端点**（跨日合并）\n\n")
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		for _, p := range protocols {
+			rows := append([]EndpointRow(nil), byProto[p]...)
+			sort.SliceStable(rows, func(i, j int) bool { return rows[i].TokOutPerSec > rows[j].TokOutPerSec })
+			w("*%s*\n\n| 端点 | ttft p50/p95 (n) | dur p50/p95/max (n) | slow>%ds⭐ | tok/s |\n|---|---|---|---|---|\n",
+				p, SlowThresholdMS/1000)
+			for _, e := range rows {
+				w("| %s | %s | %s | %d | %s |\n",
+					e.Endpoint,
+					ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),
+					ppCell(e.DurMSP50, e.DurMSP95, e.DurMSMax, e.RequestsWithDur),
+					e.SlowRequests,
+					tokPerSec(e.TokOutPerSec))
+			}
+			w("\n")
+		}
+	}
 }
 
 // ---- §5 负载分布 ----
 func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 	w("## §5 负载分布\n\n")
 	// by virtual model (6)
-	w("**按虚拟模型**\n\n| 模型 | 协议 | 请求 | 成功率 | fresh/cached/out | p95 dur |\n|---|---|---|---|---|---|\n")
+	w("**按虚拟模型**\n\n| 模型 | 协议 | 请求 | 成功率 | fresh/cached/out | dur p50/p95 |\n|---|---|---|---|---|---|\n")
 	for _, m := range rep.ByModel {
 		w("| %s | %s | %d | %s | %s / %s / %s | %s |\n",
 			m.Model, m.Protocol, m.Requests, pctStr2(m.OK, m.Requests),
 			fmtTokens(m.TokensInFresh), fmtTokens(m.TokensInCached), fmtTokens(m.TokensOut),
-			fmtDurMS(m.DurMSP95))
+			p5095Cell(m.DurMSP50, m.DurMSP95))
 	}
 	w("\n")
 	// by workload class (6)
-	w("**按工作负载类**\n\n| 类 | 请求 | fresh | 缓存效率⭐ | tool_call_rate | p95 dur |\n|---|---|---|---|---|---|\n")
+	w("**按工作负载类**\n\n| 类 | 请求 | fresh | 缓存效率⭐ | tool_call_rate | dur p50/p95 |\n|---|---|---|---|---|---|\n")
 	for _, wl := range rep.Workloads {
 		flag := ""
 		if wl.TokensKnown > 0 && wl.CacheEfficiency < 0.30 {
@@ -357,89 +409,130 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 		w("| %s | %d | %s | %s%s | %s | %s |\n",
 			wl.Class, wl.Requests, fmtTokens(wl.TokensInFresh),
 			cacheEffCell(wl.CacheEfficiency, wl.TokensKnown, wl.Requests), flag,
-			pctStr(wl.ToolCallRate), fmtDurMS(wl.DurMSP95))
+			pctStr(wl.ToolCallRate), p5095Cell(wl.DurMSP50, wl.DurMSP95))
 	}
 	w("\n")
-	// by hour: dual sparkline + narrow table
+	// by hour: mermaid only - request volume + input tokens (no dur chart, no table)
 	if len(rep.HoursOfDay) > 0 {
 		vol := make([]int64, 24)
-		p95 := make([]int64, 24)
+		tokIn := make([]int64, 24)
 		for _, h := range rep.HoursOfDay {
 			if h.Hour >= 0 && h.Hour < 24 {
 				vol[h.Hour] = int64(h.Requests)
-				p95[h.Hour] = h.DurMSP95
+				tokIn[h.Hour] = h.TokensIn
 			}
 		}
 		w("**每小时活跃度**\n\n%s%s",
 			mermaidHourBar("请求量 / 小时", "请求", vol),
-			mermaidHourLine("p95 耗时 / 小时（秒）", "p95 dur (s)", p95))
-		// narrow table only for non-trivial hours
-		w("| 小时 | 请求 | p95 dur | slow |\n|---|---|---|---|\n")
-		for _, h := range rep.HoursOfDay {
-			if h.Requests == 0 {
-				continue
-			}
-			w("| %02d | %d | %s | %d |\n", h.Hour, h.Requests, fmtDurMS(h.DurMSP95), h.SlowRequests)
+			mermaidHourBar("输入Token / 小时", "Token", tokIn))
+	}
+	// by date: mermaid only - request volume + input tokens
+	if len(rep.ByDate) > 0 {
+		labels := make([]string, len(rep.ByDate))
+		vol := make([]int64, len(rep.ByDate))
+		tokIn := make([]int64, len(rep.ByDate))
+		for i, d := range rep.ByDate {
+			labels[i] = shortDate(d.Date)
+			vol[i] = int64(d.Requests)
+			tokIn[i] = d.TokensIn
+		}
+		w("**按日期活跃度**\n\n%s%s",
+			mermaidBarLabeled("请求量 / 天", "请求", labels, vol),
+			mermaidBarLabeled("输入Token / 天", "Token", labels, tokIn))
+	}
+	// by client (8)
+	if len(rep.ByClient) > 0 {
+		w("**按客户端** ⭐\n\n| client_key | 请求 | 成功率 | fresh/cached/out(reasoning) | 缓存效率 | dur p50/p95 | In(p50/p95) | Out(p50/p95) |\n|---|---|---|---|---|---|---|---|\n")
+		for _, c := range rep.ByClient {
+			w("| %s | %d | %s | %s / %s / %s (%s) | %s | %s | %s | %s |\n",
+				c.ClientKey, c.Requests, pctStr2(c.OK, c.Requests),
+				fmtTokens(c.TokensInFresh), fmtTokens(c.TokensInCached), fmtTokens(c.TokensOut), fmtTokens(c.TokensReasoning),
+				cacheEffCell(c.CacheEfficiency, c.TokensKnown, c.Requests),
+				p5095Cell(c.DurMSP50, c.DurMSP95),
+				tokP5095Cell(c.InTokP50, c.InTokP95),
+				tokP5095Cell(c.OutTokP50, c.OutTokP95))
 		}
 		w("\n")
 	}
-	// by client (6)
-	if len(rep.ByClient) > 0 {
-		w("**按客户端** ⭐\n\n| client_key | 请求 | 成功率 | fresh | 缓存效率 | p95 dur |\n|---|---|---|---|---|---|\n")
-		for _, c := range rep.ByClient {
-			w("| %s | %d | %s | %s | %s | %s |\n",
-				c.ClientKey, c.Requests, pctStr2(c.OK, c.Requests),
-				fmtTokens(c.TokensInFresh),
-				cacheEffCell(c.CacheEfficiency, c.TokensKnown, c.Requests),
-				fmtDurMS(c.DurMSP95))
+	// by endpoint (8), format mirrors 按客户端 - cross-day merged like §3/§4
+	if len(rep.EndpointsAll) > 0 {
+		w("**按端点** ⭐（跨日合并）\n\n| 端点 | 请求 | 成功率 | fresh/cached/out(reasoning) | 缓存效率 | dur p50/p95 | In(p50/p95) | Out(p50/p95) |\n|---|---|---|---|---|---|---|---|\n")
+		byRequests := append([]EndpointRow(nil), rep.EndpointsAll...)
+		sort.SliceStable(byRequests, func(i, j int) bool { return byRequests[i].Requests > byRequests[j].Requests })
+		for _, e := range byRequests {
+			w("| %s | %d | %s | %s / %s / %s (%s) | %s | %s | %s | %s |\n",
+				e.Endpoint, e.Requests, pctStr2(e.RequestsOK, e.Requests),
+				fmtTokens(e.TokensInFresh), fmtTokens(e.TokensInCached), fmtTokens(e.TokensOut), fmtTokens(e.TokensReasoning),
+				cacheEffCell(e.CacheEfficiency, e.TokensKnown, e.Requests),
+				p5095Cell(e.DurMSP50, e.DurMSP95),
+				tokP5095Cell(e.InTokP50, e.InTokP95),
+				tokP5095Cell(e.OutTokP50, e.OutTokP95))
 		}
 		w("\n")
 	}
 }
 
 // ---- §6 会话与任务 ----
+// Only interactive-class sessions are listed here (scheduled single-shots -
+// heartbeat/dream_diary/… - live in vmr-requests.md's own 定时任务 rollups,
+// see requests.go); grouped by client (Chat User), matching vmr-requests.md's
+// grouping, so a "类" column would be redundant (every row is interactive).
 func renderSessions(w func(string, ...any), rep *Report2) {
 	w("## §6 会话与任务\n\n")
-	if len(rep.Sessions) == 0 {
-		w("（无会话）\n\n")
+	var interactive []SessionRow
+	for _, s := range rep.Sessions {
+		if s.Class == "interactive" {
+			interactive = append(interactive, s)
+		}
+	}
+	if len(interactive) == 0 {
+		w("（无 interactive 会话）\n\n")
+		renderCompactionChains(w, rep)
 		return
 	}
-	w("| 会话 | 标题 | 类 | 轮 | 任务 | fresh/cached/out | 结果 |\n|---|---|---|---|---|---|---|\n")
-	// Collapse single-turn scheduled sessions (heartbeat/dream_diary/compaction
-	// one-shots) into one row per class, like the legacy report - keeps the
-	// table readable. Multi-turn scheduled sessions (cron jobs with several
-	// turns) and interactive sessions stay individual.
-	type collapsed struct {
-		class              string
-		count, requests    int
-		fresh, cached, out int64
+
+	byClient := map[string][]SessionRow{}
+	var seenOrder []string
+	for _, s := range interactive {
+		key := s.ClientKey
+		if key == "" {
+			key = "(unresolved)"
+		}
+		if _, ok := byClient[key]; !ok {
+			seenOrder = append(seenOrder, key)
+		}
+		byClient[key] = append(byClient[key], s)
 	}
-	byClass := map[string]*collapsed{}
-	var order []string
-	for _, s := range rep.Sessions {
-		if s.Class != "interactive" && s.Requests == 1 {
-			c := byClass[s.Class]
-			if c == nil {
-				c = &collapsed{class: s.Class}
-				byClass[s.Class] = c
-				order = append(order, s.Class)
+	// rep.ByClient order (by request volume) first, then any extra key with
+	// no ByClient entry - "(unresolved)" never carries a client_key_tag.
+	clientOrder := make([]string, 0, len(rep.ByClient)+1)
+	for _, c := range rep.ByClient {
+		clientOrder = append(clientOrder, c.ClientKey)
+	}
+	for _, k := range seenOrder {
+		found := false
+		for _, o := range clientOrder {
+			if o == k {
+				found = true
+				break
 			}
-			c.count++
-			c.requests += s.Requests
-			c.fresh += s.TokensInFresh
-			c.cached += s.TokensInCached
-			c.out += s.TokensOut
+		}
+		if !found {
+			clientOrder = append(clientOrder, k)
+		}
+	}
+
+	for _, ck := range clientOrder {
+		rows := byClient[ck]
+		if len(rows) == 0 {
 			continue
 		}
-		renderSessionRow(w, s)
+		w("**%s**\n\n| 会话 | 标题 | 轮 | 任务 | fresh/cached/out | 结果 |\n|---|---|---|---|---|---|\n", ck)
+		for _, s := range rows {
+			renderSessionRow(w, s)
+		}
+		w("\n")
 	}
-	for _, cls := range order {
-		c := byClass[cls]
-		w("| （合并） | %s ×%d | %s | %d | %d | %s / %s / %s | ok |\n",
-			cls, c.count, cls, c.requests, c.count,
-			fmtTokens(c.fresh), fmtTokens(c.cached), fmtTokens(c.out))
-	}
-	w("\n")
 	// compaction chains: mermaid for chains ≥3 nodes
 	renderCompactionChains(w, rep)
 }
@@ -452,14 +545,21 @@ func renderSessionRow(w func(string, ...any), s SessionRow) {
 	if s.Fallbacks > 0 {
 		outcome += fmt.Sprintf(" · %d fallback", s.Fallbacks)
 	}
-	title := s.Title
-	if len(title) > 28 {
-		title = title[:28] + "…"
-	}
-	w("| %s | %s | %s | %d | %d | %s / %s / %s | %s |\n",
-		s.ID, title, s.Class, s.Requests, s.Tasks,
+	w("| %s | %s | %d | %d | %s / %s / %s | %s |\n",
+		s.ID, truncateTitle(s.Title, 28), s.Requests, s.Tasks,
 		fmtTokens(s.TokensInFresh), fmtTokens(s.TokensInCached), fmtTokens(s.TokensOut),
 		outcome)
+}
+
+// truncateTitle shortens s to at most maxRunes runes, appending an ellipsis
+// when cut. Rune-based, unlike a byte slice - a truncated CJK title never
+// splits a multi-byte UTF-8 sequence into mojibake (e.g. a trailing "�").
+func truncateTitle(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
 }
 
 // renderCompactionChains builds head->current chains from SessionRow.ContinuedFrom
@@ -583,14 +683,21 @@ func renderToolShapeDetail(w func(string, ...any), t ToolShapeRow) {
 func renderRequestIndexLink(w func(string, ...any), rep *Report2) {
 	w("## §8 请求详单\n\n")
 	w("每条记录（Chat User -> Session -> Task -> Turn）见 [vmr-requests.md](./vmr-requests.md)。\n")
-	if len(rep.ByClient) > 0 {
-		w("per-client: ")
-		for i, c := range rep.ByClient {
-			if i > 0 {
-				w(" · ")
-			}
-			w("[-%s](./vmr-requests-%s.md)", c.ClientKey, sanitize(c.ClientKey))
+	withSibling := clientsWithSiblingFile(rep)
+	first := true
+	for _, c := range rep.ByClient {
+		if !withSibling[c.ClientKey] {
+			continue
 		}
+		if first {
+			w("per-client: ")
+			first = false
+		} else {
+			w(" · ")
+		}
+		w("[-%s](./vmr-requests-%s.md)", c.ClientKey, sanitize(c.ClientKey))
+	}
+	if !first {
 		w("\n")
 	}
 	w("单请求全量捕获（req/resp/SSE）见 `details/*.md`。\n\n")
@@ -614,6 +721,16 @@ func renderAppendix(w func(string, ...any), rep *Report2) {
 func cut(s string, n int) string {
 	if len(s) > n {
 		return s[:n]
+	}
+	return s
+}
+
+// shortDate renders a Row.Date ("2026-07-14") as "MM-dd" ("07-14") for the
+// §5 按日期活跃度 x-axis, where the year is implied by the report's own date
+// range and would otherwise crowd 11+ daily labels.
+func shortDate(s string) string {
+	if len(s) == 10 {
+		return s[5:]
 	}
 	return s
 }
@@ -662,17 +779,6 @@ func ppCell(p50, p95, max int64, n int) string {
 		return fmt.Sprintf("%s / %s / %s (n=%d%s)", fmtDurMS(p50), fmtDurMS(p95), fmtDurMS(max), n, flag)
 	}
 	return fmt.Sprintf("%s / %s (n=%d%s)", fmtDurMS(p50), fmtDurMS(p95), n, flag)
-}
-
-func streamCell(p95 int64, n int) string {
-	if n == 0 {
-		return "- (n=0)"
-	}
-	flag := ""
-	if n < 20 {
-		flag = " ⚠️low-n"
-	}
-	return fmt.Sprintf("%s (n=%d%s)", fmtDurMS(p95), n, flag)
 }
 
 func durCell(p95 int64, n int) string {
@@ -734,6 +840,67 @@ func sortedRoles(m map[string]int64) []string {
 	return out
 }
 
+// endpointProtocol extracts the leading "protocol:" segment from an
+// EndpointRow.Endpoint label ("protocol:provider:model").
+func endpointProtocol(endpoint string) string {
+	if i := strings.IndexByte(endpoint, ':'); i >= 0 {
+		return endpoint[:i]
+	}
+	return endpoint
+}
+
+// protocolBuckets splits endpoint rows by protocol, preserving each row's
+// relative order within its bucket. "openai" sorts first, "anthropic"
+// second, any other protocol follows alphabetically — the fixed group order
+// every §3/§4 by-protocol table renders in.
+func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
+	byProto := map[string][]EndpointRow{}
+	var order []string
+	for _, e := range eps {
+		p := endpointProtocol(e.Endpoint)
+		if _, ok := byProto[p]; !ok {
+			order = append(order, p)
+		}
+		byProto[p] = append(byProto[p], e)
+	}
+	rank := func(p string) int {
+		switch p {
+		case "openai":
+			return 0
+		case "anthropic":
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		ri, rj := rank(order[i]), rank(order[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return order[i] < order[j]
+	})
+	return order, byProto
+}
+
+// pctHundred formats a value already on a 0-100 percentage scale (e.g.
+// EndpointRow.ErrorRate) as "x.x%" — unlike pctStr/pctFloat, which expect a
+// 0-1 fraction and would multiply by 100 again.
+func pctHundred(v float64) string {
+	return strconv.FormatFloat(v, 'f', 1, 64) + "%"
+}
+
+// p5095Cell renders a "p50/p95" duration pair for the §5 workload tables.
+func p5095Cell(p50, p95 int64) string {
+	return fmtDurMS(p50) + "/" + fmtDurMS(p95)
+}
+
+// tokP5095Cell renders a "p50/p95" token-count pair (§5 按客户端 In/Out
+// columns) - same shape as p5095Cell but token-scaled, not duration-scaled.
+func tokP5095Cell(p50, p95 int64) string {
+	return fmtTokens(p50) + "/" + fmtTokens(p95)
+}
+
 func sortedKeysInt(m map[string]int) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -767,40 +934,39 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-// ---- hourly mermaid charts ----
+// ---- mermaid charts ----
 
-// hourAxisLabels renders the fixed 24-hour x-axis category list ("00".."23"),
-// shared by both hourly chart shapes below.
-func hourAxisLabels() string {
+// hourLabels returns the fixed 24-hour x-axis category list ("00".."23"),
+// shared by every hourly chart.
+func hourLabels() []string {
 	labels := make([]string, 24)
 	for i := 0; i < 24; i++ {
-		labels[i] = fmt.Sprintf("%q", fmt.Sprintf("%02d", i))
+		labels[i] = fmt.Sprintf("%02d", i)
 	}
-	return strings.Join(labels, ", ")
+	return labels
 }
 
-// mermaidHourBar renders 24 hourly integer buckets (requests, error counts)
-// as a mermaid xychart-beta bar chart.
+// mermaidHourBar renders 24 hourly integer buckets (requests, error counts,
+// input tokens) as a mermaid xychart-beta bar chart against the fixed
+// 24-hour axis.
 func mermaidHourBar(title, yLabel string, vals []int64) string {
+	return mermaidBarLabeled(title, yLabel, hourLabels(), vals)
+}
+
+// mermaidBarLabeled renders an arbitrary-length integer series (hourly,
+// daily, …) as a mermaid xychart-beta bar chart with the given x-axis
+// category labels.
+func mermaidBarLabeled(title, yLabel string, labels []string, vals []int64) string {
+	qlabels := make([]string, len(labels))
+	for i, l := range labels {
+		qlabels[i] = fmt.Sprintf("%q", l)
+	}
 	parts := make([]string, len(vals))
 	for i, v := range vals {
 		parts[i] = strconv.FormatInt(v, 10)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "```mermaid\nxychart-beta\n    title %q\n    x-axis [%s]\n    y-axis %q\n    bar [%s]\n```\n\n",
-		title, hourAxisLabels(), yLabel, strings.Join(parts, ", "))
-	return b.String()
-}
-
-// mermaidHourLine renders 24 hourly ms-duration buckets (e.g. p95 dur) as a
-// mermaid xychart-beta line chart, scaled to seconds with one decimal.
-func mermaidHourLine(title, yLabel string, valsMS []int64) string {
-	parts := make([]string, len(valsMS))
-	for i, v := range valsMS {
-		parts[i] = strconv.FormatFloat(float64(v)/1000, 'f', 1, 64)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "```mermaid\nxychart-beta\n    title %q\n    x-axis [%s]\n    y-axis %q\n    line [%s]\n```\n\n",
-		title, hourAxisLabels(), yLabel, strings.Join(parts, ", "))
+		title, strings.Join(qlabels, ", "), yLabel, strings.Join(parts, ", "))
 	return b.String()
 }

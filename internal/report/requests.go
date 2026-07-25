@@ -1,16 +1,20 @@
 // Ver 2026-07-25, by Sonnet 5
 
 // The redesigned per-request drill-down (V2 §7): vmr-requests.jsonl (the data)
-// + vmr-requests.md (the view, grouped Chat User -> Session -> Task -> Turn).
-// Sessions are partitioned two ways: an interactive (or multi-turn scheduled)
-// session becomes an individual card under its Chat User (client_key)
-// section; a single-shot scheduled session (heartbeat/dream_diary, exactly
-// one request) collapses into a global "定时任务" rollup, one flat table per
-// class, so twenty near-identical poll turns don't drown the real
-// conversations. The footer "全部请求（时间序）" always carries every row.
+// + vmr-requests.md (a pure index) + one fully-detailed sibling per group
+// (vmr-requests-<tag>.md per real Chat User, vmr-requests-unresolved.md for
+// sessions with no client_key_tag, vmr-requests-cron-<tag>.md per scheduled
+// class). The index used to duplicate every group's full detail inline
+// *and* export it again to its own sibling file; splitting index from
+// detail means each request's full drill-down (session/task/turn cards, or
+// the scheduled flat table) is written exactly once, in exactly one file.
+// A single-shot scheduled session (heartbeat/dream_diary, exactly one
+// request) never gets its own Chat User card — regardless of which client
+// tag issued it — it folds into its class's dedicated cron-<tag> file
+// instead, so twenty near-identical poll turns don't drown a real
+// conversation and don't appear twice under two different groupings.
 // All displayed timestamps are rendered in UTC+8 regardless of the source
-// record's own offset. Per-tag siblings reuse the exact same renderer on a
-// pre-filtered row set, so each is self-contained without the main report.
+// record's own offset.
 
 package report
 
@@ -53,10 +57,33 @@ func WriteRequestsJSONL(rows []RequestRow, path string) (int, error) {
 	return len(rows), nil
 }
 
-// WriteRequestsIndex writes vmr-requests.md (the redesigned Chat User ->
-// Session -> Task -> Turn view) plus one vmr-requests-<tag>.md sibling per
-// distinct non-empty ClientKey, each pre-filtered to that client's rows and
-// carrying a one-line summary header. Titles come from sess.
+// cronFileTag maps a scheduled workload class to the suffix in its
+// vmr-requests-cron-<tag>.md filename. "heartbeat" keeps the exact spelling
+// the operator specified for this file ("hartbeat"); any other class
+// (dream_diary today, anything added later) uses its own name unchanged —
+// the general "vmr-requests-cron-<class>.md" pattern.
+func cronFileTag(class string) string {
+	if class == "heartbeat" {
+		return "hartbeat"
+	}
+	return sanitize(class)
+}
+
+// indexEntry is one line item in vmr-requests.md's index: a group header
+// (Chat User or scheduled class), the sibling file it links to, and the
+// summary stats shown in the blockquote above that link.
+type indexEntry struct {
+	header  string
+	file    string
+	summary tagSummaryData
+}
+
+// WriteRequestsIndex writes vmr-requests.md (a pure per-group index: header
+// + one-line summary + link to that group's sibling file, plus the full
+// "全部请求（时间序）" table) and one fully-detailed sibling per group:
+// vmr-requests-<tag>.md per real client_key_tag, vmr-requests-unresolved.md
+// for sessions carrying no tag, vmr-requests-cron-<tag>.md per scheduled
+// class. Titles come from sess.
 func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 	rows := rep.RequestRows()
 	sessionTitle, taskTitle := titleMaps(sess)
@@ -69,35 +96,88 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 		clientOrder = append(clientOrder, c.ClientKey)
 	}
 
-	main := renderIndex("VMR 请求详单", rows, sessionTitle, taskTitle, sessionMeta, clientOrder, nil)
-	if err := os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(main), 0o600); err != nil {
-		return err
-	}
-	// per-tag siblings
-	tags := distinctTags(rows)
-	for _, tag := range tags {
-		filtered := filterByTag(rows, tag)
-		summary := tagSummary(filtered, tag)
-		title := fmt.Sprintf("VMR 请求详单（client: %s）", tag)
-		content := renderIndex(title, filtered, sessionTitle, taskTitle, sessionMeta, []string{tag}, &summary)
-		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("vmr-requests-%s.md", sanitize(tag))), []byte(content), 0o600); err != nil {
-			return err
+	chatUser, scheduled, scheduledOrder := partitionGroups(rows, sessionMeta)
+	chatUserOrder := append([]string(nil), clientOrder...)
+	for k := range chatUser {
+		found := false
+		for _, o := range chatUserOrder {
+			if o == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			chatUserOrder = append(chatUserOrder, k)
 		}
 	}
-	return nil
+
+	var entries []indexEntry
+
+	// Chat User siblings: real tags (clientOrder) first, then "(unresolved)".
+	for _, ck := range chatUserOrder {
+		groups := chatUser[ck]
+		if len(groups) == 0 {
+			continue
+		}
+		var tasks, turns int
+		var grows []RequestRow
+		for _, g := range groups {
+			tasks += g.tasks
+			turns += g.requests
+			grows = append(grows, g.rows...)
+		}
+		header := fmt.Sprintf("Chat User: %s · %d 会话 %d 任务 %d 轮", ck, len(groups), tasks, turns)
+		file := "vmr-requests-" + sanitize(ck) + ".md"
+		content := renderChatUserDoc(header, groups, sessionTitle, taskTitle)
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
+			return err
+		}
+		entries = append(entries, indexEntry{header, file, tagSummary(grows)})
+	}
+
+	// Scheduled-class siblings.
+	for _, cls := range scheduledOrder {
+		occ := append([]RequestRow(nil), scheduled[cls]...)
+		sort.SliceStable(occ, func(i, j int) bool { return occ[i].TS < occ[j].TS })
+		header := fmt.Sprintf("定时任务 · %s 单发会话 × %d", cls, len(occ))
+		file := "vmr-requests-cron-" + cronFileTag(cls) + ".md"
+		content := renderScheduledDoc(header, occ)
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
+			return err
+		}
+		entries = append(entries, indexEntry{header, file, tagSummary(occ)})
+	}
+
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	w("# VMR 请求详单\n\n")
+	for _, e := range entries {
+		w("## %s\n\n", e.header)
+		w("> 请求 %d · 成功率 %s · fresh %s / cached %s / out %s · 缓存效率 %s\n",
+			e.summary.requests, pctStr2(e.summary.ok, e.summary.requests),
+			fmtTokens(e.summary.fresh), fmtTokens(e.summary.cached), fmtTokens(e.summary.out),
+			pctStr(e.summary.cacheEff))
+		w("> 详情见 [%s](%s)\n\n", e.file, e.file)
+	}
+	w("---\n\n")
+	writeAllRequestsFooter(w, rows)
+	return os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(b.String()), 0o600)
 }
 
+// tagSummaryData is the one-line blockquote's basis: request count, success
+// rate, fresh/cached/out tokens, and cache efficiency over one group's rows.
 type tagSummaryData struct {
-	tag         string
 	requests    int
 	ok          int
 	fresh       int64
+	cached      int64
+	out         int64
 	cacheEff    float64
 	tokensKnown int
 }
 
-func tagSummary(rows []RequestRow, tag string) tagSummaryData {
-	s := tagSummaryData{tag: tag}
+func tagSummary(rows []RequestRow) tagSummaryData {
+	var s tagSummaryData
 	for _, r := range rows {
 		s.requests++
 		if r.Outcome == "ok" {
@@ -105,40 +185,15 @@ func tagSummary(rows []RequestRow, tag string) tagSummaryData {
 		}
 		if r.TokensIn > 0 {
 			s.fresh += r.TokensInFresh
+			s.cached += r.TokensInCached
+			s.out += r.TokensOut
 			s.tokensKnown++
 		}
 	}
 	if s.tokensKnown > 0 {
-		var cached int64
-		for _, r := range rows {
-			cached += r.TokensInCached
-		}
-		s.cacheEff = cacheEff(cached, s.fresh)
+		s.cacheEff = cacheEff(s.cached, s.fresh)
 	}
 	return s
-}
-
-func distinctTags(rows []RequestRow) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, r := range rows {
-		if r.ClientKey != "" && !seen[r.ClientKey] {
-			seen[r.ClientKey] = true
-			out = append(out, r.ClientKey)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func filterByTag(rows []RequestRow, tag string) []RequestRow {
-	var out []RequestRow
-	for _, r := range rows {
-		if r.ClientKey == tag {
-			out = append(out, r)
-		}
-	}
-	return out
 }
 
 func titleMaps(sess *SessionAnalysis) (sessionTitle, taskTitle map[string]string) {
@@ -215,33 +270,20 @@ func groupSessions(rows []RequestRow, sessionMeta map[string]SessionRow) ([]stri
 	return order, bySession
 }
 
-// renderIndex builds the grouped Markdown for one row set (the main file
-// gets all rows; a per-tag sibling gets a pre-filtered subset). If summary
-// is non-nil, a one-line summary blockquote replaces the generic legend.
-func renderIndex(title string, rows []RequestRow, sessionTitle, taskTitle map[string]string,
-	sessionMeta map[string]SessionRow, clientOrder []string, summary *tagSummaryData) string {
-	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-
-	w("# %s\n\n", title)
-	if summary != nil {
-		w("> 请求 %d · 成功率 %s · fresh %s · 缓存效率 %s\n\n",
-			summary.requests, pctStr2(summary.ok, summary.requests),
-			fmtTokens(summary.fresh), pctStr(summary.cacheEff))
-	} else {
-		w("层级: Chat User -> Session -> Task -> Turn（时间均为 UTC+8）。每轮表列: 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件\n\n")
-	}
-	w("---\n\n")
-
+// partitionGroups splits rows into scheduled-class rollups and Chat User
+// groups, exactly as WriteRequestsIndex does: a single-shot (requests==1)
+// non-interactive session belongs to its class's scheduled rollup
+// regardless of client; everything else — interactive sessions, any
+// multi-turn scheduled session, and any ungrouped row — is an individual
+// card grouped by Chat User (client_key, "(unresolved)" when empty). Shared
+// with Markdown() so its header/footer per-client link lists only ever
+// point at a client tag that actually got a vmr-requests-<tag>.md sibling
+// written — a client whose only traffic was single-shot scheduled requests
+// gets no sibling file at all.
+func partitionGroups(rows []RequestRow, sessionMeta map[string]SessionRow) (chatUser map[string][]*sessGroup, scheduled map[string][]RequestRow, scheduledOrder []string) {
 	order, bySession := groupSessions(rows, sessionMeta)
-
-	// Partition: a single-shot (requests==1) non-interactive session folds
-	// into its class's global rollup; everything else — interactive
-	// sessions, and any multi-turn scheduled session — is an individual
-	// card grouped by Chat User (client_key).
-	scheduled := map[string][]RequestRow{}
-	var scheduledOrder []string
-	chatUser := map[string][]*sessGroup{}
+	scheduled = map[string][]RequestRow{}
+	chatUser = map[string][]*sessGroup{}
 	for _, sid := range order {
 		g := bySession[sid]
 		if g.id != "" && g.class != "interactive" && g.requests == 1 {
@@ -257,66 +299,73 @@ func renderIndex(title string, rows []RequestRow, sessionTitle, taskTitle map[st
 		}
 		chatUser[key] = append(chatUser[key], g)
 	}
+	return
+}
 
-	// Chat User sections: clientOrder first, then any client_key present in
-	// the data but missing from it (defensive — shouldn't happen since
-	// clientOrder is derived from the same Build pass).
-	order2 := append([]string(nil), clientOrder...)
+// clientsWithSiblingFile returns the set of real client_key_tags that get
+// their own vmr-requests-<tag>.md — i.e. every tag in partitionGroups'
+// chatUser result except the synthetic "(unresolved)" bucket.
+func clientsWithSiblingFile(rep *Report2) map[string]bool {
+	sessionMeta := map[string]SessionRow{}
+	for _, s := range rep.Sessions {
+		sessionMeta[s.ID] = s
+	}
+	chatUser, _, _ := partitionGroups(rep.RequestRows(), sessionMeta)
+	out := map[string]bool{}
 	for k := range chatUser {
-		found := false
-		for _, o := range order2 {
-			if o == k {
-				found = true
-				break
-			}
-		}
-		if !found {
-			order2 = append(order2, k)
+		if k != "(unresolved)" {
+			out[k] = true
 		}
 	}
-	for _, ck := range order2 {
-		groups := chatUser[ck]
-		if len(groups) == 0 {
-			continue
-		}
-		var tasks, turns int
-		for _, g := range groups {
-			tasks += g.tasks
-			turns += g.requests
-		}
-		w("# Chat User: %s · %d 会话 %d 任务 %d 轮\n\n", ck, len(groups), tasks, turns)
-		for _, g := range groups {
-			renderSessionCard(w, g, sessionTitle, taskTitle)
-		}
-		w("---\n\n")
-	}
+	return out
+}
 
-	// Scheduled rollups: one flat table per class, chronological.
-	for _, cls := range scheduledOrder {
-		occ := scheduled[cls]
-		sort.SliceStable(occ, func(i, j int) bool { return occ[i].TS < occ[j].TS })
-		w("# 定时任务 · %s 单发会话 × %d\n\n", cls, len(occ))
-		ok := 0
-		var fresh, cached, out int64
-		for _, r := range occ {
-			if r.Outcome == "ok" {
-				ok++
-			}
-			fresh += r.TokensInFresh
-			cached += r.TokensInCached
-			out += r.TokensOut
-		}
-		w("> 成功率 %s · fresh %s / cached %s / out %s\n\n",
-			pctStr2(ok, len(occ)), fmtTokens(fresh), fmtTokens(cached), fmtTokens(out))
-		w("| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n")
-		for _, r := range occ {
-			w("| %s | %s | %s | %s | %s | %s |\n",
-				fmtUTC8Full(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
-		}
-		w("\n---\n\n")
+// renderChatUserDoc renders one Chat User's full detail doc: an H1 header,
+// a legend, then one session card per session (renderSessionCard).
+func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, taskTitle map[string]string) string {
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	w("# %s\n\n", header)
+	w("层级: Session -> Task -> Turn（时间均为 UTC+8）。每轮表列: 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件\n\n")
+	w("---\n\n")
+	for _, g := range groups {
+		renderSessionCard(w, g, sessionTitle, taskTitle)
 	}
+	return b.String()
+}
 
-	// footer: all requests in time order
+// renderScheduledDoc renders one scheduled class's full detail doc: an H1
+// header, a summary blockquote, then a flat chronological table — the same
+// shape the old collapsed rollup section used, just as its own file.
+func renderScheduledDoc(header string, occ []RequestRow) string {
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	w("# %s\n\n", header)
+	ok := 0
+	var fresh, cached, out int64
+	for _, r := range occ {
+		if r.Outcome == "ok" {
+			ok++
+		}
+		fresh += r.TokensInFresh
+		cached += r.TokensInCached
+		out += r.TokensOut
+	}
+	w("> 成功率 %s · fresh %s / cached %s / out %s\n\n",
+		pctStr2(ok, len(occ)), fmtTokens(fresh), fmtTokens(cached), fmtTokens(out))
+	w("| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n")
+	for _, r := range occ {
+		w("| %s | %s | %s | %s | %s | %s |\n",
+			fmtUTC8Full(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
+	}
+	w("\n")
+	return b.String()
+}
+
+// writeAllRequestsFooter appends the flat "全部请求（时间序）" table covering
+// every row regardless of grouping — kept only in the main index, since it's
+// the one place a cross-group chronological view belongs.
+func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow) {
 	w("# 全部请求（时间序）\n\n")
 	all := append([]RequestRow(nil), rows...)
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS < all[j].TS })
@@ -327,7 +376,6 @@ func renderIndex(title string, rows []RequestRow, sessionTitle, taskTitle map[st
 			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 	}
 	w("\n")
-	return b.String()
 }
 
 // renderSessionCard renders one "## sNN · ts · N任务N轮" session card: a
@@ -451,11 +499,15 @@ func cacheEffTurn(r RequestRow) string {
 	return pctStr(r.CacheEff)
 }
 
+// detailLink renders the "文件" column: one link to the human-readable
+// Markdown detail and one to the same-named JSON (detail.go always writes
+// both — the JSON is the raw record, for jq/ad-hoc querying).
 func detailLink(f string) string {
 	if f == "" {
 		return "-"
 	}
-	return fmt.Sprintf("[%s](details/%s)", strings.TrimSuffix(f, ".md"), f)
+	base := strings.TrimSuffix(f, ".md")
+	return fmt.Sprintf("[Ⓜ️ Markdown](details/%s), [JSON](details/%s.json)", f, base)
 }
 
 func sessTaskCell(r RequestRow) string {

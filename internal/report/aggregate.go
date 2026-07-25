@@ -34,6 +34,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"vmr/internal/audit"
@@ -140,6 +141,7 @@ type Row struct {
 	Messages         int64            `json:"messages,omitempty"`
 	MessagesKnown    int              `json:"messages_known,omitempty"`
 	RoleChars        map[string]int64 `json:"role_chars,omitempty"`
+	RoleTokens       map[string]int64 `json:"role_tokens,omitempty"`
 	Images           int              `json:"images,omitempty"`
 	ImagesCompressed int              `json:"images_compressed,omitempty"`
 
@@ -202,11 +204,15 @@ type EndpointRow struct {
 	ErrorClasses map[string]int `json:"error_classes,omitempty"`
 
 	// B/C - only for the requests this endpoint actually served
+	Requests           int     `json:"requests,omitempty"`     // requests this endpoint actually served (request-level, ≠ Attempts)
+	RequestsOK         int     `json:"requests_ok,omitempty"`  // subset with overall outcome "ok"
+	SuccessRate        float64 `json:"success_rate,omitempty"` // RequestsOK/Requests - request-level, distinct from Availability (attempt-level)
 	TokensIn           int64   `json:"tokens_in,omitempty"`
 	TokensInCached     int64   `json:"tokens_in_cached,omitempty"`
 	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
 	TokensInFresh      int64   `json:"tokens_in_fresh,omitempty"`
 	TokensOut          int64   `json:"tokens_out,omitempty"`
+	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
 	TokensKnown        int     `json:"tokens_known,omitempty"`
 	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
 	TTFTKnown          int     `json:"ttft_known,omitempty"`
@@ -222,10 +228,16 @@ type EndpointRow struct {
 	TokOutPerSec       float64 `json:"tok_out_per_sec,omitempty"`
 	DurMSSum           int64   `json:"dur_ms_sum,omitempty"`
 
+	// per-request input/output token percentiles (⭐ derived, from Usage.In/Out)
+	InTokP50  int64 `json:"in_tok_p50,omitempty"`
+	InTokP95  int64 `json:"in_tok_p95,omitempty"`
+	OutTokP50 int64 `json:"out_tok_p50,omitempty"`
+	OutTokP95 int64 `json:"out_tok_p95,omitempty"`
+
 	// H - cost (only when pricing configured)
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
 
-	durs, ttfts, streamMS []int64
+	durs, ttfts, streamMS, inToks, outToks []int64
 }
 
 // ClientRow is the by-client_key_tag bucket (new in the summary): A+B+C.
@@ -241,6 +253,7 @@ type ClientRow struct {
 	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
 	TokensInFresh      int64   `json:"tokens_in_fresh"`
 	TokensOut          int64   `json:"tokens_out"`
+	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
 	TokensKnown        int     `json:"tokens_known,omitempty"`
 	CacheEfficiency    float64 `json:"cache_efficiency"`
 
@@ -249,10 +262,16 @@ type ClientRow struct {
 	DurMSP95        int64 `json:"dur_ms_p95,omitempty"`
 	SlowRequests    int   `json:"slow_requests,omitempty"`
 
+	// per-request input/output token percentiles (⭐ derived, from Usage.In/Out)
+	InTokP50  int64 `json:"in_tok_p50,omitempty"`
+	InTokP95  int64 `json:"in_tok_p95,omitempty"`
+	OutTokP50 int64 `json:"out_tok_p50,omitempty"`
+	OutTokP95 int64 `json:"out_tok_p95,omitempty"`
+
 	// H - cost (only when pricing configured)
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
 
-	durs, ttfts, streamMS []int64
+	durs, ttfts, streamMS, inToks, outToks []int64
 }
 
 // WorkloadRow splits traffic by workload class: A+B+C+E(tool_call_rate).
@@ -286,6 +305,7 @@ type SessionRow struct {
 	ID            string `json:"id"`
 	Title         string `json:"title,omitempty"`
 	Class         string `json:"class,omitempty"`
+	ClientKey     string `json:"client_key,omitempty"`
 	ContinuedFrom string `json:"continued_from,omitempty"`
 	Requests      int    `json:"requests"`
 	Tasks         int    `json:"tasks"`
@@ -381,23 +401,6 @@ type RequestRow struct {
 // RequestRows returns the per-request export rows (populated by Build).
 func (r *Report2) RequestRows() []RequestRow { return r.requests }
 
-// Pricing is the optional sidecar config (V2 §4). Nil/absent => no $ anywhere.
-type Pricing struct {
-	Currency   string                 `json:"currency,omitempty"`
-	UpdatedAt  string                 `json:"updated_at,omitempty"`
-	Rates      []PricingRate          `json:"rates"`
-	byEndpoint map[string]PricingRate `json:"-"`
-}
-
-// PricingRate is one endpoint's unit prices (per 1M tokens).
-type PricingRate struct {
-	Endpoint        string  `json:"endpoint" yaml:"endpoint"`
-	InFreshPer1M    float64 `json:"in_fresh_per_1m" yaml:"in_fresh_per_1m"`
-	CacheReadPer1M  float64 `json:"cache_read_per_1m" yaml:"cache_read_per_1m"`
-	CacheWritePer1M float64 `json:"cache_write_per_1m" yaml:"cache_write_per_1m"`
-	OutPer1M        float64 `json:"out_per_1m" yaml:"out_per_1m"`
-}
-
 // rec2 is Build's per-record working struct: raw fields from audit.Record
 // joined to ReqInfo's grouping/features. Built once per record, shared
 // read-only by every bucket.
@@ -425,6 +428,7 @@ type rec2 struct {
 	toolDeclCount            int
 	toolCalls                []string
 	roleChars                map[string]int64
+	roleTokens               map[string]int64
 	// from ReqInfo
 	sessionID, taskID       string
 	taskSeq, sessSeq        int
@@ -442,6 +446,22 @@ type rec2 struct {
 // AnalyzeSessions for grouping (one read), then does its own pass
 // (second read) joining each record to its ReqInfo via sess.Lookup.
 //
+// onRecord (optional, nil = skip) is called once per successfully-parsed
+// record, right where this pass already has both the raw *audit.Record and
+// its *ReqInfo in hand — the same pair a third, independent read used to
+// re-derive for detail export (WriteDetails, before it grew this hook).
+// Detail rendering depends only on a record's own (audit.Record, *ReqInfo)
+// pair, never on anything accumulated across records, so there's no reason
+// it needs its own pass at all: cmd/vmr now hands this pass a
+// DetailWriter.Submit bound to a live worker pool instead, cutting `vmr
+// report`'s total reads of the (possibly gigabyte-scale, zstd-compressed)
+// audit source from three down to two. Build's own success/failure is
+// entirely independent of onRecord's outcome — it doesn't inspect or
+// propagate whatever onRecord does with what it's handed (by design: a
+// broken detail-output directory must not cost the caller an otherwise-good
+// vmr-report.json/md, exactly as before when detail export was a separate,
+// independently-failing step run after Build returned).
+//
 // Unlike the old (now removed) `vmr report` aggregator — which ran its
 // deterministic aggregation first and only attempted session analysis
 // afterward, so a session-analysis failure degraded to a warning instead of
@@ -457,7 +477,7 @@ type rec2 struct {
 // long-running `vmr start` compressing/deleting a log file out from under
 // a concurrently running `vmr report` — not a code bug, so the message
 // below names that possibility explicitly.
-func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) (*Report2, *SessionAnalysis, error) {
+func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
 	sess, err := AnalyzeSessions(paths)
 	if err != nil {
 		return nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
@@ -558,6 +578,14 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 				r.RoleChars[role] += c
 			}
 		}
+		if len(rc.roleTokens) > 0 {
+			if r.RoleTokens == nil {
+				r.RoleTokens = map[string]int64{}
+			}
+			for role, t := range rc.roleTokens {
+				r.RoleTokens[role] += t
+			}
+		}
 	}
 
 	addHour := func(h *HourRow, rc *rec2) {
@@ -624,12 +652,19 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 	}
 	// Request-level metrics attach to the endpoint that served the client.
 	addEndpointReq := func(e *EndpointRow, rc *rec2) {
+		e.Requests++
+		if rc.outcome == "ok" {
+			e.RequestsOK++
+		}
 		if rc.usageOK {
 			e.TokensIn += rc.usage.In
 			e.TokensInCached += rc.usage.CacheRead
 			e.TokensInCacheWrite += rc.usage.CacheWrite
 			e.TokensOut += rc.usage.Out
+			e.TokensReasoning += rc.usage.Reasoning
 			e.TokensKnown++
+			e.inToks = append(e.inToks, rc.usage.In)
+			e.outToks = append(e.outToks, rc.usage.Out)
 		}
 		if rc.ttftMS > 0 {
 			e.TTFTKnown++
@@ -666,7 +701,10 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 			c.TokensInCached += rc.usage.CacheRead
 			c.TokensInCacheWrite += rc.usage.CacheWrite
 			c.TokensOut += rc.usage.Out
+			c.TokensReasoning += rc.usage.Reasoning
 			c.TokensKnown++
+			c.inToks = append(c.inToks, rc.usage.In)
+			c.outToks = append(c.outToks, rc.usage.Out)
 		}
 		if rc.durMS > 0 {
 			c.RequestsWithDur++
@@ -777,6 +815,9 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 				to = arec.TS
 			}
 			ri := sess.Lookup(path, line)
+			if onRecord != nil {
+				onRecord(&arec, ri)
+			}
 			rc := buildRec2(&arec, ri, path, line)
 
 			date := rc.date
@@ -863,7 +904,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 				if s == nil {
 					info := sessionInfo[rc.sessionID]
 					s = &SessionRow{ID: info.ID, Title: info.Title, Tasks: len(info.Tasks),
-						ContinuedFrom: info.ContinuedFrom, Class: wc}
+						ContinuedFrom: info.ContinuedFrom, Class: wc, ClientKey: rc.clientKey}
 					if len(info.Recs) > 0 {
 						s.From = info.Recs[0].TS.Format(time.RFC3339)
 						s.To = info.Recs[len(info.Recs)-1].TS.Format(time.RFC3339)
@@ -876,7 +917,8 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing) 
 			// by-endpoint (epsAll, cross-date — matches §3 端点健康's basis)
 			// and by-client, when either bucket applies to this record.
 			if pricing != nil && rc.endpoint != "" {
-				pr, ok := pricing.byEndpoint[rc.endpoint]
+				provider, model := splitEndpointProviderModel(rc.endpoint)
+				pr, ok := pricing.RateFor(provider, model, rc.ts)
 				if ok {
 					c := costFor(pr, rc)
 					if rep.Overall.CostEstimate == nil {
@@ -1122,6 +1164,7 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 		r.imagesCompressed = ri.ImagesCompressed
 		r.toolCalls = ri.ToolCalls
 		r.roleChars = ri.RoleChars
+		r.roleTokens = ri.RoleTokens
 		r.msgs = ri.Msgs
 		r.sessionID = ri.SessionID
 		r.taskID = ri.TaskID
@@ -1185,6 +1228,21 @@ func costFor(pr PricingRate, rc *rec2) float64 {
 	return pr.InFreshPer1M/1e6*float64(fresh) +
 		pr.CacheWritePer1M/1e6*float64(rc.usage.CacheWrite) +
 		pr.OutPer1M/1e6*float64(rc.usage.Out)
+}
+
+// splitEndpointProviderModel splits a "protocol:provider:model" endpoint
+// label into its provider and model segments — pricing.yaml keys rates by
+// provider+model only, protocol-agnostic (see pricing.go). SplitN(…, 3)
+// rather than a plain Split: a real-world model name can itself contain ":"
+// or "/" (e.g. OpenRouter's "z-ai/glm-5.2"), so this only ever isolates the
+// first two colon-separated segments and leaves the third — the model —
+// exactly as-is, whatever it contains.
+func splitEndpointProviderModel(endpoint string) (provider, model string) {
+	parts := strings.SplitN(endpoint, ":", 3)
+	if len(parts) < 3 {
+		return "", ""
+	}
+	return parts[1], parts[2]
 }
 
 // buildTools derives the tool-waste fields from the analysis's ToolShapes.

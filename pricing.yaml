@@ -1,0 +1,130 @@
+# Ver 2026-07-26, by Sonnet 5 — sample pricing sidecar for `vmr report`'s §2 成本估算
+#
+# One row per active provider+model in config.yaml. Rates are keyed by
+# provider+model only, NOT protocol: the same upstream account/model costs
+# the same whether reached over vmr's openai or anthropic ingress, so
+# ark-code-latest (served on both protocols in config.yaml) needs only one
+# entry here instead of two.
+#
+# Prices are per 1,000,000 tokens. Each of the four price fields accepts
+# either a bare number (uses `currency` below) or a string with a leading
+# currency code matched against `exchange_rate` — "0.14", "USD0.14", and
+# "usd 0.14" are all valid, case-insensitive, space after the code optional.
+# A currency that's neither `currency` itself nor reachable through
+# `exchange_rate` is a load-time error, not a silent zero.
+#
+# Only in_fresh_per_1m, cache_write_per_1m, and out_per_1m feed the $
+# estimate (see internal/report/aggregate.go costFor). cache_read_per_1m is
+# informational only — every provider below treats a cache hit as free/
+# near-free, and vmr's own cost formula matches that (fresh + cache_write +
+# out; cache hits excluded, per docs/UserGuide.md "Audit log & usage
+# reports"). None of these providers bill an explicit Anthropic-style
+# cache-write premium either, so cache_write_per_1m is 0 throughout.
+#
+# A provider+model can list more than one rate — e.g. an off-peak discount
+# plus a full-price fallback — narrowed by the optional date_range
+# ([start, end], "yyyy-MM-dd") and/or hour_range ([start, end], "HH:MM";
+# start > end wraps past midnight, e.g. ["22:00", "06:00"]). vmr picks the
+# FIRST matching rate in file order for a given request's timestamp, so a
+# narrower/promotional window must be listed before the catch-all entry
+# it overrides. Neither window set = matches any time.
+#
+# Sources (fetched 2026-07-25):
+#   - DeepSeek (deepseek-v4-flash / deepseek-v4-pro): official pricing page,
+#     https://api-docs.deepseek.com/quick_start/pricing (USD)
+#   - OpenCode Zen (glm-5.2, deepseek-v4-flash, minimax-m3): official pricing,
+#     https://opencode.ai/docs/zen/ — "sells at cost", so its deepseek-v4-flash
+#     row matches DeepSeek's own listing (USD)
+#   - OpenRouter (z-ai/glm-5.2): https://openrouter.ai/z-ai/glm-5.2 — a
+#     marketplace route, shown at a "49% off" promotional rate at fetch time;
+#     cheaper than OpenCode's own GLM-5.2 listing as a result (USD)
+#   - Volcengine Ark (ark-code-latest, served via Doubao-Seed-Code): official
+#     Chinese pricing announcement (CNY, native — no conversion needed)
+#
+# exchange_rate below is a snapshot (USD/CNY spot, 2026-07-24) — vmr itself
+# never fetches prices or exchange rates automatically (single binary, no
+# external calls by design). Re-derive it instead of trusting it verbatim
+# once real money is on the line.
+#
+# Caveats worth knowing before reading §2 too literally:
+#   - ark-code-latest is Volcengine's "Coding Plan" alias, actually billed as
+#     a flat-rate monthly subscription (¥8.9-¥200/mo), not pay-per-token. The
+#     rate below is Doubao-Seed-Code's own list price (0-32k input tier) —
+#     i.e. "what this usage would cost at open-market rates", useful for
+#     comparing endpoint efficiency, NOT what you actually paid. Doubao-Seed-
+#     Code pricing is also tiered by context length; long agentic sessions
+#     that push past 32k input cost more per token (32-128k: ¥1.40/¥12.00,
+#     128-256k: ¥2.80/¥16.00 per 1M in/out) — this file uses the cheapest
+#     (0-32k) tier as a floor estimate, so §2's ark-code-latest number likely
+#     undercounts on long sessions.
+#   - z-ai/glm-5.2's cache_read_per_1m is left at 0 (not published on
+#     OpenRouter's model page) rather than guessed — doesn't affect the $
+#     estimate either way (see note above), only the informational column.
+#   - The deepseek/deepseek-v4-flash off-peak entry below is an illustration
+#     of date_range/hour_range syntax (the Chinese LLM market commonly runs
+#     off-peak discounts), not a verified current DeepSeek promotion —
+#     confirm the real window and rate before relying on it.
+currency: CNY
+exchange_rate:
+  - { USD: 1, CNY: 6.77 }
+updated_at: "2026-07-25"
+rates:
+  # --- volcengine: ark-code-latest (Doubao-Seed-Code via "Coding Plan"), --
+  # --- one rate for both protocol faces ------------------------------------
+  - provider: volcengine
+    model: ark-code-latest
+    in_fresh_per_1m: 1.20
+    cache_read_per_1m: 0.24 # transparent caching, ~80% off fresh
+    cache_write_per_1m: 0
+    out_per_1m: 8.00
+
+  # --- deepseek: official API ----------------------------------------------
+  # Illustrative off-peak window (see caveat above) — listed before the
+  # catch-all full-price entry so it wins for matching timestamps.
+  # - provider: deepseek
+  #   model: deepseek-v4-flash
+  #   in_fresh_per_1m: USD0.07 # illustrative ~50% off-peak discount
+  #   cache_read_per_1m: USD0.0028
+  #   cache_write_per_1m: 0
+  #   out_per_1m: USD0.14
+  #   hour_range: ["00:30", "08:30"]
+  - provider: deepseek
+    model: deepseek-v4-flash
+    in_fresh_per_1m: USD0.14
+    cache_read_per_1m: USD0.0028
+    cache_write_per_1m: 0
+    out_per_1m: USD0.28
+  - provider: deepseek
+    model: deepseek-v4-pro
+    in_fresh_per_1m: USD0.435
+    cache_read_per_1m: USD0.003625
+    cache_write_per_1m: 0
+    out_per_1m: USD0.87
+
+  # --- opencode (zen gateway) -----------------------------------------------
+  - provider: opencode
+    model: deepseek-v4-flash
+    in_fresh_per_1m: USD0.14 # matches deepseek's own price, opencode sells at cost
+    cache_read_per_1m: USD0.0028
+    cache_write_per_1m: 0
+    out_per_1m: USD0.28
+  - provider: opencode
+    model: glm-5.2
+    in_fresh_per_1m: USD1.40
+    cache_read_per_1m: USD0.26
+    cache_write_per_1m: 0
+    out_per_1m: USD4.40
+  - provider: opencode
+    model: minimax-m3
+    in_fresh_per_1m: USD0.30
+    cache_read_per_1m: USD0.06
+    cache_write_per_1m: 0
+    out_per_1m: USD1.20
+
+  # --- openrouter: z-ai/glm-5.2 (marketplace rate, promotional at fetch) --
+  - provider: openrouter
+    model: z-ai/glm-5.2
+    in_fresh_per_1m: USD0.7133
+    cache_read_per_1m: 0 # not published on OpenRouter's model page
+    cache_write_per_1m: 0
+    out_per_1m: USD2.242

@@ -122,7 +122,7 @@ func TestBuild(t *testing.T) {
 	dir := t.TempDir()
 	records := smallAuditRecords()
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestBuild(t *testing.T) {
 func TestMarkdownAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestToolWaste(t *testing.T) {
 		}
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,8 @@ func TestPricing(t *testing.T) {
 	yaml := `currency: USD
 updated_at: "2026-07-20"
 rates:
-  - endpoint: "openai:volcengine:doubao-seed-2.0-lite"
+  - provider: volcengine
+    model: doubao-seed-2.0-lite
     in_fresh_per_1m: 0.28
     cache_read_per_1m: 0.028
     cache_write_per_1m: 0
@@ -278,9 +279,12 @@ rates:
 	if p.Disclaimer() == "" {
 		t.Fatalf("disclaimer should not be empty")
 	}
+	if len(p.Raw) == 0 {
+		t.Fatalf("Raw should hold the file's exact bytes for §2's frozen snapshot")
+	}
 	// Build with pricing
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, p)
+	rep, _, err := Build([]string{path}, time.Now(), nil, p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,15 +304,15 @@ func TestPricingAccumulatesToEndpointAndClient(t *testing.T) {
 	dir := t.TempDir()
 	pricing := &Pricing{
 		Currency: "CNY",
-		byEndpoint: map[string]PricingRate{
-			"openai:volcengine:doubao-seed-2.0-lite": {
-				Endpoint:     "openai:volcengine:doubao-seed-2.0-lite",
-				InFreshPer1M: 0.28, CacheReadPer1M: 0.028, CacheWritePer1M: 0, OutPer1M: 1.10,
+		byKey: map[string][]PricingRate{
+			rateKey("volcengine", "doubao-seed-2.0-lite"): {
+				{Provider: "volcengine", Model: "doubao-seed-2.0-lite",
+					InFreshPer1M: 0.28, CacheReadPer1M: 0.028, CacheWritePer1M: 0, OutPer1M: 1.10},
 			},
 		},
 	}
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, pricing)
+	rep, _, err := Build([]string{path}, time.Now(), nil, pricing, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +374,7 @@ func TestPricingAccumulatesToEndpointAndClient(t *testing.T) {
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,15 +402,17 @@ func TestWriteRequestsJSONL(t *testing.T) {
 }
 
 // TestWriteRequestsIndexGrouping covers vmr-requests.md's Chat User grouping
-// end to end — no prior test exercised WriteRequestsIndex/renderIndex at
-// all, only the aggregate Report2 (via smallAuditRecords, whose records all
-// share identical message content and so fold into a single session,
-// useless for testing grouping). Two distinct-content records under
-// client "alice" become two separate one-turn sessions (so "alice"'s Chat
-// User header can be checked for the "N 会话 N 任务 N 轮" count); one
-// heartbeat-tagged record under "bob" is a single-shot scheduled session
-// and must collapse into the top-level 定时任务 rollup instead of getting
-// its own Chat User section.
+// end to end — no prior test exercised WriteRequestsIndex at all, only the
+// aggregate Report2 (via smallAuditRecords, whose records all share
+// identical message content and so fold into a single session, useless for
+// testing grouping). Two distinct-content records under client "alice"
+// become two separate one-turn sessions (so "alice"'s Chat User header can
+// be checked for the "N 会话 N 任务 N 轮" count); one heartbeat-tagged
+// record under "bob" is a single-shot scheduled session and must collapse
+// into the top-level 定时任务 rollup (its own vmr-requests-cron-hartbeat.md,
+// linked from the main index) instead of getting its own Chat User section
+// or per-tag sibling — "bob" never had any interactive traffic, so no
+// vmr-requests-bob.md is written at all.
 func TestWriteRequestsIndexGrouping(t *testing.T) {
 	dir := t.TempDir()
 	at := func(h, m int) string {
@@ -437,7 +443,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		mk(at(2, 0), "bob", "heartbeat check [OpenClaw heartbeat poll]"),
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, sess, err := Build([]string{path}, time.Now(), nil, nil)
+	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,25 +456,44 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(main)
-	if !strings.Contains(s, "# Chat User: alice · 2 会话 2 任务 2 轮") {
-		t.Errorf("missing alice Chat User header with counts:\n%s", s)
+	// The main index only carries a "## " group header + summary + link per
+	// group now — the full "# Chat User: …" detail card moved to the
+	// per-group sibling file.
+	if !strings.Contains(s, "## Chat User: alice · 2 会话 2 任务 2 轮") {
+		t.Errorf("missing alice Chat User index entry with counts:\n%s", s)
 	}
-	if !strings.Contains(s, "# 定时任务 · heartbeat 单发会话 × 1") {
-		t.Errorf("missing collapsed heartbeat rollup section:\n%s", s)
+	if !strings.Contains(s, "[vmr-requests-alice.md](vmr-requests-alice.md)") {
+		t.Errorf("missing link to alice's detail sibling:\n%s", s)
 	}
-	if strings.Contains(s, "# Chat User: bob") {
+	if !strings.Contains(s, "## 定时任务 · heartbeat 单发会话 × 1") {
+		t.Errorf("missing collapsed heartbeat rollup index entry:\n%s", s)
+	}
+	if !strings.Contains(s, "[vmr-requests-cron-hartbeat.md](vmr-requests-cron-hartbeat.md)") {
+		t.Errorf("missing link to heartbeat's cron detail sibling:\n%s", s)
+	}
+	if strings.Contains(s, "Chat User: bob") {
 		t.Errorf("bob's only record is a single-shot heartbeat and must not get its own Chat User section:\n%s", s)
 	}
 	// 00:00 UTC on the first record must render as 08:00 local (UTC+8),
-	// not the source record's own (UTC) offset.
+	// not the source record's own (UTC) offset — footer table is still in
+	// the main index.
 	if !strings.Contains(s, "2026-07-24 08:00:00") {
 		t.Errorf("timestamps should be converted to UTC+8:\n%s", s)
 	}
 
-	for _, name := range []string{"vmr-requests-alice.md", "vmr-requests-bob.md"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Errorf("missing per-tag sibling %s: %v", name, err)
-		}
+	alice, err := os.ReadFile(filepath.Join(dir, "vmr-requests-alice.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(alice), "# Chat User: alice · 2 会话 2 任务 2 轮") {
+		t.Errorf("alice's sibling should carry the full Chat User detail card:\n%s", alice)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-bob.md")); !os.IsNotExist(err) {
+		t.Errorf("bob has no interactive traffic and should get no per-tag sibling")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-cron-hartbeat.md")); err != nil {
+		t.Errorf("missing scheduled-class sibling vmr-requests-cron-hartbeat.md: %v", err)
 	}
 	for _, legacy := range []string{"vmr-requests-index.md", "vmr-requests-index-alice.md"} {
 		if _, err := os.Stat(filepath.Join(dir, legacy)); !os.IsNotExist(err) {
@@ -513,6 +538,6 @@ func BenchmarkBuild(b *testing.B) {
 	}
 	f.Close()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Build([]string{path}, time.Now(), nil, nil)
+		_, _, _ = Build([]string{path}, time.Now(), nil, nil, nil)
 	}
 }
