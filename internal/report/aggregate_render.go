@@ -27,8 +27,7 @@ import (
 // row format string. Column *formatting* stays the caller's job — the ~20
 // tables here differ too much in per-cell logic (conditional flags,
 // composite "a / b / c" cells, dynamic header text) to templatize further,
-// and a heavier templating layer is explicitly the kind of over-abstraction
-// docs/vmr_architecture_review_opus-5.md §7 warns against for a Markdown
+// and a heavier templating layer would be over-abstraction for a Markdown
 // renderer with this few consumers.
 type mdTable struct {
 	w    func(string, ...any)

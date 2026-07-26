@@ -1036,9 +1036,8 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 	// deliberately does not guarantee is the same from one run to the next.
 	// The result: rows sharing a tied value would silently swap places
 	// between two otherwise-identical runs of the same binary against the
-	// same input (caught by TestBuildIsDeterministic; see
-	// docs/vmr_architecture_review_opus-5.md's report note for how this was
-	// first noticed, comparing loadtest-report.md across two runs).
+	// same input (caught by TestBuildIsDeterministic — first noticed by
+	// comparing loadtest-report.md across two runs).
 	sort.Slice(rep.EndpointsAll, func(i, j int) bool {
 		a, b := rep.EndpointsAll[i], rep.EndpointsAll[j]
 		if a.Attempts != b.Attempts {
@@ -1224,14 +1223,26 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 	return r
 }
 
-// endpointInfo returns the last successful attempt's endpoint (the one that
-// served the client) and the last attempt's error class (for index display).
+// endpointInfo returns the endpoint that served the client and the last
+// attempt's error class (for index display). "Served" prefers a strictly
+// successful attempt (no error, 2xx) but falls back to the last attempt that
+// got a 2xx response header at all: a stream truncated mid-transfer already
+// committed its status to the client via that endpoint before dying, so the
+// bytes/tokens/cost the client received are genuinely this endpoint's, not
+// unattributable — only SetSuccessResponse's status matters here, not
+// whether SetTruncated ran afterward.
 func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
-	var successEp string
+	var successEp, servedEp string
 	for _, a := range arec.Attempts {
-		if a.Error == "" && a.Response != nil && a.Response.Status < 400 {
-			successEp = a.Endpoint
+		if a.Response != nil && a.Response.Status < 400 {
+			servedEp = a.Endpoint
+			if a.Error == "" {
+				successEp = a.Endpoint
+			}
 		}
+	}
+	if successEp == "" {
+		successEp = servedEp
 	}
 	if len(arec.Attempts) > 0 {
 		errClass = attemptErrorClass(arec.Attempts[len(arec.Attempts)-1])

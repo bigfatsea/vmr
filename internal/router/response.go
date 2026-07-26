@@ -55,7 +55,7 @@
 // it (thinkShapeGuard, stripThinkingProcess, containsSoftBlockMarker, and
 // the thinkOpenMarker/thinkCloseMarker/thinkPattern constants) at the few
 // points where the state machine needs to know "does this look like a
-// MiniMax quirk" (see docs/vmr_architecture_review_opus-5.md §3.8/§4.4).
+// MiniMax quirk".
 package router
 
 import (
@@ -123,19 +123,21 @@ type respStream struct {
 	protocol    string // ingress protocol: decides [DONE] policy
 	opaque      bool   // Content-Encoding present: no transforms at all
 
-	mode           int
-	pending        []byte // undecided: withheld bytes; passthrough: partial-event tail
-	scanned        int    // undecided only: pending[:scanned] holds events already classified undecided — decide resumes after them instead of rescanning (keeps a ping-heavy stream linear, not quadratic)
-	buf            []byte // buffered-mode accumulation
-	out            []byte // processed bytes ready for the client
-	srcErr         error  // non-EOF src error, surfaced after out drains
-	done           bool   // src hit EOF and out holds the final bytes
-	sawDone        bool   // upstream emitted its own data: [DONE]
-	tailNL         bool   // last emitted bytes ended with the SSE separator
-	thinkTriggered bool   // buffering was caused by an inline <think> block
-	applied        []string
-	rawPreStrip    []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
-	scratch        []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
+	mode              int
+	pending           []byte // undecided: withheld bytes; passthrough: partial-event tail
+	scanned           int    // undecided only: pending[:scanned] holds events already classified undecided — decide resumes after them instead of rescanning (keeps a ping-heavy stream linear, not quadratic)
+	buf               []byte // buffered-mode accumulation
+	out               []byte // processed bytes ready for the client
+	srcErr            error  // non-EOF src error, surfaced after out drains
+	done              bool   // src hit EOF and out holds the final bytes
+	sawDone           bool   // upstream emitted its own data: [DONE]
+	tailNL            bool   // last emitted bytes ended with the SSE separator
+	thinkTriggered    bool   // buffering was caused by an inline <think> block
+	thinkPatternBytes int    // observation only: cumulative content bytes scanned for the leaked-thinking-process shape
+	thinkPatternHits  int    // cumulative "\n<N>." numbered-marker hits found in those bytes
+	applied           []string
+	rawPreStrip       []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
+	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 }
 
 func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol string, opaque bool) *respStream {
@@ -346,6 +348,7 @@ func (s *respStream) emitBlock(block []byte) {
 	if containsSoftBlockMarker(block) {
 		s.noteApplied("soft_block_detected")
 	}
+	s.noteThinkingPatternIfSuspected(block)
 	if modelFieldPattern.Match(block) {
 		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
@@ -373,6 +376,7 @@ func (s *respStream) finish() {
 		s.pending = nil
 		s.appendDone()
 	}
+	s.notePatternDetectedIfSuspected()
 }
 
 func (s *respStream) finalizeBuffered() {
@@ -404,6 +408,7 @@ func (s *respStream) finalizeBuffered() {
 	if containsSoftBlockMarker(b) {
 		s.noteApplied("soft_block_detected")
 	}
+	s.noteThinkingPatternIfSuspected(b)
 	s.tailNL = len(b) == 0 || bytes.HasSuffix(b, eventSep)
 	s.out = append(s.out, b...)
 	s.appendDone()
@@ -431,6 +436,47 @@ func (s *respStream) noteApplied(step string) {
 		}
 	}
 	s.applied = append(s.applied, step)
+}
+
+// noteThinkingPatternIfSuspected accumulates the leaked-thinking-process
+// observation signal for one block/whole-body b: total bytes scanned and how
+// many numbered-subsection markers ("\n1.", "\n2.", …) they contain. Called
+// on every buffered and passthrough emission regardless of whether an actual
+// strip already fired for this response — cheap two-int bookkeeping, no
+// extra buffering — because the strip may fire later in the same response
+// (buffered mode) or not fire at all despite this shape appearing (exactly
+// the failure this exists to catch); the pass/fail decision is deferred to
+// finish()'s notePatternDetectedIfSuspected once every byte has been seen.
+func (s *respStream) noteThinkingPatternIfSuspected(b []byte) {
+	s.thinkPatternBytes += len(b)
+	s.thinkPatternHits += len(thinkingProcessNumberedMarker.FindAll(b, -1))
+}
+
+// stripFired reports whether either MiniMax thinking-mode repair actually
+// rewrote this response's bytes.
+func (s *respStream) stripFired() bool {
+	for _, a := range s.applied {
+		if a == "think_strip" || a == "thinking_process_strip" {
+			return true
+		}
+	}
+	return false
+}
+
+// notePatternDetectedIfSuspected makes the final call at EOF: this response
+// looked like MiniMax's leaked thinking-mode outline (enough numbered-marker
+// hits over enough content bytes) but neither actual strip fired for it —
+// stripThinkingProcess's literal "Thinking Process:" prefix guard (which
+// also decides passthrough vs. buffered mode up in decide()) may have gone
+// blind to a wording change. Tags the audit trail only; never touches a byte
+// of the response and never affects failover/health.
+func (s *respStream) notePatternDetectedIfSuspected() {
+	if s.stripFired() {
+		return
+	}
+	if s.thinkPatternBytes > 1024 && s.thinkPatternHits >= 3 {
+		s.noteApplied("thinking_process_pattern_detected")
+	}
 }
 
 type verdict int

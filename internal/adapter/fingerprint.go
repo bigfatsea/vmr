@@ -183,8 +183,7 @@ var toolsKeyLiteral = []byte(`"tools"`)
 // needs before routing — model, stream, and whether "tools" is a non-empty
 // array — in one structural scan over raw, replacing what used to be a
 // reflective json.Unmarshal into a 2-field struct (for model/stream) plus a
-// second, independent top-level array-non-empty scan (for tools). See
-// docs/vmr_architecture_review_opus-5.md §4.2/§6 item 2.2.
+// second, independent top-level array-non-empty scan (for tools).
 //
 // ok=false exactly where json.Unmarshal(raw, &struct{Model string; Stream
 // bool}{}) would have errored: raw isn't a JSON object, is malformed, or

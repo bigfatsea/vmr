@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,43 @@ func TestHousekeep_ResumesInterruptedCompress(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "vmr-audit-2026-07-06.jsonl.zst"))
 	if err != nil || string(data) != "the real compressed data" {
 		t.Errorf(".zst content changed: %q err=%v", data, err)
+	}
+}
+
+// TestHousekeep_RetentionWithInterruptedCompressResume covers the case
+// purgeOne's os.IsNotExist guard exists for: a date past the retention
+// cutoff whose plain file is ALSO mid-resume (both it and its .zst exist).
+// The plain-file entry's compressOne resume removes the plain file and
+// purges the now-current .zst; the SAME date's separate .zst directory
+// entry (read before either removal, per housekeep's single os.ReadDir)
+// then reaches purgeOne a second time for a file already gone — that
+// second removal must be silent, not an ENOENT error on stderr.
+func TestHousekeep_RetentionWithInterruptedCompressResume(t *testing.T) {
+	SetRetentionDays(30)
+	defer SetRetentionDays(0)
+
+	dir := t.TempDir()
+	writeFile(t, dir, "vmr-audit-2026-05-01.jsonl", "stale original")
+	writeFile(t, dir, "vmr-audit-2026-05-01.jsonl.zst", "compressed, past retention")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+	housekeep(dir, time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC))
+	w.Close()
+	os.Stderr = origStderr
+	stderr, _ := io.ReadAll(r)
+
+	mustNotExist(t, filepath.Join(dir, "vmr-audit-2026-05-01.jsonl"))
+	mustNotExist(t, filepath.Join(dir, "vmr-audit-2026-05-01.jsonl.zst"))
+	if strings.Contains(string(stderr), "no such file") {
+		t.Errorf("the second, redundant purge of an already-removed file must be silent, got stderr: %s", stderr)
+	}
+	if !strings.Contains(string(stderr), "removed vmr-audit-2026-05-01.jsonl.zst") {
+		t.Errorf("expected exactly one successful removal log line, got stderr: %s", stderr)
 	}
 }
 

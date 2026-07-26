@@ -531,7 +531,10 @@ func failureSurfaceRecords() []map[string]any {
 	canceled["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "canceled by client", "error_class": "canceled"}}
 
 	truncated := base(t0.Add(3*time.Minute), "ok", 200)
-	truncated["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "truncated: EOF", "error_class": "truncated"}}
+	// Real shape: SetSuccessResponse commits the 2xx response first, then
+	// SetTruncated (mid-stream death) only sets error/error_class — Response
+	// stays as the already-committed 2xx.
+	truncated["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "error": "truncated: EOF", "error_class": "truncated"}}
 
 	return []map[string]any{ok, failed, canceled, truncated}
 }
@@ -561,6 +564,58 @@ func TestFailedRequestRows(t *testing.T) {
 		if !got[want] {
 			t.Errorf("missing expected failure shape %q among: %v", want, got)
 		}
+	}
+}
+
+// TestTruncatedRequestAttributesToServingEndpoint covers endpointInfo's
+// fallback: a request whose only attempt got a 2xx response header before
+// dying mid-stream (outcome "ok", attempt error_class "truncated") must
+// still attribute its RequestRow.Endpoint and its endpoint-bucket
+// request-level metrics to the endpoint that actually served those bytes —
+// not leave them unattributed just because the attempt also carries an
+// Error string.
+func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, failureSurfaceRecords())
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const wantEp = "openai:volcengine:doubao-seed-2.0-lite"
+	rows := rep.RequestRows()
+	var truncatedRow *RequestRow
+	for i, r := range rows {
+		if r.Outcome == "ok" && r.Truncated {
+			truncatedRow = &rows[i]
+		}
+	}
+	if truncatedRow == nil {
+		t.Fatal("no truncated row found among request rows")
+	}
+	if truncatedRow.Endpoint != wantEp {
+		t.Errorf("truncated request's RequestRow.Endpoint = %q, want %q", truncatedRow.Endpoint, wantEp)
+	}
+
+	var ep *EndpointRow
+	for i, e := range rep.EndpointsAll {
+		if e.Endpoint == wantEp {
+			ep = &rep.EndpointsAll[i]
+		}
+	}
+	if ep == nil {
+		t.Fatalf("no EndpointsAll entry for %q", wantEp)
+	}
+	// ok + truncated both attribute to this endpoint at the request level;
+	// error/canceled attempts in this fixture carry no committed response,
+	// so they stay unattributed (unaffected by this fix).
+	if ep.Requests != 2 {
+		t.Errorf("EndpointsAll[%q].Requests = %d, want 2 (ok + truncated)", wantEp, ep.Requests)
+	}
+	// All 4 fixture records attempt this same endpoint once each, regardless
+	// of request-level attribution.
+	if ep.Attempts != 4 {
+		t.Errorf("EndpointsAll[%q].Attempts = %d, want 4", wantEp, ep.Attempts)
 	}
 }
 
@@ -690,10 +745,9 @@ func tiedAuditRecords() []map[string]any {
 	}
 }
 
-// TestBuildIsDeterministic locks in the fix for the non-determinism
-// documented in docs/vmr_architecture_review_opus-5.md: EndpointsAll/
-// ByClient/Workloads/Sessions/Tools are appended from Go maps (whose
-// iteration order the language spec deliberately leaves unspecified) and
+// TestBuildIsDeterministic locks in the fix for a non-determinism bug:
+// EndpointsAll/ByClient/Workloads/Sessions/Tools are appended from Go maps
+// (whose iteration order the language spec deliberately leaves unspecified) and
 // then sorted only by a count/byte-size value that can legitimately tie
 // across distinct rows — without a secondary tie-break on the bucket's own
 // identity field, two Build() calls against byte-identical input could

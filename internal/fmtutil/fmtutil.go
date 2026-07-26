@@ -2,11 +2,10 @@
 
 // Package fmtutil holds small, dependency-free display-formatting functions
 // shared between vmr's live router log (internal/router) and its offline
-// `vmr report`/`vmr diagnose` output. Split out of internal/core (see
-// docs/vmr_architecture_review_opus-5.md §3.1/§4.3): these are display
-// formatting, not routing-domain types, and keeping them separate from core
-// means the analysis layer (internal/report) doesn't have to pull in
-// core.Endpoint/core.CanonicalRequest and friends just to render a number.
+// `vmr report`/`vmr diagnose` output. Split out of internal/core: these are
+// display formatting, not routing-domain types, and keeping them separate
+// from core means the analysis layer (internal/report) doesn't have to pull
+// in core.Endpoint/core.CanonicalRequest and friends just to render a number.
 package fmtutil
 
 import (

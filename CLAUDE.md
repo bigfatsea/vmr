@@ -44,7 +44,7 @@ No Makefile, no CI config in-repo. `vmr.sh` never runs `go build` itself — bui
 | `diagnose`, `replay` | `vmr diagnose` (real connectivity check) / `vmr replay` (resend one audit record) — reuse the same `adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses |
 | `imgprep` | Inline image downscale + disk cache |
 | `rundir` | Default dir resolution formula (`~/.vmr` → temp → cwd), shared by log/cache dirs |
-| `archtest` | Executable architecture invariants (import boundaries, core-file line-count budgets) — see `docs/vmr_architecture_review_opus-5.md` |
+| `archtest` | Executable architecture invariants (import boundaries, core-file line-count budgets) |
 
 `cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand: `main.go` (dispatch + usage +
 the adapter blank-import registration point), `cmd_start.go`, `cmd_check.go`, `cmd_status.go`,

@@ -316,7 +316,7 @@ func Redact(h http.Header) http.Header {
 	}
 	out := make(http.Header, len(h))
 	for k, vs := range h {
-		out[k] = vs
+		out[k] = append([]string(nil), vs...)
 	}
 	for _, k := range credentialHeaders {
 		if vs := out.Values(k); len(vs) > 0 {
@@ -463,12 +463,10 @@ func (l *Logger) Path() string {
 // in parallel; a shared Logger-level buffer would force serializing that
 // CPU-bound JSON encoding under the same global lock that guards the much
 // cheaper file write, trading one performance problem for a worse one under
-// real concurrent load (see docs/vmr_architecture_review_opus-5.md §3.10 —
-// this is a deliberate deviation from that review's initial sketch of "one
-// reused buffer"). A sync.Pool gets the allocation-reduction win without
-// that regression: each goroutine borrows its own buffer, encodes into it
-// with no contention, and only the resulting bytes cross into the locked
-// section below.
+// real concurrent load. A sync.Pool gets the allocation-reduction win
+// without that regression: each goroutine borrows its own buffer, encodes
+// into it with no contention, and only the resulting bytes cross into the
+// locked section below.
 var writeBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 // Write appends one record. Failures must never break request serving: the

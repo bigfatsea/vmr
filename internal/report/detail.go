@@ -36,16 +36,17 @@ const toolArgsInlineThreshold = 600
 // normDescriptions translates audit norm-trail steps (internal/router
 // response normalizer) into human language for the detail files.
 var normDescriptions = map[string]string{
-	"model_rewrite":            "上游返回的真实模型名被改写回虚拟模型名",
-	"done_appended":            "上游未发送 `data: [DONE]`，VMR 补发了终止哨兵",
-	"think_strip":              "剥离了 `<think>…</think>` 推理块（防止思考内容进入会话历史）",
-	"thinking_process_strip":   "剥离了 \"Thinking Process:\" 纯文本推理草稿",
-	"buffered":                 "整个响应被缓冲后一次性归一化（非逐事件透传）",
-	"resumed_stream":           "`<think>` 块结束后由缓冲恢复为流式转发",
-	"soft_block_detected":      "检测到 MiniMax 软屏蔽标志（input/output_sensitive）——仅记录，字节未改动",
-	"opaque":                   "响应带 Content-Encoding（上游自行压缩，未被透明解码），归一化器整体跳过，字节未做任何检查或改动",
-	"overflow_raw_passthrough": "响应体超过 32MB 缓冲上限，归一化器放弃处理并原样透传剩余字节——后续的 model 改写/think 剥离等步骤不再执行，等同直连行为",
-	"crlf_framing_suspected":   "疑似 CRLF（`\\r\\n\\r\\n`）分帧的 SSE 响应——归一化器只识别 `\\n\\n` 事件边界，未找到时整段响应会被当作一次性缓冲处理（内容仍正确，仅逐 token 流式效果退化）",
+	"model_rewrite":                     "上游返回的真实模型名被改写回虚拟模型名",
+	"done_appended":                     "上游未发送 `data: [DONE]`，VMR 补发了终止哨兵",
+	"think_strip":                       "剥离了 `<think>…</think>` 推理块（防止思考内容进入会话历史）",
+	"thinking_process_strip":            "剥离了 \"Thinking Process:\" 纯文本推理草稿",
+	"buffered":                          "整个响应被缓冲后一次性归一化（非逐事件透传）",
+	"resumed_stream":                    "`<think>` 块结束后由缓冲恢复为流式转发",
+	"soft_block_detected":               "检测到 MiniMax 软屏蔽标志（input/output_sensitive）——仅记录，字节未改动",
+	"opaque":                            "响应带 Content-Encoding（上游自行压缩，未被透明解码），归一化器整体跳过，字节未做任何检查或改动",
+	"overflow_raw_passthrough":          "响应体超过 32MB 缓冲上限，归一化器放弃处理并原样透传剩余字节——后续的 model 改写/think 剥离等步骤不再执行，等同直连行为",
+	"crlf_framing_suspected":            "疑似 CRLF（`\\r\\n\\r\\n`）分帧的 SSE 响应——归一化器只识别 `\\n\\n` 事件边界，未找到时整段响应会被当作一次性缓冲处理（内容仍正确，仅逐 token 流式效果退化）",
+	"thinking_process_pattern_detected": "响应内容含类似 MiniMax thinking=medium 泄漏的编号推理小节，但未命中现有 \"Thinking Process:\" 剥离触发条件——字节未改动，仅作观测标记，用于判断该剥离规则是否已经失效",
 }
 
 // detailWorkerCount bounds how many records get rendered+written

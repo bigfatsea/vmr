@@ -1,12 +1,11 @@
 // Ver 2026-07-26, by Sonnet 5
 
 // Package archtest holds executable checks for architectural invariants
-// this project has stated but never enforced with code — see
-// docs/vmr_architecture_review_opus-5.md §4.5: a documented tripwire with no
-// automated check is a tripwire nobody actually sees trip. Every test here
-// exists because someone (a design doc, a review) already wrote down a rule;
-// this package just makes violating it a test failure instead of a fact that
-// quietly stops being true.
+// this project has stated but never enforced with code: a documented
+// tripwire with no automated check is a tripwire nobody actually sees trip.
+// Every test here exists because someone (a design doc, a review) already
+// wrote down a rule; this package just makes violating it a test failure
+// instead of a fact that quietly stops being true.
 package archtest
 
 import (
@@ -15,11 +14,11 @@ import (
 	"testing"
 )
 
-// forbiddenImports pins docs/vmr_architecture_review_opus-5.md §5.2's rule 2:
-// the analysis/report layer only depends on the audit log schema, never on
-// the routing runtime it analyzes. internal/report is already structurally
-// an island (only vmr/internal/{audit,core} today) — this test exists so it
-// stays that way as the package grows, not because it's currently violated.
+// forbiddenImports pins the rule that the analysis/report layer only
+// depends on the audit log schema, never on the routing runtime it
+// analyzes. internal/report is already structurally an island (only
+// vmr/internal/{audit,core} today) — this test exists so it stays that way
+// as the package grows, not because it's currently violated.
 var forbiddenImports = map[string][]string{
 	"vmr/internal/report": {
 		"vmr/internal/router",
@@ -45,8 +44,8 @@ func TestArchitecture_ImportBoundaries(t *testing.T) {
 		}
 		for _, f := range forbidden {
 			if deps[f] {
-				t.Errorf("%s must not depend on %s (see docs/vmr_architecture_review_opus-5.md §5.2: "+
-					"the analysis layer only depends on the audit schema, never on the routing runtime)", pkg, f)
+				t.Errorf("%s must not depend on %s: "+
+					"the analysis layer only depends on the audit schema, never on the routing runtime", pkg, f)
 			}
 		}
 	}

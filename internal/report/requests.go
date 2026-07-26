@@ -36,22 +36,30 @@ import (
 var utc8 = time.FixedZone("UTC+8", 8*3600)
 
 // WriteRequestsJSONL writes one RequestRow per line to vmr-requests.jsonl.
-func WriteRequestsJSONL(rows []RequestRow, path string) (int, error) {
+func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() {
+		// Close can be where a full disk's delayed write failure actually
+		// surfaces (Flush below only pushes into the OS buffer) — a plain
+		// `defer f.Close()` would swallow that and report "success" over an
+		// incomplete file.
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	bw := bufio.NewWriter(f)
 	for _, r := range rows {
-		data, err := json.Marshal(r)
-		if err != nil {
-			return 0, err
+		data, merr := json.Marshal(r)
+		if merr != nil {
+			return 0, merr
 		}
 		bw.Write(data)
 		bw.WriteByte('\n')
 	}
-	if err := bw.Flush(); err != nil {
+	if err = bw.Flush(); err != nil {
 		return 0, err
 	}
 	return len(rows), nil

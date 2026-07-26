@@ -390,9 +390,8 @@ func percentile(sorted []int64, p float64) int64 {
 // own per-model table (internal/report/aggregate_render.go) — just the
 // columns this report's readers actually look at (see loadtest/README.md's
 // "reading the numbers" section). Sorted by model name for run-to-run
-// stability — this tool's own map iteration would otherwise be exactly the
-// kind of non-determinism documented in
-// docs/vmr_architecture_review_opus-5.md's report note.
+// stability — this tool's own map iteration would otherwise be
+// non-deterministic across runs.
 func renderModelStats(models map[string]*modelStats) string {
 	names := make([]string, 0, len(models))
 	for name := range models {

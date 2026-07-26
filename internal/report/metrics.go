@@ -71,12 +71,12 @@ func round2(f float64) float64 {
 // types shares: latency samples plus the token-cache breakdown. All 6
 // finishX functions below start by feeding their own fields through
 // finishMeasures instead of repeating the same percentiles/freshTokens/
-// cacheEff calls — the only sharing 2.1's scope allows (see
-// docs/vmr_architecture_review_opus-5.md §6 item 2.1): the 6 Row *struct
-// declarations* are deliberately left untouched (their "same-name" fields
-// carry inconsistent omitempty tags across types — e.g. Row.CacheEfficiency
-// is omitempty, ClientRow.CacheEfficiency is not — so a shared embedded
-// struct would change zero-value JSON output for some types).
+// cacheEff calls — that shared computation is as far as the unification
+// goes: the 6 Row *struct declarations* are deliberately left untouched
+// (their "same-name" fields carry inconsistent omitempty tags across
+// types — e.g. Row.CacheEfficiency is omitempty, ClientRow.CacheEfficiency
+// is not — so a shared embedded struct would change zero-value JSON output
+// for some types).
 type measuresInput struct {
 	durs, ttfts, streamMS                        []int64
 	tokensIn, tokensInCached, tokensInCacheWrite int64

@@ -165,6 +165,18 @@ func TestRewriteModel_SameNameZeroCopy(t *testing.T) {
 	}
 }
 
+func TestRewriteModel_NullBodyReturnsErrorNotPanic(t *testing.T) {
+	// raw is the JSON literal "null" — not an object, but syntactically
+	// valid JSON, so it reaches the generic fallback (topLevelValues
+	// declines: no top-level "{"). json.Unmarshal into a map pointer accepts
+	// null as "set to nil" without erroring; assigning into that nil map
+	// used to panic. Found by FuzzRewriteModel.
+	_, err := RewriteModel([]byte("null"), "up")
+	if err == nil {
+		t.Error("expected an error for a non-object body, got nil")
+	}
+}
+
 func TestRewriteModel_MissingKeyFallsBackAndAdds(t *testing.T) {
 	// No top-level model key: the generic fallback adds it (historical
 	// behavior for direct callers; the server rejects such requests earlier).

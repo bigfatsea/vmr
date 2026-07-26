@@ -514,6 +514,85 @@ func TestRespStream_AppliedTracking(t *testing.T) {
 	}
 }
 
+// TestRespStream_ThinkingPatternDetectedOnGuardMiss covers the leaked-
+// thinking-process observation signal: a response shaped exactly like
+// MiniMax's leaked thinking-mode outline (numbered subsections, long) but
+// whose first content value does NOT start with the literal "Thinking
+// Process:" — simulating a wording drift that defeats BOTH decide()'s
+// buffered-mode trigger and stripThinkingProcess's own guard. The stream
+// must still reach the client untouched (fail-open, no strip fires) AND the
+// audit trail must carry "thinking_process_pattern_detected" so the drift
+// is observable.
+func TestRespStream_ThinkingPatternDetectedOnGuardMiss(t *testing.T) {
+	pad := strings.Repeat("filler ", 60) // ~420 bytes per section, well past bufferedCap concerns
+	content := "Reasoning Steps:\\n\\n1. " + pad + "\\n\\n2. " + pad + "\\n\\n3. " + pad + "\\n\\nHere is the actual final answer."
+	in := `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
+
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	out := readAll(t, rs)
+
+	// Fail-open: nothing was stripped, the leaked outline reaches the client
+	// verbatim (this is the actual failure mode being observed, not fixed).
+	if !strings.Contains(out, "Reasoning Steps:") || !strings.Contains(out, "actual final answer") {
+		t.Fatalf("content should pass through untouched: %q", out)
+	}
+	found := false
+	for _, a := range rs.Applied() {
+		if a == "thinking_process_pattern_detected" {
+			found = true
+		}
+		if a == "think_strip" || a == "thinking_process_strip" {
+			t.Errorf("an actual strip fired (%q) — this case is supposed to simulate the guard missing it", a)
+		}
+	}
+	if !found {
+		t.Errorf("expected thinking_process_pattern_detected in applied, got %v", rs.Applied())
+	}
+}
+
+// TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires checks the
+// negative side of the same signal: when stripThinkingProcess's own guard
+// DOES fire (the ordinary, working case — same shape as
+// TestStripThinkingProcess_FullPattern), the observation tag must NOT also
+// appear. Guard working correctly is not evidence of guard drift.
+func TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires(t *testing.T) {
+	pad := strings.Repeat("filler ", 60)
+	content := "Thinking Process:\\n\\n1. " + pad + "\\n\\n2. " + pad + "\\n\\n3. " + pad +
+		"\\n\\nLooks good. Proceed\\n\\nactual final answer here"
+	in := `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
+
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	out := readAll(t, rs)
+
+	if !strings.Contains(out, "actual final answer here") {
+		t.Fatalf("final answer should survive the strip: %q", out)
+	}
+	if strings.Contains(out, "Thinking Process:") {
+		t.Errorf("thinking section should have been stripped: %q", out)
+	}
+	for _, a := range rs.Applied() {
+		if a == "thinking_process_pattern_detected" {
+			t.Errorf("pattern_detected should not fire when the real strip already handled it: %v", rs.Applied())
+		}
+	}
+}
+
+// TestRespStream_ThinkingPatternNotTaggedOnOrdinaryContent checks the other
+// negative side: ordinary content that merely happens to contain a short
+// numbered list (below the hit/byte thresholds) must not be flagged —
+// otherwise the signal would fire on routine step-by-step replies and be
+// worthless as a frequency measure.
+func TestRespStream_ThinkingPatternNotTaggedOnOrdinaryContent(t *testing.T) {
+	in := `data: {"choices":[{"delta":{"content":"Sure, here are the steps:\\n\\n1. First\\n\\n2. Second\\n\\nDone."}}]}` + "\n\n"
+	rs := newRespStream(strings.NewReader(in), "agent", true, "openai", false)
+	readAll(t, rs)
+	for _, a := range rs.Applied() {
+		if a == "thinking_process_pattern_detected" {
+			t.Errorf("ordinary short reply should not be flagged: %v", rs.Applied())
+		}
+	}
+}
+
 func TestRespStream_ReasoningContentStreams(t *testing.T) {
 	// DeepSeek-style reasoning in a dedicated field is well-behaved:
 	// the stream must settle into passthrough on the first

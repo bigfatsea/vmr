@@ -48,12 +48,11 @@ type Adapter interface {
 // lock-free atomic load instead of an RWMutex.RLock/RUnlock pair for a map
 // that, in practice, never changes after the first few milliseconds of
 // process startup (each provider subpackage's init() calls Register exactly
-// once — see docs/vmr_architecture_review_opus-5.md §3.3/§4.1). registerMu
-// serializes the copy-on-write writes themselves: Register is only ever
-// called from sequential init() in production, so this never actually
-// contends, but a plain copy-on-write without it would lose an update under
-// two genuinely concurrent Register calls (last Store wins, silently
-// dropping the other writer's entry) — caught by
+// once). registerMu serializes the copy-on-write writes themselves:
+// Register is only ever called from sequential init() in production, so this
+// never actually contends, but a plain copy-on-write without it would lose
+// an update under two genuinely concurrent Register calls (last Store wins,
+// silently dropping the other writer's entry) — caught by
 // TestGetConcurrentWithRegister under -race.
 var (
 	registerMu sync.Mutex

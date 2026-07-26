@@ -312,7 +312,7 @@ Description=vmr - Virtual Model Router
 After=network-online.target
 
 [Service]
-ExecStart=$BIN start -c $CFG
+ExecStart="$BIN" start -c "$CFG"
 WorkingDirectory=$PWD
 EnvironmentFile=-$ENV_FILE
 StandardOutput=append:$SERVER_LOG

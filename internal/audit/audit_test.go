@@ -36,6 +36,18 @@ func TestRedactMasksCredentials(t *testing.T) {
 	}
 }
 
+// TestRedactCopiesNonCredentialValueSlices ensures a non-credential header's
+// value slice is deep-copied, not shared with the input's backing array —
+// mutating the returned Header in place must never leak back into h.
+func TestRedactCopiesNonCredentialValueSlices(t *testing.T) {
+	h := http.Header{"X-Trace-Id": {"original"}}
+	out := Redact(h)
+	out["X-Trace-Id"][0] = "mutated"
+	if h["X-Trace-Id"][0] != "original" {
+		t.Errorf("mutating Redact's output leaked into the input: %q", h["X-Trace-Id"][0])
+	}
+}
+
 func TestKeyTag(t *testing.T) {
 	cases := []struct {
 		name, key, want string
@@ -158,13 +170,12 @@ func TestNilLoggerNoop(t *testing.T) {
 }
 
 // TestWriteConcurrentGoroutinesProduceValidJSONL is the correctness property
-// the sync.Pool-based rewrite of Write actually depends on (see
-// docs/vmr_architecture_review_opus-5.md §3.10): each goroutine encodes into
-// its own pooled buffer with no cross-goroutine sharing, so N concurrent
-// Write calls must produce exactly N complete, independently-parseable JSON
-// lines — never a line that's the concatenation, truncation, or interleaving
-// of two records. Run with -race to also catch any data race on the pooled
-// buffers or the underlying file.
+// the sync.Pool-based rewrite of Write actually depends on: each goroutine
+// encodes into its own pooled buffer with no cross-goroutine sharing, so N
+// concurrent Write calls must produce exactly N complete,
+// independently-parseable JSON lines — never a line that's the
+// concatenation, truncation, or interleaving of two records. Run with -race
+// to also catch any data race on the pooled buffers or the underlying file.
 func TestWriteConcurrentGoroutinesProduceValidJSONL(t *testing.T) {
 	dir := t.TempDir()
 	l, err := New(dir)

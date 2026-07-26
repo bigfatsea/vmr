@@ -18,9 +18,8 @@ func (f fakeCondition) Eligible(*core.Endpoint, core.RequestFacts) bool {
 }
 
 // TestEligibleConcurrentWithRegisterCondition exercises the atomic.Pointer
-// copy-on-write conditions registry (see
-// docs/vmr_architecture_review_opus-5.md §3.5/§4.1) under `go test -race`:
-// concurrent RegisterCondition calls (harder than production's real,
+// copy-on-write conditions registry under `go test -race`: concurrent
+// RegisterCondition calls (harder than production's real,
 // sequential-from-init() case) racing against concurrent Eligible/RejectedBy
 // reads must never race and must never lose a registration (the same class
 // of lost-update bug internal/adapter's Register had before its

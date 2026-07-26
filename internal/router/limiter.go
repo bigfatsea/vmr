@@ -1,7 +1,6 @@
 // Ver 2026-07-26, by Sonnet 5
 
-// The global concurrency gate. Split out of router.go (see
-// docs/vmr_architecture_review_opus-5.md §3.7/§4.5) — pure move, no
+// The global concurrency gate. Split out of router.go — pure move, no
 // behavior change.
 package router
 

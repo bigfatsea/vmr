@@ -45,9 +45,8 @@ var headerBlocklist = map[string]struct{}{
 // before headers reach an adapter, and reused by internal/replay to
 // reconstruct the header set a live request would have carried when
 // rebuilding one from an audit record. Lives in core (moved out of
-// internal/server, see docs/vmr_architecture_review_opus-5.md §3.13) so
-// internal/replay doesn't need to import the whole HTTP server package just
-// for this one function.
+// internal/server) so internal/replay doesn't need to import the whole HTTP
+// server package just for this one function.
 func FilterClientHeaders(h http.Header) http.Header {
 	out := http.Header{}
 	for k, vs := range h {

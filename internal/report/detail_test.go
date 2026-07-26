@@ -13,6 +13,25 @@ import (
 	"vmr/internal/core"
 )
 
+// TestNormDescriptions_AllKnownStepsHaveText guards against a norm step
+// name being added to the router-side trail (response.go/responsefix.go)
+// without a matching entry here — writeNorms falls back to "（未知步骤）"
+// for anything missing, which is silent and easy to forget.
+func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
+	for _, step := range []string{
+		"model_rewrite", "done_appended", "think_strip", "thinking_process_strip",
+		"buffered", "resumed_stream", "soft_block_detected", "opaque",
+		"overflow_raw_passthrough", "crlf_framing_suspected",
+		"thinking_process_pattern_detected",
+	} {
+		var b strings.Builder
+		writeNorms(&b, []string{step})
+		if strings.Contains(b.String(), "未知步骤") {
+			t.Errorf("norm step %q has no description in normDescriptions", step)
+		}
+	}
+}
+
 // TestAttemptUpstreamFallback covers backward compatibility with audit
 // logs written before Attempt.Protocol/Provider/Model existed: the three
 // segments must still be recoverable by splitting the "/"-joined Endpoint

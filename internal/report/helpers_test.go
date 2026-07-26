@@ -41,6 +41,23 @@ func TestAttemptErrorClassFallback(t *testing.T) {
 	}
 }
 
+func TestMs(t *testing.T) {
+	for _, tc := range []struct {
+		v    int64
+		want string
+	}{
+		{0, "0ms"},
+		{999, "999ms"},
+		{1000, "1.0s"}, // exactly 1000ms must already switch to seconds
+		{1001, "1.0s"},
+		{2500, "2.5s"},
+	} {
+		if got := ms(tc.v); got != tc.want {
+			t.Errorf("ms(%d) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+}
+
 func TestExtractUsage(t *testing.T) {
 	cases := []struct {
 		name                           string

@@ -10,8 +10,7 @@
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
 //
-// Each subcommand lives in its own cmd_*.go file (see
-// docs/vmr_architecture_review_opus-5.md §3.14); this file is only the
+// Each subcommand lives in its own cmd_*.go file; this file is only the
 // dispatcher, usage text, and the adapter blank-import registration point.
 package main
 

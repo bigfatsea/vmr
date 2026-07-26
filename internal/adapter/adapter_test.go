@@ -22,11 +22,10 @@ func (f fakeAdapter) BuildRequest(context.Context, *core.Endpoint, *core.Canonic
 func (f fakeAdapter) ClassifyError(int, []byte) core.ErrorClass { return core.ErrTransient }
 
 // TestGetConcurrentWithRegister exercises the atomic.Pointer copy-on-write
-// registry (see docs/vmr_architecture_review_opus-5.md §3.3/§4.1) under
-// `go test -race`: N goroutines calling Get/Names while a handful of
-// distinct names are Register()'d must never race and Get must always see
-// either "not yet registered" or the fully-registered adapter, never a
-// partially-constructed one.
+// registry under `go test -race`: N goroutines calling Get/Names while a
+// handful of distinct names are Register()'d must never race and Get must
+// always see either "not yet registered" or the fully-registered adapter,
+// never a partially-constructed one.
 func TestGetConcurrentWithRegister(t *testing.T) {
 	const names = 8
 	var wg sync.WaitGroup

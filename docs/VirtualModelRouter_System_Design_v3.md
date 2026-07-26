@@ -236,6 +236,7 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 | 追加 `data: [DONE]\n\n` | **仅 openai 协议 + SSE + 上游未发**（MiniMax 直接关流；上游已发绝不重复；Anthropic 协议无此哨兵，永不追加） | `done_appended` |
 | 软拦截标记嗅探（**不改字节，仅记录**） | 响应体（buffered 整体或 passthrough 单个事件块）内出现 `"input_sensitive":true` 或 `"output_sensitive":true` | `soft_block_detected` |
 | CRLF 分帧嗅探（**不改字节，仅记录**） | `eventSep`（`\n\n`）全程未找到边界、退到整体缓冲兜底时，累积字节里出现 `\r\n\r\n` | `crlf_framing_suspected` |
+| Thinking Process 泄漏形态嗅探（**不改字节，仅记录**） | `thinking_process_strip` 未触发（首个 content/text 值没以字面量 `Thinking Process:` 开头），但累计响应内容里 `\n<数字>.` 编号小节标记命中 ≥3 次且总字节 >1KB——覆盖 passthrough 与 buffered 两条路径，因为该形态判定同时也是 `decide()` 选择 passthrough/buffered 的依据 | `thinking_process_pattern_detected` |
 
 `isSSE` 由上游响应的 `Content-Type` 判定（含 `text/event-stream`；缺失时回退到客户端的 `stream` 字段），而非盲信请求参数——上游若忽略 `stream` 返回 JSON，原样透传。
 

@@ -672,10 +672,10 @@ func tokensTriple(in, hit, out int64) string {
 		fmtN(in), fmtN(hit), pct(int(hit), int(in)), fmtN(out))
 }
 
-// ms renders a millisecond duration as fixed-decimal seconds above 1000ms,
-// or plain milliseconds below.
+// ms renders a millisecond duration as fixed-decimal seconds at 1000ms and
+// above, or plain milliseconds below.
 func ms(v int64) string {
-	if v > 1000 {
+	if v >= 1000 {
 		return fmt.Sprintf("%.1fs", float64(v)/1000)
 	}
 	return fmt.Sprintf("%dms", v)

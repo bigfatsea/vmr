@@ -17,6 +17,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"runtime"
 	"sort"
@@ -807,9 +808,16 @@ func linkCompactions(a *SessionAnalysis) {
 		}
 		if successor != nil {
 			c.ContinuesTo = successor.ID
+		} else if out != "" {
+			// Distinguishes "genuinely no continuation" from "the 200-byte
+			// needle missed" — both leave ContinuesTo empty, and only a log
+			// line tells them apart during triage.
+			log.Printf("report: compaction linking: successor needle not found for compaction at %s (%s)", c.TS.Format(time.RFC3339), c.Path)
 		}
 		if predecessor != nil {
 			c.Summarizes = predecessor.ID
+		} else if in != "" {
+			log.Printf("report: compaction linking: predecessor needle not found for compaction at %s (%s)", c.TS.Format(time.RFC3339), c.Path)
 		}
 		if successor != nil && predecessor != nil && successor != predecessor {
 			successor.ContinuedFrom = predecessor.ID

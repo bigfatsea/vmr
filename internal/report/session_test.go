@@ -2,7 +2,9 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -220,6 +222,40 @@ func TestAnalyzeSessionsGrouping(t *testing.T) {
 	}
 	if r1i.Finish != "tool_calls" {
 		t.Errorf("finish = %q", r1i.Finish)
+	}
+}
+
+// TestLinkCompactionsLogsMiss covers the case neither needle finds a match
+// (content genuinely unrelated, not just past the 200-byte cap): both sides
+// must stay unlinked AND each miss must be logged, so triage can tell
+// "no relation" apart from "the needle missed" instead of seeing the same
+// silent blank field either way.
+func TestLinkCompactionsLogsMiss(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(orig)
+
+	t0 := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	sess := &SessionInfo{ID: "s01", Recs: []*ReqInfo{{firstText: "hello world", TS: t0.Add(time.Minute)}}}
+	compaction := &ReqInfo{
+		Path: "test.jsonl", TS: t0,
+		respText:  "this response text does not appear in any session's opening message",
+		firstText: "this compaction's own opening text is not a prefix of any session's continuation",
+	}
+	a := &SessionAnalysis{Sessions: []*SessionInfo{sess}, Compactions: []*ReqInfo{compaction}}
+	linkCompactions(a)
+
+	if compaction.ContinuesTo != "" || compaction.Summarizes != "" {
+		t.Fatalf("expected no links for a non-matching compaction, got continuesTo=%q summarizes=%q",
+			compaction.ContinuesTo, compaction.Summarizes)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "successor needle not found") {
+		t.Errorf("expected a successor-miss log line, got: %s", out)
+	}
+	if !strings.Contains(out, "predecessor needle not found") {
+		t.Errorf("expected a predecessor-miss log line, got: %s", out)
 	}
 }
 

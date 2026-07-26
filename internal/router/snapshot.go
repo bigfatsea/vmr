@@ -2,8 +2,7 @@
 
 // Snapshot construction and installation: turning a validated config.Config
 // into the immutable, atomically-swappable routing table Serve reads. Split
-// out of router.go (see docs/vmr_architecture_review_opus-5.md §3.7/§4.5) —
-// pure move, no behavior change.
+// out of router.go — pure move, no behavior change.
 package router
 
 import (

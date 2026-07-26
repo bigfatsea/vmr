@@ -91,8 +91,7 @@ func TestSessionFingerprint_NoMessages(t *testing.T) {
 // hand-rolled scanner accepts/rejects exactly what
 // json.Unmarshal(raw, &struct{Model string; Stream bool}{}) would have —
 // see TopLevelProbe's doc comment. This is the regression net for server.go
-// replacing that reflective unmarshal (see
-// docs/vmr_architecture_review_opus-5.md §6 item 2.2).
+// replacing that reflective unmarshal with this scanner.
 func TestTopLevelProbe_MatchesStructUnmarshalSemantics(t *testing.T) {
 	cases := []struct {
 		name       string

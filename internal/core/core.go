@@ -175,12 +175,11 @@ type Endpoint struct {
 	// immutable once constructed, so BuildSnapshot computes them exactly
 	// once (Freeze) instead of every one of the ~7 hot-path call sites
 	// (health filtering, Acquire, sticky lookups, logging) recomputing —
-	// HealthKey in particular re-hashes APIKey with SHA-256 every call — see
-	// docs/vmr_architecture_review_opus-5.md §4.1. Endpoints built directly
-	// (outside BuildSnapshot, as plenty of tests do via `&core.Endpoint{...}`
-	// literals) simply never call Freeze and fall back to computing on
-	// demand every time: slower, but correct, and that fallback path is
-	// never on the request hot path.
+	// HealthKey in particular re-hashes APIKey with SHA-256 every call.
+	// Endpoints built directly (outside BuildSnapshot, as plenty of tests do
+	// via `&core.Endpoint{...}` literals) simply never call Freeze and fall
+	// back to computing on demand every time: slower, but correct, and that
+	// fallback path is never on the request hot path.
 	healthKey string
 	name      string
 }
@@ -202,9 +201,8 @@ func (e *Endpoint) Freeze() {
 // which can range from minutes to days — see design doc §6.5. Lives here
 // rather than in internal/sticky itself so internal/config can validate a
 // configured sticky_ttl against it without importing the sticky package
-// just to read one constant (see docs/vmr_architecture_review_opus-5.md
-// §3.2). internal/sticky.BackstopTTL is this same value, kept as an alias
-// for callers that already spell it that way.
+// just to read one constant. internal/sticky.BackstopTTL is this same
+// value, kept as an alias for callers that already spell it that way.
 const StickyBackstopTTL = 24 * time.Hour
 
 // HasCapability reports whether e declares support for name. An endpoint

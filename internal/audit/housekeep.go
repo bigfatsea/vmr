@@ -141,6 +141,12 @@ func compressFile(src, dst string) (err error) {
 func purgeOne(dir, name string, retentionDays int) {
 	path := filepath.Join(dir, name)
 	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			// Already gone — e.g. the resume path removed the plain .jsonl
+			// this same sweep is now purging the .zst sibling of. Not an
+			// error, nothing to report.
+			return
+		}
 		fmt.Fprintf(os.Stderr, "audit: retention: remove %s: %v\n", name, err)
 		return
 	}

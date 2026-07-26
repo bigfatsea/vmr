@@ -10,14 +10,14 @@ import (
 	"testing"
 )
 
-// fileLineLimits pins docs/vmr_architecture_review_opus-5.md §3.7/§4.5's
-// finding: router.go had grown to 948 lines against the design doc's own
-// stated ~550-line budget ("若主流程显著变大，说明抽象错了"), and nobody
-// noticed because the budget only ever lived in a comment. Phase 1's file
-// split (snapshot.go/limiter.go/transport.go/logfmt.go) brought it back to
-// 538. The limit here is set with headroom above that real post-split
-// number, not at the design doc's original round figure — the point is
-// catching regrowth back toward 948, not fighting over every line.
+// fileLineLimits pins a finding from an architecture review: router.go had
+// grown to 948 lines against the design doc's own stated ~550-line budget
+// ("若主流程显著变大，说明抽象错了"), and nobody noticed because the budget
+// only ever lived in a comment. A file split
+// (snapshot.go/limiter.go/transport.go/logfmt.go) brought it back to 538.
+// The limit here is set with headroom above that real post-split number,
+// not at the design doc's original round figure — the point is catching
+// regrowth back toward 948, not fighting over every line.
 var fileLineLimits = map[string]int{
 	"internal/router/router.go": 700,
 }
@@ -42,8 +42,7 @@ func TestArchitecture_CoreFileSizes(t *testing.T) {
 		}
 		n := bytes.Count(data, []byte("\n"))
 		if n > limit {
-			t.Errorf("%s is %d lines, over its %d-line budget — see "+
-				"docs/vmr_architecture_review_opus-5.md §3.7/§4.5: split it "+
+			t.Errorf("%s is %d lines, over its %d-line budget: split it "+
 				"into another file under internal/router, don't just raise "+
 				"this number", rel, n, limit)
 		}

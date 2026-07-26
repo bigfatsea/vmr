@@ -101,9 +101,8 @@ type Condition interface {
 // conditions is read once per endpoint per request by Eligible — the
 // actual per-request hot path — via a lock-free atomic load instead of an
 // RWMutex.RLock/RUnlock pair per endpoint (conditions.go's init() calls
-// RegisterCondition twice, never dynamically; see
-// docs/vmr_architecture_review_opus-5.md §3.5/§4.1). conditionsMu
-// serializes the copy-on-write writes themselves — see adapter.registerMu's
+// RegisterCondition twice, never dynamically). conditionsMu serializes the
+// copy-on-write writes themselves — see adapter.registerMu's
 // doc comment for why a plain copy-on-write without it would silently lose
 // an update under genuinely concurrent writers. factories (the Dimension
 // registry above) deliberately keeps its plain mutex on both paths: Build

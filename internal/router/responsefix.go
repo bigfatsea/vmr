@@ -7,10 +7,9 @@
 // generic transport mechanics (event splitting, model-field rewrite, [DONE]
 // policy, the buffered/passthrough decision) and calls into this file only
 // at the points where it needs to know "does this look like a MiniMax
-// quirk". Split out of response.go (see
-// docs/vmr_architecture_review_opus-5.md §3.8/§4.4) — pure move, no
-// behavior change: response.go and responsefix.go together are byte-for-
-// byte the same logic that lived in one file before.
+// quirk". Split out of response.go — pure move, no behavior change:
+// response.go and responsefix.go together are byte-for-byte the same logic
+// that lived in one file before.
 package router
 
 import (
@@ -29,6 +28,18 @@ var thinkPattern = regexp.MustCompile(`(?s)<think>.*?</think>(?:\\n|\n)*`)
 // thinkingProcessEndorsement matches the self-endorsement marker the
 // model uses to signal "end of thinking, start of final response".
 var thinkingProcessEndorsement = regexp.MustCompile(`Looks good\.[ \t]+Pro(?:ceed)?`)
+
+// thinkingProcessNumberedMarker approximates the numbered-subsection shape
+// of MiniMax's leaked thinking-mode outline ("1. **Analyze**", "2.
+// **Draft**", …) as it appears JSON-escaped inside a content/text string
+// value: an escaped newline immediately followed by a small integer and a
+// period. Used only as an observation signal (see
+// respStream.noteThinkingPatternIfSuspected in response.go) when
+// stripThinkingProcess's own literal "Thinking Process:" prefix guard did
+// NOT fire — a content-shape proxy for "this still looks like the leaked
+// outline even though the literal marker guard missed it", not a strip
+// trigger itself.
+var thinkingProcessNumberedMarker = regexp.MustCompile(`\\n\s*[1-9]\d?\.`)
 
 // thinkingProcessFullMatch captures the endorsement and the rest of its
 // line; the final response starts on the same line right after the

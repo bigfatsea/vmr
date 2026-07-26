@@ -4,6 +4,7 @@ package adapter
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"vmr/internal/core"
@@ -147,6 +148,11 @@ func RewriteStream(raw json.RawMessage, stream bool) ([]byte, error) {
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return nil, err
 		}
+		if m == nil {
+			// Same "null" corner case as rewriteModelGeneric: a nillable
+			// target unmarshals a JSON null without error, leaving m nil.
+			return nil, errors.New("adapter: cannot rewrite stream: request body is not a JSON object")
+		}
 		m["stream"] = sv
 		return core.MarshalNoEscape(m)
 	}
@@ -179,6 +185,14 @@ func rewriteModelGeneric(raw json.RawMessage, mv []byte) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, err
+	}
+	if m == nil {
+		// raw was the JSON literal "null" (or similar) — Unmarshal into a
+		// map pointer accepts that as "set to nil" without erroring, per
+		// encoding/json's documented null-into-nillable-type rule. Not an
+		// object, so there's nowhere to add "model"; without this check the
+		// assignment below panics on a nil map.
+		return nil, errors.New("adapter: cannot rewrite model: request body is not a JSON object")
 	}
 	m["model"] = mv
 	return core.MarshalNoEscape(m)
