@@ -362,6 +362,48 @@ func renderScheduledDoc(header string, occ []RequestRow) string {
 	return b.String()
 }
 
+// FailedRequestRows filters rows down to the error-analysis surface: outcome
+// "error" (upstream/vmr rejected the request), "canceled" (client hung up
+// mid-request), and "ok" rows with Truncated==true (client got a 2xx but the
+// stream broke off mid-response — a usable response was still not fully
+// delivered).
+func FailedRequestRows(rows []RequestRow) []RequestRow {
+	var out []RequestRow
+	for _, r := range rows {
+		if r.Outcome == "error" || r.Outcome == "canceled" || (r.Outcome == "ok" && r.Truncated) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// WriteFailedIndex writes vmr-requests-failed.md: a flat, time-ordered index
+// of every failed request (FailedRequestRows), each row linking straight to
+// its details/*.md+*.json. This is a dedicated error-analysis index — it
+// does not remove or alter failed requests anywhere else; vmr-requests.md
+// and every per-group sibling keep listing them exactly as before.
+func WriteFailedIndex(rows []RequestRow, dir string) error {
+	failed := FailedRequestRows(rows)
+	sort.SliceStable(failed, func(i, j int) bool { return failed[i].TS < failed[j].TS })
+
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	w("# VMR 失败请求索引\n\n")
+	w("专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，"+
+		"按时间排序，每条直链到对应的 details/*.md + *.json。不影响其他报表——这些记录在 "+
+		"vmr-requests.md 及其分组 sibling 文件里照常出现，本文件只是额外的索引。共 %d 条。\n\n", len(failed))
+	if len(failed) == 0 {
+		return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
+	}
+	w("| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n")
+	for _, r := range failed {
+		w("| %s | %s | %s/%s | %s | %s | %s |\n",
+			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
+			outcomeCell(r), fmtDurMS(r.DurMS), detailLink(r.DetailFile))
+	}
+	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
+}
+
 // writeAllRequestsFooter appends the flat "全部请求（时间序）" table covering
 // every row regardless of grouping — kept only in the main index, since it's
 // the one place a cross-group chronological view belongs.

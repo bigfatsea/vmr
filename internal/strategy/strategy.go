@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"vmr/internal/core"
 )
@@ -97,18 +98,34 @@ type Condition interface {
 	Eligible(ep *core.Endpoint, facts core.RequestFacts) bool
 }
 
+// conditions is read once per endpoint per request by Eligible — the
+// actual per-request hot path — via a lock-free atomic load instead of an
+// RWMutex.RLock/RUnlock pair per endpoint (conditions.go's init() calls
+// RegisterCondition twice, never dynamically; see
+// docs/vmr_architecture_review_opus-5.md §3.5/§4.1). conditionsMu
+// serializes the copy-on-write writes themselves — see adapter.registerMu's
+// doc comment for why a plain copy-on-write without it would silently lose
+// an update under genuinely concurrent writers. factories (the Dimension
+// registry above) deliberately keeps its plain mutex on both paths: Build
+// is only called once per model at config-load/reload time, not per
+// request, so there's no read-side win to chase there.
 var (
-	condMu     sync.RWMutex
-	conditions []Condition
+	conditionsMu sync.Mutex
+	conditions   atomic.Pointer[[]Condition]
 )
 
 // RegisterCondition adds c to the set consulted by Eligible/RejectedBy.
 // Called from init() in the file that defines each condition (see
 // conditions.go), the same compile-time registration pattern as Register.
 func RegisterCondition(c Condition) {
-	condMu.Lock()
-	defer condMu.Unlock()
-	conditions = append(conditions, c)
+	conditionsMu.Lock()
+	defer conditionsMu.Unlock()
+	var next []Condition
+	if cur := conditions.Load(); cur != nil {
+		next = append(next, *cur...)
+	}
+	next = append(next, c)
+	conditions.Store(&next)
 }
 
 // Eligible reports whether ep passes every registered hard Condition for
@@ -117,9 +134,11 @@ func RegisterCondition(c Condition) {
 // because it rests on an estimate rather than a certainty the way
 // capability conditions do.
 func Eligible(ep *core.Endpoint, facts core.RequestFacts) bool {
-	condMu.RLock()
-	defer condMu.RUnlock()
-	for _, c := range conditions {
+	cur := conditions.Load()
+	if cur == nil {
+		return true
+	}
+	for _, c := range *cur {
 		if !c.Eligible(ep, facts) {
 			return false
 		}
@@ -132,10 +151,12 @@ func Eligible(ep *core.Endpoint, facts core.RequestFacts) bool {
 // candidate set is eliminated. Not on the hot path — only called once
 // Serve() already knows candidates ended up empty.
 func RejectedBy(ep *core.Endpoint, facts core.RequestFacts) []string {
-	condMu.RLock()
-	defer condMu.RUnlock()
+	cur := conditions.Load()
+	if cur == nil {
+		return nil
+	}
 	var names []string
-	for _, c := range conditions {
+	for _, c := range *cur {
 		if !c.Eligible(ep, facts) {
 			names = append(names, c.Name())
 		}

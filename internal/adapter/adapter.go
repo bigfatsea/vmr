@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"vmr/internal/core"
 )
@@ -43,33 +44,55 @@ type Adapter interface {
 	ClassifyError(status int, body []byte) core.ErrorClass
 }
 
+// registry is read on every failover attempt (tryOne, probe.go) via a
+// lock-free atomic load instead of an RWMutex.RLock/RUnlock pair for a map
+// that, in practice, never changes after the first few milliseconds of
+// process startup (each provider subpackage's init() calls Register exactly
+// once — see docs/vmr_architecture_review_opus-5.md §3.3/§4.1). registerMu
+// serializes the copy-on-write writes themselves: Register is only ever
+// called from sequential init() in production, so this never actually
+// contends, but a plain copy-on-write without it would lose an update under
+// two genuinely concurrent Register calls (last Store wins, silently
+// dropping the other writer's entry) — caught by
+// TestGetConcurrentWithRegister under -race.
 var (
-	mu       sync.RWMutex
-	registry = map[string]Adapter{}
+	registerMu sync.Mutex
+	registry   atomic.Pointer[map[string]Adapter]
 )
 
 // Register makes an adapter available under the given config `type` name.
 // It follows the database/sql driver pattern and is called from init().
 func Register(name string, a Adapter) {
-	mu.Lock()
-	defer mu.Unlock()
-	if _, dup := registry[name]; dup {
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	next := map[string]Adapter{}
+	if cur := registry.Load(); cur != nil {
+		for k, v := range *cur {
+			next[k] = v
+		}
+	}
+	if _, dup := next[name]; dup {
 		panic(fmt.Sprintf("adapter: Register called twice for %q", name))
 	}
-	registry[name] = a
+	next[name] = a
+	registry.Store(&next)
 }
 
 func Get(name string) (Adapter, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	a, ok := registry[name]
+	cur := registry.Load()
+	if cur == nil {
+		return nil, false
+	}
+	a, ok := (*cur)[name]
 	return a, ok
 }
 
 func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	return core.SortedKeys(registry)
+	cur := registry.Load()
+	if cur == nil {
+		return nil
+	}
+	return core.SortedKeys(*cur)
 }
 
 // ResolveURL joins baseURL and suffix into the complete upstream URL.

@@ -67,20 +67,56 @@ func round2(f float64) float64 {
 	return float64(int64(f*100+0.5)) / 100
 }
 
+// measuresInput is the raw per-bucket accumulation every one of the 6 Row
+// types shares: latency samples plus the token-cache breakdown. All 6
+// finishX functions below start by feeding their own fields through
+// finishMeasures instead of repeating the same percentiles/freshTokens/
+// cacheEff calls — the only sharing 2.1's scope allows (see
+// docs/vmr_architecture_review_opus-5.md §6 item 2.1): the 6 Row *struct
+// declarations* are deliberately left untouched (their "same-name" fields
+// carry inconsistent omitempty tags across types — e.g. Row.CacheEfficiency
+// is omitempty, ClientRow.CacheEfficiency is not — so a shared embedded
+// struct would change zero-value JSON output for some types).
+type measuresInput struct {
+	durs, ttfts, streamMS                        []int64
+	tokensIn, tokensInCached, tokensInCacheWrite int64
+	tokensKnown                                  int
+}
+
+type measuresResult struct {
+	durMSP50, durMSP95       int64
+	ttftMSP50, ttftMSP95     int64
+	streamMSP50, streamMSP95 int64
+	tokensInFresh            int64
+	cacheEfficiency          float64
+}
+
+func finishMeasures(in measuresInput) measuresResult {
+	var out measuresResult
+	out.durMSP50, out.durMSP95 = percentiles(in.durs)
+	out.ttftMSP50, out.ttftMSP95 = percentiles(in.ttfts)
+	out.streamMSP50, out.streamMSP95 = percentiles(in.streamMS)
+	out.tokensInFresh = freshTokens(in.tokensIn, in.tokensInCached, in.tokensInCacheWrite)
+	if in.tokensKnown > 0 {
+		out.cacheEfficiency = cacheEff(in.tokensInCached, out.tokensInFresh)
+	}
+	return out
+}
+
 // finishRow computes true percentiles + derived fields for a full Row.
 func finishRow(r *Row) {
-	r.DurMSP50, r.DurMSP95 = percentiles(r.durs)
-	r.TTFTMSP50, r.TTFTMSP95 = percentiles(r.ttfts)
-	r.StreamMSP50, r.StreamMSP95 = percentiles(r.streamMS)
-	r.TokensInFresh = freshTokens(r.TokensIn, r.TokensInCached, r.TokensInCacheWrite)
+	m := finishMeasures(measuresInput{durs: r.durs, ttfts: r.ttfts, streamMS: r.streamMS,
+		tokensIn: r.TokensIn, tokensInCached: r.TokensInCached, tokensInCacheWrite: r.TokensInCacheWrite, tokensKnown: r.TokensKnown})
+	r.DurMSP50, r.DurMSP95 = m.durMSP50, m.durMSP95
+	r.TTFTMSP50, r.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
+	r.StreamMSP50, r.StreamMSP95 = m.streamMSP50, m.streamMSP95
+	r.TokensInFresh = m.tokensInFresh
+	r.CacheEfficiency = m.cacheEfficiency
 	if r.Requests > 0 {
 		r.SuccessRate = round2(float64(r.OK) / float64(r.Requests))
 	}
 	if r.TokensIn > 0 {
 		r.CacheHitRate = cacheHitRate(r.TokensInCached, r.TokensIn)
-	}
-	if r.TokensKnown > 0 {
-		r.CacheEfficiency = cacheEff(r.TokensInCached, r.TokensInFresh)
 	}
 	if r.TokensOut > 0 && r.TokensReasoning > 0 {
 		r.ReasoningShare = round2(float64(r.TokensReasoning) / float64(r.TokensOut))
@@ -98,32 +134,32 @@ func finishRow(r *Row) {
 }
 
 func finishHour(h *HourRow) {
-	h.DurMSP50, h.DurMSP95 = percentiles(h.durs)
-	h.TTFTMSP50, h.TTFTMSP95 = percentiles(h.ttfts)
-	_, h.StreamMSP95 = percentiles(h.streamMS)
-	h.TokensInFresh = freshTokens(h.TokensIn, h.TokensInCached, h.TokensInCacheWrite)
-	if h.TokensKnown > 0 {
-		h.CacheEfficiency = cacheEff(h.TokensInCached, h.TokensInFresh)
-	}
+	m := finishMeasures(measuresInput{durs: h.durs, ttfts: h.ttfts, streamMS: h.streamMS,
+		tokensIn: h.TokensIn, tokensInCached: h.TokensInCached, tokensInCacheWrite: h.TokensInCacheWrite, tokensKnown: h.TokensKnown})
+	h.DurMSP50, h.DurMSP95 = m.durMSP50, m.durMSP95
+	h.TTFTMSP50, h.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
+	h.StreamMSP95 = m.streamMSP95
+	h.TokensInFresh = m.tokensInFresh
+	h.CacheEfficiency = m.cacheEfficiency
 	h.durs, h.ttfts, h.streamMS = nil, nil, nil
 }
 
 func finishEndpoint(e *EndpointRow) {
-	e.DurMSP50, e.DurMSP95 = percentiles(e.durs)
-	e.TTFTMSP50, e.TTFTMSP95 = percentiles(e.ttfts)
-	_, e.StreamMSP95 = percentiles(e.streamMS)
+	m := finishMeasures(measuresInput{durs: e.durs, ttfts: e.ttfts, streamMS: e.streamMS,
+		tokensIn: e.TokensIn, tokensInCached: e.TokensInCached, tokensInCacheWrite: e.TokensInCacheWrite, tokensKnown: e.TokensKnown})
+	e.DurMSP50, e.DurMSP95 = m.durMSP50, m.durMSP95
+	e.TTFTMSP50, e.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
+	e.StreamMSP95 = m.streamMSP95
+	e.TokensInFresh = m.tokensInFresh
+	e.CacheEfficiency = m.cacheEfficiency
 	e.InTokP50, e.InTokP95 = percentiles(e.inToks)
 	e.OutTokP50, e.OutTokP95 = percentiles(e.outToks)
-	e.TokensInFresh = freshTokens(e.TokensIn, e.TokensInCached, e.TokensInCacheWrite)
 	if e.Attempts > 0 {
 		e.Availability = round2(float64(e.OK) / float64(e.Attempts))
 		e.ErrorRate = round2(float64(e.Failed) / float64(e.Attempts) * 100)
 	}
 	if e.Requests > 0 {
 		e.SuccessRate = round2(float64(e.RequestsOK) / float64(e.Requests))
-	}
-	if e.TokensKnown > 0 {
-		e.CacheEfficiency = cacheEff(e.TokensInCached, e.TokensInFresh)
 	}
 	if e.DurMSSum > 0 {
 		e.TokOutPerSec = round2(float64(e.TokensOut) / (float64(e.DurMSSum) / 1000))
@@ -135,25 +171,25 @@ func finishEndpoint(e *EndpointRow) {
 }
 
 func finishClient(c *ClientRow) {
-	c.DurMSP50, c.DurMSP95 = percentiles(c.durs)
+	m := finishMeasures(measuresInput{durs: c.durs, ttfts: c.ttfts, streamMS: c.streamMS,
+		tokensIn: c.TokensIn, tokensInCached: c.TokensInCached, tokensInCacheWrite: c.TokensInCacheWrite, tokensKnown: c.TokensKnown})
+	c.DurMSP50, c.DurMSP95 = m.durMSP50, m.durMSP95
+	c.TokensInFresh = m.tokensInFresh
+	c.CacheEfficiency = m.cacheEfficiency
 	c.InTokP50, c.InTokP95 = percentiles(c.inToks)
 	c.OutTokP50, c.OutTokP95 = percentiles(c.outToks)
-	c.TokensInFresh = freshTokens(c.TokensIn, c.TokensInCached, c.TokensInCacheWrite)
 	if c.Requests > 0 {
 		c.SuccessRate = round2(float64(c.OK) / float64(c.Requests))
-	}
-	if c.TokensKnown > 0 {
-		c.CacheEfficiency = cacheEff(c.TokensInCached, c.TokensInFresh)
 	}
 	c.durs, c.ttfts, c.streamMS, c.inToks, c.outToks = nil, nil, nil, nil, nil
 }
 
 func finishWorkload(w *WorkloadRow) {
-	w.DurMSP50, w.DurMSP95 = percentiles(w.durs)
-	w.TokensInFresh = freshTokens(w.TokensIn, w.TokensInCached, w.TokensInCacheWrite)
-	if w.TokensKnown > 0 {
-		w.CacheEfficiency = cacheEff(w.TokensInCached, w.TokensInFresh)
-	}
+	m := finishMeasures(measuresInput{durs: w.durs, streamMS: w.streamMS,
+		tokensIn: w.TokensIn, tokensInCached: w.TokensInCached, tokensInCacheWrite: w.TokensInCacheWrite, tokensKnown: w.TokensKnown})
+	w.DurMSP50, w.DurMSP95 = m.durMSP50, m.durMSP95
+	w.TokensInFresh = m.tokensInFresh
+	w.CacheEfficiency = m.cacheEfficiency
 	if w.Requests > 0 {
 		w.ToolCallRate = round2(float64(w.RequestsWithToolCalls) / float64(w.Requests))
 	}
@@ -161,12 +197,12 @@ func finishWorkload(w *WorkloadRow) {
 }
 
 func finishSession(s *SessionRow, info *SessionInfo) {
-	s.DurMSP95 = p95Only(s.durs)
-	s.TTFTMSP95 = p95Only(s.ttfts)
-	s.TokensInFresh = freshTokens(s.TokensIn, s.TokensInCached, s.TokensInCacheWrite)
-	if s.TokensKnown > 0 {
-		s.CacheEfficiency = cacheEff(s.TokensInCached, s.TokensInFresh)
-	}
+	m := finishMeasures(measuresInput{durs: s.durs, ttfts: s.ttfts,
+		tokensIn: s.TokensIn, tokensInCached: s.TokensInCached, tokensInCacheWrite: s.TokensInCacheWrite, tokensKnown: s.TokensKnown})
+	s.DurMSP95 = m.durMSP95
+	s.TTFTMSP95 = m.ttftMSP95
+	s.TokensInFresh = m.tokensInFresh
+	s.CacheEfficiency = m.cacheEfficiency
 	// context_growth: last-turn tokens_in / first-turn tokens_in (ts order).
 	if info != nil && len(info.Recs) >= 2 {
 		first := info.Recs[0].Usage.In
@@ -180,11 +216,6 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 		s.RoleChars = nil
 	}
 	s.durs, s.ttfts = nil, nil
-}
-
-func p95Only(xs []int64) int64 {
-	_, p95 := percentiles(xs)
-	return p95
 }
 
 // buildFindings assembles the §7 efficiency/waste table from the finished

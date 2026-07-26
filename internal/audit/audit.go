@@ -9,6 +9,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -171,6 +172,100 @@ type Message struct {
 // size cap; whatever vmr actually saw is what gets recorded.
 func NewMessage(headers http.Header, body []byte) Message {
 	return Message{Headers: Redact(headers), Body: EncodeBody(body)}
+}
+
+// The Set* methods below are nil-safe (a nil *Attempt is a no-op) so
+// router.tryOne can call them unconditionally instead of wrapping every
+// audit write in "if att != nil { ... }" — att is nil exactly when auditing
+// is disabled for this request (see router.go). Each mirrors one of the
+// outcomes tryOne can reach for a single upstream attempt.
+
+// SetRequest records the outbound URL and request body/headers, once
+// BuildRequest has produced them.
+func (a *Attempt) SetRequest(url string, header http.Header, body []byte) {
+	if a == nil {
+		return
+	}
+	a.URL = url
+	a.Request = NewMessage(header, body)
+}
+
+// SetBuildError records that the adapter failed to construct the outbound
+// request (bad canonical request shape, not a network/upstream failure).
+func (a *Attempt) SetBuildError(err error) {
+	if a == nil {
+		return
+	}
+	a.Error = "build: " + err.Error()
+	a.ErrorClass = core.ErrBuild.String()
+}
+
+// SetCanceled records that the client disconnected while this attempt was
+// still in flight (context canceled before any response arrived).
+func (a *Attempt) SetCanceled() {
+	if a == nil {
+		return
+	}
+	a.Error = "canceled by client"
+	a.ErrorClass = core.ErrCanceled.String()
+}
+
+// SetNetworkError records a dial/write/read failure before any response
+// arrived.
+func (a *Attempt) SetNetworkError(err error) {
+	if a == nil {
+		return
+	}
+	a.Error = "network: " + err.Error()
+	a.ErrorClass = core.ErrNetwork.String()
+}
+
+// SetErrorResponse records a >=400 upstream response: auditBody is whatever
+// the caller decided to keep (already truncated/marked if it exceeded the
+// caller's own cap — that policy lives in router, not here).
+func (a *Attempt) SetErrorResponse(header http.Header, auditBody []byte, status int, class core.ErrorClass) {
+	if a == nil {
+		return
+	}
+	m := NewMessage(header, auditBody)
+	m.Status = status
+	a.Response = &m
+	a.Error = class.String()
+	a.ErrorClass = class.String()
+}
+
+// SetSuccessResponse records a 2xx upstream response's status/headers. The
+// body isn't captured here — it streams to the client and is recorded
+// separately via SetNorm/RawPreStrip once the normalizer has processed it.
+func (a *Attempt) SetSuccessResponse(status int, header http.Header) {
+	if a == nil {
+		return
+	}
+	a.Response = &Message{Status: status, Headers: Redact(header)}
+}
+
+// SetTruncated records that the upstream connection died mid-stream, after
+// the response was already committed to the client.
+func (a *Attempt) SetTruncated(err error) {
+	if a == nil {
+		return
+	}
+	a.Error = "truncated: " + err.Error()
+	a.ErrorClass = core.ErrTruncated.String()
+}
+
+// SetNorm records which normalization steps the response normalizer
+// applied, and — only when one of them rewrote the body (think_strip /
+// thinking_process_strip) — the upstream bytes exactly as received just
+// before that rewrite.
+func (a *Attempt) SetNorm(applied []string, rawPreStrip []byte) {
+	if a == nil {
+		return
+	}
+	a.Norm = applied
+	if len(rawPreStrip) > 0 {
+		a.RawPreStrip = EncodeBody(rawPreStrip)
+	}
 }
 
 // EncodeBody returns the body as raw JSON when it is valid JSON (kept
@@ -361,14 +456,35 @@ func (l *Logger) Path() string {
 	return filepath.Join(l.dir, "vmr-audit-"+l.now().Format("2006-01-02")+".jsonl")
 }
 
+// writeBufPool pools the *bytes.Buffer used to encode a Record before it's
+// written to disk. Deliberately NOT a single buffer field on Logger: audit
+// records can run to several MB for a long agent conversation, and encoding
+// happens here — outside l.mu — specifically so concurrent requests encode
+// in parallel; a shared Logger-level buffer would force serializing that
+// CPU-bound JSON encoding under the same global lock that guards the much
+// cheaper file write, trading one performance problem for a worse one under
+// real concurrent load (see docs/vmr_architecture_review_opus-5.md §3.10 —
+// this is a deliberate deviation from that review's initial sketch of "one
+// reused buffer"). A sync.Pool gets the allocation-reduction win without
+// that regression: each goroutine borrows its own buffer, encodes into it
+// with no contention, and only the resulting bytes cross into the locked
+// section below.
+var writeBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
 // Write appends one record. Failures must never break request serving: the
 // error is returned for the caller to log and otherwise ignore.
 func (l *Logger) Write(rec *Record) error {
 	if l == nil {
 		return nil
 	}
-	line, err := json.Marshal(rec)
-	if err != nil {
+	buf := writeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer writeBufPool.Put(buf)
+	// json.NewEncoder.Encode appends its own trailing '\n' — unlike
+	// json.Marshal + a manual append(line, '\n'), which reallocates and
+	// copies the whole (potentially multi-MB) record just to add one byte,
+	// since Marshal's returned slice has no spare capacity.
+	if err := json.NewEncoder(buf).Encode(rec); err != nil {
 		return fmt.Errorf("audit marshal: %w", err)
 	}
 	l.mu.Lock()
@@ -394,7 +510,7 @@ func (l *Logger) Write(rec *Record) error {
 		// written to and are fair game for compression/retention.
 		l.scheduleHousekeeping()
 	}
-	_, err = l.f.Write(append(line, '\n'))
+	_, err := l.f.Write(buf.Bytes())
 	return err
 }
 

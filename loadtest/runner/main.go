@@ -5,14 +5,22 @@
 // cost-regime subsets, see gentargets), fires each load profile in profiles
 // through Vegeta — as two separate attacks, plain-request scenarios and
 // image-processing scenarios, so image decode/scale/encode's real cost
-// doesn't get blended into everyone else's percentiles — runs `vmr report`
-// once at the end, and writes a combined Markdown report to
-// reports/loadtest-report.md.
+// doesn't get blended into everyone else's percentiles — and writes a
+// combined Markdown report to reports/loadtest-report.md.
 // The audit log lives under logs/loadtest/ — a subdirectory of the same
 // logs/ tree real vmr instances use, not the shared top level: the audit
 // filename (vmr-audit-YYYY-MM-DD.jsonl) has no prefix knob, and this run
 // wipes its log dir clean before starting, so mixing with — or clobbering —
 // real audit data is a real risk if it pointed at logs/ directly.
+//
+// This tool is deliberately self-contained: the "server-side view" numbers
+// come from parsing this run's own audit JSONL directly (computeServerStats
+// below), never from running `vmr report` or importing any vmr-internal
+// package. A load test measures vmr's HTTP surface under load — it has no
+// business depending on a separate command's (internal/report's) rendering
+// pipeline succeeding, existing, or keeping a particular output shape. Run
+// this having never once run `vmr report` against anything, and the result
+// is identical.
 //
 // Requires: vegeta on PATH (go install github.com/tsenart/vegeta@latest)
 // and a built ./vmr binary at the repo root (go build -o vmr ./cmd/vmr).
@@ -24,6 +32,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -31,6 +40,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -172,29 +182,12 @@ func run() error {
 	mock.Process.Kill()
 	mock.Wait()
 
-	fmt.Println("== vmr report ==")
-	// `vmr report`'s output filenames are fixed (vmr-report.md, etc., no
-	// prefix option) — staged in a throwaway temp dir instead of reportsDir
-	// directly, so this can never collide with or overwrite a real report
-	// already sitting in reports/. Only the synthesized reportOutPath below
-	// (client + server view combined, this run's actual deliverable) is
-	// kept; the raw vmr-report.* staging output is discarded.
-	stagingDir, err := os.MkdirTemp("", "vmr-loadtest-report-*")
-	if err != nil {
-		return fmt.Errorf("create report staging dir: %w", err)
-	}
-	defer os.RemoveAll(stagingDir)
-
+	fmt.Println("== computing server-side stats from this run's own audit log ==")
 	logFiles, err := filepath.Glob(filepath.Join(logDir, "vmr-audit-*.jsonl"))
 	if err != nil || len(logFiles) == 0 {
 		return fmt.Errorf("no audit log files under %s (err=%v)", logDir, err)
 	}
-	reportArgs := append([]string{"report", "-o", stagingDir}, logFiles...)
-	if out, err := exec.Command(vmrBinary, reportArgs...).CombinedOutput(); err != nil {
-		return fmt.Errorf("vmr report: %w\n%s", err, out)
-	}
-
-	byModel, endpoints, err := extractTables(filepath.Join(stagingDir, "vmr-report.md"))
+	byModel, endpoints, err := computeServerStats(logFiles)
 	if err != nil {
 		return err
 	}
@@ -283,37 +276,170 @@ func attack(targetsPath string, rate int, duration time.Duration) (vegetaReport,
 	return rep, nil
 }
 
-// extractTables pulls the "按模型" and "端点可用度" sections out of vmr's own
-// generated report.md verbatim — reusing vmr's own rendering instead of
-// re-parsing vmr-report.json and reimplementing table formatting.
-func extractTables(path string) (byModel, endpoints string, err error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", fmt.Errorf("read %s: %w", path, err)
-	}
-	md := string(data)
-	byModel = extractSection(md, "## 按模型")
-	endpoints = extractSection(md, "## 端点可用度")
-	if byModel == "" || endpoints == "" {
-		return "", "", fmt.Errorf("expected sections not found in %s — vmr-report.md's headings may have changed", path)
-	}
-	return byModel, endpoints, nil
+// auditRecord is the minimal subset of one audit JSONL line's fields this
+// tool needs (see docs/VirtualModelRouter_System_Design_v3.md §9.2 for the
+// full schema). Deliberately hand-rolled here instead of importing
+// vmr/internal/audit.Record: this load test computes its own numbers
+// straight from the raw audit log its own vmr instance just wrote, with
+// zero dependency on any vmr-internal package for this step — the same
+// on-disk JSONL format an external tool (jq, DuckDB, a human) would read
+// directly. A malformed or missing field just zero-values here rather than
+// failing to compile; that trade is deliberate, see the package doc above.
+type auditRecord struct {
+	Model    string `json:"model"`
+	DurMS    int64  `json:"dur_ms"`
+	TTFTMS   int64  `json:"ttft_ms"`
+	Attempts []struct {
+		Endpoint   string `json:"endpoint"`
+		ErrorClass string `json:"error_class"` // "" = this attempt succeeded (see design doc §9.2 note 4)
+	} `json:"attempts"`
 }
 
-func extractSection(md, heading string) string {
-	i := strings.Index(md, heading)
-	if i < 0 {
-		return ""
+// modelStats accumulates one scenario (= virtual model)'s raw dur_ms/ttft_ms
+// values for this tool's own p50/p95/max.
+type modelStats struct {
+	requests  int
+	dur, ttft []int64
+}
+
+type endpointStats struct {
+	attempts, ok int
+}
+
+// computeServerStats reads the audit JSONL files this load test run's own
+// vmr instance just wrote (logFiles, under logDir) and computes the two
+// tables loadtest-report.md's "server-side view" shows: per-model
+// (=scenario) latency and per-endpoint availability — a scanner over plain
+// JSON lines, nothing more. See the package doc for why this replaced an
+// earlier version that shelled out to `vmr report` and parsed its output.
+func computeServerStats(logFiles []string) (byModel, endpoints string, err error) {
+	models := map[string]*modelStats{}
+	eps := map[string]*endpointStats{}
+	for _, path := range logFiles {
+		if err := scanAuditFile(path, models, eps); err != nil {
+			return "", "", err
+		}
 	}
-	rest := md[i:]
-	nl := strings.Index(rest, "\n")
-	if nl < 0 {
-		return rest
+	if len(models) == 0 || len(eps) == 0 {
+		return "", "", fmt.Errorf("no records with model/attempts found across %d audit file(s) under %s", len(logFiles), logDir)
 	}
-	if next := strings.Index(rest[nl+1:], "\n## "); next >= 0 {
-		return strings.TrimSpace(rest[:nl+1+next])
+	return renderModelStats(models), renderEndpointStats(eps), nil
+}
+
+func scanAuditFile(path string, models map[string]*modelStats, eps map[string]*endpointStats) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
 	}
-	return strings.TrimSpace(rest)
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// Audit lines embed full request/response bodies and can run to several
+	// MB (image scenarios especially) — bufio.Scanner's 64KB default token
+	// cap would silently truncate the scan with ErrTooLong well before that.
+	scanner.Buffer(make([]byte, 0, 64<<10), 32<<20)
+	for scanner.Scan() {
+		var rec auditRecord
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			continue // a malformed line shouldn't sink the whole load test summary
+		}
+		ms, ok := models[rec.Model]
+		if !ok {
+			ms = &modelStats{}
+			models[rec.Model] = ms
+		}
+		ms.requests++
+		if rec.DurMS > 0 {
+			ms.dur = append(ms.dur, rec.DurMS)
+		}
+		if rec.TTFTMS > 0 {
+			ms.ttft = append(ms.ttft, rec.TTFTMS)
+		}
+		for _, a := range rec.Attempts {
+			if a.Endpoint == "" {
+				continue
+			}
+			es, ok := eps[a.Endpoint]
+			if !ok {
+				es = &endpointStats{}
+				eps[a.Endpoint] = es
+			}
+			es.attempts++
+			if a.ErrorClass == "" {
+				es.ok++
+			}
+		}
+	}
+	return scanner.Err()
+}
+
+// percentile returns sorted's p-th percentile (nearest-rank, p in [0,1]) —
+// a self-contained implementation, not internal/report's: this tool
+// doesn't need to match internal/report's exact percentile method, only to
+// report a stable, documented one of its own. sorted must already be sorted
+// ascending.
+func percentile(sorted []int64, p float64) int64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(p * float64(len(sorted)-1))
+	return sorted[idx]
+}
+
+// renderModelStats is a deliberately minimal stand-in for vmr-report.md's
+// own per-model table (internal/report/aggregate_render.go) — just the
+// columns this report's readers actually look at (see loadtest/README.md's
+// "reading the numbers" section). Sorted by model name for run-to-run
+// stability — this tool's own map iteration would otherwise be exactly the
+// kind of non-determinism documented in
+// docs/vmr_architecture_review_opus-5.md's report note.
+func renderModelStats(models map[string]*modelStats) string {
+	names := make([]string, 0, len(models))
+	for name := range models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString("**按模型**（本次运行自己的审计日志现算，不经过 `vmr report`）\n\n")
+	b.WriteString("| 模型 | 请求 | dur p50/p95/max | ttft p50/p95 |\n|---|---|---|---|\n")
+	for _, name := range names {
+		m := models[name]
+		dur := append([]int64(nil), m.dur...)
+		sort.Slice(dur, func(i, j int) bool { return dur[i] < dur[j] })
+		ttft := append([]int64(nil), m.ttft...)
+		sort.Slice(ttft, func(i, j int) bool { return ttft[i] < ttft[j] })
+		var maxDur int64
+		if len(dur) > 0 {
+			maxDur = dur[len(dur)-1]
+		}
+		fmt.Fprintf(&b, "| %s | %d | %dms/%dms/%dms | %dms/%dms |\n",
+			name, m.requests,
+			percentile(dur, 0.5), percentile(dur, 0.95), maxDur,
+			percentile(ttft, 0.5), percentile(ttft, 0.95))
+	}
+	return b.String()
+}
+
+// renderEndpointStats mirrors renderModelStats' rationale for the
+// per-endpoint availability table.
+func renderEndpointStats(eps map[string]*endpointStats) string {
+	names := make([]string, 0, len(eps))
+	for name := range eps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString("**端点可用度**（本次运行自己的审计日志现算——确认没有端点被 failover 卡住或悄悄绕过）\n\n")
+	b.WriteString("| 端点 | 尝试 | 成功 | 可用度 |\n|---|---|---|---|\n")
+	for _, name := range names {
+		e := eps[name]
+		var avail float64
+		if e.attempts > 0 {
+			avail = float64(e.ok) / float64(e.attempts) * 100
+		}
+		fmt.Fprintf(&b, "| %s | %d | %d | %.1f%% |\n", name, e.attempts, e.ok, avail)
+	}
+	return b.String()
 }
 
 func writeReport(results []roundResult, byModel, endpoints string) error {
@@ -343,7 +469,7 @@ func writeReport(results []roundResult, byModel, endpoints string) error {
 	}
 
 	fmt.Fprint(&b, "## Server-side view (vmr's own audit log), per scenario, all rounds combined\n\n")
-	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) — this is where the per-scenario cost breakdown comes from (§1 of the design doc: no custom report code, this is `vmr report`'s own output, extracted verbatim).\n\n")
+	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) — this is where the per-scenario cost breakdown comes from, computed directly from this run's own audit JSONL (computeServerStats), not from `vmr report` — this tool never runs it.\n\n")
 	b.WriteString(byModel)
 	b.WriteString("\n\n")
 	b.WriteString(endpoints)

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sort"
 	"time"
@@ -170,7 +169,43 @@ type Endpoint struct {
 	// config.EndpointConfig.StickyTTL override or, absent that, the global
 	// config.Config.StickyTTL default.
 	StickyTTL time.Duration
+
+	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
+	// functions of the exported fields above and every Endpoint is
+	// immutable once constructed, so BuildSnapshot computes them exactly
+	// once (Freeze) instead of every one of the ~7 hot-path call sites
+	// (health filtering, Acquire, sticky lookups, logging) recomputing —
+	// HealthKey in particular re-hashes APIKey with SHA-256 every call — see
+	// docs/vmr_architecture_review_opus-5.md §4.1. Endpoints built directly
+	// (outside BuildSnapshot, as plenty of tests do via `&core.Endpoint{...}`
+	// literals) simply never call Freeze and fall back to computing on
+	// demand every time: slower, but correct, and that fallback path is
+	// never on the request hot path.
+	healthKey string
+	name      string
 }
+
+// Freeze precomputes HealthKey()/Name() so every later call is a plain
+// field read. Called once per Endpoint, right after construction, by
+// router.BuildSnapshot — before the Endpoint is ever reachable from a
+// concurrently-read Snapshot, so no additional synchronization is needed
+// beyond the atomic pointer swap that already publishes the Snapshot.
+// Idempotent; safe to call more than once (it never will be, but nothing
+// breaks if it is).
+func (e *Endpoint) Freeze() {
+	e.healthKey = e.computeHealthKey()
+	e.name = e.computeName()
+}
+
+// StickyBackstopTTL bounds internal/sticky's Registry memory growth,
+// independent of any per-endpoint validity TTL (Endpoint.StickyTTL above),
+// which can range from minutes to days — see design doc §6.5. Lives here
+// rather than in internal/sticky itself so internal/config can validate a
+// configured sticky_ttl against it without importing the sticky package
+// just to read one constant (see docs/vmr_architecture_review_opus-5.md
+// §3.2). internal/sticky.BackstopTTL is this same value, kept as an alias
+// for callers that already spell it that way.
+const StickyBackstopTTL = 24 * time.Hour
 
 // HasCapability reports whether e declares support for name. An endpoint
 // that declares no capabilities at all is unconstrained (see Capabilities).
@@ -193,12 +228,26 @@ func (e *Endpoint) HasCapability(name string) bool {
 // and providers.anthropic) — without it, two genuinely different endpoints
 // sharing a name, API key, and upstream model string would collide.
 func (e *Endpoint) HealthKey() string {
+	if e.healthKey != "" {
+		return e.healthKey
+	}
+	return e.computeHealthKey()
+}
+
+func (e *Endpoint) computeHealthKey() string {
 	sum := sha256.Sum256([]byte(e.APIKey))
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model + "/" + hex.EncodeToString(sum[:4])
 }
 
 // Name is the human-readable endpoint label used in logs and status output.
 func (e *Endpoint) Name() string {
+	if e.name != "" {
+		return e.name
+	}
+	return e.computeName()
+}
+
+func (e *Endpoint) computeName() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model
 }
 
@@ -212,42 +261,6 @@ func SortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// FmtBytes renders a byte count human-readably (B/KB/MB) — request/response
-// bodies range from a few hundred bytes to several MB (inline images), so a
-// fixed unit would be either unreadable or falsely precise at one end.
-// Shared by every place that prints a body size (live router log, `vmr
-// report` rendering) so they don't each carry their own copy of this
-// threshold logic.
-func FmtBytes(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%dB", n)
-	}
-}
-
-// FmtTokens renders RequestFacts.EstimatedTokens — a pre-call estimate
-// derived from the request body's byte length (see server/facts.go), never
-// the provider's actual post-response usage count — the same way FmtBytes
-// renders a byte count: K/M-scaled above 1000/1e6, raw below. The "EST"
-// marker on the unit itself (not just a comment) is deliberate: this number
-// explains a routing decision made before the call, and must never be
-// mistaken for billed/actual usage at a glance in the live router log's
-// req=xxxKB/xxxESTKT column.
-func FmtTokens(n int64) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fESTMT", float64(n)/1_000_000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fESTKT", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%dESTT", n)
-	}
 }
 
 // asciiBytesPerToken/wideBytesPerToken split EstimateTextTokens' byte count
@@ -278,13 +291,4 @@ func EstimateTextTokens(body []byte) int64 {
 		}
 	}
 	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
-}
-
-// FmtSeconds renders d as fixed-decimal seconds ("6.32s") instead of
-// Duration.String()'s mixed units (ms/s/m) — a column where some rows read
-// "141ms" and others "1m4s" doesn't scan as a column; one unit throughout
-// does. decimals lets callers trade precision for width (2 for the live
-// router log, 3 for `vmr diagnose`'s sub-10ms-sensitive latency columns).
-func FmtSeconds(d time.Duration, decimals int) string {
-	return fmt.Sprintf("%.*fs", decimals, d.Seconds())
 }

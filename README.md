@@ -92,7 +92,7 @@ That's the whole surface a first request needs. Everything past this point — f
 go test -race ./...
 ```
 
-Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the three-method interface + one blank import in `cmd/vmr/main.go`.
+Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the four-method `Adapter` interface + one blank import in `cmd/vmr/main.go`.
 
 ## License
 

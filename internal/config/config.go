@@ -19,8 +19,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"vmr/internal/adapter"
+	"vmr/internal/core"
 	"vmr/internal/rundir"
-	"vmr/internal/sticky"
 )
 
 const (
@@ -371,16 +371,17 @@ func (c *Config) validate() error {
 	if c.ProbeMode != ProbeModeActive && c.ProbeMode != ProbeModePassive {
 		return fmt.Errorf("probe_mode %q: must be %q or %q", c.ProbeMode, ProbeModeActive, ProbeModePassive)
 	}
-	// sticky.BackstopTTL is the internal/sticky Registry's own memory-eviction
-	// window — an entry idle longer than that is dropped from the map
-	// regardless of what any endpoint's own StickyTTL says, so a configured
-	// sticky_ttl above it would look accepted but silently stop taking effect
-	// once a conversation goes quiet for longer than the backstop (see
-	// sticky.BackstopTTL's doc comment). Caught here, at load time, instead
-	// of surfacing as "sticky mysteriously stopped working" in production.
-	if c.StickyTTL.D() > sticky.BackstopTTL {
+	// core.StickyBackstopTTL is the internal/sticky Registry's own memory-
+	// eviction window — an entry idle longer than that is dropped from the
+	// map regardless of what any endpoint's own StickyTTL says, so a
+	// configured sticky_ttl above it would look accepted but silently stop
+	// taking effect once a conversation goes quiet for longer than the
+	// backstop (see core.StickyBackstopTTL's doc comment). Caught here, at
+	// load time, instead of surfacing as "sticky mysteriously stopped
+	// working" in production.
+	if c.StickyTTL.D() > core.StickyBackstopTTL {
 		return fmt.Errorf("sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-			c.StickyTTL.D(), sticky.BackstopTTL, c.StickyTTL.D(), sticky.BackstopTTL)
+			c.StickyTTL.D(), core.StickyBackstopTTL, c.StickyTTL.D(), core.StickyBackstopTTL)
 	}
 	for i, k := range c.APIKeys {
 		if len(k) < minAPIKeyLen {
@@ -456,9 +457,9 @@ func (c *Config) validate() error {
 					if ep.StickyTTL.D() <= 0 {
 						return fmt.Errorf("model %q endpoint #%d: sticky_ttl must be positive", name, i+1)
 					}
-					if ep.StickyTTL.D() > sticky.BackstopTTL {
+					if ep.StickyTTL.D() > core.StickyBackstopTTL {
 						return fmt.Errorf("model %q endpoint #%d: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-							name, i+1, ep.StickyTTL.D(), sticky.BackstopTTL, ep.StickyTTL.D(), sticky.BackstopTTL)
+							name, i+1, ep.StickyTTL.D(), core.StickyBackstopTTL, ep.StickyTTL.D(), core.StickyBackstopTTL)
 					}
 				}
 			}

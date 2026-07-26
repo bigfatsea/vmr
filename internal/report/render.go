@@ -16,6 +16,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 )
 
 // previewLen bounds the one-line preview shown in a <details> summary.
@@ -87,10 +88,10 @@ func truncCell(s string, n int) string {
 }
 
 // fmtBytes renders a byte count human-readably — thin local alias for
-// core.FmtBytes so the ~10 call sites across this package (detail.go,
-// render.go) don't all need the "core." qualifier.
+// fmtutil.FmtBytes so the ~10 call sites across this package (detail.go,
+// render.go) don't all need the "fmtutil." qualifier.
 func fmtBytes(n int64) string {
-	return core.FmtBytes(n)
+	return fmtutil.FmtBytes(n)
 }
 
 // jsonIndent pretty-prints any decoded JSON value.

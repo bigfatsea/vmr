@@ -135,7 +135,7 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	if err := cmdReport([]string{"-o", outDir, auditPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.jsonl"} {
+	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.jsonl", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("expected %s to be written: %v", name, err)
 		}

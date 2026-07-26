@@ -91,7 +91,7 @@ curl http://127.0.0.1:8800/admin/status
 go test -race ./...
 ```
 
-新增 Provider：OpenAI/Anthropic 兼容的厂商只是一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现三方法接口 + `cmd/vmr/main.go` 一行 blank import。
+新增 Provider：OpenAI/Anthropic 兼容的厂商只是一条配置，零代码。新协议 = `internal/adapter/<name>/` 实现 `Adapter` 四方法接口 + `cmd/vmr/main.go` 一行 blank import。
 
 ## 开源协议
 

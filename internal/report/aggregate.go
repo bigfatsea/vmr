@@ -1023,18 +1023,61 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		}
 		return rep.Endpoints[i].Endpoint < rep.Endpoints[j].Endpoint
 	})
-	sort.Slice(rep.EndpointsAll, func(i, j int) bool { return rep.EndpointsAll[i].Attempts > rep.EndpointsAll[j].Attempts })
-	sort.Slice(rep.ByClient, func(i, j int) bool { return rep.ByClient[i].Requests > rep.ByClient[j].Requests })
-	sort.Slice(rep.Workloads, func(i, j int) bool { return rep.Workloads[i].TokensIn > rep.Workloads[j].TokensIn })
+	// Every comparator below sorts primarily by a count/byte-size value that
+	// legitimately repeats across rows (two endpoints can both have exactly
+	// 1 attempt; two sessions can both have exactly 2 requests). Each also
+	// appends the bucket's own identity field as a tie-break — Endpoint/
+	// ClientKey/Class/ID/Shape are each guaranteed unique within their own
+	// slice (they're literally what these rows were grouped by), so the
+	// comparator always returns a strict answer for two distinct rows.
+	// Without it, ties fell back to whatever order the slice already had —
+	// which itself comes from ranging over a Go map a few lines up
+	// (byModel/epsAll/byClient/... above), an order the language spec
+	// deliberately does not guarantee is the same from one run to the next.
+	// The result: rows sharing a tied value would silently swap places
+	// between two otherwise-identical runs of the same binary against the
+	// same input (caught by TestBuildIsDeterministic; see
+	// docs/vmr_architecture_review_opus-5.md's report note for how this was
+	// first noticed, comparing loadtest-report.md across two runs).
+	sort.Slice(rep.EndpointsAll, func(i, j int) bool {
+		a, b := rep.EndpointsAll[i], rep.EndpointsAll[j]
+		if a.Attempts != b.Attempts {
+			return a.Attempts > b.Attempts
+		}
+		return a.Endpoint < b.Endpoint
+	})
+	sort.Slice(rep.ByClient, func(i, j int) bool {
+		a, b := rep.ByClient[i], rep.ByClient[j]
+		if a.Requests != b.Requests {
+			return a.Requests > b.Requests
+		}
+		return a.ClientKey < b.ClientKey
+	})
+	sort.Slice(rep.Workloads, func(i, j int) bool {
+		a, b := rep.Workloads[i], rep.Workloads[j]
+		if a.TokensIn != b.TokensIn {
+			return a.TokensIn > b.TokensIn
+		}
+		return a.Class < b.Class
+	})
 	sort.Slice(rep.Sessions, func(i, j int) bool {
 		// interactive first (by requests), then scheduled; stable within
 		a, b := rep.Sessions[i], rep.Sessions[j]
 		if (a.Class == "interactive") != (b.Class == "interactive") {
 			return a.Class == "interactive"
 		}
-		return a.Requests > b.Requests
+		if a.Requests != b.Requests {
+			return a.Requests > b.Requests
+		}
+		return a.ID < b.ID
 	})
-	sort.Slice(rep.Tools, func(i, j int) bool { return rep.Tools[i].SchemaWasteBytes > rep.Tools[j].SchemaWasteBytes })
+	sort.Slice(rep.Tools, func(i, j int) bool {
+		a, b := rep.Tools[i], rep.Tools[j]
+		if a.SchemaWasteBytes != b.SchemaWasteBytes {
+			return a.SchemaWasteBytes > b.SchemaWasteBytes
+		}
+		return a.Shape < b.Shape
+	})
 	return rep, sess, nil
 }
 

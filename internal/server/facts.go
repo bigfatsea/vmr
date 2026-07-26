@@ -15,7 +15,6 @@ package server
 import (
 	"bytes"
 
-	"vmr/internal/adapter"
 	"vmr/internal/core"
 )
 
@@ -36,7 +35,12 @@ const (
 // computeRequestFacts derives core.RequestFacts from a request's already-
 // buffered body. It never fails: every sub-estimate degrades to zero on
 // any shape it doesn't recognize, matching the fail-open posture of the
-// scanner it's built from (adapter.HasNonEmptyTopLevelArray).
+// scanner it's built from.
+//
+// hasTools is NOT derived here from a second body scan — it comes from the
+// same adapter.TopLevelProbe call server.go already made to extract
+// model/stream, folded into that single structural pass instead of a
+// second, independent top-level "tools" array scan.
 //
 // imageCount is NOT derived here from a body scan — it comes from the
 // caller's single imgprep.Downscale call (server.go), which walks the
@@ -62,10 +66,10 @@ const (
 //     count for both HasImage and the image portion of EstimatedTokens
 //     means the common no-image case never does the image-related work
 //     twice.
-func computeRequestFacts(body []byte, imageCount int) core.RequestFacts {
+func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.RequestFacts {
 	return core.RequestFacts{
 		HasImage:        imageCount > 0,
-		HasTools:        adapter.HasNonEmptyTopLevelArray(body, "tools"),
+		HasTools:        hasTools,
 		EstimatedTokens: core.EstimateTextTokens(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
 	}
 }

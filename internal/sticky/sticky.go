@@ -15,6 +15,8 @@ package sticky
 import (
 	"sync"
 	"time"
+
+	"vmr/internal/core"
 )
 
 // BackstopTTL bounds memory growth independent of any per-endpoint
@@ -24,14 +26,17 @@ import (
 // still-present entry is "valid" for a routing decision, which Peek leaves
 // entirely to the caller.
 //
-// Exported so internal/config can reject a configured sticky_ttl (global or
-// per-endpoint) above this value at load time: such a setting would look
+// This is core.StickyBackstopTTL, kept here as an alias for callers that
+// already spell it sticky.BackstopTTL: the canonical value lives in
+// internal/core so internal/config can validate a configured sticky_ttl
+// against it without importing this package just to read one constant (see
+// docs/vmr_architecture_review_opus-5.md §3.2) — such a setting would look
 // accepted but silently stop working the moment an entry goes quiet for
 // longer than BackstopTTL, since Set's sweep would have already dropped it
 // from the map — a routing decision that quietly degrades from "sticky"
 // to "not sticky" with no error is exactly the kind of surprise vmr's
 // fail-fast config philosophy exists to catch before it ships.
-const BackstopTTL = 24 * time.Hour
+const BackstopTTL = core.StickyBackstopTTL
 
 // sweepInterval throttles the opportunistic sweep so Set doesn't walk the
 // whole map on every call — same event-triggered-and-throttled shape as

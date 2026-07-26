@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -153,6 +154,55 @@ func TestNilLoggerNoop(t *testing.T) {
 	}
 	if err := l.Close(); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestWriteConcurrentGoroutinesProduceValidJSONL is the correctness property
+// the sync.Pool-based rewrite of Write actually depends on (see
+// docs/vmr_architecture_review_opus-5.md §3.10): each goroutine encodes into
+// its own pooled buffer with no cross-goroutine sharing, so N concurrent
+// Write calls must produce exactly N complete, independently-parseable JSON
+// lines — never a line that's the concatenation, truncation, or interleaving
+// of two records. Run with -race to also catch any data race on the pooled
+// buffers or the underlying file.
+func TestWriteConcurrentGoroutinesProduceValidJSONL(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	l.hkWG.Wait()
+
+	const n = 200
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Vary body size so short and long encodes race against each
+			// other — a bug in buffer reuse is more likely to surface when
+			// buffer sizes differ between concurrent callers.
+			if err := l.Write(&Record{Model: strings.Repeat("m", i%50+1)}); err != nil {
+				t.Errorf("Write: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	data, err := os.ReadFile(l.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != n {
+		t.Fatalf("want %d lines, got %d", n, len(lines))
+	}
+	for i, line := range lines {
+		var rec Record
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Errorf("line %d not valid JSON: %v (%q)", i, err, line)
+		}
 	}
 }
 

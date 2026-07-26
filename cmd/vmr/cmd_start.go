@@ -1,0 +1,199 @@
+// Ver 2026-07-26, by Sonnet 5
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"vmr/internal/audit"
+	"vmr/internal/config"
+	"vmr/internal/router"
+	"vmr/internal/server"
+)
+
+// vmrBanner is a fixed-width, pure-ASCII block-letter "VMR" mark (no
+// unicode box-drawing glyphs, so it renders identically in any terminal,
+// log viewer, or `less`/`grep` pipeline). Printed once per process start —
+// scanning a log file top to bottom, it's the unmistakable marker of "a new
+// vmr process began writing here", distinct from the ordinary timestamped
+// lines around it.
+const vmrBanner = `
+ _    ____  _______
+| |  / /  |/  / __ \
+| | / / /|_/ / /_/ /
+| |/ / /  / / _, _/
+|___/_/  /_/_/ |_|
+
+  Virtual Model Router
+`
+
+// stampWriter prepends a "YYYY-MM-DD HH:MM:SS " timestamp (ISO-ish, unlike
+// log.LstdFlags' fixed "2006/01/02 15:04:05") to every write. log.Logger
+// calls Write exactly once per line — the fully formatted message, already
+// newline-terminated — so wrapping the writer stamps every logger.Printf
+// call site uniformly without editing any of them individually.
+type stampWriter struct{ w io.Writer }
+
+func (s stampWriter) Write(p []byte) (int, error) {
+	line := append([]byte(time.Now().Format("2006-01-02 15:04:05")+" "), p...)
+	if _, err := s.w.Write(line); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// logStart prints the hero banner followed by one timestamped, greppable
+// marker line carrying the facts that matter for a support/incident
+// timeline: pid, config path, listen address. The banner is written
+// straight to stderr (bypassing the logger's stamping) — ASCII art doesn't
+// want a timestamp glued to its first line.
+func logStart(logger *log.Logger, path string, listen string) {
+	fmt.Fprint(os.Stderr, vmrBanner)
+	logger.Printf("VMR START pid=%d config=%s listen=%s", os.Getpid(), path, listen)
+}
+
+// logStop prints one timestamped, greppable marker line on the way out —
+// clean shutdown or abnormal exit alike — so "how long did this process
+// run and why did it stop" is answerable from the log file alone.
+func logStop(logger *log.Logger, reason string, uptime time.Duration) {
+	logger.Printf("==================================================")
+	logger.Printf("VMR STOP  pid=%d reason=%q uptime=%s", os.Getpid(), reason, uptime.Round(time.Second))
+	logger.Printf("==================================================")
+}
+
+func cmdStart(args []string) error {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	path := fs.String("c", "config.yaml", "path to config file")
+	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from config log_dir, see 'vmr dirs log')")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	logger := log.New(stampWriter{os.Stderr}, "", 0)
+	startTime := time.Now()
+
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	logStart(logger, *path, cfg.Listen)
+
+	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
+	// reads the retention window at the moment it runs — SetRetentionDays
+	// must land before New, not after, or that first sweep compresses old
+	// files but never purges them.
+	audit.SetRetentionDays(cfg.AuditRetentionDays)
+
+	var auditLog *audit.Logger
+	if *auditOn {
+		if auditLog, err = audit.New(cfg.LogDir); err != nil {
+			return fmt.Errorf("audit log: %w", err)
+		}
+		defer auditLog.Close()
+		logger.Printf("audit log: %s", auditLog.Path())
+	} else {
+		logger.Printf("audit log disabled (-audit=false)")
+	}
+	// The audit logger keeps the directory it opened with for the process
+	// lifetime; remember it so a hot reload that moves log_dir can say
+	// "restart required" instead of silently keeping the old directory.
+	auditDirInUse := cfg.LogDir
+
+	rt := router.New(logger)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		return fmt.Errorf("build routes: %w", err)
+	}
+	rt.Install(snap)
+
+	logConfigSummary(logger, cfg, snap)
+
+	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
+	// Every attempt — rejected or not — gets the same banner treatment (same
+	// idiom logStop uses for its own marker) so a reload is never lost in
+	// the steady drip of per-request log lines around it; a rejected reload
+	// especially so, since that's the one that needs a human's attention.
+	// The bar alone (through the normal timestamped logger, not a raw
+	// stderr write) is enough separation — no need for blank lines too.
+	reload := func(trigger string) {
+		bar := strings.Repeat("=", 50)
+		logger.Printf("%s", bar)
+		logger.Printf("CONFIG RELOAD  trigger=%s", trigger)
+		defer logger.Printf("%s", bar)
+
+		newCfg, err := config.Load(*path)
+		if err != nil {
+			logger.Printf("rejected, keeping current config: %v", err)
+			return
+		}
+		newSnap, err := router.BuildSnapshot(newCfg)
+		if err != nil {
+			logger.Printf("rejected, keeping current config: %v", err)
+			return
+		}
+		rt.Install(newSnap)
+		audit.SetRetentionDays(newCfg.AuditRetentionDays)
+		if newCfg.LogDir != auditDirInUse {
+			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
+				auditDirInUse, newCfg.LogDir)
+		}
+		logConfigSummary(logger, newCfg, newSnap)
+	}
+	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })
+	if err != nil {
+		logger.Printf("config watch disabled: %v (SIGHUP still works)", err)
+	} else {
+		defer stopWatch()
+	}
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+			reload("SIGHUP")
+		}
+	}()
+
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           server.New(rt, auditLog).Handler(),
+		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
+	}
+	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, config.CountNested(cfg.Models))
+
+	// vmr.sh (and systemd/launchd) stop the process with SIGTERM; Go doesn't
+	// catch that by default, so without this the process just dies mid-request
+	// with no trace in the log. Catching it here buys a graceful drain (existing
+	// requests finish, srv.Shutdown waits for them) and — the point of this
+	// function — a "VMR STOP" marker so the log file shows exactly when and why
+	// the process went away, matching every "VMR START" with a corresponding stop.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+
+	select {
+	case sig := <-sigCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			logger.Printf("shutdown: forced close after 10s drain timeout: %v", err)
+		}
+		logStop(logger, sig.String(), time.Since(startTime))
+		return nil
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			logStop(logger, "error: "+err.Error(), time.Since(startTime))
+			return err
+		}
+		logStop(logger, "server closed", time.Since(startTime))
+		return nil
+	}
+}

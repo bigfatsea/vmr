@@ -32,6 +32,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/probe"
 	"vmr/internal/router"
 )
@@ -365,10 +366,10 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 // Duration.String()'s default of switching to "141ms" below one second and
 // "1.068s" above it. A column where some rows read "141ms" and others
 // "1.068s" doesn't scan as a column; same unit throughout does. Thin local
-// alias for core.FmtSeconds (3 decimals — diagnose cares about sub-10ms
+// alias for fmtutil.FmtSeconds (3 decimals — diagnose cares about sub-10ms
 // differences the live router log's 2-decimal dur= column doesn't).
 func formatSeconds(d time.Duration) string {
-	return core.FmtSeconds(d, 3)
+	return fmtutil.FmtSeconds(d, 3)
 }
 
 func snippet(body []byte) string {

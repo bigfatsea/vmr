@@ -22,7 +22,6 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/router"
-	"vmr/internal/server"
 )
 
 // Options configures one replay run. There are three ways to pick which
@@ -379,17 +378,17 @@ func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte)
 }
 
 // replayHeaders reconstructs the header set a live request would have
-// carried. server.FilterClientHeaders alone isn't enough here: its
-// blocklist and audit.Redact's separate credentialHeaders list are
-// independently maintained and don't fully overlap (e.g. "Api-Key"/
-// "X-Auth-Token" are masked by Redact but not blocked from forwarding on
-// live traffic, since live headers are always real). The stored value for
-// any audit.IsCredentialHeader entry is a masked placeholder like
-// "***c1d4", never the real credential — forwarding it to a live upstream
-// would send garbage where FilterClientHeaders alone wouldn't catch it, so
-// every such header is stripped here too.
+// carried. core.FilterClientHeaders alone isn't enough here: its blocklist
+// and audit.Redact's separate credentialHeaders list are independently
+// maintained and don't fully overlap (e.g. "Api-Key"/"X-Auth-Token" are
+// masked by Redact but not blocked from forwarding on live traffic, since
+// live headers are always real). The stored value for any
+// audit.IsCredentialHeader entry is a masked placeholder like "***c1d4",
+// never the real credential — forwarding it to a live upstream would send
+// garbage where FilterClientHeaders alone wouldn't catch it, so every such
+// header is stripped here too.
 func replayHeaders(h http.Header) http.Header {
-	out := server.FilterClientHeaders(h)
+	out := core.FilterClientHeaders(h)
 	for k := range out {
 		if audit.IsCredentialHeader(k) {
 			out.Del(k)

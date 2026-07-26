@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -502,6 +503,134 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	}
 }
 
+// failureSurfaceRecords returns one record of each outcome shape relevant to
+// FailedRequestRows: a clean "ok", an "error", a "canceled", and an
+// ok-but-truncated (outcome "ok" with a "truncated"-classed attempt, the
+// shape session.go's collect() reads to set ReqInfo.Truncated). Three of the
+// four are the failure surface; the plain "ok" one is the control that must
+// never appear in it.
+func failureSurfaceRecords() []map[string]any {
+	base := func(ts time.Time, outcome string, status int) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent",
+			"protocol": "openai", "outcome": outcome,
+			"client": map[string]any{
+				"request":  map[string]any{"body": map[string]any{"model": "agent", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
+				"response": map[string]any{"status": status, "body": map[string]any{}},
+			},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	ok := base(t0, "ok", 200)
+	ok["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}}}
+
+	failed := base(t0.Add(time.Minute), "error", 500)
+	failed["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "transient: boom", "error_class": "transient"}}
+
+	canceled := base(t0.Add(2*time.Minute), "canceled", 0)
+	canceled["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "canceled by client", "error_class": "canceled"}}
+
+	truncated := base(t0.Add(3*time.Minute), "ok", 200)
+	truncated["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "truncated: EOF", "error_class": "truncated"}}
+
+	return []map[string]any{ok, failed, canceled, truncated}
+}
+
+// TestFailedRequestRows checks the outcome filter: of failureSurfaceRecords'
+// four records, exactly the error/canceled/ok-but-truncated three must
+// survive — the plain "ok" one must not.
+func TestFailedRequestRows(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, failureSurfaceRecords())
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := FailedRequestRows(rep.RequestRows())
+	if len(failed) != 3 {
+		t.Fatalf("want 3 failed rows (error, canceled, ok-but-truncated), got %d", len(failed))
+	}
+	got := map[string]bool{}
+	for _, r := range failed {
+		if r.Outcome == "ok" && !r.Truncated {
+			t.Errorf("plain ok row leaked into FailedRequestRows: %+v", r)
+		}
+		got[r.Outcome+":"+strconv.FormatBool(r.Truncated)] = true
+	}
+	for _, want := range []string{"error:false", "canceled:false", "ok:true"} {
+		if !got[want] {
+			t.Errorf("missing expected failure shape %q among: %v", want, got)
+		}
+	}
+}
+
+// TestWriteFailedIndex checks vmr-requests-failed.md/.jsonl: they must list
+// exactly the 3 failed rows (not the 1 plain-ok row), link to detail files,
+// and leave vmr-requests.md itself untouched (still carrying all 4 requests)
+// — the failed index is additive, not a move.
+func TestWriteFailedIndex(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, failureSurfaceRecords())
+	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rep.RequestRows()
+
+	if err := WriteFailedIndex(rows, dir); err != nil {
+		t.Fatal(err)
+	}
+	failedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(failedMD)
+	if !strings.Contains(s, "共 3 条") {
+		t.Errorf("want exactly 3 failed rows reported:\n%s", s)
+	}
+
+	n, err := WriteRequestsJSONL(FailedRequestRows(rows), filepath.Join(dir, "vmr-requests-failed.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("want 3 rows written to vmr-requests-failed.jsonl, got %d", n)
+	}
+
+	// The full index is unaffected: still every request, the plain ok one included.
+	if err := WriteRequestsIndex(rep, sess, dir); err != nil {
+		t.Fatal(err)
+	}
+	fullMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := string(fullMD)
+	if strings.Count(full, "❌") != 1 {
+		t.Errorf("vmr-requests.md should still carry the error row inline, unmoved:\n%s", full)
+	}
+	if !strings.Contains(full, "canceled") {
+		t.Errorf("vmr-requests.md should still carry the canceled row inline, unmoved:\n%s", full)
+	}
+	if !strings.Contains(full, "⚠️trunc") {
+		t.Errorf("vmr-requests.md should still carry the truncated ok row inline, unmoved:\n%s", full)
+	}
+}
+
+func TestWriteFailedIndexEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteFailedIndex(nil, dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "共 0 条") {
+		t.Errorf("want a 0-count header for no failed requests:\n%s", b)
+	}
+}
+
 func containsAll(s string, subs []string) bool {
 	for _, sub := range subs {
 		if !contains(s, sub) {
@@ -524,6 +653,125 @@ func containsSub(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// tiedAuditRecords returns records deliberately constructed so several
+// Build() buckets end up with genuine ties on their primary sort value:
+// two client tags each with exactly 1 request (ByClient ties on Requests),
+// two distinct endpoints each attempted exactly once (EndpointsAll ties on
+// Attempts), and — as a side effect of two different first-user-messages —
+// two single-request "interactive" sessions (Sessions ties on Requests).
+// Without a deterministic tie-break, which endpoint/client/session of each
+// tied pair sorts first depends on Go's (deliberately randomized) map
+// iteration order — see TestBuildIsDeterministic below.
+func tiedAuditRecords() []map[string]any {
+	mk := func(ts, clientKey, endpoint, userMsg string) map[string]any {
+		return map[string]any{
+			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai",
+			"outcome": "ok", "client_key_tag": clientKey,
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
+					map[string]any{"role": "user", "content": userMsg},
+				}}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": endpoint, "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	return []map[string]any{
+		mk(t0.Format(time.RFC3339), "alice", "openai:provider-a:model-a", "alice's first message"),
+		mk(t0.Add(time.Minute).Format(time.RFC3339), "bob", "openai:provider-b:model-b", "bob's first message"),
+	}
+}
+
+// TestBuildIsDeterministic locks in the fix for the non-determinism
+// documented in docs/vmr_architecture_review_opus-5.md: EndpointsAll/
+// ByClient/Workloads/Sessions/Tools are appended from Go maps (whose
+// iteration order the language spec deliberately leaves unspecified) and
+// then sorted only by a count/byte-size value that can legitimately tie
+// across distinct rows — without a secondary tie-break on the bucket's own
+// identity field, two Build() calls against byte-identical input could
+// (and, before the fix, empirically did — caught comparing
+// loadtest-report.md across two runs of the same unmodified binary)
+// disagree on which tied row comes first. Running Build() several times
+// and requiring byte-identical JSON output is the direct test of that
+// property — it doesn't matter whether any particular run's map iteration
+// happened to "get lucky"; it must never be allowed to matter.
+func TestBuildIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, tiedAuditRecords())
+
+	const runs = 8
+	var want []byte
+	for i := 0; i < runs; i++ {
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		got, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatalf("run %d: marshal: %v", i, err)
+		}
+		if i == 0 {
+			want = got
+			continue
+		}
+		if string(got) != string(want) {
+			t.Fatalf("run %d produced different JSON than run 0 — Build() is not deterministic.\nrun 0: %s\nrun %d: %s", i, want, i, got)
+		}
+	}
+}
+
+// TestMarkdownTableCellsWithPercentRenderVerbatim locks in a bug 2.6's
+// mdTable refactor introduced and the real-log verification caught: row()
+// originally passed the joined cell string straight to w(format, ...) as
+// the FORMAT string itself, so any cell containing a literal "%" (every
+// percentage/cache-efficiency cell in this report) got reinterpreted by
+// fmt.Fprintf as a verb and corrupted into "%!s(MISSING)" or similar. Fixed
+// by always passing cells through a literal "%s" verb. Every row here has
+// requests > 0, so pctStr2/cacheEffCell/pctHundred all produce "%" cells —
+// if the bug reappears, "MISSING" shows up in the rendered document.
+func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
+	rep := &Report2{
+		Overall: Row{Requests: 10, OK: 9, TokensIn: 100, TokensInCached: 90, TokensKnown: 10, CacheEfficiency: 0.9, RequestsWithDur: 10, DurMSP95: 500},
+		EndpointsAll: []EndpointRow{
+			{Endpoint: "openai:p:m", Attempts: 10, OK: 9, Availability: 0.9, ErrorRate: 10,
+				ErrorClasses: map[string]int{"transient": 1}},
+		},
+	}
+	md := Markdown(rep)
+	if strings.Contains(md, "MISSING") {
+		t.Fatalf("rendered Markdown contains a corrupted Printf verb (percent sign in a table cell mishandled):\n%s", md)
+	}
+	if !strings.Contains(md, "90.0%") {
+		t.Errorf("expected a literal cache-efficiency percentage in the output; got:\n%s", md)
+	}
+}
+
+// TestTopErrorClassCountDeterministic locks in the fix for a second,
+// previously-undiscovered instance of the same non-determinism class
+// TestBuildIsDeterministic covers: topErrorClass/topErrorClassShort picked
+// the error class with the highest count by ranging the map directly, so a
+// TIE between two classes (both count 1, as here) resolved to whichever
+// class Go's randomized map order happened to visit last — found while
+// diffing 2.6's table-builder refactor against real production report
+// output, where "主因" (top error class) flipped between two runs of the
+// same unmodified binary. Fixed by iterating sortedKeysInt so a tie always
+// resolves to the alphabetically-first class name.
+func TestTopErrorClassCountDeterministic(t *testing.T) {
+	classes := map[string]int{"transient": 1, "endpoint": 1, "auth": 1}
+	for i := 0; i < 20; i++ {
+		cls, n := topErrorClassCount(classes)
+		if cls != "auth" || n != 1 {
+			t.Fatalf("run %d: got (%q, %d), want (\"auth\", 1) — ties must always resolve alphabetically", i, cls, n)
+		}
+	}
 }
 
 func BenchmarkBuild(b *testing.B) {

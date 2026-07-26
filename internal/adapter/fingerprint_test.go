@@ -87,22 +87,83 @@ func TestSessionFingerprint_NoMessages(t *testing.T) {
 	}
 }
 
-func TestHasNonEmptyTopLevelArray(t *testing.T) {
+// TestTopLevelProbe_MatchesStructUnmarshalSemantics locks in that the
+// hand-rolled scanner accepts/rejects exactly what
+// json.Unmarshal(raw, &struct{Model string; Stream bool}{}) would have —
+// see TopLevelProbe's doc comment. This is the regression net for server.go
+// replacing that reflective unmarshal (see
+// docs/vmr_architecture_review_opus-5.md §6 item 2.2).
+func TestTopLevelProbe_MatchesStructUnmarshalSemantics(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want bool
+		name       string
+		body       string
+		wantModel  string
+		wantStream bool
+		wantTools  bool
+		wantOK     bool
 	}{
-		{"present and non-empty", `{"tools":[{"name":"x"}]}`, true},
-		{"present but empty", `{"tools":[]}`, false},
-		{"absent", `{"model":"x"}`, false},
-		{"whitespace inside empty array", `{"tools":[  ]}`, false},
+		{"basic", `{"model":"agent","stream":true,"tools":[{"name":"x"}]}`, "agent", true, true, true},
+		{"defaults when absent", `{"model":"agent"}`, "agent", false, false, true},
+		{"empty tools array", `{"model":"agent","tools":[]}`, "agent", false, false, true},
+		{"whitespace-only tools array", `{"model":"agent","tools":[  ]}`, "agent", false, false, true},
+		{"unrecognized keys ignored", `{"foo":"bar","model":"agent","nested":{"tools":[1]}}`, "agent", false, false, true},
+		{"model null is a no-op, not an error", `{"model":null}`, "", false, false, true},
+		{"stream null is a no-op, not an error", `{"model":"agent","stream":null}`, "agent", false, false, true},
+		{"stream false explicit", `{"model":"agent","stream":false}`, "agent", false, false, true},
+		{"duplicate keys: last wins", `{"model":"a","model":"b","stream":false,"stream":true}`, "b", true, false, true},
+		{"top level array, not object", `[1,2,3]`, "", false, false, false},
+		{"malformed json", `{"model":`, "", false, false, false},
+		{"model wrong type errors like unmarshal would", `{"model":123}`, "", false, false, false},
+		{"stream wrong type errors like unmarshal would", `{"model":"agent","stream":"yes"}`, "", false, false, false},
+		{"stream number errors like unmarshal would", `{"model":"agent","stream":1}`, "", false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := HasNonEmptyTopLevelArray(json.RawMessage(c.body), "tools")
-			if got != c.want {
-				t.Errorf("HasNonEmptyTopLevelArray(%q) = %v, want %v", c.body, got, c.want)
+			model, stream, hasTools, ok := TopLevelProbe(json.RawMessage(c.body))
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if model != c.wantModel || stream != c.wantStream || hasTools != c.wantTools {
+				t.Errorf("got (model=%q, stream=%v, hasTools=%v), want (model=%q, stream=%v, hasTools=%v)",
+					model, stream, hasTools, c.wantModel, c.wantStream, c.wantTools)
+			}
+		})
+	}
+}
+
+// TestTopLevelProbe_AgreesWithStructUnmarshal cross-checks a handful of
+// shapes directly against the real json.Unmarshal path it replaced, so this
+// doesn't just encode the author's assumptions about encoding/json's
+// null/type-mismatch rules.
+func TestTopLevelProbe_AgreesWithStructUnmarshal(t *testing.T) {
+	bodies := []string{
+		`{"model":"agent","stream":true}`,
+		`{"model":"agent"}`,
+		`{"model":null}`,
+		`{"model":"agent","stream":null}`,
+		`{"model":123}`,
+		`{"model":"agent","stream":"yes"}`,
+		`[1,2,3]`,
+		`{"model":`,
+		`{"model":"agent","stream":false,"extra":{"nested":true}}`,
+	}
+	for _, body := range bodies {
+		t.Run(body, func(t *testing.T) {
+			var probe struct {
+				Model  string `json:"model"`
+				Stream bool   `json:"stream"`
+			}
+			wantErr := json.Unmarshal([]byte(body), &probe) != nil
+
+			model, stream, _, ok := TopLevelProbe(json.RawMessage(body))
+			if ok == wantErr {
+				t.Fatalf("ok=%v but json.Unmarshal error=%v (wantErr=%v) disagree for %q", ok, !wantErr, wantErr, body)
+			}
+			if ok && (model != probe.Model || stream != probe.Stream) {
+				t.Errorf("TopLevelProbe=(%q,%v), json.Unmarshal=(%q,%v) disagree for %q", model, stream, probe.Model, probe.Stream, body)
 			}
 		})
 	}

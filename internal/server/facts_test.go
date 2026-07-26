@@ -6,7 +6,7 @@ import "testing"
 
 func TestComputeRequestFacts_PlainText(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":"hello there"}]}`)
-	facts := computeRequestFacts(body, 0)
+	facts := computeRequestFacts(body, 0, false)
 	if facts.HasImage {
 		t.Errorf("plain text request must not report HasImage")
 	}
@@ -23,26 +23,29 @@ func TestComputeRequestFacts_ChineseCostsMoreThanEnglishPerByte(t *testing.T) {
 	// than an equal-length ASCII string — the whole point of the split.
 	en := []byte(`{"model":"agent","messages":[{"role":"user","content":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`)
 	zh := []byte(`{"model":"agent","messages":[{"role":"user","content":"我我我我我我我我我我"}]}`) // 10 CJK chars = 30 bytes, similar payload size to the ascii run above
-	enFacts := computeRequestFacts(en, 0)
-	zhFacts := computeRequestFacts(zh, 0)
+	enFacts := computeRequestFacts(en, 0, false)
+	zhFacts := computeRequestFacts(zh, 0, false)
 	if zhFacts.EstimatedTokens <= enFacts.EstimatedTokens {
 		t.Errorf("expected Chinese text to estimate more tokens per byte than English: en=%d zh=%d", enFacts.EstimatedTokens, zhFacts.EstimatedTokens)
 	}
 }
 
+// TestComputeRequestFacts_Tools locks in that HasTools is a straight
+// pass-through of the caller-supplied hasTools argument — computeRequestFacts
+// does no tools-array scanning of its own anymore (see the function's doc
+// comment: the caller's single adapter.TopLevelProbe call already did that
+// detection, folded into the same structural pass as model/stream). The
+// detection accuracy itself (empty vs non-empty vs absent "tools") is
+// adapter.TopLevelProbe's own test responsibility
+// (internal/adapter/fingerprint_test.go).
 func TestComputeRequestFacts_Tools(t *testing.T) {
-	withTools := []byte(`{"model":"agent","tools":[{"name":"x"}],"messages":[]}`)
-	emptyTools := []byte(`{"model":"agent","tools":[],"messages":[]}`)
-	noTools := []byte(`{"model":"agent","messages":[]}`)
+	body := []byte(`{"model":"agent","messages":[]}`)
 
-	if !computeRequestFacts(withTools, 0).HasTools {
-		t.Errorf("non-empty tools array must set HasTools")
+	if !computeRequestFacts(body, 0, true).HasTools {
+		t.Errorf("hasTools=true must set facts.HasTools")
 	}
-	if computeRequestFacts(emptyTools, 0).HasTools {
-		t.Errorf("empty tools array must not set HasTools")
-	}
-	if computeRequestFacts(noTools, 0).HasTools {
-		t.Errorf("absent tools field must not set HasTools")
+	if computeRequestFacts(body, 0, false).HasTools {
+		t.Errorf("hasTools=false must not set facts.HasTools")
 	}
 }
 
@@ -59,21 +62,21 @@ func TestComputeRequestFacts_Tools(t *testing.T) {
 func TestComputeRequestFacts_Image(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":"hello"}]}`)
 
-	if computeRequestFacts(body, 0).HasImage {
+	if computeRequestFacts(body, 0, false).HasImage {
 		t.Errorf("imageCount=0 must report HasImage=false")
 	}
-	if !computeRequestFacts(body, 1).HasImage {
+	if !computeRequestFacts(body, 1, false).HasImage {
 		t.Errorf("imageCount=1 must report HasImage=true")
 	}
 
 	// Two images must estimate more tokens than one, scaling linearly with
 	// imageCount — same body both times, only the count differs.
-	oneImg := computeRequestFacts(body, 1).EstimatedTokens
-	twoImg := computeRequestFacts(body, 2).EstimatedTokens
+	oneImg := computeRequestFacts(body, 1, false).EstimatedTokens
+	twoImg := computeRequestFacts(body, 2, false).EstimatedTokens
 	if twoImg <= oneImg {
 		t.Errorf("two images should estimate more tokens than one: one=%d two=%d", oneImg, twoImg)
 	}
-	if got, want := twoImg-oneImg, oneImg-computeRequestFacts(body, 0).EstimatedTokens; got != want {
+	if got, want := twoImg-oneImg, oneImg-computeRequestFacts(body, 0, false).EstimatedTokens; got != want {
 		t.Errorf("each additional image should add a constant token amount: (2img-1img)=%d, (1img-0img)=%d", got, want)
 	}
 }
@@ -83,7 +86,7 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 	// must NOT trigger the document estimate (avoids false positives on
 	// arbitrary large string fields).
 	noMarker := []byte(`{"model":"agent","messages":[{"role":"user","content":"data:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}`)
-	base := computeRequestFacts(noMarker, 0).EstimatedTokens
+	base := computeRequestFacts(noMarker, 0, false).EstimatedTokens
 
 	withDoc := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` +
 		string(make([]byte, 400)) + `"}}]}]}`)
@@ -94,7 +97,7 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 			withDoc[i] = 'A'
 		}
 	}
-	docFacts := computeRequestFacts(withDoc, 0)
+	docFacts := computeRequestFacts(withDoc, 0, false)
 	if docFacts.EstimatedTokens <= base {
 		t.Errorf("a request with a document marker + large data field should estimate more tokens than one without any marker: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
 	}

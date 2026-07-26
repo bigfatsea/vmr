@@ -477,7 +477,7 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record) {
 }
 
 // fmtTokensPlain renders an estimated token count for human-facing detail
-// pages ("27.3 KT") — same K/M scaling as core.FmtTokens but without its
+// pages ("27.3 KT") — same K/M scaling as fmtutil.FmtTokens but without its
 // "EST" unit marker (that marker exists to keep the live router log's
 // req=xxxKB/xxxESTKT column from being mistaken for billed usage at a
 // glance; a labeled "预估Token数量" field on a detail page already carries

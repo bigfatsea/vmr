@@ -177,20 +177,98 @@ func elementRole(raw []byte, elemStart, elemEnd int) (string, bool) {
 	return "", false
 }
 
-// HasNonEmptyTopLevelArray reports whether raw's top-level object has a key
-// whose value is a JSON array containing at least one element. Used for
-// cheap RequestFacts detection (e.g. "tools") — a structural check, no
-// full unmarshal.
-func HasNonEmptyTopLevelArray(raw json.RawMessage, key string) bool {
-	ranges, ok := topLevelValues(raw, []byte(`"`+key+`"`))
-	if !ok || len(ranges) == 0 {
-		return false
+var toolsKeyLiteral = []byte(`"tools"`)
+
+// TopLevelProbe extracts the three top-level fields server.go's ingress path
+// needs before routing — model, stream, and whether "tools" is a non-empty
+// array — in one structural scan over raw, replacing what used to be a
+// reflective json.Unmarshal into a 2-field struct (for model/stream) plus a
+// second, independent top-level array-non-empty scan (for tools). See
+// docs/vmr_architecture_review_opus-5.md §4.2/§6 item 2.2.
+//
+// ok=false exactly where json.Unmarshal(raw, &struct{Model string; Stream
+// bool}{}) would have errored: raw isn't a JSON object, is malformed, or
+// either field is present with a value that isn't its expected JSON type
+// (mirroring encoding/json's behavior, a JSON null for either field is a
+// no-op, not an error — same as unmarshaling null into a string/bool
+// struct field leaves it at its zero value). Unrecognized top-level keys
+// (including a malformed "tools" value only matters if it makes the whole
+// document unparsable, in which case ok=false here exactly as the old
+// whole-body json.Unmarshal would have failed too) are skipped, matching
+// encoding/json's default "ignore unknown fields" behavior. Duplicate
+// top-level keys resolve last-write-wins, same as encoding/json.
+func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools bool, ok bool) {
+	i := skipJSONWS(raw, 0)
+	if i >= len(raw) || raw[i] != '{' {
+		return "", false, false, false
 	}
-	start, end := ranges[0][0], ranges[0][1]
-	i := skipJSONWS(raw, start)
-	if i >= end || raw[i] != '[' {
-		return false
+	i++
+	for {
+		i = skipJSONWS(raw, i)
+		if i >= len(raw) {
+			return "", false, false, false
+		}
+		switch raw[i] {
+		case '}':
+			return model, stream, hasTools, true
+		case ',':
+			i++
+			continue
+		case '"':
+			// key follows
+		default:
+			return "", false, false, false
+		}
+		keyStart := i
+		var kok bool
+		i, kok = skipJSONString(raw, i)
+		if !kok {
+			return "", false, false, false
+		}
+		key := raw[keyStart:i]
+		i = skipJSONWS(raw, i)
+		if i >= len(raw) || raw[i] != ':' {
+			return "", false, false, false
+		}
+		i = skipJSONWS(raw, i+1)
+		valStart := i
+		i, kok = skipJSONValue(raw, i)
+		if !kok {
+			return "", false, false, false
+		}
+		val := raw[valStart:i]
+		switch {
+		case bytes.Equal(key, modelKeyLiteral):
+			if bytes.Equal(val, nullLiteral) {
+				continue // JSON null: no-op, same as unmarshaling null into a string field
+			}
+			if err := json.Unmarshal(val, &model); err != nil {
+				return "", false, false, false
+			}
+		case bytes.Equal(key, streamKeyLiteral):
+			switch {
+			case bytes.Equal(val, nullLiteral):
+				// no-op, same as unmarshaling null into a bool field
+			case bytes.Equal(val, trueLiteral):
+				stream = true
+			case bytes.Equal(val, falseLiteral):
+				stream = false
+			default:
+				return "", false, false, false
+			}
+		case bytes.Equal(key, toolsKeyLiteral):
+			vi := skipJSONWS(val, 0)
+			hasTools = vi < len(val) && val[vi] == '['
+			if hasTools {
+				vi = skipJSONWS(val, vi+1)
+				hasTools = vi < len(val) && val[vi] != ']'
+			}
+		}
 	}
-	i = skipJSONWS(raw, i+1)
-	return i < end && raw[i] != ']'
 }
+
+var (
+	nullLiteral  = []byte("null")
+	trueLiteral  = []byte("true")
+	falseLiteral = []byte("false")
+)

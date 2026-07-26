@@ -54,6 +54,47 @@ func TestNameOmitsAPIKey(t *testing.T) {
 	}
 }
 
+// TestEndpointHealthKeyWithoutFreezeStillWorks locks in the fallback path:
+// an Endpoint built as a bare struct literal (as ~12 call sites across the
+// test suite do, never going through router.BuildSnapshot) must still
+// return the correct HealthKey()/Name() even though Freeze() was never
+// called — router.BuildSnapshot's Freeze() call is a hot-path optimization,
+// not a correctness requirement.
+func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
+	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
+	if got, want := e.HealthKey(), e.computeHealthKey(); got != want {
+		t.Errorf("un-frozen HealthKey() = %q, want %q (computeHealthKey directly)", got, want)
+	}
+	if got, want := e.Name(), "anthropic/minimax/MiniMax-M3"; got != want {
+		t.Errorf("un-frozen Name() = %q, want %q", got, want)
+	}
+}
+
+// TestEndpointFreezeMatchesUnfrozen checks Freeze() doesn't change the
+// value HealthKey()/Name() report — only how cheaply they report it. Two
+// Endpoints built from identical fields, one Freeze()'d and one not, must
+// stay indistinguishable to every caller.
+func TestEndpointFreezeMatchesUnfrozen(t *testing.T) {
+	fields := func() Endpoint {
+		return Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "sk-secret"}
+	}
+	unfrozen := fields()
+	frozen := fields()
+	frozen.Freeze()
+
+	if unfrozen.HealthKey() != frozen.HealthKey() {
+		t.Errorf("HealthKey mismatch: unfrozen=%q frozen=%q", unfrozen.HealthKey(), frozen.HealthKey())
+	}
+	if unfrozen.Name() != frozen.Name() {
+		t.Errorf("Name mismatch: unfrozen=%q frozen=%q", unfrozen.Name(), frozen.Name())
+	}
+	// Freeze must be idempotent — calling it twice must not change the result.
+	frozen.Freeze()
+	if frozen.HealthKey() != unfrozen.HealthKey() || frozen.Name() != unfrozen.Name() {
+		t.Errorf("Freeze() is not idempotent: HealthKey=%q Name=%q", frozen.HealthKey(), frozen.Name())
+	}
+}
+
 // TestErrorClassString locks every declared ErrorClass to its string, not
 // just the ones classify.go itself produces — the four audit-only values
 // (Build/Network/Canceled/Truncated) never reach Health.ReportFailure, but
@@ -159,5 +200,25 @@ func TestWriteErrorEnvelope(t *testing.T) {
 	}
 	if body.Type != "error" || body.Error.Type != "rate_limit_error" || body.Error.Message != "slow down" {
 		t.Errorf("envelope: %+v", body)
+	}
+}
+
+// BenchmarkHealthKey_Unfrozen/Frozen quantifies §4.1's claim: HealthKey()
+// re-hashes APIKey with SHA-256 on every call unless Freeze() was called
+// once up front (router.BuildSnapshot does this for every real Endpoint).
+func BenchmarkHealthKey_Unfrozen(b *testing.B) {
+	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = e.HealthKey()
+	}
+}
+
+func BenchmarkHealthKey_Frozen(b *testing.B) {
+	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
+	e.Freeze()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = e.HealthKey()
 	}
 }

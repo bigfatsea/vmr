@@ -6,7 +6,6 @@ package server
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/adapter"
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/health"
@@ -103,57 +103,6 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// headerBlocklist is the set of client headers VMR never forwards to the
-// upstream. The pass-through policy is the inverse of the prior strict
-// whitelist: most client headers (User-Agent, X-Stainless-*, Traceparent,
-// Accept-Language, etc.) are legitimate metadata and are forwarded as-is,
-// so SDK upgrades and tracing work without VMR code changes. The items
-// here are the ones that would cause a security or protocol-correctness
-// problem if leaked to the upstream.
-//
-// "Must override" headers (Authorization, Host, Content-Length, etc.) are
-// also listed here as a defense in depth, but the primary mechanism is
-// adapter.BuildRequest using httpReq.Header.Set to replace them.
-var headerBlocklist = map[string]struct{}{
-	"authorization":       {}, // credential — adapter injects its own
-	"x-api-key":           {}, // Anthropic credential — same reason
-	"cookie":              {}, // browser/session state — never belongs in LLM API
-	"x-forwarded-for":     {},
-	"x-forwarded-proto":   {},
-	"x-forwarded-host":    {},
-	"x-real-ip":           {},
-	"proxy-authorization": {},
-	"host":                {}, // Go http.Request.Host follows URL, but block anyway
-	"content-length":      {}, // Go Transport recomputes
-	"transfer-encoding":   {}, // Go Transport manages
-	"connection":          {}, // Go Transport manages
-	// Forwarding the client's Accept-Encoding disables Go Transport's
-	// transparent gzip: the upstream may then answer compressed, the
-	// response normalizer (response.go) would run its regexes over gzip
-	// bytes, and the client would receive them without a Content-Encoding
-	// header (only Content-Type is forwarded back). Blocking it lets the
-	// Transport negotiate gzip itself and hand every layer plaintext.
-	"accept-encoding": {},
-}
-
-// FilterClientHeaders returns a copy of h with headerBlocklist entries
-// removed — the same filtering chatHandler applies to a live request before
-// handing headers to an adapter. Exported so `vmr replay` (internal/replay)
-// can reconstruct the exact header set a live request would have carried
-// when rebuilding one from an audit record.
-func FilterClientHeaders(h http.Header) http.Header {
-	out := http.Header{}
-	for k, vs := range h {
-		if _, blocked := headerBlocklist[strings.ToLower(k)]; blocked {
-			continue
-		}
-		for _, v := range vs {
-			out.Add(k, v)
-		}
-	}
-	return out
-}
-
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var rec *audit.Record
@@ -209,21 +158,21 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// Probe the routing fields before acquiring the concurrency gate or
 		// downscaling images: both of the latter are per-model (image
 		// downscale can be overridden per virtual model, §7) and cheap JSON
-		// parsing shouldn't wait behind either.
-		var probe struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		if err := json.Unmarshal(body, &probe); err != nil {
+		// parsing shouldn't wait behind either. One structural scan yields
+		// model/stream/hasTools together (adapter.TopLevelProbe) instead of
+		// a reflective json.Unmarshal for model/stream plus a second,
+		// independent top-level scan for tools later in computeRequestFacts.
+		probeModel, probeStream, probeHasTools, probeOK := adapter.TopLevelProbe(body)
+		if !probeOK {
 			core.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
 			return
 		}
-		if probe.Model == "" {
+		if probeModel == "" {
 			core.WriteError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
 			return
 		}
 		if rec != nil {
-			rec.Model, rec.Stream = probe.Model, probe.Stream
+			rec.Model, rec.Stream = probeModel, probeStream
 		}
 
 		// Global concurrency gate: excess requests park here until a slot
@@ -266,7 +215,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// must never be misrouted as needing image support, which is exactly
 		// what the cheap imgprep.HasImageMarker byte-scan this replaced as
 		// the routing signal would do.
-		route := snap.Models[protocol][probe.Model]
+		route := snap.Models[protocol][probeModel]
 		n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
 		body, images := imgprep.Downscale(body, protocol, imgprep.Options{
 			MaxPx:        n,
@@ -300,20 +249,20 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// necessary — it strips legitimate metadata (User-Agent,
 		// X-Stainless-*, Traceparent) and needs code updates when SDKs
 		// add new headers.
-		hdr := FilterClientHeaders(r.Header)
+		hdr := core.FilterClientHeaders(r.Header)
 
 		// Computed once, used twice: the routing layer consults it via
 		// CanonicalRequest.Facts, and the audit trail records the exact
 		// same value (rec.Facts) — never a second, independent computation
 		// at write time. See audit.Record.Facts's doc comment for why it's
 		// a sibling of Client.Request rather than folded into it.
-		facts := computeRequestFacts(body, len(images))
+		facts := computeRequestFacts(body, len(images), probeHasTools)
 		if rec != nil {
 			rec.Facts = &facts
 		}
 
 		s.rt.Serve(w, r, &core.CanonicalRequest{
-			Model: probe.Model, Stream: probe.Stream, Raw: body, Header: hdr,
+			Model: probeModel, Stream: probeStream, Raw: body, Header: hdr,
 			Facts: facts,
 		}, protocol, rec)
 	}
