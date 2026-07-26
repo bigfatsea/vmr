@@ -95,8 +95,9 @@ Upstream   ├─ 2xx → 响应归一化 → 转发 → 上报健康成功 → 
 
 ```
 cmd/vmr                    CLI（stdlib flag），一命令一文件：main.go（分发 + usage + Adapter 的 blank import 注册点）
-                            ├─ cmd_start.go/cmd_check.go/cmd_status.go/cmd_report.go/cmd_dirs.go/cmd_diagnose.go/cmd_replay.go  各子命令
-                            └─ summary.go  start/check 共用的配置摘要渲染（logConfigSummary/providerProxyEntries 等）
+  ├─ cmd_start.go/cmd_check.go/cmd_status.go/cmd_report.go/cmd_dirs.go/cmd_diagnose.go/cmd_replay.go  各子命令
+  └─ summary.go  start/check 共用的配置摘要渲染（logConfigSummary/providerProxyEntries 等）
+
 internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass、Endpoint（无依赖的共享类型；HealthKey()/Name() 由 BuildSnapshot 调 Freeze() 预计算一次，见 §11"无中心 IR"决策行）+ FilterClientHeaders（header 黑名单，server/replay 共用）
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
@@ -109,24 +110,27 @@ internal/probe             探测请求原语：构造带一次性 nonce 回显�
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
-                            ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
-                            ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
-                            ├─ transport.go NewUpstreamClient（diagnose/replay 复用）+ copyFlush（流式转发）
-                            ├─ logfmt.go    实时路由日志的行格式化
-                            ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）
-                            ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
-                            ├─ probe.go  probe_mode: active 的后台探测 goroutine
+  ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
+  ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
+  ├─ transport.go NewUpstreamClient（diagnose/replay 复用）+ copyFlush（流式转发）
+  ├─ logfmt.go    实时路由日志的行格式化
+  ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）
+  ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
+  └─ probe.go  probe_mode: active 的后台探测 goroutine
 internal/server            HTTP 入口、鉴权、审计录制、四个端点（header 黑名单见 internal/core.FilterClientHeaders）
-                            ├─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
+  └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
+
 internal/audit             审计日志（JSONL 落盘）+ 共享的日志文件读取（OpenLogFile/ForEachLine，report/replay 共用）+ OutcomeFor（server/replay 共用的 outcome 判定）
-                            ├─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理
+  └─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理
+
 internal/report             `vmr report`：审计日志聚合统计（透明读取明文/.zst）
-                            ├─ session.go/export.go     Agent 会话/任务分组（AnalyzeSessions）+ 工具使用聚合（ToolShapes）
-                            ├─ detail.go/render.go      DetailWriter：逐请求 Markdown+JSON 详单（Build 聚合循环内联跑，WriteDetails 是独立备选路径）
-                            ├─ aggregate.go/metrics.go  桶聚合 + 派生指标（fresh/cache_efficiency/真 p50p95/成本估算）
-                            ├─ aggregate_render.go      §0-§8 Markdown 渲染 + mermaid 图表
-                            ├─ requests.go              vmr-requests.md 索引 + 按分组的 Chat User/cron sibling 详单
-                            └─ pricing.go                定价 sidecar（可选，-pricing 或自动加载 ./pricing.yaml）
+  ├─ session.go/export.go     Agent 会话/任务分组（AnalyzeSessions）+ 工具使用聚合（ToolShapes）
+  ├─ detail.go/render.go      DetailWriter：逐请求 Markdown+JSON 详单（Build 聚合循环内联跑，WriteDetails 是独立备选路径）
+  ├─ aggregate.go/metrics.go  桶聚合 + 派生指标（fresh/cache_efficiency/真 p50p95/成本估算）
+  ├─ aggregate_render.go      §0-§8 Markdown 渲染 + mermaid 图表
+  ├─ requests.go              vmr-requests.md 索引 + 按分组的 Chat User/cron sibling 详单
+  └─ pricing.go                定价 sidecar（可选，-pricing 或自动加载 ./pricing.yaml）
+
 internal/diagnose          `vmr diagnose`：配置校验 + DNS/TLS/代理连通性 + 真实最小请求 + 路由预览
 internal/replay            `vmr replay`：从审计记录重建并重发一个请求，用于调试
 internal/imgprep           请求内联图片降采样
@@ -873,4 +877,3 @@ models:                          # "对外叫什么、按什么顺序用"——�
 **重建请求**：`replayHeaders()` 在 `core.FilterClientHeaders`（与 `chatHandler` 共用同一份 blocklist）之外，额外按 `audit.IsCredentialHeader` 剔除一遍——原因见「审计日志」的约定 3：审计记录里的凭证类 header 存的是打码占位符，`FilterClientHeaders` 的黑名单和 `audit` 的打码列表是两张故意不完全重合的表，直接套用前者会把打码值当真凭据转发给上游。model 字段用记录里的**虚拟名**（不是 `Attempts[*]` 里已经改写过的真实上游名）过 `adapter.BuildRequest`，与真实流量走同一条改写路径。`-stream true|false` 覆盖时会真正改写 body 顶层 `stream` 字段（`adapter.RewriteStream`，与 model 改写共用同一个顶层字段 splice 扫描器；记录的 body 没有该键时走 generic 路径补上）——上游读的是 body 里的字段，只改本地簿记等于没改；`--record` 产出的记录同步反映覆盖后的请求。
 
 **`--record`**：把这次回放的请求/响应也写一条 `audit.Record`，追加到用户指定的独立文件（不写入常规 `log_dir`，不会被 `vmr report` 的常规 glob 意外扫到）。字段布局刻意模仿真实流量的既有约定，而不是简单地把能填的都填满：`Client.Request.Body` 存回放前的原文（虚拟模型名，不是发给上游的改写后字节——那部分在 `Attempts[0].Request.Body`）；`Client.Response` 存完整响应；`Attempts[0].Response.Body` 只在失败（状态码 ≥400）时存，成功时省略——与 `router.tryOne` 的既有约定一致（透传恒等，省略是因为与 `Client.Response.Body` 字节相同）。这样 `--record` 产出的文件可以被 `vmr report`/`jq`/再次 `vmr replay` 当成普通审计记录正确消费，不需要为"这是回放产出的"单开一条解析路径；记录本身带 `replay_of` 字段（"来源文件:行号"或 `-detail` 的文件路径）标注来源，供人工排查。`DurMS`/`Attempts[0].DurMS` 测的是完整响应体传输完成后的总耗时，不是拿到响应头就停表——与 server/router 对这两个字段"总耗时"的定义一致，否则一个响应头快、body 慢的请求会被记成"很快"。
-
