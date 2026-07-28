@@ -436,6 +436,9 @@ vmr 的价值应当明确锚定在三处，且这三处已经足够：
 
 ### 6.2 候选清单
 
+**本文档写成后已落地（2026-07-28）**——不占本节排期，列此以免重复论证：`vmr version` + 运行实例版本上报（`/admin/status` 的 `instance.version`，靠 Go 自带 VCS 戳，零构建配置）；热重载结果与配置新鲜度上报（`config_stale`/`reload`，关掉"进程在服务一份与磁盘不符的配置而外部看不出来"这个静默失败面）；`vmr.sh ps`（本机全部实例：端口 + 配置 + 版本）与 `vmr status -addr/-brief`；`vmr.sh` 原生命令透传；响应头 `X-VMR-Route-Reason`/`X-VMR-Failover`；`attempts[].upstream_model` 采集；report 新增 §6.5 Sticky 有效性与 §6.6 端点性价比，渲染层按章节拆文件并纳入 archtest 行数预算。
+
+
 **常设义务 —— 不占排期，但优先级高于一切特性**
 
 **协议前向兼容跟随。** OpenAI / Anthropic 每次协议演进（新参数、新事件类型、新的 thinking / reasoning 形态、Responses API 之类的大版本），vmr 都必须保持可用。byte-faithful 设计让这件事在绝大多数情况下是**零改动**的——未知参数原样透传，新特性当天可用，这正是相对翻译型网关的结构性优势（对方每次升级要改 N 个翻译器）。
@@ -494,13 +497,13 @@ vmr 的价值应当明确锚定在三处，且这三处已经足够：
 | 审计记录加 `client_ip` | 支持按来源 IP 聚合 |
 | `vmr replay -list` | 不解码全部内容，只列摘要表，便于在 GB 级日志里定位回放目标 |
 | `vmr replay --format=curl` | 体验糖，成本很低，可与上一项一起做 |
-| `vmr diagnose --diff-config` | 热重载被拒时指出是哪个字段导致的 |
+| `vmr diagnose --diff-config` | 热重载被拒时指出是哪个字段导致的。**部分已覆盖**：`/admin/status` 与 `vmr status` 现在会报出最近一次重载被拒及其原因、以及配置文件比运行中的配置更新，剩下的增量只是"定位到具体字段" |
 | `weight` 排序维度 | 同 priority 内按权重加权随机。已有过一轮方案设计，未落地 |
 | 端点级 rpm/并发限流 | 主动避免 429。现有 failover 已把 429 的用户可见伤害压得很低，价值中等 |
 | `/metrics`（Prometheus 文本格式，手写无依赖） | 有真实用户要接监控时再做。**OpenTelemetry exporter 与端到端 trace 归入同一条**——三者解决同一个诉求（接入既有监控栈），应当一起设计并只选其一落地，不要各做一半 |
 | `vmr watch`——实时 tail 审计日志 | `vmr status` 已覆盖健康态，这一条补的是"看着请求实时流过"。演示效果好，实用价值中等 |
-| provider health score（成功率/延迟的精细统计进 `vmr status`） | 现有健康机制是二值的（可用/冷却中）。精细化后能看出"这个端点在变差但还没到冷却" |
-| 上游凭证轮换（key rotation） | 单账号多 key 时有用。mTLS 一并归入本条，但没有任何证据表明目标用户需要它 |
+| provider health score（成功率/延迟的精细统计进 `vmr status`） | 现有健康机制是二值的（可用/冷却中）。精细化后能看出"这个端点在变差但还没到冷却"。离线侧已由 report §6.6 端点性价比部分覆盖（成本/单位产出 + 失败尝试累计耗时），这一条剩下的是**实时**视图 |
+| 上游凭证轮换（key rotation） | 单账号多 key 时有用。mTLS 一并归入本条，但没有任何证据表明目标用户需要它。与 CCR 分析报告的 T1-1 多 Key 池是同一件事，那边有更完整的阻力分析（`Endpoint.Name()` 不含 key 指纹是真正的工作量所在） |
 | `audit_rotate_interval: hour｜day` | 当前只有天级轮转。当前流量级别够用 |
 | 客户端中途断开的可区分性 | 目前流中途断开与完整成功在审计里完全一样，会污染 p95 分析。需要改审计 schema，是一次跨包变更 |
 | 直连语法 `model: "provider:model"` | 绕过虚拟模型直达指定 provider，调试用 |

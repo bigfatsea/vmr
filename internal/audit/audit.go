@@ -158,6 +158,17 @@ type Attempt struct {
 	// normalizer had accumulated at that moment), not a second copy of the
 	// whole response body.
 	RawPreStrip any `json:"raw_pre_strip,omitempty"`
+	// UpstreamModel is the model name the upstream itself reported in its
+	// response, recorded ONLY when it differs from Model (the name vmr
+	// asked for) — so the overwhelmingly common "they match" case adds
+	// nothing to the record. It is raw and carries no verdict: version
+	// pinning, vendor prefixes and plan aliases all differ legitimately on
+	// every request, and only the aggregate distribution per endpoint can
+	// tell an alias apart from a relay quietly serving a cheaper model.
+	// vmr cannot recover this after the fact — the rewrite that puts the
+	// virtual name back destroys it, and a successful attempt's body is
+	// not stored — so it is captured at the only moment it exists.
+	UpstreamModel string `json:"upstream_model,omitempty"`
 }
 
 type Message struct {
@@ -266,6 +277,16 @@ func (a *Attempt) SetNorm(applied []string, rawPreStrip []byte) {
 	if len(rawPreStrip) > 0 {
 		a.RawPreStrip = EncodeBody(rawPreStrip)
 	}
+}
+
+// SetUpstreamModel records the upstream's self-reported model name. Called
+// with "" (the common case: it matched what we asked for) it records
+// nothing.
+func (a *Attempt) SetUpstreamModel(model string) {
+	if a == nil || model == "" {
+		return
+	}
+	a.UpstreamModel = model
 }
 
 // EncodeBody returns the body as raw JSON when it is valid JSON (kept

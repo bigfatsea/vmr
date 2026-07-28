@@ -556,3 +556,24 @@ models:
 		t.Error("cmdStatus should return an error when no server is running")
 	}
 }
+
+// dialHost turns a bind address into something you can actually connect
+// to. cfg.Listen is routinely a wildcard ("0.0.0.0:8800") and lsof reports
+// the same socket as "*:8800" — vmr.sh ps feeds both forms straight into
+// `vmr status -addr`, and /admin/status is loopback-only regardless.
+func TestDialHostRewritesWildcardBinds(t *testing.T) {
+	cases := map[string]string{
+		"0.0.0.0:8800":   "127.0.0.1:8800",
+		"*:8800":         "127.0.0.1:8800",
+		":8800":          "127.0.0.1:8800",
+		"[::]:8800":      "127.0.0.1:8800",
+		"127.0.0.1:8901": "127.0.0.1:8901",
+		"localhost:8800": "localhost:8800",
+		"garbage":        "garbage", // not host:port — pass through so the dial reports the real reason
+	}
+	for in, want := range cases {
+		if got := dialHost(in); got != want {
+			t.Errorf("dialHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

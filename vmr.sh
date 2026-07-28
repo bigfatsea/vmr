@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ver 2026-07-17 13:00, by Sonnet 5
+# Ver 2026-07-28 11:20, by Opus 5
 #
 # vmr.sh — the single command-line entry point for running VMR.
 #
@@ -8,7 +8,15 @@
 #   ./vmr.sh stop       stop the running process
 #   ./vmr.sh restart    stop + start
 #   ./vmr.sh status     process state + endpoint health (vmr status)
+#   ./vmr.sh ps         every vmr instance on this machine: port + config
 #   ./vmr.sh logs       tail -f the server log
+#
+# Everything else is forwarded verbatim to the vmr binary, so this script is
+# the only entry point you ever need:
+#   ./vmr.sh check | diagnose | replay | report | dirs | <any future subcommand>
+# See "passthrough" below for the two things that forwarding is not:
+# a whitelist (unknown subcommands reach the binary and get its own usage
+# text), and a cwd change (relative paths still resolve from where you stand).
 #
 # Service mode (the OS init system supervises: crash restart + start at login/boot):
 #   ./vmr.sh service install     render + register the launchd/systemd unit, start it
@@ -38,6 +46,10 @@
 # to start) when source under cmd/vmr or internal/ is newer than ./vmr.
 
 set -euo pipefail
+# Captured before the cd: passthrough runs the binary from here, so a
+# relative path a caller typed (audit globs, -o, -c) means what it meant in
+# their shell, not what it happens to mean inside this checkout.
+ORIG_PWD="$PWD"
 cd "$(dirname "$0")"
 
 BIN="$PWD/vmr"
@@ -230,10 +242,111 @@ cmd_status() {
   pids="$(running_pids)"
   if [[ -z "$pids" ]]; then
     echo "vmr not running"
+    # This only ever looked for *this* checkout's binary path (see MATCH);
+    # another checkout's instance is running as far as the machine cares.
+    echo "  (other instances on this machine, if any: $0 ps)"
     exit 1
   fi
   echo "vmr running (pid $(echo "$pids" | tr '\n' ' '))"
-  "$BIN" status -c "$CFG"
+  if "$BIN" status -c "$CFG" 2>/dev/null; then
+    return 0
+  fi
+  # config.yaml didn't load, so `status -c` couldn't even work out which
+  # port to ask. That is not an edge case here — it is precisely the
+  # situation this command exists to explain: a config broken mid-edit, or
+  # the rejected hot reload you are trying to diagnose (the process is
+  # still happily serving the last good snapshot). Fall back to the port
+  # the process actually holds, which needs no config at all.
+  local addr
+  addr="$(listen_addr_of "$(head -1 <<<"$pids")")"
+  if [[ -n "$addr" ]]; then
+    echo "note: config.yaml does not load — querying the running process directly on $addr" >&2
+    "$BIN" status -addr "$addr"
+    return 0
+  fi
+  "$BIN" status -c "$CFG"   # no port to fall back to: re-run so the real error surfaces
+}
+
+# cmd_ps: every vmr instance running on this machine, whatever checkout or
+# config it came from — the one question `status` cannot answer, because
+# `status` starts from *this* checkout's config and can only ever find the
+# instance that config points at.
+#
+# Three steps, each doing only what it is actually good at:
+#   1. pgrep  — which processes are vmr servers (any checkout, any config)
+#   2. lsof   — which TCP port each one holds (the listen address lives in
+#               that process's config, not on its command line, so the
+#               process table alone genuinely cannot tell you)
+#   3. vmr status -addr PORT -brief — everything else, asked of the instance
+#               itself over /admin/status. Deliberately not parsed here:
+#               the binary already speaks JSON, and making bash do it would
+#               either drag in a jq dependency or hand-roll a JSON parser.
+#
+# Note this uses *this* checkout's binary to interrogate instances that may
+# be running a different build — fine, because -addr only speaks HTTP to a
+# stable endpoint; nothing about the other process's binary is touched.
+#
+# Degradations, both deliberately non-fatal: no lsof → no port, so the row
+# falls back to the -c argument off the command line; a process that has a
+# port but doesn't answer /admin/status (starting up, wedged, or not a vmr
+# at all) → same fallback row, flagged, rather than a disappeared instance.
+listen_addr_of() {
+  command -v lsof >/dev/null 2>&1 || return 0
+  # -a is load-bearing: lsof ORs its selection filters by default, so
+  # `-p PID -iTCP` without it means "this process OR any TCP socket" and
+  # happily returns some unrelated daemon's port. $9 is the NAME column
+  # ("127.0.0.1:8800" / "*:8800"); first LISTEN socket only — vmr binds
+  # exactly one. `return 0`: lsof exits 1 on no match, which under set -e
+  # would abort the caller's assignment.
+  lsof -nP -a -p "$1" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9; exit}'
+  return 0
+}
+
+ps_row_fmt='%-7s %-22s %-10s %-7s %-14s %s\n'
+
+cmd_ps() {
+  local pids pid addr row p l u m v st c cfgarg why
+  # (^|/)vmr start — anchored so a bare-name launch off $PATH still matches
+  # while "vmr.sh start" (this script, mid-run) does not.
+  pids="$(pgrep -f '(^|/)vmr start' 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    echo "no vmr instance running on this machine"
+    return 0
+  fi
+  command -v lsof >/dev/null 2>&1 \
+    || echo "note: lsof not installed — listen ports and live details unavailable, showing process table only" >&2
+  # shellcheck disable=SC2059
+  printf "$ps_row_fmt" PID LISTEN UPTIME MODELS VERSION CONFIG
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    addr="$(listen_addr_of "$pid")"
+    row=""
+    if [[ -n "$addr" ]]; then
+      row="$("$BIN" status -addr "$addr" -brief 2>/dev/null || true)"
+    fi
+    if [[ -n "$row" ]]; then
+      IFS=$'\t' read -r p l u m v st c <<<"$row"
+      # The stale flag rides in its own field rather than pre-formatted by
+      # the binary: -brief stays machine-readable, and CONFIG being the last
+      # column makes appending a marker to it safe.
+      [[ "$st" == "stale" ]] && c="$c  [config file is newer — see: $0 status]"
+      # shellcheck disable=SC2059
+      printf "$ps_row_fmt" "$p" "$l" "$u" "$m" "$v" "$c"
+    else
+      # Fallback config path: the -c argument as typed, which unlike the
+      # instance's own answer may be relative to a working directory we
+      # don't know — hence the marker, so a reader doesn't mistake it for
+      # a resolved path.
+      cfgarg="$(ps -o command= -p "$pid" 2>/dev/null | sed -n 's/.*-c[= ]\([^ ]*\).*/\1/p')"
+      if [[ -n "$addr" ]]; then
+        why="no answer on /admin/status"
+      else
+        why="port unknown (lsof)"
+      fi
+      # shellcheck disable=SC2059
+      printf "$ps_row_fmt" "$pid" "${addr:-?}" "?" "?" "?" "${cfgarg:-?}  ($why, config as typed)"
+    fi
+  done <<<"$pids"
 }
 
 # ---------- service mode (init-system supervision) ----------
@@ -415,6 +528,53 @@ svc_status() {
   "$BIN" status -c "$CFG" || true
 }
 
+# ---------- passthrough to the binary ----------
+
+# has_c_flag ARGS...: true if the caller already named a config file. Covers
+# all four spellings Go's flag package accepts (-c X, -c=X, --c X, --c=X).
+has_c_flag() {
+  local a
+  for a in "$@"; do
+    case "$a" in -c|--c|-c=*|--c=*) return 0 ;; esac
+  done
+  return 1
+}
+
+# passthrough SUB ARGS...: forward a subcommand this script doesn't own to
+# the binary. Deliberately NOT a whitelist — a subcommand added to the
+# binary tomorrow works here today, and a typo gets vmr's own usage text
+# instead of a stale list maintained in bash.
+#
+# Two adjustments, both about paths:
+#
+#  1. cd back to ORIG_PWD. Every subcommand takes paths (audit globs for
+#     report, -o, -detail, -record...), and the binary resolves them against
+#     its cwd. Running it from this checkout instead of the caller's shell
+#     would silently resolve `vmr.sh report audit.jsonl` against the repo.
+#  2. Inject -c "$CFG" when the subcommand has a -c flag and the caller
+#     omitted it. Needed *because* of (1): the binary's own default is the
+#     relative "config.yaml", which after (1) would mean the caller's cwd,
+#     not this checkout's config — and "the config next to the script" is
+#     the only sensible default for a script whose whole job is running
+#     this checkout. The list is the subcommands that actually define -c;
+#     `report` is the one that doesn't, and injecting there is a hard error
+#     (flag.ExitOnError on an undefined flag), not a harmless extra.
+#     A future -c-taking subcommand missing from this list degrades to
+#     "type -c yourself", never to a wrong config.
+passthrough() {
+  local sub="$1"; shift
+  local args=("$@")
+  case "$sub" in
+    start|check|status|dirs|diagnose|replay)
+      has_c_flag "$@" || args=(-c "$CFG" "$@")
+      ;;
+  esac
+  cd "$ORIG_PWD"
+  # ${args[@]+...}: an empty array under set -u is an unbound-variable error
+  # in bash 3.2 (macOS's /bin/bash) — reachable via a bare `./vmr.sh report`.
+  exec "$BIN" "$sub" ${args[@]+"${args[@]}"}
+}
+
 svc_cmd() {
   case "${1:-}" in
     install)   svc_install ;;
@@ -433,10 +593,16 @@ case "${1:-}" in
   stop)    cmd_stop ;;
   restart) cmd_stop; cmd_start ;;
   status)  cmd_status ;;
+  ps)      cmd_ps ;;
   logs)    resolve_log_dir; exec tail -f "$SERVER_LOG" ;;
   service) shift; svc_cmd "$@" ;;
-  *)
-    echo "usage: $0 {start|stop|restart|status|logs}                      # dev mode (you supervise)" >&2
+  "")
+    echo "usage: $0 {start|stop|restart|status|ps|logs}                   # dev mode (you supervise)" >&2
     echo "       $0 service {install|uninstall|start|stop|restart|status|logs}   # init system supervises" >&2
+    echo "       $0 <check|diagnose|report|dirs|replay|...> [args]         # forwarded to vmr (defaults -c $CFG)" >&2
     exit 2 ;;
+  # Not a script-owned subcommand — the binary decides whether it exists.
+  # `vmr start` in the foreground is the one thing this shadows: run
+  # ./vmr start -c config.yaml directly if you want it unsupervised.
+  *) passthrough "$@" ;;
 esac

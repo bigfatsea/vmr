@@ -132,14 +132,17 @@ func cmdStart(args []string) error {
 		newCfg, err := config.Load(*path)
 		if err != nil {
 			logger.Printf("rejected, keeping current config: %v", err)
+			rt.RecordReload(trigger, err)
 			return
 		}
 		newSnap, err := router.BuildSnapshot(newCfg)
 		if err != nil {
 			logger.Printf("rejected, keeping current config: %v", err)
+			rt.RecordReload(trigger, err)
 			return
 		}
 		rt.Install(newSnap)
+		rt.RecordReload(trigger, nil)
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
 		if newCfg.LogDir != auditDirInUse {
 			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
@@ -163,7 +166,7 @@ func cmdStart(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           server.New(rt, auditLog).Handler(),
+		Handler:           server.New(rt, auditLog).WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, config.CountNested(cfg.Models))

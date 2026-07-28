@@ -20,6 +20,14 @@ import (
 // regrowth back toward 948, not fighting over every line.
 var fileLineLimits = map[string]int{
 	"internal/router/router.go": 700,
+	// internal/report's two largest files, budgeted after the same kind of
+	// split: the renderer used to be one 1053-line aggregate_render.go and
+	// is now render_doc.go (running order + shared table primitive) plus one
+	// section_*.go per numbered section. The budget is what keeps a new
+	// report section arriving as a new file rather than as another 90 lines
+	// appended to whichever file is already the biggest.
+	"internal/report/aggregate.go":  1000,
+	"internal/report/render_doc.go": 400,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

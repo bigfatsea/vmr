@@ -8,7 +8,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
 	"vmr/internal/core"
-	"vmr/internal/health"
 	"vmr/internal/imgprep"
 	"vmr/internal/router"
 )
@@ -25,6 +23,7 @@ import (
 type Server struct {
 	rt    *router.Router
 	audit *audit.Logger // nil = auditing disabled
+	inst  instance      // zero value outside `vmr start` (tests, embedding)
 }
 
 func New(rt *router.Router, auditLog *audit.Logger) *Server {
@@ -288,46 +287,4 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	core.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list, "has_more": false})
-}
-
-// adminStatus reports per-endpoint health. Loopback callers only.
-func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil || !net.ParseIP(host).IsLoopback() {
-		core.WriteError(w, http.StatusForbidden, "permission_error", "admin endpoints are loopback-only")
-		return
-	}
-	snap := s.rt.Snapshot()
-	now := time.Now()
-	type epStatus struct {
-		Endpoint string `json:"endpoint"`
-		Protocol string `json:"protocol"`
-		Priority int    `json:"priority"`
-		health.Status
-	}
-	// Keyed "name [protocol]": the same virtual-model name may exist in
-	// both protocol groups (§10), and mixing their endpoints under one
-	// key reads as one model with double the endpoints.
-	out := map[string][]epStatus{}
-	for protocol, byName := range snap.Models {
-		for name, route := range byName {
-			key := name + " [" + protocol + "]"
-			for _, ep := range route.Endpoints {
-				out[key] = append(out[key], epStatus{
-					Endpoint: ep.Name(),
-					Protocol: protocol,
-					Priority: ep.Priority,
-					Status:   s.rt.Health.Status(ep.HealthKey(), now),
-				})
-			}
-		}
-	}
-	limit, inFlight, waiting := s.rt.Concurrency()
-	core.WriteJSON(w, http.StatusOK, map[string]any{
-		"models": out,
-		"concurrency": map[string]any{
-			"limit": limit, "in_flight": inFlight, "waiting": waiting,
-		},
-		"time": now,
-	})
 }

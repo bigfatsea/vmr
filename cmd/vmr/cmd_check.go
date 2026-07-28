@@ -68,5 +68,10 @@ func cmdCheck(args []string) error {
 			}
 		}
 	}
+	// check is deliberately offline — it proves the config is coherent and
+	// shows the try order, but never touches the network, which is exactly
+	// what makes it safe for vmr.sh start to gate on. Say so, or the split
+	// with diagnose is something you only learn by reading the docs.
+	fmt.Println("\nconfig and routing are valid (no network I/O) — to test real connectivity: vmr diagnose")
 	return nil
 }

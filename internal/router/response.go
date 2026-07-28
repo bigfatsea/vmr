@@ -91,7 +91,12 @@ const bufferedCap = 32 << 20
 // quote. JSON-escaped quotes inside string values (\") never match the
 // bare `"` the pattern requires, so content that merely *mentions* a
 // model field is not rewritten.
-var modelFieldPattern = regexp.MustCompile(`("model":\s*")[^"]*"`)
+var modelFieldPattern = regexp.MustCompile(`("model":\s*")([^"]*)"`)
+
+// Group 2 is the upstream's own model value, read once per response before
+// the rewrite overwrites it — see respStream.noteUpstreamModel. Adding the
+// group is free for the rewrite itself: ReplaceAll's `${1}` still names the
+// same opener it always did.
 
 var (
 	contentFieldMarker = []byte(`"content":"`)
@@ -132,6 +137,9 @@ type respStream struct {
 	done              bool   // src hit EOF and out holds the final bytes
 	sawDone           bool   // upstream emitted its own data: [DONE]
 	tailNL            bool   // last emitted bytes ended with the SSE separator
+	upstreamModel     string // the real model name vmr ASKED this endpoint for (ep.Model)
+	observedModel     string // what the upstream actually answered with, recorded only when it differs from upstreamModel
+	modelSeen         bool   // the observed value is captured once per response, not once per SSE chunk
 	thinkTriggered    bool   // buffering was caused by an inline <think> block
 	thinkPatternBytes int    // observation only: cumulative content bytes scanned for the leaked-thinking-process shape
 	thinkPatternHits  int    // cumulative "\n<N>." numbered-marker hits found in those bytes
@@ -140,8 +148,8 @@ type respStream struct {
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 }
 
-func newRespStream(src io.Reader, clientModel string, isSSE bool, protocol string, opaque bool) *respStream {
-	rs := &respStream{src: src, clientModel: clientModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true}
+func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *respStream {
+	rs := &respStream{src: src, clientModel: clientModel, upstreamModel: upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true}
 	switch {
 	case opaque:
 		rs.applied = append(rs.applied, "opaque")
@@ -350,12 +358,54 @@ func (s *respStream) emitBlock(block []byte) {
 	}
 	s.noteThinkingPatternIfSuspected(block)
 	if modelFieldPattern.Match(block) {
+		s.noteUpstreamModel(block)
 		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
 	}
 	s.tailNL = bytes.HasSuffix(block, eventSep)
 	s.out = append(s.out, block...)
 }
+
+// noteUpstreamModel records what the upstream actually said its model was,
+// captured from the block about to have that value overwritten with the
+// virtual name. This is the only moment the information exists: the audit
+// trail deliberately does not store a successful attempt's response body
+// (it is byte-identical to the client's, minus the steps in Norm), and the
+// client's copy has already been rewritten — so a value not read here is
+// gone for good.
+//
+// Deliberately records the RAW value and no verdict. "Asked for X, got Y"
+// is not evidence of anything by itself: version pinning (gpt-4o ->
+// gpt-4o-2024-08-06), vendor prefixes (z-ai/glm-5.2 -> glm-5.2) and plan
+// aliases (ark-code-latest -> doubao-seed-code-251015) all produce a
+// legitimate mismatch on every single request. What separates an alias from
+// a silent downgrade is only visible in aggregate — a *consistent* mapping
+// is an alias, an inconsistent one is worth looking at — and that judgment
+// belongs in vmr report, offline, over many requests, not in a per-request
+// heuristic on the streaming path.
+//
+// Costs one extra regex scan per response, not per SSE chunk: the model
+// field repeats in every chunk and modelSeen latches after the first.
+// Identical values record nothing at all, so the common case adds no bytes
+// to the audit record.
+func (s *respStream) noteUpstreamModel(block []byte) {
+	if s.modelSeen || s.upstreamModel == "" {
+		return
+	}
+	m := modelFieldPattern.FindSubmatch(block)
+	if len(m) < 3 {
+		return
+	}
+	s.modelSeen = true
+	if got := string(m[2]); got != s.upstreamModel {
+		s.observedModel = got
+	}
+}
+
+// ObservedModel is the upstream's own model value when it differed from the
+// one vmr requested, else "" — see noteUpstreamModel for why there is no
+// verdict attached.
+func (s *respStream) ObservedModel() string { return s.observedModel }
 
 func (s *respStream) finish() {
 	if s.opaque {
@@ -384,6 +434,7 @@ func (s *respStream) finalizeBuffered() {
 	s.buf = nil
 	raw := b // pre-strip snapshot; only kept (below) if a strip actually fires
 	if modelFieldPattern.Match(b) {
+		s.noteUpstreamModel(b)
 		b = modelFieldPattern.ReplaceAll(b, []byte(`${1}`+s.clientModel+`"`))
 		s.noteApplied("model_rewrite")
 	}

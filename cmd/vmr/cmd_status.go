@@ -1,62 +1,196 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-28 12:10, by Opus 5
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"vmr/internal/config"
 	"vmr/internal/core"
 )
 
+// statusResponse is the /admin/status payload, as much of it as this
+// command renders.
+type statusResponse struct {
+	Instance struct {
+		PID         int       `json:"pid"`
+		Listen      string    `json:"listen"`
+		Config      string    `json:"config"`
+		Models      int       `json:"models"`
+		Uptime      int64     `json:"uptime_seconds"`
+		Started     string    `json:"started_at"`
+		Version     string    `json:"version"`
+		ConfigStale bool      `json:"config_stale"`
+		ConfigMtime time.Time `json:"config_mtime"`
+	} `json:"instance"`
+	Reload struct {
+		At      time.Time `json:"at"`
+		Trigger string    `json:"trigger"`
+		OK      bool      `json:"ok"`
+		Err     string    `json:"error"`
+		Count   int       `json:"count"`
+	} `json:"reload"`
+	Sticky struct {
+		Entries int `json:"entries"`
+	} `json:"sticky"`
+	Models map[string][]struct {
+		Endpoint      string    `json:"endpoint"`
+		Protocol      string    `json:"protocol"`
+		Priority      int       `json:"priority"`
+		Fails         int       `json:"consecutive_failures"`
+		CooldownUntil time.Time `json:"cooldown_until"`
+		LastError     string    `json:"last_error"`
+		Available     bool      `json:"available"`
+		Probing       bool      `json:"probing"`
+	} `json:"models"`
+	Concurrency struct {
+		Limit    int   `json:"limit"`
+		InFlight int64 `json:"in_flight"`
+		Waiting  int64 `json:"waiting"`
+	} `json:"concurrency"`
+}
+
 func cmdStatus(args []string) error {
-	path, err := configFlag(args, "status")
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	path := fs.String("c", "config.yaml", "path to config file")
+	addr := fs.String("addr", "", "query this host:port directly, without loading a config to find it (for instances whose config this machine may not have)")
+	brief := fs.Bool("brief", false, "print one tab-separated line — pid, listen, uptime, models, version, config-stale, config — instead of the health listing (vmr.sh ps uses this)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	target := *addr
+	if target == "" {
+		cfg, err := config.Load(*path)
+		if err != nil {
+			return err
+		}
+		target = cfg.Listen
+	}
+	st, err := fetchStatus(target)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		return err
+	if *brief {
+		// Tab-separated, fixed field order — pid, listen, uptime, models,
+		// version, config-stale flag, config — so the caller can split on a
+		// delimiter that cannot appear in a path. Column widths and how to
+		// render the stale flag are the caller's business (vmr.sh ps).
+		stale := "-"
+		if st.Instance.ConfigStale {
+			stale = "stale"
+		}
+		fmt.Printf("%d\t%s\t%s\t%d\t%s\t%s\t%s\n", st.Instance.PID, st.Instance.Listen,
+			uptimeStr(st.Instance.Uptime), st.Instance.Models, st.Instance.Version, stale, st.Instance.Config)
+		return nil
 	}
+	printStatus(st)
+	return nil
+}
+
+// uptimeStr renders whole seconds the same way cmd_start's VMR STOP line
+// does (time.Duration's own "3h12m5s"), so a log line and a status line
+// never disagree about how long the same process has been up.
+func uptimeStr(seconds int64) string {
+	return (time.Duration(seconds) * time.Second).String()
+}
+
+// oneLine flattens a multi-line error (config.Load's YAML errors are
+// routinely three lines) into something that fits one status line, and
+// caps it so a pathological error can't scroll the endpoint listing off
+// screen — the log has the untruncated version either way.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// dialHost rewrites a wildcard bind address into a loopback one. cfg.Listen
+// is routinely "0.0.0.0:8800" and lsof reports the same socket as "*:8800";
+// neither is a destination you can portably connect to, and /admin/status
+// is loopback-only anyway — so the only address worth trying is 127.0.0.1.
+func dialHost(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr // not host:port at all — pass it through and let the dial fail with the real reason
+	}
+	switch host {
+	case "", "*", "0.0.0.0", "::", "[::]":
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return addr
+}
+
+func fetchStatus(addr string) (*statusResponse, error) {
 	// Bare Transport (nil Proxy): this is a local diagnostic call to vmr's
 	// own admin endpoint — it must never route through a proxy, and vmr
 	// ignores proxy environment variables everywhere by design (§10).
 	statusClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
-	resp, err := statusClient.Get("http://" + cfg.Listen + "/admin/status")
+	resp, err := statusClient.Get("http://" + dialHost(addr) + "/admin/status")
 	if err != nil {
-		return fmt.Errorf("is vmr running on %s? %w", cfg.Listen, err)
+		return nil, fmt.Errorf("is vmr running on %s? %w", addr, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status endpoint returned %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("status endpoint returned %d: %s", resp.StatusCode, body)
 	}
-	var st struct {
-		Models map[string][]struct {
-			Endpoint      string    `json:"endpoint"`
-			Protocol      string    `json:"protocol"`
-			Priority      int       `json:"priority"`
-			Fails         int       `json:"consecutive_failures"`
-			CooldownUntil time.Time `json:"cooldown_until"`
-			LastError     string    `json:"last_error"`
-			Available     bool      `json:"available"`
-			Probing       bool      `json:"probing"`
-		} `json:"models"`
-		Concurrency struct {
-			Limit    int   `json:"limit"`
-			InFlight int64 `json:"in_flight"`
-			Waiting  int64 `json:"waiting"`
-		} `json:"concurrency"`
-	}
+	var st statusResponse
 	if err := json.Unmarshal(body, &st); err != nil {
-		return err
+		return nil, err
+	}
+	return &st, nil
+}
+
+func printStatus(st *statusResponse) {
+	// Instance line first: with several vmr processes on one machine, "which
+	// one did I just reach" has to be answerable before any of the health
+	// numbers below mean anything.
+	if st.Instance.PID > 0 {
+		fmt.Printf("instance: pid=%d listen=%s uptime=%s version=%s config=%s\n",
+			st.Instance.PID, st.Instance.Listen,
+			uptimeStr(st.Instance.Uptime), st.Instance.Version, st.Instance.Config)
+	}
+	// The whole point of tracking reload state: say it loudly, at the top,
+	// because a process serving a config that no longer matches the file on
+	// disk looks perfectly healthy in every line below this one.
+	if st.Instance.ConfigStale {
+		fmt.Printf("  WARNING: config file modified %s — newer than the config this process is serving\n",
+			st.Instance.ConfigMtime.Local().Format("2006-01-02 15:04:05"))
+		if !st.Reload.At.IsZero() && !st.Reload.OK {
+			fmt.Printf("           last reload (%s at %s) was REJECTED: %s\n",
+				st.Reload.Trigger, st.Reload.At.Local().Format("15:04:05"), oneLine(st.Reload.Err))
+		} else {
+			fmt.Println("           no reload has picked it up — check the log, or send SIGHUP to retry")
+		}
+	}
+	if !st.Reload.At.IsZero() {
+		state := "ok"
+		if !st.Reload.OK {
+			// The warning block above already printed the reason in full;
+			// repeating a multi-line YAML error twice in six lines of output
+			// is noise, not emphasis.
+			state = "REJECTED: " + oneLine(st.Reload.Err)
+			if st.Instance.ConfigStale {
+				state = "REJECTED (reason above)"
+			}
+		}
+		fmt.Printf("reload: %d applied, last %s at %s %s\n",
+			st.Reload.Count, st.Reload.Trigger, st.Reload.At.Local().Format("15:04:05"), state)
 	}
 	if st.Concurrency.Limit > 0 {
 		fmt.Printf("concurrency: %d/%d in flight, %d waiting\n",
 			st.Concurrency.InFlight, st.Concurrency.Limit, st.Concurrency.Waiting)
+	}
+	if st.Sticky.Entries > 0 {
+		fmt.Printf("sticky: %d session(s) pinned\n", st.Sticky.Entries)
 	}
 	for _, name := range core.SortedKeys(st.Models) {
 		fmt.Println(name) // key is already "name [protocol]"
@@ -75,5 +209,4 @@ func cmdStatus(args []string) error {
 			fmt.Printf("  p%-3d %-40s %s\n", ep.Priority, ep.Endpoint, state)
 		}
 	}
-	return nil
 }

@@ -1,0 +1,145 @@
+// Ver 2026-07-28 19:20, by Opus 5
+
+// §6 会话: per-session rollups and the compaction chains that link a
+// summarized session to the one continuing from it.
+package report
+
+import (
+	"fmt"
+	"strconv"
+)
+
+// ---- §6 会话与任务 ----
+// Only interactive-class sessions are listed here (scheduled single-shots -
+// heartbeat/dream_diary/… - live in vmr-requests.md's own 定时任务 rollups,
+// see requests.go); grouped by client (Chat User), matching vmr-requests.md's
+// grouping, so a "类" column would be redundant (every row is interactive).
+func renderSessions(w func(string, ...any), rep *Report2) {
+	w("## §6 会话与任务\n\n")
+	var interactive []SessionRow
+	for _, s := range rep.Sessions {
+		if s.Class == "interactive" {
+			interactive = append(interactive, s)
+		}
+	}
+	if len(interactive) == 0 {
+		w("（无 interactive 会话）\n\n")
+		renderCompactionChains(w, rep)
+		return
+	}
+
+	byClient := map[string][]SessionRow{}
+	var seenOrder []string
+	for _, s := range interactive {
+		key := s.ClientKey
+		if key == "" {
+			key = "(unresolved)"
+		}
+		if _, ok := byClient[key]; !ok {
+			seenOrder = append(seenOrder, key)
+		}
+		byClient[key] = append(byClient[key], s)
+	}
+	// rep.ByClient order (by request volume) first, then any extra key with
+	// no ByClient entry - "(unresolved)" never carries a client_key_tag.
+	clientOrder := make([]string, 0, len(rep.ByClient)+1)
+	for _, c := range rep.ByClient {
+		clientOrder = append(clientOrder, c.ClientKey)
+	}
+	for _, k := range seenOrder {
+		found := false
+		for _, o := range clientOrder {
+			if o == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			clientOrder = append(clientOrder, k)
+		}
+	}
+
+	for _, ck := range clientOrder {
+		rows := byClient[ck]
+		if len(rows) == 0 {
+			continue
+		}
+		w("**%s**\n\n", ck)
+		tbl := newTable(w, "会话", "标题", "轮", "任务", "fresh/cached/out", "结果")
+		for _, s := range rows {
+			renderSessionRow(tbl, s)
+		}
+		w("\n")
+	}
+	// compaction chains: mermaid for chains ≥3 nodes
+	renderCompactionChains(w, rep)
+}
+
+func renderSessionRow(tbl *mdTable, s SessionRow) {
+	outcome := "ok"
+	if s.Errors > 0 {
+		outcome = fmt.Sprintf("ok (%d error)", s.Errors)
+	}
+	if s.Fallbacks > 0 {
+		outcome += fmt.Sprintf(" · %d fallback", s.Fallbacks)
+	}
+	tbl.row(s.ID, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
+		fmt.Sprintf("%s / %s / %s", fmtTokens(s.TokensInFresh), fmtTokens(s.TokensInCached), fmtTokens(s.TokensOut)),
+		outcome)
+}
+
+// truncateTitle shortens s to at most maxRunes runes, appending an ellipsis
+// when cut. Rune-based, unlike a byte slice - a truncated CJK title never
+// splits a multi-byte UTF-8 sequence into mojibake (e.g. a trailing "�").
+func truncateTitle(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
+}
+
+// renderCompactionChains builds head->current chains from SessionRow.ContinuedFrom
+// and renders a mermaid flowchart for any chain with ≥3 nodes (≥2 compaction
+// hops). Shorter chains are noted inline as text. (V2 A3 / M5)
+func renderCompactionChains(w func(string, ...any), rep *Report2) {
+	byID := map[string]*SessionRow{}
+	for i := range rep.Sessions {
+		byID[rep.Sessions[i].ID] = &rep.Sessions[i]
+	}
+	// child -> parent (ContinuedFrom). A session is a "tip" if nobody continues from it.
+	pointedTo := map[string]bool{}
+	for _, s := range rep.Sessions {
+		if s.ContinuedFrom != "" {
+			pointedTo[s.ContinuedFrom] = true
+		}
+	}
+	seen := map[string]bool{}
+	for _, s := range rep.Sessions {
+		if pointedTo[s.ID] {
+			continue // not a tip
+		}
+		// walk back to head via ContinuedFrom links (string-only, no pointer)
+		chain := []string{s.ID}
+		parent := s.ContinuedFrom
+		for parent != "" && byID[parent] != nil && !seen[parent] {
+			chain = append(chain, parent)
+			seen[parent] = true
+			parent = byID[parent].ContinuedFrom
+		}
+		// reverse: head -> tip
+		for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+			chain[i], chain[j] = chain[j], chain[i]
+		}
+		if len(chain) >= 3 {
+			w("```mermaid\nflowchart LR\n")
+			for i := 0; i < len(chain)-1; i++ {
+				w("    %s[\"%s\"] -->|compacted| %s[\"%s\"]\n", chain[i], chain[i], chain[i+1], chain[i+1])
+			}
+			w("```\n\n")
+		} else if len(chain) == 2 {
+			// text arrow, inline note
+			w("> %s ← %s（单次 compaction）\n\n", chain[1], chain[0])
+		}
+	}
+}

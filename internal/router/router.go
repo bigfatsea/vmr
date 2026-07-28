@@ -35,6 +35,8 @@ type Router struct {
 	limiter  atomic.Pointer[limiter] // nil = unlimited
 	inFlight atomic.Int64
 	waiting  atomic.Int64
+
+	reloads reloadTracker // see reload.go: last hot-reload outcome, for /admin/status
 }
 
 func New(logger *log.Logger) *Router {
@@ -114,8 +116,10 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			candidates = append(candidates, ep)
 		}
 	}
+	reason := routeReason{total: len(route.Endpoints), healthOK: len(healthOK), afterCond: len(hardFiltered)}
 	if len(candidates) == 0 && len(hardFiltered) > 0 {
 		candidates = hardFiltered
+		reason.ctxFallback = true
 	}
 	strategy.Sort(candidates, route.Dims)
 
@@ -136,6 +140,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			if epKey, lastUsed, found := rt.Sticky.Peek(stickyKey); found {
 				if ep := findByHealthKey(candidates, epKey); ep != nil && time.Since(lastUsed) < ep.StickyTTL {
 					moveToFront(candidates, ep)
+					reason.sticky = true
 				}
 			}
 		}
@@ -144,8 +149,14 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	// Failover walks the whole candidate sequence: keep trying until one
 	// endpoint succeeds or every available endpoint has been tried once.
 	// max_attempts (>0) optionally caps the walk to bound tail latency.
+	// Set once, up front: w.Header() is just a map until something calls
+	// WriteHeader, and every path that does so (forwardSuccess,
+	// handleErrorResponse, the all-failed branch below) runs after this.
+	w.Header().Set("X-VMR-Route-Reason", reason.String())
+
 	attempts := 0
 	var last *upstreamError
+	var trail failoverTrail
 	for _, ep := range candidates {
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
@@ -158,6 +169,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			continue
 		}
 		attempts++
+		trail.apply(w.Header()) // failures so far — the attempt about to run writes the headers itself if it succeeds
 		done, uerr, success := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
 		if done {
 			if success && stickyKey != "" {
@@ -174,8 +186,12 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		// status/headers/body to return.
 		if uerr != nil {
 			last = uerr
+			trail.add(ep, uerr.status)
+		} else {
+			trail.add(ep, 0)
 		}
 	}
+	trail.apply(w.Header()) // every candidate failed: the all-failed branch below writes the response
 
 	// All candidates failed or none were available.
 	if last != nil {
@@ -463,7 +479,7 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	ct := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
 	opaque := resp.Header.Get("Content-Encoding") != ""
-	rbody := newRespStream(body, creq.Model, isSSE, ep.AdapterType, opaque)
+	rbody := newRespStream(body, creq.Model, ep.Model, isSSE, ep.AdapterType, opaque)
 
 	// Both SSE and non-SSE bodies go through copyFlush so the stream_idle
 	// watchdog covers every upstream response body: a 200 whose body stalls
@@ -477,6 +493,7 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 		att.SetTruncated(copyErr)
 	}
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
+	att.SetUpstreamModel(rbody.ObservedModel())
 	rt.logf("%s, status=%s, dur=%s", logPrefix, strings.ToUpper(status), fmtDur(time.Since(start)))
 	return true, nil, true
 }

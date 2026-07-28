@@ -42,6 +42,8 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 
 # dev mode — quick background run, you supervise (validates first, logs under logs/):
 ./vmr.sh start          # also: stop / restart / status / logs
+./vmr.sh ps             # every vmr instance on this machine: port + config + uptime
+./vmr.sh <check|diagnose|report|…>   # any vmr subcommand, forwarded to the binary
 
 # service mode — the OS init system supervises: crash auto-restart + start at login.
 # macOS → launchd user agent; Linux → systemd user unit. `install` renders and

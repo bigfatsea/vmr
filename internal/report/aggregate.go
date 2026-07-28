@@ -1,31 +1,24 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-07-28 21:30, by Opus 5
 
-// This file (aggregate.go) is the aggregator behind the `vmr report`
-// command: it turns audit JSONL into a Markdown + JSON pair organized
-// around nine numbered sections (§0-§8, see
-// docs/VirtualModelRouter_System_Design_v3.md §9.4; the original design
-// rationale predates the pricing/cost-estimate section and is kept as a
-// historical record in REPORT_REDESIGN_V2.zh.md — that doc's "eight
-// sections"/"format 9" numbering is superseded here).
+// This file is the aggregation pass behind `vmr report`: it reads audit
+// JSONL and fills in the Report2 buckets declared in rows.go. Rendering
+// lives in render_doc.go + one section_*.go per numbered section; the
+// per-request detail files in detail.go/render.go; session and task
+// grouping in session.go; token extraction in usage.go; the optional
+// pricing sidecar in pricing.go.
 //
-// It shares the package with session.go/export.go (AnalyzeSessions: 791-
-// line session/task-grouping heuristic, compaction chains, workload tags,
-// tool signatures) and detail.go/render.go (WriteDetails: per-request
-// Markdown+JSON detail files under details/) — those pieces, plus
-// usage.go's ExtractUsage, are the foundation every request-level and
-// session-level field in this file's Build() reads. aggregate.go/
-// aggregate_render.go/metrics.go/requests.go/pricing.go are what's actually
-// new relative to that foundation: bucket aggregation, derived metrics
-// (fresh tokens, cache efficiency, true stream_ms percentiles, slow-request
-// counts, tool-schema waste, context growth, by-client, cost estimate),
-// Markdown rendering, the requests index, and the pricing sidecar.
+// The report is organized around nine numbered sections (§0-§8) plus §6.5
+// sticky effectiveness and §6.6 endpoint value — see
+// docs/VirtualModelRouter_System_Design_v3.md §9.4.
 //
-// Format 10 (Meta.Format / const Format below) is the only format; the
-// invariant it encodes: every bucket keeps its own raw dur_ms / ttft_ms /
-// stream_ms slices and computes true p50/p95 directly - no cross-bucket
-// roll-up, no percentile-of-percentiles. stream_ms (dur-ttft) is collected
-// as its own per-request slice for the same reason:
-// P95(dur)-P95(ttft) != P95(dur-ttft).
+// Meta.Format (const Format, rows.go) encodes one invariant: every bucket
+// keeps its own raw dur_ms / ttft_ms / stream_ms slices and computes true
+// p50/p95 directly — no cross-bucket roll-up, no percentile-of-percentiles.
+// stream_ms (dur-ttft) is collected as its own per-request slice for the
+// same reason: P95(dur)-P95(ttft) != P95(dur-ttft).
+//
+// Coupled to the audit record's shape at compile time: changing
+// audit.Record means changing this package and its tests in the same edit.
 package report
 
 import (
@@ -39,367 +32,6 @@ import (
 
 	"vmr/internal/audit"
 )
-
-// Format is the aggregate report's JSON structure version. 10 continues the legacy
-// sequence (9 = legacy report) and marks the redesigned layout.
-const Format = 10
-
-// SlowThresholdMS is the default "unbearably slow" cutoff for slow_requests
-// (V2 C-family / F-family). 30s matches the V2 spec.
-const SlowThresholdMS = 30_000
-
-// Report2 is the top-level JSON output, mirroring the Markdown structure.
-// Every aggregating bucket carries the derived fields that are cheap to
-// compute during finish* (fresh tokens, cache_efficiency, slow_requests,
-// true stream_ms percentiles) since the raw sums already exist then.
-type Report2 struct {
-	Meta         Meta           `json:"meta"`
-	Overall      Row            `json:"overall"`
-	ByModel      []Row          `json:"by_model"`
-	ByDate       []Row          `json:"by_date"`
-	Hours        []HourRow      `json:"hours,omitempty"`
-	HoursOfDay   []HourRow      `json:"hours_of_day,omitempty"`
-	Endpoints    []EndpointRow  `json:"endpoints"`
-	EndpointsAll []EndpointRow  `json:"endpoints_all,omitempty"`
-	ByClient     []ClientRow    `json:"by_client,omitempty"`
-	Workloads    []WorkloadRow  `json:"workloads,omitempty"`
-	Sessions     []SessionRow   `json:"sessions,omitempty"`
-	Tools        []ToolShapeRow `json:"tools,omitempty"`
-	Efficiency   []Finding      `json:"efficiency,omitempty"`
-	Pricing      *Pricing       `json:"pricing,omitempty"`
-
-	// requests is the per-request export (vmr-requests.jsonl). Unexported so
-	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
-	// RequestRows() for the jsonl writer + index renderer.
-	requests []RequestRow
-}
-
-// Meta carries provenance + method notes consumed by the appendix.
-type Meta struct {
-	Format           int      `json:"format"`
-	GeneratedAt      string   `json:"generated_at"`
-	Inputs           []string `json:"inputs"`
-	Records          int      `json:"records"`
-	ParseErrors      int      `json:"parse_errors"`
-	From             string   `json:"from,omitempty"`
-	To               string   `json:"to,omitempty"`
-	SlowThreshold    int      `json:"slow_threshold_ms"`
-	PercentileMethod string   `json:"percentile_method"` // documented in appendix
-}
-
-// Row is the full-metric bucket: Overall, ByModel, ByDate. It carries
-// families A (volume/outcome), B (token economics), C (latency), D (wire).
-type Row struct {
-	// identity
-	Date     string `json:"date,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-
-	// A - volume & outcome
-	Requests          int     `json:"requests"`
-	OK                int     `json:"ok"`
-	Errors            int     `json:"errors"`
-	Canceled          int     `json:"canceled"`
-	Fallbacks         int     `json:"fallbacks,omitempty"`          // requests needing >1 attempt
-	FallbackRecovered int     `json:"fallback_recovered,omitempty"` // subset that ended ok
-	FallbackFailed    int     `json:"fallback_failed,omitempty"`    // subset that ended error
-	Truncated         int     `json:"truncated,omitempty"`          // ok but stream broke
-	Streams           int     `json:"streams,omitempty"`            // stream:true count
-	SuccessRate       float64 `json:"success_rate"`
-
-	// B - token economics
-	TokensIn           int64   `json:"tokens_in"`
-	TokensInCached     int64   `json:"tokens_in_cached"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh"` // derived: in - cached - cache_write
-	TokensOut          int64   `json:"tokens_out"`
-	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`     // basis for B ratios
-	CacheHitRate       float64 `json:"cache_hit_rate,omitempty"`   // cached/in
-	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"` // cached/(cached+fresh) - the lever
-	ReasoningShare     float64 `json:"reasoning_share,omitempty"`
-
-	// C - latency & speed (true per-bucket percentiles)
-	TTFTKnown       int     `json:"ttft_known,omitempty"`
-	TTFTMSSum       int64   `json:"ttft_ms_sum,omitempty"`
-	TTFTMSP50       int64   `json:"ttft_ms_p50,omitempty"`
-	TTFTMSP95       int64   `json:"ttft_ms_p95,omitempty"`
-	RequestsWithDur int     `json:"requests_with_dur,omitempty"`
-	DurMSSum        int64   `json:"dur_ms_sum,omitempty"`
-	DurMSP50        int64   `json:"dur_ms_p50,omitempty"`
-	DurMSP95        int64   `json:"dur_ms_p95,omitempty"`
-	DurMSMax        int64   `json:"dur_ms_max,omitempty"`
-	StreamKnown     int     `json:"stream_known,omitempty"`  // basis = records with BOTH dur>0 and ttft>0
-	StreamMSP50     int64   `json:"stream_ms_p50,omitempty"` // true p50 of (dur-ttft)
-	StreamMSP95     int64   `json:"stream_ms_p95,omitempty"`
-	SlowRequests    int     `json:"slow_requests,omitempty"` // count(dur > SlowThresholdMS)
-	TokOutPerSec    float64 `json:"tok_out_per_sec,omitempty"`
-
-	// D - wire & payload
-	BytesIn          int64            `json:"bytes_in,omitempty"`
-	BytesOut         int64            `json:"bytes_out,omitempty"`
-	Messages         int64            `json:"messages,omitempty"`
-	MessagesKnown    int              `json:"messages_known,omitempty"`
-	RoleChars        map[string]int64 `json:"role_chars,omitempty"`
-	RoleTokens       map[string]int64 `json:"role_tokens,omitempty"`
-	Images           int              `json:"images,omitempty"`
-	ImagesCompressed int              `json:"images_compressed,omitempty"`
-
-	// H - cost (only when pricing configured)
-	CostEstimate *float64 `json:"cost_estimate,omitempty"`
-
-	// working state (not serialized)
-	durs, ttfts, streamMS []int64
-	tokDurMS              int64
-}
-
-// HourRow is the (date, local-hour) and hour-of-day bucket: A+B+C (+D in JSON).
-type HourRow struct {
-	Date string `json:"date,omitempty"`
-	Hour int    `json:"hour"`
-
-	Requests  int `json:"requests"`
-	OK        int `json:"ok"`
-	Errors    int `json:"errors"`
-	Fallbacks int `json:"fallbacks,omitempty"`
-	Truncated int `json:"truncated,omitempty"`
-
-	TokensIn           int64   `json:"tokens_in"`
-	TokensInCached     int64   `json:"tokens_in_cached"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh"`
-	TokensOut          int64   `json:"tokens_out"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
-
-	TTFTKnown       int   `json:"ttft_known,omitempty"`
-	TTFTMSP50       int64 `json:"ttft_ms_p50,omitempty"`
-	TTFTMSP95       int64 `json:"ttft_ms_p95,omitempty"`
-	RequestsWithDur int   `json:"requests_with_dur,omitempty"`
-	DurMSP50        int64 `json:"dur_ms_p50,omitempty"`
-	DurMSP95        int64 `json:"dur_ms_p95,omitempty"`
-	DurMSMax        int64 `json:"dur_ms_max,omitempty"`
-	StreamKnown     int   `json:"stream_known,omitempty"`
-	StreamMSP95     int64 `json:"stream_ms_p95,omitempty"`
-	SlowRequests    int   `json:"slow_requests,omitempty"`
-
-	BytesIn  int64 `json:"bytes_in,omitempty"`
-	BytesOut int64 `json:"bytes_out,omitempty"`
-	Images   int   `json:"images,omitempty"`
-
-	durs, ttfts, streamMS []int64
-}
-
-// EndpointRow is the (date, endpoint) and endpoint-only bucket: G + B + C.
-type EndpointRow struct {
-	Date     string `json:"date,omitempty"`
-	Endpoint string `json:"endpoint"` // provider/real-model (or provider:real-model label)
-
-	// G - endpoint health
-	Attempts     int            `json:"attempts"`
-	OK           int            `json:"ok"`
-	Failed       int            `json:"failed"`
-	Availability float64        `json:"availability"`
-	ErrorRate    float64        `json:"error_rate,omitempty"` // failed/attempts × 100
-	ErrorClasses map[string]int `json:"error_classes,omitempty"`
-
-	// B/C - only for the requests this endpoint actually served
-	Requests           int     `json:"requests,omitempty"`     // requests this endpoint actually served (request-level, ≠ Attempts)
-	RequestsOK         int     `json:"requests_ok,omitempty"`  // subset with overall outcome "ok"
-	SuccessRate        float64 `json:"success_rate,omitempty"` // RequestsOK/Requests - request-level, distinct from Availability (attempt-level)
-	TokensIn           int64   `json:"tokens_in,omitempty"`
-	TokensInCached     int64   `json:"tokens_in_cached,omitempty"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh,omitempty"`
-	TokensOut          int64   `json:"tokens_out,omitempty"`
-	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
-	TTFTKnown          int     `json:"ttft_known,omitempty"`
-	TTFTMSP50          int64   `json:"ttft_ms_p50,omitempty"`
-	TTFTMSP95          int64   `json:"ttft_ms_p95,omitempty"`
-	RequestsWithDur    int     `json:"requests_with_dur,omitempty"`
-	DurMSP50           int64   `json:"dur_ms_p50,omitempty"`
-	DurMSP95           int64   `json:"dur_ms_p95,omitempty"`
-	DurMSMax           int64   `json:"dur_ms_max,omitempty"`
-	StreamKnown        int     `json:"stream_known,omitempty"`
-	StreamMSP95        int64   `json:"stream_ms_p95,omitempty"`
-	SlowRequests       int     `json:"slow_requests,omitempty"`
-	TokOutPerSec       float64 `json:"tok_out_per_sec,omitempty"`
-	DurMSSum           int64   `json:"dur_ms_sum,omitempty"`
-
-	// per-request input/output token percentiles (⭐ derived, from Usage.In/Out)
-	InTokP50  int64 `json:"in_tok_p50,omitempty"`
-	InTokP95  int64 `json:"in_tok_p95,omitempty"`
-	OutTokP50 int64 `json:"out_tok_p50,omitempty"`
-	OutTokP95 int64 `json:"out_tok_p95,omitempty"`
-
-	// H - cost (only when pricing configured)
-	CostEstimate *float64 `json:"cost_estimate,omitempty"`
-
-	durs, ttfts, streamMS, inToks, outToks []int64
-}
-
-// ClientRow is the by-client_key_tag bucket (new in the summary): A+B+C.
-type ClientRow struct {
-	ClientKey   string  `json:"client_key"`
-	Requests    int     `json:"requests"`
-	OK          int     `json:"ok"`
-	Errors      int     `json:"errors"`
-	SuccessRate float64 `json:"success_rate"`
-
-	TokensIn           int64   `json:"tokens_in"`
-	TokensInCached     int64   `json:"tokens_in_cached"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh"`
-	TokensOut          int64   `json:"tokens_out"`
-	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency"`
-
-	RequestsWithDur int   `json:"requests_with_dur,omitempty"`
-	DurMSP50        int64 `json:"dur_ms_p50,omitempty"`
-	DurMSP95        int64 `json:"dur_ms_p95,omitempty"`
-	SlowRequests    int   `json:"slow_requests,omitempty"`
-
-	// per-request input/output token percentiles (⭐ derived, from Usage.In/Out)
-	InTokP50  int64 `json:"in_tok_p50,omitempty"`
-	InTokP95  int64 `json:"in_tok_p95,omitempty"`
-	OutTokP50 int64 `json:"out_tok_p50,omitempty"`
-	OutTokP95 int64 `json:"out_tok_p95,omitempty"`
-
-	// H - cost (only when pricing configured)
-	CostEstimate *float64 `json:"cost_estimate,omitempty"`
-
-	durs, ttfts, streamMS, inToks, outToks []int64
-}
-
-// WorkloadRow splits traffic by workload class: A+B+C+E(tool_call_rate).
-type WorkloadRow struct {
-	Class    string `json:"class"`
-	Requests int    `json:"requests"`
-
-	TokensIn           int64   `json:"tokens_in"`
-	TokensInCached     int64   `json:"tokens_in_cached"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh"`
-	TokensOut          int64   `json:"tokens_out"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency"`
-
-	RequestsWithDur int   `json:"requests_with_dur,omitempty"`
-	DurMSP50        int64 `json:"dur_ms_p50,omitempty"`
-	DurMSP95        int64 `json:"dur_ms_p95,omitempty"`
-	SlowRequests    int   `json:"slow_requests,omitempty"`
-
-	ToolCalls             int     `json:"tool_calls,omitempty"`
-	RequestsWithToolCalls int     `json:"requests_with_tool_calls,omitempty"`
-	ToolCallRate          float64 `json:"tool_call_rate,omitempty"`
-
-	durs, streamMS []int64
-}
-
-// SessionRow is the per-session drill-down (V2 §5): no latency columns in
-// Markdown, but the data stays in JSON (P6). context_growth = last/first turn.
-type SessionRow struct {
-	ID            string `json:"id"`
-	Title         string `json:"title,omitempty"`
-	Class         string `json:"class,omitempty"`
-	ClientKey     string `json:"client_key,omitempty"`
-	ContinuedFrom string `json:"continued_from,omitempty"`
-	Requests      int    `json:"requests"`
-	Tasks         int    `json:"tasks"`
-	OK            int    `json:"ok,omitempty"`
-	Errors        int    `json:"errors,omitempty"`
-	Fallbacks     int    `json:"fallbacks,omitempty"`
-	Truncated     int    `json:"truncated,omitempty"`
-	From          string `json:"from"`
-	To            string `json:"to"`
-
-	TokensIn           int64   `json:"tokens_in"`
-	TokensInCached     int64   `json:"tokens_in_cached,omitempty"`
-	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
-	TokensInFresh      int64   `json:"tokens_in_fresh"`
-	TokensOut          int64   `json:"tokens_out"`
-	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
-
-	// latency kept in JSON for P6 completeness, not shown in MD
-	TTFTKnown       int   `json:"ttft_known,omitempty"`
-	TTFTMSP95       int64 `json:"ttft_ms_p95,omitempty"`
-	RequestsWithDur int   `json:"requests_with_dur,omitempty"`
-	DurMSP95        int64 `json:"dur_ms_p95,omitempty"`
-	DurMSMax        int64 `json:"dur_ms_max,omitempty"`
-
-	RoleChars map[string]int64 `json:"role_chars,omitempty"`
-	Images    int              `json:"images,omitempty"`
-
-	// E - workload shape
-	ContextGrowth   float64  `json:"context_growth,omitempty"`   // last_in / first_in
-	CompactionChain []string `json:"compaction_chain,omitempty"` // session ids, head->current
-
-	durs, ttfts []int64
-}
-
-// ToolShapeRow is per declared-tool-set waste (V2 §6 Top-N): F-family.
-type ToolShapeRow struct {
-	Shape         string         `json:"shape"`
-	Requests      int            `json:"requests"`
-	Declared      []string       `json:"declared"`
-	DeclaredBytes int64          `json:"declared_bytes"` // per-request schema bytes
-	Calls         map[string]int `json:"calls,omitempty"`
-	NeverCalled   []string       `json:"never_called,omitempty"`
-	// derived (F-family)
-	SchemaBytesShipped int64   `json:"schema_bytes_shipped"` // declared_bytes × requests
-	DistinctCalled     int     `json:"distinct_called"`
-	DeclareUtilization float64 `json:"declare_utilization"` // distinct_called / declared
-	SchemaWasteBytes   int64   `json:"schema_waste_bytes"`  // shipped × (1 - utilization)
-}
-
-// Finding is one row of the §7 efficiency/waste table.
-type Finding struct {
-	Finding    string `json:"finding"`
-	Metric     string `json:"metric"`
-	Value      string `json:"value"`
-	Implicated string `json:"implicated,omitempty"`
-	Action     string `json:"action,omitempty"`
-}
-
-// RequestRow is one line of vmr-requests.jsonl: the per-request drill-down
-// backing the redesigned index (V2 §7). Every field is rule-extracted;
-// unavailable signals are omitted rather than fabricated.
-type RequestRow struct {
-	TS             string  `json:"ts"`
-	Session        string  `json:"session,omitempty"`
-	Task           string  `json:"task,omitempty"`
-	Turn           int     `json:"turn,omitempty"`         // within task
-	SessTurn       int     `json:"session_turn,omitempty"` // within session
-	Model          string  `json:"model,omitempty"`
-	Protocol       string  `json:"protocol,omitempty"`
-	Outcome        string  `json:"outcome"`
-	ClientKey      string  `json:"client_key,omitempty"`
-	Endpoint       string  `json:"endpoint,omitempty"`
-	Finish         string  `json:"finish,omitempty"`
-	DurMS          int64   `json:"dur_ms,omitempty"`
-	TTFTMS         int64   `json:"ttft_ms,omitempty"`
-	Msgs           int     `json:"msgs,omitempty"`
-	TokensIn       int64   `json:"tokens_in,omitempty"`
-	TokensInCached int64   `json:"tokens_in_cached,omitempty"`
-	TokensInFresh  int64   `json:"tokens_in_fresh,omitempty"`
-	TokensOut      int64   `json:"tokens_out,omitempty"`
-	CacheEff       float64 `json:"cache_eff,omitempty"`
-	Fallbacks      int     `json:"fallbacks,omitempty"`
-	Truncated      bool    `json:"truncated,omitempty"`
-	ErrorClass     string  `json:"error_class,omitempty"`
-	DetailFile     string  `json:"detail_file,omitempty"`
-	Title          string  `json:"title,omitempty"` // session/task title (index-only)
-
-	Path string `json:"-"`
-	Line int    `json:"-"`
-}
-
-// RequestRows returns the per-request export rows (populated by Build).
-func (r *Report2) RequestRows() []RequestRow { return r.requests }
 
 // rec2 is Build's per-record working struct: raw fields from audit.Record
 // joined to ReqInfo's grouping/features. Built once per record, shared
@@ -510,6 +142,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 	byClient := map[string]*ClientRow{}
 	workloads := map[string]*WorkloadRow{}
 	sessions := map[string]*SessionRow{}
+	stickyCol := newStickyCollector()
 
 	addA := func(r *Row, rc *rec2) {
 		r.Requests++
@@ -640,6 +273,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 			e.OK++
 		} else {
 			e.Failed++
+			e.WastedMS += a.DurMS
 			cls := attemptErrorClass(a)
 			if cls == "" {
 				cls = "unknown"
@@ -945,6 +579,9 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 					}
 				}
 			}
+			// Sticky Model effectiveness (sticky.go): buffered per session,
+			// resolved after the pass — it needs each session in order.
+			stickyCol.add(rc)
 			// per-request export row
 			rep.requests = append(rep.requests, buildRequestRow(rc))
 		}, func() {
@@ -1004,6 +641,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		rep.Sessions = append(rep.Sessions, *s)
 	}
 	rep.Tools = buildTools(sess)
+	rep.Sticky = stickyCol.result()
 	rep.Efficiency = buildFindings(rep)
 	rep.Pricing = pricing
 

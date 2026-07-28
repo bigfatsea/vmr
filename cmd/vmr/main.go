@@ -4,7 +4,8 @@
 //
 //	vmr start    -c config.yaml   run the router
 //	vmr check    -c config.yaml   validate config and print a summary
-//	vmr status   -c config.yaml   show endpoint health of a running instance
+//	vmr status   -c config.yaml   show identity + endpoint health of a running instance
+//	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
 //	vmr report   <audit.jsonl>    aggregate audit logs into usage statistics (default -o: ./reports)
 //	vmr dirs     {log|cache}      print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
@@ -44,6 +45,8 @@ func main() {
 		err = cmdReplay(os.Args[2:])
 	case "diagnose":
 		err = cmdDiagnose(os.Args[2:])
+	case "version":
+		err = cmdVersion(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -55,10 +58,12 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: vmr <start|check|status> [-c config.yaml]
+	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
+       vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <audit.jsonl|glob>...   (default -o: ./reports; auto-loads ./pricing.yaml if -pricing omitted)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
-       vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]`)
+       vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]
+       vmr version`)
 }

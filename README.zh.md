@@ -42,6 +42,8 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 
 # dev 模式 —— 快速后台运行，你自己监督（先校验再拉起，日志落 logs/）：
 ./vmr.sh start          # 另有 stop / restart / status / logs
+./vmr.sh ps             # 列出本机全部 vmr 实例：端口 + 配置文件 + uptime
+./vmr.sh <check|diagnose|report|…>   # 任意 vmr 子命令，原样转发给二进制
 
 # service 模式 —— 交给操作系统 init 系统监督：崩溃自动重启 + 登录自启。
 # macOS → launchd user agent；Linux → systemd 用户单元。install 会渲染并注册

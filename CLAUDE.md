@@ -37,19 +37,23 @@ No Makefile, no CI config in-repo. `vmr.sh` never runs `go build` itself — bui
 | `probe` | Minimal echo-nonce request used by both active-mode recovery probes and `vmr diagnose` |
 | `strategy` | `Dimension` (ordering, e.g. priority) + `Condition` (elimination, e.g. image/tools capability, lock-free `atomic.Pointer` registry) — two separate interfaces, don't merge them |
 | `sticky` | Session-affinity registry (prompt-cache stickiness); its `BackstopTTL` is an alias for `core.StickyBackstopTTL` (canonical value lives in `core` so `config` can validate against it without importing `sticky`) |
-| `router` | Failover loop (`router.go`: `Serve`/`tryOne`/`handleErrorResponse`/`forwardSuccess`, the part that must stay small) + `snapshot.go` (`BuildSnapshot`/`Install`) + `limiter.go` (concurrency gate) + `transport.go` (`NewUpstreamClient`, streaming forward) + `logfmt.go` (live log line formatting) + `response.go` (response normalization: event splitting, model-name rewrite, `[DONE]` policy, buffered/passthrough decision) + `responsefix.go` (MiniMax-specific quirk knowledge — `<think>`/Thinking-Process stripping, soft-block markers — `response.go` calls into it, never the other way) |
-| `server` | HTTP entry, auth, audit recording, `facts.go` (RequestFacts extraction) — header blocklist lives in `core.FilterClientHeaders`, not here |
+| `router` | Failover loop (`router.go`: `Serve`/`tryOne`/`handleErrorResponse`/`forwardSuccess`, the part that must stay small) + `reload.go` (hot-reload outcome + config staleness, for `/admin/status`) + `routehdr.go` (`X-VMR-Route-Reason`/`X-VMR-Failover`) + `snapshot.go` (`BuildSnapshot`/`Install`) + `limiter.go` (concurrency gate) + `transport.go` (`NewUpstreamClient`, streaming forward) + `logfmt.go` (live log line formatting) + `response.go` (response normalization: event splitting, model-name rewrite, `[DONE]` policy, buffered/passthrough decision) + `responsefix.go` (MiniMax-specific quirk knowledge — `<think>`/Thinking-Process stripping, soft-block markers — `response.go` calls into it, never the other way) |
+| `server` | HTTP entry, auth, audit recording, `facts.go` (RequestFacts extraction), `admin.go` (the loopback-only `/admin/status`: process identity, config freshness, reload outcome) — header blocklist lives in `core.FilterClientHeaders`, not here |
 | `audit` | JSONL audit log (one line per request, two layers: client↔vmr, vmr↔upstream) + zstd compression/retention. `Write` encodes into a pooled buffer *outside* its lock — don't move that encode inside the lock, it would serialize JSON-encoding potentially-multi-MB records across concurrent requests |
-| `report` | `vmr report`: aggregates audit JSONL into `vmr-report.{json,md}` + `vmr-requests.{jsonl,md}` + per-request `details/*.{md,json}`. Only depends on `{audit, core}` — an `internal/archtest` test enforces it never depends on `router`/`server`/`config` |
+| `report` | `vmr report`: aggregates audit JSONL into `vmr-report.{json,md}` + `vmr-requests.{jsonl,md}` + per-request `details/*.{md,json}`. Data shape in `rows.go` (= the vmr-report.json schema), aggregation pass in `aggregate.go`, rendering split `render_doc.go` (running order + `mdTable`) + one `section_*.go` per report section — **a new section is a new file, not more lines in an existing one** (`archtest` budgets enforce it). Only depends on `{audit, core}` — an `internal/archtest` test enforces it never depends on `router`/`server`/`config` |
 | `diagnose`, `replay` | `vmr diagnose` (real connectivity check) / `vmr replay` (resend one audit record) — reuse the same `adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses |
 | `imgprep` | Inline image downscale + disk cache |
+| `buildinfo` | Build identity from Go's own VCS stamp (`debug.ReadBuildInfo`) — no ldflags, no generated file. Used by `vmr version` and `/admin/status`'s `instance.version` |
 | `rundir` | Default dir resolution formula (`~/.vmr` → temp → cwd), shared by log/cache dirs |
 | `archtest` | Executable architecture invariants (import boundaries, core-file line-count budgets) |
 
 `cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand: `main.go` (dispatch + usage +
 the adapter blank-import registration point), `cmd_start.go`, `cmd_check.go`, `cmd_status.go`,
-`cmd_report.go`, `cmd_dirs.go`, `cmd_diagnose.go`, `cmd_replay.go`, and `summary.go` (config-summary
-rendering shared by start/check).
+`cmd_report.go`, `cmd_dirs.go`, `cmd_diagnose.go`, `cmd_replay.go`, `cmd_version.go`, and `summary.go`
+(config-summary rendering shared by start/check).
+
+`vmr.sh` owns `start/stop/restart/status/ps/logs` + `service *`; every other subcommand is
+forwarded verbatim to the binary (not a whitelist — see the script's `passthrough`).
 
 ## Invariants to not accidentally break
 
