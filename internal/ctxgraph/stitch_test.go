@@ -387,3 +387,37 @@ func TestStitchOutcome_String(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveStitch_EmptyOpeningKeysStillTriesSameChat is a regression test:
+// resolveStitch used to return NoPredecessorFound immediately whenever the
+// broken-away lineage's opening manifest had zero content-hash Keys (e.g. a
+// system-prompt-only request), skipping findSameChatCandidate entirely even
+// though that fallback needs no key overlap at all — only a shared SessKey
+// and time proximity. A same-SessKey predecessor ending well within
+// stitchSameChatWindow of l's start must still surface as AmbiguousMatch/
+// StitchSameChat, not get silently downgraded to "no predecessor found".
+func TestResolveStitch_EmptyOpeningKeysStillTriesSameChat(t *testing.T) {
+	predEnd := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	pred := &Lineage{
+		Idx: 0, SessKey: "s1",
+		Manifests: []*Manifest{{TS: predEnd, Keys: []Hash{{1}}}},
+	}
+	l := &Lineage{
+		Idx: 1, SessKey: "s1",
+		BrokeFrom: &BreakInfo{Edit: Edit{Kind: Fork}},
+		// Keys is nil/empty — an opening manifest with no non-system
+		// message content at all (e.g. system-only), the exact case the old
+		// early return mishandled.
+		Manifests: []*Manifest{{TS: predEnd.Add(5 * time.Minute)}},
+	}
+	byIdx := map[int]*Lineage{0: pred, 1: l}
+
+	res := resolveStitch(l, byIdx, map[Hash]map[int]bool{})
+
+	if res.Outcome != AmbiguousMatch {
+		t.Fatalf("Outcome = %v, want AmbiguousMatch (empty Keys must still fall through to findSameChatCandidate)", res.Outcome)
+	}
+	if res.Edge == nil || res.Edge.Kind != StitchSameChat || res.Edge.PredIdx != 0 {
+		t.Errorf("Edge = %+v, want {Kind: StitchSameChat, PredIdx: 0}", res.Edge)
+	}
+}

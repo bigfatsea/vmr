@@ -1,8 +1,9 @@
-// Ver 2026-07-29 22:30, by Sonnet 5
+// Ver 2026-07-30 21:00, by Sonnet 5
 
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +15,38 @@ import (
 	"vmr/internal/story"
 	"vmr/internal/story/profile"
 )
+
+// llmCLIOptions bundles the -llm-* flags after validation — a thin CLI-level
+// wrapper around story.LLMOptions that also carries -llm-dry-run (a command-
+// behavior switch compareJourneys itself acts on, not something
+// story.Interpret needs to know about).
+type llmCLIOptions struct {
+	story.LLMOptions
+	DryRun bool
+}
+
+// resolveLLMOptions validates the -llm-* flag combination: -llm-addr is the
+// sole switch that turns the interpretation layer on (design doc plan
+// review — no separate -llm bool); -llm-model is required alongside it
+// unless -llm-dry-run (a dry run never sends a request, so it never needs to
+// know which model to ask); -llm-model/-llm-key/-llm-dry-run without
+// -llm-addr are rejected outright rather than silently ignored, since that
+// combination is almost certainly a missed flag, not an intentional no-op.
+func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, error) {
+	if addr == "" {
+		switch {
+		case dryRun:
+			return llmCLIOptions{}, fmt.Errorf("-llm-dry-run requires -llm-addr")
+		case model != "" || key != "":
+			return llmCLIOptions{}, fmt.Errorf("-llm-model/-llm-key require -llm-addr")
+		}
+		return llmCLIOptions{}, nil
+	}
+	if model == "" && !dryRun {
+		return llmCLIOptions{}, fmt.Errorf("-llm-model is required when -llm-addr is given (unless -llm-dry-run)")
+	}
+	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
+}
 
 // cmdStory renders one agent task's full execution history as a
 // self-contained Markdown narrative — see
@@ -36,12 +69,22 @@ func cmdStory(args []string) error {
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
-	compareA := fs.String("compare-a", "", "first journey (id or id prefix) for a behavior-profile comparison against -compare-b (design doc Appendix C.6 4d)")
-	compareB := fs.String("compare-b", "", "second journey (id or id prefix) for -compare-a's comparison")
+	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id or id prefix; design doc Appendix C.6 4d)")
 	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (design doc §11 D1)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records (design-doc review §2.1)")
+	llmAddr := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -compare's report (Step 4a; see _tmp/plan_sonnet-5.md). Never auto-started; the instance must already be up")
+	llmModel := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run")
+	llmKey := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured")
+	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	llmOpts, err := resolveLLMOptions(*llmAddr, *llmModel, *llmKey, *llmDryRun)
+	if err != nil {
+		return err
+	}
+	if llmOpts.Addr != "" && (*journeyArg != "" || *renderAll) {
+		return fmt.Errorf("-llm-addr is only supported with -compare, not -journey/-render-all")
 	}
 	paths, err := resolveInputPaths(fs, *configPath)
 	if err != nil {
@@ -69,11 +112,12 @@ func cmdStory(args []string) error {
 
 	cands := story.ListCandidates(g)
 
-	if *compareA != "" || *compareB != "" {
-		if *compareA == "" || *compareB == "" {
-			return fmt.Errorf("-compare-a and -compare-b must both be given")
+	if *compare != "" {
+		ids := strings.Split(*compare, ",")
+		if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
+			return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
 		}
-		return compareJourneys(cands, byIdx, *compareA, *compareB, firstPath, prof, *includePartial, *outDir)
+		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, *includePartial, *outDir, llmOpts, paths)
 	}
 	if *journeyArg != "" {
 		target, _, err := resolveJourneyID(cands, byIdx, *journeyArg)
@@ -90,9 +134,9 @@ func cmdStory(args []string) error {
 
 // resolveJourneyID finds the candidate chain whose ID (design doc §11's
 // content-addressed j-<client>-<start>-<end>-<code>) starts with idPrefix —
-// shared by -journey and -compare-a/-compare-b, which all resolve a
-// user-supplied id prefix the same way (first match in candidate order, as
-// printed by running with no selector flag at all).
+// shared by -journey and -compare, which all resolve a user-supplied id
+// prefix the same way (first match in candidate order, as printed by
+// running with no selector flag at all).
 func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idPrefix string) (*ctxgraph.Lineage, []*ctxgraph.Lineage, error) {
 	for _, l := range cands {
 		chain := ctxgraph.ChainFrom(l, byIdx)
@@ -218,14 +262,14 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
-		return fmt.Errorf("-compare-a: %w", err)
+		return fmt.Errorf("-compare first id: %w", err)
 	}
 	_, chainB, err := resolveJourneyID(cands, byIdx, idB)
 	if err != nil {
-		return fmt.Errorf("-compare-b: %w", err)
+		return fmt.Errorf("-compare second id: %w", err)
 	}
 	partialA := story.IsPartialHead(chainA, firstPath)
 	partialB := story.IsPartialHead(chainB, firstPath)
@@ -241,18 +285,58 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err != nil {
 		return err
 	}
-	cmp := story.Compare(story.Summarize(jA), story.Summarize(jB))
+	sA, sB := story.Summarize(jA), story.Summarize(jB)
+	cmp := story.Compare(sA, sB)
+	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics)
+	extras.Sources = sources
+	cmp.Extras = &extras
+
+	// -llm-dry-run: print the evidence-pack size estimate and return
+	// immediately — deliberately checked BEFORE ensureStoriesDir below, so a
+	// dry run never leaves so much as an empty reports/stories/ directory
+	// behind (design doc C.7: "should I even run this" is a pure query, not
+	// a partial run).
+	if llmOpts.Addr != "" && llmOpts.DryRun {
+		pack := story.BuildEvidencePack(jA, jB, cmp)
+		chars := pack.EstimateChars()
+		fmt.Printf("evidence pack: %d chars (~%d tokens estimated) — dry run, no request sent\n", chars, chars/4)
+		return nil
+	}
 
 	storiesDir, err := ensureStoriesDir(outDir)
 	if err != nil {
 		return err
 	}
+
+	// Step 4a's compare-scoped LLM interpretation layer (design doc Appendix
+	// C.6/G; full rationale in _tmp/plan_sonnet-5.md) — entirely optional,
+	// switched on by -llm-addr alone.
+	var llmSection string
+	if llmOpts.Addr != "" {
+		pack := story.BuildEvidencePack(jA, jB, cmp)
+		chars := pack.EstimateChars()
+		fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
+		llmOpts.CacheDir = filepath.Join(storiesDir, ".llm-cache")
+		res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack)
+		if err != nil {
+			// Design doc C.7: the whole layer degrades away on failure —
+			// this must never fail the -compare command itself.
+			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
+		} else {
+			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res)
+		}
+	}
+
 	base := "compare-" + jA.ID + "-vs-" + jB.ID
 	if partialA || partialB {
 		base += "-partial"
 	}
 	mdPath := filepath.Join(storiesDir, base+".md")
-	if err := os.WriteFile(mdPath, []byte(story.RenderComparisonMarkdown(cmp)), 0o600); err != nil {
+	md := story.RenderComparisonMarkdown(cmp)
+	if llmSection != "" {
+		md += "\n" + llmSection
+	}
+	if err := os.WriteFile(mdPath, []byte(md), 0o600); err != nil {
 		return err
 	}
 	jsonPath := filepath.Join(storiesDir, base+".json")

@@ -1,7 +1,8 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-29, by Sonnet 5
 package main
 
 import (
+	"flag"
 	"fmt"
 
 	"vmr/internal/config"
@@ -9,12 +10,38 @@ import (
 	"vmr/internal/router"
 )
 
+// cmdCheck validates the config and prints the effective routing table (no
+// network I/O). With a trailing "log" or "cache" argument it instead prints
+// just that one resolved directory (config.LogDir / config.ImageCacheDir)
+// and returns — the scripting-friendly form vmr.sh uses to locate its own
+// server log without keeping a second copy of the resolution logic. This
+// absorbs the former standalone `vmr dirs` subcommand; the directory values
+// were already part of check's normal summary output below.
 func cmdCheck(args []string) error {
-	path, err := configFlag(args, "check")
-	if err != nil {
+	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	path := fs.String("c", "config.yaml", "path to config file")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load(path)
+	if fs.NArg() > 0 {
+		if fs.NArg() > 1 {
+			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache]")
+		}
+		cfg, err := config.Load(*path)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		switch fs.Arg(0) {
+		case "log":
+			fmt.Println(cfg.LogDir)
+		case "cache":
+			fmt.Println(cfg.ImageCacheDir)
+		default:
+			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache]")
+		}
+		return nil
+	}
+	cfg, err := config.Load(*path)
 	if err != nil {
 		return err
 	}

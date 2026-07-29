@@ -12,8 +12,8 @@ import (
 )
 
 // TestIDMatchesDeriveID locks in that the public ID entry point (used by
-// cmd_story.go's listing/-journey/-compare-a/-compare-b resolution, all
-// outside this package) returns exactly what deriveID computes — a
+// cmd_story.go's listing/-journey/-compare resolution, all outside this
+// package) returns exactly what deriveID computes — a
 // same-package test that would catch a future divergence directly, instead
 // of only through cmd/vmr's own end-to-end coverage.
 func TestIDMatchesDeriveID(t *testing.T) {

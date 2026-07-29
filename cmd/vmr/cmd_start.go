@@ -73,7 +73,7 @@ func logStop(logger *log.Logger, reason string, uptime time.Duration) {
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
-	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from config log_dir, see 'vmr dirs log')")
+	auditOn := fs.Bool("audit", true, "write per-request audit records (JSONL, daily files; dir from config log_dir, see 'vmr check log')")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

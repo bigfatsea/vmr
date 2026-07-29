@@ -3,12 +3,11 @@
 // vmr — Virtual Model Router. Single binary, config driven.
 //
 //	vmr start    -c config.yaml   run the router
-//	vmr check    -c config.yaml   validate config and print a summary
+//	vmr check    -c config.yaml   validate config and print a summary (or, with a trailing log|cache arg, just that resolved directory — vmr.sh uses this)
 //	vmr status   -c config.yaml   show identity + endpoint health of a running instance
 //	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
 //	vmr report   [audit.jsonl]    aggregate audit logs into usage statistics (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
 //	vmr story    [audit.jsonl]    render one agent task's full execution history as a narrative (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
-//	vmr dirs     {log|cache}      print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
 //
@@ -42,8 +41,6 @@ func main() {
 		err = cmdReport(os.Args[2:])
 	case "story":
 		err = cmdStory(os.Args[2:])
-	case "dirs":
-		err = cmdDirs(os.Args[2:])
 	case "replay":
 		err = cmdReplay(os.Args[2:])
 	case "diagnose":
@@ -62,10 +59,10 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
+       vmr check [-c config.yaml] [log|cache]   (prints just that resolved directory instead of the full summary)
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr report [-c config.yaml] [-o dir] [-details=false] [-pricing pricing.yaml] [audit.jsonl|glob]...   (default -o: ./reports; auto-loads ./pricing.yaml if -pricing omitted; no input files => -c's log_dir/vmr-audit-*)
-       vmr story [-c config.yaml] [-journey id | -render-all | -compare-a id -compare-b id] [-include-partial] [-show-ungrouped] [-o dir] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; no input files => -c's log_dir/vmr-audit-*)
-       vmr dirs [-c config.yaml] {log|cache}
+       vmr story [-c config.yaml] [-journey id | -render-all | -compare id1,id2] [-include-partial] [-show-ungrouped] [-o dir] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; no input files => -c's log_dir/vmr-audit-*)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
        vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]

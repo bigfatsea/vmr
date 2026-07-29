@@ -244,10 +244,15 @@ func buildBlobLineageIndex(g *Graph) map[Hash]map[int]bool {
 // the blob index, then classifies the match.
 func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash]map[int]bool) StitchResolution {
 	b0 := l.Manifests[0]
-	if len(b0.Keys) == 0 {
-		return StitchResolution{Outcome: NoPredecessorFound}
-	}
 
+	// No early return for len(b0.Keys) == 0 (a broken-away lineage whose
+	// opening manifest carries no content-hash keys, e.g. system-prompt-only)
+	// — that used to short-circuit straight to NoPredecessorFound, skipping
+	// findSameChatCandidate below even though that fallback needs no overlap
+	// at all (same SessKey + time proximity only). An empty b0.Keys just
+	// means the loop below never populates `overlap`, so bestIdx naturally
+	// stays -1 and control falls through to the findSameChatCandidate call —
+	// the same path a real "zero overlap found" case already takes.
 	overlap := map[int]int{}
 	for _, h := range b0.Keys {
 		for idx := range blobLineages[h] {

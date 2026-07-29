@@ -19,8 +19,7 @@ imported by `internal/router`/`internal/server`.
 
 Each has the "why" behind every decision, a decisions-and-tradeoffs table, and (Part 1)
 a "decided-not-to-fix" table — check both before "fixing" something that looks odd.
-This file only orients; it does not restate either doc. (`VirtualModelRouter_System_Design_v3.md`
-is the pre-split predecessor of both — superseded, kept for historical reference only.)
+This file only orients; it does not restate either doc.
 
 ## Build / test / run
 
@@ -56,12 +55,13 @@ No Makefile, no CI config in-repo. `vmr.sh` never runs `go build` itself — bui
 | `archtest` | Executable architecture invariants (import boundaries, core-file line-count budgets) |
 | `chatmsg` | Shared message/SSE/usage parsing (`Messages`, `ReassembleSSE`/`FinalMessage`, `ExtractUsage`, `CheckToolPairing`, `ExtractEntities`) — the one package `ctxgraph`/`story`/`report` all depend on, so none of the three re-implements the same parsing |
 | `ctxgraph` | Content-addressed manifest/blob-index layer behind both `vmr report` and `vmr story`: `Manifest` (per-request message-hash vector), `Classify` (5-way edit classification: Append/ReplaceTail/Splice/Contract/Fork), `Lineage`/`Scan` (splits a SessKey bucket at every Contract/Fork), `StitchGraph`/`ChainFrom` (cross-lineage reconnection). Depends on `{audit, core, chatmsg}`; never depends on `report`/`story`/`router`/`server` (`archtest`-enforced) |
-| `story` | `vmr story`: Journey/Task/Step/Event narrative built from a `ctxgraph` lineage chain (`journey.go`), nine-indicator behavior profile (`metrics.go`), Journey-vs-Journey diff (`compare.go`), Markdown rendering. `profile/` subpackage holds the one agent-specific interface (real-instruction/no-reply judgment) with an OpenClaw-aware and a generic fallback implementation. Depends on `{ctxgraph, chatmsg, core, config}`; never depends on `report`/`router`/`server` |
+| `story` | `vmr story`: Journey/Task/Step/Event narrative built from a `ctxgraph` lineage chain (`journey.go`), nine-indicator behavior profile (`metrics.go`), Journey-vs-Journey diff (`compare.go`, plus `ComparisonExtras`'s rule-derived endpoint/cache/system-prompt/final-context/duration/deliverable facts), Markdown rendering (`render_md.go`/`render_compare.go`). `llm.go` is `-compare`'s optional, always-degradable LLM interpretation layer (`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-dry-run`) — a plain `net/http` client against a manually-specified already-running VMR instance, no config.yaml provider resolution, no failover. `profile/` subpackage holds the one agent-specific interface (real-instruction/no-reply judgment) with an OpenClaw-aware and a generic fallback implementation. Depends on `{ctxgraph, chatmsg, core, config}`; never depends on `report`/`router`/`server` |
 | `report` | `vmr report`: aggregates audit JSONL into `vmr-report.{json,md}` + `vmr-requests.{jsonl,md}` + per-request `details/*.{md,json}`. Data shape in `rows.go` (= the vmr-report.json schema), aggregation pass in `aggregate.go`, session/task grouping in `session.go` (consumes `ctxgraph.Lineage`/`Classify` directly — no private hash/LCP implementation of its own), rendering split `render_doc.go` (running order + `mdTable`) + one `section_*.go` per report section — **a new section is a new file, not more lines in an existing one** (`archtest` budgets enforce it). Depends on `{audit, core, ctxgraph, chatmsg}` — an `internal/archtest` test enforces it never depends on `router`/`server`/`config` |
 
 `cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand: `main.go` (dispatch + usage +
-the adapter blank-import registration point), `cmd_start.go`, `cmd_check.go`, `cmd_status.go`,
-`cmd_dirs.go`, `cmd_diagnose.go`, `cmd_replay.go`, `cmd_version.go`, `summary.go`
+the adapter blank-import registration point), `cmd_start.go`, `cmd_check.go` (also handles a
+trailing `log`/`cache` argument — absorbed from the former standalone `cmd_dirs.go`),
+`cmd_status.go`, `cmd_diagnose.go`, `cmd_replay.go`, `cmd_version.go`, `summary.go`
 (config-summary rendering shared by start/check), `cmd_report.go`, `cmd_story.go`, and
 `auditpaths.go` (`resolveInputPaths` — the `<file|glob>...` positional-argument convention,
 including the fallback to `<config's log_dir>/vmr-audit-*`, shared by `cmd_report.go`/`cmd_story.go`).

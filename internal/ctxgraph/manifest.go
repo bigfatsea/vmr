@@ -125,7 +125,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		m.HasSys = true
 	}
 
-	if uid, _ := nested(body, "metadata", "user_id").(string); uid != "" {
+	if uid, _ := chatmsg.Nested(body, "metadata", "user_id").(string); uid != "" {
 		if i := strings.Index(uid, "session_"); i >= 0 {
 			m.SessKey = "meta:" + uid[i:]
 		} else {
@@ -146,21 +146,4 @@ func lastEndpoint(rec *audit.Record) string {
 		return "-"
 	}
 	return rec.Attempts[len(rec.Attempts)-1].Endpoint
-}
-
-// nested walks a chain of map keys, returning nil the moment any link isn't
-// a map[string]any. Deliberately a private copy — internal/report/usage.go
-// and internal/chatmsg each keep their own identical copy. Used here only
-// for metadata.user_id; the duplication avoids importing another package
-// for a 12-line helper.
-func nested(obj map[string]any, keys ...string) any {
-	var cur any = obj
-	for _, k := range keys {
-		mm, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = mm[k]
-	}
-	return cur
 }

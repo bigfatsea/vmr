@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
+<!-- Ver 2026-07-30 21:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
@@ -140,13 +140,16 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 ### 3.4 `internal/story`：Journey 视图
 
 ```
-vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare-a <id> -compare-b <id>]
+vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare <id1,id2>]
           [-include-partial] [-show-ungrouped] [file|glob]...
+
+# -compare 专属，见"双 Journey 对比"节的 4a 落地记录：
+vmr story -compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
 ```
 
 - **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览），`-journey <id前缀>` 渲染其中一个。
 - **`-render-all`**：批量渲染全部非断头候选，共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
-- **`-compare-a <id> -compare-b <id>`**：两个 Journey 的行为剖面对比，见 §3.7。
+- **`-compare <id1,id2>`**：两个 Journey 的行为剖面对比（逗号分隔的两个 id 或 id 前缀），见"双 Journey 对比"节；`-llm-addr` 给了才追加可选的 LLM 解读小节。
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
@@ -200,6 +203,24 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 ### 3.7 双 Journey 对比（`internal/story/compare.go`）
 
 两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。
+
+**4a 落地记录（compare 场景切片，2026-07-30）**：基于对 `docs/openclaw_dual_instance_analysis_2026-07-28_v1.0_deepseek-v4-pro.md` 那份人工分析报告的逐项复核（评审记录见 `docs/Step4a_LLM增强对比报告_实施计划.md` 的内联批注、落地计划见 `docs/Step4a_compare_LLM解读层_实施计划与执行记录_2026-07-29_sonnet-5.md`），`Comparison` 新增一个可选字段 `Extras *ComparisonExtras`（`ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics)` 计算），全部零 LLM 成本、直接从 `ctxgraph.Manifest`/`Step` 已有字段派生，不是新的数据采集：
+
+- **模型与端点核查**：双侧 distinct `Manifest.Endpoint` 集合是否相同；
+- **Prompt 缓存命中率**：逐轮 `CacheRead/In` 曲线 + 首轮值/稳态均值/最值；
+- **System Prompt 规模与稳定性**：取双侧最后一次 `SysChanged` 所在 Step（没变过就是第一个 Step）的 token 数、变更次数，以及一段有边界的原文节选（默认 20000 字符，截断并如实标注——最初是 4000，实测两个真实验证 Journey 的 system prompt 里"加载了哪些项目上下文文件"这类声明分别落在第 15734/13656 字符处，远超旧截断点，导致 LLM 解读层从未见过这段证据、给出的根因结论因此偏离了人工报告的头号发现；20000 是按这两个真实样本倒推出的覆盖量级，不是对任意长度 system prompt 的通用保证，见"双 Journey 对比"节的 4a 落地记录里链接的差距分析文档）；
+- **末轮上下文构成**：直接是 `Metrics.ContextCurve` 最后一项，零新增字段；
+- **总耗时 + 终止方式**：墙钟总时长（必须紧邻已有的"净工作时长"一起展示，并注明"不是效率指标"——design doc F10 已经点名"16 分钟 vs 7.5 分钟"这类单纯墙钟对比会误导）+ 双侧最后一个 Step 的 `Finish`，是 VMR 能看到的最接近"是否被类似 loop detection 机制打断"的代理信号；
+- **最终交付物对比**（本轮新增、经复核认为 ROI 最高的一项，两份此前的方案都未覆盖）：若任务的产出是通过一次"参数形状像文件写入"（有 path 类 + content 类字段，不锁定具体工具名）的工具调用落盘的，规则层扫描双侧最后几个 Step、按逆序取最后一次匹配，附上其内容节选（默认 6000 字符）——这是 VMR 唯一能直接看到"两边交付物本身差多少"而非"过程指标差多少"的证据，deepseek 报告里靠人工比较两份产出报告篇幅/章节数的那部分工作，本质上就是在读这份数据。
+
+在此基础上，`vmr story -compare` 新增一个可选、可降级的 LLM 解读层（`internal/story/llm.go`）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析故意只支持一种最简单的模式——手动指向一个已经在跑的 VMR 实例（不做 config.yaml 直连上游、不做健康检查/failover、不自动拉起进程），只认 OpenAI 协议，直接 `POST http://{addr}/v1/chat/completions`。喂给模型的证据包（`EvidencePack`）只含上述规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 一份逐轮"工具名+brief"索引，不塞完整 transcript；prompt 强约束"数字只能引用给定证据，文本节选的解读要明确标注是模型自己的阅读理解，且必须专门声明 VMR 看不到什么"。落盘缓存（`{outDir}/stories/.llm-cache/`，key 含 `model` 防止换模型误命中旧缓存）+ `-llm-dry-run`（只打印证据包大小估算、不调用）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json` 正常产出（三层分层原则：LLM 解读层永远可整体降级）。用两个真实 Journey（`j-openclaw-...8b175da9` 22 轮、`j-lobster-...d6b04665` 58 轮）实测验证，规则层复现的数字与 deepseek 报告手工核对出的数字一致（22 轮 vs 58 轮、缓存 18%→97% vs 82%→99%、system prompt 17.1K vs 20.5K token、双侧端点相同），最终交付物对比也正确识别出两侧 `write` 调用的真实报告内容。
+
+**第一梯队修复（2026-07-30，两轮独立差距分析后落地）**：对同一对真实 Journey 逐条核对 `vmr story -compare` 的实际产出与 `docs/openclaw_dual_instance_analysis_2026-07-28_v1.0_deepseek-v4-pro.md`（人工/deepseek 报告）后，发现并处理了三处高 ROI、不触碰任何架构边界的缺口（完整过程见 `docs/Step4a_compare_LLM解读层_差距分析与改进建议_2026-07-30_sonnet-5.md` 及其内联复核批注 `docs/Step4a_compare_LLM解读层_差距分析_同行评审版_2026-07-30_sonnet-5.md`）：
+1. `sysPromptExcerptChars` 4000→20000（上一段已记）；
+2. `ComparisonExtras` 新增 `Sources []string`（由 `cmd_story.go` 从 `resolveInputPaths` 的结果直接透传，`ComputeComparisonExtras` 本身不产出这个字段），渲染成报告末尾的"证据溯源"小节，列出本次对比实际读取的源审计文件路径；
+3. `llm.go` 的 `llmSystemPrompt` 升级到 v2（`promptVersion` 同步升到 `compare-llm-v2`，故意让新 prompt 的产出不会命中旧版本的磁盘缓存）：把原来扁平的"核心假设 + 证据支持/推测标签"改成一张"候选根因 | 直接证据 | 置信度（高/中/低）| 改进建议"表 + 一句话因果链，置信度分档规则写死在 prompt 里（能指认具体证据锚点才能标"高"）；同时把"节选是被截断的前缀"这条既有约束从泛泛的免责声明升级成一条具体规则——任何"节选里没提到"的判断都必须明确说明"不能排除节选之外仍存在"，不能被当成"确实不存在"来断言。三处改动都是`internal/story` 内部的常量/字段/prompt 文本层面调整，不新增依赖、不改变任何既有架构边界。
+
+被复核否决、明确不吸收的一条：另一份独立分析曾提出"可用工具集规模差异（如 46 vs 67 个工具）也因节选截断而不可见"——实测两侧完整工具清单分别在第 2039/3024 字符处结束，早已完整落在旧的 4000 字符节选窗口内，这条论断的前提不成立，未采纳。
 
 ### 3.8 盲区（诚实声明，避免"没记录"被误读成"没发生"）
 

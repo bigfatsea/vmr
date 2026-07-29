@@ -1,9 +1,10 @@
-// Ver 2026-07-29 23:50, by Sonnet 5
+// Ver 2026-07-30 23:00, by Sonnet 5
 
 # Agent 任务叙事报告（`vmr story`）—— 第一性原理推导、价值论证与渐进实现方案
 
-> **v1.2**（继承 v1.1/v2.0 的全部设计推导；v1.0→v2.0 修订清单见附录 B）。
-> 本次修订：**D1（断头 journey 自证）已实施**——采用文件名 `-partial` 后缀而非原计划的 ID `t-` 前缀（见 §11、附录 F.1，理由是后缀不改变 `deriveID` 本身、改动面更小）；**第 3 步（"能还债"）已完成**，附录 E 的重新评估计划基本按原样落地，唯一实质性偏差是 compaction 缝合的信号来源（附录 F.2 有诚实记录）；附录 D/E 的状态总览更新为"已完成"；**第 4 步计划基于第 3 步的实际发现做了微调**（附录 G）。v2.0 原文（`Agent任务叙事报告_设计与价值论证_2026-07-28_opus-5.md`）保留完整的逐条评审过程记录，不在本文重复。
+> **v1.3**（继承 v1.2/v1.1/v2.0 的全部设计推导；v1.0→v2.0 修订清单见附录 B）。
+> 本次修订：**4a LLM 解读层已实施，但范围是 4d（双 Journey 对比）场景的一个切片，不是完整的单 Journey 逐 Step 解读**——用户明确要求丰富 compare 报告后落地，实施前先评审了另一份 coding agent 给出的建议方案（`docs/Step4a_LLM增强对比报告_实施计划.md`，内联批注了逐项吸收/拒绝理由），吸收了其中"规则层能做的事更多"的判断，拒绝了它把"system prompt 文件名/工具清单识别"和"迭代阶段划分"做成正则/启发式规则层的建议（改为交给 LLM 解读，理由见该文档批注与附录 G 补记）。详见附录 G 的落地记录与 `docs/Step4a_compare_LLM解读层_实施计划与执行记录_2026-07-29_sonnet-5.md`。
+> 前序修订：**D1（断头 journey 自证）已实施**——采用文件名 `-partial` 后缀而非原计划的 ID `t-` 前缀（见 §11、附录 F.1，理由是后缀不改变 `deriveID` 本身、改动面更小）；**第 3 步（"能还债"）已完成**，附录 E 的重新评估计划基本按原样落地，唯一实质性偏差是 compaction 缝合的信号来源（附录 F.2 有诚实记录）；附录 D/E 的状态总览更新为"已完成"；**第 4 步计划基于第 3 步的实际发现做了微调**（附录 G）。v2.0 原文（`Agent任务叙事报告_设计与价值论证_2026-07-28_opus-5.md`）保留完整的逐条评审过程记录，不在本文重复。
 > 关联：`CCR_特性借鉴分析报告_opus-5.md` §2.4（Context Archive）、§5 N-4（Compaction 感知与告警）
 > 证据源：`reports/`（7112 条记录 / 15 天 / 752 会话 / 809K 条消息实例）+ `internal/report/{session,render,aggregate,metrics,rows}.go` + 设计文档 §9
 > 方法：所有结论都在真实审计数据上跑过验证脚本，附录 A 给出可复现的实测数字
@@ -399,9 +400,9 @@ compaction 渲染为特殊 Step，三块内容：
 
 1. **被吞掉的原始 events 全量**（默认折叠，从 blob 索引回捞）——这是相对 Agent 自身日志的核心优势；
 2. **summary 原文**（S1 有独立请求，S2 是被改写的消息）；
-3. **信息损失度量**：压缩前后 token 对比 + 规则粗筛的实体覆盖率（被吞段里出现过的文件路径 / 工具名 / URL，有多少在 summary 中彻底消失）。
+3. **信息损失度量**：压缩前后 token 对比 + 规则粗筛的实体覆盖率（被吞段里出现过的文件路径 / URL，有多少在 summary 中彻底消失——`chatmsg.ExtractEntities` 的正则只匹配路径/URL 形状的 token，不识别工具名，见 `internal/story/journey.go`）。
 
-纯规则、零 LLM 成本、可复现。**不修复，只揭示**——CCR 花 1600+ 行修一个它自己也修不好的问题，VMR 只需如实呈现"这次压缩把 42K token 压成 1.9K，其中这 7 个文件路径和 3 次工具调用在摘要里消失了"。
+纯规则、零 LLM 成本、可复现。**不修复，只揭示**——CCR 花 1600+ 行修一个它自己也修不好的问题，VMR 只需如实呈现"这次压缩把 42K token 压成 1.9K，其中这 7 个文件路径在摘要里消失了"。
 
 ### 6.5 行为剖面（剖面层，v1.0 遗漏）
 
@@ -502,11 +503,11 @@ CLI（实际落地，与原计划的差异见附录 D）：`vmr story [-c config
 | --- | --- | ---: | --- | --- |
 | **A** | `chatmsg` 下沉 0.5 + `ctxgraph`（blob 索引/manifest/编辑分类/lineage 切分与缝合）2.5 + `story` 事实层 1.5 + 剖面层 1 + Markdown 渲染 1 + CLI 0.5 + **一致性测试 1** + 拆 `splice/tail` 混合桶 0.5 | **8.5** | 是（附录 C 里拆成第 1、2 步） | ✅ 已完成 |
 | **B** | `report` 迁移到 `ctxgraph` + 修 compaction linking / context_growth / lineage 粘连 + `section_compaction.go` + archtest | **3** | 是：`vmr report` 自身缺陷修复 + N-4 章节 | ✅ 已完成（附录 F） |
-| **C** | LLM 解读层：prompt、结构化输出、落盘缓存、dry-run 预算、失败降级 | **2.5** | 是 | 未开始 |
+| **C** | LLM 解读层：prompt、结构化输出、落盘缓存、dry-run 预算、失败降级 | **2.5** | 是 | 🟡 部分完成——4d（compare）场景的切片已实施（自由格式 Markdown，非结构化输出；见附录 G 补记），单 Journey 逐 Step 解读仍未开始 |
 | **D** | 单文件自包含 HTML 瀑布流 + `--redact` | **2.5** | 是 | 未开始 |
 | **E** | Subagent 树（含先期采样验证 §10.1 的三条信号） | **2.5** | 是 | 未开始 |
-| **F** | 双 Journey 对比报告（剖面做差 + 差异归因） | **1.5** | 是 | 未开始（剖面层已就绪，成本可能低于原估，见附录 E） |
-| | **合计** | **20.5** | | 11.5/20.5 已完成 |
+| **F** | 双 Journey 对比报告（剖面做差 + 差异归因） | **1.5** | 是 | ✅ 已完成（含本次新增的规则层扩展：端点/缓存/system prompt/末轮上下文/终止方式/最终交付物，见附录 G 补记） |
+| | **合计** | **20.5** | | 12.5–13/20.5 已完成（Phase C 只完成了 compare 切片，未计满分） |
 
 **与 v1.0（14.5）的差异说明**：+6 天。其中 +3 是 `ctxgraph`、一致性测试与编辑分类细化（买的是"不用推倒重来"），+3 是 Phase B（买的是 report 自身缺陷修复 + 债务出清），+0.5 是剖面层与 `--redact`；−2 是 Phase F 因剖面层前置而降本。
 
@@ -843,14 +844,14 @@ The user wants me to read both files and evaluate…
 
 ### C.6 第 4 步 —— 可选扩展（9 人天，四个模块互不依赖）
 
-| 模块 | 人天 | 触发条件 |
-| --- | ---: | --- |
-| **4a LLM 解读层** | 2.5 | 用了第 1–3 步之后仍觉得读起来累。含 prompt 设计、结构化输出、`(step_hash, model, prompt_version)` 落盘缓存、dry-run 预算与确认、端点缺失时整层降级 |
-| **4b HTML + 脱敏** | 2.5 | 需要对外分享时。单文件自包含（内联 CSS/JS，零外部依赖）+ `--redact`。**在 4b 交付前，传播价值记 0**（§5.4） |
-| **4c Subagent** | 2.5 | 先跑采样脚本验证 §10.1 三条信号的命中率，不达标就继续推迟 |
-| **4d 双 Journey 对比** | 1.5 | 第 2 步的剖面 JSON 已落地——两份剖面做差 + 差异归因表。**成本可能低于原估**：第 2 步交付的 `JourneySummary`/`Metrics` 结构已经是"两份剖面"的现成输入 |
+| 模块 | 人天 | 触发条件 | 状态 |
+| --- | ---: | --- | --- |
+| **4a LLM 解读层** | 2.5 | 用了第 1–3 步之后仍觉得读起来累。含 prompt 设计、结构化输出、`(step_hash, model, prompt_version)` 落盘缓存、dry-run 预算与确认、端点缺失时整层降级 | 🟡 部分完成——2026-07-30 落地了 4d（compare）场景的切片，不是完整的单 Journey 逐 Step 解读；结构化输出未做（先上自由格式 Markdown），其余（prompt/缓存/dry-run/降级）均已实施。落地记录见附录 G 补记 |
+| **4b HTML + 脱敏** | 2.5 | 需要对外分享时。单文件自包含（内联 CSS/JS，零外部依赖）+ `--redact`。**在 4b 交付前，传播价值记 0**（§5.4） | 未开始 |
+| **4c Subagent** | 2.5 | 先跑采样脚本验证 §10.1 三条信号的命中率，不达标就继续推迟 | 未开始 |
+| **4d 双 Journey 对比** | 1.5 | 第 2 步的剖面 JSON 已落地——两份剖面做差 + 差异归因表。**成本可能低于原估**：第 2 步交付的 `JourneySummary`/`Metrics` 结构已经是"两份剖面"的现成输入 | ✅ 已完成，2026-07-30 追加了 `ComparisonExtras` 规则层扩展（端点/缓存/system prompt/末轮上下文/终止方式/最终交付物）——严格说超出了这里最初"剖面做差"的最小范围，但都是零 LLM 成本的规则事实，落地记录见附录 G 补记 |
 
-建议顺序：先 4d（最便宜且直接命中原始动机，且第 2 步已经把它的前置依赖做完），再按需 4a / 4b / 4c。
+建议顺序：先 4d（最便宜且直接命中原始动机，且第 2 步已经把它的前置依赖做完），再按需 4a / 4b / 4c。**实际执行确认了这个顺序是对的**：4d 做完之后，4a 只需要在 4d 的产物上加一层可选的 LLM 解读，两者天然衔接，没有出现"先做小的、后做大的时发现返工"的情况。
 
 ### C.7 贯穿所有步骤的不变量
 
@@ -1055,3 +1056,40 @@ T3.1 让 `AnalyzeSessions` 内部同时跑 `ctxgraph.Scan`（供 `group()` 消�
 **4a LLM 解读层，必要性进一步降低**：§6.4 分析已经指出 report 自己的新 compaction 章节能给"要不要上 4a"提供更多免费证据。第 3 步实际交付后这个论点更具体了——现在 `vmr report` 单独就能回答"这次压缩把多少 token 变成多少 token、哪些文件路径/URL 消失了"，这恰好是 deepseek 报告里最耗人工的那类观察之一。建议：4a 开工前先看几期真实 `vmr report`/`vmr story` 的实际阅读体验，再决定值不值得上 LLM——这条建议在 v1.1 就有，第 3 步的交付让"不上也够用"的可能性又高了一些，不是结论性的，只是概率上更值得先观望。
 
 **新增一条第 3 步暴露出的、值得在第 4 步开工前排查的技术问题**：附录 F.2 记录了 `ctxgraph.StitchGraph` 无法覆盖跨 `SessKey` 桶、零字面重合的标准 compaction 场景。如果 4d（双 Journey 对比）或未来的 subagent（4c）需要可靠地把"压缩前"和"压缩后"两个 Journey 串成一条时间线，会撞上和 `linkCompactions` 完全相同的局限——`ctxgraph` 目前没有能力单靠内容重合桥接这类断裂。这不阻塞 4d/4c 开工（多数真实场景要么同桶断裂、要么 4d/4c 本就只关心单个 Journey 内部的指标对比，不强依赖跨 Journey 缝合），但如果开工后发现"两个本该连起来的 Journey 连不上"，第一反应应该是"这是已知限制，不是新 bug"，去查附录 F.2 而不是重新调试 `StitchGraph`。
+
+---
+
+## 附录 G 补记：4a/4d 实际落地记录（2026-07-30）
+
+用户明确要求丰富 4d 的对比报告，并给出了两份 Journey（`j-openclaw-20260727T160544-20260727T161259-8b175da9` 22 轮、`j-lobster-20260727T160549-20260727T162156-d6b04665` 58 轮）作为具体案例，指定以 `docs/openclaw_dual_instance_analysis_2026-07-28_v1.0_deepseek-v4-pro.md` 那份人工分析报告的深度为参照（但明确要求不照抄它的框架和结论，跳出来以第一性原理判断该对比哪些维度）。
+
+### G.1 决策过程
+
+1. 先制定初版计划（`docs/Step4a_compare_LLM解读层_实施计划与执行记录_2026-07-29_sonnet-5.md` v1），核实了 deepseek 报告里的证据链在当前代码上是否真的可行——确认 `ctxgraph.Manifest` 已经带 `Endpoint`/`Usage{In,Out,CacheRead,CacheWrite}`，模型端点核查和缓存命中率曲线两节可以零 LLM 成本直接派生。
+2. 与用户确认两处简化：LLM 端点只支持手动指定一个已部署的 VMR 实例（不做 config.yaml 直连上游）；LLM 输出先做自由格式 Markdown（不做结构化 JSON）。
+3. 另一份 coding agent 独立给出了一份实施建议（`docs/Step4a_LLM增强对比报告_实施计划.md`），逐节核对源码后原文内联批注：骨架判断（两层分离、LLM 走 VMR 端点、缓存/降级/dry-run）与本方案独立吻合，可以互相印证；但它把"system prompt 里识别文件名/工具清单"和"迭代阶段划分"设计成正则/启发式规则层，评审判定为方向性错误——这两件事本质需要语义理解，规则做只会是脆弱、错了也不会显式暴露的伪精确，且违反"内核不认框架、框架特有识别归 profile 层"的既有原则；改为把有边界的原文节选和逐轮工具索引交给 LLM 自己读、自己标注"这是我的理解"。它的报告结构（对齐 deepseek 报告的 11 章）也被判定为"照抄章节数，不是按独立维度组织"，最终合并方案精简为 6 个正文小节。评审还发现它的缓存 key 缺了 `model`（换端点会误命中旧缓存的具体 bug）、以及两处"待验证"的技术前提其实已经有现成答案（system prompt 全文已经在 `Journey.Events` 里、cache 字段已经在 `Manifest.Usage` 里，都不需要重新解析原始 body）。
+4. 复核过程中按第一性原理补了一项两份方案都遗漏的维度：**最终交付物对比**——如果任务产出是通过一次"参数形状像文件写入"的工具调用落盘的，规则层可以直接把它的内容摆出来，这是 VMR 唯一能直接看到"结果差异"而非"过程差异"的证据，也是 deepseek 报告里人工比较两份产出报告篇幅/结构那部分工作的自动化版本。
+5. 按最终版 `docs/Step4a_compare_LLM解读层_实施计划与执行记录_2026-07-29_sonnet-5.md` 实施代码，全部测试通过（含 `archtest`）后，用两个真实 Journey + 一个本地 mock OpenAI 兼容端点跑了一次完整的端到端验证。
+
+### G.2 实际交付物
+
+- `internal/story/compare.go`：`Comparison` 新增 `Extras *ComparisonExtras`（`ComputeComparisonExtras`），六类规则事实：端点核查、缓存曲线、system prompt 规模/稳定性（含节选）、末轮上下文构成（免费，直接取 `Metrics.ContextCurve` 最后一项）、总耗时+终止方式、最终交付物节选。
+- `internal/story/render_compare.go`：渲染上述小节，`Extras` 为 nil 时整段跳过（向后兼容，不影响任何既有 `Compare(JourneySummary, JourneySummary)` 调用方）。
+- `internal/story/llm.go`（新文件）：`EvidencePack` 组装、prompt 模板（数字不可编造 / 文本节选可以是模型自己的阅读理解但要declare / 必须声明 VMR 看不到什么）、纯 `net/http` 的 OpenAI chat-completions 客户端、磁盘缓存（key 含 model）、`RenderLLMSection`。
+- `cmd/vmr/cmd_story.go`：新增 `-llm-addr`/`-llm-model`/`-llm-key`/`-llm-dry-run`，`-llm-addr` 是唯一开关；失败只警告、不影响 `.md`/`.json` 正常产出。
+- 测试：`internal/story/compare_test.go`（`ComputeComparisonExtras`/渲染新增小节）、`internal/story/llm_test.go`（`httptest.Server` 覆盖端点解析/缓存/失败降级/dry-run）、`cmd/vmr/cmd_story_test.go`（CLI flag 校验 + 真实 mock 端点端到端）。`go build`/`go vet`/`go test ./...`（含 `-race`、含 `archtest`）全部通过。
+
+### G.3 端到端验证结果（两个真实 Journey + 本地 mock LLM 端点）
+
+规则层复现的数字与 deepseek 报告手工核对出的数字一致：22 轮 vs 58 轮、缓存命中率 18%→97%（Standalone/A）vs 82%→99-100%（Lobster/B，R54 88% 的异常也复现了）、system prompt 17.1K vs 20.5K tokens、双侧端点均为 `openai:opencode:deepseek-v4-pro`（相同）。最终交付物对比正确识别出两侧 `write` 调用的真实报告内容（A 在第 21 轮、B 在第 56 轮）。LLM 解读小节按预期渲染，带完整的"不是事实层"免责声明。
+
+### G.4 保留、遗漏与待定事项（诚实清单）
+
+- **范围明确收窄**：本次只做了 4a 的 4d（compare）场景切片，不是设计文档 4a 原定范围的单 Journey 逐 Step 解读——那部分仍未开始，如果以后要做，`internal/story/llm.go` 的证据包/客户端/缓存代码大部分可以直接复用，只是证据包的内容需要换成单 Journey 的 Step 序列。
+- **LLM 输出仍是自由格式 Markdown，未做结构化 JSON + 程序化校验**——按计划，这是有意的第一版简化，不是遗漏；如果实际使用中发现模型经常编造数字或格式不稳定，下一步应该收紧成强制 JSON schema。
+- **只支持指向一个手动部署好的 VMR 实例，不支持直连 config.yaml 里的上游**——同样是按用户确认的简化，技术上直连 config.yaml 完全可行（`internal/replay` 已经证明），只是当前场景没有必要做两条路径。
+- **只支持 OpenAI 协议**，不支持 Anthropic——如果未来需要，`internal/story/llm.go` 的客户端代码需要单独适配 Anthropic 的 `/v1/messages` 形状，目前完全没做。
+- **不支持健康检查/failover/重试**——一次失败就是失败，直接降级为"没有 LLM 解读小节"，符合"简单优先"的既定原则，但意味着一次瞬时网络抖动就会让当次运行拿不到解读（重跑一次通常就好，缓存也不会因为一次失败而写入脏数据）。
+- **最终交付物识别是启发式的（参数形状像文件写入），不保证覆盖所有 Agent 框架的落盘方式**——如果某个框架的写文件工具用了完全不同的参数命名（既不是 path/file_path 类，也不是 content/text 类），会如实报告"未识别到可比较的最终交付物"，不会强行凑一个错误的匹配；这是"宁可断开，不要错连"原则在这个新功能上的应用，不是 bug。
+- **未处理 subagent 场景**——如果某个 Journey 涉及 subagent 分支（4c 尚未开工），当前的证据包组装只看主 lineage 的 Step，不会包含 subagent 的执行细节。
+- **未做 -redact 脱敏**——证据包和渲染出的最终交付物/system prompt 节选仍然是明文，`compare-*.md`/`.json`/缓存文件继承 `stories/` 现有的 0600/0700 权限，但脱敏（4b 范围）仍未实施，对外分享前需要人工审查内容。

@@ -128,8 +128,8 @@ type Step struct {
 // only to point at it so a human can look.
 type CompactionInfo struct {
 	TokensBefore, TokensAfter int64
-	SwallowedEntities         []string // seen in the predecessor's tail, absent from this step
-	SurvivedEntities          []string // seen in the predecessor's tail, still present in this step
+	SwallowedEntities         []string // seen in the predecessor's last manifest, absent from this step
+	SurvivedEntities          []string // seen in the predecessor's last manifest, still present in this step
 }
 
 // Event is one message's first appearance anywhere in the Journey.
@@ -464,12 +464,20 @@ func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgr
 		curText.WriteString(cm.Text)
 		curText.WriteByte('\n')
 	}
-	curEntities := map[string]bool{}
-	for _, e := range extractEntities(curText.String()) {
-		curEntities[e] = true
-	}
+	// Membership is tested against the FULL, uncapped curText — not against
+	// extractEntities(curText.String())'s own MaxEntities-capped list. Both
+	// sides independently truncate to their own first 30 distinct entities
+	// (in order of first appearance in THAT text), so a predecessor entity
+	// that survives but only reappears as curText's 31st+ distinct entity
+	// would fall outside a capped curEntities set and get misreported as
+	// swallowed — asserting a false "this was lost" instead of just omitting
+	// it, which the design's "宁可粗糙也不猜语义" principle doesn't license.
+	// A plain substring check sidesteps this: entities are already exact
+	// literal tokens the regex matched, so testing for their literal
+	// presence in curText doesn't need re-running (or re-capping) the scan.
+	curTextStr := curText.String()
 	for _, e := range extractEntities(predText.String()) {
-		if curEntities[e] {
+		if strings.Contains(curTextStr, e) {
 			info.SurvivedEntities = append(info.SurvivedEntities, e)
 		} else {
 			info.SwallowedEntities = append(info.SwallowedEntities, e)

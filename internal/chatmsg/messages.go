@@ -61,11 +61,11 @@ func RenderPart(m map[string]any) string {
 		s, _ := m["text"].(string)
 		return s
 	case "image_url": // openai
-		u, _ := nested(m, "image_url", "url").(string)
+		u, _ := Nested(m, "image_url", "url").(string)
 		return ImagePlaceholder(u)
 	case "image": // anthropic
-		mt, _ := nested(m, "source", "media_type").(string)
-		data, _ := nested(m, "source", "data").(string)
+		mt, _ := Nested(m, "source", "media_type").(string)
+		data, _ := Nested(m, "source", "data").(string)
 		return fmt.Sprintf("🖼 [image %s ~%s]", mt, fmtutil.FmtBytes(int64(base64.StdEncoding.DecodedLen(len(data)))))
 	case "thinking": // anthropic
 		s, _ := m["thinking"].(string)
@@ -157,8 +157,8 @@ func ToolCallList(v any) []ToolCall {
 		}
 		tc := ToolCall{}
 		tc.ID, _ = m["id"].(string)
-		tc.Name, _ = nested(m, "function", "name").(string)
-		tc.Args, _ = nested(m, "function", "arguments").(string)
+		tc.Name, _ = Nested(m, "function", "name").(string)
+		tc.Args, _ = Nested(m, "function", "arguments").(string)
 		out = append(out, tc)
 	}
 	return out
@@ -178,7 +178,7 @@ func ToolNames(body any) []string {
 		if !ok {
 			continue
 		}
-		if n, _ := nested(m, "function", "name").(string); n != "" {
+		if n, _ := Nested(m, "function", "name").(string); n != "" {
 			names = append(names, n)
 		} else if n, _ := m["name"].(string); n != "" {
 			names = append(names, n)
@@ -198,11 +198,14 @@ func jsonIndent(v any) string {
 	return string(b)
 }
 
-// nested walks a chain of map keys, returning nil the moment any link isn't
-// a map[string]any. Deliberately a private copy — internal/report/usage.go
-// and internal/ctxgraph/manifest.go each keep their own identical copy, so
-// no package has to import another just for a 12-line helper. See package doc.
-func nested(obj map[string]any, keys ...string) any {
+// Nested walks a chain of map keys, returning nil the moment any link isn't
+// a map[string]any. Exported so internal/ctxgraph (which already imports
+// chatmsg for Messages/ExtractUsage) doesn't need its own private copy —
+// internal/report/usage.go used to keep a third one, deleted as tech-debt
+// cleanup during the Step 3 migration onto ctxgraph (see the design doc's
+// Appendix F.5); at that point two independent copies for a 12-line helper
+// stopped being cheaper than one shared export.
+func Nested(obj map[string]any, keys ...string) any {
 	var cur any = obj
 	for _, k := range keys {
 		m, ok := cur.(map[string]any)

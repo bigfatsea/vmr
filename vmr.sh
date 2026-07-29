@@ -13,7 +13,7 @@
 #
 # Everything else is forwarded verbatim to the vmr binary, so this script is
 # the only entry point you ever need:
-#   ./vmr.sh check | diagnose | replay | report | dirs | <any future subcommand>
+#   ./vmr.sh check | diagnose | replay | report | <any future subcommand>
 # See "passthrough" below for the two things that forwarding is not:
 # a whitelist (unknown subcommands reach the binary and get its own usage
 # text), and a cwd change (relative paths still resolve from where you stand).
@@ -67,7 +67,7 @@ require_bin() {
     exit 1
   fi
 }
-require_bin   # both dirs below query the binary, so it must exist first
+require_bin   # resolve_log_dir below queries the binary, so it must exist first
 
 # warn_if_stale: a nudge, not a gate — prints one line if any source file
 # that actually feeds this binary is newer than it, but never blocks or
@@ -95,7 +95,7 @@ warn_if_stale() {
 }
 
 # LOG_DIR (where this script drops the server stderr log, next to the audit
-# JSONL) comes from `vmr dirs -c $CFG log` — the binary's own resolution of
+# JSONL) comes from `vmr check -c $CFG log` — the binary's own resolution of
 # the config's log_dir field — instead of a bash copy of that logic, so this
 # script can never disagree with where the running process actually writes.
 # The image cache dir is the binary's business alone now (config
@@ -103,10 +103,11 @@ warn_if_stale() {
 #
 # Resolved LAZILY (resolve_log_dir, called only by the commands that actually
 # need it: start, service install, logs) rather than up here unconditionally:
-# `vmr dirs` now loads and validates config.yaml (it reads log_dir from it),
-# so resolving it eagerly would make `stop`/`status`/`service uninstall` fail
-# whenever config.yaml is temporarily broken — exactly when you most need to
-# be able to stop a bad deploy without first fixing the config.
+# `vmr check log` still loads and validates config.yaml (it reads log_dir
+# from it), so resolving it eagerly would make `stop`/`status`/`service
+# uninstall` fail whenever config.yaml is temporarily broken — exactly when
+# you most need to be able to stop a bad deploy without first fixing the
+# config.
 #
 # Audit files rotate daily and auto-compress to .zst on rotation (20-75x
 # smaller; vmr report reads both transparently). They're kept forever unless
@@ -119,7 +120,7 @@ resolve_log_dir() {
   # whole script — the short-circuit exemption only covers the && list
   # itself, not the function-call boundary around it.
   if [[ -z "${LOG_DIR:-}" ]]; then
-    LOG_DIR="$("$BIN" dirs -c "$CFG" log)"
+    LOG_DIR="$("$BIN" check -c "$CFG" log)"
     SERVER_LOG="$LOG_DIR/vmr.log"
     if [[ -z "$SVC_LOG" ]]; then
       SVC_LOG="$SERVER_LOG"
@@ -557,15 +558,15 @@ has_c_flag() {
 #     not this checkout's config — and "the config next to the script" is
 #     the only sensible default for a script whose whole job is running
 #     this checkout. The list is the subcommands that actually define -c;
-#     `report` is the one that doesn't, and injecting there is a hard error
-#     (flag.ExitOnError on an undefined flag), not a harmless extra.
+#     injecting it on one that doesn't is a hard error (flag.ExitOnError on
+#     an undefined flag), not a harmless extra.
 #     A future -c-taking subcommand missing from this list degrades to
 #     "type -c yourself", never to a wrong config.
 passthrough() {
   local sub="$1"; shift
   local args=("$@")
   case "$sub" in
-    start|check|status|dirs|diagnose|replay)
+    start|check|status|diagnose|replay|report|story)
       has_c_flag "$@" || args=(-c "$CFG" "$@")
       ;;
   esac
@@ -599,7 +600,7 @@ case "${1:-}" in
   "")
     echo "usage: $0 {start|stop|restart|status|ps|logs}                   # dev mode (you supervise)" >&2
     echo "       $0 service {install|uninstall|start|stop|restart|status|logs}   # init system supervises" >&2
-    echo "       $0 <check|diagnose|report|dirs|replay|...> [args]         # forwarded to vmr (defaults -c $CFG)" >&2
+    echo "       $0 <check|diagnose|report|replay|...> [args]         # forwarded to vmr (defaults -c $CFG)" >&2
     exit 2 ;;
   # Not a script-owned subcommand — the binary decides whether it exists.
   # `vmr start` in the foreground is the one thing this shadows: run

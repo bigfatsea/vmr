@@ -4,6 +4,9 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,8 +193,8 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	}
 }
 
-// TestCmdStory_Compare covers Step 4's 4d module: -compare-a/-compare-b
-// resolve two candidate journeys by id prefix and write one comparison
+// TestCmdStory_Compare covers Step 4's 4d module: -compare id1,id2 resolves
+// two candidate journeys by id prefix and writes one comparison
 // Markdown+JSON pair. Journey B's much larger model time should surface as
 // a notable row.
 func TestCmdStory_Compare(t *testing.T) {
@@ -231,8 +234,8 @@ func TestCmdStory_Compare(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-compare-a", idA, "-compare-b", idB, path}); err != nil {
-			t.Fatalf("cmdStory -compare-a/-compare-b: %v", err)
+		if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, path}); err != nil {
+			t.Fatalf("cmdStory -compare: %v", err)
 		}
 	})
 	wantBase := "compare-" + idA + "-vs-" + idB
@@ -245,7 +248,7 @@ func TestCmdStory_Compare(t *testing.T) {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
 	md := string(mdData)
-	for _, want := range []string{idA, idB, "调研一下 A 股新股打新收益", "帮我写个 release note", "模型时间"} {
+	for _, want := range []string{idA, idB, "调研一下 A 股新股打新收益", "帮我写个 release note", "模型时间", "证据溯源", path} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
 		}
@@ -265,11 +268,26 @@ func TestCmdStory_Compare(t *testing.T) {
 	if len(cmp.Rows) == 0 {
 		t.Error("comparison json has no metric rows")
 	}
+	// Evidence-provenance addition (plan review §6.2 item 2): Extras.Sources
+	// must carry the resolved input path(s) this comparison was built from,
+	// not just be left empty — otherwise the "证据溯源" text above would be
+	// asserting against a section that silently renders nothing.
+	if cmp.Extras == nil || len(cmp.Extras.Sources) != 1 || cmp.Extras.Sources[0] != path {
+		t.Errorf("comparison json Extras.Sources = %+v, want [%q]", extrasSources(cmp), path)
+	}
 }
 
-// TestCmdStory_CompareRequiresBothSides covers the -compare-a-without-
-// -compare-b (and vice versa) usage error.
-func TestCmdStory_CompareRequiresBothSides(t *testing.T) {
+func extrasSources(cmp story.Comparison) []string {
+	if cmp.Extras == nil {
+		return nil
+	}
+	return cmp.Extras.Sources
+}
+
+// TestCmdStory_CompareRequiresTwoIDs covers the usage error when -compare
+// isn't given exactly two comma-separated ids (missing second id, or a
+// trailing/leading empty one from a stray comma).
+func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
 	u1 := storyMsg("user", "hello")
@@ -278,17 +296,20 @@ func TestCmdStory_CompareRequiresBothSides(t *testing.T) {
 	path := writeStoryJSONL(t, []audit.Record{r1, r2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
-	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-compare-a", "j-something", path})
-	})
-	if err == nil {
-		t.Error("-compare-a without -compare-b should be a usage error")
+	for _, val := range []string{"j-something", "j-something,", ",j-something"} {
+		err := captureStdoutErr(t, func() error {
+			return cmdStory([]string{"-o", outDir, "-compare", val, path})
+		})
+		if err == nil {
+			t.Errorf("-compare %q should be a usage error", val)
+		}
 	}
 }
 
-// TestCmdStory_CompareUnknownID covers -compare-a/-compare-b each reporting
-// their own side when an id prefix doesn't match any candidate — the error
-// must name which of the two flags failed, not just "no journey found".
+// TestCmdStory_CompareUnknownID covers -compare id1,id2 reporting which side
+// failed to resolve when an id prefix doesn't match any candidate — the
+// error must name whether it's the first or second id, not just "no journey
+// found".
 func TestCmdStory_CompareUnknownID(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
@@ -299,10 +320,10 @@ func TestCmdStory_CompareUnknownID(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-compare-a", "no-such-id", "-compare-b", "j-", path})
+		return cmdStory([]string{"-o", outDir, "-compare", "no-such-id,j-", path})
 	})
-	if err == nil || !strings.Contains(err.Error(), "-compare-a") {
-		t.Errorf("expected a -compare-a error naming that flag, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "-compare first id") {
+		t.Errorf("expected a -compare first id error, got: %v", err)
 	}
 }
 
@@ -351,12 +372,12 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 		t.Fatalf("could not find both candidate ids in listing:\n%s", listing)
 	}
 
-	if err := cmdStory([]string{"-o", outDir, "-compare-a", idPartial, "-compare-b", idB, path}); err == nil {
+	if err := cmdStory([]string{"-o", outDir, "-compare", idPartial + "," + idB, path}); err == nil {
 		t.Error("comparing a partial-head journey without -include-partial should error")
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-include-partial", "-compare-a", idPartial, "-compare-b", idB, path}); err != nil {
+		if err := cmdStory([]string{"-o", outDir, "-include-partial", "-compare", idPartial + "," + idB, path}); err != nil {
 			t.Fatalf("cmdStory -compare with -include-partial: %v", err)
 		}
 	})
@@ -477,4 +498,201 @@ func captureStdoutErr(t *testing.T, fn func() error) error {
 	var err error
 	captureStdout(t, func() { err = fn() })
 	return err
+}
+
+// captureStderr runs fn with os.Stderr redirected and returns what it wrote
+// — the -llm-* degradation tests assert on the warning text cmdStory prints
+// there (design doc C.7: a failed LLM call must warn, not fail the command).
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+	fn()
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// writeTwoCandidateJourneys builds a minimal two-journey audit log (same
+// shape TestCmdStory_Compare uses) and returns its path plus both journeys'
+// ids, resolved by listing once — shared setup for the -llm-* CLI tests
+// below, which only care about the compare/LLM plumbing, not journey
+// construction itself.
+func writeTwoCandidateJourneys(t *testing.T, outDir string) (path, idA, idB string) {
+	t.Helper()
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+	uA := storyMsg("user", "调研一下 A 股新股打新收益")
+	rA1 := storyRec(at(0), []any{sys, uA}, storySSE("开工"))
+	rA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("完成"))
+	uB := storyMsg("user", "帮我写个 release note")
+	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
+	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
+	path = writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
+
+	listing := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, path}); err != nil {
+			t.Fatalf("cmdStory (list): %v", err)
+		}
+	})
+	for _, line := range strings.Split(listing, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !strings.HasPrefix(fields[0], "j-") {
+			continue
+		}
+		if strings.Contains(line, "调研一下") {
+			idA = fields[0]
+		} else if strings.Contains(line, "release note") {
+			idB = fields[0]
+		}
+	}
+	if idA == "" || idB == "" {
+		t.Fatalf("could not find both candidate ids in listing:\n%s", listing)
+	}
+	return path, idA, idB
+}
+
+// TestCmdStory_LLMFlagValidation covers resolveLLMOptions' guard rails: the
+// -llm-* flag combinations that must be rejected before anything is scanned.
+func TestCmdStory_LLMFlagValidation(t *testing.T) {
+	path, idA, idB := writeTwoCandidateJourneys(t, filepath.Join(t.TempDir(), "out"))
+	compareArgs := []string{"-compare", idA + "," + idB, path}
+
+	cases := map[string][]string{
+		"-llm-dry-run without -llm-addr":           append([]string{"-llm-dry-run"}, compareArgs...),
+		"-llm-model without -llm-addr":             append([]string{"-llm-model", "agent"}, compareArgs...),
+		"-llm-key without -llm-addr":               append([]string{"-llm-key", "sk-x"}, compareArgs...),
+		"-llm-addr without -llm-model or -dry-run": append([]string{"-llm-addr", "127.0.0.1:1"}, compareArgs...),
+	}
+	for name, args := range cases {
+		if err := captureStdoutErr(t, func() error { return cmdStory(args) }); err == nil {
+			t.Errorf("%s: expected an error, got none", name)
+		}
+	}
+
+	// -llm-addr with -journey (not -compare) must be rejected too.
+	if err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out2"), "-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+	}); err == nil {
+		t.Error("-llm-addr with -journey should be rejected")
+	}
+
+	// -llm-addr with -render-all (not -compare) must be rejected too — the
+	// cmdStory guard is `*journeyArg != "" || *renderAll`, and only the
+	// -journey half was covered above until this case was added.
+	if err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out3"), "-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+	}); err == nil {
+		t.Error("-llm-addr with -render-all should be rejected")
+	}
+}
+
+// TestCmdStory_CompareLLMDryRun covers -llm-dry-run: it must print a size
+// estimate and return before writing anything, and must never dial the
+// given address (127.0.0.1:1 refuses every connection on virtually every
+// system — if the dry run actually tried to connect, this test would fail
+// with a connection-refused error surfacing as a non-nil return).
+func TestCmdStory_CompareLLMDryRun(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", path}); err != nil {
+			t.Fatalf("cmdStory -llm-dry-run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dry run") {
+		t.Errorf("dry-run output missing the size estimate line: %q", out)
+	}
+	base := "compare-" + idA + "-vs-" + idB
+	if _, err := os.Stat(filepath.Join(outDir, "stories", base+".md")); err == nil {
+		t.Error("-llm-dry-run should return before writing the compare .md")
+	}
+	// -llm-dry-run must not leave even an empty stories/ directory behind —
+	// code-review finding: ensureStoriesDir used to run before the dry-run
+	// check, so a "dry run" and "not configured" left different filesystem
+	// state even though both should be pure no-ops.
+	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
+		t.Error("-llm-dry-run should not create reports/stories/ at all")
+	}
+}
+
+// TestCmdStory_CompareWithLLM covers the full path: a real (mock) VMR
+// endpoint, the rendered .md gaining the "## LLM 解读" section with the
+// mock's reply, and a cache file appearing under stories/.llm-cache.
+func TestCmdStory_CompareWithLLM(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "一句话结论：这是 mock 的解读内容。"}},
+			},
+		})
+	}))
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+		t.Fatalf("cmdStory -llm-addr: %v", err)
+	}
+	base := "compare-" + idA + "-vs-" + idB
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", base+".md"))
+	if err != nil {
+		t.Fatalf("comparison .md not written: %v", err)
+	}
+	md := string(mdData)
+	for _, want := range []string{"## LLM 解读", "一句话结论：这是 mock 的解读内容。", "不是事实层"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("comparison markdown missing %q:\n%s", want, md)
+		}
+	}
+
+	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil || len(entries) == 0 {
+		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)
+	}
+}
+
+// TestCmdStory_CompareLLMFailureDegrades covers design doc C.7's "the whole
+// layer degrades away" rule: an unreachable -llm-addr must not fail the
+// -compare command — the .md/.json still get written, just without the LLM
+// section, and a warning goes to stderr.
+func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	var cmdErr error
+	stderr := captureStderr(t, func() {
+		cmdErr = cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+	})
+	if cmdErr != nil {
+		t.Fatalf("cmdStory should not fail when the LLM endpoint is unreachable: %v", cmdErr)
+	}
+	if !strings.Contains(stderr, "warning") {
+		t.Errorf("expected a warning on stderr about the failed LLM call, got: %q", stderr)
+	}
+
+	base := "compare-" + idA + "-vs-" + idB
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", base+".md"))
+	if err != nil {
+		t.Fatalf("comparison .md should still be written: %v", err)
+	}
+	if strings.Contains(string(mdData), "## LLM 解读") {
+		t.Error("comparison markdown should NOT contain an LLM section when the call failed")
+	}
+	if !strings.Contains(string(mdData), "模型时间") {
+		t.Error("the rule-layer report should still be complete despite the LLM failure")
+	}
 }

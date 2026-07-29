@@ -64,7 +64,7 @@ func ExtractUsage(body any) (Usage, bool) {
 // Anthropic's message_start) into the running totals, keeping the maximum
 // seen per field — robust for cumulative streams and single final objects.
 func mergeUsage(obj map[string]any, u Usage) Usage {
-	for _, holder := range []any{obj["usage"], nested(obj, "message", "usage")} {
+	for _, holder := range []any{obj["usage"], Nested(obj, "message", "usage")} {
 		m, ok := holder.(map[string]any)
 		if !ok {
 			continue
@@ -92,7 +92,7 @@ func mergeUsage(obj map[string]any, u Usage) Usage {
 func usageFromObj(m map[string]any) Usage {
 	var u Usage
 	cacheRead := num(m["cache_read_input_tokens"])
-	if v := nested(m, "prompt_tokens_details", "cached_tokens"); v != nil {
+	if v := Nested(m, "prompt_tokens_details", "cached_tokens"); v != nil {
 		cacheRead = max(cacheRead, num(v))
 	}
 	if v, ok := m["prompt_cache_hit_tokens"]; ok {
@@ -107,7 +107,7 @@ func usageFromObj(m map[string]any) Usage {
 		u.In = num(m["prompt_tokens"])
 	}
 	u.Out = max(num(m["completion_tokens"]), num(m["output_tokens"]))
-	u.Reasoning = num(nested(m, "completion_tokens_details", "reasoning_tokens"))
+	u.Reasoning = num(Nested(m, "completion_tokens_details", "reasoning_tokens"))
 	return u
 }
 
@@ -128,7 +128,7 @@ func ExtractFinish(body any) string {
 		if sr, _ := obj["stop_reason"].(string); sr != "" {
 			finish = sr
 		}
-		if sr, _ := nested(obj, "delta", "stop_reason").(string); sr != "" {
+		if sr, _ := Nested(obj, "delta", "stop_reason").(string); sr != "" {
 			finish = sr
 		}
 	}

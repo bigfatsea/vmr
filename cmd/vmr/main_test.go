@@ -68,35 +68,45 @@ func TestCmdCheck_MissingFile(t *testing.T) {
 	}
 }
 
-// TestCmdDirs_ValidConfig locks in that `vmr dirs` prints the config's
-// resolved log_dir/image_cache_dir (post-defaults) — these are config
-// fields, not environment variables (design doc §7.1).
-func TestCmdDirs_ValidConfig(t *testing.T) {
+// TestCmdCheck_DirValidConfig locks in that `vmr check log|cache` prints
+// just the config's resolved log_dir/image_cache_dir (post-defaults) — these
+// are config fields, not environment variables (design doc §7.1). Absorbed
+// from the former standalone `vmr dirs` subcommand.
+func TestCmdCheck_DirValidConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML+"log_dir: "+dir+"/logs\n")
 	got := captureStdout(t, func() {
-		if err := cmdDirs([]string{"-c", path, "log"}); err != nil {
-			t.Fatalf("cmdDirs log: %v", err)
+		if err := cmdCheck([]string{"-c", path, "log"}); err != nil {
+			t.Fatalf("cmdCheck log: %v", err)
 		}
 	})
 	if want := dir + "/logs\n"; got != want {
-		t.Errorf("cmdDirs log: got %q, want %q", got, want)
+		t.Errorf("cmdCheck log: got %q, want %q", got, want)
 	}
 }
 
-// TestCmdDirs_RequiresValidConfig locks in that `vmr dirs` loads and
-// validates the full config — a missing or malformed config.yaml makes it
-// fail, rather than resolving a default independent of config.yaml. vmr.sh
-// must never call this unconditionally for commands (stop/status/logs) that
-// have to keep working when config.yaml is broken; see resolve_log_dir's
-// lazy resolution in vmr.sh.
-func TestCmdDirs_RequiresValidConfig(t *testing.T) {
-	if err := cmdDirs([]string{"-c", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "log"}); err == nil {
-		t.Error("cmdDirs on a missing config should return an error, not resolve a default")
+// TestCmdCheck_DirRequiresValidConfig locks in that `vmr check log|cache`
+// loads and validates the full config — a missing or malformed config.yaml
+// makes it fail, rather than resolving a default independent of
+// config.yaml. vmr.sh must never call this unconditionally for commands
+// (stop/status/logs) that have to keep working when config.yaml is broken;
+// see resolve_log_dir's lazy resolution in vmr.sh.
+func TestCmdCheck_DirRequiresValidConfig(t *testing.T) {
+	if err := cmdCheck([]string{"-c", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "log"}); err == nil {
+		t.Error("cmdCheck log on a missing config should return an error, not resolve a default")
 	}
 	bad := writeTempFile(t, "config.yaml", "not: valid: yaml: [\n")
-	if err := cmdDirs([]string{"-c", bad, "log"}); err == nil {
-		t.Error("cmdDirs on an unparseable config should return an error")
+	if err := cmdCheck([]string{"-c", bad, "log"}); err == nil {
+		t.Error("cmdCheck log on an unparseable config should return an error")
+	}
+}
+
+// TestCmdCheck_DirUnknownArg locks in the usage-error path for an unknown
+// trailing argument (anything but log/cache).
+func TestCmdCheck_DirUnknownArg(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", minimalConfigYAML)
+	if err := cmdCheck([]string{"-c", path, "bogus"}); err == nil {
+		t.Error("cmdCheck with an unknown trailing arg should return an error")
 	}
 }
 

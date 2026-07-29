@@ -78,7 +78,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 		// anthropic events, keyed by "type"
 		switch obj["type"] {
 		case "message_start":
-			if m, _ := nested(obj, "message", "model").(string); m != "" {
+			if m, _ := Nested(obj, "message", "model").(string); m != "" {
 				s.Model = m
 			}
 		case "content_block_start":
@@ -104,7 +104,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 				}
 			}
 		case "message_delta":
-			if sr, _ := nested(obj, "delta", "stop_reason").(string); sr != "" {
+			if sr, _ := Nested(obj, "delta", "stop_reason").(string); sr != "" {
 				s.Finish = sr
 			}
 		}
@@ -141,8 +141,8 @@ func toolCallDeltas(v any) []tcDelta {
 		}
 		d := tcDelta{idx: int(num(m["index"]))}
 		d.id, _ = m["id"].(string)
-		d.name, _ = nested(m, "function", "name").(string)
-		d.args, _ = nested(m, "function", "arguments").(string)
+		d.name, _ = Nested(m, "function", "name").(string)
+		d.args, _ = Nested(m, "function", "arguments").(string)
 		out = append(out, d)
 	}
 	return out

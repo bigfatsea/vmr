@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/story/profile"
 )
@@ -146,6 +147,50 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	if !strings.Contains(joinedSwallowed, "README.md") {
 		t.Errorf("README.md (never restated) should be in SwallowedEntities, got %v", c.SwallowedEntities)
 	}
+
+	// The struct-level assertions above don't prove renderCompactionInfo
+	// actually surfaces any of this in what a reader opens — RenderMarkdown
+	// is the only thing a human (or the compare/LLM evidence pack) ever
+	// reads, so it needs its own assertion, not just CompactionInfo's field
+	// values.
+	md := RenderMarkdown(j)
+	for _, want := range []string{"信息损失", "README.md", "AGENTS.md"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("RenderMarkdown output missing %q for the compaction boundary step:\n%s", want, md)
+		}
+	}
+}
+
+// TestBuildCompactionInfo_EntityBeyondCapStillCountsAsSurvived is a
+// regression test for a real false-positive: chatmsg.ExtractEntities caps at
+// MaxEntities (30) distinct entities per text, independently for the
+// predecessor and the successor. The old implementation tested survival by
+// membership in the SUCCESSOR's own capped set — so an entity mentioned in
+// the predecessor that genuinely still appears in the successor, but only as
+// the successor's 31st+ distinct entity (i.e. past ITS cap), got dropped
+// from that capped set and misreported as swallowed even though it's right
+// there in the text. That's an assertion of a false fact, not just an
+// omission — the fix tests literal presence in the successor's full,
+// uncapped text instead.
+func TestBuildCompactionInfo_EntityBeyondCapStillCountsAsSurvived(t *testing.T) {
+	predBody := map[string]any{"messages": []any{msg("user", "please check target.md")}}
+	predRec := &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: predBody}}}
+
+	var b strings.Builder
+	for i := 0; i < 40; i++ { // well past chatmsg.MaxEntities (30)
+		b.WriteString("file" + strconv.Itoa(i) + ".md ")
+	}
+	b.WriteString("and also target.md")
+	curMsgs := []chatmsg.Message{{Role: "assistant", Text: b.String()}}
+
+	info := buildCompactionInfo(predRec, &ctxgraph.Manifest{}, &ctxgraph.Manifest{}, curMsgs)
+
+	if strings.Contains(strings.Join(info.SwallowedEntities, ","), "target.md") {
+		t.Errorf("target.md is present in the successor text (just past its own entity cap) and must NOT be reported as swallowed: %v", info.SwallowedEntities)
+	}
+	if !strings.Contains(strings.Join(info.SurvivedEntities, ","), "target.md") {
+		t.Errorf("target.md should be reported as survived, got survived=%v swallowed=%v", info.SurvivedEntities, info.SwallowedEntities)
+	}
 }
 
 // TestRevision_SpliceEdgeTagsTheReplacedMessage covers F11's "revision"
@@ -201,5 +246,13 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 	}
 	if first.Msg.Text != "revised summary absorbing the above" {
 		t.Errorf("unexpected first new event: %q", first.Msg.Text)
+	}
+
+	// Same gap as the compaction test above: the Event.Revises field being
+	// set doesn't by itself prove renderEvent's 🔄 marker actually reaches
+	// RenderMarkdown's output.
+	md := RenderMarkdown(j)
+	if !strings.Contains(md, "🔄[修订") {
+		t.Errorf("RenderMarkdown output should carry the 🔄[修订 …] marker for the revising event:\n%s", md)
 	}
 }
