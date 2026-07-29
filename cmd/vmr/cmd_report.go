@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-29 14:00, by Sonnet 5
 package main
 
 import (
@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"vmr/internal/audit"
@@ -49,36 +48,23 @@ const defaultPricingFile = "pricing.yaml"
 // Inputs may freely mix live plain .jsonl files and .jsonl.zst files that
 // the audit logger's housekeeping sweep has since compressed
 // (internal/report decompresses transparently) — e.g.
-// `vmr report 'vmr-audit-*.jsonl*'`.
+// `vmr report 'vmr-audit-*.jsonl*'`. With no input files given at all,
+// defaults to <-c config.yaml's log_dir>/vmr-audit-* (see resolveInputPaths
+// in auditpaths.go) — the common case of "just report on this instance's
+// own logs" needs no arguments beyond an optional -c.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	detailsOn := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/")
 	pricingPath := fs.String("pricing", "", "pricing sidecar yaml (per-endpoint unit prices); absent => auto-load ./pricing.yaml if present, else no $ estimates")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() == 0 {
-		return fmt.Errorf("no input files; usage: vmr report [-o dir] [-pricing pricing.yaml] <audit.jsonl|glob>...")
+	paths, err := resolveInputPaths(fs, *configPath)
+	if err != nil {
+		return err
 	}
-	seen := map[string]bool{}
-	var paths []string
-	for _, arg := range fs.Args() {
-		matches, err := filepath.Glob(arg)
-		if err != nil {
-			return fmt.Errorf("bad pattern %q: %w", arg, err)
-		}
-		if len(matches) == 0 {
-			return fmt.Errorf("no files match %q", arg)
-		}
-		for _, m := range matches {
-			if !seen[m] {
-				seen[m] = true
-				paths = append(paths, m)
-			}
-		}
-	}
-	sort.Strings(paths)
 
 	tw := timestampWriter{w: os.Stdout}
 

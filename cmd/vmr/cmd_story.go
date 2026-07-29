@@ -1,4 +1,4 @@
-// Ver 2026-07-29 11:00, by Sonnet 5
+// Ver 2026-07-29 14:00, by Sonnet 5
 
 package main
 
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"vmr/internal/ctxgraph"
@@ -21,8 +20,13 @@ import (
 // Step 1 scope: one ctxgraph.Lineage per Journey, no cross-break stitching
 // yet — a lineage that starts mid-conversation is rendered with an
 // explicit warning, not silently treated as a fresh start.
+//
+// With no input files given at all, defaults to <-c config.yaml's
+// log_dir>/vmr-audit-* (see resolveInputPaths in auditpaths.go), same
+// convention as cmdReport.
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
+	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
 	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (design doc §11 D1)")
@@ -30,27 +34,10 @@ func cmdStory(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() == 0 {
-		return fmt.Errorf("no input files; usage: vmr story [-journey id] [-include-partial] [-o dir] <audit.jsonl|glob>...")
+	paths, err := resolveInputPaths(fs, *configPath)
+	if err != nil {
+		return err
 	}
-	seen := map[string]bool{}
-	var paths []string
-	for _, arg := range fs.Args() {
-		matches, err := filepath.Glob(arg)
-		if err != nil {
-			return fmt.Errorf("bad pattern %q: %w", arg, err)
-		}
-		if len(matches) == 0 {
-			return fmt.Errorf("no files match %q", arg)
-		}
-		for _, m := range matches {
-			if !seen[m] {
-				seen[m] = true
-				paths = append(paths, m)
-			}
-		}
-	}
-	sort.Strings(paths)
 
 	fmt.Printf("scanning %d file(s)...\n", len(paths))
 	g, err := ctxgraph.Scan(paths)
