@@ -1,4 +1,4 @@
-// Ver 2026-07-29 15:00, by Sonnet 5
+// Ver 2026-07-29 17:15, by Sonnet 5
 
 // Package story turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
@@ -18,8 +18,10 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"vmr/internal/audit"
@@ -79,20 +81,117 @@ type Event struct {
 // Build renders one Lineage into a Journey using prof for the
 // agent-specific real-instruction/no-reply judgment calls. It re-fetches
 // every manifest's full audit.Record (a Lineage on its own only carries
-// content hashes) in one batched pass per source file.
+// content hashes) in one batched pass per source file. Rendering many
+// lineages at once should use BuildAll instead — calling Build in a loop
+// re-fetches from scratch per lineage, which re-scans a source file once
+// per lineage rooted in (or passing through) it instead of once total.
 func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
 	if len(l.Manifests) == 0 {
 		return nil, errEmptyLineage
 	}
-	locs := make([]ctxgraph.Loc, len(l.Manifests))
-	for i, m := range l.Manifests {
-		locs[i] = ctxgraph.Loc{Path: m.Path, Line: m.Line}
+	recs, err := ctxgraph.FetchRecords(manifestLocs(l))
+	if err != nil {
+		return nil, err
+	}
+	return buildFrom(l, prof, recs)
+}
+
+// BuildAll renders many Lineages into Journeys. Two independent costs are
+// batched/parallelized here, found by measuring an actual -render-all run
+// against a real 15-file/253-candidate corpus (design-doc review
+// follow-up):
+//
+//  1. I/O: every lineage's manifest-record fetch is batched into a single
+//     ctxgraph.FetchRecords call — FetchRecords already groups its reads by
+//     source file (zstd isn't seekable, so each file is scanned at most
+//     once regardless of how many lines are wanted from it), turning "read
+//     every candidate's records" from one pass over the source files PER
+//     CANDIDATE into one pass total, same fix PreviewTitles applied to the
+//     listing path.
+//  2. CPU: buildFrom's own work (re-rendering each manifest's full message
+//     list, event-hash dedup, jsonIndent on tool payloads) turned out to be
+//     the larger cost on that real corpus — a single request's body already
+//     carries its ENTIRE accumulated history, so buildFrom's cost per
+//     lineage grows with the square of its turn count, not linearly. Doing
+//     that serially, one candidate at a time, left 253 candidates' worth of
+//     CPU work on a single core. Each lineage's Journey is independent of
+//     every other's (buildFrom only reads the shared recs map, never
+//     mutates it), so this runs on the same bounded worker pool
+//     scanWorkerCount uses in internal/ctxgraph.
+//
+// Order of the returned slice matches ls; a per-lineage error aborts the
+// whole batch (matches Build's own all-or-nothing contract for a single
+// lineage).
+func BuildAll(ls []*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, error) {
+	for _, l := range ls {
+		if len(l.Manifests) == 0 {
+			return nil, errEmptyLineage
+		}
+	}
+
+	var locs []ctxgraph.Loc
+	for _, l := range ls {
+		locs = append(locs, manifestLocs(l)...)
 	}
 	recs, err := ctxgraph.FetchRecords(locs)
 	if err != nil {
 		return nil, err
 	}
 
+	out := make([]*Journey, len(ls))
+	errs := make([]error, len(ls))
+	sem := make(chan struct{}, buildWorkerCount(len(ls)))
+	var wg sync.WaitGroup
+	for i, l := range ls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, l *ctxgraph.Lineage) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i], errs[i] = buildFrom(l, prof, recs)
+		}(i, l)
+	}
+	wg.Wait()
+
+	for _, e := range errs {
+		if e != nil {
+			return nil, e
+		}
+	}
+	return out, nil
+}
+
+// buildWorkerCount bounds Journey-construction concurrency the same way
+// ctxgraph's scanWorkerCount does: more workers than cores (or than
+// lineages) just adds scheduling overhead, not throughput.
+func buildWorkerCount(lineages int) int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		n = 1
+	}
+	if lineages > 0 && n > lineages {
+		n = lineages
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// manifestLocs is l's manifests' source coordinates, in order — the batch
+// FetchRecords needs to resolve them to full audit.Records.
+func manifestLocs(l *ctxgraph.Lineage) []ctxgraph.Loc {
+	locs := make([]ctxgraph.Loc, len(l.Manifests))
+	for i, m := range l.Manifests {
+		locs[i] = ctxgraph.Loc{Path: m.Path, Line: m.Line}
+	}
+	return locs
+}
+
+// buildFrom is Build's actual assembly logic, factored out so BuildAll can
+// share one batched recs lookup across many lineages instead of each
+// lineage doing its own FetchRecords call.
+func buildFrom(l *ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record) (*Journey, error) {
 	j := &Journey{
 		ID:      deriveID(l),
 		Break:   l.BrokeFrom,

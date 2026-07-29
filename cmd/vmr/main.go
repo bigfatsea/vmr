@@ -64,7 +64,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr report [-c config.yaml] [-o dir] [-details=false] [-pricing pricing.yaml] [audit.jsonl|glob]...   (default -o: ./reports; auto-loads ./pricing.yaml if -pricing omitted; no input files => -c's log_dir/vmr-audit-*)
-       vmr story [-c config.yaml] [-journey id] [-include-partial] [-show-ungrouped] [-o dir] [audit.jsonl|glob]...   (default -o: ./reports; no -journey lists candidates; no input files => -c's log_dir/vmr-audit-*)
+       vmr story [-c config.yaml] [-journey id | -render-all] [-include-partial] [-show-ungrouped] [-o dir] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; no input files => -c's log_dir/vmr-audit-*)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>

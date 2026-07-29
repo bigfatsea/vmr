@@ -1,4 +1,4 @@
-// Ver 2026-07-29 14:00, by Sonnet 5
+// Ver 2026-07-29 16:00, by Sonnet 5
 
 package main
 
@@ -29,6 +29,7 @@ func cmdStory(args []string) error {
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
+	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
 	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (design doc §11 D1)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records (design-doc review §2.1)")
 	if err := fs.Parse(args); err != nil {
@@ -57,8 +58,8 @@ func cmdStory(args []string) error {
 
 	cands := story.ListCandidates(g)
 
-	var target *ctxgraph.Lineage
 	if *journeyArg != "" {
+		var target *ctxgraph.Lineage
 		for _, l := range cands {
 			if strings.HasPrefix(story.ID(l), *journeyArg) {
 				target = l
@@ -68,12 +69,12 @@ func cmdStory(args []string) error {
 		if target == nil {
 			return fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", *journeyArg)
 		}
+		return renderJourney(target, firstPath, prof, *includePartial, *outDir)
 	}
-
-	if target == nil {
-		return listJourneys(cands, g, firstPath, prof, *includePartial)
+	if *renderAll {
+		return renderAllJourneys(cands, firstPath, prof, *includePartial, *outDir)
 	}
-	return renderJourney(target, firstPath, prof, *includePartial, *outDir)
+	return listJourneys(cands, g, firstPath, prof, *includePartial)
 }
 
 func listJourneys(cands []*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool) error {
@@ -158,20 +159,86 @@ func renderJourney(target *ctxgraph.Lineage, firstPath string, prof profile.Prof
 	if err != nil {
 		return err
 	}
-	storiesDir := filepath.Join(outDir, "stories")
-	// 0o700/0o600: story output embeds full conversation bodies, same
-	// sensitivity as internal/report's details/ — must not loosen that.
-	if err := os.MkdirAll(storiesDir, 0o700); err != nil {
+	storiesDir, err := ensureStoriesDir(outDir)
+	if err != nil {
 		return err
 	}
+	outPath, err := writeJourneyFile(j, storiesDir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), journeySteps(j))
+	return nil
+}
+
+// renderAllJourneys renders every non-partial candidate in one batched
+// pass instead of requiring -journey <id> one at a time — story.BuildAll
+// shares a single FetchRecords call across every candidate (same fix
+// PreviewTitles applied to the listing path), so this costs about the same
+// I/O as just listing, not N times more.
+func renderAllJourneys(cands []*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+	var toRender []*ctxgraph.Lineage
+	skippedPartial := 0
+	for _, l := range cands {
+		if story.IsPartialHead(l, firstPath) && !includePartial {
+			skippedPartial++
+			continue
+		}
+		toRender = append(toRender, l)
+	}
+	if len(toRender) == 0 {
+		fmt.Println("no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
+		return nil
+	}
+
+	journeys, err := story.BuildAll(toRender, prof)
+	if err != nil {
+		return err
+	}
+	storiesDir, err := ensureStoriesDir(outDir)
+	if err != nil {
+		return err
+	}
+	for _, j := range journeys {
+		outPath, err := writeJourneyFile(j, storiesDir)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), journeySteps(j))
+	}
+	if skippedPartial > 0 {
+		fmt.Printf("\n%d 个断头 journey 已跳过（-include-partial 渲染；见设计文档 §11 D1）\n", skippedPartial)
+	}
+	fmt.Printf("\n%d 个 journey 已渲染到 %s\n", len(journeys), storiesDir)
+	return nil
+}
+
+// ensureStoriesDir creates (if needed) and returns {outDir}/stories.
+// 0o700: story output embeds full conversation bodies, same sensitivity
+// as internal/report's details/ — must not loosen that.
+func ensureStoriesDir(outDir string) (string, error) {
+	storiesDir := filepath.Join(outDir, "stories")
+	if err := os.MkdirAll(storiesDir, 0o700); err != nil {
+		return "", err
+	}
+	return storiesDir, nil
+}
+
+// writeJourneyFile writes j's rendered Markdown into storiesDir and returns
+// the path written. 0o600: same sensitivity note as ensureStoriesDir.
+func writeJourneyFile(j *story.Journey, storiesDir string) (string, error) {
 	outPath := filepath.Join(storiesDir, "journey-"+j.ID+".md")
 	if err := os.WriteFile(outPath, []byte(story.RenderMarkdown(j)), 0o600); err != nil {
-		return err
+		return "", err
 	}
+	return outPath, nil
+}
+
+// journeySteps totals a Journey's steps across all its tasks.
+func journeySteps(j *story.Journey) int {
 	steps := 0
 	for _, t := range j.Tasks {
 		steps += len(t.Steps)
 	}
-	fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), steps)
-	return nil
+	return steps
 }

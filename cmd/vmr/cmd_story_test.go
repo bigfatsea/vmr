@@ -1,4 +1,4 @@
-// Ver 2026-07-29, by Sonnet 5
+// Ver 2026-07-29 16:15, by Sonnet 5
 
 package main
 
@@ -121,6 +121,54 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "调研一下 A 股新股打新收益") {
 		t.Errorf("rendered journey missing root instruction:\n%s", content)
+	}
+}
+
+// TestCmdStory_RenderAll covers -render-all: two independent candidate
+// lineages must both be rendered in one pass, with no -journey id needed
+// (design-doc review follow-up: picking an id by hand for every journey was
+// the friction this flag removes).
+func TestCmdStory_RenderAll(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	uA := storyMsg("user", "调研一下 A 股新股打新收益")
+	rA1 := storyRec(at(0), []any{sys, uA}, storySSE("开工"))
+	rA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("完成"))
+
+	uB := storyMsg("user", "帮我写个 release note")
+	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
+	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
+
+	path := writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-render-all", path}); err != nil {
+			t.Fatalf("cmdStory -render-all: %v", err)
+		}
+	})
+	if !strings.Contains(out, "2 个 journey 已渲染到") {
+		t.Errorf("summary line missing or wrong count:\n%s", out)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	if err != nil {
+		t.Fatalf("reports/stories not created: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want 2 story files, got %d: %v", len(entries), entries)
+	}
+	var all string
+	for _, e := range entries {
+		content, err := os.ReadFile(filepath.Join(outDir, "stories", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		all += string(content)
+	}
+	if !strings.Contains(all, "调研一下 A 股新股打新收益") || !strings.Contains(all, "帮我写个 release note") {
+		t.Errorf("both journeys' root instructions should appear across the two files:\n%s", all)
 	}
 }
 

@@ -324,3 +324,60 @@ func TestIsPartialHead_TrueForMultiKeyRootEarlyInFirstFile(t *testing.T) {
 		t.Error("root should not be flagged partial when its file is not firstPath")
 	}
 }
+
+// TestBuildAll_MatchesIndividualBuild locks in that batching (BuildAll)
+// produces byte-identical output to calling Build once per lineage — the
+// whole point of BuildAll is an I/O optimization (one shared FetchRecords
+// call across every lineage instead of one per lineage), it must not change
+// what gets rendered. The two lineages live in separate source files so
+// this actually exercises FetchRecords' cross-file grouping, not just
+// cross-lineage-in-one-file.
+func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+
+	uA := msg("user", "lineage A opening")
+	rA1 := mkRec(at(0), "", []any{sys, uA}, sseText("a1"))
+	rA2 := mkRec(at(1), "", []any{sys, uA, msg("assistant", "reply A")}, sseText("a2"))
+
+	uB := msg("user", "lineage B opening")
+	rB1 := mkRec(at(10), "", []any{sys, uB}, sseText("b1"))
+	rB2 := mkRec(at(11), "", []any{sys, uB, msg("assistant", "reply B")}, sseText("b2"))
+
+	pathA := writeJSONL(t, []audit.Record{rA1, rA2})
+	pathB := writeJSONL(t, []audit.Record{rB1, rB2})
+
+	g, err := ctxgraph.Scan([]string{pathA, pathB})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(g.Lineages) != 2 {
+		t.Fatalf("got %d lineages, want 2", len(g.Lineages))
+	}
+
+	got, err := BuildAll(g.Lineages, profile.Generic)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("BuildAll returned %d journeys, want 2", len(got))
+	}
+	for i, l := range g.Lineages {
+		want, err := Build(l, profile.Generic)
+		if err != nil {
+			t.Fatalf("Build[%d]: %v", i, err)
+		}
+		if gotMD, wantMD := RenderMarkdown(got[i]), RenderMarkdown(want); gotMD != wantMD {
+			t.Errorf("BuildAll[%d] rendered differently than Build:\n=== BuildAll ===\n%s\n=== Build ===\n%s", i, gotMD, wantMD)
+		}
+	}
+}
+
+// TestBuildAll_EmptyLineageErrors covers BuildAll's defensive guard: same
+// contract as Build itself (errEmptyLineage), just checked per-lineage
+// inside the batch instead of once up front.
+func TestBuildAll_EmptyLineageErrors(t *testing.T) {
+	if _, err := BuildAll([]*ctxgraph.Lineage{{}}, profile.Generic); err == nil {
+		t.Error("BuildAll with an empty lineage should return an error")
+	}
+}
