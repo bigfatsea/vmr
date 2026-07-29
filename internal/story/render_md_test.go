@@ -1,4 +1,4 @@
-// Ver 2026-07-28 23:35, by Sonnet 5
+// Ver 2026-07-29 18:15, by Sonnet 5
 
 package story
 
@@ -40,6 +40,63 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 		"Step 2 ·",
 		"web_search",
 		"finish: `stop`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
+		}
+	}
+}
+
+// TestRenderMarkdown_LLMResponseSection locks in the Messages/LLM Response
+// split (design-doc review follow-up: a real reader found the old renderer
+// collapsed a tool-calling step into a bare "🔧 调用工具: read, read" — no
+// arguments, no ids, no reasoning, and even that much only showed up one
+// step later once the reply became history). The response's reasoning and
+// each tool call's full id+arguments (pretty-printed, "json"-tagged) must
+// show up in the step that actually produced them, under "**LLM
+// Response**" — separate from "**Messages**", which stays the delta of
+// what's newly entering context.
+func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "read both files and compare")
+	resp := map[string]any{
+		"model": "agent",
+		"choices": []any{map[string]any{
+			"finish_reason": "tool_calls",
+			"message": map[string]any{
+				"role":              "assistant",
+				"content":           "",
+				"reasoning_content": "I should read both files first.",
+				"tool_calls": []any{
+					map[string]any{"id": "call_1", "function": map[string]any{"name": "read", "arguments": `{"path":"/a.md"}`}},
+					map[string]any{"id": "call_2", "function": map[string]any{"name": "read", "arguments": `{"path":"/b.md"}`}},
+				},
+			},
+		}},
+	}
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("ok"))
+	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "ack")}, resp)
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j)
+
+	for _, want := range []string{
+		"**Messages**",
+		"**LLM Response**",
+		"🤔 reasoning · ",
+		"I should read both files first.",
+		"finish: tool_calls (read, read)",
+		"🔧 **tool_call** `read` [id=call_1]",
+		"```json",
+		`"path": "/a.md"`,
+		"🔧 **tool_call** `read` [id=call_2]",
+		`"path": "/b.md"`,
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)

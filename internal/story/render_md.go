@@ -1,8 +1,9 @@
-// Ver 2026-07-29 11:30, by Sonnet 5
+// Ver 2026-07-29 18:00, by Sonnet 5
 
 package story
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -27,8 +28,8 @@ func RenderMarkdown(j *Journey) string {
 		len(j.Tasks), stepCount(j), j.From.Format("2006-01-02 15:04:05"), j.To.Format("15:04:05"))
 
 	if j.Break != nil {
-		w("> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（%s：%s，lcp=%d，覆盖率=%.0f%%）——两段之间的关系尚未确认，本轮（第一步）不做跨断点缝合，只如实标出断点。\n\n",
-			j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind), j.Break.Edit.LCP, j.Break.Edit.Coverage*100)
+		w("> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（%s：%s；%s）——两段之间的关系尚未确认，本轮（第一步）不做跨断点缝合，只如实标出断点。\n\n",
+			j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind), editStatsHint(j.Break.Edit))
 	}
 
 	for ti, task := range j.Tasks {
@@ -59,6 +60,19 @@ func breakReasonHint(k ctxgraph.EditKind) string {
 	}
 }
 
+// editStatsHint renders an Edit's LCP/Coverage as plain language instead of
+// the "lcp=N, cov=P%" abbreviations a reader has no way to decode from the
+// document alone (design-doc review follow-up: a real reader asked "这里的
+// LCP是什么？cov又是谁"). LCP: how many messages at the START of this turn
+// are byte-identical to the previous turn, in order — everything after that
+// point is what actually changed. Coverage: what fraction of THIS turn's
+// messages already existed SOMEWHERE in the previous turn (content-only,
+// not position) — the number Contract/Fork's "did this really keep going,
+// or is it a new conversation" judgment call is based on.
+func editStatsHint(e ctxgraph.Edit) string {
+	return fmt.Sprintf("最长相同前缀 %d 条消息，内容重合率 %.0f%%", e.LCP, e.Coverage*100)
+}
+
 func renderStep(w func(string, ...any), s *Step) {
 	m := s.Manifest
 	w("### Step %d · %s · %s", s.Seq, m.TS.Format("15:04:05"), fmtutil.FmtSeconds(msDuration(m.DurMS), 1))
@@ -75,27 +89,80 @@ func renderStep(w func(string, ...any), s *Step) {
 	w(" · %s\n\n", m.Endpoint)
 
 	if s.Edge != nil {
-		w("> 编辑: %s (lcp=%d, cov=%.0f%%)\n\n", s.Edge.Kind.String(), s.Edge.LCP, s.Edge.Coverage*100)
+		w("> 编辑: %s（%s）\n\n", s.Edge.Kind.String(), editStatsHint(*s.Edge))
 	}
 
-	for _, ev := range s.NewEvents {
-		renderEvent(w, ev)
+	if len(s.NewEvents) > 0 {
+		w("**Messages**\n\n")
+		for _, ev := range s.NewEvents {
+			renderEvent(w, ev)
+		}
 	}
 
+	renderLLMResponse(w, s)
+
+	if s.NoReply {
+		w("- ⏭️ **本轮 LLM 未实际回复**（NO_REPLY 或空内容）——下一轮可能是重试\n\n")
+	}
+}
+
+// renderLLMResponse shows what the model itself produced this turn — the
+// part the old renderer dropped almost entirely (design-doc review
+// follow-up: a real Journey's tool-calling step rendered as a bare "🔧 调用
+// 工具: read, read", no arguments, no ids, no reasoning; the full content
+// only surfaced later, folded into the NEXT step's Messages section once it
+// became history — one step later than where it actually happened, and
+// only as raw re-serialized text, not the response's own shape). Reasoning
+// and the tool-call block get their own <details>, same folded-by-default
+// convention renderEvent already uses for Messages; a plain-text reply is
+// previewed like a Message so it's still scannable at a glance.
+func renderLLMResponse(w func(string, ...any), s *Step) {
+	if s.Reasoning == "" && s.RespText == "" && len(s.ToolCalls) == 0 {
+		if s.Finish != "" {
+			w("- finish: `%s`\n\n", s.Finish)
+		}
+		return
+	}
+	w("**LLM Response**\n\n")
+
+	if s.Reasoning != "" {
+		w("<details><summary>🤔 reasoning · %d 字符</summary>\n\n%s</details>\n\n",
+			len([]rune(s.Reasoning)), codeFence(s.Reasoning))
+	}
+	if s.RespText != "" {
+		w("<details><summary>💬 回复 · %s</summary>\n\n%s</details>\n\n",
+			escapeHTML(preview(s.RespText)), codeFence(s.RespText))
+	}
 	if len(s.ToolCalls) > 0 {
 		names := make([]string, len(s.ToolCalls))
 		for i, tc := range s.ToolCalls {
 			names[i] = tc.Name
 		}
-		w("- 🔧 调用工具: %s\n", strings.Join(names, ", "))
+		var body strings.Builder
+		for _, tc := range s.ToolCalls {
+			fmt.Fprintf(&body, "🔧 **tool_call** `%s` [id=%s]\n%s\n", tc.Name, tc.ID, codeFenceLang(prettyJSON(tc.Args), "json"))
+		}
+		w("<details><summary>finish: %s (%s)</summary>\n\n%s</details>\n\n",
+			s.Finish, strings.Join(names, ", "), body.String())
+	} else if s.Finish != "" {
+		w("- finish: `%s`\n\n", s.Finish)
 	}
-	if s.NoReply {
-		w("- ⏭️ **本轮 LLM 未实际回复**（NO_REPLY 或空内容）——下一轮可能是重试\n")
+}
+
+// prettyJSON re-indents s if it's valid JSON (tool_calls' arguments arrive
+// as a compact, single-line JSON string), falling back to s verbatim when
+// it isn't — a mid-stream truncation can leave a tool call's arguments
+// incomplete, and this must never panic or drop content on that.
+func prettyJSON(s string) string {
+	var v any
+	if json.Unmarshal([]byte(s), &v) != nil {
+		return s
 	}
-	if s.Finish != "" {
-		w("- finish: `%s`\n", s.Finish)
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return s
 	}
-	w("\n")
+	return string(b)
 }
 
 func renderEvent(w func(string, ...any), ev *Event) {
@@ -122,8 +189,13 @@ func escapeHTML(s string) string {
 // moment real content contains one. Same rationale/implementation as
 // internal/report/render.go's codeFence (duplicated, not exported: it's a
 // tiny, stable, purely cosmetic helper — see that package's chatmsg_compat.go
-// for the general pattern of what does and doesn't get shared).
-func codeFence(s string) string {
+// for the general pattern of what does and doesn't get shared), plus an
+// optional lang tag (report's own codeFence has no caller that needs one).
+// codeFence itself is the plain "" case every caller but tool-call
+// arguments uses.
+func codeFence(s string) string { return codeFenceLang(s, "") }
+
+func codeFenceLang(s, lang string) string {
 	n := 3
 	run := 0
 	for _, r := range s {
@@ -140,7 +212,7 @@ func codeFence(s string) string {
 	if !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	return f + "\n" + s + f + "\n"
+	return f + lang + "\n" + s + f + "\n"
 }
 
 // msDuration converts a millisecond count (as stored in the audit record)

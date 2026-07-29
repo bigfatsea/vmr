@@ -1,4 +1,4 @@
-// Ver 2026-07-29 17:15, by Sonnet 5
+// Ver 2026-07-29 18:00, by Sonnet 5
 
 // Package story turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
@@ -69,6 +69,11 @@ type Step struct {
 	NoReply   bool
 	ToolCalls []chatmsg.ToolCall
 	RespText  string
+	// Reasoning is the response's thinking/reasoning-content block, when the
+	// provider reported one (chatmsg.StreamSummary.Reasoning) — "" when
+	// absent, not when-a-provider-doesn't-support-it vs. empty-this-turn are
+	// not distinguished, same convention RespText already uses.
+	Reasoning string
 }
 
 // Event is one message's first appearance anywhere in the Journey.
@@ -238,6 +243,7 @@ func buildFrom(l *ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]
 				step.Finish = s.Finish
 				step.RespText = strings.TrimSpace(s.Content)
 				step.ToolCalls = s.ToolCalls
+				step.Reasoning = strings.TrimSpace(s.Reasoning)
 			}
 		}
 		step.NoReply = prof.NoReply(step.Finish, step.RespText)
