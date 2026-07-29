@@ -1,4 +1,4 @@
-// Ver 2026-07-28 23:15, by Sonnet 5
+// Ver 2026-07-29 15:00, by Sonnet 5
 
 // Package story turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
@@ -17,6 +17,7 @@ package story
 import (
 	"crypto/md5"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -160,12 +161,62 @@ func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
 	return j, nil
 }
 
-// deriveID identifies a Journey by hashing its lineage's ROOT manifest as a
-// whole (see ctxgraph.Lineage.RootHash's doc comment for why not just the
-// opening message) — content-addressed, stable across runs regardless of
-// which other files were also loaded (design doc §11 D1).
+// idTimeLayout renders a manifest timestamp for use inside a Journey id:
+// no colons (filename-safe on every OS, including Windows) and a fixed
+// width, so lexical sort of ids/filenames matches chronological order.
+// Always UTC — a local-timezone id would depend on which machine/timezone
+// ran the tool, breaking the "stable across independent runs" property
+// deriveID otherwise guarantees.
+const idTimeLayout = "20060102T150405"
+
+// idCodeLen is how many hex characters of RootHash back a Journey id's
+// trailing disambiguator — see deriveID. 8 hex chars (32 bits) is ample:
+// by the time client tag + start + end timestamp already agree, two
+// distinct lineages colliding on top of that is not a realistic scenario
+// this needs to defend hard against, unlike RootHash itself (still hashed
+// in full — see ctxgraph.Lineage.RootHash) which is the actual identity
+// check.
+const idCodeLen = 8
+
+// deriveID identifies a Journey as "j-<client>-<start>-<end>-<code>":
+// client is the root manifest's (sanitized) ClientKeyTag, start/end are the
+// lineage's first/last manifest timestamps, and code is a short prefix of
+// RootHash — enough to disambiguate two lineages that otherwise share a
+// client and exact start/end second, not the identity itself (design-doc
+// review follow-up: putting client+time first instead of a bare hash means
+// `ls reports/stories/` and a bare `-journey <id>` listing both sort
+// meaningfully — grouped by client, chronological within each — instead of
+// by content-hash noise).
+//
+// Still fully content-addressed and stable across independent runs
+// regardless of which other files were also loaded (design doc §11 D1):
+// every component here comes from the lineage's own manifests, never from
+// load order or which file it was read from.
 func deriveID(l *ctxgraph.Lineage) string {
-	return "j-" + l.RootHash().String()[:12]
+	root, last := l.Manifests[0], l.Manifests[len(l.Manifests)-1]
+	client := sanitizeIDComponent(root.ClientKeyTag)
+	start := root.TS.UTC().Format(idTimeLayout)
+	end := last.TS.UTC().Format(idTimeLayout)
+	code := l.RootHash().String()[:idCodeLen]
+	return "j-" + client + "-" + start + "-" + end + "-" + code
+}
+
+// idUnsafeRe matches anything not safe to put in a filename/CLI-argument
+// component unescaped.
+var idUnsafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// sanitizeIDComponent lowercases s and collapses every run of
+// filename-unsafe characters into a single "-", trimming any that land at
+// the edges. "" (auth disabled, no key matched) becomes "nokey" rather than
+// an empty id segment, which would otherwise collapse two adjacent "-"
+// separators into one and make the id ambiguous to split back apart.
+func sanitizeIDComponent(s string) string {
+	s = idUnsafeRe.ReplaceAllString(strings.ToLower(s), "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "nokey"
+	}
+	return s
 }
 
 // eventHashAt returns idx's content hash for event-stream de-duplication

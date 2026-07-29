@@ -1,4 +1,4 @@
-// Ver 2026-07-28 22:30, by Sonnet 5
+// Ver 2026-07-29 15:00, by Sonnet 5
 
 package ctxgraph
 
@@ -46,7 +46,10 @@ type BreakInfo struct {
 // RootHash identifies this lineage by hashing its ENTIRE first manifest
 // (system hash + every message key, in order) — content-addressed, so the
 // same lineage gets the same id across runs regardless of which other
-// files were also loaded (design doc §11 D1).
+// files were also loaded (design doc §11 D1). internal/story's Journey id
+// leads with client tag + start/end timestamps for sortability and only
+// uses a short prefix of this hash as a trailing disambiguator — RootHash
+// itself stays the full-strength identity check.
 //
 // Deliberately not just Keys[0] (the opening message alone): a Contract
 // edit very often preserves the exact opening user instruction verbatim

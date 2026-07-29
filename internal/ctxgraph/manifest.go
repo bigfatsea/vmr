@@ -1,4 +1,4 @@
-// Ver 2026-07-28 22:30, by Sonnet 5
+// Ver 2026-07-29 15:00, by Sonnet 5
 
 package ctxgraph
 
@@ -30,6 +30,12 @@ type Manifest struct {
 	TTFTMS   int64
 	Usage    chatmsg.Usage
 	UsageOK  bool
+
+	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim — "" when
+	// auth was disabled or no key matched. internal/story's Journey id
+	// embeds the root manifest's tag so a directory listing groups (and
+	// sorts within) one client at a time.
+	ClientKeyTag string
 
 	// TraceID is the Traceparent header's trace-id segment, when the
 	// client sent one — a trace-id change between consecutive manifests is
@@ -80,7 +86,8 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		Path: path, Line: line, TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
 		Stream: rec.Stream, DurMS: rec.DurMS, TTFTMS: rec.TTFTMS,
-		Endpoint: lastEndpoint(rec),
+		Endpoint:     lastEndpoint(rec),
+		ClientKeyTag: rec.ClientKeyTag,
 	}
 	if rec.Client.Response != nil {
 		m.Usage, m.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
