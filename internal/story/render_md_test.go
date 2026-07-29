@@ -1,0 +1,156 @@
+// Ver 2026-07-28 23:35, by Sonnet 5
+
+package story
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
+	"vmr/internal/story/profile"
+)
+
+func TestRenderMarkdown_BasicStructure(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "调研一下 A 股新股打新收益")
+	a1 := map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+		map[string]any{"id": "c1", "function": map[string]any{"name": "web_search", "arguments": "{}"}},
+	}}
+	t1 := map[string]any{"role": "tool", "tool_call_id": "c1", "content": "search results here"}
+
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("开工"))
+	r2 := mkRec(at(1), "", []any{sys, u1, a1, t1}, sseText("完成"))
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j)
+
+	for _, want := range []string{
+		"# Journey j-",
+		"调研一下 A 股新股打新收益",
+		"t01 ·",
+		"Step 1 ·",
+		"Step 2 ·",
+		"web_search",
+		"finish: `stop`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
+		}
+	}
+}
+
+// TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence locks in a fix: a
+// fixed ``` fence around event content breaks the moment the content itself
+// contains a triple-backtick (an agent quoting code, a tool result
+// containing a Markdown snippet) — the embedded backticks close the fence
+// early and corrupt everything rendered after it. codeFence's fence must be
+// longer than any backtick run actually present in the content.
+func TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	codeBlock := "here's the file:\n```python\nprint('hi')\n```\ndone"
+	u1 := msg("user", codeBlock)
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("ok"))
+	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "reply")}, sseText("ok2"))
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j)
+	if !strings.Contains(md, "````\n") {
+		t.Errorf("expected a 4-backtick fence to safely wrap content containing a 3-backtick run:\n%s", md)
+	}
+	if !strings.Contains(md, codeBlock) {
+		t.Errorf("embedded code block content should survive verbatim inside the wider fence:\n%s", md)
+	}
+}
+
+func TestRenderMarkdown_BreakWarning(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 16, 15, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "深入调研内存涨价")
+	msgs := []any{sys, u1}
+	var recs []audit.Record
+	for i := 0; i < 8; i++ {
+		recs = append(recs, mkRec(at(i), "", append([]any{}, msgs...), sseText("ok")))
+		msgs = append(msgs, msg("assistant", "step"))
+	}
+	// Contract: history collapses to just [sys2, u1] — same opening
+	// instruction, drastically shorter.
+	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1}, sseText("continuing")))
+
+	path := writeJSONL(t, recs)
+	g, err := ctxgraph.Scan([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Lineages) != 2 {
+		t.Fatalf("got %d lineages, want 2", len(g.Lineages))
+	}
+	second := g.Lineages[1]
+	if second.BrokeFrom == nil {
+		t.Fatal("second lineage should have BrokeFrom set")
+	}
+	j, err := Build(second, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j)
+	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "上下文被大幅收缩") {
+		t.Errorf("rendered Markdown missing break warning:\n%s", md)
+	}
+}
+
+func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 16, 15, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "shared opening instruction")
+	// Lineage 1: grows via appends (3 manifests, each with new content).
+	msgs := []any{sys, u1}
+	var recs []audit.Record
+	for i := 0; i < 3; i++ {
+		recs = append(recs, mkRec(at(i), "", append([]any{}, msgs...), sseText("ok")))
+		msgs = append(msgs, msg("assistant", "step"+string(rune('a'+i))))
+	}
+	// Lineage 2: same anchor (u1 survives), but drastically different content
+	// after it — low coverage against lineage 1's last manifest → Fork.
+	recs = append(recs, mkRec(at(30), "",
+		[]any{msg("system", "sys"), u1,
+			msg("user", "brand new sub-task"), msg("assistant", "ack"), msg("user", "yet another")},
+		sseText("branching off")))
+
+	path := writeJSONL(t, recs)
+	g, err := ctxgraph.Scan([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Lineages) != 2 {
+		t.Fatalf("got %d lineages, want 2", len(g.Lineages))
+	}
+	second := g.Lineages[1]
+	if second.BrokeFrom == nil {
+		t.Fatal("second lineage should have BrokeFrom set")
+	}
+	if second.BrokeFrom.Edit.Kind != ctxgraph.Fork {
+		t.Fatalf("break edit kind = %v, want Fork", second.BrokeFrom.Edit.Kind)
+	}
+	j, err := Build(second, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j)
+	if !strings.Contains(md, "内容与前段几乎不重叠") {
+		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
+	}
+}

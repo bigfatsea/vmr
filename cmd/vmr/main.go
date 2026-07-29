@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-29 11:35, by Sonnet 5
 
 // vmr — Virtual Model Router. Single binary, config driven.
 //
@@ -7,6 +7,7 @@
 //	vmr status   -c config.yaml   show identity + endpoint health of a running instance
 //	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
 //	vmr report   <audit.jsonl>    aggregate audit logs into usage statistics (default -o: ./reports)
+//	vmr story    <audit.jsonl>    render one agent task's full execution history as a narrative (default -o: ./reports)
 //	vmr dirs     {log|cache}      print the config's effective log_dir / image_cache_dir (vmr.sh uses this)
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
@@ -39,6 +40,8 @@ func main() {
 		err = cmdStatus(os.Args[2:])
 	case "report":
 		err = cmdReport(os.Args[2:])
+	case "story":
+		err = cmdStory(os.Args[2:])
 	case "dirs":
 		err = cmdDirs(os.Args[2:])
 	case "replay":
@@ -61,6 +64,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <audit.jsonl|glob>...   (default -o: ./reports; auto-loads ./pricing.yaml if -pricing omitted)
+       vmr story [-journey id] [-include-partial] [-show-ungrouped] [-o dir] <audit.jsonl|glob>...   (default -o: ./reports; no -journey lists candidates)
        vmr dirs [-c config.yaml] {log|cache}
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>

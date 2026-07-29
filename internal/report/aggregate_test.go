@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-07-29 11:00, by Sonnet 5
 
 package report
 
@@ -778,6 +778,297 @@ func TestBuildIsDeterministic(t *testing.T) {
 		}
 		if string(got) != string(want) {
 			t.Fatalf("run %d produced different JSON than run 0 — Build() is not deterministic.\nrun 0: %s\nrun %d: %s", i, want, i, got)
+		}
+	}
+}
+
+// heartbeatDreamDiaryTiedRecords builds one heartbeat and one dream_diary
+// record, each with zero cached tokens — an EXACT (not just rounded) tie on
+// cache_efficiency (0/(0+fresh) = 0 for both) — but different TokensInFresh,
+// so there is an unambiguous "worst offender" (heartbeat, with more fresh
+// tokens) for buildFindings' "定时任务冗余" finding to pick.
+func heartbeatDreamDiaryTiedRecords() []map[string]any {
+	mk := func(ts, userMsg string, fresh int) map[string]any {
+		return map[string]any{
+			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
+					map[string]any{"role": "user", "content": userMsg},
+				}}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": fresh, "completion_tokens": 5,
+						"prompt_tokens_details": map[string]any{"cached_tokens": 0}},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	return []map[string]any{
+		mk(t0.Format(time.RFC3339), "[OpenClaw heartbeat poll]", 1000),
+		mk(t0.Add(time.Minute).Format(time.RFC3339), "Write a dream diary entry", 100),
+	}
+}
+
+// TestBuildFindingsIsDeterministic locks in a fix for a bug distinct from
+// (but the same class as) TestBuildIsDeterministic above: buildFindings
+// runs BEFORE Build's "---- sort all slices ----" pass, so its "pick the
+// worst one, first-match-then-break" loops over rep.Tools/rep.ByModel/
+// rep.Workloads read map-iteration order, not the deterministic sorted
+// order those same slices end up in by the time Build returns. Confirmed
+// via a real corpus (2026-07-16's audit log): the "定时任务冗余" finding
+// alternated between "heartbeat" and "dream_diary" across repeated `vmr
+// report` runs on byte-identical input, even though rep.Workloads itself
+// (the JSON array) was proven identical every time — only buildFindings'
+// PICK from it varied. This test reproduces that with a minimal fixture
+// instead of depending on real log data being present.
+func TestBuildFindingsIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, heartbeatDreamDiaryTiedRecords())
+
+	const runs = 8
+	for i := 0; i < runs; i++ {
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		var found *Finding
+		for j := range rep.Efficiency {
+			if rep.Efficiency[j].Finding == "定时任务冗余" {
+				found = &rep.Efficiency[j]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("run %d: no 定时任务冗余 finding (both heartbeat and dream_diary should qualify: cache_efficiency=0)", i)
+		}
+		if found.Implicated != "heartbeat" {
+			t.Fatalf("run %d: implicated = %q, want %q (heartbeat has more fresh tokens: 1000 vs 100 — the higher-fresh class must always win, not whichever the map happened to yield first)", i, found.Implicated, "heartbeat")
+		}
+	}
+}
+
+// toolShapeTieToolNames are two declared-tool sets used by
+// TestBuildFindingsWorstToolTieIsDeterministic: five tools each, one name
+// per set at each position, every name exactly 6 bytes long so their
+// serialized "tools" arrays are byte-for-byte the same length. Only the
+// ToolsSig hash (computed from these names) differs between the two shapes.
+var (
+	toolShapeTieNamesA = []string{"alpha1", "alpha2", "alpha3", "alpha4", "alpha5"}
+	toolShapeTieNamesB = []string{"beta01", "beta02", "beta03", "beta04", "beta05"}
+)
+
+// toolShapeTieRecords returns two single-request records whose tool-waste
+// finding ties exactly: each declares 5 same-size tools and calls none of
+// them, so DeclareUtilization=0 and SchemaWasteBytes == SchemaBytesShipped
+// == DeclaredBytes*1 for both shapes — identical by construction, with only
+// the shape identity (ToolsSig) differing.
+func toolShapeTieRecords() []map[string]any {
+	toolsFor := func(names []string) []any {
+		tools := make([]any, len(names))
+		for i, n := range names {
+			tools[i] = map[string]any{"name": n}
+		}
+		return tools
+	}
+	mk := func(ts time.Time, names []string) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "tools": toolsFor(names), "messages": []any{
+					map[string]any{"role": "user", "content": "hi " + names[0]},
+				}}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	return []map[string]any{
+		mk(t0, toolShapeTieNamesA),
+		mk(t0.Add(time.Minute), toolShapeTieNamesB),
+	}
+}
+
+// TestBuildFindingsWorstToolTieIsDeterministic covers the "工具 schema 浪费"
+// tie-break in buildFindings (metrics.go's worstTool loop), the first of the
+// three tie-break sites TestBuildFindingsIsDeterministic above left
+// unexercised (design-doc review §5.1: the fix's tie-break logic is
+// identical in shape across all four findings, but only 定时任务冗余 had a
+// regression test). toolShapeTieRecords ties SchemaWasteBytes exactly
+// between two shapes; only their Shape string (ToolsSig) differs, so a
+// deterministic pick must always prefer the alphabetically-smaller one —
+// computed here via the package's own toolsSig, not hardcoded, since the
+// hash is opaque from outside.
+func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, toolShapeTieRecords())
+
+	wantShape := toolsSig(toolShapeTieNamesA)
+	if other := toolsSig(toolShapeTieNamesB); other < wantShape {
+		wantShape = other
+	}
+	wantImplicated := wantShape + "/1 请求"
+
+	const runs = 8
+	for i := 0; i < runs; i++ {
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		var found *Finding
+		for j := range rep.Efficiency {
+			if rep.Efficiency[j].Finding == "工具 schema 浪费" {
+				found = &rep.Efficiency[j]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("run %d: no 工具 schema 浪费 finding (both shapes should qualify: 0%% utilization)", i)
+		}
+		if found.Implicated != wantImplicated {
+			t.Fatalf("run %d: implicated = %q, want %q (tied SchemaWasteBytes must always resolve to the alphabetically-smaller Shape, not whichever the map happened to yield first)", i, found.Implicated, wantImplicated)
+		}
+	}
+}
+
+// modelFreshTieRecords returns two records on distinct models, each with the
+// same fresh (uncached) input tokens — an exact tie on TokensInFresh for
+// buildFindings' domModel loop ("缓存未命中输入" finding's implicated-model
+// note), and together exactly half the global fresh total each, satisfying
+// the ">= fresh/2" threshold that decides whether a dominant model gets
+// named at all.
+func modelFreshTieRecords() []map[string]any {
+	mk := func(ts time.Time, model string) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": model, "protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": model, "messages": []any{
+					map[string]any{"role": "user", "content": "hi from " + model},
+				}}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": model,
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": 500, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai:p:" + model, "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	return []map[string]any{
+		mk(t0, "model-a"),
+		mk(t0.Add(time.Minute), "model-b"),
+	}
+}
+
+// TestBuildFindingsDomModelTieIsDeterministic covers the second untested
+// tie-break site: buildFindings' domModel loop for "缓存未命中输入". Both
+// models in modelFreshTieRecords have TokensInFresh=500 (tied) against a
+// global fresh total of 1000, so the tie-break (alphabetically-smaller
+// Model name) is the only thing deciding which model gets named.
+func TestBuildFindingsDomModelTieIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, modelFreshTieRecords())
+
+	const runs = 8
+	for i := 0; i < runs; i++ {
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		var found *Finding
+		for j := range rep.Efficiency {
+			if rep.Efficiency[j].Finding == "缓存未命中输入" {
+				found = &rep.Efficiency[j]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("run %d: no 缓存未命中输入 finding", i)
+		}
+		if !strings.Contains(found.Implicated, "model-a") || strings.Contains(found.Implicated, "model-b") {
+			t.Fatalf("run %d: implicated = %q, want it to name model-a (alphabetically smaller on an exact TokensInFresh tie), never model-b", i, found.Implicated)
+		}
+	}
+}
+
+// sessionGrowthTieRecords returns two 2-turn sessions whose ContextGrowth
+// ties exactly (100 -> 1000 input tokens, x10 growth, both well above the
+// >=5 finding threshold) but whose distinct opening messages give them
+// different anchors/session IDs — session A opens first (gets "s01"),
+// session B second ("s02"), so a deterministic pick must always prefer s01.
+func sessionGrowthTieRecords() []map[string]any {
+	mkTurn := func(ts time.Time, opening string, extra []any, promptTokens int) map[string]any {
+		msgs := append([]any{map[string]any{"role": "user", "content": opening}}, extra...)
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": promptTokens, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	var recs []map[string]any
+	recs = append(recs,
+		mkTurn(t0, "session growth fixture A", nil, 100),
+		mkTurn(t0.Add(time.Minute), "session growth fixture A", []any{
+			map[string]any{"role": "assistant", "content": "ack"},
+			map[string]any{"role": "user", "content": "continue A"},
+		}, 1000),
+	)
+	recs = append(recs,
+		mkTurn(t0.Add(2*time.Minute), "session growth fixture B", nil, 100),
+		mkTurn(t0.Add(3*time.Minute), "session growth fixture B", []any{
+			map[string]any{"role": "assistant", "content": "ack"},
+			map[string]any{"role": "user", "content": "continue B"},
+		}, 1000),
+	)
+	return recs
+}
+
+// TestBuildFindingsContextGrowthTieIsDeterministic covers the third and
+// last untested tie-break site: buildFindings' worst-session loop for
+// "上下文膨胀". Both sessions in sessionGrowthTieRecords tie exactly on
+// ContextGrowth (x10); session A must always win since "s01" < "s02".
+func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, sessionGrowthTieRecords())
+
+	const runs = 8
+	for i := 0; i < runs; i++ {
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		var found *Finding
+		for j := range rep.Efficiency {
+			if rep.Efficiency[j].Finding == "上下文膨胀" {
+				found = &rep.Efficiency[j]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("run %d: no 上下文膨胀 finding (both sessions should qualify: growth x10 >= 5)", i)
+		}
+		if !strings.HasPrefix(found.Implicated, "s01 ") {
+			t.Fatalf("run %d: implicated = %q, want it to start with \"s01 \" (tied ContextGrowth must always resolve to the smaller session ID)", i, found.Implicated)
 		}
 	}
 }

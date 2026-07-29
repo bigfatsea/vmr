@@ -450,15 +450,6 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	return r
 }
 
-// msgOffset is the index shift between chatMessages output and the raw
-// messages array: anthropic's top-level system is prepended as message #0.
-func msgOffset(body map[string]any) int {
-	if _, ok := body["system"]; ok {
-		return 1
-	}
-	return 0
-}
-
 // openClawEnvelopeRe matches OpenClaw's "Conversation info (untrusted
 // metadata)" / "Sender (untrusted metadata)" JSON blocks. OpenClaw glues
 // these routing headers onto the front of real inbound messages (not just

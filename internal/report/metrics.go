@@ -221,48 +221,100 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 // buildFindings assembles the §7 efficiency/waste table from the finished
 // buckets. One row per actionable finding, each naming the implicated entity
 // and a suggested action.
+//
+// buildFindings runs BEFORE Build's own "---- sort all slices ----" pass
+// (rep.Tools/rep.ByModel/rep.Workloads are still in whatever order their
+// source map happened to iterate in when this function reads them — see
+// aggregate.go's call site). Every "pick the worst one" search below must
+// therefore find its answer by explicit comparison over the WHOLE bucket,
+// with its own tie-break on the bucket's identity field — exactly the
+// non-determinism class TestBuildIsDeterministic's doc comment describes,
+// just one level removed (a *finding* picked from map-order data, not a
+// *row* rendered in map-order). "First match, then break" over an
+// as-yet-unsorted slice silently picks a different winner on every run
+// whenever two rows tie on the filter condition — caught by
+// TestBuildFindingsIsDeterministic comparing rep.Efficiency (not just
+// rep.Workloads/Tools/ByModel themselves, which the sort later in Build
+// does make deterministic) across repeated Build() calls.
 func buildFindings(rep *Report2) []Finding {
 	var out []Finding
 	add := func(finding, metric, value, implicated, action string) {
 		out = append(out, Finding{finding, metric, value, implicated, action})
 	}
 
-	// tool schema waste (top shape)
-	for _, t := range rep.Tools {
-		if t.DeclareUtilization < 0.20 && t.SchemaBytesShipped > 0 {
-			add("工具 schema 浪费", "schema_bytes_shipped",
-				fmtBytesGB(t.SchemaBytesShipped),
-				t.Shape+"/"+strconv.Itoa(t.Requests)+" 请求",
-				"裁剪未用工具；利用率 "+strconv.FormatFloat(float64(t.DeclareUtilization)*100, 'f', 1, 64)+"%")
-			break // one finding per report (the worst shape)
+	// tool schema waste: the worst (highest SchemaWasteBytes, tie-broken by
+	// Shape) among shapes under 20% declare-utilization — mirrors the
+	// criteria rep.Tools' own later sort uses, so "the worst shape" means
+	// the same thing here as it does in §7's own table.
+	var worstTool *ToolShapeRow
+	for i := range rep.Tools {
+		t := &rep.Tools[i]
+		if t.DeclareUtilization >= 0.20 || t.SchemaBytesShipped == 0 {
+			continue
 		}
+		if worstTool == nil || t.SchemaWasteBytes > worstTool.SchemaWasteBytes ||
+			(t.SchemaWasteBytes == worstTool.SchemaWasteBytes && t.Shape < worstTool.Shape) {
+			worstTool = t
+		}
+	}
+	if worstTool != nil {
+		add("工具 schema 浪费", "schema_bytes_shipped",
+			fmtBytesGB(worstTool.SchemaBytesShipped),
+			worstTool.Shape+"/"+strconv.Itoa(worstTool.Requests)+" 请求",
+			"裁剪未用工具；利用率 "+strconv.FormatFloat(float64(worstTool.DeclareUtilization)*100, 'f', 1, 64)+"%")
 	}
 
 	// cache miss input (global)
 	if rep.Overall.TokensKnown > 0 {
 		fresh := rep.Overall.TokensInFresh
 		share := float64(fresh) / float64(rep.Overall.TokensIn) * 100
-		// find the by-model split for the implicated note
+		// find the by-model split for the implicated note: the model with
+		// the MOST fresh tokens (tie-broken by name), used only if it
+		// actually accounts for at least half the global total — at most
+		// one model can exceed half by construction, so finding the max
+		// explicitly (instead of "first one seen that exceeds half")
+		// removes the same ambient-order dependency as the two findings
+		// above, even though a real tie here would need two models each
+		// at exactly 50%.
 		implicated := "全局"
-		for _, m := range rep.ByModel {
-			if m.TokensInFresh > 0 && m.TokensInFresh >= fresh/2 {
-				implicated = "全局，" + m.Model + " 占 " + fmtTokens(m.TokensInFresh)
-				break
+		var domModel *Row
+		for i := range rep.ByModel {
+			m := &rep.ByModel[i]
+			if domModel == nil || m.TokensInFresh > domModel.TokensInFresh ||
+				(m.TokensInFresh == domModel.TokensInFresh && m.Model < domModel.Model) {
+				domModel = m
 			}
+		}
+		if domModel != nil && domModel.TokensInFresh > 0 && domModel.TokensInFresh >= fresh/2 {
+			implicated = "全局，" + domModel.Model + " 占 " + fmtTokens(domModel.TokensInFresh)
 		}
 		add("缓存未命中输入", "cache_miss_tokens",
 			fmtTokens(fresh)+" ("+strconv.FormatFloat(share, 'f', 1, 64)+"%)",
 			implicated, "检查 prompt 前缀稳定性 / 开启 provider 缓存")
 	}
 
-	// scheduled-task redundancy (heartbeat/dream_diary low cache-eff)
-	for _, w := range rep.Workloads {
-		if (w.Class == "heartbeat" || w.Class == "dream_diary") && w.TokensKnown > 0 && w.CacheEfficiency < 0.30 {
-			add("定时任务冗余", "fresh + cache_eff",
-				fmtTokens(w.TokensInFresh)+" fresh, 缓存效率 "+pctStr(w.CacheEfficiency),
-				w.Class, "拉长间隔 / 换便宜模型 / 缓存前缀")
-			break
+	// scheduled-task redundancy (heartbeat/dream_diary low cache-eff): the
+	// worst offender (highest TokensInFresh, tie-broken by Class) among the
+	// two scheduled classes with cache_efficiency below 0.30 — this is the
+	// exact case that was empirically observed flipping between "heartbeat"
+	// and "dream_diary" from one otherwise-identical run to the next before
+	// this fix, since both classes routinely sit at the same rounded ~1%
+	// cache efficiency in real corpora.
+	var worstWL *WorkloadRow
+	for i := range rep.Workloads {
+		w := &rep.Workloads[i]
+		if (w.Class != "heartbeat" && w.Class != "dream_diary") || w.TokensKnown == 0 || w.CacheEfficiency >= 0.30 {
+			continue
 		}
+		if worstWL == nil || w.TokensInFresh > worstWL.TokensInFresh ||
+			(w.TokensInFresh == worstWL.TokensInFresh && w.Class < worstWL.Class) {
+			worstWL = w
+		}
+	}
+	if worstWL != nil {
+		add("定时任务冗余", "fresh + cache_eff",
+			fmtTokens(worstWL.TokensInFresh)+" fresh, 缓存效率 "+pctStr(worstWL.CacheEfficiency),
+			worstWL.Class, "拉长间隔 / 换便宜模型 / 缓存前缀")
 	}
 
 	// output truncation
@@ -289,11 +341,19 @@ func buildFindings(rep *Report2) []Finding {
 		}
 	}
 
-	// context growth (worst session)
+	// context growth (worst session) — tie-broken by ID for the same
+	// reason as the three findings above: on an exact ContextGrowth tie
+	// (plausible since it's rounded to 1 decimal for display), a bare ">"
+	// comparison keeps whichever session was encountered first in
+	// rep.Sessions' as-yet-unsorted order, which is not deterministic.
 	var worst *SessionRow
 	for i := range rep.Sessions {
 		s := &rep.Sessions[i]
-		if s.ContextGrowth > 0 && (worst == nil || s.ContextGrowth > worst.ContextGrowth) {
+		if s.ContextGrowth <= 0 {
+			continue
+		}
+		if worst == nil || s.ContextGrowth > worst.ContextGrowth ||
+			(s.ContextGrowth == worst.ContextGrowth && s.ID < worst.ID) {
 			worst = s
 		}
 	}
