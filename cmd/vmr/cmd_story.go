@@ -1,8 +1,9 @@
-// Ver 2026-07-29 16:00, by Sonnet 5
+// Ver 2026-07-29 22:30, by Sonnet 5
 
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -17,9 +18,14 @@ import (
 // cmdStory renders one agent task's full execution history as a
 // self-contained Markdown narrative — see
 // docs/Agent任务叙事报告_设计与价值论证_2026-07-28_opus-5.md for the design.
-// Step 1 scope: one ctxgraph.Lineage per Journey, no cross-break stitching
-// yet — a lineage that starts mid-conversation is rendered with an
-// explicit warning, not silently treated as a fresh start.
+// Step 2 (design doc Appendix C.4 T2.2): a candidate is no longer always
+// exactly one ctxgraph.Lineage — ctxgraph.StitchGraph resolves Contract/
+// Fork breaks back to their best predecessor where the evidence supports
+// it, and ctxgraph.ChainFrom walks the resulting chain into the ordered
+// list of lineages one Journey actually renders. A lineage that still
+// starts mid-conversation after best-effort stitching (no confident
+// predecessor found) is rendered with an explicit "context was rebuilt
+// here, unresolved" notice rather than silently treated as a fresh start.
 //
 // With no input files given at all, defaults to <-c config.yaml's
 // log_dir>/vmr-audit-* (see resolveInputPaths in auditpaths.go), same
@@ -51,6 +57,9 @@ func cmdStory(args []string) error {
 	}
 	firstPath := paths[0]
 
+	ctxgraph.StitchGraph(g)
+	byIdx := ctxgraph.LineageIndex(g)
+
 	// Step 1 ships exactly one profile (design doc §11 D5): OpenClaw-aware
 	// but harmless on any other agent's input, since none of its patterns
 	// match generic chat text.
@@ -61,7 +70,8 @@ func cmdStory(args []string) error {
 	if *journeyArg != "" {
 		var target *ctxgraph.Lineage
 		for _, l := range cands {
-			if strings.HasPrefix(story.ID(l), *journeyArg) {
+			chain := ctxgraph.ChainFrom(l, byIdx)
+			if strings.HasPrefix(story.ID(chain), *journeyArg) {
 				target = l
 				break
 			}
@@ -69,42 +79,44 @@ func cmdStory(args []string) error {
 		if target == nil {
 			return fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", *journeyArg)
 		}
-		return renderJourney(target, firstPath, prof, *includePartial, *outDir)
+		return renderJourney(target, byIdx, firstPath, prof, *includePartial, *outDir)
 	}
 	if *renderAll {
-		return renderAllJourneys(cands, firstPath, prof, *includePartial, *outDir)
+		return renderAllJourneys(cands, byIdx, firstPath, prof, *includePartial, *outDir)
 	}
-	return listJourneys(cands, g, firstPath, prof, *includePartial)
+	return listJourneys(cands, byIdx, g, firstPath, prof, *includePartial)
 }
 
-func listJourneys(cands []*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool) error {
+func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool) error {
 	excluded := len(g.Lineages) - len(cands)
-	fmt.Printf("%d candidate journey(s) (%d total lineage(s), %d single-request/scheduled excluded):\n\n", len(cands), len(g.Lineages), excluded)
+	fmt.Printf("%d candidate journey(s) (%d total lineage(s), %d single-request/scheduled excluded or absorbed into a stitched chain):\n\n", len(cands), len(g.Lineages), excluded)
 
 	type row struct {
 		l       *ctxgraph.Lineage
+		chain   []*ctxgraph.Lineage
 		partial bool
 	}
 	var toShow []row
 	skippedPartial := 0
 	for _, l := range cands {
-		partial := story.IsPartialHead(l, firstPath)
+		chain := ctxgraph.ChainFrom(l, byIdx)
+		partial := story.IsPartialHead(chain, firstPath)
 		if partial && !includePartial {
 			skippedPartial++
 			continue
 		}
-		toShow = append(toShow, row{l, partial})
+		toShow = append(toShow, row{l, chain, partial})
 	}
 
-	// One batched fetch across all candidates instead of one per lineage —
+	// One batched fetch across all candidates instead of one per chain —
 	// story.PreviewTitles groups the underlying reads by source file, so
 	// this scans each file at most once no matter how many candidate
-	// lineages are rooted in it (design-doc review §1.2).
-	lineages := make([]*ctxgraph.Lineage, len(toShow))
+	// chains are rooted in it (design-doc review §1.2).
+	chains := make([][]*ctxgraph.Lineage, len(toShow))
 	for i, r := range toShow {
-		lineages[i] = r.l
+		chains[i] = r.chain
 	}
-	titles, err := story.PreviewTitles(lineages, prof)
+	titles, err := story.PreviewTitles(chains, prof)
 	if err != nil {
 		return err
 	}
@@ -114,9 +126,17 @@ func listJourneys(cands []*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string
 		if r.partial {
 			mark = " [断头]"
 		}
-		first, last := r.l.Manifests[0], r.l.Manifests[len(r.l.Manifests)-1]
+		if len(r.chain) > 1 {
+			mark += fmt.Sprintf(" [缝合×%d]", len(r.chain))
+		}
+		head, tail := r.chain[0], r.chain[len(r.chain)-1]
+		first, last := head.Manifests[0], tail.Manifests[len(tail.Manifests)-1]
+		steps := 0
+		for _, cl := range r.chain {
+			steps += len(cl.Manifests)
+		}
 		fmt.Printf("  %s%-6s %3d 轮  %s → %s  %s\n",
-			story.ID(r.l), mark, len(r.l.Manifests),
+			story.ID(r.chain), mark, steps,
 			first.TS.Format("01-02 15:04"), last.TS.Format("15:04"), titles[r.l])
 	}
 	if skippedPartial > 0 {
@@ -151,14 +171,17 @@ func printUngrouped(ms []*ctxgraph.Manifest) {
 	}
 }
 
-func renderJourney(target *ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
-	if story.IsPartialHead(target, firstPath) && !includePartial {
-		return fmt.Errorf("journey %s looks head-truncated (design doc §11 D1) — pass -include-partial to render it anyway", story.ID(target))
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+	chain := ctxgraph.ChainFrom(target, byIdx)
+	partial := story.IsPartialHead(chain, firstPath)
+	if partial && !includePartial {
+		return fmt.Errorf("journey %s looks head-truncated (design doc §11 D1) — pass -include-partial to render it anyway", story.ID(chain))
 	}
-	j, err := story.Build(target, prof)
+	j, err := story.BuildChain(chain, prof)
 	if err != nil {
 		return err
 	}
+	j.Partial = partial
 	storiesDir, err := ensureStoriesDir(outDir)
 	if err != nil {
 		return err
@@ -176,15 +199,19 @@ func renderJourney(target *ctxgraph.Lineage, firstPath string, prof profile.Prof
 // shares a single FetchRecords call across every candidate (same fix
 // PreviewTitles applied to the listing path), so this costs about the same
 // I/O as just listing, not N times more.
-func renderAllJourneys(cands []*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
-	var toRender []*ctxgraph.Lineage
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+	var toRender [][]*ctxgraph.Lineage
+	var toRenderPartial []bool
 	skippedPartial := 0
 	for _, l := range cands {
-		if story.IsPartialHead(l, firstPath) && !includePartial {
+		chain := ctxgraph.ChainFrom(l, byIdx)
+		partial := story.IsPartialHead(chain, firstPath)
+		if partial && !includePartial {
 			skippedPartial++
 			continue
 		}
-		toRender = append(toRender, l)
+		toRender = append(toRender, chain)
+		toRenderPartial = append(toRenderPartial, partial)
 	}
 	if len(toRender) == 0 {
 		fmt.Println("no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
@@ -199,7 +226,8 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, firstPath string, prof profile
 	if err != nil {
 		return err
 	}
-	for _, j := range journeys {
+	for i, j := range journeys {
+		j.Partial = toRenderPartial[i]
 		outPath, err := writeJourneyFile(j, storiesDir)
 		if err != nil {
 			return err
@@ -224,11 +252,34 @@ func ensureStoriesDir(outDir string) (string, error) {
 	return storiesDir, nil
 }
 
-// writeJourneyFile writes j's rendered Markdown into storiesDir and returns
-// the path written. 0o600: same sensitivity note as ensureStoriesDir.
+// writeJourneyFile writes j's rendered Markdown plus its behavior-profile
+// JSON (design doc §6.5: journey-<id>.json, consumed directly by Step 4's
+// 4d comparison module) into storiesDir, and returns the Markdown path
+// written. 0o600: same sensitivity note as ensureStoriesDir — the JSON
+// carries token counts and tool-call args derived straight from the
+// conversation body.
+//
+// A partial (head-truncated, design doc §11 D1) Journey gets a "-partial"
+// filename suffix — its ID is already unstable (it depends on whatever
+// happened to be the earliest loaded manifest), so the suffix is cheap,
+// visible self-disclosure that this file's beginning isn't the real
+// beginning, without requiring the reader to open it and find the warning
+// line first.
 func writeJourneyFile(j *story.Journey, storiesDir string) (string, error) {
-	outPath := filepath.Join(storiesDir, "journey-"+j.ID+".md")
+	base := "journey-" + j.ID
+	if j.Partial {
+		base += "-partial"
+	}
+	outPath := filepath.Join(storiesDir, base+".md")
 	if err := os.WriteFile(outPath, []byte(story.RenderMarkdown(j)), 0o600); err != nil {
+		return "", err
+	}
+	jsonPath := filepath.Join(storiesDir, base+".json")
+	data, err := json.MarshalIndent(story.Summarize(j), "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(jsonPath, data, 0o600); err != nil {
 		return "", err
 	}
 	return outPath, nil

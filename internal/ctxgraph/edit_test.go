@@ -49,6 +49,39 @@ func TestClassify_ReplaceTail(t *testing.T) {
 	}
 }
 
+// TestClassify_Splice covers T2.1's split of the splice_or_tail bucket:
+// common prefix holds, new content follows, and prev's own last 3 messages
+// reappear verbatim at the end of cur — evidence the tail was spliced
+// around (F11's S2), not discarded.
+func TestClassify_Splice(t *testing.T) {
+	prev := mkHashes(20, "s")
+	cur := append(append(append([]Hash{}, prev[:10]...), mkHashes(3, "new")...), prev[17:]...)
+	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
+	if e.Kind != Splice {
+		t.Errorf("got %v, want Splice (lcp=%d cov=%.2f)", e.Kind, e.LCP, e.Coverage)
+	}
+}
+
+// TestClassify_SpliceRequiresMinTailMatch: a single coincidentally-matching
+// trailing message must NOT be enough to call it Splice — spliceMinTailMatch
+// (2) exists specifically to reject that kind of noise.
+func TestClassify_SpliceRequiresMinTailMatch(t *testing.T) {
+	prev := mkHashes(20, "s")
+	cur := append(append(append([]Hash{}, prev[:10]...), mkHashes(4, "new")...), prev[19:]...) // only the very last message reappears
+	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
+	if e.Kind != ReplaceTail {
+		t.Errorf("got %v, want ReplaceTail (a single matching tail message is below spliceMinTailMatch)", e.Kind)
+	}
+}
+
+// TestClassify_SpliceDoesNotSplitLineage locks in T2.1's core promise:
+// Splice, exactly like ReplaceTail, must never split a lineage.
+func TestClassify_SpliceDoesNotSplitLineage(t *testing.T) {
+	if Splice.Splits() {
+		t.Error("Splice must not split a lineage — it's a labeling refinement of ReplaceTail, not a new splitting condition")
+	}
+}
+
 func TestClassify_Contract(t *testing.T) {
 	// Real corpus case (design doc F6/A.3): 79 messages -> 4 messages.
 	prev := mkHashes(79, "s")
@@ -163,7 +196,7 @@ func TestEditKind_Splits(t *testing.T) {
 }
 
 func TestEditKind_String(t *testing.T) {
-	cases := map[EditKind]string{Append: "append", ReplaceTail: "replace_tail", Contract: "contract", Fork: "fork"}
+	cases := map[EditKind]string{Append: "append", ReplaceTail: "replace_tail", Splice: "splice", Contract: "contract", Fork: "fork"}
 	for k, want := range cases {
 		if got := k.String(); got != want {
 			t.Errorf("%v.String() = %q, want %q", k, got, want)

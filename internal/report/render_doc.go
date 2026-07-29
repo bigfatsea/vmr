@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // The report document skeleton: the section running order, the summary and
 // highlights that open it, the closing pointers, and the one table
@@ -86,6 +86,7 @@ func Markdown(rep *Report2) string {
 	renderSessions(w, rep)
 	renderStickyEffect(w, rep)
 	renderEndpointValue(w, rep)
+	renderCompactions(w, rep)
 	renderEfficiency(w, rep, o)
 	renderRequestIndexLink(w, rep)
 	renderAppendix(w, rep)

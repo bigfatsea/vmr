@@ -1,4 +1,4 @@
-// Ver 2026-07-29 16:15, by Sonnet 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 package main
 
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/story"
 )
 
 func writeStoryJSONL(t *testing.T, recs []audit.Record) string {
@@ -112,15 +113,28 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("want 1 story file, got %d", len(entries))
+	// One journey now writes two files: journey-<id>.md (the narrative) and
+	// journey-<id>.json (design doc §6.5's behavior profile).
+	if len(entries) != 2 {
+		t.Fatalf("want 2 story files (.md + .json), got %d: %v", len(entries), entries)
 	}
-	content, err := os.ReadFile(filepath.Join(outDir, "stories", entries[0].Name()))
+	content, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+id+".md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(content), "调研一下 A 股新股打新收益") {
 		t.Errorf("rendered journey missing root instruction:\n%s", content)
+	}
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+id+".json"))
+	if err != nil {
+		t.Fatalf("journey-%s.json not written: %v", id, err)
+	}
+	var summary story.JourneySummary
+	if err := json.Unmarshal(jsonData, &summary); err != nil {
+		t.Fatalf("journey-%s.json is not valid JSON: %v\n%s", id, err, jsonData)
+	}
+	if summary.ID != id {
+		t.Errorf("journey-%s.json's own id field = %q, want %q", id, summary.ID, id)
 	}
 }
 
@@ -156,11 +170,15 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("want 2 story files, got %d: %v", len(entries), entries)
+	// Two journeys, each now writing a .md + .json pair.
+	if len(entries) != 4 {
+		t.Fatalf("want 4 story files (2 journeys x .md+.json), got %d: %v", len(entries), entries)
 	}
 	var all string
 	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
 		content, err := os.ReadFile(filepath.Join(outDir, "stories", e.Name()))
 		if err != nil {
 			t.Fatal(err)
@@ -168,7 +186,7 @@ func TestCmdStory_RenderAll(t *testing.T) {
 		all += string(content)
 	}
 	if !strings.Contains(all, "调研一下 A 股新股打新收益") || !strings.Contains(all, "帮我写个 release note") {
-		t.Errorf("both journeys' root instructions should appear across the two files:\n%s", all)
+		t.Errorf("both journeys' root instructions should appear across the two .md files:\n%s", all)
 	}
 }
 
@@ -195,6 +213,64 @@ func TestCmdStory_UnknownJourney(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("cmdStory -journey with an unmatched id prefix should return an error")
+	}
+}
+
+// TestCmdStory_PartialHeadFilenameSuffix covers design doc §11 D1's fix: a
+// head-truncated Journey's rendered filename must self-disclose that its ID
+// isn't stable, via a "-partial" suffix, without requiring the reader to
+// open the file and find the warning line first. The first record already
+// carries a multi-turn-looking manifest (sys + 2 user/assistant pairs) at
+// line 0 of the only loaded file — story.IsPartialHead's signal for "this
+// conversation's real opening lives outside the loaded range".
+func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+	u1 := storyMsg("user", "第一轮指令")
+	a1 := storyMsg("assistant", "第一轮回复")
+	u2 := storyMsg("user", "第二轮追问")
+	r1 := storyRec(at(0), []any{sys, u1, a1, u2}, storySSE("continuing"))
+	r2 := storyRec(at(1), []any{sys, u1, a1, u2, storyMsg("assistant", "第二轮回复")}, storySSE("done"))
+	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	// Without -include-partial, the candidate is skipped and -render-all
+	// writes nothing.
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-render-all", path}); err != nil {
+			t.Fatalf("cmdStory -render-all (no -include-partial): %v", err)
+		}
+	})
+	if !strings.Contains(out, "skipped as partial-head") {
+		t.Errorf("expected the candidate to be skipped as partial-head:\n%s", out)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(outDir, "stories")); len(entries) != 0 {
+		t.Fatalf("no files should be written without -include-partial, got %v", entries)
+	}
+
+	// With -include-partial, it renders — and the filename must carry the
+	// "-partial" suffix.
+	out = captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-render-all", "-include-partial", path}); err != nil {
+			t.Fatalf("cmdStory -render-all -include-partial: %v", err)
+		}
+	})
+	if !strings.Contains(out, "-partial.md") {
+		t.Errorf("render output should mention the -partial.md filename:\n%s", out)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	if err != nil {
+		t.Fatalf("reports/stories not created: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want 2 story files (.md + .json), got %d: %v", len(entries), entries)
+	}
+	for _, e := range entries {
+		if !strings.Contains(e.Name(), "-partial.") {
+			t.Errorf("file %s missing the -partial suffix", e.Name())
+		}
 	}
 }
 

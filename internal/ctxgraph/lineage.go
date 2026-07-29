@@ -1,15 +1,16 @@
-// Ver 2026-07-29 15:00, by Sonnet 5
+// Ver 2026-07-29 21:30, by Sonnet 5
 
 package ctxgraph
 
 import "crypto/md5"
 
 // Lineage is a maximal run of manifests connected by non-splitting edits
-// (Append/ReplaceTail) within one SessKey bucket. It is NOT yet a "Journey"
-// in the design doc's sense — stitching lineages back together across a
-// Contract/Fork break (design doc §6.2's compaction/head_prune/same_chat
-// edge classification) is Phase 2 work; a Lineage here is deliberately just
-// the structural, zero-inference unit.
+// (Append/ReplaceTail/Splice) within one SessKey bucket. It is NOT itself a
+// "Journey" in the design doc's sense — a Lineage is deliberately just the
+// structural, zero-inference unit; stitching lineages back together across
+// a Contract/Fork break (design doc §6.2, this package's stitch.go) is a
+// separate, later pass over the whole Graph, and internal/story.Journey is
+// what actually chains stitched lineages into one narrative.
 type Lineage struct {
 	// Idx is this package's own bookkeeping order (assignment order within
 	// Scan), not a stable cross-run identifier — internal/story derives its
@@ -31,6 +32,14 @@ type Lineage struct {
 	// itself can truncate a lineage's true head (D1's decision: default to
 	// skipping such journeys, see internal/story).
 	BrokeFrom *BreakInfo
+
+	// Stitch is nil until StitchGraph (stitch.go) runs — a separate pass
+	// over the whole Graph, after Scan has built every lineage, since
+	// finding a lineage's best predecessor needs the full blob inverted
+	// index across ALL lineages, not just its own bucket. Only meaningful
+	// when BrokeFrom != nil; StitchGraph leaves it nil for a bucket's first
+	// lineage (nothing to stitch).
+	Stitch *StitchResolution
 }
 
 // BreakInfo is the structural evidence for why a lineage started mid-bucket

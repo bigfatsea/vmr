@@ -1,4 +1,4 @@
-// Ver 2026-07-29 15:00, by Sonnet 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 package ctxgraph
 
@@ -113,12 +113,14 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		m.MsgIdx = append(m.MsgIdx, i)
 	}
 	if m.LeadSys > 0 {
-		// Raw text bytes, NOT hashJSON — session.go's collect() hashes
-		// []byte(m.Text) directly (an md5.Hash.Write, no JSON re-encoding),
-		// so running it through hashJSON here would re-encode the string
-		// as a quoted/escaped JSON value first and produce a different
-		// digest for the exact same prompt. Caught by the parity test in
-		// internal/report/ctxgraph_parity_test.go.
+		// Raw text bytes, NOT hashJSON — re-running the concatenated system
+		// text through hashJSON would re-encode it as a quoted/escaped JSON
+		// string first and produce a different digest than hashing the plain
+		// bytes directly. internal/report/session.go used to keep its own
+		// independent copy of this exact same hashing convention (so its
+		// SysChanged detection would agree with this package's); design doc
+		// Appendix C.5 T3.1 deleted that copy — session.go now reads
+		// SysHash straight from here instead of recomputing it.
 		m.SysHash = md5.Sum([]byte(sysText.String()))
 		m.HasSys = true
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:40, by Opus 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // The report's data shape: every struct that Build fills in and that both
 // renderers (vmr-report.md and vmr-report.json) read back out. Split out of
@@ -23,21 +23,22 @@ const SlowThresholdMS = 30_000
 // compute during finish* (fresh tokens, cache_efficiency, slow_requests,
 // true stream_ms percentiles) since the raw sums already exist then.
 type Report2 struct {
-	Meta         Meta           `json:"meta"`
-	Overall      Row            `json:"overall"`
-	ByModel      []Row          `json:"by_model"`
-	ByDate       []Row          `json:"by_date"`
-	Hours        []HourRow      `json:"hours,omitempty"`
-	HoursOfDay   []HourRow      `json:"hours_of_day,omitempty"`
-	Endpoints    []EndpointRow  `json:"endpoints"`
-	EndpointsAll []EndpointRow  `json:"endpoints_all,omitempty"`
-	ByClient     []ClientRow    `json:"by_client,omitempty"`
-	Workloads    []WorkloadRow  `json:"workloads,omitempty"`
-	Sessions     []SessionRow   `json:"sessions,omitempty"`
-	Tools        []ToolShapeRow `json:"tools,omitempty"`
-	Efficiency   []Finding      `json:"efficiency,omitempty"`
-	Sticky       *StickyEffect  `json:"sticky,omitempty"`
-	Pricing      *Pricing       `json:"pricing,omitempty"`
+	Meta         Meta            `json:"meta"`
+	Overall      Row             `json:"overall"`
+	ByModel      []Row           `json:"by_model"`
+	ByDate       []Row           `json:"by_date"`
+	Hours        []HourRow       `json:"hours,omitempty"`
+	HoursOfDay   []HourRow       `json:"hours_of_day,omitempty"`
+	Endpoints    []EndpointRow   `json:"endpoints"`
+	EndpointsAll []EndpointRow   `json:"endpoints_all,omitempty"`
+	ByClient     []ClientRow     `json:"by_client,omitempty"`
+	Workloads    []WorkloadRow   `json:"workloads,omitempty"`
+	Sessions     []SessionRow    `json:"sessions,omitempty"`
+	Compactions  []CompactionRow `json:"compactions,omitempty"`
+	Tools        []ToolShapeRow  `json:"tools,omitempty"`
+	Efficiency   []Finding       `json:"efficiency,omitempty"`
+	Sticky       *StickyEffect   `json:"sticky,omitempty"`
+	Pricing      *Pricing        `json:"pricing,omitempty"`
 
 	// requests is the per-request export (vmr-requests.jsonl). Unexported so
 	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
@@ -320,6 +321,31 @@ type SessionRow struct {
 	CompactionChain []string `json:"compaction_chain,omitempty"` // session ids, head->current
 
 	durs, ttfts []int64
+}
+
+// CompactionRow is one standalone compaction LLM call (design doc §6.4 / CCR
+// N-4, Appendix C.5 T3.3): a report-only, body-sniffed concept (ReqInfo.
+// Compaction) distinct from the F6-style structural session splits
+// SessionRow.ContinuedFrom already covers — this row is specifically about
+// an OBSERVABLE call that consumed tokens to produce a summary, not an
+// in-place history rebuild with no separate request. "Before/after" here is
+// the compaction call's OWN input/output (how much history it was asked to
+// compress vs how big the resulting summary is), not either neighboring
+// session's own token counts.
+type CompactionRow struct {
+	TS          string `json:"ts"`
+	Summarizes  string `json:"summarizes,omitempty"`   // predecessor session id
+	ContinuesTo string `json:"continues_to,omitempty"` // successor session id
+
+	TokensIn  int64 `json:"tokens_in"`  // history fed into the compaction call
+	TokensOut int64 `json:"tokens_out"` // the resulting summary
+
+	// Entities found in the compaction call's own input (the conversation
+	// being condensed) via chatmsg.ExtractEntities, split by whether they're
+	// still mentioned in its output (the summary) — a rule-based, "宁可粗糙也
+	// 不猜语义" proxy for information loss (design doc §6.4).
+	SwallowedEntities []string `json:"swallowed_entities,omitempty"`
+	SurvivedEntities  []string `json:"survived_entities,omitempty"`
 }
 
 // ToolShapeRow is per declared-tool-set waste (V2 §6 Top-N): F-family.

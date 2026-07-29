@@ -1,4 +1,4 @@
-// Ver 2026-07-28 21:30, by Opus 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // This file is the aggregation pass behind `vmr report`: it reads audit
 // JSONL and fills in the Report2 buckets declared in rows.go. Rendering
@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 )
 
 // rec2 is Build's per-record working struct: raw fields from audit.Record
@@ -641,6 +642,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		rep.Sessions = append(rep.Sessions, *s)
 	}
 	rep.Tools = buildTools(sess)
+	rep.Compactions = buildCompactions(sess)
 	rep.Sticky = stickyCol.result()
 	rep.Efficiency = buildFindings(rep)
 	rep.Pricing = pricing
@@ -935,6 +937,40 @@ func splitEndpointProviderModel(endpoint string) (provider, model string) {
 		return "", ""
 	}
 	return parts[1], parts[2]
+}
+
+// buildCompactions derives §6.4/CCR N-4's compaction rows from the
+// analysis's standalone compaction calls (design doc Appendix C.5 T3.3).
+// "Before/after" tokens are the compaction call's OWN input/output — how
+// much history it was asked to compress vs how big the resulting summary
+// is — not either neighboring session's own token counts, which stay
+// whatever they legitimately were (see TestContextGrowthDoesNotCrossContractBreak).
+// Entity loss reuses chatmsg.ExtractEntities, the same rough file-path/URL
+// scan internal/story's own CompactionInfo uses (sunk to chatmsg so both
+// packages share one implementation, design doc Appendix E.2).
+func buildCompactions(sess *SessionAnalysis) []CompactionRow {
+	out := make([]CompactionRow, 0, len(sess.Compactions))
+	for _, c := range sess.Compactions {
+		row := CompactionRow{
+			TS: c.TS.Format(time.RFC3339), Summarizes: c.Summarizes, ContinuesTo: c.ContinuesTo,
+		}
+		if c.UsageOK {
+			row.TokensIn, row.TokensOut = c.Usage.In, c.Usage.Out
+		}
+		survived := map[string]bool{}
+		for _, e := range chatmsg.ExtractEntities(c.respText) {
+			survived[e] = true
+		}
+		for _, e := range chatmsg.ExtractEntities(c.firstText) {
+			if survived[e] {
+				row.SurvivedEntities = append(row.SurvivedEntities, e)
+			} else {
+				row.SwallowedEntities = append(row.SwallowedEntities, e)
+			}
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // buildTools derives the tool-waste fields from the analysis's ToolShapes.

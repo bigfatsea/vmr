@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // Derived-metric helpers, true per-bucket percentiles, and the small
 // per-record extraction helpers shared by Build. Every finish* computes the
@@ -204,6 +204,11 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 	s.TokensInFresh = m.tokensInFresh
 	s.CacheEfficiency = m.cacheEfficiency
 	// context_growth: last-turn tokens_in / first-turn tokens_in (ts order).
+	// Safe to compare across the whole session since design doc Appendix
+	// C.5 T3.1: group() now splits a session at every Contract/Fork edit
+	// (one SessionInfo per ctxgraph.Lineage), so info.Recs can no longer
+	// straddle a hidden history reset the way it used to (§2.5's ×179.5
+	// dirty-value case) — see TestContextGrowthDoesNotCrossContractBreak.
 	if info != nil && len(info.Recs) >= 2 {
 		first := info.Recs[0].Usage.In
 		last := info.Recs[len(info.Recs)-1].Usage.In

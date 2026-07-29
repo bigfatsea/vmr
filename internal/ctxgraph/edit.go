@@ -1,4 +1,4 @@
-// Ver 2026-07-28 22:30, by Sonnet 5
+// Ver 2026-07-29 21:00, by Sonnet 5
 
 package ctxgraph
 
@@ -8,16 +8,18 @@ package ctxgraph
 // at least three real compaction shapes exist, two of which have no marker
 // to match at all).
 //
-// Step 1 (this package's first cut) distinguishes four kinds. A real
-// "mid-conversation splice" (design doc F11's S2: a message rewritten in
-// place, absorbing a summary) and an ordinary trailing-message replacement
-// (ephemeral tail edits, image pruning) both land in ReplaceTail for now —
-// telling them apart needs a second structural check (does the ORIGINAL
-// tail resurface elsewhere in the new manifest?) that doesn't change
-// whether the lineage splits, only how the split is explained. That's
-// deferred to Phase 2 (see the design doc's Appendix C.4 T2.1) — splitting
-// it out is a labeling refinement, not a correctness fix: ReplaceTail never
-// splits a lineage, exactly like Splice never will either.
+// Step 1 shipped four kinds, with a real "mid-conversation splice" (design
+// doc F11's S2: a message rewritten in place, absorbing a summary) and an
+// ordinary trailing-message replacement (ephemeral tail edits, image
+// pruning) both landing in ReplaceTail — deliberately deferred (see that
+// commit's Appendix C.3 "明确不做": telling them apart doesn't change
+// whether the lineage splits, only how the split is explained). Step 2
+// (T2.1) tells them apart: Splice is now its own kind, split out of
+// ReplaceTail by a second structural check (does a suffix of prev's tail
+// resurface, unchanged, as a suffix of cur's tail? — evidence the tail
+// wasn't discarded but spliced around). Splice still never splits a
+// lineage, exactly like ReplaceTail — this is a labeling refinement, not a
+// correctness fix.
 type EditKind int
 
 const (
@@ -26,11 +28,20 @@ const (
 	// case — 95.86% of edges in the calibration corpus (Appendix A.7).
 	Append EditKind = iota
 	// ReplaceTail: a common prefix holds, but the tail diverges without
-	// prev shrinking drastically or losing most of its content — normal
-	// turn-to-turn editing (retries, ephemeral message replacement) or an
-	// unclassified in-place splice (see the Step-1/Step-2 split above).
-	// Does not split the lineage.
+	// prev shrinking drastically or losing most of its content, AND none of
+	// prev's tail resurfaces in cur's tail (see Splice) — ordinary
+	// turn-to-turn editing: retries, ephemeral message replacement (image
+	// pruning, a resent request with a corrected last message). Does not
+	// split the lineage.
 	ReplaceTail
+	// Splice: same shape as ReplaceTail (common prefix holds, tail
+	// diverges, no drastic shrink), but at least spliceMinTailMatch of
+	// prev's tail messages reappear verbatim, in order, at the end of cur's
+	// tail — design doc F11's S2: new content was inserted mid-conversation
+	// and the original tail preserved further along, not discarded. Does
+	// NOT split the lineage (T2.1: "splitting it out is a labeling
+	// refinement, not a correctness fix").
+	Splice
 	// Contract: cur is much smaller than prev (below contractLenRatio) —
 	// history was truncated or rebuilt. Splits the lineage.
 	Contract
@@ -47,6 +58,8 @@ func (k EditKind) String() string {
 		return "append"
 	case ReplaceTail:
 		return "replace_tail"
+	case Splice:
+		return "splice"
 	case Contract:
 		return "contract"
 	case Fork:
@@ -80,6 +93,14 @@ const (
 	// counts as a plain Append (guards against off-by-one/duplicate-final-
 	// message noise being classified as ReplaceTail for no useful reason).
 	tailSlack = 2
+	// spliceMinTailMatch: within a ReplaceTail-shaped edit, reclassify as
+	// Splice when at least this many of prev's tail messages reappear
+	// verbatim, in order, at the end of cur's tail. 2 (not 1) guards
+	// against a single short, generic reply ("好的"/"OK") matching by pure
+	// coincidence rather than genuine evidence the tail was preserved —
+	// tune against a wider corpus if this misses or over-fires real splices
+	// (design doc Appendix A.7's T2.1 re-run).
+	spliceMinTailMatch = 2
 )
 
 // Edit is the classified transition from prev to cur.
@@ -110,6 +131,9 @@ func Classify(prev, cur *Manifest) Edit {
 		e.Kind = Fork
 	case l < len(prev.Keys)-tailSlack:
 		e.Kind = ReplaceTail
+		if commonSuffixLen(prev.Keys[l:], cur.Keys[l:]) >= spliceMinTailMatch {
+			e.Kind = Splice
+		}
 	default:
 		e.Kind = Append
 	}
@@ -120,6 +144,17 @@ func Classify(prev, cur *Manifest) Edit {
 func lcpLen(a, b []Hash) int {
 	n := 0
 	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	return n
+}
+
+// commonSuffixLen is lcpLen's mirror: the longest common suffix length of
+// two hash vectors, counted from the end — used by Classify to tell Splice
+// (old tail resurfaces further along) apart from ReplaceTail (it doesn't).
+func commonSuffixLen(a, b []Hash) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[len(a)-1-n] == b[len(b)-1-n] {
 		n++
 	}
 	return n

@@ -1,4 +1,4 @@
-// Ver 2026-07-29 18:00, by Sonnet 5
+// Ver 2026-07-29 23:30, by Sonnet 5
 
 package story
 
@@ -28,7 +28,7 @@ func RenderMarkdown(j *Journey) string {
 		len(j.Tasks), stepCount(j), j.From.Format("2006-01-02 15:04:05"), j.To.Format("15:04:05"))
 
 	if j.Break != nil {
-		w("> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（%s：%s；%s）——两段之间的关系尚未确认，本轮（第一步）不做跨断点缝合，只如实标出断点。\n\n",
+		w("> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（%s：%s；%s）——已尝试自动缝合到更早的片段，但没有找到证据充分的前驱（覆盖率/置信度不够，或确认没有前驱），两段之间的关系仍未确认，只如实标出断点，不强行缝合（宁可断开，不要错连）。\n\n",
 			j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind), editStatsHint(j.Break.Edit))
 	}
 
@@ -90,6 +90,16 @@ func renderStep(w func(string, ...any), s *Step) {
 
 	if s.Edge != nil {
 		w("> 编辑: %s（%s）\n\n", s.Edge.Kind.String(), editStatsHint(*s.Edge))
+	}
+	if s.StitchEdge != nil {
+		w("> 🧵 **缝合自更早片段**（%s，覆盖率 %s，置信度 %s）——这一段与上一段之间发生过一次结构性断裂，已根据内容重合证据自动重新接上；证据如实保留，供核实。\n\n",
+			s.StitchEdge.Kind.String(), pctStr(s.StitchEdge.Score), pctStr(s.StitchEdge.Confidence))
+	}
+	if s.SysChanged {
+		w("> ⚙️ **system prompt 变更**（换模型 / 换工具集 / 平台注入变化，原因未知，如实标出）\n\n")
+	}
+	if s.Compaction != nil {
+		renderCompactionInfo(w, s.Compaction)
 	}
 
 	if len(s.NewEvents) > 0 {
@@ -167,12 +177,40 @@ func prettyJSON(s string) string {
 
 func renderEvent(w func(string, ...any), ev *Event) {
 	head := fmt.Sprintf("▸ %s", ev.Msg.Role)
+	if ev.Revises != nil {
+		// F11's "revision" relation: without this marker, a Splice-rewritten
+		// message would render as an unrelated new Event — reading as "the
+		// same thing said twice" instead of "this replaces that".
+		head += fmt.Sprintf(" 🔄[修订 %s]", ev.Revises.String()[:8])
+	}
 	if ev.Msg.Text == "" {
 		w("%s (空)\n\n", head)
 		return
 	}
 	summary := preview(ev.Msg.Text)
 	w("<details><summary>%s · %s</summary>\n\n%s</details>\n\n", head, escapeHTML(summary), codeFence(ev.Msg.Text))
+}
+
+// renderCompactionInfo shows a stitch boundary's information-loss summary
+// (design doc §6.4 = CCR N-4's promise): token counts before/after, plus
+// which file-path/URL-shaped entities the predecessor's tail mentioned but
+// this step's opening doesn't — versus which survived. Folded by default
+// like everything else here; the point is that it's THERE to check, not
+// that every reader needs to open it every time.
+func renderCompactionInfo(w func(string, ...any), c *CompactionInfo) {
+	ratio := "—"
+	if c.TokensBefore > 0 {
+		ratio = fmt.Sprintf("%.1f%%", 100*float64(c.TokensAfter)/float64(c.TokensBefore))
+	}
+	w("<details><summary>📉 信息损失: %s → %s tokens（%s）· %d 个实体消失 / %d 个存活</summary>\n\n",
+		fmtTokens(c.TokensBefore), fmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities))
+	if len(c.SwallowedEntities) > 0 {
+		w("**消失的实体**（在更早片段里提到过，这一步没再提到——规则粗筛，不代表真的不再相关）：%s\n\n", strings.Join(c.SwallowedEntities, "、"))
+	}
+	if len(c.SurvivedEntities) > 0 {
+		w("**仍然存活的实体**：%s\n\n", strings.Join(c.SurvivedEntities, "、"))
+	}
+	w("</details>\n\n")
 }
 
 func escapeHTML(s string) string {
@@ -240,4 +278,11 @@ func fmtTokens(n int64) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
+}
+
+// pctStr renders a 0..1 fraction as a percentage string — same rationale/
+// implementation as internal/report/metrics.go's pctStr (duplicated, not
+// exported: tiny, stable, purely cosmetic).
+func pctStr(f float64) string {
+	return fmt.Sprintf("%.0f%%", f*100)
 }

@@ -1,4 +1,4 @@
-// Ver 2026-07-16 21:00, by Fable 5
+// Ver 2026-07-29 22:30, by Sonnet 5
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
@@ -11,6 +11,17 @@
 // OpenClaw wrapper templates, chat_id, Claude Code metadata.user_id) are
 // used when present and silently skipped when not: a request that matches
 // nothing still groups by the generic rule, it just carries fewer tags.
+//
+// Grouping itself (design doc Appendix C.5 T3.1) is a thin consumer of
+// internal/ctxgraph: AnalyzeSessions runs ctxgraph.Scan/StitchGraph over the
+// same paths and uses its already-split Lineages as the one-session-per-
+// Lineage grouping unit, and ctxgraph.Classify for each record's delta
+// against its predecessor — replacing this package's own former private
+// message-hash vector + LCP window search (the exact duplication design doc
+// §2.5 flagged: "同一个数据结构，被四个功能各自绕过"). Every OTHER feature
+// collect() extracts (Tags, ToolsDeclared, RoleChars/Tokens, chat_id, NoReply,
+// realUsers, …) stays exactly as it was — those are report-domain concerns
+// ctxgraph has no reason to know about.
 package report
 
 import (
@@ -27,12 +38,8 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 )
-
-// parentWindow bounds how many recent requests per session are kept as
-// parent candidates for the max-LCP match. Observed divergences (ephemeral
-// tail replacement, pruning branches) always resolve within a few requests.
-const parentWindow = 16
 
 // tailPrevKeep is how many trailing message previews each request retains,
 // for rendering the parent's replaced tail. Replaced tails observed in real
@@ -102,10 +109,15 @@ type ReqInfo struct {
 	ImagesCompressed int              // subset that triggered downscaling
 
 	// working state (analysis only, dropped from JSON)
-	leadSys   int      // leading system messages (absolute offset of keys[0])
-	keys      []string // per non-system message content hash
-	sysKey    string
-	anchor    string
+	//
+	// manifest is this record's ctxgraph.Manifest, correlated by (Path,Line)
+	// after ctxgraph.Scan runs — the message-hash vector, system-prompt
+	// hash, and leading-system-message count all live there now (design doc
+	// Appendix C.5 T3.1); this package no longer computes its own copy. nil
+	// for a record ctxgraph couldn't build a Manifest for at all (body
+	// wasn't a parseable chat object — same case collect() already bails
+	// out of early, see the body-parse guard below).
+	manifest  *ctxgraph.Manifest
 	tailPrev  []string       // previews of the last tailPrevKeep messages
 	realUsers map[int]string // absolute idx → preview, real user instructions
 	firstText string         // first non-system message text (capped)
@@ -187,6 +199,16 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // version, tie-breaks included: parallelizing which file gets read first
 // never changes what the final sort sees.
 //
+// ctxgraph.Scan/StitchGraph read the SAME paths independently, in a
+// goroutine alongside collect()'s own pass (design doc Appendix C.5 T3.1) —
+// group() needs the resulting Graph to assign sessions by Lineage instead
+// of collect()'s former private hash-vector grouping. Running both passes
+// concurrently rather than back-to-back keeps this from roughly doubling
+// `vmr report`'s wall-clock time on a large corpus, at the cost of
+// transiently oversubscribing CPU (each pass already bounds its own worker
+// pool to NumCPU) — an acceptable trade for a command that runs occasionally
+// offline, not in a hot path.
+//
 // On error, every already-dispatched file still finishes reading (unlike
 // the old version, which stopped at the first failing file) before the
 // first error in path order is returned — wasted work on a path that's
@@ -194,6 +216,18 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // cancellation machinery.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
+
+	var g *ctxgraph.Graph
+	var scanErr error
+	var scanWG sync.WaitGroup
+	scanWG.Add(1)
+	go func() {
+		defer scanWG.Done()
+		g, scanErr = ctxgraph.Scan(paths)
+		if scanErr == nil {
+			ctxgraph.StitchGraph(g)
+		}
+	}()
 
 	results := make([]fileAnalysisResult, len(paths))
 	sem := make(chan struct{}, analysisWorkerCount(len(paths)))
@@ -208,6 +242,10 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 		}(i, path)
 	}
 	wg.Wait()
+	scanWG.Wait()
+	if scanErr != nil {
+		return nil, scanErr
+	}
 
 	for _, res := range results {
 		if res.err != nil {
@@ -221,7 +259,7 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 
 	sort.SliceStable(a.Recs, func(i, j int) bool { return a.Recs[i].TS.Before(a.Recs[j].TS) })
 	assignNames(a.Recs)
-	group(a)
+	group(a, g)
 	linkCompactions(a)
 	return a, nil
 }
@@ -360,14 +398,10 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 			r.declBytes = int64(len(raw))
 		}
 	}
-	if uid, _ := nested(body, "metadata", "user_id").(string); uid != "" {
-		// Claude Code embeds a session uuid: "…_session_<uuid>".
-		if i := strings.Index(uid, "session_"); i >= 0 {
-			r.SessKey = "meta:" + uid[i:]
-		} else {
-			r.SessKey = "meta:" + uid
-		}
-	}
+	// SessKey (metadata.user_id, else "anchor:" + first non-system message
+	// hash) is NOT computed here — group() sources it straight from this
+	// record's correlated ctxgraph.Manifest.SessKey once ctxgraph.Scan has
+	// run (design doc Appendix C.5 T3.1: one computation, not two).
 
 	msgs := chatMessages(body) // anthropic system becomes message #0 — same shape both protocols
 	r.Msgs = len(msgs)
@@ -385,23 +419,18 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		r.RoleTokens[role] += t
 	}
 	rawMsgs, _ := body["messages"].([]any)
-	sysHash := md5.New()
+	// leadSys mirrors ctxgraph.Manifest.LeadSys's definition (count of
+	// contiguous leading role=="system" messages) — recomputed here as a
+	// cheap, hash-free loop bound purely to skip that block in THIS loop;
+	// nothing outside collect() reads it (the grouping code below reads
+	// r.manifest.LeadSys instead, once correlated).
+	leadSys := 0
 	var lastUser string
 	for i, m := range msgs {
-		if m.Role == "system" && i == r.leadSys { // leading system block
-			sysHash.Write([]byte(m.Text))
-			r.leadSys++
+		if m.Role == "system" && i == leadSys { // leading system block
+			leadSys++
 			continue
 		}
-		// Hash the raw message when available (exact), else the rendered text.
-		// json.Marshal sorts map keys, so the digest is deterministic.
-		var raw any = m.Text
-		if ri := i - msgOffset(body); ri >= 0 && ri < len(rawMsgs) {
-			raw = rawMsgs[ri]
-		}
-		b, _ := json.Marshal(raw)
-		r.keys = append(r.keys, fmt.Sprintf("%x", md5.Sum(b)))
-
 		if r.firstText == "" {
 			r.firstText = capStr(m.Text, 512<<10)
 		}
@@ -411,14 +440,6 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 				r.realUsers[i] = preview(text)
 			}
 		}
-	}
-	r.sysKey = fmt.Sprintf("%x", sysHash.Sum(nil))
-	r.anchor = ""
-	if len(r.keys) > 0 {
-		r.anchor = r.keys[0]
-	}
-	if r.SessKey == "" && r.anchor != "" {
-		r.SessKey = "anchor:" + r.anchor
 	}
 	for i := max(0, len(msgs)-tailPrevKeep); i < len(msgs); i++ {
 		r.tailPrev = append(r.tailPrev, msgs[i].Role+": "+preview(msgs[i].Text))
@@ -438,7 +459,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	// max_completion_tokens shape (§1.6-3 triple features).
 	_, hasMaxCT := body["max_completion_tokens"]
 	sysText := ""
-	if r.leadSys > 0 {
+	if leadSys > 0 {
 		sysText = msgs[0].Text
 	}
 	if strings.Contains(strings.ToLower(capStr(sysText, 200)), "summarization") ||
@@ -578,23 +599,55 @@ func assignNames(recs []*ReqInfo) {
 	}
 }
 
-// group clusters records into sessions and segments tasks.
-func group(a *SessionAnalysis) {
-	sessions := map[string]*SessionInfo{}
+// recLoc is the (path, line) coordinate both this package's ReqInfo and
+// ctxgraph's Manifest key their records by — shared with
+// session_conformance_test.go's cross-package grouping comparison.
+type recLoc struct {
+	Path string
+	Line int
+}
+
+// group clusters records into sessions and segments tasks, using g's already
+// -split Lineages as the grouping unit — one SessionInfo per Lineage,
+// instead of this package's former per-SessKey bucketing that never split
+// on a hidden Contract/Fork edit (design doc F6; Appendix C.5 T3.1). r.
+// Compaction-tagged records are pulled out into a.Compactions exactly as
+// before — that's a report-only, body-sniffed concept ctxgraph doesn't
+// share, orthogonal to lineage boundaries.
+func group(a *SessionAnalysis, g *ctxgraph.Graph) {
+	manifestByLoc := make(map[recLoc]*ctxgraph.Manifest)
+	lineageByLoc := make(map[recLoc]*ctxgraph.Lineage)
+	for _, l := range g.Lineages {
+		for _, m := range l.Manifests {
+			loc := recLoc{m.Path, m.Line}
+			manifestByLoc[loc] = m
+			lineageByLoc[loc] = l
+		}
+	}
+	for _, m := range g.Ungrouped {
+		manifestByLoc[recLoc{m.Path, m.Line}] = m
+	}
+
+	sessionOfLineage := make(map[int]*SessionInfo)
 	var order []*SessionInfo
 	for _, r := range a.Recs {
 		if r.Compaction {
 			a.Compactions = append(a.Compactions, r)
 			continue
 		}
-		if r.SessKey == "" {
+		loc := recLoc{r.Path, r.Line}
+		m := manifestByLoc[loc]
+		r.manifest = m // nil when the body never parsed as a chat object
+		if m == nil || m.SessKey == "" {
 			a.Ungrouped = append(a.Ungrouped, r)
 			continue
 		}
-		s := sessions[r.SessKey]
+		r.SessKey = m.SessKey
+		lin := lineageByLoc[loc]
+		s := sessionOfLineage[lin.Idx]
 		if s == nil {
 			s = &SessionInfo{}
-			sessions[r.SessKey] = s
+			sessionOfLineage[lin.Idx] = s
 			order = append(order, s)
 		}
 		attach(s, r)
@@ -617,25 +670,64 @@ func group(a *SessionAnalysis) {
 		s.IsContinuation = len(s.Recs) > 0 && hasTag(s.Recs[0], "compacted_session")
 	}
 	a.Sessions = order
+	linkStitchedLineages(g, sessionOfLineage)
 }
 
-// attach adds a record to a session: picks its parent by max LCP, derives
-// the delta boundary, and opens a new task when warranted.
-func attach(s *SessionInfo, r *ReqInfo) {
-	lo := max(0, len(s.Recs)-parentWindow)
-	bestLCP := -1
-	for _, cand := range s.Recs[lo:] {
-		l := lcp(cand.keys, r.keys)
-		if l >= bestLCP { // ties → most recent
-			bestLCP, r.Parent = l, cand
+// linkStitchedLineages sets SessionInfo.ContinuedFrom from ctxgraph's own
+// structural stitch resolution wherever a session's underlying Lineage broke
+// away from an earlier one (BrokeFrom != nil) and was matched back to it
+// with enough evidence (Stitch.Outcome == Stitched) — design doc Appendix E:
+// this is what makes an F6-style split still render as "the same
+// conversation, continued" instead of two unrelated sessions, something
+// today's report couldn't even express before (an F6-glued pair used to BE
+// one single SessionInfo, so there was nothing to link).
+//
+// This complements, not replaces, linkCompactions' text-based link for
+// standalone compaction LLM calls: that one connects two sessions THROUGH a
+// compaction record excluded from both (predecessor.Summarizes/
+// ContinuesTo/successor.ContinuedFrom), a case ctxgraph's exact
+// message-hash matching cannot always resolve — a full-history-rewrite
+// compaction need not share a single verbatim message with its predecessor,
+// so there is nothing in the blob index to stitch on (see design doc
+// Appendix E and F2's real corpus case, where the hash match that DOES work
+// is against later, still-verbatim tool messages, not the summary text
+// itself). linkCompactions runs after this and only fills ContinuedFrom
+// where it's still empty, so it never clobbers a Stitch-derived link.
+func linkStitchedLineages(g *ctxgraph.Graph, sessionOfLineage map[int]*SessionInfo) {
+	for _, l := range g.Lineages {
+		if l.Stitch == nil || l.Stitch.Outcome != ctxgraph.Stitched {
+			continue
 		}
+		succ := sessionOfLineage[l.Idx]
+		pred := sessionOfLineage[l.Stitch.Edge.PredIdx]
+		if succ == nil || pred == nil || succ.ContinuedFrom != "" {
+			continue // one side has no non-compaction records of its own, or already linked
+		}
+		succ.ContinuedFrom = pred.ID
 	}
-	newTask := r.Parent == nil
-	if r.Parent != nil {
-		p := r.Parent
-		r.DeltaStart = r.leadSys + bestLCP
-		r.ReplacedTail = len(p.keys) - bestLCP
-		r.SysChanged = p.sysKey != r.sysKey
+}
+
+// attach adds a record to a session: its parent is the previous record
+// already attached to this SAME session (== the same ctxgraph.Lineage,
+// compaction-tagged records excluded), its delta boundary comes from
+// ctxgraph.Classify against that parent's own manifest, and it opens a new
+// task when warranted. Classify is called fresh on the two manifests rather
+// than trusting Lineage.Edges' positional adjacency, so this stays correct
+// even when a Compaction-tagged record (excluded from s.Recs) happens to sit
+// between them in the raw manifest sequence.
+func attach(s *SessionInfo, r *ReqInfo) {
+	var parent *ReqInfo
+	if len(s.Recs) > 0 {
+		parent = s.Recs[len(s.Recs)-1]
+	}
+	newTask := parent == nil
+	if parent != nil {
+		p := parent
+		e := ctxgraph.Classify(p.manifest, r.manifest)
+		r.DeltaStart = r.manifest.LeadSys + e.LCP
+		r.ReplacedTail = len(p.manifest.Keys) - e.LCP
+		r.SysChanged = p.manifest.SysHash != r.manifest.SysHash
+		r.Parent = p
 		traceChanged := r.TraceID != "" && p.TraceID != "" && r.TraceID != p.TraceID
 		// If the parent record ended in NO_REPLY (the LLM skipped its
 		// reply), the user's instruction in this record is a RETRY of the
@@ -673,10 +765,10 @@ func attach(s *SessionInfo, r *ReqInfo) {
 // envelope-wrapped instructions: pruning shifted the same "OK，基于你…"
 // message into the tail window a second time).
 func (r *ReqInfo) deltaHasNewInstruction() bool {
-	var parentKeys map[string]bool
+	var parentKeys map[ctxgraph.Hash]bool
 	if r.Parent != nil {
-		parentKeys = make(map[string]bool, len(r.Parent.keys))
-		for _, k := range r.Parent.keys {
+		parentKeys = make(map[ctxgraph.Hash]bool, len(r.Parent.manifest.Keys))
+		for _, k := range r.Parent.manifest.Keys {
 			parentKeys[k] = true
 		}
 	}
@@ -684,7 +776,7 @@ func (r *ReqInfo) deltaHasNewInstruction() bool {
 		if idx < r.DeltaStart || idx < r.Msgs-newUserWindow {
 			continue
 		}
-		if ki := idx - r.leadSys; parentKeys != nil && ki >= 0 && ki < len(r.keys) && parentKeys[r.keys[ki]] {
+		if ki := idx - r.manifest.LeadSys; parentKeys != nil && ki >= 0 && ki < len(r.manifest.Keys) && parentKeys[r.manifest.Keys[ki]] {
 			continue // identical content already existed in the parent — shifted, not new
 		}
 		return true
@@ -761,21 +853,22 @@ func hasTag(r *ReqInfo, tag string) bool {
 	return false
 }
 
-// lcp is the longest common prefix length of two hash vectors.
-func lcp(a, b []string) int {
-	n := 0
-	for n < len(a) && n < len(b) && a[n] == b[n] {
-		n++
-	}
-	return n
-}
-
 // ---- compaction linking ----
 
 // linkCompactions ties each compaction call to the session it summarized
 // (its input quotes that session's first instruction) and to the session
 // continuing from it (whose anchor embeds its output). Both are exact
 // substring checks — no guessing; unmatched sides stay empty.
+//
+// Deliberately still a text-needle match, not a ctxgraph.Stitch lookup
+// (design doc Appendix C.5 T3.1/E): a standalone compaction LLM call's own
+// input/output need not share a single verbatim message with the sessions
+// on either side of it (a full-history-rewrite compaction has nothing for
+// ctxgraph's exact-hash blob index to match against), so this stays as the
+// complementary signal for that case. group()'s linkStitchedLineages already
+// ran and may have set some sessions' ContinuedFrom from real structural
+// evidence (an F6-style same-lineage break) — this function only fills
+// ContinuedFrom where it's still empty, so it can never clobber that.
 func linkCompactions(a *SessionAnalysis) {
 	for _, c := range a.Compactions {
 		out := needle(c.respText)
@@ -810,7 +903,7 @@ func linkCompactions(a *SessionAnalysis) {
 		} else if in != "" {
 			log.Printf("report: compaction linking: predecessor needle not found for compaction at %s (%s)", c.TS.Format(time.RFC3339), c.Path)
 		}
-		if successor != nil && predecessor != nil && successor != predecessor {
+		if successor != nil && predecessor != nil && successor != predecessor && successor.ContinuedFrom == "" {
 			successor.ContinuedFrom = predecessor.ID
 		}
 	}

@@ -296,7 +296,7 @@ func TestIsPartialHead_ColdStartNeverPartial(t *testing.T) {
 	coldStart := mkRec(at, "", []any{msg("system", "sys"), msg("user", "hi")}, sseText("ok"))
 	path := writeJSONL(t, []audit.Record{coldStart, mkRec(at.Add(time.Minute), "", []any{msg("system", "sys"), msg("user", "hi"), msg("assistant", "a")}, sseText("ok"))})
 	l := onlyLineage(t, path)
-	if IsPartialHead(l, path) {
+	if IsPartialHead([]*ctxgraph.Lineage{l}, path) {
 		t.Error("cold-start-shaped root should never be flagged partial")
 	}
 }
@@ -315,12 +315,12 @@ func TestIsPartialHead_TrueForMultiKeyRootEarlyInFirstFile(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	if !IsPartialHead(l, path) {
+	if !IsPartialHead([]*ctxgraph.Lineage{l}, path) {
 		t.Error("root with 3 Keys at line=1 of firstPath should be flagged partial")
 	}
 	// Same lineage with a different firstPath: not the earliest file, so
 	// NOT flagged — the root really IS the start of what we can see.
-	if IsPartialHead(l, "/some/other/file.jsonl") {
+	if IsPartialHead([]*ctxgraph.Lineage{l}, "/some/other/file.jsonl") {
 		t.Error("root should not be flagged partial when its file is not firstPath")
 	}
 }
@@ -355,7 +355,8 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 		t.Fatalf("got %d lineages, want 2", len(g.Lineages))
 	}
 
-	got, err := BuildAll(g.Lineages, profile.Generic)
+	chains := [][]*ctxgraph.Lineage{{g.Lineages[0]}, {g.Lineages[1]}}
+	got, err := BuildAll(chains, profile.Generic)
 	if err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
@@ -374,10 +375,10 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 }
 
 // TestBuildAll_EmptyLineageErrors covers BuildAll's defensive guard: same
-// contract as Build itself (errEmptyLineage), just checked per-lineage
-// inside the batch instead of once up front.
+// contract as Build itself (errEmptyLineage), just checked per-chain inside
+// the batch instead of once up front.
 func TestBuildAll_EmptyLineageErrors(t *testing.T) {
-	if _, err := BuildAll([]*ctxgraph.Lineage{{}}, profile.Generic); err == nil {
+	if _, err := BuildAll([][]*ctxgraph.Lineage{{{}}}, profile.Generic); err == nil {
 		t.Error("BuildAll with an empty lineage should return an error")
 	}
 }

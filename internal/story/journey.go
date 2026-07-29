@@ -1,4 +1,4 @@
-// Ver 2026-07-29 18:00, by Sonnet 5
+// Ver 2026-07-29 23:30, by Sonnet 5
 
 // Package story turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
@@ -38,7 +38,11 @@ import (
 // open a task.
 const newUserWindow = 8
 
-// Journey is one lineage rendered as a narrative.
+// Journey is a stitched chain of one or more Lineages rendered as one
+// continuous narrative (design doc Appendix C.4 T2.2). Chain is oldest
+// lineage first, exactly as ctxgraph.ChainFrom returns it — Step 1's "one
+// Lineage, one Journey" is the len(Chain)==1 degenerate case, not a
+// separate code path.
 type Journey struct {
 	ID       string
 	Partial  bool // head-truncated (design doc §11 D1) — see BuildAll
@@ -46,8 +50,14 @@ type Journey struct {
 	From, To time.Time
 	Tasks    []*Task
 	Events   []*Event // full de-duped event stream, first-appearance order
-	Break    *ctxgraph.BreakInfo
-	Lineage  *ctxgraph.Lineage
+	// Break is Chain[0]'s own BrokeFrom — i.e., even after best-effort
+	// stitching (ctxgraph.StitchGraph), THIS journey's beginning is still
+	// an unresolved break (StitchOutcome NoPredecessorFound or
+	// AmbiguousMatch). nil when Chain[0] opened its bucket cleanly, or was
+	// itself successfully stitched onto an earlier lineage (in which case
+	// ChainFrom would have included that predecessor, making IT Chain[0]).
+	Break *ctxgraph.BreakInfo
+	Chain []*ctxgraph.Lineage
 }
 
 // Task is one user-instruction burst within a Journey.
@@ -61,9 +71,43 @@ type Step struct {
 	Seq        int // 1-based, across the whole Journey
 	Manifest   *ctxgraph.Manifest
 	Rec        *audit.Record
-	Edge       *ctxgraph.Edit // nil for the Journey's first step
+	Edge       *ctxgraph.Edit // nil for the Journey's first step, or at a stitch boundary
 	DeltaStart int            // absolute message index where this step's new content begins
 	NewEvents  []*Event       // events first introduced by this step, in order
+	// StitchEdge is non-nil exactly when this Step is the first manifest of
+	// a non-first Lineage in the Journey's Chain — the evidence
+	// ctxgraph.StitchGraph found connecting it to the previous Lineage.
+	// DeltaStart is always 0 for such a Step (the whole manifest is scanned
+	// for new events; the global seen-hash dedup — not a computed LCP delta
+	// — is what correctly suppresses content the predecessor already
+	// showed, since Classify's structural LCP has no meaning across a
+	// stitch boundary).
+	StitchEdge *ctxgraph.StitchEdge
+	// SysChanged is true when this manifest's leading system block differs
+	// from the logically-preceding manifest's (the previous manifest in the
+	// same lineage, or — at a stitch boundary — the predecessor lineage's
+	// last manifest). System prompt changes are their own analysis-worthy
+	// event (model switch, tool-set change, platform injection change —
+	// design doc F11) independent of whatever edit classification the
+	// message-content transition got.
+	SysChanged bool
+	// Compaction is non-nil only at a stitch boundary (StitchEdge != nil) —
+	// the information-loss summary design doc §6.4 (= CCR N-4's promise)
+	// calls for: token count before/after, and which identifiable entities
+	// (file paths, URLs) mentioned in the swallowed predecessor content
+	// stopped being mentioned versus which survived into this step.
+	Compaction *CompactionInfo
+	// HumanInitiated is true when this Step's OWN opening carries a
+	// genuinely new real user instruction (deltaHasNewInstruction, or the
+	// dedup-aware equivalent at a stitch boundary — see
+	// newInstructionTitleAtStitch) — as opposed to a pure tool-loop
+	// continuation, a trace-id change, or a stitch boundary with nothing
+	// new to say. Metrics' F10 gap classification (design doc D4) uses this
+	// to tell "the human went quiet and came back" apart from "the agent
+	// kept working on its own" for the gap immediately BEFORE this step.
+	// True for the Journey's very first step by construction (design doc
+	// §11 D1: every Journey opens on a real instruction).
+	HumanInitiated bool
 
 	Finish    string
 	NoReply   bool
@@ -76,37 +120,77 @@ type Step struct {
 	Reasoning string
 }
 
+// CompactionInfo is the information-loss summary attached to a stitch
+// boundary Step (design doc §6.4). Purely rule-derived — token counts come
+// straight from recorded Usage, entities from a rough regex scan (file
+// paths, URLs) over the predecessor's last rendered manifest vs this step's
+// own — "宁可粗糙也不猜语义": this doesn't try to understand what was lost,
+// only to point at it so a human can look.
+type CompactionInfo struct {
+	TokensBefore, TokensAfter int64
+	SwallowedEntities         []string // seen in the predecessor's tail, absent from this step
+	SurvivedEntities          []string // seen in the predecessor's tail, still present in this step
+}
+
 // Event is one message's first appearance anywhere in the Journey.
 type Event struct {
 	Hash         ctxgraph.Hash
 	Msg          chatmsg.Message
 	FirstStepSeq int
+	// Revises is non-nil when this Event's message sits exactly at a
+	// ctxgraph.Splice edge's divergence point — design doc F11's "revision"
+	// relation: without this, the global seen-hash dedup would render the
+	// rewritten message as a brand-new, unrelated Event, reading as if the
+	// same thing got said twice instead of the earlier one being replaced
+	// in place. The referenced Hash is the message it replaces — usually
+	// already rendered as an earlier Event, so callers can cross-reference.
+	Revises *ctxgraph.Hash
 }
 
 // Build renders one Lineage into a Journey using prof for the
-// agent-specific real-instruction/no-reply judgment calls. It re-fetches
-// every manifest's full audit.Record (a Lineage on its own only carries
-// content hashes) in one batched pass per source file. Rendering many
-// lineages at once should use BuildAll instead — calling Build in a loop
-// re-fetches from scratch per lineage, which re-scans a source file once
-// per lineage rooted in (or passing through) it instead of once total.
+// agent-specific real-instruction/no-reply judgment calls, WITHOUT
+// stitching — the degenerate len(Chain)==1 case of BuildChain, kept as its
+// own entry point for callers previewing/testing a single lineage in
+// isolation. Rendering a lineage's actual stitched chain (design doc
+// Appendix C.4 T2.2) needs BuildChain(ctxgraph.ChainFrom(l, byIdx), prof)
+// instead.
 func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
-	if len(l.Manifests) == 0 {
+	return BuildChain([]*ctxgraph.Lineage{l}, prof)
+}
+
+// BuildChain renders a full stitched chain — oldest lineage first, exactly
+// as ctxgraph.ChainFrom returns it — into one continuous Journey. It
+// re-fetches every manifest's full audit.Record (a Lineage on its own only
+// carries content hashes) in one batched pass per source file across the
+// WHOLE chain. Rendering many chains at once should use BuildAll instead —
+// calling BuildChain in a loop re-fetches from scratch per chain, which
+// re-scans a source file once per chain touching it instead of once total.
+func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
+	if len(chain) == 0 {
 		return nil, errEmptyLineage
 	}
-	recs, err := ctxgraph.FetchRecords(manifestLocs(l))
+	for _, l := range chain {
+		if len(l.Manifests) == 0 {
+			return nil, errEmptyLineage
+		}
+	}
+	var locs []ctxgraph.Loc
+	for _, l := range chain {
+		locs = append(locs, manifestLocs(l)...)
+	}
+	recs, err := ctxgraph.FetchRecords(locs)
 	if err != nil {
 		return nil, err
 	}
-	return buildFrom(l, prof, recs)
+	return buildFrom(chain, prof, recs)
 }
 
-// BuildAll renders many Lineages into Journeys. Two independent costs are
-// batched/parallelized here, found by measuring an actual -render-all run
-// against a real 15-file/253-candidate corpus (design-doc review
-// follow-up):
+// BuildAll renders many stitched chains into Journeys. Two independent
+// costs are batched/parallelized here, found by measuring an actual
+// -render-all run against a real 15-file/253-candidate corpus (design-doc
+// review follow-up):
 //
-//  1. I/O: every lineage's manifest-record fetch is batched into a single
+//  1. I/O: every chain's manifest-record fetch is batched into a single
 //     ctxgraph.FetchRecords call — FetchRecords already groups its reads by
 //     source file (zstd isn't seekable, so each file is scanned at most
 //     once regardless of how many lines are wanted from it), turning "read
@@ -119,42 +203,49 @@ func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
 //     carries its ENTIRE accumulated history, so buildFrom's cost per
 //     lineage grows with the square of its turn count, not linearly. Doing
 //     that serially, one candidate at a time, left 253 candidates' worth of
-//     CPU work on a single core. Each lineage's Journey is independent of
+//     CPU work on a single core. Each chain's Journey is independent of
 //     every other's (buildFrom only reads the shared recs map, never
 //     mutates it), so this runs on the same bounded worker pool
 //     scanWorkerCount uses in internal/ctxgraph.
 //
-// Order of the returned slice matches ls; a per-lineage error aborts the
-// whole batch (matches Build's own all-or-nothing contract for a single
-// lineage).
-func BuildAll(ls []*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, error) {
-	for _, l := range ls {
-		if len(l.Manifests) == 0 {
+// Order of the returned slice matches chains; a per-chain error aborts the
+// whole batch (matches BuildChain's own all-or-nothing contract for a
+// single chain).
+func BuildAll(chains [][]*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, error) {
+	for _, chain := range chains {
+		if len(chain) == 0 {
 			return nil, errEmptyLineage
+		}
+		for _, l := range chain {
+			if len(l.Manifests) == 0 {
+				return nil, errEmptyLineage
+			}
 		}
 	}
 
 	var locs []ctxgraph.Loc
-	for _, l := range ls {
-		locs = append(locs, manifestLocs(l)...)
+	for _, chain := range chains {
+		for _, l := range chain {
+			locs = append(locs, manifestLocs(l)...)
+		}
 	}
 	recs, err := ctxgraph.FetchRecords(locs)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]*Journey, len(ls))
-	errs := make([]error, len(ls))
-	sem := make(chan struct{}, buildWorkerCount(len(ls)))
+	out := make([]*Journey, len(chains))
+	errs := make([]error, len(chains))
+	sem := make(chan struct{}, buildWorkerCount(len(chains)))
 	var wg sync.WaitGroup
-	for i, l := range ls {
+	for i, chain := range chains {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, l *ctxgraph.Lineage) {
+		go func(i int, chain []*ctxgraph.Lineage) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out[i], errs[i] = buildFrom(l, prof, recs)
-		}(i, l)
+			out[i], errs[i] = buildFrom(chain, prof, recs)
+		}(i, chain)
 	}
 	wg.Wait()
 
@@ -168,14 +259,14 @@ func BuildAll(ls []*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, error) 
 
 // buildWorkerCount bounds Journey-construction concurrency the same way
 // ctxgraph's scanWorkerCount does: more workers than cores (or than
-// lineages) just adds scheduling overhead, not throughput.
-func buildWorkerCount(lineages int) int {
+// chains) just adds scheduling overhead, not throughput.
+func buildWorkerCount(chains int) int {
 	n := runtime.NumCPU()
 	if n < 1 {
 		n = 1
 	}
-	if lineages > 0 && n > lineages {
-		n = lineages
+	if chains > 0 && n > chains {
+		n = chains
 	}
 	if n < 1 {
 		n = 1
@@ -193,77 +284,198 @@ func manifestLocs(l *ctxgraph.Lineage) []ctxgraph.Loc {
 	return locs
 }
 
-// buildFrom is Build's actual assembly logic, factored out so BuildAll can
-// share one batched recs lookup across many lineages instead of each
-// lineage doing its own FetchRecords call.
-func buildFrom(l *ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record) (*Journey, error) {
+// buildFrom is BuildChain's actual assembly logic, factored out so BuildAll
+// can share one batched recs lookup across many chains instead of each
+// chain doing its own FetchRecords call. chain is oldest-lineage-first
+// (ctxgraph.ChainFrom's contract); every Lineage after chain[0] is joined
+// at a stitch boundary — the first manifest of chain[c] for c>0 — using
+// that Lineage's own Stitch.Edge as the evidence (guaranteed non-nil:
+// ChainFrom only walks through Stitched outcomes).
+func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record) (*Journey, error) {
+	head, tail := chain[0], chain[len(chain)-1]
 	j := &Journey{
-		ID:      deriveID(l),
-		Break:   l.BrokeFrom,
-		Lineage: l,
-		From:    l.Manifests[0].TS,
-		To:      l.Manifests[len(l.Manifests)-1].TS,
+		ID:    deriveID(chain),
+		Break: head.BrokeFrom,
+		Chain: chain,
+		From:  head.Manifests[0].TS,
+		To:    tail.Manifests[len(tail.Manifests)-1].TS,
 	}
 
 	seen := map[ctxgraph.Hash]*Event{}
 	var curTask *Task
 	seq := 0
 	prevNoReply := false
-	for i, m := range l.Manifests {
-		rec := recs[ctxgraph.Loc{Path: m.Path, Line: m.Line}]
-		if rec == nil {
-			continue // defensive: FetchRecords silently drops a line it couldn't parse a second time
-		}
-		body, _ := rec.Client.Request.Body.(map[string]any)
-		msgs := chatmsg.Messages(body)
-		rawMsgs, _ := body["messages"].([]any)
-		off := chatmsg.MsgOffset(body)
-
-		var edge *ctxgraph.Edit
-		deltaStart := 0
-		newTask := i == 0
-		if i > 0 {
-			e := l.Edges[i-1]
-			edge = &e
-			deltaStart = m.LeadSys + e.LCP
-			prev := l.Manifests[i-1]
-			traceChanged := m.TraceID != "" && prev.TraceID != "" && m.TraceID != prev.TraceID
-			hasNewInstr := deltaHasNewInstruction(prof, msgs, rawMsgs, off, m, prev, deltaStart)
-			newTask = traceChanged || (!prevNoReply && hasNewInstr)
-		}
-		if newTask || curTask == nil {
-			curTask = &Task{Title: taskTitle(lastInstructionInDelta(prof, msgs, rawMsgs, off, deltaStart))}
-			j.Tasks = append(j.Tasks, curTask)
-		}
-
-		seq++
-		step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, DeltaStart: deltaStart}
-		if rec.Client.Response != nil {
-			if s := responseSummary(rec.Client.Response.Body); s != nil {
-				step.Finish = s.Finish
-				step.RespText = strings.TrimSpace(s.Content)
-				step.ToolCalls = s.ToolCalls
-				step.Reasoning = strings.TrimSpace(s.Reasoning)
+	for ci, l := range chain {
+		for i, m := range l.Manifests {
+			rec := recs[ctxgraph.Loc{Path: m.Path, Line: m.Line}]
+			if rec == nil {
+				continue // defensive: FetchRecords silently drops a line it couldn't parse a second time
 			}
-		}
-		step.NoReply = prof.NoReply(step.Finish, step.RespText)
-		prevNoReply = step.NoReply
+			body, _ := rec.Client.Request.Body.(map[string]any)
+			msgs := chatmsg.Messages(body)
+			rawMsgs, _ := body["messages"].([]any)
+			off := chatmsg.MsgOffset(body)
 
-		for idx := deltaStart; idx < len(msgs); idx++ {
-			h := eventHashAt(m, msgs, rawMsgs, off, idx)
-			if _, dup := seen[h]; dup {
-				continue
+			atStitchBoundary := ci > 0 && i == 0
+			var edge *ctxgraph.Edit
+			var stitchEdge *ctxgraph.StitchEdge
+			var compaction *CompactionInfo
+			var prevManifest *ctxgraph.Manifest
+			var revisesHash *ctxgraph.Hash
+			deltaStart := 0
+			newTask := (ci == 0 && i == 0) || atStitchBoundary
+			// Default: true only for the Journey's very first step (design
+			// doc §11 D1 — every Journey opens on a real instruction, by
+			// construction). Both branches below override this for their
+			// own cases; a plain tool-loop continuation (neither branch
+			// fires) correctly stays false.
+			humanInitiated := ci == 0 && i == 0
+
+			switch {
+			case atStitchBoundary:
+				stitchEdge = l.Stitch.Edge
+				predLineage := chain[ci-1]
+				prevManifest = predLineage.Manifests[len(predLineage.Manifests)-1]
+				if predRec := recs[ctxgraph.Loc{Path: prevManifest.Path, Line: prevManifest.Line}]; predRec != nil {
+					compaction = buildCompactionInfo(predRec, prevManifest, m, msgs)
+				}
+				// deltaStart stays 0: Classify's structural LCP has no
+				// meaning across a stitch boundary, so the whole manifest
+				// is scanned — the global seen-hash dedup below (not a
+				// computed delta) is what correctly suppresses content the
+				// predecessor already showed.
+			case i > 0:
+				e := l.Edges[i-1]
+				edge = &e
+				deltaStart = m.LeadSys + e.LCP
+				prevManifest = l.Manifests[i-1]
+				traceChanged := m.TraceID != "" && prevManifest.TraceID != "" && m.TraceID != prevManifest.TraceID
+				hasNewInstr := deltaHasNewInstruction(prof, msgs, rawMsgs, off, m, prevManifest, deltaStart)
+				newTask = traceChanged || (!prevNoReply && hasNewInstr)
+				humanInitiated = hasNewInstr
+				// F11's "revision" relation: a Splice edge's divergence
+				// point (prevManifest.Keys[e.LCP]) is a message being
+				// rewritten in place, not a coincidental new one — recorded
+				// here and attached to the first NewEvent below, so it
+				// doesn't render as "the same thing said twice".
+				if e.Kind == ctxgraph.Splice && e.LCP < len(prevManifest.Keys) {
+					h := prevManifest.Keys[e.LCP]
+					revisesHash = &h
+				}
 			}
-			ev := &Event{Hash: h, Msg: msgs[idx], FirstStepSeq: seq}
-			seen[h] = ev
-			step.NewEvents = append(step.NewEvents, ev)
-			j.Events = append(j.Events, ev)
+			sysChanged := prevManifest != nil &&
+				(m.HasSys != prevManifest.HasSys || (m.HasSys && prevManifest.HasSys && m.SysHash != prevManifest.SysHash))
+
+			if newTask || curTask == nil {
+				var title string
+				if atStitchBoundary {
+					// Not lastInstructionInDelta: deltaStart is 0 here, so
+					// it would happily pick up the shared anchor message
+					// (e.g. s231's opening instruction, already shown from
+					// the predecessor) and title this task with it again —
+					// reads as "the user asked the same thing twice" even
+					// though nothing new was actually said. Only a
+					// genuinely NEW instruction (not already in seen)
+					// should become the title.
+					newInstr := newInstructionTitleAtStitch(prof, m, msgs, rawMsgs, off, seen)
+					humanInitiated = newInstr != ""
+					title = taskTitle(newInstr)
+					if title == toolLoopTitle {
+						title = stitchTaskTitle(stitchEdge)
+					}
+				} else {
+					title = taskTitle(lastInstructionInDelta(prof, msgs, rawMsgs, off, deltaStart))
+				}
+				curTask = &Task{Title: title}
+				j.Tasks = append(j.Tasks, curTask)
+			}
+
+			seq++
+			step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
+				SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
+				HumanInitiated: humanInitiated}
+			if rec.Client.Response != nil {
+				if s := responseSummary(rec.Client.Response.Body); s != nil {
+					step.Finish = s.Finish
+					step.RespText = strings.TrimSpace(s.Content)
+					step.ToolCalls = s.ToolCalls
+					step.Reasoning = strings.TrimSpace(s.Reasoning)
+				}
+			}
+			step.NoReply = prof.NoReply(step.Finish, step.RespText)
+			prevNoReply = step.NoReply
+
+			for idx := deltaStart; idx < len(msgs); idx++ {
+				h := eventHashAt(m, msgs, rawMsgs, off, idx)
+				if _, dup := seen[h]; dup {
+					continue
+				}
+				ev := &Event{Hash: h, Msg: msgs[idx], FirstStepSeq: seq}
+				if idx == deltaStart {
+					ev.Revises = revisesHash
+				}
+				seen[h] = ev
+				step.NewEvents = append(step.NewEvents, ev)
+				j.Events = append(j.Events, ev)
+			}
+			curTask.Steps = append(curTask.Steps, step)
 		}
-		curTask.Steps = append(curTask.Steps, step)
 	}
 
 	j.Title = deriveTitle(prof, j.Tasks)
 	return j, nil
+}
+
+// stitchTaskTitle titles the Task a stitch boundary opens when there's no
+// genuine new user instruction right there — toolLoopTitle would otherwise
+// claim this is "just a tool loop continuing", which understates what
+// actually happened (a structural context break was bridged).
+func stitchTaskTitle(e *ctxgraph.StitchEdge) string {
+	return "(缝合自更早片段 · " + e.Kind.String() + "，覆盖率 " + pctStr(e.Score) + ")"
+}
+
+// extractEntities moved to chatmsg.ExtractEntities (design doc Appendix C.5
+// T3.3/E.2): internal/report needed the same file-path/URL scan for its own
+// compaction section, and chatmsg is the one package both already depend on
+// without crossing either side's archtest boundary.
+func extractEntities(text string) []string { return chatmsg.ExtractEntities(text) }
+
+// buildCompactionInfo computes a stitch boundary's information-loss
+// summary: token counts before (the predecessor's last manifest) and after
+// (this step, the successor's opening), plus which entities (file-path-like
+// or URL tokens) mentioned in the predecessor's last rendered request
+// stopped appearing here versus which survived.
+func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgraph.Manifest, curMsgs []chatmsg.Message) *CompactionInfo {
+	info := &CompactionInfo{}
+	if predManifest.UsageOK {
+		info.TokensBefore = predManifest.Usage.In
+	}
+	if curManifest.UsageOK {
+		info.TokensAfter = curManifest.Usage.In
+	}
+
+	predBody, _ := predRec.Client.Request.Body.(map[string]any)
+	var predText, curText strings.Builder
+	for _, pm := range chatmsg.Messages(predBody) {
+		predText.WriteString(pm.Text)
+		predText.WriteByte('\n')
+	}
+	for _, cm := range curMsgs {
+		curText.WriteString(cm.Text)
+		curText.WriteByte('\n')
+	}
+	curEntities := map[string]bool{}
+	for _, e := range extractEntities(curText.String()) {
+		curEntities[e] = true
+	}
+	for _, e := range extractEntities(predText.String()) {
+		if curEntities[e] {
+			info.SurvivedEntities = append(info.SurvivedEntities, e)
+		} else {
+			info.SwallowedEntities = append(info.SwallowedEntities, e)
+		}
+	}
+	return info
 }
 
 // idTimeLayout renders a manifest timestamp for use inside a Journey id:
@@ -284,25 +496,31 @@ const idTimeLayout = "20060102T150405"
 const idCodeLen = 8
 
 // deriveID identifies a Journey as "j-<client>-<start>-<end>-<code>":
-// client is the root manifest's (sanitized) ClientKeyTag, start/end are the
-// lineage's first/last manifest timestamps, and code is a short prefix of
-// RootHash — enough to disambiguate two lineages that otherwise share a
-// client and exact start/end second, not the identity itself (design-doc
-// review follow-up: putting client+time first instead of a bare hash means
-// `ls reports/stories/` and a bare `-journey <id>` listing both sort
+// client and code come from chain[0] (the chain's own root — client is its
+// root manifest's sanitized ClientKeyTag, code a short prefix of its
+// RootHash), start is chain[0]'s opening timestamp, end is the LAST
+// lineage's closing timestamp — so a stitched Journey's id spans its whole
+// reconnected timeline, not just its most recent lineage's slice of it.
+// Enough to disambiguate two lineages/chains that otherwise share a client
+// and exact start/end second, not the identity itself (design-doc review
+// follow-up: putting client+time first instead of a bare hash means `ls
+// reports/stories/` and a bare `-journey <id>` listing both sort
 // meaningfully — grouped by client, chronological within each — instead of
 // by content-hash noise).
 //
 // Still fully content-addressed and stable across independent runs
 // regardless of which other files were also loaded (design doc §11 D1):
-// every component here comes from the lineage's own manifests, never from
-// load order or which file it was read from.
-func deriveID(l *ctxgraph.Lineage) string {
-	root, last := l.Manifests[0], l.Manifests[len(l.Manifests)-1]
+// every component here comes from the chain's own manifests (and
+// ctxgraph.StitchGraph's evidence, itself derived purely from manifest
+// content), never from load order or which file it was read from.
+func deriveID(chain []*ctxgraph.Lineage) string {
+	head, tail := chain[0], chain[len(chain)-1]
+	root := head.Manifests[0]
+	last := tail.Manifests[len(tail.Manifests)-1]
 	client := sanitizeIDComponent(root.ClientKeyTag)
 	start := root.TS.UTC().Format(idTimeLayout)
 	end := last.TS.UTC().Format(idTimeLayout)
-	code := l.RootHash().String()[:idCodeLen]
+	code := head.RootHash().String()[:idCodeLen]
 	return "j-" + client + "-" + start + "-" + end + "-" + code
 }
 
@@ -409,11 +627,51 @@ func lastInstructionInDelta(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 	return preview(bestText)
 }
 
+// newInstructionTitleAtStitch is lastInstructionInDelta's stitch-boundary
+// counterpart: scans the WHOLE manifest (deltaStart is always 0 at a stitch
+// boundary — see buildFrom) but, unlike lastInstructionInDelta, skips any
+// candidate whose content hash is already in seen. Without this, a stitch
+// boundary whose manifest opens with the same shared anchor the
+// predecessor already showed (the common case — F6's own s231 example
+// keeps the exact opening instruction verbatim) would title the new task
+// with that same instruction again, reading as "asked the same thing
+// twice" when nothing new was actually said.
+func newInstructionTitleAtStitch(prof profile.Profile, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {
+	best := -1
+	var bestText string
+	for idx, msgv := range msgs {
+		if msgv.Role != "user" {
+			continue
+		}
+		text, ok := prof.RealUserText(msgv, rawMsgs, idx-off)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[eventHashAt(m, msgs, rawMsgs, off, idx)]; dup {
+			continue
+		}
+		if idx > best {
+			best, bestText = idx, text
+		}
+	}
+	if best < 0 {
+		return ""
+	}
+	return preview(bestText)
+}
+
+// toolLoopTitle is the fallback Task title when a turn opens without any
+// genuine new user instruction. Named (not just an inline literal) so
+// buildFrom can detect it and substitute stitchTaskTitle's more specific
+// wording at a stitch boundary — a bridged structural break is a much more
+// informative thing to say than "just a tool loop continuing".
+const toolLoopTitle = "(工具循环延续)"
+
 func taskTitle(newInstruction string) string {
 	if newInstruction != "" {
 		return newInstruction
 	}
-	return "(工具循环延续)"
+	return toolLoopTitle
 }
 
 // deriveTitle is the Journey's own title: the earliest real user

@@ -1073,6 +1073,145 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 	}
 }
 
+// contextGrowthContractFixture reproduces design doc §2.5's ×179.5 dirty-
+// value case (Appendix C.5 T3.2): a session that grows normally for a few
+// turns, then hits an F6-style Contract (anchor survives, everything else
+// collapses), then keeps growing on the other side. Before T3.1's grouping
+// fix, this whole thing was ONE report session (anchor never changed), so
+// ContextGrowth (last/first tokens_in) compared a post-reset token count
+// against a pre-reset one — numerically whatever it happened to be, but
+// meaningless either way, since the two sides never shared a context.
+func contextGrowthContractFixture() []map[string]any {
+	mkTurn := func(ts time.Time, msgs []any, promptTokens int) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": promptTokens, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	sys := map[string]any{"role": "system", "content": "sys"}
+	u1 := map[string]any{"role": "user", "content": "深入调研内存涨价 context growth fixture"}
+
+	var recs []map[string]any
+	msgs := []any{sys, u1}
+	for i, tok := range []int{100, 500, 8000} { // pre-contract growth: honest 80x peak
+		recs = append(recs, mkTurn(t0.Add(time.Duration(i)*time.Minute), append([]any{}, msgs...), tok))
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": "step"})
+	}
+	// Contract: history collapses to [sys v2, u1] — same opening instruction
+	// survives verbatim (F6's pattern) — small post-compaction token count.
+	recs = append(recs, mkTurn(t0.Add(10*time.Minute),
+		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1}, 150))
+	// Post-contract growth continues independently, to its own honest 6x peak.
+	recs = append(recs, mkTurn(t0.Add(11*time.Minute),
+		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1, map[string]any{"role": "assistant", "content": "continuing"}}, 900))
+	return recs
+}
+
+// TestContextGrowthDoesNotCrossContractBreak covers design doc Appendix C.5
+// T3.2: since group() (T3.1) now splits a session at every Contract/Fork
+// edit, ContextGrowth's last/first ratio can no longer straddle a hidden
+// history reset — each of the two resulting sessions gets its own honest,
+// independently-computed growth figure instead of one meaningless number
+// spanning both. No separate "segment by lineage, take the longest segment"
+// algorithm turned out to be needed (design doc Appendix E's T3.2 plan): a
+// SessionInfo IS already exactly one Lineage's worth of records post-T3.1,
+// so there is nothing left to segment.
+func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, contextGrowthContractFixture())
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2 (T3.1: report must split at the Contract break)", len(rep.Sessions))
+	}
+	byID := map[string]*SessionRow{}
+	for i := range rep.Sessions {
+		byID[rep.Sessions[i].ID] = &rep.Sessions[i]
+	}
+	s1, s2 := byID["s01"], byID["s02"]
+	if s1 == nil || s2 == nil {
+		t.Fatalf("expected sessions s01/s02, got %+v", rep.Sessions)
+	}
+	if s1.ContextGrowth != 80 {
+		t.Errorf("session 1 ContextGrowth = %v, want 80 (100 -> 8000 within its own pre-contract lineage)", s1.ContextGrowth)
+	}
+	if s2.ContextGrowth != 6 {
+		t.Errorf("session 2 ContextGrowth = %v, want 6 (150 -> 900 within its own post-contract lineage, independent of session 1) — a value computed across the Contract break would land somewhere else entirely", s2.ContextGrowth)
+	}
+	if s2.ContinuedFrom != s1.ID {
+		t.Errorf("session 2 ContinuedFrom = %q, want %q (linkStitchedLineages should still connect the two for display, even though their ContextGrowth figures stay separate)", s2.ContinuedFrom, s1.ID)
+	}
+}
+
+// TestBuildCompactionsEntitySplitAndTokens covers design doc Appendix C.5
+// T3.3's new §6.7 section: a standalone compaction call whose input
+// mentions two file paths and whose summary output keeps only one of them —
+// the surviving one must land in SurvivedEntities, the dropped one in
+// SwallowedEntities, and tokens_in/tokens_out must come from the compaction
+// call's OWN usage, not either neighboring session's.
+func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	rec := map[string]any{
+		"ts": t0.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"client": map[string]any{
+			"request": map[string]any{"body": map[string]any{
+				"model": "agent",
+				"messages": []any{
+					map[string]any{"role": "system", "content": "You are a context summarization assistant."},
+					map[string]any{"role": "user", "content": "worked on keep.go and drop.go together"},
+				},
+			}},
+			"response": map[string]any{"status": 200, "body": map[string]any{
+				"model": "agent",
+				"choices": []any{map[string]any{"finish_reason": "stop",
+					"message": map[string]any{"role": "assistant", "content": "Summary: continued work on keep.go"}}},
+				"usage": map[string]any{"prompt_tokens": 5000, "completion_tokens": 300},
+			}},
+		},
+		"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+	}
+
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, []map[string]any{rec})
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Compactions) != 1 {
+		t.Fatalf("compactions = %d, want 1: %+v", len(rep.Compactions), rep.Compactions)
+	}
+	c := rep.Compactions[0]
+	if c.TokensIn != 5000 || c.TokensOut != 300 {
+		t.Errorf("tokens = %d/%d, want 5000/300 (the compaction call's own usage)", c.TokensIn, c.TokensOut)
+	}
+	if len(c.SurvivedEntities) != 1 || c.SurvivedEntities[0] != "keep.go" {
+		t.Errorf("survived entities = %v, want [keep.go]", c.SurvivedEntities)
+	}
+	if len(c.SwallowedEntities) != 1 || c.SwallowedEntities[0] != "drop.go" {
+		t.Errorf("swallowed entities = %v, want [drop.go]", c.SwallowedEntities)
+	}
+
+	md := Markdown(rep)
+	if !strings.Contains(md, "§6.7 Compaction 还原") {
+		t.Error("rendered Markdown missing the §6.7 Compaction section header")
+	}
+	if !strings.Contains(md, "drop.go") {
+		t.Errorf("rendered Markdown should surface the swallowed entity sample:\n%s", md)
+	}
+}
+
 // TestMarkdownTableCellsWithPercentRenderVerbatim locks in a bug 2.6's
 // mdTable refactor introduced and the real-log verification caught: row()
 // originally passed the joined cell string straight to w(format, ...) as

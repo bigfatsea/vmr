@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // Package archtest holds executable checks for architectural invariants
 // this project has stated but never enforced with code: a documented
@@ -15,20 +15,19 @@ import (
 )
 
 // forbiddenImports pins the rule that the analysis/report layer only
-// depends on the audit log schema, never on the routing runtime it
-// analyzes. internal/report is already structurally an island (only
-// vmr/internal/{audit,core} today) — this test exists so it stays that way
-// as the package grows, not because it's currently violated.
+// depends on the audit log schema and (since design doc Appendix C.5 T3.1)
+// internal/ctxgraph, never on the routing runtime it analyzes — this test
+// exists so it stays that way as the package grows, not because it's
+// currently violated.
 //
 // internal/ctxgraph (the content-addressed manifest/lineage layer behind
-// `vmr story` — see docs/Agent任务叙事报告_设计与价值论证_2026-07-28_opus-5.md
-// §7.3) is held to the same island rule, plus one more: it must not depend
-// on internal/report either, even though internal/report's _test.go files
-// import ctxgraph the other way around (a parity check, not a production
-// dependency — go list -deps doesn't see test-only imports, so that stays
-// invisible here). ctxgraph existing to eventually replace report's own
-// grouping logic (Phase 3) would be undermined if it quietly depended back
-// on the thing it's meant to decouple.
+// `vmr story`, and — as of T3.1 — behind internal/report's own session
+// grouping too; see docs/
+// Agent任务叙事报告_设计与价值论证_v1.1_2026-07-30_sonnet-5.md §7.3) is held
+// to the same island rule, plus one more: it must not depend on
+// internal/report — report now legitimately depends on ctxgraph in
+// production code (one-directional), and ctxgraph depending back on report
+// would be a real import cycle risk, not just a layering preference.
 var forbiddenImports = map[string][]string{
 	"vmr/internal/report": {
 		"vmr/internal/router",

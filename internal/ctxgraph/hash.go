@@ -1,4 +1,4 @@
-// Ver 2026-07-28 22:30, by Sonnet 5
+// Ver 2026-07-29 23:55, by Sonnet 5
 
 // Package ctxgraph builds a content-addressed model of an agent's context
 // over time: each request's message list becomes a Manifest (a vector of
@@ -25,10 +25,9 @@ import (
 // key order in the original request body).
 type Hash [16]byte
 
-// String renders h as a lowercase hex string, matching the format
-// internal/report/session.go's collect() used for the same digest (its
-// r.keys/r.anchor were "%x" of the same md5.Sum) — this parity matters for
-// the cross-package hash test in internal/report (T1's parity check).
+// String renders h as a lowercase hex string — internal/story uses this for
+// a Journey id's trailing disambiguator (RootHash().String()[:idCodeLen]),
+// so it needs to be filename/URL-safe, not just human-readable.
 func (h Hash) String() string {
 	return hex.EncodeToString(h[:])
 }
