@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
+<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
 
 # 为什么选 vmr，而不是 LiteLLM（或 Portkey，或其他任何"翻译型"网关）
 
@@ -48,4 +48,4 @@ vmr 没有一个"你的请求要在里面幸存下来"的内部 schema。它只�
 
 ---
 
-延伸阅读：完整架构与每条设计决策背后的取舍见[设计文档](VirtualModelRouter_System_Design_v3.md)；配置与 CLI 完整参考见[用户指南](UserGuide.zh.md)。
+延伸阅读：完整架构与每条设计决策背后的取舍见设计文档——[Part 1：路由核心](VirtualModelRouter_Design_v4_Core.md)、[Part 2：`vmr report`/`vmr story`](VirtualModelRouter_Design_v4_Analytics.md)；配置与 CLI 完整参考见[用户指南](UserGuide.zh.md)。

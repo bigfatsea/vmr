@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->
+<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -19,7 +19,7 @@ Agent 是无人值守跑的：凌晨三点某家供应商限流、欠费、宕�
 - **条件感知路由 + 会话粘性** —— 端点声明自己实际支持什么（`capabilities: [image, tools]`、`max_context_tokens`），请求需要而某个端点没声明的能力会被自动跳过；估算过于保守时有内建的降级兜底，绝不会因为一次猜测就拒掉一条本该成功的请求。多轮对话会尽量留在上游 prompt cache 已经预热的那个端点上，让"更聪明的路由"不会因为中途换供应商反而悄悄推高成本。
 - **真流式** —— SSE 事件到达即转发。归一化器只在检测到厂商"思考内联"病理形态时才缓冲，且 `</think>` 闭合后立即恢复实时流。
 - **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
-- **飞行记录仪式审计日志，为 agent 场景而设计** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计——而且专门读得懂 Agent 流量：请求自动分组为会话 → 任务 → 轮次，每份详单用 🆕 前缀标记本轮新增，工具使用报告直接告诉你哪些声明的工具从未被调用。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍），也可以设置自动过期。
+- **飞行记录仪式审计日志，为 agent 场景而设计** —— 每个请求一行 JSONL，双层完整记录（调用方↔vmr、vmr↔上游）、每次 failover 尝试、实际生效的归一化清单。`vmr report` 把日志变成用量/延迟/可用度统计——而且专门读得懂 Agent 流量：请求自动分组为会话 → 任务 → 轮次，每份详单用 🆕 前缀标记本轮新增，工具使用报告直接告诉你哪些声明的工具从未被调用。`vmr story` 更进一步：把单次 Agent 任务的完整执行过程还原成一份可读的叙事（进了什么上下文、模型拿它做了什么、哪一次历史压缩丢了什么信息），外加一套规则派生的行为剖面，可以拿两次运行直接做差对比。过期的日志文件自动压缩为 `.zst`（实测缩小 20~75 倍），也可以设置自动过期。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；默认关闭，fail-open；降采样结果按内容哈希落盘缓存，避免重复处理。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。只有 4 个直接依赖，完整清单见 `go.mod`。
 - **性能是量出来的，不是猜的** —— 压测至 150 req/s：11 个测试场景中有 9 个路由/透传开销 p95 在 10ms 以内，唯一有实质成本的是可选的图片降采样。细节见 [`loadtest/`](loadtest/)。
@@ -85,7 +85,7 @@ curl http://127.0.0.1:8800/admin/status
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传/归一化行为、故障切换与健康细节、审计日志与 `vmr report`、图片降采样、完整 CLI 参考。
 - **[为什么选 vmr 而不是 LiteLLM](docs/Why_vmr_over_LiteLLM.zh.md)** —— 字节级透传跟翻译型网关比到底差在哪，以及什么时候你其实该选翻译型网关。
-- **[设计文档](docs/VirtualModelRouter_System_Design_v3.md)** —— 完整架构与每条设计决策，附带取舍理由。
+- **设计文档**（分两部分）—— 完整架构与每条设计决策，附带取舍理由：[Part 1 —— 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2 —— `vmr report`/`vmr story`](docs/VirtualModelRouter_Design_v4_Analytics.md)。
 
 ## 开发
 

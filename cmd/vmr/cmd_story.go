@@ -17,7 +17,7 @@ import (
 
 // cmdStory renders one agent task's full execution history as a
 // self-contained Markdown narrative — see
-// docs/Agent任务叙事报告_设计与价值论证_2026-07-28_opus-5.md for the design.
+// docs/VirtualModelRouter_Design_v4_Analytics.md §3 for the design.
 // Step 2 (design doc Appendix C.4 T2.2): a candidate is no longer always
 // exactly one ctxgraph.Lineage — ctxgraph.StitchGraph resolves Contract/
 // Fork breaks back to their best predecessor where the evidence supports
@@ -36,6 +36,8 @@ func cmdStory(args []string) error {
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
+	compareA := fs.String("compare-a", "", "first journey (id or id prefix) for a behavior-profile comparison against -compare-b (design doc Appendix C.6 4d)")
+	compareB := fs.String("compare-b", "", "second journey (id or id prefix) for -compare-a's comparison")
 	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (design doc §11 D1)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records (design-doc review §2.1)")
 	if err := fs.Parse(args); err != nil {
@@ -67,17 +69,16 @@ func cmdStory(args []string) error {
 
 	cands := story.ListCandidates(g)
 
-	if *journeyArg != "" {
-		var target *ctxgraph.Lineage
-		for _, l := range cands {
-			chain := ctxgraph.ChainFrom(l, byIdx)
-			if strings.HasPrefix(story.ID(chain), *journeyArg) {
-				target = l
-				break
-			}
+	if *compareA != "" || *compareB != "" {
+		if *compareA == "" || *compareB == "" {
+			return fmt.Errorf("-compare-a and -compare-b must both be given")
 		}
-		if target == nil {
-			return fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", *journeyArg)
+		return compareJourneys(cands, byIdx, *compareA, *compareB, firstPath, prof, *includePartial, *outDir)
+	}
+	if *journeyArg != "" {
+		target, _, err := resolveJourneyID(cands, byIdx, *journeyArg)
+		if err != nil {
+			return err
 		}
 		return renderJourney(target, byIdx, firstPath, prof, *includePartial, *outDir)
 	}
@@ -85,6 +86,21 @@ func cmdStory(args []string) error {
 		return renderAllJourneys(cands, byIdx, firstPath, prof, *includePartial, *outDir)
 	}
 	return listJourneys(cands, byIdx, g, firstPath, prof, *includePartial)
+}
+
+// resolveJourneyID finds the candidate chain whose ID (design doc §11's
+// content-addressed j-<client>-<start>-<end>-<code>) starts with idPrefix —
+// shared by -journey and -compare-a/-compare-b, which all resolve a
+// user-supplied id prefix the same way (first match in candidate order, as
+// printed by running with no selector flag at all).
+func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idPrefix string) (*ctxgraph.Lineage, []*ctxgraph.Lineage, error) {
+	for _, l := range cands {
+		chain := ctxgraph.ChainFrom(l, byIdx)
+		if strings.HasPrefix(story.ID(chain), idPrefix) {
+			return l, chain, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", idPrefix)
 }
 
 func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool) error {
@@ -191,6 +207,63 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return err
 	}
 	fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), journeySteps(j))
+	return nil
+}
+
+// compareJourneys is Step 4's 4d module (design doc Appendix C.6/G): resolve
+// both id prefixes, build each Journey, diff their already-computed
+// behavior profiles (story.Compare), and write the result as one Markdown +
+// JSON pair — the same .md+.json convention writeJourneyFile uses for a
+// single Journey. Either side being partial-head gates on -include-partial
+// exactly like a single-journey render (an unstable ID is still unstable
+// when it's one half of a comparison), and the output filename picks up the
+// same "-partial" self-disclosure suffix if either side is.
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
+	if err != nil {
+		return fmt.Errorf("-compare-a: %w", err)
+	}
+	_, chainB, err := resolveJourneyID(cands, byIdx, idB)
+	if err != nil {
+		return fmt.Errorf("-compare-b: %w", err)
+	}
+	partialA := story.IsPartialHead(chainA, firstPath)
+	partialB := story.IsPartialHead(chainB, firstPath)
+	if (partialA || partialB) && !includePartial {
+		return fmt.Errorf("one or both journeys look head-truncated (design doc §11 D1) — pass -include-partial to compare them anyway")
+	}
+
+	jA, err := story.BuildChain(chainA, prof)
+	if err != nil {
+		return err
+	}
+	jB, err := story.BuildChain(chainB, prof)
+	if err != nil {
+		return err
+	}
+	cmp := story.Compare(story.Summarize(jA), story.Summarize(jB))
+
+	storiesDir, err := ensureStoriesDir(outDir)
+	if err != nil {
+		return err
+	}
+	base := "compare-" + jA.ID + "-vs-" + jB.ID
+	if partialA || partialB {
+		base += "-partial"
+	}
+	mdPath := filepath.Join(storiesDir, base+".md")
+	if err := os.WriteFile(mdPath, []byte(story.RenderComparisonMarkdown(cmp)), 0o600); err != nil {
+		return err
+	}
+	jsonPath := filepath.Join(storiesDir, base+".json")
+	data, err := json.MarshalIndent(cmp, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(jsonPath, data, 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("%s\n", mdPath)
 	return nil
 }
 

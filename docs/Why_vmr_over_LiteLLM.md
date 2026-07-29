@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-16 17:00, by Sonnet 5 -->
+<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
 
 # Why vmr over LiteLLM (or Portkey, or any other translation gateway)
 
@@ -48,4 +48,4 @@ If none of those describe your situation — if what you actually have is one ag
 
 ---
 
-See also: [design doc](VirtualModelRouter_System_Design_v3.md) for the full architecture and every design decision behind it, [User Guide](UserGuide.md) for configuration and CLI reference.
+See also: design doc for the full architecture and every design decision behind it — [Part 1: routing core](VirtualModelRouter_Design_v4_Core.md), [Part 2: `vmr report`/`vmr story`](VirtualModelRouter_Design_v4_Analytics.md) — and [User Guide](UserGuide.md) for configuration and CLI reference.

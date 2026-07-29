@@ -1,7 +1,7 @@
 // Ver 2026-07-24 13:15, by Sonnet 5
 
 // gentargets writes loadtest/targets.json — one Vegeta attack target per
-// scenario (see docs/VirtualModelRouter_System_Design_v3.md §12) — plus two
+// scenario (see docs/VirtualModelRouter_Design_v4_Core.md §12) — plus two
 // subset files, targets-plain.json and targets-image.json, split by
 // whether the scenario exercises image downscaling. Image decode/scale/
 // encode is by far the most expensive code path vmr has (design doc §7);

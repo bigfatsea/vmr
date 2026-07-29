@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->
+<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -19,7 +19,7 @@ Point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK at one stable virtual m
 - **Condition-aware, session-sticky routing** — endpoints declare what they actually support (`capabilities: [image, tools]`, `max_context_tokens`); a request needing something an endpoint doesn't declare skips it, with a built-in fallback so a conservative size estimate can never block a request that would have worked. Multi-turn conversations stay pinned to whichever endpoint's upstream prompt cache is already warm, so smarter routing can't quietly cost you more by switching providers mid-conversation.
 - **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
 - **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
-- **Flight-recorder audit log, agent-shaped** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, and the exact normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics — and it understands agent traffic specifically: requests group into sessions → tasks → turns, each turn's delta gets a 🆕 marker, and a tool-usage report tells you which declared tools are never actually called. Old days auto-compress to `.zst` (20–75× smaller) and can auto-expire.
+- **Flight-recorder audit log, agent-shaped** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, and the exact normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics — and it understands agent traffic specifically: requests group into sessions → tasks → turns, each turn's delta gets a 🆕 marker, and a tool-usage report tells you which declared tools are never actually called. `vmr story` goes one level deeper: reconstructs a single agent task's full execution history into a readable narrative (what context entered, what the model did with it, where a history-compaction event lost information), plus a rule-derived behavior profile you can diff between two runs. Old days auto-compress to `.zst` (20–75× smaller) and can auto-expire.
 - **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; off by default, fail-open, content-hash cached on disk so the same image is never reprocessed.
 - **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Four direct dependencies, full list in `go.mod`.
 - **Measured, not assumed** — load-tested at up to 150 req/s: sub-10ms p95 routing/passthrough overhead on 9 of 11 tested scenarios; the only real cost is optional image downscaling. See [`loadtest/`](loadtest/).
@@ -86,7 +86,7 @@ That's the whole surface a first request needs. Everything past this point — f
 
 - **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, image downscaling, complete CLI reference.
 - **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** — how byte-faithful passthrough compares to translation-based gateways, and when you'd actually want a translation gateway instead.
-- **[Design doc](docs/VirtualModelRouter_System_Design_v3.md)** (Chinese) — full architecture and every design decision, with the reasoning behind it.
+- **Design doc** (Chinese, two parts) — full architecture and every design decision, with the reasoning behind it: [Part 1 — routing core](docs/VirtualModelRouter_Design_v4_Core.md), [Part 2 — `vmr report`/`vmr story`](docs/VirtualModelRouter_Design_v4_Analytics.md).
 
 ## Development
 

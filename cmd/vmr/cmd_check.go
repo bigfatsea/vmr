@@ -52,7 +52,7 @@ func cmdCheck(args []string) error {
 				// when they actually constrain something — an endpoint with
 				// none of these set behaves exactly as before they existed,
 				// and the check output should look exactly as before too
-				// (see docs/VirtualModelRouter_System_Design_v3.md §6.4:
+				// (see docs/VirtualModelRouter_Design_v4_Core.md §6.4:
 				// absent = unconstrained/inherit, never a new limit).
 				extra := ""
 				if len(ep.Capabilities) > 0 {

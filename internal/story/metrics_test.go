@@ -325,3 +325,30 @@ func TestComputeMetrics_CompactionTotals(t *testing.T) {
 		t.Errorf("CompactionLossTokens = %d, want %d", m.CompactionLossTokens, wantLoss)
 	}
 }
+
+// TestSummarize covers JourneySummary's own construction: identity fields
+// copied straight from the Journey, Metrics computed fresh (not just
+// zero-valued) — the shape journey-<id>.json actually serializes and Step
+// 4's 4d module (Compare) consumes.
+func TestSummarize(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "调研一下")
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("开工"))
+	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "done")}, sseText("完成"))
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, profile.Generic)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	s := Summarize(j)
+	if s.ID != j.ID || s.Title != j.Title || !s.From.Equal(j.From) || !s.To.Equal(j.To) {
+		t.Errorf("Summarize identity fields = %+v, want them copied from Journey %+v", s, j)
+	}
+	want := ComputeMetrics(j)
+	if s.Metrics.ModelMS != want.ModelMS || s.Metrics.NetWorkingMS != want.NetWorkingMS {
+		t.Errorf("Summarize.Metrics = %+v, want it to match a fresh ComputeMetrics(j) = %+v", s.Metrics, want)
+	}
+}

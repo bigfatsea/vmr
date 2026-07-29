@@ -382,3 +382,42 @@ func TestBuildAll_EmptyLineageErrors(t *testing.T) {
 		t.Error("BuildAll with an empty lineage should return an error")
 	}
 }
+
+// TestSortByRootThenTime_TieBreaksOnRootHash covers the tie-break path: two
+// lineages whose root manifests share the exact same timestamp (should not
+// happen in practice, but must still sort deterministically across runs
+// rather than depending on input slice order) fall back to comparing
+// RootHash strings.
+func TestSortByRootThenTime_TieBreaksOnRootHash(t *testing.T) {
+	tie := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	rA := mkRec(tie, "", []any{msg("system", "sys"), msg("user", "task A")}, sseText("ok"))
+	rB := mkRec(tie, "", []any{msg("system", "sys"), msg("user", "task B")}, sseText("ok"))
+
+	pathA := writeJSONL(t, []audit.Record{rA})
+	pathB := writeJSONL(t, []audit.Record{rB})
+	gA, err := ctxgraph.Scan([]string{pathA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gB, err := ctxgraph.Scan([]string{pathB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lA, lB := gA.Lineages[0], gB.Lineages[0]
+	if !lA.Manifests[0].TS.Equal(lB.Manifests[0].TS) {
+		t.Fatal("fixture bug: both lineages must share the exact same root timestamp")
+	}
+
+	want := []*ctxgraph.Lineage{lA, lB}
+	if lB.RootHash().String() < lA.RootHash().String() {
+		want = []*ctxgraph.Lineage{lB, lA}
+	}
+
+	for _, in := range [][]*ctxgraph.Lineage{{lA, lB}, {lB, lA}} {
+		got := append([]*ctxgraph.Lineage(nil), in...)
+		sortByRootThenTime(got)
+		if got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("sortByRootThenTime(%v) tie-break not deterministic/RootHash-ordered: got %v, want %v", in, got, want)
+		}
+	}
+}

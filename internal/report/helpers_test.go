@@ -1,9 +1,8 @@
 // Ver 2026-07-25, report
 
-// Tests for small shared helpers that used to live in report.go/usage.go's
-// test file before the old aggregate-report code (report.go/markdown.go)
-// was removed; attemptErrorClass now lives in render.go, ExtractUsage in
-// usage.go — both still load-bearing via session.go/detail.go.
+// Tests for small shared helpers: attemptErrorClass (render.go) and the
+// ExtractUsage re-export (chatmsg_compat.go, backed by chatmsg.ExtractUsage)
+// — both load-bearing via session.go/detail.go.
 package report
 
 import (

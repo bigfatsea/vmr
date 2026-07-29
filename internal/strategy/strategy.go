@@ -83,7 +83,7 @@ func (priority) Compare(a, b *core.Endpoint) int {
 // (endpoint-vs-endpoint ordering, no request access), a Condition is
 // request-aware and elimination-only — it never reorders candidates, it
 // only says yes or no. See
-// docs/VirtualModelRouter_System_Design_v3.md §6.4 for the
+// docs/VirtualModelRouter_Design_v4_Core.md §6.4 for the
 // architectural rationale (Dimension.Compare structurally can't see the
 // request; this is a parallel, differently-shaped interface, not an
 // extension of Dimension).

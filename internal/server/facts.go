@@ -1,7 +1,7 @@
 // Ver 2026-07-25, by Sonnet 5
 
 // RequestFacts computation for condition-based routing (see
-// docs/VirtualModelRouter_System_Design_v3.md §6.4). Every estimate here is
+// docs/VirtualModelRouter_Design_v4_Core.md §6.4). Every estimate here is
 // a coarse, deliberately-conservative approximation, not a precise
 // accounting: the guiding cost principle is to infer from length/presence
 // rather than parse content, accept imprecision, and lean toward

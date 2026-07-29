@@ -60,7 +60,7 @@ type CanonicalRequest struct {
 
 // RequestFacts are cheap, request-derived signals computed once per request
 // (never per candidate endpoint) and consulted by strategy.Condition
-// implementations — see docs/VirtualModelRouter_System_Design_v3.md §6.4.
+// implementations — see docs/VirtualModelRouter_Design_v4_Core.md §6.4.
 // WantsThinking/HasAudio/HasVideo are typed placeholders only: no
 // detection logic populates them yet (protocol shapes for audio/video input
 // and MiniMax's thinking parameter aren't confirmed), so they are always

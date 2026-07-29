@@ -1,8 +1,8 @@
-<!-- Ver 2026-07-24 13:15, by Sonnet 5 -->
+<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
 
 # vmr load test — runbook
 
-Design and rationale: [`docs/VirtualModelRouter_System_Design_v3.md`](../docs/VirtualModelRouter_System_Design_v3.md), "Performance validation" section. This is a one-off sanity check, not a maintained benchmark suite — run it when you actually want the numbers (e.g. before a release push), not on every commit. Nothing here is wired into CI.
+Design and rationale: [`docs/VirtualModelRouter_Design_v4_Core.md`](../docs/VirtualModelRouter_Design_v4_Core.md), "Performance validation" section. This is a one-off sanity check, not a maintained benchmark suite — run it when you actually want the numbers (e.g. before a release push), not on every commit. Nothing here is wired into CI.
 
 Eleven scenarios, each its own virtual model in [`config.yaml`](config.yaml), each exercising a code path with a genuinely different cost profile: `baseline` (routing floor), `stream_normal` (true SSE passthrough), `thinking_leak` (the known-worst full-buffer path), `think_tag` (buffer-then-resume path), `big_response` (large non-streaming body), `big_image` / `multi_image` (image decode/scale/encode, single and multi-image), `gif` (confirms the never-rescale fast path stays cheap), `long_history` (large-body parsing/audit cost), `failover` (health/cooldown machinery), `anthropic_baseline` (the other protocol adapter).
 

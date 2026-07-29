@@ -104,7 +104,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	}
 
 	// Context length is an estimate, not a certainty (see
-	// docs/VirtualModelRouter_System_Design_v3.md §6.4), so it never gets to
+	// docs/VirtualModelRouter_Design_v4_Core.md §6.4), so it never gets to
 	// empty a non-empty hardFiltered set on its own — if every declared
 	// max_context_tokens looks too small, fall back to hardFiltered and let
 	// a real attempt (backed by the ordinary failover loop once the
@@ -125,7 +125,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 
 	// Sticky Model: prefer whichever endpoint most recently, successfully
 	// served this same conversation, so the upstream prompt cache stays
-	// warm (docs/VirtualModelRouter_System_Design_v3.md §6.5). Only ever
+	// warm (docs/VirtualModelRouter_Design_v4_Core.md §6.5). Only ever
 	// reorders within the already-filtered candidates — an endpoint that's
 	// unhealthy or fails a hard condition this turn is never resurrected
 	// just because it was the sticky pick last time.
@@ -210,7 +210,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		} else if len(healthOK) > 0 {
 			// Health had candidates; a Condition rejected every one of
 			// them — name which one(s) so the operator doesn't have to
-			// guess (see docs/VirtualModelRouter_System_Design_v3.md §6.4).
+			// guess (see docs/VirtualModelRouter_Design_v4_Core.md §6.4).
 			msg = fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
 		}
 		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)

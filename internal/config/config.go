@@ -33,7 +33,7 @@ const (
 	// affinity preference stays valid, absent an explicit sticky_ttl.
 	// Calibrated to the shortest common upstream prompt-cache lifetime
 	// (Anthropic's 5-minute default, OpenAI's 5-10 minute window) with a
-	// little headroom — see docs/VirtualModelRouter_System_Design_v3.md
+	// little headroom — see docs/VirtualModelRouter_Design_v4_Core.md
 	// §6.5. Endpoints backed by a longer-lived cache (e.g. DeepSeek's disk
 	// cache, hours to days) should override it per-endpoint.
 	DefaultStickyTTL = 10 * time.Minute
@@ -96,7 +96,7 @@ type EndpointConfig struct {
 	Priority int    `yaml:"priority"`
 
 	// Capabilities and MaxContextTokens drive condition-based routing (see
-	// docs/VirtualModelRouter_System_Design_v3.md §6.4). Both
+	// docs/VirtualModelRouter_Design_v4_Core.md §6.4). Both
 	// are optional and default to "unconstrained" when absent — a request
 	// needing a capability or context size this endpoint doesn't declare
 	// simply isn't filtered by that dimension, so configs written before
@@ -124,7 +124,7 @@ type ModelConfig struct {
 	ImageDownscaleMaxPx *int             `yaml:"image_downscale"`
 
 	// Sticky enables session-affinity routing for this virtual model (see
-	// docs/VirtualModelRouter_System_Design_v3.md §6.5). A *bool,
+	// docs/VirtualModelRouter_Design_v4_Core.md §6.5). A *bool,
 	// not bool: nil (field absent) defaults to true — the hashing cost is
 	// negligible and multi-turn agent traffic is VMR's primary
 	// audience, so stickiness should apply without the user having to
@@ -231,7 +231,7 @@ type Config struct {
 	ImageCacheTTLDays   int    `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int    `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
 	// StickyTTL is the global default for how long a Sticky Model affinity
-	// preference stays valid (see docs/VirtualModelRouter_System_Design_v3.md
+	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md
 	// §6.5); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
 	// EndpointConfig.StickyTTL overrides this for endpoints whose upstream
 	// cache lifetime differs (e.g. DeepSeek's disk cache).

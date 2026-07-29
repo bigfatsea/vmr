@@ -4,12 +4,13 @@
 // JSONL and fills in the Report2 buckets declared in rows.go. Rendering
 // lives in render_doc.go + one section_*.go per numbered section; the
 // per-request detail files in detail.go/render.go; session and task
-// grouping in session.go; token extraction in usage.go; the optional
-// pricing sidecar in pricing.go.
+// grouping in session.go; token extraction in chatmsg.ExtractUsage (via the
+// ExtractUsage re-export in chatmsg_compat.go); the optional pricing sidecar
+// in pricing.go.
 //
 // The report is organized around nine numbered sections (§0-§8) plus §6.5
-// sticky effectiveness and §6.6 endpoint value — see
-// docs/VirtualModelRouter_System_Design_v3.md §9.4.
+// sticky effectiveness, §6.6 endpoint value, and §6.7 compaction — see
+// docs/VirtualModelRouter_Design_v4_Analytics.md §2.
 //
 // Meta.Format (const Format, rows.go) encodes one invariant: every bucket
 // keeps its own raw dur_ms / ttft_ms / stream_ms slices and computes true
