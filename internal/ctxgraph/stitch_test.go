@@ -17,6 +17,7 @@ import (
 // predecessor's accumulated content — StitchGraph must reconnect them as
 // StitchCompaction.
 func TestStitchGraph_CompactionCase(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := sysMsg("You are a personal assistant.")
 	u1 := userMsg("深入调研这个内存涨价这一波")
@@ -66,6 +67,7 @@ func TestStitchGraph_CompactionCase(t *testing.T) {
 // opening shares nothing at all with any earlier lineage, and no
 // metadata.user_id to fall back on for a same_chat signal either.
 func TestStitchGraph_NoPredecessorFoundForGenuinelyNewLineage(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := sysMsg("sys")
 	// Bucket A: an anchor that has nothing to do with bucket B.
@@ -103,6 +105,7 @@ func TestStitchGraph_NoPredecessorFoundForGenuinelyNewLineage(t *testing.T) {
 // SessKey+time-proximity signal and flag it AmbiguousMatch (same_chat),
 // never auto-stitch it.
 func TestStitchGraph_SameChatAmbiguousMatch(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := sysMsg("sys")
 	meta := func(uid string) map[string]any { return map[string]any{"user_id": uid} }
@@ -144,6 +147,7 @@ func TestStitchGraph_SameChatAmbiguousMatch(t *testing.T) {
 // clears stitchHeadPruneScore but not stitchCompactionScore — a Fork-origin
 // break with real (but partial) content continuity.
 func TestStitchGraph_HeadPruneCase(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := sysMsg("sys")
 	meta := func(uid string) map[string]any { return map[string]any{"user_id": uid} }
@@ -195,6 +199,7 @@ func TestStitchGraph_HeadPruneCase(t *testing.T) {
 // even with a very high score, falling through to same_chat/no-match
 // instead of a false StitchHeadPrune.
 func TestStitchGraph_CrossBucketMatchRejectedBeyondMaxGap(t *testing.T) {
+	t.Parallel()
 	sys := sysMsg("sys")
 	shared := userMsg("recurring scheduled-task boilerplate that repeats verbatim every day")
 
@@ -250,6 +255,7 @@ func TestStitchGraph_CrossBucketMatchRejectedBeyondMaxGap(t *testing.T) {
 // TestChainFrom_CompactionCase covers the chain-resolution helpers using
 // the same compaction fixture TestStitchGraph_CompactionCase uses.
 func TestChainFrom_CompactionCase(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := sysMsg("sys")
 	u1 := userMsg("深入调研这个内存涨价这一波")
@@ -308,6 +314,7 @@ func TestChainFrom_CompactionCase(t *testing.T) {
 // always wins, across many repeated Scan+StitchGraph calls on the exact
 // same input.
 func TestStitchGraph_TiedScoreCandidatesPickDeterministicWinner(t *testing.T) {
+	t.Parallel()
 	sys := sysMsg("sys")
 	shared1 := userMsg("SHARED_ONE unique content")
 	shared2 := userMsg("SHARED_TWO unique content")
@@ -368,6 +375,7 @@ func TestStitchGraph_TiedScoreCandidatesPickDeterministicWinner(t *testing.T) {
 }
 
 func TestStitchKind_String(t *testing.T) {
+	t.Parallel()
 	cases := map[StitchKind]string{StitchCompaction: "compaction", StitchHeadPrune: "head_prune", StitchSameChat: "same_chat"}
 	for k, want := range cases {
 		if got := k.String(); got != want {
@@ -377,6 +385,7 @@ func TestStitchKind_String(t *testing.T) {
 }
 
 func TestStitchOutcome_String(t *testing.T) {
+	t.Parallel()
 	cases := map[StitchOutcome]string{
 		NoBreak: "no_break", Stitched: "stitched",
 		NoPredecessorFound: "no_predecessor_found", AmbiguousMatch: "ambiguous_match",
@@ -397,6 +406,7 @@ func TestStitchOutcome_String(t *testing.T) {
 // stitchSameChatWindow of l's start must still surface as AmbiguousMatch/
 // StitchSameChat, not get silently downgraded to "no predecessor found".
 func TestResolveStitch_EmptyOpeningKeysStillTriesSameChat(t *testing.T) {
+	t.Parallel()
 	predEnd := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	pred := &Lineage{
 		Idx: 0, SessKey: "s1",

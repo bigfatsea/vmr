@@ -35,6 +35,7 @@ func readAll(t *testing.T, rs io.Reader) string {
 }
 
 func TestRespStream_ModelFieldRewrite(t *testing.T) {
+	t.Parallel()
 	// Each chunk: standard SSE message with model field. The processor
 	// should rewrite "MiniMax-M3" → "agent" in every chunk.
 	src := strings.NewReader(
@@ -52,6 +53,7 @@ func TestRespStream_ModelFieldRewrite(t *testing.T) {
 }
 
 func TestRespStream_ThinkBlockStripped(t *testing.T) {
+	t.Parallel()
 	// MiniMax-style: thinking is inline as <think>...</think> inside
 	// delta.content, with literal "\n\n" trailing the close tag.
 	src := strings.NewReader(
@@ -73,6 +75,7 @@ func TestRespStream_ThinkBlockStripped(t *testing.T) {
 }
 
 func TestRespStream_ThinkBlockCrossChunk(t *testing.T) {
+	t.Parallel()
 	// Realistic cross-chunk case: the opener <think> and the closer
 	// </think> are in different SSE messages, and the body of the
 	// think block spans the boundary. This is the typical pattern in
@@ -95,6 +98,7 @@ func TestRespStream_ThinkBlockCrossChunk(t *testing.T) {
 }
 
 func TestRespStream_DoneSentinel(t *testing.T) {
+	t.Parallel()
 	// Upstream closes without [DONE]. The processor must append one
 	// before returning EOF so SSE parsers get a clean termination.
 	src := strings.NewReader(
@@ -108,6 +112,7 @@ func TestRespStream_DoneSentinel(t *testing.T) {
 }
 
 func TestRespStream_NonStreamSingleObject(t *testing.T) {
+	t.Parallel()
 	// A single JSON object with no SSE framing: no event separator ever
 	// appears, so the stream stays undecided until EOF and goes through
 	// the buffered whole-body pass (model rewrite + think strip). isSSE
@@ -132,6 +137,7 @@ func TestRespStream_NonStreamSingleObject(t *testing.T) {
 }
 
 func TestRespStream_NoThinkBlockPassthrough(t *testing.T) {
+	t.Parallel()
 	// Normal content without any think markers should be untouched.
 	// The trailing newlines in delta.content are preserved.
 	in := `data: {"choices":[{"delta":{"content":"plain reply"}}]}` + "\n\n"
@@ -142,6 +148,7 @@ func TestRespStream_NoThinkBlockPassthrough(t *testing.T) {
 }
 
 func TestRespStream_OneByteReads(t *testing.T) {
+	t.Parallel()
 	// Pathological: read one byte at a time from the source. Event
 	// assembly and the mode decision must be unaffected by how the
 	// bytes are chunked on the wire.
@@ -175,6 +182,7 @@ func (r oneByteReader) Read(p []byte) (int, error) {
 }
 
 func TestStripThinkingProcess_FullPattern(t *testing.T) {
+	t.Parallel()
 	// The full MiniMax M3 thinking=medium shape: the buffer is the raw
 	// upstream body with SSE framing, and the thinking lives in a separate
 	// data: line from the final response — the strip must drop the
@@ -214,6 +222,7 @@ func TestStripThinkingProcess_FullPattern(t *testing.T) {
 }
 
 func TestStripThinkingProcess_MultipleEndorsements(t *testing.T) {
+	t.Parallel()
 	// The model iterates — emits "Looks good. Pro" once in
 	// the thinking line, then "Looks good. Proceed" at the
 	// actual transition in the final response line. We must
@@ -239,6 +248,7 @@ func TestStripThinkingProcess_MultipleEndorsements(t *testing.T) {
 }
 
 func TestStripThinkingProcess_NoEndorsement(t *testing.T) {
+	t.Parallel()
 	// Content mentions "Thinking Process" but lacks the
 	// "Looks good. Pro" self-endorsement marker. Pass through
 	// rather than drop the response.
@@ -250,6 +260,7 @@ func TestStripThinkingProcess_NoEndorsement(t *testing.T) {
 }
 
 func TestStripThinkingProcess_NotThinkingProcess(t *testing.T) {
+	t.Parallel()
 	// Content has no "Looks good. Pro" self-endorsement marker —
 	// pass through.
 	in := "data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"Hello world\"}}]}\n\n"
@@ -260,6 +271,7 @@ func TestStripThinkingProcess_NotThinkingProcess(t *testing.T) {
 }
 
 func TestStripThinkingProcess_ChineseEndorsement(t *testing.T) {
+	t.Parallel()
 	// Future-proofing: the model might use Chinese self-endorsement
 	// markers. For now we only support the English ones, so this
 	// should pass through.
@@ -272,6 +284,7 @@ func TestStripThinkingProcess_ChineseEndorsement(t *testing.T) {
 }
 
 func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
+	t.Parallel()
 	// The self-endorsement line is indented (Final Polish
 	// drafts are indented). The regex must eat the leading
 	// whitespace. The first content line carries the
@@ -296,6 +309,7 @@ func TestStripThinkingProcess_LeadingWhitespace(t *testing.T) {
 }
 
 func TestStripThinkingProcess_LooksGoodInNormalStream(t *testing.T) {
+	t.Parallel()
 	// A NORMAL reply whose text legitimately contains "Looks good. Proceed"
 	// — e.g. a code review verdict — must pass through untouched. Without
 	// the trigger guard (first content value must start with "Thinking
@@ -312,6 +326,7 @@ func TestStripThinkingProcess_LooksGoodInNormalStream(t *testing.T) {
 }
 
 func TestStripThinkingProcess_LooksGoodInNormalNonStream(t *testing.T) {
+	t.Parallel()
 	// Non-streaming JSON whose content contains the endorsement phrase as
 	// part of a normal reply must pass through unchanged — the single-line
 	// body must never get duplicated (marker line == first line), which
@@ -324,6 +339,7 @@ func TestStripThinkingProcess_LooksGoodInNormalNonStream(t *testing.T) {
 }
 
 func TestStripThinkingProcess_MarkerInFirstLine(t *testing.T) {
+	t.Parallel()
 	// The real thinking=medium shape in a NON-STREAMING response:
 	// thinking and final response share one content value in one JSON
 	// object — the marker line IS the first line. The strip must trim
@@ -343,6 +359,7 @@ func TestStripThinkingProcess_MarkerInFirstLine(t *testing.T) {
 }
 
 func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
+	t.Parallel()
 	// When the strip fires, the surviving lines must stay separated by
 	// "\n\n" — including the boundary before the appended [DONE] sentinel.
 	// The trailing empty element from splitting a body that ends in "\n\n"
@@ -361,6 +378,7 @@ func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
 }
 
 func TestRespStream_EmptySource(t *testing.T) {
+	t.Parallel()
 	// Empty source: just the [DONE] sentinel should be emitted.
 	out := readAll(t, newRespStream(strings.NewReader(""), "agent", "", true, "openai", false))
 	if out != "data: [DONE]\n\n" {
@@ -369,6 +387,7 @@ func TestRespStream_EmptySource(t *testing.T) {
 }
 
 func TestRespStream_NestedModelInDelta(t *testing.T) {
+	t.Parallel()
 	// modelFieldPattern is a plain regex with no JSON-depth tracking: it
 	// rewrites every unescaped `"model":"..."` occurrence in the block,
 	// nested or not — unlike the request-side RewriteModel, which is a
@@ -410,6 +429,7 @@ func (r *scriptReader) Read(p []byte) (int, error) {
 }
 
 func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
+	t.Parallel()
 	// A normal content event must be forwarded as soon as it arrives —
 	// after a single source read, before the upstream stream ends.
 	ev1 := `data: {"id":"1","model":"MiniMax-M3","choices":[{"delta":{"content":"hello"}}]}` + "\n\n"
@@ -444,6 +464,7 @@ func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
 }
 
 func TestRespStream_NoDoubleDone(t *testing.T) {
+	t.Parallel()
 	// Upstream already sends [DONE] (DeepSeek, OpenRouter): VMR must
 	// not append a second one.
 	in := `data: {"id":"1","model":"M","choices":[{"delta":{"content":"hi"}}]}` + "\n\n" +
@@ -455,6 +476,7 @@ func TestRespStream_NoDoubleDone(t *testing.T) {
 }
 
 func TestRespStream_AnthropicNoDoneAppended(t *testing.T) {
+	t.Parallel()
 	// Anthropic SSE has no [DONE] concept — appending one is protocol
 	// pollution. The model field (message_start) is still rewritten.
 	in := `event: message_start` + "\n" +
@@ -476,6 +498,7 @@ func TestRespStream_AnthropicNoDoneAppended(t *testing.T) {
 }
 
 func TestRespStream_OpaquePassthrough(t *testing.T) {
+	t.Parallel()
 	// Content-Encoding responses are forwarded raw: no rewrite, no
 	// strip, no [DONE] — running transforms over compressed bytes can
 	// only corrupt them.
@@ -491,6 +514,7 @@ func TestRespStream_OpaquePassthrough(t *testing.T) {
 }
 
 func TestRespStream_AppliedTracking(t *testing.T) {
+	t.Parallel()
 	// The applied list must name every transform that ran, so the audit
 	// log can explain any upstream/client byte difference.
 	in := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"<think>reason</think>\n\nreply"}}]}` + "\n\n"
@@ -524,6 +548,7 @@ func TestRespStream_AppliedTracking(t *testing.T) {
 // audit trail must carry "thinking_process_pattern_detected" so the drift
 // is observable.
 func TestRespStream_ThinkingPatternDetectedOnGuardMiss(t *testing.T) {
+	t.Parallel()
 	pad := strings.Repeat("filler ", 60) // ~420 bytes per section, well past bufferedCap concerns
 	content := "Reasoning Steps:\\n\\n1. " + pad + "\\n\\n2. " + pad + "\\n\\n3. " + pad + "\\n\\nHere is the actual final answer."
 	in := `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
@@ -556,6 +581,7 @@ func TestRespStream_ThinkingPatternDetectedOnGuardMiss(t *testing.T) {
 // TestStripThinkingProcess_FullPattern), the observation tag must NOT also
 // appear. Guard working correctly is not evidence of guard drift.
 func TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires(t *testing.T) {
+	t.Parallel()
 	pad := strings.Repeat("filler ", 60)
 	content := "Thinking Process:\\n\\n1. " + pad + "\\n\\n2. " + pad + "\\n\\n3. " + pad +
 		"\\n\\nLooks good. Proceed\\n\\nactual final answer here"
@@ -583,6 +609,7 @@ func TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires(t *testing.T) {
 // otherwise the signal would fire on routine step-by-step replies and be
 // worthless as a frequency measure.
 func TestRespStream_ThinkingPatternNotTaggedOnOrdinaryContent(t *testing.T) {
+	t.Parallel()
 	in := `data: {"choices":[{"delta":{"content":"Sure, here are the steps:\\n\\n1. First\\n\\n2. Second\\n\\nDone."}}]}` + "\n\n"
 	rs := newRespStream(strings.NewReader(in), "agent", "", true, "openai", false)
 	readAll(t, rs)
@@ -594,6 +621,7 @@ func TestRespStream_ThinkingPatternNotTaggedOnOrdinaryContent(t *testing.T) {
 }
 
 func TestRespStream_ReasoningContentStreams(t *testing.T) {
+	t.Parallel()
 	// DeepSeek-style reasoning in a dedicated field is well-behaved:
 	// the stream must settle into passthrough on the first
 	// reasoning_content delta, not wait for regular content.
@@ -617,6 +645,7 @@ func TestRespStream_ReasoningContentStreams(t *testing.T) {
 }
 
 func TestRespStream_ToolCallOnlyStreams(t *testing.T) {
+	t.Parallel()
 	// Pure tool-call responses (no text content at all) are the bread
 	// and butter of agent loops — they must stream, not buffer.
 	ev1 := `data: {"model":"M","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":""}}]}}]}` + "\n\n"
@@ -635,6 +664,7 @@ func TestRespStream_ToolCallOnlyStreams(t *testing.T) {
 }
 
 func TestRespStream_ThinkingProcessBuffered(t *testing.T) {
+	t.Parallel()
 	// thinking=medium shape through the full pipeline: detected on the
 	// first content event, buffered, stripped, [DONE] appended with
 	// intact SSE framing.
@@ -659,6 +689,7 @@ func TestRespStream_ThinkingProcessBuffered(t *testing.T) {
 }
 
 func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
+	t.Parallel()
 	// M3 thinking mode: buffering must last only through the think
 	// block. Once </think> arrives, the stripped prefix is emitted and
 	// the remaining events stream live — before the source is drained.
@@ -724,6 +755,7 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 // test is the byte count crossing bufferedCap, not the shape of any one
 // event.
 func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
+	t.Parallel()
 	rs := newRespStream(strings.NewReader(""), "agent", "", true, "openai", false)
 	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"
 	for i := 0; i < 40 && !rs.opaque; i++ {    // 40MB > bufferedCap (32MB)
@@ -767,6 +799,7 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 // the crlf_framing_suspected marker, added purely for `vmr report`
 // visibility into why this response never streamed.
 func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
+	t.Parallel()
 	in := "data: {\"model\":\"MiniMax-M3\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n"
 	rs := newRespStream(strings.NewReader(in), "agent", "", true, "openai", false)
 	out := readAll(t, rs)
@@ -794,6 +827,7 @@ func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
 // crlf_framing_suspected — the two conditions are independent and can
 // co-occur.
 func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
+	t.Parallel()
 	rs := newRespStream(strings.NewReader(""), "agent", "", true, "openai", false)
 	rs.ingest([]byte("data: {\"model\":\"MiniMax-M3\"}\r\n\r\n")) // the only CRLF boundary in the whole stream
 	filler := bytes.Repeat([]byte("x"), 1<<20)                    // 1MB, contains no "\n\n" or "\r\n\r\n"
@@ -818,6 +852,7 @@ func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
 // decisive content event must settle into passthrough with every withheld
 // ping released in order — the offset must not skip or duplicate events.
 func TestRespStream_ManyPingsThenContent(t *testing.T) {
+	t.Parallel()
 	var in strings.Builder
 	for i := 0; i < 500; i++ {
 		in.WriteString(`event: ping` + "\n" + `data: {"type":"ping"}` + "\n\n")
@@ -856,6 +891,7 @@ func (r *dataThenErrReader) Read(p []byte) (int, error) {
 // same Read that produced a mid-stream error must reach the client before
 // the error surfaces — a direct connection would have handed them over too.
 func TestRespStream_DeliversBytesBeforeSrcError(t *testing.T) {
+	t.Parallel()
 	ev := "data: {\"delta\":{\"content\":\"hi\"}}\n\n"
 	rs := newRespStream(&dataThenErrReader{data: []byte(ev), err: errors.New("conn reset")}, "agent", "", true, "openai", false)
 
@@ -876,6 +912,7 @@ func TestRespStream_DeliversBytesBeforeSrcError(t *testing.T) {
 // a MiniMax 2xx body embedding input_sensitive must be recorded in Applied()
 // as an observation, with the client-visible bytes left untouched.
 func TestSoftBlockDetected_NonStreaming(t *testing.T) {
+	t.Parallel()
 	in := `{"id":"1","input_sensitive":true,"choices":[{"message":{"role":"assistant","content":""}}],"model":"MiniMax-M3"}`
 	rs := newRespStream(strings.NewReader(in), "agent", "", false, "openai", false)
 	out := readAll(t, rs)
@@ -900,6 +937,7 @@ func TestSoftBlockDetected_NonStreaming(t *testing.T) {
 // the marker can arrive inside an ordinary SSE data: line and must still be
 // flagged without altering transport mode or bytes.
 func TestSoftBlockDetected_Streaming(t *testing.T) {
+	t.Parallel()
 	roleLine := `data: {"delta":{"role":"assistant"}}` + "\n\n"
 	textLine := `data: {"delta":{"content":"hi"},"output_sensitive":true}` + "\n\n"
 	rs := newRespStream(strings.NewReader(roleLine+textLine), "agent", "", true, "openai", false)
@@ -921,6 +959,7 @@ func TestSoftBlockDetected_Streaming(t *testing.T) {
 // TestSoftBlockDetected_NoFalsePositive is a control: an ordinary response
 // with neither marker must never gain the norm entry.
 func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
+	t.Parallel()
 	in := `{"id":"1","choices":[{"message":{"content":"all good"}}],"model":"m"}`
 	rs := newRespStream(strings.NewReader(in), "agent", "", false, "openai", false)
 	readAll(t, rs)
@@ -936,6 +975,7 @@ func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
 // about the tag format, a code sample echoing it) is NOT the MiniMax
 // thinking shape — the quoted span must reach the client intact, streamed.
 func TestRespStream_ThinkQuotedMidTextUntouched(t *testing.T) {
+	t.Parallel()
 	in := `data: {"choices":[{"delta":{"content":"The tag format is <think>reasoning goes here</think> followed by the reply."}}]}` + "\n\n"
 	rs := newRespStream(strings.NewReader(in), "agent", "", true, "openai", false)
 	out := readAll(t, rs)
@@ -953,6 +993,7 @@ func TestRespStream_ThinkQuotedMidTextUntouched(t *testing.T) {
 // counterpart: a single JSON body quoting <think> mid-content must survive
 // finalizeBuffered's guarded strip.
 func TestRespStream_ThinkQuotedMidTextNonStreamUntouched(t *testing.T) {
+	t.Parallel()
 	in := `{"model":"M","choices":[{"message":{"role":"assistant","content":"Explanation: models emit <think>steps</think> before answering."}}]}`
 	out := readAll(t, newRespStream(strings.NewReader(in), "agent", "", false, "openai", false))
 	if !strings.Contains(out, "<think>steps</think>") {
@@ -964,6 +1005,7 @@ func TestRespStream_ThinkQuotedMidTextNonStreamUntouched(t *testing.T) {
 // coverage the guard refactor must not lose: a text delta OPENING with
 // <think> is the same MiniMax pathology and is still buffered + stripped.
 func TestRespStream_AnthropicTextThinkStripped(t *testing.T) {
+	t.Parallel()
 	in := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<think>internal</think>\n\nvisible"}}` + "\n\n"
 	rs := newRespStream(strings.NewReader(in), "agent", "", true, "anthropic", false)
 	out := readAll(t, rs)

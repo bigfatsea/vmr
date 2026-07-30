@@ -32,6 +32,7 @@ func sseText(text string) string {
 }
 
 func TestReassembleSSE_OpenAIToolCall(t *testing.T) {
+	t.Parallel()
 	s := ReassembleSSE(sseToolCall("exec"))
 	if s == nil {
 		t.Fatal("ReassembleSSE returned nil")
@@ -45,6 +46,7 @@ func TestReassembleSSE_OpenAIToolCall(t *testing.T) {
 }
 
 func TestReassembleSSE_OpenAIText(t *testing.T) {
+	t.Parallel()
 	s := ReassembleSSE(sseText("hello world"))
 	if s == nil || s.Content != "hello world" || s.Finish != "stop" {
 		t.Errorf("ReassembleSSE text = %+v", s)
@@ -52,6 +54,7 @@ func TestReassembleSSE_OpenAIText(t *testing.T) {
 }
 
 func TestReassembleSSE_AnthropicEvents(t *testing.T) {
+	t.Parallel()
 	raw := strings.Join([]string{
 		`data: {"type":"message_start","message":{"model":"claude"}}`,
 		``,
@@ -74,12 +77,14 @@ func TestReassembleSSE_AnthropicEvents(t *testing.T) {
 }
 
 func TestReassembleSSE_NoParsableLines(t *testing.T) {
+	t.Parallel()
 	if s := ReassembleSSE("not sse at all"); s != nil {
 		t.Errorf("expected nil, got %+v", s)
 	}
 }
 
 func TestFinalMessage_OpenAI(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"choices": []any{
 			map[string]any{"finish_reason": "stop", "message": map[string]any{"content": "hi"}},
@@ -92,6 +97,7 @@ func TestFinalMessage_OpenAI(t *testing.T) {
 }
 
 func TestFinalMessage_Anthropic(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"stop_reason": "end_turn",
 		"content": []any{
@@ -106,6 +112,7 @@ func TestFinalMessage_Anthropic(t *testing.T) {
 }
 
 func TestFinalMessage_UnrecognizedShape(t *testing.T) {
+	t.Parallel()
 	if _, ok := FinalMessage(map[string]any{"foo": "bar"}); ok {
 		t.Error("expected ok=false for unrecognized body shape")
 	}

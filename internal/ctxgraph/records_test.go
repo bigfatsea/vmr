@@ -10,6 +10,7 @@ import (
 )
 
 func TestBuildManifest_TraceID(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{"messages": []any{userMsg("hi")}}
 	rec := mkAuditRec(time.Now(), body)
 	rec.Client.Request.Headers = map[string][]string{
@@ -25,6 +26,7 @@ func TestBuildManifest_TraceID(t *testing.T) {
 }
 
 func TestBuildManifest_NoTraceparent(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{"messages": []any{userMsg("hi")}}
 	rec := mkAuditRec(time.Now(), body)
 	m, _ := BuildManifest(&rec, "f", 1)
@@ -34,6 +36,7 @@ func TestBuildManifest_NoTraceparent(t *testing.T) {
 }
 
 func TestFetchRecords_ResolvesRequestedLines(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	r1 := mkAuditRec(at, chatBody(sysMsg("sys"), userMsg("one")))
 	r2 := mkAuditRec(at.Add(time.Second), chatBody(sysMsg("sys"), userMsg("one"), assistantMsg("two")))
@@ -66,12 +69,14 @@ func TestFetchRecords_ResolvesRequestedLines(t *testing.T) {
 }
 
 func TestFetchRecords_MissingFile(t *testing.T) {
+	t.Parallel()
 	if _, err := FetchRecords([]Loc{{Path: "/nonexistent", Line: 1}}); err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
 func TestFetchRecords_EmptyLocs(t *testing.T) {
+	t.Parallel()
 	got, err := FetchRecords(nil)
 	if err != nil {
 		t.Fatalf("FetchRecords(nil): %v", err)

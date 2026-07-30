@@ -19,6 +19,7 @@ func mkAuditRec(ts time.Time, body map[string]any) audit.Record {
 }
 
 func TestBuildManifest_NonChatBody(t *testing.T) {
+	t.Parallel()
 	rec := audit.Record{Client: audit.Exchange{Request: audit.Message{Body: "not a map"}}}
 	if _, ok := BuildManifest(&rec, "f", 1); ok {
 		t.Error("expected ok=false for non-map body")
@@ -26,6 +27,7 @@ func TestBuildManifest_NonChatBody(t *testing.T) {
 }
 
 func TestBuildManifest_KeysExcludeLeadingSystem(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"messages": []any{
 			map[string]any{"role": "system", "content": "sys prompt"},
@@ -55,6 +57,7 @@ func TestBuildManifest_KeysExcludeLeadingSystem(t *testing.T) {
 }
 
 func TestBuildManifest_MultipleLeadingSystemMessagesFoldIntoOneHash(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"messages": []any{
 			map[string]any{"role": "system", "content": "part one"},
@@ -76,6 +79,7 @@ func TestBuildManifest_MultipleLeadingSystemMessagesFoldIntoOneHash(t *testing.T
 }
 
 func TestBuildManifest_NoSystemMessage(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	rec := mkAuditRec(time.Now(), body)
 	m, ok := BuildManifest(&rec, "f", 1)
@@ -88,6 +92,7 @@ func TestBuildManifest_NoSystemMessage(t *testing.T) {
 }
 
 func TestBuildManifest_AnthropicTopLevelSystem(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"system":   "you are helpful",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
@@ -111,6 +116,7 @@ func TestBuildManifest_AnthropicTopLevelSystem(t *testing.T) {
 }
 
 func TestBuildManifest_IdenticalContentSameHash(t *testing.T) {
+	t.Parallel()
 	body1 := map[string]any{"messages": []any{
 		map[string]any{"role": "system", "content": "sys"},
 		map[string]any{"role": "user", "content": "same text"},
@@ -132,6 +138,7 @@ func TestBuildManifest_IdenticalContentSameHash(t *testing.T) {
 }
 
 func TestBuildManifest_SessKey_MetadataUserID(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 		"metadata": map[string]any{"user_id": "app_abc_session_1234-5678"},
@@ -144,6 +151,7 @@ func TestBuildManifest_SessKey_MetadataUserID(t *testing.T) {
 }
 
 func TestBuildManifest_SessKey_AnchorFallback(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	rec := mkAuditRec(time.Now(), body)
 	m, _ := BuildManifest(&rec, "f", 1)
@@ -154,6 +162,7 @@ func TestBuildManifest_SessKey_AnchorFallback(t *testing.T) {
 }
 
 func TestBuildManifest_SessKey_EmptyWhenNoMessagesAndNoMetadata(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{"messages": []any{}}
 	rec := mkAuditRec(time.Now(), body)
 	m, _ := BuildManifest(&rec, "f", 1)

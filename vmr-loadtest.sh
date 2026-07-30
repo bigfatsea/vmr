@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# Ver 2026-07-24 12:00, by Sonnet 5
+# Ver 2026-07-31, by Sonnet 5
 #
 # vmr-loadtest.sh — one-command wrapper around loadtest/runner. Pure glue,
 # no new logic: rebuild ./vmr fresh, make sure vegeta is on PATH, then hand
 # off to `go run ./loadtest/runner`, which does the real work (starts
 # mockupstream + vmr on isolated ports 9900/8801, generates targets, fires
-# three escalating Vegeta load rounds at all 11 scenarios, runs `vmr report`
-# on the resulting audit log, writes reports/loadtest-report.md) and cleans
-# up its own subprocesses on exit.
+# three escalating Vegeta load rounds at all 11 scenarios, computes the
+# per-scenario server-side breakdown directly from the resulting audit log,
+# writes reports/loadtest-report.md) and cleans up its own subprocesses on
+# exit. The runner never shells out to `vmr report` (an earlier version
+# did; see runner/main.go's own history note) — a load test's result must
+# not depend on a separate command's rendering pipeline.
 #
 # Generated files land in the project's normal logs/reports/ directories,
 # not loadtest/ itself — namespaced (logs/loadtest/, reports/loadtest-*) so
 # they can never mix with or overwrite real data living in those same dirs.
 #
-# Design/rationale: docs/VirtualModelRouter_System_Design_v3.md §12
+# Design/rationale: docs/VirtualModelRouter_Design_v4_Core.md §12
 # Full manual steps + how to read the numbers: loadtest/README.md
 #
 # This is a one-off sanity check (e.g. before a release push), not a CI

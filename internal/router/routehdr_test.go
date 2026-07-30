@@ -19,6 +19,7 @@ func TestRouteReasonOmitsWhatDidNotHappen(t *testing.T) {
 }
 
 func TestRouteReasonReportsEliminations(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		rr   routeReason
@@ -36,9 +37,12 @@ func TestRouteReasonReportsEliminations(t *testing.T) {
 			"pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1"},
 	}
 	for _, c := range cases {
-		if got := c.rr.String(); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.rr.String(); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

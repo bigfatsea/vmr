@@ -8,35 +8,9 @@
 package server
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
-
-// capabilityYAML builds a two-endpoint virtual model where p1 declares only
-// declP1 capabilities and p2 declares only declP2 — sticky disabled (these
-// tests are about condition filtering, not session affinity, and repeated
-// identical requests would otherwise get pinned by it).
-func capabilityYAML(u1, u2, declP1, declP2 string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-models:
-  vm:
-    sticky: false
-    endpoints:
-      - protocol: openai
-        provider: p1
-        models: [model-one]
-        priority: 1%s
-      - protocol: openai
-        provider: p2
-        models: [model-two]
-        priority: 2%s
-`, u1, u2, declP1, declP2)
-}
 
 // tiny1x1PNGDataURI is a real, decodable 1x1 PNG — used instead of a fake
 // base64 payload purely for realism (imgprep.Downscale counts any
@@ -120,29 +94,6 @@ func TestCondition_AllRejectedGivesDiagnosticMessage(t *testing.T) {
 	if u1.hits.Load() != 0 || u2.hits.Load() != 0 {
 		t.Errorf("neither endpoint should have been tried: p1 hits=%d p2 hits=%d", u1.hits.Load(), u2.hits.Load())
 	}
-}
-
-// contextLenYAML gives p1 a small declared context window and p2 a large
-// one (or none — unconstrained), both otherwise identical.
-func contextLenYAML(u1, u2 string, p1Max, p2Max string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-models:
-  vm:
-    sticky: false
-    endpoints:
-      - protocol: openai
-        provider: p1
-        models: [model-one]
-        priority: 1%s
-      - protocol: openai
-        provider: p2
-        models: [model-two]
-        priority: 2%s
-`, u1, u2, p1Max, p2Max)
 }
 
 // bigReq is long enough that its estimated token count comfortably clears

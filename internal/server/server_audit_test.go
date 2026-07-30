@@ -19,6 +19,7 @@ import (
 )
 
 func newSSEUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl := w.(http.Flusher)
@@ -33,6 +34,7 @@ func newSSEUpstream(t *testing.T) *httptest.Server {
 }
 
 func newAuditedServer(t *testing.T, yaml string) (*httptest.Server, *audit.Logger) {
+	t.Helper()
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +56,7 @@ func newAuditedServer(t *testing.T, yaml string) (*httptest.Server, *audit.Logge
 }
 
 func readRecords(t *testing.T, al *audit.Logger) []audit.Record {
+	t.Helper()
 	data, err := os.ReadFile(al.Path())
 	if err != nil {
 		t.Fatal(err)

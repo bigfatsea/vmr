@@ -77,6 +77,7 @@ models:
 }
 
 func TestProxySpecFor(t *testing.T) {
+	t.Parallel()
 	mkP := func(baseURL string, proxy *bool) Provider {
 		return Provider{BaseURL: map[string]string{"openai": baseURL}, Proxy: proxy}
 	}
@@ -95,10 +96,13 @@ func TestProxySpecFor(t *testing.T) {
 		{"provider proxy:true opts in over http", mkP("http://x", boolPtr(true)), ProxyURL, "http://hp:1"},
 	}
 	for _, c := range offCases {
-		mode, u := off.ProxySpecFor(c.p, "openai")
-		if mode != c.wantMode || u != c.wantURL {
-			t.Errorf("%s: got (%s, %q), want (%s, %q)", c.name, mode, u, c.wantMode, c.wantURL)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mode, u := off.ProxySpecFor(c.p, "openai")
+			if mode != c.wantMode || u != c.wantURL {
+				t.Errorf("got (%s, %q), want (%s, %q)", mode, u, c.wantMode, c.wantURL)
+			}
+		})
 	}
 
 	// Global proxy default on: an unset per-provider switch now follows it;
@@ -116,10 +120,13 @@ func TestProxySpecFor(t *testing.T) {
 		{"provider true redundant with global default on", mkP("https://x", boolPtr(true)), ProxyURL, "http://sp:2"},
 	}
 	for _, c := range onCases {
-		mode, u := on.ProxySpecFor(c.p, "openai")
-		if mode != c.wantMode || u != c.wantURL {
-			t.Errorf("%s: got (%s, %q), want (%s, %q)", c.name, mode, u, c.wantMode, c.wantURL)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mode, u := on.ProxySpecFor(c.p, "openai")
+			if mode != c.wantMode || u != c.wantURL {
+				t.Errorf("got (%s, %q), want (%s, %q)", mode, u, c.wantMode, c.wantURL)
+			}
+		})
 	}
 
 	// No config proxy → direct. There is no environment fallback.

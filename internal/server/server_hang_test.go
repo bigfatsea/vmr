@@ -21,6 +21,7 @@ import (
 // stallingUpstream writes headers (and optionally a body prefix), flushes,
 // then parks until the test tears it down.
 func stallingUpstream(t *testing.T, status int, bodyPrefix string) *httptest.Server {
+	t.Helper()
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

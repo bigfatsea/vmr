@@ -31,7 +31,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
@@ -51,8 +50,9 @@ type openclawScenarioUpstream struct {
 }
 
 func newOpenclawScenarioUpstream(t *testing.T) *openclawScenarioUpstream {
+	t.Helper()
 	u := &openclawScenarioUpstream{}
-	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	u.srv = newJSONUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		u.hits.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
@@ -105,8 +105,7 @@ func newOpenclawScenarioUpstream(t *testing.T) *openclawScenarioUpstream {
 		// Usage — note the upstream model field is "MiniMax-M3" here.
 		writeSSE(w, flusher, fmt.Sprintf(`{"id":"x","choices":[],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":{"total_tokens":%d,"prompt_tokens":%d,"completion_tokens":%d},"service_tier":"standard"}`, prompt+completion, prompt, completion))
 		// No [DONE] — MiniMax doesn't send one.
-	}))
-	t.Cleanup(u.srv.Close)
+	})
 	return u
 }
 
@@ -260,12 +259,6 @@ models:
 	got := string(body)
 
 	// Model field rewritten to virtual name.
-	var parsed struct {
-		Model   string `json:"model"`
-		Message struct {
-			Content string `json:"content"`
-		} `json:"choices"`
-	}
 	// The OpenAI non-stream response is a JSON object with `model`
 	// at the top level and `choices[0].message.content` for the
 	// assistant text.
@@ -280,7 +273,6 @@ models:
 	if err := json.Unmarshal(body, &respObj); err != nil {
 		t.Fatalf("parse response: %v\nbody=%s", err, body)
 	}
-	_ = parsed
 	if respObj.Model != "agent" {
 		t.Errorf("non-stream model = %q, want %q (raw: %s)", respObj.Model, "agent", got)
 	}
@@ -573,6 +565,3 @@ func readAuditLines(dir string) ([]string, error) {
 	}
 	return out, nil
 }
-
-// Suppress unused-import warning if time becomes unused after edits.
-var _ = time.Now

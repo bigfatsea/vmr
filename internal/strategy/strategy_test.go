@@ -9,6 +9,7 @@ import (
 )
 
 func TestPrioritySortStableOnTies(t *testing.T) {
+	t.Parallel()
 	eps := []*core.Endpoint{
 		{Provider: "c", Priority: 2},
 		{Provider: "a", Priority: 1},
@@ -29,6 +30,7 @@ func TestPrioritySortStableOnTies(t *testing.T) {
 }
 
 func TestPriorityCompareNoOverflow(t *testing.T) {
+	t.Parallel()
 	// cmp.Compare avoids the subtraction overflow that a-b produces
 	// when the two values are at opposite extremes of int.
 	d := priority{}
@@ -46,6 +48,7 @@ func TestPriorityCompareNoOverflow(t *testing.T) {
 }
 
 func TestBuildUnknownDimension(t *testing.T) {
+	t.Parallel()
 	if _, err := Build([]string{"priority", "nosuch"}); err == nil {
 		t.Error("want error for unknown dimension")
 	}

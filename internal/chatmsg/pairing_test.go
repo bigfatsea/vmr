@@ -5,6 +5,7 @@ package chatmsg
 import "testing"
 
 func TestCheckToolPairing_OpenAI_AllMatched(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "user", "content": "go"},
 		map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
@@ -24,6 +25,7 @@ func TestCheckToolPairing_OpenAI_AllMatched(t *testing.T) {
 }
 
 func TestCheckToolPairing_OpenAI_OrphanCall(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
 			map[string]any{"id": "c1", "function": map[string]any{"name": "read", "arguments": "{}"}},
@@ -43,6 +45,7 @@ func TestCheckToolPairing_OpenAI_OrphanCall(t *testing.T) {
 }
 
 func TestCheckToolPairing_OpenAI_OrphanResult(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "tool", "tool_call_id": "c-unknown", "content": "r"},
 	}
@@ -56,6 +59,7 @@ func TestCheckToolPairing_OpenAI_OrphanResult(t *testing.T) {
 }
 
 func TestCheckToolPairing_Anthropic_AllMatched(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "assistant", "content": []any{
 			map[string]any{"type": "tool_use", "id": "t1", "name": "read", "input": map[string]any{}},
@@ -74,6 +78,7 @@ func TestCheckToolPairing_Anthropic_AllMatched(t *testing.T) {
 }
 
 func TestCheckToolPairing_Anthropic_OrphanCall(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "assistant", "content": []any{
 			map[string]any{"type": "tool_use", "id": "t1", "name": "read", "input": map[string]any{}},
@@ -89,6 +94,7 @@ func TestCheckToolPairing_Anthropic_OrphanCall(t *testing.T) {
 }
 
 func TestCheckToolPairing_MixedProtocolsAndNonToolMessages(t *testing.T) {
+	t.Parallel()
 	msgs := []any{
 		map[string]any{"role": "system", "content": "sys"},
 		map[string]any{"role": "user", "content": "hi"},
@@ -114,6 +120,7 @@ func TestCheckToolPairing_MixedProtocolsAndNonToolMessages(t *testing.T) {
 }
 
 func TestCheckToolPairing_Empty(t *testing.T) {
+	t.Parallel()
 	if r := CheckToolPairing(nil); !r.OK() || r.Calls != 0 || r.Results != 0 {
 		t.Errorf("empty input should report OK with zero calls/results, got %+v", r)
 	}

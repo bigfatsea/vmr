@@ -36,9 +36,10 @@ type anthUpstream struct {
 }
 
 func newAnthUpstream(t *testing.T) *anthUpstream {
+	t.Helper()
 	u := &anthUpstream{}
 	u.status.Store(200)
-	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	u.srv = newJSONUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/messages") {
 			http.NotFound(w, r)
 			return
@@ -47,11 +48,8 @@ func newAnthUpstream(t *testing.T) *anthUpstream {
 		u.lastAPIKey.Store(r.Header.Get("x-api-key"))
 		u.lastVer.Store(r.Header.Get("anthropic-version"))
 		body, _ := io.ReadAll(r.Body)
-		var m struct {
-			Model string `json:"model"`
-		}
-		json.Unmarshal(body, &m)
-		u.lastModel.Store(m.Model)
+		model := extractModelField(body)
+		u.lastModel.Store(model)
 		st := int(u.status.Load())
 		w.Header().Set("Content-Type", "application/json")
 		if st != 200 {
@@ -59,32 +57,13 @@ func newAnthUpstream(t *testing.T) *anthUpstream {
 			fmt.Fprintf(w, `{"type":"error","error":{"type":"api_error","message":"upstream says %d"}}`, st)
 			return
 		}
-		fmt.Fprintf(w, `{"id":"m1","type":"message","role":"assistant","model":%q,"content":[{"type":"text","text":"PONG"}]}`, m.Model)
-	}))
-	t.Cleanup(u.srv.Close)
+		fmt.Fprintf(w, `{"id":"m1","type":"message","role":"assistant","model":%q,"content":[{"type":"text","text":"PONG"}]}`, model)
+	})
 	return u
 }
 
-func dualProtocolYAML(oai, anth1, anth2 string, extra string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-%s
-providers:
-  - {name: oai, base_url: {openai: %s}, api_key: k0}
-  - {name: a1, base_url: {anthropic: %s}, api_key: ka1}
-  - {name: a2, base_url: {anthropic: %s}, api_key: ka2}
-models:
-  vm-openai:
-    endpoints:
-      - {protocol: openai, provider: oai, models: [model-one], priority: 1}
-  vm-anth:
-    endpoints:
-      - {protocol: anthropic, provider: a1, models: [real-a], priority: 1}
-      - {protocol: anthropic, provider: a2, models: [real-b], priority: 2}
-`, extra, oai, anth1, anth2)
-}
-
 func messages(t *testing.T, ts *httptest.Server, body string, hdr map[string]string) (*http.Response, string) {
+	t.Helper()
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range hdr {

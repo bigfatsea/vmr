@@ -17,6 +17,7 @@ func manifestWithKeys(keys []Hash) *Manifest {
 }
 
 func TestClassify_Append(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(5, "s")
 	cur := append(append([]Hash{}, prev...), hashJSON("new"))
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
@@ -29,6 +30,7 @@ func TestClassify_Append(t *testing.T) {
 }
 
 func TestClassify_AppendWithinTailSlack(t *testing.T) {
+	t.Parallel()
 	// cur == prev exactly (LCP == len(prev)) is the purest Append case;
 	// tailSlack exists so a same-length-ish tail wobble still resolves to
 	// Append rather than ReplaceTail when coverage/contraction don't apply.
@@ -41,6 +43,7 @@ func TestClassify_AppendWithinTailSlack(t *testing.T) {
 }
 
 func TestClassify_ReplaceTail(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(20, "s")
 	cur := append(append([]Hash{}, prev[:15]...), mkHashes(3, "t")...) // tail diverges, no shrink, high coverage
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
@@ -54,6 +57,7 @@ func TestClassify_ReplaceTail(t *testing.T) {
 // reappear verbatim at the end of cur — evidence the tail was spliced
 // around (F11's S2), not discarded.
 func TestClassify_Splice(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(20, "s")
 	cur := append(append(append([]Hash{}, prev[:10]...), mkHashes(3, "new")...), prev[17:]...)
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
@@ -66,6 +70,7 @@ func TestClassify_Splice(t *testing.T) {
 // trailing message must NOT be enough to call it Splice — spliceMinTailMatch
 // (2) exists specifically to reject that kind of noise.
 func TestClassify_SpliceRequiresMinTailMatch(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(20, "s")
 	cur := append(append(append([]Hash{}, prev[:10]...), mkHashes(4, "new")...), prev[19:]...) // only the very last message reappears
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
@@ -77,12 +82,14 @@ func TestClassify_SpliceRequiresMinTailMatch(t *testing.T) {
 // TestClassify_SpliceDoesNotSplitLineage locks in T2.1's core promise:
 // Splice, exactly like ReplaceTail, must never split a lineage.
 func TestClassify_SpliceDoesNotSplitLineage(t *testing.T) {
+	t.Parallel()
 	if Splice.Splits() {
 		t.Error("Splice must not split a lineage — it's a labeling refinement of ReplaceTail, not a new splitting condition")
 	}
 }
 
 func TestClassify_Contract(t *testing.T) {
+	t.Parallel()
 	// Real corpus case (design doc F6/A.3): 79 messages -> 4 messages.
 	prev := mkHashes(79, "s")
 	cur := mkHashes(4, "s") // reuses same seed so keys[0] matches prev[0] (mirrors the real case: same user instruction survives)
@@ -93,6 +100,7 @@ func TestClassify_Contract(t *testing.T) {
 }
 
 func TestClassify_ContractThresholdBoundary(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(10, "s")
 	// exactly at the 0.6 ratio: 6 messages is NOT below 0.6*10=6 (strict <), so should NOT be Contract.
 	curAtBoundary := mkHashes(6, "u")
@@ -109,6 +117,7 @@ func TestClassify_ContractThresholdBoundary(t *testing.T) {
 }
 
 func TestClassify_Fork(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(10, "s")
 	cur := mkHashes(12, "totally-different") // same/similar length, near-zero overlap
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
@@ -118,6 +127,7 @@ func TestClassify_Fork(t *testing.T) {
 }
 
 func TestClassify_EmptyCurIsVacuousAppendOrReplaceTail(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(3, "s")
 	cur := manifestWithKeys(nil)
 	e := Classify(manifestWithKeys(prev), cur)
@@ -137,6 +147,7 @@ func TestClassify_EmptyCurIsVacuousAppendOrReplaceTail(t *testing.T) {
 // threshold before the comparison) fixes this without changing any of the
 // calibrated corpus boundary behavior (see TestClassify_ContractThresholdBoundary).
 func TestClassify_TinyPrevContractsCorrectly(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(1, "s")
 	cur := manifestWithKeys(nil)
 	e := Classify(manifestWithKeys(prev), cur)
@@ -146,6 +157,7 @@ func TestClassify_TinyPrevContractsCorrectly(t *testing.T) {
 }
 
 func TestClassify_EmptyPrev(t *testing.T) {
+	t.Parallel()
 	prev := manifestWithKeys(nil)
 	cur := mkHashes(3, "s")
 	e := Classify(prev, manifestWithKeys(cur))
@@ -159,6 +171,7 @@ func TestClassify_EmptyPrev(t *testing.T) {
 }
 
 func TestLCPLen(t *testing.T) {
+	t.Parallel()
 	a := mkHashes(5, "x")
 	b := append(append([]Hash{}, a[:3]...), mkHashes(2, "y")...)
 	if got := lcpLen(a, b); got != 3 {
@@ -170,6 +183,7 @@ func TestLCPLen(t *testing.T) {
 }
 
 func TestCoverage(t *testing.T) {
+	t.Parallel()
 	prev := mkHashes(4, "x")
 	cur := append(append([]Hash{}, prev[1:3]...), mkHashes(1, "z")...) // 2 of 3 in prev
 	got := coverage(cur, prev)
@@ -183,6 +197,7 @@ func TestCoverage(t *testing.T) {
 }
 
 func TestEditKind_Splits(t *testing.T) {
+	t.Parallel()
 	for _, k := range []EditKind{Append, ReplaceTail} {
 		if k.Splits() {
 			t.Errorf("%v should not split a lineage", k)
@@ -196,6 +211,7 @@ func TestEditKind_Splits(t *testing.T) {
 }
 
 func TestEditKind_String(t *testing.T) {
+	t.Parallel()
 	cases := map[EditKind]string{Append: "append", ReplaceTail: "replace_tail", Splice: "splice", Contract: "contract", Fork: "fork"}
 	for k, want := range cases {
 		if got := k.String(); got != want {

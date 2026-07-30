@@ -15,6 +15,7 @@ import (
 // two Endpoints that are genuinely different upstream targets must not share
 // a health-registry key just because Provider/Model/APIKey happen to match.
 func TestHealthKeyProtocolPrefixAvoidsCollision(t *testing.T) {
+	t.Parallel()
 	openai := &Endpoint{AdapterType: "openai", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
 	anthropic := &Endpoint{AdapterType: "anthropic", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
 	if openai.HealthKey() == anthropic.HealthKey() {
@@ -26,6 +27,7 @@ func TestHealthKeyProtocolPrefixAvoidsCollision(t *testing.T) {
 // identical but authenticate with different keys (e.g. two accounts at the
 // same provider) get distinct health state.
 func TestHealthKeyDiffersByAPIKey(t *testing.T) {
+	t.Parallel()
 	a := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "key-a"}
 	b := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "key-b"}
 	if a.HealthKey() == b.HealthKey() {
@@ -38,6 +40,7 @@ func TestHealthKeyDiffersByAPIKey(t *testing.T) {
 // state to survive a hot reload (a fresh Endpoint value built from the same
 // config must resolve to the same registry entry).
 func TestHealthKeyStableForSameFields(t *testing.T) {
+	t.Parallel()
 	a := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
 	b := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
 	if a.HealthKey() != b.HealthKey() {
@@ -48,6 +51,7 @@ func TestHealthKeyStableForSameFields(t *testing.T) {
 // TestNameOmitsAPIKey checks Name() (used in X-VMR-Endpoint and audit logs)
 // never leaks the credential, unlike HealthKey which folds in a fingerprint.
 func TestNameOmitsAPIKey(t *testing.T) {
+	t.Parallel()
 	e := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "sk-secret"}
 	if got, want := e.Name(), "openai/acme/m"; got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
@@ -61,6 +65,7 @@ func TestNameOmitsAPIKey(t *testing.T) {
 // called — router.BuildSnapshot's Freeze() call is a hot-path optimization,
 // not a correctness requirement.
 func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
+	t.Parallel()
 	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
 	if got, want := e.HealthKey(), e.computeHealthKey(); got != want {
 		t.Errorf("un-frozen HealthKey() = %q, want %q (computeHealthKey directly)", got, want)
@@ -75,6 +80,7 @@ func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
 // Endpoints built from identical fields, one Freeze()'d and one not, must
 // stay indistinguishable to every caller.
 func TestEndpointFreezeMatchesUnfrozen(t *testing.T) {
+	t.Parallel()
 	fields := func() Endpoint {
 		return Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "sk-secret"}
 	}
@@ -107,6 +113,7 @@ func TestEndpointFreezeMatchesUnfrozen(t *testing.T) {
 // estimate in detail pages (roleTokens). A regression here silently changes
 // both a live routing signal and a reporting number.
 func TestEstimateTextTokens(t *testing.T) {
+	t.Parallel()
 	if got := EstimateTextTokens(nil); got != 0 {
 		t.Errorf("empty input = %d, want 0", got)
 	}
@@ -131,6 +138,7 @@ func TestEstimateTextTokens(t *testing.T) {
 }
 
 func TestErrorClassString(t *testing.T) {
+	t.Parallel()
 	cases := map[ErrorClass]string{
 		ErrClient:    "client",
 		ErrAuth:      "auth",
@@ -151,6 +159,7 @@ func TestErrorClassString(t *testing.T) {
 }
 
 func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {
+	t.Parallel()
 	out, err := MarshalNoEscape("a < b & c > d")
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +172,7 @@ func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {
 // TestWriteJSONSetsStatusAndContentType locks in the shape router and server
 // both rely on (formerly two byte-identical local copies, see design doc §11).
 func TestWriteJSONSetsStatusAndContentType(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	WriteJSON(w, 201, map[string]any{"ok": true})
 	if w.Code != 201 {
@@ -183,6 +193,7 @@ func TestWriteJSONSetsStatusAndContentType(t *testing.T) {
 // TestWriteErrorEnvelope locks in the error envelope shape both OpenAI
 // clients (error.message) and Anthropic clients (type:"error") parse.
 func TestWriteErrorEnvelope(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	WriteError(w, 429, "rate_limit_error", "slow down")
 	if w.Code != 429 {

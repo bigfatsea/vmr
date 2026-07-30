@@ -9,6 +9,7 @@ import (
 )
 
 func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
+	t.Parallel()
 	// Vendors may attach verbose debug payloads before the actual error
 	// message; a marker several KB into the body must still be sniffed
 	// within the snippet cutoff — a miss classifies as ErrClient, which
@@ -23,9 +24,12 @@ func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 		{"content flag late", `{"trace":[` + padding + `],"error":{"message":"output data may contain inappropriate content (1027)"}}`, core.ErrContent},
 	}
 	for _, tc := range cases {
-		if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 	// Beyond the 32 KB bound the marker is invisible by design.
 	huge := strings.Repeat("x", classifySnippetBytes) + "model not found"
@@ -40,6 +44,7 @@ func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 // dead-end the failover walk the way a genuine bad-request 400 correctly
 // does.
 func TestDefaultClassify_UpstreamGatewayFailure(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -62,13 +67,17 @@ func TestDefaultClassify_UpstreamGatewayFailure(t *testing.T) {
 		{"content flag beats upstream wording", `{"error":{"message":"upstream request failed: content_policy violation"}}`, core.ErrContent},
 	}
 	for _, tc := range cases {
-		if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
 func TestRewriteModel_NoHTMLEscaping(t *testing.T) {
+	t.Parallel()
 	// Direct-equivalence: re-serialization must not rewrite < > & in
 	// message content to their \uXXXX escape forms — a direct call
 	// would send the raw characters.
@@ -92,6 +101,7 @@ func TestRewriteModel_NoHTMLEscaping(t *testing.T) {
 }
 
 func TestRewriteModel_UnknownFieldsPreserved(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"model":"vm","future_param":{"nested":[1,2,3]},"temperature":0.5}`)
 	out, err := RewriteModel(raw, "up")
 	if err != nil {
@@ -106,6 +116,7 @@ func TestRewriteModel_UnknownFieldsPreserved(t *testing.T) {
 }
 
 func TestRewriteModel_ByteSplicePreservesEverythingElse(t *testing.T) {
+	t.Parallel()
 	// The splice path must keep every byte outside the model value —
 	// key order, whitespace, formatting — exactly as the client sent it.
 	raw := []byte(`{"messages":[{"role":"user","content":"hi"}],  "model" : "vm-name" , "stream":true}`)
@@ -120,6 +131,7 @@ func TestRewriteModel_ByteSplicePreservesEverythingElse(t *testing.T) {
 }
 
 func TestRewriteModel_NestedModelKeysUntouched(t *testing.T) {
+	t.Parallel()
 	// Only the TOP-LEVEL model key is rewritten; "model" keys nested in
 	// tool schemas / metadata objects / arrays must pass through verbatim.
 	raw := []byte(`{"model":"vm","metadata":{"model":"keep-a"},"tools":[{"parameters":{"model":{"type":"string"}}}]}`)
@@ -140,6 +152,7 @@ func TestRewriteModel_NestedModelKeysUntouched(t *testing.T) {
 }
 
 func TestRewriteModel_EscapedTextInContentUntouched(t *testing.T) {
+	t.Parallel()
 	// A literal `"model":"x"` mentioned inside a content string arrives
 	// JSON-escaped; the scanner must skip over it, not rewrite it.
 	raw := []byte(`{"content":"send {\"model\":\"fake\"} please","model":"vm"}`)
@@ -154,6 +167,7 @@ func TestRewriteModel_EscapedTextInContentUntouched(t *testing.T) {
 }
 
 func TestRewriteModel_SameNameZeroCopy(t *testing.T) {
+	t.Parallel()
 	// Virtual name == upstream name: the original slice is returned as-is.
 	raw := []byte(`{"model":"same","messages":[]}`)
 	out, err := RewriteModel(raw, "same")
@@ -166,6 +180,7 @@ func TestRewriteModel_SameNameZeroCopy(t *testing.T) {
 }
 
 func TestRewriteModel_NullBodyReturnsErrorNotPanic(t *testing.T) {
+	t.Parallel()
 	// raw is the JSON literal "null" — not an object, but syntactically
 	// valid JSON, so it reaches the generic fallback (topLevelValues
 	// declines: no top-level "{"). json.Unmarshal into a map pointer accepts
@@ -178,6 +193,7 @@ func TestRewriteModel_NullBodyReturnsErrorNotPanic(t *testing.T) {
 }
 
 func TestRewriteModel_MissingKeyFallsBackAndAdds(t *testing.T) {
+	t.Parallel()
 	// No top-level model key: the generic fallback adds it (historical
 	// behavior for direct callers; the server rejects such requests earlier).
 	out, err := RewriteModel([]byte(`{"messages":[]}`), "up")
@@ -225,6 +241,7 @@ func BenchmarkRewriteModelGeneric(b *testing.B) {
 }
 
 func TestRewriteStream(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, raw, want string
 		stream          bool
@@ -254,6 +271,7 @@ func TestRewriteStream(t *testing.T) {
 }
 
 func TestRewriteStream_SameValueZeroCopy(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"stream":true,"model":"m"}`)
 	out, err := RewriteStream(raw, true)
 	if err != nil {
@@ -265,6 +283,7 @@ func TestRewriteStream_SameValueZeroCopy(t *testing.T) {
 }
 
 func TestRewriteStream_MissingKeyAdded(t *testing.T) {
+	t.Parallel()
 	out, err := RewriteStream([]byte(`{"model":"m","messages":[]}`), true)
 	if err != nil {
 		t.Fatal(err)
@@ -275,6 +294,7 @@ func TestRewriteStream_MissingKeyAdded(t *testing.T) {
 }
 
 func TestRewriteRoles_DeveloperToSystem(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"user","content":"hi"}]}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
 	if err != nil {
@@ -293,6 +313,7 @@ func TestRewriteRoles_DeveloperToSystem(t *testing.T) {
 }
 
 func TestRewriteRoles_MultipleMatchesAllReplaced(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"messages":[{"role":"developer","content":"a"},{"role":"user","content":"b"},{"role":"developer","content":"c"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
 	if err != nil {
@@ -308,6 +329,7 @@ func TestRewriteRoles_MultipleMatchesAllReplaced(t *testing.T) {
 }
 
 func TestRewriteRoles_ByteSplicePreservesEverythingElse(t *testing.T) {
+	t.Parallel()
 	// The splice must keep every byte outside role values — key order,
 	// whitespace, formatting, other fields — exactly as the client sent it.
 	raw := []byte(`{"messages":[ {"role":"developer", "content":"hi"} ],  "model" : "vm"}`)
@@ -322,6 +344,7 @@ func TestRewriteRoles_ByteSplicePreservesEverythingElse(t *testing.T) {
 }
 
 func TestRewriteRoles_DeveloperInContentUntouched(t *testing.T) {
+	t.Parallel()
 	// The string "developer" inside message content must NOT be remapped.
 	// JSON escaping ensures the scanner sees it as part of a string value,
 	// not as a key-value pair.
@@ -336,6 +359,7 @@ func TestRewriteRoles_DeveloperInContentUntouched(t *testing.T) {
 }
 
 func TestRewriteRoles_EscapedRoleInContentUntouched(t *testing.T) {
+	t.Parallel()
 	// A literal {"role":"developer"} mentioned inside a content string
 	// arrives JSON-escaped; the scanner must skip over it.
 	raw := []byte(`{"messages":[{"role":"user","content":"send {\"role\":\"developer\"} please"}],"model":"vm"}`)
@@ -350,6 +374,7 @@ func TestRewriteRoles_EscapedRoleInContentUntouched(t *testing.T) {
 }
 
 func TestRewriteRoles_NoHTMLEscaping(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"messages":[{"role":"developer","content":"a < b && c > d"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
 	if err != nil {
@@ -364,6 +389,7 @@ func TestRewriteRoles_NoHTMLEscaping(t *testing.T) {
 }
 
 func TestRewriteRoles_NoMatchZeroCopy(t *testing.T) {
+	t.Parallel()
 	// No role matches the map: original slice returned as-is.
 	raw := []byte(`{"messages":[{"role":"user","content":"hi"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
@@ -376,6 +402,7 @@ func TestRewriteRoles_NoMatchZeroCopy(t *testing.T) {
 }
 
 func TestRewriteRoles_EmptyMapZeroCopy(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"messages":[{"role":"developer","content":"hi"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, nil)
 	if err != nil {
@@ -387,6 +414,7 @@ func TestRewriteRoles_EmptyMapZeroCopy(t *testing.T) {
 }
 
 func TestRewriteRoles_NoMessagesKey(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"model":"vm","prompt":"hi"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
 	if err != nil {
@@ -398,6 +426,7 @@ func TestRewriteRoles_NoMessagesKey(t *testing.T) {
 }
 
 func TestRewriteRoles_MessagesNotArray(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"messages":"not-an-array","model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
 	if err != nil {
@@ -409,6 +438,7 @@ func TestRewriteRoles_MessagesNotArray(t *testing.T) {
 }
 
 func TestRewriteRoles_MultipleMappings(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"messages":[{"role":"developer","content":"a"},{"role":"tool","content":"b"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"developer": "system", "tool": "user"})
 	if err != nil {
@@ -424,6 +454,7 @@ func TestRewriteRoles_MultipleMappings(t *testing.T) {
 }
 
 func TestRewriteRoles_SameRoleZeroCopy(t *testing.T) {
+	t.Parallel()
 	// Role already maps to itself: no replacement needed, zero-copy return.
 	raw := []byte(`{"messages":[{"role":"system","content":"hi"}],"model":"vm"}`)
 	out, err := RewriteRoles(raw, map[string]string{"system": "system"})

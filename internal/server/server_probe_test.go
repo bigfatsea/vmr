@@ -31,9 +31,10 @@ type probeUpstream struct {
 }
 
 func newProbeUpstream(t *testing.T) *probeUpstream {
+	t.Helper()
 	u := &probeUpstream{entered: make(chan struct{}, 4), release: make(chan struct{})}
 	u.mode.Store("ok")
-	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	u.srv = newJSONUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		u.hits.Add(1)
 		switch u.mode.Load() {
 		case "429":
@@ -69,28 +70,9 @@ func newProbeUpstream(t *testing.T) *probeUpstream {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"id":"x","model":"m","choices":[]}`)
 		}
-	}))
-	t.Cleanup(u.srv.Close)
+	})
 	t.Cleanup(func() { close(u.release) }) // runs BEFORE srv.Close (LIFO): unparks stragglers
 	return u
-}
-
-// probe_mode: passive — this file is specifically about the passive
-// single-request-is-the-probe contract (every outcome must release the probe
-// slot); probe_mode: active's equivalent invariants (an async probe always
-// resolves, never leaves an endpoint locked) are covered separately in
-// server_active_probe_test.go.
-func singleEndpointYAML(u string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-probe_mode: passive
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-models:
-  vm:
-    endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
-`, u)
 }
 
 // driveHalfOpen sends one rate-limited request and waits out the cooldown,
@@ -105,6 +87,7 @@ func driveHalfOpen(t *testing.T, ts *httptest.Server, u *probeUpstream) {
 }
 
 func TestProbeSlotReleasedOnClientCancel(t *testing.T) {
+	t.Parallel()
 	u := newProbeUpstream(t)
 	ts := newRouterServer(t, singleEndpointYAML(u.srv.URL))
 	driveHalfOpen(t, ts, u)
@@ -141,6 +124,7 @@ func TestProbeSlotReleasedOnClientCancel(t *testing.T) {
 }
 
 func TestProbeSlotReleasedOnClientError(t *testing.T) {
+	t.Parallel()
 	u := newProbeUpstream(t)
 	ts := newRouterServer(t, singleEndpointYAML(u.srv.URL))
 	driveHalfOpen(t, ts, u)

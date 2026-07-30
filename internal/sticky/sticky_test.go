@@ -8,6 +8,7 @@ import (
 )
 
 func TestRegistry_SetPeek(t *testing.T) {
+	t.Parallel()
 	r := New()
 	if _, _, ok := r.Peek("k"); ok {
 		t.Fatalf("expected no entry before Set")
@@ -26,6 +27,7 @@ func TestRegistry_SetPeek(t *testing.T) {
 }
 
 func TestRegistry_SetOverwrites(t *testing.T) {
+	t.Parallel()
 	r := New()
 	r.Set("k", "endpoint-a")
 	r.Set("k", "endpoint-b") // e.g. sticky pointer moved after failover success
@@ -36,6 +38,7 @@ func TestRegistry_SetOverwrites(t *testing.T) {
 }
 
 func TestRegistry_ValidityIsCallersJob(t *testing.T) {
+	t.Parallel()
 	// Peek never evicts or hides an entry based on age — that's explicitly
 	// the caller's responsibility (per-endpoint TTL), not this package's.
 	r := New()
@@ -51,6 +54,7 @@ func TestRegistry_ValidityIsCallersJob(t *testing.T) {
 }
 
 func TestRegistry_Len(t *testing.T) {
+	t.Parallel()
 	r := New()
 	if r.Len() != 0 {
 		t.Errorf("expected empty registry to have Len 0")

@@ -11,6 +11,7 @@ import (
 // exercised indirectly through report/router output), so this is new
 // coverage, not a relocation of an existing test.
 func TestFmtBytes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		n    int64
 		want string
@@ -33,6 +34,7 @@ func TestFmtBytes(t *testing.T) {
 // suffix is a deliberate anti-confusion marker (see doc comment) and must
 // never silently drop.
 func TestFmtTokens(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		n    int64
 		want string
@@ -54,6 +56,7 @@ func TestFmtTokens(t *testing.T) {
 // TestFmtSeconds locks the fixed-decimal rendering and the decimals
 // parameter (2 for the live router log, 3 for `vmr diagnose`).
 func TestFmtSeconds(t *testing.T) {
+	t.Parallel()
 	d := 6*time.Second + 320*time.Millisecond
 	if got, want := FmtSeconds(d, 2), "6.32s"; got != want {
 		t.Errorf("FmtSeconds(%s, 2) = %q, want %q", d, got, want)

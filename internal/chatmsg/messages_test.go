@@ -8,6 +8,7 @@ import (
 )
 
 func TestMessages_OpenAI(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"messages": []any{
 			map[string]any{"role": "system", "content": "sys"},
@@ -34,6 +35,7 @@ func TestMessages_OpenAI(t *testing.T) {
 }
 
 func TestMessages_AnthropicSystemPrepended(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"system": "you are helpful",
 		"messages": []any{
@@ -56,6 +58,7 @@ func TestMessages_AnthropicSystemPrepended(t *testing.T) {
 }
 
 func TestMessages_AnthropicToolResultAndImage(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"messages": []any{
 			map[string]any{"role": "assistant", "content": []any{
@@ -80,12 +83,14 @@ func TestMessages_AnthropicToolResultAndImage(t *testing.T) {
 }
 
 func TestRenderContent_Nil(t *testing.T) {
+	t.Parallel()
 	if got := RenderContent(nil); got != "" {
 		t.Errorf("RenderContent(nil) = %q, want empty", got)
 	}
 }
 
 func TestImagePlaceholder_DataURL(t *testing.T) {
+	t.Parallel()
 	got := ImagePlaceholder("data:image/jpeg;base64,QUFBQQ==")
 	if !strings.Contains(got, "image/jpeg") {
 		t.Errorf("ImagePlaceholder data url = %q", got)
@@ -93,6 +98,7 @@ func TestImagePlaceholder_DataURL(t *testing.T) {
 }
 
 func TestImagePlaceholder_RemoteURL(t *testing.T) {
+	t.Parallel()
 	got := ImagePlaceholder("https://example.com/x.png")
 	if !strings.Contains(got, "https://example.com/x.png") {
 		t.Errorf("ImagePlaceholder remote url = %q", got)
@@ -100,6 +106,7 @@ func TestImagePlaceholder_RemoteURL(t *testing.T) {
 }
 
 func TestToolNames(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"tools": []any{
 			map[string]any{"type": "function", "function": map[string]any{"name": "exec"}},
@@ -113,6 +120,7 @@ func TestToolNames(t *testing.T) {
 }
 
 func TestMessages_NonMapBody(t *testing.T) {
+	t.Parallel()
 	if got := Messages("not a map"); got != nil {
 		t.Errorf("Messages(non-map) = %v, want nil", got)
 	}

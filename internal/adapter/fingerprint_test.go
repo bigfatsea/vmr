@@ -8,6 +8,7 @@ import (
 )
 
 func TestSessionFingerprint_Anthropic(t *testing.T) {
+	t.Parallel()
 	a := json.RawMessage(`{"model":"x","system":"you are Agent A","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}`)
 	b := json.RawMessage(`{"model":"x","system":"you are Agent A","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"different tail"}]}`)
 	c := json.RawMessage(`{"model":"x","system":"you are Agent B","messages":[{"role":"user","content":"hi"}]}`)
@@ -49,6 +50,7 @@ func TestSessionFingerprint_Anthropic(t *testing.T) {
 }
 
 func TestSessionFingerprint_OpenAI_LeadingSystem(t *testing.T) {
+	t.Parallel()
 	single := json.RawMessage(`{"model":"x","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`)
 	multi := json.RawMessage(`{"model":"x","messages":[{"role":"system","content":"sys"},{"role":"system","content":"more sys"},{"role":"user","content":"hi"}]}`)
 	noSys := json.RawMessage(`{"model":"x","messages":[{"role":"user","content":"hi"}]}`)
@@ -79,6 +81,7 @@ func TestSessionFingerprint_OpenAI_LeadingSystem(t *testing.T) {
 }
 
 func TestSessionFingerprint_NoMessages(t *testing.T) {
+	t.Parallel()
 	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x"}`), "anthropic"); ok {
 		t.Errorf("expected ok=false when there is no top-level messages array")
 	}
@@ -93,6 +96,7 @@ func TestSessionFingerprint_NoMessages(t *testing.T) {
 // see TopLevelProbe's doc comment. This is the regression net for server.go
 // replacing that reflective unmarshal with this scanner.
 func TestTopLevelProbe_MatchesStructUnmarshalSemantics(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		body       string
@@ -138,6 +142,7 @@ func TestTopLevelProbe_MatchesStructUnmarshalSemantics(t *testing.T) {
 // doesn't just encode the author's assumptions about encoding/json's
 // null/type-mismatch rules.
 func TestTopLevelProbe_AgreesWithStructUnmarshal(t *testing.T) {
+	t.Parallel()
 	bodies := []string{
 		`{"model":"agent","stream":true}`,
 		`{"model":"agent"}`,

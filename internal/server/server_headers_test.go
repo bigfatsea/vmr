@@ -20,19 +20,6 @@ import (
 	"testing"
 )
 
-// oneProviderYAML is a minimal config: one virtual model, one provider.
-func oneProviderYAML(u string) string {
-	return `
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai: ` + u + `}, api_key: k1}
-models:
-  vm:
-    endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
-`
-}
-
 func chatHeaders(t *testing.T, ts string, hdr map[string]string) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest("POST", ts+"/v1/chat/completions", bytes.NewReader([]byte(`{"model":"vm"}`)))
@@ -229,7 +216,6 @@ func TestHeaders_BodyUnaffected(t *testing.T) {
 	if hh.Get("User-Agent") != "TestUA/1.0" {
 		t.Errorf("User-Agent not forwarded alongside body rewrite")
 	}
-	_ = json.Valid // keep import used if a later test needs it
 }
 
 func TestHeaders_AcceptEncodingNotForwarded(t *testing.T) {

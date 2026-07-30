@@ -13,6 +13,7 @@ import (
 // URLs are found and de-duplicated in order of first appearance, and the
 // MaxEntities cap is enforced.
 func TestExtractEntities(t *testing.T) {
+	t.Parallel()
 	text := "see internal/report/session.go and https://example.com/docs, " +
 		"also internal/report/session.go again and README.md"
 	got := ExtractEntities(text)
@@ -28,6 +29,7 @@ func TestExtractEntities(t *testing.T) {
 }
 
 func TestExtractEntitiesCapsAtMaxEntities(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	for i := 0; i < MaxEntities+20; i++ {
 		b.WriteString("file")

@@ -25,6 +25,7 @@ func (f fakeCondition) Eligible(*core.Endpoint, core.RequestFacts) bool {
 // of lost-update bug internal/adapter's Register had before its
 // registerMu fix — see that package's TestGetConcurrentWithRegister).
 func TestEligibleConcurrentWithRegisterCondition(t *testing.T) {
+	t.Parallel()
 	const n = 8
 	var wg sync.WaitGroup
 	names := make([]string, n)

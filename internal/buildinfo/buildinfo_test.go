@@ -11,6 +11,7 @@ import (
 // a VCS checkout must say "unknown", never an empty column that reads as a
 // rendering bug.
 func TestShort(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   Info
@@ -22,9 +23,12 @@ func TestShort(t *testing.T) {
 		{"short revision passes through", Info{Revision: "abc"}, "abc"},
 	}
 	for _, c := range cases {
-		if got := c.in.Short(); got != c.want {
-			t.Errorf("%s: Short() = %q, want %q", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.in.Short(); got != c.want {
+				t.Errorf("Short() = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
@@ -33,6 +37,7 @@ func TestShort(t *testing.T) {
 // is a reason to distrust a bug report about it — so it must be spelled
 // out, not left implicit in a suffix.
 func TestStringSpellsOutDirty(t *testing.T) {
+	t.Parallel()
 	s := Info{Revision: "abcdef1234", Time: "2026-07-27T18:38:00Z", GoVersion: "go1.26", Modified: true}.String()
 	for _, want := range []string{"abcdef1-dirty", "2026-07-27T18:38:00Z", "go1.26", "modified working tree"} {
 		if !strings.Contains(s, want) {
@@ -48,6 +53,7 @@ func TestStringSpellsOutDirty(t *testing.T) {
 // repository — so the stamp is expected to be present here. It must at
 // minimum never panic and always report the Go version.
 func TestReadReturnsSomethingUsable(t *testing.T) {
+	t.Parallel()
 	got := Read()
 	if got.GoVersion == "" {
 		t.Error("GoVersion is empty")

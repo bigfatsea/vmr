@@ -5,6 +5,7 @@ package adapter
 import "testing"
 
 func TestResolveURL(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, baseURL, suffix, want string
 	}{

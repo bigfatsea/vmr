@@ -71,6 +71,7 @@ func TestRoleCompatRequest_ShapeAndNonce(t *testing.T) {
 }
 
 func TestEchoed(t *testing.T) {
+	t.Parallel()
 	nonce := "VMR-PROBE-deadbeef"
 	cases := []struct {
 		name string
@@ -85,8 +86,11 @@ func TestEchoed(t *testing.T) {
 		{"empty body", ``, false},
 	}
 	for _, tc := range cases {
-		if got := Echoed([]byte(tc.body), nonce); got != tc.want {
-			t.Errorf("%s: Echoed=%v, want %v", tc.name, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Echoed([]byte(tc.body), nonce); got != tc.want {
+				t.Errorf("Echoed=%v, want %v", got, tc.want)
+			}
+		})
 	}
 }

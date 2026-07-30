@@ -34,8 +34,9 @@ type streamingUpstream struct {
 }
 
 func newStreamingUpstream(t *testing.T) *streamingUpstream {
+	t.Helper()
 	u := &streamingUpstream{}
-	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	u.srv = newJSONUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.WriteHeader(200)
 		flusher, _ := w.(http.Flusher)
@@ -57,8 +58,7 @@ func newStreamingUpstream(t *testing.T) *streamingUpstream {
 		// Chunk 6: usage — note the model field is also "MiniMax-M3"
 		writeSSE(w, flusher, `{"id":"x","choices":[],"created":1,"model":"MiniMax-M3","object":"chat.completion.chunk","usage":{"total_tokens":42,"prompt_tokens":30,"completion_tokens":12},"service_tier":"standard"}`)
 		// Upstream closes WITHOUT data: [DONE]
-	}))
-	t.Cleanup(u.srv.Close)
+	})
 	return u
 }
 

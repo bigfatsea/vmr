@@ -5,6 +5,7 @@ package chatmsg
 import "testing"
 
 func TestExtractUsage_OpenAIJSON(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"usage": map[string]any{
 			"prompt_tokens":     float64(1000),
@@ -24,6 +25,7 @@ func TestExtractUsage_OpenAIJSON(t *testing.T) {
 }
 
 func TestExtractUsage_AnthropicJSON(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{
 		"usage": map[string]any{
 			"input_tokens":                float64(500),
@@ -43,6 +45,7 @@ func TestExtractUsage_AnthropicJSON(t *testing.T) {
 }
 
 func TestExtractUsage_SSEStream(t *testing.T) {
+	t.Parallel()
 	raw := sseToolCall("exec")
 	u, ok := ExtractUsage(raw)
 	if !ok {
@@ -54,12 +57,14 @@ func TestExtractUsage_SSEStream(t *testing.T) {
 }
 
 func TestExtractUsage_NoUsage(t *testing.T) {
+	t.Parallel()
 	if _, ok := ExtractUsage(map[string]any{"foo": "bar"}); ok {
 		t.Error("expected ok=false when no usage present")
 	}
 }
 
 func TestExtractFinish(t *testing.T) {
+	t.Parallel()
 	sse := sseText("hi") // finish_reason "stop"
 	if got := ExtractFinish(sse); got != "stop" {
 		t.Errorf("ExtractFinish(sse) = %q, want stop", got)

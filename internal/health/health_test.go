@@ -11,6 +11,7 @@ import (
 var t0 = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
 
 func TestTransientBackoffCurve(t *testing.T) {
+	t.Parallel()
 	r := New()
 	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	for i, w := range want {
@@ -28,6 +29,7 @@ func TestTransientBackoffCurve(t *testing.T) {
 }
 
 func TestAuthAndEndpointLongCooldown(t *testing.T) {
+	t.Parallel()
 	r := New()
 	if got := r.ReportFailure("a", core.ErrAuth, 0, t0); got != 10*time.Minute {
 		t.Errorf("auth cooldown: %v", got)
@@ -38,6 +40,7 @@ func TestAuthAndEndpointLongCooldown(t *testing.T) {
 }
 
 func TestRetryAfterHonored(t *testing.T) {
+	t.Parallel()
 	r := New()
 	if got := r.ReportFailure("e", core.ErrRateLimit, 42*time.Second, t0); got != 42*time.Second {
 		t.Errorf("retry-after: %v", got)
@@ -51,6 +54,7 @@ func TestRetryAfterHonored(t *testing.T) {
 }
 
 func TestHalfOpenSingleFlightProbe(t *testing.T) {
+	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0)
 	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
@@ -85,6 +89,7 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 }
 
 func TestTransientHonorsRetryAfter(t *testing.T) {
+	t.Parallel()
 	r := New()
 	// OpenRouter sends Retry-After on 503 (classified transient).
 	if got := r.ReportFailure("e", core.ErrTransient, 30*time.Second, t0); got != 30*time.Second {
@@ -93,6 +98,7 @@ func TestTransientHonorsRetryAfter(t *testing.T) {
 }
 
 func TestReportNeutralReleasesProbeOnly(t *testing.T) {
+	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0) // cooldown 2s, fails=1
 	after := t0.Add(3 * time.Second)               // half-open
@@ -114,6 +120,7 @@ func TestReportNeutralReleasesProbeOnly(t *testing.T) {
 }
 
 func TestSuccessResets(t *testing.T) {
+	t.Parallel()
 	r := New()
 	for i := 0; i < 5; i++ {
 		r.ReportFailure("e", core.ErrTransient, 0, t0)
@@ -125,6 +132,7 @@ func TestSuccessResets(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
+	t.Parallel()
 	r := New()
 	if st := r.Status("never-seen", t0); !st.Available || st.Fails != 0 {
 		t.Errorf("unknown endpoint should be available: %+v", st)
@@ -137,6 +145,7 @@ func TestStatus(t *testing.T) {
 }
 
 func TestStatusReportsProbing(t *testing.T) {
+	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0)
 	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
@@ -157,6 +166,7 @@ func TestStatusReportsProbing(t *testing.T) {
 }
 
 func TestRetryAfterCappedAtOneHour(t *testing.T) {
+	t.Parallel()
 	r := New()
 	// Retry-After is upstream-controlled input; a bogus huge value must not
 	// lock the endpoint out beyond the long-cooldown cap (1h).

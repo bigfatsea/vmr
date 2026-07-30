@@ -23,23 +23,6 @@ import (
 	"time"
 )
 
-// stickyYAML is stickyYAML(u1, u2, extraModelLines): unlike twoEndpointYAML,
-// sticky defaults to true here (these tests exist to exercise it).
-func stickyYAML(u1, u2, extraModelLines string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-models:
-  vm:
-    %s
-    endpoints:
-      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
-      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
-`, u1, u2, extraModelLines)
-}
-
 func flagP1(u1 *upstream) {
 	u1.status.Store(403)
 	u1.errBody.Store(`{"error":{"message":"flagged"}}`)

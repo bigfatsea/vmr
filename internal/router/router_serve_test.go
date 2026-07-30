@@ -73,6 +73,7 @@ type mockUpstream struct {
 }
 
 func newMockUpstream(t *testing.T, status int, body string) *mockUpstream {
+	t.Helper()
 	u := &mockUpstream{status: status, body: body, hdr: http.Header{}}
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.hits++

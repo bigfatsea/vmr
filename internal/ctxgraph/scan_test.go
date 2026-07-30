@@ -53,6 +53,7 @@ func assistantMsg(text string) map[string]any {
 // same user instruction (the survives-a-compaction shape) — this must split
 // into two lineages, not stay merged under one anchor.
 func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
+	t.Parallel()
 	zone := time.UTC
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, zone) }
 
@@ -124,6 +125,7 @@ func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
 }
 
 func TestScan_PureAppendStaysOneLineage(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 10, m, 0, 0, time.UTC) }
 	sys := sysMsg("sys")
 	msgs := []map[string]any{sys, userMsg("do the task")}
@@ -146,6 +148,7 @@ func TestScan_PureAppendStaysOneLineage(t *testing.T) {
 }
 
 func TestScan_DifferentSessKeysAreIndependentBuckets(t *testing.T) {
+	t.Parallel()
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 10, m, 0, 0, time.UTC) }
 	recA := mkAuditRec(at(0), chatBody(sysMsg("sys"), userMsg("task A")))
 	recB := mkAuditRec(at(1), chatBody(sysMsg("sys"), userMsg("task B (unrelated)")))
@@ -163,6 +166,7 @@ func TestScan_DifferentSessKeysAreIndependentBuckets(t *testing.T) {
 }
 
 func TestScan_BlobIndexFetchAllRecoversOriginalContent(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	body := chatBody(sysMsg("sys"), userMsg("hello there"), assistantMsg("hi back"))
 	rec := mkAuditRec(at, body)
@@ -204,6 +208,7 @@ func TestScan_BlobIndexFetchAllRecoversOriginalContent(t *testing.T) {
 }
 
 func TestScan_NoBodyRecordsCounted(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	rejected := audit.Record{TS: at, Model: "", Outcome: "error",
 		Client: audit.Exchange{Request: audit.Message{Body: nil}}}
@@ -222,6 +227,7 @@ func TestScan_NoBodyRecordsCounted(t *testing.T) {
 }
 
 func TestScan_EmptyPaths(t *testing.T) {
+	t.Parallel()
 	g, err := Scan(nil)
 	if err != nil {
 		t.Fatalf("Scan(nil): %v", err)
@@ -232,6 +238,7 @@ func TestScan_EmptyPaths(t *testing.T) {
 }
 
 func TestScan_MissingFileReturnsError(t *testing.T) {
+	t.Parallel()
 	if _, err := Scan([]string{"/nonexistent/path.jsonl"}); err == nil {
 		t.Error("expected error for missing file")
 	}

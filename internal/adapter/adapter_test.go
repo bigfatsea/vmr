@@ -27,6 +27,7 @@ func (f fakeAdapter) ClassifyError(int, []byte) core.ErrorClass { return core.Er
 // always see either "not yet registered" or the fully-registered adapter,
 // never a partially-constructed one.
 func TestGetConcurrentWithRegister(t *testing.T) {
+	t.Parallel()
 	const names = 8
 	var wg sync.WaitGroup
 

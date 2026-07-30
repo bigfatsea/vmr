@@ -1,123 +1,20 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
-// Integration tests: full handler + mock upstreams over real HTTP.
+// Integration tests: full handler + mock upstreams over real HTTP. Shared
+// mock/fixture/client scaffolding lives in testhelpers_test.go and
+// fixtures_test.go (docs/test_review_action_plan_sonnet-5.md Batch 3) — this
+// file holds only the tests themselves.
 package server
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"vmr/internal/config"
-	"vmr/internal/router"
-
-	_ "vmr/internal/adapter/openai"
 )
-
-// upstream is a scriptable mock provider.
-type upstream struct {
-	srv         *httptest.Server
-	hits        atomic.Int32
-	status      atomic.Int32 // response status; 200 = success
-	lastModel   atomic.Value // model name seen in the last request
-	lastHeaders atomic.Value // http.Header received in the last request
-	errBody     atomic.Value // optional custom error body (string)
-	retryAfter  string
-}
-
-func newUpstream(t *testing.T) *upstream {
-	u := &upstream{}
-	u.status.Store(200)
-	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u.hits.Add(1)
-		body, _ := io.ReadAll(r.Body)
-		var m struct {
-			Model string `json:"model"`
-		}
-		json.Unmarshal(body, &m)
-		u.lastModel.Store(m.Model)
-		u.lastHeaders.Store(r.Header.Clone())
-		st := int(u.status.Load())
-		if st != 200 {
-			if u.retryAfter != "" {
-				w.Header().Set("Retry-After", u.retryAfter)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(st)
-			if custom, ok := u.errBody.Load().(string); ok {
-				fmt.Fprint(w, custom)
-			} else {
-				fmt.Fprintf(w, `{"error":{"message":"upstream says %d"}}`, st)
-			}
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"x","object":"chat.completion","model":%q,"choices":[]}`, m.Model)
-	}))
-	t.Cleanup(u.srv.Close)
-	return u
-}
-
-func newRouterServer(t *testing.T, yaml string) *httptest.Server {
-	cfg, err := config.Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt := router.New(nil)
-	snap, err := router.BuildSnapshot(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt.Install(snap)
-	ts := httptest.NewServer(New(rt, nil).Handler())
-	t.Cleanup(ts.Close)
-	return ts
-}
-
-// twoEndpointYAML is the shared fixture for failover/health/probe tests,
-// which repeatedly send the byte-identical simpleReq and expect each call
-// to be freshly routed by health/priority — sticky: false so Sticky
-// Model's default-on affinity (see docs/VirtualModelRouter_Design_v4_Core.md
-// §6.5) never pins repeated calls to whichever endpoint last succeeded and
-// masks the health/priority behavior these tests exist to pin down.
-func twoEndpointYAML(u1, u2 string, extra string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-%s
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-models:
-  vm:
-    sticky: false
-    endpoints:
-      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
-      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
-`, extra, u1, u2)
-}
-
-func chat(t *testing.T, ts *httptest.Server, body string, hdr map[string]string) (*http.Response, string) {
-	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return resp, string(b)
-}
-
-const simpleReq = `{"model":"vm","messages":[{"role":"user","content":"hi"}]}`
 
 func TestFailoverOn5xxAndModelRewrite(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
@@ -241,6 +138,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 // covered by TestActiveProbe_RecoversInBackgroundWithoutServingRealTraffic
 // in server_active_probe_test.go.
 func TestRateLimitCooldownAndRecovery(t *testing.T) {
+	t.Parallel()
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(429)
 	u1.retryAfter = "1"

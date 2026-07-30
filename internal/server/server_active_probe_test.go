@@ -36,6 +36,7 @@ func driveHalfOpenViaFailover(t *testing.T, ts *httptest.Server, u *probeUpstrea
 // probe_mode override is set here on purpose (this is what a default install
 // does).
 func TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic(t *testing.T) {
+	t.Parallel()
 	u := newProbeUpstream(t)
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
@@ -74,6 +75,7 @@ models:
 // must be served fast by p2 — never diverted for as long as p1's background
 // probe takes to resolve.
 func TestActiveProbe_RealTrafficUnaffectedByBackgroundProbeLatency(t *testing.T) {
+	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 300ms"))
@@ -111,6 +113,7 @@ func TestActiveProbe_RealTrafficUnaffectedByBackgroundProbeLatency(t *testing.T)
 // again — recovery happened off the request path, not by any client "being"
 // the probe.
 func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
+	t.Parallel()
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(429)
 	u1.retryAfter = "1"
@@ -164,6 +167,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 // ReportNeutral, or the endpoint would stay "probing" forever and never be
 // probed again.
 func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
+	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
@@ -215,6 +219,7 @@ func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 // which covers the same body on the *synchronous* tryOne path) would catch
 // it.
 func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
+	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
