@@ -1,4 +1,4 @@
-// Ver 2026-07-13 01:30, by Fable 5
+// Ver 2026-07-30, by Sonnet 5
 package config
 
 import (
@@ -11,11 +11,9 @@ import (
 const dirsTestBody = `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: https://example.com, api_key: k}
+  - {name: p1, base_url: {openai: https://example.com}, api_key: k}
 models:
-  openai:
-    m: {endpoints: [{provider: p1, model: x}]}
+  m: {endpoints: [{protocol: openai, provider: p1, models: [x]}]}
 `
 
 func TestDirDefaultsResolveToPersistentHome(t *testing.T) {

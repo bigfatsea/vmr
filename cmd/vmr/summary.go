@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Config-summary rendering shared by cmd_start.go (startup/reload banner)
 // and cmd_check.go (`vmr check` output): configFlag, logConfigSummary, and
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strings"
 
 	"vmr/internal/config"
@@ -104,8 +105,8 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 
 	var model strings.Builder
 	model.WriteString("model config:")
-	for _, protocol := range core.SortedKeys(cfg.Models) {
-		for _, name := range core.SortedKeys(cfg.Models[protocol]) {
+	for _, protocol := range core.SortedKeys(snap.Models) {
+		for _, name := range core.SortedKeys(snap.Models[protocol]) {
 			route := snap.Models[protocol][name]
 			imgOverride := ""
 			if route.ImageDownscaleMaxPx != nil {
@@ -173,20 +174,21 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 		return raw
 	}
 	var entries []providerProxyEntry
-	for _, protocol := range core.SortedKeys(cfg.Providers) {
-		for _, name := range core.SortedKeys(cfg.Providers[protocol]) {
-			p := cfg.Providers[protocol][name]
+	providers := append([]config.Provider(nil), cfg.Providers...)
+	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
+	for _, p := range providers {
+		for _, protocol := range core.SortedKeys(p.BaseURL) {
 			desc := "direct"
 			if p.Proxy != nil && !*p.Proxy {
 				desc = "direct (proxy: false)"
 			}
 			isProxied := false
-			if mode, proxyURL := cfg.ProxySpecFor(p); mode == config.ProxyURL {
+			if mode, proxyURL := cfg.ProxySpecFor(p, protocol); mode == config.ProxyURL {
 				desc = redact(proxyURL)
 				isProxied = true
 			}
 			entries = append(entries, providerProxyEntry{
-				Name: protocol + "/" + name, BaseURL: p.BaseURL, Proxy: desc, IsProxied: isProxied,
+				Name: protocol + "/" + p.Name, BaseURL: p.BaseURL[protocol], Proxy: desc, IsProxied: isProxied,
 			})
 		}
 	}

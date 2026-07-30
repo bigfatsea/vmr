@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 23:30, by Sonnet 5 -->
+<!-- Ver 2026-07-30 23:45, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -8,7 +8,7 @@
 
 ## 配置
 
-`providers`/`models` 都按协议分两层：外层 key 是协议（`openai` / `anthropic`），内层才是名字。一个 model 的 endpoints 只能引用同协议分组下的 provider——跨协议混用没有语法能表达它，而不是靠校验去抓。同一账号的两个协议面可复用同一个短名（`openrouter`），不需要后缀区分：
+`providers` 是一个扁平列表——一个账号一条，不管它实际讲两种入口协议（`openai` / `anthropic`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai 协议的候选列表和一条 anthropic 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -36,31 +36,24 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s          # 上游 body 静默看门狗（流式/非流式/错误体都覆盖）
 
 providers:
-  openai:
-    openrouter:
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
-      proxy: true              # 永远走 https_proxy/http_proxy，无视全局 proxy 默认值——
-                               # 给海外 provider 开代理的推荐写法
-    minimax:
-      base_url: https://api.minimaxi.com/v1
-      api_key: ${MINIMAX_API_KEY}
-      # proxy: false           # 这里不需要写——推荐的基线（全局 proxy 关闭）本来就对
-                               # 这个 provider 默认直连
-  anthropic:
-    openrouter:                # 同一账号的 Anthropic 面，同名不冲突（两层 map 天然隔离）
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
+  - name: openrouter
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    api_key: ${OPENROUTER_API_KEY}
+    proxy: true              # 永远走 https_proxy/http_proxy，无视全局 proxy 默认值——
+                             # 给海外 provider 开代理的推荐写法
+  - name: minimax
+    base_url: {openai: https://api.minimaxi.com/v1}
+    api_key: ${MINIMAX_API_KEY}
+    # proxy: false           # 这里不需要写——推荐的基线（全局 proxy 关闭）本来就对
+                             # 这个 provider 默认直连
 
 models:
-  openai:
-    coding:
-      endpoints:
-        - {provider: openrouter, model: z-ai/glm-5.2}   # 不写 priority：列表顺序就是尝试顺序
-  anthropic:
-    claude:                    # anthropic 协议 → 走 /v1/messages
-      endpoints:
-        - {provider: openrouter, model: minimax/minimax-m3}
+  coding:                      # 只有 openai 协议 → 走 /v1/chat/completions
+    endpoints:
+      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
+  claude:                      # 只有 anthropic 协议 → 走 /v1/messages
+    endpoints:
+      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
 ```
 
 全部字段与校验规则见设计文档 Part 1 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
@@ -69,7 +62,7 @@ models:
 
 **base_url 必须自带版本号**：vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI 为 `/chat/completions`，Anthropic 为 `/messages`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
 
-**`role_map`——按 provider 做 role 改写**：有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 provider 一级（跟 `base_url`/`api_key` 同级），不是挂在虚拟模型上——因为"拒收某个 role"通常是上游网关本身的特性，不是它背后某一个模型的特性；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。
+**`role_map`——按 endpoint-group 做 role 改写**：有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints[]` 的某条 entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
 
 ### 环境变量
 
@@ -120,20 +113,21 @@ probe_timeout: 15s      # 仅 active 模式生效：一次后台探测的时间�
 
 ```yaml
 models:
-  openai:
-    agent:
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          capabilities: [text, image, tools]   # 自由字符串标签：这个端点接受什么
-          max_context_tokens: 1000000          # 声明的上下文窗口
-        - provider: deepseek
-          model: deepseek-chat
-          capabilities: [text, tools]           # 没有 "image"——带图片的请求会跳过这个端点
-          max_context_tokens: 128000
+  agent:
+    capabilities: [text, tools]        # 基线：下面每个端点都继承这个
+    max_context_tokens: 128000         # 基线：同上
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
+        max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
 ```
 
-两个字段都是可选的，缺省即**不限制**：端点不声明 `capabilities` 就视为什么都支持，不声明 `max_context_tokens` 就没有上限——现有配置文件行为完全不变。`capabilities` 一旦声明就是穷尽式的（把端点真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）；`vmr check` 会把每个端点声明的能力和上下文上限打印出来，配置遗漏在这里一眼可见。
+两个字段在虚拟模型层和端点层都是可选的，缺省即**不限制**：虚拟模型不声明 `capabilities` 就没有基线，端点不声明自己的就视为支持模型基线里的一切（如果哪一层都没声明，就是什么都支持）——现有配置文件行为完全不变。`capabilities` 在端点层是**叠加**语义（与模型基线取并集）,`max_context_tokens` 则是**覆盖或继承**（单个数值没法取并集）。端点的生效能力集合一旦非空就是穷尽式的（把它真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）；`vmr check` 会把每个虚拟模型的基线、以及每个端点自己声明的叠加/覆盖值打印出来，配置遗漏在这里一眼可见。
 
 两类条件性质不同：
 
@@ -150,17 +144,18 @@ models:
 sticky_ttl: 10m              # 全局默认：粘性偏好保持有效的时长
 
 models:
-  openai:
-    agent:
-      # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
-      # 才需要显式写 sticky: false
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          # 继承全局的 10 分钟 sticky_ttl
-        - provider: deepseek
-          model: deepseek-chat
-          sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
+  agent:
+    # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
+    # 才需要显式写 sticky: false
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        # 继承全局的 10 分钟 sticky_ttl
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-chat]
+        sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
 ```
 
 - **身份识别**：对话锚点取自 system prompt **和**第一条非 system 消息的哈希——两者都只哈希、从不记录或以其他方式暴露。两个恰好用同一句话开场的不同 Agent 不会被混同，因为它们的 system prompt（进而它们在上游真正的缓存前缀）不同；如果只哈希首条用户消息、不含 system prompt，恰好会漏掉这个场景。
@@ -247,13 +242,12 @@ image_downscale: 512   # 全局长边像素上限；0 或缺省 = 关闭
 image_cache_ttl_days: 7   # 降采样结果缓存的失效期（缺省 7 天，见下）
 
 models:
-  openai:
-    coding:
-      image_downscale: 1024   # 覆盖全局值，只对这一个虚拟模型生效
-      endpoints: [...]
-    cheap:
-      image_downscale: 0      # 显式关闭：即使全局开启，这个模型也不降采样
-      endpoints: [...]
+  coding:
+    image_downscale: 1024   # 覆盖全局值，只对这一个虚拟模型生效
+    endpoints: [...]
+  cheap:
+    image_downscale: 0      # 显式关闭：即使全局开启，这个模型也不降采样
+    endpoints: [...]
 ```
 
 **模型级覆盖**：每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
@@ -278,7 +272,7 @@ models:
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /admin/status` | 端点健康 + 并发指标，含某个端点当前是否正被一次恢复探测（被动或主动）占着单飞名额（仅 loopback） |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
-| `vmr check -c config.yaml` | 校验配置、打印路由表、Key 状态与每个 provider 的生效代理。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
+| `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、代理悄悄退化成直连、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
 | `vmr report [-o dir] [-pricing pricing.yaml] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话） |
 | `vmr story [-journey <id> \| -render-all \| -compare <id1,id2>] <glob>` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见下文"Agent 任务叙事重建"）；不带参数列出候选任务及其 id，`-render-all` 一次批量渲染全部，`-compare id1,id2` 对比两个已渲染任务的行为剖面（规则事实之外，加 `-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可追加可选的 LLM 解读小节） |

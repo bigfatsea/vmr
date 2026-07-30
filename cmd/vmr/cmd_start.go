@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package main
 
 import (
@@ -169,7 +169,7 @@ func cmdStart(args []string) error {
 		Handler:           server.New(rt, auditLog).WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
-	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, config.CountNested(cfg.Models))
+	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(cfg.Models))
 
 	// vmr.sh (and systemd/launchd) stop the process with SIGTERM; Go doesn't
 	// catch that by default, so without this the process just dies mid-request

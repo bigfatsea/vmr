@@ -1,4 +1,4 @@
-// Ver 2026-07-18 23:15, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // probe_mode: active — the goal this whole mode exists for is that real
 // client traffic never waits on, and is never diverted for longer than a
@@ -41,13 +41,11 @@ func TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic(t *testing.T) {
 listen: 127.0.0.1:0
 probe_timeout: 200ms
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: model-one}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [model-one]}
 `, u.srv.URL))
 	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired (passive contract, unrelated to probe_mode)
 

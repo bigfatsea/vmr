@@ -1,4 +1,4 @@
-// Ver 2026-07-17 08:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Package replay implements `vmr replay`: rebuild and resend one request
 // from an audit JSONL record, using the exact same adapter.BuildRequest vmr
@@ -35,7 +35,7 @@ type Options struct {
 	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS
 	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line
 	DetailPath string // a `vmr report` details/*.json file, read directly as the one record it holds — AuditPath/Line/TS unused
-	Provider   string // required: providers.<protocol>.<name> to replay against
+	Provider   string // required: name of a providers[] entry to replay against
 	Model      string // override the upstream model name; "" = resolved from config
 	Protocol   string // override the protocol; "" = the record's own protocol
 	Stream     *bool  // nil = use the record's own stream value
@@ -95,9 +95,13 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	if !ok {
 		return fmt.Errorf("unknown protocol %q (available: %v)", protocol, adapter.Names())
 	}
-	providerCfg, ok := cfg.Providers[protocol][opts.Provider]
+	providerCfg, ok := cfg.ProviderByName(opts.Provider)
 	if !ok {
-		return fmt.Errorf("provider %q not found under providers.%s in %s", opts.Provider, protocol, opts.ConfigPath)
+		return fmt.Errorf("provider %q not found in %s", opts.Provider, opts.ConfigPath)
+	}
+	baseURL, ok := providerCfg.BaseURL[protocol]
+	if !ok {
+		return fmt.Errorf("provider %q has no base_url for protocol %q in %s", opts.Provider, protocol, opts.ConfigPath)
 	}
 
 	model := opts.Model
@@ -110,11 +114,11 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	ep := &core.Endpoint{
 		Provider:    opts.Provider,
 		AdapterType: protocol,
-		BaseURL:     providerCfg.BaseURL,
+		BaseURL:     baseURL,
 		APIKey:      providerCfg.APIKey,
 		Model:       model,
 	}
-	ep.FullURL = ad.ResolveURL(providerCfg.BaseURL)
+	ep.FullURL = ad.ResolveURL(baseURL)
 
 	stream := rv.Stream
 	if opts.Stream != nil && *opts.Stream != rv.Stream {
@@ -157,7 +161,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	}
 	httpReq = httpReq.WithContext(ctx)
 
-	client := router.NewUpstreamClient(cfg, providerCfg)
+	client := router.NewUpstreamClient(cfg, providerCfg, protocol)
 	fmt.Fprintf(stdout, "-> %s %s\n", httpReq.Method, httpReq.URL)
 	start := time.Now()
 	resp, err := client.Do(httpReq)
@@ -344,18 +348,30 @@ func loadRecordByLine(path string, line int) (*recordView, int, error) {
 
 // resolveModel looks up the real upstream model name for provider under the
 // virtual model the record was sent to — the same lookup config.yaml itself
-// encodes (models.<protocol>.<virtualModel>.endpoints[].{provider,model}).
+// encodes (models.<virtualModel>.endpoints[].{protocol,provider,models}).
+// Errors (rather than guessing) when provider/protocol match more than one
+// candidate model — an EndpointGroup's Models list can legitimately hold
+// several, and picking the wrong one would replay against a model the
+// record was never sent to.
 func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (string, error) {
-	mc, ok := cfg.Models[protocol][virtualModel]
+	vm, ok := cfg.Models[virtualModel]
 	if !ok {
-		return "", fmt.Errorf("virtual model %q not found in config under protocol %q; pass -model to specify the upstream model explicitly", virtualModel, protocol)
+		return "", fmt.Errorf("virtual model %q not found in config; pass -model to specify the upstream model explicitly", virtualModel)
 	}
-	for _, ep := range mc.Endpoints {
-		if ep.Provider == provider {
-			return ep.Model, nil
+	var candidates []string
+	for _, eg := range vm.Endpoints {
+		if eg.Protocol == protocol && eg.Provider == provider {
+			candidates = append(candidates, eg.Models...)
 		}
 	}
-	return "", fmt.Errorf("provider %q has no endpoint under virtual model %q; pass -model to specify the upstream model explicitly", provider, virtualModel)
+	switch len(candidates) {
+	case 0:
+		return "", fmt.Errorf("provider %q has no %s-protocol endpoint under virtual model %q; pass -model to specify the upstream model explicitly", provider, protocol, virtualModel)
+	case 1:
+		return candidates[0], nil
+	default:
+		return "", fmt.Errorf("provider %q has %d candidate models under virtual model %q (%v); pass -model to pick one", provider, len(candidates), virtualModel, candidates)
+	}
 }
 
 func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte) {

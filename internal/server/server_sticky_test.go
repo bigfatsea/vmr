@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // End-to-end tests for Sticky Model (see
 // docs/VirtualModelRouter_Design_v4_Core.md §6.5): once a
@@ -29,16 +29,14 @@ func stickyYAML(u1, u2, extraModelLines string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      %s
-      endpoints:
-        - {provider: p1, model: model-one, priority: 1}
-        - {provider: p2, model: model-two, priority: 2}
+  vm:
+    %s
+    endpoints:
+      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
+      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
 `, u1, u2, extraModelLines)
 }
 
@@ -117,20 +115,20 @@ func TestSticky_TTLExpiry(t *testing.T) {
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      endpoints:
-        - provider: p1
-          model: model-one
-          priority: 1
-        - provider: p2
-          model: model-two
-          priority: 2
-          sticky_ttl: 200ms
+  vm:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [model-one]
+        priority: 1
+      - protocol: openai
+        provider: p2
+        models: [model-two]
+        priority: 2
+        sticky_ttl: 200ms
 `, u1.srv.URL, u2.srv.URL))
 
 	chat(t, ts, simpleReq, nil) // establishes p2 stickiness

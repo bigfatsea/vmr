@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:05, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // End-to-end tests for condition-based routing (see
 // docs/VirtualModelRouter_Design_v4_Core.md §6.4): a request's
@@ -21,20 +21,20 @@ func capabilityYAML(u1, u2, declP1, declP2 string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      sticky: false
-      endpoints:
-        - provider: p1
-          model: model-one
-          priority: 1%s
-        - provider: p2
-          model: model-two
-          priority: 2%s
+  vm:
+    sticky: false
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [model-one]
+        priority: 1%s
+      - protocol: openai
+        provider: p2
+        models: [model-two]
+        priority: 2%s
 `, u1, u2, declP1, declP2)
 }
 
@@ -53,8 +53,8 @@ func TestCondition_ImageRoutesAwayFromNonCapableHigherPriority(t *testing.T) {
 	// p1 (priority 1, would normally win) declares no image support; p2
 	// declares it. An image request must skip p1 despite its priority.
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
-		"\n          capabilities: [text, tools]",
-		"\n          capabilities: [text, tools, image]"))
+		"\n        capabilities: [text, tools]",
+		"\n        capabilities: [text, tools, image]"))
 
 	resp, _ := chat(t, ts, imageReq, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
@@ -68,8 +68,8 @@ func TestCondition_ImageRoutesAwayFromNonCapableHigherPriority(t *testing.T) {
 func TestCondition_NonImageRequestUsesNormalPriority(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
-		"\n          capabilities: [text, tools]",
-		"\n          capabilities: [text, tools, image]"))
+		"\n        capabilities: [text, tools]",
+		"\n        capabilities: [text, tools, image]"))
 
 	resp, _ := chat(t, ts, simpleReq, nil) // no image
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p1/model-one" {
@@ -93,8 +93,8 @@ func TestCondition_UndeclaredCapabilitiesIsUnconstrained(t *testing.T) {
 func TestCondition_ToolsRoutesAwayFromNonCapable(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
-		"\n          capabilities: [text]",
-		"\n          capabilities: [text, tools]"))
+		"\n        capabilities: [text]",
+		"\n        capabilities: [text, tools]"))
 
 	resp, _ := chat(t, ts, toolsReq, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
@@ -107,8 +107,8 @@ func TestCondition_AllRejectedGivesDiagnosticMessage(t *testing.T) {
 	// Neither endpoint supports image — an image request must fail fast
 	// (no upstream attempt at all) with a message naming the condition.
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
-		"\n          capabilities: [text]",
-		"\n          capabilities: [text]"))
+		"\n        capabilities: [text]",
+		"\n        capabilities: [text]"))
 
 	resp, body := chat(t, ts, imageReq, nil)
 	if resp.StatusCode != 503 {
@@ -128,20 +128,20 @@ func contextLenYAML(u1, u2 string, p1Max, p2Max string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      sticky: false
-      endpoints:
-        - provider: p1
-          model: model-one
-          priority: 1%s
-        - provider: p2
-          model: model-two
-          priority: 2%s
+  vm:
+    sticky: false
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [model-one]
+        priority: 1%s
+      - protocol: openai
+        provider: p2
+        models: [model-two]
+        priority: 2%s
 `, u1, u2, p1Max, p2Max)
 }
 
@@ -153,8 +153,8 @@ var bigReq = `{"model":"vm","messages":[{"role":"user","content":"` + strings.Re
 func TestCondition_ContextLengthSkipsTooSmallEndpoint(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	ts := newRouterServer(t, contextLenYAML(u1.srv.URL, u2.srv.URL,
-		"\n          max_context_tokens: 50",
-		"\n          max_context_tokens: 1000000"))
+		"\n        max_context_tokens: 50",
+		"\n        max_context_tokens: 1000000"))
 
 	resp, _ := chat(t, ts, bigReq, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
@@ -182,8 +182,8 @@ func TestCondition_ContextLengthFallbackNeverEmptiesCandidates(t *testing.T) {
 	// #3's reactive failover make the call instead of refusing on a guess.
 	u1, u2 := newUpstream(t), newUpstream(t)
 	ts := newRouterServer(t, contextLenYAML(u1.srv.URL, u2.srv.URL,
-		"\n          max_context_tokens: 10",
-		"\n          max_context_tokens: 10"))
+		"\n        max_context_tokens: 10",
+		"\n        max_context_tokens: 10"))
 
 	resp, _ := chat(t, ts, bigReq, nil)
 	if resp.StatusCode != 200 {

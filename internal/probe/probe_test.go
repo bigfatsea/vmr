@@ -40,6 +40,36 @@ func TestRequest_TwoCallsGetDifferentNonces(t *testing.T) {
 	}
 }
 
+func TestRoleCompatRequest_ShapeAndNonce(t *testing.T) {
+	body, nonce := RoleCompatRequest("some-model", "developer")
+	if nonce == "" || !strings.HasPrefix(nonce, "VMR-PROBE-") {
+		t.Fatalf("unexpected nonce: %q", nonce)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatalf("body is not valid JSON: %v (%s)", err, body)
+	}
+	msgs, ok := m["messages"].([]any)
+	if !ok || len(msgs) != 2 {
+		// Two messages, not Request's one: some providers reject a request
+		// whose only message isn't role "user", a shape problem this test
+		// must not be confused with a role-support problem.
+		t.Fatalf("messages: %v, want 2 entries", m["messages"])
+	}
+	first, _ := msgs[0].(map[string]any)
+	if first["role"] != "developer" {
+		t.Errorf("messages[0].role = %v, want %q", first["role"], "developer")
+	}
+	last, _ := msgs[len(msgs)-1].(map[string]any)
+	if last["role"] != "user" {
+		t.Errorf("messages[last].role = %v, want %q", last["role"], "user")
+	}
+	content, _ := last["content"].(string)
+	if !strings.Contains(content, nonce) {
+		t.Errorf("last message content does not mention the nonce: %q", content)
+	}
+}
+
 func TestEchoed(t *testing.T) {
 	nonce := "VMR-PROBE-deadbeef"
 	cases := []struct {

@@ -1,4 +1,4 @@
-// Ver 2026-07-28 12:40, by Opus 5
+// Ver 2026-07-30, by Sonnet 5
 
 // /admin/status's "instance" block: the facts that let a caller who only
 // has a port tell which vmr answered it (vmr.sh ps is built entirely on
@@ -23,13 +23,11 @@ import (
 const instanceYAML = `
 listen: 127.0.0.1:18800
 providers:
-  openai:
-    p1: {base_url: http://127.0.0.1:1, api_key: k1}
+  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
 `
 
 type instanceBlock struct {

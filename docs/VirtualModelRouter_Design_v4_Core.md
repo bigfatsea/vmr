@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
+<!-- Ver 2026-07-30 18:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -20,9 +20,9 @@
 
 | 概念 | 职责 |
 | --- | --- |
-| **Virtual Model** | 对外暴露的模型名，代表能力而非厂商；对应一组 Endpoint，绑定一种协议 |
-| **Provider** | 一个可复用的上游定义：base_url + api_key；归属哪个协议由它在配置里的位置决定（`providers.<protocol>.<name>`） |
-| **Endpoint** | 最小调度单位：Provider × 实际模型名 × 调度属性；同厂不同 Key / 不同协议面即不同 Provider→不同 Endpoint |
+| **Virtual Model** | 对外暴露的模型名，代表能力而非厂商；对应一组 Endpoint-Group，每组自带协议标签，同一虚拟模型名可以同时挂 openai 面和 anthropic 面 |
+| **Provider** | 一个可复用的上游账号定义：`name` + 按协议分 key 的 `base_url` map（`{openai: ..., anthropic: ...}`，至少声明一个）+ 共享的 api_key/proxy；协议信息现在挂在 base_url 的 key 上，不再由 provider 在配置里的位置决定 |
+| **Endpoint** | 最小调度单位：Provider × 实际模型名 × 调度属性；一个 Endpoint-Group 的 `models:` 列表展开成多个独立 Endpoint，共享同一组 provider/protocol/capabilities |
 | **Adapter** | 协议插件：构造上游请求、转换响应、归类错误；声明自己的协议 |
 | **Strategy** | 候选排序器：健康与条件过滤后按维度序列做稳定多键排序 |
 
@@ -43,13 +43,13 @@ POST /v1/messages           Anthropic 协议 → 只路由到 Anthropic 兼容�
 
 落实机制：
 
-* 协议是 Adapter 的属性（`Protocol() string`），也是配置里 `providers`/`models` 的外层 key。一个 Virtual Model 的 endpoints 只能引用同一协议分组下的 provider——跨协议混用没有语法能表达它，不是"配置了会被校验拒绝"，而是"配置这个东西本身写不出来"（见「配置参考」）。
+* 协议是 Adapter 的属性（`Protocol() string`），也是 `models.<name>.endpoints[]` 每条 endpoint-group 自带的字段。一个 endpoint-group 引用的 provider 必须在对应协议下声明了 base_url——引用一个没声明该协议 base_url 的 provider，是加载期错误（"provider 有没有这个协议的 base_url"），不是配置写不出来；但单条 endpoint-group 内部混用两种协议依旧没有语法能表达它，每条 entry 天生只属于一个协议（见「配置参考」）。
 * 模型存在但协议不符 → 404，message 指明正确入口。
 * 恰好两种协议的请求体都是顶层 `model` + `stream` 字段，路由解析层（`CanonicalRequest`）天然协议无关。
 * vmr 自产的错误体为两种客户端都能解析的合并形态：`{"type":"error","error":{"type","message"}}`（OpenAI SDK 读 `error.message`，Anthropic SDK 认 `type:"error"` 信封）。`GET /v1/models` 同理（`object:"list"` + `has_more` + `type:"model"` 并存）。
 * 新增协议入口（如 gemini）= 新 Adapter + 新路由行，同样透传。
 
-已接入的厂商协议面（均实测）。同一账号的两个协议面共用同一个 provider 名，分属 `providers.openai`/`providers.anthropic` 两个分组，天然不冲突：
+已接入的厂商协议面（均实测）。同一账号的两个协议面现在共用同一条 provider 条目——`base_url` 是按协议分 key 的 map，两个协议面各自一个 key，天然不冲突：
 
 | Provider 名 | base_url（openai 面 / anthropic 面） |
 | --- | --- |
@@ -86,7 +86,7 @@ Upstream   ├─ 2xx → 响应归一化 → 转发 → 上报健康成功 → 
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
 * **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503，消息按具体原因区分（全员冷却中、或某个 Condition 拒绝了全部候选，见「调度与健康」）。凡进入 failover 循环的响应带 `X-VMR-Attempts` 与 `X-VMR-Route-Reason`（成功另带 `X-VMR-Endpoint`），有过失败尝试时再带 `X-VMR-Failover`；路由之前被拒的请求（401/404/413/坏 JSON）不带。`X-VMR-Route-Reason` 形如 `pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1`，只印真正发生过的部分（最常见的按序选中只剩 `pick=order eligible=3/3`）；`X-VMR-Failover` 形如 `deepseek/deepseek-v4:429, minimax/m2:500`，无 HTTP 响应的构建/网络失败记 `:err`。两者都沿用既有的 `X-VMR-*` 例外（§5.4），内容不超出 `X-VMR-Endpoint` 已暴露的范围。**实现约束**：`X-VMR-Failover` 必须在每次尝试**之前**写入截至目前的失败——成功的那次尝试在 `forwardSuccess` 内部自行 `WriteHeader` 后直接返回，不再回到 `Serve`，循环后才写就只有全败路径生效。
 
-* **`role_map`：按 provider 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。provider 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 provider 一级而非虚拟模型——拒收哪个 role 是网关本身的特性，不是某个具体模型的特性；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.Provider.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
+* **`role_map`：按 endpoint-group 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。`models.<name>.endpoints[]` 的某条 entry 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 endpoint-group 一级而非 provider——同一账号可能背靠不止一个虚拟模型/上游模型族，不见得都需要同一套改写规则；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.EndpointGroup.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
 ### 4.2 模块划分
 
@@ -297,7 +297,7 @@ type Condition interface {
 }
 ```
 
-已注册的 Condition **全部无条件参与过滤**，不需要像 `ModelConfig.Strategy` 那样在配置里声明一份名字列表——Condition 之间是纯 AND 语义、顺序无关，且"端点没声明某个能力字段"天然等价于"对这个条件不设限"，没有 Dimension 那种"要不要参与排序、参与顺序"的选择要做。
+已注册的 Condition **全部无条件参与过滤**，不需要像 `VirtualModel.Strategy` 那样在配置里声明一份名字列表——Condition 之间是纯 AND 语义、顺序无关，且"端点没声明某个能力字段"天然等价于"对这个条件不设限"，没有 Dimension 那种"要不要参与排序、参与顺序"的选择要做。
 
 **`core.RequestFacts`**（挂在 `core.CanonicalRequest.Facts`）是请求侧廉价、预计算一次的信号集合，`internal/server/facts.go` 的 `computeRequestFacts(body []byte, imageCount int, hasTools bool) core.RequestFacts` 在请求体缓冲完成后算一次。`imageCount`/`hasTools` 都由调用方（`server.chatHandler`）传入，不在 `computeRequestFacts` 内部重新扫描请求体——`hasTools` 来自 `adapter.TopLevelProbe`（Phase 2 item 2.2）一次结构化扫描同时提取的 model/stream/tools-非空三个顶层字段，替代了原来 `json.Unmarshal` 反射解码 model/stream、外加一次独立的 `HasNonEmptyTopLevelArray(body,"tools")` 扫描；`imageCount`——它就是「请求图片自动降采样」（§7）里 `imgprep.Downscale` 那一次调用已经算出来的 `len(images)`，这一次结构化遍历（走 `messages[].content[]`，识别真正的 `image_url`/`source` 图片块）同时喂给三个消费者：审计的 `images[]`、这里的 `HasImage`（`imageCount > 0`）、以及下文 `EstimatedTokens` 里图片那部分的常量项——一次探测，三处复用，一条没有图片的请求全程只付一次探测成本，不会因为三个消费者各自扫一遍而扫三次。`HasImage` 刻意不再走"子串扫描命中即认为有图"这条路径：这个字段要喂给下文的硬性淘汰条件，子串扫描对一句引用了类似 `"image_downscale=512px"` 的纯文本内容一样会命中，曾经真实导致一个不含任何图片的请求被硬性条件误判、把候选端点全部淘汰（无 fallback，直接 503）——`imgprep.Downscale` 的结构化遍历只认 JSON 结构上真正的图片块，不受消息文本内容影响。**"检测到"与"解得出格式"是两件独立的事**：一个结构上确认是图片引用、但 payload 解不出真实格式（不认识的格式、数据损坏）的块，仍然计入 `imageCount`——vmr 自己的解码器认不出，不代表上游也认不出，这个块对上游而言仍是一张真图片，不能因为 vmr 解不出就误判成"没有图片"。
 
@@ -322,24 +322,25 @@ for _, ep := range route.Endpoints {
 
 **诊断**：过滤后候选集为空是最容易让用户困惑的情形（"为什么明明配了好几个端点却说没有可用的"）。只在这条"空候选集"的失败路径上（不在热路径）额外跑一遍，找出是哪个 Condition 淘汰了最后剩下的端点，把原因写进错误消息（`rejected by condition(s): image`），不复用容易误导的"all cooling down or none configured"文案。`vmr check` 同步把每个端点声明的 `capabilities`/`max_context_tokens` 打印出来，让配置缺口在运行前就可见。
 
-配置侧，端点在 `EndpointConfig.Capabilities []string` 里自由声明支持哪些能力（`text`/`image`/`audio`/`video`/`tools`/`thinking`，不区分"模态"与"能力"两类——在 Condition 框架里它们是同一种事实），`EndpointConfig.MaxContextTokens int64` 声明上下文窗口上限：
+配置侧，虚拟模型在 `VirtualModel.Capabilities []string` / `VirtualModel.MaxContextTokens int64` 里声明这个组下所有端点共享的**基线**——同一批可互换的端点通常支持面差不多，写一次即可；端点自己的 `EndpointGroup.Capabilities []string`（`text`/`image`/`audio`/`video`/`tools`/`thinking`，不区分"模态"与"能力"两类——在 Condition 框架里它们是同一种事实）是**叠加**在基线之上的（取并集），`EndpointGroup.MaxContextTokens int64` 则是**覆盖**基线（单个数值没法取并集，声明即覆盖，不声明就原样继承）：
 
 ```yaml
 models:
-  openai:
-    agent:
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          capabilities: [text, image, tools]
-          max_context_tokens: 1000000
-        - provider: deepseek
-          model: deepseek-chat
-          capabilities: [text, tools]      # 不支持图像输入
-          max_context_tokens: 128000
+  agent:
+    capabilities: [text, tools]          # 基线：下面每个端点都继承
+    max_context_tokens: 128000           # 基线：同上
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        capabilities: [image]            # 叠加 -> 生效集合 text,image,tools
+        max_context_tokens: 1000000      # 覆盖基线，只对这个端点生效
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-chat]          # 两者都不声明 -> 原样继承基线
 ```
 
-两个字段都**未声明 = 不限制**（假设支持一切/无上限，保证旧配置零改动迁移）；一旦声明 `capabilities` 就是穷尽式的（allowlist）——运营者需要把端点真正支持的能力全部列出来，遗漏会导致端点被误判为不支持而被条件过滤挡在候选之外，这是数组式声明的已知代价，缓解手段就是上面提到的 `vmr check` 展示。
+两个字段在模型层和端点层都是**未声明 = 不限制**（假设支持一切/无上限，保证旧配置零改动迁移，模型层也不声明时端点层的语义和这个字段引入之前完全一样）；端点的生效能力集合一旦非空就是穷尽式的（allowlist）——运营者需要把端点真正支持的能力全部列出来（基线 + 自己叠加的那部分），遗漏会导致端点被误判为不支持而被条件过滤挡在候选之外，这是数组式声明的已知代价，缓解手段就是上面提到的 `vmr check` 展示（现在按模型基线 + 每个端点自己的叠加/覆盖值分层打印）。
 
 **四类条件的最终定义**：
 
@@ -395,7 +396,7 @@ models:
 
 **Key 组成**：`client_key_tag`（既有的 `audit.KeyTag` 机制）作为命名空间，不是主键——`sticky_key = client_key_tag + ":" + hex(sysHash) + ":" + hex(firstMsgHash)`。
 
-**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointConfig.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。主要挂 DeepSeek 的端点应该显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。
+**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointGroup.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。主要挂 DeepSeek 的端点应该显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。
 
 **内存淘汰与粘性有效性判定是两件事，不共用同一个数字**：一个 `Registry` 里同时装着分钟量级和小时量级的条目，判定粘性有效性时必须用**这条记录当时指向的那个端点**自己的 TTL；内存淘汰则用一个统一的、比任何端点 TTL 都宽松的粗粒度兜底值——`internal/sticky.BackstopTTL`，24 小时，只负责内存卫生，不参与路由决策。这个 24 小时上限由 `config.validate()` 强制保证：全局 `sticky_ttl` 与任意端点的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝，`vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都会挡住这类配置——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录会在写入的 TTL 到期前，先被内存清理兜底删掉）。
 
@@ -410,7 +411,7 @@ func (r *Registry) Set(key, endpointKey string)  // 命中时刷新 mtime，用�
 
 "这条记录对不对应端点的 TTL 而言还有效"这个判断留给调用方（`router.Serve`），因为只有调用方在查到 `endpointKey` 之后才知道该用哪个端点的 TTL。
 
-**`Sticky` 默认开启**（`ModelConfig.Sticky *bool`，`nil` 视为 `true`）：哈希本身的开销可以忽略不计，"默认关闭、需要显式声明才开启"不是必要的保护措施，反而会让大多数真正受益的多轮 agent 场景需要多写一行配置才能拿到默认应有的行为。让"不需要 sticky"的少数场景显式声明更符合"服务多数场景"的默认值原则。字段类型用 `*bool` 而不是发明一个否定式的字段名（如 `no_sticky`）——`nil`（配置里没写）= 默认开启，显式 `false` = 关闭，与 `ImageDownscaleMaxPx *int`/`StickyTTL *Duration` 是同一套"指针语义表达三态"的既有模式。
+**`Sticky` 默认开启**（`VirtualModel.Sticky *bool`，`nil` 视为 `true`）：哈希本身的开销可以忽略不计，"默认关闭、需要显式声明才开启"不是必要的保护措施，反而会让大多数真正受益的多轮 agent 场景需要多写一行配置才能拿到默认应有的行为。让"不需要 sticky"的少数场景显式声明更符合"服务多数场景"的默认值原则。字段类型用 `*bool` 而不是发明一个否定式的字段名（如 `no_sticky`）——`nil`（配置里没写）= 默认开启，显式 `false` = 关闭，与 `ImageDownscaleMaxPx *int`/`StickyTTL *Duration` 是同一套"指针语义表达三态"的既有模式。
 
 **接入点**（`router.Serve`，紧接条件过滤和既有排序之后）：亲和性重排只在已经通过健康与条件过滤的候选集里生效（找不到匹配端点、或找到但已过 TTL，都直接跳过，什么都不做）——这保证它永远不会把一个当前不健康或不满足本次请求硬性条件的端点复活。粘性指针在**每一次成功完成请求后都更新**，包括 failover 后的成功，不只是第一次建立时——这样一次故障转移会让指针自动跟着移动到"实际生效缓存"真正所在的端点，是自愈设计，不需要额外的失效检测逻辑。
 
@@ -448,9 +449,9 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 **范围**：只处理请求里的内联 base64 图片（OpenAI `image_url` 的 data URI／Anthropic `source.type=base64`）；不处理 response，也不 fetch 远程图片 URL——两者都超出"改写本地已有字节"的边界。与路线图规划的敏感词过滤插件共享同一接入点（body 解析后、`router.Serve` 之前），但不是同一套机制：图片降采样是具体、确定的处理，不经过预留的插件注册表。
 
-**开关，全局 + 逐虚拟模型覆盖**：全局配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。每个 virtual model 也可以在 `models.<protocol>.<name>.image_downscale` 单独设置，**模型自身的值优先于全局值**；不写则继承全局。`config.ModelConfig.ImageDownscaleMaxPx` 是 `*int` 而非 `int`：nil 代表"未设置，继承全局"，非 nil（含指向 0 的指针）代表"模型显式设置"，0 在模型层面是明确的"强制关闭"——即使全局开着，这个模型也不降采样。用 `int` 存不下这个区分（0 到底是"没写"还是"写了 0"），这是选指针类型的唯一原因。负数（全局或模型级）在 `applyDefaults` 里一律钳制为 0，与既有惯例一致。
+**开关，全局 + 逐虚拟模型覆盖**：全局配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。每个 virtual model 也可以在 `models.<name>.image_downscale` 单独设置，**模型自身的值优先于全局值**；不写则继承全局。`config.VirtualModel.ImageDownscaleMaxPx` 是 `*int` 而非 `int`：nil 代表"未设置，继承全局"，非 nil（含指向 0 的指针）代表"模型显式设置"，0 在模型层面是明确的"强制关闭"——即使全局开着，这个模型也不降采样。用 `int` 存不下这个区分（0 到底是"没写"还是"写了 0"），这是选指针类型的唯一原因。负数（全局或模型级）在 `applyDefaults` 里一律钳制为 0，与既有惯例一致。
 
-运行时对应关系：`router.ModelRoute` 携带同名的 `ImageDownscaleMaxPx *int` 字段（`BuildSnapshot` 从 `ModelConfig` 透传），并提供 `EffectiveImageDownscaleMaxPx(globalMaxPx int) int` 方法解出对某个模型实际生效的上限——nil 接收者安全（未知模型直接回退全局，调用方不用先判空）。`server.chatHandler` 因此需要在做降采样之前先解出 `probe.Model`：JSON 探测解析（`model`/`stream` 两个字段）在并发闸获取与图片降采样**之前**完成——探测本身够便宜，不需要等并发闸，这个顺序也让"坏 JSON / 缺 model"这两类 400 提前返回，不再白占一个并发槽位。
+运行时对应关系：`router.ModelRoute` 携带同名的 `ImageDownscaleMaxPx *int` 字段（`BuildSnapshot` 从 `VirtualModel` 透传），并提供 `EffectiveImageDownscaleMaxPx(globalMaxPx int) int` 方法解出对某个模型实际生效的上限——nil 接收者安全（未知模型直接回退全局，调用方不用先判空）。`server.chatHandler` 因此需要在做降采样之前先解出 `probe.Model`：JSON 探测解析（`model`/`stream` 两个字段）在并发闸获取与图片降采样**之前**完成——探测本身够便宜，不需要等并发闸，这个顺序也让"坏 JSON / 缺 model"这两类 400 提前返回，不再白占一个并发槽位。
 
 **检测分层，越靠前越便宜**：
 
@@ -625,7 +626,7 @@ max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
 https_proxy: http://...       # 可选：https 型 base_url 的代理服务器地址。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}。只声明代理在哪，不代表默认开启，见下面的 proxy
 http_proxy: http://...        # 可选：http 型 base_url 同理（如局域网 llama.cpp）；按 base_url 的 scheme 选用
 proxy: false                  # 可选：全局默认代理开关，缺省 false。没有自己 proxy 开关的 provider 跟随这个值；推荐保持关闭，
-                               # 个别需要代理的 provider 自己写 proxy: true（见下方 providers.<protocol>.<name>.proxy）
+                               # 个别需要代理的 provider 自己写 proxy: true（见下方 providers[].proxy）
 log_dir: ~/.vmr/logs          # 可选：审计日志目录。显式值原样使用（~/ 展开）；缺省 ~/.vmr/logs（三层默认，见「请求图片自动降采样」）。改动需重启生效
 image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录。规则同上，缺省 ~/.vmr/image_cache；随热重载即时生效
 image_downscale: 0            # 请求内联图片长边像素上限；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
@@ -637,44 +638,53 @@ timeouts:
   response_header: 120s       # 上游首字节（缺省 120s）
   stream_idle: 120s           # 上游 body 静默看门狗（缺省 120s）：SSE 流、非流式响应体、错误响应体的读取全部受此约束——响应头之后的一切上游读取都有超时兜底，任何上游停滞都不能把请求永久卡住
 
-providers:                       # "我有什么"——按协议分组，两层 map
-  <protocol>:                    # openai | anthropic | 未来任何已注册的 adapter 名
-    <name>:
-      base_url: https://...      # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages
-      api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串
-      proxy: false               # 可选三态开关：true = 该 provider 永远走 http(s)_proxy（无视全局 proxy
-                                 # 默认值，海外厂商的推荐写法）；false = 永远直连（无视全局 proxy 默认值，
-                                 # 国内厂商的典型写法）；缺省 = 跟随全局 proxy 开关（同样缺省 false）。没有
-                                 # 环境变量回退。true（不管全局还是这里）但没配对应 scheme 的代理地址是
-                                 # 校验错误（拒绝加载），缺省则安静跟随全局值。yaml.v3 是 YAML 1.2，必须写
-                                 # true/false（on/off 不是 bool）
-      role_map:                  # 可选；provider 拒收的 role → 改写成什么，缺省不改写
-        developer: system        # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
+providers:                       # "我有什么"——扁平列表，一个账号一条
+  - name: <name>
+    base_url: {openai: https://..., anthropic: https://...}  # 按协议分 key 的 map，至少声明一个；
+                                 # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages
+    api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串；两个协议面共享同一把 key
+    proxy: false               # 可选三态开关：true = 该 provider 永远走 http(s)_proxy（无视全局 proxy
+                               # 默认值，海外厂商的推荐写法）；false = 永远直连（无视全局 proxy 默认值，
+                               # 国内厂商的典型写法）；缺省 = 跟随全局 proxy 开关（同样缺省 false）。没有
+                               # 环境变量回退。true（不管全局还是这里）但没配对应 scheme 的代理地址是
+                               # 校验错误（拒绝加载），缺省则安静跟随全局值。yaml.v3 是 YAML 1.2，必须写
+                               # true/false（on/off 不是 bool）
 
-models:                          # "对外叫什么、按什么顺序用"——同样按协议分组
-  <protocol>:
-    <virtual-model-name>:
-      strategy: [priority]       # 缺省 [priority]
-      image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效；写 0 表示对这个模型强制关闭，即使全局开着
-      sticky: true                # 可选；Sticky Model 开关，*bool，缺省（不写）视为 true；只有确实不需要
-                                   # 会话亲和的单次调用场景才需要显式写 false
-      endpoints:
-        - provider: <name>       # 必须引用同协议分组下已定义的 provider
-          model: <上游真实模型名>
-          priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
-          capabilities: [text, image, tools]   # 可选；条件路由——这个端点声明支持的能力，
-                                                # 缺省 = 不限制（假设全部支持）；一旦声明就是穷尽式的
-          max_context_tokens: 200000           # 可选；条件路由——声明的上下文窗口上限（token 数量级）；
-                                                # 缺省/0 = 不限制
-          sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效——挂在端点而不是
-                                   # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
+models:                          # "对外叫什么、按什么顺序用"——按虚拟模型名分组，协议信息挂在每条 endpoint-group 上
+  <virtual-model-name>:
+    strategy: [priority]       # 缺省 [priority]
+    image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效；写 0 表示对这个模型强制关闭，即使全局开着
+    sticky: true                # 可选；Sticky Model 开关，*bool，缺省（不写）视为 true；只有确实不需要
+                                 # 会话亲和的单次调用场景才需要显式写 false
+    capabilities: [text, tools]   # 可选；这个虚拟模型下所有端点共享的能力基线，缺省 = 无基线（不限制）
+    max_context_tokens: 128000    # 可选；同上，端点共享的上下文窗口基线，缺省/0 = 无基线（不限制）
+    endpoints:
+      - protocol: openai        # openai | anthropic | 未来任何已注册的 adapter 名——引用的 provider 必须
+                                 # 在这个协议下声明了 base_url；同一虚拟模型名可以再挂一条 protocol: anthropic
+                                 # 的 entry，两个入口各自独立可达（见「协议模型」）
+        provider: <name>       # 必须引用 providers 列表里已定义的账号名
+        models: [<上游真实模型名>, ...]   # 一个或多个；每个名字展开成独立的、各自健康跟踪的端点，
+                                          # 按列表顺序参与 priority 排序，共享本条 entry 的其余字段
+        priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
+        capabilities: [image]        # 可选；叠加在虚拟模型的 capabilities 基线之上（取并集），不是替换；
+                                      # 缺省 = 不额外叠加；生效集合一旦非空就是穷尽式的
+        max_context_tokens: 1000000  # 可选；覆盖虚拟模型的 max_context_tokens 基线（单个数值，覆盖不叠加）；
+                                      # 缺省/0 = 原样继承基线
+        role_map:               # 可选；这条 entry 拒收的 role → 改写成什么，缺省不改写
+          developer: system     # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
+        sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效——挂在端点而不是
+                                 # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
 ```
 
-**两层 map 而非扁平 map + 显式字段**：provider 没有 `type:` 字段，协议就是它在配置里所处的位置（`providers.<protocol>.<name>`）；一个 model 的 endpoints 只能引用同一 `<protocol>` 分组下的 provider，跨协议引用没有语法能表达它。带来两个直接好处：同一账号的两个协议面可以复用同一个 provider 短名（`openrouter` 在 `providers.openai` 和 `providers.anthropic` 下各存一份），不需要额外的后缀区分；同一个 virtual model 名也可以在两个协议分组下各存一份，两个入口各自独立可达。这带来一个约束：`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）必须是三段式 `<protocol>/<provider>/<model>`——如果两个协议面复用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
+**扁平 provider 列表 + 按协议分 key 的 base_url，而不是两层 map**：早期版本按协议把 provider/model 分成两层 map（`providers.<protocol>.<name>`），协议就是配置里的位置；现在 provider 是扁平列表，`name` 是显式字段，`base_url` 改成按协议分 key 的 map，同一账号的两个协议面（如 MiniMax）合并成一条 provider 条目而不是重复两份。协议改为 endpoint-group 自带的 `protocol:` 字段：一个 model 的某条 endpoint-group 引用的 provider，必须在 `protocol:` 对应的 key 下声明了 base_url——跨协议引用不是配置写不出来，而是加载期"provider 没有这个协议的 base_url"错误。这带来的好处不变：同一账号一条 provider 条目自然覆盖两个协议面，不需要重复声明或后缀区分；同一个 virtual model 名下可以同时放一条 `protocol: openai` 和一条 `protocol: anthropic` 的 entry，两个入口各自独立可达（`router.BuildSnapshot` 按 entry 的 `protocol` 拆成两条独立路由，见 `internal/router/snapshot.go`）。`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）仍然是三段式 `<protocol>/<provider>/<model>`——即便现在只有一条 provider 条目，两个协议面用的是同一个 provider 名、同一个 API Key，两段式的 `provider/model` 键依然会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即拒绝并提示迁移进 `api_keys`、`probe_mode` 只能是 `active`/`passive`（拼错值直接拒绝加载，不会默默生效成别的东西）、listen 可解析、providers/models 非空、provider 引用存在（在同协议分组内查找）、协议 key 已注册为 adapter、base_url 合法、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、全局 `proxy: true` 但 `http_proxy`/`https_proxy` 都没配 = 校验错误、provider `proxy: true`（不管全局 `proxy` 是否为 true）但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、endpoint.model 非空、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验+按生效顺序打印路由表，含每个模型的 image_downscale/sticky 覆盖标记、每个端点的 capabilities/max_context_tokens/sticky_ttl、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
+**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即拒绝并提示迁移进 `api_keys`、`probe_mode` 只能是 `active`/`passive`（拼错值直接拒绝加载，不会默默生效成别的东西）、listen 可解析、providers/models 非空、每个 provider 的 `name` 非空且在列表内唯一、`base_url` 至少声明一个协议、`base_url` 的每个 key 已注册为 adapter 且值是带 scheme+host 的合法 URL、endpoint-group 的 `protocol` 已注册为 adapter、引用的 provider 存在（按 `name` 在扁平列表里查找）且在该 `protocol` 下声明了 base_url（这是旧版"provider 引用存在于同协议分组内"校验的新等价物）、`models` 列表至少一项且每项非空、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、全局 `proxy: true` 但 `http_proxy`/`https_proxy` 都没配 = 校验错误、provider `proxy: true`（不管全局 `proxy` 是否为 true）但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。
+
+**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、provider 只靠全局 `proxy: true` 隐式继承代理却因 scheme 不匹配（比如只配了 `https_proxy` 但这个 provider 的 `base_url` 是 `http://`）而悄悄退化成直连、`probe_timeout` 没有明显小于 `response_header`（违反 active 探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型基线 capabilities/max_context_tokens 与每个端点自己叠加/覆盖值的分层展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
+
+CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 image_downscale/sticky 覆盖标记、每个端点的 capabilities/max_context_tokens/sticky_ttl、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
 **上游代理：显式配置，三层解析，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器的 URL——本身不替任何 provider 打开代理。是否真的走代理由三层解析决定：① provider 自己的 `proxy: true`/`false` 最高优先；② 没写就跟随全局 `proxy` 开关（缺省同样是 `false`——只配了 `http_proxy`/`https_proxy` 而不设 `proxy: true`，等于只声明了代理地址，所有 provider 仍然默认直连）；③ 解析结果是"开"时，才按 base_url 的 scheme 选用 `http_proxy`/`https_proxy`。**推荐配置方法**：全局 `proxy` 保持缺省（关闭），只给个别确实需要代理的 provider（典型是访问受限的海外厂商）显式写 `proxy: true`——单点意图优于全局开关，新增 provider 不会因为踩中一个早先设好的全局默认值而被静默代理或静默直连。反过来，只有当"默认全部代理、少数国内厂商直连"更贴合部署场景时，才把全局 `proxy` 设为 `true`，再用个别 provider 的 `proxy: false` 挖例外。**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到——一个只在某次交互式 shell 里临时设置过的 `HTTPS_PROXY`，一旦被 vmr 悄悄读取，就会让接下来启动的所有实例在不知情的情况下把全部上游流量导进代理。vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境。`proxy: true`（不管全局还是 provider 级）但没配对应 scheme 的代理地址是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
 
@@ -751,9 +761,9 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `vmr report` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755 | details/、索引、报表与 vmr-requests.jsonl 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600，派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异，单用户机器上无感知 |
 | 条件路由用新接口 `Condition`（elimination，感知请求），不扩展 `Dimension` | 给 `Dimension.Compare` 加一个 request 参数 | `Dimension` 的现有实现（priority）和未来实现（weight/latency）本来就不需要看请求，硬塞一个参数会强迫每个排序维度都感知请求；`Condition` 语义上是准入不是排序，混进同一个接口是把两种不同的事情绑在一起。两个接口平行存在，`router.Serve` 分两步跑，互不干扰 |
 | 上下文长度条件（`WithinContext`）不注册进 `Condition` 接口，单独一个函数 | 也注册成一个普通 Condition | 唯一需要"全体拒绝时不能真的拒绝"这个降级行为的条件，其余（image/tools）都是确定性的，全体拒绝就该直接拒绝——为一个目前只有一个成员的特例改动整个接口的语义不划算，`router.Serve` 里两行代码就能表达清楚这个特例 |
-| `sticky_ttl` 挂在 `EndpointConfig`，不是 `ModelConfig` | 挂在虚拟模型层级 | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 的属性，不是虚拟模型的属性；模型级设计会逼着用户把不同缓存寿命的端点拆成不同虚拟模型才能各自配置 TTL，端点级消除了这个别扭 |
+| `sticky_ttl` 挂在 `EndpointGroup`，不是 `VirtualModel` | 挂在虚拟模型层级 | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 的属性，不是虚拟模型的属性；模型级设计会逼着用户把不同缓存寿命的端点拆成不同虚拟模型才能各自配置 TTL，端点级消除了这个别扭 |
 | Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者 |
-| Sticky Model 默认开启（`ModelConfig.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
+| Sticky Model 默认开启（`VirtualModel.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
 | `sticky_ttl`（全局与端点级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
 
 ---
@@ -846,7 +856,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 1. **配置校验**：复用 `config.Load` + `router.BuildSnapshot`；失败直接退出，不进入后续阶段。
 2. **环境检查**（`envCheck`，每个 provider 一条结果）：DNS 解析 + TLS 握手（仅 https 且未配代理时），或代理可达性（配了代理时）；`api_key` 是否非空。**代理感知是关键**：`cfg.ProxySpecFor` 判定这个 provider 的真实流量是否经过代理——是的话跳过对目标 host 的直连检查（那条路径真实请求从不会走），只测代理本身；否则会把"只能通过代理访问"的健康 provider 系统性误报成故障。DNS 查询用 `(&net.Resolver{}).LookupHost(ctx, host)` 加 5 秒上限，不用不带超时的 `net.LookupHost`——诊断工具本身绝不能因为一次网络黑洞而无限挂起。
-3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `adapter.BuildRequest` 拼一个最小请求（`internal/probe.Request` 构造，两种协议共用同一份 body），要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟 `probe_mode: active` 的运行时后台探测共用同一个 `internal/probe.Request`/`Echoed`，但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。
+3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `adapter.BuildRequest` 拼一个最小请求，要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**探测请求的 role 按协议区分**：`protocol: anthropic` 的端点用 `internal/probe.Request`（单条 `role: "user"` 消息，两种协议共用的最小形态）；`protocol: openai` 的端点改用 `internal/probe.RoleCompatRequest(model, "developer")`——首条 `role: "developer"`（OpenAI o1/o3 系列引入、部分自称兼容 OpenAI 协议的 provider 实际拒收的那个 role），末条普通 `role: "user"` 带回显 nonce，同样走 `adapter.BuildRequest`/`RoleMap` 那条流水线。**没有独立的第二次请求**：developer role 走不通，等价于这个端点连不通——不为它单开一个阶段或再打一次请求，直接算作这一条 `testEndpoint` 结果的失败，提示里按 `ep.RoleMap` 是否已配置给出对应建议（没配→提示加 `role_map: {developer: system}`；配了但仍失败→提示检查改写目标 role 名）。**两条消息而非一条**：如果只发一条非 `user` 的消息，部分 provider 会因为"消息数组只有一条且不是 user"这个形状问题直接拒收，跟"这个 provider 不认 developer role"是两个不同的失败原因，混在一起会把纯粹的请求形状问题错判成 role 不兼容；两条消息（角色消息 + 用户消息）也正是真实客户端的发送形态。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟 `probe_mode: active` 的运行时后台探测共用同一个 `internal/probe.Request`/`Echoed`（运行时探测不区分 role，永远是 `Request` 的单条 `user` 消息——developer-role 探测只在 `vmr diagnose` 这个一次性诊断工具里做），但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。去重时若同一个 `(protocol, provider, model)` 三元组被多条不同 `role_map` 的 endpoint-group 引用，取第一个出现的——这是没打算特意处理的边界情况。
 4. **路由预览**：对每个虚拟模型打印 `EffectiveOrder()` 排出的尝试顺序，用本轮连通性测试的结果标注每个端点。**不查活实例的实时健康状态**——`vmr status` 才是那个职责，二者边界刻意分开：`diagnose` 回答"现在直连会发生什么"，`status` 回答"那个正在跑的 vmr 现在什么状态"。
 
 阶段 2/3 都以 `checkConcurrency=8` 的有界并发执行（每个检查写自己预分配的结果槽位，无锁）。诊断恰好是"怀疑某个 provider 有问题"时才会跑的工具，顺序执行下几个同时不可达的 provider 会把等待时间线性放大到分钟级——精确发生在最需要快速给出结论的场景。

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // End-to-end test for a long OpenClaw-style agent conversation: 24 rounds of
 // tool-use where the model emits <think>...</think> blocks before each tool
@@ -121,13 +121,11 @@ func TestOpenClawScenario_TwentyFourRounds(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.srv.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -235,13 +233,11 @@ func TestOpenClawScenario_NonStreaming(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -316,13 +312,11 @@ func TestOpenClawScenario_AuditLogCapturesTransformedResponse(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.srv.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -414,13 +408,11 @@ func TestOpenClawScenario_ThinkingProcessStripped(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -510,15 +502,13 @@ func TestResponseNormalizer_FailoverStillWorks(t *testing.T) {
 	cfg, _ := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    bad: {base_url: %s, api_key: k1}
-    good: {base_url: %s, api_key: k2}
+  - {name: bad, base_url: {openai: %s}, api_key: k1}
+  - {name: good, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: bad, model: MiniMax-M3, priority: 1}
-        - {provider: good, model: MiniMax-M3, priority: 2}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: bad, models: [MiniMax-M3], priority: 1}
+      - {protocol: openai, provider: good, models: [MiniMax-M3], priority: 2}
 `, bad.URL, good.srv.URL)))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)

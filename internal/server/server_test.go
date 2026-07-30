@@ -91,16 +91,14 @@ func twoEndpointYAML(u1, u2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      sticky: false
-      endpoints:
-        - {provider: p1, model: model-one, priority: 1}
-        - {provider: p2, model: model-two, priority: 2}
+  vm:
+    sticky: false
+    endpoints:
+      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
+      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
 `, extra, u1, u2)
 }
 

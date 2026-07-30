@@ -1,4 +1,4 @@
-// Ver 2026-07-24 23:20, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package router
 
 import (
@@ -24,17 +24,15 @@ listen: 127.0.0.1:0
 proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
-  openai:
-    a: {base_url: https://a.example/v1, api_key: k}
-    b: {base_url: https://b.example/v1, api_key: k, proxy: false}
-    c: {base_url: https://c.example/v1, api_key: k, proxy: true}
+  - {name: a, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: b, base_url: {openai: https://b.example/v1}, api_key: k, proxy: false}
+  - {name: c, base_url: {openai: https://c.example/v1}, api_key: k, proxy: true}
 models:
-  openai:
-    m:
-      endpoints:
-        - {provider: a, model: x}
-        - {provider: b, model: x}
-        - {provider: c, model: x}
+  m:
+    endpoints:
+      - {protocol: openai, provider: a, models: [x]}
+      - {protocol: openai, provider: b, models: [x]}
+      - {protocol: openai, provider: c, models: [x]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -100,13 +98,11 @@ listen: 127.0.0.1:0
 proxy: true
 http_proxy: %s
 providers:
-  openai:
-    viaproxy: {base_url: http://upstream.invalid/v1, api_key: k}
-    directp:  {base_url: %s/v1, api_key: k, proxy: false}
+  - {name: viaproxy, base_url: {openai: http://upstream.invalid/v1}, api_key: k}
+  - {name: directp, base_url: {openai: %s/v1}, api_key: k, proxy: false}
 models:
-  openai:
-    m-proxy:  {endpoints: [{provider: viaproxy, model: real}]}
-    m-direct: {endpoints: [{provider: directp, model: real}]}
+  m-proxy:  {endpoints: [{protocol: openai, provider: viaproxy, models: [real]}]}
+  m-direct: {endpoints: [{protocol: openai, provider: directp, models: [real]}]}
 `, proxy.URL, upstream.URL))
 	if err != nil {
 		t.Fatal(err)

@@ -154,16 +154,31 @@ type Endpoint struct {
 	RoleMap     map[string]string // per-provider role remapping (e.g. {"developer":"system"}); nil = no remapping
 
 	// Capabilities is a free-form allowlist (e.g. "image", "tools",
-	// "thinking") declared in config.EndpointConfig.Capabilities. Empty/nil
-	// means unconstrained — every capability is assumed supported — so
-	// existing configs that don't set this field see no behavior change.
-	// Once non-empty it is exhaustive: a capability the endpoint actually
+	// "thinking") — the *effective* set actually used for condition
+	// routing, already resolved at BuildSnapshot time as the union of the
+	// endpoint's virtual model's base config.VirtualModel.Capabilities and
+	// this endpoint's own config.EndpointGroup.Capabilities. Empty/nil means
+	// unconstrained — every capability is assumed supported — so existing
+	// configs that don't set either field see no behavior change. Once
+	// non-empty it is exhaustive: a capability the endpoint actually
 	// supports but omits here is treated as unsupported (see design doc
 	// §1.1 for the tradeoff).
 	Capabilities []string
-	// MaxContextTokens is the declared context-window ceiling in tokens;
-	// 0 (the zero value, same as "unset") means unconstrained.
+	// ExtraCapabilities is this endpoint's own declared
+	// config.EndpointGroup.Capabilities, *before* merging with the model's
+	// base — display-only (vmr check), so a human can see exactly what this
+	// endpoint adds on top of its group's shared floor instead of the
+	// already-merged set in Capabilities above.
+	ExtraCapabilities []string
+	// MaxContextTokens is the effective, already-resolved context-window
+	// ceiling in tokens (this endpoint's own override if set, else its
+	// virtual model's base); 0 means unconstrained.
 	MaxContextTokens int64
+	// OwnMaxContextTokens is this endpoint's own declared
+	// config.EndpointGroup.MaxContextTokens override, 0 if it inherits its
+	// virtual model's base value as-is — display-only (vmr check);
+	// MaxContextTokens above always holds the resolved value routing uses.
+	OwnMaxContextTokens int64
 	// StickyTTL is how long a sticky preference for this endpoint stays
 	// valid, resolved at BuildSnapshot time from the endpoint's own
 	// config.EndpointConfig.StickyTTL override or, absent that, the global

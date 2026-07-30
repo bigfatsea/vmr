@@ -1,4 +1,4 @@
-// Ver 2026-07-07 17:45, by Fable 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Exhaustive failover: by default the router walks every available endpoint
 // until one succeeds; max_attempts (>0) is an optional cap.
@@ -16,19 +16,17 @@ func fourEndpointYAML(u1, u2, u3, u4, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
-    p3: {base_url: %s, api_key: k3}
-    p4: {base_url: %s, api_key: k4}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p3, base_url: {openai: %s}, api_key: k3}
+  - {name: p4, base_url: {openai: %s}, api_key: k4}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
-        - {provider: p2, model: m2}
-        - {provider: p3, model: m3}
-        - {provider: p4, model: m4}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, provider: p3, models: [m3]}
+      - {protocol: openai, provider: p4, models: [m4]}
 `, extra, u1, u2, u3, u4)
 }
 

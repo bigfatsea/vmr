@@ -1,4 +1,4 @@
-// Ver 2026-07-24 10:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package config
 
 import (
@@ -13,17 +13,16 @@ import (
 const validYAML = `
 listen: 127.0.0.1:9900
 providers:
-  openai:
-    p1:
-      base_url: https://api.example.com/v1
-      api_key: ${VMR_TEST_KEY}
+  - name: p1
+    base_url: {openai: https://api.example.com/v1}
+    api_key: ${VMR_TEST_KEY}
 models:
-  openai:
-    m1:
-      endpoints:
-        - provider: p1
-          model: real-model
-          priority: 1
+  m1:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [real-model]
+        priority: 1
 `
 
 func TestParseDefaultsAndEnvExpansion(t *testing.T) {
@@ -32,8 +31,9 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Providers["openai"]["p1"].APIKey; got != "sk-test-123" {
-		t.Errorf("env expansion: got %q", got)
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != "sk-test-123" {
+		t.Errorf("env expansion: got %q", p.APIKey)
 	}
 	if cfg.MaxAttempts != 0 || cfg.MaxRequestBodyMB != 8 {
 		t.Errorf("defaults: attempts=%d (want 0 = unlimited) body=%d", cfg.MaxAttempts, cfg.MaxRequestBodyMB)
@@ -44,7 +44,7 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if cfg.Timeouts.Connect.D() != 10*time.Second {
 		t.Errorf("default connect timeout: %v", cfg.Timeouts.Connect.D())
 	}
-	if got := cfg.Models["openai"]["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
+	if got := cfg.Models["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
 		t.Errorf("default strategy: %v", got)
 	}
 	if cfg.ProbeMode != ProbeModeActive {
@@ -84,8 +84,8 @@ func TestUnsetEnvExpandsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Providers["openai"]["p1"].APIKey != "" {
-		t.Errorf("unset env should expand to empty, got %q", cfg.Providers["openai"]["p1"].APIKey)
+	if p, _ := cfg.ProviderByName("p1"); p.APIKey != "" {
+		t.Errorf("unset env should expand to empty, got %q", p.APIKey)
 	}
 }
 
@@ -104,14 +104,18 @@ func TestCustomTimeouts(t *testing.T) {
 	}
 }
 
+// TestRoleMapConfig/TestRoleMapUnsetIsNil pin role_map's new home: per
+// endpoint-group (models.<name>.endpoints[].role_map), not per provider —
+// the same account can back several endpoint-groups with different upstream
+// model families, not all of which necessarily need the same role rewrite.
 func TestRoleMapConfig(t *testing.T) {
-	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n      role_map:\n        developer: system", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        role_map:\n          developer: system", 1)
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Providers["openai"]["p1"].RoleMap
+	got := cfg.Models["m1"].Endpoints[0].RoleMap
 	if len(got) != 1 || got["developer"] != "system" {
 		t.Errorf("role_map: got %v, want map[developer:system]", got)
 	}
@@ -123,8 +127,8 @@ func TestRoleMapUnsetIsNil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Providers["openai"]["p1"].RoleMap != nil {
-		t.Errorf("role_map should be nil when omitted, got %v", cfg.Providers["openai"]["p1"].RoleMap)
+	if got := cfg.Models["m1"].Endpoints[0].RoleMap; got != nil {
+		t.Errorf("role_map should be nil when omitted, got %v", got)
 	}
 }
 
@@ -160,18 +164,18 @@ func TestModelImageDownscaleUnsetInheritsGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx; got != nil {
+	if got := cfg.Models["m1"].ImageDownscaleMaxPx; got != nil {
 		t.Errorf("unset per-model image_downscale must parse to nil (inherit global), got %v", *got)
 	}
 }
 
 func TestModelImageDownscaleOverride(t *testing.T) {
-	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: 256\n      endpoints:", 1)
+	yaml := strings.Replace(validYAML, "    endpoints:", "    image_downscale: 256\n    endpoints:", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	got := cfg.Models["m1"].ImageDownscaleMaxPx
 	if got == nil || *got != 256 {
 		t.Errorf("model image_downscale override: got %v, want 256", got)
 	}
@@ -182,12 +186,12 @@ func TestModelImageDownscaleOverride(t *testing.T) {
 // set" all the way through parsing, so it can force-disable the feature for
 // this model even when the global default is on (§7).
 func TestModelImageDownscaleExplicitZeroDiffersFromUnset(t *testing.T) {
-	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: 0\n      endpoints:", 1)
+	yaml := strings.Replace(validYAML, "    endpoints:", "    image_downscale: 0\n    endpoints:", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	got := cfg.Models["m1"].ImageDownscaleMaxPx
 	if got == nil {
 		t.Fatal("explicit image_downscale: 0 must not parse to nil (that would mean 'unset')")
 	}
@@ -197,12 +201,12 @@ func TestModelImageDownscaleExplicitZeroDiffersFromUnset(t *testing.T) {
 }
 
 func TestModelImageDownscaleNegativeClampsToZero(t *testing.T) {
-	yaml := strings.Replace(validYAML, "endpoints:", "image_downscale: -1\n      endpoints:", 1)
+	yaml := strings.Replace(validYAML, "    endpoints:", "    image_downscale: -1\n    endpoints:", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Models["openai"]["m1"].ImageDownscaleMaxPx
+	got := cfg.Models["m1"].ImageDownscaleMaxPx
 	if got == nil || *got != 0 {
 		t.Errorf("negative per-model image_downscale must clamp to 0 (force-disabled), got %v", got)
 	}
@@ -299,82 +303,131 @@ func TestPriorityOmittedUsesFileOrder(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:9901
 providers:
-  openai:
-    p:
-      base_url: https://api.example.com/v1
-      api_key: k
+  - name: p
+    base_url: {openai: https://api.example.com/v1}
+    api_key: k
 models:
-  openai:
-    m:
-      endpoints:
-        - {provider: p, model: third}
-        - {provider: p, model: first}
-        - {provider: p, model: second}
+  m:
+    endpoints:
+      - {protocol: openai, provider: p, models: [third]}
+      - {protocol: openai, provider: p, models: [first]}
+      - {protocol: openai, provider: p, models: [second]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := cfg.Models["openai"]["m"].Endpoints
-	if len(eps) != 3 || eps[0].Model != "third" || eps[1].Model != "first" || eps[2].Model != "second" {
+	eps := cfg.Models["m"].Endpoints
+	if len(eps) != 3 || eps[0].Models[0] != "third" || eps[1].Models[0] != "first" || eps[2].Models[0] != "second" {
 		t.Errorf("endpoints must keep file order when priority is omitted: %+v", eps)
 	}
 	for _, ep := range eps {
 		if ep.Priority != 0 {
-			t.Errorf("omitted priority must default to 0, got %d for %s", ep.Priority, ep.Model)
+			t.Errorf("omitted priority must default to 0, got %d for %v", ep.Priority, ep.Models)
 		}
 	}
 }
 
-// TestSameProviderNameAcrossProtocols is the whole point of nesting
-// providers/models by protocol: the same short name can be reused once per
-// protocol group (e.g. the same OpenRouter account's OpenAI-compatible and
-// Anthropic-compatible surfaces), no "_a" suffix hack required.
-func TestSameProviderNameAcrossProtocols(t *testing.T) {
+// TestModelsListExpandsToMultipleCandidates is the new format's headline
+// feature: one endpoint-group's `models:` list stands in for that many
+// EndpointGroup-level try-order entries sharing the same
+// provider/protocol/capabilities — config-level this is just "the list
+// parses with every name intact and in order"; BuildSnapshot's expansion
+// into independent *core.Endpoints is covered in internal/router.
+func TestModelsListExpandsToMultipleCandidates(t *testing.T) {
+	yaml := strings.Replace(validYAML, "models: [real-model]", "models: [model-a, model-b, model-c]", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"model-a", "model-b", "model-c"}
+	got := cfg.Models["m1"].Endpoints[0].Models
+	if len(got) != len(want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("models[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestProviderServesBothProtocols pins the new Provider shape: one account
+// entry declares base_url for both "openai" and "anthropic", sharing one
+// api_key/proxy setting, instead of the old format's two separately-keyed
+// provider entries under providers.openai/providers.anthropic.
+func TestProviderServesBothProtocols(t *testing.T) {
 	yaml := `
-listen: 127.0.0.1:9902
+listen: 127.0.0.1:9903
 providers:
-  openai:
-    openrouter: {base_url: https://openrouter.ai/api/v1, api_key: k1}
-  anthropic:
-    openrouter: {base_url: https://openrouter.ai/api/v1, api_key: k1}
+  - name: dual
+    base_url: {openai: https://api.example.com/v1, anthropic: https://api.example.com/anthropic/v1}
+    api_key: k1
 models:
-  openai:
-    coding: {endpoints: [{provider: openrouter, model: z-ai/glm-5.2}]}
-  anthropic:
-    coding: {endpoints: [{provider: openrouter, model: minimax/minimax-m3}]}
+  m:
+    endpoints:
+      - {protocol: openai, provider: dual, models: [x]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Providers["openai"]["openrouter"].BaseURL == "" || cfg.Providers["anthropic"]["openrouter"].BaseURL == "" {
-		t.Fatal("both protocol-scoped providers must parse")
+	p, ok := cfg.ProviderByName("dual")
+	if !ok {
+		t.Fatal("provider not found")
 	}
-	if cfg.Models["openai"]["coding"].Endpoints[0].Model != "z-ai/glm-5.2" {
-		t.Error("openai-face coding model mismatch")
+	if p.BaseURL["openai"] != "https://api.example.com/v1" || p.BaseURL["anthropic"] != "https://api.example.com/anthropic/v1" {
+		t.Errorf("base_url map: %v", p.BaseURL)
 	}
-	if cfg.Models["anthropic"]["coding"].Endpoints[0].Model != "minimax/minimax-m3" {
-		t.Error("anthropic-face coding model mismatch")
+}
+
+// TestSameVirtualModelNameBothProtocols is the new format's version of "the
+// same virtual model name is independently reachable from both ingress
+// protocols": one models.<name> entry mixes an openai-protocol endpoint
+// group and an anthropic-protocol one. Config-level this only needs to
+// confirm both entries parse with their own protocol/provider/models intact
+// — BuildSnapshot's split into two independent routes is covered in
+// internal/router.
+func TestSameVirtualModelNameBothProtocols(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:9902
+providers:
+  - name: openrouter
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    api_key: k1
+models:
+  coding:
+    endpoints:
+      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}
+      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eps := cfg.Models["coding"].Endpoints
+	if len(eps) != 2 {
+		t.Fatalf("want 2 endpoint groups, got %d", len(eps))
+	}
+	if eps[0].Protocol != "openai" || eps[0].Models[0] != "z-ai/glm-5.2" {
+		t.Errorf("openai-protocol entry mismatch: %+v", eps[0])
+	}
+	if eps[1].Protocol != "anthropic" || eps[1].Models[0] != "minimax/minimax-m3" {
+		t.Errorf("anthropic-protocol entry mismatch: %+v", eps[1])
 	}
 }
 
 func TestValidationErrors(t *testing.T) {
 	cases := []struct {
-		name, mutate, wantErr string
+		name, mutate, replacement, wantErr string
 	}{
-		{"bad base_url", "base_url: https://api.example.com/v1", "invalid base_url"},
-		{"unknown provider ref", "provider: p1", "unknown provider"},
-		{"missing model", "model: real-model", "missing model"},
-	}
-	replacements := map[string]string{
-		"bad base_url":         "base_url: not-a-url",
-		"unknown provider ref": "provider: ghost",
-		"missing model":        `model: ""`,
+		{"bad base_url", "base_url: {openai: https://api.example.com/v1}", "base_url: {openai: not-a-url}", "invalid base_url"},
+		{"unknown provider ref", "provider: p1", "provider: ghost", "unknown provider"},
+		{"empty models list", "models: [real-model]", "models: []", "at least one required"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			yaml := strings.Replace(validYAML, c.mutate, replacements[c.name], 1)
+			yaml := strings.Replace(validYAML, c.mutate, c.replacement, 1)
 			_, err := Parse([]byte(yaml))
 			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 				t.Errorf("want error containing %q, got %v", c.wantErr, err)
@@ -383,11 +436,26 @@ func TestValidationErrors(t *testing.T) {
 	}
 }
 
+// TestUnknownProtocolKeyRejected covers a provider's base_url declaring a
+// protocol with no registered adapter (e.g. a typo).
 func TestUnknownProtocolKeyRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "providers:\n  openai:", "providers:\n  nosuch:", 1)
+	yaml := strings.Replace(validYAML, "base_url: {openai: https://api.example.com/v1}", "base_url: {nosuch: https://api.example.com/v1}", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown adapter type") {
 		t.Errorf("want unknown adapter type error, got %v", err)
+	}
+}
+
+// TestUnknownEndpointProtocolRejected covers the new per-endpoint-group
+// `protocol:` field itself naming an unregistered adapter — a validation
+// path that didn't exist under the old nested-by-protocol schema, where
+// protocol was implicit from map position rather than a value that could be
+// wrong.
+func TestUnknownEndpointProtocolRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "protocol: openai", "protocol: nosuch", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
+		t.Errorf("want unknown protocol error, got %v", err)
 	}
 }
 
@@ -447,27 +515,11 @@ func TestAPIKeysTooShortRejected(t *testing.T) {
 }
 
 func TestEmptySections(t *testing.T) {
-	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {openai: {m: {endpoints: [{provider: x, model: y}]}}}")); err == nil {
+	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai, provider: x, models: [y]}]}}")); err == nil {
 		t.Error("want error for no providers")
 	}
-	if _, err := Parse([]byte("providers: {openai: {p: {base_url: https://x.com}}}")); err == nil {
+	if _, err := Parse([]byte("providers:\n  - {name: p, base_url: {openai: https://x.com}}")); err == nil {
 		t.Error("want error for no models")
-	}
-}
-
-// TestCountNested locks the shared helper directly: validate() only checks
-// it against zero, but diagnose and cmd/vmr both print the actual count, so
-// the arithmetic itself needs its own coverage, not just the boundary case.
-func TestCountNested(t *testing.T) {
-	m := map[string]map[string]int{
-		"a": {"x": 1, "y": 2},
-		"b": {"z": 3},
-	}
-	if got := CountNested(m); got != 3 {
-		t.Errorf("CountNested = %d, want 3", got)
-	}
-	if got := CountNested(map[string]map[string]int{}); got != 0 {
-		t.Errorf("CountNested(empty) = %d, want 0", got)
 	}
 }
 
@@ -475,47 +527,80 @@ func TestCountNested(t *testing.T) {
 // docs/VirtualModelRouter_Design_v4_Core.md §6.4/§6.5) ---
 
 func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
-	// The base fixture declares neither field on its one endpoint — this is
-	// the zero-config-migration case every existing config.yaml is in.
+	// The base fixture declares neither field on its one endpoint-group —
+	// this is the zero-config-migration case every existing config.yaml is in.
 	cfg, err := Parse([]byte(validYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := cfg.Models["openai"]["m1"].Endpoints[0]
-	if len(ep.Capabilities) != 0 {
-		t.Errorf("expected no declared capabilities, got %v", ep.Capabilities)
+	eg := cfg.Models["m1"].Endpoints[0]
+	if len(eg.Capabilities) != 0 {
+		t.Errorf("expected no declared capabilities, got %v", eg.Capabilities)
 	}
-	if ep.MaxContextTokens != 0 {
-		t.Errorf("expected MaxContextTokens 0 (unconstrained), got %d", ep.MaxContextTokens)
+	if eg.MaxContextTokens != 0 {
+		t.Errorf("expected MaxContextTokens 0 (unconstrained), got %d", eg.MaxContextTokens)
 	}
 }
 
 func TestCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
 	yaml := strings.Replace(validYAML, "priority: 1",
-		"priority: 1\n          capabilities: [text, image, tools]\n          max_context_tokens: 200000", 1)
+		"priority: 1\n        capabilities: [text, image, tools]\n        max_context_tokens: 200000", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := cfg.Models["openai"]["m1"].Endpoints[0]
+	eg := cfg.Models["m1"].Endpoints[0]
 	want := []string{"text", "image", "tools"}
-	if len(ep.Capabilities) != len(want) {
-		t.Fatalf("Capabilities = %v, want %v", ep.Capabilities, want)
+	if len(eg.Capabilities) != len(want) {
+		t.Fatalf("Capabilities = %v, want %v", eg.Capabilities, want)
 	}
 	for i, c := range want {
-		if ep.Capabilities[i] != c {
-			t.Errorf("Capabilities[%d] = %q, want %q", i, ep.Capabilities[i], c)
+		if eg.Capabilities[i] != c {
+			t.Errorf("Capabilities[%d] = %q, want %q", i, eg.Capabilities[i], c)
 		}
 	}
-	if ep.MaxContextTokens != 200000 {
-		t.Errorf("MaxContextTokens = %d, want 200000", ep.MaxContextTokens)
+	if eg.MaxContextTokens != 200000 {
+		t.Errorf("MaxContextTokens = %d, want 200000", eg.MaxContextTokens)
 	}
 }
 
 func TestMaxContextTokensNegativeRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          max_context_tokens: -1", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        max_context_tokens: -1", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("negative max_context_tokens must be rejected at load, not silently clamped")
+	}
+}
+
+// TestVirtualModelCapabilitiesAndMaxContextTokensParsed locks in the
+// model-level base fields (VirtualModel.Capabilities/MaxContextTokens) —
+// distinct from the endpoint-group-level fields above, which override/add
+// to this base at BuildSnapshot time (see router.mergeCapabilities).
+func TestVirtualModelCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
+	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:",
+		"  m1:\n    capabilities: [text, tools]\n    max_context_tokens: 128000\n    endpoints:", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Models["m1"]
+	want := []string{"text", "tools"}
+	if len(m.Capabilities) != len(want) {
+		t.Fatalf("Capabilities = %v, want %v", m.Capabilities, want)
+	}
+	for i, c := range want {
+		if m.Capabilities[i] != c {
+			t.Errorf("Capabilities[%d] = %q, want %q", i, m.Capabilities[i], c)
+		}
+	}
+	if m.MaxContextTokens != 128000 {
+		t.Errorf("MaxContextTokens = %d, want 128000", m.MaxContextTokens)
+	}
+}
+
+func TestVirtualModelMaxContextTokensNegativeRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:", "  m1:\n    max_context_tokens: -1\n    endpoints:", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("negative model-level max_context_tokens must be rejected at load, not silently clamped")
 	}
 }
 
@@ -543,17 +628,17 @@ func TestStickyTTLGlobalOverride(t *testing.T) {
 func TestStickyTTLPerEndpointOverride(t *testing.T) {
 	// nil (unset) vs. an explicit override must both be representable —
 	// same *Duration pattern as ImageDownscaleMaxPx.
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 2h", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 2h", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := cfg.Models["openai"]["m1"].Endpoints[0]
-	if ep.StickyTTL == nil {
+	eg := cfg.Models["m1"].Endpoints[0]
+	if eg.StickyTTL == nil {
 		t.Fatal("expected a non-nil per-endpoint StickyTTL override")
 	}
-	if ep.StickyTTL.D() != 2*time.Hour {
-		t.Errorf("endpoint StickyTTL = %v, want 2h", ep.StickyTTL.D())
+	if eg.StickyTTL.D() != 2*time.Hour {
+		t.Errorf("endpoint StickyTTL = %v, want 2h", eg.StickyTTL.D())
 	}
 
 	// The base fixture's endpoint doesn't set it — nil means "inherit the
@@ -562,13 +647,13 @@ func TestStickyTTLPerEndpointOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base.Models["openai"]["m1"].Endpoints[0].StickyTTL != nil {
+	if base.Models["m1"].Endpoints[0].StickyTTL != nil {
 		t.Error("expected a nil per-endpoint StickyTTL when not set (inherit global)")
 	}
 }
 
 func TestStickyTTLNonPositiveRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 0s", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 0s", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("sticky_ttl: 0s must be rejected at load (a zero-duration affinity window is meaningless)")
 	}
@@ -590,7 +675,7 @@ func TestStickyTTLGlobalAboveBackstopRejected(t *testing.T) {
 }
 
 func TestStickyTTLPerEndpointAboveBackstopRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 48h", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 48h", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("per-endpoint sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
 	}
@@ -611,7 +696,7 @@ func TestModelStickyDefaultsToTrue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := cfg.Models["openai"]["m1"]
+	m := cfg.Models["m1"]
 	if m.Sticky != nil {
 		t.Errorf("expected Sticky to be nil (unset) when not declared, got %v", *m.Sticky)
 	}
@@ -621,12 +706,12 @@ func TestModelStickyDefaultsToTrue(t *testing.T) {
 }
 
 func TestModelStickyExplicitFalse(t *testing.T) {
-	yaml := strings.Replace(validYAML, "endpoints:", "sticky: false\n      endpoints:", 1)
+	yaml := strings.Replace(validYAML, "    endpoints:", "    sticky: false\n    endpoints:", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := cfg.Models["openai"]["m1"]
+	m := cfg.Models["m1"]
 	if m.Sticky == nil || *m.Sticky != false {
 		t.Errorf("expected Sticky to be an explicit false, got %v", m.Sticky)
 	}

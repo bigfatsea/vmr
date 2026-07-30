@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // CLI-wiring tests for `vmr diagnose` and `vmr replay`. The underlying
 // mechanics (env checks, connectivity classification, request rebuilding)
@@ -23,13 +23,11 @@ func diagnoseConfigYAML(t *testing.T, upstreamURL string) string {
 	return writeTempFile(t, "config.yaml", fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %q, api_key: test-key}
+  - {name: p1, base_url: {openai: %q}, api_key: test-key}
 models:
-  openai:
-    m1:
-      endpoints:
-        - {provider: p1, model: real-model}
+  m1:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [real-model]}
 `, upstreamURL))
 }
 

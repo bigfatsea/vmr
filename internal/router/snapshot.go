@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Snapshot construction and installation: turning a validated config.Config
 // into the immutable, atomically-swappable routing table Serve reads. Split
@@ -65,7 +65,10 @@ func (r *ModelRoute) EffectiveImageDownscaleMaxPx(globalMaxPx int) int {
 
 // Snapshot is an immutable view of the config; hot reload swaps the whole
 // thing atomically, so in-flight requests keep the version they started with.
-// Models is keyed protocol -> name, mirroring config.Config.Models.
+// Models is keyed protocol -> name: BuildSnapshot splits each
+// config.VirtualModel's endpoint groups by their own declared protocol, so
+// this shape is derived, not a direct mirror of config.Config.Models (which
+// is keyed by virtual-model name alone — see config.VirtualModel).
 type Snapshot struct {
 	Cfg    *config.Config
 	Models map[string]map[string]*ModelRoute
@@ -82,51 +85,75 @@ type Snapshot struct {
 
 // clientFor returns the http.Client that carries this endpoint's provider.
 // Coverage is guaranteed by construction: BuildSnapshot resolves endpoints
-// from the same Cfg.Providers map Install builds clients from.
+// from the same Cfg.Providers list Install builds clients from.
 func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 	return s.clients[ep.AdapterType+"/"+ep.Provider]
 }
 
-// BuildSnapshot resolves provider references into concrete endpoints. Because
-// an endpoint's provider is looked up within its own model's protocol group
-// (cfg.Providers[protocol]), every endpoint of a model is guaranteed to share
-// one adapter/protocol by construction — there is no "mixed protocol" case
-// left to detect.
+// BuildSnapshot resolves provider references into concrete endpoints. A
+// virtual model's config.EndpointGroups are grouped by their own declared
+// Protocol into one *ModelRoute per protocol actually present — the same
+// virtual model name can be reachable from both ingress protocols at once
+// (see config.VirtualModel's doc comment), each independently, sharing the
+// model-level Dims/Sticky/ImageDownscaleMaxPx but never each other's
+// endpoints. Each EndpointGroup's Models list expands into that many
+// independent *core.Endpoint values, in list order.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
-	for protocol, models := range cfg.Models {
-		ad, ok := adapter.Get(protocol)
-		if !ok { // defensive; config.validate already checked this
-			return nil, fmt.Errorf("protocol %q: unknown adapter type (available: %v)", protocol, adapter.Names())
+	for name, m := range cfg.Models {
+		dims, err := strategy.Build(m.Strategy)
+		if err != nil {
+			return nil, fmt.Errorf("model %q: %w", name, err)
 		}
-		byName := make(map[string]*ModelRoute, len(models))
-		for name, m := range models {
-			dims, err := strategy.Build(m.Strategy)
-			if err != nil {
-				return nil, fmt.Errorf("model %q: %w", name, err)
+		sticky := m.Sticky == nil || *m.Sticky
+		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
+		for _, eg := range m.Endpoints {
+			ad, ok := adapter.Get(eg.Protocol)
+			if !ok { // defensive; config.validate already checked this
+				return nil, fmt.Errorf("model %q: unknown adapter type %q (available: %v)", name, eg.Protocol, adapter.Names())
 			}
-			route := &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: m.Sticky == nil || *m.Sticky}
-			for _, ec := range m.Endpoints {
-				p, ok := cfg.Providers[protocol][ec.Provider]
-				if !ok { // defensive; config.validate already checked this
-					return nil, fmt.Errorf("model %q: unknown provider %q in the %s protocol group", name, ec.Provider, protocol)
-				}
-				stickyTTL := cfg.StickyTTL.D()
-				if ec.StickyTTL != nil {
-					stickyTTL = ec.StickyTTL.D()
-				}
+			p, ok := cfg.ProviderByName(eg.Provider)
+			if !ok { // defensive; config.validate already checked this
+				return nil, fmt.Errorf("model %q: unknown provider %q", name, eg.Provider)
+			}
+			baseURL, ok := p.BaseURL[eg.Protocol]
+			if !ok { // defensive; config.validate already checked this
+				return nil, fmt.Errorf("model %q: provider %q has no base_url for protocol %q", name, eg.Provider, eg.Protocol)
+			}
+			stickyTTL := cfg.StickyTTL.D()
+			if eg.StickyTTL != nil {
+				stickyTTL = eg.StickyTTL.D()
+			}
+			route, ok := routes[eg.Protocol]
+			if !ok {
+				route = &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
+				routes[eg.Protocol] = route
+			}
+			// Capabilities: union of the virtual model's base list and this
+			// endpoint's own (additive) declaration. MaxContextTokens: this
+			// endpoint's own override if set, else the model's base — a
+			// scalar can't be unioned, so it's override-or-inherit instead.
+			// See config.VirtualModel/config.EndpointGroup's doc comments.
+			effCapabilities := mergeCapabilities(m.Capabilities, eg.Capabilities)
+			effMaxContextTokens := m.MaxContextTokens
+			if eg.MaxContextTokens > 0 {
+				effMaxContextTokens = eg.MaxContextTokens
+			}
+			for _, upstreamModel := range eg.Models {
 				ep := &core.Endpoint{
-					Provider:         ec.Provider,
-					AdapterType:      protocol,
-					BaseURL:          p.BaseURL,
-					FullURL:          ad.ResolveURL(p.BaseURL),
-					APIKey:           p.APIKey,
-					Model:            ec.Model,
-					Priority:         ec.Priority,
-					RoleMap:          p.RoleMap,
-					Capabilities:     ec.Capabilities,
-					MaxContextTokens: ec.MaxContextTokens,
-					StickyTTL:        stickyTTL,
+					Provider:            eg.Provider,
+					AdapterType:         eg.Protocol,
+					BaseURL:             baseURL,
+					FullURL:             ad.ResolveURL(baseURL),
+					APIKey:              p.APIKey,
+					Model:               upstreamModel,
+					Priority:            eg.Priority,
+					RoleMap:             eg.RoleMap,
+					Capabilities:        effCapabilities,
+					ExtraCapabilities:   eg.Capabilities,
+					MaxContextTokens:    effMaxContextTokens,
+					OwnMaxContextTokens: eg.MaxContextTokens,
+					StickyTTL:           stickyTTL,
 				}
 				// Precompute HealthKey()/Name() once, here, before ep is
 				// ever reachable from a concurrently-read Snapshot (see
@@ -136,11 +163,39 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 				ep.Freeze()
 				route.Endpoints = append(route.Endpoints, ep)
 			}
+		}
+		for protocol, route := range routes {
+			byName, ok := snap.Models[protocol]
+			if !ok {
+				byName = map[string]*ModelRoute{}
+				snap.Models[protocol] = byName
+			}
 			byName[name] = route
 		}
-		snap.Models[protocol] = byName
 	}
 	return snap, nil
+}
+
+// mergeCapabilities unions a virtual model's base capabilities with one
+// endpoint's own (additive) declaration, base entries first, deduplicated —
+// nil when both are empty so an endpoint declaring neither stays
+// unconstrained exactly as before these fields existed (see
+// core.Endpoint.Capabilities).
+func mergeCapabilities(base, extra []string) []string {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	merged := make([]string, 0, len(base)+len(extra))
+	for _, lists := range [][]string{base, extra} {
+		for _, c := range lists {
+			if !seen[c] {
+				seen[c] = true
+				merged = append(merged, c)
+			}
+		}
+	}
+	return merged
 }
 
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.
@@ -150,17 +205,17 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 func (rt *Router) Install(s *Snapshot) {
 	byResolution := map[string]*http.Client{}
 	s.clients = map[string]*http.Client{}
-	for protocol, byName := range s.Cfg.Providers {
-		for name, p := range byName {
-			mode, proxyURL := s.Cfg.ProxySpecFor(p)
+	for _, p := range s.Cfg.Providers {
+		for protocol := range p.BaseURL {
+			mode, proxyURL := s.Cfg.ProxySpecFor(p, protocol)
 			key := mode + "|" + proxyURL
 			c, ok := byResolution[key]
 			if !ok {
-				c = NewUpstreamClient(s.Cfg, p)
+				c = NewUpstreamClient(s.Cfg, p, protocol)
 				byResolution[key] = c
 				s.clientSet = append(s.clientSet, c)
 			}
-			s.clients[protocol+"/"+name] = c
+			s.clients[protocol+"/"+p.Name] = c
 		}
 	}
 	rt.installLimiter(s.Cfg.MaxConcurrency)

@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 23:30, by Sonnet 5 -->
+<!-- Ver 2026-07-30 23:45, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -8,7 +8,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
 
 ## Configuration
 
-`providers` and `models` are both nested by protocol: the outer key is the protocol (`openai` / `anthropic`), the inner key the name. A model's endpoints can only reference providers in the same protocol group — mixing protocols in one model has no syntax to write, rather than being a config error to catch. The same short name (`openrouter`) can appear once per protocol group for the two faces of one account:
+`providers` is a flat list — one entry per upstream account, however many of the two ingress protocols (`openai` / `anthropic`) it actually speaks. `base_url` is itself keyed by protocol, so one entry covers both faces of an account instead of declaring it twice. `models` is keyed by virtual-model name; each entry under `endpoints` carries its own `protocol` field, so one virtual model can mix an openai-protocol candidate list and an anthropic-protocol one under the same name — each independently reachable only from its own ingress. An endpoint-group's `models:` list can name more than one upstream model, each expanding into its own independently health-tracked candidate sharing the rest of that entry's fields:
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -38,32 +38,25 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s          # abort any upstream body (stream, JSON, error) silent for this long
 
 providers:
-  openai:
-    openrouter:
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
-      proxy: true              # always go through https_proxy/http_proxy above, whatever the
-                               # global proxy default says — the recommended way to opt a
-                               # foreign provider in
-    minimax:
-      base_url: https://api.minimaxi.com/v1
-      api_key: ${MINIMAX_API_KEY}
-      # proxy: false           # not needed here — the recommended baseline (global proxy
-                               # left off) is already direct-by-default for this provider
-  anthropic:
-    openrouter:                # same account's Anthropic face; same name, no conflict
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
+  - name: openrouter
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    api_key: ${OPENROUTER_API_KEY}
+    proxy: true              # always go through https_proxy/http_proxy above, whatever the
+                             # global proxy default says — the recommended way to opt a
+                             # foreign provider in
+  - name: minimax
+    base_url: {openai: https://api.minimaxi.com/v1}
+    api_key: ${MINIMAX_API_KEY}
+    # proxy: false           # not needed here — the recommended baseline (global proxy
+                             # left off) is already direct-by-default for this provider
 
 models:
-  openai:
-    coding:
-      endpoints:
-        - {provider: openrouter, model: z-ai/glm-5.2}   # no priority field: list order = try order
-  anthropic:
-    claude:                    # anthropic protocol → served via /v1/messages
-      endpoints:
-        - {provider: openrouter, model: minimax/minimax-m3}
+  coding:                      # openai protocol only → served via /v1/chat/completions
+    endpoints:
+      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}   # no priority field: list order = try order
+  claude:                      # anthropic protocol only → served via /v1/messages
+    endpoints:
+      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
 ```
 
 All fields and validation rules: Part 1 §10 of the design doc. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one. Parsing is strict: an unknown or misspelled key (`max_concurency: 8`) is a load error, never a silently ignored no-op you believe is in effect.
@@ -72,7 +65,7 @@ All fields and validation rules: Part 1 §10 of the design doc. Config edits hot
 
 **base_url must include the version**: vmr pre-computes each provider's complete upstream URL at initialization by appending the protocol's bare path (`/chat/completions` for OpenAI, `/messages` for Anthropic) directly to `base_url` — no normalization, no overlap detection. `base_url` must therefore already carry the provider's own full API version, whatever that provider calls it: `https://api.example.com/v1`, `https://api.minimaxi.com/anthropic/v1`, `https://ark.example.com/api/coding/v3`. This matters because not every provider versions its OpenAI/Anthropic-compatible surface as `v1` — Volcengine's coding-plan OpenAI endpoint is `v3`, for instance — so vmr never assumes a version on your behalf; get it wrong and the 404 shows up immediately against the exact base_url you wrote. The URL is computed once at config load and stored on the endpoint; the adapter uses it directly, never constructing or normalizing a URL per request.
 
-**`role_map` — per-provider role remapping**: some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a provider rewrites matching `"role"` values inside the top-level `messages` array before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the provider (like `base_url`/`api_key`), not the virtual model, since rejecting a role is normally a property of the upstream gateway itself, not of any one model behind it; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for providers that accept every role as-is — the default.
+**`role_map` — per-endpoint-group role remapping**: some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a `models.<name>.endpoints[]` entry rewrites matching `"role"` values inside the top-level `messages` array before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the endpoint-group, not the provider or the virtual model as a whole, since the same account can back several endpoint-groups (different virtual models, different upstream model families) that don't all necessarily need the same rewrite; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for an entry whose upstream accepts every role as-is — the default.
 
 ### Environment variables
 
@@ -123,20 +116,21 @@ Endpoints behind one virtual model don't have to be interchangeable. Declare wha
 
 ```yaml
 models:
-  openai:
-    agent:
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          capabilities: [text, image, tools]   # free-form tags: what this endpoint accepts
-          max_context_tokens: 1000000          # declared context window
-        - provider: deepseek
-          model: deepseek-chat
-          capabilities: [text, tools]           # no "image" — an image request skips this endpoint
-          max_context_tokens: 128000
+  agent:
+    capabilities: [text, tools]        # base: every endpoint below inherits this
+    max_context_tokens: 128000         # base: ditto
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        capabilities: [image]          # ADDED to the base -> effective: text, tools, image
+        max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-chat]        # declares neither -> inherits the base as-is
 ```
 
-Both fields are optional and default to **unconstrained**: an endpoint that doesn't set `capabilities` is assumed to support everything, and one without `max_context_tokens` has no declared ceiling — existing configs behave exactly as before. Once `capabilities` is set it's exhaustive (list everything the endpoint actually supports, not just what you want checked); `vmr check` prints each endpoint's declared capabilities and context ceiling so a gap is visible before it causes a misroute.
+Both fields are optional at both levels and default to **unconstrained**: a virtual model with no `capabilities` has no base, and an endpoint that doesn't add its own is assumed to support everything the model does (or, absent any declaration anywhere, everything at all) — existing configs behave exactly as before. `capabilities` is *additive* per endpoint (union with the model's base) since `max_context_tokens` is *override-or-inherit* instead (a single number can't be unioned). Once an endpoint's effective capability set is non-empty it's exhaustive (list everything it actually supports, not just what you want checked); `vmr check` prints each virtual model's base and each endpoint's own declared extras/override so a gap is visible before it causes a misroute.
 
 Two different kinds of condition:
 
@@ -153,17 +147,18 @@ Upstream prompt caches are keyed on an exact byte prefix. If a multi-turn agent 
 sticky_ttl: 10m              # global default: how long a sticky preference stays valid
 
 models:
-  openai:
-    agent:
-      # sticky: true is the default — omit it. Only a genuinely one-shot
-      # virtual model (no multi-turn value to protect) needs sticky: false.
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          # inherits the global 10-minute sticky_ttl
-        - provider: deepseek
-          model: deepseek-chat
-          sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
+  agent:
+    # sticky: true is the default — omit it. Only a genuinely one-shot
+    # virtual model (no multi-turn value to protect) needs sticky: false.
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        # inherits the global 10-minute sticky_ttl
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-chat]
+        sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
 ```
 
 - **Identity**: a conversation is fingerprinted from its system prompt *and* first non-system message — both hashed, never logged or otherwise exposed. Two different agents that happen to open with the same line don't collide, because their system prompts (and therefore their actual upstream cache prefixes) differ; hashing only the first user message, without the system prompt, would have missed exactly that case.
@@ -250,13 +245,12 @@ image_downscale: 512      # global long-side px cap; 0 or absent = off
 image_cache_ttl_days: 7   # eviction age for the on-disk downscale cache (default 7 days, see below)
 
 models:
-  openai:
-    coding:
-      image_downscale: 1024   # overrides the global value, only for this virtual model
-      endpoints: [...]
-    cheap:
-      image_downscale: 0      # explicitly off, even though the global setting is on
-      endpoints: [...]
+  coding:
+    image_downscale: 1024   # overrides the global value, only for this virtual model
+    endpoints: [...]
+  cheap:
+    image_downscale: 0      # explicitly off, even though the global setting is on
+    endpoints: [...]
 ```
 
 **Per-model override**: any virtual model can set its own `image_downscale`, which always wins over the global value; omitting it inherits the global setting. `image_downscale: 0` on a model is an explicit "off" — even with the global setting on — because "not set" and "set to 0" mean different things (inherit vs. force-disable).
@@ -281,7 +275,7 @@ models:
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
 | `GET /admin/status` | endpoint health + concurrency metrics, including whether a recovery probe (passive or active) currently has an endpoint's single-flight slot (loopback only) |
 | `vmr start -c config.yaml [-audit=false]` | run the router in the foreground (Ctrl-C to stop); `-audit=false` turns off the JSONL audit log (on by default). `./vmr.sh start` is the background-supervised equivalent and is the one command it shadows — run this one directly for foreground/dev use |
-| `vmr check -c config.yaml` | validate config, print routing table, key status and per-provider effective proxy. With a trailing `log`\|`cache` argument, print just that resolved directory instead (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
+| `vmr check -c config.yaml` | validate config, run the consistency scan (missing api_key, a proxy that silently falls back to direct, a duplicate endpoint, …), and print the routing table with key status and per-provider effective proxy — flagged values get an inline ⚠️ plus a trailing `=== Failed ===` summary. With a trailing `log`\|`cache` argument, print just that resolved directory instead (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
 | `vmr status -c config.yaml` | render a running instance's identity (pid / listen / uptime / absolute config path) plus health and concurrency. `-addr host:port` queries whatever instance holds that port without loading a config at all — for when several instances run on one machine, or you don't have that instance's config; `-brief` prints one tab-separated summary line (what `./vmr.sh ps` builds its table from) |
 | `vmr report [-o dir] [-pricing pricing.yaml] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip); adds the §2 cost-estimate section once a pricing sidecar is loaded — `-pricing` names one explicitly, or a `./pricing.yaml` in the current directory is auto-loaded when `-pricing` is omitted |
 | `vmr story [-journey <id> \| -render-all \| -compare <id1,id2>] <glob>` | reconstruct one agent task's full execution history into a readable Markdown narrative (see "Agent task narratives" below); no args lists candidate tasks with their ids, `-render-all` renders every one in a single batched pass, `-compare id1,id2` diffs two already-built tasks' behavior profiles (rule-derived facts plus, with `-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`, an optional LLM interpretation section) |

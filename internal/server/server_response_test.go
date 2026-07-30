@@ -1,4 +1,4 @@
-// Ver 2026-07-07 21:50, by Fable 5 (post-audit 2026-07-07 fixes)
+// Ver 2026-07-30, by Sonnet 5
 //
 // Integration tests for the response-side normalizer: model-field
 // rewrite + think-block stripping + [DONE] sentinel, exercised through
@@ -84,13 +84,11 @@ func TestResponse_NonStreamingNoDoneSentinel(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -124,13 +122,11 @@ func TestResponse_NormalizedThroughVMR(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + up.srv.URL + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
 models:
-  openai:
-    agent:
-      endpoints:
-        - {provider: p1, model: MiniMax-M3}
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
 `))
 	if err != nil {
 		t.Fatal(err)

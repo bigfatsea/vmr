@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Outbound HTTP transport: building the upstream http.Client and forwarding
 // a response body to the client. Split out of router.go — pure move, no
@@ -17,13 +17,15 @@ import (
 )
 
 // NewUpstreamClient builds an *http.Client configured exactly like Install
-// would for connections to p: same dial/response-header/idle timeouts, same
-// proxy resolution (config.ProxySpecFor). Standalone one-shot tools (replay,
+// would for connections to p under protocol (a provider can declare a
+// different-scheme base_url per protocol, so the proxy-scheme decision needs
+// to know which one — see config.ProxySpecFor): same dial/response-header/
+// idle timeouts, same proxy resolution. Standalone one-shot tools (replay,
 // diagnose) that need to speak to a single provider without running a Router
 // use this instead of duplicating Install's Transport setup — Install itself
 // calls this per distinct proxy resolution.
-func NewUpstreamClient(cfg *config.Config, p config.Provider) *http.Client {
-	mode, proxyURL := cfg.ProxySpecFor(p)
+func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *http.Client {
+	mode, proxyURL := cfg.ProxySpecFor(p, protocol)
 	// nil Proxy = direct. Proxy environment variables are deliberately not
 	// consulted — proxies are explicit config (config.Config.HTTPProxy/
 	// HTTPSProxy), nothing implicit.

@@ -1,9 +1,13 @@
-// Ver 2026-07-22 22:10, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
-// Package diagnose implements `vmr diagnose`: config validation plus a
-// series of read-only checks (DNS/TLS/proxy reachability, then a real
-// minimal request per configured endpoint) that `vmr check` deliberately
-// doesn't do — vmr check is a static preview, diagnose actually dials out.
+// Package diagnose implements `vmr diagnose`: config validation, the same
+// config.Check consistency scan `vmr check` runs, and — only once that scan
+// comes back clean — a series of read-only checks that touch the network
+// (DNS/TLS/proxy reachability, then a real minimal request per configured
+// endpoint) that `vmr check` deliberately never does. A config with
+// consistency issues (missing api_key, a proxy contradiction, …) skips
+// straight past both network phases: there is no point dialing out for
+// endpoints a human still needs to fix the declaration of first.
 //
 // diagnose never touches vmr's own audit log or health registry: it runs as
 // a one-shot process with no access to a live `vmr start` instance's
@@ -17,6 +21,7 @@ package diagnose
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -128,30 +133,60 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	rep := &Report{}
 	rep.Results = append(rep.Results, Result{
 		Phase: "config", Target: configPath, Status: StatusOK,
-		Detail: fmt.Sprintf("%d provider(s), %d virtual model(s)", config.CountNested(cfg.Providers), config.CountNested(cfg.Models)),
+		Detail: fmt.Sprintf("%d provider(s), %d virtual model(s)", len(cfg.Providers), len(cfg.Models)),
 	})
+
+	// Phase 1b: the same consistency scan `vmr check` runs (missing
+	// api_key, a proxy contradiction that silently resolves to direct, a
+	// duplicate endpoint, …) — config that's structurally valid
+	// (BuildSnapshot above already succeeded) but operationally broken.
+	// Anything found here skips Phase 2/3 entirely: there is no point
+	// dialing out to test connectivity for endpoints a human still needs
+	// to fix the declaration of first — see cfg.Check's doc comment.
+	checkIssues := cfg.Check()
+	for _, is := range checkIssues {
+		target := "global"
+		switch {
+		case is.Field == "endpoint":
+			target = fmt.Sprintf("model %s: %s", is.Model, is.Endpoint)
+		case is.Provider != "":
+			target = "provider " + is.Provider
+		case is.Model != "":
+			target = "model " + is.Model
+		}
+		rep.Results = append(rep.Results, Result{Phase: "check", Target: target, Status: StatusFail, Detail: is.Message})
+	}
+	runNetworkChecks := len(checkIssues) == 0
+	if !runNetworkChecks && opts.Progress != nil {
+		fmt.Fprintf(opts.Progress, "Consistency check: %d issue(s) found — skipping Environment/Connectivity (real network I/O)\n", len(checkIssues))
+	}
 
 	// Phase 2: DNS/TLS/proxy/api_key per provider, up to checkConcurrency at
 	// once — sequential here means N unreachable providers each eat a full
 	// timeout back to back, which is exactly the scenario diagnose exists
-	// to debug quickly.
+	// to debug quickly. One check per (protocol, provider) pair: a provider
+	// speaking both protocols gets checked once per declared base_url.
 	type providerCheck struct {
 		protocol, name string
 		p              config.Provider
 	}
 	var providerChecks []providerCheck
-	for _, protocol := range core.SortedKeys(cfg.Providers) {
-		for _, name := range core.SortedKeys(cfg.Providers[protocol]) {
-			providerChecks = append(providerChecks, providerCheck{protocol, name, cfg.Providers[protocol][name]})
+	providers := append([]config.Provider(nil), cfg.Providers...)
+	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
+	for _, p := range providers {
+		for _, protocol := range core.SortedKeys(p.BaseURL) {
+			providerChecks = append(providerChecks, providerCheck{protocol, p.Name, p})
 		}
 	}
 	onResult := progressPrinter(opts.Progress)
-	if opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "Environment: checking %d provider(s)...\n", len(providerChecks))
+	if runNetworkChecks {
+		if opts.Progress != nil {
+			fmt.Fprintf(opts.Progress, "Environment: checking %d provider(s)...\n", len(providerChecks))
+		}
+		rep.Results = append(rep.Results, runConcurrent(providerChecks, checkConcurrency, func(c providerCheck) Result {
+			return envCheck(ctx, cfg, c.protocol, c.name, c.p)
+		}, onResult)...)
 	}
-	rep.Results = append(rep.Results, runConcurrent(providerChecks, checkConcurrency, func(c providerCheck) Result {
-		return envCheck(ctx, cfg, c.protocol, c.name, c.p)
-	}, onResult)...)
 
 	// Phase 3: a real minimal request per distinct (protocol, provider,
 	// model) triple referenced by any virtual model — a provider alone
@@ -162,16 +197,25 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	if opts.TestTimeout <= 0 {
 		opts.TestTimeout = 15 * time.Second
 	}
-	if opts.TestRouting {
+	if opts.TestRouting && runNetworkChecks {
 		// Collect every distinct (protocol, provider, model) triple first,
 		// then sort by protocol/provider/model — so the same provider's
 		// endpoints land next to each other in the report instead of
 		// scattered across wherever each virtual model listed them.
-		seen := map[epKey]bool{}
-		for _, protocol := range core.SortedKeys(cfg.Models) {
-			for _, name := range core.SortedKeys(cfg.Models[protocol]) {
-				for _, ec := range cfg.Models[protocol][name].Endpoints {
-					seen[epKey{protocol, ec.Provider, ec.Model}] = true
+		// The map value is the endpoint-group's RoleMap (first endpoint-group
+		// referencing a given triple wins — the same triple declared with two
+		// different role_maps across virtual models is an edge case not
+		// worth reconciling here): testEndpoint needs it both to apply the
+		// same rewrite real traffic would get and, on failure, to word its
+		// hint correctly.
+		seen := map[epKey]map[string]string{}
+		for _, name := range core.SortedKeys(cfg.Models) {
+			for _, eg := range cfg.Models[name].Endpoints {
+				for _, mn := range eg.Models {
+					k := epKey{eg.Protocol, eg.Provider, mn}
+					if _, ok := seen[k]; !ok {
+						seen[k] = eg.RoleMap
+					}
 				}
 			}
 		}
@@ -190,11 +234,12 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		})
 		endpoints := make([]*core.Endpoint, len(keys))
 		for i, k := range keys {
-			p := cfg.Providers[k.protocol][k.provider]
+			p, _ := cfg.ProviderByName(k.provider)
+			baseURL := p.BaseURL[k.protocol]
 			ad, _ := adapter.Get(k.protocol)
-			ep := &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: k.model}
+			ep := &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: k.model, RoleMap: seen[k]}
 			if ad != nil {
-				ep.FullURL = ad.ResolveURL(p.BaseURL)
+				ep.FullURL = ad.ResolveURL(baseURL)
 			}
 			endpoints[i] = ep
 		}
@@ -243,7 +288,7 @@ type epKey struct{ protocol, provider, model string }
 // provider as broken). Also reports whether an api_key is present.
 func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p config.Provider) Result {
 	target := protocol + "/" + name
-	u, err := url.Parse(p.BaseURL)
+	u, err := url.Parse(p.BaseURL[protocol])
 	if err != nil {
 		return Result{Phase: "env", Target: target, Status: StatusFail, Detail: "invalid base_url: " + err.Error()}
 	}
@@ -252,7 +297,7 @@ func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p 
 	fail := func(s string) { parts = append(parts, s); status = StatusFail }
 	ok := func(s string) { parts = append(parts, s) }
 
-	if mode, proxyURL := cfg.ProxySpecFor(p); mode == config.ProxyURL {
+	if mode, proxyURL := cfg.ProxySpecFor(p, protocol); mode == config.ProxyURL {
 		ok("proxy:yes")
 		pu, err := url.Parse(proxyURL)
 		if err != nil {
@@ -303,13 +348,30 @@ func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p 
 // testEndpoint sends one minimal real request through the exact same
 // adapter.BuildRequest path vmr's own server uses, and classifies the
 // response the way a user configuring vmr would want explained.
+//
+// An openai-protocol endpoint is probed with role "developer" instead of
+// "user" — OpenAI's o1/o3-series introduced that role, and some self-
+// described-OpenAI-compatible providers reject it outright (see
+// config.example.yaml's role_map). There is no separate check for this: a
+// provider that can't handle the role real "developer"-role clients send
+// (or a missing role_map to rewrite it away first) is exactly as broken as
+// any other liveness failure, so it fails the one connectivity check
+// instead of a second one alongside it. Anthropic-protocol endpoints keep
+// probing with plain "user" — "developer" is an OpenAI-only role, no
+// Anthropic client ever sends it.
 func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, timeout time.Duration) Result {
 	target := ep.AdapterType + "/" + ep.Provider + "/" + ep.Model
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok {
 		return Result{Phase: "connect", Target: target, Status: StatusFail, Detail: "unknown adapter " + ep.AdapterType}
 	}
-	probeBody, nonce := probe.Request(ep.Model)
+	var probeBody json.RawMessage
+	var nonce string
+	if ep.AdapterType == "openai" {
+		probeBody, nonce = probe.RoleCompatRequest(ep.Model, "developer")
+	} else {
+		probeBody, nonce = probe.Request(ep.Model)
+	}
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: probeBody, Header: http.Header{}}
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {
@@ -319,7 +381,8 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 	defer cancel()
 	req = req.WithContext(tctx)
 
-	client := router.NewUpstreamClient(cfg, cfg.Providers[ep.AdapterType][ep.Provider])
+	p, _ := cfg.ProviderByName(ep.Provider)
+	client := router.NewUpstreamClient(cfg, p, ep.AdapterType)
 	start := time.Now()
 	resp, err := client.Do(req)
 	latency := formatSeconds(time.Since(start))
@@ -356,8 +419,20 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 		return Result{Phase: "connect", Target: target, Status: StatusFail,
 			Detail: fmt.Sprintf("%d upstream error (%s)", resp.StatusCode, latency)}
 	default:
+		// For an openai-protocol endpoint this default case is also where a
+		// rejected "developer" role lands (typically a 400) — add a role_map
+		// hint precisely when that's a plausible explanation, so the fix is
+		// obvious instead of just "some 400-something happened".
+		hint := ""
+		if ep.AdapterType == "openai" {
+			if len(ep.RoleMap) == 0 {
+				hint = ` — no role_map configured; if this provider rejects the "developer" role, add role_map: {developer: system}`
+			} else {
+				hint = fmt.Sprintf(" — role_map %v is configured; if this is a rejected \"developer\" role, check its target role name", ep.RoleMap)
+			}
+		}
 		return Result{Phase: "connect", Target: target, Status: StatusFail,
-			Detail: fmt.Sprintf("%d: %s (%s)", resp.StatusCode, snippet(body), latency)}
+			Detail: fmt.Sprintf("%d: %s (%s)%s", resp.StatusCode, snippet(body), latency, hint)}
 	}
 }
 
@@ -473,6 +548,7 @@ func printRule(w io.Writer, title string) {
 // a JSON discriminator but not as prose a human scans top to bottom.
 var phaseTitles = map[string]string{
 	"config":  "Config",
+	"check":   "Consistency Check",
 	"env":     "Environment",
 	"connect": "Connectivity",
 	"route":   "Routing",

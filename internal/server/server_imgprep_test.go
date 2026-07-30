@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-07-30, by Sonnet 5
 
 // End-to-end check that image downscaling (internal/imgprep) is wired into
 // the real request path: client -> server -> router -> adapter -> upstream.
@@ -55,13 +55,11 @@ func TestImageDownscaleAppliedBeforeUpstream(t *testing.T) {
 listen: 127.0.0.1:0
 image_downscale: 512
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: model-one}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [model-one]}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -250,15 +248,13 @@ func TestImageDownscalePerModelOverrideWinsOverGlobal(t *testing.T) {
 listen: 127.0.0.1:0
 image_downscale: 1024
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints: [{provider: p1, model: model-one}]
-    vm-small:
-      image_downscale: 256
-      endpoints: [{provider: p1, model: model-one}]
+  vm:
+    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
+  vm-small:
+    image_downscale: 256
+    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -302,13 +298,11 @@ func TestImageDownscaleModelOverrideCanForceDisable(t *testing.T) {
 listen: 127.0.0.1:0
 image_downscale: 512
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm-off:
-      image_downscale: 0
-      endpoints: [{provider: p1, model: model-one}]
+  vm-off:
+    image_downscale: 0
+    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -356,12 +350,10 @@ listen: 127.0.0.1:0
 image_downscale: 512
 image_cache_dir: %s
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints: [{provider: p1, model: model-one}]
+  vm:
+    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
 `, cacheDir, up.URL))
 
 	uri := bigJPEGDataURI(t) // 1600x900

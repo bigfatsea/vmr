@@ -1,4 +1,4 @@
-// Ver 2026-07-24 23:20, by Sonnet 5
+// Ver 2026-07-30 12:00, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -59,10 +59,13 @@ const (
 	ProbeModePassive = "passive"
 )
 
-// Provider has no protocol field: it lives under providers.<protocol>.<name>,
-// so the outer map key IS the adapter type. This also lets the same short
-// name (e.g. "openrouter") appear once per protocol group without collision —
-// no more "_a" suffix hack for a provider's second protocol face.
+// Provider is a flat, protocol-agnostic account definition: one entry per
+// upstream account, however many of the two ingress protocols it actually
+// speaks. BaseURL is keyed by protocol ("openai"/"anthropic"); a provider
+// must declare at least one, and may declare both when the same account
+// speaks both surfaces (e.g. MiniMax) — api_key/proxy are shared across
+// whichever protocol faces this account has, since they're properties of the
+// account, not of a single protocol.
 //
 // Proxy is a tri-state switch over this provider's upstream connections:
 // true = always proxied via http_proxy/https_proxy (the foreign-provider
@@ -75,36 +78,60 @@ const (
 // configured is a validation error (a contradiction the config can state
 // on its own). Note yaml.v3 is YAML 1.2: write true/false, not on/off.
 type Provider struct {
-	BaseURL string            `yaml:"base_url"`
+	Name    string            `yaml:"name"`
+	BaseURL map[string]string `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Proxy   *bool             `yaml:"proxy"`
-	RoleMap map[string]string `yaml:"role_map"`
 }
 
-// EndpointConfig.Provider resolves within the enclosing model's own protocol
-// group (models.<protocol>.<name>.endpoints[].provider -> providers.<protocol>.<provider>),
-// so an endpoint can never reference a provider of the wrong protocol — that
-// mistake has no syntax to express, rather than being caught by validation.
+// EndpointGroup is one try-order entry under a virtual model: a provider, a
+// protocol face of it, and one or more upstream model names that all share
+// this entry's routing metadata. Models is exhaustive: each name expands
+// into its own independent *core.Endpoint (own health/failover state), in
+// list order, sharing Capabilities/MaxContextTokens/RoleMap/StickyTTL/
+// Priority — the shape that saves repeating those fields once per model when
+// several models behind the same account are interchangeable candidates for
+// one virtual model.
+//
+// Provider resolves by name against Config.Providers; Protocol picks which
+// of that provider's declared BaseURL entries applies — an EndpointGroup
+// referencing a provider that hasn't declared a base_url for Protocol is a
+// validation error, not a silent mismatch.
 //
 // Priority is optional and defaults to 0. Endpoints of equal priority (the
 // common case: nobody sets it) keep their config-file order because Sort is
 // stable — so listing endpoints in the order you want them tried is enough;
 // there is no need to number them.
-type EndpointConfig struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	Priority int    `yaml:"priority"`
+type EndpointGroup struct {
+	Protocol string   `yaml:"protocol"`
+	Provider string   `yaml:"provider"`
+	Models   []string `yaml:"models"`
+	Priority int      `yaml:"priority"`
 
 	// Capabilities and MaxContextTokens drive condition-based routing (see
-	// docs/VirtualModelRouter_Design_v4_Core.md §6.4). Both
-	// are optional and default to "unconstrained" when absent — a request
-	// needing a capability or context size this endpoint doesn't declare
-	// simply isn't filtered by that dimension, so configs written before
-	// these fields existed see no behavior change. Capabilities is
-	// exhaustive once set: list every capability the endpoint actually
-	// supports, not just the ones you want VMR to check.
+	// docs/VirtualModelRouter_Design_v4_Core.md §6.4). Both are optional and
+	// default to "inherit the virtual model's own base value" (VirtualModel.
+	// Capabilities/MaxContextTokens below), which itself defaults to
+	// "unconstrained" — a config that sets neither the model-level nor the
+	// endpoint-level field sees no behavior change from before these fields
+	// existed.
+	//
+	// Capabilities here is *additive*: it lists capabilities this endpoint
+	// supports on top of the model's own base list (e.g. the base already
+	// says [text, tools]; a stronger backing model can add "image" here
+	// instead of repeating [text, tools, image]) — the effective, exhaustive
+	// set used for filtering is the union of the two. MaxContextTokens
+	// instead *overrides* the model's base when set (a single number can't
+	// be unioned): 0/absent inherits the base value as-is.
 	Capabilities     []string `yaml:"capabilities"`
 	MaxContextTokens int64    `yaml:"max_context_tokens"`
+
+	// RoleMap rewrites message roles (e.g. {"developer":"system"}) for
+	// requests sent through this entry alone — a provider account can back
+	// several endpoint-groups (different virtual models, different upstream
+	// models) with different role-rejection behavior per model family, so
+	// this lives per entry rather than once per provider.
+	RoleMap map[string]string `yaml:"role_map"`
 
 	// StickyTTL overrides the global sticky_ttl (below) for this endpoint
 	// alone — cache lifetime is a property of the upstream provider, not of
@@ -118,10 +145,30 @@ type EndpointConfig struct {
 // image_downscale) and "explicitly 0" (force-disable for this model, even
 // if the global setting is on) are distinguishable — a plain int can't
 // represent that distinction (§7 image downscale, priority: model > global).
-type ModelConfig struct {
-	Strategy            []string         `yaml:"strategy"`
-	Endpoints           []EndpointConfig `yaml:"endpoints"`
-	ImageDownscaleMaxPx *int             `yaml:"image_downscale"`
+//
+// A VirtualModel is reachable from whichever ingress protocol(s) its own
+// Endpoints declare — the same virtual model name can mix an openai-protocol
+// entry and an anthropic-protocol entry in one place, each independently
+// reachable only from its own protocol's ingress (POST /v1/chat/completions
+// vs POST /v1/messages); see BuildSnapshot.
+type VirtualModel struct {
+	Strategy            []string        `yaml:"strategy"`
+	Endpoints           []EndpointGroup `yaml:"endpoints"`
+	ImageDownscaleMaxPx *int            `yaml:"image_downscale"`
+
+	// Capabilities and MaxContextTokens are the *base* condition-routing
+	// declaration shared by every endpoint under this virtual model —
+	// declaring them once here instead of repeating the same
+	// EndpointGroup.Capabilities/MaxContextTokens on each try-order entry is
+	// the common case when several backing models are otherwise
+	// interchangeable. Both default to "unconstrained" (empty/0) when
+	// absent, same as before this field existed. An individual
+	// EndpointGroup's own Capabilities is unioned on top of this base
+	// (additive: what that specific endpoint supports beyond the group's
+	// shared floor); its own MaxContextTokens overrides this base instead
+	// when set (a scalar can't be unioned). See EndpointGroup's doc comment.
+	Capabilities     []string `yaml:"capabilities"`
+	MaxContextTokens int64    `yaml:"max_context_tokens"`
 
 	// Sticky enables session-affinity routing for this virtual model (see
 	// docs/VirtualModelRouter_Design_v4_Core.md §6.5). A *bool,
@@ -157,9 +204,13 @@ type Timeouts struct {
 	StreamIdle     Duration `yaml:"stream_idle"`
 }
 
-// Providers and Models are both keyed protocol -> name. The protocol key is
-// validated against the adapter registry, so adding a new ingress protocol
-// is just "register an adapter" — no schema change here.
+// Providers is a flat list (protocol is per-provider data, not a grouping
+// key — see Provider.BaseURL); Models is keyed by virtual-model name alone,
+// with protocol carried per EndpointGroup instead (see VirtualModel). Every
+// protocol value appearing anywhere (Provider.BaseURL's keys, EndpointGroup.
+// Protocol) is validated against the adapter registry, so adding a new
+// ingress protocol is still just "register an adapter" — no schema change
+// here.
 type Config struct {
 	Listen string `yaml:"listen"`
 	// RemovedAPIKey exists only to catch configs still using the removed
@@ -233,12 +284,12 @@ type Config struct {
 	// StickyTTL is the global default for how long a Sticky Model affinity
 	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md
 	// §6.5); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
-	// EndpointConfig.StickyTTL overrides this for endpoints whose upstream
+	// EndpointGroup.StickyTTL overrides this for endpoints whose upstream
 	// cache lifetime differs (e.g. DeepSeek's disk cache).
-	StickyTTL Duration                          `yaml:"sticky_ttl"`
-	Timeouts  Timeouts                          `yaml:"timeouts"`
-	Providers map[string]map[string]Provider    `yaml:"providers"`
-	Models    map[string]map[string]ModelConfig `yaml:"models"`
+	StickyTTL Duration                `yaml:"sticky_ttl"`
+	Timeouts  Timeouts                `yaml:"timeouts"`
+	Providers []Provider              `yaml:"providers"`
+	Models    map[string]VirtualModel `yaml:"models"`
 }
 
 // Load reads, expands, parses, defaults and validates the config file.
@@ -342,21 +393,19 @@ func (c *Config) applyDefaults() {
 	if c.Timeouts.StreamIdle <= 0 {
 		c.Timeouts.StreamIdle = Duration(DefaultIdleTimeout)
 	}
-	for _, byName := range c.Models {
-		for name, m := range byName {
-			changed := false
-			if len(m.Strategy) == 0 {
-				m.Strategy = []string{"priority"}
-				changed = true
-			}
-			if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
-				zero := 0
-				m.ImageDownscaleMaxPx = &zero
-				changed = true
-			}
-			if changed {
-				byName[name] = m
-			}
+	for name, m := range c.Models {
+		changed := false
+		if len(m.Strategy) == 0 {
+			m.Strategy = []string{"priority"}
+			changed = true
+		}
+		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
+			zero := 0
+			m.ImageDownscaleMaxPx = &zero
+			changed = true
+		}
+		if changed {
+			c.Models[name] = m
 		}
 	}
 }
@@ -410,57 +459,78 @@ func (c *Config) validate() error {
 	if c.Proxy && c.HTTPProxy == "" && c.HTTPSProxy == "" {
 		return fmt.Errorf("proxy: true but neither http_proxy nor https_proxy is configured")
 	}
-	if CountNested(c.Providers) == 0 {
+	if len(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
-	if CountNested(c.Models) == 0 {
+	if len(c.Models) == 0 {
 		return fmt.Errorf("no models defined")
 	}
-	for protocol, byName := range c.Providers {
-		if _, ok := adapter.Get(protocol); !ok {
-			return fmt.Errorf("providers.%s: unknown adapter type (available: %v)", protocol, adapter.Names())
+	seenProvider := map[string]bool{}
+	for i, p := range c.Providers {
+		if p.Name == "" {
+			return fmt.Errorf("providers[%d]: missing name", i)
 		}
-		for name, p := range byName {
-			u, err := url.Parse(p.BaseURL)
+		if seenProvider[p.Name] {
+			return fmt.Errorf("providers[%d]: duplicate provider name %q", i, p.Name)
+		}
+		seenProvider[p.Name] = true
+		if len(p.BaseURL) == 0 {
+			return fmt.Errorf("provider %q: base_url: at least one protocol required", p.Name)
+		}
+		for protocol, raw := range p.BaseURL {
+			if _, ok := adapter.Get(protocol); !ok {
+				return fmt.Errorf("provider %q: base_url.%s: unknown adapter type (available: %v)", p.Name, protocol, adapter.Names())
+			}
+			u, err := url.Parse(raw)
 			if err != nil || u.Scheme == "" || u.Host == "" {
-				return fmt.Errorf("provider %q: invalid base_url %q", name, p.BaseURL)
+				return fmt.Errorf("provider %q: invalid base_url.%s %q", p.Name, protocol, raw)
 			}
 			// proxy: true with nothing to follow is a contradiction the
 			// config states entirely on its own (no environment involved),
 			// so it is rejected here rather than warned about at startup.
 			if p.Proxy != nil && *p.Proxy {
-				if mode, _ := c.ProxySpecFor(p); mode != ProxyURL {
-					return fmt.Errorf("provider %q: proxy: true but no global proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", name, u.Scheme)
+				if mode, _ := c.ProxySpecFor(p, protocol); mode != ProxyURL {
+					return fmt.Errorf("provider %q: proxy: true but no global proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", p.Name, u.Scheme)
 				}
 			}
 		}
 	}
-	for protocol, byName := range c.Models {
-		if _, ok := adapter.Get(protocol); !ok {
-			return fmt.Errorf("models.%s: unknown adapter type (available: %v)", protocol, adapter.Names())
+	for name, m := range c.Models {
+		if len(m.Endpoints) == 0 {
+			return fmt.Errorf("model %q: no endpoints", name)
 		}
-		for name, m := range byName {
-			if len(m.Endpoints) == 0 {
-				return fmt.Errorf("model %q: no endpoints", name)
+		if m.MaxContextTokens < 0 {
+			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)
+		}
+		for i, eg := range m.Endpoints {
+			if _, ok := adapter.Get(eg.Protocol); !ok {
+				return fmt.Errorf("model %q endpoint group #%d: unknown protocol %q (available: %v)", name, i+1, eg.Protocol, adapter.Names())
 			}
-			for i, ep := range m.Endpoints {
-				if _, ok := c.Providers[protocol][ep.Provider]; !ok {
-					return fmt.Errorf("model %q endpoint #%d: unknown provider %q in the %s protocol group", name, i+1, ep.Provider, protocol)
+			p, ok := c.ProviderByName(eg.Provider)
+			if !ok {
+				return fmt.Errorf("model %q endpoint group #%d: unknown provider %q", name, i+1, eg.Provider)
+			}
+			if _, ok := p.BaseURL[eg.Protocol]; !ok {
+				return fmt.Errorf("model %q endpoint group #%d: provider %q has no base_url for protocol %q", name, i+1, eg.Provider, eg.Protocol)
+			}
+			if len(eg.Models) == 0 {
+				return fmt.Errorf("model %q endpoint group #%d: models: at least one required", name, i+1)
+			}
+			for j, mn := range eg.Models {
+				if mn == "" {
+					return fmt.Errorf("model %q endpoint group #%d: models[%d]: empty", name, i+1, j)
 				}
-				if ep.Model == "" {
-					return fmt.Errorf("model %q endpoint #%d: missing model", name, i+1)
+			}
+			if eg.MaxContextTokens < 0 {
+				return fmt.Errorf("model %q endpoint group #%d: max_context_tokens must be >= 0", name, i+1)
+			}
+			if eg.StickyTTL != nil {
+				if eg.StickyTTL.D() <= 0 {
+					return fmt.Errorf("model %q endpoint group #%d: sticky_ttl must be positive", name, i+1)
 				}
-				if ep.MaxContextTokens < 0 {
-					return fmt.Errorf("model %q endpoint #%d: max_context_tokens must be >= 0", name, i+1)
-				}
-				if ep.StickyTTL != nil {
-					if ep.StickyTTL.D() <= 0 {
-						return fmt.Errorf("model %q endpoint #%d: sticky_ttl must be positive", name, i+1)
-					}
-					if ep.StickyTTL.D() > core.StickyBackstopTTL {
-						return fmt.Errorf("model %q endpoint #%d: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-							name, i+1, ep.StickyTTL.D(), core.StickyBackstopTTL, ep.StickyTTL.D(), core.StickyBackstopTTL)
-					}
+				if eg.StickyTTL.D() > core.StickyBackstopTTL {
+					return fmt.Errorf("model %q endpoint group #%d: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
+						name, i+1, eg.StickyTTL.D(), core.StickyBackstopTTL, eg.StickyTTL.D(), core.StickyBackstopTTL)
 				}
 			}
 		}
@@ -468,16 +538,18 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// CountNested totals the inner maps of a protocol -> name -> V structure
-// (Config.Providers, Config.Models) — exported because validate() isn't the
-// only place that needs "how many providers/models total": diagnose and
-// cmd/vmr both report the same count in their own output.
-func CountNested[V any](m map[string]map[string]V) int {
-	n := 0
-	for _, byName := range m {
-		n += len(byName)
+// ProviderByName looks up a provider by its declared name. Providers is a
+// short, human-sized list — a linear scan is simpler than maintaining a
+// parallel index, and nothing on the request hot path calls this:
+// BuildSnapshot resolves every reference once at startup/reload, and
+// everything downstream reads the resolved core.Endpoint instead.
+func (c *Config) ProviderByName(name string) (Provider, bool) {
+	for _, p := range c.Providers {
+		if p.Name == name {
+			return p, true
+		}
 	}
-	return n
+	return Provider{}, false
 }
 
 func (c *Config) MaxRequestBodyBytes() int64 { return int64(c.MaxRequestBodyMB) << 20 }
@@ -488,18 +560,19 @@ const (
 	ProxyURL    = "url"    // a global http_proxy/https_proxy from this config applies
 )
 
-// ProxySpecFor resolves which proxy applies to p's upstream connections:
-// p's own Proxy switch (true/false) wins outright; absent, it follows the
-// global Config.Proxy default (also false by default — http_proxy/
-// https_proxy alone only declare a proxy URL, they don't opt anyone in).
-// Only when the resolved switch is on does the base_url's scheme pick
-// http_proxy or https_proxy; no configured URL for that scheme still means
-// direct. There is no environment fallback — proxies are explicit config
-// only (reference ${HTTPS_PROXY} in the yaml to opt into an env value).
-// proxyURL is only non-empty for ProxyURL. The decision is static per
-// provider — the router builds one shared http.Client per distinct
-// resolution, not a per-request proxy callback.
-func (c *Config) ProxySpecFor(p Provider) (mode, proxyURL string) {
+// ProxySpecFor resolves which proxy applies to p's connections under
+// protocol (p may declare a different-scheme base_url per protocol, so the
+// scheme check needs to know which one): p's own Proxy switch (true/false)
+// wins outright; absent, it follows the global Config.Proxy default (also
+// false by default — http_proxy/https_proxy alone only declare a proxy URL,
+// they don't opt anyone in). Only when the resolved switch is on does the
+// base_url's scheme pick http_proxy or https_proxy; no configured URL for
+// that scheme still means direct. There is no environment fallback —
+// proxies are explicit config only (reference ${HTTPS_PROXY} in the yaml to
+// opt into an env value). proxyURL is only non-empty for ProxyURL. The
+// decision is static per provider+protocol — the router builds one shared
+// http.Client per distinct resolution, not a per-request proxy callback.
+func (c *Config) ProxySpecFor(p Provider, protocol string) (mode, proxyURL string) {
 	useProxy := c.Proxy
 	if p.Proxy != nil {
 		useProxy = *p.Proxy
@@ -508,7 +581,7 @@ func (c *Config) ProxySpecFor(p Provider) (mode, proxyURL string) {
 		return ProxyDirect, ""
 	}
 	cfgProxy := c.HTTPSProxy
-	if u, err := url.Parse(p.BaseURL); err == nil && u.Scheme == "http" {
+	if u, err := url.Parse(p.BaseURL[protocol]); err == nil && u.Scheme == "http" {
 		cfgProxy = c.HTTPProxy
 	}
 	if cfgProxy != "" {

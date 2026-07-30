@@ -1,4 +1,4 @@
-// Ver 2026-07-24 23:20, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package diagnose
 
 import (
@@ -21,23 +21,29 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/core"
 
+	_ "vmr/internal/adapter/anthropic"
 	_ "vmr/internal/adapter/openai"
 )
 
 func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endpoint {
-	p := cfg.Providers[protocol][provider]
-	ep := &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: p.BaseURL, APIKey: p.APIKey, Model: model}
+	p, _ := cfg.ProviderByName(provider)
+	baseURL := p.BaseURL[protocol]
+	ep := &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: model}
 	if ad, ok := adapter.Get(protocol); ok {
-		ep.FullURL = ad.ResolveURL(p.BaseURL)
+		ep.FullURL = ad.ResolveURL(baseURL)
 	}
 	return ep
 }
 
-// echoUpstream returns an httptest.Server that answers a probe.Request-shaped
-// body with a 200 whose content echoes back the nonce it was asked for — the
-// mock stand-in for "a real, working provider" used by every test that needs
-// testEndpoint to classify an endpoint as StatusOK now that a bare 200 is no
-// longer enough (see TestTestEndpoint_EchoVerification).
+// echoUpstream returns an httptest.Server that answers a probe.Request- or
+// probe.RoleCompatRequest-shaped body with a 200 whose content echoes back
+// the nonce it was asked for — the mock stand-in for "a real, working
+// provider" used by every test that needs testEndpoint to classify an
+// endpoint as StatusOK now that a bare 200 is no longer enough (see
+// TestTestEndpoint_EchoVerification). The nonce-bearing prompt is always the
+// LAST message: probe.Request sends one "user" message (last == first),
+// probe.RoleCompatRequest (what an openai-protocol testEndpoint now sends)
+// sends a leading "developer" message followed by it.
 func echoUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +53,7 @@ func echoUpstream(t *testing.T) *httptest.Server {
 		}
 		reply := ""
 		if err := json.Unmarshal(body, &req); err == nil && len(req.Messages) > 0 {
-			content := req.Messages[0].Content
+			content := req.Messages[len(req.Messages)-1].Content
 			const prefix = "Reply with exactly this token and nothing else: "
 			if i := strings.Index(content, prefix); i >= 0 {
 				reply = content[i+len(prefix):]
@@ -72,14 +78,15 @@ func TestEnvCheck_DNSFailure(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: "https://this-host-does-not-exist.invalid", api_key: k}}
+  - {name: p1, base_url: {openai: "https://this-host-does-not-exist.invalid"}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := envCheck(context.Background(), cfg, "openai", "p1", cfg.Providers["openai"]["p1"])
+	p1, _ := cfg.ProviderByName("p1")
+	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
 	if r.Status != StatusFail {
 		t.Errorf("status = %s, want fail", r.Status)
 	}
@@ -98,14 +105,15 @@ func TestEnvCheck_UntrustedTLSFails(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: %q, api_key: k}}
+  - {name: p1, base_url: {openai: %q}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := envCheck(context.Background(), cfg, "openai", "p1", cfg.Providers["openai"]["p1"])
+	p1, _ := cfg.ProviderByName("p1")
+	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
 	if r.Status != StatusFail || !strings.Contains(r.Detail, "tls:FAIL") {
 		t.Errorf("result = %+v, want fail with tls:FAIL", r)
 	}
@@ -117,14 +125,15 @@ func TestEnvCheck_EmptyAPIKeyWarns(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: %q, api_key: ""}}
+  - {name: p1, base_url: {openai: %q}, api_key: ""}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := envCheck(context.Background(), cfg, "openai", "p1", cfg.Providers["openai"]["p1"])
+	p1, _ := cfg.ProviderByName("p1")
+	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
 	if r.Status != StatusWarn || !strings.Contains(r.Detail, "api_key:EMPTY") {
 		t.Errorf("result = %+v, want warn with api_key:EMPTY", r)
 	}
@@ -154,14 +163,15 @@ listen: 127.0.0.1:0
 proxy: true
 http_proxy: "http://%s"
 providers:
-  openai: {p1: {base_url: %q, api_key: k}}
+  - {name: p1, base_url: {openai: %q}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, openProxy.Addr().String(), upstream.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := envCheck(context.Background(), cfg, "openai", "p1", cfg.Providers["openai"]["p1"])
+	p1, _ := cfg.ProviderByName("p1")
+	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
 	if !strings.Contains(r.Detail, "proxy:yes") {
 		t.Errorf("detail = %q, want proxy:yes (this provider is configured to go through a proxy)", r.Detail)
 	}
@@ -196,14 +206,15 @@ listen: 127.0.0.1:0
 proxy: true
 http_proxy: "http://%s"
 providers:
-  openai: {p1: {base_url: "http://this-host-does-not-exist.invalid", api_key: k}}
+  - {name: p1, base_url: {openai: "http://this-host-does-not-exist.invalid"}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, openProxy.Addr().String())))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := envCheck(context.Background(), cfg, "openai", "p1", cfg.Providers["openai"]["p1"])
+	p1, _ := cfg.ProviderByName("p1")
+	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
 	if r.Status != StatusOK {
 		t.Errorf("status = %s, want ok (a proxy-only-reachable host must not fail on a direct DNS check it never needs); detail=%q", r.Status, r.Detail)
 	}
@@ -237,9 +248,9 @@ func TestTestEndpoint_StatusClassification(t *testing.T) {
 			cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: %q, api_key: k}}
+  - {name: p1, base_url: {openai: %q}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
@@ -284,9 +295,9 @@ func TestTestEndpoint_EchoVerification(t *testing.T) {
 			cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: %q, api_key: k}}
+  - {name: p1, base_url: {openai: %q}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
@@ -312,9 +323,9 @@ func TestTestEndpoint_NetworkError(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: "http://%s", api_key: k}}
+  - {name: p1, base_url: {openai: "http://%s"}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, addr)))
 	if err != nil {
 		t.Fatal(err)
@@ -329,6 +340,172 @@ models:
 	// a column.
 	if matched, _ := regexp.MatchString(`\(\d+\.\d{3}s\)`, r.Detail); !matched {
 		t.Errorf("detail = %q, want a NN.NNNs latency, not Duration.String()'s default unit-switching format", r.Detail)
+	}
+}
+
+// roleRejectingUpstream mimics a provider that speaks the OpenAI protocol
+// but 400s any request whose first message's role is "developer" — the
+// exact real-world failure mode role_map exists for (OpenAI's o1/o3-series
+// introduced that role; not every self-described-OpenAI-compatible provider
+// accepts it). Any other role gets the usual echoUpstream-style reply, read
+// from the LAST message — probe.RoleCompatRequest's shape is [{role,
+// preamble}, {role: "user", the nonce-echo instruction}].
+func roleRejectingUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || len(req.Messages) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if req.Messages[0].Role == "developer" {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"Unrecognized request argument supplied: role 'developer'"}}`)
+			return
+		}
+		last := req.Messages[len(req.Messages)-1].Content
+		reply := ""
+		const prefix = "Reply with exactly this token and nothing else: "
+		if i := strings.Index(last, prefix); i >= 0 {
+			reply = last[i+len(prefix):]
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%q}}]}`, reply)
+	}))
+}
+
+// TestTestEndpoint_OpenAIDeveloperRole_FailsWithoutRoleMap covers exactly the
+// config mistake this probe shape exists to catch: an openai-protocol
+// endpoint with no role_map, behind a provider that rejects the "developer"
+// role — the single connectivity check must itself fail, with a role_map
+// hint, not report StatusOK the way it would if testEndpoint still probed
+// with plain "user".
+func TestTestEndpoint_OpenAIDeveloperRole_FailsWithoutRoleMap(t *testing.T) {
+	ts := roleRejectingUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: %q}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "openai", "p1", "m") // no RoleMap set
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status != StatusFail {
+		t.Fatalf("status = %s, want fail (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "role_map") {
+		t.Errorf("detail = %q, want a role_map hint", r.Detail)
+	}
+}
+
+// TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap covers the fixed
+// config: the same role-rejecting upstream, but this endpoint's role_map
+// rewrites "developer" to "system" before the request leaves vmr —
+// adapter.RewriteRoles applies it inside ad.BuildRequest, so the upstream
+// never sees "developer" at all.
+func TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap(t *testing.T) {
+	ts := roleRejectingUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: %q}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m], role_map: {developer: system}}]}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "openai", "p1", "m")
+	ep.RoleMap = map[string]string{"developer": "system"}
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status != StatusOK {
+		t.Fatalf("status = %s, want ok (detail=%q)", r.Status, r.Detail)
+	}
+}
+
+// TestTestEndpoint_AnthropicStillProbesWithUser locks in that only the
+// openai-protocol probe shape changed: an anthropic-protocol endpoint hitting
+// the same role-rejecting mock must still pass, because testEndpoint never
+// sends it anything but role "user" — "developer" is an OpenAI-only role, no
+// Anthropic client ever sends it, and there is nothing to check there.
+func TestTestEndpoint_AnthropicStillProbesWithUser(t *testing.T) {
+	ts := roleRejectingUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {anthropic: %q}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: anthropic, provider: p1, models: [m]}]}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "anthropic", "p1", "m")
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status != StatusOK {
+		t.Fatalf("status = %s, want ok (detail=%q) — anthropic endpoints must never be probed with role \"developer\"", r.Status, r.Detail)
+	}
+}
+
+// TestRun_DeveloperRoleIsPlainConnectivityFailure locks in the merged design
+// end to end via Run: a missing role_map on an openai-protocol endpoint
+// surfaces as an ordinary "connect" phase failure — there is no separate
+// phase or second request, "developer role doesn't work" simply IS
+// "connectivity doesn't work" for that endpoint.
+func TestRun_DeveloperRoleIsPlainConnectivityFailure(t *testing.T) {
+	ts := roleRejectingUpstream(t)
+	defer ts.Close()
+
+	cfgPath := writeConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: %q, anthropic: %q}, api_key: k}
+models:
+  vm-openai: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm-anthropic: {endpoints: [{protocol: anthropic, provider: p1, models: [m]}]}
+`, ts.URL, ts.URL))
+
+	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var connOpenAI, connAnthropic Result
+	for _, r := range rep.Results {
+		if r.Phase != "connect" {
+			continue
+		}
+		if strings.HasPrefix(r.Target, "openai/") {
+			connOpenAI = r
+		}
+		if strings.HasPrefix(r.Target, "anthropic/") {
+			connAnthropic = r
+		}
+		if r.Phase == "role" {
+			t.Errorf("got a %q phase result — the merged design has no separate role phase", r.Phase)
+		}
+	}
+	if connOpenAI.Status != StatusFail {
+		t.Errorf("openai connect result = %+v, want fail (no role_map, provider rejects developer)", connOpenAI)
+	}
+	if !strings.Contains(connOpenAI.Detail, "role_map") {
+		t.Errorf("openai connect detail = %q, want a role_map hint", connOpenAI.Detail)
+	}
+	if connAnthropic.Status != StatusOK {
+		t.Errorf("anthropic connect result = %+v, want ok (never probed with role \"developer\")", connAnthropic)
+	}
+	if n := rep.FailCount(); n == 0 {
+		t.Error("FailCount() = 0, want > 0 (missing role_map should be a diagnosable failure)")
 	}
 }
 
@@ -364,15 +541,13 @@ func TestRun_FullReport(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    good: {base_url: %q, api_key: k1}
-    bad:  {base_url: %q, api_key: k2}
+  - {name: good, base_url: {openai: %q}, api_key: k1}
+  - {name: bad, base_url: {openai: %q}, api_key: k2}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: bad, model: m, priority: 0}
-        - {provider: good, model: m, priority: 1}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: bad, models: [m], priority: 0}
+      - {protocol: openai, provider: good, models: [m], priority: 1}
 `, goodUp.URL, badUp.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -463,13 +638,11 @@ func TestRun_ConnectivityResultsSortedByProviderThenModel(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    zulu:  {base_url: %[1]q, api_key: k1}
-    alpha: {base_url: %[1]q, api_key: k2}
+  - {name: zulu, base_url: {openai: %[1]q}, api_key: k1}
+  - {name: alpha, base_url: {openai: %[1]q}, api_key: k2}
 models:
-  openai:
-    vm-a: {endpoints: [{provider: zulu, model: m1}, {provider: alpha, model: m2}]}
-    vm-z: {endpoints: [{provider: alpha, model: m1}]}
+  vm-a: {endpoints: [{protocol: openai, provider: zulu, models: [m1]}, {protocol: openai, provider: alpha, models: [m2]}]}
+  vm-z: {endpoints: [{protocol: openai, provider: alpha, models: [m1]}]}
 `, up.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -511,10 +684,10 @@ func TestRun_ChecksRunConcurrently(t *testing.T) {
 	var providers strings.Builder
 	var models strings.Builder
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(&providers, "    p%d: {base_url: %q, api_key: k}\n", i, slow.URL)
-		fmt.Fprintf(&models, "    vm%d: {endpoints: [{provider: p%d, model: m}]}\n", i, i)
+		fmt.Fprintf(&providers, "  - {name: p%d, base_url: {openai: %q}, api_key: k}\n", i, slow.URL)
+		fmt.Fprintf(&models, "  vm%d: {endpoints: [{protocol: openai, provider: p%d, models: [m]}]}\n", i, i)
 	}
-	cfgPath := writeConfig(t, fmt.Sprintf("listen: 127.0.0.1:0\nproviders:\n  openai:\n%s\nmodels:\n  openai:\n%s", providers.String(), models.String()))
+	cfgPath := writeConfig(t, fmt.Sprintf("listen: 127.0.0.1:0\nproviders:\n%s\nmodels:\n%s", providers.String(), models.String()))
 
 	start := time.Now()
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -536,9 +709,9 @@ func TestRun_NoTestRoutingSkipsConnectivity(t *testing.T) {
 	cfgPath := writeConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: "http://127.0.0.1:1/unreachable", api_key: k}}
+  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: k}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: false})
 	if err != nil {
@@ -561,6 +734,49 @@ models:
 	}
 	if !sawRoute {
 		t.Error("expected at least one route entry")
+	}
+}
+
+// TestRun_ConsistencyIssuesSkipEnvAndConnect locks in the check-gates-
+// diagnose wiring: a config that's structurally valid (BuildSnapshot
+// succeeds) but fails config.Check (here: a missing provider api_key)
+// must skip both Phase 2 (env) and Phase 3 (connect) — real network I/O —
+// entirely, surfacing the issue as its own "check" phase result instead,
+// while the static route preview (no network) still renders.
+func TestRun_ConsistencyIssuesSkipEnvAndConnect(t *testing.T) {
+	cfgPath := writeConfig(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: ""}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`)
+	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var sawCheck, sawRoute bool
+	for _, r := range rep.Results {
+		switch r.Phase {
+		case "env", "connect":
+			t.Errorf("%s phase should be skipped when config.Check finds issues, got %+v", r.Phase, r)
+		case "check":
+			sawCheck = true
+			if r.Status != StatusFail {
+				t.Errorf("check result should be StatusFail, got %+v", r)
+			}
+		case "route":
+			sawRoute = true
+		}
+	}
+	if !sawCheck {
+		t.Error("expected a check phase result for the missing api_key")
+	}
+	if !sawRoute {
+		t.Error("expected the static route preview to still render")
+	}
+	if n := rep.FailCount(); n == 0 {
+		t.Error("FailCount() should be > 0 so cmdDiagnose exits non-zero")
 	}
 }
 
@@ -664,9 +880,9 @@ func TestRun_ProgressReportsPerCheck(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai: {p1: {base_url: %q, api_key: k1}}
+  - {name: p1, base_url: {openai: %q}, api_key: k1}
 models:
-  openai: {vm: {endpoints: [{provider: p1, model: m}]}}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, up.URL))
 
 	var progress strings.Builder

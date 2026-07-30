@@ -1,4 +1,4 @@
-// Ver 2026-07-17 10:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 
 // Integration tests for two features that shipped in the same batch and
 // have shared this file ever since: Anthropic ingress (protocol isolation,
@@ -70,21 +70,17 @@ func dualProtocolYAML(oai, anth1, anth2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  openai:
-    oai: {base_url: %s, api_key: k0}
-  anthropic:
-    a1: {base_url: %s, api_key: ka1}
-    a2: {base_url: %s, api_key: ka2}
+  - {name: oai, base_url: {openai: %s}, api_key: k0}
+  - {name: a1, base_url: {anthropic: %s}, api_key: ka1}
+  - {name: a2, base_url: {anthropic: %s}, api_key: ka2}
 models:
-  openai:
-    vm-openai:
-      endpoints:
-        - {provider: oai, model: model-one, priority: 1}
-  anthropic:
-    vm-anth:
-      endpoints:
-        - {provider: a1, model: real-a, priority: 1}
-        - {provider: a2, model: real-b, priority: 2}
+  vm-openai:
+    endpoints:
+      - {protocol: openai, provider: oai, models: [model-one], priority: 1}
+  vm-anth:
+    endpoints:
+      - {protocol: anthropic, provider: a1, models: [real-a], priority: 1}
+      - {protocol: anthropic, provider: a2, models: [real-b], priority: 2}
 `, extra, oai, anth1, anth2)
 }
 
@@ -163,52 +159,48 @@ func TestProtocolIsolation(t *testing.T) {
 	}
 }
 
-// Nesting providers/models by protocol removes the syntax for mixing
-// protocols within one model entirely: an endpoint can only ever name a
-// provider from its own model's protocol group, so referencing the other
-// group's provider is just "unknown provider" — the same error class as any
-// other typo, not a special case.
+// TestCrossProtocolProviderRefRejectedAtLoad locks in the new schema's
+// equivalent guard: an endpoint-group's protocol must match one of its
+// referenced provider's declared base_url protocols. "anth" only declares
+// an anthropic base_url, so an openai-protocol entry referencing it is
+// rejected — the same "no valid syntax to express this" mismatch the old
+// protocol-nested schema caught via "unknown provider", now caught by
+// "provider has no base_url for protocol".
 func TestCrossProtocolProviderRefRejectedAtLoad(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    oai: {base_url: https://x.example/v1, api_key: k}
-  anthropic:
-    anth: {base_url: https://y.example/v1, api_key: k}
+  - {name: oai, base_url: {openai: https://x.example/v1}, api_key: k}
+  - {name: anth, base_url: {anthropic: https://y.example/v1}, api_key: k}
 models:
-  openai:
-    bad:
-      endpoints:
-        - {provider: oai, model: a}
-        - {provider: anth, model: b}
+  bad:
+    endpoints:
+      - {protocol: openai, provider: oai, models: [a]}
+      - {protocol: openai, provider: anth, models: [b]}
 `
 	_, err := config.Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
-		t.Errorf("want unknown-provider error (cross-protocol ref has no valid syntax), got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no base_url for protocol") {
+		t.Errorf("want a no-base_url-for-protocol error (cross-protocol ref has no valid syntax), got %v", err)
 	}
 }
 
-// A model name can now exist under both protocol groups at once — nesting by
-// protocol means the two entries are looked up independently, no artificial
-// "-a" suffix needed to give one virtual model both an OpenAI and an
-// Anthropic face.
+// A model name can exist under both protocols at once — one models.<name>
+// entry mixes an openai-protocol endpoint-group and an anthropic-protocol
+// one, and BuildSnapshot resolves them independently, no artificial "-a"
+// suffix needed to give one virtual model both an OpenAI and an Anthropic
+// face.
 func TestSameModelNameReachableUnderBothProtocols(t *testing.T) {
 	o, a := newUpstream(t), newAnthUpstream(t)
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    oai: {base_url: %s, api_key: k0}
-  anthropic:
-    anth: {base_url: %s, api_key: ka}
+  - {name: oai, base_url: {openai: %s}, api_key: k0}
+  - {name: anth, base_url: {anthropic: %s}, api_key: ka}
 models:
-  openai:
-    coding:
-      endpoints: [{provider: oai, model: model-one}]
-  anthropic:
-    coding:
-      endpoints: [{provider: anth, model: real-a}]
+  coding:
+    endpoints:
+      - {protocol: openai, provider: oai, models: [model-one]}
+      - {protocol: anthropic, provider: anth, models: [real-a]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 
@@ -293,13 +285,11 @@ func TestConcurrencyGate(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 2
 providers:
-  openai:
-    p: {base_url: %s, api_key: k}
+  - {name: p, base_url: {openai: %s}, api_key: k}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p, model: m}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p, models: [m]}
 `, slow.URL))
 
 	var wg sync.WaitGroup
@@ -339,12 +329,10 @@ func TestConcurrencyWaiterCanceled(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 1
 providers:
-  openai:
-    p: {base_url: %s, api_key: k}
+  - {name: p, base_url: {openai: %s}, api_key: k}
 models:
-  openai:
-    vm:
-      endpoints: [{provider: p, model: m}]
+  vm:
+    endpoints: [{protocol: openai, provider: p, models: [m]}]
 `, slow.URL))
 
 	// Occupy the only slot.

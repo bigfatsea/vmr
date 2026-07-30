@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package main
 
 import (
@@ -21,16 +21,15 @@ import (
 const minimalConfigYAML = `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1:
-      base_url: https://example.com/v1
-      api_key: test-key
+  - name: p1
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
 models:
-  openai:
-    m1:
-      endpoints:
-        - provider: p1
-          model: real-model
+  m1:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [real-model]
 `
 
 func writeTempFile(t *testing.T, name, content string) string {
@@ -59,6 +58,171 @@ func TestCmdCheck_InvalidConfig(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", "listen: not-a-valid-address\n")
 	if err := cmdCheck([]string{"-c", path}); err == nil {
 		t.Error("cmdCheck on an invalid config should return an error")
+	}
+}
+
+// TestCmdCheck_ConsistencyIssueFails locks in that cmdCheck returns an
+// error whenever config.Check finds something — a structurally valid
+// config (Load succeeds) that's still operationally broken (here: a
+// missing provider api_key) must gate `vmr.sh start`/`vmr diagnose` just
+// like a hard Load failure does, not just print a warning and exit 0.
+func TestCmdCheck_ConsistencyIssueFails(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: https://example.com}, api_key: ""}
+models:
+  m1: {endpoints: [{protocol: openai, provider: p1, models: [real-model]}]}
+`)
+	var err error
+	out := captureStdout(t, func() {
+		err = cmdCheck([]string{"-c", path})
+	})
+	if err == nil {
+		t.Error("cmdCheck with a missing provider api_key should return an error")
+	}
+	if !strings.Contains(out, "=== Failed ===") {
+		t.Errorf("cmdCheck output missing Failed summary:\n%s", out)
+	}
+	if !strings.Contains(out, "api_key missing") {
+		t.Errorf("cmdCheck output missing the api_key issue detail:\n%s", out)
+	}
+}
+
+// TestCmdCheck_CleanConfigPrintsOK locks in the success-path rendering: a
+// config with no structural or consistency issues prints "=== OK ===" and
+// cmdCheck returns nil.
+func TestCmdCheck_CleanConfigPrintsOK(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", minimalConfigYAML)
+	var err error
+	out := captureStdout(t, func() {
+		err = cmdCheck([]string{"-c", path})
+	})
+	if err != nil {
+		t.Errorf("cmdCheck on a clean config returned an error: %v", err)
+	}
+	if !strings.Contains(out, "=== OK ===") {
+		t.Errorf("cmdCheck output missing OK summary:\n%s", out)
+	}
+}
+
+// TestCheckLineAlignsValueColumn locks the fixed-width column every `vmr
+// check` section relies on: the value always starts at checkKeyWidth,
+// regardless of indent or key length.
+func TestCheckLineAlignsValueColumn(t *testing.T) {
+	tests := []struct {
+		indent   int
+		key, val string
+	}{
+		{0, "listen", "127.0.0.1:8800"},
+		{2, "api_key", "sk***1234"},
+		{2, "log", "/var/log"},
+	}
+	for _, tt := range tests {
+		line := checkLine(tt.indent, tt.key, tt.val)
+		label := strings.Repeat(" ", tt.indent) + tt.key + ":"
+		if !strings.HasPrefix(line, label) || !strings.HasSuffix(line, tt.val) {
+			t.Fatalf("checkLine(%d, %q, %q) = %q, want prefix %q and suffix %q", tt.indent, tt.key, tt.val, line, label, tt.val)
+		}
+		if col := len(line) - len(tt.val); col != checkKeyWidth {
+			t.Errorf("checkLine(%d, %q, %q): value starts at column %d, want %d", tt.indent, tt.key, tt.val, col, checkKeyWidth)
+		}
+	}
+}
+
+// TestPadLabelOverWidthKeyGetsOneSpace locks the over-width fallback: a
+// label already at or past the target width still gets exactly one
+// separating space rather than being crammed against its value.
+func TestPadLabelOverWidthKeyGetsOneSpace(t *testing.T) {
+	longLabel := strings.Repeat("x", checkKeyWidth) + ":"
+	if got, want := padLabel(longLabel, checkKeyWidth)+"value", longLabel+" value"; got != want {
+		t.Errorf("padLabel with an over-width label = %q, want %q", got, want)
+	}
+}
+
+// TestCmdCheck_SingleProxyLinePerProvider locks in that a provider
+// declaring more than one protocol still renders one "proxy:" line, not a
+// "proxy(openai):"/"proxy(anthropic):" pair — Provider.Proxy is one switch
+// per provider, not per protocol.
+func TestCmdCheck_SingleProxyLinePerProvider(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai: https://example.com/v1, anthropic: https://example.com/anthropic}
+    api_key: test-key
+models:
+  m1: {endpoints: [{protocol: openai, provider: p1, models: [real-model]}]}
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if strings.Contains(out, "proxy(openai)") || strings.Contains(out, "proxy(anthropic)") {
+		t.Errorf("expected one collapsed proxy: line, got per-protocol lines:\n%s", out)
+	}
+	if !strings.Contains(out, checkLine(2, "proxy", "direct")) {
+		t.Errorf("expected a single \"proxy: direct\" line:\n%s", out)
+	}
+}
+
+// TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra locks in the display
+// contract for the model-level capabilities/max_context_tokens base: the
+// model line shows the base as declared, an endpoint that adds its own
+// shows only its own addition/override under "extra_capabilities="/
+// "max_context_tokens=" (not the merged effective set — that's what
+// core.Endpoint.Capabilities is for), and an endpoint declaring neither
+// shows a bare "N. provider/model:" with nothing after the colon.
+func TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
+models:
+  m1:
+    capabilities: [text, tools]
+    max_context_tokens: 128000
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [with-extra]
+        capabilities: [image]
+        max_context_tokens: 512000
+      - protocol: openai
+        provider: p1
+        models: [plain]
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, checkLine(2, "capabilities", "text,tools")) {
+		t.Errorf("model base capabilities not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, checkLine(2, "max_context_tokens", "128000")) {
+		t.Errorf("model base max_context_tokens not rendered:\n%s", out)
+	}
+	wantEndpointLine := padLabel("    1. p1/with-extra:", endpointKeyWidth) + "extra_capabilities=image; max_context_tokens=512000"
+	if !strings.Contains(out, wantEndpointLine) {
+		t.Errorf("endpoint's own extra/override not rendered at column %d:\ngot:  %s\nwant: %q", endpointKeyWidth, out, wantEndpointLine)
+	}
+	if !strings.Contains(out, "2. p1/plain:\n") {
+		t.Errorf("endpoint declaring neither should render a bare label with nothing after the colon:\n%s", out)
+	}
+}
+
+// TestCmdCheck_BlankLineBetweenModels locks in the blank-line separator
+// between consecutive virtual models in the "=== Models ===" section.
+func TestCmdCheck_BlankLineBetweenModels(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
+models:
+  a: {endpoints: [{protocol: openai, provider: p1, models: [m1]}]}
+  b: {endpoints: [{protocol: openai, provider: p1, models: [m2]}]}
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "1. p1/m1:\n\nb:\n") {
+		t.Errorf("expected exactly one blank line between model \"a\" and model \"b\":\n%s", out)
 	}
 }
 
@@ -186,15 +350,13 @@ image_downscale: 512
 audit_retention_days: 30
 probe_mode: active
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: key-aaaa}
-    p2: {base_url: https://b.example/v1, api_key: key-bbbb, proxy: false}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: key-aaaa}
+  - {name: p2, base_url: {openai: https://b.example/v1}, api_key: key-bbbb, proxy: false}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: real-a, priority: 1}
-        - {provider: p2, model: real-b, priority: 2}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [real-a], priority: 1}
+      - {protocol: openai, provider: p2, models: [real-b], priority: 2}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -264,15 +426,13 @@ listen: 127.0.0.1:8800
 proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
-  openai:
-    proxied: {base_url: https://a.example/v1, api_key: k}
-    direct: {base_url: https://b.example/v1, api_key: k, proxy: false}
+  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k, proxy: false}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: proxied, model: m1}
-        - {provider: direct, model: m2}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: proxied, models: [m1]}
+      - {protocol: openai, provider: direct, models: [m2]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -302,11 +462,9 @@ func TestLogConfigSummary_AuthOffAndDefaults(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -346,12 +504,10 @@ func TestLogConfigSummary_ImageDownscaleOverride(t *testing.T) {
 listen: 127.0.0.1:8800
 image_downscale: 1024
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  openai:
-    plain: {endpoints: [{provider: p1, model: m}]}
-    custom: {image_downscale: 256, endpoints: [{provider: p1, model: m}]}
+  plain: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  custom: {image_downscale: 256, endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -385,14 +541,12 @@ func TestLogConfigSummary_MaxContextTokensAndCapabilities(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: declared, max_context_tokens: 128000, capabilities: [text, image, tools]}
-        - {provider: p1, model: bare}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [declared], max_context_tokens: 128000, capabilities: [text, image, tools]}
+      - {protocol: openai, provider: p1, models: [bare]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -422,11 +576,9 @@ func TestProviderProxyLines_Direct(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -446,11 +598,9 @@ func TestProviderProxyLines_ProxyFalse(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k, proxy: false}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: false}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -468,11 +618,9 @@ listen: 127.0.0.1:0
 proxy: true
 https_proxy: http://user:pass@127.0.0.1:7890
 providers:
-  openai:
-    p1: {base_url: https://a.example/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -521,11 +669,9 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  openai:
-    p1: {base_url: https://example.com/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -555,11 +701,9 @@ func TestCmdStatus_ServerNotRunning(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:1
 providers:
-  openai:
-    p1: {base_url: https://example.com/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	if err := cmdStatus([]string{"-c", path}); err == nil {

@@ -1,4 +1,4 @@
-// Ver 2026-07-19, by Claude
+// Ver 2026-07-30, by Sonnet 5
 //
 // Direct unit tests for the router's Serve failover loop, copyFlush
 // watchdog, parseRetryAfter, IngressPath, and 3xx redirect passthrough.
@@ -44,6 +44,25 @@ func mustSnapshot(t *testing.T, cfg *config.Config) *Snapshot {
 	return snap
 }
 
+// endpointFor rebuilds the *core.Endpoint a config's models.<name>.endpoints[0]
+// resolves to, the same way BuildSnapshot would — used by tests that need to
+// probe rt.Health directly (Available/HealthKey) rather than through Serve.
+func endpointFor(t *testing.T, cfg *config.Config, protocol, virtualModel string) *core.Endpoint {
+	t.Helper()
+	eg := cfg.Models[virtualModel].Endpoints[0]
+	p, ok := cfg.ProviderByName(eg.Provider)
+	if !ok {
+		t.Fatalf("provider %q not found", eg.Provider)
+	}
+	return &core.Endpoint{
+		Provider:    eg.Provider,
+		AdapterType: protocol,
+		BaseURL:     p.BaseURL[protocol],
+		APIKey:      p.APIKey,
+		Model:       eg.Models[0],
+	}
+}
+
 // mockUpstream is a scriptable upstream for router-level Serve tests.
 type mockUpstream struct {
 	srv    *httptest.Server
@@ -86,17 +105,15 @@ func TestServe_MultiEndpointFailoverSequence(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
-    p3: {base_url: %s, api_key: k3}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p3, base_url: {openai: %s}, api_key: k3}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
-        - {provider: p2, model: m2}
-        - {provider: p3, model: m3}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, provider: p3, models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)
@@ -123,11 +140,9 @@ func TestServe_ModelNotFound(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: https://example.com/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  openai:
-    real: {endpoints: [{provider: p1, model: m}]}
+  real: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -147,15 +162,11 @@ func TestServe_WrongProtocolHint(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: https://example.com/v1, api_key: k}
-  anthropic:
-    p2: {base_url: https://example.com/v1, api_key: k}
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p2, base_url: {anthropic: https://example.com/v1}, api_key: k}
 models:
-  openai:
-    coding: {endpoints: [{provider: p1, model: m}]}
-  anthropic:
-    claude: {endpoints: [{provider: p2, model: m}]}
+  coding: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  claude: {endpoints: [{protocol: anthropic, provider: p2, models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -177,11 +188,9 @@ func TestServe_NoAvailableEndpoints(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k}
+  - {name: p1, base_url: {openai: %s}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -317,11 +326,9 @@ func TestRedirect_NotFollowed(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k}
+  - {name: p1, base_url: {openai: %s}, api_key: k}
 models:
-  openai:
-    vm: {endpoints: [{provider: p1, model: m}]}
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, redirected.srv.URL))
 
 	rt := New(nil)
@@ -351,15 +358,13 @@ func TestServe_AllFailReturnsLastUpstreamError(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
-        - {provider: p2, model: m2}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -385,15 +390,13 @@ func TestServe_ClientErrorDoesNotFailover(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
-        - {provider: p2, model: m2}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -417,15 +420,13 @@ func TestServe_ContentFlagFailsOverWithoutCooldown(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
-    p2: {base_url: %s, api_key: k2}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
-        - {provider: p2, model: m2}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -439,16 +440,7 @@ models:
 		t.Errorf("endpoint=%s, want openai/p2/m2", got)
 	}
 	// u1 must still be available (no cooldown applied for content flags).
-	key := rt.Health // just verify the endpoint isn't in cooldown
-	_ = key
-	ep := cfg.Models["openai"]["vm"].Endpoints[0]
-	endpoint := &core.Endpoint{
-		Provider:    ep.Provider,
-		AdapterType: "openai",
-		BaseURL:     cfg.Providers["openai"][ep.Provider].BaseURL,
-		APIKey:      cfg.Providers["openai"][ep.Provider].APIKey,
-		Model:       ep.Model,
-	}
+	endpoint := endpointFor(t, cfg, "openai", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("u1 should still be available after a content flag (no cooldown)")
 	}
@@ -467,13 +459,11 @@ func TestServe_BuildErrorDoesNotCooldownEndpoint(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: m1}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -490,14 +480,7 @@ models:
 		t.Errorf("upstream hits=%d, want 0 (BuildRequest must fail before any HTTP call)", u.hits)
 	}
 
-	ep := cfg.Models["openai"]["vm"].Endpoints[0]
-	endpoint := &core.Endpoint{
-		Provider:    ep.Provider,
-		AdapterType: "openai",
-		BaseURL:     cfg.Providers["openai"][ep.Provider].BaseURL,
-		APIKey:      cfg.Providers["openai"][ep.Provider].APIKey,
-		Model:       ep.Model,
-	}
+	endpoint := endpointFor(t, cfg, "openai", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("endpoint should still be available after a build error (no cooldown)")
 	}

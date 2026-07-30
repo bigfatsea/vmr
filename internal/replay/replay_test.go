@@ -1,4 +1,4 @@
-// Ver 2026-07-13 19:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 package replay
 
 import (
@@ -31,25 +31,22 @@ func writeConfig(t *testing.T, dir, upstreamURL string, withModel bool) string {
 	if withModel {
 		models = `
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: upstream-model}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [upstream-model]}
 `
 	} else {
 		models = `
 models:
-  openai:
-    other:
-      endpoints:
-        - {provider: p1, model: upstream-model}
+  other:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [upstream-model]}
 `
 	}
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: %q, api_key: real-provider-key}
+  - {name: p1, base_url: {openai: %q}, api_key: real-provider-key}
 `, upstreamURL+"/v1") + models
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {

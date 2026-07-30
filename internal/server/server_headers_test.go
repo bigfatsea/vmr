@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // Tests for the header pass-through policy: "default pass + small
 // blocklist" — forward every client header except the ones that would
@@ -25,13 +25,11 @@ func oneProviderYAML(u string) string {
 	return `
 listen: 127.0.0.1:0
 providers:
-  openai:
-    p1: {base_url: ` + u + `, api_key: k1}
+  - {name: p1, base_url: {openai: ` + u + `}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: upstream-model}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [upstream-model]}
 `
 }
 
@@ -355,13 +353,11 @@ func TestHeaders_AnthropicVersionNotDuplicated(t *testing.T) {
 	ts := newRouterServer(t, `
 listen: 127.0.0.1:0
 providers:
-  anthropic:
-    p1: {base_url: `+u.srv.URL+`, api_key: k1}
+  - {name: p1, base_url: {anthropic: `+u.srv.URL+`}, api_key: k1}
 models:
-  anthropic:
-    vm:
-      endpoints:
-        - {provider: p1, model: upstream-model}
+  vm:
+    endpoints:
+      - {protocol: anthropic, provider: p1, models: [upstream-model]}
 `)
 
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader([]byte(`{"model":"vm"}`)))

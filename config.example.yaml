@@ -1,10 +1,35 @@
-# Ver 2026-07-24 23:20, by Sonnet 5
+# Ver 2026-07-30 12:00, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
-# providers = what you have; models = what clients see and in which order to use it.
-# Both are nested protocol -> name: the outer key is the adapter/protocol
-# ("openai" | "anthropic"), so a model's endpoints can only ever reference a
-# provider from its own protocol group — mixing protocols in one model has no
-# syntax to write, rather than being a config error to catch.
+# providers = what you have (a flat list of accounts); models = what clients see
+# and in which order to use it.
+#
+# providers is a flat list: one entry per upstream account, however many of
+# the two ingress protocols ("openai" | "anthropic") that account actually
+# speaks — base_url is itself keyed by protocol, so the same account (same
+# api_key, same proxy policy) can back both surfaces from one entry instead
+# of being declared twice.
+#
+# models is keyed by virtual-model name only. A virtual model's own top-level
+# `capabilities`/`max_context_tokens` are the *base* shared by every endpoint
+# under it — set once instead of repeating the same declaration on every
+# try-order candidate (see the "agent" example below). Each entry under a
+# model's `endpoints:` list is one try-order candidate: it names its own
+# protocol (which ingress can reach it — POST /v1/chat/completions for
+# "openai", POST /v1/messages for "anthropic"), a provider (resolved by name
+# against the providers list above), and a `models:` list of upstream model
+# names that all share this entry's capabilities/max_context_tokens/
+# role_map/sticky_ttl/priority — each name expands into its own independent,
+# individually health-tracked endpoint, in list order. An entry's own
+# `capabilities` is *additive* to the model's base (union — declare only
+# what this specific entry adds beyond the shared floor); its own
+# `max_context_tokens` *overrides* the base instead when set (a single
+# number can't be unioned). A virtual model name can mix protocols: give it
+# one endpoint-group entry with protocol: openai and another with protocol:
+# anthropic, and it becomes reachable — with potentially different upstream
+# candidates — from both ingress protocols at once (see the "agent" example
+# below). Mixing protocols within one endpoint-group entry has no syntax to
+# express, rather than being a config error to catch: each entry is exactly
+# one protocol.
 
 listen: 127.0.0.1:8800
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
@@ -71,98 +96,140 @@ providers:
   # surface as "v1" (e.g. Volcengine's coding-plan endpoint uses /v3)
   # are exactly why: hardcoding "/v1" into the suffix would silently
   # produce the wrong URL for them.
-  openai:
-    minimax:
-      base_url: https://api.minimaxi.com/v1
-      api_key: ${MINIMAX_PLAN_KEY}
-      # proxy: false               # no-op here — the recommended baseline (global
-      #                            # `proxy` absent/false) is already direct-by-default.
-      #                            # Only needed if you flip the global default to true
-      #                            # and this domestic provider needs to opt back out.
-    openrouter:
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
-      proxy: true                  # per-provider switch: true = always go through
-                                    # https_proxy/http_proxy above, whatever the global
-                                    # `proxy` default says (recommended way to opt a
-                                    # foreign provider in); false = always direct; absent
-                                    # = follow the global `proxy` default. No env
-                                    # fallback; true with no matching global proxy URL
-                                    # fails validation. YAML 1.2: write true/false, not
-                                    # on/off.
-    deepseek:
-      base_url: https://api.deepseek.com/v1
-      api_key: ${DEEPSEEK_API_KEY}
-    # A provider whose API doesn't accept all OpenAI roles can remap them:
-    # role_map is a plain old→new mapping applied to "role" values inside the
-    # top-level "messages" array before the body is sent upstream. The canonical
-    # use case: some providers (e.g. DashScope/Qianwen) reject the "developer"
-    # role OpenAI introduced for o1/o3-series models — mapping it back to "system"
-    # makes those clients work without any client-side change. Only the specific
-    # roles listed are affected; every other byte of the request is preserved.
-    # dashscope:
-    #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    #   api_key: ${DASHSCOPE_PLAN_KEY}
-    #   role_map:
-    #     developer: system
-  # Anthropic-protocol providers: callers use POST /v1/messages. Same short
-  # names as above are reused on purpose — nesting by protocol means
-  # "openrouter" here and "openrouter" under providers.openai are two
-  # unambiguous, independent entries (same account, different API surface).
-  anthropic:
-    minimax:
-      base_url: https://api.minimaxi.com/anthropic/v1
-      api_key: ${MINIMAX_PLAN_KEY}
-    deepseek:
-      base_url: https://api.deepseek.com/anthropic/v1
-      api_key: ${DEEPSEEK_API_KEY}
-    openrouter: # OpenRouter also speaks Anthropic; same base, /messages appended
-      base_url: https://openrouter.ai/api/v1
-      api_key: ${OPENROUTER_API_KEY}
+  #
+  # base_url declares at least one protocol, up to both — MiniMax speaks
+  # both surfaces on the same account, so one entry covers it instead of
+  # two (the old format's providers.openai.minimax / providers.anthropic.minimax
+  # duplication). A models.<name> endpoint-group's own `protocol:` picks
+  # which of these a given try-order entry actually uses.
+  - name: minimax
+    base_url: {openai: https://api.minimaxi.com/v1, anthropic: https://api.minimaxi.com/anthropic/v1}
+    api_key: ${MINIMAX_PLAN_KEY}
+    # proxy: false               # no-op here — the recommended baseline (global
+    #                            # `proxy` absent/false) is already direct-by-default.
+    #                            # Only needed if you flip the global default to true
+    #                            # and this domestic provider needs to opt back out.
+
+  - name: openrouter
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}  # OpenRouter speaks both surfaces on the same base
+    api_key: ${OPENROUTER_API_KEY}
+    proxy: true                  # per-provider switch: true = always go through
+                                  # https_proxy/http_proxy above, whatever the global
+                                  # `proxy` default says (recommended way to opt a
+                                  # foreign provider in); false = always direct; absent
+                                  # = follow the global `proxy` default. No env
+                                  # fallback; true with no matching global proxy URL
+                                  # fails validation. YAML 1.2: write true/false, not
+                                  # on/off.
+
+  - name: deepseek
+    base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}
+    api_key: ${DEEPSEEK_API_KEY}
+
+  # A provider whose API doesn't accept all OpenAI roles can have it rewritten
+  # per endpoint-group (models.<name>.endpoints[].role_map below) — a plain
+  # old->new mapping applied to "role" values inside the top-level "messages"
+  # array before the body is sent upstream. The canonical use case: some
+  # providers (e.g. DashScope/Qianwen) reject the "developer" role OpenAI
+  # introduced for o1/o3-series models — mapping it back to "system" makes
+  # those clients work without any client-side change. role_map lives on the
+  # endpoint-group rather than the provider: the same account can back several
+  # virtual models with different upstream model families, and not all of
+  # them necessarily need the same rewrite. Only the specific roles listed
+  # are affected; every other byte of the request is preserved.
+  # - name: dashscope
+  #   base_url: {openai: https://dashscope.aliyuncs.com/compatible-mode/v1}
+  #   api_key: ${DASHSCOPE_PLAN_KEY}
 
 models:
-  openai:
-    coding:
-      # strategy defaults to [priority]; endpoints below have no explicit
-      # priority — ties (everyone defaults to 0) keep this file order, so
-      # listing them in the order you want them tried is enough.
-      #
-      # capabilities/max_context_tokens (condition routing) and sticky_ttl
-      # (Sticky Model) are all optional and default to "unconstrained" /
-      # "inherit the global default" — omitting them, as every endpoint
-      # below does, is identical to how this file behaved before these
-      # fields existed. sticky itself (session affinity) defaults to true
-      # per virtual model; see the "cheap" model below for the opt-out and
-      # per-endpoint override forms. Full reference: docs/UserGuide.md
-      # "Condition-based routing" / "Sticky Model".
-      endpoints:
-        - {provider: openrouter, model: z-ai/glm-5.2}
-        - {provider: deepseek, model: deepseek-v4-pro}
+  coding:
+    # strategy defaults to [priority]; endpoints below have no explicit
+    # priority — ties (everyone defaults to 0) keep this file order, so
+    # listing them in the order you want them tried is enough.
+    #
+    # capabilities/max_context_tokens (condition routing) and sticky_ttl
+    # (Sticky Model) are all optional and default to "unconstrained" /
+    # "inherit the global default" — omitting them, as every endpoint
+    # below does, is identical to how this file behaved before these
+    # fields existed. sticky itself (session affinity) defaults to true
+    # per virtual model; see the "cheap" model below for the opt-out and
+    # per-endpoint override forms. Full reference: docs/UserGuide.md
+    # "Condition-based routing" / "Sticky Model".
+    endpoints:
+      - protocol: openai
+        provider: openrouter
+        models: [z-ai/glm-5.2]
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-v4-pro]
 
-    cheap:
-      # image_downscale: 0        # per-model override example: force this model
-                                   # to skip downscaling even if the global
-                                   # setting above is on (omit to inherit it)
-      # sticky: false              # opt out of session affinity for a model that's
-                                    # genuinely one-shot (no multi-turn value to protect)
-      endpoints:
-        - provider: minimax
-          model: MiniMax-M3
-          # capabilities: [text, image, tools]   # declare once you want vmr to skip this
-          # max_context_tokens: 1000000          # endpoint for requests it can't actually serve
-        - {provider: openrouter, model: tencent/hy3-preview}
-        - provider: deepseek
-          model: deepseek-v4-flash
-          # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
-                              # override the global sticky_ttl for just this endpoint
+  cheap:
+    # image_downscale: 0        # per-model override example: force this model
+                                 # to skip downscaling even if the global
+                                 # setting above is on (omit to inherit it)
+    # sticky: false              # opt out of session affinity for a model that's
+                                  # genuinely one-shot (no multi-turn value to protect)
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        # capabilities: [image]        # this model has no base capabilities above, so this
+        #                              # endpoint's effective set is exactly [image] alone
+        # max_context_tokens: 1000000  # declare once you want vmr to skip this endpoint
+        #                              # for requests it can't actually serve
+      - protocol: openai
+        provider: openrouter
+        # A models: list with more than one name expands into that many
+        # independent, individually health-tracked endpoints sharing this
+        # entry's provider/protocol/capabilities/priority — tried in list
+        # order (each still subject to its own failover/health state).
+        models: [tencent/hy3-preview, qwen/qwen3-max]
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-v4-flash]
+        # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
+                            # override the global sticky_ttl for just this endpoint
 
-  # Anthropic-protocol virtual models: reachable only via POST /v1/messages.
-  # "claude" only needs to exist here; nothing under models.openai references
-  # it, and models.openai.coding above can't accidentally reach these
-  # providers even by typo, since anthropic.* isn't in its lookup scope.
-  anthropic:
-    claude:
-      endpoints:
-        - {provider: minimax, model: MiniMax-M3}
-        - {provider: deepseek, model: deepseek-v4-pro}
-        - {provider: openrouter, model: minimax/minimax-m3} # any OpenRouter model, spoken over Anthropic protocol
+  # "agent" mixes both ingress protocols under one virtual model name: the
+  # openai-protocol entry is reachable only from POST /v1/chat/completions,
+  # the anthropic-protocol entry only from POST /v1/messages — a client on
+  # either protocol can ask for "agent" and get its own independent try-order
+  # list, sharing nothing but the name.
+  #
+  # capabilities/max_context_tokens here are the *base* every endpoint below
+  # inherits: both backing models support at least text+tools up to 256k
+  # tokens, so that's declared once instead of on each entry. The minimax
+  # endpoint's own capabilities: [...] list ADDS to the base (union — its
+  # effective set is text,tools,image,audio,video,thinking, not just the
+  # four listed here) and its own max_context_tokens OVERRIDES the base to
+  # 512000 for that endpoint alone; the openrouter entry declares neither,
+  # so it simply inherits the base as-is.
+  agent:
+    capabilities: [text, tools]
+    max_context_tokens: 256000
+    endpoints:
+      - protocol: openai
+        provider: openrouter
+        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]
+      - protocol: anthropic
+        provider: minimax
+        models: [MiniMax-M3]
+        max_context_tokens: 512000
+        capabilities: [image, audio, video, thinking]
+
+  # Anthropic-only virtual model: reachable only via POST /v1/messages.
+  # "claude" needs no openai-protocol entry — nothing on the openai side
+  # references it, and a request for it over POST /v1/chat/completions
+  # simply finds no route, since that ingress only ever looks at
+  # protocol: openai entries.
+  claude:
+    endpoints:
+      - protocol: anthropic
+        provider: minimax
+        models: [MiniMax-M3]
+      - protocol: anthropic
+        provider: deepseek
+        models: [deepseek-v4-pro]
+      - protocol: anthropic
+        provider: openrouter
+        models: [minimax/minimax-m3] # any OpenRouter model, spoken over Anthropic protocol

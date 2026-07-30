@@ -1,4 +1,4 @@
-// Ver 2026-07-13 04:00, by Sonnet 5
+// Ver 2026-07-30, by Sonnet 5
 //
 // Liveness tests: no upstream behavior may park a request forever.
 // ResponseHeaderTimeout covers time-to-headers; these tests pin down the two
@@ -64,13 +64,11 @@ func TestNonSSEBodyStallAborts(t *testing.T) {
 listen: 127.0.0.1:0
 timeouts: {stream_idle: 300ms}
 providers:
-  openai:
-    p1: {base_url: %s, api_key: k1}
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
-  openai:
-    vm:
-      endpoints:
-        - {provider: p1, model: model-one}
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [model-one]}
 `, u.URL)
 	ts := newRouterServer(t, yaml)
 

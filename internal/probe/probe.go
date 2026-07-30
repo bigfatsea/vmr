@@ -49,6 +49,39 @@ func Request(model string) (body json.RawMessage, nonce string) {
 	return b, nonce
 }
 
+// RoleCompatRequest builds a two-message probe: a leading message under role
+// (e.g. "developer", the role OpenAI's o1/o3-series introduced that some
+// self-described-OpenAI-compatible providers reject outright — see
+// config.example.yaml's role_map), followed by an ordinary "user" message
+// asking for the nonce echo. Two messages, not Request's single one: some
+// providers reject a request whose ONLY message isn't role "user" regardless
+// of what that other role is — a message-array-shape rejection that has
+// nothing to do with role support, and Request's single-message shape can't
+// tell the two apart. A leading role/user pair is also simply what every
+// real client sends (a system/developer preamble followed by a user turn),
+// so this is the shape actually worth validating end to end. Sending it
+// through the exact same adapter.BuildRequest/RoleMap path real traffic uses
+// is how `vmr diagnose` verifies a provider actually accepts role, or that a
+// configured role_map correctly rewrites it before the request ever leaves
+// vmr — see internal/diagnose's testEndpointRole. Only that one-shot
+// diagnostic calls this; the runtime active health probe intentionally
+// stays on Request's minimal single-message shape.
+func RoleCompatRequest(model, role string) (body json.RawMessage, nonce string) {
+	nonce = newNonce()
+	b, err := json.Marshal(map[string]any{
+		"model":      model,
+		"max_tokens": 300,
+		"messages": []map[string]string{
+			{"role": role, "content": "You are a helpful assistant."},
+			{"role": "user", "content": "Reply with exactly this token and nothing else: " + nonce},
+		},
+	})
+	if err != nil {
+		return json.RawMessage(`{}`), nonce
+	}
+	return b, nonce
+}
+
 // newNonce returns a short, effectively-unique token. It doesn't need to be
 // cryptographically unpredictable — only distinct enough that seeing it in a
 // response body is proof this response was generated for this request, not
