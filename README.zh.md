@@ -72,7 +72,12 @@ Anthropic 客户端 ──(/v1/messages)──────────┘       
 
 ## 快速开始
 
-从 [最新 Release](https://github.com/bigfatsea/vmr/releases/latest) 下载对应平台的预编译二进制（darwin/linux，amd64/arm64）——不需要装 Go 工具链。
+```bash
+# macOS
+brew install bigfatsea/tap/vmr
+```
+
+或者从 [最新 Release](https://github.com/bigfatsea/vmr/releases/latest) 下载对应平台的预编译二进制（darwin/linux，amd64/arm64）——不需要装 Go 工具链。
 
 <details>
 <summary>也可以从源码构建</summary>

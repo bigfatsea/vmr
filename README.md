@@ -72,7 +72,12 @@ This is real output, not a mockup — from a tiny synthetic session checked into
 
 ## Quick start
 
-Download a prebuilt binary for your platform from the [latest release](https://github.com/bigfatsea/vmr/releases/latest) (darwin/linux, amd64/arm64) — no Go toolchain required.
+```bash
+# macOS
+brew install bigfatsea/tap/vmr
+```
+
+Or download a prebuilt binary for your platform from the [latest release](https://github.com/bigfatsea/vmr/releases/latest) (darwin/linux, amd64/arm64) — no Go toolchain required.
 
 <details>
 <summary>Build from source instead</summary>
