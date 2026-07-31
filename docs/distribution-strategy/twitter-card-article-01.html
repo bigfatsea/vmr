@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200,height=675">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1200px; height: 675px;
+  background: linear-gradient(135deg, #0a0e27 0%, #141832 40%, #1a1040 100%);
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative;
+}
+.card {
+  width: 1100px; height: 590px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 24px;
+  padding: 60px 70px;
+  position: relative;
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.badge {
+  display: inline-block;
+  background: rgba(99, 179, 237, 0.15);
+  border: 1px solid rgba(99, 179, 237, 0.3);
+  color: #63b3ed;
+  font-size: 18px; font-weight: 600;
+  padding: 6px 20px; border-radius: 20px;
+  letter-spacing: 0.5px;
+}
+h1 {
+  color: #f7fafc; font-size: 48px; font-weight: 800;
+  line-height: 1.35; letter-spacing: -0.5px;
+  margin-top: 20px;
+}
+h1 span.highlight {
+  background: linear-gradient(135deg, #63b3ed 0%, #b794f4 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.steps {
+  display: flex; gap: 30px; margin-top: 10px;
+}
+.step {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px; padding: 28px 24px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.step .num {
+  font-size: 32px; font-weight: 800;
+  background: linear-gradient(135deg, #63b3ed, #b794f4);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.step .label {
+  color: #e2e8f0; font-size: 21px; font-weight: 700; margin-top: 8px;
+}
+.step .desc {
+  color: #a0aec0; font-size: 15px; margin-top: 6px; line-height: 1.5;
+}
+.footer {
+  display: flex; justify-content: space-between; align-items: flex-end;
+}
+.tagline {
+  color: #718096; font-size: 16px;
+}
+.cta {
+  color: #a0aec0; font-size: 16px;
+}
+.cta code {
+  background: rgba(255,255,255,0.08); color: #68d391;
+  padding: 4px 12px; border-radius: 8px; font-size: 15px;
+}
+.dot-pattern {
+  position: absolute; top: 0; right: 0; width: 300px; height: 300px;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 20px 20px; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="dot-pattern"></div>
+  <div>
+    <div class="badge">🔍 Agent 运行可见性</div>
+    <h1>我的 Agent 跑了 50 轮任务，<br>我用 <span class="highlight">VMR</span> 看清了每一步</h1>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="num">01</div>
+      <div class="label">黑匣子审计</div>
+      <div class="desc">两层完整字节记录<br>客户端↔上游，原始事实</div>
+    </div>
+    <div class="step">
+      <div class="num">02</div>
+      <div class="label">任务叙事重建</div>
+      <div class="desc">自动还原 50 轮执行流程<br>每一步的上下文和工具调用</div>
+    </div>
+    <div class="step">
+      <div class="num">03</div>
+      <div class="label">物理级回放</div>
+      <div class="desc">原样重放任一条历史请求<br>复现上游 Bug &amp; 向中转商举证</div>
+    </div>
+  </div>
+  <div class="footer">
+    <div class="tagline">开源 · Go 单二进制 · 零依赖 · 即装即用</div>
+    <div class="cta">brew install <code>bigfatsea/tap/vmr</code></div>
+  </div>
+</div>
+</body>
+</html>
