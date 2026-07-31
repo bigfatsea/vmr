@@ -1,4 +1,4 @@
-# Ver 2026-07-20 08:00, by Sonnet 5
+# Ver 2026-07-31 17:00, by Sonnet 5
 
 # Binaries
 /vmr
@@ -32,6 +32,7 @@ coverage.html
 # Audit data (may contain full conversation bodies — never commit)
 *.jsonl
 *.jsonl.zst
+!/examples/*.jsonl
 
 # Runtime logs (vmr.sh daemon + audit) and image-downscale cache — only
 # populated here as internal/rundir's last-resort fallback, reached when
