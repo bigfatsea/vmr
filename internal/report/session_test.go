@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/audit"
+	"vmr/internal/i18n"
 )
 
 // sseToolCall builds a minimal OpenAI SSE stream that calls one tool and
@@ -306,7 +307,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
 	}
 	out := filepath.Join(dir, "details")
-	if n, err := WriteDetails([]string{src}, out, a, nil); err != nil {
+	if n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatalf("n = %d, want 1", n)
@@ -320,7 +321,7 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(t.TempDir(), "details")
-	n, err := WriteDetails([]string{path}, dir, a, nil)
+	n, err := WriteDetails([]string{path}, dir, a, nil, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,10 +336,10 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"**会话 s01** · **任务 t02**",
-		"🆕 #7 user",       // per-message emoji on the increment
-		"换个方向",            // NewInstruction still surfaces in meta line
-		"本轮增量（相对上一轮,+5 条", // footer summary on the message list (5 msgs in this r3 delta)
+		"**Session s01** · **Task t02**",
+		"🆕 #7 user", // per-message emoji on the increment
+		"换个方向",      // NewInstruction still surfaces in meta line
+		"This turn's increment (vs. the previous turn, +5", // footer summary on the message list (5 msgs in this r3 delta)
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("r3 detail missing %q", want)

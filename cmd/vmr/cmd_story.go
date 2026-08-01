@@ -1,4 +1,4 @@
-// Ver 2026-07-30 21:00, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 package main
 
@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story"
 	"vmr/internal/story/profile"
 )
@@ -76,7 +77,13 @@ func cmdStory(args []string) error {
 	llmModel := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run")
 	llmKey := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured")
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
+	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
+	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	lang, err := resolveLanguage(*langFlag, *reportConfigPath, os.Stdout)
+	if err != nil {
 		return err
 	}
 	llmOpts, err := resolveLLMOptions(*llmAddr, *llmModel, *llmKey, *llmDryRun)
@@ -98,7 +105,7 @@ func cmdStory(args []string) error {
 	}
 	fmt.Printf("%d lineage(s), %d ungrouped record(s), %d unparseable record(s)\n", len(g.Lineages), len(g.Ungrouped), g.NoBody)
 	if *showUngrouped {
-		printUngrouped(g.Ungrouped)
+		printUngrouped(g.Ungrouped, lang)
 	}
 	firstPath := paths[0]
 
@@ -117,19 +124,19 @@ func cmdStory(args []string) error {
 		if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
 			return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
 		}
-		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, *includePartial, *outDir, llmOpts, paths)
+		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, *includePartial, *outDir, llmOpts, paths, lang)
 	}
 	if *journeyArg != "" {
 		target, _, err := resolveJourneyID(cands, byIdx, *journeyArg)
 		if err != nil {
 			return err
 		}
-		return renderJourney(target, byIdx, firstPath, prof, *includePartial, *outDir)
+		return renderJourney(target, byIdx, firstPath, prof, *includePartial, *outDir, lang)
 	}
 	if *renderAll {
-		return renderAllJourneys(cands, byIdx, firstPath, prof, *includePartial, *outDir)
+		return renderAllJourneys(cands, byIdx, firstPath, prof, *includePartial, *outDir, lang)
 	}
-	return listJourneys(cands, byIdx, g, firstPath, prof, *includePartial)
+	return listJourneys(cands, byIdx, g, firstPath, prof, *includePartial, lang)
 }
 
 // resolveJourneyID finds the candidate chain whose ID (design doc §11's
@@ -147,7 +154,8 @@ func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage
 	return nil, nil, fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", idPrefix)
 }
 
-func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool) error {
+func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g *ctxgraph.Graph, firstPath string, prof profile.Profile, includePartial bool, lang i18n.Lang) error {
+	t := i18n.CLI(lang)
 	excluded := len(g.Lineages) - len(cands)
 	fmt.Printf("%d candidate journey(s) (%d total lineage(s), %d single-request/scheduled excluded or absorbed into a stitched chain):\n\n", len(cands), len(g.Lineages), excluded)
 
@@ -176,7 +184,7 @@ func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g 
 	for i, r := range toShow {
 		chains[i] = r.chain
 	}
-	titles, err := story.PreviewTitles(chains, prof)
+	titles, err := story.PreviewTitles(chains, prof, lang)
 	if err != nil {
 		return err
 	}
@@ -184,10 +192,10 @@ func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g 
 	for _, r := range toShow {
 		mark := ""
 		if r.partial {
-			mark = " [断头]"
+			mark = t.HeadTruncatedMark
 		}
 		if len(r.chain) > 1 {
-			mark += fmt.Sprintf(" [缝合×%d]", len(r.chain))
+			mark += t.StitchedMark(len(r.chain))
 		}
 		head, tail := r.chain[0], r.chain[len(r.chain)-1]
 		first, last := head.Manifests[0], tail.Manifests[len(tail.Manifests)-1]
@@ -195,14 +203,12 @@ func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g 
 		for _, cl := range r.chain {
 			steps += len(cl.Manifests)
 		}
-		fmt.Printf("  %s%-6s %3d 轮  %s → %s  %s\n",
-			story.ID(r.chain), mark, steps,
-			first.TS.Format("01-02 15:04"), last.TS.Format("15:04"), titles[r.l])
+		fmt.Print(t.ListLine(story.ID(r.chain), mark, steps, first.TS.Format("01-02 15:04"), last.TS.Format("15:04"), titles[r.l]))
 	}
 	if skippedPartial > 0 {
-		fmt.Printf("\n%d 个断头 journey 已跳过（-include-partial 显示；见设计文档 §11 D1）\n", skippedPartial)
+		fmt.Print(t.SkippedPartialNote(skippedPartial))
 	}
-	fmt.Printf("\n用 -journey <id前缀> 渲染其中一个\n")
+	fmt.Print(t.RenderHint)
 	return nil
 }
 
@@ -214,30 +220,32 @@ const maxUngroupedShown = 10
 // printUngrouped prints the source location of the first few ungrouped
 // manifests, so -show-ungrouped gives an operator somewhere to start
 // looking instead of just a bare count.
-func printUngrouped(ms []*ctxgraph.Manifest) {
+func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 	if len(ms) == 0 {
 		return
 	}
+	t := i18n.CLI(lang)
 	n := len(ms)
 	if n > maxUngroupedShown {
 		n = maxUngroupedShown
 	}
-	fmt.Printf("  前 %d 条未归组记录:\n", n)
+	fmt.Print(t.UngroupedHeader(n))
 	for _, m := range ms[:n] {
 		fmt.Printf("    %s:%d  ts=%s\n", m.Path, m.Line, m.TS.Format("01-02 15:04:05"))
 	}
 	if len(ms) > n {
-		fmt.Printf("    ... 还有 %d 条\n", len(ms)-n)
+		fmt.Print(t.UngroupedMore(len(ms) - n))
 	}
 }
 
-func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang) error {
+	t := i18n.CLI(lang)
 	chain := ctxgraph.ChainFrom(target, byIdx)
 	partial := story.IsPartialHead(chain, firstPath)
 	if partial && !includePartial {
 		return fmt.Errorf("journey %s looks head-truncated (design doc §11 D1) — pass -include-partial to render it anyway", story.ID(chain))
 	}
-	j, err := story.BuildChain(chain, prof)
+	j, err := story.BuildChain(chain, prof, lang)
 	if err != nil {
 		return err
 	}
@@ -246,11 +254,11 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	if err != nil {
 		return err
 	}
-	outPath, err := writeJourneyFile(j, storiesDir)
+	outPath, err := writeJourneyFile(j, storiesDir, lang)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), journeySteps(j))
+	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
 	return nil
 }
 
@@ -262,7 +270,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string, lang i18n.Lang) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -277,11 +285,11 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return fmt.Errorf("one or both journeys look head-truncated (design doc §11 D1) — pass -include-partial to compare them anyway")
 	}
 
-	jA, err := story.BuildChain(chainA, prof)
+	jA, err := story.BuildChain(chainA, prof, lang)
 	if err != nil {
 		return err
 	}
-	jB, err := story.BuildChain(chainB, prof)
+	jB, err := story.BuildChain(chainB, prof, lang)
 	if err != nil {
 		return err
 	}
@@ -297,7 +305,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	// behind (design doc C.7: "should I even run this" is a pure query, not
 	// a partial run).
 	if llmOpts.Addr != "" && llmOpts.DryRun {
-		pack := story.BuildEvidencePack(jA, jB, cmp)
+		pack := story.BuildEvidencePack(jA, jB, cmp, lang)
 		chars := pack.EstimateChars()
 		fmt.Printf("evidence pack: %d chars (~%d tokens estimated) — dry run, no request sent\n", chars, chars/4)
 		return nil
@@ -313,17 +321,17 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	// switched on by -llm-addr alone.
 	var llmSection string
 	if llmOpts.Addr != "" {
-		pack := story.BuildEvidencePack(jA, jB, cmp)
+		pack := story.BuildEvidencePack(jA, jB, cmp, lang)
 		chars := pack.EstimateChars()
 		fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
 		llmOpts.CacheDir = filepath.Join(storiesDir, ".llm-cache")
-		res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack)
+		res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
 		if err != nil {
 			// Design doc C.7: the whole layer degrades away on failure —
 			// this must never fail the -compare command itself.
 			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
-			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res)
+			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang)
 		}
 	}
 
@@ -332,7 +340,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		base += "-partial"
 	}
 	mdPath := filepath.Join(storiesDir, base+".md")
-	md := story.RenderComparisonMarkdown(cmp)
+	md := story.RenderComparisonMarkdown(cmp, lang)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}
@@ -356,7 +364,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 // shares a single FetchRecords call across every candidate (same fix
 // PreviewTitles applied to the listing path), so this costs about the same
 // I/O as just listing, not N times more.
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string) error {
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
@@ -375,7 +383,7 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 		return nil
 	}
 
-	journeys, err := story.BuildAll(toRender, prof)
+	journeys, err := story.BuildAll(toRender, prof, lang)
 	if err != nil {
 		return err
 	}
@@ -383,18 +391,19 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 	if err != nil {
 		return err
 	}
+	t := i18n.CLI(lang)
 	for i, j := range journeys {
 		j.Partial = toRenderPartial[i]
-		outPath, err := writeJourneyFile(j, storiesDir)
+		outPath, err := writeJourneyFile(j, storiesDir, lang)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s (%d 任务, %d 轮)\n", outPath, len(j.Tasks), journeySteps(j))
+		fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
 	}
 	if skippedPartial > 0 {
-		fmt.Printf("\n%d 个断头 journey 已跳过（-include-partial 渲染；见设计文档 §11 D1）\n", skippedPartial)
+		fmt.Print(t.AllRenderedSkipped(skippedPartial))
 	}
-	fmt.Printf("\n%d 个 journey 已渲染到 %s\n", len(journeys), storiesDir)
+	fmt.Print(t.AllRenderedNote(len(journeys), storiesDir))
 	return nil
 }
 
@@ -422,13 +431,13 @@ func ensureStoriesDir(outDir string) (string, error) {
 // visible self-disclosure that this file's beginning isn't the real
 // beginning, without requiring the reader to open it and find the warning
 // line first.
-func writeJourneyFile(j *story.Journey, storiesDir string) (string, error) {
+func writeJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) (string, error) {
 	base := "journey-" + j.ID
 	if j.Partial {
 		base += "-partial"
 	}
 	outPath := filepath.Join(storiesDir, base+".md")
-	if err := os.WriteFile(outPath, []byte(story.RenderMarkdown(j)), 0o600); err != nil {
+	if err := os.WriteFile(outPath, []byte(story.RenderMarkdown(j, lang)), 0o600); err != nil {
 		return "", err
 	}
 	jsonPath := filepath.Join(storiesDir, base+".json")

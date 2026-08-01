@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"vmr/internal/i18n"
 )
 
 func f64(v float64) *float64 { return &v }
@@ -58,7 +60,7 @@ func TestEndpointValueUnpricedRendersDashNotZero(t *testing.T) {
 		EndpointsAll: []EndpointRow{{Endpoint: "openai:p1:m1", RequestsOK: 3, TokensOut: 100}},
 	}
 	var b strings.Builder
-	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep)
+	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep, i18n.EN)
 	out := b.String()
 	if !strings.Contains(out, "| - | - |") {
 		t.Errorf("unpriced endpoint must render dashes:\n%s", out)
@@ -89,7 +91,7 @@ func TestEndpointValueRendersAvailabilityAsPercent(t *testing.T) {
 		{Endpoint: "openai:p1:m1", RequestsOK: 4, TokensOut: 100, Availability: 0.8, Failed: 1},
 	}}
 	var b strings.Builder
-	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep)
+	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep, i18n.EN)
 	if !strings.Contains(b.String(), "80.0%") {
 		t.Errorf("availability 0.8 must render as 80.0%%:\n%s", b.String())
 	}

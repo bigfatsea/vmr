@@ -165,7 +165,7 @@ func TestCmdStory_RenderAll(t *testing.T) {
 			t.Fatalf("cmdStory -render-all: %v", err)
 		}
 	})
-	if !strings.Contains(out, "2 个 journey 已渲染到") {
+	if !strings.Contains(out, "2 journey(s) rendered to") {
 		t.Errorf("summary line missing or wrong count:\n%s", out)
 	}
 
@@ -248,7 +248,7 @@ func TestCmdStory_Compare(t *testing.T) {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
 	md := string(mdData)
-	for _, want := range []string{idA, idB, "调研一下 A 股新股打新收益", "帮我写个 release note", "模型时间", "证据溯源", path} {
+	for _, want := range []string{idA, idB, "调研一下 A 股新股打新收益", "帮我写个 release note", "Model Time", "Evidence Provenance", path} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
 		}
@@ -404,7 +404,7 @@ func TestCmdStory_ShowUngrouped(t *testing.T) {
 	if !strings.Contains(out, "1 ungrouped record") {
 		t.Errorf("expected 1 ungrouped record reported:\n%s", out)
 	}
-	if !strings.Contains(out, "未归组记录") || !strings.Contains(out, filepath.Base(path)) {
+	if !strings.Contains(out, "ungrouped record") || !strings.Contains(out, filepath.Base(path)) {
 		t.Errorf("-show-ungrouped should print the record's source location:\n%s", out)
 	}
 }
@@ -626,7 +626,7 @@ func TestCmdStory_CompareLLMDryRun(t *testing.T) {
 }
 
 // TestCmdStory_CompareWithLLM covers the full path: a real (mock) VMR
-// endpoint, the rendered .md gaining the "## LLM 解读" section with the
+// endpoint, the rendered .md gaining the "## LLM Interpretation" section with the
 // mock's reply, and a cache file appearing under stories/.llm-cache.
 func TestCmdStory_CompareWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -652,7 +652,7 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
 	md := string(mdData)
-	for _, want := range []string{"## LLM 解读", "一句话结论：这是 mock 的解读内容。", "不是事实层"} {
+	for _, want := range []string{"## LLM Interpretation", "一句话结论：这是 mock 的解读内容。", "not the fact layer"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
 		}
@@ -689,10 +689,10 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("comparison .md should still be written: %v", err)
 	}
-	if strings.Contains(string(mdData), "## LLM 解读") {
+	if strings.Contains(string(mdData), "## LLM Interpretation") {
 		t.Error("comparison markdown should NOT contain an LLM section when the call failed")
 	}
-	if !strings.Contains(string(mdData), "模型时间") {
+	if !strings.Contains(string(mdData), "Model Time") {
 		t.Error("the rule-layer report should still be complete despite the LLM failure")
 	}
 }

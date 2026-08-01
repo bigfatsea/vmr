@@ -11,6 +11,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 )
 
 // TestNormDescriptions_AllKnownStepsHaveText guards against a norm step
@@ -25,8 +26,8 @@ func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
 		"thinking_process_pattern_detected",
 	} {
 		var b strings.Builder
-		writeNorms(&b, []string{step})
-		if strings.Contains(b.String(), "未知步骤") {
+		writeNorms(&b, []string{step}, i18n.Detail(i18n.EN))
+		if strings.Contains(b.String(), "unknown step") {
 			t.Errorf("norm step %q has no description in normDescriptions", step)
 		}
 	}
@@ -143,7 +144,7 @@ func TestCodeFence(t *testing.T) {
 func TestDiffHeaderTable(t *testing.T) {
 	base := http.Header{"Same": {"v"}, "Changed": {"old"}, "Removed": {"gone"}}
 	other := http.Header{"Same": {"v"}, "Changed": {"new"}, "Added": {"fresh"}}
-	table, changed := diffHeaderTable(base, other)
+	table, changed := diffHeaderTable(base, other, i18n.Detail(i18n.EN))
 	if changed != 3 {
 		t.Errorf("changed = %d, want 3", changed)
 	}
@@ -175,15 +176,15 @@ func TestRenderBodyDiffMarksChanges(t *testing.T) {
 		},
 	}
 	var b strings.Builder
-	renderBodyDiff(&b, client, attempt)
+	renderBodyDiff(&b, client, attempt, i18n.Detail(i18n.EN))
 	out := b.String()
 	for _, want := range []string{
 		`| 🔶 | model | "agent" → "MiniMax-M3" |`,
-		"| | stream | true |",    // unchanged field still listed
-		"- #1 system · 3 字符",     // unchanged message still listed, unmarked
-		"🔶 #2 user · 5 → 13 字符",  // changed message marked with sizes
-		"hello resized",          // attempt-side content available inline
-		"Messages 对比 (2 条，1 处变化", // summary carries the change count
+		"| | stream | true |",         // unchanged field still listed
+		"- #1 system · 3 chars",       // unchanged message still listed, unmarked
+		"🔶 #2 user · 5 → 13 chars",    // changed message marked with sizes
+		"hello resized",               // attempt-side content available inline
+		"Messages diff (2, 1 changed", // summary carries the change count
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -392,7 +393,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, nil, nil)
+	n, err := WriteDetails([]string{src}, out, nil, nil, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,10 +406,10 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## ① Client → VMR 请求",
+		"## ① Client → VMR Request",
 		"### Attempt 1/1 · openai/prov/real-1 · ✅ · HTTP 200",
 		`| 🔶 | model | "agent" → "real-1" |`,
-		"`model_rewrite` — 上游返回的真实模型名被改写回虚拟模型名",
+		"`model_rewrite` — The real upstream model name was rewritten back to the virtual model name",
 		"hello", // reassembled final message
 	} {
 		if !strings.Contains(string(okFile), want) {
@@ -422,7 +423,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	}
 	for _, want := range []string{
 		"❌ **error**: network: dial tcp: refused",
-		"（无响应记录——连接中断或请求被取消）",
+		"(no response record — connection dropped or the request was canceled)",
 	} {
 		if !strings.Contains(string(errFile), want) {
 			t.Errorf("error file missing %q", want)
@@ -480,7 +481,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, a, nil)
+	n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,16 +529,16 @@ func TestRenderDetail_RawPreStrip(t *testing.T) {
 		}
 	}
 
-	withRaw := renderDetail(base(`data: {"choices":[{"delta":{"content":"<think>step 1</think>final answer"}}]}`+"\n\n"), nil)
-	if !strings.Contains(withRaw, "剥离前原始内容") || !strings.Contains(withRaw, "<think>step 1</think>final answer") {
+	withRaw := renderDetail(base(`data: {"choices":[{"delta":{"content":"<think>step 1</think>final answer"}}]}`+"\n\n"), nil, i18n.EN)
+	if !strings.Contains(withRaw, "Pre-strip raw content") || !strings.Contains(withRaw, "<think>step 1</think>final answer") {
 		t.Errorf("full pre-strip content not rendered:\n%s", withRaw)
 	}
-	if strings.Contains(withRaw, "未保留剥离前原始内容") {
+	if strings.Contains(withRaw, "didn't retain the pre-strip raw content") {
 		t.Error("should not show the unavailable note when RawPreStrip is populated")
 	}
 
-	withoutRaw := renderDetail(base(nil), nil)
-	if !strings.Contains(withoutRaw, "未保留剥离前原始内容") {
+	withoutRaw := renderDetail(base(nil), nil, i18n.EN)
+	if !strings.Contains(withoutRaw, "didn't retain the pre-strip raw content") {
 		t.Errorf("missing graceful fallback note when RawPreStrip is nil:\n%s", withoutRaw)
 	}
 }
@@ -558,38 +559,38 @@ func TestRenderDetail_FactsLine(t *testing.T) {
 		}
 	}
 
-	withFacts := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), nil)
-	if !strings.Contains(withFacts, "VMR 路由前判断") {
+	withFacts := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), nil, i18n.EN)
+	if !strings.Contains(withFacts, "VMR pre-routing judgment") {
 		t.Errorf("facts line missing:\n%s", withFacts)
 	}
-	if !strings.Contains(withFacts, "请求所需能力：`image`") {
+	if !strings.Contains(withFacts, "Capabilities required: `image`") {
 		t.Errorf("facts line should list only the detected capability `image`:\n%s", withFacts)
 	}
 	if strings.Contains(withFacts, "`tools`") {
 		t.Errorf("facts line should not list tools when HasTools is false:\n%s", withFacts)
 	}
-	if factsIdx, reqIdx := strings.Index(withFacts, "VMR 路由前判断"), strings.Index(withFacts, "① Client"); factsIdx < 0 || reqIdx < 0 || factsIdx > reqIdx {
+	if factsIdx, reqIdx := strings.Index(withFacts, "VMR pre-routing judgment"), strings.Index(withFacts, "① Client"); factsIdx < 0 || reqIdx < 0 || factsIdx > reqIdx {
 		t.Errorf("facts line must appear before section ①, got factsIdx=%d reqIdx=%d", factsIdx, reqIdx)
 	}
-	if !strings.Contains(withFacts, "预估Token数量：1.2 KT") {
+	if !strings.Contains(withFacts, "Estimated token count: 1.2 KT") {
 		t.Errorf("facts line should render the plain (non-EST-suffixed) token estimate:\n%s", withFacts)
 	}
 
-	both := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), nil)
-	if !strings.Contains(both, "请求所需能力：`image`、`tools`") {
-		t.Errorf("facts line should list both detected capabilities joined by 、:\n%s", both)
+	both := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), nil, i18n.EN)
+	if !strings.Contains(both, "Capabilities required: `image`, `tools`") {
+		t.Errorf("facts line should list both detected capabilities joined by \", \":\n%s", both)
 	}
-	if !strings.Contains(both, "预估Token数量：500 T") {
+	if !strings.Contains(both, "Estimated token count: 500 T") {
 		t.Errorf("facts line should render sub-1000 estimate as plain T:\n%s", both)
 	}
 
-	neither := renderDetail(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), nil)
-	if !strings.Contains(neither, "请求所需能力：无") {
-		t.Errorf("facts line should show 无 when no capability is detected:\n%s", neither)
+	neither := renderDetail(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), nil, i18n.EN)
+	if !strings.Contains(neither, "Capabilities required: none") {
+		t.Errorf("facts line should show none when no capability is detected:\n%s", neither)
 	}
 
-	withoutFacts := renderDetail(base(nil), nil)
-	if strings.Contains(withoutFacts, "VMR 路由前判断") {
+	withoutFacts := renderDetail(base(nil), nil, i18n.EN)
+	if strings.Contains(withoutFacts, "VMR pre-routing judgment") {
 		t.Errorf("nil Facts must render nothing:\n%s", withoutFacts)
 	}
 }
@@ -611,13 +612,13 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldDir := filepath.Join(dir, "old-details")
-	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil)
+	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	newDir := filepath.Join(dir, "new-details")
-	dw, err := NewDetailWriter(newDir)
+	dw, err := NewDetailWriter(newDir, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}

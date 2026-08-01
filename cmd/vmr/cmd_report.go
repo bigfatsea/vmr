@@ -58,6 +58,8 @@ func cmdReport(args []string) error {
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	detailsOn := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/")
 	pricingPath := fs.String("pricing", "", "pricing sidecar yaml (per-endpoint unit prices); absent => auto-load ./pricing.yaml if present, else no $ estimates")
+	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
+	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -67,6 +69,11 @@ func cmdReport(args []string) error {
 	}
 
 	tw := timestampWriter{w: os.Stdout}
+
+	lang, err := resolveLanguage(*langFlag, *reportConfigPath, tw)
+	if err != nil {
+		return err
+	}
 
 	resolvedPricingPath := *pricingPath
 	if resolvedPricingPath == "" {
@@ -103,7 +110,7 @@ func cmdReport(args []string) error {
 	detailDir := filepath.Join(*outDir, "details")
 	var onRecord func(*audit.Record, *report.ReqInfo)
 	if *detailsOn {
-		dw, err = report.NewDetailWriter(detailDir)
+		dw, err = report.NewDetailWriter(detailDir, lang)
 		if err != nil {
 			return err
 		}
@@ -125,7 +132,7 @@ func cmdReport(args []string) error {
 	if err := report.WriteJSON(rep, jsonPath); err != nil {
 		return err
 	}
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep)), 0o600); err != nil {
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, lang)), 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
@@ -148,7 +155,7 @@ func cmdReport(args []string) error {
 		return fmt.Errorf("requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
-	if err := report.WriteRequestsIndex(rep, sess, *outDir); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, *outDir, lang); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(*outDir, "vmr-requests.md"))
@@ -165,7 +172,7 @@ func cmdReport(args []string) error {
 		return fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, *outDir); err != nil {
+	if err := report.WriteFailedIndex(rows, *outDir, lang); err != nil {
 		return fmt.Errorf("failed-requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(*outDir, "vmr-requests-failed.md"))

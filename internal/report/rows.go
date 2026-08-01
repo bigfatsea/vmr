@@ -365,12 +365,35 @@ type ToolShapeRow struct {
 
 // Finding is one row of the §7 efficiency/waste table.
 type Finding struct {
+	// Code is a stable, English, never-localized identifier — the only
+	// thing tests or any programmatic consumer of vmr-report.json should
+	// key off (never Finding below, which is display text).
+	Code FindingCode `json:"code"`
+	// Finding/Value/Implicated/Action are narrative text. They are always
+	// English in this persisted struct, regardless of report language —
+	// buildFindings is always called with i18n.EN to populate Report2.
+	// A localized copy for Markdown rendering is produced separately, by
+	// calling buildFindings again with the target language; it is never
+	// derived from this struct after the fact.
 	Finding    string `json:"finding"`
 	Metric     string `json:"metric"`
 	Value      string `json:"value"`
 	Implicated string `json:"implicated,omitempty"`
 	Action     string `json:"action,omitempty"`
 }
+
+// FindingCode identifies which §7 finding a row is, independent of its
+// (localized) display text. See Finding.Code.
+type FindingCode string
+
+const (
+	FindingToolSchemaWaste  FindingCode = "tool_schema_waste"
+	FindingCacheMiss        FindingCode = "cache_miss"
+	FindingCronRedundancy   FindingCode = "cron_redundancy"
+	FindingOutputTruncation FindingCode = "output_truncation"
+	FindingSlowRequests     FindingCode = "slow_requests"
+	FindingContextGrowth    FindingCode = "context_growth"
+)
 
 // RequestRow is one line of vmr-requests.jsonl: the per-request drill-down
 // backing the redesigned index (V2 §7). Every field is rule-extracted;

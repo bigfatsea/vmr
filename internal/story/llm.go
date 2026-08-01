@@ -33,14 +33,23 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"vmr/internal/i18n"
 )
 
-// promptVersion is bumped whenever the prompt template or the evidence
+// promptVersionBase is bumped whenever the prompt template or the evidence
 // pack's shape changes materially — part of the disk-cache key (design doc
 // §5.5's "(step_hash, model, prompt_version)" convention, adapted here to
 // "(both journey ids + evidence pack, model, prompt_version)" since this
-// layer operates on a pair of Journeys, not a single step).
-const promptVersion = "compare-llm-v2"
+// layer operates on a pair of Journeys, not a single step). promptVersionFor
+// appends the language, so switching -lang never reuses another language's
+// cached interpretation (docs/VirtualModelRouter_Design_v4_Analytics.md's
+// "LLM 解读层的语言联动" subsection).
+const promptVersionBase = "compare-llm-v2"
+
+func promptVersionFor(lang i18n.Lang) string {
+	return promptVersionBase + "-" + lang.String()
+}
 
 // llmHTTPTimeout is deliberately generous (not the 30s a simple echo call
 // would need): the evidence pack can carry a several-thousand-character
@@ -64,10 +73,14 @@ type ToolIndexEntry struct {
 	Brief string   `json:"brief"`
 }
 
-// buildToolIndex condenses j's Steps into ToolIndexEntry rows.
-func buildToolIndex(j *Journey) []ToolIndexEntry {
+// buildToolIndex condenses j's Steps into ToolIndexEntry rows, in lang (the
+// "brief" field is free text the evidence pack embeds verbatim for the LLM
+// to read — see this file's package comment — so it follows the same
+// language as the rest of the evidence pack's surrounding prose).
+func buildToolIndex(j *Journey, lang i18n.Lang) []ToolIndexEntry {
 	steps := journeySteps(j)
 	out := make([]ToolIndexEntry, 0, len(steps))
+	noReply := i18n.LLM(lang).NoTextReply
 	for _, s := range steps {
 		var tools []string
 		for _, tc := range s.ToolCalls {
@@ -75,7 +88,7 @@ func buildToolIndex(j *Journey) []ToolIndexEntry {
 		}
 		brief := preview(s.RespText)
 		if brief == "" {
-			brief = "(无文本回复)"
+			brief = noReply
 		}
 		out = append(out, ToolIndexEntry{Seq: s.Seq, Tools: tools, Brief: brief})
 	}
@@ -103,13 +116,13 @@ type EvidencePack struct {
 // is expected to have called ComputeComparisonExtras first; this function
 // doesn't compute it itself so callers who only want the tool index/task
 // titles without paying for Extras twice can reuse an already-built cmp).
-func BuildEvidencePack(jA, jB *Journey, cmp Comparison) EvidencePack {
+func BuildEvidencePack(jA, jB *Journey, cmp Comparison, lang i18n.Lang) EvidencePack {
 	return EvidencePack{
 		Comparison:  cmp,
 		TaskTitlesA: journeyTaskTitles(jA),
 		TaskTitlesB: journeyTaskTitles(jB),
-		ToolIndexA:  buildToolIndex(jA),
-		ToolIndexB:  buildToolIndex(jB),
+		ToolIndexA:  buildToolIndex(jA, lang),
+		ToolIndexB:  buildToolIndex(jB, lang),
 	}
 }
 
@@ -140,49 +153,20 @@ func (p EvidencePack) EstimateChars() int {
 	return utf8.RuneCount(data)
 }
 
-// llmSystemPrompt is the fixed instruction set every call sends — the
-// three-layer boundary (design doc §3.3/C.7) spelled out as constraints a
-// model actually follows: numbers are off-limits to invent, prose is
-// explicitly allowed to be the model's own reading as long as it says so,
-// and blind spots must be named rather than glossed over.
-//
-// v2 (`docs/Step4a_compare_LLM解读层_差距分析与改进建议_2026-07-30_sonnet-5.md`
-// §6.2 items 1/3, tier-1 adopted): two changes from v1, both prompt-only —
-//  1. Point 2 now spells out the excerpt-boundary caveat explicitly, not just
-//     generically: an "absence" claim ("this tool/file wasn't mentioned")
-//     must be qualified as "absent from the excerpt", never asserted as
-//     "doesn't exist" — the concrete failure mode a prior real run hit was
-//     giving a confident, "evidence-supported"-tagged conclusion built on a
-//     window that happened to cut off before the decisive evidence.
-//  2. Point 3 replaces the old flat "assumption list, each tagged supported/
-//     speculative" with a confidence-tiered table (high/medium/low) plus one
-//     causal-chain sentence — structure, not new license to assert. The
-//     tiering rule is deliberately mechanical (must point at a specific
-//     evidence anchor to claim "high") so this doesn't become an invitation
-//     to sound more certain than the underlying evidence supports — a human-
-//     authored reference report's confident tone partly comes from asserting
-//     correlation as causation, and that's a trade-off to NOT copy, not a
-//     gap to close.
-const llmSystemPrompt = `你是一个 Agent 任务执行对比分析助手。你会收到两个 Agent Journey（同一任务的两次不同执行）的结构化对比数据（JSON），包括已经算好的行为剖面指标、工具调用分布、端点/缓存/system prompt 规模等规则事实，以及两段有边界的原文节选（system prompt 节选、可能的最终交付物节选）和逐轮工具调用索引。
-
-严格遵循：
-1. 数字只能引用给定 JSON 里已经算好的数值，禁止编造或推算新的数字、百分比、次数。
-2. 原文节选（system prompt、最终交付物、逐轮工具索引里的 brief）是未经规则解析的文本证据——你可以基于阅读理解对它们做出判断（比如"看起来加载了哪些上下文文件""大致分几个阶段"），但必须明确说明这是你的阅读理解，不是规则核实的事实。节选是从原文开头起截断的一段前缀，截断点之后的内容你看不到——如果某个判断依赖"节选里没出现"这件事（比如"某个工具/某份文件没有被提到"），必须在该判断旁边明确写"仅代表节选范围内未出现，不能排除节选之外仍存在"，不能把"节选里没看到"直接当成"确实不存在"。
-3. 核心假设用一张表输出，列为：候选根因 | 直接证据 | 置信度 | 改进建议。置信度只能填"高"/"中"/"低"三档之一：能在给定 JSON 或原文节选里指认出至少一条直接支持的具体证据才标"高"；只有间接证据、需要你自己推断关联的标"中"；仅凭排除法或直觉、没有明确证据锚点的标"低"。低置信度的候选也应该列出（让读者看到"想到了但证据不足"本身就有价值），但必须诚实标低，不能为了让结论显得更确定而拔高置信度，也不能因为不确定就干脆不提。"高"或"中"置信度的候选之后可以附最多 1-2 条可执行的改进建议，"低"置信度的不需要附。表格之后另起一行，用一句话给出你认为最主要的因果链（例如"A → B → C"的箭头形式）——这一句是你的归纳，不是新增事实，不需要额外标注。
-4. 必须专门列一段"VMR 看不到什么"——如宿主 Agent 自身的配置（如是否有类似 loop detection 的机制、工具白名单的来源等），这些不在给定证据里，如实说明是盲区，不要编造。
-5. 不要预设某种特定的结论模板（比如"一定是某个配置文件的差异"），根因判断完全基于这次给定的实际证据。
-6. 输出为 Markdown 正文，不要输出 JSON。第一行是一句话结论，然后依次是"## 候选根因"（含第 3 条要求的表格 + 一句话因果链）、"## 工作方式与阶段解读"、"## VMR 看不到什么"三个小节。`
-
 // buildUserPrompt embeds the evidence pack as pretty-printed JSON — pretty
 // rather than compact on purpose: this is a debugging aid too (the exact
 // prompt sent is what a human reads if they open the cache file), and the
 // token-cost difference against a several-thousand-char excerpt is noise.
-func buildUserPrompt(pack EvidencePack) (string, error) {
+// The system prompt (internal/i18n.LLM(lang).SystemPrompt) instructs the
+// model which language to answer in, so this wrapper text and the model's
+// own reply stay in the same language as the rest of the report.
+func buildUserPrompt(pack EvidencePack, lang i18n.Lang) (string, error) {
 	data, err := json.MarshalIndent(pack, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal evidence pack: %w", err)
 	}
-	return "以下是两个 Journey 的结构化对比数据：\n\n```json\n" + string(data) + "\n```\n", nil
+	t := i18n.LLM(lang)
+	return t.UserPromptPrefix + string(data) + t.UserPromptSuffix, nil
 }
 
 // LLMOptions configures the interpretation layer's one HTTP call — see this
@@ -224,13 +208,13 @@ func (o LLMOptions) chatURL() string {
 // concrete bug the plan review flagged in the alternative proposal), and
 // the evidence pack's own content (so a re-run against updated Journeys, or
 // a different pair of ids, never collides).
-func cacheKey(model string, pack EvidencePack) (string, error) {
+func cacheKey(model string, pack EvidencePack, lang i18n.Lang) (string, error) {
 	data, err := json.Marshal(pack)
 	if err != nil {
 		return "", err
 	}
 	h := sha256.New()
-	h.Write([]byte(promptVersion))
+	h.Write([]byte(promptVersionFor(lang)))
 	h.Write([]byte{0})
 	h.Write([]byte(model))
 	h.Write([]byte{0})
@@ -269,12 +253,12 @@ type chatCompletionResponse struct {
 // health check — a single best-effort call; the caller decides what "it
 // failed" means for the rest of the report (design doc C.7: the whole layer
 // degrades away, it never fails the command).
-func callLLM(ctx context.Context, opts LLMOptions, userPrompt string) (string, error) {
+func callLLM(ctx context.Context, opts LLMOptions, userPrompt string, lang i18n.Lang) (string, error) {
 	reqBody := chatCompletionRequest{
 		Model:  opts.Model,
 		Stream: false,
 		Messages: []chatMsgSimple{
-			{Role: "system", Content: llmSystemPrompt},
+			{Role: "system", Content: i18n.LLM(lang).SystemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
 	}
@@ -337,14 +321,14 @@ type InterpretResult struct {
 // failure (cache I/O aside — a cache miss is not a failure) is returned as
 // an error and the caller is expected to treat it as "no LLM section this
 // run", per design doc C.7 — this function itself never panics or retries.
-func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack) (InterpretResult, error) {
+func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack, lang i18n.Lang) (InterpretResult, error) {
 	if !opts.Enabled() {
 		return InterpretResult{}, fmt.Errorf("LLM interpretation layer not enabled (no -llm-addr)")
 	}
 
 	var key string
 	if opts.CacheDir != "" {
-		k, err := cacheKey(opts.Model, pack)
+		k, err := cacheKey(opts.Model, pack, lang)
 		if err == nil {
 			key = k
 			if data, err := os.ReadFile(cachePath(opts.CacheDir, key)); err == nil {
@@ -353,11 +337,11 @@ func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack) (Interpr
 		}
 	}
 
-	userPrompt, err := buildUserPrompt(pack)
+	userPrompt, err := buildUserPrompt(pack, lang)
 	if err != nil {
 		return InterpretResult{}, err
 	}
-	text, err := callLLM(ctx, opts, userPrompt)
+	text, err := callLLM(ctx, opts, userPrompt, lang)
 	if err != nil {
 		return InterpretResult{}, err
 	}
@@ -382,12 +366,13 @@ func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack) (Interpr
 // with the "this is interpretation, not fact" banner design doc §3.3
 // requires — always rendered as its own clearly separated section, never
 // blended into the fact-layer sections above it.
-func RenderLLMSection(opts LLMOptions, res InterpretResult) string {
+func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang) string {
+	t := i18n.LLM(lang)
 	var b strings.Builder
-	fmt.Fprintf(&b, "## LLM 解读（模型：%s）\n\n", opts.Model)
-	fmt.Fprintf(&b, "> 以下内容由 `%s` 生成的解读，不是事实层，可能有误，请对照上面的证据表核实。\n", opts.Model)
+	b.WriteString(t.SectionTitle(opts.Model))
+	b.WriteString(t.SectionDisclaimer(opts.Model))
 	if res.Cached {
-		fmt.Fprintf(&b, "> (命中缓存，未重新调用)\n")
+		b.WriteString(t.CachedNote)
 	}
 	b.WriteString("\n")
 	b.WriteString(res.Text)

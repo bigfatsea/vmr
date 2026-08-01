@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"vmr/internal/i18n"
 )
 
 // smallAuditRecords returns a few synthetic records covering ok/error,
@@ -182,8 +184,8 @@ func TestMarkdownAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(rep)
-	if !containsAll(md, []string{"# VMR 用量报告", "## §0 摘要", "## §1 成本与 Token 经济", "## §2 成本估算", "## §8 请求详单"}) {
+	md := Markdown(rep, i18n.EN)
+	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Cost Estimate", "## §8 Request Detail Index"}) {
 		t.Fatalf("Markdown missing expected sections")
 	}
 	// JSON roundtrip preserves fields but not the unexported requests slice.
@@ -277,7 +279,7 @@ rates:
 	if p.Rates[0].InFreshPer1M != 0.28 || p.Rates[0].OutPer1M != 1.10 {
 		t.Fatalf("price values not parsed: %+v", p.Rates[0])
 	}
-	if p.Disclaimer() == "" {
+	if p.Disclaimer(i18n.EN) == "" {
 		t.Fatalf("disclaimer should not be empty")
 	}
 	if len(p.Raw) == 0 {
@@ -448,7 +450,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteRequestsIndex(rep, sess, dir); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN); err != nil {
 		t.Fatal(err)
 	}
 
@@ -460,13 +462,13 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	// The main index only carries a "## " group header + summary + link per
 	// group now — the full "# Chat User: …" detail card moved to the
 	// per-group sibling file.
-	if !strings.Contains(s, "## Chat User: alice · 2 会话 2 任务 2 轮") {
+	if !strings.Contains(s, "## Chat User: alice · 2 sessions 2 tasks 2 turns") {
 		t.Errorf("missing alice Chat User index entry with counts:\n%s", s)
 	}
 	if !strings.Contains(s, "[vmr-requests-alice.md](vmr-requests-alice.md)") {
 		t.Errorf("missing link to alice's detail sibling:\n%s", s)
 	}
-	if !strings.Contains(s, "## 定时任务 · heartbeat 单发会话 × 1") {
+	if !strings.Contains(s, "## Scheduled · heartbeat single-shot sessions × 1") {
 		t.Errorf("missing collapsed heartbeat rollup index entry:\n%s", s)
 	}
 	if !strings.Contains(s, "[vmr-requests-cron-hartbeat.md](vmr-requests-cron-hartbeat.md)") {
@@ -486,7 +488,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(alice), "# Chat User: alice · 2 会话 2 任务 2 轮") {
+	if !strings.Contains(string(alice), "# Chat User: alice · 2 sessions 2 tasks 2 turns") {
 		t.Errorf("alice's sibling should carry the full Chat User detail card:\n%s", alice)
 	}
 
@@ -632,7 +634,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 	rows := rep.RequestRows()
 
-	if err := WriteFailedIndex(rows, dir); err != nil {
+	if err := WriteFailedIndex(rows, dir, i18n.EN); err != nil {
 		t.Fatal(err)
 	}
 	failedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
@@ -640,7 +642,7 @@ func TestWriteFailedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(failedMD)
-	if !strings.Contains(s, "共 3 条") {
+	if !strings.Contains(s, "3 total.") {
 		t.Errorf("want exactly 3 failed rows reported:\n%s", s)
 	}
 
@@ -653,7 +655,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 
 	// The full index is unaffected: still every request, the plain ok one included.
-	if err := WriteRequestsIndex(rep, sess, dir); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN); err != nil {
 		t.Fatal(err)
 	}
 	fullMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
@@ -674,14 +676,14 @@ func TestWriteFailedIndex(t *testing.T) {
 
 func TestWriteFailedIndexEmpty(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteFailedIndex(nil, dir); err != nil {
+	if err := WriteFailedIndex(nil, dir, i18n.EN); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "共 0 条") {
+	if !strings.Contains(string(b), "0 total.") {
 		t.Errorf("want a 0-count header for no failed requests:\n%s", b)
 	}
 }
@@ -837,7 +839,7 @@ func TestBuildFindingsIsDeterministic(t *testing.T) {
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
-			if rep.Efficiency[j].Finding == "定时任务冗余" {
+			if rep.Efficiency[j].Code == FindingCronRedundancy {
 				found = &rep.Efficiency[j]
 				break
 			}
@@ -916,7 +918,7 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 	if other := toolsSig(toolShapeTieNamesB); other < wantShape {
 		wantShape = other
 	}
-	wantImplicated := wantShape + "/1 请求"
+	wantImplicated := wantShape + "/1 requests"
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
@@ -926,7 +928,7 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
-			if rep.Efficiency[j].Finding == "工具 schema 浪费" {
+			if rep.Efficiency[j].Code == FindingToolSchemaWaste {
 				found = &rep.Efficiency[j]
 				break
 			}
@@ -988,7 +990,7 @@ func TestBuildFindingsDomModelTieIsDeterministic(t *testing.T) {
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
-			if rep.Efficiency[j].Finding == "缓存未命中输入" {
+			if rep.Efficiency[j].Code == FindingCacheMiss {
 				found = &rep.Efficiency[j]
 				break
 			}
@@ -1059,7 +1061,7 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
-			if rep.Efficiency[j].Finding == "上下文膨胀" {
+			if rep.Efficiency[j].Code == FindingContextGrowth {
 				found = &rep.Efficiency[j]
 				break
 			}
@@ -1203,8 +1205,8 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 		t.Errorf("swallowed entities = %v, want [drop.go]", c.SwallowedEntities)
 	}
 
-	md := Markdown(rep)
-	if !strings.Contains(md, "§6.7 Compaction 还原") {
+	md := Markdown(rep, i18n.EN)
+	if !strings.Contains(md, "§6.7 Compaction Reconstruction") {
 		t.Error("rendered Markdown missing the §6.7 Compaction section header")
 	}
 	if !strings.Contains(md, "drop.go") {
@@ -1229,7 +1231,7 @@ func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 				ErrorClasses: map[string]int{"transient": 1}},
 		},
 	}
-	md := Markdown(rep)
+	md := Markdown(rep, i18n.EN)
 	if strings.Contains(md, "MISSING") {
 		t.Fatalf("rendered Markdown contains a corrupted Printf verb (percent sign in a table cell mishandled):\n%s", md)
 	}

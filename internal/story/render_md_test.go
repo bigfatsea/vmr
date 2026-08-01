@@ -9,6 +9,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -26,11 +27,11 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j)
+	md := RenderMarkdown(j, i18n.EN)
 
 	for _, want := range []string{
 		"# Journey j-",
@@ -80,11 +81,11 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j)
+	md := RenderMarkdown(j, i18n.EN)
 
 	for _, want := range []string{
 		"**Messages**",
@@ -120,11 +121,11 @@ func TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j)
+	md := RenderMarkdown(j, i18n.EN)
 	if !strings.Contains(md, "````\n") {
 		t.Errorf("expected a 4-backtick fence to safely wrap content containing a 3-backtick run:\n%s", md)
 	}
@@ -159,12 +160,12 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if second.BrokeFrom == nil {
 		t.Fatal("second lineage should have BrokeFrom set")
 	}
-	j, err := Build(second, profile.Generic)
+	j, err := Build(second, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j)
-	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "上下文被大幅收缩") {
+	md := RenderMarkdown(j, i18n.EN)
+	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "context was sharply contracted") {
 		t.Errorf("rendered Markdown missing break warning:\n%s", md)
 	}
 }
@@ -202,12 +203,12 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if second.BrokeFrom.Edit.Kind != ctxgraph.Fork {
 		t.Fatalf("break edit kind = %v, want Fork", second.BrokeFrom.Edit.Kind)
 	}
-	j, err := Build(second, profile.Generic)
+	j, err := Build(second, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j)
-	if !strings.Contains(md, "内容与前段几乎不重叠") {
+	md := RenderMarkdown(j, i18n.EN)
+	if !strings.Contains(md, "content barely overlaps with the previous segment") {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}
 }

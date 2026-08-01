@@ -1,4 +1,4 @@
-// Ver 2026-07-28 20:40, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §6.6 端点性价比: not "what did this endpoint cost" (§2 already answers
 // that) but "what did it cost per unit of work delivered, and what did its
@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // valueRow is the rendered form of one endpoint's efficiency, computed
@@ -32,28 +34,32 @@ type valueRow struct {
 	wastedMS     int64
 }
 
-func renderEndpointValue(w func(string, ...any), rep *Report2) {
+func renderEndpointValue(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	rows := endpointValueRows(rep)
 	if len(rows) == 0 {
 		return
 	}
-	w("## §6.6 端点性价比 ⭐\n\n")
+	t := i18n.EndpointValue(lang)
+	w("## %s\n\n", t.Title)
 
 	cur := ""
 	priced := rep.Pricing != nil
 	if priced {
 		cur = " (" + rep.Pricing.Currency + ")"
 	}
-	w("单位产出的代价，而不只是总花费——%s\n\n",
-		orDash2(priced,
-			"一个单价便宜但经常失败的端点，把请求推给下一家之后的真实代价可能更高。",
-			"未配置定价，本节只显示时间维度；配置 `-pricing` 后会补上单位成本列。"))
-
-	headers := []string{"端点", "成功请求", "out tokens"}
 	if priced {
-		headers = append(headers, "成本/1M out"+cur, "成本/成功请求"+cur)
+		w("%s", t.IntroPriced)
+	} else {
+		w("%s", t.IntroUnpriced)
 	}
-	headers = append(headers, "失败尝试", "可用率", "失败耗时⭐")
+
+	headers := append([]string(nil), t.BaseHeaders[:]...)
+	if priced {
+		ph := t.PricedHeaders(cur)
+		headers = append(headers, ph[0], ph[1])
+	}
+	tail := t.TailHeaders
+	headers = append(headers, tail[0], tail[1], tail[2])
 	tbl := newTable(w, headers...)
 
 	for _, r := range rows {
@@ -69,11 +75,11 @@ func renderEndpointValue(w func(string, ...any), rep *Report2) {
 		tbl.row(cells...)
 	}
 	w("\n")
-	w("> 失败耗时⭐ = 该端点**失败尝试**累计墙钟时间：请求最终由别处完成，这段时间是纯粹的延迟损耗。\n")
-	w("> **只记时间、不折算成钱**：失败尝试拿不到 usage（vmr 只从客户端真正收到的那份响应里提取），厂商通常也不对失败请求计费——\n")
-	w("> 给它标一个金额会是编造。这里的口径是「它让你多等了多久」，不是「它花了你多少钱」。\n")
+	w("%s", t.WastedNote)
+	w("%s", t.NoMoneyNote1)
+	w("%s", t.NoMoneyNote2)
 	if priced {
-		w("> 成本/1M out 用于横向比价（同样产出 100 万 token 谁更便宜）；成本/成功请求受各端点承接的请求形态影响，跨端点比较前先看 §5 的负载画像。\n")
+		w("%s", t.PricedCompareNote)
 	}
 	w("\n")
 }

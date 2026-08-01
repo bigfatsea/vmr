@@ -53,18 +53,41 @@ const notableRelThreshold = 0.30
 // rule-derived "notable" flag — no judgment about WHY they differ, only
 // THAT they differ by more than a fixed bar (design doc's "宁可粗糙也不猜语义").
 type MetricDiff struct {
-	Label string     `json:"label"`
-	Kind  MetricKind `json:"kind"`
-	A     float64    `json:"a"`
-	B     float64    `json:"b"`
+	// Metric is a stable, English, never-localized identifier — the only
+	// thing tests or any programmatic consumer of compare-*.json should key
+	// off (never Label below, which is display text).
+	Metric MetricCode `json:"metric"`
+	Label  string     `json:"label"`
+	Kind   MetricKind `json:"kind"`
+	A      float64    `json:"a"`
+	B      float64    `json:"b"`
 	// DeltaRel is (B-A) / max(|A|,|B|) — signed relative change from A to B,
 	// 0 when both are exactly 0 (no signal, not a 0% "no change" claim).
 	DeltaRel float64 `json:"delta_rel"`
 	Notable  bool    `json:"notable"`
 }
 
-func metricDiff(label string, kind MetricKind, a, b float64) MetricDiff {
-	d := MetricDiff{Label: label, Kind: kind, A: a, B: b}
+// MetricCode identifies which behavior-profile metric a MetricDiff row is,
+// independent of its (localized) display Label. See MetricDiff.Metric.
+type MetricCode string
+
+const (
+	MetricModelMS              MetricCode = "model_ms"
+	MetricAgentExecMS          MetricCode = "agent_exec_ms"
+	MetricHumanIdleMS          MetricCode = "human_idle_ms"
+	MetricNetWorkingMS         MetricCode = "net_working_ms"
+	MetricModelToolRatio       MetricCode = "model_tool_ratio"
+	MetricToolCallCount        MetricCode = "tool_call_count"
+	MetricDuplicateActionRate  MetricCode = "duplicate_action_rate"
+	MetricErrorRecoveryCount   MetricCode = "error_recovery_count"
+	MetricPlanExecRatio        MetricCode = "plan_exec_ratio"
+	MetricContextUtilization   MetricCode = "context_utilization"
+	MetricCompactionCount      MetricCode = "compaction_count"
+	MetricCompactionLossTokens MetricCode = "compaction_loss_tokens"
+)
+
+func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {
+	d := MetricDiff{Metric: code, Label: label, Kind: kind, A: a, B: b}
 	denom := a
 	if abs(b) > abs(a) {
 		denom = b
@@ -136,19 +159,26 @@ type Comparison struct {
 // candidate); Compare doesn't sort or normalize that choice away.
 func Compare(a, b JourneySummary) Comparison {
 	ma, mb := a.Metrics, b.Metrics
+	// Labels here are fixed English literals, not routed through i18n —
+	// Compare is deliberately language-agnostic (see
+	// docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection):
+	// the JSON these rows serialize into (compare-*.json) is always English,
+	// exactly like report.Finding's persisted copy. RenderComparisonMarkdown
+	// looks up the localized label per row via i18n.MetricLabel(lang,
+	// string(row.Metric)) at render time — see render_compare.go.
 	rows := []MetricDiff{
-		metricDiff("模型时间", KindMillis, float64(ma.ModelMS), float64(mb.ModelMS)),
-		metricDiff("Agent 侧执行时间", KindMillis, float64(ma.AgentExecMS), float64(mb.AgentExecMS)),
-		metricDiff("人类空闲时间", KindMillis, float64(ma.HumanIdleMS), float64(mb.HumanIdleMS)),
-		metricDiff("净工作时长", KindMillis, float64(ma.NetWorkingMS), float64(mb.NetWorkingMS)),
-		metricDiff("模型/工具时间比", KindMultiple, ma.ModelToToolRatio, mb.ModelToToolRatio),
-		metricDiff("工具调用次数", KindCount, float64(ma.ToolCallCount), float64(mb.ToolCallCount)),
-		metricDiff("重复动作率", KindRatio, ma.DuplicateActionRate, mb.DuplicateActionRate),
-		metricDiff("错误恢复次数", KindCount, float64(ma.ErrorRecoveryCount), float64(mb.ErrorRecoveryCount)),
-		metricDiff("计划/执行比", KindRatio, ma.PlanExecRatio, mb.PlanExecRatio),
-		metricDiff("上下文有效利用率", KindRatio, ma.ContextUtilization, mb.ContextUtilization),
-		metricDiff("Compaction 次数", KindCount, float64(ma.CompactionCount), float64(mb.CompactionCount)),
-		metricDiff("Compaction 信息损失", KindTokens, float64(ma.CompactionLossTokens), float64(mb.CompactionLossTokens)),
+		metricDiff(MetricModelMS, "Model Time", KindMillis, float64(ma.ModelMS), float64(mb.ModelMS)),
+		metricDiff(MetricAgentExecMS, "Agent-Side Execution Time", KindMillis, float64(ma.AgentExecMS), float64(mb.AgentExecMS)),
+		metricDiff(MetricHumanIdleMS, "Human Idle Time", KindMillis, float64(ma.HumanIdleMS), float64(mb.HumanIdleMS)),
+		metricDiff(MetricNetWorkingMS, "Net Working Time", KindMillis, float64(ma.NetWorkingMS), float64(mb.NetWorkingMS)),
+		metricDiff(MetricModelToolRatio, "Model/Tool Time Ratio", KindMultiple, ma.ModelToToolRatio, mb.ModelToToolRatio),
+		metricDiff(MetricToolCallCount, "Tool Call Count", KindCount, float64(ma.ToolCallCount), float64(mb.ToolCallCount)),
+		metricDiff(MetricDuplicateActionRate, "Duplicate Action Rate", KindRatio, ma.DuplicateActionRate, mb.DuplicateActionRate),
+		metricDiff(MetricErrorRecoveryCount, "Error Recovery Count", KindCount, float64(ma.ErrorRecoveryCount), float64(mb.ErrorRecoveryCount)),
+		metricDiff(MetricPlanExecRatio, "Plan/Execution Ratio", KindRatio, ma.PlanExecRatio, mb.PlanExecRatio),
+		metricDiff(MetricContextUtilization, "Context Utilization", KindRatio, ma.ContextUtilization, mb.ContextUtilization),
+		metricDiff(MetricCompactionCount, "Compaction Count", KindCount, float64(ma.CompactionCount), float64(mb.CompactionCount)),
+		metricDiff(MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, float64(ma.CompactionLossTokens), float64(mb.CompactionLossTokens)),
 	}
 	return Comparison{A: journeyRef(a), B: journeyRef(b), Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }

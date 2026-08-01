@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 21:00, by Sonnet 5 -->
+<!-- Ver 2026-08-02 02:15, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
@@ -44,7 +44,9 @@ vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
     # + {out}/details/ 逐请求详单（-details=false 关闭；加载了定价配置才会渲染 §2 成本估算）
 ```
 
-全部实现在 `internal/report` 一个包里：`aggregate.go`（聚合入口 `Build`）、`session.go`（会话/任务分组）、`rows.go`（`Report2` 及各 Row 类型 = `vmr-report.json` 的公开 schema）、`metrics.go`（派生指标）、`render_doc.go`（章节运行顺序 + 共享的 `mdTable`）+ 一个章节一个文件的 `section_*.go`（**新增章节 = 新增文件，不是把某个文件改大**，`internal/archtest` 的行数预算逼着遵守这条）、`detail.go`/`render.go`（逐请求详单）、`requests.go`（`vmr-requests.md` 索引）、`pricing.go`（定价 sidecar）。与审计记录格式强耦合：改动 `audit.Record` 结构必须同步改这个包及其测试。
+全部实现在 `internal/report` 一个包里：`aggregate.go`（聚合入口 `Build`）、`session.go`（会话/任务分组）、`rows.go`（`Report2` 及各 Row 类型 = `vmr-report.json` 的公开 schema）、`metrics.go`（派生指标 + `buildFindings`）、`render_doc.go`（章节运行顺序 + 共享的 `mdTable`）+ 一个章节一个文件的 `section_*.go`（**新增章节 = 新增文件，不是把某个文件改大**，`internal/archtest` 的行数预算逼着遵守这条）、`detail.go`/`render.go`（逐请求详单）、`requests.go`（`vmr-requests.md` 索引）、`pricing.go`（定价 sidecar）。与审计记录格式强耦合：改动 `audit.Record` 结构必须同步改这个包及其测试。
+
+**输出语言**：`vmr-report.md`/`vmr-requests*.md`/`details/*.md` 的文案（英文/中文，默认英文）来自渲染函数新增的 `lang i18n.Lang` 参数；`vmr-report.json` 的叙述性字段（`Finding.Finding` 等）固定英文，不随语言变化——`Build` 本身完全不接收 `lang`。完整机制（`internal/i18n` 架构、`report.yaml`/`-lang`、JSON/Markdown 语言契约）见 §4。
 
 ### 2.1 两遍读取：`AnalyzeSessions` + `Build`
 
@@ -85,7 +87,7 @@ vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
 
 ### 2.6 Markdown 渲染：九个编号章节
 
-`renderSummary`/`renderCostTokens`/`renderCostEstimate`/`renderReliability`/`renderLatency`/`renderWorkload`/`renderSessions`/`renderStickyEffect`/`renderEndpointValue`/`renderCompactions`/`renderEfficiency`/`renderRequestIndexLink`/`renderAppendix`（`render_doc.go` 的 `Markdown()` 固定运行顺序）：`§0` 摘要 + 自动亮点、`§1` 成本与 Token 经济、`§2` 成本估算、`§3` 可靠性、`§4` 延迟与吞吐、`§5` 负载分布、`§6` 会话与任务（含 `§6.5` Sticky 有效性、`§6.6` 端点性价比、`§6.7` Compaction 还原）、`§7` 效率与浪费、`§8` 请求详单入口，外加一段附录（数据源、百分位方法、`⭐` 含义）。`§7` 的自动发现表（`buildFindings`）扫描已完成聚合的各桶，挑出跨过阈值的浪费项（工具 schema 浪费、缓存未命中、定时任务冗余、输出截断率、慢请求占比、上下文膨胀），每条附一句可执行建议。
+`renderSummary`/`renderCostTokens`/`renderCostEstimate`/`renderReliability`/`renderLatency`/`renderWorkload`/`renderSessions`/`renderStickyEffect`/`renderEndpointValue`/`renderCompactions`/`renderEfficiency`/`renderRequestIndexLink`/`renderAppendix`（`render_doc.go` 的 `Markdown()` 固定运行顺序）：`§0` 摘要 + 自动亮点、`§1` 成本与 Token 经济、`§2` 成本估算、`§3` 可靠性、`§4` 延迟与吞吐、`§5` 负载分布、`§6` 会话与任务（含 `§6.5` Sticky 有效性、`§6.6` 端点性价比、`§6.7` Compaction 还原）、`§7` 效率与浪费、`§8` 请求详单入口，外加一段附录（数据源、百分位方法、`⭐` 含义）。`§7` 的自动发现表（`buildFindings`）扫描已完成聚合的各桶，挑出跨过阈值的浪费项（工具 schema 浪费、缓存未命中、定时任务冗余、输出截断率、慢请求占比、上下文膨胀），每条附一句可执行建议。每条 `Finding` 除展示文案外还带一个不随语言变化的稳定标识 `Code`（`FindingCode`，如 `tool_schema_waste`）——测试与任何程序化消费者都应该只依赖 `Code`，不依赖展示文案本身，见 §4.2。
 
 **`§6.5` Sticky 有效性的度量方法**：Sticky Model 存在只有一个理由——保持上游 prompt cache 处于热状态，这个章节就是验证它是否真的起作用的证据。**按结果（是否落在上一请求的同一端点）度量，不按机制**：一次触发了 sticky 指针但落到冷端点的请求，仍然算作"切换"；切换的具体原因（TTL 过期、健康冷却、条件路由淘汰、该模型未开 sticky）事后无法互相区分，因此这个章节**不区分切换原因**，只对比"延续上一端点"与"切换了端点"两组各自的缓存命中效率。结果按虚拟模型（sticky 配置的实际粒度）拆开；任一组样本量低于 20 时表格仍渲染但不给结论。
 
@@ -141,11 +143,13 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 
 ```
 vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare <id1,id2>]
-          [-include-partial] [-show-ungrouped] [file|glob]...
+          [-include-partial] [-show-ungrouped] [-lang en|zh] [-report-config report.yaml] [file|glob]...
 
 # -compare 专属，见"双 Journey 对比"节的 4a 落地记录：
 vmr story -compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
 ```
+
+**输出语言**：与 `vmr report` 同一套机制（见 §4），`Build`/`BuildChain`/`BuildAll` 多一个 `lang i18n.Lang` 参数。唯一的例外是 `journey.go` 自己的两个标题占位符（无真实用户指令时的兜底："(tool loop continuation)"/"(untitled)"）——它们**跟随** `lang`，不像 `Finding`/`MetricDiff` 那样固定英文：`Journey.Title`/`Task.Title` 本来就是用户原话的逐字引用、从不保证是英文，`Journey` 另有内容寻址的 `ID` 承担 identity 职责，`Title` 从未被当成 identity 用过，所以这里跟随语言不会重演"展示文案被当成 identity"的问题。`journey-<id>.json`/`compare-*.json` 里其余的叙述字段（`MetricDiff.Label`）仍然固定英文——`Compare` 本身不接收 `lang`（§4.2）。
 
 - **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览），`-journey <id前缀>` 渲染其中一个。
 - **`-render-all`**：批量渲染全部非断头候选，共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
@@ -202,7 +206,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 ### 3.7 双 Journey 对比（`internal/story/compare.go`）
 
-两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。
+两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。每行同时带一个不随语言变化的稳定标识 `Metric`（`MetricCode`，如 `model_ms`），与展示用的 `Label` 分离——`Label` 随 `-lang` 变化，`Metric` 不变（§4.2）。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。
 
 **4a 落地记录（compare 场景切片，2026-07-30）**：基于对 `docs/openclaw_dual_instance_analysis_2026-07-28_v1.0_deepseek-v4-pro.md` 那份人工分析报告的逐项复核（评审记录见 `docs/Step4a_LLM增强对比报告_实施计划.md` 的内联批注、落地计划见 `docs/Step4a_compare_LLM解读层_实施计划与执行记录_2026-07-29_sonnet-5.md`），`Comparison` 新增一个可选字段 `Extras *ComparisonExtras`（`ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics)` 计算），全部零 LLM 成本、直接从 `ctxgraph.Manifest`/`Step` 已有字段派生，不是新的数据采集：
 
@@ -233,7 +237,92 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 ---
 
-## 4. 关键决策与取舍
+## 4. 输出语言（多语言支持）
+
+`vmr report`/`vmr story` 支持英文（默认）与简体中文两种输出语言：当前目录放一份 `report.yaml`（`language: zh`）自动切换，或 `-lang en|zh` 覆盖（优先级更高）。`vmr story -compare` 的 LLM 解读层跟随同一个语言设置。不支持除中/英外的第三种语言（真正需要时再加，见 §4.7），不引入 i18n 框架（两种语言的静态文本，标准库足够），不本地化文件名/路径与 JSON 里的结构化字段。
+
+### 4.1 `internal/i18n`：按来源文件组织的类型化文本
+
+新增的零依赖叶子包，只装类型化的双语文本，不装渲染逻辑、不装业务判断——`internal/report`/`internal/story` 都合法依赖它，它不依赖两者，也不依赖 `internal/config`（语言这类"报表/叙事产物的展示偏好"不属于路由部署配置，`report`/`story` 本来就经常在没有 `config.yaml` 的场景下运行——见 §4.4）。
+
+文本**不放在一个大文件里，也不放在消费它的 `report`/`story` 包里**，而是按"它服务哪个源文件"一一对应拆成多个小文件，延续 `internal/report` 里 `section_*.go` 已经验证过的组织原则：`internal/i18n/report_workload.go` 对应 `section_workload.go`，`story_render.go` 对应 `render_md.go`，以此类推。每个文件导出一个"取当前语言这一份文本"的函数，返回一个只在这个文件里定义的 struct，不做成横跨全部章节的巨型 `Catalog`：
+
+```go
+// internal/i18n/report_workload.go
+type WorkloadText struct {
+    Title, ByModel, ByWorkload, Model, Protocol, Requests string
+}
+
+func Workload(lang Lang) WorkloadText {
+    if lang == ZH {
+        return WorkloadText{Title: "负载分布", ByModel: "按虚拟模型", ...}
+    }
+    return WorkloadText{Title: "Workload Distribution", ByModel: "By Virtual Model", ...}
+}
+```
+
+**字段拼错直接编译失败**（`t.Mdoel` 是编译错误，不是运行时空字符串）——这是选 struct 而不是 `map[string]string` 查表的唯一理由。跨章节复用的词（"模型"/"请求"这类在多个章节都出现的表头）不设全局公共词表文件——放在它们第一次出现的那个章节对应的文件里，其它章节重复声明一遍自己的字段。一个"公共词表"文件会制造一个和任何章节都没有一一对应关系的杂项容器；重复几个词条换来的是"改哪个章节的文案，只用打开哪个章节对应的一个文件"。
+
+对于**完整句子**（自动发现的结论、Journey 断裂提示、对比结论），struct 里放的不是格式串字段，而是**函数值字段**，中英文各自的语序完全自由：
+
+```go
+type EfficiencyText struct {
+    ToolSchemaWasteFinding func(shape string, requests int, wasteGB, utilPct string) FindingText
+}
+```
+
+这样 Go 编译器/`go vet` 的 printf 检查在编译期就独立核实每个语言分支自己的 `Sprintf` 调用，不需要额外写"两种语言占位符数量必须一致"的反射测试——不存在"两边共用同一个模板、其中一边漏填"的风险类别，因为压根没有共用模板。这与"一个格式串 + 两语言共享同一套 `%s` 占位符顺序"的方案相对：后者要求译者倒着数第几个占位符对应哪个参数，是一类肉眼难查的错误源。
+
+语言值像 `report.Build` 现有的 `pricing *Pricing` 参数一样，作为普通参数逐层显式传入，不用包级单例/`atomic.Pointer` 存一份"当前语言"给所有函数隐式读取——这与项目里唯一的包级可变状态先例（`adapter.registry`/`strategy.conditions`）解决的是本质不同的问题（"编译期注册的一组实现，运行时只读" vs "这一次调用要用哪个语言"），不应该套用同一个模式。代价是给约 15 个 `report`/`story` 的导出函数各加一个 `lang i18n.Lang` 参数——这些函数已经在传 `rep *Report2`/`o Row` 这类参数，多一个 token 不构成心智负担的质变。
+
+### 4.2 identity 与展示文案分离
+
+展示文案一度被当成 identity 用，且已经泄漏进 JSON——`internal/report/metrics.go` 的 `buildFindings` 产出的 `Finding{Finding: "工具 schema 浪费", ...}` 这个字符串本身既写进 `vmr-report.json` 的 `efficiency[].finding` 字段，又被 `aggregate_test.go` 直接当 identity 比较；`internal/story/compare.go` 的 `metricDiff("模型时间", ...)` 是同一个模式，12 个标签写进 `compare-*.json` 的 `rows[].label`，`compare_test.go` 同样按标签字符串断言。只要标题字符串还兼职 identity，语言一旦可配置，测试就会在切换语言时随机失败。
+
+修法：`Finding`/`MetricDiff` 各自新增一个不随语言变化的稳定编码字段——`Finding.Code`（`FindingCode`，如 `tool_schema_waste`）、`MetricDiff.Metric`（`MetricCode`，如 `model_ms`）——测试和任何未来的程序化消费者都只依赖编码，`Finding`/`Label` 变回纯展示文案。这一步在引入 `internal/i18n` 之前就独立完成、独立验证，把"改 identity"和"改语言"两件事的风险分开。
+
+### 4.3 JSON 契约：叙述字段固定英文，本地化只发生在渲染层
+
+`vmr-report.json`/`compare-*.json` 里的叙述性字段（`Finding.Finding`/`Implicated`/`Action`、`MetricDiff.Label`）遵循同一条规则：**落盘的 JSON 里永远是英文**，不随 `-lang` 变化；`-lang zh` 只改变 `.md` 里显示的文字，不改变 JSON 一个字节。JSON 因此是稳定的英文机器接口，Markdown 是本地化的人读文档——写一个读 `vmr-report.json` 的脚本时，不需要先搞清楚"这个字段会不会因为运行报告的人选了中文而变成中文"。
+
+两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构不同：
+- **`MetricDiff.Label`**（12 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary) Comparison` 完全不接收 `lang`，`Label` 是硬编码英文字面量直接进 JSON；渲染 `compare-*.md` 时，`RenderComparisonMarkdown(cmp, lang)` 拿每行的 `Metric` 编码，用一张纯静态的 `i18n.MetricLabel(lang, code)` 查表换成目标语言。
+- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子，如"gpt-tools-v2/12 请求"）：不能只查一张标题表——`buildFindings(rep *Report2, lang i18n.Lang) []Finding` 保留 `lang` 参数，但**被调用两次**：`report.Build` 内部通过不导出的包装函数 `buildFindingsForJSON(rep) { return buildFindings(rep, i18n.EN) }` 调用，固定传英文写进 JSON；`section_efficiency.go` 的 `renderEfficiency` 直接再调一次 `buildFindings(rep, lang)`，拿一份只用于本次渲染、渲染完即丢弃的本地化副本，不回写 `rep.Efficiency`。两次调用读的是同一个已聚合完毕的 `rep`，"挑出最浪费的那个 tool/workload"这一步的选择逻辑不依赖 `lang`，因此两次调用必然选中同一批 `Code`（`TestBuildFindingsIsDeterministic` 一类的既有测试已经覆盖"选择结果确定"这条前提）。`Build` 自身的签名和函数体因此完全不需要改动——`aggregate.go` 里唯一的改动是把调用目标从 `buildFindings(rep)` 换成 `buildFindingsForJSON(rep)`，不新增参数、不新增 import，`aggregate.go` 因此不用为这个特性在文件行数预算里再占一行。
+
+`story.Interpret`（LLM 解读层）的 system prompt 本身明确指示模型"用 en/中文回答"，见 §4.5。
+
+### 4.4 配置与命令行
+
+`vmr report`/`vmr story` 的受众是分析这批审计日志的人，往往不是部署路由进程的人：把日志从生产环境拷到自己笔记本上跑 `vmr report`，或者在 CI 的一次性容器里批量生成报告——这些场景下手头常常没有、也不该有 provider API key。语言配置因此**不进 `config.yaml`**，新建一份专属、轻量、非敏感的 `report.yaml`：
+
+```yaml
+# report.yaml — vmr report/vmr story 专属配置，与 config.yaml 完全独立
+language: zh   # 可选，默认 "en"；可选值 en | zh
+```
+
+默认路径是当前目录下的 `report.yaml`（和 `-pricing` 默认自动加载 `./pricing.yaml` 同构：不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——只有一两个字段，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
+
+`resolveLanguage` 的优先级：`-lang` > `report.yaml` 的 `language` > 默认 `en`。`-lang` 给了错值是硬错误（用户主动输入的，不是 best-effort 场景）；`report.yaml` 不存在时安静跳过；`report.yaml` 存在但解析失败或 `language` 值非法时降级为英文并打印一行 warning——但**只有在这份路径是用户用 `-report-config` 显式指定时**才对"文件不存在"本身也打印 warning（区别于自动探测 `./report.yaml`：那种情况下文件不存在是正常状态，不该出声；显式指定的路径缺失，多半是拼写错误，值得提醒）。
+
+### 4.5 LLM 解读层的语言联动
+
+关键约束：中文报告配中文解读，英文报告配英文解读。`internal/story/llm.go` 的 system prompt 因此拆成 `i18n.LLMSystemPrompt(lang)`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
+
+### 4.6 实现中发现的三个真实问题
+
+逐文件核对"这个字符串是不是真的被 i18n 覆盖了"时，发现三类设计阶段的文本盘点漏掉的真实硬编码中文，全部已修复——发现方式一致：不是重读设计文档，而是迁移完每个文件后跑 `grep -P '[\x{4e00}-\x{9fff}]'` 对该文件独立复查一遍，全部迁移完成后又做了一次全仓库级扫描：
+
+1. `internal/report/render.go` 的 `truncCell`/`renderMessageSection`——详单页表格截断提示（"共 %d 字符"）和消息占位符（"(空)"）当时被归类成"纯格式化助手函数"，没算进文案盘点；现在接收 `t i18n.DetailText` 参数。
+2. `internal/report/pricing.go` 的 `Disclaimer()`——定价免责声明是 `Pricing` 类型的一个方法，直接拼接中文字符串，不在任何一个 section 文件里，盘点时被漏掉；现在签名是 `Disclaimer(lang i18n.Lang) string`。
+3. 三处硬编码的中文顿号"、"——`detail.go` 的 `renderFactsLine`、`story/render_md.go` 的 `renderCompactionInfo` 都用 `strings.Join(xs, "、")` 无条件拼接列表，跟语言设置无关，英文报告里也会显示中文顿号；两侧文本 struct 各加了一个 `ListSep` 字段（`、` vs `, `）。
+
+### 4.7 扩展性
+
+新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的 `XxxText(lang)` 函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Xxx(lang)` 拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/story/profile` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
+
+---
+
+## 5. 关键决策与取舍
 
 | 决策 | 备选 | 取舍逻辑 |
 | --- | --- | --- |
@@ -248,8 +337,11 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | `vmr report`/`vmr story` 内部对同一批文件各跑一次独立扫描（`AnalyzeSessions` 内的 `ctxgraph.Scan` 通道 + 报表自己的 `collect()` 通道），用 goroutine 并发而非合并成一趟 | 合并成单一遍历，两边共享同一份解析结果 | 合并需要把两套本来独立演进的特征提取（`ctxgraph` 的哈希/lineage vs 报表的工具签名/角色统计等）耦合进同一个循环体，代价是架构复杂度；并发跑两条独立通道用 goroutine 就能把"审计文件读两遍"的墙钟代价从翻倍压到大致不变，是当前语料规模（7112 条记录）下更划算的取舍。若未来语料规模显著增长到 CPU 而非墙钟成为瓶颈，这里是第一个该回头看的地方 |
 | 报表的独立 compaction 文本匹配（`linkCompactions`）与 `ctxgraph` 的结构化缝合（`linkStitchedLineages`）并存，不用后者取代前者 | 统一成一套机制 | 两者覆盖不同场景：结构化缝合基于精确哈希匹配，对"零字面重合的历史重写"没有信号；文本匹配能覆盖这个盲区，代价是精度较低。合并会让报表在最需要它的场景（标准的独立摘要调用）里失去唯一还有效的信号 |
 | `internal/chatmsg` 承接三方（`ctxgraph`/`story`/`report`）共享的消息解析/实体抽取，不各自维护一份 | 各包各自实现 | 曾经真实发生过：`extractEntities` 一度是 `story` 包的私有函数，`report` 需要同样的能力时面临"复制一份"或"下沉"的选择——下沉到两者都已依赖的 `chatmsg`，换来的是以后只有一处规则要维护，不增加任何一方的依赖面 |
+| 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`story` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |
+| 叙述字段（`Finding.Finding`/`MetricDiff.Label`）在 JSON 里固定英文，只有 Markdown 跟随 `-lang`（§4.3） | JSON 也跟随语言 | JSON 是给脚本消费的机器接口；固定英文让任何下游消费者不用先判断"这次报告是用哪个语言生成的"再解析同一个字段 |
+| 动态拼句用函数值字段（`func(args...) FindingText`），不用位置化占位符模板（§4.1） | 一个格式串 + 两语言共享同一套 `%s` 占位符顺序 | 中英文语序天然不同；共享模板要求译者数第几个占位符对应哪个参数，是一类肉眼难查的错误源，`go vet` 的 printf 检查覆盖不到"两边模板参数对不上"这类错误。函数字段让每个语言分支各自是独立类型检查过的 `Sprintf` 调用 |
 
-## 5. 实测结论（真实语料，7112 条记录 / 809K 条消息实例 / 752 会话）
+## 6. 实测结论（真实语料，7112 条记录 / 809K 条消息实例 / 752 会话）
 
 - **只读末轮消息丢失 26%–99% 的内容**（6 个真实会话实测）——任何"取末轮/按 session 分组/认模板"的简化方案都会给出错误结论。
 - **95.86% 的相邻编辑是纯追加，真正的断裂只占约 1%**，但集中在最长、最值得精读的会话里（例：一个 444 请求的会话内部断裂 10 次）——这是"切分成本低、缝合成本高"这条架构判断的实测依据，也是为什么大部分任务不需要缝合就能得到完整叙事。
@@ -258,7 +350,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 - **一致性验证**：752 个会话中 718 个与单个 lineage 一一对应，34 个被 `ctxgraph` 正确切成多段（对应上面的隐藏断裂类型）；lineage 缝合在同一语料上 68 个断裂中 62 个成功缝合、6 个正确识别为"疑似同源"未缝合、0 个跨桶时间窗违规。
 - **F9 因果配对不变量**：全语料 406534 个 `tool_call`/`tool_result` 配对，零孤儿。
 
-## 6. 已知限制、暂不处理的事项
+## 7. 已知限制、暂不处理的事项
 
 已识别、但判定"动它的收益低于扰动成本，或数据不足以支撑动它"的项。每项都不是 bug，列在这里是为了下次有人重新发现它时不必从头论证一遍。
 
@@ -269,7 +361,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | `report` 的独立 compaction 文本匹配（`linkCompactions`）用 200 字节子串比对，理论上存在误配对的可能 | 实测语料上未观测到一例误配对 | 提高比对长度/加校验会增加误报"没匹配上"的风险（真实摘要文本本身会被压缩改写）；现阶段的精度换取的是覆盖率，等真的观测到一例误配对再收紧 |
 | `vmr story` 对"跨 SessKey 桶、零字面重合的历史重写"没有兜底信号（§3.8） | `vmr report` 的独立文本匹配能覆盖一部分同类场景，`vmr story` 没有对应机制 | 两个产物的输入相同，但 `vmr story` 目前没有移植 `linkCompactions` 那一类文本匹配信号；这类 Journey 会渲染成一个诚实的断头而不是错误缝合，符合"宁可断开"的原则，不算 bug，只是覆盖率上限还没到 |
 
-## 7. 可选扩展（尚未实现）
+## 8. 可选扩展（尚未实现）
 
 以下模块设计上互不依赖，可以任意挑选、任意顺序实现，不阻塞彼此：
 

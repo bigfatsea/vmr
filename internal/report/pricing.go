@@ -43,6 +43,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"vmr/internal/i18n"
 )
 
 // Pricing is the optional sidecar config. Nil/absent => no $ anywhere.
@@ -140,7 +142,7 @@ func (p *Pricing) RateFor(provider, model string, ts time.Time) (PricingRate, bo
 }
 
 // Disclaimer renders the cost-estimate disclaimer for the appendix / footer.
-func (p *Pricing) Disclaimer() string {
+func (p *Pricing) Disclaimer(lang i18n.Lang) string {
 	if p == nil {
 		return ""
 	}
@@ -152,7 +154,7 @@ func (p *Pricing) Disclaimer() string {
 	if cur == "" {
 		cur = "CNY"
 	}
-	return fmt.Sprintf("成本估算基于 %s 的价格配置（货币 %s），不代表报告所涵盖历史请求实际发生时的价格。", asOf, cur)
+	return i18n.Cost(lang).Disclaimer(asOf, cur)
 }
 
 // ---- on-disk shape ----

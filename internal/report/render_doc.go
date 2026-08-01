@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 // The report document skeleton: the section running order, the summary and
 // highlights that open it, the closing pointers, and the one table
@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"vmr/internal/i18n"
 )
 
 // mdTable collapses the "write a header row + separator row, then one row
@@ -57,18 +59,22 @@ func (t *mdTable) row(cells ...string) {
 	t.w("%s", "| "+strings.Join(cells, " | ")+" |\n")
 }
 
-// Markdown renders the full vmr-report.md document.
-func Markdown(rep *Report2) string {
+// Markdown renders the full vmr-report.md document in lang — see
+// docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section:
+// every narrative string comes from internal/i18n, looked up once per
+// section via that section's own Xxx(lang) bundle; nothing here or in any
+// section_*.go file hardcodes a language.
+func Markdown(rep *Report2, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	o := rep.Overall
+	t := i18n.Doc(lang)
 
 	// ---- header ----
-	w("# VMR 用量报告\n\n")
-	w("数据源: %s · format %d · %d 条记录（%d 坏行）· %s – %s\n",
-		strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
-		cut(rep.Meta.From, 19), cut(rep.Meta.To, 19))
-	w("详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json")
+	w("# %s\n\n", t.Title)
+	w("%s\n", t.MetaLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
+		cut(rep.Meta.From, 19), cut(rep.Meta.To, 19)))
+	w("%s", t.DetailLinkLine)
 	withSibling := clientsWithSiblingFile(rep)
 	for _, c := range rep.ByClient {
 		if withSibling[c.ClientKey] {
@@ -77,26 +83,28 @@ func Markdown(rep *Report2) string {
 	}
 	w("\n\n")
 
-	renderSummary(w, rep, o)
-	renderCostTokens(w, rep, o)
-	renderCostEstimate(w, rep)
-	renderReliability(w, rep, o)
-	renderLatency(w, rep, o)
-	renderWorkload(w, rep, o)
-	renderSessions(w, rep)
-	renderStickyEffect(w, rep)
-	renderEndpointValue(w, rep)
-	renderCompactions(w, rep)
-	renderEfficiency(w, rep, o)
-	renderRequestIndexLink(w, rep)
-	renderAppendix(w, rep)
+	renderSummary(w, rep, o, lang)
+	renderCostTokens(w, rep, o, lang)
+	renderCostEstimate(w, rep, lang)
+	renderReliability(w, rep, o, lang)
+	renderLatency(w, rep, o, lang)
+	renderWorkload(w, rep, o, lang)
+	renderSessions(w, rep, lang)
+	renderStickyEffect(w, rep, lang)
+	renderEndpointValue(w, rep, lang)
+	renderCompactions(w, rep, lang)
+	renderEfficiency(w, rep, o, lang)
+	renderRequestIndexLink(w, rep, lang)
+	renderAppendix(w, rep, lang)
 	return b.String()
 }
 
 // ---- §0 摘要 ----
-func renderSummary(w func(string, ...any), rep *Report2, o Row) {
-	w("## §0 摘要\n\n")
-	tbl := newTable(w, "请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时")
+func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Doc(lang)
+	w("## %s\n\n", t.SummaryTitle)
+	h := t.SummaryHeaders
+	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4])
 	p95n := o.RequestsWithDur
 	tbl.row(fmt.Sprintf("%d（fallback %d / trunc %d）", o.Requests, o.Fallbacks, o.Truncated),
 		pctStr2(o.OK, o.Requests),
@@ -104,30 +112,29 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row) {
 		cacheEffCell(o.CacheEfficiency, o.TokensKnown, o.Requests),
 		durCell(o.DurMSP95, p95n))
 	w("\n")
-	w("**亮点 (auto):**\n")
-	for _, h := range highlights(rep) {
+	w("%s\n", t.HighlightsAuto)
+	for _, h := range highlights(rep, lang) {
 		w("- %s\n", h)
 	}
 	w("\n")
 }
 
 // highlights generates ≤3 auto highlights from the finished buckets.
-func highlights(rep *Report2) []string {
+func highlights(rep *Report2, lang i18n.Lang) []string {
+	t := i18n.Doc(lang)
 	var out []string
 	// 1. workload with low cache-eff
 	for _, wl := range rep.Workloads {
 		if wl.TokensKnown > 0 && wl.CacheEfficiency < 0.30 {
-			out = append(out, fmt.Sprintf("⚠️ **%s 工作负载缓存效率 %s** - %s fresh tokens（占该负载输入大头）",
-				wl.Class, pctStr(wl.CacheEfficiency), fmtTokens(wl.TokensInFresh)))
+			out = append(out, t.CacheWarn(wl.Class, pctStr(wl.CacheEfficiency), fmtTokens(wl.TokensInFresh)))
 			break
 		}
 	}
 	// 2. tool shape with low utilization
-	for _, t := range rep.Tools {
-		if t.Requests > 0 && t.DeclareUtilization < 0.20 && t.SchemaBytesShipped > 0 {
-			out = append(out, fmt.Sprintf("⚠️ **工具声明 %s** - 跨 %d 请求发送 %s schema，利用率 %s（%d 个从未调用）",
-				t.Shape, t.Requests, fmtBytesGB(t.SchemaBytesShipped),
-				pctStr(t.DeclareUtilization), len(t.NeverCalled)))
+	for _, tl := range rep.Tools {
+		if tl.Requests > 0 && tl.DeclareUtilization < 0.20 && tl.SchemaBytesShipped > 0 {
+			out = append(out, t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
+				pctStr(tl.DeclareUtilization), len(tl.NeverCalled)))
 			break
 		}
 	}
@@ -140,12 +147,11 @@ func highlights(rep *Report2) []string {
 		}
 	}
 	if worst != nil && worst.Attempts >= 4 && worst.ErrorRate > 5 {
-		top := topErrorClass(worst)
-		out = append(out, fmt.Sprintf("⚠️ **端点 %s 错误率 %s/100**（最差）%s",
-			worst.Endpoint, strconv.FormatFloat(float64(worst.ErrorRate), 'f', 1, 64), top))
+		top := topErrorClass(worst, lang)
+		out = append(out, t.EndpointWarn(worst.Endpoint, strconv.FormatFloat(float64(worst.ErrorRate), 'f', 1, 64), top))
 	}
 	if len(out) == 0 {
-		out = append(out, "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）")
+		out = append(out, t.NoAnomalies)
 	}
 	return out
 }
@@ -168,18 +174,19 @@ func topErrorClassCount(classes map[string]int) (cls string, n int) {
 	return cls, n
 }
 
-func topErrorClass(e *EndpointRow) string {
+func topErrorClass(e *EndpointRow, lang i18n.Lang) string {
 	if len(e.ErrorClasses) == 0 {
 		return ""
 	}
 	cls, n := topErrorClassCount(e.ErrorClasses)
-	return "，主因 " + cls + " ×" + strconv.Itoa(n)
+	return i18n.Doc(lang).TopErrorSuffix(cls, n)
 }
 
 // ---- §8 请求详单 ----
-func renderRequestIndexLink(w func(string, ...any), rep *Report2) {
-	w("## §8 请求详单\n\n")
-	w("每条记录（Chat User -> Session -> Task -> Turn）见 [vmr-requests.md](./vmr-requests.md)。\n")
+func renderRequestIndexLink(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	t := i18n.Doc(lang)
+	w("## %s\n\n", t.RequestIndexTitle)
+	w("%s\n", t.RequestIndexBody)
 	withSibling := clientsWithSiblingFile(rep)
 	first := true
 	for _, c := range rep.ByClient {
@@ -187,7 +194,7 @@ func renderRequestIndexLink(w func(string, ...any), rep *Report2) {
 			continue
 		}
 		if first {
-			w("per-client: ")
+			w("%s", t.PerClientLabel)
 			first = false
 		} else {
 			w(" · ")
@@ -197,20 +204,21 @@ func renderRequestIndexLink(w func(string, ...any), rep *Report2) {
 	if !first {
 		w("\n")
 	}
-	w("单请求全量捕获（req/resp/SSE）见 `details/*.md`。\n\n")
+	w("%s", t.DetailsCaptureBody)
 }
 
 // ---- 附录 ----
-func renderAppendix(w func(string, ...any), rep *Report2) {
-	w("## 附录 数据源与方法论\n\n")
-	w("- 输入: %s · format %d · %d 记录 / %d 坏行\n", strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors)
-	w("- 时段: %s – %s (本地时区)\n", cut(rep.Meta.From, 19), cut(rep.Meta.To, 19))
-	w("- 百分位: %s\n", rep.Meta.PercentileMethod)
-	w("- n 基准: 每个百分位标注 n（= ttft_known / requests_with_dur / stream_known）；n<20 标 ⚠️low-n。\n")
-	w("- 比值低置信度: cache_efficiency 等比值指标的分母 / 总请求数 < 90%% 时标注脚注 ¹。\n")
-	w("- ⭐ 标记: 该列为衍生/预估指标（非上游直接返回值），解读时请结合样本量与口径说明。\n")
-	w("- 计费口径: fresh + cache_write(溢价) + out；缓存命中按各厂免费/极低价。%s\n", orDash2(rep.Pricing == nil, "未配置定价时不显示 $。", ""))
-	w("- 慢请求阈值: %ds\n", rep.Meta.SlowThreshold/1000)
+func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	t := i18n.Doc(lang)
+	w("## %s\n\n", t.AppendixTitle)
+	w("%s", t.AppendixInputLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors))
+	w("%s", t.AppendixPeriodLine(cut(rep.Meta.From, 19), cut(rep.Meta.To, 19)))
+	w("%s", t.AppendixPercentile(rep.Meta.PercentileMethod))
+	w("%s", t.AppendixNBase)
+	w("%s", t.AppendixLowConf)
+	w("%s", t.AppendixStarMark)
+	w("%s", t.AppendixBillingLine(orDash2(rep.Pricing == nil, t.AppendixNoPricing, "")))
+	w("%s", t.AppendixSlowThresh(rep.Meta.SlowThreshold/1000))
 }
 
 // ---- cell/format helpers ----

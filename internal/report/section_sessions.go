@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §6 会话: per-session rollups and the compaction chains that link a
 // summarized session to the one continuing from it.
@@ -7,6 +7,8 @@ package report
 import (
 	"fmt"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §6 会话与任务 ----
@@ -14,8 +16,9 @@ import (
 // heartbeat/dream_diary/… - live in vmr-requests.md's own 定时任务 rollups,
 // see requests.go); grouped by client (Chat User), matching vmr-requests.md's
 // grouping, so a "类" column would be redundant (every row is interactive).
-func renderSessions(w func(string, ...any), rep *Report2) {
-	w("## §6 会话与任务\n\n")
+func renderSessions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	t := i18n.Sessions(lang)
+	w("## %s\n\n", t.Title)
 	var interactive []SessionRow
 	for _, s := range rep.Sessions {
 		if s.Class == "interactive" {
@@ -23,8 +26,8 @@ func renderSessions(w func(string, ...any), rep *Report2) {
 		}
 	}
 	if len(interactive) == 0 {
-		w("（无 interactive 会话）\n\n")
-		renderCompactionChains(w, rep)
+		w("%s", t.NoInteractive)
+		renderCompactionChains(w, rep, lang)
 		return
 	}
 
@@ -59,29 +62,30 @@ func renderSessions(w func(string, ...any), rep *Report2) {
 		}
 	}
 
+	th := t.TableHeaders
 	for _, ck := range clientOrder {
 		rows := byClient[ck]
 		if len(rows) == 0 {
 			continue
 		}
 		w("**%s**\n\n", ck)
-		tbl := newTable(w, "会话", "标题", "轮", "任务", "fresh/cached/out", "结果")
+		tbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
 		for _, s := range rows {
-			renderSessionRow(tbl, s)
+			renderSessionRow(tbl, s, t)
 		}
 		w("\n")
 	}
 	// compaction chains: mermaid for chains ≥3 nodes
-	renderCompactionChains(w, rep)
+	renderCompactionChains(w, rep, lang)
 }
 
-func renderSessionRow(tbl *mdTable, s SessionRow) {
+func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
 	outcome := "ok"
 	if s.Errors > 0 {
-		outcome = fmt.Sprintf("ok (%d error)", s.Errors)
+		outcome = t.OutcomeOKErrors(s.Errors)
 	}
 	if s.Fallbacks > 0 {
-		outcome += fmt.Sprintf(" · %d fallback", s.Fallbacks)
+		outcome += t.OutcomeFallback(s.Fallbacks)
 	}
 	tbl.row(s.ID, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtTokens(s.TokensInFresh), fmtTokens(s.TokensInCached), fmtTokens(s.TokensOut)),
@@ -102,7 +106,8 @@ func truncateTitle(s string, maxRunes int) string {
 // renderCompactionChains builds head->current chains from SessionRow.ContinuedFrom
 // and renders a mermaid flowchart for any chain with ≥3 nodes (≥2 compaction
 // hops). Shorter chains are noted inline as text. (V2 A3 / M5)
-func renderCompactionChains(w func(string, ...any), rep *Report2) {
+func renderCompactionChains(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	t := i18n.Sessions(lang)
 	byID := map[string]*SessionRow{}
 	for i := range rep.Sessions {
 		byID[rep.Sessions[i].ID] = &rep.Sessions[i]
@@ -139,7 +144,7 @@ func renderCompactionChains(w func(string, ...any), rep *Report2) {
 			w("```\n\n")
 		} else if len(chain) == 2 {
 			// text arrow, inline note
-			w("> %s ← %s（单次 compaction）\n\n", chain[1], chain[0])
+			w("%s", t.CompactionChainNote(chain[1], chain[0]))
 		}
 	}
 }

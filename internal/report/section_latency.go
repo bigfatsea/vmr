@@ -1,20 +1,22 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §4 延迟: TTFT / total duration / stream duration percentiles, each
 // carrying the n it was computed from.
 package report
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §4 延迟与吞吐 ----
-func renderLatency(w func(string, ...any), rep *Report2, o Row) {
-	w("## §4 延迟与吞吐\n\n")
-	tbl := newTable(w, "模型", "协议", "ttft p50/p95 (n)", "dur p50/p95/max (n)",
-		fmt.Sprintf("slow>%ds⭐", SlowThresholdMS/1000), "tok/s")
+func renderLatency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Latency(lang)
+	w("## %s\n\n", t.Title)
+	h := t.Headers(SlowThresholdMS / 1000)
+	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4], h[5])
 	byModelSpeed := append([]Row(nil), rep.ByModel...)
 	sort.SliceStable(byModelSpeed, func(i, j int) bool { return byModelSpeed[i].TokOutPerSec > byModelSpeed[j].TokOutPerSec })
 	for _, m := range byModelSpeed {
@@ -24,21 +26,20 @@ func renderLatency(w func(string, ...any), rep *Report2, o Row) {
 			strconv.Itoa(m.SlowRequests),
 			tokPerSec(m.TokOutPerSec))
 	}
-	w("\n> 全局 p95 dur %s，max %s。按 tok/s 降序排列。\n",
-		fmtDurMS(o.DurMSP95), fmtDurMS(o.DurMSMax))
-	w("> 若 coding 的慢主要来自长流式输出，而非首字延迟，参见每模型的 ttft vs dur 差值。\n\n")
+	w("%s", t.SummaryNote(fmtDurMS(o.DurMSP95), fmtDurMS(o.DurMSMax)))
+	w("%s", t.StreamNote)
 
 	// by endpoint, split by protocol (跨日合并, same basis as §3 端点健康), each
 	// group sorted by tok/s descending
 	if len(rep.EndpointsAll) > 0 {
-		w("**按端点**（跨日合并）\n\n")
+		w("%s\n\n", t.ByEndpointTitle)
 		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		eh := t.EndpointHeaders(SlowThresholdMS / 1000)
 		for _, p := range protocols {
 			rows := append([]EndpointRow(nil), byProto[p]...)
 			sort.SliceStable(rows, func(i, j int) bool { return rows[i].TokOutPerSec > rows[j].TokOutPerSec })
 			w("*%s*\n\n", p)
-			epTbl := newTable(w, "端点", "ttft p50/p95 (n)", "dur p50/p95/max (n)",
-				fmt.Sprintf("slow>%ds⭐", SlowThresholdMS/1000), "tok/s")
+			epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4])
 			for _, e := range rows {
 				epTbl.row(e.Endpoint,
 					ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),

@@ -6,6 +6,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -21,14 +22,14 @@ func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 // candidate in a listing: one FetchRecords per chain forces one full-file
 // scan per chain even when many chains' roots share the same source file
 // (design-doc review §1.2).
-func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile) (string, error) {
+func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (string, error) {
 	root := chain[0].Manifests[0]
 	loc := ctxgraph.Loc{Path: root.Path, Line: root.Line}
 	recs, err := ctxgraph.FetchRecords([]ctxgraph.Loc{loc})
 	if err != nil {
 		return "", err
 	}
-	return titleFromRecord(recs[loc], prof), nil
+	return titleFromRecord(recs[loc], prof, lang), nil
 }
 
 // PreviewTitles is PreviewTitle for many chains at once, batching every
@@ -42,7 +43,7 @@ func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile) (string, erro
 // it"). The result is keyed by each chain's TAIL lineage (chain's last
 // element) — the same pointer ListCandidates returned and callers already
 // use as the candidate's identity.
-func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile) (map[*ctxgraph.Lineage]string, error) {
+func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {
 	locs := make([]ctxgraph.Loc, len(chains))
 	for i, chain := range chains {
 		root := chain[0].Manifests[0]
@@ -55,18 +56,19 @@ func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile) (map[*ctx
 	out := make(map[*ctxgraph.Lineage]string, len(chains))
 	for i, chain := range chains {
 		tail := chain[len(chain)-1]
-		out[tail] = titleFromRecord(recs[locs[i]], prof)
+		out[tail] = titleFromRecord(recs[locs[i]], prof, lang)
 	}
 	return out, nil
 }
 
-func titleFromRecord(rec *audit.Record, prof profile.Profile) string {
+func titleFromRecord(rec *audit.Record, prof profile.Profile, lang i18n.Lang) string {
+	st := i18n.Story(lang)
 	if rec == nil {
-		return "(无法读取)"
+		return st.UnreadableTitle
 	}
 	body, ok := rec.Client.Request.Body.(map[string]any)
 	if !ok {
-		return "(无标题)"
+		return st.NoTitle
 	}
 	msgs := chatmsg.Messages(body)
 	rawMsgs, _ := body["messages"].([]any)
@@ -79,5 +81,5 @@ func titleFromRecord(rec *audit.Record, prof profile.Profile) string {
 			return preview(text)
 		}
 	}
-	return "(无标题)"
+	return st.NoTitle
 }

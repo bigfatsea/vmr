@@ -18,6 +18,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
 )
 
 // previewLen bounds the one-line preview shown in a <details> summary.
@@ -80,12 +81,12 @@ func escapeCell(s string) string {
 }
 
 // truncCell caps a table-cell value, noting the original length.
-func truncCell(s string, n int) string {
+func truncCell(s string, n int, t i18n.DetailText) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
 	}
-	return fmt.Sprintf("%s… (共 %d 字符)", string(r[:n]), len(r))
+	return string(r[:n]) + t.TruncSuffix(len(r))
 }
 
 // fmtBytes renders a byte count human-readably — thin local alias for
@@ -225,14 +226,13 @@ func roleStatLine(chars map[string]int64, withChars, bold bool) string {
 // "is this expanded or folded?". prefix is prepended to the summary line
 // (🆕 for messages added by this turn vs the parent) and is "" for
 // historical context.
-func renderMessageSection(idx int, m chatMessage, prefix string) string {
+func renderMessageSection(idx int, m chatMessage, prefix string, t i18n.DetailText) string {
 	head := fmt.Sprintf("#%d %s", idx, m.Role)
 	if m.Text == "" {
-		return fmt.Sprintf("%s**%s** · (空)\n", prefix, head)
+		return t.EmptyMessage(prefix, head)
 	}
 	chars := len([]rune(m.Text))
-	summary := fmt.Sprintf("<b>%s%s</b> · %s 字符 · %s",
-		prefix, head, fmtCount(chars), escapeHTML(preview(m.Text)))
+	summary := t.MessageSummary(prefix, head, fmtCount(chars), escapeHTML(preview(m.Text)))
 	return details(summary, codeFence(m.Text))
 }
 

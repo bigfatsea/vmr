@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -77,7 +78,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	pathA := writeJSONL(t, []audit.Record{recA})
-	jA, err := Build(onlyLineage(t, pathA), profile.Generic)
+	jA, err := Build(onlyLineage(t, pathA), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recB := mkExtrasRec(atB, "system prompt B", "do the research", "openai:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
 	pathB := writeJSONL(t, []audit.Record{recB})
-	jB, err := Build(onlyLineage(t, pathB), profile.Generic)
+	jB, err := Build(onlyLineage(t, pathB), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	rec := mkExtrasRec(at, long, "hi", "openai:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
-	j, err := Build(onlyLineage(t, path), profile.Generic)
+	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 	rec2 := mkExtrasRec(at2, "sys", "go", "openai:p:m", 110, 10, 0, "stop",
 		[]map[string]any{writeToolCall("write", "final.md", "the real final content")})
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	j, err := Build(onlyLineage(t, path), profile.Generic)
+	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestCompareBasicDiff(t *testing.T) {
 
 	var modelRow *MetricDiff
 	for i := range cmp.Rows {
-		if cmp.Rows[i].Label == "模型时间" {
+		if cmp.Rows[i].Metric == MetricModelMS {
 			modelRow = &cmp.Rows[i]
 		}
 	}
@@ -244,7 +245,7 @@ func TestCompareBasicDiff(t *testing.T) {
 	// (NetWorkingMS = ModelMS+AgentExecMS) legitimately co-varies with 模型时间
 	// here, so it's excluded from this identical-rows check too.
 	for _, r := range cmp.Rows {
-		if r.Label == "模型时间" || r.Label == "净工作时长" {
+		if r.Metric == MetricModelMS || r.Metric == MetricNetWorkingMS {
 			continue
 		}
 		if r.Notable {
@@ -274,7 +275,7 @@ func TestCompareSmallDeltaNotNotable(t *testing.T) {
 	b := JourneySummary{Metrics: Metrics{ToolCallCount: 1}}
 	cmp := Compare(a, b)
 	for _, r := range cmp.Rows {
-		if r.Label == "工具调用次数" && r.Notable {
+		if r.Metric == MetricToolCallCount && r.Notable {
 			t.Error("0 vs 1 tool call should not be notable (below the count floor)")
 		}
 	}
@@ -301,9 +302,9 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 		Metrics: Metrics{ModelMS: 1000, ToolCallDist: []ToolCallStat{{Name: "read", Count: 5}}}}
 	b := JourneySummary{ID: "j-b", Title: "跑B股研究", From: time.Now(), To: time.Now(),
 		Metrics: Metrics{ModelMS: 9000, ToolCallDist: []ToolCallStat{{Name: "read", Count: 1}}}}
-	md := RenderComparisonMarkdown(Compare(a, b))
+	md := RenderComparisonMarkdown(Compare(a, b), i18n.EN)
 
-	for _, want := range []string{"j-a", "j-b", "跑A股研究", "跑B股研究", "模型时间", "⚠️", "read"} {
+	for _, want := range []string{"j-a", "j-b", "跑A股研究", "跑B股研究", "Model Time", "⚠️", "read"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered comparison missing %q:\n%s", want, md)
 		}
@@ -311,7 +312,7 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 	// Without Extras (the existing lightweight JourneySummary-only path),
 	// none of the new rule-layer sections should appear — Extras is purely
 	// additive, never a requirement.
-	for _, absent := range []string{"## 模型与端点核查", "## Prompt 缓存命中率", "## System Prompt 规模与稳定性", "## 最终交付物对比", "## 证据溯源"} {
+	for _, absent := range []string{"## Model & Endpoint Check", "## Prompt Cache Hit Rate", "## System Prompt Size & Stability", "## Final Deliverable Comparison", "## Evidence Provenance"} {
 		if strings.Contains(md, absent) {
 			t.Errorf("rendered comparison without Extras should not contain %q:\n%s", absent, md)
 		}
@@ -325,14 +326,14 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
 	recA := mkExtrasRec(atA, "system prompt A", "research", "openai:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
-	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), profile.Generic)
+	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
 	recB := mkExtrasRec(atB, "system prompt B", "research", "openai:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
-	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), profile.Generic)
+	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}
@@ -342,13 +343,13 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics)
 	cmp.Extras = &extras
 
-	md := RenderComparisonMarkdown(cmp)
+	md := RenderComparisonMarkdown(cmp, i18n.EN)
 	for _, want := range []string{
-		"## 模型与端点核查", "openai:opencode:deepseek-v4-pro", "openai:minimax:MiniMax-M3", "不同",
-		"## Prompt 缓存命中率", "80%",
-		"## System Prompt 规模与稳定性", "system prompt A", "system prompt B",
-		"## 最终交付物对比", "findings here", "未识别到可比较的最终交付物",
-		"净工作时长",
+		"## Model & Endpoint Check", "openai:opencode:deepseek-v4-pro", "openai:minimax:MiniMax-M3", "differ",
+		"## Prompt Cache Hit Rate", "80%",
+		"## System Prompt Size & Stability", "system prompt A", "system prompt B",
+		"## Final Deliverable Comparison", "findings here", "no comparable final deliverable identified",
+		"Net Working Time",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered comparison (with Extras) missing %q:\n%s", want, md)
@@ -358,8 +359,8 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	// it itself — see TestRenderComparisonMarkdown_WithSources for the
 	// populated case), so the evidence-provenance section must not render a
 	// heading with nothing under it.
-	if strings.Contains(md, "## 证据溯源") {
-		t.Errorf("rendered comparison without Extras.Sources should not contain the 证据溯源 section:\n%s", md)
+	if strings.Contains(md, "## Evidence Provenance") {
+		t.Errorf("rendered comparison without Extras.Sources should not contain the Evidence Provenance section:\n%s", md)
 	}
 }
 
@@ -377,8 +378,8 @@ func TestRenderComparisonMarkdown_WithSources(t *testing.T) {
 	extras := ComparisonExtras{Sources: []string{"logs/vmr-audit-2026-07-28.jsonl.zst", "logs/vmr-audit-2026-07-29.jsonl"}}
 	cmp.Extras = &extras
 
-	md := RenderComparisonMarkdown(cmp)
-	for _, want := range []string{"## 证据溯源", "logs/vmr-audit-2026-07-28.jsonl.zst", "logs/vmr-audit-2026-07-29.jsonl"} {
+	md := RenderComparisonMarkdown(cmp, i18n.EN)
+	for _, want := range []string{"## Evidence Provenance", "logs/vmr-audit-2026-07-28.jsonl.zst", "logs/vmr-audit-2026-07-29.jsonl"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered comparison with Extras.Sources missing %q:\n%s", want, md)
 		}

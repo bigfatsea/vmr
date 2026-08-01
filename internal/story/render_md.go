@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:30, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 package story
 
@@ -10,32 +10,33 @@ import (
 
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
 )
 
-// RenderMarkdown renders j as a self-contained Markdown document: the event
-// stream organized by Task/Step, each Step's genuinely-new content shown
-// inline and its full recorded body available in a folded <details> block.
-// Purely a view over already-computed facts (Task/Step/Event) — no
-// judgment calls happen here, only formatting (design doc §3.3's layering:
-// this is the fact-layer renderer; a narrate-layer on top is Phase C).
-func RenderMarkdown(j *Journey) string {
+// RenderMarkdown renders j as a self-contained Markdown document in lang:
+// the event stream organized by Task/Step, each Step's genuinely-new
+// content shown inline and its full recorded body available in a folded
+// <details> block. Purely a view over already-computed facts (Task/Step/
+// Event) — no judgment calls happen here, only formatting (design doc
+// §3.3's layering: this is the fact-layer renderer; a narrate-layer on top
+// is Phase C).
+func RenderMarkdown(j *Journey, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	t := i18n.Story(lang)
 
 	w("# Journey %s\n\n", j.ID)
 	w("> %s\n\n", j.Title)
-	w("> %d 任务 · %d 轮 · %s → %s\n\n",
-		len(j.Tasks), stepCount(j), j.From.Format("2006-01-02 15:04:05"), j.To.Format("15:04:05"))
+	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.Format("2006-01-02 15:04:05"), j.To.Format("15:04:05")))
 
 	if j.Break != nil {
-		w("> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（%s：%s；%s）——已尝试自动缝合到更早的片段，但没有找到证据充分的前驱（覆盖率/置信度不够，或确认没有前驱），两段之间的关系仍未确认，只如实标出断点，不强行缝合（宁可断开，不要错连）。\n\n",
-			j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind), editStatsHint(j.Break.Edit))
+		w("%s", t.BreakWarning(j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind, t), editStatsHint(j.Break.Edit, t)))
 	}
 
 	for ti, task := range j.Tasks {
 		w("## t%02d · %s\n\n", ti+1, task.Title)
 		for _, step := range task.Steps {
-			renderStep(w, step)
+			renderStep(w, step, t)
 		}
 	}
 	return b.String()
@@ -49,14 +50,14 @@ func stepCount(j *Journey) int {
 	return n
 }
 
-func breakReasonHint(k ctxgraph.EditKind) string {
+func breakReasonHint(k ctxgraph.EditKind, t i18n.StoryText) string {
 	switch k {
 	case ctxgraph.Contract:
-		return "上下文被大幅收缩（截断/重建）"
+		return t.BreakReasonContract
 	case ctxgraph.Fork:
-		return "内容与前段几乎不重叠（可能是同一 anchor 下的另一次对话）"
+		return t.BreakReasonFork
 	default:
-		return "结构性断裂"
+		return t.BreakReasonDefault
 	}
 }
 
@@ -69,11 +70,11 @@ func breakReasonHint(k ctxgraph.EditKind) string {
 // messages already existed SOMEWHERE in the previous turn (content-only,
 // not position) — the number Contract/Fork's "did this really keep going,
 // or is it a new conversation" judgment call is based on.
-func editStatsHint(e ctxgraph.Edit) string {
-	return fmt.Sprintf("最长相同前缀 %d 条消息，内容重合率 %.0f%%", e.LCP, e.Coverage*100)
+func editStatsHint(e ctxgraph.Edit, t i18n.StoryText) string {
+	return t.EditStatsHint(e.LCP, e.Coverage*100)
 }
 
-func renderStep(w func(string, ...any), s *Step) {
+func renderStep(w func(string, ...any), s *Step, t i18n.StoryText) {
 	m := s.Manifest
 	w("### Step %d · %s · %s", s.Seq, m.TS.Format("15:04:05"), fmtutil.FmtSeconds(msDuration(m.DurMS), 1))
 	if m.TTFTMS > 0 {
@@ -89,30 +90,29 @@ func renderStep(w func(string, ...any), s *Step) {
 	w(" · %s\n\n", m.Endpoint)
 
 	if s.Edge != nil {
-		w("> 编辑: %s（%s）\n\n", s.Edge.Kind.String(), editStatsHint(*s.Edge))
+		w("%s", t.EditLine(s.Edge.Kind.String(), editStatsHint(*s.Edge, t)))
 	}
 	if s.StitchEdge != nil {
-		w("> 🧵 **缝合自更早片段**（%s，覆盖率 %s，置信度 %s）——这一段与上一段之间发生过一次结构性断裂，已根据内容重合证据自动重新接上；证据如实保留，供核实。\n\n",
-			s.StitchEdge.Kind.String(), pctStr(s.StitchEdge.Score), pctStr(s.StitchEdge.Confidence))
+		w("%s", t.StitchLine(s.StitchEdge.Kind.String(), pctStr(s.StitchEdge.Score), pctStr(s.StitchEdge.Confidence)))
 	}
 	if s.SysChanged {
-		w("> ⚙️ **system prompt 变更**（换模型 / 换工具集 / 平台注入变化，原因未知，如实标出）\n\n")
+		w("%s", t.SysChangedLine)
 	}
 	if s.Compaction != nil {
-		renderCompactionInfo(w, s.Compaction)
+		renderCompactionInfo(w, s.Compaction, t)
 	}
 
 	if len(s.NewEvents) > 0 {
 		w("**Messages**\n\n")
 		for _, ev := range s.NewEvents {
-			renderEvent(w, ev)
+			renderEvent(w, ev, t)
 		}
 	}
 
-	renderLLMResponse(w, s)
+	renderLLMResponse(w, s, t)
 
 	if s.NoReply {
-		w("- ⏭️ **本轮 LLM 未实际回复**（NO_REPLY 或空内容）——下一轮可能是重试\n\n")
+		w("%s", t.NoReplyLine)
 	}
 }
 
@@ -126,7 +126,7 @@ func renderStep(w func(string, ...any), s *Step) {
 // and the tool-call block get their own <details>, same folded-by-default
 // convention renderEvent already uses for Messages; a plain-text reply is
 // previewed like a Message so it's still scannable at a glance.
-func renderLLMResponse(w func(string, ...any), s *Step) {
+func renderLLMResponse(w func(string, ...any), s *Step, t i18n.StoryText) {
 	if s.Reasoning == "" && s.RespText == "" && len(s.ToolCalls) == 0 {
 		if s.Finish != "" {
 			w("- finish: `%s`\n\n", s.Finish)
@@ -136,12 +136,12 @@ func renderLLMResponse(w func(string, ...any), s *Step) {
 	w("**LLM Response**\n\n")
 
 	if s.Reasoning != "" {
-		w("<details><summary>🤔 reasoning · %d 字符</summary>\n\n%s</details>\n\n",
-			len([]rune(s.Reasoning)), codeFence(s.Reasoning))
+		w("<details><summary>%s</summary>\n\n%s</details>\n\n",
+			t.ReasoningSummary(len([]rune(s.Reasoning))), codeFence(s.Reasoning))
 	}
 	if s.RespText != "" {
-		w("<details><summary>💬 回复 · %s</summary>\n\n%s</details>\n\n",
-			escapeHTML(preview(s.RespText)), codeFence(s.RespText))
+		w("<details><summary>%s</summary>\n\n%s</details>\n\n",
+			t.ReplySummary(escapeHTML(preview(s.RespText))), codeFence(s.RespText))
 	}
 	if len(s.ToolCalls) > 0 {
 		names := make([]string, len(s.ToolCalls))
@@ -175,16 +175,16 @@ func prettyJSON(s string) string {
 	return string(b)
 }
 
-func renderEvent(w func(string, ...any), ev *Event) {
+func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
 	head := fmt.Sprintf("▸ %s", ev.Msg.Role)
 	if ev.Revises != nil {
 		// F11's "revision" relation: without this marker, a Splice-rewritten
 		// message would render as an unrelated new Event — reading as "the
 		// same thing said twice" instead of "this replaces that".
-		head += fmt.Sprintf(" 🔄[修订 %s]", ev.Revises.String()[:8])
+		head += t.RevisionMarker(ev.Revises.String()[:8])
 	}
 	if ev.Msg.Text == "" {
-		w("%s (空)\n\n", head)
+		w("%s", t.EmptyEvent(head))
 		return
 	}
 	summary := preview(ev.Msg.Text)
@@ -197,18 +197,18 @@ func renderEvent(w func(string, ...any), ev *Event) {
 // this step's opening doesn't — versus which survived. Folded by default
 // like everything else here; the point is that it's THERE to check, not
 // that every reader needs to open it every time.
-func renderCompactionInfo(w func(string, ...any), c *CompactionInfo) {
+func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.StoryText) {
 	ratio := "—"
 	if c.TokensBefore > 0 {
 		ratio = fmt.Sprintf("%.1f%%", 100*float64(c.TokensAfter)/float64(c.TokensBefore))
 	}
-	w("<details><summary>📉 信息损失: %s → %s tokens（%s）· %d 个实体消失 / %d 个存活</summary>\n\n",
-		fmtTokens(c.TokensBefore), fmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities))
+	w("<details><summary>%s</summary>\n\n",
+		t.CompactionSummary(fmtTokens(c.TokensBefore), fmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities)))
 	if len(c.SwallowedEntities) > 0 {
-		w("**消失的实体**（在更早片段里提到过，这一步没再提到——规则粗筛，不代表真的不再相关）：%s\n\n", strings.Join(c.SwallowedEntities, "、"))
+		w("%s", t.SwallowedEntities(strings.Join(c.SwallowedEntities, t.ListSep)))
 	}
 	if len(c.SurvivedEntities) > 0 {
-		w("**仍然存活的实体**：%s\n\n", strings.Join(c.SurvivedEntities, "、"))
+		w("%s", t.SurvivedEntities(strings.Join(c.SurvivedEntities, t.ListSep)))
 	}
 	w("</details>\n\n")
 }

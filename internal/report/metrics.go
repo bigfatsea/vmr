@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // freshTokens returns in - cached - cacheWrite, floored at 0.
@@ -241,10 +243,11 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 // TestBuildFindingsIsDeterministic comparing rep.Efficiency (not just
 // rep.Workloads/Tools/ByModel themselves, which the sort later in Build
 // does make deterministic) across repeated Build() calls.
-func buildFindings(rep *Report2) []Finding {
+func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
+	tx := i18n.Efficiency(lang)
 	var out []Finding
-	add := func(finding, metric, value, implicated, action string) {
-		out = append(out, Finding{finding, metric, value, implicated, action})
+	add := func(code FindingCode, metric string, ft i18n.FindingText) {
+		out = append(out, Finding{Code: code, Finding: ft.Title, Metric: metric, Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action})
 	}
 
 	// tool schema waste: the worst (highest SchemaWasteBytes, tie-broken by
@@ -263,10 +266,9 @@ func buildFindings(rep *Report2) []Finding {
 		}
 	}
 	if worstTool != nil {
-		add("工具 schema 浪费", "schema_bytes_shipped",
-			fmtBytesGB(worstTool.SchemaBytesShipped),
-			worstTool.Shape+"/"+strconv.Itoa(worstTool.Requests)+" 请求",
-			"裁剪未用工具；利用率 "+strconv.FormatFloat(float64(worstTool.DeclareUtilization)*100, 'f', 1, 64)+"%")
+		add(FindingToolSchemaWaste, "schema_bytes_shipped", tx.ToolSchemaWasteFinding(
+			worstTool.Shape, worstTool.Requests, fmtBytesGB(worstTool.SchemaBytesShipped),
+			strconv.FormatFloat(float64(worstTool.DeclareUtilization)*100, 'f', 1, 64)))
 	}
 
 	// cache miss input (global)
@@ -281,7 +283,6 @@ func buildFindings(rep *Report2) []Finding {
 		// removes the same ambient-order dependency as the two findings
 		// above, even though a real tie here would need two models each
 		// at exactly 50%.
-		implicated := "全局"
 		var domModel *Row
 		for i := range rep.ByModel {
 			m := &rep.ByModel[i]
@@ -290,12 +291,12 @@ func buildFindings(rep *Report2) []Finding {
 				domModel = m
 			}
 		}
+		dominantModel, dominantTokens := "", ""
 		if domModel != nil && domModel.TokensInFresh > 0 && domModel.TokensInFresh >= fresh/2 {
-			implicated = "全局，" + domModel.Model + " 占 " + fmtTokens(domModel.TokensInFresh)
+			dominantModel, dominantTokens = domModel.Model, fmtTokens(domModel.TokensInFresh)
 		}
-		add("缓存未命中输入", "cache_miss_tokens",
-			fmtTokens(fresh)+" ("+strconv.FormatFloat(share, 'f', 1, 64)+"%)",
-			implicated, "检查 prompt 前缀稳定性 / 开启 provider 缓存")
+		add(FindingCacheMiss, "cache_miss_tokens", tx.CacheMissFinding(
+			fmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens))
 	}
 
 	// scheduled-task redundancy (heartbeat/dream_diary low cache-eff): the
@@ -317,9 +318,8 @@ func buildFindings(rep *Report2) []Finding {
 		}
 	}
 	if worstWL != nil {
-		add("定时任务冗余", "fresh + cache_eff",
-			fmtTokens(worstWL.TokensInFresh)+" fresh, 缓存效率 "+pctStr(worstWL.CacheEfficiency),
-			worstWL.Class, "拉长间隔 / 换便宜模型 / 缓存前缀")
+		add(FindingCronRedundancy, "fresh + cache_eff", tx.CronRedundancyFinding(
+			fmtTokens(worstWL.TokensInFresh), pctStr(worstWL.CacheEfficiency), worstWL.Class))
 	}
 
 	// output truncation
@@ -329,9 +329,7 @@ func buildFindings(rep *Report2) []Finding {
 		// count finish=length from sessions/tools? Truncated field covers stream breaks;
 		// finish=length is separate. We report truncated stream breaks here.
 		if trunc > 0 {
-			add("输出截断", "truncated",
-				strconv.Itoa(trunc)+"/"+strconv.Itoa(rep.Overall.Requests),
-				"stream 中断", "排查上游超时 / 提高 stream_idle")
+			add(FindingOutputTruncation, "truncated", tx.OutputTruncationFinding(trunc, rep.Overall.Requests))
 		}
 	}
 
@@ -340,9 +338,8 @@ func buildFindings(rep *Report2) []Finding {
 		slow := rep.Overall.SlowRequests
 		if slow > 0 {
 			share := float64(slow) / float64(rep.Overall.RequestsWithDur) * 100
-			add("慢请求", "slow_request_share",
-				"~"+strconv.FormatFloat(share, 'f', 0, 64)+"% > "+strconv.Itoa(SlowThresholdMS/1000)+"s",
-				"见 §4 stream_ms 归因", "见 §4")
+			add(FindingSlowRequests, "slow_request_share", tx.SlowRequestsFinding(
+				strconv.FormatFloat(share, 'f', 0, 64), SlowThresholdMS/1000))
 		}
 	}
 
@@ -363,12 +360,25 @@ func buildFindings(rep *Report2) []Finding {
 		}
 	}
 	if worst != nil && worst.ContextGrowth >= 5 {
-		add("上下文膨胀", "context_growth",
-			"×"+strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64),
-			worst.ID+" "+worst.Title, "中途 compaction")
+		add(FindingContextGrowth, "context_growth", tx.ContextGrowthFinding(
+			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, worst.Title))
 	}
 
 	return out
+}
+
+// buildFindingsForJSON is buildFindings fixed to English — the only
+// call Build itself makes (aggregate.go), so Report2.Efficiency (and
+// therefore vmr-report.json) never varies with the report's display
+// language. Markdown rendering computes its own, separately localized copy
+// by calling buildFindings again directly (section_efficiency.go); see
+// docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约：叙述字段固定
+// 英文" subsection for why the two diverge on purpose. Kept as its own named
+// function (not an inline i18n.EN literal at the call site) so aggregate.go's
+// own call site never needs to import internal/i18n itself — see that file's
+// line-count budget note.
+func buildFindingsForJSON(rep *Report2) []Finding {
+	return buildFindings(rep, i18n.EN)
 }
 
 // ---- per-record extraction helpers (recompute fields ReqInfo keeps

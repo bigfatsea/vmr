@@ -645,7 +645,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 	rep.Tools = buildTools(sess)
 	rep.Compactions = buildCompactions(sess)
 	rep.Sticky = stickyCol.result()
-	rep.Efficiency = buildFindings(rep)
+	rep.Efficiency = buildFindingsForJSON(rep)
 	rep.Pricing = pricing
 
 	// ---- sort all slices ----

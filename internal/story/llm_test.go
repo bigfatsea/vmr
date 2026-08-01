@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -56,7 +57,7 @@ func testPack(t *testing.T) EvidencePack {
 // records — every other test in this file exercises Interpret/callLLM/
 // caching against the hand-built literal testPack() returns, which never
 // goes through these three functions. cmd_story.go's compareJourneys calls
-// BuildEvidencePack(jA, jB, cmp) in production, so this closes a real gap:
+// BuildEvidencePack(jA, jB, cmp, i18n.EN) in production, so this closes a real gap:
 // the per-Journey evidence-pack assembly (tool index, task titles) had zero
 // direct unit coverage.
 func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
@@ -66,14 +67,14 @@ func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 		[]map[string]any{writeToolCall("exec", "", "")})
 	rec2 := mkExtrasRec(at2, "sys", "调研任务", "openai:p:m", 110, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	j, err := Build(onlyLineage(t, path), profile.Generic)
+	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	s := Summarize(j)
 	cmp := Compare(s, s)
 
-	pack := BuildEvidencePack(j, j, cmp)
+	pack := BuildEvidencePack(j, j, cmp, i18n.EN)
 
 	if len(pack.TaskTitlesA) == 0 || pack.TaskTitlesA[0] == "" {
 		t.Errorf("TaskTitlesA should list the journey's task title(s), got %+v", pack.TaskTitlesA)
@@ -163,7 +164,7 @@ func TestInterpret_CallsServerAndParsesReply(t *testing.T) {
 	opts := LLMOptions{Addr: addr, Model: "agent"}
 	pack := testPack(t)
 
-	res, err := Interpret(context.Background(), opts, pack)
+	res, err := Interpret(context.Background(), opts, pack, i18n.EN)
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestInterpret_CallsServerAndParsesReply(t *testing.T) {
 	// must actually be in the instructions sent, not just described in a
 	// comment — this is the regression guard against silently reverting to
 	// the old flat "assumption list" format.
-	for _, want := range []string{"候选根因", "置信度", "因果链", "不能排除节选之外仍存在"} {
+	for _, want := range []string{"Candidate Root Cause", "Confidence", "causal chain", "not that it doesn't exist beyond it"} {
 		if !strings.Contains(sentReq.Messages[0].Content, want) {
 			t.Errorf("system prompt missing %q (v2 confidence-tier/excerpt-boundary requirement):\n%s", want, sentReq.Messages[0].Content)
 		}
@@ -211,7 +212,7 @@ func TestInterpret_APIKeySentAsBearer(t *testing.T) {
 	ts, _, lastReq, _ := mockChatServer(t, "ok")
 	addr := strings.TrimPrefix(ts.URL, "http://")
 
-	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", APIKey: "sk-test-123"}, testPack(t)); err != nil {
+	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", APIKey: "sk-test-123"}, testPack(t), i18n.EN); err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
 	if got := (*lastReq).Header.Get("Authorization"); got != "Bearer sk-test-123" {
@@ -223,7 +224,7 @@ func TestInterpret_NoAPIKeyMeansNoAuthHeader(t *testing.T) {
 	ts, _, lastReq, _ := mockChatServer(t, "ok")
 	addr := strings.TrimPrefix(ts.URL, "http://")
 
-	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t)); err != nil {
+	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN); err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
 	if got := (*lastReq).Header.Get("Authorization"); got != "" {
@@ -236,7 +237,7 @@ func TestInterpret_NoAPIKeyMeansNoAuthHeader(t *testing.T) {
 // "configured but the call failed" if it ever needs to (today both just
 // mean "skip the section", but the distinction costs nothing to keep).
 func TestInterpret_Disabled(t *testing.T) {
-	if _, err := Interpret(context.Background(), LLMOptions{}, testPack(t)); err == nil {
+	if _, err := Interpret(context.Background(), LLMOptions{}, testPack(t), i18n.EN); err == nil {
 		t.Error("Interpret with no Addr should return an error")
 	}
 }
@@ -252,7 +253,7 @@ func TestInterpret_ServerErrorDegradesToError(t *testing.T) {
 	defer ts.Close()
 	addr := strings.TrimPrefix(ts.URL, "http://")
 
-	_, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t))
+	_, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN)
 	if err == nil {
 		t.Fatal("Interpret should error on a non-2xx response")
 	}
@@ -267,7 +268,7 @@ func TestInterpret_CacheHitSkipsSecondCall(t *testing.T) {
 	opts := LLMOptions{Addr: addr, Model: "agent", CacheDir: cacheDir}
 	pack := testPack(t)
 
-	res1, err := Interpret(context.Background(), opts, pack)
+	res1, err := Interpret(context.Background(), opts, pack, i18n.EN)
 	if err != nil {
 		t.Fatalf("first Interpret: %v", err)
 	}
@@ -275,7 +276,7 @@ func TestInterpret_CacheHitSkipsSecondCall(t *testing.T) {
 		t.Error("first call should not be cached")
 	}
 
-	res2, err := Interpret(context.Background(), opts, pack)
+	res2, err := Interpret(context.Background(), opts, pack, i18n.EN)
 	if err != nil {
 		t.Fatalf("second Interpret: %v", err)
 	}
@@ -299,10 +300,10 @@ func TestInterpret_CacheKeyIncludesModel(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), ".llm-cache")
 	pack := testPack(t)
 
-	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", CacheDir: cacheDir}, pack); err != nil {
+	if _, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", CacheDir: cacheDir}, pack, i18n.EN); err != nil {
 		t.Fatalf("Interpret (model=agent): %v", err)
 	}
-	res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "coding", CacheDir: cacheDir}, pack)
+	res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "coding", CacheDir: cacheDir}, pack, i18n.EN)
 	if err != nil {
 		t.Fatalf("Interpret (model=coding): %v", err)
 	}
@@ -316,18 +317,18 @@ func TestInterpret_CacheKeyIncludesModel(t *testing.T) {
 
 func TestRenderLLMSection(t *testing.T) {
 	opts := LLMOptions{Model: "agent"}
-	md := RenderLLMSection(opts, InterpretResult{Text: "一句话结论：测试。", Cached: false})
-	for _, want := range []string{"## LLM 解读", "agent", "不是事实层", "一句话结论：测试。"} {
+	md := RenderLLMSection(opts, InterpretResult{Text: "一句话结论：测试。", Cached: false}, i18n.EN)
+	for _, want := range []string{"## LLM Interpretation", "agent", "not the fact layer", "一句话结论：测试。"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderLLMSection missing %q:\n%s", want, md)
 		}
 	}
-	if strings.Contains(md, "命中缓存") {
+	if strings.Contains(md, "cache hit") {
 		t.Error("uncached result should not claim a cache hit")
 	}
 
-	cachedMD := RenderLLMSection(opts, InterpretResult{Text: "x", Cached: true})
-	if !strings.Contains(cachedMD, "命中缓存") {
+	cachedMD := RenderLLMSection(opts, InterpretResult{Text: "x", Cached: true}, i18n.EN)
+	if !strings.Contains(cachedMD, "cache hit") {
 		t.Error("cached result should say so")
 	}
 }

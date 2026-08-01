@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §7 效率与浪费: the findings list and the per-tool-shape detail behind
 // the declared-but-never-called tool waste figure.
@@ -7,35 +7,50 @@ package report
 import (
 	"sort"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §7 效率与浪费 ----
-func renderEfficiency(w func(string, ...any), rep *Report2, o Row) {
-	w("## §7 效率与浪费 ⭐\n\n")
-	if len(rep.Efficiency) > 0 {
-		tbl := newTable(w, "发现", "指标", "值", "涉及", "建议")
-		for _, f := range rep.Efficiency {
+//
+// This section does NOT render rep.Efficiency directly — that field is
+// always English (report.Build populates it via buildFindingsForJSON, fixed
+// to i18n.EN, so vmr-report.json's efficiency[] never varies by language;
+// see docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection).
+// Markdown rendering needs its own localized copy, so it calls buildFindings
+// again with the caller's real lang — a second, cheap, in-memory-only call
+// over the same already-aggregated rep; the result is used only for display
+// and never written back into rep.Efficiency.
+func renderEfficiency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Efficiency(lang)
+	w("## %s\n\n", t.Title)
+	findings := buildFindings(rep, lang)
+	if len(findings) > 0 {
+		h := t.TableHeaders
+		tbl := newTable(w, h[0], h[1], h[2], h[3], h[4])
+		for _, f := range findings {
 			tbl.row(f.Finding, f.Metric, f.Value, f.Implicated, f.Action)
 		}
 		w("\n")
 	}
 	// tool waste Top-5: compact table + per-shape used/never-called detail
 	if len(rep.Tools) > 0 {
-		w("**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 vmr-report.json -> tools[]）\n\n")
+		w("%s\n\n", t.ToolWasteTitle)
 		top := rep.Tools
 		if len(top) > 5 {
 			top = top[:5]
 		}
-		toolTbl := newTable(w, "形态", "请求", "声明", "已用", "利用率", "浪费字节")
-		for _, t := range top {
-			toolTbl.row(t.Shape, strconv.Itoa(t.Requests), strconv.Itoa(len(t.Declared)), strconv.Itoa(t.DistinctCalled),
-				pctStr(t.DeclareUtilization), fmtBytesGB(t.SchemaWasteBytes))
+		wh := t.ToolWasteHeaders
+		toolTbl := newTable(w, wh[0], wh[1], wh[2], wh[3], wh[4], wh[5])
+		for _, tl := range top {
+			toolTbl.row(tl.Shape, strconv.Itoa(tl.Requests), strconv.Itoa(len(tl.Declared)), strconv.Itoa(tl.DistinctCalled),
+				pctStr(tl.DeclareUtilization), fmtBytesGB(tl.SchemaWasteBytes))
 		}
 		w("\n")
-		for _, t := range top {
-			renderToolShapeDetail(w, t)
+		for _, tl := range top {
+			renderToolShapeDetail(w, tl, t)
 		}
-		w("> 统计窗口 = 本报告的输入日志范围；低频工具（如 cron 触发类）可能不在窗口内，裁剪决策建议基于 ≥1 周日志。\n\n")
+		w("%s", t.WindowNote)
 	}
 }
 
@@ -44,9 +59,8 @@ func renderEfficiency(w func(string, ...any), rep *Report2, o Row) {
 // never invoked (alphabetical) — the data behind the summary table's
 // "利用率" number, collapsed into <details> so a 60+-tool schema doesn't
 // blow out the document while still keeping full detail one click away.
-func renderToolShapeDetail(w func(string, ...any), t ToolShapeRow) {
-	w("<details><summary>%s · %d 请求 · 声明 %d 个 · 实际调用 %d 个</summary>\n\n",
-		t.Shape, t.Requests, len(t.Declared), t.DistinctCalled)
+func renderToolShapeDetail(w func(string, ...any), t ToolShapeRow, tx i18n.EfficiencyText) {
+	w("<details><summary>%s</summary>\n\n", tx.DetailSummary(t.Shape, t.Requests, len(t.Declared), t.DistinctCalled))
 	if len(t.Calls) > 0 {
 		type callCount struct {
 			name string
@@ -62,18 +76,18 @@ func renderToolShapeDetail(w func(string, ...any), t ToolShapeRow) {
 			}
 			return calls[i].name < calls[j].name
 		})
-		w("**调用过的工具（%d 个，按调用次数降序）：**\n\n", len(calls))
+		w("%s\n\n", tx.CalledToolsTitle(len(calls)))
 		for i, c := range calls {
-			w("%d. %s (%d 次)\n", i+1, c.name, c.n)
+			w("%s\n", tx.CalledToolLine(i+1, c.name, c.n))
 		}
 		w("\n")
 	}
 	if len(t.NeverCalled) > 0 {
 		names := append([]string(nil), t.NeverCalled...)
 		sort.Strings(names)
-		w("**声明但从未调用（%d 个，按字母序）：**\n\n", len(names))
+		w("%s\n\n", tx.NeverCalledTitle(len(names)))
 		for i, n := range names {
-			w("%d. %s\n", i+1, n)
+			w("%s\n", tx.NeverCalledLine(i+1, n))
 		}
 		w("\n")
 	}

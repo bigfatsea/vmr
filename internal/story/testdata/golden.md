@@ -2,7 +2,7 @@
 
 > 帮我查一下 A 股新股打新收益
 
-> 2 任务 · 3 轮 · 2026-07-29 10:00:00 → 10:00:06
+> 2 tasks · 3 turns · 2026-07-29 10:00:00 → 10:00:06
 
 ## t01 · 帮我查一下 A 股新股打新收益
 
@@ -26,7 +26,7 @@ You are a helpful assistant.
 
 **LLM Response**
 
-<details><summary>💬 回复 · 好的，我来搜索相关数据。</summary>
+<details><summary>💬 reply · 好的，我来搜索相关数据。</summary>
 
 ```
 好的，我来搜索相关数据。
@@ -37,7 +37,7 @@ You are a helpful assistant.
 
 ### Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
 
-> 编辑: append（最长相同前缀 1 条消息，内容重合率 33%）
+> Edit: append (longest common prefix 1 messages, content overlap 33%)
 
 **Messages**
 
@@ -60,7 +60,7 @@ You are a helpful assistant.
 
 **LLM Response**
 
-<details><summary>💬 回复 · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。</summary>
+<details><summary>💬 reply · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。</summary>
 
 ```
 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
@@ -73,7 +73,7 @@ You are a helpful assistant.
 
 ### Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
 
-> 编辑: append（最长相同前缀 3 条消息，内容重合率 60%）
+> Edit: append (longest common prefix 3 messages, content overlap 60%)
 
 **Messages**
 
@@ -93,7 +93,7 @@ You are a helpful assistant.
 
 **LLM Response**
 
-<details><summary>💬 回复 · 好的，前10名的新股打新收益如下…</summary>
+<details><summary>💬 reply · 好的，前10名的新股打新收益如下…</summary>
 
 ```
 好的，前10名的新股打新收益如下…

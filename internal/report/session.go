@@ -806,7 +806,13 @@ func taskTitle(r *ReqInfo) string {
 	if hasTag(r, "heartbeat") {
 		return "(heartbeat)"
 	}
-	return "(工具循环延续)"
+	// Not localized: this fallback is computed inside AnalyzeSessions, the
+	// one full-corpus pass report.Build deliberately runs only once (see
+	// aggregate.go's own "one file scan, not three" rationale) — localizing
+	// it would mean re-running that whole pass a second time per language
+	// just for a rare placeholder string. Kept in English always, same
+	// treatment as the sibling "(heartbeat)" fallback right above it.
+	return "(tool loop continuation)"
 }
 
 func sessionTitle(s *SessionInfo) string {
@@ -832,7 +838,8 @@ func sessionTitle(s *SessionInfo) string {
 	if len(s.Recs) > 0 && s.Recs[0].firstText != "" {
 		return preview(s.Recs[0].firstText)
 	}
-	return "(无标题)"
+	// Not localized — see taskTitle's comment above; same reasoning applies.
+	return "(untitled)"
 }
 
 func sessionChatID(s *SessionInfo) string {

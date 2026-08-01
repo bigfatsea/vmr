@@ -13,6 +13,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -44,7 +45,7 @@ func TestSysChanged_WithinLineage(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -71,7 +72,7 @@ func TestSysChanged_SameSystemPromptStaysFalse(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 		t.Fatalf("chain length = %d, want 2 (stitch should have succeeded)", len(chain))
 	}
 
-	j, err := BuildChain(chain, profile.Generic)
+	j, err := BuildChain(chain, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}
@@ -153,8 +154,8 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	// is the only thing a human (or the compare/LLM evidence pack) ever
 	// reads, so it needs its own assertion, not just CompactionInfo's field
 	// values.
-	md := RenderMarkdown(j)
-	for _, want := range []string{"信息损失", "README.md", "AGENTS.md"} {
+	md := RenderMarkdown(j, i18n.EN)
+	for _, want := range []string{"Information loss", "README.md", "AGENTS.md"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderMarkdown output missing %q for the compaction boundary step:\n%s", want, md)
 		}
@@ -231,7 +232,7 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 		t.Fatalf("test setup: want a single Splice edge, got %+v", l.Edges)
 	}
 
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -251,8 +252,8 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 	// Same gap as the compaction test above: the Event.Revises field being
 	// set doesn't by itself prove renderEvent's 🔄 marker actually reaches
 	// RenderMarkdown's output.
-	md := RenderMarkdown(j)
-	if !strings.Contains(md, "🔄[修订") {
-		t.Errorf("RenderMarkdown output should carry the 🔄[修订 …] marker for the revising event:\n%s", md)
+	md := RenderMarkdown(j, i18n.EN)
+	if !strings.Contains(md, "🔄[revises") {
+		t.Errorf("RenderMarkdown output should carry the 🔄[revises …] marker for the revising event:\n%s", md)
 	}
 }

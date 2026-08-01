@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §5 负载画像: request shape by workload class, hourly series, and the
 // per-client / per-endpoint breakdowns.
@@ -8,14 +8,18 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §5 负载分布 ----
-func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
-	w("## §5 负载分布\n\n")
+func renderWorkload(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Workload(lang)
+	w("## %s\n\n", t.Title)
 	// by virtual model (6)
-	w("**按虚拟模型**\n\n")
-	modelTbl := newTable(w, "模型", "协议", "请求", "成功率", "fresh/cached/out", "dur p50/p95")
+	w("%s\n\n", t.ByModelTitle)
+	mh := t.ByModelHeaders
+	modelTbl := newTable(w, mh[0], mh[1], mh[2], mh[3], mh[4], mh[5])
 	for _, m := range rep.ByModel {
 		modelTbl.row(m.Model, m.Protocol, strconv.Itoa(m.Requests), pctStr2(m.OK, m.Requests),
 			fmt.Sprintf("%s / %s / %s", fmtTokens(m.TokensInFresh), fmtTokens(m.TokensInCached), fmtTokens(m.TokensOut)),
@@ -23,8 +27,9 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 	}
 	w("\n")
 	// by workload class (6)
-	w("**按工作负载类**\n\n")
-	wlTbl := newTable(w, "类", "请求", "fresh", "缓存效率⭐", "tool_call_rate", "dur p50/p95")
+	w("%s\n\n", t.ByWorkloadTitle)
+	wh := t.ByWorkloadHeaders
+	wlTbl := newTable(w, wh[0], wh[1], wh[2], wh[3], wh[4], wh[5])
 	for _, wl := range rep.Workloads {
 		flag := ""
 		if wl.TokensKnown > 0 && wl.CacheEfficiency < 0.30 {
@@ -45,9 +50,11 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 				tokIn[h.Hour] = h.TokensIn
 			}
 		}
-		w("**每小时活跃度**\n\n%s%s",
-			mermaidHourBar("请求量 / 小时", "请求", vol),
-			mermaidTokenHourBar("输入Token / 小时", tokIn))
+		reqTitle, reqAxis := t.HourlyReqChart()
+		w("%s\n\n%s%s",
+			t.HourlyTitle,
+			mermaidHourBar(reqTitle, reqAxis, vol),
+			mermaidTokenHourBar(t.HourlyTokChart, tokIn))
 	}
 	// by date: mermaid only - request volume + input tokens
 	if len(rep.ByDate) > 0 {
@@ -59,14 +66,17 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 			vol[i] = int64(d.Requests)
 			tokIn[i] = d.TokensIn
 		}
-		w("**按日期活跃度**\n\n%s%s",
-			mermaidBarLabeled("请求量 / 天", "请求", labels, vol),
-			mermaidTokenBarLabeled("输入Token / 天", labels, tokIn))
+		dayTitle, dayAxis := t.DailyReqChart()
+		w("%s\n\n%s%s",
+			t.DailyTitle,
+			mermaidBarLabeled(dayTitle, dayAxis, labels, vol),
+			mermaidTokenBarLabeled(t.DailyTokChart, labels, tokIn))
 	}
 	// by client (8)
 	if len(rep.ByClient) > 0 {
-		w("**按客户端** ⭐\n\n")
-		clientTbl := newTable(w, "client_key", "请求", "成功率", "fresh/cached/out(reasoning)", "缓存效率", "dur p50/p95", "In(p50/p95)", "Out(p50/p95)")
+		w("%s\n\n", t.ByClientTitle)
+		ch := t.ByClientHeaders
+		clientTbl := newTable(w, ch[0], ch[1], ch[2], ch[3], ch[4], ch[5], ch[6], ch[7])
 		for _, c := range rep.ByClient {
 			clientTbl.row(c.ClientKey, strconv.Itoa(c.Requests), pctStr2(c.OK, c.Requests),
 				fmt.Sprintf("%s / %s / %s (%s)", fmtTokens(c.TokensInFresh), fmtTokens(c.TokensInCached), fmtTokens(c.TokensOut), fmtTokens(c.TokensReasoning)),
@@ -79,8 +89,9 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row) {
 	}
 	// by endpoint (8), format mirrors 按客户端 - cross-day merged like §3/§4
 	if len(rep.EndpointsAll) > 0 {
-		w("**按端点** ⭐（跨日合并）\n\n")
-		epTbl := newTable(w, "端点", "请求", "成功率", "fresh/cached/out(reasoning)", "缓存效率", "dur p50/p95", "In(p50/p95)", "Out(p50/p95)")
+		w("%s\n\n", t.ByEndpointTitle)
+		eh := t.ByEndpointHeaders
+		epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5], eh[6], eh[7])
 		byRequests := append([]EndpointRow(nil), rep.EndpointsAll...)
 		sort.SliceStable(byRequests, func(i, j int) bool { return byRequests[i].Requests > byRequests[j].Requests })
 		for _, e := range byRequests {

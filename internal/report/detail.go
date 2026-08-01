@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named so lexical order equals arrival order. The
@@ -26,28 +26,13 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 )
 
 // toolArgsInlineThreshold: tool-call args shorter than this render inline
 // in the model output summary; longer ones go in a <details> fold (a multi-KB
 // JSON blob would drown the document otherwise).
 const toolArgsInlineThreshold = 600
-
-// normDescriptions translates audit norm-trail steps (internal/router
-// response normalizer) into human language for the detail files.
-var normDescriptions = map[string]string{
-	"model_rewrite":                     "上游返回的真实模型名被改写回虚拟模型名",
-	"done_appended":                     "上游未发送 `data: [DONE]`，VMR 补发了终止哨兵",
-	"think_strip":                       "剥离了 `<think>…</think>` 推理块（防止思考内容进入会话历史）",
-	"thinking_process_strip":            "剥离了 \"Thinking Process:\" 纯文本推理草稿",
-	"buffered":                          "整个响应被缓冲后一次性归一化（非逐事件透传）",
-	"resumed_stream":                    "`<think>` 块结束后由缓冲恢复为流式转发",
-	"soft_block_detected":               "检测到 MiniMax 软屏蔽标志（input/output_sensitive）——仅记录，字节未改动",
-	"opaque":                            "响应带 Content-Encoding（上游自行压缩，未被透明解码），归一化器整体跳过，字节未做任何检查或改动",
-	"overflow_raw_passthrough":          "响应体超过 32MB 缓冲上限，归一化器放弃处理并原样透传剩余字节——后续的 model 改写/think 剥离等步骤不再执行，等同直连行为",
-	"crlf_framing_suspected":            "疑似 CRLF（`\\r\\n\\r\\n`）分帧的 SSE 响应——归一化器只识别 `\\n\\n` 事件边界，未找到时整段响应会被当作一次性缓冲处理（内容仍正确，仅逐 token 流式效果退化）",
-	"thinking_process_pattern_detected": "响应内容含类似 MiniMax thinking=medium 泄漏的编号推理小节，但未命中现有 \"Thinking Process:\" 剥离触发条件——字节未改动，仅作观测标记，用于判断该剥离规则是否已经失效",
-}
 
 // detailWorkerCount bounds how many records get rendered+written
 // concurrently in WriteDetails. Capped well below NumCPU on large machines:
@@ -77,8 +62,8 @@ type detailJob struct {
 // writeOneDetail renders and writes one record's .md + .json pair. Errors
 // are reported through recordErr rather than returned, since this runs on a
 // worker goroutine, not the caller's.
-func writeOneDetail(dir string, j detailJob, n *int64, recordErr func(error)) {
-	if err := os.WriteFile(filepath.Join(dir, j.name), []byte(renderDetail(j.rec, j.info)), 0o600); err != nil {
+func writeOneDetail(dir string, lang i18n.Lang, j detailJob, n *int64, recordErr func(error)) {
+	if err := os.WriteFile(filepath.Join(dir, j.name), []byte(renderDetail(j.rec, j.info, lang)), 0o600); err != nil {
 		recordErr(err)
 		return
 	}
@@ -112,6 +97,7 @@ func writeOneDetail(dir string, j detailJob, n *int64, recordErr func(error)) {
 // (WriteDetails' own scan loop; Build's per-record loop).
 type DetailWriter struct {
 	dir      string
+	lang     i18n.Lang
 	usedMu   sync.Mutex
 	used     map[string]int
 	jobs     chan detailJob
@@ -122,8 +108,9 @@ type DetailWriter struct {
 }
 
 // NewDetailWriter creates dir and starts the worker pool (detailWorkerCount
-// goroutines). Callers must eventually call Close to drain it.
-func NewDetailWriter(dir string) (*DetailWriter, error) {
+// goroutines) rendering every submitted record's detail page in lang.
+// Callers must eventually call Close to drain it.
+func NewDetailWriter(dir string, lang i18n.Lang) (*DetailWriter, error) {
 	// 0o700/0o600 throughout: detail files carry the same full conversation
 	// bodies as the audit JSONL they were derived from, which is
 	// deliberately written 0600 — the exports must not silently loosen that.
@@ -133,6 +120,7 @@ func NewDetailWriter(dir string) (*DetailWriter, error) {
 	numWorkers := detailWorkerCount()
 	dw := &DetailWriter{
 		dir:  dir,
+		lang: lang,
 		used: map[string]int{},
 		jobs: make(chan detailJob, numWorkers*4),
 	}
@@ -141,7 +129,7 @@ func NewDetailWriter(dir string) (*DetailWriter, error) {
 		go func() {
 			defer dw.poolWG.Done()
 			for j := range dw.jobs {
-				writeOneDetail(dw.dir, j, &dw.n, dw.recordErr)
+				writeOneDetail(dw.dir, dw.lang, j, &dw.n, dw.recordErr)
 				if j.wg != nil {
 					j.wg.Done()
 				}
@@ -206,10 +194,10 @@ func (dw *DetailWriter) Close() (int, error) {
 }
 
 // WriteDetails renders every record in the given audit files into dir (one
-// .md + one same-named .json per record). Returns the number of record files
-// written. Reruns overwrite deterministically. sess (optional, nil = plain
-// mode) supplies the session grouping: detail headers gain session/task
-// coordinates and a delta section.
+// .md + one same-named .json per record, in lang). Returns the number of
+// record files written. Reruns overwrite deterministically. sess (optional,
+// nil = plain mode) supplies the session grouping: detail headers gain
+// session/task coordinates and a delta section.
 //
 // Callers must pass the same paths (same order) here and to AnalyzeSessions:
 // filenames come from the analysis pass (assignNames, ts order — stable
@@ -225,8 +213,8 @@ func (dw *DetailWriter) Close() (int, error) {
 // for tests and any other standalone use.
 //
 // progress (optional, nil = silent) gets one line per input file.
-func WriteDetails(paths []string, dir string, sess *SessionAnalysis, progress io.Writer) (int, error) {
-	dw, err := NewDetailWriter(dir)
+func WriteDetails(paths []string, dir string, sess *SessionAnalysis, progress io.Writer, lang i18n.Lang) (int, error) {
+	dw, err := NewDetailWriter(dir, lang)
 	if err != nil {
 		return 0, err
 	}
@@ -414,18 +402,19 @@ func recordUsage(rec *audit.Record, info *ReqInfo) (Usage, bool) {
 
 // ---- document skeleton ----
 
-func renderDetail(rec *audit.Record, info *ReqInfo) string {
+func renderDetail(rec *audit.Record, info *ReqInfo, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	t := i18n.Detail(lang)
 
 	// Title + overview.
 	w("# %s [%s] · %s · %s · %s\n\n",
 		displayModel(rec), rec.Protocol, outcomeMark(rec.Outcome), ms(rec.DurMS),
 		rec.TS.Format("2006-01-02 15:04:05.000 -07:00"))
-	renderSessionHeader(&b, info)
-	stream := "否"
+	renderSessionHeader(&b, info, t)
+	stream := t.StreamNo
 	if rec.Stream {
-		stream = "是"
+		stream = t.StreamYes
 	}
 	tok := "-"
 	if u, ok := recordUsage(rec, info); ok {
@@ -435,15 +424,17 @@ func renderDetail(rec *audit.Record, info *ReqInfo) string {
 	if rec.TTFTMS > 0 {
 		ttft = ms(rec.TTFTMS)
 	}
-	w("| 虚拟模型 | 上游端点 | 结果 | 耗时 | 首字延迟 | 尝试次数 | stream | Tokens In/CacheHit/Out | 客户端 |\n|---|---|---|---|---|---|---|---|---|\n")
+	oh := t.OverviewHeaders
+	w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n|---|---|---|---|---|---|---|---|---|\n",
+		oh[0], oh[1], oh[2], oh[3], oh[4], oh[5], oh[6], oh[7], oh[8])
 	w("| %s | %s | %s | %s | %s | %d | %s | %s | %s |\n\n",
 		escapeCell(displayModel(rec)), escapeCell(lastEndpoint(rec)), outcomeMark(rec.Outcome),
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
-	renderFactsLine(&b, rec)
+	renderFactsLine(&b, rec, t)
 
-	renderClientRequest(&b, rec, info)
-	renderAttempts(&b, rec)
-	renderClientResponse(&b, rec)
+	renderClientRequest(&b, rec, info, t)
+	renderAttempts(&b, rec, t)
+	renderClientResponse(&b, rec, t)
 	return b.String()
 }
 
@@ -457,7 +448,7 @@ func renderDetail(rec *audit.Record, info *ReqInfo) string {
 // below. Silently omitted when Facts is nil — the request was rejected
 // before fact computation ever ran (bad auth, unparseable JSON, missing
 // model field), so there is nothing to show.
-func renderFactsLine(b *strings.Builder, rec *audit.Record) {
+func renderFactsLine(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 	f := rec.Facts
 	if f == nil {
 		return
@@ -469,20 +460,19 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record) {
 	if f.HasTools {
 		caps = append(caps, "`tools`")
 	}
-	capsText := "无"
+	capsText := t.FactsCapsNone
 	if len(caps) > 0 {
-		capsText = strings.Join(caps, "、")
+		capsText = strings.Join(caps, t.ListSep)
 	}
-	fmt.Fprintf(b, "> **VMR 路由前判断**：\n> 请求所需能力：%s\n> 预估Token数量：%s\n\n",
-		capsText, fmtTokensPlain(f.EstimatedTokens))
+	b.WriteString(t.FactsLine(capsText, fmtTokensPlain(f.EstimatedTokens)))
 }
 
 // fmtTokensPlain renders an estimated token count for human-facing detail
 // pages ("27.3 KT") — same K/M scaling as fmtutil.FmtTokens but without its
 // "EST" unit marker (that marker exists to keep the live router log's
 // req=xxxKB/xxxESTKT column from being mistaken for billed usage at a
-// glance; a labeled "预估Token数量" field on a detail page already carries
-// that context, so the terser unit reads better here).
+// glance; a labeled estimated-token-count field on a detail page already
+// carries that context, so the terser unit reads better here).
 func fmtTokensPlain(n int64) string {
 	switch {
 	case n >= 1_000_000:
@@ -497,37 +487,36 @@ func fmtTokensPlain(n int64) string {
 // renderSessionHeader emits the grouping coordinates line and, when this
 // turn diverged from its parent, the notable events (replaced tail, system
 // prompt change, truncation).
-func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
+func renderSessionHeader(b *strings.Builder, info *ReqInfo, t i18n.DetailText) {
 	if info == nil {
 		return
 	}
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	switch {
 	case info.Compaction:
-		w("> **[compaction 调用]**")
+		w("%s", t.CompactionCallLabel)
 		if info.Summarizes != "" {
-			w(" 压缩会话 %s 的历史", info.Summarizes)
+			w("%s", t.CompactionSummarizes(info.Summarizes))
 		}
 		if info.ContinuesTo != "" {
-			w(" → 其摘要续接为会话 %s", info.ContinuesTo)
+			w("%s", t.CompactionContinues(info.ContinuesTo))
 		}
 		w("\n")
 	case info.SessionID != "":
-		w("> **会话 %s** · **任务 %s** · 任务内第 %d 轮 / 会话内第 %d 轮",
-			info.SessionID, info.TaskID, info.TaskSeq, info.SessSeq)
+		w("%s", t.SessionTaskLine(info.SessionID, info.TaskID, info.TaskSeq, info.SessSeq))
 		if info.Parent != nil {
-			w(" · 上一轮: [%s](./%s)", info.Parent.TS.Format("15:04:05.000"), info.Parent.DetailFile)
+			w("%s", t.PrevTurnLink(info.Parent.TS.Format("15:04:05.000"), info.Parent.DetailFile))
 		}
 		w("\n")
 		var meta []string
 		if len(info.ToolCalls) > 0 {
-			meta = append(meta, "本轮调用: <strong>"+callsCell(info.ToolCalls)+"</strong>")
+			meta = append(meta, t.ThisTurnCalls+"<strong>"+callsCell(info.ToolCalls)+"</strong>")
 		}
 		if info.TraceID != "" {
-			meta = append(meta, "trace <strong>"+capStr(info.TraceID, 16)+"</strong>")
+			meta = append(meta, t.TraceLabel+"<strong>"+capStr(info.TraceID, 16)+"</strong>")
 		}
 		if info.ChatID != "" {
-			meta = append(meta, "chat <strong>"+info.ChatID+"</strong>")
+			meta = append(meta, t.ChatLabel+"<strong>"+info.ChatID+"</strong>")
 		}
 		if info.ToolsSig != "" {
 			meta = append(meta, "<strong>"+info.ToolsSig+"</strong>")
@@ -543,19 +532,19 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo) {
 		return
 	}
 	if info.Truncated {
-		w("> ⚠️ **客户端收到 2xx 但流中途断开**——内容不完整（attempts 内有 truncated 错误）\n")
+		w("%s", t.TruncatedWarning)
 	}
 	if info.NoReply {
-		w("> ⏭️ **LLM 主动跳过回复**（response 为空或 NO_REPLY）——本轮指令未实际处理，下一条可能是重试。\n")
+		w("%s", t.NoReplyWarning)
 	}
 	b.WriteString("\n")
 }
 
 // renderClientRequest emits section ①: what the caller sent to vmr.
-func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
+func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	req := rec.Client.Request
-	w("## ① Client → VMR 请求\n\n")
+	w("## %s\n\n", t.ClientRequestTitle)
 	msgs := chatMessages(req.Body)
 	tools := toolNames(req.Body)
 	w("`%s %s` · body %s", req.Method, req.Path, fmtBytes(bodyBytes(req.Body)))
@@ -566,12 +555,12 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 		w(" · %d tools", len(tools))
 	}
 	w("\n\n")
-	b.WriteString(details(fmt.Sprintf("Headers (%d)", len(req.Headers)), headerTable(req.Headers)))
+	b.WriteString(details(fmt.Sprintf("Headers (%d)", len(req.Headers)), headerTable(req.Headers, t)))
 
 	obj, isObj := req.Body.(map[string]any)
 	if !isObj {
 		if req.Body != nil { // non-JSON body (rejected requests etc.)
-			b.WriteString(details("Body（非 JSON）", codeFence(fmt.Sprintf("%v", req.Body))))
+			b.WriteString(details(t.BodyNonJSON, codeFence(fmt.Sprintf("%v", req.Body))))
 		}
 		return
 	}
@@ -583,21 +572,21 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 		}
 	}
 	if len(params) > 0 {
-		b.WriteString(details(fmt.Sprintf("请求参数 (%d)", len(params)), codeFence(jsonIndent(params))))
+		b.WriteString(details(t.ParamsSummary(len(params)), codeFence(jsonIndent(params))))
 	}
 	if arr, _ := obj["tools"].([]any); len(arr) > 0 {
 		var tb strings.Builder
-		for i, t := range arr {
+		for i, tn := range arr {
 			name := "?"
 			if i < len(tools) {
 				name = tools[i]
 			}
-			tb.WriteString(details(escapeHTML(name), codeFence(jsonIndent(t))))
+			tb.WriteString(details(escapeHTML(name), codeFence(jsonIndent(tn))))
 		}
-		b.WriteString(details(fmt.Sprintf("Tools (%d): %s", len(arr), escapeHTML(preview(strings.Join(tools, ", ")))), tb.String()))
+		b.WriteString(details(t.ToolsSummary(len(arr), escapeHTML(preview(strings.Join(tools, ", ")))), tb.String()))
 	}
 	if len(msgs) > 0 {
-		w("\n### Messages (%d)\n\n", len(msgs))
+		w("\n### %s\n\n", t.MessagesTitle(len(msgs)))
 		// info.RoleTokens is the exact same computation over the exact same
 		// body (session.go's collect() already ran roleTokens(body) for
 		// this record during session analysis) — reuse it instead of
@@ -611,24 +600,24 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 			roleTok = roleTokens(req.Body)
 		}
 		if line := roleStatLine(roleTok, true, true); line != "" {
-			w("角色 Token 估算占比：%s\n\n", line)
+			w("%s", t.RoleTokenShare(line))
 		}
 		if info != nil && info.SessionID != "" && info.Parent != nil && info.DeltaStart > 0 {
-			w("#1–#%d 为历史上下文（↺）,#%d 起为本轮新增（🆕）\n\n", info.DeltaStart, info.DeltaStart+1)
+			w("%s", t.HistoryVsNewNote(info.DeltaStart))
 		}
 		for i, m := range msgs {
 			prefix := ""
 			if info != nil && info.SessionID != "" && info.Parent != nil && i >= info.DeltaStart {
 				prefix = "🆕 "
 			}
-			b.WriteString(renderMessageSection(i+1, m, prefix))
+			b.WriteString(renderMessageSection(i+1, m, prefix, t))
 			b.WriteString("\n")
 		}
 		// Increment summary at the end of the message list.
 		if info != nil && info.SessionID != "" && info.Parent != nil {
 			n := len(msgs) - info.DeltaStart
 			if n > 0 {
-				w("\n🆕 **本轮增量（相对上一轮,+%d 条,#1–#%d 为历史上下文）**\n", n, info.DeltaStart)
+				w("%s", t.IncrementNote(n, info.DeltaStart))
 			}
 		}
 	}
@@ -636,11 +625,11 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo) {
 
 // renderAttempts emits section ②: every upstream try, each compared in full
 // against the client request.
-func renderAttempts(b *strings.Builder, rec *audit.Record) {
+func renderAttempts(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
-	w("## ② VMR → 上游（%d 次尝试）\n\n", len(rec.Attempts))
+	w("## %s\n\n", t.AttemptsTitle(len(rec.Attempts)))
 	if len(rec.Attempts) == 0 {
-		w("无上游尝试（请求在路由前被拒绝）。\n\n")
+		w("%s", t.NoAttempts)
 		return
 	}
 	for i, a := range rec.Attempts {
@@ -661,31 +650,31 @@ func renderAttempts(b *strings.Builder, rec *audit.Record) {
 			w("❌ **error**: %s\n\n", a.Error)
 		}
 
-		w("**请求对比**（相对 ①，🟢 新增 / 🔴 删除 / 🔶 变化，未标记 = 未变）\n\n")
-		hdr, hchanged := diffHeaderTable(rec.Client.Request.Headers, a.Request.Headers)
-		b.WriteString(details(fmt.Sprintf("Headers 对比 (%d 项，%d 处变化)", unionLen(rec.Client.Request.Headers, a.Request.Headers), hchanged), hdr))
-		renderBodyDiff(b, rec.Client.Request.Body, a.Request.Body)
+		w("%s", t.RequestDiffIntro)
+		hdr, hchanged := diffHeaderTable(rec.Client.Request.Headers, a.Request.Headers, t)
+		b.WriteString(details(t.HeadersDiffSummary(unionLen(rec.Client.Request.Headers, a.Request.Headers), hchanged), hdr))
+		renderBodyDiff(b, rec.Client.Request.Body, a.Request.Body, t)
 
-		w("\n**响应**\n\n")
+		w("\n%s\n\n", t.ResponseTitle)
 		switch {
 		case a.Response == nil:
-			w("（无响应——请求未完成）\n\n")
+			w("%s", t.NoResponse)
 		default:
-			b.WriteString(details(fmt.Sprintf("响应 Headers (%d)", len(a.Response.Headers)), headerTable(a.Response.Headers)))
+			b.WriteString(details(t.ResponseHeadersSummary(len(a.Response.Headers)), headerTable(a.Response.Headers, t)))
 			if a.Response.Body == nil && a.Error == "" && a.Response.Status < 400 {
-				w("body：**透传** —— 与 ③ 客户端收到的字节一致，仅差以下归一化步骤：\n\n")
-				writeNorms(b, a.Norm)
+				w("%s", t.PassthroughBody)
+				writeNorms(b, a.Norm, t)
 			} else if a.Response.Body != nil {
-				renderRawBody(b, "响应 body", a.Response.Body)
+				renderRawBody(b, t.ResponseBodyLabel, a.Response.Body, t)
 				if len(a.Norm) > 0 {
-					w("归一化步骤：\n\n")
-					writeNorms(b, a.Norm)
+					w("%s", t.NormStepsTitle)
+					writeNorms(b, a.Norm, t)
 				}
 			} else if len(a.Norm) > 0 {
-				w("归一化步骤：\n\n")
-				writeNorms(b, a.Norm)
+				w("%s", t.NormStepsTitle)
+				writeNorms(b, a.Norm, t)
 			}
-			renderRawPreStrip(b, &a)
+			renderRawPreStrip(b, &a, t)
 		}
 	}
 }
@@ -695,7 +684,7 @@ func renderAttempts(b *strings.Builder, rec *audit.Record) {
 // content (and the raw SSE events that carried it) that never reaches the
 // client. Captured only going forward (internal/router/response.go); older
 // logs have the norm step listed with no raw bytes to show.
-func renderRawPreStrip(b *strings.Builder, a *audit.Attempt) {
+func renderRawPreStrip(b *strings.Builder, a *audit.Attempt, t i18n.DetailText) {
 	stripped := false
 	for _, n := range a.Norm {
 		if n == "think_strip" || n == "thinking_process_strip" {
@@ -706,21 +695,21 @@ func renderRawPreStrip(b *strings.Builder, a *audit.Attempt) {
 		return
 	}
 	if a.RawPreStrip == nil {
-		b.WriteString("⚠️ 该记录采集时未保留剥离前原始内容（think_strip 归一化步骤名有记录，原始 SSE 未保留）\n\n")
+		b.WriteString(t.NoRawPreStripKept)
 		return
 	}
 	if s, ok := a.RawPreStrip.(string); ok {
-		b.WriteString(details(fmt.Sprintf("剥离前原始内容（%s，含完整 &lt;think&gt; 块与对应原始 SSE）", fmtBytes(int64(len(s)))), codeFence(s)))
+		b.WriteString(details(t.RawPreStripSized(fmtBytes(int64(len(s)))), codeFence(s)))
 		return
 	}
-	b.WriteString(details("剥离前原始内容（含完整 &lt;think&gt; 块与对应原始 SSE）", codeFence(jsonIndent(a.RawPreStrip))))
+	b.WriteString(details(t.RawPreStrip, codeFence(jsonIndent(a.RawPreStrip))))
 }
 
-func writeNorms(b *strings.Builder, norms []string) {
+func writeNorms(b *strings.Builder, norms []string, t i18n.DetailText) {
 	for _, n := range norms {
-		desc, ok := normDescriptions[n]
+		desc, ok := t.NormDescriptions[n]
 		if !ok {
-			desc = "（未知步骤）"
+			desc = t.UnknownNormStep
 		}
 		fmt.Fprintf(b, "- `%s` — %s\n", n, desc)
 	}
@@ -729,12 +718,12 @@ func writeNorms(b *strings.Builder, norms []string) {
 
 // renderClientResponse emits section ③: what the client received, with the
 // stream reassembled into the actual model output.
-func renderClientResponse(b *strings.Builder, rec *audit.Record) {
+func renderClientResponse(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
-	w("## ③ VMR → Client 响应\n\n")
+	w("## %s\n\n", t.ClientResponseTitle)
 	resp := rec.Client.Response
 	if resp == nil {
-		w("（无响应记录——连接中断或请求被取消）\n\n")
+		w("%s", t.NoResponseRecord)
 		return
 	}
 	mark := "✅"
@@ -747,30 +736,29 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record) {
 	// Headers compared against the upstream response they were derived from
 	// (the successful attempt) — the "received vs sent" view on headers.
 	if up := successfulAttemptResponse(rec); up != nil {
-		hdr, changed := diffHeaderTable(up.Headers, resp.Headers)
-		b.WriteString(details(fmt.Sprintf("Headers 对比（相对上游响应，%d 项，%d 处变化）",
-			unionLen(up.Headers, resp.Headers), changed), hdr))
+		hdr, changed := diffHeaderTable(up.Headers, resp.Headers, t)
+		b.WriteString(details(t.ResponseHeadersDiffSummary(unionLen(up.Headers, resp.Headers), changed), hdr))
 	} else {
-		b.WriteString(details(fmt.Sprintf("Headers (%d)", len(resp.Headers)), headerTable(resp.Headers)))
+		b.WriteString(details(t.ResponseHeadersSummary(len(resp.Headers)), headerTable(resp.Headers, t)))
 	}
 
 	switch body := resp.Body.(type) {
 	case nil:
-		w("（body 为空）\n\n")
+		w("%s", t.EmptyBody)
 	case string:
 		if s := reassembleSSE(body); s != nil {
-			w("\n### 模型输出（由 %d 个 SSE 事件重组）\n\n", s.Events)
-			renderStreamSummary(b, s)
-			b.WriteString(details(fmt.Sprintf("原始 SSE 全文（%d events · %s）", s.Events, fmtBytes(int64(len(body)))), codeFence(body)))
+			w("\n### %s\n\n", t.ModelOutputSSE(s.Events))
+			renderStreamSummary(b, s, t)
+			b.WriteString(details(t.RawSSEFull(s.Events, fmtBytes(int64(len(body)))), codeFence(body)))
 		} else {
-			renderRawBody(b, "Body（非 JSON/SSE）", body)
+			renderRawBody(b, t.BodyNonJSONSSE, body, t)
 		}
 	default:
 		if s, ok := finalMessage(body); ok {
-			w("\n### 模型输出\n\n")
-			renderStreamSummary(b, s)
+			w("\n### %s\n\n", t.ModelOutputTitle)
+			renderStreamSummary(b, s, t)
 		}
-		b.WriteString(details(fmt.Sprintf("完整响应 JSON（%s）", fmtBytes(bodyBytes(body))), codeFence(jsonIndent(body))))
+		b.WriteString(details(t.FullResponseJSON(fmtBytes(bodyBytes(body))), codeFence(jsonIndent(body))))
 	}
 }
 
@@ -789,10 +777,10 @@ func successfulAttemptResponse(rec *audit.Record) *audit.Message {
 // renderStreamSummary writes the reassembled model output: reasoning folded,
 // content expanded (it is what the user came to read), tool calls, then
 // finish reason and usage.
-func renderStreamSummary(b *strings.Builder, s *streamSummary) {
+func renderStreamSummary(b *strings.Builder, s *streamSummary, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	if s.Reasoning != "" {
-		b.WriteString(details(fmt.Sprintf("🤔 reasoning · %s 字符", fmtCount(len([]rune(s.Reasoning)))), codeFence(s.Reasoning)))
+		b.WriteString(details(t.ReasoningChars(fmtCount(len([]rune(s.Reasoning)))), codeFence(s.Reasoning)))
 	}
 	if s.Content != "" {
 		b.WriteString(codeFence(s.Content))
@@ -806,12 +794,11 @@ func renderStreamSummary(b *strings.Builder, s *streamSummary) {
 		if len(args) <= toolArgsInlineThreshold {
 			w("🔧 **tool_call** `%s` [id=%s]\n\n%s\n", tc.Name, tc.ID, codeFence(args))
 		} else {
-			b.WriteString(details(fmt.Sprintf("🔧 tool_call <code>%s</code> [id=%s] · args %s 字符",
-				escapeHTML(tc.Name), escapeHTML(tc.ID), fmtCount(len([]rune(args)))), codeFence(args)))
+			b.WriteString(details(t.ToolCallArgsChars(escapeHTML(tc.Name), escapeHTML(tc.ID), fmtCount(len([]rune(args)))), codeFence(args)))
 		}
 	}
 	if s.Finish != "" || s.Model != "" {
-		w("finish_reason: `%s` · model 字段: `%s`\n\n", s.Finish, s.Model)
+		w("%s", t.FinishModelLine(s.Finish, s.Model))
 	}
 }
 
@@ -825,34 +812,34 @@ func prettyJSONString(s string) string {
 }
 
 // renderRawBody folds an arbitrary recorded body (JSON or text).
-func renderRawBody(b *strings.Builder, label string, body any) {
+func renderRawBody(b *strings.Builder, label string, body any, t i18n.DetailText) {
 	switch v := body.(type) {
 	case string:
-		b.WriteString(details(fmt.Sprintf("%s（%s）", label, fmtBytes(int64(len(v)))), codeFence(v)))
+		b.WriteString(details(t.SizedLabel(label, fmtBytes(int64(len(v)))), codeFence(v)))
 	default:
-		b.WriteString(details(fmt.Sprintf("%s（%s）", label, fmtBytes(bodyBytes(body))), codeFence(jsonIndent(body))))
+		b.WriteString(details(t.SizedLabel(label, fmtBytes(bodyBytes(body))), codeFence(jsonIndent(body))))
 	}
 }
 
 // ---- full-list diffs（全部列出，仅标记变化）----
 
 // headerTable renders headers as a plain two-column table (no comparison).
-func headerTable(h http.Header) string {
+func headerTable(h http.Header, t i18n.DetailText) string {
 	if len(h) == 0 {
-		return "（无）\n"
+		return t.HeaderTableEmpty
 	}
 	keys := core.SortedKeys(h)
 	var b strings.Builder
-	b.WriteString("| Header | 值 |\n|---|---|\n")
+	fmt.Fprintf(&b, "| %s | %s |\n|---|---|\n", t.HeaderColumn, t.ValueColumn)
 	for _, k := range keys {
-		fmt.Fprintf(&b, "| %s | %s |\n", k, escapeCell(truncCell(strings.Join(h[k], ", "), 120)))
+		fmt.Fprintf(&b, "| %s | %s |\n", k, escapeCell(truncCell(strings.Join(h[k], ", "), 120, t)))
 	}
 	return b.String()
 }
 
 // diffHeaderTable lists the union of both header sets, marking additions,
 // removals and changes relative to base. Returns the table and change count.
-func diffHeaderTable(base, other http.Header) (string, int) {
+func diffHeaderTable(base, other http.Header, t i18n.DetailText) (string, int) {
 	keys := map[string]bool{}
 	for k := range base {
 		keys[k] = true
@@ -864,7 +851,7 @@ func diffHeaderTable(base, other http.Header) (string, int) {
 
 	var b strings.Builder
 	changed := 0
-	b.WriteString("| | Header | 值 |\n|---|---|---|\n")
+	fmt.Fprintf(&b, "| | %s | %s |\n|---|---|---|\n", t.HeaderColumn, t.ValueColumn)
 	for _, k := range sorted {
 		bv, inBase := base[k]
 		ov, inOther := other[k]
@@ -875,15 +862,15 @@ func diffHeaderTable(base, other http.Header) (string, int) {
 		switch {
 		case !inBase:
 			changed++
-			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, escapeCell(truncCell(ovs, 120)))
+			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, escapeCell(truncCell(ovs, 120, t)))
 		case !inOther:
 			changed++
-			fmt.Fprintf(&b, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(truncCell(bs, 120)))
+			fmt.Fprintf(&b, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(truncCell(bs, 120, t)))
 		case bs != ovs:
 			changed++
-			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, escapeCell(truncCell(bs, 60)), escapeCell(truncCell(ovs, 60)))
+			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, escapeCell(truncCell(bs, 60, t)), escapeCell(truncCell(ovs, 60, t)))
 		default:
-			fmt.Fprintf(&b, "| | %s | %s |\n", k, escapeCell(truncCell(bs, 120)))
+			fmt.Fprintf(&b, "| | %s | %s |\n", k, escapeCell(truncCell(bs, 120, t)))
 		}
 	}
 	return b.String(), changed
@@ -904,17 +891,16 @@ func unionLen(a, b http.Header) int {
 // body: top-level fields in one marked table, the bulky conversation fields
 // (messages/tools/system) compared entry-by-entry so a single downscaled
 // image or rewritten model name stands out without re-printing 75 messages.
-func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any) {
+func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.DetailText) {
 	cObj, cOK := clientBody.(map[string]any)
 	aObj, aOK := attemptBody.(map[string]any)
 	if !cOK || !aOK {
 		if reflect.DeepEqual(clientBody, attemptBody) {
-			b.WriteString("Body：与 ① 完全一致\n\n")
+			b.WriteString(t.BodyIdentical)
 		} else {
-			fmt.Fprintf(b, "Body：🔶 与 ① 不同（客户端 %s / 上游 %s，非 JSON 对象，无法逐字段对比）\n\n",
-				fmtBytes(bodyBytes(clientBody)), fmtBytes(bodyBytes(attemptBody)))
+			b.WriteString(t.BodyDifferentNonJSON(fmtBytes(bodyBytes(clientBody)), fmtBytes(bodyBytes(attemptBody))))
 			if attemptBody != nil {
-				renderRawBody(b, "上游请求 body", attemptBody)
+				renderRawBody(b, t.UpstreamRequestBody, attemptBody, t)
 			}
 		}
 		return
@@ -938,36 +924,36 @@ func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any) {
 
 	var tb strings.Builder
 	changed := 0
-	tb.WriteString("| | 字段 | 值 |\n|---|---|---|\n")
+	fmt.Fprintf(&tb, "| | %s | %s |\n|---|---|---|\n", t.FieldColumn, t.ValueColumn)
 	for _, k := range sorted {
 		cv, inC := cObj[k]
 		av, inA := aObj[k]
 		switch {
 		case !inC:
 			changed++
-			fmt.Fprintf(&tb, "| 🟢 | %s | %s |\n", k, escapeCell(summarizeVal(av)))
+			fmt.Fprintf(&tb, "| 🟢 | %s | %s |\n", k, escapeCell(summarizeVal(av, t)))
 		case !inA:
 			changed++
-			fmt.Fprintf(&tb, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(summarizeVal(cv)))
+			fmt.Fprintf(&tb, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(summarizeVal(cv, t)))
 		case !reflect.DeepEqual(cv, av):
 			changed++
-			fmt.Fprintf(&tb, "| 🔶 | %s | %s → %s |\n", k, escapeCell(summarizeVal(cv)), escapeCell(summarizeVal(av)))
+			fmt.Fprintf(&tb, "| 🔶 | %s | %s → %s |\n", k, escapeCell(summarizeVal(cv, t)), escapeCell(summarizeVal(av, t)))
 		default:
-			fmt.Fprintf(&tb, "| | %s | %s |\n", k, escapeCell(summarizeVal(cv)))
+			fmt.Fprintf(&tb, "| | %s | %s |\n", k, escapeCell(summarizeVal(cv, t)))
 		}
 	}
-	b.WriteString(details(fmt.Sprintf("Body 字段对比 (%d 项，%d 处变化)", len(sorted), changed), tb.String()))
+	b.WriteString(details(t.BodyFieldDiffSummary(len(sorted), changed), tb.String()))
 
 	// system is compared as part of chatMessages (anthropic renders it as
 	// message #0 on both sides), tools separately by entry.
-	renderMessagesDiff(b, clientBody, attemptBody)
-	renderToolsDiff(b, cObj["tools"], aObj["tools"])
+	renderMessagesDiff(b, clientBody, attemptBody, t)
+	renderToolsDiff(b, cObj["tools"], aObj["tools"], t)
 }
 
 // renderMessagesDiff lists every message on both sides, marking per-entry
 // equality; changed/added entries carry the attempt-side full content folded
 // inline so "what did the upstream actually get" needs no cross-referencing.
-func renderMessagesDiff(b *strings.Builder, clientBody, attemptBody any) {
+func renderMessagesDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.DetailText) {
 	cMsgs := chatMessages(clientBody)
 	aMsgs := chatMessages(attemptBody)
 	if len(cMsgs) == 0 && len(aMsgs) == 0 {
@@ -984,31 +970,30 @@ func renderMessagesDiff(b *strings.Builder, clientBody, attemptBody any) {
 		case i >= len(aMsgs):
 			changed++
 			m := cMsgs[i]
-			fmt.Fprintf(&tb, "- 🔴 #%d %s · %s 字符 · 仅客户端侧有\n", i+1, m.Role, fmtCount(len([]rune(m.Text))))
+			tb.WriteString(t.MsgClientOnly(i+1, m.Role, fmtCount(len([]rune(m.Text)))))
 		case i >= len(cMsgs):
 			changed++
 			m := aMsgs[i]
-			fmt.Fprintf(&tb, "- 🟢 #%d %s · %s 字符 · 仅上游侧有\n", i+1, m.Role, fmtCount(len([]rune(m.Text))))
-			tb.WriteString(details(fmt.Sprintf("上游侧内容 #%d %s", i+1, m.Role), codeFence(m.Text)))
+			tb.WriteString(t.MsgUpstreamOnly(i+1, m.Role, fmtCount(len([]rune(m.Text)))))
+			tb.WriteString(details(t.UpstreamContent(i+1, m.Role), codeFence(m.Text)))
 		case cMsgs[i] == aMsgs[i]:
-			fmt.Fprintf(&tb, "- #%d %s · %s 字符\n", i+1, cMsgs[i].Role, fmtCount(len([]rune(cMsgs[i].Text))))
+			tb.WriteString(t.MsgUnchanged(i+1, cMsgs[i].Role, fmtCount(len([]rune(cMsgs[i].Text)))))
 		default:
 			changed++
 			c, a := cMsgs[i], aMsgs[i]
-			fmt.Fprintf(&tb, "- 🔶 #%d %s · %s → %s 字符\n", i+1, c.Role,
-				fmtCount(len([]rune(c.Text))), fmtCount(len([]rune(a.Text))))
-			tb.WriteString(details(fmt.Sprintf("上游侧内容 #%d %s（客户端侧见 ①）", i+1, a.Role), codeFence(a.Text)))
+			tb.WriteString(t.MsgChanged(i+1, c.Role, fmtCount(len([]rune(c.Text))), fmtCount(len([]rune(a.Text)))))
+			tb.WriteString(details(t.UpstreamContentSeeClient(i+1, a.Role), codeFence(a.Text)))
 		}
 	}
-	label := fmt.Sprintf("Messages 对比 (%d 条，无变化)", n)
+	label := t.MessagesDiffNoChange(n)
 	if changed > 0 {
-		label = fmt.Sprintf("Messages 对比 (%d 条，%d 处变化 🔶)", n, changed)
+		label = t.MessagesDiffChanged(n, changed)
 	}
 	b.WriteString(details(label, tb.String()))
 }
 
 // renderToolsDiff lists every declared tool, marking per-entry equality.
-func renderToolsDiff(b *strings.Builder, clientTools, attemptTools any) {
+func renderToolsDiff(b *strings.Builder, clientTools, attemptTools any, t i18n.DetailText) {
 	cArr, _ := clientTools.([]any)
 	aArr, _ := attemptTools.([]any)
 	if len(cArr) == 0 && len(aArr) == 0 {
@@ -1032,43 +1017,43 @@ func renderToolsDiff(b *strings.Builder, clientTools, attemptTools any) {
 		switch {
 		case i >= len(aArr):
 			changed++
-			fmt.Fprintf(&tb, "- 🔴 %s · 仅客户端侧有\n", name(cNames, i))
+			tb.WriteString(t.ToolClientOnly(name(cNames, i)))
 		case i >= len(cArr):
 			changed++
-			fmt.Fprintf(&tb, "- 🟢 %s · 仅上游侧有\n", name(aNames, i))
-			tb.WriteString(details("上游侧定义 "+escapeHTML(name(aNames, i)), codeFence(jsonIndent(aArr[i]))))
+			tb.WriteString(t.ToolUpstreamOnly(name(aNames, i)))
+			tb.WriteString(details(t.ToolDefUpstream+escapeHTML(name(aNames, i)), codeFence(jsonIndent(aArr[i]))))
 		case reflect.DeepEqual(cArr[i], aArr[i]):
 			fmt.Fprintf(&tb, "- %s\n", name(cNames, i))
 		default:
 			changed++
-			fmt.Fprintf(&tb, "- 🔶 %s · 定义有变化\n", name(cNames, i))
-			tb.WriteString(details("上游侧定义 "+escapeHTML(name(aNames, i))+"（客户端侧见 ①）", codeFence(jsonIndent(aArr[i]))))
+			tb.WriteString(t.ToolChanged(name(cNames, i)))
+			tb.WriteString(details(t.ToolDefUpstream+escapeHTML(name(aNames, i))+t.SeeClientSide, codeFence(jsonIndent(aArr[i]))))
 		}
 	}
-	label := fmt.Sprintf("Tools 对比 (%d 个，无变化)", n)
+	label := t.ToolsDiffNoChange(n)
 	if changed > 0 {
-		label = fmt.Sprintf("Tools 对比 (%d 个，%d 处变化 🔶)", n, changed)
+		label = t.ToolsDiffChanged(n, changed)
 	}
 	b.WriteString(details(label, tb.String()))
 }
 
 // summarizeVal renders a JSON value compactly for a diff table cell: scalars
 // verbatim (truncated), containers by size.
-func summarizeVal(v any) string {
-	switch t := v.(type) {
+func summarizeVal(v any, t i18n.DetailText) string {
+	switch tv := v.(type) {
 	case nil:
 		return "null"
 	case string:
-		return truncCell(fmt.Sprintf("%q", t), 60)
+		return truncCell(fmt.Sprintf("%q", tv), 60, t)
 	case []any:
-		return fmt.Sprintf("[%d 项]", len(t))
+		return t.ArrayItems(len(tv))
 	case map[string]any:
-		raw, _ := json.Marshal(t)
+		raw, _ := json.Marshal(tv)
 		if len(raw) <= 60 {
 			return string(raw)
 		}
-		return fmt.Sprintf("{%d 字段}", len(t))
+		return t.ObjectFields(len(tv))
 	default:
-		return fmt.Sprintf("%v", t)
+		return fmt.Sprintf("%v", tv)
 	}
 }

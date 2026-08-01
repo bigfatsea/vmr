@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:30, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §6.7 Compaction 还原 (design doc §6.4 / CCR N-4, Appendix C.5 T3.3): every
 // standalone compaction LLM call this period, with which sessions it links,
@@ -10,15 +10,19 @@ package report
 import (
 	"strconv"
 	"strings"
+
+	"vmr/internal/i18n"
 )
 
-func renderCompactions(w func(string, ...any), rep *Report2) {
-	w("## §6.7 Compaction 还原 ⭐\n\n")
+func renderCompactions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	t := i18n.Compaction(lang)
+	w("## %s\n\n", t.Title)
 	if len(rep.Compactions) == 0 {
-		w("（本期无 compaction 调用）\n\n")
+		w("%s", t.None)
 		return
 	}
-	tbl := newTable(w, "时间", "压缩会话", "续接会话", "tokens_in → tokens_out", "保留比", "吞掉的实体（样例）")
+	h := t.Headers
+	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4], h[5])
 	for _, c := range rep.Compactions {
 		tbl.row(cut(c.TS, 19), orDash(c.Summarizes), orDash(c.ContinuesTo),
 			fmtTokens(c.TokensIn)+" → "+fmtTokens(c.TokensOut),

@@ -27,6 +27,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -154,8 +155,8 @@ type Event struct {
 // isolation. Rendering a lineage's actual stitched chain (design doc
 // Appendix C.4 T2.2) needs BuildChain(ctxgraph.ChainFrom(l, byIdx), prof)
 // instead.
-func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
-	return BuildChain([]*ctxgraph.Lineage{l}, prof)
+func Build(l *ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey, error) {
+	return BuildChain([]*ctxgraph.Lineage{l}, prof, lang)
 }
 
 // BuildChain renders a full stitched chain — oldest lineage first, exactly
@@ -165,7 +166,7 @@ func Build(l *ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
 // WHOLE chain. Rendering many chains at once should use BuildAll instead —
 // calling BuildChain in a loop re-fetches from scratch per chain, which
 // re-scans a source file once per chain touching it instead of once total.
-func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile) (*Journey, error) {
+func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey, error) {
 	if len(chain) == 0 {
 		return nil, errEmptyLineage
 	}
@@ -182,7 +183,7 @@ func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile) (*Journey, erro
 	if err != nil {
 		return nil, err
 	}
-	return buildFrom(chain, prof, recs)
+	return buildFrom(chain, prof, recs, lang)
 }
 
 // BuildAll renders many stitched chains into Journeys. Two independent
@@ -211,7 +212,7 @@ func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile) (*Journey, erro
 // Order of the returned slice matches chains; a per-chain error aborts the
 // whole batch (matches BuildChain's own all-or-nothing contract for a
 // single chain).
-func BuildAll(chains [][]*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, error) {
+func BuildAll(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) ([]*Journey, error) {
 	for _, chain := range chains {
 		if len(chain) == 0 {
 			return nil, errEmptyLineage
@@ -244,7 +245,7 @@ func BuildAll(chains [][]*ctxgraph.Lineage, prof profile.Profile) ([]*Journey, e
 		go func(i int, chain []*ctxgraph.Lineage) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out[i], errs[i] = buildFrom(chain, prof, recs)
+			out[i], errs[i] = buildFrom(chain, prof, recs, lang)
 		}(i, chain)
 	}
 	wg.Wait()
@@ -291,7 +292,7 @@ func manifestLocs(l *ctxgraph.Lineage) []ctxgraph.Loc {
 // at a stitch boundary — the first manifest of chain[c] for c>0 — using
 // that Lineage's own Stitch.Edge as the evidence (guaranteed non-nil:
 // ChainFrom only walks through Stitched outcomes).
-func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record) (*Journey, error) {
+func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record, lang i18n.Lang) (*Journey, error) {
 	head, tail := chain[0], chain[len(chain)-1]
 	j := &Journey{
 		ID:    deriveID(chain),
@@ -379,12 +380,12 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 					// should become the title.
 					newInstr := newInstructionTitleAtStitch(prof, m, msgs, rawMsgs, off, seen)
 					humanInitiated = newInstr != ""
-					title = taskTitle(newInstr)
-					if title == toolLoopTitle {
-						title = stitchTaskTitle(stitchEdge)
+					title = taskTitle(newInstr, lang)
+					if title == i18n.Story(lang).ToolLoopTitle {
+						title = stitchTaskTitle(stitchEdge, lang)
 					}
 				} else {
-					title = taskTitle(lastInstructionInDelta(prof, msgs, rawMsgs, off, deltaStart))
+					title = taskTitle(lastInstructionInDelta(prof, msgs, rawMsgs, off, deltaStart), lang)
 				}
 				curTask = &Task{Title: title}
 				j.Tasks = append(j.Tasks, curTask)
@@ -422,7 +423,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 		}
 	}
 
-	j.Title = deriveTitle(prof, j.Tasks)
+	j.Title = deriveTitle(prof, j.Tasks, lang)
 	return j, nil
 }
 
@@ -430,8 +431,8 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 // genuine new user instruction right there — toolLoopTitle would otherwise
 // claim this is "just a tool loop continuing", which understates what
 // actually happened (a structural context break was bridged).
-func stitchTaskTitle(e *ctxgraph.StitchEdge) string {
-	return "(缝合自更早片段 · " + e.Kind.String() + "，覆盖率 " + pctStr(e.Score) + ")"
+func stitchTaskTitle(e *ctxgraph.StitchEdge, lang i18n.Lang) string {
+	return i18n.Story(lang).StitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
 }
 
 // extractEntities moved to chatmsg.ExtractEntities (design doc Appendix C.5
@@ -668,25 +669,23 @@ func newInstructionTitleAtStitch(prof profile.Profile, m *ctxgraph.Manifest, msg
 	return preview(bestText)
 }
 
-// toolLoopTitle is the fallback Task title when a turn opens without any
-// genuine new user instruction. Named (not just an inline literal) so
-// buildFrom can detect it and substitute stitchTaskTitle's more specific
-// wording at a stitch boundary — a bridged structural break is a much more
-// informative thing to say than "just a tool loop continuing".
-const toolLoopTitle = "(工具循环延续)"
-
-func taskTitle(newInstruction string) string {
+// taskTitle's fallback (i18n.StoryText.ToolLoopTitle) is the Task title used
+// when a turn opens without any genuine new user instruction — buildFrom
+// detects this exact value and substitutes stitchTaskTitle's more specific
+// wording at a stitch boundary, since a bridged structural break is a much
+// more informative thing to say than "just a tool loop continuing".
+func taskTitle(newInstruction string, lang i18n.Lang) string {
 	if newInstruction != "" {
 		return newInstruction
 	}
-	return toolLoopTitle
+	return i18n.Story(lang).ToolLoopTitle
 }
 
 // deriveTitle is the Journey's own title: the earliest real user
 // instruction in its very first step (searched over the WHOLE message
 // list, not just the delta — the opening ask, not the latest turn),
 // falling back to the first task with a real title, then a placeholder.
-func deriveTitle(prof profile.Profile, tasks []*Task) string {
+func deriveTitle(prof profile.Profile, tasks []*Task, lang i18n.Lang) string {
 	if len(tasks) > 0 && len(tasks[0].Steps) > 0 {
 		first := tasks[0].Steps[0]
 		if body, ok := first.Rec.Client.Request.Body.(map[string]any); ok {
@@ -712,12 +711,13 @@ func deriveTitle(prof profile.Profile, tasks []*Task) string {
 			}
 		}
 	}
+	st := i18n.Story(lang)
 	for _, t := range tasks {
-		if t.Title != "" && t.Title != "(工具循环延续)" {
+		if t.Title != "" && t.Title != st.ToolLoopTitle {
 			return t.Title
 		}
 	}
-	return "(无标题)"
+	return st.NoTitle
 }
 
 // responseSummary reassembles a recorded client response body (SSE string

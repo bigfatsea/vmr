@@ -17,6 +17,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -77,7 +78,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Fatalf("chain = %v, want [%d, %d] (oldest first)", chain, first.Idx, second.Idx)
 	}
 
-	j, err := BuildChain(chain, profile.Generic)
+	j, err := BuildChain(chain, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}
@@ -121,9 +122,9 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Errorf("Journey.ID = %q, want it to contain the chain head's start time %q", j.ID, wantStart)
 	}
 
-	md := RenderMarkdown(j)
+	md := RenderMarkdown(j, i18n.EN)
 	for _, want := range []string{
-		"🧵 **缝合自更早片段**",
+		"🧵 **Stitched from an earlier fragment**",
 		"compaction",
 		"深入调研这个内存涨价这一波",    // the opening instruction, shared by both lineages
 		"post-break reply", // content unique to the post-break lineage
@@ -147,7 +148,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 	if strings.Contains(stitchSection, "深入调研这个内存涨价这一波") {
 		t.Errorf("the stitch-boundary task re-shows the shared opening instruction — dedup should have suppressed it:\n%s", stitchSection)
 	}
-	if !strings.Contains(stitchSection, "缝合自更早片段") {
+	if !strings.Contains(stitchSection, "stitched from an earlier fragment") {
 		t.Errorf("the stitch-boundary task title should fall back to the stitch marker (no genuinely new instruction there):\n%s", stitchSection)
 	}
 }

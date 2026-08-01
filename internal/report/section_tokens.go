@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §1 成本与 Token 经济: the token-class breakdown (cached / fresh /
 // cache_write / out), per-model cache efficiency, and the role-level
@@ -7,40 +7,45 @@ package report
 
 import (
 	"strconv"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §1 成本与 Token 经济 ----
-func renderCostTokens(w func(string, ...any), rep *Report2, o Row) {
-	w("## §1 成本与 Token 经济\n\n")
+func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Tokens(lang)
+	w("## %s\n\n", t.Title)
 	// token class breakdown
-	w("**Token 类别分解**（basis: %d 条带 usage 的记录）\n\n", o.TokensKnown)
-	tokTbl := newTable(w, "类别", "数量", "占比")
-	tokTbl.row("输入-缓存命中", fmtTokens(o.TokensInCached), pctStr(o.CacheHitRate)+" of in")
+	w("%s\n\n", t.ClassBreakdownFmt(o.TokensKnown))
+	h := t.ClassHeaders
+	tokTbl := newTable(w, h[0], h[1], h[2])
+	tokTbl.row(t.RowInputCached, fmtTokens(o.TokensInCached), t.OfInSuffix(pctStr(o.CacheHitRate)))
 	freshShare := 0.0
 	if o.TokensInCached+o.TokensInFresh > 0 {
 		freshShare = float64(o.TokensInFresh) / float64(o.TokensInCached+o.TokensInFresh)
 	}
-	tokTbl.row("输入-fresh ⭐", fmtTokens(o.TokensInFresh), pctFloat(freshShare)+" of (fresh+cached)")
+	tokTbl.row(t.RowInputFresh, fmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctFloat(freshShare)))
 	cw := ""
 	if o.TokensInCacheWrite > 0 {
-		cw = "（Anthropic 缓存创建，溢价计费）"
+		cw = t.CacheWriteNote
 	}
-	tokTbl.row("输入-cache_write", fmtTokens(o.TokensInCacheWrite), orDash(cw))
-	tokTbl.row("输出", fmtTokens(o.TokensOut), "-")
+	tokTbl.row(t.RowInputCacheWrite, fmtTokens(o.TokensInCacheWrite), orDash(cw))
+	tokTbl.row(t.RowOutput, fmtTokens(o.TokensOut), "-")
 	if o.TokensReasoning > 0 {
-		tokTbl.row("└ 其中 reasoning", fmtTokens(o.TokensReasoning), pctStr(o.ReasoningShare)+" of out")
+		tokTbl.row(t.RowReasoning, fmtTokens(o.TokensReasoning), t.OfOutSuffix(pctStr(o.ReasoningShare)))
 	}
-	w("\n> 计费口径：fresh + cache_write(×溢价) + out。缓存命中按各厂免费/极低价计。\n")
+	w("%s", t.BillingNote)
 	if rep.Pricing == nil {
-		w("> 未配置定价 -> 不显示 $ 估算；配置后见 §2 成本估算。\n")
+		w("%s", t.NoPricingNote)
 	} else {
-		w("> %s 详见 §2 成本估算。\n", rep.Pricing.Disclaimer())
+		w("%s", t.PricingNote(rep.Pricing.Disclaimer(lang)))
 	}
 	w("\n")
 
 	// by-model cache efficiency (7 cols)
-	w("**按模型缓存效率** ⭐\n\n")
-	modelTbl := newTable(w, "模型", "协议", "请求", "缓存效率⭐", "fresh", "cached", "out")
+	w("%s\n\n", t.ByModelCacheTitle)
+	mh := t.ByModelHeaders
+	modelTbl := newTable(w, mh[0], mh[1], mh[2], mh[3], mh[4], mh[5], mh[6])
 	for _, m := range rep.ByModel {
 		modelTbl.row(m.Model, m.Protocol, strconv.Itoa(m.Requests),
 			cacheEffCell(m.CacheEfficiency, m.TokensKnown, m.Requests),
@@ -50,19 +55,20 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row) {
 
 	// role chars + estimated tokens (D-family)
 	if len(o.RoleChars) > 0 {
-		w("**请求消息字符、预估Token及占比**\n\n")
-		roleTbl := newTable(w, "角色", "字符", "预估Token⭐", "占比⭐")
+		w("%s\n\n", t.RoleCharsTitle)
+		rh := t.RoleHeaders
+		roleTbl := newTable(w, rh[0], rh[1], rh[2], rh[3])
 		totalTok := sumRoleChars(o.RoleTokens)
 		for _, role := range sortedRoles(o.RoleChars) {
 			c := o.RoleChars[role]
-			t := o.RoleTokens[role]
+			tk := o.RoleTokens[role]
 			share := 0.0
 			if totalTok > 0 {
-				share = float64(t) / float64(totalTok)
+				share = float64(tk) / float64(totalTok)
 			}
-			roleTbl.row(role, fmtTokens(c), fmtTokens(t), pctStr(share))
+			roleTbl.row(role, fmtTokens(c), fmtTokens(tk), pctStr(share))
 		}
-		w("\n> 预估Token⭐：上游 usage 不按角色拆分，无法拿到真实值，这里用粗估口径（ASCII ~4B/token，多字节 UTF-8 ~2B/token，同 §1 计费口径）；占比按预估Token 计算。\n")
-		w("> takeaway: tool 结果占比最大时，上下文优化的首要杠杆是压缩 tool 返回，而非 system prompt。\n\n")
+		w("%s", t.EstimatedTokensNote)
+		w("%s", t.TakeawayNote)
 	}
 }

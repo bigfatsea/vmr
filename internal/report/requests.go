@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-08-01, by Sonnet 5
 
 // The redesigned per-request drill-down (V2 §7): vmr-requests.jsonl (the data)
 // + vmr-requests.md (a pure index) + one fully-detailed sibling per group
@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"vmr/internal/i18n"
 )
 
 // utc8 is China Standard Time — no DST since 1991, so a fixed offset is
@@ -88,11 +90,12 @@ type indexEntry struct {
 
 // WriteRequestsIndex writes vmr-requests.md (a pure per-group index: header
 // + one-line summary + link to that group's sibling file, plus the full
-// "全部请求（时间序）" table) and one fully-detailed sibling per group:
-// vmr-requests-<tag>.md per real client_key_tag, vmr-requests-unresolved.md
-// for sessions carrying no tag, vmr-requests-cron-<tag>.md per scheduled
-// class. Titles come from sess.
-func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
+// "all requests, chronological" table) and one fully-detailed sibling per
+// group: vmr-requests-<tag>.md per real client_key_tag,
+// vmr-requests-unresolved.md for sessions carrying no tag,
+// vmr-requests-cron-<tag>.md per scheduled class. Titles come from sess.
+func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang) error {
+	t := i18n.Requests(lang)
 	rows := rep.RequestRows()
 	sessionTitle, taskTitle := titleMaps(sess)
 	sessionMeta := map[string]SessionRow{}
@@ -134,9 +137,9 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 			turns += g.requests
 			grows = append(grows, g.rows...)
 		}
-		header := fmt.Sprintf("Chat User: %s · %d 会话 %d 任务 %d 轮", ck, len(groups), tasks, turns)
+		header := t.ChatUserHeader(ck, len(groups), tasks, turns)
 		file := "vmr-requests-" + sanitize(ck) + ".md"
-		content := renderChatUserDoc(header, groups, sessionTitle, taskTitle)
+		content := renderChatUserDoc(header, groups, sessionTitle, taskTitle, t)
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
 			return err
 		}
@@ -147,9 +150,9 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 	for _, cls := range scheduledOrder {
 		occ := append([]RequestRow(nil), scheduled[cls]...)
 		sort.SliceStable(occ, func(i, j int) bool { return occ[i].TS < occ[j].TS })
-		header := fmt.Sprintf("定时任务 · %s 单发会话 × %d", cls, len(occ))
+		header := t.CronHeader(cls, len(occ))
 		file := "vmr-requests-cron-" + cronFileTag(cls) + ".md"
-		content := renderScheduledDoc(header, occ)
+		content := renderScheduledDoc(header, occ, t)
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
 			return err
 		}
@@ -158,17 +161,16 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string) error {
 
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-	w("# VMR 请求详单\n\n")
+	w("# %s\n\n", t.IndexTitle)
 	for _, e := range entries {
 		w("## %s\n\n", e.header)
-		w("> 请求 %d · 成功率 %s · fresh %s / cached %s / out %s · 缓存效率 %s\n",
-			e.summary.requests, pctStr2(e.summary.ok, e.summary.requests),
+		w("%s", t.GroupSummary(e.summary.requests, pctStr2(e.summary.ok, e.summary.requests),
 			fmtTokens(e.summary.fresh), fmtTokens(e.summary.cached), fmtTokens(e.summary.out),
-			pctStr(e.summary.cacheEff))
-		w("> 详情见 [%s](%s)\n\n", e.file, e.file)
+			pctStr(e.summary.cacheEff)))
+		w("%s", t.GroupDetailLink(e.file))
 	}
 	w("---\n\n")
-	writeAllRequestsFooter(w, rows)
+	writeAllRequestsFooter(w, rows, t)
 	return os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(b.String()), 0o600)
 }
 
@@ -241,8 +243,7 @@ type sessGroup struct {
 // "" key and merge into one group, silently misattributing one client's
 // ungrouped requests to whichever other client's ungrouped row happened to
 // be seen first. Keying on (Session, ClientKey) keeps them apart while still
-// merging same-client ungrouped rows into one "（未分组）" card, same as
-// before.
+// merging same-client ungrouped rows into one unrouted card, same as before.
 func groupSessions(rows []RequestRow, sessionMeta map[string]SessionRow) ([]string, map[string]*sessGroup) {
 	bySession := map[string]*sessGroup{}
 	var order []string
@@ -330,14 +331,14 @@ func clientsWithSiblingFile(rep *Report2) map[string]bool {
 
 // renderChatUserDoc renders one Chat User's full detail doc: an H1 header,
 // a legend, then one session card per session (renderSessionCard).
-func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, taskTitle map[string]string) string {
+func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, taskTitle map[string]string, t i18n.RequestsText) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", header)
-	w("层级: Session -> Task -> Turn（时间均为 UTC+8）。每轮表列: 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件\n\n")
+	w("%s", t.ChatUserLegend)
 	w("---\n\n")
 	for _, g := range groups {
-		renderSessionCard(w, g, sessionTitle, taskTitle)
+		renderSessionCard(w, g, sessionTitle, taskTitle, t)
 	}
 	return b.String()
 }
@@ -345,7 +346,7 @@ func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, taskTit
 // renderScheduledDoc renders one scheduled class's full detail doc: an H1
 // header, a summary blockquote, then a flat chronological table — the same
 // shape the old collapsed rollup section used, just as its own file.
-func renderScheduledDoc(header string, occ []RequestRow) string {
+func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", header)
@@ -359,9 +360,8 @@ func renderScheduledDoc(header string, occ []RequestRow) string {
 		cached += r.TokensInCached
 		out += r.TokensOut
 	}
-	w("> 成功率 %s · fresh %s / cached %s / out %s\n\n",
-		pctStr2(ok, len(occ)), fmtTokens(fresh), fmtTokens(cached), fmtTokens(out))
-	w("| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n")
+	w("%s", t.ScheduledSummary(pctStr2(ok, len(occ)), fmtTokens(fresh), fmtTokens(cached), fmtTokens(out)))
+	w("%s", t.ScheduledTableHeader)
 	for _, r := range occ {
 		w("| %s | %s | %s | %s | %s | %s |\n",
 			fmtUTC8Full(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
@@ -390,20 +390,19 @@ func FailedRequestRows(rows []RequestRow) []RequestRow {
 // its details/*.md+*.json. This is a dedicated error-analysis index — it
 // does not remove or alter failed requests anywhere else; vmr-requests.md
 // and every per-group sibling keep listing them exactly as before.
-func WriteFailedIndex(rows []RequestRow, dir string) error {
+func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang) error {
+	t := i18n.Requests(lang)
 	failed := FailedRequestRows(rows)
 	sort.SliceStable(failed, func(i, j int) bool { return failed[i].TS < failed[j].TS })
 
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-	w("# VMR 失败请求索引\n\n")
-	w("专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，"+
-		"按时间排序，每条直链到对应的 details/*.md + *.json。不影响其他报表——这些记录在 "+
-		"vmr-requests.md 及其分组 sibling 文件里照常出现，本文件只是额外的索引。共 %d 条。\n\n", len(failed))
+	w("# %s\n\n", t.FailedIndexTitle)
+	w("%s", t.FailedIndexIntro(len(failed)))
 	if len(failed) == 0 {
 		return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
 	}
-	w("| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n")
+	w("%s", t.FailedTableHeader)
 	for _, r := range failed {
 		w("| %s | %s | %s/%s | %s | %s | %s |\n",
 			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
@@ -412,14 +411,14 @@ func WriteFailedIndex(rows []RequestRow, dir string) error {
 	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
 }
 
-// writeAllRequestsFooter appends the flat "全部请求（时间序）" table covering
-// every row regardless of grouping — kept only in the main index, since it's
-// the one place a cross-group chronological view belongs.
-func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow) {
-	w("# 全部请求（时间序）\n\n")
+// writeAllRequestsFooter appends the flat "all requests, chronological"
+// table covering every row regardless of grouping — kept only in the main
+// index, since it's the one place a cross-group chronological view belongs.
+func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.RequestsText) {
+	w("# %s\n\n", t.AllRequestsTitle)
 	all := append([]RequestRow(nil), rows...)
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS < all[j].TS })
-	w("| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|---|---|\n")
+	w("%s", t.AllRequestsTableHeader)
 	for _, r := range all {
 		w("| %s | %s | %s/%s | %s | %s | %s | %s | %s |\n",
 			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
@@ -428,19 +427,19 @@ func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow) {
 	w("\n")
 }
 
-// renderSessionCard renders one "## sNN · ts · N任务N轮" session card: a
-// "### tNN · ts · N轮" sub-header per task, each followed by a one-line
-// quote of the task's opening message and its per-turn table.
-func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskTitle map[string]string) {
+// renderSessionCard renders one session card ("## sNN · ts · N tasks M
+// turns"): one task sub-header per task, each followed by a one-line quote
+// of the task's opening message and its per-turn table.
+func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskTitle map[string]string, t i18n.RequestsText) {
 	label := g.id
 	if label == "" {
-		label = "（未分组）"
+		label = t.Unrouted
 	}
 	classNote := ""
 	if g.class != "interactive" {
 		classNote = " · " + g.class
 	}
-	w("## %s · %s · %d 任务 %d 轮%s\n\n", label, fmtUTC8Full(g.rows[0].TS), g.tasks, g.requests, classNote)
+	w("%s", t.SessionCardHeader(label, fmtUTC8Full(g.rows[0].TS), g.tasks, g.requests, classNote))
 
 	byTask := map[string][]RequestRow{}
 	var taskOrder []string
@@ -455,9 +454,9 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 		sort.SliceStable(trows, func(i, j int) bool { return trows[i].Turn < trows[j].Turn })
 		tLabel := tk
 		if tLabel == "" {
-			tLabel = "（未分组）"
+			tLabel = t.Unrouted
 		}
-		w("### %s · %s · %d 轮\n\n", tLabel, fmtUTC8Full(trows[0].TS), len(trows))
+		w("%s", t.TaskHeader(tLabel, fmtUTC8Full(trows[0].TS), len(trows)))
 		title := taskTitle[g.id+"\x00"+tk]
 		if title == "" {
 			title = sessionTitle[g.id]
@@ -465,7 +464,7 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 		if title != "" {
 			w("> %s\n\n", title)
 		}
-		w("| 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|---|---|---|\n")
+		w("%s", t.TurnTableHeader)
 		for _, r := range trows {
 			w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 				turnCell(r.Turn), fmtUTC8Time(r.TS), msgsCell(r.Msgs),

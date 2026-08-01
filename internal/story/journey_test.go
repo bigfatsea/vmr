@@ -11,6 +11,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -88,7 +89,7 @@ func TestBuild_TaskSplittingOnNewInstruction(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestBuild_NoReplyMergesRetryIntoSameTask(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.OpenClawAware)
+	j, err := Build(l, profile.OpenClawAware, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestBuild_TraceChangeAlwaysOpensNewTask(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestBuild_EventStreamDeduplicatesAcrossSteps(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestBuild_TitleFromEarliestInstruction(t *testing.T) {
 	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("好的"))
 	path := writeJSONL(t, []audit.Record{r1, mkRec(at(1), "", []any{sys, u1, msg("user", "继续")}, sseText("ok"))})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic)
+	j, err := Build(l, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -251,11 +252,11 @@ func TestDeriveID_StableAcrossIndependentScans(t *testing.T) {
 
 	l1 := onlyLineage(t, path1)
 	l2 := onlyLineage(t, path2)
-	j1, err := Build(l1, profile.Generic)
+	j1, err := Build(l1, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Build(l2, profile.Generic)
+	j2, err := Build(l2, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +357,7 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 	}
 
 	chains := [][]*ctxgraph.Lineage{{g.Lineages[0]}, {g.Lineages[1]}}
-	got, err := BuildAll(chains, profile.Generic)
+	got, err := BuildAll(chains, profile.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
@@ -364,11 +365,11 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 		t.Fatalf("BuildAll returned %d journeys, want 2", len(got))
 	}
 	for i, l := range g.Lineages {
-		want, err := Build(l, profile.Generic)
+		want, err := Build(l, profile.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build[%d]: %v", i, err)
 		}
-		if gotMD, wantMD := RenderMarkdown(got[i]), RenderMarkdown(want); gotMD != wantMD {
+		if gotMD, wantMD := RenderMarkdown(got[i], i18n.EN), RenderMarkdown(want, i18n.EN); gotMD != wantMD {
 			t.Errorf("BuildAll[%d] rendered differently than Build:\n=== BuildAll ===\n%s\n=== Build ===\n%s", i, gotMD, wantMD)
 		}
 	}
@@ -378,7 +379,7 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 // contract as Build itself (errEmptyLineage), just checked per-chain inside
 // the batch instead of once up front.
 func TestBuildAll_EmptyLineageErrors(t *testing.T) {
-	if _, err := BuildAll([][]*ctxgraph.Lineage{{{}}}, profile.Generic); err == nil {
+	if _, err := BuildAll([][]*ctxgraph.Lineage{{{}}}, profile.Generic, i18n.EN); err == nil {
 		t.Error("BuildAll with an empty lineage should return an error")
 	}
 }

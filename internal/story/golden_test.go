@@ -11,6 +11,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
 
@@ -75,38 +76,50 @@ func goldenFixture() []audit.Record {
 // before this pinned the FULL rendered document, only substrings within it
 // (TestRenderMarkdown_BasicStructure and friends) — a change that shifted
 // step numbering, broke a <details> pairing, or reordered fields would slip
-// through those. Regenerate testdata/golden.md with `UPDATE_GOLDEN=1 go
+// through those. Runs both languages (this is the one place test
+// infrastructure itself has to fork by language, since a golden
+// test's whole point is pinning the FULL byte-for-byte output, which is
+// necessarily language-specific) — regenerate both with `UPDATE_GOLDEN=1 go
 // test ./internal/story/ -run TestGoldenMarkdown` after a deliberate
 // rendering change, review the diff, then commit it.
 func TestGoldenMarkdown(t *testing.T) {
-	path := writeJSONL(t, goldenFixture())
-	goldenMD := filepath.Join("testdata", "golden.md")
+	for _, tc := range []struct {
+		lang     i18n.Lang
+		goldenMD string
+	}{
+		{i18n.EN, filepath.Join("testdata", "golden.md")},
+		{i18n.ZH, filepath.Join("testdata", "golden_zh.md")},
+	} {
+		t.Run(tc.lang.String(), func(t *testing.T) {
+			path := writeJSONL(t, goldenFixture())
 
-	g, err := ctxgraph.Scan([]string{path})
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(g.Lineages) != 1 {
-		t.Fatalf("want 1 lineage in the golden fixture, got %d", len(g.Lineages))
-	}
-	j, err := Build(g.Lineages[0], profile.Generic)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	got := RenderMarkdown(j)
+			g, err := ctxgraph.Scan([]string{path})
+			if err != nil {
+				t.Fatalf("Scan: %v", err)
+			}
+			if len(g.Lineages) != 1 {
+				t.Fatalf("want 1 lineage in the golden fixture, got %d", len(g.Lineages))
+			}
+			j, err := Build(g.Lineages[0], profile.Generic, tc.lang)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			got := RenderMarkdown(j, tc.lang)
 
-	if os.Getenv("UPDATE_GOLDEN") != "" {
-		if err := os.WriteFile(goldenMD, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Skipf("regenerated %s — review the diff, then re-run without UPDATE_GOLDEN", goldenMD)
-	}
+			if os.Getenv("UPDATE_GOLDEN") != "" {
+				if err := os.WriteFile(tc.goldenMD, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				t.Skipf("regenerated %s — review the diff, then re-run without UPDATE_GOLDEN", tc.goldenMD)
+			}
 
-	want, err := os.ReadFile(goldenMD)
-	if err != nil {
-		t.Fatalf("reading golden file (run with UPDATE_GOLDEN=1 to create it): %v", err)
-	}
-	if got != string(want) {
-		t.Errorf("golden output mismatch — after reviewing why, regenerate with UPDATE_GOLDEN=1 and diff the result before committing.\n=== got ===\n%s\n=== want ===\n%s", got, string(want))
+			want, err := os.ReadFile(tc.goldenMD)
+			if err != nil {
+				t.Fatalf("reading golden file (run with UPDATE_GOLDEN=1 to create it): %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("golden output mismatch — after reviewing why, regenerate with UPDATE_GOLDEN=1 and diff the result before committing.\n=== got ===\n%s\n=== want ===\n%s", got, string(want))
+			}
+		})
 	}
 }

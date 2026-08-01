@@ -1,4 +1,4 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-08-01, by Sonnet 5
 
 // §3 可靠性: outcome mix, per-endpoint health (attempt-level availability
 // vs request-level success rate — deliberately distinct), and the error
@@ -10,24 +10,29 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"vmr/internal/i18n"
 )
 
 // ---- §3 可靠性 ----
-func renderReliability(w func(string, ...any), rep *Report2, o Row) {
-	w("## §3 可靠性\n\n")
-	w("**结果分布**\n\n")
-	outcomeTbl := newTable(w, "ok", "error", "canceled", "truncated", "fallback(恢复/失败)⭐")
+func renderReliability(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
+	t := i18n.Reliability(lang)
+	w("## %s\n\n", t.Title)
+	w("%s\n\n", t.OutcomeTitle)
+	oh := t.OutcomeHeaders
+	outcomeTbl := newTable(w, oh[0], oh[1], oh[2], oh[3], oh[4])
 	outcomeTbl.row(strconv.Itoa(o.OK), strconv.Itoa(o.Errors), strconv.Itoa(o.Canceled), strconv.Itoa(o.Truncated),
 		fmt.Sprintf("%d (%d/%d)", o.Fallbacks, o.FallbackRecovered, o.FallbackFailed))
 	w("\n")
 
 	// endpoint health (6 cols) - use EndpointsAll for cross-date view, split by protocol
 	if len(rep.EndpointsAll) > 0 {
-		w("**端点健康**（跨日合并）\n\n")
+		w("%s\n\n", t.EndpointHealthTitle)
 		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		eh := t.EndpointHeaders
 		for _, p := range protocols {
 			w("*%s*\n\n", p)
-			tbl := newTable(w, "端点", "尝试", "成功", "可用度", "错误率⭐", "首要错误")
+			tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
 			for _, e := range byProto[p] {
 				marker := ""
 				if e.ErrorRate > 10 {
@@ -50,8 +55,9 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 		}
 	}
 	if nonzero {
-		w("**错误类别 × 端点**（仅非零）\n\n")
+		w("%s\n\n", t.ErrorByEndpointTitle)
 		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		eh := t.ErrorByEndpointHeaders
 		for _, p := range protocols {
 			rows := byProto[p]
 			hasAny := false
@@ -65,7 +71,7 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 				continue
 			}
 			w("*%s*\n\n", p)
-			tbl := newTable(w, "端点", "类别", "计数")
+			tbl := newTable(w, eh[0], eh[1], eh[2])
 			for _, e := range rows {
 				for _, cls := range sortedKeysInt(e.ErrorClasses) {
 					n := e.ErrorClasses[cls]
@@ -88,7 +94,8 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 				errs[h.Hour] += int64(h.Errors)
 			}
 		}
-		w("**错误时间线**（错误数 / 小时）\n\n%s", mermaidHourBar("错误数 / 小时", "错误数", errs))
+		chartTitle, chartAxis := t.ErrorTimelineChart()
+		w("%s\n\n%s", t.ErrorTimelineTitle, mermaidHourBar(chartTitle, chartAxis, errs))
 		// callout the peak hour
 		peakH, peakN := 0, int64(0)
 		for i, n := range errs {
@@ -97,7 +104,7 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row) {
 			}
 		}
 		if peakN > 0 {
-			w("> 错误集中在 %02d:00（共 %d 条）。\n\n", peakH, peakN)
+			w("%s", t.PeakHourNote(peakH, peakN))
 		}
 	}
 }
