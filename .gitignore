@@ -28,6 +28,7 @@ coverage.html
 /vmr-requests.md
 /vmr-requests-*.md
 /details/
+/archived/
 
 # Audit data (may contain full conversation bodies — never commit)
 *.jsonl
