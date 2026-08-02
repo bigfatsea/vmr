@@ -115,6 +115,74 @@ func TestBuildManifest_AnthropicTopLevelSystem(t *testing.T) {
 	}
 }
 
+// TestBuildManifest_ResponsesTopLevelInstructions is
+// TestBuildManifest_AnthropicTopLevelSystem's openai-responses counterpart:
+// proves session/lineage grouping — the actual gap this test closes — works
+// for Responses-shaped bodies (top-level "instructions" + "input" array
+// instead of "system" + "messages"), not just the per-request detail view.
+func TestBuildManifest_ResponsesTopLevelInstructions(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"instructions": "you are helpful",
+		"input":        []any{map[string]any{"role": "user", "content": "hi"}},
+	}
+	rec := mkAuditRec(time.Now(), body)
+	rec.Protocol = "openai-responses"
+	m, ok := BuildManifest(&rec, "f", 1)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if !m.HasSys || m.LeadSys != 1 {
+		t.Errorf("HasSys=%v LeadSys=%d, want true/1 (openai-responses top-level instructions)", m.HasSys, m.LeadSys)
+	}
+	if len(m.Keys) != 1 {
+		t.Errorf("Keys len=%d, want 1", len(m.Keys))
+	}
+	if m.MsgIdx[0] != 1 {
+		t.Errorf("MsgIdx = %v, want [1]", m.MsgIdx)
+	}
+	if m.SessKey == "" {
+		t.Error("SessKey should not be empty — this is the actual grouping signal vmr report/story rely on")
+	}
+}
+
+// TestBuildManifest_ResponsesSameConversationSameSessKey proves two turns of
+// the same Responses-protocol conversation (second turn resends the first
+// turn's input plus a follow-up, the way agent clients always resend full
+// history) land in the same SessKey bucket — the concrete, user-visible
+// behavior "vmr report/vmr story can't group Responses traffic into
+// sessions" was about.
+func TestBuildManifest_ResponsesSameConversationSameSessKey(t *testing.T) {
+	t.Parallel()
+	turn1 := map[string]any{
+		"instructions": "you are helpful",
+		"input":        []any{map[string]any{"role": "user", "content": "hi"}},
+	}
+	turn2 := map[string]any{
+		"instructions": "you are helpful",
+		"input": []any{
+			map[string]any{"role": "user", "content": "hi"},
+			map[string]any{"role": "assistant", "content": "hello, how can I help?"},
+			map[string]any{"role": "user", "content": "follow up question"},
+		},
+	}
+	r1 := mkAuditRec(time.Now(), turn1)
+	r1.Protocol = "openai-responses"
+	r2 := mkAuditRec(time.Now(), turn2)
+	r2.Protocol = "openai-responses"
+	m1, ok1 := BuildManifest(&r1, "f", 1)
+	m2, ok2 := BuildManifest(&r2, "f", 2)
+	if !ok1 || !ok2 {
+		t.Fatalf("expected ok=true for both: ok1=%v ok2=%v", ok1, ok2)
+	}
+	if m1.SessKey != m2.SessKey {
+		t.Errorf("SessKey mismatch across turns of the same conversation: %q vs %q", m1.SessKey, m2.SessKey)
+	}
+	if m1.Keys[0] != m2.Keys[0] {
+		t.Error("turn 2's resent first message should hash identically to turn 1's")
+	}
+}
+
 func TestBuildManifest_IdenticalContentSameHash(t *testing.T) {
 	t.Parallel()
 	body1 := map[string]any{"messages": []any{

@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
+<!-- Ver 2026-08-02 14:00, by Sonnet 5 -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代 -->
 
 # vmr — Virtual Model Router
@@ -17,16 +17,16 @@
 - **字节级透传** —— 没有中间表示，永不做协议翻译。请求与响应和直连供应商字节一致（含响应头），仅有的例外是虚拟名↔真实名的 model 字段改写和两个有触发守卫、有实证依据的厂商怪癖修复。上游 3xx 重定向原样透传（绝不静默跟随）。未知 API 参数原样通过——上游新功能上线当天即可用，vmr 代码零改动。
 - **条件感知路由 + 会话粘性** —— 端点声明自己实际支持什么（`capabilities: [image, tools]`、`max_context_tokens`），请求需要而某个端点没声明的能力会被自动跳过；估算过于保守时有内建的降级兜底，绝不会因为一次猜测就拒掉一条本该成功的请求。多轮对话会尽量留在上游 prompt cache 已经预热的那个端点上，让"更聪明的路由"不会因为中途换供应商反而悄悄推高成本。
 - **真流式** —— SSE 事件到达即转发。归一化器只在检测到厂商"思考内联"病理形态时才缓冲，且 `</think>` 闭合后立即恢复实时流。
-- **双协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI）与 `POST /v1/messages`（Anthropic）两个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
+- **三协议一体** —— 原生 `POST /v1/chat/completions`（OpenAI Chat Completions）、`POST /v1/messages`（Anthropic Messages）与 `POST /v1/responses`（OpenAI Responses）三个入口，各自严格在本协议族内路由。不做有损的跨协议翻译——这是特性，不是缺口。
 - **视觉 token 减负（可选）** —— 入口处压缩超大内联图片附件；默认关闭，fail-open；降采样结果按内容哈希落盘缓存，避免重复处理。
 - **Unix 风格工具** —— 单二进制、零数据库、零 Web UI、零运行时插件。坏配置拒绝启动（热加载同样拒绝）。只有 4 个直接依赖，完整清单见 `go.mod`。
-- **性能是量出来的，不是猜的** —— 压测至 150 req/s：11 个测试场景中有 9 个路由/透传开销 p95 在 10ms 以内，唯一有实质成本的是可选的图片降采样。细节见 [`loadtest/`](loadtest/)。
+- **性能是量出来的，不是猜的** —— 压测至 150 req/s：12 个测试场景中有 10 个路由/透传开销 p95 在 10ms 以内，唯一有实质成本的是可选的图片降采样。细节见 [`loadtest/`](loadtest/)。
 
 ```
-OpenAI 客户端    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI 面)
-                                           ├── vmr ──┤
-Anthropic 客户端 ──(/v1/messages)──────────┘         └─> MiniMax / DeepSeek / OpenRouter (Anthropic 面)
-                                                         失败/冷却 → 按序切换下一端点
+OpenAI 客户端           ──(/v1/chat/completions)──┐       ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI 面)
+Anthropic 客户端        ──(/v1/messages)──────────┼─ vmr ─┼─> MiniMax / DeepSeek / OpenRouter (Anthropic 面)
+OpenAI Responses 客户端 ──(/v1/responses)─────────┘       └─> DeepSeek / OpenRouter (Responses 面)
+                                                              失败/冷却 → 按序切换下一端点
 ```
 
 ## 长什么样
@@ -123,6 +123,13 @@ curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/jso
 curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
   -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+# OpenAI Responses 协议客户端（client.responses.create(...)，或默认走
+# wire_api=responses 的工具）；需要 provider 配了 Responses 兼容面
+# （protocol: openai-responses）
+curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-vmr-local-xxx" \
+  -d '{"model":"coding","input":"hi"}'
 
 # 列出虚拟模型（认证规则同上，用的是 vmr 自己的 api_keys）
 curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"

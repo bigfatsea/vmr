@@ -54,11 +54,13 @@ const (
 )
 
 // Provider is a flat, protocol-agnostic account definition: one entry per
-// upstream account, however many of the two ingress protocols it actually
-// speaks. BaseURL is keyed by protocol ("openai"/"anthropic"); a provider
-// must declare at least one, and may declare both when the same account
-// speaks both surfaces (e.g. MiniMax) — api_key/proxy are shared across
-// whichever protocol faces this account has, since they're properties of the
+// upstream account, however many of the registered ingress protocols
+// ("openai"/"anthropic"/"openai-responses"/...) it actually speaks. BaseURL
+// is keyed by protocol; a provider must declare at least one, and may
+// declare several when the same account speaks several surfaces (e.g.
+// MiniMax speaks openai+anthropic, OpenRouter speaks all three) — api_key/
+// proxy are shared across whichever protocol faces this account has, since
+// they're properties of the
 // account, not of a single protocol.
 //
 // Proxy opts this provider's upstream connections into http_proxy/

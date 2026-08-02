@@ -418,7 +418,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 		r.RoleTokens[role] += t
 	}
-	rawMsgs, _ := body["messages"].([]any)
+	rawMsgs := rawArray(body)
 	// leadSys mirrors ctxgraph.Manifest.LeadSys's definition (count of
 	// contiguous leading role=="system" messages) — recomputed here as a
 	// cheap, hash-free loop bound purely to skip that block in THIS loop;

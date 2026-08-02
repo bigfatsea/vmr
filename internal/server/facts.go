@@ -86,7 +86,12 @@ var documentMarkers = [][]byte{
 	[]byte(`input_file`),
 }
 
-var dataFieldMarker = []byte(`"data":"`)
+// dataFieldMarkers are the field names whose value holds a document's raw
+// (still base64-encoded) bytes: "data" for Anthropic's source.data, and
+// "file_data" for Responses' input_file blocks (see the openai-python SDK's
+// ResponseInputFileParam — the field is genuinely named differently, not
+// just a different nesting of the same key).
+var dataFieldMarkers = [][]byte{[]byte(`"data":"`), []byte(`"file_data":"`)}
 
 // estimateDocumentTokens sums the raw (still base64-encoded) byte length
 // of every "data" field in the body and divides by documentBytesPerToken,
@@ -109,19 +114,21 @@ func estimateDocumentTokens(body []byte) int64 {
 		return 0
 	}
 	var total int64
-	rest := body
-	for {
-		idx := bytes.Index(rest, dataFieldMarker)
-		if idx < 0 {
-			break
+	for _, marker := range dataFieldMarkers {
+		rest := body
+		for {
+			idx := bytes.Index(rest, marker)
+			if idx < 0 {
+				break
+			}
+			rest = rest[idx+len(marker):]
+			end := indexUnescapedQuote(rest)
+			if end < 0 {
+				break
+			}
+			total += int64(end)
+			rest = rest[end+1:]
 		}
-		rest = rest[idx+len(dataFieldMarker):]
-		end := indexUnescapedQuote(rest)
-		if end < 0 {
-			break
-		}
-		total += int64(end)
-		rest = rest[end+1:]
 	}
 	return total / documentBytesPerToken
 }

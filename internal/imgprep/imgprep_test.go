@@ -186,6 +186,79 @@ func extractOpenAIImage(t *testing.T, body []byte) (image.Image, string) {
 	return img, format
 }
 
+// responsesReq builds a Responses-protocol request body: top-level "input"
+// array instead of "messages", and image_url as a FLAT string field on the
+// input_image block (not the nested {"image_url":{"url":...}} object Chat
+// Completions uses) — see the openai-python SDK's ResponseInputImageParam.
+func responsesReq(t *testing.T, url string) []byte {
+	t.Helper()
+	req := map[string]any{
+		"model": "coding",
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "what's in this image?"},
+					map[string]any{"type": "input_image", "image_url": url, "detail": "auto"},
+				},
+			},
+		},
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// responsesFileIDReq builds a Responses request whose input_image block
+// references an already-uploaded file (file_id) instead of carrying inline
+// bytes — no image_url field at all.
+func responsesFileIDReq(t *testing.T, fileID string) []byte {
+	t.Helper()
+	req := map[string]any{
+		"model": "coding",
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_image", "file_id": fileID},
+				},
+			},
+		},
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func extractResponsesImage(t *testing.T, body []byte) (image.Image, string) {
+	t.Helper()
+	var req struct {
+		Input []struct {
+			Content []struct {
+				Type     string `json:"type"`
+				ImageURL string `json:"image_url"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	url := req.Input[0].Content[1].ImageURL
+	data, ok := parseDataURI(url)
+	if !ok {
+		t.Fatalf("expected a data URI, got %q", url)
+	}
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode rewritten image: %v", err)
+	}
+	return img, format
+}
+
 func extractAnthropicImage(t *testing.T, body []byte) (image.Image, string, string) {
 	t.Helper()
 	var req struct {
@@ -216,9 +289,11 @@ func extractAnthropicImage(t *testing.T, body []byte) (image.Image, string, stri
 
 func TestHasImageMarker(t *testing.T) {
 	cases := map[string]bool{
-		`{"messages":[{"content":[{"type":"image_url"}]}]}`: true,
-		`{"messages":[{"content":[{"type":"image"}]}]}`:     true,
-		`{"messages":[{"content":"hello there"}]}`:          false,
+		`{"messages":[{"content":[{"type":"image_url"}]}]}`:                    true,
+		`{"messages":[{"content":[{"type":"image"}]}]}`:                        true,
+		`{"messages":[{"content":"hello there"}]}`:                             false,
+		`{"input":[{"content":[{"type":"input_image","image_url":"data:"}]}]}`: true, // caught via the "image_url" key
+		`{"input":[{"content":[{"type":"input_image","file_id":"file-1"}]}]}`:  true, // file_id-only: no image_url key at all, caught via the bare "input_image" type value
 	}
 	for body, want := range cases {
 		if got := HasImageMarker([]byte(body)); got != want {
@@ -314,6 +389,56 @@ func TestOpenAIRemoteURLNotFetched(t *testing.T) {
 	}
 	if len(images) != 1 || !images[0].Remote || images[0].Bytes != 0 || images[0].Format != "" {
 		t.Errorf("images = %+v, want one Remote=true entry with no size/format", images)
+	}
+}
+
+func TestResponsesImageAboveThresholdIsResized(t *testing.T) {
+	body := responsesReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
+	out, _ := Downscale(body, "openai-responses", Options{MaxPx: 512})
+	img, format := extractResponsesImage(t, out)
+	b := img.Bounds()
+	if format != "jpeg" {
+		t.Errorf("output format = %q, want jpeg", format)
+	}
+	if b.Dx() != 512 || b.Dy() != 256 {
+		t.Errorf("resized to %dx%d, want 512x256 (aspect-preserved)", b.Dx(), b.Dy())
+	}
+}
+
+func TestResponsesImageBelowThresholdUntouched(t *testing.T) {
+	body := responsesReq(t, dataURI("image/jpeg", solidJPEG(t, 300, 200)))
+	out, _ := Downscale(body, "openai-responses", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("an image already within the pixel cap must not be rewritten")
+	}
+}
+
+func TestResponsesRemoteURLNotFetched(t *testing.T) {
+	body := responsesReq(t, "https://example.com/some-huge-photo.jpg")
+	out, images := Downscale(body, "openai-responses", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("remote image URLs must never be fetched or rewritten")
+	}
+	if len(images) != 1 || !images[0].Remote || images[0].Bytes != 0 || images[0].Format != "" {
+		t.Errorf("images = %+v, want one Remote=true entry with no size/format", images)
+	}
+}
+
+// TestResponsesFileIDImageCounted is the gap HasImageMarker's second check
+// exists to close: a Files-API-referenced input_image block has no
+// "image_url" field at all (only "file_id"), so it can't be detected via
+// the same substring that catches every other shape — this proves the
+// request still comes out of Downscale with a real ImageInfo entry
+// (HasImage must not silently read false for it) even though there is
+// nothing to fetch or resize.
+func TestResponsesFileIDImageCounted(t *testing.T) {
+	body := responsesFileIDReq(t, "file-abc123")
+	out, images := Downscale(body, "openai-responses", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("a file_id-referenced image must never be rewritten")
+	}
+	if len(images) != 1 || !images[0].Remote {
+		t.Errorf("images = %+v, want one Remote=true entry (detected, nothing to fetch)", images)
 	}
 }
 

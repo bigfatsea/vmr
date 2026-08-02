@@ -43,9 +43,9 @@ func New(logger *log.Logger) *Router {
 }
 
 // Serve routes one chat request through the failover loop. protocol is the
-// ingress protocol ("openai" or "anthropic"); a model bound to the other
-// protocol is rejected — VMR never converts between protocols. rec (nilable)
-// collects the per-attempt audit trail.
+// ingress protocol ("openai", "anthropic", "openai-responses", ...); a model
+// bound to a different protocol is rejected — VMR never converts between
+// protocols. rec (nilable) collects the per-attempt audit trail.
 func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
 	start := time.Now()
 	snap := rt.snap.Load()
@@ -531,16 +531,22 @@ func otherProtocolFor(s *Snapshot, protocol, name string) string {
 }
 
 // IngressPath is the vmr entry point for protocol — what a live client
-// actually POSTs to ("openai" -> chat completions, anything else ->
-// Anthropic messages, mirroring every other protocol switch in this
-// codebase). Exported so every consumer that needs to name a protocol's
-// ingress route (this package's own 404 redirect message, and
+// actually POSTs to. Exported so every consumer that needs to name a
+// protocol's ingress route (this package's own 404 redirect message, and
 // internal/replay's reconstructed Client.Request.Path) shares one mapping
-// instead of each keeping its own copy that could drift if a third
-// protocol is ever registered.
+// instead of each keeping its own copy that could drift as protocols are
+// added. Falls back to the Chat Completions path for any protocol string
+// this doesn't recognize (including "openai" itself) — a third+ protocol
+// that reuses this default without adding a case here would misroute, so
+// every registered protocol must have its own explicit case, not rely on
+// falling through.
 func IngressPath(protocol string) string {
-	if protocol == "anthropic" {
+	switch protocol {
+	case "anthropic":
 		return "/v1/messages"
+	case "openai-responses":
+		return "/v1/responses"
+	default:
+		return "/v1/chat/completions"
 	}
-	return "/v1/chat/completions"
 }

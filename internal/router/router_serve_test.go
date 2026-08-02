@@ -312,6 +312,9 @@ func TestIngressPath(t *testing.T) {
 	if got := IngressPath("anthropic"); got != "/v1/messages" {
 		t.Errorf("anthropic: got %q, want /v1/messages", got)
 	}
+	if got := IngressPath("openai-responses"); got != "/v1/responses" {
+		t.Errorf("openai-responses: got %q, want /v1/responses", got)
+	}
 	// Unknown protocol defaults to the OpenAI path.
 	if got := IngressPath("unknown"); got != "/v1/chat/completions" {
 		t.Errorf("unknown: got %q, want /v1/chat/completions", got)

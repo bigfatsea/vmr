@@ -314,7 +314,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 			}
 			body, _ := rec.Client.Request.Body.(map[string]any)
 			msgs := chatmsg.Messages(body)
-			rawMsgs, _ := body["messages"].([]any)
+			rawMsgs := chatmsg.RawArray(body)
 			off := chatmsg.MsgOffset(body)
 
 			atStitchBoundary := ci > 0 && i == 0
@@ -690,7 +690,7 @@ func deriveTitle(prof profile.Profile, tasks []*Task, lang i18n.Lang) string {
 		first := tasks[0].Steps[0]
 		if body, ok := first.Rec.Client.Request.Body.(map[string]any); ok {
 			msgs := chatmsg.Messages(body)
-			rawMsgs, _ := body["messages"].([]any)
+			rawMsgs := chatmsg.RawArray(body)
 			off := chatmsg.MsgOffset(body)
 			best := -1
 			var bestText string

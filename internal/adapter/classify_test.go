@@ -466,6 +466,89 @@ func TestRewriteRoles_SameRoleZeroCopy(t *testing.T) {
 	}
 }
 
+// TestRewriteInputRoles_DeveloperToSystem is TestRewriteRoles_
+// DeveloperToSystem's Responses-protocol counterpart — same rewrite,
+// applied to the top-level "input" array instead of "messages", proving
+// RewriteInputRoles and RewriteRoles actually share
+// rewriteRolesInTopLevelArray rather than two independently-drifting scans.
+func TestRewriteInputRoles_DeveloperToSystem(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","input":[{"role":"developer","content":"be helpful"},{"role":"user","content":"hi"}]}`)
+	out, err := RewriteInputRoles(raw, map[string]string{"developer": "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `{"role":"system","content":"be helpful"}`) {
+		t.Errorf("developer role not remapped: %s", s)
+	}
+	if !strings.Contains(s, `{"role":"user","content":"hi"}`) {
+		t.Errorf("user role should be untouched: %s", s)
+	}
+	if strings.Contains(s, `"developer"`) {
+		t.Errorf("developer role still present: %s", s)
+	}
+}
+
+// TestRewriteInputRoles_NonMessageItemUntouched covers what RewriteRoles
+// never had to: Responses' "input" array can hold non-message Items
+// (function_call, reasoning, ...) that have no "role" key at all — these
+// must be left alone, not error the scan.
+func TestRewriteInputRoles_NonMessageItemUntouched(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","input":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"},{"role":"developer","content":"be helpful"}]}`)
+	out, err := RewriteInputRoles(raw, map[string]string{"developer": "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `"type":"function_call"`) || !strings.Contains(s, `"call_id":"c1"`) {
+		t.Errorf("non-message item corrupted: %s", s)
+	}
+	if !strings.Contains(s, `{"role":"system","content":"be helpful"}`) {
+		t.Errorf("developer role not remapped: %s", s)
+	}
+}
+
+// TestRewriteInputRoles_StringInputZeroCopy covers Responses' bare-string
+// input shape: there is no array to scan, so this must be a no-op, not an
+// error or a misinterpretation of the string's bytes as JSON structure.
+func TestRewriteInputRoles_StringInputZeroCopy(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","input":"hello there"}`)
+	out, err := RewriteInputRoles(raw, map[string]string{"developer": "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Errorf("string input should be unchanged: %s", out)
+	}
+}
+
+func TestRewriteInputRoles_NoInputKeyZeroCopy(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","instructions":"be nice"}`)
+	out, err := RewriteInputRoles(raw, map[string]string{"developer": "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Errorf("body should be unchanged when there is no input key: %s", out)
+	}
+}
+
+func TestRewriteInputRoles_EmptyMapZeroCopy(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","input":[{"role":"developer","content":"hi"}]}`)
+	out, err := RewriteInputRoles(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &out[0] != &raw[0] {
+		t.Error("expected zero-copy return for an empty roleMap")
+	}
+}
+
 func BenchmarkRewriteRoles(b *testing.B) {
 	raw := benchBody(200 << 10)
 	// Inject a developer role at the start of the messages array.

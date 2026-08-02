@@ -79,7 +79,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		return nil, false
 	}
 	msgs := chatmsg.Messages(body)
-	rawMsgs, _ := body["messages"].([]any)
+	rawMsgs := chatmsg.RawArray(body)
 	off := chatmsg.MsgOffset(body)
 
 	m := &Manifest{

@@ -22,6 +22,7 @@ import (
 	// Adding a provider type = one blank import here.
 	_ "vmr/internal/adapter/anthropic"
 	_ "vmr/internal/adapter/openai"
+	_ "vmr/internal/adapter/openairesponses"
 )
 
 func main() {

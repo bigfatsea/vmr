@@ -31,7 +31,8 @@ func main() {
 	mux.HandleFunc("/ok/v1/chat/completions", handleScenario)
 	mux.HandleFunc("/fail1/v1/chat/completions", handleFail)
 	mux.HandleFunc("/fail2/v1/chat/completions", handleFail)
-	mux.HandleFunc("/v1/messages", handleAnthropicScenario) // Anthropic-protocol ingress (anthropic_baseline)
+	mux.HandleFunc("/v1/messages", handleAnthropicScenario)  // Anthropic-protocol ingress (anthropic_baseline)
+	mux.HandleFunc("/v1/responses", handleResponsesScenario) // Responses-protocol ingress (responses_baseline)
 
 	log.Printf("mockupstream listening on %s (scenarios dispatch on the request's model field)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
@@ -82,6 +83,24 @@ func handleAnthropicScenario(w http.ResponseWriter, r *http.Request) {
 		"model":       "scenario:baseline",
 		"stop_reason": "end_turn",
 		"usage":       map[string]int{"input_tokens": 5, "output_tokens": 1},
+	})
+}
+
+// handleResponsesScenario is the /v1/responses counterpart of
+// handleAnthropicScenario — only the responses_baseline scenario uses it,
+// so it doesn't need the same dispatch table, just the one Responses-shaped
+// (top-level "output", no "choices") response.
+func handleResponsesScenario(w http.ResponseWriter, r *http.Request) {
+	io.Copy(io.Discard, r.Body)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"id": "mock-responses-baseline", "object": "response",
+		"model": "scenario:baseline",
+		"output": []map[string]any{{
+			"type": "message", "role": "assistant",
+			"content": []map[string]string{{"type": "output_text", "text": "ok"}},
+		}},
+		"usage": map[string]int{"input_tokens": 5, "output_tokens": 1},
 	})
 }
 

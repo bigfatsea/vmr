@@ -8,6 +8,7 @@ import (
 
 	_ "vmr/internal/adapter/anthropic"
 	_ "vmr/internal/adapter/openai"
+	_ "vmr/internal/adapter/openairesponses"
 )
 
 const validYAML = `
@@ -713,5 +714,71 @@ func TestModelStickyExplicitFalse(t *testing.T) {
 	m := cfg.Models["m1"]
 	if m.Sticky == nil || *m.Sticky != false {
 		t.Errorf("expected Sticky to be an explicit false, got %v", m.Sticky)
+	}
+}
+
+// TestOpenAIResponsesProtocolAccepted locks in that a third protocol needs
+// zero config-package code changes to become valid config: base_url and
+// EndpointGroup.Protocol are both validated purely against the adapter
+// registry (adapter.Get), never a hardcoded "openai"/"anthropic" string
+// list — see config.go's validate(). Registering the new adapter (this
+// file's blank import above) is the only thing that made this YAML valid;
+// nothing in this package itself was touched to allow it.
+func TestOpenAIResponsesProtocolAccepted(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:9900
+providers:
+  - name: p1
+    base_url: {openai-responses: https://api.example.com/v1}
+    api_key: ${VMR_TEST_KEY}
+models:
+  m1:
+    endpoints:
+      - protocol: openai-responses
+        provider: p1
+        models: [real-model]
+`
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("openai-responses protocol should validate: %v", err)
+	}
+	eg := cfg.Models["m1"].Endpoints[0]
+	if eg.Protocol != "openai-responses" {
+		t.Errorf("protocol: got %q", eg.Protocol)
+	}
+}
+
+// TestOpenAIResponsesAndChatCompletionsCoexist locks in that one virtual
+// model name can mix protocol: openai and protocol: openai-responses
+// endpoint groups — the same "one name, several independently-reachable
+// protocol faces" pattern already used for openai/anthropic (see
+// VirtualModel's doc comment); BuildSnapshot splits them into separate
+// per-protocol routes (see internal/router/snapshot_test.go for the
+// runtime-side assertion of that split).
+func TestOpenAIResponsesAndChatCompletionsCoexist(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:9900
+providers:
+  - name: p1
+    base_url: {openai: https://api.example.com/v1, openai-responses: https://api.example.com/v1}
+    api_key: ${VMR_TEST_KEY}
+models:
+  agent:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [real-model]
+      - protocol: openai-responses
+        provider: p1
+        models: [real-model]
+`
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("mixed protocol endpoints under one virtual model should validate: %v", err)
+	}
+	if len(cfg.Models["agent"].Endpoints) != 2 {
+		t.Fatalf("expected 2 endpoint groups, got %d", len(cfg.Models["agent"].Endpoints))
 	}
 }

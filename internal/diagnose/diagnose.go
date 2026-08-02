@@ -367,9 +367,18 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 	}
 	var probeBody json.RawMessage
 	var nonce string
-	if ep.AdapterType == "openai" {
+	switch ep.AdapterType {
+	case "openai":
 		probeBody, nonce = probe.RoleCompatRequest(ep.Model, "developer")
-	} else {
+	case "openai-responses":
+		// Responses-shaped body (top-level "input", not "messages") — see
+		// probe.ResponsesRequest's doc comment. No role-compat variant here:
+		// unlike Chat Completions' single-vs-two-message shape ambiguity
+		// (RoleCompatRequest's reason for existing), a rejected role_map
+		// target for this protocol fails this one connectivity check the
+		// same way any other liveness failure does, no second probe needed.
+		probeBody, nonce = probe.ResponsesRequest(ep.Model)
+	default:
 		probeBody, nonce = probe.Request(ep.Model)
 	}
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: probeBody, Header: http.Header{}}

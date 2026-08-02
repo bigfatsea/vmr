@@ -102,18 +102,31 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 		logger.Printf("%s", provider.String())
 	}
 
+	// Grouped by virtual model name first, protocol nested inside — same
+	// order as cmd_check.go's printModels, so a name reachable from more
+	// than one protocol (§3 of the design doc: one name, several
+	// independently-routed protocol faces) reads as one block instead of
+	// scattering its faces across separate, non-adjacent top-level lines
+	// under each protocol's own group. ImageDownscaleMaxPx is a per-name
+	// setting shared by every protocol face (config.VirtualModel, not
+	// EndpointGroup), so it's printed once on the name's own line, not
+	// once per protocol.
 	var model strings.Builder
 	model.WriteString("model config:")
-	for _, protocol := range core.SortedKeys(snap.Models) {
-		for _, name := range core.SortedKeys(snap.Models[protocol]) {
-			route := snap.Models[protocol][name]
-			imgOverride := ""
-			if route.ImageDownscaleMaxPx != nil {
-				imgOverride = fmt.Sprintf(" (image_downscale=%dpx)", *route.ImageDownscaleMaxPx)
+	for _, name := range core.SortedKeys(cfg.Models) {
+		imgOverride := ""
+		if m := cfg.Models[name]; m.ImageDownscaleMaxPx != nil {
+			imgOverride = fmt.Sprintf(" (image_downscale=%dpx)", *m.ImageDownscaleMaxPx)
+		}
+		fmt.Fprintf(&model, "\n    %s:%s", name, imgOverride)
+		for _, protocol := range core.SortedKeys(snap.Models) {
+			route, ok := snap.Models[protocol][name]
+			if !ok {
+				continue
 			}
-			fmt.Fprintf(&model, "\n    %s/%s%s", protocol, name, imgOverride)
+			fmt.Fprintf(&model, "\n        %s:", protocol)
 			for i, ep := range route.EffectiveOrder() {
-				fmt.Fprintf(&model, "\n        %d.%s/%s, max_context_tokens=%s, capabilities=%s",
+				fmt.Fprintf(&model, "\n            %d.%s/%s, max_context_tokens=%s, capabilities=%s",
 					i+1, ep.Provider, ep.Model, fmtMaxContextTokens(ep.MaxContextTokens), fmtCapabilities(ep.Capabilities))
 			}
 		}

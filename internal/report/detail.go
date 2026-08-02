@@ -567,7 +567,7 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo, t
 	// Params: everything except the bulky conversation fields.
 	params := map[string]any{}
 	for k, v := range obj {
-		if k != "messages" && k != "tools" && k != "system" {
+		if k != "messages" && k != "tools" && k != "system" && k != "input" && k != "instructions" {
 			params[k] = v
 		}
 	}
@@ -906,7 +906,7 @@ func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.Deta
 		return
 	}
 
-	bulky := map[string]bool{"messages": true, "tools": true, "system": true}
+	bulky := map[string]bool{"messages": true, "tools": true, "system": true, "input": true, "instructions": true}
 	keys := map[string]bool{}
 	for k := range cObj {
 		keys[k] = true

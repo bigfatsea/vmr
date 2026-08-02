@@ -49,12 +49,13 @@ type reqBody struct {
 	Model     string    `json:"model"`
 	Stream    bool      `json:"stream"`
 	MaxTokens int       `json:"max_tokens,omitempty"` // Anthropic requires this; omitted (0) is fine for OpenAI-shaped scenarios
-	Messages  []message `json:"messages"`
+	Messages  []message `json:"messages,omitempty"`   // Chat Completions / Anthropic Messages shape
+	Input     string    `json:"input,omitempty"`      // Responses shape (top-level "input", no "messages" at all) — responses_baseline only
 }
 
 // scenario pairs a request body with the ingress path it must hit —
 // everything is OpenAI-protocol (/v1/chat/completions) except
-// anthropic_baseline.
+// anthropic_baseline (/v1/messages) and responses_baseline (/v1/responses).
 type scenario struct {
 	path string
 	body reqBody
@@ -167,6 +168,10 @@ func main() {
 			Model: "anthropic_baseline", Stream: false, MaxTokens: 64,
 			Messages: []message{{Role: "user", Content: "hi"}},
 		}},
+		"responses_baseline": {"/v1/responses", reqBody{
+			Model: "responses_baseline", Stream: false,
+			Input: "hi",
+		}},
 	}
 
 	// big_image/multi_image are handled separately from the single-body
@@ -239,6 +244,7 @@ func main() {
 	order := []string{
 		"baseline", "stream_normal", "thinking_leak", "think_tag", "big_response",
 		"big_image", "multi_image", "gif", "long_history", "failover", "anthropic_baseline",
+		"responses_baseline",
 	}
 	var plainCount, imageCount, totalLines int
 	for _, name := range order {

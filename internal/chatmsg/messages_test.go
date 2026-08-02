@@ -119,6 +119,94 @@ func TestToolNames(t *testing.T) {
 	}
 }
 
+func TestMessages_ResponsesInstructionsAndInputArray(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"instructions": "you are helpful",
+		"input": []any{
+			map[string]any{"role": "user", "content": "hi"},
+			map[string]any{"type": "function_call", "call_id": "c1", "name": "exec", "arguments": `{"cmd":"ls"}`},
+			map[string]any{"type": "function_call_output", "call_id": "c1", "output": "file1\nfile2"},
+			map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "thinking it through"}}},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "output_text", "text": "done"},
+			}},
+		},
+	}
+	msgs := Messages(body)
+	if len(msgs) != 6 {
+		t.Fatalf("got %d messages, want 6 (instructions prepended + 5 input items)", len(msgs))
+	}
+	if msgs[0].Role != "system" || msgs[0].Text != "you are helpful" {
+		t.Errorf("prepended instructions: %+v", msgs[0])
+	}
+	if msgs[1].Role != "user" || msgs[1].Text != "hi" {
+		t.Errorf("user message: %+v", msgs[1])
+	}
+	if msgs[2].Role != "assistant" || !strings.Contains(msgs[2].Text, "tool_call exec") {
+		t.Errorf("function_call not rendered as assistant tool_call: %+v", msgs[2])
+	}
+	if msgs[3].Role != "tool" || !strings.Contains(msgs[3].Text, "file1") {
+		t.Errorf("function_call_output not rendered as tool: %+v", msgs[3])
+	}
+	if msgs[4].Role != "assistant" || !strings.Contains(msgs[4].Text, "thinking it through") {
+		t.Errorf("reasoning item not rendered: %+v", msgs[4])
+	}
+	if msgs[5].Role != "assistant" || msgs[5].Text != "done" {
+		t.Errorf("output_text message: %+v", msgs[5])
+	}
+	if MsgOffset(body) != 1 {
+		t.Errorf("MsgOffset with top-level instructions = %d, want 1", MsgOffset(body))
+	}
+	if got := RawArray(body); len(got) != 5 {
+		t.Errorf("RawArray = %d elements, want 5", len(got))
+	}
+}
+
+func TestMessages_ResponsesBareStringInput(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{"model": "vm", "input": "hello there"}
+	msgs := Messages(body)
+	if len(msgs) != 1 || msgs[0].Role != "user" || msgs[0].Text != "hello there" {
+		t.Errorf("bare-string input: %+v", msgs)
+	}
+	if got := RawArray(body); got != nil {
+		t.Errorf("RawArray on a bare-string input = %v, want nil", got)
+	}
+}
+
+func TestMessages_ResponsesReasoningNoSummary(t *testing.T) {
+	t.Parallel()
+	encrypted := map[string]any{"type": "reasoning", "encrypted_content": "opaque-ciphertext"}
+	if got := responsesItemMessage(encrypted); !strings.Contains(got.Text, "encrypted reasoning") {
+		t.Errorf("encrypted reasoning with no summary: %+v", got)
+	}
+	empty := map[string]any{"type": "reasoning"}
+	if got := responsesItemMessage(empty); !strings.Contains(got.Text, "no summary") {
+		t.Errorf("reasoning with neither summary nor encrypted_content: %+v", got)
+	}
+}
+
+func TestRenderPart_ResponsesImageAndFile(t *testing.T) {
+	t.Parallel()
+	img := map[string]any{"type": "input_image", "image_url": "data:image/jpeg;base64,QUFBQQ=="}
+	if got := RenderPart(img); !strings.Contains(got, "image/jpeg") {
+		t.Errorf("input_image with image_url: %q", got)
+	}
+	imgFileID := map[string]any{"type": "input_image", "file_id": "file-abc"}
+	if got := RenderPart(imgFileID); !strings.Contains(got, "file-abc") {
+		t.Errorf("input_image with only file_id: %q", got)
+	}
+	file := map[string]any{"type": "input_file", "filename": "a.pdf", "file_data": "QUFBQQ=="}
+	if got := RenderPart(file); !strings.Contains(got, "a.pdf") {
+		t.Errorf("input_file with file_data: %q", got)
+	}
+	refusal := map[string]any{"type": "refusal", "refusal": "cannot help with that"}
+	if got := RenderPart(refusal); !strings.Contains(got, "cannot help with that") {
+		t.Errorf("refusal part: %q", got)
+	}
+}
+
 func TestMessages_NonMapBody(t *testing.T) {
 	t.Parallel()
 	if got := Messages("not a map"); got != nil {

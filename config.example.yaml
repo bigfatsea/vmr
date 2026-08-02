@@ -1,13 +1,13 @@
-# Ver 2026-08-02 02:30, by Sonnet 5
+# Ver 2026-08-02 13:30, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have (a flat list of accounts); models = what clients see
 # and in which order to use it.
 #
 # providers is a flat list: one entry per upstream account, however many of
-# the two ingress protocols ("openai" | "anthropic") that account actually
-# speaks — base_url is itself keyed by protocol, so the same account (same
-# api_key, same proxy policy) can back both surfaces from one entry instead
-# of being declared twice.
+# the three ingress protocols ("openai" | "anthropic" | "openai-responses")
+# that account actually speaks — base_url is itself keyed by protocol, so
+# the same account (same api_key, same proxy policy) can back several
+# surfaces from one entry instead of being declared multiple times.
 #
 # models is keyed by virtual-model name only. A virtual model's own top-level
 # `capabilities`/`max_context_tokens` are the *base* shared by every endpoint
@@ -15,21 +15,28 @@
 # try-order candidate (see the "agent" example below). Each entry under a
 # model's `endpoints:` list is one try-order candidate: it names its own
 # protocol (which ingress can reach it — POST /v1/chat/completions for
-# "openai", POST /v1/messages for "anthropic"), a provider (resolved by name
-# against the providers list above), and a `models:` list of upstream model
-# names that all share this entry's capabilities/max_context_tokens/
-# role_map/sticky_ttl/priority — each name expands into its own independent,
-# individually health-tracked endpoint, in list order. An entry's own
-# `capabilities` is *additive* to the model's base (union — declare only
-# what this specific entry adds beyond the shared floor); its own
-# `max_context_tokens` *overrides* the base instead when set (a single
-# number can't be unioned). A virtual model name can mix protocols: give it
-# one endpoint-group entry with protocol: openai and another with protocol:
-# anthropic, and it becomes reachable — with potentially different upstream
-# candidates — from both ingress protocols at once (see the "agent" example
+# "openai", POST /v1/messages for "anthropic", POST /v1/responses for
+# "openai-responses"), a provider (resolved by name against the providers
+# list above), and a `models:` list of upstream model names that all share
+# this entry's capabilities/max_context_tokens/role_map/sticky_ttl/priority
+# — each name expands into its own independent, individually health-tracked
+# endpoint, in list order. An entry's own `capabilities` is *additive* to
+# the model's base (union — declare only what this specific entry adds
+# beyond the shared floor); its own `max_context_tokens` *overrides* the
+# base instead when set (a single number can't be unioned). A virtual model
+# name can mix protocols: give it one endpoint-group entry with protocol:
+# openai and another with protocol: anthropic (or openai-responses), and it
+# becomes reachable — with potentially different upstream candidates — from
+# every one of those ingress protocols at once (see the "agent" example
 # below). Mixing protocols within one endpoint-group entry has no syntax to
 # express, rather than being a config error to catch: each entry is exactly
 # one protocol.
+#
+# openai-responses is newer and narrower than the other two: as of this
+# writing only DeepSeek and OpenRouter document a Responses-compatible
+# endpoint (MiniMax doesn't yet), and both force stateless usage (store:true
+# / a non-null previous_response_id gets rejected by the upstream itself —
+# vmr never inspects or strips request fields, it only routes).
 
 listen: 127.0.0.1:8800
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
@@ -98,7 +105,11 @@ providers:
     #                            # provider, no need to write this out).
 
   - name: openrouter
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}  # OpenRouter speaks both surfaces on the same base
+    # OpenRouter speaks all three surfaces on the same base — including a
+    # (Beta, as of this writing) Responses-compatible endpoint, forced
+    # stateless: store:true / a non-null previous_response_id gets a 400
+    # from OpenRouter itself, vmr doesn't intercept it.
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
     proxy: true                  # per-provider switch: true = always go through
                                   # https_proxy/http_proxy above; absent/false = direct
@@ -175,10 +186,11 @@ models:
         # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
                             # override the global sticky_ttl for just this endpoint
 
-  # "agent" mixes both ingress protocols under one virtual model name: the
-  # openai-protocol entry is reachable only from POST /v1/chat/completions,
-  # the anthropic-protocol entry only from POST /v1/messages — a client on
-  # either protocol can ask for "agent" and get its own independent try-order
+  # "agent" mixes all three ingress protocols under one virtual model name:
+  # the openai-protocol entry is reachable only from POST /v1/chat/completions,
+  # the anthropic-protocol entry only from POST /v1/messages, the
+  # openai-responses entry only from POST /v1/responses — a client on any of
+  # the three can ask for "agent" and get its own independent try-order
   # list, sharing nothing but the name.
   #
   # capabilities/max_context_tokens here are the *base* every endpoint below
@@ -187,8 +199,8 @@ models:
   # endpoint's own capabilities: [...] list ADDS to the base (union — its
   # effective set is text,tools,image,audio,video,thinking, not just the
   # four listed here) and its own max_context_tokens OVERRIDES the base to
-  # 512000 for that endpoint alone; the openrouter entry declares neither,
-  # so it simply inherits the base as-is.
+  # 512000 for that endpoint alone; the openrouter entries declare neither,
+  # so they simply inherit the base as-is.
   agent:
     capabilities: [text, tools]
     max_context_tokens: 256000
@@ -201,6 +213,9 @@ models:
         models: [MiniMax-M3]
         max_context_tokens: 512000
         capabilities: [image, audio, video, thinking]
+      - protocol: openai-responses
+        provider: openrouter
+        models: [gemini-3.6-flash-high]
 
   # Anthropic-only virtual model: reachable only via POST /v1/messages.
   # "claude" needs no openai-protocol entry — nothing on the openai side

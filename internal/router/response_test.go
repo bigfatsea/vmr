@@ -463,6 +463,47 @@ func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
 	}
 }
 
+// TestRespStream_ResponsesTrueStreamingPassthrough is
+// TestRespStream_TrueStreamingPassthrough's Responses-protocol
+// counterpart, proving the fix for the bug newRespStream's protocol-gated
+// modePassthrough short-circuit exists to close: Responses' typed SSE
+// events carry payload in a "delta" field, never the "content"/"text"
+// field names classifyEvent looks for, so without that short-circuit these
+// events would never resolve out of modeUndecided and the whole response
+// would silently buffer to EOF instead of streaming. This event
+// deliberately contains neither "content" nor "text" anywhere, so a
+// passing test here can only mean the protocol-gated branch fired, not
+// that classifyEvent happened to recognize the shape.
+func TestRespStream_ResponsesTrueStreamingPassthrough(t *testing.T) {
+	t.Parallel()
+	ev1 := `data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"hello"}` + "\n\n"
+	ev2 := `data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.6","output":[]}}` + "\n\n"
+	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
+	rs := newRespStream(sr, "agent", "", true, "openai-responses", false)
+
+	buf := make([]byte, 64<<10)
+	n, err := rs.Read(buf)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	first := string(buf[:n])
+	if sr.i != 1 {
+		t.Fatalf("expected exactly 1 source read before first output (true streaming, not buffered to EOF), got %d", sr.i)
+	}
+	if !strings.Contains(first, "hello") {
+		t.Errorf("first event not forwarded immediately: %q", first)
+	}
+
+	rest := readAll(t, rs)
+	full := first + rest
+	if strings.Contains(full, "[DONE]") {
+		t.Errorf("Responses protocol has no [DONE] concept, must never be appended: %q", full)
+	}
+	if !strings.Contains(full, `"model":"agent"`) {
+		t.Errorf("model not rewritten in the response.completed event: %q", full)
+	}
+}
+
 func TestRespStream_NoDoubleDone(t *testing.T) {
 	t.Parallel()
 	// Upstream already sends [DONE] (DeepSeek, OpenRouter): VMR must

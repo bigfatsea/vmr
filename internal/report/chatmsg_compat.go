@@ -20,6 +20,10 @@ func renderPart(m map[string]any) string  { return chatmsg.RenderPart(m) }
 func imagePlaceholder(u string) string    { return chatmsg.ImagePlaceholder(u) }
 func toolNames(body any) []string         { return chatmsg.ToolNames(body) }
 func msgOffset(body map[string]any) int   { return chatmsg.MsgOffset(body) }
+func rawArray(body map[string]any) []any  { return chatmsg.RawArray(body) }
+func responsesItemMessage(m map[string]any) (role, text string) {
+	return chatmsg.ResponsesItemMessage(m)
+}
 
 type toolCall = chatmsg.ToolCall
 

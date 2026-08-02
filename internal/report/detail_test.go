@@ -291,6 +291,32 @@ func TestChatMessagesAnthropicSystem(t *testing.T) {
 	}
 }
 
+// TestRenderBodyDiffExcludesResponsesConversationFields proves the
+// param-diff table's "bulky" exclusion — already covering "messages"/
+// "tools"/"system" — also covers openai-responses' "input"/"instructions",
+// so a Responses-protocol detail page doesn't dump the entire conversation
+// twice: once (correctly) under "Messages diff", and again as raw JSON in
+// the top-level param table meant for small metadata fields only.
+func TestRenderBodyDiffExcludesResponsesConversationFields(t *testing.T) {
+	client := map[string]any{
+		"model": "agent", "instructions": "you are helpful",
+		"input": []any{map[string]any{"role": "user", "content": "hi"}},
+	}
+	attempt := map[string]any{
+		"model": "real-model", "instructions": "you are helpful",
+		"input": []any{map[string]any{"role": "user", "content": "hi"}},
+	}
+	var b strings.Builder
+	renderBodyDiff(&b, client, attempt, i18n.Detail(i18n.EN))
+	out := b.String()
+	if strings.Contains(out, "\"input\"") || strings.Contains(out, "| input |") {
+		t.Errorf("input array leaked into the param diff table instead of staying in Messages diff:\n%s", out)
+	}
+	if strings.Contains(out, "| instructions |") {
+		t.Errorf("instructions leaked into the param diff table:\n%s", out)
+	}
+}
+
 func TestRoleChars(t *testing.T) {
 	// openai shape: roles taken as-is, tool_calls counted to assistant.
 	openai := map[string]any{
@@ -320,6 +346,26 @@ func TestRoleChars(t *testing.T) {
 	rc = roleChars(anthropic)
 	if rc["system"] != 5 || rc["user"] != 7 || rc["tool"] == 0 {
 		t.Errorf("anthropic roleChars = %v", rc)
+	}
+
+	// openai-responses shape: top-level instructions counts as "system";
+	// function_call/function_call_output Items have no "role" key at all
+	// and must still land under a sensible bucket ("assistant"/"tool"), not
+	// silently vanish into an empty-string role.
+	responses := map[string]any{
+		"instructions": strings.Repeat("s", 5),
+		"input": []any{
+			map[string]any{"role": "user", "content": strings.Repeat("u", 7)},
+			map[string]any{"type": "function_call", "call_id": "c1", "name": "exec", "arguments": strings.Repeat("a", 9)},
+			map[string]any{"type": "function_call_output", "call_id": "c1", "output": strings.Repeat("t", 11)},
+		},
+	}
+	rc = roleChars(responses)
+	if rc["system"] != 5 || rc["user"] != 7 || rc["assistant"] == 0 || rc["tool"] == 0 {
+		t.Errorf("openai-responses roleChars = %v", rc)
+	}
+	if _, hasEmptyRole := rc[""]; hasEmptyRole {
+		t.Errorf("roleChars should never bucket a Responses non-message Item under an empty role: %v", rc)
 	}
 
 	// Non-chat bodies yield nothing.

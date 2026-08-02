@@ -202,6 +202,7 @@ var (
 	modelKeyLiteral    = []byte(`"model"`)
 	streamKeyLiteral   = []byte(`"stream"`)
 	messagesKeyLiteral = []byte(`"messages"`)
+	inputKeyLiteral    = []byte(`"input"`)
 	roleKeyLiteral     = []byte(`"role"`)
 )
 
@@ -335,27 +336,50 @@ func skipJSONValue(b []byte, i int) (int, bool) {
 }
 
 // RewriteRoles replaces "role" values inside the top-level "messages" array
-// according to roleMap (e.g. {"developer":"system"}). Only the string values
-// of "role" keys within message objects are rewritten; every other byte —
-// key order, whitespace, unknown parameters, message content — is preserved
-// exactly as the client sent it, consistent with RewriteModel's byte-splice
-// philosophy.
-//
-// The scan is JSON-aware: it descends into the top-level "messages" array,
-// visits each element object, and checks for a "role" key. This avoids false
-// positives from the string "developer" appearing in message content (JSON
-// string escaping ensures unescaped "role":"developer" only occurs as a
-// key-value pair, but the scanner also skips string values correctly). An
-// empty roleMap returns the input unchanged (zero-copy).
+// according to roleMap (e.g. {"developer":"system"}) — the Chat Completions/
+// Anthropic Messages shape, where every array element is a role-bearing
+// message object. See rewriteRolesInTopLevelArray for the shared scan;
+// RewriteInputRoles below is the Responses-protocol counterpart (top-level
+// "input" instead of "messages", and not every element carries a role).
 func RewriteRoles(raw json.RawMessage, roleMap map[string]string) ([]byte, error) {
+	return rewriteRolesInTopLevelArray(raw, roleMap, messagesKeyLiteral)
+}
+
+// RewriteInputRoles is RewriteRoles' Responses-protocol counterpart: same
+// byte-splice rewrite, applied to the top-level "input" array instead of
+// "messages". Responses' input can also be a bare string (no messages array
+// at all, e.g. input: "hello") — topLevelValues still locates the "input"
+// key's value range in that case, but the array-open check inside the
+// shared scan (raw[i] != '[') declines it, so a string input is correctly
+// left untouched rather than misread as an empty array.
+func RewriteInputRoles(raw json.RawMessage, roleMap map[string]string) ([]byte, error) {
+	return rewriteRolesInTopLevelArray(raw, roleMap, inputKeyLiteral)
+}
+
+// rewriteRolesInTopLevelArray replaces "role" values inside the top-level
+// array named by arrayKeyLiteral (e.g. `"messages"` or `"input"`), according
+// to roleMap (e.g. {"developer":"system"}). Only the string values of "role"
+// keys within element objects are rewritten; every other byte — key order,
+// whitespace, unknown parameters, message content — is preserved exactly as
+// the client sent it, consistent with RewriteModel's byte-splice philosophy.
+//
+// The scan is JSON-aware: it descends into the named array, visits each
+// element, and checks for a "role" key on objects that have one (elements
+// without one — e.g. a Responses function_call/reasoning Item — are left
+// alone, not an error). This avoids false positives from the string
+// "developer" appearing in message content (JSON string escaping ensures
+// unescaped "role":"developer" only occurs as a key-value pair, but the
+// scanner also skips string values correctly). An empty roleMap returns the
+// input unchanged (zero-copy).
+func rewriteRolesInTopLevelArray(raw json.RawMessage, roleMap map[string]string, arrayKeyLiteral []byte) ([]byte, error) {
 	if len(roleMap) == 0 {
 		return raw, nil
 	}
 
-	// Locate the top-level "messages" value.
-	msgRanges, ok := topLevelValues(raw, messagesKeyLiteral)
+	// Locate the top-level array value.
+	msgRanges, ok := topLevelValues(raw, arrayKeyLiteral)
 	if !ok || len(msgRanges) == 0 {
-		return raw, nil // not a JSON object or no messages key
+		return raw, nil // not a JSON object or no such key
 	}
 
 	arrStart, arrEnd := msgRanges[0][0], msgRanges[0][1]

@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 02:15, by Sonnet 5 -->
+<!-- Ver 2026-08-02 15:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
@@ -137,7 +137,9 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 
 ### 3.3 `internal/chatmsg`：消息解析共享层
 
-从 `internal/report` 下沉出来的纯函数集合，被 `ctxgraph`/`story`/`report` 三方共同依赖，是三者共享而不重复实现的最低公共点：`Messages`/`RenderContent`（两种协议的消息列表归一化解析）、`ReassembleSSE`/`FinalMessage`（响应体重组，JSON 或 SSE 两种形态）、`ExtractUsage`（token 用量提取）、`ToolCallList`/`CheckToolPairing`（工具调用列表解析 + F9 不变量断言）、`ExtractEntities`（文件路径/URL 的粗糙正则扫描，`vmr story` 的 compaction 信息损失与 `vmr report` 的 §6.7 章节共享同一份实现）。
+从 `internal/report` 下沉出来的纯函数集合，被 `ctxgraph`/`story`/`report` 三方共同依赖，是三者共享而不重复实现的最低公共点：`Messages`/`RenderContent`（三种协议的消息列表归一化解析）、`ReassembleSSE`/`FinalMessage`（响应体重组，JSON 或 SSE 两种形态）、`ExtractUsage`（token 用量提取）、`ToolCallList`/`CheckToolPairing`（工具调用列表解析 + F9 不变量断言）、`ExtractEntities`（文件路径/URL 的粗糙正则扫描，`vmr story` 的 compaction 信息损失与 `vmr report` 的 §6.7 章节共享同一份实现）。
+
+`openai-responses` 的会话结构一样由这层负责归一化，不需要 `ctxgraph`/`story`/`report` 三方任何一方单独适配：`Messages` 把顶层 `instructions`（系统提示等价物）当作 anthropic `system` 的同类处理，把顶层 `input`（数组或裸字符串）当作 `messages` 的同类处理；`input` 数组里没有 `role` 字段的 Item（`function_call`/`function_call_output`/`reasoning`）各自映射到一个语义最接近的角色（分别是 assistant/tool/assistant）。`RawArray` 是这条改动新增的一个小导出函数——`messages`/`input` 两者中实际存在的那个数组，供 `ctxgraph.BuildManifest` 等需要按位置回取"这条消息的原始 JSON 编码"（而不是 `Messages` 渲染出的纯文本）的调用方使用，替代了 `ctxgraph`/`report`/`story` 五处调用点里各自硬编码的 `body["messages"].([]any)`——这正是本节开头强调的"不重复实现"原则本该覆盖、但第一版 Responses 协议接入时遗漏的一处：路由层（`internal/router`/`internal/diagnose`）当时已经完整支持了这个协议，`internal/chatmsg` 这一层却还只认 `messages` 字段，导致 `vmr report`/`vmr story` 对这类流量完全分不出会话/任务边界（详单页本身不受影响，因为它不依赖会话分组）。
 
 ### 3.4 `internal/story`：Journey 视图
 

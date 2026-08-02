@@ -23,6 +23,7 @@ import (
 
 	_ "vmr/internal/adapter/anthropic"
 	_ "vmr/internal/adapter/openai"
+	_ "vmr/internal/adapter/openairesponses"
 )
 
 func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endpoint {
@@ -452,6 +453,89 @@ models:
 	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 	if r.Status != StatusOK {
 		t.Fatalf("status = %s, want ok (detail=%q) — anthropic endpoints must never be probed with role \"developer\"", r.Status, r.Detail)
+	}
+}
+
+// responsesEchoUpstream is echoUpstream's Responses-protocol counterpart:
+// probe.ResponsesRequest sends a bare-string top-level "input" (no message
+// array at all), so the nonce extraction reads that field directly instead
+// of the last element of a "messages" array.
+func responsesEchoUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Input string `json:"input"`
+		}
+		reply := ""
+		if err := json.Unmarshal(body, &req); err == nil {
+			const prefix = "Reply with exactly this token and nothing else: "
+			if i := strings.Index(req.Input, prefix); i >= 0 {
+				reply = req.Input[i+len(prefix):]
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"id":"resp_1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, reply)
+	}))
+}
+
+// responsesShapeCheckingUpstream fails the probe (400) if it ever receives
+// a "messages" key — the regression net for testEndpoint's dispatch bug:
+// sending the Chat-Completions-shaped probe body to a Responses endpoint
+// would otherwise go unnoticed (a well-behaved mock upstream might just
+// ignore the unexpected "input" field and answer 200 anyway, which would
+// pass even a broken dispatch).
+func responsesShapeCheckingUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"messages"`) {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"missing required parameter: 'input'"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":"resp_1","output":[]}`)
+	}))
+}
+
+func TestTestEndpoint_ResponsesProtocolUsesResponsesShapedProbe(t *testing.T) {
+	ts := responsesEchoUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-responses: %q}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai-responses, provider: p1, models: [m]}]}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "openai-responses", "p1", "m")
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status != StatusOK {
+		t.Fatalf("status = %s, want ok (detail=%q)", r.Status, r.Detail)
+	}
+}
+
+func TestTestEndpoint_ResponsesProtocolNeverSendsMessagesShape(t *testing.T) {
+	ts := responsesShapeCheckingUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-responses: %q}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai-responses, provider: p1, models: [m]}]}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "openai-responses", "p1", "m")
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status == StatusFail {
+		t.Fatalf("status = fail (detail=%q) — testEndpoint sent a Chat-Completions-shaped probe body to a Responses endpoint", r.Detail)
 	}
 }
 

@@ -90,6 +90,123 @@ func TestSessionFingerprint_NoMessages(t *testing.T) {
 	}
 }
 
+// TestSessionFingerprint_Responses_Instructions mirrors the Anthropic case
+// (a system-equivalent field independent of the message array) but for
+// Responses' top-level "instructions" + array "input".
+func TestSessionFingerprint_Responses_Instructions(t *testing.T) {
+	t.Parallel()
+	a := json.RawMessage(`{"model":"x","instructions":"you are Agent A","input":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}`)
+	b := json.RawMessage(`{"model":"x","instructions":"you are Agent A","input":[{"role":"user","content":"hi"},{"role":"assistant","content":"different tail"}]}`)
+	c := json.RawMessage(`{"model":"x","instructions":"you are Agent B","input":[{"role":"user","content":"hi"}]}`)
+	d := json.RawMessage(`{"model":"x","instructions":"you are Agent A","input":[{"role":"user","content":"bye"}]}`)
+
+	sysA, firstA, ok := SessionFingerprint(a, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true for a")
+	}
+	sysB, firstB, ok := SessionFingerprint(b, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true for b")
+	}
+	if sysA != sysB || firstA != firstB {
+		t.Errorf("same instructions+first input across turns must fingerprint identically; a=(%x,%x) b=(%x,%x)", sysA, firstA, sysB, firstB)
+	}
+
+	sysC, firstC, ok := SessionFingerprint(c, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true for c")
+	}
+	if sysC == sysA {
+		t.Errorf("different instructions must produce different sysHash")
+	}
+	if firstC != firstA {
+		t.Errorf("first input identical between a and c, firstMsgHash should match")
+	}
+
+	sysD, firstD, ok := SessionFingerprint(d, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true for d")
+	}
+	if sysD != sysA {
+		t.Errorf("instructions identical between a and d, sysHash should match")
+	}
+	if firstD == firstA {
+		t.Errorf("different first input must produce different firstMsgHash")
+	}
+}
+
+// TestSessionFingerprint_Responses_LeadingSystemAndDeveloperItems mirrors
+// TestSessionFingerprint_OpenAI_LeadingSystem, generalized to Responses'
+// extra "developer" role — both count as leading system-equivalent Items.
+func TestSessionFingerprint_Responses_LeadingSystemAndDeveloperItems(t *testing.T) {
+	t.Parallel()
+	single := json.RawMessage(`{"model":"x","input":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`)
+	multi := json.RawMessage(`{"model":"x","input":[{"role":"system","content":"sys"},{"role":"developer","content":"more sys"},{"role":"user","content":"hi"}]}`)
+	noSys := json.RawMessage(`{"model":"x","input":[{"role":"user","content":"hi"}]}`)
+
+	sysS, firstS, ok := SessionFingerprint(single, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	sysM, firstM, ok := SessionFingerprint(multi, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if sysS == sysM {
+		t.Errorf("extra leading developer-role item should change sysHash")
+	}
+	if firstS != firstM {
+		t.Errorf("first non-system/developer element identical, firstMsgHash should match: got %x vs %x", firstS, firstM)
+	}
+
+	sysN, _, ok := SessionFingerprint(noSys, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	var zero [16]byte
+	if sysN != zero {
+		t.Errorf("no leading system/developer item and no instructions: sysHash should be the zero value, got %x", sysN)
+	}
+}
+
+// TestSessionFingerprint_Responses_StringInput covers Responses' simplest
+// valid shape: input as a bare string, no message array at all.
+func TestSessionFingerprint_Responses_StringInput(t *testing.T) {
+	t.Parallel()
+	a := json.RawMessage(`{"model":"x","instructions":"be nice","input":"hello there"}`)
+	b := json.RawMessage(`{"model":"x","instructions":"be nice","input":"hello there"}`)
+	c := json.RawMessage(`{"model":"x","instructions":"be nice","input":"a different message"}`)
+
+	sysA, firstA, ok := SessionFingerprint(a, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	sysB, firstB, ok := SessionFingerprint(b, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if sysA != sysB || firstA != firstB {
+		t.Errorf("identical string input must fingerprint identically")
+	}
+	_, firstC, ok := SessionFingerprint(c, "openai-responses")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if firstC == firstA {
+		t.Errorf("different string input must produce a different firstMsgHash")
+	}
+}
+
+func TestSessionFingerprint_Responses_NoInput(t *testing.T) {
+	t.Parallel()
+	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x"}`), "openai-responses"); ok {
+		t.Errorf("expected ok=false when there is no top-level input field")
+	}
+	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x","input":[]}`), "openai-responses"); ok {
+		t.Errorf("expected ok=false for an empty input array")
+	}
+}
+
 // TestTopLevelProbe_MatchesStructUnmarshalSemantics locks in that the
 // hand-rolled scanner accepts/rejects exactly what
 // json.Unmarshal(raw, &struct{Model string; Stream bool}{}) would have —

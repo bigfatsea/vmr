@@ -155,6 +155,21 @@ func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool,
 		rs.applied = append(rs.applied, "opaque")
 	case !isSSE:
 		rs.mode = modeBuffered
+	case protocol == "openai-responses":
+		// The modeUndecided/classifyEvent machinery below exists purely to
+		// detect MiniMax's two thinking-mode shapes, both defined by
+		// inline text inside "content"/"text" fields. The Responses
+		// protocol has no such shape to detect: reasoning is always a
+		// separate typed Item (response.output[].type == "reasoning"),
+		// never mixed into text content — and its SSE events don't carry
+		// the "content"/"text" field markers classifyEvent looks for in
+		// the first place, so every response on this protocol would
+		// otherwise sit in modeUndecided until EOF and silently degrade
+		// from true streaming to full buffering. Going straight to
+		// modePassthrough is the same "no known quirk shape, so don't
+		// wait for one" decision !isSSE already makes for non-SSE bodies —
+		// not a guess at Responses' event field names.
+		rs.mode = modePassthrough
 	}
 	return rs
 }

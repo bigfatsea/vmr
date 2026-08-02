@@ -82,6 +82,29 @@ func RoleCompatRequest(model, role string) (body json.RawMessage, nonce string) 
 	return b, nonce
 }
 
+// ResponsesRequest is Request's Responses-protocol counterpart: same
+// echo-nonce liveness check, built in the Responses shape (top-level
+// "input" instead of "messages", no "max_tokens" — Responses' analogous
+// field is named differently and unconfirmed against a real endpoint, so it
+// is deliberately omitted rather than guessed; leaving an optional field
+// out is always safe, a wrong field name is not). Used both by the runtime
+// background recovery probe (internal/router/probe.go's runProbe) and `vmr
+// diagnose` for any endpoint whose protocol is "openai-responses" — sending
+// Request's messages-shaped body to a /responses endpoint would be rejected
+// as a missing required "input" field, which is exactly the bug this
+// function exists to avoid.
+func ResponsesRequest(model string) (body json.RawMessage, nonce string) {
+	nonce = newNonce()
+	b, err := json.Marshal(map[string]any{
+		"model": model,
+		"input": "Reply with exactly this token and nothing else: " + nonce,
+	})
+	if err != nil {
+		return json.RawMessage(`{}`), nonce
+	}
+	return b, nonce
+}
+
 // newNonce returns a short, effectively-unique token. It doesn't need to be
 // cryptographically unpredictable — only distinct enough that seeing it in a
 // response body is proof this response was generated for this request, not

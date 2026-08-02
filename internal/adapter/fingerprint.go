@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 )
 
-var systemKeyLiteral = []byte(`"system"`)
+var (
+	systemKeyLiteral       = []byte(`"system"`)
+	instructionsKeyLiteral = []byte(`"instructions"`)
+)
 
 // SessionFingerprint locates the system prompt (if any) and the first
 // non-system message in raw, and returns the md5 of each as separate
@@ -26,6 +29,10 @@ var systemKeyLiteral = []byte(`"system"`)
 // array, or the array is empty) — the caller should skip Sticky routing
 // for this request, not fail it.
 func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsgHash [16]byte, ok bool) {
+	if protocol == "openai-responses" {
+		return responsesSessionFingerprint(raw)
+	}
+
 	msgsRanges, msgsOK := topLevelValues(raw, messagesKeyLiteral)
 	if !msgsOK || len(msgsRanges) == 0 {
 		return sysHash, firstMsgHash, false
@@ -60,6 +67,57 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 	default:
 		return sysHash, firstMsgHash, false
 	}
+}
+
+// responsesSessionFingerprint is SessionFingerprint's Responses-protocol
+// case, split out because the shape it scans differs from "messages" in two
+// ways at once: the system-prompt equivalent can come from a top-level
+// "instructions" string, a leading "input" element (Responses allows
+// role:"system" and role:"developer" on message Items, unlike Chat
+// Completions' "system" only), or both at once — and "input" itself may be
+// a bare string rather than an array. Both signals are folded into one
+// sysHash (concatenated, then hashed once) since either can legitimately
+// carry the system-equivalent instructions for a given client, and a Sticky
+// Model anchor needs both to agree for two turns to fingerprint identically.
+func responsesSessionFingerprint(raw json.RawMessage) (sysHash, firstMsgHash [16]byte, ok bool) {
+	var sysBytes []byte
+	if instrRanges, iok := topLevelValues(raw, instructionsKeyLiteral); iok && len(instrRanges) > 0 {
+		sysBytes = append(sysBytes, raw[instrRanges[0][0]:instrRanges[0][1]]...)
+	}
+
+	inputRanges, iok := topLevelValues(raw, inputKeyLiteral)
+	if !iok || len(inputRanges) == 0 {
+		return sysHash, firstMsgHash, false
+	}
+	inStart, inEnd := inputRanges[0][0], inputRanges[0][1]
+	j := skipJSONWS(raw, inStart)
+	if j >= inEnd {
+		return sysHash, firstMsgHash, false
+	}
+	if raw[j] == '"' {
+		// input is a bare string (no message array at all): the whole value
+		// is the first-message anchor; only "instructions" can contribute a
+		// system-equivalent signal in this shape.
+		if len(sysBytes) > 0 {
+			sysHash = md5.Sum(sysBytes)
+		}
+		return sysHash, md5.Sum(raw[inStart:inEnd]), true
+	}
+
+	// input is an array of Items: walk past any leading role:"system"/
+	// role:"developer" message Items (folded into sysBytes alongside
+	// "instructions" above) to find the first Item that isn't one — same
+	// bounded-cost walk as the "openai" case's leadingSystemAndFirstOther,
+	// generalized to Responses' extra "developer" role.
+	sys2, firstBytes, fok := leadingSystemAndFirstOtherResponses(raw, inStart, inEnd)
+	if !fok {
+		return sysHash, firstMsgHash, false
+	}
+	sysBytes = append(sysBytes, sys2...)
+	if len(sysBytes) > 0 {
+		sysHash = md5.Sum(sysBytes)
+	}
+	return sysHash, md5.Sum(firstBytes), true
 }
 
 // walkArrayElements scans the JSON array whose value occupies
@@ -123,6 +181,32 @@ func leadingSystemAndFirstOther(raw []byte, arrStart, arrEnd int) (sysBytes, fir
 		}
 		firstOther = raw[s:e]
 		return true // first non-system element found: stop
+	})
+	if !walkOK || !found {
+		return nil, nil, false
+	}
+	return sys, firstOther, true
+}
+
+// leadingSystemAndFirstOtherResponses is leadingSystemAndFirstOther's
+// Responses-protocol counterpart: same bounded leading-role walk, but a
+// Responses message Item's role can be "system" OR "developer" (the SDK's
+// Message type allows both — OpenAI's Chat Completions-only "developer"
+// role concept carries over here as a first-class input role, not just a
+// role_map rewrite target), so both count as "leading system-equivalent"
+// for sysHash purposes. A non-message Item (function_call, reasoning, …)
+// has no "role" key at all — elementRole reports roleOK=false for it, which
+// this treats the same as a role that isn't system/developer: it becomes
+// the first-message anchor, stopping the walk.
+func leadingSystemAndFirstOtherResponses(raw []byte, arrStart, arrEnd int) (sysBytes, firstOther []byte, ok bool) {
+	var sys []byte
+	found, walkOK := walkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
+		if role, roleOK := elementRole(raw, s, e); roleOK && (role == "system" || role == "developer") {
+			sys = append(sys, raw[s:e]...)
+			return false // keep walking past leading system/developer elements
+		}
+		firstOther = raw[s:e]
+		return true // first other element found: stop
 	})
 	if !walkOK || !found {
 		return nil, nil, false

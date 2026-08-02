@@ -7,6 +7,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -37,7 +38,22 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		return
 	}
 
-	body, nonce := probe.Request(ep.Model)
+	// The probe body's shape must match the endpoint's protocol — Request's
+	// Chat-Completions-shaped ("messages") body sent to a Responses endpoint
+	// would be rejected as missing the required "input" field, which
+	// ClassifyError would most likely read as ErrClient (a bad-request
+	// verdict, see adapter.DefaultClassify) and thus ReportNeutral: the
+	// endpoint would never leave "probing" and stay half-open forever, even
+	// though it's perfectly healthy. See probe.ResponsesRequest's doc
+	// comment for why this dispatches on protocol instead of adding a
+	// second, wrong-shaped probe body to the mix.
+	var body json.RawMessage
+	var nonce string
+	if ep.AdapterType == "openai-responses" {
+		body, nonce = probe.ResponsesRequest(ep.Model)
+	} else {
+		body, nonce = probe.Request(ep.Model)
+	}
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body}
 	ctx, cancel := context.WithTimeout(context.Background(), snap.Cfg.ProbeTimeout.D())
 	defer cancel()

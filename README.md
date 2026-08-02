@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
+<!-- Ver 2026-08-02 14:00, by Sonnet 5 -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -17,16 +17,16 @@ One stable virtual model name (`coding`, `claude`, `agent`) hides every provider
 - **Byte-faithful passthrough** — no intermediate representation, no protocol translation, ever. Requests and responses match a direct provider call byte-for-byte, headers included, except the virtual↔real model-name rewrite and a couple of guarded, evidence-based provider quirk repairs. Upstream 3xx redirects are passed through untouched (never silently followed). Unknown API parameters pass through untouched — new provider features work the day they ship, with zero vmr changes.
 - **Condition-aware, session-sticky routing** — endpoints declare what they actually support (`capabilities: [image, tools]`, `max_context_tokens`); a request needing something an endpoint doesn't declare skips it, with a built-in fallback so a conservative size estimate can never block a request that would have worked. Multi-turn conversations stay pinned to whichever endpoint's upstream prompt cache is already warm, so smarter routing can't quietly cost you more by switching providers mid-conversation.
 - **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
-- **Two protocols, one router** — native `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
+- **Three protocols, one router** — native `POST /v1/chat/completions` (OpenAI Chat Completions), `POST /v1/messages` (Anthropic Messages), and `POST /v1/responses` (OpenAI Responses) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
 - **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; off by default, fail-open, content-hash cached on disk so the same image is never reprocessed.
 - **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Four direct dependencies, full list in `go.mod`.
-- **Measured, not assumed** — load-tested at up to 150 req/s: sub-10ms p95 routing/passthrough overhead on 9 of 11 tested scenarios; the only real cost is optional image downscaling. See [`loadtest/`](loadtest/).
+- **Measured, not assumed** — load-tested at up to 150 req/s: sub-10ms p95 routing/passthrough overhead on 10 of 12 tested scenarios; the only real cost is optional image downscaling. See [`loadtest/`](loadtest/).
 
 ```
-OpenAI client    ──(/v1/chat/completions)──┐         ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI face)
-                                           ├── vmr ──┤
-Anthropic client ──(/v1/messages)──────────┘         └─> MiniMax / DeepSeek / OpenRouter (Anthropic face)
-                                                         failure/cooldown → next endpoint in order
+OpenAI client        ──(/v1/chat/completions)──┐       ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI face)
+Anthropic client     ──(/v1/messages)──────────┼─ vmr ─┼─> MiniMax / DeepSeek / OpenRouter (Anthropic face)
+OpenAI Responses SDK ──(/v1/responses)─────────┘       └─> DeepSeek / OpenRouter (Responses face)
+                                                            failure/cooldown → next endpoint in order
 ```
 
 ## What it looks like
@@ -124,6 +124,13 @@ curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/jso
 curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
   -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+# OpenAI Responses-protocol client (client.responses.create(...), or OPENAI_BASE_URL
+# for tools that default to wire_api=responses); requires a provider with a
+# Responses-compatible face configured (protocol: openai-responses)
+curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-vmr-local-xxx" \
+  -d '{"model":"coding","input":"hi"}'
 
 # List virtual models (same optional api_keys auth as above)
 curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"

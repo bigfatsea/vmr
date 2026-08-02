@@ -95,19 +95,32 @@ func usageFromObj(m map[string]any) Usage {
 	if v := Nested(m, "prompt_tokens_details", "cached_tokens"); v != nil {
 		cacheRead = max(cacheRead, num(v))
 	}
+	if v := Nested(m, "input_tokens_details", "cached_tokens"); v != nil { // openai-responses
+		cacheRead = max(cacheRead, num(v))
+	}
 	if v, ok := m["prompt_cache_hit_tokens"]; ok {
 		cacheRead = max(cacheRead, num(v))
 	}
 	cacheWrite := num(m["cache_creation_input_tokens"])
 	u.CacheRead, u.CacheWrite = cacheRead, cacheWrite
 
-	if _, anthropicShape := m["input_tokens"]; anthropicShape {
+	// openai-responses reuses Anthropic's input_tokens/output_tokens field
+	// names (unlike Chat Completions' prompt_tokens/completion_tokens) but,
+	// like Chat Completions and unlike Anthropic, already includes cached
+	// tokens in that total rather than counting them separately — so it
+	// must NOT take the "+ cacheRead + cacheWrite" branch below. Anthropic's
+	// own usage object never carries "input_tokens_details", so checking
+	// for that key is what tells the two apart.
+	switch {
+	case Nested(m, "input_tokens_details", "cached_tokens") != nil: // openai-responses
+		u.In = num(m["input_tokens"])
+	case m["input_tokens"] != nil: // anthropic
 		u.In = num(m["input_tokens"]) + cacheRead + cacheWrite
-	} else {
+	default:
 		u.In = num(m["prompt_tokens"])
 	}
 	u.Out = max(num(m["completion_tokens"]), num(m["output_tokens"]))
-	u.Reasoning = num(Nested(m, "completion_tokens_details", "reasoning_tokens"))
+	u.Reasoning = max(num(Nested(m, "completion_tokens_details", "reasoning_tokens")), num(Nested(m, "output_tokens_details", "reasoning_tokens")))
 	return u
 }
 

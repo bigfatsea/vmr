@@ -19,6 +19,7 @@ import (
 	"vmr/internal/audit"
 
 	_ "vmr/internal/adapter/openai"
+	_ "vmr/internal/adapter/openairesponses"
 )
 
 // writeConfig writes a minimal one-provider, one-model config.yaml pointing
@@ -164,6 +165,70 @@ func TestRun_RealReplayRewritesModelAndInjectsCredentials(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "200") {
 		t.Errorf("stdout missing status line: %q", out.String())
+	}
+}
+
+// TestRun_RealReplayOpenAIResponsesProtocol proves vmr replay needs zero
+// protocol-specific code to support a third protocol: it goes through the
+// exact same adapter.BuildRequest/router.IngressPath path live traffic
+// does (see replay.go's doc comment), both of which are already protocol-
+// generic — so an openai-responses audit record replays correctly with no
+// changes to this package at all.
+func TestRun_RealReplayOpenAIResponsesProtocol(t *testing.T) {
+	dir := t.TempDir()
+	var gotPath string
+	var gotModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		gotModel, _ = body["model"].(string)
+		if _, hasMessages := body["messages"]; hasMessages {
+			t.Errorf("replayed body must stay Responses-shaped (input, not messages): %v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"resp1","model":"upstream-model","output":[]}`)
+	}))
+	defer upstream.Close()
+
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-responses: %q}, api_key: real-provider-key}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-responses, provider: p1, models: [upstream-model]}
+`, upstream.URL)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &audit.Record{
+		Model: "vm", Protocol: "openai-responses", Stream: false,
+		Client: audit.Exchange{
+			Request: audit.Message{
+				Method: http.MethodPost, Path: "/v1/responses",
+				Headers: http.Header{"Authorization": {"Bearer clientkey"}},
+				Body:    audit.EncodeBody([]byte(`{"model":"vm","input":"hi there"}`)),
+			},
+		},
+	}
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", rec)
+
+	var out bytes.Buffer
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1",
+	}, &out)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if gotPath != "/responses" {
+		t.Errorf("upstream path=%q, want /responses", gotPath)
+	}
+	if gotModel != "upstream-model" {
+		t.Errorf("upstream saw model=%q, want upstream-model (virtual name should be rewritten)", gotModel)
 	}
 }
 

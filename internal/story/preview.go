@@ -71,7 +71,7 @@ func titleFromRecord(rec *audit.Record, prof profile.Profile, lang i18n.Lang) st
 		return st.NoTitle
 	}
 	msgs := chatmsg.Messages(body)
-	rawMsgs, _ := body["messages"].([]any)
+	rawMsgs := chatmsg.RawArray(body)
 	off := chatmsg.MsgOffset(body)
 	for idx, m := range msgs {
 		if m.Role != "user" {

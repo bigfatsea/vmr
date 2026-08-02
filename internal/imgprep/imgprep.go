@@ -85,8 +85,19 @@ type Options struct {
 // HasImageMarker is a cheap pre-check so non-image requests (the large
 // majority) never pay for JSON parsing. False positives (matching "images"
 // or similar) just fall through to a parse that finds nothing to rewrite.
+//
+// The second check exists for Responses' input_image blocks specifically:
+// the common inline-data shape ({"type":"input_image","image_url":"data:..."})
+// is already caught by the first check via the "image_url" key itself, but a
+// Files-API-referenced block ({"type":"input_image","file_id":"..."}, no
+// image_url field at all) has no "image_url` substring anywhere — only the
+// type value "input_image" names it, and that value's leading '"' is
+// preceded by "input_" rather than immediately followed by "image", so it
+// doesn't match the first check either. Checking for the bare type-value
+// substring closes that gap without a false-positive risk worth worrying
+// about (it's a specific enough token).
 func HasImageMarker(body []byte) bool {
-	return bytes.Contains(body, []byte(`"image`))
+	return bytes.Contains(body, []byte(`"image`)) || bytes.Contains(body, []byte(`input_image`))
 }
 
 // ImageInfo describes one image block found in a request — mirrors
@@ -112,9 +123,11 @@ type ImageInfo struct {
 // always returns a description of every image it found (see ImageInfo) —
 // detection doesn't depend on opts.MaxPx being positive. protocol selects
 // which content-block shape to look for ("openai": content[].image_url.url
-// data URI; "anthropic": content[].source with type "base64"). On any
-// rewrite failure, or when nothing needed resizing, the returned body is the
-// original unchanged (same backing array) — images is still populated.
+// data URI; "anthropic": content[].source with type "base64"; "openai-
+// responses": content[].image_url as a flat data URI string, see
+// rewriteResponsesImage). On any rewrite failure, or when nothing needed
+// resizing, the returned body is the original unchanged (same backing
+// array) — images is still populated.
 //
 // "Detected" and "decodable" are deliberately independent: len(images) is
 // the count of content blocks that are structurally image references (the
@@ -157,12 +170,27 @@ func Downscale(body []byte, protocol string, opts Options) (result []byte, image
 	return
 }
 
+// containerKey is the top-level key holding the array of message-shaped
+// elements to walk: "messages" for Chat Completions/Anthropic Messages,
+// "input" for Responses. Responses' "input" can also be a bare string
+// (no array at all) — the json.Unmarshal into []json.RawMessage below
+// fails for that shape exactly the way it already does for Chat
+// Completions' "content is a plain string" case, and rewriteBody correctly
+// no-ops rather than erroring.
+func containerKey(protocol string) string {
+	if protocol == "openai-responses" {
+		return "input"
+	}
+	return "messages"
+}
+
 func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, []ImageInfo, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, false, nil, nil
 	}
-	rawMsgs, ok := top["messages"]
+	key := containerKey(protocol)
+	rawMsgs, ok := top[key]
 	if !ok {
 		return nil, false, nil, nil
 	}
@@ -188,7 +216,7 @@ func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, []Im
 	if err != nil {
 		return nil, false, images, err
 	}
-	top["messages"] = newMsgs
+	top[key] = newMsgs
 	out, err := core.MarshalNoEscape(top)
 	if err != nil {
 		return nil, false, images, err
@@ -251,6 +279,8 @@ func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Optio
 		return rewriteOpenAIImage(msgIndex, raw, block, opts)
 	case protocol == "anthropic" && typ == "image":
 		return rewriteAnthropicImage(msgIndex, raw, block, opts)
+	case protocol == "openai-responses" && typ == "input_image":
+		return rewriteResponsesImage(msgIndex, raw, block, opts)
 	default:
 		return raw, false, nil, nil
 	}
@@ -297,6 +327,56 @@ func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json
 		return raw, false, &info, err
 	}
 	block["image_url"] = ib
+	out, err := core.MarshalNoEscape(block)
+	if err != nil {
+		return raw, false, &info, err
+	}
+	return out, true, &info, nil
+}
+
+// rewriteResponsesImage handles a Responses-protocol input_image block:
+// {"type":"input_image","image_url":"data:...","detail":"...","file_id":"..."}.
+// Unlike rewriteOpenAIImage's Chat Completions shape, image_url here is a
+// FLAT string field directly on the block, not a nested {"url":...} object —
+// per the official openai-python SDK's ResponseInputImageParam (the
+// OpenAPI-generated, authoritative field shape). A block that references an
+// already-uploaded file (file_id, no image_url at all) has no bytes vmr can
+// reach — recorded the same way a remote URL is: a real image reference
+// that HasImage/EstimatedTokens must still count, just with nothing to
+// downscale.
+func rewriteResponsesImage(msgIndex int, raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
+	rawURL, hasURL := block["image_url"]
+	if !hasURL {
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
+	}
+	var url string
+	if err := json.Unmarshal(rawURL, &url); err != nil {
+		return raw, false, nil, nil
+	}
+	data, ok := parseDataURI(url)
+	if !ok {
+		// A real http(s) URL (or an unrecognized scheme): vmr never fetches
+		// it, but it's still an image reference worth recording — same
+		// treatment as rewriteOpenAIImage/rewriteAnthropicImage's remote case.
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Remote: true}, nil
+	}
+	newData, newMime, changed, info := processImage(data, opts)
+	if info.Format == "" {
+		// Header decode failed, but this is still a structurally-confirmed
+		// image reference — see Downscale's doc comment on why "detected"
+		// must never depend on "decodable".
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Bytes: int64(len(data))}, nil
+	}
+	info.MessageIndex = msgIndex
+	if !changed {
+		return raw, false, &info, nil
+	}
+	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
+	uv, err := core.MarshalNoEscape(newURL)
+	if err != nil {
+		return raw, false, &info, err
+	}
+	block["image_url"] = uv
 	out, err := core.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, &info, err

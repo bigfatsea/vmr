@@ -22,12 +22,12 @@ image_cache_dir: ./logs/loadtest/image_cache  # own subdirectory, same reasoning
                             # defeating the whole point of generating them.
 
 providers:
-  # mockupstream speaks both protocols on the same account (it just echoes
-  # back whatever shape the request came in as) — one flat-schema entry
-  # covers what used to be two separate providers.openai.mock /
+  # mockupstream speaks all three protocols on the same account (it just
+  # echoes back whatever shape the request came in as) — one flat-schema
+  # entry covers what used to be separate providers.openai.mock /
   # providers.anthropic.mock declarations.
   - name: mock
-    base_url: {openai: http://127.0.0.1:9900/v1, anthropic: http://127.0.0.1:9900/v1}
+    base_url: {openai: http://127.0.0.1:9900/v1, anthropic: http://127.0.0.1:9900/v1, openai-responses: http://127.0.0.1:9900/v1}
     api_key: sk-loadtest-mock-key
   - name: mock_fail1
     base_url: {openai: http://127.0.0.1:9900/fail1/v1}   # loadtest/mockupstream always answers 500 on this path
@@ -70,3 +70,5 @@ models:
       - {protocol: openai, provider: mock_ok, models: ["scenario:baseline"], priority: 3}
   anthropic_baseline:
     endpoints: [{protocol: anthropic, provider: mock, models: ["scenario:baseline"]}]
+  responses_baseline:
+    endpoints: [{protocol: openai-responses, provider: mock, models: ["scenario:baseline"]}]

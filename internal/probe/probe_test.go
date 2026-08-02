@@ -70,6 +70,38 @@ func TestRoleCompatRequest_ShapeAndNonce(t *testing.T) {
 	}
 }
 
+func TestResponsesRequest_ShapeAndNonce(t *testing.T) {
+	body, nonce := ResponsesRequest("some-model")
+	if nonce == "" || !strings.HasPrefix(nonce, "VMR-PROBE-") {
+		t.Fatalf("unexpected nonce: %q", nonce)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatalf("body is not valid JSON: %v (%s)", err, body)
+	}
+	if m["model"] != "some-model" {
+		t.Errorf("model = %v, want %q", m["model"], "some-model")
+	}
+	if _, ok := m["messages"]; ok {
+		t.Error("messages must not be present — a Chat-Completions-shaped body sent to a Responses endpoint would be rejected as missing \"input\"")
+	}
+	input, ok := m["input"].(string)
+	if !ok {
+		t.Fatalf("input: %v, want a string", m["input"])
+	}
+	if !strings.Contains(input, nonce) {
+		t.Errorf("input does not mention the nonce: %q", input)
+	}
+}
+
+func TestResponsesRequest_TwoCallsGetDifferentNonces(t *testing.T) {
+	_, n1 := ResponsesRequest("m")
+	_, n2 := ResponsesRequest("m")
+	if n1 == n2 {
+		t.Error("two probes got the same nonce — the echo check can't tell a fresh response from a stale one")
+	}
+}
+
 func TestEchoed(t *testing.T) {
 	t.Parallel()
 	nonce := "VMR-PROBE-deadbeef"

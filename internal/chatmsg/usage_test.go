@@ -44,6 +44,57 @@ func TestExtractUsage_AnthropicJSON(t *testing.T) {
 	}
 }
 
+// TestExtractUsage_ResponsesJSON proves openai-responses' usage object —
+// Anthropic's field names (input_tokens/output_tokens) but Chat Completions'
+// "cached tokens already included in the total" semantics — is read
+// correctly rather than falling into either sibling protocol's rule
+// verbatim: input_tokens_details.cached_tokens is the tell that selects the
+// no-double-add path (see usageFromObj's doc comment).
+func TestExtractUsage_ResponsesJSON(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"usage": map[string]any{
+			"input_tokens":  float64(1000),
+			"output_tokens": float64(200),
+			"input_tokens_details": map[string]any{
+				"cached_tokens": float64(800),
+			},
+			"output_tokens_details": map[string]any{
+				"reasoning_tokens": float64(50),
+			},
+		},
+	}
+	u, ok := ExtractUsage(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if u.In != 1000 || u.Out != 200 || u.CacheRead != 800 || u.Reasoning != 50 {
+		t.Errorf("usage = %+v, want In=1000 (not 1000+800 — already inclusive like Chat Completions)", u)
+	}
+}
+
+// TestExtractUsage_ResponsesJSONNoCacheDetails covers a Responses usage
+// object with no input_tokens_details at all (the shape my mockupstream
+// loadtest scenario and a plain non-caching upstream both send) — must
+// still take the "already inclusive" branch, not silently fall through to
+// Anthropic's additive one just because input_tokens_details is absent.
+func TestExtractUsage_ResponsesJSONNoCacheDetails(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"usage": map[string]any{
+			"input_tokens":  float64(5),
+			"output_tokens": float64(1),
+		},
+	}
+	u, ok := ExtractUsage(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if u.In != 5 || u.Out != 1 {
+		t.Errorf("usage = %+v, want In=5 Out=1", u)
+	}
+}
+
 func TestExtractUsage_SSEStream(t *testing.T) {
 	t.Parallel()
 	raw := sseToolCall("exec")

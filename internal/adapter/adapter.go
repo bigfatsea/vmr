@@ -19,8 +19,10 @@ import (
 // response bodies flow back untouched (the router's normalizer handles the
 // few guarded quirk repairs; see internal/router/response.go).
 type Adapter interface {
-	// Protocol names the ingress protocol this adapter speaks ("openai", "anthropic").
-	// A virtual model's endpoints must all share one protocol.
+	// Protocol names the ingress protocol this adapter speaks ("openai",
+	// "anthropic", "openai-responses"). Each endpoint-group under a virtual
+	// model belongs to exactly one protocol; a name can mix several groups
+	// of different protocols to be reachable from more than one ingress.
 	Protocol() string
 
 	// ResolveURL returns the complete upstream URL for a given base_url.

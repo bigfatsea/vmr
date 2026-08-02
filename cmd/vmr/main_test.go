@@ -391,8 +391,9 @@ models:
 		t.Errorf("output missing timeouts block:\n%s", out)
 	}
 
-	// Model group with endpoints in try order.
-	if !strings.Contains(out, "openai/vm") {
+	// Model group with endpoints in try order — grouped by name first,
+	// protocol nested inside (see logConfigSummary's doc comment).
+	if !strings.Contains(out, "vm:") || !strings.Contains(out, "openai:") {
 		t.Errorf("output missing model group:\n%s", out)
 	}
 	if !strings.Contains(out, "1.p1/real-a, max_context_tokens=<empty>, capabilities=<empty>") {
@@ -520,11 +521,59 @@ models:
 	logConfigSummary(logger, cfg, snap)
 	out := buf.String()
 
-	if !strings.Contains(out, "openai/plain\n") {
+	if !strings.Contains(out, "plain:\n") {
 		t.Errorf("plain model should not have image_downscale override: %s", out)
 	}
-	if !strings.Contains(out, "openai/custom (image_downscale=256px)") {
+	if !strings.Contains(out, "custom: (image_downscale=256px)") {
 		t.Errorf("custom model should show image_downscale=256px: %s", out)
+	}
+}
+
+// TestLogConfigSummary_NameGroupsAcrossProtocols locks in the fix for the
+// startup-log readability gap identified in
+// docs/VirtualModel_CrossProtocol_Naming_Analysis_Sonnet5.md §3.2: a virtual
+// model name reachable from more than one protocol must render as ONE block
+// (name line, both protocols nested under it), not as two separate,
+// non-adjacent top-level "protocol/name" lines the old protocol-outer
+// grouping produced — matching cmd_check.go's printModels order.
+func TestLogConfigSummary_NameGroupsAcrossProtocols(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:8800
+providers:
+  - {name: p1, base_url: {openai: https://a.example/v1, anthropic: https://a.example/v1}, api_key: k}
+models:
+  agent:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m-openai]}
+      - {protocol: anthropic, provider: p1, models: [m-anthropic]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	logConfigSummary(logger, cfg, snap)
+	out := buf.String()
+
+	// Both protocol faces must appear as children of the SAME "agent:"
+	// block — this config only declares one virtual model, so everything
+	// after "agent:" belongs to it.
+	i := strings.Index(out, "\n    agent:")
+	if i < 0 {
+		t.Fatalf("missing \"agent:\" model group:\n%s", out)
+	}
+	rest := out[i:]
+	if !strings.Contains(rest, "openai:") || !strings.Contains(rest, "anthropic:") {
+		t.Errorf("both protocol faces must nest under the same agent: block, got:\n%s", rest)
+	}
+	if !strings.Contains(rest, "p1/m-openai") || !strings.Contains(rest, "p1/m-anthropic") {
+		t.Errorf("both protocol faces' endpoints must be present, got:\n%s", rest)
 	}
 }
 

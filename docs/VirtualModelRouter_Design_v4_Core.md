@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
+<!-- Ver 2026-08-02 14:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -32,30 +32,49 @@ Health、并发闸、Sticky Model 亲和状态都不是独立概念，而是运�
 
 ## 3. 协议模型：多入口，永不翻译
 
-vmr 同时暴露两个聊天入口，**不做任何跨协议转换**：
+vmr 同时暴露三个聊天入口，**不做任何跨协议转换**：
 
 ```
-POST /v1/chat/completions   OpenAI 协议   → 只路由到 OpenAI 兼容端点
-POST /v1/messages           Anthropic 协议 → 只路由到 Anthropic 兼容端点
+POST /v1/chat/completions   OpenAI Chat Completions 协议 → 只路由到该协议兼容端点
+POST /v1/messages           Anthropic Messages 协议      → 只路由到该协议兼容端点
+POST /v1/responses           OpenAI Responses 协议        → 只路由到该协议兼容端点
 ```
 
-**决策逻辑**：双向流式翻译（Anthropic 的 `message_start`/`content_block_delta` 事件流 vs OpenAI 的 chunk 流，tool-use / thinking 块的语义映射）是 LiteLLM 复杂度失控的根源之一；而主流厂商（MiniMax、DeepSeek、OpenRouter）已原生提供两种兼容面，翻译不创造价值。协议内透传保证零损耗、对上游新字段前向兼容。
+**决策逻辑**：双向流式翻译（Anthropic 的 `message_start`/`content_block_delta` 事件流 vs OpenAI 的 chunk 流，tool-use / thinking 块的语义映射）是 LiteLLM 复杂度失控的根源之一；而主流厂商（MiniMax、DeepSeek、OpenRouter）已原生提供两种兼容面，翻译不创造价值。协议内透传保证零损耗、对上游新字段前向兼容。**Responses 协议同理**：即使它和 Chat Completions 同属"OpenAI 家族"，请求/响应形状（`input`/`instructions`/`output` vs `messages`/`choices`）、流式事件形态（typed SSE events vs delta chunk）都完全不同，把两者揉进一个 Adapter 里翻译，复杂度病灶和 Anthropic↔OpenAI 互转是同一类；按"新协议 = 新 Adapter + 新路由行"接入，不新增任何跨协议转换逻辑。
 
 落实机制：
 
 * 协议是 Adapter 的属性（`Protocol() string`），也是 `models.<name>.endpoints[]` 每条 endpoint-group 自带的字段。一个 endpoint-group 引用的 provider 必须在对应协议下声明了 base_url——引用一个没声明该协议 base_url 的 provider，是加载期错误（"provider 有没有这个协议的 base_url"），不是配置写不出来；但单条 endpoint-group 内部混用两种协议依旧没有语法能表达它，每条 entry 天生只属于一个协议（见「配置参考」）。
-* 模型存在但协议不符 → 404，message 指明正确入口。
-* 恰好两种协议的请求体都是顶层 `model` + `stream` 字段，路由解析层（`CanonicalRequest`）天然协议无关。
+* 模型存在但协议不符 → 404，message 指明正确入口（`router.IngressPath` 按协议字符串返回对应路径，三个协议各一条 case，不是二元 if/else——新协议接入时这里必须显式加一条分支，落进默认分支会给出错误的入口提示）。
+* 三种协议的请求体都是顶层 `model` + `stream` 字段，路由解析层（`CanonicalRequest`）天然协议无关，`internal/config`（`base_url` 校验、`protocol` 字段校验）、`router.BuildSnapshot`、`internal/strategy`（Condition/Dimension）同样协议无关——新协议接入这几处零代码改动，只需注册 Adapter。
 * vmr 自产的错误体为两种客户端都能解析的合并形态：`{"type":"error","error":{"type","message"}}`（OpenAI SDK 读 `error.message`，Anthropic SDK 认 `type:"error"` 信封）。`GET /v1/models` 同理（`object:"list"` + `has_more` + `type:"model"` 并存）。
 * 新增协议入口（如 gemini）= 新 Adapter + 新路由行，同样透传。
 
-已接入的厂商协议面（均实测）。同一账号的两个协议面现在共用同一条 provider 条目——`base_url` 是按协议分 key 的 map，两个协议面各自一个 key，天然不冲突：
+已接入的厂商协议面（均实测）。同一账号的多个协议面现在共用同一条 provider 条目——`base_url` 是按协议分 key 的 map，各协议面各自一个 key，天然不冲突：
 
-| Provider 名 | base_url（openai 面 / anthropic 面） |
+| Provider 名 | base_url（openai 面 / anthropic 面 / openai-responses 面） |
 | --- | --- |
-| minimax | `https://api.minimaxi.com/v1` / `https://api.minimaxi.com/anthropic/v1` |
-| deepseek | `https://api.deepseek.com/v1` / `https://api.deepseek.com/anthropic/v1` |
-| openrouter | `https://openrouter.ai/api/v1`（同一 base，anthropic 面由 Adapter 拼 `/messages`） |
+| minimax | `https://api.minimaxi.com/v1` / `https://api.minimaxi.com/anthropic/v1` / 未提供（[MiniMax-AI/MiniMax-M2#112](https://github.com/MiniMax-AI/MiniMax-M2/issues/112) 仍是 open 的 feature request） |
+| deepseek | `https://api.deepseek.com/v1` / `https://api.deepseek.com/anthropic/v1` / `https://api.deepseek.com`（Responses 面截至上线时只开放 `deepseek-v4-flash`，`deepseek-v4-pro` 待补；强制 `store:false`/`previous_response_id:null`，见下方「Responses 协议接入」） |
+| openrouter | `https://openrouter.ai/api/v1`（同一 base，各协议面由各自 Adapter 拼 `/messages`/`/responses`；Responses 面 Beta 状态，同样强制无状态） |
+
+### 3.1 Responses 协议接入（`internal/adapter/openairesponses`）
+
+OpenAI 官方力推的下一代协议（`POST /v1/responses`，[迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)），DeepSeek/OpenRouter 已提供 OpenAI 兼容实现。与 Chat Completions 的关键形状差异：请求体顶层是 `input`（字符串或 Item 数组）+ 可选 `instructions`（system/developer 指导，可选地也能以 `role:"system"`/`role:"developer"` 的 Item 出现在 `input` 数组里），不是 `messages`；响应是 `output[]`（`message`/`reasoning`/`function_call` 等 typed Item 混合数组），不是 `choices[]`；流式是**类型化 SSE 事件**（`response.output_text.delta`/`response.completed`/…），不是 `delta` chunk，也没有 `[DONE]` 哨兵——终止靠类型化的完成事件本身。
+
+**天然复用（协议无关，零改动）**：顶层 `model`/`stream` 字段解析（`CanonicalRequest`）、顶层 `model` 字节 splice 重写（`adapter.RewriteModel`）、响应侧 `model` 字段正则重写（全局字面量扫描，不区分嵌套层级，Responses 把 `model` 放在 `response.created`/`response.completed` 事件体内层同样命中）、`[DONE]` 追加策略（门槛是 `protocol=="openai"`，新协议字符串天然被排除）、顶层 `tools` 数组非空探测（`HasTools`）、按字节估算 token 的 `EstimatedTokens`、审计落盘（body 原样存，不关心内部字段形状）。
+
+**协议专属实现（新写，不能套用 Chat Completions 的实现）**：
+
+* `adapter.RewriteInputRoles`：`role_map` 在 Responses 协议下作用于顶层 `input` 数组而不是 `messages`，且数组元素混杂 message 型（带 `role`）与 function_call/reasoning 等无 `role` 的 Item——与 `RewriteRoles` 共享同一段字节扫描逻辑（`rewriteRolesInTopLevelArray`，只是扫描的顶层键不同），不是重新发明。
+* `adapter.SessionFingerprint` 的 `"openai-responses"` 分支：system 等价信号来自顶层 `instructions` **和/或** `input` 数组里前导的 `role:"system"`/`role:"developer"` Item（Responses 的 role 取值比 Chat Completions 多一个 `developer`），两者拼接后一起哈希；`input` 为纯字符串时整串作为首条消息锚点。这不是可选项——Responses 协议下手动回传上下文（`context += res1.output`）时，上一轮的加密 reasoning Item（`encrypted_content`）只有创建它的那个端点能解密，一旦 failover/条件路由换了端点，跟着换的还有"新端点看不懂上一轮的加密状态"这个问题；Sticky Model 的会话亲和正是为同一类问题（prompt cache 按端点失效）设计的机制，扩展它的指纹计算即可原样覆盖 Responses 的这个新问题，不需要另造一套状态保护。
+* `imgprep`：Responses 的图片块是 `{"type":"input_image","image_url":"data:...","detail":"...","file_id":"..."}`——`image_url` 是**扁平字符串字段**，不是 Chat Completions 那种嵌套对象 `{"image_url":{"url":...}}`（见 [openai-python SDK 的 `ResponseInputImageParam`](https://github.com/openai/openai-python)，OpenAPI 生成、字段名的权威来源）。`rewriteResponsesImage` 单独实现；`HasImageMarker` 额外加了 `input_image` 子串检查——常见的内联图片场景能靠 `"image_url"` 这个 KEY 本身命中原有 marker，但 `file_id`-only（Files API 引用，无 `image_url` 字段）的块两个既有 marker 都命中不到，需要专门兜底。
+* `server/facts.go` 的 `estimateDocumentTokens`：Responses 的 `input_file` 块内联数据字段名是 `file_data`，不是 Anthropic 的 `data`——字段名真的不同，不是嵌套方式不同，需要多认一个 marker。
+* `internal/probe.ResponsesRequest` + `internal/router/probe.go` 的 `runProbe` 协议分派：半开端点的后台恢复探测原先无条件用 `probe.Request`（Chat-Completions 形状，顶层 `messages`）——一个 `openai-responses` 端点一旦冷却过一次，后台探测发给它的 body 缺 `input` 字段，几乎必然被拒（400），分类落入 `ErrClient` → `ReportNeutral`，端点永远停在半开态、真实流量视为不可用，**永久锁死**（回归测试：`internal/router/router_probe_test.go`）。`internal/diagnose.testEndpoint` 有同构的三选一分支。
+
+**`internal/replay` 不需要专门适配，已验证**：`vmr replay` 的请求重建全程走 `adapter.BuildRequest`/`router.IngressPath`，两者都已经是协议无关的（前者靠注册表分派到 `OpenAIResponses.BuildRequest`，后者已修好三路分支）——一条 `protocol: openai-responses` 的审计记录不需要 `internal/replay` 包本身有任何改动就能正确重放，回归测试见 `internal/replay/replay_test.go` 的 `TestRun_RealReplayOpenAIResponsesProtocol`。
+
+**明确不做（第一版范围收窄，非遗漏）**：`internal/report`/`internal/story`/`internal/chatmsg`（Part 2 分析工具对 `input`/`output` 结构的消息级解析与会话分组）——这是 Part 2 设计文档覆盖的独立子系统，审计落盘本身对 body 内部结构无感知，Responses 请求/响应体原样落盘、可被 `vmr report`/`vmr story` 读到，只是消息级解析/会话分组暂时把它当"识别不出结构"处理（降级，不是崩溃）；错误分类词表未针对 DeepSeek/OpenRouter 的 Responses 端点新增任何 vendor 专属 sniff——`ClassifyError` 起步复用 `DefaultClassify`，遵循「必须做 body 嗅探，因为实测显示各家习惯不一」这条原则本身要求的前提：先有真实错误样本，再补词表，不能凭空编造。
 
 ---
 
@@ -100,11 +119,12 @@ internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass�
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch
-internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写；fingerprint.go：SessionFingerprint（Sticky Model 用）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
-internal/adapter/openai    OpenAI 协议透传 Adapter
-internal/adapter/anthropic Anthropic 协议透传 Adapter
+internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写/role 改写（classify.go 的 `rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）；fingerprint.go：SessionFingerprint（Sticky Model 用，按协议分派，含 openai-responses 的 instructions+input 分支）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
+internal/adapter/openai    OpenAI Chat Completions 协议透传 Adapter
+internal/adapter/anthropic Anthropic Messages 协议透传 Adapter
+internal/adapter/openairesponses  OpenAI Responses 协议透传 Adapter（`POST /v1/responses`，见「协议模型」§3.1）
 internal/health            失败驱动的健康状态机（冷却、退避、半开单飞名额）——不知道、也不需要知道半开端点具体怎么被重新验证，那是 router 的策略
-internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）
+internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）；`Request`（messages 形状）与 `ResponsesRequest`（input 形状）按端点协议由调用方分派，body 形状必须匹配协议，否则半开端点的后台恢复探测会被上游当坏请求拒绝、永久锁在半开态
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
@@ -112,10 +132,10 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
   ├─ transport.go NewUpstreamClient（diagnose/replay 复用）+ copyFlush（流式转发）
   ├─ logfmt.go    实时路由日志的行格式化
-  ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）
+  ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newRespStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）
   ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
-  └─ probe.go  半开端点的后台探测 goroutine
-internal/server            HTTP 入口、鉴权、审计录制、四个端点（header 黑名单见 internal/core.FilterClientHeaders）
+  └─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
+internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
 internal/audit             审计日志（JSONL 落盘）+ 共享的日志文件读取（OpenLogFile/ForEachLine，report/replay 共用）+ OutcomeFor（server/replay 共用的 outcome 判定）
@@ -138,8 +158,9 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 
 | 端点 | 说明 |
 | --- | --- |
-| `POST /v1/chat/completions` | OpenAI 协议入口 |
-| `POST /v1/messages` | Anthropic 协议入口 |
+| `POST /v1/chat/completions` | OpenAI Chat Completions 协议入口 |
+| `POST /v1/messages` | Anthropic Messages 协议入口 |
+| `POST /v1/responses` | OpenAI Responses 协议入口（见「协议模型」§3.1） |
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
 | `GET /admin/status` | `instance`（进程身份 + 配置新鲜度）+ `reload`（最近一次热重载结果）+ `sticky.entries` + 端点健康 + 并发指标 JSON（健康部分含 `probing` 字段——某个端点当前是否正被一次后台恢复探测占着单飞名额）；仅接受 loopback 来源 |
 
@@ -653,9 +674,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
     capabilities: [text, tools]   # 可选；这个虚拟模型下所有端点共享的能力基线，缺省 = 无基线（不限制）
     max_context_tokens: 128000    # 可选；同上，端点共享的上下文窗口基线，缺省/0 = 无基线（不限制）
     endpoints:
-      - protocol: openai        # openai | anthropic | 未来任何已注册的 adapter 名——引用的 provider 必须
-                                 # 在这个协议下声明了 base_url；同一虚拟模型名可以再挂一条 protocol: anthropic
-                                 # 的 entry，两个入口各自独立可达（见「协议模型」）
+      - protocol: openai        # openai | anthropic | openai-responses | 未来任何已注册的 adapter 名——引用的
+                                 # provider 必须在这个协议下声明了 base_url；同一虚拟模型名可以再挂多条不同
+                                 # protocol 的 entry，各入口各自独立可达（见「协议模型」§3）
         provider: <name>       # 必须引用 providers 列表里已定义的账号名
         models: [<上游真实模型名>, ...]   # 一个或多个；每个名字展开成独立的、各自健康跟踪的端点，
                                           # 按列表顺序参与 priority 排序，共享本条 entry 的其余字段
@@ -759,6 +780,9 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者 |
 | Sticky Model 默认开启（`VirtualModel.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
 | `sticky_ttl`（全局与端点级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
+| Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai` | 复用 `protocol: openai` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai`/`anthropic` 命名同构 |
+| Responses 协议第一版归一化器不做任何 quirk 检测，直接短路到真流式 | 给 Responses 的 typed SSE 事件（如 `"delta":"..."`）也加一套 marker 表，复刻 Chat Completions 的"确认命中形态才缓冲"判定 | Responses 协议原生把 reasoning 做成独立 typed Item，从设计上就不会出现 MiniMax 那种"思考混进 content"的怪癖——没有已知怪癖形态可确认，猜测性地加 marker 表是无凭无据的过度设计；`newRespStream` 的协议短路（直接进 `modePassthrough`）与 `!isSSE` 那条已有短路是同一逻辑：没有已知怪癖就不等待判定 |
+| `previous_response_id`/`store:true` 不在 vmr 侧拦截，交给上游自然拒绝 | vmr 主动校验并拒绝这两个字段，或做特殊的 failover 保护逻辑 | 调研到 vmr 目前唯二提供 Responses 兼容面的上游（DeepSeek、OpenRouter）都在协议层强制无状态（`store:true`/非空 `previous_response_id` 直接 400），这个问题现状下并不存在；vmr 的"协议内透传、不替客户端做校验"原则决定了不该主动剥离或拦截客户端发送的字段——真正需要处理"有状态续接端点不可跨候选替换"这个第一性原理问题，要等接入一个真支持它的上游（如 OpenAI 官方账号）才有意义，到时候的方向是扩展 Sticky Model 的强度而不是发明新的错误分类规则 |
 
 ---
 
@@ -768,28 +792,28 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 **工具选型：Vegeta**（`github.com/tsenart/vegeta`）。核心诉求是"配置文件驱动"（不为测个性能再学一门脚本语言）和"能应对 SSE 流式响应"；调研过 k6（功能最全但要学 JS + 自己编译 SSE 扩展）、oha/hey（命令行参数驱动，不支持按请求变化 body）、Artillery（引入 Node.js 依赖）。Vegeta 是 Go 原生、JSON-lines targets 文件、内置延迟百分位统计，与项目技术栈最贴合。**一个关键简化**：不需要压测工具懂 TTFB/流式细节——vmr 自己的审计日志已经把每条请求的 `ttft_ms`/`dur_ms` 记下来。于是分工很清楚：Vegeta 只负责"客户端视角的总延迟/吞吐/成功率"，"是不是因为全缓冲变慢了"这类更细的按场景归因，`loadtest/runner` 自己直接扫一遍这次运行产生的审计 JSONL 现算（`computeServerStats`，`runner/main.go`）；场景区分也顺势用虚拟模型名当标签，mock 上游按 model 名决定要模拟哪种响应形态。唯一需要自己写的是这个 mock 上游（`loadtest/mockupstream`）——没有任何通用压测工具会假装自己是一个 LLM provider，更不用说模拟已知的具体怪癖形态（MiniMax 的 thinking 泄漏文本、SSE 分块节奏）。**`loadtest/runner` 刻意不跑 `vmr report`、不 import `internal/report`**：压测测的是 vmr 的 HTTP 路由/转发层，它的结果不该系于另一个命令（`vmr report`）的渲染管线是否碰巧还能跑通——`internal/report` 的分析管线本身会独立演进（会话分组、成本估算等），压测不需要、也不该被它拖着走。这条边界由 `go list -deps ./loadtest/runner` 里不出现任何 `vmr/internal/*` 包来保证。
 
-**场景矩阵**（`loadtest/config.yaml` 里每个场景一个虚拟模型，覆盖开销特征明显不同的代码路径，不做协议交叉/并发梯度扫描——一次性健全性检查不是要画一条完整性能曲线）：`baseline`（路由开销下限）、`stream_normal`（真流式透传）、`thinking_leak`（已知最差路径——全程缓冲到 EOF）、`think_tag`（`<think>` 标签形态，先缓冲后恢复流式）、`big_response`（大体积非流式响应）、`big_image`/`multi_image`（图片降采样的完整 decode→scale→encode 链路，单图与多图）、`gif`（确认永不缩放的快速跳过路径依然便宜）、`long_history`（长对话历史的 JSON 探测扫描 + model splice + 审计全量写盘开销）、`failover`（health 状态机 + 冷却 + 故障切换循环开销）、`anthropic_baseline`（确认 Anthropic 协议适配器与 openai 协议共享的归一化代码没有额外成本）。`loadtest/runner`（`go run ./loadtest/runner`）把起 mock 上游、起 vmr、生成 targets、按 `light`/`moderate`/`heavy` 三档递增负载（10/50/150 req/s）依次跑 Vegeta、再现算按场景/按端点的汇总，全部串成一条命令，产物落在项目原有的 `logs/loadtest/`（独立子目录，每次运行前清空）与 `reports/loadtest-report.md`，不与真实数据混放。图片处理场景（`big_image`/`multi_image`/`gif`）单独分组统计客户端视角百分位——它是唯一真正做 decode/scale/encode 的路径，混进其余场景会把"正常请求"的 p95/p99/max 也一起拉高，失真明显。
+**场景矩阵**（`loadtest/config.yaml` 里每个场景一个虚拟模型，覆盖开销特征明显不同的代码路径，不做协议交叉/并发梯度扫描——一次性健全性检查不是要画一条完整性能曲线）：`baseline`（路由开销下限）、`stream_normal`（真流式透传）、`thinking_leak`（已知最差路径——全程缓冲到 EOF）、`think_tag`（`<think>` 标签形态，先缓冲后恢复流式）、`big_response`（大体积非流式响应）、`big_image`/`multi_image`（图片降采样的完整 decode→scale→encode 链路，单图与多图）、`gif`（确认永不缩放的快速跳过路径依然便宜）、`long_history`（长对话历史的 JSON 探测扫描 + model splice + 审计全量写盘开销）、`failover`（health 状态机 + 冷却 + 故障切换循环开销）、`anthropic_baseline`（确认 Anthropic 协议适配器与 openai 协议共享的归一化代码没有额外成本）、`responses_baseline`（确认 openai-responses 协议适配器——`input` 数组扫描、`RewriteInputRoles`、`newRespStream` 的协议短路——同样没有额外成本）。`loadtest/runner`（`go run ./loadtest/runner`）把起 mock 上游、起 vmr、生成 targets、按 `light`/`moderate`/`heavy` 三档递增负载（10/50/150 req/s）依次跑 Vegeta、再现算按场景/按端点的汇总，全部串成一条命令，产物落在项目原有的 `logs/loadtest/`（独立子目录，每次运行前清空）与 `reports/loadtest-report.md`，不与真实数据混放。图片处理场景（`big_image`/`multi_image`/`gif`）单独分组统计客户端视角百分位——它是唯一真正做 decode/scale/encode 的路径，混进其余场景会把"正常请求"的 p95/p99/max 也一起拉高，失真明显。
 
 **`big_image`/`multi_image` 用一批变体图片，不是同一张图反复发送**：`internal/imgprep` 的降采样磁盘缓存按内容哈希 + 目标像素上限做 key（见「请求图片自动降采样」§7.1），如果三档负载全程只用同一张固定图，除了全程第一次，其余请求都会命中缓存——真正的 decode→scale→encode 反而被缓存挡在外面，测不到这两个场景本该测的东西。`loadtest/gentargets` 因此给这两个场景各生成 `cacheBustVariants`（50）张内容不同、但尺寸/复杂度相同的变体，Vegeta 按目标文件的行序循环发送；`gif` 场景虽不需要变体（`imgprep` 从不缩放 GIF，没有缓存可言），但同样重复写 50 行——Vegeta 按目标文件的**行数**而非 scenario 名字均分流量，行数不对齐会让 `gif` 拿不到它该有的 1/3 份额。**`loadtest/config.yaml` 单独声明 `image_cache_dir`（`logs/loadtest` 下的子目录，随 `logs/loadtest` 一起在每次运行前清空）**：这批变体图片是确定性生成的（同样的 seed 每次产出同样的字节），如果和真实部署共用默认的 `~/.vmr/image_cache`，第二次跑测试时上一次生成的"新"变体早就被缓存预热过，测试会在不知不觉间悄悄退回"全程命中缓存"的老问题。
 
 运行方式与如何读数字的完整操作说明见 [`loadtest/README.md`](../loadtest/README.md)，本节只记录设计判断与结论。
 
-**实测结论（测试时间：2026-07-24，独立、清空过的 `image_cache_dir`）**：三档负载共 4100 个请求（11 个场景 × 3 轮）全部 100% 成功率。
+**实测结论（测试时间：2026-08-02，独立、清空过的 `image_cache_dir`，新增 `responses_baseline` 后的 12 场景版本）**：三档负载共 4150 个请求（12 个场景 × 3 轮）全部 100% 成功率。
 
 客户端视角（Vegeta，plain/image 分组，单位 ms）：
 
 | 负载档 | 分组 | 速率 | 请求数 | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|---|---|
-| light | plain | 7/s | 70 | 1.5 | 7.5 | 8.7 | 8.8 |
-| light | image | 3/s | 30 | 118.5 | 131.8 | 146.9 | 146.9 |
-| moderate | plain | 36/s | 720 | 1.4 | 7.1 | 8.6 | 9.1 |
-| moderate | image | 14/s | 280 | 23.5 | 89.0 | 91.7 | 92.6 |
-| heavy | plain | 109/s | 2180 | 1.2 | 6.5 | 8.1 | 13.0 |
-| heavy | image | 41/s | 820 | 12.1 | 22.2 | 34.1 | 54.5 |
+| light | plain | 8/s | 80 | 1.4 | 4.9 | 5.6 | 5.7 |
+| light | image | 3/s | 30 | 105.4 | 112.7 | 115.5 | 115.5 |
+| moderate | plain | 38/s | 760 | 1.1 | 4.8 | 6.1 | 6.6 |
+| moderate | image | 13/s | 260 | 24.6 | 85.4 | 86.6 | 93.9 |
+| heavy | plain | 113/s | 2260 | 0.6 | 3.8 | 5.5 | 10.1 |
+| heavy | image | 38/s | 760 | 11.4 | 29.9 | 55.0 | 89.8 |
 
-**image 分组这一档比一档"看起来更快"，是变体池大小相对每档样本量的直接结果，不是错觉也不是变快了**：50 个变体里，`light` 档 image 组总共只有 30 个请求（3 个场景各 10 个左右），全部落在变体池范围内，等于这一档**全部**是真·decode→scale→encode，没有一次缓存命中——它测的是"缓存完全没预热"的最坏情形。`moderate`（280 个请求）与 `heavy`（820 个请求）里，头 50 次是真实 miss，之后开始循环、命中缓存，档位越重、真实处理占比越低——`heavy` 只有约 6% 的请求是真实 miss，其余都是廉价的磁盘读，p50 自然被摊薄；但 p95/p99/max 三档都还留着真实处理的尾巴（`heavy` 档 max 54.5ms，同量级的真实成本依然可见）。三档测的其实是同一件事在不同缓存命中率下的样子，不是三次独立的性能测量，读数字时不要拿 p50 跨档直接比较"谁更快"。
+**image 分组这一档比一档"看起来更快"，是变体池大小相对每档样本量的直接结果，不是错觉也不是变快了**：50 个变体里，`light` 档 image 组总共只有 30 个请求（3 个场景各 10 个左右），全部落在变体池范围内，等于这一档**全部**是真·decode→scale→encode，没有一次缓存命中——它测的是"缓存完全没预热"的最坏情形。`moderate`（260 个请求，每场景约 87 个）与 `heavy`（760 个请求，每场景约 253 个）里，头 50 次是真实 miss，之后开始循环、命中缓存，档位越重、真实处理占比越低——`heavy` 档 `big_image`/`multi_image` 各自约 20%（50/253）的请求是真实 miss，其余都是廉价的磁盘读，p50 自然被摊薄；但 p95/p99/max 三档都还留着真实处理的尾巴（`heavy` 档 image 组 max 89.8ms，同量级的真实成本依然可见）。三档测的其实是同一件事在不同缓存命中率下的样子，不是三次独立的性能测量，读数字时不要拿 p50 跨档直接比较"谁更快"（本节数字与代码改动无关时会随机器负载小幅波动，属正常现象，不代表回归）。
 
-服务端视角（`vmr report` 按虚拟模型分桶的 p50/p95 请求耗时，三轮合并，混合了真实处理与缓存命中）：`big_image` 19ms/111ms、`multi_image` 10ms/44ms（三图，含一张过阈值触发降采样的）、`gif` 1ms/1ms（确认永不缩放的快速跳过路径确实便宜，不受变体数量影响），其余八个场景全部在 0-4ms 之间。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认冷却/切换机制按预期工作：`mock_fail1`/`mock_fail2` 全程各自只被真实尝试了 1 次（首次失败后进入冷却，此后请求全部直接落到 `mock_ok`），端点可用度表里两者的尝试数与成功率也如实反映了这一点。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
+服务端视角（`loadtest/runner` 自算——`computeServerStats`，直接扫这次运行自己的审计 JSONL，不经过 `vmr report`——按虚拟模型分桶的 p50/p95 请求耗时，三轮合并，混合了真实处理与缓存命中）：`big_image` 18ms/101ms、`multi_image` 10ms/43ms（三图，含一张过阈值触发降采样的）、`gif` 1ms/2ms（确认永不缩放的快速跳过路径确实便宜，不受变体数量影响），其余九个场景（含新增的 `responses_baseline`）全部在 0-3ms 之间——`responses_baseline` 本身 1ms/1ms，与 `anthropic_baseline`（1ms/1ms）同一量级，确认 openai-responses 协议适配器（`input` 数组扫描、`RewriteInputRoles`、`newRespStream` 的协议短路）没有引入额外开销。**与必要性判断的预期一致：vmr 自己的路由/透传/归一化/协议适配开销可以忽略不计**，`thinking_leak` 场景确认了全缓冲路径相对真流式确实有可观测的 TTFB 代价（这是已知、接受的设计权衡，不是 bug），`failover` 场景确认冷却/切换机制按预期工作：`mock_fail1`/`mock_fail2` 全程各自只被真实尝试了 1 次（首次失败后进入冷却，此后请求全部直接落到 `mock_ok`），端点可用度表里两者的尝试数与成功率也如实反映了这一点。跑完这一轮，性能这条线索关闭——除非未来某条具体路径的数字明显异常，否则不需要再往下细分（更细粒度的 `go test -bench` 微基准继续不做）。
 
 ---
 

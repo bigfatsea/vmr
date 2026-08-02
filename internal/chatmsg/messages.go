@@ -54,10 +54,11 @@ func RenderContent(v any) string {
 	}
 }
 
-// RenderPart formats one typed content part (openai or anthropic shape).
+// RenderPart formats one typed content part (openai, anthropic, or
+// openai-responses shape).
 func RenderPart(m map[string]any) string {
 	switch m["type"] {
-	case "text":
+	case "text", "input_text", "output_text": // "text": openai chat completions/anthropic; the other two: openai-responses
 		s, _ := m["text"].(string)
 		return s
 	case "image_url": // openai
@@ -67,6 +68,29 @@ func RenderPart(m map[string]any) string {
 		mt, _ := Nested(m, "source", "media_type").(string)
 		data, _ := Nested(m, "source", "data").(string)
 		return fmt.Sprintf("🖼 [image %s ~%s]", mt, fmtutil.FmtBytes(int64(base64.StdEncoding.DecodedLen(len(data)))))
+	case "input_image": // openai-responses — image_url is a FLAT string field here, not nested like openai chat completions
+		if u, _ := m["image_url"].(string); u != "" {
+			return ImagePlaceholder(u)
+		}
+		if fid, _ := m["file_id"].(string); fid != "" {
+			return fmt.Sprintf("🖼 [image file_id=%s]", fid)
+		}
+		return "🖼 [image]"
+	case "input_file": // openai-responses
+		name, _ := m["filename"].(string)
+		if data, _ := m["file_data"].(string); data != "" {
+			return fmt.Sprintf("📄 [file %s ~%s]", name, fmtutil.FmtBytes(int64(base64.StdEncoding.DecodedLen(len(data)))))
+		}
+		if u, _ := m["file_url"].(string); u != "" {
+			return fmt.Sprintf("📄 [file %s: %s]", name, u)
+		}
+		if fid, _ := m["file_id"].(string); fid != "" {
+			return fmt.Sprintf("📄 [file %s, file_id=%s]", name, fid)
+		}
+		return fmt.Sprintf("📄 [file %s]", name)
+	case "refusal": // openai-responses
+		s, _ := m["refusal"].(string)
+		return "⚠️ refusal: " + s
 	case "thinking": // anthropic
 		s, _ := m["thinking"].(string)
 		return "🤔 [thinking]\n" + s
@@ -96,18 +120,41 @@ func ImagePlaceholder(u string) string {
 	return "🖼 [image url: " + u + "]"
 }
 
-// MsgOffset is the index shift between Messages' output and the raw
-// messages array: anthropic's top-level system is prepended as message #0.
+// MsgOffset is the index shift between Messages' output and RawArray's
+// element array: a leading synthetic message is prepended as message #0
+// when the body carries its system-equivalent as a separate top-level
+// field — anthropic's "system", or openai-responses' "instructions".
 func MsgOffset(body map[string]any) int {
 	if _, ok := body["system"]; ok {
+		return 1
+	}
+	if _, ok := body["instructions"]; ok {
 		return 1
 	}
 	return 0
 }
 
+// RawArray returns the raw top-level conversation array a request body
+// carries — "messages" for Chat Completions/Anthropic Messages, "input" for
+// openai-responses. nil when the body has neither, or when "input" is a
+// bare string (Responses' simplest valid shape — no array to index into at
+// all). Callers that need a message's EXACT raw JSON encoding (as opposed
+// to Messages' rendered text — e.g. for content-addressed hashing) index
+// into this with MsgOffset as the alignment shift; every other caller
+// should just use Messages.
+func RawArray(body map[string]any) []any {
+	if arr, ok := body["messages"].([]any); ok {
+		return arr
+	}
+	arr, _ := body["input"].([]any)
+	return arr
+}
+
 // Messages extracts the conversation from a request body: anthropic keeps
 // system as a top-level field (rendered as message #0), openai carries it in
-// the messages list. Non-map bodies yield nil.
+// the messages list, openai-responses carries it in "instructions" (rendered
+// as message #0) plus a top-level "input" array or bare string in place of
+// "messages". Non-map bodies yield nil.
 func Messages(body any) []Message {
 	obj, ok := body.(map[string]any)
 	if !ok {
@@ -117,14 +164,27 @@ func Messages(body any) []Message {
 	if sys, ok := obj["system"]; ok { // anthropic top-level system prompt
 		out = append(out, Message{Role: "system", Text: RenderContent(sys)})
 	}
-	msgs, _ := obj["messages"].([]any)
+	if instr, ok := obj["instructions"]; ok { // openai-responses top-level system-equivalent
+		out = append(out, Message{Role: "system", Text: RenderContent(instr)})
+	}
+	msgs := RawArray(obj)
+	if msgs == nil {
+		if s, ok := obj["input"].(string); ok && s != "" { // Responses' bare-string input shape
+			out = append(out, Message{Role: "user", Text: s})
+		}
+		return out
+	}
 	for _, raw := range msgs {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			out = append(out, Message{Role: "?", Text: jsonIndent(raw)})
 			continue
 		}
-		role, _ := m["role"].(string)
+		role, hasRole := m["role"].(string)
+		if !hasRole { // openai-responses non-message Item: function_call/function_call_output/reasoning/...
+			out = append(out, responsesItemMessage(m))
+			continue
+		}
 		text := RenderContent(m["content"])
 		if rc, _ := m["reasoning_content"].(string); rc != "" {
 			text = "🤔 [reasoning_content]\n" + rc + "\n" + text
@@ -138,6 +198,64 @@ func Messages(body any) []Message {
 		out = append(out, Message{Role: role, Text: strings.TrimSpace(text)})
 	}
 	return out
+}
+
+// responsesItemMessage renders one openai-responses "input" Item that has no
+// "role" key — a function_call/function_call_output/reasoning Item, as
+// opposed to a role-bearing message Item (handled inline by Messages).
+// Exported behavior lives here, not duplicated in internal/report's own
+// role-breakdown walk (roleMeasure calls this too via ResponsesItemMessage),
+// so the two never disagree on how a given Item categorizes.
+func responsesItemMessage(m map[string]any) Message {
+	switch m["type"] {
+	case "function_call": // the assistant's tool invocation — Responses' flat counterpart to Chat Completions' message.tool_calls[]
+		name, _ := m["name"].(string)
+		args, _ := m["arguments"].(string)
+		id, _ := m["call_id"].(string)
+		return Message{Role: "assistant", Text: fmt.Sprintf("🔧 tool_call %s [id=%s]\n%s", name, id, args)}
+	case "function_call_output": // the tool's result being fed back — Responses' counterpart to a role:"tool" message
+		id, _ := m["call_id"].(string)
+		return Message{Role: "tool", Text: fmt.Sprintf("↩️ call_id=%s\n%s", id, RenderContent(m["output"]))}
+	case "reasoning":
+		return Message{Role: "assistant", Text: "🤔 [reasoning]\n" + reasoningSummaryText(m)}
+	default:
+		return Message{Role: "?", Text: jsonIndent(m)}
+	}
+}
+
+// ResponsesItemMessage exports responsesItemMessage for internal/report's
+// roleMeasure, which needs the same Item-type categorization Messages uses
+// internally but can't just call Messages itself (it buckets Anthropic
+// tool_result parts under a "tool" role distinct from their containing
+// message's role — a per-part split Messages' one-Message-per-Item output
+// doesn't preserve).
+func ResponsesItemMessage(m map[string]any) (role, text string) {
+	msg := responsesItemMessage(m)
+	return msg.Role, msg.Text
+}
+
+// reasoningSummaryText renders a Responses "reasoning" Item's summary parts
+// (when the provider includes one) or a placeholder — encrypted_content (if
+// present instead) is opaque ciphertext vmr has no business rendering.
+func reasoningSummaryText(m map[string]any) string {
+	arr, _ := m["summary"].([]any)
+	var parts []string
+	for _, s := range arr {
+		sm, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := sm["text"].(string); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	if _, ok := m["encrypted_content"]; ok {
+		return "[encrypted reasoning, no summary]"
+	}
+	return "[reasoning, no summary]"
 }
 
 // ToolCall is one decoded tool invocation (openai tool_calls entry or

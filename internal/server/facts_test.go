@@ -102,3 +102,26 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 		t.Errorf("a request with a document marker + large data field should estimate more tokens than one without any marker: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
 	}
 }
+
+// TestComputeRequestFacts_ResponsesInputFile locks in that a Responses-
+// protocol input_file block's inline payload (field name "file_data", not
+// Anthropic's "data") is actually counted — the field name is genuinely
+// different, not just differently nested (see the openai-python SDK's
+// ResponseInputFileParam), so estimateDocumentTokens needs its own marker
+// for it or this silently undercounts to zero.
+func TestComputeRequestFacts_ResponsesInputFile(t *testing.T) {
+	noMarker := []byte(`{"model":"agent","input":[{"role":"user","content":"hello there"}]}`)
+	base := computeRequestFacts(noMarker, 0, false).EstimatedTokens
+
+	withDoc := []byte(`{"model":"agent","input":[{"role":"user","content":[{"type":"input_file","filename":"a.pdf","file_data":"` +
+		string(make([]byte, 400)) + `"}]}]}`)
+	for i := range withDoc {
+		if withDoc[i] == 0 {
+			withDoc[i] = 'A'
+		}
+	}
+	docFacts := computeRequestFacts(withDoc, 0, false)
+	if docFacts.EstimatedTokens <= base {
+		t.Errorf("a Responses input_file block's file_data payload should raise the token estimate: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
+	}
+}

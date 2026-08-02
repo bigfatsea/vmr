@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", s.chatHandler("openai"))
 	mux.HandleFunc("POST /v1/messages", s.chatHandler("anthropic"))
+	mux.HandleFunc("POST /v1/responses", s.chatHandler("openai-responses"))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
 	mux.HandleFunc("GET /admin/status", s.adminStatus)
 	return mux

@@ -141,13 +141,20 @@ func roleMeasure(body any, measure func(string) int64) map[string]int64 {
 	if sys, ok := obj["system"]; ok {
 		add("system", renderContent(sys))
 	}
-	msgs, _ := obj["messages"].([]any)
-	for _, raw := range msgs {
+	if instr, ok := obj["instructions"]; ok { // openai-responses
+		add("system", renderContent(instr))
+	}
+	for _, raw := range rawArray(obj) {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		role, _ := m["role"].(string)
+		role, hasRole := m["role"].(string)
+		if !hasRole { // openai-responses non-message Item: function_call/function_call_output/reasoning/...
+			itemRole, text := responsesItemMessage(m)
+			add(itemRole, text)
+			continue
+		}
 		switch c := m["content"].(type) {
 		case []any:
 			for _, p := range c {
