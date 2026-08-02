@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 14:00, by Sonnet 5 -->
+<!-- Ver 2026-08-02 16:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -74,7 +74,7 @@ OpenAI 官方力推的下一代协议（`POST /v1/responses`，[迁移指南](ht
 
 **`internal/replay` 不需要专门适配，已验证**：`vmr replay` 的请求重建全程走 `adapter.BuildRequest`/`router.IngressPath`，两者都已经是协议无关的（前者靠注册表分派到 `OpenAIResponses.BuildRequest`，后者已修好三路分支）——一条 `protocol: openai-responses` 的审计记录不需要 `internal/replay` 包本身有任何改动就能正确重放，回归测试见 `internal/replay/replay_test.go` 的 `TestRun_RealReplayOpenAIResponsesProtocol`。
 
-**明确不做（第一版范围收窄，非遗漏）**：`internal/report`/`internal/story`/`internal/chatmsg`（Part 2 分析工具对 `input`/`output` 结构的消息级解析与会话分组）——这是 Part 2 设计文档覆盖的独立子系统，审计落盘本身对 body 内部结构无感知，Responses 请求/响应体原样落盘、可被 `vmr report`/`vmr story` 读到，只是消息级解析/会话分组暂时把它当"识别不出结构"处理（降级，不是崩溃）；错误分类词表未针对 DeepSeek/OpenRouter 的 Responses 端点新增任何 vendor 专属 sniff——`ClassifyError` 起步复用 `DefaultClassify`，遵循「必须做 body 嗅探，因为实测显示各家习惯不一」这条原则本身要求的前提：先有真实错误样本，再补词表，不能凭空编造。
+`internal/chatmsg`（Part 2 分析工具的共享解析层）对 Responses 的 `input`/`output` 结构做了完整的消息级解析：请求侧 `Messages`/`RawArray` 把顶层 `instructions`+`input`（数组或裸字符串）归一化成与 anthropic `system`+`messages` 同构的形状，`ctxgraph.BuildManifest` 据此正确计算 SessKey，`vmr report`/`vmr story` 能对 Responses 流量分组会话、切任务边界；响应侧 `FinalMessage`/`ReassembleSSE` 把顶层 `output[]`（非流式）与 `response.completed` 事件里嵌套的 `response.output[]`（流式）都解析成 `StreamSummary`（含 `reasoning` Item 的摘要文本），供 `vmr report`/`vmr story` 还原助手回复。**明确不做的只有一项**：错误分类词表未针对 DeepSeek/OpenRouter 的 Responses 端点新增任何 vendor 专属 sniff——`ClassifyError` 起步复用 `DefaultClassify`，遵循「必须做 body 嗅探，因为实测显示各家习惯不一」这条原则本身要求的前提：先有真实错误样本，再补词表，不能凭空编造。
 
 ---
 

@@ -529,13 +529,12 @@ models:
 	}
 }
 
-// TestLogConfigSummary_NameGroupsAcrossProtocols locks in the fix for the
-// startup-log readability gap identified in
-// docs/VirtualModel_CrossProtocol_Naming_Analysis_Sonnet5.md §3.2: a virtual
-// model name reachable from more than one protocol must render as ONE block
-// (name line, both protocols nested under it), not as two separate,
-// non-adjacent top-level "protocol/name" lines the old protocol-outer
-// grouping produced — matching cmd_check.go's printModels order.
+// TestLogConfigSummary_NameGroupsAcrossProtocols locks in a startup-log
+// readability fix: a virtual model name reachable from more than one
+// protocol must render as ONE block (name line, both protocols nested under
+// it), not as two separate, non-adjacent top-level "protocol/name" lines the
+// old protocol-outer grouping produced — matching cmd_check.go's
+// printModels order.
 func TestLogConfigSummary_NameGroupsAcrossProtocols(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800

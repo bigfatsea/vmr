@@ -1,4 +1,4 @@
-// Ver 2026-07-28 22:10, by Sonnet 5
+// Ver 2026-08-02 16:00, by Sonnet 5
 
 package chatmsg
 
@@ -107,6 +107,31 @@ func ReassembleSSE(raw string) *StreamSummary {
 			if sr, _ := Nested(obj, "delta", "stop_reason").(string); sr != "" {
 				s.Finish = sr
 			}
+		case "response.completed":
+			// openai-responses: unlike the openai/anthropic branches above,
+			// this doesn't accumulate per-delta events — Responses' delta
+			// event field names (response.output_text.delta, .../
+			// function_call_arguments.delta, ...) aren't confirmed against
+			// real traffic yet, and guessing them risks silently
+			// mis-assembling content (worse than not trying). "completed" is
+			// the one terminal event guaranteed present and self-contained:
+			// it carries the full final Response object (nested under
+			// "response"), same "output" typed-Item array shape FinalMessage
+			// already parses for the non-streaming case — so this reuses
+			// responsesFinalMessage instead of a second implementation.
+			if resp, _ := obj["response"].(map[string]any); resp != nil {
+				if rs, ok := responsesFinalMessage(resp); ok {
+					if rs.Model != "" {
+						s.Model = rs.Model
+					}
+					if rs.Finish != "" {
+						s.Finish = rs.Finish
+					}
+					content.WriteString(rs.Content)
+					reasoning.WriteString(rs.Reasoning)
+					s.ToolCalls = append(s.ToolCalls, rs.ToolCalls...)
+				}
+			}
 		}
 	}
 	if parsed == 0 {
@@ -192,5 +217,50 @@ func FinalMessage(body any) (*StreamSummary, bool) {
 		s.Content = content.String()
 		return s, true
 	}
+	// openai-responses: top-level "output" typed-Item array
+	if s, ok := responsesFinalMessage(obj); ok {
+		return s, true
+	}
 	return nil, false
+}
+
+// responsesFinalMessage parses a Responses-protocol response object's
+// content: the top-level "output" typed-Item array (message/reasoning/
+// function_call — the same vocabulary responsesItemMessage already
+// categorizes on the request side), "model", and "status" (Responses'
+// finish_reason/stop_reason equivalent). false when there's no "output"
+// array at all, i.e. this isn't a Responses-shaped object.
+//
+// Shared between FinalMessage (given a non-streaming JSON body directly)
+// and ReassembleSSE's "response.completed" case (given that event's nested
+// "response" object) — both carry the identical shape, so there is exactly
+// one place that decides how a Responses output Item becomes display text.
+func responsesFinalMessage(obj map[string]any) (*StreamSummary, bool) {
+	output, ok := obj["output"].([]any)
+	if !ok {
+		return nil, false
+	}
+	s := &StreamSummary{}
+	s.Model, _ = obj["model"].(string)
+	s.Finish, _ = obj["status"].(string)
+	var content strings.Builder
+	for _, raw := range output {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch m["type"] {
+		case "message":
+			content.WriteString(RenderContent(m["content"]))
+		case "reasoning":
+			s.Reasoning += reasoningSummaryText(m)
+		case "function_call":
+			name, _ := m["name"].(string)
+			args, _ := m["arguments"].(string)
+			id, _ := m["call_id"].(string)
+			s.ToolCalls = append(s.ToolCalls, ToolCall{ID: id, Name: name, Args: args})
+		}
+	}
+	s.Content = content.String()
+	return s, true
 }

@@ -754,8 +754,9 @@ models:
 // endpoint groups — the same "one name, several independently-reachable
 // protocol faces" pattern already used for openai/anthropic (see
 // VirtualModel's doc comment); BuildSnapshot splits them into separate
-// per-protocol routes (see internal/router/snapshot_test.go for the
-// runtime-side assertion of that split).
+// per-protocol routes (see internal/router/router_test.go's
+// TestBuildSnapshotSplitsVirtualModelByProtocol for the runtime-side
+// assertion of that split).
 func TestOpenAIResponsesAndChatCompletionsCoexist(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:9900

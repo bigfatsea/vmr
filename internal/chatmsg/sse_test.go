@@ -120,3 +120,97 @@ func TestFinalMessage_UnrecognizedShape(t *testing.T) {
 		t.Error("expected ok=false for non-map body")
 	}
 }
+
+// TestFinalMessage_ResponsesOutputArray proves the gap this fix closes: a
+// non-streaming openai-responses response body's "output" typed-Item array
+// (message + reasoning + function_call mixed together, the way a real tool-
+// calling turn looks) is fully reconstructed into a StreamSummary — content,
+// reasoning summary, and tool calls alike — not silently dropped as an
+// "unrecognized shape". Before this fix FinalMessage only knew "choices"
+// (openai) and "content" (anthropic), so every Responses-protocol response
+// vmr report/vmr story tried to summarize came back ok=false.
+func TestFinalMessage_ResponsesOutputArray(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"model":  "gpt-5.6",
+		"status": "completed",
+		"output": []any{
+			map[string]any{
+				"type":    "reasoning",
+				"summary": []any{map[string]any{"type": "summary_text", "text": "thinking it through"}},
+			},
+			map[string]any{
+				"type": "function_call", "call_id": "c1", "name": "exec", "arguments": `{"cmd":"ls"}`,
+			},
+			map[string]any{
+				"type": "message", "role": "assistant",
+				"content": []any{map[string]any{"type": "output_text", "text": "done"}},
+			},
+		},
+	}
+	s, ok := FinalMessage(body)
+	if !ok {
+		t.Fatal("expected ok=true for a Responses-shaped output array")
+	}
+	if s.Model != "gpt-5.6" || s.Finish != "completed" {
+		t.Errorf("Model/Finish = %q/%q, want gpt-5.6/completed", s.Model, s.Finish)
+	}
+	if s.Content != "done" {
+		t.Errorf("Content = %q, want %q", s.Content, "done")
+	}
+	if !strings.Contains(s.Reasoning, "thinking it through") {
+		t.Errorf("Reasoning = %q, want it to contain the reasoning summary", s.Reasoning)
+	}
+	if len(s.ToolCalls) != 1 || s.ToolCalls[0].Name != "exec" || s.ToolCalls[0].ID != "c1" {
+		t.Errorf("ToolCalls = %+v", s.ToolCalls)
+	}
+}
+
+// TestFinalMessage_ResponsesEmptyOutputStillRecognized mirrors the
+// anthropic branch's "content: []" behavior: an empty (but present) output
+// array is still a recognized Responses shape (ok=true, zero-value
+// content) — not the same as "no output key at all" (ok=false).
+func TestFinalMessage_ResponsesEmptyOutputStillRecognized(t *testing.T) {
+	t.Parallel()
+	s, ok := FinalMessage(map[string]any{"model": "m", "output": []any{}})
+	if !ok || s.Content != "" {
+		t.Errorf("FinalMessage with empty output = %+v ok=%v, want ok=true empty content", s, ok)
+	}
+}
+
+// TestReassembleSSE_ResponsesCompletedEvent proves the streaming
+// counterpart of TestFinalMessage_ResponsesOutputArray: a Responses SSE
+// stream's typed events (none of which ReassembleSSE tries to parse
+// individually — see responsesFinalMessage's doc comment on why only the
+// terminal event is trusted) still yields a full StreamSummary once
+// "response.completed" arrives, reusing the exact same output-Item parsing
+// FinalMessage uses for the non-streaming case.
+func TestReassembleSSE_ResponsesCompletedEvent(t *testing.T) {
+	t.Parallel()
+	raw := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.6","status":"in_progress"}}`,
+		``,
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"ignored, not parsed per-delta"}`,
+		``,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.6","status":"completed","output":[` +
+			`{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]},` +
+			`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}` +
+			`]}}`,
+	}, "\n")
+	s := ReassembleSSE(raw)
+	if s == nil {
+		t.Fatal("nil summary")
+	}
+	if s.Model != "gpt-5.6" || s.Finish != "completed" {
+		t.Errorf("Model/Finish = %q/%q, want gpt-5.6/completed", s.Model, s.Finish)
+	}
+	if s.Content != "final answer" {
+		t.Errorf("Content = %q, want %q", s.Content, "final answer")
+	}
+	if !strings.Contains(s.Reasoning, "thinking") {
+		t.Errorf("Reasoning = %q, want it to contain the reasoning summary", s.Reasoning)
+	}
+	if strings.Contains(s.Content, "ignored") {
+		t.Errorf("a response.output_text.delta event must not be parsed for content: %q", s.Content)
+	}
+}

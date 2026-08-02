@@ -51,7 +51,7 @@ type Record struct {
 	// measurement", which conveniently excludes those rejects from averages.
 	TTFTMS   int64     `json:"ttft_ms,omitempty"`
 	Model    string    `json:"model"`    // virtual model ("" if rejected before parsing)
-	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic
+	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic | openai-responses | ...
 	Stream   bool      `json:"stream"`
 	Outcome  string    `json:"outcome"` // ok | error | canceled
 	Client   Exchange  `json:"client"`
@@ -137,7 +137,7 @@ type Exchange struct {
 // client received.
 type Attempt struct {
 	Endpoint string   `json:"endpoint"`           // protocol:provider:model, human-readable label (see Protocol/Provider/Model for the structured form)
-	Protocol string   `json:"protocol,omitempty"` // == the endpoint's adapter type (openai | anthropic)
+	Protocol string   `json:"protocol,omitempty"` // == the endpoint's adapter type (openai | anthropic | openai-responses | ...)
 	Provider string   `json:"provider,omitempty"` // provider name as configured
 	Model    string   `json:"model,omitempty"`    // real upstream model name (as opposed to Record.Model, the virtual name)
 	URL      string   `json:"url"`
