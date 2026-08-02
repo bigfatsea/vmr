@@ -1,4 +1,4 @@
-# Ver 2026-07-30 12:00, by Sonnet 5
+# Ver 2026-08-02 02:30, by Sonnet 5
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have (a flat list of accounts); models = what clients see
 # and in which order to use it.
@@ -51,29 +51,18 @@ listen: 127.0.0.1:8800
 # value still gets the same tag treatment (no 16-char minimum here — it's not a secret). A
 # client sending nothing stays untagged.
 #
-# (Singular `api_key` was removed — a config still using it fails to load with a migration
-# message. Unknown/misspelled keys are load errors too, never silently ignored.)
+# (Singular `api_key` was removed — a config still using it fails to load as an
+# unknown field, same as any other typo. api_keys is the only auth surface.)
 # max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
-# probe_mode: active             # "active" (default): a half-open endpoint gets a small dedicated background probe
-#                                 # request before real traffic is allowed back onto it — real requests never wait on
-#                                 # or get diverted by someone else's slow recovery check. "passive": the old
-#                                 # behavior — the next real request IS the probe, so its own size/duration decides
-#                                 # how long that single-flight probe slot (and, under concurrent load, every other
-#                                 # request's access to this endpoint) stays locked.
-# probe_timeout: 15s             # active mode only: upper bound on one background probe call
+# probe_timeout: 15s             # upper bound on one background recovery-probe call: a half-open endpoint gets
+#                                 # a small dedicated probe request before real traffic is allowed back onto it —
+#                                 # real requests never wait on or get diverted by another endpoint's recovery check
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy (env vars are
 #                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly). Declaring this URL
-#                                      # does NOT turn proxying on by itself — see `proxy` below.
+#                                      # does NOT turn proxying on by itself — see providers[].proxy below.
 # http_proxy: http://127.0.0.1:7890    # same, for http base_urls (e.g. a LAN llama.cpp server)
-# proxy: false                   # global default for providers with no proxy switch of their own (default false:
-#                                 # http_proxy/https_proxy above only declare where the proxy lives, they opt nobody
-#                                 # in). Recommended: leave this false and opt individual providers in with their own
-#                                 # `proxy: true` (see openrouter below) — explicit per-provider intent, so a provider
-#                                 # added later doesn't silently inherit a stale global default. Flip this to true only
-#                                 # if you want "proxied" to be the default and carve out exceptions with a provider's
-#                                 # own `proxy: false` instead.
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
 # sticky_ttl: 10m                # global default for Sticky Model's affinity window (0/absent = default 10m);
@@ -105,22 +94,18 @@ providers:
   - name: minimax
     base_url: {openai: https://api.minimaxi.com/v1, anthropic: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}
-    # proxy: false               # no-op here — the recommended baseline (global
-    #                            # `proxy` absent/false) is already direct-by-default.
-    #                            # Only needed if you flip the global default to true
-    #                            # and this domestic provider needs to opt back out.
+    # proxy: false               # not needed here — absent already means direct (domestic
+    #                            # provider, no need to write this out).
 
   - name: openrouter
     base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}  # OpenRouter speaks both surfaces on the same base
     api_key: ${OPENROUTER_API_KEY}
     proxy: true                  # per-provider switch: true = always go through
-                                  # https_proxy/http_proxy above, whatever the global
-                                  # `proxy` default says (recommended way to opt a
-                                  # foreign provider in); false = always direct; absent
-                                  # = follow the global `proxy` default. No env
-                                  # fallback; true with no matching global proxy URL
-                                  # fails validation. YAML 1.2: write true/false, not
-                                  # on/off.
+                                  # https_proxy/http_proxy above; absent/false = direct
+                                  # (the default). No global default to inherit — every
+                                  # provider decides its own proxy use, explicitly. No
+                                  # env fallback; true with no matching proxy URL fails
+                                  # validation. YAML 1.2: write true/false, not on/off.
 
   - name: deepseek
     base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}

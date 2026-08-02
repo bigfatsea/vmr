@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -18,7 +18,6 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
-	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/health"
 	"vmr/internal/sticky"
@@ -65,23 +64,19 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 
 	// Health filter (read-only) + stable multi-key sort.
 	//
-	// probe_mode: active (default) never lets real traffic touch a half-open
-	// endpoint (fails>0, cooldown expired) at all — instead the first caller
-	// to notice it's unprobed claims the single-flight slot (Acquire, same
-	// method passive mode's per-candidate loop below uses) and hands it to a
-	// background probe goroutine, then treats the endpoint as unavailable
-	// for THIS request exactly as if Acquire had failed. Real requests never
-	// wait on that probe and are never diverted for as long as it takes to
-	// resolve — only for as long as it takes to notice it needs to run.
-	// probe_mode: passive skips this and falls through to the original
-	// behavior: any request may land on a half-open endpoint and become the
-	// probe itself via Acquire in the per-candidate loop below.
+	// A half-open endpoint (fails>0, cooldown expired) never gets touched by
+	// real traffic at all — instead the first caller to notice it's unprobed
+	// claims the single-flight slot (Acquire, same method the per-candidate
+	// loop below uses) and hands it to a background probe goroutine, then
+	// treats the endpoint as unavailable for THIS request exactly as if
+	// Acquire had failed. Real requests never wait on that probe and are
+	// never diverted for as long as it takes to resolve — only for as long
+	// as it takes to notice it needs to run.
 	now := time.Now()
 	healthOK := make([]*core.Endpoint, 0, len(route.Endpoints))
-	activeProbing := snap.Cfg.ProbeMode == config.ProbeModeActive
 	for _, ep := range route.Endpoints {
 		key := ep.HealthKey()
-		if activeProbing && rt.Health.Status(key, now).Fails > 0 {
+		if rt.Health.Status(key, now).Fails > 0 {
 			if rt.Health.Acquire(key, now) {
 				go rt.runProbe(ep, snap)
 			}
@@ -161,10 +156,12 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
-		// Acquire enforces the single-flight probe for half-open endpoints
-		// (probe_mode: passive — active mode's half-open endpoints were
-		// already filtered out above, so every candidate reaching this line
-		// under active mode has fails==0 and this is always a no-op true).
+		// Acquire enforces the single-flight probe for half-open endpoints.
+		// Every candidate reaching this line was already Available() above
+		// (fails==0, or the health-filter loop would have diverted it to a
+		// background probe instead), so this is normally a no-op true — it
+		// only matters as a race guard against an endpoint going half-open
+		// in the gap between that filter and this loop.
 		if !rt.Health.Acquire(ep.HealthKey(), time.Now()) {
 			continue
 		}

@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 package config
 
 import (
@@ -47,35 +47,34 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if got := cfg.Models["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
 		t.Errorf("default strategy: %v", got)
 	}
-	if cfg.ProbeMode != ProbeModeActive {
-		t.Errorf("default probe_mode: got %q, want %q", cfg.ProbeMode, ProbeModeActive)
-	}
 	if cfg.ProbeTimeout.D() != DefaultProbeTimeout {
 		t.Errorf("default probe_timeout: got %v, want %v", cfg.ProbeTimeout.D(), DefaultProbeTimeout)
 	}
 }
 
-func TestProbeModeConfig(t *testing.T) {
+func TestProbeTimeoutConfig(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
-		"listen: 127.0.0.1:9900\nprobe_mode: passive\nprobe_timeout: 5s", 1)
+		"listen: 127.0.0.1:9900\nprobe_timeout: 5s", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.ProbeMode != ProbeModePassive {
-		t.Errorf("probe_mode: got %q, want %q", cfg.ProbeMode, ProbeModePassive)
 	}
 	if cfg.ProbeTimeout.D() != 5*time.Second {
 		t.Errorf("probe_timeout: got %v, want 5s", cfg.ProbeTimeout.D())
 	}
 }
 
-func TestProbeModeInvalidValueRejected(t *testing.T) {
+// TestProbeModeFieldRejected locks in the removal of probe_mode (passive
+// mode no longer exists — recovery probing is always the active,
+// backgrounded kind): a config still setting it must fail to load as an
+// unknown field, same as any other typo, with no dedicated migration
+// message needed.
+func TestProbeModeFieldRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
-		"listen: 127.0.0.1:9900\nprobe_mode: sometimes", 1)
+		"listen: 127.0.0.1:9900\nprobe_mode: active", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "probe_mode") {
-		t.Errorf("expected a probe_mode validation error, got %v", err)
+		t.Errorf("want load error naming probe_mode, got %v", err)
 	}
 }
 
@@ -472,16 +471,16 @@ func TestAPIKeysParsed(t *testing.T) {
 	}
 }
 
-// TestLegacyAPIKeyRejectedWithMigrationMessage locks in the removal of the
-// singular api_key: a config still carrying it must fail to load with a
-// message that names api_keys as the replacement, not a generic yaml error.
-func TestLegacyAPIKeyRejectedWithMigrationMessage(t *testing.T) {
+// TestLegacyAPIKeyRejected locks in the removal of the singular api_key: a
+// config still carrying it must fail to load. No dedicated migration
+// message anymore — the field is simply unknown, same as any other typo,
+// and KnownFields' own error already names it.
+func TestLegacyAPIKeyRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
 		"listen: 127.0.0.1:9900\napi_key: sk-vmr-legacy-catchall", 1)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "api_key has been removed") ||
-		!strings.Contains(err.Error(), "api_keys") {
-		t.Errorf("want migration error mentioning api_keys, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "api_key") {
+		t.Errorf("want load error naming api_key, got %v", err)
 	}
 }
 

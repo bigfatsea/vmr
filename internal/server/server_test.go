@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
 // Integration tests: full handler + mock upstreams over real HTTP. Shared
 // mock/fixture/client scaffolding lives in testhelpers_test.go and
@@ -131,18 +131,17 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	}
 }
 
-// TestRateLimitCooldownAndRecovery pins probe_mode: passive because it
-// checks recovery via the passive contract — the request sent right after
-// cooldown expiry IS the probe and is itself served by the recovered
-// endpoint. probe_mode: active's recovery (async, off the request path) is
-// covered by TestActiveProbe_RecoversInBackgroundWithoutServingRealTraffic
+// TestCooldownFiltersEndpointUntilRetryAfterExpires checks that a
+// rate-limited endpoint is filtered out for the duration of Retry-After —
+// recovery itself (the half-open endpoint getting probed and rejoining
+// rotation) is covered by TestActiveProbe_RecoversInBackgroundThenServesRealTraffic
 // in server_active_probe_test.go.
-func TestRateLimitCooldownAndRecovery(t *testing.T) {
+func TestCooldownFiltersEndpointUntilRetryAfterExpires(t *testing.T) {
 	t.Parallel()
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(429)
 	u1.retryAfter = "1"
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_mode: passive"))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
 
 	// 1st request: 429 on p1 → served by p2; p1 enters cooldown.
 	resp, _ := chat(t, ts, simpleReq, nil)
@@ -153,13 +152,6 @@ func TestRateLimitCooldownAndRecovery(t *testing.T) {
 	chat(t, ts, simpleReq, nil)
 	if u1.hits.Load() != 1 {
 		t.Errorf("p1 must not be hit during cooldown, hits=%d", u1.hits.Load())
-	}
-	// After Retry-After expires, p1 recovers and serves as priority 1 again.
-	u1.status.Store(200)
-	time.Sleep(1200 * time.Millisecond)
-	resp, _ = chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
-		t.Errorf("p1 should have recovered, got %s", got)
 	}
 }
 

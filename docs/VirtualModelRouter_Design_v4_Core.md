@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 18:00, by Sonnet 5 -->
+<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -103,7 +103,7 @@ internal/config            YAML 加载、${ENV} 展开、校验、热加载 watc
 internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写；fingerprint.go：SessionFingerprint（Sticky Model 用）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
 internal/adapter/openai    OpenAI 协议透传 Adapter
 internal/adapter/anthropic Anthropic 协议透传 Adapter
-internal/health            被动健康状态机（冷却、退避、半开单飞名额）——核心状态机本身不区分主动/被动探测模式
+internal/health            失败驱动的健康状态机（冷却、退避、半开单飞名额）——不知道、也不需要知道半开端点具体怎么被重新验证，那是 router 的策略
 internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
@@ -114,7 +114,7 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ logfmt.go    实时路由日志的行格式化
   ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）
   ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
-  └─ probe.go  probe_mode: active 的后台探测 goroutine
+  └─ probe.go  半开端点的后台探测 goroutine
 internal/server            HTTP 入口、鉴权、审计录制、四个端点（header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -141,7 +141,7 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 | `POST /v1/chat/completions` | OpenAI 协议入口 |
 | `POST /v1/messages` | Anthropic 协议入口 |
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
-| `GET /admin/status` | `instance`（进程身份 + 配置新鲜度）+ `reload`（最近一次热重载结果）+ `sticky.entries` + 端点健康 + 并发指标 JSON（健康部分含 `probing` 字段——某个端点当前是否正被一次恢复探测占着单飞名额，被动/主动两种模式共用同一个字段）；仅接受 loopback 来源 |
+| `GET /admin/status` | `instance`（进程身份 + 配置新鲜度）+ `reload`（最近一次热重载结果）+ `sticky.entries` + 端点健康 + 并发指标 JSON（健康部分含 `probing` 字段——某个端点当前是否正被一次后台恢复探测占着单飞名额）；仅接受 loopback 来源 |
 
 **`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `config` 绝对路径 / `started_at` / `uptime_seconds` / `config_stale` / `config_mtime`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）整块省略而非输出零值。
 
@@ -269,17 +269,15 @@ type Dimension interface {
 
 Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意组合（`strategy: [priority, weight]`）；新增策略 = 新增维度实现，路由主流程永不改。当前实现 `priority`（数字小优先，平手保持配置文件顺序）；其余在路线图。
 
-### 6.2 健康：冷却 + 半开恢复探测（被动 / 主动两种模式）
+### 6.2 健康：冷却 + 半开恢复探测（后台探测）
 
 * 失败按类别计冷却：Transient 2s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 与 Transient 优先 `Retry-After`（429/503 都可能携带），**但同样封顶 1h**——Retry-After 是上游可控输入，一个畸形的超大值不该把端点锁死到进程重启。内容合规（ErrContent）零冷却。
-* 冷却中被健康过滤剔除；到期进入半开，此时如何确认端点已恢复由 `probe_mode` 决定（配置项，默认 `active`）：
-  * **`active`（默认）**：半开端点永远不放行真实请求。发现某个端点半开且当前没有探测在跑，就用 `Health.Acquire` 抢下单飞名额，起一个后台 goroutine（`internal/router/probe.go` 的 `runProbe`）发一个 `internal/probe` 构造的最小请求（要求模型原样回显一个一次性 nonce，`internal/probe.Echoed` 做子串校验），真实请求本身仍旧把这个端点当不可用处理，直接路由到下一候选。探测结果走跟真实请求完全相同的 `ad.ClassifyError` 判定，落到 `ReportSuccess`/`ReportFailure`/`ReportNeutral` 三者之一——2xx 视为恢复（回显没对上只记日志、不惩罚，避免模型偶尔不遵循指令误伤一个其实健康的端点）；4xx 且分类为 `ErrClient`/`ErrContent` 视为"探测请求本身的问题，与端点健康无关"（`ReportNeutral`）；其余（含探测超时，受 `probe_timeout` 约束，默认 15s）视为真失败（`ReportFailure`，按原分类计相应冷却）。这条路径要解决的问题：被动模式下"谁先撞上半开端点谁就当探针"——如果这个探针请求本身很大很慢（比如一段几十万 token 的长对话），恢复检测的时长就跟这个具体请求的体量强绑定，期间同一进程里所有其他并发调用方也会被连带拖累；探测跟真实流量解耦之后，这个连带效应被消除，真实请求永远不必等探测、也不会因为探测变慢。`internal/health` 本身零改动来支撑这个模式——`Acquire`/`ReportSuccess`/`ReportFailure`/`ReportNeutral` 两种模式原样复用，差异完全在 `internal/router.Serve` 的候选构建逻辑（谁来触发探测、真实请求能不能用半开端点），健康状态机不知道、也不需要知道自己被哪种模式调用。
-  * **`passive`**：`active` 出现之前唯一的实现，完整保留，配置里显式声明 `probe_mode: passive` 即可切回，行为逐字节不变——**只放行一个真实请求当探针**（避免惊群），成功清零、失败退避加深、中性结果只释放探针（`ReportNeutral`）。
-* **探针槽必须在每种结局下都归还**——中性结局共三类：内容拦截（ErrContent）、客户端中途断连（仅被动模式，主动模式下真实请求从不持有探针槽）、ErrClient（坏请求原样返回）；漏掉任何一类的释放，探针一旦撞上对应类型的请求，`probing` 就会永久为 true，端点锁死到进程重启（这个不变式由回归测试锁定：被动模式 `internal/server/server_probe_test.go`，主动模式 `server_active_probe_test.go` 逐一镜像同一组场景）。`upstreamHint` 命中的 `ErrEndpoint` 必须真的走到 `ReportFailure`、不能被误并进上面的中性分支——这条路径的同步 `tryOne` 侧由 `TestUpstreamGatewayFailureContinuesFailover`（`server_test.go`）锁定，异步 `runProbe` 侧由镜像的 `TestActiveProbe_UpstreamFailureGoesToReportFailure`（`server_active_probe_test.go`）锁定，两条路径各一份，互不替代。
-* 客户端主动断连不计入端点失败（与上游健康无关，防状态污染）；若断连的请求正持有半开探针（被动模式），探针槽照常释放。
+* 冷却中被健康过滤剔除；到期进入半开，此时半开端点永远不放行真实请求：发现某个端点半开且当前没有探测在跑，就用 `Health.Acquire` 抢下单飞名额，起一个后台 goroutine（`internal/router/probe.go` 的 `runProbe`）发一个 `internal/probe` 构造的最小请求（要求模型原样回显一个一次性 nonce，`internal/probe.Echoed` 做子串校验），真实请求本身仍旧把这个端点当不可用处理，直接路由到下一候选。探测结果走跟真实请求完全相同的 `ad.ClassifyError` 判定，落到 `ReportSuccess`/`ReportFailure`/`ReportNeutral` 三者之一——2xx 视为恢复（回显没对上只记日志、不惩罚，避免模型偶尔不遵循指令误伤一个其实健康的端点）；4xx 且分类为 `ErrClient`/`ErrContent` 视为"探测请求本身的问题，与端点健康无关"（`ReportNeutral`）；其余（含探测超时，受 `probe_timeout` 约束，默认 15s）视为真失败（`ReportFailure`，按原分类计相应冷却）。这条路径要解决的问题：如果放任"谁先撞上半开端点谁就当探针"，探针请求本身很大很慢时（比如一段几十万 token 的长对话），恢复检测的时长就跟这个具体请求的体量强绑定，期间同一进程里所有其他并发调用方也会被连带拖累；探测跟真实流量解耦之后，这个连带效应被消除，真实请求永远不必等探测、也不会因为探测变慢。
+* **探针槽必须在每种结局下都归还**——中性结局共两类：内容拦截（ErrContent）、ErrClient（坏请求原样返回）；漏掉任何一类的释放，探针一旦撞上对应类型的请求，`probing` 就会永久为 true，端点锁死到进程重启（这个不变式由回归测试锁定：`internal/server/server_active_probe_test.go`）。`upstreamHint` 命中的 `ErrEndpoint` 必须真的走到 `ReportFailure`、不能被误并进上面的中性分支——这条路径的同步 `tryOne` 侧由 `TestUpstreamGatewayFailureContinuesFailover`（`server_test.go`）锁定，异步 `runProbe` 侧由镜像的 `TestActiveProbe_UpstreamFailureGoesToReportFailure`（`server_active_probe_test.go`）锁定，两条路径各一份，互不替代。
+* 客户端主动断连不计入端点失败（与上游健康无关，防状态污染）——真实请求从不持有探针槽，所以断连也不需要额外释放探针的逻辑。
 * **配额窗口 vs 余额耗尽不做区分**：两者都归 ErrEndpoint（10min 起指数退避封顶 1h）。不对"N 小时窗口配额"单设更长冷却（如 5h 后再试）——厂商错误信号无法可靠区分两种耗尽，且现行封顶 1h 意味着最坏情况每小时只花一次失败探针请求，充值/窗口刷新后一小时内自动回归；专设长冷却省下的探针成本可忽略，代价却是恢复迟钝。
 * 健康注册表以 `provider/model/key指纹` 为稳定键、独立于配置快照存活——**热重载不清零冷却**（否则每次改配置都会把 429 中的端点放出来重打）。重启即重置，不持久化。
-* `probe_mode: active` 意味着"每次某个端点从冷却恢复"都会多花一次探测请求（`internal/probe.Request` 默认 `max_tokens: 300`——实测部分推理模型会把预算耗在 `<think>` 块上，太小的预算会让回显校验大面积假失败，见文件内注释）——这笔额外成本按次计费而非按时间轮询（没有独立的后台定时探测器，触发点完全绑定"真的有请求撞上这个半开端点"），且冷却机制本身已经把"同一个端点反复失败"的探测频率限制在秒级到小时级的退避区间内，不会失控增长。权衡细节和被否决的替代方案（提示词/请求参数尝试压制模型思考过程）不在本设计文档维护范围，只记录最终取舍：不做 provider 专属的探测参数特判，保持 `internal/probe` provider-agnostic。
+* 每次某个端点从冷却恢复都会多花一次探测请求（`internal/probe.Request` 默认 `max_tokens: 300`——实测部分推理模型会把预算耗在 `<think>` 块上，太小的预算会让回显校验大面积假失败，见文件内注释）——这笔额外成本按次计费而非按时间轮询（没有独立的后台定时探测器，触发点完全绑定"真的有请求撞上这个半开端点"），且冷却机制本身已经把"同一个端点反复失败"的探测频率限制在秒级到小时级的退避区间内，不会失控增长。权衡细节和被否决的替代方案（提示词/请求参数尝试压制模型思考过程）不在本设计文档维护范围，只记录最终取舍：不做 provider 专属的探测参数特判，保持 `internal/probe` provider-agnostic。
 
 ### 6.3 热加载
 
@@ -617,16 +615,13 @@ listen: 127.0.0.1:8800        # 缺省 127.0.0.1:8800
 api_keys:                     # 可选：vmr 自身鉴权（Bearer 或 x-api-key）；字符串数组，非具名映射；每把 ≥16 字符
   - ${VMR_KEY_ALICE}          #   （校验强制，否则 KeyTag 的末 8 位窗口可能就是整把密钥）。命中的那把给请求打上
   - ${VMR_KEY_OPENCLAW}       #   client_key_tag = audit.KeyTag(该 key)，供 vmr report 按调用方分组导出。
-                              #   旧的单把 api_key 已移除，配置里仍写着会被拒绝加载并提示迁移
+                              #   旧的单把 api_key 已移除，配置里仍写着会被当作未知字段拒绝加载
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
-probe_mode: active            # 半开端点恢复探测模式：active（缺省）| passive；只做全局开关，不支持按模型覆盖（刻意的 YAGNI）
-probe_timeout: 15s            # 仅 active 模式生效：一次后台探测的时间上限（缺省 15s，远小于 response_header 的 120s——探测要的是快且便宜，等不到就是等不到）
+probe_timeout: 15s            # 半开端点一次后台恢复探测的时间上限（缺省 15s，远小于 response_header 的 120s——探测要的是快且便宜，等不到就是等不到）；只做全局开关，不支持按模型覆盖（刻意的 YAGNI）
 max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 413）；仅为稳定性考虑，与审计记录无关——vmr 接受的请求，审计里永远是完整的那一份
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
-https_proxy: http://...       # 可选：https 型 base_url 的代理服务器地址。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}。只声明代理在哪，不代表默认开启，见下面的 proxy
+https_proxy: http://...       # 可选：https 型 base_url 的代理服务器地址。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}。只声明代理在哪，不代表默认开启，见下方 providers[].proxy
 http_proxy: http://...        # 可选：http 型 base_url 同理（如局域网 llama.cpp）；按 base_url 的 scheme 选用
-proxy: false                  # 可选：全局默认代理开关，缺省 false。没有自己 proxy 开关的 provider 跟随这个值；推荐保持关闭，
-                               # 个别需要代理的 provider 自己写 proxy: true（见下方 providers[].proxy）
 log_dir: ~/.vmr/logs          # 可选：审计日志目录。显式值原样使用（~/ 展开）；缺省 ~/.vmr/logs（三层默认，见「请求图片自动降采样」）。改动需重启生效
 image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录。规则同上，缺省 ~/.vmr/image_cache；随热重载即时生效
 image_downscale: 0            # 请求内联图片长边像素上限；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
@@ -643,12 +638,11 @@ providers:                       # "我有什么"——扁平列表，一个账�
     base_url: {openai: https://..., anthropic: https://...}  # 按协议分 key 的 map，至少声明一个；
                                  # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages
     api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串；两个协议面共享同一把 key
-    proxy: false               # 可选三态开关：true = 该 provider 永远走 http(s)_proxy（无视全局 proxy
-                               # 默认值，海外厂商的推荐写法）；false = 永远直连（无视全局 proxy 默认值，
-                               # 国内厂商的典型写法）；缺省 = 跟随全局 proxy 开关（同样缺省 false）。没有
-                               # 环境变量回退。true（不管全局还是这里）但没配对应 scheme 的代理地址是
-                               # 校验错误（拒绝加载），缺省则安静跟随全局值。yaml.v3 是 YAML 1.2，必须写
-                               # true/false（on/off 不是 bool）
+    proxy: false               # 可选布尔开关，缺省 false：true = 该 provider 走 http(s)_proxy（海外厂商的
+                               # 推荐写法）；false/缺省 = 直连（国内厂商的典型写法，也是唯一的缺省值——
+                               # 没有全局默认可继承，每个 provider 独立、显式决定）。没有环境变量回退。
+                               # true 但没配对应 scheme 的代理地址是校验错误（拒绝加载）。yaml.v3 是
+                               # YAML 1.2，必须写 true/false（on/off 不是 bool）
 
 models:                          # "对外叫什么、按什么顺序用"——按虚拟模型名分组，协议信息挂在每条 endpoint-group 上
   <virtual-model-name>:
@@ -680,13 +674,13 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即拒绝并提示迁移进 `api_keys`、`probe_mode` 只能是 `active`/`passive`（拼错值直接拒绝加载，不会默默生效成别的东西）、listen 可解析、providers/models 非空、每个 provider 的 `name` 非空且在列表内唯一、`base_url` 至少声明一个协议、`base_url` 的每个 key 已注册为 adapter 且值是带 scheme+host 的合法 URL、endpoint-group 的 `protocol` 已注册为 adapter、引用的 provider 存在（按 `name` 在扁平列表里查找）且在该 `protocol` 下声明了 base_url（这是旧版"provider 引用存在于同协议分组内"校验的新等价物）、`models` 列表至少一项且每项非空、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、全局 `proxy: true` 但 `http_proxy`/`https_proxy` 都没配 = 校验错误、provider `proxy: true`（不管全局 `proxy` 是否为 true）但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告）、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。
+**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即被当作未知字段拒绝加载（不再有专门的迁移提示——早已全量迁移到 `api_keys`，没有外部用户需要照顾这条兼容路径）、已移除的 `probe_mode`（半开端点恢复探测不再有可选的被动模式，永远是后台探测）同样出现即被当作未知字段拒绝加载、listen 可解析、providers/models 非空、每个 provider 的 `name` 非空且在列表内唯一、`base_url` 至少声明一个协议、`base_url` 的每个 key 已注册为 adapter 且值是带 scheme+host 的合法 URL、endpoint-group 的 `protocol` 已注册为 adapter、引用的 provider 存在（按 `name` 在扁平列表里查找）且在该 `protocol` 下声明了 base_url（这是旧版"provider 引用存在于同协议分组内"校验的新等价物）、`models` 列表至少一项且每项非空、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告；`proxy` 没有全局默认可继承，每个 provider 独立决定）、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。
 
-**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、provider 只靠全局 `proxy: true` 隐式继承代理却因 scheme 不匹配（比如只配了 `https_proxy` 但这个 provider 的 `base_url` 是 `http://`）而悄悄退化成直连、`probe_timeout` 没有明显小于 `response_header`（违反 active 探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型基线 capabilities/max_context_tokens 与每个端点自己叠加/覆盖值的分层展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
+**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`probe_timeout` 没有明显小于 `response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型基线 capabilities/max_context_tokens 与每个端点自己叠加/覆盖值的分层展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
 
 CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 image_downscale/sticky 覆盖标记、每个端点的 capabilities/max_context_tokens/sticky_ttl、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
-**上游代理：显式配置，三层解析，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器的 URL——本身不替任何 provider 打开代理。是否真的走代理由三层解析决定：① provider 自己的 `proxy: true`/`false` 最高优先；② 没写就跟随全局 `proxy` 开关（缺省同样是 `false`——只配了 `http_proxy`/`https_proxy` 而不设 `proxy: true`，等于只声明了代理地址，所有 provider 仍然默认直连）；③ 解析结果是"开"时，才按 base_url 的 scheme 选用 `http_proxy`/`https_proxy`。**推荐配置方法**：全局 `proxy` 保持缺省（关闭），只给个别确实需要代理的 provider（典型是访问受限的海外厂商）显式写 `proxy: true`——单点意图优于全局开关，新增 provider 不会因为踩中一个早先设好的全局默认值而被静默代理或静默直连。反过来，只有当"默认全部代理、少数国内厂商直连"更贴合部署场景时，才把全局 `proxy` 设为 `true`，再用个别 provider 的 `proxy: false` 挖例外。**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到——一个只在某次交互式 shell 里临时设置过的 `HTTPS_PROXY`，一旦被 vmr 悄悄读取，就会让接下来启动的所有实例在不知情的情况下把全部上游流量导进代理。vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境。`proxy: true`（不管全局还是 provider 级）但没配对应 scheme 的代理地址是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
+**上游代理：显式配置，两级解析，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器的 URL——本身不替任何 provider 打开代理。是否真的走代理完全由 provider 自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，没有全局默认可继承）；只有它是 `true` 时，才按 base_url 的 scheme 选用 `http_proxy`/`https_proxy`。**推荐配置方法**：只给个别确实需要代理的 provider（典型是访问受限的海外厂商）显式写 `proxy: true`，其余不写——单点意图，新增 provider 默认直连、不会意外被牵连进代理。（早期设计里曾有一层全局 `proxy` 默认开关，供"多数 provider 都要代理"的场景整体翻转；实测这个场景从未出现——真实部署里全局开关始终是缺省关闭，只有个别海外 provider 逐个显式 `proxy: true`——于是连同它的三层解析、专属矛盾校验一起去掉，见下方决策表。）**没有环境变量回退**：隐式改变流量走向的旋钮容易被忽略、排障时最难想到——一个只在某次交互式 shell 里临时设置过的 `HTTPS_PROXY`，一旦被 vmr 悄悄读取，就会让接下来启动的所有实例在不知情的情况下把全部上游流量导进代理。vmr 的原则是流量去哪必须在 config.yaml 里读得出来；想引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`——`${VAR}` 展开对它一视同仁，vmr.sh 的通用 `${VAR}` 抓取会自然把它带进 service 环境。`proxy: true` 但没配对应 scheme 的代理地址是校验错误——这个矛盾配置自身就能陈述，不需要等到运行时。实现上不做每请求动态判断：`router.Install` 按"生效代理解析结果"分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，endpoint 在快照期绑定到组（`Snapshot.clientFor`），请求期零额外开销；config 内的代理值随热重载即时生效。启动摘要与 `vmr check` 逐 provider 打印生效代理（URL 内凭证经 `url.Redacted` 掩码）。
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 provider 的生效代理（凭证掩码）、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
@@ -706,7 +700,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 不用 Provider SDK | 官方 SDK | 路由只需改 URL/Key/model 字段；SDK 带来二进制膨胀与版本纠缠 |
 | 编译期 Adapter 注册（blank import） | 运行时插件（.so/脚本/外部进程） | 满足"插件式扩展、写法统一"，不引入运行时插件的任何成本 |
 | 调度 = 过滤+多键排序 | 策略类枚举（Priority/RR/Weighted 各一套） | 组合能力来自排序键叠加；新策略不改主流程 |
-| 半开恢复默认用后台主动探测（`probe_mode: active`），被动单飞探针保留为可选项 | 定期轮询式主动探测（不管有没有真实请求都固定间隔探测每个端点） | 定期轮询无论如何都要花钱、且探测闲置端点毫无意义；`active` 模式的探测仍然完全由真实请求触发（没有独立的后台定时器），只是触发之后交给一个跟真实流量解耦的后台请求去做，而不是让真实请求自己当探针——被动模式下"探针请求多大/多慢，恢复检测就要多久，且期间连累同一端点的其他并发请求"的问题因此被消除，代价是每次半开恢复多花一次小额探测请求 |
+| 半开恢复统一用后台探测，不保留"下一个真实请求自己当探针"的被动模式 | 定期轮询式主动探测（不管有没有真实请求都固定间隔探测每个端点）；或保留被动模式作为可选降级 | 定期轮询无论如何都要花钱、且探测闲置端点毫无意义；后台探测仍然完全由真实请求触发（没有独立的后台定时器），只是触发之后交给一个跟真实流量解耦的后台请求去做，而不是让真实请求自己当探针——这样"探针请求多大/多慢，恢复检测就要多久，且期间连累同一端点的其他并发请求"的问题被消除，代价是每次半开恢复多花一次小额探测请求；被动模式从未在实际部署中启用过，保留它只是徒增一个配置维度和 `router.go` 主循环里的一个分支，予以移除 |
 | 错误分类含 body 嗅探 | 严格按 HTTP status 映射 | 实测各家 status 习惯不一（400 当 404 用等）；漏判 = 永不 failover，误判只是一次无害切换 |
 | providers/models 按协议分两层 map，协议即配置位置 | 扁平 map + provider.type / model.protocol 显式字段 | 显式字段要么冗余（与 endpoint 实际协议重复）要么矛盾（写错/漏改）；把协议变成 map 的外层 key 之后，"一个 model 混用两种协议" 连语法都写不出来，不是运行时校验能不能查到，是从设计上不给它写的机会 |
 | 全败透传最后上游错误 | 合成统一 502 | 保留客户端 SDK 可解析的厂商错误结构；聚合信息在日志里 |
@@ -745,7 +739,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `audit_retention_days` 缺省 0（永久保留） | 缺省一个"合理"天数（如 30） | 审计日志是 `vmr report` 成本核算的唯一数据源，非用户主动设置就被静默删除的风险 > 磁盘空间收益；压缩（无条件发生）已经解决了大头的磁盘占用问题，保留期清理是可选的第二层 |
 | model 改写用字节 splice，只动顶层 `model` 值 | `map[string]json.RawMessage` 全量 unmarshal + 重新序列化 | 每次 failover attempt 都要重复这个操作——整体 unmarshal 再重新序列化是主路径上最大的单项 CPU 成本，且会改写键序/空白，偏离"直连等价"。splice 单趟免分配扫描 + 三段拼接，客户端原文除 model 值外逐字节保留；扫不动的形态回退到 unmarshal 路径，行为不变 |
 | `BuildRequest` 一并返回出站 body；`audit.EncodeBody` 引用不克隆 | router 用 `GetBody()+io.ReadAll` 再读一份；EncodeBody 防御性拷贝 | 改写后的 body 本来就在 adapter 手里，为审计再拷两份纯属浪费（大 body 每 attempt 多两次全量拷贝）。代价是一条所有权契约：交给 EncodeBody 的 slice 此后不得改写——五个调用点（client 请求缓冲、recorder 响应缓冲、attempt 出站 body、上游错误 body、归一化 pre-strip 快照）都是终态字节，契约天然成立 |
-| 代理纯显式三层解析：provider 级 `proxy` > 全局 `proxy`（**缺省 false**）> `http(s)_proxy` 的 URL，**无环境变量回退**；按解析结果分组建 Client | `http(s)_proxy` 一配上就对全体 provider 默认生效 / 单一 `ProxyFromEnvironment` / config 优先 + env 回退 / 每请求动态 Proxy 回调 / config 级 `no_proxy` 清单 | "配了代理 URL 就默认全体生效"这个初版设计混淆了"代理在哪"和"要不要用"两件事：给单个海外 provider 配代理，会不知不觉把所有 provider 都导流进去，直到有人手工给每个国内 provider 补一条 `proxy: false` 才能收住——补漏式配置容易漏，且新增 provider 默认就"继承"了代理。拆成独立的全局 `proxy` 开关（缺省 false）后，"声明代理地址"与"启用代理"互不隐含，推荐写法变成给需要代理的少数 provider 逐个显式 `proxy: true`，新增 provider 默认直连、不会意外破网。纯环境变量是全有全无：国内直连 + 海外走代理混配时只能靠 `NO_PROXY` 在 vmr 之外绕。env 回退也不采用：隐式旋钮悄悄决定流量走向，最容易被忽略、排障时最难想到——流量去哪必须在 config.yaml 里读得出来，要引用 env 就显式写 `${HTTPS_PROXY}`。provider 级布尔开关粒度恰好（provider ≙ base_url ≙ host），config 级 `no_proxy` 因此多余。全显式的附带收益：`proxy: true`（全局或 provider 级）无代理可跟从这个矛盾变成静态可判的校验错误；解析不再依赖运行环境，热重载语义完整。每请求回调换取不到任何灵活性——解析对 provider 是静态的，快照期分组建 Client（典型 1~2 组，连接池按组共享，请求期零开销） |
+| 代理纯显式两级解析：provider 级 `proxy`（**缺省 false，无全局默认可继承**）→ `http(s)_proxy` 的 URL，**无环境变量回退**；按解析结果分组建 Client | `http(s)_proxy` 一配上就对全体 provider 默认生效 / 单一 `ProxyFromEnvironment` / config 优先 + env 回退 / 每请求动态 Proxy 回调 / config 级 `no_proxy` 清单 / 一层可翻转的全局默认开关 | "配了代理 URL 就默认全体生效"这个初版设计混淆了"代理在哪"和"要不要用"两件事：给单个海外 provider 配代理，会不知不觉把所有 provider 都导流进去，直到有人手工给每个国内 provider 补一条 `proxy: false` 才能收住——补漏式配置容易漏，且新增 provider 默认就"继承"了代理。纯环境变量是全有全无：国内直连 + 海外走代理混配时只能靠 `NO_PROXY` 在 vmr 之外绕。env 回退也不采用：隐式旋钮悄悄决定流量走向，最容易被忽略、排障时最难想到——流量去哪必须在 config.yaml 里读得出来，要引用 env 就显式写 `${HTTPS_PROXY}`。provider 级布尔开关粒度恰好（provider ≙ base_url ≙ host），config 级 `no_proxy` 因此多余。全显式的附带收益：`proxy: true` 无代理可跟从这个矛盾变成静态可判的校验错误；解析不再依赖运行环境，热重载语义完整。每请求回调换取不到任何灵活性——解析对 provider 是静态的，快照期分组建 Client（典型 1~2 组，连接池按组共享，请求期零开销）。**2026-08-02 追加简化**：中间还短暂存在过一层"没写就跟随全局 `proxy` 开关（同样缺省 false）"，供"多数 provider 都要代理、少数国内厂商直连"这种反过来的部署场景整体翻转默认值。上线后复核真实配置：从未用过这层——所有 provider 要么显式 `proxy: true`，要么直接不写，全局开关始终缺省关闭。既然文档自己都写"推荐保持关闭，个别 provider 自己开"，这层为小概率场景保留的翻转能力就是从未使用的可选特性，遂删——`Provider.Proxy` 从三态 `*bool` 收窄为普通 `bool`，`Config.Proxy` 字段、它专属的矛盾校验、`vmr check` 里"继承全局但 scheme 不匹配"那条一致性检查一并去掉。真要出现"多数需要代理"的部署，逐个 provider 显式 `proxy: true` 也不过是多写几行 YAML，不构成恢复这层的理由 |
 | `vmr diagnose` 对走代理的 provider 跳过直连 DNS/TLS 检查，只测代理本身可达性 | 不论是否配代理，一律先测目标 host 的直连 DNS/TLS | `router.NewUpstreamClient` 对走代理的 provider 从不直连目标 host——直连检查测的是一件真实请求路径上根本不会发生的事，只会把"只能通过代理访问"（项目本身面向的国内网络场景很常见）的健康 provider 误报成故障 |
 | `vmr diagnose` Phase 2/3 有界并发（`checkConcurrency=8`），每个检查写自己的预分配槽位、不加锁 | 顺序执行 / 无界并发 | diagnose 恰好是"怀疑某个 provider 有问题"时才会跑的工具，顺序执行下 N 个同时不可达的 provider 会把等待时间线性放大到分钟级——这正是最需要快速给出结论的场景；无界并发在配置规模较大或 provider 端有并发连接限制时无必要地激进，8 是与 `router.go` 连接池 `MaxIdleConnsPerHost` 同量级的保守取值 |
 | `vmr replay` 定位记录支持 `-line`/`-ts`/`-detail` 三种互斥方式 | 只保留 `-line`（原始设计） | `-line` 要求用户先数出目标记录在文件里是第几行，这个坐标在 jq/vmr report 等实际排障工作流里根本拿不到，文件按天轮转后也对不上；`-ts` 匹配 `ts` 字段（容忍 `vmr-requests.jsonl` 的毫秒精度与原始审计日志的纳秒精度），`-detail` 直接读 `vmr report` 已生成的 `details/*.json`（一文件一条记录，天然无歧义）——两者都是用户真实拿在手上的定位符；`-line` 保留作为脚本化场景的兜底，不删 |
@@ -840,7 +834,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `respStream.Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |
 | 健康注册表中被配置删除的端点条目跨热重载残留 | 每条目几十字节，重启清零 | 有界（≤ 历史配置的端点总数），加清理逻辑需要 diff 新旧快照，复杂度不成比例 |
 | 测试里存在三个各自为政的 mock 上游（`upstream`/`probeUpstream`/`stallingUpstream`） | 各 30~50 行，职责不同（脚本化状态 / 探针时序 / 停滞） | 测试代码合并会互相牵连；等真实收敛需求出现再说 |
-| `runProbe`（主动探测模式）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `probe_timeout` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |
+| `runProbe`（半开端点后台探测）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `probe_timeout` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |
 | `audit.Logger.Close` 不等待后台 housekeeping 收尾 | `hkWG.Wait()` 只给测试用 | 压缩 crash-safe（tmp+rename+重启续跑），housekeeping 只碰已轮转的历史文件、与 Close 关闭的当日 fd 零交集；让关停阻塞在一次可能数 GB 的 zstd 上没有收益。Close 后的迟到 Write 由 `closed` 标志拒绝，不会重开文件 |
 | `vmr report` 不区分 `vmr replay --record` 产出的记录（`replay_of` 字段）与真实流量 | 指向包含两者的 glob 时，回放记录会被当普通请求计入统计 | 属于用户主动行为——`--record` 默认不写、写了也是独立文件，只有显式把 glob 指向它才会混入；混入本身有时是期望行为（比如想验证回放请求的 token 用量）。真出现"不小心混进日常统计"的抱怨再加过滤 |
 
@@ -856,7 +850,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 1. **配置校验**：复用 `config.Load` + `router.BuildSnapshot`；失败直接退出，不进入后续阶段。
 2. **环境检查**（`envCheck`，每个 provider 一条结果）：DNS 解析 + TLS 握手（仅 https 且未配代理时），或代理可达性（配了代理时）；`api_key` 是否非空。**代理感知是关键**：`cfg.ProxySpecFor` 判定这个 provider 的真实流量是否经过代理——是的话跳过对目标 host 的直连检查（那条路径真实请求从不会走），只测代理本身；否则会把"只能通过代理访问"的健康 provider 系统性误报成故障。DNS 查询用 `(&net.Resolver{}).LookupHost(ctx, host)` 加 5 秒上限，不用不带超时的 `net.LookupHost`——诊断工具本身绝不能因为一次网络黑洞而无限挂起。
-3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `adapter.BuildRequest` 拼一个最小请求，要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**探测请求的 role 按协议区分**：`protocol: anthropic` 的端点用 `internal/probe.Request`（单条 `role: "user"` 消息，两种协议共用的最小形态）；`protocol: openai` 的端点改用 `internal/probe.RoleCompatRequest(model, "developer")`——首条 `role: "developer"`（OpenAI o1/o3 系列引入、部分自称兼容 OpenAI 协议的 provider 实际拒收的那个 role），末条普通 `role: "user"` 带回显 nonce，同样走 `adapter.BuildRequest`/`RoleMap` 那条流水线。**没有独立的第二次请求**：developer role 走不通，等价于这个端点连不通——不为它单开一个阶段或再打一次请求，直接算作这一条 `testEndpoint` 结果的失败，提示里按 `ep.RoleMap` 是否已配置给出对应建议（没配→提示加 `role_map: {developer: system}`；配了但仍失败→提示检查改写目标 role 名）。**两条消息而非一条**：如果只发一条非 `user` 的消息，部分 provider 会因为"消息数组只有一条且不是 user"这个形状问题直接拒收，跟"这个 provider 不认 developer role"是两个不同的失败原因，混在一起会把纯粹的请求形状问题错判成 role 不兼容；两条消息（角色消息 + 用户消息）也正是真实客户端的发送形态。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟 `probe_mode: active` 的运行时后台探测共用同一个 `internal/probe.Request`/`Echoed`（运行时探测不区分 role，永远是 `Request` 的单条 `user` 消息——developer-role 探测只在 `vmr diagnose` 这个一次性诊断工具里做），但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。去重时若同一个 `(protocol, provider, model)` 三元组被多条不同 `role_map` 的 endpoint-group 引用，取第一个出现的——这是没打算特意处理的边界情况。
+3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `adapter.BuildRequest` 拼一个最小请求，要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**探测请求的 role 按协议区分**：`protocol: anthropic` 的端点用 `internal/probe.Request`（单条 `role: "user"` 消息，两种协议共用的最小形态）；`protocol: openai` 的端点改用 `internal/probe.RoleCompatRequest(model, "developer")`——首条 `role: "developer"`（OpenAI o1/o3 系列引入、部分自称兼容 OpenAI 协议的 provider 实际拒收的那个 role），末条普通 `role: "user"` 带回显 nonce，同样走 `adapter.BuildRequest`/`RoleMap` 那条流水线。**没有独立的第二次请求**：developer role 走不通，等价于这个端点连不通——不为它单开一个阶段或再打一次请求，直接算作这一条 `testEndpoint` 结果的失败，提示里按 `ep.RoleMap` 是否已配置给出对应建议（没配→提示加 `role_map: {developer: system}`；配了但仍失败→提示检查改写目标 role 名）。**两条消息而非一条**：如果只发一条非 `user` 的消息，部分 provider 会因为"消息数组只有一条且不是 user"这个形状问题直接拒收，跟"这个 provider 不认 developer role"是两个不同的失败原因，混在一起会把纯粹的请求形状问题错判成 role 不兼容；两条消息（角色消息 + 用户消息）也正是真实客户端的发送形态。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟运行时的半开端点后台探测共用同一个 `internal/probe.Request`/`Echoed`（运行时探测不区分 role，永远是 `Request` 的单条 `user` 消息——developer-role 探测只在 `vmr diagnose` 这个一次性诊断工具里做），但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。去重时若同一个 `(protocol, provider, model)` 三元组被多条不同 `role_map` 的 endpoint-group 引用，取第一个出现的——这是没打算特意处理的边界情况。
 4. **路由预览**：对每个虚拟模型打印 `EffectiveOrder()` 排出的尝试顺序，用本轮连通性测试的结果标注每个端点。**不查活实例的实时健康状态**——`vmr status` 才是那个职责，二者边界刻意分开：`diagnose` 回答"现在直连会发生什么"，`status` 回答"那个正在跑的 vmr 现在什么状态"。
 
 阶段 2/3 都以 `checkConcurrency=8` 的有界并发执行（每个检查写自己预分配的结果槽位，无锁）。诊断恰好是"怀疑某个 provider 有问题"时才会跑的工具，顺序执行下几个同时不可达的 provider 会把等待时间线性放大到分钟级——精确发生在最需要快速给出结论的场景。

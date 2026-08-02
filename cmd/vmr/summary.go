@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
 // Config-summary rendering shared by cmd_start.go (startup/reload banner)
 // and cmd_check.go (`vmr check` output): configFlag, logConfigSummary, and
@@ -73,7 +73,6 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 	global.WriteString(field(4, "image_downscale", imgScale))
 	global.WriteString(field(4, "image_cache_ttl", fmt.Sprintf("%dd", cfg.ImageCacheTTLDays)))
 	global.WriteString(field(4, "audit_retention", retention))
-	global.WriteString(field(4, "probe_mode", cfg.ProbeMode))
 	global.WriteString(field(4, "probe_timeout", cfg.ProbeTimeout.D()))
 	global.WriteString("\n    timeouts")
 	global.WriteString(field(8, "connect", cfg.Timeouts.Connect.D()))
@@ -179,9 +178,6 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 	for _, p := range providers {
 		for _, protocol := range core.SortedKeys(p.BaseURL) {
 			desc := "direct"
-			if p.Proxy != nil && !*p.Proxy {
-				desc = "direct (proxy: false)"
-			}
 			isProxied := false
 			if mode, proxyURL := cfg.ProxySpecFor(p, protocol); mode == config.ProxyURL {
 				desc = redact(proxyURL)

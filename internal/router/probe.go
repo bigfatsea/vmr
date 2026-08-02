@@ -1,8 +1,8 @@
-// Ver 2026-07-21 01:15, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
-// probe_mode: active's background half of Serve (see router.go) — a
-// dedicated, lightweight request that verifies a half-open endpoint without
-// making any real client wait on it.
+// Serve's background half (see router.go) — a dedicated, lightweight
+// request that verifies a half-open endpoint without making any real
+// client wait on it.
 package router
 
 import (

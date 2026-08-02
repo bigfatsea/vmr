@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 01:30, by Sonnet 5 -->
+<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -14,19 +14,15 @@
 listen: 127.0.0.1:8800
 # api_keys:                    # 可选：保护 vmr（Bearer 或 x-api-key 都认）；每把 key 在
 #   - ${VMR_KEY_ALICE}          # `vmr report` 里按各自的尾部打标签分组统计（见下文"多调用方场景"）。
-#   - ${VMR_KEY_OPENCLAW}       # 旧的单把 api_key 已移除——配置里还写着它会在加载时被拒绝并提示迁移
+#   - ${VMR_KEY_OPENCLAW}       # 旧的单把 api_key 已移除——配置里还写着它会被当作未知字段拒绝加载
 # max_attempts: 0              # 每请求上游尝试数上限（缺省 0 = 试遍全部候选）
-# probe_mode: active            # active（缺省）| passive —— 端点冷却到期后如何重新验证恢复，再放行真实流量，见下文"故障切换与健康"
-# probe_timeout: 15s            # 仅 active 模式生效：一次后台恢复探测的超时上限
+# probe_timeout: 15s            # 一次后台恢复探测的超时上限，见下文"故障切换与健康"
 # max_request_body_mb: 8       # 入站请求体大小上限（仅为稳定性考虑；审计日志始终原样全量记录，不受此项限制）
 # max_concurrency: 8           # 全局并发上限，超限请求挂起等待（缺省不限）
 # https_proxy: http://127.0.0.1:7890   # https 型 base_url 的代理服务器地址——vmr 用代理的唯一途径
 #                                      # （环境变量被忽略；要引用就显式写 ${HTTPS_PROXY}）。
 #                                      # 只是声明代理在哪，不代表默认开启——见下面的 `proxy`
 # http_proxy: http://127.0.0.1:7890    # http 型 base_url 同理（如局域网 llama.cpp）
-# proxy: false                  # 全局默认值：没有自己 proxy 开关的 provider 走这个（缺省 false）。
-#                                # 推荐写法：全局保持关闭，个别需要代理的 provider 自己写 proxy: true——
-#                                # 显式的单点意图，不会让以后新加的 provider 悄悄被一个全局开关决定
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
 # image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
 # audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
@@ -39,13 +35,12 @@ providers:
   - name: openrouter
     base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
-    proxy: true              # 永远走 https_proxy/http_proxy，无视全局 proxy 默认值——
-                             # 给海外 provider 开代理的推荐写法
+    proxy: true              # 走 https_proxy/http_proxy——给海外 provider 开代理的
+                             # 推荐写法（缺省 false，即直连）
   - name: minimax
     base_url: {openai: https://api.minimaxi.com/v1}
     api_key: ${MINIMAX_API_KEY}
-    # proxy: false           # 这里不需要写——推荐的基线（全局 proxy 关闭）本来就对
-                             # 这个 provider 默认直连
+    # proxy: false           # 这里不需要写——false 本来就是缺省值
 
 models:
   coding:                      # 只有 openai 协议 → 走 /v1/chat/completions
@@ -58,7 +53,7 @@ models:
 
 全部字段与校验规则见设计文档 Part 1 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
 
-**上游代理——只认显式配置，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器**在哪**，本身不会替任何 provider 打开代理。一个 provider 是否真的走代理，由三层解析决定：provider 自己的 `proxy: true`/`false` 最高优先；没写就跟随全局 `proxy` 开关（缺省同样是 `false`）；解析结果是"开"时，才按 base_url 的 scheme 选用 `https_proxy`/`http_proxy`。**推荐写法**：全局 `proxy` 保持关闭，个别需要代理的 provider（通常是海外厂商）自己写 `proxy: true`——这是显式的单点意图，不会让以后新增的 provider 悄悄继承一个已经过时的全局默认值。（只有想让"默认走代理"成为基线、再用个别 provider 的 `proxy: false` 挖例外时，才把全局 `proxy` 设为 `true`。）**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true`（不管全局还是 provider 级）但没配对应的代理地址是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
+**上游代理——只认显式配置，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器**在哪**，本身不会替任何 provider 打开代理。一个 provider 是否真的走代理，完全由它自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，没有全局默认可继承——每个 provider 独立、显式决定）；只有它是 `true` 时，才按 base_url 的 scheme 选用 `https_proxy`/`http_proxy`。**推荐写法**：只给个别需要代理的 provider（通常是海外厂商）写 `proxy: true`，其余不写——单点意图，新增 provider 默认直连，不会被意外牵连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但没配对应的代理地址是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
 
 **base_url 必须自带版本号**：vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI 为 `/chat/completions`，Anthropic 为 `/messages`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
 
@@ -95,14 +90,10 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 - 400 类**客户端**错误——确实是请求本身写错了——直接返回，不切换、不冷却：换哪个端点都会被同样拒绝，切换解决不了任何问题；
 - **内容合规拦截**切换下一家，但**不惩罚**被拦端点——它只是拒绝了这一条请求，并没有坏。
 
-**冷却端点如何恢复**（`probe_mode`，缺省 `active`）：
-
-- `active`（缺省）：端点冷却一到期，vmr 立刻在后台发一个专门的轻量探测请求（受 `probe_timeout` 约束，缺省 15s），而不是让下一个真实请求自己去踩一脚。真实流量在端点被确认恢复之前**完全不会碰到它、也不会等它**——探测没出结果之前，请求照样路由到下一个候选，不管探测本身要跑多久。探测会要求模型原样回显一个一次性 token，所以网关返回一个缓存/兜底的"假成功"不会被当成恢复。
-- `passive`：更早期的行为——冷却到期后**第一个真实请求就是探针**（单飞，防止大量并发请求同时涌向刚恢复的端点）。这个探针请求本身跑多久、多大，就决定了这次恢复检测要花多久；并发场景下，其他打向同一端点的请求在这段时间里都会被导流到下一个候选。不想多花这一次探测请求，或者本来就不会有高并发场景，可以切回这个模式。
+**冷却端点如何恢复**：端点冷却一到期，vmr 立刻在后台发一个专门的轻量探测请求（受 `probe_timeout` 约束，缺省 15s），而不是让下一个真实请求自己去踩一脚。真实流量在端点被确认恢复之前**完全不会碰到它、也不会等它**——探测没出结果之前，请求照样路由到下一个候选，不管探测本身要跑多久。探测会要求模型原样回显一个一次性 token，所以网关返回一个缓存/兜底的"假成功"不会被当成恢复。
 
 ```yaml
-probe_mode: active      # active（缺省）| passive
-probe_timeout: 15s      # 仅 active 模式生效：一次后台探测的时间上限
+probe_timeout: 15s      # 一次后台探测的时间上限
 ```
 
 全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。
@@ -272,9 +263,9 @@ models:
 | `POST /v1/chat/completions` | OpenAI 协议入口（流式 + 非流式） |
 | `POST /v1/messages` | Anthropic 协议入口（流式 + 非流式） |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
-| `GET /admin/status` | 端点健康 + 并发指标，含某个端点当前是否正被一次恢复探测（被动或主动）占着单飞名额（仅 loopback） |
+| `GET /admin/status` | 端点健康 + 并发指标，含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback） |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
-| `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、代理悄悄退化成直连、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
+| `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
 | `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文"输出语言"）可切换成中文 |
 | `vmr story [-journey <id> \| -render-all \| -compare <id1,id2>] [-lang en\|zh] [-report-config report.yaml] <glob>` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见下文"Agent 任务叙事重建"）；不带参数列出候选任务及其 id，`-render-all` 一次批量渲染全部，`-compare id1,id2` 对比两个已渲染任务的行为剖面（规则事实之外，加 `-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可追加可选的 LLM 解读小节）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致 |

@@ -21,10 +21,9 @@ import (
 func TestProxyResolutionGrouping(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
-proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: a, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: a, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
   - {name: b, base_url: {openai: https://b.example/v1}, api_key: k, proxy: false}
   - {name: c, base_url: {openai: https://c.example/v1}, api_key: k, proxy: true}
 models:
@@ -95,10 +94,9 @@ func TestProxyEndToEnd(t *testing.T) {
 	// transport hands it to the proxy instead of dialing the host itself.
 	cfg, err := config.Parse(fmt.Appendf(nil, `
 listen: 127.0.0.1:0
-proxy: true
 http_proxy: %s
 providers:
-  - {name: viaproxy, base_url: {openai: http://upstream.invalid/v1}, api_key: k}
+  - {name: viaproxy, base_url: {openai: http://upstream.invalid/v1}, api_key: k, proxy: true}
   - {name: directp, base_url: {openai: %s/v1}, api_key: k, proxy: false}
 models:
   m-proxy:  {endpoints: [{protocol: openai, provider: viaproxy, models: [real]}]}

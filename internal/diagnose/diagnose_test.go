@@ -160,10 +160,9 @@ func TestEnvCheck_ProxyReachability(t *testing.T) {
 
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
-proxy: true
 http_proxy: "http://%s"
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai: %q}, api_key: k, proxy: true}
 models:
   vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, openProxy.Addr().String(), upstream.URL)))
@@ -203,10 +202,9 @@ func TestEnvCheck_ProxiedProviderSkipsDirectDNS(t *testing.T) {
 
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
-proxy: true
 http_proxy: "http://%s"
 providers:
-  - {name: p1, base_url: {openai: "http://this-host-does-not-exist.invalid"}, api_key: k}
+  - {name: p1, base_url: {openai: "http://this-host-does-not-exist.invalid"}, api_key: k, proxy: true}
 models:
   vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `, openProxy.Addr().String())))

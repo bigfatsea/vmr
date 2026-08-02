@@ -1,4 +1,4 @@
-// Ver 2026-07-28 12:10, by Opus 5
+// Ver 2026-08-02, by Sonnet 5
 package main
 
 import (
@@ -202,7 +202,7 @@ func printStatus(st *statusResponse) {
 			} else if ep.Fails > 0 {
 				probing := ""
 				if ep.Probing {
-					probing = ", probing" // a passive-mode real request or an active-mode background probe currently holds this endpoint's single-flight recovery check
+					probing = ", probing" // a background probe currently holds this endpoint's single-flight recovery check
 				}
 				state = fmt.Sprintf("half-open (%s, fails=%d%s)", ep.LastError, ep.Fails, probing)
 			}

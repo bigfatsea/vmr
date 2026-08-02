@@ -28,6 +28,12 @@ var fileLineLimits = map[string]int{
 	// appended to whichever file is already the biggest.
 	"internal/report/aggregate.go":  1000,
 	"internal/report/render_doc.go": 400,
+	// No prior split here — config.go is at 591 lines today. The budget is
+	// a tripwire against the same unnoticed growth pattern that hit
+	// router.go, not a statement that 591 is already too big: if it crosses
+	// this, split by concern (e.g. a separate file for provider/model
+	// validation) rather than raising the number.
+	"internal/config/config.go": 750,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

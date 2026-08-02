@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 package main
 
 import (
@@ -121,7 +121,7 @@ func cmdCheck(args []string) error {
 
 	issues := cfg.Check()
 	printGlobalSettings(cfg, issues)
-	printProviders(cfg, issues)
+	printProviders(cfg)
 	printModels(cfg, snap, issues)
 
 	fmt.Println()
@@ -172,17 +172,11 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	}
 	fmt.Println(checkLine(0, "audit_retention", retention))
 	fmt.Println(checkLine(0, "sticky_ttl", cfg.StickyTTL.D().String()))
-	fmt.Println(checkLine(0, "probe_mode", cfg.ProbeMode))
 	probeTimeout := cfg.ProbeTimeout.D().String()
 	if hasIssue(issues, "", "", "", "probe_timeout") {
 		probeTimeout = warn(probeTimeout)
 	}
 	fmt.Println(checkLine(0, "probe_timeout", probeTimeout))
-	// proxy grouped with http_proxy/https_proxy: it's the global default
-	// switch for whichever of those two URLs actually applies, so the three
-	// read as one unit rather than proxy sitting apart from the URLs it
-	// defaults for.
-	fmt.Println(checkLine(0, "proxy", fmt.Sprintf("%v", cfg.Proxy)))
 	fmt.Println(checkLine(0, "http_proxy", orNone(cfg.HTTPProxy)))
 	fmt.Println(checkLine(0, "https_proxy", orNone(cfg.HTTPSProxy)))
 	fmt.Println("dirs:")
@@ -198,7 +192,7 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	fmt.Println(checkLine(2, "stream_idle", cfg.Timeouts.StreamIdle.D().String()))
 }
 
-func printProviders(cfg *config.Config, issues []config.Issue) {
+func printProviders(cfg *config.Config) {
 	fmt.Println()
 	fmt.Println("=== Providers ===")
 	providers := append([]config.Provider(nil), cfg.Providers...)
@@ -219,7 +213,7 @@ func printProviders(cfg *config.Config, issues []config.Issue) {
 		for _, protocol := range protocols {
 			fmt.Println(checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
 		}
-		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor, issues)))
+		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
 	}
 }
 
@@ -230,14 +224,10 @@ func printProviders(cfg *config.Config, issues []config.Issue) {
 // where http/https base_urls resolve differently (say only https_proxy is
 // configured) falls back to listing each protocol's own resolution instead
 // of hiding the discrepancy behind a single misleading value.
-func providerProxyLine(p config.Provider, protocols []string, descFor map[string]providerProxyEntry, issues []config.Issue) string {
+func providerProxyLine(p config.Provider, protocols []string, descFor map[string]providerProxyEntry) string {
 	descs := map[string]bool{}
-	anyIssue := false
 	for _, protocol := range protocols {
 		descs[descFor[protocol+"/"+p.Name].Proxy] = true
-		if hasIssue(issues, p.Name, "", protocol, "proxy") {
-			anyIssue = true
-		}
 	}
 	out := descFor[protocols[0]+"/"+p.Name].Proxy
 	if len(descs) > 1 {
@@ -246,9 +236,6 @@ func providerProxyLine(p config.Provider, protocols []string, descFor map[string
 			parts[i] = fmt.Sprintf("%s=%s", protocol, descFor[protocol+"/"+p.Name].Proxy)
 		}
 		out = strings.Join(parts, ", ")
-	}
-	if anyIssue {
-		out = warn(out)
 	}
 	return out
 }

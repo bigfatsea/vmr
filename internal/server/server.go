@@ -46,8 +46,8 @@ func (s *Server) Handler() http.Handler {
 // is disabled entirely or (ok == false) nothing matched at all. api_keys is
 // the only auth surface (the singular api_key catch-all was removed: it
 // added nothing this list can't express, at the cost of a second code path
-// here and a second config field to document — config.validate rejects it
-// with a migration message).
+// here and a second config field to document — config's strict KnownFields
+// decoding now rejects it like any other unknown field).
 //
 // Self-declared tag, no config needed: when APIKeys is empty, the door
 // stays fully open, but whatever credential-shaped value the client chooses

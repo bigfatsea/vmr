@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 package main
 
 import (
@@ -348,7 +348,6 @@ max_attempts: 3
 max_concurrency: 8
 image_downscale: 512
 audit_retention_days: 30
-probe_mode: active
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: key-aaaa}
   - {name: p2, base_url: {openai: https://b.example/v1}, api_key: key-bbbb, proxy: false}
@@ -380,7 +379,6 @@ models:
 		"max_concurrency   = 8",
 		"image_downscale   = 512px",
 		"audit_retention   = 30d",
-		"probe_mode        = active",
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {
@@ -423,11 +421,10 @@ models:
 func TestLogConfigSummary_ProxyMarker(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
-proxy: true
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k}
-  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k, proxy: false}
+  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
+  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k}
 models:
   vm:
     endpoints:
@@ -607,18 +604,17 @@ models:
 		t.Fatal(err)
 	}
 	lines := providerProxyLines(cfg)
-	if !strings.Contains(lines[0], "proxy: false") {
-		t.Errorf("expected proxy: false, got %q", lines[0])
+	if !strings.Contains(lines[0], "direct") {
+		t.Errorf("expected direct, got %q", lines[0])
 	}
 }
 
 func TestProviderProxyLines_ProxyURL(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
-proxy: true
 https_proxy: http://user:pass@127.0.0.1:7890
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
 models:
   vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
 `

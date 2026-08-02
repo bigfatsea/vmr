@@ -1,11 +1,11 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 //
-// probe_mode: active — the goal this whole mode exists for is that real
-// client traffic never waits on, and is never diverted for longer than a
-// heartbeat by, another endpoint's recovery check (see docs/
-// ActiveProbeAndFailoverFix_Sonnet5.md and reports/incident-20260718-
-// console-go-400-failover_Sonnet5.md §2.4). These tests pin that contract
-// down the same way server_probe_test.go pins the passive contract.
+// Background recovery probing — the goal is that real client traffic never
+// waits on, and is never diverted for longer than a heartbeat by, another
+// endpoint's recovery check (see docs/ActiveProbeAndFailoverFix_Sonnet5.md
+// and reports/incident-20260718-console-go-400-failover_Sonnet5.md §2.4).
+// These tests pin that contract down; server_probe_test.go holds the shared
+// mock upstream and half-open setup helper they build on.
 package server
 
 import (
@@ -32,9 +32,7 @@ func driveHalfOpenViaFailover(t *testing.T, ts *httptest.Server, u *probeUpstrea
 // route where that one endpoint is half-open and currently parked (would
 // hang if a real request reached it). The real request must come back fast
 // with "no candidates" rather than hang waiting on — or being served
-// through — the half-open endpoint. active is the config default, so no
-// probe_mode override is set here on purpose (this is what a default install
-// does).
+// through — the half-open endpoint.
 func TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic(t *testing.T) {
 	t.Parallel()
 	u := newProbeUpstream(t)
@@ -48,7 +46,7 @@ models:
     endpoints:
       - {protocol: openai, provider: p1, models: [model-one]}
 `, u.srv.URL))
-	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired (passive contract, unrelated to probe_mode)
+	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired
 
 	u.mode.Store("block") // if real traffic reached p1, this would hang until released/timed out
 
@@ -66,7 +64,7 @@ models:
 	case <-u.entered:
 		// good: the real request's arrival triggered a background probe.
 	case <-time.After(1 * time.Second):
-		t.Error("no probe request reached the half-open endpoint — active mode should have launched one")
+		t.Error("no probe request reached the half-open endpoint — a background probe should have launched")
 	}
 }
 
@@ -126,9 +124,9 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond) // Retry-After: 1 → half-open now
 	u1.status.Store(200)                // p1 would succeed if actually tried
 
-	// This request must still land on p2 — p1 is half-open, active mode
-	// never lets real traffic touch it directly, no matter how fast p1
-	// would itself have answered.
+	// This request must still land on p2 — p1 is half-open, and real
+	// traffic never touches a half-open endpoint directly, no matter how
+	// fast p1 would itself have answered.
 	resp, _ = chat(t, ts, simpleReq, nil)
 	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
 		t.Fatalf("endpoint=%s, want p2 (p1 must stay excluded until its background probe reports success)", got)
@@ -146,8 +144,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	}
 
 	// Now p1 must be back in rotation and win by priority (p1: priority 1 <
-	// p2: priority 2) exactly as passive recovery would have — the only
-	// difference is which request got there first.
+	// p2: priority 2).
 	deadline = time.Now().Add(2 * time.Second)
 	for {
 		resp, _ = chat(t, ts, simpleReq, nil)
@@ -161,11 +158,9 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	}
 }
 
-// TestActiveProbe_FailedProbeReleasesSlot mirrors server_probe_test.go's
-// passive-mode probe-slot-release tests, for the async path: a probe that
-// draws an ErrClient-classified response must still resolve via
-// ReportNeutral, or the endpoint would stay "probing" forever and never be
-// probed again.
+// TestActiveProbe_FailedProbeReleasesSlot: a background probe that draws an
+// ErrClient-classified response must still resolve via ReportNeutral, or
+// the endpoint would stay "probing" forever and never be probed again.
 func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 	t.Parallel()
 	u1 := newProbeUpstream(t)

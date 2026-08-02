@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
 // Shared YAML config fixtures for internal/server's integration tests.
 // Consolidated here (docs/test_review_action_plan_sonnet-5.md Batch 3, T2-1)
@@ -63,24 +63,6 @@ models:
       - {protocol: openai, provider: p3, models: [m3]}
       - {protocol: openai, provider: p4, models: [m4]}
 `, extra, u1, u2, u3, u4)
-}
-
-// probe_mode: passive — this file is specifically about the passive
-// single-request-is-the-probe contract (every outcome must release the probe
-// slot); probe_mode: active's equivalent invariants (an async probe always
-// resolves, never leaves an endpoint locked) are covered separately in
-// server_active_probe_test.go.
-func singleEndpointYAML(u string) string {
-	return fmt.Sprintf(`
-listen: 127.0.0.1:0
-probe_mode: passive
-providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-models:
-  vm:
-    endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
-`, u)
 }
 
 // capabilityYAML builds a two-endpoint virtual model where p1 declares only

@@ -1,4 +1,4 @@
-// Ver 2026-07-30 12:00, by Sonnet 5
+// Ver 2026-08-02, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -37,12 +37,13 @@ const (
 	// §6.5. Endpoints backed by a longer-lived cache (e.g. DeepSeek's disk
 	// cache, hours to days) should override it per-endpoint.
 	DefaultStickyTTL = 10 * time.Minute
-	// DefaultProbeTimeout bounds one active-probe HTTP call (see ProbeMode).
-	// Deliberately far under DefaultHeaderTimeout: the whole point of an
-	// active probe is a fast, cheap liveness check that never makes real
-	// traffic wait on it — if a provider can't answer a one-line prompt
-	// within this window, it isn't going to look "recovered" by waiting
-	// longer, so there's no reason to borrow the same budget a real request gets.
+	// DefaultProbeTimeout bounds one background recovery-probe HTTP call
+	// (see probe_timeout on Config). Deliberately far under
+	// DefaultHeaderTimeout: the whole point of a probe is a fast, cheap
+	// liveness check that never makes real traffic wait on it — if a
+	// provider can't answer a one-line prompt within this window, it isn't
+	// going to look "recovered" by waiting longer, so there's no reason to
+	// borrow the same budget a real request gets.
 	DefaultProbeTimeout = 15 * time.Second
 	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
 	// solely so audit.KeyTag's trailing 8-character window can never be
@@ -50,13 +51,6 @@ const (
 	// value written, in the clear, into every report and filename its tag
 	// ends up in.
 	minAPIKeyLen = 16
-)
-
-// ProbeMode values (Config.ProbeMode). Unexported validity list lives next to
-// validate() below.
-const (
-	ProbeModeActive  = "active"
-	ProbeModePassive = "passive"
 )
 
 // Provider is a flat, protocol-agnostic account definition: one entry per
@@ -67,21 +61,20 @@ const (
 // whichever protocol faces this account has, since they're properties of the
 // account, not of a single protocol.
 //
-// Proxy is a tri-state switch over this provider's upstream connections:
-// true = always proxied via http_proxy/https_proxy (the foreign-provider
-// case, opted in explicitly — the recommended way to turn proxying on);
-// false = always direct, whatever Config.Proxy or the global proxy URLs say
-// (the domestic-provider case: MiniMax/DeepSeek are reachable directly and
-// a proxy would only slow them down or break them); absent = follow
-// Config.Proxy's global default. There is no environment fallback anywhere
-// — proxies are explicit config. true with no matching global proxy URL
-// configured is a validation error (a contradiction the config can state
-// on its own). Note yaml.v3 is YAML 1.2: write true/false, not on/off.
+// Proxy opts this provider's upstream connections into http_proxy/
+// https_proxy: true = proxied (the foreign-provider case — Anthropic/OpenAI/
+// OpenRouter from behind the GFW); false/absent = direct (the default, and
+// the domestic-provider case: MiniMax/DeepSeek/etc. are reachable directly
+// and a proxy would only slow them down or break them). There is no global
+// default to inherit and no environment fallback — proxies are explicit,
+// per-provider config. true with no matching proxy URL configured is a
+// validation error (a contradiction the config can state on its own). Note
+// yaml.v3 is YAML 1.2: write true/false, not on/off.
 type Provider struct {
 	Name    string            `yaml:"name"`
 	BaseURL map[string]string `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
-	Proxy   *bool             `yaml:"proxy"`
+	Proxy   bool              `yaml:"proxy"`
 }
 
 // EndpointGroup is one try-order entry under a virtual model: a provider, a
@@ -213,12 +206,6 @@ type Timeouts struct {
 // here.
 type Config struct {
 	Listen string `yaml:"listen"`
-	// RemovedAPIKey exists only to catch configs still using the removed
-	// singular `api_key` field with a migration message instead of the
-	// generic strict-decoding error. api_keys is the one auth surface now:
-	// the untagged catch-all added nothing api_keys can't do, at the cost of
-	// a second code path in authenticate and a second thing to document.
-	RemovedAPIKey string `yaml:"api_key"`
 	// APIKeys is the list of credentials vmr itself accepts (empty = auth
 	// disabled). Each entry gets tagged in the audit trail via audit.KeyTag
 	// (the key's own tail, not a separately configured name) so `vmr report`
@@ -227,16 +214,12 @@ type Config struct {
 	// against a key short enough that its whole value becomes the tag.
 	APIKeys     []string `yaml:"api_keys"`
 	MaxAttempts int      `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
-	// ProbeMode selects how a half-open endpoint (past its cooldown, but not
-	// yet confirmed recovered) gets re-verified: "active" (default) fires a
-	// small dedicated probe request in the background and never lets real
-	// traffic touch the endpoint until that probe succeeds; "passive" lets
-	// the next real request BE the probe, so its own size/duration
-	// determines how long the single-flight probe slot (and, under
-	// concurrent load, every other request's access to this endpoint) stays
-	// locked.
-	ProbeMode    string   `yaml:"probe_mode"`
-	ProbeTimeout Duration `yaml:"probe_timeout"` // active mode only: per-probe upper bound; default DefaultProbeTimeout
+	// ProbeTimeout bounds one background recovery probe of a half-open
+	// endpoint (past its cooldown, but not yet confirmed recovered): a
+	// small dedicated request fires in the background and real traffic
+	// never touches the endpoint until that probe succeeds. Per-probe upper
+	// bound; default DefaultProbeTimeout.
+	ProbeTimeout Duration `yaml:"probe_timeout"`
 	// MaxRequestBodyMB bounds the inbound client request body vmr will read
 	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
 	// audit logging (the audit trail records every request in full,
@@ -246,26 +229,16 @@ type Config struct {
 	// HTTPProxy/HTTPSProxy only declare the proxy server's URL, selected by
 	// the provider base_url's scheme — they do NOT by themselves turn
 	// proxying on for anyone. Whether a provider actually uses that URL is
-	// decided by Proxy (below) and Provider.Proxy. These are the ONLY way
-	// vmr ever learns of a proxy: proxy environment variables are
-	// deliberately ignored — an implicit knob that silently changes where
-	// traffic flows is exactly the kind of surprise a router shouldn't
-	// have. To feed a value from the environment, reference it explicitly
-	// (https_proxy: ${HTTPS_PROXY}); ${VAR} expansion applies like
-	// everywhere else in the file.
+	// decided entirely by that provider's own Provider.Proxy (default false:
+	// direct — there is no global default to inherit; opt providers in one
+	// at a time). These are the ONLY way vmr ever learns of a proxy: proxy
+	// environment variables are deliberately ignored — an implicit knob that
+	// silently changes where traffic flows is exactly the kind of surprise a
+	// router shouldn't have. To feed a value from the environment, reference
+	// it explicitly (https_proxy: ${HTTPS_PROXY}); ${VAR} expansion applies
+	// like everywhere else in the file.
 	HTTPProxy  string `yaml:"http_proxy"`
 	HTTPSProxy string `yaml:"https_proxy"`
-	// Proxy is the global default for whether a provider without its own
-	// Provider.Proxy setting uses http_proxy/https_proxy above. Default
-	// false: setting http_proxy/https_proxy only declares where the proxy
-	// lives, it opts nothing in on its own. Flip this to true to make
-	// "proxied" the default for every provider, then carve out exceptions
-	// with a provider's own proxy: false. The recommended shape is the
-	// opposite of that, though: leave this false and opt individual
-	// providers in with their own proxy: true — explicit per-provider
-	// intent beats a global switch silently deciding for providers added
-	// later. Provider.Proxy (true or false) always overrides this default.
-	Proxy bool `yaml:"proxy"`
 	// LogDir is where audit JSONL files land; ImageCacheDir holds the
 	// image-downscale result cache. Explicit values are used exactly as
 	// given (a leading "~/" expands to the home directory; ${VAR} expansion
@@ -352,9 +325,6 @@ func (c *Config) applyDefaults() {
 	if c.MaxAttempts < 0 {
 		c.MaxAttempts = 0
 	}
-	if c.ProbeMode == "" {
-		c.ProbeMode = ProbeModeActive
-	}
 	if c.ProbeTimeout <= 0 {
 		c.ProbeTimeout = Duration(DefaultProbeTimeout)
 	}
@@ -414,12 +384,6 @@ func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
 	}
-	if c.RemovedAPIKey != "" {
-		return fmt.Errorf("api_key has been removed: move the credential into the api_keys list instead (each entry must be >= %d characters — its tail becomes the caller tag in vmr report)", minAPIKeyLen)
-	}
-	if c.ProbeMode != ProbeModeActive && c.ProbeMode != ProbeModePassive {
-		return fmt.Errorf("probe_mode %q: must be %q or %q", c.ProbeMode, ProbeModeActive, ProbeModePassive)
-	}
 	// core.StickyBackstopTTL is the internal/sticky Registry's own memory-
 	// eviction window — an entry idle longer than that is dropped from the
 	// map regardless of what any endpoint's own StickyTTL says, so a
@@ -453,12 +417,6 @@ func (c *Config) validate() error {
 			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", proxy.name, proxy.val)
 		}
 	}
-	// proxy: true globally with nothing to follow is the same self-stated
-	// contradiction as a provider's own proxy: true below — reject at load
-	// rather than have every provider quietly resolve to direct.
-	if c.Proxy && c.HTTPProxy == "" && c.HTTPSProxy == "" {
-		return fmt.Errorf("proxy: true but neither http_proxy nor https_proxy is configured")
-	}
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("no providers defined")
 	}
@@ -488,9 +446,9 @@ func (c *Config) validate() error {
 			// proxy: true with nothing to follow is a contradiction the
 			// config states entirely on its own (no environment involved),
 			// so it is rejected here rather than warned about at startup.
-			if p.Proxy != nil && *p.Proxy {
+			if p.Proxy {
 				if mode, _ := c.ProxySpecFor(p, protocol); mode != ProxyURL {
-					return fmt.Errorf("provider %q: proxy: true but no global proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", p.Name, u.Scheme)
+					return fmt.Errorf("provider %q: proxy: true but no matching proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", p.Name, u.Scheme)
 				}
 			}
 		}
@@ -562,22 +520,17 @@ const (
 
 // ProxySpecFor resolves which proxy applies to p's connections under
 // protocol (p may declare a different-scheme base_url per protocol, so the
-// scheme check needs to know which one): p's own Proxy switch (true/false)
-// wins outright; absent, it follows the global Config.Proxy default (also
-// false by default — http_proxy/https_proxy alone only declare a proxy URL,
-// they don't opt anyone in). Only when the resolved switch is on does the
-// base_url's scheme pick http_proxy or https_proxy; no configured URL for
-// that scheme still means direct. There is no environment fallback —
-// proxies are explicit config only (reference ${HTTPS_PROXY} in the yaml to
-// opt into an env value). proxyURL is only non-empty for ProxyURL. The
-// decision is static per provider+protocol — the router builds one shared
-// http.Client per distinct resolution, not a per-request proxy callback.
+// scheme check needs to know which one): p's own Proxy switch decides
+// everything — false (the default) means direct, no global fallback to
+// inherit. Only when it's true does the base_url's scheme pick http_proxy
+// or https_proxy; no configured URL for that scheme still means direct.
+// There is no environment fallback — proxies are explicit config only
+// (reference ${HTTPS_PROXY} in the yaml to opt into an env value). proxyURL
+// is only non-empty for ProxyURL. The decision is static per
+// provider+protocol — the router builds one shared http.Client per distinct
+// resolution, not a per-request proxy callback.
 func (c *Config) ProxySpecFor(p Provider, protocol string) (mode, proxyURL string) {
-	useProxy := c.Proxy
-	if p.Proxy != nil {
-		useProxy = *p.Proxy
-	}
-	if !useProxy {
+	if !p.Proxy {
 		return ProxyDirect, ""
 	}
 	cfgProxy := c.HTTPSProxy

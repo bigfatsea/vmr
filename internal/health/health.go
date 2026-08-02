@@ -1,8 +1,11 @@
-// Ver 2026-07-08 21:20, by Fable 5
+// Ver 2026-08-02, by Sonnet 5
 
-// Package health implements the passive health state machine:
-// failure-driven cooldown with exponential backoff and half-open recovery
-// where a single real request acts as the probe (no paid active probing).
+// Package health implements the failure-driven health state machine:
+// cooldown with exponential backoff and single-flight half-open recovery
+// (Acquire/ReportSuccess/ReportFailure/ReportNeutral). It knows nothing
+// about *how* a half-open endpoint gets re-verified — that policy (a
+// decoupled background probe, see internal/router/probe.go) lives entirely
+// in internal/router.
 package health
 
 import (
@@ -147,9 +150,8 @@ type Status struct {
 	LastError     string    `json:"last_error,omitempty"`
 	Available     bool      `json:"available"`
 	// Probing is true while a single-flight probe holds this endpoint's
-	// slot — the next real request in passive mode, or a background probe_
-	// mode: active probe (see internal/router/probe.go) — is currently
-	// deciding whether the endpoint has recovered. Purely observational:
+	// slot — a background probe (see internal/router/probe.go) is
+	// currently deciding whether the endpoint has recovered. Purely observational:
 	// nothing reads this field to make a routing decision, it exists so
 	// `vmr status` and /admin/status can show *why* a half-open endpoint
 	// (Available==true, Fails>0) isn't being tried right this moment.

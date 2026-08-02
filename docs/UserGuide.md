@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 01:30, by Sonnet 5 -->
+<!-- Ver 2026-08-02 02:30, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -15,20 +15,15 @@ listen: 127.0.0.1:8800
 # api_keys:                    # optional: protect vmr itself (Bearer or x-api-key accepted); each
 #   - ${VMR_KEY_ALICE}          # entry is tagged in `vmr report` output by its own tail (see
 #   - ${VMR_KEY_OPENCLAW}       # "Multiple callers, one instance" below). The old singular api_key
-#                               # was removed — configs still using it are rejected with a migration hint
+#                               # was removed — configs still using it are rejected as an unknown field
 # max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
-# probe_mode: active            # active (default) | passive — how a cooled-down endpoint gets re-verified before real traffic returns to it, see Failover & health below
-# probe_timeout: 15s            # active mode only: upper bound on one background recovery probe
+# probe_timeout: 15s            # upper bound on one background recovery probe, see Failover & health below
 # max_request_body_mb: 8       # inbound request body size cap (stability only; the audit trail always records requests in full, whatever size vmr accepted)
 # max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited)
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy
 #                                      # (env vars are ignored; write ${HTTPS_PROXY} to reference one explicitly).
 #                                      # Declaring this URL does NOT turn proxying on by itself — see `proxy` below
 # http_proxy: http://127.0.0.1:7890    # same for http base_urls (e.g. a LAN llama.cpp server)
-# proxy: false                  # global default for providers with no proxy switch of their own (default false).
-#                                # Recommended: leave this off and opt individual providers in with their own
-#                                # proxy: true (see below) — explicit per-provider intent beats a global switch
-#                                # silently deciding for providers added later
 # image_downscale: 512         # long-side px cap for inline request images (default: off; a model's own setting overrides this, see below)
 # image_cache_ttl_days: 7      # eviction age for cached downscale results (default: 7 days)
 # audit_retention_days: 30     # delete audit files older than this (default: keep forever)
@@ -41,14 +36,12 @@ providers:
   - name: openrouter
     base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
-    proxy: true              # always go through https_proxy/http_proxy above, whatever the
-                             # global proxy default says — the recommended way to opt a
-                             # foreign provider in
+    proxy: true              # go through https_proxy/http_proxy above — the recommended
+                             # way to opt a foreign provider in (default: false, direct)
   - name: minimax
     base_url: {openai: https://api.minimaxi.com/v1}
     api_key: ${MINIMAX_API_KEY}
-    # proxy: false           # not needed here — the recommended baseline (global proxy
-                             # left off) is already direct-by-default for this provider
+    # proxy: false           # not needed here — false is already the default
 
 models:
   coding:                      # openai protocol only → served via /v1/chat/completions
@@ -61,7 +54,7 @@ models:
 
 All fields and validation rules: Part 1 §10 of the design doc. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one. Parsing is strict: an unknown or misspelled key (`max_concurency: 8`) is a load error, never a silently ignored no-op you believe is in effect.
 
-**Upstream proxy — explicit config only, default off**: `http_proxy`/`https_proxy` above only declare *where* the proxy lives — they don't turn it on for anyone by themselves. Whether a provider actually uses it is decided by a three-way resolution: a provider's own `proxy: true`/`false` always wins; absent that, it follows the global `proxy` switch (also `false` by default); if that resolves to "on", the base_url's scheme picks `https_proxy` or `http_proxy`. **Recommended shape**: leave the global `proxy` off and opt individual providers in with their own `proxy: true` — explicit per-provider intent, so a provider added later doesn't silently inherit a stale global default. (Flip the global `proxy` to `true` only if you want "proxied" to be the default and carve out exceptions with a provider's own `proxy: false` instead.) Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` (global or per-provider) with no matching proxy URL configured is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
+**Upstream proxy — explicit config only, default off**: `http_proxy`/`https_proxy` above only declare *where* the proxy lives — they don't turn it on for anyone by themselves. Whether a provider actually uses it is decided entirely by that provider's own `proxy: true`/`false` (default `false`, direct — there's no global default to inherit; opt providers in one at a time). When it's `true`, the base_url's scheme picks `https_proxy` or `http_proxy`. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching proxy URL configured is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
 **base_url must include the version**: vmr pre-computes each provider's complete upstream URL at initialization by appending the protocol's bare path (`/chat/completions` for OpenAI, `/messages` for Anthropic) directly to `base_url` — no normalization, no overlap detection. `base_url` must therefore already carry the provider's own full API version, whatever that provider calls it: `https://api.example.com/v1`, `https://api.minimaxi.com/anthropic/v1`, `https://ark.example.com/api/coding/v3`. This matters because not every provider versions its OpenAI/Anthropic-compatible surface as `v1` — Volcengine's coding-plan OpenAI endpoint is `v3`, for instance — so vmr never assumes a version on your behalf; get it wrong and the 404 shows up immediately against the exact base_url you wrote. The URL is computed once at config load and stored on the endpoint; the adapter uses it directly, never constructing or normalizing a URL per request.
 
@@ -98,14 +91,10 @@ On upstream failure vmr walks the endpoint list in order until one succeeds or a
 - 400-class **client** errors — a genuinely bad request — return immediately, no failover, no cooldown: every endpoint would reject the same request the same way, so there's nothing switching providers would fix;
 - **content-policy blocks** fail over to the next provider but do **not** penalize the blocked endpoint — it rejected one request; it isn't down.
 
-**Recovering a cooled-down endpoint** (`probe_mode`, default `active`):
-
-- `active` (default): once an endpoint's cooldown expires, vmr fires one small dedicated probe request in the background (bounded by `probe_timeout`, default 15s) instead of letting the next real request find out the hard way. Real traffic never touches — and never waits behind — an endpoint that hasn't been confirmed recovered yet; it's simply routed to the next candidate until the probe reports back, however long that takes. The probe asks the model to echo back a one-time token, so a relay/gateway answering with a cached or canned "success" doesn't count as recovered.
-- `passive`: the classic behavior — the next real request past the cooldown *is* the probe (single-flight, so a thundering herd can't pile onto a just-recovering endpoint). Its own size and duration decide how long that recovery check takes; under concurrent load, every other request targeting the same endpoint is diverted to the next candidate for as long as it runs. Switch to this if you'd rather not spend the extra probe request, or you never run vmr under heavy concurrent load in the first place.
+**Recovering a cooled-down endpoint**: once an endpoint's cooldown expires, vmr fires one small dedicated probe request in the background (bounded by `probe_timeout`, default 15s) instead of letting the next real request find out the hard way. Real traffic never touches — and never waits behind — an endpoint that hasn't been confirmed recovered yet; it's simply routed to the next candidate until the probe reports back, however long that takes. The probe asks the model to echo back a one-time token, so a relay/gateway answering with a cached or canned "success" doesn't count as recovered.
 
 ```yaml
-probe_mode: active      # active (default) | passive
-probe_timeout: 15s      # active mode only: upper bound on one background probe
+probe_timeout: 15s      # upper bound on one background recovery probe
 ```
 
 All-candidates-failed returns the last upstream error verbatim. Streams only fail over before the first byte is written.
@@ -275,9 +264,9 @@ models:
 | `POST /v1/chat/completions` | OpenAI-protocol ingress (streaming + non-streaming) |
 | `POST /v1/messages` | Anthropic-protocol ingress (streaming + non-streaming) |
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
-| `GET /admin/status` | endpoint health + concurrency metrics, including whether a recovery probe (passive or active) currently has an endpoint's single-flight slot (loopback only) |
+| `GET /admin/status` | endpoint health + concurrency metrics, including whether a background recovery probe currently has an endpoint's single-flight slot (loopback only) |
 | `vmr start -c config.yaml [-audit=false]` | run the router in the foreground (Ctrl-C to stop); `-audit=false` turns off the JSONL audit log (on by default). `./vmr.sh start` is the background-supervised equivalent and is the one command it shadows — run this one directly for foreground/dev use |
-| `vmr check -c config.yaml` | validate config, run the consistency scan (missing api_key, a proxy that silently falls back to direct, a duplicate endpoint, …), and print the routing table with key status and per-provider effective proxy — flagged values get an inline ⚠️ plus a trailing `=== Failed ===` summary. With a trailing `log`\|`cache` argument, print just that resolved directory instead (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
+| `vmr check -c config.yaml` | validate config, run the consistency scan (missing api_key, a duplicate endpoint, …), and print the routing table with key status and per-provider effective proxy — flagged values get an inline ⚠️ plus a trailing `=== Failed ===` summary. With a trailing `log`\|`cache` argument, print just that resolved directory instead (`log_dir`/`image_cache_dir` after defaults) — what `vmr.sh` queries internally |
 | `vmr status -c config.yaml` | render a running instance's identity (pid / listen / uptime / absolute config path) plus health and concurrency. `-addr host:port` queries whatever instance holds that port without loading a config at all — for when several instances run on one machine, or you don't have that instance's config; `-brief` prints one tab-separated summary line (what `./vmr.sh ps` builds its table from) |
 | `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] <glob>` | audit logs (plain or `.zst`) → usage statistics + session/tool analysis + per-request features (`vmr-requests.jsonl`) + detail files (`-details=false` to skip); adds the §2 cost-estimate section once a pricing sidecar is loaded — `-pricing` names one explicitly, or a `./pricing.yaml` in the current directory is auto-loaded when `-pricing` is omitted. Output language defaults to English; `-lang` or a `report.yaml`'s `language:` (see "Output language" above) switches to Chinese |
 | `vmr story [-journey <id> \| -render-all \| -compare <id1,id2>] [-lang en\|zh] [-report-config report.yaml] <glob>` | reconstruct one agent task's full execution history into a readable Markdown narrative (see "Agent task narratives" below); no args lists candidate tasks with their ids, `-render-all` renders every one in a single batched pass, `-compare id1,id2` diffs two already-built tasks' behavior profiles (rule-derived facts plus, with `-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`, an optional LLM interpretation section). `-lang`/`report.yaml` control output language exactly as for `vmr report` |
