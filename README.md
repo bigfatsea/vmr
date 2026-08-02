@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 14:00, by Sonnet 5 -->
+<!-- Ver 2026-08-02 20:22, by Gemini 3.6 Flash -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
 
 # vmr — Virtual Model Router
@@ -45,7 +45,7 @@ This is real output, not a mockup — from a tiny synthetic session checked into
 
 ❌ **error**: content
 
-响应 body（137B）：
+response body (137B):
 {
   "error": {
     "code": "content_flagged",
@@ -57,17 +57,17 @@ This is real output, not a mockup — from a tiny synthetic session checked into
 ### Attempt 2/2 · openai:coder-backup:coder-large-mini · ✅ · HTTP 200 · 2.5s
 ```
 
-**The aggregate view**, `vmr-report.md` (report output is Chinese-only today — 摘要=summary, 成功率=success rate, 计费输入=billed fresh input tokens, 缓存效率=cache-hit efficiency, 错误率=error rate):
+**The aggregate view**, `vmr-report.md`:
 
 ```
-## §0 摘要
+## §0 Summary
 
-| 请求 | 成功率 | 计费输入(fresh)⭐ | 缓存效率⭐ | p95 耗时 |
+| Requests | Success Rate | Billed Input (fresh)⭐ | Cache Efficiency⭐ | p95 Duration |
 |---|---|---|---|---|
-| 5（fallback 1 / trunc 0） | 100.0% | 730 | 54.0% | 3.4s (n=5 ⚠️low-n) |
+| 5 (fallback 1 / trunc 0) | 100.0% | 730 | 54.0% | 3.4s (n=5 ⚠️low-n) |
 
-**亮点 (auto):**
-- ⚠️ **端点 openai:coder-primary:coder-large 错误率 20.0/100**（最差），主因 content ×1
+**Highlights (auto):**
+- ⚠️ **Endpoint openai:coder-primary:coder-large error rate 20.0/100** (worst), top cause content ×1
 ```
 
 ## Quick start
