@@ -66,8 +66,8 @@ listen: 127.0.0.1:8800
 #                                 # real requests never wait on or get diverted by another endpoint's recovery check
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited) — worst case
-#                                 # per in-flight request is ~104MB (8MB request + 32MB response-normalization
-#                                 # buffer + 64MB audit response copy); on a shared instance set this explicitly
+#                                 # per in-flight request is ~32MB (8MB request + 8MB response-normalization
+#                                 # buffer + 16MB audit response copy); on a shared instance set this explicitly
 #                                 # rather than leaving it unlimited (see UserGuide.md's "Per-request memory budget")
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy (env vars are
 #                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly). Declaring this URL

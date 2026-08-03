@@ -249,7 +249,7 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 **双传输模式**（按响应逐个决定）：
 
 * **passthrough（SSE 缺省）**：逐 SSE 事件实时转发——真流式，除 model 改写外字节一致。首个承载有效载荷的事件（非空 `content`/`text`/`reasoning_content`/`thinking` 值、`tool_calls`、`partial_json`）一旦证明响应**不是** MiniMax 思考形态，立即定型为透传；此前仅暂扣 role marker/ping 等零载荷小事件。
-* **buffered**：整体缓冲，EOF 时单遍 regex 归一化。用于：非 SSE 响应（单 JSON，客户端本来就等完整体）；首个载荷事件含 `<think>` 或 content 以 `Thinking Process:` 开头的 SSE（思考期间客户端本就无正文可看，缓冲无体验损失）；未及判定即 EOF 的小流。**`<think>` 触发的缓冲在 closer 到达后恢复流式**（剥掉 think 块、已缓冲部分一次吐出、其余实时转发）——客户端只等了思考阶段；`Thinking Process:` 形态的结束标记在响应末尾才可识别，无法恢复，只能全缓冲。缓冲上限 32MB，超限放弃归一化降级为原样透传（=直连行为）。
+* **buffered**：整体缓冲，EOF 时单遍 regex 归一化。用于：非 SSE 响应（单 JSON，客户端本来就等完整体）；首个载荷事件含 `<think>` 或 content 以 `Thinking Process:` 开头的 SSE（思考期间客户端本就无正文可看，缓冲无体验损失）；未及判定即 EOF 的小流。**`<think>` 触发的缓冲在 closer 到达后恢复流式**（剥掉 think 块、已缓冲部分一次吐出、其余实时转发）——客户端只等了思考阶段；`Thinking Process:` 形态的结束标记在响应末尾才可识别，无法恢复，只能全缓冲。缓冲上限 8MB（按 1M-token 上下文窗口约 3-4MB 字节量 + 约 2 倍余量估算，与 `config.DefaultMaxRequestBodyMB` 同一套推导，而非拍脑袋的整数），超限放弃归一化降级为原样透传（=直连行为）。
 * **opaque**：上游响应带 `Content-Encoding`（Go Transport 未透明解压的压缩形态）→ 原样转发零变换——对压缩字节跑 regex 只会损坏它。
 
 **变换清单**（每项触发条件独立，实际生效的集合记入审计 `attempts[].norm`）：

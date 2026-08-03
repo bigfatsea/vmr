@@ -2,20 +2,22 @@
 
 # vmr — Claude Code project brief
 
-Local-run, single-binary, config-driven LLM router (Go). Clients connect to a stable
-Virtual Model name (`coding`, `agent`, `claude`); vmr hides provider, account, key,
-priority, and failover behind it. Two ingress protocols, **never translated into each
-other**: `POST /v1/chat/completions` (OpenAI) and `POST /v1/messages` (Anthropic) — each
+Local-run, single-binary LLM router with a built-in audit/analytics layer (Go) — two
+co-equal halves, not routing-plus-an-afterthought (the analytics half's production code
+is larger than the routing core's). The routing half hides provider, account, key,
+priority, and failover behind a stable Virtual Model name (`coding`, `agent`, `claude`).
+Three ingress protocols, **never translated into each other**: `POST /v1/chat/completions`
+(OpenAI), `POST /v1/messages` (Anthropic), `POST /v1/responses` (OpenAI Responses) — each
 routes only to same-protocol endpoints. Everything else is byte-faithful passthrough.
 
-Beyond routing, two offline tools consume the audit log: `vmr report` (aggregate
-statistics) and `vmr story` (single-task narrative reconstruction). Both are read-only
-consumers of the JSONL audit format — neither is on the request path, neither is
-imported by `internal/router`/`internal/server`.
+`vmr report` (aggregate statistics) and `vmr story` (single-task narrative
+reconstruction) are the analytics half: read-only, offline consumers of the routing
+half's JSONL audit log — neither is on the request path, neither is imported by
+`internal/router`/`internal/server`.
 
-**Full design doc (read before any non-trivial change) — two parts:**
-- `docs/VirtualModelRouter_Design_v4_Core.md` — routing core (this file's main subject).
-- `docs/VirtualModelRouter_Design_v4_Analytics.md` — `vmr report`/`vmr story` (`internal/{report,story,ctxgraph,chatmsg}`).
+**Full design doc (read before any non-trivial change) — two parts, one per half:**
+- `docs/VirtualModelRouter_Design_v4_Core.md` — the routing half.
+- `docs/VirtualModelRouter_Design_v4_Analytics.md` — the analytics half (`vmr report`/`vmr story`, `internal/{report,story,ctxgraph,chatmsg}`).
 
 Each has the "why" behind every decision, a decisions-and-tradeoffs table, and (Part 1)
 a "decided-not-to-fix" table — check both before "fixing" something that looks odd.
@@ -31,9 +33,10 @@ go test ./...              # add -race for anything touching health/audit/router
 ./vmr.sh {start|stop|restart|status|logs}   # dev-mode background supervisor, calls `vmr check` first
 ```
 
-No Makefile. `.github/workflows/ci.yml` runs `go vet`/`go build`/`go test -race` on push/PR
-(ubuntu only); `release.yml` cross-compiles 4 platforms and publishes a GitHub Release on a
-`v*` tag. `vmr.sh` never runs `go build` itself — build first.
+No Makefile. `.github/workflows/ci.yml` runs three jobs on push/PR: `go vet`/`go build`/
+`go test -race` on an ubuntu+macOS matrix, `gofmt -l`, and `shellcheck` over `vmr.sh`/
+`vmr-loadtest.sh`. `release.yml` cross-compiles 4 platforms and publishes a GitHub Release
+on a `v*` tag. `vmr.sh` never runs `go build` itself — build first.
 
 ## Module map (`internal/`)
 
@@ -42,7 +45,7 @@ No Makefile. `.github/workflows/ci.yml` runs `go vet`/`go build`/`go test -race`
 | `core` | `CanonicalRequest`, `ErrorClass`, `Endpoint` (with `Freeze()` — precomputes `HealthKey()`/`Name()` once in `router.BuildSnapshot`; unfrozen literals still work, just uncached) — shared types, no internal deps. Also `FilterClientHeaders` (header blocklist — `server` and `replay` both call this, neither owns it) |
 | `fmtutil` | `FmtBytes`/`FmtTokens`/`FmtSeconds` — display formatting shared by `router`'s live log and `report`'s rendering; split out of `core` so neither has to depend on routing-domain types just to print a number |
 | `config` | YAML load, `${ENV}` expand, strict validation (`KnownFields`), hot-reload watch |
-| `adapter`, `adapter/openai`, `adapter/anthropic` | `Adapter` interface (compile-time registered via blank import, lock-free `atomic.Pointer` registry) + shared error classification / model-name byte-splice rewrite |
+| `adapter`, `adapter/openai`, `adapter/anthropic`, `adapter/openairesponses` | `Adapter` interface (compile-time registered via blank import, lock-free `atomic.Pointer` registry) + shared error classification / model-name byte-splice rewrite. `openairesponses` is the `POST /v1/responses` passthrough adapter (OpenAI Responses and its OpenAI-compatible reimplementations) — same contract as `openai`'s, own request/response shape (`input`/`instructions` in, typed `output[]` items out) |
 | `health` | Passive state machine: cooldown, backoff, half-open single-flight |
 | `probe` | Minimal echo-nonce request used by both background recovery probes and `vmr diagnose` |
 | `strategy` | `Dimension` (ordering, e.g. priority) + `Condition` (elimination, e.g. image/tools capability, lock-free `atomic.Pointer` registry) — two separate interfaces, don't merge them |

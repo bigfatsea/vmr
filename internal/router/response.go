@@ -77,8 +77,13 @@ const (
 // keeps sending forever would otherwise grow the buffer without limit
 // (the stream-idle watchdog only catches silence, not endless data).
 // Past the cap the accumulated bytes are flushed raw and the response
-// degrades to opaque passthrough — direct-connection behavior.
-const bufferedCap = 32 << 20
+// degrades to opaque passthrough — direct-connection behavior. Sized off
+// today's ~1M-token context windows (~3-4MB of bytes) with about 2x
+// headroom, matching config.DefaultMaxRequestBodyMB's reasoning rather than
+// an arbitrary round number — legitimate responses have no reason to need
+// more than a request does, and a lower cap also means a genuinely runaway
+// upstream degrades to passthrough sooner instead of buffering longer.
+const bufferedCap = 8 << 20
 
 // modelFieldPattern matches every unescaped "model" field value in the
 // block — not just the top-level one; it has no JSON-depth tracking, so a

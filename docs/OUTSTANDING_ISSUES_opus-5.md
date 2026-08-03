@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-03, by Sonnet 5 -->
+<!-- Ver 2026-08-04, by Sonnet 5 -->
 
 # vmr — 遗留问题清单
 
@@ -19,8 +19,8 @@
 
 - 没有会导致数据丢失、凭证泄漏或服务不可用的缺陷。可以继续放心用于生产。
 - 原第一梯队 5 项已全部处理完毕（见 §3.1）；处理过程中 fuzz 测试额外发现并修复了一个真实 nil map panic（`RewriteModel`/`RewriteStream` 对 JSON `null` 输入）。
-- 当前第一梯队为空。待定 11 项，其他 26 项。
-- 2026-08 全面评审（`docs/VMR_全面评审报告_opus-5.md`，基线 `c2c6df7`）的 P0/P1/P2/P3 已逐项处理：3 项 P0 全部修复，7 项 P1 里 5 项修复、2 项评估后判断本轮成本过高暂不做，16 项 P2 里 14 项修复、2 项复核后判定是误判未改，P3-3（存量编号引用的分级处置）已全项目执行完毕。本次并入的 §2.9-2.11 三个新待定项，以及对 §2.5/§3.2/§3.3 既有条目的补充，都来自那 2 项未采纳的 P1（MiniMax response_fix 开关、探针纳入审计）和 3 项 P0 里未完全采纳的子建议（`/admin/status` 暴露 Check 结果、`recorderBodyCap` 可配置化）——已修复的部分不重复记录在本文档，详情见评审报告本身。
+- 当前第一梯队为空。待定 10 项，其他 27 项。
+- 2026-08 全面评审的 P0/P1/P2/P3 已逐项处理：3 项 P0 全部修复，7 项 P1 里 5 项修复、2 项评估后判断本轮成本过高暂不做，16 项 P2 里 14 项修复、2 项复核后判定是误判未改，P3-3（存量编号引用的分级处置）已全项目执行完毕——评审报告本身已按"结论落地即删除"的惯例移除，不重复记录已修复的部分在本文档。本次并入的 §2.9/2.10 两个待定项，以及对 §2.5/§3.2/§3.3 既有条目的补充，都来自评审里未采纳的 P1（MiniMax response_fix 开关、探针纳入审计）和 P0 里未完全采纳的子建议（`/admin/status` 暴露 Check 结果）；`recorderBodyCap` 可配置化那条子建议已在后续一轮里直接改成降默认值解决，见 §3.1。
 
 ---
 
@@ -176,21 +176,7 @@
 
 ---
 
-### 2.10 [M] 单请求最坏内存约 104MB，`recorderBodyCap` 目前不可配置
-
-**现状**：三个独立定义、各自局部合理的缓冲上限叠加：`config.MaxRequestBodyMB`（默认 8MB，入站请求体）、`router.bufferedCap`（32MB，响应归一化缓冲）、`server.recorderBodyCap`（64MB，审计响应副本，`bytes.Buffer` 增长期还有约 2x 峰值）。三者之和约 104MB/请求，而 `max_concurrency` 默认无限（0）。
-
-**已做的部分（2026-08 复核落地）**：`UserGuide.md`/`.zh.md` 已加"Per-request memory budget"/"单请求内存预算"说明三者乘积及"共享实例请设置 `max_concurrency`"的建议；`config.example.yaml` 的 `max_concurrency` 注释补了估算。
-
-**未做的部分**：`recorderBodyCap` 仍是硬编码常量，不能调低也不能配置。64MB 的审计响应副本对绝大多数请求都是过量的（真实响应很少超过几百 KB），但对"极少数确实需要完整大响应审计"的场景，调低默认值又会让审计记录变得不完整。
-
-**方案**：把 `recorderBodyCap` 降一档默认值（如 16MB），或做成 `config` 里的可选项（如 `audit_response_cap_mb`），默认值维持现状以免破坏现有部署对审计完整性的预期。
-
-**为什么待定**：降低默认值是一个真实的行为变更——可能让原本能完整入档的大响应审计记录被截断，需要单独评估影响面，不是文档层面能替用户一次性决定的事。
-
----
-
-### 2.11 [L] `/admin/status` 未暴露 `config.Check()` 的操作性告警
+### 2.10 [L] `/admin/status` 未暴露 `config.Check()` 的操作性告警
 
 **现状（2026-08 复核落地部分）**：`cmd_start.go` 现已在启动和每次热重载（fsnotify/SIGHUP/服务自动重启）时调用 `cfg.Check()`，把每条 `Issue` 打成日志里的一行 `WARN config check: ...`——此前该检查只在人工运行 `vmr check`/`vmr diagnose` 时才跑，热重载路径完全缺席（例如 `api_key` 拼错的 `${ENV_VAR}` 会被静默接受，把全部流量打成 401 且日志无任何提示）。
 
@@ -227,6 +213,7 @@
 - **compaction 链接漏链静默**：`linkCompactions` 未匹配到 successor/predecessor 时补一条 debug 日志，区分"确实无关联"与"探针漏了"。**已解决**。
 - **`RewriteModel`/`RewriteStream` 缺 fuzz 测试**：已加 `FuzzRewriteModel`/`FuzzRewriteStream`；fuzz 过程中发现并修复一个真实 bug——两者对 JSON 字面量 `null` 输入会 panic（`assignment to entry in nil map`），现改为返回 error。**已解决**。
 - **五处一行级瑕疵**（`purgeOne` ENOENT 噪音日志、`ms()` 1000ms 边界、`Redact` 浅拷贝、`WriteRequestsJSONL` 吞 Close 错误、`vmr.sh` `ExecStart` 缺引号）：全部修复，均有对应测试。**已解决**。
+- **单请求最坏内存约 104MB，三个缓冲上限各自合理但乘起来偏大**：`router.bufferedCap`（32MB→8MB）、`server.recorderBodyCap`（64MB→16MB）都已降档，`config.MaxRequestBodyMB`（8MB）不变。三者的新取值统一按"1M-token 上下文窗口约 3-4MB 字节量 + 约 2 倍余量"估算，而不是各自独立的整数；`recorderBodyCap` 比 `bufferedCap` 多留一倍余量，因为它的截断丢的是 `vmr report`/`vmr story` 的审计信息本身，代价比 `bufferedCap` 触发降级为原样透传（无损）更高。单请求最坏驻留降到约 32MB。`UserGuide.md`/`.zh.md`、`config.example.yaml`、`docs/VirtualModelRouter_Design_v4_Core.md`、`internal/i18n/report_detail.go`（`overflow_raw_passthrough` 的用户可见说明）同步更新。选择"降默认值"而非"加可配置项"：三个数字本来就该是同一套推导下的产物，加一个独立可配置项反而会鼓励用户脱离这套推导各自调整。**已解决**。
 
 ### 3.2 未解决，但明确不建议动
 

@@ -799,7 +799,7 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	t.Parallel()
 	rs := newRespStream(strings.NewReader(""), "agent", "", true, "openai", false)
 	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"
-	for i := 0; i < 40 && !rs.opaque; i++ {    // 40MB > bufferedCap (32MB)
+	for i := 0; i < 40 && !rs.opaque; i++ {    // loop caps at 40MB, well past bufferedCap (8MB); breaks early once opaque
 		rs.ingest(filler)
 	}
 	if !rs.opaque {
@@ -872,7 +872,7 @@ func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
 	rs := newRespStream(strings.NewReader(""), "agent", "", true, "openai", false)
 	rs.ingest([]byte("data: {\"model\":\"MiniMax-M3\"}\r\n\r\n")) // the only CRLF boundary in the whole stream
 	filler := bytes.Repeat([]byte("x"), 1<<20)                    // 1MB, contains no "\n\n" or "\r\n\r\n"
-	for i := 0; i < 40 && !rs.opaque; i++ {                       // 40MB > bufferedCap (32MB)
+	for i := 0; i < 40 && !rs.opaque; i++ {                       // loop caps at 40MB, well past bufferedCap (8MB); breaks early once opaque
 		rs.ingest(filler)
 	}
 	if !rs.opaque {

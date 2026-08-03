@@ -36,7 +36,7 @@ func TestRecorderCapsAuditBodyButNotClientBody(t *testing.T) {
 	under := httptest.NewRecorder()
 	rw := newRecorder(under, time.Now())
 
-	const chunk = 1 << 20 // 1MB chunks so the test doesn't allocate 64MB+ one shot count
+	const chunk = 1 << 20 // 1MB chunks so the test doesn't allocate 16MB+ in one shot
 	p := make([]byte, chunk)
 	for i := range p {
 		p[i] = 'x'
@@ -62,7 +62,7 @@ func TestRecorderCapsAuditBodyButNotClientBody(t *testing.T) {
 	if len(body) <= recorderBodyCap || len(body) >= total {
 		t.Errorf("audit body length = %d, want > %d (cap) and < %d (total written)", len(body), recorderBodyCap, total)
 	}
-	wantSuffix := "...(recording truncated at 67108864 bytes)"
+	wantSuffix := "...(recording truncated at 16777216 bytes)"
 	if !strings.HasSuffix(body, wantSuffix) {
 		t.Errorf("audit body missing truncation marker, tail = %q", body[len(body)-min(len(body), 80):])
 	}

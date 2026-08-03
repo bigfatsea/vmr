@@ -15,8 +15,13 @@ import (
 // at the read site), a success response is streamed straight to the client
 // with no size limit — so without this cap, an oversized or runaway upstream
 // stream (SSE or otherwise) would make recorder.buf grow unbounded in
-// lockstep, entirely outside the client's own memory budget.
-const recorderBodyCap = 64 << 20
+// lockstep, entirely outside the client's own memory budget. Kept above
+// router.bufferedCap (audit completeness matters more here — a truncated
+// audit copy loses vmr report/vmr story information, not just "smart"
+// normalization) but still just a fraction of the old 64MB: today's
+// ~1M-token context windows are ~3-4MB of bytes, and a legitimate response
+// has no structural reason to run many times larger than that.
+const recorderBodyCap = 16 << 20
 
 // recorder tees the client-side response into the audit record: status,
 // headers, the full body (capped, see recorderBodyCap), and the
