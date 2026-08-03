@@ -161,8 +161,7 @@ type Endpoint struct {
 	// unconstrained — every capability is assumed supported — so existing
 	// configs that don't set either field see no behavior change. Once
 	// non-empty it is exhaustive: a capability the endpoint actually
-	// supports but omits here is treated as unsupported (see design doc
-	// §1.1 for the tradeoff).
+	// supports but omits here is treated as unsupported.
 	Capabilities []string
 	// ExtraCapabilities is this endpoint's own declared
 	// config.EndpointGroup.Capabilities, *before* merging with the model's
@@ -213,7 +212,8 @@ func (e *Endpoint) Freeze() {
 
 // StickyBackstopTTL bounds internal/sticky's Registry memory growth,
 // independent of any per-endpoint validity TTL (Endpoint.StickyTTL above),
-// which can range from minutes to days — see design doc §6.5. Lives here
+// which can range from minutes to days — see the design doc's Sticky Model
+// section. Lives here
 // rather than in internal/sticky itself so internal/config can validate a
 // configured sticky_ttl against it without importing the sticky package
 // just to read one constant. internal/sticky.BackstopTTL is this same
@@ -281,7 +281,7 @@ func SortedKeys[V any](m map[string]V) []string {
 // across mainstream BPE tokenizers; CJK and other multi-byte UTF-8 content
 // is denser and deliberately overestimated at 2 bytes/token — higher than
 // any tokenizer this was checked against actually costs, on purpose (see
-// design doc §1.4).
+// the design doc's token-estimation calibration).
 const (
 	asciiBytesPerToken = 4
 	wideBytesPerToken  = 2

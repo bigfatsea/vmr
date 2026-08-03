@@ -13,8 +13,8 @@ import (
 // line within it, and which position in that request's chatmsg.Messages()
 // output. Content is never held in memory alongside the hash — only this
 // coordinate is, so indexing a multi-GB corpus costs bytes, not gigabytes
-// (design doc §2.4/F12: manifests + this index together are tens of MB for
-// the full 15-day/7112-record corpus).
+// (manifests + this index together are tens of MB for the full
+// 15-day/7112-record corpus).
 type BlobRef struct {
 	Path string
 	Line int
@@ -56,8 +56,8 @@ func (b *BlobIndex) Len() int { return len(b.refs) }
 // reading each source audit file at most once no matter how many requested
 // hashes point into it (grouped by Path, then by Line within that file) —
 // zstd files aren't seekable, so "read the file once, pull everything
-// needed out of this one pass" is the only efficient access pattern (design
-// doc §2.4). Hashes with no recorded ref, or whose ref points at a body
+// needed out of this one pass" is the only efficient access pattern.
+// Hashes with no recorded ref, or whose ref points at a body
 // that no longer parses as a chat object (should not happen for anything
 // BuildManifest itself produced a hash from, but Fetch doesn't assume that
 // invariant holds forever), are silently omitted from the result — callers

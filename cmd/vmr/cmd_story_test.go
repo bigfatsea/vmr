@@ -59,7 +59,7 @@ func storyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 }
 
 // TestCmdStory_ListAndRender exercises the `vmr story` CLI end to end — a
-// path design-doc review §6.3 flagged as untested: internal/story's own
+// path flagged as untested: internal/story's own
 // tests cover Build/RenderMarkdown directly, but nothing exercised
 // cmd_story.go's flag parsing, candidate listing (batched PreviewTitles),
 // or the -journey render-to-file path. Two records sharing the same opening
@@ -117,7 +117,7 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
 	// One journey now writes two files: journey-<id>.md (the narrative) and
-	// journey-<id>.json (design doc §6.5's behavior profile).
+	// journey-<id>.json (the behavior profile).
 	if len(entries) != 2 {
 		t.Fatalf("want 2 story files (.md + .json), got %d: %v", len(entries), entries)
 	}
@@ -268,10 +268,10 @@ func TestCmdStory_Compare(t *testing.T) {
 	if len(cmp.Rows) == 0 {
 		t.Error("comparison json has no metric rows")
 	}
-	// Evidence-provenance addition (plan review §6.2 item 2): Extras.Sources
-	// must carry the resolved input path(s) this comparison was built from,
-	// not just be left empty — otherwise the "证据溯源" text above would be
-	// asserting against a section that silently renders nothing.
+	// Evidence-provenance addition: Extras.Sources must carry the resolved
+	// input path(s) this comparison was built from, not just be left empty —
+	// otherwise the "证据溯源" text above would be asserting against a
+	// section that silently renders nothing.
 	if cmp.Extras == nil || len(cmp.Extras.Sources) != 1 || cmp.Extras.Sources[0] != path {
 		t.Errorf("comparison json Extras.Sources = %+v, want [%q]", extrasSources(cmp), path)
 	}
@@ -435,7 +435,7 @@ func TestCmdStory_UnknownJourney(t *testing.T) {
 	}
 }
 
-// TestCmdStory_PartialHeadFilenameSuffix covers design doc §11 D1's fix: a
+// TestCmdStory_PartialHeadFilenameSuffix covers the fix: a
 // head-truncated Journey's rendered filename must self-disclose that its ID
 // isn't stable, via a "-partial" suffix, without requiring the reader to
 // open the file and find the warning line first. The first record already

@@ -10,9 +10,9 @@
 // the expensive provider?", "it worked, but was that a failover?").
 //
 // Both extend the existing X-VMR-Endpoint/X-VMR-Attempts deviation from
-// byte-faithful passthrough rather than opening a new one (design doc §5.4:
-// vmr-generated response metadata is a sanctioned exception, provider
-// response headers are still copied verbatim). Neither carries anything the
+// byte-faithful passthrough rather than opening a new one (vmr-generated
+// response metadata is a sanctioned exception, provider response headers
+// are still copied verbatim). Neither carries anything the
 // client couldn't already infer from X-VMR-Endpoint — the same provider
 // names, no keys, no URLs.
 package router
@@ -31,7 +31,7 @@ type routeReason struct {
 	total       int  // endpoints configured for this virtual model
 	healthOK    int  // survived the health filter
 	afterCond   int  // survived hard capability conditions
-	ctxFallback bool // every declared context window looked too small; fell back (§6.4)
+	ctxFallback bool // every declared context window looked too small; fell back
 	sticky      bool // a sticky pointer reordered the list
 }
 

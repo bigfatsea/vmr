@@ -53,7 +53,7 @@ func TestCmdCheck_ValidConfig(t *testing.T) {
 
 // TestCmdCheck_InvalidConfig ensures an unloadable/invalid config surfaces as
 // an error rather than a panic or a silent success — this is what stops a
-// bad hot-reload or a bad `vmr start` from booting (design doc §10).
+// bad hot-reload or a bad `vmr start` from booting.
 func TestCmdCheck_InvalidConfig(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", "listen: not-a-valid-address\n")
 	if err := cmdCheck([]string{"-c", path}); err == nil {
@@ -234,8 +234,8 @@ func TestCmdCheck_MissingFile(t *testing.T) {
 
 // TestCmdCheck_DirValidConfig locks in that `vmr check log|cache` prints
 // just the config's resolved log_dir/image_cache_dir (post-defaults) — these
-// are config fields, not environment variables (design doc §7.1). Absorbed
-// from the former standalone `vmr dirs` subcommand.
+// are config fields, not environment variables. Absorbed from the former
+// standalone `vmr dirs` subcommand.
 func TestCmdCheck_DirValidConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML+"log_dir: "+dir+"/logs\n")
@@ -295,8 +295,8 @@ func captureStdout(t *testing.T, fn func()) string {
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
 // report.Build: glob expansion, output directory creation, and writing both
-// the JSON and Markdown artifacts (design doc §9.4), plus the session-
-// analysis outputs (vmr-requests.jsonl/.md + details/).
+// the JSON and Markdown artifacts, plus the session-analysis outputs
+// (vmr-requests.jsonl/.md + details/).
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")

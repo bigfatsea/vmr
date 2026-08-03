@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// §6.7 Compaction 还原 (design doc §6.4 / CCR N-4, Appendix C.5 T3.3): every
+// §6.7 Compaction 还原 (CCR N-4): every
 // standalone compaction LLM call this period, with which sessions it links,
 // how much it compressed, and a rule-based sample of what got swallowed.
 // "不修复，只揭示" — no LLM, no attempt to judge whether the loss mattered,

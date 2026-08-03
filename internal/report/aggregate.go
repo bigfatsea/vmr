@@ -4,9 +4,8 @@
 // JSONL and fills in the Report2 buckets declared in rows.go. Rendering
 // lives in render_doc.go + one section_*.go per numbered section; the
 // per-request detail files in detail.go/render.go; session and task
-// grouping in session.go; token extraction in chatmsg.ExtractUsage (via the
-// ExtractUsage re-export in chatmsg_compat.go); the optional pricing sidecar
-// in pricing.go.
+// grouping in session.go; token extraction in chatmsg.ExtractUsage; the
+// optional pricing sidecar in pricing.go.
 //
 // The report is organized around nine numbered sections (§0-§8) plus §6.5
 // sticky effectiveness, §6.6 endpoint value, and §6.7 compaction — see
@@ -47,7 +46,7 @@ type rec2 struct {
 	durMS, ttftMS            int64
 	streamMS                 int64
 	streamOK                 bool
-	usage                    Usage
+	usage                    chatmsg.Usage
 	usageOK                  bool
 	msgs                     int
 	bytesIn, bytesOut        int64
@@ -940,15 +939,15 @@ func splitEndpointProviderModel(endpoint string) (provider, model string) {
 	return parts[1], parts[2]
 }
 
-// buildCompactions derives §6.4/CCR N-4's compaction rows from the
-// analysis's standalone compaction calls (design doc Appendix C.5 T3.3).
+// buildCompactions derives §6.7/CCR N-4's compaction rows from the
+// analysis's standalone compaction calls.
 // "Before/after" tokens are the compaction call's OWN input/output — how
 // much history it was asked to compress vs how big the resulting summary
 // is — not either neighboring session's own token counts, which stay
 // whatever they legitimately were (see TestContextGrowthDoesNotCrossContractBreak).
 // Entity loss reuses chatmsg.ExtractEntities, the same rough file-path/URL
 // scan internal/story's own CompactionInfo uses (sunk to chatmsg so both
-// packages share one implementation, design doc Appendix E.2).
+// packages share one implementation).
 func buildCompactions(sess *SessionAnalysis) []CompactionRow {
 	out := make([]CompactionRow, 0, len(sess.Compactions))
 	for _, c := range sess.Compactions {

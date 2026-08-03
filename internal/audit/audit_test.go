@@ -48,6 +48,44 @@ func TestRedactCopiesNonCredentialValueSlices(t *testing.T) {
 	}
 }
 
+// TestExtraRedactHeadersMasked covers config's extra_redact_headers →
+// audit.SetExtraRedactHeaders → Redact/IsCredentialHeader path: a client's
+// own custom auth header, unknown to the built-in credentialHeaders list,
+// gets masked once configured and stops being masked once cleared (a
+// hot-reload dropping the setting must not leave stale state behind).
+func TestExtraRedactHeadersMasked(t *testing.T) {
+	t.Cleanup(func() { SetExtraRedactHeaders(nil) })
+
+	h := http.Header{}
+	h.Set("X-Custom-Token", "supersecretvalue")
+	h.Set("Content-Type", "application/json")
+
+	if IsCredentialHeader("X-Custom-Token") {
+		t.Fatal("must not be masked before SetExtraRedactHeaders configures it")
+	}
+	out := Redact(h)
+	if got := out.Get("X-Custom-Token"); got != "supersecretvalue" {
+		t.Errorf("before configuring: X-Custom-Token = %q, want unmasked", got)
+	}
+
+	SetExtraRedactHeaders([]string{"X-Custom-Token"})
+	if !IsCredentialHeader("x-custom-token") {
+		t.Error("IsCredentialHeader must match case-insensitively")
+	}
+	out = Redact(h)
+	if got := out.Get("X-Custom-Token"); got != "***alue" {
+		t.Errorf("X-Custom-Token = %q, want masked", got)
+	}
+	if got := out.Get("Content-Type"); got != "application/json" {
+		t.Errorf("content-type must not be masked: %q", got)
+	}
+
+	SetExtraRedactHeaders(nil)
+	if IsCredentialHeader("X-Custom-Token") {
+		t.Error("must stop being masked once cleared (e.g. a hot reload dropping the setting)")
+	}
+}
+
 func TestKeyTag(t *testing.T) {
 	cases := []struct {
 		name, key, want string
@@ -118,9 +156,8 @@ func TestDailyRotation(t *testing.T) {
 	l.hkWG.Wait() // rotating into day2 triggers a housekeeping sweep of day1's now-closed file
 
 	// day1 is no longer "today" as of the day2 write: the rotation sweep
-	// compresses it to .zst (Layer 2 of the audit log compression design —
-	// the audit-compression analysis, folded into design doc §9.5 — runs unconditionally,
-	// independent of retention).
+	// compresses it to .zst (Layer 2 of the audit log compression design;
+	// runs unconditionally, independent of retention).
 	if _, err := os.Stat(filepath.Join(dir, "vmr-audit-2026-07-07.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("day1 plain file should have been compressed away, stat err=%v", err)
 	}

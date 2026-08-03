@@ -187,6 +187,17 @@ func (s *respStream) Applied() []string { return s.applied }
 // stream has been fully copied.
 func (s *respStream) RawPreStrip() []byte { return s.rawPreStrip }
 
+// Read does not satisfy the general io.Reader contract: it can return
+// (0, nil) — see the comment above the return statement below — which
+// io.Reader's own doc comment explicitly discourages ("Implementations of
+// Read are discouraged from returning a zero byte count with a nil error").
+// This type is meant for exactly one consumer, transport.go's copyFlush,
+// which already treats a zero-byte/nil-error read as "nothing to flush yet,
+// call again" rather than a suspicious/terminal condition. It happens to
+// stay safe even for a generic io.Copy-style caller too, since the (0,nil)
+// only ever follows a real blocking read on s.src that already consumed
+// some upstream bytes — but that's incidental to this type's contract, not
+// a promise: don't rely on it, route new consumers through copyFlush.
 func (s *respStream) Read(p []byte) (int, error) {
 	if len(s.out) > 0 {
 		n := copy(p, s.out)

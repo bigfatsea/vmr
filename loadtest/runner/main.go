@@ -291,7 +291,7 @@ type auditRecord struct {
 	TTFTMS   int64  `json:"ttft_ms"`
 	Attempts []struct {
 		Endpoint   string `json:"endpoint"`
-		ErrorClass string `json:"error_class"` // "" = this attempt succeeded (see design doc §9.2 note 4)
+		ErrorClass string `json:"error_class"` // "" = this attempt succeeded
 	} `json:"attempts"`
 }
 

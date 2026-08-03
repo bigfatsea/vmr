@@ -105,7 +105,7 @@ func TestPercentilesAndStream(t *testing.T) {
 	if p50 != 30 || p95 != 50 {
 		t.Fatalf("percentiles want p50=30 p95=50, got p50=%d p95=%d", p50, p95)
 	}
-	// stream_ms true percentile != two percentiles subtracted (the F1 invariant)
+	// stream_ms true percentile != two percentiles subtracted (P95(dur)-P95(ttft) need not equal P95(stream))
 	durs := []int64{100, 200, 300, 400, 500}
 	ttfts := []int64{10, 20, 30, 40, 50}
 	var stream []int64
@@ -903,9 +903,9 @@ func toolShapeTieRecords() []map[string]any {
 // TestBuildFindingsWorstToolTieIsDeterministic covers the "工具 schema 浪费"
 // tie-break in buildFindings (metrics.go's worstTool loop), the first of the
 // three tie-break sites TestBuildFindingsIsDeterministic above left
-// unexercised (design-doc review §5.1: the fix's tie-break logic is
-// identical in shape across all four findings, but only 定时任务冗余 had a
-// regression test). toolShapeTieRecords ties SchemaWasteBytes exactly
+// unexercised (the fix's tie-break logic is identical in shape across all
+// four findings, but only 定时任务冗余 had a regression test).
+// toolShapeTieRecords ties SchemaWasteBytes exactly
 // between two shapes; only their Shape string (ToolsSig) differs, so a
 // deterministic pick must always prefer the alphabetically-smaller one —
 // computed here via the package's own toolsSig, not hardcoded, since the
@@ -1075,11 +1075,11 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 	}
 }
 
-// contextGrowthContractFixture reproduces design doc §2.5's ×179.5 dirty-
-// value case (Appendix C.5 T3.2): a session that grows normally for a few
-// turns, then hits an F6-style Contract (anchor survives, everything else
-// collapses), then keeps growing on the other side. Before T3.1's grouping
-// fix, this whole thing was ONE report session (anchor never changed), so
+// contextGrowthContractFixture reproduces the ContextGrowth dirty-value case:
+// a session that grows normally for a few turns, then hits a Contract-style
+// edit (anchor survives, everything else collapses), then keeps growing on
+// the other side. Before the session-grouping fix, this whole thing was ONE
+// report session (anchor never changed), so
 // ContextGrowth (last/first tokens_in) compared a post-reset token count
 // against a pre-reset one — numerically whatever it happened to be, but
 // meaningless either way, since the two sides never shared a context.
@@ -1110,7 +1110,7 @@ func contextGrowthContractFixture() []map[string]any {
 		msgs = append(msgs, map[string]any{"role": "assistant", "content": "step"})
 	}
 	// Contract: history collapses to [sys v2, u1] — same opening instruction
-	// survives verbatim (F6's pattern) — small post-compaction token count.
+	// survives verbatim (the Contract pattern) — small post-compaction token count.
 	recs = append(recs, mkTurn(t0.Add(10*time.Minute),
 		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1}, 150))
 	// Post-contract growth continues independently, to its own honest 6x peak.
@@ -1119,15 +1119,14 @@ func contextGrowthContractFixture() []map[string]any {
 	return recs
 }
 
-// TestContextGrowthDoesNotCrossContractBreak covers design doc Appendix C.5
-// T3.2: since group() (T3.1) now splits a session at every Contract/Fork
-// edit, ContextGrowth's last/first ratio can no longer straddle a hidden
-// history reset — each of the two resulting sessions gets its own honest,
-// independently-computed growth figure instead of one meaningless number
-// spanning both. No separate "segment by lineage, take the longest segment"
-// algorithm turned out to be needed (design doc Appendix E's T3.2 plan): a
-// SessionInfo IS already exactly one Lineage's worth of records post-T3.1,
-// so there is nothing left to segment.
+// TestContextGrowthDoesNotCrossContractBreak covers the case where group()
+// now splits a session at every Contract/Fork edit, so ContextGrowth's
+// last/first ratio can no longer straddle a hidden history reset — each of
+// the two resulting sessions gets its own honest, independently-computed
+// growth figure instead of one meaningless number spanning both. No separate
+// "segment by lineage, take the longest segment" algorithm turned out to be
+// needed: a SessionInfo IS already exactly one Lineage's worth of records
+// post-grouping-fix, so there is nothing left to segment.
 func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, contextGrowthContractFixture())
@@ -1136,7 +1135,7 @@ func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(rep.Sessions) != 2 {
-		t.Fatalf("sessions = %d, want 2 (T3.1: report must split at the Contract break)", len(rep.Sessions))
+		t.Fatalf("sessions = %d, want 2 (report must split at the Contract break)", len(rep.Sessions))
 	}
 	byID := map[string]*SessionRow{}
 	for i := range rep.Sessions {
@@ -1157,8 +1156,8 @@ func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	}
 }
 
-// TestBuildCompactionsEntitySplitAndTokens covers design doc Appendix C.5
-// T3.3's new §6.7 section: a standalone compaction call whose input
+// TestBuildCompactionsEntitySplitAndTokens covers the §6.7 Compaction
+// Reconstruction section: a standalone compaction call whose input
 // mentions two file paths and whose summary output keeps only one of them —
 // the surviving one must land in SurvivedEntities, the dropped one in
 // SwallowedEntities, and tokens_in/tokens_out must come from the compaction

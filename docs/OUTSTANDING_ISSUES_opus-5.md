@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-26 23:40, by Sonnet 5 -->
+<!-- Ver 2026-08-03, by Sonnet 5 -->
 
 # vmr — 遗留问题清单
 
@@ -19,7 +19,8 @@
 
 - 没有会导致数据丢失、凭证泄漏或服务不可用的缺陷。可以继续放心用于生产。
 - 原第一梯队 5 项已全部处理完毕（见 §3.1）；处理过程中 fuzz 测试额外发现并修复了一个真实 nil map panic（`RewriteModel`/`RewriteStream` 对 JSON `null` 输入）。
-- 当前第一梯队为空。待定 8 项，其他 25 项。
+- 当前第一梯队为空。待定 11 项，其他 26 项。
+- 2026-08 全面评审（`docs/VMR_全面评审报告_opus-5.md`，基线 `c2c6df7`）的 P0/P1/P2/P3 已逐项处理：3 项 P0 全部修复，7 项 P1 里 5 项修复、2 项评估后判断本轮成本过高暂不做，16 项 P2 里 14 项修复、2 项复核后判定是误判未改，P3-3（存量编号引用的分级处置）已全项目执行完毕。本次并入的 §2.9-2.11 三个新待定项，以及对 §2.5/§3.2/§3.3 既有条目的补充，都来自那 2 项未采纳的 P1（MiniMax response_fix 开关、探针纳入审计）和 3 项 P0 里未完全采纳的子建议（`/admin/status` 暴露 Check 结果、`recorderBodyCap` 可配置化）——已修复的部分不重复记录在本文档，详情见评审报告本身。
 
 ---
 
@@ -110,6 +111,8 @@
 
 **为什么待定（有硬约束）**：同名字段（如 `CacheEfficiency`）在不同 Row 类型上的 `omitempty` 标签**并不一致**。统一成共享嵌入结构体会在零值场景悄悄改变 `vmr-report.json` 的输出。真要做，必须接受一次 Format 号升级（10 → 11），并用真实生产日志逐字节比对验证。这是本清单里**代码量收益最大**的一项，但也是唯一一项会改变对外数据契约的。
 
+**2026-08 复核补充**：`internal/archtest` 已经给 `aggregate.go` 定过 1000 行的行数预算（防它重新长成从前 1053 行的 `aggregate_render.go`），实测已用到 999 行——下一次改动大概率直接撞线。撞线时的直觉反应是把预算数字改大，但 `archtest` 自己的注释已经预先反对这么做（"split it, don't just raise this number"）。这正是本条方案该登场的时候：先把 `Row`/`HourRow`/`EndpointRow`/`ClientRow`/`WorkloadRow`/`SessionRow` 六个结构体收敛成泛型 `Bucket[K]`，`aggregate.go` 的行数会随之大幅下降，新预算届时自然水到渠成——而不是反过来，先在文件已经臃肿的状态下讨论该给多大的预算。这让"何时做"多了一个具体触发信号：`aggregate.go` 撞线的那次改动，就是做这条重构的时候，而不是继续往后拖。
+
 ---
 
 ### 2.6 [L] ingress 侧请求体仍被独立扫描约 7 遍
@@ -159,6 +162,46 @@
 
 ---
 
+### 2.9 [L] 探针请求完全绕过审计，`vmr report` 看不到探针成本
+
+**现状**：`internal/router/probe.go` 的 `runProbe` 直接发请求、读响应、报健康，全程不经过 `audit.Record`。`audit` 包自己的定位是"每请求一行"，但探针请求——本质上也是一次真实的上游调用，会消耗 token、产生延迟——完全不在这一行里。半开端点频繁抖动的场景下，这部分成本持续不可见。
+
+**问题**：不只是"补一行日志"这么简单，2026-08 复核实测发现两处比想象中更深的耦合：
+1. `Router` 结构体目前完全不持有 `audit.Logger`——审计日志由 `server` 持有，逐请求把 `*audit.Record` 传进 `Serve`；`runProbe` 是 `router` 包内部的后台 goroutine，要写审计得先给 `Router` 加一个可选的 `Audit *audit.Logger` 字段并在 `cmd_start.go` 里接好。
+2. `audit.Record.Client`（`Exchange` 类型）不是指针、其 `Request Message` 也没有 `omitempty`——探针没有真实客户端请求，写一条探针记录要么塞一个假的空 `Client.Request`，要么放宽 schema。`internal/report` 在编译期耦合 `audit.Record` 的形状，改 schema 必须同步改 `report` 及其测试，还必须先决定 `vmr report` 的可靠性/延迟/成交量统计要不要把探针记录排除在外——不排除的话，一个端点的"错误率"统计会被后台探针污染。项目里已有的同类先例 `ReplayOf`（标记一条记录来自 `vmr replay` 而非真实流量）目前在 `report` 侧**完全没有特殊处理**，照抄这个先例大概率不是探针记录真正需要的行为。
+
+**方案**：给 `Router` 加 `Audit *audit.Logger`（nil = 未接入，与 `server.Server.audit` 的"nil = disabled"惯例一致）；`audit.Record` 加一个类似 `ReplayOf` 的 provenance 字段（如 `Probe bool`）；`runProbe` 写一条不含完整 body 的精简记录；`report` 侧显式决定探针记录在哪些章节参与统计、哪些章节排除。
+
+**为什么待定**：这是一条贯穿 `router`→`audit`→`report` 三层的改动，且核心难点不是代码量，而是"探针记录在 report 里该怎么呈现"这个产品判断——这个判断没做之前，仓促定 schema 大概率做完一次还要再改一次。
+
+---
+
+### 2.10 [M] 单请求最坏内存约 104MB，`recorderBodyCap` 目前不可配置
+
+**现状**：三个独立定义、各自局部合理的缓冲上限叠加：`config.MaxRequestBodyMB`（默认 8MB，入站请求体）、`router.bufferedCap`（32MB，响应归一化缓冲）、`server.recorderBodyCap`（64MB，审计响应副本，`bytes.Buffer` 增长期还有约 2x 峰值）。三者之和约 104MB/请求，而 `max_concurrency` 默认无限（0）。
+
+**已做的部分（2026-08 复核落地）**：`UserGuide.md`/`.zh.md` 已加"Per-request memory budget"/"单请求内存预算"说明三者乘积及"共享实例请设置 `max_concurrency`"的建议；`config.example.yaml` 的 `max_concurrency` 注释补了估算。
+
+**未做的部分**：`recorderBodyCap` 仍是硬编码常量，不能调低也不能配置。64MB 的审计响应副本对绝大多数请求都是过量的（真实响应很少超过几百 KB），但对"极少数确实需要完整大响应审计"的场景，调低默认值又会让审计记录变得不完整。
+
+**方案**：把 `recorderBodyCap` 降一档默认值（如 16MB），或做成 `config` 里的可选项（如 `audit_response_cap_mb`），默认值维持现状以免破坏现有部署对审计完整性的预期。
+
+**为什么待定**：降低默认值是一个真实的行为变更——可能让原本能完整入档的大响应审计记录被截断，需要单独评估影响面，不是文档层面能替用户一次性决定的事。
+
+---
+
+### 2.11 [L] `/admin/status` 未暴露 `config.Check()` 的操作性告警
+
+**现状（2026-08 复核落地部分）**：`cmd_start.go` 现已在启动和每次热重载（fsnotify/SIGHUP/服务自动重启）时调用 `cfg.Check()`，把每条 `Issue` 打成日志里的一行 `WARN config check: ...`——此前该检查只在人工运行 `vmr check`/`vmr diagnose` 时才跑，热重载路径完全缺席（例如 `api_key` 拼错的 `${ENV_VAR}` 会被静默接受，把全部流量打成 401 且日志无任何提示）。
+
+**未做的部分**：这些 `WARN` 目前只进日志文件，`/admin/status` 里看不到。`/admin/status` 已经有 `config_stale`（配置文件是否比运行中的新）这个信号，`Check()` 的结果是同一类"配置合法但操作性可疑"的信号，逻辑上应该并列。
+
+**方案**：`instanceBlock`（`admin.go`）里加一个 `config_check_issues` 字段，与 `config_stale` 并列渲染最近一次 `Check()` 的结果。
+
+**为什么待定**：日志里的 `WARN` 已经解决了"完全没有信号"这个最紧迫的问题；`/admin/status` 只是让这个信号在不翻日志的情况下也能看到，价值是锦上添花而非从无到有，牵连 `ReloadState`/`admin.go` 及其测试，留作后续一起做更划算。
+
+---
+
 ## 3. 其他（一句话）
 
 ### 3.1 已修复 / 已解决
@@ -197,7 +240,7 @@
 - `imgprep.ImageInfo` → `audit.ImageInfo` 的 20 行字段抄写 —— 换来 `imgprep` 不依赖 `audit`，是包边界的合理代价。
 - `copyFlush` 的 goroutine + channel + 每 chunk 一次堆分配 —— 唯一替代路径是在 `DialContext` 里包 `net.Conn` 做 `SetReadDeadline`，但 deadline 会覆盖整条连接生命周期（含 TLS 握手、响应头阶段），与现有 `TLSHandshakeTimeout`/`ResponseHeaderTimeout` 语义重叠，且只能靠真实 TCP 往返验证。
 - 把 `Dimension` / `Condition` / `WithinContext` 合并成统一的 `Filter` 接口 —— soft 语义目前只有一个成员，抽象一个只有一个实现的接口违反 YAGNI；触发条件是出现第二个 soft filter。
-- 端点级 `quirks: [...]` 声明式配置 —— 会引入新配置概念且用户须理解各厂内部行为才填得对；触发条件是出现第三个厂商 quirk，或发生真实误伤。
+- 端点级 `quirks: [...]` 声明式配置 —— 会引入新配置概念且用户须理解各厂内部行为才填得对；触发条件是出现第三个厂商 quirk，或发生真实误伤。**2026-08 复核细化了一版更窄的替代方案**：不是通用 `quirks` 系统，只给 `responsefix.go` 里已经存在的、真正会改字节的 MiniMax 修复（`<think>`/Thinking-Process 剥离）加一个 provider 级 on/off 开关，如 `response_fix: [minimax_think, minimax_thinking_process]`，默认全开保持兼容——这是全项目唯一一处"vmr 替用户做了一个用户无法否决的内容决定"，比通用 quirks 配置更聚焦、价值更明确。但实现成本比看起来高：`newRespStream`（`response.go`）目前完全不感知 provider/endpoint 身份，要做成可配置需要贯穿 `config`（新 schema + 校验）→`core.Endpoint`（新字段 + `Freeze()`考量）→`router`（`BuildSnapshot` 计算生效值、`newRespStream` 构造签名改动）三层，外加对应测试。判断：比通用 `quirks` 系统更值得做，但量级仍属于独立任务而非顺手为之，2026-08 这轮未实现。
 - 把 `report` 拆成独立二进制 —— 二进制 12MB → 7MB 不是真实收益，却要牺牲"单二进制"这一核心定位（`report` 实测占自有代码符号 55%，182KB/335KB）。
 - 引入 DuckDB/cgo 做聚合 —— 与"纯 Go、无 cgo、自包含"定位直接冲突。
 - 用 `text/template` 重写 Markdown 渲染 —— 条件列、对齐、`⭐`/`¹`/`⚠️low-n` 脚注在模板里更难读；已用 `mdTable` helper 收掉重复的表头/分隔符拼接，这是更有据的中间方案。
@@ -220,9 +263,10 @@
 - `loadtest/` 下 `runner` / `config.yaml` / `gentargets` 三处地址常量需人工同步，无自动化保障。
 - `loadtest/runner/main.go:116,138` 的 `defer mock.Process.Kill()` 用 SIGKILL，会在日志里留下"有 START 无 STOP"的假崩溃痕迹（第 180 行的正常退出路径已用 `os.Interrupt`）。
 - `loadtest/gentargets/main.go:234` 的 `f.Write(line)` 与 `defer all.Close()` 错误被忽略，磁盘满时 `targets.json` 可能静默截断。
-- 无 CI/CD 配置，`go vet` + `go test -race` 全靠手动跑（单人项目可接受）。
+- P3-3 分级处置里明确保留不动的 ~23 处引用（`docs/VirtualModelRouter_Design_v4_{Core,Analytics}.md §x.y` 形式，已带文件名）：CLAUDE.md 收紧后的原则是"只引用文档名字和章节名称，不用编号"，这些从严格意义上仍不完全合规，但报告原建议就是留到最后一档——号码旁边已经有文件名兜底，出问题时至少还能定位到文档，紧迫性明显低于本轮已清掉的裸编号和死引用。
+- CI（`.github/workflows/ci.yml`）覆盖 `go vet`/`go build`/`go test -race`；2026-08 复核加了 macOS 矩阵、`gofmt -l`、`shellcheck` 三个 job。`staticcheck` 评估后未采纳——本机无网络环境无法预先验证，且 25,574 行生产代码首次接入大概率冒出大量未经筛选的既有发现，没有时间预算逐条判断真假阳性，贸然接入可能让 CI 从下一次 push 就直接变红，风险大于收益。
 - 缺 `CHANGELOG.md` / `CONTRIBUTING.md`（≤3 人内部项目，靠 commit message 追踪）。
-- `vmr.sh`（442 行，dev/service 双模式）无脚本测试，关键路径靠人工验证。
+- `vmr.sh`（609 行，dev/service 双模式）+ `vmr-loadtest.sh`（76 行）无脚本测试，关键路径靠人工验证——2026-08 复核加的 `shellcheck` CI job（见上一条）只是静态检查，不是行为测试，plist/unit 渲染是否真的能被 launchd/systemd 接受这类问题它照样测不出来。
 
 ---
 

@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// The redesigned per-request drill-down (V2 §7): vmr-requests.jsonl (the data)
+// The redesigned per-request drill-down: vmr-requests.jsonl (the data)
 // + vmr-requests.md (a pure index) + one fully-detailed sibling per group
 // (vmr-requests-<tag>.md per real Chat User, vmr-requests-unresolved.md for
 // sessions with no client_key_tag, vmr-requests-cron-<tag>.md per scheduled

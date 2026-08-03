@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 )
 
@@ -421,18 +422,18 @@ func TestExtractFinish(t *testing.T) {
 	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n" +
 		"data: {\"choices\":[{\"finish_reason\":\"length\",\"delta\":{}}]}\n" +
 		"data: [DONE]\n"
-	if got := extractFinish(sse); got != "length" {
+	if got := chatmsg.ExtractFinish(sse); got != "length" {
 		t.Errorf("sse finish = %q", got)
 	}
 	anth := "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n"
-	if got := extractFinish(anth); got != "end_turn" {
+	if got := chatmsg.ExtractFinish(anth); got != "end_turn" {
 		t.Errorf("anthropic finish = %q", got)
 	}
 	jsonBody := map[string]any{"choices": []any{map[string]any{"finish_reason": "stop"}}}
-	if got := extractFinish(jsonBody); got != "stop" {
+	if got := chatmsg.ExtractFinish(jsonBody); got != "stop" {
 		t.Errorf("json finish = %q", got)
 	}
-	if got := extractFinish("no finish here"); got != "" {
+	if got := chatmsg.ExtractFinish("no finish here"); got != "" {
 		t.Errorf("empty finish = %q", got)
 	}
 }
@@ -444,11 +445,11 @@ func TestIsRealUserScaffolding(t *testing.T) {
 		"Attached image(s) from tool result:",
 		"The conversation history before this point was compacted into the following summary:\n<summary>x</summary>",
 	} {
-		if isRealUser(chatMessage{Role: "user", Text: text}, nil, -1) {
+		if isRealUser(chatmsg.Message{Role: "user", Text: text}, nil, -1) {
 			t.Errorf("scaffolding counted as real user: %q", text[:40])
 		}
 	}
-	if !isRealUser(chatMessage{Role: "user", Text: "帮我修个 bug"}, nil, -1) {
+	if !isRealUser(chatmsg.Message{Role: "user", Text: "帮我修个 bug"}, nil, -1) {
 		t.Error("real instruction not recognized")
 	}
 }
@@ -465,7 +466,7 @@ func TestRealUserTextStripsEnvelope(t *testing.T) {
 		"```json\n{\"chat_id\":\"user:ou_x\"}\n```\n\n" +
 		"Sender (untrusted metadata):\n```json\n{\"id\":\"ou_x\"}\n```\n\n" +
 		"OK，基于你为每个风格设计的提示词，调用 ai-script 批量生成 logo 设计图。"
-	text, ok := realUserText(chatMessage{Role: "user", Text: wrapped}, nil, -1)
+	text, ok := realUserText(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1)
 	if !ok {
 		t.Fatal("envelope-wrapped real instruction not recognized")
 	}

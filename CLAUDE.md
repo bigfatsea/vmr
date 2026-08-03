@@ -1,4 +1,4 @@
-<!-- Ver 2026-07-30 12:00, by Sonnet 5 -->
+<!-- Ver 2026-08-03, by Sonnet 5 -->
 
 # vmr — Claude Code project brief
 
@@ -31,7 +31,9 @@ go test ./...              # add -race for anything touching health/audit/router
 ./vmr.sh {start|stop|restart|status|logs}   # dev-mode background supervisor, calls `vmr check` first
 ```
 
-No Makefile, no CI config in-repo. `vmr.sh` never runs `go build` itself — build first.
+No Makefile. `.github/workflows/ci.yml` runs `go vet`/`go build`/`go test -race` on push/PR
+(ubuntu only); `release.yml` cross-compiles 4 platforms and publishes a GitHub Release on a
+`v*` tag. `vmr.sh` never runs `go build` itself — build first.
 
 ## Module map (`internal/`)
 
@@ -56,7 +58,8 @@ No Makefile, no CI config in-repo. `vmr.sh` never runs `go build` itself — bui
 | `chatmsg` | Shared message/SSE/usage parsing (`Messages`, `ReassembleSSE`/`FinalMessage`, `ExtractUsage`, `CheckToolPairing`, `ExtractEntities`) — the one package `ctxgraph`/`story`/`report` all depend on, so none of the three re-implements the same parsing |
 | `ctxgraph` | Content-addressed manifest/blob-index layer behind both `vmr report` and `vmr story`: `Manifest` (per-request message-hash vector), `Classify` (5-way edit classification: Append/ReplaceTail/Splice/Contract/Fork), `Lineage`/`Scan` (splits a SessKey bucket at every Contract/Fork), `StitchGraph`/`ChainFrom` (cross-lineage reconnection). Depends on `{audit, core, chatmsg}`; never depends on `report`/`story`/`router`/`server` (`archtest`-enforced) |
 | `story` | `vmr story`: Journey/Task/Step/Event narrative built from a `ctxgraph` lineage chain (`journey.go`), nine-indicator behavior profile (`metrics.go`), Journey-vs-Journey diff (`compare.go`, plus `ComparisonExtras`'s rule-derived endpoint/cache/system-prompt/final-context/duration/deliverable facts), Markdown rendering (`render_md.go`/`render_compare.go`). `llm.go` is `-compare`'s optional, always-degradable LLM interpretation layer (`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-dry-run`) — a plain `net/http` client against a manually-specified already-running VMR instance, no config.yaml provider resolution, no failover. `profile/` subpackage holds the one agent-specific interface (real-instruction/no-reply judgment) with an OpenClaw-aware and a generic fallback implementation. Depends on `{ctxgraph, chatmsg, core, config}`; never depends on `report`/`router`/`server` |
-| `report` | `vmr report`: aggregates audit JSONL into `vmr-report.{json,md}` + `vmr-requests.{jsonl,md}` + per-request `details/*.{md,json}`. Data shape in `rows.go` (= the vmr-report.json schema), aggregation pass in `aggregate.go`, session/task grouping in `session.go` (consumes `ctxgraph.Lineage`/`Classify` directly — no private hash/LCP implementation of its own), rendering split `render_doc.go` (running order + `mdTable`) + one `section_*.go` per report section — **a new section is a new file, not more lines in an existing one** (`archtest` budgets enforce it). Depends on `{audit, core, ctxgraph, chatmsg}` — an `internal/archtest` test enforces it never depends on `router`/`server`/`config` |
+| `report` | `vmr report`: aggregates audit JSONL into `vmr-report.{json,md}` + `vmr-requests.{jsonl,md}` + per-request `details/*.{md,json}`. Data shape in `rows.go` (= the vmr-report.json schema), aggregation pass in `aggregate.go`, session/task grouping in `session.go` (consumes `ctxgraph.Lineage`/`Classify` directly — no private hash/LCP implementation of its own), rendering split `render_doc.go` (running order + `mdTable`) + one `section_*.go` per report section — **a new section is a new file, not more lines in an existing one** (`archtest` budgets enforce it). `pricing.go` is the optional cost-estimate sidecar: reads the repo-root `pricing.yaml` (hand-maintained, tracked in git; absent = report degrades to token-class accounting with no $ figures) and embeds the exact price snapshot a report's $ numbers came from. Depends on `{audit, core, ctxgraph, chatmsg}` — an `internal/archtest` test enforces it never depends on `router`/`server`/`config` |
+| `i18n` | English/Chinese text for every `vmr report`/`vmr story` output string, organized by which produced file each source file's text feeds (`report_*.go` next to `internal/report/section_*.go`, `story_*.go` next to `internal/story/render_*.go`) rather than one catalog directory — wording changes stay next to the section they render. Zero dependencies, same layer as `core`/`fmtutil`. `Lang` zero value is `EN`. Consumed by `report`, `story`, and `cmd/vmr` |
 
 `cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand: `main.go` (dispatch + usage +
 the adapter blank-import registration point), `cmd_start.go`, `cmd_check.go` (also handles a
@@ -72,10 +75,13 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
 ## Invariants to not accidentally break
 
 - **Byte-faithful passthrough.** No canonical IR, no cross-protocol translation. Only
-  sanctioned deviations: model-name rewrite (virtual ↔ real) and a short list of
+  three sanctioned deviations: model-name rewrite (virtual ↔ real), a short list of
   evidence-based provider quirk repairs (see Part 1's "Response-side normalization"
   section) — each behind a strict content-based guard, fail-open to "unmodified" on
-  any doubt.
+  any doubt — and `imgprep`'s inline-image downscale, which is the largest of the
+  three (a full unmarshal/rewrite/re-marshal, not a byte splice) and only fires when
+  `image_downscale` is configured and an image actually needs shrinking; every other
+  request path returns the original bytes untouched.
 - **No provider SDKs.** Routing only needs URL/key/model-field changes.
 - **Compile-time plugin registration only** (blank import), never a runtime plugin system.
 - **Config: strict YAML** (`KnownFields`) — unknown keys are load errors, not warnings.
@@ -110,9 +116,18 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
 - Before treating something as a bug: check Part 1's "已识别、暂不落地的清理项" (decided-
   not-to-fix) table and Part 2's "已知限制、暂不处理的事项" table — some odd-looking
   behavior is a documented, deliberate non-fix.
-- **No section numbers in cross-references** — in code comments and between docs, name
-  the section ("the sticky-effectiveness section", "the decided-not-to-fix table") or
-  describe the fact in one short clause, never `§6.5`/`Appendix C.6`/`F9`. Section numbers
-  renumber every time a doc is edited; a name or a short description survives that, a
-  number silently goes stale and points at the wrong thing. This applies going forward —
-  existing numbered references already in the code aren't being swept in one pass.
+- **No section numbers in cross-references** — in code comments and between docs, cite the
+  document name and the section's name ("`docs/..._Core.md`'s Sticky Model section", "the
+  decided-not-to-fix table"), never a bare number (`§6.5`, `Appendix C.6`, `F9`). A vaguer,
+  name-based reference is *more* durable, not less: numbers renumber every time a doc is
+  edited and then silently point at the wrong thing, while a name or a short description
+  keeps resolving even after the doc is reorganized. Existing code was swept once for this
+  (2026-08); keep new comments to the same rule rather than reintroducing numbers.
+- **Docs are current state, not changelogs** — when a doc changes, replace the stale part
+  with the new fact; don't append a dated paragraph explaining what changed and why on top
+  of the old text. Layer-on-layer accretion preserves the story but defeats the point of a
+  concise reference doc, and git history already holds that story. If losing the old
+  wording would confuse a future reader, compress it into one short clause instead of
+  keeping it in full. This does not apply to documents whose whole purpose is the trail —
+  review reports, `docs/OUTSTANDING_ISSUES_*.md`, and code comments recording why a
+  superseded approach was wrong are expected to accumulate.

@@ -1,6 +1,6 @@
 // Ver 2026-07-26, by Sonnet 5
 
-// Optional pricing sidecar (V2 §4). A local hand-maintained YAML file mapping
+// Optional pricing sidecar. A local hand-maintained YAML file mapping
 // each provider+model to per-1M-token unit prices. When absent (the
 // default), no $ appears anywhere in the report - the report degrades
 // gracefully to token-class accounting, with a one-line "configure pricing to

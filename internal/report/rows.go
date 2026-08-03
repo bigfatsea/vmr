@@ -7,7 +7,7 @@
 // having to be read through the other.
 //
 // These types ARE the vmr-report.json schema: the JSON tags below are the
-// public contract, not an implementation detail (see design doc §9.4).
+// public contract, not an implementation detail.
 package report
 
 // Format is the aggregate report's JSON structure version. 10 continues the legacy
@@ -281,7 +281,7 @@ type WorkloadRow struct {
 	durs, streamMS []int64
 }
 
-// SessionRow is the per-session drill-down (V2 §5): no latency columns in
+// SessionRow is the per-session drill-down (§6 Sessions & Tasks): no latency columns in
 // Markdown, but the data stays in JSON (P6). context_growth = last/first turn.
 type SessionRow struct {
 	ID            string `json:"id"`
@@ -323,10 +323,10 @@ type SessionRow struct {
 	durs, ttfts []int64
 }
 
-// CompactionRow is one standalone compaction LLM call (design doc §6.4 / CCR
-// N-4, Appendix C.5 T3.3): a report-only, body-sniffed concept (ReqInfo.
-// Compaction) distinct from the F6-style structural session splits
-// SessionRow.ContinuedFrom already covers — this row is specifically about
+// CompactionRow is one standalone compaction LLM call (CCR N-4): a
+// report-only, body-sniffed concept (ReqInfo.Compaction) distinct from the
+// anchor-gluing-style structural session splits SessionRow.ContinuedFrom
+// already covers — this row is specifically about
 // an OBSERVABLE call that consumed tokens to produce a summary, not an
 // in-place history rebuild with no separate request. "Before/after" here is
 // the compaction call's OWN input/output (how much history it was asked to
@@ -343,12 +343,12 @@ type CompactionRow struct {
 	// Entities found in the compaction call's own input (the conversation
 	// being condensed) via chatmsg.ExtractEntities, split by whether they're
 	// still mentioned in its output (the summary) — a rule-based, "宁可粗糙也
-	// 不猜语义" proxy for information loss (design doc §6.4).
+	// 不猜语义" proxy for information loss.
 	SwallowedEntities []string `json:"swallowed_entities,omitempty"`
 	SurvivedEntities  []string `json:"survived_entities,omitempty"`
 }
 
-// ToolShapeRow is per declared-tool-set waste (V2 §6 Top-N): F-family.
+// ToolShapeRow is per declared-tool-set waste (§7 Efficiency & Waste's Top-N tool shapes): F-family.
 type ToolShapeRow struct {
 	Shape         string         `json:"shape"`
 	Requests      int            `json:"requests"`
@@ -396,7 +396,7 @@ const (
 )
 
 // RequestRow is one line of vmr-requests.jsonl: the per-request drill-down
-// backing the redesigned index (V2 §7). Every field is rule-extracted;
+// backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;
 // unavailable signals are omitted rather than fabricated.
 type RequestRow struct {
 	TS             string  `json:"ts"`
@@ -429,7 +429,7 @@ type RequestRow struct {
 }
 
 // RequestRows returns the per-request export rows (populated by Build).
-// StickyEffect quantifies what Sticky Model (design doc §6.5) is actually
+// StickyEffect quantifies what Sticky Model is actually
 // buying. Sticky exists to keep an upstream prompt cache warm by sending a
 // conversation back to the endpoint that last served it — but until now
 // nothing proved it worked, and prompt cache is the single largest cost

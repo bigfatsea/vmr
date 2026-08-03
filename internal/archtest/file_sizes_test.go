@@ -34,6 +34,17 @@ var fileLineLimits = map[string]int{
 	// this, split by concern (e.g. a separate file for provider/model
 	// validation) rather than raising the number.
 	"internal/config/config.go": 750,
+	// The three entries below are first-time budgets, not post-split ones
+	// like router.go/aggregate.go/render_doc.go above — an architecture
+	// review (2026-08-03) found these had grown past aggregate.go's own
+	// 1000-line budget (999 lines, effectively at capacity) without ever
+	// having a budget of their own to trip. ~15% headroom over each file's
+	// size at the time this budget was set: enough for a paragraph-sized
+	// addition, not enough to quietly regrow into another 1050-line
+	// aggregate_render.go before anyone notices.
+	"internal/report/detail.go":  1150,
+	"internal/report/session.go": 1100,
+	"internal/story/journey.go":  850,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

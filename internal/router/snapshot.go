@@ -27,7 +27,7 @@ type ModelRoute struct {
 	// ImageDownscaleMaxPx mirrors config.ModelConfig.ImageDownscaleMaxPx: nil
 	// = this model has no override and inherits the global image_downscale;
 	// non-nil (including a pointer to 0) = this model's explicit setting,
-	// which always wins over the global one (§7 image downscale).
+	// which always wins over the global one.
 	ImageDownscaleMaxPx *int
 
 	// Sticky mirrors config.ModelConfig.Sticky, resolved at BuildSnapshot
@@ -75,7 +75,7 @@ type Snapshot struct {
 
 	// clients maps "<protocol>/<provider>" to the http.Client serving that
 	// provider. Built in Install (travels with the snapshot to avoid races);
-	// providers with the same effective proxy resolution (§config.ProxySpecFor)
+	// providers with the same effective proxy resolution (see config.ProxySpecFor)
 	// share one client, so connection pooling stays per proxy group —
 	// typically one or two clients per snapshot. clientSet is the distinct
 	// set, kept for closing idle connections when the snapshot is replaced.

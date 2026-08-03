@@ -11,8 +11,8 @@ import (
 )
 
 // OpenClawAware ports internal/report/session.go's realUserText/NoReply
-// heuristics verbatim — patterns that corpus already validated (design doc
-// §4 F5 in particular: the compaction-summary marker must be checked at the
+// heuristics verbatim — patterns that corpus already validated (in
+// particular: the compaction-summary marker must be checked at the
 // message head, not anywhere in the text, or a tool_result that happens to
 // quote it gets misread as a real turn boundary). It is harmless on input
 // from any other agent: none of these patterns match generic chat text, so

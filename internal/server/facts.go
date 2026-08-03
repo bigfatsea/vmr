@@ -20,15 +20,13 @@ import (
 
 const (
 	// imageTokenEstimate is a flat per-detected-image estimate (no pixel
-	// decoding — see design doc §1.4's image section), calibrated to a
-	// 1920x1080 screenshot's cost on Claude's high-resolution tier (2691
-	// tokens) with a little headroom.
+	// decoding), calibrated to a 1920x1080 screenshot's cost on Claude's
+	// high-resolution tier (2691 tokens) with a little headroom.
 	imageTokenEstimate = 3000
 
 	// documentBytesPerToken converts a base64 document/file payload's raw
-	// (still-encoded) byte length into an estimated token count — see
-	// design doc §1.4's document section for the calibration (derived from
-	// Anthropic's published 1500-3000-tokens-per-page range).
+	// (still-encoded) byte length into an estimated token count (derived
+	// from Anthropic's published 1500-3000-tokens-per-page range).
 	documentBytesPerToken = 20
 )
 
@@ -75,8 +73,8 @@ func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.Reques
 }
 
 // documentMarkers are cheap, wide-net signals that the request carries a
-// document/file attachment (PDF, or an unrecognized binary format) — see
-// design doc §1.4. Presence-only: matching text inside a message (not an
+// document/file attachment (PDF, or an unrecognized binary format).
+// Presence-only: matching text inside a message (not an
 // attachment) is a false positive whose only cost is a harmless
 // over-estimate, the same tradeoff HasImageMarker already makes.
 var documentMarkers = [][]byte{

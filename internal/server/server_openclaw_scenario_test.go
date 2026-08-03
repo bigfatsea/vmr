@@ -295,7 +295,7 @@ models:
 // the audit log records the response that the CLIENT saw (with
 // normalized model field, think stripped, [DONE] appended) — not the
 // raw upstream bytes. This is the client-response half of the audit
-// contract (§9.2): the upstream half is captured separately in each
+// contract: the upstream half is captured separately in each
 // attempt's own record.
 func TestOpenClawScenario_AuditLogCapturesTransformedResponse(t *testing.T) {
 	up := newOpenclawScenarioUpstream(t)

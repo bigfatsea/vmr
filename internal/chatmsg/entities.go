@@ -1,11 +1,11 @@
 // Ver 2026-07-29 23:00, by Sonnet 5
 
 // ExtractEntities is a rough, rule-based scan for file paths and URLs —
-// design doc §6.4's "规则粗筛的实体覆盖率": this deliberately doesn't try to
+// design doc's "规则粗筛的实体覆盖率": this deliberately doesn't try to
 // understand what a swallowed message MEANT, only to point at concrete,
 // checkable tokens (a file path, a URL) so a human can judge for themselves
-// whether losing them mattered. Moved here from internal/story (design doc
-// Appendix C.5 T3.3/E.2) once internal/report also needed the same scan for
+// whether losing them mattered. Moved here from internal/story once
+// internal/report also needed the same scan for
 // its own compaction section — both packages already depend on chatmsg, so
 // this is the one shared point that doesn't violate either package's
 // archtest boundary.

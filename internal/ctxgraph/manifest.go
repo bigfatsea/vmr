@@ -65,7 +65,7 @@ type Manifest struct {
 	// internal/report/session.go uses for its own (independent) grouping.
 	// This is only the STARTING point for lineage grouping; Contract/Fork
 	// edits split a SessKey bucket into multiple lineages (see lineage.go)
-	// — anchor alone is known to over-merge (design doc F6).
+	// — anchor alone is known to over-merge.
 	SessKey string
 }
 
@@ -118,8 +118,8 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		// string first and produce a different digest than hashing the plain
 		// bytes directly. internal/report/session.go used to keep its own
 		// independent copy of this exact same hashing convention (so its
-		// SysChanged detection would agree with this package's); design doc
-		// Appendix C.5 T3.1 deleted that copy — session.go now reads
+		// SysChanged detection would agree with this package's); that duplicate
+		// copy was later deleted — session.go now reads
 		// SysHash straight from here instead of recomputing it.
 		m.SysHash = md5.Sum([]byte(sysText.String()))
 		m.HasSys = true

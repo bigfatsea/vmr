@@ -52,10 +52,10 @@ func TestClassify_ReplaceTail(t *testing.T) {
 	}
 }
 
-// TestClassify_Splice covers T2.1's split of the splice_or_tail bucket:
+// TestClassify_Splice covers Classify's split of the splice_or_tail bucket:
 // common prefix holds, new content follows, and prev's own last 3 messages
 // reappear verbatim at the end of cur — evidence the tail was spliced
-// around (F11's S2), not discarded.
+// around, not discarded.
 func TestClassify_Splice(t *testing.T) {
 	t.Parallel()
 	prev := mkHashes(20, "s")
@@ -79,7 +79,7 @@ func TestClassify_SpliceRequiresMinTailMatch(t *testing.T) {
 	}
 }
 
-// TestClassify_SpliceDoesNotSplitLineage locks in T2.1's core promise:
+// TestClassify_SpliceDoesNotSplitLineage locks in Splice's core promise:
 // Splice, exactly like ReplaceTail, must never split a lineage.
 func TestClassify_SpliceDoesNotSplitLineage(t *testing.T) {
 	t.Parallel()
@@ -90,7 +90,7 @@ func TestClassify_SpliceDoesNotSplitLineage(t *testing.T) {
 
 func TestClassify_Contract(t *testing.T) {
 	t.Parallel()
-	// Real corpus case (design doc F6/A.3): 79 messages -> 4 messages.
+	// Real corpus case: 79 messages -> 4 messages.
 	prev := mkHashes(79, "s")
 	cur := mkHashes(4, "s") // reuses same seed so keys[0] matches prev[0] (mirrors the real case: same user instruction survives)
 	e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))

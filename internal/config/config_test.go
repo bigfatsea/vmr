@@ -2,6 +2,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -184,7 +185,7 @@ func TestModelImageDownscaleOverride(t *testing.T) {
 // TestModelImageDownscaleExplicitZeroDiffersFromUnset is the whole point of
 // the pointer type: an explicit 0 must remain distinguishable from "not
 // set" all the way through parsing, so it can force-disable the feature for
-// this model even when the global default is on (§7).
+// this model even when the global default is on.
 func TestModelImageDownscaleExplicitZeroDiffersFromUnset(t *testing.T) {
 	yaml := strings.Replace(validYAML, "    endpoints:", "    image_downscale: 0\n    endpoints:", 1)
 	cfg, err := Parse([]byte(yaml))
@@ -237,7 +238,7 @@ func TestImageCacheTTLDaysConfig(t *testing.T) {
 // audit_retention_days's "0 = keep forever" convention on purpose: the image
 // cache is a pure performance optimization with no audit/compliance value,
 // so silently growing it forever is not a safer default than actively
-// pruning it (§10 decision table).
+// pruning it (the design doc's decision table).
 func TestImageCacheTTLDaysNonPositiveClampsToDefault(t *testing.T) {
 	for _, v := range []string{"0", "-5"} {
 		yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_cache_ttl_days: "+v, 1)
@@ -511,6 +512,27 @@ func TestAPIKeysTooShortRejected(t *testing.T) {
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "too short") {
 		t.Errorf("want a too-short api_keys error, got %v", err)
+	}
+}
+
+func TestExtraRedactHeadersParsed(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\nextra_redact_headers:\n  - X-Custom-Token\n  - X-Session-Secret", 1)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"X-Custom-Token", "X-Session-Secret"}; !reflect.DeepEqual(cfg.ExtraRedactHeaders, want) {
+		t.Errorf("ExtraRedactHeaders = %v, want %v", cfg.ExtraRedactHeaders, want)
+	}
+}
+
+func TestExtraRedactHeadersEmptyEntryRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
+		"listen: 127.0.0.1:9900\nextra_redact_headers:\n  - \"\"", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "extra_redact_headers[0]") {
+		t.Errorf("want an empty-header-name error, got %v", err)
 	}
 }
 

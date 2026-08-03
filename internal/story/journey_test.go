@@ -306,7 +306,7 @@ func TestIsPartialHead_TrueForMultiKeyRootEarlyInFirstFile(t *testing.T) {
 	at := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	// A root manifest with >2 non-system keys (3 Keys for 4 total messages),
 	// at line 1 of firstPath — a mid-conversation continuation whose true
-	// beginning likely sits outside the loaded range (design doc D1).
+	// beginning likely sits outside the loaded range.
 	sys := msg("system", "sys")
 	u1 := msg("user", "continue from previous")
 	a1 := map[string]any{"role": "assistant", "content": "working"}

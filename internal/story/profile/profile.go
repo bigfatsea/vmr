@@ -8,10 +8,9 @@
 //
 // Step 1 ships exactly one implementation (OpenClawAware) plus a
 // template-free fallback (Generic) — no Detect-based dispatch/registry yet.
-// Design doc §11 D5: that's a deliberate YAGNI call, not an oversight —
-// build the registry when a second real profile (Pi/Hermes) actually needs
-// one, driven by what real corpus differences turn out to matter, not by
-// guessing now.
+// That's a deliberate YAGNI call, not an oversight — build the registry when
+// a second real profile (Pi/Hermes) actually needs one, driven by what real
+// corpus differences turn out to matter, not by guessing now.
 package profile
 
 import "vmr/internal/chatmsg"

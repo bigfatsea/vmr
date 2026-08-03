@@ -129,7 +129,7 @@ func RegisterCondition(c Condition) {
 
 // Eligible reports whether ep passes every registered hard Condition for
 // this request. Context length is deliberately NOT one of these — it's
-// applied separately by WithinContext with its own fallback rule (§1.5),
+// applied separately by WithinContext with its own fallback rule,
 // because it rests on an estimate rather than a certainty the way
 // capability conditions do.
 func Eligible(ep *core.Endpoint, facts core.RequestFacts) bool {
@@ -165,8 +165,8 @@ func RejectedBy(ep *core.Endpoint, facts core.RequestFacts) []string {
 
 // WithinContext reports whether ep's declared context window can plausibly
 // fit this request's estimated size. Unset MaxContextTokens (0) is
-// unconstrained. This is intentionally not a Condition: §1.5 requires a
-// fallback (never let this estimate alone empty a non-empty candidate set)
+// unconstrained. This is intentionally not a Condition: a fallback (never
+// let this estimate alone empty a non-empty candidate set) is required
 // that only the caller — which already knows the pre-context-filter
 // candidate set — can apply correctly.
 func WithinContext(ep *core.Endpoint, facts core.RequestFacts) bool {

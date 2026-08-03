@@ -131,7 +131,7 @@ func dialHost(addr string) string {
 func fetchStatus(addr string) (*statusResponse, error) {
 	// Bare Transport (nil Proxy): this is a local diagnostic call to vmr's
 	// own admin endpoint — it must never route through a proxy, and vmr
-	// ignores proxy environment variables everywhere by design (§10).
+	// ignores proxy environment variables everywhere by design.
 	statusClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
 	resp, err := statusClient.Get("http://" + dialHost(addr) + "/admin/status")
 	if err != nil {

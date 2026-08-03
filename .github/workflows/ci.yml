@@ -7,7 +7,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # darwin is the primary dev platform (vmr.sh has launchd-specific
+        # branches CI never exercised before this was added) — ubuntu alone
+        # never ran those paths. macos-latest is a GitHub-hosted runner, not
+        # an extra dependency.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -18,3 +25,37 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test -race ./...
+
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # gofmt -l lists files that aren't in canonical gofmt form; a
+      # non-empty list means a merged change would have gone in
+      # unformatted, exactly what pre-commit formatting is supposed to
+      # catch before it lands, not after.
+      - name: gofmt -l
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "::error::gofmt -l found unformatted file(s) listed above — run 'gofmt -w .' locally"
+            exit 1
+          fi
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # shellcheck ships preinstalled on GitHub-hosted ubuntu-latest runners
+      # — no extra action/dependency needed for a wc -l 685 shell surface
+      # (vmr.sh + vmr-loadtest.sh) that had zero static-analysis coverage
+      # before this job existed.
+      - name: shellcheck
+        run: shellcheck vmr.sh vmr-loadtest.sh

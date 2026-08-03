@@ -1,12 +1,11 @@
 // Ver 2026-07-30 00:10, by Sonnet 5
 
-// T2.4 (design doc Appendix C.4 / §6.5): the behavior profile — nine
-// rule-derived, framework-comparable metrics computed over a built Journey.
-// Purely a function of data already sitting on Journey/Step/Event — no
-// re-fetching, no I/O, no LLM calls (design doc §11 C.7 invariant #1: the
-// profile layer is rule-derived, the LLM layer above it is optional and not
-// built yet). Two Journeys' Metrics diff directly; that diff is Step 4's 4d
-// module's entire deliverable (design doc Appendix H.4).
+// The behavior profile — nine rule-derived, framework-comparable metrics
+// computed over a built Journey. Purely a function of data already sitting
+// on Journey/Step/Event — no re-fetching, no I/O, no LLM calls (the profile
+// layer is rule-derived; the LLM layer above it is optional and not built
+// yet). Two Journeys' Metrics diff directly; that diff is Step 4's 4d
+// module's entire deliverable.
 package story
 
 import (
@@ -18,9 +17,10 @@ import (
 	"vmr/internal/core"
 )
 
-// Metrics is one Journey's behavior profile (design doc §6.5's nine rows).
+// Metrics is one Journey's behavior profile (the design doc's nine-indicator
+// behavior-profile section).
 type Metrics struct {
-	// F10 time three-way decomposition (design doc D4): every inter-step gap
+	// F10 time three-way decomposition: every inter-step gap
 	// is classified by whether the step it precedes is HumanInitiated.
 	ModelMS      int64 `json:"model_ms"`       // sum of every Step's Rec.DurMS
 	AgentExecMS  int64 `json:"agent_exec_ms"`  // gap time before a non-HumanInitiated step
@@ -37,13 +37,13 @@ type Metrics struct {
 
 	// DuplicateActionRate is the fraction of tool calls whose (name, args)
 	// pair repeats an earlier call in the same Journey — "is it spinning its
-	// wheels" (design doc §6.5).
+	// wheels".
 	DuplicateActionRate float64 `json:"duplicate_action_rate"`
 
 	// ErrorRecoveryCount counts Steps that both (a) received an
 	// is_error-marked tool_result since the previous Step and (b) went on to
 	// issue their own tool call anyway — a rough proxy for "the agent tried
-	// to recover from a failure" (design doc §6.5's "韧性"). Only
+	// to recover from a failure". Only
 	// Anthropic's explicit is_error content-block field is detected;
 	// OpenAI's protocol has no equivalent standard marker, so this
 	// undercounts on OpenAI-only corpora — a documented limitation, not a
@@ -58,10 +58,10 @@ type Metrics struct {
 	// that Step's OWN full request body, split by role — "上下文构成演化".
 	ContextCurve []ContextPoint `json:"context_composition_curve"`
 
-	// ContextUtilization is the S-D-scenario indicator (design doc §3's
-	// blind-spot table + §6.5): of every non-system Event's estimated
+	// ContextUtilization is the S-D-scenario indicator (the design doc's
+	// blind-spot table): of every non-system Event's estimated
 	// tokens, what fraction mentioned an entity (file path, URL — the same
-	// rough regex T2.3's CompactionInfo already uses) that some LATER Event
+	// rough regex the compaction step's CompactionInfo already uses) that some LATER Event
 	// went on to mention again. Low value = a lot of what entered the
 	// context was never referred to again. Scoped to ALL non-system Events
 	// rather than only tool-role ones: chatmsg flattens a whole message's
@@ -71,7 +71,7 @@ type Metrics struct {
 	ContextUtilization float64 `json:"context_utilization"`
 
 	// CompactionCount/CompactionLossTokens aggregate every stitch
-	// boundary's CompactionInfo already computed by T2.3 — §6.4's
+	// boundary's already-computed CompactionInfo — the design doc's
 	// information-loss summary, rolled up to one Journey-level number.
 	CompactionCount      int   `json:"compaction_count"`
 	CompactionLossTokens int64 `json:"compaction_loss_tokens"`
@@ -125,7 +125,7 @@ func journeySteps(j *Journey) []*Step {
 	return out
 }
 
-// computeTimeSplit applies design doc D4's gap-classification rule to every
+// computeTimeSplit applies the design doc's gap-classification rule to every
 // consecutive Step pair: the wall-clock gap between one Step's response
 // landing and the next Step's request arriving is human idle iff the next
 // Step is HumanInitiated, else agent-side execution (the agent kept working
@@ -275,7 +275,7 @@ func contextCurve(steps []*Step) []ContextPoint {
 
 // contextUtilization implements ContextUtilization's doc comment: for each
 // non-system Event, does any entity extracted from it (extractEntities, the
-// same T2.3 uses) reappear in a LATER Event's text. j.Events is already in
+// same extraction the compaction step already uses) reappear in a LATER Event's text. j.Events is already in
 // first-appearance order, so "later" is simply a higher slice index.
 func contextUtilization(j *Journey) float64 {
 	type scanned struct {
@@ -329,7 +329,7 @@ func sharesEntity(a, b []string) bool {
 }
 
 // compactionTotals rolls every stitch boundary's already-computed
-// CompactionInfo (T2.3) up to one Journey-level count and loss total.
+// CompactionInfo up to one Journey-level count and loss total.
 func compactionTotals(steps []*Step) (count int, lossTokens int64) {
 	for _, s := range steps {
 		if s.Compaction == nil {
@@ -343,7 +343,7 @@ func compactionTotals(steps []*Step) (count int, lossTokens int64) {
 	return
 }
 
-// JourneySummary is journey-<id>.json's shape (design doc §6.5: "输出同时落
+// JourneySummary is journey-<id>.json's shape (design doc: "输出同时落
 // journey-<id>.json，供第 4 步的对比模块直接消费") — a Journey's identity
 // plus its Metrics profile, so Phase 4d's comparison module can diff two
 // Journeys without re-parsing Markdown.

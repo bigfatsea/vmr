@@ -12,7 +12,7 @@ import (
 // as a real instruction (nothing stripped), and NoReply only fires on a
 // literally empty reassembled response — no agent-specific skip-marker
 // convention to check for. Used for any request not otherwise recognized;
-// see design doc §11 D5 for why this isn't a Detect-based dispatch yet.
+// see the design doc's profile-selection notes for why this isn't a Detect-based dispatch yet.
 var Generic Profile = generic{}
 
 type generic struct{}

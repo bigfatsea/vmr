@@ -2,8 +2,7 @@
 
 // Pairs with internal/story/llm.go (the -compare LLM interpretation layer).
 // The system prompt instructs the model which language to answer in, so the
-// report's language and the interpretation's language always match — see
-// the design doc §4.6.
+// report's language and the interpretation's language always match.
 package i18n
 
 // LLMText is llm.go's text, in one language.
@@ -44,8 +43,8 @@ func LLM(lang Lang) LLMText {
 	}
 }
 
-// llmSystemPromptZH is the Chinese system prompt (design doc §3.7's v2,
-// unchanged in meaning — see internal/story/llm.go's own history for why
+// llmSystemPromptZH is the Chinese system prompt (unchanged in meaning from
+// its previous version — see internal/story/llm.go's own history for why
 // each of its six numbered rules exists).
 const llmSystemPromptZH = `你是一个 Agent 任务执行对比分析助手。你会收到两个 Agent Journey（同一任务的两次不同执行）的结构化对比数据（JSON），包括已经算好的行为剖面指标、工具调用分布、端点/缓存/system prompt 规模等规则事实，以及两段有边界的原文节选（system prompt 节选、可能的最终交付物节选）和逐轮工具调用索引。
 

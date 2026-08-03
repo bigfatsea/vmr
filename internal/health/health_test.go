@@ -88,6 +88,38 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 	}
 }
 
+// TestClassify locks in Classify's single-lock replacement for the router's
+// former Status(key,now).Fails>0 + Acquire(key,now)/Available(key,now)
+// two-call sequence: same outcomes, one call.
+func TestClassify(t *testing.T) {
+	t.Parallel()
+	r := New()
+
+	if available, needsProbe := r.Classify("unknown", t0); !available || needsProbe {
+		t.Errorf("never-seen key: available=%v needsProbe=%v, want true,false", available, needsProbe)
+	}
+
+	r.ReportFailure("e", core.ErrTransient, 0, t0)
+	if available, needsProbe := r.Classify("e", t0.Add(time.Second)); available || needsProbe {
+		t.Errorf("still cooling down: available=%v needsProbe=%v, want false,false", available, needsProbe)
+	}
+
+	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+	available, needsProbe := r.Classify("e", after)
+	if available || !needsProbe {
+		t.Errorf("first caller after cooldown: available=%v needsProbe=%v, want false,true", available, needsProbe)
+	}
+	available, needsProbe = r.Classify("e", after)
+	if available || needsProbe {
+		t.Errorf("second caller while probe in flight: available=%v needsProbe=%v, want false,false", available, needsProbe)
+	}
+
+	r.ReportSuccess("e")
+	if available, needsProbe := r.Classify("e", after); !available || needsProbe {
+		t.Errorf("healthy after ReportSuccess: available=%v needsProbe=%v, want true,false", available, needsProbe)
+	}
+}
+
 func TestTransientHonorsRetryAfter(t *testing.T) {
 	t.Parallel()
 	r := New()

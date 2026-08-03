@@ -337,6 +337,51 @@ func TestModelsEndpoint(t *testing.T) {
 	}
 }
 
+// TestModelsEndpointDedupesNameAcrossProtocols locks in a fix: a virtual
+// model name registered under more than one ingress protocol at once
+// (config's VirtualModel doc comment documents this as supported — one
+// openai-protocol endpoint group and one anthropic-protocol one sharing the
+// same name) used to produce a duplicate "id" in /v1/models' data array,
+// one row per protocol. From a client's perspective it's still one
+// addressable model — the name is what it calls, not the protocol behind
+// it — so the id must appear exactly once.
+func TestModelsEndpointDedupesNameAcrossProtocols(t *testing.T) {
+	o, a := newUpstream(t), newAnthUpstream(t)
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: oai, base_url: {openai: %s}, api_key: k0}
+  - {name: anth, base_url: {anthropic: %s}, api_key: k1}
+models:
+  shared:
+    endpoints:
+      - {protocol: openai, provider: oai, models: [model-one]}
+      - {protocol: anthropic, provider: anth, models: [model-two]}
+`, o.srv.URL, a.srv.URL)
+	ts := newRouterServer(t, yaml)
+
+	resp, err := http.Get(ts.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Data []struct {
+			ID       string `json:"id"`
+			Protocol string `json:"vmr_protocol"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Data) != 1 {
+		t.Fatalf("expected exactly one deduped entry for %q, got %d: %+v", "shared", len(out.Data), out.Data)
+	}
+	if out.Data[0].ID != "shared" || out.Data[0].Protocol != "anthropic" {
+		t.Errorf("data[0] = %+v, want id=shared vmr_protocol=anthropic (sorted-protocol-order tiebreak)", out.Data[0])
+	}
+}
+
 func TestUnknownModelAndBadRequests(t *testing.T) {
 	u := newUpstream(t)
 	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))

@@ -157,6 +157,23 @@ models:
 	}
 }
 
+// TestServe_NoSnapshotInstalled locks in the defensive nil check added
+// after an architecture review flagged Serve's unchecked rt.snap.Load():
+// a Router that never had Install called on it (unreachable in the real
+// cmd_start.go startup sequence, which always installs before the HTTP
+// server starts listening, but possible from a test or a future refactor
+// mistake) must return a clean 503, not panic on snap.Models.
+func TestServe_NoSnapshotInstalled(t *testing.T) {
+	rt := New(nil)
+	w := serveReq(rt, "whatever", []byte(`{"model":"whatever"}`))
+	if w.Code != 503 {
+		t.Fatalf("status=%d, want 503", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "service_unavailable") {
+		t.Errorf("body should contain service_unavailable: %s", w.Body)
+	}
+}
+
 // --- Serve: wrong protocol hint ---
 
 func TestServe_WrongProtocolHint(t *testing.T) {

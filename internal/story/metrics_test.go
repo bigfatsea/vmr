@@ -1,7 +1,6 @@
 // Ver 2026-07-30 00:10, by Sonnet 5
 
-// Tests for T2.4 (design doc Appendix C.4 / §6.5): the nine-indicator
-// behavior profile.
+// Tests for the nine-indicator behavior profile.
 package story
 
 import (
@@ -14,8 +13,8 @@ import (
 	"vmr/internal/story/profile"
 )
 
-// TestComputeMetrics_TimeSplitAndRatio covers F10's gap classification
-// (design doc D4): a tool-loop continuation's gap is agent-side execution
+// TestComputeMetrics_TimeSplitAndRatio covers F10's gap classification:
+// a tool-loop continuation's gap is agent-side execution
 // time, a new-instruction step's gap is human idle time, and NetWorkingMS
 // excludes the latter.
 func TestComputeMetrics_TimeSplitAndRatio(t *testing.T) {
@@ -287,7 +286,7 @@ func TestComputeMetrics_ContextUtilization(t *testing.T) {
 
 // TestComputeMetrics_CompactionTotals reuses the same stitched-chain shape
 // TestCompactionInfo_TokensAndEntities builds, verifying ComputeMetrics
-// rolls up T2.3's per-step CompactionInfo into a Journey-level total.
+// rolls up per-step CompactionInfo into a Journey-level total.
 func TestComputeMetrics_CompactionTotals(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
 	sys := msg("system", "sys")

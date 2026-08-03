@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # 4 direct dependencies total (see go.mod) — weekly is plenty; this repo
+  # doesn't move fast enough to need daily dependency-update noise.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

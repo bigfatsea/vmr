@@ -31,7 +31,7 @@ func TestSessionFingerprint_Anthropic(t *testing.T) {
 		t.Fatalf("expected ok=true for c")
 	}
 	if sysC == sysA {
-		t.Errorf("different system prompts must produce different sysHash (this is the whole point of §2.1's fix)")
+		t.Errorf("different system prompts must produce different sysHash (this is the whole point of the sysHash differentiation fix)")
 	}
 	if firstC != firstA {
 		t.Errorf("first message is identical between a and c, firstMsgHash should match: got firstA=%x firstC=%x", firstA, firstC)

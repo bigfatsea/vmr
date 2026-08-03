@@ -68,7 +68,7 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 		health.Status
 	}
 	// Keyed "name [protocol]": the same virtual-model name may exist in
-	// both protocol groups (§10), and mixing their endpoints under one
+	// both protocol groups, and mixing their endpoints under one
 	// key reads as one model with double the endpoints.
 	out := map[string][]epStatus{}
 	for protocol, byName := range snap.Models {

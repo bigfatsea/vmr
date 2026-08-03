@@ -15,8 +15,8 @@ import (
 
 // manyToolCallRecords builds a lineage of n turns, each turn appending one
 // more tool_call/tool_result pair on top of the accumulated history —
-// mirrors the real 79-message/57-pair session design doc §4 F9 hand-verified
-// (附录 A.5). n=20 gives a manifest with system+user+20*(assistant+tool) =
+// mirrors the real 79-message/57-pair session F9 hand-verified. n=20 gives
+// a manifest with system+user+20*(assistant+tool) =
 // 42 messages and 20 tool_call/tool_result pairs by the last turn, enough to
 // exercise the invariant at a meaningful scale without depending on
 // real/uncommitted audit logs (see internal/story/golden_test.go's doc
@@ -40,12 +40,11 @@ func manyToolCallRecords(n int) []audit.Record {
 	return recs
 }
 
-// TestInvariant_ToolCallPairingIsAlways100Percent locks in design doc §4 F9
+// TestInvariant_ToolCallPairingIsAlways100Percent locks in F9
 // ("Step 内部的因果结构是协议给定的精确事实，不是启发式") as an automated
-// regression, closing the gap design-doc review §C.3 acceptance criterion
-// #3 flagged: F9 had only ever been hand-verified against one real record
-// (附录 A.5, 57/57), never turned into a test that fails the build if the
-// invariant is ever violated. Runs chatmsg.CheckToolPairing over every
+// regression, closing the gap that F9 had only ever been hand-verified
+// against one real record (57/57), never turned into a test that fails the
+// build if the invariant is ever violated. Runs chatmsg.CheckToolPairing over every
 // manifest a real Build() produces (not just the fixture's raw records
 // directly) — Step.Rec.Client.Request.Body is exactly the request body
 // `story.Build` fed into rendering, so this also guards against any future
@@ -81,7 +80,7 @@ func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 	}
 
 	// The LAST step's request body carries the full accumulated history —
-	// same shape as the real 79-message/57-pair record §4 F9 hand-verified.
+	// same shape as the real 79-message/57-pair record F9 hand-verified.
 	// Assert its pairing count matches exactly what the fixture built, so
 	// this test would also catch a regression that silently dropped pairs
 	// rather than mismatching them (report.OK() alone wouldn't distinguish

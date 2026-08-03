@@ -1,7 +1,7 @@
 // Ver 2026-07-29 23:45, by Sonnet 5
 
-// Tests for T2.3 (design doc Appendix C.4): system-change marking,
-// compaction information-loss metrics, and the F11 "revision" relation.
+// Tests for system-change marking, compaction information-loss metrics,
+// and the "revision" relation.
 package story
 
 import (
@@ -194,7 +194,7 @@ func TestBuildCompactionInfo_EntityBeyondCapStillCountsAsSurvived(t *testing.T) 
 	}
 }
 
-// TestRevision_SpliceEdgeTagsTheReplacedMessage covers F11's "revision"
+// TestRevision_SpliceEdgeTagsTheReplacedMessage covers the "revision"
 // relation: a Splice edge's divergence point must be tagged as revising the
 // message it replaced, not rendered as an unrelated new Event.
 func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
@@ -219,8 +219,8 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 	r1 := mkRec(at(0), "", prevMsgs, sseText("ok"))
 
 	// cur: same prefix (sys, u1, 8 filler), then ONE new "revising" message
-	// (replacing "dropped"), then tailA/tailB reappear verbatim — Splice
-	// per T2.1's判据.
+	// (replacing "dropped"), then tailA/tailB reappear verbatim — this is
+	// what triggers Splice classification.
 	curMsgs := append([]any{}, sharedPrefix...)
 	revising := msg("assistant", "revised summary absorbing the above")
 	curMsgs = append(curMsgs, revising, tailA, tailB)

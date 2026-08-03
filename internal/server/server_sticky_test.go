@@ -65,7 +65,7 @@ func TestSticky_DifferentConversationNotPinned(t *testing.T) {
 
 // TestSticky_DifferentSystemPromptSameFirstMessageNotPinned is the
 // regression test for the whole reason the anchor includes the system
-// prompt (design doc §2.1): two different agents whose conversations
+// prompt: two different agents whose conversations
 // happen to open with the identical user message must NOT share a sticky
 // entry, because their prompt-cache prefixes diverge at the system prompt,
 // before the shared opening line is ever reached.
@@ -91,7 +91,7 @@ func TestSticky_DifferentSystemPromptSameFirstMessageNotPinned(t *testing.T) {
 func TestSticky_TTLExpiry(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	flagP1(u1)
-	// sticky_ttl is per-endpoint (design doc §2.3 — cache lifetime is a
+	// sticky_ttl is per-endpoint (cache lifetime is a
 	// property of the upstream provider, not of the virtual model), so
 	// it's declared on p2 specifically: that's the endpoint the sticky
 	// entry this test is about will point at.

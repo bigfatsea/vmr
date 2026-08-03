@@ -1,7 +1,11 @@
 // Ver 2026-07-28 21:00, by Opus 5
 package report
 
-import "testing"
+import (
+	"testing"
+
+	"vmr/internal/chatmsg"
+)
 
 // entry is a terse constructor for the table below.
 func stickyE(seq int, endpoint, model string, cached, fresh int64) stickyEntry {
@@ -86,7 +90,7 @@ func TestStickyFreshNeverNegative(t *testing.T) {
 	sc := newStickyCollector()
 	sc.add(&rec2{
 		endpoint: "epA", sessionID: "s1", model: "coding", usageOK: true,
-		usage: Usage{In: 10, CacheRead: 100, CacheWrite: 50},
+		usage: chatmsg.Usage{In: 10, CacheRead: 100, CacheWrite: 50},
 	})
 	if got := sc.bySession["s1"][0].fresh; got != 0 {
 		t.Errorf("fresh = %d, want 0 (clamped)", got)

@@ -2,8 +2,7 @@
 //
 // Background recovery probing — the goal is that real client traffic never
 // waits on, and is never diverted for longer than a heartbeat by, another
-// endpoint's recovery check (see docs/ActiveProbeAndFailoverFix_Sonnet5.md
-// and reports/incident-20260718-console-go-400-failover_Sonnet5.md §2.4).
+// endpoint's recovery check.
 // These tests pin that contract down; server_probe_test.go holds the shared
 // mock upstream and half-open setup helper they build on.
 package server

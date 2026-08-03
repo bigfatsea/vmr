@@ -1,10 +1,9 @@
 // Ver 2026-07-30 21:00, by Sonnet 5
 
-// Step 4's 4d module (design doc Appendix C.6/G): diffing two Journeys'
+// Step 4's 4d module: diffing two Journeys'
 // already-computed Metrics is the whole deliverable — "两份剖面做差就是对比
 // 报告的骨架" — so this file adds no new data collection, only a rule-based
-// diff over JourneySummary.Metrics. Purely a profile-layer feature (design
-// doc §3.3's layering): every number here is derived by a fixed formula from
+// diff over JourneySummary.Metrics. Purely a profile-layer feature: every number here is derived by a fixed formula from
 // two Metrics values, "notable" is a fixed threshold, and nothing here calls
 // an LLM or generates free-text commentary — that's Phase 4a's job, if it
 // ever happens.
@@ -109,7 +108,7 @@ func abs(f float64) float64 {
 
 // ToolShareDiff is one tool name's call-count share in each Journey, for the
 // side-by-side tool-usage comparison — a qualitative complement to the
-// numeric MetricDiff rows (design doc §6.5's "工作方式画像").
+// numeric MetricDiff rows.
 type ToolShareDiff struct {
 	Name   string `json:"name"`
 	ACalls int    `json:"a_calls"`
@@ -131,8 +130,7 @@ func journeyRef(s JourneySummary) JourneyRef {
 	return JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To}
 }
 
-// Comparison is A-vs-B's full diff — design doc Appendix C.6 4d's entire
-// deliverable. Field order in Rows is fixed (not sorted by magnitude) so
+// Comparison is A-vs-B's full diff. Field order in Rows is fixed (not sorted by magnitude) so
 // repeated runs against the same two Summaries produce byte-identical
 // output.
 type Comparison struct {
@@ -141,20 +139,19 @@ type Comparison struct {
 	Rows  []MetricDiff    `json:"rows"`
 	Tools []ToolShareDiff `json:"tools"` // union of both sides' tool names, A's Count-desc order first then B-only names
 
-	// Extras is the step-4a-into-4d slice's rule-derived facts (design doc
-	// Appendix G's plan doc, `_tmp/plan_sonnet-5.md`): endpoint/cache/system-
-	// prompt/final-context/duration/deliverable — everything Compare's own
-	// Metrics diff can't see because it needs Step/Manifest access, not just
-	// JourneySummary. Pointer and omitempty on purpose: a caller that only
-	// has two JourneySummary values (e.g. the existing unit tests) gets a nil
-	// Extras, and RenderComparisonMarkdown skips those sections entirely
-	// rather than panicking or rendering an empty table — Extras is always
-	// an addition, never a requirement for a valid Comparison.
+	// Extras holds rule-derived facts beyond Compare's own Metrics diff:
+	// endpoint/cache/system-prompt/final-context/duration/deliverable —
+	// everything Compare's own Metrics diff can't see because it needs
+	// Step/Manifest access, not just JourneySummary. Pointer and omitempty
+	// on purpose: a caller that only has two JourneySummary values (e.g. the
+	// existing unit tests) gets a nil Extras, and RenderComparisonMarkdown
+	// skips those sections entirely rather than panicking or rendering an
+	// empty table — Extras is always an addition, never a requirement for a
+	// valid Comparison.
 	Extras *ComparisonExtras `json:"extras,omitempty"`
 }
 
-// Compare diffs a and b's Metrics — the whole of Phase 4d (design doc
-// Appendix C.6/G.1: "两份剖面做差就是对比报告的骨架"). Order is fixed:
+// Compare diffs a and b's Metrics — the whole of Phase 4d ("两份剖面做差就是对比报告的骨架"). Order is fixed:
 // caller decides which Journey is "A" and which is "B" (e.g. baseline vs
 // candidate); Compare doesn't sort or normalize that choice away.
 func Compare(a, b JourneySummary) Comparison {
@@ -206,17 +203,15 @@ func toolShareDiff(a, b []ToolCallStat) []ToolShareDiff {
 }
 
 // sysPromptExcerptChars/deliverableExcerptChars bound the two raw-text
-// excerpts Extras carries — both feed the LLM evidence pack (`_tmp/plan_
-// sonnet-5.md` §3.1) and get rendered as folded <details> blocks in the
-// Markdown, but neither may be unbounded: these two Journeys' full bodies
-// are 6846/3101 lines, nowhere near what a report row or an LLM prompt
-// should carry verbatim.
+// excerpts Extras carries — both feed the LLM evidence pack and get
+// rendered as folded <details> blocks in the Markdown, but neither may be
+// unbounded: these two Journeys' full bodies are 6846/3101 lines, nowhere
+// near what a report row or an LLM prompt should carry verbatim.
 //
 // sysPromptExcerptChars was originally 4000, tuned for "some bounded prefix"
 // without checking where the information actually lives in a real system
 // prompt. Measured directly against the two validation Journeys' audit
-// records (`docs/Step4a_compare_LLM解读层_差距分析与改进建议_2026-07-30_
-// sonnet-5.md` §3.2/§6), the "# Project Context" block declaring which
+// records, the "# Project Context" block declaring which
 // project files got loaded (deepseek report's top-ranked root cause) sits at
 // character 15734/13656 of a 36871/51406-char system prompt — 3.4-3.9x past
 // the old 4000 cutoff, so the LLM interpretation layer structurally never saw
@@ -246,11 +241,10 @@ type ComparisonExtras struct {
 	Deliverable  DeliverableFact  `json:"deliverable"`
 
 	// Sources is the sorted list of source audit file paths both Journeys
-	// were built from (evidence-provenance addition from the plan review,
-	// `docs/Step4a_compare_LLM解读层_差距分析与改进建议_2026-07-30_sonnet-5.md`
-	// §6.2 item 2) — lets a reader independently re-open the exact records
-	// every number above was computed from, without having to reverse-
-	// engineer -c's log_dir default. Deliberately NOT computed by
+	// were built from — an evidence-provenance addition that lets a reader
+	// independently re-open the exact records every number above was
+	// computed from, without having to reverse-engineer -c's log_dir
+	// default. Deliberately NOT computed by
 	// ComputeComparisonExtras itself: it has no access to the resolved input
 	// paths (those live at the cmd/vmr CLI layer, from resolveInputPaths),
 	// so the caller sets this field directly, the same way it already sets
@@ -259,8 +253,8 @@ type ComparisonExtras struct {
 }
 
 // EndpointsFact lists each side's distinct "protocol:provider:model" strings
-// (ctxgraph.Manifest.Endpoint), first-seen order — deepseek report §3's
-// "model and route verification", generalized to not assume the two sides
+// (ctxgraph.Manifest.Endpoint), first-seen order — a "model and route
+// verification" check, generalized to not assume the two sides
 // necessarily match (design doc: "not everything that differs is an agent
 // difference" applies here too — a genuine model/endpoint mismatch is
 // itself a finding, not an error).
@@ -285,8 +279,8 @@ type CachePoint struct {
 	Ratio float64 `json:"ratio"`
 }
 
-// CacheStats summarizes one side's per-step cache hit ratio — deepseek
-// report §5's "18%→97% vs 82%→99%" observation, generalized to whatever
+// CacheStats summarizes one side's per-step cache hit ratio — a pattern seen
+// before ("18%→97% vs 82%→99%"), generalized to whatever
 // numbers this Journey actually has (no assumption that either side
 // stabilizes at all).
 type CacheStats struct {
@@ -322,7 +316,7 @@ type SysPromptFact struct {
 }
 
 // FinalContextFact is each side's last Step's token composition by role —
-// deepseek report §4.3's "tool tokens differ 2.3x" style observation,
+// captures a "tool tokens differ 2.3x" style observation,
 // already free: ContextPoint is Metrics.ContextCurve's own element type.
 type FinalContextFact struct {
 	A ContextPoint `json:"a"`
@@ -344,11 +338,9 @@ type DurationFact struct {
 }
 
 // DeliverableStats is the final write-shaped tool call this side's Journey
-// made, if any — the "result difference" dimension neither this project's
-// first-draft plan nor the reviewed alternative plan originally covered
-// (see `_tmp/plan_sonnet-5.md`'s top banner). Found=false is a fact, not a
-// failure: plenty of tasks never produce a single-file deliverable, and the
-// rendered report says so plainly instead of leaving a blank row.
+// made, if any. Found=false is a fact, not a failure: plenty of tasks never
+// produce a single-file deliverable, and the rendered report says so
+// plainly instead of leaving a blank row.
 type DeliverableStats struct {
 	Found     bool   `json:"found"`
 	ToolName  string `json:"tool_name,omitempty"`
@@ -362,8 +354,7 @@ type DeliverableFact struct {
 	B DeliverableStats `json:"b"`
 }
 
-// ComputeComparisonExtras derives ComparisonExtras for jA/jB — the
-// step-4a-into-4d slice's rule layer (`_tmp/plan_sonnet-5.md` §2/§5). ma/mb
+// ComputeComparisonExtras derives ComparisonExtras for jA/jB. ma/mb
 // are the same Metrics Compare(Summarize(jA), Summarize(jB)) already
 // computed — passed in rather than recomputed so a caller that already has
 // both JourneySummary values doesn't pay for ComputeMetrics twice.

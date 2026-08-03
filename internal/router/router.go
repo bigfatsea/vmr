@@ -49,6 +49,15 @@ func New(logger *log.Logger) *Router {
 func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
 	start := time.Now()
 	snap := rt.snap.Load()
+	if snap == nil {
+		// Only reachable if a caller invokes Serve before Install ever ran —
+		// the real cmd_start.go startup sequence always calls Install with
+		// the first BuildSnapshot before the HTTP server starts listening,
+		// so this never fires in production. A defensive 503 here is strictly
+		// better than the nil-pointer panic snap.Models would otherwise be.
+		core.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
+		return
+	}
 	route, ok := snap.Models[protocol][creq.Model]
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
@@ -75,14 +84,11 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	now := time.Now()
 	healthOK := make([]*core.Endpoint, 0, len(route.Endpoints))
 	for _, ep := range route.Endpoints {
-		key := ep.HealthKey()
-		if rt.Health.Status(key, now).Fails > 0 {
-			if rt.Health.Acquire(key, now) {
-				go rt.runProbe(ep, snap)
-			}
-			continue
+		available, needsProbe := rt.Health.Classify(ep.HealthKey(), now)
+		if needsProbe {
+			go rt.runProbe(ep, snap)
 		}
-		if rt.Health.Available(key, now) {
+		if available {
 			healthOK = append(healthOK, ep)
 		}
 	}
@@ -172,7 +178,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			if success && stickyKey != "" {
 				// Every successful completion moves the pointer — including
 				// a failover success — so it always follows wherever the
-				// conversation's cache is actually warm (design doc §6.5).
+				// conversation's cache is actually warm.
 				rt.Sticky.Set(stickyKey, ep.HealthKey())
 			}
 			return
@@ -409,7 +415,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		body = body[:errBodyCap]
 	}
 	class := ad.ClassifyError(resp.StatusCode, body)
-	// uerr.body is forwarded to the client verbatim (byte-faithful, §1) —
+	// uerr.body is forwarded to the client verbatim (byte-faithful) —
 	// any truncation marker must go only into the audit copy below, never
 	// into this slice.
 	uerr = &upstreamError{resp.StatusCode, resp.Header, body}

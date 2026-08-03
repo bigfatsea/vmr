@@ -1,6 +1,6 @@
 // Ver 2026-07-29 22:00, by Sonnet 5
 
-// Stitching (design doc §6.2, Appendix C.4 T2.2): for every lineage that
+// Stitching (see design doc's stitching-policy section): for every lineage that
 // broke away from its bucket (BrokeFrom != nil), find its best predecessor
 // across the WHOLE graph using a blob inverted index (hash -> which
 // lineages ever carried it) — not just within the original SessKey bucket,
@@ -39,7 +39,7 @@ const (
 	StitchHeadPrune
 	// StitchSameChat: only a SessKey match within a bucket that already
 	// forked, or some overlap below the stitching floor — flagged as
-	// "疑似同源" but never auto-stitched (§6.2: "same_chat 默认不缝合").
+	// "疑似同源" but never auto-stitched ("same_chat 默认不缝合").
 	StitchSameChat
 )
 
@@ -57,7 +57,7 @@ func (k StitchKind) String() string {
 }
 
 // StitchOutcome is a lineage's stitching resolution — exactly one of three
-// states (design doc F4: "缝合逻辑必须区分已缝合/确认无后继/匹配失败三态",
+// states (the design rule: "缝合逻辑必须区分已缝合/确认无后继/匹配失败三态",
 // read here from the searching lineage's own perspective: did IT find a
 // predecessor, confirm it has none, or come up ambiguous).
 type StitchOutcome int
@@ -71,12 +71,12 @@ const (
 	Stitched
 	// NoPredecessorFound: exhaustive search found zero blob overlap with
 	// ANY earlier lineage, and no same_chat signal either — a legitimate,
-	// evidenced fresh start (F4: sometimes "not found" is the correct
+	// evidenced fresh start (sometimes "not found" is the correct
 	// answer, not a search failure), not the same as AmbiguousMatch.
 	NoPredecessorFound
 	// AmbiguousMatch: some signal exists (same_chat SessKey/time proximity,
 	// or overlap below the stitching floor) but it's below the bar to act
-	// on — "疑似同源", explicitly not stitched (§6.2: "宁可断开，不要错连").
+	// on — "疑似同源", explicitly not stitched ("宁可断开，不要错连").
 	AmbiguousMatch
 )
 
@@ -105,7 +105,7 @@ type StitchEdge struct {
 	// overlap at all, only SessKey + time proximity).
 	Score float64
 	// Confidence is informational, derived from Kind — not used for any
-	// further decision (design doc §6.2's per-kind confidence column).
+	// further decision (design doc's per-kind stitch-confidence column).
 	Confidence float64
 }
 
@@ -118,9 +118,8 @@ type StitchResolution struct {
 // Thresholds — same calibration philosophy as edit.go's (code constants,
 // not config; see edit.go's own comment for why). Initial values, not yet
 // corpus-recalibrated the way contractLenRatio/forkCoverage were (design
-// doc Appendix A.7's T2.2 re-run records the resulting distribution these
-// produce on the 2026-07-14..28 corpus — tune here if a wider corpus
-// disagrees).
+// a corpus re-run recorded the resulting distribution these produce on
+// the 2026-07-14..28 corpus — tune here if a wider corpus disagrees).
 const (
 	// stitchCompactionScore: a Contract-origin break stitches as
 	// StitchCompaction when the successor's opening overlaps at least this
@@ -136,16 +135,16 @@ const (
 	// flagging at all (still never auto-stitched).
 	stitchSameChatWindow = 24 * time.Hour
 	// stitchCrossBucketMaxGap bounds content-score matches ACROSS different
-	// SessKeys only — same-SessKey candidates are never gap-limited (design
-	// doc D3: "Journey 边界 = manifest 编辑边界，与时间无关"; a user can
+	// SessKeys only — same-SessKey candidates are never gap-limited ("Journey
+	// 边界 = manifest 编辑边界，与时间无关"; a user can
 	// walk away for days and resume the same anchor). Cross-bucket is a
 	// much bigger claim (two seemingly-different conversations are actually
-	// one), and real corpus evidence (design doc F2/A.2) shows a genuine
+	// one), and real corpus evidence shows a genuine
 	// compaction link landing within tens of minutes, not days. Added after
 	// an unbounded first pass on the 2026-07-14..28 corpus produced several
 	// cross-bucket "matches" 190+ hours apart, all against recurring
 	// scheduled-task boilerplate — high score from shared template text,
-	// zero real relationship. "宁可断开，不要错连" (§6.2) applies here more
+	// zero real relationship. "宁可断开，不要错连" applies here more
 	// than anywhere else in this file.
 	stitchCrossBucketMaxGap = 6 * time.Hour
 )
@@ -221,8 +220,8 @@ func StitchGraph(g *Graph) {
 }
 
 // buildBlobLineageIndex maps every message hash seen anywhere in the graph
-// to the set of lineages that ever carried it — the "blob 倒排索引" §6.2
-// calls for, built once and reused across every lineage's search.
+// to the set of lineages that ever carried it — the "blob 倒排索引" the
+// design doc calls for, built once and reused across every lineage's search.
 func buildBlobLineageIndex(g *Graph) map[Hash]map[int]bool {
 	idx := make(map[Hash]map[int]bool)
 	for _, l := range g.Lineages {
@@ -270,7 +269,7 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash]map
 	// final total-ordering tie-break. Without this, two runs over the same
 	// input could pick different predecessors among equally-scored
 	// candidates — silently violating "idempotent, same input -> same
-	// output" (design doc Appendix C.7 invariant #7) and, downstream,
+	// output" (an explicit invariant) and, downstream,
 	// story's content-addressed Journey ids. Caught by running StitchGraph
 	// 5x over the real corpus and diffing PredIdx per lineage — not by any
 	// unit test (a synthetic fixture is too small to ever produce a real

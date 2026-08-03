@@ -32,9 +32,9 @@ func goldenRec(ts time.Time, durMS int64, msgs []any, sseBody string) audit.Reco
 
 // goldenSSE builds a minimal SSE response carrying a usage block — sseText
 // (journey_test.go) deliberately omits usage, but this golden test wants to
-// exercise the Step-header token-count column too (see internal/story
-// review §E.3: a real bug — actual usage mislabeled as an "EST" pre-call
-// estimate — was only caught because this column was rendered).
+// exercise the Step-header token-count column too: a real bug (actual
+// usage mislabeled as an "EST" pre-call estimate) was only caught because
+// this column was rendered.
 func goldenSSE(content string, promptTokens, completionTokens, cachedTokens int) string {
 	return fmt.Sprintf(`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":%q}}],"model":"agent"}
 
@@ -70,10 +70,10 @@ func goldenFixture() []audit.Record {
 }
 
 // TestGoldenMarkdown locks in RenderMarkdown's exact byte output for a small
-// fixed corpus — design doc Appendix C.3's acceptance criterion #4 ("golden
-// test: a small testdata/ corpus, Markdown output byte-stable, idempotent
-// across re-runs"), and the gap design-doc review §6.3 flagged: nothing
-// before this pinned the FULL rendered document, only substrings within it
+// fixed corpus — the acceptance criterion ("golden test: a small testdata/
+// corpus, Markdown output byte-stable, idempotent across re-runs"), and the
+// gap flagged: nothing before this pinned the FULL rendered document, only
+// substrings within it
 // (TestRenderMarkdown_BasicStructure and friends) — a change that shifted
 // step numbering, broke a <details> pairing, or reordered fields would slip
 // through those. Runs both languages (this is the one place test

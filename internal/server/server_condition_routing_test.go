@@ -54,8 +54,7 @@ func TestCondition_NonImageRequestUsesNormalPriority(t *testing.T) {
 func TestCondition_UndeclaredCapabilitiesIsUnconstrained(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	// Neither endpoint declares "capabilities" at all — an image request
-	// must still route by priority alone (zero-config-migration guarantee,
-	// design doc §1.1).
+	// must still route by priority alone (zero-config-migration guarantee).
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL, "", ""))
 
 	resp, _ := chat(t, ts, imageReq, nil)
@@ -127,10 +126,11 @@ func TestCondition_ContextLengthUnconstrainedByDefault(t *testing.T) {
 }
 
 func TestCondition_ContextLengthFallbackNeverEmptiesCandidates(t *testing.T) {
-	// §1.5: both endpoints declare a ceiling the estimate exceeds. This
-	// must NOT produce "no candidates" — it must fall back to trying the
-	// (health/capability-eligible) set anyway, letting a real attempt and
-	// #3's reactive failover make the call instead of refusing on a guess.
+	// Context-length ceiling fallback: both endpoints declare a ceiling the
+	// estimate exceeds. This must NOT produce "no candidates" — it must
+	// fall back to trying the (health/capability-eligible) set anyway,
+	// letting a real attempt and #3's reactive failover make the call
+	// instead of refusing on a guess.
 	u1, u2 := newUpstream(t), newUpstream(t)
 	ts := newRouterServer(t, contextLenYAML(u1.srv.URL, u2.srv.URL,
 		"\n        max_context_tokens: 10",
@@ -138,7 +138,7 @@ func TestCondition_ContextLengthFallbackNeverEmptiesCandidates(t *testing.T) {
 
 	resp, _ := chat(t, ts, bigReq, nil)
 	if resp.StatusCode != 200 {
-		t.Fatalf("status=%d, want 200 — an overestimate must never empty an otherwise-eligible candidate set (§1.5)", resp.StatusCode)
+		t.Fatalf("status=%d, want 200 — an overestimate must never empty an otherwise-eligible candidate set", resp.StatusCode)
 	}
 	// Priority order still applies within the fallback set.
 	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {

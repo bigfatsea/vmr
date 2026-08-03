@@ -3,8 +3,8 @@
 package chatmsg
 
 // PairingReport summarizes tool_call/tool_result id pairing within one
-// request's raw message list. F9 (design doc §4): this causal edge is
-// protocol-given, not inferred — a well-formed request body can never carry
+// request's raw message list. F9: this causal edge is protocol-given, not
+// inferred — a well-formed request body can never carry
 // a tool_call the model issued without a matching tool_result answering it
 // (the API would reject a continuation that skipped one), so a 100% pairing
 // rate is an invariant of the data, not a heuristic outcome. Covers both

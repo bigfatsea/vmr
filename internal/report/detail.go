@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/i18n"
 )
@@ -390,14 +391,14 @@ func outcomeMark(outcome string) string {
 // recomputing it from the response body a second time. Recompute only
 // happens when info is nil (ungrouped/rejected records, or detail rendering
 // with no session analysis at all).
-func recordUsage(rec *audit.Record, info *ReqInfo) (Usage, bool) {
+func recordUsage(rec *audit.Record, info *ReqInfo) (chatmsg.Usage, bool) {
 	if info != nil {
 		return info.Usage, info.UsageOK
 	}
 	if rec.Client.Response == nil {
-		return Usage{}, false
+		return chatmsg.Usage{}, false
 	}
-	return ExtractUsage(rec.Client.Response.Body)
+	return chatmsg.ExtractUsage(rec.Client.Response.Body)
 }
 
 // ---- document skeleton ----
@@ -545,8 +546,8 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo, t
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	req := rec.Client.Request
 	w("## %s\n\n", t.ClientRequestTitle)
-	msgs := chatMessages(req.Body)
-	tools := toolNames(req.Body)
+	msgs := chatmsg.Messages(req.Body)
+	tools := chatmsg.ToolNames(req.Body)
 	w("`%s %s` · body %s", req.Method, req.Path, fmtBytes(bodyBytes(req.Body)))
 	if len(msgs) > 0 {
 		w(" · %d messages", len(msgs))
@@ -746,7 +747,7 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record, t i18n.DetailTe
 	case nil:
 		w("%s", t.EmptyBody)
 	case string:
-		if s := reassembleSSE(body); s != nil {
+		if s := chatmsg.ReassembleSSE(body); s != nil {
 			w("\n### %s\n\n", t.ModelOutputSSE(s.Events))
 			renderStreamSummary(b, s, t)
 			b.WriteString(details(t.RawSSEFull(s.Events, fmtBytes(int64(len(body)))), codeFence(body)))
@@ -754,7 +755,7 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record, t i18n.DetailTe
 			renderRawBody(b, t.BodyNonJSONSSE, body, t)
 		}
 	default:
-		if s, ok := finalMessage(body); ok {
+		if s, ok := chatmsg.FinalMessage(body); ok {
 			w("\n### %s\n\n", t.ModelOutputTitle)
 			renderStreamSummary(b, s, t)
 		}
@@ -777,7 +778,7 @@ func successfulAttemptResponse(rec *audit.Record) *audit.Message {
 // renderStreamSummary writes the reassembled model output: reasoning folded,
 // content expanded (it is what the user came to read), tool calls, then
 // finish reason and usage.
-func renderStreamSummary(b *strings.Builder, s *streamSummary, t i18n.DetailText) {
+func renderStreamSummary(b *strings.Builder, s *chatmsg.StreamSummary, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	if s.Reasoning != "" {
 		b.WriteString(details(t.ReasoningChars(fmtCount(len([]rune(s.Reasoning)))), codeFence(s.Reasoning)))
@@ -954,8 +955,8 @@ func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.Deta
 // equality; changed/added entries carry the attempt-side full content folded
 // inline so "what did the upstream actually get" needs no cross-referencing.
 func renderMessagesDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.DetailText) {
-	cMsgs := chatMessages(clientBody)
-	aMsgs := chatMessages(attemptBody)
+	cMsgs := chatmsg.Messages(clientBody)
+	aMsgs := chatmsg.Messages(attemptBody)
 	if len(cMsgs) == 0 && len(aMsgs) == 0 {
 		return
 	}
@@ -999,8 +1000,8 @@ func renderToolsDiff(b *strings.Builder, clientTools, attemptTools any, t i18n.D
 	if len(cArr) == 0 && len(aArr) == 0 {
 		return
 	}
-	cNames := toolNames(map[string]any{"tools": clientTools})
-	aNames := toolNames(map[string]any{"tools": attemptTools})
+	cNames := chatmsg.ToolNames(map[string]any{"tools": clientTools})
+	aNames := chatmsg.ToolNames(map[string]any{"tools": attemptTools})
 	name := func(names []string, i int) string {
 		if i < len(names) {
 			return names[i]

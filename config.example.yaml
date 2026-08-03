@@ -65,7 +65,10 @@ listen: 127.0.0.1:8800
 #                                 # a small dedicated probe request before real traffic is allowed back onto it —
 #                                 # real requests never wait on or get diverted by another endpoint's recovery check
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
-# max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited)
+# max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited) — worst case
+#                                 # per in-flight request is ~104MB (8MB request + 32MB response-normalization
+#                                 # buffer + 64MB audit response copy); on a shared instance set this explicitly
+#                                 # rather than leaving it unlimited (see UserGuide.md's "Per-request memory budget")
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy (env vars are
 #                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly). Declaring this URL
 #                                      # does NOT turn proxying on by itself — see providers[].proxy below.
@@ -77,6 +80,10 @@ listen: 127.0.0.1:8800
 #                                 # hard ceiling 24h either way (the sticky registry's own memory-eviction
 #                                 # backstop) — vmr check/start reject anything above that
 # audit_retention_days: 30       # delete audit files older than this; 0/absent = keep forever (rotation always compresses old days to .zst regardless)
+# extra_redact_headers:           # additional client request header names to mask in the audit trail, same
+#   - X-Custom-Token              # treatment as the built-in Authorization/X-Api-Key/Cookie/etc list — for a
+#                                  # client's own custom auth header vmr doesn't already know to mask (case-
+#                                  # insensitive match). Absent/empty (the default) changes nothing.
 # log_dir: ~/.vmr/logs           # audit JSONL directory; used exactly as given (~/ expands); absent = ~/.vmr/logs. Changing it needs a restart
 # image_cache_dir: ~/.vmr/image_cache  # downscale-result cache directory; same rule; absent = ~/.vmr/image_cache; follows hot reload
 # timeouts:
@@ -139,9 +146,11 @@ providers:
 
 models:
   coding:
-    # strategy defaults to [priority]; endpoints below have no explicit
-    # priority — ties (everyone defaults to 0) keep this file order, so
-    # listing them in the order you want them tried is enough.
+    # strategy defaults to [priority] — priority is currently the only
+    # dimension implemented, so this list has nothing else to name yet.
+    # Endpoints below have no explicit priority — ties (everyone defaults
+    # to 0) keep this file order, so listing them in the order you want
+    # them tried is enough.
     #
     # capabilities/max_context_tokens (condition routing) and sticky_ttl
     # (Sticky Model) are all optional and default to "unconstrained" /

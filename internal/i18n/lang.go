@@ -17,7 +17,10 @@
 // drift out of sync with the section they back.
 package i18n
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Lang selects vmr report/vmr story's output language. The zero value is
 // EN, so any call site not yet updated during incremental migration keeps
@@ -40,10 +43,10 @@ func (l Lang) String() string {
 // insensitive); anything else is an error. Only two real values exist — no
 // alias registry until a third language is a real requirement.
 func Parse(s string) (Lang, error) {
-	switch s {
-	case "en", "EN", "english", "English":
+	switch strings.ToLower(s) {
+	case "en", "english":
 		return EN, nil
-	case "zh", "ZH", "chinese", "Chinese", "zh-cn", "zh-CN", "zh_cn":
+	case "zh", "chinese", "zh-cn", "zh_cn":
 		return ZH, nil
 	default:
 		return EN, fmt.Errorf("unsupported language %q (expected \"en\" or \"zh\")", s)

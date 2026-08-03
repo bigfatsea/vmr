@@ -16,8 +16,8 @@ import (
 // diff table with notable rows starred, and a tool-usage side-by-side.
 // Purely a view over already-computed Comparison data — same fact-layer-
 // renderer convention as RenderMarkdown (no judgment calls happen here).
-// cmp.Rows[].Label is always English (Compare never sees lang — design doc
-// §4.4); this function looks up each row's localized label from its stable
+// cmp.Rows[].Label is always English (Compare never sees lang); this
+// function looks up each row's localized label from its stable
 // Metric code via i18n.MetricLabel instead of using Label directly.
 func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	var b strings.Builder
@@ -63,11 +63,10 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	return b.String()
 }
 
-// renderSources renders the evidence-provenance section (plan review
-// `docs/Step4a_compare_LLM解读层_差距分析与改进建议_2026-07-30_sonnet-5.md`
-// §6.2 item 2) — the source audit file paths both Journeys were built from,
-// so a reader can independently re-open the exact records every number above
-// came from. Placed last, after every fact-layer section: this is a
+// renderSources renders the evidence-provenance section — the source audit
+// file paths both Journeys were built from, so a reader can independently
+// re-open the exact records every number above came from. Placed last,
+// after every fact-layer section: this is a
 // verification aid, not something that should compete for attention with the
 // report's actual findings. Empty (no Sources set, e.g. a caller that built
 // Extras without plumbing the resolved input paths through) renders nothing.
@@ -83,13 +82,13 @@ func renderSources(w func(string, ...any), sources []string, t i18n.CompareText)
 	w("\n")
 }
 
-// renderDurationAndFinalContext renders the three free facts absorbed from
-// the plan review (`_tmp/plan_sonnet-5.md` §2 point 2): wall-clock duration
-// (captioned per design doc F10 — never presented as an efficiency number on
-// its own), termination mode (the closest VMR-visible proxy to "did
-// something like loop detection cut this off"), and each side's final-round
-// context composition (free: ContextPoint is Metrics.ContextCurve's own
-// element type, just its last entry).
+// renderDurationAndFinalContext renders three facts that come for free from
+// data this package already has: wall-clock duration (captioned per design
+// doc F10 — never presented as an efficiency number on its own), termination
+// mode (the closest VMR-visible proxy to "did something like loop detection
+// cut this off"), and each side's final-round context composition (free:
+// ContextPoint is Metrics.ContextCurve's own element type, just its last
+// entry).
 func renderDurationAndFinalContext(w func(string, ...any), ex *ComparisonExtras, t i18n.CompareText) {
 	d := ex.Duration
 	w("%s", t.WallClockLine(fmtutil.FmtSeconds(d.AWall, 1), fmtutil.FmtSeconds(d.BWall, 1)))
@@ -120,8 +119,8 @@ func emptyDash(s string, t i18n.CompareText) string {
 	return s
 }
 
-// renderEndpoints renders the model/endpoint identity check — deepseek
-// report §3 generalized to not assume the two sides necessarily match.
+// renderEndpoints renders the model/endpoint identity check, generalized
+// to not assume the two sides necessarily match.
 func renderEndpoints(w func(string, ...any), ep EndpointsFact, t i18n.CompareText) {
 	w("%s", t.EndpointsTitle)
 	w("%s", t.EndpointSide("A", endpointList(ep.A, t)))
@@ -141,8 +140,8 @@ func endpointList(eps []string, t i18n.CompareText) string {
 	return "`" + strings.Join(eps, "`, `") + "`"
 }
 
-// renderCache renders the per-step prompt-cache hit-ratio summary — deepseek
-// report §5's "18%→97% vs 82%→99%" observation, computed the same way for
+// renderCache renders the per-step prompt-cache hit-ratio summary — the
+// same "18%→97% vs 82%→99%" style observation, computed the same way for
 // whatever numbers this pair of Journeys actually has.
 func renderCache(w func(string, ...any), c CacheFact, t i18n.CompareText) {
 	w("%s", t.CacheTitle)

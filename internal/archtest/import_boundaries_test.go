@@ -15,14 +15,13 @@ import (
 )
 
 // forbiddenImports pins the rule that the analysis/report layer only
-// depends on the audit log schema and (since design doc Appendix C.5 T3.1)
-// internal/ctxgraph, never on the routing runtime it analyzes — this test
-// exists so it stays that way as the package grows, not because it's
-// currently violated.
+// depends on the audit log schema and internal/ctxgraph, never on the
+// routing runtime it analyzes — this test exists so it stays that way as
+// the package grows, not because it's currently violated.
 //
 // internal/ctxgraph (the content-addressed manifest/lineage layer behind
-// `vmr story`, and — as of T3.1 — behind internal/report's own session
-// grouping too; see docs/VirtualModelRouter_Design_v4_Analytics.md §3.1) is
+// `vmr story`, and now behind internal/report's own session grouping too;
+// see docs/VirtualModelRouter_Design_v4_Analytics.md §3.1) is
 // held to the same island rule, plus one more: it must not depend on
 // internal/report — report now legitimately depends on ctxgraph in
 // production code (one-directional), and ctxgraph depending back on report
@@ -42,8 +41,8 @@ var forbiddenImports = map[string][]string{
 	// internal/story (the `vmr story` narrative renderer) sits on top of
 	// ctxgraph, never on report — the same reasoning as ctxgraph's own
 	// rule: report's session/task grouping is an independent, still-
-	// authoritative implementation until Phase 3 migrates it onto
-	// ctxgraph (design doc §7.2), and story must not quietly reach past
+	// authoritative implementation until a later phase migrates it onto
+	// ctxgraph (per the design doc's phased-migration plan), and story must not quietly reach past
 	// that boundary just because report happens to have similar-looking
 	// helpers.
 	"vmr/internal/story": {
@@ -51,11 +50,57 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 		"vmr/internal/report",
 	},
+	// adapter builds requests and classifies errors for both the live
+	// routing path (router) and the offline tools (diagnose/replay) that
+	// reuse it precisely so they exercise the same code real traffic does
+	// (see those packages' doc comments) — that only holds if adapter
+	// itself never depends back on router or server, or "reuses the same
+	// construction code" would stop being a one-directional fact.
+	"vmr/internal/adapter": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+	},
+	// router is the failover core server.go's HTTP layer sits on top of;
+	// router depending back on server would be a real import-cycle risk,
+	// not just a layering preference (CLAUDE.md's module map already states
+	// this direction — this test is what makes it stay true).
+	"vmr/internal/router": {
+		"vmr/internal/server",
+	},
+}
+
+// zeroInternalDepPackages must not depend on any other vmr/internal/*
+// package at all, per CLAUDE.md's module map: core is "shared types, no
+// internal deps" and fmtutil is "same layer as core". Checked separately
+// from forbiddenImports above because "must have zero deps" isn't
+// expressible as a finite forbidden list without silently going stale every
+// time a new internal package is added elsewhere in the tree.
+var zeroInternalDepPackages = []string{
+	"vmr/internal/core",
+	"vmr/internal/fmtutil",
+}
+
+// TestArchitecture_ZeroInternalDepPackages guards the two packages every
+// other package in this project is free to import without a boundary
+// concern — that promise only holds if they never grow an internal
+// dependency of their own.
+func TestArchitecture_ZeroInternalDepPackages(t *testing.T) {
+	for _, pkg := range zeroInternalDepPackages {
+		out, err := exec.Command("go", "list", "-deps", pkg).Output()
+		if err != nil {
+			t.Fatalf("go list -deps %s: %v", pkg, err)
+		}
+		for _, d := range strings.Fields(string(out)) {
+			if d != pkg && strings.HasPrefix(d, "vmr/internal/") {
+				t.Errorf("%s must have zero vmr/internal dependencies, but depends on %s", pkg, d)
+			}
+		}
+	}
 }
 
 // TestArchitecture_ImportBoundaries shells out to `go list -deps` rather
 // than adding a Go dependency-graph library: vmr's own stated policy is
-// zero non-essential dependencies (see design doc §4.2's dependency list),
+// zero non-essential dependencies (see the design doc's dependency-policy section),
 // and every environment that can run `go test` already has the `go` binary
 // on PATH by construction.
 func TestArchitecture_ImportBoundaries(t *testing.T) {

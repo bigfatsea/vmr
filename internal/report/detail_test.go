@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/i18n"
 )
@@ -208,7 +209,7 @@ func TestReassembleSSEOpenAI(t *testing.T) {
 		``,
 		`data: [DONE]`,
 	}, "\n")
-	s := reassembleSSE(raw)
+	s := chatmsg.ReassembleSSE(raw)
 	if s == nil {
 		t.Fatal("nil summary")
 	}
@@ -238,7 +239,7 @@ func TestReassembleSSEAnthropic(t *testing.T) {
 		``,
 		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 	}, "\n")
-	s := reassembleSSE(raw)
+	s := chatmsg.ReassembleSSE(raw)
 	if s == nil {
 		t.Fatal("nil summary")
 	}
@@ -251,13 +252,13 @@ func TestReassembleSSEAnthropic(t *testing.T) {
 }
 
 func TestReassembleSSEUnparseable(t *testing.T) {
-	if s := reassembleSSE("plain text, not SSE at all"); s != nil {
+	if s := chatmsg.ReassembleSSE("plain text, not SSE at all"); s != nil {
 		t.Errorf("expected nil, got %+v", s)
 	}
 }
 
 func TestImagePlaceholder(t *testing.T) {
-	got := renderContent([]any{
+	got := chatmsg.RenderContent([]any{
 		map[string]any{"type": "text", "text": "look:"},
 		map[string]any{"type": "image_url", "image_url": map[string]any{
 			"url": "data:image/png;base64," + strings.Repeat("A", 4096)}},
@@ -282,7 +283,7 @@ func TestChatMessagesAnthropicSystem(t *testing.T) {
 			}},
 		},
 	}
-	msgs := chatMessages(body)
+	msgs := chatmsg.Messages(body)
 	if len(msgs) != 3 || msgs[0].Role != "system" || msgs[0].Text != "be nice" {
 		t.Fatalf("msgs = %+v", msgs)
 	}
@@ -418,11 +419,11 @@ func TestFinalMessageJSON(t *testing.T) {
 			"message":       map[string]any{"role": "assistant", "content": "done"},
 		}},
 	}
-	s, ok := finalMessage(body)
+	s, ok := chatmsg.FinalMessage(body)
 	if !ok || s.Content != "done" || s.Finish != "stop" {
 		t.Errorf("ok=%v s=%+v", ok, s)
 	}
-	if _, ok := finalMessage("not json"); ok {
+	if _, ok := chatmsg.FinalMessage("not json"); ok {
 		t.Error("string body should not parse")
 	}
 }

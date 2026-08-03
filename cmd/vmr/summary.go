@@ -104,10 +104,10 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 
 	// Grouped by virtual model name first, protocol nested inside — same
 	// order as cmd_check.go's printModels, so a name reachable from more
-	// than one protocol (§3 of the design doc: one name, several
-	// independently-routed protocol faces) reads as one block instead of
-	// scattering its faces across separate, non-adjacent top-level lines
-	// under each protocol's own group. ImageDownscaleMaxPx is a per-name
+	// than one protocol (one name, several independently-routed protocol
+	// faces) reads as one block instead of scattering its faces across
+	// separate, non-adjacent top-level lines under each protocol's own
+	// group. ImageDownscaleMaxPx is a per-name
 	// setting shared by every protocol face (config.VirtualModel, not
 	// EndpointGroup), so it's printed once on the name's own line, not
 	// once per protocol.

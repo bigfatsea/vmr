@@ -4,18 +4,17 @@ package ctxgraph
 
 // EditKind classifies the transition between two consecutive manifests in
 // the same SessKey bucket. Deliberately structural — no template/marker
-// matching — so it works the same for any agent client (design doc F11:
-// at least three real compaction shapes exist, two of which have no marker
-// to match at all).
+// matching — so it works the same for any agent client (at least three
+// real compaction shapes exist, two of which have no marker to match at
+// all).
 //
-// Step 1 shipped four kinds, with a real "mid-conversation splice" (design
-// doc F11's S2: a message rewritten in place, absorbing a summary) and an
-// ordinary trailing-message replacement (ephemeral tail edits, image
-// pruning) both landing in ReplaceTail — deliberately deferred (see that
-// commit's Appendix C.3 "明确不做": telling them apart doesn't change
-// whether the lineage splits, only how the split is explained). Step 2
-// (T2.1) tells them apart: Splice is now its own kind, split out of
-// ReplaceTail by a second structural check (does a suffix of prev's tail
+// Step 1 shipped four kinds, with a real "mid-conversation splice" (a
+// message rewritten in place, absorbing a summary) and an ordinary
+// trailing-message replacement (ephemeral tail edits, image pruning) both
+// landing in ReplaceTail — deliberately deferred ("明确不做": telling them
+// apart doesn't change whether the lineage splits, only how the split is
+// explained). Step 2 tells them apart: Splice is now its own kind, split out
+// of ReplaceTail by a second structural check (does a suffix of prev's tail
 // resurface, unchanged, as a suffix of cur's tail? — evidence the tail
 // wasn't discarded but spliced around). Splice still never splits a
 // lineage, exactly like ReplaceTail — this is a labeling refinement, not a
@@ -25,7 +24,7 @@ type EditKind int
 const (
 	// Append: cur's manifest starts with all of prev's messages (LCP ==
 	// len(prev)) plus something new at the end. The overwhelmingly common
-	// case — 95.86% of edges in the calibration corpus (Appendix A.7).
+	// case — 95.86% of edges in the calibration corpus.
 	Append EditKind = iota
 	// ReplaceTail: a common prefix holds, but the tail diverges without
 	// prev shrinking drastically or losing most of its content, AND none of
@@ -37,10 +36,10 @@ const (
 	// Splice: same shape as ReplaceTail (common prefix holds, tail
 	// diverges, no drastic shrink), but at least spliceMinTailMatch of
 	// prev's tail messages reappear verbatim, in order, at the end of cur's
-	// tail — design doc F11's S2: new content was inserted mid-conversation
-	// and the original tail preserved further along, not discarded. Does
-	// NOT split the lineage (T2.1: "splitting it out is a labeling
-	// refinement, not a correctness fix").
+	// tail — new content was inserted mid-conversation and the original
+	// tail preserved further along, not discarded. Does NOT split the
+	// lineage ("splitting it out is a labeling refinement, not a
+	// correctness fix").
 	Splice
 	// Contract: cur is much smaller than prev (below contractLenRatio) —
 	// history was truncated or rebuilt. Splits the lineage.
@@ -97,8 +96,7 @@ const (
 	// verbatim, in order, at the end of cur's tail. 2 (not 1) guards
 	// against a single short, generic reply ("好的"/"OK") matching by pure
 	// coincidence rather than genuine evidence the tail was preserved —
-	// tune against a wider corpus if this misses or over-fires real splices
-	// (design doc Appendix A.7's T2.1 re-run).
+	// tune against a wider corpus if this misses or over-fires real splices.
 	spliceMinTailMatch = 2
 )
 
@@ -114,8 +112,8 @@ type Edit struct {
 
 // Classify determines the edit between two manifests known to be adjacent
 // in time within the same SessKey bucket. The order of checks matters and
-// mirrors the classifier used to produce the corpus distribution in
-// Appendix A.7 — do not reorder without rechecking that appendix.
+// mirrors the classifier used to produce the calibration corpus's edit-kind
+// distribution — do not reorder without rechecking that distribution.
 func Classify(prev, cur *Manifest) Edit {
 	l := lcpLen(prev.Keys, cur.Keys)
 	cov := coverage(cur.Keys, prev.Keys)
@@ -161,8 +159,8 @@ func commonSuffixLen(a, b []Hash) int {
 
 // coverage is |cur ∩ prev| / len(cur) — how much of cur's content already
 // existed somewhere in prev (not just its LCP-matched prefix), the same
-// set-based check design doc F6/session.go's deltaHasNewInstruction relies
-// on to avoid position-based false positives after a mid-history edit.
+// set-based check session.go's deltaHasNewInstruction relies on to avoid
+// position-based false positives after a mid-history edit.
 func coverage(cur, prev []Hash) float64 {
 	if len(cur) == 0 {
 		return 1.0

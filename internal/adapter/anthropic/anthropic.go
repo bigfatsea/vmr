@@ -58,7 +58,8 @@ func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.
 	// No default anthropic-version: a client that omits it gets exactly
 	// what a direct connection to the provider would see — the provider's
 	// own default, not one vmr picks on its behalf. Forwarding nothing
-	// here is a deliberate passthrough choice (§5.4), not an oversight.
+	// here is a deliberate passthrough choice (see the design doc's
+	// header-passthrough policy), not an oversight.
 	return httpReq, body, nil
 }
 

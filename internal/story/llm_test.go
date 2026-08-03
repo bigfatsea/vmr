@@ -194,7 +194,7 @@ func TestInterpret_CallsServerAndParsesReply(t *testing.T) {
 	if !strings.Contains(sentReq.Messages[1].Content, `"a_journey"`) {
 		t.Error("user message should embed the evidence pack JSON")
 	}
-	// v2 prompt requirements (plan review §6.2 items 1/3, tier-1): the
+	// v2 prompt requirements: the
 	// confidence-tiered root-cause table plus the excerpt-boundary caveat
 	// must actually be in the instructions sent, not just described in a
 	// comment — this is the regression guard against silently reverting to

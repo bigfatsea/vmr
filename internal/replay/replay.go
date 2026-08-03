@@ -79,6 +79,10 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// audit.Redact below (via -record) must mask the same extra header
+	// names live traffic does, or a replay-produced record would leak a
+	// custom credential header the running server's config redacts.
+	audit.SetExtraRedactHeaders(cfg.ExtraRedactHeaders)
 	rv, replayOf, err := selectRecord(opts)
 	if err != nil {
 		return err

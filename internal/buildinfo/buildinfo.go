@@ -55,10 +55,16 @@ func Read() Info {
 }
 
 // Short is the one-token form for a status line or a table column:
-// "fbc034c", "fbc034c-dirty", or "unknown". Deliberately not a semver —
-// this project has no release process to produce one, and a fabricated
-// version number that nothing increments is worse than a commit SHA that
-// is always exactly true.
+// "fbc034c", "fbc034c-dirty", or "unknown". Deliberately not a semver: even
+// though .github/workflows/release.yml does tag releases (v*), this package
+// stays tag-unaware on purpose — it answers "which exact commit is this
+// binary" from the VCS stamp alone, with no -ldflags injection and no
+// generated version.go (see this package's doc comment). A fabricated
+// version number that nothing increments is worse than a commit SHA that is
+// always exactly true; the accepted cost is that `vmr version` on an
+// official release tarball prints the tagged commit's SHA, not the tag
+// itself (`git describe --tags <revision>` or `git log --oneline` maps one
+// to the other in a few seconds when that's what's needed).
 func (i Info) Short() string {
 	if i.Revision == "" {
 		return "unknown"

@@ -3,12 +3,12 @@
 // Package story turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
 // request/response Steps, plus a globally de-duplicated Event stream
-// (design doc §2.3/F1 — reading only the final request's message list
-// misses 26%-99% of what actually happened; the event stream is built by
-// walking every step and keeping only each message's FIRST appearance).
+// (reading only the final request's message list misses 26%-99% of what
+// actually happened; the event stream is built by walking every step and
+// keeping only each message's FIRST appearance).
 //
-// Step 1 scope (design doc Appendix C.3): one Lineage == one Journey — no
-// cross-lineage stitching yet (Appendix C.4/Phase 2). A Lineage that starts
+// Step 1 scope: one Lineage == one Journey — no cross-lineage stitching
+// yet (that's phase 2). A Lineage that starts
 // mid-conversation (BrokeFrom != nil) is rendered with an explicit "context
 // was rebuilt here, not yet reconnected" notice rather than silently
 // treated as a fresh start.
@@ -40,13 +40,13 @@ import (
 const newUserWindow = 8
 
 // Journey is a stitched chain of one or more Lineages rendered as one
-// continuous narrative (design doc Appendix C.4 T2.2). Chain is oldest
+// continuous narrative. Chain is oldest
 // lineage first, exactly as ctxgraph.ChainFrom returns it — Step 1's "one
 // Lineage, one Journey" is the len(Chain)==1 degenerate case, not a
 // separate code path.
 type Journey struct {
 	ID       string
-	Partial  bool // head-truncated (design doc §11 D1) — see BuildAll
+	Partial  bool // head-truncated — see BuildAll
 	Title    string
 	From, To time.Time
 	Tasks    []*Task
@@ -88,13 +88,13 @@ type Step struct {
 	// from the logically-preceding manifest's (the previous manifest in the
 	// same lineage, or — at a stitch boundary — the predecessor lineage's
 	// last manifest). System prompt changes are their own analysis-worthy
-	// event (model switch, tool-set change, platform injection change —
-	// design doc F11) independent of whatever edit classification the
-	// message-content transition got.
+	// event (model switch, tool-set change, platform injection change)
+	// independent of whatever edit classification the message-content
+	// transition got.
 	SysChanged bool
 	// Compaction is non-nil only at a stitch boundary (StitchEdge != nil) —
-	// the information-loss summary design doc §6.4 (= CCR N-4's promise)
-	// calls for: token count before/after, and which identifiable entities
+	// the information-loss summary (CCR N-4's promise) calls for: token
+	// count before/after, and which identifiable entities
 	// (file paths, URLs) mentioned in the swallowed predecessor content
 	// stopped being mentioned versus which survived into this step.
 	Compaction *CompactionInfo
@@ -103,11 +103,11 @@ type Step struct {
 	// dedup-aware equivalent at a stitch boundary — see
 	// newInstructionTitleAtStitch) — as opposed to a pure tool-loop
 	// continuation, a trace-id change, or a stitch boundary with nothing
-	// new to say. Metrics' F10 gap classification (design doc D4) uses this
-	// to tell "the human went quiet and came back" apart from "the agent
+	// new to say. Metrics' F10 gap classification uses this to tell "the
+	// human went quiet and came back" apart from "the agent
 	// kept working on its own" for the gap immediately BEFORE this step.
-	// True for the Journey's very first step by construction (design doc
-	// §11 D1: every Journey opens on a real instruction).
+	// True for the Journey's very first step by construction — every
+	// Journey opens on a real instruction.
 	HumanInitiated bool
 
 	Finish    string
@@ -122,7 +122,7 @@ type Step struct {
 }
 
 // CompactionInfo is the information-loss summary attached to a stitch
-// boundary Step (design doc §6.4). Purely rule-derived — token counts come
+// boundary Step. Purely rule-derived — token counts come
 // straight from recorded Usage, entities from a rough regex scan (file
 // paths, URLs) over the predecessor's last rendered manifest vs this step's
 // own — "宁可粗糙也不猜语义": this doesn't try to understand what was lost,
@@ -139,8 +139,8 @@ type Event struct {
 	Msg          chatmsg.Message
 	FirstStepSeq int
 	// Revises is non-nil when this Event's message sits exactly at a
-	// ctxgraph.Splice edge's divergence point — design doc F11's "revision"
-	// relation: without this, the global seen-hash dedup would render the
+	// ctxgraph.Splice edge's divergence point — the "revision" relation:
+	// without this, the global seen-hash dedup would render the
 	// rewritten message as a brand-new, unrelated Event, reading as if the
 	// same thing got said twice instead of the earlier one being replaced
 	// in place. The referenced Hash is the message it replaces — usually
@@ -152,9 +152,8 @@ type Event struct {
 // agent-specific real-instruction/no-reply judgment calls, WITHOUT
 // stitching — the degenerate len(Chain)==1 case of BuildChain, kept as its
 // own entry point for callers previewing/testing a single lineage in
-// isolation. Rendering a lineage's actual stitched chain (design doc
-// Appendix C.4 T2.2) needs BuildChain(ctxgraph.ChainFrom(l, byIdx), prof)
-// instead.
+// isolation. Rendering a lineage's actual stitched chain needs
+// BuildChain(ctxgraph.ChainFrom(l, byIdx), prof) instead.
 func Build(l *ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey, error) {
 	return BuildChain([]*ctxgraph.Lineage{l}, prof, lang)
 }
@@ -325,9 +324,9 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 			var revisesHash *ctxgraph.Hash
 			deltaStart := 0
 			newTask := (ci == 0 && i == 0) || atStitchBoundary
-			// Default: true only for the Journey's very first step (design
-			// doc §11 D1 — every Journey opens on a real instruction, by
-			// construction). Both branches below override this for their
+			// Default: true only for the Journey's very first step (every
+			// Journey opens on a real instruction, by construction). Both
+			// branches below override this for their
 			// own cases; a plain tool-loop continuation (neither branch
 			// fires) correctly stays false.
 			humanInitiated := ci == 0 && i == 0
@@ -354,7 +353,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgrap
 				hasNewInstr := deltaHasNewInstruction(prof, msgs, rawMsgs, off, m, prevManifest, deltaStart)
 				newTask = traceChanged || (!prevNoReply && hasNewInstr)
 				humanInitiated = hasNewInstr
-				// F11's "revision" relation: a Splice edge's divergence
+				// The "revision" relation: a Splice edge's divergence
 				// point (prevManifest.Keys[e.LCP]) is a message being
 				// rewritten in place, not a coincidental new one — recorded
 				// here and attached to the first NewEvent below, so it
@@ -435,10 +434,10 @@ func stitchTaskTitle(e *ctxgraph.StitchEdge, lang i18n.Lang) string {
 	return i18n.Story(lang).StitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
 }
 
-// extractEntities moved to chatmsg.ExtractEntities (design doc Appendix C.5
-// T3.3/E.2): internal/report needed the same file-path/URL scan for its own
-// compaction section, and chatmsg is the one package both already depend on
-// without crossing either side's archtest boundary.
+// extractEntities moved to chatmsg.ExtractEntities: internal/report needed
+// the same file-path/URL scan for its own compaction section, and chatmsg
+// is the one package both already depend on without crossing either side's
+// archtest boundary.
 func extractEntities(text string) []string { return chatmsg.ExtractEntities(text) }
 
 // buildCompactionInfo computes a stitch boundary's information-loss
@@ -518,8 +517,8 @@ const idCodeLen = 8
 // by content-hash noise).
 //
 // Still fully content-addressed and stable across independent runs
-// regardless of which other files were also loaded (design doc §11 D1):
-// every component here comes from the chain's own manifests (and
+// regardless of which other files were also loaded: every component here
+// comes from the chain's own manifests (and
 // ctxgraph.StitchGraph's evidence, itself derived purely from manifest
 // content), never from load order or which file it was read from.
 func deriveID(chain []*ctxgraph.Lineage) string {
@@ -641,8 +640,8 @@ func lastInstructionInDelta(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 // boundary — see buildFrom) but, unlike lastInstructionInDelta, skips any
 // candidate whose content hash is already in seen. Without this, a stitch
 // boundary whose manifest opens with the same shared anchor the
-// predecessor already showed (the common case — F6's own s231 example
-// keeps the exact opening instruction verbatim) would title the new task
+// predecessor already showed (the common case — the s231 example keeps
+// the exact opening instruction verbatim) would title the new task
 // with that same instruction again, reading as "asked the same thing
 // twice" when nothing new was actually said.
 func newInstructionTitleAtStitch(prof profile.Profile, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {

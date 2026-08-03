@@ -9,7 +9,7 @@ import (
 )
 
 // TestExtractEntities locks in ExtractEntities' behavior now that it's a
-// public, shared entry point (design doc Appendix C.5 T3.3): file paths and
+// public, shared entry point: file paths and
 // URLs are found and de-duplicated in order of first appearance, and the
 // MaxEntities cap is enforced.
 func TestExtractEntities(t *testing.T) {

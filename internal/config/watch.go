@@ -10,8 +10,14 @@ import (
 
 // Watch invokes onChange (debounced) whenever the config file is written,
 // created or renamed. It watches the parent directory because editors and
-// tools typically replace the file rather than write it in place.
-func Watch(path string, onChange func()) (func() error, error) {
+// tools typically replace the file rather than write it in place. onError,
+// if non-nil, is called for every error fsnotify reports on its Errors
+// channel (an exhausted inotify handle, the watched directory disappearing,
+// …) — without it, the watch goroutine used to just read the error and drop
+// it, so hot reload could stop working with zero signal to the operator;
+// SIGHUP would still work, but nothing said so. onError runs on the same
+// internal goroutine as onChange, so it must not block.
+func Watch(path string, onChange func(), onError func(error)) (func() error, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -42,9 +48,12 @@ func Watch(path string, onChange func()) (func() error, error) {
 					timer.Stop()
 				}
 				timer = time.AfterFunc(300*time.Millisecond, onChange)
-			case _, ok := <-watcher.Errors:
+			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
+				}
+				if onError != nil {
+					onError(err)
 				}
 			}
 		}

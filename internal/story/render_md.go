@@ -17,9 +17,8 @@ import (
 // the event stream organized by Task/Step, each Step's genuinely-new
 // content shown inline and its full recorded body available in a folded
 // <details> block. Purely a view over already-computed facts (Task/Step/
-// Event) — no judgment calls happen here, only formatting (design doc
-// §3.3's layering: this is the fact-layer renderer; a narrate-layer on top
-// is Phase C).
+// Event) — no judgment calls happen here, only formatting (this is the
+// fact-layer renderer; a narrate-layer on top is Phase C).
 func RenderMarkdown(j *Journey, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
@@ -178,7 +177,7 @@ func prettyJSON(s string) string {
 func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
 	head := fmt.Sprintf("▸ %s", ev.Msg.Role)
 	if ev.Revises != nil {
-		// F11's "revision" relation: without this marker, a Splice-rewritten
+		// The "revision" relation: without this marker, a Splice-rewritten
 		// message would render as an unrelated new Event — reading as "the
 		// same thing said twice" instead of "this replaces that".
 		head += t.RevisionMarker(ev.Revises.String()[:8])
@@ -192,7 +191,7 @@ func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
 }
 
 // renderCompactionInfo shows a stitch boundary's information-loss summary
-// (design doc §6.4 = CCR N-4's promise): token counts before/after, plus
+// (CCR N-4's promise): token counts before/after, plus
 // which file-path/URL-shaped entities the predecessor's tail mentioned but
 // this step's opening doesn't — versus which survived. Folded by default
 // like everything else here; the point is that it's THERE to check, not

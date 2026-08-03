@@ -2,9 +2,9 @@
 
 // Markdown rendering primitives for per-request detail files (detail.go):
 // collapsible sections and dynamic code fences. Chat-message rendering and
-// SSE stream reassembly moved to internal/chatmsg (see chatmsg_compat.go for
-// the delegating wrappers this file's siblings still call by their old
-// names). Everything here turns one piece of a recorded exchange into
+// SSE stream reassembly live in internal/chatmsg (see that package's doc
+// comment for why: internal/ctxgraph and internal/story also need the same
+// parsing). Everything here turns one piece of a recorded exchange into
 // human-readable Markdown; the document skeleton and diffing live in
 // detail.go.
 package report
@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
@@ -139,19 +140,19 @@ func roleMeasure(body any, measure func(string) int64) map[string]int64 {
 		}
 	}
 	if sys, ok := obj["system"]; ok {
-		add("system", renderContent(sys))
+		add("system", chatmsg.RenderContent(sys))
 	}
 	if instr, ok := obj["instructions"]; ok { // openai-responses
-		add("system", renderContent(instr))
+		add("system", chatmsg.RenderContent(instr))
 	}
-	for _, raw := range rawArray(obj) {
+	for _, raw := range chatmsg.RawArray(obj) {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		role, hasRole := m["role"].(string)
 		if !hasRole { // openai-responses non-message Item: function_call/function_call_output/reasoning/...
-			itemRole, text := responsesItemMessage(m)
+			itemRole, text := chatmsg.ResponsesItemMessage(m)
 			add(itemRole, text)
 			continue
 		}
@@ -160,20 +161,20 @@ func roleMeasure(body any, measure func(string) int64) map[string]int64 {
 			for _, p := range c {
 				pm, isMap := p.(map[string]any)
 				if isMap && pm["type"] == "tool_result" {
-					add("tool", renderPart(pm))
+					add("tool", chatmsg.RenderPart(pm))
 				} else if isMap {
-					add(role, renderPart(pm))
+					add(role, chatmsg.RenderPart(pm))
 				} else {
 					add(role, jsonIndent(p))
 				}
 			}
 		default:
-			add(role, renderContent(c))
+			add(role, chatmsg.RenderContent(c))
 		}
 		if rc, _ := m["reasoning_content"].(string); rc != "" {
 			add(role, rc)
 		}
-		for _, tc := range toolCallList(m["tool_calls"]) {
+		for _, tc := range chatmsg.ToolCallList(m["tool_calls"]) {
 			add(role, tc.Name+tc.Args)
 		}
 	}
@@ -233,7 +234,7 @@ func roleStatLine(chars map[string]int64, withChars, bold bool) string {
 // "is this expanded or folded?". prefix is prepended to the summary line
 // (🆕 for messages added by this turn vs the parent) and is "" for
 // historical context.
-func renderMessageSection(idx int, m chatMessage, prefix string, t i18n.DetailText) string {
+func renderMessageSection(idx int, m chatmsg.Message, prefix string, t i18n.DetailText) string {
 	head := fmt.Sprintf("#%d %s", idx, m.Role)
 	if m.Text == "" {
 		return t.EmptyMessage(prefix, head)

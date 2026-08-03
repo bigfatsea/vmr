@@ -1,18 +1,16 @@
 // Ver 2026-07-30 21:00, by Sonnet 5
 
-// Step 4's 4a module, scoped to the -compare report (design doc Appendix
-// C.6/G; full plan and rationale in `_tmp/plan_sonnet-5.md`): an optional,
-// always-degradable LLM interpretation layer appended to a Comparison's
-// rendered Markdown. Every constraint here traces back to the design doc's
-// three-layer principle (§3.3/C.7): the LLM only ever receives numbers this
-// package already computed (Comparison/ComparisonExtras), never generates a
-// new number itself, and its output is rendered as a clearly-labeled,
-// separately-cached block — never mixed into the fact-layer sections
-// RenderComparisonMarkdown produces.
+// Scoped to the -compare report: an optional, always-degradable LLM
+// interpretation layer appended to a Comparison's rendered Markdown. Every
+// constraint here follows one three-layer principle: the LLM only ever
+// receives numbers this package already computed (Comparison/
+// ComparisonExtras), never generates a new number itself, and its output is
+// rendered as a clearly-labeled, separately-cached block — never mixed into
+// the fact-layer sections RenderComparisonMarkdown produces.
 //
-// Endpoint resolution is deliberately the single simplest option the plan
-// review settled on: a manually-supplied "host:port" for an already-running
-// VMR instance (LLMOptions.Addr) plus that instance's own virtual model name
+// Endpoint resolution is deliberately the single simplest option: a
+// manually-supplied "host:port" for an already-running VMR instance
+// (LLMOptions.Addr) plus that instance's own virtual model name
 // (LLMOptions.Model) — no config.yaml provider/model resolution, no
 // failover, no auto-launched process. This package never depends on
 // internal/router or internal/adapter for it: a plain net/http POST to
@@ -38,8 +36,8 @@ import (
 )
 
 // promptVersionBase is bumped whenever the prompt template or the evidence
-// pack's shape changes materially — part of the disk-cache key (design doc
-// §5.5's "(step_hash, model, prompt_version)" convention, adapted here to
+// pack's shape changes materially — part of the disk-cache key (the
+// "(step_hash, model, prompt_version)" convention, adapted here to
 // "(both journey ids + evidence pack, model, prompt_version)" since this
 // layer operates on a pair of Journeys, not a single step). promptVersionFor
 // appends the language, so switching -lang never reuses another language's
@@ -140,8 +138,8 @@ func journeyTaskTitles(j *Journey) []string {
 // EstimateChars returns the evidence pack's serialized JSON size in
 // characters (Unicode code points, not bytes — an evidence pack full of
 // Chinese task titles/excerpts would otherwise report ~3x its actual
-// character count) — the -llm-dry-run size estimate (`_tmp/plan_sonnet-5.md`
-// §3.4). Deliberately not a token count: estimating tokens accurately would
+// character count) — this is the -llm-dry-run size estimate. Deliberately
+// not a token count: estimating tokens accurately would
 // need a tokenizer matched to whatever model -llm-addr resolves to, which
 // this package has no way to know in advance — chars/4 is close enough for
 // "does this look reasonable before I spend money on it".
@@ -180,8 +178,7 @@ type LLMOptions struct {
 }
 
 // Enabled reports whether opts actually turns the interpretation layer on —
-// Addr is the sole switch (`_tmp/plan_sonnet-5.md` §4: no separate -llm
-// bool flag).
+// Addr is the sole switch, there is no separate -llm bool flag.
 func (o LLMOptions) Enabled() bool { return o.Addr != "" }
 
 // chatURL resolves opts.Addr to the full chat-completions URL. A bare
@@ -347,7 +344,7 @@ func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack, lang i18
 	}
 
 	// Both failure modes here are fail-open by design (the disk cache is an
-	// optimization, not a requirement — design doc §3.4) but are kept as two
+	// optimization, not a requirement) but are kept as two
 	// distinct, separately-named steps rather than one collapsed `if err ==
 	// nil { ... }`: a directory-creation failure (permissions, disk full) and
 	// a single-file write failure are different problems, and keeping them
@@ -363,9 +360,9 @@ func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack, lang i18
 }
 
 // RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
-// with the "this is interpretation, not fact" banner design doc §3.3
-// requires — always rendered as its own clearly separated section, never
-// blended into the fact-layer sections above it.
+// with the "this is interpretation, not fact" banner — always rendered as
+// its own clearly separated section, never blended into the fact-layer
+// sections above it.
 func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang) string {
 	t := i18n.LLM(lang)
 	var b strings.Builder

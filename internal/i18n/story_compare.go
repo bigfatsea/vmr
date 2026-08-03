@@ -4,7 +4,7 @@
 // behavior-profile metric labels internal/story/compare.go's Compare
 // produces. MetricLabel takes the metric code as a plain string (not
 // story.MetricCode) — internal/i18n must not import internal/story (it
-// would invert the dependency direction the design doc §4.2/archtest
+// would invert the dependency direction the design doc and archtest
 // require: story depends on i18n, never the reverse); MetricCode's
 // underlying type is already a plain string, so callers pass
 // string(diff.Metric).

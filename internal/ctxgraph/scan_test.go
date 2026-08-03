@@ -47,7 +47,7 @@ func assistantMsg(text string) map[string]any {
 }
 
 // TestScan_AppendRunThenContractSplitsLineage reproduces the real corpus
-// case (design doc F6/Appendix A.3: session s231, turn 20->21): a session
+// case (session s231, turn 20->21): a session
 // that grows turn by turn via pure appends, then a request whose message
 // list collapses to a handful of messages that still opens with the exact
 // same user instruction (the survives-a-compaction shape) — this must split

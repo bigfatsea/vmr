@@ -52,7 +52,7 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 // cmdStory renders one agent task's full execution history as a
 // self-contained Markdown narrative — see
 // docs/VirtualModelRouter_Design_v4_Analytics.md §3 for the design.
-// Step 2 (design doc Appendix C.4 T2.2): a candidate is no longer always
+// Step 2: a candidate is no longer always
 // exactly one ctxgraph.Lineage — ctxgraph.StitchGraph resolves Contract/
 // Fork breaks back to their best predecessor where the evidence supports
 // it, and ctxgraph.ChainFrom walks the resulting chain into the ordered
@@ -70,10 +70,10 @@ func cmdStory(args []string) error {
 	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
 	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
-	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id or id prefix; design doc Appendix C.6 4d)")
-	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (design doc §11 D1)")
-	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records (design-doc review §2.1)")
-	llmAddr := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -compare's report (Step 4a; see _tmp/plan_sonnet-5.md). Never auto-started; the instance must already be up")
+	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id or id prefix)")
+	includePartial := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range")
+	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
+	llmAddr := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -compare's report. Never auto-started; the instance must already be up")
 	llmModel := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run")
 	llmKey := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured")
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
@@ -112,7 +112,7 @@ func cmdStory(args []string) error {
 	ctxgraph.StitchGraph(g)
 	byIdx := ctxgraph.LineageIndex(g)
 
-	// Step 1 ships exactly one profile (design doc §11 D5): OpenClaw-aware
+	// Step 1 ships exactly one profile: OpenClaw-aware
 	// but harmless on any other agent's input, since none of its patterns
 	// match generic chat text.
 	prof := profile.OpenClawAware
@@ -139,8 +139,8 @@ func cmdStory(args []string) error {
 	return listJourneys(cands, byIdx, g, firstPath, prof, *includePartial, lang)
 }
 
-// resolveJourneyID finds the candidate chain whose ID (design doc §11's
-// content-addressed j-<client>-<start>-<end>-<code>) starts with idPrefix —
+// resolveJourneyID finds the candidate chain whose ID (the content-addressed
+// j-<client>-<start>-<end>-<code>) starts with idPrefix —
 // shared by -journey and -compare, which all resolve a user-supplied id
 // prefix the same way (first match in candidate order, as printed by
 // running with no selector flag at all).
@@ -179,7 +179,7 @@ func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g 
 	// One batched fetch across all candidates instead of one per chain —
 	// story.PreviewTitles groups the underlying reads by source file, so
 	// this scans each file at most once no matter how many candidate
-	// chains are rooted in it (design-doc review §1.2).
+	// chains are rooted in it.
 	chains := make([][]*ctxgraph.Lineage, len(toShow))
 	for i, r := range toShow {
 		chains[i] = r.chain
@@ -214,7 +214,7 @@ func listJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, g 
 
 // maxUngroupedShown caps how many ungrouped records -show-ungrouped prints —
 // a triage aid, not a report; showing all of them defeats the point when
-// there are thousands (design-doc review §2.1).
+// there are thousands.
 const maxUngroupedShown = 10
 
 // printUngrouped prints the source location of the first few ungrouped
@@ -243,7 +243,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	chain := ctxgraph.ChainFrom(target, byIdx)
 	partial := story.IsPartialHead(chain, firstPath)
 	if partial && !includePartial {
-		return fmt.Errorf("journey %s looks head-truncated (design doc §11 D1) — pass -include-partial to render it anyway", story.ID(chain))
+		return fmt.Errorf("journey %s looks head-truncated — pass -include-partial to render it anyway", story.ID(chain))
 	}
 	j, err := story.BuildChain(chain, prof, lang)
 	if err != nil {
@@ -262,7 +262,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	return nil
 }
 
-// compareJourneys is Step 4's 4d module (design doc Appendix C.6/G): resolve
+// compareJourneys is Step 4's 4d module: resolve
 // both id prefixes, build each Journey, diff their already-computed
 // behavior profiles (story.Compare), and write the result as one Markdown +
 // JSON pair — the same .md+.json convention writeJourneyFile uses for a
@@ -282,7 +282,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	partialA := story.IsPartialHead(chainA, firstPath)
 	partialB := story.IsPartialHead(chainB, firstPath)
 	if (partialA || partialB) && !includePartial {
-		return fmt.Errorf("one or both journeys look head-truncated (design doc §11 D1) — pass -include-partial to compare them anyway")
+		return fmt.Errorf("one or both journeys look head-truncated — pass -include-partial to compare them anyway")
 	}
 
 	jA, err := story.BuildChain(chainA, prof, lang)
@@ -316,9 +316,8 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	// Step 4a's compare-scoped LLM interpretation layer (design doc Appendix
-	// C.6/G; full rationale in _tmp/plan_sonnet-5.md) — entirely optional,
-	// switched on by -llm-addr alone.
+	// The compare-scoped LLM interpretation layer (internal/story/llm.go) —
+	// entirely optional, switched on by -llm-addr alone.
 	var llmSection string
 	if llmOpts.Addr != "" {
 		pack := story.BuildEvidencePack(jA, jB, cmp, lang)
@@ -419,13 +418,13 @@ func ensureStoriesDir(outDir string) (string, error) {
 }
 
 // writeJourneyFile writes j's rendered Markdown plus its behavior-profile
-// JSON (design doc §6.5: journey-<id>.json, consumed directly by Step 4's
+// JSON (journey-<id>.json, consumed directly by Step 4's
 // 4d comparison module) into storiesDir, and returns the Markdown path
 // written. 0o600: same sensitivity note as ensureStoriesDir — the JSON
 // carries token counts and tool-call args derived straight from the
 // conversation body.
 //
-// A partial (head-truncated, design doc §11 D1) Journey gets a "-partial"
+// A partial (head-truncated) Journey gets a "-partial"
 // filename suffix — its ID is already unstable (it depends on whatever
 // happened to be the earliest loaded manifest), so the suffix is cheap,
 // visible self-disclosure that this file's beginning isn't the real

@@ -12,15 +12,15 @@ var errEmptyLineage = errors.New("story: lineage has no manifests")
 
 // ListCandidates returns the lineages worth offering as a Journey,
 // chronologically. Each returned lineage is a chain TAIL — call
-// ctxgraph.ChainFrom(l, byIdx) to get its full stitched chain (design doc
-// Appendix C.4 T2.2) before rendering; a lineage with a stitched successor
+// ctxgraph.ChainFrom(l, byIdx) to get its full stitched chain before
+// rendering; a lineage with a stitched successor
 // is excluded here because its content is already reachable through that
 // successor's own chain (rendering it again as its own candidate would
 // duplicate it). A lineage with fewer than two manifests is excluded
 // without any content-based tag detection: a single-request lineage is
 // exactly what a scheduled single-shot call (OpenClaw's heartbeat/
 // dream_diary and similar) looks like structurally, and there is no task
-// narrative to tell for one request anyway (design doc §11 D4).
+// narrative to tell for one request anyway.
 func ListCandidates(g *ctxgraph.Graph) []*ctxgraph.Lineage {
 	hasSuccessor := ctxgraph.StitchedSuccessorSet(g)
 	byIdx := ctxgraph.LineageIndex(g)
@@ -59,7 +59,7 @@ const (
 // actual visible beginning after stitching, not necessarily the candidate
 // lineage passed to ListCandidates — looks like it sits in a file the
 // caller didn't load, rather than genuinely being the start of a
-// conversation (design doc §11 D1). A fresh conversation's first turn is
+// conversation. A fresh conversation's first turn is
 // short — leading system plus one real instruction, maybe a brief ack, so
 // few non-system keys. A root manifest with substantially more content
 // than that, sitting within the first few lines of the earliest scanned

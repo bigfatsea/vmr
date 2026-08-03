@@ -29,7 +29,7 @@ func TestWatchFiresOnWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := make(chan struct{}, 8)
-	stop, err := Watch(path, func() { ch <- struct{}{} })
+	stop, err := Watch(path, func() { ch <- struct{}{} }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestWatchFiresOnAtomicReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := make(chan struct{}, 8)
-	stop, err := Watch(path, func() { ch <- struct{}{} })
+	stop, err := Watch(path, func() { ch <- struct{}{} }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestWatchIgnoresSiblingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := make(chan struct{}, 8)
-	stop, err := Watch(path, func() { ch <- struct{}{} })
+	stop, err := Watch(path, func() { ch <- struct{}{} }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,4 +94,31 @@ func TestWatchIgnoresSiblingFiles(t *testing.T) {
 		t.Fatal("watcher fired for an unrelated sibling file")
 	case <-time.After(700 * time.Millisecond):
 	}
+}
+
+// TestWatchOnErrorNotCalledDuringNormalOperation locks in that onError is
+// wired without disturbing the normal onChange path: a real fsnotify error
+// (exhausted inotify handles, the watched directory disappearing) can't be
+// triggered portably in a unit test, but this at least confirms passing a
+// non-nil onError doesn't change behavior for the common case, and that it
+// stays silent when nothing has gone wrong.
+func TestWatchOnErrorNotCalledDuringNormalOperation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("a: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan struct{}, 8)
+	stop, err := Watch(path, func() { ch <- struct{}{} }, func(err error) {
+		t.Errorf("onError fired unexpectedly: %v", err)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	if err := os.WriteFile(path, []byte("a: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitChange(t, ch, "in-place write")
 }

@@ -13,7 +13,7 @@ import (
 // /TestRealUserTextStripsEnvelope — same corpus-validated behavior, ported
 // verbatim rather than re-derived, since this package's whole reason to
 // exist is "the exact same heuristics, reachable without depending on
-// internal/report" (design doc §7.3/§11 D5).
+// internal/report".
 func TestOpenClawAware_ScaffoldingRejected(t *testing.T) {
 	for _, text := range []string{
 		"OpenClaw runtime context for the immediately preceding user message.\nInternal.",

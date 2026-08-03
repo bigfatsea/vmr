@@ -22,7 +22,7 @@ import (
 
 // cacheFileName is the cache key: sha256 of the original (pre-downscale)
 // image bytes, plus the target maxPx — the same source image downscaled for
-// two different models (different maxPx overrides, §7) produces two
+// two different models (different maxPx overrides) produces two
 // different outputs and must not collide.
 func cacheFileName(hash [32]byte, maxPx int) string {
 	return hex.EncodeToString(hash[:]) + "-" + strconv.Itoa(maxPx) + ".jpg"

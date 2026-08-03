@@ -2,7 +2,7 @@
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
-// Method and evidence: design doc §9.4 "Agent 会话分析".
+// Method and evidence: design doc's "Agent 会话分析" section.
 //
 // The core signal is protocol-generic — agent clients resend the whole
 // conversation each turn, so the first non-system message fingerprints the
@@ -12,13 +12,13 @@
 // used when present and silently skipped when not: a request that matches
 // nothing still groups by the generic rule, it just carries fewer tags.
 //
-// Grouping itself (design doc Appendix C.5 T3.1) is a thin consumer of
+// Grouping itself is a thin consumer of
 // internal/ctxgraph: AnalyzeSessions runs ctxgraph.Scan/StitchGraph over the
 // same paths and uses its already-split Lineages as the one-session-per-
 // Lineage grouping unit, and ctxgraph.Classify for each record's delta
 // against its predecessor — replacing this package's own former private
 // message-hash vector + LCP window search (the exact duplication design doc
-// §2.5 flagged: "同一个数据结构，被四个功能各自绕过"). Every OTHER feature
+// flagged: "同一个数据结构，被四个功能各自绕过"). Every OTHER feature
 // collect() extracts (Tags, ToolsDeclared, RoleChars/Tokens, chat_id, NoReply,
 // realUsers, …) stays exactly as it was — those are report-domain concerns
 // ctxgraph has no reason to know about.
@@ -38,6 +38,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 )
 
@@ -67,7 +68,7 @@ type ReqInfo struct {
 	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim: "" when
 	// auth was disabled and the client sent no credential, or nothing
 	// matched. Drives the by-tag sibling exports in export.go/detail.go —
-	// see design doc §9.4 "按调用方分组导出".
+	// see design doc's "按调用方分组导出" section.
 	ClientKeyTag string
 
 	// grouping
@@ -95,7 +96,7 @@ type ReqInfo struct {
 	ToolCalls      []string
 	Finish         string
 	Truncated      bool
-	Usage          Usage
+	Usage          chatmsg.Usage
 	UsageOK        bool
 
 	DetailFile string // deterministic detail filename (assigned in ts order)
@@ -112,8 +113,8 @@ type ReqInfo struct {
 	//
 	// manifest is this record's ctxgraph.Manifest, correlated by (Path,Line)
 	// after ctxgraph.Scan runs — the message-hash vector, system-prompt
-	// hash, and leading-system-message count all live there now (design doc
-	// Appendix C.5 T3.1); this package no longer computes its own copy. nil
+	// hash, and leading-system-message count all live there now; this
+	// package no longer computes its own copy. nil
 	// for a record ctxgraph couldn't build a Manifest for at all (body
 	// wasn't a parseable chat object — same case collect() already bails
 	// out of early, see the body-parse guard below).
@@ -200,7 +201,7 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // never changes what the final sort sees.
 //
 // ctxgraph.Scan/StitchGraph read the SAME paths independently, in a
-// goroutine alongside collect()'s own pass (design doc Appendix C.5 T3.1) —
+// goroutine alongside collect()'s own pass —
 // group() needs the resulting Graph to assign sessions by Lineage instead
 // of collect()'s former private hash-vector grouping. Running both passes
 // concurrently rather than back-to-back keeps this from roughly doubling
@@ -361,7 +362,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 	}
 	if rec.Client.Response != nil {
-		r.Usage, r.UsageOK = ExtractUsage(rec.Client.Response.Body)
+		r.Usage, r.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
 		if s := responseSummary(rec.Client.Response.Body); s != nil {
 			r.Finish = s.Finish
 			for _, tc := range s.ToolCalls {
@@ -391,7 +392,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	if !ok {
 		return r
 	}
-	r.ToolsDeclared = toolNames(body)
+	r.ToolsDeclared = chatmsg.ToolNames(body)
 	if tools, hasTools := body["tools"]; hasTools || len(r.ToolsDeclared) > 0 {
 		r.ToolsSig = toolsSig(r.ToolsDeclared)
 		if raw, err := json.Marshal(tools); err == nil {
@@ -401,9 +402,9 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	// SessKey (metadata.user_id, else "anchor:" + first non-system message
 	// hash) is NOT computed here — group() sources it straight from this
 	// record's correlated ctxgraph.Manifest.SessKey once ctxgraph.Scan has
-	// run (design doc Appendix C.5 T3.1: one computation, not two).
+	// run (one computation, not two).
 
-	msgs := chatMessages(body) // anthropic system becomes message #0 — same shape both protocols
+	msgs := chatmsg.Messages(body) // anthropic system becomes message #0 — same shape both protocols
 	r.Msgs = len(msgs)
 	r.MessagesKnown = 1 // body parsed as chat object
 	for role, c := range roleChars(body) {
@@ -418,7 +419,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 		r.RoleTokens[role] += t
 	}
-	rawMsgs := rawArray(body)
+	rawMsgs := chatmsg.RawArray(body)
 	// leadSys mirrors ctxgraph.Manifest.LeadSys's definition (count of
 	// contiguous leading role=="system" messages) — recomputed here as a
 	// cheap, hash-free loop bound purely to skip that block in THIS loop;
@@ -436,7 +437,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		}
 		if m.Role == "user" {
 			lastUser = m.Text
-			if text, ok := realUserText(m, rawMsgs, i-msgOffset(body)); ok {
+			if text, ok := realUserText(m, rawMsgs, i-chatmsg.MsgOffset(body)); ok {
 				r.realUsers[i] = preview(text)
 			}
 		}
@@ -456,7 +457,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	}
 
 	// Compaction: summarization system prompt, or the no-tools +
-	// max_completion_tokens shape (§1.6-3 triple features).
+	// max_completion_tokens shape (three-signal compaction heuristic).
 	_, hasMaxCT := body["max_completion_tokens"]
 	sysText := ""
 	if leadSys > 0 {
@@ -500,7 +501,7 @@ var leadingBracketRe = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 // envelope was dropped, so the task title showed an unrelated "continue"
 // ping from 6 minutes earlier instead). A message that's PURELY the
 // envelope — nothing real left after stripping — still doesn't count.
-func realUserText(m chatMessage, rawMsgs []any, rawIdx int) (string, bool) {
+func realUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) (string, bool) {
 	head := capStr(m.Text, 200)
 	if strings.HasPrefix(head, "OpenClaw runtime context") ||
 		strings.HasPrefix(head, "Attached image(s) from tool result") ||
@@ -539,7 +540,7 @@ func realUserText(m chatMessage, rawMsgs []any, rawIdx int) (string, bool) {
 
 // isRealUser reports whether a user message is an actual instruction rather
 // than transport scaffolding. See realUserText for the classification rules.
-func isRealUser(m chatMessage, rawMsgs []any, rawIdx int) bool {
+func isRealUser(m chatmsg.Message, rawMsgs []any, rawIdx int) bool {
 	_, ok := realUserText(m, rawMsgs, rawIdx)
 	return ok
 }
@@ -576,12 +577,12 @@ func toolsSig(names []string) string {
 
 // responseSummary reassembles a recorded client response body (SSE string or
 // JSON object) into the model's output.
-func responseSummary(body any) *streamSummary {
+func responseSummary(body any) *chatmsg.StreamSummary {
 	switch b := body.(type) {
 	case string:
-		return reassembleSSE(b)
+		return chatmsg.ReassembleSSE(b)
 	case map[string]any:
-		if s, ok := finalMessage(b); ok {
+		if s, ok := chatmsg.FinalMessage(b); ok {
 			return s
 		}
 	}
@@ -610,7 +611,7 @@ type recLoc struct {
 // group clusters records into sessions and segments tasks, using g's already
 // -split Lineages as the grouping unit — one SessionInfo per Lineage,
 // instead of this package's former per-SessKey bucketing that never split
-// on a hidden Contract/Fork edit (design doc F6; Appendix C.5 T3.1). r.
+// on a hidden Contract/Fork edit. r.
 // Compaction-tagged records are pulled out into a.Compactions exactly as
 // before — that's a report-only, body-sniffed concept ctxgraph doesn't
 // share, orthogonal to lineage boundaries.
@@ -676,11 +677,11 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 // linkStitchedLineages sets SessionInfo.ContinuedFrom from ctxgraph's own
 // structural stitch resolution wherever a session's underlying Lineage broke
 // away from an earlier one (BrokeFrom != nil) and was matched back to it
-// with enough evidence (Stitch.Outcome == Stitched) — design doc Appendix E:
-// this is what makes an F6-style split still render as "the same
-// conversation, continued" instead of two unrelated sessions, something
-// today's report couldn't even express before (an F6-glued pair used to BE
-// one single SessionInfo, so there was nothing to link).
+// with enough evidence (Stitch.Outcome == Stitched): this is what makes a
+// hidden Contract/Fork split still render as "the same conversation,
+// continued" instead of two unrelated sessions, something today's report
+// couldn't even express before (a stitched pair used to BE one single
+// SessionInfo, so there was nothing to link).
 //
 // This complements, not replaces, linkCompactions' text-based link for
 // standalone compaction LLM calls: that one connects two sessions THROUGH a
@@ -688,11 +689,11 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 // ContinuesTo/successor.ContinuedFrom), a case ctxgraph's exact
 // message-hash matching cannot always resolve — a full-history-rewrite
 // compaction need not share a single verbatim message with its predecessor,
-// so there is nothing in the blob index to stitch on (see design doc
-// Appendix E and F2's real corpus case, where the hash match that DOES work
-// is against later, still-verbatim tool messages, not the summary text
-// itself). linkCompactions runs after this and only fills ContinuedFrom
-// where it's still empty, so it never clobbers a Stitch-derived link.
+// so there is nothing in the blob index to stitch on (real corpus cases show
+// the hash match that DOES work is against later, still-verbatim tool
+// messages, not the summary text itself). linkCompactions runs after this
+// and only fills ContinuedFrom where it's still empty, so it never clobbers
+// a Stitch-derived link.
 func linkStitchedLineages(g *ctxgraph.Graph, sessionOfLineage map[int]*SessionInfo) {
 	for _, l := range g.Lineages {
 		if l.Stitch == nil || l.Stitch.Outcome != ctxgraph.Stitched {
@@ -867,14 +868,14 @@ func hasTag(r *ReqInfo, tag string) bool {
 // continuing from it (whose anchor embeds its output). Both are exact
 // substring checks — no guessing; unmatched sides stay empty.
 //
-// Deliberately still a text-needle match, not a ctxgraph.Stitch lookup
-// (design doc Appendix C.5 T3.1/E): a standalone compaction LLM call's own
+// Deliberately still a text-needle match, not a ctxgraph.Stitch lookup: a
+// standalone compaction LLM call's own
 // input/output need not share a single verbatim message with the sessions
 // on either side of it (a full-history-rewrite compaction has nothing for
 // ctxgraph's exact-hash blob index to match against), so this stays as the
 // complementary signal for that case. group()'s linkStitchedLineages already
 // ran and may have set some sessions' ContinuedFrom from real structural
-// evidence (an F6-style same-lineage break) — this function only fills
+// evidence (a hidden Contract/Fork same-lineage break) — this function only fills
 // ContinuedFrom where it's still empty, so it can never clobber that.
 func linkCompactions(a *SessionAnalysis) {
 	for _, c := range a.Compactions {

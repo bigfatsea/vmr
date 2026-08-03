@@ -57,7 +57,7 @@ func Sticky(lang Lang) StickyText {
 	return StickyText{
 		Title:        "§6.5 Sticky Effectiveness ⭐",
 		Intro1:       "Within the same session: requests that landed back on the **previous request's endpoint** vs. requests that **switched endpoints** — cache efficiency compared between the two groups.\n",
-		Intro2:       "The Sticky Model's (design doc §6.5) only reason to exist is keeping the upstream prompt cache warm — this section is the evidence for whether it actually delivers that.\n\n",
+		Intro2:       "The Sticky Model's only reason to exist is keeping the upstream prompt cache warm — this section is the evidence for whether it actually delivers that.\n\n",
 		TableHeaders: [6]string{"Group", "Requests", "With usage", "Cache Efficiency⭐", "cached", "fresh"},
 		RowContinued: "Same endpoint",
 		RowSwitched:  "Switched endpoint",

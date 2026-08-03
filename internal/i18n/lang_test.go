@@ -15,6 +15,10 @@ func TestParse(t *testing.T) {
 	}{
 		{"en", EN, false}, {"EN", EN, false}, {"english", EN, false}, {"English", EN, false},
 		{"zh", ZH, false}, {"ZH", ZH, false}, {"chinese", ZH, false}, {"zh-cn", ZH, false}, {"zh-CN", ZH, false}, {"zh_cn", ZH, false},
+		// Mixed casings the doc comment always promised ("case-insensitive")
+		// but the original hand-enumerated switch didn't actually accept —
+		// these previously fell through to the error branch.
+		{"Zh", ZH, false}, {"EnGlish", EN, false}, {"CHINESE", ZH, false}, {"ZH-CN", ZH, false}, {"Zh_Cn", ZH, false},
 		{"fr", EN, true}, {"", EN, true}, {"japanese", EN, true},
 	}
 	for _, c := range cases {

@@ -69,10 +69,9 @@ func writeToolCall(name, path, content string) map[string]any {
 	}
 }
 
-// TestComputeComparisonExtras covers the full step-4a-into-4d rule layer
-// (`_tmp/plan_sonnet-5.md` §2/§5) end to end: two single-step Journeys with
-// different endpoints, cache ratios, and tool calls (one with a write-shaped
-// call, one without).
+// TestComputeComparisonExtras covers ComputeComparisonExtras' full rule
+// layer end to end: two single-step Journeys with different endpoints,
+// cache ratios, and tool calls (one with a write-shaped call, one without).
 func TestComputeComparisonExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
 	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai:opencode:deepseek-v4-pro",
@@ -319,9 +318,9 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 	}
 }
 
-// TestRenderComparisonMarkdown_WithExtras covers the new rule-layer sections
-// (`_tmp/plan_sonnet-5.md` §2 points 2-6) end to end via a real
-// ComputeComparisonExtras call, not hand-built fixture data.
+// TestRenderComparisonMarkdown_WithExtras covers the ComparisonExtras
+// rendered sections end to end via a real ComputeComparisonExtras call,
+// not hand-built fixture data.
 func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
 	recA := mkExtrasRec(atA, "system prompt A", "research", "openai:opencode:deepseek-v4-pro",
@@ -365,9 +364,8 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 }
 
 // TestRenderComparisonMarkdown_WithSources covers the evidence-provenance
-// section (plan review `docs/Step4a_compare_LLM解读层_差距分析与改进建议_
-// 2026-07-30_sonnet-5.md` §6.2 item 2): Extras.Sources, when the caller sets
-// it (cmd_story.go does, from resolveInputPaths — ComputeComparisonExtras
+// section: Extras.Sources, when the caller sets it (cmd_story.go does, from
+// resolveInputPaths — ComputeComparisonExtras
 // itself never touches this field), must render as a "证据溯源" section
 // listing every source path so a reader can independently re-open the exact
 // audit records every number in the report was computed from.

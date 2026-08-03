@@ -4,7 +4,7 @@
 // scenario (see docs/VirtualModelRouter_Design_v4_Core.md §12) — plus two
 // subset files, targets-plain.json and targets-image.json, split by
 // whether the scenario exercises image downscaling. Image decode/scale/
-// encode is by far the most expensive code path vmr has (design doc §7);
+// encode is by far the most expensive code path vmr has;
 // mixed into one combined percentile figure it silently drags up the
 // p95/p99/max for every *other*, genuinely-cheap scenario. runner.go fires
 // the two subsets as separate Vegeta attacks so the client-side report
@@ -77,7 +77,7 @@ var imageScenarios = map[string]bool{
 // for the whole run. internal/imgprep's on-disk downscale cache is keyed
 // by content hash + MaxPx, so a single fixed image is a cache MISS
 // (real decode+scale+encode — the expensive work these two scenarios
-// exist to measure, design doc §7) exactly once across the entire run,
+// exist to measure) exactly once across the entire run,
 // then a HIT for every request after that, for as long as this cache
 // entry survives (it isn't cleared between runs the way logs/reports
 // are). That's not a realistic hit rate, and it isn't just imprecise —
@@ -98,7 +98,7 @@ var imageScenarios = map[string]bool{
 // a round are fresh, and only requests beyond that start repeating —
 // enough that p95/p99/max (not just the mean) in every round's own
 // report still reflect real decode+scale+encode cost, which is the
-// entire reason these scenarios exist (design doc §7).
+// entire reason these scenarios exist.
 //
 // 50 (not some far larger number closer to a full run's ~380 total
 // big_image requests) is a deliberate size-vs-realism tradeoff: each
@@ -337,7 +337,7 @@ func animatedGIFDataURI(w, h int) string {
 }
 
 // longHistory simulates an agent resending its full conversation every
-// turn — the request-size regime the design doc's §4 "long_history" row
+// turn — the request-size regime the design doc's "long_history" row
 // targets (audit full-body write, model-field splice, image-marker scan,
 // all at a bigger-than-baseline body size).
 func longHistory(turns int) []message {

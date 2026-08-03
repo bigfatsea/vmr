@@ -20,8 +20,7 @@ func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 // chain[0]'s ROOT record (not every manifest's, unlike BuildChain) — cheap
 // enough to call once, but see PreviewTitles when calling this for every
 // candidate in a listing: one FetchRecords per chain forces one full-file
-// scan per chain even when many chains' roots share the same source file
-// (design-doc review §1.2).
+// scan per chain even when many chains' roots share the same source file.
 func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (string, error) {
 	root := chain[0].Manifests[0]
 	loc := ctxgraph.Loc{Path: root.Path, Line: root.Line}
@@ -37,10 +36,10 @@ func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lan
 // FetchRecords already groups its work by source file (zstd isn't seekable,
 // so each file is scanned at most once regardless of how many lines are
 // wanted from it), so this turns what used to be one full-file scan PER
-// CANDIDATE CHAIN into one full-file scan per FILE — the fix for
-// design-doc review §1.2 ("listJourneys without -journey is much slower
-// than expected: it re-scans a source file once per candidate rooted in
-// it"). The result is keyed by each chain's TAIL lineage (chain's last
+// CANDIDATE CHAIN into one full-file scan per FILE — the fix for a real
+// observed problem ("listJourneys without -journey is much slower than
+// expected: it re-scans a source file once per candidate rooted in it").
+// The result is keyed by each chain's TAIL lineage (chain's last
 // element) — the same pointer ListCandidates returned and callers already
 // use as the candidate's identity.
 func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {

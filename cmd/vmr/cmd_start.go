@@ -61,6 +61,21 @@ func logStart(logger *log.Logger, path string, listen string) {
 	logger.Printf("VMR START pid=%d config=%s listen=%s", os.Getpid(), path, listen)
 }
 
+// logConfigCheckIssues surfaces operational config problems (config.Check)
+// that structural validation lets through — most notably an empty api_key
+// from a typo'd or unset ${ENV_VAR}, which loads as valid YAML and only
+// fails once a real request 401s. Called on every path that can put a new
+// config into service without a human running `vmr check` by hand: initial
+// start, and every hot reload (fsnotify/SIGHUP), including the reloads a
+// service manager's restart triggers. Warnings only — a Check() issue is
+// "can run but may be wrong", not grounds to refuse a config validate()
+// already accepted.
+func logConfigCheckIssues(logger *log.Logger, issues []config.Issue) {
+	for _, is := range issues {
+		logger.Printf("WARN config check: %s", is.Message)
+	}
+}
+
 // logStop prints one timestamped, greppable marker line on the way out —
 // clean shutdown or abnormal exit alike — so "how long did this process
 // run and why did it stop" is answerable from the log file alone.
@@ -85,12 +100,14 @@ func cmdStart(args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	logStart(logger, *path, cfg.Listen)
+	logConfigCheckIssues(logger, cfg.Check())
 
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
 	// must land before New, not after, or that first sweep compresses old
 	// files but never purges them.
 	audit.SetRetentionDays(cfg.AuditRetentionDays)
+	audit.SetExtraRedactHeaders(cfg.ExtraRedactHeaders)
 
 	var auditLog *audit.Logger
 	if *auditOn {
@@ -135,6 +152,7 @@ func cmdStart(args []string) error {
 			rt.RecordReload(trigger, err)
 			return
 		}
+		logConfigCheckIssues(logger, newCfg.Check())
 		newSnap, err := router.BuildSnapshot(newCfg)
 		if err != nil {
 			logger.Printf("rejected, keeping current config: %v", err)
@@ -144,13 +162,16 @@ func cmdStart(args []string) error {
 		rt.Install(newSnap)
 		rt.RecordReload(trigger, nil)
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
+		audit.SetExtraRedactHeaders(newCfg.ExtraRedactHeaders)
 		if newCfg.LogDir != auditDirInUse {
 			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
 				auditDirInUse, newCfg.LogDir)
 		}
 		logConfigSummary(logger, newCfg, newSnap)
 	}
-	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") })
+	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") }, func(err error) {
+		logger.Printf("WARN config watch: %v (hot reload may have stopped working; SIGHUP still works)", err)
+	})
 	if err != nil {
 		logger.Printf("config watch disabled: %v (SIGHUP still works)", err)
 	} else {

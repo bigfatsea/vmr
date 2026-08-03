@@ -191,7 +191,7 @@ func TestAuditRecordsFacts_NilWhenRejectedBeforeParsing(t *testing.T) {
 
 // TestErrorBodyCappedAndAuditMarksTruncation locks in router.errBodyCap's
 // two-copy split: the client gets an untouched, capped prefix of the
-// upstream body (byte-faithful, §1 — no marker ever leaks into what a real
+// upstream body (byte-faithful — no marker ever leaks into what a real
 // caller sees), while the audit trail's copy gets a truncation marker
 // appended so a human reading vmr-audit-*.jsonl knows the body was cut, not
 // that the upstream really sent something that short.

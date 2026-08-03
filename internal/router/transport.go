@@ -46,7 +46,7 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 		},
 		// Never follow upstream redirects: POST 301/302/303 would be
 		// silently rewritten to GET by the default policy, violating
-		// byte-faithful passthrough (§1). LLM APIs almost never send 3xx,
+		// byte-faithful passthrough. LLM APIs almost never send 3xx,
 		// but if one does the client sees exactly what a direct call would
 		// — the 3xx status, Location header, and body, untouched.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

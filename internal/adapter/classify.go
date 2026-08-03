@@ -323,10 +323,21 @@ func skipJSONValue(b []byte, i int) (int, bool) {
 		}
 		return 0, false
 	default:
-		// number / true / false / null: scan to the next structural delimiter
+		// number / true / false / null: scan to the next structural
+		// delimiter. start guards against zero-progress "success": if b[i]
+		// is itself already a delimiter, there was no value token here at
+		// all (e.g. a stray "," or unmatched "}" where a value was
+		// expected) — returning (i, true) unchanged would let every caller
+		// here, all of which loop as `i, ok = skipJSONValue(...); continue`
+		// on ok==true, spin forever re-scanning the same byte. Malformed
+		// input must fail the scan (ok=false), not stall it.
+		start := i
 		for i < len(b) {
 			switch b[i] {
 			case ',', '}', ']', ' ', '\t', '\n', '\r':
+				if i == start {
+					return 0, false
+				}
 				return i, true
 			}
 			i++

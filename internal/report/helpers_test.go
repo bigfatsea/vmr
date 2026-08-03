@@ -1,14 +1,14 @@
 // Ver 2026-07-25, report
 
-// Tests for small shared helpers: attemptErrorClass (render.go) and the
-// ExtractUsage re-export (chatmsg_compat.go, backed by chatmsg.ExtractUsage)
-// — both load-bearing via session.go/detail.go.
+// Tests for small shared helpers: attemptErrorClass (render.go) and
+// chatmsg.ExtractUsage — both load-bearing via session.go/detail.go.
 package report
 
 import (
 	"testing"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 )
 
 // TestAttemptErrorClassFallback covers backward compatibility with audit
@@ -89,7 +89,7 @@ func TestExtractUsage(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			u, ok := ExtractUsage(c.body)
+			u, ok := chatmsg.ExtractUsage(c.body)
 			if u.In != c.in || u.Out != c.out || u.CacheRead != c.cacheRead || u.CacheWrite != c.cacheWrite || ok != c.ok {
 				t.Errorf("got %+v ok=%v, want in=%d out=%d cacheRead=%d cacheWrite=%d ok=%v",
 					u, ok, c.in, c.out, c.cacheRead, c.cacheWrite, c.ok)

@@ -139,7 +139,7 @@ type EndpointGroup struct {
 // ImageDownscaleMaxPx is a pointer so "unset" (inherit the global
 // image_downscale) and "explicitly 0" (force-disable for this model, even
 // if the global setting is on) are distinguishable — a plain int can't
-// represent that distinction (§7 image downscale, priority: model > global).
+// represent that distinction (priority: model > global).
 //
 // A VirtualModel is reachable from whichever ingress protocol(s) its own
 // Endpoints declare — the same virtual model name can mix an openai-protocol
@@ -253,9 +253,17 @@ type Config struct {
 	// its directory once at startup); image_cache_dir follows hot reloads.
 	LogDir              string `yaml:"log_dir"`
 	ImageCacheDir       string `yaml:"image_cache_dir"`
-	ImageDownscaleMaxPx int    `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority, see design doc §7)
+	ImageDownscaleMaxPx int    `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
 	ImageCacheTTLDays   int    `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
 	AuditRetentionDays  int    `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
+	// ExtraRedactHeaders names additional client request headers to mask in
+	// the audit trail the same way the built-in credential list (see
+	// audit.credentialHeaders) already masks Authorization/X-Api-Key/etc —
+	// for a client's own custom auth header vmr's adapters don't know about,
+	// which would otherwise sit in the audit file in cleartext. Matched
+	// case-insensitively, same as the built-in list. Absent/empty (the
+	// default) changes nothing.
+	ExtraRedactHeaders []string `yaml:"extra_redact_headers"`
 	// StickyTTL is the global default for how long a Sticky Model affinity
 	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md
 	// §6.5); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
@@ -401,6 +409,11 @@ func (c *Config) validate() error {
 	for i, k := range c.APIKeys {
 		if len(k) < minAPIKeyLen {
 			return fmt.Errorf("api_keys[%d]: too short (min %d characters) — its tail becomes a report label (see audit.KeyTag), so short keys would expose the whole key", i, minAPIKeyLen)
+		}
+	}
+	for i, h := range c.ExtraRedactHeaders {
+		if strings.TrimSpace(h) == "" {
+			return fmt.Errorf("extra_redact_headers[%d]: empty header name", i)
 		}
 	}
 	// A slice, not a map: map iteration order is randomized, and a name+value

@@ -170,7 +170,7 @@ func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {
 }
 
 // TestWriteJSONSetsStatusAndContentType locks in the shape router and server
-// both rely on (formerly two byte-identical local copies, see design doc §11).
+// both rely on (formerly two byte-identical local copies).
 func TestWriteJSONSetsStatusAndContentType(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
@@ -214,7 +214,7 @@ func TestWriteErrorEnvelope(t *testing.T) {
 	}
 }
 
-// BenchmarkHealthKey_Unfrozen/Frozen quantifies §4.1's claim: HealthKey()
+// BenchmarkHealthKey_Unfrozen/Frozen quantifies the claim that HealthKey()
 // re-hashes APIKey with SHA-256 on every call unless Freeze() was called
 // once up front (router.BuildSnapshot does this for every real Endpoint).
 func BenchmarkHealthKey_Unfrozen(b *testing.B) {

@@ -315,22 +315,54 @@ func EncodeBody(body []byte) any {
 // on the response side.
 var credentialHeaders = []string{"Authorization", "X-Api-Key", "Api-Key", "X-Auth-Token", "Cookie", "Set-Cookie", "Proxy-Authorization"}
 
+// extraRedactHeaders holds config-supplied header names (config's
+// extra_redact_headers) masked the same way as the built-in
+// credentialHeaders list above. This covers a gap the built-in list can't:
+// a client's own custom auth header (e.g. "X-Custom-Token") that none of
+// vmr's adapters know about, and so isn't in credentialHeaders, still
+// arrives on the client request and would otherwise sit in the audit file
+// in cleartext. atomic.Pointer rather than the registries' mutex-guarded
+// copy-on-write pattern (see adapter.registry/strategy.conditions) because
+// this is a whole-value replace on every (re)load, never an incremental
+// update — same shape as retentionDays above, just for a slice instead of
+// an int.
+var extraRedactHeaders atomic.Pointer[[]string]
+
+// SetExtraRedactHeaders updates the extra redaction list (config's
+// extra_redact_headers); nil or empty is a no-op difference from the
+// built-in credentialHeaders list, not an error.
+func SetExtraRedactHeaders(names []string) {
+	cp := append([]string(nil), names...)
+	extraRedactHeaders.Store(&cp)
+}
+
 // IsCredentialHeader reports whether h is one of the header names Redact
-// masks. A stored audit record's value for such a header is a placeholder
-// ("Bearer ***c1d4"), never the real credential — a consumer that
-// reconstructs a request from an audit record (internal/replay) must strip
-// these in addition to whatever headers it would otherwise block, or it
-// forwards the masked placeholder to a live upstream as if it were real.
+// masks — the built-in credentialHeaders list plus whatever
+// SetExtraRedactHeaders configured. A stored audit record's value for such
+// a header is a placeholder ("Bearer ***c1d4"), never the real credential —
+// a consumer that reconstructs a request from an audit record
+// (internal/replay) must strip these in addition to whatever headers it
+// would otherwise block, or it forwards the masked placeholder to a live
+// upstream as if it were real.
 func IsCredentialHeader(h string) bool {
 	for _, k := range credentialHeaders {
 		if strings.EqualFold(k, h) {
 			return true
 		}
 	}
+	if p := extraRedactHeaders.Load(); p != nil {
+		for _, k := range *p {
+			if strings.EqualFold(k, h) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
-// Redact copies headers, masking credential values ("Bearer sk-…" → "***c1d4").
+// Redact copies headers, masking credential values ("Bearer sk-…" → "***c1d4")
+// for both the built-in credentialHeaders list and whatever
+// SetExtraRedactHeaders configured.
 func Redact(h http.Header) http.Header {
 	if h == nil {
 		return nil
@@ -339,16 +371,23 @@ func Redact(h http.Header) http.Header {
 	for k, vs := range h {
 		out[k] = append([]string(nil), vs...)
 	}
-	for _, k := range credentialHeaders {
-		if vs := out.Values(k); len(vs) > 0 {
+	maskNames(out, credentialHeaders)
+	if p := extraRedactHeaders.Load(); p != nil {
+		maskNames(out, *p)
+	}
+	return out
+}
+
+func maskNames(h http.Header, names []string) {
+	for _, k := range names {
+		if vs := h.Values(k); len(vs) > 0 {
 			masked := make([]string, len(vs))
 			for i, v := range vs {
 				masked[i] = mask(v)
 			}
-			out[http.CanonicalHeaderKey(k)] = masked
+			h[http.CanonicalHeaderKey(k)] = masked
 		}
 	}
-	return out
 }
 
 func mask(v string) string {

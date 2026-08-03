@@ -55,7 +55,7 @@ func (s *Server) Handler() http.Handler {
 // to send still gets KeyTag-derived and recorded — a private-network caller
 // can identify itself to `vmr report` just by ending its own
 // Authorization/x-api-key value in "-<label>", with zero vmr-side config.
-// A client sending nothing still gets "" (design doc §4.3/§9.4).
+// A client sending nothing still gets "".
 func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
 	cfg := s.rt.Snapshot().Cfg
 	got := trimBearerPrefix(r.Header.Get("Authorization"))
@@ -157,7 +157,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 
 		// Probe the routing fields before acquiring the concurrency gate or
 		// downscaling images: both of the latter are per-model (image
-		// downscale can be overridden per virtual model, §7) and cheap JSON
+		// downscale can be overridden per virtual model) and cheap JSON
 		// parsing shouldn't wait behind either. One structural scan yields
 		// model/stream/hasTools together (adapter.TopLevelProbe) instead of
 		// a reflective json.Unmarshal for model/stream plus a second,
@@ -191,7 +191,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// with screenshot resolution. Response bodies are never touched.
 		// The effective cap is the virtual model's own override if it set
 		// one (even 0, which force-disables it for that model), else the
-		// global default (§7). Detection (format/dimensions/count) always
+		// global default. Detection (format/dimensions/count) always
 		// runs regardless of that cap (n<=0 just skips the resize/cache path
 		// inside imgprep) — a plain-text request with no image marker at all
 		// still costs only one cheap substring scan (imgprep.HasImageMarker)
@@ -280,9 +280,24 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 		OwnedBy  string `json:"owned_by"`
 		Protocol string `json:"vmr_protocol"`
 	}
+	// A virtual model name can be registered under more than one ingress
+	// protocol at once (one openai-protocol endpoint group and one
+	// anthropic-protocol one sharing the same name, see config's
+	// VirtualModel doc comment) — from a client's perspective that's still
+	// one addressable model (it always calls it by the one name it was
+	// configured with), so the id must appear exactly once here, not once
+	// per protocol. Protocols are walked in sorted order so the reported
+	// vmr_protocol for a name registered under more than one is
+	// deterministic across requests, not whichever the map's random
+	// iteration order happened to visit first.
+	seen := make(map[string]bool)
 	var list []model
-	for protocol, byName := range snap.Models {
-		for name := range byName {
+	for _, protocol := range core.SortedKeys(snap.Models) {
+		for _, name := range core.SortedKeys(snap.Models[protocol]) {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
 			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: protocol})
 		}
 	}

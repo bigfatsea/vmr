@@ -10,8 +10,8 @@ import (
 )
 
 // TestStitchGraph_CompactionCase reuses the exact real-corpus shape
-// TestScan_AppendRunThenContractSplitsLineage already reproduces (design
-// doc F6/A.3: s231 turn 20->21): a 5-turn append run, then a Contract whose
+// TestScan_AppendRunThenContractSplitsLineage already reproduces (the real
+// corpus case: s231 turn 20->21): a 5-turn append run, then a Contract whose
 // opening keeps the same anchor. The two lineages share a SessKey (so Scan
 // already splits them), and the successor's opening overlaps 100% with the
 // predecessor's accumulated content — StitchGraph must reconnect them as
@@ -62,7 +62,7 @@ func TestStitchGraph_CompactionCase(t *testing.T) {
 	}
 }
 
-// TestStitchGraph_NoPredecessorFoundForGenuinelyNewLineage covers F4's
+// TestStitchGraph_NoPredecessorFoundForGenuinelyNewLineage covers
 // "sometimes not-found is the correct answer": a Fork-origin break whose
 // opening shares nothing at all with any earlier lineage, and no
 // metadata.user_id to fall back on for a same_chat signal either.

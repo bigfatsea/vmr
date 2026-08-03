@@ -1,7 +1,7 @@
 // Ver 2026-07-29 23:00, by Sonnet 5
 
-// End-to-end coverage for design doc Appendix C.4 T2.2's acceptance
-// criterion #2: "s231 的两段被缝成一个 journey，边类型 compaction，置信度
+// End-to-end coverage for the stitching acceptance criterion:
+// "s231 的两段被缝成一个 journey，边类型 compaction，置信度
 // 高，证据可打印" — the real s231 pattern (pure appends, then a Contract
 // that keeps the same opening user message) rendered all the way through
 // Scan -> StitchGraph -> ListCandidates -> ChainFrom -> BuildChain ->
@@ -34,13 +34,13 @@ func s231StyleFixture(t *testing.T) string {
 		msgsList = append(msgsList, msg("assistant", "step reply"))
 	}
 	// Contract: history collapses, but the exact opening instruction
-	// survives verbatim — the real s231 shape (design doc F6/A.3-A.4).
+	// survives verbatim — the real s231 shape.
 	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1, msg("assistant", "post-break reply")}, sseText("continuing")))
 
 	return writeJSONL(t, recs)
 }
 
-// TestStitchedJourney_EndToEnd is the full pipeline check for T2.2's
+// TestStitchedJourney_EndToEnd is the full pipeline check for the stitching
 // acceptance criterion.
 func TestStitchedJourney_EndToEnd(t *testing.T) {
 	path := s231StyleFixture(t)
@@ -96,7 +96,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 	// The stitch-boundary step (the 6th, last) carries nothing genuinely new
 	// — its only content is the shared opening instruction (already shown
 	// by the predecessor) plus "post-break reply" from the ASSISTANT side,
-	// not a real user instruction. HumanInitiated must be false there: T2.4
+	// not a real user instruction. HumanInitiated must be false there:
 	// metrics.go's F10 gap classification depends on this to count the long
 	// pre-compaction gap as agent-side execution, not human idle.
 	last := j.Tasks[len(j.Tasks)-1].Steps[len(j.Tasks[len(j.Tasks)-1].Steps)-1]

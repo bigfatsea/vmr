@@ -21,7 +21,7 @@ import (
 
 // BackstopTTL bounds memory growth independent of any per-endpoint
 // validity TTL, which can range from minutes (Anthropic/OpenAI/MiniMax) to
-// days (DeepSeek's disk cache) — see design doc §2.4. It only governs when
+// days (DeepSeek's disk cache). It only governs when
 // a stale entry is dropped from the map; it has no bearing on whether a
 // still-present entry is "valid" for a routing decision, which Peek leaves
 // entirely to the caller.
@@ -40,7 +40,7 @@ const BackstopTTL = core.StickyBackstopTTL
 
 // sweepInterval throttles the opportunistic sweep so Set doesn't walk the
 // whole map on every call — same event-triggered-and-throttled shape as
-// the image downscale cache housekeeping (design doc §7.1), not an
+// the image downscale cache housekeeping, not an
 // independent ticker goroutine.
 const sweepInterval = time.Hour
 
@@ -78,7 +78,7 @@ func (r *Registry) Peek(key string) (endpointKey string, lastUsed time.Time, ok 
 // endpointKey, refreshing its last-used time. Call this after every
 // successful completion — including a failover success, not only the
 // first time a session is seen — so the pointer follows wherever the
-// conversation's cache is actually warm (design doc §2.5, point 3).
+// conversation's cache is actually warm.
 func (r *Registry) Set(key, endpointKey string) {
 	now := time.Now()
 	r.mu.Lock()

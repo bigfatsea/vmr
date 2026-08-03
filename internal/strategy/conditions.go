@@ -35,7 +35,7 @@ func init() {
 	})
 	// "thinking" is deliberately not registered yet: the request-side
 	// signal (WantsThinking) has no detection logic behind it until the
-	// Anthropic/OpenAI/MiniMax protocol shapes are confirmed (see design
-	// doc §1.3④) — registering the condition now would be a no-op that
-	// looks implemented but never fires, which is worse than leaving it out.
+	// Anthropic/OpenAI/MiniMax protocol shapes are confirmed — registering
+	// the condition now would be a no-op that looks implemented but never
+	// fires, which is worse than leaving it out.
 }

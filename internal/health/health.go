@@ -143,6 +143,43 @@ func backoff(base, cap time.Duration, fails int) time.Duration {
 	return d
 }
 
+// Classify answers the router's per-candidate health-filter question in one
+// locked read instead of two: available reports whether the endpoint should
+// be handed real traffic this round; needsProbe reports whether the caller
+// just claimed the single-flight half-open probe slot and must launch a
+// background probe (see internal/router/probe.go). Replaces the router's
+// former Status(key,now).Fails>0 + Acquire(key,now) / Available(key,now)
+// two-call sequence, which separately locked and unlocked the registry
+// twice per endpoint per request — and, on the Fails>0 path, built a full
+// Status struct (including a lastClass.String() call) just to read one
+// field — plus left a window between the two locked reads where another
+// goroutine's ReportSuccess/ReportFailure could change the state being
+// classified out from under it. Status/Acquire/Available stay as their own
+// methods: Status backs /admin/status's full health view, and Acquire is
+// still used standalone by the router's per-attempt loop once a candidate
+// has already passed this filter.
+func (r *Registry) Classify(key string, now time.Time) (available, needsProbe bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.m[key]
+	if !ok || s.fails == 0 {
+		return true, false
+	}
+	// cooldownUntil is only ever set alongside fails>0 (ReportSuccess always
+	// clears both together), so a fails>0 state with cooldownUntil in the
+	// future is still cooling down — not available, no probe to launch yet.
+	if now.Before(s.cooldownUntil) {
+		return false, false
+	}
+	// Half-open: cooldown expired, at least one failure on record. Exactly
+	// one caller gets to claim the probe slot, same rule Acquire enforces.
+	if s.probing {
+		return false, false
+	}
+	s.probing = true
+	return false, true
+}
+
 // Status is one endpoint's health as exposed by /admin/status.
 type Status struct {
 	Fails         int       `json:"consecutive_failures"`
