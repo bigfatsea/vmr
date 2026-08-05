@@ -5,8 +5,8 @@
 // recently, successfully served it, used to keep a multi-turn agent
 // conversation on the same upstream endpoint so the provider's prompt
 // cache stays warm. See
-// docs/VirtualModelRouter_Design_v4_Core.md §6.5 for the full
-// design — in particular why this package deliberately knows nothing about
+// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section for the
+// full design — in particular why this package deliberately knows nothing about
 // config, endpoints, or TTL values: validity is a per-endpoint property
 // (internal/core.Endpoint.StickyTTL) the caller resolves, not something
 // this registry can determine on its own.

@@ -9,7 +9,7 @@
 //
 // The report is organized around nine numbered sections (§0-§8) plus §6.5
 // sticky effectiveness, §6.6 endpoint value, and §6.7 compaction — see
-// docs/VirtualModelRouter_Design_v4_Analytics.md §2.
+// docs/VirtualModelRouter_Design_v4_Analytics.md's `vmr report` section.
 //
 // Meta.Format (const Format, rows.go) encodes one invariant: every bucket
 // keeps its own raw dur_ms / ttft_ms / stream_ms slices and computes true

@@ -20,6 +20,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 
 	_ "vmr/internal/adapter/anthropic"
 	_ "vmr/internal/adapter/openai"
@@ -893,8 +894,18 @@ func TestSnippetRuneSafe(t *testing.T) {
 // one section per phase (blank line separated, human-readable title instead
 // of the bare phase string), route entries sub-grouped and indented under
 // their Group header, and target columns padded to that section's own
-// longest entry so status/detail line up.
+// longest entry so status/detail line up. RanAt is only ever time.Now()
+// (never a persisted, foreign-offset value read back later — see its own
+// doc comment), but the summary line still goes through fmtutil.DisplayZone
+// like every other timestamp render in this codebase, for the same
+// grep-ability/consistency reason, not because a skew is actually possible
+// here; DisplayZone is pinned to a non-UTC zone so this assertion actually
+// proves the conversion happens rather than coincidentally matching input.
 func TestFormatTable_GroupedFixedWidth(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.FixedZone("TEST+05:00", 5*3600)
+	defer func() { fmtutil.DisplayZone = origZone }()
+
 	ranAt := time.Date(2026, 7, 19, 10, 42, 7, 0, time.UTC)
 	rep := &Report{RanAt: ranAt, Results: []Result{
 		{Phase: "config", Target: "config.yaml", Status: StatusOK, Detail: "1 provider(s), 1 model(s)"},
@@ -947,8 +958,8 @@ func TestFormatTable_GroupedFixedWidth(t *testing.T) {
 	if strings.Count(table, "agent [openai]") != 1 {
 		t.Errorf("a Group header must print once, not once per row: %q", table)
 	}
-	if !strings.HasSuffix(table, "Summary: 4 ok, 0 warn, 2 fail (2026-07-19 10:42:07)\n") {
-		t.Errorf("summary line must report ok/warn/fail counts and RanAt: %q", table)
+	if !strings.HasSuffix(table, "Summary: 4 ok, 0 warn, 2 fail (2026-07-19 15:42:07)\n") {
+		t.Errorf("summary line must report ok/warn/fail counts and RanAt converted through fmtutil.DisplayZone (10:42:07 UTC -> 15:42:07 at TEST+05:00): %q", table)
 	}
 }
 

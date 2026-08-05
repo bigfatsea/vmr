@@ -16,6 +16,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/fmtutil"
 	"vmr/internal/router"
 	"vmr/internal/server"
 )
@@ -44,7 +45,7 @@ const vmrBanner = `
 type stampWriter struct{ w io.Writer }
 
 func (s stampWriter) Write(p []byte) (int, error) {
-	line := append([]byte(time.Now().Format("2006-01-02 15:04:05")+" "), p...)
+	line := append([]byte(time.Now().In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")+" "), p...)
 	if _, err := s.w.Write(line); err != nil {
 		return 0, err
 	}

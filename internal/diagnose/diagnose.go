@@ -609,7 +609,7 @@ func FormatTable(rep *Report) string {
 			fail++
 		}
 	}
-	fmt.Fprintf(&b, "\nSummary: %d ok, %d warn, %d fail (%s)\n", ok, warn, fail, rep.RanAt.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&b, "\nSummary: %d ok, %d warn, %d fail (%s)\n", ok, warn, fail, rep.RanAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"))
 	return b.String()
 }
 

@@ -1,7 +1,8 @@
 // Ver 2026-07-30, by Sonnet 5
 //
 // End-to-end tests for condition-based routing (see
-// docs/VirtualModelRouter_Design_v4_Core.md §6.4): a request's
+// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
+// section): a request's
 // content (image/tools present, estimated size) determines which endpoints
 // in a virtual model's candidate list are even eligible, independent of
 // health and priority.

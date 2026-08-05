@@ -4,7 +4,7 @@
 
 本文档描述 vmr 审计日志的两个离线消费方：聚合报表 `vmr report`（`internal/report`）与 Agent 任务叙事重建 `vmr story`（`internal/story` + 支撑层 `internal/ctxgraph`/`internal/chatmsg`）。读完即可维护与二次开发这一侧。使用文档见 `README.md`/`README.zh.md`、`docs/UserGuide.md`/`UserGuide.zh.md`。
 
-**这是 v4 版设计文档的 Part 2（共两部分）**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。两份文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1 §9.2 定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
+**这是 v4 版设计文档的 Part 2（共两部分）**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。两份文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1"记录结构"一节定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
 
 ---
 

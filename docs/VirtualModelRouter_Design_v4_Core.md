@@ -4,7 +4,7 @@
 
 本文档描述 vmr 路由核心的完整设计：定位、架构、机制与关键决策。读完即可维护与二次开发路由主线（`internal/{core,config,adapter,health,probe,strategy,sticky,router,server,audit,imgprep,diagnose,replay,buildinfo,rundir,archtest}` + `cmd/vmr` 里除 `cmd_report.go`/`cmd_story.go` 外的全部子命令）。使用文档见 `README.md`（英文）/ `README.zh.md`（中文）。
 
-**这是 v4 版设计文档的 Part 1（共两部分）**：审计日志的两个离线消费方——聚合报表 `vmr report` 与 Agent 任务叙事重建 `vmr story`（`internal/{report,story,ctxgraph,chatmsg}` + `cmd_report.go`/`cmd_story.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档 §9.2）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。**v3**（`VirtualModelRouter_System_Design_v3.md`）是本文档的上一版，内容已全部拆分到 Part 1/Part 2 两份 v4 文档中，不再维护；早期版本的过程记录如需追溯，见 git 历史。
+**这是 v4 版设计文档的 Part 1（共两部分）**：审计日志的两个离线消费方——聚合报表 `vmr report` 与 Agent 任务叙事重建 `vmr story`（`internal/{report,story,ctxgraph,chatmsg}` + `cmd_report.go`/`cmd_story.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档"记录结构"一节）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。**v3**（`VirtualModelRouter_System_Design_v3.md`）是本文档的上一版，内容已全部拆分到 Part 1/Part 2 两份 v4 文档中，不再维护；早期版本的过程记录如需追溯，见 git 历史。
 
 ---
 
@@ -615,7 +615,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 ### 9.4 统计分析工具 `vmr report` / `vmr story`
 
 审计 JSONL 的离线消费方——聚合报表（`vmr report`）与 Agent 任务叙事重建（`vmr story`）——完整设计见姊妹文档
-`docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。两者与本文档描述的路由核心只通过审计日志格式耦合（本节 §9.2 的 Record 结构是它们唯一的输入契约），不共享任何路由期状态，也不反向影响路由决策——`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里（`internal/archtest` 强制这条边界）。
+`docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。两者与本文档描述的路由核心只通过审计日志格式耦合（"记录结构"一节的 Record 结构是它们唯一的输入契约），不共享任何路由期状态，也不反向影响路由决策——`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里（`internal/archtest` 强制这条边界）。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 

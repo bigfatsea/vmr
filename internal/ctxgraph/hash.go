@@ -5,9 +5,10 @@
 // message hashes), and the edit between consecutive manifests within the
 // same raw session grouping is classified (append / replace-tail / contract
 // / fork) purely structurally — no template matching, no agent-specific
-// knowledge. See docs/VirtualModelRouter_Design_v4_Analytics.md §3.0-3.1 for
-// the derivation and §5 for the corpus evidence this design is calibrated
-// against.
+// knowledge. See docs/VirtualModelRouter_Design_v4_Analytics.md's First
+// Principles and internal/ctxgraph content-addressing layer sections for
+// the derivation, and its Empirical Validation section for the corpus
+// evidence this design is calibrated against.
 //
 // This package must not depend on vmr/internal/{router,server,config,report,
 // story} — see internal/archtest's import boundary test. It depends only on

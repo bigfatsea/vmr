@@ -21,7 +21,8 @@ import (
 //
 // internal/ctxgraph (the content-addressed manifest/lineage layer behind
 // `vmr story`, and now behind internal/report's own session grouping too;
-// see docs/VirtualModelRouter_Design_v4_Analytics.md §3.1) is
+// see docs/VirtualModelRouter_Design_v4_Analytics.md's internal/ctxgraph
+// content-addressing layer section) is
 // held to the same island rule, plus one more: it must not depend on
 // internal/report — report now legitimately depends on ctxgraph in
 // production code (one-directional), and ctxgraph depending back on report

@@ -117,7 +117,7 @@ models:
 // capabilities/max_context_tokens reach core.Endpoint unchanged from
 // config, and that an endpoint not declaring them ends up unconstrained
 // (nil Capabilities, 0 MaxContextTokens) — see
-// docs/VirtualModelRouter_Design_v4_Core.md §6.4.
+// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing section.
 func TestBuildSnapshotCarriesConditionRoutingFields(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
@@ -257,7 +257,7 @@ func TestMergeCapabilitiesDedup(t *testing.T) {
 // TestBuildSnapshotResolvesStickyDefaultAndOverride locks the *bool ->
 // bool resolution (nil = true) plus the endpoint-level StickyTTL
 // inherit/override split — see
-// docs/VirtualModelRouter_Design_v4_Core.md §6.5.
+// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section.
 func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0

@@ -16,7 +16,7 @@ var (
 // SessionFingerprint locates the system prompt (if any) and the first
 // non-system message in raw, and returns the md5 of each as separate
 // values. This is Sticky Model's own extraction (see
-// docs/VirtualModelRouter_Design_v4_Core.md §6.5) — a
+// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section) — a
 // standalone byte-range scan, no full unmarshal. It is deliberately NOT
 // shared with internal/report/session.go's offline session-grouping
 // anchor: session.go tolerates system-prompt drift within one conversation

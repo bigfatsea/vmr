@@ -13,6 +13,7 @@ import (
 
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 )
 
 // statusResponse is the /admin/status payload, as much of it as this
@@ -163,10 +164,10 @@ func printStatus(st *statusResponse) {
 	// disk looks perfectly healthy in every line below this one.
 	if st.Instance.ConfigStale {
 		fmt.Printf("  WARNING: config file modified %s — newer than the config this process is serving\n",
-			st.Instance.ConfigMtime.Local().Format("2006-01-02 15:04:05"))
+			st.Instance.ConfigMtime.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"))
 		if !st.Reload.At.IsZero() && !st.Reload.OK {
 			fmt.Printf("           last reload (%s at %s) was REJECTED: %s\n",
-				st.Reload.Trigger, st.Reload.At.Local().Format("15:04:05"), oneLine(st.Reload.Err))
+				st.Reload.Trigger, st.Reload.At.In(fmtutil.DisplayZone).Format("15:04:05"), oneLine(st.Reload.Err))
 		} else {
 			fmt.Println("           no reload has picked it up — check the log, or send SIGHUP to retry")
 		}
@@ -183,7 +184,7 @@ func printStatus(st *statusResponse) {
 			}
 		}
 		fmt.Printf("reload: %d applied, last %s at %s %s\n",
-			st.Reload.Count, st.Reload.Trigger, st.Reload.At.Local().Format("15:04:05"), state)
+			st.Reload.Count, st.Reload.Trigger, st.Reload.At.In(fmtutil.DisplayZone).Format("15:04:05"), state)
 	}
 	if st.Concurrency.Limit > 0 {
 		fmt.Printf("concurrency: %d/%d in flight, %d waiting\n",
@@ -198,7 +199,7 @@ func printStatus(st *statusResponse) {
 			state := "ok"
 			if !ep.Available {
 				state = fmt.Sprintf("COOLDOWN until %s (%s, fails=%d)",
-					ep.CooldownUntil.Local().Format("15:04:05"), ep.LastError, ep.Fails)
+					ep.CooldownUntil.In(fmtutil.DisplayZone).Format("15:04:05"), ep.LastError, ep.Fails)
 			} else if ep.Fails > 0 {
 				probing := ""
 				if ep.Probing {

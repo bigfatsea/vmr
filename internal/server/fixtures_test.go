@@ -12,9 +12,10 @@ import "fmt"
 // twoEndpointYAML is the shared fixture for failover/health/probe tests,
 // which repeatedly send the byte-identical simpleReq and expect each call
 // to be freshly routed by health/priority — sticky: false so Sticky
-// Model's default-on affinity (see docs/VirtualModelRouter_Design_v4_Core.md
-// §6.5) never pins repeated calls to whichever endpoint last succeeded and
-// masks the health/priority behavior these tests exist to pin down.
+// Model's default-on affinity (see docs/VirtualModelRouter_Design_v4_Core.md's
+// Sticky Model section) never pins repeated calls to whichever endpoint
+// last succeeded and masks the health/priority behavior these tests exist
+// to pin down.
 func twoEndpointYAML(u1, u2 string, extra string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0

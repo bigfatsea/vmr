@@ -1223,6 +1223,29 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 	}
 }
 
+// TestRenderCompactionsTSConvertsToDisplayZone proves the §6.7 Compaction
+// table's TS column goes through fmtutil.DisplayZone like every other
+// human-facing timestamp in this package, rather than a raw cut() of the
+// record's own embedded offset (regression: section_compaction.go's
+// renderCompactions used to call cut(c.TS, 19), which showed the source
+// offset verbatim and never converted at all).
+func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.FixedZone("TEST+05:00", 5*3600)
+	defer func() { fmtutil.DisplayZone = origZone }()
+
+	rep := &Report2{Compactions: []CompactionRow{
+		{TS: "2026-07-24T00:00:00Z", TokensIn: 100, TokensOut: 10},
+	}}
+	md := Markdown(rep, i18n.EN)
+	if !strings.Contains(md, "2026-07-24 05:00:00") {
+		t.Errorf("compaction TS should render as 05:00:00 in DisplayZone (TEST+05:00), not the source 00:00:00 UTC:\n%s", md)
+	}
+	if strings.Contains(md, "2026-07-24T00:00:00Z") {
+		t.Errorf("compaction TS rendered the raw RFC3339 string verbatim instead of converting through DisplayZone:\n%s", md)
+	}
+}
+
 // TestMarkdownTableCellsWithPercentRenderVerbatim locks in a bug 2.6's
 // mdTable refactor introduced and the real-log verification caught: row()
 // originally passed the joined cell string straight to w(format, ...) as

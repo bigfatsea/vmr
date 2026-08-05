@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/fmtutil"
 	"vmr/internal/report"
 )
 
 // timestampWriter prefixes every line written through it with
-// "2006-01-02 15:04:05.000 " (local time, millisecond precision) — `vmr
+// "2006-01-02 15:04:05.000 " (fmtutil.DisplayZone, millisecond precision) — `vmr
 // report`'s progress output otherwise has no way to show how long each
 // phase/file actually took. One Write() call is assumed to be one
 // already-formatted line (true for every fmt.Fprintf call site this wraps),
@@ -23,7 +24,7 @@ import (
 type timestampWriter struct{ w io.Writer }
 
 func (tw timestampWriter) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(tw.w, time.Now().Format("2006-01-02 15:04:05.000")+" "); err != nil {
+	if _, err := io.WriteString(tw.w, time.Now().In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05.000")+" "); err != nil {
 		return 0, err
 	}
 	if _, err := tw.w.Write(p); err != nil {

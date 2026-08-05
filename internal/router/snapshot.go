@@ -33,7 +33,7 @@ type ModelRoute struct {
 	// Sticky mirrors config.ModelConfig.Sticky, resolved at BuildSnapshot
 	// time: nil (field absent in config) defaults to true, so Sticky Model
 	// affinity applies unless a virtual model explicitly opts out. See
-	// docs/VirtualModelRouter_Design_v4_Core.md §6.5.
+	// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section.
 	Sticky bool
 }
 
