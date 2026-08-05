@@ -2,11 +2,13 @@
 
 // Direct unit tests for render_spine.go's decision-spine layer
 // (renderOverviewCard/timelineNodes/structuralTags, renderDecisionSpine,
-// stepRoleTag, renderToolTimeline, argPreview/padRight) — previously only
-// exercised indirectly via golden_test.go's no-tool-call, no-Finding
-// fixture, which never touched any of the populated code paths. Fixtures
-// reuse this package's existing helpers: journeyOf/journeyOfTasks/tc from
+// stepRoleTag, renderToolTimeline, padRight) — previously only exercised
+// indirectly via golden_test.go's no-tool-call, no-Finding fixture, which
+// never touched any of the populated code paths. Fixtures reuse this
+// package's existing helpers: journeyOf/journeyOfTasks/tc from
 // compare_test.go/findings_test.go, not a new fixture style.
+// render_spine_args_test.go covers toolCallLine/scalarSummary/capFull, the
+// argument-renderer half split into render_spine_args.go.
 package story
 
 import (
@@ -262,14 +264,12 @@ func TestRenderDecisionSpine(t *testing.T) {
 		}
 	})
 
-	t.Run("one line per tool_call, grouped by Task, Finding marker only on the referenced Step", func(t *testing.T) {
+	t.Run("one block per Step, grouped by Task, Finding marker only on the referenced Step's header", func(t *testing.T) {
 		w, buf := capture()
-		task1 := &Task{Title: "first task", Steps: []*Step{
-			{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a.go"}`)}},
-		}}
-		task2 := &Task{Title: "second task", Steps: []*Step{
-			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"b.go"}`)}},
-		}}
+		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a.go"}`)}}
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"b.go"}`)}}
+		task1 := &Task{Title: "first task", Steps: []*Step{s1}}
+		task2 := &Task{Title: "second task", Steps: []*Step{s2}}
 		j := journeyOfTasks(task1, task2)
 		findings := []Finding{{Code: FindingExactRepeatToolCall, StepSeq: 2}}
 		renderDecisionSpine(w, j, findings, i18n.EN)
@@ -281,26 +281,124 @@ func TestRenderDecisionSpine(t *testing.T) {
 		if !strings.Contains(out, et.SpineTaskLine(2, "second task")) {
 			t.Errorf("output missing task 2 header: %q", out)
 		}
-
-		readLine := et.SpineActionLine("read", argPreview(`{"path":"a.go"}`))
-		writeLine := et.SpineActionLine("write", argPreview(`{"path":"b.go"}`))
-		if !strings.Contains(out, readLine) || strings.Contains(out, readLine+et.SpineFindingTag) {
-			t.Errorf("output should contain the unmarked read line %q, got %q", readLine, out)
+		if !strings.Contains(out, toolCallLine(tc("read", `{"path":"a.go"}`), et)) {
+			t.Errorf("output missing the read tool call: %q", out)
 		}
-		if !strings.Contains(out, writeLine+et.SpineFindingTag) {
-			t.Errorf("output should contain the Finding-marked write line %q, got %q", writeLine+et.SpineFindingTag, out)
+		if !strings.Contains(out, toolCallLine(tc("write", `{"path":"b.go"}`), et)) {
+			t.Errorf("output missing the write tool call: %q", out)
+		}
+
+		step1Header := "**" + stepRoleTag(s1, false, et) + " Step 1 · " + at(0).Format("15:04:05") + "**"
+		step2Header := "**" + stepRoleTag(s2, false, et) + " Step 2 · " + at(1).Format("15:04:05") + "**"
+		if !strings.Contains(out, step1Header+"\n\n") {
+			t.Errorf("output should contain the unmarked Step 1 header %q, got %q", step1Header, out)
+		}
+		if !strings.Contains(out, step2Header+et.SpineFindingTag) {
+			t.Errorf("output should contain the Finding-marked Step 2 header %q, got %q", step2Header+et.SpineFindingTag, out)
 		}
 	})
 
-	t.Run("RelatedSeq also earns the Finding marker", func(t *testing.T) {
+	t.Run("RelatedSeq also earns the Finding marker, on the Step header", func(t *testing.T) {
 		w, buf := capture()
-		j := journeyOf(&Step{Seq: 5, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}})
+		s := &Step{Seq: 5, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
 		findings := []Finding{{Code: FindingUnverifiedSuccess, StepSeq: 99, RelatedSeq: []int{5}}}
 		renderDecisionSpine(w, j, findings, i18n.EN)
 		out := buf.String()
-		want := et.SpineActionLine("bash", argPreview(`{"cmd":"x"}`)) + et.SpineFindingTag
+		want := "**" + stepRoleTag(s, false, et) + " Step 5 · " + at(0).Format("15:04:05") + "**" + et.SpineFindingTag
 		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, want it to contain RelatedSeq-marked line %q", out, want)
+			t.Errorf("output = %q, want it to contain the RelatedSeq-marked header %q", out, want)
+		}
+	})
+
+	t.Run("non-consecutive exact repeat: each Step still gets its own block, role-tagged as a repeat", func(t *testing.T) {
+		w, buf := capture()
+		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("exec", `{"command":"go build"}`)}}
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), ToolCalls: []chatmsg.ToolCall{tc("exec", `{"command":"go test"}`)}}
+		s3 := &Step{Seq: 3, Manifest: mkManifest(at(2)), ToolCalls: []chatmsg.ToolCall{tc("exec", `{"command":"go build"}`)}} // repeats Step 1
+		j := journeyOf(s1, s2, s3)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+
+		n := strings.Count(out, "Step 1 ·") + strings.Count(out, "Step 2 ·") + strings.Count(out, "Step 3 ·")
+		if n != 3 {
+			t.Fatalf("expected exactly 3 separate Step blocks (not collapsed), got %d:\n%s", n, out)
+		}
+		normalHeader := "**" + et.StepTagAction + " Step 1 · " + at(0).Format("15:04:05") + "**"
+		if !strings.Contains(out, normalHeader) {
+			t.Errorf("output = %q, want Step 1 role-tagged as a normal action (%s)", out, et.StepTagAction)
+		}
+		repeatHeader := "**" + et.StepTagRetry + " Step 3 · " + at(2).Format("15:04:05") + "**"
+		if !strings.Contains(out, repeatHeader) {
+			t.Errorf("output = %q, want Step 3 role-tagged as a repeat (%s) of Step 1's identical call", out, et.StepTagRetry)
+		}
+	})
+
+	t.Run("multiple tool calls in one Step all render under that Step's single header", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 3, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{
+			tc("web_fetch", `{"url":"https://example.com"}`),
+			tc("web_search", `{"query":"a"}`),
+			tc("web_search", `{"query":"b"}`),
+		}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Count(out, "Step 3 ·") != 1 {
+			t.Errorf("output = %q, want exactly one Step 3 header even though it made 3 tool calls", out)
+		}
+		if !strings.Contains(out, "`web_fetch`") {
+			t.Errorf("output missing web_fetch call: %q", out)
+		}
+		if strings.Count(out, "`web_search`") != 2 {
+			t.Errorf("output = %q, want both web_search calls to appear", out)
+		}
+	})
+
+	t.Run("RespText renders as the why-line, in full", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: "先试试东方财富接口", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if !strings.Contains(out, "> 先试试东方财富接口\n\n") {
+			t.Errorf("output = %q, want the RespText why-line", out)
+		}
+	})
+
+	t.Run("Reasoning renders as a 🤔-prefixed why-line only when RespText is empty", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), Reasoning: "let me check the docs first", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if !strings.Contains(out, "> 🤔 let me check the docs first\n\n") {
+			t.Errorf("output = %q, want the Reasoning why-line", out)
+		}
+	})
+
+	t.Run("RespText wins over Reasoning when both are present", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: "stated plan", Reasoning: "inner reasoning", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if !strings.Contains(out, "> stated plan\n\n") {
+			t.Errorf("output = %q, want RespText's why-line", out)
+		}
+		if strings.Contains(out, "inner reasoning") {
+			t.Errorf("output = %q, must not also show Reasoning when RespText is present", out)
+		}
+	})
+
+	t.Run("neither RespText nor Reasoning: no why-line at all", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, ">") {
+			t.Errorf("output = %q, must not invent a why-line when the Step said nothing", out)
 		}
 	})
 }
@@ -456,42 +554,7 @@ func TestRenderToolTimeline(t *testing.T) {
 	})
 }
 
-// --- argPreview / padRight -------------------------------------------------
-
-func TestArgPreview(t *testing.T) {
-	t.Run("short input: unchanged", func(t *testing.T) {
-		in := "short args"
-		if got := argPreview(in); got != in {
-			t.Errorf("argPreview(%q) = %q, want unchanged", in, got)
-		}
-	})
-
-	t.Run("collapses internal whitespace/newlines", func(t *testing.T) {
-		got := argPreview("a\n  b\tc")
-		if got != "a b c" {
-			t.Errorf("argPreview whitespace collapse = %q, want %q", got, "a b c")
-		}
-	})
-
-	t.Run("truncates at spineArgPreviewLen runes with an ellipsis", func(t *testing.T) {
-		long := strings.Repeat("x", spineArgPreviewLen+10)
-		got := argPreview(long)
-		wantPrefix := strings.Repeat("x", spineArgPreviewLen)
-		if got != wantPrefix+"…" {
-			t.Errorf("argPreview(long) = %q, want %d x's + ellipsis", got, spineArgPreviewLen)
-		}
-		if len([]rune(got)) != spineArgPreviewLen+1 {
-			t.Errorf("argPreview(long) rune length = %d, want %d", len([]rune(got)), spineArgPreviewLen+1)
-		}
-	})
-
-	t.Run("exactly at the limit: no truncation", func(t *testing.T) {
-		exact := strings.Repeat("y", spineArgPreviewLen)
-		if got := argPreview(exact); got != exact {
-			t.Errorf("argPreview(exact-length) = %q, want unchanged %q", got, exact)
-		}
-	})
-}
+// --- padRight ---------------------------------------------------------------
 
 func TestPadRight(t *testing.T) {
 	t.Run("pads a short string to n", func(t *testing.T) {

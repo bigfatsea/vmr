@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -69,7 +70,7 @@ func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
-	journeyArg := fs.String("journey", "", "render this journey (id or id prefix, as printed by running with no -journey)")
+	journeyArg := fs.String("journey", "", "render this journey: an id or id-prefix, a comma-separated list of ids/prefixes/globs, and/or a shell-style glob (*, ?, [...]) matched against the full id — e.g. -journey j-a,j-b or -journey 'j-openclaw-*'. A selector resolving to exactly one journey renders as before (and alone supports -llm-addr); more than one batches like -render-all")
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
 	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id or id prefix)")
 	corpus := fs.Bool("corpus", false, "compute corpus-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey")
@@ -101,7 +102,18 @@ func cmdStory(args []string) error {
 		return err
 	}
 	llmOpts.CacheDir = llmCacheDir
-	if llmOpts.Addr != "" && (*renderAll || *corpus) {
+	// llmAddrExplicit, not llmOpts.Addr != "", gates every "-llm-addr isn't
+	// supported here" rejection below: report.yaml's llm_addr is a
+	// standing convenience default for the single-journey/-compare case
+	// (so a lone `-journey <id>` never needs -llm-addr typed out), and
+	// none of -render-all/-corpus/a multi-match -journey selector ever
+	// reads llmOpts at all — they'd just silently not use it. Treating
+	// that default's mere presence as a hard error (as this used to)
+	// means anyone with an llm_addr configured for convenience can no
+	// longer run a plain batch render at all; only an -llm-addr the user
+	// actually typed on this invocation is worth rejecting outright.
+	llmAddrExplicit := flagPassed(fs, "llm-addr")
+	if llmAddrExplicit && (*renderAll || *corpus) {
 		return fmt.Errorf("-llm-addr is not supported with -render-all or -corpus (would fire one LLM call per journey) — use -journey to interpret one at a time")
 	}
 	if *corpus && (*compare != "" || *journeyArg != "" || *renderAll) {
@@ -174,11 +186,22 @@ func cmdStory(args []string) error {
 		return corpusStats(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx)
 	}
 	if *journeyArg != "" {
-		target, _, err := resolveJourneyID(cands, byIdx, *journeyArg)
+		ids := make([]string, len(cands))
+		for i, ch := range chains {
+			ids[i] = story.ID(ch)
+		}
+		targets, err := resolveJourneySelector(cands, ids, *journeyArg)
 		if err != nil {
 			return err
 		}
-		return renderJourney(target, byIdx, firstPath, prof, includePartial, outDir, llmOpts, lang, idx)
+		if len(targets) == 1 {
+			return renderJourney(targets[0], byIdx, firstPath, prof, includePartial, outDir, llmOpts, lang, idx)
+		}
+		if llmAddrExplicit {
+			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), *journeyArg)
+		}
+		return renderJourneys(targets, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
+			"no matching journeys to render (all skipped as partial-head; pass -include-partial)")
 	}
 	if *renderAll {
 		return renderAllJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx)
@@ -232,6 +255,61 @@ func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage
 		}
 	}
 	return nil, nil, fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", idPrefix)
+}
+
+// journeyPatternMatches reports whether id satisfies pattern: a shell-style
+// glob (pattern contains *, ?, or [) matched against the full id via
+// path.Match — path.Match rather than filepath.Match since a journey id is
+// a plain string, not a filesystem path, and this must behave identically
+// regardless of OS — or, absent any glob character, the original -journey/
+// -compare "id or id prefix" prefix match.
+func journeyPatternMatches(id, pattern string) bool {
+	if strings.ContainsAny(pattern, "*?[") {
+		ok, err := path.Match(pattern, id)
+		return err == nil && ok
+	}
+	return strings.HasPrefix(id, pattern)
+}
+
+// resolveJourneySelector parses -journey's value — a comma-separated list
+// of tokens, each an id/id-prefix or a shell-style glob (see
+// journeyPatternMatches) — into the matching candidate set: every token's
+// matches are merged and de-duplicated, returned in candidate (i.e.
+// chronological listing) order, same order -render-all/-corpus already
+// use. Every token must match at least one candidate, else the whole
+// selector errors — same "fail loud on what looks like a typo" stance the
+// single-id form always had, now applied per token so `-journey
+// real,typo` still catches the typo instead of silently rendering only the
+// real one. Unlike resolveJourneyID (still used by -compare, which needs
+// exactly one match per side and keeps its own "first match wins"
+// contract), a plain prefix token here can resolve to more than one
+// journey — the natural reading of "select journeys whose id starts with
+// this" once selection is a set instead of a single target.
+func resolveJourneySelector(cands []*ctxgraph.Lineage, ids []string, selector string) ([]*ctxgraph.Lineage, error) {
+	matched := make([]bool, len(cands))
+	for _, tok := range strings.Split(selector, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			return nil, fmt.Errorf("-journey %q: empty id/pattern between commas", selector)
+		}
+		hit := false
+		for i, id := range ids {
+			if journeyPatternMatches(id, tok) {
+				matched[i] = true
+				hit = true
+			}
+		}
+		if !hit {
+			return nil, fmt.Errorf("no journey matching %q (run without -journey to list candidates)", tok)
+		}
+	}
+	var out []*ctxgraph.Lineage
+	for i, l := range cands {
+		if matched[i] {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // listJourneys prints the candidate listing (unchanged stdout format) and,
@@ -333,7 +411,10 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
-			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang)
+			// scope "": renderJourney's document only ever has one LLM
+			// section (unlike -compare, there's no second, divergence-
+			// scoped call to disambiguate it from).
+			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, "")
 		}
 	}
 
@@ -418,7 +499,12 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 			// this must never fail the -compare command itself.
 			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
-			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang)
+			// A non-"" scope: -compare's document can carry a second LLM
+			// section below (the divergence-point-scoped call just below,
+			// when one fires) — without a distinguishing label here, both
+			// would render under the byte-identical heading "## LLM 解读
+			// （模型：X）" with nothing in the outline to tell them apart.
+			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
 		}
 
 		// A second, separately-cached LLM call scoped to just the
@@ -435,7 +521,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
 			} else {
-				divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang)
+				divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
 				if llmSection != "" {
 					llmSection += "\n" + divSection
 				} else {
@@ -471,12 +557,16 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	return saveStoryIndex(idx, outDir, lang)
 }
 
-// renderAllJourneys renders every non-partial candidate in one batched
-// pass instead of requiring -journey <id> one at a time — story.BuildAll
-// shares a single FetchRecords call across every candidate (same fix
-// PreviewTitles applied to the listing path), so this costs about the same
-// I/O as just listing, not N times more.
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+// renderJourneys renders every given candidate (skipping partial-head ones
+// unless includePartial) in one batched pass — story.BuildAll shares a
+// single FetchRecords call across every candidate (same fix PreviewTitles
+// applied to the listing path), so this costs about the same I/O as just
+// listing, not N times more. Shared by renderAllJourneys (-render-all,
+// every candidate) and -journey's multi-match dispatch (a comma-list/glob
+// selector that resolved to more than one journey) — the two differ only
+// in which candidates they pass in and the message printed when none of
+// them survive the partial-head filter.
+func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
@@ -491,7 +581,7 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 		toRenderPartial = append(toRenderPartial, partial)
 	}
 	if len(toRender) == 0 {
-		fmt.Println("no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
+		fmt.Println(noneMsg)
 		return saveStoryIndex(idx, outDir, lang)
 	}
 
@@ -520,6 +610,13 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 	}
 	fmt.Print(t.AllRenderedNote(len(journeys), storiesDir))
 	return saveStoryIndex(idx, outDir, lang)
+}
+
+// renderAllJourneys renders every non-partial candidate journey — see
+// renderJourneys.
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
+		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
 }
 
 // corpusStats builds every non-partial candidate journey (same

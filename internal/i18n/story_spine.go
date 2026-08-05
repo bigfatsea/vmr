@@ -22,10 +22,10 @@ type SpineText struct {
 	TagContextCompacted string
 	TagsLine            func(tags string) string
 
-	SpineTitle      string
-	SpineTaskLine   func(idx int, title string) string
-	SpineActionLine func(tool, argSummary string) string
-	SpineFindingTag string // appended to a spine action line that hit a Finding
+	SpineTitle          string
+	SpineTaskLine       func(idx int, title string) string
+	SpineFindingTag     string                // appended to a spine Step header that hit a Finding
+	SpineValueTruncated func(more int) string // appended to a tool-call payload block capped at spineFullCap
 
 	StepTagPlan       string
 	StepTagAction     string
@@ -66,12 +66,12 @@ func Spine(lang Lang) SpineText {
 			TagContextCompacted: "上下文压缩",
 			TagsLine:            func(tags string) string { return "**标签**：" + tags + "\n\n" },
 
-			SpineTitle:    "## 决策脊柱\n\n",
-			SpineTaskLine: func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
-			SpineActionLine: func(tool, argSummary string) string {
-				return "- 🔧 " + tool + "(" + argSummary + ")"
-			},
+			SpineTitle:      "## 决策脊柱\n\n",
+			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 			SpineFindingTag: " ⚠️",
+			SpineValueTruncated: func(more int) string {
+				return "\n… （还有 " + strconv.Itoa(more) + " 字符，完整内容见下方该 Step 的 tool_call 详情）"
+			},
 
 			StepTagPlan:       "📋",
 			StepTagAction:     "🔧",
@@ -112,12 +112,12 @@ func Spine(lang Lang) SpineText {
 		TagContextCompacted: "context-compacted",
 		TagsLine:            func(tags string) string { return "**Tags**: " + tags + "\n\n" },
 
-		SpineTitle:    "## Decision Spine\n\n",
-		SpineTaskLine: func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
-		SpineActionLine: func(tool, argSummary string) string {
-			return "- 🔧 " + tool + "(" + argSummary + ")"
-		},
+		SpineTitle:      "## Decision Spine\n\n",
+		SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 		SpineFindingTag: " ⚠️",
+		SpineValueTruncated: func(more int) string {
+			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's tool_call section below)"
+		},
 
 		StepTagPlan:       "📋",
 		StepTagAction:     "🔧",

@@ -390,11 +390,19 @@ func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T,
 // RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
 // with the "this is interpretation, not fact" banner — always rendered as
 // its own clearly separated section, never blended into the fact-layer
-// sections above it.
-func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang) string {
+// sections above it. scope distinguishes this section's title from
+// another LLM section in the SAME document — pass "" when this is the
+// only one (renderJourney's single call); -compare's two calls (the
+// overall comparison, and — only when a divergence point was found — a
+// second, separately-cached call scoped to just that point) must each
+// pass their own non-empty scope, or both would render under the
+// byte-identical heading "## LLM 解读（模型：X）" with nothing in the
+// document's own outline to tell a reader they're two different sections
+// covering two different things, not one section pasted in twice.
+func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang, scope string) string {
 	t := i18n.LLM(lang)
 	var b strings.Builder
-	b.WriteString(t.SectionTitle(opts.Model))
+	b.WriteString(t.SectionTitle(opts.Model, scope))
 	b.WriteString(t.SectionDisclaimer(opts.Model))
 	if res.Cached {
 		b.WriteString(t.CachedNote)

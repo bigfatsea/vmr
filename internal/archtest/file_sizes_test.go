@@ -52,8 +52,14 @@ var fileLineLimits = map[string]int{
 	// registration time as the detail.go/session.go/journey.go entries
 	// above, a paragraph's worth of room, not an invitation to keep
 	// growing unnoticed.
-	"internal/story/render_md.go":           350,
-	"internal/story/render_spine.go":        380,
+	"internal/story/render_md.go":    350,
+	"internal/story/render_spine.go": 380,
+	// toolCallLine and its helpers (the per-tool-call argument renderer
+	// render_spine.go's decision spine calls into) — split out the moment
+	// render_spine.go first crossed its own budget over this, not appended
+	// past 380 in place; same ~15% headroom convention as the
+	// rest of this table.
+	"internal/story/render_spine_args.go":   200,
 	"internal/story/findings.go":            580,
 	"internal/story/findings_toolresult.go": 320,
 	"internal/story/compare.go":             850,

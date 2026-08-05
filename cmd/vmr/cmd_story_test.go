@@ -195,6 +195,108 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	}
 }
 
+// TestCmdStory_JourneyCommaSeparatedList covers -journey id1,id2: both
+// journeys must render, batched through the same renderJourneys path
+// -render-all uses (proven by the "N journey(s) rendered to" summary line,
+// distinct from single-journey render's own RenderedNote wording).
+func TestCmdStory_JourneyCommaSeparatedList(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, path}); err != nil {
+			t.Fatalf("cmdStory -journey (comma list): %v", err)
+		}
+	})
+	if !strings.Contains(out, "2 journey(s) rendered to") {
+		t.Errorf("expected the batched-render summary line:\n%s", out)
+	}
+	for _, id := range []string{idA, idB} {
+		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".md")); err != nil {
+			t.Errorf("journey-%s.md not written: %v", id, err)
+		}
+	}
+}
+
+// TestCmdStory_JourneyWildcardMatchesMultiple covers -journey '*' style
+// globbing: a pattern with no exact-prefix relationship to either id (a
+// wildcard match against the id's suffix, which prefix matching alone could
+// never express) must still resolve and batch-render every match.
+func TestCmdStory_JourneyWildcardMatchesMultiple(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-journey", "j-*", path}); err != nil {
+			t.Fatalf("cmdStory -journey (wildcard, all): %v", err)
+		}
+	})
+	if !strings.Contains(out, "2 journey(s) rendered to") {
+		t.Errorf("expected both journeys to match 'j-*':\n%s", out)
+	}
+	for _, id := range []string{idA, idB} {
+		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".md")); err != nil {
+			t.Errorf("journey-%s.md not written: %v", id, err)
+		}
+	}
+}
+
+// TestCmdStory_JourneyWildcardMatchesOne covers a glob that pins down
+// exactly one journey (by its content-addressed suffix, which a plain
+// prefix can't select on) — it must still take the single-journey render
+// path (RenderedNote's "(N tasks, N turns)" wording, not the batched
+// summary), same as passing the full id directly.
+func TestCmdStory_JourneyWildcardMatchesOne(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+	pattern := "*" + idA[len(idA)-8:]
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-journey", pattern, path}); err != nil {
+			t.Fatalf("cmdStory -journey (wildcard, one): %v", err)
+		}
+	})
+	if !strings.Contains(out, "journey-"+idA+".md") || !strings.Contains(out, "tasks") {
+		t.Errorf("expected the single-journey RenderedNote line for %s:\n%s", idA, out)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idB+".md")); err == nil {
+		t.Errorf("journey-%s.md should not have been rendered (pattern only matches idA)", idB)
+	}
+}
+
+// TestCmdStory_JourneySelectorNoMatchErrors covers the per-token "fail loud"
+// contract: one real id plus one bogus token must error, not silently
+// render only the real match.
+func TestCmdStory_JourneySelectorNoMatchErrors(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+
+	err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", outDir, "-journey", idA + ",no-such-id", path})
+	})
+	if err == nil {
+		t.Fatal("expected an error when one comma-separated token matches nothing")
+	}
+	if !strings.Contains(err.Error(), "no-such-id") {
+		t.Errorf("error should name the unmatched token: %v", err)
+	}
+}
+
+// TestCmdStory_JourneyMultiMatchRejectsLLM covers the same "-llm-addr wants
+// exactly one journey" rule -render-all/-corpus already enforce, extended to
+// a -journey selector that resolves to more than one match.
+func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+	})
+	if err == nil {
+		t.Fatal("expected an error: -llm-addr with a multi-match -journey selector")
+	}
+}
+
 // TestCmdStory_Compare covers Step 4's 4d module: -compare id1,id2 resolves
 // two candidate journeys by id prefix and writes one comparison
 // Markdown+JSON pair. Journey B's much larger model time should surface as
@@ -777,6 +879,58 @@ func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	if err != nil || len(entries) == 0 {
 		t.Errorf("expected at least one cache file under report.yaml's llm_cache_dir %s: %v", cacheDir, err)
 	}
+}
+
+// TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths is a regression test
+// for a real bug: report.yaml's llm_addr is meant as a standing convenience
+// default for -journey/-compare (see TestCmdStory_ReportYamlProvidesLLMDefaults),
+// but the -render-all/-corpus/multi-match-journey rejection used to trigger
+// on llmOpts.Addr being non-empty at all — which made it fire off of
+// report.yaml's default even though -llm-addr was never passed on the
+// command line, so anyone with an llm_addr configured for convenience could
+// no longer run a plain batch render. The guard must key off whether
+// -llm-addr was explicitly passed (flagPassed), not merely resolved.
+func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	reportConfigPath := filepath.Join(t.TempDir(), "report.yaml")
+	// Deliberately an address nothing is listening on: none of these
+	// batch paths may ever actually dial it.
+	yaml := "llm_addr: 127.0.0.1:1\nllm_model: agent\n"
+	if err := os.WriteFile(reportConfigPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("multi-match -journey", func(t *testing.T) {
+		if err := cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, "-report-config", reportConfigPath, path}); err != nil {
+			t.Fatalf("cmdStory -journey (comma list, report.yaml llm_addr default): %v", err)
+		}
+	})
+	t.Run("-render-all", func(t *testing.T) {
+		outDir2 := filepath.Join(t.TempDir(), "out2")
+		if err := cmdStory([]string{"-o", outDir2, "-render-all", "-report-config", reportConfigPath, path}); err != nil {
+			t.Fatalf("cmdStory -render-all (report.yaml llm_addr default): %v", err)
+		}
+	})
+	t.Run("-corpus", func(t *testing.T) {
+		outDir3 := filepath.Join(t.TempDir(), "out3")
+		if err := cmdStory([]string{"-o", outDir3, "-corpus", "-report-config", reportConfigPath, path}); err != nil {
+			t.Fatalf("cmdStory -corpus (report.yaml llm_addr default): %v", err)
+		}
+	})
+
+	// An explicit -llm-addr on the command line must still be rejected —
+	// only report.yaml's own default is exempt.
+	t.Run("explicit -llm-addr with -render-all still rejected", func(t *testing.T) {
+		outDir4 := filepath.Join(t.TempDir(), "out4")
+		err := captureStdoutErr(t, func() error {
+			return cmdStory([]string{"-o", outDir4, "-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		})
+		if err == nil {
+			t.Error("expected an error: explicit -llm-addr with -render-all")
+		}
+	})
 }
 
 // TestCmdStory_Corpus covers -corpus: two independent candidate journeys

@@ -317,7 +317,7 @@ func TestInterpret_CacheKeyIncludesModel(t *testing.T) {
 
 func TestRenderLLMSection(t *testing.T) {
 	opts := LLMOptions{Model: "agent"}
-	md := RenderLLMSection(opts, InterpretResult{Text: "一句话结论：测试。", Cached: false}, i18n.EN)
+	md := RenderLLMSection(opts, InterpretResult{Text: "一句话结论：测试。", Cached: false}, i18n.EN, "")
 	for _, want := range []string{"## LLM Interpretation", "agent", "not the fact layer", "一句话结论：测试。"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderLLMSection missing %q:\n%s", want, md)
@@ -327,8 +327,43 @@ func TestRenderLLMSection(t *testing.T) {
 		t.Error("uncached result should not claim a cache hit")
 	}
 
-	cachedMD := RenderLLMSection(opts, InterpretResult{Text: "x", Cached: true}, i18n.EN)
+	cachedMD := RenderLLMSection(opts, InterpretResult{Text: "x", Cached: true}, i18n.EN, "")
 	if !strings.Contains(cachedMD, "cache hit") {
 		t.Error("cached result should say so")
+	}
+}
+
+// TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument covers
+// -compare's own real failure mode: two independent LLM calls (the overall
+// comparison, and — when a divergence point was found — a second call
+// scoped to just that point) land in the SAME Markdown document. Without a
+// distinguishing scope label, both would render under the byte-identical
+// heading "## LLM Interpretation (model: X)", making the document's own
+// outline look like the same section pasted in twice even though the
+// content differs.
+func TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument(t *testing.T) {
+	opts := LLMOptions{Model: "agent"}
+	overall := RenderLLMSection(opts, InterpretResult{Text: "overall text"}, i18n.EN, i18n.LLM(i18n.EN).ScopeOverall)
+	divergence := RenderLLMSection(opts, InterpretResult{Text: "divergence text"}, i18n.EN, i18n.LLM(i18n.EN).ScopeDivergence)
+
+	overallTitle := strings.SplitN(overall, "\n", 2)[0]
+	divergenceTitle := strings.SplitN(divergence, "\n", 2)[0]
+	if overallTitle == divergenceTitle {
+		t.Errorf("the two sections' titles must differ, got the same %q for both", overallTitle)
+	}
+	if !strings.Contains(overallTitle, "overall comparison") {
+		t.Errorf("overall section title = %q, want it to name its scope", overallTitle)
+	}
+	if !strings.Contains(divergenceTitle, "divergence point") {
+		t.Errorf("divergence section title = %q, want it to name its scope", divergenceTitle)
+	}
+
+	// scope "" (renderJourney's single-section document) keeps the plain,
+	// unlabeled title — no behavior change for the case that was never
+	// ambiguous in the first place.
+	plain := RenderLLMSection(opts, InterpretResult{Text: "x"}, i18n.EN, "")
+	plainTitle := strings.SplitN(plain, "\n", 2)[0]
+	if strings.Contains(plainTitle, "·") {
+		t.Errorf("plain (scope-less) title = %q, must not carry a scope separator", plainTitle)
 	}
 }

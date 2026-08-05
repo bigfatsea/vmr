@@ -154,12 +154,18 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 ### 3.4 `internal/story`：Journey 视图
 
 ```
-vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare <id1,id2> | -corpus]
+vmr story [-c config.yaml] [-o dir] [-journey <selector> | -render-all | -compare <id1,id2> | -corpus]
           [-include-partial] [-show-ungrouped] [-lang en|zh] [-report-config report.yaml] [file|glob]...
 
-# -llm-addr：单 Journey（5.9）与对比（含 6c 的分叉点解读）都支持，-render-all/-corpus 不支持
+# <selector>：逗号分隔的多个 token，每个 token 是 id/id 前缀，或匹配完整 id 的
+# shell 风格通配符（*、?、[...]，path.Match 语义）——解出恰好一个 Journey 时走
+# 单 Journey 渲染路径，解出多个时走 -render-all 同一条批处理路径：
+vmr story -journey j-a,j-b | -journey 'j-openclaw-*' | -journey 'j-a-*,j-b-*' ...
+
+# -llm-addr：单 Journey（5.9，即 -journey 解出恰好一个匹配时）与对比（含 6c 的
+# 分叉点解读）都支持，-render-all/-corpus 以及解出不止一个匹配的 -journey 不支持
 # （会对每个 Journey 各打一次 LLM 调用，费用不可控）：
-vmr story -journey <id前缀>|-compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
+vmr story -journey <id前缀或恰好命中一个的通配符>|-compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
 
 # -corpus：语料级统计（§3.9），不接 -journey/-render-all/-compare：
 vmr story -corpus [-o dir] [file|glob]...
@@ -167,7 +173,7 @@ vmr story -corpus [-o dir] [file|glob]...
 
 **输出语言**：与 `vmr report` 同一套机制（见 §4），`Build`/`BuildChain`/`BuildAll` 多一个 `lang i18n.Lang` 参数。唯一的例外是 `journey.go` 自己的两个标题占位符（无真实用户指令时的兜底："(tool loop continuation)"/"(untitled)"）——它们**跟随** `lang`，不像 `Finding`/`MetricDiff` 那样固定英文：`Journey.Title`/`Task.Title` 本来就是用户原话的逐字引用、从不保证是英文，`Journey` 另有内容寻址的 `ID` 承担 identity 职责，`Title` 从未被当成 identity 用过，所以这里跟随语言不会重演"展示文案被当成 identity"的问题。`journey-<id>.json`/`compare-*.json` 里其余的叙述字段（`MetricDiff.Label`）仍然固定英文——`Compare` 本身不接收 `lang`（§4.2）。
 
-- **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览），`-journey <id前缀>` 渲染其中一个。
+- **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览）。`-journey` 接受逗号分隔的多个 id/id 前缀/`path.Match` 风格通配符，合并去重后渲染全部匹配——只匹配到一个走单 Journey 渲染路径，匹配到多个则复用 `-render-all` 的批处理路径（`renderJourneys`，`cmd_story.go`）。任一 token 一个都没匹配上，整个命令报错（不静默丢弃），避免拼错的 token 被悄悄漏掉。
 - **`-render-all`**：批量渲染全部非断头候选，共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
 - **`-compare <id1,id2>`**：两个 Journey 的行为剖面对比（逗号分隔的两个 id 或 id 前缀），见"双 Journey 对比"节；`-llm-addr` 给了才追加可选的 LLM 解读小节（含 6c 的分叉点解读，当 6a/6b 定位到分叉点时）。
 - **`-corpus`**：语料级统计（§3.9），跨全部非断头候选，产出 `vmr-story-corpus.md`/`.json`；不接 `-llm-addr`。
@@ -250,18 +256,21 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 用户打开一条 trace 排查问题时，真正想问的是"哪里开始不对"，不是"Agent 做了什么"——这个诉求在 2026 年上半年被多个独立一线实践信源反复提出，统一称作"决策脊柱"（decision spine，见 `docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §4 的调研）。`Journey → Task → Step` 的数据模型天然具备构建它的结构基础，不需要新采集任何数据，纯粹是渲染层重新分层：
 
 - **概览卡**（`renderOverviewCard`，Journey 页顶部）：3–5 个关键节点（起始时间、首个错误标记、首个非 `Append`/缝合转折点、结束时间）+ 基于 `Metrics` 阈值的结构标签（工具密集型/重试多/上下文压缩）——全部现成数据，零新增计算。
-- **决策脊柱**（`renderDecisionSpine`）：按 Task 分组的紧凑 `tool_call` 列表，每行只有工具名 + 参数摘要（40 字符截断，比 Step 正文的 80 字符预览更紧凑），命中 §3.5a 任一 Finding 的 Step 标 ⚠️。一个纯问答、没有任何 `tool_call` 的 Journey 不渲染这一节——没有"决策"可摘。
+- **决策脊柱**（`renderDecisionSpine`）：按 Task 分组，一个 Step 一个块——一次请求可能有多个 `tool_call`（同一个模型响应里连续发起 web_fetch + 两次 web_search 很常见），所以分组单位是 Step 而不是拍平的 `tool_call` 列表，同一 Step 的所有调用聚在同一个块下，块与块之间的边界（哪次调用属于哪一轮）一眼可辨。每个块：
+  - **Step 标题行**（`renderSpineStep`）：复用 `stepRoleTag`（见下）的同一个图标——决策脊柱和下方事实层的同一个 Step 因此顶着同一个图标，不是两套并行的分类；命中 §3.5a 任一 Finding 的标题再加一个 ⚠️。
+  - **"为什么"一行**（`spineWhyLine`）：模型这一轮自己说的话——`RespText`（有就用，真实语料里几乎总是一句简短、决策性的话，例如"akshare 1.18.79 可用！直接用 Python 获取数据。"，原样展示，不截断到看不出内容的程度）优先于 `Reasoning`（`RespText` 为空时才用，标 🤔 前缀以区分"模型自己说的"和"从内部推理摘的"，截得更短——那一段可能长达整段思维链，完整版本本来就在这个 Step 自己的 LLM Response 折叠区里）。两者都没有就不渲染这一行，不替记录发明一个理由。
+  - **每个 `tool_call`**（`toolCallLine`，`render_spine_args.go`）：不是"JSON 原文截断前 N 字符"——那样每次都在展示 `{"command": "` 这类信封语法和字段名，真正不同的内容反而被挤出预览窗口，一堆 `exec` 调用因此看起来像同一条命令，是本节这版之前的真实教训；也不是"摘一行代表全部"——那样虽然能让不同调用看起来不一样，但读者还是看不到命令到底是什么。改为按解出的值形状通用挑选展示方式，两种形状都是**完整**内容，不是摘要：字段全是短标量（如 `{"action":"poll","sessionId":"..."}`）就把每个字段紧凑列成 `key=value`；有一个字段扛着真正的负载（命令、路径、URL、查询词、文件内容、plan 数组……）就展示那一个字段的完整值——取值规则是"渲染后最长的顶层字段"（负载字段几乎总比其余标量参数长）——单行且不超过 `spineInlineLen`（120 字符）内联展示，否则（多行，或单行但更长，比如一条几百字符的 `curl` 命令或一段 heredoc 脚本）单独起一个代码块，完整展示到 `spineFullCap`（3000 字符）为止；真撞到这个上限（少见——一份贴进 `content` 字段的完整报告文本这种量级），会在截断处附一句本地化提示，指向下方该 Step 自己 `tool_call` 小节里那份保证完整、从不截断的原文（`render_md.go` 的 `prettyJSON`）。全程不针对具体工具名建表，任何未见过的工具只要参数是 JSON 对象就能落进上述两种形状之一；解不出 JSON 对象时退化为原文本身（同样走"单行内联/多行或过长入代码块"的判断，同样不截断到 `spineFullCap` 之前）。一个纯问答、没有任何 `tool_call` 的 Journey 不渲染这一节，Journey 里没有 `tool_call` 的 Task 也照样跳过——没有"决策"可摘。
 - **Step 角色标注**（`stepRoleTag`，Step 标题行前缀）：7 类标签中挑一个优先级最高的——🧹压缩（缝合边界）> ⚠️错误（本 Step 新事件含错误标记）> 🔄重试（`toolCallRepeats` 标记为重复）> 🔧执行（有 `tool_call`）> 📋规划（无 `tool_call` 但文本含编号列表）> 💬汇报（有回复文本）> 👀观察（以上都不是）。纯渲染层启发式，复用已有结构信号，不新增判断逻辑。
 - **工具调用时序图**（`renderToolTimeline`，Journey 末尾）：每个工具名一行、每个 Step 一列的 ASCII 图，符号区分 `●` 正常/`🔄` 疑似重复/`❌` 本 Step 含错误标记——同一份 `toolCallRepeats` 结果，换一个横向布局，用于发现"这段时间某个工具在密集重试"这类线性阅读容易漏掉的模式。
 - **Findings 清单**（`renderFindingsSection`，紧邻时序图之后）：§3.5a 每条 Finding 的完整文案（决策脊柱只标 ⚠️，这里才是能看到"为什么"的地方）。
 
-**共享基础设施**（`toolCallRepeats`，`metrics.go`）：Step 角色标注的 🔄、时序图的 🔄、`exact_repeat_tool_call` Finding 三处都需要回答"这次调用是不是在重复更早的调用"，如果各自实现一遍，最现实的风险不是重复劳动，是三处判据不一致（比如某个 Step 被标了 🔄 但 Findings 列表里却找不到对应条目，看起来像产品 bug）。`toolCallRepeats(steps []*Step) []ToolCallOccurrence` 是这三处唯一的判据来源，`Metrics.DuplicateActionRate`（九项指标之一）也改成基于它计算，不再是独立实现。
+**共享基础设施**（`toolCallRepeats`，`metrics.go`）：Step 角色标注的 🔄、决策脊柱标题行同一个 🔄（两者是同一次 `stepRoleTag` 调用，不是两处独立判断）、时序图的 🔄、`exact_repeat_tool_call` Finding 四处都需要回答"这次调用是不是在重复更早的调用"，如果各自实现一遍，最现实的风险不是重复劳动，是判据不一致（比如某个 Step 被标了 🔄 但 Findings 列表里却找不到对应条目，看起来像产品 bug）。`toolCallRepeats(steps []*Step) []ToolCallOccurrence` 是这四处唯一的判据来源，`Metrics.DuplicateActionRate`（九项指标之一）也改成基于它计算，不再是独立实现。
 
 **渲染层与 JSON 输出共享同一份计算**：`cmd_story.go` 的 `writeJourneyFile` 先算一次 `Metrics`/`Findings`，再同时喂给 `RenderMarkdown(j, m, findings, lang)` 和（内部固定 `i18n.EN` 重算一次的）`Summarize(j)`——两次 `ComputeFindings` 调用的**选择逻辑**（挑中哪些 `Code`/`StepSeq`）必须与 `lang` 无关，只有展示文案随 `lang` 变化，`TestComputeFindingsIsDeterministic` 把这条前提锁成了可执行测试（同构于 `internal/report` 的 `TestBuildFindingsIsDeterministic`）——否则中文版 Markdown 和英文版 JSON 可能标出不同的 Finding 集合。
 
 ### 3.5c 单 Journey LLM 解读层（5.9，`llm_single.go`）
 
-`-journey`（含 `-render-all` 不支持，见下）现在也能接 `-llm-addr`，复用 `llm.go` 已验证过的调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级）——这条链路原本硬编码给 `-compare` 的 `EvidencePack` 用，为了让 `SingleJourneyEvidencePack`（5.9）、`DivergenceEvidencePack`（6c，见 §3.7）复用同一套 `Interpret`/`cacheKey`/`buildUserPrompt`，`llm.go` 新增一个 `evidencePackKind` 接口（`promptSpec(lang) promptSpec`，返回该场景自己的 system prompt + 用户消息前后缀 + 缓存版本号），三个 pack 类型各自实现一次；`Interpret[T evidencePackKind]` 改成泛型函数后，**`-compare` 原有调用点一行都没有改**——Go 的类型推断让 `Interpret(ctx, opts, pack, lang)` 在三种场景下写法完全一致。`SingleJourneyEvidencePack` = Journey 的 `Metrics` + `[]Finding`（§2.3 当初设计 `Finding.StepSeq`/`RelatedSeq`/`Evidence` 三个字段就是为了这里直接拼证据包，不需要回头改形状）+ 逐轮工具索引；system prompt 的任务是对已有 Finding 做优先级排序/串联解读，明确禁止"自己发现清单之外的新问题"（除非明确标注"这是我自己的阅读判断，不是规则核实的 Finding"）。`-llm-addr` 不支持 `-render-all`/`-corpus`（会对每个 Journey 各打一次 LLM 调用，费用不可控），只支持 `-journey`/`-compare` 各自一次。
+`-journey`（含 `-render-all` 不支持，见下）现在也能接 `-llm-addr`，复用 `llm.go` 已验证过的调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级）——这条链路原本硬编码给 `-compare` 的 `EvidencePack` 用，为了让 `SingleJourneyEvidencePack`（5.9）、`DivergenceEvidencePack`（6c，见 §3.7）复用同一套 `Interpret`/`cacheKey`/`buildUserPrompt`，`llm.go` 新增一个 `evidencePackKind` 接口（`promptSpec(lang) promptSpec`，返回该场景自己的 system prompt + 用户消息前后缀 + 缓存版本号），三个 pack 类型各自实现一次；`Interpret[T evidencePackKind]` 改成泛型函数后，**`-compare` 原有调用点一行都没有改**——Go 的类型推断让 `Interpret(ctx, opts, pack, lang)` 在三种场景下写法完全一致。`SingleJourneyEvidencePack` = Journey 的 `Metrics` + `[]Finding`（§2.3 当初设计 `Finding.StepSeq`/`RelatedSeq`/`Evidence` 三个字段就是为了这里直接拼证据包，不需要回头改形状）+ 逐轮工具索引；system prompt 的任务是对已有 Finding 做优先级排序/串联解读，明确禁止"自己发现清单之外的新问题"（除非明确标注"这是我自己的阅读判断，不是规则核实的 Finding"）。`-llm-addr` 不支持 `-render-all`/`-corpus`，也不支持解出不止一个匹配的 `-journey` 选择器（同样的道理：会对每个 Journey 各打一次 LLM 调用，费用不可控），只支持 `-compare` 以及解出恰好一个匹配的 `-journey`。
 
 ### 3.6 Compaction 三形态与信息损失（CCR N-4 的落地）
 
@@ -299,7 +308,7 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 **分叉点检测（`computeDivergence`，2026-08-05 落地）**：`ComparisonExtras` 里九项指标 diff、`EndpointsFact`、`CacheFact` 这些都是"整体层面"的对比——真正定位"从哪一步开始两条轨迹走上不同的路"是三份独立分析（本仓库 `docs/future-strategy/` 下的深挖报告与两份交叉评审文档）唯一同时提出的方向，这次调研里交叉验证信号最强的一条。做法完全建立在已有原语上，不需要新数据采集：两个 Journey 按位置对齐（`flattenWithTask`，展平成一个跨 Task 的 Step 序列，**不是**按 `Step.Seq` 对齐——两个独立 Journey 的 `Seq` 编号互不可比），逐位比较一个粗糙的结构签名（`toolSignature`：是否有 `tool_call` + 排序去重后的工具名集合），取两侧较短一方的长度为界，第一个签名不同的位置即候选分叉点。严重度分两档：工具名集合本身不同（或一方有 `tool_call`、另一方没有）→ `DivergenceHeavy`；工具名集合相同但参数不同（`stepArgsEqual` 判定）→ `DivergenceLight`。产出是一个纯结构事实（`DivergencePoint`，含双侧各自的 `StepSeq`、涉及的工具名、严重度），渲染时紧跟一句免责声明："分叉点定位 ≠ 根因判定"——只陈述"从这里开始不同了"，"为什么这个分叉更差"永远是解读层的可选、可关闭的推测，不包装成确定性结论（详见 `docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §6 的边界讨论）。真实语料验证：同一个 A 股新股打新调研任务的两次独立重跑（`j-lobster-...-99aa3efe` vs `j-lobster-...-09a3158a`）正确定位到两侧第一步都调用了 `exec` 但目标不同（`DivergenceLight`）；另一对更具代表性的样本——两个**不同 Agent 框架**（openclaw vs lobster）跑同一个任务（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，即 `reports/compare-...json` 那份旧版基准报告分析过的同一对 Journey）——正确定位到第一步就是重度分叉：openclaw 先调用 `memory_search`+`read`（查已有上下文/记忆），lobster 直接 `web_fetch`（抓数据），是这次调研里两个 Agent 处理同一任务时最先出现的真实策略差异，旧版报告（人工/deepseek 逐项核对产出）完全没有这一层定位——只停留在"33 次 vs 64 次工具调用"这类聚合数字，本次是这份数据第一次被结构化地定位到具体分叉步骤。
 
-**分叉点 LLM 解读层（6c，`llm_divergence.go`）**：`-compare` given `-llm-addr` 且 6a/6b 定位到分叉点时，除了原有的整体对比解读，额外发起第二次、单独缓存的 LLM 调用，证据包（`DivergenceEvidencePack`）只含分叉点本身 + 双侧各 `divergenceContextWindow`（2）步的简要信息（工具名 + 回复摘要），不塞完整 transcript。System prompt 的核心约束：分叉点本身是已确认的结构事实，不需要 LLM 重新论证；"为什么在这里分道扬镳"必须标注为推测（高/中/低置信度）；**绝不判断哪一方更好**——VMR 没有任务是否真正达成目标的信号，这个判断超出证据能支持的范围（与 §2.6/`docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §6 的边界一致）。
+**分叉点 LLM 解读层（6c，`llm_divergence.go`）**：`-compare` given `-llm-addr` 且 6a/6b 定位到分叉点时，除了原有的整体对比解读，额外发起第二次、单独缓存的 LLM 调用，证据包（`DivergenceEvidencePack`）只含分叉点本身 + 双侧各 `divergenceContextWindow`（2）步的简要信息（工具名 + 回复摘要），不塞完整 transcript。System prompt 的核心约束：分叉点本身是已确认的结构事实，不需要 LLM 重新论证；"为什么在这里分道扬镳"必须标注为推测（高/中/低置信度）；**绝不判断哪一方更好**——VMR 没有任务是否真正达成目标的信号，这个判断超出证据能支持的范围（与 §2.6/`docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §6 的边界一致）。两次调用的渲染结果落进同一份 `.md`：`RenderLLMSection`（`llm.go`）的标题因此带一个 `scope` 参数——整体对比段是"## LLM 解读（模型：X · 整体对比）"，分叉点段是"## LLM 解读（模型：X · 分叉点）"（`i18n.LLMText.ScopeOverall`/`ScopeDivergence`），不是都用同一句"## LLM 解读（模型：X）"——那样文档大纲里会出现两个字面相同的标题，读者光看目录分不清是同一节被贴了两遍还是两个独立分析（`-journey` 单 Journey 场景一份文档只有一次 LLM 调用，不存在这个歧义，`scope` 传 `""` 保持原来的无后缀标题，不受影响）。
 
 ### 3.8 盲区（诚实声明，避免"没记录"被误读成"没发生"）
 
