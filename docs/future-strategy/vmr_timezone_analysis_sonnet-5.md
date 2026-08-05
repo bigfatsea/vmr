@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-05 00:00, by Sonnet 5 -->
+<!-- Ver 2026-08-05 (rev 2), by Sonnet 5 -->
 
 # VMR 时区处理现状分析与统一方案
 
@@ -105,15 +105,30 @@ func (r PricingRate) matches(ts time.Time) bool {
 
 **结论**：`cmd_status.go` 的 `.Local()` 模式是目前代码库里唯一"正确对齐系统默认时区"的展示写法；`requests.go`/`render_doc.go`/`story` 全家/`pricing.go` 各写各的，互不一致，其中 `story` 和 `report` 两个包对同一批 JSONL 数据算出的显示时间甚至可能对不上。
 
-### 2.4 一处"看似不一致、实为故意设计"的点——`story` 的 Journey ID
+### 2.4（2026-08-05 复核更正）Journey ID 的 `.UTC()` 其实是个真实疏漏——但修法不是切到 `DisplayZone`
 
 ```go
-// internal/story/journey.go:529-530
+// internal/story/journey.go:529-530（修正前）
 start := root.TS.UTC().Format(idTimeLayout)   // idTimeLayout = "20060102T150405"
 end := last.TS.UTC().Format(idTimeLayout)
 ```
 
-Journey ID（如 `j-nokey-20260729T100000-20260729T100006-...`）故意用 `.UTC()`，**这是对的，不需要改**：ID 是给程序/人在命令行里当稳定标识符用的（`-journey <id>` 参数、比较两个 Journey 时的文件名），如果 ID 里的时间片段随"系统默认时区"漂移，同一个 Journey 在两台不同时区的机器上跑出来的 ID 就会不一样，稳定性直接被破坏。这条应该保留为"决定不改"项，写进最终方案里，避免以后被误当成 bug 修掉。
+本节原判断"这是对的，不需要改"是**错的**——用户在实际使用中真的踩到了这个坑：`vmr story -compare j-openclaw-20260727T160544-...` 里的 ID 时间片段是 UTC，在 UTC+8 的机器上看永远比本地墙钟时间少 8 小时（当天 00:05 显示成前一天 16:05），每次都要心算时区，且这个 ID 直接就是 `journey-<id>.md`/`compare-<id>.vs-<id>.md` 的文件名，`ls reports/stories/` 里看到的全是这种"错位"时间。
+
+真正的修法不是把 `.UTC()` 换成 `.In(fmtutil.DisplayZone)`（第二轮独立复核时先考虑过这个方向，也是 Gemini 3.6 Flash 独立分析给出的建议）——那会让"ID 跨机器稳定"这条本节原本想保护的性质直接失效：`DisplayZone` 是**读取机器**的时区，同一份数据在两台不同时区的机器上跑 `vmr story` 会算出两个不同的 ID 字符串。
+
+最终采纳的修法：**两个 `.UTC()` 全部去掉，直接用 manifest 自带的 `time.Time` 格式化**（不经过任何 `.In()`/`.UTC()` 转换），即：
+
+```go
+start := root.TS.Format(idTimeLayout)
+end := last.TS.Format(idTimeLayout)
+```
+
+这个 `time.Time` 本身携带的偏移量，是这条审计记录**写入那一刻**、写入它的那台服务器自身的本地时区（比如 `+08:00`）——这是数据的属性，不是读取环境的属性，所以：
+- **稳定性不受影响**：同一份审计数据不管在哪台机器（哪个时区设置）上跑 `vmr story`，`root.TS`/`last.TS` 解析出来的 `time.Time` 都携带同一个原始偏移量，格式化结果自然一致，本节最初想保护的"ID 跨机器可复现"这条性质完全保留。
+- **可读性问题同时解决**：因为团队自己的部署场景是单一时区（中国大陆、无夏令时），"写入时那台机器的时区"在实践中几乎总是等于"现在看报告这台机器的时区"，所以 ID/文件名里显示的数字直接就是用户在 agent 系统上看到的本地时间，不需要心算。
+
+唯一的理论代价：如果未来把来自不同时区服务器的审计日志合并到一起分析（团队当前的自托管单团队场景下没有这个需求），`ls` 的字典序排序在跨偏移量边界处可能不再严格等于时间先后——这是一个已知、可接受的边界情况，不是本次决定的目标场景。
 
 ## 三、现状总结表
 
@@ -127,7 +142,7 @@ Journey ID（如 `j-nokey-20260729T100000-20260729T100006-...`）故意用 `.UTC
 | 展示 · 单请求详情页 | `report/detail.go` | 保留原始偏移量，逐行显式标注 | ⚠️ 语义与其它展示点不一致 |
 | 计算 · 价格档位匹配 | `report/pricing.go` | 按记录自带偏移量取小时，时区语义未定义 | ❌ 有算错金额的风险，优先级最高 |
 | 实时 CLI 输出 | `cmd_status.go` | 显式 `.Local()` | ✅ 已经是目标模式 |
-| 内部 ID 生成 | `story/journey.go` | 显式 `.UTC()` | ✅ 故意如此，不应改 |
+| 内部 ID 生成 | `story/journey.go` | 显式 `.UTC()` → 已改为直接用记录自带偏移量（不转换） | ❌→✅ 见 2.4 节 2026-08-05 复核更正 |
 
 ## 四、核心取舍：JSON/JSONL 原始记录该存 GMT 还是本地偏移量
 
@@ -189,7 +204,7 @@ var DisplayZone = time.Local
 
 **文档/文案**：`internal/i18n/report_requests.go` 的 `ChatUserLegend`（中英文）、`docs/UserGuide.md`/`docs/UserGuide.zh.md` 里"所有时间为 UTC+8"这类措辞，改成通用表述（如"所有时间均为运行 `vmr report`/`vmr story` 这台机器的系统默认时区"），不再写死 UTC+8。
 
-**明确保留、不改动的点**：`story/journey.go` 里 Journey ID 生成用的 `.UTC()`（第 2.4 节）——这是故意的设计，为了 ID 跨时区稳定，写进本方案里是为了避免未来被误判成"不一致"而顺手改掉。
+**已更正的点**：`story/journey.go` 里 Journey ID 生成的 `.UTC()`（第 2.4 节 2026-08-05 复核更正）——原方案判断"故意如此不应改"是错的，已改为直接用记录自带的原始偏移量（既不转 UTC，也不转 `DisplayZone`），同时满足"ID 跨机器稳定"与"文件名对人可读"两条诉求。
 
 ### 5.2 方案带来的一致性收益
 
@@ -248,4 +263,4 @@ var DisplayZone = time.Local
 
 - **JSON/JSONL 原始记录**：已经符合"带显式时区"的要求，建议**继续存本地系统时区 + 偏移量**，不切 GMT——GMT 唯一的优势（多机汇总时原始文本可比性）在当前单团队自托管场景下没有实际收益，代价却是要动全部捕获点、还和"按本地日历日轮转审计文件"这条既有设计打架。
 - **展示层与聚合层（日志/Markdown/统计分桶）**是本轮真正要修的地方：`report/requests.go` 硬编码 UTC+8、`render_doc.go` 裸截断不转换、`story` 全家和 `pricing.go` 完全不转换、`detail.go` 显式带偏移量、`aggregate.go` 的 `buildRec2` 用原始偏移量算聚合分桶 key（吸收自 Gemini 报告的独立发现）——五种写法各不相同，同一份数据在不同产物里可能显示不同时间，甚至统计图表本身会失真。统一方案是新增一个 `internal/fmtutil.DisplayZone`（= `time.Local`）作为唯一读取点，所有展示/聚合代码过这一层再 `.Format`/`.Hour()`，原始 JSON/JSONL 完全不动。
-- `story/journey.go` 里 Journey ID 用 `.UTC()` 是故意设计（保证 ID 跨时区稳定），不在本次修改范围内。
+- `story/journey.go` 里 Journey ID 原本用 `.UTC()`——2026-08-05 复核确认这是个真实疏漏（用户实际踩到），已改为直接用记录自带偏移量（不转换），同时保住"ID 跨机器稳定"与"文件名人类可读"两条诉求，见第 2.4 节。

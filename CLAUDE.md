@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-05 (rev 3), by Sonnet 5 -->
+<!-- Ver 2026-08-05 (rev 4), by Sonnet 5 -->
 
 # vmr — Claude Code project brief
 
@@ -95,20 +95,15 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
 - Audit files are 0600 / `reports/` output (including `reports/stories/` from `vmr story`)
   is 0600/0700 — derived report/story artifacts must not loosen that (they carry full
   conversation bodies).
-- **Timezone: raw records keep local-offset RFC3339, display/aggregation always convert
-  through `fmtutil.DisplayZone`.** `audit.Record.TS` and every other persisted JSON/JSONL
-  timestamp keep whatever offset `time.Now()` carried at write time (Go's default
-  `time.Time` JSON marshaling) — never normalized to GMT, never left as a bare/zoneless
-  timestamp. Any code that formats a persisted timestamp for a human (a `vmr-report.md`/
-  `vmr-requests.md`/`vmr story` Markdown line, a live CLI/router log line, a
-  `pricing.yaml` hour/date window match, a `byDate`/`hoursOfDay` aggregation bucket key)
-  must first convert with `.In(fmtutil.DisplayZone)` (= `time.Local`, the system default
-  timezone) — never trust a parsed `time.Time`'s own embedded offset as-is, never
-  hardcode a fixed zone (`time.FixedZone("UTC+8", ...)` was one; don't reintroduce it).
-  The one deliberate exception: `internal/story/journey.go`'s Journey id time segment
-  uses `.UTC()` on purpose, so an id stays stable across machines in different
-  timezones — don't "fix" that. Full analysis/rationale:
-  `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md`.
+- **Timezone: one display authority, raw data stays untouched, payload timestamps are
+  opaque.** Everything human-facing — Markdown/CLI output, aggregation bucketing, and
+  filenames alike — renders through `fmtutil.DisplayZone`, never a hardcoded zone;
+  persisted records keep their original write-time offset as-is. A timestamp inside an
+  LLM/tool payload (messages, model output, tool args/results) is the agent layer's
+  content, not vmr's — never parsed or converted, same as any other passthrough byte.
+  `internal/story/journey.go`'s `deriveID` is the one documented exception (an id needs
+  to reproduce identically regardless of which machine derives it) — see its comment and
+  `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md` before "fixing" it.
 - `internal/report` is coupled to `audit.Record`'s shape at compile time — changing the
   audit record structure requires updating `internal/report` and its tests in the same change.
 - `ctxgraph`/`chatmsg` are the one shared source of truth for message-hashing and message
@@ -126,6 +121,13 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
 
 ## Conventions
 
+- **This file holds principles, not implementation detail.** State the rule and point at
+  where it's enforced (a file, a function, a design doc); don't restate call sequences,
+  exact function names, or file lists that already live in the code — those drift out of
+  sync with this file the moment the code changes, and a stale detail here is worse than
+  no detail, since it reads as authoritative. If a bullet needs a paragraph to justify
+  one line of rule, the justification belongs in a code comment or design doc, linked
+  from here.
 - Comments: only for non-obvious "why" (hidden constraint, workaround, invariant) —
   match the existing terse style, don't add narration.
 - Commit messages: short, imperative, no trailer boilerplate (see `git log --oneline`).

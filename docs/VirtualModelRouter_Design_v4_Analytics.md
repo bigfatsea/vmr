@@ -36,7 +36,9 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 **时区**：`ts` 序列化成 RFC3339（Go `time.Time` 默认 `MarshalJSON`），带写入那一刻进程自身的本地偏移量（即 `time.Now()`），不转 GMT——一份 `audit.Record` JSONL 打开就是当地墙钟时间，无需心算时区，偏移量本身又消除了任何解析歧义，两头都占。审计文件按天轮转（`vmr-audit-YYYY-MM-DD.jsonl`）用的是同一个本地时钟，轮转边界即当地日历日的午夜。
 
-`vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、或者用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳、`pricing.yaml` 的 `hour_from`/`hour_to`/`date_from`/`date_to` 时段匹配）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。`internal/story/journey.go` 的 Journey id 时间片段是唯一例外——故意用 `.UTC()`，为了 id 跨时区稳定，不受 `DisplayZone` 影响。详细排查过程与取舍分析见 `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md`。
+`vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳、`pricing.yaml` 的 `hour_from`/`hour_to`/`date_from`/`date_to` 时段匹配），或者嵌进文件名（per-request `details/*.md`、报告/日志输出路径）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。
+
+`internal/story/journey.go` 的 `deriveID` 是唯一一处不走这条规则的地方，但也不是简单粗暴地强制 `.UTC()`——它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换）格式化，也就是记录写入那一刻服务器自身的本地偏移量。这个 id 同时也是 `journey-<id>.md`/`compare-<id>.vs-<id>.md` 的文件名，需要满足两个看似矛盾的诉求：①同一份审计数据不管在哪台机器（哪个时区）上跑 `vmr story`，都必须算出同一个 id 字符串（用于 `-journey <id>`/`-compare id1,id2` 精确匹配）；②文件名里的时间要是人一眼能看懂的本地墙钟时间，不需要心算时区。因为这个偏移量是数据本身的属性（写入时那台机器的时区），不随"现在是谁在读它"变化，两个诉求同时满足——不需要走 `DisplayZone`（那是读取机器的时区，会引入①想避免的不稳定性），也不需要强制 `UTC`（那会导致②要求的可读性问题，即用户实际踩到的坑）。详细排查过程与取舍分析见 `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md`。
 
 ---
 

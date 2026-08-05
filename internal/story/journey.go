@@ -489,9 +489,17 @@ func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgr
 // idTimeLayout renders a manifest timestamp for use inside a Journey id:
 // no colons (filename-safe on every OS, including Windows) and a fixed
 // width, so lexical sort of ids/filenames matches chronological order.
-// Always UTC — a local-timezone id would depend on which machine/timezone
-// ran the tool, breaking the "stable across independent runs" property
-// deriveID otherwise guarantees.
+// Deliberately NOT run through fmtutil.DisplayZone and NOT forced to UTC —
+// it's formatted straight off the manifest's own parsed time.Time, which
+// carries whatever offset the audit record was written with (e.g. +08:00
+// for a China-local server). That offset is a property of the data, not of
+// whichever machine later runs `vmr story`, so two machines processing the
+// same audit files still derive the identical id string — the "stable
+// across independent runs" property this id needs — while the digits a
+// human sees are the same local wall-clock time the record was captured
+// at, not a UTC figure that needs +8h translation to make sense. Converting
+// through DisplayZone here would reintroduce exactly the instability this
+// comment warns about (the reading machine's zone leaking into the id).
 const idTimeLayout = "20060102T150405"
 
 // idCodeLen is how many hex characters of RootHash back a Journey id's
@@ -526,8 +534,8 @@ func deriveID(chain []*ctxgraph.Lineage) string {
 	root := head.Manifests[0]
 	last := tail.Manifests[len(tail.Manifests)-1]
 	client := sanitizeIDComponent(root.ClientKeyTag)
-	start := root.TS.UTC().Format(idTimeLayout)
-	end := last.TS.UTC().Format(idTimeLayout)
+	start := root.TS.Format(idTimeLayout)
+	end := last.TS.Format(idTimeLayout)
 	code := head.RootHash().String()[:idCodeLen]
 	return "j-" + client + "-" + start + "-" + end + "-" + code
 }
