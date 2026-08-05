@@ -376,6 +376,10 @@ write_env_file() {
   : > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   local var missing=()
+  # Single quotes here are deliberate, not a missed-expansion bug: both the
+  # grep pattern and the tr charset must match the literal text `${VAR}` in
+  # config.yaml, not have $CFG's shell expand anything before grep sees it.
+  # shellcheck disable=SC2016
   for var in $(grep -o '\${[A-Za-z_][A-Za-z0-9_]*}' "$CFG" | tr -d '${}' | sort -u); do
     if [[ -n "${!var:-}" ]]; then
       printf '%s=%s\n' "$var" "${!var}" >> "$ENV_FILE"
