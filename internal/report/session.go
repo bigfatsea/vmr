@@ -40,6 +40,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 )
 
 // tailPrevKeep is how many trailing message previews each request retains,
@@ -962,7 +963,7 @@ func detailFileNameFromInfo(r *ReqInfo, used map[string]int) string {
 		outcome += "-" + r.errClass
 	}
 	base := fmt.Sprintf("%s_%s_%s_%s",
-		r.TS.Format("20060102-150405.000"),
+		r.TS.In(fmtutil.DisplayZone).Format("20060102-150405.000"),
 		sanitizeName(displayModelName(r.Model)), sanitizeName(r.realModel), sanitizeName(outcome))
 	used[base]++
 	if n := used[base]; n > 1 {

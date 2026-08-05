@@ -13,8 +13,8 @@
 // tag issued it — it folds into its class's dedicated cron-<tag> file
 // instead, so twenty near-identical poll turns don't drown a real
 // conversation and don't appear twice under two different groupings.
-// All displayed timestamps are rendered in UTC+8 regardless of the source
-// record's own offset.
+// All displayed timestamps are rendered in fmtutil.DisplayZone (the system
+// default timezone) regardless of the source record's own offset.
 
 package report
 
@@ -29,13 +29,9 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
-
-// utc8 is China Standard Time — no DST since 1991, so a fixed offset is
-// always correct and (unlike time.LoadLocation) never depends on the host
-// having a tzdata database installed.
-var utc8 = time.FixedZone("UTC+8", 8*3600)
 
 // WriteRequestsJSONL writes one RequestRow per line to vmr-requests.jsonl.
 func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
@@ -364,7 +360,7 @@ func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText) st
 	w("%s", t.ScheduledTableHeader)
 	for _, r := range occ {
 		w("| %s | %s | %s | %s | %s | %s |\n",
-			fmtUTC8Full(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
+			fmtDisplayFull(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 	}
 	w("\n")
 	return b.String()
@@ -405,7 +401,7 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang) error {
 	w("%s", t.FailedTableHeader)
 	for _, r := range failed {
 		w("| %s | %s | %s/%s | %s | %s | %s |\n",
-			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
+			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
 			outcomeCell(r), fmtDurMS(r.DurMS), detailLink(r.DetailFile))
 	}
 	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
@@ -421,7 +417,7 @@ func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.Re
 	w("%s", t.AllRequestsTableHeader)
 	for _, r := range all {
 		w("| %s | %s | %s/%s | %s | %s | %s | %s | %s |\n",
-			fmtUTC8Full(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
+			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
 			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 	}
 	w("\n")
@@ -439,7 +435,7 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 	if g.class != "interactive" {
 		classNote = " · " + g.class
 	}
-	w("%s", t.SessionCardHeader(label, fmtUTC8Full(g.rows[0].TS), g.tasks, g.requests, classNote))
+	w("%s", t.SessionCardHeader(label, fmtDisplayFull(g.rows[0].TS), g.tasks, g.requests, classNote))
 
 	byTask := map[string][]RequestRow{}
 	var taskOrder []string
@@ -456,7 +452,7 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 		if tLabel == "" {
 			tLabel = t.Unrouted
 		}
-		w("%s", t.TaskHeader(tLabel, fmtUTC8Full(trows[0].TS), len(trows)))
+		w("%s", t.TaskHeader(tLabel, fmtDisplayFull(trows[0].TS), len(trows)))
 		title := taskTitle[g.id+"\x00"+tk]
 		if title == "" {
 			title = sessionTitle[g.id]
@@ -467,7 +463,7 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 		w("%s", t.TurnTableHeader)
 		for _, r := range trows {
 			w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-				turnCell(r.Turn), fmtUTC8Time(r.TS), msgsCell(r.Msgs),
+				turnCell(r.Turn), fmtDisplayTime(r.TS), msgsCell(r.Msgs),
 				finishCell(r), fmtDurMS(r.DurMS), msOrDash(r.TTFTMS),
 				freshCachedOut(r), cacheEffTurn(r), detailLink(r.DetailFile))
 		}
@@ -475,25 +471,27 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskT
 	}
 }
 
-// fmtUTC8Full renders a RequestRow.TS (RFC3339, source offset) as
-// "2026-07-24 00:17:58" in UTC+8. Falls back to a raw cut when the
-// timestamp doesn't parse (defensive; Build always writes RFC3339).
-func fmtUTC8Full(ts string) string {
+// fmtDisplayFull renders a RequestRow.TS (RFC3339, source offset) as
+// "2026-07-24 00:17:58" in fmtutil.DisplayZone (the system default
+// timezone), regardless of the record's own embedded offset. Falls back to
+// a raw cut when the timestamp doesn't parse (defensive; Build always
+// writes RFC3339).
+func fmtDisplayFull(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		return cut(ts, 19)
 	}
-	return t.In(utc8).Format("2006-01-02 15:04:05")
+	return t.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
 }
 
-// fmtUTC8Time is fmtUTC8Full but time-only ("00:17:58"), for per-turn table
+// fmtDisplayTime is fmtDisplayFull but time-only ("00:17:58"), for per-turn table
 // cells where the enclosing session/task header already carries the date.
-func fmtUTC8Time(ts string) string {
+func fmtDisplayTime(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		return cut(ts, 19)
 	}
-	return t.In(utc8).Format("15:04:05")
+	return t.In(fmtutil.DisplayZone).Format("15:04:05")
 }
 
 func orDashModel(m string) string {

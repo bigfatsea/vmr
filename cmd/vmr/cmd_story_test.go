@@ -578,20 +578,33 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 		}
 	}
 
-	// -llm-addr with -journey (not -compare) must be rejected too.
+	// -llm-addr WITH -journey is 5.9 — allowed (not rejected the way -compare's
+	// restriction used to blanket-reject -journey/-render-all together). A
+	// connection failure (127.0.0.1:1 refuses every connection) must degrade
+	// away per design doc C.7, not fail the command — this call returning nil
+	// is itself the regression guard against silently reintroducing the old
+	// "-llm-addr is only supported with -compare" rejection.
 	if err := captureStdoutErr(t, func() error {
 		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out2"), "-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
-	}); err == nil {
-		t.Error("-llm-addr with -journey should be rejected")
+	}); err != nil {
+		t.Errorf("-llm-addr with -journey should degrade away on connection failure, not fail the command: %v", err)
 	}
 
-	// -llm-addr with -render-all (not -compare) must be rejected too — the
-	// cmdStory guard is `*journeyArg != "" || *renderAll`, and only the
-	// -journey half was covered above until this case was added.
+	// -llm-addr with -render-all must still be rejected — one LLM call per
+	// rendered journey in a batch pass is a different cost profile than a
+	// single -journey/-compare call, deliberately not supported.
 	if err := captureStdoutErr(t, func() error {
 		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out3"), "-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
 	}); err == nil {
 		t.Error("-llm-addr with -render-all should be rejected")
+	}
+
+	// -llm-addr with -corpus must be rejected the same way as -render-all —
+	// same "one LLM call per journey in a batch pass" cost-profile reasoning.
+	if err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out4"), "-corpus", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+	}); err == nil {
+		t.Error("-llm-addr with -corpus should be rejected")
 	}
 }
 
@@ -662,6 +675,171 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil || len(entries) == 0 {
 		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)
+	}
+}
+
+// TestCmdStory_Corpus covers -corpus: two independent candidate journeys
+// must produce vmr-story-corpus.md + .json under {outDir}/stories, and the
+// "no candidates" path (an audit log that groups into zero lineages at all)
+// must return without error and without writing either file, matching
+// corpusStats' own len(toRender)==0 early return.
+func TestCmdStory_Corpus(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, _, _ := writeTwoCandidateJourneys(t, outDir)
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-corpus", path}); err != nil {
+			t.Fatalf("cmdStory -corpus: %v", err)
+		}
+	})
+	if !strings.Contains(out, "2 journey(s) analyzed") {
+		t.Errorf("summary line missing or wrong journey count:\n%s", out)
+	}
+
+	mdPath := filepath.Join(outDir, "stories", "vmr-story-corpus.md")
+	mdData, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatalf("vmr-story-corpus.md not written: %v", err)
+	}
+	if len(mdData) == 0 {
+		t.Error("vmr-story-corpus.md is empty")
+	}
+
+	jsonPath := filepath.Join(outDir, "stories", "vmr-story-corpus.json")
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("vmr-story-corpus.json not written: %v", err)
+	}
+	var stats story.CorpusStats
+	if err := json.Unmarshal(jsonData, &stats); err != nil {
+		t.Fatalf("vmr-story-corpus.json is not valid JSON: %v\n%s", err, jsonData)
+	}
+	if stats.JourneyCount != 2 {
+		t.Errorf("stats.JourneyCount = %d, want 2", stats.JourneyCount)
+	}
+}
+
+// TestCmdStory_CorpusNoCandidates covers corpusStats' own early return when
+// there are zero candidate journeys to analyze (here: a single record with
+// no non-system messages, which ctxgraph groups into Ungrouped rather than
+// any Lineage at all — same fixture shape as TestCmdStory_ShowUngrouped).
+// The command must not error, and must not create reports/stories/ at all —
+// mirroring how -llm-dry-run leaves no directory behind either.
+func TestCmdStory_CorpusNoCandidates(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sysOnly := storyRec(at(0), []any{storyMsg("system", "sys, nothing else")}, storySSE("ok"))
+	path := writeStoryJSONL(t, []audit.Record{sysOnly})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-corpus", path}); err != nil {
+			t.Fatalf("cmdStory -corpus (no candidates): %v", err)
+		}
+	})
+	if !strings.Contains(out, "no candidate journeys to analyze") {
+		t.Errorf("expected the no-candidates message:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
+		t.Error("-corpus with zero candidates should not create reports/stories/ at all")
+	}
+}
+
+// TestCmdStory_CorpusExclusivity covers the exclusivity check that rejects
+// -corpus combined with -journey/-render-all/-compare — each must be
+// rejected before any input file is even scanned, and must leave no
+// reports/stories/ directory behind.
+func TestCmdStory_CorpusExclusivity(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+	u1 := storyMsg("user", "hello")
+	r1 := storyRec(at(0), []any{sys, u1}, storySSE("a"))
+	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("b"))
+	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+
+	cases := map[string][]string{
+		"-corpus with -journey":    {"-corpus", "-journey", "j-something"},
+		"-corpus with -render-all": {"-corpus", "-render-all"},
+		"-corpus with -compare":    {"-corpus", "-compare", "a,b"},
+	}
+	for name, extra := range cases {
+		outDir := filepath.Join(t.TempDir(), "out")
+		args := append(append([]string{"-o", outDir}, extra...), path)
+		err := captureStdoutErr(t, func() error { return cmdStory(args) })
+		if err == nil {
+			t.Errorf("%s: expected an error, got none", name)
+			continue
+		}
+		wantErr := "-corpus is exclusive with -journey/-render-all/-compare — run it on its own"
+		if err.Error() != wantErr {
+			t.Errorf("%s: error = %q, want %q", name, err.Error(), wantErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(outDir, "stories")); statErr == nil {
+			t.Errorf("%s: reports/stories/ should not be created when the exclusivity check rejects the args", name)
+		}
+	}
+}
+
+// TestCmdStory_JourneyWithLLM mirrors TestCmdStory_CompareWithLLM but for
+// -journey: a real (mock) VMR endpoint, the rendered journey .md gaining the
+// "## LLM Interpretation" section with the mock's reply, and a cache file
+// appearing under stories/.llm-cache.
+func TestCmdStory_JourneyWithLLM(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "一句话结论：这是 mock 的单journey解读内容。"}},
+			},
+		})
+	}))
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+
+	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+		t.Fatalf("cmdStory -journey -llm-addr: %v", err)
+	}
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	if err != nil {
+		t.Fatalf("journey .md not written: %v", err)
+	}
+	md := string(mdData)
+	for _, want := range []string{"## LLM Interpretation", "一句话结论：这是 mock 的单journey解读内容。", "not the fact layer"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("journey markdown missing %q:\n%s", want, md)
+		}
+	}
+
+	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil || len(entries) == 0 {
+		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)
+	}
+}
+
+// TestCmdStory_JourneyLLMDryRun mirrors TestCmdStory_CompareLLMDryRun but
+// for -journey: -llm-dry-run must print a size estimate and return before
+// writing anything (including reports/stories/ itself), and must never dial
+// the given address.
+func TestCmdStory_JourneyLLMDryRun(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+
+	out := captureStdout(t, func() {
+		if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", path}); err != nil {
+			t.Fatalf("cmdStory -journey -llm-dry-run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dry run") {
+		t.Errorf("dry-run output missing the size estimate line: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idA+".md")); err == nil {
+		t.Error("-llm-dry-run should return before writing the journey .md")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
+		t.Error("-llm-dry-run should not create reports/stories/ at all")
 	}
 }
 

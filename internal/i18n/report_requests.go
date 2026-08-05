@@ -41,7 +41,7 @@ func Requests(lang Lang) RequestsText {
 				return "> 请求 " + strconv.Itoa(requests) + " · 成功率 " + successPct + " · fresh " + fresh + " / cached " + cached + " / out " + out + " · 缓存效率 " + cacheEffPct + "\n"
 			},
 			GroupDetailLink: func(file string) string { return "> 详情见 [" + file + "](" + file + ")\n\n" },
-			ChatUserLegend:  "层级: Session -> Task -> Turn（时间均为 UTC+8）。每轮表列: 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件\n\n",
+			ChatUserLegend:  "层级: Session -> Task -> Turn（时间均为本机系统默认时区）。每轮表列: 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件\n\n",
 			ScheduledSummary: func(successPct, fresh, cached, out string) string {
 				return "> 成功率 " + successPct + " · fresh " + fresh + " / cached " + cached + " / out " + out + "\n\n"
 			},
@@ -75,7 +75,7 @@ func Requests(lang Lang) RequestsText {
 			return "> Requests " + strconv.Itoa(requests) + " · Success Rate " + successPct + " · fresh " + fresh + " / cached " + cached + " / out " + out + " · Cache Efficiency " + cacheEffPct + "\n"
 		},
 		GroupDetailLink: func(file string) string { return "> Details in [" + file + "](" + file + ")\n\n" },
-		ChatUserLegend:  "Hierarchy: Session -> Task -> Turn (all times in UTC+8). Per-turn columns: Turn | Time | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | File\n\n",
+		ChatUserLegend:  "Hierarchy: Session -> Task -> Turn (all times in the local machine's system default timezone). Per-turn columns: Turn | Time | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | File\n\n",
 		ScheduledSummary: func(successPct, fresh, cached, out string) string {
 			return "> Success Rate " + successPct + " · fresh " + fresh + " / cached " + cached + " / out " + out + "\n\n"
 		},

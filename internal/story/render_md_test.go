@@ -31,7 +31,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 
 	for _, want := range []string{
 		"# Journey j-",
@@ -85,7 +85,7 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 
 	for _, want := range []string{
 		"**Messages**",
@@ -125,7 +125,7 @@ func TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	if !strings.Contains(md, "````\n") {
 		t.Errorf("expected a 4-backtick fence to safely wrap content containing a 3-backtick run:\n%s", md)
 	}
@@ -164,7 +164,7 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "context was sharply contracted") {
 		t.Errorf("rendered Markdown missing break warning:\n%s", md)
 	}
@@ -207,7 +207,7 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	if !strings.Contains(md, "content barely overlaps with the previous segment") {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}

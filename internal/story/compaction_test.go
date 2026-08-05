@@ -154,7 +154,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	// is the only thing a human (or the compare/LLM evidence pack) ever
 	// reads, so it needs its own assertion, not just CompactionInfo's field
 	// values.
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	for _, want := range []string{"Information loss", "README.md", "AGENTS.md"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderMarkdown output missing %q for the compaction boundary step:\n%s", want, md)
@@ -252,7 +252,7 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 	// Same gap as the compaction test above: the Event.Revises field being
 	// set doesn't by itself prove renderEvent's 🔄 marker actually reaches
 	// RenderMarkdown's output.
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	if !strings.Contains(md, "🔄[revises") {
 		t.Errorf("RenderMarkdown output should carry the 🔄[revises …] marker for the revising event:\n%s", md)
 	}

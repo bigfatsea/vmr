@@ -14,30 +14,48 @@ import (
 )
 
 // RenderMarkdown renders j as a self-contained Markdown document in lang:
-// the event stream organized by Task/Step, each Step's genuinely-new
-// content shown inline and its full recorded body available in a folded
-// <details> block. Purely a view over already-computed facts (Task/Step/
-// Event) — no judgment calls happen here, only formatting (this is the
-// fact-layer renderer; a narrate-layer on top is Phase C).
-func RenderMarkdown(j *Journey, lang i18n.Lang) string {
+// a decision-spine layer (overview card, per-Task action list — see
+// render_spine.go) followed by the event stream organized by Task/Step,
+// each Step's genuinely-new content shown inline and its full recorded body
+// available in a folded <details> block, then a tool-call timeline and the
+// Findings candidate list. m/findings are computed once by the caller
+// (cmd/vmr/cmd_story.go's writeJourneyFile) and passed in rather than
+// recomputed here, so the Markdown and JSON outputs for the same Journey
+// are guaranteed to agree on both. Purely a view over already-computed
+// facts — no judgment calls happen here, only formatting.
+func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Story(lang)
+	st := i18n.Spine(lang)
 
 	w("# Journey %s\n\n", j.ID)
 	w("> %s\n\n", j.Title)
-	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.Format("2006-01-02 15:04:05"), j.To.Format("15:04:05")))
+	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), j.To.In(fmtutil.DisplayZone).Format("15:04:05")))
 
 	if j.Break != nil {
 		w("%s", t.BreakWarning(j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind, t), editStatsHint(j.Break.Edit, t)))
 	}
 
+	renderOverviewCard(w, j, m, lang)
+	renderDecisionSpine(w, j, findings, lang)
+
+	isRepeatStep := map[int]bool{}
+	for _, o := range toolCallRepeats(journeySteps(j)) {
+		if o.IsRepeat {
+			isRepeatStep[o.StepSeq] = true
+		}
+	}
+
 	for ti, task := range j.Tasks {
 		w("## t%02d · %s\n\n", ti+1, task.Title)
 		for _, step := range task.Steps {
-			renderStep(w, step, t)
+			renderStep(w, step, t, st, isRepeatStep[step.Seq])
 		}
 	}
+
+	renderToolTimeline(w, j, lang)
+	renderFindingsSection(w, findings, lang)
 	return b.String()
 }
 
@@ -73,9 +91,9 @@ func editStatsHint(e ctxgraph.Edit, t i18n.StoryText) string {
 	return t.EditStatsHint(e.LCP, e.Coverage*100)
 }
 
-func renderStep(w func(string, ...any), s *Step, t i18n.StoryText) {
+func renderStep(w func(string, ...any), s *Step, t i18n.StoryText, st i18n.SpineText, isRepeat bool) {
 	m := s.Manifest
-	w("### Step %d · %s · %s", s.Seq, m.TS.Format("15:04:05"), fmtutil.FmtSeconds(msDuration(m.DurMS), 1))
+	w("### %s Step %d · %s · %s", stepRoleTag(s, isRepeat, st), s.Seq, m.TS.In(fmtutil.DisplayZone).Format("15:04:05"), fmtutil.FmtSeconds(msDuration(m.DurMS), 1))
 	if m.TTFTMS > 0 {
 		w(" (ttft %s)", fmtutil.FmtSeconds(msDuration(m.TTFTMS), 1))
 	}

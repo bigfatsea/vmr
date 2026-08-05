@@ -44,6 +44,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -90,7 +91,13 @@ type PricingRate struct {
 }
 
 // matches reports whether ts falls inside r's optional date/hour window.
+// DateFrom/DateTo/HourFrom/HourTo are interpreted in fmtutil.DisplayZone
+// (the system default timezone) — ts is converted once up front so a
+// record's own embedded offset (which may differ from the machine running
+// `vmr report`, or from what the operator had in mind writing
+// pricing.yaml) never silently shifts which window a request falls into.
 func (r PricingRate) matches(ts time.Time) bool {
+	ts = ts.In(fmtutil.DisplayZone)
 	if r.DateFrom != "" && ts.Format("2006-01-02") < r.DateFrom {
 		return false
 	}

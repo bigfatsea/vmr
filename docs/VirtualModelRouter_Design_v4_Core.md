@@ -541,7 +541,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 | --- | --- |
 | 开关 | 默认开启；`vmr start -audit=false` 关闭 |
 | 目录 | 配置项 `log_dir`（有设置则原样使用，`~/` 展开）否则持久的 `~/.vmr/logs`（`internal/rundir` 的三层默认规则，与 `image_cache_dir` 共用同一套公式；不用系统临时目录——macOS 会清理它，审计会被静默删除）。启动日志打印实际路径，`vmr check -c <cfg> log` 也可单独查询；改 `log_dir` 需重启生效（热重载会打提示） |
-| 文件 | 每天一个：`vmr-audit-YYYY-MM-DD.jsonl`（本地时区，写入时轮转），权限 0600 |
+| 文件 | 每天一个：`vmr-audit-YYYY-MM-DD.jsonl`（本地时区，写入时轮转），权限 0600——记录里 `ts` 字段的时区含义见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的审计日志输入契约一节 |
 | 时机 | 请求完成后追加一行（含流式全程），不影响 TTFB |
 | 失败 | 写盘失败仅打 stderr 日志，绝不影响请求服务 |
 | 覆盖 | 两个聊天入口的所有请求，含被 vmr 拒绝的（401/413/坏 JSON/未知模型/协议不符）；`/v1/models`、`/admin/status` 不记 |

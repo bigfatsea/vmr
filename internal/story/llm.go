@@ -35,18 +35,40 @@ import (
 	"vmr/internal/i18n"
 )
 
-// promptVersionBase is bumped whenever the prompt template or the evidence
-// pack's shape changes materially — part of the disk-cache key (the
-// "(step_hash, model, prompt_version)" convention, adapted here to
-// "(both journey ids + evidence pack, model, prompt_version)" since this
-// layer operates on a pair of Journeys, not a single step). promptVersionFor
-// appends the language, so switching -lang never reuses another language's
-// cached interpretation (docs/VirtualModelRouter_Design_v4_Analytics.md's
-// "LLM 解读层的语言联动" subsection).
+// promptVersionBase is bumped whenever the -compare prompt template or its
+// evidence pack's shape changes materially — part of the disk-cache key
+// (the "(step_hash, model, prompt_version)" convention, adapted here to
+// "(evidence pack, model, prompt_version)" since this layer operates on
+// whole Journeys, not a single step). Each of the other two scenarios
+// (SingleJourneyEvidencePack, DivergenceEvidencePack) carries its own
+// version string in its own promptSpec — see evidencePackKind.
 const promptVersionBase = "compare-llm-v2"
 
-func promptVersionFor(lang i18n.Lang) string {
-	return promptVersionBase + "-" + lang.String()
+// promptSpec bundles one interpretation scenario's prompt template pieces:
+// which system prompt to send, how to wrap the evidence pack's JSON into
+// the user message, and a version tag that becomes part of the disk-cache
+// key. Each evidence-pack shape supplies its own via evidencePackKind.
+type promptSpec struct {
+	Version                string
+	System                 string
+	UserPrefix, UserSuffix string
+}
+
+// evidencePackKind is implemented by every evidence-pack shape this layer
+// supports — EvidencePack (-compare), SingleJourneyEvidencePack (5.9),
+// DivergenceEvidencePack (6c). It's how cacheKey/buildUserPrompt/Interpret
+// pick the right prompt for whichever pack type they're called with,
+// entirely through Go's generic type inference — every call site
+// (Interpret(ctx, opts, pack, lang)) reads identically regardless of which
+// scenario pack belongs to, and the -compare call site in cmd_story.go
+// needed zero changes when 5.9/6c were added.
+type evidencePackKind interface {
+	promptSpec(lang i18n.Lang) promptSpec
+}
+
+func (EvidencePack) promptSpec(lang i18n.Lang) promptSpec {
+	t := i18n.LLM(lang)
+	return promptSpec{Version: promptVersionBase, System: t.SystemPrompt, UserPrefix: t.UserPromptPrefix, UserSuffix: t.UserPromptSuffix}
 }
 
 // llmHTTPTimeout is deliberately generous (not the 30s a simple echo call
@@ -143,8 +165,13 @@ func journeyTaskTitles(j *Journey) []string {
 // need a tokenizer matched to whatever model -llm-addr resolves to, which
 // this package has no way to know in advance — chars/4 is close enough for
 // "does this look reasonable before I spend money on it".
-func (p EvidencePack) EstimateChars() int {
-	data, err := json.Marshal(p)
+func (p EvidencePack) EstimateChars() int { return packChars(p) }
+
+// packChars is EstimateChars' shared implementation — a package-level
+// function rather than a generic method (Go doesn't allow type parameters
+// on methods), reused by every evidence-pack shape's own EstimateChars.
+func packChars(pack any) int {
+	data, err := json.Marshal(pack)
 	if err != nil {
 		return 0
 	}
@@ -155,16 +182,16 @@ func (p EvidencePack) EstimateChars() int {
 // rather than compact on purpose: this is a debugging aid too (the exact
 // prompt sent is what a human reads if they open the cache file), and the
 // token-cost difference against a several-thousand-char excerpt is noise.
-// The system prompt (internal/i18n.LLM(lang).SystemPrompt) instructs the
-// model which language to answer in, so this wrapper text and the model's
-// own reply stay in the same language as the rest of the report.
-func buildUserPrompt(pack EvidencePack, lang i18n.Lang) (string, error) {
+// The system prompt (pack.promptSpec(lang).System) instructs the model
+// which language to answer in, so this wrapper text and the model's own
+// reply stay in the same language as the rest of the report.
+func buildUserPrompt[T evidencePackKind](pack T, lang i18n.Lang) (string, error) {
 	data, err := json.MarshalIndent(pack, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal evidence pack: %w", err)
 	}
-	t := i18n.LLM(lang)
-	return t.UserPromptPrefix + string(data) + t.UserPromptSuffix, nil
+	spec := pack.promptSpec(lang)
+	return spec.UserPrefix + string(data) + spec.UserSuffix, nil
 }
 
 // LLMOptions configures the interpretation layer's one HTTP call — see this
@@ -205,13 +232,14 @@ func (o LLMOptions) chatURL() string {
 // concrete bug the plan review flagged in the alternative proposal), and
 // the evidence pack's own content (so a re-run against updated Journeys, or
 // a different pair of ids, never collides).
-func cacheKey(model string, pack EvidencePack, lang i18n.Lang) (string, error) {
+func cacheKey[T evidencePackKind](model string, pack T, lang i18n.Lang) (string, error) {
 	data, err := json.Marshal(pack)
 	if err != nil {
 		return "", err
 	}
+	spec := pack.promptSpec(lang)
 	h := sha256.New()
-	h.Write([]byte(promptVersionFor(lang)))
+	h.Write([]byte(spec.Version + "-" + lang.String()))
 	h.Write([]byte{0})
 	h.Write([]byte(model))
 	h.Write([]byte{0})
@@ -250,12 +278,12 @@ type chatCompletionResponse struct {
 // health check — a single best-effort call; the caller decides what "it
 // failed" means for the rest of the report (design doc C.7: the whole layer
 // degrades away, it never fails the command).
-func callLLM(ctx context.Context, opts LLMOptions, userPrompt string, lang i18n.Lang) (string, error) {
+func callLLM(ctx context.Context, opts LLMOptions, systemPrompt, userPrompt string) (string, error) {
 	reqBody := chatCompletionRequest{
 		Model:  opts.Model,
 		Stream: false,
 		Messages: []chatMsgSimple{
-			{Role: "system", Content: i18n.LLM(lang).SystemPrompt},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
 	}
@@ -318,7 +346,7 @@ type InterpretResult struct {
 // failure (cache I/O aside — a cache miss is not a failure) is returned as
 // an error and the caller is expected to treat it as "no LLM section this
 // run", per design doc C.7 — this function itself never panics or retries.
-func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack, lang i18n.Lang) (InterpretResult, error) {
+func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T, lang i18n.Lang) (InterpretResult, error) {
 	if !opts.Enabled() {
 		return InterpretResult{}, fmt.Errorf("LLM interpretation layer not enabled (no -llm-addr)")
 	}
@@ -338,7 +366,7 @@ func Interpret(ctx context.Context, opts LLMOptions, pack EvidencePack, lang i18
 	if err != nil {
 		return InterpretResult{}, err
 	}
-	text, err := callLLM(ctx, opts, userPrompt, lang)
+	text, err := callLLM(ctx, opts, pack.promptSpec(lang).System, userPrompt)
 	if err != nil {
 		return InterpretResult{}, err
 	}

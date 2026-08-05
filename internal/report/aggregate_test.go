@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -417,6 +418,15 @@ func TestWriteRequestsJSONL(t *testing.T) {
 // or per-tag sibling — "bob" never had any interactive traffic, so no
 // vmr-requests-bob.md is written at all.
 func TestWriteRequestsIndexGrouping(t *testing.T) {
+	// Override DisplayZone to something other than UTC (this package's
+	// TestMain default) and other than a plausible "real" timezone, so the
+	// assertion below proves display genuinely follows fmtutil.DisplayZone
+	// — not a hardcoded offset (the old behavior this test used to lock in)
+	// and not a coincidence of the test fixture's own zone.
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.FixedZone("TEST+05:00", 5*3600)
+	defer func() { fmtutil.DisplayZone = origZone }()
+
 	dir := t.TempDir()
 	at := func(h, m int) string {
 		return time.Date(2026, 7, 24, h, m, 0, 0, time.UTC).Format(time.RFC3339)
@@ -477,11 +487,11 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if strings.Contains(s, "Chat User: bob") {
 		t.Errorf("bob's only record is a single-shot heartbeat and must not get its own Chat User section:\n%s", s)
 	}
-	// 00:00 UTC on the first record must render as 08:00 local (UTC+8),
-	// not the source record's own (UTC) offset — footer table is still in
-	// the main index.
-	if !strings.Contains(s, "2026-07-24 08:00:00") {
-		t.Errorf("timestamps should be converted to UTC+8:\n%s", s)
+	// 00:00 UTC on the first record must render as 05:00 in fmtutil.DisplayZone
+	// (TEST+05:00 above), not the source record's own (UTC) offset — footer
+	// table is still in the main index.
+	if !strings.Contains(s, "2026-07-24 05:00:00") {
+		t.Errorf("timestamps should be converted to fmtutil.DisplayZone:\n%s", s)
 	}
 
 	alice, err := os.ReadFile(filepath.Join(dir, "vmr-requests-alice.md"))
@@ -1256,6 +1266,52 @@ func TestTopErrorClassCountDeterministic(t *testing.T) {
 		if cls != "auth" || n != 1 {
 			t.Fatalf("run %d: got (%q, %d), want (\"auth\", 1) — ties must always resolve alphabetically", i, cls, n)
 		}
+	}
+}
+
+// TestBuildDateHourBucketsUseDisplayZone proves buildRec2 derives its
+// byDate/hoursOfDay bucket keys through fmtutil.DisplayZone rather than the
+// record's own embedded offset (the bug absorbed from an independent
+// Gemini analysis of this same timezone problem: a naive
+// arec.TS.Format("2006-01-02")/.Hour() reads whatever offset the record
+// happened to carry, which can silently misfile a request into the wrong
+// calendar day/hour of the report's byDate/hoursOfDay charts). The record
+// below is 23:30 UTC — late on 2026-07-24 in its own zone, but 04:30 the
+// next calendar day once converted to a +05:00 DisplayZone.
+func TestBuildDateHourBucketsUseDisplayZone(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.FixedZone("TEST+05:00", 5*3600)
+	defer func() { fmtutil.DisplayZone = origZone }()
+
+	dir := t.TempDir()
+	ts := time.Date(2026, 7, 24, 23, 30, 0, 0, time.UTC)
+	record := map[string]any{
+		"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent", "protocol": "openai",
+		"outcome": "ok", "stream": false,
+		"client": map[string]any{
+			"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
+				map[string]any{"role": "user", "content": "hi"},
+			}}},
+			"response": map[string]any{"status": 200, "body": map[string]any{
+				"model":   "agent",
+				"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "ok"}}},
+				"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
+			}},
+		},
+		"attempts": []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite",
+			"dur_ms": 100, "response": map[string]any{"status": 200}}},
+	}
+	path := writeTempJSONL(t, dir, []map[string]any{record})
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rep.ByDate) != 1 || rep.ByDate[0].Date != "2026-07-25" {
+		t.Errorf("ByDate = %+v, want a single 2026-07-25 bucket (23:30 UTC converted to +05:00 crosses midnight)", rep.ByDate)
+	}
+	if len(rep.HoursOfDay) != 1 || rep.HoursOfDay[0].Hour != 4 {
+		t.Errorf("HoursOfDay = %+v, want a single hour=4 bucket (23:30 UTC + 5h = 04:30)", rep.HoursOfDay)
 	}
 }
 

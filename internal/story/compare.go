@@ -11,6 +11,7 @@ package story
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 
@@ -239,6 +240,11 @@ type ComparisonExtras struct {
 	FinalContext FinalContextFact `json:"final_context"`
 	Duration     DurationFact     `json:"duration"`
 	Deliverable  DeliverableFact  `json:"deliverable"`
+	// Divergence is the first Step position (in the two Journeys' shared
+	// aligned prefix) where their tool-use structure first differs — a
+	// structural fact ("from here on the two runs differ"), never a root-
+	// cause claim. See computeDivergence's doc comment.
+	Divergence DivergencePoint `json:"divergence"`
 
 	// Sources is the sorted list of source audit file paths both Journeys
 	// were built from — an evidence-provenance addition that lets a reader
@@ -366,6 +372,7 @@ func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics) ComparisonExtras {
 		FinalContext: finalContextFact(ma, mb),
 		Duration:     durationFact(jA, jB),
 		Deliverable:  DeliverableFact{A: deliverableStats(jA), B: deliverableStats(jB)},
+		Divergence:   computeDivergence(jA, jB),
 	}
 }
 
@@ -589,4 +596,145 @@ func truncateText(s string, maxChars int) (string, bool) {
 		return s, false
 	}
 	return string(r[:maxChars]), true
+}
+
+// --- divergence-point detection --------------------------------------------
+
+// DivergenceSeverity distinguishes "same tools, different targets" from "a
+// genuinely different tool was chosen" — the two-tier severity the plan
+// review settled on: light divergence is worth a note, heavy divergence is
+// worth highlighting. Neither is a root-cause claim (see
+// DivergencePoint's doc comment).
+type DivergenceSeverity string
+
+const (
+	DivergenceLight DivergenceSeverity = "light"
+	DivergenceHeavy DivergenceSeverity = "heavy"
+)
+
+// DivergencePoint is a structural fact only — "the two runs' tool-use
+// structure first differs here" — never a claim about why, or about which
+// side did better. index is the 0-based position within the two Journeys'
+// SHARED aligned prefix (comparison stops at whichever side is shorter);
+// AStepSeq/BStepSeq are each side's own Step numbering at that position
+// (not comparable to each other directly — two independent Journeys'
+// Step.Seq values have no relationship beyond "how many steps in").
+// Found=false means the shared prefix showed no structural divergence —
+// stated as a fact about what this detector saw, not a claim the two runs
+// were identical throughout.
+type DivergencePoint struct {
+	Found     bool               `json:"found"`
+	Index     int                `json:"index"` // 0-based; a legitimate value, unlike AStepSeq/BStepSeq below
+	AStepSeq  int                `json:"a_step_seq,omitempty"`
+	BStepSeq  int                `json:"b_step_seq,omitempty"`
+	TaskTitle string             `json:"task_title,omitempty"` // A's task title at this position (both sides are aligned by position, not guaranteed to share a title)
+	ATools    []string           `json:"a_tools,omitempty"`
+	BTools    []string           `json:"b_tools,omitempty"`
+	Severity  DivergenceSeverity `json:"severity,omitempty"`
+}
+
+// toolSignature is the coarse, order-independent structural fingerprint
+// computeDivergence compares position-by-position: whether a Step called
+// any tool at all, and which distinct tool names it called (sorted,
+// deduped — call count and argument content are NOT part of the
+// signature, only WHICH tools). This is deliberately the crudest signal
+// that still answers "did the two paths structurally diverge here" — the
+// plan review's own guidance ("先用最粗糙的结构签名...做第一版").
+type toolSignature struct {
+	hasCall bool
+	names   []string
+}
+
+func stepToolSignature(s *Step) toolSignature {
+	seen := map[string]bool{}
+	var names []string
+	for _, tc := range s.ToolCalls {
+		if !seen[tc.Name] {
+			seen[tc.Name] = true
+			names = append(names, tc.Name)
+		}
+	}
+	sort.Strings(names)
+	return toolSignature{hasCall: len(s.ToolCalls) > 0, names: names}
+}
+
+func sameNames(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// stepArgsEqual reports whether a and b issued exactly the same tool calls,
+// in the same order, with byte-identical arguments — only ever called once
+// both sides' toolSignature already matched, to tell "same tools, same
+// targets" (no divergence yet) apart from "same tools, different targets"
+// (DivergenceLight).
+func stepArgsEqual(a, b *Step) bool {
+	if len(a.ToolCalls) != len(b.ToolCalls) {
+		return false
+	}
+	for i := range a.ToolCalls {
+		if a.ToolCalls[i].Name != b.ToolCalls[i].Name || a.ToolCalls[i].Args != b.ToolCalls[i].Args {
+			return false
+		}
+	}
+	return true
+}
+
+// alignedStep pairs a Step with the title of the Task it belongs to —
+// computeDivergence flattens both Journeys into this shape so it can walk
+// a single aligned-by-position sequence without losing which Task each
+// position belongs to (needed for DivergencePoint.TaskTitle).
+type alignedStep struct {
+	step      *Step
+	taskTitle string
+}
+
+func flattenWithTask(j *Journey) []alignedStep {
+	var out []alignedStep
+	for _, task := range j.Tasks {
+		for _, s := range task.Steps {
+			out = append(out, alignedStep{step: s, taskTitle: task.Title})
+		}
+	}
+	return out
+}
+
+// computeDivergence walks jA/jB position-by-position (NOT by Step.Seq,
+// which isn't comparable across two independent Journeys) up to whichever
+// side is shorter, and returns the first position whose toolSignature
+// differs. This assumes the two Journeys share a comparable opening (the
+// common "same task, re-run with a different prompt/model" scenario
+// divergence-point detection is built for) — a caller comparing two unrelated Journeys will get a
+// position-0 divergence immediately, which is still an honest answer ("they
+// differed from the very first step"), just not a useful one.
+func computeDivergence(jA, jB *Journey) DivergencePoint {
+	a := flattenWithTask(jA)
+	b := flattenWithTask(jB)
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		sa, sb := stepToolSignature(a[i].step), stepToolSignature(b[i].step)
+		switch {
+		case sa.hasCall != sb.hasCall || !sameNames(sa.names, sb.names):
+			return DivergencePoint{
+				Found: true, Index: i, AStepSeq: a[i].step.Seq, BStepSeq: b[i].step.Seq,
+				TaskTitle: a[i].taskTitle, ATools: sa.names, BTools: sb.names, Severity: DivergenceHeavy,
+			}
+		case sa.hasCall && !stepArgsEqual(a[i].step, b[i].step):
+			return DivergencePoint{
+				Found: true, Index: i, AStepSeq: a[i].step.Seq, BStepSeq: b[i].step.Seq,
+				TaskTitle: a[i].taskTitle, ATools: sa.names, BTools: sb.names, Severity: DivergenceLight,
+			}
+		}
+	}
+	return DivergencePoint{}
 }

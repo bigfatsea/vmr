@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"vmr/internal/fmtutil"
 )
 
 func TestResolveCurrencyFactors(t *testing.T) {
@@ -139,6 +141,14 @@ rates:
 }
 
 func TestPricingRateTimeWindows(t *testing.T) {
+	// matches() interprets DateFrom/DateTo/HourFrom/HourTo in
+	// fmtutil.DisplayZone — pin it to UTC (matching this test's at() helper)
+	// so the assertions below don't depend on the host machine's real
+	// timezone.
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.UTC
+	defer func() { fmtutil.DisplayZone = origZone }()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pricing.yaml")
 	// Two rules for the same provider+model: an off-peak discount
@@ -211,6 +221,33 @@ rates:
 	// case-insensitive provider/model lookup.
 	if _, ok := p.RateFor("VolcEngine", "ARK-Code-Latest", at(2026, 7, 26, 23, 0)); !ok {
 		t.Errorf("provider/model lookup should be case-insensitive")
+	}
+}
+
+// TestPricingRateMatchesConvertsToDisplayZone proves matches() interprets a
+// timestamp in fmtutil.DisplayZone rather than trusting the time.Time's own
+// embedded offset — a record written from a different timezone than the
+// machine running `vmr report` must still land in the correct hour/date
+// window. Constructed so the two interpretations disagree: 23:00 in a
+// fixed +05:00 zone is 18:00 UTC, which falls outside the 22:00..06:00
+// off-peak window a naive (non-converting) read of the record's own "23:00"
+// would have matched.
+func TestPricingRateMatchesConvertsToDisplayZone(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.UTC
+	defer func() { fmtutil.DisplayZone = origZone }()
+
+	rate := PricingRate{HourFrom: "22:00", HourTo: "06:00"}
+
+	plusFive := time.FixedZone("+05:00", 5*3600)
+	tsLocalLooking := time.Date(2026, 7, 26, 23, 0, 0, 0, plusFive) // == 18:00 UTC
+	if rate.matches(tsLocalLooking) {
+		t.Errorf("matches() should convert to DisplayZone (UTC) before comparing — 23:00+05:00 is 18:00 UTC, outside 22:00..06:00")
+	}
+
+	tsUTC := time.Date(2026, 7, 26, 23, 0, 0, 0, time.UTC)
+	if !rate.matches(tsUTC) {
+		t.Errorf("23:00 UTC should match the 22:00..06:00 window when DisplayZone is UTC")
 	}
 }
 

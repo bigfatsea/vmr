@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 	"vmr/internal/story/profile"
 )
@@ -382,4 +383,84 @@ func TestRenderComparisonMarkdown_WithSources(t *testing.T) {
 			t.Errorf("rendered comparison with Extras.Sources missing %q:\n%s", want, md)
 		}
 	}
+}
+
+// journeyOfTasks builds a Journey directly from Task literals — 6a/6b's
+// divergence detection compares two independent Journeys position-by-
+// position, so these tests need full control over each side's Task/Step
+// shape without going through the audit-record Build() pipeline (findings_
+// test.go's journeyOf covers the single-Task case; divergence tests need
+// multiple Tasks on at least one side).
+func journeyOfTasks(tasks ...*Task) *Journey { return &Journey{Tasks: tasks} }
+
+func TestComputeDivergence(t *testing.T) {
+	t.Run("identical shared prefix: not found", func(t *testing.T) {
+		a := journeyOf(
+			&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}},
+			&Step{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"b"}`)}},
+		)
+		b := journeyOf(
+			&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}},
+			&Step{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"b"}`)}},
+		)
+		d := computeDivergence(a, b)
+		if d.Found {
+			t.Fatalf("expected no divergence for identical sequences, got %+v", d)
+		}
+	})
+
+	t.Run("different tool chosen: heavy, at the first differing position", func(t *testing.T) {
+		a := journeyOf(
+			&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}},
+			&Step{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"b"}`)}},
+		)
+		b := journeyOf(
+			&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}},
+			&Step{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("delete", `{"path":"b"}`)}},
+		)
+		d := computeDivergence(a, b)
+		if !d.Found || d.Severity != DivergenceHeavy || d.Index != 1 {
+			t.Fatalf("got %+v, want Found=true Severity=heavy Index=1", d)
+		}
+		if d.AStepSeq != 2 || d.BStepSeq != 2 {
+			t.Errorf("AStepSeq/BStepSeq = %d/%d, want 2/2", d.AStepSeq, d.BStepSeq)
+		}
+	})
+
+	t.Run("one side has a tool call, the other doesn't: heavy", func(t *testing.T) {
+		a := journeyOf(&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}})
+		b := journeyOf(&Step{Seq: 1, RespText: "just thinking, no action yet"})
+		d := computeDivergence(a, b)
+		if !d.Found || d.Severity != DivergenceHeavy || d.Index != 0 {
+			t.Fatalf("got %+v, want Found=true Severity=heavy Index=0", d)
+		}
+		buf, err := json.Marshal(d)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if !strings.Contains(string(buf), `"index":0`) {
+			t.Errorf("Index=0 must survive JSON marshaling (regression: `omitempty` silently drops it), got %s", buf)
+		}
+	})
+
+	t.Run("same tool, different args: light", func(t *testing.T) {
+		a := journeyOf(&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}})
+		b := journeyOf(&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"different"}`)}})
+		d := computeDivergence(a, b)
+		if !d.Found || d.Severity != DivergenceLight {
+			t.Fatalf("got %+v, want Found=true Severity=light", d)
+		}
+	})
+
+	t.Run("shorter side bounds the comparison, task title comes from A", func(t *testing.T) {
+		a := journeyOfTasks(
+			&Task{Title: "investigate", Steps: []*Step{{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{}`)}}}},
+			&Task{Title: "fix it", Steps: []*Step{{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{}`)}}}},
+		)
+		b := journeyOf(&Step{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("read", `{}`)}})
+		d := computeDivergence(a, b)
+		if d.Found {
+			t.Fatalf("comparison should stop at B's shorter length without ever reaching A's second Task: %+v", d)
+		}
+	})
 }

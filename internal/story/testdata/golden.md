@@ -4,9 +4,14 @@
 
 > 2 tasks · 3 turns · 2026-07-29 10:00:00 → 10:00:06
 
+## Overview
+
+- Started 10:00:00
+- Ended · Step 3 · finish=stop · 10:00:06
+
 ## t01 · 帮我查一下 A 股新股打新收益
 
-### Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
+### 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
 
 **Messages**
 
@@ -35,7 +40,7 @@ You are a helpful assistant.
 
 - finish: `stop`
 
-### Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
+### 💬 Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
 
 > Edit: append (longest common prefix 1 messages, content overlap 33%)
 
@@ -71,7 +76,7 @@ You are a helpful assistant.
 
 ## t02 · 继续，把前10名列出来
 
-### Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
+### 💬 Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
 
 > Edit: append (longest common prefix 3 messages, content overlap 60%)
 
@@ -101,4 +106,12 @@ You are a helpful assistant.
 </details>
 
 - finish: `stop`
+
+## Tool Call Timeline
+
+(no tool calls in this Journey)
+
+## Suspected Issues (candidate list, not a verdict)
+
+No rule-detectable suspected issues.
 

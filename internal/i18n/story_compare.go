@@ -54,6 +54,12 @@ type CompareText struct {
 	DeliverableExcerptLabel func(side string) string
 	ExcerptTruncatedNote    string
 
+	DivergenceTitle    string
+	DivergenceNone     string
+	DivergenceHeavy    func(index int, taskTitle string, aSeq, bSeq int, aTools, bTools string) string
+	DivergenceLight    func(index int, taskTitle string, aSeq, bSeq int, tools string) string
+	DivergenceFootnote string
+
 	MetricLabels map[string]string
 }
 
@@ -113,6 +119,16 @@ func Compare(lang Lang) CompareText {
 			},
 			DeliverableExcerptLabel: func(side string) string { return side + " 的交付物节选" },
 			ExcerptTruncatedNote:    "（已截断）",
+
+			DivergenceTitle: "## 分叉点\n\n",
+			DivergenceNone:  "在两侧共享的前缀范围内，未检测到工具使用结构上的分叉——如实陈述：这不代表两条轨迹完全相同，只代表本检测器能看到的这一层信号没有分叉。\n\n",
+			DivergenceHeavy: func(index int, taskTitle string, aSeq, bSeq int, aTools, bTools string) string {
+				return "🔴 **重度分叉**（对齐位置第 " + strconv.Itoa(index+1) + " 步，所属任务：" + taskTitle + "）：A 第 " + strconv.Itoa(aSeq) + " 轮调用了 [" + aTools + "]，B 第 " + strconv.Itoa(bSeq) + " 轮调用了 [" + bTools + "]——从这一步开始，两条轨迹选择了不同的工具（或一方有调用、另一方没有）。这只是一个结构事实，\"为什么分叉更差\"仍然是解读层的可选推测，不是确定性结论。\n\n"
+			},
+			DivergenceLight: func(index int, taskTitle string, aSeq, bSeq int, tools string) string {
+				return "🟡 **轻度分叉**（对齐位置第 " + strconv.Itoa(index+1) + " 步，所属任务：" + taskTitle + "）：A 第 " + strconv.Itoa(aSeq) + " 轮与 B 第 " + strconv.Itoa(bSeq) + " 轮都调用了 [" + tools + "]，但调用参数不同——工具选择一致，目标不同。\n\n"
+			},
+			DivergenceFootnote: "> 分叉点定位 ≠ 根因判定：这里只陈述\"从哪一步开始两者不同了\"，不推断谁对谁错、也不解释为什么。\n\n",
 
 			MetricLabels: map[string]string{
 				"model_ms":               "模型时间",
@@ -184,6 +200,16 @@ func Compare(lang Lang) CompareText {
 		},
 		DeliverableExcerptLabel: func(side string) string { return side + "'s deliverable excerpt" },
 		ExcerptTruncatedNote:    " (truncated)",
+
+		DivergenceTitle: "## Divergence Point\n\n",
+		DivergenceNone:  "No structural divergence in tool usage was detected within the two sides' shared prefix — stated honestly: this does not mean the two runs were identical, only that this detector's own signal never diverged.\n\n",
+		DivergenceHeavy: func(index int, taskTitle string, aSeq, bSeq int, aTools, bTools string) string {
+			return "🔴 **Heavy divergence** (aligned position " + strconv.Itoa(index+1) + ", task: " + taskTitle + "): A's turn " + strconv.Itoa(aSeq) + " called [" + aTools + "], B's turn " + strconv.Itoa(bSeq) + " called [" + bTools + "] — from here on the two runs chose different tools (or one called and the other didn't). This is a structural fact only; \"why the divergence made things worse\" is still an optional, speculative interpretation-layer claim, never a determined conclusion.\n\n"
+		},
+		DivergenceLight: func(index int, taskTitle string, aSeq, bSeq int, tools string) string {
+			return "🟡 **Light divergence** (aligned position " + strconv.Itoa(index+1) + ", task: " + taskTitle + "): A's turn " + strconv.Itoa(aSeq) + " and B's turn " + strconv.Itoa(bSeq) + " both called [" + tools + "], but with different arguments — same tool choice, different target.\n\n"
+		},
+		DivergenceFootnote: "> Divergence-point location ≠ root-cause determination: this only states \"the two runs differ starting here\", not who was right or why.\n\n",
 
 		MetricLabels: map[string]string{
 			"model_ms":               "Model Time",

@@ -73,7 +73,7 @@ func Markdown(rep *Report2, lang i18n.Lang) string {
 	// ---- header ----
 	w("# %s\n\n", t.Title)
 	w("%s\n", t.MetaLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
-		cut(rep.Meta.From, 19), cut(rep.Meta.To, 19)))
+		fmtDisplayFull(rep.Meta.From), fmtDisplayFull(rep.Meta.To)))
 	w("%s", t.DetailLinkLine)
 	withSibling := clientsWithSiblingFile(rep)
 	for _, c := range rep.ByClient {
@@ -212,7 +212,7 @@ func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	t := i18n.Doc(lang)
 	w("## %s\n\n", t.AppendixTitle)
 	w("%s", t.AppendixInputLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors))
-	w("%s", t.AppendixPeriodLine(cut(rep.Meta.From, 19), cut(rep.Meta.To, 19)))
+	w("%s", t.AppendixPeriodLine(fmtDisplayFull(rep.Meta.From), fmtDisplayFull(rep.Meta.To)))
 	w("%s", t.AppendixPercentile(rep.Meta.PercentileMethod))
 	w("%s", t.AppendixNBase)
 	w("%s", t.AppendixLowConf)

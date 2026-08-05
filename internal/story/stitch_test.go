@@ -122,7 +122,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Errorf("Journey.ID = %q, want it to contain the chain head's start time %q", j.ID, wantStart)
 	}
 
-	md := RenderMarkdown(j, i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 	for _, want := range []string{
 		"🧵 **Stitched from an earlier fragment**",
 		"compaction",

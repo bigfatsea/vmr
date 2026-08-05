@@ -15,6 +15,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 )
 
 // Metrics is one Journey's behavior profile (the design doc's nine-indicator
@@ -186,26 +187,61 @@ func toolCallDistribution(steps []*Step) ([]ToolCallStat, int) {
 	return out, total
 }
 
-// duplicateActionRate is the fraction of tool calls whose exact (name, args)
-// pair already occurred earlier in the same Journey.
-func duplicateActionRate(steps []*Step) float64 {
-	seen := map[string]int{}
-	total := 0
-	dup := 0
+// toolCallKey is the exact-repeat identity of a tool call: same tool, same
+// serialized arguments. Shared by toolCallRepeats and findings.go's own
+// grouping so both agree on what "the same call" means — two independent
+// definitions here would let a Step get tagged 🔄 by one and skipped by the
+// other for what a reader would see as the identical situation.
+func toolCallKey(tc chatmsg.ToolCall) string { return tc.Name + "\x00" + tc.Args }
+
+// ToolCallOccurrence is one tool call's repeat status within a Journey —
+// the shared basis for duplicateActionRate (aggregate rate), the
+// exact_repeat_tool_call Finding (findings.go, Step-level location), and the
+// 🔄 retry tag/symbol render_spine.go's Step-role labeling and tool-call
+// timeline both use. All three read this one slice instead of each
+// re-deciding "is this a repeat" on its own.
+type ToolCallOccurrence struct {
+	StepSeq      int
+	Name         string
+	IsRepeat     bool // this (name, args) pair already occurred earlier in the Journey
+	FirstSeenSeq int  // valid when IsRepeat: the Step where this pair first appeared
+}
+
+// toolCallRepeats walks steps in order and marks each tool call as a repeat
+// (of an earlier, exact — same name, same serialized args — call) or not.
+func toolCallRepeats(steps []*Step) []ToolCallOccurrence {
+	seen := map[string]int{} // toolCallKey -> first-seen StepSeq
+	var out []ToolCallOccurrence
 	for _, s := range steps {
 		for _, tc := range s.ToolCalls {
-			key := tc.Name + "\x00" + tc.Args
-			seen[key]++
-			total++
-			if seen[key] > 1 {
-				dup++
+			key := toolCallKey(tc)
+			if first, ok := seen[key]; ok {
+				out = append(out, ToolCallOccurrence{StepSeq: s.Seq, Name: tc.Name, IsRepeat: true, FirstSeenSeq: first})
+			} else {
+				seen[key] = s.Seq
+				out = append(out, ToolCallOccurrence{StepSeq: s.Seq, Name: tc.Name})
 			}
 		}
 	}
-	if total == 0 {
+	return out
+}
+
+// duplicateActionRate is the fraction of tool calls whose exact (name, args)
+// pair already occurred earlier in the same Journey — built on
+// toolCallRepeats rather than its own scan, so the Journey-level rate and
+// the Step-level 🔄 tagging can never disagree on what counts as a repeat.
+func duplicateActionRate(steps []*Step) float64 {
+	occ := toolCallRepeats(steps)
+	if len(occ) == 0 {
 		return 0
 	}
-	return float64(dup) / float64(total)
+	dup := 0
+	for _, o := range occ {
+		if o.IsRepeat {
+			dup++
+		}
+	}
+	return float64(dup) / float64(len(occ))
 }
 
 // isErrorMarker is the literal text chatmsg.RenderPart embeds for an
@@ -345,17 +381,26 @@ func compactionTotals(steps []*Step) (count int, lossTokens int64) {
 
 // JourneySummary is journey-<id>.json's shape (design doc: "输出同时落
 // journey-<id>.json，供第 4 步的对比模块直接消费") — a Journey's identity
-// plus its Metrics profile, so Phase 4d's comparison module can diff two
-// Journeys without re-parsing Markdown.
+// plus its Metrics profile and rule-derived Findings, so Phase 4d's
+// comparison module can diff two Journeys without re-parsing Markdown.
 type JourneySummary struct {
-	ID      string    `json:"id"`
-	Title   string    `json:"title"`
-	From    time.Time `json:"from"`
-	To      time.Time `json:"to"`
-	Metrics Metrics   `json:"metrics"`
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	From     time.Time `json:"from"`
+	To       time.Time `json:"to"`
+	Metrics  Metrics   `json:"metrics"`
+	Findings []Finding `json:"findings,omitempty"`
 }
 
-// Summarize builds j's JourneySummary, computing Metrics fresh.
+// Summarize builds j's JourneySummary, computing Metrics and Findings
+// fresh. Findings are always computed with i18n.EN — journey-<id>.json is
+// always-English, same convention report.Report2/vmr-report.json already
+// uses for its own Finding field; a target-language copy is a separate
+// ComputeFindings(j, lang) call the Markdown renderer's caller makes (see
+// cmd/vmr/cmd_story.go's writeJourneyFile).
 func Summarize(j *Journey) JourneySummary {
-	return JourneySummary{ID: j.ID, Title: j.Title, From: j.From, To: j.To, Metrics: ComputeMetrics(j)}
+	return JourneySummary{
+		ID: j.ID, Title: j.Title, From: j.From, To: j.To,
+		Metrics: ComputeMetrics(j), Findings: ComputeFindings(j, i18n.EN),
+	}
 }

@@ -25,8 +25,8 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	t := i18n.Compare(lang)
 
 	w("%s", t.Title)
-	w("%s", t.SideBlock("A", cmp.A.ID, cmp.A.Title, cmp.A.From.Format("2006-01-02 15:04:05"), cmp.A.To.Format("15:04:05")))
-	w("%s", t.SideBlock("B", cmp.B.ID, cmp.B.Title, cmp.B.From.Format("2006-01-02 15:04:05"), cmp.B.To.Format("15:04:05")))
+	w("%s", t.SideBlock("A", cmp.A.ID, cmp.A.Title, cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05")))
+	w("%s", t.SideBlock("B", cmp.B.ID, cmp.B.Title, cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05")))
 
 	w("%s", t.ProfileTitle)
 	w("%s", t.ProfileTableHeader)
@@ -53,6 +53,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	}
 
 	if cmp.Extras != nil {
+		renderDivergence(w, cmp.Extras.Divergence, t)
 		renderEndpoints(w, cmp.Extras.Endpoints, t)
 		renderCache(w, cmp.Extras.Cache, t)
 		renderSysPrompt(w, cmp.Extras.SysPrompt, t)
@@ -117,6 +118,28 @@ func emptyDash(s string, t i18n.CompareText) string {
 		return t.EmptyDash
 	}
 	return s
+}
+
+// renderDivergence renders 6a/6b: the first Step position (in the two
+// Journeys' shared aligned prefix) where their tool-use structure first
+// differs — a structural fact only, never a root-cause claim (see
+// DivergencePoint's own doc comment). Placed first among the Extras
+// sections: per the plan review, this is the highest-ROI single addition
+// to -compare, so it belongs above the endpoint/cache/sys-prompt facts a
+// reader would otherwise have to piece the same conclusion together from.
+func renderDivergence(w func(string, ...any), d DivergencePoint, t i18n.CompareText) {
+	w("%s", t.DivergenceTitle)
+	if !d.Found {
+		w("%s", t.DivergenceNone)
+		return
+	}
+	switch d.Severity {
+	case DivergenceHeavy:
+		w("%s", t.DivergenceHeavy(d.Index, d.TaskTitle, d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", "), strings.Join(d.BTools, ", ")))
+	case DivergenceLight:
+		w("%s", t.DivergenceLight(d.Index, d.TaskTitle, d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", ")))
+	}
+	w("%s", t.DivergenceFootnote)
 }
 
 // renderEndpoints renders the model/endpoint identity check, generalized

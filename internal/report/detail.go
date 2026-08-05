@@ -27,6 +27,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -345,8 +346,9 @@ func attemptUpstream(a audit.Attempt) (protocol, provider, model string) {
 }
 
 // detailFileName builds "{20060102-150405.000}_{virtual}_{real}_{outcome}.md".
-// The zero-padded local timestamp leads so lexical sort equals time order;
-// same-millisecond collisions get a numeric suffix.
+// The zero-padded timestamp (rendered in fmtutil.DisplayZone, the system
+// default timezone) leads so lexical sort equals time order; same-
+// millisecond collisions get a numeric suffix.
 func detailFileName(rec *audit.Record, used map[string]int) string {
 	outcome := rec.Outcome
 	if outcome == "error" {
@@ -355,7 +357,7 @@ func detailFileName(rec *audit.Record, used map[string]int) string {
 		}
 	}
 	base := fmt.Sprintf("%s_%s_%s_%s",
-		rec.TS.Format("20060102-150405.000"),
+		rec.TS.In(fmtutil.DisplayZone).Format("20060102-150405.000"),
 		sanitizeName(displayModel(rec)), sanitizeName(realModel(rec)), sanitizeName(outcome))
 	used[base]++
 	if n := used[base]; n > 1 {
@@ -411,7 +413,7 @@ func renderDetail(rec *audit.Record, info *ReqInfo, lang i18n.Lang) string {
 	// Title + overview.
 	w("# %s [%s] · %s · %s · %s\n\n",
 		displayModel(rec), rec.Protocol, outcomeMark(rec.Outcome), ms(rec.DurMS),
-		rec.TS.Format("2006-01-02 15:04:05.000 -07:00"))
+		rec.TS.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05.000"))
 	renderSessionHeader(&b, info, t)
 	stream := t.StreamNo
 	if rec.Stream {
@@ -506,7 +508,7 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo, t i18n.DetailText) {
 	case info.SessionID != "":
 		w("%s", t.SessionTaskLine(info.SessionID, info.TaskID, info.TaskSeq, info.SessSeq))
 		if info.Parent != nil {
-			w("%s", t.PrevTurnLink(info.Parent.TS.Format("15:04:05.000"), info.Parent.DetailFile))
+			w("%s", t.PrevTurnLink(info.Parent.TS.In(fmtutil.DisplayZone).Format("15:04:05.000"), info.Parent.DetailFile))
 		}
 		w("\n")
 		var meta []string

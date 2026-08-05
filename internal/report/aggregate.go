@@ -32,6 +32,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/fmtutil"
 )
 
 // rec2 is Build's per-record working struct: raw fields from audit.Record
@@ -784,10 +785,11 @@ func sortRows(rows []Row, key string) {
 // buildRec2 extracts the aggregator's per-record fields from an audit.Record joined
 // to its ReqInfo (which may be nil for records the analyzer skipped).
 func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
+	// date/hour bucket keys use fmtutil.DisplayZone, not arec.TS's own offset.
 	r := &rec2{
 		ts:       arec.TS,
-		date:     arec.TS.Format("2006-01-02"),
-		hour:     arec.TS.Hour(),
+		date:     arec.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
+		hour:     arec.TS.In(fmtutil.DisplayZone).Hour(),
 		model:    arec.Model,
 		protocol: arec.Protocol,
 		outcome:  arec.Outcome,

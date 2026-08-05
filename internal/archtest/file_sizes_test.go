@@ -45,6 +45,21 @@ var fileLineLimits = map[string]int{
 	"internal/report/detail.go":  1150,
 	"internal/report/session.go": 1100,
 	"internal/story/journey.go":  850,
+	// The entries below (decision-spine rendering, rule-derived Findings,
+	// corpus-level statistics, and the shared infra they landed in
+	// compare.go/metrics.go/render_md.go) were pre-registered, not caught
+	// after the fact — same ~15% headroom over each file's line count at
+	// registration time as the detail.go/session.go/journey.go entries
+	// above, a paragraph's worth of room, not an invitation to keep
+	// growing unnoticed.
+	"internal/story/render_md.go":           350,
+	"internal/story/render_spine.go":        380,
+	"internal/story/findings.go":            580,
+	"internal/story/findings_toolresult.go": 320,
+	"internal/story/compare.go":             850,
+	"internal/story/metrics.go":             470,
+	"internal/story/corpus.go":              380,
+	"internal/story/render_corpus.go":       150,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

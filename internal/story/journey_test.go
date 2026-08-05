@@ -369,7 +369,7 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build[%d]: %v", i, err)
 		}
-		if gotMD, wantMD := RenderMarkdown(got[i], i18n.EN), RenderMarkdown(want, i18n.EN); gotMD != wantMD {
+		if gotMD, wantMD := RenderMarkdown(got[i], ComputeMetrics(got[i]), ComputeFindings(got[i], i18n.EN), i18n.EN), RenderMarkdown(want, ComputeMetrics(want), ComputeFindings(want, i18n.EN), i18n.EN); gotMD != wantMD {
 			t.Errorf("BuildAll[%d] rendered differently than Build:\n=== BuildAll ===\n%s\n=== Build ===\n%s", i, gotMD, wantMD)
 		}
 	}

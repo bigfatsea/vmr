@@ -4,9 +4,14 @@
 
 > 2 任务 · 3 轮 · 2026-07-29 10:00:00 → 10:00:06
 
+## 概览
+
+- 起始 10:00:00
+- 结束 · Step 3 · finish=stop · 10:00:06
+
 ## t01 · 帮我查一下 A 股新股打新收益
 
-### Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
+### 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
 
 **Messages**
 
@@ -35,7 +40,7 @@ You are a helpful assistant.
 
 - finish: `stop`
 
-### Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
+### 💬 Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
 
 > 编辑: append（最长相同前缀 1 条消息，内容重合率 33%）
 
@@ -71,7 +76,7 @@ You are a helpful assistant.
 
 ## t02 · 继续，把前10名列出来
 
-### Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
+### 💬 Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
 
 > 编辑: append（最长相同前缀 3 条消息，内容重合率 60%）
 
@@ -101,4 +106,12 @@ You are a helpful assistant.
 </details>
 
 - finish: `stop`
+
+## 工具调用时序图
+
+（本 Journey 未出现工具调用）
+
+## 疑似问题（候选清单，不是判决）
+
+未检测到规则可判定的疑似问题。
 

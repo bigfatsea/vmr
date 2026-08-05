@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 16:00, by Sonnet 5 -->
+<!-- Ver 2026-08-05 03:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
@@ -33,6 +33,10 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 - `client_key_tag`：调用方标签（`vmr report` 按它分组导出，`vmr story` 的 Journey id 用它做客户端前缀）。
 
 两个产物都支持混合读取明文 `.jsonl` 与历史压缩产生的 `.jsonl.zst`（`audit.OpenLogFile` 透明处理），且都能在未显式指定输入文件时回退到 `<config.yaml 的 log_dir>/vmr-audit-*`（`cmd/vmr/auditpaths.go` 的 `resolveInputPaths`，`vmr report`/`vmr story` 共用）。
+
+**时区**：`ts` 序列化成 RFC3339（Go `time.Time` 默认 `MarshalJSON`），带写入那一刻进程自身的本地偏移量（即 `time.Now()`），不转 GMT——一份 `audit.Record` JSONL 打开就是当地墙钟时间，无需心算时区，偏移量本身又消除了任何解析歧义，两头都占。审计文件按天轮转（`vmr-audit-YYYY-MM-DD.jsonl`）用的是同一个本地时钟，轮转边界即当地日历日的午夜。
+
+`vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、或者用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳、`pricing.yaml` 的 `hour_from`/`hour_to`/`date_from`/`date_to` 时段匹配）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。`internal/story/journey.go` 的 Journey id 时间片段是唯一例外——故意用 `.UTC()`，为了 id 跨时区稳定，不受 `DisplayZone` 影响。详细排查过程与取舍分析见 `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md`。
 
 ---
 
@@ -146,18 +150,23 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 ### 3.4 `internal/story`：Journey 视图
 
 ```
-vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare <id1,id2>]
+vmr story [-c config.yaml] [-o dir] [-journey <id前缀> | -render-all | -compare <id1,id2> | -corpus]
           [-include-partial] [-show-ungrouped] [-lang en|zh] [-report-config report.yaml] [file|glob]...
 
-# -compare 专属，见"双 Journey 对比"节的 4a 落地记录：
-vmr story -compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
+# -llm-addr：单 Journey（5.9）与对比（含 6c 的分叉点解读）都支持，-render-all/-corpus 不支持
+# （会对每个 Journey 各打一次 LLM 调用，费用不可控）：
+vmr story -journey <id前缀>|-compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
+
+# -corpus：语料级统计（§3.9），不接 -journey/-render-all/-compare：
+vmr story -corpus [-o dir] [file|glob]...
 ```
 
 **输出语言**：与 `vmr report` 同一套机制（见 §4），`Build`/`BuildChain`/`BuildAll` 多一个 `lang i18n.Lang` 参数。唯一的例外是 `journey.go` 自己的两个标题占位符（无真实用户指令时的兜底："(tool loop continuation)"/"(untitled)"）——它们**跟随** `lang`，不像 `Finding`/`MetricDiff` 那样固定英文：`Journey.Title`/`Task.Title` 本来就是用户原话的逐字引用、从不保证是英文，`Journey` 另有内容寻址的 `ID` 承担 identity 职责，`Title` 从未被当成 identity 用过，所以这里跟随语言不会重演"展示文案被当成 identity"的问题。`journey-<id>.json`/`compare-*.json` 里其余的叙述字段（`MetricDiff.Label`）仍然固定英文——`Compare` 本身不接收 `lang`（§4.2）。
 
 - **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览），`-journey <id前缀>` 渲染其中一个。
 - **`-render-all`**：批量渲染全部非断头候选，共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
-- **`-compare <id1,id2>`**：两个 Journey 的行为剖面对比（逗号分隔的两个 id 或 id 前缀），见"双 Journey 对比"节；`-llm-addr` 给了才追加可选的 LLM 解读小节。
+- **`-compare <id1,id2>`**：两个 Journey 的行为剖面对比（逗号分隔的两个 id 或 id 前缀），见"双 Journey 对比"节；`-llm-addr` 给了才追加可选的 LLM 解读小节（含 6c 的分叉点解读，当 6a/6b 定位到分叉点时）。
+- **`-corpus`**：语料级统计（§3.9），跨全部非断头候选，产出 `vmr-story-corpus.md`/`.json`；不接 `-llm-addr`。
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
@@ -194,7 +203,53 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | 上下文有效利用率 | 非 system Event 里，其提取到的实体（文件路径/URL）后续被更晚的 Event 再次提到的 token 占比——低值意味着大量进入上下文的内容从未被再次引用 |
 | Compaction 次数与信息损失 | 见 §3.6，汇总到 Journey 级别 |
 
-`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + Journey 身份（id/标题/时间范围），是 §3.7 对比模块的直接输入，不需要重新解析 Markdown。
+`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + Journey 身份（id/标题/时间范围）+ 下面 §3.5a 的 Findings，是 §3.7 对比模块的直接输入，不需要重新解析 Markdown。
+
+### 3.5a Findings：规则派生的 Step 级"疑似问题"清单（`findings.go`）
+
+`internal/report` 的 `buildFindings`（§6.7 之前那批§7 效率发现）是**聚合级**发现——扫全部请求算出一行统计。`story.ComputeFindings(j *Journey, lang i18n.Lang) []Finding` 是同一套"稳定 `Code` + 展示文案分离 + 一句话建议"模式的**Step 级**版本——每条 `Finding` 定位到 Journey 里具体的一个 `StepSeq`（+ 可选的 `RelatedSeq`），不是一个聚合数字。两者故意不共享类型：`internal/archtest` 的 import 边界禁止 `story` 依赖 `report`（反之亦然），语义粒度也本来就不同。
+
+**措辞纪律**：每条 Finding 都是"候选/嫌疑清单，不是判决"——文案统一是"检测到疑似 X，建议人工复核"，不是"Agent 在这里出错了"。这不是谦虚，是被学术证据逼出来的克制：Who&When（ICML 2025）/TRAIL（Patronus AI）两个独立数据集上，公开最好的自动根因定位方法 step 级准确率也只有 11%–14.2%——`vmr story` 不承诺、也不该承诺比这更高的确定性（详见 `docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §3 的规则化边界表）。
+
+Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之上新增四个——后四个全部建立在 I1（`chatmsg.ToolResultList`，见下）之上，能精确定位"哪个 `tool_call` 的哪个 `tool_result`"，不再依赖 `Event.Msg.Text` 里拍扁的文本猜测。全部零 LLM 成本、纯规则/字符串匹配，每条都对应一个真实事故/issue 或学术失败分类法（MAST，Cemri et al. 2025）里的一个具名类别：
+
+| `FindingCode` | 判据 | 依据 |
+| --- | --- | --- |
+| `exact_repeat_tool_call` | 同一 `(工具名, 参数)` 对（`toolCallKey`，§3.5b 的 `toolCallRepeats` 同一份底层实现）重复出现 ≥ `exactRepeatThreshold`（3）次 | MAST 最高发失败模式（Step repetition，15.7%）；真实案例：`anthropics/claude-code#19699`（同一命令连续报错 7 次以上才被人工打断）、`#15909`（重试 300+ 次、耗时 4.6 小时） |
+| `narration_without_action` | 连续 ≥ `narrationMinRun`（3）个无 `tool_call` 的 Step，相邻 `RespText` 词集合 Jaccard 相似度 ≥ `narrationJaccardThreshold`（0.5） | `anthropics/claude-code#27281`（反复说"让我现在组装文档"却不触发工具调用，直到耗尽上下文窗口） |
+| `error_then_unverified_success` | 一次 `is_error` 标记后，同 Task 内直到最后一个 Step（携带 `Finish`）都没出现"看起来像验证"的调用（`verificationLikeToolRe`，一个局部启发式，不是正式的读写分类器） | Replit/Google Gemini CLI/Amazon 三起独立报道的真实生产事故，共同点是"面对含糊错误响应自行脑补了乐观结论" |
+| `reasoning_action_mismatch` | 推理文本**最后一句**（`lastSentence`，非全文）提取到的实体（`chatmsg.ExtractEntities`）里，有实体在本轮 `tool_call` 参数里找不到子串意义上的匹配（`entityReferenced`，双向 `Contains`，不要求完全相等） | MAST 第二高发模式（Reasoning-action mismatch，13.2%） |
+| `plan_execution_misalignment` | Task 首个 Step 的推理/回复里若有编号列表（`lastNumberedList`，只取**最后一段连续编号**，`minPlanItems`=2 到 `maxPlanItems`=8 项），逐项检查后续 Step（含首个 Step 自己的 `tool_call`）是否有实体/关键词重合 | 自我限定为字符串/实体匹配，不做语义理解——识别不出编号格式、列表过长（更像文档而非可执行计划）时直接跳过，不强行分析 |
+| `error_retry_unadapted`（Phase 2） | 一次 `tool_call` 收到 `is_error` 结果后，`retryLookaheadSteps`（5）步内第一次同工具调用的参数与出错那次逐字相同 | 5.3 的 Step 级精细化版本——`ErrorRecoveryCount`（九项指标）只问"出错后有没有再调用"，这个问"再调用是不是原地打转" |
+| `unused_tool_result`（Phase 2） | 一次 `tool_result` 提取到的实体，**全部**在此后没有任何 Step 再引用（不是"部分未引用"——见下方校准记录） | Step 级定位版的 `ContextUtilization`（九项指标） |
+| `unverified_entity_reference`（Phase 2） | 一次 `tool_result` 命中证伪信号（`falsificationRe`：ENOENT/404/not found 等），其实体在此后仍被引用 | 对应 Breunig 命名的 context poisoning 失败模式；措辞明确"仅基于字面证伪标记，不代表确认幻觉" |
+| `constraint_text_dropped_at_compaction`（Phase 2） | 缝合边界 Step 的 `Compaction.SwallowedEntities` 非空——直接复用 §3.6 已验证过的信息损失机制，不新增解析路径 | 对应 Governance Decay 论文命名、但论文本身未提出检测器的失败模式；措辞明确"未经验证的假设级检测" |
+
+**I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`story.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
+
+**校准记录（2026-08-05，真实语料，两轮）**：
+
+*第一轮（Phase 1 提交前，约 130 个候选 Journey）*：`reasoning_action_mismatch` 初版对整段 `Reasoning+RespText` 做实体差集，假阳性率约 90%——原因有二：(a) 推理文本常常是"1. 查A 2. 查B 3. 查C"式的多步计划 narration，当前 Step 只做了其中一步，其余几步被误判为"没做"；(b) 同一个文件路径因为正则的词边界起点不同，在推理侧和参数侧被抽成两个不同的实体字符串。改成只扫推理的**最后一句** + 双向子串匹配后，命中数从 24 降到 5，人工抽查全部可信。`plan_execution_misalignment` 初版只扫描 `Steps[1:]`，把"计划和第一步动作同时出现在宣告计划的 Step 里"（很常见）误判成"第一项从未被执行"。编号列表项数超过 `maxPlanItems`（8）时"全部未匹配"开始压倒性地主导命中——人工核查后发现这类样本几乎都是长篇战略文档，加了这道上限。
+
+*第二轮（Phase 2 提交前 + 用真实 A 股新股打新调研双 Agent 对比案例复核，137 个候选 Journey）*：`unused_tool_result` 初版按**单个实体**判定（一次工具结果里任意一个文件名/URL 没被再提到就算一条 Finding），在真实语料上单个 Journey 命中数最高到 92 条——原因是目录列表/搜索结果类工具结果天然一次列出十几到几十个文件，Agent 按设计只会挑其中几个跟进，这是正常 triage，不是浪费。改成只在**整个结果的所有实体都没被再引用**时才触发后，命中数从 918 降到 297，人工抽查转为合理（多为单一实体、确实再未提及的结果）。`plan_execution_misalignment` 在这轮真实案例复核（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，同一个 A 股新股打新调研任务的两次独立执行）中暴露第二个缺陷：一段推理里如果先后出现两个独立的编号列表（先是"拆解一下这个请求"式的主题分解，再是"让我规划一下方法"式的真实执行计划），`FindAllStringSubmatch` 会把两段列表拼成一个 8 项"计划"，导致"6/8 项未匹配"这类虚高结论。`lastNumberedList` 改为只取**最后一段连续编号**（编号一旦不再递增——最典型是从 1 重新开始——就判定为进入了下一段列表），修复后同一条真实推理正确识别出"3/4 项未匹配"（只对应第二段、真正的执行计划）。四处修复全部固化成了 `findings_test.go`/`findings_toolresult_test.go` 里的具名回归测试，不是只留在这段校准记录里。
+
+### 3.5b 决策脊柱与呈现层（`render_spine.go`）
+
+用户打开一条 trace 排查问题时，真正想问的是"哪里开始不对"，不是"Agent 做了什么"——这个诉求在 2026 年上半年被多个独立一线实践信源反复提出，统一称作"决策脊柱"（decision spine，见 `docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §4 的调研）。`Journey → Task → Step` 的数据模型天然具备构建它的结构基础，不需要新采集任何数据，纯粹是渲染层重新分层：
+
+- **概览卡**（`renderOverviewCard`，Journey 页顶部）：3–5 个关键节点（起始时间、首个错误标记、首个非 `Append`/缝合转折点、结束时间）+ 基于 `Metrics` 阈值的结构标签（工具密集型/重试多/上下文压缩）——全部现成数据，零新增计算。
+- **决策脊柱**（`renderDecisionSpine`）：按 Task 分组的紧凑 `tool_call` 列表，每行只有工具名 + 参数摘要（40 字符截断，比 Step 正文的 80 字符预览更紧凑），命中 §3.5a 任一 Finding 的 Step 标 ⚠️。一个纯问答、没有任何 `tool_call` 的 Journey 不渲染这一节——没有"决策"可摘。
+- **Step 角色标注**（`stepRoleTag`，Step 标题行前缀）：7 类标签中挑一个优先级最高的——🧹压缩（缝合边界）> ⚠️错误（本 Step 新事件含错误标记）> 🔄重试（`toolCallRepeats` 标记为重复）> 🔧执行（有 `tool_call`）> 📋规划（无 `tool_call` 但文本含编号列表）> 💬汇报（有回复文本）> 👀观察（以上都不是）。纯渲染层启发式，复用已有结构信号，不新增判断逻辑。
+- **工具调用时序图**（`renderToolTimeline`，Journey 末尾）：每个工具名一行、每个 Step 一列的 ASCII 图，符号区分 `●` 正常/`🔄` 疑似重复/`❌` 本 Step 含错误标记——同一份 `toolCallRepeats` 结果，换一个横向布局，用于发现"这段时间某个工具在密集重试"这类线性阅读容易漏掉的模式。
+- **Findings 清单**（`renderFindingsSection`，紧邻时序图之后）：§3.5a 每条 Finding 的完整文案（决策脊柱只标 ⚠️，这里才是能看到"为什么"的地方）。
+
+**共享基础设施**（`toolCallRepeats`，`metrics.go`）：Step 角色标注的 🔄、时序图的 🔄、`exact_repeat_tool_call` Finding 三处都需要回答"这次调用是不是在重复更早的调用"，如果各自实现一遍，最现实的风险不是重复劳动，是三处判据不一致（比如某个 Step 被标了 🔄 但 Findings 列表里却找不到对应条目，看起来像产品 bug）。`toolCallRepeats(steps []*Step) []ToolCallOccurrence` 是这三处唯一的判据来源，`Metrics.DuplicateActionRate`（九项指标之一）也改成基于它计算，不再是独立实现。
+
+**渲染层与 JSON 输出共享同一份计算**：`cmd_story.go` 的 `writeJourneyFile` 先算一次 `Metrics`/`Findings`，再同时喂给 `RenderMarkdown(j, m, findings, lang)` 和（内部固定 `i18n.EN` 重算一次的）`Summarize(j)`——两次 `ComputeFindings` 调用的**选择逻辑**（挑中哪些 `Code`/`StepSeq`）必须与 `lang` 无关，只有展示文案随 `lang` 变化，`TestComputeFindingsIsDeterministic` 把这条前提锁成了可执行测试（同构于 `internal/report` 的 `TestBuildFindingsIsDeterministic`）——否则中文版 Markdown 和英文版 JSON 可能标出不同的 Finding 集合。
+
+### 3.5c 单 Journey LLM 解读层（5.9，`llm_single.go`）
+
+`-journey`（含 `-render-all` 不支持，见下）现在也能接 `-llm-addr`，复用 `llm.go` 已验证过的调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级）——这条链路原本硬编码给 `-compare` 的 `EvidencePack` 用，为了让 `SingleJourneyEvidencePack`（5.9）、`DivergenceEvidencePack`（6c，见 §3.7）复用同一套 `Interpret`/`cacheKey`/`buildUserPrompt`，`llm.go` 新增一个 `evidencePackKind` 接口（`promptSpec(lang) promptSpec`，返回该场景自己的 system prompt + 用户消息前后缀 + 缓存版本号），三个 pack 类型各自实现一次；`Interpret[T evidencePackKind]` 改成泛型函数后，**`-compare` 原有调用点一行都没有改**——Go 的类型推断让 `Interpret(ctx, opts, pack, lang)` 在三种场景下写法完全一致。`SingleJourneyEvidencePack` = Journey 的 `Metrics` + `[]Finding`（§2.3 当初设计 `Finding.StepSeq`/`RelatedSeq`/`Evidence` 三个字段就是为了这里直接拼证据包，不需要回头改形状）+ 逐轮工具索引；system prompt 的任务是对已有 Finding 做优先级排序/串联解读，明确禁止"自己发现清单之外的新问题"（除非明确标注"这是我自己的阅读判断，不是规则核实的 Finding"）。`-llm-addr` 不支持 `-render-all`/`-corpus`（会对每个 Journey 各打一次 LLM 调用，费用不可控），只支持 `-journey`/`-compare` 各自一次。
 
 ### 3.6 Compaction 三形态与信息损失（CCR N-4 的落地）
 
@@ -230,6 +285,10 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 被复核否决、明确不吸收的一条：另一份独立分析曾提出"可用工具集规模差异（如 46 vs 67 个工具）也因节选截断而不可见"——实测两侧完整工具清单分别在第 2039/3024 字符处结束，早已完整落在旧的 4000 字符节选窗口内，这条论断的前提不成立，未采纳。
 
+**分叉点检测（`computeDivergence`，2026-08-05 落地）**：`ComparisonExtras` 里九项指标 diff、`EndpointsFact`、`CacheFact` 这些都是"整体层面"的对比——真正定位"从哪一步开始两条轨迹走上不同的路"是三份独立分析（本仓库 `docs/future-strategy/` 下的深挖报告与两份交叉评审文档）唯一同时提出的方向，这次调研里交叉验证信号最强的一条。做法完全建立在已有原语上，不需要新数据采集：两个 Journey 按位置对齐（`flattenWithTask`，展平成一个跨 Task 的 Step 序列，**不是**按 `Step.Seq` 对齐——两个独立 Journey 的 `Seq` 编号互不可比），逐位比较一个粗糙的结构签名（`toolSignature`：是否有 `tool_call` + 排序去重后的工具名集合），取两侧较短一方的长度为界，第一个签名不同的位置即候选分叉点。严重度分两档：工具名集合本身不同（或一方有 `tool_call`、另一方没有）→ `DivergenceHeavy`；工具名集合相同但参数不同（`stepArgsEqual` 判定）→ `DivergenceLight`。产出是一个纯结构事实（`DivergencePoint`，含双侧各自的 `StepSeq`、涉及的工具名、严重度），渲染时紧跟一句免责声明："分叉点定位 ≠ 根因判定"——只陈述"从这里开始不同了"，"为什么这个分叉更差"永远是解读层的可选、可关闭的推测，不包装成确定性结论（详见 `docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §6 的边界讨论）。真实语料验证：同一个 A 股新股打新调研任务的两次独立重跑（`j-lobster-...-99aa3efe` vs `j-lobster-...-09a3158a`）正确定位到两侧第一步都调用了 `exec` 但目标不同（`DivergenceLight`）；另一对更具代表性的样本——两个**不同 Agent 框架**（openclaw vs lobster）跑同一个任务（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，即 `reports/compare-...json` 那份旧版基准报告分析过的同一对 Journey）——正确定位到第一步就是重度分叉：openclaw 先调用 `memory_search`+`read`（查已有上下文/记忆），lobster 直接 `web_fetch`（抓数据），是这次调研里两个 Agent 处理同一任务时最先出现的真实策略差异，旧版报告（人工/deepseek 逐项核对产出）完全没有这一层定位——只停留在"33 次 vs 64 次工具调用"这类聚合数字，本次是这份数据第一次被结构化地定位到具体分叉步骤。
+
+**分叉点 LLM 解读层（6c，`llm_divergence.go`）**：`-compare` given `-llm-addr` 且 6a/6b 定位到分叉点时，除了原有的整体对比解读，额外发起第二次、单独缓存的 LLM 调用，证据包（`DivergenceEvidencePack`）只含分叉点本身 + 双侧各 `divergenceContextWindow`（2）步的简要信息（工具名 + 回复摘要），不塞完整 transcript。System prompt 的核心约束：分叉点本身是已确认的结构事实，不需要 LLM 重新论证；"为什么在这里分道扬镳"必须标注为推测（高/中/低置信度）；**绝不判断哪一方更好**——VMR 没有任务是否真正达成目标的信号，这个判断超出证据能支持的范围（与 §2.6/`docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §6 的边界一致）。
+
 ### 3.8 盲区（诚实声明，避免"没记录"被误读成"没发生"）
 
 | 盲区 | 说明 |
@@ -238,6 +297,16 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | 不经 vmr 的调用 | Agent 若对某些任务直连其他 provider，这段完全不可见；manifest 会出现无法解释的编辑，标为"来源不可见"而不是强行归类 |
 | Agent 的内部状态 | 计划、记忆检索、循环检测等不体现在消息列表里的逻辑，只能从行为反推 |
 | 跨 SessKey 桶、零字面重合的历史重写 | `ctxgraph.StitchGraph` 的哈希倒排索引在这种情况下没有信号可用（§3.1）——`vmr report` 的独立文本匹配（§2.1）能覆盖一部分，但不是全部；`vmr story` 目前没有对应的兜底信号，这类 Journey 会渲染成一个确认无前驱的断头 |
+
+### 3.9 语料级统计（7.1/7.2，`corpus.go`）
+
+`vmr story -corpus [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建复用 `-render-all` 已有的 `story.BuildAll`（单次 `FetchRecords` 服务全部候选），产出 `vmr-story-corpus.md`/`.json`，落在同一个 `{out}/stories/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
+
+- **相关性只报效应量**：`ComputeCorpusStats` 对九项指标里的 12 个数值字段两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
+- **无成功/失败标签**：VMR 零埋点前提意味着结构性拿不到任务是否真正达成目标的信号——`GroupComparison`（7.2，按 `Finding.Code` 分组比较净工作时长中位数）比较的是"耗时"这一个代理指标，不是效果；每处输出都明确写"不是确定性结论"。
+- **样本量门槛，不是静默阈值**：`corpusMinCorrelationN`（5）、`corpusMinGroupSize`（3，双侧）——低于门槛的 Finding 分组对比不是不显示就算了，`SkippedGroupComparisons` 字段显式列出被跳过的 Code，Markdown 也渲染成一句"因样本不足跳过"，不是悄悄消失。
+
+真实语料验证（137 个候选 Journey）：`exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%，双双越过 `notableRelThreshold`（30%，复用 `compare.go` 已有阈值）——这是这批语料上第一个"某类 Finding 确实伴随更长耗时"的数据支撑，而不是纯粹的直觉；同时也如实验证了 §2.5 的顾虑本身成立：直接列出全部相关性会是一张 48 行的表，Top-15 截断是必要的可读性处理，不是可选项。
 
 ---
 
@@ -353,6 +422,7 @@ language: zh   # 可选，默认 "en"；可选值 en | zh
 - **一次隐藏断裂案例**：某会话内部 20 轮纯追加（cover 0.60→0.97）之后突然 79 条消息骤降到 4 条（cover=0.25）——同一开场白锚点原样保留，是"anchor 存活型"Contract 编辑的真实样本，也是 §3.2 那条历史缺陷的实证来源。
 - **一致性验证**：752 个会话中 718 个与单个 lineage 一一对应，34 个被 `ctxgraph` 正确切成多段（对应上面的隐藏断裂类型）；lineage 缝合在同一语料上 68 个断裂中 62 个成功缝合、6 个正确识别为"疑似同源"未缝合、0 个跨桶时间窗违规。
 - **F9 因果配对不变量**：全语料 406534 个 `tool_call`/`tool_result` 配对，零孤儿。
+- **Journey/Story 深度化（Phase 1+2，2026-08-05，137 个候选 Journey）**：九条 Finding 检测器提交前均在真实语料上跑过校准（不是理论设计后直接上线），两轮共发现并修复四处真实假阳性/精度问题（详见 §3.5a 的校准记录）——最后一轮直接用真实双 Agent 对比案例（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，同一个 A 股新股打新调研任务）复核，`plan_execution_misalignment` 从"6/8 项未匹配"修到"3/4 项未匹配"（两段独立编号列表被错误拼接的 bug）；6a/6b 分叉点检测在同一案例上正确定位到两个 Agent 从第一步就选择了不同策略（openclaw 先查记忆/已有笔记，lobster 直接抓数据），是旧版人工/deepseek 报告完全没有的一层定位；语料级统计（§3.9）在同一批语料上验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
 
 ## 7. 已知限制、暂不处理的事项
 
@@ -369,7 +439,7 @@ language: zh   # 可选，默认 "en"；可选值 en | zh
 
 以下模块设计上互不依赖，可以任意挑选、任意顺序实现，不阻塞彼此：
 
-- **LLM 解读层**：在规则派生的事实层/剖面层之上，加一层可选的自然语言注解（每个 Step 的意图-动作-结果、Journey 全局总述）。硬约束：三层不得混淆（事实层→剖面层→LLM 解读层），LLM 不得生成任何数字，注解必须携带引用的 Step id 供核实；按 `(step_hash, model, prompt_version)` 落盘缓存，重跑稳定；不配置分析端点时整层消失，报告仍完整可用。跑前 dry-run 打印预估 token 与金额并要求确认，绝不在 `vmr report`/`vmr story` 的默认路径里自动触发。§5 的实测已经说明：多数横向对比的证据规则层就能给出，这层的必要性应该用"规则层交付后的实际阅读体验"来决定，而不是预先假定需要它。
+- ~~LLM 解读层~~：已实现，见 §3.5c（5.9，单 Journey）、§3.7（原有的 `-compare` 整体解读 + 6c 的分叉点解读）——三条路径共享同一套 `Interpret`/`cacheKey`/`buildUserPrompt` 调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级），硬约束（三层不得混淆、LLM 不得生成数字、必须声明看不到什么）原样保留。语料级（corpus，§3.9）统计层面暂无对应的 LLM 叙述层——7.1/7.2 目前只输出规则派生的统计数字，"把统计上有支撑的模式翻译成人话"这一步（`docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md` §7 第 3 点）还没有做，算这条扩展里唯一还剩的部分。
 - **HTML 单文件渲染 + 脱敏**：单文件自包含（内联 CSS/JS，零外部依赖），左侧时间轴 + 右侧 Step 卡片瀑布。脱敏模式（保留结构与指标，正文替换为长度占位符 + 类型标签）是分享给团队外部这个使用场景的前置条件——Markdown 产物含完整对话正文、文件路径、内部项目名，没有脱敏能力之前不应该假定这个产物适合对外分享。
 - **Subagent 树**：Event 模型已预留 `parent_step_id` 挂载点，渲染层预留分支，但识别信号（system blob 与主 Journey 同源、时间窗完整嵌套在某次工具调用/结果之间、其输出 blob 出现在主 Journey 后续的 tool_result 里）尚未验证过命中率。开工前应先跑一次采样脚本验证这三条信号在现有语料上是否成立，验证不过继续推迟——不预先假定这套判据有效。
 

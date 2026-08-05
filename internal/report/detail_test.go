@@ -84,17 +84,22 @@ func TestRealModelFallback(t *testing.T) {
 }
 
 func TestDetailFileName(t *testing.T) {
+	// ts's own embedded offset is CST (+08:00); this package's TestMain
+	// pins fmtutil.DisplayZone to UTC, so detailFileName's timestamp
+	// portion must show the UTC-converted value (2026-07-08 16:31:06.804),
+	// not ts's own raw CST wall-clock fields — proof the filename follows
+	// DisplayZone rather than whatever offset the record happened to carry.
 	ts := time.Date(2026, 7, 9, 0, 31, 6, 804_000_000, time.FixedZone("CST", 8*3600))
 	rec := &audit.Record{TS: ts, Model: "agent", Outcome: "ok",
 		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
 	used := map[string]int{}
 	got := detailFileName(rec, used)
-	want := "20260709-003106.804_agent_MiniMax-M3_ok.md"
+	want := "20260708-163106.804_agent_MiniMax-M3_ok.md"
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
 	// Same-millisecond collision gets a numeric suffix.
-	if got2 := detailFileName(rec, used); got2 != "20260709-003106.804_agent_MiniMax-M3_ok-2.md" {
+	if got2 := detailFileName(rec, used); got2 != "20260708-163106.804_agent_MiniMax-M3_ok-2.md" {
 		t.Errorf("collision name = %q", got2)
 	}
 
@@ -102,7 +107,7 @@ func TestDetailFileName(t *testing.T) {
 	rec2 := &audit.Record{TS: ts, Model: "my model/v2", Outcome: "error",
 		Attempts: []audit.Attempt{{Endpoint: "openai:x:y", Model: "y", Error: "network: dial tcp: refused", ErrorClass: "network"}}}
 	got = detailFileName(rec2, map[string]int{})
-	if want := "20260709-003106.804_my-model-v2_y_error-network.md"; got != want {
+	if want := "20260708-163106.804_my-model-v2_y_error-network.md"; got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
 
@@ -430,7 +435,11 @@ func TestFinalMessageJSON(t *testing.T) {
 
 func TestWriteDetailsEndToEnd(t *testing.T) {
 	// Two records out of time order in the file; INDEX must sort by ts and
-	// the norm trail must be translated in the passthrough note.
+	// the norm trail must be translated in the passthrough note. Source
+	// timestamps carry a +08:00 offset; this package's TestMain pins
+	// fmtutil.DisplayZone to UTC, so the exported filenames below are 8h
+	// earlier than the source records' own local wall-clock fields
+	// (10:00:01+08:00 -> 02:00:01 file name, 09:00:00+08:00 -> 01:00:00).
 	lines := `{"ts":"2026-07-09T10:00:01+08:00","dur_ms":500,"model":"agent","protocol":"openai","stream":false,"outcome":"ok","client":{"addr":"1.2.3.4:5","request":{"method":"POST","path":"/v1/chat/completions","headers":{"Content-Type":["application/json"]},"body":{"model":"agent","messages":[{"role":"user","content":"hi"}]}},"response":{"status":200,"headers":{"Content-Type":["application/json"]},"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}}},"attempts":[{"endpoint":"openai/prov/real-1","protocol":"openai","provider":"prov","model":"real-1","url":"https://x/v1","dur_ms":450,"request":{"method":"POST","path":"/v1","headers":{"Content-Type":["application/json"]},"body":{"model":"real-1","messages":[{"role":"user","content":"hi"}]}},"response":{"status":200,"headers":{"Content-Type":["application/json"]}},"norm":["model_rewrite"]}]}
 {"ts":"2026-07-09T09:00:00+08:00","dur_ms":100,"model":"agent","protocol":"openai","stream":false,"outcome":"error","client":{"addr":"1.2.3.4:5","request":{"method":"POST","path":"/v1/chat/completions","headers":{},"body":{"model":"agent","messages":[]}}},"attempts":[{"endpoint":"openai/prov/real-1","protocol":"openai","provider":"prov","model":"real-1","url":"https://x/v1","dur_ms":90,"request":{"headers":{},"body":{"model":"real-1","messages":[]}},"error":"network: dial tcp: refused","error_class":"network"}]}
 `
@@ -448,7 +457,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatalf("n = %d, want 2", n)
 	}
 
-	okFile, err := os.ReadFile(filepath.Join(out, "20260709-100001.000_agent_real-1_ok.md"))
+	okFile, err := os.ReadFile(filepath.Join(out, "20260709-020001.000_agent_real-1_ok.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +473,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		}
 	}
 
-	errFile, err := os.ReadFile(filepath.Join(out, "20260709-090000.000_agent_real-1_error-network.md"))
+	errFile, err := os.ReadFile(filepath.Join(out, "20260709-010000.000_agent_real-1_error-network.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +487,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	}
 
 	// Same-named .json sibling for the ok record.
-	if _, err := os.ReadFile(filepath.Join(out, "20260709-100001.000_agent_real-1_ok.json")); err != nil {
+	if _, err := os.ReadFile(filepath.Join(out, "20260709-020001.000_agent_real-1_ok.json")); err != nil {
 		t.Errorf("ok record missing .json sibling: %v", err)
 	}
 
@@ -486,8 +495,8 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	// they must not loosen its permissions (owner-only, no group/other bits).
 	for _, p := range []string{
 		out,
-		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.md"),
-		filepath.Join(out, "20260709-100001.000_agent_real-1_ok.json"),
+		filepath.Join(out, "20260709-020001.000_agent_real-1_ok.md"),
+		filepath.Join(out, "20260709-020001.000_agent_real-1_ok.json"),
 	} {
 		st, err := os.Stat(p)
 		if err != nil {
