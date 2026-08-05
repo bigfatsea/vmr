@@ -117,9 +117,11 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
 	// One journey now writes two files: journey-<id>.md (the narrative) and
-	// journey-<id>.json (the behavior profile).
-	if len(entries) != 2 {
-		t.Fatalf("want 2 story files (.md + .json), got %d: %v", len(entries), entries)
+	// journey-<id>.json (the behavior profile) — plus vmr-stories.json/.md,
+	// written on every invocation (the earlier bare listing call already
+	// wrote them, this render just updates them in place).
+	if len(entries) != 4 {
+		t.Fatalf("want 4 files (journey .md+.json, vmr-stories .md+.json), got %d: %v", len(entries), entries)
 	}
 	content, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+id+".md"))
 	if err != nil {
@@ -173,9 +175,9 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
-	// Two journeys, each now writing a .md + .json pair.
-	if len(entries) != 4 {
-		t.Fatalf("want 4 story files (2 journeys x .md+.json), got %d: %v", len(entries), entries)
+	// Two journeys, each writing a .md + .json pair, plus vmr-stories.json/.md.
+	if len(entries) != 6 {
+		t.Fatalf("want 6 files (2 journeys x .md+.json, vmr-stories .md+.json), got %d: %v", len(entries), entries)
 	}
 	var all string
 	for _, e := range entries {
@@ -464,8 +466,16 @@ func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
 	if !strings.Contains(out, "skipped as partial-head") {
 		t.Errorf("expected the candidate to be skipped as partial-head:\n%s", out)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(outDir, "stories")); len(entries) != 0 {
-		t.Fatalf("no files should be written without -include-partial, got %v", entries)
+	// vmr-stories.json/.md are still written (every invocation gets one),
+	// but no journey-*.md/.json — the partial-head candidate was skipped.
+	entries, _ := os.ReadDir(filepath.Join(outDir, "stories"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "journey-") {
+			t.Errorf("no journey file should be written without -include-partial, got %s", e.Name())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-stories.json")); err != nil {
+		t.Errorf("vmr-stories.json should still be written: %v", err)
 	}
 
 	// With -include-partial, it renders — and the filename must carry the
@@ -483,10 +493,16 @@ func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reports/stories not created: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("want 2 story files (.md + .json), got %d: %v", len(entries), entries)
-	}
+	var journeyFiles []os.DirEntry
 	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "journey-") {
+			journeyFiles = append(journeyFiles, e)
+		}
+	}
+	if len(journeyFiles) != 2 {
+		t.Fatalf("want 2 journey story files (.md + .json), got %d: %v", len(journeyFiles), entries)
+	}
+	for _, e := range journeyFiles {
 		if !strings.Contains(e.Name(), "-partial.") {
 			t.Errorf("file %s missing the -partial suffix", e.Name())
 		}
@@ -538,8 +554,14 @@ func writeTwoCandidateJourneys(t *testing.T, outDir string) (path, idA, idB stri
 	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
 	path = writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
 
+	// The id-discovery listing deliberately runs against its own scratch
+	// -o, not the caller's outDir: since vmr-stories.json/.md are now
+	// written on every invocation (including a bare listing), reusing
+	// outDir here would leave reports/stories/ already populated before
+	// the caller's own cmdStory call — which some callers (the -llm-dry-run
+	// tests) specifically assert creates nothing.
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, path}); err != nil {
+		if err := cmdStory([]string{"-o", filepath.Join(t.TempDir(), "discover"), path}); err != nil {
 			t.Fatalf("cmdStory (list): %v", err)
 		}
 	})
@@ -655,8 +677,9 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
 
-	if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+	if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, path}); err != nil {
 		t.Fatalf("cmdStory -llm-addr: %v", err)
 	}
 	base := "compare-" + idA + "-vs-" + idB
@@ -671,10 +694,88 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 		}
 	}
 
-	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil || len(entries) == 0 {
 		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)
+	}
+}
+
+// TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching covers the explicit
+// behavior change: -llm-cache-dir has no implicit default (unlike the old
+// hardcoded {out}/stories/.llm-cache) — with neither the flag nor
+// report.yaml's llm_cache_dir set, an -llm-addr call must still succeed
+// (the LLM section renders) but must leave no .llm-cache directory behind
+// anywhere under outDir.
+func TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "一句话结论：无缓存路径。"}},
+			},
+		})
+	}))
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+
+	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+		t.Fatalf("cmdStory -journey -llm-addr (no -llm-cache-dir): %v", err)
+	}
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	if err != nil {
+		t.Fatalf("journey .md not written: %v", err)
+	}
+	if !strings.Contains(string(mdData), "一句话结论：无缓存路径。") {
+		t.Error("LLM section should still render even with no cache configured")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", ".llm-cache")); err == nil {
+		t.Error("no .llm-cache directory should exist when -llm-cache-dir is unset both on the CLI and in report.yaml")
+	}
+}
+
+// TestCmdStory_ReportYamlProvidesLLMDefaults covers report.yaml's
+// llm_addr/llm_model/llm_cache_dir feeding -journey's LLM interpretation
+// layer when the corresponding -llm-* flags aren't passed at all — the same
+// merge order TestCmdReport_ReportYamlDefaultsOutputAndDetails covers for
+// -o/-details.
+func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "一句话结论：来自 report.yaml 的配置。"}},
+			},
+		})
+	}))
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+	cacheDir := filepath.Join(t.TempDir(), "llmcache")
+
+	reportConfigPath := filepath.Join(t.TempDir(), "report.yaml")
+	yaml := "llm_addr: " + addr + "\nllm_model: agent\nllm_cache_dir: " + cacheDir + "\n"
+	if err := os.WriteFile(reportConfigPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-report-config", reportConfigPath, path}); err != nil {
+		t.Fatalf("cmdStory -journey (llm settings from report.yaml): %v", err)
+	}
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	if err != nil {
+		t.Fatalf("journey .md not written: %v", err)
+	}
+	if !strings.Contains(string(mdData), "一句话结论：来自 report.yaml 的配置。") {
+		t.Error("report.yaml's llm_addr/llm_model should have enabled the LLM interpretation section")
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil || len(entries) == 0 {
+		t.Errorf("expected at least one cache file under report.yaml's llm_cache_dir %s: %v", cacheDir, err)
 	}
 }
 
@@ -723,8 +824,11 @@ func TestCmdStory_Corpus(t *testing.T) {
 // there are zero candidate journeys to analyze (here: a single record with
 // no non-system messages, which ctxgraph groups into Ungrouped rather than
 // any Lineage at all — same fixture shape as TestCmdStory_ShowUngrouped).
-// The command must not error, and must not create reports/stories/ at all —
-// mirroring how -llm-dry-run leaves no directory behind either.
+// The command must not error, and must not write vmr-story-corpus.md/.json
+// (nothing to analyze) — but vmr-stories.json/.md still get written, same
+// as every other invocation (an empty candidate list is still a real,
+// worth-recording result, unlike -llm-dry-run's "should I even run this"
+// pure query, which is why that one still leaves no directory at all).
 func TestCmdStory_CorpusNoCandidates(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sysOnly := storyRec(at(0), []any{storyMsg("system", "sys, nothing else")}, storySSE("ok"))
@@ -739,8 +843,11 @@ func TestCmdStory_CorpusNoCandidates(t *testing.T) {
 	if !strings.Contains(out, "no candidate journeys to analyze") {
 		t.Errorf("expected the no-candidates message:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
-		t.Error("-corpus with zero candidates should not create reports/stories/ at all")
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-story-corpus.md")); err == nil {
+		t.Error("-corpus with zero candidates should not write vmr-story-corpus.md")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-stories.json")); err != nil {
+		t.Errorf("vmr-stories.json should still be written even with zero candidates: %v", err)
 	}
 }
 
@@ -797,8 +904,9 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
 
-	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey -llm-addr: %v", err)
 	}
 	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
@@ -812,7 +920,6 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 		}
 	}
 
-	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil || len(entries) == 0 {
 		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)

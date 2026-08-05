@@ -294,9 +294,9 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
-// report.Build: glob expansion, output directory creation, and writing both
-// the JSON and Markdown artifacts, plus the session-analysis outputs
-// (vmr-requests.jsonl/.md + details/).
+// report.BuildCached: glob expansion, output directory creation, and
+// writing both the JSON and Markdown artifacts, plus the session-analysis
+// outputs (vmr-requests.json/.md + details/).
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
@@ -309,13 +309,55 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	if err := cmdReport([]string{"-o", outDir, auditPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.jsonl", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
+	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.json", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("expected %s to be written: %v", name, err)
 		}
 	}
 	if fi, err := os.Stat(filepath.Join(outDir, "details")); err != nil || !fi.IsDir() {
 		t.Errorf("expected details/ directory to be written: %v", err)
+	}
+}
+
+// TestCmdReport_ReportYamlDefaultsOutputAndDetails covers report.yaml's
+// output/details fields feeding cmdReport's -o/-details when the flags
+// themselves aren't passed — the same "-flag > report.yaml > built-in
+// default" merge order resolveLanguage already established for -lang.
+func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report.yaml"), []byte("output: myout\ndetails: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmdReport([]string{auditPath}); err != nil {
+		t.Fatalf("cmdReport: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "myout", "vmr-report.json")); err != nil {
+		t.Errorf("expected report.yaml's output dir 'myout' to be used: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "myout", "details")); err == nil {
+		t.Error("report.yaml's details: false should have suppressed details/ export")
+	}
+
+	// An explicit -details=true must still win over report.yaml's false.
+	if err := cmdReport([]string{"-o", filepath.Join(dir, "myout2"), "-details=true", auditPath}); err != nil {
+		t.Fatalf("cmdReport: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "myout2", "details")); err != nil || !fi.IsDir() {
+		t.Errorf("explicit -details=true should override report.yaml's details: false: %v", err)
 	}
 }
 

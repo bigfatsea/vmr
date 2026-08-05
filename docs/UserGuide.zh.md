@@ -175,7 +175,7 @@ models:
 ./vmr start -c config.yaml -audit=false    # 关闭
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
-./vmr report "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.jsonl（明文/.zst 混着传也行）
+./vmr report "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.json（明文/.zst 混着传也行）
 ```
 
 `vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底），Markdown 按九个编号章节组织，每章回答一个运维问题：`§0` 摘要（headline 数字 + 最多 3 条自动亮点——缓存效率低、工具 schema 浪费、端点异常）、`§1` 成本与 Token 经济（缓存命中/fresh/cache_write/reasoning 拆分，按模型缓存效率，按角色的消息字符/预估 token 占比）、`§2` 成本估算（一旦加载了定价配置就渲染，见下文"成本估算与 `pricing.yaml`"；按模型/端点/客户端各一张表，末尾还会原样折叠嵌入本次实际使用的定价配置，让报告的 $ 数字即使在 `pricing.yaml` 之后被改过也能追溯）、`§3` 可靠性（端点可用度/错误率、错误类别拆分，因为 openai/anthropic 两个协议面各自独立路由，两张表都按协议再拆一次，外加每小时错误数图表）、`§4` 延迟与吞吐（按模型、按端点的 ttft/耗时分位数，都按吞吐量降序排列，各自带样本量，n<20 标 `⚠️low-n`）、`§5` 负载分布（按虚拟模型、按工作负载类——交互 vs 定时脚手架——、按端点、按客户端——后两张表还带每请求输入/输出 token 分位数——外加每小时和每日的请求量/输入 token Mermaid 图表）、`§6` 会话与任务（只列 interactive 会话，按 Chat User 分组；单发定时会话改放进请求详单里，见下文）、`§6.5` Sticky 有效性（见下）、`§6.6` 端点性价比（见下）、`§6.7` Compaction 还原（本期每一次独立的历史压缩 LLM 调用：链接到哪个会话、tokens_in→tokens_out、保留比，以及一份规则筛出的被吞掉内容样例——不靠 LLM 判断，只呈现可观察的事实）、`§7` 效率与浪费（自动发现 + 每个声明工具集的完整"已调用/从未调用"明细）、`§8` 指向请求详单的链接。每张表都控制在几列以内；分位数都是每个桶的真值——每个桶在单趟遍历里直接收自己的原始样本、自己算 p50/p95，不做跨桶近似（合并"已经算完的"桶算不出真百分位，因为原始值早被释放了）。`⭐` 标记衍生/预估指标（相对上游原始返回值而言）。每小时/每日活跃度和每小时错误数都用 Mermaid `xychart-beta` 图表渲染。
@@ -187,7 +187,7 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 `vmr report` 还能读懂 Agent 工作负载——全部离线、纯规则、不调用 LLM（方法与实证见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"两遍读取：`AnalyzeSessions` + `Build`"一节）：
 
 - **会话 → 任务 → 轮次分组**。每轮重发同一段渐增对话的请求以首条非 system 消息做指纹（Claude Code 的 `metadata.user_id` 存在时优先），按最长公共前缀成链——多个 Agent 会话即使在时间上互相穿插也能干净分开。任务边界来自 Traceparent trace-id 变化与增量中的新用户指令，两个信号互为交叉验证。Compaction 调用被识别并双向链接，会话与其压缩后的续接体串成同一条线程。
-- **`vmr-requests.jsonl`** —— 每请求一行特征（会话/任务/轮次、trace 与 chat id、请求形态、`heartbeat` 等标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning 的 token 细分、增量大小、最新指令），jq / DuckDB / pandas 直接可用。
+- **`vmr-requests.json`** —— `requests` 字段：每请求一行特征（会话/任务/轮次、trace 与 chat id、请求形态、`heartbeat` 等标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning 的 token 细分、增量大小、最新指令），jq / DuckDB / pandas 直接可用（这之前是逐行一个 JSON 对象的 `vmr-requests.jsonl`，现在合并成单一文档）；外加 `files` 字段——按内容哈希索引的输入文件解析缓存，日志目录大部分没变时，重跑 `vmr report` 能跳过没变文件的重新解析（和 `vmr story` 的 `vmr-stories.json` 是同一套机制，见下文）。
 - **Sticky 有效性（§6.5）⭐** —— Sticky Model 存在的唯一理由是让上游 prompt cache 保温，这一节是它有没有兑现的证据：同一会话内，落回**上一条请求所用端点**的请求 vs 换了端点的请求，比较两组缓存效率。按结果（端点连续性）而非按机制度量，所以 sticky 指针命中却落到一个冷端点照样算切换。会话首条无前驱，计数但不入组；任一组带 usage 的样本 < 20 条时只出表、不下结论。**不解释切换原因**——sticky_ttl 到期、端点冷却、条件路由淘汰、该模型没开 sticky，事后无法区分。再按虚拟模型拆一张表：sticky 是按虚拟模型配的，那才是能动手的粒度。
 
 - **端点性价比（§6.6）⭐** —— 不是"这个端点花了多少钱"（§2 已经答了），而是"单位产出的代价，以及它的失败让你多等了多久"：成本/1M out token、成本/成功请求、失败尝试数、**失败尝试累计墙钟时间**。一个单价便宜但经常失败的端点不便宜，但这在按端点的花费列里看不出来——钱记在最终成功的那一家头上。**只记时间不折算成钱**：失败尝试拿不到 usage，厂商通常也不对失败请求计费，给它标金额会是编造。
@@ -198,9 +198,11 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
 `vmr-requests.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）是一份纯索引：每个分组一条 `## Chat User: <key> · N 会话 N 任务 N 轮`（或 `## 定时任务 · <class> 单发会话 × N`），带一行摘要引用块和指向该分组自己那份完整详单的链接。真正的 **Chat User → Session → Task → Turn** 展开——每个会话一个 `## sNN · <时间> · N 任务 N 轮` 标题，每个任务一个 `### tNN · <时间> · N 轮` 标题，带首条消息的引用块和轮次表（`轮 / 时间 / msgs / finish / dur / ttft / fresh/cached/out / cache-eff⭐ / 文件`；所有时间戳统一转本机系统默认时区，不管原始记录自带什么时区）——只存在于对应的独立文件里，不会在索引里重复一遍。独立文件的命名：每个真实 `client_key_tag` 对应 `vmr-requests-<tag>.md`，没有标签的会话归到 `vmr-requests-unresolved.md`，每个定时任务类别对应 `vmr-requests-cron-<class>.md`（`heartbeat` 这一个的文件名固定是 `vmr-requests-cron-hartbeat.md`；以后新增的定时任务类别照 `-cron-<class>` 这个模式来）。单发的定时会话（heartbeat/dream_diary——只有一次请求、没有真实来回）不管是哪个客户端发起的，永远归到它对应类别的 cron 文件里，这样一堆近乎重复的轮询请求既不会淹没真实对话，也不会同时出现在两种分组下；轮次数大于一的定时会话（真正的多步 cron 任务）则作为普通会话卡片挂在自己调用方名下。索引文末的 `# 全部请求（时间序）` 依旧是一张不分组的时间序全量表。每一处"文件"列都同时链接到 Markdown 详单和同名的 JSON 详单。
 
-**输出语言。** `vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：不含任何敏感信息，是可选的，跟 `pricing.yaml` 一样从当前目录自动加载（`-report-config path` 可以指向别的路径）。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
+**输出语言。** `vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，跟 `pricing.yaml` 一样从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
 
-**多调用方场景。** 如果一个 vmr 实例被多个调用方共用（队友、另一个 Agent、CI 任务），想在事后统计里把各自的用量分开看，就给每个调用方在 `api_keys` 下各配一把 key（见上文配置），不要多人共用同一把。每个请求会用命中的那把 key 自身的尾部给审计记录打标签（`client_key_tag`，取法见 `KeyTag`：末 8 个字符，若这 8 个字符里有 `-`，只保留最后一个 `-` 之后的部分——所以 key 以 `...-alice` 结尾时标签就读作 `alice`；建议有意义的部分留 ≥3-4 位，太短容易和别的调用方撞标签）。`vmr report` 会自动识别，不需要加参数：每观测到一个不同的标签，就多写一份 `vmr-requests-<tag>.md` 详单（见上文）——同目录下，标签文件里 `details/…` 链接不用做任何调整。`vmr-report.md`/`.json`、`vmr-requests.jsonl` 和 `details/` 本身永远不分组、不重复：单条请求的详单只写一份，与调用方无关；`vmr-requests.jsonl` 永远覆盖全部记录；汇总报告永远覆盖所有人。不配置 `api_keys` 就什么都不会变——不多一个文件，不多一列。完整设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"逐请求详单与索引"一节。
+`report.yaml` 不止管语言：`-o`/`-details`/`-include-partial`/`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-cache-dir` 都可以在这份文件里预先写好默认值，同名命令行 flag 显式传了照样优先——完整字段和注释见仓库根目录的 `report.example.yaml`。`llm_key` 可以直接写明文（这份文件已经 `.gitignore`），也可以写成 `${VMR_LLM_KEY}` 这样引用一个已有的环境变量，两种都行；`llm_cache_dir` 没有隐式默认路径，两处（flag、`report.yaml`）都不设就完全不缓存 LLM 调用结果。
+
+**多调用方场景。** 如果一个 vmr 实例被多个调用方共用（队友、另一个 Agent、CI 任务），想在事后统计里把各自的用量分开看，就给每个调用方在 `api_keys` 下各配一把 key（见上文配置），不要多人共用同一把。每个请求会用命中的那把 key 自身的尾部给审计记录打标签（`client_key_tag`，取法见 `KeyTag`：末 8 个字符，若这 8 个字符里有 `-`，只保留最后一个 `-` 之后的部分——所以 key 以 `...-alice` 结尾时标签就读作 `alice`；建议有意义的部分留 ≥3-4 位，太短容易和别的调用方撞标签）。`vmr report` 会自动识别，不需要加参数：每观测到一个不同的标签，就多写一份 `vmr-requests-<tag>.md` 详单（见上文）——同目录下，标签文件里 `details/…` 链接不用做任何调整。`vmr-report.md`/`.json`、`vmr-requests.json` 和 `details/` 本身永远不分组、不重复：单条请求的详单只写一份，与调用方无关；`vmr-requests.json` 永远覆盖全部记录；汇总报告永远覆盖所有人。不配置 `api_keys` 就什么都不会变——不多一个文件，不多一列。完整设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"逐请求详单与索引"一节。
 
 纯内网、根本不想要真实鉴权？`api_keys` 不配置——门照样完全敞开——但客户端自愿发来的任意 Authorization/x-api-key 值依旧会走同一套标签提取逻辑并记录下来，vmr 侧不需要配置任何东西：每个客户端自己把发出去的值末尾带上 `-<标签>` 即可对 `vmr report` 自报家门。这个模式下没有 16 字符下限（本来就不是要保护的秘钥）；什么都不发的客户端依旧是未打标签的记录。
 
@@ -221,6 +223,8 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
 ```
 
 不带 `-journey` 时列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个，把它的 id（精确或唯一前缀均可）传给 `-journey`。`-render-all` 把所有候选的渲染合并成一次批处理，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/stories/journey-<id>.md`（叙事正文）与 `journey-<id>.json`（同一任务的行为剖面，见下文）——权限与 `details/` 一致（0600/0700），两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
+
+不管带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会额外写一份 `{out}/stories/vmr-stories.json`/`.md`——候选索引（字段和上面终端列表一致，外加每个候选的 chain 涉及哪些文件、渲染过就带上 `journey-<id>.md` 的链接），把以前"跑完只打印到终端、关掉就找不到"的候选列表落了盘。`vmr-stories.json` 的 `files` 字段同时是一份按内容哈希索引的解析缓存——没变过的输入文件直接复用已解析的结果，不用重新扫；变了的或全新的文件才重新解析，Journey 关系图始终基于完整文件集重建，不会因为缓存而漏看任何文件，只是省掉了解析这一步的开销。设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的 `vmr-stories.json` 一节。
 
 如果一个任务自己的开头看起来像是在续接一段本次没有加载进来的更早历史（表现为：真实的多轮开场恰好出现在你最早那个输入文件的最开头），默认会跳过——它的 id 在不同的文件加载范围下不保证稳定。加 `-include-partial` 可以照样渲染，文件名会带上 `-partial` 后缀，提醒你这个 id 换一批输入文件可能会变。
 
@@ -282,11 +286,11 @@ models:
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.jsonl`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文"输出语言"）可切换成中文 |
+| `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文"输出语言"）可切换成中文 |
 | `vmr story [-journey <id> \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] <glob>` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见下文"Agent 任务叙事重建"）；不带参数列出候选任务及其 id，`-render-all` 一次批量渲染全部，`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致 |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
-| `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.jsonl` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
+| `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/admin/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
@@ -311,7 +315,7 @@ models:
 ./vmr replay -c config.yaml -provider openrouter -dry-run \
     -detail out/details/20260713-153042.100_coding_z-ai-glm-5.2_error.json
 
-# 或者用 vmr-requests.jsonl / vmr-report.md 里看到的精确时间戳来定位。
+# 或者用 vmr-requests.json / vmr-report.md 里看到的精确时间戳来定位。
 ./vmr replay -c config.yaml -provider openrouter -dry-run \
     -ts 2026-07-13T15:30:42.100+08:00 \
     "$(./vmr check -c config.yaml log)/vmr-audit-2026-07-13.jsonl"

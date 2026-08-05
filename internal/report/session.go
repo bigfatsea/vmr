@@ -216,16 +216,35 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // first error in path order is returned — wasted work on a path that's
 // rare and not performance-sensitive, traded for not needing goroutine
 // cancellation machinery.
+// AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache —
+// every call re-runs ctxgraph.Scan's JSON-decode/message-hash pass on every
+// input file, same as always. Kept as the stable entry point every existing
+// caller/test already uses; AnalyzeSessionsCached is the one Build's cached
+// variant (BuildCached, see aggregate.go) actually calls.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
+	a, _, err := AnalyzeSessionsCached(paths, nil)
+	return a, err
+}
+
+// AnalyzeSessionsCached is AnalyzeSessions plus a file-hash-keyed cache
+// (ctxgraph.FileCache/ScanCached) for its ctxgraph.Scan pass — the
+// analyzeFile pass just below (report's own, independent per-request
+// parse into ReqInfo) is NOT cached by this: it still reparses every file
+// on every call, same as AnalyzeSessions always has. See
+// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+// section for why only the ctxgraph.Manifest-based half is cached this
+// round. prior may be nil (identical to AnalyzeSessions).
+func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache) (*SessionAnalysis, *ctxgraph.FileCache, error) {
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
 
 	var g *ctxgraph.Graph
+	var cache *ctxgraph.FileCache
 	var scanErr error
 	var scanWG sync.WaitGroup
 	scanWG.Add(1)
 	go func() {
 		defer scanWG.Done()
-		g, scanErr = ctxgraph.Scan(paths)
+		g, cache, scanErr = ctxgraph.ScanCached(paths, prior)
 		if scanErr == nil {
 			ctxgraph.StitchGraph(g)
 		}
@@ -246,12 +265,12 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	wg.Wait()
 	scanWG.Wait()
 	if scanErr != nil {
-		return nil, scanErr
+		return nil, nil, scanErr
 	}
 
 	for _, res := range results {
 		if res.err != nil {
-			return nil, res.err
+			return nil, nil, res.err
 		}
 		for _, r := range res.recs {
 			a.Recs = append(a.Recs, r)
@@ -263,7 +282,7 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	assignNames(a.Recs)
 	group(a, g)
 	linkCompactions(a)
-	return a, nil
+	return a, cache, nil
 }
 
 // analysisWorkerCount bounds how many files AnalyzeSessions reads

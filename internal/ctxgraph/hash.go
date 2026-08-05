@@ -19,6 +19,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 )
 
 // Hash is a content digest of one decoded message value (its canonical JSON
@@ -31,6 +32,30 @@ type Hash [16]byte
 // so it needs to be filename/URL-safe, not just human-readable.
 func (h Hash) String() string {
 	return hex.EncodeToString(h[:])
+}
+
+// MarshalJSON/UnmarshalJSON render Hash as its hex string (same as
+// String()) instead of encoding/json's default byte-array-of-numbers
+// rendering for a fixed-size array — a Manifest's Keys can hold dozens of
+// these, and a cached file's worth of Manifests (internal/ctxgraph/cache.go)
+// can hold thousands, so the size difference isn't cosmetic: hex is under a
+// third the bytes of "[26,88,3,...]" per hash, both on disk and to parse
+// back.
+func (h Hash) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.String())
+}
+
+func (h *Hash) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != len(h) {
+		return fmt.Errorf("ctxgraph: invalid Hash %q", s)
+	}
+	copy(h[:], b)
+	return nil
 }
 
 // hashJSON re-serializes v with json.Marshal (which sorts object keys) and

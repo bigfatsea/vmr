@@ -261,12 +261,13 @@ func loadDetailFile(path string) (*recordView, error) {
 }
 
 // loadRecordByTS scans path for the record whose arrival timestamp matches
-// ts at millisecond resolution — the precision `vmr-requests.jsonl`'s own
-// "ts" column uses (internal/report/export.go), so a value copied from
-// either that file or the raw audit.jsonl's full nanosecond "ts" field
-// locates the same record. time.Parse(time.RFC3339, ...) accepts a
-// fractional-second component of any length regardless of the layout given,
-// so both precisions parse through the same call. Errors if no record
+// ts at millisecond resolution — coarser than `vmr-requests.json`'s own
+// "ts" column actually needs (whole-second precision, see aggregate.go's
+// buildRequestRow), so a value copied from either that file or the raw
+// audit.jsonl's full nanosecond "ts" field locates the same record.
+// time.Parse(time.RFC3339, ...) accepts a fractional-second component of
+// any length regardless of the layout given, so both precisions parse
+// through the same call. Errors if no record
 // matches, or if more than one shares that millisecond (rare, but a debug
 // tool guessing which one you meant would be worse than asking you to use
 // -line instead).

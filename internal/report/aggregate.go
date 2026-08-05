@@ -32,6 +32,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 )
 
@@ -76,45 +77,16 @@ type rec2 struct {
 	line                    int
 }
 
-// Build reads audit JSONL files and aggregates them into a Report2. It calls
-// AnalyzeSessions for grouping (one read), then does its own pass
-// (second read) joining each record to its ReqInfo via sess.Lookup.
-//
-// onRecord (optional, nil = skip) is called once per successfully-parsed
-// record, right where this pass already has both the raw *audit.Record and
-// its *ReqInfo in hand — the same pair a third, independent read used to
-// re-derive for detail export (WriteDetails, before it grew this hook).
-// Detail rendering depends only on a record's own (audit.Record, *ReqInfo)
-// pair, never on anything accumulated across records, so there's no reason
-// it needs its own pass at all: cmd/vmr now hands this pass a
-// DetailWriter.Submit bound to a live worker pool instead, cutting `vmr
-// report`'s total reads of the (possibly gigabyte-scale, zstd-compressed)
-// audit source from three down to two. Build's own success/failure is
-// entirely independent of onRecord's outcome — it doesn't inspect or
-// propagate whatever onRecord does with what it's handed (by design: a
-// broken detail-output directory must not cost the caller an otherwise-good
-// vmr-report.json/md, exactly as before when detail export was a separate,
-// independently-failing step run after Build returned).
-//
-// Unlike the old (now removed) `vmr report` aggregator — which ran its
-// deterministic aggregation first and only attempted session analysis
-// afterward, so a session-analysis failure degraded to a warning instead of
-// losing the whole report — this two-pass design needs AnalyzeSessions to
-// succeed before the second pass can even start (every record's usage/
-// tokens now comes from its ReqInfo, not a second independent extraction).
-// A failure here is fatal to the whole command. In practice the only way
-// AnalyzeSessions fails is a per-file I/O error (bad open, or a read error
-// mid-scan — malformed JSON lines are just skipped, not fatal), and this
-// pass reads the exact same files the same way a moment later, so the
-// error surface is the same either way. The most likely real-world trigger
-// is a race with `internal/audit/housekeep.go`'s rotation sweep — a
-// long-running `vmr start` compressing/deleting a log file out from under
-// a concurrently running `vmr report` — not a code bug, so the message
-// below names that possibility explicitly.
-func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
-	sess, err := AnalyzeSessions(paths)
+// buildInternal is Build/BuildCached's shared body — see build_cached.go
+// for both entry points' doc comments and the full rationale (two-read
+// design, onRecord's independence from Build's own success/failure, the
+// session-analysis-failure error message below). Split into its own file
+// purely to keep this one under internal/archtest's line budget; no
+// behavior split, buildInternal is the only thing that does real work.
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+	sess, cache, err := AnalyzeSessionsCached(paths, prior)
 	if err != nil {
-		return nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
+		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
 			"This step reads every input file a second time; the most common real-world cause "+
 			"is one of them being rotated/compressed by the audit housekeeping sweep (a running "+
 			"`vmr start` instance) while this scan was in progress. Rerun; if it persists, check "+
@@ -432,7 +404,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		var fileRecords int
 		rc, err := audit.OpenLogFile(path)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		line := 0
 		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
@@ -591,7 +563,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		})
 		rc.Close()
 		if scanErr != nil {
-			return nil, nil, fmt.Errorf("%s: %w", path, scanErr)
+			return nil, nil, nil, fmt.Errorf("%s: %w", path, scanErr)
 		}
 		if progress != nil {
 			fmt.Fprintf(progress, "[%d/%d] %s  done: %d records (%s)\n",
@@ -718,7 +690,7 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 		}
 		return a.Shape < b.Shape
 	})
-	return rep, sess, nil
+	return rep, sess, cache, nil
 }
 
 // buildRequestRow maps a rec2 to its per-request export row.
@@ -756,7 +728,7 @@ func buildRequestRow(rc *rec2) RequestRow {
 }
 
 // WriteJSON writes the aggregate report JSON (vmr-report.json). Per-request
-// rows are NOT included (they live in vmr-requests.jsonl).
+// rows are NOT included (they live in vmr-requests.json).
 func WriteJSON(rep *Report2, path string) error {
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {

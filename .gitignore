@@ -10,6 +10,10 @@ skills-lock.json
 /config.yaml
 /config.local.yaml
 
+# vmr report/vmr story sidecar config — may hold a plaintext llm_key
+# (use report.example.yaml as template)
+/report.yaml
+
 # Test & coverage
 *.test
 *.out

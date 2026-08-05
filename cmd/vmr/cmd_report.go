@@ -42,7 +42,7 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 const defaultPricingFile = "pricing.yaml"
 
 // cmdReport aggregates audit JSONL into internal/report's output:
-// vmr-report.json/.md, vmr-requests.jsonl/.md (+ per-tag siblings),
+// vmr-report.json/.md, vmr-requests.json/.md (+ per-tag siblings),
 // vmr-requests-failed.jsonl/.md (error-analysis index: outcome ==
 // error|canceled plus ok-but-truncated, additive — doesn't remove those
 // requests from anything above), and one details/*.md+.json per request.
@@ -56,8 +56,8 @@ const defaultPricingFile = "pricing.yaml"
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
-	outDir := fs.String("o", "reports", "output directory (default: ./reports)")
-	detailsOn := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/")
+	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
+	detailsFlag := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/ (default: report.yaml's details, or true)")
 	pricingPath := fs.String("pricing", "", "pricing sidecar yaml (per-endpoint unit prices); absent => auto-load ./pricing.yaml if present, else no $ estimates")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
@@ -71,10 +71,13 @@ func cmdReport(args []string) error {
 
 	tw := timestampWriter{w: os.Stdout}
 
-	lang, err := resolveLanguage(*langFlag, *reportConfigPath, tw)
+	rc := resolveReportConfig(*reportConfigPath, tw)
+	lang, err := resolveLanguage(*langFlag, rc, tw)
 	if err != nil {
 		return err
 	}
+	outDir := resolveString(*outDirFlag, rc.Output, "reports")
+	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
 
 	resolvedPricingPath := *pricingPath
 	if resolvedPricingPath == "" {
@@ -95,7 +98,7 @@ func cmdReport(args []string) error {
 	// aggregation pass starts feeding it records, since detail rendering
 	// now happens inside that same pass instead of as a separate step
 	// afterward.
-	if err := os.MkdirAll(*outDir, 0o700); err != nil {
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return err
 	}
 
@@ -108,9 +111,9 @@ func cmdReport(args []string) error {
 	// robustness the old separate-WriteDetails-step had, just without the
 	// extra pass.
 	var dw *report.DetailWriter
-	detailDir := filepath.Join(*outDir, "details")
+	detailDir := filepath.Join(outDir, "details")
 	var onRecord func(*audit.Record, *report.ReqInfo)
-	if *detailsOn {
+	if detailsOn {
 		dw, err = report.NewDetailWriter(detailDir, lang)
 		if err != nil {
 			return err
@@ -122,14 +125,20 @@ func cmdReport(args []string) error {
 	// The gap between this line's timestamp and the first "[1/N]" line below
 	// is session analysis (AnalyzeSessions) — a full, currently silent pass
 	// over every input file that Build() always runs before its own
-	// per-file aggregation loop starts printing.
+	// per-file aggregation loop starts printing. priorCache (from a
+	// previous run's vmr-requests.json, if any) lets that pass skip
+	// re-parsing/re-hashing any input file whose content hasn't changed —
+	// see docs/VirtualModelRouter_Design_v4_Analytics.md's
+	// vmr-requests.json section.
+	reqPath := filepath.Join(outDir, "vmr-requests.json")
+	priorCache := report.LoadRequestsFileCache(reqPath)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, err := report.Build(paths, time.Now(), tw, pricing, onRecord)
+	rep, sess, cache, err := report.BuildCached(paths, time.Now(), tw, pricing, onRecord, priorCache)
 	if err != nil {
 		return err
 	}
-	jsonPath := filepath.Join(*outDir, "vmr-report.json")
-	mdPath := filepath.Join(*outDir, "vmr-report.md")
+	jsonPath := filepath.Join(outDir, "vmr-report.json")
+	mdPath := filepath.Join(outDir, "vmr-report.md")
 	if err := report.WriteJSON(rep, jsonPath); err != nil {
 		return err
 	}
@@ -148,18 +157,17 @@ func cmdReport(args []string) error {
 		fmt.Fprintf(tw, "%d detail file(s) (.md + .json) in %s\n", n, detailDir)
 	}
 
-	// Requests index (+ per-tag siblings) + jsonl.
+	// Requests index (+ per-tag siblings) + json (data + file-hash cache).
 	rows := rep.RequestRows()
-	reqPath := filepath.Join(*outDir, "vmr-requests.jsonl")
-	nReq, err := report.WriteRequestsJSONL(rows, reqPath)
+	nReq, err := report.WriteRequestsJSON(rows, cache, reqPath)
 	if err != nil {
 		return fmt.Errorf("requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
-	if err := report.WriteRequestsIndex(rep, sess, *outDir, lang); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, outDir, lang); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(*outDir, "vmr-requests.md"))
+	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests.md"))
 
 	// Failed-requests index: a dedicated error-analysis view (outcome ==
 	// error|canceled, plus ok-but-truncated), each row linking to its
@@ -167,15 +175,15 @@ func cmdReport(args []string) error {
 	// output above is unaffected and still lists these same failed requests
 	// inline as before.
 	failedRows := report.FailedRequestRows(rows)
-	failedJSONLPath := filepath.Join(*outDir, "vmr-requests-failed.jsonl")
+	failedJSONLPath := filepath.Join(outDir, "vmr-requests-failed.jsonl")
 	nFailed, err := report.WriteRequestsJSONL(failedRows, failedJSONLPath)
 	if err != nil {
 		return fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, *outDir, lang); err != nil {
+	if err := report.WriteFailedIndex(rows, outDir, lang); err != nil {
 		return fmt.Errorf("failed-requests index: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(*outDir, "vmr-requests-failed.md"))
+	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests-failed.md"))
 	return nil
 }

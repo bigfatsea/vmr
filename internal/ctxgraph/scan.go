@@ -60,6 +60,17 @@ func Scan(paths []string) (*Graph, error) {
 		all = append(all, res.manifests...)
 		noBody += res.noBody
 	}
+	return buildGraph(all, noBody), nil
+}
+
+// buildGraph is Scan's shared tail: sort every already-parsed Manifest by
+// timestamp, bucket by SessKey, split each bucket into lineages, and build
+// the blob inverted index — pure in-memory work over Manifests, with no
+// dependency on where they came from (freshly parsed this call, or reused
+// from a cache — see ScanCached in cache.go). Manifest count, not source
+// file bytes, is what this scales with, so it stays cheap even when most of
+// the corpus is cache-sourced.
+func buildGraph(all []*Manifest, noBody int) *Graph {
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS.Before(all[j].TS) })
 
 	g := &Graph{Index: newBlobIndex(), NoBody: noBody}
@@ -87,7 +98,7 @@ func Scan(paths []string) (*Graph, error) {
 			g.Lineages = append(g.Lineages, l)
 		}
 	}
-	return g, nil
+	return g
 }
 
 // scanWorkerCount bounds file-read concurrency the same way AnalyzeSessions

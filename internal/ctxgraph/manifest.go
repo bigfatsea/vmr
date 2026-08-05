@@ -17,47 +17,47 @@ import (
 // between them (see edit.go) — that edit, not either manifest alone, is
 // what carries meaning.
 type Manifest struct {
-	Path string
-	Line int
+	Path string `json:"path"`
+	Line int    `json:"line"`
 
-	TS       time.Time
-	Model    string
-	Protocol string
-	Outcome  string
-	Endpoint string // final attempt's "protocol:provider:model", "-" if none
-	Stream   bool
-	DurMS    int64
-	TTFTMS   int64
-	Usage    chatmsg.Usage
-	UsageOK  bool
+	TS       time.Time     `json:"ts"`
+	Model    string        `json:"model,omitempty"`
+	Protocol string        `json:"protocol,omitempty"`
+	Outcome  string        `json:"outcome,omitempty"`
+	Endpoint string        `json:"endpoint,omitempty"` // final attempt's "protocol:provider:model", "-" if none
+	Stream   bool          `json:"stream,omitempty"`
+	DurMS    int64         `json:"dur_ms,omitempty"`
+	TTFTMS   int64         `json:"ttft_ms,omitempty"`
+	Usage    chatmsg.Usage `json:"usage"`
+	UsageOK  bool          `json:"usage_ok,omitempty"`
 
 	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim — "" when
 	// auth was disabled or no key matched. internal/story's Journey id
 	// embeds the root manifest's tag so a directory listing groups (and
 	// sorts within) one client at a time.
-	ClientKeyTag string
+	ClientKeyTag string `json:"client_key_tag,omitempty"`
 
 	// TraceID is the Traceparent header's trace-id segment, when the
 	// client sent one — a trace-id change between consecutive manifests is
 	// a strong "this is a new task" signal (a new client-side request
 	// chain), independent of message content. "" when absent.
-	TraceID string
+	TraceID string `json:"trace_id,omitempty"`
 
 	// SysHash is the digest of the leading system block's rendered text
 	// (all contiguous role=="system" messages from index 0, concatenated —
 	// mirrors session.go's collect(), which folds them into one running
 	// hash rather than treating each as its own message). HasSys is false
 	// when the request had no leading system message at all.
-	SysHash Hash
-	HasSys  bool
-	LeadSys int
+	SysHash Hash `json:"sys_hash"`
+	HasSys  bool `json:"has_sys,omitempty"`
+	LeadSys int  `json:"lead_sys,omitempty"`
 
 	// Keys is one hash per non-leading-system message, in original order.
 	// MsgIdx[i] is the index of Keys[i]'s message within chatmsg.Messages'
 	// output for this request — the coordinate BlobIndex needs to refetch
 	// that message's actual text later (see blobindex.go).
-	Keys   []Hash
-	MsgIdx []int
+	Keys   []Hash `json:"keys,omitempty"`
+	MsgIdx []int  `json:"msg_idx,omitempty"`
 
 	// SessKey is a cheap same-conversation hint: Claude Code's
 	// metadata.user_id session UUID when present, else "anchor:<hex of
@@ -66,7 +66,7 @@ type Manifest struct {
 	// This is only the STARTING point for lineage grouping; Contract/Fork
 	// edits split a SessKey bucket into multiple lineages (see lineage.go)
 	// — anchor alone is known to over-merge.
-	SessKey string
+	SessKey string `json:"sess_key,omitempty"`
 }
 
 // BuildManifest extracts a Manifest from one audit record. ok=false when the

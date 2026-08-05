@@ -1,0 +1,67 @@
+# Ver 2026-08-05, by Sonnet 5
+# vmr report/vmr story's own sidecar config — copy to report.yaml and adjust.
+# THIS example file is the one meant to be committed; report.yaml itself is
+# .gitignore'd, same as config.yaml — it can hold a real llm_key. Entirely
+# separate from config.yaml otherwise: no provider config, no complex
+# schema, and vmr report/vmr story routinely run with no report.yaml at all
+# (falls through to every flag's own built-in default). Auto-loaded from the
+# current directory by both `vmr report` and `vmr story` when
+# -report-config isn't given; pass -report-config path to point at a
+# different one.
+#
+# Every field below is a fallback default only: the matching command-line
+# flag, if passed, always wins over it. Leaving a field out (or the whole
+# file absent) falls through to that flag's own built-in default, noted
+# per field.
+
+language: en   # en (default) | zh — output language for vmr-report.md /
+               # vmr-requests*.md / vmr-stories.md / journey-*.md /
+               # compare-*.md / vmr-story-corpus.md / details/*.md.
+               # Narrative JSON fields (e.g. Finding.Finding, MetricDiff.Label)
+               # always stay English regardless of this setting, so a script
+               # parsing those files never has to account for which language
+               # a report was generated in. Overridden by -lang.
+
+output: reports   # -o's default (built-in default: "reports"). Both
+                  # `vmr report` and `vmr story` share this one field —
+                  # there's no separate per-command output setting.
+
+details: true   # vmr report only. Whether to also export one Markdown+JSON
+                 # file per request into {output}/details/ (built-in
+                 # default: true). Overridden by -details.
+
+include_partial: false   # vmr story only. Also list/render journeys whose
+                          # head looks truncated by the loaded file range
+                          # (built-in default: false). Overridden by
+                          # -include-partial.
+
+# --- LLM interpretation layer (vmr story only; see -llm-addr's own -h text) ---
+# All three of llm_addr/llm_model/llm_key are optional and independent of
+# each other only in the sense that each has its own default; -llm-addr
+# (here or on the command line) remains the sole switch that turns this
+# layer on at all — an llm_model/llm_key with no llm_addr anywhere is
+# rejected the same way the CLI flags already are.
+
+llm_addr: ""       # host:port of an already-running VMR instance, e.g.
+                    # "127.0.0.1:8787". Overridden by -llm-addr. Never
+                    # auto-started; the instance must already be up.
+
+llm_model: ""       # that instance's virtual model name (e.g. "agent"),
+                     # sent verbatim. Overridden by -llm-model.
+
+llm_key: ""          # bearer token for that instance, only needed if it has
+                      # api_keys configured. Plaintext is fine here — this
+                      # field only ever lands in your own .gitignore'd
+                      # report.yaml, never in this committed example. Also
+                      # accepts ${ENV_VAR} expansion (e.g.
+                      # llm_key: "${VMR_LLM_KEY}") if you'd rather reference
+                      # an already-set environment variable than duplicate
+                      # the literal value into this file. Overridden by
+                      # -llm-key.
+
+llm_cache_dir: ""   # directory for the disk cache of LLM interpretation
+                     # results. Deliberately has NO implicit default path:
+                     # if this is empty AND -llm-cache-dir isn't passed on
+                     # the command line, LLM calls are never cached, full
+                     # stop — caching only ever happens somewhere you
+                     # explicitly named. Overridden by -llm-cache-dir.

@@ -40,7 +40,7 @@ type Report2 struct {
 	Sticky       *StickyEffect   `json:"sticky,omitempty"`
 	Pricing      *Pricing        `json:"pricing,omitempty"`
 
-	// requests is the per-request export (vmr-requests.jsonl). Unexported so
+	// requests is the per-request export (vmr-requests.json). Unexported so
 	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
 	// RequestRows() for the jsonl writer + index renderer.
 	requests []RequestRow
@@ -395,7 +395,7 @@ const (
 	FindingContextGrowth    FindingCode = "context_growth"
 )
 
-// RequestRow is one line of vmr-requests.jsonl: the per-request drill-down
+// RequestRow is one row of vmr-requests.json's "requests" field: the per-request drill-down
 // backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;
 // unavailable signals are omitted rather than fabricated.
 type RequestRow struct {

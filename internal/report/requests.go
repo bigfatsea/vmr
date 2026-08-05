@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// The redesigned per-request drill-down: vmr-requests.jsonl (the data)
+// The redesigned per-request drill-down: vmr-requests.json (the data)
 // + vmr-requests.md (a pure index) + one fully-detailed sibling per group
 // (vmr-requests-<tag>.md per real Chat User, vmr-requests-unresolved.md for
 // sessions with no client_key_tag, vmr-requests-cron-<tag>.md per scheduled
@@ -29,11 +29,62 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
-// WriteRequestsJSONL writes one RequestRow per line to vmr-requests.jsonl.
+// RequestsIndex is vmr-requests.json's whole shape: Requests is exactly
+// what vmr-requests.jsonl used to hold (one row per request), plus Files —
+// the file-hash-keyed parse cache (see ctxgraph.FileCache/ScanCached) for
+// AnalyzeSessionsCached's ctxgraph.Scan pass, same "index doubles as cache"
+// reasoning internal/story's vmr-stories.json uses (see
+// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+// section). vmr-requests-failed.jsonl stays a plain flat JSONL — it's a
+// filtered dump of Requests, not itself an independent cache.
+type RequestsIndex struct {
+	Files    ctxgraph.FileCache `json:"files"`
+	Requests []RequestRow       `json:"requests"`
+}
+
+// WriteRequestsJSON writes vmr-requests.json — RequestsIndex's rows plus
+// cache's files section (cache may be nil: an empty files section, e.g.
+// when the caller used Build instead of BuildCached).
+func WriteRequestsJSON(rows []RequestRow, cache *ctxgraph.FileCache, path string) (n int, err error) {
+	idx := RequestsIndex{Requests: rows, Files: ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{}}}
+	if cache != nil {
+		idx.Files = *cache
+	}
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+// LoadRequestsFileCache reads path's "files" section for BuildCached's
+// prior cache argument. Best-effort, same contract as
+// internal/story.LoadStoryIndex: a missing, unreadable, or corrupt file all
+// degrade to nil ("no cache, parse everything fresh") rather than failing
+// the caller.
+func LoadRequestsFileCache(path string) *ctxgraph.FileCache {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var idx RequestsIndex
+	if err := json.Unmarshal(data, &idx); err != nil || idx.Files.Files == nil {
+		return nil
+	}
+	return &idx.Files
+}
+
+// WriteRequestsJSONL writes one RequestRow per line — used for
+// vmr-requests-failed.jsonl, a filtered dump with no cache section of its
+// own (see RequestsIndex's doc comment).
 func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {

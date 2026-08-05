@@ -1,0 +1,191 @@
+// Ver 2026-08-05, by Sonnet 5
+
+package story
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
+	"vmr/internal/i18n"
+)
+
+func twoStepChain(t *testing.T) []*ctxgraph.Lineage {
+	t.Helper()
+	at := func(m int) time.Time { return time.Date(2026, 7, 16, 10, m, 0, 0, time.UTC) }
+	r1 := mkRec(at(0), "", []any{msg("system", "sys"), msg("user", "do the thing")}, sseText("ok"))
+	r2 := mkRec(at(1), "", []any{msg("system", "sys"), msg("user", "do the thing"), msg("assistant", "ok"), msg("user", "more")}, sseText("done"))
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	return []*ctxgraph.Lineage{l}
+}
+
+func TestBuildJourneyIndexRow_CheapFields(t *testing.T) {
+	chain := twoStepChain(t)
+	row := BuildJourneyIndexRow(chain, "some title", false)
+
+	if row.ID != ID(chain) {
+		t.Errorf("ID = %q, want %q", row.ID, ID(chain))
+	}
+	if row.Requests != 2 {
+		t.Errorf("Requests = %d, want 2 (one per manifest)", row.Requests)
+	}
+	if row.Title != "some title" {
+		t.Errorf("Title = %q, want %q", row.Title, "some title")
+	}
+	if row.Partial {
+		t.Error("Partial should be false")
+	}
+	if row.Stitched != 1 {
+		t.Errorf("Stitched = %d, want 1 (single-lineage chain)", row.Stitched)
+	}
+	if len(row.Files) != 1 {
+		t.Fatalf("Files = %v, want exactly 1 (both manifests share the same source file)", row.Files)
+	}
+	if row.Files[0] != chain[0].Manifests[0].Path {
+		t.Errorf("Files[0] = %q, want %q", row.Files[0], chain[0].Manifests[0].Path)
+	}
+	// Not built yet — the caller (renderJourney etc.) fills these in only
+	// once story.BuildChain has actually run.
+	if row.Tasks != 0 || row.Steps != 0 || row.Rendered != "" {
+		t.Errorf("expected zero-value Tasks/Steps/Rendered before a full build, got %+v", row)
+	}
+}
+
+func TestMergeJourneyIndexRows_CarriesForwardBuiltFields(t *testing.T) {
+	fresh := []JourneyIndexRow{
+		{ID: "j-a", Requests: 2, Title: "fresh title A"},
+		{ID: "j-b", Requests: 1, Title: "fresh title B"},
+	}
+	prior := []JourneyIndexRow{
+		{ID: "j-a", Requests: 2, Title: "stale title A", Tasks: 3, Steps: 7, Rendered: "journey-j-a.md"},
+		{ID: "j-gone", Requests: 5, Title: "no longer derivable from current files"},
+	}
+	merged := MergeJourneyIndexRows(fresh, prior)
+
+	if len(merged) != 2 {
+		t.Fatalf("got %d rows, want 2 (exactly fresh's count — j-gone must be dropped)", len(merged))
+	}
+	var a, b *JourneyIndexRow
+	for i := range merged {
+		switch merged[i].ID {
+		case "j-a":
+			a = &merged[i]
+		case "j-b":
+			b = &merged[i]
+		}
+	}
+	if a == nil || b == nil {
+		t.Fatalf("expected rows j-a and j-b, got %+v", merged)
+	}
+	if a.Title != "fresh title A" {
+		t.Errorf("a.Title = %q, want fresh's title (fresh always wins for cheap fields)", a.Title)
+	}
+	if a.Tasks != 3 || a.Steps != 7 || a.Rendered != "journey-j-a.md" {
+		t.Errorf("a should carry forward prior's built fields, got Tasks=%d Steps=%d Rendered=%q", a.Tasks, a.Steps, a.Rendered)
+	}
+	if b.Tasks != 0 || b.Steps != 0 || b.Rendered != "" {
+		t.Errorf("b has no prior entry, should stay zero-valued, got %+v", b)
+	}
+}
+
+func TestMergeJourneyIndexRows_FreshBuiltFieldsWinOverPrior(t *testing.T) {
+	fresh := []JourneyIndexRow{
+		{ID: "j-a", Requests: 2, Tasks: 4, Steps: 9, Rendered: "journey-j-a.md"},
+	}
+	prior := []JourneyIndexRow{
+		{ID: "j-a", Requests: 2, Tasks: 3, Steps: 7, Rendered: "journey-j-a-partial.md"},
+	}
+	merged := MergeJourneyIndexRows(fresh, prior)
+	if len(merged) != 1 {
+		t.Fatalf("got %d rows, want 1", len(merged))
+	}
+	if merged[0].Tasks != 4 || merged[0].Steps != 9 || merged[0].Rendered != "journey-j-a.md" {
+		t.Errorf("this run's own freshly built fields should win, got %+v", merged[0])
+	}
+}
+
+func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
+	chain := twoStepChain(t)
+	idx := &StoryIndex{
+		Files: ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{
+			chain[0].Manifests[0].Path: {Hash: "deadbeef", Manifests: chain[0].Manifests, NoBody: 1},
+		}},
+		Journeys: []JourneyIndexRow{BuildJourneyIndexRow(chain, "t", false)},
+	}
+	path := filepath.Join(t.TempDir(), "vmr-stories.json")
+	if err := idx.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got := LoadStoryIndex(path)
+	if len(got.Journeys) != 1 || got.Journeys[0].ID != idx.Journeys[0].ID {
+		t.Fatalf("round-tripped Journeys = %+v, want %+v", got.Journeys, idx.Journeys)
+	}
+	if len(got.Files.Files) != 1 {
+		t.Fatalf("round-tripped Files has %d entries, want 1", len(got.Files.Files))
+	}
+	entry := got.Files.Files[chain[0].Manifests[0].Path]
+	if entry.Hash != "deadbeef" || len(entry.Manifests) != 2 {
+		t.Errorf("round-tripped cache entry = %+v, want hash deadbeef, 2 manifests", entry)
+	}
+}
+
+func TestLoadStoryIndex_MissingFileReturnsEmpty(t *testing.T) {
+	idx := LoadStoryIndex(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if idx == nil || idx.Files.Files == nil || len(idx.Journeys) != 0 {
+		t.Errorf("expected an empty, non-nil index for a missing file, got %+v", idx)
+	}
+}
+
+func TestLoadStoryIndex_CorruptFileDegradesToEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vmr-stories.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	idx := LoadStoryIndex(path)
+	if idx == nil || idx.Files.Files == nil || len(idx.Journeys) != 0 {
+		t.Errorf("expected a corrupt file to degrade to an empty index, got %+v", idx)
+	}
+}
+
+func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
+	empty := RenderStoryIndexMarkdown(nil, i18n.EN)
+	if empty == "" {
+		t.Error("empty render should still produce a title/note, not an empty string")
+	}
+
+	chain := twoStepChain(t)
+	rows := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
+	rows[0].Tasks, rows[0].Steps, rows[0].Rendered = 1, 2, "journey-"+rows[0].ID+".md"
+	md := RenderStoryIndexMarkdown(rows, i18n.EN)
+	for _, want := range []string{rows[0].ID, "调研一下", rows[0].Rendered} {
+		if !strings.Contains(md, want) {
+			t.Errorf("rendered markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestJourneyIndexRow_JSONRoundTrip(t *testing.T) {
+	chain := twoStepChain(t)
+	row := BuildJourneyIndexRow(chain, "t", false)
+	row.Tasks, row.Steps, row.Rendered = 2, 3, "journey-x.md"
+	data, err := json.Marshal(row)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got JourneyIndexRow
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !got.Start.Equal(row.Start) || !got.End.Equal(row.End) {
+		t.Errorf("Start/End didn't round-trip: got %v/%v, want %v/%v", got.Start, got.End, row.Start, row.End)
+	}
+	if got.ID != row.ID || got.Tasks != row.Tasks || got.Rendered != row.Rendered {
+		t.Errorf("round-tripped row = %+v, want %+v", got, row)
+	}
+}

@@ -46,7 +46,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 ```
 vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
-    # 输出 vmr-report.json + vmr-report.md + vmr-requests.jsonl + vmr-requests.md（+ 按 client_key_tag 的 sibling）
+    # 输出 vmr-report.json + vmr-report.md + vmr-requests.json + vmr-requests.md（+ 按 client_key_tag 的 sibling）
     # + {out}/details/ 逐请求详单（-details=false 关闭；加载了定价配置才会渲染 §2 成本估算）
 ```
 
@@ -90,6 +90,8 @@ vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
 每条审计记录导出一个 Markdown 文件 + 同名 JSON 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调），不再单独扫一遍。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
+
+`vmr-requests.json`（此前是 `vmr-requests.jsonl`）是 `vmr-requests.md` 背后的数据层：`requests` 字段是原来 `.jsonl` 每行一条的 `RequestRow` 列表，改用单一 JSON 文档（不再是逐行 JSONL）是因为多了一个 `files` 字段——一份文件级、按内容哈希索引的解析缓存（`{path: {hash, manifests: [...]}}`），跟 `internal/story` 的 `vmr-stories.json`（§3.4）用的是完全同一个 `ctxgraph.FileCache`/`ScanCached` 类型和机制。`AnalyzeSessionsCached`（`session.go`）把这份缓存喂给它自己的 `ctxgraph.Scan` 那一趟——文件内容哈希没变就跳过 `BuildManifest` 的 JSON 解析+逐消息哈希，直接复用缓存里的 Manifest。**这一轮只缓存了这一半**：`Build`（`aggregate.go`）里那趟独立的、report 自己的每请求解析（"single pass over files, joined to ReqInfo"，产出 `ReqInfo`/`RequestRow` 的那一趟，跟"关键决策与取舍"表里提到的与 `ctxgraph.Scan` 各扫一遍同一批文件是同一处重复扫描）仍然每次全量重跑，没有缓存——把 report 也改成直接消费 `ctxgraph.Manifest`、彻底消掉这个重复扫描，是比这次缓存更大的一步重构，本轮刻意不做，见"关键决策与取舍"表相应行。`vmr-requests-failed.jsonl` 是 `RequestRow` 的一份过滤导出，不是独立缓存，继续保持逐行 JSONL 格式不变。`BuildCached`/`Build` 两个入口并存：前者接受一份先前的 `*ctxgraph.FileCache` 并把更新后的缓存一并返回，`cmd_report.go` 用的是它；`Build` 是它的无缓存瘦封装，保留给全部既有调用方（含测试）用，行为完全不变。
 
 ### 2.6 Markdown 渲染：九个编号章节
 
@@ -171,6 +173,14 @@ vmr story -corpus [-o dir] [file|glob]...
 - **`-corpus`**：语料级统计（§3.9），跨全部非断头候选，产出 `vmr-story-corpus.md`/`.json`；不接 `-llm-addr`。
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
+
+**`vmr-stories.json`/`.md`——候选列表落盘 + 文件级解析缓存**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（数据 + 缓存）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。
+
+`vmr-stories.json` 的 `files` 段同时是一份内容哈希索引的解析缓存：`{path: {hash, manifests: [...]}}`，`manifests` 是 `ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按 `Path`/`Line` 回原始审计文件按需取，缓存本身体积很小）。下一次运行先加载这份缓存，对每个输入文件重新算一次内容哈希（`ctxgraph.HashFile`，对磁盘上原始字节做 sha256，不关心是否被 housekeeping 压缩过——一份文件从 `.jsonl` 压缩成 `.jsonl.zst` 后字节和路径都变了，天然被当成"没缓存过"重新解析一次，一次性代价，不是错误）：哈希命中的文件直接复用缓存的 `manifests`，跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希（这是整个扫描过程里真正贵的部分）；未命中（内容变了，或是全新文件）才重新解析。
+
+**关键设计取舍：只缓存"文件 → Manifest 解析结果"这一层，绝不缩小参与图重建的文件集合**——`ctxgraph.ScanCached`（`internal/ctxgraph/cache.go`）拿到每个文件"命中缓存的旧 Manifest 或新解析的 Manifest"之后，永远把**全部**文件的 Manifest 合并成一份完整集合，再整体跑一遍分桶/拆 lineage/`StitchGraph`——从不因为某个文件"没变"或"是新出现的"就把它排除在图重建之外。这不是留在桌面上没做的优化，是刻意的正确性边界：`StitchGraph` 的同 SessKey 桶续接搜索**没有时间上限**（用户可以走开几天再回来同一个锚点，见 §3.3 的缝合小节），一个全新文件里的记录完全可能续接到一个"看起来早就定型"的旧 Journey 后面，把它的 ID（`<end>` 分量）往后推——如果只按"这个文件是否被某个已知 Journey 引用过"来决定要不要把它纳入图重建，一个全新文件永远查不到任何引用（它是新的），这条续接就会被静默漏掉。因为 Manifest 本身很轻（一条消息一个 16 字节哈希，不含正文），"整体重建图"这一步的开销正比于请求条数而不是原始字节数，缓存跳过昂贵的解析步骤之后，重建图这一步本身已经便宜到不需要再做更激进的局部/增量式图更新。
+
+`vmr-requests.json`（§2.5）用的是完全同一套 `ctxgraph.FileCache`/`ScanCached` 机制、同一条设计取舍——两个产物的"索引 + 缓存合一"需求本质相通，实现上共用 `internal/ctxgraph` 这一层，不是分别发明两套缓存格式。
 
 **数据模型**（`journey.go`）：
 
@@ -368,16 +378,29 @@ type EfficiencyText struct {
 
 ### 4.4 配置与命令行
 
-`vmr report`/`vmr story` 的受众是分析这批审计日志的人，往往不是部署路由进程的人：把日志从生产环境拷到自己笔记本上跑 `vmr report`，或者在 CI 的一次性容器里批量生成报告——这些场景下手头常常没有、也不该有 provider API key。语言配置因此**不进 `config.yaml`**，新建一份专属、轻量、非敏感的 `report.yaml`：
+`vmr report`/`vmr story` 的受众是分析这批审计日志的人，往往不是部署路由进程的人：把日志从生产环境拷到自己笔记本上跑 `vmr report`，或者在 CI 的一次性容器里批量生成报告——这些场景下手头常常没有、也不该有 provider API key。这类设置因此**不进 `config.yaml`**，落在一份专属、轻量的 `report.yaml` 里，跟 `config.yaml` 同构：`report.yaml` 本身 `.gitignore`（可以放真实的 `llm_key`），提交进仓库的是模板 `report.example.yaml`（完整字段见该文件）：
 
 ```yaml
 # report.yaml — vmr report/vmr story 专属配置，与 config.yaml 完全独立
-language: zh   # 可选，默认 "en"；可选值 en | zh
+language: zh          # en (默认) | zh
+output: reports        # -o 的默认值
+details: true           # vmr report 专属，-details 的默认值
+include_partial: false   # vmr story 专属，-include-partial 的默认值
+llm_addr: ""              # vmr story 专属，-llm-addr 的默认值
+llm_model: ""              # vmr story 专属，-llm-model 的默认值
+llm_key: ""                  # vmr story 专属，-llm-key 的默认值；明文或 ${ENV} 都可以
+llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值；两处都不设 = 永不缓存
 ```
 
-默认路径是当前目录下的 `report.yaml`（和 `-pricing` 默认自动加载 `./pricing.yaml` 同构：不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——只有一两个字段，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
+每个字段都只是命令行同名 flag 的兜底默认值：flag 显式传了就赢，没传才看这份文件，文件里也没有就落到 flag 自己的内建默认（`resolveString`/`resolveBool`/`flagPassed`，`cmd/vmr/reportconfig.go`）——`resolveLanguage` 当初定下的 `-lang` > `report.yaml` > 内建默认这个优先级，后来给其余每个字段原样套用，不是各写一套。两个 bool 字段（`details`/`include_partial`）在 struct 里是指针，不是普通 bool——一个 flag 的零值（`false`）本身就是合法的显式选择，没法靠"是不是零值"判断用户到底传没传，只能用 `flag.FlagSet.Visit` 拿"这个 flag 到底出现在命令行没有"这个事实，report.yaml 侧同理用指针的 nil/非 nil 表达"这个字段到底写没写"。
 
-`resolveLanguage` 的优先级：`-lang` > `report.yaml` 的 `language` > 默认 `en`。`-lang` 给了错值是硬错误（用户主动输入的，不是 best-effort 场景）；`report.yaml` 不存在时安静跳过；`report.yaml` 存在但解析失败或 `language` 值非法时降级为英文并打印一行 warning——但**只有在这份路径是用户用 `-report-config` 显式指定时**才对"文件不存在"本身也打印 warning（区别于自动探测 `./report.yaml`：那种情况下文件不存在是正常状态，不该出声；显式指定的路径缺失，多半是拼写错误，值得提醒）。
+`llm_key` 是这份文件里唯一可能敏感的字段——`report.yaml` 已经 `.gitignore`，明文写 token 跟 `config.yaml` 里写 provider API key 是同一个安全模型，不需要额外保护。仍然支持 `${ENV_VAR}` 展开（`expandReportEnv`，对整份文件的原始文本做替换，跟 `internal/config` 的 `expandEnv` 同一套 `${NAME}` 语法，各自独立实现，不共享代码——`report.yaml` 刻意不依赖 `internal/config`，见本文件包注释），纯粹是给想复用某个已有环境变量（比如跟 `config.yaml` 的 provider key 共用一个）而不想在两份文件里各写一份明文的人一个可选项，不是强制要求。
+
+`llm_cache_dir` 是唯一没有内建默认值的字段——早期实现里它硬编码成 `{output}/stories/.llm-cache`，只要开了 `-llm-addr` 就自动落盘缓存；现在改成两处（flag、`report.yaml`）都不设就完全不缓存，缓存目录必须是用户显式点名的地方，不再有隐式路径。
+
+默认路径是当前目录下的 `report.yaml`（和 `-pricing` 默认自动加载 `./pricing.yaml` 同构：不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
+
+文件本身缺失/损坏时的降级行为：`report.yaml` 不存在时安静跳过；存在但解析失败，或某个字段值非法（如 `language` 不是 `en`/`zh`）时降级为该字段的内建默认并打印一行 warning——但**只有在这份路径是用户用 `-report-config` 显式指定时**才对"文件不存在"本身也打印 warning（区别于自动探测 `./report.yaml`：那种情况下文件不存在是正常状态，不该出声；显式指定的路径缺失，多半是拼写错误，值得提醒）。`-lang` 本身给了错值是唯一的例外，是硬错误而非降级（用户主动输入的，不是 best-effort 场景）。
 
 ### 4.5 LLM 解读层的语言联动
 
@@ -409,7 +432,7 @@ language: zh   # 可选，默认 "en"；可选值 en | zh
 | 断头 Journey 默认跳过，`-include-partial` 才渲染，文件名带 `-partial` 后缀 | 强行当作全新对话渲染 / 完全拒绝渲染 | 断头意味着真正的开头在本次加载范围之外，ID 因此依赖"最早可见的 manifest"、不是稳定的内容寻址；后缀是这个不稳定性最低成本的自我声明——不改动 ID 本身的计算方式，只在文件名层面提醒读者 |
 | 行为剖面（九项规则派生指标）先于 LLM 解读层实现 | LLM 解读层优先 | 横向对比两套 Agent 框架的证据里，九成来自规则可得的表格（工具分布、耗时构成、缓存效率曲线），LLM 在这类分析里承担的是文字组织而非发现；规则层零成本、确定性、可复现，理应先做 |
 | 双 Journey 对比（4d）用规则化的相对变化阈值，不生成自由文本解读 | 让 LLM 生成对比叙述 | 4d 和其余八项指标同属"剖面层"（规则派生），LLM 解读层是独立的、可选的第三层，两者不能混——数字必须只由规则产生，混入 LLM 生成的数字会破坏"报告里的每个数字都可复现"这个约束 |
-| `vmr report`/`vmr story` 内部对同一批文件各跑一次独立扫描（`AnalyzeSessions` 内的 `ctxgraph.Scan` 通道 + 报表自己的 `collect()` 通道），用 goroutine 并发而非合并成一趟 | 合并成单一遍历，两边共享同一份解析结果 | 合并需要把两套本来独立演进的特征提取（`ctxgraph` 的哈希/lineage vs 报表的工具签名/角色统计等）耦合进同一个循环体，代价是架构复杂度；并发跑两条独立通道用 goroutine 就能把"审计文件读两遍"的墙钟代价从翻倍压到大致不变，是当前语料规模（7112 条记录）下更划算的取舍。若未来语料规模显著增长到 CPU 而非墙钟成为瓶颈，这里是第一个该回头看的地方 |
+| `vmr report`/`vmr story` 内部对同一批文件各跑一次独立扫描（`AnalyzeSessions` 内的 `ctxgraph.Scan` 通道 + 报表自己的 `collect()`/`analyzeFile` 通道），用 goroutine 并发而非合并成一趟 | 合并成单一遍历，两边共享同一份解析结果 | 合并需要把两套本来独立演进的特征提取（`ctxgraph` 的哈希/lineage vs 报表的工具签名/角色统计等）耦合进同一个循环体，代价是架构复杂度；并发跑两条独立通道用 goroutine 就能把"审计文件读两遍"的墙钟代价从翻倍压到大致不变。语料规模涨到需要正视这件事之后，先做的是更小的一步：`ctxgraph.Scan` 那条通道加了文件级哈希缓存（`ScanCached`/`vmr-requests.json`，见 §2.5），文件内容没变就跳过它的解析，`collect()`/`analyzeFile` 通道仍未缓存、仍全量重跑——合并成单一遍历、让 report 直接消费 `ctxgraph.Manifest` 仍是更大的一步，尚未做 |
 | 报表的独立 compaction 文本匹配（`linkCompactions`）与 `ctxgraph` 的结构化缝合（`linkStitchedLineages`）并存，不用后者取代前者 | 统一成一套机制 | 两者覆盖不同场景：结构化缝合基于精确哈希匹配，对"零字面重合的历史重写"没有信号；文本匹配能覆盖这个盲区，代价是精度较低。合并会让报表在最需要它的场景（标准的独立摘要调用）里失去唯一还有效的信号 |
 | `internal/chatmsg` 承接三方（`ctxgraph`/`story`/`report`）共享的消息解析/实体抽取，不各自维护一份 | 各包各自实现 | 曾经真实发生过：`extractEntities` 一度是 `story` 包的私有函数，`report` 需要同样的能力时面临"复制一份"或"下沉"的选择——下沉到两者都已依赖的 `chatmsg`，换来的是以后只有一处规则要维护，不增加任何一方的依赖面 |
 | 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`story` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |

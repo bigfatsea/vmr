@@ -375,6 +375,13 @@ func TestPricingAccumulatesToEndpointAndClient(t *testing.T) {
 	}
 }
 
+// TestWriteRequestsJSONL covers WriteRequestsJSONL as a generic row writer.
+// The only production caller today is vmr-requests-failed.jsonl (see
+// cmd_report.go) — vmr-requests.json, the main per-request export, is
+// WriteRequestsJSON (no "L"), a different function with its own
+// "files" cache section. The filename below is deliberately generic
+// (not vmr-requests-failed.jsonl) so this test doesn't imply the function
+// is single-purpose.
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
@@ -382,7 +389,7 @@ func TestWriteRequestsJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonlPath := filepath.Join(dir, "vmr-requests.jsonl")
+	jsonlPath := filepath.Join(dir, "vmr-requests-failed.jsonl")
 	n, err := WriteRequestsJSONL(rep.RequestRows(), jsonlPath)
 	if err != nil {
 		t.Fatal(err)
@@ -774,9 +781,17 @@ func TestBuildIsDeterministic(t *testing.T) {
 	path := writeTempJSONL(t, dir, tiedAuditRecords())
 
 	const runs = 8
+	// now is captured once, outside the loop, and reused for every run: this
+	// test's whole point is map-iteration-order determinism (see doc
+	// comment above), not wall-clock time — a fresh time.Now() per
+	// iteration would make Meta.GeneratedAt legitimately differ (and the
+	// byte-identical-JSON assertion below legitimately fail) if two calls
+	// happened to straddle a second boundary, which is exactly the kind of
+	// incidental flakiness this test exists to NOT have.
+	now := time.Now()
 	var want []byte
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		rep, _, err := Build([]string{path}, now, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
