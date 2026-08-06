@@ -1,76 +1,81 @@
-<!-- Ver 2026-08-02 20:22, by Gemini 3.6 Flash -->
-<!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative -->
+<!-- Ver 2026-08-06 10:30, by Gemini 3.6 Flash -->
+<!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative, flight recorder, agent audit, request replay -->
 
-# vmr — Virtual Model Router
+# vmr — Zero-Instrumentation Router & Flight Recorder for AI Agents
 
-**The flight recorder for AI agents that run unattended.** vmr sits between your agent and its LLM providers, capturing every request and response byte-for-byte — so when a 3 AM failover, a silent content-policy block, or a lost context window happens, you find out from `vmr report` / `vmr story` afterward, not from a dead session you have to explain to yourself the next morning.
+**vmr** is a single-binary router and flight recorder for AI agents that run unattended. One stable virtual model name (`coding`, `claude`, `agent`) hides every provider, key, and failover rule behind it — point any OpenAI/Anthropic-compatible client's `base_url` at vmr and you're done, **zero SDK modifications or code instrumentation required**.
+
+That same byte-faithfulness — no protocol translation, ever — is what makes the recording trustworthy: nothing vmr logs is something vmr itself rewrote first. Every request becomes a `details/` audit entry, an agent execution narrative (`vmr story`), a cross-run divergence diff (`vmr story -compare`), or an exact 1-click replay (`vmr replay`). When a 3 AM failover or a silent content-block happens, you find out from the log afterward, not from a dead session you have to explain to yourself the next morning.
 
 English | [简体中文](README.zh.md)
 
-One stable virtual model name (`coding`, `claude`, `agent`) hides every provider, account, key, priority, and failover rule behind it — point Claude Code, OpenClaw, or any OpenAI/Anthropic SDK at it and you're done. Byte-faithful passthrough (no protocol translation, ever) isn't the headline feature here — it's *why the recording can be trusted*: nothing vmr logs is something vmr itself rewrote first. **→ [Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** if you're comparing gateways.
-
-## Why vmr
-
-- **Flight-recorder audit log, agent-shaped** — every request recorded as one JSONL line with both layers (client↔vmr, vmr↔upstream), every failover attempt, and the exact normalizations applied. `vmr report` turns the logs into usage/latency/availability statistics — and it understands agent traffic specifically: requests group into sessions → tasks → turns, each turn's delta gets a 🆕 marker, and a tool-usage report tells you which declared tools are never actually called. `vmr story` goes one level deeper: reconstructs a single agent task's full execution history into a readable narrative (what context entered, what the model did with it, where a history-compaction event lost information), plus a rule-derived behavior profile you can diff between two runs. Old days auto-compress to `.zst` (20–75× smaller) and can auto-expire.
-- **Failover that actually fails over** — health tracking with per-error-class cooldowns (rate limit ≠ dead key ≠ content flag ≠ a relay reporting its own forwarding failure), exponential backoff, `Retry-After` respected. Recovery checks always run as a background probe decoupled from real traffic, so one slow or oversized request never blocks concurrent callers waiting on a recovering endpoint. Content-policy rejections switch providers *without* punishing a healthy endpoint.
-- **One name, every provider** — swap and reorder upstreams (MiniMax, DeepSeek, OpenRouter, anything protocol-compatible) in a YAML file, hot-reloaded in seconds, no client changes ever. `base_url` path overlap is auto-eliminated — write it with or without `/v1`, vmr always produces the correct URL.
-- **Byte-faithful passthrough** — no intermediate representation, no protocol translation, ever. Requests and responses match a direct provider call byte-for-byte, headers included, except the virtual↔real model-name rewrite and a couple of guarded, evidence-based provider quirk repairs. Upstream 3xx redirects are passed through untouched (never silently followed). Unknown API parameters pass through untouched — new provider features work the day they ship, with zero vmr changes.
-- **Condition-aware, session-sticky routing** — endpoints declare what they actually support (`capabilities: [image, tools]`, `max_context_tokens`); a request needing something an endpoint doesn't declare skips it, with a built-in fallback so a conservative size estimate can never block a request that would have worked. Multi-turn conversations stay pinned to whichever endpoint's upstream prompt cache is already warm, so smarter routing can't quietly cost you more by switching providers mid-conversation.
-- **True streaming** — SSE events are forwarded as they arrive. The normalizer buffers only when it detects a provider's inline-thinking pathology, and resumes live streaming the moment the thinking block closes.
-- **Three protocols, one router** — native `POST /v1/chat/completions` (OpenAI Chat Completions), `POST /v1/messages` (Anthropic Messages), and `POST /v1/responses` (OpenAI Responses) ingress, each routed strictly within its own protocol family. No lossy cross-protocol translation — that's a feature, not a gap.
-- **Vision-token diet (optional)** — downscale oversized inline image attachments on the way in; off by default, fail-open, content-hash cached on disk so the same image is never reprocessed.
-- **Unix-style tool** — one binary, zero database, zero web UI, zero runtime plugins. Config validation refuses to boot (or hot-load) a broken config. Four direct dependencies, full list in `go.mod`.
-- **Measured, not assumed** — load-tested at up to 150 req/s: sub-10ms p95 routing/passthrough overhead on 10 of 12 tested scenarios; the only real cost is optional image downscaling. See [`loadtest/`](loadtest/).
+[ Quick Start ](#quick-start) | [ User Guide ](docs/UserGuide.md) | [ Why vmr vs LiteLLM ](docs/Why_vmr_over_LiteLLM.md)
 
 ```
-OpenAI client        ──(/v1/chat/completions)──┐       ┌─> MiniMax / DeepSeek / OpenRouter (OpenAI face)
-Anthropic client     ──(/v1/messages)──────────┼─ vmr ─┼─> MiniMax / DeepSeek / OpenRouter (Anthropic face)
-OpenAI Responses SDK ──(/v1/responses)─────────┘       └─> DeepSeek / OpenRouter (Responses face)
-                                                            failure/cooldown → next endpoint in order
+[ Agent App / SDK ] ──(Zero Instrumentation)──> [ vmr Router ] ──(Passthrough)──> [ LLM Providers ]
+                                                      │
+                                           (Byte-Faithful Audit)
+                                                      │
+                       ┌──────────────────────────────┼──────────────────────────────┐
+                       ▼                              ▼                              ▼
+             [ 1-Click Replay ]             [ vmr report / details ]        [ vmr story / compare ]
 ```
 
-## What it looks like
+## See It in Action
 
-This is real output, not a mockup — from a tiny synthetic session checked into [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl). Run it yourself:
-
-```bash
-./vmr report -o /tmp/vmr-example examples/sample-audit.jsonl
-./vmr story  -o /tmp/vmr-example examples/sample-audit.jsonl
-```
-
-**A failover, caught in the act.** The primary endpoint silently content-blocks the request; vmr retries the same request on the backup endpoint, and the client only ever sees a normal 200. This is `details/*.md`, one file per request:
+### 1. In-Flight Failover Evidence (`details/*.md`)
+Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) — run `./vmr report -o /tmp/out examples/sample-audit.jsonl` and compare. The primary endpoint silently content-blocks the request; vmr retries the same payload on the backup endpoint, so the client only sees a 200 OK:
 
 ```
-### Attempt 1/2 · openai:coder-primary:coder-large · ❌ · HTTP 403 · 900ms
+### Attempt 1/2 · openai:coder-primary:coder-large · ❌ HTTP 403
+{"error": {"code": "content_flagged", "message": "This request was flagged by our safety guardrail and blocked.", "type": "guardrail_blocked"}}
 
-❌ **error**: content
-
-response body (137B):
-{
-  "error": {
-    "code": "content_flagged",
-    "message": "This request was flagged by our safety guardrail and blocked.",
-    "type": "guardrail_blocked"
-  }
-}
-
-### Attempt 2/2 · openai:coder-backup:coder-large-mini · ✅ · HTTP 200 · 2.5s
+### Attempt 2/2 · openai:coder-backup:coder-large-mini · ✅ HTTP 200 (2.5s)
 ```
 
-**The aggregate view**, `vmr-report.md`:
+### 2. Agent Execution Narrative & Context Loss (`vmr story`)
+What a real multi-tool agent run looks like reconstructed into tasks, steps, and context-compaction boundaries:
 
 ```
-## §0 Summary
-
-| Requests | Success Rate | Billed Input (fresh)⭐ | Cache Efficiency⭐ | p95 Duration |
-|---|---|---|---|---|
-| 5 (fallback 1 / trunc 0) | 100.0% | 730 | 54.0% | 3.4s (n=5 ⚠️low-n) |
-
-**Highlights (auto):**
-- ⚠️ **Endpoint openai:coder-primary:coder-large error rate 20.0/100** (worst), top cause content ×1
+Task 1: Search codebase and outline implementation
+  Step 1: user instruction -> 🆕 3 files inspected -> assistant response
+  --- ⚠️ Context Compaction Boundary: 18.5K tokens -> 4.2K tokens ---
+  Dropped Entities: [internal/core/router.go, https://docs.example.com/api]
 ```
 
-## Quick start
+### 3. Divergence Point & LLM Cause Analysis (`vmr story -compare`)
+Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Claude) pinpoints exactly where and why they parted ways:
+
+```
+⚡ Divergence Point detected at Step 1 (DivergenceHeavy)
+- Journey A: Step 1 used [memory_search, read]
+- Journey B: Step 1 used [web_fetch]
+
+## LLM Interpretation (Model: agent · Divergence Point)
+| Candidate Root Cause | Direct Evidence | Confidence | Suggestion |
+|---|---|---|---|
+| Initial strategy split | Journey A loaded local context; Journey B fetched live web pages | High | Align system prompt instructions for initial tool choice |
+```
+
+## Dual Core Pillars
+
+### Pillar A: In-Flight Transparent Router & Reliability
+- **Zero Instrumentation**: Drop-in proxy via `base_url` — zero code changes or SDK tracing required. Native OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and OpenAI Responses (`/v1/responses`) ingress.
+- **Error-Class Aware Failover**: Smartly retries across backup endpoints for rate-limits, dead keys, or content blocks; background probes handle endpoint recovery without blocking live traffic.
+- **Session-Sticky Prompt Cache Protection**: Pins multi-turn agent conversations to warm upstream prompt caches, preventing routing from inflating token costs.
+- **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes vendor quirk repairs (MiniMax `<think>` stripping, soft-block empty 200 OK detection).
+- **Measured, Not Assumed**: Load-tested to 150 req/s — p95 stays under 10ms for every non-image scenario; the only real per-request cost is optional image downscaling. See [`loadtest/`](loadtest/).
+
+### Pillar B: Post-Flight Audit, Story & Forensic Replay
+- **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency.
+- **1-Click Request Replay (`vmr replay`)**: Re-issue any failed request using exact historical byte payloads to reproduce bugs instantly.
+- **Aggregate Reports (`vmr report`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
+- **Agent Task Narrative (`vmr story`)**: Reconstructs one task's full execution into a Step-by-step story — what context went in, what the model did with it, where a compaction event silently dropped information.
+- **Behavioral Profiling & Divergence Detection (`vmr story -compare`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
+
+## Quick Start
+
+### 1. Installation
 
 ```bash
 # macOS
@@ -87,65 +92,74 @@ go build -o vmr ./cmd/vmr
 ```
 </details>
 
+### 2. Run
+
 ```bash
 cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 ./vmr check -c config.yaml           # validate config, print the routing table
-./vmr start -c config.yaml           # foreground; prints a full config summary
+./vmr start -c config.yaml           # foreground run
 
-# dev mode — quick background run, you supervise (validates first, logs under logs/):
-./vmr.sh start          # also: stop / restart / status / logs
-./vmr.sh ps             # every vmr instance on this machine: port + config + uptime
-./vmr.sh <check|diagnose|report|…>   # any vmr subcommand, forwarded to the binary
+# Or background dev mode via vmr.sh:
+./vmr.sh start          # also: stop / restart / status / logs / ps
 
-# service mode — the OS init system supervises: crash auto-restart + start at login.
-# macOS → launchd user agent; Linux → systemd user unit. `install` renders and
-# registers the unit, and generates ~/.config/vmr/env (0600) from your current
-# shell for every ${VAR} referenced in config.yaml — init systems start with a
-# clean environment and would otherwise see empty keys.
-./vmr.sh service install     # register + start (idempotent; rerun to update)
-./vmr.sh service status      # also: start / stop / restart / logs
-./vmr.sh service uninstall   # stop + unregister
-# Linux: run `loginctl enable-linger $USER` once if the service must survive logout.
+# Or OS init service mode (launchd / systemd):
+./vmr.sh service install     # register + start
 ```
 
-Pick one mode at a time — `service install`/`start` stops a dev-mode process automatically. On macOS the service-mode server log lives at `~/Library/Logs/vmr.log` (TCC keeps launchd file ops off external volumes); the audit log follows the config's `log_dir` as usual.
+### 3. Connect (Zero Code Changes)
 
-Point your client's base URL at vmr and you're done:
+Point your client's base URL at vmr:
 
 ```bash
-# OpenAI-protocol client (OPENAI_BASE_URL=http://127.0.0.1:8800/v1)
-# add -H "Authorization: Bearer <key>" if vmr's own api_keys is set in config.yaml
+# OpenAI protocol
+OPENAI_BASE_URL=http://127.0.0.1:8800/v1
+
+# Anthropic protocol (e.g. Claude Code)
+ANTHROPIC_BASE_URL=http://127.0.0.1:8800
+```
+
+<details>
+<summary>Curl & API Test Examples</summary>
+
+```bash
+# OpenAI Chat Completions
 curl http://127.0.0.1:8800/v1/chat/completions -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 
-# Anthropic-protocol client (e.g. Claude Code: ANTHROPIC_BASE_URL=http://127.0.0.1:8800)
-# Anthropic clients send x-api-key instead of Authorization — vmr accepts either
+# Anthropic Messages
 curl http://127.0.0.1:8800/v1/messages -H "Content-Type: application/json" \
   -H "x-api-key: sk-vmr-local-xxx" \
   -d '{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
 
-# OpenAI Responses-protocol client (client.responses.create(...), or OPENAI_BASE_URL
-# for tools that default to wire_api=responses); requires a provider with a
-# Responses-compatible face configured (protocol: openai-responses)
+# OpenAI Responses
 curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","input":"hi"}'
 
-# List virtual models (same optional api_keys auth as above)
-curl http://127.0.0.1:8800/v1/models -H "Authorization: Bearer sk-vmr-local-xxx"
-
-# Per-endpoint health + concurrency (loopback-only; no api_keys auth required even if configured)
+# Admin Status & Health
 curl http://127.0.0.1:8800/admin/status
 ```
+</details>
 
-That's the whole surface a first request needs. Everything past this point — full config reference, protocol/normalization details, the audit log and report format, image downscaling, the complete CLI — lives in the **[User Guide](docs/UserGuide.md)**.
+Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 
-## Learn more
+## Why vmr vs Translation-Based Gateways
 
-- **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, image downscaling, complete CLI reference.
-- **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** — how byte-faithful passthrough compares to translation-based gateways, and when you'd actually want a translation gateway instead.
-- **Design doc** (Chinese, two parts) — full architecture and every design decision, with the reasoning behind it: [Part 1 — routing core](docs/VirtualModelRouter_Design_v4_Core.md), [Part 2 — `vmr report`/`vmr story`](docs/VirtualModelRouter_Design_v4_Analytics.md).
+| Dimension | Translation Gateways (LiteLLM / Bifrost) | vmr (Router + Flight Recorder) |
+|---|---|---|
+| **Architecture** | Translates everything to OpenAI format | Byte-faithful passthrough (native 3-protocol ingress) |
+| **Setup & Dependencies** | Complex setup, PostgreSQL DB, Web UI | Single binary, zero DB, zero code changes |
+| **Audit Logging** | Metadata / Summarized JSON | Two-layer raw byte audit + 1-click `vmr replay` |
+| **Agent Forensics** | Flat request logs | Task/Step narratives (`vmr story`) & Divergence Diff |
+
+See **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** for a detailed technical comparison.
+
+## Learn More
+
+- **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, complete CLI reference.
+- **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** — detailed architecture and gateway comparison.
+- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md), [Part 2: Analytics & Story](docs/VirtualModelRouter_Design_v4_Analytics.md).
 
 ## Development
 
@@ -153,7 +167,7 @@ That's the whole surface a first request needs. Everything past this point — f
 go test -race ./...
 ```
 
-Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the four-method `Adapter` interface + one blank import in `cmd/vmr/main.go`.
+Adding a provider: OpenAI/Anthropic-compatible vendors are one config entry, zero code. A new protocol = one package under `internal/adapter/<name>/` implementing the `Adapter` interface + one blank import in `cmd/vmr/main.go`.
 
 ## License
 

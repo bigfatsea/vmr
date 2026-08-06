@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-02 13:30, by Sonnet 5 -->
+<!-- Ver 2026-08-06 14:00, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -6,7 +6,35 @@
 
 完整的配置参考、协议行为细节、CLI 说明。如果只是想先跑起来，先看 [README](../README.zh.md) 的快速开始——跑通之后再回来看这份。
 
+## 目录
+
+- [配置](#配置)
+  - [配置文件结构](#配置文件结构)
+  - [启动与热重载检查](#启动与热重载检查)
+  - [单请求内存预算](#单请求内存预算)
+  - [上游代理](#上游代理)
+  - [base_url 与 API 版本号](#base_url-与-api-版本号)
+  - [角色改写 role_map](#角色改写-role_map)
+  - [端点尝试顺序 priority 与 strategy](#端点尝试顺序-priority-与-strategy)
+  - [环境变量](#环境变量)
+- [请求处理与路由](#请求处理与路由)
+  - [透传与归一化](#透传与归一化)
+  - [故障切换与健康](#故障切换与健康)
+  - [条件路由](#条件路由)
+  - [Sticky Model 会话亲和](#sticky-model-会话亲和)
+- [审计与报表](#审计与报表)
+  - [审计日志](#审计日志)
+  - [用量与成本报表 vmr report](#用量与成本报表-vmr-report)
+  - [Agent 任务叙事重建 vmr story](#agent-任务叙事重建-vmr-story)
+- [请求图片自动降采样](#请求图片自动降采样)
+  - [模型级覆盖](#模型级覆盖)
+  - [降采样结果缓存](#降采样结果缓存)
+  - [审计目录和缓存目录到底落在哪](#审计目录和缓存目录到底落在哪)
+- [CLI 与端点参考](#cli-与端点参考)
+
 ## 配置
+
+### 配置文件结构
 
 `providers` 是一个扁平列表——一个账号一条，不管它实际讲两种入口协议（`openai` / `anthropic`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai 协议的候选列表和一条 anthropic 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
 
@@ -26,6 +54,9 @@ listen: 127.0.0.1:8800
 # image_downscale: 512         # 请求内联图片长边像素上限，缺省关闭（可被虚拟模型自身设置覆盖，见下文）
 # image_cache_ttl_days: 7      # 降采样结果缓存的失效期（缺省 7 天）
 # audit_retention_days: 30     # 超过此天数的审计文件自动删除（缺省永久保留）
+# extra_redact_headers:        # 额外需要在审计日志里打码的客户端请求 header 名，处理方式与内置的
+#   - X-Custom-Token            # Authorization/X-Api-Key/Cookie 等列表一致（大小写不敏感）。
+#                                # 缺省/留空不改变任何行为。
 # timeouts:
 #   connect: 10s               # 连接上游
 #   response_header: 120s      # 上游首字节
@@ -56,15 +87,29 @@ models:
 
 全部字段与校验规则见设计文档 Part 1 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
 
-**启动/热重载的合理性告警**：除了上面的严格解析之外，vmr 在每次启动和每次热重载（fsnotify 或 SIGHUP，包括服务管理器自动重启触发的那次）都会顺带跑一遍*操作性*检查——跟 `vmr check`/`vmr diagnose` 打印的是同一套——命中的每一条都会打一行 `WARN config check: ...` 日志。最值得知道的一条：`api_key` 拼错或没导出的 `${ENV_VAR}` 展开成空串在 YAML 层面完全合法，所以加载和热重载都不会报错——这个 provider 下的每个请求会一直 401 到有人发现为止。这个告警是唯一的信号；它从不阻断启动或重载，因为 Check() 发现的问题按定义是"能跑但可能不对"。
+### 启动与热重载检查
 
-**单请求内存预算**：三个各自独立、各自合理的缓冲上限乘起来看：`max_request_body_mb`（缺省 8MB，入站请求体）、响应归一化缓冲（8MB，防止需要缓冲而非直接流式转发时被失控上游撑爆）、审计响应副本（16MB，限制审计记录保留一条响应正文的上限，比归一化缓冲留了更多余量——审计副本被截断丢的是 `vmr report`/`vmr story` 需要的信息本身，不只是"聪明处理"）。三者都是按当下 ~1M-token 上下文窗口（约 3-4MB 字节量）留约 2 倍余量估算出来的，不是拍脑袋的整数。最坏情况大致是三者之和——约 32MB——每个在途请求都可能吃到这么多，还没算上 `bytes.Buffer` 扩容期间的额外开销。`max_concurrency` 缺省不限，所以这个数字唯一的上界就是同时涌进来多少个请求。单用户本地实例上这纯属背景噪音；共享实例上，请把 `max_concurrency` 设成一个具体数字，而不是让这四个数字的乘积保持无界。
+除了严格解析之外，vmr 在每次启动和每次热重载（fsnotify 或 SIGHUP，包括服务管理器自动重启触发的那次）都会顺带跑一遍*操作性*检查——跟 `vmr check`/`vmr diagnose` 打印的是同一套——命中的每一条都会打一行 `WARN config check: ...` 日志。最值得知道的一条：`api_key` 拼错或没导出的 `${ENV_VAR}` 展开成空串在 YAML 层面完全合法，所以加载和热重载都不会报错——这个 provider 下的每个请求会一直 401 到有人发现为止。这个告警是唯一的信号；它从不阻断启动或重载，因为 Check() 发现的问题按定义是"能跑但可能不对"。
 
-**上游代理——只认显式配置，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器**在哪**，本身不会替任何 provider 打开代理。一个 provider 是否真的走代理，完全由它自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，没有全局默认可继承——每个 provider 独立、显式决定）；只有它是 `true` 时，才按 base_url 的 scheme 选用 `https_proxy`/`http_proxy`。**推荐写法**：只给个别需要代理的 provider（通常是海外厂商）写 `proxy: true`，其余不写——单点意图，新增 provider 默认直连，不会被意外牵连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但没配对应的代理地址是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
+### 单请求内存预算
 
-**base_url 必须自带版本号**：vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI Chat Completions 为 `/chat/completions`，Anthropic 为 `/messages`，OpenAI Responses 为 `/responses`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
+三个各自独立、各自合理的缓冲上限乘起来看：`max_request_body_mb`（缺省 8MB，入站请求体）、响应归一化缓冲（8MB，防止需要缓冲而非直接流式转发时被失控上游撑爆）、审计响应副本（16MB，限制审计记录保留一条响应正文的上限，比归一化缓冲留了更多余量——审计副本被截断丢的是 `vmr report`/`vmr story` 需要的信息本身，不只是"聪明处理"）。三者都是按当下 ~1M-token 上下文窗口（约 3-4MB 字节量）留约 2 倍余量估算出来的，不是拍脑袋的整数。最坏情况大致是三者之和——约 32MB——每个在途请求都可能吃到这么多，还没算上 `bytes.Buffer` 扩容期间的额外开销。`max_concurrency` 缺省不限，所以这个数字唯一的上界就是同时涌进来多少个请求。单用户本地实例上这纯属背景噪音；共享实例上，请把 `max_concurrency` 设成一个具体数字，而不是让这四个数字的乘积保持无界。
 
-**`role_map`——按 endpoint-group 做 role 改写**：有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints[]` 的某条 entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 是 `protocol: openai-responses`，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
+### 上游代理
+
+只认显式配置，默认关闭。`http_proxy`/`https_proxy` 只声明代理服务器**在哪**，本身不会替任何 provider 打开代理。一个 provider 是否真的走代理，完全由它自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，没有全局默认可继承——每个 provider 独立、显式决定）；只有它是 `true` 时，才按 base_url 的 scheme 选用 `https_proxy`/`http_proxy`。**推荐写法**：只给个别需要代理的 provider（通常是海外厂商）写 `proxy: true`，其余不写——单点意图，新增 provider 默认直连，不会被意外牵连。**代理环境变量被有意忽略**——隐式旋钮悄悄改变流量走向，最容易被忽略、排障时最难想到；要引用它就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但没配对应的代理地址是校验错误（拒绝加载），不是运行时惊喜。`vmr check` 与启动摘要逐 provider 打印生效代理（凭证掩码）。YAML 1.2 语法：写 `true`/`false`，不能写 `on`/`off`。
+
+### base_url 与 API 版本号
+
+vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把协议的裸路径（OpenAI Chat Completions 为 `/chat/completions`，Anthropic 为 `/messages`，OpenAI Responses 为 `/responses`）拼在 `base_url` 后面，不做任何归一化或重叠检测。所以 `base_url` 必须已经带上该 provider 自己的完整 API 版本号，不管它叫什么：`https://api.example.com/v1`、`https://api.minimaxi.com/anthropic/v1`、`https://ark.example.com/api/coding/v3`。这条规则的原因是：不是所有 provider 的 OpenAI/Anthropic 兼容面都叫 `v1`——比如火山引擎 coding plan 的 OpenAI 端点版本号是 `v3`——所以 vmr 不会替你猜版本号；写错了会立刻在你写的这个 base_url 上报 404，而不是被悄悄"纠正"成别的样子。URL 在配置加载时一次性计算并存入 Endpoint，adapter 直接使用，不在每次请求时构造或归一化 URL。
+
+### 角色改写 role_map
+
+有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints[]` 的某条 entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 是 `protocol: openai-responses`，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
+
+### 端点尝试顺序 priority 与 strategy
+
+`endpoints:` 下每条 entry 都可以写 `priority: N`（整数，缺省 0）；端点按 priority 升序排列后再尝试，打平的情况（最常见——没人去设它）保持配置文件里的原始顺序，因为排序是稳定的。实际用法就是：把端点按你想要的尝试顺序列出来就够了；只有想在不重排列表本身的前提下调整顺序时，才需要显式写 `priority`。`priority` 是虚拟模型 `strategy` 列表里的一个维度（`strategy: [priority]` 是缺省值，截至本文写作时也是唯一实际注册的排序维度——这个列表暂时没有别的可加），所以绝大多数配置都用不上 `strategy`。
 
 ### 环境变量
 
@@ -77,7 +122,9 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 
 目录（`log_dir`/`image_cache_dir`，见下）和代理都是 config 字段，不是环境变量——理由一致：vmr 往哪写、怎么连网络，不该依赖隐式的运行环境。service 模式下，`vmr.sh service install` 会把 config 引用的全部 `${VAR}` 从当前 shell 快照进 `~/.config/vmr/env`（0600，已存在则不覆盖）——不需要再注入任何别的东西，二进制自己读 config。
 
-## 透传与归一化
+## 请求处理与路由
+
+### 透传与归一化
 
 **原则：直连等价**。客户端经 vmr 收到的内容——字节、头部、传输节奏——与直连供应商一致。仅有的偏离：
 
@@ -89,7 +136,7 @@ vmr 涉及的环境变量全部在此——除此之外不读任何环境变量�
 
 正因为透传是字节级的，三个协议任何一侧新增的请求/响应字段都不需要 vmr 改代码就能到达上游或客户端——这正是透传的意义所在。vmr **不做**的事：只路由 `POST /v1/chat/completions`、`POST /v1/messages`、`POST /v1/responses` 三个入口，其他 OpenAI/Anthropic surface（`/v1/realtime`、`/v1/images`、`/v1/audio` 等）不在范围内——这类需求请直接把客户端指向供应商自己的 base URL。`openai-responses` 协议面比另外两个更新、覆盖也更窄：截至本文撰写，只有 DeepSeek 和 OpenRouter 提供了 Responses 兼容端点（MiniMax 尚未支持），且两家都强制无状态——`store: true` 或非空 `previous_response_id` 会被上游直接拒绝，不是 vmr 拦的（vmr 从不检查或剥离客户端字段，只负责路由）。如果你对着一个真支持这些字段的上游使用 `previous_response_id` 或手动回放加密 reasoning item，注意 vmr 的 failover 可能把同一段对话的后续轮次路由到创建那份状态的端点之外——下文的 Sticky Model 能降低这种情况的概率，但不能从结构上根除它。
 
-## 故障切换与健康
+### 故障切换与健康
 
 上游失败即按端点列表顺序逐个尝试，直到成功或全部耗尽（`max_attempts` 可选设上限）。健康完全由失败驱动，按响应逐条分类，确保每次失败既受到匹配的惩罚，也得到正确的"还要不要继续切换"的判断：
 
@@ -105,7 +152,7 @@ probe_timeout: 15s      # 一次后台探测的时间上限
 
 全部候选失败时原样返回最后一次上游错误。流式只在首字节前切换。
 
-## 条件路由
+### 条件路由
 
 同一个虚拟模型背后挂的端点不必是完全等价的。声明每个端点实际支持什么,一条请求需要而某个端点没声明的能力,该端点会被直接跳过——而不是照样把请求打过去,得到一个必然失败的结果:
 
@@ -134,7 +181,7 @@ models:
 
 完整设计与 token 估算的调研依据：`docs/VirtualModelRouter_Design_v4_Core.md`「条件路由」一节。
 
-## Sticky Model（会话亲和）
+### Sticky Model 会话亲和
 
 上游的 prompt cache 是按精确字节前缀匹配的。如果一条多轮 agent 对话在中途被路由到不同端点，上游的缓存就会失效，一次"看起来更合适"的路由选择反而可能让总成本更高——上面的条件路由本身就可能触发这种情况（比如 agent 压缩上下文后，估算出的长度缩小到低于另一个端点声明的上限）。Sticky Model 会把一条对话尽量留在最近一次成功服务过它的端点上：
 
@@ -164,9 +211,11 @@ models:
 
 完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文 `vmr report` 离线会话分组是两套独立实现）：`docs/VirtualModelRouter_Design_v4_Core.md`「Sticky Model」一节。
 
-## 审计日志与用量报表
+## 审计与报表
 
-默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、生效的归一化清单，以及请求内联图片的元数据（格式/宽高/字节数，以及是否触发压缩/是否命中缓存——不论该虚拟模型是否开启了图片压缩，都会采集）。body 一律原样全量记录，不设审计侧截断上限（上面的 `max_request_body_mb` 只管入站请求体大小，与审计记录无关）。每次上游尝试同时携带一个人类可读的 `endpoint` 标签（`protocol:provider:model`）和拆开的三个结构化字段（`protocol`/`provider`/`model`），并在自由文本 `error` 之外新增一个类型化的 `error_class`。凭证掩码默认覆盖 `Authorization`/`X-Api-Key`/`Api-Key`/`X-Auth-Token`/`Cookie`/`Set-Cookie`/`Proxy-Authorization`；如果客户端自己发了一个 vmr 不认识的自定义鉴权 header（如 `X-Custom-Token`），需要配 `extra_redact_headers`（见上文"配置"）才会一并打码，否则会明文落进审计文件。
+### 审计日志
+
+默认开启：每个请求一行 JSONL，双层记录（调用方↔vmr 与每次 vmr↔上游尝试）、凭证掩码、生效的归一化清单，以及请求内联图片的元数据（格式/宽高/字节数，以及是否触发压缩/是否命中缓存——不论该虚拟模型是否开启了图片压缩，都会采集）。body 一律原样全量记录，不设审计侧截断上限（上面的 `max_request_body_mb` 只管入站请求体大小，与审计记录无关）。每次上游尝试同时携带一个人类可读的 `endpoint` 标签（`protocol:provider:model`）和拆开的三个结构化字段（`protocol`/`provider`/`model`），并在自由文本 `error` 之外新增一个类型化的 `error_class`。凭证掩码默认覆盖 `Authorization`/`X-Api-Key`/`Api-Key`/`X-Auth-Token`/`Cookie`/`Set-Cookie`/`Proxy-Authorization`；如果客户端自己发了一个 vmr 不认识的自定义鉴权 header（如 `X-Custom-Token`），需要配 `extra_redact_headers`（见上文[配置文件结构](#配置文件结构)）才会一并打码，否则会明文落进审计文件。
 
 每条记录还带一个 `facts` 对象——vmr 自己对这条请求的路由前判断（`has_image`/`has_tools`/`estimated_tokens`），和路由当时用来选端点的值完全一样，原样落盘，不是事后重新算的。它是这条请求的兄弟字段，不是请求本身的一部分，所以记录下来的请求体依旧对客户端原始请求保持字节忠实。请求在路由开始之前就被拒绝时（鉴权失败、JSON 解析不了）这个字段整体不出现，不是一个全零值的对象。
 
@@ -174,43 +223,80 @@ models:
 ./vmr start -c config.yaml                 # 写入 config 的 log_dir（`vmr check -c config.yaml log` 可核对）
 ./vmr start -c config.yaml -audit=false    # 关闭
 jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
-
-./vmr report "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.json（明文/.zst 混着传也行）
 ```
 
-`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底），Markdown 按九个编号章节组织，每章回答一个运维问题：`§0` 摘要（headline 数字 + 最多 3 条自动亮点——缓存效率低、工具 schema 浪费、端点异常）、`§1` 成本与 Token 经济（缓存命中/fresh/cache_write/reasoning 拆分，按模型缓存效率，按角色的消息字符/预估 token 占比）、`§2` 成本估算（一旦加载了定价配置就渲染，见下文"成本估算与 `pricing.yaml`"；按模型/端点/客户端各一张表，末尾还会原样折叠嵌入本次实际使用的定价配置，让报告的 $ 数字即使在 `pricing.yaml` 之后被改过也能追溯）、`§3` 可靠性（端点可用度/错误率、错误类别拆分，因为 openai/anthropic 两个协议面各自独立路由，两张表都按协议再拆一次，外加每小时错误数图表）、`§4` 延迟与吞吐（按模型、按端点的 ttft/耗时分位数，都按吞吐量降序排列，各自带样本量，n<20 标 `⚠️low-n`）、`§5` 负载分布（按虚拟模型、按工作负载类——交互 vs 定时脚手架——、按端点、按客户端——后两张表还带每请求输入/输出 token 分位数——外加每小时和每日的请求量/输入 token Mermaid 图表）、`§6` 会话与任务（只列 interactive 会话，按 Chat User 分组；单发定时会话改放进请求详单里，见下文）、`§6.5` Sticky 有效性（见下）、`§6.6` 端点性价比（见下）、`§6.7` Compaction 还原（本期每一次独立的历史压缩 LLM 调用：链接到哪个会话、tokens_in→tokens_out、保留比，以及一份规则筛出的被吞掉内容样例——不靠 LLM 判断，只呈现可观察的事实）、`§7` 效率与浪费（自动发现 + 每个声明工具集的完整"已调用/从未调用"明细）、`§8` 指向请求详单的链接。每张表都控制在几列以内；分位数都是每个桶的真值——每个桶在单趟遍历里直接收自己的原始样本、自己算 p50/p95，不做跨桶近似（合并"已经算完的"桶算不出真百分位，因为原始值早被释放了）。`⭐` 标记衍生/预估指标（相对上游原始返回值而言）。每小时/每日活跃度和每小时错误数都用 Mermaid `xychart-beta` 图表渲染。
+### 用量与成本报表 vmr report
+
+```bash
+./vmr report "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.json（明文/.zst 混着传也行）
+./vmr report                                                          # 同上，完全不带 glob——见下文
+```
+
+**大多数情况不需要指定输入文件。** `vmr report` 和 `vmr story` 都接受零个位置参数：完全不写 glob，两者会自己从 `-c config.yaml` 的 `log_dir` 解析出来（`<log_dir>/vmr-audit-*`，明文 `.jsonl` 和压缩过的 `.jsonl.zst` 都能匹配）——只为读这一个字段而加载一次 config。所以对着你正在跑的这个实例做报表，直接 `./vmr report`（或 `./vmr story`）就够了；上面那种 `$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*` 的写法是留给指向*另一个*目录（别的实例的日志、归档的文件集）或自定义 glob 的场景用的。
+
+`vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。
+
+#### 报告章节
+
+Markdown 按九个编号章节组织，每章回答一个运维问题：
+
+- **§0 摘要** —— headline 数字 + 最多 3 条自动亮点（缓存效率低、工具 schema 浪费、端点异常）。
+- **§1 成本与 Token 经济** —— 缓存命中/fresh/cache_write/reasoning 拆分，按模型缓存效率，按角色的消息字符/预估 token 占比。
+- **§2 成本估算** —— 一旦加载了定价配置就渲染（见下文[成本估算与 pricing.yaml](#成本估算与-pricingyaml)）；按模型/端点/客户端各一张表，末尾还会原样折叠嵌入本次实际使用的定价配置，让报告的 $ 数字即使在 `pricing.yaml` 之后被改过也能追溯。
+- **§3 可靠性** —— 端点可用度/错误率、错误类别拆分，因为 openai/anthropic 两个协议面各自独立路由，两张表都按协议再拆一次，外加每小时错误数图表。
+- **§4 延迟与吞吐** —— 按模型、按端点的 ttft/耗时分位数，都按吞吐量降序排列，各自带样本量，n<20 标 `⚠️low-n`。
+- **§5 负载分布** —— 按虚拟模型、按工作负载类（交互 vs 定时脚手架）、按端点、按客户端（后两张表还带每请求输入/输出 token 分位数），外加每小时和每日的请求量/输入 token Mermaid 图表。
+- **§6 会话与任务** —— 只列 interactive 会话，按 Chat User 分组（单发定时会话改放进请求详单里，见下文[索引文件](#索引文件)）。§6.5（Sticky 有效性）和 §6.6（端点性价比）的内容见下文[Agent 感知分析](#agent-感知分析)；§6.7（Compaction 还原）是本期每一次独立历史压缩 LLM 调用的记录：链接到哪个会话、tokens_in→tokens_out、保留比，以及一份规则筛出的被吞掉内容样例（不靠 LLM 判断，只呈现可观察的事实）。
+- **§7 效率与浪费** —— 自动发现 + 每个声明工具集的完整"已调用/从未调用"明细（见下文[Agent 感知分析](#agent-感知分析)）。
+- **§8 请求索引** —— 指向 `vmr-requests.md`（见下文[索引文件](#索引文件)）。
+
+每张表都控制在几列以内；分位数都是每个桶的真值——每个桶在单趟遍历里直接收自己的原始样本、自己算 p50/p95，不做跨桶近似（合并"已经算完的"桶算不出真百分位，因为原始值早被释放了）。`⭐` 标记衍生/预估指标（相对上游原始返回值而言）。每小时/每日活跃度和每小时错误数都用 Mermaid `xychart-beta` 图表渲染。
 
 运行进度写到 stdout，每一行都带 `yyyy-MM-dd HH:mm:ss.SSS` 时间戳，方便看清每个阶段实际花了多久：会话分析最先跑（按输入文件并行处理——在天数多的语料上这是耗时最长的单一阶段——过程本身不打印逐文件的进度行），然后聚合与详单导出合并成一趟：一个文件一行 `[i/N] <path>  done: M records (Ts)`，详单渲染在自己的 worker 池上跑，与喂给它数据的文件扫描并发进行——因为一条记录的详单页面只依赖它自己的内容，跟其他记录累积出来的任何东西都无关。JSON（`vmr-report.json`）是二次开发（图表/Dashboard）的数据源——Markdown 里只展示 Top-5 或做了折叠的明细，JSON 里都是全量。
 
-**成本估算与 `pricing.yaml`。** `-pricing pricing.yaml` 显式指定一份定价配置；不加这个参数时，`vmr report` 会自动读取当前目录下的 `./pricing.yaml`（文件不存在就安静跳过，不报错，也不显示 $ 估算）。价格按"provider+model"配置，跟协议无关——同一个上游账号/模型不管走 vmr 的 openai 面还是 anthropic 面成本都一样，一条规则就够。四个每百万 token 价格字段（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m`——只有第一、三、四个会计入 $ 估算，缓存命中按各厂都当免费处理）既可以写纯数字（用文件顶层的 `currency`），也可以写带货币前缀的字符串（`"USD0.14"`、`"jpy 1.2"`，大小写不敏感，前缀和数字之间的空格可有可无），换算靠顶层的 `exchange_rate` 列表（成对给出等值货币，例如 `{USD: 1, CNY: 7}` 表示 1 美元 = 7 人民币；`USD→EUR→CNY` 这种链式换算即使没有 USD 直连 CNY 的条目也能算出来）。价格用了一个 `exchange_rate` 里没定义、又不是顶层 `currency` 本身的货币符号，是配置加载阶段的报错，不会静默按 0 处理。同一个 provider+model 可以配多条规则，各自用可选的 `date_range: [start, end]`（`"2026-07-01"`，yyyy-MM-dd）和/或 `hour_range: [start, end]`（`"22:00"`，HH:MM——起始晚于结束表示跨过午夜）限定生效时段，用来表达随时段变化的价格（比如低谷折扣、促销窗口）；`vmr report` 按文件里的先后顺序取第一条时间窗口覆盖该请求时间戳的规则，所以更窄/促销性质的窗口要写在它要覆盖的兜底规则前面。完整的、带注释的示例见仓库自带的 `pricing.yaml`。
+#### 成本估算与 pricing.yaml
+
+`-pricing pricing.yaml` 显式指定一份定价配置；不加这个参数时，`vmr report` 会自动读取当前目录下的 `./pricing.yaml`（文件不存在就安静跳过，不报错，也不显示 $ 估算）。价格按"provider+model"配置，跟协议无关——同一个上游账号/模型不管走 vmr 的 openai 面还是 anthropic 面成本都一样，一条规则就够。四个每百万 token 价格字段（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m`——只有第一、三、四个会计入 $ 估算，缓存命中按各厂都当免费处理）既可以写纯数字（用文件顶层的 `currency`），也可以写带货币前缀的字符串（`"USD0.14"`、`"jpy 1.2"`，大小写不敏感，前缀和数字之间的空格可有可无），换算靠顶层的 `exchange_rate` 列表（成对给出等值货币，例如 `{USD: 1, CNY: 7}` 表示 1 美元 = 7 人民币；`USD→EUR→CNY` 这种链式换算即使没有 USD 直连 CNY 的条目也能算出来）。价格用了一个 `exchange_rate` 里没定义、又不是顶层 `currency` 本身的货币符号，是配置加载阶段的报错，不会静默按 0 处理。同一个 provider+model 可以配多条规则，各自用可选的 `date_range: [start, end]`（`"2026-07-01"`，yyyy-MM-dd）和/或 `hour_range: [start, end]`（`"22:00"`，HH:MM——起始晚于结束表示跨过午夜）限定生效时段，用来表达随时段变化的价格（比如低谷折扣、促销窗口）；`vmr report` 按文件里的先后顺序取第一条时间窗口覆盖该请求时间戳的规则，所以更窄/促销性质的窗口要写在它要覆盖的兜底规则前面。完整的、带注释的示例见仓库自带的 `pricing.yaml`。
+
+#### Agent 感知分析
 
 `vmr report` 还能读懂 Agent 工作负载——全部离线、纯规则、不调用 LLM（方法与实证见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"两遍读取：`AnalyzeSessions` + `Build`"一节）：
 
-- **会话 → 任务 → 轮次分组**。每轮重发同一段渐增对话的请求以首条非 system 消息做指纹（Claude Code 的 `metadata.user_id` 存在时优先），按最长公共前缀成链——多个 Agent 会话即使在时间上互相穿插也能干净分开。任务边界来自 Traceparent trace-id 变化与增量中的新用户指令，两个信号互为交叉验证。Compaction 调用被识别并双向链接，会话与其压缩后的续接体串成同一条线程。
+- **会话 → 任务 → 轮次分组。** 每轮重发同一段渐增对话的请求以首条非 system 消息做指纹（Claude Code 的 `metadata.user_id` 存在时优先），按最长公共前缀成链——多个 Agent 会话即使在时间上互相穿插也能干净分开。任务边界来自 Traceparent trace-id 变化与增量中的新用户指令，两个信号互为交叉验证。Compaction 调用被识别并双向链接，会话与其压缩后的续接体串成同一条线程。
 - **`vmr-requests.json`** —— `requests` 字段：每请求一行特征（会话/任务/轮次、trace 与 chat id、请求形态、`heartbeat` 等标签、当轮 tool 调用、finish_reason、"ok 但截断"标志、含 reasoning 的 token 细分、增量大小、最新指令），jq / DuckDB / pandas 直接可用（这之前是逐行一个 JSON 对象的 `vmr-requests.jsonl`，现在合并成单一文档）；外加 `files` 字段——按内容哈希索引的输入文件解析缓存，日志目录大部分没变时，重跑 `vmr report` 能跳过没变文件的重新解析（和 `vmr story` 的 `vmr-stories.json` 是同一套机制，见下文）。
 - **Sticky 有效性（§6.5）⭐** —— Sticky Model 存在的唯一理由是让上游 prompt cache 保温，这一节是它有没有兑现的证据：同一会话内，落回**上一条请求所用端点**的请求 vs 换了端点的请求，比较两组缓存效率。按结果（端点连续性）而非按机制度量，所以 sticky 指针命中却落到一个冷端点照样算切换。会话首条无前驱，计数但不入组；任一组带 usage 的样本 < 20 条时只出表、不下结论。**不解释切换原因**——sticky_ttl 到期、端点冷却、条件路由淘汰、该模型没开 sticky，事后无法区分。再按虚拟模型拆一张表：sticky 是按虚拟模型配的，那才是能动手的粒度。
-
 - **端点性价比（§6.6）⭐** —— 不是"这个端点花了多少钱"（§2 已经答了），而是"单位产出的代价，以及它的失败让你多等了多久"：成本/1M out token、成本/成功请求、失败尝试数、**失败尝试累计墙钟时间**。一个单价便宜但经常失败的端点不便宜，但这在按端点的花费列里看不出来——钱记在最终成功的那一家头上。**只记时间不折算成钱**：失败尝试拿不到 usage，厂商通常也不对失败请求计费，给它标金额会是编造。
-
 - **工具使用报告（§7）** —— 按声明工具集分组：声明的工具 vs **当轮实际调用**的工具（从响应中提取,历史重发绝不重复计数），外加"声明但从未调用"清单——两者都折叠进每个工具集自己的 `<details>` 块（numbered list + 字母序，自然让 `feishu_*` 同前缀聚类，避免 60+ 工具的 schema 撑爆文档）——及其每请求字节成本，为从 Agent 配置里裁掉没用的工具提供直接依据。
+
+#### 逐请求详单
 
 `vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），紧接一段 `VMR 路由前判断`，读上文提到的 `facts` 对象——只列出**实际探测到**的能力（`image`、`tools`，各自渲染成一个反引号包裹的小标签，都没探测到时显示"无"），加预估 token 数——该记录没有 `facts` 时这一段完全不出现，再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（字段缺失的旧格式日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。加 `-details=false` 可关闭详单导出。
 
+#### 索引文件
+
 `vmr-requests.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）是一份纯索引：每个分组一条 `## Chat User: <key> · N 会话 N 任务 N 轮`（或 `## 定时任务 · <class> 单发会话 × N`），带一行摘要引用块和指向该分组自己那份完整详单的链接。真正的 **Chat User → Session → Task → Turn** 展开——每个会话一个 `## sNN · <时间> · N 任务 N 轮` 标题，每个任务一个 `### tNN · <时间> · N 轮` 标题，带首条消息的引用块和轮次表（`轮 / 时间 / msgs / finish / dur / ttft / fresh/cached/out / cache-eff⭐ / 文件`；所有时间戳统一转本机系统默认时区，不管原始记录自带什么时区）——只存在于对应的独立文件里，不会在索引里重复一遍。独立文件的命名：每个真实 `client_key_tag` 对应 `vmr-requests-<tag>.md`，没有标签的会话归到 `vmr-requests-unresolved.md`，每个定时任务类别对应 `vmr-requests-cron-<class>.md`（`heartbeat` 这一个的文件名固定是 `vmr-requests-cron-hartbeat.md`；以后新增的定时任务类别照 `-cron-<class>` 这个模式来）。单发的定时会话（heartbeat/dream_diary——只有一次请求、没有真实来回）不管是哪个客户端发起的，永远归到它对应类别的 cron 文件里，这样一堆近乎重复的轮询请求既不会淹没真实对话，也不会同时出现在两种分组下；轮次数大于一的定时会话（真正的多步 cron 任务）则作为普通会话卡片挂在自己调用方名下。索引文末的 `# 全部请求（时间序）` 依旧是一张不分组的时间序全量表。每一处"文件"列都同时链接到 Markdown 详单和同名的 JSON 详单。
 
-**输出语言。** `vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，跟 `pricing.yaml` 一样从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
+**错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）**：每次 `vmr report` 运行都会额外写一份按时间排序的过滤视图——只包含 `outcome == error`/`canceled`，以及任何"ok 但被截断"的响应——这样排查"到底哪里出了问题"不用先翻过全部成功的请求。纯叠加：不会把这些请求从 `vmr-report.md`、`vmr-requests.md` 或它们所属的会话分组里挪走，只是多了一条过滤后直达同一批记录的路径。`.md` 是人类可读的索引（和 `vmr-requests.md` 各个子文件同一种"一行摘要+链接"格式）；`.jsonl` 是没有会话/任务分组、也没有自己文件缓存段的扁平逐行 dump，给 `jq`/脚本用。
+
+#### 输出语言
+
+`vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，跟 `pricing.yaml` 一样从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
 
 `report.yaml` 不止管语言：`-o`/`-details`/`-include-partial`/`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-cache-dir` 都可以在这份文件里预先写好默认值，同名命令行 flag 显式传了照样优先——完整字段和注释见仓库根目录的 `report.example.yaml`。`llm_key` 可以直接写明文（这份文件已经 `.gitignore`），也可以写成 `${VMR_LLM_KEY}` 这样引用一个已有的环境变量，两种都行；`llm_cache_dir` 没有隐式默认路径，两处（flag、`report.yaml`）都不设就完全不缓存 LLM 调用结果。
 
-**多调用方场景。** 如果一个 vmr 实例被多个调用方共用（队友、另一个 Agent、CI 任务），想在事后统计里把各自的用量分开看，就给每个调用方在 `api_keys` 下各配一把 key（见上文配置），不要多人共用同一把。每个请求会用命中的那把 key 自身的尾部给审计记录打标签（`client_key_tag`，取法见 `KeyTag`：末 8 个字符，若这 8 个字符里有 `-`，只保留最后一个 `-` 之后的部分——所以 key 以 `...-alice` 结尾时标签就读作 `alice`；建议有意义的部分留 ≥3-4 位，太短容易和别的调用方撞标签）。`vmr report` 会自动识别，不需要加参数：每观测到一个不同的标签，就多写一份 `vmr-requests-<tag>.md` 详单（见上文）——同目录下，标签文件里 `details/…` 链接不用做任何调整。`vmr-report.md`/`.json`、`vmr-requests.json` 和 `details/` 本身永远不分组、不重复：单条请求的详单只写一份，与调用方无关；`vmr-requests.json` 永远覆盖全部记录；汇总报告永远覆盖所有人。不配置 `api_keys` 就什么都不会变——不多一个文件，不多一列。完整设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"逐请求详单与索引"一节。
+#### 多调用方场景
+
+如果一个 vmr 实例被多个调用方共用（队友、另一个 Agent、CI 任务），想在事后统计里把各自的用量分开看，就给每个调用方在 `api_keys` 下各配一把 key（见上文[配置文件结构](#配置文件结构)），不要多人共用同一把。每个请求会用命中的那把 key 自身的尾部给审计记录打标签（`client_key_tag`，取法见 `KeyTag`：末 8 个字符，若这 8 个字符里有 `-`，只保留最后一个 `-` 之后的部分——所以 key 以 `...-alice` 结尾时标签就读作 `alice`；建议有意义的部分留 ≥3-4 位，太短容易和别的调用方撞标签）。`vmr report` 会自动识别，不需要加参数：每观测到一个不同的标签，就多写一份 `vmr-requests-<tag>.md` 详单（见上文[索引文件](#索引文件)）——同目录下，标签文件里 `details/…` 链接不用做任何调整。`vmr-report.md`/`.json`、`vmr-requests.json` 和 `details/` 本身永远不分组、不重复：单条请求的详单只写一份，与调用方无关；`vmr-requests.json` 永远覆盖全部记录；汇总报告永远覆盖所有人。不配置 `api_keys` 就什么都不会变——不多一个文件，不多一列。完整设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的"逐请求详单与索引"一节。
 
 纯内网、根本不想要真实鉴权？`api_keys` 不配置——门照样完全敞开——但客户端自愿发来的任意 Authorization/x-api-key 值依旧会走同一套标签提取逻辑并记录下来，vmr 侧不需要配置任何东西：每个客户端自己把发出去的值末尾带上 `-<标签>` 即可对 `vmr report` 自报家门。这个模式下没有 16 字符下限（本来就不是要保护的秘钥）；什么都不发的客户端依旧是未打标签的记录。
 
+#### 保留期与压缩
+
 Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日志动辄几个 GB——而且这种冗余主要出现在**行与行之间**，不是单行内部。每天的日志文件一旦不再是"今天"就自动轮转压缩：用 zstd 压缩整个文件（而不是逐行压缩）才能吃到跨行的重复内容，实测压缩比 20~75 倍——这是逐条记录单独压缩根本达不到的量级，因为单条记录看不到上一轮几乎重复的请求体。`vmr report` 对 `.jsonl` 和 `.jsonl.zst` 一视同仁，通配符同时覆盖两者即可。设置 `audit_retention_days` 还能让过期文件自动删除（缺省永久保留，不设置不会删任何东西）；压缩和清理都只看文件名里的日期，不需要扫描或逐个 `stat` 整个日志目录。背后的实测数据和方案取舍见设计文档 Part 1 §9.5。
 
-**不要让两个 vmr 实例共用同一个 `log_dir`。** 每个实例的housekeeping 清扫只靠文件名里的日期判断"这份日志今天写完了"（可以压缩，过了保留期还能删）——它没有办法知道另一个进程是不是还在往同一个文件里追加。两个实例共用 `log_dir` 又都跨过了午夜，才会踩到这个坑：实例 A 轮转到今天的文件，看到昨天的文件已经"写完"，于是压缩、删除——而实例 B（还停在昨天的日期，或者轮转得慢一点）还在往那个已经被删除的 inode 里写。给每个实例（包括为了测试临时起的第二个 checkout）都配一个独立的 `log_dir`。
+**不要让两个 vmr 实例共用同一个 `log_dir`。** 每个实例的 housekeeping 清扫只靠文件名里的日期判断"这份日志今天写完了"（可以压缩，过了保留期还能删）——它没有办法知道另一个进程是不是还在往同一个文件里追加。两个实例共用 `log_dir` 又都跨过了午夜，才会踩到这个坑：实例 A 轮转到今天的文件，看到昨天的文件已经"写完"，于是压缩、删除——而实例 B（还停在昨天的日期，或者轮转得慢一点）还在往那个已经被删除的 inode 里写。给每个实例（包括为了测试临时起的第二个 checkout）都配一个独立的 `log_dir`。
 
-## Agent 任务叙事重建（`vmr story`）
+### Agent 任务叙事重建 vmr story
 
 `vmr report` 回答的是"这段时间总共花了多少、整体怎么样"；`vmr story` 读的是同一份审计 JSONL，但回答的是"这一个任务具体发生了什么，一步一步地看"——它把单次 Agent 任务的完整执行过程重建成上下文演化过程：每一轮进了什么新内容、模型拿它做了什么，以及（如果发生过）一次历史压缩具体丢了什么。
 
@@ -222,6 +308,7 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
     "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"                   # 批量渲染两个模式各自匹配到的全部候选
 ./vmr story -render-all "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # 一次批量渲染全部候选
 ./vmr story -corpus "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"       # 跨全部候选的语料级统计
+./vmr story                                                                       # 和 vmr report 一样的文件解析捷径——不用写 glob
 ```
 
 不带 `-journey` 时列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个传给 `-journey`。`-journey` 接受逗号分隔的多个 token，每个 token 要么是 id/id 前缀，要么是匹配完整 id 的 shell 风格通配符（`*`、`?`、`[...]`）——通配符记得在 shell 里加引号，避免被 shell 自己展开。选择器只解出一个 journey 时直接渲染（也是唯一支持 `-llm-addr` 的形式）；解出不止一个时走 `-render-all` 同一条批处理路径，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/stories/journey-<id>.md`（叙事正文）与 `journey-<id>.json`（同一任务的行为剖面，见下文）——权限与 `details/` 一致（0600/0700），两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
@@ -230,17 +317,29 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
 
 如果一个任务自己的开头看起来像是在续接一段本次没有加载进来的更早历史（表现为：真实的多轮开场恰好出现在你最早那个输入文件的最开头），默认会跳过——它的 id 在不同的文件加载范围下不保证稳定。加 `-include-partial` 可以照样渲染，文件名会带上 `-partial` 后缀，提醒你这个 id 换一批输入文件可能会变。
 
-**怎么读这份叙事**：每个任务按用户指令切成若干轮（`Step`）分组归入对应的任务（`Task`）。每一轮把 **Messages**（这一轮新进入上下文的内容）与 **LLM Response**（模型自己产出的内容——推理块、回复文本、每个工具调用的完整参数）分开展示，"Agent 拿到了什么"和"Agent 决定做什么"不会混进同一份笼统的历史视图里。一次历史压缩事件（靠结构判断，不是靠认某个特定 Agent 框架的标记文本——原因见设计文档）会渲染成一段带标注的边界：压缩前后的 token 数，以及压缩前提到过的文件路径/URL 里，哪些在压缩之后再也没被提到过。这里的每一个数字都能追溯回某次请求自己记录的 usage，每一条"被吞掉"的判断也都是一次可以自己打开原文核对的简单字符串比对——不是猜出来的。
+#### 怎么读这份叙事
 
-**决策脊柱与疑似问题**：完整逐轮叙事之前，每个渲染出来的 Journey 会先给一张概览卡（起始/首个错误标记/首个转折点/结束时间，加上"工具密集型""重试多"这类基于阈值的粗分类标签）和一条决策脊柱——按 Task 分组、只列工具调用（工具名 + 参数摘要）的紧凑列表，命中规则检测器的调用打 ⚠️。每个 `Step` 标题也会带一个角色标签（🔧执行 / 📋规划 / 💬汇报 / 👀观察 / 🔄重试 / ⚠️错误 / 🧹压缩），有工具调用的 Journey 末尾还会附一张 ASCII 工具调用时序图（每个工具一行、每个 Step 一列），用于发现线性阅读容易漏掉的重试密集模式。**疑似问题**小节列出这些规则检测器的实际命中——九个零 LLM 成本、纯字符串/结构匹配的检测（同一工具调用重复出现、只叙述不动手、错误后未经复核就当成功、推理里提到的东西下一次工具调用没碰、宣告的计划后续条目没被执行、重试参数和出错那次一字不差、工具结果里的实体后续再没被提及、结果看起来像失败但引用还在延续、以及压缩边界悄悄丢掉的约束文本）。每条 Finding 都写成"检测到疑似 N 次，建议人工复核"，不是判决——是给人看的候选清单，不是自动化的根因结论。
+每个任务按用户指令切成若干轮（`Step`）分组归入对应的任务（`Task`）。每一轮把 **Messages**（这一轮新进入上下文的内容）与 **LLM Response**（模型自己产出的内容——推理块、回复文本、每个工具调用的完整参数）分开展示，"Agent 拿到了什么"和"Agent 决定做什么"不会混进同一份笼统的历史视图里。一次历史压缩事件（靠结构判断，不是靠认某个特定 Agent 框架的标记文本——原因见设计文档）会渲染成一段带标注的边界：压缩前后的 token 数，以及压缩前提到过的文件路径/URL 里，哪些在压缩之后再也没被提到过。这里的每一个数字都能追溯回某次请求自己记录的 usage，每一条"被吞掉"的判断也都是一次可以自己打开原文核对的简单字符串比对——不是猜出来的。
 
-**行为剖面**（`journey-<id>.json`，与 `.md` 同时写出）：九项规则派生、零 LLM 成本的指标——模型时间/Agent 侧执行时间/人类空闲时间的三分解、工具调用分布、重复动作率、错误恢复次数、计划/执行比、上下文构成演化曲线（每一轮请求体里各角色 token 占比,让上下文预算的构成随任务推进的变化可见）、上下文有效利用率（进入上下文的内容有多少后来真的被再次引用过）、compaction 次数与信息损失。不管背后是 Claude Code、OpenClaw 还是别的框架，这套数字定义都一样——能横向对比不同 Agent 框架正是收集它们的初衷。
+#### 决策脊柱与疑似问题
 
-**对比两个任务**：`-compare <id1,id2>` 直接对比两个任务的行为剖面（不需要先分别 `-journey` 渲染），产物是 `compare-<id1>-vs-<id2>.md` + `.json`，与单任务的文件放在同一目录。每一行都同时展示两侧的值和相对变化，差异大到超过固定阈值时打 ⚠️ 标记（规则化判定，不是主观判断）——适合回答"换了 Agent 框架/prompt 之后，这个任务的完成方式到底有没有变"这类问题。报告里还包含以下同样零 LLM 成本的规则事实：双方各自用到的端点、逐轮 Prompt 缓存命中率曲线、双方 system prompt 的规模与稳定性（含有边界的节选，默认前 2 万字符——够覆盖两侧真实验证用例里"加载了哪些项目上下文文件"这类声明在原文中出现的位置，但仍是从开头截断的一段前缀，不保证覆盖任意长度 system prompt 的全部信息量）、末轮上下文按角色的构成、总耗时（紧邻已有的"净工作时长"一起展示，不单独当效率指标看）、双方的终止方式，以及——如果任务产出是通过一次"参数形状像文件写入"的工具调用落盘的——双方最终交付物本身的内容节选。两个开场可比的 Journey（同一任务、换了 prompt/模型/框架重跑）还会得到一个规则派生的**分叉点**：两侧工具使用结构第一次出现差异的位置（换了工具，或同一工具但参数不同），标轻度或重度。这只是一个结构事实——"从这里开始不一样了"——不对哪一方更好或为什么下判断，渲染出来的报告里也会明确带一句免责声明。报告末尾的"证据溯源"小节列出本次对比实际读取的源审计文件路径，方便独立核对。
+完整逐轮叙事之前，每个渲染出来的 Journey 会先给一张概览卡（起始/首个错误标记/首个转折点/结束时间，加上"工具密集型""重试多"这类基于阈值的粗分类标签）和一条决策脊柱——按 Task 分组、只列工具调用（工具名 + 参数摘要）的紧凑列表，命中规则检测器的调用打 ⚠️。每个 `Step` 标题也会带一个角色标签（🔧执行 / 📋规划 / 💬汇报 / 👀观察 / 🔄重试 / ⚠️错误 / 🧹压缩），有工具调用的 Journey 末尾还会附一张 ASCII 工具调用时序图（每个工具一行、每个 Step 一列），用于发现线性阅读容易漏掉的重试密集模式。**疑似问题**小节列出这些规则检测器的实际命中——九个零 LLM 成本、纯字符串/结构匹配的检测（同一工具调用重复出现、只叙述不动手、错误后未经复核就当成功、推理里提到的东西下一次工具调用没碰、宣告的计划后续条目没被执行、重试参数和出错那次一字不差、工具结果里的实体后续再没被提及、结果看起来像失败但引用还在延续、以及压缩边界悄悄丢掉的约束文本）。每条 Finding 都写成"检测到疑似 N 次，建议人工复核"，不是判决——是给人看的候选清单，不是自动化的根因结论。
 
-**语料级统计**：`-corpus` 把 `-compare` 的"两个 Journey"对比扩展成"输入文件里找到的每一个候选 Journey"——指标分布（`-compare` 对比的十二项行为剖面数值各自的均值/中位数/最小/最大/p90）、Finding 命中率、指标两两之间的 Spearman 秩相关（只报效应量，不报 p 值——当前语料规模撑不住严格的显著性检验）、以及 Finding 分组比较（命中某个 Finding 的 Journey vs 未命中的，比较净工作时长中位数）。产物落在 `{out}/stories/vmr-story-corpus.md`/`.json`，复用 `-render-all` 同一套批量文件扫描。和 `-compare` 一样，不带任何成功/失败标签——VMR 没有任务是否真正完成的信号，只有耗时这类规则派生的代理指标。`-corpus` 不接受 `-journey`/`-render-all`/`-compare`/`-llm-addr`。
+#### 行为剖面
 
-**可选的 LLM 解读小节**：加上 `-llm-addr host:port -llm-model name`（一个已经在跑的 VMR 实例的地址和它暴露的虚拟模型名——不会自动拉起该实例；如果那台实例配置了鉴权还需要 `-llm-key`），可以在只解出一个 journey 的 `-journey` 或 `-compare` 上（不支持 `-render-all`/`-corpus`，也不支持解出不止一个 journey 的 `-journey` 选择器——那样每个 Journey 都要各打一次 LLM 调用，这笔费用必须按次显式开启）追加一段明确标注、完全可选的解读。在 `-journey` 上，它对该 Journey 自己的疑似问题清单做优先级排序和串联解读（不会凭空发现清单之外的新问题，除非明确标注这是模型自己的阅读判断），外加对逐轮工具调用序列的叙述性解读。在 `-compare` 上，是一句话结论、一张"候选根因 | 直接证据 | 置信度（高/中/低）| 改进建议"表 + 一句话因果链、对逐轮工具调用序列的叙述性解读、以及一段"VMR 看不到什么"的诚实声明——如果定位到了分叉点，还会追加第二次、单独缓存的调用，只解读*为什么*两侧可能在这里分道扬镳（标置信度的推测，绝不判断哪一方更好）。置信度分档写死在 prompt 里：只有能在证据表或原文节选里指认出具体证据的候选才能标"高"，仅凭排除法/直觉的必须诚实标"低"（但仍会列出，不会因为不确定就不提）。喂给模型的只有上面的规则事实，加上有边界的原文节选，不是完整对话正文，且 prompt 明确要求不得编造给定证据之外的数字，"节选里没提到"也不能被模型当成"确实不存在"来断言。加 `-llm-dry-run` 只打印证据包大小估算并退出，不实际调用。结果会缓存在 `stories/.llm-cache/` 下（key 同时包含 journey id、证据内容与所用模型——换 `-llm-model` 不会误用别的模型的缓存结果）；任何失败（地址不可达、非 2xx 等）只会跳过这一节并打印警告，报告的其余部分不受影响。
+`journey-<id>.json`，与 `.md` 同时写出：九项规则派生、零 LLM 成本的指标——模型时间/Agent 侧执行时间/人类空闲时间的三分解、工具调用分布、重复动作率、错误恢复次数、计划/执行比、上下文构成演化曲线（每一轮请求体里各角色 token 占比,让上下文预算的构成随任务推进的变化可见）、上下文有效利用率（进入上下文的内容有多少后来真的被再次引用过）、compaction 次数与信息损失。不管背后是 Claude Code、OpenClaw 还是别的框架，这套数字定义都一样——能横向对比不同 Agent 框架正是收集它们的初衷。
+
+#### 对比两个任务
+
+`-compare <id1,id2>` 直接对比两个任务的行为剖面（不需要先分别 `-journey` 渲染），产物是 `compare-<id1>-vs-<id2>.md` + `.json`，与单任务的文件放在同一目录。每一行都同时展示两侧的值和相对变化，差异大到超过固定阈值时打 ⚠️ 标记（规则化判定，不是主观判断）——适合回答"换了 Agent 框架/prompt 之后，这个任务的完成方式到底有没有变"这类问题。报告里还包含以下同样零 LLM 成本的规则事实：双方各自用到的端点、逐轮 Prompt 缓存命中率曲线、双方 system prompt 的规模与稳定性（含有边界的节选，默认前 2 万字符——够覆盖两侧真实验证用例里"加载了哪些项目上下文文件"这类声明在原文中出现的位置，但仍是从开头截断的一段前缀，不保证覆盖任意长度 system prompt 的全部信息量）、末轮上下文按角色的构成、总耗时（紧邻已有的"净工作时长"一起展示，不单独当效率指标看）、双方的终止方式，以及——如果任务产出是通过一次"参数形状像文件写入"的工具调用落盘的——双方最终交付物本身的内容节选。两个开场可比的 Journey（同一任务、换了 prompt/模型/框架重跑）还会得到一个规则派生的**分叉点**：两侧工具使用结构第一次出现差异的位置（换了工具，或同一工具但参数不同），标轻度或重度。这只是一个结构事实——"从这里开始不一样了"——不对哪一方更好或为什么下判断，渲染出来的报告里也会明确带一句免责声明。报告末尾的"证据溯源"小节列出本次对比实际读取的源审计文件路径，方便独立核对。
+
+#### 语料级统计
+
+`-corpus` 把 `-compare` 的"两个 Journey"对比扩展成"输入文件里找到的每一个候选 Journey"——指标分布（`-compare` 对比的十二项行为剖面数值各自的均值/中位数/最小/最大/p90）、Finding 命中率、指标两两之间的 Spearman 秩相关（只报效应量，不报 p 值——当前语料规模撑不住严格的显著性检验）、以及 Finding 分组比较（命中某个 Finding 的 Journey vs 未命中的，比较净工作时长中位数）。产物落在 `{out}/stories/vmr-story-corpus.md`/`.json`，复用 `-render-all` 同一套批量文件扫描。和 `-compare` 一样，不带任何成功/失败标签——VMR 没有任务是否真正完成的信号，只有耗时这类规则派生的代理指标。`-corpus` 不接受 `-journey`/`-render-all`/`-compare`/`-llm-addr`。
+
+#### 可选的 LLM 解读小节
+
+加上 `-llm-addr host:port -llm-model name`（一个已经在跑的 VMR 实例的地址和它暴露的虚拟模型名——不会自动拉起该实例；如果那台实例配置了鉴权还需要 `-llm-key`），可以在只解出一个 journey 的 `-journey` 或 `-compare` 上（不支持 `-render-all`/`-corpus`，也不支持解出不止一个 journey 的 `-journey` 选择器——那样每个 Journey 都要各打一次 LLM 调用，这笔费用必须按次显式开启）追加一段明确标注、完全可选的解读。在 `-journey` 上，它对该 Journey 自己的疑似问题清单做优先级排序和串联解读（不会凭空发现清单之外的新问题，除非明确标注这是模型自己的阅读判断），外加对逐轮工具调用序列的叙述性解读。在 `-compare` 上，是一句话结论、一张"候选根因 | 直接证据 | 置信度（高/中/低）| 改进建议"表 + 一句话因果链、对逐轮工具调用序列的叙述性解读、以及一段"VMR 看不到什么"的诚实声明——如果定位到了分叉点，还会追加第二次、单独缓存的调用，只解读*为什么*两侧可能在这里分道扬镳（标置信度的推测，绝不判断哪一方更好）。置信度分档写死在 prompt 里：只有能在证据表或原文节选里指认出具体证据的候选才能标"高"，仅凭排除法/直觉的必须诚实标"低"（但仍会列出，不会因为不确定就不提）。喂给模型的只有上面的规则事实，加上有边界的原文节选，不是完整对话正文，且 prompt 明确要求不得编造给定证据之外的数字，"节选里没提到"也不能被模型当成"确实不存在"来断言。加 `-llm-dry-run` 只打印证据包大小估算并退出，不实际调用。结果会缓存在 `stories/.llm-cache/` 下（key 同时包含 journey id、证据内容与所用模型——换 `-llm-model` 不会误用别的模型的缓存结果）；任何失败（地址不可达、非 2xx 等）只会跳过这一节并打印警告，报告的其余部分不受影响。
 
 完整设计（背后的内容寻址模型、lineage/compaction 检测原理、九项行为剖面指标、已知盲区）：`docs/VirtualModelRouter_Design_v4_Analytics.md`。
 
@@ -263,11 +362,17 @@ models:
     endpoints: [...]
 ```
 
-**模型级覆盖**：每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
+### 模型级覆盖
 
-**降采样结果缓存**：同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）缓存到磁盘。缓存 key 是**内容哈希 + 目标尺寸**——文件名为 `<原始字节的 sha256>-<maxPx>.jpg`，所以同一张图降到 512px 和 256px（不同模型的不同覆盖值）是两个互相独立的条目，绝不会串（目录取配置项 `image_cache_dir`，见下）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
+每个 virtual model 都可以设置自己的 `image_downscale`，优先级高于全局值；不写则继承全局设置。`image_downscale: 0` 在模型层面是一个明确的"关闭"指令，即使全局开着也照样关——因为"没写"和"写了 0"含义不同（前者继承，后者强制关闭）。
 
-**审计目录和缓存目录到底落在哪**：两者都是 config 字段——
+### 降采样结果缓存
+
+同一张原始图片、同一个目标像素上限，第一次处理后会把结果（JPEG 字节）缓存到磁盘。缓存 key 是**内容哈希 + 目标尺寸**——文件名为 `<原始字节的 sha256>-<maxPx>.jpg`，所以同一张图降到 512px 和 256px（不同模型的不同覆盖值）是两个互相独立的条目，绝不会串（目录取配置项 `image_cache_dir`，见下）。后续请求命中同一张图片时直接复用缓存字节，不再重新解码/缩放/编码。这带来两个好处：省 CPU（agent 场景每轮都会把完整对话历史连同图片重发一遍），以及避免破坏上游的 prompt cache——上游的缓存是按精确字节/token 匹配的，同一张图片如果每次都重新编码，输出字节可能有细微差异，足以让上游缓存失效；用缓存后的完全相同字节，上游缓存才能命中。缓存条目按"最近一次被命中"的时间做 TTL 淘汰（`image_cache_ttl_days`，缺省 7 天；命中会刷新计时，长对话里反复引用的图片不会被提前清掉），淘汰扫描搭在缓存目录访问上触发，不额外起定时器。
+
+### 审计目录和缓存目录到底落在哪
+
+两者都是 config 字段——
 
 ```yaml
 # log_dir: ~/.vmr/logs                  # 审计 JSONL 目录；有设置就原样使用（~/ 会展开）；改动需要重启才生效
@@ -276,7 +381,7 @@ models:
 
 ——有设置就原样使用（开头的 `~/` 展开为 home 目录），否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，会静默删掉审计数据——而它是 `vmr report` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr check -c config.yaml log` / `vmr check -c config.yaml cache`（不带参数的 `vmr check` 与启动摘要也会打印），不用真的启动服务。`vmr.sh` 只查询 `vmr check log` 来定位 server log 落点，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。两个目录都没有对应的环境变量——想从环境注入，在 `log_dir`/`image_cache_dir` 里显式写 `${VAR}` 即可。
 
-## 端点与 CLI
+## CLI 与端点参考
 
 | 端点/命令 | 作用 |
 | --- | --- |
@@ -284,19 +389,19 @@ models:
 | `POST /v1/messages` | Anthropic Messages 协议入口（流式 + 非流式） |
 | `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要一条 `protocol: openai-responses` 的端点 |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
-| `GET /admin/status` | 端点健康 + 并发指标，含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback） |
+| `GET /admin/status` | 进程身份（pid/listen/版本/配置路径/uptime）、配置是否过期的判定、热重载结果、逐端点健康、Sticky Model 注册表大小，以及并发指标，含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback）——下文的 `vmr status` 是这份数据的 CLI 前端 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] <glob>` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文"输出语言"）可切换成中文 |
-| `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] <glob>` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见下文"Agent 任务叙事重建"）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致 |
+| `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文 |
+| `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
 | `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/admin/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
-| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh report …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**（`report` 没有 `-c`，不补）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
+| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh report …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`replay`/`report`/`story` 都算——`report`/`story` 也在内，因为不给 glob 时两者都要靠它解析 `log_dir`，见上文"大多数情况不需要指定输入文件"）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
 
 经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=sticky|order`、`eligible=N/M`，以及真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
 
