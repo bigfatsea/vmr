@@ -46,12 +46,39 @@
 
 ---
 
-## 2. 市场调研：套餐的真实形态
+## 2. 套餐的形态分类
 
-**完整事实依据见 `docs/TokenPlan_Market_Reference.md`**（81 个在售套餐的结构化快照，
-原始数据留档在 `docs/data/tokenplan-market-plans-2026-07-26.json`）。本节只摘取直接驱动设计的结论。
+> **本节只做分类，不记录"哪家用哪种"。** 具体厂商用什么计量、什么额度、什么折扣，是**配置阶段的数据**，
+> 不是设计阶段的输入——它churn 得很快（同一家厂商的新旧两代套餐就可能从次数制换成 Token 制），
+> 写进设计文档只会变成一条读起来权威、实际过期的断言。
+> 实例数据全部留在 `docs/TokenPlan_Market_Reference.md`（81 个在售套餐的结构化快照 +
+> 原始 JSON 留档），本节只引用它的**统计结论**——因为统计分布才是驱动设计的证据。
 
-### 2.1 计量单位分布（在售 81 个套餐）
+### 2.1 三个正交维度
+
+任何一个套餐都可以由三个维度描述，它们**互相独立、可自由组合**：
+
+| 维度 | 取值 |
+|---|---|
+| **计量单位** | 次数（requests） / Token 总量 / 金额或 Credits |
+| **限额窗口** | 单层 或 多层并存；每层各有长度（数小时～数月）、锚点、以及固定重置 or 滚动 |
+| **折算规则** | 无 / 按模型的倍率 / 按 token 分量的不同比例 / 两者兼有 |
+
+把它们组合起来，实际市场上稳定出现的是这几类（后文一律用类型代号，不点名厂商）：
+
+| 类型 | 计量 | 窗口 | 折算 |
+|---|---|---|---|
+| **A** | 次数 | 多层并存（时/周/月） | 无 |
+| **B** | 次数 | 滚动短窗 + 固定长窗 | 按模型倍率 |
+| **C** | Token 总量 | 单层 | 无 |
+| **D** | Token 总量 | 多层并存 | 按模型倍率 + 分量比例 |
+| **E** | 金额 / Credits | 单层 | 按模型的分量费率 + 账号折扣 |
+| **F** | 金额 / Credits | 多层并存 | 同 E |
+| **—** | 纯按量计费端点 | 无限额 | — |
+
+### 2.2 统计分布（在售 81 个套餐）
+
+这些数字才是设计决策的依据，因此保留在本文：
 
 | 分类 | 数量 | 占比 |
 |---|---|---|
@@ -60,62 +87,39 @@
 | 仅 Token 限额 | 44 | 54% |
 | 仅请求数限额 | 14 | 17% |
 | **两者并存** | 18 | **22%** |
+| 两者都无 / 都未公开 | 5 | 6% |
 
-| 类型 | 数量 | 有请求限额 | 有 Token 限额 |
+| 套餐大类 | 数量 | 有请求限额 | 有 Token 限额 |
 |---|---|---|---|
-| **Coding Plan** | 31（38%） | 23（**74%**） | 15（48%） |
-| **Token Plan** | 50（**62%**） | 9（18%） | 47（**94%**） |
+| Coding Plan | 31（38%） | 23（**74%**） | 15（48%） |
+| Token Plan | 50（**62%**） | 9（18%） | 47（**94%**） |
 
-### 2.2 五条结论，每条都直接改变设计
+### 2.3 五条驱动设计的结论
 
-1. **Token 是整体主流口径，不是 requests。** "国内套餐以次数计量为主"只在 Coding Plan 这个
-   38% 的子集内成立；数量更多的 Token Plan 有 94% 按 Token/Credits 计量。而且市场正从
-   Coding Plan 向 Token Plan 收缩，这个方向只会让 Token 口径的占比继续上升。
-2. **22% 的套餐同时受两种 metric 约束**，所以"选一种 metric"这个问法本身是错的——
-   同一账号必须能同时挂多种 metric 的 Limit。
-3. **Credits 制套餐按分量折算，比例差 5～120 倍**，这是本轮最重要的发现：
+1. **Token 是整体主流口径，requests 不是。** "次数计量为主"只在 Coding Plan 这个 38% 的子集内成立；
+   数量更多的 Token Plan 有 94% 按 Token/Credits 计。且市场正从 Coding Plan 向 Token Plan 收缩，
+   这个方向只会让 Token 口径占比继续上升。**→ 三种 metric 都要支持，不能二选一。**
+2. **22% 的套餐同时受两种 metric 约束。** "选一种 metric"这个问法本身就是错的。
+   **→ 同一账号必须能挂多条不同 metric 的 Limit。**
+3. **Credits 制套餐按分量折算，且比例极端。** 观察到的费率差（缓存读 vs 新鲜输入）在
+   **5～120 倍**量级；输出相对输入普遍贵数倍。按"输入输出 99:1、缓存命中率 90%"
+   （市场对比站统一采用的口径）量化，**把额度当等权总 Token 记账会高估 3～8 倍**——
+   对高缓存命中率的 Agent 工作流，一个刚用掉 15% 的账号会显示成"已耗尽"。
+   **→ 必须支持分量加权。**
+4. **多窗口并存是常态，但并非所有套餐都有。** 有的三层（时/周/月）并存，有的只有单层，
+   也有只有周限、没有月限的。**→ 窗口数量与长度都必须是配置项，不能写死。**
+5. **"上游无配额 API"这个前提要修正为"无*标准* API，但部分厂商有*私有* API"。**
+   已确认存在返回"5 小时窗口 + 周窗口 + 模型级明细"的私有查询接口，也存在带反爬、
+   或只在客户端侧暴露百分比的形态。**→ 本地累计不该被写死成唯一数据源。**
 
-   | 厂商 | 折算口径 | fresh : cache read : output |
-   |---|---|---|
-   | 小米·MiMo | 缓存 2.5 / 输入 300 / 输出 600 Credits per Token | cache 便宜 **120 倍** |
-   | 阿里·百炼 | 输入 5K / 命中 25K / 输出 0.83K Token per Credit | cache 便宜 5 倍，output 贵 **6 倍** |
-   | DeepSeek Pro | 缓存 ¥0.025/M、未命中 ¥3/M、输出 ¥6/M | cache 便宜 **120 倍** |
-   | 字节·方舟 | 积分制 AFP，1 AFP = 1111 Token，最优模型 **9 倍系数** | 模型系数 9x |
-   | OpenCode | 美元 Credits：基础 $12 / 周 $30 / 月 $60 | 三窗口 + 金额计量 |
+### 2.4 一个跨类型的共性陷阱：厂商计数单位 ≠ vmr 可观测单位
 
-   按"输入输出 99:1、缓存命中率 90%"（该市场对比站统一采用的口径）量化：
-   **把额度当等权总 Token 记账，相对真实折算会高估 3～8 倍**
-   （小米·MiMo 7.9 倍、阿里·百炼 3.0 倍）。对高缓存命中率的 Agent 工作流，
-   等权记账会让一个刚用掉 15% 的账号显示成"已耗尽"。
-
-4. **多窗口并存是常态。** 字节·方舟明确"有 5 小时、周、月的 Token 限制"；
-   阿里云 Coding Plan Pro 是 5h 6,000 / 周 45,000 / 月 90,000 三层。
-   反过来也有只有单层的（小米·MiMo 无 5h 限额；阶跃星辰只有周限量无月限量）。
-5. **"上游无配额 API"这个前提要修正为"无*标准* API，但有厂商*私有* API"**：
-   MiniMax `GET /v1/api/openplatform/coding_plan/remains`（5h + 周 + 模型级明细）、
-   智谱 `/api/monitor/usage/quota/limit`（返回 `type`/`percentage`/`nextResetTime`，有反爬）、
-   Claude Code statusLine 的 `{five_hour,seven_day}.used_percentage`。
-   这意味着本地累计不必是唯一数据源——设计上要为外部校准源留出扩展点。
-
-### 2.3 一个容易踩的坑：厂商计数单位 ≠ vmr 可观测单位
-
-阶跃星辰官方按 **prompt** 计数，市场对比站给出的换算是 **1 prompt ≈ 15 次请求**；
-智谱老套餐同样按 prompt 计（每 prompt 约 15–20 次模型调用）。vmr 在网络层看到的是那 15–20 次。
+部分套餐按"一次用户提问"计数，而一次提问在网络层会展开成十几到二十几次上游 API 调用
+（工具调用往返）。vmr 在网络层看到的是后者。
 
 所以 `amount` 必须按 **vmr 可观测的口径**配置，不能直接抄套餐标称值。
-这是**单位换算问题，不是精度问题**，必须在用户文档里写死，
+这是**单位换算问题，不是精度问题**——必须在用户文档写明，
 并且是"官方用量 API 校准"最有价值的场景。
-
-**调研来源**：
-[市场对比站原始数据](https://vibecoding.dreamfree.space/)（已留档，见 `docs/TokenPlan_Market_Reference.md`）、
-[阿里云 Coding Plan 官方文档](https://help.aliyun.com/zh/model-studio/coding-plan)、
-[MiniMax Token Plan 文档](https://platform.minimaxi.com/docs/token-plan/intro)、
-[智谱 GLM Coding Plan 套餐概览](https://codingplan.org/plans/zhipu)、
-[coding-plan-monitor（用量 API 逆向）](https://github.com/JinHanAI/coding-plan-monitor)、
-[GitHub Copilot 转向用量计费](https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/)、
-[Claude Code 用量限制](https://www.truefoundry.com/blog/claude-code-limits-explained)。
-
----
 
 ## 3. 全集：额度约束的完整模型
 
@@ -135,8 +139,8 @@
 
 **为什么折算规则是账号级而不是窗口级**：一次调用消耗多少额度，是"这个账号怎么记账"的属性；
 在多长的窗口里累计，是"厂商怎么切周期"的属性。**两者正交。**
-观察到的每一个套餐都印证这点：字节·方舟的 9 倍模型系数对它的 5h / 周 / 月三个窗口是同一个值；
-智谱 GLM-5.2 的 3 倍对 5h 和 7d 也是同一个值。把折算写在 Limit 上，就是把同一个事实抄 N 遍——
+观察到的每一个套餐都印证这点：类型 D 的 9 倍模型系数对它的时/周/月三个窗口是同一个值；
+类型 B 的 3 倍模型倍率对它的两个窗口也是同一个值。把折算写在 Limit 上，就是把同一个事实抄 N 遍——
 既是配置噪音，也是"三处改了两处"的经典 bug 来源。
 
 于是扣减量是一个统一公式：
@@ -153,20 +157,20 @@ charge = base(metric) × ModelMultipliers[model]
 
 验证这个模型能装下全集：
 
-| 套餐 | 表达 |
+| 类型（§2.1） | 表达 |
 |---|---|
-| 阿里云 Coding Plan Pro | 3 条 Limit：(requests, 5h) / (requests, 1w) / (requests, 1mo) |
-| 智谱 GLM Coding Plan（老，prompt 制） | 2 条：(requests, 5h, rolling) / (requests, 7d) + 账号级 `{glm-5.2: 3}` |
-| 智谱 GLM Coding Plan（新，Token 制） | 1 条：(tokens, 1w) |
-| 字节·方舟（AFP 积分制） | 3 条：(tokens, 5h/1w/1mo) + 账号级 `{最优模型: 9}` + `TokenWeights` |
-| 阿里云 Token Plan 团队版 / 小米·MiMo | 1 条：(cost, 1mo)，分量费率来自费率表 |
-| MiniMax Token Plan | 2 条：(cost, 5h) / (cost, 1w) |
-| OpenCode | 3 条：(cost, 5h/1w/1mo) |
-| 纯按量端点 | 0 条 |
+| **A** 次数 + 多层窗口 | 3 条 Limit：`(requests, 5h)` / `(requests, 1w)` / `(requests, 1mo)` |
+| **B** 次数 + 滚动短窗 + 模型倍率 | 2 条：`(requests, 5h, rolling)` / `(requests, 7d)` + 账号级 `model_multipliers` |
+| **C** Token 总量 + 单层 | 1 条：`(tokens, 1w)`，无任何折算配置 |
+| **D** Token 总量 + 多层 + 折算 | 3 条：`(tokens, 5h/1w/1mo)` + 账号级 `model_multipliers` + `token_weights` |
+| **E** 金额/Credits + 单层 | 1 条：`(cost, 1mo)`，分量费率来自费率表 + 账号折扣 |
+| **F** 金额/Credits + 多层 | 3 条：`(cost, 5h/1w/1mo)` |
+| **—** 纯按量端点 | 0 条 |
 | 模型独立子额度 | 多条 Limit，各自 `Scope` 指向不同模型集合 |
 
-> Copilot / Cursor 这类纯 $ 制产品在模型上可表达为 `(cost, 1mo)`，但它们**没有可重定向
-> `base_url` 的 API 出口，接不进 vmr**——列在这里只为验证模型的表达力，不是目标场景。
+> 有一类纯金额制产品（订阅内含固定额度的编程助手）在模型上同样落在 **E**，
+> 但它们**没有可重定向 `base_url` 的 API 出口，接不进 vmr**——
+> 模型表达得了，不代表是目标场景。
 
 模型成立。下一节做简化。
 
@@ -182,66 +186,112 @@ charge = base(metric) × ModelMultipliers[model]
 |---|---|---|
 | **多条并存 Limit** | 22% 套餐两种 metric 并存；三层窗口是常态 | 极低——多窗口天然可用 `min()` 归并（见 §5） |
 | **metric: requests** | Coding Plan 74% 按次数计 | **最低**——计数器 +1，完全不需要解析响应 |
-| **metric: tokens** | 纯 token 桶（智谱新版"Token/周"、字节 AFP→Token、Kimi） | 中——需要 usage 嗅探 + 降级估算 |
+| **metric: tokens** | 类型 C / D（Token 总量桶） | 中——需要 usage 嗅探 + 降级估算 |
 | **metric: cost（分量折算）** | **Token Plan 94% 按 Token/Credits 计，且 Credits 按分量折算，比例差 5～120 倍** | 中——复用既有的按模型分项费率表 |
-| **模型倍率（账号级）** | 字节 9 倍系数、限时 2.5x/4x；智谱老套餐 3 倍 | 极低——一个 `map[string]float64` |
-| **token 分量权重（账号级）** | 字节 AFP、智谱新版是 token 桶，但分量扣减比例不均一 | 极低——四个 float，缺省全 1.0 |
-| **Scope（按模型限定）** | MiniMax 模型级明细；用户明确提出 | 极低——charge 时一次模型名匹配 |
-| **rolling 窗口** | 智谱/Claude 是滚动窗口 | 低——分桶近似，约 40 行（见 §8） |
+| **模型倍率（账号级）** | 类型 B / D 普遍存在，实测倍率跨度 2～9 倍 | 极低——一个 `map[string]float64` |
+| **token 分量权重（账号级）** | 类型 D 是 Token 桶，但四个分量的扣减比例不均一 | 极低——四个 float，缺省全 1.0 |
+| **Scope（按模型限定）** | 存在返回模型级明细的用量接口，提示可能有独立子额度 | 极低——charge 时一次模型名匹配 |
+| **rolling 窗口** | 类型 B 的短窗是滚动的 | 低——分桶近似，约 40 行（见 §8） |
 
 ### 4.2 砍掉（有依据的简化）
 
-**① 定价分两层：随二进制内置的标准列表价 + config.yaml 里的 per-provider 覆盖**
+**① 定价分三层：内置标准表 → 用户补充表 → 账号覆盖**
 
 今天的 `pricing.yaml` 名字叫"定价表"，实质却是**一份必须与 config.yaml 逐条对齐的部署清单**
-（文件头原文："One row per active provider+model in config.yaml"）。这带来两个真问题：
+（文件头原文："One row per active provider+model in config.yaml"）。两个真问题：
+**入门断崖**（不手写就完全没有 $ 估算，`metric: cost` 更是不可用）和
+**两文件必须一致**（provider/model 名各写一遍，漂移是静默的）。
 
-- **入门断崖**：不手写这张表就完全没有 $ 估算；而 `metric: cost` 更是直接不可用。
-- **两文件必须一致**：provider 名、model 名在两处各写一遍，漂移是静默的。
+拆成三层，各自回答一个不同的问题：
 
-改成两层：
+| 层 | 回答的问题 | 键空间 | 位置 | 谁维护 |
+|---|---|---|---|---|
+| **标准表** | 这个模型的**列表价**是多少 | canonical model id | 随二进制 `go:embed` | 项目 + 社区 |
+| **补充表** | 标准表**没收录**的模型价格 | 同上（可合并、可回贡） | 用户文件，`pricing.supplement` 指定 | 用户 |
+| **账号覆盖** | **我这个账号**的实际成交价 | vmr 的 `provider` + `model` | `config.yaml` 的 `providers[].pricing` | 用户 |
 
-| 层 | 内容 | 位置 | 谁维护 |
-|---|---|---|---|
-| **标准列表价** | 按 canonical model id 的四分量费率 | 随二进制 `go:embed`，带生成时间戳 | 项目维护，脚本定期刷新 |
-| **账号覆盖** | 该账号真实的费率 / 折扣 / ID 映射 | `config.yaml` 的 `providers[].pricing` | 用户，只写"和列表价不一样"的部分 |
+**为什么补充表不能被账号覆盖替代**（这是三层而非两层的理由）：
+两者的**键空间不同**。补充表按 canonical model id 记的是"这个模型的列表价"——
+它与账号无关，可以被多个 provider 复用，**并且可以原样回贡给项目的标准表**；
+账号覆盖记的是"我谈到的折扣"，永远不该回贡。
+把列表价缺口硬塞进账号覆盖，会把这两件事混成一团，且失去回贡的自然载体。
 
-标准表由 `tools/` 下的脚本从 [LiteLLM 的 `model_prices_and_context_window.json`](https://github.com/BerriAI/litellm)
-（MIT，允许再分发，需保留署名）生成。**不直接 vendor 原文件**，而是生成一张**最小派生表**——
-只留 key + 四项费率，单位在生成时从 per-token 归一到 per-1M。这一次性解决三件事：
-体积（原文件 1.67 MB / 2988 条，裁剪后数量级更小，才谈得上 `go:embed` 而不破坏单二进制）、
-单位口径、字段命名差异。脚本手动运行、产物入库，**构建过程不联网**。
-
-> **必须诚实说明覆盖度**（已实测，不是假设）：标准表对西方厂商和一部分国产厂商很好
-> （`deepseek/` 8 条、`moonshot/` 22 条、`zai/` 13 条均带完整四分量），
-> 但**恰恰对本功能主打的国产 Token-Plan 覆盖最弱**：
-> `dashscope/`（阿里）36 条**只有 input/output、无缓存字段**；
-> `volcengine/`（字节）4 条**完全没有价格字段**；
-> 智谱国内站、小米·MiMo、阶跃星辰**一条都没有**。全表 cache_read 覆盖率仅 23%、cache_write 仅 8%。
->
-> 所以标准表的定位是**消除入门断崖的基线**，**不是** `metric: cost` 的充分数据源。
-> 而缓存费率正是 `cost` 档最要命的一项（分量差 5～120 倍）——设计上必须假定它经常缺失。
-
-由此定下**费率解析顺序**与失败姿态：
+**解析顺序与失败姿态**：
 
 ```
 rate(provider, model, ts):
   1. providers[].pricing.overrides 中第一条 model 匹配且时间窗命中的规则（first-match-wins）
-       · discount 形式 → 标准表费率 × discount
-       · 显式费率形式 → 直接采用
-  2. 标准表：key 取 providers[].pricing.map[model]，缺省则按 §9.1 的自动解析规则
+       · discount 形式 → 下层解析出的费率 × discount
+       · 显式费率形式 → 直接采用，不再下探
+  2. 补充表 ∪ 标准表（按 key 合并，补充表在冲突时胜出）
+       key 取 providers[].pricing.map[model]，缺省则按 §9.1 的四步自动解析
   3. 都没有 → 该 provider+model 无费率
        · vmr report：该行无 $ 估算（降级，与今天行为一致）
        · metric: cost：**加载期错误**
 ```
 
 `metric: cost` 的严格性还要再进一步：**不仅"查不到条目"要报错，"条目存在但缺少四分量中的任何一项"
-也必须报错**。原因是失效方向危险——把缺失的 `cache_read` 当 0 会**低估**消耗，
-账号显示得比实际更宽裕，进而拿到更多流量、超支。
-显式写着 `0.0` 的（LiteLLM 对确实免费的缓存就是这么写的）算"存在"，与"字段缺失"必须区分对待，
-而这个区分在数据里本来就有。
+也必须报错**。失效方向是危险的——把缺失的 `cache_read` 当 0 会**低估**消耗，
+账号显得比实际宽裕，进而拿到更多流量、超支。
+显式写着 `0.0` 的（上游数据对确实免费的缓存就是这么写的）算"存在"，与"字段缺失"必须区分对待——
+这个区分在数据里本来就有，生成脚本**不得把缺失补成 0**，否则就把这道保护抹掉了。
 
-**② 折扣与促销归入价格层，不再借道 `model_multipliers`**
+> **必须诚实说明覆盖度**（已实测）：上游标准数据对西方主流厂商覆盖完整（四分量齐全），
+> 对**国产第一方厂商覆盖明显偏弱**——部分只有 input/output 而无缓存字段，
+> 部分条目完全没有价格字段，部分厂商一条都没有；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%。
+> 而缓存费率恰恰是 `cost` 档最要命的一项（分量差 5～120 倍）。
+>
+> 所以标准表的定位是**消除入门断崖的基线**，**不是** `metric: cost` 的充分数据源——
+> 设计上必须假定它经常缺失，这正是上面那条"四项不齐即报错"存在的理由。
+> 各厂商的具体覆盖情况见 `docs/TokenPlan_Market_Reference.md`，不在本文重复。
+
+**标准表自身的维护结构**：内部拆成两块，合并后对外表现为一张表——
+
+* `pricing/standard.generated.yaml` —— 脚本从上游生成，**可整体覆盖**；
+* `pricing/standard.curated.yaml` —— 项目手工维护，主要补上游缺失的国产厂商，**脚本不得触碰**。
+
+这个拆分不是洁癖：**若刷新脚本直接重写单一文件，手工补的行每次刷新都会被清掉。**
+
+**② 格式要不要向上游看齐：不看齐，但键空间对齐**
+
+值得严肃比一次，因为对齐能省掉一次转换。逐项看：
+
+| 维度 | 上游格式 | vmr 现格式 | 结论 |
+|---|---|---|---|
+| 单位 | per-token（`2.8e-07`） | per-1M（`0.28`） | **保留 vmr 的**。补充表与账号覆盖都是**手写**的，`1.58` 比 `1.58e-06` 少一个数量级的出错机会 |
+| 分量语义 | `input_cost_per_token` + `cache_read_*` + `cache_creation_*` | `in_fresh` / `cache_read` / `cache_write` / `out` | **等价**，只是命名不同——上游的"input"就是未命中缓存的价格。可机械转换 |
+| 时间窗 | **没有** | `date_from/to` + `hour_from/to` | **必须保留 vmr 的**。促销与分时折扣依赖它，向上游看齐等于丢掉一个已有能力 |
+| 币种 | 隐含 USD | `currency` + `exchange_rate` | **必须保留 vmr 的**，否则无法表达非美元计价的套餐 |
+| 附带字段 | 另有约二十个非价格字段 | 无 | 不需要，生成时丢弃 |
+| 键 | 单一字符串 `provider/model` | `provider` + `model` 两字段 | **标准表/补充表改用单一 canonical key** |
+
+最后一行是本条的实质结论：**标准表与补充表采用上游的 canonical key 空间**，
+理由是互操作恰好只在这一层发生——键对齐使得生成脚本是纯机械转换、用户的补充表可以直接回贡上游、
+`map` 字段的语义也变得直白（"我的 model 名对应哪个 canonical id"）。
+
+而**账号覆盖仍用 vmr 自己的 `provider` + `model`**，因为 vmr 的 provider 名是用户自取的
+（`my-plan-a`），与 canonical 厂商标识不是一回事。**两层用两套键空间不是不一致，
+而是它们本来就在回答两个不同的问题**——也正是 `map` 存在的原因。
+
+其余各项都要么更适合手写、要么是 vmr 已有而上游没有的能力，所以**不向上游看齐，做一次性转换**。
+转换是单向的、脚本化的、离线的，维护成本近乎为零。
+
+**③ 标准表以开源参考表的形式维护**
+
+定位要卡死：**它是一份参考数据文件加一个刷新脚本，不是一个产品，更不是一个服务。**
+价值在于把大多数用户的初始化门槛降到零，同时给社区一个自然的贡献载体——
+尤其在国产厂商这块，上游覆盖很弱，vmr 反而有机会成为更好的那张表。
+
+四条必须同时立的护栏：
+
+1. **过期比缺失更危险**——一张看起来权威的陈旧价目表会静默产出错误的 $ 数字。
+   表内带生成时间戳，`vmr check` 与报表免责声明一并显示；超过阈值给出显式提醒。
+2. **溯源可见**——报表免责声明要能说明每行费率来自标准表 / 补充表 / 账号覆盖的哪一层，
+   而不是给一个无从追问的总数。
+3. **许可与署名**——生成部分派生自 MIT 许可的上游数据，保留署名；手工维护部分同许可。
+4. **不承诺准确性**——价格以厂商官方为准，本表是参考值。这条要写进表头和报表免责声明。
+
+**④ 折扣与促销归入价格层，不再借道 `model_multipliers`**
 
 有了 per-provider 价格覆盖之后，"这个账号比列表价便宜"就该写在价格层，理由不只是归类整齐：
 
@@ -254,16 +304,16 @@ rate(provider, model, ts):
 | 折扣形态 | 真实例子 | 承载方式 |
 |---|---|---|
 | 整个账号按列表价打折 | Credits 制套餐普遍低于列表价 | `overrides: [{model: "*", discount: 0.6}]` |
-| 单模型价格与列表价不同 | 阿里"输入 5K / 命中 25K / 输出 0.83K Token per Credit" | 该模型写显式四分量费率 |
-| 有起止日期的限时活动 | 字节"6.8–8.8 期间 2.5 折" | override 规则上的 `date_from`/`date_to` |
-| 分时段价差 | 智谱高峰 14:00–18:00 加倍 | override 规则上的 `hour_from`/`hour_to`（支持跨零点） |
+| 单模型价格与列表价不同 | 类型 E/F 的 Credits 折算率自成一套 | 该模型写显式四分量费率 |
+| 有起止日期的限时活动 | 两个月的开卡促销折扣 | override 规则上的 `date_from`/`date_to` |
+| 分时段价差 | 高峰时段扣减加倍 | override 规则上的 `hour_from`/`hour_to`（支持跨零点） |
 
 后两行沿用**既有能力**而非新建：`PricingRate` 今天已有
 `DateFrom`/`DateTo`/`HourFrom`/`HourTo` 四个可选字段，按书写顺序 first-match-wins，
 其文档注释举的例子正是"一条 off-peak 折扣 + 一条全价兜底"。搬进 config.yaml 时原样保留。
 
 **于是 `model_multipliers` 收敛回纯粹的额度语义**：它只表示"这个模型烧掉几倍的**计数单位**"
-（字节 9 倍 AFP 系数、智谱 3 倍 prompt），**只作用于 `requests` 和 `tokens`**。
+（类型 D 的 9 倍积分系数、类型 B 的 3 倍次数系数），**只作用于 `requests` 和 `tokens`**。
 `cost` 档的一切价格分化——按模型、按折扣、按时段——全部由价格层承担。
 配置校验据此加一条：某 provider 的 Limit 全是 `cost` 却配了 `model_multipliers` → 报错，
 提示改用价格覆盖。**同一件事只有一种写法**，这正是上一轮批评 gemini 方案时立的标准，
@@ -272,7 +322,7 @@ rate(provider, model, ts):
 > 上一轮文档里用 `model_multipliers: {"*": 0.6}` 表达 `cost` 档的套餐折扣——**那是错的**，
 > 它把价格概念塞进了额度字段，并且让 `vmr report` 继续按列表价高报。本条即是对它的纠正。
 
-**③ 把 per-provider 定价并入 `config.yaml`：架构上安全，且是 `metric: cost` 的硬需求**
+**⑤ 把 per-provider 定价并入 `config.yaml`：架构上安全，且是 `metric: cost` 的硬需求**
 
 已核对代码确认可行，不是想当然：`LoadPricing` 的调用点在 **`cmd/vmr/cmd_report.go`**，
 `internal/report` 只接收一个已加载的定价对象、从不自己读文件；
@@ -300,7 +350,7 @@ rate(provider, model, ts):
 > 应理解为"这些流量若按量计费要花多少"——这恰好是判断"套餐买得值不值"的那个数，
 > 是特性而非缺陷，但需要在报表免责声明里说清楚。
 
-**④ 折算规则放在账号级，不放在窗口级**
+**⑥ 折算规则放在账号级，不放在窗口级**
 
 见 §3。观察到的每个套餐里，模型系数与分量权重在该账号的所有窗口上都是同一个值，
 写在 Limit 上就是把同一事实抄 N 遍。**当前配置样例里 `model_multipliers` 在两条 Limit 上重复出现，
@@ -309,50 +359,49 @@ rate(provider, model, ts):
 若将来出现"同账号不同 metric 需要不同折算"的情形（未观察到），
 加一个 Limit 级 override 是纯增量的可选字段，不需要重构。**按 YAGNI 现在不做。**
 
-**⑤ 不做 per-provider 的四个**金额**全局权重**
+**⑦ 不做 per-provider 的四个**金额**全局权重**
 
-这是 gemini 方案的做法，拒绝理由不变、且被新数据进一步坐实：阿里的折算率原文明确标注了
-适用模型（"Qwen-3.6-Plus，输入 5K Token/Credit……"），小米·MiMo 更直接写明
-"表格按 MiMo-V2.5-Pro 口径算，MiMo-V2.5 实际更高"——**金额折算率是按模型给的**。
+这是 gemini 方案的做法，拒绝理由不变、且被市场数据进一步坐实：类型 E/F 的 Credits 折算率
+在厂商文档里就是**逐模型标注**的，同一账号下换个模型折算率就变。**金额折算率是按模型给的**。
 一组 per-provider 的金额权重对多模型账号必然系统性偏差，而费率表天然按模型。
 
-> 注意这与 ⑥ 的 `token_weights` 不冲突：`token_weights` 服务的是 **token 桶**型套餐
+> 注意这与 ⑧ 的 `token_weights` 不冲突：`token_weights` 服务的是 **token 桶**型套餐
 > （其账号内各模型共用一套分量比例），费率表服务的是**金额/Credits** 型套餐
 > （其费率按模型分化）。两者对应两类不同的套餐，不是同一件事的两种写法。
 
-**⑥ `metric: tokens` 支持分量权重，缺省 1:1:1:1**
+**⑧ `metric: tokens` 支持分量权重，缺省 1:1:1:1**
 
-token 桶型套餐（字节 AFP、智谱新版）的账面单位是 token，但四个分量的扣减比例未必均一。
+类型 C / D 的账面单位是 token，但四个分量的扣减比例未必均一。
 让它们各带一个权重、缺省全 1.0，好处有三：
 
 - **简单场景零配置**：真按原始 token 数计的套餐什么都不用写，行为与"总量"完全一致；
-- **不必为一个非金额套餐去维护费率表**：字节的额度以 AFP/Token 计，
-  强迫用户把它反推成 ¥ 单价再填进价目表，既绕又容易错；
+- **不必为一个非金额套餐去维护费率表**：类型 D 的额度以积分/Token 计，
+  强迫用户把它反推成货币单价再填进价目表，既绕又容易错；
 - **与 `cost` 结构同构**：两者都是"四分量加权求和"，只是权重来源不同
   （内联比例 vs. 按模型的价目表），实现上是**同一个函数、两个权重来源**，不是两条代码路径。
 
 选择哪一档的判据很清楚：**账号内各模型共用一套分量比例 → `tokens` + `token_weights`；
 分量费率按模型分化 → `cost` + 费率表。**
 
-**⑦ 时段倍率：`cost` 档天然支持，`requests`/`tokens` 档不做**
+**⑨ 时段倍率：`cost` 档天然支持，`requests`/`tokens` 档不做**
 
-智谱高峰 14:00–18:00 消耗 2–3 倍这类规则，对 `cost` 档由价格覆盖规则的 `hour_from`/`hour_to`
-直接表达（见 ②）。对 `requests`/`tokens` 档**不做**：需要新的配置面，而目前只有智谱一家、
-规则本身还在变（官方写明"9 月底前限时福利"）。代价是对这类账号系统性低估，
+"高峰时段扣减加倍"这类规则，对 `cost` 档由价格覆盖规则的 `hour_from`/`hour_to`
+直接表达（见 ④）。对 `requests`/`tokens` 档**不做**：需要新的配置面，而这种规则目前只在个别厂商出现、
+且其自身还在频繁调整（常以限时活动形式发布）。代价是对这类账号系统性低估，
 缓解手段是调低 `amount`、改用 `cost` 档，或接官方用量 API 校准。
 
-**⑧ `reset_period` + `reset_day` 的字段组合 → 统一为 `(every, since)` 二元组**
+**⑩ `reset_period` + `reset_day` 的字段组合 → 统一为 `(every, since)` 二元组**
 
 `every: 1mo, since: 2026-08-14` 即"每月 14 号重置"。同一个机制还表达周锚点、5h 锚点、
 "每 2 周"、"每 3 天"，免掉了将来再加 `reset_weekday`/`reset_hour` 的字段膨胀。
 用户要求的"数月/数周/数日/数小时 + 周期开始时间，后续自动推算"由此一次性满足。
 
-**⑨ `initial_consumed_tokens` 初始偏置 → 砍**
+**⑪ `initial_consumed_tokens` 初始偏置 → 砍**
 
 它只在接入 vmr 的第一个周期有意义，第二个周期起就该是 0，但配置文件里的值不会自己消失，
 会长期造成系统性偏差。中途接入的对齐用手工编辑状态文件解决。
 
-**⑩ SWRR 平滑加权轮询 → 砍，改用贪心（见 §5.3）**
+**⑫ SWRR 平滑加权轮询 → 砍，改用贪心（见 §5.3）**
 
 ---
 
@@ -393,7 +442,7 @@ raw(L)            = (1 - used_frac) / max(time_left_frac, ε)
 
 判定规则，零配置：**周期最长的那条 tumbling Limit 是桶，其余全是闸。**
 套餐费按最长周期收取，只有这个周期的未用额度才对应到真实浪费。该规则在每一个观察到的套餐上都成立
-（阿里云 Pro：月=桶，周/5h=闸；智谱：7d=桶，5h=闸；只配一条 tumbling 时它自己就是桶）。
+（类型 A：月=桶，周/时=闸；类型 B：周=桶，滚动短窗=闸；只配一条 tumbling 时它自己就是桶）。
 
 **rolling 窗口永远不能当桶**——这是必须显式写死的一条边界，否则会静默算错：
 滚动窗口的额度是持续再生的，不存在"到期作废"，因此 use-it-or-lose-it 对它不成立。
@@ -413,7 +462,7 @@ score(provider) = min( over all its Limits ) headroom(L)      // 最紧的约束
 闸的形式含义：**只要该窗口的消耗速率不超过其比例进度的 2 倍，闸保持中性（1.0）；
 超过后线性收紧到 0。** 于是闸永远只能把分数往下拉，不会把一个账号顶上去。
 
-验证：阿里云 Pro，5h 窗口已用 5500/6000（剩 8.3%）且只剩 1h（时间剩 20%）：
+验证（类型 A，三层窗口）：5h 窗口已用 5500/6000（剩 8.3%）且只剩 1h（时间剩 20%）：
 
 ```
 raw(5h)  = 0.083 / 0.2         = 0.417
@@ -510,8 +559,8 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 | metric | `base` | 适用套餐 | 解析成本 |
 |---|---|---|---|
 | `requests` | `1` | Coding Plan（74% 按次数计） | **零**。不碰响应体 |
-| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重账号级、缺省全 1.0 | token 桶（智谱新版、字节 AFP、Kimi） | 中，见 §7.2 |
-| `cost` | `Σ_c tokens_c × Rate[provider, model, c, ts]`，费率 = 内置标准表 + config 覆盖（§4.2 ①） | Credits / 金额制（阿里·百炼、小米·MiMo、DeepSeek 虚拟套餐、OpenCode） | 同 `tokens`，多一次查表 |
+| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重账号级、缺省全 1.0 | 类型 C / D | 中，见 §7.2 |
+| `cost` | `Σ_c tokens_c × Rate[provider, model, c, ts]`，费率见 §4.2 ① 的三层解析 | 类型 E / F | 同 `tokens`，多一次查表 |
 
 `c` 遍历四个分量 `{in_fresh, cache_read, cache_write, out}`，其中
 `in_fresh = usage.In − usage.CacheRead − usage.CacheWrite`
@@ -565,7 +614,7 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 ### 7.3 外部用量校准：留位置，但先不抽接口
 
 §2 中"厂商有私有用量 API"那条结论意味着本地累计终究不该是唯一来源：
-MiniMax 的 `coding_plan/remains` 一类接口能一举消解本地计数最大的三条限制
+已确认存在的私有用量查询接口能一举消解本地计数最大的三条限制
 （绕过 vmr 的流量、单位换算偏差、时段倍率）。
 
 但**现在不定义 `Source` 之类的接口**。在只有一个实现时，接口只是把一个函数调用包了一层；
@@ -620,78 +669,75 @@ Ring{ width: 桶宽, slots: []struct{ startUnix int64; c Counters } }
 ### 9.1 配置形态
 
 ```yaml
-# 全局定价设置。standard 是随二进制内置的标准列表价（带生成时间戳），
-# 通常不需要动；exchange_rate 用于把标准表的 USD 折算成 currency。
+# 全局定价。standard 内置随二进制（无需配置）；supplement 是用户补充表，
+# 按 canonical model id 与标准表合并，冲突时补充表胜出。
 pricing:
   currency: CNY
   exchange_rate: {USD: 7.1}
-  # standard: <path>        # 缺省 = 内置表；给路径可覆盖为自备的标准表
+  supplement: ./pricing.local.yaml    # 可选；给了路径但文件不存在 = 加载期错误，不静默跳过
 
 providers:
-  # ① 三层并存的次数制 Coding Plan（阿里云 Pro 形态）
-  - name: aliyun-coding-plan
-    base_url: {anthropic: https://dashscope.aliyuncs.com/apps/claude-code-proxy}
-    api_key: ${ALI_KEY}
+  # ── 类型 A：次数制 + 三层窗口 ────────────────────────────────
+  - name: plan-a
+    base_url: {anthropic: https://example.invalid/anthropic}
+    api_key: ${PLAN_A_KEY}
     quota:
       limits:
         - {metric: requests, every: 5h, amount: 6000}
         - {metric: requests, every: 1w, amount: 45000}
         - {metric: requests, every: 1mo, amount: 90000}   # 周期最长的 tumbling → 桶
 
-  # ② 滚动窗口 + 模型倍率（智谱老套餐，prompt 制）
-  # 注意 amount 按 vmr 可观测的"上游 API 调用次数"配置，不是厂商的 prompt 数。
-  #      智谱 1 prompt ≈ 15~20 次调用，Pro 的 400 prompts/5h ≈ 6000~8000 次。
-  - name: zhipu-coding-plan
-    base_url: {anthropic: https://open.bigmodel.cn/api/anthropic}
-    api_key: ${ZHIPU_KEY}
+  # ── 类型 B：次数制 + 滚动短窗 + 模型倍率 ──────────────────────
+  # amount 按 vmr 可观测的“上游 API 调用次数”配置，不是厂商标称的“提问数”（§2.4）
+  - name: plan-b
     quota:
-      model_multipliers: {glm-5.2: 3, glm-5: 3}    # 账号级：两条 Limit 共用，不重复书写
+      model_multipliers: {premium-model: 3}    # 账号级：两条 Limit 共用，不重复书写
       limits:
         - {metric: requests, every: 5h, rolling: true, amount: 7000}
         - {metric: requests, every: 7d, amount: 35000}
 
-  # ③ token 桶 + 分量权重（字节·方舟 AFP 形态）
+  # ── 类型 C：纯 Token 桶，什么都不配 = 分量 1:1:1:1 ─────────────
+  - name: plan-c
+    quota:
+      limits:
+        - {metric: tokens, every: 1w, since: 2026-08-14, amount: 65000000}
+
+  # ── 类型 D：Token 桶 + 分量权重 + 模型系数 ────────────────────
   # 账号内各模型共用一套分量比例 → 用 tokens + token_weights，不必去维护费率表
-  - name: ark-token-plan
+  - name: plan-d
     quota:
       token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-      model_multipliers: {"*": 1.0, doubao-seed-2.0: 9}
+      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
         - {metric: tokens, every: 5h,  amount: 83000000}
         - {metric: tokens, every: 1w,  amount: 624000000}
         - {metric: tokens, every: 1mo, amount: 1249000000}
 
-  # ④ 纯 token 桶，什么都不配 = 分量 1:1:1:1（智谱新版"中值约 0.65 亿 Token/周"）
-  - name: zhipu-new-lite
-    quota:
-      limits:
-        - {metric: tokens, every: 1w, since: 2026-08-14, amount: 65000000}
-
-  # ⑤ Credits / 金额制（阿里·百炼、小米·MiMo 形态）
-  # 分量费率按模型分化 → 走 cost。价格分两层：标准表兜底 + 这里的账号覆盖。
-  - name: bailian-token-plan
+  # ── 类型 E：金额 / Credits 制，单层窗口 ───────────────────────
+  # 分量费率按模型分化 → 走 cost；价格三层解析（§4.2 ①）
+  - name: plan-e
     pricing:
-      map: {qwen3-max: dashscope/qwen3-max}    # 仅在标准表 key 对不上时才需要
+      map: {my-model-x: vendor/model-x}        # 仅在自动解析对不上 canonical key 时才需要
       overrides:
-        # 整账号按列表价 6 折
-        - {model: "*", discount: 0.6}
-        # 该模型的实际分量费率与列表价不同 → 写显式费率（单位：每 1M token）
-        - {model: qwen3-coder, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
-        # 限时促销：先于兜底规则命中（first-match-wins）
+        # 限时促销：写在前面，first-match-wins
         - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}
+        # 该模型的实际分量费率与列表价不同 → 写显式费率（每 1M token）
+        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
+        # 兜底：整账号按列表价 6 折
+        - {model: "*", discount: 0.6}
     quota:
       limits:
         - {metric: cost, every: 1mo, amount: 198}
 
-  # ⑥ 三窗口 + 金额制（OpenCode 形态：基础 $12 / 周 $30 / 月 $60）
-  - name: opencode-go
+  # ── 类型 F：金额制 + 多层窗口 ────────────────────────────────
+  - name: plan-f
     quota:
       limits:
         - {metric: cost, every: 5h,  amount: 12}
         - {metric: cost, every: 1w,  amount: 30}
         - {metric: cost, every: 1mo, amount: 60}
 
-  # ⑦ 模型级独立子额度（Scope）
+  # ── 模型级独立子额度（Scope） ────────────────────────────────
   - name: plan-with-submodel-cap
     quota:
       limits:
@@ -699,13 +745,14 @@ providers:
         - {metric: requests, every: 1d, amount: 200, models: [premium-model]} # 仅约束该模型
 ```
 
-**账号级字段**（`providers[].quota`，描述"一次调用怎么折算成额度"）：
+**全局定价字段**（`pricing`）：
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
-| `model_multipliers` | 按上游模型名的扣减系数，支持 `"*"` 通配缺省。`>1` = 该模型消耗更快（字节 9 倍系数）；`<1` = 折扣（套餐按列表价打折、限时促销） | 全部 1.0 |
-| `token_weights` | `metric: tokens` 的四分量权重 `{in_fresh, cache_read, cache_write, out}` | 全部 1.0 |
-| `limits` | 该账号的 Limit 列表 | 必填（`quota` 存在时） |
+| `currency` | `amount`（`cost` 档）与费率的基准币种 | 必填（有 `cost` Limit 时） |
+| `exchange_rate` | 把标准表币种折算到 `currency` 的汇率 | 空 |
+| `supplement` | 用户补充表路径，按 canonical key 与内置标准表合并、冲突时它胜出 | 空 |
+| `standard` | 覆盖内置标准表（自备整表时用） | 内置 |
 
 **账号级定价字段**（`providers[].pricing`，只写"和标准列表价不一样"的部分）：
 
@@ -842,7 +889,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 窗口实现 | 环形分桶，tumbling=1 桶、rolling=K 桶 | 一套结构覆盖两类；滚动误差 ≤1/K；tumbling 硬近似 rolling 误差可达 100% | 精确滑动窗口（需存每请求时间戳）；只支持 tumbling |
 | 周期重置 | 惰性比较桶起点 | 无 goroutine、无漏重置、无时钟回拨、重启自动补偿 | 定时器/cron 式重置 |
 | 周期表达 | `(every, since)` 二元组 | 一个机制覆盖数小时/数日/数周/数月 + 任意锚点，免掉字段膨胀 | `reset_period` + `reset_day`（装不下 5h/周，且要不断加字段） |
-| 分量加权 | **必做**，两条路径：账号内比例统一走 `tokens` + `token_weights`；按模型分化走 `cost` + 费率表 | Credits 制套餐 cache read 比 fresh input 便宜 5～120 倍，等权总量记账高估 3～8 倍；而字节 AFP 这类非金额套餐不该被迫去反推 ¥ 单价 | 只做等权总 token（高估 3～8 倍）；只做 `cost`（逼着 token 桶套餐维护价目表）；per-provider 四个**金额**全局权重（费率实际按模型给出） |
+| 分量加权 | **必做**，两条路径：账号内比例统一走 `tokens` + `token_weights`；按模型分化走 `cost` + 费率表 | Credits 制套餐 cache read 比 fresh input 便宜 5～120 倍，等权总量记账高估 3～8 倍；而类型 D 这类非金额套餐不该被迫去反推货币单价 | 只做等权总 token（高估 3～8 倍）；只做 `cost`（逼着 token 桶套餐维护价目表）；per-provider 四个**金额**全局权重（费率实际按模型给出） |
 | 折算规则的层级 | 账号级（`providers[].quota`），不放窗口级 | 一次调用扣多少是"账号怎么记账"，在多长窗口累计是"厂商怎么切周期"，两者正交；观察到的套餐里同账号各窗口的系数完全一致 | 每条 Limit 各写一份（同一事实抄 N 遍，"三处改了两处"的经典 bug 源） |
 | 定价来源 | 两层：随二进制内置的**标准列表价** + `config.yaml` 里的 **per-provider 覆盖** | 今天的 `pricing.yaml` 实为"与 config.yaml 逐条对齐的部署清单"，不写就完全没有 $ 估算；标准表消除这个断崖，覆盖写在账号侧只补差异 | 继续手写全量 `pricing.yaml`（入门断崖 + 两文件漂移）；只要标准表（对国产第一方覆盖不足，见 §13） |
 | 定价的落点 | 并入 `config.yaml` 的 `providers[].pricing` | 已核对 `LoadPricing` 在 `cmd` 侧、`report` 只接收已解析的表，故不触碰 `report ↛ config` 禁令；更关键的是 `cost` 把定价放到了请求路径上，而独立 `pricing.yaml` 根本不在热重载链路里 | 保留独立文件（需另建文件监听 + 原子换表，凭空多一个子系统） |
@@ -866,11 +913,11 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 
 | 事项 | 决定 | 理由 | 后果与缓解 |
 |---|---|---|---|
-| 厂商计数单位 ≠ vmr 可观测单位 | 需用户实测校准 | prompt / message 这类单位在网络层根本不可见 | `amount` 必须按 vmr 口径配置（阶跃星辰 1 prompt ≈ 15 次请求）；官方用量 API 是根治手段 |
+| 厂商计数单位 ≠ vmr 可观测单位 | 需用户实测校准 | "一次提问"这类单位在网络层根本不可见，会展开成十几到二十几次调用 | `amount` 必须按 vmr 口径配置；官方用量 API 是根治手段 |
 | 绕过 vmr 的直连流量 | 无法计入 | 结构性不可能 | 本地计数低估；`Source` 接口接官方用量 API 可消解 |
 | 多实例共享计数 | 不做 | 单二进制、零 DB 是产品前提 | 多实例各自低估；单实例部署，或接官方用量 API |
-| 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且只有智谱一家、规则还在变 | 对这类账号系统性低估；改用 `cost` 档（价格覆盖的 `hour_*` 直接支持）或调低 `amount` |
-| 标准列表价对国产第一方覆盖不全 | 接受，靠账号覆盖补 | 实测：`dashscope/` 36 条**无缓存字段**、`volcengine/` 4 条**无价格字段**、智谱国内站/小米/阶跃**零条**；全表 cache_read 覆盖率仅 23% | 这些账号要用 `metric: cost` 必须手写 `pricing.overrides`——且因为四项不齐会加载期报错，缺失不会被静默吞掉 |
+| 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且这类规则只在个别厂商出现、自身还在频繁调整 | 对这类账号系统性低估；改用 `cost` 档（价格覆盖的 `hour_*` 直接支持）或调低 `amount` |
+| 标准表对国产第一方覆盖不全 | 接受，靠补充表 / 账号覆盖补 | 实测上游数据：部分厂商无缓存字段、部分条目无价格字段、部分厂商零收录；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%（明细见市场参考文档） | 这些账号要用 `metric: cost` 必须补费率；因四项不齐即加载期报错，缺失不会被静默吞掉；补充表可回贡以逐步消解 |
 | 标准列表价会过期 | 接受 | 随二进制内置的是快照 | 表内带生成时间戳，报表免责声明与 `vmr check` 一并显示；`tools/` 下有刷新脚本，用户也可自备标准表 |
 | `cost` 档分量比例与价目表不同 | 接受 | 按模型的绝对费率已能覆盖绝大多数情形 | 改用 `tokens` + `token_weights`（换取精确比例，损失按模型粒度） |
 | 无 config.yaml 时跑 `vmr report` | 接受降级 | 账号覆盖存在 config.yaml 里 | 只拿到标准列表价，$ 数字不含该账号折扣；需在用户文档写明 |
@@ -896,9 +943,9 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 先永久砍掉两项（不是延后，是不做）：
 
 * **`Source` 接口**：上一版称它"零成本"。诚实讲它是**投机性接口**——在没有第二个实现之前，
-  接口只是把一个函数调用包了一层。等真要写 MiniMax 用量适配器时再抽，形状还会更贴合真实数据。
+  接口只是把一个函数调用包了一层。等真要写第一个用量适配器时再抽，形状还会更贴合真实数据。
   **上一轮批评 gemini 文档"打空头勾"，这里必须对自己用同一把尺。**
-* **Scope（`models:`）降级为"有真实案例才做"**：证据本来就弱——MiniMax 的"模型级明细"很可能只是
+* **Scope（`models:`）降级为"有真实案例才做"**：证据本来就弱——用量接口返回的"模型级明细"很可能只是
   展示明细，而非各自独立的额度池。按未证实的猜测建结构，正是本文一直在拒绝的做法。
 
 剩下的十二项不靠"裁剪"解决，靠**分批**：因为它们不是同一个问题的十二个面，
@@ -954,7 +1001,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 |---|---|---|---|
 | **P1 单桶均衡** | 多套餐按剩余进度自动分流 | 81 个在售套餐中只有 5 个既无请求限额也无 token 限额 → **约 94% 能配出一条计费周期桶** | 少 |
 | **P2 计量准确** | 百分比可信；Credits 制套餐精确记账 | Token Plan 的 Credits/金额制账号（约占在售的 1/3） | 中 |
-| **P3 多约束** | 少撞 5h/周限额造成的 429 抖动 | 多窗口套餐（阿里 Pro / 智谱 / 字节 / OpenCode 等） | 中 |
+| **P3 多约束** | 少撞短窗限额造成的 429 抖动 | 多窗口套餐（类型 A / B / D / F） | 中 |
 | **P4 校准与看板** | 消除本地计数的系统性偏差；成本归因 | — | 小而深 |
 
 ---
@@ -985,7 +1032,9 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 **范围**
 - `token_weights`（账号级，缺省全 1.0）
 - `model_multipliers`（账号级，**纯额度语义**，只作用于 `requests`/`tokens`）
-- 标准列表价：`tools/` 下的生成脚本（LiteLLM → 最小派生表，单位归一到 per-1M，保留 MIT 署名）+ `go:embed` + 生成时间戳
+- 标准表：`tools/` 下的生成脚本（上游 → 最小派生表，单位归一到 per-1M，canonical key 对齐，
+  **缺失分量不补 0**，保留 MIT 署名）+ `standard.generated` / `standard.curated` 双文件 + `go:embed` + 生成时间戳
+- 用户补充表 `pricing.supplement`：按 canonical key 与标准表合并，冲突时补充表胜出
 - `providers[].pricing`：`map`（含四步自动解析，有歧义时不猜）+ `overrides`（`discount` / 显式费率 / 时间窗）
 - `metric: cost`，四项费率不齐 → **加载期错误**
 - **破坏性变更**：独立 `pricing.yaml` 与 `vmr report -pricing` 取消，存量行迁入 `providers[].pricing.overrides`
@@ -997,7 +1046,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 **验收**
 1. `token_weights` 全为 1.0 时，`base(tokens)` 与 P1 **逐字节一致**（"不配置就是原来的行为"）
 2. `cost` + `discount: 0.6` 的结果恰为纯 `cost` 的 0.6 倍（折扣层未被二次套用）
-3. 小米·MiMo / 阿里·百炼两组真实费率夹具下，`cost` 与等权总 token 的比值落在 3～8 倍区间
+3. 两组取自市场参考文档的真实费率夹具下，`cost` 与等权总 token 的比值落在 3～8 倍区间
 
 #### P3 — 多约束（防 429 抖动）
 
@@ -1006,15 +1055,15 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 **范围**：一个 provider 多条 Limit + `min()` 归并；桶/闸角色（最长 tumbling 为桶，全 rolling 则无桶）；
 rolling 窗口 + 环形分桶；Scope（`models:`，仍以出现真实案例为前提）
 
-**验收**：§5.2 的阿里云 Pro 算例（`score = 0.833`）作为数值断言；
+**验收**：§5.2 的类型 A 算例（`score = 0.833`）作为数值断言；
 5h 窗口接近饱和时该账号被压制、窗口翻转后自动恢复，且月度桶进度不因此失衡
 
 #### P4 — 校准与看板
 
 **范围**
 - `vmr report` 的 `section_quota.go`：额度燃尽看板、按 `ClientKeyTag` 的消耗归因（跨到分析半区，见战略文档）
-- 官方用量 API 适配器：**优先 MiniMax**（`coding_plan/remains` 是目前唯一公开且稳定的接口；
-  智谱有反爬，Claude 只在 statusLine 侧）——**写这个适配器时才抽 `Source` 接口**
+- 官方用量 API 适配器：从**唯一一个公开且稳定的私有接口**入手（其余厂商或有反爬、或只在客户端侧
+  暴露百分比，见市场参考文档）——**写这个适配器时才抽 `Source` 接口**
 - 标准列表价刷新脚本纳入定期流程
 
 **价值**：这一批直接消解 §13 里最难受的三条限制（单位换算、绕过 vmr 的流量、时段倍率）。
@@ -1056,12 +1105,17 @@ archtest 有 700 行预算，当前 561 行。
   若 `stream_normal` 的 p95 出现可测量变化，说明门禁写错了
 * **[P2] `tokens` 档的退化等价性**：`token_weights` 全 1.0 时 `base(tokens)` 逐字节等于 `In + Out`
 * **[P2] 三种 metric 的折算**：以 `docs/TokenPlan_Market_Reference.md` 的真实折算率做夹具——
-  小米·MiMo（缓存 2.5 / 输入 300 / 输出 600 Credits per Token）与阿里·百炼
-  （输入 5K / 命中 25K / 输出 0.83K Token per Credit）各一组，断言 `cost` 与等权总 token 的比值
-  落在 3～8 倍区间——**这条钉住的是"为什么必须做分量折算"这个立论本身**
+  取两组分量比例差异悬殊的真实费率各一组（具体数值见该文档，勿在本文重复），断言 `cost`
+  与等权总 token 的比值落在 3～8 倍区间——**这条钉住的是"为什么必须做分量折算"这个立论本身**
 * **[P2] 折扣层不重复计算**：`cost` + `discount: 0.6` 恰为纯 `cost` 的 0.6 倍
-* **[P2] 费率解析**：四步自动解析的优先级；第 ④ 步有歧义时**不猜**而是按无费率处理；
+* **[P2] 三层费率解析**：账号覆盖 → 补充表∪标准表 → 无费率，三层优先级；
+  补充表与标准表按 canonical key 合并、冲突时补充表胜出；
+  `discount` 形式作用于**下层解析出的**费率而非列表价原值；
+  `pricing.supplement` 指了路径但文件不存在 = 加载期错误（不静默跳过）
+* **[P2] canonical key 自动解析**：四步优先级；第 ④ 步有歧义时**不猜**而是按无费率处理；
   `map` 显式项优先于一切
+* **[P2] 生成脚本**：上游缺失的分量**不得补 0**（否则会抹掉"四项不齐即报错"这道保护）；
+  单位从 per-token 归一到 per-1M 的换算；`standard.curated` 的手工行在重新生成后仍然存在
 * **[P2] 缺失费率**：`metric: cost` 下四项不齐（区分"显式 0.0"与"字段缺失"）必须是加载期错误，
   断言不会静默按 0 计费
 * **[P2] 时间窗费率**：`date_*` 与 `hour_*`（含跨零点）按 first-match-wins 生效
@@ -1069,7 +1123,7 @@ archtest 有 700 行预算，当前 561 行。
 * **[P2] 配置校验**：`token_weights` 配在无 `tokens` Limit 的账号上、`model_multipliers` 配在全 `cost`
   的账号上、`discount` 与显式费率同时出现——三者都必须报错，不能静默无效
 * **[P3] 桶/闸**：角色判定（最长 **tumbling** 为桶）；**全 rolling 的账号没有桶、全部按闸**；
-  闸只压制不提升（`raw > 1` 时 headroom 仍 ≤ 1）；多 Limit 取 `min`；§5.2 阿里云 Pro 算例的数值断言
+  闸只压制不提升（`raw > 1` 时 headroom 仍 ≤ 1）；多 Limit 取 `min`；§5.2 类型 A 算例的数值断言
 * **[P3] 环形分桶**：滚动窗口下的求和与过期桶复用
 * **[P3] Scope 与倍率**：`models:` 过滤只对匹配模型计费；`model_multipliers` 按**上游**模型名生效
   （非虚拟模型名）；`"*"` 通配项不覆盖具名项
