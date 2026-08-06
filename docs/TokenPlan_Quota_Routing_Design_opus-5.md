@@ -459,8 +459,11 @@ score(provider) = min( over all its Limits ) headroom(L)      // 最紧的约束
                   再 clamp 到 [0, HeadroomCap]                 // HeadroomCap = 5
 ```
 
-闸的形式含义：**只要该窗口的消耗速率不超过其比例进度的 2 倍，闸保持中性（1.0）；
-超过后线性收紧到 0。** 于是闸永远只能把分数往下拉，不会把一个账号顶上去。
+闸的形式含义：**`raw ≥ GateReserve`（即剩余额度比例仍不低于剩余时间比例的一半）时保持中性 1.0，
+低于该线后线性收紧到 0。** 于是闸永远只能把分数往下拉，不会把一个账号顶上去。
+
+> 不要把它读成"消耗速率不超过 N 倍就中性"——`raw` 与"超额消耗倍数"的对应关系随窗口进度变化，
+> 不是一个固定倍数。判据就是 `raw` 本身。
 
 验证（类型 A，三层窗口）：5h 窗口已用 5500/6000（剩 8.3%）且只剩 1h（时间剩 20%）：
 
@@ -490,8 +493,14 @@ A 拿走流量 → A 的消耗上升 → A 的 score 下降 → 跌破 B 后自�
 4. **对 Prefix-Cache 友好**：贪心会把新会话在一段时间内集中到同一账号，
    而轮询式撒开恰恰在制造缓存分裂，与项目主线目标反向。
 
-代价是分配粒度较粗（两账号 score 交叉前流量持续压在一个上）。真实场景下不是问题：
-Agent 会话本身稀疏且长尾，账号侧并发上限触发会返回 429 → 走既有 health 冷却与 failover。
+**score 是每个新会话重算一次的**，所以"平手"不会造成持续独吞：几个刚重置的账号 score 相等时，
+排第一的接下第一个会话、随即因计费而 score 下降，队首立刻换人——边际行为接近轮转。
+真正的粒度损失只发生在两账号 score 交叉之前的那一小段，量级是一个会话。
+
+残余的一种情形是并发突发：N 个新会话在任何一个计费落地前同时选中同一账号。
+其额度影响已在 §7.4 量化（上界约 0.5%）；其并发影响由账号侧 429 → 既有 health 冷却与 failover 兜住。
+**注意这不是本功能引入的**——今天没有额度感知时，`priority` 打平后的稳定排序本来就把全部流量
+交给第一个端点，本功能只会改善它。
 
 ---
 
@@ -529,7 +538,9 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 
   // 1. 切分并列梯队：沿 candidates 走，相邻两端点若对 dims 链中每个
   //    Dimension.Compare 都返回 0，则同属一个梯队。
-  //    （不预设 priority 在链里；Sort 稳定，梯队内保持配置文件顺序；dims 为空则全体同梯队。）
+  //    （不预设 priority 在链里；Sort 稳定，梯队内保持配置文件顺序；
+  //     dims 为空则全体同梯队——config 的 applyDefaults 会把 strategy 补成 ["priority"]，
+  //     所以空 dims 只在直接构造 ModelRoute 的测试里可达，仍需正确处理。）
   //
   // 2. 每个梯队内：取出"挂了 Limit"的成员及其下标，按 score 降序稳定排序后写回**原来那些下标**。
   //    未挂 Limit 的成员位置纹丝不动。
@@ -597,7 +608,11 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 实现约束：
 * 挂在 `respStream` **已有的事件切分**上，不新增一遍全文遍历；
 * 每个事件先做 `bytes.Contains(ev, []byte("\"usage\""))` 廉价门禁，命中才 JSON 解析——
-  绝大多数 token delta 事件直接跳过，开销约等于零；
+  绝大多数 token delta 事件直接跳过，开销约等于零。
+  **门禁必须作用于重组后的完整事件（以及缓冲模式下的完整响应体），绝不能作用于原始 TCP 分片**：
+  一个 usage 对象被网络层从中间切开时，逐分片检测会静默漏扫。事件重组本来就是 `respStream`
+  已有的机制，挂在它上面即可，但这一点必须写死——它是本处最容易实现错的地方。
+  门禁被正文里的 `"usage"` 误开是良性的：解析后找不到顶层 `usage` 键就什么都不合并；
 * 解析与合并**不在 router 里重写**：在 `chatmsg` 暴露逐块入口（形如 `UsageFromChunk([]byte) (Usage, bool)`，
   内部即现有 `mergeUsage`）。这守住 CLAUDE.md 的"`chatmsg` 是消息解析唯一真相源"不变量——
   否则 Anthropic 的 `message_start`/`message_delta` 两段式累计会出现第二份实现；
@@ -826,10 +841,19 @@ type account struct {
 HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全；但对额度而言，轮换密钥（同一账号）
 清零当月计数会直接导致超支。两个方向的风险不对称，必须在代码注释里写明原因，否则后人一定会"顺手统一"。
 
-**Spec 落点**：`core.QuotaSpec`（`{ModelMultipliers, TokenWeights, Limits []Limit}`）定义在 `core`——`config` 校验它、`quota` 计算它、
-`router` 读它，放 `core` 是唯一不产生环的位置（与 `core.StickyBackstopTTL` 同一先例）。
-`BuildSnapshot` 把同一个 `*core.QuotaSpec` 指针挂到该 Provider 展开出的所有 `core.Endpoint` 上
-（`nil` = 无套餐），于是排序时取额度是一次字段读，而不是对 `Cfg.Providers` 做线性查找。
+**Spec 落点**：分成 **YAML 形状**与**运行态形状**两个类型，对齐 `config.EndpointGroup → core.Endpoint`
+这个已有先例，而不是让一个类型同时背两副担子：
+
+* `config.QuotaConfig` / `config.LimitConfig`——带 yaml 标签，`every`/`since` 需要自己的 `UnmarshalYAML`
+  （Go 的 `time.ParseDuration` 不认识 `1mo`/`1w`，`config.Duration` 复用不了）；`validate()` 校验枚举与取值域。
+* `core.QuotaSpec` / `core.Limit`——运行态形状，**无 yaml 标签**，周期已解析成结构化字段。
+
+放 `core` 的理由仍成立且是硬约束：`core.Endpoint` 要挂这个指针，而 `core` 受 archtest 的
+**零内部依赖**约束（`zeroInternalDepPackages`），不可能反向 import `quota`；同时 `config → core`
+本来就存在（`validate` 已引用 `core.StickyBackstopTTL`），不产生环。
+
+`BuildSnapshot` 负责转换，并把同一个 `*core.QuotaSpec` 指针挂到该 Provider 展开出的所有
+`core.Endpoint` 上（`nil` = 无套餐），于是排序时取额度是一次字段读，而不是对 `Cfg.Providers` 做线性查找。
 
 ### 9.3 持久化
 
@@ -851,8 +875,9 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | 会真实调用上游，因此**会计费** | 与真实流量一致，符合直觉，无需特殊处理 |
+| `vmr replay` | **不计费**——已核对代码：`internal/replay` 直接用 `router.NewUpstreamClient` + `client.Do`，完全绕开失败循环与 `respStream` | 它确实消耗真实额度，但不经过计费点，属**已知盲区**（与 probe 同一类），见 §13 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`docs/OUTSTANDING_ISSUES_opus-5.md` 已有记录 |
+| 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 
 ---
 
@@ -864,17 +889,29 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
   这是刻意选择的方案，替代"给 `audit.Record` 加字段"（后者按 CLAUDE.md 必须同步改 report 及其测试）。
 * **`/admin/status`**：新增 `quota` 段，每个 Provider 的每条 Limit 一行：
   `metric` / `window` / `used` / `amount` / `pct` / `headroom` / `role(bucket|gate)` / `window_ends_at` /
-  `estimated_pct`，外加该 Provider 的最终 `score` 与它由哪条 Limit 决定，
+  `estimated_pct`，**以及 `used` 的四分量明细（fresh / cache_read / cache_write / out）**——
+  计数器本来就按分量存，把明细露出来近乎免费，却让用户**第一天就能算出自己的换算系数**
+  （高缓存命中的账号，等权口径与真实扣减能差 3～8 倍，见 §14.2），
+  而不必等一个完整周期才凭经验标定 `amount`。
+  外加该 Provider 的最终 `score` 与它由哪条 Limit 决定，
   以及生效中的 `model_multipliers` / `token_weights`——
   **促销倍率过期后忘记改配置是可预见的失效模式，把生效值显示出来是最便宜的防呆**。
   这是运维者回答"为什么流量都压在这个账号上"的第一现场。
-* **`vmr check`**：在既有路由表预览里打印各 Provider 的 Limit 配置（纯静态，不读运行态）。
+* **`vmr check`**：打印各 Provider 的 Limit 配置（纯静态，不读运行态），**并打印生效时区**——
+  周期边界与分时费率都按 `fmtutil.DisplayZone`（= `time.Local`）判定，
+  而容器里未设 `TZ` 时它就是 UTC，与运维者心智模型差好几个小时且完全无声。
+  把生效值显示出来是最便宜的防呆，与显示生效倍率是同一条思路。
+* **`vmr status`**：`cmd/vmr/cmd_status.go` 用**类型化结构体**解析 `/admin/status` 的 JSON，不是通用透传——
+  所以 `/admin/status` 新增 quota 段后 `vmr status` **不会自动显示**，必须同步扩展那个结构体，
+  否则会出现"接口有数据但 CLI 看不见"的割裂。
 * **live log**：**不加**。日志行已很密，额度是"当前状态"而非"本次请求发生了什么"，它属于 `/admin/status`。
 * **`vmr report`**：阶段二，`section_quota.go`（新 section = 新文件，符合 archtest 约定）。
 
 ---
 
 ## 12. 决策与取舍
+
+### 12.1 设计决策
 
 | 决策 | 选择 | 理由 | 放弃的备选 |
 |---|---|---|---|
@@ -906,6 +943,25 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 
 ---
 
+### 12.2 已评估并否决的改进提案
+
+**这一节存在的目的是防止同一批意见被反复提出。** 下列提案都经过核对与评估，
+判定与理据记在此处；重新提出前请先看这里。
+
+| 提案 | 判定 | 理据 |
+|---|---|---|
+| score 平手时加抖动/轮转因子（原子计数取模），避免刚重置的账号被"单点全量压测" | **否决** | 贪心是**每个新会话重算一次**的：A 只要计费一次，score 就低于 B，队首随即换人——平手不会造成持续独吞，边际行为接近轮转。残余的并发突发（N 个新会话在任何一个计费前同时选中 A）是 §7.4 已量化的同一现象（上界约 0.5%），且**今天没有本功能时，`priority` 打平后稳定排序本来就把全部流量给第一个端点**，本功能只会改善它。而该提案会同时废掉 §5.3 的无状态、确定性、cache 局部性三条属性——用确定的损失换不确定的收益 |
+| `hour_from`/`hour_to` 匹配前须显式转 `DisplayZone` | **已实现，非问题** | `PricingRate.matches` 首行即 `ts = ts.In(fmtutil.DisplayZone)`，且有注释说明。真正的相邻风险是**容器里未设 TZ 时 `DisplayZone` 本身就是 UTC**——已采纳的对策是把生效时区显示出来（§11），而不是给规则加时区字段（那会与"单一显示权威"的既定不变量对冲） |
+| usage 门禁 `bytes.Contains` 会被正文里的 `"usage"` 误触发 | **否决** | 门禁误开只是多做一次 JSON 解析，**不产生错误计量**——解析后找不到顶层 `usage` 键就什么都不合并。且 JSON 会把内容里的引号转义成 `\"`，`"usage"` 这个字节序列本就匹配不上，与 `modelFieldPattern` 注释里记录的同一条推理。为此加复杂度不值得 |
+| usage 门禁不能作用于原始 TCP chunk，否则跨包截断会漏扫 | **本就如此，非问题** | 门禁作用于**重组后的完整事件**（`emitBlock`）与**完整响应体**（`finalizeBuffered`），从不作用于 `ingest` 拿到的原始 chunk。这一点已在 §7.2 写死，因为它正是最容易实现错的地方 |
+| `every: 1mo` 不能裸调 `time.AddDate` | **成立，已处理** | Go 的 `AddDate` 会把 2 月 31 日归一化溢出（1/31 + 1mo 得到 3/3）。实现必须自带月末截断，已写入 P1 开发计划的周期数学一步 |
+| P1 等权 token 会让高缓存命中的 Credits 套餐被误判耗尽 | **成立，但对策不同** | 确实存在：等权记账高估 3～8 倍，而用户在第一个周期结束前无从凭经验标定 `amount`。但后果是**被错误降权、浪费套餐**，不是"无法工作"（score 归零只排到梯队末位，不淘汰）。对策不采用"把 amount 放大 3～5 倍"这种猜数——P1 本就按分量存原始 token，**把分量明细放进 `/admin/status` 即可让用户第一天就算出自己的换算系数**（§11、§14.2） |
+
+其余反复出现过的路线选择，理据已在 §12.1 的"放弃的备选"列：SWRR、预先定义 `Source` 接口、
+额度耗尽硬熔断、per-provider 的四个金额全局权重、预扣对账。
+
+---
+
 ## 13. 范围边界与已知限制
 
 `vmr` 的额度计数**本质是一个估算值**。下表把"决定不做的事"和"做了之后剩下的偏差"合并成一张表——
@@ -914,7 +970,8 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 事项 | 决定 | 理由 | 后果与缓解 |
 |---|---|---|---|
 | 厂商计数单位 ≠ vmr 可观测单位 | 需用户实测校准 | "一次提问"这类单位在网络层根本不可见，会展开成十几到二十几次调用 | `amount` 必须按 vmr 口径配置；官方用量 API 是根治手段 |
-| 绕过 vmr 的直连流量 | 无法计入 | 结构性不可能 | 本地计数低估；`Source` 接口接官方用量 API 可消解 |
+| 绕过 vmr 的直连流量 | 无法计入 | 结构性不可能 | 本地计数低估；将来接官方用量 API 可消解 |
+| `vmr replay` / 后台探针的消耗 | 不计入 | 两者都绕开 `forwardSuccess`：replay 直接用 `NewUpstreamClient`，probe 自己发请求 | 量级小（replay 人工偶发、probe 是小报文），低估幅度可忽略；接官方用量 API 同样可消解 |
 | 多实例共享计数 | 不做 | 单二进制、零 DB 是产品前提 | 多实例各自低估；单实例部署，或接官方用量 API |
 | 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且这类规则只在个别厂商出现、自身还在频繁调整 | 对这类账号系统性低估；改用 `cost` 档（价格覆盖的 `hour_*` 直接支持）或调低 `amount` |
 | 标准表对国产第一方覆盖不全 | 接受，靠补充表 / 账号覆盖补 | 实测上游数据：部分厂商无缓存字段、部分条目无价格字段、部分厂商零收录；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%（明细见市场参考文档） | 这些账号要用 `metric: cost` 必须补费率；因四项不齐即加载期报错，缺失不会被静默吞掉；补充表可回贡以逐步消解 |
@@ -964,7 +1021,12 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 （"我这个月烧到 80% 了没有"），**不是路由决策需要的**。
 第一批用等权总 token，路由决策就已经正确。
 
-诚实的边界：这个偏差不是严格恒定的——缓存命中率会随会话推进从低走高，
+**抵消的前提是 `amount` 按 vmr 的计数口径标定**，而不是照抄厂商标称值（§2.4 已就单位换算说过同一件事）。
+对高缓存命中的 Credits 套餐，这个系数可达 3～8 倍，而用户在第一个周期结束前无从凭经验取得它——
+所以 P1 必须把 `used` 的**四分量明细**露在 `/admin/status`（§11），让用户第一天就能算出来。
+否则该账号会被错误降权、浪费套餐，正是本功能要防的事。
+
+诚实的边界：这个偏差也不是严格恒定的——缓存命中率会随会话推进从低走高，
 等效倍数在 60%～95% 命中率区间里大约漂 ±30%，与我们本来就接受的估算误差同量级。
 相对于"完全没有额度感知"，这是二阶问题。
 
