@@ -25,7 +25,7 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 1. **厂商绑定与额度不均**：Coding-Plan 通常只能调用该厂商自家模型；购买多家套餐容易出现部分套餐跑爆溢出到高价按量 API、部分套餐吃不满浪费的局面。
 2. **Prefix-Cache 跨账号隔离陷阱**：在长上下文 Agent 会话中，不同账号间的 Prompt Cache 完全隔离。常规网关的无状态轮询调度会导致 Agent 的多轮对话频繁落到不同账号上，缓存命中率归零，成本与延迟暴涨。
 3. **上游缺乏标准配额 API**：各大厂商控制台对于 Token-Plan 剩余额度、自然日刷新限制等缺乏稳定、公开的标准 API 接口。
-4. **计费模型不统一，"额度"本身有两种形态**：部分 Coding-Plan 是严格的月度/日度 Token 总量桶（如「100M tokens/月」），可以用剩余量做加权调度；但相当一部分主流套餐（典型如 Claude Code 的 Pro/Max 订阅）并非按 Token 总量计费，而是按滚动时间窗口内的用量/会话数限流（例如"每 5 小时一个窗口"），且厂商官方从不精确公开窗口内的剩余额度。这两种形态需要两种不同的调度机制——前者是"额度加权分流"问题，后者本质是"限流感知的退避与切流"问题——不能用同一套 `total_tokens`/`reset_period` 模型硬套，详见 4.1。
+4. **计费模型不统一，"额度"本身有两种形态**：部分 Coding-Plan 是严格的月度/日度 Token 总量桶（如「100M tokens/月」），周期一到未用完的部分直接作废；但相当一部分主流套餐（典型如 Claude Code 的 Pro/Max 订阅）并非按 Token 总量计费，而是按滚动时间窗口内的用量/会话数限流（例如"每 5 小时一个窗口"），窗口内烧多少都不影响下一个窗口，且厂商官方从不精确公开窗口内的剩余额度。这两种形态背后是两种不同的经济学：前者是"过期作废、须在到期前恰好烧完"的**配速（Pacing）问题**，后者是**限流感知的退避与切流问题**，不能用同一套模型硬套——这正是 `TokenPlan_Quota_Routing_Design_opus-5.md` §5.2 把额度约束（Limit）分为"桶（Bucket）"与"闸（Gate）"两种角色的出发点。第一阶段（P1）只做前者，后者继续交给现有健康状态机的冷却/退避机制兜底，详见该文档 §14 的分批实施。
 5. **合规与账号共享边界**：不少 Coding-Plan（尤其是绑定 CLI 客户端 OAuth 会话、而非标准 API Key 计费的套餐）在服务条款中限定"单一用户/单一客户端"使用。能否合规地把它接入网关做多人共享，取决于厂商条款、以及该套餐是否提供可重定向 `base_url` 的标准 API Key 出口——不能默认所有 Coding-Plan 都允许，需要逐厂商确认后再接入。
 
 ### 2.2 传统 Agent 观测工具的痛点
@@ -53,7 +53,7 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 | **接入侵入性** | 替换 `base_url` (无侵入) | 替换 `base_url` (无侵入) | 替换 `base_url` (无侵入) | **强侵入** (需在代码中导入 SDK / 装饰器 / OTel) | 替换 `base_url` 或 CLI 配置 (无侵入) | **替换 `base_url` (零代码侵入，Zero-Instrumentation)** |
 | **协议处理方式** | 强行转为 OpenAI 格式 | 强行转为 OpenAI 格式 | 统一中间格式转换 | 仅捕获 SDK 层 Payload | 通常仅覆盖单一厂商原生协议，不做多协议透传 | **字节忠实透传 (Byte-Faithful Passthrough)，保留厂商特有字段** |
 | **Prefix-Cache 保护** | ❌ 无状态/随机轮询，极易摧毁 Cache | ⚠️ 部分支持基础 Session Affinity | ❌ 无状态路由，不支持自备账号 Cache 优化 | N/A (仅观测，不参与路由) | ✅ 局限于单一厂商内的多账号级 Sticky（这是它们存在的初衷） | **✅ 原生 Session-Sticky (System Prompt + First Msg 哈希绑定)** |
-| **Token-Plan 水位调度** | ❌ 仅感知下游虚拟扣费，不感知上游额度 | ❌ 无针对 Token-Plan 配额平滑调度的逻辑 | ❌ 不支持带入用户自备 Token-Plan 额度池 | N/A (仅观测) | ✅ 部分支持同厂商多账号轮转，但无法跨厂商统一调度 | **✅ 本地用量累计 (Response Usage) + 平滑加权水位调度** |
+| **Token-Plan 水位调度** | ❌ 仅感知下游虚拟扣费，不感知上游额度 | ❌ 无针对 Token-Plan 配额平滑调度的逻辑 | ❌ 不支持带入用户自备 Token-Plan 额度池 | N/A (仅观测) | ✅ 部分支持同厂商多账号轮转，但无法跨厂商统一调度 | **✅ 本地用量累计 (Response Usage) + 按周期配速 (Headroom Pacing) 的水位调度** |
 | **执行诊断与对比** | ❌ 仅有基础日志 | ⚠️ 简单日志与 Cost 统计 | ❌ 仅有 HTTP 调用日志 | ✅ 强大的链路 Trace，但无 1-Click Replay | ❌ 基本没有，多为纯转发脚本 | **✅ 步骤级 Story 还原 (`vmr story`) + 跨 Run 差异对比 (`compare`) + 1-Click Replay** |
 
 ### 3.3 总结 VMR 的差异化壁垒
@@ -64,66 +64,48 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 
 ---
 
-## 4. 技术实现策略与调度算法
+## 4. 技术路线：为什么是"配速"而不是"负载均衡"
 
-针对上游无标准 API 的现状，VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略。本节仅覆盖 2.1 第 4 点中"月度/日度 Token 总量桶"这一类套餐；"滚动时间窗口限流"类套餐（如 Claude Code Max/Pro）不适用下述模型，留作独立机制评估（见 5. 路线图）。
+VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略，但**这不是一个负载均衡问题**——把流量喂给账号 A 就是不喂给账号 B，而套餐额度周期性作废、不结转，所以要优化的是"在每个套餐各自到期前恰好烧完"，不是"把压力摊匀"。这个区分是整套算法的立论前提：直觉上最自然的"剩余额度比例"公式，在套餐重置日彼此错开（多账号是分批买的，重置日对齐是例外不是常态）时会给出方向性错误的结论——一个 4 天后到期、还剩 30% 额度的账号最该被优先烧掉，纯按剩余比例排反而会把它排到最后。完整推导与算法见
+`TokenPlan_Quota_Routing_Design_opus-5.md`（下称"设计文档"），本节只记路由框架层面的策略性决定，不复述其算法细节——算法本身仍在演进（当前落地依据见 `TokenPlan_Quota_P1_DevPlan_opus-5.md` 的 P1 单桶均衡批次），复述一份会立刻过期的公式副本没有意义。
 
-### 4.1 本地 Response Token 累计策略
+本节仅覆盖 2.1 第 4 点中"月度/日度 Token 总量桶"（设计文档称"桶 Bucket"）这一类套餐；"滚动时间窗口限流"（设计文档称"闸 Gate"）类套餐（如 Claude Code Max/Pro）不适用同一套配速模型，第一阶段继续交给现有健康状态机的冷却/退避兜底，是否值得单独建模留给后续批次用真实运行数据判断（设计文档 §14.3）。
 
-在配置文件 [`UserGuide.md`](file:///Users/stanford/code/vmr/docs/UserGuide.md#config-layout) 中允许为每个 Provider 配置预估额度与重置周期。`budget` 挂在 Provider 一级而非 EndpointGroup 一级，因为额度是账号级资源——同一账号的 Coding-Plan 常常被多个虚拟模型下的不同 EndpointGroup 复用，只有挂在 Provider 上才不会被重复计费或分裂成互不相干的多份计数：
+### 4.1 本地 Response Token 累计：为什么不等厂商开放配额 API
 
-```yaml
-providers:
-  - name: ali-coding-plan-1
-    base_url: {openai: https://dashscope.aliyuncs.com/compatible-mode/v1}
-    api_key: ${ALI_KEY_1}
-    budget:
-      total_tokens: 100000000     # 100M tokens 初始套餐配额
-      reset_period: monthly       # monthly / daily / fixed
-      reset_day: 1                # 每月 1 号自动重置本地累计器（VMR 本地时钟，非厂商账单周期的精确对齐，见下）
-```
+上游普遍没有稳定公开的配额查询接口，VMR 因此选择"本地累计上游 Response 的真实 Usage"作为主数据源，而不是等待或依赖厂商私有接口。这个选择带来三条必须接受、而非要消除的已知限制：
 
-* **运行态统计**：每次请求成功返回后，VMR 复用 `internal/chatmsg.ExtractUsage` 已有的 `Usage{In, Out, CacheRead, CacheWrite, Reasoning}` 结构提取实际消耗，在内存中更新该 Provider 的 `consumed_tokens`。不同厂商对 Coding-Plan 额度的实际扣减权重并不总是"In+Out 原样相加"——例如 Cache Write 通常按溢价计入额度、Cache Read 常按折扣或免费计入——因此扣减公式需要按 Provider 可配置权重，而不是套用统一的等权求和，否则本地估算会系统性偏离厂商的真实剩余额度。
-* **有效权重计算**：
-  $$\text{Effective Weight} = \max\left(0, \frac{\text{total\_tokens} - \text{consumed\_tokens}}{\text{total\_tokens}}\right)$$
-* **已知限制，非本阶段解决**：
-  * **单一数据源假设**：本地计数只有在该 Provider 账号的全部流量都经过这一个 VMR 实例时才准确；账号被绕过 VMR 直接使用（例如同一把 Key 被另一个客户端直连），会导致本地计数与厂商真实剩余额度静默偏离。这是选择"本地统计"这条路径（而非等待厂商开放配额 API）必须接受的代价，不是实现缺陷。
-  * **`reset_day` 是本地近似，不是厂商账单周期的精确复刻**：厂商实际重置时刻的时区、小时精度未必对外公开，本地重置只保证"大致对齐"，不保证跨自然日边界的分秒级一致。
-  * **不覆盖并发/会话数上限**：不少 Coding-Plan 除总量桶外还单独限制并发会话数或 RPM，Effective Weight 看不到这类限制——账号显示"额度充足"仍可能因触发并发上限被上游拒绝。这类瞬时拒绝由现有的错误分类 + 健康状态机（冷却/半开）兜底处理，不需要 Effective Weight 提前预测，但需要明确这不是同一个问题。
+* **单一数据源假设**：本地计数只有在该账号的全部流量都经过这一个 VMR 实例时才准确；账号被绕过 VMR 直接使用（例如同一把 Key 被另一个客户端直连、或同一账号被团队其他人共用），会导致本地计数与厂商真实剩余额度静默偏离。这是选择"本地统计"这条路径必须接受的代价，不是实现缺陷，且对滚动窗口型套餐尤其致命——见设计文档 §14.3 对 Rolling 窗口适用范围的讨论。
+* **周期重置是本地近似，不是厂商账单周期的精确复刻**：厂商实际重置时刻的时区、小时精度未必对外公开，本地重置只保证"大致对齐"。
+* **不覆盖并发/会话数上限**：不少 Coding-Plan 除总量桶外还单独限制并发会话数或 RPM，本地额度水位看不到这类限制——账号显示"额度充足"仍可能因触发并发上限被上游拒绝。这类瞬时拒绝由现有的错误分类 + 健康状态机（冷却/半开）兜底处理，不需要额度水位提前预测，但需要明确这不是同一个问题。
 
-### 4.2 结合 Prefix-Cache 保护的双层路由算法
+厂商私有用量 API 不是完全不存在（已确认部分厂商有非标准的私有查询接口），本地累计不该被视为唯一可能的数据源、只是第一阶段唯一要实现的数据源——接口适配器留到验证过本地累计的准确性、且真的动手写第一个适配器时再设计（YAGNI；见设计文档 §7.3）。
 
-为了防止用量平衡算法破坏长上下文缓存，路由决策按如下两层执行：
+### 4.2 双层路由：Sticky 优先于配速
 
-1. **第一层：Session Affinity 强锁定（Sticky Pin）**
-   * 对于已建立的 Agent 多轮会话（通过 System Prompt + 首条 User Message 的 Hash 提取指纹），只要原 Endpoint 处于健康状态（未触发 4xx/5xx/429/Block 且满足 Capabilities 要求），**强制路由至原 Endpoint**。
-   * 该优先级高于任何水位相位调度，确保 Prefix-Cache 命中率达到 100%。
-   * **Sticky 命中的账号 Effective Weight 降为 0（套餐用尽）时的显式策略**：只要该端点仍处于健康态，继续沿用第一层的强锁定，任由本轮会话按量计费溢出，而不是为了省钱强行切换账号——切换账号打断 Prefix-Cache 后的重算成本，在长上下文场景下通常比短暂溢出计费更贵，这与"Cache 命中率优先"的既定取舍一致，实现时必须显式保留，不能被水位调度覆盖。
+为了防止额度调度破坏长上下文缓存，路由决策严格按两层执行，且**顺序不可颠倒**：
 
-2. **第二层：新会话加权分流（Quota-Aware Balanced Allocation）**
-   * 当接收到全新的 Agent 会话请求时，计算候选 Endpoint/Provider 的 `Effective Weight`。
-   * 采用平滑加权轮询（Smooth Weighted Round-Robin）算法分配新 Session。消耗较少、剩余额度比例较大的 Token-Plan 将获得更高的新 Session 接入概率。
-   * 这一层是在既有 `strategy.Dimension`（如 `priority`）排序打平之后，同一优先级梯队内部的加权细分，而不是取代 `priority`。典型用法：把预算充足的几个 Coding-Plan 账号配成同一优先级，做加权轮询；再用更低的 `priority` 挂一个按量计费的兜底 EndpointGroup。这样当所有 Coding-Plan 的 Effective Weight 同时打平至 0 时，现有 failover 逻辑天然会往下一优先级尝试，不需要为"套餐全部用尽后去哪"另外设计溢出逻辑。
+1. **第一层：Session Affinity 强锁定（Sticky Pin）**——对已建立的 Agent 多轮会话，只要原 Endpoint 仍健康，强制路由回原 Endpoint，优先级高于任何额度调度。**即使该账号的额度已耗尽，只要端点仍健康，照样继续锁定**，任由本轮会话按量计费溢出而不是为了省钱切账号——切账号打断 Prefix-Cache 后的重算成本，在长上下文场景下通常比短暂溢出计费更贵。
+2. **第二层：新会话按配速分流**——只对没有 Sticky 命中的全新会话生效，在既有 `strategy.Dimension`（如 `priority`）排序打平后的同一优先级梯队内部重排，不取代 `priority`。分配策略是无状态的贪心（按配速分数降序），不是平滑加权轮询——设计文档 §12.1 已论证 SWRR 需要额外的持久化累加器、且撒开流量本身会伤害 Prefix-Cache 局部性，与本项目"缓存命中率优先"的取舍方向相反。
 
 ### 4.3 内部多用户可见性：复用已有 ClientKeyTag，而非另起一套
 
-"企业同时采购多家厂商 Token-Plan，对内给员工/业务线共享调度"这类细分需求里，"共享调度"（4.1/4.2 的 Provider 级加权分流）和"按人可见性/归因"是两件事，本方案第一阶段只解决前者。路由层面无法做到、也不必做到按员工/业务线的实时限流——这需要在请求路径上引入下游身份维度的配额状态，比 Provider 级水位调度重得多，应作为独立范围评估，不与本阶段混淆。
+"企业同时采购多家厂商 Token-Plan，对内给员工/业务线共享调度"这类细分需求里，"共享调度"（4.2 的 Provider 级配速分流）和"按人可见性/归因"是两件事，本方案第一阶段只解决前者。路由层面无法做到、也不必做到按员工/业务线的实时限流——这需要在请求路径上引入下游身份维度的配额状态，比 Provider 级水位调度重得多，应作为独立范围评估，不与本阶段混淆。
 
-但"按人可见性"第一阶段就能低成本交付：VMR 的 `server` 层已经把每个下游 API Key 映射为 `ClientKeyTag`（`Cfg.APIKeys` → `audit.KeyTag`），逐请求写进审计日志，`vmr report`/`vmr story` 已经能按这个 tag 分组统计。也就是说"每个员工/业务线消耗了多少、逼近哪个套餐的额度上限"这类事后可见性，直接复用现有数据契约即可交付（见 5. 路线图阶段二），不需要为此新增一套采集机制。
+但"按人可见性"第一阶段就能低成本交付：VMR 的 `server` 层已经把每个下游 API Key 映射为 `ClientKeyTag`（`Cfg.APIKeys` → `audit.KeyTag`），逐请求写进审计日志，`vmr report`/`vmr story` 已经能按这个 tag 分组统计。也就是说"每个员工/业务线消耗了多少、逼近哪个套餐的额度上限"这类事后可见性，直接复用现有数据契约即可交付（见 5. 路线图 Analytics 侧），不需要为此新增一套采集机制。
 
 ---
 
 ## 5. 路线图与后续实施规划
 
-项目的实施分为两个明确阶段，保持一体两面的解耦架构：
+项目的实施沿本项目一贯的"两个物理对等半区"划分（Router 侧 / Analytics 侧），保持解耦架构。**Router 侧的具体分批与每批范围以设计文档 §14 为准**，本节只记两个半区各自的战略角色，不复述批次清单——批次的具体内容会随每一批上线后的真实数据调整，写在这里会立刻过期。
 
-### 阶段一：Router 侧 Token-Plan 水位感知路由与算法增强
-1. 在配置解析器中增加 `budget` 配置项支持（`total_tokens`、`reset_period` 等），仅覆盖 4.1 定义的"月度/日度 Token 总量桶"型套餐。
-2. 在路由引擎中接入 `chatmsg.ExtractUsage` 的本地统计器（支持按天/月时间窗口轮转，按 Provider 可配置的 Cache Read/Write 权重折算）。
-3. 扩展现有的 `strategy` 路由逻辑，在 Sticky 命中之外，实现基于 `Effective Weight` 的新会话分配策略——作为 `priority` 排序打平后的同层加权，而非替代（见 4.2）。
-4. "滚动时间窗口限流"型套餐（如 Claude Code Max/Pro）明确不纳入本阶段的 Token 桶模型，留作独立的限流感知机制单独评估。
+### Router 侧：Token-Plan 配速路由
 
-### 阶段二：Analytics 侧 Agent Story 与 Audit 丰富化
-1. 保持现有 [`UserGuide.md`](file:///Users/stanford/code/vmr/docs/UserGuide.md#agent-task-narratives-vmr-story) 中的 `vmr story` 与 `vmr story -compare` 分析指令独立高效。
-2. 在 `vmr report` 的用量报告中追加基于 Token-Plan 本地预算的消耗进度与预测看板。
-3. 复用现有 `ClientKeyTag`，在 `report`/`story` 中新增按员工/业务线的套餐消耗占比与成本归因视图（见 4.3），把"多人共享调度"的可见性需求用既有数据契约交付，不新增采集机制。
+按"精度阶梯"分批交付，而不是横向拆"配置/计量/决策"三层各做一半——每一批都是端到端可上线的垂直切片，且严格遵守"先只观测、后再决策"：先跑几天纯计量、拿 `/admin/status` 对着厂商控制台核对准确，确认可信后再打开真正影响路由的那一步。当前批次（P1 单桶均衡）的可核对基线事实、逐步骤实施顺序与验收标准见 `TokenPlan_Quota_P1_DevPlan_opus-5.md`；P2（计量准确）、P3（多约束）、P4（校准与看板）的范围与触发条件见设计文档 §14.3——尤其是 P3 明确"触发条件是上线后的 429 数据，不是排期到了就做"，不是提前承诺的固定日期。
+
+### Analytics 侧：Agent Story 与 Audit 丰富化
+
+1. 保持现有 [`UserGuide.md`](file:///Users/stanford/code/vmr/docs/UserGuide.md#agent-task-narratives-vmr-story) 中的 `vmr story` 与 `vmr story -compare` 分析指令独立高效——**不因为 Router 侧引入额度状态就去耦合它**，`ctxgraph`/`chatmsg` 是两侧共用的解析层，`report`/`story` 本身仍是审计日志的只读离线消费者。
+2. 在 `vmr report` 的用量报告中追加基于 Token-Plan 本地额度的消耗进度与预测看板——对应设计文档 P4 的 `section_quota.go`。
+3. 复用现有 `ClientKeyTag`，在 `report`/`story` 中新增按员工/业务线的套餐消耗占比与成本归因视图（见 4.3），把"多人共享调度"的可见性需求用既有数据契约交付，不新增采集机制——同样对应 P4。
