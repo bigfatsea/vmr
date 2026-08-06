@@ -517,8 +517,16 @@ P1 单条 tumbling Limit ⇒ 它必然是桶 ⇒ **`GateReserve` 与桶/闸判�
    彻底修法是让 `copyFlush` 暴露一个 join 句柄、由 `forwardSuccess` 先 `body.Close()` 再 join 再读字段——
    属于对热路径的改动，不该塞进 P1。
 
-2. **`vmr replay` 消耗真实上游额度但不经过任何计费/审计点**（基线 #21）。
-   与后台探针同类的可见性盲区。量级小，但值得在文档里明说。
+2. **`vmr replay` 消耗真实上游额度但不经过任何计费点**（基线 #21）。
+   2026-08 对本计划的一轮 ROI 复核（`docs/TokenPlan_Routing_and_Forensics_Comprehensive_Design_gemini_3_6_flash.md`
+   第6节发现六）判定：这不该继续归类为"文档里提一句就算"的永久盲区——修法成本低：`internal/replay` 已经在用
+   `router.NewUpstreamClient`，且本身是一次性进程，不需要 `cmd_start` 那套后台 flusher，只需成功响应后
+   `Load → Charge(metric=requests 恒 +1；metric=tokens 时对已缓冲的完整响应体跑一次 S5.1 的
+   `chatmsg.MergeUsageBytes`) → Flush` 一遍。不修的代价是：开发者高频用 `vmr replay` 重放长上下文调试请求时，
+   本地额度与上游真实剩余持续静默漂移。
+   **处置**：不进 S0–S7——`replay` 是独立 CLI 路径，与 `Router`/`forwardSuccess` 无关，塞进 S0–S7 会把
+   "S0–S6 路由决策零变化"这条 P1 安全阀的验证范围搅浑；作为 P1 交付后的近期跟进任务单独排期，验收标准
+   与 S4/S5 同口径（成功计费、失败不计费、`-race` 干净）。
 
 ---
 
