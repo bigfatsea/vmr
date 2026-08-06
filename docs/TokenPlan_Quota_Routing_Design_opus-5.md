@@ -36,7 +36,7 @@
 
 在上述基础上，真实套餐还有三个维度必须建模，且都不是假想：
 
-1. **计量单位有三种**：次数（requests）、token、金额（currency/credits）。
+1. **计量单位有三种**：次数（requests）、token、金额/Credits（cost）。
 2. **限额窗口有多个且并存**：同一账号可能同时受 5 小时、周、月三层约束。
 3. **同一套餐内不同模型的消耗不同**：折算倍率不同，甚至有独立子额度。
 
@@ -46,36 +46,66 @@
 
 ## 2. 市场调研：套餐的真实形态
 
-以下均为 2026-08 的公开信息核对结果，不是推测。
+**完整事实依据见 `docs/TokenPlan_Market_Reference.md`**（81 个在售套餐的结构化快照，
+原始数据留档在 `docs/data/tokenplan-market-plans-2026-07-26.json`）。本节只摘取直接驱动设计的结论。
 
-| 套餐 | 计量单位 | 限额窗口 | 模型差异 |
+### 2.1 计量单位分布（在售 81 个套餐）
+
+| 分类 | 数量 | 占比 |
+|---|---|---|
+| 有 Token 维度限额 | 62 | **77%** |
+| 有数值型请求数限额 | 32 | **40%** |
+| 仅 Token 限额 | 44 | 54% |
+| 仅请求数限额 | 14 | 17% |
+| **两者并存** | 18 | **22%** |
+
+| 类型 | 数量 | 有请求限额 | 有 Token 限额 |
 |---|---|---|---|
-| 阿里云百炼 Coding Plan Pro | **调用次数** | **5h 6,000 次 + 周 45,000 次 + 月 90,000 次（三层并存）** | 文档未区分 |
-| 阿里云百炼 Token Plan 团队版 | **Credits**（token 折算） | 月（明确无小时/周限） | **不同模型折算比例不同** |
-| 智谱 GLM Coding Plan | **prompts 次数** | **5h 滚动 + 7 天** | **GLM-5.2 / GLM-5 消耗 3 倍**；另有高峰时段 2–3 倍 |
-| MiniMax Token Plan | 按按量价格折算额度 | **5h 窗口 + 周窗口** | 官方用量 API 返回**模型级明细** |
-| Claude Pro / Max | messages（另有 hours 口径） | 5h 滚动 + 7 天固定 | Opus 与 Sonnet 消耗不同 |
-| GitHub Copilot | **AI Credits（1 credit = $0.01）** | 月 | 按各模型 API 价折算 |
-| DeepSeek / 火山 / OpenRouter 等按量 | token / $ | 无（纯按量） | — |
+| **Coding Plan** | 31（38%） | 23（**74%**） | 15（48%） |
+| **Token Plan** | 50（**62%**） | 9（18%） | 47（**94%**） |
 
-**四条结论，每条都直接改变设计：**
+### 2.2 五条结论，每条都直接改变设计
 
-1. **多窗口并存是常态，不是特例。** 阿里云 Pro 一家就同时有三层。只支持单一 `reset_period` 的模型装不下。
-2. **次数是国产 Coding Plan 的主流单位，不是 token。** 把默认单位定成 token 会让功能对主要目标市场失效。
-3. **模型倍率是硬事实。** 智谱 3 倍、阿里云"不同模型折算比例不同"。不建模就直接算错 3 倍。
-4. **"上游无配额 API"这个前提要修正为"无*标准* API，但有厂商*私有* API"**：
+1. **Token 是整体主流口径，不是 requests。** "国内套餐以次数计量为主"只在 Coding Plan 这个
+   38% 的子集内成立；数量更多的 Token Plan 有 94% 按 Token/Credits 计量。而且市场正从
+   Coding Plan 向 Token Plan 收缩，这个方向只会让 Token 口径的占比继续上升。
+2. **22% 的套餐同时受两种 metric 约束**，所以"选一种 metric"这个问法本身是错的——
+   同一账号必须能同时挂多种 metric 的 Limit。
+3. **Credits 制套餐按分量折算，比例差 5～120 倍**，这是本轮最重要的发现：
+
+   | 厂商 | 折算口径 | fresh : cache read : output |
+   |---|---|---|
+   | 小米·MiMo | 缓存 2.5 / 输入 300 / 输出 600 Credits per Token | cache 便宜 **120 倍** |
+   | 阿里·百炼 | 输入 5K / 命中 25K / 输出 0.83K Token per Credit | cache 便宜 5 倍，output 贵 **6 倍** |
+   | DeepSeek Pro | 缓存 ¥0.025/M、未命中 ¥3/M、输出 ¥6/M | cache 便宜 **120 倍** |
+   | 字节·方舟 | 积分制 AFP，1 AFP = 1111 Token，最优模型 **9 倍系数** | 模型系数 9x |
+   | OpenCode | 美元 Credits：基础 $12 / 周 $30 / 月 $60 | 三窗口 + 金额计量 |
+
+   按"输入输出 99:1、缓存命中率 90%"（该市场对比站统一采用的口径）量化：
+   **把额度当等权总 Token 记账，相对真实折算会高估 3～8 倍**
+   （小米·MiMo 7.9 倍、阿里·百炼 3.0 倍）。对高缓存命中率的 Agent 工作流，
+   等权记账会让一个刚用掉 15% 的账号显示成"已耗尽"。
+
+4. **多窗口并存是常态。** 字节·方舟明确"有 5 小时、周、月的 Token 限制"；
+   阿里云 Coding Plan Pro 是 5h 6,000 / 周 45,000 / 月 90,000 三层。
+   反过来也有只有单层的（小米·MiMo 无 5h 限额；阶跃星辰只有周限量无月限量）。
+5. **"上游无配额 API"这个前提要修正为"无*标准* API，但有厂商*私有* API"**：
    MiniMax `GET /v1/api/openplatform/coding_plan/remains`（5h + 周 + 模型级明细）、
    智谱 `/api/monitor/usage/quota/limit`（返回 `type`/`percentage`/`nextResetTime`，有反爬）、
    Claude Code statusLine 的 `{five_hour,seven_day}.used_percentage`。
    这意味着本地累计不必是唯一数据源——设计上要为外部校准源留出扩展点。
 
-**一个容易踩的坑（两份前置文档都没发现）**：厂商的计数单位未必等于 vmr 能观测到的单位。
-智谱按 **prompt** 计数，而"每个 prompt 约触发 15–20 次模型调用"——vmr 在网络层看到的是那 15–20 次。
-所以 `amount` 必须按 **vmr 可观测的口径**（上游 API 调用次数）配置：智谱 Lite 的 80 prompts/5h
-应配成约 `1200~1600`。这是**单位换算问题，不是精度问题**，必须在用户文档里写死，
-并作为"官方用量 API 校准"最有价值的场景。
+### 2.3 一个容易踩的坑：厂商计数单位 ≠ vmr 可观测单位
+
+阶跃星辰官方按 **prompt** 计数，市场对比站给出的换算是 **1 prompt ≈ 15 次请求**；
+智谱老套餐同样按 prompt 计（每 prompt 约 15–20 次模型调用）。vmr 在网络层看到的是那 15–20 次。
+
+所以 `amount` 必须按 **vmr 可观测的口径**配置，不能直接抄套餐标称值。
+这是**单位换算问题，不是精度问题**，必须在用户文档里写死，
+并且是"官方用量 API 校准"最有价值的场景。
 
 **调研来源**：
+[市场对比站原始数据](https://vibecoding.dreamfree.space/)（已留档，见 `docs/TokenPlan_Market_Reference.md`）、
 [阿里云 Coding Plan 官方文档](https://help.aliyun.com/zh/model-studio/coding-plan)、
 [MiniMax Token Plan 文档](https://platform.minimaxi.com/docs/token-plan/intro)、
 [智谱 GLM Coding Plan 套餐概览](https://codingplan.org/plans/zhipu)、
@@ -92,7 +122,7 @@
 ```
 Limit = (Metric, Window, Amount, Scope, Multiplier)
 
-  Metric      计量单位：requests | tokens | currency
+  Metric      计量单位：requests | tokens | cost（金额/Credits，按分量折算）
   Window      窗口：{ 长度 N×{h,d,w,mo}, 锚点 since, 类型 tumbling|rolling }
   Amount      该窗口内的上限
   Scope       作用模型集合（缺省 = 该账号全部模型）
@@ -108,8 +138,8 @@ Limit = (Metric, Window, Amount, Scope, Multiplier)
 | 阿里云 Coding Plan Pro | 3 条 Limit：(requests, 5h) / (requests, 1w) / (requests, 1mo) |
 | 智谱 GLM Coding Plan | 2 条：(requests, 5h, rolling) / (requests, 7d)，均带 `{glm-5.2: 3}` 倍率 |
 | 阿里云 Token Plan 团队版 | 1 条：(tokens, 1mo)，带按模型倍率 |
-| MiniMax Token Plan | 2 条：(currency, 5h) / (currency, 1w) |
-| Copilot | 1 条：(currency, 1mo) |
+| MiniMax Token Plan | 2 条：(cost, 5h) / (cost, 1w) |
+| Copilot | 1 条：(cost, 1mo) |
 | 纯按量端点 | 0 条 |
 | 模型独立子额度 | 多条 Limit，各自 `Scope` 指向不同模型集合 |
 
@@ -125,42 +155,41 @@ Limit = (Metric, Window, Amount, Scope, Multiplier)
 
 | 保留项 | 依据 | 实现代价 |
 |---|---|---|
-| **多条并存 Limit** | 阿里云 Pro 三层并存 | 极低——多窗口天然可用 `min()` 归并（见 §5） |
-| **metric: requests** | 国产 Coding Plan 主流单位 | **最低**——计数器 +1，完全不需要解析响应 |
-| **metric: tokens** | 纯 token 套餐（阿里云 Token Plan） | 中——需要 usage 嗅探 + 降级估算 |
-| **模型倍率** | 智谱 3 倍、阿里云折算率不同 | 极低——一个 `map[string]float64` |
+| **多条并存 Limit** | 22% 套餐两种 metric 并存；三层窗口是常态 | 极低——多窗口天然可用 `min()` 归并（见 §5） |
+| **metric: requests** | Coding Plan 74% 按次数计 | **最低**——计数器 +1，完全不需要解析响应 |
+| **metric: tokens** | 纯 token 桶（智谱新版"Token/周"、字节 AFP→Token、Kimi） | 中——需要 usage 嗅探 + 降级估算 |
+| **metric: cost（分量折算）** | **Token Plan 94% 按 Token/Credits 计，且 Credits 按分量折算，比例差 5～120 倍** | 中——复用 `pricing.yaml` 的按模型分项费率 |
+| **模型倍率** | 字节 9 倍系数、限时 2.5x/4x；智谱老套餐 3 倍 | 极低——一个 `map[string]float64` |
 | **Scope（按模型限定）** | MiniMax 模型级明细；用户明确提出 | 极低——charge 时一次模型名匹配 |
-| **rolling 窗口** | 智谱/Claude 是滚动窗口 | 低——分桶近似，约 40 行（见 §7） |
+| **rolling 窗口** | 智谱/Claude 是滚动窗口 | 低——分桶近似，约 40 行（见 §8） |
 
 ### 4.2 砍掉（有依据的简化）
 
-**① token 的五分量加权 → 只保留 total，需要分项加权就改用 `metric: currency`**
-
-依据：所有观察到的 token/credits 型套餐，扣减口径都是**"按对应按量计费价格折算"**
-（阿里云 Token Plan 明确写"输入/输出/缓存 Token 折算 Credits，不同模型折算比例不同"；
-MiniMax "按对应按量计费价格扣减"；Copilot AI Credits 同理）。
-**分量差异的本质是价格差异。** 那么正确的建模是 `metric: currency` 复用仓库里已有的 `pricing.yaml`
-（**按模型**的真实分项单价），而不是给 token 计量加四个**全局**权重——后者对多模型账号必然系统性偏差，
-且会与 `pricing.yaml` 形成两套互相矛盾的价格口径。
-
-**净效果：整个权重配置块消失。** 计数器仍**分四项存**（`fresh/cache_read/cache_write/out`，
-存储成本为零），因为 currency 计算本来就需要分项，且 `/admin/status` 展示明细有用——
-**事实存在存储侧，口径放在读取侧**。
-
-**② 时段倍率（智谱高峰 14:00–18:00 消耗 2–3 倍）→ 不做**
+**① 时段倍率（智谱高峰 14:00–18:00 消耗 2–3 倍）→ 不做**
 
 依据：(a) 只有智谱一家；(b) 规则本身在变（官方写明"9 月底前限时福利"）；
 (c) 它是上游内部的折算，vmr 在网络层观测不到，只能靠硬编码规则跟进，规则一变就静默算错。
 代价是对智谱会系统性低估，缓解手段是调低 `amount` 或接官方用量 API 校准。这是明示的取舍。
 
-**③ `metric: currency` 的实现延后到阶段 1.5（模型里保留定义）**
+**② 不引入独立的额度价格表 → `metric: cost` 直接复用已有的 `pricing.yaml`**
 
-依据三条：
-- 需要前置重构：把 `internal/report/pricing.go` 下沉成独立的 `internal/pricing` 包
-  （已核对：它只依赖 `fmtutil` + `i18n` + yaml，无 report 内部耦合，下沉干净，但仍是一次独立改动）；
-- **`metric: tokens` + 模型倍率能近似覆盖已知的 currency 型套餐**——阿里云"不同模型折算比例不同"
-  正好就是倍率作用于 token；精度损失仅在于 input/output 单价不同而倍率是单一标量；
-- 纯 $ 制的 Copilot / Cursor **根本没有可重定向 `base_url` 的 API 出口**，接不进 vmr。
+Credits 制套餐的折算率（阿里"输入 5K / 命中 25K / 输出 0.83K Token per Credit"）本质就是
+**按模型的分项单价**——它与 `pricing.yaml` 的形状（`provider+model` → `in_fresh` / `cache_read` /
+`cache_write` / `out` 四项费率）完全同构，仓库里已经有这张表。
+所以不新建价格体系，`limits.amount` 以 `pricing.yaml` 的基准币种计价即可。
+
+> **一处必须注意的差异**：`internal/report` 现有的成本公式**刻意排除 cache read**
+> （注释原文："every provider below treats a cache hit as free/near-free"）。
+> 这个假设对额度记账**不成立**——阿里的 cache 是 ¥0.32/M 对 input ¥1.58/M，
+> 在 90% 命中率下 cache 部分占输入成本的 **65%**，排除它会严重低估。
+> 因此 `internal/pricing` 应当只提供**原始费率**，成本公式由各调用方自己套：
+> report 保持它现有的口径，quota 用 `fresh + cache_read + cache_write + out`。
+
+**③ 不做 per-provider 的四个全局权重**
+
+这是 gemini 方案的做法，拒绝理由不变、且被新数据进一步坐实：阿里的折算率原文明确标注了
+适用模型（"Qwen-3.6-Plus，输入 5K Token/Credit……"），**折算率是按模型给的**。
+一组 per-provider 全局权重对多模型账号必然系统性偏差，而 `pricing.yaml` 天然就是按模型的。
 
 **④ `reset_period` + `reset_day` 的字段组合 → 统一为 `(every, since)` 二元组**
 
@@ -309,14 +338,20 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 
 ### 7.1 三种 metric 的计量方式
 
-| metric | 计量 | 解析成本 |
-|---|---|---|
-| `requests` | 每次成功响应 `+1 × multiplier` | **零**。不碰响应体 |
-| `tokens` | `usage.In + usage.Out`（分项存储），乘 multiplier | 中，见 §7.2 |
-| `currency` | 分项 × `pricing.yaml` 单价 | 阶段 1.5 |
+| metric | 计量 | 适用套餐 | 解析成本 |
+|---|---|---|---|
+| `requests` | 每次成功响应 `+1 × multiplier` | Coding Plan（74% 按次数计） | **零**。不碰响应体 |
+| `tokens` | `In + Out` 总量 × multiplier | 纯 token 桶（智谱新版、字节 AFP、Kimi） | 中，见 §7.2 |
+| `cost` | `fresh×r_f + cache_read×r_cr + cache_write×r_cw + out×r_o`，费率来自 `pricing.yaml`（按 provider+model） | **Credits / 金额制**（阿里·百炼、小米·MiMo、DeepSeek 虚拟套餐、OpenCode） | 同 `tokens`，多一次查表 |
 
-`requests` 完全不需要解析响应体，这使它成为**风险最低、最该先落地的一档**，
-而它恰好又是国产 Coding Plan 的主流单位。
+三档都必须在阶段一内交付，因为它们各自覆盖的市场份额都不小（见 §2.1）。落地顺序按解析成本递增：
+`requests` 完全不碰响应体，是风险最低的第一档；`tokens` 和 `cost` 共用同一套 usage 嗅探，
+只在最后的折算公式上分叉。
+
+**`cost` 不是可选项**：Token Plan 占在售套餐 62%，其中 94% 按 Token/Credits 计量，
+而 Credits 的扣减是按分量折算的（cache read 比 fresh input 便宜 5～120 倍）。
+用 `tokens` 的等权总量去记 Credits 制套餐，会**高估 3～8 倍**——
+一个刚用掉 15% 的账号会显示成已耗尽，路由和看板同时失真。
 
 ### 7.2 token 计量：嗅探 + 降级
 
@@ -422,10 +457,24 @@ providers:
         model_multipliers: {glm-5.2: 3, glm-5: 3}
       - {metric: requests, every: 7d, amount: 35000, model_multipliers: {glm-5.2: 3, glm-5: 3}}
 
-  # 纯 token 月度套餐，周期锚点在 14 号
+  # 纯 token 桶（智谱新版形态："中值约 0.65 亿 Token/周"），周期锚点在 14 号
+  - name: zhipu-new-lite
+    limits:
+      - {metric: tokens, every: 1w, since: 2026-08-14, amount: 65000000}
+
+  # Credits / 金额制（阿里·百炼、小米·MiMo 形态）
+  # amount 以 pricing.yaml 的基准币种计价；分项费率按 provider+model 从 pricing.yaml 取，
+  # 与等权总量记账相比可避免 3~8 倍的高估。
   - name: bailian-token-plan
     limits:
-      - {metric: tokens, every: 1mo, since: 2026-08-14, amount: 100000000}
+      - {metric: cost, every: 1mo, amount: 198}
+
+  # 三窗口 + 金额制（OpenCode 形态：基础 $12 / 周 $30 / 月 $60）
+  - name: opencode-go
+    limits:
+      - {metric: cost, every: 5h, amount: 12}
+      - {metric: cost, every: 1w, amount: 30}
+      - {metric: cost, every: 1mo, amount: 60}
 
   # 模型级独立子额度（Scope）
   - name: plan-with-submodel-cap
@@ -438,7 +487,7 @@ providers:
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
-| `metric` | `requests` \| `tokens` \| `currency` | 必填 |
+| `metric` | `requests` \| `tokens` \| `cost` | 必填 |
 | `every` | `N{h,d,w,mo}`，覆盖"数小时/数日/数周/数月" | 必填 |
 | `since` | 周期锚点时间，后续周期自动推算 | `1mo`→每月 1 日、`1w`→周一、其余→当日 0 点 |
 | `rolling` | 滚动窗口（分桶近似）；否则固定对齐窗口 | `false` |
@@ -450,8 +499,9 @@ providers:
 （`pricing.yaml`），配置里再出现一个 `budget` 却指次数或 token，是可预见的混淆源。
 
 **校验**（`config.validate`，沿用现有 fail-fast 风格）：`metric` 枚举；`every` 语法与 `N>0`；
-`amount > 0`；`since` 可解析；`model_multipliers` 值 `>0`；`currency` 在阶段一给出明确的
-"尚未实现"错误而非静默忽略。
+`amount > 0`；`since` 可解析；`model_multipliers` 值 `>0`；`metric: cost` 但 `pricing.yaml`
+缺少对应 `provider+model` 费率时，必须是**加载期错误**而非静默按 0 计费——
+静默按 0 会让该账号永远显示"额度充裕"，是最坏的失效模式。
 
 ### 9.2 运行态
 
@@ -529,7 +579,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 
 | 决策 | 选择 | 理由 | 放弃的备选 |
 |---|---|---|---|
-| 计量单位 | requests / tokens 两档先行，currency 延后 | 次数是国产 Coding Plan 主流且**零解析成本**；currency 需前置 pricing 包下沉，且 tokens+倍率可近似 | 只做 tokens（对主要目标市场失效） |
+| 计量单位 | requests / tokens / cost 三档均在阶段一交付 | 三者各自覆盖的市场份额都不小：Coding Plan 74% 按次数、Token Plan 94% 按 Token/Credits；漏掉任一档都会让功能对相应人群失效 | 只做 tokens（对 Coding Plan 失效）；只做 requests（对 62% 的 Token Plan 失效）|
 | 权重信号 | `headroom = 剩余额度比例 / 剩余时间比例` | 目标是"过期前烧完"，配速问题不是存量问题；无量纲故可跨 metric 比较 | `remaining/total`——重置日不对齐时信号反向，且多窗口/多 metric 下无定义 |
 | 多窗口归并 | 取所有 Limit 的 `min` | "最紧的约束说了算"是多约束的标准语义，一个循环 | 加权平均（会让一个已触顶的闸被其他窗口稀释掉） |
 | 桶 vs 闸 | 周期最长者为桶，其余为闸（闸只压制不提升） | 用满 5h 窗口没有经济价值，只有计费周期的未用额度对应真实浪费；零配置且在每个观察到的套餐上都成立 | 全部当桶（会在 5h 窗口末尾制造无意义的冲量） |
@@ -540,7 +590,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 窗口实现 | 环形分桶，tumbling=1 桶、rolling=K 桶 | 一套结构覆盖两类；滚动误差 ≤1/K；tumbling 硬近似 rolling 误差可达 100% | 精确滑动窗口（需存每请求时间戳）；只支持 tumbling |
 | 周期重置 | 惰性比较桶起点 | 无 goroutine、无漏重置、无时钟回拨、重启自动补偿 | 定时器/cron 式重置 |
 | 周期表达 | `(every, since)` 二元组 | 一个机制覆盖数小时/数日/数周/数月 + 任意锚点，免掉字段膨胀 | `reset_period` + `reset_day`（装不下 5h/周，且要不断加字段） |
-| 分量加权 | 删除权重配置；分项只做存储 | 分量差异本质是价格差异，应由 currency + `pricing.yaml`（按模型真实单价）表达 | 四个全局权重（对多模型账号必然偏差，且与 pricing.yaml 口径冲突） |
+| 分量加权 | **必做**，走 `metric: cost` + `pricing.yaml` 的按模型分项费率 | Credits 制套餐 cache read 比 fresh input 便宜 5～120 倍；等权总量记账会高估 3～8 倍 | 等权总 token（高估 3～8 倍）；per-provider 四个全局权重（折算率实际按模型给出，全局权重对多模型账号必然偏差） |
 | 计量精度 | usage 为准、估算降级、标注估算占比 | 粗决策容忍 ±30%，阶段二额度预测看板不容忍 | 全程估算；无 usage 时放弃计费 |
 | 并发超冲 | 不做预扣 | 超冲上界约 0.5%，换掉一个三态子系统与其泄漏风险 | 预扣 + 对账 + 回滚 |
 | Registry key | Provider name，不含密钥哈希 | 轮换密钥不应清零当周期计数；与 HealthKey 的风险方向相反 | 照抄 `HealthKey()` |
@@ -568,19 +618,26 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 
 每一步都可独立编译、独立验证、独立回滚：
 
+0. **前置重构：`internal/report/pricing.go` → `internal/pricing`**。已核对可干净下沉
+   （只依赖 `fmtutil` + `i18n` + yaml，无 report 内部耦合）。新包只提供**原始费率查询**，
+   不提供成本公式——`report` 保留自己那套（排除 cache read），`quota` 用自己那套（包含 cache read）。
+   纯搬迁 + 一次接口收窄，`report` 的测试必须全绿后才继续。
 1. **`internal/quota`**：`Counters` / `Ring`（两种边界策略）/ `PeriodStart`/`PeriodEnd` / `Registry` / 持久化。
    纯逻辑 + 纯函数，全部可单测，不碰请求路径。
 2. **`core.QuotaSpec` + `config` 解析校验 + `vmr check` 打印**。此时行为零变化。
 3. **接线**：`BuildSnapshot` 挂 spec；`Router` 持有 `*quota.Registry`；启动加载、退出落盘、flusher goroutine。
    仍无路由行为变化。
 4. **`metric: requests` 计量**：`forwardSuccess` 里 `+1 × multiplier`。**零解析成本，先落这一档。**
-5. **`metric: tokens` 计量**：`chatmsg` 增加逐块入口 → `respStream` 嗅探 → 计费与降级估算。
+5. **`metric: tokens` / `metric: cost` 计量**：`chatmsg` 增加逐块入口 → `respStream` 嗅探 →
+   降级估算 → 两种折算公式（`tokens` 取总量；`cost` 按分量查 `internal/pricing` 的费率）。
+   两者共用同一套嗅探，只在最后的折算上分叉。
 6. **决策**：`internal/router/quota.go`（**新文件，不进 `router.go`**——archtest 有 700 行预算，
    当前 561 行）：梯队切分 + score 排序；`Serve` 加一行调用；`routeReason` 加 `quota` 字段。
 
-> **风险控制的关键切分**：第 1–5 步做完时**路由决策完全没变**。可以先在生产只跑计量，
-> 用 `/admin/status` 对着厂商控制台校准几天，确认数字可信（尤其是 §2 指出的**单位换算**问题）
-> 之后再开第 6 步。整套机制建立在一个估算出来的计数器上，"先只观测、后再决策"是主要的降险手段。
+> **风险控制的关键切分**：第 0–5 步做完时**路由决策完全没变**。可以先在生产只跑计量，
+> 用 `/admin/status` 对着厂商控制台校准几天，确认数字可信（尤其是 §2.3 指出的**单位换算**问题、
+> 以及 `cost` 档的费率是否与该套餐的真实 Credits 折算率成比例）之后再开第 6 步。
+> 整套机制建立在一个估算出来的计数器上，"先只观测、后再决策"是主要的降险手段。
 
 ### 14.2 测试
 
@@ -592,6 +649,13 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
   多 Limit 取 min；`ε`/`HeadroomCap` 的 clamp。
 * **梯队切分**：`priority` 分层时不跨层重排；`dims` 为空时全体同层；未挂 Limit 的成员位置不变。
 * **Scope 与倍率**：`models:` 过滤只对匹配模型计费；`model_multipliers` 按上游模型名生效（非虚拟模型名）。
+* **三种 metric 的折算**：以 `docs/TokenPlan_Market_Reference.md` 的真实折算率做夹具——
+  小米·MiMo（缓存 2.5 / 输入 300 / 输出 600 Credits per Token）与阿里·百炼
+  （输入 5K / 命中 25K / 输出 0.83K Token per Credit）各做一组，断言 `cost` 档与
+  "等权总 token"的比值落在 3～8 倍区间（该文档已量化：MiMo 7.9 倍、百炼 3.0 倍）——
+  这条测试钉住的是"为什么必须做分量折算"这个立论本身。
+* **费率缺失**：`metric: cost` 但 `pricing.yaml` 无对应 `provider+model` 时必须是加载期错误，
+  断言它不会静默按 0 计费（静默按 0 会让账号永远显示额度充裕，是最坏的失效模式）。
 * **惰性重置**：跨周期的 `Charge`/读取均触发清零；重启后从文件加载并补偿重置。
 * **不变量回归**：sticky 命中时 quota 重排结果被覆盖；耗尽端点仍在候选集里（不被淘汰）；
   额度耗尽不产生 health 冷却。
