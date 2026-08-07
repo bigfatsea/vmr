@@ -32,6 +32,7 @@ type routeReason struct {
 	healthOK    int  // survived the health filter
 	afterCond   int  // survived hard capability conditions
 	ctxFallback bool // every declared context window looked too small; fell back
+	quota       bool // Quota-Aware Routing's reorderByQuota actually moved the front candidate
 	sticky      bool // a sticky pointer reordered the list
 }
 
@@ -39,7 +40,16 @@ type routeReason struct {
 // "nothing was eliminated, order decided it" case stays a short header
 // instead of a row of zeroes nobody reads.
 func (rr routeReason) String() string {
+	// sticky > quota > order: Sticky Model's moveToFront runs after quota's
+	// reorder and unconditionally overrides it for THIS request when a
+	// sticky pointer hits (see router.go's Serve and the design doc's
+	// Scheduling Flow section) — so a request that shows pick=sticky may
+	// well have had its tier reordered by quota first, but sticky is the
+	// reason this particular candidate won.
 	pick := "order"
+	if rr.quota {
+		pick = "quota"
+	}
 	if rr.sticky {
 		pick = "sticky"
 	}

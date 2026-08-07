@@ -100,6 +100,7 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 // independent *core.Endpoint values, in list order.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
+	quotaSpecs := buildQuotaSpecs(cfg.Providers)
 	for name, m := range cfg.Models {
 		dims, err := strategy.Build(m.Strategy)
 		if err != nil {
@@ -154,6 +155,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 					MaxContextTokens:    effMaxContextTokens,
 					OwnMaxContextTokens: eg.MaxContextTokens,
 					StickyTTL:           stickyTTL,
+					Quota:               quotaSpecs[eg.Provider],
 				}
 				// Precompute HealthKey()/Name() once, here, before ep is
 				// ever reachable from a concurrently-read Snapshot (see
@@ -174,6 +176,28 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// buildQuotaSpecs converts each provider's config.QuotaConfig into a
+// core.QuotaSpec once, keyed by provider name, so every core.Endpoint
+// expanded from that provider (however many virtual models/protocols
+// reference it) shares the SAME pointer — quota is an account property, not
+// a per-endpoint one (see core.Endpoint.Quota's doc comment). Providers
+// with no quota: configured are simply absent from the map, so a lookup
+// miss below naturally yields nil (unmetered).
+func buildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
+	out := map[string]*core.QuotaSpec{}
+	for _, p := range providers {
+		if p.Quota == nil {
+			continue
+		}
+		limits := make([]core.Limit, len(p.Quota.Limits))
+		for i, lc := range p.Quota.Limits {
+			limits[i] = lc.Resolved
+		}
+		out[p.Name] = &core.QuotaSpec{Limits: limits}
+	}
+	return out
 }
 
 // mergeCapabilities unions a virtual model's base capabilities with one

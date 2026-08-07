@@ -22,6 +22,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Failover and health](#failover-and-health)
   - [Condition-based routing](#condition-based-routing)
   - [Sticky Model (session affinity)](#sticky-model-session-affinity)
+  - [Quota-Aware Routing](#quota-aware-routing)
 - [Audit and reporting](#audit-and-reporting)
   - [The audit log](#the-audit-log)
   - [Usage and cost reports (vmr report)](#usage-and-cost-reports-vmr-report)
@@ -211,6 +212,41 @@ models:
 - The pointer moves on every successful completion, including a failover success, so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
 
 Full design (identity choice, TTL research behind the defaults, why this fingerprint is a separate implementation from `vmr report`'s offline session grouping below): `docs/VirtualModelRouter_Design_v4_Core.md`, "Sticky Model" section.
+
+### Quota-Aware Routing
+
+If you're juggling several periodic usage plans (a "coding plan" or "token plan" tied to one provider account) plus maybe some pay-as-you-go endpoints as a fallback, Quota-Aware Routing biases new sessions toward whichever account has the most *slack relative to how much of its billing period has elapsed* — not simply whichever has the most quota left. That distinction matters because reset days rarely line up: a plan that just reset looks "most remaining" under a naive calculation, but a plan that's 90% through its month with unused quota is the one about to waste it. Configure it per provider:
+
+```yaml
+providers:
+  - name: plan-a
+    base_url: {openai: https://example.invalid/v1}
+    api_key: ${PLAN_A_KEY}
+    quota:
+      limits:
+        - metric: requests       # or: tokens (input + output, equal-weighted)
+          every: 1mo             # N{h,d,w,mo} — also valid: 5h, 2w, 3d
+          since: 2026-08-01      # period anchor; every later period is derived
+                                  # automatically (defaults: 1mo -> the 1st of the
+                                  # month, 1w -> Monday, else today)
+          amount: 90000          # this window's cap, in vmr's OWN observed unit — see below
+```
+
+An endpoint with no `quota:` block behaves exactly as before — this is entirely opt-in, per provider.
+
+**This release's scope is deliberately narrow** (see `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md` for why): exactly one `limits:` entry per provider, `metric: requests` or `metric: tokens` only, tumbling (non-rolling) windows only. Every other knob from the full design — a `cost`/Credits metric, multiple windows on one account, `rolling: true`, a `models:` scope — is a **load-time error** naming the field and saying it's planned for a later batch. None of them are silently ignored; if you write one and vmr accepts the config anyway, that's a bug, not a feature.
+
+**`amount` must be calibrated to what vmr itself observes, not the plan's marketing number.** Some vendors bill "one user turn" as a single unit, but an agentic client (tool calls, retries, multi-step workflows) turns that into anywhere from one to twenty-plus real HTTP requests vmr actually sees and counts. Set `amount` from your own traffic — a few days of `/admin/status`'s `quota` section, or a `vmr report` run — not from the number on the pricing page. Getting this wrong doesn't break anything (an under-provisioned account just gets deprioritized sooner than it should), but it does make the routing decision less accurate than it could be.
+
+For `metric: tokens`, vmr prefers the upstream's own reported usage (exact) and only falls back to a byte-count estimate when that's unavailable (a compressed response, a provider that doesn't report usage, or a stream that got cut off mid-response) — the fallback is deliberately biased to *overestimate*, and how much of an account's running total came from the fallback is visible as `estimated_pct` in `/admin/status`.
+
+**What it does NOT do**: it never removes an endpoint from the candidate list — an exhausted account just sorts to the back of its priority tier, so failover still reaches it if everything else is unavailable. It never overrides Sticky Model — an established conversation keeps its endpoint even if that account's quota has since run low; reordering only ever applies to a new session. And it never triggers on its own — quota exhaustion doesn't cool an endpoint down the way a real 429/402 does (that's still `internal/health`'s job).
+
+**Checking it**: `vmr check` prints each provider's configured limit (and the effective timezone period boundaries are computed in — see the timezone note below); `/admin/status`'s `quota` section and `vmr status` show live consumption (`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`, plus the raw fresh/cache-read/cache-write/output breakdown even though P1 doesn't weight them differently yet — useful for eyeballing how far a high-cache-hit-rate account's equal-weighted number would diverge from what a Credits-style bill would actually charge); a response's `X-VMR-Route-Reason` header shows `pick=quota` when reordering actually changed which endpoint went first.
+
+Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying.
+
+Full design, including everything staged for later batches (`cost` metric, multi-window accounts, rolling windows, token-weighted accounting, official usage-API calibration): `docs/TokenPlan_Quota_Routing_Design_opus-5.md`.
 
 ## Audit and reporting
 

@@ -1,0 +1,121 @@
+// Ver 2026-08-07, by Opus 5
+
+package quota
+
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestRegistry_ChargeAndUsed(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 100, Out: 50}, 0)
+	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 20}, 0)
+	c, est := r.Used("plan-a", "tokens/1mo", ps)
+	if c.Fresh != 120 || c.Out != 50 {
+		t.Fatalf("Used = %+v, want Fresh=120 Out=50", c)
+	}
+	if est != 0 {
+		t.Fatalf("estimated = %d, want 0", est)
+	}
+}
+
+func TestRegistry_EstimatedAccumulates(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 10}, 10)
+	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 5}, 5)
+	_, est := r.Used("plan-a", "tokens/1mo", ps)
+	if est != 15 {
+		t.Fatalf("estimated = %d, want 15", est)
+	}
+}
+
+func TestRegistry_LazyResetOnCharge(t *testing.T) {
+	r := NewRegistry("")
+	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p2 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", p1, Counters{Requests: 5}, 0)
+	c, _ := r.Used("plan-a", "requests/1mo", p1)
+	if c.Requests != 5 {
+		t.Fatalf("period 1 requests = %d, want 5", c.Requests)
+	}
+	// Crossing into period 2 must zero the bucket, not carry the old count.
+	r.Charge("plan-a", "requests/1mo", p2, Counters{Requests: 1}, 0)
+	c2, _ := r.Used("plan-a", "requests/1mo", p2)
+	if c2.Requests != 1 {
+		t.Fatalf("period 2 requests after reset = %d, want 1 (old period's count must not carry over)", c2.Requests)
+	}
+	// The old period's own key, re-queried, is stale forever once we moved
+	// past it — Used(p1) after the bucket has advanced to p2 sees a reset
+	// bucket back at p1's boundary, not the retained old value: this is
+	// documented behavior of the single-bucket-per-limitKey design (no
+	// history is kept), not a bug.
+}
+
+func TestRegistry_LazyResetOnUsedAlone(t *testing.T) {
+	// A pure-read caller (the router's per-request scoring path) must see a
+	// correctly-zeroed bucket immediately after a period boundary, without
+	// any Charge ever happening in the new period first.
+	r := NewRegistry("")
+	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p2 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", p1, Counters{Requests: 42}, 0)
+	c, _ := r.Used("plan-a", "requests/1mo", p2)
+	if c.Requests != 0 {
+		t.Fatalf("Used() alone across a period boundary = %d, want 0 (reset without any Charge)", c.Requests)
+	}
+}
+
+func TestRegistry_ProviderKeyExcludesAPIKey(t *testing.T) {
+	// This test exists purely to pin the API surface: Charge/Used take a
+	// provider NAME string, never an API key or its hash — see quota.go's
+	// Registry doc comment for why (key rotation must not reset quota).
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
+	// Simulate "rotating the key": the provider's core.Endpoint.HealthKey()
+	// would change, but Registry only ever sees the stable provider name.
+	c, _ := r.Used("plan-a", "requests/1mo", ps)
+	if c.Requests != 1 {
+		t.Fatalf("count lost across what would be a key rotation: %d, want 1", c.Requests)
+	}
+}
+
+func TestRegistry_IndependentAccountsAndLimitKeys(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
+	r.Charge("plan-b", "requests/1mo", ps, Counters{Requests: 2}, 0)
+	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 3}, 0)
+	a, _ := r.Used("plan-a", "requests/1mo", ps)
+	b, _ := r.Used("plan-b", "requests/1mo", ps)
+	at, _ := r.Used("plan-a", "tokens/1mo", ps)
+	if a.Requests != 1 || b.Requests != 2 || at.Fresh != 3 {
+		t.Fatalf("cross-contamination between accounts/limitKeys: a=%+v b=%+v at=%+v", a, b, at)
+	}
+}
+
+func TestRegistry_ConcurrentChargeUsed_Race(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
+		}()
+		go func() {
+			defer wg.Done()
+			r.Used("plan-a", "requests/1mo", ps)
+		}()
+	}
+	wg.Wait()
+	c, _ := r.Used("plan-a", "requests/1mo", ps)
+	if c.Requests != 50 {
+		t.Fatalf("concurrent charges: got %d, want 50", c.Requests)
+	}
+}

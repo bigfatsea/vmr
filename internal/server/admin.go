@@ -102,6 +102,14 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if rl, ok := reloadBlock(s.rt.ReloadState()); ok {
 		body["reload"] = rl
 	}
+	// Absent (not an empty array) when no quota.Registry is wired up or no
+	// provider has quota: configured — same "nothing to report" convention
+	// reloadBlock above already uses, so a caller doesn't have to
+	// distinguish "quota feature not in use" from "quota feature broken,
+	// zero providers found".
+	if qs := s.rt.QuotaStatus(); len(qs) > 0 {
+		body["quota"] = qs
+	}
 	core.WriteJSON(w, http.StatusOK, body)
 }
 

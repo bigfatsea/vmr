@@ -118,7 +118,7 @@ cmd/vmr                    CLI（stdlib flag），一命令一文件：main.go�
 internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass、Endpoint（无依赖的共享类型；HealthKey()/Name() 由 BuildSnapshot 调 Freeze() 预计算一次，见 §11"无中心 IR"决策行）+ FilterClientHeaders（header 黑名单，server/replay 共用）
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
-internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch
+internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch；quota.go：Provider.Quota 的 YAML 形状（QuotaConfig/LimitConfig）与校验（P1 范围之外的字段一律加载期报错，见 §6.6）
 internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写/role 改写（classify.go 的 `rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）；fingerprint.go：SessionFingerprint（Sticky Model 用，按协议分派，含 openai-responses 的 instructions+input 分支）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
 internal/adapter/openai    OpenAI Chat Completions 协议透传 Adapter
 internal/adapter/anthropic Anthropic Messages 协议透传 Adapter
@@ -127,6 +127,7 @@ internal/health            失败驱动的健康状态机（冷却、退避、�
 internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）；`Request`（messages 形状）与 `ResponsesRequest`（input 形状）按端点协议由调用方分派，body 形状必须匹配协议，否则半开端点的后台恢复探测会被上游当坏请求拒绝、永久锁在半开态
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
+internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
@@ -134,7 +135,8 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ logfmt.go    实时路由日志的行格式化
   ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newRespStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）
   ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
-  └─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
+  ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
+  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge（成功响应计费）、reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排）、QuotaStatus（/admin/status 用）
 internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -406,7 +408,7 @@ models:
 上游 prompt cache 按精确字节前缀匹配。条件路由一旦生效，尤其是上下文长度这一维——agent 压缩上下文后，同一条对话的估算体积可能突然小到另一个更便宜/更快的端点也能接，若因此换端点，会打掉正在累积的缓存，"选了更合适的模型、总成本反而更高"。Sticky Model 让同一条对话优先留在最近一次成功服务过它的端点上，抵消这个副作用。两者是同一个调度管线里相邻的两个阶段：
 
 ```
-健康过滤 → 条件过滤（硬性淘汰） → 优先级/权重排序（既有 Dimension） → 会话亲和重排（软性置顶）
+健康过滤 → 条件过滤（硬性淘汰） → 优先级/权重排序（既有 Dimension） → 额度感知重排（同档位内，软性） → 会话亲和重排（软性置顶）
 ```
 
 **识别"同一条对话"**：`internal/adapter.SessionFingerprint(raw, protocol)` 对 system prompt（若存在）和第一条非 system 消息分别算 md5，返回两个独立哈希，不合并、不解析其余内容——只做字节范围定位（复用 `topLevelValues` 定位 Anthropic 的顶层 `system` 字段；OpenAI 侧用同款的消息数组遍历骨架，只扫到第一个非 system 元素为止，代价与对话历史长度无关）。**必须包含 system prompt**：prompt cache 前缀从请求最前面开始比较，system prompt 排在 messages 之前，两个 system 不同的对话即使后续消息逐字相同，上游前缀匹配也早已分道扬镳——只哈希首条用户消息会把不同 Agent 的相同开场白误判成同一条对话。**不包含 `tools`**：`tools` 是结构化数据，若客户端动态枚举工具列表，同一批工具在不同请求里可能序列化出不同字节，会让锚点无谓跳变；`system` 和首条消息都是纯文本，没有这个风险。哈希本身的开销可忽略——`system` prompt 加首条消息常见场景是几 KB 到几十 KB，纯 Go `crypto/md5` 在现代硬件上处理 1MB 数据是个位数毫秒，相对一次真实的 LLM 请求往返（几百毫秒到几秒）可以忽略不计，不是需要优化的性能问题。
@@ -459,6 +461,22 @@ models:
 ```
 
 Compaction（上下文压缩）场景下机制依然成立：压缩本身就会让 cache miss 一次，与 vmr 选哪个端点无关；压缩后的后续轮次共享新锚点，粘性照常生效；`system` prompt 在压缩前后通常不变，是锚点里更稳定的一段。
+
+### 6.6 额度感知路由（Quota-Aware Routing）
+
+多个按周期计费的套餐账号背后是同一个问题的两面：套餐额度周期性作废、不结转，"哪个流量喂给哪个账号"直接决定了浪费多少。这不是负载均衡问题（那是要均分压力），而是"在每个套餐各自作废之前恰好把它烧完"的配速问题——直觉的 `remaining/total` 公式在重置日不对齐时会给出系统性反向的结论（详见专门设计文档 §1）。
+
+**接入点与 6.1/6.5 是同一条管线上相邻的一步**：紧接在 `strategy.Sort` 之后、Sticky Model 重排之前（见上面更新后的管线图）——在 `Sort` 已经确立的优先级次序之上，只在**同一个梯队内部**按额度余量比例重新排序；跨梯队的优先级语义（例如把按量计费端点压在低优先级做兜底）原样保留，从不被跨越。Sticky 命中时的 `moveToFront` 天然覆盖额度重排的结果——已建立的会话优先级最高，即使命中的账号额度已经紧张，只要端点健康就继续走它，打断 prefix cache 重算的成本通常高于短暂溢出的计费成本。
+
+**核心算法**：对每个配了 `quota:` 的 provider，取其当前周期 `headroom = (1 - 已用比例) / max(剩余时间比例, ε)`，同一梯队内按 `headroom` 降序稳定排序（贪心，无状态、无 `math/rand`，failover 顺序自动跟着正确）；未配额度的端点位置纹丝不动（"占位重排"，避免给一个 provider 配额度对其它 provider 产生隔空影响）。`headroom` 是无量纲比值，`= 1` 代表按进度线性消耗、`> 1` 代表欠用该多接、`< 1` 代表超前该少接——这正是它能在重置日错位时给出正确结论的原因：一个月度周期已过完 90%、额度却只用了六成的账号，`headroom` 显著大于 1，会被优先导流，即使它绝对剩余额度不是最多的那个。
+
+**只重排、从不淘汰**：候选集大小不变，failover 语义完全不受影响；额度耗尽的账号只是排到梯队末位，不会从候选列表里消失，其它候选全部不可用时仍然会被尝试。额度耗尽也**不会**触发 `internal/health` 的冷却——计数器是本地估算值，按估算值执行破坏性动作（熔断）等于自制故障；真正的耗尽硬信号是上游返回的 402/429，已经由 6.2 节的 `ErrEndpoint`/`ErrRateLimit` 分类与冷却机制覆盖，两套机制各管各的，不交叉。
+
+**计量**：本批（P1）只支持 `metric: requests`（计数 +1，零解析成本）与 `metric: tokens`（输入输出等权求和，优先用上游返回的 usage 字段，拿不到时降级为按字节数估算并标记 `estimated_pct`）；`metric: cost`（Credits/金额，需要分量费率表）、多层窗口并存、`rolling` 滚动窗口、按模型的 `models:` 子额度都在后续批次交付，本批配置里写了会在加载期直接报错，不会静默忽略。
+
+**架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
+
+完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；本批（P1）的落地范围与验收标准：`docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`。
 
 ---
 

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/router"
 )
 
@@ -179,6 +181,17 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	fmt.Println(checkLine(0, "probe_timeout", probeTimeout))
 	fmt.Println(checkLine(0, "http_proxy", orNone(cfg.HTTPProxy)))
 	fmt.Println(checkLine(0, "https_proxy", orNone(cfg.HTTPSProxy)))
+	// Quota period boundaries (and every other human-facing timestamp) render
+	// through fmtutil.DisplayZone, which is just time.Local — a container
+	// with no TZ set is silently UTC, which can differ from an operator's
+	// mental model by several hours with no other visible symptom (see the
+	// design doc's Timezone section). Printing the resolved value here is
+	// the cheapest possible guard against that.
+	// time.Local's own Name() is literally the string "Local" — useless for
+	// telling "TZ correctly set to Asia/Shanghai" apart from "TZ unset,
+	// silently UTC", so the actual offset is appended (both read the same
+	// "Local" either way, but the offset gives it away).
+	fmt.Println(checkLine(0, "timezone", fmt.Sprintf("%s (UTC%s)", fmtutil.DisplayZone.String(), time.Now().In(fmtutil.DisplayZone).Format("-07:00"))))
 	fmt.Println("dirs:")
 	fmt.Println(checkLine(2, "log", cfg.LogDir))
 	fmt.Println(checkLine(2, "image_cache", cfg.ImageCacheDir))
@@ -214,6 +227,23 @@ func printProviders(cfg *config.Config) {
 			fmt.Println(checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
 		}
 		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
+		printProviderQuota(p)
+	}
+}
+
+// printProviderQuota renders p's quota: block, if any — purely static
+// (config-derived), never reads Registry state (that's /admin/status's and
+// `vmr status`'s job, see server/admin.go). Absent entirely for a provider
+// with no quota: configured, same as every other optional section here.
+func printProviderQuota(p config.Provider) {
+	if p.Quota == nil || len(p.Quota.Limits) == 0 {
+		return
+	}
+	fmt.Println("  quota:")
+	for _, lc := range p.Quota.Limits {
+		l := lc.Resolved
+		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
+		fmt.Println(checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%g", l.EveryText, since, l.Amount)))
 	}
 }
 

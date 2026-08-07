@@ -254,6 +254,8 @@
 - CI（`.github/workflows/ci.yml`）覆盖 `go vet`/`go build`/`go test -race`；2026-08 复核加了 macOS 矩阵、`gofmt -l`、`shellcheck` 三个 job。`staticcheck` 评估后未采纳——本机无网络环境无法预先验证，且 25,574 行生产代码首次接入大概率冒出大量未经筛选的既有发现，没有时间预算逐条判断真假阳性，贸然接入可能让 CI 从下一次 push 就直接变红，风险大于收益。
 - 缺 `CHANGELOG.md` / `CONTRIBUTING.md`（≤3 人内部项目，靠 commit message 追踪）。
 - `vmr.sh`（609 行，dev/service 双模式）+ `vmr-loadtest.sh`（76 行）无脚本测试，关键路径靠人工验证——2026-08 复核加的 `shellcheck` CI job（见上一条）只是静态检查，不是行为测试，plist/unit 渲染是否真的能被 launchd/systemd 接受这类问题它照样测不出来。
+- `internal/router/transport.go` 的 `copyFlush` 在 idle 超时/写错误两条返回路径上不等读 goroutine 退出就返回，`forwardSuccess` 随后读 `rbody.Applied()`/`RawPreStrip()`/`ObservedModel()` 因而存在既有数据竞争（Quota-Aware Routing 落地过程中核对发现，登记而非修复——属于热路径改动，超出该功能范围）；Quota-Aware Routing 自己新增的 usage/字节累加器已用专用锁隔离，不受影响，也没有扩大这个既有问题。方案与代价见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md` §S5.4。
+- `vmr replay` 消耗真实上游额度但不经过 Quota-Aware Routing 的计费点（P1 明确不计费，`internal/replay` 完全绕开 `Router.Serve`/`forwardSuccess`）——高频用 `vmr replay` 重放长上下文调试请求会让本地额度计数与上游真实剩余持续静默漂移。已排期为 P1 交付后的近期跟进任务，处置方案（复用既有 `NewUpstreamClient`，一次性 `Registry` 加载+计费+退出前 flush，不需要后台 flusher）见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md` §8 与 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` §10/§13。
 
 ---
 

@@ -22,6 +22,7 @@
   - [故障切换与健康](#故障切换与健康)
   - [条件路由](#条件路由)
   - [Sticky Model 会话亲和](#sticky-model-会话亲和)
+  - [额度感知路由 Quota-Aware Routing](#额度感知路由-quota-aware-routing)
 - [审计与报表](#审计与报表)
   - [审计日志](#审计日志)
   - [用量与成本报表 vmr report](#用量与成本报表-vmr-report)
@@ -210,6 +211,40 @@ models:
 - 每次成功完成请求（含 failover 后的成功）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
 
 完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文 `vmr report` 离线会话分组是两套独立实现）：`docs/VirtualModelRouter_Design_v4_Core.md`「Sticky Model」一节。
+
+### 额度感知路由 Quota-Aware Routing
+
+如果你手上有好几个按周期计费的套餐（绑在某个厂商账号上的"编程计划"或"Token 计划"），外加几个按量计费的端点做兜底，额度感知路由会把新会话优先导向**相对自己账期进度还有余力**的那个账号——而不是简单地导向剩余额度绝对值最多的那个。这个区别很关键，因为各账号的重置日很少对齐：一个刚重置的套餐按朴素算法看起来"剩得最多"，但一个月度周期已经过完 90%、额度却还没用完的套餐，才是真正快要白白浪费额度的那个。按账号配置：
+
+```yaml
+providers:
+  - name: plan-a
+    base_url: {openai: https://example.invalid/v1}
+    api_key: ${PLAN_A_KEY}
+    quota:
+      limits:
+        - metric: requests       # 或 tokens（输入+输出，等权重）
+          every: 1mo             # N{h,d,w,mo} —— 也可以是 5h、2w、3d
+          since: 2026-08-01      # 周期锚点；后续周期自动推算
+                                  # （缺省值：1mo -> 当月 1 日，1w -> 周一，其余 -> 当日）
+          amount: 90000          # 该窗口的上限，按 vmr 自己观测到的口径填写——见下文
+```
+
+没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
+
+**这一批交付的范围刻意收得很窄**（原因见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`）：每个 provider 恰好一条 `limits:`，`metric` 只能是 `requests` 或 `tokens`，只支持固定（非滚动）窗口。完整设计里的其它每一项——`cost`/Credits 计量、单账号多条窗口、`rolling: true`、`models:` 子额度——写了都会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
+
+**`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/admin/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
+
+对 `metric: tokens`，vmr 优先使用上游返回的真实 usage（精确值），只有在拿不到时才降级为按字节数估算——拿不到的三种情况是：响应被压缩、上游不返回 usage 字段、或流在中途被截断。降级估算刻意偏保守（**宁可高估**），一个账号本周期内有多少比例的计数来自降级估算，会显示为 `/admin/status` 里的 `estimated_pct`。
+
+**它不会做的事**：它从不会把某个端点从候选列表里剔除——一个额度耗尽的账号只是在自己的 priority 梯队里排到最后，其它端点都不可用时 failover 仍然会尝试它。它不会覆盖 Sticky Model——已建立的对话即使对应账号额度已经紧张，也会继续留在原端点；重排只对新会话生效。它也从不会主动触发降级——额度耗尽不会像真实的 429/402 那样让端点进入冷却，那仍然是 `internal/health` 的职责。
+
+**如何查看**：`vmr check` 会打印每个 provider 配置的额度（以及周期边界所依据的生效时区——见下面的时区提示）；`/admin/status` 的 `quota` 段和 `vmr status` 会展示实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`，外加原始的 fresh/cache_read/cache_write/output 四分量明细——虽然 P1 还不区分它们的权重，但这个明细能让你自己心算出一个高缓存命中率账号的等权计数和真实 Credits 账单之间差多少）；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
+
+周期边界（以及所有面向人的时间戳）都按 vmr 进程所在服务器的本地时区渲染（`vmr check` 的 `timezone:` 一行会打印出实际生效的值）——容器里如果没设 `TZ`，会悄悄按 UTC 处理，跟你以为的时区可能差好几个小时，且没有其它任何提示，值得部署后检查一下这一行。
+
+完整设计，包括留给后续批次的一切（`cost` 计量档位、单账号多窗口、滚动窗口、按分量加权、接官方用量 API 校准）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`。
 
 ## 审计与报表
 

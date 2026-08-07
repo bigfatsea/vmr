@@ -20,6 +20,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/health"
+	"vmr/internal/quota"
 	"vmr/internal/sticky"
 	"vmr/internal/strategy"
 )
@@ -28,6 +29,13 @@ type Router struct {
 	Health *health.Registry
 	Sticky *sticky.Registry
 	Logger *log.Logger
+	// Quota is nil unless cmd_start.go wires one up (see quota.NewRegistry) —
+	// every call site touching it (chargeQuota, reorderByQuota) must be
+	// nil-safe: a plain no-op, not a panic. New() deliberately leaves it
+	// nil because the large majority of Router construction sites (tests,
+	// vmr diagnose) have no config.yaml log_dir to persist quota state
+	// into and no use for it.
+	Quota *quota.Registry
 
 	snap atomic.Pointer[Snapshot]
 
@@ -124,6 +132,15 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		reason.ctxFallback = true
 	}
 	strategy.Sort(candidates, route.Dims)
+
+	// Quota-Aware Routing: within each priority tier Sort just established,
+	// move quota-bearing endpoints to the front in headroom-score order —
+	// see internal/router/quota.go's reorderByQuota and
+	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's Scheduling Flow
+	// section for why this sits exactly here (after Sort, before Sticky).
+	// nil-safe: a no-op returning false when rt.Quota is nil (no
+	// quota.Registry wired up).
+	reason.quota = reorderByQuota(candidates, route.Dims, rt.Quota, now)
 
 	// Sticky Model: prefer whichever endpoint most recently, successfully
 	// served this same conversation, so the upstream prompt cache stays
@@ -498,6 +515,11 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 		status = "truncated" // upstream died mid-stream; the response is already committed
 		att.SetTruncated(copyErr)
 	}
+	// Charged here regardless of copyErr — a truncated response still
+	// consumed whatever tokens actually reached the client (see
+	// chargeQuota's doc comment); nil-safe when no quota.Registry is wired
+	// up or this endpoint carries no quota: config.
+	rt.chargeQuota(ep, rbody, creq, time.Now())
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
 	rt.logf("%s, status=%s, dur=%s", logPrefix, strings.ToUpper(status), fmtDur(time.Since(start)))

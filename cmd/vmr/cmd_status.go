@@ -55,6 +55,22 @@ type statusResponse struct {
 		InFlight int64 `json:"in_flight"`
 		Waiting  int64 `json:"waiting"`
 	} `json:"concurrency"`
+	// Quota is absent (nil slice) from the JSON entirely when no provider
+	// has quota: configured — server/admin.go only sets the "quota" key
+	// when router.Router.QuotaStatus() returns a non-empty slice, so a
+	// plain instance sees no behavior change here either.
+	Quota []struct {
+		Provider     string    `json:"provider"`
+		Metric       string    `json:"metric"`
+		Every        string    `json:"every"`
+		Amount       float64   `json:"amount"`
+		Used         float64   `json:"used"`
+		Pct          float64   `json:"pct"`
+		Headroom     float64   `json:"headroom"`
+		PeriodStart  time.Time `json:"period_start"`
+		PeriodEndsAt time.Time `json:"period_ends_at"`
+		EstimatedPct float64   `json:"estimated_pct"`
+	} `json:"quota"`
 }
 
 func cmdStatus(args []string) error {
@@ -192,6 +208,15 @@ func printStatus(st *statusResponse) {
 	}
 	if st.Sticky.Entries > 0 {
 		fmt.Printf("sticky: %d session(s) pinned\n", st.Sticky.Entries)
+	}
+	for _, q := range st.Quota {
+		estNote := ""
+		if q.EstimatedPct > 0 {
+			estNote = fmt.Sprintf(", %.0f%% estimated", q.EstimatedPct)
+		}
+		fmt.Printf("quota %-12s %s/%s  used=%.0f/%.0f (%.1f%%)  headroom=%.2f  resets %s%s\n",
+			q.Provider, q.Metric, q.Every, q.Used, q.Amount, q.Pct, q.Headroom,
+			q.PeriodEndsAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"), estNote)
 	}
 	for _, name := range core.SortedKeys(st.Models) {
 		fmt.Println(name) // key is already "name [protocol]"

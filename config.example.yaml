@@ -110,6 +110,36 @@ providers:
     api_key: ${MINIMAX_PLAN_KEY}
     # proxy: false               # not needed here — absent already means direct (domestic
     #                            # provider, no need to write this out).
+    #
+    # quota: Quota-Aware Routing (P1 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md
+    # and docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for the full design and what
+    # this release actually delivers). Absent = unmetered, no behavior change.
+    # When several providers each carry a quota:, vmr biases new sessions toward
+    # whichever account has the most slack relative to how much of its billing
+    # period has elapsed — not the most quota left in absolute terms (a plan
+    # about to reset "wins" less than one about to expire with unused quota).
+    #
+    # P1 accepts EXACTLY ONE limits: entry per provider, metric: requests or
+    # tokens, a tumbling (non-rolling) window. Everything else in the full
+    # design (metric: cost, multiple windows, rolling windows, models: scope,
+    # model_multipliers/token_weights, a pricing: block) is a load-time error
+    # naming the field and saying it's planned for a later batch — never a
+    # silent no-op.
+    #
+    # amount MUST be calibrated to what VMR ITSELF OBSERVES, not the plan's
+    # marketing number: some vendors bill "one user turn" as a single unit
+    # while an agentic client (tool calls, retries) turns that into a dozen-plus
+    # real HTTP requests vmr sees — set amount from your own `vmr report`
+    # numbers (or a few days of /admin/status's quota section) once traffic is
+    # flowing, not from the vendor's published quota.
+    # quota:
+    #   limits:
+    #     - metric: requests       # or: tokens (in + out, equal-weighted in P1)
+    #       every: 1mo             # N{h,d,w,mo} — also: 5h, 2w, 3d
+    #       since: 2026-08-01      # period anchor; every subsequent period is
+    #                              # derived automatically (defaults: 1mo -> the
+    #                              # 1st of the month, 1w -> Monday, else today)
+    #       amount: 90000          # this window's cap, in vmr's own observed unit
 
   - name: openrouter
     # OpenRouter speaks all three surfaces on the same base — including a

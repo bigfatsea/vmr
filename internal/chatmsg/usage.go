@@ -3,6 +3,7 @@
 package chatmsg
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -44,20 +45,42 @@ func ExtractUsage(body any) (Usage, bool) {
 	case map[string]any:
 		u = mergeUsage(b, u)
 	case string:
-		for _, line := range strings.Split(b, "\n") {
-			line = strings.TrimSpace(line)
-			data, found := strings.CutPrefix(line, "data:")
-			if !found {
-				continue
-			}
-			var obj map[string]any
-			if json.Unmarshal([]byte(strings.TrimSpace(data)), &obj) != nil {
-				continue
-			}
-			u = mergeUsage(obj, u)
-		}
+		u = MergeUsageBytes([]byte(b), u)
 	}
 	return u, u.In > 0 || u.Out > 0
+}
+
+// MergeUsageBytes parses usage out of b and folds it into acc, returning the
+// merged result — the byte-oriented entry point internal/router/response.go
+// needs (a respStream block can be either a complete JSON object body or SSE
+// text, depending on which transport mode is in play; see respStream's own
+// doc comment), auto-detecting which shape b is. This and ExtractUsage's
+// string case share this one implementation rather than each parsing SSE
+// lines independently — the same "one parser, not two" rule this package
+// exists to enforce (see CLAUDE.md's chatmsg invariant: it is the one
+// shared source of truth for message/usage parsing, so a router-side
+// re-implementation can't silently drift from this one).
+func MergeUsageBytes(b []byte, acc Usage) Usage {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var obj map[string]any
+		if json.Unmarshal(trimmed, &obj) == nil {
+			return mergeUsage(obj, acc)
+		}
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		data, found := strings.CutPrefix(line, "data:")
+		if !found {
+			continue
+		}
+		var obj map[string]any
+		if json.Unmarshal([]byte(strings.TrimSpace(data)), &obj) != nil {
+			continue
+		}
+		acc = mergeUsage(obj, acc)
+	}
+	return acc
 }
 
 // mergeUsage folds usage found in obj (top-level or under "message", as in

@@ -62,6 +62,9 @@ import (
 	"bytes"
 	"io"
 	"regexp"
+	"sync"
+
+	"vmr/internal/chatmsg"
 )
 
 // Transport modes. A stream starts undecided (SSE) or buffered (non-SSE)
@@ -109,6 +112,13 @@ var (
 	doneSentinel       = []byte("data: [DONE]")
 	eventSep           = []byte("\n\n")
 	crlfEventSepHint   = []byte("\r\n\r\n")
+	// usageFieldMarker is the cheap gate for Quota-Aware Routing's usage
+	// sniffing (see noteUsage below): almost every SSE token-delta event
+	// carries no "usage" key at all, so this bytes.Contains check skips a
+	// full JSON parse for the overwhelming majority of events — the same
+	// "cheap substring gate before an expensive parse" idiom modelFieldPattern
+	// and the other markers in this file already use.
+	usageFieldMarker = []byte(`"usage"`)
 )
 
 // passthroughStringMarkers / passthroughTokenMarkers are event contents
@@ -151,6 +161,28 @@ type respStream struct {
 	applied           []string
 	rawPreStrip       []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
+
+	// qmu guards ONLY the four fields below — Quota-Aware Routing's usage/
+	// byte-count accumulators — not the rest of respStream's fields. Those
+	// stay unsynchronized on purpose (Read is only ever called serially by
+	// transport.go's copyFlush reader goroutine), but Usage()/OutBytes()
+	// are read from forwardSuccess's own goroutine, AFTER copyFlush
+	// returns — and on two of copyFlush's return paths (idle timeout,
+	// write error) the reader goroutine is not guaranteed to have exited
+	// yet (see transport.go's copyFlush doc comment and
+	// docs/OUTSTANDING_ISSUES_opus-5.md's existing entry on this). Rather
+	// than fixing that pre-existing race (a hot-path change out of scope
+	// for this feature — see docs/TokenPlan_Quota_P1_DevPlan_opus-5.md's
+	// §5.3/§S5.4), these four fields get their own lock so the NEW code
+	// this feature adds is race-clean without touching the old fields at
+	// all. Worst case under the pre-existing race: this response's very
+	// last chunk of usage/bytes is missed — a benign undercount, not
+	// undefined behavior.
+	qmu        sync.Mutex
+	asciiBytes int64
+	wideBytes  int64
+	usage      chatmsg.Usage
+	usageSeen  bool
 }
 
 func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *respStream {
@@ -248,6 +280,13 @@ func (s *respStream) Read(p []byte) (int, error) {
 }
 
 func (s *respStream) ingest(b []byte) {
+	// Every source byte flows through here exactly once, in every mode
+	// including opaque (see the P1 dev plan's baseline-facts table) — the
+	// one hook that
+	// can classify 100% of a response's bytes for the degraded token
+	// estimate (see OutBytes/tokenCharge in quota.go), unlike emitBlock/
+	// finalizeBuffered below which only ever see the non-opaque paths.
+	s.countBytes(b)
 	if s.opaque {
 		s.out = append(s.out, b...)
 		return
@@ -388,6 +427,7 @@ func (s *respStream) emitBlock(block []byte) {
 		s.noteApplied("soft_block_detected")
 	}
 	s.noteThinkingPatternIfSuspected(block)
+	s.noteUsage(block)
 	if modelFieldPattern.Match(block) {
 		s.noteUpstreamModel(block)
 		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
@@ -491,6 +531,7 @@ func (s *respStream) finalizeBuffered() {
 		s.noteApplied("soft_block_detected")
 	}
 	s.noteThinkingPatternIfSuspected(b)
+	s.noteUsage(b)
 	s.tailNL = len(b) == 0 || bytes.HasSuffix(b, eventSep)
 	s.out = append(s.out, b...)
 	s.appendDone()
@@ -604,6 +645,70 @@ func classifyEvent(ev []byte) verdict {
 		}
 	}
 	return verdictUndecided
+}
+
+// countBytes classifies every byte of b by UTF-8 lead byte (ASCII vs. wide),
+// the same split core.EstimateTextTokens uses — feeding Quota-Aware
+// Routing's degraded token estimate (see quota.go's tokenCharge) without
+// buffering a whole response body just to hand it to that function: this
+// tallies incrementally, once per Read, and the result is byte-for-byte
+// equivalent to running EstimateTextTokens over the full concatenated body
+// (see core.EstimateTokensFromCounts's doc comment).
+func (s *respStream) countBytes(b []byte) {
+	var ascii, wide int64
+	for _, c := range b {
+		if c < 0x80 {
+			ascii++
+		} else {
+			wide++
+		}
+	}
+	s.qmu.Lock()
+	s.asciiBytes += ascii
+	s.wideBytes += wide
+	s.qmu.Unlock()
+}
+
+// noteUsage looks for a "usage" object in b and folds it into the running
+// total. Called from both emitBlock (streaming) and finalizeBuffered
+// (buffered) — the two paths never overlap for one response (see
+// response.go's package doc comment on transport modes), so this never
+// double-counts. The bytes.Contains gate means the overwhelming majority of
+// streamed events (plain content/tool-call deltas) cost one substring scan
+// and nothing else; only an event that actually mentions "usage" pays for a
+// JSON parse.
+func (s *respStream) noteUsage(b []byte) {
+	if !bytes.Contains(b, usageFieldMarker) {
+		return
+	}
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	u := chatmsg.MergeUsageBytes(b, s.usage)
+	s.usage = u
+	if u.In > 0 || u.Out > 0 {
+		s.usageSeen = true
+	}
+}
+
+// Usage returns the usage sniffed from this response so far; ok is true
+// only once at least one usage-bearing block has actually been parsed —
+// see quota.go's tokenCharge for the fallback when ok is false. Safe to
+// call concurrently with an in-flight Read/ingest — see qmu's doc comment
+// on respStream for why this specific pair of fields needs that guarantee
+// when the rest of the type doesn't.
+func (s *respStream) Usage() (chatmsg.Usage, bool) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	return s.usage, s.usageSeen
+}
+
+// OutBytes returns the ASCII/wide byte counts countBytes has classified so
+// far — the degraded-estimate input when Usage() has nothing. Same
+// concurrency contract as Usage().
+func (s *respStream) OutBytes() (ascii, wide int64) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	return s.asciiBytes, s.wideBytes
 }
 
 // afterMarker returns the bytes following the first occurrence of marker.

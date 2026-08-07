@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/fmtutil"
+	"vmr/internal/quota"
 	"vmr/internal/router"
 	"vmr/internal/server"
 )
@@ -126,6 +128,27 @@ func cmdStart(args []string) error {
 	auditDirInUse := cfg.LogDir
 
 	rt := router.New(logger)
+
+	// Quota-Aware Routing's consumption registry: lives on the Router (not
+	// the Snapshot), so counts survive a hot reload — see
+	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's Persistence section.
+	// A corrupt or missing state file is never fatal: quota is a statistics
+	// helper that must not be able to stall routing, so Load's error is
+	// only logged and the registry proceeds from zero either way. The
+	// deferred stop()+Flush() covers both of this function's exit paths
+	// (SIGINT/SIGTERM and an unexpected ListenAndServe error) since both
+	// return from this same function — stop() blocks until the flusher
+	// goroutine has actually exited before Flush() runs, so the two can
+	// never race on the same file (see quota.Registry.StartFlusher's doc
+	// comment).
+	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
+	if err := qreg.Load(); err != nil {
+		logger.Printf("WARN quota state: %v (starting from zero)", err)
+	}
+	rt.Quota = qreg
+	stopQuotaFlush := qreg.StartFlusher(5 * time.Second)
+	defer func() { stopQuotaFlush(); qreg.Flush() }()
+
 	snap, err := router.BuildSnapshot(cfg)
 	if err != nil {
 		return fmt.Errorf("build routes: %w", err)

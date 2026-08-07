@@ -184,6 +184,14 @@ type Endpoint struct {
 	// config.Config.StickyTTL default.
 	StickyTTL time.Duration
 
+	// Quota is this endpoint's provider-level quota spec, resolved at
+	// BuildSnapshot time — the SAME pointer is shared by every
+	// core.Endpoint expanded from the same config.Provider (quota is an
+	// account property, not a per-model one), so reading it costs one field
+	// dereference instead of a linear scan of Cfg.Providers. nil = the
+	// provider has no quota configured (unmetered account).
+	Quota *QuotaSpec
+
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
 	// immutable once constructed, so BuildSnapshot computes them exactly
@@ -264,6 +272,52 @@ func (e *Endpoint) computeName() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model
 }
 
+// QuotaMetric is the counting unit a Limit is measured in. Only the P1
+// subset exists today (see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// §3 for the full model, including the "cost" metric later batches add).
+type QuotaMetric string
+
+const (
+	MetricRequests QuotaMetric = "requests"
+	MetricTokens   QuotaMetric = "tokens"
+)
+
+// Limit is one window-level quota constraint: "in this long a period,
+// starting from this anchor, at most this much." The runtime (yaml-tag-free)
+// counterpart of config.LimitConfig, resolved once at BuildSnapshot time —
+// see config.LimitConfig's doc comment for why the two are split into
+// separate YAML-shape/runtime-shape types (the config.EndpointGroup ->
+// core.Endpoint precedent).
+//
+// P1 supports exactly one Limit per provider, tumbling only (no Rolling
+// field here at all — config.LimitConfig.Rolling exists solely to produce a
+// clear "not yet supported" load error, never reaches this type).
+type Limit struct {
+	Metric QuotaMetric
+	EveryN int
+	// EveryUnit is one of "h"/"d"/"w"/"mo" — see period.go's PeriodStart/
+	// PeriodEnd for the calendar arithmetic each implies.
+	EveryUnit string
+	// EveryText is the original "every" text (e.g. "1mo", "2w") — used
+	// as-is for quota.Registry's limitKey and for display (vmr check,
+	// /admin/status), so a human-readable value never needs reconstructing
+	// from EveryN+EveryUnit.
+	EveryText string
+	// Since is the resolved period anchor — either the config's explicit
+	// value or the unit-specific default (see config.LimitConfig.Since's
+	// doc comment) — already parsed once here so period.go's hot-path
+	// PeriodStart/PeriodEnd never reparses a string.
+	Since  time.Time
+	Amount float64
+}
+
+// QuotaSpec is a provider's full quota configuration: today just its one
+// Limit (P1), but already shaped as a slice so P3's multi-window support is
+// additive, not a type change.
+type QuotaSpec struct {
+	Limits []Limit
+}
+
 // SortedKeys returns m's keys in sorted order. A recurring need across
 // packages that print or iterate a map deterministically (config summaries,
 // adapter/model registries, header tables).
@@ -303,5 +357,15 @@ func EstimateTextTokens(body []byte) int64 {
 			wide++
 		}
 	}
+	return EstimateTokensFromCounts(ascii, wide)
+}
+
+// EstimateTokensFromCounts applies EstimateTextTokens' formula to byte
+// counts already tallied elsewhere (internal/router/response.go's respStream
+// classifies bytes incrementally, as they arrive, rather than buffering a
+// whole body to hand to EstimateTextTokens) — exported so both call sites
+// share the exact same coefficients instead of one silently drifting from
+// the other.
+func EstimateTokensFromCounts(ascii, wide int64) int64 {
 	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
 }

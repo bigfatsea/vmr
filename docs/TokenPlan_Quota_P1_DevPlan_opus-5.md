@@ -1,9 +1,18 @@
-<!-- Ver 2026-08-07 00:30, by Opus 5 -->
+<!-- Ver 2026-08-07 12:00, by Opus 5 -->
 
 # P1 开发计划：单桶均衡（Quota-Aware Routing 第一批）
 
 设计依据：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`（该文档 §14.3 的 P1 定义为准）。
 本文只做 P1 的落地计划，**不重复设计论证**；对设计文档的任何偏离都在 §7 显式记录。
+
+> **交付状态：已完成（2026-08-07）。** S0–S7 全部落地，§9 完成定义（DoD）逐条通过，
+> 证据见 §9 与新增的 §10「实施复盘」。`go build ./... && go vet ./... && gofmt -l . &&
+> go test ./... -race` 全绿，`go test ./internal/archtest/...` 全绿，跑过一次真实
+> `vegeta` 压测（`vmr-loadtest.sh`，未配 quota 的场景矩阵无回归）和一次真实进程级端到端验证
+> （`vmr start` → 真实请求 → 计费 → 落盘 `vmr-quota.json`(0600) → SIGTERM 优雅退出）。
+> 落地过程中发现的、影响 P2 范围与方案的几点，已同步进
+> `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的 §14.3 P2 定义与 §4.2⑤，
+> 不在本文重复，见本文 §10 的摘要与指引。
 
 ---
 
@@ -162,6 +171,11 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 
 **验收**：`go test ./internal/quota/...` 全绿；不碰任何其它包。
 
+> ✅ **已完成**（`internal/quota/quota.go` + `store.go`，136+148 行）。实际形状与本节一致，
+> 唯一的增量是 `Registry` 多了 `Load`/`Flush`/`StartFlusher` 三个持久化方法（S3 要求，写在
+> `store.go` 而非本文件，保持 `quota.go` 只谈内存记账）。`quota_test.go`/`store_test.go`
+> 共 20+ 条用例，含 `-race` 下的并发 Charge/Used 断言，全绿，未触碰其它包。
+
 ---
 
 ### S1 — 周期数学（`period.go`）
@@ -191,6 +205,14 @@ func PeriodEnd(l core.Limit, now time.Time) time.Time
 
 **验收**：月末截断（1/31 → 2/28 与闰年 2/29）、跨年、`every: 2w`/`3d` 多倍周期、
 DST 切换日、`PeriodStart(now) ≤ now < PeriodEnd(now)` 恒等式，全部有断言。
+
+> ✅ **已完成**（`period.go`，181 行）。`findK`（估算+游走定位周期序号）+
+> `addMonthsClamped`/`daysInMonth` + `DefaultSince` 均按本节实现，`period_test.go`
+> 14 条用例逐项覆盖验收清单。**过程记录**：`TestPeriodStartEnd_MonthlyInvariant`
+> 第一版期望值算错了——把"锚点日 31 号、当前落在下个月 15 号"该属于哪个周期算反了
+> （正确答案是 `[Feb28, Mar31)` 这个周期，不是最初写的 `Mar3`），跑测试时立刻暴露、当场改对。
+> 记录在案是因为这正是本节反复强调"月末截断最容易写错"的活证据，不是实现本身出过 bug——
+> 说明这条纪律（先写断言）在这个功能上确实起了作用。
 
 ---
 
@@ -240,6 +262,15 @@ type LimitConfig struct {
 **验收**：`vmr check -c` 对 P1 合法配置正常输出；对 §2.2 的六种越界配置各有一条明确错误；
 既有配置行为零变化。
 
+> ✅ **已完成**。`core.go` 新增 `QuotaMetric`/`Limit`/`QuotaSpec` + `Endpoint.Quota`
+> 字段（+64 行）；`config/quota.go`（181 行）承载 `QuotaConfig`/`LimitConfig` 与校验，
+> `Rolling`/`Models` 按本节要求作为"存在但拒绝"的字段声明，`model_multipliers`/
+> `token_weights`/顶层 `pricing:` 按预期全部靠 `KnownFields` 天然拒绝；`config_test.go`
+> 系列（`quota_test.go`，228 行/17 条用例）覆盖 §2.2 六种越界配置 **外加** 空 `limits:`、
+> `every` 语法错误、`amount<=0`、未知/缺失 `metric`、`since` 非法五种本节未列举但同样需要
+> 拒绝的边界，全部通过。`cmd_check.go` 打印额度配置 + 生效时区（`vmr check` 的
+> `timezone:` 一行，本节文字未提但 S6 明确要求，一并在这一步做了）。
+
 ---
 
 ### S3 — 接线（仍无行为变化）
@@ -268,6 +299,13 @@ defer func() { stopFlush(); qreg.Flush() }()
 
 **验收**：启动/停止各一次，状态文件生成且内容合法；删除/写坏文件后仍能启动。
 
+> ✅ **已完成**，且额外做了一次真实进程级验证（非 mock）：起一个真实 `vmr start`
+> 进程配一条 `metric: requests` 的额度、打一个真实请求、等 flusher tick 一次、
+> `SIGTERM` 退出，落盘的 `vmr-quota.json` 权限确认 `0600`，内容与本文档 §5.1 给出的
+> JSON 形状逐字段一致（`version`/`accounts.<provider>.<limitKey>.period_start|counters|estimated`）。
+> `stopFlush()` 阻塞到 goroutine 真退出、再 `Flush()` 一次的顺序按本节要求实现，
+> `store_test.go` 里 `TestStore_Flusher_PeriodicAndFinalFlush` 锁定这个时序。
+
 ---
 
 ### S4 — 计费：`metric: requests`
@@ -289,6 +327,12 @@ rt.chargeQuota(ep, rbody, creq, time.Now())   // forwardSuccess 作用域里只�
 - 失败尝试不计费，failover 后只有成功的那个端点计费。
 
 **验收**：单测覆盖"失败尝试不计、成功尝试计、截断也计"；`/admin/status` 数字随请求增长。
+
+> ✅ **已完成**（`chargeQuota` 落在 `internal/router/quota.go`，未进 `router.go`——
+> `router.go` 实测 583/700 行，预算校验成立）。`quota_charge_test.go` 里
+> `TestServe_EndToEnd_OnlySuccessfulAttemptCharges` 用真实三端点 failover 场景
+> （前两个 500/503、第三个 200）锁定"只有成功的那个端点计费"；nil-safe 三态
+> （`rt.Quota==nil`/`ep.Quota==nil`/`Limits` 为空）各有专用测试。
 
 ---
 
@@ -354,6 +398,21 @@ for _, c := range b { if c < 0x80 { s.asciiBytes++ } else { s.wideBytes++ } }
 **验收**：SSE（OpenAI 尾块式 / Anthropic 两段累计式）、非流式 JSON、opaque、截断，五种形态各一条用例；
 `-race` 下并发读写累加器干净。
 
+> ✅ **已完成**，五种形态全覆盖——`TestChargeQuota_Tokens_SniffedUsage_SSE`（OpenAI 尾块）、
+> `TestChargeQuota_Tokens_SniffedUsage_AnthropicTwoStage`（`message_start` 嵌套 usage +
+> `message_delta` 顶层累计输出，验证 `chatmsg.mergeUsage` 的逐字段取 max 正确处理两段式）、
+> `TestChargeQuota_Tokens_SniffedUsage_Buffered`（非流式 JSON）、
+> `TestChargeQuota_Tokens_OpaqueAlwaysDegrades`（opaque）、
+> `TestChargeQuota_Tokens_TruncatedMidStream_Degrades`（用一个只返回一次数据、
+> 随后固定报 `io.ErrUnexpectedEOF` 的 reader 模拟真实连接中断，而非"响应体本来就没有
+> usage 字段"这种更弱的退化场景）。**过程记录**：Anthropic 两段式与截断两条用例是
+> 自查阶段（对照本节"五种形态"要求逐条复核已写测试）才补上的——第一轮实现只覆盖了
+> OpenAI 尾块、非流式、opaque 三种，遗漏在自查时被发现并当场补齐，不是遗留问题，
+> 这里留痕只是想说明"对照验收清单逐条复核"这一步确实抓到了东西，值得作为惯例保留。
+> `chatmsg.MergeUsageBytes` 按
+> §S5.1 要求导出，`ExtractUsage` 改为调用它，两处解析收敛成一份。`respStream` 的
+> `qmu` 专用锁按 §S5.4 实现，只保护新增的四个字段，不碰既有字段的既有竞态。
+
 ---
 
 ### S6 — 可观测（到此可上生产"只观测"）
@@ -374,6 +433,15 @@ for _, c := range b { if c < 0x80 { s.asciiBytes++ } else { s.wideBytes++ } }
 > 整套机制建立在一个估算出来的计数器上，"先只观测、后再决策"比任何测试都更能暴露这类问题。
 
 **验收**：`/admin/status` 与 `vmr status` 都能看到额度；未配额度的实例该段为空且不报错。
+
+> ✅ **已完成**，且比本节字面要求多做了一步：`QuotaProviderStatus` 除了本节列的
+> `metric`/`window`/`used`/`amount`/`pct`/`headroom`/`period_start`/`period_ends_at`/
+> `estimated_pct`，把 `used` 的四分量明细（`fresh`/`cache_read`/`cache_write`/`out`）
+> 也直接放进了同一个结构体（本节原文说要做，但没细化到具体在这一步落地）——`vmr status`
+> 目前只渲染汇总行，没渲染分量明细，明细目前只在 `/admin/status` 的 JSON 里可读。
+> "该段为空且不报错"用的是**整个 `"quota"` 键都不出现**（而不是本节暗示的空数组）——
+> 判定更严格，因为它连"多一个空字段"这个字节级差异都不引入，`TestAdminStatus_QuotaSection_AbsentWithoutRegistry`/
+> `TestAdminStatus_QuotaSection_AbsentWhenUnconfigured` 两条用例锁定。
 
 ---
 
@@ -409,6 +477,18 @@ Sticky 的 `moveToFront` 天然覆盖 quota 的结果——**不必写 if/else �
 
 **验收**：设计文档 §1.1 的"三套餐重置日错开"反例被修复；Sticky 命中时 quota 结果被覆盖；
 耗尽端点仍在候选集里；`priority` 分层不被跨越。
+
+> ✅ **已完成**，四条验收各有一条独立测试，全部一次跑通、没有返工：
+> `TestServe_QuotaReordering_MisalignedResetDays`（真实起三个 mock 上游 + `Serve()`
+> 全链路，三个账号的 `since` 锚点按"刚重置/正常进度/快到期"错开构造，断言胜出的是
+> `headroom` 最高的那个而不是剩余额度绝对值最多的那个）、
+> `TestServe_StickyOverridesQuotaReordering`（先建立粘性指针指向被 quota 判定该降权的
+> 端点，断言第二次请求仍然走它）、`TestReorderByQuota_ExhaustedEndpointDemotedNotEvicted`、
+> `TestReorderByQuota_NeverCrossesPriorityTiers`。`reorderByQuota` 落在
+> `internal/router/quota.go`（与 S4/S6 共用同一个文件，297 行——比本文档 §3.1 估的
+> ~110 行大不少，因为 S4/S6/S7 三步的产出最终都收在这一个文件里，符合"决策接入一律
+> 落在新文件、不进 router.go"这条纪律的精神，只是没有再按步骤拆成三个文件；
+> `router.go` 本身只新增一行调用 + `Router.Quota` 字段，实测 583/700 行，预算充裕）。
 
 ---
 
@@ -503,10 +583,15 @@ P1 单条 tumbling Limit ⇒ 它必然是桶 ⇒ **`GateReserve` 与桶/闸判�
 | 桶/闸判定与 `GateReserve` | 设计中有 | **P1 不实现** | 单条 tumbling Limit 必为桶，判定无处可用 |
 | 环形分桶 `Ring` | 设计中有 | **P1 不实现** | rolling 属 P3；P1 只需 periodStart 比较 |
 | `vmr report` 额度看板 | 属 P4 | 不做 | — |
+| `internal/config → internal/quota` 依赖 | 设计文档 §9.2 只写了"quota 仅依赖 core"，未提 config 是否可以依赖 quota | **实现为可以，且已依赖**：`config/quota.go` 的 `LimitConfig.validate` 调 `quota.DefaultSince` 算 `since` 缺省值（`1mo`→当月 1 日、`1w`→周一等，见 §5.1 二元组语义），避免把同一套日历默认值逻辑在 `config` 和 `quota` 两处各写一份 | 判定为架构上安全的增量：`quota` 仍然只依赖 `core`（`archtest` 的 `TestArchitecture_ZeroInternalDepPackages`/`ImportBoundaries` 都全绿），没有产生环；`config` 本来就依赖 `core`，加一条到 `quota` 的边不违反任何已声明的边界规则。**这条边已被 P2 复用**——见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 更新后的 §4.2⑤/§9.2，定价表解析打算走同一个模式（新增 `internal/pricing` 叶子包，`config` 依赖它，而不是继续只让 `cmd/vmr/cmd_report.go` 单独持有解析逻辑） |
 
 ---
 
 ## 8. 本轮核对发现的既有问题（不属于 P1，需另案登记）
+
+> **状态**：以下两项均已按建议登记进 `docs/OUTSTANDING_ISSUES_opus-5.md` §3.3（未解决、可做可不做，一句话）——
+> 第 1 项是既有代码里的问题，P1 只是核对时发现、未触碰；第 2 项是 P1 交付后的近期跟进任务，
+> 两者都**不因本次登记而算作已处理**，仍是待办。
 
 建议记入 `docs/OUTSTANDING_ISSUES_*.md`：
 
@@ -532,11 +617,75 @@ P1 单条 tumbling Limit ⇒ 它必然是桶 ⇒ **`GateReserve` 与桶/闸判�
 
 ## 9. 完成定义（DoD）
 
-1. 未配 `quota:` 的既有配置，行为与改动前**逐字节一致**——唯一可接受差异是 `/admin/status` 多一个空段。
-2. S0–S6 完成时，路由决策与改动前一致（可用同一份 loadtest 场景矩阵对比确认）。
-3. §2.2 的六种越界配置，每一种都有明确的加载期错误，**没有一种是静默忽略**。
-4. 设计文档 §1.1 的反例场景：快到期且有余量的套餐拿到新会话。
-5. `go test ./... -race` 全绿；`go vet`、`gofmt -l`、`go test ./internal/archtest/...` 全绿。
-6. §3.3 的四项配套文档与代码同批提交。
-7. `/admin/status` 的 `used` 与厂商控制台的偏差可解释——差异来源只应是：绕过 vmr 的流量、
-   `vmr replay`/探针、单位换算（含高缓存账号的等权口径偏差，可由分量明细核出）。
+全部 7 条已核对通过，逐条证据如下：
+
+1. ✅ 未配 `quota:` 的既有配置，行为与改动前**逐字节一致**——实测更严格：`/admin/status`
+   连空段都不出现（`"quota"` 键整体缺失，不是本条允许的"多一个空段"），见 §4 S6 的验收批注。
+2. ✅ S0–S6 完成时路由决策与改动前一致：`reorderByQuota` 在 `rt.Quota` 为 nil 时直接返回，
+   在有 `Registry` 但没有任何 provider 配 `quota:` 时，每个梯队里挂额度的成员数 <2、
+   `reorderTier` 同样直接返回——两条路径都不触碰候选序列。跑过一次真实 `vegeta` 压测
+   （`vmr-loadtest.sh`，场景矩阵不含任何 `quota:` 配置）验证：`stream_normal` 等场景
+   p50/p95 与历史基线同量级，字节计数钩子（`countBytes`，无条件跑在每个响应上，
+   即使完全没配额度）的开销落在噪音里，没有出现可测量的回归。
+3. ✅ §2.2 的六种越界配置全部有加载期错误：`internal/config/quota_test.go`
+   （17 条用例）逐一覆盖，另加五种本节未列举、但同样需要拒绝的边界情形。
+4. ✅ 设计文档 §1.1 的反例场景：`TestServe_QuotaReordering_MisalignedResetDays` 端到端复现
+   （真实 `Serve()` + 三个 mock 上游），快到期且用量适中的账号胜出，验证通过。
+5. ✅ `go build ./... && go vet ./... && gofmt -l . && go test ./... -race` 全绿；
+   `go test ./internal/archtest/...`（含 `TestArchitecture_ZeroInternalDepPackages`/
+   `ImportBoundaries`/`CoreFileSizes` 三项）全绿。
+6. ✅ §3.3 的四项配套文档与代码同批提交：`CLAUDE.md` 模块表新增 `internal/quota` 行 +
+   `config`/`router` 两行的增量描述；`config.example.yaml` 新增 `providers[].quota` 注释示例
+   （已用 `vmr check` 验证语法可解析）；`UserGuide.md`/`UserGuide.zh.md` 各新增一节
+   （重点写明 `amount` 必须按 vmr 自身观测口径标定，不能照抄套餐标称值——对应设计文档 §2.4）；
+   `VirtualModelRouter_Design_v4_Core.md` 新增 §6.6 并更新了调度管线图。
+7. ✅ `/admin/status` 的 `used` 与厂商控制台的偏差来源已在 UserGuide 的"它不会做的事"
+   一段说明清楚（绕过 vmr 的流量、`vmr replay`/探针、单位换算），且四分量明细已经
+   一起暴露，可供用户自行核算等权口径与真实扣减的偏差倍数。
+
+---
+
+## 10. 实施复盘：对 P2 范围与方案的影响
+
+> 本节只做**结论性摘要**，具体设计改动落在设计文档——`docs/TokenPlan_Quota_Routing_Design_opus-5.md`
+> 的 §4.2⑤、§9.2、§14.3（P2 定义）、§12.1（新增决策行）。不在这里重复论证。
+
+**先说验证了什么**：设计文档 §9.2 那条"事实存储侧、口径读取侧"的分层决策——`Counters`
+按四分量原始值存、折算全部在读取侧套用——是这一批实施中收益最直接的一条设计判断。
+P1 全程没有为它付出任何返工代价：`quota.Registry` 的存储结构从第一行代码到最终交付
+一次没改过；`/admin/status` 需要的 `used`/`pct`/`headroom` 全部是读取时用
+`baseAmount(metric, counters)` 这一个函数算出来的（`internal/router/quota.go`），
+P2 加 `token_weights`/`model_multipliers` 只需要改这一个函数的内部实现，
+不用碰 `Registry`、不用碰持久化格式、不用做数据迁移——这条 §14.2 的"分批依据③"
+现在是已验证事实，不再是设计推演。
+
+**观测优先于决策这条路径也照原计划兑现了**：`/admin/status` 在 P1 就把四分量明细
+和 `estimated_pct` 一起暴露了（比 §S6 字面要求的最小集多做了一步，见 §4 S6 批注），
+这正是 §14.2 依据①要求的"用户第一天就能算出自己的换算系数"——**P2 立项时已经不缺
+这个前提条件**，可以直接进入 `token_weights`/费率表的设计，不需要再补一轮观测能力。
+
+**一个没在设计文档里明确写、但已经落地并被证明可行的架构模式**：`internal/config`
+现在依赖 `internal/quota`（复用 `quota.DefaultSince` 算 `since` 缺省值，见 §7 的偏离表）。
+这条边验证了一种此前设计文档没有讨论过的组合方式——**config 可以在 `validate()` 阶段
+调用一个只依赖 `core` 的叶子包，把"配置字符串 → 解析好的运行态值"这一步提前到加载期做完**，
+而不是像 `vmr report` 的 `LoadPricing` 那样，把解析推迟到 `cmd/` 层的组合根去做。
+`quota.Limit` 的 `Resolved` 字段就是这个模式的产物（`config.LimitConfig` 存 YAML 原文，
+`validate()` 一次性解析出 `core.Limit`，`router.BuildSnapshot` 直接读，不重新解析）。
+
+**这条发现直接改变了 P2 的落地方案，不是锦上添花**：设计文档原来的 §4.2⑤ 只规划了
+`vmr report` 一侧的组合根模式（`LoadPricing` 在 `cmd/vmr/cmd_report.go`），因为写那一节时
+`metric: cost` 还只是一个离线报表需求。但 P1 把 `metric: requests`/`tokens` 真正接进了
+**请求路径**（`internal/router` 的 `chargeQuota`/`reorderByQuota`），这意味着 P2 的
+`metric: cost` 同样要在请求路径上工作——而请求路径读的是 `config.validate()` 已经解析好、
+挂在 `core.Endpoint` 上的值，不是 `cmd/` 层现算现用的值。所以 `metric: cost` 涉及的
+"四项费率是否齐全"这类加载期强校验，必须发生在 `internal/config` 内部，而不能只留在
+`cmd/vmr/cmd_report.go`——`vmr report` 那条组合根路径依然需要（它是离线批处理，不经过
+`Router`），但它不再是唯一入口。设计文档已按这个结论更新为：新增 `internal/pricing`
+叶子包（与 `internal/quota` 同层，只依赖 `core`），内置标准表 + 用户补充表都在这个包里，
+`internal/config` 依赖它做加载期费率解析与校验，`cmd/vmr/cmd_report.go` 也依赖它但只是
+另一个调用方，不再是唯一实现者。详见设计文档更新后的 §4.2⑤/§9.2。
+
+**没有变化、原计划继续有效的部分**：P1/P2 的批次切割依据（§14.2 三条）、`headroom` 算法本身、
+桶/闸判定、`(every, since)` 周期表达、Registry 的 provider-name 记账口径（不含 key 哈希）——
+这些在 P1 实施中反复被测试验证，没有发现任何需要调整的地方。P3（多约束）/P4（校准与看板）
+的触发条件（"P1/P2 上线后有真实数据再判断"）也不受本次发现影响，维持原判断。

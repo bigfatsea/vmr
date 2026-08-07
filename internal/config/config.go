@@ -77,6 +77,15 @@ type Provider struct {
 	BaseURL map[string]string `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Proxy   bool              `yaml:"proxy"`
+	// Quota declares this account's usage-plan limit(s) for Quota-Aware
+	// Routing (see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
+	// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for what this release
+	// actually supports). nil = unmetered — no behavior change from before
+	// this field existed. A pointer, not a value, so "absent" and "present
+	// but empty" are distinguishable — the latter is a validation error
+	// (quota: with no limits: is almost certainly a mistake), not a silent
+	// no-op.
+	Quota *QuotaConfig `yaml:"quota"`
 }
 
 // EndpointGroup is one try-order entry under a virtual model: a provider, a
@@ -395,6 +404,11 @@ func (c *Config) validate() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
 	}
+	// quotaNow anchors every provider's unset `since` default (see
+	// validateQuota/LimitConfig.validate) to the same instant — one
+	// config.Parse call resolving every Limit's default anchor consistently,
+	// rather than each one reading a slightly different time.Now().
+	quotaNow := time.Now()
 	// core.StickyBackstopTTL is the internal/sticky Registry's own memory-
 	// eviction window — an entry idle longer than that is dropped from the
 	// map regardless of what any endpoint's own StickyTTL says, so a
@@ -467,6 +481,9 @@ func (c *Config) validate() error {
 					return fmt.Errorf("provider %q: proxy: true but no matching proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", p.Name, u.Scheme)
 				}
 			}
+		}
+		if err := validateQuota(p.Name, p.Quota, quotaNow); err != nil {
+			return err
 		}
 	}
 	for name, m := range c.Models {
