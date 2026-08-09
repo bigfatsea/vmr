@@ -5,10 +5,10 @@
 /bin/
 *.exe
 skills-lock.json
+*.local.yaml
 
 # Local config with real keys (use config.example.yaml as template)
 /config.yaml
-/config.local.yaml
 
 # vmr report/vmr story sidecar config — may hold a plaintext llm_key
 # (use report.example.yaml as template)
