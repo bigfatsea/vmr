@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"vmr/internal/audit"
@@ -48,10 +49,18 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 // returns a usable Resolver/*report.Pricing pair backed by the standard
 // table alone, with no account-specific overrides — NOT an error:
 // `vmr report` must keep working against a bare audit log with no
-// config.yaml in reach (see the design doc's §13 "无 config.yaml 时跑
-// vmr report" degrade). `vmr report`'s own philosophy is that a pricing
-// problem must never cost the whole report, only its $ column's accuracy.
-func buildPricing(configPath string, tw io.Writer) (*pricing.Resolver, *report.Pricing) {
+// config.yaml in reach (see the design doc's "no config.yaml" degrade
+// section). `vmr report`'s own philosophy is that a pricing problem must
+// never cost the whole report, only its $ column's accuracy.
+//
+// displayCCY/extraRates (report.yaml's currency/exchange_rate, or -currency)
+// are a final, purely cosmetic step layered on top of the above: everything
+// resolves in the accounting currency exactly as before, and only the
+// number actually printed gets rescaled (Resolver.WithDisplayFactor) —
+// missing displayCCY, or a rate this function can't resolve, both degrade
+// to "show whatever currency computation used" with a warning, never an
+// error (same philosophy as the rest of this function).
+func buildPricing(configPath string, tw io.Writer, displayCCY string, extraRates map[string]float64) (*pricing.Resolver, *report.Pricing) {
 	standard, err := pricing.LoadStandard()
 	if err != nil {
 		fmt.Fprintf(tw, "pricing: embedded standard table failed to load (%v) — no $ estimates\n", err)
@@ -60,29 +69,53 @@ func buildPricing(configPath string, tw io.Writer) (*pricing.Resolver, *report.P
 	summary := &report.Pricing{Currency: standard.Currency, StandardGeneratedAt: standard.GeneratedAt}
 
 	cfg, err := config.Load(configPath)
+	var resolver *pricing.Resolver
+	var configRates map[string]float64
 	if err != nil {
 		fmt.Fprintf(tw, "pricing: %s not usable (%v) — $ estimates use the standard price table only, no account overrides\n", configPath, err)
-		return pricing.NewResolver(standard, nil), summary
+		resolver = pricing.NewResolver(standard, nil)
+	} else {
+		table := standard
+		if t, err := cfg.PricingTable(); err == nil && t != nil {
+			table = t
+		}
+		perProvider := map[string]pricing.ProviderPolicy{}
+		overrideCount := 0
+		for name, policy := range cfg.ProviderPricingPolicies {
+			perProvider[name] = policy
+			overrideCount += len(policy.Overrides)
+		}
+		if cfg.Pricing != nil {
+			summary.Currency = cfg.Pricing.Currency
+			summary.Supplement = cfg.Pricing.Supplement
+			configRates = cfg.Pricing.ExchangeRate
+		}
+		summary.ProviderOverrides = overrideCount
+		if overrideCount > 0 {
+			fmt.Fprintf(tw, "pricing: %d provider override rule(s) loaded from %s\n", overrideCount, configPath)
+		}
+		resolver = pricing.NewResolver(table, perProvider)
 	}
-	table := standard
-	if t, err := cfg.PricingTable(); err == nil && t != nil {
-		table = t
+	if summary.Currency == "" {
+		summary.Currency = "USD"
 	}
-	perProvider := map[string]pricing.ProviderPolicy{}
-	overrideCount := 0
-	for name, policy := range cfg.ProviderPricingPolicies {
-		perProvider[name] = policy
-		overrideCount += len(policy.Overrides)
+
+	if displayCCY != "" && !strings.EqualFold(displayCCY, summary.Currency) {
+		rates := map[string]float64{}
+		for k, v := range configRates {
+			rates[k] = v
+		}
+		for k, v := range extraRates { // report.yaml's own rates win over config.yaml's on a matching key
+			rates[k] = v
+		}
+		if factor, ok := pricing.FactorBetween(summary.Currency, displayCCY, rates); ok {
+			resolver = resolver.WithDisplayFactor(factor)
+			summary.Currency = displayCCY
+		} else {
+			fmt.Fprintf(tw, "pricing: no exchange rate to convert %s -> %s for -currency, showing %s instead (add exchange_rate: {%s: <rate>} to config.yaml's pricing: block or report.yaml)\n", summary.Currency, displayCCY, summary.Currency, displayCCY)
+		}
 	}
-	if cfg.Pricing != nil {
-		summary.Currency = cfg.Pricing.Currency
-		summary.Supplement = cfg.Pricing.Supplement
-	}
-	summary.ProviderOverrides = overrideCount
-	if overrideCount > 0 {
-		fmt.Fprintf(tw, "pricing: %d provider override rule(s) loaded from %s\n", overrideCount, configPath)
-	}
-	return pricing.NewResolver(table, perProvider), summary
+	return resolver, summary
 }
 
 // cmdReport aggregates audit JSONL into internal/report's output:
@@ -103,6 +136,7 @@ func cmdReport(args []string) error {
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
 	detailsFlag := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/ (default: report.yaml's details, or true)")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
+	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -122,7 +156,8 @@ func cmdReport(args []string) error {
 	outDir := resolveString(*outDirFlag, rc.Output, "reports")
 	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
 
-	pricingSrc, pricingInfo := buildPricing(*configPath, tw)
+	displayCCY := resolveString(*currencyFlag, rc.Currency, "")
+	pricingSrc, pricingInfo := buildPricing(*configPath, tw, displayCCY, rc.ExchangeRate)
 
 	// 0o700/0o600: report outputs embed full conversation bodies from the
 	// 0600 audit files - the derived copies must not loosen that. Created

@@ -22,6 +22,14 @@ import (
 type Resolver struct {
 	table       *Table
 	perProvider map[string]ProviderPolicy
+	// displayFactor, when non-zero and not 1, scales every Rate RateFor
+	// returns — vmr report's final "resolved in the accounting currency,
+	// SHOWN in a different display currency" step (see WithDisplayFactor).
+	// A pure linear rescale applied once here, so aggregate.go's per-record
+	// Cost() math (internal/report/cost.go's costFor) stays currency-
+	// unaware — it just multiplies whatever four-component Rate this
+	// Resolver hands it against raw token counts.
+	displayFactor float64
 
 	mu    sync.Mutex
 	cache map[string]*core.PricingSpec // "provider\x00model" -> resolved spec, or an explicit nil entry caching a miss
@@ -48,6 +56,21 @@ func NewResolver(table *Table, perProvider map[string]ProviderPolicy) *Resolver 
 	return &Resolver{table: table, perProvider: perProvider, cache: map[string]*core.PricingSpec{}}
 }
 
+// WithDisplayFactor returns a new Resolver that scales every RateFor result
+// by f — vmr report's display-currency step (cmd/vmr/cmd_report.go's
+// buildPricing): resolution still happens in the accounting currency
+// (config.yaml's pricing.currency, or USD with no config.yaml reachable),
+// this only rescales the number shown. A genuinely new Resolver (its own
+// cache/mutex), not a shallow copy of r, so the two never share a
+// sync.Mutex value under two independent lock states — a fresh, initially
+// empty cache is cheap here since callers always call this immediately
+// after NewResolver, before any RateFor call has populated it.
+func (r *Resolver) WithDisplayFactor(f float64) *Resolver {
+	nr := NewResolver(r.table, r.perProvider)
+	nr.displayFactor = f
+	return nr
+}
+
 // RateFor resolves provider+model's Rate at ts — Resolve (memoized) then
 // RateAt, composed into the single call shape a per-record aggregation
 // loop wants. ok=false when nothing resolves at all (no table entry, no
@@ -59,7 +82,11 @@ func (r *Resolver) RateFor(provider, model string, ts time.Time) (Rate, bool) {
 	if !ok {
 		return Rate{}, false
 	}
-	return RateAt(spec, ts), true
+	rate := RateAt(spec, ts)
+	if r.displayFactor != 0 && r.displayFactor != 1 {
+		rate = rate.Scale(r.displayFactor)
+	}
+	return rate, true
 }
 
 func (r *Resolver) resolve(provider, model string) (*core.PricingSpec, bool) {

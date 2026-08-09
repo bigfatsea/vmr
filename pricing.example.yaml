@@ -19,10 +19,29 @@
 # file's own pricing section; use THIS file when the correction should
 # apply everywhere that canonical key resolves, not just one account).
 #
-# Every amount below is USD per 1,000,000 tokens — this package only loads
-# USD tables (see internal/pricing.fileTable's doc comment for why); convert
-# into your own accounting currency via config.yaml's pricing.exchange_rate,
-# not by pre-converting the numbers in this file.
+# Recommended default: most rows are USD-native (the built-in table's own
+# currency) — for those, skip currency:/exchange_rate: entirely, this file
+# stays exactly as simple as a plain list of USD rates. Only reach for the
+# rest of this section once a row's price actually comes from a non-USD
+# source (a domestic vendor's own CNY price list, say).
+#
+# Every amount is per 1,000,000 tokens, in whatever currency the table (or
+# an individual row) declares. currency: at the top sets the default for
+# every row below it; a row can override that default with its own
+# `currency:` field (e.g. a domestic vendor's row entered straight from its
+# official CNY price list, even while this file's default stays USD) — write
+# the vendor's native-currency number here as-is, don't hand-convert it to
+# USD first, vmr does that at load time.
+#
+# The rate used for that conversion comes from an exchange_rate: block (a
+# "1 USD = X <code>" map) — either right here in THIS file (recommended:
+# keeps this file fully self-contained/portable, and the row's resolved USD
+# price stays pinned even if some other deployment's config.yaml later
+# tweaks its own rate for unrelated accounting reasons), or, for any
+# currency this file doesn't declare a rate for, falling back to
+# config.yaml's own pricing.exchange_rate (see that file's own pricing
+# section) — handy if you'd rather not repeat the same rate in every
+# supplement file and are fine with it tracking the deployment's rate.
 #
 # A component you omit means "unknown" to vmr, NEVER "free" — an explicit
 # 0.0 is how you spell "actually free". An unverified price is more
@@ -37,9 +56,19 @@
 
 currency: USD
 generated_at: "2026-08-09"
+exchange_rate:
+  CNY: 7.1   # only needed for currencies the rows below actually use — delete if you don't need CNY, or add more codes as needed
 rates:
   - key: some-vendor/some-model
     in_fresh: 1.0      # cost per 1M fresh (non-cached) input tokens
     cache_read: 0.1    # cost per 1M cache-hit input tokens
     cache_write: 1.25  # cost per 1M tokens written into cache (creation)
     out: 4.0           # cost per 1M output tokens
+
+  - key: some-domestic-vendor/some-model
+    currency: CNY      # this row's own price list is CNY-denominated — resolved via
+                        # this file's own exchange_rate: above, no config.yaml needed
+    in_fresh: 7.1
+    cache_read: 0.71
+    cache_write: 8.875
+    out: 28.4

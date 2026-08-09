@@ -145,6 +145,121 @@ pricing:
 	}
 }
 
+func TestPricing_Override_Currency_ConvertsToTarget(t *testing.T) {
+	// Account's own negotiated rate entered straight from a USD invoice
+	// while the deployment's accounting currency is CNY.
+	yaml := pricingCfg("pricing:\n  currency: CNY\n  exchange_rate: {CNY: 7.1}\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: "*", currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}`, "gpt-4o")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	spec := cfg.ResolvedPricing["p1\x00gpt-4o"]
+	if spec == nil || len(spec.Overrides) != 1 {
+		t.Fatalf("spec = %+v, want exactly 1 override", spec)
+	}
+	rate := pricing.RateAt(spec, time.Now())
+	if got, want := *rate.InFresh, 7.1; got < want-1e-9 || got > want+1e-9 {
+		t.Errorf("InFresh = %v, want %v (1 USD x 7.1)", got, want)
+	}
+	if got, want := *rate.Out, 28.4; got < want-1e-9 || got > want+1e-9 {
+		t.Errorf("Out = %v, want %v (4 USD x 7.1)", got, want)
+	}
+}
+
+func TestPricing_Override_CurrencyWithDiscount_Rejected(t *testing.T) {
+	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: "*", currency: CNY, discount: 0.5}`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "currency only applies to an explicit rate") {
+		t.Errorf("want a currency+discount rejection, got %v", err)
+	}
+}
+
+func TestPricing_Override_CurrencyMissingRate_Rejected(t *testing.T) {
+	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: "*", currency: CNY, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "exchange_rate entry") {
+		t.Errorf("want a missing-rate rejection, got %v", err)
+	}
+}
+
+func TestPricing_Supplement_NonUSDRow_ConvertsViaExchangeRate(t *testing.T) {
+	supplementPath := writeSupplementFile(t, `
+currency: USD
+generated_at: "2026-08-09"
+rates:
+  - key: domestic/model-a
+    currency: CNY
+    in_fresh: 7.1
+    cache_read: 0.71
+    cache_write: 8.875
+    out: 28.4
+`)
+	yaml := pricingCfgNamed(fmt.Sprintf("pricing:\n  currency: USD\n  exchange_rate: {CNY: 7.1}\n  supplement: %s\n", supplementPath),
+		"domestic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}`, "model-a")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	spec := cfg.ResolvedPricing["domestic\x00model-a"]
+	if spec == nil || spec.Base.InFresh == nil {
+		t.Fatal("no resolved base rate")
+	}
+	if got := *spec.Base.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("Base.InFresh = %v, want 1.0 (the supplement row's 7.1 CNY converted to USD via exchange_rate, then to the USD target currency unchanged)", got)
+	}
+}
+
+func TestPricing_Supplement_SelfContainedExchangeRate_NoConfigRateNeeded(t *testing.T) {
+	// config.yaml has NO pricing.exchange_rate at all — the supplement
+	// file's own exchange_rate: block must be enough on its own, proving
+	// pricing.yaml can be portable/self-contained rather than depending on
+	// an unrelated config.yaml declaring a matching key.
+	supplementPath := writeSupplementFile(t, `
+currency: USD
+generated_at: "2026-08-09"
+exchange_rate: {CNY: 7.1}
+rates:
+  - key: domestic/model-a
+    currency: CNY
+    in_fresh: 7.1
+    cache_read: 0.71
+    cache_write: 8.875
+    out: 28.4
+`)
+	yaml := pricingCfgNamed(fmt.Sprintf("pricing:\n  currency: USD\n  supplement: %s\n", supplementPath),
+		"domestic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}`, "model-a")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse (no pricing.exchange_rate in config.yaml at all): %v", err)
+	}
+	spec := cfg.ResolvedPricing["domestic\x00model-a"]
+	if spec == nil || spec.Base.InFresh == nil {
+		t.Fatal("no resolved base rate")
+	}
+	if got := *spec.Base.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("Base.InFresh = %v, want 1.0 (converted via the supplement file's own exchange_rate, with no help from config.yaml)", got)
+	}
+}
+
 func TestPricing_MetricCost_MissingCurrency_Rejected(t *testing.T) {
 	yaml := pricingCfg("", `quota:
   limits:
@@ -166,7 +281,7 @@ func TestPricing_MetricCost_NonUSD_MissingExchangeRate_Rejected(t *testing.T) {
 }
 
 func TestPricing_MetricCost_NonUSD_ExchangeRateApplied(t *testing.T) {
-	yaml := pricingCfgNamed("pricing:\n  currency: CNY\n  exchange_rate: {USD: 7.1}\n", "anthropic", `quota:
+	yaml := pricingCfgNamed("pricing:\n  currency: CNY\n  exchange_rate: {CNY: 7.1}\n", "anthropic", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}`, "claude-3-7-sonnet-20250219")
 	cfg, err := Parse([]byte(yaml))
@@ -332,7 +447,7 @@ func TestPricing_NonUSD_MissingExchangeRate_RejectedEvenWithoutCostProvider(t *t
 
 func TestPricing_ExchangeRate_NonPositive_Rejected(t *testing.T) {
 	for _, rate := range []string{"-1.0", "0", ".nan", ".inf"} {
-		yaml := pricingCfg("pricing:\n  currency: CNY\n  exchange_rate: {USD: "+rate+"}\n", `quota:
+		yaml := pricingCfg("pricing:\n  currency: CNY\n  exchange_rate: {CNY: "+rate+"}\n", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}`, "gpt-4o")
 		_, err := Parse([]byte(yaml))
@@ -390,7 +505,7 @@ func TestPricing_ProviderPolicy_CoversProviderWithoutPricingBlock(t *testing.T) 
 listen: 127.0.0.1:9900
 pricing:
   currency: CNY
-  exchange_rate: {USD: 7.1}
+  exchange_rate: {CNY: 7.1}
 providers:
   - name: plain
     base_url: {openai: https://api.example.com/v1}
@@ -435,7 +550,7 @@ func TestPricing_NonUSDProviderWithoutPricingBlock_ResolverActuallyConverts(t *t
 listen: 127.0.0.1:9900
 pricing:
   currency: CNY
-  exchange_rate: {USD: 7.1}
+  exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
     base_url: {openai: https://api.example.com/v1}

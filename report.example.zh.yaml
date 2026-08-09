@@ -25,6 +25,20 @@ details: true   # 只对 vmr report 有效。是否额外为每个请求各导�
                  # Markdown+JSON 文件到 {output}/details/（内置默认：true）。
                  # 会被 -details 覆盖。
 
+currency: ""   # 只对 vmr report 有效。$ 成本估算的展示币种，比如 "CNY" 或
+               # "JPY"——和这些估算实际"计算"时用的币种（config.yaml 的
+               # pricing.currency，或者没有 config.yaml 可用时的 USD）相互
+               # 独立。推荐的默认做法：留空——直接显示计算时用的那个币种，不
+               # 做任何换算。只有当你确实想让报告用和记账不同的币种呈现时，
+               # 才需要设置它。会被 -currency 覆盖。
+
+exchange_rate: {}   # 一张"1 美元 = X <货币代码>"的映射表（和 config.yaml 的
+                     # pricing.exchange_rate 形状相同），只用来解析上面
+                     # currency: 的换算——比如 {JPY: 155}。这里的条目在 key
+                     # 撞车时会盖过 config.yaml 自己的 pricing.exchange_rate；
+                     # 而且当完全没有 config.yaml 可用时（report.yaml 本来就
+                     # 设计成能独立使用），这是唯一能让 -currency 生效的办法。
+
 include_partial: false   # 只对 vmr story 有效。是否也列出/渲染那些头部看起来
                           # 被加载文件范围截断的 journey（内置默认：false）。
                           # 会被 -include-partial 覆盖。

@@ -30,6 +30,24 @@ details: true   # vmr report only. Whether to also export one Markdown+JSON
                  # file per request into {output}/details/ (built-in
                  # default: true). Overridden by -details.
 
+currency: ""   # vmr report only. Display currency for $ cost estimates,
+               # e.g. "CNY" or "JPY" — independent of whatever currency the
+               # estimates were actually COMPUTED in (config.yaml's
+               # pricing.currency, or USD when no config.yaml is reachable).
+               # Recommended default: leave empty — shows whatever currency
+               # computation used, no conversion. Only set this when you
+               # specifically want the report itself in a different
+               # currency than the one accounting uses. Overridden by
+               # -currency.
+
+exchange_rate: {}   # A "1 USD = X <code>" map (same shape as config.yaml's
+                     # pricing.exchange_rate), consulted ONLY to resolve the
+                     # currency: conversion above — e.g. {JPY: 155}. Entries
+                     # here win over config.yaml's own pricing.exchange_rate
+                     # on a matching key, and this is the ONLY way -currency
+                     # can work at all when no config.yaml is reachable
+                     # (report.yaml is meant to stand on its own).
+
 include_partial: false   # vmr story only. Also list/render journeys whose
                           # head looks truncated by the loaded file range
                           # (built-in default: false). Overridden by

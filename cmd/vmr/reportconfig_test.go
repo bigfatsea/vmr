@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"vmr/internal/i18n"
@@ -95,7 +96,7 @@ func TestLoadReportConfig_EmptyFileIsOK(t *testing.T) {
 			if err != nil {
 				t.Fatalf("loadReportConfig: %v", err)
 			}
-			if rc != (reportConfig{}) {
+			if !reflect.DeepEqual(rc, reportConfig{}) {
 				t.Errorf("expected zero-value reportConfig, got %+v", rc)
 			}
 		})
@@ -114,7 +115,7 @@ func TestResolveReportConfig_EmptyDefaultFileIsSilent(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	rc := resolveReportConfig("", &buf)
-	if rc != (reportConfig{}) {
+	if !reflect.DeepEqual(rc, reportConfig{}) {
 		t.Errorf("expected zero-value reportConfig for an empty report.yaml, got %+v", rc)
 	}
 	if buf.Len() != 0 {
@@ -141,7 +142,7 @@ func TestResolveReportConfig_MissingDefaultPathIsSilent(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	rc := resolveReportConfig("", &buf)
-	if rc != (reportConfig{}) {
+	if !reflect.DeepEqual(rc, reportConfig{}) {
 		t.Errorf("expected zero-value reportConfig when report.yaml is absent, got %+v", rc)
 	}
 	if buf.Len() != 0 {
@@ -152,7 +153,7 @@ func TestResolveReportConfig_MissingDefaultPathIsSilent(t *testing.T) {
 func TestResolveReportConfig_MissingExplicitPathWarns(t *testing.T) {
 	var buf bytes.Buffer
 	rc := resolveReportConfig(filepath.Join(t.TempDir(), "does-not-exist.yaml"), &buf)
-	if rc != (reportConfig{}) {
+	if !reflect.DeepEqual(rc, reportConfig{}) {
 		t.Errorf("expected zero-value reportConfig on load failure, got %+v", rc)
 	}
 	if buf.Len() == 0 {

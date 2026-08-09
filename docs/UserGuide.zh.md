@@ -265,12 +265,14 @@ providers:
 
 #### 定价与 cost 计量档位
 
-`metric: cost`（P2.2）直接按真实金额而不是次数/token 数给账号计费——适合按模型分化定价的 Credits 制套餐，这正是 `token_weights` 那套单一共享比例表达不了的场景。定价来自两层：**内置在二进制里的标准价目表**（不需要任何配置——数据源自一份公开的 LiteLLM 格式快照，MIT 许可，定期刷新）叠加你在 `config.yaml` 里写明的、与你账号不同的部分。
+`metric: cost` 直接按真实金额而不是次数/token 数给账号计费——适合按模型分化定价的 Credits 制套餐，这正是 `token_weights` 那套单一共享比例表达不了的场景。定价来自两层：**内置在二进制里的标准价目表**（不需要任何配置——数据源自一份公开的 LiteLLM 格式快照，MIT 许可，定期刷新）叠加你在 `config.yaml` 里写明的、与你账号不同的部分。
+
+**推荐的默认做法：大多数部署完全用不到下面这些。** 如果你哪个账号都不用 `metric: cost`（纯 `requests`/`tokens` 档位完全不涉及定价），整个 `pricing:` 块直接跳过。如果用了、也不介意统一按美元记账，只需要 `pricing: {currency: USD}` 一行——`exchange_rate` 留空不用，下面每条 `providers[].pricing.overrides` 费率直接填美元数字就行。只有当某个账号真正的配额上限是用非美元货币计的（比如某个国产厂商的人民币套餐），才需要用到 `exchange_rate`。
 
 ```yaml
 pricing:
   currency: CNY # 只要有账号用 metric: cost 就必填；标准表本身是 USD
-  exchange_rate: {USD: 7.1} # 1 USD = 7.1 CNY —— 只要 currency 不是 USD 就必填（确实不需要换算时，显式写 {USD: 1.0}）
+  exchange_rate: {CNY: 7.1} # 一张通用的"1 美元 = X <货币代码>"映射表——只要 currency 不是 USD 就必填
   supplement: ./pricing.yaml # 可选：你自己补充的条目，格式与内置表相同，合并进来（冲突时你的胜出）——参见 pricing.example.yaml
 
 providers:
@@ -282,19 +284,22 @@ providers:
       map: {my-claude-alias: anthropic/claude-3-7-sonnet-20250219} # 只在自动解析猜不出你的模型名时才需要
       overrides:
         - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"} # 一次限时促销，写在最前面（first-match-wins）
-        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54} # 这个账号对某个模型的实际谈判价
+        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54} # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
+        - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4} # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
         - {model: "*", discount: 0.6} # 兜底：其余模型统一按列表价 6 折
 ```
 
 **一个模型的价格怎么找到**：先看 `providers[].pricing.map`（显式的"本地模型名 → 标准表条目"映射），再依次尝试三步自动解析——`<provider 名>/<模型名>`、裸模型名、或者在标准表里对 `*/<模型名>` 后缀做**唯一**匹配。如果最后一步能匹配上不止一条，vmr 会拒绝瞎猜（宁可没有价格，也不猜错厂商）——这时加一条 `map` 消除歧义即可。`vmr check` 会把每个 provider 实际解析到的结果打印出来，所以这一步从不需要你自己猜测。
 
-**`providers[].pricing.overrides`** 是一条 first-match-wins 的规则列表：每条要么是 `discount`（对"下层解析出的费率"打折——下层可以是标准表，也可以是列表里更靠后的另一条 override），要么是显式的四分量费率（`in_fresh`/`cache_read`/`cache_write`/`out` 必须**四个一起给**——只给一部分会被拒绝，因为"其余的免费"和"其余的没写"是两件不同的事，vmr 不会替你猜是哪一种）。两种形式都可以带 `date_from`/`date_to`（`yyyy-MM-dd`）和/或 `hour_from`/`hour_to`（`HH:MM`，from>to 表示跨零点），用于限时促销或错峰定价。
+**`providers[].pricing.overrides`** 是一条 first-match-wins 的规则列表：每条要么是 `discount`（对"下层解析出的费率"打折——下层可以是标准表，也可以是列表里更靠后的另一条 override），要么是显式的四分量费率（`in_fresh`/`cache_read`/`cache_write`/`out` 必须**四个一起给**——只给一部分会被拒绝，因为"其余的免费"和"其余的没写"是两件不同的事，vmr 不会替你猜是哪一种）。两种形式都可以带 `date_from`/`date_to`（`yyyy-MM-dd`）和/或 `hour_from`/`hour_to`（`HH:MM`，from>to 表示跨零点），用于限时促销或错峰定价。显式费率还可以自带 `currency:`——省得你把厂商发票上的数字先手工换算成 `pricing.currency` 再填进来；`discount` 规则不能带 `currency:`（它是个无量纲乘数，不存在货币这回事）。
 
 **缺失永远比错误安全**：一个 `metric: cost` 账号在加载期就会被拒绝——`vmr check`/`vmr start`/热重载走的是同一条校验路径——除非它配置要服务的**每一个**上游模型，在**所有可能的 override 组合**下都能解析出完整的四分量费率，而不只是常见情形下。显式写 `0.0` 算"已定价"（有些分量确实免费）；缺失字段不算——把缺失的 `cache_read` 静默当 0，会让账号显得比实际便宜，进而拿到更多流量、超支。这是 vmr 唯一一处刻意不做优雅降级的地方。
 
+**`pricing.supplement` 的行也可以是非美元原生的**——补充表/standard-override 文件（见 `pricing.example.yaml`）里的某一行可以自带 `currency:`，直接抄厂商官网的原生货币价目表，不用手工换算。折算成 USD 用的汇率来自一个 `exchange_rate:` 块，可以就写在补充表文件自己里面（**推荐**：这样这份文件完全自包含、可以直接搬到别的部署用，而且它解析出来的 USD 价格不会因为某个 `config.yaml` 出于记账原因调整了自己的汇率而跟着漂移），对补充表没声明汇率的货币，则退回 `config.yaml` 自己的 `pricing.exchange_rate`。
+
 **从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数；和上面 `pricing.supplement: ./pricing.yaml` 只是撞了同一个文件名，两者并不是一回事——旧侧车的字段形状（`in_fresh_per_1m`/`date_range`/`updated_at` 等）不是新补充表的形状）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`），`date_range`/`hour_range` 两元数组拆成 `date_from`/`date_to`/`hour_from`/`hour_to`。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
 
-`vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价，和之前行为一致。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。
+`vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。`vmr report` 自己的展示币种选项（和上面的记账币种相互独立）见下文[成本估算与定价](#成本估算与定价)。
 
 完整设计，包括留给后续批次的一切（单账号多窗口、滚动窗口、接官方用量 API 校准）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`。
 
@@ -343,7 +348,9 @@ Markdown 按九个编号章节组织，每章回答一个运维问题：
 
 #### 成本估算与定价
 
-`vmr report`（用 `-c config.yaml`，跟它找 `log_dir` 用的是同一个参数）用的是和 `metric: cost` 额度完全相同的两层定价模型——二进制内置的标准价目表，叠加你 `config.yaml` 里声明的 `providers[].pricing`/全局 `pricing:` 块——完整配置形态见上文[定价与 cost 计量档位](#定价与-cost-计量档位)（`map`/`overrides`/`discount`/时间窗全部原样适用）。找不到 `config.yaml` 时优雅降级为只用标准表的列表价、没有账号覆盖，跟以前行为一致——不会因此拖累报表的其余部分。和 `metric: cost` 额度账号不同（只要有一个模型解析出不完整的费率就在加载期直接拒绝），报表里某一行价格解析不完整或缺失时，只是那一行不显示 $ 数字——报表的哲学是"定价缺口只丢一个数字，不丢整份报表"。
+`vmr report`（用 `-c config.yaml`，跟它找 `log_dir` 用的是同一个参数）用的是和 `metric: cost` 额度完全相同的两层定价模型——二进制内置的标准价目表，叠加你 `config.yaml` 里声明的 `providers[].pricing`/全局 `pricing:` 块——完整配置形态见上文[定价与 cost 计量档位](#定价与-cost-计量档位)（`map`/`overrides`/`discount`/时间窗全部原样适用）。找不到 `config.yaml` 时优雅降级为只用标准表的列表价、没有账号覆盖——不会因此拖累报表的其余部分。和 `metric: cost` 额度账号不同（只要有一个模型解析出不完整的费率就在加载期直接拒绝），报表里某一行价格解析不完整或缺失时，只是那一行不显示 $ 数字——报表的哲学是"定价缺口只丢一个数字，不丢整份报表"。
+
+**展示币种和记账币种相互独立。** `-currency CODE`（或 `report.yaml` 的 `currency`）决定报表 $ 列实际显示成什么币种——比如记账用 `pricing.currency: USD`，但想给别人看一份 `-currency CNY` 的报表。这是一次纯粹的展示层最终换算（`internal/pricing.Resolver.WithDisplayFactor`），发生在每个数字已经按记账币种算完之后——从不改变 `metric: cost` 账号实际被扣掉的金额。所需的汇率来自 `config.yaml` 的 `pricing.exchange_rate` 和/或 `report.yaml` 自己的 `exchange_rate`（同样"1 美元 = X `<货币代码>`"的形状——见 `report.example.yaml`），后者在 key 撞车时优先；而且当完全没有 `config.yaml` 可用时，这是唯一能让 `-currency` 生效的办法，因为 `report.yaml` 本来就设计成能独立使用。`-currency` 解析不出汇率时降级为显示记账币种、打一行警告——不是硬错误。
 
 #### Agent 感知分析
 
@@ -369,7 +376,7 @@ Markdown 按九个编号章节组织，每章回答一个运维问题：
 
 `vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，存在就从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
 
-`report.yaml` 不止管语言：`-o`/`-details`/`-include-partial`/`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-cache-dir` 都可以在这份文件里预先写好默认值，同名命令行 flag 显式传了照样优先——完整字段和注释见仓库根目录的 `report.example.yaml`。`llm_key` 可以直接写明文（这份文件已经 `.gitignore`），也可以写成 `${VMR_LLM_KEY}` 这样引用一个已有的环境变量，两种都行；`llm_cache_dir` 没有隐式默认路径，两处（flag、`report.yaml`）都不设就完全不缓存 LLM 调用结果。
+`report.yaml` 不止管语言：`-o`/`-details`/`-include-partial`/`-currency`/`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-cache-dir` 都可以在这份文件里预先写好默认值（`currency`/`exchange_rate`——见上文[成本估算与定价](#成本估算与定价)），同名命令行 flag 显式传了照样优先——完整字段和注释见仓库根目录的 `report.example.yaml`。`llm_key` 可以直接写明文（这份文件已经 `.gitignore`），也可以写成 `${VMR_LLM_KEY}` 这样引用一个已有的环境变量，两种都行；`llm_cache_dir` 没有隐式默认路径，两处（flag、`report.yaml`）都不设就完全不缓存 LLM 调用结果。
 
 #### 多调用方场景
 
@@ -480,7 +487,7 @@ models:
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文 |
+| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文。`-currency` 决定 $ 列的展示币种，和它实际计算时用的币种相互独立（见上文[成本估算与定价](#成本估算与定价)） |
 | `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |

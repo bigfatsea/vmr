@@ -1,7 +1,10 @@
 // Ver 2026-08-07, by Opus 5
 package pricing
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func f(v float64) *float64 { return &v }
 
@@ -197,5 +200,187 @@ func TestLoadStandard_EmbeddedTablesParseAndMerge(t *testing.T) {
 		} else if r.InFresh == nil {
 			t.Errorf("%q: in_fresh unexpectedly nil", key)
 		}
+	}
+}
+
+// --- FactorBetween ---
+
+func TestFactorBetween_USDIdentity(t *testing.T) {
+	if f, ok := FactorBetween("USD", "USD", nil); !ok || f != 1 {
+		t.Fatalf("FactorBetween(USD, USD, nil) = (%v, %v), want (1, true)", f, ok)
+	}
+	if f, ok := FactorBetween("", "usd", nil); !ok || f != 1 {
+		t.Fatalf("FactorBetween(\"\", usd, nil) = (%v, %v), want (1, true) — empty and lowercase both mean USD", f, ok)
+	}
+}
+
+func TestFactorBetween_DirectPivot(t *testing.T) {
+	rates := map[string]float64{"CNY": 7.1}
+	f, ok := FactorBetween("USD", "CNY", rates)
+	if !ok || f != 7.1 {
+		t.Fatalf("FactorBetween(USD, CNY) = (%v, %v), want (7.1, true)", f, ok)
+	}
+	f, ok = FactorBetween("CNY", "USD", rates)
+	if !ok {
+		t.Fatalf("FactorBetween(CNY, USD) ok = false, want true")
+	}
+	if diff := f - 1/7.1; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("FactorBetween(CNY, USD) = %v, want %v (1/7.1, the inverse direction)", f, 1/7.1)
+	}
+}
+
+func TestFactorBetween_CrossNonUSDPair_ViaUSDPivot(t *testing.T) {
+	// CNY -> JPY with no direct rate between them — must resolve via the
+	// implicit USD pivot (1 USD = 7.1 CNY = 155 JPY -> 1 CNY = 155/7.1 JPY).
+	rates := map[string]float64{"CNY": 7.1, "JPY": 155}
+	f, ok := FactorBetween("CNY", "JPY", rates)
+	want := 155.0 / 7.1
+	if !ok || f < want-1e-9 || f > want+1e-9 {
+		t.Fatalf("FactorBetween(CNY, JPY) = (%v, %v), want (%v, true)", f, ok, want)
+	}
+}
+
+func TestFactorBetween_MissingOrInvalidRate_Rejected(t *testing.T) {
+	for _, rates := range []map[string]float64{
+		nil,
+		{},
+		{"CNY": 0},
+		{"CNY": -1},
+		{"CNY": math.NaN()},
+		{"CNY": math.Inf(1)},
+	} {
+		if _, ok := FactorBetween("USD", "CNY", rates); ok {
+			t.Errorf("FactorBetween(USD, CNY, %v) = ok, want rejected", rates)
+		}
+	}
+}
+
+// --- ParseTableWithRates ---
+
+func TestParseTableWithRates_RowLevelCurrency_ConvertsToUSD(t *testing.T) {
+	data := []byte(`currency: USD
+rates:
+  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+`)
+	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 7.1})
+	if err != nil {
+		t.Fatalf("ParseTableWithRates: %v", err)
+	}
+	r, ok := tbl.Lookup("domestic/model-a")
+	if !ok {
+		t.Fatal("row not found")
+	}
+	if got := *r.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("InFresh = %v, want 1.0 (7.1 CNY / 7.1)", got)
+	}
+	if got := *r.Out; got < 4-1e-9 || got > 4+1e-9 {
+		t.Fatalf("Out = %v, want 4.0 (28.4 CNY / 7.1)", got)
+	}
+	if tbl.Currency != "USD" {
+		t.Fatalf("Table.Currency = %q, want USD — the in-memory Table must always be USD regardless of source rows", tbl.Currency)
+	}
+}
+
+func TestParseTableWithRates_TableLevelDefaultCurrency(t *testing.T) {
+	data := []byte(`currency: CNY
+rates:
+  - {key: domestic/model-a, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+  - {key: foreign/model-b, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}
+`)
+	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 7.1})
+	if err != nil {
+		t.Fatalf("ParseTableWithRates: %v", err)
+	}
+	a, _ := tbl.Lookup("domestic/model-a")
+	if got := *a.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("model-a InFresh = %v, want 1.0 (inherits table-level currency: CNY)", got)
+	}
+	b, _ := tbl.Lookup("foreign/model-b")
+	if got := *b.InFresh; got != 1 {
+		t.Fatalf("model-b InFresh = %v, want 1.0 unchanged (row's own currency: USD overrides the table default)", got)
+	}
+}
+
+func TestParseTableWithRates_MissingRate_Rejected(t *testing.T) {
+	data := []byte(`currency: USD
+rates:
+  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+`)
+	if _, err := ParseTableWithRates(data, nil); err == nil {
+		t.Fatal("want an error: row declares currency CNY but no rates map was given to convert it")
+	}
+}
+
+func TestParseTableWithRates_FileOwnExchangeRate_SelfContained(t *testing.T) {
+	// No external rates passed at all — the file's own exchange_rate:
+	// block must be enough on its own, proving a supplement/standard file
+	// can be fully portable across deployments.
+	data := []byte(`currency: USD
+exchange_rate: {CNY: 7.1}
+rates:
+  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+`)
+	tbl, err := ParseTableWithRates(data, nil)
+	if err != nil {
+		t.Fatalf("ParseTableWithRates (no external rates): %v", err)
+	}
+	r, ok := tbl.Lookup("domestic/model-a")
+	if !ok {
+		t.Fatal("row not found")
+	}
+	if got := *r.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("InFresh = %v, want 1.0 (7.1 CNY / the file's own 7.1 rate)", got)
+	}
+}
+
+func TestParseTableWithRates_FileOwnExchangeRate_WinsOverExternal(t *testing.T) {
+	// The file's own exchange_rate: block must win over a conflicting
+	// external (config.yaml) rate on the same currency code — a
+	// self-declared rate is a deliberate pin, not a mere suggestion.
+	data := []byte(`currency: USD
+exchange_rate: {CNY: 7.1}
+rates:
+  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+`)
+	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 999}) // wildly different external rate
+	if err != nil {
+		t.Fatalf("ParseTableWithRates: %v", err)
+	}
+	r, _ := tbl.Lookup("domestic/model-a")
+	if got := *r.InFresh; got < 1-1e-9 || got > 1+1e-9 {
+		t.Fatalf("InFresh = %v, want 1.0 (the file's own 7.1 rate must win over the external 999)", got)
+	}
+}
+
+func TestParseTableWithRates_FileExchangeRate_FallsBackToExternalForOtherCurrencies(t *testing.T) {
+	// The file declares its own rate for CNY only; a JPY row must still
+	// fall back to the externally-supplied rates map.
+	data := []byte(`currency: USD
+exchange_rate: {CNY: 7.1}
+rates:
+  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
+  - {key: jp-vendor/model-b, currency: JPY, in_fresh: 155, cache_read: 15.5, cache_write: 193.75, out: 620}
+`)
+	tbl, err := ParseTableWithRates(data, map[string]float64{"JPY": 155})
+	if err != nil {
+		t.Fatalf("ParseTableWithRates: %v", err)
+	}
+	r, ok := tbl.Lookup("jp-vendor/model-b")
+	if !ok {
+		t.Fatal("row not found")
+	}
+	if got := *r.InFresh; got != 1 {
+		t.Fatalf("InFresh = %v, want 1.0 (155 JPY / the external 155 rate)", got)
+	}
+}
+
+func TestParseTableWithRates_NilRates_BehavesLikePlainParseTable(t *testing.T) {
+	data := []byte("currency: USD\nrates: []\n")
+	tbl, err := ParseTableWithRates(data, nil)
+	if err != nil {
+		t.Fatalf("ParseTableWithRates(nil rates, all-USD data): unexpected error: %v", err)
+	}
+	if tbl.Currency != "USD" {
+		t.Fatalf("Table.Currency = %q, want USD", tbl.Currency)
 	}
 }

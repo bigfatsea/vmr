@@ -87,16 +87,30 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # 上游响应体（流式、JSON、错误）静默超过这么久就中止
 
 # pricing：metric: cost 计量账号和 vmr report 的 $ 估算所用的全局设置
-# （P2.2——完整设计见 docs/TokenPlan_Quota_Routing_Design_opus-5.md，账号级的
-# 那一半见下面 providers[].pricing）。不做任何配置也会有一份内置的标准价目表
-# 生效（数据源自公开的 LiteLLM 格式快照）；只有当你需要货币换算，或者某个账号
-# 的价格和标准列表价不同时，才需要用到这个块。
+# （完整设计见 docs/TokenPlan_Quota_Routing_Design_opus-5.md，账号级的那一半
+# 见下面 providers[].pricing）。不做任何配置也会有一份内置的标准价目表生效
+# （数据源自公开的 LiteLLM 格式快照），vmr report 的 $ 估算零配置就能用——这
+# 整个块对大多数部署来说都可以跳过。
+#
+# 推荐的默认做法：如果你完全不用 metric: cost 配额（metric: requests/tokens
+# 都不需要这些东西），整个块直接不写。如果你用了 metric: cost、也不介意统一
+# 按美元记账，只写 `pricing: {currency: USD}` 一行就够——exchange_rate 留空
+# 不用，下面 providers[].pricing.overrides 每一行也直接填美元数字。只有当某
+# 个账号真正的配额上限是用非美元货币计的（比如某个国产厂商的人民币套餐），才
+# 需要用到 exchange_rate——强行统一成美元并不会消灭手工换算这件事，只是把它
+# 从这里挪到了下面的 amount: 上。
 # pricing:
 #   currency: CNY                # 只要有任意一个 provider 用了 metric: cost 就必填；标准表本身是 USD
-#   exchange_rate: {USD: 7.1}    # 1 USD = 7.1 CNY —— 只要 currency 不是 USD 就必填：内置表是以 USD
-#                                 # 计价的，metric: cost 计费和 vmr report 的 $ 列都靠它，不写就会把
-#                                 # USD 的数字直接当成 CNY 标出来。
-#                                 # 想明确表示"不需要换算"，就显式写 {USD: 1.0}。
+#   exchange_rate: {CNY: 7.1}    # 一张通用的"1 美元 = X <货币代码>"映射表——只要 currency 不是 USD 就
+#                                 # 必填（需要一条 CNY 的条目：内置表是以 USD 计价的，metric: cost 计费
+#                                 # 和 vmr report 的 $ 列都靠它，不写就会把 USD 的数字直接当成 CNY 标出
+#                                 # 来）。同时也是 providers[].pricing.overrides 某一行自带 currency:（见
+#                                 # 下面——override 就写在这份文件里，不存在"退回到哪"的问题）的换算来源，
+#                                 # 以及 pricing.supplement 某一行自带 currency:（见 pricing.example.yaml）
+#                                 # 在**那份文件自己没声明** exchange_rate: 块时的兜底——补充表自己声明的
+#                                 # 汇率在 key 撞车时永远优先，这样它才能脱离具体部署独立搬用；这张表只补
+#                                 # 它没覆盖到的部分。vmr report 的 -currency 展示币种和这里不一致时，
+#                                 # 也会查这张表。想明确表示"不需要换算"，就显式写 {CNY: 1.0}。
 #   supplement: ./pricing.yaml    # 可选：你自己补充的条目，格式和内置表相同
 #                                   # （参见 pricing.example.yaml——复制成 pricing.yaml 后按需修改），
 #                                   # 合并进来——canonical key 撞车时你的条目胜出。指向一个不存在
@@ -180,7 +194,8 @@ providers:
   #     overrides:                  # first-match-wins；每条要么是 discount，要么是全部四个
   #       # 分量（in_fresh/cache_read/cache_write/out）一起给，从不混着写或只给一部分
   #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # 一次限时促销，写在最前面
-  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
+  #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
   #       - {model: "*", discount: 0.6}  # 兜底：这个账号上其余所有模型统一按列表价 6 折
 
   - name: openrouter

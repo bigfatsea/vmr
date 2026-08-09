@@ -62,7 +62,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
        vmr check [-c config.yaml] [log|cache]   (prints just that resolved directory instead of the full summary)
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
-       vmr report [-c config.yaml] [-o dir] [-details=false] [-lang en|zh] [audit.jsonl|glob]...   (default -o: ./reports; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; no input files => -c's log_dir/vmr-audit-*)
+       vmr report [-c config.yaml] [-o dir] [-details=false] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (default -o: ./reports; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; -currency default: report.yaml's currency, or whatever currency pricing resolved in; no input files => -c's log_dir/vmr-audit-*)
        vmr story [-c config.yaml] [-journey id | -render-all | -compare id1,id2] [-include-partial] [-show-ungrouped] [-o dir] [-lang en|zh] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; -lang default: report.yaml's language, or en; no input files => -c's log_dir/vmr-audit-*)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>

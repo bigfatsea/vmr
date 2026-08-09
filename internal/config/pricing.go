@@ -28,12 +28,21 @@ type PricingConfig struct {
 	// resolution degrades to USD list price with no conversion, same as
 	// today's behavior with no pricing.yaml at all).
 	Currency string `yaml:"currency"`
-	// ExchangeRate converts the embedded standard/supplement table's USD
-	// prices into Currency — the ONLY meaningful key is "USD" (see
-	// internal/pricing.fileTable's doc comment for why every table this
-	// package loads is USD-only, a deliberate simplification versus the old
-	// report.Pricing sidecar's general multi-currency graph). Ignored
-	// entirely when Currency is "USD" or empty.
+	// ExchangeRate is a general "1 USD = X <code>" map (USD itself is
+	// always implicit 1.0, never needs an entry here) — see
+	// internal/pricing.FactorBetween. Every currency this deployment
+	// touches needs an entry: Currency itself (to convert the USD standard
+	// table into it), a providers[].pricing.overrides row's own currency:
+	// (to convert it into Currency — overrides live in this same file, no
+	// fallback question there), and a pricing.supplement/pricing.standard
+	// row's own currency: that file DOESN'T resolve on its own — a
+	// supplement file's own fileTable.ExchangeRate block, if it has one,
+	// wins on a matching key (see internal/pricing.ParseTableWithRates'
+	// doc comment for why: it keeps that file portable/self-contained
+	// rather than silently depending on whichever config.yaml happens to
+	// be merging it in); this map is only the fallback for what it doesn't
+	// cover. Ignored entirely when nothing above needs a non-USD
+	// conversion.
 	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 	// Supplement is an optional path to a user-maintained pricing table
 	// (same shape as internal/pricing's embedded standard.*.yaml — see
@@ -68,8 +77,18 @@ type ProviderPricingConfig struct {
 // (partial explicit rates are rejected, not silently treated as "the other
 // components are free").
 type PricingOverrideConfig struct {
-	Model      string   `yaml:"model"`
-	Discount   *float64 `yaml:"discount"`
+	Model    string   `yaml:"model"`
+	Discount *float64 `yaml:"discount"`
+	// Currency optionally names the currency the four explicit components
+	// below are written in — e.g. a domestic account's negotiated rate
+	// entered straight from its CNY invoice while pricing.currency stays
+	// USD. Converted to pricing.currency (or USD if that's unset) once at
+	// load time via pricing.FactorBetween, same "normalize at the earliest
+	// point" treatment pricing.supplement rows get. Empty means "already in
+	// pricing.currency" (the pre-existing behavior, unchanged). Only valid
+	// alongside an explicit rate — a discount is a dimensionless multiplier,
+	// no currency applies.
+	Currency   string   `yaml:"currency"`
 	InFresh    *float64 `yaml:"in_fresh"`
 	CacheRead  *float64 `yaml:"cache_read"`
 	CacheWrite *float64 `yaml:"cache_write"`
@@ -93,8 +112,11 @@ func (o PricingOverrideConfig) explicitFieldsSet() int {
 }
 
 // validate checks one override rule and, on success, returns its resolved
-// pricing.OverrideRule form.
-func (o PricingOverrideConfig) validate(providerName string, idx int) (pricing.OverrideRule, error) {
+// pricing.OverrideRule form. rates/targetCurrency are only consulted when
+// o.Currency names a conversion (see PricingOverrideConfig.Currency's doc
+// comment); targetCurrency "" is treated as USD, matching
+// buildPricingContext's own "no pricing.currency set = USD" default.
+func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[string]float64, targetCurrency string) (pricing.OverrideRule, error) {
 	if o.Model == "" {
 		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: model is required (a name, or \"*\" for a wildcard)", providerName, idx)
 	}
@@ -109,6 +131,9 @@ func (o PricingOverrideConfig) validate(providerName string, idx int) (pricing.O
 	}
 	if o.Discount != nil && !positiveFinite(*o.Discount) {
 		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: discount must be a finite number > 0 (got %v)", providerName, idx, *o.Discount)
+	}
+	if o.Currency != "" && o.Discount != nil {
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: currency only applies to an explicit rate, not a discount multiplier", providerName, idx)
 	}
 	// An explicit component may legitimately be 0.0 ("this provider really
 	// doesn't charge for cache reads") but never negative and never
@@ -144,7 +169,19 @@ func (o PricingOverrideConfig) validate(providerName string, idx int) (pricing.O
 	}
 	rule := pricing.OverrideRule{Model: o.Model, Discount: o.Discount, DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
 	if o.Discount == nil {
-		rule.Explicit = pricing.Rate{InFresh: o.InFresh, CacheRead: o.CacheRead, CacheWrite: o.CacheWrite, Out: o.Out}
+		rate := pricing.Rate{InFresh: o.InFresh, CacheRead: o.CacheRead, CacheWrite: o.CacheWrite, Out: o.Out}
+		if o.Currency != "" {
+			target := targetCurrency
+			if target == "" {
+				target = "USD"
+			}
+			factor, ok := pricing.FactorBetween(o.Currency, target, rates)
+			if !ok {
+				return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: currency %q has no matching pricing.exchange_rate entry to convert into %s", providerName, idx, o.Currency, target)
+			}
+			rate = rate.Scale(factor)
+		}
+		rule.Explicit = rate
 	}
 	return rule, nil
 }
@@ -157,6 +194,7 @@ type pricingContext struct {
 	table                *pricing.Table
 	exchangeRateToTarget float64
 	currency             string
+	rates                map[string]float64 // = gc.ExchangeRate, nil-safe — threaded into override validation for their own currency: conversion
 }
 
 // buildPricingContext loads the merged standard(+supplement) table and
@@ -164,7 +202,7 @@ type pricingContext struct {
 // provider actually needs it (a metric: cost Limit, or a pricing: block for
 // vmr report's benefit) — see resolvePricing.
 //
-// A non-USD pricing.currency with no exchange_rate["USD"] entry is an
+// A non-USD pricing.currency with no exchange_rate[currency] entry is an
 // unconditional load-time error, not a factor-defaults-to-1 degrade: the
 // standard/supplement table is USD-denominated and reaches BOTH consumers
 // (metric: cost charging and vmr report's $ column), so silently skipping
@@ -187,7 +225,7 @@ func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
 		}
-		override, err := pricing.ParseTable(data)
+		override, err := pricing.ParseTableWithRates(data, gc.ExchangeRate)
 		if err != nil {
 			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
 		}
@@ -198,7 +236,7 @@ func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
 		}
-		supp, err := pricing.ParseTable(data)
+		supp, err := pricing.ParseTableWithRates(data, gc.ExchangeRate)
 		if err != nil {
 			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
 		}
@@ -207,16 +245,16 @@ func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
 	currency := gc.Currency
 	factor := 1.0
 	if currency != "" && currency != "USD" {
-		f, ok := gc.ExchangeRate["USD"]
+		f, ok := gc.ExchangeRate[currency]
 		if !ok {
-			return nil, fmt.Errorf("pricing.currency is %q but pricing.exchange_rate has no \"USD\" entry — the standard/supplement price table is USD-denominated and needs a rate to convert into %s (write exchange_rate: {USD: 1.0} to state deliberately that no conversion applies)", currency, currency)
+			return nil, fmt.Errorf("pricing.currency is %q but pricing.exchange_rate has no %q entry — the standard/supplement price table is USD-denominated and needs a rate to convert into %s (write exchange_rate: {%s: 1.0} to state deliberately that no conversion applies)", currency, currency, currency, currency)
 		}
 		if !positiveFinite(f) {
-			return nil, fmt.Errorf("pricing.exchange_rate[\"USD\"]: must be a finite number > 0 (got %v)", f)
+			return nil, fmt.Errorf("pricing.exchange_rate[%q]: must be a finite number > 0 (got %v)", currency, f)
 		}
 		factor = f
 	}
-	return &pricingContext{table: table, exchangeRateToTarget: factor, currency: currency}, nil
+	return &pricingContext{table: table, exchangeRateToTarget: factor, currency: currency, rates: gc.ExchangeRate}, nil
 }
 
 // resolvePricing is config.validate()'s pricing pass, run after both the
@@ -278,7 +316,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 				}
 			}
 			for i, oc := range p.Pricing.Overrides {
-				rule, err := oc.validate(p.Name, i)
+				rule, err := oc.validate(p.Name, i, pctx.rates, pctx.currency)
 				if err != nil {
 					return err
 				}

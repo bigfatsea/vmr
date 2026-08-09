@@ -41,6 +41,19 @@ type reportConfig struct {
 	LLMModel       string `yaml:"llm_model"`       // vmr story's -llm-model default
 	LLMKey         string `yaml:"llm_key"`         // vmr story's -llm-key default; plaintext or "${SOME_ENV_VAR}"
 	LLMCacheDir    string `yaml:"llm_cache_dir"`   // vmr story's -llm-cache-dir default; "" everywhere = no caching, never an implicit path
+	// Currency is vmr report's -currency default — the currency $ cost
+	// estimates are DISPLAYED in, independent of whatever currency they were
+	// actually computed in (config.yaml's pricing.currency, or USD with no
+	// config.yaml reachable). Empty = show whatever currency computation
+	// used, no conversion (today's behavior, unchanged).
+	Currency string `yaml:"currency"`
+	// ExchangeRate is a "1 USD = X <code>" map (same shape/semantics as
+	// config.yaml's pricing.exchange_rate — see internal/pricing.
+	// FactorBetween), consulted ONLY for the Currency conversion above. Lets
+	// -currency work even with no config.yaml reachable at all (report.yaml
+	// is meant to stand alone); when config.yaml IS reachable, entries here
+	// win over its pricing.exchange_rate on a matching key.
+	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 }
 
 // defaultReportConfigFile is the cwd-relative path auto-loaded when

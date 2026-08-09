@@ -92,3 +92,34 @@ func TestResolver_TimeWindowedOverride_PerCallRateChanges(t *testing.T) {
 		t.Fatalf("promo and non-promo timestamps should resolve different rates, both got %v", *r1.InFresh)
 	}
 }
+
+func TestResolver_WithDisplayFactor_ScalesRateFor(t *testing.T) {
+	r := NewResolver(testTable(), nil).WithDisplayFactor(7.1)
+	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	if !ok {
+		t.Fatal("RateFor: ok = false")
+	}
+	if got, want := *rate.InFresh, 3*7.1; got < want-1e-9 || got > want+1e-9 {
+		t.Fatalf("InFresh = %v, want %v (3 x display factor 7.1)", got, want)
+	}
+}
+
+func TestResolver_WithDisplayFactor_OneOrZeroIsNoOp(t *testing.T) {
+	base := NewResolver(testTable(), nil)
+	for _, factor := range []float64{0, 1} {
+		r := base.WithDisplayFactor(factor)
+		rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+		if !ok || *rate.InFresh != 3 {
+			t.Fatalf("WithDisplayFactor(%v): rate = %+v ok=%v, want InFresh=3 unchanged", factor, rate, ok)
+		}
+	}
+}
+
+func TestResolver_WithDisplayFactor_OriginalResolverUnaffected(t *testing.T) {
+	base := NewResolver(testTable(), nil)
+	_ = base.WithDisplayFactor(7.1)
+	rate, ok := base.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	if !ok || *rate.InFresh != 3 {
+		t.Fatalf("base Resolver was mutated by WithDisplayFactor: rate = %+v ok=%v, want InFresh=3", rate, ok)
+	}
+}

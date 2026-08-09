@@ -712,7 +712,7 @@ Ring{ width: 桶宽, slots: []struct{ startUnix int64; c Counters } }
 # 按 canonical model id 与标准表合并，冲突时补充表胜出。
 pricing:
   currency: CNY
-  exchange_rate: {USD: 7.1}
+  exchange_rate: {CNY: 7.1}
   supplement: ./pricing.yaml    # 可选；给了路径但文件不存在 = 加载期错误，不静默跳过
 
 providers:
@@ -789,7 +789,7 @@ providers:
 | 字段 | 说明 | 缺省 |
 |---|---|---|
 | `currency` | `amount`（`cost` 档）与费率的基准币种 | 必填（有 `cost` Limit 时） |
-| `exchange_rate` | 把标准表币种（USD）折算到 `currency` 的汇率，写成 `{USD: 7.1}` | **必填（`currency` 非 USD 时）**——标准表同时喂给 `metric: cost` 计费和 `vmr report` 的 $ 列，缺汇率会产出"按 USD 算、按 `currency` 标"的数字；确实不需要换算时显式写 `{USD: 1.0}` |
+| `exchange_rate` | 通用的"1 美元 = X `<货币代码>`"映射表，写成 `{CNY: 7.1}`——折算标准表币种（USD）到 `currency`，也是 `providers[].pricing.overrides` 里任何一行自带 `currency:` 字段的换算来源（override 就写在这份文件里，没有"退回到哪"的问题）；对 `pricing.supplement`/`pricing.standard` 文件而言只是**兜底**——那类文件可以在自己内部再声明一份同形状的 `exchange_rate:` 块，key 撞车时**文件自己的优先**，这样一份 supplement 可以脱离某个具体 `config.yaml` 独立搬用，不会因为部署改了记账汇率就让文件里"厂商官网核实过"的价格跟着漂移（见 `pricing.example.yaml`）；也是 `vmr report` 的 `-currency` 展示币种（当它和 `currency` 不同时）的换算来源。每个用到的货币都要有条目，USD 本身隐含为 1.0、不用写 | **必填（`currency` 非 USD 时）**——标准表同时喂给 `metric: cost` 计费和 `vmr report` 的 $ 列，缺汇率会产出"按 USD 算、按 `currency` 标"的数字；确实不需要换算时显式写 `{CNY: 1.0}` |
 | `supplement` | 用户补充表路径，按 canonical key 与内置标准表合并、冲突时它胜出 | 空 |
 | `standard` | 覆盖内置标准表（自备整表时用） | 内置 |
 
@@ -798,7 +798,7 @@ providers:
 | 字段 | 说明 | 缺省 |
 |---|---|---|
 | `map` | `本地 model 名 → 标准表 canonical key` 的映射，只在自动解析失败时才需要 | 空 |
-| `overrides` | 费率覆盖规则**列表**，first-match-wins。每条含 `model`（支持 `"*"`）+ 二选一的 `discount`（乘标准表费率）或四项显式费率，另可带 `date_from`/`date_to`/`hour_from`/`hour_to` 时间窗 | 空 |
+| `overrides` | 费率覆盖规则**列表**，first-match-wins。每条含 `model`（支持 `"*"`）+ 二选一的 `discount`（乘标准表费率）或四项显式费率，另可带 `date_from`/`date_to`/`hour_from`/`hour_to` 时间窗；显式费率还可选带 `currency:`（这一行自己的币种，比如直接抄厂商美元发票的数字），加载期通过全局 `exchange_rate` 换算到 `currency`——只对显式费率有意义，和 `discount` 一起写是错误 | 空 |
 
 `map` 缺省时的**自动解析顺序**（`vmr check` 会把解析结果打出来，可审计）：
 ① `map` 显式项 → ② `<provider 名>/<model>` → ③ 裸 `<model>`（西方厂商多为此形）→
@@ -825,7 +825,8 @@ providers:
 * `model_multipliers` / `token_weights` 的值 `> 0`；
 * 某 provider 的 Limit **全是 `cost`** 却配了 `model_multipliers` → 报错，提示改用 `pricing.overrides`
   （同一件事只留一种写法）；
-* `overrides` 每条规则的 `discount` 与显式费率**二选一**，同时出现是错误；
+* `overrides` 每条规则的 `discount` 与显式费率**二选一**，同时出现是错误；`currency` 只对显式
+  费率有意义，和 `discount` 一起写同样是错误（`discount` 是无量纲乘数，不存在币种）；
 * `token_weights` 出现在**没有任何 `metric: tokens` 的 Limit** 的账号上 → 报错（配了不生效的字段，
   按 `KnownFields` 的同一精神必须显式失败，不能静默无效）；
 * `pricing.map` 的每一条显式映射，其 canonical key 必须在合并后的标准表∪补充表里存在 → 否则**加载期错误**：

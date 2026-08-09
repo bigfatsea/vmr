@@ -92,17 +92,34 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
 # pricing: global settings for metric: cost quota accounts and vmr report's $
-# estimates (P2.2 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
+# estimates (see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
 # providers[].pricing below for the account-level half). A built-in standard
 # price table (sourced from a public LiteLLM-format snapshot) always applies
-# with no configuration at all; this block only matters once you need
-# currency conversion or an account whose price differs from that list price.
+# with no configuration at all, and vmr report's $ estimates use it with zero
+# setup — this whole block is skippable for most deployments.
+#
+# Recommended default: if you don't use any metric: cost quota limit at all
+# (metric: requests/tokens don't need any of this), skip this block entirely.
+# If you DO use metric: cost and you're fine accounting in USD, write only
+# `pricing: {currency: USD}` — exchange_rate stays empty/unused, and every
+# providers[].pricing.overrides row below can just write its numbers in USD
+# directly. Only reach for exchange_rate at all once an account's real quota
+# cap is denominated in a currency other than USD (a domestic vendor's CNY
+# plan, say) — forcing everything through USD in that case just moves the
+# manual conversion problem onto amount: below instead of removing it.
 # pricing:
 #   currency: CNY                # required once any provider has a metric: cost limit; the standard table itself is USD
-#   exchange_rate: {USD: 7.1}    # 1 USD = 7.1 CNY — required whenever currency isn't USD: the built-in
-#                                 # table is USD-denominated and feeds both metric: cost charging and vmr
-#                                 # report's $ column, so skipping it would label USD numbers as CNY.
-#                                 # Write {USD: 1.0} to state deliberately that no conversion applies.
+#   exchange_rate: {CNY: 7.1}    # a general "1 USD = X <code>" map — required whenever currency isn't USD (needs
+#                                 # a CNY entry here, since the built-in table is USD-denominated and feeds both
+#                                 # metric: cost charging and vmr report's $ column, so skipping it would label
+#                                 # USD numbers as CNY). Also the FALLBACK for a providers[].pricing.overrides
+#                                 # row's own currency: (see below — overrides live in this same file, so no
+#                                 # fallback question there) and for a pricing.supplement row's own currency:
+#                                 # (see pricing.example.yaml) that DOESN'T declare its own exchange_rate: block —
+#                                 # a supplement file's own block always wins on a matching key, so it can stay
+#                                 # portable across deployments; this map only fills in what it doesn't cover.
+#                                 # Also consulted by vmr report's -currency display currency when it differs
+#                                 # from this one. Write {CNY: 1.0} to state deliberately that no conversion applies.
 #   supplement: ./pricing.yaml    # optional: your own additions, same shape as the built-in table
 #                                   # (see pricing.example.yaml — copy it to pricing.yaml and adjust),
 #                                   # merged in — yours wins on a canonical-key clash. A path that
@@ -198,7 +215,8 @@ providers:
   #     overrides:                  # first-match-wins; each entry is EITHER discount OR all four
   #       # components (in_fresh/cache_read/cache_write/out), never a mix or a partial set
   #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # a temporary promo, listed first
-  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate, already in CNY (pricing.currency above)
+  #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # or: entered in the vendor's own USD invoice, converted via pricing.exchange_rate
   #       - {model: "*", discount: 0.6}  # fallback: 40% off list price for every other model on this account
 
   - name: openrouter
