@@ -51,7 +51,7 @@
 > **本节只做分类，不记录"哪家用哪种"。** 具体厂商用什么计量、什么额度、什么折扣，是**配置阶段的数据**，
 > 不是设计阶段的输入——它churn 得很快（同一家厂商的新旧两代套餐就可能从次数制换成 Token 制），
 > 写进设计文档只会变成一条读起来权威、实际过期的断言。
-> 实例数据全部留在 `docs/TokenPlan_Market_Reference.md`（81 个在售套餐的结构化快照 +
+> 实例数据全部留在 `docs/data/TokenPlan_Market_Reference.md`（81 个在售套餐的结构化快照 +
 > 原始 JSON 留档），本节只引用它的**统计结论**——因为统计分布才是驱动设计的证据。
 
 ### 2.1 三个正交维度
@@ -243,7 +243,7 @@ rate(provider, model, ts):
 >
 > 所以标准表的定位是**消除入门断崖的基线**，**不是** `metric: cost` 的充分数据源——
 > 设计上必须假定它经常缺失，这正是上面那条"四项不齐即报错"存在的理由。
-> 各厂商的具体覆盖情况见 `docs/TokenPlan_Market_Reference.md`，不在本文重复。
+> 各厂商的具体覆盖情况见 `docs/data/TokenPlan_Market_Reference.md`，不在本文重复。
 
 **标准表自身的维护结构**：内部拆成两块，合并后对外表现为一张表——
 
@@ -1302,7 +1302,7 @@ archtest 有 700 行预算，当前 561 行。
   token 嗅探的额外开销预期落在噪音里（每事件一次 `bytes.Contains`），
   若 `stream_normal` 的 p95 出现可测量变化，说明门禁写错了
 * **[P2] `tokens` 档的退化等价性**：`token_weights` 全 1.0 时 `base(tokens)` 逐字节等于 `In + Out`
-* **[P2] 三种 metric 的折算**：以 `docs/TokenPlan_Market_Reference.md` 的真实折算率做夹具——
+* **[P2] 三种 metric 的折算**：以 `docs/data/TokenPlan_Market_Reference.md` 的真实折算率做夹具——
   取两组分量比例差异悬殊的真实费率各一组（具体数值见该文档，勿在本文重复），断言 `cost`
   与等权总 token 的比值落在 3～8 倍区间——**这条钉住的是"为什么必须做分量折算"这个立论本身**
 * **[P2] 折扣层不重复计算**：`cost` + `discount: 0.6` 恰为纯 `cost` 的 0.6 倍
