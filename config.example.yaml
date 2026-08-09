@@ -103,10 +103,10 @@ listen: 127.0.0.1:8800
 #                                 # table is USD-denominated and feeds both metric: cost charging and vmr
 #                                 # report's $ column, so skipping it would label USD numbers as CNY.
 #                                 # Write {USD: 1.0} to state deliberately that no conversion applies.
-#   supplement: ./pricing.local.yaml  # optional: your own additions, same shape as the built-in table
-#                                      # (see internal/pricing/standard.generated.yaml), merged in — yours
-#                                      # wins on a canonical-key clash. A path that doesn't exist is a
-#                                      # load-time error, not a silent skip.
+#   supplement: ./pricing.yaml    # optional: your own additions, same shape as the built-in table
+#                                   # (see pricing.example.yaml — copy it to pricing.yaml and adjust),
+#                                   # merged in — yours wins on a canonical-key clash. A path that
+#                                   # doesn't exist is a load-time error, not a silent skip.
 
 providers:
   # base_url must include the provider's own full API version (/v1, /v3,

@@ -247,8 +247,8 @@ rate(provider, model, ts):
 
 **标准表自身的维护结构**：内部拆成两块，合并后对外表现为一张表——
 
-* `pricing/standard.generated.yaml` —— 脚本从上游生成，**可整体覆盖**；
-* `pricing/standard.curated.yaml` —— 项目手工维护，主要补上游缺失的国产厂商，**脚本不得触碰**。
+* `pricing/standard_price_generated.yaml` —— 脚本从上游生成，**可整体覆盖**；
+* `pricing/standard_price_curated.yaml` —— 项目手工维护，主要补上游缺失的国产厂商，**脚本不得触碰**。
 
 这个拆分不是洁癖：**若刷新脚本直接重写单一文件，手工补的行每次刷新都会被清掉。**
 
@@ -347,7 +347,7 @@ rate(provider, model, ts):
 
 ② **`metric: cost` 一侧（在线，新增，P2 的硬需求）**：新增叶子包 `internal/pricing`
 （与 `internal/quota` 同层，只依赖 `core` + 标准库），持有内置标准表（`go:embed` 的
-`standard.generated`/`standard.curated`）、用户补充表的合并逻辑、`PricingRate` 的
+`standard_price_generated`/`standard_price_curated`）、用户补充表的合并逻辑、`PricingRate` 的
 `date_*`/`hour_*` 匹配（`internal/report/pricing.go` 现有的 `matches` 方法原样迁移过来，
 不再是 report 私有）。`internal/config` 依赖 `internal/pricing`：`validate()` 阶段解析
 `providers[].pricing.overrides` + 全局 `pricing.supplement`，产出的费率表随
@@ -713,7 +713,7 @@ Ring{ width: 桶宽, slots: []struct{ startUnix int64; c Counters } }
 pricing:
   currency: CNY
   exchange_rate: {USD: 7.1}
-  supplement: ./pricing.local.yaml    # 可选；给了路径但文件不存在 = 加载期错误，不静默跳过
+  supplement: ./pricing.yaml    # 可选；给了路径但文件不存在 = 加载期错误，不静默跳过
 
 providers:
   # ── 类型 A：次数制 + 三层窗口 ────────────────────────────────
@@ -1157,7 +1157,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 - `token_weights`（账号级，缺省全 1.0）
 - `model_multipliers`（账号级，**纯额度语义**，只作用于 `requests`/`tokens`）
 - 标准表：`tools/` 下的生成脚本（上游 → 最小派生表，单位归一到 per-1M，canonical key 对齐，
-  **缺失分量不补 0**，保留 MIT 署名）+ `standard.generated` / `standard.curated` 双文件 + `go:embed` + 生成时间戳
+  **缺失分量不补 0**，保留 MIT 署名）+ `standard_price_generated` / `standard_price_curated` 双文件 + `go:embed` + 生成时间戳
 - 用户补充表 `pricing.supplement`：按 canonical key 与标准表合并，冲突时补充表胜出
 - `providers[].pricing`：`map`（含四步自动解析，有歧义时不猜）+ `overrides`（`discount` / 显式费率 / 时间窗）
 - `metric: cost`，四项费率不齐 → **加载期错误**
@@ -1270,7 +1270,7 @@ archtest 有 700 行预算，当前 561 行。
 * **[P2] canonical key 自动解析**：四步优先级；第 ④ 步有歧义时**不猜**而是按无费率处理；
   `map` 显式项优先于一切
 * **[P2] 生成脚本**：上游缺失的分量**不得补 0**（否则会抹掉"四项不齐即报错"这道保护）；
-  单位从 per-token 归一到 per-1M 的换算；`standard.curated` 的手工行在重新生成后仍然存在
+  单位从 per-token 归一到 per-1M 的换算；`standard_price_curated` 的手工行在重新生成后仍然存在
 * **[P2] 缺失费率**：`metric: cost` 下四项不齐（区分"显式 0.0"与"字段缺失"）必须是加载期错误，
   断言不会静默按 0 计费
 * **[P2] 时间窗费率**：`date_*` 与 `hour_*`（含跨零点）按 first-match-wins 生效

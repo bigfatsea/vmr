@@ -248,7 +248,7 @@ type fileRate struct {
 // load-time error rather than a silent misinterpretation.
 func ParseTable(data []byte) (*Table, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
-		// An empty file (standard.curated.yaml starts this way — see
+		// An empty file (standard_price_curated.yaml starts this way — see
 		// embed.go's doc comment) is a valid, empty table, not an error.
 		return NewTable("USD"), nil
 	}
@@ -257,7 +257,7 @@ func ParseTable(data []byte) (*Table, error) {
 	dec.KnownFields(true) // strict, same fail-fast contract as config.yaml itself (see CLAUDE.md)
 	if err := dec.Decode(&ft); err != nil {
 		if errors.Is(err, io.EOF) {
-			// A document that's entirely comments (standard.curated.yaml
+			// A document that's entirely comments (standard_price_curated.yaml
 			// starts this way — see embed.go) decodes to no document at
 			// all, not a zero-value one; that's still a valid empty table.
 			return NewTable("USD"), nil

@@ -1,0 +1,56 @@
+# Ver 2026-08-09, by Sonnet 5
+# vmr report/vmr story 自己的侧车配置——复制为 report.yaml 后按需修改。
+# 提交进仓库的是这份示例文件本身；report.yaml 自己是 .gitignore 的，和
+# config.yaml 一样——它可以放一个真实的 llm_key。和 config.yaml 完全独立：
+# 没有 provider 配置，schema 也很简单，而且 vmr report/vmr story 完全可以在
+# 没有任何 report.yaml 的情况下正常运行（这时每个 flag 都退回自己内置的默认
+# 值）。当 -report-config 没有指定时，会自动从当前目录加载；传
+# -report-config path 可以指向别的文件。
+#
+# 下面每个字段都只是一个兜底默认值：对应的命令行 flag 只要传了，永远优先于它。
+# 某个字段没写（或者整份文件都不存在）就退回那个 flag 自己内置的默认值，具体
+# 见每个字段自己的注释。
+
+language: en   # en（默认）| zh —— vmr-report.md / vmr-requests*.md /
+               # vmr-stories.md / journey-*.md / compare-*.md /
+               # vmr-story-corpus.md 的输出语言。
+               # 叙述性的 JSON 字段（比如 Finding.Finding、MetricDiff.Label）
+               # 不管这里怎么设置永远保持英文，所以写脚本解析这些文件时完全
+               # 不需要考虑报告是用哪种语言生成的。会被 -lang 覆盖。
+
+output: reports   # -o 的默认值（内置默认："reports"）。`vmr report` 和
+                  # `vmr story` 共用这一个字段——没有分别的按命令输出设置。
+
+details: true   # 只对 vmr report 有效。是否额外为每个请求各导出一份
+                 # Markdown+JSON 文件到 {output}/details/（内置默认：true）。
+                 # 会被 -details 覆盖。
+
+include_partial: false   # 只对 vmr story 有效。是否也列出/渲染那些头部看起来
+                          # 被加载文件范围截断的 journey（内置默认：false）。
+                          # 会被 -include-partial 覆盖。
+
+# --- LLM 解读层（只对 vmr story 有效；完整说明见 -llm-addr 自己的 -h 文本） ---
+# llm_addr/llm_model/llm_key 三个都是可选的，彼此独立的意义仅在于各自有各自
+# 的默认值；-llm-addr（不管是写在这里还是命令行上）始终是唯一决定这一层是否
+# 打开的开关——只写了 llm_model/llm_key、哪里都没写 llm_addr，会和命令行 flag
+# 的情况一样被拒绝。
+
+llm_addr: ""       # 一个已经在运行的 VMR 实例的 host:port，例如
+                    # "127.0.0.1:8787"。会被 -llm-addr 覆盖。这一层从不会
+                    # 自动帮你启动实例，必须是已经跑起来的。
+
+llm_model: ""       # 那个实例上的虚拟模型名（例如 "agent"），原样发送。
+                     # 会被 -llm-model 覆盖。
+
+llm_key: ""          # 那个实例的 bearer token，只有在它配置了 api_keys 时
+                      # 才需要。这里可以直接写明文——这个字段只会出现在你自己
+                      # .gitignore 的 report.yaml 里，永远不会出现在这份提交
+                      # 到仓库的示例文件里。也支持 ${ENV_VAR} 展开（比如
+                      # llm_key: "${VMR_LLM_KEY}"），如果你更想引用一个已经
+                      # 设置好的环境变量，而不是把明文重复写进这个文件。会被
+                      # -llm-key 覆盖。
+
+llm_cache_dir: ""   # LLM 解读结果磁盘缓存所在的目录。刻意没有隐式的默认路径：
+                     # 如果这里为空、且命令行也没传 -llm-cache-dir，LLM 调用
+                     # 就完全不会被缓存——缓存只会发生在你明确指定过的地方。
+                     # 会被 -llm-cache-dir 覆盖。

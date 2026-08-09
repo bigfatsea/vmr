@@ -464,7 +464,7 @@ models:
 		t.Fatal("rate.InFresh unexpectedly nil")
 	}
 	// The standard table's USD list price for this model is 3.0/1M in_fresh
-	// (internal/pricing/standard.generated.yaml) — converted at 7.1 that
+	// (internal/pricing/standard_price_generated.yaml) — converted at 7.1 that
 	// must land on 21.3, not 3.0 (the bug's failure mode: computing in USD
 	// while the report labels the column CNY).
 	const wantUSD = 3.0

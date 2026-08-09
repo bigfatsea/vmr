@@ -271,7 +271,7 @@ providers:
 pricing:
   currency: CNY # 只要有账号用 metric: cost 就必填；标准表本身是 USD
   exchange_rate: {USD: 7.1} # 1 USD = 7.1 CNY —— 只要 currency 不是 USD 就必填（确实不需要换算时，显式写 {USD: 1.0}）
-  supplement: ./pricing.local.yaml # 可选：你自己补充的条目，格式与内置表相同，合并进来（冲突时你的胜出）
+  supplement: ./pricing.yaml # 可选：你自己补充的条目，格式与内置表相同，合并进来（冲突时你的胜出）——参见 pricing.example.yaml
 
 providers:
   - name: anthropic # 把 provider 命名成厂商本名有助于自动解析——见下文
@@ -292,7 +292,7 @@ providers:
 
 **缺失永远比错误安全**：一个 `metric: cost` 账号在加载期就会被拒绝——`vmr check`/`vmr start`/热重载走的是同一条校验路径——除非它配置要服务的**每一个**上游模型，在**所有可能的 override 组合**下都能解析出完整的四分量费率，而不只是常见情形下。显式写 `0.0` 算"已定价"（有些分量确实免费）；缺失字段不算——把缺失的 `cache_read` 静默当 0，会让账号显得比实际便宜，进而拿到更多流量、超支。这是 vmr 唯一一处刻意不做优雅降级的地方。
 
-**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`），`date_range`/`hour_range` 两元数组拆成 `date_from`/`date_to`/`hour_from`/`hour_to`。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
+**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数；和上面 `pricing.supplement: ./pricing.yaml` 只是撞了同一个文件名，两者并不是一回事——旧侧车的字段形状（`in_fresh_per_1m`/`date_range`/`updated_at` 等）不是新补充表的形状）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`），`date_range`/`hour_range` 两元数组拆成 `date_from`/`date_to`/`hour_from`/`hour_to`。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
 
 `vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价，和之前行为一致。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。
 

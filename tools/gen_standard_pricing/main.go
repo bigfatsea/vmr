@@ -1,13 +1,14 @@
 // Ver 2026-08-07, by Opus 5
 
-// gen_standard_pricing generates internal/pricing/standard.generated.yaml
-// from docs/data/model_prices_and_context_window.json (a LiteLLM-format
+// gen_standard_pricing generates
+// internal/pricing/standard_price_generated.yaml from
+// docs/data/model_prices_and_context_window.json (a LiteLLM-format
 // price-list snapshot, MIT licensed — see that file's own license note and
 // docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③ for the attribution
 // requirement this comment satisfies). Not part of the vmr binary — a
 // one-off/periodic maintenance tool, run by hand:
 //
-//	go run ./tools/gen_standard_pricing -input docs/data/model_prices_and_context_window.json -output internal/pricing/standard.generated.yaml
+//	go run ./tools/gen_standard_pricing -input docs/data/model_prices_and_context_window.json -output internal/pricing/standard_price_generated.yaml
 //
 // Two rules that are NOT optional (see the design doc's §4.2① "缺失比过期更
 // 危险" and its §9.1 validation checklist):
@@ -16,9 +17,9 @@
 //     this distinction (nil = unknown, *float64(0) = explicitly free) to
 //     safely reject metric: cost accounts with genuinely incomplete pricing
 //     instead of silently under-charging them.
-//   - This script only ever writes standard.generated.yaml — never
-//     standard.curated.yaml, the hand-maintained file this table is merged
-//     with at load time (see internal/pricing/embed.go). Overwriting
+//   - This script only ever writes standard_price_generated.yaml — never
+//     standard_price_curated.yaml, the hand-maintained file this table is
+//     merged with at load time (see internal/pricing/embed.go). Overwriting
 //     curated.yaml here would silently discard every hand-added row the
 //     next time this script runs.
 package main
@@ -67,7 +68,7 @@ var primaryVendors = map[string]bool{
 	"cohere": true, "cohere_chat": true,
 }
 
-// generatedRow is standard.generated.yaml's per-model shape — see
+// generatedRow is standard_price_generated.yaml's per-model shape — see
 // internal/pricing/pricing.go's fileRate for the loader's matching type.
 // Pointer fields marshal as an omitted key (not `null`) when nil, via
 // yaml.v3's default omitempty-like nil handling for pointers combined with
@@ -82,7 +83,7 @@ type generatedRow struct {
 
 func main() {
 	input := flag.String("input", "docs/data/model_prices_and_context_window.json", "LiteLLM-format source JSON")
-	output := flag.String("output", "internal/pricing/standard.generated.yaml", "output path (always OVERWRITTEN — never standard.curated.yaml)")
+	output := flag.String("output", "internal/pricing/standard_price_generated.yaml", "output path (always OVERWRITTEN — never standard_price_curated.yaml)")
 	generatedAt := flag.String("generated-at", "", "generation date (YYYY-MM-DD); defaults to today")
 	flag.Parse()
 
@@ -167,7 +168,7 @@ func generateRows(raw map[string]json.RawMessage) (sortedRows []generatedRow, ke
 	return sortedRows, kept, skipped
 }
 
-// fileHeader is standard.generated.yaml's top-level shape — the exact
+// fileHeader is standard_price_generated.yaml's top-level shape — the exact
 // shape internal/pricing.ParseTable reads back (see that file's fileTable
 // type), plus the license/attribution note §4.2③ requires travel with the
 // data, not just live in this generator's source comment.
@@ -187,8 +188,8 @@ func writeYAML(path, generatedAt string, rows []generatedRow) {
 # docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③).
 #
 # Hand-maintained additions (mainly domestic/first-party vendors this
-# source under-covers) belong in standard.curated.yaml instead, NEVER here
-# — this file is fully overwritten every time the generator runs.
+# source under-covers) belong in standard_price_curated.yaml instead, NEVER
+# here — this file is fully overwritten every time the generator runs.
 #
 # Prices are list prices, not a guarantee of accuracy — verify against the
 # vendor's own published pricing before relying on a $ figure this table

@@ -7,8 +7,8 @@
 # docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③).
 #
 # Hand-maintained additions (mainly domestic/first-party vendors this
-# source under-covers) belong in standard.curated.yaml instead, NEVER here
-# — this file is fully overwritten every time the generator runs.
+# source under-covers) belong in standard_price_curated.yaml instead, NEVER
+# here — this file is fully overwritten every time the generator runs.
 #
 # Prices are list prices, not a guarantee of accuracy — verify against the
 # vendor's own published pricing before relying on a $ figure this table

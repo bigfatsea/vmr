@@ -1,0 +1,39 @@
+# Ver 2026-08-09, by Sonnet 5
+#
+# 你自己的定价补充表——复制为 pricing.yaml 后按需修改。通过 config.yaml 全局
+# `pricing:` 块里的 `supplement: ./pricing.yaml` 引用（参见
+# config.example.yaml 的 pricing 部分）。pricing.yaml 本身是 .gitignore 的，
+# 和 config.yaml 一样——提交进仓库的是这份示例文件。
+#
+# 这是 vmr 两层定价里的第二层，不是第一层：vmr 总是自带一份内置的标准价目表
+# （internal/pricing/standard_price_generated.yaml +
+# standard_price_curated.yaml，编译进二进制——不重新编译 vmr 你没法改动它们）。
+# 这份文件才是设计给你编辑的那一层：这里的一行一旦在 canonical key 上和内置表
+# 撞上，就会整行覆盖内置表里对应的那一行（不是逐分量合并——见
+# internal/pricing.Merge）。用它来补内置表还没覆盖到的模型，或者补一个和列表
+# 价不同的、谈判到的折扣价（不过同形状的价格修正很多时候用 config.yaml 里的
+# providers[].pricing.overrides 表达更合适——见那份文件自己的定价部分；只有当
+# 这个修正应该在所有解析到这个 canonical key 的地方都生效、而不只是某一个账号
+# 时，才用这份文件）。
+#
+# 下面每个金额单位都是每 1,000,000 token 的美元价格——这个包只加载 USD 计价的
+# 表（原因见 internal/pricing.fileTable 的文档注释）；要换算成你自己的记账货币，
+# 用 config.yaml 的 pricing.exchange_rate，不要先把这个文件里的数字自己换算好
+# 再填进来。
+#
+# 某个分量不写，对 vmr 来说意味着"未知"，绝不是"免费"——显式写 0.0 才是"确实
+# 免费"的写法。一个没验证过的价格比缺失的价格更危险：只有在你对照过厂商自己
+# 公布的价格之后，才添加一行（在注释里注明来源 URL，和
+# internal/pricing/standard_price_curated.yaml 遵循的约定一样）。
+#
+# 这份文件允许整份都是空的（或者全是注释）——那是一份合法的空补充表，不是错误。
+# 如果你不需要下面的示例行，把它们删掉再当成你真正的 pricing.yaml 使用。
+
+currency: USD
+generated_at: "2026-08-09"
+rates:
+  - key: some-vendor/some-model
+    in_fresh: 1.0      # 每 1M 个新鲜（非缓存命中）输入 token 的价格
+    cache_read: 0.1    # 每 1M 个缓存命中输入 token 的价格
+    cache_write: 1.25  # 每 1M 个写入缓存的 token 的价格（创建费用）
+    out: 4.0           # 每 1M 个输出 token 的价格

@@ -1,0 +1,306 @@
+# Ver 2026-08-09, by Sonnet 5
+# vmr 配置文件 —— 复制为 config.yaml 后按需修改。
+# providers = 你手上有什么账号（一个平铺的账号列表）；models = 客户端看到什么、
+# 按什么顺序去用它。
+#
+# providers 是一个平铺列表：每个上游账号一条，不管这个账号实际支持三种入口协议
+# （"openai" | "anthropic" | "openai-responses"）里的几种——base_url 本身按协议
+# 分 key，所以同一个账号（同一个 api_key、同一条代理策略）可以从一条记录同时
+# 支撑多个接入面，不需要重复声明多条。
+#
+# models 只按虚拟模型名分 key。一个虚拟模型自己顶层的 `capabilities`/
+# `max_context_tokens` 是它下面每个候选端点共享的*基线*——只写一次，不用在每个
+# try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型
+# `endpoints:` 列表下的每一条，是一个 try-order 候选：它自己声明协议（哪个入口
+# 能打到它——POST /v1/chat/completions 对应 "openai"，POST /v1/messages 对应
+# "anthropic"，POST /v1/responses 对应 "openai-responses"）、一个 provider
+# （按名字去上面的 providers 列表里解析）、以及一份 `models:` 上游模型名列表，
+# 这些模型名共享这一条的 capabilities/max_context_tokens/role_map/sticky_ttl/
+# priority——每个名字都会展开成各自独立、单独做健康跟踪的端点，按列表顺序排列。
+# 一条记录自己的 `capabilities` 是对模型基线的*叠加*（并集——只需要声明这条相
+# 对共享底线额外多出的部分）；它自己的 `max_context_tokens` 一旦设置就是*覆盖*
+# 基线（一个数字没法做并集）。同一个虚拟模型名可以混合协议：给它一条
+# protocol: openai 的端点组记录，再给一条 protocol: anthropic（或
+# openai-responses）的记录，它就能同时从这几种入口协议访问到——各自可能有不同
+# 的上游候选（见下面的 "agent" 示例）。在同一条端点组记录里混用多个协议没有对
+# 应的写法，不是一个需要去校验拦截的配置错误：每一条记录本来就只对应一种协议。
+#
+# openai-responses 比另外两个更新、覆盖面也更窄：截至撰写本文时只有 DeepSeek
+# 和 OpenRouter 明确文档化了兼容 Responses 的端点（MiniMax 暂时还没有），而且
+# 两家都强制无状态用法（store:true / 非空的 previous_response_id 会被上游自
+# 己拒绝——vmr 从不检查或剥离请求字段，它只负责路由）。
+
+listen: 127.0.0.1:8800
+# api_keys:                      # 可选：给路由器加一层保护（Bearer 或 x-api-key）。每个 key 的
+#                                # 尾部同时也是它调用方的标签：`vmr report` 会据此自动为每个标签
+#                                # 各写一份 vmr-requests-<tag>.jsonl / vmr-requests-index-<tag>.md，
+#                                # 和常规的完整文件并存，不需要额外传参。
+#                                #
+#                                # 标签 = key 最后 8 个字符里、最后一个 "-" 之后的部分——所以每个
+#                                # key 都以 "-<label>" 结尾（例如 ...-alice -> 标签 "alice"）。用
+#                                # >= 3-4 个字符，避免两个 key 落到同一个标签上。标签会变成文件名的
+#                                # 一部分（做了清洗：非 A-Za-z0-9._- 的字符都替换成 "-"），而 vmr 并
+#                                # 不会检测两个*不同*标签清洗后撞车——挑选本身就对文件名安全、且互相
+#                                # 有区分度的后缀。每个 key 长度必须 >= 16 个字符，否则标签窗口就是
+#                                # 整个 key。
+#   - ${VMR_KEY_ALICE}
+#   - ${VMR_KEY_OPENCLAW}
+#
+# 不配置 api_keys：门是开着的，但每个客户端自带的 Authorization/x-api-key 值
+# 依然会走同样的打标签处理（这里没有 16 字符下限——它本来就不是密钥）。什么都
+# 不带的客户端保持无标签状态。
+#
+# （单数形式的 `api_key` 已被移除——还在用它的配置会被当成未知字段加载失败，
+# 和写错任何其他字段名一样。api_keys 是唯一的鉴权入口。）
+# max_attempts: 0                # 上游最多尝试几次；默认 0 = 把所有可用端点都走一遍
+# probe_timeout: 15s             # 一次后台恢复探测调用的时间上限：半开状态的端点在被允许重新承接真实流量
+#                                 # 之前，会先收到一个专用的小探测请求——真实请求从不会因为等待或被分流到
+#                                 # 另一个端点的恢复检查而受影响
+# max_request_body_mb: 8         # 入站请求体大小上限（是为了稳定性，和审计日志无关）
+# max_concurrency: 8             # 全局并发闸门；超出的请求在内存里排队等待（0/不写 = 不限）——单个
+#                                 # 在途请求最坏情况下大约占用 ~32MB（8MB 请求体 + 8MB 响应归一化缓冲
+#                                 # + 16MB 审计响应副本）；在共享实例上应该显式设置这个值，不要留空
+#                                 #（参见 UserGuide.zh.md 的"单请求内存预算"一节）
+# https_proxy: http://127.0.0.1:7890   # https 类 base_url 使用的代理服务器地址——这是 vmr 使用代理的
+#                                      # 唯一方式（环境变量会被忽略；要引用环境变量请显式写
+#                                      # ${HTTPS_PROXY}）。声明这个 URL 本身并不会打开代理——见下面
+#                                      # providers[].proxy。
+# http_proxy: http://127.0.0.1:7890    # 同上，用于 http 类 base_url（例如局域网里的 llama.cpp 服务）
+# image_downscale: 512           # 把内联请求图片缩小到长边这么多像素（0/不写 = 关闭）；某个模型自己下面的
+#                                 # image_downscale 会覆盖这个全局值
+# image_cache_ttl_days: 7        # 多少天未命中就淘汰缩图缓存条目（0/不写 = 默认 7 天）
+# sticky_ttl: 10m                # Sticky Model 亲和窗口的全局默认值（0/不写 = 默认 10m）；
+#                                 # 下面每个端点都可以单独覆盖它——参见 "cheap" 模型的示例；
+#                                 # 不管怎么设置都有一个硬上限 24h（sticky 注册表自身的内存淘汰
+#                                 # 兜底）——vmr check/start 会拒绝任何超过这个值的设置
+# audit_retention_days: 30       # 删除超过这么多天的审计文件；0/不写 = 永久保留（无论如何轮转都会把旧的
+#                                 # 那些天压缩成 .zst）
+# extra_redact_headers:           # 需要在审计记录里额外打码的客户端请求头名字，处理方式和内置的
+#   - X-Custom-Token              # Authorization/X-Api-Key/Cookie 等列表一样——用于 vmr 本来不知道
+#                                  # 该打码的、客户端自定义的鉴权头（大小写不敏感匹配）。不写/留空
+#                                  #（默认状态）不改变任何行为。
+# log_dir: ~/.vmr/logs           # 审计 JSONL 目录；按原样使用（~/ 会展开）；不写 = ~/.vmr/logs。改这个需要重启
+# image_cache_dir: ~/.vmr/image_cache  # 缩图结果缓存目录；规则相同；不写 = ~/.vmr/image_cache；支持热重载
+# timeouts:
+#   connect: 10s
+#   response_header: 120s        # 从上游收到首字节的时间
+#   stream_idle: 120s            # 上游响应体（流式、JSON、错误）静默超过这么久就中止
+
+# pricing：metric: cost 计量账号和 vmr report 的 $ 估算所用的全局设置
+# （P2.2——完整设计见 docs/TokenPlan_Quota_Routing_Design_opus-5.md，账号级的
+# 那一半见下面 providers[].pricing）。不做任何配置也会有一份内置的标准价目表
+# 生效（数据源自公开的 LiteLLM 格式快照）；只有当你需要货币换算，或者某个账号
+# 的价格和标准列表价不同时，才需要用到这个块。
+# pricing:
+#   currency: CNY                # 只要有任意一个 provider 用了 metric: cost 就必填；标准表本身是 USD
+#   exchange_rate: {USD: 7.1}    # 1 USD = 7.1 CNY —— 只要 currency 不是 USD 就必填：内置表是以 USD
+#                                 # 计价的，metric: cost 计费和 vmr report 的 $ 列都靠它，不写就会把
+#                                 # USD 的数字直接当成 CNY 标出来。
+#                                 # 想明确表示"不需要换算"，就显式写 {USD: 1.0}。
+#   supplement: ./pricing.yaml    # 可选：你自己补充的条目，格式和内置表相同
+#                                   # （参见 pricing.example.yaml——复制成 pricing.yaml 后按需修改），
+#                                   # 合并进来——canonical key 撞车时你的条目胜出。指向一个不存在
+#                                   # 的路径会在加载期报错，不会静默跳过。
+
+providers:
+  # base_url 必须包含 provider 自己完整的 API 版本号段（/v1、/v3，随它怎么叫）——
+  # vmr 只会在后面拼上协议自己的裸路径（OpenAI 用 /chat/completions，Anthropic
+  # 用 /messages），不做任何归一化处理。有些 provider 的 OpenAI/Anthropic 接入
+  # 面并不是按 "v1" 版本化的（例如火山引擎的 coding-plan 端点用的是 /v3）——这正
+  # 是原因所在：把 "/v1" 硬编码进拼接路径会给这些 provider 悄悄拼出错误的 URL。
+  #
+  # base_url 至少声明一种协议，最多两种都声明——MiniMax 在同一个账号下同时支持
+  # 两种接入面，所以一条记录就够，不用像旧格式那样拆成
+  # providers.openai.minimax / providers.anthropic.minimax 两份重复声明。具体
+  # 某条 models.<name> 端点组用这里面的哪一个，由它自己的 `protocol:` 决定。
+  - name: minimax
+    base_url: {openai: https://api.minimaxi.com/v1, anthropic: https://api.minimaxi.com/anthropic/v1}
+    api_key: ${MINIMAX_PLAN_KEY}
+    # proxy: false               # 这里不需要——不写默认就是直连（国内 provider，
+    #                            # 没必要专门写出来）。
+    #
+    # quota：额度感知路由（Quota-Aware Routing）——完整设计见
+    # docs/TokenPlan_Quota_Routing_Design_opus-5.md，P1 见
+    # docs/TokenPlan_Quota_P1_DevPlan_opus-5.md，P2（本次发布）见
+    # docs/TokenPlan_Quota_P2_DevPlan_opus-5.md。不写 = 不计量，行为完全不变。
+    # 当多个 provider 各自都配了 quota: 时，vmr 会把新会话优先导向"相对于当前
+    # 账单周期已经过去的比例而言，余量最充裕"的那个账号——不是绝对剩余额度最多
+    # 的那个（一个即将重置的套餐"赢面"要小于一个额度还没用完、但即将过期的套餐）。
+    #
+    # 依然是每个 provider 只能有*一条* limits: 记录（多窗口/滚动窗口/models: 子
+    # 额度目前仍是加载期的"计划在后续批次支持"报错，不是静默无操作——那是 P3
+    # 的事）。metric: cost 和 pricing: 块现在已经支持了（P2.2）——参见下面的
+    # plan-e/plan-f 示例以及 providers[].pricing 自己的注释块。
+    #
+    # amount 必须按 VMR 自己实际观测到的口径来校准，不能照抄套餐的宣传数字：
+    # 有些厂商把"一次用户交互"计成一个单位，但一个 agent 类客户端（带工具调用、
+    # 重试）会把它变成十几次甚至更多真实的 HTTP 请求，vmr 看到的是这些真实请求
+    # ——等流量真的跑起来之后，用你自己 `vmr report` 的数字（或者
+    # /admin/status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
+    # quota:
+    #   limits:
+    #     - metric: requests       # 或者：tokens，或者：cost（需要一个 pricing: 块，见下文）
+    #       every: 1mo             # N{h,d,w,mo}——也可以是 5h、2w、3d
+    #       since: 2026-08-01      # 周期锚点；后续每个周期都会自动推算
+    #                              #（缺省规则：1mo -> 每月 1 号，1w -> 周一，
+    #                              # 其他情况 -> 今天）
+    #       amount: 90000          # 这个窗口的上限，单位是 vmr 自己观测到的口径
+    #
+    #   # token_weights（P2.1）：对 metric: tokens 档 Limit 的 base(tokens) 求和
+    #   # 做逐分量的缩放——账号级，对这个 provider 下所有 Limit 都生效。整体不写，
+    #   # 或者某个分量不写，都缺省为 1.0（也就是最朴素的等权 token 总数）——只在
+    #   # 账号确实配了 metric: tokens 档时才有意义（也只有这种情况下配置校验才会
+    #   # 接受它）。当账号自己 Credits 制的折算比例（比如缓存命中读只算新鲜输入
+    #   # 的一部分价格）在所有模型间是统一的时候用它；如果这个比例是*按模型*分化
+    #   # 的，改用带 pricing: 块的 metric: cost（见下面 plan-e/plan-f）。
+    #   # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #
+    #   # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
+    #   # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。"*"
+    #   # 是通配兜底，用于任何没有具名列出的模型；一个既没有具名项也没有 "*"
+    #   # 的账号不缩放（1.0）。只影响 metric: requests/tokens——metric: cost
+    #   # 账号的价格分化完全来自 pricing: 块（两者同时配置在纯 cost 账号上是
+    #   # 加载期错误）。
+    #   # model_multipliers: {"*": 1.0, heavy-model: 9}
+
+  # 一个 Credits 制账号，如果它按模型分化的价格不是简单的统一比例（那种情况上面
+  # 的 token_weights 就够了）——metric: cost（P2.2）按真实金额给它计费，价格
+  # 通过标准表叠加这个账号自己的 overrides 来解析。完整写法见
+  # docs/UserGuide.zh.md 的"定价与 cost 计量档位"一节。
+  # - name: anthropic              # 把 provider 命名成它的厂商本名，有助于下面的自动
+  #                                 # 模型名解析找到标准表里匹配的条目
+  #   base_url: {anthropic: https://api.anthropic.com}
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   quota:
+  #     limits:
+  #       - {metric: cost, every: 1mo, since: 2026-08-01, amount: 500}  # 每月 500 元
+  #   pricing:
+  #     map:                        # 只在自动解析猜不出你的模型名时才需要——
+  #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr 自己的模型名 -> 标准表的 canonical key
+  #     overrides:                  # first-match-wins；每条要么是 discount，要么是全部四个
+  #       # 分量（in_fresh/cache_read/cache_write/out）一起给，从不混着写或只给一部分
+  #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # 一次限时促销，写在最前面
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价
+  #       - {model: "*", discount: 0.6}  # 兜底：这个账号上其余所有模型统一按列表价 6 折
+
+  - name: openrouter
+    # OpenRouter 在同一个 base 上支持全部三种接入面——包括一个（截至撰写本文时
+    # 还是 Beta 的）兼容 Responses 的端点，强制无状态：store:true / 非空的
+    # previous_response_id 会被 OpenRouter 自己返回 400，vmr 不拦截这个行为。
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
+    api_key: ${OPENROUTER_API_KEY}
+    # proxy: true                # 按 provider 单独控制的开关：true = 始终走上面的
+                                 # https_proxy/http_proxy；不写/false = 直连（默认
+                                 # 行为）。没有全局默认值可以继承——每个 provider
+                                 # 都要显式决定自己是否走代理。也没有环境变量兜底；
+                                 # true 但没有对应代理 URL 会校验失败——这也是这行
+                                 # 在这里保持注释掉的原因，和上面的 https_proxy 一起：
+                                 # 这份文件本身要能原样通过 `vmr check`。要打开就把
+                                 # 两处一起取消注释。YAML 1.2：写 true/false，不要写
+                                 # on/off。
+
+  - name: deepseek
+    base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}
+    api_key: ${DEEPSEEK_API_KEY}
+
+  # 如果某个 provider 的 API 不接受全部 OpenAI 角色，可以按端点组
+  # （下面 models.<name>.endpoints[].role_map）做重写——一份简单的旧值->新值
+  # 映射，在请求体发往上游之前应用到顶层 "messages" 数组里的 "role" 字段上。
+  # 典型场景：有些 provider（比如 DashScope/通义千问）拒绝 OpenAI 给 o1/o3 系列
+  # 模型引入的 "developer" 角色——把它映射回 "system" 就能让这些客户端在完全
+  # 不改客户端代码的情况下正常工作。role_map 挂在端点组上而不是 provider 上：
+  # 同一个账号可能同时支撑好几个使用不同上游模型族的虚拟模型，不是所有虚拟模型
+  # 都需要同一套重写。只有列出的那些角色会被影响；请求的其余每个字节都原样保留。
+  # - name: dashscope
+  #   base_url: {openai: https://dashscope.aliyuncs.com/compatible-mode/v1}
+  #   api_key: ${DASHSCOPE_PLAN_KEY}
+
+models:
+  coding:
+    # strategy 默认是 [priority]——priority 目前是唯一实现的维度，所以这个
+    # 列表暂时没有别的可以写。
+    # 下面这些端点都没有显式写 priority——都缺省是 0，打平的情况下按本文件里
+    # 出现的顺序排列，所以只要按你想尝试的顺序把它们列出来就够了。
+    #
+    # capabilities/max_context_tokens（条件路由）和 sticky_ttl（Sticky Model）
+    # 都是可选的，缺省是"不受约束"/"继承全局默认值"——像下面每条端点一样不写它
+    # 们，行为和这些字段还不存在时完全一样。sticky 本身（会话亲和性）每个虚拟
+    # 模型默认是 true；下面的 "cheap" 模型示例演示了怎么整体关掉、以及按端点单
+    # 独覆盖的写法。完整参考见 docs/UserGuide.zh.md 的"基于条件的路由"/
+    # "Sticky Model" 一节。
+    endpoints:
+      - protocol: openai
+        provider: openrouter
+        models: [z-ai/glm-5.2]
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-v4-pro]
+
+  cheap:
+    # image_downscale: 0        # 按模型覆盖的示例：强制这个模型跳过缩图，即使
+                                 # 上面全局设置是开着的（不写就继承全局设置）
+    # sticky: false              # 对确实是一次性交互、没有多轮价值需要保护的模型，
+                                  # 关掉它的会话亲和性
+    endpoints:
+      - protocol: openai
+        provider: minimax
+        models: [MiniMax-M3]
+        # capabilities: [image]        # 这个模型上面没有基线 capabilities，所以这条
+        #                              # 端点实际生效的能力集合就是单独的 [image]
+        # max_context_tokens: 1000000  # 一旦声明，vmr 就会跳过这条端点，不把它用于
+        #                              # 那些它实际服务不了的请求
+      - protocol: openai
+        provider: openrouter
+        # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
+        # 的端点，共享这一条记录的 provider/protocol/capabilities/priority——按
+        # 列表顺序依次尝试（每一个仍然有自己独立的 failover/健康状态）。
+        models: [tencent/hy3-preview, qwen/qwen3-max]
+      - protocol: openai
+        provider: deepseek
+        models: [deepseek-v4-flash]
+        # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
+                            # 只针对这一条端点覆盖全局 sticky_ttl
+
+  # "agent" 在同一个虚拟模型名下混合了全部三种入口协议：openai 协议的记录只能
+  # 从 POST /v1/chat/completions 到达，anthropic 协议的记录只能从
+  # POST /v1/messages 到达，openai-responses 的记录只能从 POST /v1/responses
+  # 到达——三种协议上的客户端都可以请求 "agent"，各自拿到自己独立的 try-order
+  # 列表，彼此只共享一个名字，别无其他。
+  #
+  # 这里的 capabilities/max_context_tokens 是下面每条端点继承的*基线*：两个
+  # 后端模型都至少支持 text+tools、最多 256k token，所以只写一次而不是在每条
+  # 记录上都重复。minimax 端点自己的 capabilities: [...] 列表是在基线上*叠加*
+  # （并集——它实际生效的集合是 text,tools,image,audio,video,thinking，不只是
+  # 这里列出的四个），而它自己的 max_context_tokens 把这一条端点单独*覆盖*成
+  # 512000；openrouter 那几条都没有单独声明，所以就原样继承基线。
+  agent:
+    capabilities: [text, tools]
+    max_context_tokens: 256000
+    endpoints:
+      - protocol: openai
+        provider: openrouter
+        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]
+      - protocol: anthropic
+        provider: minimax
+        models: [MiniMax-M3]
+        max_context_tokens: 512000
+        capabilities: [image, audio, video, thinking]
+      - protocol: openai-responses
+        provider: openrouter
+        models: [gemini-3.6-flash-high]
+
+  # 仅 Anthropic 的虚拟模型：只能通过 POST /v1/messages 到达。
+  # "claude" 不需要 openai 协议的记录——openai 那一侧没有任何地方引用它，通过
+  # POST /v1/chat/completions 请求它只会找不到路由，因为那个入口从来只看
+  # protocol: openai 的记录。
+  claude:
+    endpoints:
+      - protocol: anthropic
+        provider: minimax
+        models: [MiniMax-M3]
+      - protocol: anthropic
+        provider: deepseek
+        models: [deepseek-v4-pro]
+      - protocol: anthropic
+        provider: openrouter
+        models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 Anthropic 协议来说话

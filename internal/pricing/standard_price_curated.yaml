@@ -7,15 +7,15 @@
 # 覆盖不全" for why this gap exists.
 #
 # tools/gen_standard_pricing NEVER writes to this file — only
-# standard.generated.yaml. Rows here win over standard.generated.yaml on a
-# matching canonical key (whole-row replacement, not a per-component merge —
-# see internal/pricing.Merge).
+# standard_price_generated.yaml. Rows here win over standard_price_generated.yaml
+# on a matching canonical key (whole-row replacement, not a per-component
+# merge — see internal/pricing.Merge).
 #
 # Starts empty deliberately: an unverified price is more dangerous than a
 # missing one (this whole package's stance — see internal/pricing.Rate's
 # doc comment). Add a row only once you've confirmed it against the
 # vendor's own published pricing, in USD per 1,000,000 tokens, using
-# standard.generated.yaml's shape:
+# standard_price_generated.yaml's shape:
 #
 # currency: USD
 # generated_at: "2026-08-07"
@@ -41,7 +41,7 @@
 #
 # A missing cache_write here is a genuine, confirmed gap, not an oversight:
 # every provider below either explicitly documents no separate cache-write/
-# creation charge (DeepSeek, already complete in standard.generated.yaml —
+# creation charge (DeepSeek, already complete in standard_price_generated.yaml —
 # not repeated here), or simply does not publish one — never guessed as
 # 0 without a citation saying so (see this file's own "missing beats wrong"
 # stance above). A row that stays incomplete after this still helps `vmr
@@ -71,7 +71,7 @@ rates:
     out: 14.08451        # ¥100.00 / 7.1
 
   # Zhipu AI / GLM (bigmodel.cn) — no zhipu/zhipuai rows exist anywhere in
-  # standard.generated.yaml (the LiteLLM snapshot has no direct-vendor Zhipu
+  # standard_price_generated.yaml (the LiteLLM snapshot has no direct-vendor Zhipu
   # coverage at all, only third-party reseller entries under fireworks_ai/).
   # Source: https://bigmodel.cn/pricing (CNY per 1M tokens); cache-hit
   # discount confirmed at https://docs.bigmodel.cn/cn/guide/capabilities/cache
@@ -93,7 +93,7 @@ rates:
     out: 3.94366          # ¥28 / 7.1
 
   # ByteDance Volcengine / Doubao (volcengine.com) — the existing
-  # volcengine/* rows in standard.generated.yaml are third-party models
+  # volcengine/* rows in standard_price_generated.yaml are third-party models
   # RESOLD on the Volcengine platform (deepseek-v3-2-251201 etc, priced 0/0
   # in that snapshot — unusable placeholders), not Volcengine's own Doubao
   # line, which has no coverage there at all.
@@ -117,7 +117,7 @@ rates:
     out: 2.11268          # ¥15.00 / 7.1
 
   # Tencent Hunyuan (cloud.tencent.com) — no hunyuan/* rows exist anywhere
-  # in standard.generated.yaml. Source:
+  # in standard_price_generated.yaml. Source:
   # https://cloud.tencent.com/document/product/1729/97731 (CNY per 1M
   # tokens). Hunyuan-A13B is Tencent's own current general-purpose
   # recommendation ("适用于绝大部分场景"), not a translation/vision/embedding

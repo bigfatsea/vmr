@@ -14,6 +14,10 @@ skills-lock.json
 # (use report.example.yaml as template)
 /report.yaml
 
+# Your own pricing supplement, referenced from config.yaml's pricing.supplement
+# (use pricing.example.yaml as template)
+/pricing.yaml
+
 # Test & coverage
 *.test
 *.out

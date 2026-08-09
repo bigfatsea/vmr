@@ -97,7 +97,7 @@ func TestMerge_DisjointKeysBothSurvive(t *testing.T) {
 // testing: Merge used to build its output via NewTable(base.Currency)
 // without ever copying base.GeneratedAt, so LoadStandard()'s merged table
 // always reported an empty generation date regardless of what
-// standard.generated.yaml actually declared — silently defeating the
+// standard_price_generated.yaml actually declared — silently defeating the
 // "is this table stale" signal design doc §4.2③ requires (vmr report's §2
 // appendix, vmr check's staleness display).
 func TestMerge_PreservesBaseGeneratedAt(t *testing.T) {
