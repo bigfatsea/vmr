@@ -1,0 +1,2457 @@
+# Ver 2026-08-07, by Opus 5
+#
+# GENERATED FILE — do not hand-edit. Produced by
+# tools/gen_standard_pricing from docs/data/model_prices_and_context_window.json
+# (a LiteLLM-format price-list snapshot, MIT licensed:
+# https://github.com/BerriAI/litellm — attribution preserved per
+# docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③).
+#
+# Hand-maintained additions (mainly domestic/first-party vendors this
+# source under-covers) belong in standard.curated.yaml instead, NEVER here
+# — this file is fully overwritten every time the generator runs.
+#
+# Prices are list prices, not a guarantee of accuracy — verify against the
+# vendor's own published pricing before relying on a $ figure this table
+# produced. A stale-looking table is more dangerous than a missing one:
+# check generated_at below against today's date before trusting these
+# numbers for anything that matters.
+#
+# All amounts are USD per 1,000,000 tokens. A component absent from a row
+# means "unknown" (not "free") — see internal/pricing.Rate.Complete.
+currency: USD
+generated_at: "2026-08-07"
+rates:
+  - key: anthropic/claude-3-7-sonnet-20250219
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-3-haiku-20240307
+    in_fresh: 0.25
+    cache_read: 0.03
+    cache_write: 0.3
+    out: 1.25
+  - key: anthropic/claude-3-opus-20240229
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: anthropic/claude-4-opus-20250514
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: anthropic/claude-4-sonnet-20250514
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-fable-5
+    in_fresh: 10
+    cache_read: 1
+    cache_write: 12.5
+    out: 50
+  - key: anthropic/claude-haiku-4-5
+    in_fresh: 1
+    cache_read: 0.09999999999999999
+    cache_write: 1.25
+    out: 5
+  - key: anthropic/claude-haiku-4-5-20251001
+    in_fresh: 1
+    cache_read: 0.09999999999999999
+    cache_write: 1.25
+    out: 5
+  - key: anthropic/claude-opus-4-1
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: anthropic/claude-opus-4-1-20250805
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: anthropic/claude-opus-4-20250514
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: anthropic/claude-opus-4-5
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-5-20251101
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-6
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-6-20260205
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-7
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-7-20260416
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-4-8
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-opus-5
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: anthropic/claude-sonnet-4-20250514
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-sonnet-4-5
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-sonnet-4-5-20250929
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-sonnet-4-6
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: anthropic/claude-sonnet-5
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    cache_write: 2.5
+    out: 10
+  - key: cohere_chat/command-a-03-2025
+    in_fresh: 2.5
+    out: 10
+  - key: cohere_chat/command-light
+    in_fresh: 0.3
+    out: 0.6
+  - key: cohere_chat/command-r
+    in_fresh: 0.15
+    out: 0.6
+  - key: cohere_chat/command-r-08-2024
+    in_fresh: 0.15
+    out: 0.6
+  - key: cohere_chat/command-r-plus
+    in_fresh: 2.5
+    out: 10
+  - key: cohere_chat/command-r-plus-08-2024
+    in_fresh: 2.5
+    out: 10
+  - key: cohere_chat/command-r7b-12-2024
+    in_fresh: 0.0375
+    out: 0.15
+  - key: dashscope/qwen-coder
+    in_fresh: 0.3
+    out: 1.5
+  - key: dashscope/qwen-max
+    in_fresh: 1.5999999999999999
+    out: 6.3999999999999995
+  - key: dashscope/qwen-plus
+    in_fresh: 0.39999999999999997
+    out: 1.2
+  - key: dashscope/qwen-plus-2025-01-25
+    in_fresh: 0.39999999999999997
+    out: 1.2
+  - key: dashscope/qwen-plus-2025-04-28
+    in_fresh: 0.39999999999999997
+    out: 1.2
+  - key: dashscope/qwen-plus-2025-07-14
+    in_fresh: 0.39999999999999997
+    out: 1.2
+  - key: dashscope/qwen-turbo
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
+  - key: dashscope/qwen-turbo-2024-11-01
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
+  - key: dashscope/qwen-turbo-2025-04-28
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
+  - key: dashscope/qwen-turbo-latest
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
+  - key: dashscope/qwen3-next-80b-a3b-instruct
+    in_fresh: 0.15
+    out: 1.2
+  - key: dashscope/qwen3-next-80b-a3b-thinking
+    in_fresh: 0.15
+    out: 1.2
+  - key: dashscope/qwen3-vl-235b-a22b-instruct
+    in_fresh: 0.39999999999999997
+    out: 1.5999999999999999
+  - key: dashscope/qwen3-vl-235b-a22b-thinking
+    in_fresh: 0.39999999999999997
+    out: 4
+  - key: dashscope/qwen3-vl-32b-instruct
+    in_fresh: 0.16
+    out: 0.64
+  - key: dashscope/qwen3-vl-32b-thinking
+    in_fresh: 0.16
+    out: 2.87
+  - key: dashscope/qwen3.7-max
+    in_fresh: 2.5
+    cache_read: 0.5
+    out: 7.5
+  - key: dashscope/qwq-plus
+    in_fresh: 0.7999999999999999
+    out: 2.4
+  - key: deepseek/deepseek-chat
+    in_fresh: 0.28
+    cache_read: 0.028
+    out: 0.42
+  - key: deepseek/deepseek-coder
+    in_fresh: 0.14
+    out: 0.28
+  - key: deepseek/deepseek-r1
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: deepseek/deepseek-reasoner
+    in_fresh: 0.28
+    cache_read: 0.028
+    out: 0.42
+  - key: deepseek/deepseek-v3
+    in_fresh: 0.27
+    cache_read: 0.07
+    cache_write: 0
+    out: 1.1
+  - key: deepseek/deepseek-v3.2
+    in_fresh: 0.28
+    out: 0.39999999999999997
+  - key: deepseek/deepseek-v4-flash
+    in_fresh: 0.14
+    cache_read: 0.0028
+    cache_write: 0
+    out: 0.28
+  - key: deepseek/deepseek-v4-pro
+    in_fresh: 0.435
+    cache_read: 0.003625
+    cache_write: 0
+    out: 0.87
+  - key: fireworks_ai/chronos-hermes-13b-v2
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-13b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-13b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-13b-python
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-34b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-34b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-34b-python
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-70b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-70b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-70b-python
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/code-llama-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-llama-7b-python
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/code-qwen-1p5-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/codegemma-2b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/codegemma-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/cogito-671b-v2-p1
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/cogito-v1-preview-llama-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/cogito-v1-preview-llama-70b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/cogito-v1-preview-llama-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/cogito-v1-preview-qwen-14b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/cogito-v1-preview-qwen-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/dbrx-instruct
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/deepseek-coder-1b-base
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/deepseek-coder-33b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/deepseek-coder-7b-base
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-coder-7b-base-v1p5
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-coder-7b-instruct-v1p5
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-coder-v2-instruct
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/deepseek-coder-v2-lite-base
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/deepseek-coder-v2-lite-instruct
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/deepseek-prover-v2
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/deepseek-r1
+    in_fresh: 3
+    out: 8
+  - key: fireworks_ai/deepseek-r1-0528
+    in_fresh: 3
+    out: 8
+  - key: fireworks_ai/deepseek-r1-0528-distill-qwen3-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-r1-basic
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: fireworks_ai/deepseek-r1-distill-llama-70b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/deepseek-r1-distill-llama-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-r1-distill-qwen-14b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-r1-distill-qwen-1p5b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/deepseek-r1-distill-qwen-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/deepseek-r1-distill-qwen-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/deepseek-v2-lite-chat
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/deepseek-v2p5
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/deepseek-v3
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/deepseek-v3-0324
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/deepseek-v3p1
+    in_fresh: 0.56
+    out: 1.68
+  - key: fireworks_ai/deepseek-v3p1-terminus
+    in_fresh: 0.56
+    out: 1.68
+  - key: fireworks_ai/deepseek-v3p2
+    in_fresh: 0.56
+    out: 1.68
+  - key: fireworks_ai/deepseek-v4-flash
+    in_fresh: 0.14
+    cache_read: 0.028
+    out: 0.28
+  - key: fireworks_ai/deepseek-v4-pro
+    in_fresh: 1.74
+    cache_read: 0.145
+    out: 3.48
+  - key: fireworks_ai/devstral-small-2505
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/dobby-mini-unhinged-plus-llama-3-1-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/dobby-unhinged-llama-3-3-70b-new
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/dolphin-2-9-2-qwen2-72b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/dolphin-2p6-mixtral-8x7b
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/ernie-4p5-21b-a3b-pt
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/ernie-4p5-300b-a47b-pt
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/fare-20b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/firefunction-v1
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/firefunction-v2
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/firellava-13b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/firesearch-ocr-v6
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/flux-1-dev
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/flux-1-dev-controlnet-union
+    in_fresh: 0.001
+    out: 0.001
+  - key: fireworks_ai/flux-1-schnell
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/gemma-2b-it
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/gemma-3-27b-it
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/gemma-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/gemma-7b-it
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/gemma2-9b-it
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/glm-4p5
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: fireworks_ai/glm-4p5-air
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/glm-4p5v
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/glm-4p6
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: fireworks_ai/glm-4p7
+    in_fresh: 0.6
+    cache_read: 0.3
+    out: 2.2
+  - key: fireworks_ai/glm-5p1
+    in_fresh: 1.4
+    cache_read: 0.26
+    out: 4.4
+  - key: fireworks_ai/glm-5p1-fast
+    in_fresh: 2.8
+    cache_read: 0.52
+    out: 8.8
+  - key: fireworks_ai/glm-5p2
+    in_fresh: 1.4
+    cache_read: 0.14
+    out: 4.4
+  - key: fireworks_ai/gpt-oss-120b
+    in_fresh: 0.15
+    cache_read: 0.015
+    out: 0.6
+  - key: fireworks_ai/gpt-oss-20b
+    in_fresh: 0.07
+    cache_read: 0.035
+    out: 0.3
+  - key: fireworks_ai/gpt-oss-safeguard-120b
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/gpt-oss-safeguard-20b
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/hermes-2-pro-mistral-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/internvl3-38b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/internvl3-78b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/internvl3-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/kat-coder
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/kat-dev-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/kat-dev-72b-exp
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/kimi-k2-instruct
+    in_fresh: 0.6
+    out: 2.5
+  - key: fireworks_ai/kimi-k2-instruct-0905
+    in_fresh: 0.6
+    out: 2.5
+  - key: fireworks_ai/kimi-k2-thinking
+    in_fresh: 0.6
+    out: 2.5
+  - key: fireworks_ai/kimi-k2p5
+    in_fresh: 0.6
+    cache_read: 0.09999999999999999
+    out: 3
+  - key: fireworks_ai/kimi-k2p6
+    in_fresh: 0.95
+    cache_read: 0.16
+    out: 4
+  - key: fireworks_ai/kimi-k2p6-fast
+    in_fresh: 2
+    cache_read: 0.3
+    out: 8
+  - key: fireworks_ai/kimi-k2p7-code
+    in_fresh: 0.95
+    cache_read: 0.19
+    out: 4
+  - key: fireworks_ai/kimi-k2p7-code-fast
+    in_fresh: 1.9
+    cache_read: 0.38
+    out: 8
+  - key: fireworks_ai/llama-guard-2-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-guard-3-1b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-guard-3-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v2-13b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v2-13b-chat
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v2-70b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v2-70b-chat
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v2-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v2-7b-chat
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v3-70b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v3-70b-instruct-hf
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v3-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v3-8b-instruct-hf
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v3p1-405b-instruct
+    in_fresh: 3
+    out: 3
+  - key: fireworks_ai/llama-v3p1-405b-instruct-long
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p1-70b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v3p1-70b-instruct-1b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p1-8b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p1-nemotron-70b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v3p2-11b-vision-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llama-v3p2-1b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p2-1b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p2-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p2-3b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/llama-v3p2-90b-vision-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama-v3p3-70b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/llama4-maverick-instruct-basic
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/llama4-scout-instruct-basic
+    in_fresh: 0.15
+    out: 0.6
+  - key: fireworks_ai/llamaguard-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/llava-yi-34b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/minimax-m1-80k
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/minimax-m2
+    in_fresh: 0.3
+    out: 1.2
+  - key: fireworks_ai/minimax-m2p1
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 1.2
+  - key: fireworks_ai/minimax-m2p7
+    in_fresh: 0.3
+    cache_read: 0.06
+    out: 1.2
+  - key: fireworks_ai/minimax-m3
+    in_fresh: 0.3
+    cache_read: 0.06
+    out: 1.2
+  - key: fireworks_ai/ministral-3-14b-instruct-2512
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/ministral-3-3b-instruct-2512
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/ministral-3-8b-instruct-2512
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-7b-instruct-4k
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-7b-instruct-v0p2
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-7b-instruct-v3
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-7b-v0p2
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-large-3-fp8
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/mistral-nemo-base-2407
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-nemo-instruct-2407
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/mistral-small-24b-instruct-2501
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/mixtral-8x22b
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/mixtral-8x22b-instruct
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/mixtral-8x22b-instruct-hf
+    in_fresh: 1.2
+    out: 1.2
+  - key: fireworks_ai/mixtral-8x7b
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/mixtral-8x7b-instruct
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/mixtral-8x7b-instruct-hf
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/mythomax-l2-13b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nemotron-nano-v2-12b-vl
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/nous-capybara-7b-v1p9
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nous-hermes-2-mixtral-8x7b-dpo
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/nous-hermes-2-yi-34b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/nous-hermes-llama2-13b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nous-hermes-llama2-70b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/nous-hermes-llama2-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nvidia-nemotron-nano-12b-v2
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nvidia-nemotron-nano-9b-v2
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/openchat-3p5-0106-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/openhermes-2-mistral-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/openhermes-2p5-mistral-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/openorca-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/phi-2-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/phi-3-mini-128k-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/phi-3-vision-128k-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/phind-code-llama-34b-python-v1
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/phind-code-llama-34b-v1
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/phind-code-llama-34b-v2
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/pythia-12b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen-qwq-32b-preview
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen-v2p5-14b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen-v2p5-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen1p5-72b-chat
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2-72b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2-vl-2b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2-vl-72b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2-vl-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-0p5b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-14b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-1p5b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-32b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-72b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-72b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-coder-0p5b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-0p5b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-14b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-coder-14b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-coder-1p5b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-1p5b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-coder-32b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-coder-32b-instruct-128k
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-coder-32b-instruct-32k-rope
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-coder-32b-instruct-64k
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-coder-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-3b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen2p5-coder-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-coder-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-math-72b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-vl-32b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-vl-3b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen2p5-vl-72b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen2p5-vl-7b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3-0p6b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen3-14b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3-1p7b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen3-1p7b-fp8-draft
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen3-1p7b-fp8-draft-131072
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen3-1p7b-fp8-draft-40960
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/qwen3-235b-a22b
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/qwen3-235b-a22b-instruct-2507
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/qwen3-235b-a22b-thinking-2507
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/qwen3-30b-a3b
+    in_fresh: 0.15
+    out: 0.6
+  - key: fireworks_ai/qwen3-30b-a3b-instruct-2507
+    in_fresh: 0.5
+    out: 0.5
+  - key: fireworks_ai/qwen3-30b-a3b-thinking-2507
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-4b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3-4b-instruct-2507
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3-coder-30b-a3b-instruct
+    in_fresh: 0.15
+    out: 0.6
+  - key: fireworks_ai/qwen3-coder-480b-a35b-instruct
+    in_fresh: 0.44999999999999996
+    out: 1.7999999999999998
+  - key: fireworks_ai/qwen3-coder-480b-instruct-bf16
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-next-80b-a3b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-next-80b-a3b-thinking
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-vl-235b-a22b-instruct
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/qwen3-vl-235b-a22b-thinking
+    in_fresh: 0.22
+    out: 0.88
+  - key: fireworks_ai/qwen3-vl-30b-a3b-instruct
+    in_fresh: 0.15
+    out: 0.6
+  - key: fireworks_ai/qwen3-vl-30b-a3b-thinking
+    in_fresh: 0.15
+    out: 0.6
+  - key: fireworks_ai/qwen3-vl-32b-instruct
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/qwen3-vl-8b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/qwen3p7-plus
+    in_fresh: 0.39999999999999997
+    cache_read: 0.08
+    out: 1.5999999999999999
+  - key: fireworks_ai/qwq-32b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/rolm-ocr
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/snorkel-mistral-7b-pairrm-dpo
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/stablecode-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/starcoder-16b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/starcoder-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/starcoder2-15b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/starcoder2-3b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: fireworks_ai/starcoder2-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/toppy-m-7b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/yi-34b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/yi-34b-200k-capybara
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/yi-34b-chat
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: fireworks_ai/yi-6b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/yi-large
+    in_fresh: 3
+    out: 3
+  - key: fireworks_ai/zephyr-7b-beta
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: gemini/gemini-2.0-flash
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: gemini/gemini-2.0-flash-001
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: gemini/gemini-2.0-flash-lite
+    in_fresh: 0.075
+    cache_read: 0.01875
+    out: 0.3
+  - key: gemini/gemini-2.0-flash-lite-001
+    in_fresh: 0.075
+    cache_read: 0.01875
+    out: 0.3
+  - key: gemini/gemini-2.5-computer-use-preview-10-2025
+    in_fresh: 1.25
+    out: 10
+  - key: gemini/gemini-2.5-flash
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 2.5
+  - key: gemini/gemini-2.5-flash-lite
+    in_fresh: 0.09999999999999999
+    cache_read: 0.01
+    out: 0.39999999999999997
+  - key: gemini/gemini-2.5-flash-lite-preview-06-17
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: gemini/gemini-2.5-flash-lite-preview-09-2025
+    in_fresh: 0.09999999999999999
+    cache_read: 0.01
+    out: 0.39999999999999997
+  - key: gemini/gemini-2.5-flash-native-audio-latest
+    in_fresh: 0.3
+    out: 2.5
+  - key: gemini/gemini-2.5-flash-native-audio-preview-09-2025
+    in_fresh: 0.3
+    out: 2.5
+  - key: gemini/gemini-2.5-flash-native-audio-preview-12-2025
+    in_fresh: 0.3
+    out: 2.5
+  - key: gemini/gemini-2.5-flash-preview-09-2025
+    in_fresh: 0.3
+    cache_read: 0.075
+    out: 2.5
+  - key: gemini/gemini-2.5-pro
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: gemini/gemini-2.5-pro-preview-tts
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: gemini/gemini-3-flash-preview
+    in_fresh: 0.5
+    cache_read: 0.049999999999999996
+    out: 3
+  - key: gemini/gemini-3-pro-preview
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 12
+  - key: gemini/gemini-3.1-flash-lite
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 1.5
+  - key: gemini/gemini-3.1-flash-lite-preview
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 1.5
+  - key: gemini/gemini-3.1-flash-live-preview
+    in_fresh: 0.75
+    out: 4.5
+  - key: gemini/gemini-3.1-pro-preview
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 12
+  - key: gemini/gemini-3.1-pro-preview-customtools
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 12
+  - key: gemini/gemini-3.5-flash
+    in_fresh: 1.5
+    cache_read: 0.15
+    out: 9
+  - key: gemini/gemini-3.5-flash-lite
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 2.5
+  - key: gemini/gemini-3.6-flash
+    in_fresh: 1.5
+    cache_read: 0.15
+    out: 7.5
+  - key: gemini/gemini-exp-1114
+    in_fresh: 0
+    out: 0
+  - key: gemini/gemini-exp-1206
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 2.5
+  - key: gemini/gemini-flash-latest
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 2.5
+  - key: gemini/gemini-flash-lite-latest
+    in_fresh: 0.09999999999999999
+    cache_read: 0.01
+    out: 0.39999999999999997
+  - key: gemini/gemini-gemma-2-27b-it
+    in_fresh: 0.35
+    out: 1.0499999999999998
+  - key: gemini/gemini-gemma-2-9b-it
+    in_fresh: 0.35
+    out: 1.0499999999999998
+  - key: gemini/gemini-omni-flash-preview
+    in_fresh: 1.5
+    out: 9
+  - key: gemini/gemini-pro-latest
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: gemini/gemini-robotics-er-1.5-preview
+    in_fresh: 0.3
+    cache_read: 0
+    out: 2.5
+  - key: gemini/gemini-robotics-er-1.6-preview
+    in_fresh: 1
+    out: 5
+  - key: gemini/gemini-robotics-er-2-preview
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 10
+  - key: gemini/gemma-3-27b-it
+    in_fresh: 0
+    out: 0
+  - key: gemini/learnlm-1.5-pro-experimental
+    in_fresh: 0
+    out: 0
+  - key: gemini/lyria-3-clip-preview
+    in_fresh: 0
+    out: 0
+  - key: gemini/lyria-3-pro-preview
+    in_fresh: 0
+    out: 0
+  - key: groq/gemma-7b-it
+    in_fresh: 0.049999999999999996
+    out: 0.08
+  - key: groq/gpt-oss-120b
+    in_fresh: 0.15
+    cache_read: 0.075
+    out: 0.6
+  - key: groq/gpt-oss-20b
+    in_fresh: 0.075
+    cache_read: 0.0375
+    out: 0.3
+  - key: groq/gpt-oss-safeguard-20b
+    in_fresh: 0.075
+    cache_read: 0.037
+    out: 0.3
+  - key: groq/kimi-k2-instruct-0905
+    in_fresh: 1
+    cache_read: 0.5
+    out: 3
+  - key: groq/llama-3.1-8b-instant
+    in_fresh: 0.049999999999999996
+    out: 0.08
+  - key: groq/llama-3.3-70b-versatile
+    in_fresh: 0.59
+    out: 0.7899999999999999
+  - key: groq/llama-4-maverick-17b-128e-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.6
+  - key: groq/llama-4-scout-17b-16e-instruct
+    in_fresh: 0.11
+    out: 0.33999999999999997
+  - key: groq/llama-guard-4-12b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: groq/qwen3-32b
+    in_fresh: 0.29
+    out: 0.59
+  - key: minimax/MiniMax-M2
+    in_fresh: 0.3
+    cache_read: 0.03
+    cache_write: 0.375
+    out: 1.2
+  - key: minimax/MiniMax-M2.1
+    in_fresh: 0.3
+    cache_read: 0.03
+    cache_write: 0.375
+    out: 1.2
+  - key: minimax/MiniMax-M2.1-lightning
+    in_fresh: 0.3
+    cache_read: 0.03
+    cache_write: 0.375
+    out: 2.4
+  - key: minimax/MiniMax-M2.5
+    in_fresh: 0.3
+    cache_read: 0.03
+    cache_write: 0.375
+    out: 1.2
+  - key: minimax/MiniMax-M2.5-lightning
+    in_fresh: 0.3
+    cache_read: 0.03
+    cache_write: 0.375
+    out: 2.4
+  - key: minimax/MiniMax-M3
+    in_fresh: 0.3
+    cache_read: 0.06
+    out: 1.2
+  - key: mistral/codestral-2405
+    in_fresh: 1
+    out: 3
+  - key: mistral/codestral-2508
+    in_fresh: 0.3
+    out: 0.8999999999999999
+  - key: mistral/codestral-latest
+    in_fresh: 1
+    out: 3
+  - key: mistral/codestral-mamba-latest
+    in_fresh: 0.25
+    out: 0.25
+  - key: mistral/devstral-2512
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/devstral-latest
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/devstral-medium-2507
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/devstral-medium-latest
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/devstral-small-2505
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: mistral/devstral-small-2507
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: mistral/devstral-small-latest
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: mistral/labs-devstral-small-2512
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: mistral/magistral-medium-1-2-2509
+    in_fresh: 2
+    out: 5
+  - key: mistral/magistral-medium-2506
+    in_fresh: 2
+    out: 5
+  - key: mistral/magistral-medium-2509
+    in_fresh: 2
+    out: 5
+  - key: mistral/magistral-medium-latest
+    in_fresh: 2
+    out: 5
+  - key: mistral/magistral-small-1-2-2509
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/magistral-small-2506
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/magistral-small-latest
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/ministral-3-14b-2512
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: mistral/ministral-3-3b-2512
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: mistral/ministral-3-8b-2512
+    in_fresh: 0.15
+    out: 0.15
+  - key: mistral/ministral-8b-2512
+    in_fresh: 0.15
+    out: 0.15
+  - key: mistral/ministral-8b-latest
+    in_fresh: 0.15
+    out: 0.15
+  - key: mistral/mistral-large-2402
+    in_fresh: 4
+    out: 12
+  - key: mistral/mistral-large-2407
+    in_fresh: 3
+    out: 9
+  - key: mistral/mistral-large-2411
+    in_fresh: 2
+    out: 6
+  - key: mistral/mistral-large-2512
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/mistral-large-3
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/mistral-large-latest
+    in_fresh: 0.5
+    out: 1.5
+  - key: mistral/mistral-medium
+    in_fresh: 2.7
+    out: 8.1
+  - key: mistral/mistral-medium-2312
+    in_fresh: 2.7
+    out: 8.1
+  - key: mistral/mistral-medium-2505
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/mistral-medium-2508
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/mistral-medium-2604
+    in_fresh: 1.5
+    out: 7.5
+  - key: mistral/mistral-medium-3-1-2508
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/mistral-medium-3-5
+    in_fresh: 1.5
+    out: 7.5
+  - key: mistral/mistral-medium-latest
+    in_fresh: 1.5
+    out: 7.5
+  - key: mistral/mistral-small
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: mistral/mistral-small-3-2-2506
+    in_fresh: 0.06
+    out: 0.18
+  - key: mistral/mistral-small-latest
+    in_fresh: 0.06
+    out: 0.18
+  - key: mistral/mistral-tiny
+    in_fresh: 0.25
+    out: 0.25
+  - key: mistral/open-codestral-mamba
+    in_fresh: 0.25
+    out: 0.25
+  - key: mistral/open-mistral-7b
+    in_fresh: 0.25
+    out: 0.25
+  - key: mistral/open-mistral-nemo
+    in_fresh: 0.3
+    out: 0.3
+  - key: mistral/open-mistral-nemo-2407
+    in_fresh: 0.3
+    out: 0.3
+  - key: mistral/open-mixtral-8x22b
+    in_fresh: 2
+    out: 6
+  - key: mistral/open-mixtral-8x7b
+    in_fresh: 0.7
+    out: 0.7
+  - key: mistral/pixtral-12b-2409
+    in_fresh: 0.15
+    out: 0.15
+  - key: mistral/pixtral-large-2411
+    in_fresh: 2
+    out: 6
+  - key: mistral/pixtral-large-latest
+    in_fresh: 2
+    out: 6
+  - key: moonshot/kimi-k2-0711-preview
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 2.5
+  - key: moonshot/kimi-k2-0905-preview
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 2.5
+  - key: moonshot/kimi-k2-thinking
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 2.5
+  - key: moonshot/kimi-k2-thinking-turbo
+    in_fresh: 1.15
+    cache_read: 0.15
+    out: 8
+  - key: moonshot/kimi-k2-turbo-preview
+    in_fresh: 1.15
+    cache_read: 0.15
+    out: 8
+  - key: moonshot/kimi-k2.5
+    in_fresh: 0.6
+    cache_read: 0.09999999999999999
+    out: 3
+  - key: moonshot/kimi-k2.6
+    in_fresh: 0.95
+    cache_read: 0.16
+    out: 4
+  - key: moonshot/kimi-latest
+    in_fresh: 2
+    cache_read: 0.15
+    out: 5
+  - key: moonshot/kimi-latest-128k
+    in_fresh: 2
+    cache_read: 0.15
+    out: 5
+  - key: moonshot/kimi-latest-32k
+    in_fresh: 1
+    cache_read: 0.15
+    out: 3
+  - key: moonshot/kimi-latest-8k
+    in_fresh: 0.19999999999999998
+    cache_read: 0.15
+    out: 2
+  - key: moonshot/kimi-thinking-preview
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 2.5
+  - key: moonshot/moonshot-v1-128k
+    in_fresh: 2
+    out: 5
+  - key: moonshot/moonshot-v1-128k-0430
+    in_fresh: 2
+    out: 5
+  - key: moonshot/moonshot-v1-128k-vision-preview
+    in_fresh: 2
+    out: 5
+  - key: moonshot/moonshot-v1-32k
+    in_fresh: 1
+    out: 3
+  - key: moonshot/moonshot-v1-32k-0430
+    in_fresh: 1
+    out: 3
+  - key: moonshot/moonshot-v1-32k-vision-preview
+    in_fresh: 1
+    out: 3
+  - key: moonshot/moonshot-v1-8k
+    in_fresh: 0.19999999999999998
+    out: 2
+  - key: moonshot/moonshot-v1-8k-0430
+    in_fresh: 0.19999999999999998
+    out: 2
+  - key: moonshot/moonshot-v1-8k-vision-preview
+    in_fresh: 0.19999999999999998
+    out: 2
+  - key: moonshot/moonshot-v1-auto
+    in_fresh: 2
+    out: 5
+  - key: openai/chatgpt-4o-latest
+    in_fresh: 5
+    out: 15
+  - key: openai/ft:gpt-3.5-turbo
+    in_fresh: 3
+    out: 6
+  - key: openai/ft:gpt-3.5-turbo-0125
+    in_fresh: 3
+    out: 6
+  - key: openai/ft:gpt-3.5-turbo-0613
+    in_fresh: 3
+    out: 6
+  - key: openai/ft:gpt-3.5-turbo-1106
+    in_fresh: 3
+    out: 6
+  - key: openai/ft:gpt-4-0613
+    in_fresh: 30
+    out: 60
+  - key: openai/ft:gpt-4.1-2025-04-14
+    in_fresh: 3
+    cache_read: 0.75
+    out: 12
+  - key: openai/ft:gpt-4.1-mini-2025-04-14
+    in_fresh: 0.7999999999999999
+    cache_read: 0.19999999999999998
+    out: 3.1999999999999997
+  - key: openai/ft:gpt-4.1-nano-2025-04-14
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.7999999999999999
+  - key: openai/ft:gpt-4o-2024-08-06
+    in_fresh: 3.75
+    cache_read: 1.875
+    out: 15
+  - key: openai/ft:gpt-4o-2024-11-20
+    in_fresh: 3.75
+    cache_write: 1.875
+    out: 15
+  - key: openai/ft:gpt-4o-mini-2024-07-18
+    in_fresh: 0.3
+    cache_read: 0.15
+    out: 1.2
+  - key: openai/ft:o4-mini-2025-04-16
+    in_fresh: 4
+    cache_read: 1
+    out: 16
+  - key: openai/gpt-3.5-turbo
+    in_fresh: 0.5
+    out: 1.5
+  - key: openai/gpt-3.5-turbo-0125
+    in_fresh: 0.5
+    out: 1.5
+  - key: openai/gpt-3.5-turbo-1106
+    in_fresh: 1
+    out: 2
+  - key: openai/gpt-3.5-turbo-16k
+    in_fresh: 3
+    out: 4
+  - key: openai/gpt-4
+    in_fresh: 30
+    out: 60
+  - key: openai/gpt-4-0125-preview
+    in_fresh: 10
+    out: 30
+  - key: openai/gpt-4-0314
+    in_fresh: 30
+    out: 60
+  - key: openai/gpt-4-0613
+    in_fresh: 30
+    out: 60
+  - key: openai/gpt-4-1106-preview
+    in_fresh: 10
+    out: 30
+  - key: openai/gpt-4-turbo
+    in_fresh: 10
+    out: 30
+  - key: openai/gpt-4-turbo-2024-04-09
+    in_fresh: 10
+    out: 30
+  - key: openai/gpt-4-turbo-preview
+    in_fresh: 10
+    out: 30
+  - key: openai/gpt-4.1
+    in_fresh: 2
+    cache_read: 0.5
+    out: 8
+  - key: openai/gpt-4.1-2025-04-14
+    in_fresh: 2
+    cache_read: 0.5
+    out: 8
+  - key: openai/gpt-4.1-mini
+    in_fresh: 0.39999999999999997
+    cache_read: 0.09999999999999999
+    out: 1.5999999999999999
+  - key: openai/gpt-4.1-mini-2025-04-14
+    in_fresh: 0.39999999999999997
+    cache_read: 0.09999999999999999
+    out: 1.5999999999999999
+  - key: openai/gpt-4.1-nano
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: openai/gpt-4.1-nano-2025-04-14
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: openai/gpt-4o
+    in_fresh: 2.5
+    cache_read: 1.25
+    out: 10
+  - key: openai/gpt-4o-2024-05-13
+    in_fresh: 5
+    out: 15
+  - key: openai/gpt-4o-2024-08-06
+    in_fresh: 2.5
+    cache_read: 1.25
+    out: 10
+  - key: openai/gpt-4o-2024-11-20
+    in_fresh: 2.5
+    cache_read: 1.25
+    out: 10
+  - key: openai/gpt-4o-audio-preview
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-4o-audio-preview-2024-12-17
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-4o-audio-preview-2025-06-03
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-4o-mini
+    in_fresh: 0.15
+    cache_read: 0.075
+    out: 0.6
+  - key: openai/gpt-4o-mini-2024-07-18
+    in_fresh: 0.15
+    cache_read: 0.075
+    out: 0.6
+  - key: openai/gpt-4o-mini-audio-preview
+    in_fresh: 0.15
+    out: 0.6
+  - key: openai/gpt-4o-mini-audio-preview-2024-12-17
+    in_fresh: 0.15
+    out: 0.6
+  - key: openai/gpt-4o-mini-search-preview
+    in_fresh: 0.15
+    cache_read: 0.075
+    out: 0.6
+  - key: openai/gpt-4o-mini-search-preview-2025-03-11
+    in_fresh: 0.15
+    cache_read: 0.075
+    out: 0.6
+  - key: openai/gpt-4o-search-preview
+    in_fresh: 2.5
+    cache_read: 1.25
+    out: 10
+  - key: openai/gpt-4o-search-preview-2025-03-11
+    in_fresh: 2.5
+    cache_read: 1.25
+    out: 10
+  - key: openai/gpt-5
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5-2025-08-07
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5-chat
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5-chat-latest
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5-mini
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 2
+  - key: openai/gpt-5-mini-2025-08-07
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 2
+  - key: openai/gpt-5-nano
+    in_fresh: 0.049999999999999996
+    cache_read: 0.005
+    out: 0.39999999999999997
+  - key: openai/gpt-5-nano-2025-08-07
+    in_fresh: 0.049999999999999996
+    cache_read: 0.005
+    out: 0.39999999999999997
+  - key: openai/gpt-5-search-api
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5-search-api-2025-10-14
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5.1
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5.1-2025-11-13
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5.1-chat-latest
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openai/gpt-5.2
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openai/gpt-5.2-2025-12-11
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openai/gpt-5.2-chat-latest
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openai/gpt-5.3-chat-latest
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openai/gpt-5.4
+    in_fresh: 2.5
+    cache_read: 0.25
+    out: 15
+  - key: openai/gpt-5.4-2026-03-05
+    in_fresh: 2.5
+    cache_read: 0.25
+    out: 15
+  - key: openai/gpt-5.4-mini
+    in_fresh: 0.75
+    cache_read: 0.075
+    out: 4.5
+  - key: openai/gpt-5.4-mini-2026-03-17
+    in_fresh: 0.75
+    cache_read: 0.075
+    out: 4.5
+  - key: openai/gpt-5.4-nano
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    out: 1.25
+  - key: openai/gpt-5.4-nano-2026-03-17
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    out: 1.25
+  - key: openai/gpt-5.5
+    in_fresh: 5
+    cache_read: 0.5
+    out: 30
+  - key: openai/gpt-5.5-2026-04-23
+    in_fresh: 5
+    cache_read: 0.5
+    out: 30
+  - key: openai/gpt-5.6
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 30
+  - key: openai/gpt-5.6-luna
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    cache_write: 0.25
+    out: 1.2
+  - key: openai/gpt-5.6-sol
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 30
+  - key: openai/gpt-5.6-terra
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    cache_write: 2.5
+    out: 12
+  - key: openai/gpt-audio
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-audio-1.5
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-audio-2025-08-28
+    in_fresh: 2.5
+    out: 10
+  - key: openai/gpt-audio-mini
+    in_fresh: 0.6
+    out: 2.4
+  - key: openai/gpt-audio-mini-2025-10-06
+    in_fresh: 0.6
+    out: 2.4
+  - key: openai/gpt-audio-mini-2025-12-15
+    in_fresh: 0.6
+    out: 2.4
+  - key: openai/o1
+    in_fresh: 15
+    cache_read: 7.5
+    out: 60
+  - key: openai/o1-2024-12-17
+    in_fresh: 15
+    cache_read: 7.5
+    out: 60
+  - key: openai/o3
+    in_fresh: 2
+    cache_read: 0.5
+    out: 8
+  - key: openai/o3-2025-04-16
+    in_fresh: 2
+    cache_read: 0.5
+    out: 8
+  - key: openai/o3-mini
+    in_fresh: 1.1
+    cache_read: 0.55
+    out: 4.4
+  - key: openai/o3-mini-2025-01-31
+    in_fresh: 1.1
+    cache_read: 0.55
+    out: 4.4
+  - key: openai/o4-mini
+    in_fresh: 1.1
+    cache_read: 0.275
+    out: 4.4
+  - key: openai/o4-mini-2025-04-16
+    in_fresh: 1.1
+    cache_read: 0.275
+    out: 4.4
+  - key: openrouter/auto
+    in_fresh: 0
+    out: 0
+  - key: openrouter/bodybuilder
+    in_fresh: 0
+    out: 0
+  - key: openrouter/claude-3-haiku
+    in_fresh: 0.25
+    out: 1.25
+  - key: openrouter/claude-3.5-sonnet
+    in_fresh: 3
+    out: 15
+  - key: openrouter/claude-3.7-sonnet
+    in_fresh: 3
+    out: 15
+  - key: openrouter/claude-haiku-4.5
+    in_fresh: 1
+    cache_read: 0.09999999999999999
+    cache_write: 1.25
+    out: 5
+  - key: openrouter/claude-opus-4
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: openrouter/claude-opus-4.1
+    in_fresh: 15
+    cache_read: 1.5
+    cache_write: 18.75
+    out: 75
+  - key: openrouter/claude-opus-4.5
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: openrouter/claude-opus-4.6
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: openrouter/claude-opus-4.7
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
+  - key: openrouter/claude-sonnet-4
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: openrouter/claude-sonnet-4.5
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: openrouter/claude-sonnet-4.6
+    in_fresh: 3
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15
+  - key: openrouter/deepseek-chat
+    in_fresh: 0.14
+    out: 0.28
+  - key: openrouter/deepseek-chat-v3-0324
+    in_fresh: 0.14
+    out: 0.28
+  - key: openrouter/deepseek-chat-v3.1
+    in_fresh: 0.19999999999999998
+    out: 0.7999999999999999
+  - key: openrouter/deepseek-r1
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: openrouter/deepseek-r1-0528
+    in_fresh: 0.5
+    out: 2.1500000000000004
+  - key: openrouter/deepseek-v3.2
+    in_fresh: 0.28
+    out: 0.39999999999999997
+  - key: openrouter/deepseek-v3.2-exp
+    in_fresh: 0.19999999999999998
+    out: 0.39999999999999997
+  - key: openrouter/devstral-2512
+    in_fresh: 0.15
+    out: 0.6
+  - key: openrouter/free
+    in_fresh: 0
+    out: 0
+  - key: openrouter/gemini-2.0-flash-001
+    in_fresh: 0.09999999999999999
+    out: 0.39999999999999997
+  - key: openrouter/gemini-2.5-flash
+    in_fresh: 0.3
+    out: 2.5
+  - key: openrouter/gemini-2.5-pro
+    in_fresh: 1.25
+    out: 10
+  - key: openrouter/gemini-3-flash-preview
+    in_fresh: 0.5
+    cache_read: 0.049999999999999996
+    out: 3
+  - key: openrouter/gemini-3-pro-preview
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 12
+  - key: openrouter/gemini-3.1-flash-lite
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 1.5
+  - key: openrouter/gemini-3.1-flash-lite-preview
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 1.5
+  - key: openrouter/gemini-3.1-pro-preview
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 12
+  - key: openrouter/glm-4.6
+    in_fresh: 0.39999999999999997
+    out: 1.75
+  - key: openrouter/glm-4.6:exacto
+    in_fresh: 0.44999999999999996
+    out: 1.9
+  - key: openrouter/glm-4.7
+    in_fresh: 0.39999999999999997
+    cache_read: 0
+    cache_write: 0
+    out: 1.5
+  - key: openrouter/glm-4.7-flash
+    in_fresh: 0.07
+    cache_read: 0
+    cache_write: 0
+    out: 0.39999999999999997
+  - key: openrouter/glm-5
+    in_fresh: 0.7999999999999999
+    out: 2.56
+  - key: openrouter/glm-5.1
+    in_fresh: 1.0499999999999998
+    cache_read: 0.5249999999999999
+    cache_write: 0
+    out: 3.5
+  - key: openrouter/gpt-3.5-turbo
+    in_fresh: 1.5
+    out: 2
+  - key: openrouter/gpt-3.5-turbo-16k
+    in_fresh: 3
+    out: 4
+  - key: openrouter/gpt-4
+    in_fresh: 30
+    out: 60
+  - key: openrouter/gpt-4.1
+    in_fresh: 2
+    cache_read: 0.5
+    out: 8
+  - key: openrouter/gpt-4.1-mini
+    in_fresh: 0.39999999999999997
+    cache_read: 0.09999999999999999
+    out: 1.5999999999999999
+  - key: openrouter/gpt-4.1-nano
+    in_fresh: 0.09999999999999999
+    cache_read: 0.024999999999999998
+    out: 0.39999999999999997
+  - key: openrouter/gpt-4o
+    in_fresh: 2.5
+    out: 10
+  - key: openrouter/gpt-4o-2024-05-13
+    in_fresh: 5
+    out: 15
+  - key: openrouter/gpt-5
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openrouter/gpt-5-chat
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openrouter/gpt-5-codex
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openrouter/gpt-5-mini
+    in_fresh: 0.25
+    cache_read: 0.024999999999999998
+    out: 2
+  - key: openrouter/gpt-5-nano
+    in_fresh: 0.049999999999999996
+    cache_read: 0.005
+    out: 0.39999999999999997
+  - key: openrouter/gpt-5.1-codex-max
+    in_fresh: 1.25
+    cache_read: 0.125
+    out: 10
+  - key: openrouter/gpt-5.2
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openrouter/gpt-5.2-chat
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openrouter/gpt-5.2-codex
+    in_fresh: 1.75
+    cache_read: 0.175
+    out: 14
+  - key: openrouter/gpt-5.2-pro
+    in_fresh: 21
+    out: 168
+  - key: openrouter/gpt-oss-120b
+    in_fresh: 0.18
+    out: 0.7999999999999999
+  - key: openrouter/gpt-oss-20b
+    in_fresh: 0.02
+    out: 0.09999999999999999
+  - key: openrouter/grok-4
+    in_fresh: 3
+    out: 15
+  - key: openrouter/kimi-k2.5
+    in_fresh: 0.6
+    cache_read: 0.09999999999999999
+    out: 3
+  - key: openrouter/llama-3-70b-instruct
+    in_fresh: 0.59
+    out: 0.7899999999999999
+  - key: openrouter/mimo-v2-flash
+    in_fresh: 0.09999999999999999
+    cache_read: 0.01
+    cache_write: 0
+    out: 0.3
+  - key: openrouter/mimo-v2.5
+    in_fresh: 0.39999999999999997
+    cache_read: 0.08
+    cache_write: 0
+    out: 2
+  - key: openrouter/mimo-v2.5-pro
+    in_fresh: 1
+    cache_read: 0.19999999999999998
+    cache_write: 0
+    out: 3
+  - key: openrouter/minimax-m2
+    in_fresh: 0.255
+    out: 1.02
+  - key: openrouter/minimax-m2.1
+    in_fresh: 0.27
+    cache_read: 0
+    cache_write: 0
+    out: 1.2
+  - key: openrouter/minimax-m2.5
+    in_fresh: 0.3
+    cache_read: 0.15
+    out: 1.1
+  - key: openrouter/ministral-14b-2512
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: openrouter/ministral-3b-2512
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: openrouter/ministral-8b-2512
+    in_fresh: 0.15
+    out: 0.15
+  - key: openrouter/mistral-7b-instruct
+    in_fresh: 0.13
+    out: 0.13
+  - key: openrouter/mistral-large
+    in_fresh: 8
+    out: 24
+  - key: openrouter/mistral-large-2512
+    in_fresh: 0.5
+    out: 1.5
+  - key: openrouter/mistral-small-3.1-24b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: openrouter/mistral-small-3.2-24b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.3
+  - key: openrouter/mixtral-8x22b-instruct
+    in_fresh: 0.65
+    out: 0.65
+  - key: openrouter/mythomax-l2-13b
+    in_fresh: 1.875
+    out: 1.875
+  - key: openrouter/o1
+    in_fresh: 15
+    cache_read: 7.5
+    out: 60
+  - key: openrouter/o3-mini
+    in_fresh: 1.1
+    out: 4.4
+  - key: openrouter/o3-mini-high
+    in_fresh: 1.1
+    out: 4.4
+  - key: openrouter/qwen-2.5-coder-32b-instruct
+    in_fresh: 0.18
+    out: 0.18
+  - key: openrouter/qwen-vl-plus
+    in_fresh: 0.21
+    out: 0.63
+  - key: openrouter/qwen3-235b-a22b-2507
+    in_fresh: 0.071
+    out: 0.09999999999999999
+  - key: openrouter/qwen3-235b-a22b-thinking-2507
+    in_fresh: 0.11
+    out: 0.6
+  - key: openrouter/qwen3-coder
+    in_fresh: 0.22
+    out: 0.95
+  - key: openrouter/qwen3-coder-plus
+    in_fresh: 1
+    out: 5
+  - key: openrouter/qwen3.5-122b-a10b
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: openrouter/qwen3.5-27b
+    in_fresh: 0.3
+    out: 2.4
+  - key: openrouter/qwen3.5-35b-a3b
+    in_fresh: 0.25
+    out: 2
+  - key: openrouter/qwen3.5-397b-a17b
+    in_fresh: 0.6
+    out: 3.5999999999999996
+  - key: openrouter/qwen3.5-flash-02-23
+    in_fresh: 0.09999999999999999
+    out: 0.39999999999999997
+  - key: openrouter/qwen3.5-plus-02-15
+    in_fresh: 0.39999999999999997
+    out: 2.4
+  - key: openrouter/qwen3.6-plus
+    in_fresh: 0.325
+    out: 1.95
+  - key: openrouter/remm-slerp-l2-13b
+    in_fresh: 1.875
+    out: 1.875
+  - key: openrouter/router
+    in_fresh: 0.85
+    out: 3.4
+  - key: openrouter/ui-tars-1.5-7b
+    in_fresh: 0.09999999999999999
+    out: 0.19999999999999998
+  - key: openrouter/weaver
+    in_fresh: 5.625
+    out: 5.625
+  - key: perplexity/codellama-34b-instruct
+    in_fresh: 0.35
+    out: 1.4
+  - key: perplexity/codellama-70b-instruct
+    in_fresh: 0.7
+    out: 2.8
+  - key: perplexity/llama-2-70b-chat
+    in_fresh: 0.7
+    out: 2.8
+  - key: perplexity/llama-3.1-70b-instruct
+    in_fresh: 1
+    out: 1
+  - key: perplexity/llama-3.1-8b-instruct
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: perplexity/mistral-7b-instruct
+    in_fresh: 0.07
+    out: 0.28
+  - key: perplexity/mixtral-8x7b-instruct
+    in_fresh: 0.07
+    out: 0.28
+  - key: perplexity/pplx-70b-chat
+    in_fresh: 0.7
+    out: 2.8
+  - key: perplexity/pplx-70b-online
+    in_fresh: 0
+    out: 2.8
+  - key: perplexity/pplx-7b-chat
+    in_fresh: 0.07
+    out: 0.28
+  - key: perplexity/pplx-7b-online
+    in_fresh: 0
+    out: 0.28
+  - key: perplexity/sonar
+    in_fresh: 1
+    out: 1
+  - key: perplexity/sonar-deep-research
+    in_fresh: 2
+    out: 8
+  - key: perplexity/sonar-medium-chat
+    in_fresh: 0.6
+    out: 1.7999999999999998
+  - key: perplexity/sonar-medium-online
+    in_fresh: 0
+    out: 1.7999999999999998
+  - key: perplexity/sonar-pro
+    in_fresh: 3
+    out: 15
+  - key: perplexity/sonar-reasoning
+    in_fresh: 1
+    out: 5
+  - key: perplexity/sonar-reasoning-pro
+    in_fresh: 2
+    out: 8
+  - key: perplexity/sonar-small-chat
+    in_fresh: 0.07
+    out: 0.28
+  - key: perplexity/sonar-small-online
+    in_fresh: 0
+    out: 0.28
+  - key: together_ai/DeepSeek-R1
+    in_fresh: 3
+    out: 7
+  - key: together_ai/DeepSeek-R1-0528-tput
+    in_fresh: 0.55
+    out: 2.1900000000000004
+  - key: together_ai/DeepSeek-V3
+    in_fresh: 1.25
+    out: 1.25
+  - key: together_ai/DeepSeek-V3.1
+    in_fresh: 0.6
+    out: 1.7
+  - key: together_ai/GLM-4.5-Air-FP8
+    in_fresh: 0.19999999999999998
+    out: 1.1
+  - key: together_ai/GLM-4.6
+    in_fresh: 0.6
+    out: 2.2
+  - key: together_ai/GLM-4.7
+    in_fresh: 0.44999999999999996
+    out: 2
+  - key: together_ai/Kimi-K2-Instruct
+    in_fresh: 1
+    out: 3
+  - key: together_ai/Kimi-K2-Instruct-0905
+    in_fresh: 1
+    out: 3
+  - key: together_ai/Kimi-K2.5
+    in_fresh: 0.5
+    out: 2.8
+  - key: together_ai/Llama-3.3-70B-Instruct-Turbo
+    in_fresh: 0.88
+    out: 0.88
+  - key: together_ai/Llama-3.3-70B-Instruct-Turbo-Free
+    in_fresh: 0
+    out: 0
+  - key: together_ai/Llama-4-Maverick-17B-128E-Instruct-FP8
+    in_fresh: 0.27
+    out: 0.85
+  - key: together_ai/Llama-4-Scout-17B-16E-Instruct
+    in_fresh: 0.18
+    out: 0.59
+  - key: together_ai/Meta-Llama-3.1-405B-Instruct-Turbo
+    in_fresh: 3.5
+    out: 3.5
+  - key: together_ai/Meta-Llama-3.1-70B-Instruct-Turbo
+    in_fresh: 0.88
+    out: 0.88
+  - key: together_ai/Meta-Llama-3.1-8B-Instruct-Turbo
+    in_fresh: 0.18
+    out: 0.18
+  - key: together_ai/Mixtral-8x7B-Instruct-v0.1
+    in_fresh: 0.6
+    out: 0.6
+  - key: together_ai/Qwen3-235B-A22B-Instruct-2507-tput
+    in_fresh: 0.19999999999999998
+    out: 6
+  - key: together_ai/Qwen3-235B-A22B-Thinking-2507
+    in_fresh: 0.65
+    out: 3
+  - key: together_ai/Qwen3-235B-A22B-fp8-tput
+    in_fresh: 0.19999999999999998
+    out: 0.6
+  - key: together_ai/Qwen3-Coder-480B-A35B-Instruct-FP8
+    in_fresh: 2
+    out: 2
+  - key: together_ai/Qwen3-Next-80B-A3B-Instruct
+    in_fresh: 0.15
+    out: 1.5
+  - key: together_ai/Qwen3-Next-80B-A3B-Thinking
+    in_fresh: 0.15
+    out: 1.5
+  - key: together_ai/Qwen3.5-397B-A17B
+    in_fresh: 0.6
+    out: 3.5999999999999996
+  - key: together_ai/gpt-oss-120b
+    in_fresh: 0.15
+    out: 0.6
+  - key: together_ai/gpt-oss-20b
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
+  - key: together_ai/together-ai-21.1b-41b
+    in_fresh: 0.7999999999999999
+    out: 0.7999999999999999
+  - key: together_ai/together-ai-4.1b-8b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: together_ai/together-ai-41.1b-80b
+    in_fresh: 0.8999999999999999
+    out: 0.8999999999999999
+  - key: together_ai/together-ai-8.1b-21b
+    in_fresh: 0.3
+    out: 0.3
+  - key: together_ai/together-ai-81.1b-110b
+    in_fresh: 1.7999999999999998
+    out: 1.7999999999999998
+  - key: together_ai/together-ai-up-to-4b
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: volcengine/deepseek-v3-2-251201
+    in_fresh: 0
+    out: 0
+  - key: volcengine/glm-4-7-251222
+    in_fresh: 0
+    out: 0
+  - key: volcengine/kimi-k2-thinking-251104
+    in_fresh: 0
+    out: 0
+  - key: xai/grok-2
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-2-1212
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-2-latest
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-2-vision
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-2-vision-1212
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-2-vision-latest
+    in_fresh: 2
+    out: 10
+  - key: xai/grok-3
+    in_fresh: 3
+    cache_read: 0.75
+    out: 15
+  - key: xai/grok-3-beta
+    in_fresh: 3
+    cache_read: 0.75
+    out: 15
+  - key: xai/grok-3-fast-beta
+    in_fresh: 5
+    cache_read: 1.25
+    out: 25
+  - key: xai/grok-3-fast-latest
+    in_fresh: 5
+    cache_read: 1.25
+    out: 25
+  - key: xai/grok-3-latest
+    in_fresh: 3
+    cache_read: 0.75
+    out: 15
+  - key: xai/grok-3-mini
+    in_fresh: 0.3
+    cache_read: 0.075
+    out: 0.5
+  - key: xai/grok-3-mini-beta
+    in_fresh: 0.3
+    cache_read: 0.075
+    out: 0.5
+  - key: xai/grok-3-mini-fast
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 4
+  - key: xai/grok-3-mini-fast-beta
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 4
+  - key: xai/grok-3-mini-fast-latest
+    in_fresh: 0.6
+    cache_read: 0.15
+    out: 4
+  - key: xai/grok-3-mini-latest
+    in_fresh: 0.3
+    cache_read: 0.075
+    out: 0.5
+  - key: xai/grok-4
+    in_fresh: 3
+    out: 15
+  - key: xai/grok-4-0709
+    in_fresh: 3
+    out: 15
+  - key: xai/grok-4-1-fast
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-1-fast-non-reasoning
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-1-fast-non-reasoning-latest
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-1-fast-reasoning
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-1-fast-reasoning-latest
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-fast-non-reasoning
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-fast-reasoning
+    in_fresh: 0.19999999999999998
+    cache_read: 0.049999999999999996
+    out: 0.5
+  - key: xai/grok-4-latest
+    in_fresh: 3
+    out: 15
+  - key: xai/grok-4.20-0309-reasoning
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 6
+  - key: xai/grok-4.20-beta-0309-non-reasoning
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 6
+  - key: xai/grok-4.20-beta-0309-reasoning
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 6
+  - key: xai/grok-4.20-multi-agent-beta-0309
+    in_fresh: 2
+    cache_read: 0.19999999999999998
+    out: 6
+  - key: xai/grok-4.3
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.3-latest
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.5
+    in_fresh: 2
+    cache_read: 0.5
+    out: 6
+  - key: xai/grok-4.5-latest
+    in_fresh: 2
+    cache_read: 0.5
+    out: 6
+  - key: xai/grok-beta
+    in_fresh: 5
+    out: 15
+  - key: xai/grok-code-fast
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    out: 1.5
+  - key: xai/grok-code-fast-1
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    out: 1.5
+  - key: xai/grok-code-fast-1-0825
+    in_fresh: 0.19999999999999998
+    cache_read: 0.02
+    out: 1.5
+  - key: xai/grok-vision-beta
+    in_fresh: 5
+    out: 15

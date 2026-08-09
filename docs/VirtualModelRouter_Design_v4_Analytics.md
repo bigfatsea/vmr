@@ -36,7 +36,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 **时区**：`ts` 序列化成 RFC3339（Go `time.Time` 默认 `MarshalJSON`），带写入那一刻进程自身的本地偏移量（即 `time.Now()`），不转 GMT——一份 `audit.Record` JSONL 打开就是当地墙钟时间，无需心算时区，偏移量本身又消除了任何解析歧义，两头都占。审计文件按天轮转（`vmr-audit-YYYY-MM-DD.jsonl`）用的是同一个本地时钟，轮转边界即当地日历日的午夜。
 
-`vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳、`pricing.yaml` 的 `hour_from`/`hour_to`/`date_from`/`date_to` 时段匹配），或者嵌进文件名（per-request `details/*.md`、报告/日志输出路径）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。
+`vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳、`providers[].pricing.overrides` 规则的 `hour_from`/`hour_to`/`date_from`/`date_to` 时段匹配），或者嵌进文件名（per-request `details/*.md`、报告/日志输出路径）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。
 
 `internal/story/journey.go` 的 `deriveID` 是唯一一处不走这条规则的地方，但也不是简单粗暴地强制 `.UTC()`——它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换）格式化，也就是记录写入那一刻服务器自身的本地偏移量。这个 id 同时也是 `journey-<id>.md`/`compare-<id>.vs-<id>.md` 的文件名，需要满足两个看似矛盾的诉求：①同一份审计数据不管在哪台机器（哪个时区）上跑 `vmr story`，都必须算出同一个 id 字符串（用于 `-journey <id>`/`-compare id1,id2` 精确匹配）；②文件名里的时间要是人一眼能看懂的本地墙钟时间，不需要心算时区。因为这个偏移量是数据本身的属性（写入时那台机器的时区），不随"现在是谁在读它"变化，两个诉求同时满足——不需要走 `DisplayZone`（那是读取机器的时区，会引入①想避免的不稳定性），也不需要强制 `UTC`（那会导致②要求的可读性问题，即用户实际踩到的坑）。详细排查过程与取舍分析见 `docs/future-strategy/vmr_timezone_analysis_sonnet-5.md`。
 
@@ -45,12 +45,13 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 ## 2. `vmr report`：聚合报表
 
 ```
-vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
+vmr report [-c config.yaml] [-o dir] [-details=false] <file|glob>...
     # 输出 vmr-report.json + vmr-report.md + vmr-requests.json + vmr-requests.md（+ 按 client_key_tag 的 sibling）
-    # + {out}/details/ 逐请求详单（-details=false 关闭；加载了定价配置才会渲染 §2 成本估算）
+    # + {out}/details/ 逐请求详单（-details=false 关闭；只要定价数据解析出结果就渲染 §2 成本估算——
+    # 内置标准表始终生效，-c 指定的 config.yaml 若能读到会在其上叠加账号覆盖，见 §2.1）
 ```
 
-全部实现在 `internal/report` 一个包里：`aggregate.go`（聚合入口 `Build`）、`session.go`（会话/任务分组）、`rows.go`（`Report2` 及各 Row 类型 = `vmr-report.json` 的公开 schema）、`metrics.go`（派生指标 + `buildFindings`）、`render_doc.go`（章节运行顺序 + 共享的 `mdTable`）+ 一个章节一个文件的 `section_*.go`（**新增章节 = 新增文件，不是把某个文件改大**，`internal/archtest` 的行数预算逼着遵守这条）、`detail.go`/`render.go`（逐请求详单）、`requests.go`（`vmr-requests.md` 索引）、`pricing.go`（定价 sidecar）。与审计记录格式强耦合：改动 `audit.Record` 结构必须同步改这个包及其测试。
+全部实现在 `internal/report` 一个包里：`aggregate.go`（聚合入口 `Build`）、`session.go`（会话/任务分组）、`rows.go`（`Report2` 及各 Row 类型 = `vmr-report.json` 的公开 schema）、`metrics.go`（派生指标 + `buildFindings`）、`render_doc.go`（章节运行顺序 + 共享的 `mdTable`）+ 一个章节一个文件的 `section_*.go`（**新增章节 = 新增文件，不是把某个文件改大**，`internal/archtest` 的行数预算逼着遵守这条）、`detail.go`/`render.go`（逐请求详单）、`requests.go`（`vmr-requests.md` 索引）、`cost.go`（`costFor` 成本公式 + 端点标签拆分）、`pricing.go`（定价摘要类型——实际的三层解析引擎在 `internal/pricing`，见其包注释的"两个消费者"说明）。与审计记录格式强耦合：改动 `audit.Record` 结构必须同步改这个包及其测试。
 
 **输出语言**：`vmr-report.md`/`vmr-requests*.md`/`details/*.md` 的文案（英文/中文，默认英文）来自渲染函数新增的 `lang i18n.Lang` 参数；`vmr-report.json` 的叙述性字段（`Finding.Finding` 等）固定英文，不随语言变化——`Build` 本身完全不接收 `lang`。完整机制（`internal/i18n` 架构、`report.yaml`/`-lang`、JSON/Markdown 语言契约）见 §4。
 
@@ -77,9 +78,9 @@ vmr report [-o dir] [-details=false] [-pricing pricing.yaml] <file|glob>...
 
 派生指标（每个 finish 阶段就地写回，原始切片随即释放）：`tokens_in_fresh = tokens_in − tokens_in_cached − tokens_in_cache_write`；`cache_efficiency = cached / (cached + fresh)`；`cache_hit_rate = cached / tokens_in`；`slow_requests`（`dur_ms` 超过 30s 阈值）；`context_growth`（会话内末轮/首轮 `tokens_in` 之比——现在这个比值永远在同一个 Lineage 范围内计算，不会跨越一次隐藏的历史重置，见 §3.2 对这条历史缺陷的说明）。比值类指标的分母低于该桶总请求数 90% 时，Markdown 侧标注 `¹` 低置信度脚注。
 
-### 2.3 成本估算（可选）
+### 2.3 成本估算（可选，P2.2 起接入 `internal/pricing`）
 
-`-pricing pricing.yaml` 显式指定一份本地维护的定价 sidecar，不传时自动尝试加载当前目录下的 `./pricing.yaml`（不存在则安静跳过，全程不出现 `$`/成本数字）。按 provider+model（不含协议）配置四个费率字段，支持货币前缀字符串与按 `exchange_rate` 换算；同一 provider+model 可配多条按时间窗口生效的规则。每条记录按其 `endpoint` 拆出 provider/model 查价，命中则把成本累加进 `Overall`/`ByModel`/`EndpointsAll`/`ByClient` 各自的 `cost_estimate` 指针字段（`nil` = 未配置定价，前端据此判断是否渲染）。定价 sidecar 的 `updated_at` 会渲染成免责声明，避免旧报告的 `$` 列被误当成实际账单。
+定价来自 `internal/pricing` 的两层模型（随二进制内置的标准价目表 + `-c` 指定的 config.yaml 里 `providers[].pricing`/全局 `pricing:` 的账号覆盖，与 `metric: cost` 额度共用同一套解析——见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的 §4.2①、`internal/pricing` 的包注释）；找不到 config.yaml 时优雅降级为只用标准表列表价。`cmd/vmr/cmd_report.go` 的 `buildPricing` 是唯一的组合根：读 config、构造 `pricing.Resolver`（按 provider 记忆化，`RateFor(provider, model, ts)` 免去每条记录重新走四步 canonical key 解析）连同一份供渲染用的 `report.Pricing` 摘要（币种、标准表生成日期、supplement 路径、override 条数），一并传给 `Build`/`BuildCached`——`internal/report` 自身从不 import `internal/config`（`report ↛ config` 边界不变）。每条记录按其 `endpoint` 拆出 provider/model 查价（`internal/report/cost.go` 的 `splitEndpointProviderModel`），命中则把成本累加进 `Overall`/`ByModel`/`EndpointsAll`/`ByClient` 各自的 `cost_estimate` 指针字段（`nil` = 未解析出定价，前端据此判断是否渲染）——`costFor`（同文件）四个分量全部计入，包括 `cache_read`（P2.2 订正：P1 时代的样例 `pricing.yaml` 四个 provider 恰好都把缓存读定价为 0，旧公式因此省略了它，是巧合不是通例，见该函数注释）。`report.Pricing` 的 `Disclaimer()` 渲染成免责声明，避免旧报告的 `$` 列被误当成实际账单。
 
 ### 2.4 §6.7 Compaction 还原（CCR N-4 的落地）
 
@@ -407,7 +408,7 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 
 `llm_cache_dir` 是唯一没有内建默认值的字段——早期实现里它硬编码成 `{output}/stories/.llm-cache`，只要开了 `-llm-addr` 就自动落盘缓存；现在改成两处（flag、`report.yaml`）都不设就完全不缓存，缓存目录必须是用户显式点名的地方，不再有隐式路径。
 
-默认路径是当前目录下的 `report.yaml`（和 `-pricing` 默认自动加载 `./pricing.yaml` 同构：不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
+默认路径是当前目录下的 `report.yaml`（不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
 
 文件本身缺失/损坏时的降级行为：`report.yaml` 不存在时安静跳过；存在但解析失败，或某个字段值非法（如 `language` 不是 `en`/`zh`）时降级为该字段的内建默认并打印一行 warning——但**只有在这份路径是用户用 `-report-config` 显式指定时**才对"文件不存在"本身也打印 warning（区别于自动探测 `./report.yaml`：那种情况下文件不存在是正常状态，不该出声；显式指定的路径缺失，多半是拼写错误，值得提醒）。`-lang` 本身给了错值是唯一的例外，是硬错误而非降级（用户主动输入的，不是 best-effort 场景）。
 

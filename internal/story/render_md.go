@@ -98,11 +98,7 @@ func renderStep(w func(string, ...any), s *Step, t i18n.StoryText, st i18n.Spine
 		w(" (ttft %s)", fmtutil.FmtSeconds(msDuration(m.TTFTMS), 1))
 	}
 	if m.UsageOK {
-		fresh := m.Usage.In - m.Usage.CacheRead - m.Usage.CacheWrite
-		if fresh < 0 {
-			fresh = 0
-		}
-		w(" · %s/%s/%s", fmtTokens(fresh), fmtTokens(m.Usage.CacheRead), fmtTokens(m.Usage.Out))
+		w(" · %s/%s/%s", fmtTokens(m.Usage.Fresh()), fmtTokens(m.Usage.CacheRead), fmtTokens(m.Usage.Out))
 	}
 	w(" · %s\n\n", m.Endpoint)
 

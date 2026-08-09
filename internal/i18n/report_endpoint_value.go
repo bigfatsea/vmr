@@ -22,7 +22,7 @@ func EndpointValue(lang Lang) EndpointValueText {
 		return EndpointValueText{
 			Title:             "§6.6 端点性价比 ⭐",
 			IntroPriced:       "单位产出的代价，而不只是总花费——一个单价便宜但经常失败的端点，把请求推给下一家之后的真实代价可能更高。\n\n",
-			IntroUnpriced:     "单位产出的代价，而不只是总花费——未配置定价，本节只显示时间维度；配置 `-pricing` 后会补上单位成本列。\n\n",
+			IntroUnpriced:     "单位产出的代价，而不只是总花费——未找到可用的定价数据，本节只显示时间维度；在 config.yaml 配置 pricing/providers[].pricing 后会补上单位成本列。\n\n",
 			BaseHeaders:       [3]string{"端点", "成功请求", "out tokens"},
 			PricedHeaders:     func(cur string) [2]string { return [2]string{"成本/1M out" + cur, "成本/成功请求" + cur} },
 			TailHeaders:       [3]string{"失败尝试", "可用率", "失败耗时⭐"},
@@ -35,7 +35,7 @@ func EndpointValue(lang Lang) EndpointValueText {
 	return EndpointValueText{
 		Title:             "§6.6 Endpoint Value ⭐",
 		IntroPriced:       "Cost per unit of output delivered, not just total spend — a cheap-per-request endpoint that fails often can be more expensive once you account for the retry it forces.\n\n",
-		IntroUnpriced:     "Cost per unit of output delivered, not just total spend — no pricing configured, so this section only shows the time dimension; configure `-pricing` to add the unit-cost columns.\n\n",
+		IntroUnpriced:     "Cost per unit of output delivered, not just total spend — no pricing data available, so this section only shows the time dimension; configure pricing/providers[].pricing in config.yaml to add the unit-cost columns.\n\n",
 		BaseHeaders:       [3]string{"Endpoint", "Successful Requests", "out tokens"},
 		PricedHeaders:     func(cur string) [2]string { return [2]string{"Cost/1M out" + cur, "Cost/Success Req" + cur} },
 		TailHeaders:       [3]string{"Failed Attempts", "Availability", "Wasted Time⭐"},

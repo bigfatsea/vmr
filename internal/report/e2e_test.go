@@ -24,7 +24,7 @@ func TestRealLogE2E(t *testing.T) {
 		t.Skip("SKIP_SLOW_E2E set")
 	}
 
-	new, _, err := Build([]string{realLogPath}, time.Now(), nil, nil, nil)
+	new, _, err := Build([]string{realLogPath}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,12 +16,25 @@ import (
 // policy changes; storing raw components means P2's token_weights/
 // model_multipliers/cost pricing read the exact same history under a
 // different formula.
+// Cost (P2.2) is deliberately the one exception to this type's "never
+// pre-weighted or pre-priced" rule: a metric: cost charge is computed
+// against a price table that changes over time (promotions, list-price
+// updates), so the $ amount MUST be computed and frozen at charge time —
+// re-deriving it later from raw token counts using whatever price happens
+// to be configured when someone reads it would silently rewrite history
+// every time pricing.yaml-equivalent config changes. See
+// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §1.4/§6.2 for the full
+// argument. Fresh/CacheRead/CacheWrite/Out are still recorded alongside
+// Cost even for a cost-metric account (not used for routing decisions on
+// that account, but /admin/status's four-component breakdown is useful
+// regardless of metric — see the design doc's Observability section).
 type Counters struct {
-	Fresh      int64 `json:"fresh"`
-	CacheRead  int64 `json:"cache_read"`
-	CacheWrite int64 `json:"cache_write"`
-	Out        int64 `json:"out"`
-	Requests   int64 `json:"requests"`
+	Fresh      int64   `json:"fresh"`
+	CacheRead  int64   `json:"cache_read"`
+	CacheWrite int64   `json:"cache_write"`
+	Out        int64   `json:"out"`
+	Requests   int64   `json:"requests"`
+	Cost       float64 `json:"cost,omitempty"`
 }
 
 // Add returns the element-wise sum of c and d.
@@ -32,6 +45,7 @@ func (c Counters) Add(d Counters) Counters {
 		CacheWrite: c.CacheWrite + d.CacheWrite,
 		Out:        c.Out + d.Out,
 		Requests:   c.Requests + d.Requests,
+		Cost:       c.Cost + d.Cost,
 	}
 }
 
@@ -44,7 +58,17 @@ func (c Counters) Add(d Counters) Counters {
 type bucket struct {
 	PeriodStart int64    `json:"period_start"` // Unix seconds
 	C           Counters `json:"counters"`
-	Estimated   int64    `json:"estimated"` // this period's total contributed by degraded (non-usage-sniffed) token estimates; same unit as C's token fields
+	// Estimated is this period's total contributed by degraded (non-usage-
+	// sniffed) TOKEN estimates — requests/tokens accounts only. JSON key
+	// stays "estimated" (not "estimated_tokens") for on-disk compatibility
+	// with a vmr-quota.json file written by a pre-P2.2 build.
+	Estimated int64 `json:"estimated"`
+	// EstimatedCost (P2.2) is the $ equivalent for a metric: cost account:
+	// this period's total Cost that came from a degraded token estimate
+	// (via the resolved rate) rather than sniffed usage — same "how much to
+	// trust this number" signal Estimated gives requests/tokens accounts,
+	// just in money instead of tokens. Always 0 for a non-cost account.
+	EstimatedCost float64 `json:"estimated_cost,omitempty"`
 }
 
 // Registry holds every provider's live quota consumption. Shaped like
@@ -133,4 +157,35 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 	b := r.getLocked(provider, limitKey)
 	resetIfStaleLocked(b, periodStart)
 	return b.C, b.Estimated
+}
+
+// AddEstimatedCost (P2.2) bumps provider's limitKey bucket's running
+// EstimatedCost — the metric: cost analogue of Charge's estimated int64
+// parameter, kept as a separate method rather than overloading Charge's
+// signature: Counters already has a Cost field (Charge/Add sum it exactly
+// like every other component, so a cost charge's $ amount is recorded via
+// an ordinary Charge call with d.Cost set), but the ESTIMATE signal for a
+// cost-metric account is denominated in money, not tokens, and doesn't fit
+// Charge's existing int64 estimated parameter. Call this alongside Charge,
+// not instead of it, when a charge came from a degraded (non-usage-sniffed)
+// token estimate priced through the resolved rate.
+func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.Time, amount float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.getLocked(provider, limitKey)
+	resetIfStaleLocked(b, periodStart)
+	b.EstimatedCost += amount
+	r.dirty = true
+}
+
+// EstimatedCostFor returns provider's limitKey bucket's running
+// EstimatedCost as of periodStart (lazily resetting first, same as Used) —
+// a small dedicated accessor rather than growing Used's return shape,
+// since only /admin/status's cost-metric rendering needs it.
+func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.Time) float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.getLocked(provider, limitKey)
+	resetIfStaleLocked(b, periodStart)
+	return b.EstimatedCost
 }

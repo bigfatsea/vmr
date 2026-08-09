@@ -132,3 +132,32 @@ func TestExtractFinish(t *testing.T) {
 		t.Errorf("ExtractFinish(no finish) = %q, want empty", got)
 	}
 }
+
+// TestUsage_Fresh pins the one formula this type's own doc comment states
+// ("In - CacheRead - CacheWrite is the fresh portion") — previously
+// hand-written at four independent call sites (internal/router/quota.go,
+// internal/report/{cost,sticky}.go, internal/story/render_md.go) with no
+// single test covering any of them directly; each site's own behavior was
+// only ever pinned indirectly through that package's higher-level tests.
+func TestUsage_Fresh(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		u    Usage
+		want int64
+	}{
+		{"no cache", Usage{In: 100, Out: 20}, 100},
+		{"cache read only", Usage{In: 100, CacheRead: 40, Out: 20}, 60},
+		{"cache read and write", Usage{In: 100, CacheRead: 30, CacheWrite: 10, Out: 20}, 60},
+		{"pure cache hit, no fresh", Usage{In: 100, CacheRead: 100, Out: 20}, 0},
+		{
+			"defensive: reported cache exceeds reported total floors at 0, not negative",
+			Usage{In: 100, CacheRead: 80, CacheWrite: 50, Out: 20}, 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.u.Fresh(); got != tc.want {
+				t.Errorf("Fresh() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

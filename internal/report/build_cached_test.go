@@ -18,11 +18,11 @@ func TestBuildCached_ColdMatchesBuild(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	now := time.Now()
 
-	want, _, err := Build([]string{path}, now, nil, nil, nil)
+	want, _, err := Build([]string{path}, now, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil)
+	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
 	}
@@ -51,15 +51,15 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	now := time.Now()
 
-	want, _, err := Build([]string{path}, now, nil, nil, nil)
+	want, _, err := Build([]string{path}, now, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil)
+	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
-	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, cache1)
+	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1)
 	if err != nil {
 		t.Fatalf("BuildCached (warm): %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 func TestWriteRequestsJSON_RoundTripsFilesAndRows(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	_, _, cache, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil)
+	_, _, cache, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords()[:2])
 	now := time.Now()
 
-	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil)
+	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
@@ -197,7 +197,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	}
 	f.Close()
 
-	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, cache1)
+	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1)
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}

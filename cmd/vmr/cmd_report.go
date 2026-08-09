@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/config"
 	"vmr/internal/fmtutil"
+	"vmr/internal/pricing"
 	"vmr/internal/report"
 )
 
@@ -33,13 +35,55 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// defaultPricingFile is the pricing sidecar `vmr report` auto-loads when
-// -pricing is not given — the same relative-to-cwd convention config.yaml
-// itself uses with -c. Auto-load is silently skipped (no error, no $
-// estimates) when this file doesn't exist; an explicit -pricing always wins
-// and is used exactly as given, existent or not (report.LoadPricing already
-// treats a missing explicit path as "no pricing" rather than an error).
-const defaultPricingFile = "pricing.yaml"
+// buildPricing (P2.2) resolves `vmr report`'s $-estimate inputs from
+// config.yaml: the embedded standard price table (always available) plus,
+// when configPath actually loads, every provider's pricing: block (map/
+// overrides) and the global pricing: block's currency/exchange_rate — see
+// internal/config's PricingTable/ProviderPricingPolicies doc comments for
+// why report reuses config's already-validated resolution instead of
+// re-implementing it. Only returns (nil, nil) when the embedded standard
+// table itself fails to parse (should not happen with a well-formed
+// build). When configPath doesn't exist, fails to load, or fails to
+// VALIDATE (a real config error, not just "file absent"), this still
+// returns a usable Resolver/*report.Pricing pair backed by the standard
+// table alone, with no account-specific overrides — NOT an error:
+// `vmr report` must keep working against a bare audit log with no
+// config.yaml in reach (see the design doc's §13 "无 config.yaml 时跑
+// vmr report" degrade). `vmr report`'s own philosophy is that a pricing
+// problem must never cost the whole report, only its $ column's accuracy.
+func buildPricing(configPath string, tw io.Writer) (*pricing.Resolver, *report.Pricing) {
+	standard, err := pricing.LoadStandard()
+	if err != nil {
+		fmt.Fprintf(tw, "pricing: embedded standard table failed to load (%v) — no $ estimates\n", err)
+		return nil, nil
+	}
+	summary := &report.Pricing{Currency: standard.Currency, StandardGeneratedAt: standard.GeneratedAt}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(tw, "pricing: %s not usable (%v) — $ estimates use the standard price table only, no account overrides\n", configPath, err)
+		return pricing.NewResolver(standard, nil), summary
+	}
+	table := standard
+	if t, err := cfg.PricingTable(); err == nil && t != nil {
+		table = t
+	}
+	perProvider := map[string]pricing.ProviderPolicy{}
+	overrideCount := 0
+	for name, policy := range cfg.ProviderPricingPolicies {
+		perProvider[name] = policy
+		overrideCount += len(policy.Overrides)
+	}
+	if cfg.Pricing != nil {
+		summary.Currency = cfg.Pricing.Currency
+		summary.Supplement = cfg.Pricing.Supplement
+	}
+	summary.ProviderOverrides = overrideCount
+	if overrideCount > 0 {
+		fmt.Fprintf(tw, "pricing: %d provider override rule(s) loaded from %s\n", overrideCount, configPath)
+	}
+	return pricing.NewResolver(table, perProvider), summary
+}
 
 // cmdReport aggregates audit JSONL into internal/report's output:
 // vmr-report.json/.md, vmr-requests.json/.md (+ per-tag siblings),
@@ -55,10 +99,9 @@ const defaultPricingFile = "pricing.yaml"
 // own logs" needs no arguments beyond an optional -c.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
+	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block) — see PricingTable's doc comment for the no-config.yaml degrade")
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
 	detailsFlag := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/ (default: report.yaml's details, or true)")
-	pricingPath := fs.String("pricing", "", "pricing sidecar yaml (per-endpoint unit prices); absent => auto-load ./pricing.yaml if present, else no $ estimates")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
 	if err := fs.Parse(args); err != nil {
@@ -79,17 +122,7 @@ func cmdReport(args []string) error {
 	outDir := resolveString(*outDirFlag, rc.Output, "reports")
 	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
 
-	resolvedPricingPath := *pricingPath
-	if resolvedPricingPath == "" {
-		if _, err := os.Stat(defaultPricingFile); err == nil {
-			resolvedPricingPath = defaultPricingFile
-			fmt.Fprintf(tw, "pricing: auto-loaded %s (pass -pricing to override)\n", defaultPricingFile)
-		}
-	}
-	pricing, err := report.LoadPricing(resolvedPricingPath)
-	if err != nil {
-		return err
-	}
+	pricingSrc, pricingInfo := buildPricing(*configPath, tw)
 
 	// 0o700/0o600: report outputs embed full conversation bodies from the
 	// 0600 audit files - the derived copies must not loosen that. Created
@@ -133,7 +166,7 @@ func cmdReport(args []string) error {
 	reqPath := filepath.Join(outDir, "vmr-requests.json")
 	priorCache := report.LoadRequestsFileCache(reqPath)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, cache, err := report.BuildCached(paths, time.Now(), tw, pricing, onRecord, priorCache)
+	rep, sess, cache, err := report.BuildCached(paths, time.Now(), tw, pricingInfo, pricingSrc, onRecord, priorCache)
 	if err != nil {
 		return err
 	}

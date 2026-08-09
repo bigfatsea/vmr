@@ -27,13 +27,13 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/pricing"
 )
 
 // rec2 is Build's per-record working struct: raw fields from audit.Record
@@ -83,7 +83,7 @@ type rec2 struct {
 // session-analysis-failure error message below). Split into its own file
 // purely to keep this one under internal/archtest's line budget; no
 // behavior split, buildInternal is the only thing that does real work.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
 	sess, cache, err := AnalyzeSessionsCached(paths, prior)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
@@ -524,9 +524,9 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricing *P
 			// cost (if pricing): overall + by-model (existing) plus
 			// by-endpoint (epsAll, cross-date — matches §3 端点健康's basis)
 			// and by-client, when either bucket applies to this record.
-			if pricing != nil && rc.endpoint != "" {
+			if pricingSrc != nil && rc.endpoint != "" {
 				provider, model := splitEndpointProviderModel(rc.endpoint)
-				pr, ok := pricing.RateFor(provider, model, rc.ts)
+				pr, ok := pricingSrc.RateFor(provider, model, rc.ts)
 				if ok {
 					c := costFor(pr, rc)
 					if rep.Overall.CostEstimate == nil {
@@ -618,7 +618,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricing *P
 	rep.Compactions = buildCompactions(sess)
 	rep.Sticky = stickyCol.result()
 	rep.Efficiency = buildFindingsForJSON(rep)
-	rep.Pricing = pricing
+	rep.Pricing = pricingInfo
 
 	// ---- sort all slices ----
 	sortRows(rep.ByModel, "model")
@@ -720,7 +720,7 @@ func buildRequestRow(rc *rec2) RequestRow {
 	if rc.usageOK {
 		rr.TokensIn = rc.usage.In
 		rr.TokensInCached = rc.usage.CacheRead
-		rr.TokensInFresh = freshTokens(rc.usage.In, rc.usage.CacheRead, rc.usage.CacheWrite)
+		rr.TokensInFresh = rc.usage.Fresh()
 		rr.TokensOut = rc.usage.Out
 		rr.CacheEff = cacheEff(rc.usage.CacheRead, rr.TokensInFresh)
 	}
@@ -882,35 +882,6 @@ func workloadClassOf(ri *ReqInfo) string {
 		}
 	}
 	return "interactive"
-}
-
-// costFor computes one record's estimated cost from its endpoint's rate.
-func costFor(pr PricingRate, rc *rec2) float64 {
-	if !rc.usageOK {
-		return 0
-	}
-	fresh := rc.usage.In - rc.usage.CacheRead - rc.usage.CacheWrite
-	if fresh < 0 {
-		fresh = 0
-	}
-	return pr.InFreshPer1M/1e6*float64(fresh) +
-		pr.CacheWritePer1M/1e6*float64(rc.usage.CacheWrite) +
-		pr.OutPer1M/1e6*float64(rc.usage.Out)
-}
-
-// splitEndpointProviderModel splits a "protocol:provider:model" endpoint
-// label into its provider and model segments — pricing.yaml keys rates by
-// provider+model only, protocol-agnostic (see pricing.go). SplitN(…, 3)
-// rather than a plain Split: a real-world model name can itself contain ":"
-// or "/" (e.g. OpenRouter's "z-ai/glm-5.2"), so this only ever isolates the
-// first two colon-separated segments and leaves the third — the model —
-// exactly as-is, whatever it contains.
-func splitEndpointProviderModel(endpoint string) (provider, model string) {
-	parts := strings.SplitN(endpoint, ":", 3)
-	if len(parts) < 3 {
-		return "", ""
-	}
-	return parts[1], parts[2]
 }
 
 // buildCompactions derives §6.7/CCR N-4's compaction rows from the

@@ -91,6 +91,23 @@ listen: 127.0.0.1:8800
 #   response_header: 120s        # time to first byte from upstream
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
+# pricing: global settings for metric: cost quota accounts and vmr report's $
+# estimates (P2.2 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
+# providers[].pricing below for the account-level half). A built-in standard
+# price table (sourced from a public LiteLLM-format snapshot) always applies
+# with no configuration at all; this block only matters once you need
+# currency conversion or an account whose price differs from that list price.
+# pricing:
+#   currency: CNY                # required once any provider has a metric: cost limit; the standard table itself is USD
+#   exchange_rate: {USD: 7.1}    # 1 USD = 7.1 CNY — required whenever currency isn't USD: the built-in
+#                                 # table is USD-denominated and feeds both metric: cost charging and vmr
+#                                 # report's $ column, so skipping it would label USD numbers as CNY.
+#                                 # Write {USD: 1.0} to state deliberately that no conversion applies.
+#   supplement: ./pricing.local.yaml  # optional: your own additions, same shape as the built-in table
+#                                      # (see internal/pricing/standard.generated.yaml), merged in — yours
+#                                      # wins on a canonical-key clash. A path that doesn't exist is a
+#                                      # load-time error, not a silent skip.
+
 providers:
   # base_url must include the provider's own full API version (/v1, /v3,
   # whatever it calls it) — vmr just appends the protocol's bare path
@@ -111,20 +128,20 @@ providers:
     # proxy: false               # not needed here — absent already means direct (domestic
     #                            # provider, no need to write this out).
     #
-    # quota: Quota-Aware Routing (P1 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md
-    # and docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for the full design and what
-    # this release actually delivers). Absent = unmetered, no behavior change.
-    # When several providers each carry a quota:, vmr biases new sessions toward
-    # whichever account has the most slack relative to how much of its billing
-    # period has elapsed — not the most quota left in absolute terms (a plan
-    # about to reset "wins" less than one about to expire with unused quota).
+    # quota: Quota-Aware Routing — see docs/TokenPlan_Quota_Routing_Design_opus-5.md
+    # for the full design, docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for P1 and
+    # docs/TokenPlan_Quota_P2_DevPlan_opus-5.md for P2 (this release). Absent =
+    # unmetered, no behavior change. When several providers each carry a quota:,
+    # vmr biases new sessions toward whichever account has the most slack
+    # relative to how much of its billing period has elapsed — not the most
+    # quota left in absolute terms (a plan about to reset "wins" less than one
+    # about to expire with unused quota).
     #
-    # P1 accepts EXACTLY ONE limits: entry per provider, metric: requests or
-    # tokens, a tumbling (non-rolling) window. Everything else in the full
-    # design (metric: cost, multiple windows, rolling windows, models: scope,
-    # model_multipliers/token_weights, a pricing: block) is a load-time error
-    # naming the field and saying it's planned for a later batch — never a
-    # silent no-op.
+    # Still exactly ONE limits: entry per provider (multiple windows/rolling
+    # windows/models: scope remain a load-time "planned for a later batch"
+    # error, never a silent no-op — that's P3). metric: cost and a pricing:
+    # block ARE now supported (P2.2) — see the plan-e/plan-f examples further
+    # down and providers[].pricing's own comment block.
     #
     # amount MUST be calibrated to what VMR ITSELF OBSERVES, not the plan's
     # marketing number: some vendors bill "one user turn" as a single unit
@@ -134,12 +151,55 @@ providers:
     # flowing, not from the vendor's published quota.
     # quota:
     #   limits:
-    #     - metric: requests       # or: tokens (in + out, equal-weighted in P1)
+    #     - metric: requests       # or: tokens, or: cost (needs a pricing: block, see below)
     #       every: 1mo             # N{h,d,w,mo} — also: 5h, 2w, 3d
     #       since: 2026-08-01      # period anchor; every subsequent period is
     #                              # derived automatically (defaults: 1mo -> the
     #                              # 1st of the month, 1w -> Monday, else today)
     #       amount: 90000          # this window's cap, in vmr's own observed unit
+    #
+    #   # token_weights (P2.1): per-component scaling for a metric: tokens
+    #   # Limit's base(tokens) sum — account-level, applies to every Limit on
+    #   # this provider. Defaults to 1.0 on every component (a plain equal-
+    #   # weighted total token count) when omitted entirely, or on any
+    #   # component you don't mention — only meaningful (and only accepted by
+    #   # config validation) on an account that has a metric: tokens limit.
+    #   # Use this when the account's own Credits-style discount ratio (e.g.
+    #   # cache reads cost a fraction of fresh input) is uniform across all its
+    #   # models; if the ratio instead varies BY MODEL, use metric: cost with a
+    #   # pricing: block instead (see plan-e/plan-f below).
+    #   # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #
+    #   # model_multipliers (P2.1): per-model scaling applied to EVERY
+    #   # component of a charge (including requests), at the moment the charge
+    #   # is recorded — not at read time. "*" is a wildcard fallback for any
+    #   # model not named explicitly; an account with neither a named nor a
+    #   # "*" entry is unscaled (1.0). Only affects metric: requests/tokens —
+    #   # metric: cost accounts get their price differentiation entirely from
+    #   # the pricing: block instead (configuring both on a cost-only account
+    #   # is a load-time error).
+    #   # model_multipliers: {"*": 1.0, heavy-model: 9}
+
+  # A Credits-style account whose per-model price differs (not just a
+  # uniform ratio, which token_weights above would cover) — metric: cost
+  # (P2.2) charges it in real money, priced through the standard table plus
+  # this account's own overrides. See docs/UserGuide.md's "Pricing and
+  # cost-metric quota" section for the full write-up.
+  # - name: anthropic              # naming the provider after its vendor helps the automatic model-name
+  #                                 # resolution below find the standard table's matching entry
+  #   base_url: {anthropic: https://api.anthropic.com}
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   quota:
+  #     limits:
+  #       - {metric: cost, every: 1mo, since: 2026-08-01, amount: 500}  # 500 CNY/month
+  #   pricing:
+  #     map:                        # only needed when auto-resolution can't guess your model name —
+  #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr's own model name -> standard table's canonical key
+  #     overrides:                  # first-match-wins; each entry is EITHER discount OR all four
+  #       # components (in_fresh/cache_read/cache_write/out), never a mix or a partial set
+  #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # a temporary promo, listed first
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate
+  #       - {model: "*", discount: 0.6}  # fallback: 40% off list price for every other model on this account
 
   - name: openrouter
     # OpenRouter speaks all three surfaces on the same base — including a
@@ -148,12 +208,15 @@ providers:
     # from OpenRouter itself, vmr doesn't intercept it.
     base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
-    proxy: true                  # per-provider switch: true = always go through
-                                  # https_proxy/http_proxy above; absent/false = direct
-                                  # (the default). No global default to inherit — every
-                                  # provider decides its own proxy use, explicitly. No
-                                  # env fallback; true with no matching proxy URL fails
-                                  # validation. YAML 1.2: write true/false, not on/off.
+    # proxy: true                # per-provider switch: true = always go through
+                                 # https_proxy/http_proxy above; absent/false = direct
+                                 # (the default). No global default to inherit — every
+                                 # provider decides its own proxy use, explicitly. No
+                                 # env fallback; true with no matching proxy URL fails
+                                 # validation — which is why this line stays commented
+                                 # out here alongside https_proxy above: this file is
+                                 # meant to pass `vmr check` as-is. Uncomment BOTH
+                                 # together. YAML 1.2: write true/false, not on/off.
 
   - name: deepseek
     base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}

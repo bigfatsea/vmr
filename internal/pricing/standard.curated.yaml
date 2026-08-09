@@ -1,0 +1,133 @@
+# Ver 2026-08-07, by Opus 5
+#
+# Hand-maintained pricing additions — primarily first-party domestic vendor
+# models the generated table (tools/gen_standard_pricing, sourced from a
+# LiteLLM snapshot) under-covers. See
+# docs/TokenPlan_Quota_Routing_Design_opus-5.md's §13 "标准表对国产第一方
+# 覆盖不全" for why this gap exists.
+#
+# tools/gen_standard_pricing NEVER writes to this file — only
+# standard.generated.yaml. Rows here win over standard.generated.yaml on a
+# matching canonical key (whole-row replacement, not a per-component merge —
+# see internal/pricing.Merge).
+#
+# Starts empty deliberately: an unverified price is more dangerous than a
+# missing one (this whole package's stance — see internal/pricing.Rate's
+# doc comment). Add a row only once you've confirmed it against the
+# vendor's own published pricing, in USD per 1,000,000 tokens, using
+# standard.generated.yaml's shape:
+#
+# currency: USD
+# generated_at: "2026-08-07"
+# rates:
+#   - key: some-vendor/some-model
+#     in_fresh: 1.0
+#     cache_read: 0.1
+#     cache_write: 1.25
+#     out: 4.0
+#
+# --- Rows below added 2026-08-09, by Sonnet 5 ---
+#
+# Every row below was confirmed against the vendor's own official pricing
+# page on 2026-08-09 (URL cited per row/group) — not a third-party
+# aggregator. CNY -> USD conversion uses 7.1 (the same rate this repo's own
+# config.example.yaml/UserGuide use as their worked example) since every
+# table this package loads must be USD (see fileTable's doc comment); if
+# your own pricing.exchange_rate differs, the *ratio* between components
+# here is still correct even if the absolute USD figure drifts slightly —
+# only the money-denominated (cost) accounting is affected, never the
+# routing decision, which is a ratio internal to one account (see the
+# design doc's §14.2 "headroom only needs the ratio to be right").
+#
+# A missing cache_write here is a genuine, confirmed gap, not an oversight:
+# every provider below either explicitly documents no separate cache-write/
+# creation charge (DeepSeek, already complete in standard.generated.yaml —
+# not repeated here), or simply does not publish one — never guessed as
+# 0 without a citation saying so (see this file's own "missing beats wrong"
+# stance above). A row that stays incomplete after this still helps `vmr
+# report`'s best-effort $ estimate; it just can't satisfy a `metric: cost`
+# account's stricter AllPathsComplete gate until the gap is filled with a
+# sourced number.
+currency: USD
+generated_at: "2026-08-09"
+rates:
+  # Moonshot AI / Kimi (platform.kimi.com) — these three model ids postdate
+  # the tools/gen_standard_pricing LiteLLM snapshot (2026-08-07) and have no
+  # row there at all. Source: https://platform.kimi.com/docs/pricing/chat-k27-code
+  # and https://platform.kimi.com/docs/pricing/chat-k3, both CNY per 1M
+  # tokens on the page. cache_write: not published on either page (Kimi's
+  # context caching is automatic/implicit, no documented creation fee).
+  - key: moonshot/kimi-k2.7-code
+    in_fresh: 0.91549    # ¥6.50 / 7.1
+    cache_read: 0.18310  # ¥1.30 / 7.1
+    out: 3.80282         # ¥27.00 / 7.1
+  - key: moonshot/kimi-k2.7-code-highspeed
+    in_fresh: 1.83099    # ¥13.00 / 7.1
+    cache_read: 0.36620  # ¥2.60 / 7.1
+    out: 7.60563         # ¥54.00 / 7.1
+  - key: moonshot/kimi-k3
+    in_fresh: 2.81690    # ¥20.00 / 7.1
+    cache_read: 0.28169  # ¥2.00 / 7.1
+    out: 14.08451        # ¥100.00 / 7.1
+
+  # Zhipu AI / GLM (bigmodel.cn) — no zhipu/zhipuai rows exist anywhere in
+  # standard.generated.yaml (the LiteLLM snapshot has no direct-vendor Zhipu
+  # coverage at all, only third-party reseller entries under fireworks_ai/).
+  # Source: https://bigmodel.cn/pricing (CNY per 1M tokens); cache-hit
+  # discount confirmed at https://docs.bigmodel.cn/cn/guide/capabilities/cache
+  # ("缓存费用" example: half the standard input price), explicitly named
+  # for the GLM-5.x series only — NOT extrapolated to other GLM generations.
+  # GLM-5.1's price is tiered by input length (bigmodel.cn/pricing shows
+  # [0,32K) vs >=32K rows); the [0,32K) tier is used here as the common
+  # case — an account whose traffic runs mostly above 32K input should add
+  # a providers[].pricing.overrides entry with the >=32K figures instead of
+  # relying on this row. cache_write: not published (no separate
+  # cache-creation fee documented for GLM's caching mechanism).
+  - key: zhipu/glm-5.1
+    in_fresh: 0.84507    # ¥6 / 7.1 ([0,32K) input tier)
+    cache_read: 0.42254  # 50% of in_fresh, per the cache-discount doc above
+    out: 3.38028          # ¥24 / 7.1 ([0,32K) input tier)
+  - key: zhipu/glm-5.2
+    in_fresh: 1.12676    # ¥8 / 7.1 (flat — GLM-5.2 has a single 1M-context tier, no tiering caveat)
+    cache_read: 0.56338  # 50% of in_fresh, per the cache-discount doc above
+    out: 3.94366          # ¥28 / 7.1
+
+  # ByteDance Volcengine / Doubao (volcengine.com) — the existing
+  # volcengine/* rows in standard.generated.yaml are third-party models
+  # RESOLD on the Volcengine platform (deepseek-v3-2-251201 etc, priced 0/0
+  # in that snapshot — unusable placeholders), not Volcengine's own Doubao
+  # line, which has no coverage there at all.
+  # Source: https://docs.volcengine.com/docs/82379/1544106 (CNY per 1M
+  # tokens). Volcengine additionally bills cache STORAGE by the hour
+  # (¥0.017/1M tokens/hour for both models below) — a pricing dimension
+  # pricing.Rate has no field for (it only models per-token components), so
+  # it is deliberately omitted here rather than folded into cache_read;
+  # an account whose workload leaves data cached for many hours should
+  # account for that separately. cache_read below is the per-access
+  # cache-HIT price only. cache_write: no separate per-token creation fee
+  # published (only the hourly storage fee above, which this schema can't
+  # represent).
+  - key: volcengine/doubao-seed-2.1-pro
+    in_fresh: 0.84507    # ¥6.00 / 7.1
+    cache_read: 0.16901  # ¥1.20 / 7.1
+    out: 4.22535          # ¥30.00 / 7.1
+  - key: volcengine/doubao-seed-2.1-turbo
+    in_fresh: 0.42254    # ¥3.00 / 7.1
+    cache_read: 0.08451  # ¥0.60 / 7.1
+    out: 2.11268          # ¥15.00 / 7.1
+
+  # Tencent Hunyuan (cloud.tencent.com) — no hunyuan/* rows exist anywhere
+  # in standard.generated.yaml. Source:
+  # https://cloud.tencent.com/document/product/1729/97731 (CNY per 1M
+  # tokens). Hunyuan-A13B is Tencent's own current general-purpose
+  # recommendation ("适用于绝大部分场景"), not a translation/vision/embedding
+  # specialty model. No cache pricing of any kind is published anywhere in
+  # Hunyuan's docs (not merely a missing field on this one page) — this row
+  # stays at 2 of 4 components on purpose; it will never satisfy a
+  # `metric: cost` account's completeness gate without an account-level
+  # override supplying cache figures from elsewhere (e.g. a negotiated
+  # contract), but it still turns `vmr report`'s $ estimate for this
+  # provider from "nothing at all" into a real (if partial) number.
+  - key: hunyuan/hunyuan-a13b
+    in_fresh: 0.07042    # ¥0.5 / 7.1
+    out: 0.28169          # ¥2 / 7.1

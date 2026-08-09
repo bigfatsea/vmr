@@ -16,6 +16,26 @@ import (
 	"vmr/internal/fmtutil"
 )
 
+// quotaTokenWeightsView mirrors router.TokenWeightsView's JSON shape — a
+// named type (rather than inlining it, the way every other nested struct in
+// statusResponse below is) specifically because its zero-config default
+// value gets compared against a literal in the rendering code further down;
+// an anonymous struct there would mean hand-copying this same field list a
+// second time as a struct literal, with no compiler help keeping the two in
+// sync if a field is ever added or renamed.
+type quotaTokenWeightsView struct {
+	InFresh    float64 `json:"in_fresh"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+	Out        float64 `json:"out"`
+}
+
+// allDefaultTokenWeights is the all-1.0 zero-config default every
+// TokenWeights view resolves to when an account never configured
+// token_weights — see printStatus's quota loop below, the one place this
+// is compared against.
+var allDefaultTokenWeights = quotaTokenWeightsView{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}
+
 // statusResponse is the /admin/status payload, as much of it as this
 // command renders.
 type statusResponse struct {
@@ -60,16 +80,18 @@ type statusResponse struct {
 	// when router.Router.QuotaStatus() returns a non-empty slice, so a
 	// plain instance sees no behavior change here either.
 	Quota []struct {
-		Provider     string    `json:"provider"`
-		Metric       string    `json:"metric"`
-		Every        string    `json:"every"`
-		Amount       float64   `json:"amount"`
-		Used         float64   `json:"used"`
-		Pct          float64   `json:"pct"`
-		Headroom     float64   `json:"headroom"`
-		PeriodStart  time.Time `json:"period_start"`
-		PeriodEndsAt time.Time `json:"period_ends_at"`
-		EstimatedPct float64   `json:"estimated_pct"`
+		Provider         string                `json:"provider"`
+		Metric           string                `json:"metric"`
+		Every            string                `json:"every"`
+		Amount           float64               `json:"amount"`
+		Used             float64               `json:"used"`
+		Pct              float64               `json:"pct"`
+		Headroom         float64               `json:"headroom"`
+		PeriodStart      time.Time             `json:"period_start"`
+		PeriodEndsAt     time.Time             `json:"period_ends_at"`
+		EstimatedPct     float64               `json:"estimated_pct"`
+		TokenWeights     quotaTokenWeightsView `json:"token_weights"`
+		ModelMultipliers map[string]float64    `json:"model_multipliers,omitempty"`
 	} `json:"quota"`
 }
 
@@ -214,9 +236,27 @@ func printStatus(st *statusResponse) {
 		if q.EstimatedPct > 0 {
 			estNote = fmt.Sprintf(", %.0f%% estimated", q.EstimatedPct)
 		}
-		fmt.Printf("quota %-12s %s/%s  used=%.0f/%.0f (%.1f%%)  headroom=%.2f  resets %s%s\n",
+		// metric: cost's used/amount are money, not a whole-number count —
+		// %.0f would silently truncate a $2.50 balance to "2".
+		usedFmt := "used=%.0f/%.0f"
+		if q.Metric == "cost" {
+			usedFmt = "used=%.4f/%.4f"
+		}
+		fmt.Printf("quota %-12s %s/%s  "+usedFmt+" (%.1f%%)  headroom=%.2f  resets %s%s\n",
 			q.Provider, q.Metric, q.Every, q.Used, q.Amount, q.Pct, q.Headroom,
 			q.PeriodEndsAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"), estNote)
+		tw := q.TokenWeights
+		if tw != allDefaultTokenWeights {
+			fmt.Printf("  token_weights: in_fresh=%g cache_read=%g cache_write=%g out=%g\n",
+				tw.InFresh, tw.CacheRead, tw.CacheWrite, tw.Out)
+		}
+		if len(q.ModelMultipliers) > 0 {
+			parts := make([]string, 0, len(q.ModelMultipliers))
+			for _, model := range core.SortedKeys(q.ModelMultipliers) {
+				parts = append(parts, fmt.Sprintf("%s=%g", model, q.ModelMultipliers[model]))
+			}
+			fmt.Printf("  model_multipliers: %s\n", strings.Join(parts, " "))
+		}
 	}
 	for _, name := range core.SortedKeys(st.Models) {
 		fmt.Println(name) // key is already "name [protocol]"

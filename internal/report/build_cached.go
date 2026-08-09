@@ -8,6 +8,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/pricing"
 )
 
 // Build reads audit JSONL files and aggregates them into a Report2. It calls
@@ -51,8 +52,8 @@ import (
 // same as before this cache existed. Kept as the stable, cache-free entry
 // point every existing caller/test already uses; BuildCached below is the
 // one cmd_report.go actually calls.
-func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
-	rep, sess, _, err := buildInternal(paths, now, progress, pricing, onRecord, nil)
+func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
+	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, nil)
 	return rep, sess, err
 }
 
@@ -65,6 +66,6 @@ func Build(paths []string, now time.Time, progress io.Writer, pricing *Pricing, 
 // vmr-requests.json section for why that's the deliberately scoped-down
 // near-term version, not the deeper "report consumes ctxgraph.Manifest
 // directly" unification). prior may be nil (identical to Build).
-func BuildCached(paths []string, now time.Time, progress io.Writer, pricing *Pricing, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
-	return buildInternal(paths, now, progress, pricing, onRecord, prior)
+func BuildCached(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+	return buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, prior)
 }

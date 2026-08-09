@@ -13,16 +13,18 @@ import (
 	"sort"
 	"strconv"
 
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 )
 
-// freshTokens returns in - cached - cacheWrite, floored at 0.
+// freshTokens returns in - cached - cacheWrite, floored at 0 — a thin
+// wrapper over chatmsg.Usage.Fresh() for the one caller here (finishRow,
+// below) that only has the three fields unpacked onto a Measures
+// accumulator, not a chatmsg.Usage value to call the method on directly.
+// Callers that already hold a chatmsg.Usage (aggregate.go, cost.go) call
+// .Fresh() on it directly instead of going through this wrapper.
 func freshTokens(in, cached, cacheWrite int64) int64 {
-	f := in - cached - cacheWrite
-	if f < 0 {
-		f = 0
-	}
-	return f
+	return chatmsg.Usage{In: in, CacheRead: cached, CacheWrite: cacheWrite}.Fresh()
 }
 
 // cacheEff is cached / (cached + fresh) - the cost lever. 0 when no fresh

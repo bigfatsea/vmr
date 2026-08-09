@@ -6,6 +6,15 @@
 已在 P1 交付后按实测经验修订——见该文档 §4.2⑤/§9.2/§12.1 与
 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md` §10）。
 
+> **交付状态：P2.1 + P2.2 均已完成（2026-08-07）；2026-08-09 的交付后复核修掉七项问题，
+> 见 §12。** §10 完成定义（DoD）逐条通过（其中第 4 条的"`config.example.yaml` 通过
+> `vmr check`"当时并不成立，已在 §12 #8 修复），
+> 证据见新增的 §11「实施复盘」。`go build ./... && go vet ./... && gofmt -l . &&
+> go test ./... -race` 全绿，`go test ./internal/archtest/...` 全绿；跑过一次真实
+> 端到端验证（mock 上游 + 真实 HTTP 流量，metric: cost 实际计费、token_weights/
+> model_multipliers 组合计费、`vmr report` 输出 §2 成本估算），过程中发现并修复了
+> 两处仅靠单测未能覆盖到的真实 bug（见 §11）。
+
 **本文的核对方法**：设计文档 §14.3 P2 的"范围"一段是概念级描述，不是代码级承诺。
 本文每一条计划都先去读了实际源码再落笔——`internal/report/pricing.go`
 （当前定价子系统的**唯一**实现）、`internal/core/core.go`（P1 的 `Limit`/`QuotaSpec`）、
@@ -470,3 +479,109 @@ P2.1 落地时，`chargeQuota` 的 `switch l.Metric` 分支结构决定了这条
 5. `internal/report/aggregate.go` 未超行数预算（或已提前拆分）。
 6. `go test ./... -race`、`go vet`、`gofmt -l`、`archtest` 全绿；两组真实费率夹具下
    `cost` 与等权总 token 的比值落在 3～8 倍区间。
+
+---
+
+## 11. 实施复盘
+
+### 11.1 §10 DoD 逐条验证证据
+
+P2.1 第 1–5 条：`internal/router/quota_p21_test.go`/`internal/config/quota_test.go` 覆盖；
+`TestChargeQuota_ModelMultiplier_*` 系列钉死"计费时套用、聚合后不可逆"这条语义；
+`vmr check`/`/admin/status` 的展示在真实 e2e 运行中人工核对过（见 §11.3）。
+
+P2.2 第 2 条：`TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange`
+（`internal/router/quota_p22_test.go`）直接钉住——charge 之后修改 `ep.PricingRate`，
+已落盘的 `Counters.Cost` 必须原样不变。第 3 条：`internal/report/cost.go` 的 `costFor`
+与 `internal/router/quota.go` 的 `componentCost` 共用同一个"四分量求和、缺失记 0"公式，
+`TestCostFor_IncludesCacheRead` 钉住订正方向。第 5 条：`aggregate.go` 拆出
+`internal/report/cost.go` 后从 992 行降到 943 行（1000 行预算内，留了确定的余量，不是压线通过）。
+第 6 条：`internal/pricing/market_fixture_test.go` 用**内置标准表自身的真实数据**
+（`deepseek/deepseek-v4-pro`、`anthropic/claude-opus-4-1`）验证 3～8 倍区间——分别测得
+7.91x 与 4.20x，与设计文档 §2.3 的市场统计结论吻合。
+
+第 1 条有一处**已记录的偏离**，不是"零丢失迁移"：`internal/report/pricing_test.go`
+的旧用例（`resolveCurrencyFactors`/`moneyValue` 的多币种图算法）没有逐条搬进
+`internal/pricing`，因为 §6 已经把"USD-only 标准表 + 单一全局汇率因子"定为对旧图算法的
+**蓄意简化**（旧图算法服务的是账号覆盖层自己也能带任意货币前缀字符串的场景，新模型里
+账号覆盖层直接用 `pricing.currency` 记账、不再需要这层复杂度）。时间窗口匹配
+（`hour_from`/`hour_to`/`date_from`/`date_to`，含跨零点、DisplayZone 转换）逐条原样搬进了
+`internal/pricing/resolve_test.go`（`TestRateAt_HourWindow_WrapsMidnight`/
+`TestRateAt_ConvertsToDisplayZone` 等），这部分行为没有变化、也没有测试损失。
+
+### 11.2 靠测试而非代码审查抓住的两个真实 bug
+
+**折扣重复套用**：最初实现里 `Resolve()` 会把"无时间窗的 override"提前折进 `Base`，
+`RateAt()` 再对 `Base` 套用同一条 override 一次——`TestResolve_DiscountAppliesOnceToBase`
+断言 `3 × 0.6 = 1.8`，实测跑出 `1.08`（即 `3 × 0.6 × 0.6`）。根因是把"discount 作用于
+下层解析出的费率"错误地实现成"discount 作用于 `Base`"——设计文档原文其实已经写明是
+"下层"，但"下层"在有多条 override 叠加时可能是**另一条 override**，不总是 `Base`。
+修复为 `resolveChain` 的递归实现（`RateAt`/`GuaranteedRate`/`AllPathsComplete` 共用），
+`i` 号 override 命中discount 形式时，"下层"显式定义为"从 `i+1` 开始重新走一遍同一个
+resolve 过程"，不是硬编码指向 `spec.Base`。
+
+**Merge() 丢失 GeneratedAt**：`vmr report` 的 §2 附录一度显示"standard table generated
+(unknown date)"——不是数据问题，是 `internal/pricing.Merge()` 用 `NewTable(base.Currency)`
+构造返回值时忘了把 `base.GeneratedAt` 也带过去。所有 `pricing_test.go`/`resolve_test.go`
+里的单测都没抓到，因为它们大多直接操作 `Table` 内部字段或只关心费率数值，没有断言
+`GeneratedAt` 这个纯展示字段——**是端到端跑了一次真实 `vmr report` 之后肉眼看输出才发现的**。
+修复后补了 `TestMerge_PreservesBaseGeneratedAt`，顺带修了同一个函数里一个从未触发但确实
+存在的 nil 解引用（`base.Currency` 在检查 `base != nil` 之前就被访问）。
+
+这两处共同的教训：**纯单元测试覆盖率不能替代一次端到端真实调用**——两个 bug 都是"每个
+函数单独看都对，组合起来才错"的类型，第一个是跨函数的语义错位，第二个是没人断言过的
+展示字段。P2 的验证流程因此补了 §11.3 这一趟真实链路。
+
+### 11.3 端到端验证记录
+
+用 Python 起了一个假上游（`http.server`，固定返回带 `usage` 字段的响应），真实
+`vmr start` 监听、真实 HTTP 请求（`curl`）。config.yaml 同时配了一个 `metric: cost`
+账号（`discount: 0.5` override）和一个 `metric: tokens` 账号（`token_weights` +
+`model_multipliers: {"*": 2}`）打同一个虚拟模型，验证：
+
+- `vmr check` 正确展示两个账号的生效定价/权重/倍率；
+- 多轮请求下 `X-VMR-Route-Reason` 显示 `pick=quota`，两个账号按 headroom 交替胜出；
+- `/admin/status`/`vmr status` 的 `used` 数值经手工验算完全吻合：token 账号的
+  `5760` = `(600×2)×1 + (400×2)×0.1 + (200×2)×4`（先按 `model_multipliers` 在计费时
+  乘 2，再按 `token_weights` 在读取时加权）——证明 P2.1 的"计费时套用 model_multipliers、
+  读取时套用 token_weights"这条分层在真实链路里确实是这样组合的，不只是单测里分开验证；
+- `vmr report` 生成的 `vmr-report.md` §2 成本估算章节正确渲染 $ 数字与"本次使用的定价来源"
+  摘要（含标准表生成日期、override 条数）。
+
+### 11.4 没有做但明确记录的取舍
+
+`internal/pricing` 的三层解析目前对**每个 override 是否都必须完整**做了比设计文档字面
+更严格的校验（`AllPathsComplete` 检查每一条可能被激活的 override、不只是"没有 override
+时"的兜底路径）——这比设计文档 §9.1 字面写的"GuaranteedRate 式"检查更保守，属于
+对设计文档留白处的主动补强，不是偏离；已在 `internal/pricing/resolve.go` 的
+`AllPathsComplete` 注释里说明理由（一条限时促销折扣叠加在不完整的 Base 上，只在设计文档
+字面校验下会漏过，只在真正进入促销窗口那一刻才会算出错误的价格）。
+
+---
+
+## 12. 交付后复核（2026-08-09）：发现的问题与处置
+
+P2.1/P2.2 交付后对整批改动做了一轮逐文件源码复核（含外部评审意见的逐条核实）。
+**七项成立并已就地修复**，两项判定不成立、一项判定为低优先级另案，详见下表。
+修复均已随本轮提交，`go build ./... && go vet ./... && gofmt -l . && go test ./... -race`
+与 `go test ./internal/archtest/...` 全绿，并跑过一次真实端到端（mock 上游 + `vmr start`
++ 真实请求 + `vmr status` + `vmr report`）复验。
+
+| # | 问题 | 判定 | 处置 |
+|---|---|---|---|
+| 1 | `QuotaStatus` 的 `EstimatedPct` 在 `metric: tokens` 下**分子分母单位不一致**：`estimated` 是降级估算贡献的**原始** token 数，`used` 是 `token_weights` 加权后的值。配了 `out: 5.0` 的账号，整周期全靠降级估算时会显示成"20% 估算"而不是 100% | **成立**（P2.1 引入 `token_weights` 时未同步这处除法） | 分母改为原始四分量之和（与 `estimated` 同口径，且两者都同样被 `model_multipliers` 缩放过）；`TestQuotaStatus_MetricTokens_EstimatedPctIgnoresTokenWeights` 钉住 |
+| 2 | `pricing.exchange_rate["USD"]` 未校验正负与有限性，负值/0 会让整张标准表的解析结果变负或归零 | **成立** | `positiveFinite` 校验 + 专项测试 |
+| 3 | 所有新增数值字段（`amount`/`token_weights`/`model_multipliers`/`discount`/显式费率）都只做了 `<= 0` 符号检查，而 `NaN <= 0` 恒为 false——实测 `model_multipliers: {"*": .nan}` 能通过 `vmr check` | **成立**，且失效方向危险（NaN 经 `math.Ceil` 转 int64 结果由平台定义；NaN 分数让排序比较全为 false，候选顺序失去确定性） | 新增 `positiveFinite`/`nonNegativeFinite`（显式费率允许 `0.0`，不允许负数），四类字段全部改用；`TestQuota_Reject_NonFiniteNumbers` 等覆盖 |
+| 4 | 非 USD 全局币种下 `vmr report` 可能"标 CNY、算 USD"：`ProviderPricingPolicies` 只为**有 `pricing:` 块或 `metric: cost`** 的 provider 建条目，而报表要给审计日志里出现的**每一个** provider 定价，缺条目者以因子 1.0（即 USD）解析 | **成立**（评审给的定位不准——`metric: cost` 的 provider 其实**有**条目；真正漏掉的是"既无 `pricing:` 块又非 cost"的普通 provider，也就是绝大多数） | ①`ProviderPricingPolicies` 改为覆盖**每一个** provider（未配 `pricing:` 块者只带全局 currency/汇率因子）；②`pricing.currency` 非 USD 而无 `exchange_rate["USD"]` 由"仅 cost 账号存在时报错"改为**无条件加载期报错**（顺带删掉 `buildPricingContext` 的 `requireConversion` 参数——该分支正是"标签对、数字错"的来源）。真实端到端复验：两个 provider（一个配了 cost 额度、一个什么都没配）的报表金额均为 639.0000 CNY = 90 USD × 7.1 |
+| 5 | 设计文档要求的"标准表新鲜度护栏"只落地了一半：报表有生成日期，`vmr check` 没有，全仓也没有任何过期阈值 | **成立** | `vmr check` 新增 `pricing_table` 行（仅在该配置确实用到定价时出现），超过 180 天附一句刷新提示。**刻意不用 ⚠️、不计入 `=== Failed ===`**：参考价过期不该让路由起不来 |
+| 6 | `AllPathsComplete` 会检查**不可达**的 override：首条无条件规则已经 first-match-wins，其后的规则任何 ts 都轮不到，却仍被逐条解析，可能拒绝一个实际永远完整的配置 | **成立**（false rejection，非计费低估） | 遇到首条无条件规则即 `break`；`TestAllPathsComplete_RuleAfterUnconditional_Unreachable_NotChecked` 钉住 |
+| 7 | `resolveCanonicalKey` 里"显式 `map` 命中但表里查不到"时静默继续走第 ②③④ 步，可能匹配到**另一个模型**的费率；该处注释文意也自相矛盾 | **成立** | 改为在 `config.resolvePricing` 里做**加载期**校验：`pricing.map` 的每条 value 必须是合并后表里的真实 key；`resolveCanonicalKey` 的落地行为保持不变（`vmr report` 在 config 加载失败时的尽力而为路径仍需要它），注释重写说明这层分工 |
+| 8 | §10 DoD 第 4 条"`config.example.yaml` 通过 `vmr check`"当时**不成立**：`openrouter` 配了 `proxy: true` 但 `https_proxy` 是注释状态 | **成立**（既有问题，非 P2 引入，但确实不能再作为完成证据） | 把 `proxy: true` 一并注释掉并说明"两行要同时打开"；现在干净环境下 `vmr check -c config.example.yaml` 输出 `=== OK ===` |
+
+**判定不成立/不处理的**：
+
+- 评审提出的"`metric: cost` 的 provider 拿不到汇率 policy"——**不成立**，见上表 #4 的括注；
+  修的是它旁边那个更普遍的漏洞。
+- `ParseTable` 未校验表内费率的正负/有限性——**暂不处理**：标准表是生成脚本产出 + `go:embed`
+  的受控数据，补充表是用户自备的完整表（与手写一两条 override 不同量级），两者出现 NaN 的
+  路径都需要先绕过生成脚本或手工构造整表。ROI 低于上面七项，登记备查即可。

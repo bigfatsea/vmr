@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -192,6 +193,9 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	// silently UTC", so the actual offset is appended (both read the same
 	// "Local" either way, but the offset gives it away).
 	fmt.Println(checkLine(0, "timezone", fmt.Sprintf("%s (UTC%s)", fmtutil.DisplayZone.String(), time.Now().In(fmtutil.DisplayZone).Format("-07:00"))))
+	if line, ok := pricingTableLine(cfg); ok {
+		fmt.Println(checkLine(0, "pricing_table", line))
+	}
 	fmt.Println("dirs:")
 	fmt.Println(checkLine(2, "log", cfg.LogDir))
 	fmt.Println(checkLine(2, "image_cache", cfg.ImageCacheDir))
@@ -228,7 +232,89 @@ func printProviders(cfg *config.Config) {
 		}
 		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
 		printProviderQuota(p)
+		printProviderPricing(cfg, p)
 	}
+}
+
+// pricingStaleAfter is how old the built-in standard price table may get
+// before `vmr check` says so out loud. The design doc's pricing guardrails
+// put "过期比缺失更危险" first: a stale-but-authoritative-looking table
+// silently produces wrong $ figures, where a missing one at least produces
+// none. Half a year is deliberately loose — list prices move, but not so
+// fast that a monthly nag would be anything but noise, and this is a
+// reminder (plain text, no ⚠️), never a validation failure: an out-of-date
+// reference price must not be able to stop a router from starting.
+const pricingStaleAfter = 180 * 24 * time.Hour
+
+// pricingTableLine describes the standard price table backing this config's
+// $ figures — its generation date, and whether that date is old enough to
+// deserve a refresh. ok=false when nothing in this config touches pricing at
+// all (no global pricing: block, no providers[].pricing, no metric: cost
+// Limit), so the common quota-free config gains no new line.
+func pricingTableLine(cfg *config.Config) (string, bool) {
+	if len(cfg.ProviderPricingPolicies) == 0 && cfg.Pricing == nil {
+		return "", false
+	}
+	table, err := cfg.PricingTable()
+	if err != nil || table == nil {
+		return "", false
+	}
+	if table.GeneratedAt == "" {
+		return "built-in standard table (generation date unknown)", true
+	}
+	line := "built-in standard table generated " + table.GeneratedAt
+	gen, perr := time.ParseInLocation("2006-01-02", table.GeneratedAt, fmtutil.DisplayZone)
+	if perr == nil {
+		if age := time.Since(gen); age > pricingStaleAfter {
+			line += fmt.Sprintf(" — %d days old, list prices may have moved (regenerate: go run ./tools/gen_standard_pricing)", int(age.Hours()/24))
+		}
+	}
+	return line, true
+}
+
+// printProviderPricing renders p's resolved metric: cost pricing (P2.2), if
+// any — one line per upstream model this provider actually resolved a
+// price for (see config.Config.ResolvedPricing), so an operator can see
+// exactly what rate a cost account will be charged at without cross-
+// referencing the standard table by hand. Absent entirely for a provider
+// with no resolved pricing, same as every other optional section here.
+func printProviderPricing(cfg *config.Config, p config.Provider) {
+	if len(cfg.ResolvedPricing) == 0 {
+		return
+	}
+	var models []string
+	prefix := p.Name + "\x00"
+	for key := range cfg.ResolvedPricing {
+		if strings.HasPrefix(key, prefix) {
+			models = append(models, strings.TrimPrefix(key, prefix))
+		}
+	}
+	if len(models) == 0 {
+		return
+	}
+	sort.Strings(models)
+	fmt.Println("  pricing:")
+	for _, model := range models {
+		spec := cfg.ResolvedPricing[prefix+model]
+		r := spec.Base
+		fmt.Println(checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
+			ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
+	}
+}
+
+// ratePart renders one Rate component for display — "?" makes a missing
+// (nil) component visually distinct from an explicit 0, the same
+// distinction internal/pricing.Rate exists to preserve everywhere else.
+func ratePart(v *float64) string {
+	if v == nil {
+		return "?"
+	}
+	// %.6g rather than %g: a rate that went through an exchange-rate
+	// multiplication (e.g. 3.0 USD x 7.1) routinely lands on a float64 like
+	// 21.299999999999997 — cosmetic noise for a display line, not a value
+	// anything downstream computes from (chargeCost/componentCost read the
+	// pricing.Rate directly, never this formatted string).
+	return strconv.FormatFloat(*v, 'g', 6, 64)
 }
 
 // printProviderQuota renders p's quota: block, if any — purely static
@@ -244,6 +330,25 @@ func printProviderQuota(p config.Provider) {
 		l := lc.Resolved
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
 		fmt.Println(checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%g", l.EveryText, since, l.Amount)))
+	}
+	// token_weights is always resolved (defaults to all 1.0), but only
+	// printed when the account actually configured it non-default — an
+	// all-1.0 line on every quota-configured provider would be noise on the
+	// common case (P1-style plain token/request counting).
+	w := p.Quota.ResolvedTokenWeights
+	allDefault := core.TokenWeights{
+		InFresh: core.DefaultTokenWeight, CacheRead: core.DefaultTokenWeight,
+		CacheWrite: core.DefaultTokenWeight, Out: core.DefaultTokenWeight,
+	}
+	if w != allDefault {
+		fmt.Println(checkLine(4, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", w.InFresh, w.CacheRead, w.CacheWrite, w.Out)))
+	}
+	if len(p.Quota.ModelMultipliers) > 0 {
+		parts := make([]string, 0, len(p.Quota.ModelMultipliers))
+		for _, model := range core.SortedKeys(p.Quota.ModelMultipliers) {
+			parts = append(parts, fmt.Sprintf("%s=%g", model, p.Quota.ModelMultipliers[model]))
+		}
+		fmt.Println(checkLine(4, "model_multipliers", strings.Join(parts, " ")))
 	}
 }
 

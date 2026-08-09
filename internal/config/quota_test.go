@@ -100,12 +100,16 @@ func TestQuota_Reject_MultipleLimits(t *testing.T) {
 	}
 }
 
-func TestQuota_Reject_MetricCost(t *testing.T) {
+// TestQuota_MetricCost_WithoutPricingCurrency_Rejected pins P2.2's
+// completeness gate at the point closest to "cost" alone: metric: cost now
+// parses structurally, but an account with no pricing.currency configured
+// at all can't be charged in anything — see resolvePricing.
+func TestQuota_MetricCost_WithoutPricingCurrency_Rejected(t *testing.T) {
 	yaml := withQuotaBlock(`limits:
   - {metric: cost, every: 1mo, amount: 100}`)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), `"cost"`) {
-		t.Errorf("want cost-metric rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "pricing.currency") {
+		t.Errorf("want a pricing.currency-not-set rejection, got %v", err)
 	}
 }
 
@@ -127,32 +131,113 @@ func TestQuota_Reject_ModelsScope(t *testing.T) {
 	}
 }
 
-func TestQuota_Reject_ModelMultipliers_UnknownField(t *testing.T) {
-	yaml := withQuotaBlock(`model_multipliers: {"*": 3}
+// --- P2.1: model_multipliers / token_weights are now real, accepted fields ---
+
+func TestQuota_ModelMultipliers_HappyPath(t *testing.T) {
+	yaml := withQuotaBlock(`model_multipliers: {"*": 1, heavy-model: 9}
 limits:
   - {metric: requests, every: 1mo, amount: 100}`)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "model_multipliers") {
-		t.Errorf("want model_multipliers unknown-field rejection, got %v", err)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, _ := cfg.ProviderByName("p1")
+	if got := p.Quota.ModelMultipliers["heavy-model"]; got != 9 {
+		t.Fatalf("model_multipliers[heavy-model] = %v, want 9", got)
+	}
+	if got := p.Quota.ModelMultipliers["*"]; got != 1 {
+		t.Fatalf(`model_multipliers["*"] = %v, want 1`, got)
 	}
 }
 
-func TestQuota_Reject_TokenWeights_UnknownField(t *testing.T) {
+func TestQuota_ModelMultipliers_ZeroOrNegative_Rejected(t *testing.T) {
+	for _, bad := range []string{"0", "-1"} {
+		yaml := withQuotaBlock(`model_multipliers: {heavy-model: ` + bad + `}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`)
+		_, err := Parse([]byte(yaml))
+		if err == nil || !strings.Contains(err.Error(), "model_multipliers") {
+			t.Errorf("multiplier=%s: want model_multipliers rejection, got %v", bad, err)
+		}
+	}
+}
+
+// TestQuota_TokenWeights_ZeroValueIsNotDefault pins the exact trap the dev
+// plan calls out (docs/TokenPlan_Quota_P2_DevPlan_opus-5.md §5's S1
+// "陷阱提醒"): an account with no token_weights: at all must resolve to
+// core.DefaultTokenWeight (1.0) on every component, never Go's TokenWeights{}
+// zero value (all 0), which would silently zero out every tokens-metric
+// account's accounting.
+func TestQuota_TokenWeights_ZeroValueIsNotDefault(t *testing.T) {
+	yaml := withQuotaBlock(`limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, _ := cfg.ProviderByName("p1")
+	w := p.Quota.ResolvedTokenWeights
+	want := core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}
+	if w != want {
+		t.Fatalf("ResolvedTokenWeights = %+v, want %+v (all-default, not the zero value)", w, want)
+	}
+}
+
+func TestQuota_TokenWeights_PartialOverride_RestDefault(t *testing.T) {
 	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1}
 limits:
   - {metric: tokens, every: 1mo, amount: 100}`)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "token_weights") {
-		t.Errorf("want token_weights unknown-field rejection, got %v", err)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, _ := cfg.ProviderByName("p1")
+	w := p.Quota.ResolvedTokenWeights
+	want := core.TokenWeights{InFresh: 1, CacheRead: 0.1, CacheWrite: 1, Out: 1}
+	if w != want {
+		t.Fatalf("ResolvedTokenWeights = %+v, want %+v (only cache_read overridden)", w, want)
 	}
 }
 
-func TestQuota_Reject_PricingBlock_UnknownField(t *testing.T) {
+func TestQuota_TokenWeights_ExplicitZero_Rejected(t *testing.T) {
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "token_weights.cache_read") {
+		t.Errorf("want explicit-zero token_weights rejection, got %v", err)
+	}
+}
+
+func TestQuota_TokenWeights_NegativeRejected(t *testing.T) {
+	yaml := withQuotaBlock(`token_weights: {out: -2}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "token_weights.out") {
+		t.Errorf("want negative token_weights rejection, got %v", err)
+	}
+}
+
+func TestQuota_TokenWeights_WithoutTokensLimit_Rejected(t *testing.T) {
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "no quota.limits entry uses metric") {
+		t.Errorf("want token_weights-without-tokens-limit rejection, got %v", err)
+	}
+}
+
+// TestQuota_PricingBlock_AcceptedWhenUnused pins P2.2's structural change:
+// a top-level pricing: block is now a real, known field — accepted (and
+// simply unused) on a config with no metric: cost provider at all. See
+// internal/config/pricing_test.go for the full P2.2 pricing test matrix.
+func TestQuota_PricingBlock_AcceptedWhenUnused(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
 		"listen: 127.0.0.1:9900\npricing:\n  currency: USD", 1)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "pricing") {
-		t.Errorf("want top-level pricing: block unknown-field rejection, got %v", err)
+	if _, err := Parse([]byte(yaml)); err != nil {
+		t.Errorf("pricing: block should now be a known, accepted field, got %v", err)
 	}
 }
 
@@ -177,7 +262,7 @@ func TestQuota_Reject_ZeroAmount(t *testing.T) {
 	yaml := withQuotaBlock(`limits:
   - {metric: requests, every: 1mo, amount: 0}`)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "amount must be > 0") {
+	if err == nil || !strings.Contains(err.Error(), "amount must be a finite number > 0") {
 		t.Errorf("want zero-amount rejection, got %v", err)
 	}
 }
@@ -224,5 +309,32 @@ func TestQuota_Reject_InvalidSince(t *testing.T) {
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "since") {
 		t.Errorf("want invalid since rejection, got %v", err)
+	}
+}
+
+// TestQuota_Reject_NonFiniteNumbers pins the NaN/Inf hole a plain `v <= 0`
+// sign check leaves open: YAML's .nan/.inf are valid scalars, `NaN <= 0` is
+// false, and a NaN that reaches ceilScale/headroom scoring produces
+// platform-defined garbage instead of a config error.
+func TestQuota_Reject_NonFiniteNumbers(t *testing.T) {
+	cases := []struct{ name, block, want string }{
+		{"amount NaN", `limits:
+  - {metric: requests, every: 1mo, amount: .nan}`, "amount must be a finite number"},
+		{"amount Inf", `limits:
+  - {metric: requests, every: 1mo, amount: .inf}`, "amount must be a finite number"},
+		{"model_multipliers NaN", `limits:
+  - {metric: requests, every: 1mo, amount: 100}
+model_multipliers: {"*": .nan}`, "model_multipliers"},
+		{"token_weights Inf", `limits:
+  - {metric: tokens, every: 1mo, amount: 100}
+token_weights: {in_fresh: .inf}`, "token_weights.in_fresh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(withQuotaBlock(tc.block)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("want %q rejection, got %v", tc.want, err)
+			}
+		})
 	}
 }

@@ -27,6 +27,24 @@ type Usage struct {
 	Reasoning int64
 }
 
+// Fresh returns In - CacheRead - CacheWrite, floored at 0 — the non-cached
+// portion of In (see this type's own doc comment). Floored rather than
+// left negative: that would require an upstream usage object whose
+// reported cache components exceed its reported total, and every consumer
+// of this value (quota charging, report/story cache-efficiency metrics)
+// needs a non-negative token count. This was independently hand-written at
+// four call sites (internal/router/quota.go's tokenCharge,
+// internal/report/{cost,sticky}.go, internal/story/render_md.go) before
+// being collected here — the one formula this type's doc comment already
+// specifies, now backed by one implementation instead of four.
+func (u Usage) Fresh() int64 {
+	f := u.In - u.CacheRead - u.CacheWrite
+	if f < 0 {
+		f = 0
+	}
+	return f
+}
+
 // ExtractUsage pulls token usage from a recorded client response body.
 // Four shapes are understood (audit stores JSON bodies as objects, SSE
 // streams as strings):

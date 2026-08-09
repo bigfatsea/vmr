@@ -678,7 +678,7 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Build([]string{path}, time.Now(), nil, nil, dw.Submit); err != nil {
+	if _, _, err := Build([]string{path}, time.Now(), nil, nil, nil, dw.Submit); err != nil {
 		t.Fatal(err)
 	}
 	newN, err := dw.Close()

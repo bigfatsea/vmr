@@ -44,8 +44,8 @@ type reportConfig struct {
 }
 
 // defaultReportConfigFile is the cwd-relative path auto-loaded when
-// -report-config isn't given — same "auto-load if present, else silently
-// skip" convention cmd_report.go's own -pricing/pricing.yaml already uses.
+// -report-config isn't given — auto-loaded if present, else silently
+// skipped (falls back to defaults).
 const defaultReportConfigFile = "report.yaml"
 
 // reportEnvRe/expandReportEnv: the same "${NAME} -> os.Getenv(NAME), unset

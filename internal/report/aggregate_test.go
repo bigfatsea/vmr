@@ -13,6 +13,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/pricing"
 )
 
 // smallAuditRecords returns a few synthetic records covering ok/error,
@@ -126,7 +127,7 @@ func TestBuild(t *testing.T) {
 	dir := t.TempDir()
 	records := smallAuditRecords()
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestBuild(t *testing.T) {
 func TestMarkdownAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +231,7 @@ func TestToolWaste(t *testing.T) {
 		}
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,49 +252,45 @@ func TestToolWaste(t *testing.T) {
 	}
 }
 
+// TestPricing exercises the P2.2 shape: internal/pricing.Table/Resolver
+// feeding Build's pricingSrc parameter, plus the report-local *Pricing
+// summary (Build's pricingInfo parameter) that ends up on rep.Pricing for
+// rendering (Currency/Disclaimer — see pricing.go's doc comment for why
+// these are two separate values now instead of one report.Pricing type).
 func TestPricing(t *testing.T) {
 	dir := t.TempDir()
-	pricingPath := filepath.Join(dir, "pricing.yaml")
-	yaml := `currency: USD
-updated_at: "2026-07-20"
+	table, err := pricing.ParseTable([]byte(`currency: USD
+generated_at: "2026-07-20"
 rates:
-  - provider: volcengine
-    model: doubao-seed-2.0-lite
-    in_fresh_per_1m: 0.28
-    cache_read_per_1m: 0.028
-    cache_write_per_1m: 0
-    out_per_1m: 1.10
-`
-	if err := os.WriteFile(pricingPath, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	p, err := LoadPricing(pricingPath)
+  - key: volcengine/doubao-seed-2.0-lite
+    in_fresh: 0.28
+    cache_read: 0.028
+    cache_write: 0
+    out: 1.10
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p == nil || p.Currency != "USD" {
-		t.Fatalf("pricing load failed")
+	rate, ok := table.Lookup("volcengine/doubao-seed-2.0-lite")
+	if !ok || rate.InFresh == nil || *rate.InFresh != 0.28 || rate.Out == nil || *rate.Out != 1.10 {
+		t.Fatalf("price values not parsed: ok=%v rate=%+v", ok, rate)
 	}
-	if len(p.Rates) != 1 {
-		t.Fatalf("rates want 1 got %d", len(p.Rates))
-	}
-	if p.Rates[0].InFreshPer1M != 0.28 || p.Rates[0].OutPer1M != 1.10 {
-		t.Fatalf("price values not parsed: %+v", p.Rates[0])
-	}
-	if p.Disclaimer(i18n.EN) == "" {
+	pricingInfo := &Pricing{Currency: "USD", StandardGeneratedAt: "2026-07-20"}
+	if pricingInfo.Disclaimer(i18n.EN) == "" {
 		t.Fatalf("disclaimer should not be empty")
 	}
-	if len(p.Raw) == 0 {
-		t.Fatalf("Raw should hold the file's exact bytes for §2's frozen snapshot")
-	}
-	// Build with pricing
+
+	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, p, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, pricingInfo, resolver, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rep.Pricing == nil {
 		t.Fatalf("report should carry pricing")
+	}
+	if rep.Overall.CostEstimate == nil || *rep.Overall.CostEstimate <= 0 {
+		t.Fatalf("Overall.CostEstimate should be populated and positive, got %v", rep.Overall.CostEstimate)
 	}
 }
 
@@ -306,17 +303,20 @@ rates:
 // contribute zero everywhere, not just get skipped from Overall.
 func TestPricingAccumulatesToEndpointAndClient(t *testing.T) {
 	dir := t.TempDir()
-	pricing := &Pricing{
-		Currency: "CNY",
-		byKey: map[string][]PricingRate{
-			rateKey("volcengine", "doubao-seed-2.0-lite"): {
-				{Provider: "volcengine", Model: "doubao-seed-2.0-lite",
-					InFreshPer1M: 0.28, CacheReadPer1M: 0.028, CacheWritePer1M: 0, OutPer1M: 1.10},
-			},
-		},
+	table, err := pricing.ParseTable([]byte(`currency: USD
+rates:
+  - key: volcengine/doubao-seed-2.0-lite
+    in_fresh: 0.28
+    cache_read: 0.028
+    cache_write: 0
+    out: 1.10
+`))
+	if err != nil {
+		t.Fatal(err)
 	}
+	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, pricing, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, &Pricing{Currency: "CNY"}, resolver, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestPricingAccumulatesToEndpointAndClient(t *testing.T) {
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		mk(at(2, 0), "bob", "heartbeat check [OpenClaw heartbeat poll]"),
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func failureSurfaceRecords() []map[string]any {
 func TestFailedRequestRows(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +596,7 @@ func TestFailedRequestRows(t *testing.T) {
 func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +645,7 @@ func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
 func TestWriteFailedIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestBuildIsDeterministic(t *testing.T) {
 	now := time.Now()
 	var want []byte
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, now, nil, nil, nil)
+		rep, _, err := Build([]string{path}, now, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
@@ -858,7 +858,7 @@ func TestBuildFindingsIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
@@ -947,7 +947,7 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
@@ -1009,7 +1009,7 @@ func TestBuildFindingsDomModelTieIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
@@ -1080,7 +1080,7 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
 		}
@@ -1155,7 +1155,7 @@ func contextGrowthContractFixture() []map[string]any {
 func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, contextGrowthContractFixture())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1211,7 +1211,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, []map[string]any{rec})
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1340,7 +1340,7 @@ func TestBuildDateHourBucketsUseDisplayZone(t *testing.T) {
 			"dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	path := writeTempJSONL(t, dir, []map[string]any{record})
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1365,6 +1365,6 @@ func BenchmarkBuild(b *testing.B) {
 	}
 	f.Close()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Build([]string{path}, time.Now(), nil, nil, nil)
+		_, _, _ = Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	}
 }

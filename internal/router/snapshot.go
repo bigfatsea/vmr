@@ -156,6 +156,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 					OwnMaxContextTokens: eg.MaxContextTokens,
 					StickyTTL:           stickyTTL,
 					Quota:               quotaSpecs[eg.Provider],
+					PricingRate:         cfg.ResolvedPricing[eg.Provider+"\x00"+upstreamModel],
 				}
 				// Precompute HealthKey()/Name() once, here, before ep is
 				// ever reachable from a concurrently-read Snapshot (see
@@ -195,7 +196,11 @@ func buildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
 		for i, lc := range p.Quota.Limits {
 			limits[i] = lc.Resolved
 		}
-		out[p.Name] = &core.QuotaSpec{Limits: limits}
+		out[p.Name] = &core.QuotaSpec{
+			Limits:           limits,
+			TokenWeights:     p.Quota.ResolvedTokenWeights,
+			ModelMultipliers: p.Quota.ModelMultipliers,
+		}
 	}
 	return out
 }

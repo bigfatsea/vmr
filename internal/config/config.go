@@ -20,6 +20,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/pricing"
 	"vmr/internal/rundir"
 )
 
@@ -86,6 +87,12 @@ type Provider struct {
 	// (quota: with no limits: is almost certainly a mistake), not a silent
 	// no-op.
 	Quota *QuotaConfig `yaml:"quota"`
+	// Pricing declares this account's price differences from the standard
+	// list price (P2.2) — required (and validated for completeness) when
+	// Quota has a metric: cost limit; optional otherwise, in which case it
+	// only sharpens vmr report's $ estimates. See ProviderPricingConfig's
+	// doc comment (pricing.go).
+	Pricing *ProviderPricingConfig `yaml:"pricing"`
 }
 
 // EndpointGroup is one try-order entry under a virtual model: a provider, a
@@ -283,6 +290,39 @@ type Config struct {
 	Timeouts  Timeouts                `yaml:"timeouts"`
 	Providers []Provider              `yaml:"providers"`
 	Models    map[string]VirtualModel `yaml:"models"`
+	// Pricing is the global pricing block (P2.2) — currency, exchange rate,
+	// and an optional user supplement/standard-table override. See
+	// PricingConfig's doc comment (pricing.go).
+	Pricing *PricingConfig `yaml:"pricing"`
+
+	// ResolvedPricing holds every metric:-cost provider+model's fully
+	// resolved pricing.Resolve result, keyed by provider+"\x00"+model —
+	// filled by resolvePricing() during validate(), read by
+	// router.BuildSnapshot to attach core.Endpoint.PricingRate. Not a yaml
+	// field: nil when no provider has a metric: cost limit (the common
+	// case — no pricing resolution work was needed at all), non-nil
+	// (possibly still empty) otherwise.
+	ResolvedPricing map[string]*core.PricingSpec `yaml:"-"`
+
+	// ProviderPricingPolicies holds one pricing.ProviderPolicy per provider
+	// — its map/overrides if it declared a pricing: block, plus (for every
+	// provider, block or not) the global currency and exchange-rate factor
+	// — for `vmr report`'s broader best-effort resolution (see
+	// PricingTable's doc comment). A superset of ResolvedPricing's coverage,
+	// deliberately: report prices whatever providers an audit log names,
+	// and a provider resolving standard-table prices with no conversion
+	// factor would be reported in the wrong currency. Not a yaml field; nil
+	// when nothing anywhere needed pricing resolved at all (no global
+	// pricing: block, no provider pricing: block, no metric: cost Limit).
+	ProviderPricingPolicies map[string]pricing.ProviderPolicy `yaml:"-"`
+
+	// pricingTableCache is the merged standard(+supplement) table computed
+	// once by resolvePricing() during validate() — PricingTable() returns
+	// this instead of re-parsing the embedded YAML on every call. Unset
+	// (nil) when resolvePricing() had no reason to build one (no pricing:
+	// block anywhere, no metric: cost provider); PricingTable() computes a
+	// fresh one on demand in that case.
+	pricingTableCache *pricing.Table `yaml:"-"`
 }
 
 // Load reads, expands, parses, defaults and validates the config file.
@@ -486,6 +526,12 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	// providerModels collects, per provider, every upstream model name any
+	// virtual model's endpoint group actually configures it to serve —
+	// resolvePricing (called after this loop) needs this to know which
+	// models a metric: cost provider must have complete pricing for; no
+	// other validation step needed this set before P2.2.
+	providerModels := map[string]map[string]bool{}
 	for name, m := range c.Models {
 		if len(m.Endpoints) == 0 {
 			return fmt.Errorf("model %q: no endpoints", name)
@@ -511,6 +557,10 @@ func (c *Config) validate() error {
 				if mn == "" {
 					return fmt.Errorf("model %q endpoint group #%d: models[%d]: empty", name, i+1, j)
 				}
+				if providerModels[eg.Provider] == nil {
+					providerModels[eg.Provider] = map[string]bool{}
+				}
+				providerModels[eg.Provider][mn] = true
 			}
 			if eg.MaxContextTokens < 0 {
 				return fmt.Errorf("model %q endpoint group #%d: max_context_tokens must be >= 0", name, i+1)
@@ -525,6 +575,9 @@ func (c *Config) validate() error {
 				}
 			}
 		}
+	}
+	if err := c.resolvePricing(providerModels); err != nil {
+		return err
 	}
 	return nil
 }

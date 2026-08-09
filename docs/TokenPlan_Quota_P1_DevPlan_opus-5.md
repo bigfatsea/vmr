@@ -13,6 +13,12 @@
 > 落地过程中发现的、影响 P2 范围与方案的几点，已同步进
 > `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的 §14.3 P2 定义与 §4.2⑤，
 > 不在本文重复，见本文 §10 的摘要与指引。
+>
+> **两条 P1 之后的状态更新**：①§8 第 2 项（`vmr replay` 不计费）**仍未落地**，
+> 维持"P1 交付后的近期跟进任务"状态，未排期；②P1 写下的 `EstimatedPct` 计算在 P2.1
+> 引入 `token_weights` 后变成了单位不一致的除法，已在 2026-08-09 的交付后复核里修复
+> （见 `docs/TokenPlan_Quota_P2_DevPlan_opus-5.md` §12 #1）。整体进度与剩余缺口见
+> `docs/TokenPlan_Quota_P1P2_Status_opus-5.md`。
 
 ---
 

@@ -1,0 +1,365 @@
+// Ver 2026-08-07, by Opus 5
+
+// Pricing (P2.2) YAML-shape config types and their validation/resolution —
+// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2①/§9.1 for the
+// full design and docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §3.3/§6 for
+// what this batch delivers. Split from config.go per that file's own
+// line-count budget (see quota.go's identical rationale).
+package config
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"vmr/internal/core"
+	"vmr/internal/pricing"
+)
+
+// PricingConfig is the global `pricing:` block: the account-independent
+// settings needed to interpret every provider's pricing (see
+// ProviderPricingConfig for the per-account half).
+type PricingConfig struct {
+	// Currency is the currency `cost`-metric amounts and account overrides
+	// are denominated in. Required only when at least one provider actually
+	// has a metric: cost Limit — a provider whose pricing: block exists
+	// purely to sharpen `vmr report`'s $ estimates for a requests/tokens
+	// account doesn't need one (cmd_report.go's independent pricing
+	// resolution degrades to USD list price with no conversion, same as
+	// today's behavior with no pricing.yaml at all).
+	Currency string `yaml:"currency"`
+	// ExchangeRate converts the embedded standard/supplement table's USD
+	// prices into Currency — the ONLY meaningful key is "USD" (see
+	// internal/pricing.fileTable's doc comment for why every table this
+	// package loads is USD-only, a deliberate simplification versus the old
+	// report.Pricing sidecar's general multi-currency graph). Ignored
+	// entirely when Currency is "USD" or empty.
+	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
+	// Supplement is an optional path to a user-maintained pricing table
+	// (same shape as internal/pricing's embedded standard.*.yaml — see
+	// that package's fileTable), merged over the embedded standard table
+	// (supplement wins on a matching canonical key). A path that doesn't
+	// exist is a load-time error, never a silent skip.
+	Supplement string `yaml:"supplement"`
+	// Standard optionally replaces the embedded standard table wholesale
+	// (for a deployment that maintains its own complete price list) —
+	// still merged with Supplement on top. Rare; most configs leave this
+	// unset and get the embedded table.
+	Standard string `yaml:"standard"`
+}
+
+// ProviderPricingConfig is one provider's `pricing:` block: what's
+// different about THIS account's prices versus the standard list price —
+// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2① for why this is
+// two layers (account overrides on top of a shared table) rather than one.
+type ProviderPricingConfig struct {
+	// Map resolves a local upstream model name to the standard table's
+	// canonical key, for the cases the automatic 4-step resolution (see
+	// internal/pricing.resolveCanonicalKey) can't or shouldn't guess.
+	Map map[string]string `yaml:"map"`
+	// Overrides is a first-match-wins rule list — see PricingOverrideConfig.
+	Overrides []PricingOverrideConfig `yaml:"overrides"`
+}
+
+// PricingOverrideConfig is one providers[].pricing.overrides entry, as
+// written in YAML. Model supports a "*" wildcard. Exactly one of Discount
+// or the four explicit rate components must be given — see validate()
+// below for why an explicit form must supply all four or none at all
+// (partial explicit rates are rejected, not silently treated as "the other
+// components are free").
+type PricingOverrideConfig struct {
+	Model      string   `yaml:"model"`
+	Discount   *float64 `yaml:"discount"`
+	InFresh    *float64 `yaml:"in_fresh"`
+	CacheRead  *float64 `yaml:"cache_read"`
+	CacheWrite *float64 `yaml:"cache_write"`
+	Out        *float64 `yaml:"out"`
+	DateFrom   string   `yaml:"date_from"`
+	DateTo     string   `yaml:"date_to"`
+	HourFrom   string   `yaml:"hour_from"`
+	HourTo     string   `yaml:"hour_to"`
+}
+
+// explicitFieldsSet counts how many of the four rate components are set —
+// used by validate() to enforce "all four or none".
+func (o PricingOverrideConfig) explicitFieldsSet() int {
+	n := 0
+	for _, v := range []*float64{o.InFresh, o.CacheRead, o.CacheWrite, o.Out} {
+		if v != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// validate checks one override rule and, on success, returns its resolved
+// pricing.OverrideRule form.
+func (o PricingOverrideConfig) validate(providerName string, idx int) (pricing.OverrideRule, error) {
+	if o.Model == "" {
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: model is required (a name, or \"*\" for a wildcard)", providerName, idx)
+	}
+	explicitN := o.explicitFieldsSet()
+	switch {
+	case o.Discount != nil && explicitN > 0:
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: discount and an explicit rate are mutually exclusive — use one or the other, not both", providerName, idx)
+	case o.Discount == nil && explicitN == 0:
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: either discount or all four explicit rate components (in_fresh/cache_read/cache_write/out) are required", providerName, idx)
+	case o.Discount == nil && explicitN != 4:
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: an explicit rate must supply all four components (in_fresh/cache_read/cache_write/out) — a partial one is ambiguous about whether the rest are free or simply unspecified, see internal/pricing.Rate's doc comment", providerName, idx)
+	}
+	if o.Discount != nil && !positiveFinite(*o.Discount) {
+		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: discount must be a finite number > 0 (got %v)", providerName, idx, *o.Discount)
+	}
+	// An explicit component may legitimately be 0.0 ("this provider really
+	// doesn't charge for cache reads") but never negative and never
+	// non-finite — see nonNegativeFinite's doc comment for what a negative
+	// rate would do to a metric: cost account's running total.
+	for _, f := range []struct {
+		name string
+		val  *float64
+	}{{"in_fresh", o.InFresh}, {"cache_read", o.CacheRead}, {"cache_write", o.CacheWrite}, {"out", o.Out}} {
+		if f.val != nil && !nonNegativeFinite(*f.val) {
+			return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: %s must be a finite number >= 0 (got %v)", providerName, idx, f.name, *f.val)
+		}
+	}
+	for _, w := range []struct {
+		name string
+		val  string
+	}{{"date_from", o.DateFrom}, {"date_to", o.DateTo}} {
+		if w.val != "" {
+			if _, err := time.Parse("2006-01-02", w.val); err != nil {
+				return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: invalid %s %q (want yyyy-MM-dd): %w", providerName, idx, w.name, w.val, err)
+			}
+		}
+	}
+	for _, w := range []struct {
+		name string
+		val  string
+	}{{"hour_from", o.HourFrom}, {"hour_to", o.HourTo}} {
+		if w.val != "" {
+			if _, err := time.Parse("15:04", w.val); err != nil {
+				return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: invalid %s %q (want HH:MM): %w", providerName, idx, w.name, w.val, err)
+			}
+		}
+	}
+	rule := pricing.OverrideRule{Model: o.Model, Discount: o.Discount, DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
+	if o.Discount == nil {
+		rule.Explicit = pricing.Rate{InFresh: o.InFresh, CacheRead: o.CacheRead, CacheWrite: o.CacheWrite, Out: o.Out}
+	}
+	return rule, nil
+}
+
+// pricingContext bundles what resolvePricing needs across every provider —
+// built once per config load/reload rather than reloading the embedded
+// standard table and reparsing every provider's overrides once per
+// provider+model pair.
+type pricingContext struct {
+	table                *pricing.Table
+	exchangeRateToTarget float64
+	currency             string
+}
+
+// buildPricingContext loads the merged standard(+supplement) table and
+// resolves the global exchange-rate factor. Only called when at least one
+// provider actually needs it (a metric: cost Limit, or a pricing: block for
+// vmr report's benefit) — see resolvePricing.
+//
+// A non-USD pricing.currency with no exchange_rate["USD"] entry is an
+// unconditional load-time error, not a factor-defaults-to-1 degrade: the
+// standard/supplement table is USD-denominated and reaches BOTH consumers
+// (metric: cost charging and vmr report's $ column), so silently skipping
+// the conversion produces numbers labelled in the target currency but
+// computed in USD — a ~7x error that looks completely normal on screen.
+// "Every price this account uses is an explicit override, so no conversion
+// is needed" is expressible without lying about the currency: leave
+// pricing.currency unset, or give exchange_rate a 1.0 entry deliberately.
+func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
+	standard, err := pricing.LoadStandard()
+	if err != nil {
+		return nil, fmt.Errorf("embedded standard pricing table: %w", err)
+	}
+	if gc == nil {
+		return &pricingContext{table: standard, exchangeRateToTarget: 1, currency: ""}, nil
+	}
+	table := standard
+	if gc.Standard != "" {
+		data, err := os.ReadFile(gc.Standard)
+		if err != nil {
+			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
+		}
+		override, err := pricing.ParseTable(data)
+		if err != nil {
+			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
+		}
+		table = override
+	}
+	if gc.Supplement != "" {
+		data, err := os.ReadFile(gc.Supplement)
+		if err != nil {
+			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
+		}
+		supp, err := pricing.ParseTable(data)
+		if err != nil {
+			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
+		}
+		table = pricing.Merge(table, supp)
+	}
+	currency := gc.Currency
+	factor := 1.0
+	if currency != "" && currency != "USD" {
+		f, ok := gc.ExchangeRate["USD"]
+		if !ok {
+			return nil, fmt.Errorf("pricing.currency is %q but pricing.exchange_rate has no \"USD\" entry — the standard/supplement price table is USD-denominated and needs a rate to convert into %s (write exchange_rate: {USD: 1.0} to state deliberately that no conversion applies)", currency, currency)
+		}
+		if !positiveFinite(f) {
+			return nil, fmt.Errorf("pricing.exchange_rate[\"USD\"]: must be a finite number > 0 (got %v)", f)
+		}
+		factor = f
+	}
+	return &pricingContext{table: table, exchangeRateToTarget: factor, currency: currency}, nil
+}
+
+// resolvePricing is config.validate()'s pricing pass, run after both the
+// provider loop and the models loop (providerModels: provider name -> set
+// of upstream model names that provider is actually asked to serve,
+// collected while validating models[].endpoints[].models). It validates
+// every provider's pricing: block structurally (regardless of that
+// provider's metric — a requests/tokens account's pricing: block only
+// sharpens vmr report's $ estimates, but still must be well-formed), and
+// additionally requires full, resolved pricing for every model a metric:
+// cost provider is configured to serve — storing the result in
+// c.ResolvedPricing for router.BuildSnapshot to attach to core.Endpoint,
+// so this expensive-ish resolution happens exactly once per config load,
+// not once per request.
+func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error {
+	needsTable := c.Pricing != nil
+	costProviders := map[string]bool{}
+	for _, p := range c.Providers {
+		if p.Pricing != nil {
+			needsTable = true
+		}
+		if p.Quota != nil && len(p.Quota.Limits) == 1 && p.Quota.Limits[0].Resolved.Metric == core.MetricCost {
+			costProviders[p.Name] = true
+			needsTable = true
+		}
+	}
+	if !needsTable {
+		return nil
+	}
+	pctx, err := buildPricingContext(c.Pricing)
+	if err != nil {
+		return err
+	}
+	// Cached so PricingTable() (vmr report's broader, best-effort
+	// resolution — see that method's doc comment) doesn't have to re-parse
+	// the embedded standard table plus any supplement/standard override a
+	// second time.
+	c.pricingTableCache = pctx.table
+
+	c.ResolvedPricing = map[string]*core.PricingSpec{}
+	c.ProviderPricingPolicies = map[string]pricing.ProviderPolicy{}
+	for _, p := range c.Providers {
+		var mapping map[string]string
+		var overrides []pricing.OverrideRule
+		if p.Pricing != nil {
+			mapping = p.Pricing.Map
+			for _, local := range core.SortedKeys(p.Pricing.Map) {
+				// An explicit map entry naming a canonical key the merged
+				// table doesn't contain is always a mistake (a typo, or a
+				// key that only exists in a supplement that isn't loaded) —
+				// and a silent one, because resolution would just fall
+				// through to the automatic steps and possibly land on some
+				// OTHER model's price. The design doc's own rule for that
+				// situation is "猜错一个费率比没有费率危险得多"; failing at
+				// load time is how that rule is honored for a key the user
+				// wrote out by hand.
+				if _, ok := pctx.table.Lookup(p.Pricing.Map[local]); !ok {
+					return fmt.Errorf("provider %q: pricing.map[%q]: %q is not a key in the standard/supplement price table — fix the canonical key, add it via pricing.supplement, or drop the map entry and let automatic resolution try (see internal/pricing.resolveCanonicalKey)", p.Name, local, p.Pricing.Map[local])
+				}
+			}
+			for i, oc := range p.Pricing.Overrides {
+				rule, err := oc.validate(p.Name, i)
+				if err != nil {
+					return err
+				}
+				overrides = append(overrides, rule)
+			}
+		}
+		// Stored for EVERY provider, not just ones with a pricing: block or
+		// a metric: cost Limit — the policy also carries the global
+		// currency/exchange-rate factor, and `vmr report` resolves rates
+		// for every provider that appears in an audit log, most of which
+		// have no pricing: block at all. Omitting them here would leave
+		// their standard-table (USD) prices unconverted while the report
+		// still labelled every number with pricing.currency: right label,
+		// wrong number. Only the completeness gate below is specific to
+		// metric: cost.
+		c.ProviderPricingPolicies[p.Name] = pricing.ProviderPolicy{
+			Map: mapping, Overrides: overrides,
+			ExchangeRateToTarget: pctx.exchangeRateToTarget, Currency: pctx.currency,
+		}
+		if !costProviders[p.Name] {
+			// A pricing: block on a non-cost provider is purely for vmr
+			// report's benefit — validated above for shape, but nothing
+			// needs to be resolved against router.Snapshot for it (report
+			// resolves independently — see internal/pricing's package doc
+			// comment on the two consumers).
+			continue
+		}
+		if pctx.currency == "" {
+			return fmt.Errorf("provider %q: has a metric: cost quota limit but pricing.currency is not set — cost accounting needs a currency to charge in", p.Name)
+		}
+		factor := pctx.exchangeRateToTarget
+		models := core.SortedKeys(providerModels[p.Name])
+		for _, model := range models {
+			spec, ok := pricing.Resolve(p.Name, model, pricing.ResolveOptions{
+				Table: pctx.table, Map: mapping, Overrides: overrides,
+				ExchangeRateToTarget: factor, Currency: pctx.currency,
+			})
+			if !ok {
+				return fmt.Errorf("provider %q: metric: cost: no price found for model %q — checked pricing.overrides, then providers[].pricing.map / the standard price table; add an override or a pricing.map entry (see providers[].pricing's doc comment)", p.Name, model)
+			}
+			// AllPathsComplete, not just a GuaranteedRate check: every
+			// possible RateAt(spec, ts) outcome — including one reached only
+			// when a conditional/time-scoped override is active — must be
+			// complete, or a promo window could silently under-price a
+			// charge on the live request path with no load-time warning.
+			if ok, bad, badIdx := pricing.AllPathsComplete(spec); !ok {
+				via := "the standard/supplement/account base rate (no override active)"
+				if badIdx >= 0 {
+					via = fmt.Sprintf("pricing.overrides[%d]", badIdx)
+				}
+				return fmt.Errorf("provider %q: metric: cost: model %q resolves an incomplete rate via %s (missing %v) — every one of in_fresh/cache_read/cache_write/out must be priced (explicitly 0.0 if genuinely free) for EVERY possible resolution path, not just the common one",
+					p.Name, model, via, bad.MissingComponents())
+			}
+			c.ResolvedPricing[p.Name+"\x00"+model] = spec
+		}
+	}
+	return nil
+}
+
+// PricingTable returns the merged standard(+supplement, +standard-override)
+// table config.yaml's global pricing: block describes — the same table
+// resolvePricing() builds internally for metric: cost accounts, exposed
+// here for callers needing BROADER, best-effort pricing coverage than
+// ResolvedPricing provides (see that field's doc comment: it only covers
+// the specific provider+model pairs a metric: cost Limit actually needs,
+// strictly validated). `vmr report`'s composition root (cmd/vmr/cmd_report.go)
+// is the intended caller, pairing this with ProviderPricingPolicies to
+// build a pricing.Resolver — see internal/pricing's package doc comment for
+// why report can't just reuse ResolvedPricing directly (it only knows about
+// models config.yaml's own models: block references, not whatever a raw
+// audit log's endpoint labels happen to contain). Safe to call even when
+// c.Pricing is nil and no provider declares a pricing: block (returns just
+// the embedded standard table); returns a cached value when validate()
+// already built one (the common case, once per config load/reload).
+func (c *Config) PricingTable() (*pricing.Table, error) {
+	if c.pricingTableCache != nil {
+		return c.pricingTableCache, nil
+	}
+	pctx, err := buildPricingContext(c.Pricing)
+	if err != nil {
+		return nil, err
+	}
+	return pctx.table, nil
+}

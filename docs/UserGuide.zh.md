@@ -37,7 +37,7 @@
 
 ### 配置文件结构
 
-`providers` 是一个扁平列表——一个账号一条，不管它实际讲两种入口协议（`openai` / `anthropic`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai 协议的候选列表和一条 anthropic 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
+`providers` 是一个扁平列表——一个账号一条，不管它实际讲三种入口协议（`openai` / `anthropic` / `openai-responses`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai 协议的候选列表和一条 anthropic 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -232,7 +232,7 @@ providers:
 
 没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
 
-**这一批交付的范围刻意收得很窄**（原因见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`）：每个 provider 恰好一条 `limits:`，`metric` 只能是 `requests` 或 `tokens`，只支持固定（非滚动）窗口。完整设计里的其它每一项——`cost`/Credits 计量、单账号多条窗口、`rolling: true`、`models:` 子额度——写了都会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
+**目前交付的范围**（P1 + P2.1，原因见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`/`docs/TokenPlan_Quota_P2_DevPlan_opus-5.md`）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（P2.2——见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
 
 **`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/admin/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
 
@@ -240,11 +240,63 @@ providers:
 
 **它不会做的事**：它从不会把某个端点从候选列表里剔除——一个额度耗尽的账号只是在自己的 priority 梯队里排到最后，其它端点都不可用时 failover 仍然会尝试它。它不会覆盖 Sticky Model——已建立的对话即使对应账号额度已经紧张，也会继续留在原端点；重排只对新会话生效。它也从不会主动触发降级——额度耗尽不会像真实的 429/402 那样让端点进入冷却，那仍然是 `internal/health` 的职责。
 
-**如何查看**：`vmr check` 会打印每个 provider 配置的额度（以及周期边界所依据的生效时区——见下面的时区提示）；`/admin/status` 的 `quota` 段和 `vmr status` 会展示实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`，外加原始的 fresh/cache_read/cache_write/output 四分量明细——虽然 P1 还不区分它们的权重，但这个明细能让你自己心算出一个高缓存命中率账号的等权计数和真实 Credits 账单之间差多少）；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
+**如何查看**：`vmr check` 会打印每个 provider 配置的额度（以及周期边界所依据的生效时区——见下面的时区提示）；`/admin/status` 的 `quota` 段和 `vmr status` 会展示实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`、原始的 fresh/cache_read/cache_write/output 四分量明细，以及配置了的话该账号生效中的 `token_weights`/`model_multipliers`）；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
 
 周期边界（以及所有面向人的时间戳）都按 vmr 进程所在服务器的本地时区渲染（`vmr check` 的 `timezone:` 一行会打印出实际生效的值）——容器里如果没设 `TZ`，会悄悄按 UTC 处理，跟你以为的时区可能差好几个小时，且没有其它任何提示，值得部署后检查一下这一行。
 
-完整设计，包括留给后续批次的一切（`cost` 计量档位、单账号多窗口、滚动窗口、按分量加权、接官方用量 API 校准）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`。
+#### 让数字更精确：`token_weights` 与 `model_multipliers`（P2.1）
+
+一个普通的 `metric: tokens` 账号对新鲜输入、缓存读、缓存写、输出四个分量**等权重**计数——对一个纯粹按"总 Token 数"计费的套餐是准确的，但对 Credits 制套餐会**系统性高估**消耗：这类套餐的缓存命中价格往往只是新鲜输入的一个零头（市场实测比例从 5 倍到 120 倍不等）。一个实际只花掉预算 15% 的账号，在等权计数下可能显示为"已耗尽"，被降权，白白浪费掉套餐里没花完的大头。
+
+```yaml
+providers:
+  - name: plan-d
+    quota:
+      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+      model_multipliers: {"*": 1.0, heavy-model: 9}
+      limits:
+        - {metric: tokens, every: 1mo, amount: 1249000000}
+```
+
+- **`token_weights`** 在计算 headroom 以及 `/admin/status` 的 `used`/`pct` 时，对 `metric: tokens` 账号的四个分量重新加权——账号级（对该 provider 下所有 `limits:` 条目生效），未写的分量缺省为 `1.0`，且只对确实配了 `metric: tokens` Limit 的账号生效（配在纯 `requests` 账号上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例是**按模型分化**的，改用带 `pricing:` 块的 `metric: cost`（见下文）——按模型分化的价格没法用一组共享比例表达。
+- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按 provider 聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率永远向上取整（例如 1.5 倍作用在 3 个 token 上算成 5，不是 4）——安全的方向是宁可多算，绝不能少算账号的真实消耗。`model_multipliers` 只影响 `requests`/`tokens` 档；纯 `cost` 账号的价格分化完全由 `pricing:` 块承担，两者同时配置是加载期错误。
+
+两个字段都不配置时行为不变——`token_weights` 缺省等同于 P1 一直在用的纯等权求和，`model_multipliers` 缺省让每笔计费保持 1 倍。
+
+#### 定价与 cost 计量档位
+
+`metric: cost`（P2.2）直接按真实金额而不是次数/token 数给账号计费——适合按模型分化定价的 Credits 制套餐，这正是 `token_weights` 那套单一共享比例表达不了的场景。定价来自两层：**内置在二进制里的标准价目表**（不需要任何配置——数据源自一份公开的 LiteLLM 格式快照，MIT 许可，定期刷新）叠加你在 `config.yaml` 里写明的、与你账号不同的部分。
+
+```yaml
+pricing:
+  currency: CNY # 只要有账号用 metric: cost 就必填；标准表本身是 USD
+  exchange_rate: {USD: 7.1} # 1 USD = 7.1 CNY —— 只要 currency 不是 USD 就必填（确实不需要换算时，显式写 {USD: 1.0}）
+  supplement: ./pricing.local.yaml # 可选：你自己补充的条目，格式与内置表相同，合并进来（冲突时你的胜出）
+
+providers:
+  - name: anthropic # 把 provider 命名成厂商本名有助于自动解析——见下文
+    quota:
+      limits:
+        - {metric: cost, every: 1mo, amount: 500} # 每月 500 元
+    pricing:
+      map: {my-claude-alias: anthropic/claude-3-7-sonnet-20250219} # 只在自动解析猜不出你的模型名时才需要
+      overrides:
+        - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"} # 一次限时促销，写在最前面（first-match-wins）
+        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54} # 这个账号对某个模型的实际谈判价
+        - {model: "*", discount: 0.6} # 兜底：其余模型统一按列表价 6 折
+```
+
+**一个模型的价格怎么找到**：先看 `providers[].pricing.map`（显式的"本地模型名 → 标准表条目"映射），再依次尝试三步自动解析——`<provider 名>/<模型名>`、裸模型名、或者在标准表里对 `*/<模型名>` 后缀做**唯一**匹配。如果最后一步能匹配上不止一条，vmr 会拒绝瞎猜（宁可没有价格，也不猜错厂商）——这时加一条 `map` 消除歧义即可。`vmr check` 会把每个 provider 实际解析到的结果打印出来，所以这一步从不需要你自己猜测。
+
+**`providers[].pricing.overrides`** 是一条 first-match-wins 的规则列表：每条要么是 `discount`（对"下层解析出的费率"打折——下层可以是标准表，也可以是列表里更靠后的另一条 override），要么是显式的四分量费率（`in_fresh`/`cache_read`/`cache_write`/`out` 必须**四个一起给**——只给一部分会被拒绝，因为"其余的免费"和"其余的没写"是两件不同的事，vmr 不会替你猜是哪一种）。两种形式都可以带 `date_from`/`date_to`（`yyyy-MM-dd`）和/或 `hour_from`/`hour_to`（`HH:MM`，from>to 表示跨零点），用于限时促销或错峰定价。
+
+**缺失永远比错误安全**：一个 `metric: cost` 账号在加载期就会被拒绝——`vmr check`/`vmr start`/热重载走的是同一条校验路径——除非它配置要服务的**每一个**上游模型，在**所有可能的 override 组合**下都能解析出完整的四分量费率，而不只是常见情形下。显式写 `0.0` 算"已定价"（有些分量确实免费）；缺失字段不算——把缺失的 `cache_read` 静默当 0，会让账号显得比实际便宜，进而拿到更多流量、超支。这是 vmr 唯一一处刻意不做优雅降级的地方。
+
+**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`），`date_range`/`hour_range` 两元数组拆成 `date_from`/`date_to`/`hour_from`/`hour_to`。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
+
+`vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价，和之前行为一致。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。
+
+完整设计，包括留给后续批次的一切（单账号多窗口、滚动窗口、接官方用量 API 校准）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`。
 
 ## 审计与报表
 
@@ -277,8 +329,8 @@ Markdown 按九个编号章节组织，每章回答一个运维问题：
 
 - **§0 摘要** —— headline 数字 + 最多 3 条自动亮点（缓存效率低、工具 schema 浪费、端点异常）。
 - **§1 成本与 Token 经济** —— 缓存命中/fresh/cache_write/reasoning 拆分，按模型缓存效率，按角色的消息字符/预估 token 占比。
-- **§2 成本估算** —— 一旦加载了定价配置就渲染（见下文[成本估算与 pricing.yaml](#成本估算与-pricingyaml)）；按模型/端点/客户端各一张表，末尾还会原样折叠嵌入本次实际使用的定价配置，让报告的 $ 数字即使在 `pricing.yaml` 之后被改过也能追溯。
-- **§3 可靠性** —— 端点可用度/错误率、错误类别拆分，因为 openai/anthropic 两个协议面各自独立路由，两张表都按协议再拆一次，外加每小时错误数图表。
+- **§2 成本估算** —— 只要定价数据能解析出结果就渲染（见下文[成本估算与定价](#成本估算与定价)）；按模型/端点/客户端各一张表，末尾附一份本次用了哪些定价来源的摘要（标准表生成日期、补充表、override 条数）。
+- **§3 可靠性** —— 端点可用度/错误率、错误类别拆分，因为每个入口协议面都各自独立路由，两张表都按实际用到的协议各拆一份（openai 排第一、anthropic 第二，其余协议按字母序），外加每小时错误数图表。
 - **§4 延迟与吞吐** —— 按模型、按端点的 ttft/耗时分位数，都按吞吐量降序排列，各自带样本量，n<20 标 `⚠️low-n`。
 - **§5 负载分布** —— 按虚拟模型、按工作负载类（交互 vs 定时脚手架）、按端点、按客户端（后两张表还带每请求输入/输出 token 分位数），外加每小时和每日的请求量/输入 token Mermaid 图表。
 - **§6 会话与任务** —— 只列 interactive 会话，按 Chat User 分组（单发定时会话改放进请求详单里，见下文[索引文件](#索引文件)）。§6.5（Sticky 有效性）和 §6.6（端点性价比）的内容见下文[Agent 感知分析](#agent-感知分析)；§6.7（Compaction 还原）是本期每一次独立历史压缩 LLM 调用的记录：链接到哪个会话、tokens_in→tokens_out、保留比，以及一份规则筛出的被吞掉内容样例（不靠 LLM 判断，只呈现可观察的事实）。
@@ -289,9 +341,9 @@ Markdown 按九个编号章节组织，每章回答一个运维问题：
 
 运行进度写到 stdout，每一行都带 `yyyy-MM-dd HH:mm:ss.SSS` 时间戳，方便看清每个阶段实际花了多久：会话分析最先跑（按输入文件并行处理——在天数多的语料上这是耗时最长的单一阶段——过程本身不打印逐文件的进度行），然后聚合与详单导出合并成一趟：一个文件一行 `[i/N] <path>  done: M records (Ts)`，详单渲染在自己的 worker 池上跑，与喂给它数据的文件扫描并发进行——因为一条记录的详单页面只依赖它自己的内容，跟其他记录累积出来的任何东西都无关。JSON（`vmr-report.json`）是二次开发（图表/Dashboard）的数据源——Markdown 里只展示 Top-5 或做了折叠的明细，JSON 里都是全量。
 
-#### 成本估算与 pricing.yaml
+#### 成本估算与定价
 
-`-pricing pricing.yaml` 显式指定一份定价配置；不加这个参数时，`vmr report` 会自动读取当前目录下的 `./pricing.yaml`（文件不存在就安静跳过，不报错，也不显示 $ 估算）。价格按"provider+model"配置，跟协议无关——同一个上游账号/模型不管走 vmr 的 openai 面还是 anthropic 面成本都一样，一条规则就够。四个每百万 token 价格字段（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m`——只有第一、三、四个会计入 $ 估算，缓存命中按各厂都当免费处理）既可以写纯数字（用文件顶层的 `currency`），也可以写带货币前缀的字符串（`"USD0.14"`、`"jpy 1.2"`，大小写不敏感，前缀和数字之间的空格可有可无），换算靠顶层的 `exchange_rate` 列表（成对给出等值货币，例如 `{USD: 1, CNY: 7}` 表示 1 美元 = 7 人民币；`USD→EUR→CNY` 这种链式换算即使没有 USD 直连 CNY 的条目也能算出来）。价格用了一个 `exchange_rate` 里没定义、又不是顶层 `currency` 本身的货币符号，是配置加载阶段的报错，不会静默按 0 处理。同一个 provider+model 可以配多条规则，各自用可选的 `date_range: [start, end]`（`"2026-07-01"`，yyyy-MM-dd）和/或 `hour_range: [start, end]`（`"22:00"`，HH:MM——起始晚于结束表示跨过午夜）限定生效时段，用来表达随时段变化的价格（比如低谷折扣、促销窗口）；`vmr report` 按文件里的先后顺序取第一条时间窗口覆盖该请求时间戳的规则，所以更窄/促销性质的窗口要写在它要覆盖的兜底规则前面。完整的、带注释的示例见仓库自带的 `pricing.yaml`。
+`vmr report`（用 `-c config.yaml`，跟它找 `log_dir` 用的是同一个参数）用的是和 `metric: cost` 额度完全相同的两层定价模型——二进制内置的标准价目表，叠加你 `config.yaml` 里声明的 `providers[].pricing`/全局 `pricing:` 块——完整配置形态见上文[定价与 cost 计量档位](#定价与-cost-计量档位)（`map`/`overrides`/`discount`/时间窗全部原样适用）。找不到 `config.yaml` 时优雅降级为只用标准表的列表价、没有账号覆盖，跟以前行为一致——不会因此拖累报表的其余部分。和 `metric: cost` 额度账号不同（只要有一个模型解析出不完整的费率就在加载期直接拒绝），报表里某一行价格解析不完整或缺失时，只是那一行不显示 $ 数字——报表的哲学是"定价缺口只丢一个数字，不丢整份报表"。
 
 #### Agent 感知分析
 
@@ -315,7 +367,7 @@ Markdown 按九个编号章节组织，每章回答一个运维问题：
 
 #### 输出语言
 
-`vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，跟 `pricing.yaml` 一样从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
+`vmr report`/`vmr story` 默认输出英文（上文这些示例展示的是切到中文之后的样子）。在当前目录放一份 `report.yaml`（写 `language: zh`）即可切换成中文，或者在命令行上加 `-lang en|zh` 只影响这一次运行——`-lang` 优先级高于 `report.yaml`。`report.yaml` 是独立的一份小文件，跟 `config.yaml` 完全无关：是可选的，存在就从当前目录自动加载（`-report-config path` 可以指向别的路径）。它可以放一个真实的密钥（`llm_key`，见下文），所以跟 `config.yaml` 一样 `.gitignore`——仓库根目录提交的是模板 `report.example.yaml`，照着复制一份改。这个开关只影响 Markdown 文档的文字——`vmr-report.json`/`journey-*.json`/`compare-*.json` 不受影响：里面的叙述性字段（比如 `efficiency[].finding`、`compare-*.json` 的 `rows[].label`）不管 `-lang` 是什么，永远是英文，写脚本解析这些 JSON 不需要考虑报告是用哪种语言生成的。
 
 `report.yaml` 不止管语言：`-o`/`-details`/`-include-partial`/`-llm-addr`/`-llm-model`/`-llm-key`/`-llm-cache-dir` 都可以在这份文件里预先写好默认值，同名命令行 flag 显式传了照样优先——完整字段和注释见仓库根目录的 `report.example.yaml`。`llm_key` 可以直接写明文（这份文件已经 `.gitignore`），也可以写成 `${VMR_LLM_KEY}` 这样引用一个已有的环境变量，两种都行；`llm_cache_dir` 没有隐式默认路径，两处（flag、`report.yaml`）都不设就完全不缓存 LLM 调用结果。
 
@@ -424,11 +476,11 @@ models:
 | `POST /v1/messages` | Anthropic Messages 协议入口（流式 + 非流式） |
 | `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要一条 `protocol: openai-responses` 的端点 |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
-| `GET /admin/status` | 进程身份（pid/listen/版本/配置路径/uptime）、配置是否过期的判定、热重载结果、逐端点健康、Sticky Model 注册表大小，以及并发指标，含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback）——下文的 `vmr status` 是这份数据的 CLI 前端 |
+| `GET /admin/status` | 进程身份（pid/listen/版本/配置路径/uptime）、配置是否过期的判定、热重载结果、逐端点健康、Sticky Model 注册表大小、并发指标，以及——对每个配了 `quota:` 的 provider——一段展示实时消耗的 `quota` 段（见上文"额度感知路由"），含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback）——下文的 `vmr status` 是这份数据的 CLI 前端 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-o dir] [-pricing pricing.yaml] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；加载了定价配置就会渲染 §2 成本估算章节——`-pricing` 显式指定，或者不加这个参数时自动加载当前目录下的 `./pricing.yaml`（存在的话）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文 |
+| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文 |
 | `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
@@ -438,7 +490,7 @@ models:
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 | `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh report …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`replay`/`report`/`story` 都算——`report`/`story` 也在内，因为不给 glob 时两者都要靠它解析 `log_dir`，见上文"大多数情况不需要指定输入文件"）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
 
-经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=sticky|order`、`eligible=N/M`，以及真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
+经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
 
 ```bash
 # 怀疑配置有问题——先诊断一遍，而不是对着日志里的 401 干瞪眼。

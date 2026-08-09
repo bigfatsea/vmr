@@ -46,13 +46,9 @@ func (sc *stickyCollector) add(rc *rec2) {
 		sc.ungrouped++
 		return
 	}
-	fresh := rc.usage.In - rc.usage.CacheRead - rc.usage.CacheWrite
-	if fresh < 0 {
-		fresh = 0
-	}
 	sc.bySession[rc.sessionID] = append(sc.bySession[rc.sessionID], stickyEntry{
 		seq: rc.sessSeq, endpoint: rc.endpoint, model: rc.model, protocol: rc.protocol,
-		cached: rc.usage.CacheRead, fresh: fresh, cacheWrite: rc.usage.CacheWrite,
+		cached: rc.usage.CacheRead, fresh: rc.usage.Fresh(), cacheWrite: rc.usage.CacheWrite,
 		known: rc.usageOK,
 	})
 }

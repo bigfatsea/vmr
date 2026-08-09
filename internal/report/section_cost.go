@@ -1,8 +1,8 @@
 // Ver 2026-08-01, by Sonnet 5
 
 // §2 成本估算: per-model / per-endpoint / per-client $ estimates, rendered
-// only when a pricing sidecar was loaded, plus the frozen snapshot of the
-// pricing.yaml those figures came from.
+// only when pricing resolved (see pricing.go's Pricing summary), plus a
+// closing note naming the pricing sources those figures came from.
 package report
 
 import (
@@ -86,11 +86,17 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("%s", t.NoDataBody)
 	}
 
-	// Freeze the exact pricing.yaml used for this report, collapsed by
-	// default — pricing.yaml can keep changing after the fact; embedding it
-	// verbatim means a later reader of this report is never left guessing
-	// which price snapshot the $ figures above actually came from.
-	if len(rep.Pricing.Raw) > 0 {
-		w("%s\n", details(t.FrozenSnapshotSummary, codeFence(string(rep.Pricing.Raw))))
+	// P2.2: pricing is now composed from several layers (embedded standard
+	// table + optional supplement + per-provider config.yaml overrides),
+	// so there's no longer a single file's bytes to freeze verbatim the
+	// way the pre-P2.2 sidecar did — this summary line is the replacement
+	// traceability mechanism (see pricing.go's package doc comment).
+	summary := fmt.Sprintf("standard table generated %s", orDash2(rep.Pricing.StandardGeneratedAt == "", "(unknown)", rep.Pricing.StandardGeneratedAt))
+	if rep.Pricing.Supplement != "" {
+		summary += fmt.Sprintf("; supplement: %s", rep.Pricing.Supplement)
 	}
+	if rep.Pricing.ProviderOverrides > 0 {
+		summary += fmt.Sprintf("; %d provider override rule(s) applied", rep.Pricing.ProviderOverrides)
+	}
+	w("%s\n\n", details(t.FrozenSnapshotSummary, summary))
 }

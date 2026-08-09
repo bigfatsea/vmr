@@ -192,6 +192,16 @@ type Endpoint struct {
 	// provider has no quota configured (unmetered account).
 	Quota *QuotaSpec
 
+	// PricingRate is this specific provider+model's resolved pricing
+	// (P2.2), resolved at BuildSnapshot time — unlike Quota, NOT shared
+	// across every Endpoint expanded from the same provider, because price
+	// is inherently model-scoped (see PricingSpec's doc comment). nil = no
+	// pricing resolved for this provider+model (no providers[].pricing
+	// configured and no standard/supplement table match) — a metric: cost
+	// Limit on such a provider is rejected at config-validate time before
+	// this is ever read on the request path.
+	PricingRate *PricingSpec
+
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
 	// immutable once constructed, so BuildSnapshot computes them exactly
@@ -272,14 +282,19 @@ func (e *Endpoint) computeName() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model
 }
 
-// QuotaMetric is the counting unit a Limit is measured in. Only the P1
-// subset exists today (see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
-// §3 for the full model, including the "cost" metric later batches add).
+// QuotaMetric is the counting unit a Limit is measured in — see
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §3 for the full model.
 type QuotaMetric string
 
 const (
 	MetricRequests QuotaMetric = "requests"
 	MetricTokens   QuotaMetric = "tokens"
+	// MetricCost is P2.2's Credits/money-denominated metric — see
+	// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §3.3. Charging it needs a
+	// resolved Endpoint.PricingRate; config.validate() rejects a metric:
+	// cost Limit on any provider+model that doesn't resolve one with every
+	// component present (see PricingSpec/Rate's doc comments).
+	MetricCost QuotaMetric = "cost"
 )
 
 // Limit is one window-level quota constraint: "in this long a period,
@@ -311,11 +326,116 @@ type Limit struct {
 	Amount float64
 }
 
-// QuotaSpec is a provider's full quota configuration: today just its one
-// Limit (P1), but already shaped as a slice so P3's multi-window support is
-// additive, not a type change.
+// TokenWeights is the account-level per-component scaling factor applied to
+// a tokens-metric Limit's base(tokens) formula — see
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §3 (charge = base(metric) ×
+// ModelMultipliers[model]) and its "Simplification" section ⑧ for why this
+// lives here rather than as a per-model price table: a Credits-style plan
+// whose account discounts cache reads (or prices output higher) uniformly
+// across all its models needs one shared ratio, not a per-model rate table
+// (that's what metric: cost's pricing layer is for instead).
+//
+// The zero value is {0,0,0,0} — NOT the "1.0 across the board" default this
+// type is documented to have. config.validate() (or router.BuildSnapshot,
+// whichever resolves config.QuotaConfig into core.QuotaSpec) MUST explicitly
+// fill every unset component with DefaultTokenWeight; nothing in this
+// package does that for you. This is the same class of trap
+// HeadroomCap/epsilon hit during P1 — recorded here so it isn't rediscovered.
+type TokenWeights struct {
+	InFresh    float64
+	CacheRead  float64
+	CacheWrite float64
+	Out        float64
+}
+
+// DefaultTokenWeight is the value every one of TokenWeights' four
+// components resolves to when the account's config leaves it unset — see
+// TokenWeights' doc comment for why this can't just be relied on as Go's
+// zero value.
+const DefaultTokenWeight = 1.0
+
+// Rate is a per-1,000,000-token four-component price snapshot — the
+// runtime-shape counterpart of internal/pricing.Rate (this package cannot
+// import internal/pricing: core is a zero-internal-dep package, see
+// archtest's TestArchitecture_ZeroInternalDepPackages), in whatever
+// currency the resolving account's pricing.currency names. A nil component
+// means "unknown", never "free" — see PricingSpec's doc comment for why
+// that distinction survives all the way to this type.
+type Rate struct {
+	InFresh    *float64
+	CacheRead  *float64
+	CacheWrite *float64
+	Out        *float64
+}
+
+// PricingOverride is one time/model-scoped rule from an account's
+// providers[].pricing.overrides, already filtered (at resolve time, in
+// internal/pricing) to the ones whose `model` pattern matches this specific
+// Endpoint's Model — see PricingSpec.RateAt (internal/pricing.RateAt, the
+// function that actually walks this slice; core stays pure data, per this
+// package's own "shared types, no internal deps" charter).
+type PricingOverride struct {
+	// Discount, when non-nil, means "the rate that resolves BELOW this rule
+	// in the chain, scaled by this factor" — NOT always PricingSpec.Base
+	// directly: "below" can be another, more specific Override (see
+	// internal/pricing.RateAt/resolveChain's doc comments, and
+	// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §11.2 for the bug this
+	// distinction fixes — an earlier implementation folded a discount
+	// straight onto Base and double-applied it whenever two discount rules
+	// were stacked). Explicit, when Discount is nil, is used as-is. Discount
+	// and Explicit are mutually exclusive by construction — internal/
+	// pricing's config-time resolution never produces one with both set.
+	Discount         *float64
+	Explicit         Rate
+	DateFrom, DateTo string // "2026-06-08" form, empty = unbounded
+	HourFrom, HourTo string // "22:00" form, empty = unbounded; a From>To pair wraps past midnight
+}
+
+// PricingSpec is one provider+model's fully resolved pricing (P2.2):
+// Base — the rate reachable with no time-scoped override active (from the
+// standard/supplement table, or an always-on account override) — plus zero
+// or more time-scoped Overrides layered on top, evaluated in written order
+// at charge time. Attached per-Endpoint (not per-account, unlike QuotaSpec)
+// because price is inherently model-scoped — see
+// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §6.3 for why this couldn't be
+// shared the way QuotaSpec is.
+//
+// Why Base can't just be a single resolved core.Rate computed once at
+// config-load time: PricingRate.DateFrom/HourFrom-style windows mean the
+// effective rate can differ moment to moment (a promotional discount, a
+// peak-hour surcharge — see the design doc's §4.2④/⑨), so charge time must
+// still pick among Overrides using the actual request timestamp. See
+// internal/pricing.RateAt.
+type PricingSpec struct {
+	Base      Rate
+	Overrides []PricingOverride
+	// Currency is the account's pricing.currency this Spec's amounts are
+	// denominated in — carried along so a charge doesn't need a second
+	// lookup back into config just to label the number it just computed.
+	Currency string
+}
+
+// QuotaSpec is a provider's full quota configuration: its Limit(s) (P1: just
+// one; already shaped as a slice so P3's multi-window support is additive,
+// not a type change) plus two account-level charge-time modifiers (P2.1):
+//
+//   - TokenWeights scales a tokens-metric Limit's four components when read
+//     (applied in baseAmount, at read time — see
+//     docs/TokenPlan_Quota_Routing_Design_opus-5.md's §9.2 "store raw
+//     components, apply policy on read" principle, which holds for this
+//     field).
+//   - ModelMultipliers scales EVERY component (including Requests) of a
+//     charge by the upstream model actually hit, keyed by that model name
+//     with an optional "*" wildcard fallback; nil/absent-key means 1.0 (no
+//     scaling). Unlike TokenWeights, this one is applied at CHARGE time, not
+//     read time — see docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §1.3 for
+//     why: quota.Counters aggregates per-provider, not per-model, so once a
+//     charge lands there is no way to recover which slice of a later read
+//     came from which upstream model to multiply retroactively.
 type QuotaSpec struct {
-	Limits []Limit
+	Limits           []Limit
+	TokenWeights     TokenWeights
+	ModelMultipliers map[string]float64
 }
 
 // SortedKeys returns m's keys in sorted order. A recurring need across

@@ -55,6 +55,52 @@ func TestCmdCheck_NoQuotaBlock_SectionAbsent(t *testing.T) {
 	}
 }
 
+// TestCmdCheck_PrintsPricingTableLine pins the P2 dev plan §12 #5 fix
+// (pricingTableLine in cmd_check.go): a config that touches pricing at all
+// — here, a global `pricing:` block — must grow a "pricing_table:" line
+// naming the embedded standard table's generation date, so an operator can
+// spot a stale reference price without opening internal/pricing's source.
+// This had zero test coverage before (verified by grep across the repo
+// during a 2026-08-09 review) — a regression that silently dropped this
+// line, or broke the "no pricing touched" absence case below, would not
+// have failed any existing test.
+func TestCmdCheck_PrintsPricingTableLine(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+pricing:
+  currency: USD
+providers:
+  - name: plan-a
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
+models:
+  m1:
+    endpoints:
+      - protocol: openai
+        provider: plan-a
+        models: [real-model]
+`
+	path := writeTempFile(t, "config.yaml", yaml)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "pricing_table:") || !strings.Contains(out, "built-in standard table generated") {
+		t.Fatalf("output missing pricing_table: line for a config with a pricing: block:\n%s", out)
+	}
+}
+
+// TestCmdCheck_NoPricingTouched_PricingTableLineAbsent is
+// TestCmdCheck_PrintsPricingTableLine's negative case: a config that never
+// mentions pricing (no global pricing: block, no providers[].pricing, no
+// metric: cost limit) must not grow a pricing_table: line at all — see
+// pricingTableLine's own doc comment ("ok=false when nothing in this
+// config touches pricing at all").
+func TestCmdCheck_NoPricingTouched_PricingTableLineAbsent(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", minimalConfigYAML)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if strings.Contains(out, "pricing_table:") {
+		t.Fatalf("output has a pricing_table: line for a config that never touches pricing:\n%s", out)
+	}
+}
+
 // TestCmdStatus_RendersQuotaLine mirrors TestCmdStatus_WithMockServer but
 // adds a "quota" array to the mocked /admin/status payload — pinning that
 // server/admin.go's new section actually reaches a human-readable line in

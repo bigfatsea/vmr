@@ -11,10 +11,12 @@
 package router
 
 import (
+	"math"
 	"sort"
 	"time"
 
 	"vmr/internal/core"
+	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/strategy"
 )
@@ -37,13 +39,18 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 	if rt.Quota == nil || ep.Quota == nil || len(ep.Quota.Limits) == 0 {
 		return
 	}
-	// P1: exactly one Limit per provider (internal/config/quota.go's
+	// Exactly one Limit per provider (internal/config/quota.go's
 	// validateQuota enforces this at load time) — no min()-across-Limits
 	// merge yet; that's P3 (see the design doc's Core Algorithm section on
 	// multi-window merging).
 	l := ep.Quota.Limits[0]
 	limitKey := string(l.Metric) + "/" + l.EveryText
 	periodStart := quota.PeriodStart(l, now)
+
+	if l.Metric == core.MetricCost {
+		rt.chargeCost(ep, rbody, creq, limitKey, periodStart, now)
+		return
+	}
 
 	var d quota.Counters
 	var estimated int64
@@ -53,12 +60,101 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 	case core.MetricTokens:
 		d, estimated = tokenCharge(rbody, creq)
 	default:
-		// config validation only ever admits requests|tokens in P1; an
+		// config validation only ever admits requests|tokens|cost; an
 		// unreachable metric value here (e.g. a hand-built core.Limit in a
 		// test) is a no-op, not a panic.
 		return
 	}
+	// model_multipliers is only ever configured on a requests/tokens
+	// account (config.validate() rejects it on a cost-only account — see
+	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2④), so this never
+	// runs for the MetricCost branch above — deliberately: applyModelMultiplier
+	// rebuilds a fresh quota.Counters that would silently zero out a Cost
+	// field if it ever ran after chargeCost had set one.
+	d, estimated = applyModelMultiplier(ep, d, estimated)
 	rt.Quota.Charge(ep.Provider, limitKey, periodStart, d, estimated)
+}
+
+// chargeCost (P2.2) is chargeQuota's metric: cost path: meters the same raw
+// token components tokenCharge always computes, prices them through
+// ep.PricingRate at the CHARGE-TIME timestamp (pricing.RateAt — see its doc
+// comment for why "the rate right now" and not a pre-resolved constant),
+// and writes the resulting $ amount into Counters.Cost — computed once,
+// here, and never recomputed later from raw tokens (see
+// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §1.4/§6.2: a price table that
+// changes over time means only charge time can correctly answer "what was
+// this worth").
+func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, limitKey string, periodStart, now time.Time) {
+	d, estimatedTokens := tokenCharge(rbody, creq)
+	rate := pricing.RateAt(ep.PricingRate, now)
+	d.Cost = componentCost(d, rate)
+	rt.Quota.Charge(ep.Provider, limitKey, periodStart, d, estimatedTokens)
+	if estimatedTokens != 0 {
+		// The whole charge came from a degraded token estimate (see
+		// tokenCharge's doc comment: its degraded path always sets
+		// estimated to exactly Fresh+Out, never a partial value), so the
+		// $ amount computed from it is entirely an estimate too.
+		rt.Quota.AddEstimatedCost(ep.Provider, limitKey, periodStart, d.Cost)
+	}
+}
+
+// componentCost prices d's four raw components through rate — see
+// pricing.Rate.Cost for the shared formula (also used by
+// internal/report/cost.go's costFor) and the nil-component/AllPathsComplete
+// reasoning.
+func componentCost(d quota.Counters, rate pricing.Rate) float64 {
+	return rate.Cost(d.Fresh, d.CacheRead, d.CacheWrite, d.Out)
+}
+
+// applyModelMultiplier scales d (and its accompanying degraded-estimate
+// marker) by ep's account-level model_multipliers, resolved for ep.Model —
+// exact match first, "*" wildcard second, 1.0 (no scaling) otherwise. This
+// MUST happen at charge time, not read time — see core.QuotaSpec's doc
+// comment on ModelMultipliers for why: quota.Counters aggregates per
+// provider, not per model, so once a charge lands there is no way to later
+// recover which slice of a read came from which upstream model.
+//
+// Every component (including Requests) is scaled and rounded UP
+// (math.Ceil): a non-integer multiplier (nothing in the design rules that
+// out) must round toward "counts as more consumption", the safe direction —
+// rounding down could let an already-multiplied-up model's calls be
+// under-counted relative to the account's real usage.
+func applyModelMultiplier(ep *core.Endpoint, d quota.Counters, estimated int64) (quota.Counters, int64) {
+	mult := modelMultiplier(ep)
+	if mult == 1.0 {
+		return d, estimated
+	}
+	return quota.Counters{
+		Fresh:      ceilScale(d.Fresh, mult),
+		CacheRead:  ceilScale(d.CacheRead, mult),
+		CacheWrite: ceilScale(d.CacheWrite, mult),
+		Out:        ceilScale(d.Out, mult),
+		Requests:   ceilScale(d.Requests, mult),
+	}, ceilScale(estimated, mult)
+}
+
+// modelMultiplier resolves ep's charge-time scaling factor: an exact
+// ep.Model match in ep.Quota.ModelMultipliers, else its "*" wildcard entry,
+// else 1.0 (no scaling — the zero-config default, and also what an account
+// with no model_multipliers configured at all gets, since ep.Quota.
+// ModelMultipliers is then a nil map).
+func modelMultiplier(ep *core.Endpoint) float64 {
+	if ep.Quota == nil || len(ep.Quota.ModelMultipliers) == 0 {
+		return 1.0
+	}
+	if m, ok := ep.Quota.ModelMultipliers[ep.Model]; ok {
+		return m
+	}
+	if m, ok := ep.Quota.ModelMultipliers["*"]; ok {
+		return m
+	}
+	return 1.0
+}
+
+// ceilScale multiplies v by mult and rounds up — see applyModelMultiplier's
+// doc comment for why the rounding direction is deliberate, not incidental.
+func ceilScale(v int64, mult float64) int64 {
+	return int64(math.Ceil(float64(v) * mult))
 }
 
 // tokenCharge computes one response's token consumption: the upstream's own
@@ -72,16 +168,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 // token-metered account's numbers.
 func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters, int64) {
 	if u, ok := rbody.Usage(); ok {
-		fresh := u.In - u.CacheRead - u.CacheWrite
-		if fresh < 0 {
-			// Defensive only: would require an upstream usage object whose
-			// reported cache components exceed its reported total. Charging
-			// 0 rather than a negative fresh count keeps Counters
-			// non-negative without discarding the (still valid) cache
-			// figures alongside it.
-			fresh = 0
-		}
-		return quota.Counters{Fresh: fresh, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out}, 0
+		return quota.Counters{Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out}, 0
 	}
 	// Degraded: request-side reuses the cheap pre-routing estimate every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
@@ -99,18 +186,36 @@ func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters
 	return quota.Counters{Fresh: inEst, Out: outEst}, inEst + outEst
 }
 
-// baseAmount applies P1's base(metric) formula to a raw Counters value —
-// requests: the count itself; tokens: the equal-weighted sum of all four
-// components (token_weights all 1.0 is P1's implicit, zero-config default —
-// see the design doc's Metering section). Shared by QuotaStatus (below,
-// for /admin/status) and reorderByQuota (decision time) so "how much has
-// this account used, in its own metric's unit" has exactly one formula.
-func baseAmount(metric core.QuotaMetric, c quota.Counters) float64 {
-	switch metric {
+// baseAmount applies base(metric) to a raw Counters value — requests: the
+// count itself; tokens: spec.TokenWeights' four-component weighted sum
+// (token_weights all 1.0 — core.DefaultTokenWeight — is the zero-config
+// default, so an unconfigured account gets P1's plain equal-weighted sum
+// back exactly). Shared by QuotaStatus (below, for /admin/status) and
+// reorderByQuota (decision time) so "how much has this account used, in its
+// own metric's unit" has exactly one formula.
+//
+// Reads the metric off spec.Limits[0] rather than taking it as a separate
+// parameter: P1/P2.1 both guarantee exactly one Limit per provider (see
+// chargeQuota's own comment), so spec already carries it — every call site
+// already has spec in hand (ep.Quota) at the point it used to look up l.Metric
+// itself. spec must be non-nil; every call site is already guarded by an
+// ep.Quota==nil / len(Limits)==0 check upstream (chargeQuota, QuotaStatus,
+// scoreForEndpoint).
+func baseAmount(spec *core.QuotaSpec, c quota.Counters) float64 {
+	switch spec.Limits[0].Metric {
 	case core.MetricRequests:
 		return float64(c.Requests)
 	case core.MetricTokens:
-		return float64(c.Fresh + c.CacheRead + c.CacheWrite + c.Out)
+		w := spec.TokenWeights
+		return float64(c.Fresh)*w.InFresh + float64(c.CacheRead)*w.CacheRead +
+			float64(c.CacheWrite)*w.CacheWrite + float64(c.Out)*w.Out
+	case core.MetricCost:
+		// Counters.Cost is already the final $ amount, computed once at
+		// charge time (see chargeCost) — never re-derived here from raw
+		// tokens, which is the whole point of storing it pre-computed (see
+		// core.Counters' doc comment on why cost is the one exception to
+		// "store raw, weight on read").
+		return c.Cost
 	default:
 		return 0
 	}
@@ -136,16 +241,41 @@ type QuotaProviderStatus struct {
 	PeriodStart  time.Time `json:"period_start"`
 	PeriodEndsAt time.Time `json:"period_ends_at"`
 	// EstimatedPct is 0 for metric=requests (always exact) and for a
-	// tokens account whose usage has been fully sniffed from upstream
-	// responses — the fraction of Used that came from the degraded
-	// byte-count fallback instead (see tokenCharge). The one signal an
-	// operator has for how much to trust Used/Pct for this account.
+	// tokens/cost account whose usage has been fully sniffed from upstream
+	// responses — otherwise the percentage of this period's consumption
+	// that came from the degraded byte-count fallback instead (see
+	// tokenCharge). The one signal an operator has for how much to trust
+	// Used/Pct for this account. Computed against the matching unit for
+	// each metric (raw tokens for tokens, money for cost — see
+	// QuotaStatus), NOT against Used, which has base(metric) applied.
 	EstimatedPct float64 `json:"estimated_pct"`
 	Fresh        int64   `json:"fresh"`
 	CacheRead    int64   `json:"cache_read"`
 	CacheWrite   int64   `json:"cache_write"`
 	Out          int64   `json:"out"`
 	Requests     int64   `json:"requests"`
+
+	// TokenWeights/ModelMultipliers surface the account-level modifiers
+	// currently in effect (P2.1) — the design doc's Observability section
+	// calls this out explicitly: "a promotional multiplier left configured
+	// after it expired is a foreseeable failure mode, and showing the
+	// effective value is the cheapest guard against it." TokenWeights is
+	// always populated (defaults to all core.DefaultTokenWeight when
+	// unconfigured); ModelMultipliers is omitted entirely when the account
+	// has none configured.
+	TokenWeights     TokenWeightsView   `json:"token_weights"`
+	ModelMultipliers map[string]float64 `json:"model_multipliers,omitempty"`
+}
+
+// TokenWeightsView is core.TokenWeights with JSON tags — kept separate from
+// core.TokenWeights itself so internal/core stays free of any
+// presentation/encoding concern (see CLAUDE.md's module map: core is "shared
+// types", not a serialization layer).
+type TokenWeightsView struct {
+	InFresh    float64 `json:"in_fresh"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+	Out        float64 `json:"out"`
 }
 
 // QuotaStatus reports every quota-configured provider's live state, sorted
@@ -181,19 +311,48 @@ func (rt *Router) QuotaStatus() []QuotaProviderStatus {
 				periodStart := quota.PeriodStart(l, now)
 				periodEnd := quota.PeriodEnd(l, now)
 				c, estimated := rt.Quota.Used(ep.Provider, limitKey, periodStart)
-				used := baseAmount(l.Metric, c)
+				used := baseAmount(ep.Quota, c)
 				var pct, estPct float64
 				if l.Amount > 0 {
 					pct = used / l.Amount * 100
 				}
-				if used > 0 {
-					estPct = float64(estimated) / used * 100
+				// Every metric's estimate share is a ratio of two
+				// numbers in the SAME unit — which is not `used` for
+				// either non-requests metric, since `used` has already
+				// had base(metric) applied to it:
+				//   cost   — `estimated` is a raw token count; the $
+				//            estimate share lives in EstimatedCost.
+				//   tokens — `estimated` is the raw (unweighted) token
+				//            count charged by tokenCharge's degraded
+				//            path, while `used` is the token_weights-
+				//            weighted sum. Dividing one by the other
+				//            reports a wrong share the moment any weight
+				//            isn't 1.0 (a 5x `out` weight would report a
+				//            fully-estimated period as 20% estimated).
+				//            The raw four-component total is the matching
+				//            denominator — both sides are then the same
+				//            unweighted (but equally model_multiplier-
+				//            scaled) token count.
+				switch l.Metric {
+				case core.MetricCost:
+					if used > 0 {
+						estPct = rt.Quota.EstimatedCostFor(ep.Provider, limitKey, periodStart) / used * 100
+					}
+				case core.MetricTokens:
+					if rawTokens := float64(c.Fresh + c.CacheRead + c.CacheWrite + c.Out); rawTokens > 0 {
+						estPct = float64(estimated) / rawTokens * 100
+					}
 				}
 				out = append(out, QuotaProviderStatus{
 					Provider: ep.Provider, Metric: string(l.Metric), Every: l.EveryText, Amount: l.Amount,
 					Used: used, Pct: pct, Headroom: quota.ScoreForLimit(l, used, now),
 					PeriodStart: periodStart, PeriodEndsAt: periodEnd, EstimatedPct: estPct,
 					Fresh: c.Fresh, CacheRead: c.CacheRead, CacheWrite: c.CacheWrite, Out: c.Out, Requests: c.Requests,
+					TokenWeights: TokenWeightsView{
+						InFresh: ep.Quota.TokenWeights.InFresh, CacheRead: ep.Quota.TokenWeights.CacheRead,
+						CacheWrite: ep.Quota.TokenWeights.CacheWrite, Out: ep.Quota.TokenWeights.Out,
+					},
+					ModelMultipliers: ep.Quota.ModelMultipliers,
 				})
 			}
 		}
@@ -293,5 +452,5 @@ func scoreForEndpoint(ep *core.Endpoint, reg *quota.Registry, now time.Time) flo
 	l := ep.Quota.Limits[0] // P1: exactly one Limit per provider (see chargeQuota's own comment)
 	limitKey := string(l.Metric) + "/" + l.EveryText
 	c, _ := reg.Used(ep.Provider, limitKey, quota.PeriodStart(l, now))
-	return quota.ScoreForLimit(l, baseAmount(l.Metric, c), now)
+	return quota.ScoreForLimit(l, baseAmount(ep.Quota, c), now)
 }

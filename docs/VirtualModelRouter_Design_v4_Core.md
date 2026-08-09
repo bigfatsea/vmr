@@ -88,7 +88,7 @@ Client ── POST /v1/chat/completions | /v1/messages
 Server     审计记录开始 → 鉴权(可选) → 缓冲请求体(≤8MB,413) → 并发闸
   │        → 图片降采样(可选) → 解析 model/stream，其余字节不动 → 计算 RequestFacts
   ▼
-Router     查 Virtual Model → 校验协议 → 健康过滤 → 条件过滤 → 稳定多键排序 → 会话亲和重排 → 候选序列
+Router     查 Virtual Model → 校验协议 → 健康过滤 → 条件过滤 → 稳定多键排序 → 额度感知重排 → 会话亲和重排 → 候选序列
   │
   ▼ failover 循环（每个可用候选各试一次，直到成功或候选耗尽；max_attempts 可选设上限）
 Adapter    BuildRequest：改 URL / 注入 Key / 改写 model 字段（其余透传）
@@ -103,7 +103,7 @@ Upstream   ├─ 2xx → 响应归一化 → 转发 → 上报健康成功 → 
 
 * **请求体一律入口缓冲**（流式也是）：failover 重放的前提。
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
-* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503，消息按具体原因区分（全员冷却中、或某个 Condition 拒绝了全部候选，见「调度与健康」）。凡进入 failover 循环的响应带 `X-VMR-Attempts` 与 `X-VMR-Route-Reason`（成功另带 `X-VMR-Endpoint`），有过失败尝试时再带 `X-VMR-Failover`；路由之前被拒的请求（401/404/413/坏 JSON）不带。`X-VMR-Route-Reason` 形如 `pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1`，只印真正发生过的部分（最常见的按序选中只剩 `pick=order eligible=3/3`）；`X-VMR-Failover` 形如 `deepseek/deepseek-v4:429, minimax/m2:500`，无 HTTP 响应的构建/网络失败记 `:err`。两者都沿用既有的 `X-VMR-*` 例外（§5.4），内容不超出 `X-VMR-Endpoint` 已暴露的范围。**实现约束**：`X-VMR-Failover` 必须在每次尝试**之前**写入截至目前的失败——成功的那次尝试在 `forwardSuccess` 内部自行 `WriteHeader` 后直接返回，不再回到 `Serve`，循环后才写就只有全败路径生效。
+* **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503，消息按具体原因区分（全员冷却中、或某个 Condition 拒绝了全部候选，见「调度与健康」）。凡进入 failover 循环的响应带 `X-VMR-Attempts` 与 `X-VMR-Route-Reason`（成功另带 `X-VMR-Endpoint`），有过失败尝试时再带 `X-VMR-Failover`；路由之前被拒的请求（401/404/413/坏 JSON）不带。`X-VMR-Route-Reason` 形如 `pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1`，`pick` 三选一（`order`/`quota`/`sticky`，优先级依次升高——额度感知重排真正换了队首时给 `pick=quota`，见 §6.6），只印真正发生过的部分（最常见的按序选中只剩 `pick=order eligible=3/3`）；`X-VMR-Failover` 形如 `deepseek/deepseek-v4:429, minimax/m2:500`，无 HTTP 响应的构建/网络失败记 `:err`。两者都沿用既有的 `X-VMR-*` 例外（§5.4），内容不超出 `X-VMR-Endpoint` 已暴露的范围。**实现约束**：`X-VMR-Failover` 必须在每次尝试**之前**写入截至目前的失败——成功的那次尝试在 `forwardSuccess` 内部自行 `WriteHeader` 后直接返回，不再回到 `Serve`，循环后才写就只有全败路径生效。
 
 * **`role_map`：按 endpoint-group 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。`models.<name>.endpoints[]` 的某条 entry 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 endpoint-group 一级而非 provider——同一账号可能背靠不止一个虚拟模型/上游模型族，不见得都需要同一套改写规则；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.EndpointGroup.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
@@ -118,7 +118,7 @@ cmd/vmr                    CLI（stdlib flag），一命令一文件：main.go�
 internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass、Endpoint（无依赖的共享类型；HealthKey()/Name() 由 BuildSnapshot 调 Freeze() 预计算一次，见 §11"无中心 IR"决策行）+ FilterClientHeaders（header 黑名单，server/replay 共用）
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
-internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch；quota.go：Provider.Quota 的 YAML 形状（QuotaConfig/LimitConfig）与校验（P1 范围之外的字段一律加载期报错，见 §6.6）
+internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch；quota.go：Provider.Quota 的 YAML 形状（QuotaConfig/LimitConfig）与校验（P1/P3 范围之外的字段一律加载期报错，见 §6.6）；pricing.go（P2.2）：全局 `pricing:` 块与 `Provider.Pricing` 的 YAML 形状，`validate()` 阶段调 `internal/pricing` 做三层解析，`metric: cost` 账号的四分量费率不齐即加载期报错
 internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写/role 改写（classify.go 的 `rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）；fingerprint.go：SessionFingerprint（Sticky Model 用，按协议分派，含 openai-responses 的 instructions+input 分支）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
 internal/adapter/openai    OpenAI Chat Completions 协议透传 Adapter
 internal/adapter/anthropic Anthropic Messages 协议透传 Adapter
@@ -127,7 +127,8 @@ internal/health            失败驱动的健康状态机（冷却、退避、�
 internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）；`Request`（messages 形状）与 `ResponsesRequest`（input 形状）按端点协议由调用方分派，body 形状必须匹配协议，否则半开端点的后台恢复探测会被上游当坏请求拒绝、永久锁在半开态
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
-internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
+internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——费率随时间变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
+internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/RateAt/GuaranteedRate/AllPathsComplete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard.generated.yaml + standard.curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
@@ -136,7 +137,7 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newRespStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）
   ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
   ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
-  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge（成功响应计费）、reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排）、QuotaStatus（/admin/status 用）
+  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge（成功响应计费，requests/tokens）、chargeCost/componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）、reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
 internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -472,11 +473,13 @@ Compaction（上下文压缩）场景下机制依然成立：压缩本身就会�
 
 **只重排、从不淘汰**：候选集大小不变，failover 语义完全不受影响；额度耗尽的账号只是排到梯队末位，不会从候选列表里消失，其它候选全部不可用时仍然会被尝试。额度耗尽也**不会**触发 `internal/health` 的冷却——计数器是本地估算值，按估算值执行破坏性动作（熔断）等于自制故障；真正的耗尽硬信号是上游返回的 402/429，已经由 6.2 节的 `ErrEndpoint`/`ErrRateLimit` 分类与冷却机制覆盖，两套机制各管各的，不交叉。
 
-**计量**：本批（P1）只支持 `metric: requests`（计数 +1，零解析成本）与 `metric: tokens`（输入输出等权求和，优先用上游返回的 usage 字段，拿不到时降级为按字节数估算并标记 `estimated_pct`）；`metric: cost`（Credits/金额，需要分量费率表）、多层窗口并存、`rolling` 滚动窗口、按模型的 `models:` 子额度都在后续批次交付，本批配置里写了会在加载期直接报错，不会静默忽略。
+**计量**：三档 metric 均已交付。`metric: requests`（计数 +1，零解析成本）与 `metric: tokens`（四分量求和，优先用上游返回的 usage 字段，拿不到时降级为按字节数估算并标记 `estimated_pct`；四分量的账号级权重 `token_weights` 在**读取时**套用，缺省全 1.0 等价于 P1 的等权求和）属 P1/P2.1；`metric: cost`（按 `internal/pricing` 解析出的分量费率，在**计费时**把 $ 金额算好写入 `Counters.Cost`，事后改价不影响已记录历史）属 P2.2，见下方"定价"一段。账号级 `model_multipliers`（按上游模型的整体倍率，只作用于 `requests`/`tokens`，在**计费时**套用）属 P2.1。多条 Limit 并存、`rolling` 滚动窗口、按模型的 `models:` 子额度仍未交付（P3），本批配置里写了会在加载期直接报错，不会静默忽略。
 
-**架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
+**定价（P2.2）**：`metric: cost` 的分量费率来自新增叶子包 `internal/pricing`——内置标准价目表（`go:embed` 的 `standard.generated.yaml`，由 `tools/gen_standard_pricing` 从 LiteLLM 快照生成 + 手工维护的 `standard.curated.yaml` 补国产第一方厂商）叠加用户在 `config.yaml` 里的 `pricing.supplement`/`providers[].pricing`（`map`/`overrides`，含 `discount`/显式费率/`date_*`/`hour_*` 时间窗）。`internal/config` 在 `validate()` 阶段完成三层解析并要求每个 `metric: cost` 账号的每个上游模型在**任意**可能命中的时间窗下都解析出四分量齐全的费率（缺失按"更危险"处理，绝不当 0），解析结果随 `core.Endpoint.PricingRate` 进 Snapshot——费率是模型级属性，不像 `QuotaSpec` 那样整个账号共享一个指针。原先独立维护的 `pricing.yaml`/`vmr report -pricing` 已废弃，迁移进 `config.yaml`。
 
-完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；本批（P1）的落地范围与验收标准：`docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`。
+**架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行）+ `internal/pricing`（同层、只依赖 `core`），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
+
+完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；各批落地范围与验收证据：`docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`（P1）、`docs/TokenPlan_Quota_P2_DevPlan_opus-5.md`（P2.1/P2.2）；当前交付状态总览：`docs/TokenPlan_Quota_Status_opus-5.md`。
 
 ---
 
