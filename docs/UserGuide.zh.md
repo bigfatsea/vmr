@@ -232,7 +232,7 @@ providers:
 
 没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
 
-**目前交付的范围**（P1 + P2.1，原因见 `docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`/`docs/TokenPlan_Quota_P2_DevPlan_opus-5.md`）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（P2.2——见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
+**目前交付的范围**（完整现状见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`「现状与后续计划」一节）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
 
 **`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/admin/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
 

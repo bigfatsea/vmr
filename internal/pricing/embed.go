@@ -19,12 +19,11 @@ var standardGeneratedYAML []byte
 
 // standardCuratedYAML is hand-maintained — primarily first-party domestic
 // vendor rows the generated table under-covers (see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §13 "标准表对国产第一方
-// 覆盖不全" limitation). Starts empty (see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's S6: "standard.curated.yaml
-// 起始可以是空文件") rather than with fabricated numbers — an unverified
-// price is worse than an absent one, per this whole package's "missing beats
-// wrong" stance. tools/gen_standard_pricing must NEVER write to this file.
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "范围边界与已知限制"
+// section, "标准表对国产第一方覆盖不全" row). Starts empty rather than with
+// fabricated numbers — an unverified price is worse than an absent one, per
+// this whole package's "missing beats wrong" stance.
+// tools/gen_standard_pricing must NEVER write to this file.
 //
 //go:embed standard_price_curated.yaml
 var standardCuratedYAML []byte

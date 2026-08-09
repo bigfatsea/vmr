@@ -6,8 +6,8 @@
 // out of router.go on purpose — see internal/archtest's line-count budget
 // for that file — so this feature's decision logic never has to compete
 // with the failover loop for that budget. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and
-// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for what P1 actually delivers.
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// "现状与后续计划" section for what's actually shipped.
 package router
 
 import (
@@ -80,10 +80,9 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 // ep.PricingRate at the CHARGE-TIME timestamp (pricing.RateAt — see its doc
 // comment for why "the rate right now" and not a pre-resolved constant),
 // and writes the resulting $ amount into Counters.Cost — computed once,
-// here, and never recomputed later from raw tokens (see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §1.4/§6.2: a price table that
-// changes over time means only charge time can correctly answer "what was
-// this worth").
+// here, and never recomputed later from raw tokens (see the design doc's
+// "9.2 运行态" section: a price table that changes over time means only
+// charge time can correctly answer "what was this worth").
 func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, limitKey string, periodStart, now time.Time) {
 	d, estimatedTokens := tokenCharge(rbody, creq)
 	rate := pricing.RateAt(ep.PricingRate, now)

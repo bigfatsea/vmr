@@ -79,9 +79,8 @@ type Provider struct {
 	APIKey  string            `yaml:"api_key"`
 	Proxy   bool              `yaml:"proxy"`
 	// Quota declares this account's usage-plan limit(s) for Quota-Aware
-	// Routing (see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
-	// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for what this release
-	// actually supports). nil = unmetered — no behavior change from before
+	// Routing (see docs/TokenPlan_Quota_Routing_Design_opus-5.md, and its
+	// "现状与后续计划" section for what's actually shipped). nil = unmetered — no behavior change from before
 	// this field existed. A pointer, not a value, so "absent" and "present
 	// but empty" are distinguishable — the latter is a validation error
 	// (quota: with no limits: is almost certainly a mistake), not a silent

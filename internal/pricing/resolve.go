@@ -32,9 +32,8 @@ func (o OverrideRule) matchesModel(model string) bool {
 
 // matchesTime reports whether ts falls inside o's optional date/hour
 // window — ported byte-for-byte from the old internal/report/pricing.go's
-// PricingRate.matches (already exercised in production; see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's S5 "migrate, don't rewrite").
-// ts is converted to fmtutil.DisplayZone up front so a record's own
+// PricingRate.matches (already exercised in production, so migrated as-is
+// rather than rewritten). ts is converted to fmtutil.DisplayZone up front so a record's own
 // embedded offset never silently shifts which window a request falls into
 // — the same reasoning core.Endpoint.HealthKey-adjacent code already
 // documents for every other DisplayZone consumer.
@@ -221,9 +220,8 @@ func RateAt(spec *core.PricingSpec, ts time.Time) Rate {
 // at all (since a windowed one might not be active at an arbitrary future
 // charge time). This is what config.validate() checks Complete() against
 // for a metric: cost account: a temporary promotional override is a bonus
-// layered on top of real coverage, never a substitute for it (see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §6.3). nil-safe: a nil spec
-// returns the zero Rate.
+// layered on top of real coverage, never a substitute for it. nil-safe: a
+// nil spec returns the zero Rate.
 func GuaranteedRate(spec *core.PricingSpec) Rate {
 	if spec == nil {
 		return Rate{}

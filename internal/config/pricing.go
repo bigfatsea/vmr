@@ -1,10 +1,10 @@
 // Ver 2026-08-07, by Opus 5
 
 // Pricing (P2.2) YAML-shape config types and their validation/resolution —
-// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2①/§9.1 for the
-// full design and docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §3.3/§6 for
-// what this batch delivers. Split from config.go per that file's own
-// line-count budget (see quota.go's identical rationale).
+// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's pricing sections
+// (config shape, three-layer resolution, "现状与后续计划" for what's
+// actually shipped) for the full design. Split from config.go per that
+// file's own line-count budget (see quota.go's identical rationale).
 package config
 
 import (

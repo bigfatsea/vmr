@@ -134,9 +134,8 @@ providers:
     #                            # 没必要专门写出来）。
     #
     # quota：额度感知路由（Quota-Aware Routing）——完整设计见
-    # docs/TokenPlan_Quota_Routing_Design_opus-5.md，P1 见
-    # docs/TokenPlan_Quota_P1_DevPlan_opus-5.md，P2（本次发布）见
-    # docs/TokenPlan_Quota_P2_DevPlan_opus-5.md。不写 = 不计量，行为完全不变。
+    # docs/TokenPlan_Quota_Routing_Design_opus-5.md，当前实际落地状态见该文档
+    # 「现状与后续计划」一节。不写 = 不计量，行为完全不变。
     # 当多个 provider 各自都配了 quota: 时，vmr 会把新会话优先导向"相对于当前
     # 账单周期已经过去的比例而言，余量最充裕"的那个账号——不是绝对剩余额度最多
     # 的那个（一个即将重置的套餐"赢面"要小于一个额度还没用完、但即将过期的套餐）。

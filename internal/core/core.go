@@ -290,10 +290,11 @@ const (
 	MetricRequests QuotaMetric = "requests"
 	MetricTokens   QuotaMetric = "tokens"
 	// MetricCost is P2.2's Credits/money-denominated metric — see
-	// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §3.3. Charging it needs a
-	// resolved Endpoint.PricingRate; config.validate() rejects a metric:
-	// cost Limit on any provider+model that doesn't resolve one with every
-	// component present (see PricingSpec/Rate's doc comments).
+	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's pricing/cost sections.
+	// Charging it needs a resolved Endpoint.PricingRate; config.validate()
+	// rejects a metric: cost Limit on any provider+model that doesn't
+	// resolve one with every component present (see PricingSpec/Rate's doc
+	// comments).
 	MetricCost QuotaMetric = "cost"
 )
 
@@ -378,13 +379,12 @@ type PricingOverride struct {
 	// Discount, when non-nil, means "the rate that resolves BELOW this rule
 	// in the chain, scaled by this factor" — NOT always PricingSpec.Base
 	// directly: "below" can be another, more specific Override (see
-	// internal/pricing.RateAt/resolveChain's doc comments, and
-	// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §11.2 for the bug this
-	// distinction fixes — an earlier implementation folded a discount
-	// straight onto Base and double-applied it whenever two discount rules
-	// were stacked). Explicit, when Discount is nil, is used as-is. Discount
-	// and Explicit are mutually exclusive by construction — internal/
-	// pricing's config-time resolution never produces one with both set.
+	// internal/pricing.RateAt/resolveChain's doc comments — folding a
+	// discount straight onto Base instead of the chain below it double-
+	// applies it whenever two discount rules are stacked). Explicit, when
+	// Discount is nil, is used as-is. Discount and Explicit are mutually
+	// exclusive by construction — internal/pricing's config-time resolution
+	// never produces one with both set.
 	Discount         *float64
 	Explicit         Rate
 	DateFrom, DateTo string // "2026-06-08" form, empty = unbounded
@@ -397,15 +397,16 @@ type PricingOverride struct {
 // or more time-scoped Overrides layered on top, evaluated in written order
 // at charge time. Attached per-Endpoint (not per-account, unlike QuotaSpec)
 // because price is inherently model-scoped — see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §6.3 for why this couldn't be
-// shared the way QuotaSpec is.
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section
+// ("定价解析结果的挂点不一样") for why this couldn't be shared the way
+// QuotaSpec is.
 //
 // Why Base can't just be a single resolved core.Rate computed once at
 // config-load time: PricingRate.DateFrom/HourFrom-style windows mean the
 // effective rate can differ moment to moment (a promotional discount, a
-// peak-hour surcharge — see the design doc's §4.2④/⑨), so charge time must
-// still pick among Overrides using the actual request timestamp. See
-// internal/pricing.RateAt.
+// peak-hour surcharge — see the design doc's discount/promo-window
+// discussion), so charge time must still pick among Overrides using the
+// actual request timestamp. See internal/pricing.RateAt.
 type PricingSpec struct {
 	Base      Rate
 	Overrides []PricingOverride
@@ -421,17 +422,18 @@ type PricingSpec struct {
 //
 //   - TokenWeights scales a tokens-metric Limit's four components when read
 //     (applied in baseAmount, at read time — see
-//     docs/TokenPlan_Quota_Routing_Design_opus-5.md's §9.2 "store raw
-//     components, apply policy on read" principle, which holds for this
-//     field).
+//     docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section
+//     for the "store raw components, apply policy on read" principle, which
+//     holds for this field).
 //   - ModelMultipliers scales EVERY component (including Requests) of a
 //     charge by the upstream model actually hit, keyed by that model name
 //     with an optional "*" wildcard fallback; nil/absent-key means 1.0 (no
 //     scaling). Unlike TokenWeights, this one is applied at CHARGE time, not
-//     read time — see docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §1.3 for
-//     why: quota.Counters aggregates per-provider, not per-model, so once a
-//     charge lands there is no way to recover which slice of a later read
-//     came from which upstream model to multiply retroactively.
+//     read time — see the same "9.2 运行态" section's model_multipliers
+//     discussion for why: quota.Counters aggregates per-provider, not
+//     per-model, so once a charge lands there is no way to recover which
+//     slice of a later read came from which upstream model to multiply
+//     retroactively.
 type QuotaSpec struct {
 	Limits           []Limit
 	TokenWeights     TokenWeights

@@ -479,7 +479,9 @@ Compaction（上下文压缩）场景下机制依然成立：压缩本身就会�
 
 **架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行）+ `internal/pricing`（同层、只依赖 `core`），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
 
-完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；各批落地范围与验收证据：`docs/TokenPlan_Quota_P1_DevPlan_opus-5.md`（P1）、`docs/TokenPlan_Quota_P2_DevPlan_opus-5.md`（P2.1/P2.2）；当前交付状态总览：`docs/TokenPlan_Quota_Status_opus-5.md`。
+完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据、各批落地范围与验收证据）见
+`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；当前逐项落地状态、已知缺口与后续建议见该文档的
+「现状与后续计划」一节。
 
 ---
 

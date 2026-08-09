@@ -1,10 +1,9 @@
 // Ver 2026-08-07, by Opus 5
 
 // Quota-Aware Routing's YAML-shape config types and their validation — see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and
-// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for what P1 actually delivers.
-// Split from config.go per that dev plan's file-size budget (config.go
-// already has its own archtest line-count budget).
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// "现状与后续计划" section for what's actually shipped. Split from
+// config.go per its own archtest line-count budget.
 package config
 
 import (
@@ -199,7 +198,7 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 		return fmt.Errorf("provider %q: quota.limits: at least one entry required when quota: is set", providerName)
 	}
 	if len(qc.Limits) > 1 {
-		return fmt.Errorf("provider %q: quota.limits: %d entries given, but only one is supported in this release — multi-window quota is planned for a later batch (see docs/TokenPlan_Quota_P1_DevPlan_opus-5.md)", providerName, len(qc.Limits))
+		return fmt.Errorf("provider %q: quota.limits: %d entries given, but only one is supported in this release — multi-window quota is planned for a later batch (see docs/TokenPlan_Quota_Routing_Design_opus-5.md)", providerName, len(qc.Limits))
 	}
 	seen := map[string]bool{}
 	hasTokensLimit := false
@@ -234,8 +233,8 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 			return fmt.Errorf("provider %q: quota.model_multipliers[%q]: must be a finite number > 0 (got %v)", providerName, model, qc.ModelMultipliers[model])
 		}
 	}
-	// model_multipliers is a pure accounting-unit concept (§4.2④ of the
-	// design doc) — it only ever multiplies a requests/tokens Limit's
+	// model_multipliers is a pure accounting-unit concept (see the design
+	// doc's "折扣与促销归入价格层" section) — it only ever multiplies a requests/tokens Limit's
 	// base(metric). An account whose only Limit is metric: cost gets its
 	// entire price differentiation from providers[].pricing instead
 	// (per-model rates), so a model_multipliers block there would be
@@ -249,13 +248,13 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 }
 
 // validate checks one LimitConfig and, on success, fills in Resolved. Every
-// P1-unsupported knob (cost metric, rolling windows, per-model scope) is
-// rejected here with a message that names the capability and says it's
-// planned, not "invalid" or "unsupported forever" — see
-// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md's §2.2, which treats a silently
-// ignored quota field as the one failure mode this project cannot tolerate
-// (the same fail-fast contract KnownFields already enforces everywhere
-// else in this config).
+// knob not yet supported (rolling windows, per-model scope — cost metric IS
+// supported, see the "cost" case below) is rejected here with a message
+// that names the capability and says it's planned, not "invalid" or
+// "unsupported forever" — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// P3 batch description, which treats a silently ignored quota field as the
+// one failure mode this project cannot tolerate (the same fail-fast
+// contract KnownFields already enforces everywhere else in this config).
 func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) error {
 	switch lc.Metric {
 	case "requests":

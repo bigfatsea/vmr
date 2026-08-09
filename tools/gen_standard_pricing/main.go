@@ -58,8 +58,9 @@ type sourceEntry struct {
 // different (markup or bundled-discount) pricing than the vendor's own API,
 // and including them risks a canonical-key collision silently picking the
 // wrong number for a direct-API account. See
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md §6 for why standard-table
-// coverage is inherently a curated subset, not "every row in the source".
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "标准表以开源参考表的形式维护"
+// section for why standard-table coverage is inherently a curated subset,
+// not "every row in the source".
 var primaryVendors = map[string]bool{
 	"openai": true, "anthropic": true, "gemini": true, "deepseek": true,
 	"moonshot": true, "dashscope": true, "minimax": true, "volcengine": true,

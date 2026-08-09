@@ -162,9 +162,8 @@ limits:
 	}
 }
 
-// TestQuota_TokenWeights_ZeroValueIsNotDefault pins the exact trap the dev
-// plan calls out (docs/TokenPlan_Quota_P2_DevPlan_opus-5.md §5's S1
-// "陷阱提醒"): an account with no token_weights: at all must resolve to
+// TestQuota_TokenWeights_ZeroValueIsNotDefault pins a real footgun: an
+// account with no token_weights: at all must resolve to
 // core.DefaultTokenWeight (1.0) on every component, never Go's TokenWeights{}
 // zero value (all 0), which would silently zero out every tokens-metric
 // account's accounting.

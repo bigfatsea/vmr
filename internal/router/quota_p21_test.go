@@ -1,7 +1,8 @@
 // Ver 2026-08-07, by Opus 5
 
-// Tests for P2.1 (docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's阶段 P2.1):
-// account-level model_multipliers (applied at charge time) and token_weights
+// Tests for P2.1 (see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// "P2 — 计量准确" batch description): account-level model_multipliers
+// (applied at charge time) and token_weights
 // (applied at read time via baseAmount). See quota_charge_test.go/
 // quota_status_test.go for the P1 tests these extend.
 package router

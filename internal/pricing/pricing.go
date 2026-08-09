@@ -1,9 +1,9 @@
 // Ver 2026-08-07, by Opus 5
 
 // Package pricing is Quota-Aware Routing's per-1M-token pricing resolution
-// engine (P2.2 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2①
-// for the three-layer design and docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's
-// §3.3/§6 for what this batch actually delivers). A leaf package: only
+// engine (P2.2 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// "定价分三层" section for the three-layer design and its "现状与后续计划"
+// section for what's actually shipped). A leaf package: only
 // depends on core + stdlib + gopkg.in/yaml.v3, same layer as internal/quota
 // (see that package's own doc comment for the precedent this follows).
 //

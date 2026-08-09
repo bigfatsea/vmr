@@ -9,8 +9,8 @@
 // benchmark profile), because cache reads are typically priced far below
 // fresh input. Unlike the design doc's own two hand-picked examples, this
 // test draws its two fixtures directly from the EMBEDDED standard table
-// (real market data, not synthetic numbers) — see
-// docs/TokenPlan_Quota_P2_DevPlan_opus-5.md's §7 "真实费率夹具" test row.
+// (real market data, not synthetic numbers) — see the design doc's "14.5
+// 测试" section, "三种 metric 的折算" row.
 package pricing
 
 import "testing"

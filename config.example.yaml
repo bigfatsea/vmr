@@ -146,9 +146,8 @@ providers:
     #                            # provider, no need to write this out).
     #
     # quota: Quota-Aware Routing — see docs/TokenPlan_Quota_Routing_Design_opus-5.md
-    # for the full design, docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for P1 and
-    # docs/TokenPlan_Quota_P2_DevPlan_opus-5.md for P2 (this release). Absent =
-    # unmetered, no behavior change. When several providers each carry a quota:,
+    # for the full design and its "现状与后续计划" section for what's actually
+    # shipped. Absent = unmetered, no behavior change. When several providers each carry a quota:,
     # vmr biases new sessions toward whichever account has the most slack
     # relative to how much of its billing period has elapsed — not the most
     # quota left in absolute terms (a plan about to reset "wins" less than one

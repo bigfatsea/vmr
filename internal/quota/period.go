@@ -3,9 +3,10 @@
 // Package quota implements Quota-Aware Routing's accounting half: counting
 // what a provider account has consumed against its configured Limit(s) and
 // computing the headroom score the router reorders candidates by. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and
-// docs/TokenPlan_Quota_P1_DevPlan_opus-5.md for what P1 actually delivers
-// (one Limit per provider, tumbling windows only, requests|tokens metrics).
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// "现状与后续计划" section for what's actually shipped (currently: one
+// Limit per provider, tumbling windows only; multi-window/rolling windows
+// are P3, not yet delivered).
 //
 // Depends only on core + the standard library — no I/O beyond store.go's
 // file persistence, and the period/score math here is pure functions, fully
