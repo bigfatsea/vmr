@@ -412,10 +412,10 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 }
 
 // handleErrorResponse reads, classifies, and records a >=400 upstream
-// response. A content-policy flag or a bad request (ErrClient) never cools
-// the endpoint down — see the per-class comments below; everything else
-// reports failure and lets the caller's failover loop move to the next
-// candidate.
+// response. A content-policy flag, a context-window overflow, or a bad
+// request (ErrClient) never cools the endpoint down — see the per-class
+// comments below; everything else reports failure and lets the caller's
+// failover loop move to the next candidate.
 func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response, ad adapter.Adapter, att *audit.Attempt,
 	logPrefix string, snap *Snapshot, attempt int, start time.Time, key string) (done bool, uerr *upstreamError, success bool) {
 
@@ -449,12 +449,15 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 	}
 	att.SetErrorResponse(resp.Header, auditBody, resp.StatusCode, class)
 
-	if class == core.ErrContent {
-		// Content-policy flag: specific to this request, not this endpoint.
-		// Keep failing over (vendors differ in sensitivity) but leave the
-		// endpoint's health untouched — only release a probe slot if held.
+	if class == core.ErrContent || class == core.ErrContextLimit {
+		// Content-policy flag or context-window overflow: both are facts
+		// about this particular request (vendor sensitivity; this
+		// endpoint's model's window size), not evidence the endpoint is
+		// unhealthy. Keep failing over — another candidate may accept the
+		// content, or have a larger window — but leave the endpoint's
+		// health untouched; only release a probe slot if held.
 		rt.Health.ReportNeutral(key)
-		rt.logf("%s, status=%d, class=content (no cooldown)", logPrefix, resp.StatusCode)
+		rt.logf("%s, status=%d, class=%s (no cooldown)", logPrefix, resp.StatusCode, class)
 		return false, uerr, false
 	}
 	if class == core.ErrClient {

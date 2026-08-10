@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestBuildPricing_NoDisplayCurrency_Unaffected pins the pre-existing
@@ -34,7 +33,7 @@ models:
 	if summary.Currency != "CNY" {
 		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
 	}
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
@@ -72,7 +71,7 @@ models:
 	if summary.Currency != "JPY" {
 		t.Fatalf("summary.Currency = %q, want JPY", summary.Currency)
 	}
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
@@ -112,7 +111,7 @@ models:
 	if summary.Currency != "CNY" {
 		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
 	}
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
@@ -147,7 +146,7 @@ models:
 	if !strings.Contains(tw.String(), "CNY") {
 		t.Errorf("expected a warning mentioning the unresolved target currency, got %q", tw.String())
 	}
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
@@ -166,7 +165,7 @@ func TestBuildPricing_DisplayCurrency_NoConfigReachable(t *testing.T) {
 	if summary.Currency != "JPY" {
 		t.Fatalf("summary.Currency = %q, want JPY", summary.Currency)
 	}
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved (standard table alone should still cover this model)")
 	}

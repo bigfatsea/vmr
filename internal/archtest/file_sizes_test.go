@@ -66,6 +66,14 @@ var fileLineLimits = map[string]int{
 	"internal/story/metrics.go":             470,
 	"internal/story/corpus.go":              380,
 	"internal/story/render_corpus.go":       150,
+	// response.go is the router half's counterpart to report/story's
+	// largest files above: a full response-normalization state machine
+	// (passthrough/buffered/opaque transitions, SSE event splitting,
+	// MiniMax quirk trigger points, quota usage sniffing) with no budget of
+	// its own until an architecture review (2026-08-10) flagged it as the
+	// one large file this table didn't cover — same ~15% first-time
+	// headroom convention as the entries above (736 lines at registration).
+	"internal/router/response.go": 850,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

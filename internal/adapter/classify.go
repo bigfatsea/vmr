@@ -61,6 +61,16 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		if contentHint(snippet) {
 			return core.ErrContent
 		}
+		// Context-window overflow next: OpenAI-shaped context_length_exceeded
+		// wording contains "model" ("this model's maximum context length is
+		// ..."), so it must be checked before the model-unknown rule below or
+		// it would misclassify as ErrEndpoint (still failover-eligible, but
+		// the wrong cooldown treatment — ErrEndpoint cools the endpoint down,
+		// which is wrong for a static per-model property nothing about this
+		// attempt changed).
+		if contextLimitHint(snippet) {
+			return core.ErrContextLimit
+		}
 		// A wrong model name is a per-endpoint config error where switching helps.
 		if strings.Contains(snippet, "model") &&
 			containsAny(snippet, "unknown", "not found", "not_found", "does not exist", "invalid model", "supported") {
@@ -94,6 +104,43 @@ func upstreamHint(snippet string) bool {
 	return containsAny(snippet,
 		"upstream request failed", "upstream error", "upstream connect error",
 		"error from provider", "bad gateway", "gateway timeout")
+}
+
+// contextLimitHint spots a genuine "conversation/prompt exceeds this
+// endpoint's context window" rejection across vendors (EN + ZH wording,
+// same "lean wide" reasoning as contentHint: a false positive only costs
+// one harmless extra failover, a miss dead-ends a failover walk that could
+// have succeeded on a candidate with a larger window). Checked AFTER
+// maxOutputHint: a request's own max_tokens/output-length parameter being
+// set larger than this endpoint allows is a different failure mode —
+// switching endpoints can't fix a client-supplied number, so that case
+// stays ErrClient (see maxOutputHint's own doc comment).
+func contextLimitHint(snippet string) bool {
+	if maxOutputHint(snippet) {
+		return false
+	}
+	return containsAny(snippet,
+		"context_length_exceeded", "context_window_exceeded",
+		"maximum context length", "context window",
+		"prompt is too long", "input is too long",
+		"reduce the length of the messages",
+		"上下文长度", "上下文过长", "超出上下文", "超过最大上下文", "超出最大上下文")
+}
+
+// maxOutputHint spots a rejection specifically about the request's own
+// max_tokens/output-length parameter exceeding what this endpoint allows —
+// a client-supplied number, not the conversation history, so switching
+// endpoints can't fix it (another candidate's larger context window is
+// irrelevant to an output-length cap). Kept narrow and checked before
+// contextLimitHint precisely because vendor wording for this case often
+// ALSO mentions "context"/"tokens" in the same sentence (e.g. Anthropic's
+// "max_tokens: 100000 > 64000, which is the maximum allowed number of
+// output tokens").
+func maxOutputHint(snippet string) bool {
+	if containsAny(snippet, "max_tokens to sample", "maximum allowed number of output tokens", "max_output_tokens") {
+		return true
+	}
+	return strings.Contains(snippet, "max_tokens") && containsAny(snippet, "completion tokens", "output tokens")
 }
 
 // contentHint spots content-policy rejections across vendors (EN + ZH wording).

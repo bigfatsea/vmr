@@ -85,10 +85,7 @@ type TokenWeightsConfig struct {
 // omitted entirely) resolves to all-default, same as every component being
 // individually unset.
 func (tw *TokenWeightsConfig) resolve(providerName string) (core.TokenWeights, error) {
-	r := core.TokenWeights{
-		InFresh: core.DefaultTokenWeight, CacheRead: core.DefaultTokenWeight,
-		CacheWrite: core.DefaultTokenWeight, Out: core.DefaultTokenWeight,
-	}
+	r := core.NewTokenWeights()
 	if tw == nil {
 		return r, nil
 	}

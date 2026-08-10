@@ -4,23 +4,28 @@ package pricing
 
 import (
 	"strings"
-	"time"
 
 	"vmr/internal/core"
-	"vmr/internal/fmtutil"
 )
 
 // OverrideRule is one providers[].pricing.overrides entry, as resolved by
 // internal/config from YAML — the input shape Resolve consumes. Model
 // supports a "*" wildcard (matches any upstream model); Discount and
 // Explicit are mutually exclusive (internal/config's validation enforces
-// this before Resolve ever sees a rule).
+// this before Resolve ever sees a rule). No time dimension (date/hour
+// window) by design — see EffectiveRate's doc comment for why that
+// functionality was dropped rather than kept: this package used to carry
+// date_from/date_to/hour_from/hour_to promotional windows, but they priced
+// vmr's core routing decision (which is a dimensionless ratio, unaffected
+// by absolute $ precision — see the design doc's §14.2① math) at a
+// complexity cost (a full time-reachability analysis in what's now
+// Complete/resolveChain) the feature's actual value never justified. A
+// static, per-model price differentiation covers the overwhelming majority
+// of real-world "this account's price differs by model" needs.
 type OverrideRule struct {
-	Model            string // exact upstream model name, or "*"
-	Discount         *float64
-	Explicit         Rate
-	DateFrom, DateTo string
-	HourFrom, HourTo string
+	Model    string // exact upstream model name, or "*"
+	Discount *float64
+	Explicit Rate
 }
 
 // matchesModel reports whether o applies to model — exact match (case-
@@ -30,56 +35,8 @@ func (o OverrideRule) matchesModel(model string) bool {
 	return o.Model == "*" || strings.EqualFold(o.Model, model)
 }
 
-// matchesTime reports whether ts falls inside o's optional date/hour
-// window — ported byte-for-byte from the old internal/report/pricing.go's
-// PricingRate.matches (already exercised in production, so migrated as-is
-// rather than rewritten). ts is converted to fmtutil.DisplayZone up front so a record's own
-// embedded offset never silently shifts which window a request falls into
-// — the same reasoning core.Endpoint.HealthKey-adjacent code already
-// documents for every other DisplayZone consumer.
-func (o OverrideRule) matchesTime(ts time.Time) bool {
-	ts = ts.In(fmtutil.DisplayZone)
-	if o.DateFrom != "" && ts.Format("2006-01-02") < o.DateFrom {
-		return false
-	}
-	if o.DateTo != "" && ts.Format("2006-01-02") > o.DateTo {
-		return false
-	}
-	switch {
-	case o.HourFrom != "" && o.HourTo != "":
-		h := ts.Format("15:04")
-		if o.HourFrom <= o.HourTo {
-			if h < o.HourFrom || h > o.HourTo {
-				return false
-			}
-		} else if h > o.HourTo && h < o.HourFrom { // wraps midnight
-			return false
-		}
-	case o.HourFrom != "":
-		if ts.Format("15:04") < o.HourFrom {
-			return false
-		}
-	case o.HourTo != "":
-		if ts.Format("15:04") > o.HourTo {
-			return false
-		}
-	}
-	return true
-}
-
-// unconditional reports whether o has no date/hour window at all — the
-// "always active" rules Resolve uses to compute PricingSpec.Base (see
-// ResolveOptions' doc comment for why only these count toward the
-// completeness check a metric: cost account must pass).
-func (o OverrideRule) unconditional() bool {
-	return o.DateFrom == "" && o.DateTo == "" && o.HourFrom == "" && o.HourTo == ""
-}
-
 func (o OverrideRule) toCoreOverride() core.PricingOverride {
-	return core.PricingOverride{
-		Discount: o.Discount, Explicit: o.Explicit.toCore(),
-		DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo,
-	}
+	return core.PricingOverride{Discount: o.Discount, Explicit: o.Explicit.toCore()}
 }
 
 func (r Rate) toCore() core.Rate {
@@ -150,18 +107,18 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 // Resolve computes provider+model's PricingSpec: Base is the RAW
 // canonical-key lookup (opts.Map / the 4-step auto-resolution), converted
 // to opts.Currency via opts.ExchangeRateToTarget — deliberately with NO
-// override folded in (see RateAt for why: folding an unconditional override
-// into Base here and ALSO keeping it in Overrides for RateAt to apply would
-// double-apply it — a discount composing against itself). Overrides carries
-// every opts.Overrides entry whose model pattern matches model, in written
-// order, unmodified; RateAt is the only place that ever combines Base with
-// an Override.
+// override folded in (see EffectiveRate for why: folding an override into
+// Base here and ALSO keeping it in Overrides for EffectiveRate to apply
+// would double-apply it — a discount composing against itself). Overrides
+// carries every opts.Overrides entry whose model pattern matches model, in
+// written order, unmodified; EffectiveRate is the only place that ever
+// combines Base with an Override.
 //
 // ok=false means neither the table nor any override supplies so much as a
 // partial rate for this provider+model — genuinely nothing to go on. A
 // partial/incomplete Base (some components nil) still resolves with
-// ok=true; whether that's fatal is the CALLER's decision — see
-// GuaranteedRate, which config.validate() uses to decide.
+// ok=true; whether that's fatal is the CALLER's decision — see Complete,
+// which config.validate() uses to decide.
 func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bool) {
 	base, tableHit := resolveCanonicalKey(provider, model, opts.Table, opts.Map)
 	if tableHit {
@@ -190,120 +147,65 @@ func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bo
 	return spec, true
 }
 
-// RateAt resolves spec's effective Rate at ts: the first Override (in
-// written/config order) whose time window contains ts wins. An explicit
-// form is used as-is; a discount form scales "the rate that would have
-// resolved had this rule not existed" — the design doc's §4.2① wording,
-// implemented as literally as its name suggests: everything BELOW this
-// rule in the chain (later Overrides, then spec.Base), resolved
+// EffectiveRate resolves spec's Rate: the first Override (in written/config
+// order) whose model pattern matched at Resolve time wins — Resolve already
+// filtered spec.Overrides to model, so every entry here is a live candidate
+// (no time-window eligibility check: P0-A dropped that dimension, see
+// OverrideRule's doc comment). An explicit form is used as-is; a discount
+// form scales "the rate that resolves below it in the chain" — the design
+// doc's §4.2① wording, implemented as literally as its name suggests:
+// everything BELOW this rule (later Overrides, then spec.Base), resolved
 // recursively — NOT always spec.Base directly. This matters whenever a
-// discount rule is layered above another, more specific rule (a promo
-// window above an always-on explicit override, e.g. the design doc's
-// plan-e example): the promo must discount THAT rate, not fall straight
-// through to Base (which, for a model with no standard-table entry at all
-// and only account overrides, may not even be complete). No override
-// matches at all (including the common case of none configured) resolves
-// to spec.Base itself. nil-safe: a nil spec returns the zero Rate.
-func RateAt(spec *core.PricingSpec, ts time.Time) Rate {
+// discount rule is layered above another, more specific rule (a wildcard
+// catch-all discount above a model-specific explicit override): the
+// catch-all must discount THAT rate, not fall straight through to Base
+// (which, for a model with no standard-table entry at all and only account
+// overrides, may not even be complete). No override at all (the common
+// case) resolves to spec.Base itself. Deterministic — the same spec always
+// resolves to the same Rate, which is why this is a pure function of spec
+// alone, not "at" any particular moment. nil-safe: a nil spec returns the
+// zero Rate.
+func EffectiveRate(spec *core.PricingSpec) Rate {
 	if spec == nil {
 		return Rate{}
 	}
-	return resolveChain(spec, func(o core.PricingOverride) bool {
-		rule := OverrideRule{DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
-		return rule.matchesTime(ts)
-	}, 0)
+	r, _ := resolveChain(spec, 0)
+	return r
 }
 
-// GuaranteedRate is the Rate RateAt would return at any moment NO
-// time-scoped override is active — the same resolveChain walk as RateAt,
-// but only ever descending through Overrides that have no date/hour window
-// at all (since a windowed one might not be active at an arbitrary future
-// charge time). This is what config.validate() checks Complete() against
-// for a metric: cost account: a temporary promotional override is a bonus
-// layered on top of real coverage, never a substitute for it. nil-safe: a
-// nil spec returns the zero Rate.
-func GuaranteedRate(spec *core.PricingSpec) Rate {
-	if spec == nil {
-		return Rate{}
-	}
-	return resolveChain(spec, func(o core.PricingOverride) bool {
-		rule := OverrideRule{DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
-		return rule.unconditional()
-	}, 0)
-}
-
-// AllPathsComplete reports whether RateAt(spec, ts) is guaranteed Complete()
-// for EVERY possible ts — not just "no override active" (that's
-// GuaranteedRate's question). This closes a real gap GuaranteedRate alone
-// leaves open: a conditional (time-scoped) discount override composing
-// against an incomplete spec.Base would only surface as a silently wrong
-// (under-priced) charge on the live request path at the moment that
-// override's window is active, never as a load-time error — exactly the
-// dangerous failure direction docs/TokenPlan_Quota_Routing_Design_opus-5.md's
-// §9.1 validation checklist exists to rule out. config.validate() uses this
-// (not GuaranteedRate) as the actual completeness gate for a metric: cost
-// account. badIndex is -1 when spec.Base itself (the "no override active"
-// case) is the incomplete one, else the index of the Override whose
-// activation would produce badRate.
-func AllPathsComplete(spec *core.PricingSpec) (ok bool, badRate Rate, badIndex int) {
+// Complete reports whether EffectiveRate(spec) is a Complete() rate — the
+// gate config.validate() applies to any provider+model a metric: cost Limit
+// will actually charge. Since EffectiveRate has exactly one resolution path
+// (no time dimension to range over), this is a single walk, not a
+// reachability search: badIndex is -1 when spec.Base itself supplied the
+// (possibly incomplete) rate, else the index of the Override whose Explicit
+// rate did (a Discount form can never itself introduce an incompleteness —
+// Rate.Scale only narrows an already-resolved rate, never widens it).
+// nil-safe: a nil spec is never complete.
+func Complete(spec *core.PricingSpec) (ok bool, bad Rate, badIndex int) {
 	if spec == nil {
 		return false, Rate{}, -1
 	}
-	hasUnconditional := false
-	for i, o := range spec.Overrides {
-		r := resolveChain(spec, func(core.PricingOverride) bool { return true }, i)
-		if !r.Complete() {
-			return false, r, i
-		}
-		rule := OverrideRule{DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
-		if rule.unconditional() {
-			// First-match-wins: an unconditional rule is eligible at every
-			// ts, so RateAt can never walk past it — every LATER override is
-			// dead config that no timestamp can activate, and checking it
-			// would reject a config whose live behavior is always complete.
-			// (Rules BEFORE this one are still reachable and were already
-			// checked by earlier iterations; a discount among them descends
-			// into this one, never past it.)
-			hasUnconditional = true
-			break
-		}
-	}
-	if hasUnconditional {
-		// spec.Base is unreachable at ANY ts: walking the Overrides list in
-		// order, an unconditional entry matches every ts, so RateAt (and
-		// this function's own per-override loop above) always resolves
-		// through an Override before ever falling through to Base — Base's
-		// own completeness is moot and must NOT be checked here (it would
-		// reject configs like the design doc's plan-e, whose account
-		// overrides fully cover a model the standard table doesn't even
-		// list).
-		return true, Rate{}, -1
-	}
-	base := fromCoreRate(spec.Base)
-	if !base.Complete() {
-		return false, base, -1
-	}
-	return true, Rate{}, -1
+	r, idx := resolveChain(spec, 0)
+	return r.Complete(), r, idx
 }
 
-// resolveChain walks spec.Overrides starting at index from, using eligible
-// to decide which entries are even candidates (RateAt: matches ts;
-// GuaranteedRate: has no time window at all) — the first eligible entry
-// wins: an explicit-form one is returned directly, a discount-form one
-// scales whatever resolveChain would have returned starting one entry
-// later (a genuine recursive descent, not always spec.Base — see RateAt's
-// doc comment for why that distinction is load-bearing). No eligible entry
-// falls through to spec.Base.
-func resolveChain(spec *core.PricingSpec, eligible func(core.PricingOverride) bool, from int) Rate {
-	for i := from; i < len(spec.Overrides); i++ {
-		o := spec.Overrides[i]
-		if !eligible(o) {
-			continue
-		}
+// resolveChain walks spec.Overrides starting at index from — the first
+// entry wins: an explicit-form one is returned directly (idx = its own
+// index), a discount-form one scales whatever resolveChain would have
+// returned starting one entry later (a genuine recursive descent, not
+// always spec.Base — see EffectiveRate's doc comment for why that
+// distinction is load-bearing), propagating that deeper call's idx
+// unchanged (a discount never becomes the "source" of an incompleteness).
+// No entry at all falls through to spec.Base (idx = -1).
+func resolveChain(spec *core.PricingSpec, from int) (Rate, int) {
+	if from < len(spec.Overrides) {
+		o := spec.Overrides[from]
 		if o.Discount != nil {
-			return resolveChain(spec, eligible, i+1).Scale(*o.Discount)
+			r, idx := resolveChain(spec, from+1)
+			return r.Scale(*o.Discount), idx
 		}
-		return fromCoreRate(o.Explicit)
+		return fromCoreRate(o.Explicit), from
 	}
-	return fromCoreRate(spec.Base)
+	return fromCoreRate(spec.Base), -1
 }

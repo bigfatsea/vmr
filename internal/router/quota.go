@@ -48,7 +48,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 	periodStart := quota.PeriodStart(l, now)
 
 	if l.Metric == core.MetricCost {
-		rt.chargeCost(ep, rbody, creq, limitKey, periodStart, now)
+		rt.chargeCost(ep, rbody, creq, limitKey, periodStart)
 		return
 	}
 
@@ -77,15 +77,16 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 
 // chargeCost (P2.2) is chargeQuota's metric: cost path: meters the same raw
 // token components tokenCharge always computes, prices them through
-// ep.PricingRate at the CHARGE-TIME timestamp (pricing.RateAt — see its doc
-// comment for why "the rate right now" and not a pre-resolved constant),
-// and writes the resulting $ amount into Counters.Cost — computed once,
-// here, and never recomputed later from raw tokens (see the design doc's
-// "9.2 运行态" section: a price table that changes over time means only
-// charge time can correctly answer "what was this worth").
-func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, limitKey string, periodStart, now time.Time) {
+// ep.PricingRate (pricing.EffectiveRate — a deterministic function of the
+// resolved override chain; no time dimension since P0-A dropped
+// promotional/off-peak windows), and writes the resulting $ amount into
+// Counters.Cost — computed once, here, and never recomputed later from raw
+// tokens (the price table itself can still change across a config reload,
+// which produces a new ep.PricingRate — recomputing from raw tokens later
+// would silently re-price a past charge at today's rate).
+func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, limitKey string, periodStart time.Time) {
 	d, estimatedTokens := tokenCharge(rbody, creq)
-	rate := pricing.RateAt(ep.PricingRate, now)
+	rate := pricing.EffectiveRate(ep.PricingRate)
 	d.Cost = componentCost(d, rate)
 	rt.Quota.Charge(ep.Provider, limitKey, periodStart, d, estimatedTokens)
 	if estimatedTokens != 0 {
@@ -99,7 +100,7 @@ func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.Ca
 
 // componentCost prices d's four raw components through rate — see
 // pricing.Rate.Cost for the shared formula (also used by
-// internal/report/cost.go's costFor) and the nil-component/AllPathsComplete
+// internal/report/cost.go's costFor) and the nil-component/Complete
 // reasoning.
 func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 	return rate.Cost(d.Fresh, d.CacheRead, d.CacheWrite, d.Out)

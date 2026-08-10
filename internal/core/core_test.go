@@ -140,16 +140,17 @@ func TestEstimateTextTokens(t *testing.T) {
 func TestErrorClassString(t *testing.T) {
 	t.Parallel()
 	cases := map[ErrorClass]string{
-		ErrClient:    "client",
-		ErrAuth:      "auth",
-		ErrRateLimit: "rate_limit",
-		ErrEndpoint:  "endpoint",
-		ErrTransient: "transient",
-		ErrContent:   "content",
-		ErrBuild:     "build",
-		ErrNetwork:   "network",
-		ErrCanceled:  "canceled",
-		ErrTruncated: "truncated",
+		ErrClient:       "client",
+		ErrAuth:         "auth",
+		ErrRateLimit:    "rate_limit",
+		ErrEndpoint:     "endpoint",
+		ErrTransient:    "transient",
+		ErrContent:      "content",
+		ErrContextLimit: "context_limit",
+		ErrBuild:        "build",
+		ErrNetwork:      "network",
+		ErrCanceled:     "canceled",
+		ErrTruncated:    "truncated",
 	}
 	for class, want := range cases {
 		if got := class.String(); got != want {

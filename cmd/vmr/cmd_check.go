@@ -336,11 +336,7 @@ func printProviderQuota(p config.Provider) {
 	// all-1.0 line on every quota-configured provider would be noise on the
 	// common case (P1-style plain token/request counting).
 	w := p.Quota.ResolvedTokenWeights
-	allDefault := core.TokenWeights{
-		InFresh: core.DefaultTokenWeight, CacheRead: core.DefaultTokenWeight,
-		CacheWrite: core.DefaultTokenWeight, Out: core.DefaultTokenWeight,
-	}
-	if w != allDefault {
+	if w != core.NewTokenWeights() {
 		fmt.Println(checkLine(4, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", w.InFresh, w.CacheRead, w.CacheWrite, w.Out)))
 	}
 	if len(p.Quota.ModelMultipliers) > 0 {

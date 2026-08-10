@@ -89,6 +89,15 @@ const (
 	ErrEndpoint                    // endpoint persistently unusable (quota/402, unknown model/404): long cooldown, switch
 	ErrTransient                   // 5xx/408/timeouts/network: short cooldown, switch
 	ErrContent                     // content policy/moderation flag: request-specific, switch WITHOUT health penalty
+	// ErrContextLimit is a conversation-history-exceeds-context-window
+	// rejection: a static property of THIS endpoint's model, not evidence
+	// the endpoint is unhealthy — another candidate may have a larger
+	// window. Switch WITHOUT health penalty, same treatment as ErrContent
+	// (see internal/adapter/classify.go's contextLimitHint for the word-list
+	// sniffing, and its own doc comment for why this is deliberately NOT
+	// used for a request's own max_tokens/output-length parameter being
+	// too large — switching endpoints can't fix a client-supplied number).
+	ErrContextLimit
 
 	// The four below never reach Health.ReportFailure/ReportNeutral — they
 	// occur before a response classification is possible (build/network) or
@@ -118,6 +127,8 @@ func (c ErrorClass) String() string {
 		return "endpoint"
 	case ErrContent:
 		return "content"
+	case ErrContextLimit:
+		return "context_limit"
 	case ErrBuild:
 		return "build"
 	case ErrNetwork:
@@ -355,6 +366,21 @@ type TokenWeights struct {
 // zero value.
 const DefaultTokenWeight = 1.0
 
+// NewTokenWeights returns the all-DefaultTokenWeight value TokenWeights'
+// zero value is NOT — the one correct starting point for any caller
+// resolving an account's token_weights, whether or not it configured one.
+// Two production call sites (internal/config/quota.go's TokenWeightsConfig.
+// resolve, cmd/vmr/cmd_check.go's "is this non-default" check) used to each
+// spell out the same four-field literal by hand; a third that did the same
+// thing slightly differently would have been a silent, uncompiler-caught
+// drift risk (see this type's doc comment on the zero-value trap).
+func NewTokenWeights() TokenWeights {
+	return TokenWeights{
+		InFresh: DefaultTokenWeight, CacheRead: DefaultTokenWeight,
+		CacheWrite: DefaultTokenWeight, Out: DefaultTokenWeight,
+	}
+}
+
 // Rate is a per-1,000,000-token four-component price snapshot — the
 // runtime-shape counterpart of internal/pricing.Rate (this package cannot
 // import internal/pricing: core is a zero-internal-dep package, see
@@ -369,44 +395,44 @@ type Rate struct {
 	Out        *float64
 }
 
-// PricingOverride is one time/model-scoped rule from an account's
+// PricingOverride is one model-scoped rule from an account's
 // providers[].pricing.overrides, already filtered (at resolve time, in
 // internal/pricing) to the ones whose `model` pattern matches this specific
-// Endpoint's Model — see PricingSpec.RateAt (internal/pricing.RateAt, the
-// function that actually walks this slice; core stays pure data, per this
-// package's own "shared types, no internal deps" charter).
+// Endpoint's Model — see PricingSpec.EffectiveRate (internal/pricing.
+// EffectiveRate, the function that actually walks this slice; core stays
+// pure data, per this package's own "shared types, no internal deps"
+// charter). No time dimension (date/hour window) — P0-A dropped that
+// functionality; see internal/pricing.OverrideRule's doc comment for why.
 type PricingOverride struct {
 	// Discount, when non-nil, means "the rate that resolves BELOW this rule
 	// in the chain, scaled by this factor" — NOT always PricingSpec.Base
 	// directly: "below" can be another, more specific Override (see
-	// internal/pricing.RateAt/resolveChain's doc comments — folding a
+	// internal/pricing.EffectiveRate/resolveChain's doc comments — folding a
 	// discount straight onto Base instead of the chain below it double-
 	// applies it whenever two discount rules are stacked). Explicit, when
 	// Discount is nil, is used as-is. Discount and Explicit are mutually
 	// exclusive by construction — internal/pricing's config-time resolution
 	// never produces one with both set.
-	Discount         *float64
-	Explicit         Rate
-	DateFrom, DateTo string // "2026-06-08" form, empty = unbounded
-	HourFrom, HourTo string // "22:00" form, empty = unbounded; a From>To pair wraps past midnight
+	Discount *float64
+	Explicit Rate
 }
 
 // PricingSpec is one provider+model's fully resolved pricing (P2.2):
-// Base — the rate reachable with no time-scoped override active (from the
-// standard/supplement table, or an always-on account override) — plus zero
-// or more time-scoped Overrides layered on top, evaluated in written order
-// at charge time. Attached per-Endpoint (not per-account, unlike QuotaSpec)
-// because price is inherently model-scoped — see
+// Base — the rate reachable with no Override present (from the
+// standard/supplement table, or an account override that fully replaces
+// it) — plus zero or more Overrides layered on top, evaluated in written
+// order (first-match-wins; a Discount composes against whatever the chain
+// below it resolves to). Attached per-Endpoint (not per-account, unlike
+// QuotaSpec) because price is inherently model-scoped — see
 // docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section
 // ("定价解析结果的挂点不一样") for why this couldn't be shared the way
 // QuotaSpec is.
 //
-// Why Base can't just be a single resolved core.Rate computed once at
-// config-load time: PricingRate.DateFrom/HourFrom-style windows mean the
-// effective rate can differ moment to moment (a promotional discount, a
-// peak-hour surcharge — see the design doc's discount/promo-window
-// discussion), so charge time must still pick among Overrides using the
-// actual request timestamp. See internal/pricing.RateAt.
+// Why Base can't just collapse into a single resolved core.Rate at
+// config-load time: a wildcard catch-all Override (e.g. a blanket account
+// discount) can be layered above a model-specific Explicit override, and
+// EffectiveRate needs the full Base+Overrides chain to compose that
+// correctly — see internal/pricing.EffectiveRate.
 type PricingSpec struct {
 	Base      Rate
 	Overrides []PricingOverride

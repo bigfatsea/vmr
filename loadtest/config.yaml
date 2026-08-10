@@ -7,7 +7,7 @@
 # multi-protocol list...") — this file was missed in that migration and had
 # gone stale (go run ./loadtest/runner failed to parse it) until this pass.
 
-listen: 127.0.0.1:8801
+listen: 127.0.0.1:8801     # must match loadtest/addr.VMR (YAML can't import the Go constant, so this one line stays hand-synced)
 max_concurrency: 0          # unlimited — we want to see vmr's natural ceiling, not an artificial gate
 log_dir: ./logs/loadtest    # own subdirectory under logs/ — separate from ~/.vmr/logs and from
                             # any real vmr instance's logs/*.jsonl (runner.go wipes this dir clean
@@ -28,6 +28,7 @@ providers:
   # providers.anthropic.mock declarations.
   - name: mock
     base_url: {openai: http://127.0.0.1:9900/v1, anthropic: http://127.0.0.1:9900/v1, openai-responses: http://127.0.0.1:9900/v1}
+    # every 127.0.0.1:9900 on this page must match loadtest/addr.Mock (YAML can't import the Go constant)
     api_key: sk-loadtest-mock-key
   - name: mock_fail1
     base_url: {openai: http://127.0.0.1:9900/fail1/v1}   # loadtest/mockupstream always answers 500 on this path

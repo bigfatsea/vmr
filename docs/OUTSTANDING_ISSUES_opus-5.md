@@ -19,7 +19,8 @@
 
 - 没有会导致数据丢失、凭证泄漏或服务不可用的缺陷。可以继续放心用于生产。
 - 原第一梯队 5 项已全部处理完毕（见 §3.1）；处理过程中 fuzz 测试额外发现并修复了一个真实 nil map panic（`RewriteModel`/`RewriteStream` 对 JSON `null` 输入）。
-- 当前第一梯队为空。待定 10 项，其他 27 项。
+- 当前第一梯队为空。待定 9 项（2026-08-10：§2.7 `RawPreStrip` 类型收窄经复核判定方案本身不成立，
+  移出待定、并入 §3.2「不建议动」，原因见该条目），其他 27 项。
 - 2026-08 全面评审的 P0/P1/P2/P3 已逐项处理：3 项 P0 全部修复，7 项 P1 里 5 项修复、2 项评估后判断本轮成本过高暂不做，16 项 P2 里 14 项修复、2 项复核后判定是误判未改，P3-3（存量编号引用的分级处置）已全项目执行完毕——评审报告本身已按"结论落地即删除"的惯例移除，不重复记录已修复的部分在本文档。本次并入的 §2.9/2.10 两个待定项，以及对 §2.5/§3.2/§3.3 既有条目的补充，都来自评审里未采纳的 P1（MiniMax response_fix 开关、探针纳入审计）和 P0 里未完全采纳的子建议（`/admin/status` 暴露 Check 结果）；`recorderBodyCap` 可配置化那条子建议已在后续一轮里直接改成降默认值解决，见 §3.1。
 
 ---
@@ -138,18 +139,6 @@
 
 ---
 
-### 2.7 [L] `audit.Attempt.RawPreStrip` 字段类型仍是 `any`
-
-**位置**：`internal/audit/audit.go:160`，消费端在 `internal/report/detail.go:707-715` 要做类型断言（先试 `string`，否则走 `jsonIndent`）。
-
-**问题**：不利于 schema 化，也让"这个字段到底可能是什么类型"只能靠读消费端代码反推。
-
-**方案**：改成 `json.RawMessage`。
-
-**为什么待定**：需要同步检查所有读取该字段的消费方（目前是 `detail.go` 的渲染逻辑，但要确认没有遗漏），且会影响已有审计文件的向后兼容读取路径。改动不大但要仔细，收益纯属整洁性。
-
----
-
 ### 2.8 [L] 审计落盘的文件 write syscall 仍在全局锁内
 
 **现状**：`audit.Logger.Write` 已经优化过一轮——用 `sync.Pool` 复用编码缓冲区，**JSON 编码在锁外完成**，只有最终的字节写入持锁。这消除了"多 MB 的 JSON 编码被并发请求串行化"这个真实瓶颈。
@@ -234,6 +223,7 @@
 - 为 `router → audit` 上事件总线 —— 当前的可变 Record 传递性能最优；15 处 `if att != nil` 的噪音已由 nil-safe 的 `SetXxx` 方法收敛。
 - 统一 `cmdCheck` / `cmdStart` / `diagnose` 三处的路由表打印格式 —— 排序逻辑已统一到 `EffectiveOrder()`，剩下的纯格式化差异不值得再抽象。
 - README 的 `admin/status` 示例"无需 api_key" —— 与实现一致，单机单用户场景可接受，已文档化。
+- `audit.Attempt.RawPreStrip` 字段类型仍是 `any`，原方案是"改成 `json.RawMessage`"——**2026-08-10 复核判定方案本身不成立**：核对了唯一构造点 `EncodeBody`（`internal/audit/audit.go`），该函数按内容是否为合法 JSON 在 `json.RawMessage` 与 `string` 之间二选一返回（非 JSON 的原始 SSE 文本必须走 `string` 分支），`RawPreStrip` 因此本来就必须是 `any`（`json.RawMessage | string` 的联合），收窄成纯 `json.RawMessage` 会在非 JSON 场景丢数据或直接 panic——与 `Message.Body` 是完全相同的模式（同一个 `EncodeBody` 产出）。从"待定，收益纯属整洁性"改判为"不成立，不建议动"。
 
 ### 3.3 未解决，可做可不做（不展开）
 
@@ -247,7 +237,9 @@
 - `go.mod` 无 `toolchain` 指令（声明 go1.25.1，本机实测更高版本）。
 - `.gitignore` 全局忽略 `*.jsonl` / `*.jsonl.zst`，未来想提交测试 fixture 需要加白名单。
 - `vmr.sh` 的 `write_env_file` 用 `printf '%s=%s\n'` 写值，值含换行或特殊字符时 launchd/systemd 的 EnvironmentFile 解析可能出错（API key 现实中不含空格）。
-- `loadtest/` 下 `runner` / `config.yaml` / `gentargets` 三处地址常量需人工同步，无自动化保障。
+- `loadtest/` 下地址常量需人工同步——**🟡 2026-08-10 架构复核已部分处理**：新增 `loadtest/addr`
+  包，`runner`/`gentargets` 两个 Go 源改为引用同一份常量，原先的三处独立声明降为一处 Go 常量 +
+  `config.yaml`（YAML 无法 import Go 常量，仍需人工同步，已在对应行加注释指回 `loadtest/addr`）。
 - `loadtest/runner/main.go:116,138` 的 `defer mock.Process.Kill()` 用 SIGKILL，会在日志里留下"有 START 无 STOP"的假崩溃痕迹（第 180 行的正常退出路径已用 `os.Interrupt`）。
 - `loadtest/gentargets/main.go:234` 的 `f.Write(line)` 与 `defer all.Close()` 错误被忽略，磁盘满时 `targets.json` 可能静默截断。
 - P3-3 分级处置里明确保留不动的 ~23 处引用（`docs/VirtualModelRouter_Design_v4_{Core,Analytics}.md §x.y` 形式，已带文件名）：CLAUDE.md 收紧后的原则是"只引用文档名字和章节名称，不用编号"，这些从严格意义上仍不完全合规，但报告原建议就是留到最后一档——号码旁边已经有文件名兜底，出问题时至少还能定位到文档，紧迫性明显低于本轮已清掉的裸编号和死引用。

@@ -10,7 +10,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	"vmr/internal/core"
 	"vmr/internal/pricing"
@@ -93,10 +93,6 @@ type PricingOverrideConfig struct {
 	CacheRead  *float64 `yaml:"cache_read"`
 	CacheWrite *float64 `yaml:"cache_write"`
 	Out        *float64 `yaml:"out"`
-	DateFrom   string   `yaml:"date_from"`
-	DateTo     string   `yaml:"date_to"`
-	HourFrom   string   `yaml:"hour_from"`
-	HourTo     string   `yaml:"hour_to"`
 }
 
 // explicitFieldsSet counts how many of the four rate components are set —
@@ -147,27 +143,7 @@ func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[
 			return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: %s must be a finite number >= 0 (got %v)", providerName, idx, f.name, *f.val)
 		}
 	}
-	for _, w := range []struct {
-		name string
-		val  string
-	}{{"date_from", o.DateFrom}, {"date_to", o.DateTo}} {
-		if w.val != "" {
-			if _, err := time.Parse("2006-01-02", w.val); err != nil {
-				return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: invalid %s %q (want yyyy-MM-dd): %w", providerName, idx, w.name, w.val, err)
-			}
-		}
-	}
-	for _, w := range []struct {
-		name string
-		val  string
-	}{{"hour_from", o.HourFrom}, {"hour_to", o.HourTo}} {
-		if w.val != "" {
-			if _, err := time.Parse("15:04", w.val); err != nil {
-				return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: invalid %s %q (want HH:MM): %w", providerName, idx, w.name, w.val, err)
-			}
-		}
-	}
-	rule := pricing.OverrideRule{Model: o.Model, Discount: o.Discount, DateFrom: o.DateFrom, DateTo: o.DateTo, HourFrom: o.HourFrom, HourTo: o.HourTo}
+	rule := pricing.OverrideRule{Model: o.Model, Discount: o.Discount}
 	if o.Discount == nil {
 		rate := pricing.Rate{InFresh: o.InFresh, CacheRead: o.CacheRead, CacheWrite: o.CacheWrite, Out: o.Out}
 		if o.Currency != "" {
@@ -184,6 +160,35 @@ func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[
 		rule.Explicit = rate
 	}
 	return rule, nil
+}
+
+// firstDeadOverride returns the index of the first rule in rules (already
+// validated, in written order) that first-match-wins can never reach: an
+// earlier "*" wildcard matches every model including this rule's own, or an
+// earlier rule already named this exact model. Returns -1 when every rule
+// is reachable. This is only a meaningful, unconditional mistake now that
+// P0-A dropped the date/hour time dimension — two rules sharing a model
+// pattern used to legitimately differ by active time window (a promo
+// stacked over a standing rate); with no time axis left, a repeated model
+// pattern has no way to ever differ in outcome, so it is always dead
+// config, not a deliberate pairing.
+func firstDeadOverride(rules []pricing.OverrideRule) int {
+	seenWildcard := false
+	seenModel := map[string]bool{}
+	for i, r := range rules {
+		if seenWildcard {
+			return i
+		}
+		key := strings.ToLower(r.Model)
+		if seenModel[key] {
+			return i
+		}
+		seenModel[key] = true
+		if r.Model == "*" {
+			seenWildcard = true
+		}
+	}
+	return -1
 }
 
 // pricingContext bundles what resolvePricing needs across every provider —
@@ -322,6 +327,9 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 				}
 				overrides = append(overrides, rule)
 			}
+			if idx := firstDeadOverride(overrides); idx >= 0 {
+				return fmt.Errorf("provider %q: pricing.overrides[%d]: model %q can never activate — an earlier rule in this list already matches every request this one would (either the exact same model, or an earlier \"*\" wildcard) and first-match-wins always picks that one first; drop this rule or reorder the list", p.Name, idx, overrides[idx].Model)
+			}
 		}
 		// Stored for EVERY provider, not just ones with a pricing: block or
 		// a metric: cost Limit — the policy also carries the global
@@ -357,17 +365,16 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 			if !ok {
 				return fmt.Errorf("provider %q: metric: cost: no price found for model %q — checked pricing.overrides, then providers[].pricing.map / the standard price table; add an override or a pricing.map entry (see providers[].pricing's doc comment)", p.Name, model)
 			}
-			// AllPathsComplete, not just a GuaranteedRate check: every
-			// possible RateAt(spec, ts) outcome — including one reached only
-			// when a conditional/time-scoped override is active — must be
-			// complete, or a promo window could silently under-price a
-			// charge on the live request path with no load-time warning.
-			if ok, bad, badIdx := pricing.AllPathsComplete(spec); !ok {
-				via := "the standard/supplement/account base rate (no override active)"
+			// The resolved chain (Overrides first-match-wins, then Base) must
+			// be fully priced, or a charge on the live request path would
+			// silently under-price (a nil component priced as 0 — see
+			// pricing.Rate's doc comment) with no load-time warning.
+			if ok, bad, badIdx := pricing.Complete(spec); !ok {
+				via := "the standard/supplement/account base rate (no override matched)"
 				if badIdx >= 0 {
 					via = fmt.Sprintf("pricing.overrides[%d]", badIdx)
 				}
-				return fmt.Errorf("provider %q: metric: cost: model %q resolves an incomplete rate via %s (missing %v) — every one of in_fresh/cache_read/cache_write/out must be priced (explicitly 0.0 if genuinely free) for EVERY possible resolution path, not just the common one",
+				return fmt.Errorf("provider %q: metric: cost: model %q resolves an incomplete rate via %s (missing %v) — every one of in_fresh/cache_read/cache_write/out must be priced (explicitly 0.0 if genuinely free)",
 					p.Name, model, via, bad.MissingComponents())
 			}
 			c.ResolvedPricing[p.Name+"\x00"+model] = spec

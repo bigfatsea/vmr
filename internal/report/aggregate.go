@@ -526,7 +526,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			// and by-client, when either bucket applies to this record.
 			if pricingSrc != nil && rc.endpoint != "" {
 				provider, model := splitEndpointProviderModel(rc.endpoint)
-				pr, ok := pricingSrc.RateFor(provider, model, rc.ts)
+				pr, ok := pricingSrc.RateFor(provider, model)
 				if ok {
 					c := costFor(pr, rc)
 					if rep.Overall.CostEstimate == nil {

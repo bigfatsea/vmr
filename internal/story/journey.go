@@ -31,14 +31,6 @@ import (
 	"vmr/internal/story/profile"
 )
 
-// newUserWindow mirrors internal/report/session.go's identical constant:
-// a real user message only counts as a NEW instruction (opening a task)
-// when it sits within this many messages of the request's end. Ported
-// rationale: an in-place history edit can push the delta boundary far
-// back and sweep an old user message into the "new" range; those must not
-// open a task.
-const newUserWindow = 8
-
 // Journey is a stitched chain of one or more Lineages rendered as one
 // continuous narrative. Chain is oldest
 // lineage first, exactly as ctxgraph.ChainFrom returns it — Step 1's "one
@@ -586,9 +578,9 @@ func eventHashAt(m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, of
 
 // deltaHasNewInstruction ports internal/report/session.go's
 // deltaHasNewInstruction: a message only counts as a new instruction if
-// it's within newUserWindow of the request's end AND its content wasn't
-// already present somewhere in the parent manifest (a set check, not a
-// position check — a mid-task history prune can shift an old message into
+// it's within chatmsg.NewUserWindow of the request's end AND its content
+// wasn't already present somewhere in the parent manifest (a set check, not
+// a position check — a mid-task history prune can shift an old message into
 // the tail window without it being new).
 func deltaHasNewInstruction(prof profile.Profile, msgs []chatmsg.Message, rawMsgs []any, off int, cur, prev *ctxgraph.Manifest, deltaStart int) bool {
 	prevSet := make(map[ctxgraph.Hash]bool, len(prev.Keys))
@@ -597,7 +589,7 @@ func deltaHasNewInstruction(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 	}
 	total := len(msgs)
 	for idx := deltaStart; idx < total; idx++ {
-		if idx < total-newUserWindow {
+		if idx < total-chatmsg.NewUserWindow {
 			continue
 		}
 		if msgs[idx].Role != "user" {
@@ -618,7 +610,7 @@ func deltaHasNewInstruction(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 }
 
 // lastInstructionInDelta returns the preview of the newest real user
-// instruction inside the delta (no newUserWindow bound here — unlike
+// instruction inside the delta (no chatmsg.NewUserWindow bound here — unlike
 // deltaHasNewInstruction, this picks the task's TITLE, which should reflect
 // whatever the user actually asked even if it's not near the very end);
 // "" when this turn is a pure tool-loop step.

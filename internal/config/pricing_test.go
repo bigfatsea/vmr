@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"vmr/internal/core"
 	"vmr/internal/pricing"
@@ -162,7 +161,7 @@ pricing:
 	if spec == nil || len(spec.Overrides) != 1 {
 		t.Fatalf("spec = %+v, want exactly 1 override", spec)
 	}
-	rate := pricing.RateAt(spec, time.Now())
+	rate := pricing.EffectiveRate(spec)
 	if got, want := *rate.InFresh, 7.1; got < want-1e-9 || got > want+1e-9 {
 		t.Errorf("InFresh = %v, want %v (1 USD x 7.1)", got, want)
 	}
@@ -353,29 +352,59 @@ pricing:
 	}
 }
 
-func TestPricing_Override_BadDateFormat_Rejected(t *testing.T) {
+// TestPricing_Override_TimeWindowFieldsUnknown_Rejected locks in P0-A's
+// removal of the date_from/date_to/hour_from/hour_to promotional-window
+// fields: they are no longer part of PricingOverrideConfig, so KnownFields'
+// ordinary unknown-field rejection catches them exactly like any other typo
+// — no dedicated migration message, same reasoning as
+// TestLegacyAPIKeyRejected in config_test.go.
+func TestPricing_Override_TimeWindowFieldsUnknown_Rejected(t *testing.T) {
 	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}
 pricing:
   overrides:
-    - {model: "*", discount: 0.5, date_from: "not-a-date"}`, "gpt-4o")
+    - {model: "*", discount: 0.5, date_from: "2026-06-08"}`, "gpt-4o")
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "date_from") {
-		t.Errorf("want a bad-date-format rejection, got %v", err)
+		t.Errorf("want an unknown-field rejection naming date_from, got %v", err)
 	}
 }
 
-func TestPricing_Override_BadHourFormat_Rejected(t *testing.T) {
+// TestPricing_Override_DuplicateModelPattern_Rejected covers
+// firstDeadOverride: with no time dimension left to differentiate two rules
+// sharing the same model pattern, the second is always dead config
+// (first-match-wins never reaches it) — see that function's doc comment.
+func TestPricing_Override_DuplicateModelPattern_Rejected(t *testing.T) {
 	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}
 pricing:
   overrides:
-    - {model: "*", discount: 0.5, hour_from: "25:99"}`, "gpt-4o")
+    - {model: gpt-4o, discount: 0.5}
+    - {model: gpt-4o, discount: 0.25}`, "gpt-4o")
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "hour_from") {
-		t.Errorf("want a bad-hour-format rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "can never activate") {
+		t.Errorf("want a dead-override rejection, got %v", err)
+	}
+}
+
+// TestPricing_Override_WildcardBeforeSpecific_Rejected covers the other
+// firstDeadOverride shape: an earlier "*" wildcard shadows every later
+// rule regardless of that rule's own model — the design doc's old
+// promo-over-standing-rate pattern relied on a time window to make this
+// ordering meaningful; without one, it is simply dead config.
+func TestPricing_Override_WildcardBeforeSpecific_Rejected(t *testing.T) {
+	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: "*", discount: 0.25}
+    - {model: gpt-4o, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "can never activate") {
+		t.Errorf("want a dead-override rejection, got %v", err)
 	}
 }
 
@@ -571,7 +600,7 @@ models:
 		t.Fatalf("PricingTable: %v", err)
 	}
 	resolver := pricing.NewResolver(table, cfg.ProviderPricingPolicies)
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219", time.Now())
+	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok {
 		t.Fatal("RateFor: no rate resolved for a model the standard table covers")
 	}
@@ -651,9 +680,9 @@ pricing:
 	if spec2 == nil {
 		t.Fatal("no PricingSpec resolved (with account override)")
 	}
-	rate := pricing.RateAt(spec2, time.Now())
+	rate := pricing.EffectiveRate(spec2)
 	if got, want := *rate.InFresh, 4.5; got != want {
-		t.Fatalf("RateAt.InFresh = %v, want %v (= supplement's 9 x 0.5 discount) — account override did not correctly layer on top of the supplement", got, want)
+		t.Fatalf("EffectiveRate.InFresh = %v, want %v (= supplement's 9 x 0.5 discount) — account override did not correctly layer on top of the supplement", got, want)
 	}
 }
 

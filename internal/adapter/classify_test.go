@@ -76,6 +76,62 @@ func TestDefaultClassify_UpstreamGatewayFailure(t *testing.T) {
 	}
 }
 
+// TestDefaultClassify_ContextLimit locks in P0-A's fix for a real
+// robustness gap: a long-context request that overflows an endpoint's
+// context window must classify as ErrContextLimit (switch, no health
+// penalty) instead of ErrClient (return to client, failover walk stops
+// dead) — see the architecture review's P0-B finding. Distinguishes
+// "conversation history exceeds the window" (failover-eligible) from "the
+// request's own max_tokens/output-length parameter is too large" (switching
+// endpoints can't fix a client-supplied number, stays ErrClient).
+func TestDefaultClassify_ContextLimit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		{
+			"OpenAI context_length_exceeded (the classic shape)",
+			`{"error":{"message":"This model's maximum context length is 8192 tokens. However, you requested 10000 tokens (9000 in the messages, 1000 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}`,
+			core.ErrContextLimit,
+		},
+		{
+			"Anthropic prompt-too-long wording",
+			`{"error":{"type":"invalid_request_error","message":"prompt is too long: 220000 tokens > 200000 maximum"}}`,
+			core.ErrContextLimit,
+		},
+		{
+			"generic context window wording",
+			`{"error":"input exceeds the model's context window"}`,
+			core.ErrContextLimit,
+		},
+		{
+			"Chinese vendor wording",
+			`{"error":{"message":"输入内容超出上下文长度限制"}}`,
+			core.ErrContextLimit,
+		},
+		{
+			"Anthropic max_tokens output-param rejection stays ErrClient",
+			`{"error":{"type":"invalid_request_error","message":"max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens"}}`,
+			core.ErrClient,
+		},
+		{
+			"OpenAI max_tokens output-param rejection stays ErrClient",
+			`{"error":{"message":"max_tokens is too large: 100000. This model supports at most 16384 completion tokens, whereas you provided 100000.","type":"invalid_request_error"}}`,
+			core.ErrClient,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRewriteModel_NoHTMLEscaping(t *testing.T) {
 	t.Parallel()
 	// Direct-equivalence: re-serialization must not rewrite < > & in

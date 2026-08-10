@@ -212,8 +212,10 @@ providers:
   #     map:                        # only needed when auto-resolution can't guess your model name —
   #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr's own model name -> standard table's canonical key
   #     overrides:                  # first-match-wins; each entry is EITHER discount OR all four
-  #       # components (in_fresh/cache_read/cache_write/out), never a mix or a partial set
-  #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # a temporary promo, listed first
+  #       # components (in_fresh/cache_read/cache_write/out), never a mix or a partial set.
+  #       # List a specific model BEFORE a "*" wildcard fallback — the reverse order makes
+  #       # the specific rule dead config (vmr rejects it at load time; no time-scoped
+  #       # promo/off-peak windows here, only a static per-model rate).
   #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate, already in CNY (pricing.currency above)
   #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # or: entered in the vendor's own USD invoice, converted via pricing.exchange_rate
   #       - {model: "*", discount: 0.6}  # fallback: 40% off list price for every other model on this account

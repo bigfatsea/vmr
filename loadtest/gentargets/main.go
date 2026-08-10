@@ -29,10 +29,12 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"os"
+
+	"vmr/loadtest/addr"
 )
 
 // vmrAddr must match loadtest/config.yaml's `listen`.
-const vmrAddr = "http://127.0.0.1:8801"
+const vmrAddr = "http://" + addr.VMR
 
 type target struct {
 	Method string              `json:"method"`

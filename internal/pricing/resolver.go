@@ -4,7 +4,6 @@ package pricing
 
 import (
 	"sync"
-	"time"
 
 	"vmr/internal/core"
 )
@@ -71,18 +70,19 @@ func (r *Resolver) WithDisplayFactor(f float64) *Resolver {
 	return nr
 }
 
-// RateFor resolves provider+model's Rate at ts — Resolve (memoized) then
-// RateAt, composed into the single call shape a per-record aggregation
-// loop wants. ok=false when nothing resolves at all (no table entry, no
-// override) for this provider+model; a resolved-but-incomplete Rate still
-// returns ok=true (best-effort — vmr report degrades gracefully on partial
-// data the way it always has, unlike metric: cost's load-time hard gate).
-func (r *Resolver) RateFor(provider, model string, ts time.Time) (Rate, bool) {
+// RateFor resolves provider+model's Rate — Resolve (memoized) then
+// EffectiveRate, composed into the single call shape a per-record
+// aggregation loop wants. ok=false when nothing resolves at all (no table
+// entry, no override) for this provider+model; a resolved-but-incomplete
+// Rate still returns ok=true (best-effort — vmr report degrades gracefully
+// on partial data the way it always has, unlike metric: cost's load-time
+// hard gate).
+func (r *Resolver) RateFor(provider, model string) (Rate, bool) {
 	spec, ok := r.resolve(provider, model)
 	if !ok {
 		return Rate{}, false
 	}
-	rate := RateAt(spec, ts)
+	rate := EffectiveRate(spec)
 	if r.displayFactor != 0 && r.displayFactor != 1 {
 		rate = rate.Scale(r.displayFactor)
 	}

@@ -127,8 +127,8 @@ internal/health            失败驱动的健康状态机（冷却、退避、�
 internal/probe             探测请求原语：构造带一次性 nonce 回显要求的最小请求 + 校验响应是否回显（diagnose 与 router 共用，二者互不依赖，避免循环 import）；`Request`（messages 形状）与 `ResponsesRequest`（input 形状）按端点协议由调用方分派，body 形状必须匹配协议，否则半开端点的后台恢复探测会被上游当坏请求拒绝、永久锁在半开态
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
-internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——费率随时间变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
-internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/RateAt/GuaranteedRate/AllPathsComplete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
+internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——标准表/账号覆盖本身会随配置变更而变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
+internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/EffectiveRate/Complete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，first-match-wins 静态按模型区分（无时间维度——P0-A 移除了曾经的 date_*/hour_* 时间窗，见 docs/TokenPlan_Quota_Routing_Design_opus-5.md 的相应章节），discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
@@ -195,18 +195,21 @@ type Adapter interface {
 ### 错误分类（决定 failover 质量的关键）
 
 ```go
-ErrClient     请求本身有问题 → 直接返回客户端，不切换
-ErrAuth       401 / 403（非内容类）→ 长冷却（10min 起），切换
-ErrRateLimit  429 → 尊重 Retry-After（秒/HTTP-date），切换
-ErrEndpoint   端点持续不可用（额度耗尽/402、模型不存在/404 或 400+嗅探；402/404 先过内容词表，命中归 ErrContent；
-              或 4xx body 里出现"网关/中转层自报转发失败"措辞——upstreamHint，见下）→ 长冷却，切换
-ErrTransient  5xx/408/529/超时/网络 → 短冷却（2s 指数退避；带 Retry-After 则从其值），切换
-ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷却）
+ErrClient       请求本身有问题 → 直接返回客户端，不切换
+ErrAuth         401 / 403（非内容类）→ 长冷却（10min 起），切换
+ErrRateLimit    429 → 尊重 Retry-After（秒/HTTP-date），切换
+ErrEndpoint     端点持续不可用（额度耗尽/402、模型不存在/404 或 400+嗅探；402/404 先过内容词表，命中归 ErrContent；
+                或 4xx body 里出现"网关/中转层自报转发失败"措辞——upstreamHint，见下）→ 长冷却，切换
+ErrTransient    5xx/408/529/超时/网络 → 短冷却（2s 指数退避；带 Retry-After 则从其值），切换
+ErrContent      内容合规拦截 → 切换，但不惩罚端点健康（零冷却）
+ErrContextLimit 会话历史超出该端点模型的上下文窗口 → 切换，但不惩罚端点健康（零冷却，窗口大小是端点的静态属性）
 ```
 
 `core.ErrorClass` 还有四个值只在审计侧使用（`ErrBuild`/`ErrNetwork`/`ErrCanceled`/`ErrTruncated`，字符串分别是 `build`/`network`/`canceled`/`truncated`）：它们对应 HTTP 响应到达之前就失败的路径（构建上游请求出错、拨号失败、客户端中途取消、成功后流断），从不经过 `ClassifyError`，也从不传给 `Health.ReportFailure`/`ReportNeutral`——健康/failover 逻辑完全不知道它们存在，纯粹是给 `internal/audit`（`Attempt.ErrorClass`）提供一套统一取值，不必另造一套字符串。
 
 `ErrContent` 是"按请求"而非"按端点"的错误：各厂对内容的敏感度不同，换端点常能成功，所以必须继续 failover；但被拦的端点本身完全健康，绝不能因此进冷却（否则一条敏感请求就会把健康端点打下线）。若该端点恰处半开探针中，以 `health.ReportNeutral` 只释放探针、不加深退避。全部候选都被拦时，客户端原样收到最后一次内容错误。
+
+`ErrContextLimit`（架构复核 P0-B 发现并修复的健壮性缺口）与 `ErrContent` 是同一类"按请求不按端点"的错误，处理方式完全一致（`ReportNeutral`，零冷却）：会话历史超出这个端点声明的上下文窗口，纯粹是"这个端点的模型窗口太小"，跟端点是否健康无关；候选列表里窗口更大的端点很可能成功，必须继续 failover 而不是原样把 400 返回客户端——修复前，这类请求落到兜底的 `ErrClient`，直接中断长上下文 agent 任务，即使候选里还有窗口更大的端点。`contextLimitHint` 嗅探词表命中前必须先排除 `maxOutputHint`（见下）：两者对应完全不同的失败原因，混淆会导致该切换的没切换、不该切换的却切换了。
 
 分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic 的 529）。**必须做 body 嗅探**，因为实测/官方文档显示各家习惯不一：
 
@@ -215,9 +218,11 @@ ErrContent    内容合规拦截 → 切换，但不惩罚端点健康（零冷�
 * OpenRouter：402 余额不足；**403 = moderation flag / guardrail 拦截**（body 带 "flagged"、`metadata.reasons`）；429 与 503 都可能带 Retry-After；
 * 有厂商额度耗尽也发 429（body 见 insufficient/quota/balance/credit）。
 
-嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 内容错被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
+嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451；上下文超限类 = {context_length_exceeded, context_window_exceeded, maximum context length, context window, prompt is too long, input is too long, reduce the length of the messages}（中英并收，如"上下文长度"/"超出上下文"）。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
 
-`upstreamHint`（网关转发失败嗅探）是这套宽松取舍里唯一一处刻意收窄的例外：只匹配"upstream request failed" / "upstream error" / "upstream connect error" / "error from provider" / "bad gateway" / "gateway timeout" 这类**明确把失败归给转发这一跳本身**的措辞，不匹配单独出现的 "upstream"/"gateway" 字样——那样宽松匹配的话会连带命中真正的请求内容错误（错误信息里恰好提到这两个词）。触发场景：某个 relay/网关层自己转发失败，返回一个不点名任何请求字段的 4xx（例：`{"message":"Error from provider (X): Upstream request failed", ...}`），若无此规则会被兜底判成 `ErrClient` 而直接放弃 failover——换任何端点都不会重试，即便队列里还有健康的候选，这正是这条规则要堵上的口子。判定顺序：内容词表 > 模型未知词表 > `upstreamHint` > 兜底 `ErrClient`，三者都命中同一段文本时内容/模型判定优先。
+`maxOutputHint`（请求自身 `max_tokens`/输出长度参数超限嗅探，如 Anthropic 的 "maximum allowed number of output tokens"、OpenAI 的 "completion tokens"）是上下文超限词表判定前必须先排除的一类窄嗅探：这类错误换任何端点都解决不了（是客户端自己填的参数超出该端点上限，不是会话历史撑爆了窗口），继续归为 `ErrClient` 更合适；不排除它会让 `context_length_exceeded` 这类词表误吞一部分本该保持 `ErrClient` 的请求（部分厂商的输出超限措辞会在同一句话里同时提到"context"/"tokens"）。
+
+`upstreamHint`（网关转发失败嗅探）是这套宽松取舍里唯一一处刻意收窄的例外：只匹配"upstream request failed" / "upstream error" / "upstream connect error" / "error from provider" / "bad gateway" / "gateway timeout" 这类**明确把失败归给转发这一跳本身**的措辞，不匹配单独出现的 "upstream"/"gateway" 字样——那样宽松匹配的话会连带命中真正的请求内容错误（错误信息里恰好提到这两个词）。触发场景：某个 relay/网关层自己转发失败，返回一个不点名任何请求字段的 4xx（例：`{"message":"Error from provider (X): Upstream request failed", ...}`），若无此规则会被兜底判成 `ErrClient` 而直接放弃 failover——换任何端点都不会重试，即便队列里还有健康的候选，这正是这条规则要堵上的口子。判定顺序：内容词表 > 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
 
 **已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，见下文「响应侧归一化」），但**仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康——这是先把频率变成可量化的数字，再决定要不要做请求预处理插件（见「路线图」）的第一阶段。把这类响应变成主动拦截或自动 failover 仍是未实现的未来方向。
 
@@ -475,7 +480,7 @@ Compaction（上下文压缩）场景下机制依然成立：压缩本身就会�
 
 **计量**：三档 metric 均已交付。`metric: requests`（计数 +1，零解析成本）与 `metric: tokens`（四分量求和，优先用上游返回的 usage 字段，拿不到时降级为按字节数估算并标记 `estimated_pct`；四分量的账号级权重 `token_weights` 在**读取时**套用，缺省全 1.0 等价于 P1 的等权求和）属 P1/P2.1；`metric: cost`（按 `internal/pricing` 解析出的分量费率，在**计费时**把 $ 金额算好写入 `Counters.Cost`，事后改价不影响已记录历史）属 P2.2，见下方"定价"一段。账号级 `model_multipliers`（按上游模型的整体倍率，只作用于 `requests`/`tokens`，在**计费时**套用）属 P2.1。多条 Limit 并存、`rolling` 滚动窗口、按模型的 `models:` 子额度仍未交付（P3），本批配置里写了会在加载期直接报错，不会静默忽略。
 
-**定价（P2.2）**：`metric: cost` 的分量费率来自新增叶子包 `internal/pricing`——内置标准价目表（`go:embed` 的 `standard_price_generated.yaml`，由 `tools/gen_standard_pricing` 从 LiteLLM 快照生成 + 手工维护的 `standard_price_curated.yaml` 补国产第一方厂商）叠加用户在 `config.yaml` 里的 `pricing.supplement`/`providers[].pricing`（`map`/`overrides`，含 `discount`/显式费率/`date_*`/`hour_*` 时间窗）。`internal/config` 在 `validate()` 阶段完成三层解析并要求每个 `metric: cost` 账号的每个上游模型在**任意**可能命中的时间窗下都解析出四分量齐全的费率（缺失按"更危险"处理，绝不当 0），解析结果随 `core.Endpoint.PricingRate` 进 Snapshot——费率是模型级属性，不像 `QuotaSpec` 那样整个账号共享一个指针。原先独立维护的 `pricing.yaml`/`vmr report -pricing` 已废弃，迁移进 `config.yaml`。标准表内部永远是 USD；`pricing.supplement`/`providers[].pricing.overrides` 允许某一行自带非美元 `currency:`，经 `pricing.exchange_rate`（通用的"1 美元 = X `<货币代码>`"映射表）在解析阶段一次性折算成 USD 再进入这条链路——`Resolve`/`RateAt` 本身对币种毫无感知，多币种只是解析入口的一层归一化，不是贯穿整条计费链路的一等概念（完整设计见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`）。`vmr report` 的展示币种（`-currency`）是纯渲染层的独立选项，和这里的记账币种互不干扰。
+**定价（P2.2）**：`metric: cost` 的分量费率来自新增叶子包 `internal/pricing`——内置标准价目表（`go:embed` 的 `standard_price_generated.yaml`，由 `tools/gen_standard_pricing` 从 LiteLLM 快照生成 + 手工维护的 `standard_price_curated.yaml` 补国产第一方厂商）叠加用户在 `config.yaml` 里的 `pricing.supplement`/`providers[].pricing`（`map`/`overrides`，含 `discount`/显式费率，first-match-wins 静态按模型区分——无时间维度，P0-A 移除了曾经的 `date_*`/`hour_*` 时间窗，见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的相应章节）。`internal/config` 在 `validate()` 阶段完成三层解析并要求每个 `metric: cost` 账号的每个上游模型都解析出四分量齐全的费率（缺失按"更危险"处理，绝不当 0），解析结果随 `core.Endpoint.PricingRate` 进 Snapshot——费率是模型级属性，不像 `QuotaSpec` 那样整个账号共享一个指针。原先独立维护的 `pricing.yaml`/`vmr report -pricing` 已废弃，迁移进 `config.yaml`。标准表内部永远是 USD；`pricing.supplement`/`providers[].pricing.overrides` 允许某一行自带非美元 `currency:`，经 `pricing.exchange_rate`（通用的"1 美元 = X `<货币代码>`"映射表）在解析阶段一次性折算成 USD 再进入这条链路——`Resolve`/`EffectiveRate` 本身对币种毫无感知，多币种只是解析入口的一层归一化，不是贯穿整条计费链路的一等概念（完整设计见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`）。`vmr report` 的展示币种（`-currency`）是纯渲染层的独立选项，和这里的记账币种互不干扰。
 
 **架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行）+ `internal/pricing`（同层、只依赖 `core`），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
 
@@ -627,7 +632,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 1. **成功尝试的响应 body 不存**：透传恒等，它与 `client.response.body` 字节相同，只在 client 层存一份；两者的字节差异**完整由 `norm` 列表解释**（`model_rewrite`/`think_strip`/`thinking_process_strip`/`done_appended`/`buffered`/`resumed_stream`/`opaque`/`overflow_raw_passthrough`）——**唯一例外是 `soft_block_detected`和 `crlf_framing_suspected`**：两者都是纯观测标记，不对应任何字节改动，出现时 upstream body 与 client body 仍然完全相同（见「响应侧归一化」）。失败尝试的错误 body（≤128KB，`router.errBodyCap`）存在 attempt 内；超出上限时转发给客户端的字节仍是未改动的截断前缀（byte-faithful 对客户端始终成立），只有 attempt 内的审计副本会在末尾追加 `...(truncated at N bytes)` 标记（N = 上限本身，不是上游真实大小——`io.LimitReader` 故意不读过上限，真实大小未知）。成功尝试后流中断时 `error` 为 `"truncated: <原因>"`（客户端已收到 2xx，outcome 仍为 ok——status 与 error 并存即"当时 200 但中途断了"）。
 2. **body 编码，不截断**：合法 JSON 原样嵌入（可直接用 jq 查询，如 `.client.response.body.usage`）；非 JSON（如 SSE 流文本）为字符串。**审计侧不设记录上限**——不论原始 body 有多大都原样记录，没有 `max_body_mb` 这类联动配置，也没有 `body_truncated` 标记。入站请求体大小仍有一个独立的、纯粹为稳定性考虑的上限（`max_request_body_mb`，缺省 8MiB，超限 413）——它只决定 vmr 愿不愿意接受这个请求，与审计记录是否完整无关：只要 vmr 接受了，审计里就是完整的那一份。流式响应的 usage 通常在末尾 SSE 事件里，脚本需从字符串 body 中解析。
 3. **凭证掩码**：`Authorization` / `X-Api-Key` / `Api-Key` / `X-Auth-Token` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` 的值只保留末 4 字符（`"Bearer ***abcd"`），其余 header 原样。后三项虽然被 server 层黑名单挡在上游之外，但客户端发来时会进入审计的 client 层记录，明文落盘同样有外泄风险。这是对"完整 header"要求的唯一偏离——审计文件常驻磁盘，明文密钥外泄风险大于取证价值。这份列表与 `core.headerBlocklist` 是两张独立维护、故意不完全重合的表：前者决定"记审计时要不要打码"，后者决定"转发给上游前要不要剔除"，`Api-Key`/`X-Auth-Token` 在前者但不在后者（活的客户端流量里这两个 header 是真值，vmr 默认放行转发；但审计记录里存的是打过码的占位符）。`internal/audit` 导出了 `IsCredentialHeader(name string) bool` 判定函数，`vmr replay` 重建请求头时用它把这批 header 额外剔除一遍——否则会把打码占位符当真实凭据发给上游。
-4. **`attempts[].error` / `error_class` 的形态**：`error` 是自由文本（错误类别裸词、或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`），供人读；`error_class` 是与它同步设置的类型化枚举字符串（复用 `core.ErrorClass.String()`：`client`/`auth`/`rate_limit`/`endpoint`/`transient`/`content`，加上四个只在 HTTP 响应之前的失败路径出现的值 `build`/`network`/`canceled`/`truncated`），`vmr report` 直接按这个字段归桶。**必须容忍缺失该字段的日志文件**：一部分历史留存的审计文件没有 `error_class`（只有 `error` 自由文本）——`internal/report` 的 `attemptErrorClass()` 辅助函数在 `error_class` 为空时回退到解析 `error`（6 种 HTTP 分类错误本来就是不带冒号的裸类名，直接原样使用；`build`/`network`/`canceled`/`truncated` 这四种非 HTTP 路径本来就是 `"class: 详情"` 前缀，取冒号前半部分），使错误分布、`truncated` 计数在混用新旧格式日志时依然正确，而不是退化成 `unknown`。`internal/audit` 仍是无外部依赖的叶子包，`Attempt.ErrorClass` 类型是 `string` 而非 `core.ErrorClass` 本身，只是复用同一组取值。
+4. **`attempts[].error` / `error_class` 的形态**：`error` 是自由文本（错误类别裸词、或带详情的 `"network: …"` / `"build: …"` / `"truncated: …"` / `"canceled by client"`），供人读；`error_class` 是与它同步设置的类型化枚举字符串（复用 `core.ErrorClass.String()`：`client`/`auth`/`rate_limit`/`endpoint`/`transient`/`content`/`context_limit`，加上四个只在 HTTP 响应之前的失败路径出现的值 `build`/`network`/`canceled`/`truncated`），`vmr report` 直接按这个字段归桶。**必须容忍缺失该字段的日志文件**：一部分历史留存的审计文件没有 `error_class`（只有 `error` 自由文本）——`internal/report` 的 `attemptErrorClass()` 辅助函数在 `error_class` 为空时回退到解析 `error`（7 种 HTTP 分类错误本来就是不带冒号的裸类名，直接原样使用；`build`/`network`/`canceled`/`truncated` 这四种非 HTTP 路径本来就是 `"class: 详情"` 前缀，取冒号前半部分），使错误分布、`truncated` 计数在混用新旧格式日志时依然正确，而不是退化成 `unknown`。`internal/audit` 仍是无外部依赖的叶子包，`Attempt.ErrorClass` 类型是 `string` 而非 `core.ErrorClass` 本身，只是复用同一组取值。
 5. **`images[]` 的采集范围**：只记录请求侧的内联图片（vmr 不生成图片，响应侧不采集）；`message_index` 是该图片所在消息在 `chatMessages` 里的 0-based 下标。检测**始终进行**，与该虚拟模型是否开启了 `image_downscale` 无关——只做一次廉价的 `image.DecodeConfig`（只读文件头拿 format/width/height，不解码像素），`downscaled`/`downscaled_*`/`cache_hit` 只在实际触发了压缩路径时才有意义。远程 URL 图片（vmr 未拉取内容）记一条 `remote:true`，其余字段皆为零值。
 6. **`facts` 是原样落盘，不是事后重新计算**：`server.go` 只算一次 `core.RequestFacts`（喂给路由决策），把同一个值原样存进 `rec.Facts` 再写审计；`internal/replay`/`internal/report` 都不会、也不需要从存下来的请求体反推一份新的 `facts`——这类衍生字段的原则是"算一次、到处传"，不是"谁要用谁自己再算一遍"。字段整体省略（不是每个子字段为零值的对象）代表这条请求在拿到 `model` 字段、真正开始算 `facts` 之前就被拒绝了。
 
@@ -752,6 +757,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 并发闸：全局、无等待上限 | 每端点限流 / 排队超时 | 全局闸覆盖"保护本机与总用量"诉求且实现极简；客户端自有超时 |
 | failover 默认穷尽全部候选 | 固定尝试上限（旧默认 3） | 配了兜底端点就该兜到底，固定上限会让后位端点永远轮不到；尾延迟由可选 max_attempts 与各超时约束 |
 | 内容合规错误：切换但零惩罚（ErrContent） | 当普通 4xx 处理 | 该错误按请求不按端点：不切换会中断长程任务，惩罚健康会让一条敏感请求打掉整个端点；靠 403/451 + 中英文词表嗅探识别 |
+| 上下文超限：切换但零惩罚（ErrContextLimit，架构复核 P0-B） | 原先兜底归 ErrClient，直接返回客户端 | 窗口大小是端点的静态属性，不是端点故障；长上下文 agent 任务打到窗口偏小的端点不该直接中断，候选里窗口更大的端点很可能成功。用 `maxOutputHint` 先排除"请求自身 `max_tokens` 参数超限"这类换端点也解决不了的情形，避免误伤 |
 | 配额窗口与余额耗尽同罪同罚 | 按窗口设 5h 级长冷却 | 厂商信号无法可靠区分两者；封顶 1h 的探针成本 ≤1 失败请求/小时/端点，恢复及时性优先 |
 | 审计双层结构、成功 body 去重 | 每层完整存两份 | 透传恒等，重复存储只膨胀文件；失败 body 各自保留因为各不相同 |
 | 审计凭证掩码（留末 4 位） | 完整记录 header | 密钥落盘外泄风险 > 取证价值；末 4 位足以区分 Key |

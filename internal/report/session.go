@@ -48,13 +48,6 @@ import (
 // logs are 1-2 messages; beyond this window only counts are reported.
 const tailPrevKeep = 8
 
-// newUserWindow guards task splitting: a real user message only counts as a
-// new instruction when it sits within this many messages of the request's
-// end. An in-place history edit (e.g. image pruning) can push the delta
-// boundary far back and sweep old user messages into the delta; those must
-// not open a task.
-const newUserWindow = 8
-
 // ReqInfo is the analysis result for one audit record: grouping coordinates
 // plus rule-extracted features. Fields are best-effort — absent signals stay
 // zero-valued.
@@ -773,7 +766,7 @@ func attach(s *SessionInfo, r *ReqInfo) {
 }
 
 // deltaHasNewInstruction reports whether the delta contains a real user
-// instruction near the request's end (see newUserWindow).
+// instruction near the request's end (see chatmsg.NewUserWindow).
 //
 // A message only counts as new if its content wasn't already present
 // SOMEWHERE in the parent (not just its LCP-matched prefix). LCP diffing is
@@ -794,7 +787,7 @@ func (r *ReqInfo) deltaHasNewInstruction() bool {
 		}
 	}
 	for idx := range r.realUsers {
-		if idx < r.DeltaStart || idx < r.Msgs-newUserWindow {
+		if idx < r.DeltaStart || idx < r.Msgs-chatmsg.NewUserWindow {
 			continue
 		}
 		if ki := idx - r.manifest.LeadSys; parentKeys != nil && ki >= 0 && ki < len(r.manifest.Keys) && parentKeys[r.manifest.Keys[ki]] {

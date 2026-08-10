@@ -46,7 +46,7 @@
 # 0 without a citation saying so (see this file's own "missing beats wrong"
 # stance above). A row that stays incomplete after this still helps `vmr
 # report`'s best-effort $ estimate; it just can't satisfy a `metric: cost`
-# account's stricter AllPathsComplete gate until the gap is filled with a
+# account's stricter Complete gate until the gap is filled with a
 # sourced number.
 currency: USD
 generated_at: "2026-08-09"

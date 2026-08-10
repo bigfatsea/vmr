@@ -1,14 +1,13 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-08-10, by Sonnet 5
 package pricing
 
 import (
 	"testing"
-	"time"
 )
 
 func TestResolver_RateFor_TableOnly(t *testing.T) {
 	r := NewResolver(testTable(), nil)
-	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok || *rate.InFresh != 3 {
 		t.Fatalf("RateFor = %+v ok=%v, want InFresh=3", rate, ok)
 	}
@@ -18,7 +17,7 @@ func TestResolver_RateFor_UnknownProvider_NoPolicy_StillTriesTable(t *testing.T)
 	r := NewResolver(testTable(), nil)
 	// "anthropic" as the vmr provider name lets step ② of the 4-step
 	// resolution succeed even with zero policy configured for it.
-	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok || rate.InFresh == nil {
 		t.Fatalf("RateFor should resolve via the table alone, got ok=%v rate=%+v", ok, rate)
 	}
@@ -35,7 +34,7 @@ func TestResolver_RateFor_PerProviderPolicy(t *testing.T) {
 	// contract), but scaling an empty Base produces an empty (all-nil)
 	// Rate — report's costFor treats every nil component as 0, so this
 	// degrades to "no cost estimate", not an error.
-	rate, ok := r.RateFor("my-plan", "totally-unknown-model", time.Now())
+	rate, ok := r.RateFor("my-plan", "totally-unknown-model")
 	if !ok {
 		t.Fatal("a matching override, even with nothing to discount, still counts as ok=true")
 	}
@@ -46,7 +45,7 @@ func TestResolver_RateFor_PerProviderPolicy(t *testing.T) {
 
 func TestResolver_RateFor_NoMatch(t *testing.T) {
 	r := NewResolver(testTable(), nil)
-	if _, ok := r.RateFor("nope", "nope", time.Now()); ok {
+	if _, ok := r.RateFor("nope", "nope"); ok {
 		t.Fatal("want ok=false for a totally unknown provider+model")
 	}
 }
@@ -58,8 +57,8 @@ func TestResolver_MemoizesResolution(t *testing.T) {
 	// can't observe the internal call count directly, but it does prove
 	// repeated calls stay consistent and don't error out on a second pass
 	// through the cache-hit branch.
-	r1, ok1 := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
-	r2, ok2 := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	r1, ok1 := r.RateFor("anthropic", "claude-3-5-sonnet")
+	r2, ok2 := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok1 || !ok2 || *r1.InFresh != *r2.InFresh {
 		t.Fatalf("repeated RateFor calls disagree: %+v/%v vs %+v/%v", r1, ok1, r2, ok2)
 	}
@@ -67,35 +66,16 @@ func TestResolver_MemoizesResolution(t *testing.T) {
 
 func TestResolver_CachesMisses(t *testing.T) {
 	r := NewResolver(testTable(), nil)
-	_, ok1 := r.RateFor("nope", "nope", time.Now())
-	_, ok2 := r.RateFor("nope", "nope", time.Now())
+	_, ok1 := r.RateFor("nope", "nope")
+	_, ok2 := r.RateFor("nope", "nope")
 	if ok1 || ok2 {
 		t.Fatal("want ok=false consistently for a cached miss")
 	}
 }
 
-func TestResolver_TimeWindowedOverride_PerCallRateChanges(t *testing.T) {
-	r := NewResolver(NewTable("USD"), map[string]ProviderPolicy{
-		"plan-e": {Overrides: []OverrideRule{
-			{Model: "*", Discount: f(0.25), DateFrom: "2026-06-08", DateTo: "2026-08-08"},
-			{Model: "my-model-x", Explicit: Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}},
-		}},
-	})
-	inPromo := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	outsidePromo := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	r1, ok1 := r.RateFor("plan-e", "my-model-x", inPromo)
-	r2, ok2 := r.RateFor("plan-e", "my-model-x", outsidePromo)
-	if !ok1 || !ok2 {
-		t.Fatalf("both calls should resolve, got ok1=%v ok2=%v", ok1, ok2)
-	}
-	if *r1.InFresh == *r2.InFresh {
-		t.Fatalf("promo and non-promo timestamps should resolve different rates, both got %v", *r1.InFresh)
-	}
-}
-
 func TestResolver_WithDisplayFactor_ScalesRateFor(t *testing.T) {
 	r := NewResolver(testTable(), nil).WithDisplayFactor(7.1)
-	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok {
 		t.Fatal("RateFor: ok = false")
 	}
@@ -108,7 +88,7 @@ func TestResolver_WithDisplayFactor_OneOrZeroIsNoOp(t *testing.T) {
 	base := NewResolver(testTable(), nil)
 	for _, factor := range []float64{0, 1} {
 		r := base.WithDisplayFactor(factor)
-		rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+		rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 		if !ok || *rate.InFresh != 3 {
 			t.Fatalf("WithDisplayFactor(%v): rate = %+v ok=%v, want InFresh=3 unchanged", factor, rate, ok)
 		}
@@ -118,7 +98,7 @@ func TestResolver_WithDisplayFactor_OneOrZeroIsNoOp(t *testing.T) {
 func TestResolver_WithDisplayFactor_OriginalResolverUnaffected(t *testing.T) {
 	base := NewResolver(testTable(), nil)
 	_ = base.WithDisplayFactor(7.1)
-	rate, ok := base.RateFor("anthropic", "claude-3-5-sonnet", time.Now())
+	rate, ok := base.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok || *rate.InFresh != 3 {
 		t.Fatalf("base Resolver was mutated by WithDisplayFactor: rate = %+v ok=%v, want InFresh=3", rate, ok)
 	}

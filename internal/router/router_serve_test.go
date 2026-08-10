@@ -467,6 +467,46 @@ models:
 	}
 }
 
+// --- Serve: context-window overflow fails over without cooldown ---
+
+// TestServe_ContextLimitFailsOverWithoutCooldown pins P0-B: a long-context
+// request that overflows an endpoint's context window must still failover
+// to a candidate with more room, and must not cool the overflowing
+// endpoint down (its window size is a static property, not evidence it's
+// unhealthy) — the mirror image of TestServe_ContentFlagFailsOverWithoutCooldown.
+func TestServe_ContextLimitFailsOverWithoutCooldown(t *testing.T) {
+	u1 := newMockUpstream(t, 400, `{"error":{"message":"This model's maximum context length is 8192 tokens. However, you requested 10000 tokens (9000 in the messages, 1000 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","code":"context_length_exceeded"}}`)
+	u2 := newMockUpstream(t, 200, `{"id":"ok","model":"m2"}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, provider: p2, models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 {
+		t.Fatalf("status=%d, want 200 (context-limit rejection should failover to u2)", w.Code)
+	}
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p2/m2" {
+		t.Errorf("endpoint=%s, want openai/p2/m2", got)
+	}
+	// u1 must still be available (no cooldown applied for context-limit rejections).
+	endpoint := endpointFor(t, cfg, "openai", "vm")
+	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
+		t.Error("u1 should still be available after a context-limit rejection (no cooldown)")
+	}
+}
+
 // --- Serve: BuildRequest failure does not cool the endpoint down ---
 
 // TestServe_BuildErrorDoesNotCooldownEndpoint locks in tryOne's build-error

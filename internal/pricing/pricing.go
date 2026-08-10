@@ -217,7 +217,7 @@ func Merge(base, overlay *Table) *Table {
 // with is LiteLLM's) — a source file (or one row of it) may declare a
 // different currency, converted to USD once at parse time via
 // FactorBetween/ParseTableWithRates, rather than carrying a currency tag
-// through Resolve/RateAt the way the old, retired report.Pricing sidecar's
+// through Resolve/EffectiveRate the way the old, retired report.Pricing sidecar's
 // moneyValue did. This is still deliberately simpler than that sidecar's
 // general multi-currency graph (arbitrary CCY->CCY chains): every currency
 // here goes through one USD pivot hop, since every real-world rate has a

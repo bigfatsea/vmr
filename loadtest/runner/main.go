@@ -43,6 +43,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"vmr/loadtest/addr"
 )
 
 // profiles are the "typical combinations" — escalating rate/duration so the
@@ -62,8 +64,8 @@ type loadProfile struct {
 }
 
 const (
-	vmrAddr       = "127.0.0.1:8801"
-	mockAddr      = "127.0.0.1:9900"
+	vmrAddr       = addr.VMR
+	mockAddr      = addr.Mock
 	vmrBinary     = "./vmr"
 	configPath    = "loadtest/config.yaml"
 	logDir        = "logs/loadtest" // must match loadtest/config.yaml's log_dir

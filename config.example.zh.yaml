@@ -191,8 +191,10 @@ providers:
   #     map:                        # 只在自动解析猜不出你的模型名时才需要——
   #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr 自己的模型名 -> 标准表的 canonical key
   #     overrides:                  # first-match-wins；每条要么是 discount，要么是全部四个
-  #       # 分量（in_fresh/cache_read/cache_write/out）一起给，从不混着写或只给一部分
-  #       - {model: "*", discount: 0.25, date_from: "2026-06-08", date_to: "2026-08-08"}  # 一次限时促销，写在最前面
+  #       # 分量（in_fresh/cache_read/cache_write/out）一起给，从不混着写或只给一部分。
+  #       # 具体模型的规则要写在 "*" 通配兜底规则前面——反过来写会让具体规则变成永远
+  #       # 不会命中的死配置（vmr 加载期直接拒绝）；这里没有限时促销/错峰时间窗，
+  #       # 只有按模型的静态价格。
   #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
   #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
   #       - {model: "*", discount: 0.6}  # 兜底：这个账号上其余所有模型统一按列表价 6 折
