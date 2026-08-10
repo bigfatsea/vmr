@@ -77,6 +77,24 @@ type rec2 struct {
 	line                    int
 }
 
+// diagnosticNormMarker is the subset of respStream.Applied()'s vocabulary
+// (internal/router/response.go's noteApplied call sites) worth surfacing as
+// a per-endpoint frequency stat via EndpointRow.NormCounts: an actual vendor
+// content quirk vmr silently worked around, not a routine transport/protocol
+// step every successful response goes through regardless of vendor
+// (model_rewrite fires on ~100% of them, done_appended/buffered/opaque/
+// resumed_stream/overflow_raw_passthrough/crlf_framing_suspected describe
+// vmr's own transport handling, not a vendor's content behavior). Kept here
+// rather than as an exported list in internal/router: the router package has
+// no reason to know which of its own marker strings a downstream analytics
+// consumer finds diagnostically interesting.
+var diagnosticNormMarker = map[string]bool{
+	"think_strip":                       true,
+	"thinking_process_strip":            true,
+	"soft_block_detected":               true,
+	"thinking_process_pattern_detected": true,
+}
+
 // buildInternal is Build/BuildCached's shared body — see build_cached.go
 // for both entry points' doc comments and the full rationale (two-read
 // design, onRecord's independence from Build's own success/failure, the
@@ -245,6 +263,15 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 		e.Attempts++
 		if a.Error == "" && a.Response != nil && a.Response.Status < 400 {
 			e.OK++
+			for _, n := range a.Norm {
+				if !diagnosticNormMarker[n] {
+					continue
+				}
+				if e.NormCounts == nil {
+					e.NormCounts = map[string]int{}
+				}
+				e.NormCounts[n]++
+			}
 		} else {
 			e.Failed++
 			e.WastedMS += a.DurMS

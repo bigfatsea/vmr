@@ -1045,9 +1045,17 @@ OpenClaw 客户端方言散落在 `report` 6 个文件里（接入第二个 agen
 5. **`vmr report` 的额度燃尽看板（P4，`section_quota.go`）**（该做没做，且我认为优先级被 P2.2 抢占）——
    对"最大化套餐效益"这个核心目标有直接价值（每个套餐的燃尽曲线、该优先烧哪个），却排在"让 $ 列更准"
    （`metric: cost`）之后交付。这是 P0-A 判断在路线图排期上的具体体现。
-6. **软屏蔽/quirk 修复的聚合展示**（该接线没接线）——`soft_block_detected`/`thinking_process_pattern_
-   detected`/`model_rewrite` 已进审计 `norm` 字段，但 `report`/`story` 没有消费方把它们聚合成一个可读
-   的章节/指标。属于"数据已经在采集、只是没有出口"的小任务。
+6. ✅ **软屏蔽/quirk 修复的聚合展示**（该接线没接线，已修复）——`soft_block_detected`/`thinking_process_
+   pattern_detected`/`model_rewrite` 已进审计 `norm` 字段，但 `report`/`story` 没有消费方把它们聚合成
+   一个可读的章节/指标。属于"数据已经在采集、只是没有出口"的小任务。**2026-08-11 独立复查确认成立**
+   （核对了仓库现存 9101 份 `reports/details/*.md`，`think_strip`/`thinking_process_strip`/
+   `soft_block_detected`/`thinking_process_pattern_detected` 命中率约 9%-19%，不是罕见边缘情况）并
+   落地：`report/aggregate.go` 的 `addAttempt` 按端点聚合 `EndpointRow.NormCounts`（只统计这四个真正
+   的 quirk 标记，`model_rewrite`/`opaque` 等结构性标记显式过滤掉，否则会被 ~100% 命中率的噪音淹没），
+   `section_reliability.go` 新增"Quirk Fix × Endpoint"表（复用既有的"Error Class × Endpoint"渲染模式）。
+   `report/session.go` 里那个写而不读的孤儿字段 `ReqInfo.norm` 顺手删除——它按"最后一条非空 Norm"取值，
+   在 failover 场景下会丢掉更早 attempt 的 quirk 记录，不适合拿来做这件事，真正的聚合直接在
+   `aggregate.go` 的逐 attempt 循环里按端点归属计数。`vmr story` 暂未接线（不在本次范围内）。
 7. **`future-strategy/` 目录归档机制**（该完善没完善）——见 §10 建议，防止"多模型各写一份战略分析"
    持续堆积成陈旧、重叠的知识负债。
 8. **`vmr.sh`/service 模式的行为测试**（该完善没完善，已知项）——环境特定 bug（launchd/systemd 单元
@@ -1126,10 +1134,16 @@ OpenClaw 客户端方言散落在 `report` 6 个文件里（接入第二个 agen
 > （P1-A）；`core.NewTokenWeights()` 构造函数（§3.1 建议 3）——**这次重新读代码时发现它比原文档记录
 > 的范围更大**：`cmd/vmr/cmd_check.go` 里还有一处独立同款字面量，原文档判断的"唯一生产构造点"其实
 > 已经出现了第二处，不是假设性风险。`copyFlush` 数据竞争（P1-B）、`vmr replay` 计费、`/metrics`
-> 端点、软屏蔽聚合展示等其余项经重新评估后判定 effort/风险高于顺手改的量级，列入第二梯队，不在本轮
-> 处理。`docs/OUTSTANDING_ISSUES_opus-5.md` 与本文档的对应条目已同步更新。两轮全部改动通过
-> `go build`/`go vet`/`go test -race ./...`/`internal/archtest`/`gofmt` 验证，新增/调整测试约
-> 20 个用例。仍待用户后续裁定的：P0-C（分析半区体量准入门槛）、11.4 缺口清单里其余尚未打勾的项目。
+> 端点等其余项经重新评估后判定 effort/风险高于顺手改的量级，列入第二梯队，本轮未处理。
+> `docs/OUTSTANDING_ISSUES_opus-5.md` 与本文档的对应条目已同步更新。
+>
+> **第三轮（2026-08-11，用户另行提出并核实的一条 P0）**：软屏蔽/quirk 修复聚合展示（11.4 缺口 #6）——本文档
+> 第二轮曾把它归进"列入第二梯队"，但用户随后单独就这一条重新核实并要求落地，独立验证过程见该条目
+> 本身的批注（含对仓库现存 9101 份 detail 文件的实测命中率统计）。已修复，细节见 §11.4 第 6 条。
+>
+> 三轮全部改动通过 `go build`/`go vet`/`go test -race ./...`/`internal/archtest`/`gofmt` 验证，
+> 新增/调整测试约 25 个用例。仍待用户后续裁定的：P0-C（分析半区体量准入门槛）、11.4 缺口清单里
+> 其余尚未打勾的项目。
 
 ---
 

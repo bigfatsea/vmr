@@ -12,6 +12,8 @@ type ReliabilityText struct {
 	EndpointHeaders        [6]string // endpoint, attempts, ok, availability, error rate, top error
 	ErrorByEndpointTitle   string
 	ErrorByEndpointHeaders [3]string // endpoint, class, count
+	QuirkByEndpointTitle   string
+	QuirkByEndpointHeaders [3]string // endpoint, marker, count
 	ErrorTimelineTitle     string
 	ErrorTimelineChart     func() (title, axis string)
 	PeakHourNote           func(hour int, count int64) string
@@ -27,6 +29,8 @@ func Reliability(lang Lang) ReliabilityText {
 			EndpointHeaders:        [6]string{"端点", "尝试", "成功", "可用度", "错误率⭐", "首要错误"},
 			ErrorByEndpointTitle:   "**错误类别 × 端点**（仅非零）",
 			ErrorByEndpointHeaders: [3]string{"端点", "类别", "计数"},
+			QuirkByEndpointTitle:   "**Quirk 修复 × 端点**（仅非零，占该端点成功尝试的比例；详见每条请求的详情页）",
+			QuirkByEndpointHeaders: [3]string{"端点", "标记", "计数"},
 			ErrorTimelineTitle:     "**错误时间线**（错误数 / 小时）",
 			ErrorTimelineChart:     func() (string, string) { return "错误数 / 小时", "错误数" },
 			PeakHourNote: func(hour int, count int64) string {
@@ -42,6 +46,8 @@ func Reliability(lang Lang) ReliabilityText {
 		EndpointHeaders:        [6]string{"Endpoint", "Attempts", "OK", "Availability", "Error Rate⭐", "Top Error"},
 		ErrorByEndpointTitle:   "**Error Class × Endpoint** (non-zero only)",
 		ErrorByEndpointHeaders: [3]string{"Endpoint", "Class", "Count"},
+		QuirkByEndpointTitle:   "**Quirk Fix × Endpoint** (non-zero only, % of this endpoint's successful attempts; see each request's detail page for the full narration)",
+		QuirkByEndpointHeaders: [3]string{"Endpoint", "Marker", "Count"},
 		ErrorTimelineTitle:     "**Error Timeline** (errors / hour)",
 		ErrorTimelineChart:     func() (string, string) { return "Errors / hour", "Errors" },
 		PeakHourNote: func(hour int, count int64) string {

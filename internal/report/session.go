@@ -133,7 +133,6 @@ type ReqInfo struct {
 	durMS     int64
 	ttftMS    int64
 	stream    bool
-	norm      []string
 }
 
 // SessionInfo is one grouped agent session.
@@ -368,12 +367,14 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	// since that's the one that actually feeds the aggregate report) — this
 	// used to duplicate that same json.Marshal-based sizing on every
 	// record's full body for no reason.
-	for i := len(rec.Attempts) - 1; i >= 0; i-- {
-		if len(rec.Attempts[i].Norm) > 0 {
-			r.norm = rec.Attempts[i].Norm
-			break
-		}
-	}
+	//
+	// Attempt.Norm is likewise NOT pulled onto ReqInfo here: it's an
+	// attempt-level, per-endpoint signal (which endpoint's response needed a
+	// think_strip/soft_block quirk fix), not a per-request/session one — a
+	// "last non-empty attempt" copy would silently drop an earlier failed
+	// attempt's marker on any request with a failover chain. aggregate.go's
+	// own addAttempt reads rec.Attempts[i].Norm directly, attributed to the
+	// specific EndpointRow that attempt hit (EndpointRow.NormCounts).
 	if rec.Client.Response != nil {
 		r.Usage, r.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
 		if s := responseSummary(rec.Client.Response.Body); s != nil {

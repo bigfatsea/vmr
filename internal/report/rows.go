@@ -174,6 +174,18 @@ type EndpointRow struct {
 	Availability float64        `json:"availability"`
 	ErrorRate    float64        `json:"error_rate,omitempty"` // failed/attempts × 100
 	ErrorClasses map[string]int `json:"error_classes,omitempty"`
+	// NormCounts tallies this endpoint's SUCCESSFUL attempts by which
+	// response-normalization quirk-repair step fired — think_strip/
+	// thinking_process_strip/soft_block_detected/thinking_process_pattern_detected
+	// only (see aggregate.go's diagnosticNormMarker): routine steps every
+	// successful response carries regardless of vendor behavior
+	// (model_rewrite, buffered, opaque, ...) are deliberately excluded, or
+	// this would be dominated by near-100%-hit-rate noise instead of
+	// surfacing the vendor quirks it exists to catch. Per-request detail
+	// pages already narrate each step for one request at a time (see
+	// internal/i18n.Detail's NormDescriptions); this is the cross-request
+	// frequency view that was previously uncollected.
+	NormCounts map[string]int `json:"norm_counts,omitempty"`
 
 	// B/C - only for the requests this endpoint actually served
 	Requests           int     `json:"requests,omitempty"`     // requests this endpoint actually served (request-level, ≠ Attempts)

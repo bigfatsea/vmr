@@ -1,8 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
 // §3 可靠性: outcome mix, per-endpoint health (attempt-level availability
-// vs request-level success rate — deliberately distinct), and the error
-// class distribution, bucketed by protocol.
+// vs request-level success rate — deliberately distinct), the error class
+// distribution, and the quirk-repair marker distribution (soft-block/
+// thinking-leak fixes — see EndpointRow.NormCounts), bucketed by protocol.
 package report
 
 import (
@@ -80,6 +81,48 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row, lang i18n.La
 						rate = float64(n) / float64(e.Attempts) * 100
 					}
 					tbl.row(e.Endpoint, cls, fmt.Sprintf("%d(%s)", n, pctHundred(rate)))
+				}
+			}
+			w("\n")
+		}
+	}
+
+	// quirk marker × endpoint (only non-zero), split by protocol — the
+	// cross-request frequency view detail pages can't provide on their own
+	// (each narrates one request at a time; see EndpointRow.NormCounts).
+	quirkNonzero := false
+	for _, e := range rep.EndpointsAll {
+		if len(e.NormCounts) > 0 {
+			quirkNonzero = true
+			break
+		}
+	}
+	if quirkNonzero {
+		w("%s\n\n", t.QuirkByEndpointTitle)
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
+		qh := t.QuirkByEndpointHeaders
+		for _, p := range protocols {
+			rows := byProto[p]
+			hasAny := false
+			for _, e := range rows {
+				if len(e.NormCounts) > 0 {
+					hasAny = true
+					break
+				}
+			}
+			if !hasAny {
+				continue
+			}
+			w("*%s*\n\n", p)
+			tbl := newTable(w, qh[0], qh[1], qh[2])
+			for _, e := range rows {
+				for _, marker := range sortedKeysInt(e.NormCounts) {
+					n := e.NormCounts[marker]
+					rate := 0.0
+					if e.OK > 0 {
+						rate = float64(n) / float64(e.OK) * 100
+					}
+					tbl.row(e.Endpoint, marker, fmt.Sprintf("%d(%s)", n, pctHundred(rate)))
 				}
 			}
 			w("\n")

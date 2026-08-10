@@ -638,6 +638,125 @@ func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
 	}
 }
 
+// quirkNormRecords returns three successful requests against one endpoint
+// (soft_block_detected once, think_strip once, and a clean response with
+// only the routine model_rewrite step) plus one clean request against a
+// second endpoint, all attempts also carrying model_rewrite (the ~100%
+// baseline every successful response gets).
+func quirkNormRecords() []map[string]any {
+	base := func(ts time.Time, endpoint string, norm []string) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent",
+			"protocol": "openai", "outcome": "ok",
+			"client": map[string]any{
+				"request":  map[string]any{"body": map[string]any{"model": "agent", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
+				"response": map[string]any{"status": 200, "body": map[string]any{}},
+			},
+			"attempts": []map[string]any{
+				{"endpoint": endpoint, "dur_ms": 100, "response": map[string]any{"status": 200}, "norm": norm},
+			},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	const minimax, openrouter = "openai:minimax:m3", "openai:openrouter:gpt"
+	return []map[string]any{
+		base(t0, minimax, []string{"model_rewrite", "soft_block_detected"}),
+		base(t0.Add(time.Minute), minimax, []string{"model_rewrite", "think_strip"}),
+		base(t0.Add(2*time.Minute), minimax, []string{"model_rewrite"}),
+		base(t0.Add(3*time.Minute), openrouter, []string{"model_rewrite"}),
+	}
+}
+
+// TestEndpointNormCounts verifies EndpointRow.NormCounts only tallies
+// diagnosticNormMarker's curated "vendor quirk fix" subset of Attempt.Norm
+// — model_rewrite (the routine, near-100%-hit-rate step every successful
+// response carries) must never show up, or it would drown out the actually
+// interesting soft-block/thinking-leak signal this field exists to surface
+// — and attributes each marker to the specific endpoint the successful
+// attempt that carried it actually hit, not globally.
+func TestEndpointNormCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, quirkNormRecords())
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var minimax, openrouter *EndpointRow
+	for i, e := range rep.EndpointsAll {
+		switch e.Endpoint {
+		case "openai:minimax:m3":
+			minimax = &rep.EndpointsAll[i]
+		case "openai:openrouter:gpt":
+			openrouter = &rep.EndpointsAll[i]
+		}
+	}
+	if minimax == nil {
+		t.Fatal("no EndpointsAll entry for openai:minimax:m3")
+	}
+	if n := minimax.NormCounts["model_rewrite"]; n != 0 {
+		t.Errorf("model_rewrite must be filtered out (routine, not a quirk), got count %d", n)
+	}
+	if n := minimax.NormCounts["soft_block_detected"]; n != 1 {
+		t.Errorf("soft_block_detected = %d, want 1", n)
+	}
+	if n := minimax.NormCounts["think_strip"]; n != 1 {
+		t.Errorf("think_strip = %d, want 1", n)
+	}
+	if len(minimax.NormCounts) != 2 {
+		t.Errorf("minimax.NormCounts = %v, want exactly 2 keys (soft_block_detected, think_strip)", minimax.NormCounts)
+	}
+
+	if openrouter == nil {
+		t.Fatal("no EndpointsAll entry for openai:openrouter:gpt")
+	}
+	if len(openrouter.NormCounts) != 0 {
+		t.Errorf("openrouter saw no quirk markers, want empty NormCounts, got %v", openrouter.NormCounts)
+	}
+}
+
+// TestRenderReliabilityQuirkSection covers section_reliability.go's render
+// side: the "Quirk Fix × Endpoint" table must appear (with the endpoint,
+// marker, and a rate derived from EndpointRow.OK, not Attempts) when at
+// least one EndpointRow.NormCounts entry is non-zero, and must be entirely
+// absent (not an empty table) when the report has none.
+func TestRenderReliabilityQuirkSection(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, quirkNormRecords())
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := Markdown(rep, i18n.EN)
+	if !strings.Contains(md, "Quirk Fix × Endpoint") {
+		t.Fatalf("markdown missing the quirk-by-endpoint section:\n%s", md)
+	}
+	if !containsAll(md, []string{"openai:minimax:m3", "soft_block_detected", "think_strip"}) {
+		t.Errorf("markdown missing expected endpoint/marker cells:\n%s", md)
+	}
+	if strings.Contains(md, "model_rewrite") {
+		t.Error("model_rewrite must never appear in the quirk table — it's the filtered-out routine step")
+	}
+	// minimax.OK == 3 (all three requests succeeded), 1 soft_block_detected
+	// hit -> 33%.
+	if !strings.Contains(md, "1(33") {
+		t.Errorf("expected a 1(33...%%) cell (1 hit / 3 OK attempts) for soft_block_detected, got:\n%s", md)
+	}
+
+	// Second report with no quirk markers at all: the section must not render.
+	dir2 := t.TempDir()
+	clean := []map[string]any{quirkNormRecords()[3]} // the openrouter record, only model_rewrite
+	path2 := writeTempJSONL(t, dir2, clean)
+	rep2, _, err := Build([]string{path2}, time.Now(), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md2 := Markdown(rep2, i18n.EN)
+	if strings.Contains(md2, "Quirk Fix") {
+		t.Errorf("quirk section must not render when no endpoint has a non-zero NormCounts:\n%s", md2)
+	}
+}
+
 // TestWriteFailedIndex checks vmr-requests-failed.md/.jsonl: they must list
 // exactly the 3 failed rows (not the 1 plain-ok row), link to detail files,
 // and leave vmr-requests.md itself untouched (still carrying all 4 requests)
