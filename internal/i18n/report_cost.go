@@ -8,6 +8,8 @@ type CostText struct {
 	Title                 string
 	NoPricingBody         string
 	PricingNote           func(disclaimer string) string
+	ByDateTitle           func(currency string) string
+	ByDateHeaders         [4]string // date, fresh, out, estimated cost
 	ByModelTitle          func(currency string) string
 	ByModelHeaders        [5]string // model, protocol, fresh, out, estimated cost
 	ByEndpointTitle       func(currency string) string
@@ -25,6 +27,8 @@ func Cost(lang Lang) CostText {
 			Title:                 "§2 成本估算",
 			NoPricingBody:         "未找到可用的定价数据（内置标准表 + config.yaml 的 pricing/providers[].pricing 均未生效），本章节不显示 $ 估算。\n\n",
 			PricingNote:           func(disclaimer string) string { return "> " + disclaimer + "\n\n" },
+			ByDateTitle:           func(cur string) string { return "**按日估算成本**（" + cur + "）" },
+			ByDateHeaders:         [4]string{"日期", "fresh", "out", "估算成本"},
 			ByModelTitle:          func(cur string) string { return "**按模型估算成本**（" + cur + "）" },
 			ByModelHeaders:        [5]string{"模型", "协议", "fresh", "out", "估算成本"},
 			ByEndpointTitle:       func(cur string) string { return "**按端点估算成本**（" + cur + "，跨日合并）" },
@@ -42,6 +46,8 @@ func Cost(lang Lang) CostText {
 		Title:                 "§2 Cost Estimate",
 		NoPricingBody:         "No pricing data available (neither the embedded standard table nor config.yaml's pricing/providers[].pricing resolved anything); this section shows no $ estimate.\n\n",
 		PricingNote:           func(disclaimer string) string { return "> " + disclaimer + "\n\n" },
+		ByDateTitle:           func(cur string) string { return "**Estimated Cost by Date** (" + cur + ")" },
+		ByDateHeaders:         [4]string{"Date", "fresh", "out", "Est. Cost"},
 		ByModelTitle:          func(cur string) string { return "**Estimated Cost by Model** (" + cur + ")" },
 		ByModelHeaders:        [5]string{"Model", "Protocol", "fresh", "out", "Est. Cost"},
 		ByEndpointTitle:       func(cur string) string { return "**Estimated Cost by Endpoint** (" + cur + ", merged across dates)" },

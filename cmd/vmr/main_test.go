@@ -739,6 +739,7 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 						"priority":             1,
 						"consecutive_failures": 0,
 						"available":            true,
+						"serving":              true,
 					},
 				},
 			},
@@ -778,6 +779,107 @@ models:
 	}
 	if !strings.Contains(got, "ok") {
 		t.Errorf("endpoint state should be ok: %q", got)
+	}
+}
+
+// TestCmdStatus_HalfOpenRendersDistinctFromOK pins the fix for a finding
+// from the 2026-08-12 review (VMR_项目全面Review报告 B2): a half-open
+// endpoint (available=true, serving=false, fails>0) must render as
+// "half-open", not "ok" — cmd_status.go used to key this off fails>0 alone,
+// which happened to give the same answer, but now explicitly checks the
+// serving field so it can't silently regress if available's semantics ever
+// change again.
+func TestCmdStatus_HalfOpenRendersDistinctFromOK(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": map[string]any{
+				"vm [openai]": []map[string]any{
+					{
+						"endpoint":             "openai/p1/m",
+						"protocol":             "openai",
+						"priority":             1,
+						"consecutive_failures": 3,
+						"last_error":           "transient",
+						"available":            true,
+						"serving":              false,
+					},
+				},
+			},
+			"concurrency": map[string]any{"limit": 8, "in_flight": 0, "waiting": 0},
+			"time":        "2026-07-19T12:00:00Z",
+		})
+	}))
+	defer ts.Close()
+
+	yaml := fmt.Sprintf(`
+listen: %s
+providers:
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`, ts.Listener.Addr().String())
+
+	path := writeTempFile(t, "config.yaml", yaml)
+	got := captureStdout(t, func() {
+		if err := cmdStatus([]string{"-c", path}); err != nil {
+			t.Fatalf("cmdStatus: %v", err)
+		}
+	})
+	if !strings.Contains(got, "half-open") {
+		t.Errorf("available=true, serving=false should render as half-open: %q", got)
+	}
+	if strings.Contains(got, "COOLDOWN") {
+		t.Errorf("available=true should never render as COOLDOWN: %q", got)
+	}
+}
+
+// TestCmdStatus_OlderServerMissingServingField_HealthyEndpointStillOK covers
+// a version-skew gap an independent review found: a `vmr status` binary
+// built after the Serving field was added can still query an older,
+// already-running `vmr start` process (e.g. right after a Homebrew tap
+// upgrade, before the service restarts) whose /admin/status response omits
+// "serving" entirely. A healthy endpoint (available=true, fails=0, no
+// "serving" key at all) must still render "ok", not misread the absent
+// field as serving=false and render a false "half-open" alarm.
+func TestCmdStatus_OlderServerMissingServingField_HealthyEndpointStillOK(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": map[string]any{
+				"vm [openai]": []map[string]any{
+					{
+						"endpoint":             "openai/p1/m",
+						"protocol":             "openai",
+						"priority":             1,
+						"consecutive_failures": 0,
+						"available":            true,
+						// "serving" deliberately absent — simulates an older server.
+					},
+				},
+			},
+			"concurrency": map[string]any{"limit": 8, "in_flight": 0, "waiting": 0},
+			"time":        "2026-07-19T12:00:00Z",
+		})
+	}))
+	defer ts.Close()
+
+	yaml := fmt.Sprintf(`
+listen: %s
+providers:
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`, ts.Listener.Addr().String())
+
+	path := writeTempFile(t, "config.yaml", yaml)
+	got := captureStdout(t, func() {
+		if err := cmdStatus([]string{"-c", path}); err != nil {
+			t.Fatalf("cmdStatus: %v", err)
+		}
+	})
+	if strings.Contains(got, "half-open") || strings.Contains(got, "COOLDOWN") {
+		t.Errorf("a healthy endpoint with no \"serving\" key (older server) should render ok, not half-open/COOLDOWN: %q", got)
 	}
 }
 

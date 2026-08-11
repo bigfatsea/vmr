@@ -62,6 +62,7 @@ import (
 	"bytes"
 	"io"
 	"regexp"
+	"strings"
 	"sync"
 
 	"vmr/internal/chatmsg"
@@ -139,9 +140,14 @@ var passthroughTokenMarkers = [][]byte{
 type respStream struct {
 	src         io.Reader
 	clientModel string
-	isSSE       bool
-	protocol    string // ingress protocol: decides [DONE] policy
-	opaque      bool   // Content-Encoding present: no transforms at all
+	// modelRewriteRepl is the regexp.ReplaceAll template used to rewrite the
+	// "model" field back to clientModel — precomputed once so a virtual
+	// model name containing "$" (a legal YAML `models:` key) can't be
+	// misread as a submatch reference (see newRespStream).
+	modelRewriteRepl []byte
+	isSSE            bool
+	protocol         string // ingress protocol: decides [DONE] policy
+	opaque           bool   // Content-Encoding present: no transforms at all
 
 	mode              int
 	pending           []byte // undecided: withheld bytes; passthrough: partial-event tail
@@ -185,7 +191,16 @@ type respStream struct {
 }
 
 func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *respStream {
-	rs := &respStream{src: src, clientModel: clientModel, upstreamModel: upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true}
+	// "$" is a template metacharacter to regexp.ReplaceAll (see
+	// modelRewriteRepl's use in emitBlock/finalizeBuffered) — escape it so a
+	// virtual model name like "gpt$4" is emitted verbatim instead of being
+	// read as a (nonexistent) submatch reference and silently truncated.
+	escapedClientModel := strings.ReplaceAll(clientModel, "$", "$$")
+	rs := &respStream{
+		src: src, clientModel: clientModel,
+		modelRewriteRepl: []byte(`${1}` + escapedClientModel + `"`),
+		upstreamModel:    upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true,
+	}
 	switch {
 	case opaque:
 		rs.applied = append(rs.applied, "opaque")
@@ -429,7 +444,7 @@ func (s *respStream) emitBlock(block []byte) {
 	s.noteUsage(block)
 	if modelFieldPattern.Match(block) {
 		s.noteUpstreamModel(block)
-		block = modelFieldPattern.ReplaceAll(block, []byte(`${1}`+s.clientModel+`"`))
+		block = modelFieldPattern.ReplaceAll(block, s.modelRewriteRepl)
 		s.noteApplied("model_rewrite")
 	}
 	s.tailNL = bytes.HasSuffix(block, eventSep)
@@ -505,7 +520,7 @@ func (s *respStream) finalizeBuffered() {
 	raw := b // pre-strip snapshot; only kept (below) if a strip actually fires
 	if modelFieldPattern.Match(b) {
 		s.noteUpstreamModel(b)
-		b = modelFieldPattern.ReplaceAll(b, []byte(`${1}`+s.clientModel+`"`))
+		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
 		s.noteApplied("model_rewrite")
 	}
 	// Guarded like the streaming path: only a response whose first non-empty

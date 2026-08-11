@@ -31,6 +31,19 @@ func costFor(pr pricing.Rate, rc *rec2) float64 {
 	return pr.Cost(rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite, rc.usage.Out)
 }
 
+// addCost adds c to *p, lazily allocating the pointer on first use — the
+// nil-check-then-allocate-then-add pattern every CostEstimate bucket
+// (Overall/ByModel/ByDate/EndpointsAll/ByClient) needs, factored out after
+// a missing ByDate accumulation (a hand-written copy of this block that
+// simply wasn't added) went unnoticed until a 2026-08-12 review caught it —
+// a shared call site is harder to omit by accident than a fifth copy-paste.
+func addCost(p **float64, c float64) {
+	if *p == nil {
+		*p = new(float64)
+	}
+	**p += c
+}
+
 // splitEndpointProviderModel splits a "protocol:provider:model" endpoint
 // label into its provider and model segments — pricing is keyed by
 // provider+model only, protocol-agnostic (see internal/pricing's package

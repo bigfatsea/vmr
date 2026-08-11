@@ -54,6 +54,61 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	}
 }
 
+// TestParseRejectsEnvValueWithNewline pins the fix for a finding from the
+// 2026-08-12 review (VMR_项目全面Review报告 B5): expandEnv substitutes
+// ${VAR} into the raw YAML TEXT before parsing, so a value containing a
+// newline doesn't just fill in the scalar it was written into — it can
+// inject a new top-level key (here, a second listen: line) that changes
+// the document's structure. Must be a hard load error, not a config that
+// silently parses into something the author never wrote.
+func TestParseRejectsEnvValueWithNewline(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-test-123\nlisten: 0.0.0.0:1")
+	_, err := Parse([]byte(validYAML))
+	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") || !strings.Contains(err.Error(), "newline") {
+		t.Fatalf("want a rejection naming VMR_TEST_KEY and \"newline\", got %v", err)
+	}
+}
+
+// TestParseRejectsEnvValueWithColonSpace is TestParseRejectsEnvValueWithNewline's
+// other trigger: a ": " inside an expanded value can turn what was meant to
+// be a scalar into a new key: value pair on the same line.
+func TestParseRejectsEnvValueWithColonSpace(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-test-123, extra: stuff")
+	_, err := Parse([]byte(validYAML))
+	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
+		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+	}
+}
+
+// TestParseRejectsEnvValueWithHashComment covers a gap an independent
+// review found in the first version of this guard: a " #" inside an
+// expanded value doesn't restructure the document, it starts a YAML
+// comment mid-scalar — silently truncating the value with no parse error
+// at all, which is arguably worse than the newline/colon cases (those at
+// least tend to produce a load error downstream; this one doesn't).
+func TestParseRejectsEnvValueWithHashComment(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-test-123 #rotated 2026-08")
+	_, err := Parse([]byte(validYAML))
+	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
+		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+	}
+}
+
+// TestParseAllowsOrdinaryEnvValues is the negative case: a plain API key
+// (no newline, no ": ") must keep loading exactly as before — the check
+// above must not false-positive on ordinary secrets.
+func TestParseAllowsOrdinaryEnvValues(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-ordinary-1234567890abcdef")
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != "sk-ordinary-1234567890abcdef" {
+		t.Errorf("env expansion: got %q", p.APIKey)
+	}
+}
+
 func TestProbeTimeoutConfig(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
 		"listen: 127.0.0.1:9900\nprobe_timeout: 5s", 1)

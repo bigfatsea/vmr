@@ -16,8 +16,18 @@ import (
 	"vmr/internal/core"
 )
 
-// Dimension is one comparable sort key. Stateful dimensions (round_robin)
-// manage their own state inside the instance returned by their factory.
+// Dimension is one comparable sort key. Build (below) instantiates a
+// model's dimension chain exactly once, at snapshot-build time — the
+// resulting []Dimension is stored in router.ModelRoute.Dims and reused,
+// unchanged, by every concurrent request's strategy.Sort call for that
+// model's lifetime (until the next config reload rebuilds a fresh chain).
+// Compare must therefore be safe for concurrent use: a stateful dimension
+// (e.g. a future round_robin) cannot mutate unsynchronized state inside its
+// factory-returned instance the way a naive per-request read might suggest —
+// it needs its own locking/atomics, or a redesign to per-request
+// instantiation, not "manage state inside the instance" left unqualified.
+// The only dimension registered today (priority) is a stateless empty
+// struct, so this has no live consequence yet.
 type Dimension interface {
 	Name() string
 	Compare(a, b *core.Endpoint) int // <0: a first; 0: tie, defer to next dimension

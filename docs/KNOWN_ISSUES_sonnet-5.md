@@ -127,9 +127,10 @@ struct。千万级记录约 640MB。
 共有派生计算（真百分位、fresh tokens、cache efficiency）已收进共享的 `finishMeasures`，但**结构体声明
 本身没动**——新增一个分组维度仍需改 4 个地方。
 
-**实测更新（本次复核）**：`aggregate.go` 当前 **970 行**（`wc -l`），距 `internal/archtest` 的 1000 行
-预算只剩 30 行——比原记录的"999/1000"略有反复（P0-A 简化定价引擎减了一些行，quirk 聚合展示又加了
-`NormCounts` 相关逻辑），但仍然是全仓库距撞线最近的文件之一。
+**实测更新（本次复核）**：`aggregate.go` 当前 **960 行**（`wc -l`），距 `internal/archtest` 的 1000 行
+预算还剩 40 行——2026-08-12 review 加了按日成本累加（+4 行），随后又把五处重复的
+"nil 检查→分配→累加" cost 逻辑收成 `cost.go` 的共享 `addCost` helper（净 −18 行），比原记录的
+"999/1000"宽松了不少，但仍然是全仓库距撞线最近的文件之一。
 
 **方案**：泛型 `Bucket[K comparable]{ Key K; Measures }` + `Measures.Add/Finish`，估算 1,200–1,500 行
 → ~300 行。**为什么待定（有硬约束）**：同名字段（如 `CacheEfficiency`）在不同 Row 类型上的 `omitempty`
@@ -214,6 +215,11 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 按目录统计导出函数/类型数量、或给 Finding 检测器数量设上限），而不是停留在文档共识——`archtest` 目前
 只覆盖"行数"和"import 边界"两个维度，"功能面膨胀"是它现有机制的盲区。
 
+**同源的文档侧张力**（2026-08-12 review 补充）：三份主设计文档（`VirtualModelRouter_Design_v4_Core.md`/
+`Analytics.md`/`TokenPlan_Quota_Routing_Design_opus-5.md`）合计约 400KB，每次实现变更都要判断哪几份
+需要同步更新。这不是缺陷，是同一个"范围仍在扩张、同步负担随之增长"张力在文档侧的表现，与代码侧的
+体量问题同源，不单独立项，留给用户和上面的代码侧问题一起裁定。
+
 #### 1.2.11 [L] 图片降采样缓存无物理磁盘容量上限
 
 `internal/imgprep/cache.go` 的 `sweepCacheDir` 只按 `image_cache_ttl_days`（缺省 7 天）做基于 mtime
@@ -272,9 +278,14 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   STOP"的假崩溃痕迹（正常退出路径已用 `os.Interrupt`）。
 - `loadtest/gentargets/main.go` 的 `f.Write(line)` 与 `defer all.Close()` 错误被忽略，磁盘满时
   `targets.json` 可能静默截断。
-- P3-3 分级处置里明确保留不动的 ~23 处引用（`docs/VirtualModelRouter_Design_v4_{Core,Analytics}.md`
-  形式的编号引用，已带文件名）：CLAUDE.md 收紧后的原则是"只引用文档名字和章节名称，不用编号"，这些
-  从严格意义上仍不完全合规，但号码旁边已经有文件名兜底，紧迫性明显低于已清掉的裸编号和死引用。
+- P3-3 分级处置里明确保留不动的编号引用——**规模已由 2026-08-12 review 更正**：`grep -rn '§[0-9]'
+  --include="*.go"` 实测生产代码（不含测试）117 处（而非本条此前记录的 ~23 处，低估了一个数量级），
+  但分类后紧迫性判断不变：约 30 处是 `internal/report`/`i18n` 渲染出的**报告产物自己的章节号**（Markdown 里真有
+  `## §2 成本估算` 这样的标题），跟"引用外部文档编号"是两回事，不算违规；其余绝大多数是
+  `pricing`/`quota`/`router`/`core` 对 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的引用，且
+  几乎都在同一行或文件头注释里带着"the design doc"/完整文件名——落在本条已有的"号码旁边已有文件名
+  兜底"范围内。真要把 `§4.2①`/`§9.1` 这类替换成准确章节名，必须先通读 1378 行设计文档核对当前标题，
+  出错代价（指向错误章节）不小于不动，暂不排期。
 - `internal/router/transport.go` 的 `copyFlush` 在 idle 超时/写错误两条返回路径上不等读 goroutine 真正
   退出就返回，`forwardSuccess` 随后读 `rbody.Applied()`/`RawPreStrip()`/`ObservedModel()` 存在既有数据
   竞争（触发条件窄：上游中途卡住超过 `stream_idle` 超时，或客户端写入失败；最坏后果是审计记录里
@@ -282,7 +293,8 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   文件时顺手修"，不单独立项、不单独测试验证。
 - CI（`.github/workflows/ci.yml`）覆盖 `go vet`/`go build`/`go test -race`（ubuntu+macOS 矩阵）+
   `gofmt -l` + `shellcheck`。`staticcheck` 评估后未采纳——见 §2.3。
-- 缺 `CHANGELOG.md`/`CONTRIBUTING.md`（≤3 人内部项目，靠 commit message 追踪，见 §2.3 的产品判断）。
+- 缺 `CONTRIBUTING.md`（≤3 人内部项目，靠 commit message 追踪，见 §2.3 的产品判断）。`CHANGELOG.md`
+  已存在并已是 `release.yml` 的发布说明真源，见 §3。
 - `admin.go` 判断 loopback 用 `net.ParseIP(host).IsLoopback()`，对带 zone 的 IPv6 loopback（`::1%lo0`）
   没有专门测试——`net.ParseIP` 对带 zone 的地址返回 `nil`，`nil.IsLoopback()` 不会 panic（`net.IP` 是
   `[]byte`，方法体只检查切片长度）、返回 false，fail-closed 方向无害，只是极端场景下 admin 端点会被
@@ -310,6 +322,41 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   但如果未来继续为新厂商在这些函数里加分支（尤其 `response.go`，新增一种响应端异常检测要同时改
   `classifyEvent`/`decide`/`emitBlock`/`finalizeBuffered` 四个函数），会逐渐失去"新协议/新 quirk =
   新文件"这种隔离性。已被认知到的未来风险，非当前问题。
+- **`report.Build`/`BuildCached` 位置参数已达 6/7 个**（`paths, now, progress, pricingInfo, pricingSrc,
+  onRecord[, prior]`）——2026-08-12 review 核实：生产调用点只有 `cmd_report.go` 一处，`internal/report`
+  包内（几乎全是测试文件）另有 32 处，合计 **33 处**，量级与"引入 `BuildOptions` struct"这个建议方案
+  原估的"~40 行含测试"基本相符（初次用不限定包的 grep 统计出"76 处"，混入了 `internal/strategy`/
+  `internal/story` 各自另一个同名无关的 `Build()` 函数，已更正）。没有任何 bug、没有调用错误的历史
+  记录，纯 ergonomics 改动，按 YAGNI 不现在做——留到真的要加第 9 个参数、调用点已经读不动的那次再重构。
+- **`RequestFacts` 的三个永假占位字段**：`HasAudio`/`HasVideo`/`WantsThinking`（`core.go`）有类型、有
+  JSON tag、被写进每条审计记录的 `facts`，`router/logfmt.go` 的 `capField` 还会把它们渲染进 `cap=`
+  列，但没有任何代码给它们赋过 true——"看起来实现了但其实是死的"表面积。无害；若要清理，最小改动是
+  删掉 `capField` 里的三个不可达分支，字段本身建议保留（有 JSON tag，删了会改 schema）。
+- **`core.WriteJSON` 忽略 `Encode` 的返回错误**：响应体写一半断掉时服务端毫无痕迹。此时 `WriteHeader`
+  已发出、无法改状态码，加一行日志需要给零依赖的 `core` 引入 logger 或改签名，成本大于收益，暂不动。
+- **`internal/server` 直接解引用 `Snapshot()`，缺少 `router.Serve` 那样的 nil 防御**：`router.Serve`
+  专门为"Install 之前被调用"写了 nil 防御并注释说明"防御性 503 严格优于 nil panic"，`server.go` 的
+  `chatHandler`/`authenticate` 没有同款防御。生产路径上 `cmd_start.go` 保证了 Install 先于请求处理，
+  这只是一致性瑕疵，非当前 bug。
+- **每次热重载都重建全部 `http.Client`，丢弃连接池**：`router/snapshot.go` 的 `Install` 无条件
+  `NewUpstreamClient(...)` 一遍，即使代理配置完全没变，一次 `SIGHUP`/config.yaml 保存也会让所有上游
+  连接池归零，下一批请求全部重新握手——对一个"配置改动频繁"的本地工具是可感知的抖动。修复需要按
+  `mode|proxyURL|timeouts` 指纹复用旧 client，改动面涉及 `snapshot.go` 的 client 生命周期管理，暂不
+  排期，仅登记。
+- **`internal/report` 的 `Report2`/`rec2`/`orDash2`/`pctStr2` 等 `2` 后缀是历史版本迭代的命名残留**：
+  `Format = 10` 的注释显式说明"10 continues the legacy sequence (9 = legacy report)"，即 v1 早已不
+  存在，`2` 后缀不再区分任何东西。纯命名债；`Report2` 是导出类型，改动面横跨 `cmd/vmr` 与大量测试，
+  收益纯审美，不排期。
+- **`vmr story` 的 LLM 解读文本原样写入 Markdown**（`story/llm.go` 的 `RenderLLMSection`）：证据包内容
+  （任务标题、工具调用摘要、交付物节选）源自被审计的 agent 会话，理论上可被会话内容影响 LLM 输出，
+  再原样进入产物。缓解因素：产物是本地 0600 文件、Markdown 渲染不执行代码、已有"这是解读不是事实"
+  的横幅。登记备案级别，非当前需要处理的问题。
+- **`docs/dependabot_branch_cleanup_2026-08-11_sonnet-5.md` 放在 `docs/` 顶层**，与设计文档、用户手册
+  并列——它是一次性运维流水账，既不是"当前状态"文档也不是 CLAUDE.md 豁免的追溯型文档（review
+  report/KNOWN_ISSUES/CHANGELOG）。归档到 `archived/` 更合适，纯文档卫生，优先级低于本文档其他条目。
+- **`resolveInputPaths`（`cmd/vmr/auditpaths.go`）在 glob 无匹配时的报错不够引导**：全新安装还没产生
+  审计文件时，`vmr report`/`vmr story` 报的是 `no files match "..."`，没有提示"是不是还没运行过
+  vmr start"。小 UX 瑕疵，加一句引导语即可，优先级低。
 
 ---
 
@@ -403,8 +450,9 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 - **CI 未接入 `staticcheck`**——评估后未采纳：本机无网络环境无法预先验证，25,000+ 行生产代码首次接入
   大概率冒出大量未经筛选的既有发现，没有时间预算逐条判断真假阳性，贸然接入可能让 CI 从下一次 push 就
   直接变红，风险大于收益。
-- **不维护 `CHANGELOG.md`/`CONTRIBUTING.md`**——≤3 人内部项目，靠 commit message 追踪足够，维护变更日志
-  的边际收益低。
+- **不维护 `CONTRIBUTING.md`**——≤3 人内部项目，外部贡献者流程的边际收益低。（`CHANGELOG.md` 曾在此
+  一并列为"不维护"，是本文档 2026-08-12 review 发现的一处过期记录：它已存在并被 `CLAUDE.md` 定为发布
+  说明唯一真源，`release.yml` 缺对应章节时会让发布失败——已改列 §3 已解决，不再属于这条产品判断。）
 - **`buildinfo` 刻意不编造 semver，只报告 VCS commit 短哈希**——没有能递增语义化版本号的发布流程，编造
   一个没人维护的版本号比诚实报告 commit SHA 更容易误导人。**这个判断的前提是"当前阶段"**：如果未来
   `vmr` 的使用者从"看得懂 commit SHA 的开发者"扩展到更广受众（比如通过 Homebrew tap 触达的普通用户），
@@ -504,6 +552,48 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   状态文件。未覆盖：与另一个正在写同一状态文件的进程（如运行中的 `vmr start`）并发时没有跨进程锁，
   这是 `TokenPlan_Quota_Routing_Design_opus-5.md`"多实例共享计数：不做"这条既有取舍的一个具体表现，
   不是新问题。
+- **`CHANGELOG.md` 缺失**（2026-08-12 前旧记录）：已新增 `CHANGELOG.md`（Keep a Changelog 格式，回填
+  v0.1–v0.5），`CLAUDE.md` 已把它定为发布说明唯一真源，`release.yml` 会在缺对应 tag 章节时让发布失败。
+  §1.3/§2.3 此前把它记在"缺失"/"确定不修"两处，是一处过期记录，已一并更正。
+- **2026-08-12 review 第一梯队（六条，均验证后修复）**：响应端模型名重写被 `$` 破坏（`response.go`
+  的 `ReplaceAll` 把 `clientModel` 当模板解析，含 `$` 的虚拟模型名如 `gpt$4` 被截断成 `gpt`——已用
+  独立程序复现根因；改为预计算转义后的替换模板并锁定回归测试）；`vmr check` 定价明细打印标准原价
+  而非折后生效价（改用 `pricing.EffectiveRate(spec)`）；非回环 `listen` + 空 `api_keys` 三层全部
+  沉默（新增 `config.checkListenExposure`，见下一条 Severity 修正）；release tarball 缺中文/report/
+  pricing 模板；`KNOWN_ISSUES` 把已落地的 `CHANGELOG.md` 记成"确定不修"（已更正，见上一条）；
+  `config/quota.go` 头部注释描述 P2.2 落地前的过期状态（已更新指向 `pricing.go`）。
+- **`config.Issue` 补充 `Severity` 区分 Error/Warning，修正上线后发现的阻断回归**：A3 的
+  `checkListenExposure` 首版接入时，`Issue` 只有隐含的单一严重度，导致这条本该是"提醒"的检查被当成
+  和"api_key 缺失"同级的硬错误——`vmr check` 报 `Failed`（非零退出）、`vmr diagnose` 因"有 Check
+  问题就跳过全部网络阶段"这条既有逻辑直接跳过 Phase 2/3，实测确认两处都被**阻断**了。修复：`Issue`
+  加 `Severity`（`SeverityError` 零值保持所有旧 checker 行为不变／`SeverityWarning`），`checkListenExposure`
+  标记为 `SeverityWarning`；`vmr check` 拆分输出为 `=== Warnings ===`（不影响退出码）与
+  `=== Failed ===`（仅 `SeverityError` 触发）；`vmr diagnose` 改用 `config.HasErrors(issues)` 判断是否
+  跳过网络阶段。这是一个"新加的安全提示检查本身引入新回归"的具体案例——加安全检查时同样要过一遍
+  fail-open/fail-closed 的分类，不能默认套用最严格的既有分支。
+- **2026-08-12 review 第二梯队（五条验证后修复，四条验证后判定暂缓/非问题）**：`story.contextUtilization`
+  O(N²·E)（改为 `lastSeen[entity]->最大 index` 单趟预计算，降到 O(N·E)）；`health` 的
+  `Status.Available` 在半开状态下与 `Classify` 实际路由行为不一致（新增 `Status.Serving` 镜像
+  `Classify` 的判断，`Available` 保留原语义不破坏兼容性，`vmr status` 渲染同步改用 `Serving`）；
+  `§2 成本估算` 无按日成本（`ByDate` 桶补上 `CostEstimate` 累加 + 新增按日表）；`strategy.Dimension`
+  接口文档误导并发安全预期（改写注释，纯文档修正）；`config.expandEnv` 文本层替换可被环境变量值
+  注入 YAML 结构（改为对含换行/`": "`的展开值直接报错，比建议方案的"仅告警"更严格——这类值没有
+  合法配置意图，越早拒绝越安全）。`buffered` 内存放大缺容量指引一条核实后是**误报**：
+  `UserGuide.md`/`.zh.md` 的"Per-request memory budget"/"单请求内存预算"一节早在 review 基线之前
+  就已经写清楚这个乘数关系，`config.example.yaml`(+zh) 也已交叉引用。编号交叉引用规模、
+  `report.Build`/`BuildCached` 参数过多两条核实为真实但 ROI 暂不支持现在动手，已改写进本文档 §1.3
+  对应条目（避免下次重新调查一遍规模）。`copyFlush` 数据竞争、两趟扫描+全内存聚合两条复核确认现状
+  未变，维持既有判断。
+- **上述两轮修复自身的独立代码审查（`code-review` skill，2026-08-12）发现并修正的三处**：
+  `cmd_status.go` 解析 `/admin/status` 的 `serving` 字段原来是裸 `bool`——较新的 `vmr status` 二进制
+  查询一个尚未重启、`serving` 字段落地前就已启动的旧 `vmr start`（例如 Homebrew tap 升级后未重启）时，
+  JSON 缺失该字段会被解码成零值 `false`，把每个健康端点误渲染成 half-open；已改成 `Serving *bool`
+  （nil = 服务端未回传，回退到旧的 `Fails>0` 判定）。`config.expandEnv` 的注入检测漏了 YAML 行内注释
+  `" #"`——`api_key: sk-real123 #rotated 2026-08` 能被干净解析、把值静默截断成 `sk-real123` 且不报任何
+  错，比换行/冒号的"改结构"更隐蔽；已补上这条检测（flow-collection 逗号注入评估后判定场景太窄，写进
+  代码注释留作已知残留缺口，不做成第四条规则）。`report/aggregate.go` 里五处重复的"nil 检查→分配→
+  累加"cost 逻辑（`§2 成本估算`那次改动又加了第五处）收成 `cost.go` 的共享 `addCost` helper，顺手把
+  `aggregate.go` 从 974 行降到 960 行，`archtest` 预算余量从 26 行回升到 40 行。
 
 ---
 

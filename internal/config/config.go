@@ -334,7 +334,10 @@ func Load(path string) (*Config, error) {
 }
 
 func Parse(raw []byte) (*Config, error) {
-	expanded := expandEnv(string(raw))
+	expanded, err := expandEnv(string(raw))
+	if err != nil {
+		return nil, err
+	}
 	var cfg Config
 	// KnownFields: a misspelled key (max_concurency, image_downscale_px, …)
 	// must be a load error, not a silently ignored no-op the user believes
@@ -355,10 +358,38 @@ var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // expandEnv replaces ${NAME} with the environment value. Only the ${...} form
 // is recognized; a bare $ stays literal. Unset variables expand to "".
-func expandEnv(s string) string {
-	return envRe.ReplaceAllStringFunc(s, func(m string) string {
-		return os.Getenv(m[2 : len(m)-1])
+//
+// This runs on the raw YAML text BEFORE parsing (see Parse) — a text-layer
+// substitution, not a per-scalar one. A substituted value containing a
+// newline, ": ", or " #" doesn't just fill in the scalar it was written
+// into: a newline or ": " can restructure the document (a new top-level
+// key, a value that swallows the rest of the line), and " #" starts a YAML
+// comment mid-scalar — silently truncating the value with no parse error at
+// all (confirmed: `api_key: sk-real${SUFFIX}` with SUFFIX containing
+// " #..." parses cleanly with api_key holding only the text before the
+// space). No config author intends either outcome, so both are hard load
+// errors rather than a silent misinterpretation — the same fail-fast rule
+// this package applies to every other "config that would look like it works
+// but doesn't" case (see e.g. resolvePricing's currency-factor check).
+// Not exhaustive: a value used inside a YAML flow collection (e.g.
+// `api_keys: [${VAR}]`) could still inject an extra element via a comma —
+// narrower and less common than the three checked here (needs flow-style
+// usage, which this codebase's own examples never write), left as a known
+// residual gap rather than hand-rolling a full YAML-metacharacter scanner.
+func expandEnv(s string) (string, error) {
+	var badVar string
+	out := envRe.ReplaceAllStringFunc(s, func(m string) string {
+		name := m[2 : len(m)-1]
+		v := os.Getenv(name)
+		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #")) {
+			badVar = name
+		}
+		return v
 	})
+	if badVar != "" {
+		return "", fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
+	}
+	return out, nil
 }
 
 // expandTilde resolves a leading "~/" (or a bare "~") to the user's home

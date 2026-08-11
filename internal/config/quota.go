@@ -117,10 +117,10 @@ func (tw *TokenWeightsConfig) resolve(providerName string) (core.TokenWeights, e
 // relying on strict-YAML's KnownFields to reject them) specifically so a
 // user who writes them gets "this capability is planned for a later batch"
 // instead of a confusing "unknown field" error — see validate() below.
-// A `pricing:` block (P2.2, providers[].pricing/global pricing:) is
-// deliberately NOT declared anywhere in this file — it relies on
-// KnownFields' ordinary unknown-field rejection until P2.2 lands it, since
-// P2.1 has no specific guidance to offer about it beyond "not yet supported".
+// A `pricing:` block (providers[].pricing/global pricing:) is deliberately
+// NOT declared anywhere in this file — its YAML shape and validation
+// (PricingConfig/ProviderPricingConfig, resolvePricing) live in pricing.go
+// instead, since it's a distinct config surface from quota limits.
 type LimitConfig struct {
 	Metric string  `yaml:"metric"`
 	Every  string  `yaml:"every"`

@@ -65,6 +65,73 @@ models:
 	}
 }
 
+// TestCheckFlagsNonLoopbackListenWithNoAPIKeys pins the fix for a finding
+// from the 2026-08-12 review (VMR_项目全面Review报告 A3): validate() only
+// checks that listen is a syntactically valid host:port, so a config that
+// binds a non-loopback address with no api_keys configured loaded cleanly
+// and ran as a silent open proxy holding every configured upstream
+// credential — exactly the gap Check exists to cover. Severity must be
+// SeverityWarning, not the default SeverityError: this is a risk worth
+// surfacing, not a broken config — a first version of this check used the
+// zero-value severity and ended up blocking `vmr check`/`vmr diagnose`
+// entirely for a config that's fully intentional (see HasErrors' doc
+// comment and TestCheckAllowsNonLoopbackListenWithAPIKeys below for the
+// isn't-actually-broken half of that fix).
+func TestCheckFlagsNonLoopbackListenWithNoAPIKeys(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 0.0.0.0:8800
+providers:
+  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+models:
+  m: {endpoints: [{protocol: openai, provider: p1, models: [x]}]}
+`)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Field != "listen" {
+		t.Errorf("Check() = %+v, want exactly one listen issue", issues)
+	}
+	if issues[0].Severity != SeverityWarning {
+		t.Errorf("listen exposure issue Severity = %v, want SeverityWarning — it must never fail vmr check or gate vmr diagnose", issues[0].Severity)
+	}
+	if HasErrors(issues) {
+		t.Errorf("HasErrors(%+v) = true, want false — a SeverityWarning-only issue set must not read as errors", issues)
+	}
+}
+
+// TestCheckAllowsNonLoopbackListenWithAPIKeys is the positive counterpart:
+// a non-loopback listen address is fine once api_keys actually gates access
+// to it — the risk checkListenExposure exists for is credentials-free
+// exposure, not remote listening itself.
+func TestCheckAllowsNonLoopbackListenWithAPIKeys(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 0.0.0.0:8800
+api_keys: [sixteen-plus-chars]
+providers:
+  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+models:
+  m: {endpoints: [{protocol: openai, provider: p1, models: [x]}]}
+`)
+	if issues := cfg.Check(); len(issues) != 0 {
+		t.Errorf("non-loopback listen with api_keys configured: Check() = %v, want empty", issues)
+	}
+}
+
+// TestCheckAllowsLoopbackListenWithNoAPIKeys is the other positive
+// counterpart: the default 127.0.0.1 bind with no api_keys is the
+// documented, intentional "single local user, no auth" mode — must not
+// trip checkListenExposure just because api_keys is empty.
+func TestCheckAllowsLoopbackListenWithNoAPIKeys(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:8800
+providers:
+  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+models:
+  m: {endpoints: [{protocol: openai, provider: p1, models: [x]}]}
+`)
+	if issues := cfg.Check(); len(issues) != 0 {
+		t.Errorf("loopback listen with no api_keys: Check() = %v, want empty", issues)
+	}
+}
+
 // TestCheckFlagsDuplicateEndpoint covers a copy-paste mistake validate()
 // has no reason to reject (each individual field is valid) but that's dead
 // weight at best and a config author's mistake at worst.

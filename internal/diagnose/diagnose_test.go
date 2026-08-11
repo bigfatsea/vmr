@@ -863,6 +863,46 @@ models:
 	}
 }
 
+// TestRun_WarningOnlyConsistencyIssueDoesNotSkipEnvAndConnect is the
+// negative counterpart to TestRun_ConsistencyIssuesSkipEnvAndConnect: a
+// config that only trips a SeverityWarning check (here, config.checkListenExposure
+// — a non-loopback listen with no api_keys, which is a risk worth flagging
+// but not a broken config) must NOT skip Phase 2/3. Regression test for a
+// real bug where checkListenExposure's addition made every such config
+// silently skip real connectivity testing — first reported after `vmr
+// diagnose` unexpectedly refused to dial out for an otherwise-valid config.
+func TestRun_WarningOnlyConsistencyIssueDoesNotSkipEnvAndConnect(t *testing.T) {
+	cfgPath := writeConfig(t, `
+listen: 0.0.0.0:0
+providers:
+  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: k1}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`)
+	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var sawCheck, sawEnv bool
+	for _, r := range rep.Results {
+		switch r.Phase {
+		case "check":
+			sawCheck = true
+			if r.Status != StatusWarn {
+				t.Errorf("check result for a warning-severity issue should be StatusWarn, got %+v", r)
+			}
+		case "env":
+			sawEnv = true
+		}
+	}
+	if !sawCheck {
+		t.Error("expected a check phase result for the non-loopback listen with no api_keys")
+	}
+	if !sawEnv {
+		t.Error("Phase 2 (env) should NOT be skipped for a warning-only consistency issue")
+	}
+}
+
 func TestRun_BadConfigReturnsNilReport(t *testing.T) {
 	cfgPath := writeConfig(t, "not: [valid, config")
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath})

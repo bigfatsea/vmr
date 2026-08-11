@@ -548,34 +548,24 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 				}
 				addSession(s, rc)
 			}
-			// cost (if pricing): overall + by-model (existing) plus
-			// by-endpoint (epsAll, cross-date — matches §3 端点健康's basis)
-			// and by-client, when either bucket applies to this record.
+			// cost (if pricing): overall + by-model + by-date +
+			// by-endpoint (epsAll, cross-date — matches the Endpoint
+			// Health section's basis) + by-client, when each bucket
+			// applies to this record.
 			if pricingSrc != nil && rc.endpoint != "" {
 				provider, model := splitEndpointProviderModel(rc.endpoint)
 				pr, ok := pricingSrc.RateFor(provider, model)
 				if ok {
 					c := costFor(pr, rc)
-					if rep.Overall.CostEstimate == nil {
-						rep.Overall.CostEstimate = new(float64)
-					}
-					*rep.Overall.CostEstimate += c
-					if mr.CostEstimate == nil {
-						mr.CostEstimate = new(float64)
-					}
-					*mr.CostEstimate += c
+					addCost(&rep.Overall.CostEstimate, c)
+					addCost(&mr.CostEstimate, c)
+					addCost(&dr.CostEstimate, c)
 					if ea := epsAll[rc.endpoint]; ea != nil {
-						if ea.CostEstimate == nil {
-							ea.CostEstimate = new(float64)
-						}
-						*ea.CostEstimate += c
+						addCost(&ea.CostEstimate, c)
 					}
 					if rc.clientKey != "" {
 						if cl := byClient[rc.clientKey]; cl != nil {
-							if cl.CostEstimate == nil {
-								cl.CostEstimate = new(float64)
-							}
-							*cl.CostEstimate += c
+							addCost(&cl.CostEstimate, c)
 						}
 					}
 				}

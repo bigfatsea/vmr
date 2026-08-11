@@ -352,6 +352,22 @@ rates:
 		t.Errorf("sum(by_model.cost_estimate)=%v != overall=%v", modelSum, want)
 	}
 
+	// by-date: all 5 records land on the same day, so ByDate[0] == Overall —
+	// pins the fix for a finding from the 2026-08-12 review
+	// (VMR_项目全面Review报告 B3): the cost-accumulation block populated
+	// Overall/ByModel/EndpointsAll/ByClient but never the ByDate bucket
+	// (also a Row, also carrying CostEstimate), so §2 成本估算 had no
+	// per-day cost breakdown at all.
+	if len(rep.ByDate) != 1 {
+		t.Fatalf("expected 1 date bucket, got %d", len(rep.ByDate))
+	}
+	if rep.ByDate[0].CostEstimate == nil {
+		t.Fatalf("ByDate[0].CostEstimate should be populated")
+	}
+	if got := *rep.ByDate[0].CostEstimate; got != want {
+		t.Errorf("date cost_estimate=%v != overall=%v", got, want)
+	}
+
 	// by-endpoint: single shared endpoint, so EndpointsAll[0] == Overall.
 	if len(rep.EndpointsAll) != 1 {
 		t.Fatalf("expected 1 endpoint, got %d", len(rep.EndpointsAll))

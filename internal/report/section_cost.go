@@ -22,6 +22,26 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	w("%s", t.PricingNote(rep.Pricing.Disclaimer(lang)))
 	cur := rep.Pricing.Currency
 
+	hasDate := false
+	for _, d := range rep.ByDate {
+		if d.CostEstimate != nil {
+			hasDate = true
+			break
+		}
+	}
+	if hasDate {
+		w("%s\n\n", t.ByDateTitle(cur))
+		h := t.ByDateHeaders
+		tbl := newTable(w, h[0], h[1], h[2], h[3])
+		for _, d := range rep.ByDate {
+			if d.CostEstimate != nil {
+				tbl.row(d.Date, fmtTokens(d.TokensInFresh), fmtTokens(d.TokensOut),
+					fmt.Sprintf("%.4f %s", *d.CostEstimate, cur))
+			}
+		}
+		w("\n")
+	}
+
 	hasModel := false
 	for _, m := range rep.ByModel {
 		if m.CostEstimate != nil {
@@ -82,7 +102,7 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("\n")
 	}
 
-	if !hasModel && !hasEndpoint && !hasClient {
+	if !hasDate && !hasModel && !hasEndpoint && !hasClient {
 		w("%s", t.NoDataBody)
 	}
 

@@ -411,6 +411,38 @@ func TestRespStream_NestedModelInDelta(t *testing.T) {
 	}
 }
 
+// TestRespStream_ModelNameWithDollar guards against regexp.ReplaceAll's
+// template-string interpretation of "$": a virtual model name like "gpt$4"
+// is a legal config.yaml `models:` key, and prior to modelRewriteRepl being
+// escaped in newRespStream, "$4" was read as a (nonexistent) submatch
+// reference and silently dropped along with everything after it — the
+// client received "model":"gpt" instead of "model":"gpt$4". Covers both the
+// buffered (non-SSE) and passthrough (SSE) rewrite call sites.
+func TestRespStream_ModelNameWithDollar(t *testing.T) {
+	t.Parallel()
+	const clientModel = "gpt$4"
+
+	t.Run("buffered", func(t *testing.T) {
+		t.Parallel()
+		src := strings.NewReader(`{"id":"x","model":"real-upstream-model"}`)
+		out := readAll(t, newRespStream(src, clientModel, "real-upstream-model", false, "openai", false))
+		if !strings.Contains(out, `"model":"gpt$4"`) {
+			t.Errorf("model field not rewritten to the full client model name, got: %q", out)
+		}
+	})
+
+	t.Run("passthrough", func(t *testing.T) {
+		t.Parallel()
+		src := strings.NewReader(
+			`data: {"id":"x","model":"real-upstream-model","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n",
+		)
+		out := readAll(t, newRespStream(src, clientModel, "real-upstream-model", true, "openai", false))
+		if !strings.Contains(out, `"model":"gpt$4"`) {
+			t.Errorf("model field not rewritten to the full client model name, got: %q", out)
+		}
+	})
+}
+
 // scriptReader delivers one scripted chunk per Read call, then EOF. It
 // lets tests observe output produced BEFORE the source is exhausted —
 // the definition of true streaming.

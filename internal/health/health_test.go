@@ -197,6 +197,39 @@ func TestStatusReportsProbing(t *testing.T) {
 	}
 }
 
+// TestStatusServingDistinctFromAvailableWhenHalfOpen pins the fix for a
+// finding from the 2026-08-12 review (VMR_项目全面Review报告 B2): a
+// half-open endpoint (cooldown expired, Fails>0) reported Available==true
+// in /admin/status even though Classify — what the router actually
+// consults — treats it as unavailable to real traffic that round (only a
+// background probe gets dispatched). Serving is the field that must track
+// Classify's answer; Available is kept at its narrower "cooldown expired"
+// meaning for backward compatibility (see Status's doc comment).
+func TestStatusServingDistinctFromAvailableWhenHalfOpen(t *testing.T) {
+	t.Parallel()
+	r := New()
+	r.ReportFailure("e", core.ErrTransient, 0, t0)
+	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+
+	st := r.Status("e", after)
+	if !st.Available {
+		t.Errorf("half-open endpoint: Available should still be true (cooldown expired), got %+v", st)
+	}
+	if st.Serving {
+		t.Errorf("half-open endpoint: Serving should be false (real traffic isn't routed here yet), got %+v", st)
+	}
+	avail, needsProbe := r.Classify("e", after)
+	if avail {
+		t.Fatalf("test setup: Classify should agree the endpoint isn't available to real traffic, got available=%v needsProbe=%v", avail, needsProbe)
+	}
+
+	r.ReportSuccess("e")
+	st = r.Status("e", after)
+	if !st.Available || !st.Serving {
+		t.Errorf("recovered endpoint: both Available and Serving should be true, got %+v", st)
+	}
+}
+
 func TestRetryAfterCappedAtOneHour(t *testing.T) {
 	t.Parallel()
 	r := New()

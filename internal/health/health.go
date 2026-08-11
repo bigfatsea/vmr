@@ -185,7 +185,16 @@ type Status struct {
 	Fails         int       `json:"consecutive_failures"`
 	CooldownUntil time.Time `json:"cooldown_until,omitzero"`
 	LastError     string    `json:"last_error,omitempty"`
-	Available     bool      `json:"available"`
+	// Available is narrower than its name suggests: it only reports
+	// "cooldown has expired", the same test Registry.Available makes. A
+	// half-open endpoint (cooldown expired, Fails>0, not yet re-verified)
+	// reports Available==true here even though Classify — what the router
+	// actually consults this request round — returns available=false for
+	// it (only a background probe gets dispatched, never real traffic,
+	// until that probe reports success). Kept as-is for backward
+	// compatibility with existing consumers of this field; Serving below is
+	// the field that answers "would real traffic route here right now".
+	Available bool `json:"available"`
 	// Probing is true while a single-flight probe holds this endpoint's
 	// slot — a background probe (see internal/router/probe.go) is
 	// currently deciding whether the endpoint has recovered. Purely observational:
@@ -193,6 +202,12 @@ type Status struct {
 	// `vmr status` and /admin/status can show *why* a half-open endpoint
 	// (Available==true, Fails>0) isn't being tried right this moment.
 	Probing bool `json:"probing,omitempty"`
+	// Serving mirrors Classify's available return value: true only when
+	// the router's health filter would route real (non-probe) traffic to
+	// this endpoint this round. Unlike Available, this is false for the
+	// entire half-open window (Fails>0), whether or not a probe currently
+	// holds the slot — the field to alert on, not Available.
+	Serving bool `json:"serving"`
 }
 
 func (r *Registry) Status(key string, now time.Time) Status {
@@ -200,9 +215,9 @@ func (r *Registry) Status(key string, now time.Time) Status {
 	defer r.mu.Unlock()
 	s, ok := r.m[key]
 	if !ok {
-		return Status{Available: true}
+		return Status{Available: true, Serving: true}
 	}
-	st := Status{Fails: s.fails, Available: !now.Before(s.cooldownUntil), Probing: s.probing}
+	st := Status{Fails: s.fails, Available: !now.Before(s.cooldownUntil), Probing: s.probing, Serving: s.fails == 0}
 	if !s.cooldownUntil.IsZero() && now.Before(s.cooldownUntil) {
 		st.CooldownUntil = s.cooldownUntil
 	}

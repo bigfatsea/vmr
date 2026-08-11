@@ -33,7 +33,10 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go build -o vmr ./cmd/vmr
-          tar czf vmr_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz vmr README.md README.zh.md LICENSE config.example.yaml
+          tar czf vmr_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz vmr README.md README.zh.md LICENSE \
+            config.example.yaml config.example.zh.yaml \
+            report.example.yaml report.example.zh.yaml \
+            pricing.example.yaml pricing.example.zh.yaml
 
       - uses: actions/upload-artifact@v7
         with:

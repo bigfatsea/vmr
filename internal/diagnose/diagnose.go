@@ -140,9 +140,12 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	// api_key, a proxy contradiction that silently resolves to direct, a
 	// duplicate endpoint, …) — config that's structurally valid
 	// (BuildSnapshot above already succeeded) but operationally broken.
-	// Anything found here skips Phase 2/3 entirely: there is no point
+	// A SeverityError issue skips Phase 2/3 entirely: there is no point
 	// dialing out to test connectivity for endpoints a human still needs
-	// to fix the declaration of first — see cfg.Check's doc comment.
+	// to fix the declaration of first — see cfg.Check's doc comment. A
+	// SeverityWarning issue (e.g. a non-loopback listen with no api_keys) is
+	// still reported here, but as StatusWarn, and never gates the network
+	// phases — it's a risk worth surfacing, not a broken config.
 	checkIssues := cfg.Check()
 	for _, is := range checkIssues {
 		target := "global"
@@ -154,11 +157,24 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		case is.Model != "":
 			target = "model " + is.Model
 		}
-		rep.Results = append(rep.Results, Result{Phase: "check", Target: target, Status: StatusFail, Detail: is.Message})
+		status := StatusFail
+		if is.Severity == config.SeverityWarning {
+			status = StatusWarn
+		}
+		rep.Results = append(rep.Results, Result{Phase: "check", Target: target, Status: status, Detail: is.Message})
 	}
-	runNetworkChecks := len(checkIssues) == 0
+	runNetworkChecks := !config.HasErrors(checkIssues)
 	if !runNetworkChecks && opts.Progress != nil {
-		fmt.Fprintf(opts.Progress, "Consistency check: %d issue(s) found — skipping Environment/Connectivity (real network I/O)\n", len(checkIssues))
+		// errCount, not len(checkIssues): a SeverityWarning issue riding
+		// alongside a real error didn't cause this skip, so it shouldn't
+		// inflate the count attributed to it.
+		errCount := 0
+		for _, is := range checkIssues {
+			if is.Severity != config.SeverityWarning {
+				errCount++
+			}
+		}
+		fmt.Fprintf(opts.Progress, "Consistency check: %d issue(s) found — skipping Environment/Connectivity (real network I/O)\n", errCount)
 	}
 
 	// Phase 2: DNS/TLS/proxy/api_key per provider, up to checkConcurrency at

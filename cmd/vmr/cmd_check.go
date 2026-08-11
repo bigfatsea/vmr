@@ -12,6 +12,7 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
+	"vmr/internal/pricing"
 	"vmr/internal/router"
 )
 
@@ -127,17 +128,32 @@ func cmdCheck(args []string) error {
 	printProviders(cfg)
 	printModels(cfg, snap, issues)
 
+	var errs, warns []config.Issue
+	for _, is := range issues {
+		if is.Severity == config.SeverityWarning {
+			warns = append(warns, is)
+		} else {
+			errs = append(errs, is)
+		}
+	}
+
 	fmt.Println()
-	if len(issues) == 0 {
+	if len(warns) > 0 {
+		fmt.Println("=== Warnings ===")
+		for _, is := range warns {
+			fmt.Printf("- %s\n", is.Message)
+		}
+	}
+	if len(errs) == 0 {
 		fmt.Println("=== OK ===")
 		fmt.Println("config and routing are valid — to test real connectivity: vmr diagnose")
 		return nil
 	}
 	fmt.Println("=== Failed ===")
-	for _, is := range issues {
+	for _, is := range errs {
 		fmt.Printf("- %s\n", is.Message)
 	}
-	return fmt.Errorf("%d config issue(s) found", len(issues))
+	return fmt.Errorf("%d config issue(s) found", len(errs))
 }
 
 // hasIssue reports whether issues contains one matching this exact
@@ -154,7 +170,11 @@ func hasIssue(issues []config.Issue, provider, model, endpoint, field string) bo
 
 func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	fmt.Println("=== Global Settings ===")
-	fmt.Println(checkLine(0, "listen", cfg.Listen))
+	listen := cfg.Listen
+	if hasIssue(issues, "", "", "", "listen") {
+		listen = warn(listen)
+	}
+	fmt.Println(checkLine(0, "listen", listen))
 	auth := "off"
 	if len(cfg.APIKeys) > 0 {
 		auth = fmt.Sprintf("on (%d key(s))", len(cfg.APIKeys))
@@ -296,7 +316,12 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 	fmt.Println("  pricing:")
 	for _, model := range models {
 		spec := cfg.ResolvedPricing[prefix+model]
-		r := spec.Base
+		// EffectiveRate, not spec.Base: an account with an override (e.g.
+		// discount:) is charged at the resolved rate, not the standard
+		// table's list price — printing Base here would show an operator a
+		// number that has nothing to do with what metric: cost will actually
+		// charge.
+		r := pricing.EffectiveRate(spec)
 		fmt.Println(checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
 			ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
 	}

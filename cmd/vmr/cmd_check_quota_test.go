@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"vmr/internal/config"
+	"vmr/internal/pricing"
 )
 
 const quotaConfigYAML = `
@@ -98,6 +101,100 @@ func TestCmdCheck_NoPricingTouched_PricingTableLineAbsent(t *testing.T) {
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if strings.Contains(out, "pricing_table:") {
 		t.Fatalf("output has a pricing_table: line for a config that never touches pricing:\n%s", out)
+	}
+}
+
+// TestCmdCheck_PricingLineShowsEffectiveRateNotBase pins the fix for a
+// finding from the 2026-08-12 review (VMR_项目全面Review报告 A2):
+// printProviderPricing used to print spec.Base, the standard table's list
+// price, even for an account with a discount override — an operator reading
+// `vmr check` for a metric: cost account had no way to see what it would
+// actually be charged. This config gives claude-3-7-sonnet-20250219 (present
+// in the embedded standard table) a 50% discount override; the printed line
+// must reflect the discounted (effective) rate, not the undiscounted base.
+func TestCmdCheck_PricingLineShowsEffectiveRateNotBase(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+pricing:
+  currency: USD
+providers:
+  - name: anthropic
+    base_url: {anthropic: https://example.com/v1}
+    api_key: test-key
+    quota:
+      limits:
+        - {metric: cost, every: 1mo, amount: 100}
+    pricing:
+      overrides:
+        - {model: "*", discount: 0.5}
+models:
+  m1:
+    endpoints:
+      - protocol: anthropic
+        provider: anthropic
+        models: [claude-3-7-sonnet-20250219]
+`
+	path := writeTempFile(t, "config.yaml", yaml)
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.ResolvedPricing["anthropic\x00claude-3-7-sonnet-20250219"]
+	if spec == nil {
+		t.Fatal("no resolved pricing spec for anthropic/claude-3-7-sonnet-20250219")
+	}
+	base := spec.Base
+	effective := pricing.EffectiveRate(spec)
+	if base.InFresh == nil || effective.InFresh == nil || *base.InFresh == *effective.InFresh {
+		t.Fatalf("test setup didn't produce a base/effective gap — base=%v effective=%v", ratePart(base.InFresh), ratePart(effective.InFresh))
+	}
+
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, fmt.Sprintf("in_fresh=%s", ratePart(effective.InFresh))) {
+		t.Fatalf("pricing line does not show the discounted effective rate (%s):\n%s", ratePart(effective.InFresh), out)
+	}
+	if strings.Contains(out, fmt.Sprintf("in_fresh=%s", ratePart(base.InFresh))) {
+		t.Fatalf("pricing line shows the undiscounted base rate (%s) instead of the effective one:\n%s", ratePart(base.InFresh), out)
+	}
+}
+
+// TestCmdCheck_ListenExposureWarningDoesNotFail pins the fix for a real
+// blocking bug reported after A3's checkListenExposure landed: a
+// SeverityWarning-only Issue set must render under "=== Warnings ===", not
+// "=== Failed ===", and cmdCheck must return nil (exit 0) — the check is
+// meant to surface a risky-but-intentional setup, never to block `vmr
+// check`/`vmr start`/`vmr diagnose`.
+func TestCmdCheck_ListenExposureWarningDoesNotFail(t *testing.T) {
+	yaml := `
+listen: 0.0.0.0:8800
+providers:
+  - {name: p1, base_url: {openai: https://example.com}, api_key: test-key}
+models:
+  m1:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [real-model]
+`
+	path := writeTempFile(t, "config.yaml", yaml)
+	var out string
+	err := func() error {
+		var e error
+		out = captureStdout(t, func() { e = cmdCheck([]string{"-c", path}) })
+		return e
+	}()
+	if err != nil {
+		t.Fatalf("cmdCheck returned an error for a warning-only issue: %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, "=== Warnings ===") {
+		t.Fatalf("output missing === Warnings === section:\n%s", out)
+	}
+	if strings.Contains(out, "=== Failed ===") {
+		t.Fatalf("output has === Failed === for a warning-only issue set:\n%s", out)
+	}
+	if !strings.Contains(out, "=== OK ===") {
+		t.Fatalf("output missing === OK === — a warning-only issue set must still report OK:\n%s", out)
 	}
 }
 

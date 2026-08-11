@@ -311,19 +311,33 @@ func contextCurve(steps []*Step) []ContextPoint {
 
 // contextUtilization implements ContextUtilization's doc comment: for each
 // non-system Event, does any entity extracted from it (extractEntities, the
-// same extraction the compaction step already uses) reappear in a LATER Event's text. j.Events is already in
-// first-appearance order, so "later" is simply a higher slice index.
+// same extraction the compaction step already uses) reappear in a LATER
+// Event's text. j.Events is already in first-appearance order, so "later"
+// is simply a higher slice index.
+//
+// O(N·E) via a single lastSeen[entity]->max index pass, not the naive
+// O(N²·E) "for each Event, rescan every later Event and rebuild a map" —
+// an entity reappears after i iff its last (i.e. highest-index) occurrence
+// anywhere in the Journey is > i, so one forward pass recording the max
+// index per entity answers every Event's "does this reappear later"
+// question in O(len(entities)) instead of O(N). A 1,000-step Journey (a
+// real long agent task) turns ~3×10⁷ map inserts into ~a few thousand.
 func contextUtilization(j *Journey) float64 {
 	type scanned struct {
 		tokens   int64
 		entities []string
 	}
 	info := make([]scanned, len(j.Events))
+	lastSeen := make(map[string]int) // entity -> highest Event index it appears at
 	for i, ev := range j.Events {
 		if ev.Msg.Role == "system" {
 			continue
 		}
-		info[i] = scanned{tokens: core.EstimateTextTokens([]byte(ev.Msg.Text)), entities: extractEntities(ev.Msg.Text)}
+		entities := extractEntities(ev.Msg.Text)
+		info[i] = scanned{tokens: core.EstimateTextTokens([]byte(ev.Msg.Text)), entities: entities}
+		for _, e := range entities {
+			lastSeen[e] = i
+		}
 	}
 
 	var total, referenced int64
@@ -332,11 +346,8 @@ func contextUtilization(j *Journey) float64 {
 			continue
 		}
 		total += info[i].tokens
-		if len(info[i].entities) == 0 {
-			continue
-		}
-		for k := i + 1; k < len(info); k++ {
-			if sharesEntity(info[i].entities, info[k].entities) {
+		for _, e := range info[i].entities {
+			if lastSeen[e] > i {
 				referenced += info[i].tokens
 				break
 			}
@@ -346,22 +357,6 @@ func contextUtilization(j *Journey) float64 {
 		return 0
 	}
 	return float64(referenced) / float64(total)
-}
-
-func sharesEntity(a, b []string) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-	set := make(map[string]bool, len(b))
-	for _, e := range b {
-		set[e] = true
-	}
-	for _, e := range a {
-		if set[e] {
-			return true
-		}
-	}
-	return false
 }
 
 // compactionTotals rolls every stitch boundary's already-computed

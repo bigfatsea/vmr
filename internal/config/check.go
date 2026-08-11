@@ -12,36 +12,90 @@ package config
 
 import (
 	"fmt"
+	"net"
 
 	"vmr/internal/core"
 )
 
+// Severity distinguishes an Issue that should fail `vmr check` and gate
+// `vmr diagnose`'s network phase (SeverityError, the zero value — every
+// pre-existing check keeps failing exactly as before without touching its
+// call sites) from one that's worth surfacing but must never block anything
+// (SeverityWarning) — a config choice that's operationally risky but fully
+// intentional, like a non-loopback listen with no api_keys.
+type Severity int
+
+const (
+	SeverityError Severity = iota
+	SeverityWarning
+)
+
 // Issue is one problem Check finds. Provider/Model scope it for callers
 // that want to annotate a specific rendered line (vmr check) — Field names
-// which one ("api_key" | "probe_timeout" | "endpoint"); all empty means the
-// issue is global. Endpoint carries the full "protocol/provider/model" key
-// for "endpoint". There is only one severity — every Issue Check returns is
-// meant to fail `vmr check`/gate `vmr diagnose`'s connectivity test, not
-// merely inform.
+// which one ("api_key" | "probe_timeout" | "endpoint" | "listen"); all empty
+// means the issue is global. Endpoint carries the full
+// "protocol/provider/model" key for "endpoint".
 type Issue struct {
 	Provider string
 	Model    string
 	Endpoint string
 	Field    string
 	Message  string
+	Severity Severity
 }
 
 // Check runs every consistency check beyond validate(). Shared by `vmr
-// check` (renders each Issue inline as a ⚠️ plus a trailing Failed summary)
-// and `vmr diagnose` (skips its real connectivity test entirely whenever
-// Check finds anything — no point dialing out for a config already known to
-// be operationally broken).
+// check` (renders each Issue inline as a ⚠️, plus a trailing Failed summary
+// if any SeverityError issue is present — SeverityWarning issues are listed
+// but never fail the command) and `vmr diagnose` (skips its real
+// connectivity test entirely whenever a SeverityError issue is present — no
+// point dialing out for a config already known to be operationally broken;
+// a SeverityWarning issue doesn't gate anything, since it's not "broken").
 func (c *Config) Check() []Issue {
 	var issues []Issue
 	issues = append(issues, c.checkTimeouts()...)
+	issues = append(issues, c.checkListenExposure()...)
 	issues = append(issues, c.checkProviders()...)
 	issues = append(issues, c.checkModels()...)
 	return issues
+}
+
+// HasErrors reports whether issues contains at least one SeverityError
+// entry, ignoring any SeverityWarning ones — the single predicate `vmr
+// check`'s Failed summary and `vmr diagnose`'s network-phase skip both key
+// off, so the two callers can't drift on what counts as "actually broken".
+func HasErrors(issues []Issue) bool {
+	for _, is := range issues {
+		if is.Severity == SeverityError {
+			return true
+		}
+	}
+	return false
+}
+
+// checkListenExposure flags a non-loopback listen address with no
+// api_keys configured: validate() only checks that Listen is syntactically
+// a valid host:port (BuildSnapshot still succeeds), so binding
+// 0.0.0.0/a LAN IP with an empty api_keys list loads cleanly and silently
+// turns vmr into an open proxy holding every configured upstream credential.
+// A host that fails to parse as an IP (a hostname, or an empty host like
+// ":8800") is treated as exposed too — erring toward the warning, since the
+// common cases this actually needs to catch (0.0.0.0, a LAN IP, empty host)
+// all fail the loopback check the same way admin.go's own loopback gate does.
+func (c *Config) checkListenExposure() []Issue {
+	if len(c.APIKeys) > 0 {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(c.Listen)
+	if err != nil {
+		return nil // validate() already rejects this; nothing new to say here
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return []Issue{{Field: "listen", Severity: SeverityWarning, Message: fmt.Sprintf(
+		"listen (%s) is not loopback-only and no api_keys are configured — vmr is an open proxy exposing every configured upstream credential to anyone who can reach this address",
+		c.Listen)}}
 }
 
 // checkTimeouts flags a probe_timeout that isn't safely under
