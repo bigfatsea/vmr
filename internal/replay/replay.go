@@ -14,13 +14,16 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/quota"
 	"vmr/internal/router"
 )
 
@@ -83,6 +86,22 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	// names live traffic does, or a replay-produced record would leak a
 	// custom credential header the running server's config redacts.
 	audit.SetExtraRedactHeaders(cfg.ExtraRedactHeaders)
+
+	// Quota-Aware Routing: replay hits the real upstream and consumes real
+	// account quota exactly like live traffic does, but until now nothing
+	// charged it — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+	// known-gap entry ② ("vmr replay 消耗真实上游额度但不计费"). This loads
+	// the SAME state file `vmr start` uses, charges one successful replay
+	// (via chargeReplay below) against it, and flushes once before Run
+	// returns — no background flusher needed for a one-shot CLI process. A
+	// missing/corrupt state file is never fatal (mirrors cmd_start.go's own
+	// handling): quota is a statistics helper, replaying must not fail
+	// because of it.
+	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
+	if err := qreg.Load(); err != nil {
+		fmt.Fprintf(stdout, "WARN quota state: %v (starting from zero)\n", err)
+	}
+	defer qreg.Flush()
 	rv, replayOf, err := selectRecord(opts)
 	if err != nil {
 		return err
@@ -121,6 +140,12 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		BaseURL:     baseURL,
 		APIKey:      providerCfg.APIKey,
 		Model:       model,
+		// Same resolution BuildSnapshot performs for live traffic — ep
+		// never goes through BuildSnapshot itself (it's hand-built above
+		// from -provider/-model, not looked up from a virtual model's
+		// endpoint list), so chargeReplay needs these resolved directly.
+		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
+		PricingRate: cfg.ResolvedPricing[opts.Provider+"\x00"+model],
 	}
 	ep.FullURL = ad.ResolveURL(baseURL)
 
@@ -190,12 +215,51 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	dur := time.Since(start).Round(time.Millisecond)
 	fmt.Fprintf(stdout, "(%s)\n", dur)
 
+	// Mirrors forwardSuccess's own gate (router.go: resp.StatusCode >= 400
+	// goes to handleErrorResponse instead) — a >=400 response never reaches
+	// forwardSuccess on live traffic, so it must not charge here either. A
+	// response that dies mid-transfer still charges: the bytes actually
+	// sent were genuinely consumed (same reasoning chargeQuota's own doc
+	// comment gives for the live path).
+	if resp.StatusCode < 400 {
+		chargeReplay(qreg, ep, rv.Client.Request.Body, respBuf.Bytes(), time.Now())
+	}
+
 	if opts.RecordPath != "" {
 		if err := writeReplayRecord(opts.RecordPath, rv, ep, httpReq, outBody, resp, respBuf.Bytes(), replayOf, dur); err != nil {
 			return fmt.Errorf("write -record: %w", err)
 		}
 	}
 	return nil
+}
+
+// chargeReplay meters one successful replay's consumption against ep's
+// provider quota (a no-op when ep.Quota is nil, i.e. -provider has no
+// quota: configured) and hands it to router.ChargeResponse — the same
+// metric-dispatch/model-multiplier/cost-pricing pipeline chargeQuota uses
+// for live traffic (see that function's doc comment). It differs from
+// chargeQuota only in how usage is obtained: live traffic sniffs it
+// incrementally off a streaming respStream, but replay already has the
+// complete request/response bytes in hand (reqBody/respBody), so
+// chatmsg.MergeUsageBytes — the exact function respStream's own noteUsage
+// calls internally — reads it directly from the buffered bytes instead.
+// Degrades the same way tokenCharge does when no usage-bearing block is
+// found: core.EstimateTextTokens on the raw request/response bytes,
+// charged entirely to Fresh/Out (the degraded path can't tell cache hits
+// apart).
+func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []byte, now time.Time) {
+	if ep.Quota == nil {
+		return
+	}
+	if u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{}); u.In > 0 || u.Out > 0 {
+		router.ChargeResponse(reg, ep, quota.Counters{
+			Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,
+		}, 0, now)
+		return
+	}
+	inEst := core.EstimateTextTokens(reqBody)
+	outEst := core.EstimateTextTokens(respBody)
+	router.ChargeResponse(reg, ep, quota.Counters{Fresh: inEst, Out: outEst}, inEst+outEst, now)
 }
 
 // selectRecord dispatches to whichever of Options' three locators is set —

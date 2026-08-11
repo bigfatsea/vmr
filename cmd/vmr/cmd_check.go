@@ -312,8 +312,8 @@ func ratePart(v *float64) string {
 	// %.6g rather than %g: a rate that went through an exchange-rate
 	// multiplication (e.g. 3.0 USD x 7.1) routinely lands on a float64 like
 	// 21.299999999999997 — cosmetic noise for a display line, not a value
-	// anything downstream computes from (chargeCost/componentCost read the
-	// pricing.Rate directly, never this formatted string).
+	// anything downstream computes from (router.ChargeResponse/componentCost
+	// read the pricing.Rate directly, never this formatted string).
 	return strconv.FormatFloat(*v, 'g', 6, 64)
 }
 

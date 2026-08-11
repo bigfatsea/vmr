@@ -231,11 +231,6 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 - **`vmr report` 的额度燃尽看板（`section_quota.go`）未交付**：对"最大化套餐效益"这个核心目标有直接
   价值（每个套餐的燃尽曲线、该优先烧哪个），但排在"让 $ 列更准"（`metric: cost`，已在 §3 简化）之后
   交付，目前尚未开工。
-- `vmr replay` 消耗真实上游额度但不经过 Quota-Aware Routing 的计费点（`internal/replay` 完全绕开
-  `Router.Serve`/`forwardSuccess`）——高频用 `vmr replay` 重放长上下文调试请求会让本地额度计数与上游
-  真实剩余持续静默漂移。处置方案（复用既有 `NewUpstreamClient`，一次性 `Registry` 加载+计费+退出前
-  flush，不需要后台 flusher）已经写在 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`"现状与后续计划"
-  一节，尚未落地。
 - `config.go` 629/750 行，逼近 archtest 预算但还有余量——`validate()` 本身已超过 200 行，混合 provider
   校验、model/endpoint 校验、`providerModels` 集合收集。建议下次改动时主动拆成 `validateProviders`/
   `validateModels` 两个私有函数，不需要等撞线，现在拆的成本远低于撞线后临时拆。
@@ -484,6 +479,15 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 - **单请求最坏内存约 104MB 偏大**：`router.bufferedCap`（32MB→8MB）、`server.recorderBodyCap`
   （64MB→16MB）已降档，`config.MaxRequestBodyMB`（8MB）不变，三者按统一推导（1M-token 上下文窗口
   约 3-4MB 字节量 + ~2 倍余量）重新取值，单请求最坏驻留降到约 32MB。
+- **`vmr replay` 消耗真实上游额度但不计费**（2026-08-11）：`chargeQuota` 的 metric 分发 +
+  `model_multipliers` 缩放 + `cost` 定价尾段抽成导出函数 `router.ChargeResponse`，`router` 的流式路径
+  与 `internal/replay` 的一次性路径共用同一实现。`replay.Run` 加载 `<log_dir>/vmr-quota.json`（与
+  `vmr start` 同一份状态文件）→ 成功响应（状态码 `< 400`）后计费 → 返回前 flush 一次；usage 用
+  `chatmsg.MergeUsageBytes` 从已完整缓冲的响应体里取（而非 `respStream` 的增量嗅探），拿不到时降级
+  为对请求/响应体分别跑 `core.EstimateTextTokens`。`-dry-run` 与未配置 `quota:` 的 provider 均不触碰
+  状态文件。未覆盖：与另一个正在写同一状态文件的进程（如运行中的 `vmr start`）并发时没有跨进程锁，
+  这是 `TokenPlan_Quota_Routing_Design_opus-5.md`"多实例共享计数：不做"这条既有取舍的一个具体表现，
+  不是新问题。
 
 ---
 

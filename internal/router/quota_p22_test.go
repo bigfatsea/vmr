@@ -1,9 +1,9 @@
 // Ver 2026-08-07, by Opus 5
 
-// Tests for P2.2's metric: cost charging path (chargeCost/componentCost,
-// baseAmount's MetricCost case, QuotaStatus's cost-denominated
-// EstimatedPct) — see quota_p21_test.go for the P2.1 (token_weights/
-// model_multipliers) tests these sit alongside.
+// Tests for P2.2's metric: cost charging path (ChargeResponse's MetricCost
+// branch/componentCost, baseAmount's MetricCost case, QuotaStatus's
+// cost-denominated EstimatedPct) — see quota_p21_test.go for the P2.1
+// (token_weights/model_multipliers) tests these sit alongside.
 package router
 
 import (
@@ -59,7 +59,7 @@ func TestComponentCost_MissingComponent_TreatsAsZero(t *testing.T) {
 	}
 }
 
-// --- chargeCost: exact (sniffed) usage ---
+// --- ChargeResponse (metric: cost): exact (sniffed) usage ---
 
 func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
@@ -129,7 +129,7 @@ func TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange(t *tes
 	}
 }
 
-// --- chargeCost: degraded (estimated) usage tracks EstimatedCost ---
+// --- ChargeResponse (metric: cost): degraded (estimated) usage tracks EstimatedCost ---
 
 func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
@@ -158,7 +158,7 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	}
 }
 
-// --- chargeCost never applies model_multipliers (config validation forbids configuring both, but pin the mechanism too) ---
+// --- ChargeResponse's MetricCost branch never applies model_multipliers (config validation forbids configuring both, but pin the mechanism too) ---
 
 func TestChargeCost_DoesNotConsultModelMultipliers(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}

@@ -919,7 +919,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | **不计费**——`internal/replay` 直接用 `router.NewUpstreamClient` + `client.Do`，完全绕开失败循环与 `respStream` | 它确实消耗真实额度；不归类为永久盲区，是一项成本低、收益真实的已知缺口（一次性 `Registry` 加载 + 成功后计费 + 退出前 flush，不需要后台 flusher），处置计划见文末「现状与后续计划」一节 |
+| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `respStream` 的增量嗅探），退化路径复用 `core.EstimateTextTokens` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`docs/KNOWN_ISSUES_sonnet-5.md` 已有记录 |
 | 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 
@@ -1023,7 +1023,7 @@ Bucket/Gate 归一化简化、Rolling 窗口 Ring 的适用范围——
 | 厂商计数单位 ≠ vmr 可观测单位 | 需用户实测校准 | "一次提问"这类单位在网络层根本不可见，会展开成十几到二十几次调用 | `amount` 必须按 vmr 口径配置；官方用量 API 是根治手段 |
 | 绕过 vmr 的直连流量 | 无法计入 | 结构性不可能 | 本地计数低估；将来接官方用量 API 可消解 |
 | 后台探针 `probe` 的消耗 | 不计入 | 绕开 `forwardSuccess`，probe 自己发请求，报文小、频率低 | 低估幅度可忽略；接官方用量 API 同样可消解 |
-| `vmr replay` 的消耗 | **不计入**，作为已知缺口留待后续处理（不归类为永久盲区） | `internal/replay` 是独立一次性 CLI 进程，不经过 `Router`/`forwardSuccess`；但它已经在用同一个 `NewUpstreamClient`，补计费只需一次性加载 `quota.Registry`、成功后调一次计费、退出前 flush 一次——不需要 `cmd_start` 那套后台 flusher，接线比它更简单 | 2026-08 ROI 复核（见 §12.2）指出：开发者高频用 `vmr replay` 重放长上下文调试请求，不计费会让本地额度与上游真实剩余持续静默漂移；成本低、收益真实，处置计划见文末「现状与后续计划」一节 |
+| `vmr replay` 的消耗 | **已计入**（2026-08-11 交付） | `internal/replay` 是独立一次性 CLI 进程，不经过 `Router`/`forwardSuccess`，但已接入同一个 `quota.Registry` 文件与 `router.ChargeResponse` 计费管线，语义与实时流量一致 | 消解了 2026-08 ROI 复核（见 §12.2）指出的静默漂移问题；仍不覆盖多实例并发写同一状态文件的场景（§13"多实例共享计数"条目原样成立），细节见文末「现状与后续计划」一节 |
 | 多实例共享计数 | 不做 | 单二进制、零 DB 是产品前提 | 多实例各自低估；单实例部署，或接官方用量 API |
 | 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且这类规则只在个别厂商出现、自身还在频繁调整 | 对这类账号系统性低估；改用 `cost` 档（价格覆盖的 `hour_*` 直接支持）或调低 `amount` |
 | 标准表对国产第一方覆盖不全 | 接受，靠补充表 / 账号覆盖补 | 实测上游数据：部分厂商无缓存字段、部分条目无价格字段、部分厂商零收录；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%（明细见市场参考文档） | 这些账号要用 `metric: cost` 必须补费率；因四项不齐即加载期报错，缺失不会被静默吞掉；补充表可回贡以逐步消解 |
@@ -1337,12 +1337,19 @@ Scope 降级为观察项）、剩两项待 P3/P4。真正影响可用性的剩�
 **逐步补齐更多国产第一方厂商的四分量费率是这项缺口唯一的实质解法，属于持续的数据维护工作，
 不是一次性的代码任务，因此不排期，靠社区与项目持续贡献补充表/`standard_price_curated.yaml` 推进。**
 
-**② `vmr replay` 消耗真实上游额度但不计费。**
-已从"永久盲区"改判为"近期跟进任务"（见上文「与既有机制的交互」一节），但至今未落地。
-影响：开发者高频用 `vmr replay` 重放长上下文调试请求时，本地计数与上游真实剩余持续静默漂移。
-修法成本低（`internal/replay` 已经在用 `router.NewUpstreamClient`，一次性 `Registry` 加载 +
-成功后计费 + 退出前 flush，不需要 `cmd_start` 那套后台 flusher）。**暂缓理由**：单纯是排期
-优先级问题，不是技术障碍或设计未决——建议作为下一个独立小任务处理，不必等 P3。
+**② `vmr replay` 消耗真实上游额度但不计费。✅ 已交付（2026-08-11）。**
+`internal/replay.Run` 现在会：加载 `<log_dir>/vmr-quota.json`（与 `vmr start` 同一份状态文件）→
+成功响应（状态码 `< 400`，与 `forwardSuccess` 的判定口径一致）后调用 `router.ChargeResponse` 计费 →
+返回前 flush 一次，不需要后台 flusher。计费管线本身从 `chargeQuota` 里抽出为导出函数
+`router.ChargeResponse`（metric 分发 + `model_multipliers` 缩放 + `cost` 定价），`router`
+的流式路径与 `replay` 的一次性路径共用同一份实现，不是两套代码。usage 来源的差异：`replay`
+的响应已经完整缓冲在内存里，所以直接用 `chatmsg.MergeUsageBytes`（与 `respStream.noteUsage`
+内部调用的是同一个函数）从整段字节里提取 usage；提取不到时的降级路径与 `tokenCharge` 同构——
+对请求体、响应体分别跑 `core.EstimateTextTokens`，全部计入 `Fresh`/`Out`（不区分缓存命中）。
+`-dry-run` 从不触碰状态文件（请求根本没有发出）；未配置 `quota:` 的 provider replay 后也不会
+新建 `vmr-quota.json`（与改动前行为一致）。**未覆盖**：`vmr replay` 与正在运行的 `vmr start`
+并发写同一状态文件时没有跨进程锁，后写入者的一次 `Flush` 会整体覆盖前者——这本来就是
+§13"多实例共享计数：不做"这条已接受限制的一个具体表现，不是这次改动新引入的问题。
 
 **③ 报表的"溯源可见"只做到聚合级，没做到逐行级。**
 §4.2③ 护栏 2 要求"报表免责声明要能说明每行费率来自标准表/补充表/账号覆盖的哪一层"。

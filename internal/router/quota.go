@@ -43,59 +43,69 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 	// validateQuota enforces this at load time) — no min()-across-Limits
 	// merge yet; that's P3 (see the design doc's Core Algorithm section on
 	// multi-window merging).
+	var raw quota.Counters
+	var estimated int64
+	if ep.Quota.Limits[0].Metric != core.MetricRequests {
+		raw, estimated = tokenCharge(rbody, creq)
+	}
+	ChargeResponse(rt.Quota, ep, raw, estimated, now)
+}
+
+// ChargeResponse charges ep's provider quota for one successful response,
+// given its raw four-component token counters (ignored for metric:
+// requests) and how much of them came from a degraded estimate (0 = exact).
+// This is chargeQuota's metric dispatch + model-multiplier scaling + cost
+// pricing tail, factored out so a caller that never streams through
+// respStream can drive the exact same pipeline instead of reimplementing
+// it — currently `vmr replay` (internal/replay), which extracts usage from
+// an already fully-buffered response via chatmsg.MergeUsageBytes; see
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's known-gap entry ② on
+// `vmr replay` not charging quota. nil-safe: reg==nil or
+// ep.Quota==nil/no Limits is a silent no-op, the same contract chargeQuota
+// has always had.
+//
+// metric: cost prices raw through ep.PricingRate (pricing.EffectiveRate — a
+// deterministic function of the resolved override chain; no time dimension
+// since P0-A dropped promotional/off-peak windows) and writes the resulting
+// $ amount into Counters.Cost — computed once, here, and never recomputed
+// later from raw tokens (the price table itself can still change across a
+// config reload, which produces a new ep.PricingRate — recomputing from raw
+// tokens later would silently re-price a past charge at today's rate).
+// model_multipliers is only ever configured on a requests/tokens account
+// (config.validate() rejects it on a cost-only account — see the design
+// doc's §4.2④), so applyModelMultiplier never runs on the cost path —
+// deliberately: it rebuilds a fresh quota.Counters that would silently zero
+// out the Cost field this branch just set.
+func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated int64, now time.Time) {
+	if reg == nil || ep.Quota == nil || len(ep.Quota.Limits) == 0 {
+		return
+	}
 	l := ep.Quota.Limits[0]
 	limitKey := string(l.Metric) + "/" + l.EveryText
 	periodStart := quota.PeriodStart(l, now)
-
-	if l.Metric == core.MetricCost {
-		rt.chargeCost(ep, rbody, creq, limitKey, periodStart)
-		return
-	}
-
-	var d quota.Counters
-	var estimated int64
 	switch l.Metric {
 	case core.MetricRequests:
-		d = quota.Counters{Requests: 1}
+		d, est := applyModelMultiplier(ep, quota.Counters{Requests: 1}, 0)
+		reg.Charge(ep.Provider, limitKey, periodStart, d, est)
+	case core.MetricCost:
+		rate := pricing.EffectiveRate(ep.PricingRate)
+		d := raw
+		d.Cost = componentCost(d, rate)
+		reg.Charge(ep.Provider, limitKey, periodStart, d, estimated)
+		if estimated != 0 {
+			// The whole charge came from a degraded token estimate (see
+			// tokenCharge's doc comment: its degraded path always sets
+			// estimated to exactly Fresh+Out, never a partial value), so
+			// the $ amount computed from it is entirely an estimate too.
+			reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, d.Cost)
+		}
 	case core.MetricTokens:
-		d, estimated = tokenCharge(rbody, creq)
-	default:
-		// config validation only ever admits requests|tokens|cost; an
-		// unreachable metric value here (e.g. a hand-built core.Limit in a
-		// test) is a no-op, not a panic.
-		return
+		d, est := applyModelMultiplier(ep, raw, estimated)
+		reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 	}
-	// model_multipliers is only ever configured on a requests/tokens
-	// account (config.validate() rejects it on a cost-only account — see
-	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2④), so this never
-	// runs for the MetricCost branch above — deliberately: applyModelMultiplier
-	// rebuilds a fresh quota.Counters that would silently zero out a Cost
-	// field if it ever ran after chargeCost had set one.
-	d, estimated = applyModelMultiplier(ep, d, estimated)
-	rt.Quota.Charge(ep.Provider, limitKey, periodStart, d, estimated)
-}
-
-// chargeCost (P2.2) is chargeQuota's metric: cost path: meters the same raw
-// token components tokenCharge always computes, prices them through
-// ep.PricingRate (pricing.EffectiveRate — a deterministic function of the
-// resolved override chain; no time dimension since P0-A dropped
-// promotional/off-peak windows), and writes the resulting $ amount into
-// Counters.Cost — computed once, here, and never recomputed later from raw
-// tokens (the price table itself can still change across a config reload,
-// which produces a new ep.PricingRate — recomputing from raw tokens later
-// would silently re-price a past charge at today's rate).
-func (rt *Router) chargeCost(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, limitKey string, periodStart time.Time) {
-	d, estimatedTokens := tokenCharge(rbody, creq)
-	rate := pricing.EffectiveRate(ep.PricingRate)
-	d.Cost = componentCost(d, rate)
-	rt.Quota.Charge(ep.Provider, limitKey, periodStart, d, estimatedTokens)
-	if estimatedTokens != 0 {
-		// The whole charge came from a degraded token estimate (see
-		// tokenCharge's doc comment: its degraded path always sets
-		// estimated to exactly Fresh+Out, never a partial value), so the
-		// $ amount computed from it is entirely an estimate too.
-		rt.Quota.AddEstimatedCost(ep.Provider, limitKey, periodStart, d.Cost)
-	}
+	// config validation only ever admits requests|tokens|cost; an
+	// unreachable metric value here (e.g. a hand-built core.Limit in a
+	// test) is a no-op, not a panic.
 }
 
 // componentCost prices d's four raw components through rate — see
@@ -211,10 +221,10 @@ func baseAmount(spec *core.QuotaSpec, c quota.Counters) float64 {
 			float64(c.CacheWrite)*w.CacheWrite + float64(c.Out)*w.Out
 	case core.MetricCost:
 		// Counters.Cost is already the final $ amount, computed once at
-		// charge time (see chargeCost) — never re-derived here from raw
-		// tokens, which is the whole point of storing it pre-computed (see
-		// core.Counters' doc comment on why cost is the one exception to
-		// "store raw, weight on read").
+		// charge time (see ChargeResponse's MetricCost branch) — never
+		// re-derived here from raw tokens, which is the whole point of
+		// storing it pre-computed (see core.Counters' doc comment on why
+		// cost is the one exception to "store raw, weight on read").
 		return c.Cost
 	default:
 		return 0

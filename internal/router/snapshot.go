@@ -100,7 +100,7 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 // independent *core.Endpoint values, in list order.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
-	quotaSpecs := buildQuotaSpecs(cfg.Providers)
+	quotaSpecs := BuildQuotaSpecs(cfg.Providers)
 	for name, m := range cfg.Models {
 		dims, err := strategy.Build(m.Strategy)
 		if err != nil {
@@ -179,14 +179,17 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	return snap, nil
 }
 
-// buildQuotaSpecs converts each provider's config.QuotaConfig into a
+// BuildQuotaSpecs converts each provider's config.QuotaConfig into a
 // core.QuotaSpec once, keyed by provider name, so every core.Endpoint
 // expanded from that provider (however many virtual models/protocols
 // reference it) shares the SAME pointer — quota is an account property, not
 // a per-endpoint one (see core.Endpoint.Quota's doc comment). Providers
 // with no quota: configured are simply absent from the map, so a lookup
-// miss below naturally yields nil (unmetered).
-func buildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
+// miss below naturally yields nil (unmetered). Exported: internal/replay
+// needs the same provider-name -> *core.QuotaSpec resolution BuildSnapshot
+// does, for a hand-built core.Endpoint that never goes through BuildSnapshot
+// itself (see replay.go's chargeReplay).
+func BuildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
 	out := map[string]*core.QuotaSpec{}
 	for _, p := range providers {
 		if p.Quota == nil {
