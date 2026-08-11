@@ -121,7 +121,8 @@ func TestStore_MkdirAllForMissingLogDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "does", "not", "exist", "vmr-quota.json")
 	r := NewRegistry(path)
-	r.Charge("plan-a", "requests/1mo", time.Now(), Counters{Requests: 1}, 0)
+	ps := time.Now()
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 	if err := r.Flush(); err != nil {
 		t.Fatalf("Flush into a non-existent directory tree: %v", err)
 	}
@@ -134,7 +135,8 @@ func TestStore_FlushIsNoOpWhenNotDirty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vmr-quota.json")
 	r := NewRegistry(path)
-	r.Charge("plan-a", "requests/1mo", time.Now(), Counters{Requests: 1}, 0)
+	ps := time.Now()
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 	if err := r.Flush(); err != nil {
 		t.Fatalf("first Flush: %v", err)
 	}
@@ -164,7 +166,8 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vmr-quota.json")
 	r := NewRegistry(path)
-	r.Charge("plan-a", "requests/1mo", time.Now(), Counters{Requests: 1}, 0)
+	ps := time.Now()
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 
 	stop := r.StartFlusher(20 * time.Millisecond)
 	deadline := time.Now().Add(2 * time.Second)
@@ -181,7 +184,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	// Flush (the documented cmd_start.go pattern: stop() then Flush()) to
 	// capture it — stop() must have fully joined the goroutine first so
 	// this Flush can't race with one still in flight.
-	r.Charge("plan-a", "requests/1mo", time.Now(), Counters{Requests: 1}, 0)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 	stop()
 	if err := r.Flush(); err != nil {
 		t.Fatalf("final Flush after stop: %v", err)
@@ -191,7 +194,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	if err := r2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	c, _ := r2.Used("plan-a", "requests/1mo", time.Now())
+	c, _ := r2.Used("plan-a", "requests/1mo", ps)
 	if c.Requests != 2 {
 		t.Fatalf("final count after stop+Flush = %d, want 2", c.Requests)
 	}
