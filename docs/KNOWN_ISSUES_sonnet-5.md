@@ -214,6 +214,17 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 按目录统计导出函数/类型数量、或给 Finding 检测器数量设上限），而不是停留在文档共识——`archtest` 目前
 只覆盖"行数"和"import 边界"两个维度，"功能面膨胀"是它现有机制的盲区。
 
+#### 1.2.11 [L] 图片降采样缓存无物理磁盘容量上限
+
+`internal/imgprep/cache.go` 的 `sweepCacheDir` 只按 `image_cache_ttl_days`（缺省 7 天）做基于 mtime
+的定期清理，没有总字节数上限。风险有限——缓存的是降采样后的 JPEG（受 `image_downscale_max_px` 约束，
+单文件通常几百 KB 量级），要在 TTL 窗口内撑爆磁盘需要海量互不相同的高分辨率图片持续涌入，当前无实际
+故障证据。
+
+**方案**：加 `image_cache_max_mb` 配置项 + 按 mtime 的 LRU 淘汰（sweep 时若总字节数超限，从最旧条目
+删起直到阈值下）。**为什么待定**：需要新配置项、双语文档同步（`config.example.yaml`/`.zh.yaml`）、
+淘汰逻辑与测试，改动面相对于当前风险偏低。**触发条件**：真的观测到磁盘压力（而非假设）时再做。
+
 ---
 
 ### 1.3 其他（一句话，不展开）
@@ -317,7 +328,12 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   只会增加配置面复杂度，收益存疑。
 - **`ErrorClass.String()` 的 `default` 返回 `"transient"` 而非 `"unknown"`**——刻意为之，防止报表的
   error_classes bucket key 无界增长；`default` 分支实际不可达。
-- **`${VAR}` 未定义时静默展开为空串**——已文档化的预期行为，`vmr diagnose` 的 api_key 检查是现有缓解。
+- **`${VAR}` 未定义时静默展开为空串，且不支持 shell 风格的 `${VAR:-default}` 默认值语法**——
+  `internal/config/config.go` 的 `expandEnv` 正则只认 `\$\{[A-Za-z_][A-Za-z0-9_]*\}`，`:-` 这类语法
+  完全不匹配、会原样残留在展开结果里不被替换。都是刻意取舍：未定义展开为空串已文档化
+  （`docs/VirtualModelRouter_Design_v4_Core.md`），`vmr diagnose` 的 api_key 检查是现有缓解；需要
+  默认值时直接在 YAML 里写字面值即可，成本接近零，与项目"环境变量只做显式单一用途、不留隐式旋钮"的
+  一贯哲学一致，没有加 shell 风格默认值解析的实际诉求，按 YAGNI 不做。
 - **`report/render.go` 的 `reassembleSSE`（语义重组）与 `router/response.go` 的 SSE 状态机是两套独立
   实现**——一个字节级保真增量转发、一个整体语义提取，关注点不同，合并成本高于收益。
 - **`internal/adapter/openai` 与 `anthropic` 各有约 4 行的 header 拷贝循环**——凭证 header 名字与格式
