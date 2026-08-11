@@ -157,5 +157,15 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
   concise reference doc, and git history already holds that story. If losing the old
   wording would confuse a future reader, compress it into one short clause instead of
   keeping it in full. This does not apply to documents whose whole purpose is the trail —
-  review reports, `docs/KNOWN_ISSUES_*.md`, and code comments recording why a
-  superseded approach was wrong are expected to accumulate.
+  review reports, `docs/KNOWN_ISSUES_*.md`, `CHANGELOG.md`, and code comments recording why
+  a superseded approach was wrong are expected to accumulate.
+- **`CHANGELOG.md` (Keep a Changelog format) is the source of truth for release notes** — add
+  entries under `[Unreleased]` as user/dev-relevant changes land (skip pure dependency-bump
+  and doc-churn commits; group under `Added`/`Changed`/`Fixed`). When cutting a release,
+  retitle `[Unreleased]` to `## [X.Y] - YYYY-MM-DD` matching the tag about to be pushed (drop
+  the leading `v`), add a fresh empty `[Unreleased]` above it, and add the two link-reference
+  lines at the bottom. `release.yml`'s release job extracts that section and uses it as the
+  GitHub Release body instead of GitHub's auto-generated commit list — the latter is unusable
+  here since most commits land directly on `main` rather than through a PR. The release job
+  fails on purpose if the pushed tag has no matching section, rather than publish an empty
+  release — write the `CHANGELOG.md` entry (and commit it) before tagging, not after.

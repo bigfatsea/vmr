@@ -46,6 +46,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -55,7 +57,27 @@ jobs:
         working-directory: dist
         run: sha256sum *.tar.gz > checksums.txt
 
+      # GitHub's own generate_release_notes just lists PR titles, which is
+      # unreadable on this repo's mostly direct-to-main workflow (dependency
+      # bumps and real feature commits look identical). CHANGELOG.md is the
+      # curated source of truth instead — fail the release rather than
+      # publish an empty body if the tag's section is missing.
+      - name: Extract this tag's CHANGELOG section
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          escaped_tag=$(printf '%s' "$tag" | sed 's/[.[\*^$/]/\\&/g')
+          awk -v ver="$escaped_tag" '
+            $0 ~ "^## \\[" ver "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on && /^\[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::CHANGELOG.md has no [$tag] section — add one before tagging."
+            exit 1
+          fi
+
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: release_notes.md
