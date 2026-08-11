@@ -19,7 +19,7 @@
 # All amounts are USD per 1,000,000 tokens. A component absent from a row
 # means "unknown" (not "free") — see internal/pricing.Rate.Complete.
 currency: USD
-generated_at: "2026-08-07"
+generated_at: "2026-08-11"
 rates:
   - key: anthropic/claude-3-7-sonnet-20250219
     in_fresh: 3
