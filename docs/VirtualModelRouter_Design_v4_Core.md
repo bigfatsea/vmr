@@ -761,7 +761,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 配额窗口与余额耗尽同罪同罚 | 按窗口设 5h 级长冷却 | 厂商信号无法可靠区分两者；封顶 1h 的探针成本 ≤1 失败请求/小时/端点，恢复及时性优先 |
 | 审计双层结构、成功 body 去重 | 每层完整存两份 | 透传恒等，重复存储只膨胀文件；失败 body 各自保留因为各不相同 |
 | 审计凭证掩码（留末 4 位） | 完整记录 header | 密钥落盘外泄风险 > 取证价值；末 4 位足以区分 Key |
-| 无中心 IR、router 只做循环 | —— | router 主流程（`router.go`，Serve/tryOne/handleErrorResponse/forwardSuccess）约 530 行，响应归一化器拆成通用状态机（`response.go`，约 500 行）+ MiniMax quirk 专属逻辑（`responsefix.go`，约 185 行，Phase 2 item 2.3 拆出）；并发闸/快照构建安装/upstream transport/实时日志格式化已按职责拆到同包的 `limiter.go`/`snapshot.go`/`transport.go`/`logfmt.go`（见 §4.2），不算进这条门槛——门槛盯的是 failover 主流程本身的复杂度，不是同包文件总行数。若 `router.go` 显著变大，说明抽象错了；`internal/archtest` 的 `TestArchitecture_CoreFileSizes` 把这条阈值变成了可执行检查（2026-07-26 起，此前只是本表里的一句话，`router.go` 曾在无人察觉的情况下长到 948 行才被发现——归一化器的增长对应的是实证 quirk 清单，另算，暂未纳入同一检查） |
+| 无中心 IR、router 只做循环 | —— | router 主流程（`router.go`，Serve/tryOne/handleErrorResponse/forwardSuccess）、响应归一化器拆成通用状态机（`response.go`）+ MiniMax quirk 专属逻辑（`responsefix.go`，Phase 2 item 2.3 拆出）；并发闸/快照构建安装/upstream transport/实时日志格式化已按职责拆到同包的 `limiter.go`/`snapshot.go`/`transport.go`/`logfmt.go`（见 §4.2），不算进这条门槛——门槛盯的是 failover 主流程本身的复杂度，不是同包文件总行数。若 `router.go` 显著变大，说明抽象错了；`internal/archtest` 的 `TestArchitecture_CoreFileSizes` 把这条阈值变成了可执行检查（2026-07-26 起，此前只是本表里的一句话，`router.go` 曾在无人察觉的情况下长到 948 行才被发现——归一化器的增长对应的是实证 quirk 清单，另算，暂未纳入同一检查），具体行数以该检查的阈值为准，本表不再给出会漂移的绝对数字 |
 | 图片降采样跳过判定用真实像素尺寸（`DecodeConfig`） | 按字节数估算换算像素 | 压缩率随内容剧烈波动，字节数与像素尺寸不是稳定映射；读文件头一样便宜且没有换算误差 |
 | 图片降采样直接实现为函数调用 | 复用/预建请求预处理插件框架（见「路线图」） | 插件框架的词库形态、按 Provider 差异化等问题还未定型，图片降采样是具体确定的处理，不该为一个未来设计买单 |
 | 动图/超限声明尺寸一律 fail-open 跳过 | 尝试部分处理或报错 | 动图缩放会破坏语义，畸形声明尺寸可能是解压炸弹；跳过的代价只是错过一次可选优化，处理的代价可能是内存暴涨或输出错误 |

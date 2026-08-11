@@ -153,7 +153,7 @@ describe_pids() {
 }
 
 # port_holder ADDR: prints "pid command" for whatever process (if any) is
-# listening on ADDR ("host:port", as printed by `vmr check`'s listen=...),
+# listening on ADDR ("host:port", as printed by `vmr check`'s listen:...),
 # or nothing. Best-effort — silently no-ops if lsof isn't installed (some
 # minimal Linux images lack it) rather than failing the whole script over a
 # diagnostic aid; IPv6 listen addresses (with colons of their own) aren't
@@ -184,7 +184,7 @@ cmd_start() {
   # invisible to running_pids' own-binary-path match (see MATCH above), and
   # the raw bind error from vmr itself doesn't explain that.
   local listen_addr holder
-  listen_addr="$(sed -n 's/.*listen=\([^ ]*\).*/\1/p' <<<"$check_out" | head -1)"
+  listen_addr="$(sed -n 's/.*listen:[[:space:]]*\([^ ]*\).*/\1/p' <<<"$check_out" | head -1)"
   if [[ -n "$listen_addr" ]]; then
     holder="$(port_holder "$listen_addr")"
     if [[ -n "$holder" ]]; then

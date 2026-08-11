@@ -5,7 +5,7 @@
 # no new logic: rebuild ./vmr fresh, make sure vegeta is on PATH, then hand
 # off to `go run ./loadtest/runner`, which does the real work (starts
 # mockupstream + vmr on isolated ports 9900/8801, generates targets, fires
-# three escalating Vegeta load rounds at all 11 scenarios, computes the
+# three escalating Vegeta load rounds at all 12 scenarios, computes the
 # per-scenario server-side breakdown directly from the resulting audit log,
 # writes reports/loadtest-report.md) and cleans up its own subprocesses on
 # exit. The runner never shells out to `vmr report` (an earlier version

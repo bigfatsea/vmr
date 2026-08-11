@@ -215,13 +215,19 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// must never be misrouted as needing image support, which is exactly
 		// what the cheap imgprep.HasImageMarker byte-scan this replaced as
 		// the routing signal would do.
+		// Skip the work for a model name Serve is about to 404 anyway (same
+		// snap.Models lookup Serve repeats below) — no point decoding/scaling/
+		// caching images for a request that never reaches routing.
 		route := snap.Models[protocol][probeModel]
-		n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
-		body, images := imgprep.Downscale(body, protocol, imgprep.Options{
-			MaxPx:        n,
-			CacheDir:     snap.Cfg.ImageCacheDir,
-			CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
-		})
+		var images []imgprep.ImageInfo
+		if route != nil {
+			n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
+			body, images = imgprep.Downscale(body, protocol, imgprep.Options{
+				MaxPx:        n,
+				CacheDir:     snap.Cfg.ImageCacheDir,
+				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+			})
+		}
 		if rec != nil && len(images) > 0 {
 			rec.Images = make([]audit.ImageInfo, len(images))
 			for i, img := range images {

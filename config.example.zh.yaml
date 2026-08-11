@@ -33,8 +33,8 @@
 listen: 127.0.0.1:8800
 # api_keys:                      # 可选：给路由器加一层保护（Bearer 或 x-api-key）。每个 key 的
 #                                # 尾部同时也是它调用方的标签：`vmr report` 会据此自动为每个标签
-#                                # 各写一份 vmr-requests-<tag>.jsonl / vmr-requests-index-<tag>.md，
-#                                # 和常规的完整文件并存，不需要额外传参。
+#                                # 各写一份 vmr-requests-<tag>.md（索引数据统一存在 vmr-requests.json
+#                                # 里），和常规的完整文件并存，不需要额外传参。
 #                                #
 #                                # 标签 = key 最后 8 个字符里、最后一个 "-" 之后的部分——所以每个
 #                                # key 都以 "-<label>" 结尾（例如 ...-alice -> 标签 "alice"）。用

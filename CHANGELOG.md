@@ -17,6 +17,10 @@ See this file's row in `CLAUDE.md`'s Conventions section for the write-time
 process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 
 ## [Unreleased]
+### Fixed
+- `vmr.sh`'s `cmd_start` port-occupancy precheck was silently dead (its regex expected `vmr check`'s listen-address line as `listen=...`, but it prints `listen:`) — restored
+- `server.chatHandler` no longer runs image downscaling for a request naming an unknown virtual model; that work was always discarded since `router.Serve` immediately 404s on the same lookup
+- README's links to `docs/Why_vmr_over_LiteLLM.{md,zh.md}` were dead (the file had been swept into an untracked `archived/` directory during an unrelated cleanup) — restored to `docs/` and re-tracked
 
 ## [0.5] - 2026-08-11
 ### Added

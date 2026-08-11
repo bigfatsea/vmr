@@ -41,8 +41,9 @@
 listen: 127.0.0.1:8800
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
 #                                # tail also tags its caller: `vmr report` then auto-writes a
-#                                # vmr-requests-<tag>.jsonl / vmr-requests-index-<tag>.md pair per
-#                                # tag, alongside the usual full files. No flag needed for this.
+#                                # vmr-requests-<tag>.md per tag (the index data lives in the
+#                                # shared vmr-requests.json), alongside the usual full files. No
+#                                # flag needed for this.
 #                                #
 #                                # Tag = last 8 chars of the key, cut to after the last "-" in that
 #                                # window — so end each key "-<label>" (e.g. ...-alice -> tag

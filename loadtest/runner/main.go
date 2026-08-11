@@ -221,7 +221,7 @@ type roundResult struct {
 const totalScenarios = plainScenarios + imageScenarios
 
 // scaleRate gives a group of groupScenarios (out of totalScenarios) the same
-// per-scenario request rate a single combined attack across all 11 would
+// per-scenario request rate a single combined attack across all 12 would
 // have given it — round's nominal rate * groupScenarios/totalScenarios,
 // rounded to nearest. Keeps the two-attacks split from silently changing how
 // hard a round actually hits vmr; only the reporting is split, not the load
