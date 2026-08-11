@@ -89,3 +89,43 @@ origin/main
 
 - 未删除/关闭任何仍有价值的分支或 PR——本轮清理前的 6 个远程分支全部被判定为"值得合并"，没有真正意义上的废弃分支需要丢弃。
 - 未触碰 dependabot 配置本身（`.github/dependabot.yml` 不存在改动需求，本次只是清理其产出的历史 PR 积压）。
+
+## 后续：发布 v0.5 并同步 Homebrew tap
+
+分支清理与合并全部完成、全量测试通过后，按用户指示继续把版本升级到 v0.5，并同步二进制发行版与 Homebrew tap。
+
+### 版本机制
+
+`vmr` 不维护任何硬编码的版本号文件——`internal/buildinfo`（见其 doc comment）刻意只从 Go 自带的 VCS stamp（`debug.ReadBuildInfo`）读取 commit SHA/时间，`vmr version` 打印的是 commit 而非 tag。“升级到 v0.5”因此就是在 `main` 上打一个新的 `v*` tag 并推送——`.github/workflows/release.yml` 监听 `push: tags: 'v*'`，自动交叉编译 4 个平台并发布 GitHub Release，不需要改动任何源码。
+
+### 操作记录
+
+1. 确认 `git tag -l` 已有 `v0.1`–`v0.4`，`v0.4` 是最近一次发布（2026-08-05）；`git log v0.4..HEAD` 有 37 个提交，主要内容是 Quota-Aware Routing P1/P2（配额均衡、账号加权、成本定价、多币种定价）——版本号进位到 v0.5 合理。
+2. 在合并完成后的 `main` HEAD（`885c0a4`，即分支清理记录文档本身那次提交）上打 annotated tag：
+   ```
+   git tag -a v0.5 -m "v0.5
+
+   Quota-Aware Routing (P1 balancing + P2 account weighting, cost pricing, multi-currency pricing), dependency/CI Actions bumps, and a flaky-test fix."
+   ```
+3. **推送前向用户确认**（tag 推送会触发对外可见的 GitHub Release，不可静默撤回）——用户确认后执行 `git push origin v0.5`。
+4. `release.yml` 触发（run [31477726630](https://github.com/bigfatsea/vmr/actions/runs/31477726630)），4 个平台（`darwin_amd64`/`darwin_arm64`/`linux_amd64`/`linux_arm64`）构建成功，`conclusion: success`，[v0.5 Release](https://github.com/bigfatsea/vmr/releases/tag/v0.5) 已发布，含 `checksums.txt` + 4 个 `.tar.gz`。
+
+### Homebrew tap 同步
+
+发现 `bigfatsea/homebrew-tap`（`Formula/vmr.rb`）在 v0.4 发布时**从未同步过**——tap 仓库最后一次提交停留在 “vmr 0.3”（2026-08-04），本地 `_tmp/homebrew-tap` 是该仓库的既有 clone。v0.5 发布顺带把这个遗留的同步缺口一并补上（v0.5 会覆盖式地把 tap 指向最新版本，不需要单独补发 v0.4）。
+
+1. 从新发布的 v0.5 Release 下载 `checksums.txt`，取得 4 个 tarball 的官方 sha256。
+2. **独立重新下载并用 `shasum -a 256` 本地重算**这 4 个 tarball 的哈希，与 `checksums.txt` 逐行比对，完全一致，排除复制粘贴出错的可能。
+3. 更新 `Formula/vmr.rb`：`version "0.3"→"0.5"`，4 组 `url`/`sha256` 全部替换为 v0.5 对应值；`brew style` 校验语法通过（唯一告警是 v0.2 时代就存在的 `desc` 行超长问题，与本次改动无关，不在本次任务范围内，未顺手修改）。
+4. 提交 `92cb958`（"vmr 0.5"）并推送到 `bigfatsea/homebrew-tap` 的 `master` 分支。
+5. **端到端冒烟验证**：在本机通过真实 tap（而非本地路径）执行 `brew update && brew upgrade bigfatsea/tap/vmr`，成功从 0.3 升级到 0.5；`vmr version` 输出 `vmr 885c0a4 committed 2026-08-11T09:25:11Z built with go1.25.1`，commit SHA 与打 tag 时的 `main` HEAD 完全一致，证明 tap → GitHub Release → 二进制这条链路端到端可用。
+
+### 结果汇总
+
+| 项目 | 结果 |
+|---|---|
+| Git tag | `v0.5`（annotated，指向 `885c0a4`） |
+| GitHub Release | [v0.5](https://github.com/bigfatsea/vmr/releases/tag/v0.5)，4 平台二进制 + checksums.txt，全部 sha256 本地复核一致 |
+| release.yml | [run 31477726630](https://github.com/bigfatsea/vmr/actions/runs/31477726630) — success |
+| Homebrew tap | `bigfatsea/homebrew-tap` commit `92cb958`，`Formula/vmr.rb` 0.3→0.5（顺带补上被遗漏的 0.4 同步） |
+| 端到端验证 | `brew upgrade bigfatsea/tap/vmr` 0.3→0.5 成功，`vmr version` 校验通过 |
