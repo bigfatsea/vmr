@@ -170,7 +170,7 @@ type respStream struct {
 	// returns — and on two of copyFlush's return paths (idle timeout,
 	// write error) the reader goroutine is not guaranteed to have exited
 	// yet (see transport.go's copyFlush doc comment and
-	// docs/OUTSTANDING_ISSUES_opus-5.md's existing entry on this). Rather
+	// docs/KNOWN_ISSUES_sonnet-5.md's existing entry on this). Rather
 	// than fixing that pre-existing race (a hot-path change out of scope
 	// for this feature), these four fields get their own lock so the NEW code
 	// this feature adds is race-clean without touching the old fields at

@@ -157,5 +157,5 @@ forwarded verbatim to the binary (not a whitelist — see the script's `passthro
   concise reference doc, and git history already holds that story. If losing the old
   wording would confuse a future reader, compress it into one short clause instead of
   keeping it in full. This does not apply to documents whose whole purpose is the trail —
-  review reports, `docs/OUTSTANDING_ISSUES_*.md`, and code comments recording why a
+  review reports, `docs/KNOWN_ISSUES_*.md`, and code comments recording why a
   superseded approach was wrong are expected to accumulate.
