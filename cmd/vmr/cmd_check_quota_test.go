@@ -159,6 +159,40 @@ models:
 	}
 }
 
+// TestCmdCheck_DeclaredUnresolvedPricingOverrideWithoutDiscount pins a
+// crash: printProviderPricing's "declared but not resolved" fallback (a
+// providers[].pricing block whose provider has no endpoint currently routed
+// to it, so config.Config.ResolvedPricing has nothing for it) used to
+// unconditionally dereference oc.Discount before checking it for nil —
+// exactly one of Discount or the four explicit rate components is set (see
+// config.PricingOverrideConfig's doc comment), so an override using the
+// explicit-components form panicked `vmr check` outright.
+func TestCmdCheck_DeclaredUnresolvedPricingOverrideWithoutDiscount(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+pricing:
+  currency: USD
+providers:
+  - name: p1
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
+    pricing:
+      overrides:
+        - {model: some-model, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 3}
+models:
+  m1:
+    endpoints:
+      - protocol: openai
+        provider: p1
+        models: [other-model]
+`
+	path := writeTempFile(t, "config.yaml", yaml)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "in_fresh=1 cache_read=0.1 cache_write=1.25 out=3") {
+		t.Errorf("declared-but-unresolved override's explicit rate components not rendered:\n%s", out)
+	}
+}
+
 // TestCmdCheck_ListenExposureWarningDoesNotFail pins the fix for a real
 // blocking bug reported after A3's checkListenExposure landed: a
 // SeverityWarning-only Issue set must render under "=== Warnings ===", not

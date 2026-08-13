@@ -169,7 +169,7 @@ models:
 // shows only its own addition/override under "extra_capabilities="/
 // "max_context_tokens=" (not the merged effective set — that's what
 // core.Endpoint.Capabilities is for), and an endpoint declaring neither
-// shows a bare "N. provider/model:" with nothing after the colon.
+// shows a bare "- p=N. provider/model:" with nothing after the colon.
 func TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
@@ -198,11 +198,11 @@ models:
 	if !strings.Contains(out, checkLine(2, "max_context_tokens", "128000")) {
 		t.Errorf("model base max_context_tokens not rendered:\n%s", out)
 	}
-	wantEndpointLine := padLabel("    1. p1/with-extra:", endpointKeyWidth) + "extra_capabilities=image; max_context_tokens=512000"
+	wantEndpointLine := padLabel("    - p=0. p1/with-extra:", endpointKeyWidth) + "extra_capabilities=image; max_context_tokens=512000"
 	if !strings.Contains(out, wantEndpointLine) {
 		t.Errorf("endpoint's own extra/override not rendered at column %d:\ngot:  %s\nwant: %q", endpointKeyWidth, out, wantEndpointLine)
 	}
-	if !strings.Contains(out, "2. p1/plain:\n") {
+	if !strings.Contains(out, "- p=0. p1/plain:\n") {
 		t.Errorf("endpoint declaring neither should render a bare label with nothing after the colon:\n%s", out)
 	}
 }
@@ -221,7 +221,7 @@ models:
   b: {endpoints: [{protocol: openai, provider: p1, models: [m2]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, "1. p1/m1:\n\nb:\n") {
+	if !strings.Contains(out, "- p=0. p1/m1:\n\nb:\n") {
 		t.Errorf("expected exactly one blank line between model \"a\" and model \"b\":\n%s", out)
 	}
 }

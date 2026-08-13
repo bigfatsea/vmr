@@ -278,8 +278,8 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
 			group := fmt.Sprintf("%s [%s]", name, protocol)
-			for i, ep := range ordered {
-				target := fmt.Sprintf("%d. %s/%s", i+1, ep.Provider, ep.Model)
+			for _, ep := range ordered {
+				target := fmt.Sprintf("- p=%d. %s/%s", ep.Priority, ep.Provider, ep.Model)
 				status, detail := StatusOK, ""
 				if r, ok := connResults[epKey{protocol, ep.Provider, ep.Model}]; ok && r.Status != StatusOK {
 					status, detail = r.Status, "connectivity test: "+r.Detail

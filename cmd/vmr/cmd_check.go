@@ -35,7 +35,7 @@ func padLabel(label string, width int) string {
 	return label + " "
 }
 
-// endpointKeyWidth is the fixed column an endpoint's "N. provider/model:"
+// endpointKeyWidth is the fixed column an endpoint's "- p=N. provider/model:"
 // label (indent included) pads out to, so extra_capabilities=/
 // max_context_tokens=/key=EMPTY values line up the same way checkLine's
 // key column does elsewhere.
@@ -70,6 +70,14 @@ func orNone(s string) string {
 		return "(none)"
 	}
 	return s
+}
+
+// orNoneList renders an optional string-list field.
+func orNoneList(ss []string) string {
+	if len(ss) == 0 {
+		return "(none)"
+	}
+	return strings.Join(ss, ",")
 }
 
 // cmdCheck validates the config, runs Config.Check's consistency scan, and
@@ -194,6 +202,7 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
 	fmt.Println(checkLine(0, "audit_retention", retention))
+	fmt.Println(checkLine(0, "extra_redact_headers", orNoneList(cfg.ExtraRedactHeaders)))
 	fmt.Println(checkLine(0, "sticky_ttl", cfg.StickyTTL.D().String()))
 	probeTimeout := cfg.ProbeTimeout.D().String()
 	if hasIssue(issues, "", "", "", "probe_timeout") {
@@ -251,7 +260,7 @@ func printProviders(cfg *config.Config) {
 			fmt.Println(checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
 		}
 		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
-		printProviderQuota(p)
+		printProviderQuota(cfg, p)
 		printProviderPricing(cfg, p)
 	}
 }
@@ -279,14 +288,34 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 	if err != nil || table == nil {
 		return "", false
 	}
-	if table.GeneratedAt == "" {
-		return "built-in standard table (generation date unknown)", true
+	line := "built-in standard table (generation date unknown)"
+	if table.GeneratedAt != "" {
+		line = "built-in standard table generated " + table.GeneratedAt
+		gen, perr := time.ParseInLocation("2006-01-02", table.GeneratedAt, fmtutil.DisplayZone)
+		if perr == nil {
+			if age := time.Since(gen); age > pricingStaleAfter {
+				line += fmt.Sprintf(" — %d days old, list prices may have moved (regenerate: go run ./tools/gen_standard_pricing)", int(age.Hours()/24))
+			}
+		}
 	}
-	line := "built-in standard table generated " + table.GeneratedAt
-	gen, perr := time.ParseInLocation("2006-01-02", table.GeneratedAt, fmtutil.DisplayZone)
-	if perr == nil {
-		if age := time.Since(gen); age > pricingStaleAfter {
-			line += fmt.Sprintf(" — %d days old, list prices may have moved (regenerate: go run ./tools/gen_standard_pricing)", int(age.Hours()/24))
+	// cfg.Pricing's currency/exchange_rate/supplement are otherwise
+	// invisible in this output, yet directly determine what unit a
+	// metric: cost quota's amount= (below) is denominated in.
+	if cfg.Pricing != nil {
+		currency := cfg.Pricing.Currency
+		switch {
+		case currency == "":
+			line += "; currency=USD"
+		case cfg.Pricing.ExchangeRate[currency] != 0:
+			line += fmt.Sprintf("; currency=%s (1 USD = %g %s)", currency, cfg.Pricing.ExchangeRate[currency], currency)
+		default:
+			line += "; currency=" + currency
+		}
+		if cfg.Pricing.Supplement != "" {
+			line += "; supplement=" + cfg.Pricing.Supplement
+		}
+		if cfg.Pricing.Standard != "" {
+			line += "; standard=" + cfg.Pricing.Standard
 		}
 	}
 	return line, true
@@ -299,9 +328,6 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 // referencing the standard table by hand. Absent entirely for a provider
 // with no resolved pricing, same as every other optional section here.
 func printProviderPricing(cfg *config.Config, p config.Provider) {
-	if len(cfg.ResolvedPricing) == 0 {
-		return
-	}
 	var models []string
 	prefix := p.Name + "\x00"
 	for key := range cfg.ResolvedPricing {
@@ -309,21 +335,44 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 			models = append(models, strings.TrimPrefix(key, prefix))
 		}
 	}
-	if len(models) == 0 {
+	if len(models) > 0 {
+		sort.Strings(models)
+		fmt.Println("  pricing:")
+		for _, model := range models {
+			spec := cfg.ResolvedPricing[prefix+model]
+			// EffectiveRate, not spec.Base: an account with an override (e.g.
+			// discount:) is charged at the resolved rate, not the standard
+			// table's list price — printing Base here would show an operator a
+			// number that has nothing to do with what metric: cost will actually
+			// charge.
+			r := pricing.EffectiveRate(spec)
+			fmt.Println(checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
+				ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
+		}
 		return
 	}
-	sort.Strings(models)
-	fmt.Println("  pricing:")
-	for _, model := range models {
-		spec := cfg.ResolvedPricing[prefix+model]
-		// EffectiveRate, not spec.Base: an account with an override (e.g.
-		// discount:) is charged at the resolved rate, not the standard
-		// table's list price — printing Base here would show an operator a
-		// number that has nothing to do with what metric: cost will actually
-		// charge.
-		r := pricing.EffectiveRate(spec)
-		fmt.Println(checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
-			ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
+	if p.Pricing == nil {
+		return
+	}
+	// A declared providers[].pricing block with no ResolvedPricing entry
+	// means no virtual model's endpoint currently routes any model to this
+	// provider (so resolvePricing had nothing to resolve against) — show
+	// the raw declaration instead of silently dropping it, since it's
+	// explicit config a human wrote and may expect to see confirmed.
+	fmt.Println("  pricing: (declared; not resolved — no routed endpoint references this provider)")
+	for _, local := range core.SortedKeys(p.Pricing.Map) {
+		fmt.Println(checkLine(4, "map", local+" -> "+p.Pricing.Map[local]))
+	}
+	for i, oc := range p.Pricing.Overrides {
+		val := fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s",
+			ratePart(oc.InFresh), ratePart(oc.CacheRead), ratePart(oc.CacheWrite), ratePart(oc.Out))
+		if oc.Discount != nil {
+			val = fmt.Sprintf("discount=%g", *oc.Discount)
+		}
+		if oc.Currency != "" {
+			val += " currency=" + oc.Currency
+		}
+		fmt.Println(checkLine(4, fmt.Sprintf("overrides[%d] model=%s", i, oc.Model), val))
 	}
 }
 
@@ -346,7 +395,7 @@ func ratePart(v *float64) string {
 // (config-derived), never reads Registry state (that's /admin/status's and
 // `vmr status`'s job, see server/admin.go). Absent entirely for a provider
 // with no quota: configured, same as every other optional section here.
-func printProviderQuota(p config.Provider) {
+func printProviderQuota(cfg *config.Config, p config.Provider) {
 	if p.Quota == nil || len(p.Quota.Limits) == 0 {
 		return
 	}
@@ -354,7 +403,14 @@ func printProviderQuota(p config.Provider) {
 	for _, lc := range p.Quota.Limits {
 		l := lc.Resolved
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
-		fmt.Println(checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%g", l.EveryText, since, l.Amount)))
+		amount := fmt.Sprintf("%g", l.Amount)
+		// A cost-metric amount is denominated in cfg.Pricing.Currency
+		// (resolvePricing requires it to be set for any metric: cost
+		// provider) — bare "amount=698" is otherwise ambiguous.
+		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
+			amount += " " + cfg.Pricing.Currency
+		}
+		fmt.Println(checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)))
 	}
 	// token_weights is always resolved (defaults to all 1.0), but only
 	// printed when the account actually configured it non-default — an
@@ -415,6 +471,7 @@ func printModels(cfg *config.Config, snap *router.Snapshot, issues []config.Issu
 			tokens = fmt.Sprintf("%d", m.MaxContextTokens)
 		}
 		fmt.Println(checkLine(2, "max_context_tokens", tokens))
+		fmt.Println(checkLine(2, "strategy", strings.Join(m.Strategy, ",")))
 		sticky := m.Sticky == nil || *m.Sticky
 		fmt.Println(checkLine(2, "sticky", fmt.Sprintf("%v", sticky)))
 		if sticky {
@@ -429,7 +486,7 @@ func printModels(cfg *config.Config, snap *router.Snapshot, issues []config.Issu
 				continue
 			}
 			fmt.Printf("  %s:\n", protocol)
-			for epIdx, ep := range route.EffectiveOrder() {
+			for _, ep := range route.EffectiveOrder() {
 				key := ep.Provider + "/" + ep.Model
 				var parts []string
 				if len(ep.ExtraCapabilities) > 0 {
@@ -438,10 +495,20 @@ func printModels(cfg *config.Config, snap *router.Snapshot, issues []config.Issu
 				if ep.OwnMaxContextTokens > 0 {
 					parts = append(parts, fmt.Sprintf("max_context_tokens=%d", ep.OwnMaxContextTokens))
 				}
+				if len(ep.RoleMap) > 0 {
+					rm := make([]string, 0, len(ep.RoleMap))
+					for _, from := range core.SortedKeys(ep.RoleMap) {
+						rm = append(rm, from+"->"+ep.RoleMap[from])
+					}
+					parts = append(parts, "role_map="+strings.Join(rm, ","))
+				}
+				if sticky && ep.StickyTTL != cfg.StickyTTL.D() {
+					parts = append(parts, "sticky_ttl="+ep.StickyTTL.String())
+				}
 				if ep.APIKey == "" {
 					parts = append(parts, warn("key=EMPTY"))
 				}
-				label := fmt.Sprintf("    %d. %s:", epIdx+1, key)
+				label := fmt.Sprintf("    - p=%d. %s:", ep.Priority, key)
 				line := label
 				if len(parts) > 0 {
 					line = padLabel(label, endpointKeyWidth) + strings.Join(parts, "; ")

@@ -682,7 +682,7 @@ models:
 	// priority 0 (bad) sorts first; its connectivity failure must be
 	// reflected in the route preview even though diagnose never touches a
 	// live health registry.
-	if !strings.Contains(routeEntries[0].Target, "1. bad/m") {
+	if !strings.Contains(routeEntries[0].Target, "p=0. bad/m") {
 		t.Errorf("first route entry = %+v, want priority-0 (bad) endpoint first", routeEntries[0])
 	}
 	if routeEntries[0].Group != "vm [openai]" || routeEntries[1].Group != "vm [openai]" {
