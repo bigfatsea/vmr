@@ -4,6 +4,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -132,9 +134,11 @@ func cmdCheck(args []string) error {
 	}
 
 	issues := cfg.Check()
-	printGlobalSettings(cfg, issues)
-	printProviders(cfg)
-	printModels(cfg, snap, issues)
+	printGlobalSettings(os.Stdout, cfg, issues)
+	fmt.Println()
+	printProviders(os.Stdout, cfg)
+	fmt.Println()
+	printModels(os.Stdout, cfg, snap, issues)
 
 	var errs, warns []config.Issue
 	for _, is := range issues {
@@ -176,41 +180,45 @@ func hasIssue(issues []config.Issue, provider, model, endpoint, field string) bo
 	return false
 }
 
-func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
-	fmt.Println("=== Global Settings ===")
+func printGlobalSettings(w io.Writer, cfg *config.Config, issues []config.Issue) {
+	fmt.Fprintln(w, "=== Global Settings ===")
 	listen := cfg.Listen
 	if hasIssue(issues, "", "", "", "listen") {
 		listen = warn(listen)
 	}
-	fmt.Println(checkLine(0, "listen", listen))
+	fmt.Fprintln(w, checkLine(0, "listen", listen))
 	auth := "off"
 	if len(cfg.APIKeys) > 0 {
 		auth = fmt.Sprintf("on (%d key(s))", len(cfg.APIKeys))
 	}
-	fmt.Println(checkLine(0, "auth", auth))
-	fmt.Println(checkLine(0, "max_attempts", orUnlimited(cfg.MaxAttempts)))
-	fmt.Println(checkLine(0, "max_request_body", fmt.Sprintf("%dMB", cfg.MaxRequestBodyMB)))
-	fmt.Println(checkLine(0, "max_concurrency", orUnlimited(cfg.MaxConcurrency)))
+	fmt.Fprintln(w, checkLine(0, "auth", auth))
+	fmt.Fprintln(w, checkLine(0, "max_attempts", orUnlimited(cfg.MaxAttempts)))
+	fmt.Fprintln(w, checkLine(0, "max_request_body", fmt.Sprintf("%dMB", cfg.MaxRequestBodyMB)))
+	fmt.Fprintln(w, checkLine(0, "max_concurrency", orUnlimited(cfg.MaxConcurrency)))
 	imgScale := "off"
 	if cfg.ImageDownscaleMaxPx > 0 {
 		imgScale = fmt.Sprintf("%dpx", cfg.ImageDownscaleMaxPx)
 	}
-	fmt.Println(checkLine(0, "image_downscale", imgScale))
-	fmt.Println(checkLine(0, "image_cache_ttl", fmt.Sprintf("%dd", cfg.ImageCacheTTLDays)))
+	fmt.Fprintln(w, checkLine(0, "image_downscale", imgScale))
+	fmt.Fprintln(w, checkLine(0, "image_cache_ttl", fmt.Sprintf("%dd", cfg.ImageCacheTTLDays)))
 	retention := "forever"
 	if cfg.AuditRetentionDays > 0 {
 		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
 	}
-	fmt.Println(checkLine(0, "audit_retention", retention))
-	fmt.Println(checkLine(0, "extra_redact_headers", orNoneList(cfg.ExtraRedactHeaders)))
-	fmt.Println(checkLine(0, "sticky_ttl", cfg.StickyTTL.D().String()))
+	fmt.Fprintln(w, checkLine(0, "audit_retention", retention))
+	fmt.Fprintln(w, checkLine(0, "extra_redact_headers", orNoneList(cfg.ExtraRedactHeaders)))
+	fmt.Fprintln(w, checkLine(0, "sticky_ttl", cfg.StickyTTL.D().String()))
 	probeTimeout := cfg.ProbeTimeout.D().String()
 	if hasIssue(issues, "", "", "", "probe_timeout") {
 		probeTimeout = warn(probeTimeout)
 	}
-	fmt.Println(checkLine(0, "probe_timeout", probeTimeout))
-	fmt.Println(checkLine(0, "http_proxy", orNone(cfg.HTTPProxy)))
-	fmt.Println(checkLine(0, "https_proxy", orNone(cfg.HTTPSProxy)))
+	fmt.Fprintln(w, checkLine(0, "probe_timeout", probeTimeout))
+	// redactProxyURL: cfg.HTTPProxy/HTTPSProxy can carry embedded userinfo
+	// credentials (http://user:pass@host:port), same as a provider's own
+	// proxy: URL below — printing either raw to a terminal or a log file
+	// leaks a credential a human didn't ask to see.
+	fmt.Fprintln(w, checkLine(0, "http_proxy", orNone(redactProxyURL(cfg.HTTPProxy))))
+	fmt.Fprintln(w, checkLine(0, "https_proxy", orNone(redactProxyURL(cfg.HTTPSProxy))))
 	// Quota period boundaries (and every other human-facing timestamp) render
 	// through fmtutil.DisplayZone, which is just time.Local — a container
 	// with no TZ set is silently UTC, which can differ from an operator's
@@ -221,26 +229,25 @@ func printGlobalSettings(cfg *config.Config, issues []config.Issue) {
 	// telling "TZ correctly set to Asia/Shanghai" apart from "TZ unset,
 	// silently UTC", so the actual offset is appended (both read the same
 	// "Local" either way, but the offset gives it away).
-	fmt.Println(checkLine(0, "timezone", fmt.Sprintf("%s (UTC%s)", fmtutil.DisplayZone.String(), time.Now().In(fmtutil.DisplayZone).Format("-07:00"))))
+	fmt.Fprintln(w, checkLine(0, "timezone", fmt.Sprintf("%s (UTC%s)", fmtutil.DisplayZone.String(), time.Now().In(fmtutil.DisplayZone).Format("-07:00"))))
 	if line, ok := pricingTableLine(cfg); ok {
-		fmt.Println(checkLine(0, "pricing_table", line))
+		fmt.Fprintln(w, checkLine(0, "pricing_table", line))
 	}
-	fmt.Println("dirs:")
-	fmt.Println(checkLine(2, "log", cfg.LogDir))
-	fmt.Println(checkLine(2, "image_cache", cfg.ImageCacheDir))
-	fmt.Println("timeouts:")
-	fmt.Println(checkLine(2, "connect", cfg.Timeouts.Connect.D().String()))
+	fmt.Fprintln(w, "dirs:")
+	fmt.Fprintln(w, checkLine(2, "log", cfg.LogDir))
+	fmt.Fprintln(w, checkLine(2, "image_cache", cfg.ImageCacheDir))
+	fmt.Fprintln(w, "timeouts:")
+	fmt.Fprintln(w, checkLine(2, "connect", cfg.Timeouts.Connect.D().String()))
 	responseHeader := cfg.Timeouts.ResponseHeader.D().String()
 	if hasIssue(issues, "", "", "", "probe_timeout") {
 		responseHeader = warn(responseHeader) // the probe_timeout/response_header contradiction is about both values together
 	}
-	fmt.Println(checkLine(2, "response_header", responseHeader))
-	fmt.Println(checkLine(2, "stream_idle", cfg.Timeouts.StreamIdle.D().String()))
+	fmt.Fprintln(w, checkLine(2, "response_header", responseHeader))
+	fmt.Fprintln(w, checkLine(2, "stream_idle", cfg.Timeouts.StreamIdle.D().String()))
 }
 
-func printProviders(cfg *config.Config) {
-	fmt.Println()
-	fmt.Println("=== Providers ===")
+func printProviders(w io.Writer, cfg *config.Config) {
+	fmt.Fprintln(w, "=== Providers ===")
 	providers := append([]config.Provider(nil), cfg.Providers...)
 	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
 	proxyDesc := providerProxyEntries(cfg)
@@ -249,19 +256,19 @@ func printProviders(cfg *config.Config) {
 		descFor[e.Name] = e
 	}
 	for _, p := range providers {
-		fmt.Println(p.Name + ":")
+		fmt.Fprintln(w, p.Name+":")
 		if p.APIKey == "" {
-			fmt.Println(checkLine(2, "api_key", warn("missing")))
+			fmt.Fprintln(w, checkLine(2, "api_key", warn("missing")))
 		} else {
-			fmt.Println(checkLine(2, "api_key", maskAPIKey(p.APIKey)))
+			fmt.Fprintln(w, checkLine(2, "api_key", maskAPIKey(p.APIKey)))
 		}
 		protocols := core.SortedKeys(p.BaseURL)
 		for _, protocol := range protocols {
-			fmt.Println(checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
+			fmt.Fprintln(w, checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
 		}
-		fmt.Println(checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
-		printProviderQuota(cfg, p)
-		printProviderPricing(cfg, p)
+		fmt.Fprintln(w, checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
+		printProviderQuota(w, cfg, p)
+		printProviderPricing(w, cfg, p)
 	}
 }
 
@@ -327,7 +334,7 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 // exactly what rate a cost account will be charged at without cross-
 // referencing the standard table by hand. Absent entirely for a provider
 // with no resolved pricing, same as every other optional section here.
-func printProviderPricing(cfg *config.Config, p config.Provider) {
+func printProviderPricing(w io.Writer, cfg *config.Config, p config.Provider) {
 	var models []string
 	prefix := p.Name + "\x00"
 	for key := range cfg.ResolvedPricing {
@@ -337,7 +344,7 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 	}
 	if len(models) > 0 {
 		sort.Strings(models)
-		fmt.Println("  pricing:")
+		fmt.Fprintln(w, "  pricing:")
 		for _, model := range models {
 			spec := cfg.ResolvedPricing[prefix+model]
 			// EffectiveRate, not spec.Base: an account with an override (e.g.
@@ -346,7 +353,7 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 			// number that has nothing to do with what metric: cost will actually
 			// charge.
 			r := pricing.EffectiveRate(spec)
-			fmt.Println(checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
+			fmt.Fprintln(w, checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
 				ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
 		}
 		return
@@ -359,9 +366,9 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 	// provider (so resolvePricing had nothing to resolve against) — show
 	// the raw declaration instead of silently dropping it, since it's
 	// explicit config a human wrote and may expect to see confirmed.
-	fmt.Println("  pricing: (declared; not resolved — no routed endpoint references this provider)")
+	fmt.Fprintln(w, "  pricing: (declared; not resolved — no routed endpoint references this provider)")
 	for _, local := range core.SortedKeys(p.Pricing.Map) {
-		fmt.Println(checkLine(4, "map", local+" -> "+p.Pricing.Map[local]))
+		fmt.Fprintln(w, checkLine(4, "map", local+" -> "+p.Pricing.Map[local]))
 	}
 	for i, oc := range p.Pricing.Overrides {
 		val := fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s",
@@ -372,7 +379,7 @@ func printProviderPricing(cfg *config.Config, p config.Provider) {
 		if oc.Currency != "" {
 			val += " currency=" + oc.Currency
 		}
-		fmt.Println(checkLine(4, fmt.Sprintf("overrides[%d] model=%s", i, oc.Model), val))
+		fmt.Fprintln(w, checkLine(4, fmt.Sprintf("overrides[%d] model=%s", i, oc.Model), val))
 	}
 }
 
@@ -395,11 +402,11 @@ func ratePart(v *float64) string {
 // (config-derived), never reads Registry state (that's /admin/status's and
 // `vmr status`'s job, see server/admin.go). Absent entirely for a provider
 // with no quota: configured, same as every other optional section here.
-func printProviderQuota(cfg *config.Config, p config.Provider) {
+func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 	if p.Quota == nil || len(p.Quota.Limits) == 0 {
 		return
 	}
-	fmt.Println("  quota:")
+	fmt.Fprintln(w, "  quota:")
 	for _, lc := range p.Quota.Limits {
 		l := lc.Resolved
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
@@ -410,22 +417,22 @@ func printProviderQuota(cfg *config.Config, p config.Provider) {
 		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
 			amount += " " + cfg.Pricing.Currency
 		}
-		fmt.Println(checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)))
+		fmt.Fprintln(w, checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)))
 	}
 	// token_weights is always resolved (defaults to all 1.0), but only
 	// printed when the account actually configured it non-default — an
 	// all-1.0 line on every quota-configured provider would be noise on the
 	// common case (P1-style plain token/request counting).
-	w := p.Quota.ResolvedTokenWeights
-	if w != core.NewTokenWeights() {
-		fmt.Println(checkLine(4, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", w.InFresh, w.CacheRead, w.CacheWrite, w.Out)))
+	tw := p.Quota.ResolvedTokenWeights
+	if tw != core.NewTokenWeights() {
+		fmt.Fprintln(w, checkLine(4, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", tw.InFresh, tw.CacheRead, tw.CacheWrite, tw.Out)))
 	}
 	if len(p.Quota.ModelMultipliers) > 0 {
 		parts := make([]string, 0, len(p.Quota.ModelMultipliers))
 		for _, model := range core.SortedKeys(p.Quota.ModelMultipliers) {
 			parts = append(parts, fmt.Sprintf("%s=%g", model, p.Quota.ModelMultipliers[model]))
 		}
-		fmt.Println(checkLine(4, "model_multipliers", strings.Join(parts, " ")))
+		fmt.Fprintln(w, checkLine(4, "model_multipliers", strings.Join(parts, " ")))
 	}
 }
 
@@ -452,40 +459,39 @@ func providerProxyLine(p config.Provider, protocols []string, descFor map[string
 	return out
 }
 
-func printModels(cfg *config.Config, snap *router.Snapshot, issues []config.Issue) {
-	fmt.Println()
-	fmt.Println("=== Models ===")
+func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues []config.Issue) {
+	fmt.Fprintln(w, "=== Models ===")
 	for i, name := range core.SortedKeys(cfg.Models) {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 		m := cfg.Models[name]
-		fmt.Println(name + ":")
+		fmt.Fprintln(w, name+":")
 		caps := "(unconstrained)"
 		if len(m.Capabilities) > 0 {
 			caps = strings.Join(m.Capabilities, ",")
 		}
-		fmt.Println(checkLine(2, "capabilities", caps))
+		fmt.Fprintln(w, checkLine(2, "capabilities", caps))
 		tokens := "(unconstrained)"
 		if m.MaxContextTokens > 0 {
 			tokens = fmt.Sprintf("%d", m.MaxContextTokens)
 		}
-		fmt.Println(checkLine(2, "max_context_tokens", tokens))
-		fmt.Println(checkLine(2, "strategy", strings.Join(m.Strategy, ",")))
+		fmt.Fprintln(w, checkLine(2, "max_context_tokens", tokens))
+		fmt.Fprintln(w, checkLine(2, "strategy", strings.Join(m.Strategy, ",")))
 		sticky := m.Sticky == nil || *m.Sticky
-		fmt.Println(checkLine(2, "sticky", fmt.Sprintf("%v", sticky)))
+		fmt.Fprintln(w, checkLine(2, "sticky", fmt.Sprintf("%v", sticky)))
 		if sticky {
-			fmt.Println(checkLine(2, "sticky_ttl", cfg.StickyTTL.D().String()))
+			fmt.Fprintln(w, checkLine(2, "sticky_ttl", cfg.StickyTTL.D().String()))
 		}
 		if m.ImageDownscaleMaxPx != nil {
-			fmt.Println(checkLine(2, "image_downscale", fmt.Sprintf("%dpx", *m.ImageDownscaleMaxPx)))
+			fmt.Fprintln(w, checkLine(2, "image_downscale", fmt.Sprintf("%dpx", *m.ImageDownscaleMaxPx)))
 		}
 		for _, protocol := range core.SortedKeys(snap.Models) {
 			route, ok := snap.Models[protocol][name]
 			if !ok {
 				continue
 			}
-			fmt.Printf("  %s:\n", protocol)
+			fmt.Fprintf(w, "  %s:\n", protocol)
 			for _, ep := range route.EffectiveOrder() {
 				key := ep.Provider + "/" + ep.Model
 				var parts []string
@@ -517,7 +523,7 @@ func printModels(cfg *config.Config, snap *router.Snapshot, issues []config.Issu
 				if hasIssue(issues, "", name, endpointKey, "endpoint") && !strings.Contains(line, "⚠️") {
 					line = warn(line)
 				}
-				fmt.Println(line)
+				fmt.Fprintln(w, line)
 			}
 		}
 	}

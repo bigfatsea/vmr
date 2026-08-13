@@ -103,7 +103,8 @@ func cmdStart(args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	logStart(logger, *path, cfg.Listen)
-	logConfigCheckIssues(logger, cfg.Check())
+	issues := cfg.Check()
+	logConfigCheckIssues(logger, issues)
 
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
@@ -155,7 +156,7 @@ func cmdStart(args []string) error {
 	}
 	rt.Install(snap)
 
-	logConfigSummary(logger, cfg, snap)
+	logConfigSummary(logger, cfg, snap, issues)
 
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
 	// Every attempt — rejected or not — gets the same banner treatment (same
@@ -176,7 +177,8 @@ func cmdStart(args []string) error {
 			rt.RecordReload(trigger, err)
 			return
 		}
-		logConfigCheckIssues(logger, newCfg.Check())
+		newIssues := newCfg.Check()
+		logConfigCheckIssues(logger, newIssues)
 		newSnap, err := router.BuildSnapshot(newCfg)
 		if err != nil {
 			logger.Printf("rejected, keeping current config: %v", err)
@@ -191,7 +193,7 @@ func cmdStart(args []string) error {
 			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
 				auditDirInUse, newCfg.LogDir)
 		}
-		logConfigSummary(logger, newCfg, newSnap)
+		logConfigSummary(logger, newCfg, newSnap, newIssues)
 	}
 	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") }, func(err error) {
 		logger.Printf("WARN config watch: %v (hot reload may have stopped working; SIGHUP still works)", err)

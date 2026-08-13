@@ -38,6 +38,22 @@ func TestSplitEndpointLabel_ModelContainsColonOrSlash(t *testing.T) {
 	}
 }
 
+// TestSplitEndpointLabel_LegacySlashFormat_ModelHasTwoColons locks in the
+// "earliest separator wins" tie-break: a legacy "/"-joined label whose
+// model segment itself contains two or more ":" (an Ollama/vLLM-style
+// "registry:port/name:tag" model name) must still resolve via the "/"
+// split. Trying ":" first unconditionally would find exactly 3 parts on
+// the wrong field boundaries (protocol="openai/vllm/myregistry",
+// provider="5000/llama3", model="8b") and stop there, never reaching the
+// correct "/" split.
+func TestSplitEndpointLabel_LegacySlashFormat_ModelHasTwoColons(t *testing.T) {
+	protocol, provider, model, ok := SplitEndpointLabel("openai/vllm/myregistry:5000/llama3:8b")
+	if !ok || protocol != "openai" || provider != "vllm" || model != "myregistry:5000/llama3:8b" {
+		t.Errorf("SplitEndpointLabel(slash, model has 2 colons) = (%q,%q,%q,%v), want (openai,vllm,myregistry:5000/llama3:8b,true)",
+			protocol, provider, model, ok)
+	}
+}
+
 func TestSplitEndpointLabel_InvalidInput(t *testing.T) {
 	cases := []string{"", "-", "openai", "openai:acct1", "openai/acct1"}
 	for _, c := range cases {

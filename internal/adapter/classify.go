@@ -317,15 +317,36 @@ func skipJSONWS(b []byte, i int) int {
 }
 
 // skipJSONString advances past the string starting at b[i] (must be '"'),
-// returning the index just after the closing quote. Escaped quotes are
-// recognized by backslash parity, so the jump-to-next-quote stays at
-// bytes.IndexByte (memchr) speed even through multi-MB content strings.
+// returning the index just after the closing quote. A thin wrapper over
+// IndexUnescapedQuote — the two only differ in what "start" means (b[i] is
+// the opening quote here; IndexUnescapedQuote's b is everything after one).
 func skipJSONString(b []byte, i int) (int, bool) {
-	i++ // opening quote
+	j := IndexUnescapedQuote(b[i+1:])
+	if j < 0 {
+		return 0, false
+	}
+	return i + 1 + j + 1, true
+}
+
+// IndexUnescapedQuote returns the index of the first unescaped '"' in b, or
+// -1 if there isn't one — b holds the bytes right after an opening quote,
+// not including it. Escaped quotes are recognized by backslash parity (an
+// even run of '\' before the '"' leaves it unescaped: each pair is one
+// literal '\' in the string content; an odd run means the last '\' escapes
+// the '"'), so the jump-to-next-quote stays at bytes.IndexByte (memchr)
+// speed even through multi-MB content strings.
+//
+// Exported for internal/server/facts.go's estimateDocumentTokens, which
+// needs the exact same "find where this JSON string value ends" scan to
+// size a base64 document payload for token estimation — internal/server
+// already imports this package for real request building, so this is one
+// more entry on an existing dependency edge, not a new one.
+func IndexUnescapedQuote(b []byte) int {
+	i := 0
 	for {
 		j := bytes.IndexByte(b[i:], '"')
 		if j < 0 {
-			return 0, false
+			return -1
 		}
 		k, n := i+j-1, 0
 		for k >= 0 && b[k] == '\\' {
@@ -333,7 +354,7 @@ func skipJSONString(b []byte, i int) (int, bool) {
 			k--
 		}
 		if n%2 == 0 {
-			return i + j + 1, true
+			return i + j
 		}
 		i += j + 1
 	}

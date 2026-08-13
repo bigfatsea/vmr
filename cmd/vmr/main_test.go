@@ -163,6 +163,42 @@ models:
 	}
 }
 
+// TestCmdCheck_ProxyURLRedacted locks in the production rendering path for
+// a provider whose traffic actually resolves through a configured proxy:
+// the "proxy:" line must show the (credential-redacted) proxy URL, not just
+// a "direct"/"(proxy)" marker — and a provider with no proxy configured at
+// all must still render "direct". Also covers the global http_proxy/
+// https_proxy fields in "=== Global Settings ===", which carry the same raw
+// credential risk and must be redacted the same way (found by this test:
+// they weren't, until now). Both this and logConfigSummary (the
+// startup/reload log) render through the same printGlobalSettings/
+// printProviders, so this is the one place that needs to cover the
+// redaction path itself.
+func TestCmdCheck_ProxyURLRedacted(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+https_proxy: http://user:pass@127.0.0.1:7890
+providers:
+  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
+  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k}
+models:
+  m1: {endpoints: [{protocol: openai, provider: proxied, models: [m]}]}
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, checkLine(0, "https_proxy", "http://user:xxxxx@127.0.0.1:7890")) {
+		t.Errorf("global https_proxy should show its (credential-redacted) URL:\n%s", out)
+	}
+	if !strings.Contains(out, checkLine(2, "proxy", "http://user:xxxxx@127.0.0.1:7890")) {
+		t.Errorf("proxied provider should show its (credential-redacted) proxy URL:\n%s", out)
+	}
+	if strings.Contains(out, "user:pass") {
+		t.Errorf("proxy URL credentials must be redacted, found raw password in output:\n%s", out)
+	}
+	if !strings.Contains(out, checkLine(2, "proxy", "direct")) {
+		t.Errorf("provider with no proxy configured should show \"direct\":\n%s", out)
+	}
+}
+
 // TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra locks in the display
 // contract for the model-level capabilities/max_context_tokens base: the
 // model line shows the base as declared, an endpoint that adds its own
@@ -204,6 +240,34 @@ models:
 	}
 	if !strings.Contains(out, "- p=0. p1/plain:\n") {
 		t.Errorf("endpoint declaring neither should render a bare label with nothing after the colon:\n%s", out)
+	}
+}
+
+// TestCmdCheck_ModelImageDownscaleOverride locks in that a model declaring
+// its own image_downscale renders it in the "=== Models ===" section (a
+// per-model override of the global image_downscale setting, config.
+// VirtualModel.ImageDownscaleMaxPx), and a model that doesn't override it
+// renders no such line at all — this is the production path both `vmr
+// check` and logConfigSummary (the startup/reload log) share via
+// printModels.
+func TestCmdCheck_ModelImageDownscaleOverride(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+image_downscale: 1024
+providers:
+  - name: p1
+    base_url: {openai: https://example.com/v1}
+    api_key: test-key
+models:
+  plain: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  custom: {image_downscale: 256, endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, checkLine(2, "image_downscale", "256px")) {
+		t.Errorf("custom model should show its image_downscale override:\n%s", out)
+	}
+	if got, want := strings.Count(out, checkLine(2, "image_downscale", "256px")), 1; got != want {
+		t.Errorf("image_downscale override should render exactly once (for \"custom\" only, not \"plain\"), got %d:\n%s", got, out)
 	}
 }
 
@@ -377,12 +441,20 @@ func TestCmdReport_NoInputFiles(t *testing.T) {
 }
 
 // --- logConfigSummary tests ---
+//
+// logConfigSummary now literally calls printGlobalSettings/printProviders/
+// printModels — the same functions `vmr check` prints through — so the
+// startup/reload log and `vmr check`'s stdout output can never drift apart
+// in format again. The detailed rendering rules (column widths, override-
+// only endpoint lines, proxy resolution, etc.) are already locked by the
+// TestCmdCheck_* tests above against those functions directly; these tests
+// only need to confirm logConfigSummary wires logger/cfg/snap/issues into
+// them correctly.
 
-// TestLogConfigSummary_Output verifies that logConfigSummary emits the
-// key config fields a operator would scan at startup: listen address, auth
-// state, limits, timeouts, directories, per-model endpoints in try order,
-// and proxy resolution per provider.
-func TestLogConfigSummary_Output(t *testing.T) {
+// TestLogConfigSummary_MatchesCheckFormat verifies logConfigSummary's output
+// is built from the exact same section renderers and section headers as
+// `vmr check` — the two must read as one format, not two.
+func TestLogConfigSummary_MatchesCheckFormat(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
 api_keys: ["sk-vmr-local-test-key-001"]
@@ -407,100 +479,60 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
+	issues := cfg.Check()
 
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
+	logConfigSummary(logger, cfg, snap, issues)
 	out := buf.String()
 
-	// Core config fields.
-	checks := []string{
-		"listen            = 127.0.0.1:8800",
-		"auth              = on",
-		"max_attempts      = 3",
-		"max_concurrency   = 8",
-		"image_downscale   = 512px",
-		"audit_retention   = 30d",
-	}
-	for _, want := range checks {
-		if !strings.Contains(out, want) {
-			t.Errorf("logConfigSummary output missing %q in:\n%s", want, out)
+	// Same section headers as `vmr check`.
+	for _, header := range []string{"=== Global Settings ===", "=== Providers ===", "=== Models ==="} {
+		if !strings.Contains(out, header) {
+			t.Errorf("logConfigSummary output missing %q in:\n%s", header, out)
 		}
 	}
 
-	// Timeouts block.
-	if !strings.Contains(out, "timeouts") || !strings.Contains(out, "connect           = 10s") {
-		t.Errorf("output missing timeouts block:\n%s", out)
+	// Global settings, in checkLine's "key:<pad>value" column format.
+	for _, line := range []string{
+		checkLine(0, "listen", "127.0.0.1:8800"),
+		checkLine(0, "auth", "on (1 key(s))"),
+		checkLine(0, "max_attempts", "3"),
+		checkLine(0, "max_concurrency", "8"),
+		checkLine(0, "image_downscale", "512px"),
+		checkLine(0, "audit_retention", "30d"),
+	} {
+		if !strings.Contains(out, line) {
+			t.Errorf("logConfigSummary output missing %q in:\n%s", line, out)
+		}
 	}
 
-	// Model group with endpoints in try order — grouped by name first,
-	// protocol nested inside (see logConfigSummary's doc comment).
-	if !strings.Contains(out, "vm:") || !strings.Contains(out, "openai:") {
+	// Providers section: base_url + proxy lines per provider.
+	if !strings.Contains(out, "p1:\n") || !strings.Contains(out, checkLine(2, "base_url(openai)", "https://a.example/v1")) {
+		t.Errorf("output missing p1 provider block:\n%s", out)
+	}
+	if !strings.Contains(out, checkLine(2, "proxy", "direct")) {
+		t.Errorf("output missing a direct proxy line:\n%s", out)
+	}
+
+	// Models section: endpoints in try order, same "- p=N. provider/model:"
+	// label printModels uses.
+	if !strings.Contains(out, "vm:\n") || !strings.Contains(out, "openai:\n") {
 		t.Errorf("output missing model group:\n%s", out)
 	}
-	if !strings.Contains(out, "1.p1/real-a, max_context_tokens=<empty>, capabilities=<empty>") {
-		t.Errorf("output missing first endpoint:\n%s", out)
-	}
-	if !strings.Contains(out, "2.p2/real-b, max_context_tokens=<empty>, capabilities=<empty>") {
-		t.Errorf("output missing second endpoint:\n%s", out)
-	}
-
-	// Provider lines (in the "provider config:" group, no "provider" prefix per line).
-	if !strings.Contains(out, "openai/p1 base_url=https://a.example/v1") {
-		t.Errorf("output missing p1 base_url line:\n%s", out)
-	}
-	if !strings.Contains(out, "openai/p2 base_url=https://b.example/v1") {
-		t.Errorf("output missing p2 base_url line:\n%s", out)
-	}
-	if strings.Contains(out, "openai/p1 base_url=https://a.example/v1 (proxy)") {
-		t.Errorf("p1 has no proxy configured, must not show (proxy) marker:\n%s", out)
+	if !strings.Contains(out, "- p=1. p1/real-a:") || !strings.Contains(out, "- p=2. p2/real-b:") {
+		t.Errorf("output missing endpoints in try order:\n%s", out)
 	}
 }
 
-// TestLogConfigSummary_ProxyMarker verifies the "provider config:" block
-// shows base_url= always and appends the "(proxy)" marker only for a
-// provider whose traffic actually resolves to a configured proxy — not for
-// one that's direct because no proxy was ever configured at all.
-func TestLogConfigSummary_ProxyMarker(t *testing.T) {
+// TestLogConfigSummary_IssuesThreadThrough verifies the caller's cfg.Check()
+// result reaches printGlobalSettings/printModels through logConfigSummary,
+// so a warning gets the same ⚠️ marker here as it does in `vmr check` —
+// this is what the reload log's own "WARN config check: ..." line stays
+// consistent with.
+func TestLogConfigSummary_IssuesThreadThrough(t *testing.T) {
 	yaml := `
-listen: 127.0.0.1:8800
-https_proxy: http://127.0.0.1:7890
-providers:
-  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
-  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      - {protocol: openai, provider: proxied, models: [m1]}
-      - {protocol: openai, provider: direct, models: [m2]}
-`
-	cfg, err := config.Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap, err := router.BuildSnapshot(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
-	out := buf.String()
-
-	if !strings.Contains(out, "openai/proxied base_url=https://a.example/v1 (proxy)") {
-		t.Errorf("proxied provider missing (proxy) marker: %s", out)
-	}
-	if !strings.Contains(out, "openai/direct  base_url=https://b.example/v1\n") {
-		t.Errorf("direct provider must not show (proxy) marker: %s", out)
-	}
-}
-
-// TestLogConfigSummary_AuthOffAndDefaults verifies the default-value
-// rendering: auth=off when no api_keys, max_attempts=unlimited, etc.
-func TestLogConfigSummary_AuthOffAndDefaults(t *testing.T) {
-	yaml := `
-listen: 127.0.0.1:8800
+listen: 0.0.0.0:8800
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
@@ -514,69 +546,33 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var buf bytes.Buffer
-	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
-	out := buf.String()
-
-	if !strings.Contains(out, "auth              = off") {
-		t.Errorf("auth should be off: %s", out)
-	}
-	if !strings.Contains(out, "max_attempts      = unlimited") {
-		t.Errorf("max_attempts should be unlimited: %s", out)
-	}
-	if !strings.Contains(out, "max_concurrency   = unlimited") {
-		t.Errorf("max_concurrency should be unlimited: %s", out)
-	}
-	if !strings.Contains(out, "image_downscale   = off") {
-		t.Errorf("image_downscale should be off: %s", out)
-	}
-	if !strings.Contains(out, "audit_retention   = forever") {
-		t.Errorf("audit_retention should be forever: %s", out)
-	}
-}
-
-// TestLogConfigSummary_ImageDownscaleOverride verifies per-model
-// image_downscale override is rendered.
-func TestLogConfigSummary_ImageDownscaleOverride(t *testing.T) {
-	yaml := `
-listen: 127.0.0.1:8800
-image_downscale: 1024
-providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
-models:
-  plain: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
-  custom: {image_downscale: 256, endpoints: [{protocol: openai, provider: p1, models: [m]}]}
-`
-	cfg, err := config.Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap, err := router.BuildSnapshot(cfg)
-	if err != nil {
-		t.Fatal(err)
+	issues := cfg.Check()
+	if !hasIssue(issues, "", "", "", "listen") {
+		t.Fatal("test setup: expected an open-listen config issue")
 	}
 
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
+	logConfigSummary(logger, cfg, snap, issues)
 	out := buf.String()
 
-	if !strings.Contains(out, "plain:\n") {
-		t.Errorf("plain model should not have image_downscale override: %s", out)
+	if !strings.Contains(out, checkLine(0, "listen", warn("0.0.0.0:8800"))) {
+		t.Errorf("logConfigSummary did not mark the listen warning:\n%s", out)
 	}
-	if !strings.Contains(out, "custom: (image_downscale=256px)") {
-		t.Errorf("custom model should show image_downscale=256px: %s", out)
+
+	// Passing no issues at all must drop the marker — confirms the marker
+	// tracks the issues argument, not some independent recomputation.
+	buf.Reset()
+	logConfigSummary(logger, cfg, snap, nil)
+	if strings.Contains(buf.String(), "⚠️") {
+		t.Errorf("logConfigSummary with nil issues should not show a warning marker:\n%s", buf.String())
 	}
 }
 
-// TestLogConfigSummary_NameGroupsAcrossProtocols locks in a startup-log
-// readability fix: a virtual model name reachable from more than one
-// protocol must render as ONE block (name line, both protocols nested under
-// it), not as two separate, non-adjacent top-level "protocol/name" lines the
-// old protocol-outer grouping produced — matching cmd_check.go's
-// printModels order.
+// TestLogConfigSummary_NameGroupsAcrossProtocols locks in that a virtual
+// model name reachable from more than one protocol renders as ONE block
+// (name line, both protocols nested under it) — printModels' grouping,
+// reused here rather than reimplemented.
 func TestLogConfigSummary_NameGroupsAcrossProtocols(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
@@ -599,13 +595,13 @@ models:
 
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
+	logConfigSummary(logger, cfg, snap, cfg.Check())
 	out := buf.String()
 
 	// Both protocol faces must appear as children of the SAME "agent:"
 	// block — this config only declares one virtual model, so everything
 	// after "agent:" belongs to it.
-	i := strings.Index(out, "\n    agent:")
+	i := strings.Index(out, "agent:\n")
 	if i < 0 {
 		t.Fatalf("missing \"agent:\" model group:\n%s", out)
 	}
@@ -615,45 +611,6 @@ models:
 	}
 	if !strings.Contains(rest, "p1/m-openai") || !strings.Contains(rest, "p1/m-anthropic") {
 		t.Errorf("both protocol faces' endpoints must be present, got:\n%s", rest)
-	}
-}
-
-// TestLogConfigSummary_MaxContextTokensAndCapabilities verifies the
-// "model config:" block's per-endpoint line renders declared
-// max_context_tokens (round-thousands as "Nk") and capabilities (declared
-// list joined with "/"), and falls back to "<empty>" for an endpoint that
-// declares neither — the unconstrained default (core.Endpoint.HasCapability),
-// not an error state.
-func TestLogConfigSummary_MaxContextTokensAndCapabilities(t *testing.T) {
-	yaml := `
-listen: 127.0.0.1:8800
-providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      - {protocol: openai, provider: p1, models: [declared], max_context_tokens: 128000, capabilities: [text, image, tools]}
-      - {protocol: openai, provider: p1, models: [bare]}
-`
-	cfg, err := config.Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap, err := router.BuildSnapshot(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	logger := log.New(&buf, "", 0)
-	logConfigSummary(logger, cfg, snap)
-	out := buf.String()
-
-	if !strings.Contains(out, "p1/declared, max_context_tokens=128k, capabilities=text/image/tools") {
-		t.Errorf("declared endpoint not rendered correctly: %s", out)
-	}
-	if !strings.Contains(out, "p1/bare, max_context_tokens=<empty>, capabilities=<empty>") {
-		t.Errorf("bare (unconstrained) endpoint not rendered correctly: %s", out)
 	}
 }
 

@@ -24,7 +24,7 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 	if o.TokensInCached+o.TokensInFresh > 0 {
 		freshShare = float64(o.TokensInFresh) / float64(o.TokensInCached+o.TokensInFresh)
 	}
-	tokTbl.row(t.RowInputFresh, fmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctFloat(freshShare)))
+	tokTbl.row(t.RowInputFresh, fmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctStr(freshShare)))
 	cw := ""
 	if o.TokensInCacheWrite > 0 {
 		cw = t.CacheWriteNote

@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 
+	"vmr/internal/adapter"
 	"vmr/internal/core"
 )
 
@@ -121,7 +122,7 @@ func estimateDocumentTokens(body []byte) int64 {
 				break
 			}
 			rest = rest[idx+len(marker):]
-			end := indexUnescapedQuote(rest)
+			end := adapter.IndexUnescapedQuote(rest)
 			if end < 0 {
 				break
 			}
@@ -130,28 +131,4 @@ func estimateDocumentTokens(body []byte) int64 {
 		}
 	}
 	return total / documentBytesPerToken
-}
-
-// indexUnescapedQuote returns the index of the first unescaped '"' in b,
-// or -1 if there isn't one. Same backslash-parity check as
-// internal/adapter's skipJSONString; kept as a small standalone copy here
-// rather than exporting that scanner — this is the only caller outside
-// internal/adapter and the logic is a few lines.
-func indexUnescapedQuote(b []byte) int {
-	i := 0
-	for {
-		j := bytes.IndexByte(b[i:], '"')
-		if j < 0 {
-			return -1
-		}
-		k, n := i+j-1, 0
-		for k >= 0 && b[k] == '\\' {
-			n++
-			k--
-		}
-		if n%2 == 0 {
-			return i + j
-		}
-		i += j + 1
-	}
 }

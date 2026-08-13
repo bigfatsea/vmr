@@ -41,6 +41,17 @@ func EndpointLabel(adapterType, provider, model string) string {
 // way (including ctxgraph.Manifest.Endpoint's "-" sentinel for "no attempt
 // was ever made").
 //
+// Which separator is structural (not just trying ":" first, unconditionally)
+// is decided by which one occurs FIRST in label: adapterType is always one
+// of a small fixed set ("openai"/"anthropic"/"openai-responses") and never
+// itself contains "/" or ":" in either format, so the earliest separator in
+// the string is always the real protocol/provider boundary, never one
+// embedded inside the model name. Trying ":" first unconditionally used to
+// misparse a "/"-joined legacy label whose model segment happened to
+// contain two or more ":" (e.g. an Ollama/vLLM-style "registry:port/name:tag"
+// model) — its ":"-split would find exactly 3 parts and "succeed", just at
+// the wrong field boundaries, before ever reaching the correct "/" split.
+//
 // NOT currently wired into internal/report/cost.go's
 // splitEndpointProviderModel (colon-only, backs §2's $ cost estimates) — see
 // this package's own file doc comment: widening that one call site to also
@@ -48,10 +59,13 @@ func EndpointLabel(adapterType, provider, model string) string {
 // logs, a distinct, separately-reviewed change (flagged in the P2.2 dev
 // plan's risk table), not a side effect of centralizing the definition.
 func SplitEndpointLabel(label string) (protocol, provider, model string, ok bool) {
-	if parts := strings.SplitN(label, ":", 3); len(parts) == 3 {
-		return parts[0], parts[1], parts[2], true
+	colonIdx := strings.IndexByte(label, ':')
+	slashIdx := strings.IndexByte(label, '/')
+	sep := "/"
+	if colonIdx >= 0 && (slashIdx < 0 || colonIdx < slashIdx) {
+		sep = ":"
 	}
-	if parts := strings.SplitN(label, "/", 3); len(parts) == 3 {
+	if parts := strings.SplitN(label, sep, 3); len(parts) == 3 {
 		return parts[0], parts[1], parts[2], true
 	}
 	return "", "", "", false

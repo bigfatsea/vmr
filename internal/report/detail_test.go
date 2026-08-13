@@ -36,9 +36,14 @@ func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
 
 // TestAttemptUpstreamFallback covers backward compatibility with audit
 // logs written before Attempt.Protocol/Provider/Model existed: the three
-// segments must still be recoverable by splitting the "/"-joined Endpoint
-// those old logs used (current logs join with ":" and always carry the
-// structured fields directly, so they never hit the fallback).
+// segments must still be recoverable by splitting Endpoint via
+// core.SplitEndpointLabel, which accepts both the current ":"-joined format
+// and the "/"-joined form older audit logs used — a record with an empty
+// structured triple can in principle carry either, so both must resolve
+// (a prior version of this function only handled "/", silently returning
+// ("","","") for a ":"-joined Endpoint whose structured fields were empty,
+// disagreeing with internal/story/modelusage.go's stepUpstream on the same
+// record).
 func TestAttemptUpstreamFallback(t *testing.T) {
 	for _, tc := range []struct {
 		name                              string
@@ -48,11 +53,17 @@ func TestAttemptUpstreamFallback(t *testing.T) {
 		{"new log: structured fields used directly",
 			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3", Protocol: "openai", Provider: "minimax", Model: "MiniMax-M3"},
 			"openai", "minimax", "MiniMax-M3"},
+		{"structured fields empty, ':'-joined Endpoint: falls back to splitting it",
+			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3"},
+			"openai", "minimax", "MiniMax-M3"},
 		{"old log: falls back to splitting the '/'-joined Endpoint",
 			audit.Attempt{Endpoint: "openai/minimax/MiniMax-M3"},
 			"openai", "minimax", "MiniMax-M3"},
 		{"old log: model name itself contains '/' (OpenRouter-style), only first two separators are structural",
 			audit.Attempt{Endpoint: "openai/openrouter/z-ai/glm-5.2"},
+			"openai", "openrouter", "z-ai/glm-5.2"},
+		{"':'-joined Endpoint, model name itself contains '/' (OpenRouter-style)",
+			audit.Attempt{Endpoint: "openai:openrouter:z-ai/glm-5.2"},
 			"openai", "openrouter", "z-ai/glm-5.2"},
 		{"old log, unparseable endpoint: no crash, empty triple",
 			audit.Attempt{Endpoint: "not-a-real-endpoint"},

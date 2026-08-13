@@ -34,7 +34,7 @@ func renderStickyEffect(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("%s", t.InsufficientData(stickyMinBasis))
 	case eff.Continued.CacheEfficiency > eff.Switched.CacheEfficiency:
 		w("%s", t.Working(pctStr(eff.Continued.CacheEfficiency), pctStr(eff.Switched.CacheEfficiency),
-			pctFloat(eff.Continued.CacheEfficiency-eff.Switched.CacheEfficiency)))
+			pctStr(eff.Continued.CacheEfficiency-eff.Switched.CacheEfficiency)))
 	case eff.Continued.CacheEfficiency < eff.Switched.CacheEfficiency:
 		w("%s", t.Reversed(pctStr(eff.Switched.CacheEfficiency), pctStr(eff.Continued.CacheEfficiency)))
 		w("%s", t.ReversedNote2)
@@ -55,7 +55,7 @@ func renderStickyEffect(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		for _, m := range eff.ByModel {
 			delta := "-"
 			if m.Continued.TokensKnown >= stickyMinBasis && m.Switched.TokensKnown >= stickyMinBasis {
-				delta = pctFloat(m.Continued.CacheEfficiency - m.Switched.CacheEfficiency)
+				delta = pctStr(m.Continued.CacheEfficiency - m.Switched.CacheEfficiency)
 			}
 			mt.row(m.Model, m.Protocol,
 				strconv.Itoa(m.Continued.Requests), cacheEffCell(m.Continued.CacheEfficiency, m.Continued.TokensKnown, m.Continued.Requests),

@@ -93,6 +93,42 @@ const (
 	MetricModelSwitchCount MetricCode = "model_switch_count"
 )
 
+// metricSpec is one behavior-profile metric's full definition: its stable
+// Code, its (English, un-localized — see MetricDiff.Label) display Label,
+// how to render it (Kind), and how to pull its value out of a Metrics
+// value. metricSpecs below is the ONE authoritative list of the behavior-
+// profile metrics vmr tracks — both Compare's per-row diff and corpus.go's
+// per-metric distribution/correlation/Markdown-rendering range over this
+// same slice, instead of each independently declaring which metrics exist
+// (corpus.go used to hand-maintain its own copy of this exact
+// code/kind/extractor mapping across three separate declarations, kept in
+// sync with Compare only by a comment asserting they matched).
+type metricSpec struct {
+	Code  MetricCode
+	Label string
+	Kind  MetricKind
+	Value func(Metrics) float64
+}
+
+// metricSpecs' order is Comparison.Rows' order — fixed, not sorted by
+// magnitude, so repeated runs against the same two Summaries produce
+// byte-identical output (see Comparison's own doc comment).
+var metricSpecs = []metricSpec{
+	{MetricModelMS, "Model Time", KindMillis, func(m Metrics) float64 { return float64(m.ModelMS) }},
+	{MetricAgentExecMS, "Agent-Side Execution Time", KindMillis, func(m Metrics) float64 { return float64(m.AgentExecMS) }},
+	{MetricHumanIdleMS, "Human Idle Time", KindMillis, func(m Metrics) float64 { return float64(m.HumanIdleMS) }},
+	{MetricNetWorkingMS, "Net Working Time", KindMillis, func(m Metrics) float64 { return float64(m.NetWorkingMS) }},
+	{MetricModelToolRatio, "Model/Tool Time Ratio", KindMultiple, func(m Metrics) float64 { return m.ModelToToolRatio }},
+	{MetricToolCallCount, "Tool Call Count", KindCount, func(m Metrics) float64 { return float64(m.ToolCallCount) }},
+	{MetricDuplicateActionRate, "Duplicate Action Rate", KindRatio, func(m Metrics) float64 { return m.DuplicateActionRate }},
+	{MetricErrorRecoveryCount, "Error Recovery Count", KindCount, func(m Metrics) float64 { return float64(m.ErrorRecoveryCount) }},
+	{MetricPlanExecRatio, "Plan/Execution Ratio", KindRatio, func(m Metrics) float64 { return m.PlanExecRatio }},
+	{MetricContextUtilization, "Context Utilization", KindRatio, func(m Metrics) float64 { return m.ContextUtilization }},
+	{MetricCompactionCount, "Compaction Count", KindCount, func(m Metrics) float64 { return float64(m.CompactionCount) }},
+	{MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, func(m Metrics) float64 { return float64(m.CompactionLossTokens) }},
+	{MetricModelSwitchCount, "Model Switch Count", KindCount, func(m Metrics) float64 { return float64(len(m.ModelSwitches)) }},
+}
+
 func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {
 	d := MetricDiff{Metric: code, Label: label, Kind: kind, A: a, B: b}
 	denom := a
@@ -171,20 +207,9 @@ func Compare(a, b JourneySummary) Comparison {
 	// exactly like report.Finding's persisted copy. RenderComparisonMarkdown
 	// looks up the localized label per row via i18n.MetricLabel(lang,
 	// string(row.Metric)) at render time — see render_compare.go.
-	rows := []MetricDiff{
-		metricDiff(MetricModelMS, "Model Time", KindMillis, float64(ma.ModelMS), float64(mb.ModelMS)),
-		metricDiff(MetricAgentExecMS, "Agent-Side Execution Time", KindMillis, float64(ma.AgentExecMS), float64(mb.AgentExecMS)),
-		metricDiff(MetricHumanIdleMS, "Human Idle Time", KindMillis, float64(ma.HumanIdleMS), float64(mb.HumanIdleMS)),
-		metricDiff(MetricNetWorkingMS, "Net Working Time", KindMillis, float64(ma.NetWorkingMS), float64(mb.NetWorkingMS)),
-		metricDiff(MetricModelToolRatio, "Model/Tool Time Ratio", KindMultiple, ma.ModelToToolRatio, mb.ModelToToolRatio),
-		metricDiff(MetricToolCallCount, "Tool Call Count", KindCount, float64(ma.ToolCallCount), float64(mb.ToolCallCount)),
-		metricDiff(MetricDuplicateActionRate, "Duplicate Action Rate", KindRatio, ma.DuplicateActionRate, mb.DuplicateActionRate),
-		metricDiff(MetricErrorRecoveryCount, "Error Recovery Count", KindCount, float64(ma.ErrorRecoveryCount), float64(mb.ErrorRecoveryCount)),
-		metricDiff(MetricPlanExecRatio, "Plan/Execution Ratio", KindRatio, ma.PlanExecRatio, mb.PlanExecRatio),
-		metricDiff(MetricContextUtilization, "Context Utilization", KindRatio, ma.ContextUtilization, mb.ContextUtilization),
-		metricDiff(MetricCompactionCount, "Compaction Count", KindCount, float64(ma.CompactionCount), float64(mb.CompactionCount)),
-		metricDiff(MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, float64(ma.CompactionLossTokens), float64(mb.CompactionLossTokens)),
-		metricDiff(MetricModelSwitchCount, "Model Switch Count", KindCount, float64(len(ma.ModelSwitches)), float64(len(mb.ModelSwitches))),
+	rows := make([]MetricDiff, len(metricSpecs))
+	for i, spec := range metricSpecs {
+		rows[i] = metricDiff(spec.Code, spec.Label, spec.Kind, spec.Value(ma), spec.Value(mb))
 	}
 	return Comparison{A: journeyRef(a), B: journeyRef(b), Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }

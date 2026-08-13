@@ -38,3 +38,16 @@ func FmtBytes(n int64) string {
 func FmtSeconds(d time.Duration, decimals int) string {
 	return fmt.Sprintf("%.*fs", decimals, d.Seconds())
 }
+
+// FmtPercent renders a 0..1 fraction as a percentage string ("42.3%").
+// decimals follows FmtSeconds' convention (trade precision for width): 1
+// for `vmr report`'s dense per-cell metrics tables, 0 for `vmr story`'s
+// narrative text. Before this, internal/report and internal/story each
+// carried their own independently-written pctStr with this same
+// multiply-and-format line — one at 1 decimal, one at 0 — and a comment in
+// story claiming the two "matched" report's, which had already gone stale.
+// Both packages' pctStr are now thin aliases over this, the same pattern
+// internal/report/render.go's fmtBytes already uses for FmtBytes.
+func FmtPercent(f float64, decimals int) string {
+	return fmt.Sprintf("%.*f%%", decimals, f*100)
+}

@@ -33,74 +33,6 @@ import (
 	"vmr/internal/i18n"
 )
 
-// corpusMetricCodes is which of Metrics' fields get a distribution/
-// correlation slot — the same thirteen MetricCode values Compare's own Rows
-// already names, so a reader who knows -compare's output recognizes these
-// immediately. MetricModelSwitchCount (batch 4) is a ROUTING-ENVIRONMENT
-// variable, not an agent-behavior one — see MetricModelSwitchCount's own
-// doc comment (compare.go): a correlation involving it reads as "did these
-// two groups' routing environment differ", never "did the agent behave
-// differently".
-var corpusMetricCodes = []MetricCode{
-	MetricModelMS, MetricAgentExecMS, MetricHumanIdleMS, MetricNetWorkingMS,
-	MetricModelToolRatio, MetricToolCallCount, MetricDuplicateActionRate,
-	MetricErrorRecoveryCount, MetricPlanExecRatio, MetricContextUtilization,
-	MetricCompactionCount, MetricCompactionLossTokens, MetricModelSwitchCount,
-}
-
-// corpusMetricKinds mirrors Compare's own Kind assignment for each of the
-// thirteen codes above, so RenderCorpusMarkdown's distribution table renders
-// the same human units (fmtutil.FmtSeconds/pctStr/fmtTokens) -compare does
-// instead of a second, drifting set of raw-number formatters.
-var corpusMetricKinds = map[MetricCode]MetricKind{
-	MetricModelMS:              KindMillis,
-	MetricAgentExecMS:          KindMillis,
-	MetricHumanIdleMS:          KindMillis,
-	MetricNetWorkingMS:         KindMillis,
-	MetricModelToolRatio:       KindMultiple,
-	MetricToolCallCount:        KindCount,
-	MetricDuplicateActionRate:  KindRatio,
-	MetricErrorRecoveryCount:   KindCount,
-	MetricPlanExecRatio:        KindRatio,
-	MetricContextUtilization:   KindRatio,
-	MetricCompactionCount:      KindCount,
-	MetricCompactionLossTokens: KindTokens,
-	MetricModelSwitchCount:     KindCount,
-}
-
-func metricValue(m Metrics, code MetricCode) float64 {
-	switch code {
-	case MetricModelMS:
-		return float64(m.ModelMS)
-	case MetricAgentExecMS:
-		return float64(m.AgentExecMS)
-	case MetricHumanIdleMS:
-		return float64(m.HumanIdleMS)
-	case MetricNetWorkingMS:
-		return float64(m.NetWorkingMS)
-	case MetricModelToolRatio:
-		return m.ModelToToolRatio
-	case MetricToolCallCount:
-		return float64(m.ToolCallCount)
-	case MetricDuplicateActionRate:
-		return m.DuplicateActionRate
-	case MetricErrorRecoveryCount:
-		return float64(m.ErrorRecoveryCount)
-	case MetricPlanExecRatio:
-		return m.PlanExecRatio
-	case MetricContextUtilization:
-		return m.ContextUtilization
-	case MetricCompactionCount:
-		return float64(m.CompactionCount)
-	case MetricCompactionLossTokens:
-		return float64(m.CompactionLossTokens)
-	case MetricModelSwitchCount:
-		return float64(len(m.ModelSwitches))
-	default:
-		return 0
-	}
-}
-
 // Distribution summarizes one metric's values across a corpus — mean/
 // median/min/max/p90, deliberately nothing fancier (no skewness, no
 // confidence interval) since the corpus sizes this runs on don't support
@@ -283,14 +215,14 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 		findingsPerJourney[i] = ComputeFindings(j, i18n.EN)
 	}
 
-	values := make(map[MetricCode][]float64, len(corpusMetricCodes))
-	for _, code := range corpusMetricCodes {
+	values := make(map[MetricCode][]float64, len(metricSpecs))
+	for _, spec := range metricSpecs {
 		vs := make([]float64, len(metrics))
 		for i, m := range metrics {
-			vs[i] = metricValue(m, code)
+			vs[i] = spec.Value(m)
 		}
-		values[code] = vs
-		stats.MetricDist[code] = computeDistribution(vs)
+		values[spec.Code] = vs
+		stats.MetricDist[spec.Code] = computeDistribution(vs)
 	}
 
 	hitByCode := map[FindingCode]map[int]bool{}
@@ -313,8 +245,9 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 	}
 	sort.Slice(codes, func(i, j int) bool { return codes[i] < codes[j] })
 
-	for ai, a := range corpusMetricCodes {
-		for _, b := range corpusMetricCodes[ai+1:] {
+	for ai, specA := range metricSpecs {
+		for _, specB := range metricSpecs[ai+1:] {
+			a, b := specA.Code, specB.Code
 			rho, n := spearman(values[a], values[b])
 			if n < corpusMinCorrelationN || math.Abs(rho) < corpusMinCorrelationRho {
 				continue

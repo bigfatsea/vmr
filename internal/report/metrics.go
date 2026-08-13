@@ -14,6 +14,7 @@ import (
 	"strconv"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -440,6 +441,9 @@ func fmtBytesGB(n int64) string {
 	}
 }
 
+// pctStr is report's local 1-decimal alias for fmtutil.FmtPercent — same
+// thin-wrapper convention as render.go's fmtBytes, so the ~15 call sites
+// across this package don't all need the "fmtutil." qualifier.
 func pctStr(f float64) string {
-	return strconv.FormatFloat(float64(f)*100, 'f', 1, 64) + "%"
+	return fmtutil.FmtPercent(f, 1)
 }

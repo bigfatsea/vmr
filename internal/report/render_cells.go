@@ -53,10 +53,6 @@ func numStr(v float64) string {
 	return strconv.FormatFloat(v, 'f', 2, 64)
 }
 
-func pctFloat(f float64) string {
-	return strconv.FormatFloat(f*100, 'f', 1, 64) + "%"
-}
-
 func pctStr2(num, den int) string {
 	if den <= 0 {
 		return "-"
@@ -165,8 +161,8 @@ func sortedRoles(m map[string]int64) []string {
 }
 
 // pctHundred formats a value already on a 0-100 percentage scale (e.g.
-// EndpointRow.ErrorRate) as "x.x%" — unlike pctStr/pctFloat, which expect a
-// 0-1 fraction and would multiply by 100 again.
+// EndpointRow.ErrorRate) as "x.x%" — unlike pctStr, which expects a 0-1
+// fraction and would multiply by 100 again.
 func pctHundred(v float64) string {
 	return strconv.FormatFloat(v, 'f', 1, 64) + "%"
 }

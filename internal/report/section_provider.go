@@ -55,7 +55,7 @@ func renderProviders(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 				fmtTokens(p.TokensInFresh) + " / " + fmtTokens(p.TokensInCached) + " / " + fmtTokens(p.TokensOut),
 				cacheEffCell(p.CacheEfficiency, p.TokensKnown, p.Requests),
 				fmtDurMS(p.DurMSMean),
-				pctFloat(p.ErrorRate / 100),
+				pctStr(p.ErrorRate / 100),
 				topErrorClassProviderCell(p),
 			}
 			if priced {

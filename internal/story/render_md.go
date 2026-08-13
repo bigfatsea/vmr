@@ -214,7 +214,7 @@ func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
 func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.StoryText) {
 	ratio := "—"
 	if c.TokensBefore > 0 {
-		ratio = fmt.Sprintf("%.1f%%", 100*float64(c.TokensAfter)/float64(c.TokensBefore))
+		ratio = fmtutil.FmtPercent(float64(c.TokensAfter)/float64(c.TokensBefore), 1)
 	}
 	w("<details><summary>%s</summary>\n\n",
 		t.CompactionSummary(fmtTokens(c.TokensBefore), fmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities)))
@@ -292,9 +292,9 @@ func fmtTokens(n int64) string {
 	}
 }
 
-// pctStr renders a 0..1 fraction as a percentage string — same rationale/
-// implementation as internal/report/metrics.go's pctStr (duplicated, not
-// exported: tiny, stable, purely cosmetic).
+// pctStr is story's local 0-decimal alias for fmtutil.FmtPercent —
+// narrative text wants "92%", not report's denser-table "91.7%" (that
+// package's own pctStr aliases the same function at 1 decimal instead).
 func pctStr(f float64) string {
-	return fmt.Sprintf("%.0f%%", f*100)
+	return fmtutil.FmtPercent(f, 0)
 }

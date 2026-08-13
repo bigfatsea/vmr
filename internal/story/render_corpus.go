@@ -33,15 +33,14 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 
 	w("%s", t.MetricDistTitle)
 	w("%s", t.MetricDistHeader)
-	for _, code := range corpusMetricCodes {
-		d, ok := stats.MetricDist[code]
+	for _, spec := range metricSpecs {
+		d, ok := stats.MetricDist[spec.Code]
 		if !ok {
 			continue
 		}
-		kind := corpusMetricKinds[code]
 		w("| %s | %d | %s | %s | %s | %s | %s |\n",
-			i18n.MetricLabel(lang, string(code)), d.Count,
-			formatMetric(kind, d.Mean), formatMetric(kind, d.Median), formatMetric(kind, d.Min), formatMetric(kind, d.Max), formatMetric(kind, d.P90))
+			i18n.MetricLabel(lang, string(spec.Code)), d.Count,
+			formatMetric(spec.Kind, d.Mean), formatMetric(spec.Kind, d.Median), formatMetric(spec.Kind, d.Min), formatMetric(spec.Kind, d.Max), formatMetric(spec.Kind, d.P90))
 	}
 	w("\n")
 

@@ -82,10 +82,10 @@ type Metrics struct {
 	// set (same reason ToolCallDist above doesn't either). ModelSwitches is
 	// also list-typed and itself carries no scalar, but its LENGTH is
 	// registered as MetricModelSwitchCount (batch 4) — one of the thirteen
-	// codes corpus.go's corpusMetricCodes/metricValue and compare.go's
-	// Compare both consume; see MetricModelSwitchCount's own doc comment
-	// (compare.go) for why it's a routing-environment metric, not an
-	// agent-behavior one.
+	// codes compare.go's metricSpecs registers a Value extractor for,
+	// consumed by both Compare and corpus.go; see MetricModelSwitchCount's
+	// own doc comment (compare.go) for why it's a routing-environment
+	// metric, not an agent-behavior one.
 	ModelUsage    []ModelUsageStat `json:"model_usage"`
 	ModelSwitches []ModelSwitch    `json:"model_switches"`
 }

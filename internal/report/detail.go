@@ -328,21 +328,22 @@ func realModel(rec *audit.Record) string {
 }
 
 // attemptUpstream returns the attempt's protocol/provider/model, preferring
-// the structured fields (new logs) and falling back to splitting Endpoint
-// for logs written before they existed — Endpoint was "/"-joined
-// protocol/provider/model back then (":"-joined now). SplitN(…, 3) rather
-// than a plain Split: the model segment can itself contain "/" (OpenRouter
-// names like "z-ai/glm-5.2", a documented config example), so only the
-// first two separators are structural — anything after them, slashes
-// included, belongs to the model name.
+// the structured fields (new logs) and falling back to core.SplitEndpointLabel
+// for logs written before they existed — that fallback accepts both the
+// current ":"-joined Endpoint format and the "/"-joined form older audit
+// logs used, so this stays correct regardless of which era wrote the
+// record. Deliberately not a private SplitN here: an inlined "/"-only split
+// would silently return ("", "", "") for a colon-joined Endpoint whose
+// structured fields happen to be empty, disagreeing with story's own
+// upstream lookup (internal/story/modelusage.go's stepUpstream) on the same
+// record for no reason other than the two having separately hand-rolled the
+// same parse.
 func attemptUpstream(a audit.Attempt) (protocol, provider, model string) {
 	if a.Protocol != "" || a.Provider != "" || a.Model != "" {
 		return a.Protocol, a.Provider, a.Model
 	}
-	if parts := strings.SplitN(a.Endpoint, "/", 3); len(parts) == 3 {
-		return parts[0], parts[1], parts[2]
-	}
-	return "", "", ""
+	protocol, provider, model, _ = core.SplitEndpointLabel(a.Endpoint)
+	return protocol, provider, model
 }
 
 // detailFileName builds "{20060102-150405.000}_{virtual}_{real}_{outcome}.md".

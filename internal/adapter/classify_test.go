@@ -8,6 +8,34 @@ import (
 	"vmr/internal/core"
 )
 
+// TestIndexUnescapedQuote locks the backslash-parity rule shared by
+// skipJSONString (this package's own JSON-string skipper) and
+// internal/server/facts.go's estimateDocumentTokens (the other caller,
+// across a package boundary) — both now call this one function instead of
+// each carrying their own copy of the parity loop.
+func TestIndexUnescapedQuote(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		b    string
+		want int
+	}{
+		{"plain, no escapes", `hello"`, 5},
+		{"escaped quote is not the terminator", `say \"hi\""`, 10},
+		{"escaped backslash IS followed by the real terminator", `path\\"`, 6},
+		{"odd run: backslash escapes the terminator, next quote wins", `path\\\"tail"`, 12},
+		{"no quote at all", `no quote here`, -1},
+		{"empty input", ``, -1},
+		{"immediate terminator", `"`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IndexUnescapedQuote([]byte(tc.b)); got != tc.want {
+				t.Errorf("IndexUnescapedQuote(%q) = %d, want %d", tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 	t.Parallel()
 	// Vendors may attach verbose debug payloads before the actual error

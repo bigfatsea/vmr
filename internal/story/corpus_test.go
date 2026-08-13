@@ -121,27 +121,29 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 	return j
 }
 
-// TestMetricValue_ModelSwitchCount_Registered (batch 4) locks in all three
-// corpus.go registration points for MetricModelSwitchCount: it must be in
-// corpusMetricCodes (so it gets a distribution slot at all), have a
-// corpusMetricKinds entry (so the Markdown table knows how to render it),
-// and metricValue must extract len(Metrics.ModelSwitches), not always 0.
+// TestMetricValue_ModelSwitchCount_Registered (batch 4, updated when
+// corpus.go's three hand-maintained registrations were replaced by
+// compare.go's single metricSpecs list) locks in that MetricModelSwitchCount
+// has exactly one entry in metricSpecs, with KindCount and a Value that
+// extracts len(Metrics.ModelSwitches), not always 0 — both -compare's rows
+// and -corpus' distribution/correlation tables read this same entry, so
+// there's nothing left to register a second time.
 func TestMetricValue_ModelSwitchCount_Registered(t *testing.T) {
-	found := false
-	for _, c := range corpusMetricCodes {
-		if c == MetricModelSwitchCount {
-			found = true
+	var found *metricSpec
+	for i := range metricSpecs {
+		if metricSpecs[i].Code == MetricModelSwitchCount {
+			found = &metricSpecs[i]
 		}
 	}
-	if !found {
-		t.Fatal("MetricModelSwitchCount missing from corpusMetricCodes")
+	if found == nil {
+		t.Fatal("MetricModelSwitchCount missing from metricSpecs")
 	}
-	if kind, ok := corpusMetricKinds[MetricModelSwitchCount]; !ok || kind != KindCount {
-		t.Fatalf("corpusMetricKinds[MetricModelSwitchCount] = %v (ok=%v), want KindCount", kind, ok)
+	if found.Kind != KindCount {
+		t.Fatalf("metricSpecs[MetricModelSwitchCount].Kind = %v, want KindCount", found.Kind)
 	}
 	m := Metrics{ModelSwitches: []ModelSwitch{{StepSeq: 1}, {StepSeq: 2}, {StepSeq: 3}}}
-	if got := metricValue(m, MetricModelSwitchCount); got != 3 {
-		t.Errorf("metricValue(MetricModelSwitchCount) = %v, want 3", got)
+	if got := found.Value(m); got != 3 {
+		t.Errorf("metricSpecs[MetricModelSwitchCount].Value(m) = %v, want 3", got)
 	}
 }
 
