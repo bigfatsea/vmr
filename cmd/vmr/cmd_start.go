@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-13 16:39, by Gemini 3.6 Flash
 package main
 
 import (
@@ -146,7 +146,7 @@ func cmdStart(args []string) error {
 		logger.Printf("WARN quota state: %v (starting from zero)", err)
 	}
 	rt.Quota = qreg
-	stopQuotaFlush := qreg.StartFlusher(5 * time.Second)
+	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
 	defer func() { stopQuotaFlush(); qreg.Flush() }()
 
 	snap, err := router.BuildSnapshot(cfg)

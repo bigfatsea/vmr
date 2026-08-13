@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-08-13 16:39, by Gemini 3.6 Flash
 
 package quota
 
@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 )
+
+// DefaultFlushInterval is the standard background persistence period for quota counters.
+const DefaultFlushInterval = 10 * time.Second
 
 // fileVersion is bumped whenever the on-disk shape changes incompatibly —
 // left at 1 for the whole of P1 (see the design doc's Persistence section).
