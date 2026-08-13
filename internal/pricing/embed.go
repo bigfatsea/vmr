@@ -19,7 +19,7 @@ var standardGeneratedYAML []byte
 
 // standardCuratedYAML is hand-maintained — primarily first-party domestic
 // vendor rows the generated table under-covers (see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "范围边界与已知限制"
+// docs/VirtualModelRouter_Design_v4_Quota.md's "范围边界与已知限制"
 // section, "标准表对国产第一方覆盖不全" row). Starts empty rather than with
 // fabricated numbers — an unverified price is worse than an absent one, per
 // this whole package's "missing beats wrong" stance.

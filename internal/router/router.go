@@ -136,7 +136,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	// Quota-Aware Routing: within each priority tier Sort just established,
 	// move quota-bearing endpoints to the front in headroom-score order —
 	// see internal/router/quota.go's reorderByQuota and
-	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's Scheduling Flow
+	// docs/VirtualModelRouter_Design_v4_Quota.md's Scheduling Flow
 	// section for why this sits exactly here (after Sort, before Sticky).
 	// nil-safe: a no-op returning false when rt.Quota is nil (no
 	// quota.Registry wired up).

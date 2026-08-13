@@ -1,6 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// Tests for P2.1 (see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// Tests for P2.1 (see docs/VirtualModelRouter_Design_v4_Quota.md's
 // "P2 — 计量准确" batch description): account-level model_multipliers
 // (applied at charge time) and token_weights
 // (applied at read time via baseAmount). See quota_charge_test.go/

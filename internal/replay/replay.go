@@ -88,7 +88,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 
 	// Quota-Aware Routing: replay hits the real upstream and consumes real
 	// account quota exactly like live traffic does, but until now nothing
-	// charged it — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+	// charged it — see docs/VirtualModelRouter_Design_v4_Quota.md's
 	// known-gap entry ② ("vmr replay 消耗真实上游额度但不计费"). This loads
 	// the SAME state file `vmr start` uses, charges one successful replay
 	// (via chargeReplay below) against it, and flushes once before Run

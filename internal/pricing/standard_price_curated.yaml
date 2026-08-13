@@ -3,7 +3,7 @@
 # Hand-maintained pricing additions — primarily first-party domestic vendor
 # models the generated table (tools/gen_standard_pricing, sourced from a
 # LiteLLM snapshot) under-covers. See
-# docs/TokenPlan_Quota_Routing_Design_opus-5.md's §13 "标准表对国产第一方
+# docs/VirtualModelRouter_Design_v4_Quota.md's §13 "标准表对国产第一方
 # 覆盖不全" for why this gap exists.
 #
 # tools/gen_standard_pricing NEVER writes to this file — only

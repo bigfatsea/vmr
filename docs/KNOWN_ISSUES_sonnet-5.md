@@ -215,8 +215,8 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 按目录统计导出函数/类型数量、或给 Finding 检测器数量设上限），而不是停留在文档共识——`archtest` 目前
 只覆盖"行数"和"import 边界"两个维度，"功能面膨胀"是它现有机制的盲区。
 
-**同源的文档侧张力**（2026-08-12 review 补充）：三份主设计文档（`VirtualModelRouter_Design_v4_Core.md`/
-`Analytics.md`/`TokenPlan_Quota_Routing_Design_opus-5.md`）合计约 400KB，每次实现变更都要判断哪几份
+**同源的文档侧张力**（2026-08-12 review 补充）：三份主设计文档（`VirtualModelRouter_Design_v4_` 的 `Core`/
+`Analytics`/`Quota` 三篇）合计约 400KB，每次实现变更都要判断哪几份
 需要同步更新。这不是缺陷，是同一个"范围仍在扩张、同步负担随之增长"张力在文档侧的表现，与代码侧的
 体量问题同源，不单独立项，留给用户和上面的代码侧问题一起裁定。
 
@@ -282,7 +282,7 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   --include="*.go"` 实测生产代码（不含测试）117 处（而非本条此前记录的 ~23 处，低估了一个数量级），
   但分类后紧迫性判断不变：约 30 处是 `internal/report`/`i18n` 渲染出的**报告产物自己的章节号**（Markdown 里真有
   `## §2 成本估算` 这样的标题），跟"引用外部文档编号"是两回事，不算违规；其余绝大多数是
-  `pricing`/`quota`/`router`/`core` 对 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的引用，且
+  `pricing`/`quota`/`router`/`core` 对 `docs/VirtualModelRouter_Design_v4_Quota.md` 的引用，且
   几乎都在同一行或文件头注释里带着"the design doc"/完整文件名——落在本条已有的"号码旁边已有文件名
   兜底"范围内。真要把 `§4.2①`/`§9.1` 这类替换成准确章节名，必须先通读 1378 行设计文档核对当前标题，
   出错代价（指向错误章节）不小于不动，暂不排期。
@@ -484,7 +484,7 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   意外收获：时间窗去掉后，"同一 model 出现两条 override"从"用时间窗合法区分促销/常态价"变成必然的
   死配置，顺手加了 `firstDeadOverride` 加载期硬校验。影响面：`core.PricingOverride`/`PricingSpec`、
   `router/quota.go` 的 `chargeCost`、`pricing/resolver.go` 的 `RateFor`（去掉不再需要的 `ts` 参数）、
-  两对配置示例文件、`UserGuide.md`/`.zh.md`、`TokenPlan_Quota_Routing_Design_opus-5.md`、
+  两对配置示例文件、`UserGuide.md`/`.zh.md`、`VirtualModelRouter_Design_v4_Quota.md`、
   `VirtualModelRouter_Design_v4_Core.md`、`CLAUDE.md` 模块地图，约 15 个测试用例。
 - **`response.go` 缺行数预算**：`internal/archtest/file_sizes_test.go` 的 `fileLineLimits` 加了
   `"internal/router/response.go": 850`（按既有条目 ~15% 余量惯例，从注册时的 736 行取整）。此前
@@ -550,7 +550,7 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   `chatmsg.MergeUsageBytes` 从已完整缓冲的响应体里取（而非 `respStream` 的增量嗅探），拿不到时降级
   为对请求/响应体分别跑 `core.EstimateTextTokens`。`-dry-run` 与未配置 `quota:` 的 provider 均不触碰
   状态文件。未覆盖：与另一个正在写同一状态文件的进程（如运行中的 `vmr start`）并发时没有跨进程锁，
-  这是 `TokenPlan_Quota_Routing_Design_opus-5.md`"多实例共享计数：不做"这条既有取舍的一个具体表现，
+  这是 `VirtualModelRouter_Design_v4_Quota.md`"多实例共享计数：不做"这条既有取舍的一个具体表现，
   不是新问题。
 - **`CHANGELOG.md` 缺失**（2026-08-12 前旧记录）：已新增 `CHANGELOG.md`（Keep a Changelog 格式，回填
   v0.1–v0.5），`CLAUDE.md` 已把它定为发布说明唯一真源，`release.yml` 会在缺对应 tag 章节时让发布失败。

@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // Quota-Aware Routing's YAML-shape config types and their validation — see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
 // "现状与后续计划" section for what's actually shipped. Split from
 // config.go per its own archtest line-count budget.
 package config
@@ -195,7 +195,7 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 		return fmt.Errorf("provider %q: quota.limits: at least one entry required when quota: is set", providerName)
 	}
 	if len(qc.Limits) > 1 {
-		return fmt.Errorf("provider %q: quota.limits: %d entries given, but only one is supported in this release — multi-window quota is planned for a later batch (see docs/TokenPlan_Quota_Routing_Design_opus-5.md)", providerName, len(qc.Limits))
+		return fmt.Errorf("provider %q: quota.limits: %d entries given, but only one is supported in this release — multi-window quota is planned for a later batch (see docs/VirtualModelRouter_Design_v4_Quota.md)", providerName, len(qc.Limits))
 	}
 	seen := map[string]bool{}
 	hasTokensLimit := false
@@ -248,7 +248,7 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 // knob not yet supported (rolling windows, per-model scope — cost metric IS
 // supported, see the "cost" case below) is rejected here with a message
 // that names the capability and says it's planned, not "invalid" or
-// "unsupported forever" — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// "unsupported forever" — see docs/VirtualModelRouter_Design_v4_Quota.md's
 // P3 batch description, which treats a silently ignored quota field as the
 // one failure mode this project cannot tolerate (the same fail-fast
 // contract KnownFields already enforces everywhere else in this config).

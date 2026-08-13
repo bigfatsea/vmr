@@ -4,7 +4,7 @@
 
 本文档描述 vmr 路由核心的完整设计：定位、架构、机制与关键决策。读完即可维护与二次开发路由主线（`internal/{core,config,adapter,health,probe,strategy,sticky,router,server,audit,imgprep,diagnose,replay,buildinfo,rundir,archtest}` + `cmd/vmr` 里除 `cmd_report.go`/`cmd_story.go` 外的全部子命令）。使用文档见 `README.md`（英文）/ `README.zh.md`（中文）。
 
-**这是 v4 版设计文档的 Part 1（共两部分）**：审计日志的两个离线消费方——聚合报表 `vmr report` 与 Agent 任务叙事重建 `vmr story`（`internal/{report,story,ctxgraph,chatmsg}` + `cmd_report.go`/`cmd_story.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档"记录结构"一节）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。**v3**（`VirtualModelRouter_System_Design_v3.md`）是本文档的上一版，内容已全部拆分到 Part 1/Part 2 两份 v4 文档中，不再维护；早期版本的过程记录如需追溯，见 git 历史。
+**这是 v4 版设计文档的 Part 1**：审计日志的两个离线消费方——聚合报表 `vmr report` 与 Agent 任务叙事重建 `vmr story`（`internal/{report,story,ctxgraph,chatmsg}` + `cmd_report.go`/`cmd_story.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档"记录结构"一节）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。本文档的调度链上还挂着一个自带完整计量/定价/周期模型的子系统——Token-Plan 额度感知路由，独立成篇见 `docs/VirtualModelRouter_Design_v4_Quota.md`；它对本文档的唯一接口是"`strategy.Sort` 之后、Sticky 之前多一步重排"。整套 v4 的"为什么做"（战略定位与竞品坐标）见 `docs/VirtualModelRouter_Design_v4_Strategy.md`。**v3**（`VirtualModelRouter_System_Design_v3.md`）是本文档的上一版，内容已全部拆分到 Part 1/Part 2 两份 v4 文档中，不再维护；早期版本的过程记录如需追溯，见 git 历史。
 
 ---
 
@@ -128,7 +128,7 @@ internal/probe             探测请求原语：构造带一次性 nonce 回显�
 internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排序；Condition 接口 + 编译期注册表（image/tools）+ WithinContext
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
 internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——标准表/账号覆盖本身会随配置变更而变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
-internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/EffectiveRate/Complete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，first-match-wins 静态按模型区分（无时间维度——P0-A 移除了曾经的 date_*/hour_* 时间窗，见 docs/TokenPlan_Quota_Routing_Design_opus-5.md 的相应章节），discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
+internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/EffectiveRate/Complete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，first-match-wins 静态按模型区分（无时间维度——P0-A 移除了曾经的 date_*/hour_* 时间窗，见 docs/VirtualModelRouter_Design_v4_Quota.md 的相应章节），discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
@@ -137,7 +137,7 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newRespStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）
   ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
   ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
-  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respStream`）复用同一条计费管线，见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
+  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respStream`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
 internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -480,12 +480,12 @@ Compaction（上下文压缩）场景下机制依然成立：压缩本身就会�
 
 **计量**：三档 metric 均已交付。`metric: requests`（计数 +1，零解析成本）与 `metric: tokens`（四分量求和，优先用上游返回的 usage 字段，拿不到时降级为按字节数估算并标记 `estimated_pct`；四分量的账号级权重 `token_weights` 在**读取时**套用，缺省全 1.0 等价于 P1 的等权求和）属 P1/P2.1；`metric: cost`（按 `internal/pricing` 解析出的分量费率，在**计费时**把 $ 金额算好写入 `Counters.Cost`，事后改价不影响已记录历史）属 P2.2，见下方"定价"一段。账号级 `model_multipliers`（按上游模型的整体倍率，只作用于 `requests`/`tokens`，在**计费时**套用）属 P2.1。多条 Limit 并存、`rolling` 滚动窗口、按模型的 `models:` 子额度仍未交付（P3），本批配置里写了会在加载期直接报错，不会静默忽略。
 
-**定价（P2.2）**：`metric: cost` 的分量费率来自新增叶子包 `internal/pricing`——内置标准价目表（`go:embed` 的 `standard_price_generated.yaml`，由 `tools/gen_standard_pricing` 从 LiteLLM 快照生成 + 手工维护的 `standard_price_curated.yaml` 补国产第一方厂商）叠加用户在 `config.yaml` 里的 `pricing.supplement`/`providers[].pricing`（`map`/`overrides`，含 `discount`/显式费率，first-match-wins 静态按模型区分——无时间维度，P0-A 移除了曾经的 `date_*`/`hour_*` 时间窗，见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 的相应章节）。`internal/config` 在 `validate()` 阶段完成三层解析并要求每个 `metric: cost` 账号的每个上游模型都解析出四分量齐全的费率（缺失按"更危险"处理，绝不当 0），解析结果随 `core.Endpoint.PricingRate` 进 Snapshot——费率是模型级属性，不像 `QuotaSpec` 那样整个账号共享一个指针。原先独立维护的 `pricing.yaml`/`vmr report -pricing` 已废弃，迁移进 `config.yaml`。标准表内部永远是 USD；`pricing.supplement`/`providers[].pricing.overrides` 允许某一行自带非美元 `currency:`，经 `pricing.exchange_rate`（通用的"1 美元 = X `<货币代码>`"映射表）在解析阶段一次性折算成 USD 再进入这条链路——`Resolve`/`EffectiveRate` 本身对币种毫无感知，多币种只是解析入口的一层归一化，不是贯穿整条计费链路的一等概念（完整设计见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`）。`vmr report` 的展示币种（`-currency`）是纯渲染层的独立选项，和这里的记账币种互不干扰。
+**定价（P2.2）**：`metric: cost` 的分量费率来自新增叶子包 `internal/pricing`——内置标准价目表（`go:embed` 的 `standard_price_generated.yaml`，由 `tools/gen_standard_pricing` 从 LiteLLM 快照生成 + 手工维护的 `standard_price_curated.yaml` 补国产第一方厂商）叠加用户在 `config.yaml` 里的 `pricing.supplement`/`providers[].pricing`（`map`/`overrides`，含 `discount`/显式费率，first-match-wins 静态按模型区分——无时间维度，P0-A 移除了曾经的 `date_*`/`hour_*` 时间窗，见 `docs/VirtualModelRouter_Design_v4_Quota.md` 的相应章节）。`internal/config` 在 `validate()` 阶段完成三层解析并要求每个 `metric: cost` 账号的每个上游模型都解析出四分量齐全的费率（缺失按"更危险"处理，绝不当 0），解析结果随 `core.Endpoint.PricingRate` 进 Snapshot——费率是模型级属性，不像 `QuotaSpec` 那样整个账号共享一个指针。原先独立维护的 `pricing.yaml`/`vmr report -pricing` 已废弃，迁移进 `config.yaml`。标准表内部永远是 USD；`pricing.supplement`/`providers[].pricing.overrides` 允许某一行自带非美元 `currency:`，经 `pricing.exchange_rate`（通用的"1 美元 = X `<货币代码>`"映射表）在解析阶段一次性折算成 USD 再进入这条链路——`Resolve`/`EffectiveRate` 本身对币种毫无感知，多币种只是解析入口的一层归一化，不是贯穿整条计费链路的一等概念（完整设计见 `docs/VirtualModelRouter_Design_v4_Quota.md`）。`vmr report` 的展示币种（`-currency`）是纯渲染层的独立选项，和这里的记账币种互不干扰。
 
 **架构落地**：独立小包 `internal/quota`（与 `internal/health`/`internal/sticky` 平行）+ `internal/pricing`（同层、只依赖 `core`），只依赖 `core` 与标准库——周期数学（`(every, since)` 二元组推算窗口边界，含月末截断）与 headroom 计算都是纯函数，可脱离任何 I/O 单测。`Registry`（挂在 `Router` 上、不进 `Snapshot`，热重载不清零计数）按 provider **名字**记账，刻意不含 API Key 哈希——这与 `Endpoint.HealthKey()` 的取舍方向相反：`HealthKey` 换 key 就重新试探健康是故意的（新凭证该有新的信任评估），但换 key 清零当期额度计数会直接导致超支，两者的风险方向不对称。
 
 完整设计（套餐形态分类、分批交付依据、被否决的方案、市场数据、各批落地范围与验收证据）见
-`docs/TokenPlan_Quota_Routing_Design_opus-5.md`；当前逐项落地状态、已知缺口与后续建议见该文档的
+`docs/VirtualModelRouter_Design_v4_Quota.md`；当前逐项落地状态、已知缺口与后续建议见该文档的
 「现状与后续计划」一节。
 
 ---

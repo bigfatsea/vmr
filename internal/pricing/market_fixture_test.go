@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // TestMarketFixtures_EqualWeightedOverestimate3to8x pins the design doc's
-// central empirical claim (docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// central empirical claim (docs/VirtualModelRouter_Design_v4_Quota.md's
 // §2.3/§14.2): treating a Credits-style account's quota as an equal-
 // weighted token total (P1's metric: tokens behavior) overestimates real
 // consumption by roughly 3-8x for a realistic agentic workload (99:1

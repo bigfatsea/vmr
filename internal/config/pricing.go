@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // Pricing (P2.2) YAML-shape config types and their validation/resolution —
-// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's pricing sections
+// see docs/VirtualModelRouter_Design_v4_Quota.md's pricing sections
 // (config shape, three-layer resolution, "现状与后续计划" for what's
 // actually shipped) for the full design. Split from config.go per that
 // file's own line-count budget (see quota.go's identical rationale).
@@ -59,7 +59,7 @@ type PricingConfig struct {
 
 // ProviderPricingConfig is one provider's `pricing:` block: what's
 // different about THIS account's prices versus the standard list price —
-// see docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2① for why this is
+// see docs/VirtualModelRouter_Design_v4_Quota.md's §4.2① for why this is
 // two layers (account overrides on top of a shared table) rather than one.
 type ProviderPricingConfig struct {
 	// Map resolves a local upstream model name to the standard table's

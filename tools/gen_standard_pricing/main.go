@@ -4,7 +4,7 @@
 // internal/pricing/standard_price_generated.yaml from
 // docs/data/model_prices_and_context_window.json (a LiteLLM-format
 // price-list snapshot, MIT licensed — see that file's own license note and
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③ for the attribution
+// docs/VirtualModelRouter_Design_v4_Quota.md's §4.2③ for the attribution
 // requirement this comment satisfies). Not part of the vmr binary — a
 // one-off/periodic maintenance tool, run by hand:
 //
@@ -58,7 +58,7 @@ type sourceEntry struct {
 // different (markup or bundled-discount) pricing than the vendor's own API,
 // and including them risks a canonical-key collision silently picking the
 // wrong number for a direct-API account. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "标准表以开源参考表的形式维护"
+// docs/VirtualModelRouter_Design_v4_Quota.md's "标准表以开源参考表的形式维护"
 // section for why standard-table coverage is inherently a curated subset,
 // not "every row in the source".
 var primaryVendors = map[string]bool{
@@ -186,7 +186,7 @@ func writeYAML(path, generatedAt string, rows []generatedRow) {
 # tools/gen_standard_pricing from docs/data/model_prices_and_context_window.json
 # (a LiteLLM-format price-list snapshot, MIT licensed:
 # https://github.com/BerriAI/litellm — attribution preserved per
-# docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③).
+# docs/VirtualModelRouter_Design_v4_Quota.md's §4.2③).
 #
 # Hand-maintained additions (mainly domestic/first-party vendors this
 # source under-covers) belong in standard_price_curated.yaml instead, NEVER

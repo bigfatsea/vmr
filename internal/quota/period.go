@@ -3,7 +3,7 @@
 // Package quota implements Quota-Aware Routing's accounting half: counting
 // what a provider account has consumed against its configured Limit(s) and
 // computing the headroom score the router reorders candidates by. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
 // "现状与后续计划" section for what's actually shipped (currently: one
 // Limit per provider, tumbling windows only; multi-window/rolling windows
 // are P3, not yet delivered).

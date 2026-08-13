@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // /admin/status's "quota" section — see internal/router/quota.go's
-// QuotaStatus and docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// QuotaStatus and docs/VirtualModelRouter_Design_v4_Quota.md's
 // observability section.
 package server
 

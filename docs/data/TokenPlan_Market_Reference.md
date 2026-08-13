@@ -2,7 +2,7 @@
 
 # Token-Plan / Coding-Plan 市场事实参考（快照：2026-07-26）
 
-**用途**：`vmr` 额度感知路由（见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`）的事实依据与测试夹具。
+**用途**：`vmr` 额度感知路由（见 `docs/VirtualModelRouter_Design_v4_Quota.md`）的事实依据与测试夹具。
 设计决策、配置样例、单元测试的期望值都应引用本文，而不是每次重新联网拉取。
 
 **数据来源**：<https://vibecoding.dreamfree.space/>（站点自述覆盖 31 个平台的 Coding Plan / Token Plan 对比）。

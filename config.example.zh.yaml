@@ -87,7 +87,7 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # 上游响应体（流式、JSON、错误）静默超过这么久就中止
 
 # pricing：metric: cost 计量账号和 vmr report 的 $ 估算所用的全局设置
-# （完整设计见 docs/TokenPlan_Quota_Routing_Design_opus-5.md，账号级的那一半
+# （完整设计见 docs/VirtualModelRouter_Design_v4_Quota.md，账号级的那一半
 # 见下面 providers[].pricing）。不做任何配置也会有一份内置的标准价目表生效
 # （数据源自公开的 LiteLLM 格式快照），vmr report 的 $ 估算零配置就能用——这
 # 整个块对大多数部署来说都可以跳过。
@@ -134,7 +134,7 @@ providers:
     #                            # 没必要专门写出来）。
     #
     # quota：额度感知路由（Quota-Aware Routing）——完整设计见
-    # docs/TokenPlan_Quota_Routing_Design_opus-5.md，当前实际落地状态见该文档
+    # docs/VirtualModelRouter_Design_v4_Quota.md，当前实际落地状态见该文档
     # 「现状与后续计划」一节。不写 = 不计量，行为完全不变。
     # 当多个 provider 各自都配了 quota: 时，vmr 会把新会话优先导向"相对于当前
     # 账单周期已经过去的比例而言，余量最充裕"的那个账号——不是绝对剩余额度最多

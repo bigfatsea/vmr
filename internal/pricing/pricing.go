@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // Package pricing is Quota-Aware Routing's per-1M-token pricing resolution
-// engine (P2.2 — see docs/TokenPlan_Quota_Routing_Design_opus-5.md's
+// engine (P2.2 — see docs/VirtualModelRouter_Design_v4_Quota.md's
 // "定价分三层" section for the three-layer design and its "现状与后续计划"
 // section for what's actually shipped). A leaf package: only
 // depends on core + stdlib + gopkg.in/yaml.v3, same layer as internal/quota
@@ -87,7 +87,7 @@ func (r Rate) Scale(f float64) Rate {
 
 // Cost prices fresh/cacheRead/cacheWrite/out (raw token counts) through r and
 // sums them — the base(cost) formula from
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §3, shared by
+// docs/VirtualModelRouter_Design_v4_Quota.md's §3, shared by
 // internal/router/quota.go's charge-time computation and
 // internal/report/cost.go's per-record estimate so the two never drift
 // (they were independently hand-written to the same formula until P2.2's

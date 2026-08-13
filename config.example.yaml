@@ -93,7 +93,7 @@ listen: 127.0.0.1:8800
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
 
 # pricing: global settings for metric: cost quota accounts and vmr report's $
-# estimates (see docs/TokenPlan_Quota_Routing_Design_opus-5.md and
+# estimates (see docs/VirtualModelRouter_Design_v4_Quota.md and
 # providers[].pricing below for the account-level half). A built-in standard
 # price table (sourced from a public LiteLLM-format snapshot) always applies
 # with no configuration at all, and vmr report's $ estimates use it with zero
@@ -146,7 +146,7 @@ providers:
     # proxy: false               # not needed here — absent already means direct (domestic
     #                            # provider, no need to write this out).
     #
-    # quota: Quota-Aware Routing — see docs/TokenPlan_Quota_Routing_Design_opus-5.md
+    # quota: Quota-Aware Routing — see docs/VirtualModelRouter_Design_v4_Quota.md
     # for the full design and its "现状与后续计划" section for what's actually
     # shipped. Absent = unmetered, no behavior change. When several providers each carry a quota:,
     # vmr biases new sessions toward whichever account has the most slack

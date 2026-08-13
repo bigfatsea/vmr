@@ -1,9 +1,17 @@
 <!-- Ver 2026-08-13 15:30, by Opus 5 -->
 
-# Router 侧设计：Token-Plan 额度感知路由（Quota-Aware Routing）
+# Virtual Model Router (vmr) — 设计方案 · Token-Plan 额度感知路由（Quota-Aware Routing）
+
+**这是 v4 版设计文档里路由半区的一个子系统专篇。** 路由核心本身（虚拟模型、协议透传、
+Adapter、调度与健康、审计日志格式）见 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）；
+本文描述的额度感知重排是挂在它的调度链上的一步（见 §6.1 在 `Serve` 中的位置），
+之所以独立成篇而不并进 Part 1，是因为它自带一整套计量/定价/周期模型，体量已经撑起一份
+完整设计文档，而 Part 1 只需要知道"`Sort` 之后、`sticky` 之前多了一步重排"。
 
 配套文档：
-- `docs/TokenPlan_Routing_and_Forensics_Strategy.md` —— 战略与竞品，定义"为什么做"。
+- `docs/VirtualModelRouter_Design_v4_Strategy.md` —— 战略与竞品，定义"为什么做"。
+- `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）—— 分析半区。它是本文
+  §9.3 那份状态文件的离线读者，两侧的口径一致性纪律见 §12.1「额度公式的唯一实现」。
 
 本文只解决"怎么做"，范围严格限定在 Router 侧。
 **§1–§13 描述的是设计终态；实际交付分四批，见 §14——第一批的范围远小于终态。

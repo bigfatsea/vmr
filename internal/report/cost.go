@@ -22,7 +22,7 @@ import (
 // survey found cache-read pricing 5-120x cheaper than fresh input, never
 // actually free, across providers broadly. Excluding it systematically
 // UNDERSTATES cost for any provider/model priced above 0, the dangerous
-// direction (see docs/TokenPlan_Quota_Routing_Design_opus-5.md's market-data
+// direction (see docs/VirtualModelRouter_Design_v4_Quota.md's market-data
 // section for the full argument).
 func costFor(pr pricing.Rate, rc *rec2) float64 {
 	if !rc.usageOK {

@@ -4,7 +4,7 @@
 
 **用途**：纯事实性参考文档，完整记录火山方舟（Volcengine Ark）「Agent Plan」套餐的 AFP（Agent Fuel
 Point，Agent 燃料值）计费单位与抵扣规则原文，供 `vmr` 额度感知路由（Quota-Aware Routing，见
-`docs/TokenPlan_Quota_Routing_Design_opus-5.md`）配置该厂商时对照，也作为「Credits/燃料值制」
+`docs/VirtualModelRouter_Design_v4_Quota.md`）配置该厂商时对照，也作为「Credits/燃料值制」
 这一大类计费方式（`docs/data/TokenPlan_Market_Reference.md` 分类表里的类型 E/F）的一个具体样本。
 
 **本文只陈述官方原文，不做任何取舍或评价**；`config.mba.yaml` 的适配分析见对话记录，不在本文重复。

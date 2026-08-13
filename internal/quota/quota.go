@@ -23,7 +23,7 @@ import (
 // re-deriving it later from raw token counts using whatever price happens
 // to be configured when someone reads it would silently rewrite history
 // every time pricing.yaml-equivalent config changes. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section for
+// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section for
 // the full argument. Fresh/CacheRead/CacheWrite/Out are still recorded alongside
 // Cost even for a cost-metric account (not used for routing decisions on
 // that account, but /admin/status's four-component breakdown is useful

@@ -300,14 +300,14 @@ func (e *Endpoint) computeName() string {
 }
 
 // QuotaMetric is the counting unit a Limit is measured in — see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §3 for the full model.
+// docs/VirtualModelRouter_Design_v4_Quota.md's §3 for the full model.
 type QuotaMetric string
 
 const (
 	MetricRequests QuotaMetric = "requests"
 	MetricTokens   QuotaMetric = "tokens"
 	// MetricCost is P2.2's Credits/money-denominated metric — see
-	// docs/TokenPlan_Quota_Routing_Design_opus-5.md's pricing/cost sections.
+	// docs/VirtualModelRouter_Design_v4_Quota.md's pricing/cost sections.
 	// Charging it needs a resolved Endpoint.PricingRate; config.validate()
 	// rejects a metric: cost Limit on any provider+model that doesn't
 	// resolve one with every component present (see PricingSpec/Rate's doc
@@ -346,7 +346,7 @@ type Limit struct {
 
 // TokenWeights is the account-level per-component scaling factor applied to
 // a tokens-metric Limit's base(tokens) formula — see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's §3 (charge = base(metric) ×
+// docs/VirtualModelRouter_Design_v4_Quota.md's §3 (charge = base(metric) ×
 // ModelMultipliers[model]) and its "Simplification" section ⑧ for why this
 // lives here rather than as a per-model price table: a Credits-style plan
 // whose account discounts cache reads (or prices output higher) uniformly
@@ -430,7 +430,7 @@ type PricingOverride struct {
 // order (first-match-wins; a Discount composes against whatever the chain
 // below it resolves to). Attached per-Endpoint (not per-account, unlike
 // QuotaSpec) because price is inherently model-scoped — see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section
+// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
 // ("定价解析结果的挂点不一样") for why this couldn't be shared the way
 // QuotaSpec is.
 //
@@ -454,7 +454,7 @@ type PricingSpec struct {
 //
 //   - TokenWeights scales a tokens-metric Limit's four components when read
 //     (applied in baseAmount, at read time — see
-//     docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" section
+//     docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
 //     for the "store raw components, apply policy on read" principle, which
 //     holds for this field).
 //   - ModelMultipliers scales EVERY component (including Requests) of a

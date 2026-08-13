@@ -90,7 +90,7 @@ func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 }
 
 // TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange pins
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "9.2 运行态" argument
+// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" argument
 // directly: a promotional/time-scoped rate active at charge time produces a $ amount
 // that must NOT change retroactively just because the account's pricing
 // (an override, a promo window closing, a reconfigured discount) changes

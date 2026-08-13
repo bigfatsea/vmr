@@ -315,9 +315,9 @@ func TestComplete_OverrideFullyCoversModel_BaseIrrelevant(t *testing.T) {
 
 // TestComplete_DiscountOverIncompleteBase_Fails: a discount override
 // composes against an incomplete Base and must surface as incomplete —
-// the dangerous failure direction docs/TokenPlan_Quota_Routing_Design_
-// opus-5.md's §9.1 validation checklist exists to rule out (a charge on the
-// live request path silently under-priced with no load-time signal).
+// the dangerous failure direction docs/VirtualModelRouter_Design_v4_Quota.md's
+// validation checklist exists to rule out (a charge on the live request path
+// silently under-priced with no load-time signal).
 func TestComplete_DiscountOverIncompleteBase_Fails(t *testing.T) {
 	spec, ok := Resolve("deepseek", "deepseek-chat", ResolveOptions{
 		Table: testTable(), Currency: "USD", // deepseek-chat's Base is missing cache_write

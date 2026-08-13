@@ -4,7 +4,7 @@
 # tools/gen_standard_pricing from docs/data/model_prices_and_context_window.json
 # (a LiteLLM-format price-list snapshot, MIT licensed:
 # https://github.com/BerriAI/litellm — attribution preserved per
-# docs/TokenPlan_Quota_Routing_Design_opus-5.md's §4.2③).
+# docs/VirtualModelRouter_Design_v4_Quota.md's §4.2③).
 #
 # Hand-maintained additions (mainly domestic/first-party vendors this
 # source under-covers) belong in standard_price_curated.yaml instead, NEVER

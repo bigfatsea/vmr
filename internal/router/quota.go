@@ -6,7 +6,7 @@
 // out of router.go on purpose — see internal/archtest's line-count budget
 // for that file — so this feature's decision logic never has to compete
 // with the failover loop for that budget. See
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md for the full design and its
+// docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
 // "现状与后续计划" section for what's actually shipped.
 package router
 
@@ -58,7 +58,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 // respStream can drive the exact same pipeline instead of reimplementing
 // it — currently `vmr replay` (internal/replay), which extracts usage from
 // an already fully-buffered response via chatmsg.MergeUsageBytes; see
-// docs/TokenPlan_Quota_Routing_Design_opus-5.md's known-gap entry ② on
+// docs/VirtualModelRouter_Design_v4_Quota.md's known-gap entry ② on
 // `vmr replay` not charging quota. nil-safe: reg==nil or
 // ep.Quota==nil/no Limits is a silent no-op, the same contract chargeQuota
 // has always had.

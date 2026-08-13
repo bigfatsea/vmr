@@ -10,7 +10,7 @@
 >
 > 本文档的每一条发现都已回源码逐项复核，批注就地写在对应小节内（`>` 引用块）。
 > 完整的评估依据、采纳去向与善后计划见
-> 一轮终审复核的 PART D（该复核的结论已并入 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`
+> 一轮终审复核的 PART D（该复核的结论已并入 `docs/VirtualModelRouter_Design_v4_Quota.md`
 > 与 `docs/VirtualModelRouter_Design_v4_Analytics.md`，原报告已删除）。
 > **原文一律不改**（它记录了当时的判断），结论以批注为准。
 >

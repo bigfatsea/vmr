@@ -232,7 +232,7 @@ providers:
 
 没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
 
-**目前交付的范围**（完整现状见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`「现状与后续计划」一节）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
+**目前交付的范围**（完整现状见 `docs/VirtualModelRouter_Design_v4_Quota.md`「现状与后续计划」一节）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
 
 **`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/admin/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
 
@@ -298,11 +298,11 @@ providers:
 
 **`pricing.supplement` 的行也可以是非美元原生的**——补充表/standard-override 文件（见 `pricing.example.yaml`）里的某一行可以自带 `currency:`，直接抄厂商官网的原生货币价目表，不用手工换算。折算成 USD 用的汇率来自一个 `exchange_rate:` 块，可以就写在补充表文件自己里面（**推荐**：这样这份文件完全自包含、可以直接搬到别的部署用，而且它解析出来的 USD 价格不会因为某个 `config.yaml` 出于记账原因调整了自己的汇率而跟着漂移），对补充表没声明汇率的货币，则退回 `config.yaml` 自己的 `pricing.exchange_rate`。
 
-**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数；和上面 `pricing.supplement: ./pricing.yaml` 只是撞了同一个文件名，两者并不是一回事——旧侧车的字段形状（`in_fresh_per_1m`/`date_range`/`updated_at` 等）不是新补充表的形状）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`）。`date_range`/`hour_range` 两元数组没有对应字段了（限时促销/错峰时间窗已作为复杂度/价值不匹配的一处简化被砍掉——见 `docs/TokenPlan_Quota_Routing_Design_opus-5.md` 定价相关章节）——直接丢弃，只保留覆盖你当前实际生效价格的那一行。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
+**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数；和上面 `pricing.supplement: ./pricing.yaml` 只是撞了同一个文件名，两者并不是一回事——旧侧车的字段形状（`in_fresh_per_1m`/`date_range`/`updated_at` 等）不是新补充表的形状）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`）。`date_range`/`hour_range` 两元数组没有对应字段了（限时促销/错峰时间窗已作为复杂度/价值不匹配的一处简化被砍掉——见 `docs/VirtualModelRouter_Design_v4_Quota.md` 定价相关章节）——直接丢弃，只保留覆盖你当前实际生效价格的那一行。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
 
 `vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。`vmr report` 自己的展示币种选项（和上面的记账币种相互独立）见下文[成本估算与定价](#成本估算与定价)。
 
-完整设计，包括留给后续批次的一切（单账号多窗口、滚动窗口、接官方用量 API 校准）：`docs/TokenPlan_Quota_Routing_Design_opus-5.md`。
+完整设计，包括留给后续批次的一切（单账号多窗口、滚动窗口、接官方用量 API 校准）：`docs/VirtualModelRouter_Design_v4_Quota.md`。
 
 ## 审计与报表
 
