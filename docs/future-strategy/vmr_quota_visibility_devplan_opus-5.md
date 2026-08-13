@@ -125,11 +125,10 @@ switch、`i18n/story_compare.go` 的 `MetricLabels`。价值确认成立（仓�
 建议顺序 0 → 1 → 2 → 3 → 4 →（可选）5。批 5 标为可选：它是纯技术债清理，不产出任何用户可见
 变化，若时间紧可单独排期。
 
-### 1.1 交付文件 → 批次对照表（B-7，2026-08-13 复核后补记）
+### 1.1 交付文件 → 批次对照表（2026-08-13 复核后补记）
 
-`docs/future-strategy/vmr_tier12_delivery_review_and_followup_sonnet-5.md` 的 B-7 指出本轮六批
-横跨多个包、新增/修改数十个文件，却没有一张可逐项核对的清单——"批 2 主表额度列没去掉"（A.2-2）
-之所以能藏住，正是因为完成情况都是散文式自述。以下清单从 `git status` 生成，按批次归类（有些文件
+一次交付复核指出本轮六批横跨多个包、新增/修改数十个文件，却没有一张可逐项核对的清单——
+"批 2 主表额度列没去掉"之所以能藏住，正是因为完成情况都是散文式自述。以下清单从 `git status` 生成，按批次归类（有些文件
 被 DP1 一梯队创建、被本 DP2 批次扩展，标"共用"）：
 
 | 文件 | 批次 | 备注 |
@@ -427,8 +426,7 @@ func LoadFile(path string) (map[string]map[string]Bucket, error)   // provider -
 **但本节开头"§2.5 主表保持现状不变，把额度参照列移出主表"这一条当时没有落地**——主表实际保留了
 额度列，与子表的"额度参照"/"上限"重复渲染同一个 `Amount`，且两处用了不同 formatter（主表
 `quotaAmountStr`、子表 `numStr`），同一个 `19.995` 在两处会显示成不同字符串。这是 2026-08-13 的
-交付复核（`docs/future-strategy/vmr_tier12_delivery_review_and_followup_sonnet-5.md`
-的 A.2-2）发现的，随后在同一天的善后批次里修正：`section_provider.go` 的主表彻底去掉了额度列
+交付复核发现的，随后在同一天的善后批次里修正：`section_provider.go` 的主表彻底去掉了额度列
 （`hasQuota`/`QuotaHdr`/`QuotaCell`/`Disclaimer` 全部删除，`quotaAmountStr` 一并删除），额度参照
 从此只在本节的子表出现。`ProviderRow.Quota` 字段仍保留、仍写入 `vmr-report.json`，只是不再渲染
 进 Markdown 主表。

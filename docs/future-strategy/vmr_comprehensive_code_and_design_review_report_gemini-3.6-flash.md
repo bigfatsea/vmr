@@ -10,7 +10,8 @@
 >
 > 本文档的每一条发现都已回源码逐项复核，批注就地写在对应小节内（`>` 引用块）。
 > 完整的评估依据、采纳去向与善后计划见
-> `docs/future-strategy/vmr_tier12_final_review_and_wrapup_opus-5.md` 的 PART D。
+> 一轮终审复核的 PART D（该复核的结论已并入 `docs/TokenPlan_Quota_Routing_Design_opus-5.md`
+> 与 `docs/VirtualModelRouter_Design_v4_Analytics.md`，原报告已删除）。
 > **原文一律不改**（它记录了当时的判断），结论以批注为准。
 >
 > **批注图例**：
@@ -34,7 +35,7 @@
 1. `docs/future-strategy/vmr_report_provider_client_cost_analysis_sonnet-5.md`（主设计方案）
 2. `docs/future-strategy/vmr_report_story_cost_dimensions_devplan_opus-5.md`（第一梯队 DevPlan）
 3. `docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md`（第二梯队 DevPlan）
-4. `docs/future-strategy/vmr_tier12_delivery_review_and_followup_sonnet-5.md`（一/二梯队交付复核与善后计划）
+4. 一/二梯队交付复核与善后计划（已并入设计文档后删除）
 5. 仓库当前全部未提交改动（代码、测试、配置、文档及 golden 文件）
 
 ---
@@ -54,7 +55,7 @@
 
 ### A.1 善后计划（E.1 & E.2）落地实测结果
 
-实测核查了工作区内全部未提交改动，对 `vmr_tier12_delivery_review_and_followup_sonnet-5.md` PART F 所列的 21 项善后落地点进行了 1:1 源码级比对：
+实测核查了工作区内全部未提交改动，对交付复核 PART F 所列的 21 项善后落地点进行了 1:1 源码级比对：
 
 | # | 条目 | DevPlan / 善后目标 | 源码实现位置 | 实测判定 |
 |---|---|---|---|---|
@@ -203,7 +204,7 @@ type ProviderQuotaRow struct {
 
 > **🔁🟠 C.1 批注：与本报告作者自己上一轮的 I-3 同源，那一轮的否决理由一个字都没有回应。**
 >
-> 上一轮（`vmr_tier12_delivery_review_and_followup_sonnet-5.md` PART C 的 I-3）已经给过三条否决
+> 上一轮交付复核（PART C 的 I-3）已经给过三条否决
 > 理由，本次复核逐条实测确认它们仍然成立：
 > 1. `config.validateQuota` 今天显式拒绝 `len(Limits) > 1`，由 `TestQuota_Reject_MultipleLimits`
 >    锁死——所谓"map 键碰撞导致其中一个 Limit 被静默覆盖"的场景**今天构造不出来**（配置加载期就
@@ -272,7 +273,7 @@ type ProviderQuotaRow struct {
 ### 🟠 C.3 盲点三：Step 内失败尝试（Failed Attempts）的 Token 与延迟损耗漏算
 
 #### 1. 方案与 DevPlan 现存缺陷
-在 `DP1 §3.1` 和 `vmr_tier12_delivery_review_and_followup_sonnet-5.md` A.2-7 中，方案改进了 `ModelUsageStat`，使其遍历全量 Attempts，让被 Failover 掉的节点在 `vmr story` 模型使用表中可见。
+在 `DP1 §3.1` 和交付复核的 A.2-7 中，方案改进了 `ModelUsageStat`，使其遍历全量 Attempts，让被 Failover 掉的节点在 `vmr story` 模型使用表中可见。
 
 然而，**Token 消耗的归属逻辑依然存在非对称漏算**：
 ```go

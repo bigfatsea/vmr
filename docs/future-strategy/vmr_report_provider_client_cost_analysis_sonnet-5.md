@@ -329,8 +329,8 @@ token（§3.2）。排第二是因为这个维度的其余指标今天已经能�
 | **Client 单点倾斜风险 Finding**（某 client 99% 流量落在单一 provider） | **会把有意配置误判成问题**。本仓库真实数据里 `openclaw`/`pimini` 就是 100% 落在 `opencode` 上，这是优先级路由的正常结果。一个会对正确配置持续报警的检测器，只会训练用户忽略整个 §7 | 出现"本应分散但意外单点"的真实事故，且能给出区分"有意"与"意外"的判据 |
 | **`aggregate.go` 拆分为 `aggregator/` 子包** | 外部评审把"新章节 = 新文件"当成规避手段，实为 `CLAUDE.md` 的明文约定，行数预算正是其执行机制。且第二梯队全部批次对 `aggregate.go` 的改动是 **0 行**，此刻不阻塞任何事；在没有功能需求推动时做这个高耦合文件的大重构，是拿确定的风险换不确定的收益 | **下一次真正需要往 `aggregate.go` 里加逻辑**（而非新建文件）时，借那次改动一并拆分——那时才有明确的拆分边界可依 |
 
-**以下四条于 2026-08-13 从终审复核（`vmr_tier12_final_review_and_wrapup_opus-5.md` 的 PART E.3）
-移入**，均来自对 `vmr_comprehensive_code_and_design_review_report_gemini-3.6-flash.md` 的逐条核查
+**以下四条于 2026-08-13 从一轮终审复核移入**，均来自对
+`vmr_comprehensive_code_and_design_review_report_gemini-3.6-flash.md` 的逐条核查
 （该文档内已就地写有批注）：
 
 | 条目 | 不做的理由 | 触发条件 |

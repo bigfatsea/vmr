@@ -100,8 +100,8 @@ func ceilScale(v int64, mult float64) int64 {
 // BaseAmount was moved: a read-only offline consumer (vmr report's §2.5
 // live-quota column) needs the exact same share router.QuotaStatus reports
 // for /admin/status, not a re-derivation of it — see
-// docs/future-strategy/vmr_tier12_delivery_review_and_followup_sonnet-5.md's
-// finding on the dropped degraded-estimate share.
+// docs/TokenPlan_Quota_Routing_Design_opus-5.md's "额度公式的唯一实现"
+// decision row.
 //
 // estimated/estimatedCost and c must come from the SAME bucket read (quota.
 // Registry.Used or a persisted quota.Bucket) — this deliberately does not
