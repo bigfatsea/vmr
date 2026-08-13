@@ -6,10 +6,12 @@ package router
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 )
@@ -49,13 +51,11 @@ func clientTag(rec *audit.Record) string {
 // epLabel is the log-only endpoint label — colon-joined protocol:provider:model
 // (as opposed to Endpoint.Name()'s slash form, which is a stable identifier
 // used in the admin status API and the X-VMR-Endpoint header and must not
-// change shape) — with a "(stream)" suffix when the request is streaming.
-func epLabel(ep *core.Endpoint, stream bool) string {
-	label := ep.AdapterType + ":" + ep.Provider + ":" + ep.Model
-	if stream {
-		label += "(stream)"
-	}
-	return label
+// change shape). Only probe.go still calls this directly — a probe request
+// is never streamed, so there's no stream marker to carry; tryOne's own
+// attemptPrefix builds the client-facing "virtual -> physical" form inline.
+func epLabel(ep *core.Endpoint) string {
+	return ep.AdapterType + ":" + ep.Provider + ":" + ep.Model
 }
 
 // fmtDur renders an elapsed duration for the dur= column — see
@@ -64,11 +64,15 @@ func fmtDur(d time.Duration) string {
 	return fmtutil.FmtSeconds(d, 2)
 }
 
-// capField renders the live router log's cap= column: which capabilities
-// this specific request actually exercised (RequestFacts, computed once at
-// ingress from the raw body), not what the endpoint declares support for —
-// that's config.yaml's job, and repeating it here per line would just be
-// noise. "-" when the request used none of the tracked capabilities.
+// capField renders the live router log's capability column: which
+// capabilities this specific request actually exercised (RequestFacts,
+// computed once at ingress from the raw body), not what the endpoint
+// declares support for — that's config.yaml's job, and repeating it here
+// per line would just be noise. Pipe-joined ("tools|image"), no field label
+// (the vocabulary is self-describing and doesn't collide with anything
+// else in the line); "" — meaning: omit the whole segment — for a
+// pure-text request, so a normal chat turn doesn't carry a "-" for a
+// column it never uses.
 func capField(f core.RequestFacts) string {
 	var caps []string
 	if f.HasImage {
@@ -86,26 +90,82 @@ func capField(f core.RequestFacts) string {
 	if f.WantsThinking {
 		caps = append(caps, "think")
 	}
-	if len(caps) == 0 {
-		return "-"
+	return strings.Join(caps, "|")
+}
+
+// fmtTokensK K/M-scales a token count for the live log's token-usage
+// columns, without an "EST"/"(est)" unit marker of its own — every caller
+// here already spells out estimated-vs-actual in the surrounding text
+// (estTokenField appends "(est)" itself; usageTokenField is only reached
+// with real usage), so baking the marker into the unit itself would be
+// redundant. Same precedent as internal/report/detail.go's fmtTokensPlain
+// and internal/story/render_md.go's fmtTokens — each display context tunes
+// its own scaling text rather than routing through one shared fmtutil
+// helper that would need yet another parameter to cover all three.
+func fmtTokensK(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fMT", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fKT", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%dT", n)
 	}
-	return strings.Join(caps, ",")
+}
+
+// estTokenField renders the pre-call token estimate (creq.Facts.
+// EstimatedTokens, computed once at ingress) for a log line whose outcome
+// never learns actual usage — every error/failover tail (build error,
+// network error, upstream error) reads this, since none of them reaches
+// respStream. forwardSuccess's usageTokenField also falls back to this
+// exact string when the upstream never reported usage at all.
+func estTokenField(creq *core.CanonicalRequest) string {
+	return "in " + fmtTokensK(creq.Facts.EstimatedTokens) + "(est)"
+}
+
+// usageTokenField renders a successful response's actual token usage —
+// "in $X, ch $N%, cw $X, out $X" — omitting any component the upstream
+// didn't report (chatmsg.Usage's doc comment: 0 means "not reported", not
+// "billed zero"). ch is the cache-hit share of In (CacheRead/In, already
+// included in In per Usage's doc comment), not an absolute count — the one
+// column here that's a ratio rather than a token count. Falls back to
+// estTokenField when ok is false: the upstream never reported usage at all
+// (opaque/compressed body, or a stream that died before any usage-bearing
+// block arrived — see tokenCharge's doc comment for the same fallback on
+// the quota-charging side).
+func usageTokenField(u chatmsg.Usage, ok bool, creq *core.CanonicalRequest) string {
+	if !ok {
+		return estTokenField(creq)
+	}
+	parts := []string{"in " + fmtTokensK(u.In)}
+	if u.In > 0 && u.CacheRead > 0 {
+		parts = append(parts, fmt.Sprintf("ch %d%%", int(math.Round(float64(u.CacheRead)/float64(u.In)*100))))
+	}
+	if u.CacheWrite > 0 {
+		parts = append(parts, "cw "+fmtTokensK(u.CacheWrite))
+	}
+	if u.Out > 0 {
+		parts = append(parts, "out "+fmtTokensK(u.Out))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // attemptPrefix renders the fixed lead-in shared by every tryOne outcome
-// line: client tag, virtual model routed to physical endpoint, what the
-// request actually used, and the attempt number. reqBytes is the built
-// request's on-wire size; pass -1 before BuildRequest has produced one (the
-// req=.../...ESTKT column is then omitted entirely rather than printed as 0).
-func attemptPrefix(rec *audit.Record, creq *core.CanonicalRequest, ep *core.Endpoint, attempt int, reqBytes int64) string {
-	stream := ""
+// line: client tag, virtual model routed to physical endpoint (» instead
+// of -> when the request is streaming — no separate "(stream)" suffix),
+// and which capabilities it exercised. Token usage and the attempt/status/
+// duration tail differ per outcome (estimate-only on every error path,
+// actual usage once forwardSuccess has one; done vs. still-failing-over),
+// so callers append those themselves instead of this baking in one shape
+// that would fit none of them well.
+func attemptPrefix(rec *audit.Record, creq *core.CanonicalRequest, ep *core.Endpoint) string {
+	arrow := "->"
 	if creq.Stream {
-		stream = "(stream)"
+		arrow = "»"
 	}
-	req := ""
-	if reqBytes >= 0 {
-		req = fmt.Sprintf(", req=%s/%s", fmtutil.FmtBytes(reqBytes), fmtutil.FmtTokens(creq.Facts.EstimatedTokens))
+	prefix := fmt.Sprintf("%s%s:%s %s %s:%s", clientTag(rec), ep.AdapterType, creq.Model, arrow, ep.Provider, ep.Model)
+	if caps := capField(creq.Facts); caps != "" {
+		prefix += ", " + caps
 	}
-	return fmt.Sprintf("%s%s:%s -> %s:%s%s%s, cap=%s, attempt=%d",
-		clientTag(rec), ep.AdapterType, creq.Model, ep.Provider, ep.Model, stream, req, capField(creq.Facts), attempt)
+	return prefix
 }

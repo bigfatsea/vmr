@@ -238,7 +238,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		}
 		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
-	rt.logf("%s %s status=all_failed attempts=%d dur=%s", clientTag(rec), creq.Model, attempts, fmtDur(time.Since(start)))
+	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
 }
 
 // findByHealthKey returns the endpoint in candidates whose HealthKey
@@ -346,11 +346,13 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	key := ep.HealthKey()
 	attemptStart := time.Now()
 	// logPrefix carries the fields every log line in this attempt shares
-	// (client tag, virtual model, physical endpoint, cap=, attempt number)
-	// so each call site below only spells out what actually differs about
-	// its outcome. Gains the req= size once BuildRequest succeeds — a build
-	// failure never learns one, so it logs the -1 (no req=) form.
-	logPrefix := attemptPrefix(rec, creq, ep, attempt, -1)
+	// (client tag, virtual model -> physical endpoint, capabilities) so
+	// each call site below only spells out what actually differs about its
+	// outcome. tokenEst is the pre-call estimate every error/failover tail
+	// uses (none of them ever learns actual usage); forwardSuccess prefers
+	// real usage over it once one comes back.
+	logPrefix := attemptPrefix(rec, creq, ep)
+	tokenEst := estTokenField(creq)
 	var att *audit.Attempt
 	if rec != nil {
 		rec.Attempts = append(rec.Attempts, audit.Attempt{
@@ -378,11 +380,10 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// lock out every other client's traffic to it via a bogus transient
 		// cooldown.
 		rt.Health.ReportNeutral(key)
-		rt.logf("%s, error=build:%v", logPrefix, err)
+		rt.logf("%s, %s, error=build:%v, attempt=%d", logPrefix, tokenEst, err, attempt)
 		att.SetBuildError(err)
 		return false, nil, false
 	}
-	logPrefix = attemptPrefix(rec, creq, ep, attempt, int64(len(outBody)))
 	// outBody comes straight from BuildRequest (immutable by contract), so
 	// the audit trail references it directly — no GetBody+ReadAll round trip
 	// duplicating the whole body per attempt.
@@ -400,13 +401,13 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		rt.logf("%s, error=network:%v, cooldown=%s", logPrefix, err, cd)
+		rt.logf("%s, %s, error=network:%v, cooldown=%s, attempt=%d", logPrefix, tokenEst, err, cd, attempt)
 		att.SetNetworkError(err)
 		return false, nil, false
 	}
 
 	if resp.StatusCode >= 400 {
-		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, snap, attempt, start, key)
+		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key)
 	}
 	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key)
 }
@@ -417,7 +418,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 // comments below; everything else reports failure and lets the caller's
 // failover loop move to the next candidate.
 func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response, ad adapter.Adapter, att *audit.Attempt,
-	logPrefix string, snap *Snapshot, attempt int, start time.Time, key string) (done bool, uerr *upstreamError, success bool) {
+	logPrefix, tokenEst string, snap *Snapshot, attempt int, start time.Time, key string) (done bool, uerr *upstreamError, success bool) {
 
 	// The error body is read with a deadline: ResponseHeaderTimeout only
 	// covers the headers, and an upstream that stalls after sending error
@@ -457,7 +458,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		// content, or have a larger window — but leave the endpoint's
 		// health untouched; only release a probe slot if held.
 		rt.Health.ReportNeutral(key)
-		rt.logf("%s, status=%d, class=%s (no cooldown)", logPrefix, resp.StatusCode, class)
+		rt.logf("%s, %s, status=%d, class=%s, attempt=%d (no cooldown)", logPrefix, tokenEst, resp.StatusCode, class, attempt)
 		return false, uerr, false
 	}
 	if class == core.ErrClient {
@@ -469,11 +470,11 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 		w.WriteHeader(uerr.status)
 		w.Write(uerr.body)
-		rt.logf("%s, status=%d, class=client, dur=%s", logPrefix, resp.StatusCode, fmtDur(time.Since(start)))
+		rt.logf("%s, %s, %d(%s, %dx)", logPrefix, tokenEst, resp.StatusCode, fmtDur(time.Since(start)), attempt)
 		return true, nil, false
 	}
 	cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
-	rt.logf("%s, status=%d, class=%s, cooldown=%s", logPrefix, resp.StatusCode, class, cd)
+	rt.logf("%s, %s, status=%d, class=%s, cooldown=%s, attempt=%d", logPrefix, tokenEst, resp.StatusCode, class, cd, attempt)
 	return false, uerr, false
 }
 
@@ -513,9 +514,9 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// per-chunk Flush is a no-op concern for JSON bodies — Content-Length is
 	// stripped anyway.
 	copyErr := copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
-	status := "ok"
+	status := "OK"
 	if copyErr != nil && r.Context().Err() == nil {
-		status = "truncated" // upstream died mid-stream; the response is already committed
+		status = "TRUNCATED" // upstream died mid-stream; the response is already committed
 		att.SetTruncated(copyErr)
 	}
 	// Charged here regardless of copyErr — a truncated response still
@@ -525,7 +526,12 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	rt.chargeQuota(ep, rbody, creq, time.Now())
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
-	rt.logf("%s, status=%s, dur=%s", logPrefix, strings.ToUpper(status), fmtDur(time.Since(start)))
+	// rbody.Usage() is safe to read here: chargeQuota (above) already
+	// consumed it, and respStream's own contract is that Usage()/OutBytes()
+	// are stable once copyFlush has returned (see response.go's doc
+	// comment on respStream).
+	usage, ok := rbody.Usage()
+	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
 	return true, nil, true
 }
 

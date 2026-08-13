@@ -32,6 +32,7 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 ### Changed
 - `vmr report` §2.5: the declared `quota:` reference moved out of the main table entirely — it now appears only in the "Quota vs. Consumption" sub-table below, instead of being duplicated in both places through two different number formatters
 - `vmr report`: a `config.yaml` read failure now prints one unified warning instead of two near-identical ones (pricing and §2.5 quota references used to each print their own)
+- Live router log line redesigned for density: `»` replaces `-> ... (stream)` for a streaming request; the pre-call `req=xxxKB/xxxESTKT` column is replaced by actual token usage (`in`/`ch` cache-hit%/`cw`/`out`) once a response reports it, falling back to `in xxxKT(est)` when it doesn't; capabilities are now pipe-joined and omitted entirely for a pure-text request instead of printing `cap=-`; and the trailing `attempt=N, status=X, dur=Ys` triplet collapses into `STATUS(Ys, Nx)`
 
 ### Fixed
 - `vmr.sh`'s `cmd_start` port-occupancy precheck was silently dead (its regex expected `vmr check`'s listen-address line as `listen=...`, but it prints `listen:`) — restored

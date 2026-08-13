@@ -471,11 +471,11 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 }
 
 // fmtTokensPlain renders an estimated token count for human-facing detail
-// pages ("27.3 KT") — same K/M scaling as fmtutil.FmtTokens but without its
-// "EST" unit marker (that marker exists to keep the live router log's
-// req=xxxKB/xxxESTKT column from being mistaken for billed usage at a
-// glance; a labeled estimated-token-count field on a detail page already
-// carries that context, so the terser unit reads better here).
+// pages ("27.3 KT") — K/M-scaled, no "(est)"/"EST" marker on the unit
+// itself: unlike the live router log's estTokenField (internal/router/
+// logfmt.go), which needs that marker inline since it shares a line with
+// actual-usage numbers, a detail page's field is already labeled as an
+// estimate by its surrounding text, so the terser unit reads better here.
 func fmtTokensPlain(n int64) string {
 	switch {
 	case n >= 1_000_000:

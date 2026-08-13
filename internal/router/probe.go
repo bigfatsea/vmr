@@ -61,7 +61,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	// logPrefix mirrors tryOne's: shared fields once, per-outcome fields at
 	// each call site. No req= size here — probe.Request's body is a fixed
 	// few dozen tokens, never worth reporting per-probe.
-	logPrefix := tagCol("probe") + " " + epLabel(ep, false)
+	logPrefix := tagCol("probe") + " " + epLabel(ep)
 
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {

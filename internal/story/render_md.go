@@ -274,15 +274,13 @@ func msDuration(ms int64) time.Duration {
 }
 
 // fmtTokens renders an actual (already-billed) per-step token count —
-// K/M-scaled like fmtutil.FmtTokens, but without its "EST" unit marker.
-// That marker exists specifically so the live router log's pre-call
-// ESTIMATE (core.RequestFacts.EstimatedTokens, used for a routing decision
-// made BEFORE the call — see internal/fmtutil's doc comment) is never
-// mistaken for billed usage at a glance. The numbers here are the request's
-// recorded usage.In/CacheRead/Out — not an estimate — so reusing that
-// marker would claim the opposite of what's true. Same rationale
-// internal/report/detail.go's fmtTokensPlain already applies for its own
-// (still-estimated, but contextually labeled) token count.
+// K/M-scaled, no "(est)" marker: the numbers here are the request's
+// recorded usage.In/CacheRead/Out, not an estimate, so carrying one would
+// claim the opposite of what's true. Same rationale internal/report/
+// detail.go's fmtTokensPlain applies for its own (estimated, but
+// contextually labeled) token count, and internal/router/logfmt.go's
+// estTokenField/usageTokenField for the live router log's inline version
+// of the same est-vs-actual distinction.
 func fmtTokens(n int64) string {
 	switch {
 	case n >= 1_000_000:

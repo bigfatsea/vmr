@@ -16,9 +16,9 @@ import (
 // FmtBytes renders a byte count human-readably (B/KB/MB) — request/response
 // bodies range from a few hundred bytes to several MB (inline images), so a
 // fixed unit would be either unreadable or falsely precise at one end.
-// Shared by every place that prints a body size (live router log, `vmr
-// report` rendering) so they don't each carry their own copy of this
-// threshold logic.
+// Shared by every place that prints a body size (`vmr report` rendering,
+// chatmsg's inline-attachment placeholder text) so they don't each carry
+// their own copy of this threshold logic.
 func FmtBytes(n int64) string {
 	switch {
 	case n >= 1<<20:
@@ -27,23 +27,6 @@ func FmtBytes(n int64) string {
 		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
 	default:
 		return fmt.Sprintf("%dB", n)
-	}
-}
-
-// FmtTokens renders a pre-call token estimate (core.RequestFacts.EstimatedTokens)
-// the same way FmtBytes renders a byte count: K/M-scaled above 1000/1e6, raw
-// below. The "EST" marker on the unit itself (not just a comment) is
-// deliberate: this number explains a routing decision made before the call,
-// and must never be mistaken for billed/actual usage at a glance in the live
-// router log's req=xxxKB/xxxESTKT column.
-func FmtTokens(n int64) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fESTMT", float64(n)/1_000_000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fESTKT", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%dESTT", n)
 	}
 }
 

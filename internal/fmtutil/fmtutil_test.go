@@ -30,29 +30,6 @@ func TestFmtBytes(t *testing.T) {
 	}
 }
 
-// TestFmtTokens locks the K/M thresholds and the "EST*" unit suffix — the
-// suffix is a deliberate anti-confusion marker (see doc comment) and must
-// never silently drop.
-func TestFmtTokens(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		n    int64
-		want string
-	}{
-		{0, "0ESTT"},
-		{999, "999ESTT"},
-		{1000, "1.0ESTKT"},
-		{1500, "1.5ESTKT"},
-		{1_000_000, "1.0ESTMT"},
-		{2_500_000, "2.5ESTMT"},
-	}
-	for _, c := range cases {
-		if got := FmtTokens(c.n); got != c.want {
-			t.Errorf("FmtTokens(%d) = %q, want %q", c.n, got, c.want)
-		}
-	}
-}
-
 // TestFmtSeconds locks the fixed-decimal rendering and the decimals
 // parameter (2 for the live router log, 3 for `vmr diagnose`).
 func TestFmtSeconds(t *testing.T) {
