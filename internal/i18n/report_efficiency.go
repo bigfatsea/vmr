@@ -37,6 +37,11 @@ type EfficiencyText struct {
 	OutputTruncationFinding func(trunc, total int) FindingText
 	SlowRequestsFinding     func(sharePct string, thresholdSec int) FindingText
 	ContextGrowthFinding    func(growthX, sessionID, sessionTitle string) FindingText
+	// ProviderQuotaExhaustionFinding (batch 3) fires from the router's own
+	// real-time counter (report.ProviderQuotaRow.Live), never from this
+	// report's recomputed window value — see that field's doc comment for
+	// why an estimate must never be the basis of an alert.
+	ProviderQuotaExhaustionFinding func(provider string, usedPct string, metric, every string) FindingText
 }
 
 func Efficiency(lang Lang) EfficiencyText {
@@ -102,6 +107,12 @@ func Efficiency(lang Lang) EfficiencyText {
 					Implicated: sessionID + " " + sessionTitle, Action: "中途 compaction",
 				}
 			},
+			ProviderQuotaExhaustionFinding: func(provider string, usedPct string, metric, every string) FindingText {
+				return FindingText{
+					Title: "额度即将耗尽", Value: usedPct + "%（" + metric + " · " + every + "）",
+					Implicated: provider, Action: "检查该账户的路由权重或额度配置",
+				}
+			},
 		}
 	}
 	return EfficiencyText{
@@ -159,6 +170,12 @@ func Efficiency(lang Lang) EfficiencyText {
 			return FindingText{
 				Title: "Context growth", Value: "×" + growthX,
 				Implicated: sessionID + " " + sessionTitle, Action: "compact mid-session",
+			}
+		},
+		ProviderQuotaExhaustionFinding: func(provider string, usedPct string, metric, every string) FindingText {
+			return FindingText{
+				Title: "Quota nearing exhaustion", Value: usedPct + "% (" + metric + " · " + every + ")",
+				Implicated: provider, Action: "Review this account's routing weight or quota configuration",
 			}
 		},
 	}

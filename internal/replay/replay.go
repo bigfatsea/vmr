@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"vmr/internal/adapter"
@@ -512,7 +511,7 @@ func writeReplayRecord(path string, rv *recordView, ep *core.Endpoint, req *http
 			Response: &audit.Message{Status: resp.StatusCode, Headers: audit.Redact(resp.Header), Body: audit.EncodeBody(respBody)},
 		},
 		Attempts: []audit.Attempt{{
-			Endpoint: strings.Join([]string{ep.AdapterType, ep.Provider, ep.Model}, ":"),
+			Endpoint: core.EndpointLabel(ep.AdapterType, ep.Provider, ep.Model),
 			Protocol: ep.AdapterType,
 			Provider: ep.Provider,
 			Model:    ep.Model,

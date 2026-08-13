@@ -15,7 +15,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 - **`vmr report`**：横向聚合。跨全部请求统计成本、延迟、错误率、缓存效率、会话/任务分布——回答"这段时间整体花了多少、哪里在浪费"。
 - **`vmr story`**：纵向还原。把一条 Agent 任务的完整执行过程重建成可读的叙事流——回答"这一个任务具体是怎么做的、哪一步开始跑偏"。
 
-两者服务四类具体场景，落在事实层（原始记录）/剖面层（规则派生指标）/解读层（§7 尚未实现的 LLM 注解）三层里不同的层：单 Agent 调优（"这次改了 prompt，工具调用是变多还是变少了"——剖面层，`vmr story` 的九项指标 + §3.7 对比）、跨框架/跨模型横向比较（"Claude Code 和 OpenClaw 跑同一类任务谁更省"——同样是剖面层，跨 Journey 对比）、事故复盘（"这次为什么突然开始乱猜文件路径"——事实层，`vmr story` 的完整叙事 + compaction 信息损失摘要）、上下文工程（"这个 Agent 的上下文预算都花在哪了"——`vmr story` 的上下文构成演化曲线 + `vmr report` 的 §1 token 经济）。四类场景没有一类需要 LLM 参与——这也是为什么剖面层先于解读层实现（§4）。
+两者服务四类具体场景，落在事实层（原始记录）/剖面层（规则派生指标）/解读层（§7 尚未实现的 LLM 注解）三层里不同的层：单 Agent 调优（"这次改了 prompt，工具调用是变多还是变少了"——剖面层，`vmr story` 的九项指标 + 模型使用/切换 + §3.7 对比）、跨框架/跨模型横向比较（"Claude Code 和 OpenClaw 跑同一类任务谁更省"——同样是剖面层，跨 Journey 对比）、事故复盘（"这次为什么突然开始乱猜文件路径"——事实层，`vmr story` 的完整叙事 + compaction 信息损失摘要）、上下文工程（"这个 Agent 的上下文预算都花在哪了"——`vmr story` 的上下文构成演化曲线 + `vmr report` 的 §1 token 经济）。四类场景没有一类需要 LLM 参与——这也是为什么剖面层先于解读层实现（§4）。
 
 两者共享同一个底层事实来源——`internal/ctxgraph` 把审计记录建模成内容寻址的 manifest（消息哈希向量）序列 + 编辑分类 + lineage 图（见 §3），`vmr report` 的会话分组、`vmr story` 的任务叙事都是这张图上的查询，不是两套独立算法。这不是巧合：Agent 场景里"一个会话有几个任务""这次压缩丢了什么""这一步是不是新指令"这些问题，本质都是对同一份 manifest 序列做差分，用两套启发式各自回答一遍只会导致两者迟早不一致。
 
@@ -74,7 +74,7 @@ vmr report [-c config.yaml] [-o dir] [-details=false] <file|glob>...
 
 ### 2.2 数据形状：`Report2`（= `vmr-report.json` 的 schema，`meta.format` = 10）
 
-按维度分桶，每桶各自从原始值算自己的百分位（百分位不可加——跨桶拿已经算好的 p95 再汇总只能退化成错误近似）：`Overall`（单桶）、`ByModel`（model×protocol）、`ByDate`、`Hours`/`HoursOfDay`、`Endpoints`/`EndpointsAll`、`ByClient`、`Workloads`（工作负载类）、`Sessions`、`Compactions`（见 §2.4）、`Tools`（声明工具集形态）、`Efficiency`（§2.6 自动发现表）、`Sticky`（Sticky Model 有效性）、`Pricing`（可选）。
+按维度分桶，每桶各自从原始值算自己的百分位（百分位不可加——跨桶拿已经算好的 p95 再汇总只能退化成错误近似）：`Overall`（单桶）、`ByModel`（model×protocol）、`ByDate`、`Hours`/`HoursOfDay`、`Endpoints`/`EndpointsAll`、`ByClient`、`Workloads`（工作负载类）、`Sessions`、`Compactions`（见 §2.4）、`Tools`（声明工具集形态）、`Efficiency`（§2.6 自动发现表）、`Sticky`（Sticky Model 有效性）、`Providers`（§2.5 账户消耗与额度参照，从 `EndpointsAll` 事后上卷，见其下方一段）、`ClientEndpoints`（§5.5 按客户端的上游归属，`(client_key_tag, endpoint)` 二元组的 token 消耗，流式累计——见其下方一段）、`Pricing`（可选）。
 
 派生指标（每个 finish 阶段就地写回，原始切片随即释放）：`tokens_in_fresh = tokens_in − tokens_in_cached − tokens_in_cache_write`；`cache_efficiency = cached / (cached + fresh)`；`cache_hit_rate = cached / tokens_in`；`slow_requests`（`dur_ms` 超过 30s 阈值）；`context_growth`（会话内末轮/首轮 `tokens_in` 之比——现在这个比值永远在同一个 Lineage 范围内计算，不会跨越一次隐藏的历史重置，见 §3.2 对这条历史缺陷的说明）。比值类指标的分母低于该桶总请求数 90% 时，Markdown 侧标注 `¹` 低置信度脚注。
 
@@ -96,7 +96,14 @@ vmr report [-c config.yaml] [-o dir] [-details=false] <file|glob>...
 
 ### 2.6 Markdown 渲染：九个编号章节
 
-`renderSummary`/`renderCostTokens`/`renderCostEstimate`/`renderReliability`/`renderLatency`/`renderWorkload`/`renderSessions`/`renderStickyEffect`/`renderEndpointValue`/`renderCompactions`/`renderEfficiency`/`renderRequestIndexLink`/`renderAppendix`（`render_doc.go` 的 `Markdown()` 固定运行顺序）：`§0` 摘要 + 自动亮点、`§1` 成本与 Token 经济、`§2` 成本估算、`§3` 可靠性、`§4` 延迟与吞吐、`§5` 负载分布、`§6` 会话与任务（含 `§6.5` Sticky 有效性、`§6.6` 端点性价比、`§6.7` Compaction 还原）、`§7` 效率与浪费、`§8` 请求详单入口，外加一段附录（数据源、百分位方法、`⭐` 含义）。`§7` 的自动发现表（`buildFindings`）扫描已完成聚合的各桶，挑出跨过阈值的浪费项（工具 schema 浪费、缓存未命中、定时任务冗余、输出截断率、慢请求占比、上下文膨胀），每条附一句可执行建议。每条 `Finding` 除展示文案外还带一个不随语言变化的稳定标识 `Code`（`FindingCode`，如 `tool_schema_waste`）——测试与任何程序化消费者都应该只依赖 `Code`，不依赖展示文案本身，见 §4.2。
+`renderSummary`/`renderCostTokens`/`renderCostEstimate`/`renderProviders`/`renderReliability`/`renderLatency`/`renderWorkload`/`renderClientEndpoint`/`renderSessions`/`renderStickyEffect`/`renderEndpointValue`/`renderCompactions`/`renderEfficiency`/`renderRequestIndexLink`/`renderAppendix`（`render_doc.go` 的 `Markdown()` 固定运行顺序）：`§0` 摘要 + 自动亮点、`§1` 成本与 Token 经济、`§2` 成本估算、`§2.5` 账户（Provider）消耗与额度（`provider.go` 的 `buildProviders` 从已完成的 `EndpointsAll` 事后上卷——不新增流式累计，与 `buildTools`/`buildCompactions` 同构；`ProviderRow.Quota` 只读 `config.yaml` 已解析好的 `LimitConfig.Resolved`，不碰 `internal/router`，但**只写入 `vmr-report.json`，主表 Markdown 不再渲染这一列**——额度参照唯一的渲染出口是其下的子表，见 A.2-2：两处各用一个 formatter 渲染同一个 `Amount` 曾经产生过显示不一致，改为单一出口后不再可能发生），其下的**"额度与消耗对照"子表**（`providerquota.go` 的 `buildProviderQuotaRows`，见
+`docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md` 批 2）只列配了 `quota:` 的账户，把"本报表窗口消耗"（从 `EndpointsAll` 重算，经 `internal/quota` 的 `BaseAmount`/`ApplyModelMultiplier` 加权）与"本周期已用"（`<log_dir>/vmr-quota.json` 的实时计数器，经 `cmd_report.go` 的 `buildProviderQuotas` 按 `PeriodStart` 匹配后写入，不匹配则显示 `-`）并排给出——两者窗口不同，渲染层强制不做减法、各自标注来源。
+
+**重算列的基数按 metric 各不相同，这一点决定了它与路由半区记账的偏差**：`requests` 口径用 `EndpointRow.Forwarded`（响应存在且 `status < 400` 的 attempt 数）而不是 `Requests`——路由半区在 `forwardSuccess` 里逐次记账，一个所有 attempt 都失败的请求它一分不记，而 `Requests` 是请求级计数、仍会算在最后尝试的那个端点头上；`Forwarded` 也刻意宽于 `OK`（一个 2xx 但传输中断的 attempt 会被 `SetTruncated` 写上 `Error` 从而掉出 `OK`，但路由半区**已经为它记了账**）。因此这一列在 `requests` 口径下是**恒等复现而非估算**。`tokens` 口径做不到：报表只能累计 usage 解析成功的请求，而路由半区在 usage 嗅探失败时按字节数估算记了账——该账户所有请求都如此时该列渲染 `-` 而非 `0`（与 `cost` 口径"有流量但无定价"同一条纪律：缺数据不伪装成零）。`cmd/vmr/quota_parity_test.go` 是这条等价关系的差分测试——同一批合成记录分别喂给 `router.ChargeResponse` 与完整的 `vmr report` 管线，断言两者相等；**它跨越了 `report`↛`router` 的导入边界，所以只能放在组合根 `cmd/vmr`，不能放进 `internal/report`**。`§3` 可靠性、`§4` 延迟与吞吐、`§5` 负载分布、`§5.5` 按客户端的上游归属（`clientendpoint.go` 的 `clientEndpointCollector`——按 `(client_key_tag, endpoint)` 流式累计 token，因为没有任何既有桶按这个 key 分组；渲染上按 client 分组、组内按 token 降序，不是 client×endpoint 矩阵，见 `docs/future-strategy/vmr_report_provider_client_cost_analysis_sonnet-5.md` §3.2）、`§6` 会话与任务（含 `§6.5` Sticky 有效性、`§6.6` 端点性价比、`§6.7` Compaction 还原）、`§7` 效率与浪费、`§8` 请求详单入口，外加一段附录（数据源、百分位方法、`⭐` 含义）。
+
+`§7` 的自动发现表（`buildFindings`）扫描已完成聚合的各桶，挑出跨过阈值的浪费项（工具 schema 浪费、缓存未命中、定时任务冗余、输出截断率、慢请求占比、上下文膨胀），每条附一句可执行建议。每条 `Finding` 除展示文案外还带一个不随语言变化的稳定标识 `Code`（`FindingCode`，如 `tool_schema_waste`）——测试与任何程序化消费者都应该只依赖 `Code`，不依赖展示文案本身，见 §4.2。
+
+`§7` 的 `provider_quota_exhaustion`（批 3，`findings_quota.go`）只认这份实时计数器，从不用本报表自己的重算值顶替；缺实时数据不命中（一个估算值不该成为可执行警报的依据）。判据是两个条件同时满足：`Live.Pct >= 90`（绝对量已经吃紧）**且** `Live.Pct > PeriodElapsedPct`（消耗速度快于周期流逝）——后一项**才是**与路由半区 `quota.Headroom < 1` 同源的相对项（`Headroom < 1 ⟺ 已用% > 周期已过%`，两者数学等价，见 `internal/quota/score.go` 的 `Headroom`），前一项是报表自己加的绝对下限，两者合起来才是完整判据，不能只说"与 `Headroom<1` 同源"。这个双条件是刻意设计：只看绝对阈值会让 `every: 5h` 这类短周期账户在每个周期末尾稳定越过 90% 而持续误报——一个会对正确配置持续报警的检测器，只会训练用户忽略整个 `§7`（三梯队否决"Client 单点倾斜 Finding"的同一条理由）。
 
 **`§6.5` Sticky 有效性的度量方法**：Sticky Model 存在只有一个理由——保持上游 prompt cache 处于热状态，这个章节就是验证它是否真的起作用的证据。**按结果（是否落在上一请求的同一端点）度量，不按机制**：一次触发了 sticky 指针但落到冷端点的请求，仍然算作"切换"；切换的具体原因（TTL 过期、健康冷却、条件路由淘汰、该模型未开 sticky）事后无法互相区分，因此这个章节**不区分切换原因**，只对比"延续上一端点"与"切换了端点"两组各自的缓存命中效率。结果按虚拟模型（sticky 配置的实际粒度）拆开；任一组样本量低于 20 时表格仍渲染但不给结论。
 
@@ -206,7 +213,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **渲染**（`render_md.go`）：单文件自包含 Markdown，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（模型自己产出的内容：推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700，与 `vmr report` 的 `details/` 同等敏感度——正文含完整对话内容。
 
-### 3.5 行为剖面：九项规则派生指标（`metrics.go`）
+### 3.5 行为剖面：九项规则派生指标 + 模型使用/切换（`metrics.go`）
 
 零 LLM 成本、确定性、跨框架可比——`ComputeMetrics` 纯粹是对已构建 Journey 的一次遍历，不重新拉取任何数据：
 
@@ -222,7 +229,9 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | 上下文有效利用率 | 非 system Event 里，其提取到的实体（文件路径/URL）后续被更晚的 Event 再次提到的 token 占比——低值意味着大量进入上下文的内容从未被再次引用 |
 | Compaction 次数与信息损失 | 见 §3.6，汇总到 Journey 级别 |
 
-`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + Journey 身份（id/标题/时间范围）+ 下面 §3.5a 的 Findings，是 §3.7 对比模块的直接输入，不需要重新解析 Markdown。
+`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + 模型使用/切换 + Journey 身份（id/标题/时间范围）+ 下面 §3.5a 的 Findings，是 §3.7 对比模块的直接输入，不需要重新解析 Markdown。
+
+**模型使用与切换**（`modelusage.go`）：一个 Journey 用过哪些上游 `(provider, model)` 及各自的 Step 数/token，加上每一次相邻 Step 间上游发生变化的切换点（第几步、从哪换到哪）。**取值必须来自端点，不能取 `Manifest.Model`**——那是虚拟模型名（`audit.Record.Model`，如 `coding`/`agent`），一个 Journey 内客户端全程请求同一个，照它实现会得到一张永远显示"未换过模型"的空表；真实上游模型（token 归属、相邻 Step 切换点比较用的那一个）来自 `Step.Rec.Attempts` 最后一次 attempt 的结构化 `Provider`/`Model` 字段，为空（很旧的日志）才回退到切分 `Manifest.Endpoint`（先 `:` 后 `/`，`internal/story` 不能 import `internal/report` 复用其 `attemptUpstream`，这里是一份独立的小 helper）。**Step 数的计入范围更宽**（A.2-7 的"便宜的一半"修正）：一个 Step 只要有任意一次 attempt 命中某 `(provider, model)`，那个 pair 的 `Steps` 就加一——不只是最后成功的那一次；被 failover 掉的端点因此在表里可见（但不计 token，token 只归属最终解析出的那一个）。切换点带一个纯观察性标记 `OnFailoverStep`（= 该 Step 的 `len(Attempts) > 1`）——不断言切换的原因（failover、TTL 过期、路由策略变化事后不总能分辨），只陈述两者共同发生过；**Step 内部的 failover 切换本身仍不产生独立的切换记录**（切换点比较仍只看相邻 Step 之间的最终解析结果）——这是 A.2-7"完整的一半"（`WithinStep` 标记）待做的部分，本次未落地。这两个字段是列表型数据，**不进** §3.7 对比/语料统计的标量 diff/Spearman 机制（见下方两处说明）。
 
 ### 3.5a Findings：规则派生的 Step 级"疑似问题"清单（`findings.go`）
 
@@ -287,7 +296,8 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 ### 3.7 双 Journey 对比（`internal/story/compare.go`）
 
-两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。每行同时带一个不随语言变化的稳定标识 `Metric`（`MetricCode`，如 `model_ms`），与展示用的 `Label` 分离——`Label` 随 `-lang` 变化，`Metric` 不变（§4.2）。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。
+两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工——按模型的 token 拆分是列表型数据，不在这套只吃标量的 diff 机制里；"切换次数"（`len(Metrics.ModelSwitches)`）是唯一适合登记进来的标量，已作为第 13 项数值字段登记（`MetricModelSwitchCount`，见
+`docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md` 批 4）——它是**路由环境**变量，不是 Agent 行为变量，读作"这两个 Journey 的路由环境是否不同"，不能读成"Agent 行为不同"。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。每行同时带一个不随语言变化的稳定标识 `Metric`（`MetricCode`，如 `model_ms`），与展示用的 `Label` 分离——`Label` 随 `-lang` 变化，`Metric` 不变（§4.2）。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。
 
 **4a 落地记录（compare 场景切片，2026-07-30）**：基于对一份人工分析报告（同一对真实 Journey 的双实例对比）的逐项复核，`Comparison` 新增一个可选字段 `Extras *ComparisonExtras`（`ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics)` 计算），全部零 LLM 成本、直接从 `ctxgraph.Manifest`/`Step` 已有字段派生，不是新的数据采集：
 
@@ -324,7 +334,7 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 `vmr story -corpus [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建复用 `-render-all` 已有的 `story.BuildAll`（单次 `FetchRecords` 服务全部候选），产出 `vmr-story-corpus.md`/`.json`，落在同一个 `{out}/stories/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
 
-- **相关性只报效应量**：`ComputeCorpusStats` 对九项指标里的 12 个数值字段两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
+- **相关性只报效应量**：`ComputeCorpusStats` 对九项指标 + 模型切换次数共 13 个数值字段（按模型的 token 拆分仍不含在内——同样是列表型，进不了这套只吃标量的机制）两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
 - **无成功/失败标签**：VMR 零埋点前提意味着结构性拿不到任务是否真正达成目标的信号——`GroupComparison`（7.2，按 `Finding.Code` 分组比较净工作时长中位数）比较的是"耗时"这一个代理指标，不是效果；每处输出都明确写"不是确定性结论"。
 - **样本量门槛，不是静默阈值**：`corpusMinCorrelationN`（5）、`corpusMinGroupSize`（3，双侧）——低于门槛的 Finding 分组对比不是不显示就算了，`SkippedGroupComparisons` 字段显式列出被跳过的 Code，Markdown 也渲染成一句"因样本不足跳过"，不是悄悄消失。
 

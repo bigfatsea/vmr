@@ -1,0 +1,162 @@
+// Ver 2026-08-12 23:40, by Opus 5
+
+// Pairs with internal/report/section_provider.go (§2.5 Provider Spend & Quota).
+package i18n
+
+import "strconv"
+
+// ProviderText is section_provider.go's text, in one language.
+type ProviderText struct {
+	Title   string
+	Intro   string
+	Headers []string // provider, models, requests, success rate, fresh/cached/out, cache eff, dur mean, error rate, top error class — +cost appended conditionally
+	CostHdr func(cur string) string
+}
+
+func Provider(lang Lang) ProviderText {
+	if lang == ZH {
+		return ProviderText{
+			Title:   "§2.5 账户（Provider）消耗与额度",
+			Intro:   "按上游账户（config.yaml 的 providers[].name）上卷的跨模型汇总——回答\"这个账户整体消耗多少、可靠性如何\"，而不是逐个模型手动相加。\n\n",
+			Headers: []string{"账户", "模型数", "请求", "成功率", "fresh/cached/out", "缓存效率", "均值耗时", "错误率", "主要错误类"},
+			CostHdr: func(cur string) string { return "$ 估算" + cur },
+		}
+	}
+	return ProviderText{
+		Title:   "§2.5 Provider Spend & Quota",
+		Intro:   "Cross-model roll-up by upstream account (config.yaml's providers[].name) — answers \"how much did this account consume overall, and how reliable was it\" without manually summing its endpoint rows.\n\n",
+		Headers: []string{"Provider", "Models", "Requests", "Success Rate", "fresh/cached/out", "Cache Eff.", "Dur. Mean", "Error Rate", "Top Error"},
+		CostHdr: func(cur string) string { return "$ Estimate" + cur },
+	}
+}
+
+// ProviderQuotaText is section_provider.go's renderProviderQuotaTable text
+// (batch 2's "额度与消耗对照" sub-table), in one language.
+type ProviderQuotaText struct {
+	Title               string
+	Intro               string
+	Headers             []string // provider, metric, window-consumed, live-used, amount, used%, elapsed%, period range
+	WindowFootnote      string
+	StalePeriodFootnote string
+	// ConfigChangedFootnote explains the "-‡" rendered in the live-
+	// used/used% cells when Live is nil specifically because this
+	// account's quota: metric/every changed since vmr-quota.json was last
+	// written under its old key — distinct from the generic stale-period
+	// "-" (StalePeriodFootnote), which would wrongly suggest the process
+	// itself wasn't running. Only rendered when at least one row actually
+	// has the marker.
+	ConfigChangedFootnote string
+	// OverQuotaFootnote explains the ⭐ marker appended to "已用%" when
+	// Live.Pct >= 100 — Pct is deliberately never clamped
+	// (LiveQuota's own doc comment), so without a visual flag an
+	// over-quota account's 138.9% reads no differently than a healthy
+	// 68.0% at a glance.
+	OverQuotaFootnote string
+	// SourcePathLine names the <log_dir>/vmr-quota.json path the live
+	// column's numbers actually came from, so a reader can judge whether
+	// it's plausibly the same instance that produced the input audit logs.
+	SourcePathLine func(path string) string
+	// CrossInstanceWarning renders only when NONE of this report's
+	// input audit logs resolve under the live counter's own log_dir — the
+	// single-machine variant of "these two numbers might be from different
+	// instances" that can happen today (analyzing a colleague's copied-over
+	// logs against this machine's own healthy counter).
+	CrossInstanceWarning string
+	// NoOverlapFootnote explains the † marker appended to "本报表窗口
+	// 消耗" when this report's audit-log window and the account's billing
+	// period share no time at all (e.g. analyzing three-month-old archived
+	// logs against today's period) — only rendered when at least one row
+	// actually has the marker.
+	NoOverlapFootnote string
+	// FormatLiveUsed annotates the already-formatted "本周期已用" number with
+	// its degraded-estimate share, so a period whose consumption came
+	// entirely from a byte-count estimate never renders identically to one
+	// backed by authoritative usage. Takes usedStr rather than a float on
+	// purpose: number formatting stays in internal/report's numStr, the same
+	// formatter the neighbouring 上限/本报表窗口消耗 cells go through — i18n is
+	// a zero-dep leaf package, so a float parameter would force a second copy
+	// of that rule here and let the two drift.
+	FormatLiveUsed func(usedStr string, estimatedPct float64) string
+}
+
+func ProviderQuota(lang Lang) ProviderQuotaText {
+	if lang == ZH {
+		return ProviderQuotaText{
+			Title: "额度与消耗对照",
+			Intro: "只列配了 `quota:` 的账户，把两个不同时间窗口的消耗数字并排给出——" +
+				"不做减法、不算覆盖率，各自标注来源。\n\n",
+			Headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
+			WindowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
+				"各口径的精度不同：**requests 口径无出入**——按 `ceil(倍率) × 已转发尝试数` 逐字复现路由半区的记账公式" +
+				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记）；**tokens 口径**已知两处出入——逐请求 ceil 与" +
+				"汇总后取整的差异（每请求每分量至多 1 token），以及上游未返回精确 usage 的请求：路由半区按字节数估算记了账，" +
+				"本列计 0（该账户所有请求都如此时本列显示 `-` 而非 0）；**cost 口径**已知一处出入——本报表的定价解析结果" +
+				"可能与记账当时生效的价格不同。三种口径共同的出入源：config 里的权重/倍率在本窗口期内被改过。\n",
+			StalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
+				"与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 `-`。括号内的\"X% 估算\"标注" +
+				"这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
+			ConfigChangedFootnote: "> ‡ 该账户的 `quota:` metric/every 曾被改过——盘上还留着旧配置写下的计数器，" +
+				"新配置对应的计数器还没有任何记账；进程本身是健康的，不是停过，只是配置换了一把新钥匙。" +
+				"（旧计数器不会被自动清理，所以这个标记只说明「改过」，不说明改于何时——一次很久以前的修改同样会让它出现。）\n",
+			OverQuotaFootnote: "> ⭐ 已用% ≥ 100% 时的标记：该账户本周期已超出配置的额度上限。\n",
+			SourcePathLine: func(path string) string {
+				return "实时计数器来自 `" + path + "`。\n"
+			},
+			CrossInstanceWarning: "> 本次输入的审计日志全部不在这份实时计数器所在的 `log_dir` 下——" +
+				"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
+			NoOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
+				"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
+			FormatLiveUsed: func(usedStr string, estimatedPct float64) string {
+				if estimatedPct > 0 {
+					return usedStr + "（" + pctHundredStr(estimatedPct) + " 估算）"
+				}
+				return usedStr
+			},
+		}
+	}
+	return ProviderQuotaText{
+		Title: "Quota vs. Consumption",
+		Intro: "Every account that declares a `quota:`, with two independently-windowed consumption figures " +
+			"placed side by side — never subtracted or ratioed, each labeled with its own source.\n\n",
+		Headers: []string{"Provider", "Metric", "Window Consumed¹", "Used This Period²", "Amount", "Used%", "Elapsed%", "Period"},
+		WindowFootnote: "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay " +
+			"of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the " +
+			"router's own `ceil(multiplier) × forwarded-attempt count` formula literally (the router charges once per forwarded " +
+			"upstream success; failed attempts were never charged in the first place). **tokens: two known drift sources** — " +
+			"per-request vs. aggregate-then-ceil rounding (at most 1 token per request per component), and requests whose upstream " +
+			"returned no exact usage: the router charged a byte-count estimate for those, this column counts 0 (rendered `-` " +
+			"instead of 0 when that was true of every request on the account). **cost: one known drift source** — this report's " +
+			"own pricing resolution may differ from the price in effect at charge time. Common to all three: config " +
+			"weights/multipliers changed mid-window.\n",
+		StalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
+			"account, in a different window than the column to its left. Never subtract or ratio the two. Shows `-` when the stored " +
+			"counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a " +
+			"degraded estimate (a byte-count fallback used when upstream didn't return exact usage), not authoritative metering.\n",
+		ConfigChangedFootnote: "> ‡ This account's `quota:` metric/every was changed at some point — the on-disk counter is still " +
+			"keyed under the OLD config, and the new key has no charges yet. The process itself is healthy and running; only the " +
+			"config changed underneath it. (Superseded keys are never cleaned up, so this marker says the config *was* changed, " +
+			"not *when* — a long-ago edit raises it just the same.)\n",
+		OverQuotaFootnote: "> ⭐ marks Used% >= 100%: this account is over its configured quota for the current period.\n",
+		SourcePathLine: func(path string) string {
+			return "The real-time counter is read from `" + path + "`.\n"
+		},
+		CrossInstanceWarning: "> None of this report's input audit logs resolve under that counter's `log_dir` — the real-time column " +
+			"may be from a different machine/vmr instance than the one that produced the logs, not necessarily the same account's " +
+			"same books as the recomputed column to its left.\n",
+		NoOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
+			"archived logs against today's billing period. More extreme than the routine \"windows don't align\" case: the two " +
+			"numbers belong to two entirely unrelated stretches of time, not two views of the same one.\n",
+		FormatLiveUsed: func(usedStr string, estimatedPct float64) string {
+			if estimatedPct > 0 {
+				return usedStr + " (" + pctHundredStr(estimatedPct) + " est.)"
+			}
+			return usedStr
+		},
+	}
+}
+
+// pctHundredStr formats an already-percentage value (0-100 scale) to one
+// decimal place with a trailing "%" — mirrors internal/report's pctHundred.
+func pctHundredStr(v float64) string {
+	return strconv.FormatFloat(v, 'f', 1, 64) + "%"
+}

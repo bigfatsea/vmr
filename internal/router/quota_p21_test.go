@@ -148,7 +148,7 @@ func TestBaseAmount_TokenWeights_AllDefault_MatchesP1EqualWeightedSum(t *testing
 		TokenWeights: core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1},
 	}
 	c := quota.Counters{Fresh: 80, CacheRead: 20, CacheWrite: 5, Out: 50}
-	got := baseAmount(spec, c)
+	got := quota.BaseAmount(spec, c)
 	want := float64(80 + 20 + 5 + 50)
 	if got != want {
 		t.Fatalf("baseAmount = %v, want %v (equal-weighted sum, P1-identical)", got, want)
@@ -161,7 +161,7 @@ func TestBaseAmount_TokenWeights_Applied(t *testing.T) {
 		TokenWeights: core.TokenWeights{InFresh: 1.0, CacheRead: 0.1, CacheWrite: 1.25, Out: 4.0},
 	}
 	c := quota.Counters{Fresh: 100, CacheRead: 100, CacheWrite: 8, Out: 10}
-	got := baseAmount(spec, c)
+	got := quota.BaseAmount(spec, c)
 	want := 100*1.0 + 100*0.1 + 8*1.25 + 10*4.0 // = 100 + 10 + 10 + 40 = 160
 	if got != want {
 		t.Fatalf("baseAmount = %v, want %v", got, want)
@@ -177,7 +177,7 @@ func TestBaseAmount_Requests_UnaffectedByTokenWeights(t *testing.T) {
 		TokenWeights: core.TokenWeights{InFresh: 99, CacheRead: 99, CacheWrite: 99, Out: 99},
 	}
 	c := quota.Counters{Requests: 7, Fresh: 1000} // Fresh present but irrelevant to a requests Limit
-	got := baseAmount(spec, c)
+	got := quota.BaseAmount(spec, c)
 	if got != 7 {
 		t.Fatalf("baseAmount = %v, want 7 (requests metric ignores TokenWeights entirely)", got)
 	}
@@ -223,7 +223,7 @@ models:
 	}
 	// Reading it back through baseAmount applies token_weights on top:
 	// 100*1 (in_fresh default) + 100*0.1 (cache_read override) + 20*1 (out default) = 130.
-	got := baseAmount(spec, used)
+	got := quota.BaseAmount(spec, used)
 	if got != 130 {
 		t.Fatalf("baseAmount = %v, want 130 (charge-time multiplier x read-time token_weights composed correctly)", got)
 	}

@@ -10,6 +10,12 @@
 // public contract, not an implementation detail.
 package report
 
+import (
+	"time"
+
+	"vmr/internal/core"
+)
+
 // Format is the aggregate report's JSON structure version. 10 continues the legacy
 // sequence (9 = legacy report) and marks the redesigned layout.
 const Format = 10
@@ -23,22 +29,25 @@ const SlowThresholdMS = 30_000
 // compute during finish* (fresh tokens, cache_efficiency, slow_requests,
 // true stream_ms percentiles) since the raw sums already exist then.
 type Report2 struct {
-	Meta         Meta            `json:"meta"`
-	Overall      Row             `json:"overall"`
-	ByModel      []Row           `json:"by_model"`
-	ByDate       []Row           `json:"by_date"`
-	Hours        []HourRow       `json:"hours,omitempty"`
-	HoursOfDay   []HourRow       `json:"hours_of_day,omitempty"`
-	Endpoints    []EndpointRow   `json:"endpoints"`
-	EndpointsAll []EndpointRow   `json:"endpoints_all,omitempty"`
-	ByClient     []ClientRow     `json:"by_client,omitempty"`
-	Workloads    []WorkloadRow   `json:"workloads,omitempty"`
-	Sessions     []SessionRow    `json:"sessions,omitempty"`
-	Compactions  []CompactionRow `json:"compactions,omitempty"`
-	Tools        []ToolShapeRow  `json:"tools,omitempty"`
-	Efficiency   []Finding       `json:"efficiency,omitempty"`
-	Sticky       *StickyEffect   `json:"sticky,omitempty"`
-	Pricing      *Pricing        `json:"pricing,omitempty"`
+	Meta            Meta                `json:"meta"`
+	Overall         Row                 `json:"overall"`
+	ByModel         []Row               `json:"by_model"`
+	ByDate          []Row               `json:"by_date"`
+	Hours           []HourRow           `json:"hours,omitempty"`
+	HoursOfDay      []HourRow           `json:"hours_of_day,omitempty"`
+	Endpoints       []EndpointRow       `json:"endpoints"`
+	EndpointsAll    []EndpointRow       `json:"endpoints_all,omitempty"`
+	ByClient        []ClientRow         `json:"by_client,omitempty"`
+	Workloads       []WorkloadRow       `json:"workloads,omitempty"`
+	Sessions        []SessionRow        `json:"sessions,omitempty"`
+	Compactions     []CompactionRow     `json:"compactions,omitempty"`
+	Tools           []ToolShapeRow      `json:"tools,omitempty"`
+	Efficiency      []Finding           `json:"efficiency,omitempty"`
+	Sticky          *StickyEffect       `json:"sticky,omitempty"`
+	Providers       []ProviderRow       `json:"providers,omitempty"`
+	ProviderQuotas  []ProviderQuotaRow  `json:"provider_quotas,omitempty"`
+	ClientEndpoints []ClientEndpointRow `json:"client_endpoints,omitempty"`
+	Pricing         *Pricing            `json:"pricing,omitempty"`
 
 	// requests is the per-request export (vmr-requests.json). Unexported so
 	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
@@ -57,6 +66,24 @@ type Meta struct {
 	To               string   `json:"to,omitempty"`
 	SlowThreshold    int      `json:"slow_threshold_ms"`
 	PercentileMethod string   `json:"percentile_method"` // documented in appendix
+
+	// QuotaJSONPath/QuotaInputOutsideLogDir are cmd_report.go's
+	// composition-root facts about §2.5's live-quota counter, set on rep
+	// AFTER Build/BuildCached returns (report itself never imports config,
+	// so it can't compute either of these) — see cmdReport's own comment
+	// at the call site. Both zero-valued when the sub-table has nothing to
+	// render (no point naming a source for a table that isn't shown).
+	// QuotaJSONPath is the <log_dir>/vmr-quota.json path the live column's
+	// numbers actually came from — named explicitly so a reader can judge
+	// whether it's plausibly the same instance that produced the audit
+	// logs Inputs lists, not just implicitly "some file somewhere".
+	QuotaJSONPath string `json:"quota_json_path,omitempty"`
+	// QuotaInputOutsideLogDir is true when NONE of Inputs resolves under
+	// the directory QuotaJSONPath sits in — the cheap single-machine
+	// signal for "these audit logs and this live quota counter probably
+	// belong to two different vmr instances" (e.g. analyzing a colleague's
+	// copied-over logs against this machine's own healthy counter).
+	QuotaInputOutsideLogDir bool `json:"quota_input_outside_log_dir,omitempty"`
 }
 
 // Row is the full-metric bucket: Overall, ByModel, ByDate. It carries
@@ -168,8 +195,22 @@ type EndpointRow struct {
 	Endpoint string `json:"endpoint"` // provider/real-model (or provider:real-model label)
 
 	// G - endpoint health
-	Attempts     int            `json:"attempts"`
-	OK           int            `json:"ok"`
+	Attempts int `json:"attempts"`
+	OK       int `json:"ok"`
+	// Forwarded counts attempts whose response was actually forwarded to the
+	// client — response present and status < 400, WITHOUT the Error == ""
+	// condition OK additionally requires. A superset of OK on purpose: a 2xx
+	// that broke mid-copy gets Error = "truncated: …" and drops out of OK, yet
+	// the router still charged quota for it (router.go's forwardSuccess:
+	// "Charged here regardless of copyErr").
+	//
+	// That makes it the exact offline basis for the router's requests-metric
+	// charging — chargeQuota fires once per forwarded attempt, so this
+	// endpoint's real charged total is identically Forwarded x ceil(multiplier)
+	// (providerquota.go's MetricRequests branch, pinned by
+	// cmd/vmr/quota_parity_test.go). Neither OK nor the request-level
+	// Requests/RequestsOK is that identity.
+	Forwarded    int            `json:"forwarded,omitempty"`
 	Failed       int            `json:"failed"`
 	Availability float64        `json:"availability"`
 	ErrorRate    float64        `json:"error_rate,omitempty"` // failed/attempts × 100
@@ -405,6 +446,9 @@ const (
 	FindingOutputTruncation FindingCode = "output_truncation"
 	FindingSlowRequests     FindingCode = "slow_requests"
 	FindingContextGrowth    FindingCode = "context_growth"
+	// FindingProviderQuotaExhaustion (batch 3) fires from the router's own
+	// real-time counter — see findings_quota.go's quotaExhaustionFinding.
+	FindingProviderQuotaExhaustion FindingCode = "provider_quota_exhaustion"
 )
 
 // RequestRow is one row of vmr-requests.json's "requests" field: the per-request drill-down
@@ -491,6 +535,203 @@ type StickyModelRow struct {
 	Protocol  string      `json:"protocol"`
 	Continued StickyGroup `json:"continued"`
 	Switched  StickyGroup `json:"switched"`
+}
+
+// ProviderRow is one upstream account's (config.yaml's providers[].name)
+// cross-model summary — §2.5 账户消耗与额度. Rolled up post-hoc from the
+// already-finished EndpointsAll rows rather than accumulated independently
+// (see provider.go's buildProviders): every field here is additive, so no
+// new streaming state is needed. Deliberately carries no P50/P95 —
+// percentiles aren't additive, and giving this bucket real ones would mean
+// buffering a whole extra per-request slice during aggregation just for a
+// question ("is this account under pressure") that doesn't need them; each
+// endpoint's own percentiles are already in §5. DurMSMean is the honest
+// substitute.
+type ProviderRow struct {
+	Provider     string         `json:"provider"`
+	Models       []string       `json:"models"` // upstream models with traffic under this account, sorted
+	Requests     int            `json:"requests"`
+	RequestsOK   int            `json:"requests_ok"`
+	Attempts     int            `json:"attempts"`
+	Failed       int            `json:"failed"`
+	ErrorRate    float64        `json:"error_rate,omitempty"` // failed/attempts × 100
+	ErrorClasses map[string]int `json:"error_classes,omitempty"`
+	WastedMS     int64          `json:"wasted_ms,omitempty"`
+
+	TokensIn           int64   `json:"tokens_in"`
+	TokensInCached     int64   `json:"tokens_in_cached"`
+	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
+	TokensInFresh      int64   `json:"tokens_in_fresh"`
+	TokensOut          int64   `json:"tokens_out"`
+	TokensKnown        int     `json:"tokens_known,omitempty"`
+	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
+	DurMSMean          int64   `json:"dur_ms_mean,omitempty"` // mean, NOT a percentile
+
+	// H - cost (only when pricing configured)
+	CostEstimate *float64 `json:"cost_estimate,omitempty"`
+
+	// Quota is a read-only snapshot of this account's config.yaml quota
+	// declaration, purely as a reference point — see ProviderQuotaRef's own
+	// doc comment for what it deliberately is NOT.
+	Quota *ProviderQuotaRef `json:"quota,omitempty"`
+}
+
+// ProviderQuotaRef is a config.yaml provider's declared quota limit, plus
+// (batch 2) the computation inputs and Live state buildProviderQuotaRows
+// needs to build §2.5's "额度与消耗对照" sub-table row for the same
+// provider — the same map (cmd_report.go's buildProviderQuotas) feeds both
+// ProviderRow.Quota (below) and that sub-table, so the two never disagree
+// on what an account's declared quota is.
+//
+// ProviderRow.Quota itself only ever round-trips into vmr-report.json now
+// — the Markdown main table renders no quota column at all, to
+// avoid the exact duplication this type used to produce: the same Amount
+// shown twice, through two different formatters, sometimes as two
+// different strings for the same fractional value. The sub-table
+// (renderProviderQuotaTable) is the one Markdown surface for this data,
+// and carries its own "unweighted / window doesn't align with billing
+// cycle" qualification in its footnotes.
+type ProviderQuotaRef struct {
+	Metric string  `json:"metric"` // requests | tokens | cost
+	Every  string  `json:"every"`  // 1mo / 1w / 5h ...
+	Amount float64 `json:"amount"`
+
+	// Limit/Spec (P2, batch 2) are the resolved config.yaml inputs needed to
+	// compute WindowConsumed/Live below — computation INPUTS, not report
+	// conclusions, so `json:"-"` keeps them out of vmr-report.json:
+	// serializing Spec would dump the account's whole model_multipliers map
+	// into every report (config.mba.yaml's volcengine2 alone has 6 entries).
+	// Both nil exactly when this provider's quota couldn't be resolved from
+	// config.yaml at all (same condition that leaves this whole
+	// ProviderQuotaRef out of the quotas map in the first place — see
+	// cmd_report.go's buildProviderQuotas).
+	Limit *core.Limit     `json:"-"`
+	Spec  *core.QuotaSpec `json:"-"`
+
+	// Live (P2, batch 2) is this account's real-time quota-registry state,
+	// read from <log_dir>/vmr-quota.json — see LiveQuota's own doc comment.
+	// nil when that file is unreadable/missing, has no bucket for this
+	// account+limit, or the stored bucket's period doesn't match the period
+	// PeriodStart/PeriodEnd computes for "now" (a counter left over from a
+	// previous period the process wasn't running for — see the dev plan's
+	// §5.2 trap; rendering a stale bucket as "本周期已用" would silently
+	// show last period's number as if it were current).
+	Live *LiveQuota `json:"live,omitempty"`
+
+	// LiveConfigChanged is true when Live is nil specifically because
+	// this provider's quota: metric/every changed since vmr-quota.json was
+	// last written for it — the CURRENT limitKey has no bucket, but an OLDER
+	// one for the same provider does (quota.Registry never deletes a
+	// superseded key, it only lazily resets in place). Distinguishes this
+	// from the generic "process wasn't running through this period, or has
+	// never charged this account at all" story the plain nil-Live case
+	// tells: a config edit is a healthy, running process, not a stopped
+	// one — the renderer must not let the two read the same.
+	LiveConfigChanged bool `json:"live_config_changed,omitempty"`
+}
+
+// LiveQuota is one provider's real-time quota-registry snapshot as of the
+// report run's "now" — the numerator ProviderQuotaRef's static Amount alone
+// was missing (see docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md's
+// batch 2, §0.4). Deliberately NOT derived from anything in this report's own
+// audit-log window — see ProviderQuotaRow's doc comment for why the two
+// consumption numbers must never be combined into one.
+type LiveQuota struct {
+	Used         float64   `json:"used"` // base(metric) already applied — directly comparable to Amount
+	Pct          float64   `json:"pct"`  // Used/Amount*100, not clamped
+	PeriodStart  time.Time `json:"period_start"`
+	PeriodEndsAt time.Time `json:"period_ends_at"`
+	// EstimatedPct is quota.EstimatedPct's result for this account's
+	// bucket: the percentage of Used that came from a degraded (non-usage-
+	// sniffed) estimate rather than real upstream usage — always 0 for
+	// metric: requests and for a tokens/cost account whose usage was fully
+	// sniffed. Without this, an account whose entire period is a downgraded
+	// estimate renders identically to one with authoritative usage — the
+	// same estimated_pct/⭐ honesty discipline the rest of this package
+	// applies everywhere else (see report_tokens.go's EstimatedTokensNote).
+	EstimatedPct float64 `json:"estimated_pct,omitempty"`
+}
+
+// ProviderQuotaRow is one row of §2.5's "额度与消耗对照" sub-table
+// (providerquota.go's buildProviderQuotaRows) — every config.yaml account
+// that declares a quota:, with two independently-windowed consumption
+// figures placed side by side ON PURPOSE, never subtracted or ratioed
+// against each other (see the dev plan's batch 2 and risk table):
+//
+//   - WindowConsumed is THIS REPORT RUN's own audit-log window, recomputed
+//     post-hoc through the same base(metric)/model_multiplier formula the
+//     router charges with (quota.BaseAmount/ApplyModelMultiplier) — but NOT
+//     a replay of the router's actual charge history. Known small sources
+//     of drift from the router's real number: per-request ceil vs
+//     aggregate-then-ceil rounding, failed attempts never charged, config
+//     weights/multipliers having changed mid-window, and (metric: cost
+//     only) this report's own pricing resolution possibly differing from
+//     the price in effect at charge time.
+//   - Live is the router's own real-time counter (see LiveQuota) — the
+//     account's ACTUAL billing period, almost always a different window
+//     than the report's own input files cover.
+//
+// The renderer must keep both windows labeled, not just this comment.
+type ProviderQuotaRow struct {
+	Provider string  `json:"provider"`
+	Metric   string  `json:"metric"`
+	Every    string  `json:"every"`
+	Amount   float64 `json:"amount"`
+
+	// WindowConsumed is a pointer so a metric: cost account with NO
+	// resolvable pricing for any of its endpoints (CostEstimate nil
+	// everywhere in this window) can render nil → "-", the same "missing
+	// data, not a real zero" convention section_provider.go's own $ Estimate
+	// column already uses — a plain 0 here would be indistinguishable
+	// from "genuinely spent nothing this window" and read as false
+	// reassurance for exactly the AFP-pricing-gap scenario this report
+	// exists to surface. requests/tokens accounts are never nil: 0 there is
+	// a real zero (no traffic), not a missing-data case.
+	WindowConsumed *float64 `json:"window_consumed"`
+
+	// WindowNoOverlap is true when this report run's audit-log
+	// coverage ([Meta.From, Meta.To]) and this account's current billing
+	// period ([PeriodStart, PeriodEndsAt]) share NO time in common at all —
+	// e.g. analyzing three-month-old archived logs against today's live
+	// period. Partial misalignment is the documented normal case (the
+	// whole reason these two columns are never subtracted); this flags the
+	// more extreme, more easily misread case where they don't overlap even
+	// a little. Always false when this report processed zero records (no
+	// window to compare against in the first place).
+	WindowNoOverlap bool `json:"window_no_overlap,omitempty"`
+
+	// Live/LiveConfigChanged are copied as-is from the ProviderQuotaRef this
+	// row was built from — see that type's own doc comments.
+	Live              *LiveQuota `json:"live,omitempty"`
+	LiveConfigChanged bool       `json:"live_config_changed,omitempty"`
+
+	PeriodStart  time.Time `json:"period_start"`
+	PeriodEndsAt time.Time `json:"period_ends_at"`
+	// PeriodElapsedPct is 1 - quota.TimeLeftFrac(now, PeriodStart,
+	// PeriodEndsAt), as a percentage — "周期已过%", read side by side with
+	// Live.Pct ("已用%") to judge burn rate without any extrapolation (see
+	// the dev plan's period-progress rewrite: quota.Headroom<1 is exactly
+	// equivalent to Live.Pct > PeriodElapsedPct).
+	PeriodElapsedPct float64 `json:"period_elapsed_pct"`
+}
+
+// ClientEndpointRow is one (client_key_tag, upstream endpoint) pair's token
+// consumption — §5.5 按客户端的上游归属. Rendered grouped by ClientKey
+// (section_client_endpoint.go), not as a client×endpoint matrix — see this
+// file's package doc comment / the dev doc's §3.2 for why. Streaming-
+// collected (clientendpoint.go) since no existing bucket is keyed this way.
+// Deliberately token/request-only: no $ (already answered by §2's by-client
+// table) and no percentiles (this row's whole point is the endpoint-level
+// split, not a new latency view).
+type ClientEndpointRow struct {
+	ClientKey string `json:"client_key"`
+	Endpoint  string `json:"endpoint"` // protocol:provider:model (or the "/"-joined legacy label)
+	Requests  int    `json:"requests"`
+
+	TokensIn       int64 `json:"tokens_in"`
+	TokensInCached int64 `json:"tokens_in_cached"`
+	TokensInFresh  int64 `json:"tokens_in_fresh"`
+	TokensOut      int64 `json:"tokens_out"`
 }
 
 func (r *Report2) RequestRows() []RequestRow { return r.requests }

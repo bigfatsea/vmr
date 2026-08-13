@@ -366,6 +366,11 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, worst.Title))
 	}
 
+	// provider quota exhaustion (batch 3) — see findings_quota.go.
+	if f := quotaExhaustionFinding(rep, lang); f != nil {
+		out = append(out, *f)
+	}
+
 	return out
 }
 

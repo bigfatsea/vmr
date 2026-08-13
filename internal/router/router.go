@@ -354,7 +354,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	var att *audit.Attempt
 	if rec != nil {
 		rec.Attempts = append(rec.Attempts, audit.Attempt{
-			Endpoint: strings.Join([]string{ep.AdapterType, ep.Provider, ep.Model}, ":"),
+			Endpoint: core.EndpointLabel(ep.AdapterType, ep.Provider, ep.Model),
 			Protocol: ep.AdapterType,
 			Provider: ep.Provider,
 			Model:    ep.Model,

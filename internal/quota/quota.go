@@ -10,7 +10,7 @@ import (
 // Counters is one Limit's accumulated consumption, stored by raw component
 // — never pre-weighted or pre-priced. Charge/Used deal in these units
 // directly; base(metric) (requests count, or an equal-weighted token sum in
-// P1) is applied by the caller (internal/router/quota.go), not here. See
+// P1) is applied by the caller via weight.go's BaseAmount, not here. See
 // the design doc's Storage Granularity decision: folding a weighting
 // policy into the stored value would force a data migration every time that
 // policy changes; storing raw components means P2's token_weights/

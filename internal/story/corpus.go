@@ -34,18 +34,22 @@ import (
 )
 
 // corpusMetricCodes is which of Metrics' fields get a distribution/
-// correlation slot — the same twelve MetricCode values Compare's own Rows
+// correlation slot — the same thirteen MetricCode values Compare's own Rows
 // already names, so a reader who knows -compare's output recognizes these
-// immediately.
+// immediately. MetricModelSwitchCount (batch 4) is a ROUTING-ENVIRONMENT
+// variable, not an agent-behavior one — see MetricModelSwitchCount's own
+// doc comment (compare.go): a correlation involving it reads as "did these
+// two groups' routing environment differ", never "did the agent behave
+// differently".
 var corpusMetricCodes = []MetricCode{
 	MetricModelMS, MetricAgentExecMS, MetricHumanIdleMS, MetricNetWorkingMS,
 	MetricModelToolRatio, MetricToolCallCount, MetricDuplicateActionRate,
 	MetricErrorRecoveryCount, MetricPlanExecRatio, MetricContextUtilization,
-	MetricCompactionCount, MetricCompactionLossTokens,
+	MetricCompactionCount, MetricCompactionLossTokens, MetricModelSwitchCount,
 }
 
 // corpusMetricKinds mirrors Compare's own Kind assignment for each of the
-// twelve codes above, so RenderCorpusMarkdown's distribution table renders
+// thirteen codes above, so RenderCorpusMarkdown's distribution table renders
 // the same human units (fmtutil.FmtSeconds/pctStr/fmtTokens) -compare does
 // instead of a second, drifting set of raw-number formatters.
 var corpusMetricKinds = map[MetricCode]MetricKind{
@@ -61,6 +65,7 @@ var corpusMetricKinds = map[MetricCode]MetricKind{
 	MetricContextUtilization:   KindRatio,
 	MetricCompactionCount:      KindCount,
 	MetricCompactionLossTokens: KindTokens,
+	MetricModelSwitchCount:     KindCount,
 }
 
 func metricValue(m Metrics, code MetricCode) float64 {
@@ -89,6 +94,8 @@ func metricValue(m Metrics, code MetricCode) float64 {
 		return float64(m.CompactionCount)
 	case MetricCompactionLossTokens:
 		return float64(m.CompactionLossTokens)
+	case MetricModelSwitchCount:
+		return float64(len(m.ModelSwitches))
 	default:
 		return 0
 	}
@@ -254,7 +261,7 @@ type CorpusStats struct {
 
 // ComputeCorpusStats is the corpus layer's entire computation: per-metric
 // distributions, per-Finding-Code hit rates, pairwise Spearman
-// correlations among the twelve behavior-profile metrics, and
+// correlations among the thirteen behavior-profile metrics, and
 // Finding-grouped NetWorkingMS comparisons. All of it is pure, in-memory,
 // zero-LLM aggregation over already-computed Metrics/Findings — journeys
 // themselves are never re-parsed here, matching Findings' own "rules

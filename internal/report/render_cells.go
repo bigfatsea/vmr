@@ -8,6 +8,7 @@ package report
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,11 +41,39 @@ func fmtDurMS(v int64) string {
 	return strconv.FormatFloat(float64(v)/1000, 'f', 1, 64) + "s"
 }
 
+// numStr formats a float without a trailing ".0" for the common whole-number
+// case (an unweighted requests count, or a token_weights sum that happens to
+// land on an integer) but keeps two decimals for a genuinely fractional
+// value (a weighted token sum, or a $ cost amount) — §2.5's quota-vs-
+// consumption sub-table's WindowConsumed/Live.Used cells.
+func numStr(v float64) string {
+	if v == math.Trunc(v) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', 2, 64)
+}
+
 func pctFloat(f float64) string {
 	return strconv.FormatFloat(f*100, 'f', 1, 64) + "%"
 }
 
 func pctStr2(num, den int) string {
+	if den <= 0 {
+		return "-"
+	}
+	return strconv.FormatFloat(float64(num)/float64(den)*100, 'f', 1, 64) + "%"
+}
+
+// pctStr64 is pctStr2's int64 version — must keep the same den<=0 guard,
+// otherwise a zero denominator renders "NaN%" instead of "-". Added instead
+// of narrowing int64 to int at call sites (section_client_endpoint.go's
+// TokensIn/clientTotal are int64, and truncating to int before formatting a
+// percentage is loss-of-precision for no reason on any of the four release
+// targets, even though none is anywhere near overflowing int on any of
+// them) — an external review flagged this as a "systemic risk"; it is only
+// the cosmetic half of that, which is why the guard above still matters more
+// than the widening.
+func pctStr64(num, den int64) string {
 	if den <= 0 {
 		return "-"
 	}

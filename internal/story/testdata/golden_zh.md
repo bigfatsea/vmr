@@ -9,6 +9,14 @@
 - 起始 10:00:00
 - 结束 · Step 3 · finish=stop · 10:00:06
 
+### 模型使用
+
+| 模型（provider） | Step 数 | in | cached | out |
+|---|---|---|---|---|
+| agent (provider) | 3 | 800 | 580 | 95 |
+
+全程未切换上游模型。
+
 ## t01 · 帮我查一下 A 股新股打新收益
 
 ### 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent

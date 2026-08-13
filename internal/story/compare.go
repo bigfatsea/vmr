@@ -84,6 +84,13 @@ const (
 	MetricContextUtilization   MetricCode = "context_utilization"
 	MetricCompactionCount      MetricCode = "compaction_count"
 	MetricCompactionLossTokens MetricCode = "compaction_loss_tokens"
+	// MetricModelSwitchCount (batch 4) is len(Metrics.ModelSwitches) — a
+	// ROUTING-ENVIRONMENT variable, not an agent-behavior one: failover,
+	// sticky-TTL expiry, and routing-policy changes all produce a switch
+	// with no change in what the agent itself did. In corpus.go's
+	// correlation matrix this reads as "did these two groups' routing
+	// environment differ", never as "did the agent behave differently".
+	MetricModelSwitchCount MetricCode = "model_switch_count"
 )
 
 func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {
@@ -177,6 +184,7 @@ func Compare(a, b JourneySummary) Comparison {
 		metricDiff(MetricContextUtilization, "Context Utilization", KindRatio, ma.ContextUtilization, mb.ContextUtilization),
 		metricDiff(MetricCompactionCount, "Compaction Count", KindCount, float64(ma.CompactionCount), float64(mb.CompactionCount)),
 		metricDiff(MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, float64(ma.CompactionLossTokens), float64(mb.CompactionLossTokens)),
+		metricDiff(MetricModelSwitchCount, "Model Switch Count", KindCount, float64(len(ma.ModelSwitches)), float64(len(mb.ModelSwitches))),
 	}
 	return Comparison{A: journeyRef(a), B: journeyRef(b), Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }

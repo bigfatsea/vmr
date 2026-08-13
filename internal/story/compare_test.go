@@ -217,8 +217,8 @@ func TestCompareBasicDiff(t *testing.T) {
 	if cmp.A.ID != "j-a" || cmp.B.ID != "j-b" {
 		t.Fatalf("journey refs = %q/%q, want j-a/j-b", cmp.A.ID, cmp.B.ID)
 	}
-	if len(cmp.Rows) != 12 {
-		t.Fatalf("rows = %d, want 12 (one per Metrics field)", len(cmp.Rows))
+	if len(cmp.Rows) != 13 {
+		t.Fatalf("rows = %d, want 13 (one per Metrics field, incl. MetricModelSwitchCount)", len(cmp.Rows))
 	}
 
 	var modelRow *MetricDiff
@@ -264,6 +264,34 @@ func TestCompareBasicDiff(t *testing.T) {
 	}
 	if cmp.Tools[2].Name != "exec" || cmp.Tools[2].ACalls != 0 {
 		t.Errorf("tools[2] = %+v, want exec with ACalls=0 (A never called it)", cmp.Tools[2])
+	}
+}
+
+// TestCompare_ModelSwitchCount_Row (batch 4) locks in the registration of
+// MetricModelSwitchCount as Compare's 13th row: its A/B values must be
+// len(Metrics.ModelSwitches), not the switches' own content.
+func TestCompare_ModelSwitchCount_Row(t *testing.T) {
+	a := JourneySummary{Metrics: Metrics{ModelSwitches: []ModelSwitch{{StepSeq: 2, From: "p1:m1", To: "p1:m2"}}}}
+	b := JourneySummary{Metrics: Metrics{ModelSwitches: []ModelSwitch{
+		{StepSeq: 3, From: "p1:m1", To: "p2:m1"},
+		{StepSeq: 7, From: "p2:m1", To: "p1:m1"},
+		{StepSeq: 9, From: "p1:m1", To: "p2:m1"},
+	}}}
+	cmp := Compare(a, b)
+	var row *MetricDiff
+	for i := range cmp.Rows {
+		if cmp.Rows[i].Metric == MetricModelSwitchCount {
+			row = &cmp.Rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("MetricModelSwitchCount row missing from Compare's output")
+	}
+	if row.A != 1 || row.B != 3 {
+		t.Errorf("MetricModelSwitchCount A/B = %v/%v, want 1/3", row.A, row.B)
+	}
+	if row.Kind != KindCount {
+		t.Errorf("MetricModelSwitchCount Kind = %v, want KindCount", row.Kind)
 	}
 }
 

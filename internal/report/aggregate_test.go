@@ -1503,3 +1503,72 @@ func BenchmarkBuild(b *testing.B) {
 		_, _, _ = Build([]string{path}, time.Now(), nil, nil, nil, nil)
 	}
 }
+
+// TestAddAttempt_ForwardedCountsTruncated pins the one way EndpointRow.
+// Forwarded deliberately differs from OK: a 2xx response that broke
+// mid-copy carries Error = "truncated: …" (audit.Attempt.SetTruncated), so
+// it leaves OK — but the router already charged quota for it, which is why
+// Forwarded (not OK, not the request-level Requests) is the basis
+// providerquota.go's requests metric reproduces. cmd/vmr/quota_parity_test.go
+// asserts the end-to-end equality; this pins the counter itself.
+func TestAddAttempt_ForwardedCountsTruncated(t *testing.T) {
+	dir := t.TempDir()
+	// status 0 means the attempt never got a response at all (transport
+	// failure); such a record carries no "response" key, which is exactly what
+	// makes it neither OK nor Forwarded.
+	mk := func(ts time.Time, attemptErr string, status int) map[string]any {
+		att := map[string]any{"endpoint": "openai:acct1:m1", "dur_ms": 10, "error": attemptErr}
+		if status > 0 {
+			att["response"] = map[string]any{"status": status}
+		}
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 10, "model": "coding",
+			"protocol": "openai", "outcome": "ok",
+			"client":   map[string]any{"request": map[string]any{"body": map[string]any{"model": "coding"}}},
+			"attempts": []map[string]any{att},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	path := writeTempJSONL(t, dir, []map[string]any{
+		mk(t0, "", 200), // clean success: OK + Forwarded
+		mk(t0.Add(time.Minute), "truncated: EOF", 200),   // forwarded + charged, but NOT OK
+		mk(t0.Add(2*time.Minute), "upstream 429", 429),   // neither
+		mk(t0.Add(3*time.Minute), "network: refused", 0), // no response at all: neither
+	})
+	rep, _, err := Build([]string{path}, t0.Add(time.Hour), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row *EndpointRow
+	for i := range rep.EndpointsAll {
+		if rep.EndpointsAll[i].Endpoint == "openai:acct1:m1" {
+			row = &rep.EndpointsAll[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("no endpoint row for openai:acct1:m1: %+v", rep.EndpointsAll)
+	}
+	if row.Attempts != 4 {
+		t.Errorf("Attempts = %d, want 4", row.Attempts)
+	}
+	if row.OK != 1 {
+		t.Errorf("OK = %d, want 1 (the truncated 2xx carries an Error, so it must not count here)", row.OK)
+	}
+	if row.Forwarded != 2 {
+		t.Errorf("Forwarded = %d, want 2 (clean 2xx + truncated 2xx — both were forwarded and both were charged)", row.Forwarded)
+	}
+}
+
+func TestClientEndpointScale(t *testing.T) {
+	clients, rows := clientEndpointScale([]ClientEndpointRow{
+		{ClientKey: "a", Endpoint: "e1"},
+		{ClientKey: "a", Endpoint: "e2"},
+		{ClientKey: "b", Endpoint: "e1"},
+	})
+	if clients != 2 || rows != 3 {
+		t.Errorf("got %d client(s) x %d row(s), want 2 x 3", clients, rows)
+	}
+	if clients, rows := clientEndpointScale(nil); clients != 0 || rows != 0 {
+		t.Errorf("empty input: got %d x %d, want 0 x 0", clients, rows)
+	}
+}

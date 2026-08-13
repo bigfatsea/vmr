@@ -113,6 +113,56 @@ func (r *Registry) Flush() error {
 	return nil
 }
 
+// Bucket is bucket exported read-only for an offline consumer (vmr report's
+// §2.5 quota-vs-consumption table via LoadFile) — the JSON tags are shared
+// verbatim with the unexported bucket this package uses in memory and on
+// disk, per store.go's own "there is exactly one shape" rule (see
+// fileFormat's doc comment): a second, parallel type here would be exactly
+// the duplication that rule exists to avoid.
+type Bucket struct {
+	PeriodStart   int64    `json:"period_start"`
+	C             Counters `json:"counters"`
+	Estimated     int64    `json:"estimated"`
+	EstimatedCost float64  `json:"estimated_cost,omitempty"`
+}
+
+// PeriodStartTime is PeriodStart converted back to a time.Time (in
+// time.Local, per time.Unix's own contract — which zone this prints in is
+// irrelevant here: the original Charge/Used call sites always stored a
+// Unix-seconds value already computed in fmtutil.DisplayZone via
+// quota.PeriodStart, and comparing two time.Time values for equality
+// doesn't care which zone either one prints in, only that they name the
+// same instant).
+func (b Bucket) PeriodStartTime() time.Time {
+	return time.Unix(b.PeriodStart, 0)
+}
+
+// LoadFile reads path (a vmr-quota.json) and returns its accounts read-only,
+// without constructing a Registry, taking any lock, or ever writing back —
+// the shape an offline consumer like `vmr report` needs, as opposed to
+// Registry.Load's in-place mutation of a live Registry. A missing file
+// returns (nil, nil): the normal case for an instance that hasn't
+// accumulated any quota state yet, or whose log_dir was never wired up with
+// quota tracking — not an error a caller needs to branch on beyond checking
+// for a nil map.
+func LoadFile(path string) (map[string]map[string]Bucket, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var ff struct {
+		Version  int                          `json:"version"`
+		Accounts map[string]map[string]Bucket `json:"accounts"`
+	}
+	if err := json.Unmarshal(data, &ff); err != nil {
+		return nil, err
+	}
+	return ff.Accounts, nil
+}
+
 // StartFlusher launches a background goroutine that calls Flush every
 // interval, and returns a stop function. stop signals the goroutine to
 // exit and BLOCKS until it has actually done so — cmd_start.go's shutdown

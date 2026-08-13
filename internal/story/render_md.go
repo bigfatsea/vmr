@@ -38,6 +38,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) s
 	}
 
 	renderOverviewCard(w, j, m, lang)
+	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang)
 
 	isRepeatStep := map[int]bool{}

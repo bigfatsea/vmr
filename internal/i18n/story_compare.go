@@ -143,6 +143,7 @@ func Compare(lang Lang) CompareText {
 				"context_utilization":    "上下文有效利用率",
 				"compaction_count":       "Compaction 次数",
 				"compaction_loss_tokens": "Compaction 信息损失",
+				"model_switch_count":     "模型切换次数",
 			},
 		}
 	}
@@ -224,6 +225,7 @@ func Compare(lang Lang) CompareText {
 			"context_utilization":    "Context Utilization",
 			"compaction_count":       "Compaction Count",
 			"compaction_loss_tokens": "Compaction Information Loss",
+			"model_switch_count":     "Model Switch Count",
 		},
 	}
 }

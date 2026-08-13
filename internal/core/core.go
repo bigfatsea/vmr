@@ -281,7 +281,13 @@ func (e *Endpoint) computeHealthKey() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model + "/" + hex.EncodeToString(sum[:4])
 }
 
-// Name is the human-readable endpoint label used in logs and status output.
+// Name is the human-readable, "/"-joined endpoint identity used by
+// internal/server/admin.go's /admin/status and live log lines — a DIFFERENT
+// format from endpointlabel.go's EndpointLabel (":"-joined), which is the
+// audit-log's on-disk contract instead. The two coexist on purpose: this one
+// is free to change shape without touching a single historical audit
+// record; EndpointLabel's format cannot, since old records already contain
+// it. Do not unify them.
 func (e *Endpoint) Name() string {
 	if e.name != "" {
 		return e.name

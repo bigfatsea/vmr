@@ -101,7 +101,7 @@ var diagnosticNormMarker = map[string]bool{
 // session-analysis-failure error message below). Split into its own file
 // purely to keep this one under internal/archtest's line budget; no
 // behavior split, buildInternal is the only thing that does real work.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
 	sess, cache, err := AnalyzeSessionsCached(paths, prior)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
@@ -135,6 +135,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 	workloads := map[string]*WorkloadRow{}
 	sessions := map[string]*SessionRow{}
 	stickyCol := newStickyCollector()
+	clientEndpointCol := newClientEndpointCollector()
 
 	addA := func(r *Row, rc *rec2) {
 		r.Requests++
@@ -261,6 +262,13 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 	// Endpoint attempt-level accounting (G-family).
 	addAttempt := func(e *EndpointRow, a audit.Attempt) {
 		e.Attempts++
+		// Forwarded is OK's condition WITHOUT `Error == ""` — see its own
+		// doc comment (rows.go): a truncated 2xx still got forwarded and
+		// still got charged, so only this count reproduces the router's
+		// requests-metric quota charging exactly.
+		if a.Response != nil && a.Response.Status < 400 {
+			e.Forwarded++
+		}
 		if a.Error == "" && a.Response != nil && a.Response.Status < 400 {
 			e.OK++
 			for _, n := range a.Norm {
@@ -573,6 +581,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			// Sticky Model effectiveness (sticky.go): buffered per session,
 			// resolved after the pass — it needs each session in order.
 			stickyCol.add(rc)
+			clientEndpointCol.add(rc)
 			// per-request export row
 			rep.requests = append(rep.requests, buildRequestRow(rc))
 		}, func() {
@@ -632,8 +641,14 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 		rep.Sessions = append(rep.Sessions, *s)
 	}
 	rep.Tools = buildTools(sess)
+	rep.Providers = buildProviders(rep, quotas)
+	rep.ProviderQuotas = buildProviderQuotaRows(rep, quotas, now, from, to)
 	rep.Compactions = buildCompactions(sess)
 	rep.Sticky = stickyCol.result()
+	rep.ClientEndpoints = clientEndpointCol.result()
+	if clients, rows := clientEndpointScale(rep.ClientEndpoints); progress != nil && rows > 0 {
+		fmt.Fprintf(progress, "§5.5: %d client(s) x %d endpoint row(s)\n", clients, rows)
+	}
 	rep.Efficiency = buildFindingsForJSON(rep)
 	rep.Pricing = pricingInfo
 

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"vmr/internal/config"
 )
 
 // TestBuildPricing_NoDisplayCurrency_Unaffected pins the pre-existing
@@ -29,7 +31,8 @@ models:
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
-	resolver, summary := buildPricing(configPath, &tw, "", nil)
+	cfg, cfgErr := config.Load(configPath)
+	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "", nil)
 	if summary.Currency != "CNY" {
 		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
 	}
@@ -67,7 +70,8 @@ models:
 `)
 	var tw bytes.Buffer
 	extraRates := map[string]float64{"JPY": 155}
-	resolver, summary := buildPricing(configPath, &tw, "JPY", extraRates)
+	cfg, cfgErr := config.Load(configPath)
+	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "JPY", extraRates)
 	if summary.Currency != "JPY" {
 		t.Fatalf("summary.Currency = %q, want JPY", summary.Currency)
 	}
@@ -107,7 +111,8 @@ models:
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
-	resolver, summary := buildPricing(configPath, &tw, "CNY", nil)
+	cfg, cfgErr := config.Load(configPath)
+	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "CNY", nil)
 	if summary.Currency != "CNY" {
 		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
 	}
@@ -139,7 +144,8 @@ models:
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
-	resolver, summary := buildPricing(configPath, &tw, "CNY", nil)
+	cfg, cfgErr := config.Load(configPath)
+	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "CNY", nil)
 	if summary.Currency != "USD" {
 		t.Fatalf("summary.Currency = %q, want USD (degrade keeps the compute currency)", summary.Currency)
 	}
@@ -161,7 +167,8 @@ models:
 func TestBuildPricing_DisplayCurrency_NoConfigReachable(t *testing.T) {
 	var tw bytes.Buffer
 	extraRates := map[string]float64{"JPY": 155}
-	resolver, summary := buildPricing("/nonexistent/config.yaml", &tw, "JPY", extraRates)
+	cfg, cfgErr := config.Load("/nonexistent/config.yaml")
+	resolver, summary := buildPricing(cfg, cfgErr, "/nonexistent/config.yaml", &tw, "JPY", extraRates)
 	if summary.Currency != "JPY" {
 		t.Fatalf("summary.Currency = %q, want JPY", summary.Currency)
 	}
@@ -171,5 +178,18 @@ func TestBuildPricing_DisplayCurrency_NoConfigReachable(t *testing.T) {
 	}
 	if got, want := *rate.InFresh, 3.0*155; got < want-1e-6 || got > want+1e-6 {
 		t.Errorf("InFresh = %v, want %v", got, want)
+	}
+}
+
+// TestBuildPricing_LoadErrDoesNotWarnItself is the unit-level lock-in:
+// buildPricing must NOT print its own cfgErr warning anymore — cmdReport
+// prints the one unified warning now, so a duplicate here would resurrect
+// the "same file, two warnings" noise the fix removed.
+func TestBuildPricing_LoadErrDoesNotWarnItself(t *testing.T) {
+	var tw bytes.Buffer
+	cfg, cfgErr := config.Load("/nonexistent/config.yaml")
+	buildPricing(cfg, cfgErr, "/nonexistent/config.yaml", &tw, "", nil)
+	if tw.String() != "" {
+		t.Errorf("buildPricing must not print its own cfgErr warning, got: %q", tw.String())
 	}
 }

@@ -12,8 +12,10 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
+	"vmr/internal/quota"
 	"vmr/internal/report"
 )
 
@@ -60,7 +62,18 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 // missing displayCCY, or a rate this function can't resolve, both degrade
 // to "show whatever currency computation used" with a warning, never an
 // error (same philosophy as the rest of this function).
-func buildPricing(configPath string, tw io.Writer, displayCCY string, extraRates map[string]float64) (*pricing.Resolver, *report.Pricing) {
+//
+// cfg/loadErr are cmdReport's single config.Load result,
+// shared with buildProviderQuotas — NOT loaded separately here anymore.
+// Consistency, not performance, is why: if pricing and quota resolution each
+// re-read configPath independently, an edit landing between the two reads
+// would silently mix a pre-edit pricing table with a post-edit quota table
+// (or vice versa) with no error surfaced anywhere. configPath is kept
+// (rather than dropped now that cfg/loadErr replace it) for its remaining
+// use below (the provider-override-count message) — cmdReport prints the
+// one loadErr warning itself now (this function used to print its own
+// near-duplicate of it).
+func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Writer, displayCCY string, extraRates map[string]float64) (*pricing.Resolver, *report.Pricing) {
 	standard, err := pricing.LoadStandard()
 	if err != nil {
 		fmt.Fprintf(tw, "pricing: embedded standard table failed to load (%v) — no $ estimates\n", err)
@@ -68,11 +81,11 @@ func buildPricing(configPath string, tw io.Writer, displayCCY string, extraRates
 	}
 	summary := &report.Pricing{Currency: standard.Currency, StandardGeneratedAt: standard.GeneratedAt}
 
-	cfg, err := config.Load(configPath)
 	var resolver *pricing.Resolver
 	var configRates map[string]float64
-	if err != nil {
-		fmt.Fprintf(tw, "pricing: %s not usable (%v) — $ estimates use the standard price table only, no account overrides\n", configPath, err)
+	if loadErr != nil {
+		// cmdReport already printed one unified warning for cfgErr — a
+		// second, near-identical one here would just repeat it.
 		resolver = pricing.NewResolver(standard, nil)
 	} else {
 		table := standard
@@ -118,6 +131,137 @@ func buildPricing(configPath string, tw io.Writer, displayCCY string, extraRates
 	return resolver, summary
 }
 
+// buildProviderQuotas (§2.5) reads configPath and returns each provider's
+// declared quota limit (its first Limit, P1's "exactly one Limit per
+// provider" — see config.QuotaConfig's doc comment) as a read-only
+// reference for `vmr report`'s Provider section, plus (batch 2) the
+// account's real-time counter read from <log_dir>/vmr-quota.json — see
+// report.LiveQuota's doc comment. Same degrade posture as buildPricing:
+// config unreadable/invalid, or a provider with no quota: block, both just
+// mean no entry for that provider; vmr-quota.json unreadable/missing just
+// means every account's Live stays nil — none of this ever fails the report.
+//
+// now must be the exact same instant the caller later passes to
+// report.BuildCached — see ProviderQuotaRow's doc comment on why
+// PeriodStart/PeriodEndsAt must agree between the two.
+//
+// cfg/loadErr are cmdReport's single config.Load result, shared with buildPricing — see that function's own doc comment
+// for why a second, independent config.Load here would be a consistency
+// bug, not just a wasted read.
+// The second return value is the vmr-quota.json path this call actually
+// read (empty when cfg is unusable) — the caller threads this into
+// Report2.Meta so the sub-table's footnote can name its own source, letting
+// a reader judge whether it's plausibly the same instance that produced the
+// input audit logs.
+func buildProviderQuotas(cfg *config.Config, loadErr error, configPath string, tw io.Writer, now time.Time) (map[string]report.ProviderQuotaRef, string) {
+	if loadErr != nil {
+		// cmdReport already printed one unified warning for cfgErr — a
+		// second, near-identical one here would just repeat it.
+		// configPath is kept in the signature purely so this function's
+		// doc comment / callers stay symmetric with buildPricing's.
+		return nil, ""
+	}
+	quotaJSONPath := filepath.Join(cfg.LogDir, "vmr-quota.json")
+	live, err := quota.LoadFile(quotaJSONPath)
+	if err != nil {
+		fmt.Fprintf(tw, "provider quotas: %s not usable (%v) — §2.5's real-time columns render as \"-\"\n", quotaJSONPath, err)
+	}
+	quotas := map[string]report.ProviderQuotaRef{}
+	for _, p := range cfg.Providers {
+		if p.Quota == nil || len(p.Quota.Limits) == 0 {
+			continue
+		}
+		// Limits[0] is the only correct read here — config.validateQuota
+		// rejects len(Limits) > 1 at load time (P1's "exactly one Limit per
+		// provider"; see TestQuota_Reject_MultipleLimits in internal/config),
+		// so this can never silently drop a second window. P3 (multi-window
+		// quota) will need this whole function rewritten to fold across
+		// every Limit, not just widened past index 0.
+		lim := p.Quota.Limits[0].Resolved
+		spec := &core.QuotaSpec{
+			Limits:           []core.Limit{lim},
+			TokenWeights:     p.Quota.ResolvedTokenWeights,
+			ModelMultipliers: p.Quota.ModelMultipliers,
+		}
+		ref := report.ProviderQuotaRef{
+			Metric: string(lim.Metric),
+			Every:  lim.EveryText,
+			Amount: lim.Amount,
+			Limit:  &lim,
+			Spec:   spec,
+		}
+		// §5.2's stale-period trap: quota.Registry resets lazily, so a
+		// bucket still on disk from a period the process wasn't running
+		// through must NOT be rendered as "this period's usage" — only a
+		// bucket whose stored PeriodStart matches what PeriodStart(lim, now)
+		// computes for right now qualifies as Live.
+		limitKey := string(lim.Metric) + "/" + lim.EveryText
+		periodStart := quota.PeriodStart(lim, now)
+		if b, ok := live[p.Name][limitKey]; ok && b.PeriodStartTime().Equal(periodStart) {
+			used := quota.BaseAmount(spec, b.C)
+			var pct float64
+			if lim.Amount > 0 {
+				pct = used / lim.Amount * 100
+			}
+			ref.Live = &report.LiveQuota{
+				Used: used, Pct: pct,
+				PeriodStart: periodStart, PeriodEndsAt: quota.PeriodEnd(lim, now),
+				EstimatedPct: quota.EstimatedPct(lim.Metric, b.C, b.Estimated, b.EstimatedCost),
+			}
+		} else if _, exists := live[p.Name][limitKey]; !exists && len(live[p.Name]) > 0 {
+			// Distinguishes two different-looking "Live is nil" causes
+			// that the generic stale-period footnote alone conflates:
+			//   - limitKey absent, but this provider DOES have other keys
+			//     on disk → its quota:'s metric/every changed since those
+			//     were last written (Registry never deletes an old key —
+			//     it's lazy-reset, not lazy-cleaned), so the OLD bucket is
+			//     simply keyed differently now. The process is healthy and
+			//     running; the config just moved out from under it.
+			//   - limitKey present but period mismatch (the `if` branch's
+			//     negative), or no data for this provider at all → the
+			//     existing "process wasn't running through this period" or
+			//     "never charged yet" story, unchanged.
+			ref.LiveConfigChanged = true
+		}
+		quotas[p.Name] = ref
+	}
+	return quotas, quotaJSONPath
+}
+
+// allPathsOutsideDir reports whether EVERY entry in paths resolves
+// outside dir — used to flag "the live quota counter's log_dir doesn't
+// contain a single one of the audit logs this report is analyzing", the
+// cheap same-machine signal that the two might be different instances.
+// Deliberately ALL-outside, not ANY-outside: a mixed run (some paths under
+// log_dir, some not — e.g. one archived file alongside the live directory)
+// is the normal case for analyzing "this instance's logs plus one old
+// archive", not a mismatch worth flagging. An empty/unresolvable dir (a
+// config.yaml that couldn't set LogDir at all) can't be compared against,
+// so returns false rather than a false-positive warning.
+func allPathsOutsideDir(paths []string, dir string) bool {
+	if dir == "" || len(paths) == 0 {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	for _, p := range paths {
+		absP, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(absDir, absP)
+		if err != nil {
+			continue
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return false // at least one path IS under dir
+		}
+	}
+	return true
+}
+
 // cmdReport aggregates audit JSONL into internal/report's output:
 // vmr-report.json/.md, vmr-requests.json/.md (+ per-tag siblings),
 // vmr-requests-failed.jsonl/.md (error-analysis index: outcome ==
@@ -156,8 +300,25 @@ func cmdReport(args []string) error {
 	outDir := resolveString(*outDirFlag, rc.Output, "reports")
 	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
 
+	// Single config.Load, shared by buildPricing and
+	// buildProviderQuotas below — see either function's own doc comment for
+	// why splitting this into two independent loads would be a consistency
+	// bug (a config edit landing between them), not just a wasted read. A
+	// load failure here is NOT fatal to `vmr report`: both callees degrade
+	// independently (pricing falls back to the embedded standard table;
+	// the quota section simply doesn't render) — see cfgErr's threading
+	// below, never returned as this function's own error.
+	cfg, cfgErr := config.Load(*configPath)
+	if cfgErr != nil {
+		// One unified warning for both degrade paths — buildPricing
+		// and buildProviderQuotas used to each print their own near-
+		// duplicate of this, so a bare-logs `vmr report` run reliably saw
+		// two warnings naming the same unreadable file.
+		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides), §2.5 renders without quota references\n", *configPath, cfgErr)
+	}
+
 	displayCCY := resolveString(*currencyFlag, rc.Currency, "")
-	pricingSrc, pricingInfo := buildPricing(*configPath, tw, displayCCY, rc.ExchangeRate)
+	pricingSrc, pricingInfo := buildPricing(cfg, cfgErr, *configPath, tw, displayCCY, rc.ExchangeRate)
 
 	// 0o700/0o600: report outputs embed full conversation bodies from the
 	// 0600 audit files - the derived copies must not loosen that. Created
@@ -200,10 +361,23 @@ func cmdReport(args []string) error {
 	// vmr-requests.json section.
 	reqPath := filepath.Join(outDir, "vmr-requests.json")
 	priorCache := report.LoadRequestsFileCache(reqPath)
+	now := time.Now()
+	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, *configPath, tw, now)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, cache, err := report.BuildCached(paths, time.Now(), tw, pricingInfo, pricingSrc, onRecord, priorCache)
+	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, priorCache, quotas)
 	if err != nil {
 		return err
+	}
+	// Name the live-quota counter's own source path in the report, and
+	// flag when every input audit log lies outside this instance's log_dir
+	// — the one-machine variant of "the live column may be from a different
+	// instance than the logs being analyzed" that can happen today (copying
+	// a colleague's audit logs onto a machine with its own healthy
+	// vmr-quota.json). Only meaningful when the sub-table actually has
+	// something to render.
+	if quotaJSONPath != "" && len(rep.ProviderQuotas) > 0 {
+		rep.Meta.QuotaJSONPath = quotaJSONPath
+		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
 	}
 	jsonPath := filepath.Join(outDir, "vmr-report.json")
 	mdPath := filepath.Join(outDir, "vmr-report.md")

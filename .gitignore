@@ -10,6 +10,11 @@ skills-lock.json
 # Local config with real keys (use config.example.yaml as template)
 /config.yaml
 
+# Personal deployment configs (real keys via ${ENV} refs, but still private —
+# same reason /config.yaml is ignored above; matches any config.mba*.yaml
+# variant, including an accidental "config.mba copy.yaml"-style duplicate)
+/config.mba*.yaml
+
 # vmr report/vmr story sidecar config — may hold a plaintext llm_key
 # (use report.example.yaml as template)
 /report.yaml
@@ -32,6 +37,11 @@ coverage.html
 .vscode/
 .claude
 .agents
+
+# Router-generated quota accounting state, when log_dir resolves to the
+# repo root (e.g. a smoke-test run) — the normal default is
+# ~/.vmr/logs/vmr-quota.json, already covered by /logs/ below
+/vmr-quota.json
 
 # Generated reports (details/ carries full conversation bodies — never commit)
 /vmr-report.json

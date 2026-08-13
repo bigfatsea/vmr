@@ -3,12 +3,30 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestBuild_LogsClientEndpointRowCount is the lock-in: §5.5 has no Top-N
+// cap by design, so this progress line is the one observable signal an
+// operator gets that it's grown large — must actually appear when
+// ClientEndpoints is non-empty, and name both dimensions (clients, rows).
+func TestBuild_LogsClientEndpointRowCount(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, smallAuditRecords())
+	var progress bytes.Buffer
+	if _, _, err := Build([]string{path}, time.Now(), &progress, nil, nil, nil); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(progress.String(), "§5.5: 1 client(s) x 1 endpoint row(s)") {
+		t.Errorf("progress output missing the §5.5 row-count line, got:\n%s", progress.String())
+	}
+}
 
 // TestBuildCached_ColdMatchesBuild: with no prior cache, BuildCached must
 // produce byte-identical output to Build (everything is a miss) — the
@@ -22,7 +40,7 @@ func TestBuildCached_ColdMatchesBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
+	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
 	}
@@ -55,11 +73,11 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
+	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
-	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1)
+	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (warm): %v", err)
 	}
@@ -105,7 +123,7 @@ func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 func TestWriteRequestsJSON_RoundTripsFilesAndRows(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	_, _, cache, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, nil)
+	_, _, cache, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
 	}
@@ -178,7 +196,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords()[:2])
 	now := time.Now()
 
-	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil)
+	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
@@ -197,7 +215,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	}
 	f.Close()
 
-	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1)
+	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, cache1, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}

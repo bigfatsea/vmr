@@ -76,6 +76,18 @@ type Metrics struct {
 	// information-loss summary, rolled up to one Journey-level number.
 	CompactionCount      int   `json:"compaction_count"`
 	CompactionLossTokens int64 `json:"compaction_loss_tokens"`
+
+	// ModelUsage (modelusage.go) is list-typed, unlike every other field
+	// above — it doesn't participate in corpus.go's Spearman/diff scalar
+	// set (same reason ToolCallDist above doesn't either). ModelSwitches is
+	// also list-typed and itself carries no scalar, but its LENGTH is
+	// registered as MetricModelSwitchCount (batch 4) — one of the thirteen
+	// codes corpus.go's corpusMetricCodes/metricValue and compare.go's
+	// Compare both consume; see MetricModelSwitchCount's own doc comment
+	// (compare.go) for why it's a routing-environment metric, not an
+	// agent-behavior one.
+	ModelUsage    []ModelUsageStat `json:"model_usage"`
+	ModelSwitches []ModelSwitch    `json:"model_switches"`
 }
 
 // ToolCallStat is one tool name's share of a Journey's tool calls.
@@ -112,6 +124,7 @@ func ComputeMetrics(j *Journey) Metrics {
 	m.ContextCurve = contextCurve(steps)
 	m.ContextUtilization = contextUtilization(j)
 	m.CompactionCount, m.CompactionLossTokens = compactionTotals(steps)
+	m.ModelUsage, m.ModelSwitches = computeModelUsage(steps)
 	return m
 }
 

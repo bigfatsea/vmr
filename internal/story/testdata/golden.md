@@ -9,6 +9,14 @@
 - Started 10:00:00
 - Ended · Step 3 · finish=stop · 10:00:06
 
+### Model Usage
+
+| Model (provider) | Steps | in | cached | out |
+|---|---|---|---|---|
+| agent (provider) | 3 | 800 | 580 | 95 |
+
+No upstream model switch occurred.
+
 ## t01 · 帮我查一下 A 股新股打新收益
 
 ### 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent

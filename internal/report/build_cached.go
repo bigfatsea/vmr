@@ -53,7 +53,7 @@ import (
 // point every existing caller/test already uses; BuildCached below is the
 // one cmd_report.go actually calls.
 func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
-	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, nil)
+	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, nil, nil)
 	return rep, sess, err
 }
 
@@ -66,6 +66,11 @@ func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Prici
 // vmr-requests.json section for why that's the deliberately scoped-down
 // near-term version, not the deeper "report consumes ctxgraph.Manifest
 // directly" unification). prior may be nil (identical to Build).
-func BuildCached(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
-	return buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, prior)
+//
+// quotas (may be nil) is §2.5's provider quota reference — Build always
+// passes nil (it stays quota-blind on purpose, so its 26 existing call
+// sites never need to change); only BuildCached, cmd_report.go's actual
+// production entry point, threads it through.
+func BuildCached(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+	return buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, prior, quotas)
 }

@@ -121,6 +121,30 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 	return j
 }
 
+// TestMetricValue_ModelSwitchCount_Registered (batch 4) locks in all three
+// corpus.go registration points for MetricModelSwitchCount: it must be in
+// corpusMetricCodes (so it gets a distribution slot at all), have a
+// corpusMetricKinds entry (so the Markdown table knows how to render it),
+// and metricValue must extract len(Metrics.ModelSwitches), not always 0.
+func TestMetricValue_ModelSwitchCount_Registered(t *testing.T) {
+	found := false
+	for _, c := range corpusMetricCodes {
+		if c == MetricModelSwitchCount {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("MetricModelSwitchCount missing from corpusMetricCodes")
+	}
+	if kind, ok := corpusMetricKinds[MetricModelSwitchCount]; !ok || kind != KindCount {
+		t.Fatalf("corpusMetricKinds[MetricModelSwitchCount] = %v (ok=%v), want KindCount", kind, ok)
+	}
+	m := Metrics{ModelSwitches: []ModelSwitch{{StepSeq: 1}, {StepSeq: 2}, {StepSeq: 3}}}
+	if got := metricValue(m, MetricModelSwitchCount); got != 3 {
+		t.Errorf("metricValue(MetricModelSwitchCount) = %v, want 3", got)
+	}
+}
+
 func TestComputeCorpusStats(t *testing.T) {
 	t.Run("empty corpus", func(t *testing.T) {
 		stats := ComputeCorpusStats(nil)

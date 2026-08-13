@@ -11,7 +11,6 @@
 package router
 
 import (
-	"math"
 	"sort"
 	"time"
 
@@ -85,7 +84,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 	periodStart := quota.PeriodStart(l, now)
 	switch l.Metric {
 	case core.MetricRequests:
-		d, est := applyModelMultiplier(ep, quota.Counters{Requests: 1}, 0)
+		d, est := quota.ApplyModelMultiplier(ep.Quota, ep.Model, quota.Counters{Requests: 1}, 0)
 		reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 	case core.MetricCost:
 		rate := pricing.EffectiveRate(ep.PricingRate)
@@ -100,7 +99,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, d.Cost)
 		}
 	case core.MetricTokens:
-		d, est := applyModelMultiplier(ep, raw, estimated)
+		d, est := quota.ApplyModelMultiplier(ep.Quota, ep.Model, raw, estimated)
 		reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 	}
 	// config validation only ever admits requests|tokens|cost; an
@@ -114,57 +113,6 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 // reasoning.
 func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 	return rate.Cost(d.Fresh, d.CacheRead, d.CacheWrite, d.Out)
-}
-
-// applyModelMultiplier scales d (and its accompanying degraded-estimate
-// marker) by ep's account-level model_multipliers, resolved for ep.Model —
-// exact match first, "*" wildcard second, 1.0 (no scaling) otherwise. This
-// MUST happen at charge time, not read time — see core.QuotaSpec's doc
-// comment on ModelMultipliers for why: quota.Counters aggregates per
-// provider, not per model, so once a charge lands there is no way to later
-// recover which slice of a read came from which upstream model.
-//
-// Every component (including Requests) is scaled and rounded UP
-// (math.Ceil): a non-integer multiplier (nothing in the design rules that
-// out) must round toward "counts as more consumption", the safe direction —
-// rounding down could let an already-multiplied-up model's calls be
-// under-counted relative to the account's real usage.
-func applyModelMultiplier(ep *core.Endpoint, d quota.Counters, estimated int64) (quota.Counters, int64) {
-	mult := modelMultiplier(ep)
-	if mult == 1.0 {
-		return d, estimated
-	}
-	return quota.Counters{
-		Fresh:      ceilScale(d.Fresh, mult),
-		CacheRead:  ceilScale(d.CacheRead, mult),
-		CacheWrite: ceilScale(d.CacheWrite, mult),
-		Out:        ceilScale(d.Out, mult),
-		Requests:   ceilScale(d.Requests, mult),
-	}, ceilScale(estimated, mult)
-}
-
-// modelMultiplier resolves ep's charge-time scaling factor: an exact
-// ep.Model match in ep.Quota.ModelMultipliers, else its "*" wildcard entry,
-// else 1.0 (no scaling — the zero-config default, and also what an account
-// with no model_multipliers configured at all gets, since ep.Quota.
-// ModelMultipliers is then a nil map).
-func modelMultiplier(ep *core.Endpoint) float64 {
-	if ep.Quota == nil || len(ep.Quota.ModelMultipliers) == 0 {
-		return 1.0
-	}
-	if m, ok := ep.Quota.ModelMultipliers[ep.Model]; ok {
-		return m
-	}
-	if m, ok := ep.Quota.ModelMultipliers["*"]; ok {
-		return m
-	}
-	return 1.0
-}
-
-// ceilScale multiplies v by mult and rounds up — see applyModelMultiplier's
-// doc comment for why the rounding direction is deliberate, not incidental.
-func ceilScale(v int64, mult float64) int64 {
-	return int64(math.Ceil(float64(v) * mult))
 }
 
 // tokenCharge computes one response's token consumption: the upstream's own
@@ -194,41 +142,6 @@ func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters
 	ascii, wide := rbody.OutBytes()
 	outEst := core.EstimateTokensFromCounts(ascii, wide)
 	return quota.Counters{Fresh: inEst, Out: outEst}, inEst + outEst
-}
-
-// baseAmount applies base(metric) to a raw Counters value — requests: the
-// count itself; tokens: spec.TokenWeights' four-component weighted sum
-// (token_weights all 1.0 — core.DefaultTokenWeight — is the zero-config
-// default, so an unconfigured account gets P1's plain equal-weighted sum
-// back exactly). Shared by QuotaStatus (below, for /admin/status) and
-// reorderByQuota (decision time) so "how much has this account used, in its
-// own metric's unit" has exactly one formula.
-//
-// Reads the metric off spec.Limits[0] rather than taking it as a separate
-// parameter: P1/P2.1 both guarantee exactly one Limit per provider (see
-// chargeQuota's own comment), so spec already carries it — every call site
-// already has spec in hand (ep.Quota) at the point it used to look up l.Metric
-// itself. spec must be non-nil; every call site is already guarded by an
-// ep.Quota==nil / len(Limits)==0 check upstream (chargeQuota, QuotaStatus,
-// scoreForEndpoint).
-func baseAmount(spec *core.QuotaSpec, c quota.Counters) float64 {
-	switch spec.Limits[0].Metric {
-	case core.MetricRequests:
-		return float64(c.Requests)
-	case core.MetricTokens:
-		w := spec.TokenWeights
-		return float64(c.Fresh)*w.InFresh + float64(c.CacheRead)*w.CacheRead +
-			float64(c.CacheWrite)*w.CacheWrite + float64(c.Out)*w.Out
-	case core.MetricCost:
-		// Counters.Cost is already the final $ amount, computed once at
-		// charge time (see ChargeResponse's MetricCost branch) — never
-		// re-derived here from raw tokens, which is the whole point of
-		// storing it pre-computed (see core.Counters' doc comment on why
-		// cost is the one exception to "store raw, weight on read").
-		return c.Cost
-	default:
-		return 0
-	}
 }
 
 // QuotaProviderStatus is one quota-configured provider's live state, for
@@ -321,38 +234,13 @@ func (rt *Router) QuotaStatus() []QuotaProviderStatus {
 				periodStart := quota.PeriodStart(l, now)
 				periodEnd := quota.PeriodEnd(l, now)
 				c, estimated := rt.Quota.Used(ep.Provider, limitKey, periodStart)
-				used := baseAmount(ep.Quota, c)
-				var pct, estPct float64
+				used := quota.BaseAmount(ep.Quota, c)
+				var pct float64
 				if l.Amount > 0 {
 					pct = used / l.Amount * 100
 				}
-				// Every metric's estimate share is a ratio of two
-				// numbers in the SAME unit — which is not `used` for
-				// either non-requests metric, since `used` has already
-				// had base(metric) applied to it:
-				//   cost   — `estimated` is a raw token count; the $
-				//            estimate share lives in EstimatedCost.
-				//   tokens — `estimated` is the raw (unweighted) token
-				//            count charged by tokenCharge's degraded
-				//            path, while `used` is the token_weights-
-				//            weighted sum. Dividing one by the other
-				//            reports a wrong share the moment any weight
-				//            isn't 1.0 (a 5x `out` weight would report a
-				//            fully-estimated period as 20% estimated).
-				//            The raw four-component total is the matching
-				//            denominator — both sides are then the same
-				//            unweighted (but equally model_multiplier-
-				//            scaled) token count.
-				switch l.Metric {
-				case core.MetricCost:
-					if used > 0 {
-						estPct = rt.Quota.EstimatedCostFor(ep.Provider, limitKey, periodStart) / used * 100
-					}
-				case core.MetricTokens:
-					if rawTokens := float64(c.Fresh + c.CacheRead + c.CacheWrite + c.Out); rawTokens > 0 {
-						estPct = float64(estimated) / rawTokens * 100
-					}
-				}
+				estimatedCost := rt.Quota.EstimatedCostFor(ep.Provider, limitKey, periodStart)
+				estPct := quota.EstimatedPct(l.Metric, c, estimated, estimatedCost)
 				out = append(out, QuotaProviderStatus{
 					Provider: ep.Provider, Metric: string(l.Metric), Every: l.EveryText, Amount: l.Amount,
 					Used: used, Pct: pct, Headroom: quota.ScoreForLimit(l, used, now),
@@ -462,5 +350,5 @@ func scoreForEndpoint(ep *core.Endpoint, reg *quota.Registry, now time.Time) flo
 	l := ep.Quota.Limits[0] // P1: exactly one Limit per provider (see chargeQuota's own comment)
 	limitKey := string(l.Metric) + "/" + l.EveryText
 	c, _ := reg.Used(ep.Provider, limitKey, quota.PeriodStart(l, now))
-	return quota.ScoreForLimit(l, baseAmount(ep.Quota, c), now)
+	return quota.ScoreForLimit(l, quota.BaseAmount(ep.Quota, c), now)
 }
