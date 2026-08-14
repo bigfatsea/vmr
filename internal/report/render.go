@@ -20,10 +20,8 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
-
-// previewLen bounds the one-line preview shown in a <details> summary.
-const previewLen = 80
 
 // codeFence wraps s in a fenced code block whose fence is longer than any
 // backtick run inside s, so message content can never break out of its block.
@@ -61,16 +59,6 @@ func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
-}
-
-// preview returns a single-line, length-capped excerpt of s for summaries.
-func preview(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	r := []rune(s)
-	if len(r) > previewLen {
-		return string(r[:previewLen]) + "…"
-	}
 	return s
 }
 
@@ -240,7 +228,7 @@ func renderMessageSection(idx int, m chatmsg.Message, prefix string, t i18n.Deta
 		return t.EmptyMessage(prefix, head)
 	}
 	chars := len([]rune(m.Text))
-	summary := t.MessageSummary(prefix, head, fmtCount(chars), escapeHTML(preview(m.Text)))
+	summary := t.MessageSummary(prefix, head, fmtCount(chars), escapeHTML(taskseg.Preview(m.Text)))
 	return details(summary, codeFence(m.Text))
 }
 

@@ -33,6 +33,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 // promptVersionBase is bumped whenever the -compare prompt template or its
@@ -106,7 +107,7 @@ func buildToolIndex(j *Journey, lang i18n.Lang) []ToolIndexEntry {
 		for _, tc := range s.ToolCalls {
 			tools = append(tools, tc.Name)
 		}
-		brief := preview(s.RespText)
+		brief := taskseg.Preview(s.RespText)
 		if brief == "" {
 			brief = noReply
 		}

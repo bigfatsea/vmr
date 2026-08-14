@@ -159,7 +159,7 @@ func commonSuffixLen(a, b []Hash) int {
 
 // coverage is |cur ∩ prev| / len(cur) — how much of cur's content already
 // existed somewhere in prev (not just its LCP-matched prefix), the same
-// set-based check session.go's deltaHasNewInstruction relies on to avoid
+// set-based check taskseg.HasNewInstruction relies on to avoid
 // position-based false positives after a mid-history edit.
 func coverage(cur, prev []Hash) float64 {
 	if len(cur) == 0 {

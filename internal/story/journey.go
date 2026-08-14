@@ -313,6 +313,11 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			msgs := chatmsg.Messages(body)
 			rawMsgs := chatmsg.RawArray(body)
 			off := chatmsg.MsgOffset(body)
+			// Built once per step and threaded into HasNewInstruction/
+			// LastInstruction/newInstructionTitleAtStitch below instead of
+			// each re-scanning msgs itself — this manifest's real-instruction
+			// regex work used to run up to 2-3 times per step before B3.
+			ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
 
 			atStitchBoundary := ci > 0 && i == 0
 			var edge *ctxgraph.Edit
@@ -348,8 +353,8 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				deltaStart = m.LeadSys + e.LCP
 				prevManifest = l.Manifests[i-1]
 				traceChanged := m.TraceID != "" && prevManifest.TraceID != "" && m.TraceID != prevManifest.TraceID
-				hasNewInstr := deltaHasNewInstruction(prof, msgs, rawMsgs, off, m, prevManifest, deltaStart)
-				newTask = traceChanged || (!prevNoReply && hasNewInstr)
+				hasNewInstr := taskseg.HasNewInstruction(ru, taskseg.ManifestKeySet(prevManifest), m, deltaStart, len(msgs))
+				newTask = taskseg.IsNewTask(traceChanged, prevNoReply, hasNewInstr)
 				humanInitiated = hasNewInstr
 				// The "revision" relation: a Splice edge's divergence
 				// point (prevManifest.Keys[e.LCP]) is a message being
@@ -367,61 +372,67 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			if newTask || curTask == nil {
 				var title string
 				if atStitchBoundary {
-					// Not lastInstructionInDelta: deltaStart is 0 here, so
-					// it would happily pick up the shared anchor message
-					// (e.g. s231's opening instruction, already shown from
-					// the predecessor) and title this task with it again —
-					// reads as "the user asked the same thing twice" even
-					// though nothing new was actually said. Only a
-					// genuinely NEW instruction (not already in seen)
-					// should become the title.
-					newInstr := newInstructionTitleAtStitch(prof, m, msgs, rawMsgs, off, seen)
-					humanInitiated = newInstr != ""
-					title = taskTitle(newInstr, lang)
-					if title == i18n.Story(lang).ToolLoopTitle {
-						title = stitchTaskTitle(stitchEdge, lang)
-					}
+					title, humanInitiated = titleAtStitchBoundary(ru, m, msgs, rawMsgs, off, seen, stitchEdge, lang)
 				} else {
-					title = taskTitle(lastInstructionInDelta(prof, msgs, rawMsgs, off, deltaStart), lang)
+					title = taskseg.TaskTitle(taskseg.LastInstruction(ru, deltaStart), i18n.Story(lang).ToolLoopTitle)
 				}
 				curTask = &Task{Title: title}
 				j.Tasks = append(j.Tasks, curTask)
 			}
 
 			seq++
-			step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
-				SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
-				HumanInitiated: humanInitiated}
-			if rec.Client.Response != nil {
-				if s := responseSummary(rec.Client.Response.Body); s != nil {
-					step.Finish = s.Finish
-					step.RespText = strings.TrimSpace(s.Content)
-					step.ToolCalls = s.ToolCalls
-					step.Reasoning = strings.TrimSpace(s.Reasoning)
-				}
-			}
-			step.NoReply = prof.NoReply(step.Finish, step.RespText)
+			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, prof)
 			prevNoReply = step.NoReply
-
-			for idx := deltaStart; idx < len(msgs); idx++ {
-				h := eventHashAt(m, msgs, rawMsgs, off, idx)
-				if _, dup := seen[h]; dup {
-					continue
-				}
-				ev := &Event{Hash: h, Msg: msgs[idx], FirstStepSeq: seq}
-				if idx == deltaStart {
-					ev.Revises = revisesHash
-				}
-				seen[h] = ev
-				step.NewEvents = append(step.NewEvents, ev)
-				j.Events = append(j.Events, ev)
-			}
+			appendNewEvents(j, step, m, msgs, rawMsgs, off, deltaStart, revisesHash, seen)
 			curTask.Steps = append(curTask.Steps, step)
 		}
 	}
 
 	j.Title = deriveTitle(prof, j.Tasks, lang)
 	return j, nil
+}
+
+// buildStep assembles one Step from its manifest/record plus buildFrom's
+// already-resolved edit/stitch/compaction context for this iteration,
+// filling in the response-derived fields (finish reason, reply text, tool
+// calls, reasoning, NoReply) when the record has a response — split out of
+// buildFrom purely to stay under the architecture review's function-length
+// budget, not because it's an independently meaningful step.
+func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, prof taskseg.Profile) *Step {
+	step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
+		SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
+		HumanInitiated: humanInitiated}
+	if rec.Client.Response != nil {
+		if s := taskseg.ResponseSummary(rec.Client.Response.Body); s != nil {
+			step.Finish = s.Finish
+			step.RespText = strings.TrimSpace(s.Content)
+			step.ToolCalls = s.ToolCalls
+			step.Reasoning = strings.TrimSpace(s.Reasoning)
+		}
+	}
+	step.NoReply = prof.NoReply(step.Finish, step.RespText)
+	return step
+}
+
+// appendNewEvents scans step's manifest from deltaStart, appending each
+// not-yet-seen message (by content hash) as a new Event to both
+// step.NewEvents and j.Events — the global first-appearance dedup that
+// makes a Journey's Events stream show each distinct message exactly once,
+// regardless of how many later Steps' history still carries it.
+func appendNewEvents(j *Journey, step *Step, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int, revisesHash *ctxgraph.Hash, seen map[ctxgraph.Hash]*Event) {
+	for idx := deltaStart; idx < len(msgs); idx++ {
+		h := eventHashAt(m, msgs, rawMsgs, off, idx)
+		if _, dup := seen[h]; dup {
+			continue
+		}
+		ev := &Event{Hash: h, Msg: msgs[idx], FirstStepSeq: step.Seq}
+		if idx == deltaStart {
+			ev.Revises = revisesHash
+		}
+		seen[h] = ev
+		step.NewEvents = append(step.NewEvents, ev)
+		j.Events = append(j.Events, ev)
+	}
 }
 
 // stitchTaskTitle titles the Task a stitch boundary opens when there's no
@@ -582,108 +593,52 @@ func eventHashAt(m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, of
 	return md5.Sum(b)
 }
 
-// deltaHasNewInstruction ports internal/report/session.go's
-// deltaHasNewInstruction: a message only counts as a new instruction if
-// it's within chatmsg.NewUserWindow of the request's end AND its content
-// wasn't already present somewhere in the parent manifest (a set check, not
-// a position check — a mid-task history prune can shift an old message into
-// the tail window without it being new).
-func deltaHasNewInstruction(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off int, cur, prev *ctxgraph.Manifest, deltaStart int) bool {
-	prevSet := make(map[ctxgraph.Hash]bool, len(prev.Keys))
-	for _, k := range prev.Keys {
-		prevSet[k] = true
-	}
-	total := len(msgs)
-	for idx := deltaStart; idx < total; idx++ {
-		if idx < total-chatmsg.NewUserWindow {
-			continue
-		}
-		if msgs[idx].Role != "user" {
-			continue
-		}
-		if _, ok := prof.RealUserText(msgs[idx], rawMsgs, idx-off); !ok {
-			continue
-		}
-		if idx >= cur.LeadSys {
-			ki := idx - cur.LeadSys
-			if ki < len(cur.Keys) && prevSet[cur.Keys[ki]] {
-				continue // identical content already existed in the parent — shifted, not new
-			}
-		}
-		return true
-	}
-	return false
-}
-
-// lastInstructionInDelta returns the preview of the newest real user
-// instruction inside the delta (no chatmsg.NewUserWindow bound here — unlike
-// deltaHasNewInstruction, this picks the task's TITLE, which should reflect
-// whatever the user actually asked even if it's not near the very end);
-// "" when this turn is a pure tool-loop step.
-func lastInstructionInDelta(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) string {
-	best := -1
-	var bestText string
-	for idx := deltaStart; idx < len(msgs); idx++ {
-		if msgs[idx].Role != "user" {
-			continue
-		}
-		text, ok := prof.RealUserText(msgs[idx], rawMsgs, idx-off)
-		if !ok {
-			continue
-		}
-		if idx > best {
-			best, bestText = idx, text
-		}
-	}
-	if best < 0 {
-		return ""
-	}
-	return preview(bestText)
-}
-
-// newInstructionTitleAtStitch is lastInstructionInDelta's stitch-boundary
-// counterpart: scans the WHOLE manifest (deltaStart is always 0 at a stitch
-// boundary — see buildFrom) but, unlike lastInstructionInDelta, skips any
+// newInstructionTitleAtStitch is taskseg.LastInstruction's stitch-boundary
+// counterpart: scans the WHOLE manifest via ru (deltaStart is always 0 at a
+// stitch boundary — see buildFrom) but, unlike LastInstruction, skips any
 // candidate whose content hash is already in seen. Without this, a stitch
 // boundary whose manifest opens with the same shared anchor the
 // predecessor already showed (the common case — the s231 example keeps
 // the exact opening instruction verbatim) would title the new task
 // with that same instruction again, reading as "asked the same thing
-// twice" when nothing new was actually said.
-func newInstructionTitleAtStitch(prof taskseg.Profile, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {
+// twice" when nothing new was actually said. Takes ru (already indexed by
+// buildFrom's single per-step IndexRealUsers call) rather than prof/rawMsgs,
+// so this doesn't re-run RealUserText a second time over the same manifest.
+func newInstructionTitleAtStitch(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {
 	best := -1
-	var bestText string
-	for idx, msgv := range msgs {
-		if msgv.Role != "user" {
-			continue
-		}
-		text, ok := prof.RealUserText(msgv, rawMsgs, idx-off)
-		if !ok {
-			continue
-		}
+	for idx := range ru {
 		if _, dup := seen[eventHashAt(m, msgs, rawMsgs, off, idx)]; dup {
 			continue
 		}
 		if idx > best {
-			best, bestText = idx, text
+			best = idx
 		}
 	}
 	if best < 0 {
 		return ""
 	}
-	return preview(bestText)
+	return taskseg.Preview(ru[best])
 }
 
-// taskTitle's fallback (i18n.StoryText.ToolLoopTitle) is the Task title used
-// when a turn opens without any genuine new user instruction — buildFrom
-// detects this exact value and substitutes stitchTaskTitle's more specific
-// wording at a stitch boundary, since a bridged structural break is a much
-// more informative thing to say than "just a tool loop continuing".
-func taskTitle(newInstruction string, lang i18n.Lang) string {
-	if newInstruction != "" {
-		return newInstruction
+// titleAtStitchBoundary resolves the title (and whether this step counts as
+// HumanInitiated) for a task opening at a stitch boundary — split out of
+// buildFrom's task-opening branch, which the architecture review's function-
+// length budget bounds. Only a genuinely NEW instruction (not already in
+// seen) should become the title: deltaStart is always 0 at a stitch
+// boundary, so naively picking up the shared anchor message (e.g. s231's
+// opening instruction, already shown from the predecessor) would title the
+// task with it again, reading as "the user asked the same thing twice" even
+// though nothing new was actually said. Falling back to stitchTaskTitle's
+// more specific wording when there's no such instruction is more
+// informative than the generic tool-loop placeholder — a bridged structural
+// break is worth calling out on its own.
+func titleAtStitchBoundary(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event, stitchEdge *ctxgraph.StitchEdge, lang i18n.Lang) (title string, humanInitiated bool) {
+	newInstr := newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen)
+	title = taskseg.TaskTitle(newInstr, i18n.Story(lang).ToolLoopTitle)
+	if title == i18n.Story(lang).ToolLoopTitle {
+		title = stitchTaskTitle(stitchEdge, lang)
 	}
-	return i18n.Story(lang).ToolLoopTitle
+	return title, newInstr != ""
 }
 
 // deriveTitle is the Journey's own title: the earliest real user
@@ -712,7 +667,7 @@ func deriveTitle(prof taskseg.Profile, tasks []*Task, lang i18n.Lang) string {
 				}
 			}
 			if best >= 0 {
-				return preview(bestText)
+				return taskseg.Preview(bestText)
 			}
 		}
 	}
@@ -723,36 +678,6 @@ func deriveTitle(prof taskseg.Profile, tasks []*Task, lang i18n.Lang) string {
 		}
 	}
 	return st.NoTitle
-}
-
-// responseSummary reassembles a recorded client response body (SSE string
-// or JSON object) into the model's output — the same dual-dispatch
-// internal/report/session.go's responseSummary does, expressed directly
-// over chatmsg's exported ReassembleSSE/FinalMessage.
-func responseSummary(body any) *chatmsg.StreamSummary {
-	switch b := body.(type) {
-	case string:
-		return chatmsg.ReassembleSSE(b)
-	case map[string]any:
-		if s, ok := chatmsg.FinalMessage(b); ok {
-			return s
-		}
-	}
-	return nil
-}
-
-// preview returns a single-line, length-capped excerpt of s — same
-// rationale as internal/report/render.go's preview (duplicated rather than
-// exported: it's a tiny, stable, purely cosmetic helper).
-const previewLen = 80
-
-func preview(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	r := []rune(s)
-	if len(r) > previewLen {
-		return string(r[:previewLen]) + "…"
-	}
-	return s
 }
 
 // sortByRootThenTime orders lineages deterministically for listing: by

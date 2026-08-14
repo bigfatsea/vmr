@@ -113,10 +113,10 @@ type ReqInfo struct {
 	// wasn't a parseable chat object — same case collect() already bails
 	// out of early, see the body-parse guard below).
 	manifest  *ctxgraph.Manifest
-	tailPrev  []string       // previews of the last tailPrevKeep messages
-	realUsers map[int]string // absolute idx → preview, real user instructions
-	firstText string         // first non-system message text (capped)
-	respText  string         // reassembled response content (compaction linking)
+	tailPrev  []string          // previews of the last tailPrevKeep messages
+	realUsers taskseg.RealUsers // absolute idx → RAW (untruncated) text, real user instructions
+	firstText string            // first non-system message text (capped)
+	respText  string            // reassembled response content (compaction linking)
 	// NoReply is true when the assistant's reply was empty or just "NO_REPLY"
 	// (OpenClaw's skip-on-memory-flush pattern). Such records are typically
 	// retried by the client a few minutes later; the retry carries the
@@ -342,6 +342,49 @@ func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
 
 // ---- per-record collection ----
 
+// collectResponse extracts collect()'s response-derived features (usage,
+// finish reason, tool call names, reassembled text, NoReply) from a
+// record's non-nil client response — split out of collect() itself purely
+// to stay under the architecture review's function-length budget, not
+// because it's an independently meaningful step.
+func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
+	r.Usage, r.UsageOK = chatmsg.ExtractUsage(resp.Body)
+	s := taskseg.ResponseSummary(resp.Body)
+	if s == nil {
+		return
+	}
+	r.Finish = s.Finish
+	for _, tc := range s.ToolCalls {
+		if tc.Name != "" {
+			r.ToolCalls = append(r.ToolCalls, tc.Name)
+		}
+	}
+	r.respText = fmtutil.CapStr(strings.TrimSpace(s.Content), 256<<10)
+	// A deliberate no-reply skip (e.g. OpenClaw's empty-content or explicit
+	// "NO_REPLY" marker convention — see prof.NoReply): the record is sent
+	// successfully but the LLM skipped acting on it — the next record
+	// carrying the same user instruction is a retry of THIS one, not a new
+	// task.
+	r.NoReply = prof.NoReply(r.Finish, r.respText)
+}
+
+// collectRoleUsage accumulates roleChars(body)/roleTokens(body) onto r's
+// per-role maps, lazily allocating each on first use.
+func collectRoleUsage(r *ReqInfo, body map[string]any) {
+	for role, c := range roleChars(body) {
+		if r.RoleChars == nil {
+			r.RoleChars = map[string]int64{}
+		}
+		r.RoleChars[role] += c
+	}
+	for role, t := range roleTokens(body) {
+		if r.RoleTokens == nil {
+			r.RoleTokens = map[string]int64{}
+		}
+		r.RoleTokens[role] += t
+	}
+}
+
 // collect extracts everything needed from one record while its parsed JSON
 // is in hand; only compact metadata is retained. prof recognizes real user
 // instructions, a deliberate no-reply skip, and a framework-specific
@@ -351,7 +394,6 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 		Path: path, Line: line, TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
 		ClientKeyTag: rec.ClientKeyTag,
-		realUsers:    map[int]string{},
 	}
 	if tp := rec.Client.Request.Headers.Get("Traceparent"); tp != "" {
 		if parts := strings.Split(tp, "-"); len(parts) >= 2 {
@@ -388,22 +430,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	// own addAttempt reads rec.Attempts[i].Norm directly, attributed to the
 	// specific EndpointRow that attempt hit (EndpointRow.NormCounts).
 	if rec.Client.Response != nil {
-		r.Usage, r.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
-		if s := responseSummary(rec.Client.Response.Body); s != nil {
-			r.Finish = s.Finish
-			for _, tc := range s.ToolCalls {
-				if tc.Name != "" {
-					r.ToolCalls = append(r.ToolCalls, tc.Name)
-				}
-			}
-			r.respText = fmtutil.CapStr(strings.TrimSpace(s.Content), 256<<10)
-			// A deliberate no-reply skip (e.g. OpenClaw's empty-content or
-			// explicit "NO_REPLY" marker convention — see prof.NoReply):
-			// the record is sent successfully but the LLM skipped acting on
-			// it — the next record carrying the same user instruction is a
-			// retry of THIS one, not a new task.
-			r.NoReply = prof.NoReply(r.Finish, r.respText)
-		}
+		collectResponse(r, rec.Client.Response, prof)
 	}
 
 	body, ok := rec.Client.Request.Body.(map[string]any)
@@ -425,19 +452,9 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	msgs := chatmsg.Messages(body) // anthropic system becomes message #0 — same shape both protocols
 	r.Msgs = len(msgs)
 	r.MessagesKnown = 1 // body parsed as chat object
-	for role, c := range roleChars(body) {
-		if r.RoleChars == nil {
-			r.RoleChars = map[string]int64{}
-		}
-		r.RoleChars[role] += c
-	}
-	for role, t := range roleTokens(body) {
-		if r.RoleTokens == nil {
-			r.RoleTokens = map[string]int64{}
-		}
-		r.RoleTokens[role] += t
-	}
+	collectRoleUsage(r, body)
 	rawMsgs := chatmsg.RawArray(body)
+	off := chatmsg.MsgOffset(body)
 	// leadSys mirrors ctxgraph.Manifest.LeadSys's definition (count of
 	// contiguous leading role=="system" messages) — recomputed here as a
 	// cheap, hash-free loop bound purely to skip that block in THIS loop;
@@ -455,13 +472,16 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 		}
 		if m.Role == "user" {
 			lastUser = m.Text
-			if text, ok := prof.RealUserText(m, rawMsgs, i-chatmsg.MsgOffset(body)); ok {
-				r.realUsers[i] = preview(text)
-			}
 		}
 	}
+	// One dedicated pass building the real-instruction index (see
+	// taskseg.IndexRealUsers) rather than folding prof.RealUserText's regex
+	// work into the loop above — the extra array pass is cheap; what matters
+	// (per the B3 batch's perf requirement) is that this regex only runs
+	// once per user message, not that it shares a loop with leadSys/firstText.
+	r.realUsers = taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
 	for i := max(0, len(msgs)-tailPrevKeep); i < len(msgs); i++ {
-		r.tailPrev = append(r.tailPrev, msgs[i].Role+": "+preview(msgs[i].Text))
+		r.tailPrev = append(r.tailPrev, msgs[i].Role+": "+taskseg.Preview(msgs[i].Text))
 	}
 
 	r.ChatID = prof.ChatID(msgs)
@@ -510,20 +530,6 @@ func toolsSig(names []string) string {
 	sort.Strings(sorted)
 	sum := md5.Sum([]byte(strings.Join(sorted, ",")))
 	return fmt.Sprintf("tools:%d/%x", len(names), sum[:4])
-}
-
-// responseSummary reassembles a recorded client response body (SSE string or
-// JSON object) into the model's output.
-func responseSummary(body any) *chatmsg.StreamSummary {
-	switch b := body.(type) {
-	case string:
-		return chatmsg.ReassembleSSE(b)
-	case map[string]any:
-		if s, ok := chatmsg.FinalMessage(b); ok {
-			return s
-		}
-	}
-	return nil
 }
 
 // ---- grouping ----
@@ -667,17 +673,18 @@ func attach(s *SessionInfo, r *ReqInfo) {
 		r.SysChanged = p.manifest.SysHash != r.manifest.SysHash
 		r.Parent = p
 		traceChanged := r.TraceID != "" && p.TraceID != "" && r.TraceID != p.TraceID
+		hasNewInstr := taskseg.HasNewInstruction(r.realUsers, taskseg.ManifestKeySet(p.manifest), r.manifest, r.DeltaStart, r.Msgs)
 		// If the parent record ended in NO_REPLY (the LLM skipped its
 		// reply), the user's instruction in this record is a RETRY of the
 		// parent's skipped instruction, not a new user intent. We treat
 		// the retry as the same task to keep task boundaries aligned with
 		// actual user actions (a user types once → one task; multiple
 		// records may result from retries / streaming re-sends).
-		newTask = traceChanged || (!p.NoReply && r.deltaHasNewInstruction())
+		newTask = taskseg.IsNewTask(traceChanged, p.NoReply, hasNewInstr)
 	} else {
 		r.DeltaStart = 0 // whole request is "new" for the session's first record
 	}
-	r.NewInstruction = r.lastInstructionInDelta()
+	r.NewInstruction = taskseg.LastInstruction(r.realUsers, r.DeltaStart)
 
 	s.Recs = append(s.Recs, r)
 	r.SessSeq = len(s.Recs)
@@ -689,68 +696,21 @@ func attach(s *SessionInfo, r *ReqInfo) {
 	r.TaskSeq = len(t.Recs)
 }
 
-// deltaHasNewInstruction reports whether the delta contains a real user
-// instruction near the request's end (see chatmsg.NewUserWindow).
-//
-// A message only counts as new if its content wasn't already present
-// SOMEWHERE in the parent (not just its LCP-matched prefix). LCP diffing is
-// positional: pruning or reordering earlier in the history breaks the prefix
-// match at that point, so everything after it — including a real-user
-// message the parent already had verbatim, just at a different offset —
-// looks "new" by position alone. Without this check, a single instruction
-// that survives a mid-task context prune reopens as a fresh 1-turn task
-// quoting itself (observed in real logs after fixing RealUserText to see
-// envelope-wrapped instructions: pruning shifted the same "OK，基于你…"
-// message into the tail window a second time).
-func (r *ReqInfo) deltaHasNewInstruction() bool {
-	var parentKeys map[ctxgraph.Hash]bool
-	if r.Parent != nil {
-		parentKeys = make(map[ctxgraph.Hash]bool, len(r.Parent.manifest.Keys))
-		for _, k := range r.Parent.manifest.Keys {
-			parentKeys[k] = true
-		}
-	}
-	for idx := range r.realUsers {
-		if idx < r.DeltaStart || idx < r.Msgs-chatmsg.NewUserWindow {
-			continue
-		}
-		if ki := idx - r.manifest.LeadSys; parentKeys != nil && ki >= 0 && ki < len(r.manifest.Keys) && parentKeys[r.manifest.Keys[ki]] {
-			continue // identical content already existed in the parent — shifted, not new
-		}
-		return true
-	}
-	return false
-}
-
-// lastInstructionInDelta returns the preview of the newest real user
-// instruction inside the delta; "" when this turn is a pure tool-loop step.
-func (r *ReqInfo) lastInstructionInDelta() string {
-	best := -1
-	for idx := range r.realUsers {
-		if idx >= r.DeltaStart && idx > best {
-			best = idx
-		}
-	}
-	if best < 0 {
-		return ""
-	}
-	return r.realUsers[best]
-}
-
+// taskTitle resolves this task's title: r.NewInstruction (already
+// taskseg.LastInstruction-derived) when non-empty, else a fallback —
+// heartbeat first, then a generic placeholder. Not localized: this fallback
+// is computed inside AnalyzeSessions, the one full-corpus pass report.Build
+// deliberately runs only once (see aggregate.go's own "one file scan, not
+// three" rationale) — localizing it would mean re-running that whole pass a
+// second time per language just for a rare placeholder string. See
+// taskseg.TaskTitle's own doc comment for why it takes the fallback as a
+// parameter instead of importing internal/i18n itself.
 func taskTitle(r *ReqInfo) string {
-	if r.NewInstruction != "" {
-		return r.NewInstruction
-	}
+	fallback := "(tool loop continuation)"
 	if hasTag(r, "heartbeat") {
-		return "(heartbeat)"
+		fallback = "(heartbeat)"
 	}
-	// Not localized: this fallback is computed inside AnalyzeSessions, the
-	// one full-corpus pass report.Build deliberately runs only once (see
-	// aggregate.go's own "one file scan, not three" rationale) — localizing
-	// it would mean re-running that whole pass a second time per language
-	// just for a rare placeholder string. Kept in English always, same
-	// treatment as the sibling "(heartbeat)" fallback right above it.
-	return "(tool loop continuation)"
+	return taskseg.TaskTitle(r.NewInstruction, fallback)
 }
 
 func sessionTitle(s *SessionInfo) string {
@@ -765,7 +725,7 @@ func sessionTitle(s *SessionInfo) string {
 			}
 		}
 		if best >= 0 {
-			return first.realUsers[best]
+			return taskseg.Preview(first.realUsers[best])
 		}
 	}
 	for _, r := range s.Recs {
@@ -774,7 +734,7 @@ func sessionTitle(s *SessionInfo) string {
 		}
 	}
 	if len(s.Recs) > 0 && s.Recs[0].firstText != "" {
-		return preview(s.Recs[0].firstText)
+		return taskseg.Preview(s.Recs[0].firstText)
 	}
 	// Not localized — see taskTitle's comment above; same reasoning applies.
 	return "(untitled)"

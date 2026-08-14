@@ -73,11 +73,6 @@ var funcLineExemptions = map[string]int{
 	"internal/router/router.go:Serve":       190,
 	"internal/server/server.go:chatHandler": 175,
 
-	// Analytics-half passes over one record/lineage. session.go:collect and
-	// story/journey.go:buildFrom are the two implementations B3 is scheduled
-	// to converge; expect both entries to disappear rather than grow.
-	"internal/report/session.go:collect":                       150,
-	"internal/story/journey.go:buildFrom":                      135,
 	"internal/report/providerquota.go:buildProviderQuotaRows":  155,
 	"internal/report/metrics.go:buildFindings":                 130,
 	"internal/report/section_reliability.go:renderReliability": 135,

@@ -29,6 +29,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 // toolArgsInlineThreshold: tool-call args shorter than this render inline
@@ -587,7 +588,7 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, info *ReqInfo, t
 			}
 			tb.WriteString(details(escapeHTML(name), codeFence(jsonIndent(tn))))
 		}
-		b.WriteString(details(t.ToolsSummary(len(arr), escapeHTML(preview(strings.Join(tools, ", ")))), tb.String()))
+		b.WriteString(details(t.ToolsSummary(len(arr), escapeHTML(taskseg.Preview(strings.Join(tools, ", ")))), tb.String()))
 	}
 	if len(msgs) > 0 {
 		w("\n### %s\n\n", t.MessagesTitle(len(msgs)))

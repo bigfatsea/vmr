@@ -83,7 +83,7 @@ func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) st
 			continue
 		}
 		if text, ok := prof.RealUserText(m, rawMsgs, idx-off); ok {
-			return preview(text)
+			return taskseg.Preview(text)
 		}
 	}
 	return st.NoTitle

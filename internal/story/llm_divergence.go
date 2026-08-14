@@ -12,7 +12,10 @@
 // different evidence source (Step briefs, not raw text).
 package story
 
-import "vmr/internal/i18n"
+import (
+	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
+)
 
 // divergenceContextWindow bounds how many Steps before/after the
 // divergence point are included on each side — enough to see the
@@ -76,7 +79,7 @@ func divergenceStepBriefs(steps []alignedStep, center int, lang i18n.Lang) (befo
 		for _, tc := range s.ToolCalls {
 			tools = append(tools, tc.Name)
 		}
-		brief := preview(s.RespText)
+		brief := taskseg.Preview(s.RespText)
 		if brief == "" {
 			brief = i18n.LLM(lang).NoTextReply
 		}

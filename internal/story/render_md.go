@@ -11,6 +11,7 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 // RenderMarkdown renders j as a self-contained Markdown document in lang:
@@ -155,7 +156,7 @@ func renderLLMResponse(w func(string, ...any), s *Step, t i18n.StoryText) {
 	}
 	if s.RespText != "" {
 		w("<details><summary>%s</summary>\n\n%s</details>\n\n",
-			t.ReplySummary(escapeHTML(preview(s.RespText))), codeFence(s.RespText))
+			t.ReplySummary(escapeHTML(taskseg.Preview(s.RespText))), codeFence(s.RespText))
 	}
 	if len(s.ToolCalls) > 0 {
 		names := make([]string, len(s.ToolCalls))
@@ -201,7 +202,7 @@ func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
 		w("%s", t.EmptyEvent(head))
 		return
 	}
-	summary := preview(ev.Msg.Text)
+	summary := taskseg.Preview(ev.Msg.Text)
 	w("<details><summary>%s · %s</summary>\n\n%s</details>\n\n", head, escapeHTML(summary), codeFence(ev.Msg.Text))
 }
 

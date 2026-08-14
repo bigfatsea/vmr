@@ -38,6 +38,12 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 		"vmr/internal/config",
 		"vmr/internal/report",
+		// taskseg started depending on ctxgraph in the architecture review's
+		// B3 batch (Hash/Manifest types for its shared session/task-boundary
+		// primitives) — the same one-directional-dependency risk as report's
+		// entry just above: ctxgraph depending back on taskseg would be a
+		// real import cycle, not just a layering preference.
+		"vmr/internal/taskseg",
 	},
 	// internal/story (the `vmr story` narrative renderer) sits on top of
 	// ctxgraph, never on report — the same reasoning as ctxgraph's own
@@ -69,16 +75,24 @@ var forbiddenImports = map[string][]string{
 	"vmr/internal/router": {
 		"vmr/internal/server",
 	},
-	// taskseg (agent-dialect Profile: real-instruction/no-reply/chat_id
-	// detection) is the shared leaf both report's session.go and story's
-	// journey.go depend on — architecture review's B2 batch merged what used
-	// to be story's own private internal/story/profile package with a
-	// byte-identical copy report carried in session.go. Neither consumer may
-	// depend back on it, or "shared leaf" stops being true; same reasoning
-	// as ctxgraph's and chatmsg's own zero-dependency-on-consumers rule.
-	// CLAUDE.md states taskseg depends only on {chatmsg, fmtutil} — the
-	// entries below make that an enforced fact rather than only a stated
-	// one, same rationale as every other row in this table.
+	// taskseg (agent-dialect Profile plus, since the architecture review's B3
+	// batch, the session/task-segmentation primitives built on it —
+	// real-instruction indexing, new-task detection, task titling) is the
+	// shared leaf both report's session.go and story's journey.go depend on
+	// — B2 merged what used to be story's own private internal/story/profile
+	// package with a byte-identical copy report carried in session.go, B3
+	// converged the two packages' independent session/task-boundary
+	// algorithms the same way. Neither consumer may depend back on it, or
+	// "shared leaf" stops being true; same reasoning as ctxgraph's and
+	// chatmsg's own zero-dependency-on-consumers rule. CLAUDE.md states
+	// taskseg depends only on {chatmsg, fmtutil, ctxgraph} — the entries
+	// below make that an enforced fact rather than only a stated one, same
+	// rationale as every other row in this table. vmr/internal/audit is
+	// deliberately NOT listed here even though it once was (B2's own
+	// closing note): B3 added ctxgraph as a legitimate direct dependency
+	// (for its Hash/Manifest types), and ctxgraph itself depends on audit —
+	// audit is now an expected transitive dependency, not a violation to
+	// guard against.
 	"vmr/internal/taskseg": {
 		"vmr/internal/router",
 		"vmr/internal/server",
@@ -88,7 +102,6 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/adapter",
 		"vmr/internal/pricing",
 		"vmr/internal/quota",
-		"vmr/internal/audit",
 	},
 }
 

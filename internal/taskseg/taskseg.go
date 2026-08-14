@@ -5,7 +5,14 @@
 // transport scaffolding (routing envelopes, tool-result-only messages,
 // timestamp pings), recognizing an agent's "I deliberately said nothing this
 // turn" convention, and extracting a framework-specific session identifier
-// (chat_id) when the transport carries one.
+// (chat_id) when the transport carries one. This file holds that seam
+// (Profile) plus its two implementations (openclaw.go, generic.go);
+// segment.go holds the session/task-segmentation algorithm itself
+// (real-instruction indexing, new-task/new-instruction detection, task
+// titling, response reassembly, preview truncation) — generic over Profile,
+// not agent-specific on its own, but converged here in the architecture
+// review's B3 batch because report/session.go and story/journey.go used to
+// each carry an independent copy of it.
 //
 // internal/report's session.go and internal/story's journey.go both call
 // through Profile instead of each hardcoding one agent's conventions —

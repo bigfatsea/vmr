@@ -29,15 +29,18 @@ type Message struct {
 	Text string
 }
 
-// NewUserWindow guards task/instruction-boundary splitting in both
-// internal/report (session.go's task grouping) and internal/story
-// (journey.go's task-opening detection): a real user message only counts
-// as a NEW instruction when it sits within this many messages of the
-// request's end. An in-place history edit (e.g. image pruning) can push
-// the delta boundary far back and sweep an old user message into the
-// "new" range; those must not open a task. Shared here (rather than each
-// package declaring its own identical constant) so the two can't silently
-// drift apart — see the architecture review's P1-C finding.
+// NewUserWindow guards task/instruction-boundary splitting: a real user
+// message only counts as a NEW instruction when it sits within this many
+// messages of the request's end. An in-place history edit (e.g. image
+// pruning) can push the delta boundary far back and sweep an old user
+// message into the "new" range; those must not open a task. Consumed by
+// internal/taskseg.HasNewInstruction — the one shared implementation
+// report's session.go and story's journey.go both call through (the
+// architecture review's B3 batch converged what used to be two independent
+// copies of this same boundary rule). Declared here rather than in taskseg
+// so the two can't silently drift apart even before B3, and so taskseg
+// itself doesn't have to own a constant that's really about message-list
+// shape, not agent-dialect knowledge.
 const NewUserWindow = 8
 
 // RenderContent flattens a message "content" value (string, or a list of
