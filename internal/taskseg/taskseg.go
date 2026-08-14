@@ -23,11 +23,7 @@
 // corpus differences turn out to matter, not by guessing now.
 package taskseg
 
-import (
-	"unicode/utf8"
-
-	"vmr/internal/chatmsg"
-)
+import "vmr/internal/chatmsg"
 
 // Profile is the seam internal/report and internal/story both call through
 // instead of hardcoding one agent's conventions.
@@ -53,23 +49,4 @@ type Profile interface {
 	// OpenClaw's "Conversation info (untrusted metadata)" wrapper) — "" when
 	// absent or when the profile has no such convention.
 	ChatID(msgs []chatmsg.Message) string
-}
-
-// CapStr caps s at n BYTES without cutting a UTF-8 sequence in half — the
-// cut point backs up to the nearest rune boundary, so Chinese/emoji content
-// near the cap can't produce invalid UTF-8 in session titles, instruction
-// previews, or compaction needles. Exported because both this package's own
-// dialect-detection heuristics (OpenClawAware.RealUserText's scaffolding
-// prefix check) and internal/report's unrelated truncation needs (response
-// text previews, TraceID display, compaction needle matching) use the exact
-// same cap-safely helper — one implementation, not two independently
-// maintained copies.
-func CapStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
 }

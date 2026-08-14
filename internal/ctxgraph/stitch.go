@@ -15,7 +15,7 @@
 // those two collapse into one StitchCompaction kind here, decided purely by
 // blob-overlap score. Splitting a StitchCompaction edge further using an
 // agent's own compaction marker (e.g. OpenClaw's "The conversation history
-// before this point was compacted") is exactly what internal/story/profile
+// before this point was compacted") is exactly what internal/taskseg
 // exists for — a presentation-layer refinement on top of this structural
 // edge, not something this package should reach for.
 package ctxgraph

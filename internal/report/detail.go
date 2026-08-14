@@ -29,7 +29,6 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/taskseg"
 )
 
 // toolArgsInlineThreshold: tool-call args shorter than this render inline
@@ -518,7 +517,7 @@ func renderSessionHeader(b *strings.Builder, info *ReqInfo, t i18n.DetailText) {
 			meta = append(meta, t.ThisTurnCalls+"<strong>"+callsCell(info.ToolCalls)+"</strong>")
 		}
 		if info.TraceID != "" {
-			meta = append(meta, t.TraceLabel+"<strong>"+taskseg.CapStr(info.TraceID, 16)+"</strong>")
+			meta = append(meta, t.TraceLabel+"<strong>"+fmtutil.CapStr(info.TraceID, 16)+"</strong>")
 		}
 		if info.ChatID != "" {
 			meta = append(meta, t.ChatLabel+"<strong>"+info.ChatID+"</strong>")

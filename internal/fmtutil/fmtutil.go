@@ -11,6 +11,7 @@ package fmtutil
 import (
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // FmtBytes renders a byte count human-readably (B/KB/MB) — request/response
@@ -50,4 +51,22 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // internal/report/render.go's fmtBytes already uses for FmtBytes.
 func FmtPercent(f float64, decimals int) string {
 	return fmt.Sprintf("%.*f%%", decimals, f*100)
+}
+
+// CapStr caps s at n BYTES without cutting a UTF-8 sequence in half — the
+// cut point backs up to the nearest rune boundary, so Chinese/emoji content
+// near the cap can't produce invalid UTF-8. Used both for display (TraceID
+// truncation, response-text previews) and for non-display truncation
+// (compaction needle matching, a scaffolding-prefix check in
+// internal/taskseg's dialect detection) — none of those uses carry any
+// domain knowledge, which is why this lives here rather than in whichever
+// package happened to need it first.
+func CapStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

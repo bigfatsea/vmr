@@ -1269,6 +1269,35 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 > - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿；`archtest` 的文件/函数行数预算全部
 >   通过（`session.go` 993→897 行）。
 
+> **【B2 反馈复核 · 2026-08-15】** 逐条核实后落地 3 项、记录 1 项存疑待决策、1 项明确延后到 B3（反馈自己也
+> 建议如此）：
+> - **`CapStr` 职责归属**（属实）：`detail.go` 确认只为这一个函数才 import `taskseg`——移到
+>   `internal/fmtutil`（`FmtBytes`/`FmtSeconds`/`FmtPercent` 已在的同一个零依赖展示格式化包）后，
+>   `detail.go` 的 `taskseg` import 整个消失；`session.go` 六处调用改 `fmtutil.CapStr`；
+>   `TestCapStrRuneSafe` 随实现一起搬进 `fmtutil_test.go`；`taskseg` 自己（`openclaw.go` 的
+>   `RealUserText` 头部截断）也改调用 `fmtutil.CapStr`，`taskseg` 因此新增一条到 `fmtutil` 的依赖
+>   （零风险——`fmtutil` 本身零依赖）。CLAUDE.md 的 `taskseg`/`fmtutil` 两行同步更新。
+> - **`ChatID` 全文扫描 vs `RealUserText` 头部截断的不对称**（属实）：`ChatID` 确实对整段 `msgs[i].
+>   Text` 做 `strings.Contains` 和正则匹配，而 `RealUserText` 只在前 200 字节做同样的触发检测。
+>   按 `RealUserText` 的既有写法改成一致：`ChatID` 的触发判定同样先截取前 200 字节的 `head` 再
+>   `Contains`，只有命中才对**全文**跑正则提取（不能把提取本身也限窗——chatIDRe 命中的具体偏移量
+>   不保证落在任何固定窗口内）。补了 3 个测试：大尾部消息仍能命中、信封本身早于 200 字节窗口时的
+>   已知局限（与 `RealUserText` 同一套限制，故意用测试钉住，不是新引入的风险）。
+> - **`stitch.go:18` 的 `internal/story/profile` 陈旧引用**（属实）：改成 `internal/taskseg`。
+> - **Profile 公共入口的 nil 防御性**（有效但有分歧，未落地，留给你决策）：核实过全部现有调用点
+>   （`resolveTaskProfile`/测试）都不可能传 nil，属于 Go 类型系统下已经排除的场景，不是 CLAUDE.md
+>   说的"系统边界"输入。而且静默 fallback 到 `OpenClawAware` 有个真实代价：如果未来 `resolveTaskProfile`
+>   哪天因为改动引入 bug 真的返回了 nil，静默兜底会把这个 bug 悄悄吞掉、报表照样跑出一份错误但
+>   "看起来正常"的分析结果，比直接 panic 更难查——是否仍要加，以及加的话是静默兜底还是明确报错，
+>   由你决定。
+> - **`IsRealUser` 精简掉**：反馈自己就说这是 B3 的范围（`journey.go:598` 是任务切分逻辑的一部分），
+>   未在本轮动它。
+> - **`archtest` 的 taskseg 边界规则改白名单**（有效但涉及机制选择，未落地，留给你决策）：核实过
+>   `taskseg` 当前黑名单确实没列 `adapter`/`pricing`/`quota`/`audit`，但这个黑名单模式和
+>   `ctxgraph`/`story`/`adapter`/`router` 四个现有条目完全一致——`chatmsg` 甚至连黑名单都没有。
+>   给 taskseg 单独上白名单机制会造成和其余几条规则不对称，且是这份文件里第一次出现"白名单"这种
+>   检查方式。是否值得为 taskseg 单独引入这个新机制（或者只是把黑名单加长），由你决定。
+
 ---
 
 #### 4️⃣ B3 — 会话/任务切分算法收敛：消灭最后一份双实现

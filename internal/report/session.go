@@ -392,7 +392,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 					r.ToolCalls = append(r.ToolCalls, tc.Name)
 				}
 			}
-			r.respText = taskseg.CapStr(strings.TrimSpace(s.Content), 256<<10)
+			r.respText = fmtutil.CapStr(strings.TrimSpace(s.Content), 256<<10)
 			// A deliberate no-reply skip (e.g. OpenClaw's empty-content or
 			// explicit "NO_REPLY" marker convention — see prof.NoReply):
 			// the record is sent successfully but the LLM skipped acting on
@@ -447,7 +447,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 			continue
 		}
 		if r.firstText == "" {
-			r.firstText = taskseg.CapStr(m.Text, 512<<10)
+			r.firstText = fmtutil.CapStr(m.Text, 512<<10)
 		}
 		if m.Role == "user" {
 			lastUser = m.Text
@@ -469,7 +469,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	if leadSys > 0 {
 		sysText = msgs[0].Text
 	}
-	if strings.Contains(strings.ToLower(taskseg.CapStr(sysText, 200)), "summarization") ||
+	if strings.Contains(strings.ToLower(fmtutil.CapStr(sysText, 200)), "summarization") ||
 		(len(r.ToolsDeclared) == 0 && hasMaxCT && r.TraceID == "") {
 		r.Compaction = true
 	}
@@ -485,7 +485,7 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 	if compaction {
 		tags = append(tags, "compaction")
 	}
-	if strings.Contains(taskseg.CapStr(firstText, 200), "compacted into the following summary") {
+	if strings.Contains(fmtutil.CapStr(firstText, 200), "compacted into the following summary") {
 		tags = append(tags, "compacted_session")
 	}
 	if strings.HasPrefix(firstText, "<conversation>") {
@@ -854,7 +854,7 @@ func linkCompactions(a *SessionAnalysis) {
 // beyond accidental-collision territory.
 func needle(s string) string {
 	s = strings.TrimSpace(s)
-	return taskseg.CapStr(s, 200)
+	return fmtutil.CapStr(s, 200)
 }
 
 // stripBracketPrefix removes a leading "[…] " block (OpenClaw's injected

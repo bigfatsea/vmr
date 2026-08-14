@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/fmtutil"
 )
 
 // OpenClawAware ports internal/report/session.go's original realUserText/
@@ -52,7 +53,7 @@ func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) 
 	if m.Role != "user" {
 		return "", false
 	}
-	head := CapStr(m.Text, 200)
+	head := fmtutil.CapStr(m.Text, 200)
 	if strings.HasPrefix(head, "OpenClaw runtime context") ||
 		strings.HasPrefix(head, "Attached image(s) from tool result") ||
 		strings.HasPrefix(head, "The conversation history before this point was compacted") {
@@ -110,13 +111,25 @@ var chatIDRe = regexp.MustCompile(`"chat_id"\s*:\s*"([^"]+)"`)
 
 // ChatID scans msgs from the end (the wrapper is glued onto the most recent
 // user turn, not necessarily the first) for a user message carrying
-// OpenClaw's "Conversation info" envelope and extracts its chat_id.
+// OpenClaw's "Conversation info" envelope and extracts its chat_id. The
+// trigger check is head-bounded the same way RealUserText's is — the
+// envelope is always glued onto the FRONT of a message, so a message whose
+// first 200 bytes don't mention it can't be a match regardless of how long
+// the rest of the message is (a large tool result or attachment shouldn't
+// cost a full-length scan just to be ruled out). The regex extraction itself
+// still runs over the full text once triggered, unbounded — chat_id's exact
+// offset within the envelope JSON isn't guaranteed to fit any fixed window.
 func (openClawAware) ChatID(msgs []chatmsg.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" && strings.Contains(msgs[i].Text, "Conversation info (untrusted metadata)") {
-			if m := chatIDRe.FindStringSubmatch(msgs[i].Text); m != nil {
-				return m[1]
-			}
+		if msgs[i].Role != "user" {
+			continue
+		}
+		head := fmtutil.CapStr(msgs[i].Text, 200)
+		if !strings.Contains(head, "Conversation info (untrusted metadata)") {
+			continue
+		}
+		if m := chatIDRe.FindStringSubmatch(msgs[i].Text); m != nil {
+			return m[1]
 		}
 	}
 	return ""

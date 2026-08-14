@@ -2,8 +2,10 @@
 package fmtutil
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // TestFmtBytes locks the B/KB/MB thresholds and rounding — these three
@@ -60,5 +62,28 @@ func TestFmtPercent(t *testing.T) {
 	}
 	if got, want := FmtPercent(0, 1), "0.0%"; got != want {
 		t.Errorf("FmtPercent(0, 1) = %q, want %q", got, want)
+	}
+}
+
+// TestCapStrRuneSafe locks in that CapStr's byte cap never cuts through a
+// UTF-8 sequence — Chinese/emoji session titles and compaction needles near
+// the cap must stay valid UTF-8. Moved from internal/taskseg, where CapStr
+// originally landed alongside the B2 batch's Profile move despite carrying
+// no dialect-specific knowledge of its own (architecture review's B2
+// feedback round).
+func TestCapStrRuneSafe(t *testing.T) {
+	t.Parallel()
+	s := strings.Repeat("审", 100) // 3 bytes per rune
+	for n := 0; n <= 12; n++ {
+		got := CapStr(s, n)
+		if !utf8.ValidString(got) {
+			t.Errorf("CapStr(…, %d) produced invalid UTF-8: %q", n, got)
+		}
+		if len(got) > n {
+			t.Errorf("CapStr(…, %d) exceeded the byte cap: %d bytes", n, len(got))
+		}
+	}
+	if got := CapStr("ascii only", 200); got != "ascii only" {
+		t.Errorf("short string must be returned whole: %q", got)
 	}
 }

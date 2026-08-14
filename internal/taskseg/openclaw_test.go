@@ -128,3 +128,38 @@ func TestOpenClawAware_ChatID_NoEnvelopeIsEmpty(t *testing.T) {
 		t.Errorf("ChatID = %q, want empty", got)
 	}
 }
+
+// TestOpenClawAware_ChatID_LargeTailMessage locks in that the head-bounded
+// trigger check (matching RealUserText's own 200-byte head check) doesn't
+// cost a full-length scan for a large message, while still finding a
+// chat_id that's within the envelope even when the envelope's OWN JSON body
+// (not just the trailing message content) extends well past 200 bytes —
+// only the "does this message start with the trigger phrase" check is
+// head-bounded, the regex extraction itself always runs over the full text.
+func TestOpenClawAware_ChatID_LargeTailMessage(t *testing.T) {
+	envelope := "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"user:ou_big\",\"padding\":\"" +
+		strings.Repeat("x", 1000) + "\"}\n```\n\n"
+	msgs := []chatmsg.Message{
+		{Role: "user", Text: envelope + strings.Repeat("real instruction text ", 5000)},
+	}
+	if got := OpenClawAware.ChatID(msgs); got != "user:ou_big" {
+		t.Errorf("ChatID = %q, want user:ou_big", got)
+	}
+}
+
+// TestOpenClawAware_ChatID_EnvelopeBeyondHeadWindowMissed documents the
+// accepted limitation the head-bounded trigger check inherits from
+// RealUserText's own identical convention: if something other than the
+// envelope itself pushes the trigger phrase past the first 200 bytes, the
+// chat_id is missed. This isn't a real-world shape (OpenClaw always glues
+// the envelope onto the very front of the message) — this test exists so a
+// future change to the window size is a deliberate edit, not a silent
+// behavior shift.
+func TestOpenClawAware_ChatID_EnvelopeBeyondHeadWindowMissed(t *testing.T) {
+	msgs := []chatmsg.Message{
+		{Role: "user", Text: strings.Repeat("padding ", 50) + "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"user:ou_late\"}\n```"},
+	}
+	if got := OpenClawAware.ChatID(msgs); got != "" {
+		t.Errorf("ChatID = %q, want empty (envelope trigger phrase starts past the 200-byte head window)", got)
+	}
+}
