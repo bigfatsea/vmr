@@ -36,9 +36,20 @@ import (
 // record would make the two agree by construction — and would also make §2.5's
 // recomputed column a readout instead of the independent cross-check it
 // exists to be (see ProviderQuotaRow's doc comment).
+//
+// Facts is nil for a record that never reached fact computation (see
+// audit.Record.Facts's doc comment) — which, for a record with a non-empty
+// endpoint, means exactly one thing: internal/replay's writeReplayRecord,
+// which never populates Facts (see that function's doc comment). For that
+// case the router-side basis isn't Facts.EstimatedTokens either — chargeReplay
+// charges core.EstimateTextTokens(reqBody) directly — so falling back to the
+// same computation here over the recorded client request body reproduces the
+// router's own degraded basis instead of silently contributing zero.
 func estimateDegradedTokens(arec *audit.Record) (inEst, outEst int64) {
 	if arec.Facts != nil {
 		inEst = arec.Facts.EstimatedTokens
+	} else {
+		inEst = core.EstimateTextTokens(bodyRaw(arec.Client.Request.Body))
 	}
 	if arec.Client.Response != nil {
 		outEst = core.EstimateTextTokens(bodyRaw(arec.Client.Response.Body))
