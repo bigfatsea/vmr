@@ -158,6 +158,9 @@ func Build(l *ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (*Journey,
 // calling BuildChain in a loop re-fetches from scratch per chain, which
 // re-scans a source file once per chain touching it instead of once total.
 func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (*Journey, error) {
+	if prof == nil {
+		return nil, errNilProfile
+	}
 	if len(chain) == 0 {
 		return nil, errEmptyLineage
 	}
@@ -204,6 +207,9 @@ func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang)
 // whole batch (matches BuildChain's own all-or-nothing contract for a
 // single chain).
 func BuildAll(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) ([]*Journey, error) {
+	if prof == nil {
+		return nil, errNilProfile
+	}
 	for _, chain := range chains {
 		if len(chain) == 0 {
 			return nil, errEmptyLineage
@@ -595,7 +601,7 @@ func deltaHasNewInstruction(prof taskseg.Profile, msgs []chatmsg.Message, rawMsg
 		if msgs[idx].Role != "user" {
 			continue
 		}
-		if !prof.IsRealUser(msgs[idx], rawMsgs, idx-off) {
+		if _, ok := prof.RealUserText(msgs[idx], rawMsgs, idx-off); !ok {
 			continue
 		}
 		if idx >= cur.LeadSys {

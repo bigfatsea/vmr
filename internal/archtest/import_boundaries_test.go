@@ -41,11 +41,12 @@ var forbiddenImports = map[string][]string{
 	},
 	// internal/story (the `vmr story` narrative renderer) sits on top of
 	// ctxgraph, never on report — the same reasoning as ctxgraph's own
-	// rule: report's session/task grouping is an independent, still-
-	// authoritative implementation until a later phase migrates it onto
-	// ctxgraph (per the design doc's phased-migration plan), and story must not quietly reach past
-	// that boundary just because report happens to have similar-looking
-	// helpers.
+	// rule. report's session/task grouping already consumes ctxgraph
+	// directly (session.go's Lineage/Classify use) and shares its
+	// agent-dialect Profile with story via internal/taskseg, but the two
+	// consumers remain independent of each other: story must not reach past
+	// this boundary just because report happens to have similar-looking
+	// helpers, and vice versa.
 	"vmr/internal/story": {
 		"vmr/internal/router",
 		"vmr/internal/server",
@@ -75,12 +76,19 @@ var forbiddenImports = map[string][]string{
 	// byte-identical copy report carried in session.go. Neither consumer may
 	// depend back on it, or "shared leaf" stops being true; same reasoning
 	// as ctxgraph's and chatmsg's own zero-dependency-on-consumers rule.
+	// CLAUDE.md states taskseg depends only on {chatmsg, fmtutil} — the
+	// entries below make that an enforced fact rather than only a stated
+	// one, same rationale as every other row in this table.
 	"vmr/internal/taskseg": {
 		"vmr/internal/router",
 		"vmr/internal/server",
 		"vmr/internal/config",
 		"vmr/internal/report",
 		"vmr/internal/story",
+		"vmr/internal/adapter",
+		"vmr/internal/pricing",
+		"vmr/internal/quota",
+		"vmr/internal/audit",
 	},
 }
 

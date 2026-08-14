@@ -1351,6 +1351,21 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 - `grep` 确认 8.1 表中列出的 6 对同名函数在两个包中各自只剩一处引用点。
 - **性能不回退（对应 2b）**：`IndexRealUsers` 在两个调用方的主扫描循环中**各只被调用一次**；用一份大体量真实审计日志对比 `vmr report` / `vmr story` 重构前后的墙钟耗时，`report` 侧持平、`story` 侧应有改善（它今天要重跑 2–3 遍正则）。这是本批唯一与「性能不可回退」硬约束相关的检查点。
 
+> **【B3 落地前反馈复核 · 2026-08-15】** B3 尚未开工时收到一轮反馈，逐条核实后 2 项当场修掉（不必等 B3）、1 项文档修正、3 项确认为本批必须遵守的设计陷阱，决策直接写回本节，实施时不再重新推导：
+> - **（已修）** `taskseg/openclaw.go` 的 200 字节快速触发检查曾经只测 `"Conversation info (untrusted metadata)"`，但 `openClawEnvelopeRe` 用 `(?:Conversation info|Sender)` 覆盖两种信封头——一条消息若只携带独立的 `Sender (untrusted metadata)` 信封，快速检查会漏判，导致 JSON 信封混入任务标题。`RealUserText`/`ChatID` 的触发检查已改为判断公共子串 `"(untrusted metadata)"`，补了 `TestOpenClawAware_SenderEnvelopeAloneStripped`。
+> - **（已修）** `Profile.IsRealUser` 全库仅剩 `story/journey.go:598` 一处调用，且实现只是委托 `RealUserText`。纯接口最小化、不触碰切分算法本身，且 B3 落地时这行调用本来就会被 `IndexRealUsers` 整体替换掉——不必等到 B3：`journey.go:598` 已改为内联 `_, ok := prof.RealUserText(...)`，`Profile` 接口与两个实现都已删掉这个方法，`CLAUDE.md`/`_Analytics.md` 的 `taskseg` 描述同步。**2b/2c 的 `IndexRealUsers`/`HasNewInstruction`/`LastInstruction` 设计不受影响**——它们本就没有引用 `IsRealUser`。
+> - **（已修，文档）** `import_boundaries_test.go:49` "until a later phase migrates it onto ctxgraph" 一句已过期——`report` 的 `session.go` 早就在用 `ctxgraph.Lineage`/`Classify`，"later phase" 已经发生。已改为陈述现状：`report`/`story` 共享 `taskseg` 的 Profile，两者仍互不依赖。`taskseg` 的黑名单机制核实过与 `ctxgraph`/`router` 现有条目风格一致，不改成白名单。
+> - **（决策，细化 2c）`RealUsers` 存 Raw，不存 Preview**：核实属实——`report` 今天在单趟扫描里就地存 `preview(text)`（`session.go:455`），`story` 存原文、只在选出 `bestText` 后的最后一步才截断（`journey.go:635`）。**决策**：`RealUsers` 统一存未截断原文；`taskseg.LastInstruction`/`TaskTitle` 内部统一调用 `fmtutil.CapStr` 截断，两个调用方都不能绕过直接读原始 map 拿到未截断文本当标题用。与 2b 提案的签名（`LastInstruction(ru RealUsers, deltaStart int) string`）完全兼容，只是把「谁负责截断」钉死，防止两个命令的任务标题长度不知不觉分叉。
+> - **（决策，细化 2）`TaskTitle` 不导入 `internal/i18n`**：核实属实——`story` 侧走 `i18n.Story(lang).ToolLoopTitle`（`journey.go:676`），`report` 侧固定英文 fallback 且明确注释了原因（`report.Build` 全语料只扫一趟，不值得为一个占位符字符串重新跑一遍）。**决策**：`taskseg.TaskTitle(newInstruction, fallback string) string` 只接受调用方传入的兜底文案，不导入 `i18n`——`report` 传常量英文串，`story` 传 `i18n.Story(lang).ToolLoopTitle`。保持 `taskseg` 是不依赖渲染层的叶子包，与本节已确立的「`taskseg` 只依赖 `chatmsg`」的边界一致。
+> - **（决策，细化 1）`HasNewInstruction` 的父节点归属判定以 story 侧写法为准**：核实属实——两侧对「当前消息是否已存在于父节点」的判定数学上等价（`ki := idx - LeadSys` 后判 `ki >= 0` ⟺ `idx >= LeadSys`），report 侧多出的 `parentKeys != nil` 判空实为多余：统一后的签名把 `prevKeys` 作为 `map[ctxgraph.Hash]bool` 直接传入，Go 对 nil map 取值天然返回零值 `false`，`parentKeys[key]` 不需要先判空即可安全调用。**决策**：采用 story 侧更简洁的写法，不移植 report 侧这条冗余判空。
+>
+> **【B2 收尾反馈复核 · 2026-08-15】** 又收到一轮针对 `fc6eb78`/`1f200e7` 的独立反馈，逐条核实后 4 项直接落地，1 项按反馈自己的建议延后到 B3（不做）：
+> - **（已修）** `fmtutil.CapStr(s, n)` 传入 `n<0` 时 `len(s)<=n`、`for n>0` 两道判断都不拦截，直接 `s[:n]` 越界 panic——虽然当前生产调用点都传常量，但它是零依赖叶子包的**公共导出函数**，不是私有 helper，契约该对任意 `int` 成立。加了 `n<=0` 前置返回 `""`，补了 `TestCapStrNonPositiveN`。
+> - **（已修）** `taskseg` 的 `archtest` 黑名单只列了 `router`/`server`/`config`/`report`/`story`，没列 `adapter`/`pricing`/`quota`/`audit`——核实过 `taskseg` 当前确实只 import `{chatmsg, fmtutil}`，与 CLAUDE.md 声明一致，补齐黑名单条目把"文档声明"变成"测试强制"，不改动黑名单机制本身（反馈也建议维持黑名单，不引入白名单）。
+> - **（已修）** `generic_test.go` 的 `TestGeneric_AnyNonEmptyUserTextIsReal` 只查了 `RealUserText` 的 `ok` 返回值，没查文本本身有没有被意外改写——补了 `got != text` 断言，与 `OpenClawAware` 那边的覆盖对齐。
+> - **（已修，跨批次提前处理）`Profile` 公共入口的 nil 防御性**：这一点最早在上一轮 B2 复核就出现过、当时"有分歧、留给你决定"；这次反馈换了个角度重新提出（`session.go` 的并发 worker goroutine 没有 `recover()`，深处 panic 会带崩整个进程，而不是一条可读错误）。核实后判断这个论据成立，且改动的 5 个入口（`report.AnalyzeSessionsCached`、`story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles`）都是跨包公共 API、且后面紧跟并发扇出或递归组装，符合 CLAUDE.md"只在系统边界校验"的例外条款，不是"为不可能发生的场景加校验"。已在这 5 处加 `prof == nil` fail-fast 校验（`story` 新增 `errNilProfile` sentinel，风格对齐既有的 `errEmptyLineage`），各补一条负向单测，并做过一次真实的负向验证（临时摘掉 `report` 那处校验，确认编译/测试失败，复原后重新全绿）。
+> - **（延后，按反馈自己的建议）** `file_sizes_test.go` 给 `internal/taskseg/*.go` 登记文件行数预算：反馈自己的建议就是"等 B3 落地时再登记"——当前 `openclaw.go`（137 行）/`taskseg.go`（53 行）离任何预算警戒线都很远，现在登记是没有意义的数字，不符合项目"预算报警了再加，不要抢跑"的一贯做法（对应远期池 L3 的同一条原则）。
+
 ---
 
 #### 5️⃣ B4 — `TrafficStats` 组合化 + `buildInternal` 分解

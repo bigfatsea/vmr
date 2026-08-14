@@ -60,7 +60,7 @@ func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) 
 		return "", false
 	}
 	text := m.Text
-	if strings.Contains(head, "Conversation info (untrusted metadata)") {
+	if strings.Contains(head, "(untrusted metadata)") {
 		text = stripOpenClawEnvelope(text)
 		if leadingBracketRe.ReplaceAllString(text, "") == "" {
 			return "", false // just a timestamp bracket, nothing real left
@@ -89,11 +89,6 @@ func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) 
 	return text, true
 }
 
-func (p openClawAware) IsRealUser(m chatmsg.Message, rawMsgs []any, rawIdx int) bool {
-	_, ok := p.RealUserText(m, rawMsgs, rawIdx)
-	return ok
-}
-
 func (openClawAware) NoReply(finish, content string) bool {
 	if finish != "stop" && finish != "end_turn" {
 		return false
@@ -110,8 +105,8 @@ func (openClawAware) NoReply(finish, content string) bool {
 var chatIDRe = regexp.MustCompile(`"chat_id"\s*:\s*"([^"]+)"`)
 
 // ChatID scans msgs from the end (the wrapper is glued onto the most recent
-// user turn, not necessarily the first) for a user message carrying
-// OpenClaw's "Conversation info" envelope and extracts its chat_id. The
+// user turn, not necessarily the first) for a user message carrying one of
+// OpenClaw's "(untrusted metadata)" envelopes and extracts its chat_id. The
 // trigger check is head-bounded the same way RealUserText's is — the
 // envelope is always glued onto the FRONT of a message, so a message whose
 // first 200 bytes don't mention it can't be a match regardless of how long
@@ -125,7 +120,7 @@ func (openClawAware) ChatID(msgs []chatmsg.Message) string {
 			continue
 		}
 		head := fmtutil.CapStr(msgs[i].Text, 200)
-		if !strings.Contains(head, "Conversation info (untrusted metadata)") {
+		if !strings.Contains(head, "(untrusted metadata)") {
 			continue
 		}
 		if m := chatIDRe.FindStringSubmatch(msgs[i].Text); m != nil {

@@ -32,6 +32,22 @@ func TestIDMatchesDeriveID(t *testing.T) {
 	}
 }
 
+// TestPreviewTitle_NilProfileErrors and TestPreviewTitles_NilProfileErrors
+// pin the fail-fast guard for a nil taskseg.Profile — see the same-named
+// guards in journey_test.go for why this matters more than a nicer error
+// message (titleFromRecord would otherwise panic on prof.RealUserText).
+func TestPreviewTitle_NilProfileErrors(t *testing.T) {
+	if _, err := PreviewTitle([]*ctxgraph.Lineage{{}}, nil, i18n.EN); err == nil {
+		t.Error("PreviewTitle with a nil Profile should return an error, not panic")
+	}
+}
+
+func TestPreviewTitles_NilProfileErrors(t *testing.T) {
+	if _, err := PreviewTitles([][]*ctxgraph.Lineage{{{}}}, nil, i18n.EN); err == nil {
+		t.Error("PreviewTitles with a nil Profile should return an error, not panic")
+	}
+}
+
 // TestPreviewTitleAndPreviewTitlesAgree covers both the single-chain
 // PreviewTitle path and the batched PreviewTitles path (the one
 // cmd_story.go's listing actually uses) against the same fixture — both

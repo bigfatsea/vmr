@@ -62,6 +62,9 @@ func FmtPercent(f float64, decimals int) string {
 // domain knowledge, which is why this lives here rather than in whichever
 // package happened to need it first.
 func CapStr(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	if len(s) <= n {
 		return s
 	}

@@ -87,3 +87,16 @@ func TestCapStrRuneSafe(t *testing.T) {
 		t.Errorf("short string must be returned whole: %q", got)
 	}
 }
+
+func TestCapStrNonPositiveN(t *testing.T) {
+	t.Parallel()
+	if got := CapStr("hello", -1); got != "" {
+		t.Errorf("CapStr(…, -1) = %q, want empty string, not a negative slice panic", got)
+	}
+	if got := CapStr("hello", 0); got != "" {
+		t.Errorf("CapStr(…, 0) = %q, want empty string", got)
+	}
+	if got := CapStr("", -1); got != "" {
+		t.Errorf("CapStr(\"\", -1) = %q, want empty string", got)
+	}
+}

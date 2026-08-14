@@ -99,6 +99,17 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSessionsCached_NilProfileErrors pins the fail-fast guard for a
+// nil taskseg.Profile: without it, collect() only calls prof.RealUserText
+// once inside one of AnalyzeSessionsCached's per-file worker goroutines
+// (none of which recover a panic), so a nil prof would crash the whole
+// process instead of returning a clean error from this call.
+func TestAnalyzeSessionsCached_NilProfileErrors(t *testing.T) {
+	if _, _, err := AnalyzeSessionsCached(nil, nil, nil); err == nil {
+		t.Error("AnalyzeSessionsCached with a nil Profile should return an error, not panic")
+	}
+}
+
 func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())

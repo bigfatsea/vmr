@@ -14,19 +14,23 @@ func TestGeneric_AnyNonEmptyUserTextIsReal(t *testing.T) {
 	// which is the whole point: it's the fallback for agents with
 	// different (or no) transport conventions.
 	text := "OpenClaw runtime context for the immediately preceding user message."
-	if !Generic.IsRealUser(chatmsg.Message{Role: "user", Text: text}, nil, -1) {
+	got, ok := Generic.RealUserText(chatmsg.Message{Role: "user", Text: text}, nil, -1)
+	if !ok {
 		t.Error("Generic should not recognize OpenClaw-specific scaffolding markers")
+	}
+	if got != text {
+		t.Errorf("Generic.RealUserText must return the text unmodified, got %q, want %q", got, text)
 	}
 }
 
 func TestGeneric_EmptyRejected(t *testing.T) {
-	if Generic.IsRealUser(chatmsg.Message{Role: "user", Text: "   "}, nil, -1) {
+	if _, ok := Generic.RealUserText(chatmsg.Message{Role: "user", Text: "   "}, nil, -1); ok {
 		t.Error("whitespace-only text should not count as real")
 	}
 }
 
 func TestGeneric_NonUserRoleRejected(t *testing.T) {
-	if Generic.IsRealUser(chatmsg.Message{Role: "assistant", Text: "hi"}, nil, -1) {
+	if _, ok := Generic.RealUserText(chatmsg.Message{Role: "assistant", Text: "hi"}, nil, -1); ok {
 		t.Error("assistant-role message should never count as real user text")
 	}
 }

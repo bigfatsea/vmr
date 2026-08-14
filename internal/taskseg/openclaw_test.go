@@ -9,11 +9,9 @@ import (
 	"vmr/internal/chatmsg"
 )
 
-// These cases mirror internal/report/session_test.go's TestIsRealUserScaffolding
-// /TestRealUserTextStripsEnvelope — same corpus-validated behavior, ported
-// verbatim rather than re-derived, since this package's whole reason to
-// exist is "the exact same heuristics, reachable without depending on
-// internal/report".
+// These cases carry forward the corpus-validated behavior that used to live
+// in internal/report/session_test.go before the B2 refactor batch moved the
+// heuristics themselves here and deleted the byte-identical duplicate tests.
 func TestOpenClawAware_ScaffoldingRejected(t *testing.T) {
 	for _, text := range []string{
 		"OpenClaw runtime context for the immediately preceding user message.\nInternal.",
@@ -21,11 +19,11 @@ func TestOpenClawAware_ScaffoldingRejected(t *testing.T) {
 		"Attached image(s) from tool result:",
 		"The conversation history before this point was compacted into the following summary:\n<summary>x</summary>",
 	} {
-		if OpenClawAware.IsRealUser(chatmsg.Message{Role: "user", Text: text}, nil, -1) {
+		if _, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: text}, nil, -1); ok {
 			t.Errorf("scaffolding counted as real user: %q", text[:40])
 		}
 	}
-	if !OpenClawAware.IsRealUser(chatmsg.Message{Role: "user", Text: "帮我修个 bug"}, nil, -1) {
+	if _, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: "帮我修个 bug"}, nil, -1); !ok {
 		t.Error("real instruction not recognized")
 	}
 }
@@ -49,8 +47,28 @@ func TestOpenClawAware_RealUserTextStripsEnvelope(t *testing.T) {
 
 func TestOpenClawAware_TimestampOnlyAfterStrip(t *testing.T) {
 	wrapped := "[Thu 2026-07-09 06:48 GMT+8] Conversation info (untrusted metadata):\n```json\n{}\n```"
-	if OpenClawAware.IsRealUser(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1) {
+	if _, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1); ok {
 		t.Error("pure timestamp-plus-envelope should not count as real")
+	}
+}
+
+// TestOpenClawAware_SenderEnvelopeAloneStripped pins the fix for a head-check/
+// regex mismatch: openClawEnvelopeRe matches EITHER "Conversation info" or
+// "Sender" (untrusted metadata) headers, but the 200-byte trigger check used
+// to only look for "Conversation info", so a message carrying only a
+// "Sender" envelope at its head bypassed stripOpenClawEnvelope entirely and
+// leaked the raw JSON envelope into the task title.
+func TestOpenClawAware_SenderEnvelopeAloneStripped(t *testing.T) {
+	wrapped := "Sender (untrusted metadata):\n```json\n{\"id\":\"ou_x\"}\n```\n\n帮我修个 bug"
+	text, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1)
+	if !ok {
+		t.Fatal("Sender-only envelope wrapped instruction not recognized")
+	}
+	if !strings.Contains(text, "帮我修个 bug") {
+		t.Errorf("stripped text lost the real instruction: %q", text)
+	}
+	if strings.Contains(text, "\"id\"") {
+		t.Errorf("stripped text still carries the JSON envelope: %q", text)
 	}
 }
 
@@ -61,13 +79,13 @@ func TestOpenClawAware_PureToolResultRejected(t *testing.T) {
 		}},
 	}
 	m := chatmsg.Message{Role: "user", Text: "some rendered text"}
-	if OpenClawAware.IsRealUser(m, raw, 0) {
+	if _, ok := OpenClawAware.RealUserText(m, raw, 0); ok {
 		t.Error("an all-tool_result raw message should not count as real user text")
 	}
 }
 
 func TestOpenClawAware_NonUserRoleRejected(t *testing.T) {
-	if OpenClawAware.IsRealUser(chatmsg.Message{Role: "assistant", Text: "hi"}, nil, -1) {
+	if _, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "assistant", Text: "hi"}, nil, -1); ok {
 		t.Error("assistant-role message should never count as real user text")
 	}
 }

@@ -10,6 +10,14 @@ import (
 
 var errEmptyLineage = errors.New("story: lineage has no manifests")
 
+// errNilProfile guards every exported entry point that fans out into
+// concurrent goroutines (BuildAll) or worker-free recursion (BuildChain) —
+// a nil taskseg.Profile reaching prof.RealUserText inside one of those
+// would panic with no recover() in the call chain, which for a goroutine
+// means the whole process dies mid-flight instead of returning a clean
+// error the caller can report.
+var errNilProfile = errors.New("story: prof is nil")
+
 // ListCandidates returns the lineages worth offering as a Journey,
 // chronologically. Each returned lineage is a chain TAIL — call
 // ctxgraph.ChainFrom(l, byIdx) to get its full stitched chain before

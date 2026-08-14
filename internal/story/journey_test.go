@@ -384,6 +384,23 @@ func TestBuildAll_EmptyLineageErrors(t *testing.T) {
 	}
 }
 
+// TestBuildChain_NilProfileErrors and TestBuildAll_NilProfileErrors pin the
+// fail-fast guard added for a nil taskseg.Profile: without it, a nil prof
+// only surfaces once buildFrom calls prof.RealUserText, which for BuildAll
+// happens inside a worker goroutine with no recover() — an unrecovered
+// panic there kills the whole process instead of returning a clean error.
+func TestBuildChain_NilProfileErrors(t *testing.T) {
+	if _, err := BuildChain([]*ctxgraph.Lineage{{}}, nil, i18n.EN); err == nil {
+		t.Error("BuildChain with a nil Profile should return an error, not panic")
+	}
+}
+
+func TestBuildAll_NilProfileErrors(t *testing.T) {
+	if _, err := BuildAll([][]*ctxgraph.Lineage{{{}}}, nil, i18n.EN); err == nil {
+		t.Error("BuildAll with a nil Profile should return an error, not panic")
+	}
+}
+
 // TestSortByRootThenTime_TieBreaksOnRootHash covers the tie-break path: two
 // lineages whose root manifests share the exact same timestamp (should not
 // happen in practice, but must still sort deterministically across runs

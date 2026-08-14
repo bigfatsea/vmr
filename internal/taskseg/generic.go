@@ -29,11 +29,6 @@ func (generic) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) (strin
 	return m.Text, true
 }
 
-func (p generic) IsRealUser(m chatmsg.Message, rawMsgs []any, rawIdx int) bool {
-	_, ok := p.RealUserText(m, rawMsgs, rawIdx)
-	return ok
-}
-
 func (generic) NoReply(finish, content string) bool {
 	return (finish == "stop" || finish == "end_turn") && strings.TrimSpace(content) == ""
 }

@@ -27,6 +27,7 @@ package report
 import (
 	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -235,6 +236,9 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 // once at cmd/vmr's composition root (see resolveTaskProfile), not decided
 // independently by report and story.
 func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof taskseg.Profile) (*SessionAnalysis, *ctxgraph.FileCache, error) {
+	if prof == nil {
+		return nil, nil, errors.New("report: prof is nil")
+	}
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
 
 	var g *ctxgraph.Graph

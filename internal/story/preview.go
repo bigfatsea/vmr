@@ -22,6 +22,9 @@ func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 // candidate in a listing: one FetchRecords per chain forces one full-file
 // scan per chain even when many chains' roots share the same source file.
 func PreviewTitle(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (string, error) {
+	if prof == nil {
+		return "", errNilProfile
+	}
 	root := chain[0].Manifests[0]
 	loc := ctxgraph.Loc{Path: root.Path, Line: root.Line}
 	recs, err := ctxgraph.FetchRecords([]ctxgraph.Loc{loc})
@@ -43,6 +46,9 @@ func PreviewTitle(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lan
 // element) — the same pointer ListCandidates returned and callers already
 // use as the candidate's identity.
 func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {
+	if prof == nil {
+		return nil, errNilProfile
+	}
 	locs := make([]ctxgraph.Loc, len(chains))
 	for i, chain := range chains {
 		root := chain[0].Manifests[0]
