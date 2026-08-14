@@ -50,6 +50,7 @@
   - [6.3 关键微观重构与设计模式改进方案](#63-关键微观重构与设计模式改进方案)
   - [6.4 分阶段重构演进路线图（Roadmap）](#64-分阶段重构演进路线图roadmap)
 - [Part 7: 总结与行动建议](#part-7-总结与行动建议)
+- [Part 7.5: 第二轮反馈复审 —— 重复代码与 Domain 划分专项（opus-5 新增）](#part-75-第二轮反馈复审--重复代码与-domain-划分专项opus-5-新增)
 - [Part 8: ROI 视角的问题清单与重构分批蓝图（opus-5 新增）](#part-8-roi-视角的问题清单与重构分批蓝图opus-5-新增)
 
 ---
@@ -890,6 +891,175 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 
 ---
 
+## Part 7.5: 第二轮反馈复审 —— 重复代码与 Domain 划分专项（opus-5 新增）
+
+> **本节定位**：针对第二份独立反馈（「重复代码、多头实现、设计冗余及 Domain 划分」专项）的逐条核实与评估，标注方式与 Part 5–7 的批注一致。有效结论已合并进 Part 8 的批次划分。
+>
+> **总体评价**：6 条意见中 **2 条前提错误**（R1、R2 的一半）、**1 条与已记录的设计决策冲突**（R5）、**1 条收益被高估**（R6）；但 **R3 是本文档两轮 review 中最有价值的单条意见**——它推翻了我上一轮为 B4 开的方案，给出了更深的根因诊断。R4 顺带暴露了第二处 CLAUDE.md 描述与代码不符。
+
+### R1 · 手写零拷贝 JSON 字节扫描器多处重复造轮子（声称 ~400 行冗余）
+
+> **【opus-5 复审】❌ 「重复」这个前提不成立（把「调用」当成了「复制」）；但 ✅ 抽包的结论正确，且它正确地扩大了应迁移的范围。**
+>
+> **一、核实：底层原语全库只有一份实现，不是多份**
+> `skipJSONWS` / `skipJSONString` / `skipJSONValue` / `IndexUnescapedQuote` —— 全库**各只有一处定义**，均在 `internal/adapter/classify.go`。
+> - `fingerprint.go:129` 的 `walkArrayElements` 函数体开头就是 `i := skipJSONWS(raw, arrStart)`，中间是 `i, svOK = skipJSONValue(raw, i)` ——它**调用**同包的原语，没有重写任何一行状态机。
+> - `facts.go:125` 的 `estimateDocumentTokens` 循环里是 `end := adapter.IndexUnescapedQuote(rest)` ——同样是**调用**。
+>
+> 原文所谓「facts.go 中**又重新**循环调用 `adapter.IndexUnescapedQuote`」，字面描述的就是复用，却被计入了冗余。**「~400 行冗余」不成立**：那 390 行是唯一的一份实现，删不掉，只能搬家。
+>
+> **二、但抽包的结论是对的，理由不同**
+> 该抽，理由不是「消除重复」，而是上一轮已论证的两条：**归属错位**（70% 的 `classify.go` 与协议适配无关）+ **缺 fuzz**（热路径上唯一做原始字节偏移计算的代码，零 fuzz 覆盖）。与批次 **B1** 完全一致。
+>
+> **三、🆕 真实增量：应迁移的范围比我上一轮划的更大（采纳）**
+> R1 正确地识别出 `fingerprint.go` 里的 `walkArrayElements` / `firstArrayElement` / `elementRole` 也是**通用 JSON 原语**（遍历数组元素、读对象的顶层字符串键），与协议无关，应当一并迁入。我上一轮的 B1 范围只覆盖了 `classify.go`——**这个扩围是对的，已并入 B1**。
+>
+> 但必须划清一条线，R1 没有划：
+> - **迁入**（通用词法）：`walkArrayElements`、`firstArrayElement`、`elementRole`
+> - **留在 `adapter`**（领域逻辑）：`leadingSystemAndFirstOther` / `leadingSystemAndFirstOtherResponses`（知道 `"system"` / `"developer"` 的角色语义）、`SessionFingerprint`、`TopLevelProbe`（知道 `model` / `stream` / `tools` 这些协议字段）
+>
+> **四、命名采纳 R1 的 `jsonscan`**：比我上一轮用的 `jsonx` 准确——这个包做的就是扫描与切片，不是杂项工具箱。**B1 的包名统一改为 `internal/jsonscan`。**
+>
+> **五、`imgprep` 那条 ❌ 不成立**：`imgprep` 用 `map[string]json.RawMessage` 递归 unmarshal / re-marshal 不是「与字节扫描形成两套体系」的冗余，而是 CLAUDE.md 明确记载的**有意设计**——它是三个 sanctioned deviation 里最大的一个，因为图片降采样是结构性重写，字节切片**做不到**。不该统一，也无法统一。
+
+### R2 · Agent 方言识别的双轨制与重复硬编码（声称 ~350 行冗余）
+
+> **【opus-5 复审】✅ 与 6.1 异味 3 / 🆕 N1 是同一个问题，结论成立；但 ❌ 「metrics.go 也有硬编码」是事实错误，且两个子建议归错了批次。**
+>
+> **一、`report/metrics.go` 里没有任何方言硬编码**
+> 实测 `grep -n "regexp\|OpenClaw\|NO_REPLY\|chat_id\|ChatID\|strings.Contains\|strings.HasPrefix" internal/report/metrics.go` —— **零命中**。方言逻辑全部集中在 `session.go`（+ `detail.go` 少量展示分支）。
+>
+> 值得记一笔的是：**上一轮 gemini 的 6.1 异味 3 也点了 `report/metrics.go`**（原文「`internal/report/session.go` 和 `metrics.go` 内部仍散落着…硬编码判断」）。两份独立 review 犯了同一个未核实的错误——说明「report 里到处都是方言」是一个流传的印象而非事实。**这正是本次任务要求「所有点必须回源码核实」的价值所在。**
+>
+> **二、两个子建议归错了批次**
+> - **「Trace/Chat ID 解析」纳入方言层**：⚠️ 一半对。TraceID 已由 `ctxgraph.Manifest.TraceID` 统一承载，不需要 Profile 再管；但 `chatIDRe`（`session.go:333`，`"chat_id"\s*:\s*"([^"]+)"`）确实是 OpenClaw 专属，**应纳入 B2**。
+> - **「上下文压缩边界识别」纳入方言层**：❌ 不该。`session.go:473-483` 的压缩检测是**结构化字段的三信号启发式**（summarization 系统提示词 / 无工具 + `max_completion_tokens` / 无 TraceID），依赖的是请求体字段而非 Agent 措辞；`ctxgraph/stitch.go` 另有自己的压缩标记逻辑。它属于**切分层（B3）**，不属于方言层（B2）。混进 B2 会把一个「行为必须逐字节不变」的批次污染成「行为会变」的批次，破坏 B2/B3 的分界线。
+>
+> **三、数字修正**：不是「~350 行方言」，而是**约 150 行方言（B2）+ 约 400 行切分算法（B3）**，见 6.1 异味 3 批注的重复函数表。R2 不改变 B2/B3 的范围。
+
+### R3 · `internal/report` 聚合层的复制粘贴式指标累加 + `TrafficStats` 组合方案
+
+> **【opus-5 复审】✅ **本文档两轮 review 中最有价值的单条意见。** 数字全部需要修正，但根因诊断比我上一轮更深，其方案取代我原来给 B4 开的方案。**
+>
+> **一、数字逐条修正**
+> | R3 的说法 | 实测 |
+> | :--- | :--- |
+> | 9 种结构体各重复声明约 25 个**完全相同**的字段 | `rows.go` 有 20 个结构体，其中 **6 个** Row 类型共享一个约 **12–15** 字段的公共核；字段集是**重叠子集**而非相同（`Row` 45 个字段、`EndpointRow` 39 个且是 attempt 粒度、`HourRow` 27、`ClientRow` 22、`WorkloadRow` 16、`SessionRow` 29） |
+> | `buildInternal` 里机械重复编写了 **9 遍**累加逻辑 | 累加**已经**被提取成 **7 个内联闭包**（`aggregate.go:140/217/263/297/333/367/392`）；循环体里只剩 map 查找-或-创建 + 分发，约 **90 行** |
+> | ~500+ 行样板 | 7 个闭包合计约 **290 行** + 约 90 行 map 样板 |
+> | `aggregate.go` 可从 976 腰斩至 **350** 行 | 现实估计落在 **550–650** 行。**不要按 350 承诺**，那会让批次验收标准从一开始就不可能达成 |
+>
+> **二、但诊断是对的，而且比我上一轮更深**
+> 我上一轮把根因判成「函数太长」，于是开的药是「拆成顺序相函数」。R3 把根因判成「**6 个类型共享字段核，却没有一个共享类型，于是每一种累加都必须按类型各写一遍**」——这个诊断更根本。区别在结果上很实在：**拆函数只是把那 290 行搬到别处，内嵌 `TrafficStats` 才是真的删掉它们。**
+>
+> **三、🆕 最有力的证据：这个抽象已经存在，只是做了一半**
+> `internal/report/metrics.go:86` 已经有：
+> ```go
+> type measuresInput struct { durs, ttfts, streamMS []int64; ... }
+> func finishMeasures(in measuresInput) measures   // 统一的百分位收尾
+> ```
+> 也就是说，**收尾侧（百分位计算）早就统一了**。但**字段声明侧和累加侧没有**——于是 6 个 Row 类型各自声明一遍 `durs/ttfts/streamMS`，再各自写一个 `finishX` 去喂同一个 `finishMeasures`（`metrics.go:113/142/153/179/193/205`，六处）。
+>
+> 这不是「要不要引入一个新抽象」的争论。**这个抽象已经被项目自己发明、验证并投产了，只是没做完。** R3 提出的 `TrafficStats` 就是把它补完。
+>
+> **四、技术可行性核查（R3 未提及，但决定方案能否落地）**
+> - Go 的 `encoding/json` 对**匿名内嵌结构体默认扁平化**（不需要 `json:",inline"` ——那个 tag 在标准库里根本不存在）。所以 `struct { TrafficStats; Date string }` 序列化出来的 `vmr-report.json` 形状可以保持不变。✅ 方案可行。
+> - 副作用：`HourRow` / `WorkloadRow` 等会获得它们当前没有的字段（如 `TokensReasoning`、`CostEstimate`）。在「不为兼容性妥协」的前提下这是**改进**（多了可用维度），但必须写进 `CHANGELOG.md`，并检查渲染层不会因此多输出空列。
+> - `EndpointRow` 是 **attempt 粒度**（`Attempts`/`Forwarded`/`Failed`/`Availability`/`WastedMS`），与其余 5 个 request 粒度的 Row 不同。**它只能内嵌公共核的 token/时延部分，不能套用同一个 `Ingest(rc *rec2)`**——R3 的方案把它和其他 Row 一视同仁，这一处必须区别对待，否则会把 attempt 计数和 request 计数混起来（这正是 `quota_parity_test.go` 注释里记载的、已经犯过一次的那类 basis bug）。
+>
+> **五、结论：B4 的方案由「显式状态 + 顺序相函数」升级为「`TrafficStats` 内嵌 + 单点 `Ingest`」**，并保留我原方案里的一条——`buildInternal` 仍需按相拆分，因为即使删掉 290 行，剩下的读取/关联/收尾逻辑仍然过长。两者不冲突，是同一批次的两个步骤。
+
+### R4 · Token 估算与格式化逻辑的微型散落
+
+> **【opus-5 复审】✅ 格式化那半成立，且比 R4 说的更严重（🆕 N9）；❌ Token 估算那半是错的。**
+>
+> **一、`fmtTokens` 实测是四份，不是三份**
+> | 位置 | 函数 |
+> | :--- | :--- |
+> | `internal/report/metrics.go:418` | `fmtTokens` |
+> | `internal/report/detail.go:480` | `fmtTokensPlain` |
+> | `internal/story/render_md.go:284` | `fmtTokens` |
+> | `internal/router/logfmt.go:113` | `fmtTokensK` |
+>
+> **二、🆕 N9：CLAUDE.md 记载了一个不存在的函数**
+> CLAUDE.md 的模块表写着：
+> > *「`fmtutil` | `FmtBytes`/**`FmtTokens`**/`FmtSeconds` —— display formatting shared by `router`'s live log and `report`'s rendering」*
+>
+> 实测 `internal/fmtutil/fmtutil.go` 只有 `FmtBytes`、`FmtSeconds`、`FmtPercent` —— **`FmtTokens` 根本不存在**。项目文档以权威口吻把「token 格式化是共享的」写成了既成事实，而现实是四份各自为政的实现。
+>
+> 这是继 `_Strategy.md`（N3）之后**第二处 CLAUDE.md 描述与代码不符**，且两处是同一种失效模式：**文档断言了一个不存在的东西，而没有任何机制会发现。** 见下方 N11。
+>
+> **三、修法（含一条 R4 没意识到的前置判断）**
+> 在 `fmtutil` 里真正实现 `FmtTokens`，四处调用点改为调用它 —— 但**统一前必须逐一比对四者的输出格式**。`fmtTokensK` 服务实时日志（要短）、`fmtTokensPlain` 服务 Markdown 表格（要对齐），**格式差异很可能是有意的**。若确属有意，正确做法是 `fmtutil` 提供两个明确命名的函数（`FmtTokens` / `FmtTokensCompact`），而不是强行合成一个。**不要为了「统一」而抹掉有意的差异**——那会让日志变宽或让表格错位，是把一个文档问题换成一个体验问题。
+>
+> **四、「tokenCharge 与 computeRequestFacts 存在隐式耦合」❌ 不成立**
+> 两者共用 `core.EstimateTextTokens` / `core.EstimateTokensFromCounts` 的**同一组系数**（`core.go:493` 的 `asciiBytesPerToken`/`wideBytesPerToken`），且 `core.go:517` 的注释明确写着：*"exported so both call sites share the exact same coefficients instead of one silently drifting from the other"*。这是**有意的显式共享，并且写了理由**——恰恰是 R4 在别处希望达成的状态。
+
+### R5 · `internal/i18n` 目录的极端碎片化
+
+> **【opus-5 复审】🟡 现象成立，但方案与一条已记录的设计决策直接冲突 —— R5 看到的「碎片」正是另一条设计的「对齐」。真正该消灭的是样板，不是文件。**
+>
+> **一、数字**：实测 **26 个**生产文件（非 28）。最小的 `report_compaction.go` 26 行、`report_client_endpoint.go` 27 行。碎片化属实。
+>
+> **二、但这个组织方式是有意选择，CLAUDE.md 有明文记载**
+> > *「organized by which produced file each source file's text feeds (`report_*.go` next to `internal/report/section_*.go`, `story_*.go` next to `internal/story/render_*.go`) rather than one catalog directory — **wording changes stay next to the section they render**」*
+>
+> 它与 `internal/report` 的「**一个 section 一个文件**」硬规则（`archtest` 的 `fileLineLimits` 强制、CLAUDE.md 写作「a new section is a new file, not more lines in an existing one」）是**配对的**：`section_latency.go` ↔ `i18n/report_latency.go`。
+>
+> 合并成 `i18n/report.go` 会**打破这个配对**——改一个 section 的文案，从「打开对应的 47 行文件」变成「在一个 700+ 行的大文件里找」。R5 没有意识到自己在推翻一条已记录的决策，也没有给出推翻它的理由。
+>
+> **三、但 R5 指出的另一半是真问题**
+> 「产生了大量重复的 `type ...Text struct` 声明与工厂样板」—— ✅ **核实成立**。每个文件一个类型 + 一个按 `Lang` 分支的工厂函数，26 份结构完全相同的样板。**这才是该消灭的东西，且消灭它不需要动文件划分。**
+>
+> **四、正确的修法**：保留「一 section 一文件」的对齐，只削样板 —— 每个文件退化为一个 `map[Lang]XxxText` 字面量声明，由 `i18n` 里一个共享的泛型取值函数（如 `func pick[T any](m map[Lang]T, l Lang) T`）统一处理回退。**文件数不变，样板消失，配对关系完好。**
+>
+> **五、🔵 优先级最低**：纯样板削减，无正确性问题、无重复算法、不阻塞任何其他批次。排在最后，且**如果最终判断收益不足以抵消 26 个文件的改动面，不做也完全可以接受**——这是本清单里唯一一条「做与不做都对」的意见。
+
+### R6 · 从 `router` 剥离 `internal/respnorm`（领域调整 3）
+
+> **【opus-5 复审】🟡 行数准确、方向合理，但收益陈述是误导性的，且方案与「性能不可回退」这条唯一硬约束有一处真实冲突。**
+>
+> **一、行数核实**：`response.go` **751** + `responsefix.go` **195** = **946 行**。「近 950 行」✅ 准确。
+>
+> **二、但「internal/router 恢复为仅 500 行左右的纯粹路由调度器」❌ 误导**
+> - `router.go` **今天就是 596 行**，`archtest` 给它的预算是 700。`response.go` / `responsefix.go` 是**独立文件**，从来没有挤占过 `router.go` 一行。把它们搬到新包，**`router.go` 一行都不会少**。
+> - 「单文件从超标边缘恢复健康」也不成立：`response.go` 751 行 / 预算 850，有 **12% 余量**，不在超标边缘。
+> - 这是本轮反馈里第二次把「包的总行数」当成「单文件行数」来论证（第一次是 R3 的 976→350）。**包大不等于文件大，文件大才是 `archtest` 守的东西。**
+>
+> **三、那么真实收益是什么？两条，都与行数无关**
+> 1. **可测试性 / fuzz**：`respnorm` 独立成包后，双模状态机（undecided → passthrough / buffered）可以脱离 `Router`/`Snapshot` 在纯 `io.Reader` 层面做 fuzz。这与 B1 给 `jsonscan` 补 fuzz 是**同一类收益**——`response.go` 处理的同样是上游可控的字节流，同样在热路径上，同样没有 fuzz 覆盖。这条收益是真的，也是这一批唯一值得做的理由。
+> 2. **职责边界显性化**：把 MiniMax quirk 知识关进一个包，`router` 的 import 列表就会诚实地显示「它依赖一个正规化器」，而不是自己长了一身 quirk。
+>
+> **四、⚠️ 一处与硬约束的真实冲突（R6 的接口设计没处理）**
+> `respStream` 当前**内嵌了 Quota-Aware Routing 的用量嗅探**（`noteUsage` / `countBytes` / `Usage()` / `OutBytes()`，由专门的 `qmu` 互斥锁保护），`router/quota.go` 的 `chargeQuota` 直接读它。R6 给出的 `NormalizerStream` 接口把 `Usage()` / `OutBytes()` 也放了进去 —— 等于把**计费嗅探**塞进一个叫「响应正规化」的包，职责混了。
+>
+> 两条出路：
+> - **(a) 接受 R6 的接口**：职责略混，但**零性能代价**。
+> - **(b) 分层**：`respnorm` 只管正规化，用量嗅探作为一个可选的 `io.Reader` 装饰器留在路由半区，两者串联。职责干净，但流式路径上每个 chunk 多一次接口调用 + 一次边界检查 —— **直接触碰「性能不可回退」这条唯一硬约束**。
+>
+> **推荐 (a)**，并在包注释里写明「用量嗅探寄居在此，是为了不给流式路径多加一层 Reader」。把取舍写下来，比假装它不存在要好——这也正是这个代码库一贯的做法（参见 `core.TokenWeights` 零值陷阱、`quota.Counters.Cost` 那条「store raw, weight on read 的唯一例外」的注释）。
+>
+> **五、优先级**：收益真实但不紧急（无正确性问题、不阻塞其他批次），成本中等，且触碰唯一硬约束需要谨慎。**单独成批（B7），排在功能性批次之后。**
+
+### 🆕 N11 · 把「文档描述不存在的东西」变成可执行守卫
+
+> **【opus-5 新发现】** 本轮已累计两例 CLAUDE.md 以权威口吻描述了代码中不存在的东西：
+> - **N3**：`docs/VirtualModelRouter_Design_v4_Strategy.md` 被 CLAUDE.md 与三份设计文档引用，文件不存在。
+> - **N9**：CLAUDE.md 声称 `fmtutil` 拥有 `FmtTokens`，该函数不存在（现实是四份分散实现）。
+>
+> 两例是同一种失效模式，且危害不对称：CLAUDE.md 是**每个会话都会被载入的上下文**，一条错误断言会以权威口吻误导后续所有工作——N9 就是活例子，它让「token 格式化已经统一」这件没发生的事看起来已经发生了。
+>
+> **修法应当照抄 `internal/archtest` 自己的哲学**（其包注释原话）：
+> > *"a documented tripwire with no automated check is a tripwire nobody actually sees trip"*
+>
+> 在 `archtest` 中新增 `TestArchitecture_ClaudeMdReferences`：解析 `CLAUDE.md`（以及 `docs/*.md`）中出现的
+> ① `docs/*.md` 文件路径、② `internal/<pkg>` 包名、③ 反引号包裹的 `Pkg.ExportedName` 形式的标识符，
+> 逐一断言其在文件系统 / `go list` / `go doc` 中确实存在。
+>
+> 这是本轮反馈间接催生的最有价值的产出：**它把「文档漂移」从一类反复出现的人工发现，变成一条会在 CI 里变红的规则。** 归入 **B6**，且是 B6 中唯一有长期价值的一项（其余都是一次性修正）。
+
+---
+
 ## Part 8: ROI 视角的问题清单与重构分批蓝图（opus-5 新增）
 
 > **本节定位**：Part 5–7 的批注回答的是「这条意见对不对」；本节回答的是「那么，接下来到底按什么顺序动手」。它取代原文 6.4 的 Roadmap 与 7.2 的行动建议，是后续重构任务的**唯一施工依据**。
@@ -901,7 +1071,7 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 
 ### 8.1 问题总清单
 
-来源标记：`D#` = 原文提出且本轮判定成立（可能已修正方案）；`N#` = 本轮新发现。
+来源标记：`D#` = 第一份 review 提出且判定成立（可能已修正方案）；`R#` = 第二份反馈提出且判定成立；`N#` = 本文档两轮复审的新发现。
 
 | ID | 问题 | 来源 | 性质 | 收益 | 成本 | 风险 | 批次 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -910,16 +1080,25 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 | **N6** | `cmd/vmr/` 无任何行数预算（`cmd_story.go` 741 行） | 新 | 护栏 | 中 | 低 | 无 | **B0** |
 | **D2** | `classify.go` 70% 是通用 JSON 字节引擎，寄居在领域包里 | 6.3-2 | 归属 | 中 | 低 | 低 | **B1** |
 | **N7** | 该字节引擎在热路径上做原始偏移计算，**无 fuzz 测试** | 新 | **正确性** | 高 | 低 | 无 | **B1** |
+| **R1** | `fingerprint.go` 的 `walkArrayElements`/`firstArrayElement`/`elementRole` 同属通用词法，应一并迁出（**扩大 B1 范围**） | R1 | 归属 | 中 | 低 | 低 | **B1** |
 | **D5.2a** | `server → adapter` 的「奇怪依赖」 | 5.2-1 | 归属 | 低 | 0（B1 顺带） | 无 | **B1** |
 | **D1** | Agent 方言（OpenClaw 正则/NO_REPLY）在 report 与 story 逐字复制 | 6.1-3 | **重复** | 高 | 中 | 中 | **B2** |
+| **R2** | `chatIDRe`（`session.go:333`）属 OpenClaw 专属方言，应纳入方言层 | R2 | **重复** | 低 | 0（B2 顺带） | 低 | **B2** |
 | **N1** | 整套会话/任务切分算法双实现（6 对同名函数 + 任务边界判定） | 新 | **重复** | 很高 | 高 | **高** | **B3** |
 | **N8** | `archtest` 的 `story ⊀ report` 注释描述了一个从未落地的计划 | 新 | 文档 | 低 | 0（B3 顺带） | 无 | **B3** |
+| **R3** | 6 个 Row 类型共享字段核却无共享类型 → 7 个累加闭包约 290 行；`TrafficStats` 内嵌（**取代 D3 原方案**） | R3 | **重复** | **很高** | 中 | 中 | **B4** |
 | **D3** | `buildInternal` 单函数 625 行 | 6.1-2/6.3-3 | 可读性 | 中 | 中 | 中 | **B4** |
 | **D4** | `core` 里的 `WriteJSON`/`WriteError`/`MarshalNoEscape` 归属错位 + 缺准入规则 | 6.1-1 | 归属 | 低 | 低 | 低 | **B5** |
+| **N9/R4** | `fmtTokens` 四份实现；且 CLAUDE.md 声称的 `fmtutil.FmtTokens` **不存在** | 新/R4 | 归属+文档 | 中 | 低 | 低 | **B5** |
+| **R6** | `respnorm` 从 router 剥离：真实收益是 fuzz 与边界，**不是行数** | R6 | 可测试性 | 中 | 中 | 中 | **B7** |
+| **N11** | 把「文档描述不存在的东西」变成 `archtest` 可执行守卫 | 新 | **护栏** | 高 | 低 | 无 | **B6** |
 | **N3** | `docs/VirtualModelRouter_Design_v4_Strategy.md` 被 CLAUDE.md 与三份设计文档引用，但**不存在** | 新 | 文档 | 中 | 低 | 无 | **B6** |
 | **D6/D7** | 目标架构图箭头画反、CA 映射表四处错配 | 6.2/5.1 | 文档 | 中 | 低 | 无 | **B6** |
+| **R5** | `i18n` 26 个文件的工厂样板重复（**只削样板，不合并文件**） | R5 | 样板 | 低 | 中 | 低 | **B8（可选）** |
 | **D5** | `chatmsg` 的 `map[string]any` 分配（仅离线路径） | 6.1-4 | 性能 | 未知 | 中 | 中 | **远期 L1** |
 | **—** | 向 Clean Architecture 四环靠拢的整体重构 | 5.1 | — | **负** | 高 | 高 | **否决 L0** |
+| **—** | `imgprep` 的 `map[string]json.RawMessage` 与字节扫描「统一」 | R1 | — | **负** | 高 | 高 | **否决**（结构性重写，字节切片做不到） |
+| **—** | `i18n` 26 个微文件合并为 3–4 个 | R5 | — | **负** | 中 | 中 | **否决**（破坏与 `section_*.go` 的配对） |
 
 ### 8.2 批次划分与优先级论证
 
@@ -952,22 +1131,27 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 
 ---
 
-#### 🥈 B1 — 抽出 `internal/jsonx`：JSON 字节引擎独立成包 + Fuzz
+#### 🥈 B1 — 抽出 `internal/jsonscan`：JSON 字节引擎独立成包 + Fuzz
 
-**范围**：D2、N7、D5.2a
+**范围**：D2、N7、**R1**、D5.2a
 
 **具体任务**
-1. 新建**顶层零内部依赖包** `internal/jsonx`（不是 `adapter/jsonsplice`），迁入 `classify.go` 第 171–559 行的 11 个函数：`RewriteModel`、`RewriteStream`、`spliceValues`、`topLevelValues`、`skipJSONWS`、`skipJSONString`、`IndexUnescapedQuote`、`skipJSONValue`、`RewriteRoles`、`RewriteInputRoles`、`rewriteRolesInTopLevelArray`；连同 `adapter.TopLevelProbe`（`server.go:165` 的调用方）一并评估迁入。
-2. 把 `core.MarshalNoEscape`（`core.go:19`）迁入同包——它与上述函数同类，且这样 `core` 少一份行为（为 B5 铺路）。
-3. `internal/adapter/classify.go` 只保留错误分类，回落到约 140 行。
-4. `internal/server/facts.go` / `server.go` 改为 import `jsonx`，`server → adapter` 的依赖若因此消失则同步更新 CLAUDE.md 的模块表。
+1. 新建**顶层零内部依赖包** `internal/jsonscan`（采纳 R1 的命名；不是 `adapter/jsonsplice`），迁入 `classify.go` 第 171–559 行的 11 个函数：`RewriteModel`、`RewriteStream`、`spliceValues`、`topLevelValues`、`skipJSONWS`、`skipJSONString`、`IndexUnescapedQuote`、`skipJSONValue`、`RewriteRoles`、`RewriteInputRoles`、`rewriteRolesInTopLevelArray`。
+2. **（R1 扩围，采纳）** 同时迁入 `fingerprint.go` 中的通用词法函数：`walkArrayElements`(129)、`firstArrayElement`(158)、`elementRole`(219)。
+   **必须划清的边界——以下留在 `adapter`，它们是领域逻辑不是词法**：`leadingSystemAndFirstOther` / `leadingSystemAndFirstOtherResponses`（知道 `"system"`/`"developer"` 的角色语义）、`SessionFingerprint`、`TopLevelProbe`（知道 `model`/`stream`/`tools` 这些协议字段）。**判据：一个函数如果需要知道任何一个具体字段名或角色名，它就不属于 `jsonscan`。**
+3. 把 `core.MarshalNoEscape`（`core.go:19`）迁入同包——它与上述函数同类，且这样 `core` 少一份行为（为 B5 铺路）。
+4. `internal/adapter/classify.go` 只保留错误分类，回落到约 140 行；`fingerprint.go` 从 358 行降至约 260 行。
+5. `internal/server/facts.go` / `server.go` 改为 import `jsonscan`，`server → adapter` 的依赖若因此消失则同步更新 CLAUDE.md 的模块表。
 5. **本批必须补 fuzz 测试**（这是本批的核心价值，不是附赠）：
    - `FuzzTopLevelValues`：不变量 —— 返回的每个 `[2]int` 区间都落在输入范围内，且区间内容是合法的 JSON 值。
+   - `FuzzWalkArrayElements`：不变量 —— 每个回调收到的 `[start,end)` 都是合法 JSON 值，且区间互不重叠、单调递增。
    - `FuzzRewriteModel` / `FuzzRewriteRoles`：不变量 —— 输出要么与输入逐字节相同（失败即原样返回），要么是**合法 JSON** 且**除目标字段外与输入语义等价**（可用 `json.Unmarshal` 两侧对比校验）。
    - 把已知的畸形输入（截断的转义序列、深度嵌套、含 `"` 与 `\` 的 model 名、UTF-8 半个码点）加入 `testdata/fuzz` 种子语料。
-6. 将 `jsonx` 加入 `archtest` 的 `zeroInternalDepPackages`。
+7. 将 `jsonscan` 加入 `archtest` 的 `zeroInternalDepPackages`。
 
-**为什么这些归为一批**：同一批文件、同一个动机（把通用 JSON 工具从领域包里拿出来）。fuzz 测试**必须与新包同批**——它测的是新包的公开 API，分两批做的话第一批会留下一段无保护的热路径代码。
+**为什么这些归为一批**：同一批文件、同一个动机（把通用 JSON 词法从领域包里拿出来）。fuzz 测试**必须与新包同批**——它测的是新包的公开 API，分两批做的话第一批会留下一段无保护的热路径代码。
+
+**关于「消除重复」这个动机（R1 的说法）**：⚠️ 执行时不要抱这个预期。实测原语（`skipJSONWS`/`skipJSONString`/`skipJSONValue`/`IndexUnescapedQuote`）全库**只有一份实现**，`fingerprint.go` 与 `facts.go` 都是**调用**它而非重写它。这一批**不会减少总行数**，它只搬家 + 加测试。把预期设成「减 400 行」会让验收标准从一开始就不可能达成（详见 Part 7.5 的 R1 批注）。
 
 **为什么优先级仅次于 B0**
 - **纯移动 + 新增测试，零行为变更**，且可机械验证（`go build` 通过 + 现有全部测试绿 = 移动正确）。这是全清单里**风险最低的结构性改动**。
@@ -989,6 +1173,9 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 1. 新建叶子包 `internal/taskseg`（名字按**职责**取，不叫 `agentprofile`——它最终要装的不止方言，见 B3），先迁入 `internal/story/profile/` 的全部内容：`Profile` 接口、`OpenClawAware`、`generic`、`capStr`。
    - **接口签名保持现状不变**（`RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int)`），**不采纳**原文 6.3 改进 1 提议的 `http.Header` 版签名（理由见该项批注）。
 2. 删除 `internal/report/session.go` 中的重复副本：`openClawEnvelopeRe`、`stripOpenClawEnvelope`、`leadingBracketRe`、`realUserText`、`isRealUser`、`capStr`、以及第 394–401 行的 NoReply 内联判定；全部改为调用 `taskseg` 的 Profile。
+2b. **（R2，采纳）** `chatIDRe`（`session.go:333`，`"chat_id"\s*:\s*"([^"]+)"`）是 OpenClaw 专属方言，纳入 Profile 接口（新增 `ChatID(msgs []chatmsg.Message) string`）。
+   **不纳入本批**：R2 还提议把「上下文压缩边界识别」放进方言层——❌ 拒绝。`session.go:473-483` 的压缩检测是结构化字段的三信号启发式（summarization 提示词 / 无工具 + `max_completion_tokens` / 无 TraceID），不依赖 Agent 措辞；且 `ctxgraph/stitch.go` 另有压缩标记。它属于**切分层，归 B3**。混进 B2 会把一个「行为必须逐字节不变」的批次污染成「行为会变」的批次，直接毁掉 B2/B3 的分界线（见下条）。
+   **同样不纳入**：TraceID 提取——已由 `ctxgraph.Manifest.TraceID` 统一承载，Profile 不该再管一次。
 3. `report` 需要决定用哪个 Profile。当前 `cmd/vmr/cmd_story.go:154` 硬编码 `profile.OpenClawAware`；`report` 侧应采用**同样的默认**以保证行为一致，并把这个选择上提到 `cmd/vmr`（组合根），两个命令共用一个解析入口。
 4. 依赖方向确认：`taskseg` 只依赖 `chatmsg`（+ stdlib）。`archtest` 的 `story ⊀ report` 规则**无需改动**——两者仍不互相依赖。
 
@@ -1027,43 +1214,77 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 
 ---
 
-#### 5️⃣ B4 — `buildInternal` 分解
+#### 5️⃣ B4 — `TrafficStats` 组合化 + `buildInternal` 分解
 
-**范围**：D3
+**范围**：**R3**（主）、D3
+
+> **方案变更说明**：本批次原方案（「显式 `aggState` + 顺序相函数」）**已被 R3 推翻并升级**。原方案把根因判成「函数太长」，药是拆函数——那只是把 290 行搬到别处。R3 把根因判成「**6 个 Row 类型共享字段核却没有共享类型**」，药是引入共享类型——那才是真的删掉它们。采纳 R3。
 
 **具体任务**
-1. 把 `internal/report/aggregate.go:104-729` 的局部累加器提升为显式的 `aggState` 结构体。
-2. 按聚合维度切成顺序相方法：`ingestLatency` / `ingestTokens` / `ingestReliability` / `ingestCost` / `ingestSession`（具体分法以实际耦合为准），`buildInternal` 收缩为「读取 → 循环调用各相 → flush」。
-3. **不引入 `MetricAggregator` 接口**（理由见 6.3 改进 3 批注）。
-4. 更新 B0 建立的函数长度预算，把 `buildInternal` 从「待整改」改为正式预算。
+1. **定义 `TrafficStats`**，容纳 6 个 Row 类型的公共字段核（约 12–15 个）及其原始样本切片：
+   ```go
+   type TrafficStats struct {
+       Requests, OK, Errors int
+       BytesIn, BytesOut int64
+       TokensIn, TokensInCached, TokensInCacheWrite, TokensInFresh, TokensOut int64
+       TokensKnown int
+       RequestsWithDur int
+       DurMSP50, DurMSP95 int64
+       CacheEfficiency float64
+       SlowRequests int
+       durs, ttfts, streamMS []int64   // 原始样本，喂给已有的 finishMeasures
+   }
+   func (s *TrafficStats) Ingest(rc *rec2)   // 唯一的累加入口
+   func (s *TrafficStats) Finish(...)        // 复用现有 finishMeasures/measuresInput
+   ```
+   **注意这不是发明一个新抽象**：`metrics.go:86` 的 `measuresInput` + `finishMeasures` 已经把**收尾侧**统一了，本批只是把**声明侧与累加侧**补齐（详见 Part 7.5 的 R3 批注）。
+2. `Row` / `HourRow` / `ClientRow` / `WorkloadRow` / `SessionRow` **匿名内嵌** `TrafficStats`，删除各自重复的字段声明与 `durs/ttfts/streamMS`。
+   Go 的 `encoding/json` 对匿名内嵌结构体**默认扁平化**（标准库没有 `json:",inline"` 这个 tag），所以 `vmr-report.json` 的形状可以保持不变。
+3. **`EndpointRow` 必须区别对待**（R3 的方案没有处理这一点，直接照做会引入 bug）：它是 **attempt 粒度**（`Attempts`/`Forwarded`/`Failed`/`Availability`/`WastedMS`），其余 5 个是 **request 粒度**。它只能内嵌公共核的 token/时延部分，**不能套用同一个 `Ingest(rc *rec2)`**——把 attempt 计数和 request 计数混起来，正是 `cmd/vmr/quota_parity_test.go` 注释里记载的、已经犯过一次并逃过三轮评审的那类 basis bug。
+4. 把 `aggregate.go:140/217/263/297/333/367/392` 的 7 个累加闭包（约 290 行）折叠为 `bucket.Ingest(rc)` 调用；`metrics.go:113/142/153/179/193/205` 的 6 个 `finishX` 折叠为 `TrafficStats.Finish`。
+5. **在上述基础上仍需按相拆分 `buildInternal`**（保留原方案的这一半）：删掉 290 行之后，剩下的读取 / 关联 / 收尾逻辑仍然过长。**不引入 `MetricAggregator` 接口**（理由见 6.3 改进 3 批注：单线程批处理循环、单一记录类型，没有任何调用方需要运行时替换聚合器）。
+6. 更新 B0 建立的函数长度预算，把 `buildInternal` 从「待整改」改为正式预算。
+7. **`HourRow`/`WorkloadRow` 会因内嵌而获得当前没有的字段**（如 `TokensReasoning`）。在「不为兼容性妥协」的前提下这是改进，但必须：① 写进 `CHANGELOG.md`；② 检查渲染层不会因此多输出空列。
 
-**为什么单独成一批**：它只动一个包的一个文件，与其他批次无交叉；改动是机械的（局部变量→结构体字段），但量大，混进别的批次会淹没真正需要 review 的部分。
+**为什么单独成一批**：它只动 `internal/report` 的两个文件（`rows.go`/`aggregate.go`）加 `metrics.go`，与其他批次无交叉；改动量大但性质单一。
 
-**为什么排在这里**：纯可读性收益，无正确性、无重复消除；且**强依赖 B3 完成**（否则调用面要整理两遍）。
+**为什么排在这里**：**强依赖 B3 完成**（B3 会改写 `session.go` 的调用面，先做等于整理两遍）。它的收益（删约 290 行真实重复）其实高于 D3 原来的「可读性」定性，但依赖关系决定了它不能提前。
 
-**验收标准**：`go test ./...` 全绿；同一份日志的 `vmr-report.json` 逐字节一致（纯结构调整，输出不得变化）；`buildInternal` 及各相函数均在函数长度预算内。
+**验收标准**
+- `go test ./...` 全绿。
+- **`vmr-report.json` 的公共字段部分逐字节一致**；新增字段单独列出并确认是预期的。这是本批的核心验收手段——`TrafficStats` 内嵌是纯结构重组，任何**已有**字段的数值变化都是 bug。
+- `aggregate.go` 行数：**目标 550–650 行**。⚠️ **不要采纳 R3 承诺的「腰斩至 350 行」**——那个数字建立在「9 段各 55 行重复循环」的错误统计上，实际可删的是 290 行闭包 + 部分 map 样板。按 350 立验收标准会让这一批从一开始就注定「失败」。
 
 ---
 
-#### 6️⃣ B5 — `core` 归属整理
+#### 6️⃣ B5 — 共享工具归属整理（`core` + `fmtutil`）
 
-**范围**：D4
+**范围**：D4、**N9/R4**
 
 **具体任务**
 1. `core.WriteJSON` / `core.WriteError` 下沉到路由半区（`internal/router` 或一个小的 `internal/httpx`，取决于 `server` 是否仍需直接调用）。
-2. `core.MarshalNoEscape` 已在 B1 迁入 `jsonx`，此处只需确认无残留。
+2. `core.MarshalNoEscape` 已在 B1 迁入 `jsonscan`，此处只需确认无残留。
 3. **在 `core` 的包注释里写死准入规则**：*「只容纳两个及以上、分属不同半区的包必须就其达成一致的纯类型；带行为的东西归属于拥有该行为的包。`EstimateTextTokens`/`SortedKeys`/`EndpointLabel` 是有意保留的例外——它们被三个以上跨半区调用方共享，且本包是唯一可放之处。」* 这条规则本身就是本批最主要的产出。
-4. 搭车项：按领域把 `core.go` 拆成 `endpoint.go`/`request.go`/`quota.go`/`pricing.go`/`token.go`（同包，纯导航收益）。
+4. **（N9/R4）修正 `fmtTokens` 的四份实现**：`report/metrics.go:418` `fmtTokens`、`report/detail.go:480` `fmtTokensPlain`、`story/render_md.go:284` `fmtTokens`、`router/logfmt.go:113` `fmtTokensK`。
+   **第一步不是合并，是比对**：先逐一核对四者的输出格式。`fmtTokensK` 服务实时日志（要短）、`fmtTokensPlain` 服务 Markdown 表格（要对齐）——**格式差异很可能是有意的**。
+   - 若格式确实一致 → `fmtutil` 实现单个 `FmtTokens`，四处改为调用。
+   - 若差异有意 → `fmtutil` 提供两个**明确命名**的函数（`FmtTokens` / `FmtTokensCompact`），四处按语义各自归位。
+   **绝不为了「统一」而抹掉有意的差异**——那会让日志变宽或让表格错位，是把一个文档问题换成一个体验问题。
+5. 无论走哪条路径，**CLAUDE.md 的 `fmtutil` 那一行必须与现实对齐**——它当前声称 `fmtutil` 拥有 `FmtTokens`，而该函数不存在（N9）。这条断言正是让「token 格式化已经统一」这件没发生的事看起来已经发生的原因。
 
-**为什么排得靠后**：架构收益接近于零（同包拆文件不改任何依赖），真实收益只有那条准入规则和两三个函数的搬家。风险极低，随时可做，但没有任何理由挤占前面批次的位置。
+**为什么把 `fmtutil` 并进这一批**：两者是同一个问题的两面——**共享工具放错了地方**。`core` 装了不该装的（HTTP 响应写入），`fmtutil` 没装该装的（token 格式化）。一次提交里把「共享层到底该放什么」这条规则确立并执行完，比分两次做更连贯。
 
-**验收标准**：`go test ./...` 全绿；`archtest` 的零依赖检查仍通过；`core` 中不再有仅被单一半区使用的行为函数。
+**为什么排得靠后**：架构收益接近于零（同包拆文件不改任何依赖），真实收益只有那条准入规则、`fmtTokens` 的收敛和两三个函数的搬家。风险极低，随时可做，但没有任何理由挤占前面批次的位置。
+
+**验收标准**：`go test ./...` 全绿；`archtest` 的零依赖检查仍通过；`core` 中不再有仅被单一半区使用的行为函数；`grep -rn "func fmtTokens" --include='*.go' .` 结果为空（全部收敛到 `fmtutil`）。
 
 ---
 
-#### 7️⃣ B6 — 文档一致性收敛
+#### 7️⃣ B6 — 文档一致性收敛 + 文档漂移守卫
 
-**范围**：N3、D6、D7，以及 B0–B5 累积的文档更新
+> **执行顺序说明**：编号沿用第一轮，但 **B6 在执行顺序上永远是最后一批**（B7/B8 排在 B5 与 B6 之间）——它要收敛的正是前面所有批次累积的文档变更。
+
+**范围**：**N11**（主）、N3、D6、D7，以及 B0–B5/B7/B8 累积的文档更新
 
 **具体任务**
 1. **补齐或删除 `docs/VirtualModelRouter_Design_v4_Strategy.md`（N3）**。实测该文件**不存在**，但 `CLAUDE.md:25` 与三份 v4 设计文档（`_Core.md:7`、`_Analytics.md:7`、`_Quota.md:12`）**全部引用它**作为「为什么做」的权威出处。一个新人按图索骥会扑空。二选一，推荐前者：
@@ -1071,14 +1292,66 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
    - 或删除全部四处引用，改为指向 `docs/future-strategy/` 目录。
 2. 修正原文 5.1 的 CA 映射表四处错配，并加注「描述性地图，非重构目标」。
 3. 用 6.2 批注给出的修正版架构图替换原图（两半区之间无箭头）。
-4. 同步 `CLAUDE.md` 的模块表：新增 `jsonx`、`taskseg` 两行，更新 `core`/`adapter`/`report`/`story` 的职责描述，更新 `archtest` 一节。
-5. 按 CLAUDE.md 约定，把 B0–B5 中用户/开发者可见的变更写入 `CHANGELOG.md` 的 `[Unreleased]`。
+4. 同步 `CLAUDE.md` 的模块表：新增 `jsonscan`、`taskseg`（以及 B7 若执行则加 `respnorm`）三行，更新 `core`/`fmtutil`/`adapter`/`report`/`story` 的职责描述，更新 `archtest` 一节。
+5. 按 CLAUDE.md 约定，把 B0–B5/B7/B8 中用户/开发者可见的变更写入 `CHANGELOG.md` 的 `[Unreleased]`。
+6. **（N11 —— 本批唯一有长期价值的一项）新增 `archtest` 的文档漂移守卫**：
+   ```
+   TestArchitecture_DocReferences
+   ```
+   解析 `CLAUDE.md` 与 `docs/*.md`，提取并逐一断言存在性：
+   ① 出现的 `docs/*.md` 文件路径（存在于文件系统）；
+   ② 出现的 ``​`internal/<pkg>`​`` 包名（`go list` 可解析）；
+   ③ 反引号包裹的 ``​`Pkg.ExportedName`​`` 形式标识符（`go doc` 可解析）。
+   实现方式沿用 `import_boundaries_test.go` 已确立的做法——shell out 到 `go list`/`go doc`，不引入任何新依赖。
+   **必要性**：本轮已抓到两例（N3 的 `_Strategy.md` 不存在、N9 的 `fmtutil.FmtTokens` 不存在），且两例都是靠人工逐条核对才发现的。这正是 `archtest` 包注释自己写的那句话：*"a documented tripwire with no automated check is a tripwire nobody actually sees trip"*。
 
-**为什么排在最后**：B0–B5 每一批都会改动模块边界与包职责，逐批更新文档会产生大量返工与中间态错误描述。一次性收敛更省事、更准确。
+**为什么排在最后**：B0–B5/B7/B8 每一批都会改动模块边界与包职责，逐批更新文档会产生大量返工与中间态错误描述。一次性收敛更省事、更准确；而 N11 的守卫必须在文档已经修对之后才能开启，否则第一次运行就会红一片。
 
-**为什么仍然必须做（而不是丢进远期）**：CLAUDE.md 是每个会话都会被载入的上下文。**一条陈旧的模块描述比没有描述更糟**——它会以权威口吻误导后续所有工作。N3 已经是这个失效模式的现成例子。
+**为什么仍然必须做（而不是丢进远期）**：CLAUDE.md 是每个会话都会被载入的上下文。**一条错误的模块描述比没有描述更糟**——它会以权威口吻误导后续所有工作。N9 就是活例子：它让「token 格式化已经统一」这件从未发生的事，看起来已经发生了。
 
-**验收标准**：`grep -r "_Strategy.md"` 的每一处引用都能解析到实际存在的文件；CLAUDE.md 模块表与 `ls internal/` 逐项对应；`*.example.yaml` 与 `*.example.zh.yaml` 若受影响则保持平价。
+**验收标准**：`TestArchitecture_DocReferences` 通过（这本身就覆盖了 N3 与 N9 的验收）；`*.example.yaml` 与 `*.example.zh.yaml` 若受影响则保持平价。**负向验证**：手工在 CLAUDE.md 里插入一个不存在的 `internal/nosuchpkg` 引用，该测试必须失败。
+
+---
+
+#### 8️⃣ B7 — 剥离 `internal/respnorm`（响应流式正规化独立成域）
+
+**范围**：**R6**
+**执行顺序**：B5 之后、B6 之前。
+
+**具体任务**
+1. 新建 `internal/respnorm`，迁入 `router/response.go`(751) + `router/responsefix.go`(195)，对外暴露 `Wrap(src io.Reader, opts Options) NormalizerStream`。
+2. **用量嗅探的归属——本批唯一需要决策的点**：`respStream` 当前内嵌了 Quota-Aware Routing 的用量嗅探（`noteUsage`/`countBytes`/`Usage()`/`OutBytes()`，由 `qmu` 保护），`router/quota.go` 的 `chargeQuota` 直接读它。
+   - **推荐 (a)**：接受 R6 的接口形状，`Usage()`/`OutBytes()` 留在 `NormalizerStream` 上。职责略混，但**零性能代价**。**必须在包注释里写明这个取舍**（「用量嗅探寄居在此，是为了不给流式路径多加一层 Reader」）——把权衡写下来，是这个代码库一贯的做法（参见 `core.TokenWeights` 的零值陷阱注释、`quota.Counters.Cost` 的「唯一例外」注释）。
+   - **备选 (b)**：`respnorm` 只管正规化，用量嗅探作为独立的 `io.Reader` 装饰器留在路由半区。职责干净，但流式路径上每 chunk 多一次接口调用 + 一次边界检查——**直接触碰「性能不可回退」这条唯一硬约束**，选它必须先有 benchmark 数据。
+3. **本批的核心产出：给状态机补 fuzz**。`respnorm` 独立后，双模状态机（undecided → passthrough / buffered）可脱离 `Router`/`Snapshot` 在纯 `io.Reader` 层面做 fuzz。不变量：任意字节流输入下，① 输出永不包含未闭合的 `<think>` 残留；② passthrough 模式下输出与输入逐字节相同；③ 永不 panic、永不无限循环。
+4. `archtest` 中给 `respnorm` 登记文件行数预算（沿用 `response.go` 现有的 850）。
+
+**⚠️ 收益预期必须修正**：R6 声称「`internal/router` 恢复为仅 500 行左右」——❌ **不成立**。`router.go` 今天就是 596 行（预算 700），`response.go`/`responsefix.go` 是**独立文件**，从来没有挤占过它一行；搬走之后 `router.go` 一行都不会少。`response.go` 751 行 / 预算 850 也不在「超标边缘」。**这一批的真实收益是 fuzz 覆盖与职责边界，不是行数**（详见 Part 7.5 的 R6 批注）。按行数立验收标准会让它注定失败。
+
+**为什么单独成一批**：它只动路由半区，与 B2/B3/B4（分析半区）零交叉，可以完全独立提交甚至并行。
+
+**为什么排在功能性批次之后**：无正确性问题、不阻塞任何其他批次，且它是唯一一个需要在「职责纯净」与「性能不可回退」之间做取舍的批次——应当在团队对这个代码库的取舍风格已经通过前几批达成共识之后再动。
+
+**验收标准**：`go test ./... -race` 全绿；`go test -fuzz` 各跑 60s 无 crash；**流式转发的 benchmark 与重构前持平**（若选方案 b 则必须提供数据，这是硬约束的证明责任）；`internal/router` 不再包含任何 MiniMax 相关字符串。
+
+---
+
+#### 9️⃣ B8 — `i18n` 样板削减（可选）
+
+**范围**：**R5**（仅采纳「削样板」那一半）
+**执行顺序**：B5 之后、B6 之前，可与 B7 并行。
+
+**具体任务**
+1. **明确不做的事**：❌ **不把 26 个文件合并为 3–4 个**。该组织方式是 CLAUDE.md 记载的有意选择，与 `internal/report` 的「一个 section 一个文件」硬规则（`archtest` 强制）**配对**：`section_latency.go` ↔ `i18n/report_latency.go`。合并会让「改一个 section 的文案」从「打开对应的 47 行文件」变成「在 700+ 行大文件里找」。R5 没有意识到自己在推翻一条已记录的决策。
+2. **要做的事**：消灭 26 份结构相同的 `type XxxText struct` + 按 `Lang` 分支的工厂样板。每个文件退化为一个 `map[Lang]XxxText` 字面量，由 `i18n` 内一个共享的泛型取值函数统一处理语言回退：
+   ```go
+   func pick[T any](m map[Lang]T, l Lang) T   // 缺失语言回退到 EN（Lang 零值）
+   ```
+   **文件数不变，配对关系完好，样板消失。**
+
+**为什么优先级最低、且可以不做**：纯样板削减——无正确性问题、无重复算法、不阻塞任何批次。这是全清单里**唯一一条「做与不做都对」的意见**。若评估下来样板削减的收益不足以抵消 26 个文件的改动面，**直接跳过是完全可以接受的决定**，不需要理由。
+
+**验收标准**：`go test ./...` 全绿；`cmd/vmr/i18n_e2e_test.go` 全绿（它是中英文输出的端到端保障）；文件数仍为 26。
 
 ---
 
@@ -1090,21 +1363,40 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 | **L1** | `chatmsg` 离线路径的分配优化 | 🔵 **前置条件：先在真实审计日志上跑 benchmark。** 没有 profile 数据之前不动。见异味 4 批注。 |
 | **L2** | `report/detail.go`(1063) / `session.go`(993) 的进一步拆分 | 🔵 尚有 8–10% 预算余量，且 `session.go` 会被 B2/B3 大幅改写。**等预算真的报警再说**，那正是预算存在的意义。 |
 | **L3** | `archtest` 增加圈复杂度检查 | 🔵 在 B0 的函数长度预算跑满一个季度、确认它不够用之前，不加第二个指标。一次加一个守卫。 |
+| **L4** | `imgprep` 的 `map[string]json.RawMessage` 与字节扫描「统一」 | ❌ **明确否决。** 图片降采样是结构性重写，字节切片做不到；这是 CLAUDE.md 记载的三个 sanctioned deviation 中最大的一个。见 Part 7.5 的 R1 批注。 |
+| **L5** | `i18n` 26 个微文件合并为 3–4 个 | ❌ **明确否决。** 破坏与 `internal/report/section_*.go` 的一一配对（`archtest` 强制的硬规则）。样板削减另行处理，见 B8。 |
 
 ### 8.4 依赖关系与执行顺序
 
 ```mermaid
 graph LR
-    B0["B0 护栏<br/>差分测试 + 函数长度预算<br/>【正确性 + 安全网】"]
-    B1["B1 jsonx<br/>字节引擎独立 + Fuzz<br/>【正确性 · 零行为变更】"]
+    B0["B0 护栏<br/>差分测试 + 函数/文件预算<br/>【正确性 + 安全网】"]
+    B1["B1 jsonscan<br/>字节词法独立 + Fuzz<br/>【正确性 · 零行为变更】"]
     B2["B2 方言层去重<br/>【行为必须不变】"]
     B3["B3 切分算法收敛<br/>【行为会变 · 风险最高】"]
-    B4["B4 buildInternal 分解<br/>【纯可读性】"]
-    B5["B5 core 归属整理<br/>【低 ROI · 可插队】"]
-    B6["B6 文档收敛<br/>【最后一次性做】"]
+    B4["B4 TrafficStats 组合化<br/>+ buildInternal 分解<br/>【删约 290 行真实重复】"]
+    B5["B5 共享工具归属<br/>core + fmtutil<br/>【低 ROI · 可插队】"]
+    B7["B7 respnorm 剥离<br/>【路由半区 · 可并行】"]
+    B8["B8 i18n 样板削减<br/>【可选 · 做与不做都对】"]
+    B6["B6 文档收敛 + 漂移守卫<br/>【永远最后一批】"]
     B0 --> B1 --> B2 --> B3 --> B4 --> B6
     B0 -.-> B5 -.-> B6
+    B0 -.-> B7 -.-> B6
+    B8 -.-> B6
     B1 -. "MarshalNoEscape 已迁出" .-> B5
 ```
 
-**一句话总结优先级逻辑**：**正确性 → 安全网 → 零风险的结构归位 → 高收益但高风险的去重 → 纯可读性 → 文档**。B0 与 B1 之所以在最前，是因为它们同时占了「修正确性」和「建安全网」两条；B3 收益最高却排第四，是因为它是唯一会改变输出的重构，必须站在前三批建立的验证能力之上才动手。
+**主链（必须串行）**：`B0 → B1 → B2 → B3 → B4`
+**可并行支线**：`B5`、`B7`、`B8` 三者互不依赖，也不依赖主链（除 B5 需等 B1 迁走 `MarshalNoEscape`），可在主链任意阶段插入
+**收尾**：`B6` 永远最后
+
+**一句话总结优先级逻辑**：**正确性 → 安全网 → 零风险的结构归位 → 高收益但高风险的去重 → 组合化瘦身 → 可选项 → 文档**。
+B0 与 B1 在最前，因为它们同时占了「修正确性」和「建安全网」两条；B3 收益最高却排第四，因为它是唯一会改变输出的重构，必须站在前三批建立的验证能力之上才动手；B4 在第二轮反馈后升级为「删约 290 行真实重复」，收益已高于它原来的「纯可读性」定性，但依赖 B3 的调用面稳定，位置不变。
+
+### 8.5 执行时的三条纪律
+
+两轮 review 累计出现过多次「数字对不上」和「把复用当重复」的情况，落地时请守住三条：
+
+1. **验收标准不要照抄任何 review 给的行数承诺。** 已核实为错误的：`detail.go` 1150（实为 1063，1150 是预算值）、`aggregate.go` 腰斩至 350（实际 550–650）、`internal/router` 恢复到 500 行（`router.go` 今天就是 596，且一行不会少）、`jsonscan` 减除 400 行（那是唯一实现，只搬家不减行）。**每一批的验收先自己 `wc -l` 一遍。**
+2. **「重复」必须区分「复制」与「调用」。** `fingerprint.go` 调用 `skipJSONWS`、`facts.go` 调用 `IndexUnescapedQuote`——都是复用，删不掉。真正的复制只有两处：B2 的方言正则、B3 的切分算法、B4 的 7 个累加闭包。
+3. **动手前先查 CLAUDE.md 与设计文档的「决定不修」表。** R5 的 i18n 合并、R1 的 imgprep 统一，都是在推翻已记录的决策而不自知。**推翻一条已记录的决策是可以的，但必须先知道自己在推翻它，并给出理由。**
