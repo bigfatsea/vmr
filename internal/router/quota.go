@@ -14,6 +14,7 @@ import (
 	"sort"
 	"time"
 
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/pricing"
 	"vmr/internal/quota"
@@ -130,22 +131,48 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 // signal /admin/status gives an operator for how much to trust a
 // token-metered account's numbers.
 func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
-	if u, ok := rbody.Usage(); ok {
-		return quota.Counters{Fresh: float64(u.Fresh()), CacheRead: float64(u.CacheRead), CacheWrite: float64(u.CacheWrite), Out: float64(u.Out)}, 0
-	}
-	// Degraded: request-side reuses the cheap pre-routing estimate every
+	u, sniffed := rbody.Usage()
+	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
-	// server/facts.go — zero extra cost here); response-side comes from
-	// bytes respStream classified incrementally as they arrived (see
-	// response.go's countBytes), through the exact same coefficients
-	// core.EstimateTextTokens itself uses. Both are charged entirely to
-	// Fresh/Out — the degraded path cannot tell cache hits apart, and
-	// assuming none is the safe direction: it overestimates consumption
-	// rather than silently crediting a cache discount that may not have
-	// happened (see the design doc's Metering section).
-	inEst := creq.Facts.EstimatedTokens
+	// server/facts.go — zero extra cost here); response-side comes from bytes
+	// respStream classified incrementally as they arrived (response.go's
+	// countBytes), through the exact same coefficients core.EstimateTextTokens
+	// itself uses. Both are computed unconditionally: they are two field reads
+	// and an integer division, cheaper than branching around them, and
+	// TokenCounters ignores them entirely when usage was sniffed.
 	ascii, wide := rbody.OutBytes()
-	outEst := core.EstimateTokensFromCounts(ascii, wide)
+	return TokenCounters(u, sniffed, creq.Facts.EstimatedTokens, core.EstimateTokensFromCounts(ascii, wide))
+}
+
+// TokenCounters turns one response's usage into the raw four-component
+// counters ChargeResponse charges, plus how much of that total came from a
+// degraded estimate (0 when exact). sniffed reports whether u came from an
+// actual upstream usage object; when it didn't, inEst/outEst — token
+// estimates the caller derived however it can — are charged instead.
+//
+// Exported, and factored out of tokenCharge, because this exact-vs-degraded
+// decision had grown THREE independent implementations: this one,
+// internal/replay's chargeReplay, and internal/report's own reproduction of
+// it for `vmr report`'s §2.5 recomputed column. Three copies of "if usage was
+// sniffed charge it exactly, otherwise charge a byte estimate and mark the
+// whole thing estimated" is the same class of drift risk the audit-log label
+// format and quota.BaseAmount were each collapsed to one implementation to
+// avoid — and it is specifically what cmd/vmr/quota_parity_test.go exists to
+// catch, so that test must drive THIS function rather than re-deriving it.
+//
+// The degraded branch charges everything to Fresh/Out: it cannot tell cache
+// hits apart, and assuming none is the safe direction — it overestimates
+// consumption rather than silently crediting a cache discount that may not
+// have happened (see the design doc's Metering section).
+func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
+	if sniffed {
+		return quota.Counters{
+			Fresh:      float64(u.Fresh()),
+			CacheRead:  float64(u.CacheRead),
+			CacheWrite: float64(u.CacheWrite),
+			Out:        float64(u.Out),
+		}, 0
+	}
 	return quota.Counters{Fresh: float64(inEst), Out: float64(outEst)}, float64(inEst + outEst)
 }
 

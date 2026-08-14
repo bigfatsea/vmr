@@ -239,19 +239,32 @@ type EndpointRow struct {
 	TokensOut          int64   `json:"tokens_out,omitempty"`
 	TokensReasoning    int64   `json:"tokens_reasoning,omitempty"`
 	TokensKnown        int     `json:"tokens_known,omitempty"`
-	CacheEfficiency    float64 `json:"cache_efficiency,omitempty"`
-	TTFTKnown          int     `json:"ttft_known,omitempty"`
-	TTFTMSP50          int64   `json:"ttft_ms_p50,omitempty"`
-	TTFTMSP95          int64   `json:"ttft_ms_p95,omitempty"`
-	RequestsWithDur    int     `json:"requests_with_dur,omitempty"`
-	DurMSP50           int64   `json:"dur_ms_p50,omitempty"`
-	DurMSP95           int64   `json:"dur_ms_p95,omitempty"`
-	DurMSMax           int64   `json:"dur_ms_max,omitempty"`
-	StreamKnown        int     `json:"stream_known,omitempty"`
-	StreamMSP95        int64   `json:"stream_ms_p95,omitempty"`
-	SlowRequests       int     `json:"slow_requests,omitempty"`
-	TokOutPerSec       float64 `json:"tok_out_per_sec,omitempty"`
-	DurMSSum           int64   `json:"dur_ms_sum,omitempty"`
+	// TokensInFreshEst/TokensOutEst/TokensEstimated cover the requests this
+	// endpoint served whose usage was NOT sniffable (the complement of
+	// TokensKnown): the degraded byte-count estimate the routing half charged
+	// for them, reproduced here by aggregate.go's estimateDegradedTokens.
+	// Kept in SEPARATE fields rather than folded into TokensInFresh/TokensOut
+	// on purpose — every existing consumer of those two (cache efficiency,
+	// $ estimates, per-endpoint token tables) is asking about measured usage
+	// and must not silently start averaging an estimate into it. §2.5's quota
+	// column is the one consumer that deliberately adds them, because the
+	// router charged both (see providerquota.go's MetricTokens branch).
+	TokensInFreshEst int64   `json:"tokens_in_fresh_est,omitempty"`
+	TokensOutEst     int64   `json:"tokens_out_est,omitempty"`
+	TokensEstimated  int     `json:"tokens_estimated,omitempty"`
+	CacheEfficiency  float64 `json:"cache_efficiency,omitempty"`
+	TTFTKnown        int     `json:"ttft_known,omitempty"`
+	TTFTMSP50        int64   `json:"ttft_ms_p50,omitempty"`
+	TTFTMSP95        int64   `json:"ttft_ms_p95,omitempty"`
+	RequestsWithDur  int     `json:"requests_with_dur,omitempty"`
+	DurMSP50         int64   `json:"dur_ms_p50,omitempty"`
+	DurMSP95         int64   `json:"dur_ms_p95,omitempty"`
+	DurMSMax         int64   `json:"dur_ms_max,omitempty"`
+	StreamKnown      int     `json:"stream_known,omitempty"`
+	StreamMSP95      int64   `json:"stream_ms_p95,omitempty"`
+	SlowRequests     int     `json:"slow_requests,omitempty"`
+	TokOutPerSec     float64 `json:"tok_out_per_sec,omitempty"`
+	DurMSSum         int64   `json:"dur_ms_sum,omitempty"`
 	// WastedMS is wall-clock spent on this endpoint's FAILED attempts —
 	// tries that produced nothing and forced the request onward to another
 	// endpoint. Attempt-level (not request-level) like the other G-family
@@ -691,6 +704,24 @@ type ProviderQuotaRow struct {
 	// exists to surface. requests/tokens accounts are never nil: 0 there is
 	// a real zero (no traffic), not a missing-data case.
 	WindowConsumed *float64 `json:"window_consumed"`
+
+	// WindowEstimatedPct is the share of WindowConsumed that came from the
+	// degraded byte-count estimate rather than usage the routing half actually
+	// sniffed off the response — quota.EstimatedPct over this window's own
+	// recomputation, the exact counterpart of LiveQuota.EstimatedPct on the
+	// column to its right, so the two are read in the same unit.
+	//
+	// Always 0 for metric: requests (always exact) and for a cost account
+	// (its estimate share isn't recoverable from EndpointRow.CostEstimate,
+	// which is already a resolved $ amount).
+	//
+	// This field is what replaced an all-or-nothing bail-out: before it,
+	// a window where NO record had parseable usage rendered "-" while a
+	// window where only SOME did rendered a precise, systematically-low
+	// number with no signal whatsoever. The second case is the dangerous one
+	// — it is indistinguishable from genuinely lower consumption — and it was
+	// the common one.
+	WindowEstimatedPct float64 `json:"window_estimated_pct,omitempty"`
 
 	// WindowNoOverlap is true when this report run's audit-log
 	// coverage ([Meta.From, Meta.To]) and this account's current billing

@@ -36,22 +36,27 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 
 	windowSums := map[string]quota.Counters{}
 	windowCost := map[string]float64{}
-	// {cost,tokens}SawTraffic/AnyKnown implement the same "missing data is
-	// not a zero" rule for the two metrics that can have traffic yet no
-	// computable amount:
-	//   - cost:   traffic happened but pricing never resolved for any of it
-	//   - tokens: traffic happened but not one request's usage was parseable
-	//             (TokensKnown == 0 everywhere), so this window contributes
-	//             zero tokens while the ROUTER charged a byte-count estimate
-	//             for those same requests (see internal/router/quota.go's
-	//             tokenCharge degraded path)
-	// Both render nil → "-" rather than a fabricated 0, which would be
-	// indistinguishable from "genuinely zero traffic this window" (a real 0,
-	// which the requests metric and a no-traffic account still produce).
+	// windowEstimated accumulates the share of windowSums that came from the
+	// degraded byte-count estimate rather than sniffed usage — same numerator
+	// quota.Registry tracks for the live counter, so WindowEstimatedPct below
+	// and Live.EstimatedPct mean the same thing on both sides of the table.
+	windowEstimated := map[string]float64{}
+	// cost{SawTraffic,AnyPriced} implement the "missing data is not a zero"
+	// rule for the one metric that can still have traffic yet no computable
+	// amount: pricing never resolved for any of it. Renders nil → "-" rather
+	// than a fabricated 0, which would be indistinguishable from "genuinely
+	// zero spend this window".
+	//
+	// The tokens metric no longer needs an equivalent: an unparseable-usage
+	// record now contributes its degraded estimate (EndpointRow's
+	// TokensInFreshEst/TokensOutEst) instead of contributing nothing, so
+	// "traffic happened but nothing is computable" is no longer reachable
+	// there. What replaces that all-or-nothing bail-out is WindowEstimatedPct
+	// — which also covers the case the old check silently missed: a window
+	// where only SOME records had unparseable usage rendered a precise,
+	// systematically-low number with no signal at all.
 	costSawTraffic := map[string]bool{}
 	costAnyPriced := map[string]bool{}
-	tokensSawTraffic := map[string]bool{}
-	tokensAnyKnown := map[string]bool{}
 	for _, e := range rep.EndpointsAll {
 		provider, model := splitEndpointProviderModelAny(e.Endpoint)
 		ref, ok := quotas[provider]
@@ -77,19 +82,29 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 			d := quota.Counters{Requests: unit.Requests * float64(e.Forwarded)}
 			windowSums[provider] = windowSums[provider].Add(d)
 		case core.MetricTokens:
-			// Requests, not TokensKnown: "did any traffic reach this
-			// account this window" is a question about requests, so an
-			// endpoint whose every request had unparseable usage still
-			// counts as traffic (and lands in the nil/"-" case below).
-			if e.Requests > 0 {
-				tokensSawTraffic[provider] = true
+			// Sniffed usage and the degraded byte-count estimate are added
+			// together here — and ONLY here. The router charges both (see
+			// internal/router/quota.go's tokenCharge: exact when respStream
+			// sniffed a usage object, a byte-count estimate when it didn't),
+			// so a window mixing the two must count both or it reports a
+			// number the router never charged. Counting only the sniffed half
+			// was a systematic UNDER-count that rendered as a precise figure,
+			// indistinguishable from a genuinely smaller consumption.
+			//
+			// `estimated` is threaded through ApplyModelMultiplier rather than
+			// scaled separately: model_multipliers scales the estimate exactly
+			// as it scales the real counters (see quota.ApplyModelMultiplier),
+			// and EstimatedPct's denominator below has to be in the same
+			// post-multiplier unit as its numerator.
+			c := quota.Counters{
+				Fresh:      float64(e.TokensInFresh + e.TokensInFreshEst),
+				CacheRead:  float64(e.TokensInCached),
+				CacheWrite: float64(e.TokensInCacheWrite),
+				Out:        float64(e.TokensOut + e.TokensOutEst),
 			}
-			if e.TokensKnown > 0 {
-				tokensAnyKnown[provider] = true
-			}
-			c := quota.Counters{Fresh: float64(e.TokensInFresh), CacheRead: float64(e.TokensInCached), CacheWrite: float64(e.TokensInCacheWrite), Out: float64(e.TokensOut)}
-			d, _ := quota.ApplyModelMultiplier(ref.Spec, model, c, 0)
+			d, est := quota.ApplyModelMultiplier(ref.Spec, model, c, float64(e.TokensInFreshEst+e.TokensOutEst))
 			windowSums[provider] = windowSums[provider].Add(d)
+			windowEstimated[provider] += est
 		case core.MetricCost:
 			// model_multipliers never applies to a cost account (config.validate
 			// rejects that combination — see ChargeResponse's own comment), so
@@ -111,8 +126,6 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 		switch {
 		case ref.Limit.Metric == core.MetricCost && costSawTraffic[provider] && !costAnyPriced[provider]:
 			windowConsumed = nil // traffic existed, none of it priced — unknown, not zero
-		case ref.Limit.Metric == core.MetricTokens && tokensSawTraffic[provider] && !tokensAnyKnown[provider]:
-			windowConsumed = nil // traffic existed, no usage parseable for any of it — unknown, not zero
 		case ref.Limit.Metric == core.MetricCost:
 			v := windowCost[provider]
 			windowConsumed = &v
@@ -120,6 +133,10 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 			v := quota.BaseAmount(ref.Spec, windowSums[provider])
 			windowConsumed = &v
 		}
+		// Same unit-matching discipline quota.EstimatedPct documents: the
+		// estimate is a raw (unweighted) token count, so its denominator is
+		// the raw four-component total, never BaseAmount's weighted sum.
+		windowEstPct := quota.EstimatedPct(ref.Limit.Metric, windowSums[provider], windowEstimated[provider], 0)
 		periodStart := quota.PeriodStart(*ref.Limit, now)
 		periodEnd := quota.PeriodEnd(*ref.Limit, now)
 		// [windowFrom, windowTo] and [periodStart, periodEnd] overlap
@@ -130,17 +147,18 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 		windowNoOverlap := !windowFrom.IsZero() &&
 			(windowFrom.After(periodEnd) || periodStart.After(windowTo))
 		rows = append(rows, ProviderQuotaRow{
-			Provider:          provider,
-			Metric:            string(ref.Limit.Metric),
-			Every:             ref.Limit.EveryText,
-			Amount:            ref.Limit.Amount,
-			WindowConsumed:    windowConsumed,
-			WindowNoOverlap:   windowNoOverlap,
-			Live:              ref.Live,
-			LiveConfigChanged: ref.LiveConfigChanged,
-			PeriodStart:       periodStart,
-			PeriodEndsAt:      periodEnd,
-			PeriodElapsedPct:  (1 - quota.TimeLeftFrac(now, periodStart, periodEnd)) * 100,
+			Provider:           provider,
+			Metric:             string(ref.Limit.Metric),
+			Every:              ref.Limit.EveryText,
+			Amount:             ref.Limit.Amount,
+			WindowConsumed:     windowConsumed,
+			WindowEstimatedPct: windowEstPct,
+			WindowNoOverlap:    windowNoOverlap,
+			Live:               ref.Live,
+			LiveConfigChanged:  ref.LiveConfigChanged,
+			PeriodStart:        periodStart,
+			PeriodEndsAt:       periodEnd,
+			PeriodElapsedPct:   (1 - quota.TimeLeftFrac(now, periodStart, periodEnd)) * 100,
 		})
 	}
 

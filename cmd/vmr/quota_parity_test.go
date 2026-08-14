@@ -39,6 +39,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/quota"
 	"vmr/internal/report"
@@ -59,9 +60,27 @@ type parityAttempt struct {
 func (a parityAttempt) forwarded() bool { return a.status > 0 && a.status < 400 }
 
 // parityRequest is one synthetic client request and the attempts it took.
+//
+// respBody/estTokens exist for the tokens and cost metrics, which — unlike
+// requests — depend on what came BACK. respBody is deliberately typed as a
+// string (an SSE stream, the shape audit.EncodeBody stores for any non-JSON
+// body) rather than a JSON object: a JSON object round-trips through
+// map[string]any on the way back out of the audit file and re-marshals with
+// sorted keys and no whitespace, so the bytes internal/report measures would
+// no longer be the bytes this fixture wrote. A string round-trips verbatim,
+// which is what lets the degraded byte-count estimate be compared for EXACT
+// equality instead of approximately.
 type parityRequest struct {
 	model    string // real upstream model — picks the model_multiplier
 	attempts []parityAttempt
+	// respBody is the recorded client-side response. Include a usage object
+	// to exercise the exact path; omit it to exercise the degraded one.
+	respBody string
+	// estTokens is audit.Record.Facts.EstimatedTokens — vmr's own pre-routing
+	// input estimate, and the request half of the degraded charge. The router
+	// reads it off creq.Facts; the report reads the SAME persisted value back
+	// out of the audit record, so this half is exactly reproducible.
+	estTokens int64
 }
 
 // auditLine renders one parityRequest as an audit JSONL record in exactly
@@ -90,8 +109,31 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 	if last.forwarded() {
 		outcome = "ok"
 	}
-	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":"openai","outcome":%q,"client":{"request":{}},"attempts":[%s]}`,
-		ts.Format(time.RFC3339), outcome, strings.Join(atts, ","))
+	clientResp := ""
+	if r.respBody != "" {
+		body, err := json.Marshal(r.respBody)
+		if err != nil { // unreachable: json.Marshal of a string cannot fail
+			panic(err)
+		}
+		clientResp = fmt.Sprintf(`,"response":{"status":200,"body":%s}`, body)
+	}
+	facts := ""
+	if r.estTokens > 0 {
+		facts = fmt.Sprintf(`,"facts":{"estimated_tokens":%d}`, r.estTokens)
+	}
+	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":"openai","outcome":%q%s,"client":{"request":{}%s},"attempts":[%s]}`,
+		ts.Format(time.RFC3339), outcome, facts, clientResp, strings.Join(atts, ","))
+}
+
+// tokenChargeFor reproduces what internal/router computed for this request by
+// calling the router's OWN exported entry point (router.TokenCounters — the
+// same function the live path's tokenCharge and `vmr replay`'s chargeReplay
+// both go through). Nothing about the exact-vs-degraded rule is restated
+// here: restating it is precisely the failure mode this whole file exists to
+// catch, one level down.
+func (r parityRequest) tokenCharge() (quota.Counters, float64) {
+	u, sniffed := chatmsg.ExtractUsage(r.respBody)
+	return router.TokenCounters(u, sniffed, r.estTokens, core.EstimateTextTokens([]byte(r.respBody)))
 }
 
 // routerCharged replays the same requests through internal/router's REAL
@@ -99,16 +141,17 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 // hands off to and the one internal/replay reuses) and returns the account's
 // resulting consumption in its metric's own unit — i.e. the authoritative
 // number the report's recomputed column is trying to reproduce.
-func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *core.QuotaSpec, now time.Time) float64 {
+func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *core.QuotaSpec, rate *core.PricingSpec, now time.Time) float64 {
 	t.Helper()
 	reg := quota.NewRegistry("")
 	for _, r := range reqs {
+		raw, estimated := r.tokenCharge()
 		for _, a := range r.attempts {
 			if !a.forwarded() {
 				continue // the router only ever charges a forwarded response
 			}
-			ep := &core.Endpoint{AdapterType: "openai", Provider: provider, Model: r.model, Quota: spec}
-			router.ChargeResponse(reg, ep, quota.Counters{}, 0, now)
+			ep := &core.Endpoint{AdapterType: "openai", Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
+			router.ChargeResponse(reg, ep, raw, estimated, now)
 		}
 	}
 	l := spec.Limits[0]
@@ -119,6 +162,16 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 // reportWindowConsumed runs the real `vmr report` pipeline over the same
 // requests and returns §2.5's recomputed window-consumed figure.
 func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, ts time.Time) *float64 {
+	t.Helper()
+	row := reportQuotaRow(t, reqs, provider, ts, quotaYAML)
+	return row.WindowConsumed
+}
+
+// reportQuotaRow is reportWindowConsumed's full-row form: runs the real
+// `vmr report` pipeline over reqs against the config yamlFn produces, and
+// returns this provider's whole §2.5 row (the tokens tests also need
+// WindowEstimatedPct, not just the consumed figure).
+func reportQuotaRow(t *testing.T, reqs []parityRequest, provider string, ts time.Time, yamlFn func(logDir string) string) report.ProviderQuotaRow {
 	t.Helper()
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, "logs")
@@ -134,7 +187,7 @@ func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, t
 	if err := os.WriteFile(auditPath, []byte(lines.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configPath := writeTempFile(t, "config.yaml", quotaYAML(logDir))
+	configPath := writeTempFile(t, "config.yaml", yamlFn(logDir))
 	outDir := filepath.Join(dir, "out")
 	if err := cmdReport([]string{"-c", configPath, "-o", outDir, "-details=false", auditPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
@@ -149,11 +202,11 @@ func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, t
 	}
 	for _, row := range rep.ProviderQuotas {
 		if row.Provider == provider {
-			return row.WindowConsumed
+			return row
 		}
 	}
 	t.Fatalf("no §2.5 quota row for provider %q (rows: %+v)", provider, rep.ProviderQuotas)
-	return nil
+	return report.ProviderQuotaRow{}
 }
 
 // TestQuotaParity_RequestsMetric_ReportMatchesRouter is the core assertion:
@@ -191,7 +244,7 @@ func TestQuotaParity_RequestsMetric_ReportMatchesRouter(t *testing.T) {
 		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1000}
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 
-	want := routerCharged(t, reqs, "acct1", spec, now)
+	want := routerCharged(t, reqs, "acct1", spec, nil, now)
 	if want != 4 {
 		t.Fatalf("fixture sanity: router charged %v, expected 4 forwarded attempts", want)
 	}
@@ -233,7 +286,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100000}
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"real-model": 5.5}}
 
-	want := routerCharged(t, reqs, "acct1", spec, now)
+	want := routerCharged(t, reqs, "acct1", spec, nil, now)
 	if want != 104.5 {
 		t.Fatalf("fixture sanity: router charged %v, expected 19*5.5=104.5 (exact, no rounding)", want)
 	}
@@ -257,3 +310,144 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 		t.Errorf("recomputed = %v, router charged %v (diff %v exceeds relative epsilon)", got, want, diff)
 	}
 }
+
+// sseWithUsage/sseNoUsage are the two response shapes a tokens/cost account's
+// charge can come from. Both are SSE strings on purpose — see parityRequest's
+// respBody doc comment for why a JSON object would make the degraded byte
+// count unreproducible.
+func sseWithUsage(in, cacheRead, cacheWrite, out int) string {
+	return "data: {\"choices\":[{\"delta\":{\"content\":\"hello there\"}}]}\n\n" +
+		fmt.Sprintf("data: {\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d,"+
+			"\"prompt_tokens_details\":{\"cached_tokens\":%d},\"cache_creation_input_tokens\":%d}}\n\n",
+			in, out, cacheRead, cacheWrite) +
+		"data: [DONE]\n\n"
+}
+
+func sseNoUsage() string {
+	return "data: {\"choices\":[{\"delta\":{\"content\":\"a reply with no usage block at all\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+}
+
+// tokensParityFixture is the shared corpus for the tokens and cost parity
+// tests: a MIXED window — some responses carry a usage object (charged
+// exactly), some don't (charged as a degraded byte estimate) — plus traffic
+// the router never charges at all.
+//
+// The mix is the whole point. Before B0, `vmr report` counted only the
+// sniffed half and rendered the result as a precise number; the all-or-
+// nothing guard that existed ("every request unparseable → render -") never
+// fired on a window like this one, which is also the window real traffic
+// produces.
+func tokensParityFixture() []parityRequest {
+	return []parityRequest{
+		// exact: usage sniffed off the response
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(1000, 200, 50, 300), estTokens: 900},
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(500, 0, 0, 120), estTokens: 480},
+		// degraded: no usage block — the router charged Facts.EstimatedTokens
+		// on the way in and a byte count on the way out
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseNoUsage(), estTokens: 700},
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseNoUsage(), estTokens: 1300},
+		// failover: the 429 was never charged, the 200 behind it was
+		{model: "real-model", attempts: []parityAttempt{{status: 429}, {status: 200}}, respBody: sseWithUsage(800, 100, 0, 200), estTokens: 750},
+		// truncated 2xx: committed to the client, so the router charged it
+		{model: "real-model", attempts: []parityAttempt{{status: 200, truncated: true}}, respBody: sseNoUsage(), estTokens: 640},
+		// every attempt failed: nothing forwarded, nothing charged
+		{model: "real-model", attempts: []parityAttempt{{status: 429}, {status: 500}}},
+		{model: "real-model", attempts: []parityAttempt{{status: 0}}},
+	}
+}
+
+// TestQuotaParity_TokensMetric_ReportMatchesRouter is the N2 regression net.
+//
+// It is asserted as EXACT equality, which is only honest because both sides
+// see the same bytes here: the fixture's recorded client-side body is the
+// only body in play. In production the router counts UPSTREAM bytes while the
+// report can only count the forwarded ones, so the two differ by whatever
+// response normalization rewrote — a residual documented on
+// report.estimateDegradedTokens and surfaced to users through
+// ProviderQuotaRow.WindowEstimatedPct, NOT something this test can or should
+// paper over. What it pins is the part that can silently drift: the formula
+// and the basis.
+func TestQuotaParity_TokensMetric_ReportMatchesRouter(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	reqs := tokensParityFixture()
+	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.NewTokenWeights()}
+
+	want := routerCharged(t, reqs, "acct1", spec, nil, now)
+	if want <= 0 {
+		t.Fatalf("fixture sanity: router charged %v, expected a positive token total", want)
+	}
+	row := reportQuotaRow(t, reqs, "acct1", ts, tokensQuotaYAML)
+	if row.WindowConsumed == nil {
+		t.Fatal("WindowConsumed is nil — a tokens account with traffic must report a number, not '-'")
+	}
+	if *row.WindowConsumed != want {
+		t.Errorf("§2.5 window consumed = %v, router actually charged %v — the recomputed column is NOT reproducing the router.\n"+
+			"3 of the 6 charged responses carried no usage object; counting only the sniffed ones under-reports by the whole degraded share.",
+			*row.WindowConsumed, want)
+	}
+	// The mixed window must also SAY that part of it is a guess — a correct
+	// total presented as if it were authoritative is the other half of N2.
+	if row.WindowEstimatedPct <= 0 || row.WindowEstimatedPct >= 100 {
+		t.Errorf("WindowEstimatedPct = %v, want strictly between 0 and 100 for a mixed window", row.WindowEstimatedPct)
+	}
+}
+
+// TestQuotaParity_CostMetric_ReportMatchesRouter covers the third metric.
+// Unlike tokens, the two sides reach their number by genuinely different
+// routes — the router prices at charge time through ep.PricingRate
+// (componentCost), the report prices post-hoc through its own
+// pricing.Resolver (cost.go's costFor) — so this pins that both end up on
+// pricing.Rate.Cost with all FOUR components, cache_read included. Dropping
+// cache_read was a real P2.2 bug: it understates cost for every provider that
+// prices cache reads above zero, which is nearly all of them.
+//
+// Only the exactly-charged (usage-bearing) requests participate: a cost
+// account's degraded share isn't recoverable from EndpointRow.CostEstimate,
+// which is already a resolved $ amount (see ProviderQuotaRow.WindowEstimatedPct).
+func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	reqs := []parityRequest{
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(1000, 200, 50, 300)},
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(500, 100, 0, 120)},
+		{model: "real-model", attempts: []parityAttempt{{status: 429}, {status: 200}}, respBody: sseWithUsage(800, 400, 25, 200)},
+		// never forwarded — must not contribute on either side
+		{model: "real-model", attempts: []parityAttempt{{status: 500}}},
+	}
+
+	lim := core.Limit{Metric: core.MetricCost, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	// Same four per-1M rates costParityYAML declares, as the router would
+	// have resolved them onto the endpoint at BuildSnapshot time.
+	rate := &core.PricingSpec{Currency: "USD", Base: core.Rate{
+		InFresh: f64p(3), CacheRead: f64p(0.3), CacheWrite: f64p(3.75), Out: f64p(15),
+	}}
+
+	want := routerCharged(t, reqs, "acct1", spec, rate, now)
+	if want <= 0 {
+		t.Fatalf("fixture sanity: router charged $%v, expected a positive amount", want)
+	}
+	row := reportQuotaRow(t, reqs, "acct1", ts, costParityYAML)
+	if row.WindowConsumed == nil {
+		t.Fatal("WindowConsumed is nil — every request in this fixture resolves a price, so it must be a number")
+	}
+	// Relative epsilon, not equality: the two sides multiply the same four
+	// component prices by the same four token counts, but sum them in
+	// independently-written expressions (componentCost vs. costFor, both via
+	// pricing.Rate.Cost) — IEEE 754 addition isn't associative, so bit
+	// identity isn't guaranteed even when the math is.
+	if diff := math.Abs(*row.WindowConsumed - want); diff > 1e-9*want {
+		t.Errorf("§2.5 window consumed = $%v, router actually charged $%v (diff %v).\n"+
+			"A gap near the cache_read share means one side dropped that component from the four-component formula.",
+			*row.WindowConsumed, want, diff)
+	}
+}
+
+func f64p(v float64) *float64 { return &v }

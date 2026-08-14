@@ -322,6 +322,17 @@ func tokensQuotaYAML(logDir string) string {
 	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        provider: acct1\n        models: [real-model]\n"
 }
 
+// costParityYAML is the metric: cost sibling of quotaYAML/tokensQuotaYAML,
+// used by cmd/vmr/quota_parity_test.go. It pins the four per-1M component
+// prices through providers[].pricing.overrides rather than relying on the
+// embedded standard table: the parity test drives the router side with the
+// same four numbers as a hand-built core.PricingSpec, and a test whose
+// expected value could shift under it every time the LiteLLM snapshot is
+// regenerated would be a flake, not a guard.
+func costParityYAML(logDir string) string {
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\npricing:\n  currency: USD\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 100}]\n    pricing:\n      overrides:\n        - {model: real-model, in_fresh: 3, cache_read: 0.3, cache_write: 3.75, out: 15}\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        provider: acct1\n        models: [real-model]\n"
+}
+
 // writeTokensQuotaJSON is writeQuotaJSON's tokens-metric sibling with a
 // non-zero "estimated" so TestBuildProviderQuotas_EstimatedPctWiredFromBucket
 // can exercise quota.EstimatedPct's tokens branch end to end.

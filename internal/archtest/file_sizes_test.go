@@ -4,9 +4,7 @@ package archtest
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -74,6 +72,17 @@ var fileLineLimits = map[string]int{
 	// one large file this table didn't cover — same ~15% first-time
 	// headroom convention as the entries above (736 lines at registration).
 	"internal/router/response.go": 850,
+	// cmd/vmr had NO entry in this table at all until an architecture review
+	// (2026-08-14) noticed cmd_story.go had grown to 741 lines — larger than
+	// most of the internal/ files above that DO have a budget. The CLI is
+	// thin by design (parse flags, wire, delegate; see CLAUDE.md's module
+	// map), so a subcommand file crossing these is a signal that logic
+	// belongs in an internal package, not that the number should go up.
+	// Same ~15% first-time headroom convention as every other entry here.
+	"cmd/vmr/cmd_story.go":  850,
+	"cmd/vmr/cmd_check.go":  610,
+	"cmd/vmr/cmd_report.go": 500,
+	"cmd/vmr/cmd_status.go": 370,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`
@@ -81,11 +90,7 @@ var fileLineLimits = map[string]int{
 // contributor can reproduce a failure locally without reading this file's
 // counting logic first.
 func TestArchitecture_CoreFileSizes(t *testing.T) {
-	out, err := exec.Command("go", "env", "GOMOD").Output()
-	if err != nil {
-		t.Fatalf("go env GOMOD: %v", err)
-	}
-	repoRoot := filepath.Dir(strings.TrimSpace(string(out)))
+	repoRoot := repoRootDir(t)
 
 	for rel, limit := range fileLineLimits {
 		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
@@ -96,8 +101,12 @@ func TestArchitecture_CoreFileSizes(t *testing.T) {
 		}
 		n := bytes.Count(data, []byte("\n"))
 		if n > limit {
+			// "another file in the same package", not "under internal/router"
+			// as this message used to say — the table has covered report/
+			// story/config/cmd files for far longer than it has covered only
+			// the router.
 			t.Errorf("%s is %d lines, over its %d-line budget: split it "+
-				"into another file under internal/router, don't just raise "+
+				"into another file in the same package, don't just raise "+
 				"this number", rel, n, limit)
 		}
 	}

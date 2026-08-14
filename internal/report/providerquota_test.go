@@ -97,22 +97,72 @@ func derefOrNil(p *float64) any {
 	return *p
 }
 
-// TestBuildProviderQuotaRows_TokensMetric_TrafficButNoUsageRendersNil is
-// the tokens-side twin of the cost metric's "traffic but no pricing" case
-// below: every request on the account had unparseable usage (TokensKnown 0),
-// so this window computes zero tokens while the ROUTER charged a byte-count
-// estimate for those same requests. Rendering 0 would read as "spent
-// nothing"; nil renders "-".
-func TestBuildProviderQuotaRows_TokensMetric_TrafficButNoUsageRendersNil(t *testing.T) {
+// TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate
+// pins the B0 fix. Before it, an unparseable-usage request contributed 0 here
+// while the ROUTER charged a byte-count estimate for it — and the all-or-
+// nothing bail-out that tried to cover for that ("every request unparseable →
+// render nil") missed the case that actually matters: a window where only
+// SOME requests were unparseable rendered a precise, systematically-low
+// number with no signal at all.
+//
+// Now the estimate is counted (same formula the router charges with, see
+// aggregate.go's estimateDegradedTokens) and its share is reported through
+// WindowEstimatedPct instead of being papered over with a "-".
+func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", Requests: 7, Forwarded: 7, TokensKnown: 0},
+		{Endpoint: "openai:acct1:m", Requests: 7, Forwarded: 7, TokensKnown: 0,
+			TokensInFreshEst: 400, TokensOutEst: 100, TokensEstimated: 7},
 	}}
 	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed != nil {
-		t.Fatalf("WindowConsumed = %v, want nil (traffic existed but no usage was parseable — a 0 would read as 'spent nothing')", *rows[0].WindowConsumed)
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 500 {
+		t.Fatalf("WindowConsumed = %v, want 500 (the degraded estimate the router also charged); nil means it regressed to the old all-or-nothing bail-out",
+			derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowEstimatedPct != 100 {
+		t.Errorf("WindowEstimatedPct = %v, want 100 (every token in this window is an estimate)", rows[0].WindowEstimatedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged is the case the
+// old all-or-nothing check silently missed and the whole reason
+// WindowEstimatedPct exists: sniffed and estimated tokens in the same window.
+// The total must include both, and the row must say how much of it is a guess.
+func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
+	lim := tokensLimit(1_000_000)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}}
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m", Requests: 10, Forwarded: 10, TokensKnown: 6,
+			TokensInFresh: 600, TokensOut: 150,
+			TokensInFreshEst: 200, TokensOutEst: 50, TokensEstimated: 4},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 1000 {
+		t.Fatalf("WindowConsumed = %v, want 1000 (750 sniffed + 250 estimated); 750 means the estimated half was dropped",
+			derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowEstimatedPct != 25 {
+		t.Errorf("WindowEstimatedPct = %v, want 25 (250 of 1000 raw tokens are estimated)", rows[0].WindowEstimatedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged guards the
+// other direction: a window with no degraded records must report a 0
+// estimated share, so the "X% est." annotation never appears on an
+// authoritative number.
+func TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged(t *testing.T) {
+	lim := tokensLimit(1_000_000)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}}
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 800, TokensOut: 200},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowEstimatedPct != 0 {
+		t.Errorf("WindowEstimatedPct = %v, want 0 (nothing in this window was estimated)", rows[0].WindowEstimatedPct)
 	}
 }
 

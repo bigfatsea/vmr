@@ -292,17 +292,28 @@ func countImages(images []audit.ImageInfo) (total, compressed int) {
 // bodies (SSE etc.) by length. Truncated bodies undercount; that matches
 // what was recorded.
 func bodyBytes(body any) int64 {
+	return int64(len(bodyRaw(body)))
+}
+
+// bodyRaw is bodyBytes' byte-returning counterpart: the recorded body as the
+// bytes it occupied on the wire. audit.EncodeBody stores a JSON body as
+// json.RawMessage and anything else (SSE text) as a string, so the two cases
+// are unwrapped differently — but both must yield the same byte sequence a
+// re-marshal would produce, since the only consumer needing the bytes rather
+// than their count (estimateDegradedOut) has to reproduce a byte-count
+// formula the routing half already applied to this same body.
+func bodyRaw(body any) []byte {
 	switch b := body.(type) {
 	case nil:
-		return 0
+		return nil
 	case string:
-		return int64(len(b))
+		return []byte(b)
 	default:
 		raw, err := json.Marshal(b)
 		if err != nil {
-			return 0
+			return nil
 		}
-		return int64(len(raw))
+		return raw
 	}
 }
 

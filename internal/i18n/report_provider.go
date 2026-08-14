@@ -68,15 +68,21 @@ type ProviderQuotaText struct {
 	// logs against today's period) — only rendered when at least one row
 	// actually has the marker.
 	NoOverlapFootnote string
-	// FormatLiveUsed annotates the already-formatted "本周期已用" number with
-	// its degraded-estimate share, so a period whose consumption came
-	// entirely from a byte-count estimate never renders identically to one
-	// backed by authoritative usage. Takes usedStr rather than a float on
-	// purpose: number formatting stays in internal/report's numStr, the same
-	// formatter the neighbouring 上限/本报表窗口消耗 cells go through — i18n is
-	// a zero-dep leaf package, so a float parameter would force a second copy
-	// of that rule here and let the two drift.
-	FormatLiveUsed func(usedStr string, estimatedPct float64) string
+	// FormatEstimatedShare annotates an already-formatted consumption number
+	// with its degraded-estimate share, so consumption that came from a
+	// byte-count estimate never renders identically to consumption backed by
+	// authoritative usage. Used by BOTH consumption columns — "本周期已用"
+	// (the router's live counter) and "本报表窗口消耗" (this run's own
+	// recomputation) — deliberately: the two carry the same kind of
+	// uncertainty and must not describe it in two different phrasings, or a
+	// reader would take them for two different things.
+	//
+	// Takes usedStr rather than a float on purpose: number formatting stays
+	// in internal/report's numStr, the same formatter the neighbouring 上限
+	// cell goes through — i18n is a zero-dep leaf package, so a float
+	// parameter would force a second copy of that rule here and let the two
+	// drift.
+	FormatEstimatedShare func(usedStr string, estimatedPct float64) string
 }
 
 func ProviderQuota(lang Lang) ProviderQuotaText {
@@ -88,8 +94,10 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 			Headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
 			WindowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
 				"各口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
-				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**已知一处出入——" +
-				"上游未返回精确 usage 的请求：路由半区按字节数估算记了账，本列计 0（该账户所有请求都如此时本列显示 `-` 而非 0）；" +
+				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：" +
+				"上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——" +
+				"两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，" +
+				"当响应正规化改写过内容（模型名改写、`<think>` 剥离等）时两者会差出这段字节；" +
 				"**cost 口径**已知一处出入——本报表的定价解析结果可能与记账当时生效的价格不同。三种口径共同的出入源：" +
 				"config 里的权重/倍率在本窗口期内被改过。\n",
 			StalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
@@ -106,7 +114,7 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
 			NoOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
 				"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
-			FormatLiveUsed: func(usedStr string, estimatedPct float64) string {
+			FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 				if estimatedPct > 0 {
 					return usedStr + "（" + pctHundredStr(estimatedPct) + " 估算）"
 				}
@@ -123,11 +131,13 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 			"of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the " +
 			"router's own `multiplier × forwarded-attempt count` formula literally (the router charges once per forwarded " +
 			"upstream success, failed attempts were never charged in the first place, and the multiplier is applied by exact " +
-			"multiplication with no rounding). **tokens: one known drift source** — requests whose upstream returned no exact " +
-			"usage: the router charged a byte-count estimate for those, this column counts 0 (rendered `-` instead of 0 when " +
-			"that was true of every request on the account). **cost: one known drift source** — this report's own pricing " +
-			"resolution may differ from the price in effect at charge time. Common to all three: config weights/multipliers " +
-			"changed mid-window.\n",
+			"multiplication with no rounding). **tokens** — requests whose upstream returned no exact usage are counted here " +
+			"with the same byte-count estimate the router charged (no longer counted as 0); the estimated share is shown as " +
+			"\"X% est.\" in parentheses. Both sides run the same formula; the one residual drift is that the router counts " +
+			"UPSTREAM bytes while this column can only count the bytes forwarded to the client, so the two differ by whatever " +
+			"response normalization rewrote (model-name rewrite, `<think>` stripping, ...). **cost: one known drift source** — " +
+			"this report's own pricing resolution may differ from the price in effect at charge time. Common to all three: " +
+			"config weights/multipliers changed mid-window.\n",
 		StalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
 			"account, in a different window than the column to its left. Never subtract or ratio the two. Shows `-` when the stored " +
 			"counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a " +
@@ -146,7 +156,7 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 		NoOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
 			"archived logs against today's billing period. More extreme than the routine \"windows don't align\" case: the two " +
 			"numbers belong to two entirely unrelated stretches of time, not two views of the same one.\n",
-		FormatLiveUsed: func(usedStr string, estimatedPct float64) string {
+		FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 			if estimatedPct > 0 {
 				return usedStr + " (" + pctHundredStr(estimatedPct) + " est.)"
 			}

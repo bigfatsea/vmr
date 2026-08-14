@@ -99,7 +99,7 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	for _, r := range rep.ProviderQuotas {
 		liveUsed, pct := "-", "-"
 		if r.Live != nil {
-			liveUsed = t.FormatLiveUsed(numStr(r.Live.Used), r.Live.EstimatedPct)
+			liveUsed = t.FormatEstimatedShare(numStr(r.Live.Used), r.Live.EstimatedPct)
 			pct = pctHundred(r.Live.Pct)
 			if r.Live.Pct >= 100 {
 				// Pct is deliberately not clamped (see LiveQuota's doc
@@ -122,7 +122,10 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 			liveUsed, pct = "-‡", "-‡"
 			anyConfigChanged = true
 		}
-		windowConsumed := windowConsumedCell(r.WindowConsumed)
+		// Same annotation the live column gets, for the same reason: a
+		// recomputed figure that is partly a byte-count estimate must not
+		// render identically to one entirely backed by sniffed usage.
+		windowConsumed := t.FormatEstimatedShare(windowConsumedCell(r.WindowConsumed), r.WindowEstimatedPct)
 		if r.WindowNoOverlap {
 			// The report's own audit-log window and this account's
 			// billing period share no time at all — the more extreme,

@@ -241,24 +241,21 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 // incrementally off a streaming respStream, but replay already has the
 // complete request/response bytes in hand (reqBody/respBody), so
 // chatmsg.MergeUsageBytes — the exact function respStream's own noteUsage
-// calls internally — reads it directly from the buffered bytes instead.
-// Degrades the same way tokenCharge does when no usage-bearing block is
-// found: core.EstimateTextTokens on the raw request/response bytes,
-// charged entirely to Fresh/Out (the degraded path can't tell cache hits
-// apart).
+// calls internally — reads it directly from the buffered bytes instead, and
+// the degraded estimate comes from core.EstimateTextTokens over the raw
+// request/response bytes rather than from an incremental byte tally.
+//
+// Everything after "how usage was obtained" is router.TokenCounters, not a
+// second copy of the exact-vs-degraded rule — see that function's doc comment
+// for why all three call sites had to converge on one implementation.
 func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []byte, now time.Time) {
 	if ep.Quota == nil {
 		return
 	}
-	if u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{}); u.In > 0 || u.Out > 0 {
-		router.ChargeResponse(reg, ep, quota.Counters{
-			Fresh: float64(u.Fresh()), CacheRead: float64(u.CacheRead), CacheWrite: float64(u.CacheWrite), Out: float64(u.Out),
-		}, 0, now)
-		return
-	}
-	inEst := core.EstimateTextTokens(reqBody)
-	outEst := core.EstimateTextTokens(respBody)
-	router.ChargeResponse(reg, ep, quota.Counters{Fresh: float64(inEst), Out: float64(outEst)}, float64(inEst+outEst), now)
+	u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{})
+	raw, estimated := router.TokenCounters(u, u.In > 0 || u.Out > 0,
+		core.EstimateTextTokens(reqBody), core.EstimateTextTokens(respBody))
+	router.ChargeResponse(reg, ep, raw, estimated, now)
 }
 
 // selectRecord dispatches to whichever of Options' three locators is set —

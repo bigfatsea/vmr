@@ -1129,6 +1129,14 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 - **负向验证**（关键）：手工把 `providerquota.go` 的 `e.Forwarded` 改成 `e.Requests`，新增的 tokens/cost 差分测试必须**失败**；改回后恢复绿色。测不出错误的测试等于没有。
 - `archtest` 的函数长度测试在把任一登记函数加长超预算时失败。
 
+> **【B0 落地记录 · 2026-08-14】✅ 已完成。** 三项负向验证全部达标（丢降级估算 → 5629 变 2920；cost 丢 `cache_read` → 差 $0.00021；撤 `reqAttributed` → 5629 变 6629）。落地过程中挖出两个原清单没有的问题，均在本批一并修掉：
+>
+> - 🆕 **N12（真 bug，新差分测试第一次运行就抓到）**：`internal/report/aggregate.go` 的请求级指标在**同账户多 API key 故障转移**时被重复累加。`core.EndpointLabel` 是 `protocol:provider:model`，**不含 key 分量**，所以一个配了 `api_keys: [k1, k2]` 的 provider 展开出的多个 endpoint 共用**同一个 label**；聚合循环里 `if a.Endpoint == rc.endpoint` 的守卫因此对同一请求命中多次，`Requests`/token 总量/时延样本全部翻倍。修法是加一个 `reqAttributed` 一次性标记。
+>   **对后续批次的影响**：B4 要折叠的 7 个累加闭包里，`addEndpointReq` 就是这一个——`TrafficStats.Ingest` 的设计必须保留「attempt 级 vs request 级」这条区分，否则会把这个 bug 重新引入（这也正好印证了 B4 批注里「`EndpointRow` 必须区别对待」那条）。
+> - 🆕 **N13**：「usage 嗅探到了就精确计费、没嗅到就按字节估算并整笔标记为估算」这条规则原本有**三份独立实现**（`router.tokenCharge`、`replay.chargeReplay`、以及本批新加的 report 侧复现）。差分测试若自己再抄一遍公式，就正好犯了它要防的错。已统一为导出的 `router.TokenCounters`，前两者直接调用，测试也驱动它。
+>
+> 另有一处符合预期的连带效果：新增代码让 `aggregate.go` 撞上 1000 行文件预算，按预算自己的规则**拆出了 `tokenest.go`** 而不是抬高数字——护栏在保护自己落地的当天就先拦了作者一次。
+
 ---
 
 #### 🥈 B1 — 抽出 `internal/jsonscan`：JSON 字节引擎独立成包 + Fuzz

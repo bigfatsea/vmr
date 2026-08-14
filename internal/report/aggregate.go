@@ -50,6 +50,10 @@ type rec2 struct {
 	streamOK                 bool
 	usage                    chatmsg.Usage
 	usageOK                  bool
+	// estInFresh/estOut hold the degraded byte-count estimate when usage
+	// couldn't be sniffed (usageOK false); both 0 otherwise. See
+	// tokenest.go's estimateDegradedTokens.
+	estInFresh, estOut       int64
 	msgs                     int
 	bytesIn, bytesOut        int64
 	finish                   string
@@ -308,6 +312,13 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			e.TokensKnown++
 			e.inToks = append(e.inToks, rc.usage.In)
 			e.outToks = append(e.outToks, rc.usage.Out)
+		} else if rc.estInFresh > 0 || rc.estOut > 0 {
+			// Usage was never sniffed: carry the same degraded estimate the
+			// router charged, in its own fields (see EndpointRow's doc
+			// comment for why these must not merge into TokensIn*/TokensOut).
+			e.TokensInFreshEst += rc.estInFresh
+			e.TokensOutEst += rc.estOut
+			e.TokensEstimated++
 		}
 		if rc.ttftMS > 0 {
 			e.TTFTKnown++
@@ -502,6 +513,15 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			}
 			addHour(hod, rc)
 			// 5. Endpoints + EndpointsAll (attempts), request-level on success ep
+			//
+			// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does
+			// NOT make the request-level half fire once. EndpointLabel is
+			// protocol:provider:model with no key component, so one provider's
+			// several api_keys all share ONE label and a failover between two
+			// of its keys matched twice, double-counting every request-level
+			// metric on that row (caught by cmd/vmr/quota_parity_test.go's
+			// tokens case).
+			reqAttributed := false
 			for _, a := range arec.Attempts {
 				k := date + "\x00" + a.Endpoint
 				e := eps[k]
@@ -516,7 +536,8 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 					epsAll[a.Endpoint] = ea
 				}
 				addAttempt(ea, a)
-				if a.Endpoint == rc.endpoint {
+				if a.Endpoint == rc.endpoint && !reqAttributed {
+					reqAttributed = true
 					addEndpointReq(e, rc)
 					addEndpointReq(ea, rc)
 				}
@@ -865,6 +886,9 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 		r.detailFile = ri.DetailFile
 		r.newInstruction = ri.NewInstruction
 		r.workloadClass = workloadClassOf(ri)
+	}
+	if !r.usageOK && r.endpoint != "" {
+		r.estInFresh, r.estOut = estimateDegradedTokens(arec)
 	}
 	return r
 }
