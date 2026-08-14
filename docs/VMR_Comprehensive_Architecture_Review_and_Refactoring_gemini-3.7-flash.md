@@ -1140,6 +1140,13 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 2. **（R1 扩围，采纳）** 同时迁入 `fingerprint.go` 中的通用词法函数：`walkArrayElements`(129)、`firstArrayElement`(158)、`elementRole`(219)。
    **必须划清的边界——以下留在 `adapter`，它们是领域逻辑不是词法**：`leadingSystemAndFirstOther` / `leadingSystemAndFirstOtherResponses`（知道 `"system"`/`"developer"` 的角色语义）、`SessionFingerprint`、`TopLevelProbe`（知道 `model`/`stream`/`tools` 这些协议字段）。**判据：一个函数如果需要知道任何一个具体字段名或角色名，它就不属于 `jsonscan`。**
 3. 把 `core.MarshalNoEscape`（`core.go:19`）迁入同包——它与上述函数同类，且这样 `core` 少一份行为（为 B5 铺路）。
+   **⚠️ 调用点全清单（17 处，必须一次改完，否则编译不过）**：
+   | 包 | 调用点 |
+   | :--- | ---: |
+   | `internal/imgprep/imgprep.go` | **13**（215/220/256/261/320/325/330/375/380/422/426/432/437） |
+   | `internal/adapter/classify.go` | 4（172/204/245/534） |
+
+   **这条改变了本批次的爆炸半径**：B1 不只动 `adapter`/`server`/`core`，还必须动 **`imgprep`**——而 `imgprep` 在请求热路径上，且是 CLAUDE.md 记载的三个 sanctioned deviation 中最大的一个。行为仍然零变更（纯函数搬家），但执行者需要提前知道这一批会碰到它，而不是改到一半才发现。
 4. `internal/adapter/classify.go` 只保留错误分类，回落到约 140 行；`fingerprint.go` 从 358 行降至约 260 行。
 5. `internal/server/facts.go` / `server.go` 改为 import `jsonscan`，`server → adapter` 的依赖若因此消失则同步更新 CLAUDE.md 的模块表。
 5. **本批必须补 fuzz 测试**（这是本批的核心价值，不是附赠）：
@@ -1200,6 +1207,34 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
    - `taskTitle` 两侧签名不同（`report` 吃 `*ReqInfo`，`story` 吃 `newInstruction string` + `i18n.Lang`）。以 `story` 侧为准，`report` 侧适配。
    - `story` 侧额外处理了 stitch 边界（`journey.go:363-377` 的 `newInstructionTitleAtStitch`），`report` 侧没有对应概念——这部分**留在 `story`**，不进共享包。
 2. 把裁定为权威的实现迁入 `internal/taskseg`：`ResponseSummary`、`TaskTitle`、`Preview`、`LastInstructionInDelta`、`DeltaHasNewInstruction`，以及任务边界判定本身（建议提炼为一个显式函数 `IsNewTask(prev, cur ...) bool`，把 `traceChanged || (!prevNoReply && hasNewInstr)` 这行唯一化）。
+2b. **⚠️ API 形状约束：真实用户消息索引必须显式化，不能只提供无状态重扫函数。**
+   这是「以 `story` 侧为权威」这个裁决的一个**代价**，必须在 API 设计阶段处理掉，否则会在实现完成后才发现：
+   - **`report` 今天的做法**：`realUsers map[int]string`（`session.go:117`）是 `collect()` 单趟扫描（444–458 行）里顺手建的**记录内索引**，`realUserText` 的正则每条用户消息**只跑一次**；之后 `deltaHasNewInstruction`(790) / `lastInstructionInDelta`(806) 只遍历这个已过滤的小 map。
+   - **`story` 今天的做法**：`journey.go:598` 在循环里调 `prof.IsRealUser`、`journey.go:624` 在另一个循环里调 `prof.RealUserText`、`newInstructionTitleAtStitch` 可能是第三次——**同一批消息的正则要跑 2–3 遍**。
+   - 照搬 `story` 的纯函数形状，等于让 `report` 也开始重跑。
+
+   **但不要按「会引发 O(N²)」来立论——那个定性是错的**，按错误的量级立论会导致过度设计：
+   - `deltaHasNewInstruction` 有窗口下界（`journey.go:592`，只看最后 `chatmsg.NewUserWindow` 条），正则调用是 **O(1)**；
+   - `lastInstructionInDelta` 无窗口，扫 `deltaStart..M`，但 `deltaStart` 是 LCP 边界，追加式对话里 `M-deltaStart` 就是新增的几条；
+   - 更关键：`report` 的 `collect()` **本来就对每条记录做一趟完整 O(M) 扫描**（`RoleChars`/`RoleTokens`/`firstText`/`tailPrev`/`chatID` 倒扫），整体**已经是 O(N×M)**。`realUsers` 省掉的是一次额外遍历——**2–3 倍常数因子，不是渐进阶的改变**。
+   - 真正会退化的是一个更窄的场景：`deltaStart` 在**首条记录**与 **stitch 边界**（`journey.go:317` 显式置 0）时为 0，`Contract`/`Fork` 之后 LCP 也可能很小，此时 `lastInstructionInDelta` 退化为全量扫描。长会话里压缩频繁时这个常数因子会变得很难看。
+
+   **正确的 API 形状——取两侧各自对的那一半**（保留 `story` 的纯粹性 + 保留 `report` 的预计算，做成一个显式的、调用方持有的值）：
+   ```go
+   // internal/taskseg
+   type RealUsers map[int]string   // 绝对消息下标 → 预览文本
+
+   // 单趟建索引：正则每条用户消息只跑一次。两个调用方各自在自己的
+   // 主扫描循环里调用一次，结果向下传递，不再重扫。
+   func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int) RealUsers
+
+   // 边界与标题都只消费索引，不接触 Profile、不重跑正则。
+   func HasNewInstruction(ru RealUsers, prevKeys map[ctxgraph.Hash]bool, cur *ctxgraph.Manifest, deltaStart, total int) bool
+   func LastInstruction(ru RealUsers, deltaStart int) string
+   ```
+   这个形状**比两侧现状都好**：`report` 保住它现在的单趟扫描，`story` 反而从 2–3 遍降到 1 遍。
+   依赖影响：`taskseg → ctxgraph`（为了 `Hash`/`Manifest`）是可接受的——`ctxgraph` 依赖 `{audit, core, chatmsg}`，不会造成环，`archtest` 的现有规则也不禁止。若希望 `taskseg` 更瘦，可把 `prevKeys` 换成 `func(msgIdx int) bool` 谓词，由调用方闭包捕获——但那会把一段判定逻辑推回两个调用方，**不推荐**。
+2c. **一处易漏的语义差异**：`report` 的 `lastInstructionInDelta` 返回的是 `r.realUsers[best]`，即**已经 `preview()` 截断过的文本**；`story` 侧返回的是**原文**，截断发生在更后面。`RealUsers` 里到底存原文还是预览，必须在 B3 一开始就定下来并统一——否则任务标题的截断长度会在两个命令之间悄悄不一致，而这类差异不会有任何测试报错。
 3. `report/session.go` 的 `attach` 与 `story/journey.go` 的 `buildFrom` 改为调用共享实现。
 4. **改写 `archtest` 中已过期的注释**（N8）：`import_boundaries_test.go:49` 那段 "until a later phase migrates it onto ctxgraph" 应改为陈述现状——两者共同依赖 `taskseg`，规则的用意从「保护独立实现」转为「防止两个渲染层互相调用」。
 
@@ -1211,6 +1246,7 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 - `go test ./...` 全绿。
 - **差异必须被解释**：对同一份真实审计日志，重构前后输出若有差异，每一处都要能说明「是哪一侧原来错了、为什么新结果更对」，并补一条针对该场景的单测。**不允许存在无法解释的差异**。
 - `grep` 确认 8.1 表中列出的 6 对同名函数在两个包中各自只剩一处引用点。
+- **性能不回退（对应 2b）**：`IndexRealUsers` 在两个调用方的主扫描循环中**各只被调用一次**；用一份大体量真实审计日志对比 `vmr report` / `vmr story` 重构前后的墙钟耗时，`report` 侧持平、`story` 侧应有改善（它今天要重跑 2–3 遍正则）。这是本批唯一与「性能不可回退」硬约束相关的检查点。
 
 ---
 
@@ -1400,3 +1436,5 @@ B0 与 B1 在最前，因为它们同时占了「修正确性」和「建安全�
 1. **验收标准不要照抄任何 review 给的行数承诺。** 已核实为错误的：`detail.go` 1150（实为 1063，1150 是预算值）、`aggregate.go` 腰斩至 350（实际 550–650）、`internal/router` 恢复到 500 行（`router.go` 今天就是 596，且一行不会少）、`jsonscan` 减除 400 行（那是唯一实现，只搬家不减行）。**每一批的验收先自己 `wc -l` 一遍。**
 2. **「重复」必须区分「复制」与「调用」。** `fingerprint.go` 调用 `skipJSONWS`、`facts.go` 调用 `IndexUnescapedQuote`——都是复用，删不掉。真正的复制只有两处：B2 的方言正则、B3 的切分算法、B4 的 7 个累加闭包。
 3. **动手前先查 CLAUDE.md 与设计文档的「决定不修」表。** R5 的 i18n 合并、R1 的 imgprep 统一，都是在推翻已记录的决策而不自知。**推翻一条已记录的决策是可以的，但必须先知道自己在推翻它，并给出理由。**
+4. **「把 X 迁走」这类批次，先把调用点数出来再定爆炸半径。** B1 原本被描述为「只动 `adapter`/`server`/`core`」，直到清点 `MarshalNoEscape` 的 17 个调用点才发现 **13 个在 `imgprep`**——一个请求热路径上的包。`grep -rn` 一次的成本，远低于改到一半才发现批次范围不对。
+5. **性能顾虑要按真实量级立论，不要按最坏想象立论。** B3 的 `RealUsers` 索引是必要的（见 2b），但它防的是 **2–3 倍常数因子**，不是 `O(N²)`——`report` 的 `collect()` 本来就是每记录一趟 O(M) 全扫。按错误的量级立论会导致过度设计：为一个不存在的渐进阶问题引入缓存层、失效策略和一致性负担。
