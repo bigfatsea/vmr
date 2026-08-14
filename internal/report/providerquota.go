@@ -62,17 +62,19 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 		case core.MetricRequests:
 			// Exact, not an estimate — two things have to line up, and both are
 			// deliberate. (1) THE MULTIPLIER: every charge is Requests:1 scaled
-			// by the same constant ceil(mult), so applying it to a unit request
-			// and multiplying is the identity, unlike an aggregate-then-ceil
-			// (ceil(n*mult)), which drifts for a fractional multiplier.
-			// (2) THE BASIS: e.Forwarded, not e.Requests — chargeQuota fires per
-			// FORWARDED ATTEMPT (router.go's forwardSuccess), while e.Requests is
-			// request-level and still counts a request whose every attempt failed
-			// against the last endpoint tried, which the router never charged.
-			// e.OK isn't it either: a truncated 2xx leaves OK but was charged.
+			// by the same exact multiplier (quota.ApplyModelMultiplier no longer
+			// rounds — see quota.Counters' doc comment), so applying it to a
+			// unit request and multiplying by the forwarded count is the
+			// identity: no aggregate-vs-per-charge drift is possible once
+			// neither side rounds. (2) THE BASIS: e.Forwarded, not e.Requests —
+			// chargeQuota fires per FORWARDED ATTEMPT (router.go's
+			// forwardSuccess), while e.Requests is request-level and still
+			// counts a request whose every attempt failed against the last
+			// endpoint tried, which the router never charged. e.OK isn't it
+			// either: a truncated 2xx leaves OK but was charged.
 			// cmd/vmr/quota_parity_test.go pins both halves against the router.
 			unit, _ := quota.ApplyModelMultiplier(ref.Spec, model, quota.Counters{Requests: 1}, 0)
-			d := quota.Counters{Requests: unit.Requests * int64(e.Forwarded)}
+			d := quota.Counters{Requests: unit.Requests * float64(e.Forwarded)}
 			windowSums[provider] = windowSums[provider].Add(d)
 		case core.MetricTokens:
 			// Requests, not TokensKnown: "did any traffic reach this
@@ -85,7 +87,7 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 			if e.TokensKnown > 0 {
 				tokensAnyKnown[provider] = true
 			}
-			c := quota.Counters{Fresh: e.TokensInFresh, CacheRead: e.TokensInCached, CacheWrite: e.TokensInCacheWrite, Out: e.TokensOut}
+			c := quota.Counters{Fresh: float64(e.TokensInFresh), CacheRead: float64(e.TokensInCached), CacheWrite: float64(e.TokensInCacheWrite), Out: float64(e.TokensOut)}
 			d, _ := quota.ApplyModelMultiplier(ref.Spec, model, c, 0)
 			windowSums[provider] = windowSums[provider].Add(d)
 		case core.MetricCost:

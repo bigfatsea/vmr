@@ -3,8 +3,6 @@
 package quota
 
 import (
-	"math"
-
 	"vmr/internal/core"
 )
 
@@ -13,7 +11,7 @@ import (
 // (token_weights all 1.0 — core.DefaultTokenWeight — is the zero-config
 // default, so an unconfigured account gets the plain equal-weighted sum
 // back exactly); cost: Counters.Cost as-is (already the final $ amount,
-// computed once at charge time — see core.Counters' doc comment on why cost
+// computed once at charge time — see quota.Counters' doc comment on why cost
 // is the one exception to "store raw, weight on read").
 //
 // Moved here from internal/router/quota.go (originally baseAmount) so both
@@ -27,11 +25,11 @@ import (
 func BaseAmount(spec *core.QuotaSpec, c Counters) float64 {
 	switch spec.Limits[0].Metric {
 	case core.MetricRequests:
-		return float64(c.Requests)
+		return c.Requests
 	case core.MetricTokens:
 		w := spec.TokenWeights
-		return float64(c.Fresh)*w.InFresh + float64(c.CacheRead)*w.CacheRead +
-			float64(c.CacheWrite)*w.CacheWrite + float64(c.Out)*w.Out
+		return c.Fresh*w.InFresh + c.CacheRead*w.CacheRead +
+			c.CacheWrite*w.CacheWrite + c.Out*w.Out
 	case core.MetricCost:
 		return c.Cost
 	default:
@@ -66,29 +64,29 @@ func modelMultiplier(spec *core.QuotaSpec, model string) float64 {
 // no way to later recover which slice of a read came from which upstream
 // model.
 //
-// Every component (including Requests) is scaled and rounded UP
-// (math.Ceil): a non-integer multiplier (nothing in the design rules that
-// out) must round toward "counts as more consumption", the safe direction —
-// rounding down could let an already-multiplied-up model's calls be
-// under-counted relative to the account's real usage.
-func ApplyModelMultiplier(spec *core.QuotaSpec, model string, d Counters, estimated int64) (Counters, int64) {
+// Every component (including Requests) is scaled by exact multiplication —
+// no rounding. A non-integer multiplier (e.g. 4.5) is deliberately not
+// forced toward an integer: which direction an upstream provider's own
+// billing rounds a fractional multiplier, if at all, isn't observable from
+// here, so picking one (this package rounded up through 2026-08-13) is a
+// guess dressed as a safety margin — and a bad one, since the "safe"
+// direction compounds into a systematic overcharge with no fixed relation
+// to the configured multiplier (2.5 → +20% per charge, 4.5 → +11.1%, while
+// 2.9 → +3.4%, so nearby multiplier values produce wildly different bias).
+// Counters is float64 for exactly this reason (see its doc comment) — with
+// nowhere left that needs an integer, there is nothing to round.
+func ApplyModelMultiplier(spec *core.QuotaSpec, model string, d Counters, estimated float64) (Counters, float64) {
 	mult := modelMultiplier(spec, model)
 	if mult == 1.0 {
 		return d, estimated
 	}
 	return Counters{
-		Fresh:      ceilScale(d.Fresh, mult),
-		CacheRead:  ceilScale(d.CacheRead, mult),
-		CacheWrite: ceilScale(d.CacheWrite, mult),
-		Out:        ceilScale(d.Out, mult),
-		Requests:   ceilScale(d.Requests, mult),
-	}, ceilScale(estimated, mult)
-}
-
-// ceilScale multiplies v by mult and rounds up — see ApplyModelMultiplier's
-// doc comment for why the rounding direction is deliberate, not incidental.
-func ceilScale(v int64, mult float64) int64 {
-	return int64(math.Ceil(float64(v) * mult))
+		Fresh:      d.Fresh * mult,
+		CacheRead:  d.CacheRead * mult,
+		CacheWrite: d.CacheWrite * mult,
+		Out:        d.Out * mult,
+		Requests:   d.Requests * mult,
+	}, estimated * mult
 }
 
 // EstimatedPct returns the percentage of this period's consumption that
@@ -115,15 +113,15 @@ func ceilScale(v int64, mult float64) int64 {
 //   - tokens: estimated is a raw (unweighted) token count, so it's divided
 //     by the raw four-component token total, not by BaseAmount's
 //     token_weights-weighted sum.
-func EstimatedPct(metric core.QuotaMetric, c Counters, estimated int64, estimatedCost float64) float64 {
+func EstimatedPct(metric core.QuotaMetric, c Counters, estimated float64, estimatedCost float64) float64 {
 	switch metric {
 	case core.MetricCost:
 		if c.Cost > 0 {
 			return estimatedCost / c.Cost * 100
 		}
 	case core.MetricTokens:
-		if rawTokens := float64(c.Fresh + c.CacheRead + c.CacheWrite + c.Out); rawTokens > 0 {
-			return float64(estimated) / rawTokens * 100
+		if rawTokens := c.Fresh + c.CacheRead + c.CacheWrite + c.Out; rawTokens > 0 {
+			return estimated / rawTokens * 100
 		}
 	}
 	return 0

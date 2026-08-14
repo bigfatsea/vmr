@@ -18,7 +18,7 @@ func TestRegistry_ChargeAndUsed(t *testing.T) {
 		t.Fatalf("Used = %+v, want Fresh=120 Out=50", c)
 	}
 	if est != 0 {
-		t.Fatalf("estimated = %d, want 0", est)
+		t.Fatalf("estimated = %v, want 0", est)
 	}
 }
 
@@ -29,7 +29,7 @@ func TestRegistry_EstimatedAccumulates(t *testing.T) {
 	r.Charge("plan-a", "tokens/1mo", ps, Counters{Fresh: 5}, 5)
 	_, est := r.Used("plan-a", "tokens/1mo", ps)
 	if est != 15 {
-		t.Fatalf("estimated = %d, want 15", est)
+		t.Fatalf("estimated = %v, want 15", est)
 	}
 }
 
@@ -40,13 +40,13 @@ func TestRegistry_LazyResetOnCharge(t *testing.T) {
 	r.Charge("plan-a", "requests/1mo", p1, Counters{Requests: 5}, 0)
 	c, _ := r.Used("plan-a", "requests/1mo", p1)
 	if c.Requests != 5 {
-		t.Fatalf("period 1 requests = %d, want 5", c.Requests)
+		t.Fatalf("period 1 requests = %v, want 5", c.Requests)
 	}
 	// Crossing into period 2 must zero the bucket, not carry the old count.
 	r.Charge("plan-a", "requests/1mo", p2, Counters{Requests: 1}, 0)
 	c2, _ := r.Used("plan-a", "requests/1mo", p2)
 	if c2.Requests != 1 {
-		t.Fatalf("period 2 requests after reset = %d, want 1 (old period's count must not carry over)", c2.Requests)
+		t.Fatalf("period 2 requests after reset = %v, want 1 (old period's count must not carry over)", c2.Requests)
 	}
 	// The old period's own key, re-queried, is stale forever once we moved
 	// past it — Used(p1) after the bucket has advanced to p2 sees a reset
@@ -65,7 +65,7 @@ func TestRegistry_LazyResetOnUsedAlone(t *testing.T) {
 	r.Charge("plan-a", "requests/1mo", p1, Counters{Requests: 42}, 0)
 	c, _ := r.Used("plan-a", "requests/1mo", p2)
 	if c.Requests != 0 {
-		t.Fatalf("Used() alone across a period boundary = %d, want 0 (reset without any Charge)", c.Requests)
+		t.Fatalf("Used() alone across a period boundary = %v, want 0 (reset without any Charge)", c.Requests)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestRegistry_ProviderKeyExcludesAPIKey(t *testing.T) {
 	// would change, but Registry only ever sees the stable provider name.
 	c, _ := r.Used("plan-a", "requests/1mo", ps)
 	if c.Requests != 1 {
-		t.Fatalf("count lost across what would be a key rotation: %d, want 1", c.Requests)
+		t.Fatalf("count lost across what would be a key rotation: %v, want 1", c.Requests)
 	}
 }
 
@@ -116,6 +116,6 @@ func TestRegistry_ConcurrentChargeUsed_Race(t *testing.T) {
 	wg.Wait()
 	c, _ := r.Used("plan-a", "requests/1mo", ps)
 	if c.Requests != 50 {
-		t.Fatalf("concurrent charges: got %d, want 50", c.Requests)
+		t.Fatalf("concurrent charges: got %v, want 50", c.Requests)
 	}
 }

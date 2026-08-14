@@ -82,7 +82,7 @@ func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 		t.Fatalf("Counters.Cost = %v, want %v", used.Cost, wantCost)
 	}
 	if estTokens != 0 {
-		t.Fatalf("estimated tokens = %d, want 0 (usage was sniffed, exact)", estTokens)
+		t.Fatalf("estimated tokens = %v, want 0 (usage was sniffed, exact)", estTokens)
 	}
 	if estCost := rt.Quota.EstimatedCostFor("p1", "cost/1mo", quota.PeriodStart(l, chargeNow)); estCost != 0 {
 		t.Fatalf("EstimatedCost = %v, want 0 (exact charge)", estCost)

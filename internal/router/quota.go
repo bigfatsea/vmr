@@ -43,7 +43,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 	// merge yet; that's P3 (see the design doc's Core Algorithm section on
 	// multi-window merging).
 	var raw quota.Counters
-	var estimated int64
+	var estimated float64
 	if ep.Quota.Limits[0].Metric != core.MetricRequests {
 		raw, estimated = tokenCharge(rbody, creq)
 	}
@@ -75,7 +75,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 // doc's §4.2④), so applyModelMultiplier never runs on the cost path —
 // deliberately: it rebuilds a fresh quota.Counters that would silently zero
 // out the Cost field this branch just set.
-func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated int64, now time.Time) {
+func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated float64, now time.Time) {
 	if reg == nil || ep.Quota == nil || len(ep.Quota.Limits) == 0 {
 		return
 	}
@@ -110,9 +110,14 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 // componentCost prices d's four raw components through rate — see
 // pricing.Rate.Cost for the shared formula (also used by
 // internal/report/cost.go's costFor) and the nil-component/Complete
-// reasoning.
+// reasoning. d's components are converted back to int64 here: a
+// metric: cost account can never have model_multipliers configured
+// (config.validate rejects that combination — see ChargeResponse's own
+// comment), so d is always the unscaled token counts tokenCharge produced,
+// which are exact integers even though quota.Counters stores them as
+// float64 to accommodate the requests/tokens accounts that DO scale.
 func componentCost(d quota.Counters, rate pricing.Rate) float64 {
-	return rate.Cost(d.Fresh, d.CacheRead, d.CacheWrite, d.Out)
+	return rate.Cost(int64(d.Fresh), int64(d.CacheRead), int64(d.CacheWrite), int64(d.Out))
 }
 
 // tokenCharge computes one response's token consumption: the upstream's own
@@ -124,9 +129,9 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 // by quota.Registry into each account's running estimated_pct, the one
 // signal /admin/status gives an operator for how much to trust a
 // token-metered account's numbers.
-func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters, int64) {
+func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
 	if u, ok := rbody.Usage(); ok {
-		return quota.Counters{Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out}, 0
+		return quota.Counters{Fresh: float64(u.Fresh()), CacheRead: float64(u.CacheRead), CacheWrite: float64(u.CacheWrite), Out: float64(u.Out)}, 0
 	}
 	// Degraded: request-side reuses the cheap pre-routing estimate every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
@@ -141,7 +146,7 @@ func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters
 	inEst := creq.Facts.EstimatedTokens
 	ascii, wide := rbody.OutBytes()
 	outEst := core.EstimateTokensFromCounts(ascii, wide)
-	return quota.Counters{Fresh: inEst, Out: outEst}, inEst + outEst
+	return quota.Counters{Fresh: float64(inEst), Out: float64(outEst)}, float64(inEst + outEst)
 }
 
 // QuotaProviderStatus is one quota-configured provider's live state, for
@@ -172,11 +177,16 @@ type QuotaProviderStatus struct {
 	// each metric (raw tokens for tokens, money for cost — see
 	// QuotaStatus), NOT against Used, which has base(metric) applied.
 	EstimatedPct float64 `json:"estimated_pct"`
-	Fresh        int64   `json:"fresh"`
-	CacheRead    int64   `json:"cache_read"`
-	CacheWrite   int64   `json:"cache_write"`
-	Out          int64   `json:"out"`
-	Requests     int64   `json:"requests"`
+	// Fresh/CacheRead/CacheWrite/Out/Requests mirror quota.Counters' fields
+	// exactly, including its float64 type — an account with
+	// model_multipliers configured stores the multiplier already folded in
+	// (see quota.Counters' doc comment), so these can be fractional even
+	// though "requests" reads like it should always be a whole number.
+	Fresh      float64 `json:"fresh"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+	Out        float64 `json:"out"`
+	Requests   float64 `json:"requests"`
 
 	// TokenWeights/ModelMultipliers surface the account-level modifiers
 	// currently in effect (P2.1) — the design doc's Observability section

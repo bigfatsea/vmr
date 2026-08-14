@@ -206,7 +206,7 @@ type EndpointRow struct {
 	//
 	// That makes it the exact offline basis for the router's requests-metric
 	// charging — chargeQuota fires once per forwarded attempt, so this
-	// endpoint's real charged total is identically Forwarded x ceil(multiplier)
+	// endpoint's real charged total is identically Forwarded x multiplier
 	// (providerquota.go's MetricRequests branch, pinned by
 	// cmd/vmr/quota_parity_test.go). Neither OK nor the request-level
 	// Requests/RequestsOK is that identity.
@@ -662,11 +662,14 @@ type LiveQuota struct {
 //     post-hoc through the same base(metric)/model_multiplier formula the
 //     router charges with (quota.BaseAmount/ApplyModelMultiplier) — but NOT
 //     a replay of the router's actual charge history. Known small sources
-//     of drift from the router's real number: per-request ceil vs
-//     aggregate-then-ceil rounding, failed attempts never charged, config
-//     weights/multipliers having changed mid-window, and (metric: cost
-//     only) this report's own pricing resolution possibly differing from
-//     the price in effect at charge time.
+//     of drift from the router's real number: failed attempts never
+//     charged, config weights/multipliers having changed mid-window, and
+//     (metric: cost only) this report's own pricing resolution possibly
+//     differing from the price in effect at charge time. requests-metric
+//     rounding is NOT a drift source — quota.ApplyModelMultiplier applies
+//     an exact multiplier with no rounding, so per-charge and
+//     aggregate-then-multiply agree exactly (see quota.Counters' doc
+//     comment).
 //   - Live is the router's own real-time counter (see LiveQuota) — the
 //     account's ACTUAL billing period, almost always a different window
 //     than the report's own input files cover.

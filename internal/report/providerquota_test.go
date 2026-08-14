@@ -48,11 +48,12 @@ func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T
 }
 
 // TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatchesRouter
-// is the precision fix: the router charges PER REQUEST (ceil(mult) each
-// time), so its real total for N requests at a non-integer multiplier is
-// N*ceil(mult) exactly — not the old aggregate-then-ceil ceil(N*mult), which
-// under-counts. 19 requests at 5.5x: router 19*ceil(5.5)=19*6=114; the old
-// formula gave ceil(19*5.5)=ceil(104.5)=105.
+// is the precision fix: the router charges PER REQUEST with an exact
+// multiplier (no rounding — see quota.Counters' doc comment), so its real
+// total for N requests at a non-integer multiplier is exactly N*mult. 19
+// requests at 5.5x: 19*5.5=104.5 — not 114 (the pre-2026-08-14 per-charge
+// ceil(5.5)=6 behavior) and not 105 (ceil(19*5.5), the old aggregate-then-
+// ceil formula this test also used to guard against).
 func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatchesRouter(t *testing.T) {
 	lim := requestsLimit(100000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"deepseek-v4-pro": 5.5}}
@@ -61,8 +62,8 @@ func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatche
 	}}
 	quotas := map[string]ProviderQuotaRef{"volcengine": {Limit: &lim, Spec: spec}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 114 {
-		t.Fatalf("WindowConsumed = %v, want 114 (19*ceil(5.5), matching the router's per-request charge exactly)", rows[0].WindowConsumed)
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 104.5 {
+		t.Fatalf("WindowConsumed = %v, want 104.5 (19*5.5, matching the router's per-request charge exactly)", derefOrNil(rows[0].WindowConsumed))
 	}
 }
 
@@ -70,10 +71,10 @@ func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatche
 // the basis must be the FORWARDED-ATTEMPT count, not the request count. A
 // request whose every attempt failed still contributes 1 to EndpointRow.
 // Requests (it counts against the last endpoint tried) while the router
-// charged nothing for it — using Requests over-counted by ceil(mult) per
-// fully-failed request, which on a 6x account is 6 phantom charges each.
-// Here: 20 requests reached the endpoint, only 12 attempts were ever
-// forwarded, so the router's real total is 12*6=72, not 20*6=120.
+// charged nothing for it — using Requests over-counted by mult per fully-
+// failed request, which on a 5.5x account is 5.5 phantom units each. Here:
+// 20 requests reached the endpoint, only 12 attempts were ever forwarded,
+// so the router's real total is 12*5.5=66, not 20*5.5=110.
 func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testing.T) {
 	lim := requestsLimit(100000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"m": 5.5}}
@@ -82,9 +83,18 @@ func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testi
 	}}
 	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 72 {
-		t.Fatalf("WindowConsumed = %v, want 72 (12 forwarded * ceil(5.5)); 120 means it regressed to counting Requests", rows[0].WindowConsumed)
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 66 {
+		t.Fatalf("WindowConsumed = %v, want 66 (12 forwarded * 5.5); 110 means it regressed to counting Requests", derefOrNil(rows[0].WindowConsumed))
 	}
+}
+
+// derefOrNil dereferences a *float64 for a Fatalf argument without risking a
+// nil-pointer panic inside the failure message itself.
+func derefOrNil(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // TestBuildProviderQuotaRows_TokensMetric_TrafficButNoUsageRendersNil is

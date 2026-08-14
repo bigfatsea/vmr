@@ -28,12 +28,23 @@ import (
 // Cost even for a cost-metric account (not used for routing decisions on
 // that account, but /admin/status's four-component breakdown is useful
 // regardless of metric — see the design doc's Observability section).
+//
+// Fresh/CacheRead/CacheWrite/Out/Requests are float64, not int64: an
+// account with model_multipliers configured folds the (possibly
+// fractional — e.g. 4.5) multiplier into these fields at charge time (see
+// ApplyModelMultiplier), and that scaling must land exactly — rounding
+// each charge to the nearest integer (this package's pre-2026-08-14
+// behavior) produces a systematic, unpredictable-magnitude overcharge
+// bias with no relation to what the upstream provider actually bills.
+// Without model_multipliers configured these fields always hold exact
+// integer-valued floats (1.0, 2.0, ...), so a zero-config account's
+// accounting is bit-identical to the old int64 behavior.
 type Counters struct {
-	Fresh      int64   `json:"fresh"`
-	CacheRead  int64   `json:"cache_read"`
-	CacheWrite int64   `json:"cache_write"`
-	Out        int64   `json:"out"`
-	Requests   int64   `json:"requests"`
+	Fresh      float64 `json:"fresh"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+	Out        float64 `json:"out"`
+	Requests   float64 `json:"requests"`
 	Cost       float64 `json:"cost,omitempty"`
 }
 
@@ -61,8 +72,12 @@ type bucket struct {
 	// Estimated is this period's total contributed by degraded (non-usage-
 	// sniffed) TOKEN estimates — requests/tokens accounts only. JSON key
 	// stays "estimated" (not "estimated_tokens") for on-disk compatibility
-	// with a vmr-quota.json file written by a pre-P2.2 build.
-	Estimated int64 `json:"estimated"`
+	// with a vmr-quota.json file written by a pre-P2.2 build. float64, not
+	// int64: once an account has model_multipliers, this is scaled by the
+	// same fractional multiplier as Counters (see ApplyModelMultiplier) —
+	// see quota.Counters' doc comment for why that scaling must not be
+	// rounded to an integer.
+	Estimated float64 `json:"estimated"`
 	// EstimatedCost (P2.2) is the $ equivalent for a metric: cost account:
 	// this period's total Cost that came from a degraded token estimate
 	// (via the resolved rate) rather than sniffed usage — same "how much to
@@ -134,7 +149,7 @@ func resetIfStaleLocked(b *bucket, periodStart time.Time) {
 // estimated is added to the bucket's running Estimated total when this
 // charge came from degraded (non-usage-sniffed) token estimation; 0 for an
 // exact (usage-sniffed or requests-metric) charge.
-func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Counters, estimated int64) {
+func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Counters, estimated float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
@@ -151,7 +166,7 @@ func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Co
 // Charge to trigger the reset. This DOES mutate Registry state (the reset),
 // which is why it takes the same lock Charge does rather than being a
 // pure read.
-func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Counters, int64) {
+func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Counters, float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
@@ -160,15 +175,15 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 }
 
 // AddEstimatedCost (P2.2) bumps provider's limitKey bucket's running
-// EstimatedCost — the metric: cost analogue of Charge's estimated int64
+// EstimatedCost — the metric: cost analogue of Charge's estimated float64
 // parameter, kept as a separate method rather than overloading Charge's
 // signature: Counters already has a Cost field (Charge/Add sum it exactly
 // like every other component, so a cost charge's $ amount is recorded via
 // an ordinary Charge call with d.Cost set), but the ESTIMATE signal for a
 // cost-metric account is denominated in money, not tokens, and doesn't fit
-// Charge's existing int64 estimated parameter. Call this alongside Charge,
-// not instead of it, when a charge came from a degraded (non-usage-sniffed)
-// token estimate priced through the resolved rate.
+// Charge's existing token-denominated estimated parameter. Call this
+// alongside Charge, not instead of it, when a charge came from a degraded
+// (non-usage-sniffed) token estimate priced through the resolved rate.
 func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.Time, amount float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

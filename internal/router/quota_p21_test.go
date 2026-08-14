@@ -31,7 +31,7 @@ func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 9 {
-		t.Fatalf("Requests = %d, want 9 (1 call x 9x multiplier)", used.Requests)
+		t.Fatalf("Requests = %v, want 9 (1 call x 9x multiplier)", used.Requests)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 3 {
-		t.Fatalf("Requests = %d, want 3 (wildcard multiplier, not the named-model entry)", used.Requests)
+		t.Fatalf("Requests = %v, want 3 (wildcard multiplier, not the named-model entry)", used.Requests)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 1 {
-		t.Fatalf("Requests = %d, want 1 (no match, no wildcard -> 1.0, unscaled)", used.Requests)
+		t.Fatalf("Requests = %v, want 1 (no match, no wildcard -> 1.0, unscaled)", used.Requests)
 	}
 }
 
@@ -81,15 +81,18 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 1 {
-		t.Fatalf("Requests = %d, want 1 (unconfigured model_multipliers must be a no-op)", used.Requests)
+		t.Fatalf("Requests = %v, want 1 (unconfigured model_multipliers must be a no-op)", used.Requests)
 	}
 }
 
-// TestChargeQuota_ModelMultiplier_NonIntegerRoundsUp pins the rounding
-// direction the dev plan's S2 requires: ceil, never floor/round-to-nearest —
-// under-counting a heavily-multiplied model's consumption is the dangerous
-// direction (see applyModelMultiplier's doc comment).
-func TestChargeQuota_ModelMultiplier_NonIntegerRoundsUp(t *testing.T) {
+// TestChargeQuota_ModelMultiplier_NonIntegerIsExact pins that a fractional
+// multiplier scales exactly, with no rounding in either direction (see
+// quota.Counters' doc comment for why: the multiplier value is now stored
+// as float64 all the way through, so nothing forces a discretization step
+// that would need a rounding policy at all). 7 tokens x 1.5 = 10.5 — a case
+// that would have differed from the pre-2026-08-14 ceil(mult) behavior
+// (which stored 11), so this test would have caught a regression back to it.
+func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := tokensLimit(1_000_000)
 	spec := &core.QuotaSpec{
@@ -98,7 +101,7 @@ func TestChargeQuota_ModelMultiplier_NonIntegerRoundsUp(t *testing.T) {
 		TokenWeights:     core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1},
 	}
 	ep := &core.Endpoint{Provider: "p1", Model: "m", Quota: spec}
-	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 10}}
+	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 7}}
 
 	body := `{"choices":[{"message":{"content":"hi"}}]}` // no usage field -> degraded estimate path
 	rbody := newRespStream(bytes.NewReader([]byte(body)), "m", "m", false, "openai", false)
@@ -108,9 +111,8 @@ func TestChargeQuota_ModelMultiplier_NonIntegerRoundsUp(t *testing.T) {
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
-	// Fresh: 10 tokens x 1.5 = 15 exactly, ceil(15)=15.
-	if used.Fresh != 15 {
-		t.Fatalf("Fresh = %d, want 15 (ceil(10 x 1.5))", used.Fresh)
+	if used.Fresh != 10.5 {
+		t.Fatalf("Fresh = %v, want 10.5 (7 x 1.5, exact — not ceil'd to 11)", used.Fresh)
 	}
 }
 
@@ -133,10 +135,10 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if usedA.Requests != 5 {
-		t.Fatalf("plan-a Requests = %d, want 5", usedA.Requests)
+		t.Fatalf("plan-a Requests = %v, want 5", usedA.Requests)
 	}
 	if usedB.Requests != 1 {
-		t.Fatalf("plan-b Requests = %d, want 1 (must not inherit plan-a's multiplier)", usedB.Requests)
+		t.Fatalf("plan-b Requests = %v, want 1 (must not inherit plan-a's multiplier)", usedB.Requests)
 	}
 }
 

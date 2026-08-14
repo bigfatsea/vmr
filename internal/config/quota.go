@@ -21,11 +21,13 @@ import (
 // NOT NaN and NOT ±Inf, on top of being > 0. The explicit IsNaN/IsInf test
 // is the whole point: `v <= 0` is FALSE for NaN, so a plain sign check
 // silently admits `.nan` (valid YAML) into every quota/pricing knob, and a
-// NaN multiplier poisons everything downstream of it — int64(math.Ceil(NaN))
-// is platform-defined garbage, a NaN amount makes every headroom comparison
-// false and the candidate sort order arbitrary. Shared by every numeric
-// field in this file and pricing.go; see nonNegativeFinite for the price
-// components, where an explicit 0.0 is legitimate ("genuinely free").
+// NaN multiplier poisons everything downstream of it — it propagates through
+// quota.ApplyModelMultiplier's multiplication and quota.Counters.Add's
+// accumulation forever (NaN + x is always NaN), a NaN amount makes every
+// headroom comparison false and the candidate sort order arbitrary. Shared
+// by every numeric field in this file and pricing.go; see nonNegativeFinite
+// for the price components, where an explicit 0.0 is legitimate ("genuinely
+// free").
 func positiveFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v > 0
 }

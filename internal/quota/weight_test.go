@@ -60,12 +60,13 @@ func TestModelMultiplier_ExactWildcardDefault(t *testing.T) {
 	}
 }
 
-func TestApplyModelMultiplier_RoundsUp(t *testing.T) {
+func TestApplyModelMultiplier_ExactMultiplyNoRounding(t *testing.T) {
 	spec := &core.QuotaSpec{ModelMultipliers: map[string]float64{"m": 1.5}}
 	d, est := ApplyModelMultiplier(spec, "m", Counters{Fresh: 3, Out: 1, Requests: 1}, 5)
-	// 3*1.5=4.5 -> ceil 5; 1*1.5=1.5 -> ceil 2; 1*1.5=1.5 -> ceil 2; 5*1.5=7.5 -> ceil 8
-	if d.Fresh != 5 || d.Out != 2 || d.Requests != 2 || est != 8 {
-		t.Fatalf("ApplyModelMultiplier rounding = %+v est=%d, want Fresh=5 Out=2 Requests=2 est=8", d, est)
+	// Exact multiplication, no rounding in either direction — see
+	// quota.Counters' doc comment for why: 3*1.5=4.5, 1*1.5=1.5, 5*1.5=7.5.
+	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || est != 7.5 {
+		t.Fatalf("ApplyModelMultiplier scaling = %+v est=%v, want Fresh=4.5 Out=1.5 Requests=1.5 est=7.5", d, est)
 	}
 }
 
@@ -74,7 +75,7 @@ func TestApplyModelMultiplier_NoScalingIsIdentity(t *testing.T) {
 	in := Counters{Fresh: 3, Out: 1, Requests: 1}
 	d, est := ApplyModelMultiplier(spec, "m", in, 5)
 	if d != in || est != 5 {
-		t.Fatalf("ApplyModelMultiplier with no multiplier configured = %+v est=%d, want identity", d, est)
+		t.Fatalf("ApplyModelMultiplier with no multiplier configured = %+v est=%v, want identity", d, est)
 	}
 }
 
@@ -140,7 +141,7 @@ func TestLoadFile_RoundTripsRealShape(t *testing.T) {
 		t.Fatal("LoadFile did not return the volcengine/requests-1mo bucket")
 	}
 	if b.C.Requests != 12240 {
-		t.Fatalf("bucket.C.Requests = %d, want 12240", b.C.Requests)
+		t.Fatalf("bucket.C.Requests = %v, want 12240", b.C.Requests)
 	}
 	if !b.PeriodStartTime().Equal(ps) {
 		t.Fatalf("PeriodStartTime() = %v, want %v", b.PeriodStartTime(), ps)

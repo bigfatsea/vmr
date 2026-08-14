@@ -594,9 +594,23 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 - 截断的 2xx **扣了**，但它在多数"成功"口径里会被排除。所以"成功请求数"当基数会系统性低估。
 
 于是对 `metric: requests`，"路由半区实际扣了多少"存在一个**恒等式**而非近似：
-`已转发响应数 × ceil(ModelMultipliers[model])`（每次扣减都是 `base=1`，乘的是同一个常数）。
-任何离线复算若不用这个基数，就只是一个估算——这一点在 §12.1「额度公式的唯一实现」一行里
-被立成了纪律。
+`已转发响应数 × ModelMultipliers[model]`（每次扣减都是 `base=1`，乘的是同一个常数，且不取整
+——见下文"精度"一段）。任何离线复算若不用这个基数，就只是一个估算——这一点在 §12.1
+「额度公式的唯一实现」一行里被立成了纪律。
+
+**精度：`Counters` 全线 `float64`，计费时不取整。** 早期实现（2026-08-13 之前）曾把
+`Counters` 的五个原始分量存成 `int64`，`model_multipliers` 在计费那一刻用 `math.Ceil`
+向上取整——理由是"取整方向必须偏安全，不能让消耗被低估"。这个理由本身没错，但取整这件事
+的必要性完全来自"容器是整数"这个自我设限，一旦发现取整会带来系统性偏差，就应该先问"为什么
+非取整不可"，而不是急着挑一个"更安全"的取整方向。实测偏差幅度还完全不受配置者直觉控制：
+系数 `2.5` 实际生效成 `3`（+20%），`4.5` 生效成 `5`（+11.1%），而 `2.9` 只生效成 `3`
+（+3.4%）——系数离整数边界越近，偏差越离谱，且没有任何办法从系数本身反推偏差有多大。
+换成 `float64` 直接精确相乘之后，"取哪个方向取整"这个问题连同它的偏差一起被连根拔除——
+`Counters.Cost`（`metric: cost` 专用字段）本来就是 `float64`，是同一个"记账值本质上带
+小数"的问题在另一个 metric 上早就接受过的解法，这里只是把同一个解法补齐到
+`Fresh`/`CacheRead`/`CacheWrite`/`Out`/`Requests`。未配置 `model_multipliers` 的账号
+（零配置多数情形）不受影响：`ApplyModelMultiplier` 在 `mult == 1.0` 时直接短路返回原值，
+这些字段永远是精确的整数值浮点数（`1.0`、`2.0`……），与旧的 `int64` 行为逐位一致。
 
 `tokens` 与 `cost` 是**同一个加权求和函数的两个权重来源**，实现上不是两条代码路径——
 差别只在权重是账号级内联比例、还是按模型查价目表。
@@ -830,8 +844,10 @@ providers:
   正是本节"有歧义不猜"要防的那类失败，只是这次的歧义来自 typo 而不是表本身；
 * 所有数值字段（`amount`/`token_weights`/`model_multipliers`/`discount`/显式费率/`exchange_rate`）
   必须是**有限数**：YAML 的 `.nan`/`.inf` 是合法标量，而 `v <= 0` 对 NaN 恒为 false，
-  只做符号检查会让 NaN 一路穿到 `math.Ceil` 与排序比较里（前者的 int64 转换结果由平台定义，
-  后者让候选顺序失去确定性）；
+  只做符号检查会让 NaN 一路穿进 `ApplyModelMultiplier` 的乘法、`Counters.Add` 的累加、
+  以及 `vmr-quota.json` 的持久化——NaN 一旦写入某个账号的 `Counters`，之后每一次 `Add`
+  都会把污染传染给同一个桶的全部后续记账（`NaN + x` 恒为 `NaN`），`Pct`/`Headroom` 排序
+  也随之失去确定性（`NaN` 与任何值比较都是 false）；
 * `metric: cost` 涉及的每个上游模型，都必须解析出四项费率齐全的费率（显式写 `0.0` 算齐全，字段
   缺失不算）→ 否则**加载期错误**。绝不把缺失当 0：那会低估消耗、让账号显示得比实际宽裕，进而
   超支——是最坏的失效方向。没有时间维度后，一个 provider+model 只有唯一一条确定的解析路径
@@ -865,11 +881,14 @@ providers:
 package quota   // internal/quota，仅依赖 core（周期数学是纯函数，无 I/O）
 
 // Counters 的 Fresh/CacheRead/CacheWrite/Out/Requests 五个字段存原始事实，
-// token_weights 全部在读取侧套用——改配置不会让已累计的历史作废。
+// token_weights 全部在读取侧套用——改配置不会让已累计的历史作废。全部是
+// float64，不是 int64：model_multipliers 一旦配置，就要求这些字段能精确
+// 存下一个非整数倍率的计费结果（不取整——见上文"精度"一段），未配置时
+// 它们永远是精确的整数值浮点数，与整数语义等价。
 // Cost 是例外：metric: cost 的账号在计费那一刻就把 $ 金额算好写入这里，
 // 之后费率表再变也不影响已记录的历史值（理由见上）；requests/tokens 档它恒为 0。
 type Counters struct {
-    Fresh, CacheRead, CacheWrite, Out, Requests int64
+    Fresh, CacheRead, CacheWrite, Out, Requests float64
     Cost float64
 }
 
@@ -881,7 +900,7 @@ type Registry struct {           // 形状对齐 health.Registry：挂在 Router
 }
 type account struct {
     rings     map[string]*Ring   // 每条 Limit 一个环（key = Limit 的稳定标识）
-    estimated int64              // 本周期由降级估算贡献的量，用于标注可信度
+    estimated float64            // 本周期由降级估算贡献的量，用于标注可信度
 }
 ```
 
@@ -1375,7 +1394,7 @@ Scope 降级为观察项）、剩两项待 P3/P4。另有一件终态清单之�
 | 3 | 桶 / 闸角色 | ⬜ P3 | 单条 Limit 时它自己就是桶，判定逻辑尚未需要 |
 | 4 | 环形分桶（rolling） | ⬜ P3 | `rolling: true` 是加载期"计划中"错误 |
 | 5 | `(every, since)` 周期数学 | ✅ | 含月末截断、跨年、DST |
-| 6 | `model_multipliers` | ✅ P2 | 账号级、**计费时**套用，向上取整（§9.2） |
+| 6 | `model_multipliers` | ✅ P2 | 账号级、**计费时**套用，精确相乘、不取整（§9.2） |
 | 7 | `token_weights` | ✅ P2 | 账号级、**读取时**套用，缺省全 1.0 |
 | 8 | Scope（`models:`） | ⬜ 降级为"有真实案例才做" | §14.1 已定案；配置层显式拒绝 |
 | 9 | 标准定价表 + 生成脚本 | ✅ P2 | `internal/pricing` 的 `go:embed` 双表 + `tools/gen_standard_pricing` |

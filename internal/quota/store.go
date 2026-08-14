@@ -125,7 +125,7 @@ func (r *Registry) Flush() error {
 type Bucket struct {
 	PeriodStart   int64    `json:"period_start"`
 	C             Counters `json:"counters"`
-	Estimated     int64    `json:"estimated"`
+	Estimated     float64  `json:"estimated"`
 	EstimatedCost float64  `json:"estimated_cost,omitempty"`
 }
 

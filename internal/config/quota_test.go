@@ -313,8 +313,9 @@ func TestQuota_Reject_InvalidSince(t *testing.T) {
 
 // TestQuota_Reject_NonFiniteNumbers pins the NaN/Inf hole a plain `v <= 0`
 // sign check leaves open: YAML's .nan/.inf are valid scalars, `NaN <= 0` is
-// false, and a NaN that reaches ceilScale/headroom scoring produces
-// platform-defined garbage instead of a config error.
+// false, and a NaN that reaches ApplyModelMultiplier/headroom scoring
+// poisons every accumulated quota.Counters value it touches instead of
+// producing a config error.
 func TestQuota_Reject_NonFiniteNumbers(t *testing.T) {
 	cases := []struct{ name, block, want string }{
 		{"amount NaN", `limits:

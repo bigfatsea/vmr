@@ -252,13 +252,13 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []by
 	}
 	if u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{}); u.In > 0 || u.Out > 0 {
 		router.ChargeResponse(reg, ep, quota.Counters{
-			Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,
+			Fresh: float64(u.Fresh()), CacheRead: float64(u.CacheRead), CacheWrite: float64(u.CacheWrite), Out: float64(u.Out),
 		}, 0, now)
 		return
 	}
 	inEst := core.EstimateTextTokens(reqBody)
 	outEst := core.EstimateTextTokens(respBody)
-	router.ChargeResponse(reg, ep, quota.Counters{Fresh: inEst, Out: outEst}, inEst+outEst, now)
+	router.ChargeResponse(reg, ep, quota.Counters{Fresh: float64(inEst), Out: float64(outEst)}, float64(inEst+outEst), now)
 }
 
 // selectRecord dispatches to whichever of Options' three locators is set —

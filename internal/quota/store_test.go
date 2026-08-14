@@ -34,7 +34,7 @@ func TestStore_RoundTrip(t *testing.T) {
 	}
 	c, est := r2.Used("plan-a", "tokens/1mo", ps)
 	if c.Fresh != 100 || c.CacheRead != 10 || c.Out != 20 || est != 5 {
-		t.Fatalf("round-tripped counters = %+v est=%d, want Fresh=100 CacheRead=10 Out=20 est=5", c, est)
+		t.Fatalf("round-tripped counters = %+v est=%v, want Fresh=100 CacheRead=10 Out=20 est=5", c, est)
 	}
 }
 
@@ -196,7 +196,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	}
 	c, _ := r2.Used("plan-a", "requests/1mo", ps)
 	if c.Requests != 2 {
-		t.Fatalf("final count after stop+Flush = %d, want 2", c.Requests)
+		t.Fatalf("final count after stop+Flush = %v, want 2", c.Requests)
 	}
 }
 

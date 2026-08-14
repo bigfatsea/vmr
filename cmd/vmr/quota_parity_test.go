@@ -32,6 +32,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,13 +157,15 @@ func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, t
 }
 
 // TestQuotaParity_RequestsMetric_ReportMatchesRouter is the core assertion:
-// for metric: requests the two sides must agree EXACTLY, with no tolerance.
-// That is not an aspiration — every charge is Requests:1 scaled by the same
-// constant ceil(multiplier), so an exact identity is available and anything
-// less means a basis was chosen wrong.
+// for metric: requests the two sides must agree exactly (== , not an
+// epsilon compare) — quotaYAML's account has no model_multipliers, so
+// every charge is Requests:1 unscaled, and integer-valued float64 addition
+// is exact at these magnitudes. Anything less than equality here means a
+// basis was chosen wrong, not a floating-point rounding artifact.
 //
 // quotaYAML's account declares model_multipliers implicitly at 1.0; the
-// multiplier axis is covered separately below.
+// multiplier axis (where an epsilon compare IS warranted — see below) is
+// covered separately below.
 func TestQuotaParity_RequestsMetric_ReportMatchesRouter(t *testing.T) {
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
@@ -203,12 +206,19 @@ func TestQuotaParity_RequestsMetric_ReportMatchesRouter(t *testing.T) {
 	}
 }
 
-// TestQuotaParity_RequestsMetric_NonIntegerMultiplier adds the rounding axis
-// on top of the basis axis: with a fractional multiplier, per-charge
-// ceil(mult) and aggregate-then-ceil disagree, and only the former matches
-// the router. Driving the router directly means this test can't drift from
-// whatever ApplyModelMultiplier does — it asserts equality, not a
-// hand-computed constant.
+// TestQuotaParity_RequestsMetric_NonIntegerMultiplier adds the fractional-
+// multiplier axis on top of the basis axis. Since 2026-08-14,
+// quota.ApplyModelMultiplier applies an exact multiplier with no rounding
+// (see quota.Counters' doc comment), so the router side (N independent
+// float64 additions of the same per-charge value) and the report side (one
+// multiplication) are two different floating-point expressions computing
+// the same mathematical quantity — not guaranteed bit-identical for an
+// arbitrary multiplier by IEEE 754's non-associativity, even though they
+// are for the specific values this fixture uses. The comparison below uses
+// a relative epsilon for exactly that reason, not because either side is
+// allowed to actually drift. Driving the router directly means this test
+// can't drift from whatever ApplyModelMultiplier does — it asserts (near-)
+// equality, not a hand-computed constant.
 func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 
@@ -224,8 +234,8 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"real-model": 5.5}}
 
 	want := routerCharged(t, reqs, "acct1", spec, now)
-	if want != 114 {
-		t.Fatalf("fixture sanity: router charged %v, expected 19*ceil(5.5)=114", want)
+	if want != 104.5 {
+		t.Fatalf("fixture sanity: router charged %v, expected 19*5.5=104.5 (exact, no rounding)", want)
 	}
 
 	// The report side reads its multiplier from config.yaml, so this half
@@ -234,7 +244,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	// the router's formula here is the point; the end-to-end basis is
 	// covered by the test above.
 	unit, _ := quota.ApplyModelMultiplier(spec, "real-model", quota.Counters{Requests: 1}, 0)
-	forwarded := int64(0)
+	var forwarded float64
 	for _, r := range reqs {
 		for _, a := range r.attempts {
 			if a.forwarded() {
@@ -243,7 +253,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 		}
 	}
 	got := quota.BaseAmount(spec, quota.Counters{Requests: unit.Requests * forwarded})
-	if got != want {
-		t.Errorf("recomputed = %v, router charged %v", got, want)
+	if diff := math.Abs(got - want); diff > 1e-9*want {
+		t.Errorf("recomputed = %v, router charged %v (diff %v exceeds relative epsilon)", got, want, diff)
 	}
 }

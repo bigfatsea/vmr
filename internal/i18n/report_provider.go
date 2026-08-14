@@ -87,11 +87,11 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"不做减法、不算覆盖率，各自标注来源。\n\n",
 			Headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
 			WindowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
-				"各口径的精度不同：**requests 口径无出入**——按 `ceil(倍率) × 已转发尝试数` 逐字复现路由半区的记账公式" +
-				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记）；**tokens 口径**已知两处出入——逐请求 ceil 与" +
-				"汇总后取整的差异（每请求每分量至多 1 token），以及上游未返回精确 usage 的请求：路由半区按字节数估算记了账，" +
-				"本列计 0（该账户所有请求都如此时本列显示 `-` 而非 0）；**cost 口径**已知一处出入——本报表的定价解析结果" +
-				"可能与记账当时生效的价格不同。三种口径共同的出入源：config 里的权重/倍率在本窗口期内被改过。\n",
+				"各口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
+				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**已知一处出入——" +
+				"上游未返回精确 usage 的请求：路由半区按字节数估算记了账，本列计 0（该账户所有请求都如此时本列显示 `-` 而非 0）；" +
+				"**cost 口径**已知一处出入——本报表的定价解析结果可能与记账当时生效的价格不同。三种口径共同的出入源：" +
+				"config 里的权重/倍率在本窗口期内被改过。\n",
 			StalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
 				"与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 `-`。括号内的\"X% 估算\"标注" +
 				"这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
@@ -121,13 +121,13 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 		Headers: []string{"Provider", "Metric", "Window Consumed¹", "Used This Period²", "Amount", "Used%", "Elapsed%", "Period"},
 		WindowFootnote: "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay " +
 			"of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the " +
-			"router's own `ceil(multiplier) × forwarded-attempt count` formula literally (the router charges once per forwarded " +
-			"upstream success; failed attempts were never charged in the first place). **tokens: two known drift sources** — " +
-			"per-request vs. aggregate-then-ceil rounding (at most 1 token per request per component), and requests whose upstream " +
-			"returned no exact usage: the router charged a byte-count estimate for those, this column counts 0 (rendered `-` " +
-			"instead of 0 when that was true of every request on the account). **cost: one known drift source** — this report's " +
-			"own pricing resolution may differ from the price in effect at charge time. Common to all three: config " +
-			"weights/multipliers changed mid-window.\n",
+			"router's own `multiplier × forwarded-attempt count` formula literally (the router charges once per forwarded " +
+			"upstream success, failed attempts were never charged in the first place, and the multiplier is applied by exact " +
+			"multiplication with no rounding). **tokens: one known drift source** — requests whose upstream returned no exact " +
+			"usage: the router charged a byte-count estimate for those, this column counts 0 (rendered `-` instead of 0 when " +
+			"that was true of every request on the account). **cost: one known drift source** — this report's own pricing " +
+			"resolution may differ from the price in effect at charge time. Common to all three: config weights/multipliers " +
+			"changed mid-window.\n",
 		StalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
 			"account, in a different window than the column to its left. Never subtract or ratio the two. Shows `-` when the stored " +
 			"counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a " +

@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,6 +153,18 @@ func uptimeStr(seconds int64) string {
 	return (time.Duration(seconds) * time.Second).String()
 }
 
+// numStr formats a float without a trailing ".0" for the common whole-number
+// case (an unweighted requests/tokens count) but keeps two decimals for a
+// genuinely fractional value (a model_multipliers-scaled amount) — mirrors
+// internal/report/render_cells.go's numStr, which the same requests/tokens
+// precision issue was already fixed for on the report side.
+func numStr(v float64) string {
+	if v == math.Trunc(v) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', 2, 64)
+}
+
 // oneLine flattens a multi-line error (config.Load's YAML errors are
 // routinely three lines) into something that fits one status line, and
 // caps it so a pathological error can't scroll the endpoint listing off
@@ -248,14 +262,19 @@ func printStatus(st *statusResponse) {
 		if q.EstimatedPct > 0 {
 			estNote = fmt.Sprintf(", %.0f%% estimated", q.EstimatedPct)
 		}
-		// metric: cost's used/amount are money, not a whole-number count —
-		// %.0f would silently truncate a $2.50 balance to "2".
-		usedFmt := "used=%.0f/%.0f"
-		if q.Metric == "cost" {
-			usedFmt = "used=%.4f/%.4f"
+		// metric: cost's used/amount are money, always rendered to 4dp so
+		// a $2.5000 balance never reads as a rounded "$2.5". requests/tokens
+		// are usually whole numbers but aren't guaranteed to be: a
+		// fractional model_multipliers value (e.g. 1.5) folds straight into
+		// Used with no rounding (see quota.Counters' doc comment), so
+		// numStr renders those with decimals too instead of %.0f silently
+		// truncating them back to an integer.
+		usedStr, amountStr := fmt.Sprintf("%.4f", q.Used), fmt.Sprintf("%.4f", q.Amount)
+		if q.Metric != "cost" {
+			usedStr, amountStr = numStr(q.Used), numStr(q.Amount)
 		}
-		fmt.Printf("quota %-12s %s/%s  "+usedFmt+" (%.1f%%)  headroom=%.2f  resets %s%s\n",
-			q.Provider, q.Metric, q.Every, q.Used, q.Amount, q.Pct, q.Headroom,
+		fmt.Printf("quota %-12s %s/%s  used=%s/%s (%.1f%%)  headroom=%.2f  resets %s%s\n",
+			q.Provider, q.Metric, q.Every, usedStr, amountStr, q.Pct, q.Headroom,
 			q.PeriodEndsAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"), estNote)
 		tw := q.TokenWeights
 		if tw != allDefaultTokenWeights {

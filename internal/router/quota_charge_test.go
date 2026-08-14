@@ -72,10 +72,10 @@ func TestChargeQuota_Requests_OnePerCall(t *testing.T) {
 
 	used, est := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 3 {
-		t.Fatalf("Requests = %d, want 3", used.Requests)
+		t.Fatalf("Requests = %v, want 3", used.Requests)
 	}
 	if est != 0 {
-		t.Fatalf("estimated = %d, want 0 (requests metric is always exact)", est)
+		t.Fatalf("estimated = %v, want 0 (requests metric is always exact)", est)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestChargeQuota_Tokens_SniffedUsage_Buffered(t *testing.T) {
 		t.Fatalf("charged counters = %+v, want Fresh=80 CacheRead=20 Out=50", used)
 	}
 	if est != 0 {
-		t.Fatalf("estimated = %d, want 0 (usage was sniffed, not estimated)", est)
+		t.Fatalf("estimated = %v, want 0 (usage was sniffed, not estimated)", est)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestChargeQuota_Tokens_SniffedUsage_SSE(t *testing.T) {
 		t.Fatalf("charged counters = %+v, want Fresh=10 Out=5", used)
 	}
 	if est != 0 {
-		t.Fatalf("estimated = %d, want 0", est)
+		t.Fatalf("estimated = %v, want 0", est)
 	}
 }
 
@@ -180,7 +180,7 @@ data: {"type":"message_stop"}
 		t.Fatalf("charged counters = %+v, want Fresh=100 CacheRead=20 Out=25", used)
 	}
 	if est != 0 {
-		t.Fatalf("estimated = %d, want 0 (usage was sniffed)", est)
+		t.Fatalf("estimated = %v, want 0 (usage was sniffed)", est)
 	}
 }
 
@@ -227,15 +227,16 @@ func TestChargeQuota_Tokens_TruncatedMidStream_Degrades(t *testing.T) {
 
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
-	wantOut := core.EstimateTokensFromCounts(int64(len(partial)), 0) // pure ASCII partial body
+	wantOutInt := core.EstimateTokensFromCounts(int64(len(partial)), 0) // pure ASCII partial body
+	wantOut := float64(wantOutInt)
 	if used.Fresh != 15 {
-		t.Fatalf("Fresh = %d, want 15 (creq.Facts.EstimatedTokens)", used.Fresh)
+		t.Fatalf("Fresh = %v, want 15 (creq.Facts.EstimatedTokens)", used.Fresh)
 	}
 	if used.Out != wantOut {
-		t.Fatalf("Out = %d, want %d (byte count of whatever partial bytes actually arrived)", used.Out, wantOut)
+		t.Fatalf("Out = %v, want %v (byte count of whatever partial bytes actually arrived)", used.Out, wantOut)
 	}
 	if est != 15+wantOut {
-		t.Fatalf("estimated = %d, want %d", est, 15+wantOut)
+		t.Fatalf("estimated = %v, want %v", est, 15+wantOut)
 	}
 }
 
@@ -259,15 +260,16 @@ func TestChargeQuota_Tokens_DegradedEstimate_NoUsageField(t *testing.T) {
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 
-	wantOut := core.EstimateTokensFromCounts(int64(len(body)), 0) // pure ASCII body
+	wantOutInt := core.EstimateTokensFromCounts(int64(len(body)), 0) // pure ASCII body
+	wantOut := float64(wantOutInt)
 	if used.Fresh != 42 {
-		t.Fatalf("Fresh = %d, want 42 (creq.Facts.EstimatedTokens)", used.Fresh)
+		t.Fatalf("Fresh = %v, want 42 (creq.Facts.EstimatedTokens)", used.Fresh)
 	}
 	if used.Out != wantOut {
-		t.Fatalf("Out = %d, want %d (byte-count estimate of the response body)", used.Out, wantOut)
+		t.Fatalf("Out = %v, want %v (byte-count estimate of the response body)", used.Out, wantOut)
 	}
 	if est != 42+wantOut {
-		t.Fatalf("estimated = %d, want %d (the whole degraded charge)", est, 42+wantOut)
+		t.Fatalf("estimated = %v, want %v (the whole degraded charge)", est, 42+wantOut)
 	}
 }
 
@@ -295,7 +297,7 @@ func TestChargeQuota_Tokens_OpaqueAlwaysDegrades(t *testing.T) {
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Fresh != 7 {
-		t.Fatalf("Fresh = %d, want 7 (degraded, not the 999 in the opaque body)", used.Fresh)
+		t.Fatalf("Fresh = %v, want 7 (degraded, not the 999 in the opaque body)", used.Fresh)
 	}
 	if est == 0 {
 		t.Fatal("estimated = 0, want > 0 (opaque path is always a degraded charge)")
@@ -319,7 +321,7 @@ func TestChargeQuota_IndependentProviders(t *testing.T) {
 	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(lr, chargeNow))
 	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(lr, chargeNow))
 	if usedA.Requests != 2 || usedB.Requests != 1 {
-		t.Fatalf("plan-a=%d plan-b=%d, want 2 and 1", usedA.Requests, usedB.Requests)
+		t.Fatalf("plan-a=%v plan-b=%v, want 2 and 1", usedA.Requests, usedB.Requests)
 	}
 }
 
@@ -377,9 +379,9 @@ models:
 	u2Used, _ := rt.Quota.Used("p2", "requests/1mo", ps)
 	u3Used, _ := rt.Quota.Used("p3", "requests/1mo", ps)
 	if u1Used.Requests != 0 || u2Used.Requests != 0 {
-		t.Fatalf("failed attempts charged: p1=%d p2=%d, want 0/0", u1Used.Requests, u2Used.Requests)
+		t.Fatalf("failed attempts charged: p1=%v p2=%v, want 0/0", u1Used.Requests, u2Used.Requests)
 	}
 	if u3Used.Requests != 1 {
-		t.Fatalf("successful endpoint p3 charged %d, want 1", u3Used.Requests)
+		t.Fatalf("successful endpoint p3 charged %v, want 1", u3Used.Requests)
 	}
 }
