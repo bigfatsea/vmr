@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
@@ -438,46 +437,6 @@ func TestExtractFinish(t *testing.T) {
 	}
 }
 
-func TestIsRealUserScaffolding(t *testing.T) {
-	for _, text := range []string{
-		"OpenClaw runtime context for the immediately preceding user message.\nInternal.",
-		"[Thu] Conversation info (untrusted metadata):\n```json\n{}\n```",
-		"Attached image(s) from tool result:",
-		"The conversation history before this point was compacted into the following summary:\n<summary>x</summary>",
-	} {
-		if isRealUser(chatmsg.Message{Role: "user", Text: text}, nil, -1) {
-			t.Errorf("scaffolding counted as real user: %q", text[:40])
-		}
-	}
-	if !isRealUser(chatmsg.Message{Role: "user", Text: "帮我修个 bug"}, nil, -1) {
-		t.Error("real instruction not recognized")
-	}
-}
-
-// TestRealUserTextStripsEnvelope locks in that a genuine user instruction
-// survives OpenClaw's envelope: OpenClaw glues its "Conversation info
-// (untrusted metadata)" / "Sender (untrusted metadata)" JSON routing blocks
-// onto the FRONT of genuine asks, not just onto pure scaffolding pings, so
-// the envelope must be stripped rather than the whole message discarded —
-// discarding it would lose the actual instruction and make task titles fall
-// back to an unrelated earlier message.
-func TestRealUserTextStripsEnvelope(t *testing.T) {
-	wrapped := "[Thu 2026-07-09 06:48 GMT+8] Conversation info (untrusted metadata):\n" +
-		"```json\n{\"chat_id\":\"user:ou_x\"}\n```\n\n" +
-		"Sender (untrusted metadata):\n```json\n{\"id\":\"ou_x\"}\n```\n\n" +
-		"OK，基于你为每个风格设计的提示词，调用 ai-script 批量生成 logo 设计图。"
-	text, ok := realUserText(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1)
-	if !ok {
-		t.Fatal("envelope-wrapped real instruction not recognized")
-	}
-	if !strings.Contains(text, "OK，基于你为每个风格设计的提示词") {
-		t.Errorf("stripped text lost the real instruction: %q", text)
-	}
-	if strings.Contains(text, "chat_id") {
-		t.Errorf("stripped text still carries the JSON envelope: %q", text)
-	}
-}
-
 // TestNoReplyMergesRetryIntoSameTask covers OpenClaw's skip-on-memory-flush
 // pattern: when a turn's assistant reply is empty or just "NO_REPLY", the
 // LLM never actually acted on the user's instruction. The next turn (even
@@ -513,24 +472,5 @@ func TestNoReplyMergesRetryIntoSameTask(t *testing.T) {
 	}
 	if got := s.Tasks[0].Recs[1].TaskSeq; got != 2 {
 		t.Errorf("r2 task seq = %d, want 2", got)
-	}
-}
-
-// TestCapStrRuneSafe locks in that capStr's byte cap never cuts through a
-// UTF-8 sequence — Chinese/emoji session titles and compaction needles near
-// the cap must stay valid UTF-8.
-func TestCapStrRuneSafe(t *testing.T) {
-	s := strings.Repeat("审", 100) // 3 bytes per rune
-	for n := 0; n <= 12; n++ {
-		got := capStr(s, n)
-		if !utf8.ValidString(got) {
-			t.Errorf("capStr(…, %d) produced invalid UTF-8: %q", n, got)
-		}
-		if len(got) > n {
-			t.Errorf("capStr(…, %d) exceeded the byte cap: %d bytes", n, len(got))
-		}
-	}
-	if got := capStr("ascii only", 200); got != "ascii only" {
-		t.Errorf("short string must be returned whole: %q", got)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/pricing"
+	"vmr/internal/taskseg"
 )
 
 // Build reads audit JSONL files and aggregates them into a Report2. It calls
@@ -51,9 +52,13 @@ import (
 // every call parses every input file's ctxgraph.Scan pass from scratch,
 // same as before this cache existed. Kept as the stable, cache-free entry
 // point every existing caller/test already uses; BuildCached below is the
-// one cmd_report.go actually calls.
+// one cmd_report.go actually calls. Always interprets agent-dialect
+// conventions through taskseg.OpenClawAware — the same "Build always passes
+// the default, only BuildCached threads a caller's choice through" split
+// quotas below already established, so this package's ~26 existing Build
+// call sites never need to change.
 func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
-	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, nil, nil)
+	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, taskseg.OpenClawAware, nil, nil)
 	return rep, sess, err
 }
 
@@ -67,10 +72,16 @@ func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Prici
 // near-term version, not the deeper "report consumes ctxgraph.Manifest
 // directly" unification). prior may be nil (identical to Build).
 //
+// prof is the taskseg.Profile session.go's collect() uses to recognize real
+// user instructions, a deliberate no-reply skip, and a framework-specific
+// chat_id — resolved once at cmd/vmr's composition root (resolveTaskProfile,
+// the same entry point `vmr story` uses) rather than decided independently
+// here.
+//
 // quotas (may be nil) is §2.5's provider quota reference — Build always
 // passes nil (it stays quota-blind on purpose, so its 26 existing call
 // sites never need to change); only BuildCached, cmd_report.go's actual
 // production entry point, threads it through.
-func BuildCached(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
-	return buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, prior, quotas)
+func BuildCached(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+	return buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, prof, prior, quotas)
 }

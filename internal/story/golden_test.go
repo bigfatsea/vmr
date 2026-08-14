@@ -12,7 +12,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // goldenRec builds one audit.Record for the golden fixture below — like
@@ -100,7 +100,7 @@ func TestGoldenMarkdown(t *testing.T) {
 			if len(g.Lineages) != 1 {
 				t.Fatalf("want 1 lineage in the golden fixture, got %d", len(g.Lineages))
 			}
-			j, err := Build(g.Lineages[0], profile.Generic, tc.lang)
+			j, err := Build(g.Lineages[0], taskseg.Generic, tc.lang)
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}

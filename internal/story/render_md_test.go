@@ -10,7 +10,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 func TestRenderMarkdown_BasicStructure(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if second.BrokeFrom == nil {
 		t.Fatal("second lineage should have BrokeFrom set")
 	}
-	j, err := Build(second, profile.Generic, i18n.EN)
+	j, err := Build(second, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if second.BrokeFrom.Edit.Kind != ctxgraph.Fork {
 		t.Fatalf("break edit kind = %v, want Fork", second.BrokeFrom.Edit.Kind)
 	}
-	j, err := Build(second, profile.Generic, i18n.EN)
+	j, err := Build(second, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

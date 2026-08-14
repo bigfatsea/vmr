@@ -1,6 +1,6 @@
-// Ver 2026-07-28 23:05, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
-package profile
+package taskseg
 
 import (
 	"testing"
@@ -40,5 +40,14 @@ func TestGeneric_NoReply(t *testing.T) {
 	}
 	if Generic.NoReply("tool_calls", "") {
 		t.Error("non-terminal finish should never be NoReply")
+	}
+}
+
+func TestGeneric_ChatIDAlwaysEmpty(t *testing.T) {
+	msgs := []chatmsg.Message{
+		{Role: "user", Text: "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"x\"}\n```"},
+	}
+	if got := Generic.ChatID(msgs); got != "" {
+		t.Errorf("Generic.ChatID = %q, want empty (no framework convention to recognize)", got)
 	}
 }

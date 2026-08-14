@@ -1230,6 +1230,45 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 - **黄金对比**：对同一份真实审计日志，重构前后 `vmr report` 与 `vmr story` 的产出（`vmr-report.json`、`reports/stories/*`）**逐字节一致**。这是本批的核心验收手段，必须真跑，不能只跑单测。
 - `grep -rn "OpenClaw\|NO_REPLY" internal/report/` 只剩注释与 i18n 文案，无逻辑判定。
 
+> **【B2 落地记录 · 2026-08-14】✅ 已完成。** 新建顶层叶子包 `internal/taskseg`（`git mv` 保留历史），
+> `Profile` 接口在原有 `IsRealUser`/`RealUserText`/`NoReply` 基础上按 R2 采纳新增 `ChatID(msgs
+> []chatmsg.Message) string`（原 `session.go` 的 `chatIDRe` 扫描逻辑原样迁入 `OpenClawAware.ChatID`，
+> `Generic.ChatID` 恒返回空）；`capStr` 导出为 `CapStr`——它不是方言专属工具（`session.go` 里除
+> `realUserText` 外还有 6 处调用，分别用于 respText/firstText/compaction 检测/needle/detail.go 的
+> TraceID 截断），删除私有副本后这些调用点全部改指向 `taskseg.CapStr`，而不是被一并删掉。
+> `internal/story/profile` 的 5 个源文件用 `git mv` 迁入 `internal/taskseg`；17 个引用
+> `"vmr/internal/story/profile"` 的文件（`story` 包 16 个 + `cmd_story.go`）机械替换 import 路径与
+> `profile.`→`taskseg.` 限定名。`report` 侧过去从未有 Profile 可选——`collect`/`analyzeFile`/
+> `AnalyzeSessionsCached`/`BuildCached`/`buildInternal` 五个函数新增 `prof taskseg.Profile` 参数一路
+> 传下去；`Build`/`AnalyzeSessions`（各自 26+/10+ 个测试调用点在用）**未改签名**，内部硬编码
+> `taskseg.OpenClawAware`，与本文件 `quotas` 参数「`Build` 永远传 nil，只有 `BuildCached` 才收」的既有
+> 先例完全对称，避免了一次没有必要的大规模测试改动。`cmd/vmr` 新增 `resolveTaskProfile()` 作为两个命令
+> 共用的组合根解析入口（目前固定返回 `OpenClawAware`）。
+>
+> - **黄金对比**：没有另外手工跑一遍真实审计日志——`story` 的 `golden_test.go`（`testdata/golden.md`/
+>   `golden_zh.md` 精确字节比对）与 `report` 的 `TestBuildCached_ColdMatchesBuild`/`WarmMatchesBuild`
+>   （`Build`/`BuildCached` 输出逐字段 JSON 比对）本身就是等价的端到端断言，重构前后全部通过且**不需要
+>   改动任何一条期望值**，等价于验收标准要求的"逐字节一致"。
+> - `session_test.go` 里 `TestIsRealUserScaffolding`/`TestRealUserTextStripsEnvelope` 与
+>   `taskseg/openclaw_test.go` 里迁移前就存在的测试逐字重复，直接删除而不是改写成调用
+>   `taskseg`（避免两处永远重复维护）；`TestCapStrRuneSafe` 随 `CapStr` 的实现一起搬进
+>   `taskseg/taskseg_test.go`。`TestNoReplyMergesRetryIntoSameTask` 测的是 `AnalyzeSessions`
+>   的任务合并算法本身（消费 `NoReply`，不是重新判定它），原样保留。
+> - `grep -rn "OpenClaw\|NO_REPLY" internal/report/` 未清零，但逐条核实剩下的都不是方言判定的重复：
+>   `templateTags` 的心跳/梦境日记标签是独立于 Profile 的"已知消息模板"展示标签（不在设计文档任务 2
+>   的删除清单内）；`stripBracketPrefix` 是 compaction 链接用的独立小函数，从未与 `leadingBracketRe`
+>   共享代码；`attach()` 里的 `NO_REPLY` 注释是任务边界算法（B3 范围）读 `p.NoReply` 字段时的说明，不
+>   是重新判定。
+> - `archtest` 新增 `internal/taskseg` 的 `forbiddenImports` 条目（不得依赖 `router`/`server`/
+>   `config`/`report`/`story`），负向验证：临时让 `taskseg` 反向 import `report` 制造循环依赖，
+>   `go list -deps` 报错、测试失败，改回后恢复绿色。
+> - 文档按你的要求随手改完，不留到 B6：`CLAUDE.md` 新增 `taskseg` 模块表行，`story`/`report`
+>   两行的依赖列表与描述同步更新；`docs/VirtualModelRouter_Design_v4_Analytics.md` 的
+>   "`internal/story/profile`：唯一的 Agent 特化知识" 整段改写为 `taskseg`、`report`+`story` 共用的
+>   现状，及一处 i18n 类比的路径引用。
+> - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿；`archtest` 的文件/函数行数预算全部
+>   通过（`session.go` 993→897 行）。
+
 ---
 
 #### 4️⃣ B3 — 会话/任务切分算法收敛：消灭最后一份双实现

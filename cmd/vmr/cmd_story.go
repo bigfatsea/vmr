@@ -16,7 +16,7 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/story"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // llmCLIOptions bundles the -llm-* flags after validation — a thin CLI-level
@@ -148,10 +148,9 @@ func cmdStory(args []string) error {
 	ctxgraph.StitchGraph(g)
 	byIdx := ctxgraph.LineageIndex(g)
 
-	// Step 1 ships exactly one profile: OpenClaw-aware
-	// but harmless on any other agent's input, since none of its patterns
-	// match generic chat text.
-	prof := profile.OpenClawAware
+	// resolveTaskProfile is the shared cmd/vmr composition-root entry point
+	// `vmr report` also calls — see its own doc comment.
+	prof := resolveTaskProfile()
 
 	cands := story.ListCandidates(g)
 
@@ -375,7 +374,7 @@ func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 // dry-run/degrade contract compareJourneys' own LLM section follows: a
 // dry run never leaves a stories/ directory behind, and a call
 // failure only drops the LLM section, never fails the command.
-func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex) error {
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex) error {
 	t := i18n.CLI(lang)
 	chain := ctxgraph.ChainFrom(target, byIdx)
 	partial := story.IsPartialHead(chain, firstPath)
@@ -435,7 +434,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof profile.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string, lang i18n.Lang, idx *story.StoryIndex) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string, lang i18n.Lang, idx *story.StoryIndex) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -566,7 +565,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 // selector that resolved to more than one journey) — the two differ only
 // in which candidates they pass in and the message printed when none of
 // them survive the partial-head filter.
-func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string) error {
+func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
@@ -614,7 +613,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 
 // renderAllJourneys renders every non-partial candidate journey — see
 // renderJourneys.
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
 	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
 		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
 }
@@ -624,7 +623,7 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 // level statistics (vmr-story-corpus.md/.json) instead of per-Journey
 // files. Journeys are built here only to feed ComputeCorpusStats — none of
 // them are individually rendered or written to disk by this path.
-func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof profile.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
 	var toRender [][]*ctxgraph.Lineage
 	skippedPartial := 0
 	for _, l := range cands {

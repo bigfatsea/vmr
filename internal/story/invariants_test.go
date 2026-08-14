@@ -10,7 +10,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // manyToolCallRecords builds a lineage of n turns, each turn appending one
@@ -54,7 +54,7 @@ func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 	recs := manyToolCallRecords(turns)
 	path := writeJSONL(t, recs)
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

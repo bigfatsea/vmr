@@ -34,6 +34,7 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
+	"vmr/internal/taskseg"
 )
 
 // rec2 is Build's per-record working struct: raw fields from audit.Record
@@ -105,8 +106,8 @@ var diagnosticNormMarker = map[string]bool{
 // session-analysis-failure error message below). Split into its own file
 // purely to keep this one under internal/archtest's line budget; no
 // behavior split, buildInternal is the only thing that does real work.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
-	sess, cache, err := AnalyzeSessionsCached(paths, prior)
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+	sess, cache, err := AnalyzeSessionsCached(paths, prior, prof)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
 			"This step reads every input file a second time; the most common real-world cause "+

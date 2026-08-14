@@ -29,18 +29,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/taskseg"
 )
 
 // tailPrevKeep is how many trailing message previews each request retains,
@@ -208,13 +207,18 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // first error in path order is returned — wasted work on a path that's
 // rare and not performance-sensitive, traded for not needing goroutine
 // cancellation machinery.
-// AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache —
-// every call re-runs ctxgraph.Scan's JSON-decode/message-hash pass on every
-// input file, same as always. Kept as the stable entry point every existing
-// caller/test already uses; AnalyzeSessionsCached is the one Build's cached
-// variant (BuildCached, see aggregate.go) actually calls.
+// AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache,
+// always interpreting agent-dialect conventions (real-instruction/no-reply/
+// chat_id detection — see collect()) through taskseg.OpenClawAware — every
+// call re-runs ctxgraph.Scan's JSON-decode/message-hash pass on every input
+// file, same as always. Kept as the stable entry point every existing
+// caller/test already uses, the same "always the default profile" role
+// Build itself plays relative to BuildCached (see build_cached.go's own doc
+// comment on why); AnalyzeSessionsCached is the one Build's cached variant
+// (BuildCached, see aggregate.go) actually calls, and the one that accepts a
+// caller-chosen Profile.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
-	a, _, err := AnalyzeSessionsCached(paths, nil)
+	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
 	return a, err
 }
 
@@ -225,8 +229,12 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 // on every call, same as AnalyzeSessions always has. See
 // docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
 // section for why only the ctxgraph.Manifest-based half is cached this
-// round. prior may be nil (identical to AnalyzeSessions).
-func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache) (*SessionAnalysis, *ctxgraph.FileCache, error) {
+// round. prior may be nil (identical to AnalyzeSessions). prof is the
+// taskseg.Profile collect() uses to recognize real user instructions, a
+// deliberate no-reply skip, and a framework-specific chat_id — resolved
+// once at cmd/vmr's composition root (see resolveTaskProfile), not decided
+// independently by report and story.
+func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof taskseg.Profile) (*SessionAnalysis, *ctxgraph.FileCache, error) {
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
 
 	var g *ctxgraph.Graph
@@ -251,7 +259,7 @@ func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache) (*SessionA
 		go func(i int, path string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i] = analyzeFile(path)
+			results[i] = analyzeFile(path, prof)
 		}(i, path)
 	}
 	wg.Wait()
@@ -306,7 +314,7 @@ type fileAnalysisResult struct {
 // returned for each failure mode (OpenLogFile's own error already names the
 // path; a scan error gets path-wrapped here) — callers must not wrap
 // res.err again.
-func analyzeFile(path string) fileAnalysisResult {
+func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
 	rc, err := audit.OpenLogFile(path)
 	if err != nil {
 		return fileAnalysisResult{err: err}
@@ -320,7 +328,7 @@ func analyzeFile(path string) fileAnalysisResult {
 		if err := json.Unmarshal(lineBytes, &rec); err != nil {
 			return
 		}
-		recs = append(recs, collect(&rec, path, line))
+		recs = append(recs, collect(&rec, path, line, prof))
 	}, func() { line++ }) // skipped oversized lines still advance the physical line number
 	if scanErr != nil {
 		return fileAnalysisResult{err: fmt.Errorf("%s: %w", path, scanErr)}
@@ -330,11 +338,11 @@ func analyzeFile(path string) fileAnalysisResult {
 
 // ---- per-record collection ----
 
-var chatIDRe = regexp.MustCompile(`"chat_id"\s*:\s*"([^"]+)"`)
-
 // collect extracts everything needed from one record while its parsed JSON
-// is in hand; only compact metadata is retained.
-func collect(rec *audit.Record, path string, line int) *ReqInfo {
+// is in hand; only compact metadata is retained. prof recognizes real user
+// instructions, a deliberate no-reply skip, and a framework-specific
+// chat_id — see taskseg.Profile.
+func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *ReqInfo {
 	r := &ReqInfo{
 		Path: path, Line: line, TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
@@ -384,21 +392,13 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 					r.ToolCalls = append(r.ToolCalls, tc.Name)
 				}
 			}
-			r.respText = capStr(strings.TrimSpace(s.Content), 256<<10)
-			// Detect OpenClaw's "no-reply" pattern: an empty content block,
-			// or content that ends with the explicit "NO_REPLY" marker
-			// (memory-flush acknowledgement, or post-compaction turn).
-			// Such records are sent successfully but the LLM skipped the
-			// reply — the next record carrying the same user instruction
-			// is a retry of THIS one, not a new task.
-			if r.Finish == "stop" || r.Finish == "end_turn" {
-				trimmed := strings.TrimSpace(r.respText)
-				if trimmed == "" {
-					r.NoReply = true
-				} else if strings.HasSuffix(trimmed, "NO_REPLY") {
-					r.NoReply = true
-				}
-			}
+			r.respText = taskseg.CapStr(strings.TrimSpace(s.Content), 256<<10)
+			// A deliberate no-reply skip (e.g. OpenClaw's empty-content or
+			// explicit "NO_REPLY" marker convention — see prof.NoReply):
+			// the record is sent successfully but the LLM skipped acting on
+			// it — the next record carrying the same user instruction is a
+			// retry of THIS one, not a new task.
+			r.NoReply = prof.NoReply(r.Finish, r.respText)
 		}
 	}
 
@@ -447,11 +447,11 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 			continue
 		}
 		if r.firstText == "" {
-			r.firstText = capStr(m.Text, 512<<10)
+			r.firstText = taskseg.CapStr(m.Text, 512<<10)
 		}
 		if m.Role == "user" {
 			lastUser = m.Text
-			if text, ok := realUserText(m, rawMsgs, i-chatmsg.MsgOffset(body)); ok {
+			if text, ok := prof.RealUserText(m, rawMsgs, i-chatmsg.MsgOffset(body)); ok {
 				r.realUsers[i] = preview(text)
 			}
 		}
@@ -460,15 +460,7 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 		r.tailPrev = append(r.tailPrev, msgs[i].Role+": "+preview(msgs[i].Text))
 	}
 
-	// chat_id lives in OpenClaw's "Conversation info" wrapper (scan from the end).
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" && strings.Contains(msgs[i].Text, "Conversation info (untrusted metadata)") {
-			if m := chatIDRe.FindStringSubmatch(msgs[i].Text); m != nil {
-				r.ChatID = m[1]
-				break
-			}
-		}
-	}
+	r.ChatID = prof.ChatID(msgs)
 
 	// Compaction: summarization system prompt, or the no-tools +
 	// max_completion_tokens shape (three-signal compaction heuristic).
@@ -477,86 +469,13 @@ func collect(rec *audit.Record, path string, line int) *ReqInfo {
 	if leadSys > 0 {
 		sysText = msgs[0].Text
 	}
-	if strings.Contains(strings.ToLower(capStr(sysText, 200)), "summarization") ||
+	if strings.Contains(strings.ToLower(taskseg.CapStr(sysText, 200)), "summarization") ||
 		(len(r.ToolsDeclared) == 0 && hasMaxCT && r.TraceID == "") {
 		r.Compaction = true
 	}
 
 	r.Tags = templateTags(r.firstText, lastUser, r.Compaction)
 	return r
-}
-
-// openClawEnvelopeRe matches OpenClaw's "Conversation info (untrusted
-// metadata)" / "Sender (untrusted metadata)" JSON blocks. OpenClaw glues
-// these routing headers onto the front of real inbound messages (not just
-// onto pure scaffolding pings) — a message can be 90% JSON envelope and
-// still carry the actual ask in its last line.
-var openClawEnvelopeRe = regexp.MustCompile(`(?s)(?:Conversation info|Sender) \(untrusted metadata\):\s*` + "```" + `(?:json)?\n.*?` + "```" + `\s*`)
-
-// stripOpenClawEnvelope removes OpenClaw's metadata-wrapper blocks, leaving
-// whatever real text (if any) precedes or follows them.
-func stripOpenClawEnvelope(text string) string {
-	return strings.TrimSpace(openClawEnvelopeRe.ReplaceAllString(text, ""))
-}
-
-// leadingBracketRe matches OpenClaw's "[Day Mon DD HH:MM TZ]" user-typed-time
-// prefix, so a message that's just a timestamp plus an (already-stripped)
-// envelope — no real ask — doesn't get mistaken for one.
-var leadingBracketRe = regexp.MustCompile(`^\[[^\]]*\]\s*`)
-
-// realUserText returns a user message's real-instruction text and whether it
-// counts as one at all. Transport scaffolding doesn't: OpenClaw runtime
-// wrappers, tool-produced image attachments, compaction summaries, and
-// anthropic messages that are purely tool_result parts. OpenClaw's metadata
-// envelope (chat_id/sender JSON) is stripped rather than disqualifying the
-// whole message — the real ask is often glued right behind it, and
-// discarding it entirely made task titles fall back to an earlier, unrelated
-// message (observed in real logs: a 06:48 launch instruction wrapped in the
-// envelope was dropped, so the task title showed an unrelated "continue"
-// ping from 6 minutes earlier instead). A message that's PURELY the
-// envelope — nothing real left after stripping — still doesn't count.
-func realUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) (string, bool) {
-	head := capStr(m.Text, 200)
-	if strings.HasPrefix(head, "OpenClaw runtime context") ||
-		strings.HasPrefix(head, "Attached image(s) from tool result") ||
-		strings.HasPrefix(head, "The conversation history before this point was compacted") {
-		return "", false
-	}
-	text := m.Text
-	if strings.Contains(head, "Conversation info (untrusted metadata)") {
-		text = stripOpenClawEnvelope(text)
-		if leadingBracketRe.ReplaceAllString(text, "") == "" {
-			return "", false // just a timestamp bracket, nothing real left
-		}
-	}
-	if rawIdx >= 0 && rawIdx < len(rawMsgs) {
-		if rm, ok := rawMsgs[rawIdx].(map[string]any); ok {
-			if parts, ok := rm["content"].([]any); ok && len(parts) > 0 {
-				allToolResult := true
-				for _, p := range parts {
-					pm, _ := p.(map[string]any)
-					if pm == nil || pm["type"] != "tool_result" {
-						allToolResult = false
-						break
-					}
-				}
-				if allToolResult {
-					return "", false
-				}
-			}
-		}
-	}
-	if strings.TrimSpace(text) == "" {
-		return "", false
-	}
-	return text, true
-}
-
-// isRealUser reports whether a user message is an actual instruction rather
-// than transport scaffolding. See realUserText for the classification rules.
-func isRealUser(m chatmsg.Message, rawMsgs []any, rawIdx int) bool {
-	_, ok := realUserText(m, rawMsgs, rawIdx)
-	return ok
 }
 
 // templateTags classifies known message shapes. Unknown shapes get no tag —
@@ -566,7 +485,7 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 	if compaction {
 		tags = append(tags, "compaction")
 	}
-	if strings.Contains(capStr(firstText, 200), "compacted into the following summary") {
+	if strings.Contains(taskseg.CapStr(firstText, 200), "compacted into the following summary") {
 		tags = append(tags, "compacted_session")
 	}
 	if strings.HasPrefix(firstText, "<conversation>") {
@@ -776,7 +695,7 @@ func attach(s *SessionInfo, r *ReqInfo) {
 // message the parent already had verbatim, just at a different offset —
 // looks "new" by position alone. Without this check, a single instruction
 // that survives a mid-task context prune reopens as a fresh 1-turn task
-// quoting itself (observed in real logs after fixing isRealUser to see
+// quoting itself (observed in real logs after fixing RealUserText to see
 // envelope-wrapped instructions: pruning shifted the same "OK，基于你…"
 // message into the tail window a second time).
 func (r *ReqInfo) deltaHasNewInstruction() bool {
@@ -935,7 +854,7 @@ func linkCompactions(a *SessionAnalysis) {
 // beyond accidental-collision territory.
 func needle(s string) string {
 	s = strings.TrimSpace(s)
-	return capStr(s, 200)
+	return taskseg.CapStr(s, 200)
 }
 
 // stripBracketPrefix removes a leading "[…] " block (OpenClaw's injected
@@ -947,21 +866,6 @@ func stripBracketPrefix(s string) string {
 		}
 	}
 	return s
-}
-
-// capStr caps s at n BYTES (the callers' budgets are byte budgets — 200B
-// containment needles, 512KB previews) but never cuts through a UTF-8
-// sequence: the cut point backs up to the nearest rune boundary, so Chinese/
-// emoji content near the cap can't produce invalid UTF-8 in session titles,
-// instruction previews, or compaction needles.
-func capStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
 }
 
 // ---- filename (shared with detail.go) ----

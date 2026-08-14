@@ -11,7 +11,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // mkExtrasRec builds a single-step audit.Record with everything
@@ -78,7 +78,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	pathA := writeJSONL(t, []audit.Record{recA})
-	jA, err := Build(onlyLineage(t, pathA), profile.Generic, i18n.EN)
+	jA, err := Build(onlyLineage(t, pathA), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recB := mkExtrasRec(atB, "system prompt B", "do the research", "openai:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
 	pathB := writeJSONL(t, []audit.Record{recB})
-	jB, err := Build(onlyLineage(t, pathB), profile.Generic, i18n.EN)
+	jB, err := Build(onlyLineage(t, pathB), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	rec := mkExtrasRec(at, long, "hi", "openai:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
-	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 	rec2 := mkExtrasRec(at2, "sys", "go", "openai:p:m", 110, 10, 0, "stop",
 		[]map[string]any{writeToolCall("write", "final.md", "the real final content")})
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -354,14 +354,14 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
 	recA := mkExtrasRec(atA, "system prompt A", "research", "openai:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
-	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), profile.Generic, i18n.EN)
+	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
 	recB := mkExtrasRec(atB, "system prompt B", "research", "openai:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
-	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), profile.Generic, i18n.EN)
+	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}

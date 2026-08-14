@@ -14,7 +14,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // mkRecWithUsage is mkRec plus an embedded usage chunk in the SSE stream,
@@ -45,7 +45,7 @@ func TestSysChanged_WithinLineage(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestSysChanged_SameSystemPromptStaysFalse(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 		t.Fatalf("chain length = %d, want 2 (stitch should have succeeded)", len(chain))
 	}
 
-	j, err := BuildChain(chain, profile.Generic, i18n.EN)
+	j, err := BuildChain(chain, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 		t.Fatalf("test setup: want a single Splice edge, got %+v", l.Edges)
 	}
 
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

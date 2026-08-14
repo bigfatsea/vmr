@@ -209,7 +209,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **Revision 关系**（`Event.Revises`）：一次 `Splice` 编辑的分岔点是一条消息被原地改写，不是巧合的新消息——不标注的话，全局去重会把改写后的版本渲染成一个全新的、无关的 Event，读起来像是"同一件事说了两遍"。
 
-**`internal/story/profile`：唯一的 Agent 特化知识**：`ctxgraph` 全程不做模板匹配（§3.1），但"这条 user 消息是不是真实指令，还是路由信封/纯工具结果/心跳时间戳"以及"这次回复是不是 Agent 框架约定的'本轮故意不回复'"这两件事本质上依赖具体框架的约定，硬塞进 `ctxgraph` 会破坏它的框架无关性。`profile.Profile` 接口（`IsRealUser`/`RealUserText`/`NoReply`）就是这条边界——`journey.go` 的任务边界判定、标题提取、缝合边界处的"是否有新指令"判断全部通过这个接口调用，从不直接硬编码某个框架的约定。目前只有两个实现：`OpenClawAware`（认 OpenClaw 已验证过的具体标记）与 `Generic`（模板无关的兜底）——刻意不做基于检测的 profile 注册表/自动选择：第二个真实 profile（另一款 Agent 框架）出现、且真实语料显示需要专属规则时才值得抽象，现在建一个只有两个成员的注册表是猜测未来需求。
+**`internal/taskseg`：唯一的 Agent 特化知识（`report`/`story` 共用）**：`ctxgraph` 全程不做模板匹配（§3.1），但"这条 user 消息是不是真实指令，还是路由信封/纯工具结果/心跳时间戳""这次回复是不是 Agent 框架约定的'本轮故意不回复'""chat_id 这类会话标识怎么从消息里抠出来"这三件事本质上依赖具体框架的约定，硬塞进 `ctxgraph` 会破坏它的框架无关性。`taskseg.Profile` 接口（`IsRealUser`/`RealUserText`/`NoReply`/`ChatID`）就是这条边界——`story`（`journey.go` 的任务边界判定、标题提取、缝合边界处的"是否有新指令"判断）与 `report`（`session.go` 的会话/任务边界判定、chat_id 提取、NoReply 检测）都通过这个接口调用，从不各自硬编码某个框架的约定。目前只有两个实现：`OpenClawAware`（认 OpenClaw 已验证过的具体标记）与 `Generic`（模板无关的兜底）——刻意不做基于检测的 profile 注册表/自动选择：第二个真实 profile（另一款 Agent 框架）出现、且真实语料显示需要专属规则时才值得抽象，现在建一个只有两个成员的注册表是猜测未来需求。两个命令目前都用同一个默认（`OpenClawAware`），选择逻辑收在 `cmd/vmr` 的一个共用解析函数（`resolveTaskProfile`）里，不是两处各自判断。
 
 **渲染**（`render_md.go`）：单文件自包含 Markdown，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（模型自己产出的内容：推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700，与 `vmr report` 的 `details/` 同等敏感度——正文含完整对话内容。
 
@@ -436,7 +436,7 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 
 ### 4.7 扩展性
 
-新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的 `XxxText(lang)` 函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Xxx(lang)` 拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/story/profile` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
+新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的 `XxxText(lang)` 函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Xxx(lang)` 拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
 
 ---
 

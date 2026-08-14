@@ -1,6 +1,6 @@
-// Ver 2026-07-28 23:05, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
-package profile
+package taskseg
 
 import (
 	"strings"
@@ -37,3 +37,7 @@ func (p generic) IsRealUser(m chatmsg.Message, rawMsgs []any, rawIdx int) bool {
 func (generic) NoReply(finish, content string) bool {
 	return (finish == "stop" || finish == "end_turn") && strings.TrimSpace(content) == ""
 }
+
+// ChatID always returns "": Generic has no framework-specific session-id
+// convention to look for.
+func (generic) ChatID(msgs []chatmsg.Message) string { return "" }

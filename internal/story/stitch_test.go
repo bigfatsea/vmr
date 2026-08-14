@@ -18,7 +18,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 func s231StyleFixture(t *testing.T) string {
@@ -78,7 +78,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Fatalf("chain = %v, want [%d, %d] (oldest first)", chain, first.Idx, second.Idx)
 	}
 
-	j, err := BuildChain(chain, profile.Generic, i18n.EN)
+	j, err := BuildChain(chain, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}

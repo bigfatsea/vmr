@@ -9,7 +9,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // TestIDMatchesDeriveID locks in that the public ID entry point (used by
@@ -47,7 +47,7 @@ func TestPreviewTitleAndPreviewTitlesAgree(t *testing.T) {
 	l := onlyLineage(t, path)
 	chain := []*ctxgraph.Lineage{l}
 
-	single, err := PreviewTitle(chain, profile.OpenClawAware, i18n.EN)
+	single, err := PreviewTitle(chain, taskseg.OpenClawAware, i18n.EN)
 	if err != nil {
 		t.Fatalf("PreviewTitle: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPreviewTitleAndPreviewTitlesAgree(t *testing.T) {
 		t.Errorf("PreviewTitle = %q, want the fixture's opening instruction", single)
 	}
 
-	batched, err := PreviewTitles([][]*ctxgraph.Lineage{chain}, profile.OpenClawAware, i18n.EN)
+	batched, err := PreviewTitles([][]*ctxgraph.Lineage{chain}, taskseg.OpenClawAware, i18n.EN)
 	if err != nil {
 		t.Fatalf("PreviewTitles: %v", err)
 	}
@@ -68,11 +68,11 @@ func TestPreviewTitleAndPreviewTitlesAgree(t *testing.T) {
 // paths: a nil record (FetchRecords couldn't resolve the location) and a
 // record whose body has no real user instruction at all.
 func TestTitleFromRecordFallbacks(t *testing.T) {
-	if got := titleFromRecord(nil, profile.Generic, i18n.EN); got != "(unreadable)" {
+	if got := titleFromRecord(nil, taskseg.Generic, i18n.EN); got != "(unreadable)" {
 		t.Errorf("titleFromRecord(nil) = %q, want (unreadable)", got)
 	}
 	rec := mkRec(time.Now(), "", []any{msg("system", "sys only")}, sseText("ok"))
-	if got := titleFromRecord(&rec, profile.Generic, i18n.EN); got != "(untitled)" {
+	if got := titleFromRecord(&rec, taskseg.Generic, i18n.EN); got != "(untitled)" {
 		t.Errorf("titleFromRecord(no real user msg) = %q, want (untitled)", got)
 	}
 }

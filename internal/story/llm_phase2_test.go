@@ -12,7 +12,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 func TestBuildSingleJourneyEvidencePack(t *testing.T) {
@@ -23,7 +23,7 @@ func TestBuildSingleJourneyEvidencePack(t *testing.T) {
 		map[string]any{"id": "c1", "function": map[string]any{"name": "read", "arguments": `{"path":"a.md"}`}},
 	}))
 	path := writeJSONL(t, []audit.Record{r1})
-	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

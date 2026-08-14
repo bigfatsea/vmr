@@ -9,7 +9,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel is the
@@ -37,7 +37,7 @@ func TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel(t *testing.T
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

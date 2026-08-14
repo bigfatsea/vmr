@@ -9,7 +9,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 func TestDetectUnadaptedRetry(t *testing.T) {
@@ -32,7 +32,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		}))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -63,7 +63,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		}))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -84,7 +84,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		}))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -115,7 +115,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		r2 := mkRec(at(1), "", []any{sys, u1, toolUse, toolResult}, sseText("done, moving on to the next task"))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -147,7 +147,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		r2 := mkRec(at(1), "", []any{sys, u1, toolUse, toolResult}, sseText("now restoring from archive.backup.tar.gz"))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		r2 := mkRec(at(1), "", []any{sys, u1, toolUse, toolResult}, sseText("reading b.md now, the rest look irrelevant"))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -212,7 +212,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		}))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -238,7 +238,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		r2 := mkRec(at(1), "", []any{sys, u1, toolUse, toolResultNotFound}, sseText("ok, moving on to something unrelated"))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -262,7 +262,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		}))
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, profile.Generic, i18n.EN)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}

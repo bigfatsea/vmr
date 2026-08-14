@@ -1,6 +1,6 @@
 // Ver 2026-07-30 00:10, by Sonnet 5
 
-// Tests for the nine-indicator behavior profile.
+// Tests for the nine-indicator behavior taskseg.
 package story
 
 import (
@@ -10,7 +10,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // TestComputeMetrics_TimeSplitAndRatio covers F10's gap classification:
@@ -36,7 +36,7 @@ func TestComputeMetrics_TimeSplitAndRatio(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestHumanInitiated_StitchBoundaryWithGenuinelyNewInstruction(t *testing.T) 
 		t.Fatalf("chain length = %d, want 2 (stitch should have succeeded)", len(chain))
 	}
 
-	j, err := BuildChain(chain, profile.Generic, i18n.EN)
+	j, err := BuildChain(chain, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestComputeMetrics_ToolCallDistributionAndDuplicateRate(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestComputeMetrics_ErrorRecoveryCount(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestComputeMetrics_PlanExecRatio(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestComputeMetrics_ContextUtilization(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestComputeMetrics_CompactionTotals(t *testing.T) {
 	second := g.Lineages[1]
 	chain := ctxgraph.ChainFrom(second, byIdx)
 
-	j, err := BuildChain(chain, profile.Generic, i18n.EN)
+	j, err := BuildChain(chain, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("BuildChain: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestSummarize(t *testing.T) {
 	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "done")}, sseText("完成"))
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, profile.Generic, i18n.EN)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 func TestComputeDistribution(t *testing.T) {
@@ -114,7 +114,7 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 		}
 	}
 	path := writeJSONL(t, recs)
-	j, err := Build(onlyLineage(t, path), profile.Generic, i18n.EN)
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

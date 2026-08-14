@@ -28,7 +28,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // Journey is a stitched chain of one or more Lineages rendered as one
@@ -146,7 +146,7 @@ type Event struct {
 // own entry point for callers previewing/testing a single lineage in
 // isolation. Rendering a lineage's actual stitched chain needs
 // BuildChain(ctxgraph.ChainFrom(l, byIdx), prof) instead.
-func Build(l *ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey, error) {
+func Build(l *ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (*Journey, error) {
 	return BuildChain([]*ctxgraph.Lineage{l}, prof, lang)
 }
 
@@ -157,7 +157,7 @@ func Build(l *ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey,
 // WHOLE chain. Rendering many chains at once should use BuildAll instead —
 // calling BuildChain in a loop re-fetches from scratch per chain, which
 // re-scans a source file once per chain touching it instead of once total.
-func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (*Journey, error) {
+func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (*Journey, error) {
 	if len(chain) == 0 {
 		return nil, errEmptyLineage
 	}
@@ -203,7 +203,7 @@ func BuildChain(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang)
 // Order of the returned slice matches chains; a per-chain error aborts the
 // whole batch (matches BuildChain's own all-or-nothing contract for a
 // single chain).
-func BuildAll(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) ([]*Journey, error) {
+func BuildAll(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) ([]*Journey, error) {
 	for _, chain := range chains {
 		if len(chain) == 0 {
 			return nil, errEmptyLineage
@@ -283,7 +283,7 @@ func manifestLocs(l *ctxgraph.Lineage) []ctxgraph.Loc {
 // at a stitch boundary — the first manifest of chain[c] for c>0 — using
 // that Lineage's own Stitch.Edge as the evidence (guaranteed non-nil:
 // ChainFrom only walks through Stitched outcomes).
-func buildFrom(chain []*ctxgraph.Lineage, prof profile.Profile, recs map[ctxgraph.Loc]*audit.Record, lang i18n.Lang) (*Journey, error) {
+func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgraph.Loc]*audit.Record, lang i18n.Lang) (*Journey, error) {
 	head, tail := chain[0], chain[len(chain)-1]
 	j := &Journey{
 		ID:    deriveID(chain),
@@ -582,7 +582,7 @@ func eventHashAt(m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, of
 // wasn't already present somewhere in the parent manifest (a set check, not
 // a position check — a mid-task history prune can shift an old message into
 // the tail window without it being new).
-func deltaHasNewInstruction(prof profile.Profile, msgs []chatmsg.Message, rawMsgs []any, off int, cur, prev *ctxgraph.Manifest, deltaStart int) bool {
+func deltaHasNewInstruction(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off int, cur, prev *ctxgraph.Manifest, deltaStart int) bool {
 	prevSet := make(map[ctxgraph.Hash]bool, len(prev.Keys))
 	for _, k := range prev.Keys {
 		prevSet[k] = true
@@ -614,7 +614,7 @@ func deltaHasNewInstruction(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 // deltaHasNewInstruction, this picks the task's TITLE, which should reflect
 // whatever the user actually asked even if it's not near the very end);
 // "" when this turn is a pure tool-loop step.
-func lastInstructionInDelta(prof profile.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) string {
+func lastInstructionInDelta(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) string {
 	best := -1
 	var bestText string
 	for idx := deltaStart; idx < len(msgs); idx++ {
@@ -644,7 +644,7 @@ func lastInstructionInDelta(prof profile.Profile, msgs []chatmsg.Message, rawMsg
 // the exact opening instruction verbatim) would title the new task
 // with that same instruction again, reading as "asked the same thing
 // twice" when nothing new was actually said.
-func newInstructionTitleAtStitch(prof profile.Profile, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {
+func newInstructionTitleAtStitch(prof taskseg.Profile, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event) string {
 	best := -1
 	var bestText string
 	for idx, msgv := range msgs {
@@ -684,7 +684,7 @@ func taskTitle(newInstruction string, lang i18n.Lang) string {
 // instruction in its very first step (searched over the WHOLE message
 // list, not just the delta — the opening ask, not the latest turn),
 // falling back to the first task with a real title, then a placeholder.
-func deriveTitle(prof profile.Profile, tasks []*Task, lang i18n.Lang) string {
+func deriveTitle(prof taskseg.Profile, tasks []*Task, lang i18n.Lang) string {
 	if len(tasks) > 0 && len(tasks[0].Steps) > 0 {
 		first := tasks[0].Steps[0]
 		if body, ok := first.Rec.Client.Request.Body.(map[string]any); ok {

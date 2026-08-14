@@ -364,7 +364,7 @@ func cmdReport(args []string) error {
 	now := time.Now()
 	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, *configPath, tw, now)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, priorCache, quotas)
+	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas)
 	if err != nil {
 		return err
 	}

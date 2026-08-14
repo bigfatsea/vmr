@@ -7,7 +7,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story/profile"
+	"vmr/internal/taskseg"
 )
 
 // ID returns a chain's stable, content-addressed Journey identifier
@@ -21,7 +21,7 @@ func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 // enough to call once, but see PreviewTitles when calling this for every
 // candidate in a listing: one FetchRecords per chain forces one full-file
 // scan per chain even when many chains' roots share the same source file.
-func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (string, error) {
+func PreviewTitle(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (string, error) {
 	root := chain[0].Manifests[0]
 	loc := ctxgraph.Loc{Path: root.Path, Line: root.Line}
 	recs, err := ctxgraph.FetchRecords([]ctxgraph.Loc{loc})
@@ -42,7 +42,7 @@ func PreviewTitle(chain []*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lan
 // The result is keyed by each chain's TAIL lineage (chain's last
 // element) — the same pointer ListCandidates returned and callers already
 // use as the candidate's identity.
-func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {
+func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {
 	locs := make([]ctxgraph.Loc, len(chains))
 	for i, chain := range chains {
 		root := chain[0].Manifests[0]
@@ -60,7 +60,7 @@ func PreviewTitles(chains [][]*ctxgraph.Lineage, prof profile.Profile, lang i18n
 	return out, nil
 }
 
-func titleFromRecord(rec *audit.Record, prof profile.Profile, lang i18n.Lang) string {
+func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) string {
 	st := i18n.Story(lang)
 	if rec == nil {
 		return st.UnreadableTitle

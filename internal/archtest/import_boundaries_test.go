@@ -68,6 +68,20 @@ var forbiddenImports = map[string][]string{
 	"vmr/internal/router": {
 		"vmr/internal/server",
 	},
+	// taskseg (agent-dialect Profile: real-instruction/no-reply/chat_id
+	// detection) is the shared leaf both report's session.go and story's
+	// journey.go depend on — architecture review's B2 batch merged what used
+	// to be story's own private internal/story/profile package with a
+	// byte-identical copy report carried in session.go. Neither consumer may
+	// depend back on it, or "shared leaf" stops being true; same reasoning
+	// as ctxgraph's and chatmsg's own zero-dependency-on-consumers rule.
+	"vmr/internal/taskseg": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+		"vmr/internal/config",
+		"vmr/internal/report",
+		"vmr/internal/story",
+	},
 }
 
 // zeroInternalDepPackages must not depend on any other vmr/internal/*

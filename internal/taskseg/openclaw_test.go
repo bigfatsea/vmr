@@ -1,6 +1,6 @@
-// Ver 2026-07-28 23:05, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
-package profile
+package taskseg
 
 import (
 	"strings"
@@ -88,5 +88,43 @@ func TestOpenClawAware_NoReply(t *testing.T) {
 		if got := OpenClawAware.NoReply(c.finish, c.content); got != c.want {
 			t.Errorf("NoReply(%q, %q) = %v, want %v", c.finish, c.content, got, c.want)
 		}
+	}
+}
+
+// TestOpenClawAware_ChatID mirrors internal/report/session_test.go's
+// TestAnalyzeSessionsGrouping chat_id assertion, at the Profile-method level
+// rather than through a full AnalyzeSessions run.
+func TestOpenClawAware_ChatID(t *testing.T) {
+	msgs := []chatmsg.Message{
+		{Role: "system", Text: "You are a personal assistant."},
+		{Role: "user", Text: "任务开始"},
+		{Role: "user", Text: "[Thu 2026-07-09 10:00 GMT+8] Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"user:ou_test123\"}\n```"},
+	}
+	if got := OpenClawAware.ChatID(msgs); got != "user:ou_test123" {
+		t.Errorf("ChatID = %q, want user:ou_test123", got)
+	}
+}
+
+func TestOpenClawAware_ChatID_ScansFromEnd(t *testing.T) {
+	// Two envelope-carrying messages with different chat_ids: the most
+	// recent (last) one wins — the wrapper reflects the current turn's
+	// routing, not a stale earlier one.
+	msgs := []chatmsg.Message{
+		{Role: "user", Text: "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"old\"}\n```"},
+		{Role: "assistant", Text: "ok"},
+		{Role: "user", Text: "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"new\"}\n```"},
+	}
+	if got := OpenClawAware.ChatID(msgs); got != "new" {
+		t.Errorf("ChatID = %q, want %q", got, "new")
+	}
+}
+
+func TestOpenClawAware_ChatID_NoEnvelopeIsEmpty(t *testing.T) {
+	msgs := []chatmsg.Message{
+		{Role: "system", Text: "sys"},
+		{Role: "user", Text: "plain text, no envelope"},
+	}
+	if got := OpenClawAware.ChatID(msgs); got != "" {
+		t.Errorf("ChatID = %q, want empty", got)
 	}
 }

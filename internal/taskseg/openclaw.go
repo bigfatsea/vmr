@@ -1,23 +1,22 @@
-// Ver 2026-07-28 23:05, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
-package profile
+package taskseg
 
 import (
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"vmr/internal/chatmsg"
 )
 
-// OpenClawAware ports internal/report/session.go's realUserText/NoReply
-// heuristics verbatim — patterns that corpus already validated (in
-// particular: the compaction-summary marker must be checked at the
-// message head, not anywhere in the text, or a tool_result that happens to
-// quote it gets misread as a real turn boundary). It is harmless on input
-// from any other agent: none of these patterns match generic chat text, so
-// a non-OpenClaw message just falls through to "non-empty user text counts
-// as real", the same baseline Generic uses.
+// OpenClawAware ports internal/report/session.go's original realUserText/
+// NoReply/chat_id heuristics verbatim — patterns that corpus already
+// validated (in particular: the compaction-summary marker must be checked
+// at the message head, not anywhere in the text, or a tool_result that
+// happens to quote it gets misread as a real turn boundary). It is harmless
+// on input from any other agent: none of these patterns match generic chat
+// text, so a non-OpenClaw message just falls through to "non-empty user
+// text counts as real", the same baseline Generic uses.
 var OpenClawAware Profile = openClawAware{}
 
 type openClawAware struct{}
@@ -38,11 +37,22 @@ func stripOpenClawEnvelope(text string) string {
 // (already-stripped) envelope isn't mistaken for a real instruction.
 var leadingBracketRe = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 
+// RealUserText's classification rules: transport scaffolding never counts —
+// OpenClaw runtime wrappers, tool-produced image attachments, compaction
+// summaries, and anthropic messages that are purely tool_result parts.
+// OpenClaw's metadata envelope (chat_id/sender JSON) is stripped rather than
+// disqualifying the whole message — the real ask is often glued right
+// behind it, and discarding it entirely made task titles fall back to an
+// earlier, unrelated message (observed in real logs: a 06:48 launch
+// instruction wrapped in the envelope was dropped, so the task title showed
+// an unrelated "continue" ping from 6 minutes earlier instead). A message
+// that's PURELY the envelope — nothing real left after stripping — still
+// doesn't count.
 func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) (string, bool) {
 	if m.Role != "user" {
 		return "", false
 	}
-	head := capStr(m.Text, 200)
+	head := CapStr(m.Text, 200)
 	if strings.HasPrefix(head, "OpenClaw runtime context") ||
 		strings.HasPrefix(head, "Attached image(s) from tool result") ||
 		strings.HasPrefix(head, "The conversation history before this point was compacted") {
@@ -94,14 +104,20 @@ func (openClawAware) NoReply(finish, content string) bool {
 	return strings.HasSuffix(trimmed, "NO_REPLY")
 }
 
-// capStr caps s at n bytes without cutting a UTF-8 sequence in half — same
-// rationale/implementation as internal/report/session.go's capStr.
-func capStr(s string, n int) string {
-	if len(s) <= n {
-		return s
+// chatIDRe extracts OpenClaw's chat_id from its "Conversation info
+// (untrusted metadata)" JSON wrapper.
+var chatIDRe = regexp.MustCompile(`"chat_id"\s*:\s*"([^"]+)"`)
+
+// ChatID scans msgs from the end (the wrapper is glued onto the most recent
+// user turn, not necessarily the first) for a user message carrying
+// OpenClaw's "Conversation info" envelope and extracts its chat_id.
+func (openClawAware) ChatID(msgs []chatmsg.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && strings.Contains(msgs[i].Text, "Conversation info (untrusted metadata)") {
+			if m := chatIDRe.FindStringSubmatch(msgs[i].Text); m != nil {
+				return m[1]
+			}
+		}
 	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
+	return ""
 }
