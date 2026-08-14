@@ -62,11 +62,11 @@ POST /v1/responses           OpenAI Responses 协议        → 只路由到该�
 
 OpenAI 官方力推的下一代协议（`POST /v1/responses`，[迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)），DeepSeek/OpenRouter 已提供 OpenAI 兼容实现。与 Chat Completions 的关键形状差异：请求体顶层是 `input`（字符串或 Item 数组）+ 可选 `instructions`（system/developer 指导，可选地也能以 `role:"system"`/`role:"developer"` 的 Item 出现在 `input` 数组里），不是 `messages`；响应是 `output[]`（`message`/`reasoning`/`function_call` 等 typed Item 混合数组），不是 `choices[]`；流式是**类型化 SSE 事件**（`response.output_text.delta`/`response.completed`/…），不是 `delta` chunk，也没有 `[DONE]` 哨兵——终止靠类型化的完成事件本身。
 
-**天然复用（协议无关，零改动）**：顶层 `model`/`stream` 字段解析（`CanonicalRequest`）、顶层 `model` 字节 splice 重写（`adapter.RewriteModel`）、响应侧 `model` 字段正则重写（全局字面量扫描，不区分嵌套层级，Responses 把 `model` 放在 `response.created`/`response.completed` 事件体内层同样命中）、`[DONE]` 追加策略（门槛是 `protocol=="openai"`，新协议字符串天然被排除）、顶层 `tools` 数组非空探测（`HasTools`）、按字节估算 token 的 `EstimatedTokens`、审计落盘（body 原样存，不关心内部字段形状）。
+**天然复用（协议无关，零改动）**：顶层 `model`/`stream` 字段解析（`CanonicalRequest`）、顶层 `model` 字节 splice 重写（`jsonscan.RewriteModel`）、响应侧 `model` 字段正则重写（全局字面量扫描，不区分嵌套层级，Responses 把 `model` 放在 `response.created`/`response.completed` 事件体内层同样命中）、`[DONE]` 追加策略（门槛是 `protocol=="openai"`，新协议字符串天然被排除）、顶层 `tools` 数组非空探测（`HasTools`）、按字节估算 token 的 `EstimatedTokens`、审计落盘（body 原样存，不关心内部字段形状）。
 
 **协议专属实现（新写，不能套用 Chat Completions 的实现）**：
 
-* `adapter.RewriteInputRoles`：`role_map` 在 Responses 协议下作用于顶层 `input` 数组而不是 `messages`，且数组元素混杂 message 型（带 `role`）与 function_call/reasoning 等无 `role` 的 Item——与 `RewriteRoles` 共享同一段字节扫描逻辑（`rewriteRolesInTopLevelArray`，只是扫描的顶层键不同），不是重新发明。
+* `jsonscan.RewriteInputRoles`：`role_map` 在 Responses 协议下作用于顶层 `input` 数组而不是 `messages`，且数组元素混杂 message 型（带 `role`）与 function_call/reasoning 等无 `role` 的 Item——与 `RewriteRoles` 共享同一段字节扫描逻辑（`jsonscan` 内部的 `rewriteRolesInTopLevelArray`，只是扫描的顶层键不同），不是重新发明。
 * `adapter.SessionFingerprint` 的 `"openai-responses"` 分支：system 等价信号来自顶层 `instructions` **和/或** `input` 数组里前导的 `role:"system"`/`role:"developer"` Item（Responses 的 role 取值比 Chat Completions 多一个 `developer`），两者拼接后一起哈希；`input` 为纯字符串时整串作为首条消息锚点。这不是可选项——Responses 协议下手动回传上下文（`context += res1.output`）时，上一轮的加密 reasoning Item（`encrypted_content`）只有创建它的那个端点能解密，一旦 failover/条件路由换了端点，跟着换的还有"新端点看不懂上一轮的加密状态"这个问题；Sticky Model 的会话亲和正是为同一类问题（prompt cache 按端点失效）设计的机制，扩展它的指纹计算即可原样覆盖 Responses 的这个新问题，不需要另造一套状态保护。
 * `imgprep`：Responses 的图片块是 `{"type":"input_image","image_url":"data:...","detail":"...","file_id":"..."}`——`image_url` 是**扁平字符串字段**，不是 Chat Completions 那种嵌套对象 `{"image_url":{"url":...}}`（见 [openai-python SDK 的 `ResponseInputImageParam`](https://github.com/openai/openai-python)，OpenAPI 生成、字段名的权威来源）。`rewriteResponsesImage` 单独实现；`HasImageMarker` 额外加了 `input_image` 子串检查——常见的内联图片场景能靠 `"image_url"` 这个 KEY 本身命中原有 marker，但 `file_id`-only（Files API 引用，无 `image_url` 字段）的块两个既有 marker 都命中不到，需要专门兜底。
 * `server/facts.go` 的 `estimateDocumentTokens`：Responses 的 `input_file` 块内联数据字段名是 `file_data`，不是 Anthropic 的 `data`——字段名真的不同，不是嵌套方式不同，需要多认一个 marker。
@@ -105,7 +105,7 @@ Upstream   ├─ 2xx → 响应归一化 → 转发 → 上报健康成功 → 
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
 * **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503，消息按具体原因区分（全员冷却中、或某个 Condition 拒绝了全部候选，见「调度与健康」）。凡进入 failover 循环的响应带 `X-VMR-Attempts` 与 `X-VMR-Route-Reason`（成功另带 `X-VMR-Endpoint`），有过失败尝试时再带 `X-VMR-Failover`；路由之前被拒的请求（401/404/413/坏 JSON）不带。`X-VMR-Route-Reason` 形如 `pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1`，`pick` 三选一（`order`/`quota`/`sticky`，优先级依次升高——额度感知重排真正换了队首时给 `pick=quota`，见 §6.6），只印真正发生过的部分（最常见的按序选中只剩 `pick=order eligible=3/3`）；`X-VMR-Failover` 形如 `deepseek/deepseek-v4:429, minimax/m2:500`，无 HTTP 响应的构建/网络失败记 `:err`。两者都沿用既有的 `X-VMR-*` 例外（§5.4），内容不超出 `X-VMR-Endpoint` 已暴露的范围。**实现约束**：`X-VMR-Failover` 必须在每次尝试**之前**写入截至目前的失败——成功的那次尝试在 `forwardSuccess` 内部自行 `WriteHeader` 后直接返回，不再回到 `Serve`，循环后才写就只有全败路径生效。
 
-* **`role_map`：按 endpoint-group 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。`models.<name>.endpoints[]` 的某条 entry 下配 `role_map: {developer: system}`，`adapter.RewriteRoles`（`internal/adapter/classify.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`topLevelValues`/`skipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 endpoint-group 一级而非 provider——同一账号可能背靠不止一个虚拟模型/上游模型族，不见得都需要同一套改写规则；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.EndpointGroup.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
+* **`role_map`：按 endpoint-group 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。`models.<name>.endpoints[]` 的某条 entry 下配 `role_map: {developer: system}`，`jsonscan.RewriteRoles`（`internal/jsonscan/rewrite.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`TopLevelValues`/`SkipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 endpoint-group 一级而非 provider——同一账号可能背靠不止一个虚拟模型/上游模型族，不见得都需要同一套改写规则；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.EndpointGroup.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
 ### 4.2 模块划分
 
@@ -119,7 +119,8 @@ internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass�
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch；quota.go：Provider.Quota 的 YAML 形状（QuotaConfig/LimitConfig）与校验（P1/P3 范围之外的字段一律加载期报错，见 §6.6）；pricing.go（P2.2）：全局 `pricing:` 块与 `Provider.Pricing` 的 YAML 形状，`validate()` 阶段调 `internal/pricing` 做三层解析，`metric: cost` 账号的四分量费率不齐即加载期报错
-internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表/model 改写/role 改写（classify.go 的 `rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）；fingerprint.go：SessionFingerprint（Sticky Model 用，按协议分派，含 openai-responses 的 instructions+input 分支）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
+internal/jsonscan          零依赖的 JSON 字节范围扫描引擎（架构审查 B1 批次从 internal/adapter 拆出）：RewriteModel/RewriteStream/RewriteRoles/RewriteInputRoles（顶层 model/stream/role 字段 byte-splice 重写，`rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）+ 底层扫描原语 TopLevelValues/WalkArrayElements/FirstArrayElement/ElementRole/Skip* + MarshalNoEscape；internal/adapter 的 SessionFingerprint/TopLevelProbe 仍调用这些原语但函数本身留在 adapter——判据：只有不需要知道任何具体字段名/角色名的纯词法函数才搬进本包
+internal/adapter           Adapter 接口 + 注册表 + 共享错误分类表（classify.go：DefaultClassify 及一组 vendor 错误特征词表，不再含 model/role 改写）；fingerprint.go：SessionFingerprint（Sticky Model 用，按协议分派，含 openai-responses 的 instructions+input 分支）、TopLevelProbe（一次结构化扫描同时取 model/stream/tools-非空，server.go 用于 ingress 预检）
 internal/adapter/openai    OpenAI Chat Completions 协议透传 Adapter
 internal/adapter/anthropic Anthropic Messages 协议透传 Adapter
 internal/adapter/openairesponses  OpenAI Responses 协议透传 Adapter（`POST /v1/responses`，见「协议模型」§3.1）
@@ -375,7 +376,7 @@ models:
 
 **② 上下文长度**（`max_context_tokens`，单个数值）——核心设计约束：**估算宁可偏大，不可偏小**。低估的后果是把请求路由到一个放不下的端点，触发 400，此时上游会用一个明确的 400 拒绝，交由普通的 failover 兜底（浪费一次尝试，不是灾难）；高估的后果是跳过了一个其实能处理的端点，代价是次优而非错误。两种误差不对称，估算公式因此必须偏保守，见下文估算公式。
 
-**③ tools**——单一布尔标记就是能检测到的全部，也是需要的全部。原因是架构层次问题：MCP 是客户端/编排层协议，MCP client 在本地把发现的工具翻译成标准的 `tools` 数组格式后才发给 LLM API，到达 vmr 时 MCP 来源的工具和手写声明的工具在线格式完全相同——vmr 物理上看不到这个区别，不需要、也无法进一步细分"MCP 工具"和"原生 function call"。检测：顶层 `tools` 数组非空，复用 `internal/adapter/classify.go` 已有的 `topLevelValues` 顶层 key 定位器（本来给 `RewriteModel`/`RewriteRoles` 用的，检测顶层 key 存在与否是同一类操作）。
+**③ tools**——单一布尔标记就是能检测到的全部，也是需要的全部。原因是架构层次问题：MCP 是客户端/编排层协议，MCP client 在本地把发现的工具翻译成标准的 `tools` 数组格式后才发给 LLM API，到达 vmr 时 MCP 来源的工具和手写声明的工具在线格式完全相同——vmr 物理上看不到这个区别，不需要、也无法进一步细分"MCP 工具"和"原生 function call"。检测：顶层 `tools` 数组非空，复用 `internal/jsonscan` 已有的 `TopLevelValues` 顶层 key 定位器（本来给 `RewriteModel`/`RewriteRoles` 用的，检测顶层 key 存在与否是同一类操作）。
 
 **④ thinking/extended reasoning**——协议形状按厂商分述，实现前建议对照当时最新的官方文档二次核实：
 
@@ -386,7 +387,7 @@ models:
 | DeepSeek | 不是请求参数，是模型选择（`deepseek-reasoner` vs `deepseek-chat`）——这类厂商不需要本条件，是端点选型问题 |
 | MiniMax | 请求侧参数的确切形状未确认 |
 
-`thinking` 目前**未注册对应 Condition**——注册一个永远不触发的条件不如不注册；协议形状确认后，检测逻辑复用 `topLevelValues` 即可接入，与 image/tools 走同一模式。
+`thinking` 目前**未注册对应 Condition**——注册一个永远不触发的条件不如不注册；协议形状确认后，检测逻辑复用 `jsonscan.TopLevelValues` 即可接入，与 image/tools 走同一模式。
 
 **（不做）price**：不是"这个端点能不能处理"的问题，是"都能处理时先试哪个"的问题——排序（Dimension）关注点，不是准入（Condition）关注点，等 `weight`/`cost` 排序维度真正要做时按 Dimension 模式加。
 
@@ -417,7 +418,7 @@ models:
 健康过滤 → 条件过滤（硬性淘汰） → 优先级/权重排序（既有 Dimension） → 额度感知重排（同档位内，软性） → 会话亲和重排（软性置顶）
 ```
 
-**识别"同一条对话"**：`internal/adapter.SessionFingerprint(raw, protocol)` 对 system prompt（若存在）和第一条非 system 消息分别算 md5，返回两个独立哈希，不合并、不解析其余内容——只做字节范围定位（复用 `topLevelValues` 定位 Anthropic 的顶层 `system` 字段；OpenAI 侧用同款的消息数组遍历骨架，只扫到第一个非 system 元素为止，代价与对话历史长度无关）。**必须包含 system prompt**：prompt cache 前缀从请求最前面开始比较，system prompt 排在 messages 之前，两个 system 不同的对话即使后续消息逐字相同，上游前缀匹配也早已分道扬镳——只哈希首条用户消息会把不同 Agent 的相同开场白误判成同一条对话。**不包含 `tools`**：`tools` 是结构化数据，若客户端动态枚举工具列表，同一批工具在不同请求里可能序列化出不同字节，会让锚点无谓跳变；`system` 和首条消息都是纯文本，没有这个风险。哈希本身的开销可忽略——`system` prompt 加首条消息常见场景是几 KB 到几十 KB，纯 Go `crypto/md5` 在现代硬件上处理 1MB 数据是个位数毫秒，相对一次真实的 LLM 请求往返（几百毫秒到几秒）可以忽略不计，不是需要优化的性能问题。
+**识别"同一条对话"**：`internal/adapter.SessionFingerprint(raw, protocol)` 对 system prompt（若存在）和第一条非 system 消息分别算 md5，返回两个独立哈希，不合并、不解析其余内容——只做字节范围定位（复用 `jsonscan.TopLevelValues` 定位 Anthropic 的顶层 `system` 字段；OpenAI 侧用同款的消息数组遍历骨架，只扫到第一个非 system 元素为止，代价与对话历史长度无关）。**必须包含 system prompt**：prompt cache 前缀从请求最前面开始比较，system prompt 排在 messages 之前，两个 system 不同的对话即使后续消息逐字相同，上游前缀匹配也早已分道扬镳——只哈希首条用户消息会把不同 Agent 的相同开场白误判成同一条对话。**不包含 `tools`**：`tools` 是结构化数据，若客户端动态枚举工具列表，同一批工具在不同请求里可能序列化出不同字节，会让锚点无谓跳变；`system` 和首条消息都是纯文本，没有这个风险。哈希本身的开销可忽略——`system` prompt 加首条消息常见场景是几 KB 到几十 KB，纯 Go `crypto/md5` 在现代硬件上处理 1MB 数据是个位数毫秒，相对一次真实的 LLM 请求往返（几百毫秒到几秒）可以忽略不计，不是需要优化的性能问题。
 
 **这套指纹计算与 `internal/report/session.go` 的离线会话分组算法是两套独立实现，不共用代码，也不落审计日志**：两者虽然都是"对首条消息取哈希"的思路，但风险取舍相反——`session.go` 服务的是事后报表分组，容忍 system prompt 逐轮漂移（用独立的 `SysChanged` 字段记录，不拿它拆分组）；Sticky Model 服务的是路由决策，必须把 system 算进去才能避免误判。`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来任何速度收益；反过来把这套字节扫描结果写进审计日志给 `session.go` 读，也没有一个真实消费者会用到它。两边保持独立，互不牵制。
 
@@ -801,7 +802,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 鉴权只保留 `api_keys` 列表，移除单把 `api_key`（破坏性变更） | 两者并存 | 单把 catch-all 能做的事列表全都能做（一把 key 的列表就是它），并存的代价是 `authenticate()` 第二条代码路径、配置面第二个概念、文档里"两者关系"一整段解释；对一个 breaking change 成本极低的本地工具，删掉换简单是划算的。迁移靠 config 校验的定向报错（不是 yaml 泛型错误），指明挪进 `api_keys` 与 ≥16 字符要求 |
 | 配置 YAML 严格解析（`KnownFields`，未知键拒绝加载） | 宽松解析（未知键静默忽略） | 拼错的键（`max_concurency`）静默失效是配置驱动工具最常见的真实事故：用户以为限流/超时生效了，实际没有。"坏配置拒绝启动"的既有契约本来就该覆盖这种坏法；代价是配置里不能再放自造的注释性键——本来也不该放 |
 | think_strip 触发加前缀守卫：首个非空 content/text 值以 `<think>` 开头才认定思考形态 | 任意位置出现 `<think>` 即触发 | 任意位置触发对"正文合法引用 think 标签"（用户问标签格式、代码示例复现它）会静默删掉引用片段——真实的数据损坏向量，且与 Thinking Process 形态的前缀守卫不对称。MiniMax 真实思考输出永远以标记开头，收紧触发条件不丢任何真实修复场景（回归测试锁定两个方向） |
-| `vmr replay -stream` 改写出站 body 的顶层 `stream` 字段（复用 splice 扫描器，缺键则补） | 只改 replay 本地簿记，flag 本身不生效 | 上游读的是 body 里的 `stream` 字段，不改字节等于没改。改写走与 model 改写同一条 `topLevelValues` splice 路径，除该字段外逐字节保留；`--record` 产出的记录同步反映覆盖后的请求 |
+| `vmr replay -stream` 改写出站 body 的顶层 `stream` 字段（复用 splice 扫描器，缺键则补） | 只改 replay 本地簿记，flag 本身不生效 | 上游读的是 body 里的 `stream` 字段，不改字节等于没改。改写走与 model 改写同一条 `jsonscan.TopLevelValues` splice 路径，除该字段外逐字节保留；`--record` 产出的记录同步反映覆盖后的请求 |
 | `vmr report` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755 | details/、索引、报表与 vmr-requests.json 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600，派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异，单用户机器上无感知 |
 | 条件路由用新接口 `Condition`（elimination，感知请求），不扩展 `Dimension` | 给 `Dimension.Compare` 加一个 request 参数 | `Dimension` 的现有实现（priority）和未来实现（weight/latency）本来就不需要看请求，硬塞一个参数会强迫每个排序维度都感知请求；`Condition` 语义上是准入不是排序，混进同一个接口是把两种不同的事情绑在一起。两个接口平行存在，`router.Serve` 分两步跑，互不干扰 |
 | 上下文长度条件（`WithinContext`）不注册进 `Condition` 接口，单独一个函数 | 也注册成一个普通 Condition | 唯一需要"全体拒绝时不能真的拒绝"这个降级行为的条件，其余（image/tools）都是确定性的，全体拒绝就该直接拒绝——为一个目前只有一个成员的特例改动整个接口的语义不划算，`router.Serve` 里两行代码就能表达清楚这个特例 |
