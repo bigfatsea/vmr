@@ -470,7 +470,11 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 		w.WriteHeader(uerr.status)
 		w.Write(uerr.body)
-		rt.logf("%s, %s, %d(%s, %dx)", logPrefix, tokenEst, resp.StatusCode, fmtDur(time.Since(start)), attempt)
+		// "status/class=" rather than the two separate fields the cooldown
+		// line below uses: class is always ErrClient on this branch (it's
+		// how execution got here), so a second "class=client" field would
+		// repeat information the branch itself already carries.
+		rt.logf("%s, %s, status/class=%d(%s, %dx)", logPrefix, tokenEst, resp.StatusCode, fmtDur(time.Since(start)), attempt)
 		return true, nil, false
 	}
 	cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())

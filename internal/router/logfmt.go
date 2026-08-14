@@ -30,11 +30,13 @@ func (rt *Router) Logf(format string, args ...any) {
 	rt.logf(format, args...)
 }
 
-// tagCol pads s to a fixed 8-char, left-aligned column — every log line
+// tagCol pads s to a fixed 9-char, left-aligned column — every log line
 // starts with one so the fields after it stay vertically aligned regardless
-// of how long the actor name is.
+// of how long the actor name is. 9 (not 8) so an exactly-8-char client tag
+// still gets a trailing separator space before the next field, instead of
+// running into it (an 8-wide column left zero room for a tag that long).
 func tagCol(s string) string {
-	return fmt.Sprintf("%-8s", s)
+	return fmt.Sprintf("%-9s", s)
 }
 
 // clientTag is the tagCol value for a real client request: the audit key
@@ -102,6 +104,12 @@ func capField(f core.RequestFacts) string {
 // and internal/story/render_md.go's fmtTokens — each display context tunes
 // its own scaling text rather than routing through one shared fmtutil
 // helper that would need yet another parameter to cover all three.
+//
+// Always renders in "KT" (or "MT" past 1M) — never a bare token count — so
+// every token field in the log shares one unit and a reader never has to
+// mentally convert "178T" against "40.2KT" on the next line. Sub-1K values
+// get 2 decimals instead of K/M's 1: at 1 decimal a value under 100 tokens
+// would round to "0.0KT" and lose the number entirely.
 func fmtTokensK(n int64) string {
 	switch {
 	case n >= 1_000_000:
@@ -109,7 +117,7 @@ func fmtTokensK(n int64) string {
 	case n >= 1000:
 		return fmt.Sprintf("%.1fKT", float64(n)/1000)
 	default:
-		return fmt.Sprintf("%dT", n)
+		return fmt.Sprintf("%.2fKT", float64(n)/1000)
 	}
 }
 
@@ -151,15 +159,15 @@ func usageTokenField(u chatmsg.Usage, ok bool, creq *core.CanonicalRequest) stri
 }
 
 // attemptPrefix renders the fixed lead-in shared by every tryOne outcome
-// line: client tag, virtual model routed to physical endpoint (» instead
-// of -> when the request is streaming — no separate "(stream)" suffix),
-// and which capabilities it exercised. Token usage and the attempt/status/
-// duration tail differ per outcome (estimate-only on every error path,
-// actual usage once forwardSuccess has one; done vs. still-failing-over),
-// so callers append those themselves instead of this baking in one shape
-// that would fit none of them well.
+// line: client tag, virtual model routed to physical endpoint (» for a
+// streaming request, > for a non-streaming one — no separate "(stream)"
+// suffix), and which capabilities it exercised. Token usage and the
+// attempt/status/duration tail differ per outcome (estimate-only on every
+// error path, actual usage once forwardSuccess has one; done vs.
+// still-failing-over), so callers append those themselves instead of this
+// baking in one shape that would fit none of them well.
 func attemptPrefix(rec *audit.Record, creq *core.CanonicalRequest, ep *core.Endpoint) string {
-	arrow := "->"
+	arrow := ">"
 	if creq.Stream {
 		arrow = "»"
 	}
