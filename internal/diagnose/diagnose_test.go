@@ -409,7 +409,7 @@ models:
 // TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap covers the fixed
 // config: the same role-rejecting upstream, but this endpoint's role_map
 // rewrites "developer" to "system" before the request leaves vmr —
-// adapter.RewriteRoles applies it inside ad.BuildRequest, so the upstream
+// jsonscan.RewriteRoles applies it inside ad.BuildRequest, so the upstream
 // never sees "developer" at all.
 func TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap(t *testing.T) {
 	ts := roleRejectingUpstream(t)

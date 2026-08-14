@@ -22,6 +22,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 )
@@ -156,7 +157,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		// uses (adds the key when the record's body never had one). rv is
 		// updated in place so everything downstream — the outbound request,
 		// the -record audit line — sees the request as replayed.
-		newRaw, err := adapter.RewriteStream(rv.Client.Request.Body, *opts.Stream)
+		newRaw, err := jsonscan.RewriteStream(rv.Client.Request.Body, *opts.Stream)
 		if err != nil {
 			return fmt.Errorf("-stream: rewrite body: %w", err)
 		}

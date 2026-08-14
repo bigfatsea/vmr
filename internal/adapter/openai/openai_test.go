@@ -48,7 +48,7 @@ func TestBuildRequestRewritesModelAndKeepsUnknownFields(t *testing.T) {
 	}
 }
 
-// TestBuildRequestAppliesRoleMap closes the gap between classify_test.go's
+// TestBuildRequestAppliesRoleMap closes the gap between internal/jsonscan's
 // coverage of RewriteRoles itself and its actual wiring into BuildRequest —
 // an endpoint with a configured RoleMap must see it applied to the outbound
 // body, and one without must not.

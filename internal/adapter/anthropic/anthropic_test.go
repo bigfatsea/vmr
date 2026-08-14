@@ -68,7 +68,7 @@ func TestBuildRequestForwardsProtocolHeaders(t *testing.T) {
 	}
 }
 
-// TestBuildRequestAppliesRoleMap closes the gap between classify_test.go's
+// TestBuildRequestAppliesRoleMap closes the gap between internal/jsonscan's
 // coverage of RewriteRoles itself and its actual wiring into BuildRequest.
 func TestBuildRequestAppliesRoleMap(t *testing.T) {
 	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"user","content":"hi"}]}`)

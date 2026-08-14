@@ -34,7 +34,7 @@ func postResponses(t *testing.T, ts *httptest.Server, body string) (*http.Respon
 
 // newResponsesUpstream is newUpstream's Responses-shaped counterpart: reads
 // the top-level "model" field the same way (it's still a top-level key,
-// same as Chat Completions — see adapter.RewriteModel), but answers with a
+// same as Chat Completions — see jsonscan.RewriteModel), but answers with a
 // Responses-shaped body (top-level "output", no "choices") and records the
 // raw request body so tests can assert on "input" vs "messages".
 type responsesUpstream struct {

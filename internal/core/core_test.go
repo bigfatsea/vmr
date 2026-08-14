@@ -159,17 +159,6 @@ func TestErrorClassString(t *testing.T) {
 	}
 }
 
-func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {
-	t.Parallel()
-	out, err := MarshalNoEscape("a < b & c > d")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != `"a < b & c > d"` {
-		t.Errorf("got %q, want no \\u003c-style escaping", out)
-	}
-}
-
 // TestWriteJSONSetsStatusAndContentType locks in the shape router and server
 // both rely on (formerly two byte-identical local copies).
 func TestWriteJSONSetsStatusAndContentType(t *testing.T) {

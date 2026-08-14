@@ -16,8 +16,8 @@ package server
 import (
 	"bytes"
 
-	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 )
 
 const (
@@ -122,7 +122,7 @@ func estimateDocumentTokens(body []byte) int64 {
 				break
 			}
 			rest = rest[idx+len(marker):]
-			end := adapter.IndexUnescapedQuote(rest)
+			end := jsonscan.IndexUnescapedQuote(rest)
 			if end < 0 {
 				break
 			}

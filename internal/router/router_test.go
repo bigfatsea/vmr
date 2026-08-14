@@ -78,7 +78,7 @@ models:
 // TestBuildSnapshotCarriesEndpointRoleMap documents that an endpoint-group's
 // role_map (e.g. remapping "developer" to "system" for providers that reject
 // the former) reaches the endpoint BuildRequest actually sees — closing the
-// gap between classify_test.go's coverage of the RewriteRoles byte-splice
+// gap between internal/jsonscan's coverage of the RewriteRoles byte-splice
 // itself and the config->snapshot->endpoint wiring around it. role_map lives
 // per endpoint-group (not per provider): the same account can back several
 // endpoint-groups with different upstream model families.

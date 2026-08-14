@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
 // Fuzz coverage for RewriteModel: the request-side rewrite is a hand-written
 // scanner, exactly the kind of code where manually enumerated test cases
@@ -15,7 +15,7 @@
 // fallback re-serializes the whole body and only promises semantic
 // equivalence (its own doc comment already accepts reformatting as that
 // path's known cost) — see tookFastPath below.
-package adapter
+package jsonscan
 
 import (
 	"encoding/json"
@@ -140,7 +140,7 @@ func fuzzRoleRewrite(t *testing.T, raw []byte, roleMap map[string]string, arrayK
 // only to pick which invariant applies below, never to predict the
 // resulting bytes.
 func tookFastPath(raw []byte) bool {
-	ranges, ok := topLevelValues(raw, modelKeyLiteral)
+	ranges, ok := TopLevelValues(raw, modelKeyLiteral)
 	return ok && len(ranges) > 0
 }
 
@@ -162,6 +162,9 @@ func FuzzRewriteModel(f *testing.F) {
 		{`{"model":null}`, "x"},
 		{`{"model":"vm","unicode":"é中"}`, "üp"},
 		{`  {  "model"  :  "vm"  ,  "stream" : true }  `, "spaced"},
+		{`{"model":"vm\ud83d"}`, "half-surrogate"},    // truncated UTF-16 escape sequence
+		{`{"model":"a\\\"b"}`, "quote-and-backslash"}, // model name candidate carries a literal quote+backslash
+		{strings200(`{"a":[`, `]}`), "deep-nesting"},  // deeply nested arrays before any top-level "model"
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s.raw), s.model)
@@ -239,6 +242,22 @@ func FuzzRewriteModel(f *testing.F) {
 	})
 }
 
+// strings200 builds a seed with 200 levels of array nesting between prefix
+// and suffix — deep-nesting is one of the malformed/pathological input
+// shapes worth seeding explicitly rather than hoping the fuzzer finds it.
+func strings200(prefix, suffix string) string {
+	var b []byte
+	b = append(b, prefix...)
+	for i := 0; i < 200; i++ {
+		b = append(b, '[')
+	}
+	for i := 0; i < 200; i++ {
+		b = append(b, ']')
+	}
+	b = append(b, suffix...)
+	return string(b)
+}
+
 // FuzzRewriteStream mirrors FuzzRewriteModel for RewriteStream, which
 // splices/adds the top-level "stream" boolean via the same scanner +
 // generic-fallback shape (and shared the same nil-map panic on a
@@ -263,7 +282,7 @@ func FuzzRewriteStream(f *testing.F) {
 			return
 		}
 		if !json.Valid(raw) {
-			// topLevelValues (shared with ingress's TopLevelProbe) is a
+			// TopLevelValues (shared with ingress's TopLevelProbe) is a
 			// structural scanner, not a strict validator — same leniency
 			// already relied on for trailing-garbage bodies. Garbage in
 			// produces no guarantee about the shape of what comes out,
@@ -319,6 +338,7 @@ func FuzzRewriteRoles(f *testing.F) {
 		``,
 		`{"messages":[{"role":"developer" `, // truncated element
 		`{"messages":[{"role": "developer" , "content" : "spaced"  }]}`,
+		`{"messages":[{"role":"developer","content":"trail\ud83d"}]}`, // truncated UTF-16 escape in content
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s))

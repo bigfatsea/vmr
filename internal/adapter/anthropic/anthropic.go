@@ -13,6 +13,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 )
 
 func init() { adapter.Register("anthropic", Anthropic{}) }
@@ -29,11 +30,11 @@ func (Anthropic) ResolveURL(baseURL string) string {
 }
 
 func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
-	body, err := adapter.RewriteModel(req.Raw, ep.Model)
+	body, err := jsonscan.RewriteModel(req.Raw, ep.Model)
 	if err != nil {
 		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
-	if body, err = adapter.RewriteRoles(body, ep.RoleMap); err != nil {
+	if body, err = jsonscan.RewriteRoles(body, ep.RoleMap); err != nil {
 		return nil, nil, fmt.Errorf("rewrite roles: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))

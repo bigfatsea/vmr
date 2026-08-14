@@ -20,6 +20,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 )
 
 func init() { adapter.Register("openai-responses", OpenAIResponses{}) }
@@ -42,15 +43,15 @@ func (OpenAIResponses) ResolveURL(baseURL string) string {
 }
 
 func (OpenAIResponses) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
-	body, err := adapter.RewriteModel(req.Raw, ep.Model)
+	body, err := jsonscan.RewriteModel(req.Raw, ep.Model)
 	if err != nil {
 		return nil, nil, fmt.Errorf("rewrite model: %w", err)
 	}
 	// Responses' role-bearing array is the top-level "input" (not
 	// "messages") — RewriteInputRoles is the protocol-specific counterpart
 	// to internal/adapter/openai's RewriteRoles, sharing the same byte-splice
-	// scanner underneath (see adapter.rewriteRolesInTopLevelArray).
-	if body, err = adapter.RewriteInputRoles(body, ep.RoleMap); err != nil {
+	// scanner underneath (see jsonscan's unexported rewriteRolesInTopLevelArray).
+	if body, err = jsonscan.RewriteInputRoles(body, ep.RoleMap); err != nil {
 		return nil, nil, fmt.Errorf("rewrite roles: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))

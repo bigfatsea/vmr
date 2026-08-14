@@ -43,7 +43,7 @@ import (
 	"strings"
 	"time"
 
-	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 
 	"golang.org/x/image/draw"
 
@@ -212,12 +212,12 @@ func rewriteBody(body []byte, protocol string, opts Options) ([]byte, bool, []Im
 	if !changed {
 		return nil, false, images, nil
 	}
-	newMsgs, err := core.MarshalNoEscape(msgs)
+	newMsgs, err := jsonscan.MarshalNoEscape(msgs)
 	if err != nil {
 		return nil, false, images, err
 	}
 	top[key] = newMsgs
-	out, err := core.MarshalNoEscape(top)
+	out, err := jsonscan.MarshalNoEscape(top)
 	if err != nil {
 		return nil, false, images, err
 	}
@@ -253,12 +253,12 @@ func rewriteMessage(msgIndex int, raw json.RawMessage, protocol string, opts Opt
 	if !changed {
 		return raw, false, images, nil
 	}
-	newContent, err := core.MarshalNoEscape(blocks)
+	newContent, err := jsonscan.MarshalNoEscape(blocks)
 	if err != nil {
 		return raw, false, images, err
 	}
 	msg["content"] = newContent
-	out, err := core.MarshalNoEscape(msg)
+	out, err := jsonscan.MarshalNoEscape(msg)
 	if err != nil {
 		return raw, false, images, err
 	}
@@ -317,17 +317,17 @@ func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json
 		return raw, false, &info, nil
 	}
 	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
-	uv, err := core.MarshalNoEscape(newURL)
+	uv, err := jsonscan.MarshalNoEscape(newURL)
 	if err != nil {
 		return raw, false, &info, err
 	}
 	iu["url"] = uv
-	ib, err := core.MarshalNoEscape(iu)
+	ib, err := jsonscan.MarshalNoEscape(iu)
 	if err != nil {
 		return raw, false, &info, err
 	}
 	block["image_url"] = ib
-	out, err := core.MarshalNoEscape(block)
+	out, err := jsonscan.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, &info, err
 	}
@@ -372,12 +372,12 @@ func rewriteResponsesImage(msgIndex int, raw json.RawMessage, block map[string]j
 		return raw, false, &info, nil
 	}
 	newURL := "data:" + newMime + ";base64," + base64.StdEncoding.EncodeToString(newData)
-	uv, err := core.MarshalNoEscape(newURL)
+	uv, err := jsonscan.MarshalNoEscape(newURL)
 	if err != nil {
 		return raw, false, &info, err
 	}
 	block["image_url"] = uv
-	out, err := core.MarshalNoEscape(block)
+	out, err := jsonscan.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, &info, err
 	}
@@ -419,22 +419,22 @@ func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]j
 	if !changed {
 		return raw, false, &info, nil
 	}
-	mv, err := core.MarshalNoEscape(newMime)
+	mv, err := jsonscan.MarshalNoEscape(newMime)
 	if err != nil {
 		return raw, false, &info, err
 	}
-	dv, err := core.MarshalNoEscape(base64.StdEncoding.EncodeToString(newData))
+	dv, err := jsonscan.MarshalNoEscape(base64.StdEncoding.EncodeToString(newData))
 	if err != nil {
 		return raw, false, &info, err
 	}
 	src["media_type"] = mv
 	src["data"] = dv
-	sb, err := core.MarshalNoEscape(src)
+	sb, err := jsonscan.MarshalNoEscape(src)
 	if err != nil {
 		return raw, false, &info, err
 	}
 	block["source"] = sb
-	out, err := core.MarshalNoEscape(block)
+	out, err := jsonscan.MarshalNoEscape(block)
 	if err != nil {
 		return raw, false, &info, err
 	}

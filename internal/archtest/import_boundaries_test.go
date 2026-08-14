@@ -72,13 +72,18 @@ var forbiddenImports = map[string][]string{
 
 // zeroInternalDepPackages must not depend on any other vmr/internal/*
 // package at all, per CLAUDE.md's module map: core is "shared types, no
-// internal deps" and fmtutil is "same layer as core". Checked separately
-// from forbiddenImports above because "must have zero deps" isn't
-// expressible as a finite forbidden list without silently going stale every
-// time a new internal package is added elsewhere in the tree.
+// internal deps" and fmtutil is "same layer as core". jsonscan joined this
+// list when the architecture review's B1 batch extracted it from
+// internal/adapter's classify.go/fingerprint.go — a pure JSON byte-range
+// scanning engine with no reason to depend on anything but the standard
+// library. Checked separately from forbiddenImports above because "must
+// have zero deps" isn't expressible as a finite forbidden list without
+// silently going stale every time a new internal package is added elsewhere
+// in the tree.
 var zeroInternalDepPackages = []string{
 	"vmr/internal/core",
 	"vmr/internal/fmtutil",
+	"vmr/internal/jsonscan",
 }
 
 // TestArchitecture_ZeroInternalDepPackages guards the two packages every

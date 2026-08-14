@@ -191,7 +191,7 @@ func headerKeys(h http.Header) []string {
 
 func TestHeaders_BodyUnaffected(t *testing.T) {
 	// Sanity: the model field in the body is still rewritten to the
-	// upstream model name (adapter.RewriteModel) — header pass-through
+	// upstream model name (jsonscan.RewriteModel) — header pass-through
 	// is independent of request body transformation.
 	u := newUpstream(t)
 	ts := newRouterServer(t, oneProviderYAML(u.srv.URL))

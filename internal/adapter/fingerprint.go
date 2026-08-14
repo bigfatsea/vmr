@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-08-14, by Sonnet 5
 
 package adapter
 
@@ -6,11 +6,25 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/json"
+
+	"vmr/internal/jsonscan"
 )
 
+// modelKeyLiteral/streamKeyLiteral/messagesKeyLiteral/inputKeyLiteral are
+// this package's own copies of the same protocol-field literals jsonscan's
+// RewriteModel/RewriteStream/RewriteRoles/RewriteInputRoles use internally —
+// duplicated on purpose rather than exported from jsonscan and imported here:
+// they're immutable byte constants, not shared state, and TopLevelProbe/
+// SessionFingerprint knowing what "model"/"stream"/"messages"/"input" mean is
+// exactly the domain knowledge that keeps these functions in adapter instead
+// of jsonscan (see jsonscan's package doc comment for the boundary).
 var (
 	systemKeyLiteral       = []byte(`"system"`)
 	instructionsKeyLiteral = []byte(`"instructions"`)
+	modelKeyLiteral        = []byte(`"model"`)
+	streamKeyLiteral       = []byte(`"stream"`)
+	messagesKeyLiteral     = []byte(`"messages"`)
+	inputKeyLiteral        = []byte(`"input"`)
 )
 
 // SessionFingerprint locates the system prompt (if any) and the first
@@ -33,7 +47,7 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 		return responsesSessionFingerprint(raw)
 	}
 
-	msgsRanges, msgsOK := topLevelValues(raw, messagesKeyLiteral)
+	msgsRanges, msgsOK := jsonscan.TopLevelValues(raw, messagesKeyLiteral)
 	if !msgsOK || len(msgsRanges) == 0 {
 		return sysHash, firstMsgHash, false
 	}
@@ -43,10 +57,10 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 	case "anthropic":
 		// Anthropic's system prompt is an independent top-level field, never
 		// an element of "messages" — so messages[0] is always non-system.
-		if sysRanges, sok := topLevelValues(raw, systemKeyLiteral); sok && len(sysRanges) > 0 {
+		if sysRanges, sok := jsonscan.TopLevelValues(raw, systemKeyLiteral); sok && len(sysRanges) > 0 {
 			sysHash = md5.Sum(raw[sysRanges[0][0]:sysRanges[0][1]])
 		}
-		first, fok := firstArrayElement(raw, arrStart, arrEnd)
+		first, fok := jsonscan.FirstArrayElement(raw, arrStart, arrEnd)
 		if !fok {
 			return sysHash, firstMsgHash, false
 		}
@@ -81,16 +95,16 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 // Model anchor needs both to agree for two turns to fingerprint identically.
 func responsesSessionFingerprint(raw json.RawMessage) (sysHash, firstMsgHash [16]byte, ok bool) {
 	var sysBytes []byte
-	if instrRanges, iok := topLevelValues(raw, instructionsKeyLiteral); iok && len(instrRanges) > 0 {
+	if instrRanges, iok := jsonscan.TopLevelValues(raw, instructionsKeyLiteral); iok && len(instrRanges) > 0 {
 		sysBytes = append(sysBytes, raw[instrRanges[0][0]:instrRanges[0][1]]...)
 	}
 
-	inputRanges, iok := topLevelValues(raw, inputKeyLiteral)
+	inputRanges, iok := jsonscan.TopLevelValues(raw, inputKeyLiteral)
 	if !iok || len(inputRanges) == 0 {
 		return sysHash, firstMsgHash, false
 	}
 	inStart, inEnd := inputRanges[0][0], inputRanges[0][1]
-	j := skipJSONWS(raw, inStart)
+	j := jsonscan.SkipJSONWS(raw, inStart)
 	if j >= inEnd {
 		return sysHash, firstMsgHash, false
 	}
@@ -120,53 +134,6 @@ func responsesSessionFingerprint(raw json.RawMessage) (sysHash, firstMsgHash [16
 	return sysHash, md5.Sum(firstBytes), true
 }
 
-// walkArrayElements scans the JSON array whose value occupies
-// raw[arrStart:arrEnd] (brackets included, as returned by topLevelValues)
-// and calls visit once per element with that element's own byte range.
-// Stops as soon as visit returns true. ok=false means the array couldn't be
-// scanned (not actually an array, or malformed) — distinct from found=false
-// (scanned fine, visit never returned true).
-func walkArrayElements(raw []byte, arrStart, arrEnd int, visit func(start, end int) bool) (found, ok bool) {
-	i := skipJSONWS(raw, arrStart)
-	if i >= len(raw) || raw[i] != '[' {
-		return false, false
-	}
-	i++
-	for i < arrEnd {
-		i = skipJSONWS(raw, i)
-		if i >= arrEnd || raw[i] == ']' {
-			return false, true
-		}
-		if raw[i] == ',' {
-			i++
-			continue
-		}
-		elemStart := i
-		var svOK bool
-		i, svOK = skipJSONValue(raw, i)
-		if !svOK {
-			return false, false
-		}
-		if visit(elemStart, i) {
-			return true, true
-		}
-	}
-	return false, true
-}
-
-// firstArrayElement returns the byte range of the array's first element.
-func firstArrayElement(raw []byte, arrStart, arrEnd int) ([]byte, bool) {
-	var result []byte
-	found, ok := walkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
-		result = raw[s:e]
-		return true
-	})
-	if !ok || !found {
-		return nil, false
-	}
-	return result, true
-}
-
 // leadingSystemAndFirstOther walks the messages array from the start,
 // concatenating the raw bytes of every leading role:"system" element, and
 // returns that plus the byte range of the first element whose role isn't
@@ -174,8 +141,8 @@ func firstArrayElement(raw []byte, arrStart, arrEnd int) ([]byte, bool) {
 // of the (possibly very long) conversation history.
 func leadingSystemAndFirstOther(raw []byte, arrStart, arrEnd int) (sysBytes, firstOther []byte, ok bool) {
 	var sys []byte
-	found, walkOK := walkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
-		if role, roleOK := elementRole(raw, s, e); roleOK && role == "system" {
+	found, walkOK := jsonscan.WalkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
+		if role, roleOK := jsonscan.ElementRole(raw, s, e); roleOK && role == "system" {
 			sys = append(sys, raw[s:e]...)
 			return false // keep walking past leading system elements
 		}
@@ -195,13 +162,13 @@ func leadingSystemAndFirstOther(raw []byte, arrStart, arrEnd int) (sysBytes, fir
 // role concept carries over here as a first-class input role, not just a
 // role_map rewrite target), so both count as "leading system-equivalent"
 // for sysHash purposes. A non-message Item (function_call, reasoning, …)
-// has no "role" key at all — elementRole reports roleOK=false for it, which
-// this treats the same as a role that isn't system/developer: it becomes
-// the first-message anchor, stopping the walk.
+// has no "role" key at all — jsonscan.ElementRole reports roleOK=false for
+// it, which this treats the same as a role that isn't system/developer: it
+// becomes the first-message anchor, stopping the walk.
 func leadingSystemAndFirstOtherResponses(raw []byte, arrStart, arrEnd int) (sysBytes, firstOther []byte, ok bool) {
 	var sys []byte
-	found, walkOK := walkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
-		if role, roleOK := elementRole(raw, s, e); roleOK && (role == "system" || role == "developer") {
+	found, walkOK := jsonscan.WalkArrayElements(raw, arrStart, arrEnd, func(s, e int) bool {
+		if role, roleOK := jsonscan.ElementRole(raw, s, e); roleOK && (role == "system" || role == "developer") {
 			sys = append(sys, raw[s:e]...)
 			return false // keep walking past leading system/developer elements
 		}
@@ -212,53 +179,6 @@ func leadingSystemAndFirstOtherResponses(raw []byte, arrStart, arrEnd int) (sysB
 		return nil, nil, false
 	}
 	return sys, firstOther, true
-}
-
-// elementRole scans one JSON object (raw[elemStart:elemEnd], braces
-// included) for a top-level "role" string key, returning its value.
-func elementRole(raw []byte, elemStart, elemEnd int) (string, bool) {
-	if elemStart >= elemEnd || raw[elemStart] != '{' {
-		return "", false
-	}
-	i := elemStart + 1
-	for i < elemEnd {
-		i = skipJSONWS(raw, i)
-		if i >= elemEnd || raw[i] == '}' {
-			return "", false
-		}
-		if raw[i] == ',' {
-			i++
-			continue
-		}
-		if raw[i] != '"' {
-			return "", false
-		}
-		keyStart := i
-		var ok bool
-		i, ok = skipJSONString(raw, i)
-		if !ok {
-			return "", false
-		}
-		isRole := bytes.Equal(raw[keyStart:i], roleKeyLiteral)
-		i = skipJSONWS(raw, i)
-		if i >= elemEnd || raw[i] != ':' {
-			return "", false
-		}
-		i = skipJSONWS(raw, i+1)
-		valStart := i
-		i, ok = skipJSONValue(raw, i)
-		if !ok {
-			return "", false
-		}
-		if isRole {
-			var roleStr string
-			if err := json.Unmarshal(raw[valStart:i], &roleStr); err != nil {
-				return "", false
-			}
-			return roleStr, true
-		}
-	}
-	return "", false
 }
 
 var toolsKeyLiteral = []byte(`"tools"`)
@@ -281,13 +201,13 @@ var toolsKeyLiteral = []byte(`"tools"`)
 // encoding/json's default "ignore unknown fields" behavior. Duplicate
 // top-level keys resolve last-write-wins, same as encoding/json.
 func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools bool, ok bool) {
-	i := skipJSONWS(raw, 0)
+	i := jsonscan.SkipJSONWS(raw, 0)
 	if i >= len(raw) || raw[i] != '{' {
 		return "", false, false, false
 	}
 	i++
 	for {
-		i = skipJSONWS(raw, i)
+		i = jsonscan.SkipJSONWS(raw, i)
 		if i >= len(raw) {
 			return "", false, false, false
 		}
@@ -304,18 +224,18 @@ func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools boo
 		}
 		keyStart := i
 		var kok bool
-		i, kok = skipJSONString(raw, i)
+		i, kok = jsonscan.SkipJSONString(raw, i)
 		if !kok {
 			return "", false, false, false
 		}
 		key := raw[keyStart:i]
-		i = skipJSONWS(raw, i)
+		i = jsonscan.SkipJSONWS(raw, i)
 		if i >= len(raw) || raw[i] != ':' {
 			return "", false, false, false
 		}
-		i = skipJSONWS(raw, i+1)
+		i = jsonscan.SkipJSONWS(raw, i+1)
 		valStart := i
-		i, kok = skipJSONValue(raw, i)
+		i, kok = jsonscan.SkipJSONValue(raw, i)
 		if !kok {
 			return "", false, false, false
 		}
@@ -340,10 +260,10 @@ func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools boo
 				return "", false, false, false
 			}
 		case bytes.Equal(key, toolsKeyLiteral):
-			vi := skipJSONWS(val, 0)
+			vi := jsonscan.SkipJSONWS(val, 0)
 			hasTools = vi < len(val) && val[vi] == '['
 			if hasTools {
-				vi = skipJSONWS(val, vi+1)
+				vi = jsonscan.SkipJSONWS(val, vi+1)
 				hasTools = vi < len(val) && val[vi] != ']'
 			}
 		}

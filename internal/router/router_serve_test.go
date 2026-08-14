@@ -530,7 +530,7 @@ models:
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
 
-	// Not valid JSON at all — adapter.RewriteModel's fallback path fails to
+	// Not valid JSON at all — jsonscan.RewriteModel's fallback path fails to
 	// unmarshal it, so OpenAI.BuildRequest returns an error before any HTTP
 	// call is made (u.hits stays 0).
 	w := serveReq(rt, "vm", []byte(`not json`))

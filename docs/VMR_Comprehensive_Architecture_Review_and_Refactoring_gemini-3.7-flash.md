@@ -1176,7 +1176,34 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 
 **性能核查（硬约束）**：迁移必须是**纯函数移动**，签名与函数体不得改动；改包名不影响内联决策。合并提交前跑一次 `go test -bench` 或至少人工确认没有引入接口、没有引入额外拷贝。
 
-**验收标准**：`go build` + `go test ./... -race` 全绿；`classify.go` ≤ 200 行；`go test -fuzz` 各跑 60s 无 crash；`archtest` 确认 `jsonx` 零内部依赖。
+**验收标准**：`go build` + `go test ./... -race` 全绿；`classify.go` ≤ 200 行；`go test -fuzz` 各跑 60s 无 crash；`archtest` 确认 `jsonscan` 零内部依赖。
+
+> **【B1 落地记录 · 2026-08-14】✅ 已完成。** 新建 `internal/jsonscan`（零内部依赖，`archtest` 已登记），迁入
+> `RewriteModel`/`RewriteStream`/`RewriteRoles`/`RewriteInputRoles`/`spliceValues`/`TopLevelValues`/
+> `SkipJSONWS`/`SkipJSONString`/`IndexUnescapedQuote`/`SkipJSONValue`/`rewriteRolesInTopLevelArray`（文档任务 1
+> 的 11 个函数）+ R1 扩围的 `WalkArrayElements`/`FirstArrayElement`/`ElementRole`（原 fingerprint.go）+
+> `core.MarshalNoEscape`（连同其 17 个调用点：13 个在 `imgprep.go`，4 个在原 classify.go 内部）+
+> `rewriteModelGeneric`（未列入文档清单，但是 `RewriteModel` 唯一的私有 fallback 助手，随其一起搬）。
+> `classify.go` 566→161 行（预算 200 内），`fingerprint.go` 357→277 行（比文档估的 260 略高，多出的是
+> 迁移后新增的字面量归属说明注释）。`server → adapter` 依赖未消失（`server.go` 自己仍用 `adapter.TopLevelProbe`），
+> 与文档"若因此消失"的条件式表述一致，未触碰 CLAUDE.md（同步模块表已按文档排期延后到 B6）。
+>
+> - **落地时核实到的偏差**：`FuzzRewriteModel`/`FuzzRewriteStream`/`FuzzRewriteRoles`/`FuzzRewriteInputRoles`/
+>   `FuzzSessionFingerprint` 在本文档写作前就已存在（commit `f8d15e6`/`54fc27d`），N7"今天没有任何 fuzz 覆盖"
+>   对这 5 个函数已过时；跟着函数搬家（连同 4 个既有 crash 语料用 `git mv` 一并迁移），未重新声称是新增覆盖。
+>   真正新增的是文档任务 6 第 1/2 项要求的**直接**扫描器级 fuzz——`FuzzTopLevelValues`/`FuzzWalkArrayElements`，
+>   连同截断 UTF-16 转义、200 层嵌套等畸形语料（任务 4）。
+> - **新 fuzz 抓到一个真实的不变量表述错误（写在测试里，不是生产代码里）**：最初给 `FuzzTopLevelValues`/
+>   `FuzzWalkArrayElements` 写的不变量断言"每个返回区间的内容都是合法 JSON 值"，被
+>   `{"model":A}`/`[A ` 这类整体已损坏的输入证伪——`SkipJSONValue` 对 number/true/false/null 的分支本来就是
+>   "扫到下一个结构分隔符为止"的定界器，不是校验器（`TopLevelValues`/`FuzzSessionFingerprint` 的既有文档注释
+>   早就写明这条），对一个本来就不是合法 JSON 的输入，扫描器只承诺不越界、不崩溃，不承诺子区间本身能独立解析。
+>   把不变量改为"仅当整份输入本身是合法 JSON 时才要求子区间也合法"后即通过；越界/单调不重叠这两条不受此条件
+>   限制，无条件成立（对应 N7 真正关心的"偏移量错误导致请求体被静默改坏"）。6 个 fuzz 目标（含
+>   `FuzzSessionFingerprint`）各跑 60s 无 crash。
+> - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿；负向验证：给 `jsonscan.go` 临时加一个
+>   `vmr/internal/audit` import，`TestArchitecture_ZeroInternalDepPackages` 立即报错列出 `core`/`audit`
+>   两条依赖，改回后恢复绿色。
 
 ---
 
