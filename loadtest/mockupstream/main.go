@@ -128,7 +128,7 @@ type sseChunk struct {
 // writeSSE marshals with HTML escaping off — json.Marshal's default would
 // turn the think_tag scenario's literal "<think>"/"</think>" into
 // "<think>", which never matches vmr's thinkOpenMarker/
-// thinkCloseMarker byte literals (same reason vmr's own core.MarshalNoEscape
+// thinkCloseMarker byte literals (same reason vmr's own jsonscan.MarshalNoEscape
 // exists).
 func writeSSE(w http.ResponseWriter, fl http.Flusher, v any) {
 	var buf bytes.Buffer

@@ -83,6 +83,16 @@ var fileLineLimits = map[string]int{
 	"cmd/vmr/cmd_check.go":  610,
 	"cmd/vmr/cmd_report.go": 500,
 	"cmd/vmr/cmd_status.go": 370,
+	// classify.go had no budget at all before the B1 batch (2026-08-14)
+	// extracted internal/jsonscan out of it and internal/adapter/
+	// fingerprint.go, shrinking it from 566 lines to ~160 specifically so it
+	// would stay a thin error-classification file — a budget-less file can't
+	// tell a contributor "you're rebuilding what B1 just moved out" the way
+	// a tripped test can. jsonscan's own two files are first-time budgets at
+	// the same ~15-20% headroom convention as every other entry here.
+	"internal/adapter/classify.go": 200,
+	"internal/jsonscan/scan.go":    320,
+	"internal/jsonscan/rewrite.go": 300,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

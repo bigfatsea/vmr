@@ -520,6 +520,33 @@ func BenchmarkRewriteRoles(b *testing.B) {
 	}
 }
 
+// BenchmarkRewriteRoles_ManyGrowingReplacements covers the case the output
+// buffer's exact-capacity precompute (rewriteRolesInTopLevelArray's `extra`)
+// exists for: a role_map remapping to a LONGER name across many messages, so
+// the total output exceeds len(raw) — the scenario where a bare
+// make([]byte, 0, len(raw)) would blow past capacity and pay for slice
+// growth + copy on every request.
+func BenchmarkRewriteRoles_ManyGrowingReplacements(b *testing.B) {
+	var msgs strings.Builder
+	msgs.WriteString(`{"messages":[`)
+	for i := 0; i < 500; i++ {
+		if i > 0 {
+			msgs.WriteByte(',')
+		}
+		msgs.WriteString(`{"role":"u","content":"hi"}`)
+	}
+	msgs.WriteString(`]}`)
+	body := []byte(msgs.String())
+	roleMap := map[string]string{"u": "a-much-longer-role-name-than-the-original"}
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := RewriteRoles(body, roleMap); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // TestMarshalNoEscapeSkipsHTMLEscaping moved from internal/core alongside
 // MarshalNoEscape itself.
 func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {

@@ -154,7 +154,7 @@ func rewriteRolesInTopLevelArray(raw json.RawMessage, roleMap map[string]string,
 
 	arrStart, arrEnd := msgRanges[0][0], msgRanges[0][1]
 	i := SkipJSONWS(raw, arrStart)
-	if i >= len(raw) || raw[i] != '[' {
+	if i >= arrEnd || raw[i] != '[' {
 		return raw, nil // messages value is not an array
 	}
 	i++ // skip '['
@@ -237,7 +237,16 @@ func rewriteRolesInTopLevelArray(raw json.RawMessage, roleMap map[string]string,
 	}
 
 	// Apply replacements via forward splice (offsets are absolute in raw).
-	out := make([]byte, 0, len(raw))
+	// Capacity is the exact final length (len(raw) plus each replacement's
+	// own length delta, e.g. "user"->"developer" grows the body by 5 bytes
+	// per hit): a role_map remapping to a longer role name across many
+	// messages would otherwise blow past a bare len(raw) capacity and pay
+	// for slice-growth reallocation + copy on every such request.
+	extra := 0
+	for _, r := range reps {
+		extra += len(r.newVal) - (r.end - r.start)
+	}
+	out := make([]byte, 0, len(raw)+extra)
 	prev := 0
 	for _, r := range reps {
 		out = append(out, raw[prev:r.start]...)

@@ -1,11 +1,12 @@
 // Ver 2026-08-14, by Sonnet 5
 
 // Package jsonscan is the zero-dependency JSON byte-range scanning engine
-// behind vmr's byte-splice model/stream/role rewrites (internal/adapter's
-// RewriteModel/RewriteStream/RewriteRoles/RewriteInputRoles used to live
-// here, plus the structural primitives internal/adapter's SessionFingerprint
-// and TopLevelProbe still call: TopLevelValues, WalkArrayElements,
-// FirstArrayElement, ElementRole, the Skip* helpers).
+// behind vmr's byte-splice model/stream/role rewrites: RewriteModel/
+// RewriteStream/RewriteRoles/RewriteInputRoles, which used to live in
+// internal/adapter before the B1 refactor batch moved them here, plus the
+// structural primitives internal/adapter's SessionFingerprint and
+// TopLevelProbe still call: TopLevelValues, WalkArrayElements,
+// FirstArrayElement, ElementRole, the Skip* helpers.
 //
 // Everything here is a structural scanner, not a strict validator: malformed
 // input is declined (ok=false / an error), never panics, and a scan that

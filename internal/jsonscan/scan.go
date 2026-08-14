@@ -180,7 +180,7 @@ func TopLevelValues(raw, keyLiteral []byte) (ranges [][2]int, ok bool) {
 // (scanned fine, visit never returned true).
 func WalkArrayElements(raw []byte, arrStart, arrEnd int, visit func(start, end int) bool) (found, ok bool) {
 	i := SkipJSONWS(raw, arrStart)
-	if i >= len(raw) || raw[i] != '[' {
+	if i >= arrEnd || raw[i] != '[' {
 		return false, false
 	}
 	i++
@@ -222,10 +222,11 @@ func FirstArrayElement(raw []byte, arrStart, arrEnd int) ([]byte, bool) {
 // ElementRole scans one JSON object (raw[elemStart:elemEnd], braces
 // included) for a top-level "role" string key, returning its value.
 func ElementRole(raw []byte, elemStart, elemEnd int) (string, bool) {
-	if elemStart >= elemEnd || raw[elemStart] != '{' {
+	i := SkipJSONWS(raw, elemStart)
+	if i >= elemEnd || raw[i] != '{' {
 		return "", false
 	}
-	i := elemStart + 1
+	i++
 	for i < elemEnd {
 		i = SkipJSONWS(raw, i)
 		if i >= elemEnd || raw[i] == '}' {
