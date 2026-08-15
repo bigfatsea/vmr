@@ -1,8 +1,8 @@
 // Ver 2026-07-25, by Sonnet 5
 
 // ToolShapeStats/ToolShapes: per declared-tool-set usage aggregation,
-// consumed by the report §7 tool-waste section (buildTools converts every
-// field into the report's own richer ToolShapeRow — see aggregate.go).
+// consumed by the report §7 tool-waste section (recextract.go's buildTools
+// converts every field into the report's own richer ToolShapeRow, rows.go).
 package report
 
 import "sort"
@@ -11,7 +11,7 @@ import "sort"
 // shape (a distinct declared-tool set). "Actual use" counts only each
 // request's own turn — extracted from the response, so tool calls repeated
 // through resent history are never double-counted. Named distinctly from
-// the package's own richer ToolShapeRow (aggregate.go) — that one adds
+// the package's own richer ToolShapeRow (rows.go) — that one adds
 // derived waste/utilization fields on top of these raw counts.
 type ToolShapeStats struct {
 	Shape         string         `json:"shape"`

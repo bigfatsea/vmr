@@ -5,7 +5,11 @@
 // lives in render_doc.go + one section_*.go per numbered section; the
 // per-request detail files in detail.go/render.go; session and task
 // grouping in session.go; token extraction in chatmsg.ExtractUsage; the
-// optional pricing sidecar in pricing.go.
+// optional pricing sidecar in pricing.go. Per-bucket accumulation
+// (TrafficStats.Ingest and friends) lives in ingest.go; per-record
+// extraction (buildRec2 and friends) lives in recextract.go — this file is
+// buildInternal's own orchestration: aggState plus its three phases
+// (scanFiles/finishBuckets/sortBuckets).
 //
 // The report is organized around nine numbered sections (§0-§8) plus §6.5
 // sticky effectiveness, §6.6 endpoint value, and §6.7 compaction — see
@@ -25,14 +29,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
-	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 	"vmr/internal/taskseg"
 )
@@ -100,12 +102,67 @@ var diagnosticNormMarker = map[string]bool{
 	"thinking_process_pattern_detected": true,
 }
 
+// aggState is buildInternal's per-run working state: every bucket map plus
+// the collectors/inputs its three phases (scanFiles/finishBuckets/
+// sortBuckets, below) need. Split out so buildInternal itself is just the
+// three-call orchestration — see that function's own doc comment.
+type aggState struct {
+	rep         *Report2
+	sess        *SessionAnalysis
+	sessionInfo map[string]*SessionInfo
+
+	byModel    map[string]*Row
+	byDate     map[string]*Row
+	hours      map[string]*HourRow
+	hoursOfDay map[int]*HourRow
+	eps        map[string]*EndpointRow
+	epsAll     map[string]*EndpointRow
+	byClient   map[string]*ClientRow
+	workloads  map[string]*WorkloadRow
+	sessions   map[string]*SessionRow
+
+	stickyCol         *stickyCollector
+	clientEndpointCol *clientEndpointCollector
+	pricingSrc        *pricing.Resolver
+
+	from, to time.Time
+}
+
+func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolver) *aggState {
+	sessionInfo := map[string]*SessionInfo{}
+	for _, s := range sess.Sessions {
+		sessionInfo[s.ID] = s
+	}
+	return &aggState{
+		rep:               rep,
+		sess:              sess,
+		sessionInfo:       sessionInfo,
+		byModel:           map[string]*Row{},
+		byDate:            map[string]*Row{},
+		hours:             map[string]*HourRow{},
+		hoursOfDay:        map[int]*HourRow{},
+		eps:               map[string]*EndpointRow{},
+		epsAll:            map[string]*EndpointRow{},
+		byClient:          map[string]*ClientRow{},
+		workloads:         map[string]*WorkloadRow{},
+		sessions:          map[string]*SessionRow{},
+		stickyCol:         newStickyCollector(),
+		clientEndpointCol: newClientEndpointCollector(),
+		pricingSrc:        pricingSrc,
+	}
+}
+
 // buildInternal is Build/BuildCached's shared body — see build_cached.go
 // for both entry points' doc comments and the full rationale (two-read
 // design, onRecord's independence from Build's own success/failure, the
-// session-analysis-failure error message below). Split into its own file
-// purely to keep this one under internal/archtest's line budget; no
-// behavior split, buildInternal is the only thing that does real work.
+// session-analysis-failure error message below). Kept to session analysis
+// plus wiring aggState's three phases (scanFiles/finishBuckets/sortBuckets)
+// in sequence — no behavior split from the pre-B4 single function, only a
+// declaration/accumulation split (see rows.go's TrafficStats and
+// ingest.go's per-type Ingest methods) and a phase split (Part 8 batch B4).
+// Not a MetricAggregator interface: a single-threaded batch loop over one
+// record type has no caller that needs to swap the aggregator at runtime,
+// so an interface would buy polymorphism nobody uses.
 func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
 	sess, cache, err := AnalyzeSessionsCached(paths, prior, prof)
 	if err != nil {
@@ -116,548 +173,279 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			"whether any input path still exists under its original name (housekeeping renames "+
 			"rotated files to .zst) and that it isn't corrupt", err)
 	}
-	// valid session IDs (for SessionRow accumulation) + lookup by id
-	sessionInfo := map[string]*SessionInfo{}
-	for _, s := range sess.Sessions {
-		sessionInfo[s.ID] = s
-	}
 
 	rep := &Report2{Meta: Meta{
 		Format: Format, GeneratedAt: now.Format(time.RFC3339), Inputs: paths,
 		SlowThreshold:    SlowThresholdMS,
 		PercentileMethod: "true per-bucket from raw dur_ms/ttft_ms/stream_ms; cross-day merges use pre-aggregated *_all/hours_of_day siblings",
 	}}
-	var from, to time.Time
 
-	// bucket maps
-	byModel := map[string]*Row{}
-	byDate := map[string]*Row{}
-	hours := map[string]*HourRow{}
-	hoursOfDay := map[int]*HourRow{}
-	eps := map[string]*EndpointRow{}
-	epsAll := map[string]*EndpointRow{}
-	byClient := map[string]*ClientRow{}
-	workloads := map[string]*WorkloadRow{}
-	sessions := map[string]*SessionRow{}
-	stickyCol := newStickyCollector()
-	clientEndpointCol := newClientEndpointCollector()
-
-	addA := func(r *Row, rc *rec2) {
-		r.Requests++
-		switch rc.outcome {
-		case "ok":
-			r.OK++
-		case "canceled":
-			r.Canceled++
-		default:
-			r.Errors++
-		}
-		if rc.stream {
-			r.Streams++
-		}
-		if rc.fallbacks > 0 {
-			r.Fallbacks++
-			if rc.outcome == "ok" {
-				r.FallbackRecovered++
-			} else {
-				r.FallbackFailed++
-			}
-		}
-		if rc.truncated {
-			r.Truncated++
-		}
-		r.BytesIn += rc.bytesIn
-		r.BytesOut += rc.bytesOut
-		if rc.usageOK {
-			r.TokensIn += rc.usage.In
-			r.TokensInCached += rc.usage.CacheRead
-			r.TokensInCacheWrite += rc.usage.CacheWrite
-			r.TokensOut += rc.usage.Out
-			r.TokensReasoning += rc.usage.Reasoning
-			r.TokensKnown++
-		}
-		if rc.durMS > 0 {
-			r.RequestsWithDur++
-			r.durs = append(r.durs, rc.durMS)
-			r.DurMSSum += rc.durMS
-			if rc.durMS > r.DurMSMax {
-				r.DurMSMax = rc.durMS
-			}
-			if rc.durMS > SlowThresholdMS {
-				r.SlowRequests++
-			}
-			if rc.usageOK {
-				r.tokDurMS += rc.durMS
-			}
-		}
-		if rc.ttftMS > 0 {
-			r.TTFTKnown++
-			r.TTFTMSSum += rc.ttftMS
-			r.ttfts = append(r.ttfts, rc.ttftMS)
-		}
-		if rc.streamOK {
-			r.StreamKnown++
-			r.streamMS = append(r.streamMS, rc.streamMS)
-		}
-		r.Images += rc.images
-		r.ImagesCompressed += rc.imagesCompressed
-		if len(rc.roleChars) > 0 {
-			if r.RoleChars == nil {
-				r.RoleChars = map[string]int64{}
-			}
-			for role, c := range rc.roleChars {
-				r.RoleChars[role] += c
-			}
-		}
-		if len(rc.roleTokens) > 0 {
-			if r.RoleTokens == nil {
-				r.RoleTokens = map[string]int64{}
-			}
-			for role, t := range rc.roleTokens {
-				r.RoleTokens[role] += t
-			}
-		}
+	st := newAggState(rep, sess, pricingSrc)
+	if err := st.scanFiles(paths, progress, onRecord); err != nil {
+		return nil, nil, nil, err
 	}
+	st.finishBuckets(pricingInfo, quotas, now, progress)
+	st.sortBuckets()
+	return rep, sess, cache, nil
+}
 
-	addHour := func(h *HourRow, rc *rec2) {
-		h.Requests++
-		switch rc.outcome {
-		case "ok":
-			h.OK++
-		case "canceled":
-		default:
-			h.Errors++
-		}
-		if rc.fallbacks > 0 {
-			h.Fallbacks++
-		}
-		if rc.truncated {
-			h.Truncated++
-		}
-		h.BytesIn += rc.bytesIn
-		h.BytesOut += rc.bytesOut
-		if rc.usageOK {
-			h.TokensIn += rc.usage.In
-			h.TokensInCached += rc.usage.CacheRead
-			h.TokensInCacheWrite += rc.usage.CacheWrite
-			h.TokensOut += rc.usage.Out
-			h.TokensKnown++
-		}
-		if rc.durMS > 0 {
-			h.RequestsWithDur++
-			h.durs = append(h.durs, rc.durMS)
-			if rc.durMS > h.DurMSMax {
-				h.DurMSMax = rc.durMS
-			}
-			if rc.durMS > SlowThresholdMS {
-				h.SlowRequests++
-			}
-		}
-		if rc.ttftMS > 0 {
-			h.TTFTKnown++
-			h.ttfts = append(h.ttfts, rc.ttftMS)
-		}
-		if rc.streamOK {
-			h.StreamKnown++
-			h.streamMS = append(h.streamMS, rc.streamMS)
-		}
-		h.Images += rc.images
-	}
-
-	// Endpoint attempt-level accounting (G-family).
-	addAttempt := func(e *EndpointRow, a audit.Attempt) {
-		e.Attempts++
-		// Forwarded is OK's condition WITHOUT `Error == ""` — see its own
-		// doc comment (rows.go): a truncated 2xx still got forwarded and
-		// still got charged, so only this count reproduces the router's
-		// requests-metric quota charging exactly.
-		if a.Response != nil && a.Response.Status < 400 {
-			e.Forwarded++
-		}
-		if a.Error == "" && a.Response != nil && a.Response.Status < 400 {
-			e.OK++
-			for _, n := range a.Norm {
-				if !diagnosticNormMarker[n] {
-					continue
-				}
-				if e.NormCounts == nil {
-					e.NormCounts = map[string]int{}
-				}
-				e.NormCounts[n]++
-			}
-		} else {
-			e.Failed++
-			e.WastedMS += a.DurMS
-			cls := attemptErrorClass(a)
-			if cls == "" {
-				cls = "unknown"
-			}
-			if e.ErrorClasses == nil {
-				e.ErrorClasses = map[string]int{}
-			}
-			e.ErrorClasses[cls]++
-		}
-	}
-	// Request-level metrics attach to the endpoint that served the client.
-	addEndpointReq := func(e *EndpointRow, rc *rec2) {
-		e.Requests++
-		if rc.outcome == "ok" {
-			e.RequestsOK++
-		}
-		if rc.usageOK {
-			e.TokensIn += rc.usage.In
-			e.TokensInCached += rc.usage.CacheRead
-			e.TokensInCacheWrite += rc.usage.CacheWrite
-			e.TokensOut += rc.usage.Out
-			e.TokensReasoning += rc.usage.Reasoning
-			e.TokensKnown++
-			e.inToks = append(e.inToks, rc.usage.In)
-			e.outToks = append(e.outToks, rc.usage.Out)
-		} else if rc.estInFresh > 0 || rc.estOut > 0 {
-			// Usage was never sniffed: carry the same degraded estimate the
-			// router charged, in its own fields (see EndpointRow's doc
-			// comment for why these must not merge into TokensIn*/TokensOut).
-			e.TokensInFreshEst += rc.estInFresh
-			e.TokensOutEst += rc.estOut
-			e.TokensEstimated++
-		}
-		if rc.ttftMS > 0 {
-			e.TTFTKnown++
-			e.ttfts = append(e.ttfts, rc.ttftMS)
-		}
-		if rc.durMS > 0 {
-			e.RequestsWithDur++
-			e.durs = append(e.durs, rc.durMS)
-			e.DurMSSum += rc.durMS
-			if rc.durMS > e.DurMSMax {
-				e.DurMSMax = rc.durMS
-			}
-			if rc.durMS > SlowThresholdMS {
-				e.SlowRequests++
-			}
-		}
-		if rc.streamOK {
-			e.StreamKnown++
-			e.streamMS = append(e.streamMS, rc.streamMS)
-		}
-	}
-
-	addClient := func(c *ClientRow, rc *rec2) {
-		c.Requests++
-		switch rc.outcome {
-		case "ok":
-			c.OK++
-		case "canceled":
-		default:
-			c.Errors++
-		}
-		if rc.usageOK {
-			c.TokensIn += rc.usage.In
-			c.TokensInCached += rc.usage.CacheRead
-			c.TokensInCacheWrite += rc.usage.CacheWrite
-			c.TokensOut += rc.usage.Out
-			c.TokensReasoning += rc.usage.Reasoning
-			c.TokensKnown++
-			c.inToks = append(c.inToks, rc.usage.In)
-			c.outToks = append(c.outToks, rc.usage.Out)
-		}
-		if rc.durMS > 0 {
-			c.RequestsWithDur++
-			c.durs = append(c.durs, rc.durMS)
-			if rc.durMS > SlowThresholdMS {
-				c.SlowRequests++
-			}
-		}
-		if rc.ttftMS > 0 {
-			c.ttfts = append(c.ttfts, rc.ttftMS)
-		}
-		if rc.streamOK {
-			c.streamMS = append(c.streamMS, rc.streamMS)
-		}
-	}
-
-	addWorkload := func(w *WorkloadRow, rc *rec2) {
-		w.Requests++
-		if rc.usageOK {
-			w.TokensIn += rc.usage.In
-			w.TokensInCached += rc.usage.CacheRead
-			w.TokensInCacheWrite += rc.usage.CacheWrite
-			w.TokensOut += rc.usage.Out
-			w.TokensKnown++
-		}
-		if rc.durMS > 0 {
-			w.RequestsWithDur++
-			w.durs = append(w.durs, rc.durMS)
-			if rc.durMS > SlowThresholdMS {
-				w.SlowRequests++
-			}
-		}
-		if rc.streamOK {
-			w.streamMS = append(w.streamMS, rc.streamMS)
-		}
-		w.ToolCalls += len(rc.toolCalls)
-		if len(rc.toolCalls) > 0 {
-			w.RequestsWithToolCalls++
-		}
-	}
-
-	addSession := func(s *SessionRow, rc *rec2) {
-		s.Requests++
-		switch rc.outcome {
-		case "ok":
-			s.OK++
-		case "canceled":
-		default:
-			s.Errors++
-		}
-		if rc.fallbacks > 0 {
-			s.Fallbacks++
-		}
-		if rc.truncated {
-			s.Truncated++
-		}
-		if rc.usageOK {
-			s.TokensIn += rc.usage.In
-			s.TokensInCached += rc.usage.CacheRead
-			s.TokensInCacheWrite += rc.usage.CacheWrite
-			s.TokensOut += rc.usage.Out
-			s.TokensKnown++
-		}
-		if rc.durMS > 0 {
-			s.RequestsWithDur++
-			s.durs = append(s.durs, rc.durMS)
-			if rc.durMS > s.DurMSMax {
-				s.DurMSMax = rc.durMS
-			}
-		}
-		if rc.ttftMS > 0 {
-			s.TTFTKnown++
-			s.ttfts = append(s.ttfts, rc.ttftMS)
-		}
-		s.Images += rc.images
-		if len(rc.roleChars) > 0 {
-			if s.RoleChars == nil {
-				s.RoleChars = map[string]int64{}
-			}
-			for role, c := range rc.roleChars {
-				s.RoleChars[role] += c
-			}
-		}
-	}
-
-	// ---- single pass over files, joined to ReqInfo ----
+// scanFiles is buildInternal's single pass over the input files, joined to
+// ReqInfo via st.sess.Lookup — the phase that does all the I/O.
+func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo)) error {
 	for fileIdx, path := range paths {
 		fileStart := time.Now()
 		var fileRecords int
-		rc, err := audit.OpenLogFile(path)
+		f, err := audit.OpenLogFile(path)
 		if err != nil {
-			return nil, nil, nil, err
+			return err
 		}
 		line := 0
-		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
+		scanErr := audit.ForEachLine(f, audit.MaxLogLine, func(lineBytes []byte) {
 			line++
 			var arec audit.Record
 			if err := json.Unmarshal(lineBytes, &arec); err != nil {
-				rep.Meta.ParseErrors++
+				st.rep.Meta.ParseErrors++
 				return
 			}
-			rep.Meta.Records++
+			st.rep.Meta.Records++
 			fileRecords++
-			if from.IsZero() || arec.TS.Before(from) {
-				from = arec.TS
-			}
-			if arec.TS.After(to) {
-				to = arec.TS
-			}
-			ri := sess.Lookup(path, line)
+			ri := st.sess.Lookup(path, line)
 			if onRecord != nil {
 				onRecord(&arec, ri)
 			}
-			rc := buildRec2(&arec, ri, path, line)
-
-			date := rc.date
-			hour := rc.hour
-			model := rc.model
-			if model == "" {
-				model = "(rejected)"
-			}
-
-			// 1. Overall
-			addA(&rep.Overall, rc)
-			// 2. ByModel
-			mk := model + "\x00" + rc.protocol
-			mr := byModel[mk]
-			if mr == nil {
-				mr = &Row{Model: model, Protocol: rc.protocol}
-				byModel[mk] = mr
-			}
-			addA(mr, rc)
-			// 3. ByDate
-			dr := byDate[date]
-			if dr == nil {
-				dr = &Row{Date: date}
-				byDate[date] = dr
-			}
-			addA(dr, rc)
-			// 4. Hours + HoursOfDay
-			hk := fmt.Sprintf("%s\x00%02d", date, hour)
-			hr := hours[hk]
-			if hr == nil {
-				hr = &HourRow{Date: date, Hour: hour}
-				hours[hk] = hr
-			}
-			addHour(hr, rc)
-			hod := hoursOfDay[hour]
-			if hod == nil {
-				hod = &HourRow{Hour: hour}
-				hoursOfDay[hour] = hod
-			}
-			addHour(hod, rc)
-			// 5. Endpoints + EndpointsAll (attempts), request-level on success ep
-			//
-			// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does
-			// NOT make the request-level half fire once. EndpointLabel is
-			// protocol:provider:model with no key component, so one provider's
-			// several api_keys all share ONE label and a failover between two
-			// of its keys matched twice, double-counting every request-level
-			// metric on that row (caught by cmd/vmr/quota_parity_test.go's
-			// tokens case).
-			reqAttributed := false
-			for _, a := range arec.Attempts {
-				k := date + "\x00" + a.Endpoint
-				e := eps[k]
-				if e == nil {
-					e = &EndpointRow{Date: date, Endpoint: a.Endpoint}
-					eps[k] = e
-				}
-				addAttempt(e, a)
-				ea := epsAll[a.Endpoint]
-				if ea == nil {
-					ea = &EndpointRow{Endpoint: a.Endpoint}
-					epsAll[a.Endpoint] = ea
-				}
-				addAttempt(ea, a)
-				if a.Endpoint == rc.endpoint && !reqAttributed {
-					reqAttributed = true
-					addEndpointReq(e, rc)
-					addEndpointReq(ea, rc)
-				}
-			}
-			// 6. ByClient (skip empty tag - auth disabled / no match)
-			if rc.clientKey != "" {
-				c := byClient[rc.clientKey]
-				if c == nil {
-					c = &ClientRow{ClientKey: rc.clientKey}
-					byClient[rc.clientKey] = c
-				}
-				addClient(c, rc)
-			}
-			// 7. Workloads
-			wc := rc.workloadClass
-			if wc == "" {
-				wc = "interactive"
-			}
-			w := workloads[wc]
-			if w == nil {
-				w = &WorkloadRow{Class: wc}
-				workloads[wc] = w
-			}
-			addWorkload(w, rc)
-			// 8. Sessions (only grouped)
-			if rc.sessionID != "" && sessionInfo[rc.sessionID] != nil {
-				s := sessions[rc.sessionID]
-				if s == nil {
-					info := sessionInfo[rc.sessionID]
-					s = &SessionRow{ID: info.ID, Title: info.Title, Tasks: len(info.Tasks),
-						ContinuedFrom: info.ContinuedFrom, Class: wc, ClientKey: rc.clientKey}
-					if len(info.Recs) > 0 {
-						s.From = info.Recs[0].TS.Format(time.RFC3339)
-						s.To = info.Recs[len(info.Recs)-1].TS.Format(time.RFC3339)
-					}
-					sessions[rc.sessionID] = s
-				}
-				addSession(s, rc)
-			}
-			// cost (if pricing): overall + by-model + by-date +
-			// by-endpoint (epsAll, cross-date — matches the Endpoint
-			// Health section's basis) + by-client, when each bucket
-			// applies to this record.
-			accumulateCost(rep, mr, dr, epsAll, byClient, pricingSrc, rc)
-			// Sticky Model effectiveness (sticky.go): buffered per session,
-			// resolved after the pass — it needs each session in order.
-			stickyCol.add(rc)
-			clientEndpointCol.add(rc)
-			// per-request export row
-			rep.requests = append(rep.requests, buildRequestRow(rc))
+			st.ingestRecord(&arec, ri, path, line)
 		}, func() {
-			rep.Meta.ParseErrors++
+			st.rep.Meta.ParseErrors++
 		})
-		rc.Close()
+		f.Close()
 		if scanErr != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %w", path, scanErr)
+			return fmt.Errorf("%s: %w", path, scanErr)
 		}
 		if progress != nil {
 			fmt.Fprintf(progress, "[%d/%d] %s  done: %d records (%s)\n",
 				fileIdx+1, len(paths), path, fileRecords, time.Since(fileStart).Round(time.Millisecond))
 		}
 	}
+	return nil
+}
 
-	if !from.IsZero() {
-		rep.Meta.From = from.Format(time.RFC3339)
-		rep.Meta.To = to.Format(time.RFC3339)
+// ingestRecord joins one audit.Record to its ReqInfo and fans it out to
+// every bucket it touches.
+func (st *aggState) ingestRecord(arec *audit.Record, ri *ReqInfo, path string, line int) {
+	if st.from.IsZero() || arec.TS.Before(st.from) {
+		st.from = arec.TS
+	}
+	if arec.TS.After(st.to) {
+		st.to = arec.TS
+	}
+	rc := buildRec2(arec, ri, path, line)
+
+	mr, dr := st.ingestRowBuckets(rc)
+	st.ingestEndpoints(arec, rc)
+	st.ingestSecondaryBuckets(rc)
+	// cost (if pricing): overall + by-model + by-date + by-endpoint (epsAll,
+	// cross-date — matches the Endpoint Health section's basis) + by-client,
+	// when each bucket applies to this record.
+	accumulateCost(st.rep, mr, dr, st.epsAll, st.byClient, st.pricingSrc, rc)
+	// Sticky Model effectiveness (sticky.go): buffered per session, resolved
+	// after the pass — it needs each session in order.
+	st.stickyCol.add(rc)
+	st.clientEndpointCol.add(rc)
+	// per-request export row
+	st.rep.requests = append(st.rep.requests, buildRequestRow(rc))
+}
+
+// ingestRowBuckets updates Overall/ByModel/ByDate/Hours/HoursOfDay,
+// returning the ByModel/ByDate rows so ingestRecord can price them without
+// a second map lookup.
+func (st *aggState) ingestRowBuckets(rc *rec2) (mr, dr *Row) {
+	model := rc.model
+	if model == "" {
+		model = "(rejected)"
+	}
+	st.rep.Overall.Ingest(rc)
+
+	mk := model + "\x00" + rc.protocol
+	mr = st.byModel[mk]
+	if mr == nil {
+		mr = &Row{Model: model, Protocol: rc.protocol}
+		st.byModel[mk] = mr
+	}
+	mr.Ingest(rc)
+
+	dr = st.byDate[rc.date]
+	if dr == nil {
+		dr = &Row{Date: rc.date}
+		st.byDate[rc.date] = dr
+	}
+	dr.Ingest(rc)
+
+	hk := fmt.Sprintf("%s\x00%02d", rc.date, rc.hour)
+	hr := st.hours[hk]
+	if hr == nil {
+		hr = &HourRow{Date: rc.date, Hour: rc.hour}
+		st.hours[hk] = hr
+	}
+	hr.Ingest(rc)
+
+	hod := st.hoursOfDay[rc.hour]
+	if hod == nil {
+		hod = &HourRow{Hour: rc.hour}
+		st.hoursOfDay[rc.hour] = hod
+	}
+	hod.Ingest(rc)
+	return mr, dr
+}
+
+// ingestEndpoints updates Endpoints/EndpointsAll from one record's attempts.
+func (st *aggState) ingestEndpoints(arec *audit.Record, rc *rec2) {
+	// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does NOT
+	// make the request-level half fire once. EndpointLabel is
+	// protocol:provider:model with no key component, so one provider's
+	// several api_keys all share ONE label and a failover between two of
+	// its keys matched twice, double-counting every request-level metric on
+	// that row (caught by cmd/vmr/quota_parity_test.go's tokens case).
+	reqAttributed := false
+	for _, a := range arec.Attempts {
+		k := rc.date + "\x00" + a.Endpoint
+		e := st.eps[k]
+		if e == nil {
+			e = &EndpointRow{Date: rc.date, Endpoint: a.Endpoint}
+			st.eps[k] = e
+		}
+		e.IngestAttempt(a)
+		ea := st.epsAll[a.Endpoint]
+		if ea == nil {
+			ea = &EndpointRow{Endpoint: a.Endpoint}
+			st.epsAll[a.Endpoint] = ea
+		}
+		ea.IngestAttempt(a)
+		if a.Endpoint == rc.endpoint && !reqAttributed {
+			reqAttributed = true
+			e.IngestRequest(rc)
+			ea.IngestRequest(rc)
+		}
+	}
+}
+
+// ingestSecondaryBuckets updates ByClient/Workloads/Sessions.
+func (st *aggState) ingestSecondaryBuckets(rc *rec2) {
+	// ByClient (skip empty tag - auth disabled / no match)
+	if rc.clientKey != "" {
+		c := st.byClient[rc.clientKey]
+		if c == nil {
+			c = &ClientRow{ClientKey: rc.clientKey}
+			st.byClient[rc.clientKey] = c
+		}
+		c.Ingest(rc)
+	}
+	// Workloads
+	wc := rc.workloadClass
+	if wc == "" {
+		wc = "interactive"
+	}
+	w := st.workloads[wc]
+	if w == nil {
+		w = &WorkloadRow{Class: wc}
+		st.workloads[wc] = w
+	}
+	w.Ingest(rc)
+	// Sessions (only grouped)
+	if rc.sessionID != "" && st.sessionInfo[rc.sessionID] != nil {
+		s := st.sessions[rc.sessionID]
+		if s == nil {
+			info := st.sessionInfo[rc.sessionID]
+			s = &SessionRow{ID: info.ID, Title: info.Title, Tasks: len(info.Tasks),
+				ContinuedFrom: info.ContinuedFrom, Class: wc, ClientKey: rc.clientKey}
+			if len(info.Recs) > 0 {
+				s.From = info.Recs[0].TS.Format(time.RFC3339)
+				s.To = info.Recs[len(info.Recs)-1].TS.Format(time.RFC3339)
+			}
+			st.sessions[rc.sessionID] = s
+		}
+		s.Ingest(rc)
+	}
+}
+
+// finishBuckets computes every bucket's derived fields (percentiles, cache
+// efficiency, ...) and the buckets built post-hoc from the finished ones
+// (Tools/Providers/ProviderQuotas/Compactions/Sticky/ClientEndpoints/
+// Efficiency) — see metrics.go's finishX functions for the per-bucket math.
+func (st *aggState) finishBuckets(pricingInfo *Pricing, quotas map[string]ProviderQuotaRef, now time.Time, progress io.Writer) {
+	rep := st.rep
+	if !st.from.IsZero() {
+		rep.Meta.From = st.from.Format(time.RFC3339)
+		rep.Meta.To = st.to.Format(time.RFC3339)
 	}
 
-	// ---- finish all buckets ----
 	finishRow(&rep.Overall)
-	for _, r := range byModel {
+	for _, r := range st.byModel {
 		finishRow(r)
 		rep.ByModel = append(rep.ByModel, *r)
 	}
-	for _, r := range byDate {
+	for _, r := range st.byDate {
 		finishRow(r)
 		rep.ByDate = append(rep.ByDate, *r)
 	}
-	for _, h := range hours {
+	for _, h := range st.hours {
 		finishHour(h)
 		rep.Hours = append(rep.Hours, *h)
 	}
-	for _, h := range hoursOfDay {
+	for _, h := range st.hoursOfDay {
 		finishHour(h)
 		rep.HoursOfDay = append(rep.HoursOfDay, *h)
 	}
-	for _, e := range eps {
+	for _, e := range st.eps {
 		finishEndpoint(e)
 		rep.Endpoints = append(rep.Endpoints, *e)
 	}
-	for _, e := range epsAll {
+	for _, e := range st.epsAll {
 		finishEndpoint(e)
 		rep.EndpointsAll = append(rep.EndpointsAll, *e)
 	}
-	for _, c := range byClient {
+	for _, c := range st.byClient {
 		finishClient(c)
 		rep.ByClient = append(rep.ByClient, *c)
 	}
-	for _, w := range workloads {
+	for _, w := range st.workloads {
 		finishWorkload(w)
 		rep.Workloads = append(rep.Workloads, *w)
 	}
-	for _, s := range sessions {
-		finishSession(s, sessionInfo[s.ID])
+	for _, s := range st.sessions {
+		finishSession(s, st.sessionInfo[s.ID])
 		rep.Sessions = append(rep.Sessions, *s)
 	}
-	rep.Tools = buildTools(sess)
+	rep.Tools = buildTools(st.sess)
 	rep.Providers = buildProviders(rep, quotas)
-	rep.ProviderQuotas = buildProviderQuotaRows(rep, quotas, now, from, to)
-	rep.Compactions = buildCompactions(sess)
-	rep.Sticky = stickyCol.result()
-	rep.ClientEndpoints = clientEndpointCol.result()
+	rep.ProviderQuotas = buildProviderQuotaRows(rep, quotas, now, st.from, st.to)
+	rep.Compactions = buildCompactions(st.sess)
+	rep.Sticky = st.stickyCol.result()
+	rep.ClientEndpoints = st.clientEndpointCol.result()
 	if clients, rows := clientEndpointScale(rep.ClientEndpoints); progress != nil && rows > 0 {
 		fmt.Fprintf(progress, "§5.5: %d client(s) x %d endpoint row(s)\n", clients, rows)
 	}
 	rep.Efficiency = buildFindingsForJSON(rep)
 	rep.Pricing = pricingInfo
+}
 
-	// ---- sort all slices ----
+// sortBuckets makes every slice's order reproducible across runs. Every
+// comparator below sorts primarily by a count/byte-size value that
+// legitimately repeats across rows (two endpoints can both have exactly 1
+// attempt; two sessions can both have exactly 2 requests). Each also
+// appends the bucket's own identity field as a tie-break — Endpoint/
+// ClientKey/Class/ID/Shape are each guaranteed unique within their own
+// slice (they're literally what these rows were grouped by), so the
+// comparator always returns a strict answer for two distinct rows. Without
+// it, ties fell back to whatever order the slice already had — which
+// itself comes from ranging over a Go map a few lines up (byModel/epsAll/
+// byClient/... in aggState), an order the language spec deliberately does
+// not guarantee is the same from one run to the next. The result: rows
+// sharing a tied value would silently swap places between two otherwise-
+// identical runs of the same binary against the same input (caught by
+// TestBuildIsDeterministic — first noticed by comparing loadtest-report.md
+// across two runs).
+func (st *aggState) sortBuckets() {
+	rep := st.rep
 	sortRows(rep.ByModel, "model")
 	sortRows(rep.ByDate, "date")
 	sort.Slice(rep.Hours, func(i, j int) bool {
@@ -673,21 +461,6 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 		}
 		return rep.Endpoints[i].Endpoint < rep.Endpoints[j].Endpoint
 	})
-	// Every comparator below sorts primarily by a count/byte-size value that
-	// legitimately repeats across rows (two endpoints can both have exactly
-	// 1 attempt; two sessions can both have exactly 2 requests). Each also
-	// appends the bucket's own identity field as a tie-break — Endpoint/
-	// ClientKey/Class/ID/Shape are each guaranteed unique within their own
-	// slice (they're literally what these rows were grouped by), so the
-	// comparator always returns a strict answer for two distinct rows.
-	// Without it, ties fell back to whatever order the slice already had —
-	// which itself comes from ranging over a Go map a few lines up
-	// (byModel/epsAll/byClient/... above), an order the language spec
-	// deliberately does not guarantee is the same from one run to the next.
-	// The result: rows sharing a tied value would silently swap places
-	// between two otherwise-identical runs of the same binary against the
-	// same input (caught by TestBuildIsDeterministic — first noticed by
-	// comparing loadtest-report.md across two runs).
 	sort.Slice(rep.EndpointsAll, func(i, j int) bool {
 		a, b := rep.EndpointsAll[i], rep.EndpointsAll[j]
 		if a.Attempts != b.Attempts {
@@ -727,257 +500,4 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 		}
 		return a.Shape < b.Shape
 	})
-	return rep, sess, cache, nil
-}
-
-// buildRequestRow maps a rec2 to its per-request export row.
-func buildRequestRow(rc *rec2) RequestRow {
-	rr := RequestRow{
-		TS:         rc.ts.Format("2006-01-02T15:04:05Z07:00"),
-		Session:    rc.sessionID,
-		Task:       rc.taskID,
-		Turn:       rc.taskSeq,
-		SessTurn:   rc.sessSeq,
-		Model:      rc.model,
-		Protocol:   rc.protocol,
-		Outcome:    rc.outcome,
-		ClientKey:  rc.clientKey,
-		Endpoint:   rc.endpoint,
-		Finish:     rc.finish,
-		DurMS:      rc.durMS,
-		TTFTMS:     rc.ttftMS,
-		Msgs:       rc.msgs,
-		Fallbacks:  rc.fallbacks,
-		Truncated:  rc.truncated,
-		ErrorClass: rc.errClass,
-		DetailFile: rc.detailFile,
-		Path:       rc.path,
-		Line:       rc.line,
-	}
-	if rc.usageOK {
-		rr.TokensIn = rc.usage.In
-		rr.TokensInCached = rc.usage.CacheRead
-		rr.TokensInFresh = rc.usage.Fresh()
-		rr.TokensOut = rc.usage.Out
-		rr.CacheEff = cacheEff(rc.usage.CacheRead, rr.TokensInFresh)
-	}
-	return rr
-}
-
-// WriteJSON writes the aggregate report JSON (vmr-report.json). Per-request
-// rows are NOT included (they live in vmr-requests.json).
-func WriteJSON(rep *Report2, path string) error {
-	data, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
-}
-
-// sortRows sorts Row slices by the given key ("model" or "date").
-func sortRows(rows []Row, key string) {
-	sort.Slice(rows, func(i, j int) bool {
-		a, b := rows[i], rows[j]
-		if key == "date" {
-			return a.Date < b.Date
-		}
-		if a.Requests != b.Requests {
-			return a.Requests > b.Requests
-		}
-		if a.Model != b.Model {
-			return a.Model < b.Model
-		}
-		return a.Protocol < b.Protocol
-	})
-}
-
-// buildRec2 extracts the aggregator's per-record fields from an audit.Record joined
-// to its ReqInfo (which may be nil for records the analyzer skipped).
-func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
-	// date/hour bucket keys use fmtutil.DisplayZone, not arec.TS's own offset.
-	r := &rec2{
-		ts:       arec.TS,
-		date:     arec.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
-		hour:     arec.TS.In(fmtutil.DisplayZone).Hour(),
-		model:    arec.Model,
-		protocol: arec.Protocol,
-		outcome:  arec.Outcome,
-		stream:   arec.Stream,
-		durMS:    arec.DurMS,
-		ttftMS:   arec.TTFTMS,
-		path:     path,
-		line:     line,
-	}
-	if arec.DurMS > 0 && arec.TTFTMS > 0 {
-		r.streamMS = arec.DurMS - arec.TTFTMS
-		if r.streamMS < 0 {
-			r.streamMS = 0
-		} else {
-			r.streamOK = true
-		}
-	}
-	// bytes (recompute; ReqInfo keeps these unexported)
-	r.bytesIn = bodyBytes(arec.Client.Request.Body)
-	if arec.Client.Response != nil {
-		r.bytesOut = bodyBytes(arec.Client.Response.Body)
-	}
-	// tool declaration bytes (recompute; ReqInfo.declBytes unexported)
-	r.toolDeclCount, r.toolDeclBytes = toolDeclInfo(arec.Client.Request.Body)
-	// endpoint served + last error class (recompute; ReqInfo unexported)
-	r.endpoint, r.errClass = endpointInfo(arec)
-	r.clientKey = arec.ClientKeyTag
-	// images
-	for _, img := range arec.Images {
-		r.images++
-		if img.Downscaled {
-			r.imagesCompressed++
-		}
-	}
-	// fallbacks
-	if len(arec.Attempts) > 1 {
-		r.fallbacks = 1
-	}
-	// truncated: ok outcome with a truncated attempt error
-	if arec.Outcome == "ok" {
-		for _, a := range arec.Attempts {
-			if attemptErrorClass(a) == "truncated" {
-				r.truncated = true
-				break
-			}
-		}
-	}
-	// join ReqInfo (grouping + expensive features it already computed)
-	if ri != nil {
-		r.usage = ri.Usage
-		r.usageOK = ri.UsageOK
-		r.finish = ri.Finish
-		r.truncated = r.truncated || ri.Truncated
-		r.fallbacks = ri.Fallbacks
-		r.images = ri.Images
-		r.imagesCompressed = ri.ImagesCompressed
-		r.toolCalls = ri.ToolCalls
-		r.roleChars = ri.RoleChars
-		r.roleTokens = ri.RoleTokens
-		r.msgs = ri.Msgs
-		r.sessionID = ri.SessionID
-		r.taskID = ri.TaskID
-		r.taskSeq = ri.TaskSeq
-		r.sessSeq = ri.SessSeq
-		r.tags = ri.Tags
-		r.compaction = ri.Compaction
-		r.summarizes = ri.Summarizes
-		r.continuesTo = ri.ContinuesTo
-		r.detailFile = ri.DetailFile
-		r.newInstruction = ri.NewInstruction
-		r.workloadClass = workloadClassOf(ri)
-	}
-	if !r.usageOK && r.endpoint != "" {
-		r.estInFresh, r.estOut = estimateDegradedTokens(arec)
-	}
-	return r
-}
-
-// endpointInfo returns the endpoint that served the client and the last
-// attempt's error class (for index display). "Served" prefers a strictly
-// successful attempt (no error, 2xx) but falls back to the last attempt that
-// got a 2xx response header at all: a stream truncated mid-transfer already
-// committed its status to the client via that endpoint before dying, so the
-// bytes/tokens/cost the client received are genuinely this endpoint's, not
-// unattributable — only SetSuccessResponse's status matters here, not
-// whether SetTruncated ran afterward.
-func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
-	var successEp, servedEp string
-	for _, a := range arec.Attempts {
-		if a.Response != nil && a.Response.Status < 400 {
-			servedEp = a.Endpoint
-			if a.Error == "" {
-				successEp = a.Endpoint
-			}
-		}
-	}
-	if successEp == "" {
-		successEp = servedEp
-	}
-	if len(arec.Attempts) > 0 {
-		errClass = attemptErrorClass(arec.Attempts[len(arec.Attempts)-1])
-	}
-	return successEp, errClass
-}
-
-// workloadClassOf derives the workload class from a ReqInfo's Compaction +
-// Tags fields.
-func workloadClassOf(ri *ReqInfo) string {
-	if ri == nil {
-		return "interactive"
-	}
-	if ri.Compaction {
-		return "compaction"
-	}
-	for _, t := range ri.Tags {
-		if t == "heartbeat" {
-			return "heartbeat"
-		}
-		if t == "dream_diary" {
-			return "dream_diary"
-		}
-	}
-	return "interactive"
-}
-
-// buildCompactions derives §6.7/CCR N-4's compaction rows from the
-// analysis's standalone compaction calls.
-// "Before/after" tokens are the compaction call's OWN input/output — how
-// much history it was asked to compress vs how big the resulting summary
-// is — not either neighboring session's own token counts, which stay
-// whatever they legitimately were (see TestContextGrowthDoesNotCrossContractBreak).
-// Entity loss reuses chatmsg.ExtractEntities, the same rough file-path/URL
-// scan internal/story's own CompactionInfo uses (sunk to chatmsg so both
-// packages share one implementation).
-func buildCompactions(sess *SessionAnalysis) []CompactionRow {
-	out := make([]CompactionRow, 0, len(sess.Compactions))
-	for _, c := range sess.Compactions {
-		row := CompactionRow{
-			TS: c.TS.Format(time.RFC3339), Summarizes: c.Summarizes, ContinuesTo: c.ContinuesTo,
-		}
-		if c.UsageOK {
-			row.TokensIn, row.TokensOut = c.Usage.In, c.Usage.Out
-		}
-		survived := map[string]bool{}
-		for _, e := range chatmsg.ExtractEntities(c.respText) {
-			survived[e] = true
-		}
-		for _, e := range chatmsg.ExtractEntities(c.firstText) {
-			if survived[e] {
-				row.SurvivedEntities = append(row.SurvivedEntities, e)
-			} else {
-				row.SwallowedEntities = append(row.SwallowedEntities, e)
-			}
-		}
-		out = append(out, row)
-	}
-	return out
-}
-
-// buildTools derives the tool-waste fields from the analysis's ToolShapes.
-func buildTools(sess *SessionAnalysis) []ToolShapeRow {
-	shapes := sess.ToolShapes()
-	out := make([]ToolShapeRow, 0, len(shapes))
-	for _, t := range shapes {
-		row := ToolShapeRow{
-			Shape:         t.Shape,
-			Requests:      t.Requests,
-			Declared:      t.Declared,
-			DeclaredBytes: t.DeclaredBytes,
-			Calls:         t.Calls,
-			NeverCalled:   t.NeverCalled,
-		}
-		row.SchemaBytesShipped = t.DeclaredBytes * int64(t.Requests)
-		row.DistinctCalled = len(t.Calls)
-		if len(t.Declared) > 0 {
-			row.DeclareUtilization = round2(float64(row.DistinctCalled) / float64(len(t.Declared)))
-		}
-		row.SchemaWasteBytes = int64(float64(row.SchemaBytesShipped) * (1 - row.DeclareUtilization))
-		out = append(out, row)
-	}
-	return out
 }

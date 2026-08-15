@@ -216,8 +216,8 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 // caller/test already uses, the same "always the default profile" role
 // Build itself plays relative to BuildCached (see build_cached.go's own doc
 // comment on why); AnalyzeSessionsCached is the one Build's cached variant
-// (BuildCached, see aggregate.go) actually calls, and the one that accepts a
-// caller-chosen Profile.
+// (BuildCached, see build_cached.go) actually calls, and the one that
+// accepts a caller-chosen Profile.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
 	return a, err
@@ -426,9 +426,10 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	// attempt-level, per-endpoint signal (which endpoint's response needed a
 	// think_strip/soft_block quirk fix), not a per-request/session one — a
 	// "last non-empty attempt" copy would silently drop an earlier failed
-	// attempt's marker on any request with a failover chain. aggregate.go's
-	// own addAttempt reads rec.Attempts[i].Norm directly, attributed to the
-	// specific EndpointRow that attempt hit (EndpointRow.NormCounts).
+	// attempt's marker on any request with a failover chain. ingest.go's own
+	// EndpointRow.IngestAttempt reads rec.Attempts[i].Norm directly,
+	// attributed to the specific EndpointRow that attempt hit
+	// (EndpointRow.NormCounts).
 	if rec.Client.Response != nil {
 		collectResponse(r, rec.Client.Response, prof)
 	}
@@ -700,8 +701,8 @@ func attach(s *SessionInfo, r *ReqInfo) {
 // taskseg.LastInstruction-derived) when non-empty, else a fallback —
 // heartbeat first, then a generic placeholder. Not localized: this fallback
 // is computed inside AnalyzeSessions, the one full-corpus pass report.Build
-// deliberately runs only once (see aggregate.go's own "one file scan, not
-// three" rationale) — localizing it would mean re-running that whole pass a
+// deliberately runs only once (see build_cached.go's own "two-read design"
+// doc comment) — localizing it would mean re-running that whole pass a
 // second time per language just for a rare placeholder string. See
 // taskseg.TaskTitle's own doc comment for why it takes the fallback as a
 // parameter instead of importing internal/i18n itself.

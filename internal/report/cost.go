@@ -2,8 +2,8 @@
 
 // §2 成本估算's per-record cost formula and endpoint-label parsing — split
 // out of aggregate.go (P2.2) purely to keep that file under
-// internal/archtest's line budget; buildInternal's aggregation loop is the
-// only caller.
+// internal/archtest's line budget; aggState.ingestRecord (aggregate.go) is
+// the only caller.
 package report
 
 import (
@@ -45,10 +45,9 @@ func costFor(pr pricing.Rate, rc *rec2) (c float64, estimated bool) {
 
 // accumulateCost prices rc against every CostEstimate bucket it applies to
 // (Overall/ByModel/ByDate/EndpointsAll/ByClient) when pricingSrc resolves a
-// rate for its endpoint — split out of buildInternal's per-record loop so
-// that function's own line count doesn't grow (see funcLineExemptions' note
-// on aggregate.go:buildInternal: it is tracked as an outlier scheduled for
-// decomposition, not a budget meant to absorb new code).
+// rate for its endpoint — kept separate from aggState.ingestRecord
+// (aggregate.go) so that method stays focused on fan-out, not per-bucket
+// pricing detail.
 func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, byClient map[string]*ClientRow, pricingSrc *pricing.Resolver, rc *rec2) {
 	if pricingSrc == nil || rc.endpoint == "" {
 		return

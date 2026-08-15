@@ -24,7 +24,15 @@ var fileLineLimits = map[string]int{
 	// section_*.go per numbered section. The budget is what keeps a new
 	// report section arriving as a new file rather than as another 90 lines
 	// appended to whichever file is already the biggest.
-	"internal/report/aggregate.go":  1000,
+	//
+	// aggregate.go's 1000 dated from before Part 8 batch B4 (TrafficStats
+	// composition + buildInternal decomposition): it was 1015 lines with a
+	// single 625-line buildInternal, and is now 503 with buildInternal at
+	// ~25 (the accumulation half moved to ingest.go, per-record extraction
+	// to recextract.go). Retightened to the same ~15% headroom convention
+	// as the rest of this table instead of leaving 1000 as a stale ceiling
+	// nearly double the file's actual size.
+	"internal/report/aggregate.go":  600,
 	"internal/report/render_doc.go": 400,
 	// No prior split here — config.go is at 591 lines today. The budget is
 	// a tripwire against the same unnoticed growth pattern that hit

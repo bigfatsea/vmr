@@ -1407,7 +1407,7 @@ func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {
 // if the bug reappears, "MISSING" shows up in the rendered document.
 func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 	rep := &Report2{
-		Overall: Row{Requests: 10, OK: 9, TokensIn: 100, TokensInCached: 90, TokensKnown: 10, CacheEfficiency: 0.9, RequestsWithDur: 10, DurMSP95: 500},
+		Overall: Row{TrafficStats: TrafficStats{Requests: 10, OK: 9, TokensIn: 100, TokensInCached: 90, TokensKnown: 10, CacheEfficiency: 0.9, RequestsWithDur: 10, DurMSP95: 500}},
 		EndpointsAll: []EndpointRow{
 			{Endpoint: "openai:p:m", Attempts: 10, OK: 9, Availability: 0.9, ErrorRate: 10,
 				ErrorClasses: map[string]int{"transient": 1}},

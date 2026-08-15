@@ -21,7 +21,7 @@ func TestRenderCostEstimate_ByDateTable(t *testing.T) {
 	rep := &Report2{
 		Pricing: &Pricing{Currency: "USD", StandardGeneratedAt: "2026-07-20"},
 		ByDate: []Row{
-			{Date: "2026-07-24", TokensInFresh: 1000, TokensOut: 500, CostEstimate: costPtr(1.2345)},
+			{Date: "2026-07-24", TrafficStats: TrafficStats{TokensInFresh: 1000, TokensOut: 500}, CostEstimate: costPtr(1.2345)},
 		},
 	}
 	var buf strings.Builder

@@ -22,7 +22,7 @@ import (
 // wrapper over chatmsg.Usage.Fresh() for the one caller here (finishRow,
 // below) that only has the three fields unpacked onto a Measures
 // accumulator, not a chatmsg.Usage value to call the method on directly.
-// Callers that already hold a chatmsg.Usage (aggregate.go, cost.go) call
+// Callers that already hold a chatmsg.Usage (recextract.go, cost.go) call
 // .Fresh() on it directly instead of going through this wrapper.
 func freshTokens(in, cached, cacheWrite int64) int64 {
 	return chatmsg.Usage{In: in, CacheRead: cached, CacheWrite: cacheWrite}.Fresh()
@@ -72,16 +72,11 @@ func round2(f float64) float64 {
 	return float64(int64(f*100+0.5)) / 100
 }
 
-// measuresInput is the raw per-bucket accumulation every one of the 6 Row
-// types shares: latency samples plus the token-cache breakdown. All 6
-// finishX functions below start by feeding their own fields through
-// finishMeasures instead of repeating the same percentiles/freshTokens/
-// cacheEff calls — that shared computation is as far as the unification
-// goes: the 6 Row *struct declarations* are deliberately left untouched
-// (their "same-name" fields carry inconsistent omitempty tags across
-// types — e.g. Row.CacheEfficiency is omitempty, ClientRow.CacheEfficiency
-// is not — so a shared embedded struct would change zero-value JSON output
-// for some types).
+// measuresInput is the raw accumulation finishMeasures turns into
+// percentiles/freshTokens/cacheEff. TrafficStats.Finish (below) is now the
+// primary caller, for the 5 Row types that embed TrafficStats (see rows.go);
+// EndpointRow's finishEndpoint still calls this directly, since EndpointRow
+// deliberately doesn't embed TrafficStats (see that type's doc comment).
 type measuresInput struct {
 	durs, ttfts, streamMS                        []int64
 	tokensIn, tokensInCached, tokensInCacheWrite int64
@@ -108,15 +103,26 @@ func finishMeasures(in measuresInput) measuresResult {
 	return out
 }
 
+// Finish computes the shared core's true percentiles + derived fields
+// (DurMSP50/95, TokensInFresh, CacheEfficiency) from the raw samples
+// Ingest accumulated — see TrafficStats' own doc comment (rows.go) for why
+// TTFT/stream stay outside it, computed by each embedding row's own Finish
+// wrapper below instead.
+func (s *TrafficStats) Finish() {
+	m := finishMeasures(measuresInput{durs: s.durs,
+		tokensIn: s.TokensIn, tokensInCached: s.TokensInCached, tokensInCacheWrite: s.TokensInCacheWrite, tokensKnown: s.TokensKnown})
+	s.DurMSP50, s.DurMSP95 = m.durMSP50, m.durMSP95
+	s.TokensInFresh = m.tokensInFresh
+	s.CacheEfficiency = m.cacheEfficiency
+	s.durs = nil
+}
+
 // finishRow computes true percentiles + derived fields for a full Row.
 func finishRow(r *Row) {
-	m := finishMeasures(measuresInput{durs: r.durs, ttfts: r.ttfts, streamMS: r.streamMS,
-		tokensIn: r.TokensIn, tokensInCached: r.TokensInCached, tokensInCacheWrite: r.TokensInCacheWrite, tokensKnown: r.TokensKnown})
-	r.DurMSP50, r.DurMSP95 = m.durMSP50, m.durMSP95
+	r.TrafficStats.Finish()
+	m := finishMeasures(measuresInput{ttfts: r.ttfts, streamMS: r.streamMS})
 	r.TTFTMSP50, r.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
 	r.StreamMSP50, r.StreamMSP95 = m.streamMSP50, m.streamMSP95
-	r.TokensInFresh = m.tokensInFresh
-	r.CacheEfficiency = m.cacheEfficiency
 	if r.Requests > 0 {
 		r.SuccessRate = round2(float64(r.OK) / float64(r.Requests))
 	}
@@ -135,18 +141,15 @@ func finishRow(r *Row) {
 	if len(r.RoleTokens) == 0 {
 		r.RoleTokens = nil
 	}
-	r.durs, r.ttfts, r.streamMS = nil, nil, nil
+	r.ttfts, r.streamMS = nil, nil
 }
 
 func finishHour(h *HourRow) {
-	m := finishMeasures(measuresInput{durs: h.durs, ttfts: h.ttfts, streamMS: h.streamMS,
-		tokensIn: h.TokensIn, tokensInCached: h.TokensInCached, tokensInCacheWrite: h.TokensInCacheWrite, tokensKnown: h.TokensKnown})
-	h.DurMSP50, h.DurMSP95 = m.durMSP50, m.durMSP95
+	h.TrafficStats.Finish()
+	m := finishMeasures(measuresInput{ttfts: h.ttfts, streamMS: h.streamMS})
 	h.TTFTMSP50, h.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
 	h.StreamMSP95 = m.streamMSP95
-	h.TokensInFresh = m.tokensInFresh
-	h.CacheEfficiency = m.cacheEfficiency
-	h.durs, h.ttfts, h.streamMS = nil, nil, nil
+	h.ttfts, h.streamMS = nil, nil
 }
 
 func finishEndpoint(e *EndpointRow) {
@@ -176,38 +179,31 @@ func finishEndpoint(e *EndpointRow) {
 }
 
 func finishClient(c *ClientRow) {
-	m := finishMeasures(measuresInput{durs: c.durs, ttfts: c.ttfts, streamMS: c.streamMS,
-		tokensIn: c.TokensIn, tokensInCached: c.TokensInCached, tokensInCacheWrite: c.TokensInCacheWrite, tokensKnown: c.TokensKnown})
-	c.DurMSP50, c.DurMSP95 = m.durMSP50, m.durMSP95
-	c.TokensInFresh = m.tokensInFresh
-	c.CacheEfficiency = m.cacheEfficiency
+	c.TrafficStats.Finish()
+	// ttfts/streamMS are collected (Ingest, ingest.go) but ClientRow has
+	// never surfaced a percentile from either — unchanged from pre-B4
+	// behavior, just clearing the raw samples here instead of computing and
+	// discarding them.
 	c.InTokP50, c.InTokP95 = percentiles(c.inToks)
 	c.OutTokP50, c.OutTokP95 = percentiles(c.outToks)
 	if c.Requests > 0 {
 		c.SuccessRate = round2(float64(c.OK) / float64(c.Requests))
 	}
-	c.durs, c.ttfts, c.streamMS, c.inToks, c.outToks = nil, nil, nil, nil, nil
+	c.ttfts, c.streamMS, c.inToks, c.outToks = nil, nil, nil, nil
 }
 
 func finishWorkload(w *WorkloadRow) {
-	m := finishMeasures(measuresInput{durs: w.durs, streamMS: w.streamMS,
-		tokensIn: w.TokensIn, tokensInCached: w.TokensInCached, tokensInCacheWrite: w.TokensInCacheWrite, tokensKnown: w.TokensKnown})
-	w.DurMSP50, w.DurMSP95 = m.durMSP50, m.durMSP95
-	w.TokensInFresh = m.tokensInFresh
-	w.CacheEfficiency = m.cacheEfficiency
+	w.TrafficStats.Finish()
 	if w.Requests > 0 {
 		w.ToolCallRate = round2(float64(w.RequestsWithToolCalls) / float64(w.Requests))
 	}
-	w.durs, w.streamMS = nil, nil
+	w.streamMS = nil
 }
 
 func finishSession(s *SessionRow, info *SessionInfo) {
-	m := finishMeasures(measuresInput{durs: s.durs, ttfts: s.ttfts,
-		tokensIn: s.TokensIn, tokensInCached: s.TokensInCached, tokensInCacheWrite: s.TokensInCacheWrite, tokensKnown: s.TokensKnown})
-	s.DurMSP95 = m.durMSP95
+	s.TrafficStats.Finish()
+	m := finishMeasures(measuresInput{ttfts: s.ttfts})
 	s.TTFTMSP95 = m.ttftMSP95
-	s.TokensInFresh = m.tokensInFresh
-	s.CacheEfficiency = m.cacheEfficiency
 	// context_growth: last-turn tokens_in / first-turn tokens_in (ts order).
 	// Safe to compare across the whole session since group() now splits a
 	// session at every Contract/Fork edit (one SessionInfo per
@@ -225,7 +221,7 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 	if len(s.RoleChars) == 0 {
 		s.RoleChars = nil
 	}
-	s.durs, s.ttfts = nil, nil
+	s.ttfts = nil
 }
 
 // buildFindings assembles the §7 efficiency/waste table from the finished

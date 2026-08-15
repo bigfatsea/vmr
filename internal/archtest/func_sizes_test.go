@@ -49,12 +49,6 @@ const defaultFuncLineLimit = 120
 // existing entry's number to make room for new code is what this table is
 // designed to make visible.
 var funcLineExemptions = map[string]int{
-	// THE outlier, and the reason this test was written. Scheduled for
-	// decomposition — see the architecture review's Part 8 batch B4
-	// (TrafficStats composition + phase split). Do not raise this number:
-	// the whole point of the entry is that it can only go down.
-	"internal/report/aggregate.go:buildInternal": 640,
-
 	// Top-level command/entry-point bodies: flag parsing, wiring, and a
 	// linear happy path. Long because they are compositions, not algorithms —
 	// splitting them tends to produce helpers with one caller and no

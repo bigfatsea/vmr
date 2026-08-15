@@ -2,9 +2,9 @@
 
 // §2.5 账户（Provider）消耗与额度: rolls EndpointsAll up by upstream
 // account, post-hoc — see rows.go's ProviderRow doc comment for why no new
-// streaming accumulation is needed. Mirrors buildTools/buildCompactions
-// (aggregate.go): a pure function over already-finished buckets, called
-// once after the aggregation loop completes.
+// streaming accumulation is needed. Mirrors recextract.go's buildTools/
+// buildCompactions: a pure function over already-finished buckets, called
+// once after the aggregation loop completes (aggregate.go's finishBuckets).
 package report
 
 import (

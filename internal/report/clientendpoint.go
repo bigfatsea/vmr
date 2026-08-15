@@ -48,9 +48,9 @@ func (c *clientEndpointCollector) add(rc *rec2) {
 // §5.5 will render. §5.5 is a client×endpoint product with no Top-N cap by
 // design (see the dev plan's risk table) — this is what lets a deployment
 // whose section has quietly grown to hundreds of rows notice, instead of
-// finding out by scrolling. Lives here rather than inline in aggregate.go:
-// that file is the tightest line budget in the package, and counting this
-// collector's own output is this collector's job.
+// finding out by scrolling. Lives here rather than inline in aggregate.go's
+// finishBuckets: counting this collector's own output is this collector's
+// job, not the orchestration phase that calls it.
 func clientEndpointScale(rows []ClientEndpointRow) (clients, rowCount int) {
 	seen := map[string]bool{}
 	for _, r := range rows {
