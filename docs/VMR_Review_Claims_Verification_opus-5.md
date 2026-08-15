@@ -8,6 +8,8 @@
 >
 > **这不是权威待办清单**。当前状态的唯一权威清单是 `docs/KNOWN_ISSUES_sonnet-5.md`。本文是一次性的核实快照，
 > 用途是回答「那两份文档说的到底哪些是真的」。
+>
+> 核实结论已回写该清单：新增 5 条刻意取舍（§2）与 2 条待定项（§1），本文各条的 🔒/📋 标记与之一一对应。
 
 ## 核实方法与基线
 
@@ -18,7 +20,7 @@
 - **编号**：沿用两份文档自己的编号。v1 用 `D#`（第一份 review 提出）/ `R#`（第二份反馈提出）/ `N#`（复审新发现）/
   `L#`（远期池）；v2 用 `P0-A` ~ `P3-F` 与 `ISSUE-P*`。v1 的 N 编号跳过了 N5 与 N10（原文即无）。
 - **覆盖范围**：v1 的 D1–D7 + D5.2a + R1–R6 + N1–N15 + L0–L5，v2 的 Part 7 全 13 条 + Part 8 全 12 条 + 8.6 全 7 条，
-  以及 `KNOWN_ISSUES` §1 的 13 条现存待定项。
+  以及 `KNOWN_ISSUES` §1 的现存待定项（核实时 13 条，核实结论回写后为 15 条）。
 
 ## 状态图例
 
@@ -67,8 +69,8 @@
 | — | v1 B3 收尾 | `cost` 假零：usage 未嗅到时渲染 $0.0000 | ✅ |
 | — | v2 追加 | `cost` 假 UNKNOWN：全失败窗口渲染 `-` 而 router 收了 $0.00 | ✅ |
 | — | v2 追加 | `model_multipliers` 每次计费向上取整（最高 +100% 高估） | ✅ |
-| KI §1.3 | KNOWN_ISSUES | 客户端流中途断开与正常成功在审计日志中不可区分 | 📋 |
-| KI §1.6 | KNOWN_ISSUES | §2 成本表 $ 列与 Token 列口径不一致 | 📋 |
+| KI §1 | KNOWN_ISSUES | 客户端流中途断开与正常成功在审计日志中不可区分 | 📋 |
+| KI §1 | KNOWN_ISSUES | §2 成本表 $ 列与 Token 列口径不一致 | 📋 |
 
 ### 核实细节
 
@@ -121,7 +123,7 @@
 | — | 本轮新发现 | `func_sizes_test.go` 引用的 `fileLineLimits` 已改名，成悬空符号 | ✅ |
 | P1-B / N17 | v2 Part 8 | 当前状态类文档落在文档守卫扫描范围外 | 🔒 |
 | P3-E / N21 | v2 Part 8 | `internal/probe` 未登记进 `zeroInternalDepPackages` | 🔒 |
-| P3-F / N23 / KI §1.7 | v2 / KNOWN_ISSUES | 函数豁免键无法区分同文件重名方法 | 📋 |
+| P3-F / N23 / KI §1 | v2 / KNOWN_ISSUES | 函数豁免键无法区分同文件重名方法 | 📋 |
 | P3-D | v2 Part 8 | `session.go`/`cmd_story.go`/`compare.go` 观察项 | 📋 |
 | L3 | v1 远期池 | `archtest` 增加圈复杂度检查 | 🚫 |
 
@@ -262,7 +264,7 @@ v1 建议两个明确命名的函数，实际落地三个（多一个 Markdown �
 | — | v1 B0 连带 | `aggregate.go` 撞 1000 行预算，按规则拆出 `tokenest.go` 而非抬高数字 | ✅ |
 | — | 本轮连带 | `buildProviderQuotaRows` 超函数预算，拆出 `accumulateQuotaWindow` | ✅ |
 | 异味 2 | v1 6.1-2 | 分析层大文件逼近容量上限 | 🚫 |
-| P2-A / ISSUE-P2-01 / L2 / KI §1.4 | v2 / v1 远期池 | `detail.go` 1047/1150，四项正交职责 | 📋 |
+| P2-A / ISSUE-P2-01 / L2 / KI §1 | v2 / v1 远期池 | `detail.go` 1047/1150，四项正交职责 | 📋 |
 | ISSUE-P2-02 / P3-D | v2 | `session.go` 特征提取交织 | 📋 |
 
 ### 核实细节
@@ -281,7 +283,7 @@ diffing 830-1047）。
 
 **但主动搁置**：它已被 `archtest` 纳管，超预算会红——**这是一个会自己举手的问题**。项目一贯做法是
 「预算报警了再拆，拆完按实测 +15~20% 重新登记」，提前拆是替一个会自己举手的问题排队。
-⚠️ v2 的验收标准「各子文件 < 400 行」**没有依据**，那个数字凭空而来。已按项目惯例改写并登记 `KNOWN_ISSUES` §1.4。
+⚠️ v2 的验收标准「各子文件 < 400 行」**没有依据**，那个数字凭空而来。已按项目惯例改写并登记进 `KNOWN_ISSUES` §1「`detail.go` 逼近行数预算」。
 
 **ISSUE-P2-02 📋** — `session.go` 实测 **834 行 / 1100 预算 = 76%**（B3 之后从 993 降下来，本轮注释精简后又降到 834）。
 比 `detail.go` 宽松得多，**在它之前动没有理由**。
@@ -329,10 +331,10 @@ v2 判断「不建议为它扩展守卫（Go 注释不在 Markdown 守卫范围�
 | 异味 4 / D5 / L1 | v1 6.1-4 / 远期池 | `chatmsg` 的 `map[string]any` 带来 GC 压力 | 🚫 / 📋 |
 | — | v2 6.4-① | 流式 Context 断链快速中断 + 客户端取消时停止计费 | 🔒 |
 | — | v2 6.4-② | 多窗口滑动限流（Rolling Window） | 📋 |
-| KI §1.1 | KNOWN_ISSUES | `vmr report` 多文件输入的两趟扫描开销 | 📋 |
-| KI §1.2 | KNOWN_ISSUES | `vmr report` 全内存聚合的记录量上限 | 📋 |
-| KI §1.9 | KNOWN_ISSUES | 审计落盘的 `write` syscall 在全局锁内 | 📋 |
-| KI §1.11 | KNOWN_ISSUES | 图片降采样磁盘缓存无容量上限 | 📋 |
+| KI §1 | KNOWN_ISSUES | `vmr report` 多文件输入的两趟扫描开销 | 📋 |
+| KI §1 | KNOWN_ISSUES | `vmr report` 全内存聚合的记录量上限 | 📋 |
+| KI §1 | KNOWN_ISSUES | 审计落盘的 `write` syscall 在全局锁内 | 📋 |
+| KI §1 | KNOWN_ISSUES | 图片降采样磁盘缓存无容量上限 | 📋 |
 
 ### 核实细节
 
@@ -355,17 +357,17 @@ v2 更具体地说「`router`/`adapter`/`audit` 三个包的生产代码里出�
   response still consumed whatever tokens actually reached the client"*。上游已生成的 token 不会因客户端挂断而退回，
   照收才是与厂商账单对齐的口径。**按 v2 的提议改会让 `vmr report` 系统性低估消耗**——正是 B0 花整批修掉的那类发散。
 
-**KI §1.1 / §1.2 📋（本轮补核，用户提出）** — 两条都成立：
-- §1.1：`build_cached.go:16` 注释确认两趟读取（"AnalyzeSessions for grouping (one read), then does its own pass
+**「两趟扫描开销」/「全内存聚合上限」📋（本轮补核）** — 两条都成立：
+- 两趟扫描：`build_cached.go:16` 注释确认两趟读取（"AnalyzeSessions for grouping (one read), then does its own pass
   (second read)"）
-- §1.2：`rows.go` 实测 5 处 `[]int64` 原始样本切片常驻（`durs` 130、`ttfts/streamMS` 189/214、
+- 全内存聚合：`rows.go` 实测 5 处 `[]int64` 原始样本切片常驻（`durs` 130、`ttfts/streamMS` 189/214、
   `durs,ttfts,streamMS,inToks,outToks` 328、`inToks,outToks` 348），用于算真实百分位数
 
-**KI §1.9 📋（本轮补核）** — 成立。`internal/audit/audit.go:548` `l.mu.Lock()` + `:549` `defer l.mu.Unlock()`，
+**「`write` syscall 在全局锁内」📋（本轮补核）** — 成立。`internal/audit/audit.go:548` `l.mu.Lock()` + `:549` `defer l.mu.Unlock()`，
 而 `:571` 的 `l.f.Write(buf.Bytes())` **在该锁区间内**。JSON 编码已通过 `sync.Pool` 移出锁外，但 syscall 没有。
 ⚠️ 顺带修正 v1/v2 的一处措辞：两份文档都说 `sync.Pool` "消除了热路径锁竞争"——准确说法是**大幅降低**，不是消除。
 
-**KI §1.11 📋（本轮补核）** — 成立。`internal/imgprep/cache.go:96` 的 `maybeSweepCache(dir, ttlDays, now)` +
+**「图片缓存无容量上限」📋（本轮补核）** — 成立。`internal/imgprep/cache.go:96` 的 `maybeSweepCache(dir, ttlDays, now)` +
 `:110` 的 `sweepCacheDir` 按 **mtime 与 TTL** 清理，全文无 `MaxBytes`/`totalSize`/`capacity` 类总量控制。
 
 ---
@@ -376,11 +378,11 @@ v2 更具体地说「`router`/`adapter`/`audit` 三个包的生产代码里出�
 
 | 编号 | 来源 | 主张 | 状态 |
 | :--- | :--- | :--- | :---: |
-| P2-C / N22 / KI §1.6 | v2 Part 8 | `Row`/`ClientRow` 缺 `CostEstimateEst` 字段 | 📋 |
-| KI §1.5 | 本轮新增 | §2.5 表格的标记符号已达四个 | 📋 |
-| KI §1.8 | KNOWN_ISSUES | 探针请求绕过审计日志 | 📋 |
-| KI §1.10 | KNOWN_ISSUES | `/admin/status` 未暴露 `config.Check()` 的操作性告警 | 📋 |
-| KI §1.12 | KNOWN_ISSUES | 额度燃尽看板未交付 | 📋 |
+| P2-C / N22 / KI §1 | v2 Part 8 | `Row`/`ClientRow` 缺 `CostEstimateEst` 字段 | 📋 |
+| KI §1 | 本轮新增 | §2.5 表格的标记符号已达四个 | 📋 |
+| KI §1 | KNOWN_ISSUES | 探针请求绕过审计日志 | 📋 |
+| KI §1 | KNOWN_ISSUES | `/admin/status` 未暴露 `config.Check()` 的操作性告警 | 📋 |
+| KI §1 | KNOWN_ISSUES | 额度燃尽看板未交付 | 📋 |
 
 ### 核实细节
 
@@ -392,18 +394,18 @@ v2 更具体地说「`router`/`adapter`/`audit` 三个包的生产代码里出�
 `TokensInFresh | TokensOut | CostEstimate` 并列，而 `TokensInFresh` 只统计嗅探到 usage 的记录、`CostEstimate` 含估算成分。
 连 byEndpoint 表也没渲染它已有的 `CostEstimateEst`。
 
-**主动搁置**：这正是 `KNOWN_ISSUES` §1.6 已记录的方案②，该条目自己写明「会再次改动 `vmr-report.json` 形状，
+**主动搁置**：这正是 `KNOWN_ISSUES` §1「§2 成本表口径不一致」已记录的方案②，该条目自己写明「会再次改动 `vmr-report.json` 形状，
 属于展示口径决策而非缺陷修复」。不重复立项。
 
-**KI §1.5 📋（本轮新增）** — `section_provider.go` 实测确有四个按需渲染的标记：
+**「§2.5 标记符号已达四个」📋（本轮新增）** — `section_provider.go` 实测确有四个按需渲染的标记：
 `⭐`（超额度，:112）、`‡`（配置变更，:123）、`†`（无时间交集，:146）、`◇`（部分流量未计入，:136），
 各配一条门控脚注。信息都必要，但四个符号叠在一张表上可能已到「标记多到没人看脚注」的临界点。
 已登记为待定，触发条件是真实报表读起来觉得吵。
 
-**KI §1.8 / §1.10 / §1.12 📋（本轮补核）** — 三条全部成立：
-- §1.8：`grep -n "audit\." internal/router/probe.go` **零命中**，探活请求确实不写 `audit.Record`
-- §1.10：`grep -n "Check()\|Issues\|Warn" internal/server/admin.go` **零命中**，`/admin/status` 确实未暴露告警集合
-- §1.12：`grep -rn "burndown\|forecast\|projection" internal/report/` **零命中**，燃尽曲线与预测看板确未实现
+**「探针绕过审计」/「admin 未暴露告警」/「燃尽看板未交付」📋（本轮补核）** — 三条全部成立：
+- 探针绕过审计：`grep -n "audit\." internal/router/probe.go` **零命中**，探活请求确实不写 `audit.Record`
+- admin 未暴露告警：`grep -n "Check()\|Issues\|Warn" internal/server/admin.go` **零命中**，`/admin/status` 确实未暴露告警集合
+- 燃尽看板：`grep -rn "burndown\|forecast\|projection" internal/report/` **零命中**，燃尽曲线与预测看板确未实现
 
 ---
 
