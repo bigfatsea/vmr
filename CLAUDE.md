@@ -31,7 +31,10 @@ file only orients; it does not restate them.
   landscape, and what is deliberately out of scope. The only one of the four that isn't a "how".
 - `docs/KNOWN_ISSUES_sonnet-5.md` — the cross-cutting index of open issues and deliberate
   non-fixes (the design docs' own tables hold the per-subsystem detail). Check it before
-  reporting something as new.
+  reporting something as new — and **register there when you decide something too**: a
+  tradeoff argued only in a source comment is not tracked. The next reviewer reads the
+  accused line, never finds the comment that answers it three files away, and re-proposes
+  the thing you already settled.
 
 ## Build / test / run
 
@@ -146,10 +149,13 @@ root allowed to see both halves at once.
   at the wrong thing, while a name keeps resolving after a reorganization.
 - **Comments: only non-obvious "why"** (hidden constraint, workaround, invariant). Match the
   existing terse style; don't add narration.
-- **Commit messages**: short, imperative, no trailer boilerplate (`git log --oneline`).
+- **Commit messages**: short, imperative, **no trailers at all** — including `Co-Authored-By`,
+  which tooling defaults tend to add back; strip it. Body only when the change needs a why
+  (`git log --oneline`).
 - Chinese-language docs live under `docs/`; this file and all code comments are English.
-- **Every repo-root `*.example.yaml` ships a `*.example.zh.yaml` sibling** — same keys,
-  structure, and example values; only the comments translate. Update both in the same change.
+- **Every doc with a `.zh` sibling updates in the same change** — `README.md`,
+  `docs/UserGuide.md`, `docs/Why_vmr_over_LiteLLM.md`, and every repo-root `*.example.yaml`.
+  Same keys, structure, and example values; only the prose translates.
 - **`CHANGELOG.md` (Keep a Changelog) is the source of truth for release notes.** Add entries
   under `[Unreleased]` as user/developer-visible changes land, grouped `Added`/`Changed`/`Fixed`;
   skip pure dependency-bump and doc-churn commits. `release.yml` extracts that section verbatim
