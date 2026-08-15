@@ -8,6 +8,7 @@ package report
 import (
 	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -76,5 +77,5 @@ const stickyMinBasis = 20
 func stickyRow(tbl *mdTable, label string, g StickyGroup) {
 	tbl.row(label, strconv.Itoa(g.Requests), strconv.Itoa(g.TokensKnown),
 		cacheEffCell(g.CacheEfficiency, g.TokensKnown, g.Requests),
-		fmtTokens(g.TokensInCached), fmtTokens(g.TokensInFresh))
+		fmtutil.FmtTokens(g.TokensInCached), fmtutil.FmtTokens(g.TokensInFresh))
 }

@@ -95,40 +95,16 @@ func capField(f core.RequestFacts) string {
 	return strings.Join(caps, "|")
 }
 
-// fmtTokensK K/M-scales a token count for the live log's token-usage
-// columns, without an "EST"/"(est)" unit marker of its own — every caller
-// here already spells out estimated-vs-actual in the surrounding text
-// (estTokenField appends "(est)" itself; usageTokenField is only reached
-// with real usage), so baking the marker into the unit itself would be
-// redundant. Same precedent as internal/report/detail.go's fmtTokensPlain
-// and internal/story/render_md.go's fmtTokens — each display context tunes
-// its own scaling text rather than routing through one shared fmtutil
-// helper that would need yet another parameter to cover all three.
-//
-// Always renders in "KT" (or "MT" past 1M) — never a bare token count — so
-// every token field in the log shares one unit and a reader never has to
-// mentally convert "178T" against "40.2KT" on the next line. Sub-1K values
-// get 2 decimals instead of K/M's 1: at 1 decimal a value under 100 tokens
-// would round to "0.0KT" and lose the number entirely.
-func fmtTokensK(n int64) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fMT", float64(n)/1_000_000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fKT", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%.2fKT", float64(n)/1000)
-	}
-}
-
 // estTokenField renders the pre-call token estimate (creq.Facts.
 // EstimatedTokens, computed once at ingress) for a log line whose outcome
 // never learns actual usage — every error/failover tail (build error,
 // network error, upstream error) reads this, since none of them reaches
 // respStream. forwardSuccess's usageTokenField also falls back to this
-// exact string when the upstream never reported usage at all.
+// exact string when the upstream never reported usage at all. Appends
+// "(est)" itself rather than relying on fmtutil.FmtTokensCompact to carry
+// an estimate marker — see that function's doc comment.
 func estTokenField(creq *core.CanonicalRequest) string {
-	return "in " + fmtTokensK(creq.Facts.EstimatedTokens) + "(est)"
+	return "in " + fmtutil.FmtTokensCompact(creq.Facts.EstimatedTokens) + "(est)"
 }
 
 // usageTokenField renders a successful response's actual token usage —
@@ -145,15 +121,15 @@ func usageTokenField(u chatmsg.Usage, ok bool, creq *core.CanonicalRequest) stri
 	if !ok {
 		return estTokenField(creq)
 	}
-	parts := []string{"in " + fmtTokensK(u.In)}
+	parts := []string{"in " + fmtutil.FmtTokensCompact(u.In)}
 	if u.In > 0 && u.CacheRead > 0 {
 		parts = append(parts, fmt.Sprintf("ch %d%%", int(math.Round(float64(u.CacheRead)/float64(u.In)*100))))
 	}
 	if u.CacheWrite > 0 {
-		parts = append(parts, "cw "+fmtTokensK(u.CacheWrite))
+		parts = append(parts, "cw "+fmtutil.FmtTokensCompact(u.CacheWrite))
 	}
 	if u.Out > 0 {
-		parts = append(parts, "out "+fmtTokensK(u.Out))
+		parts = append(parts, "out "+fmtutil.FmtTokensCompact(u.Out))
 	}
 	return strings.Join(parts, ", ")
 }

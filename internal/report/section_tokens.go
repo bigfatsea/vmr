@@ -8,6 +8,7 @@ package report
 import (
 	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -19,20 +20,20 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 	w("%s\n\n", t.ClassBreakdownFmt(o.TokensKnown))
 	h := t.ClassHeaders
 	tokTbl := newTable(w, h[0], h[1], h[2])
-	tokTbl.row(t.RowInputCached, fmtTokens(o.TokensInCached), t.OfInSuffix(pctStr(o.CacheHitRate)))
+	tokTbl.row(t.RowInputCached, fmtutil.FmtTokens(o.TokensInCached), t.OfInSuffix(pctStr(o.CacheHitRate)))
 	freshShare := 0.0
 	if o.TokensInCached+o.TokensInFresh > 0 {
 		freshShare = float64(o.TokensInFresh) / float64(o.TokensInCached+o.TokensInFresh)
 	}
-	tokTbl.row(t.RowInputFresh, fmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctStr(freshShare)))
+	tokTbl.row(t.RowInputFresh, fmtutil.FmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctStr(freshShare)))
 	cw := ""
 	if o.TokensInCacheWrite > 0 {
 		cw = t.CacheWriteNote
 	}
-	tokTbl.row(t.RowInputCacheWrite, fmtTokens(o.TokensInCacheWrite), orDash(cw))
-	tokTbl.row(t.RowOutput, fmtTokens(o.TokensOut), "-")
+	tokTbl.row(t.RowInputCacheWrite, fmtutil.FmtTokens(o.TokensInCacheWrite), orDash(cw))
+	tokTbl.row(t.RowOutput, fmtutil.FmtTokens(o.TokensOut), "-")
 	if o.TokensReasoning > 0 {
-		tokTbl.row(t.RowReasoning, fmtTokens(o.TokensReasoning), t.OfOutSuffix(pctStr(o.ReasoningShare)))
+		tokTbl.row(t.RowReasoning, fmtutil.FmtTokens(o.TokensReasoning), t.OfOutSuffix(pctStr(o.ReasoningShare)))
 	}
 	w("%s", t.BillingNote)
 	if rep.Pricing == nil {
@@ -49,7 +50,7 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 	for _, m := range rep.ByModel {
 		modelTbl.row(m.Model, m.Protocol, strconv.Itoa(m.Requests),
 			cacheEffCell(m.CacheEfficiency, m.TokensKnown, m.Requests),
-			fmtTokens(m.TokensInFresh), fmtTokens(m.TokensInCached), fmtTokens(m.TokensOut))
+			fmtutil.FmtTokens(m.TokensInFresh), fmtutil.FmtTokens(m.TokensInCached), fmtutil.FmtTokens(m.TokensOut))
 	}
 	w("\n")
 
@@ -66,7 +67,7 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 			if totalTok > 0 {
 				share = float64(tk) / float64(totalTok)
 			}
-			roleTbl.row(role, fmtTokens(c), fmtTokens(tk), pctStr(share))
+			roleTbl.row(role, fmtutil.FmtTokens(c), fmtutil.FmtTokens(tk), pctStr(share))
 		}
 		w("%s", t.EstimatedTokensNote)
 		w("%s", t.TakeawayNote)

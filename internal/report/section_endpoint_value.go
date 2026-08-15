@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -63,7 +64,7 @@ func renderEndpointValue(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	tbl := newTable(w, headers...)
 
 	for _, r := range rows {
-		cells := []string{r.endpoint, strconv.Itoa(r.requestsOK), fmtTokens(r.tokensOut)}
+		cells := []string{r.endpoint, strconv.Itoa(r.requestsOK), fmtutil.FmtTokens(r.tokensOut)}
 		if priced {
 			if r.hasCost {
 				cells = append(cells, fmt.Sprintf("%.4f", r.costPer1MOut), fmt.Sprintf("%.4f", r.costPerReq))

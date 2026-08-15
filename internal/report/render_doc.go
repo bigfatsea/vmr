@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -110,7 +111,7 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 	p95n := o.RequestsWithDur
 	tbl.row(fmt.Sprintf("%d（fallback %d / trunc %d）", o.Requests, o.Fallbacks, o.Truncated),
 		pctStr2(o.OK, o.Requests),
-		fmtTokens(o.TokensInFresh),
+		fmtutil.FmtTokens(o.TokensInFresh),
 		cacheEffCell(o.CacheEfficiency, o.TokensKnown, o.Requests),
 		durCell(o.DurMSP95, p95n))
 	w("\n")
@@ -128,7 +129,7 @@ func highlights(rep *Report2, lang i18n.Lang) []string {
 	// 1. workload with low cache-eff
 	for _, wl := range rep.Workloads {
 		if wl.TokensKnown > 0 && wl.CacheEfficiency < 0.30 {
-			out = append(out, t.CacheWarn(wl.Class, pctStr(wl.CacheEfficiency), fmtTokens(wl.TokensInFresh)))
+			out = append(out, t.CacheWarn(wl.Class, pctStr(wl.CacheEfficiency), fmtutil.FmtTokens(wl.TokensInFresh)))
 			break
 		}
 	}

@@ -52,7 +52,7 @@ func renderProviders(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 				strconv.Itoa(len(p.Models)),
 				strconv.Itoa(p.Requests),
 				pctStr2(p.RequestsOK, p.Requests),
-				fmtTokens(p.TokensInFresh) + " / " + fmtTokens(p.TokensInCached) + " / " + fmtTokens(p.TokensOut),
+				fmtutil.FmtTokens(p.TokensInFresh) + " / " + fmtutil.FmtTokens(p.TokensInCached) + " / " + fmtutil.FmtTokens(p.TokensOut),
 				cacheEffCell(p.CacheEfficiency, p.TokensKnown, p.Requests),
 				fmtDurMS(p.DurMSMean),
 				pctStr(p.ErrorRate / 100),

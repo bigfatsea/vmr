@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"vmr/internal/buildinfo"
-	"vmr/internal/core"
 	"vmr/internal/health"
 	"vmr/internal/router"
 )
@@ -56,7 +55,7 @@ var vmrVersion = sync.OnceValue(func() string { return buildinfo.Read().Short() 
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil || !net.ParseIP(host).IsLoopback() {
-		core.WriteError(w, http.StatusForbidden, "permission_error", "admin endpoints are loopback-only")
+		router.WriteError(w, http.StatusForbidden, "permission_error", "admin endpoints are loopback-only")
 		return
 	}
 	snap := s.rt.Snapshot()
@@ -110,7 +109,7 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if qs := s.rt.QuotaStatus(); len(qs) > 0 {
 		body["quota"] = qs
 	}
-	core.WriteJSON(w, http.StatusOK, body)
+	router.WriteJSON(w, http.StatusOK, body)
 }
 
 // instanceBlock assembles process identity plus the config-freshness

@@ -10,6 +10,7 @@ package fmtutil
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 	"unicode/utf8"
 )
@@ -51,6 +52,77 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // internal/report/render.go's fmtBytes already uses for FmtBytes.
 func FmtPercent(f float64, decimals int) string {
 	return fmt.Sprintf("%.*f%%", decimals, f*100)
+}
+
+// FmtTokens renders a token count for a dense Markdown table cell
+// (K/M/B suffix, no space, no unit letter below 1000) — `vmr report`'s
+// per-cell metrics tables and `vmr story`'s narrative tables both want this
+// same compact bare-number shape. Before this, internal/report/metrics.go
+// and internal/story/render_md.go each carried their own independently
+// written fmtTokens with this same threshold logic, drifted apart only by
+// decimal-place count and B being report-only (report's corpus-wide totals
+// can reach billions; a single story Journey never does) — accidental
+// drift, not an intentional difference, so both converge here rather than
+// getting two names. No "(est)" marker: callers use this for actual,
+// already-billed usage counts, never an estimate — a caller that does need
+// to render an estimated count (FmtTokensCompact's estTokenField, e.g.)
+// carries that "(est)" label itself, at the call site, rather than baking
+// it into this function.
+func FmtTokens(n int64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return strconv.FormatFloat(float64(n)/1e9, 'f', 2, 64) + "B"
+	case n >= 1_000_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 2, 64) + "M"
+	case n >= 1_000:
+		return strconv.FormatFloat(float64(n)/1e3, 'f', 1, 64) + "K"
+	default:
+		return strconv.FormatInt(n, 10)
+	}
+}
+
+// FmtTokensPlain renders a token count with a space-separated unit letter
+// ("500 T", "1.2 KT", "1.5 MT") — `vmr report`'s detail.go facts line wants
+// each value visually self-labeled rather than relying on a table header,
+// unlike FmtTokens' bare-number table-cell shape. This is a genuinely
+// different format from FmtTokens (not just a formatting accident), so it
+// keeps its own name instead of collapsing into FmtTokens. No "(est)"/"EST"
+// marker on the unit itself: unlike the live router log's estTokenField
+// (internal/router/logfmt.go, built on FmtTokensCompact), which needs that
+// marker inline since it shares a line with actual-usage numbers, the
+// detail page's field is already labeled as an estimate by its surrounding
+// text, so the terser unit reads better here.
+func FmtTokensPlain(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1f MT", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1f KT", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d T", n)
+	}
+}
+
+// FmtTokensCompact renders a token count for the live router log line
+// (always "KT"/"MT", no bare-number tier below 1000) — the live log wants
+// every token field to line up on the same unit rather than switching shape
+// at the 1000 boundary the way FmtTokens/FmtTokensPlain do, since a log
+// line is read scrolling past rather than scanned as an aligned column.
+// Sub-1K values get 2 decimals instead of K/M's 1: at 1 decimal a value
+// under 100 tokens would round to "0.0KT" and lose the number entirely.
+// No "(est)"/"EST" marker of its own — every caller already spells out
+// estimated-vs-actual in the surrounding text (router/logfmt.go's
+// estTokenField appends "(est)" itself; usageTokenField is only reached
+// with real usage), so baking the marker into the unit would be redundant.
+func FmtTokensCompact(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fMT", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fKT", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%.2fKT", float64(n)/1000)
+	}
 }
 
 // CapStr caps s at n BYTES without cutting a UTF-8 sequence in half — the

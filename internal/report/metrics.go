@@ -288,10 +288,10 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 		}
 		dominantModel, dominantTokens := "", ""
 		if domModel != nil && domModel.TokensInFresh > 0 && domModel.TokensInFresh >= fresh/2 {
-			dominantModel, dominantTokens = domModel.Model, fmtTokens(domModel.TokensInFresh)
+			dominantModel, dominantTokens = domModel.Model, fmtutil.FmtTokens(domModel.TokensInFresh)
 		}
 		add(FindingCacheMiss, "cache_miss_tokens", tx.CacheMissFinding(
-			fmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens))
+			fmtutil.FmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens))
 	}
 
 	// scheduled-task redundancy (heartbeat/dream_diary low cache-eff): the
@@ -314,7 +314,7 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 	}
 	if worstWL != nil {
 		add(FindingCronRedundancy, "fresh + cache_eff", tx.CronRedundancyFinding(
-			fmtTokens(worstWL.TokensInFresh), pctStr(worstWL.CacheEfficiency), worstWL.Class))
+			fmtutil.FmtTokens(worstWL.TokensInFresh), pctStr(worstWL.CacheEfficiency), worstWL.Class))
 	}
 
 	// output truncation
@@ -406,19 +406,6 @@ func toolDeclInfo(body any) (count int, bytes int64) {
 }
 
 // ---- formatting helpers (shared by render + findings) ----
-
-func fmtTokens(n int64) string {
-	switch {
-	case n >= 1_000_000_000:
-		return strconv.FormatFloat(float64(n)/1e9, 'f', 2, 64) + "B"
-	case n >= 1_000_000:
-		return strconv.FormatFloat(float64(n)/1e6, 'f', 2, 64) + "M"
-	case n >= 1_000:
-		return strconv.FormatFloat(float64(n)/1e3, 'f', 1, 64) + "K"
-	default:
-		return strconv.FormatInt(n, 10)
-	}
-}
 
 func fmtBytesGB(n int64) string {
 	switch {

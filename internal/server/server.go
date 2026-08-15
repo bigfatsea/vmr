@@ -96,7 +96,7 @@ func (s *Server) checkAuth(r *http.Request) bool {
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.checkAuth(r) {
-			core.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
+			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}
 		next(w, r)
@@ -134,7 +134,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.ClientKeyTag = tag
 		}
 		if !authed {
-			core.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
+			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}
 
@@ -148,9 +148,9 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		if err != nil {
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
-				core.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds limit")
+				router.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds limit")
 			} else {
-				core.WriteError(w, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+				router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
 			}
 			return
 		}
@@ -164,11 +164,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// independent top-level scan for tools later in computeRequestFacts.
 		probeModel, probeStream, probeHasTools, probeOK := adapter.TopLevelProbe(body)
 		if !probeOK {
-			core.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
+			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
 			return
 		}
 		if probeModel == "" {
-			core.WriteError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
+			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
 			return
 		}
 		if rec != nil {
@@ -308,5 +308,5 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
-	core.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list, "has_more": false})
+	router.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list, "has_more": false})
 }

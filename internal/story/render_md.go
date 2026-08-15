@@ -100,7 +100,7 @@ func renderStep(w func(string, ...any), s *Step, t i18n.StoryText, st i18n.Spine
 		w(" (ttft %s)", fmtutil.FmtSeconds(msDuration(m.TTFTMS), 1))
 	}
 	if m.UsageOK {
-		w(" · %s/%s/%s", fmtTokens(m.Usage.Fresh()), fmtTokens(m.Usage.CacheRead), fmtTokens(m.Usage.Out))
+		w(" · %s/%s/%s", fmtutil.FmtTokens(m.Usage.Fresh()), fmtutil.FmtTokens(m.Usage.CacheRead), fmtutil.FmtTokens(m.Usage.Out))
 	}
 	w(" · %s\n\n", m.Endpoint)
 
@@ -218,7 +218,7 @@ func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.Stor
 		ratio = fmtutil.FmtPercent(float64(c.TokensAfter)/float64(c.TokensBefore), 1)
 	}
 	w("<details><summary>%s</summary>\n\n",
-		t.CompactionSummary(fmtTokens(c.TokensBefore), fmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities)))
+		t.CompactionSummary(fmtutil.FmtTokens(c.TokensBefore), fmtutil.FmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities)))
 	if len(c.SwallowedEntities) > 0 {
 		w("%s", t.SwallowedEntities(strings.Join(c.SwallowedEntities, t.ListSep)))
 	}
@@ -272,25 +272,6 @@ func codeFenceLang(s, lang string) string {
 // to a time.Duration for fmtutil.FmtSeconds.
 func msDuration(ms int64) time.Duration {
 	return time.Duration(ms) * time.Millisecond
-}
-
-// fmtTokens renders an actual (already-billed) per-step token count —
-// K/M-scaled, no "(est)" marker: the numbers here are the request's
-// recorded usage.In/CacheRead/Out, not an estimate, so carrying one would
-// claim the opposite of what's true. Same rationale internal/report/
-// detail.go's fmtTokensPlain applies for its own (estimated, but
-// contextually labeled) token count, and internal/router/logfmt.go's
-// estTokenField/usageTokenField for the live router log's inline version
-// of the same est-vs-actual distinction.
-func fmtTokens(n int64) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fK", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%d", n)
-	}
 }
 
 // pctStr is story's local 0-decimal alias for fmtutil.FmtPercent —

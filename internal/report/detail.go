@@ -469,24 +469,7 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 	if len(caps) > 0 {
 		capsText = strings.Join(caps, t.ListSep)
 	}
-	b.WriteString(t.FactsLine(capsText, fmtTokensPlain(f.EstimatedTokens)))
-}
-
-// fmtTokensPlain renders an estimated token count for human-facing detail
-// pages ("27.3 KT") — K/M-scaled, no "(est)"/"EST" marker on the unit
-// itself: unlike the live router log's estTokenField (internal/router/
-// logfmt.go), which needs that marker inline since it shares a line with
-// actual-usage numbers, a detail page's field is already labeled as an
-// estimate by its surrounding text, so the terser unit reads better here.
-func fmtTokensPlain(n int64) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1f MT", float64(n)/1_000_000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1f KT", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%d T", n)
-	}
+	b.WriteString(t.FactsLine(capsText, fmtutil.FmtTokensPlain(f.EstimatedTokens)))
 }
 
 // renderSessionHeader emits the grouping coordinates line and, when this

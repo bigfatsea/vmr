@@ -63,17 +63,17 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		// the first BuildSnapshot before the HTTP server starts listening,
 		// so this never fires in production. A defensive 503 here is strictly
 		// better than the nil-pointer panic snap.Models would otherwise be.
-		core.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
+		WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
 		return
 	}
 	route, ok := snap.Models[protocol][creq.Model]
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
-			core.WriteError(w, http.StatusNotFound, "not_found_error",
+			WriteError(w, http.StatusNotFound, "not_found_error",
 				fmt.Sprintf("model %q speaks the %s protocol; call it via POST %s", creq.Model, other, IngressPath(other)))
 			return
 		}
-		core.WriteError(w, http.StatusNotFound, "not_found_error",
+		WriteError(w, http.StatusNotFound, "not_found_error",
 			fmt.Sprintf("model %q not found; models on this endpoint: %s",
 				creq.Model, strings.Join(modelNames(snap, protocol), ", ")))
 		return
@@ -236,7 +236,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 			// Condition-based Routing section).
 			msg = fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
 		}
-		core.WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
+		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
 }

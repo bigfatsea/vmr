@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -25,7 +26,7 @@ func renderCompactions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4], h[5])
 	for _, c := range rep.Compactions {
 		tbl.row(fmtDisplayFull(c.TS), orDash(c.Summarizes), orDash(c.ContinuesTo),
-			fmtTokens(c.TokensIn)+" → "+fmtTokens(c.TokensOut),
+			fmtutil.FmtTokens(c.TokensIn)+" → "+fmtutil.FmtTokens(c.TokensOut),
 			retentionRatio(c.TokensIn, c.TokensOut),
 			entitySample(c.SwallowedEntities))
 	}

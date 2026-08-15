@@ -107,10 +107,10 @@ func renderDurationAndFinalContext(w func(string, ...any), ex *ComparisonExtras,
 	w("%s", t.FinalContextTitle)
 	w("%s", t.FinalContextHeader(fc.A.Seq, fc.B.Seq))
 	rl := t.FinalContextRowLabels
-	w("| %s | %s | %s |\n", rl[0], fmtTokens(fc.A.SystemTokens), fmtTokens(fc.B.SystemTokens))
-	w("| %s | %s | %s |\n", rl[1], fmtTokens(fc.A.UserTokens), fmtTokens(fc.B.UserTokens))
-	w("| %s | %s | %s |\n", rl[2], fmtTokens(fc.A.AssistantTokens), fmtTokens(fc.B.AssistantTokens))
-	w("| %s | %s | %s |\n\n", rl[3], fmtTokens(fc.A.ToolTokens), fmtTokens(fc.B.ToolTokens))
+	w("| %s | %s | %s |\n", rl[0], fmtutil.FmtTokens(fc.A.SystemTokens), fmtutil.FmtTokens(fc.B.SystemTokens))
+	w("| %s | %s | %s |\n", rl[1], fmtutil.FmtTokens(fc.A.UserTokens), fmtutil.FmtTokens(fc.B.UserTokens))
+	w("| %s | %s | %s |\n", rl[2], fmtutil.FmtTokens(fc.A.AssistantTokens), fmtutil.FmtTokens(fc.B.AssistantTokens))
+	w("| %s | %s | %s |\n\n", rl[3], fmtutil.FmtTokens(fc.A.ToolTokens), fmtutil.FmtTokens(fc.B.ToolTokens))
 }
 
 func emptyDash(s string, t i18n.CompareText) string {
@@ -200,8 +200,8 @@ func cacheCurveLine(series []CachePoint, t i18n.CompareText) string {
 func renderSysPrompt(w func(string, ...any), sp SysPromptFact, t i18n.CompareText) {
 	w("%s", t.SysPromptTitle)
 	w("%s", t.SysPromptTableHeader)
-	w("| A | %s | %d |\n", fmtTokens(sp.A.Tokens), sp.A.Changes)
-	w("| B | %s | %d |\n\n", fmtTokens(sp.B.Tokens), sp.B.Changes)
+	w("| A | %s | %d |\n", fmtutil.FmtTokens(sp.A.Tokens), sp.A.Changes)
+	w("| B | %s | %d |\n\n", fmtutil.FmtTokens(sp.B.Tokens), sp.B.Changes)
 	renderExcerpt(w, t.SysPromptExcerptLabel("A"), sp.A.Excerpt, sp.A.Truncated, t)
 	renderExcerpt(w, t.SysPromptExcerptLabel("B"), sp.B.Excerpt, sp.B.Truncated, t)
 }
@@ -242,7 +242,7 @@ func formatMetric(kind MetricKind, v float64) string {
 	case KindMillis:
 		return fmtutil.FmtSeconds(time.Duration(v)*time.Millisecond, 1)
 	case KindTokens:
-		return fmtTokens(int64(v))
+		return fmtutil.FmtTokens(int64(v))
 	case KindRatio:
 		return pctStr(v)
 	case KindMultiple:

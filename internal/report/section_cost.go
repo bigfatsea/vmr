@@ -8,6 +8,7 @@ package report
 import (
 	"fmt"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -35,7 +36,7 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		tbl := newTable(w, h[0], h[1], h[2], h[3])
 		for _, d := range rep.ByDate {
 			if d.CostEstimate != nil {
-				tbl.row(d.Date, fmtTokens(d.TokensInFresh), fmtTokens(d.TokensOut),
+				tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut),
 					fmt.Sprintf("%.4f %s", *d.CostEstimate, cur))
 			}
 		}
@@ -55,7 +56,7 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		tbl := newTable(w, h[0], h[1], h[2], h[3], h[4])
 		for _, m := range rep.ByModel {
 			if m.CostEstimate != nil {
-				tbl.row(m.Model, m.Protocol, fmtTokens(m.TokensInFresh), fmtTokens(m.TokensOut),
+				tbl.row(m.Model, m.Protocol, fmtutil.FmtTokens(m.TokensInFresh), fmtutil.FmtTokens(m.TokensOut),
 					fmt.Sprintf("%.4f %s", *m.CostEstimate, cur))
 			}
 		}
@@ -75,7 +76,7 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		tbl := newTable(w, h[0], h[1], h[2], h[3])
 		for _, e := range rep.EndpointsAll {
 			if e.CostEstimate != nil {
-				tbl.row(e.Endpoint, fmtTokens(e.TokensInFresh), fmtTokens(e.TokensOut),
+				tbl.row(e.Endpoint, fmtutil.FmtTokens(e.TokensInFresh), fmtutil.FmtTokens(e.TokensOut),
 					fmt.Sprintf("%.4f %s", *e.CostEstimate, cur))
 			}
 		}
@@ -95,7 +96,7 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		tbl := newTable(w, h[0], h[1], h[2], h[3])
 		for _, c := range rep.ByClient {
 			if c.CostEstimate != nil {
-				tbl.row(c.ClientKey, fmtTokens(c.TokensInFresh), fmtTokens(c.TokensOut),
+				tbl.row(c.ClientKey, fmtutil.FmtTokens(c.TokensInFresh), fmtutil.FmtTokens(c.TokensOut),
 					fmt.Sprintf("%.4f %s", *c.CostEstimate, cur))
 			}
 		}

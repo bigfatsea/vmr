@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -88,7 +89,7 @@ func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
 		outcome += t.OutcomeFallback(s.Fallbacks)
 	}
 	tbl.row(s.ID, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
-		fmt.Sprintf("%s / %s / %s", fmtTokens(s.TokensInFresh), fmtTokens(s.TokensInCached), fmtTokens(s.TokensOut)),
+		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
 }
 

@@ -1,4 +1,27 @@
 // Ver 2026-07-25, by Sonnet 5
+
+// Package core holds the shared entity layer both co-equal halves (routing:
+// internal/router, internal/server; analytics: internal/report,
+// internal/story) depend on, plus a handful of exported behavior —
+// EstimateTextTokens/EstimateTokensFromCounts, SortedKeys,
+// EndpointLabel/SplitEndpointLabel — that stayed here as a deliberate
+// exception. core is the project's one zero-internal-dependency package
+// (archtest-enforced) that both halves are free to import, so it's the
+// only place a type either half needs to see can go.
+//
+// Admission rule (Part 8 batch B5 of the architecture review): core holds
+// only types two or more packages spanning different halves must agree on
+// the shape of — Endpoint, CanonicalRequest, RequestFacts, ErrorClass,
+// Limit, TokenWeights, Rate, PricingSpec, QuotaSpec. Anything with behavior
+// belongs in the package that owns that behavior, not here by default. The
+// exported functions listed above are the named exception to that rule, not
+// a precedent to extend casually: each is shared by three or more
+// cross-half call sites, has no other package that could plausibly own it,
+// and core is the only common ancestor all of them can import. Before
+// adding a new behavior function here, check whether it actually meets that
+// bar — WriteJSON/WriteError used to live here and moved to internal/router
+// once the bar was applied retroactively (HTTP response writing has real
+// owners: router and server, not "shared infrastructure").
 package core
 
 import (
@@ -9,25 +32,6 @@ import (
 	"sort"
 	"time"
 )
-
-// WriteJSON writes v as the JSON response body with the given status.
-// Shared by router and server so every JSON response (success or error)
-// goes through one encoding path.
-func WriteJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-// WriteError emits an error body that both OpenAI clients (error.message)
-// and Anthropic clients (type:"error" envelope) can parse. Shared by router
-// and server so a format change only has to be made once.
-func WriteError(w http.ResponseWriter, status int, errType, msg string) {
-	WriteJSON(w, status, map[string]any{
-		"type":  "error",
-		"error": map[string]string{"type": errType, "message": msg},
-	})
-}
 
 // CanonicalRequest is the routing view of a chat request. Both supported
 // ingress protocols (OpenAI chat completions, Anthropic messages) carry

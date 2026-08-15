@@ -8,6 +8,7 @@ package report
 import (
 	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -34,8 +35,8 @@ func renderClientEndpoint(w func(string, ...any), rep *Report2, lang i18n.Lang) 
 		w("**%s**\n\n", client)
 		tbl := newTable(w, t.Headers[0], t.Headers[1], t.Headers[2], t.Headers[3], t.Headers[4], t.Headers[5])
 		for _, r := range rep.ClientEndpoints[i:j] {
-			tbl.row(r.Endpoint, strconv.Itoa(r.Requests), fmtTokens(r.TokensInFresh),
-				fmtTokens(r.TokensInCached), fmtTokens(r.TokensOut), pctStr64(r.TokensIn, clientTotal))
+			tbl.row(r.Endpoint, strconv.Itoa(r.Requests), fmtutil.FmtTokens(r.TokensInFresh),
+				fmtutil.FmtTokens(r.TokensInCached), fmtutil.FmtTokens(r.TokensOut), pctStr64(r.TokensIn, clientTotal))
 		}
 		w("\n")
 		i = j

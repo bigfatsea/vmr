@@ -8,6 +8,7 @@
 package story
 
 import (
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -20,7 +21,7 @@ func renderModelUsage(w func(string, ...any), m Metrics, lang i18n.Lang) {
 	w("%s", t.UsageHeader)
 	for _, u := range m.ModelUsage {
 		w("| %s (%s) | %d | %s | %s | %s |\n",
-			u.Model, u.Provider, u.Steps, fmtTokens(u.TokensIn), fmtTokens(u.TokensInCached), fmtTokens(u.TokensOut))
+			u.Model, u.Provider, u.Steps, fmtutil.FmtTokens(u.TokensIn), fmtutil.FmtTokens(u.TokensInCached), fmtutil.FmtTokens(u.TokensOut))
 	}
 	w("\n")
 

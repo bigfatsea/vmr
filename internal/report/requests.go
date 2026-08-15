@@ -212,7 +212,7 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 	for _, e := range entries {
 		w("## %s\n\n", e.header)
 		w("%s", t.GroupSummary(e.summary.requests, pctStr2(e.summary.ok, e.summary.requests),
-			fmtTokens(e.summary.fresh), fmtTokens(e.summary.cached), fmtTokens(e.summary.out),
+			fmtutil.FmtTokens(e.summary.fresh), fmtutil.FmtTokens(e.summary.cached), fmtutil.FmtTokens(e.summary.out),
 			pctStr(e.summary.cacheEff)))
 		w("%s", t.GroupDetailLink(e.file))
 	}
@@ -407,7 +407,7 @@ func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText) st
 		cached += r.TokensInCached
 		out += r.TokensOut
 	}
-	w("%s", t.ScheduledSummary(pctStr2(ok, len(occ)), fmtTokens(fresh), fmtTokens(cached), fmtTokens(out)))
+	w("%s", t.ScheduledSummary(pctStr2(ok, len(occ)), fmtutil.FmtTokens(fresh), fmtutil.FmtTokens(cached), fmtutil.FmtTokens(out)))
 	w("%s", t.ScheduledTableHeader)
 	for _, r := range occ {
 		w("| %s | %s | %s | %s | %s | %s |\n",
@@ -587,7 +587,7 @@ func freshCachedOut(r RequestRow) string {
 	if r.TokensIn == 0 && r.TokensOut == 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%s / %s / %s", fmtTokens(r.TokensInFresh), fmtTokens(r.TokensInCached), fmtTokens(r.TokensOut))
+	return fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(r.TokensInFresh), fmtutil.FmtTokens(r.TokensInCached), fmtutil.FmtTokens(r.TokensOut))
 }
 
 func cacheEffTurn(r RequestRow) string {

@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"vmr/internal/fmtutil"
 )
 
 func cut(s string, n int) string {
@@ -175,7 +177,7 @@ func p5095Cell(p50, p95 int64) string {
 // tokP5095Cell renders a "p50/p95" token-count pair (§5 按客户端 In/Out
 // columns) - same shape as p5095Cell but token-scaled, not duration-scaled.
 func tokP5095Cell(p50, p95 int64) string {
-	return fmtTokens(p50) + "/" + fmtTokens(p95)
+	return fmtutil.FmtTokens(p50) + "/" + fmtutil.FmtTokens(p95)
 }
 
 func sortedKeysInt(m map[string]int) []string {
