@@ -182,7 +182,7 @@ func serveStreamNormal(w http.ResponseWriter) {
 }
 
 // serveThinkingLeak reproduces MiniMax M3's thinking=medium shape (see
-// internal/router/response.go::stripThinkingProcess) — a plain-text
+// internal/respnorm/minimax.go::stripThinkingProcess) — a plain-text
 // "Thinking Process:" section followed by a "Looks good. Pro(ceed)"
 // self-endorsement marker, all inside one content value. This is the one
 // scenario expected to force vmr's response normalizer into full-buffer
@@ -211,7 +211,7 @@ func serveThinkingLeak(w http.ResponseWriter) {
 }
 
 // serveThinkTag reproduces MiniMax M3's OTHER thinking shape (see
-// internal/router/response.go — the thinkPattern/think_strip path, distinct
+// internal/respnorm — the thinkPattern/think_strip path, distinct
 // from thinking_leak's stripThinkingProcess path): inline <think>...</think>
 // reasoning inside the content field. Unlike thinking_leak, vmr only
 // buffers WHILE the think block is open — once </think> closes, it resumes

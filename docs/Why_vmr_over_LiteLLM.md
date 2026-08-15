@@ -48,4 +48,4 @@ If none of those describe your situation — if what you actually have is one ag
 
 ---
 
-See also: design doc for the full architecture and every design decision behind it — [Part 1: routing core](VirtualModelRouter_Design_v4_Core.md), [Part 2: `vmr report`/`vmr story`](VirtualModelRouter_Design_v4_Analytics.md) — and [User Guide](UserGuide.md) for configuration and CLI reference.
+See also: design doc for the full architecture and every design decision behind it — [Part 1: Routing Core](VirtualModelRouter_Design_v4_Core.md), [Part 2: Analytics & Story](VirtualModelRouter_Design_v4_Analytics.md), and the two topic pieces on [Quota-Aware Routing](VirtualModelRouter_Design_v4_Quota.md) and [Strategy & Competitive Landscape](VirtualModelRouter_Design_v4_Strategy.md) — plus [User Guide](UserGuide.md) for configuration and CLI reference.

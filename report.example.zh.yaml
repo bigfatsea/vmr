@@ -13,7 +13,7 @@
 
 language: en   # en（默认）| zh —— vmr-report.md / vmr-requests*.md /
                # vmr-stories.md / journey-*.md / compare-*.md /
-               # vmr-story-corpus.md 的输出语言。
+               # vmr-story-corpus.md / details/*.md 的输出语言。
                # 叙述性的 JSON 字段（比如 Finding.Finding、MetricDiff.Label）
                # 不管这里怎么设置永远保持英文，所以写脚本解析这些文件时完全
                # 不需要考虑报告是用哪种语言生成的。会被 -lang 覆盖。

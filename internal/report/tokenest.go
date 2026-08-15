@@ -24,7 +24,7 @@ import (
 // every attempt failed must contribute nothing here, the same basis
 // EndpointRow's exact token fields already use.
 //
-// Known, deliberate residual: the router counts UPSTREAM bytes (respStream's
+// Known, deliberate residual: the router counts UPSTREAM bytes (respnorm's
 // ingest hook sees every source byte, including in opaque mode), while the
 // only body an offline reader has is the CLIENT-side one the recorder
 // captured — after model-name rewrite, after any response-normalization strip,

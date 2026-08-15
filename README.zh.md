@@ -159,7 +159,7 @@ curl http://127.0.0.1:8800/admin/status
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr report`、完整 CLI 参考。
 - **[为什么选 vmr 而不是 LiteLLM](docs/Why_vmr_over_LiteLLM.zh.md)** —— 架构细节与网关对比。
-- **设计文档**（分两部分）—— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Story](docs/VirtualModelRouter_Design_v4_Analytics.md)。
+- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Story](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加两篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
 
 ## 开发
 

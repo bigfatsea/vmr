@@ -2,9 +2,9 @@
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
-本文档描述 vmr 审计日志的两个离线消费方：聚合报表 `vmr report`（`internal/report`）与 Agent 任务叙事重建 `vmr story`（`internal/story` + 支撑层 `internal/ctxgraph`/`internal/chatmsg`）。读完即可维护与二次开发这一侧。使用文档见 `README.md`/`README.zh.md`、`docs/UserGuide.md`/`UserGuide.zh.md`。
+本文档描述 vmr 审计日志的两个离线消费方：聚合报表 `vmr report`（`internal/report`）与 Agent 任务叙事重建 `vmr story`（`internal/story` + 支撑层 `internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg`）。读完即可维护与二次开发这一侧。使用文档见 `README.md`/`README.zh.md`、`docs/UserGuide.md`/`UserGuide.zh.md`。
 
-**这是 v4 版设计文档的 Part 2**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。（v4 另有两篇专题：额度感知路由 `docs/VirtualModelRouter_Design_v4_Quota.md`，战略与竞品 `docs/VirtualModelRouter_Design_v4_Strategy.md`。前者与本文档有一处实质接口：`vmr report` 的 §2.5 额度对照表是它那份 `vmr-quota.json` 的离线读者，读取契约与口径一致性纪律以那篇为准。）两份主文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1"记录结构"一节定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
+**这是 v4 版设计文档的 Part 2**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。（v4 另有两篇专题：额度感知路由 `docs/VirtualModelRouter_Design_v4_Quota.md`，战略与竞品 `docs/VirtualModelRouter_Design_v4_Strategy.md`。前者与本文档有一处实质接口：`vmr report` 的 §2.5 额度对照表是它那份 `vmr-quota.json` 的离线读者，读取契约与口径一致性纪律以那篇为准。）两份主文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1"记录结构"一节定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
 
 ---
 
@@ -426,7 +426,7 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 
 ### 4.5 LLM 解读层的语言联动
 
-关键约束：中文报告配中文解读，英文报告配英文解读。`internal/story/llm.go` 的 system prompt 因此拆成 `i18n.LLMSystemPrompt(lang)`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
+关键约束：中文报告配中文解读，英文报告配英文解读。`internal/story/llm.go` 的 system prompt 因此拆成 `i18n.LLM(lang).SystemPrompt`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
 
 ### 4.6 实现中发现的三个真实问题
 
@@ -438,7 +438,7 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 
 ### 4.7 扩展性
 
-新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的 `XxxText(lang)` 函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Xxx(lang)` 拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
+新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的文本函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Workload(lang)` 等拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
 
 ---
 

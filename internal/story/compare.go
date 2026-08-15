@@ -26,7 +26,7 @@ type MetricKind string
 
 const (
 	KindMillis   MetricKind = "ms"       // milliseconds, rendered via fmtutil.FmtSeconds
-	KindTokens   MetricKind = "tokens"   // token count, rendered via fmtTokens
+	KindTokens   MetricKind = "tokens"   // token count, rendered via fmtutil.FmtTokens
 	KindCount    MetricKind = "count"    // plain integer
 	KindRatio    MetricKind = "ratio"    // 0..1 fraction, rendered as a percentage
 	KindMultiple MetricKind = "multiple" // an unbounded ratio (e.g. model/tool time), rendered as "x.xx×"

@@ -69,10 +69,10 @@ func ExtractUsage(body any) (Usage, bool) {
 }
 
 // MergeUsageBytes parses usage out of b and folds it into acc, returning the
-// merged result — the byte-oriented entry point internal/router/response.go
-// needs (a respStream block can be either a complete JSON object body or SSE
-// text, depending on which transport mode is in play; see respStream's own
-// doc comment), auto-detecting which shape b is. This and ExtractUsage's
+// merged result — the byte-oriented entry point internal/respnorm needs (a
+// normalizer block can be either a complete JSON object body or SSE text,
+// depending on which transport mode is in play; see that package's doc
+// comment), auto-detecting which shape b is. This and ExtractUsage's
 // string case share this one implementation rather than each parsing SSE
 // lines independently — the same "one parser, not two" rule this package
 // exists to enforce (see CLAUDE.md's chatmsg invariant: it is the one

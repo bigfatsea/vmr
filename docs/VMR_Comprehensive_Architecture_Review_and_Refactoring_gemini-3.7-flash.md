@@ -436,16 +436,27 @@ classDiagram
     FrameworksAndDrivers --> InterfaceAdapters : Drives/Injects
 ```
 
+> **注：本表仅作 Clean Architecture 视角下的描述性地图，非项目重构目标。VMR 真正的架构模型是「两个对等半区 + archtest 规则表」，不强制追求 CA 同心圆式的依赖倒置。**
+>
+> **归环规则**：CA 的环边界是编译单元边界，所以每个包只能出现在一环，按主导职责归属。少数包真实地横跨环边界（见表下脚注），这里按主导职责归一环，不为了让表好看而假装它们纯粹。
+
 | Clean Architecture 规定层级 | VMR 对应包 / 组件 | 职责定义与边界 |
 | :--- | :--- | :--- |
-| **Entities（实体层）** | `internal/core`<br>`internal/chatmsg`<br>`internal/ctxgraph`<br>`internal/fmtutil` | 封装系统最核心、与外部框架无关的数据结构与业务不变式（端点、协议消息、哈希指纹、编辑图谱、错误分类枚举）。 |
-| **Use Cases（用例层）** | `internal/strategy`<br>`internal/quota`<br>`internal/pricing`<br>`internal/router`<br>`internal/story`<br>`internal/report`<br>`internal/diagnose`<br>`internal/replay` | 封装应用层调度与分析业务规则（多维排序、额度打分算法、三层费率计算、会话叙事推演、异常行为检测、报表统计聚合）。 |
-| **Interface Adapters（接口适配器层）** | `internal/adapter/{openai,anthropic,responses}`<br>`internal/server/facts.go`<br>`internal/server/recorder.go`<br>`internal/story/profile/*`<br>`internal/i18n/*` | 负责数据格式双向转换（将 HTTP 报文转换为 CanonicalRequest，将上游响应错误转换为 ErrorClass，将 Agent 方言转换为标准交互，多语言翻译）。 |
-| **Frameworks & Drivers（框架与驱动层）** | `internal/server` (Mux & Listen)<br>`internal/audit` (File IO & zstd)<br>`internal/config` (yaml.v3 & fsnotify)<br>`cmd/vmr` (CLI 入口) | 最外层技术细节与 I/O 驱动（Go 标准库 HTTP 服务器、文件系统、YAML 解析库、操作系统信号、CLI 解析）。 |
+| **Entities（实体层）** | `internal/core`<br>`internal/jsonscan`<br>`internal/chatmsg`<br>`internal/ctxgraph` | 与外部框架无关的核心数据结构、无依赖字节扫描基语与业务不变式（端点、协议消息、哈希指纹、编辑图谱、错误分类枚举）。 |
+| **Use Cases（用例层）** | `internal/strategy`<br>`internal/quota`<br>`internal/pricing`<br>`internal/config` ※<br>`internal/router`<br>`internal/respnorm`<br>`internal/taskseg`<br>`internal/story` ※<br>`internal/report` ※<br>`internal/diagnose`<br>`internal/replay` | 应用层调度、正规化与分析业务规则（多维排序、额度打分、三层费率解析、响应流状态机与厂商修复、任务切分、会话叙事推演、异常行为检测、报表统计聚合）。 |
+| **Interface Adapters（接口适配器层）** | `internal/adapter/{openai,anthropic,openairesponses}`<br>`internal/server` ※<br>`internal/fmtutil`<br>`internal/i18n` | 数据格式双向转换与展示层适配（HTTP 报文 ↔ `CanonicalRequest`、上游错误 → `ErrorClass`、展示格式化、多语言文案）。 |
+| **Frameworks & Drivers（框架与驱动层）** | `internal/audit`（文件 IO & zstd）<br>`internal/imgprep`（图像编解码）<br>`internal/rundir`、`internal/buildinfo`<br>`cmd/vmr`（CLI 入口） | 最外层技术细节与 I/O 驱动（文件系统、图像库、操作系统信号与路径惯例、CLI 解析）。 |
 
-> **【opus-5 复审】⚠️ 映射表自身有四处矛盾；更根本的是，Clean Architecture 不是这个项目最合适的分析框架，不应据此驱动重构。**
+> ※ **真实横跨环边界的四个包**——这不是待修的错配，而是「CA 不是这个项目合适透镜」最直接的证据：
+> - `internal/config`：既是 yaml.v3 + fsnotify 的最外层驱动，又在 `pricing.go` 里执行完整的三层费率解析业务规则，并且 `import "vmr/internal/adapter"`。
+> - `internal/server`：既是 HTTP mux 与监听（最外环），又在 `facts.go` 做请求事实抽取（适配器环）。
+> - `internal/report` / `internal/story`：既是分析业务规则（用例环），又拥有全部 Markdown 渲染（`render_doc.go` + 每节一个 `section_*.go`，适配器环）。
 >
-> **一、映射表的四处硬伤（可逐条对源码核实）**
+> 要把这四个包「归位」，就得为满足图示而拆包插接口——代价是四个新的包边界和一层不解决任何真实问题的间接性。这正是下面复审结论要说的事。
+
+> **【opus-5 复审】⚠️ 映射表原有四处矛盾；更根本的是，Clean Architecture 不是这个项目最合适的分析框架，不应据此驱动重构。**
+>
+> **一、原表的四处硬伤（可逐条对源码核实）**——上面的表与脚注就是按这四条改出来的，此处保留原始论证，供后来者判断改法是否成立。
 > 1. **`internal/server` 同时出现在两个环**：既在 Interface Adapters（`facts.go`/`recorder.go`），又在 Frameworks & Drivers（Mux）。CA 的环边界是**编译单元边界**，同一个 Go 包不可能横跨两环——要么承认它是一个环，要么真的拆包。原文没做选择。
 > 2. **`internal/config` 被划为 Frameworks & Drivers（yaml.v3 & fsnotify）**，但 `config/pricing.go` 的 `resolvePricing` 执行的是完整的三层费率解析业务规则，并且 `config.go` 还 `import "vmr/internal/adapter"`（已核实）。这是不折不扣的 Use Case 逻辑长在最外环里——这是表中最实质的一处错配，也恰恰是原文没点出来的。
 > 3. **`internal/report` 被划为 Use Cases**，但它同时拥有全部 Markdown 渲染（`render_doc.go` + 每个章节一个 `section_*.go`），那是 Interface Adapters 的职责。
@@ -652,32 +663,15 @@ flowchart LR
 ### 6.2 宏观架构演进目标（Target Architecture）
 
 ```mermaid
-graph LR
-    subgraph Core_Domain ["公共实体与协议层 (Core & Protocols)"]
-        CORE_EP["core/endpoint"]
-        CORE_REQ["core/request"]
-        CORE_QUOTA["core/quota"]
-        CORE_PRICING["core/pricing"]
-        AGENT_PROF["internal/agentprofile (Unified Agent Dialects)"]
-    end
-
-    subgraph Online_Runtime ["在线运行时半区 (Online Routing Runtime)"]
-        ROUTER_ENG["router/engine"]
-        ROUTER_NORM["router/normalizer"]
-        HEALTH_ENG["health/statemachine"]
-        QUOTA_ACC["quota/accounting"]
-        PRICING_ENG["pricing/resolver"]
-    end
-
-    subgraph Offline_Analytics ["离线分析半区 (Offline Analytics)"]
-        CTX_ENG["ctxgraph/engine"]
-        STORY_ENG["story/narrative"]
-        REPORT_ENG["report/aggregator"]
-    end
-
-    Online_Runtime --> Core_Domain
-    Offline_Analytics --> Core_Domain
-    Offline_Analytics -. "Single Source of Truth:\naudit.Record (JSONL)" .-> Online_Runtime
+graph TB
+    CORE["公共叶子层<br/>core · fmtutil · i18n · jsonscan · chatmsg · quota · pricing"]
+    FMT["audit.Record JSONL<br/>（磁盘格式契约 · 唯一耦合点）"]
+    ON["在线路由半区<br/>server → router → respnorm / adapter / health / sticky / strategy / imgprep"]
+    OFF["离线分析半区<br/>report / story → taskseg → ctxgraph"]
+    ON --> CORE
+    OFF --> CORE
+    ON -- "写入" --> FMT
+    OFF -- "只读消费" --> FMT
 ```
 
 > **【opus-5 复审】🟡 大方向（两半区 + 公共域）是对的，但这张图有两处会直接把重构带进坑里，不能照着实施。**
@@ -689,19 +683,7 @@ graph LR
 > **坑 2：`Offline_Analytics -.-> Online_Runtime` 这条箭头画反了语义。**
 > 图上这条边读作「离线半区依赖在线半区」，而这恰恰是 `archtest` 明令禁止、且今天为真地不存在的那条边（`report`/`story`/`ctxgraph` 均禁止 import `router`/`server`/`config`）。正确的画法是：**两个半区各自依赖 `audit.Record` 的 JSONL 格式（一个格式契约节点），彼此之间没有任何边**。
 >
-> **修正版（应替换原图）**：
-> ```mermaid
-> graph TB
->     CORE["公共叶子层<br/>core · fmtutil · i18n · jsonx(新) · chatmsg · quota · pricing"]
->     FMT["audit.Record JSONL<br/>（磁盘格式契约 · 唯一耦合点）"]
->     ON["在线路由半区<br/>server → router → adapter/health/sticky/strategy/imgprep"]
->     OFF["离线分析半区<br/>report / story → taskseg(新) → ctxgraph"]
->     ON --> CORE
->     OFF --> CORE
->     ON -- "写入" --> FMT
->     OFF -- "只读消费" --> FMT
-> ```
-> 注意这张图里**两个半区之间没有任何箭头**——这才是 `archtest` 实际强制的事实，也是这个项目真正的架构主张。
+> **修正版已替换上方原图**：公共叶子层不再拆子包，两个半区各自连到 `audit.Record` 这个格式契约节点。注意修正后的图里**两个半区之间没有任何箭头**——这才是 `archtest` 实际强制的事实，也是这个项目真正的架构主张。
 
 ---
 
@@ -1568,6 +1550,14 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 **为什么仍然必须做（而不是丢进远期）**：CLAUDE.md 是每个会话都会被载入的上下文。**一条错误的模块描述比没有描述更糟**——它会以权威口吻误导后续所有工作。N9 就是活例子：它让「token 格式化已经统一」这件从未发生的事，看起来已经发生了。
 
 **验收标准**：`TestArchitecture_DocReferences` 通过（这本身就覆盖了 N3 与 N9 的验收）；`*.example.yaml` 与 `*.example.zh.yaml` 若受影响则保持平价。**负向验证**：手工在 CLAUDE.md 里插入一个不存在的 `internal/nosuchpkg` 引用，该测试必须失败。
+
+> **【B6 落地记录 · 2026-08-15】✅ 已完成。** N3 补齐（`_Strategy.md` 从 `docs/future-strategy/` 的战略材料收敛而成，四处引用全部指得到实体），D6/D7 修正（CA 映射表改为每包只归一环 + 一条脚注点出四个真实横跨环边界的包；6.2 架构图替换为两半区无箭头、只连 `audit.Record` 契约节点的版本），CLAUDE.md 从 192 行收敛到 156 行——砍掉的是会漂移的实现细节，**保留并重写了每一条有行为约束力的不变量与约定**。`docs/KNOWN_ISSUES_sonnet-5.md` 整体重写为当前状态清单。
+>
+> 落地过程中的三点，值得写下来：
+>
+> - 🆕 **N14（守卫第一版有洞，且正好漏掉了本批自己引入的漂移）**：`TestArchitecture_DocReferences` 的符号正则最初写作 ``​`pkg.Symbol`​``（可选跟一对括号），于是 ``​`i18n.StoryLLM(lang).SystemPrompt`​`` 和 ``​`adapter.TopLevelProbeResult.Model`​`` 这两个**本批新写进设计文档、且都不存在**的符号，因为尾部多了一段 `.Field` 而**全部逃逸**。正则已改为锚定开引号、允许调用与选择器链、只校验前两段。教训是通用的：一个只在 happy path 上验证过的守卫，等于没有验证过。
+> - 🆕 **N15（负向验证是假的）**：第一版 `TestArchitecture_DocReferences_Negative` 只断言「某个编造出来的文件名确实不在磁盘上」——它**从不调用被测的检查逻辑**，恒绿，验收标准里那条负向验证并没有真正被满足。已把检查逻辑抽成纯函数 `checkDocRefs`，负向测试用 10 组合成的坏引用驱动它、并配 6 组必须保持沉默的好引用（防止守卫从「漏报」滑向「误报」）。顺带一提：这段记录本身在第一次写出来时也踩了守卫——它当时逐字写出了那个不存在的路径，测试立刻变红。守卫是有效的。
+> - **扫描范围收敛到 `docs/` 顶层**：`docs/future-strategy/` 下是带日期的战略笔记与历史评审报告，其中数处**正当地**讨论着已被删除的文件（例如一段记录 `git status` 显示某文件为 `D` 的排查过程）。把它们纳入当前状态校验，只会逼人改历史去让测试变绿。
 
 ---
 

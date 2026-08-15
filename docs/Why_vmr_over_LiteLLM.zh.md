@@ -48,4 +48,4 @@ vmr 没有一个"你的请求要在里面幸存下来"的内部 schema。它只�
 
 ---
 
-延伸阅读：完整架构与每条设计决策背后的取舍见设计文档——[Part 1：路由核心](VirtualModelRouter_Design_v4_Core.md)、[Part 2：`vmr report`/`vmr story`](VirtualModelRouter_Design_v4_Analytics.md)；配置与 CLI 完整参考见[用户指南](UserGuide.zh.md)。
+延伸阅读：完整架构与每条设计决策背后的取舍见设计文档——[Part 1：路由核心](VirtualModelRouter_Design_v4_Core.md)、[Part 2：分析与 Story](VirtualModelRouter_Design_v4_Analytics.md)，以及两篇专题：[额度感知路由](VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](VirtualModelRouter_Design_v4_Strategy.md)；配置与 CLI 完整参考见[用户指南](UserGuide.zh.md)。

@@ -478,7 +478,7 @@ models:
 }
 
 // TestResponseNormalizer_FailoverStillWorks verifies that wrapping the
-// upstream body in respStream (the response normalizer) before forwarding
+// upstream body in respnorm.Wrap (the response normalizer) before forwarding
 // does not disturb failover: failover depends on clean error propagation
 // out of the body-copy path, and a wrapper that mishandles io.EOF or errors
 // would silently break it.

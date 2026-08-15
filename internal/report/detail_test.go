@@ -16,7 +16,7 @@ import (
 )
 
 // TestNormDescriptions_AllKnownStepsHaveText guards against a norm step
-// name being added to the router-side trail (response.go/responsefix.go)
+// name being added to the router-side trail (internal/respnorm)
 // without a matching entry here — writeNorms falls back to "（未知步骤）"
 // for anything missing, which is silent and easy to forget.
 func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
@@ -578,7 +578,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 
 // TestRenderDetail_RawPreStrip covers both states of the "② VMR → 上游" raw
 // pre-strip display: full content when the audit record captured it
-// (RawPreStrip populated — see internal/router/response.go), and a graceful
+// (RawPreStrip populated — see internal/respnorm), and a graceful
 // "not captured" note for records logged before that capture existed.
 func TestRenderDetail_RawPreStrip(t *testing.T) {
 	base := func(rawPreStrip any) *audit.Record {

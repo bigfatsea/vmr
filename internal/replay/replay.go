@@ -239,9 +239,9 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 // metric-dispatch/model-multiplier/cost-pricing pipeline chargeQuota uses
 // for live traffic (see that function's doc comment). It differs from
 // chargeQuota only in how usage is obtained: live traffic sniffs it
-// incrementally off a streaming respStream, but replay already has the
-// complete request/response bytes in hand (reqBody/respBody), so
-// chatmsg.MergeUsageBytes — the exact function respStream's own noteUsage
+// incrementally off a streaming respnorm.NormalizerStream, but replay already
+// has the complete request/response bytes in hand (reqBody/respBody), so
+// chatmsg.MergeUsageBytes — the exact function respnorm's own usage sniffing
 // calls internally — reads it directly from the buffered bytes instead, and
 // the degraded estimate comes from core.EstimateTextTokens over the raw
 // request/response bytes rather than from an incremental byte tally.

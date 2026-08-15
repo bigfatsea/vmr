@@ -32,7 +32,7 @@ var headerBlocklist = map[string]struct{}{
 	"connection":          {}, // Go Transport manages
 	// Forwarding the client's Accept-Encoding disables Go Transport's
 	// transparent gzip: the upstream may then answer compressed, the
-	// response normalizer (internal/router/response.go) would run its
+	// response normalizer (internal/respnorm) would run its
 	// regexes over gzip bytes, and the client would receive them without a
 	// Content-Encoding header (only Content-Type is forwarded back).
 	// Blocking it lets the Transport negotiate gzip itself and hand every

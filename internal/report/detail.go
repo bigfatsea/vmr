@@ -670,7 +670,7 @@ func renderAttempts(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 // renderRawPreStrip shows the upstream bytes exactly as received, from
 // before a think_strip/thinking_process_strip rewrite ran — the reasoning
 // content (and the raw SSE events that carried it) that never reaches the
-// client. Captured only going forward (internal/router/response.go); older
+// client. Captured only going forward (internal/respnorm); older
 // logs have the norm step listed with no raw bytes to show.
 func renderRawPreStrip(b *strings.Builder, a *audit.Attempt, t i18n.DetailText) {
 	stripped := false

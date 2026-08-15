@@ -76,7 +76,7 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 		case core.MetricTokens:
 			// Sniffed usage and the degraded byte-count estimate are added
 			// together here — and ONLY here. The router charges both (see
-			// internal/router/quota.go's tokenCharge: exact when respStream
+			// internal/router/quota.go's tokenCharge: exact when respnorm
 			// sniffed a usage object, a byte-count estimate when it didn't),
 			// so a window mixing the two must count both or it reports a
 			// number the router never charged. Counting only the sniffed half

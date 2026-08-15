@@ -84,8 +84,8 @@ type rec2 struct {
 	line                    int
 }
 
-// diagnosticNormMarker is the subset of respStream.Applied()'s vocabulary
-// (internal/router/response.go's noteApplied call sites) worth surfacing as
+// diagnosticNormMarker is the subset of NormalizerStream.Applied()'s vocabulary
+// (internal/respnorm's noteApplied call sites) worth surfacing as
 // a per-endpoint frequency stat via EndpointRow.NormCounts: an actual vendor
 // content quirk vmr silently worked around, not a routine transport/protocol
 // step every successful response goes through regardless of vendor

@@ -1119,3 +1119,70 @@ func TestRespStream_AnthropicTextThinkStripped(t *testing.T) {
 		t.Errorf("post-think content lost: %q", out)
 	}
 }
+
+// TestStream_ReadAfterEOFIsTerminal pins the contract every generic
+// io.Reader consumer relies on: once Read has returned io.EOF, calling it
+// again returns (0, io.EOF) forever and produces no further bytes.
+//
+// Without the done check at the top of Read, a second call would fall
+// through to s.src.Read — and a source like strings.Reader answers
+// (0, io.EOF) indefinitely, so finish() would run a second time. In
+// passthrough mode that means a second appendDone: a duplicate
+// "data: [DONE]" spliced onto an already-complete stream. copyFlush stops
+// at the first EOF and so never triggered it, which is exactly why an
+// io.Copy-shaped caller could have hit a bug no production path showed.
+func TestStream_ReadAfterEOFIsTerminal(t *testing.T) {
+	t.Parallel()
+	in := `data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n"
+
+	for _, tc := range []struct {
+		name     string
+		isSSE    bool
+		protocol string
+		opaque   bool
+	}{
+		{"openai sse passthrough", true, "openai", false},
+		{"anthropic sse passthrough", true, "anthropic", false},
+		{"non-sse buffered", false, "openai", false},
+		{"opaque", true, "openai", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rs := newStream(strings.NewReader(in), "agent", "", tc.isSSE, tc.protocol, tc.opaque)
+			first := readAll(t, rs)
+
+			// Keep reading well past EOF; nothing may come back.
+			tmp := make([]byte, 4096)
+			for i := 0; i < 5; i++ {
+				n, err := rs.Read(tmp)
+				if n != 0 || err != io.EOF {
+					t.Fatalf("read %d after EOF = (%d, %v), want (0, io.EOF); extra bytes %q",
+						i, n, err, tmp[:n])
+				}
+			}
+
+			if got := strings.Count(first, "data: [DONE]"); got > 1 {
+				t.Errorf("[DONE] emitted %d times, want at most 1: %q", got, first)
+			}
+		})
+	}
+}
+
+// TestStream_IoCopyMatchesReadAll is the same guarantee from the consumer
+// side: io.Copy keeps calling Read until EOF with no special handling, so
+// it must produce exactly what the (0, nil)-tolerant reader loop does.
+func TestStream_IoCopyMatchesReadAll(t *testing.T) {
+	t.Parallel()
+	in := `data: {"choices":[{"delta":{"content":"hello"}}]}` + "\n\n" +
+		`data: {"choices":[{"finish_reason":"stop"}]}` + "\n\n"
+
+	want := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+
+	var got bytes.Buffer
+	if _, err := io.Copy(&got, newStream(strings.NewReader(in), "agent", "", true, "openai", false)); err != nil {
+		t.Fatalf("io.Copy: %v", err)
+	}
+	if got.String() != want {
+		t.Errorf("io.Copy = %q, readAll = %q", got.String(), want)
+	}
+}

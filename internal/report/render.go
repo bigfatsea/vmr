@@ -288,7 +288,7 @@ func bodyBytes(body any) int64 {
 // json.RawMessage and anything else (SSE text) as a string, so the two cases
 // are unwrapped differently — but both must yield the same byte sequence a
 // re-marshal would produce, since the only consumer needing the bytes rather
-// than their count (estimateDegradedOut) has to reproduce a byte-count
+// than their count (estimateDegradedTokens) has to reproduce a byte-count
 // formula the routing half already applied to this same body.
 func bodyRaw(body any) []byte {
 	switch b := body.(type) {

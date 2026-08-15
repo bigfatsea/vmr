@@ -5,9 +5,9 @@
 // internal/story) depend on, plus a handful of exported behavior —
 // EstimateTextTokens/EstimateTokensFromCounts, SortedKeys,
 // EndpointLabel/SplitEndpointLabel — that stayed here as a deliberate
-// exception. core is the project's one zero-internal-dependency package
-// (archtest-enforced) that both halves are free to import, so it's the
-// only place a type either half needs to see can go.
+// exception. core is one of the project's zero-internal-dependency packages
+// (alongside fmtutil, jsonscan, and i18n, archtest-enforced) that both halves
+// are free to import, so it's the primary place shared domain types go.
 //
 // Admission rule (Part 8 batch B5 of the architecture review): core holds
 // only types two or more packages spanning different halves must agree on
@@ -503,11 +503,10 @@ func EstimateTextTokens(body []byte) int64 {
 }
 
 // EstimateTokensFromCounts applies EstimateTextTokens' formula to byte
-// counts already tallied elsewhere (internal/router/response.go's respStream
-// classifies bytes incrementally, as they arrive, rather than buffering a
-// whole body to hand to EstimateTextTokens) — exported so both call sites
-// share the exact same coefficients instead of one silently drifting from
-// the other.
+// counts already tallied elsewhere (internal/respnorm classifies bytes
+// incrementally, as they arrive, rather than buffering a whole body to hand
+// to EstimateTextTokens) — exported so both call sites share the exact same
+// coefficients instead of one silently drifting from the other.
 func EstimateTokensFromCounts(ascii, wide int64) int64 {
 	return ascii/asciiBytesPerToken + wide/wideBytesPerToken
 }

@@ -368,6 +368,9 @@ func (s *stream) Read(p []byte) (int, error) {
 	if s.srcErr != nil {
 		return 0, s.srcErr
 	}
+	if s.done {
+		return 0, io.EOF
+	}
 	// Nothing deliverable yet (mid-event, or withheld pending a mode
 	// decision). Zero-length reads let the caller's idle watchdog tick.
 	return 0, nil
