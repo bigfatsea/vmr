@@ -221,15 +221,23 @@ type stream struct {
 	protocol         string // ingress protocol: decides [DONE] policy
 	opaque           bool   // Content-Encoding present: no transforms at all
 
-	mode              int
-	pending           []byte // undecided: withheld bytes; passthrough: partial-event tail
-	scanned           int    // undecided only: pending[:scanned] holds events already classified undecided — decide resumes after them instead of rescanning (keeps a ping-heavy stream linear, not quadratic)
-	buf               []byte // buffered-mode accumulation
-	out               []byte // processed bytes ready for the client
-	srcErr            error  // non-EOF src error, surfaced after out drains
-	done              bool   // src hit EOF and out holds the final bytes
-	sawDone           bool   // upstream emitted its own data: [DONE]
-	tailNL            bool   // last emitted bytes ended with the SSE separator
+	mode    int
+	pending []byte // undecided: withheld bytes; passthrough: partial-event tail
+	scanned int    // undecided only: pending[:scanned] holds events already classified undecided — decide resumes after them instead of rescanning (keeps a ping-heavy stream linear, not quadratic)
+	buf     []byte // buffered-mode accumulation
+	out     []byte // processed bytes ready for the client
+	srcErr  error  // non-EOF src error, surfaced after out drains
+	done    bool   // src hit EOF and out holds the final bytes
+	sawDone bool   // upstream emitted its own data: [DONE]
+	tailNL  bool   // last emitted bytes ended with the SSE separator
+	// emittedTail holds the last len(eventSep) bytes actually emitted by
+	// emitBlock, across ALL calls — NOT just the most recent block. Needed
+	// because s.out is drained (returned to the caller and sliced away) by
+	// Read between emitBlock calls, so a block-local check can't see a
+	// separator a fragmented delivery happened to split across two emits
+	// (see emitBlock's own comment on tailNL for the concrete case this
+	// fixed).
+	emittedTail       []byte
 	upstreamModel     string // the real model name vmr ASKED this endpoint for (ep.Model)
 	observedModel     string // what the upstream actually answered with, recorded only when it differs from upstreamModel
 	modelSeen         bool   // the observed value is captured once per response, not once per SSE chunk
@@ -519,8 +527,27 @@ func (s *stream) emitBlock(block []byte) {
 		block = modelFieldPattern.ReplaceAll(block, s.modelRewriteRepl)
 		s.noteApplied("model_rewrite")
 	}
-	s.tailNL = bytes.HasSuffix(block, eventSep)
 	s.out = append(s.out, block...)
+	// tailNL must reflect the trailing bytes of everything emitted SO FAR,
+	// not just this block — s.out is drained (returned to the caller and
+	// sliced away) by Read between emitBlock calls, so a block-local check
+	// misses a separator a fragmented delivery happened to split across two
+	// emits: one block ends "...\n\n" (tailNL correctly true), the next is
+	// a lone trailing "\n" too short to contain eventSep on its own
+	// (block-local check wrongly concludes false) — appendDone then splices
+	// in a spurious extra blank line before [DONE] that whole-shot delivery
+	// of the identical bytes never would have. Found by FuzzStream's
+	// fragmentation-invariance check (architecture review's Part 8 batch B7
+	// follow-up): whole-shot delivery happened to always emit such a split
+	// as one single block, which is why this went unnoticed until chunked
+	// ingestion was fuzzed. emittedTail (bounded to len(eventSep) bytes)
+	// carries the needed trailing context across the drain.
+	combined := append(s.emittedTail, block...)
+	s.tailNL = bytes.HasSuffix(combined, eventSep)
+	if len(combined) > len(eventSep) {
+		combined = combined[len(combined)-len(eventSep):]
+	}
+	s.emittedTail = append([]byte(nil), combined...)
 }
 
 // noteUpstreamModel records what the upstream actually said its model was,

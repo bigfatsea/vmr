@@ -87,14 +87,20 @@ var fileLineLimits = map[string]int{
 	// (2026-08-10) flagged it as the one large file this table didn't cover
 	// — 850 at 736 lines. Part 8 batch B7 (2026-08-15) moved it into its own
 	// package (see internal/respnorm's package doc comment) for fuzzability,
-	// not to shrink it, and carried the SAME 850-line budget over unchanged
-	// rather than recomputing headroom from the post-move line count: the
-	// point of that batch was explicitly not file size (its own review notes
-	// router.go doesn't shrink by a single line either), so resetting this
-	// number would misrepresent the move as a size fix it never claimed to
-	// be. minimax.go (formerly responsefix.go) is a first-time budget at the
-	// same ~15-20% headroom convention as every other entry here.
-	"internal/respnorm/respnorm.go": 850,
+	// not to shrink it — that batch's own review explicitly disclaims a
+	// line-count win (router.go doesn't shrink by a single line either).
+	// The move itself carried the 850 number over unchanged for exactly that
+	// reason. A B7 follow-up review (2026-08-15) then retuned it once the
+	// file settled at its new post-move size (823 lines, largely the new
+	// package doc comment plus the Options/NormalizerStream/Wrap surface):
+	// 850 only left ~3% headroom, tight enough that an unrelated comment
+	// edit could trip it — that's a real headroom problem independent of
+	// (and not a reversal of) the "this batch isn't about file size" framing
+	// above, so it's retuned to the same ~15% headroom convention every
+	// other entry in this table uses, computed from the size that framing
+	// itself produced rather than the pre-move number. minimax.go (formerly
+	// responsefix.go) is a first-time budget at that same convention.
+	"internal/respnorm/respnorm.go": 950,
 	"internal/respnorm/minimax.go":  235,
 	// cmd/vmr had NO entry in this table at all until an architecture review
 	// (2026-08-14) noticed cmd_story.go had grown to 741 lines — larger than

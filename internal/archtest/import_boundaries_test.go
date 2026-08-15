@@ -82,10 +82,25 @@ var forbiddenImports = map[string][]string{
 	// "shared leaf, consumer never imports back" shape as taskseg below
 	// report/story: router.go/quota.go depend on it (Wrap/NormalizerStream),
 	// and it depending back on router or server would be a real import
-	// cycle, not just a layering preference.
+	// cycle, not just a layering preference. The list below is broader than
+	// just the direct-cycle risk (router/server) for the same reason
+	// taskseg's own list is: respnorm's designed shape is "stdlib +
+	// chatmsg only" (a pure byte-level state machine over an already-parsed
+	// usage type), and every other package listed here is something a
+	// contributor might plausibly reach for without realizing it would pull
+	// analytics-half or decision-layer code into a package whose whole
+	// value is being independently fuzzable at the io.Reader level.
 	"vmr/internal/respnorm": {
 		"vmr/internal/router",
 		"vmr/internal/server",
+		"vmr/internal/config",
+		"vmr/internal/adapter",
+		"vmr/internal/quota",
+		"vmr/internal/pricing",
+		"vmr/internal/report",
+		"vmr/internal/story",
+		"vmr/internal/ctxgraph",
+		"vmr/internal/audit",
 	},
 	// taskseg (agent-dialect Profile plus, since the architecture review's B3
 	// batch, the session/task-segmentation primitives built on it —

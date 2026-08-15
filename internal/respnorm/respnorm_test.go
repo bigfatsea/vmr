@@ -548,6 +548,36 @@ func TestRespStream_NoDoubleDone(t *testing.T) {
 	}
 }
 
+// TestRespStream_DoneAppendNotDuplicatedAcrossFragmentedEventSep locks in a
+// bug FuzzStream's fragmentation-invariance check found (architecture
+// review's Part 8 batch B7 follow-up, testdata/fuzz/FuzzStream/
+// d2f91c0fe0f7d766): a trailing "\n\n\n" (a complete SSE event separator
+// plus one extra newline) split across two 1-byte Read calls used to fool
+// tailNL into thinking the stream did NOT end with a separator — the first
+// emitBlock call correctly saw "...\n\n" and set tailNL true, but the
+// SECOND call, delivering only the leftover single "\n", is too short to
+// contain eventSep on its own and (before the fix) checked only its own
+// bytes, not what had already been emitted. appendDone then spliced in a
+// spurious extra "\n\n" before [DONE] — reading the same bytes whole-shot
+// (as bytes.Reader naturally does for small inputs) never hit this at all,
+// which is exactly why it went unnoticed until chunked delivery was fuzzed.
+func TestRespStream_DoneAppendNotDuplicatedAcrossFragmentedEventSep(t *testing.T) {
+	t.Parallel()
+	in := `"content":"0` + "\n\n\n"
+	out := readAll(t, newStream(oneByteReader{src: strings.NewReader(in)}, "agent", "", true, "openai", false))
+	want := in + "data: [DONE]\n\n"
+	if out != want {
+		t.Errorf("fragmented delivery produced a different result than the bytes alone should:\ngot=  %q\nwant= %q", out, want)
+	}
+	// Cross-check against the same bytes delivered in one shot — the two
+	// must agree; a divergence here is exactly the class of bug this test
+	// exists to catch.
+	wholeShot := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+	if out != wholeShot {
+		t.Errorf("fragmented and whole-shot delivery of the same bytes disagree:\nfragmented= %q\nwhole-shot= %q", out, wholeShot)
+	}
+}
+
 func TestRespStream_AnthropicNoDoneAppended(t *testing.T) {
 	t.Parallel()
 	// Anthropic SSE has no [DONE] concept — appending one is protocol
