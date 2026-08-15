@@ -5,6 +5,7 @@ package taskseg
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
@@ -35,6 +36,57 @@ func TestIndexRealUsers_StoresRawNotPreview(t *testing.T) {
 	ru := IndexRealUsers(Generic, msgs, nil, 0)
 	if ru[0] != long {
 		t.Error("IndexRealUsers must store the raw, untruncated text — truncation happens on read")
+	}
+}
+
+func TestIndexRealUsers_OffsetAlignment(t *testing.T) {
+	// off=1 mirrors the anthropic/responses shape: a synthesized system
+	// message occupies msgs[0], so msgs[i] aligns to rawMsgs[i-1]. rawMsgs
+	// carries only the real "messages" array elements (no synthesized
+	// entry), so rawMsgs[0] here is the counterpart of msgs[1].
+	msgs := []chatmsg.Message{
+		{Role: "system", Text: "sys"},
+		{Role: "user", Text: "hello"},
+	}
+	rawMsgs := []any{
+		map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "tool_result", "content": "..."},
+			},
+		},
+	}
+	ru := IndexRealUsers(OpenClawAware, msgs, rawMsgs, 1)
+	if _, ok := ru[1]; ok {
+		t.Error("a user message whose raw counterpart (via the off=1 shift) is entirely tool_result parts must not be indexed as real")
+	}
+}
+
+func TestManifestKeySet_NilManifest(t *testing.T) {
+	if got := ManifestKeySet(nil); got != nil {
+		t.Errorf("ManifestKeySet(nil) = %v, want nil", got)
+	}
+}
+
+func TestManifestKeySet_BuildsSetFromKeys(t *testing.T) {
+	h1, h2 := ctxgraph.Hash{0x01}, ctxgraph.Hash{0x02}
+	m := &ctxgraph.Manifest{Keys: []ctxgraph.Hash{h1, h2}}
+	set := ManifestKeySet(m)
+	if !set[h1] || !set[h2] || len(set) != 2 {
+		t.Errorf("ManifestKeySet = %v, want a 2-element set containing both keys", set)
+	}
+}
+
+func TestFirstInstruction_PicksLowestIndex(t *testing.T) {
+	ru := RealUsers{9: "latest", 1: "opening ask", 5: "middle"}
+	if got := FirstInstruction(ru); got != "opening ask" {
+		t.Errorf("FirstInstruction = %q, want %q", got, "opening ask")
+	}
+}
+
+func TestFirstInstruction_EmptyWhenNoCandidates(t *testing.T) {
+	if got := FirstInstruction(RealUsers{}); got != "" {
+		t.Errorf("FirstInstruction(empty) = %q, want \"\"", got)
 	}
 }
 
@@ -169,5 +221,38 @@ func TestResponseSummary_StringBody(t *testing.T) {
 func TestResponseSummary_UnrecognizedShapeReturnsNil(t *testing.T) {
 	if s := ResponseSummary(42); s != nil {
 		t.Errorf("ResponseSummary(int) = %+v, want nil for an unrecognized body shape", s)
+	}
+}
+
+func TestResponseSummary_MapBody(t *testing.T) {
+	body := map[string]any{
+		"choices": []any{
+			map[string]any{
+				"finish_reason": "stop",
+				"message":       map[string]any{"content": "hi there"},
+			},
+		},
+	}
+	s := ResponseSummary(body)
+	if s == nil {
+		t.Fatal("ResponseSummary(map[string]any) should dispatch to chatmsg.FinalMessage, not return nil")
+	}
+	if s.Content != "hi there" || s.Finish != "stop" {
+		t.Errorf("ResponseSummary = %+v, want Content %q Finish %q", s, "hi there", "stop")
+	}
+}
+
+func TestPreview_TruncatesMultibyteRunesCleanly(t *testing.T) {
+	long := strings.Repeat("你好😀", 30) // well past previewLen in runes, multi-byte throughout
+	got := Preview(long)
+	r := []rune(got)
+	if r[len(r)-1] != '…' {
+		t.Errorf("Preview of a multibyte over-length string should end in an ellipsis, got %q", got)
+	}
+	if len(r) != previewLen+1 {
+		t.Errorf("Preview rune length = %d, want %d (previewLen + ellipsis)", len(r), previewLen+1)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("Preview produced invalid UTF-8: %q", got)
 	}
 }

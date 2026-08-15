@@ -78,13 +78,9 @@ func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) st
 	msgs := chatmsg.Messages(body)
 	rawMsgs := chatmsg.RawArray(body)
 	off := chatmsg.MsgOffset(body)
-	for idx, m := range msgs {
-		if m.Role != "user" {
-			continue
-		}
-		if text, ok := prof.RealUserText(m, rawMsgs, idx-off); ok {
-			return taskseg.Preview(text)
-		}
+	ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
+	if t := taskseg.FirstInstruction(ru); t != "" {
+		return t
 	}
 	return st.NoTitle
 }

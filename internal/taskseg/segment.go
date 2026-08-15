@@ -43,8 +43,13 @@ func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int
 // ManifestKeySet is m's Keys as a set — the prevKeys shape
 // HasNewInstruction wants, built once by whichever caller has just
 // classified this manifest against its parent (report's attach(), story's
-// buildFrom()) rather than each repeating the same small loop.
+// buildFrom()) rather than each repeating the same small loop. m may be
+// nil (no parent manifest to compare against), matching HasNewInstruction's
+// own documented nil-prevKeys contract.
 func ManifestKeySet(m *ctxgraph.Manifest) map[ctxgraph.Hash]bool {
+	if m == nil {
+		return nil
+	}
 	set := make(map[ctxgraph.Hash]bool, len(m.Keys))
 	for _, k := range m.Keys {
 		set[k] = true
@@ -83,6 +88,26 @@ func LastInstruction(ru RealUsers, deltaStart int) string {
 	best := -1
 	for idx := range ru {
 		if idx >= deltaStart && idx > best {
+			best = idx
+		}
+	}
+	if best < 0 {
+		return ""
+	}
+	return Preview(ru[best])
+}
+
+// FirstInstruction returns the preview of the EARLIEST real user instruction
+// in ru — the conversation's opening ask, as opposed to LastInstruction's
+// most-recent turn. "" when ru is empty. Reads an already-built RealUsers
+// index rather than re-scanning a message list, the same single-index
+// discipline IndexRealUsers exists to enforce: report's sessionTitle,
+// story's Journey title, and story's cheap PreviewTitle path each used to
+// hand-roll this same earliest-index search independently.
+func FirstInstruction(ru RealUsers) string {
+	best := -1
+	for idx := range ru {
+		if best < 0 || idx < best {
 			best = idx
 		}
 	}

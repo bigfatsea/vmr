@@ -24,11 +24,55 @@ import (
 // UNDERSTATES cost for any provider/model priced above 0, the dangerous
 // direction (see docs/VirtualModelRouter_Design_v4_Quota.md's market-data
 // section for the full argument).
-func costFor(pr pricing.Rate, rc *rec2) float64 {
-	if !rc.usageOK {
-		return 0
+//
+// When usage wasn't sniffed (!rc.usageOK), this prices the SAME degraded
+// byte-count estimate (rc.estInFresh/rc.estOut) internal/router/quota.go's
+// tokenCharge degraded branch charges — Fresh/Out only, no cache
+// components, for the same reason the router's degraded branch has none:
+// it cannot tell cache hits apart from an unparseable response. Returning a
+// real (if approximate) amount here instead of a hardcoded 0 is what fixes
+// the "false zero": before this, a provider whose entire window had
+// unsniffable usage rendered a misleadingly precise $0.0000 instead of
+// either a real number or an honest "-". estimated reports whether c came
+// from this degraded path, the same signal TokensEstimated/
+// TokensInFreshEst/TokensOutEst already carry for the tokens metric.
+func costFor(pr pricing.Rate, rc *rec2) (c float64, estimated bool) {
+	if rc.usageOK {
+		return pr.Cost(rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite, rc.usage.Out), false
 	}
-	return pr.Cost(rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite, rc.usage.Out)
+	return pr.Cost(rc.estInFresh, 0, 0, rc.estOut), true
+}
+
+// accumulateCost prices rc against every CostEstimate bucket it applies to
+// (Overall/ByModel/ByDate/EndpointsAll/ByClient) when pricingSrc resolves a
+// rate for its endpoint — split out of buildInternal's per-record loop so
+// that function's own line count doesn't grow (see funcLineExemptions' note
+// on aggregate.go:buildInternal: it is tracked as an outlier scheduled for
+// decomposition, not a budget meant to absorb new code).
+func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, byClient map[string]*ClientRow, pricingSrc *pricing.Resolver, rc *rec2) {
+	if pricingSrc == nil || rc.endpoint == "" {
+		return
+	}
+	provider, model := splitEndpointProviderModel(rc.endpoint)
+	pr, ok := pricingSrc.RateFor(provider, model)
+	if !ok {
+		return
+	}
+	c, estimated := costFor(pr, rc)
+	addCost(&rep.Overall.CostEstimate, c)
+	addCost(&mr.CostEstimate, c)
+	addCost(&dr.CostEstimate, c)
+	if ea := epsAll[rc.endpoint]; ea != nil {
+		addCost(&ea.CostEstimate, c)
+		if estimated {
+			ea.CostEstimateEst += c
+		}
+	}
+	if rc.clientKey != "" {
+		if cl := byClient[rc.clientKey]; cl != nil {
+			addCost(&cl.CostEstimate, c)
+		}
+	}
 }
 
 // addCost adds c to *p, lazily allocating the pointer on first use — the

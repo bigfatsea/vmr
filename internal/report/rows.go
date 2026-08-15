@@ -284,6 +284,14 @@ type EndpointRow struct {
 
 	// H - cost (only when pricing configured)
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
+	// CostEstimateEst is the portion of CostEstimate priced from the same
+	// degraded byte-count estimate TokensInFreshEst/TokensOutEst record
+	// (rather than sniffed usage) — mirrors TokensEstimated's role for the
+	// tokens metric, and is what lets providerquota.go's cost branch report
+	// a real WindowEstimatedPct instead of always 0. Meaningful only when
+	// CostEstimate is non-nil; 0 there means every priced request had
+	// sniffed usage.
+	CostEstimateEst float64 `json:"cost_estimate_est,omitempty"`
 
 	durs, ttfts, streamMS, inToks, outToks []int64
 }
@@ -711,9 +719,12 @@ type ProviderQuotaRow struct {
 	// recomputation, the exact counterpart of LiveQuota.EstimatedPct on the
 	// column to its right, so the two are read in the same unit.
 	//
-	// Always 0 for metric: requests (always exact) and for a cost account
-	// (its estimate share isn't recoverable from EndpointRow.CostEstimate,
-	// which is already a resolved $ amount).
+	// Always 0 for metric: requests (always exact). For metric: tokens it's
+	// the degraded share of the raw token total; for metric: cost it's the
+	// degraded share of the $ total (EndpointRow.CostEstimateEst summed
+	// across this window, priced from the same degraded token estimate
+	// rather than sniffed usage) — both read from a real per-record source,
+	// not derived from one another.
 	//
 	// This field is what replaced an all-or-nothing bail-out: before it,
 	// a window where NO record had parseable usage rendered "-" while a

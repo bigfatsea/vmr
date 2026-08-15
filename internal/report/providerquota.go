@@ -35,26 +35,18 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 	}
 
 	windowSums := map[string]quota.Counters{}
-	windowCost := map[string]float64{}
-	// windowEstimated accumulates the share of windowSums that came from the
-	// degraded byte-count estimate rather than sniffed usage — same numerator
-	// quota.Registry tracks for the live counter, so WindowEstimatedPct below
-	// and Live.EstimatedPct mean the same thing on both sides of the table.
+	// windowEstimated/windowCostEstimated: the share of windowSums that came
+	// from the degraded estimate rather than sniffed usage — same numerator
+	// quota.Registry tracks live, split in two because EstimatedPct's
+	// tokens/cost branches read different denominators (raw token count vs.
+	// windowSums[provider].Cost). See WindowEstimatedPct's doc comment.
 	windowEstimated := map[string]float64{}
-	// cost{SawTraffic,AnyPriced} implement the "missing data is not a zero"
-	// rule for the one metric that can still have traffic yet no computable
-	// amount: pricing never resolved for any of it. Renders nil → "-" rather
-	// than a fabricated 0, which would be indistinguishable from "genuinely
-	// zero spend this window".
-	//
-	// The tokens metric no longer needs an equivalent: an unparseable-usage
-	// record now contributes its degraded estimate (EndpointRow's
-	// TokensInFreshEst/TokensOutEst) instead of contributing nothing, so
-	// "traffic happened but nothing is computable" is no longer reachable
-	// there. What replaces that all-or-nothing bail-out is WindowEstimatedPct
-	// — which also covers the case the old check silently missed: a window
-	// where only SOME records had unparseable usage rendered a precise,
-	// systematically-low number with no signal at all.
+	windowCostEstimated := map[string]float64{}
+	// cost{SawTraffic,AnyPriced}: "missing data is not a zero" for the one
+	// gap degraded-estimate contribution doesn't cover — no rate resolved
+	// AT ALL for this provider's traffic. Renders nil → "-" rather than a
+	// fabricated 0. Distinct from windowCostEstimated above: a rate that DID
+	// resolve but priced a degraded estimate still counts as priced here.
 	costSawTraffic := map[string]bool{}
 	costAnyPriced := map[string]bool{}
 	for _, e := range rep.EndpointsAll {
@@ -111,7 +103,8 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 			// this branch deliberately skips ApplyModelMultiplier.
 			costSawTraffic[provider] = true
 			if e.CostEstimate != nil {
-				windowCost[provider] += *e.CostEstimate
+				windowSums[provider] = windowSums[provider].Add(quota.Counters{Cost: *e.CostEstimate})
+				windowCostEstimated[provider] += e.CostEstimateEst
 				costAnyPriced[provider] = true
 			}
 		}
@@ -127,16 +120,19 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 		case ref.Limit.Metric == core.MetricCost && costSawTraffic[provider] && !costAnyPriced[provider]:
 			windowConsumed = nil // traffic existed, none of it priced — unknown, not zero
 		case ref.Limit.Metric == core.MetricCost:
-			v := windowCost[provider]
+			v := windowSums[provider].Cost
 			windowConsumed = &v
 		default:
 			v := quota.BaseAmount(ref.Spec, windowSums[provider])
 			windowConsumed = &v
 		}
 		// Same unit-matching discipline quota.EstimatedPct documents: the
-		// estimate is a raw (unweighted) token count, so its denominator is
-		// the raw four-component total, never BaseAmount's weighted sum.
-		windowEstPct := quota.EstimatedPct(ref.Limit.Metric, windowSums[provider], windowEstimated[provider], 0)
+		// tokens estimate is a raw (unweighted) token count, so its
+		// denominator is the raw four-component total, never BaseAmount's
+		// weighted sum; the cost estimate's denominator is
+		// windowSums[provider].Cost itself (EstimatedPct's own MetricCost
+		// branch), already the same $ unit as windowCostEstimated.
+		windowEstPct := quota.EstimatedPct(ref.Limit.Metric, windowSums[provider], windowEstimated[provider], windowCostEstimated[provider])
 		periodStart := quota.PeriodStart(*ref.Limit, now)
 		periodEnd := quota.PeriodEnd(*ref.Limit, now)
 		// [windowFrom, windowTo] and [periodStart, periodEnd] overlap

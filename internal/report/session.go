@@ -717,15 +717,8 @@ func sessionTitle(s *SessionInfo) string {
 	// Earliest real instruction in the session's first request — the
 	// conversation's opening ask, not the latest turn.
 	if len(s.Recs) > 0 {
-		first := s.Recs[0]
-		best := -1
-		for idx := range first.realUsers {
-			if best < 0 || idx < best {
-				best = idx
-			}
-		}
-		if best >= 0 {
-			return taskseg.Preview(first.realUsers[best])
+		if t := taskseg.FirstInstruction(s.Recs[0].realUsers); t != "" {
+			return t
 		}
 	}
 	for _, r := range s.Recs {

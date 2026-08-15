@@ -1366,6 +1366,110 @@ VirtualModelRouter (VMR) 在系统设计上展现了极高的工业级水准：
 > - **（已修，跨批次提前处理）`Profile` 公共入口的 nil 防御性**：这一点最早在上一轮 B2 复核就出现过、当时"有分歧、留给你决定"；这次反馈换了个角度重新提出（`session.go` 的并发 worker goroutine 没有 `recover()`，深处 panic 会带崩整个进程，而不是一条可读错误）。核实后判断这个论据成立，且改动的 5 个入口（`report.AnalyzeSessionsCached`、`story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles`）都是跨包公共 API、且后面紧跟并发扇出或递归组装，符合 CLAUDE.md"只在系统边界校验"的例外条款，不是"为不可能发生的场景加校验"。已在这 5 处加 `prof == nil` fail-fast 校验（`story` 新增 `errNilProfile` sentinel，风格对齐既有的 `errEmptyLineage`），各补一条负向单测，并做过一次真实的负向验证（临时摘掉 `report` 那处校验，确认编译/测试失败，复原后重新全绿）。
 > - **（延后，按反馈自己的建议）** `file_sizes_test.go` 给 `internal/taskseg/*.go` 登记文件行数预算：反馈自己的建议就是"等 B3 落地时再登记"——当前 `openclaw.go`（137 行）/`taskseg.go`（53 行）离任何预算警戒线都很远，现在登记是没有意义的数字，不符合项目"预算报警了再加，不要抢跑"的一贯做法（对应远期池 L3 的同一条原则）。
 
+> **【B3 落地记录 · 2026-08-15】✅ 已完成。** 新增 `internal/taskseg/segment.go`：`RealUsers`/`IndexRealUsers`、
+> `HasNewInstruction`/`LastInstruction`、`IsNewTask`、`TaskTitle`、`ResponseSummary`、`Preview`——`report/
+> session.go` 的 `collect`/`attach`（`realUsers`/`deltaHasNewInstruction`/`lastInstructionInDelta`/
+> `taskTitle`/`respText`/`preview` 私有实现）与 `story/journey.go` 的 `buildFrom`（`IsRealUser` 循环/
+> `deltaHasNewInstruction`/`lastInstructionInDelta`/`taskTitle`/`reassembleResponse`/`preview`）全部改为
+> 调用同一份实现；`story` 独有、无 `report` 对应概念的 stitch 边界标题逻辑（`newInstructionTitleAtStitch`/
+> `titleAtStitchBoundary`/`stitchTaskTitle`）按方案 1 的裁决留在 `story` 本地，读同一份 `ru` 索引。裁决按
+> 本节「B3 落地前反馈复核」已写死的 5 条决策执行（`story` 侧为权威、`RealUsers` 存 raw 不存 preview、
+> `TaskTitle` 不导入 `i18n`、父节点归属判定采用 story 侧写法不移植 report 侧的冗余判空、`IsRealUser` 已提前
+> 在反馈复核阶段删除），实施时未重新推导。
+>
+> - **黄金对比**：对 ~50MB 真实审计日志跑 `vmr report`/`vmr story` 重构前后逐字节比对（`vmr-report.json`
+>   除自身生成时间戳外完全一致，`reports/stories/*` 完全一致），墙钟耗时 `report` 侧持平、`story` 侧因
+>   `IndexRealUsers` 从每步 2–3 遍正则收敛到 1 遍略有改善——均达到验收标准，细节见提交 `9dac706`。
+> - `session.go` 190 行改动（75 增 115 删，净 -40）、`journey.go` 243 行改动（84 增 159 删，净 -75）、
+>   新增 `segment.go` 146 行 + `segment_test.go` 173 行——两侧独立实现净减约 115 行重复，换成一份共享
+>   实现 + 专门的单元测试。`archtest` 的 `funcLineExemptions` 里 `session.go:collect`/`journey.go:buildFrom`
+>   两条豁免按落地前的批注原样消失（两个函数收缩到预算内，不再需要豁免）。
+> - N8（`import_boundaries_test.go` 里 "until a later phase migrates it onto ctxgraph" 的过期注释）已在
+>   「B3 落地前反馈复核」阶段提前改写，未在本批重新触碰。
+> - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿。
+>
+> **【B3 落地后两轮反馈复核 · 2026-08-15】** 收到两轮独立反馈，逐条核实后 9 项确认属实并直接落地，1 项确认
+> 属实但按项目"不为不可能发生的场景加校验"惯例判定为不采纳：
+> - **（已修）`journey.go:deriveTitle` 与 `preview.go:titleFromRecord` 违反 B3"单次索引"原则**：两者都在
+>   `buildFrom` 已经算出 `ru` 之后，重新解析请求体、重新对消息跑一遍 `RealUserText` 正则找最早指令；
+>   `session.go:sessionTitle` 也独立手写了一遍同样的"取最小 idx"循环。新增 `taskseg.FirstInstruction(ru
+>   RealUsers) string`（`LastInstruction` 的"最早"版本），`buildFrom` 用一个 `firstRuSet` 标记捕获第一个
+>   成功处理的步骤的 `ru`（等价于旧代码里 `tasks[0].Steps[0]` 所在的那一步，含 rec 为 nil 被跳过时的边界
+>   情况）向下传给 `deriveTitle`，彻底消灭其内的二次解析；`titleFromRecord`（`PreviewTitle`/`PreviewTitles`
+>   的轻量路径，不经过 `buildFrom`，没有现成索引可复用）与 `sessionTitle` 均改为
+>   `taskseg.IndexRealUsers`/`s.Recs[0].realUsers` + `FirstInstruction`，消除三份手写重复。
+> - **（已修）`titleAtStitchBoundary` 的两阶段 fallback 判定冗余且有极小的误判风险**：先传
+>   `i18n.Story(lang).ToolLoopTitle` 当 fallback，再判断返回值是否等于该字符串来决定要不要换成
+>   `stitchTaskTitle`——如果用户真实指令文本恰好与占位文案逐字相同会被误换。直接把
+>   `stitchTaskTitle(stitchEdge, lang)` 作为 fallback 传给 `taskseg.TaskTitle`，一次调用完成，`stitchTaskTitle`
+>   本身开销可忽略，不引入性能问题。
+> - **（已修）`ManifestKeySet(m *ctxgraph.Manifest)` 未对 `m == nil` 判空**：`HasNewInstruction` 的文档注释
+>   明确声明支持 `prevKeys == nil`（会话首条记录、无 parent 的场景），但产出这个 nil 的唯一途径
+>   `ManifestKeySet(nil)` 会在 `len(m.Keys)` 处直接 panic——两个调用点今天都用 `parent != nil`/`atStitchBoundary`
+>   分支绕开了这条路径，不是一个当前能触发的 bug，但文档承诺的契约与实现不符。加了 `m == nil` 前置返回
+>   `nil`，补了 `TestManifestKeySet_NilManifest`。**未采纳**同一条反馈里对 `HasNewInstruction` 的 `cur`
+>   参数加 `cur != nil` 判空的建议：两个调用点的 `cur`/`m` 都是当前记录自己的 manifest，构造上不可能为
+>   nil，不是 CLAUDE.md 说的"系统边界"输入，属于"为不可能发生的场景加校验"，与 B2 复核阶段对 `Profile`
+>   入口 nil 校验的判断标准（跨包公共入口 + 后接并发/递归）不是同一类场景。
+> - **（已修）`journey.go:buildStep` 的 `NoReply` 判定在无响应时仍会执行**：`step.NoReply =
+>   prof.NoReply(step.Finish, step.RespText)` 原来在 `if rec.Client.Response != nil` 代码块之外，无响应时
+>   会用 `("", "")` 走一遍判定；`session.go` 对应逻辑一直在 `Response != nil` 内部。两个 `Profile` 实现在
+>   `finish == ""` 时恰好都返回 `false`，所以不是一个当前会改变输出的 bug，但把判定移进响应存在的分支内
+>   使两个命令的防御结构对称，成本是移动一行代码。
+> - **（已修，文档）`journey.go` 里 `HumanInitiated` 字段注释仍引用 B3 已删除的私有函数
+>   `deltaHasNewInstruction`**：改为指向现在的 `taskseg.HasNewInstruction`。
+> - **（已修）`internal/jsonscan/rewrite.go:spliceValues` 在多个重复 range 且新值变长时的容量预估**：
+>   `rewriteRolesInTopLevelArray` 已经按每个替换的长度差精确计算 `extra`，`spliceValues` 却只按
+>   `len(raw)+len(newVal)` 估算——多个 range（畸形 JSON 里重复的顶层 key）叠加新值变长时会触发切片扩容
+>   重分配。改为同样按每个 range 的长度差累加 `extra`，与 `rewriteRolesInTopLevelArray` 手法一致。
+> - **（已修）`internal/taskseg/*.go` 始终未登记进 `archtest` 的 `fileLineLimits`**：反馈自己在 B2 阶段就
+>   建议"等 B3 落地时再登记"，现在是那个时点——`taskseg.go`/`openclaw.go`/`segment.go` 三个生产文件按
+>   本表一贯的 ~15-20% 首次登记 headroom 惯例补齐预算。
+> - **（已修，测试补齐）`segment_test.go` 的覆盖缺口**：补了 `ManifestKeySet`（含 nil 输入）、
+>   `ResponseSummary` 的 `map[string]any`（非流式响应）路径、`Preview` 在多字节 rune（含 emoji）边界的
+>   截断正确性、`IndexRealUsers` 在 `off > 0`（Anthropic 顶层 `system` 合成消息偏移）下正确对齐
+>   `rawMsgs[i-off]` 过滤纯 `tool_result` 片段的场景。
+> - **（不采纳）aggregate.go 已顶到 1000 行文件预算**：反馈本身是一条提醒而非缺陷——核实属实（`wc -l`
+>   确认恰好 1000 行），本批次的改动均未触碰 `internal/report/aggregate.go`，不构成需要处理的问题；留给
+>   B4 处理，按反馈的提醒，B4 之前不应再向该文件加行。
+> - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿；`internal/jsonscan` 的
+>   `FuzzRewriteModel` 额外跑了 15s 无 crash（针对 `spliceValues` 的改动）。负向验证：`segment.go` 加了
+>   `FirstInstruction` 后从 146 行涨到 171 行，把之前登记的 170 行预算撞破，`TestArchitecture_CoreFileSizes`
+>   如期报错，按同一惯例把预算调到 200（171 行的 ~17% headroom）后恢复绿色——预算表自己先拦了一次。
+>
+> **【Cost 假零修复 · 2026-08-15】** 上面两轮反馈里唯一标记"需要你决策"的一项（Issue 1）：`cost.go:costFor`
+> 在 `!rc.usageOK` 时硬编码返回 0，`aggregate.go` 却仍无条件对每条记录调用 `addCost`——一个计费窗口内若
+> provider 的全部请求都没嗅探到 usage，`§2.5` 会渲染成 `$0.0000 (0% est.)` 而不是"未知"；混合窗口下则是
+> 静默低估。与 B0 已修的 tokens 假零（N2）是同一类问题。你选择完整方案（仿照 B0 对 tokens 的做法）并明确
+> 授权临时打开 `aggregate.go` 的 1000 行文件预算红线。
+> - `costFor` 改为双返回值 `(c float64, estimated bool)`：`!usageOK` 时用 `rc.estInFresh`/`rc.estOut`
+>   （B0 就已经算好、tokens 降级估算复用的同一批字段）定价，只算 Fresh/Out 两项、不猜 cache 分量——与
+>   `internal/router/quota.go` 的 `tokenCharge` 降级分支同一个理由：拿不到 usage 就分不清哪些是缓存命中。
+> - 新增 `EndpointRow.CostEstimateEst`（`rows.go`）：镜像 `TokensInFreshEst`/`TokensOutEst`/
+>   `TokensEstimated` 在 tokens 指标里的角色，是 `CostEstimate` 里"来自降级估算而非嗅探 usage"的那一份。
+> - `providerquota.go` 把原先独立的 `windowCost` map 折进 `windowSums[provider].Cost`（`quota.Counters`
+>   本就带这个字段），新增 `windowCostEstimated` 累加器，`quota.EstimatedPct` 调用的最后一个参数从写死的
+>   字面量 `0` 换成这个真实值——这个参数早就在函数签名里但从未被传过东西，是个已经预留好、只是没接线的
+>   位置。`costSawTraffic`/`costAnyPriced`（"一分钱都没定价成功"→`-`）这条独立判定不受影响，继续处理与
+>   "usage 没嗅到"完全不同的另一个缺口（"这个模型压根没有可用价格"）。
+> - `internal/report/aggregate.go:buildInternal` 有 `funcLineExemptions` 里明确写着"不要抬高这个数字"
+>   的 640 行专项预算（架构评审本身的产物），直接在原地加代码会撞上这条硬限制。把整块 cost 累加逻辑
+>   （原来内联在 `buildInternal` 里的 17 行）抽成 `cost.go` 里的 `accumulateCost` 函数，`buildInternal`
+>   里只剩一行调用——净效果反而是 `buildInternal` **变短**、`aggregate.go` 整个文件从 1003 行掉回 983
+>   行，所以最终**没有使用**你授权的 1000 行放宽（`fileLineLimits` 表原样保持 1000，未改动）；
+>   `providerquota.go:buildProviderQuotaRows` 的同名函数级预算（155 行）也因为新加的说明性注释撞线过，
+>   通过精简注释文字收回，同样没有抬高数字。
+> - `cmd/vmr/quota_parity_test.go` 的差分测试是本项修复能否成立的关键——CLAUDE.md 的不变式明确要求
+>   "analytics 半区声称复现 routing 半区的数字，必须靠差分测试钉住，不能只靠注释"。原来的
+>   `TestQuotaParity_CostMetric_ReportMatchesRouter` 只用全部嗅探到 usage 的请求，注释里明写"cost
+>   账户的降级份额从 `EndpointRow.CostEstimate` 里恢复不出来"——这句话现在不再成立，测试改为直接复用
+>   `tokensParityFixture()`（已经是"精确/降级/失败请求"混合的真实窗口），并新增
+>   `WindowEstimatedPct` 必须严格落在 (0,100) 的断言。跑过一次负向验证：临时把 `costFor` 改回旧的
+>   "`!usageOK` 时返回 0"逻辑，这个测试如期失败（`$0.0154 vs $0.0244`，`WindowEstimatedPct=0`），
+>   复原后重新全绿。另在 `internal/report/providerquota_test.go` 补了三条对称于 tokens 侧既有测试的
+>   单元测试（全降级 100%、精确+降级混合按比例、全精确 0%）。
+> - `go build`/`go vet`/`gofmt -l`/`go test ./... -race` 全绿。
+
 ---
 
 #### 5️⃣ B4 — `TrafficStats` 组合化 + `buildInternal` 分解

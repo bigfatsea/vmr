@@ -93,6 +93,14 @@ var fileLineLimits = map[string]int{
 	"internal/adapter/classify.go": 200,
 	"internal/jsonscan/scan.go":    320,
 	"internal/jsonscan/rewrite.go": 300,
+	// internal/taskseg's registration was deliberately deferred past B2 (its
+	// files were still small enough that a budget would have been a
+	// meaningless number) until B3 landed the session/task-boundary
+	// algorithm itself into segment.go — the same first-time ~15-20%
+	// headroom convention as every other entry here.
+	"internal/taskseg/taskseg.go":  70,
+	"internal/taskseg/openclaw.go": 150,
+	"internal/taskseg/segment.go":  200,
 }
 
 // TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`

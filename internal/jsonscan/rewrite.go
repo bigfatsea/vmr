@@ -72,7 +72,16 @@ func spliceValues(raw []byte, ranges [][2]int, newVal []byte) []byte {
 	if len(ranges) == 1 && bytes.Equal(raw[ranges[0][0]:ranges[0][1]], newVal) {
 		return raw // already the target value: zero-copy
 	}
-	out := make([]byte, 0, len(raw)+len(newVal))
+	// Exact final length, same reasoning as rewriteRolesInTopLevelArray's
+	// extra calculation below: a bare len(raw)+len(newVal) only accounts for
+	// one replacement, so a malformed body with duplicate top-level keys
+	// (len(ranges) > 1) and a newVal longer than the original would
+	// otherwise pay for slice-growth reallocation + copy on the request path.
+	extra := 0
+	for _, r := range ranges {
+		extra += len(newVal) - (r[1] - r[0])
+	}
+	out := make([]byte, 0, len(raw)+extra)
 	prev := 0
 	for _, r := range ranges {
 		out = append(out, raw[prev:r[0]]...)

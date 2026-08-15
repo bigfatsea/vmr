@@ -282,6 +282,71 @@ func TestBuildProviderQuotaRows_CostMetric_PartiallyPricedSumsWhatItHas(t *testi
 	}
 }
 
+// TestBuildProviderQuotaRows_CostMetric_UnsniffedUsageCountsItsEstimate is
+// the cost-metric sibling of the tokens-metric fix above: before it, a
+// record whose usage was never sniffed contributed a hardcoded 0 to
+// CostEstimate (via costFor) — a window entirely made of such records
+// rendered a misleadingly precise $0.0000 rather than either a real number
+// or "-". Now it prices the same degraded byte-count estimate the router
+// charges, and CostEstimateEst carries that whole amount as "estimated".
+func TestBuildProviderQuotaRows_CostMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	c1 := 0.024
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m", CostEstimate: &c1, CostEstimateEst: c1},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0.024 {
+		t.Fatalf("WindowConsumed = %v, want 0.024 (the degraded estimate the router also charged); a false zero means it regressed",
+			derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowEstimatedPct != 100 {
+		t.Errorf("WindowEstimatedPct = %v, want 100 (every dollar in this window is an estimate)", rows[0].WindowEstimatedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_MixedUsageIsFlagged mirrors the
+// tokens-metric mixed-window test: sniffed and degraded-estimate cost in the
+// same window must both count toward WindowConsumed, and the row must say
+// how much of it is a guess.
+func TestBuildProviderQuotaRows_CostMetric_MixedUsageIsFlagged(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	exact, mixed := 3.0, 1.0
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m1", CostEstimate: &exact},                       // fully sniffed
+		{Endpoint: "openai:acct1:m2", CostEstimate: &mixed, CostEstimateEst: 0.4}, // partly degraded
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 4.0 {
+		t.Fatalf("WindowConsumed = %v, want 4.0 (3.0 exact + 1.0 mixed)", derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowEstimatedPct != 10 {
+		t.Errorf("WindowEstimatedPct = %v, want 10 (0.4 of 4.0 total dollars are estimated)", rows[0].WindowEstimatedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_FullySniffedIsNotFlagged guards the
+// other direction: a window with no degraded records must report a 0
+// estimated share, so the "X% est." annotation never appears on an
+// authoritative cost figure.
+func TestBuildProviderQuotaRows_CostMetric_FullySniffedIsNotFlagged(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	c1 := 2.0
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m", CostEstimate: &c1}, // CostEstimateEst left at its zero value
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowEstimatedPct != 0 {
+		t.Errorf("WindowEstimatedPct = %v, want 0 (nothing in this window was estimated)", rows[0].WindowEstimatedPct)
+	}
+}
+
 // TestBuildProviderQuotaRows_WindowNoOverlap_DisjointIntervalsFlagged is
 // analyzing three-month-old archived logs (May) against a billing
 // period computed for "now" (August) must flag WindowNoOverlap.

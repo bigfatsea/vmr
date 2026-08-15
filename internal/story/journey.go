@@ -91,7 +91,7 @@ type Step struct {
 	// stopped being mentioned versus which survived into this step.
 	Compaction *CompactionInfo
 	// HumanInitiated is true when this Step's OWN opening carries a
-	// genuinely new real user instruction (deltaHasNewInstruction, or the
+	// genuinely new real user instruction (taskseg.HasNewInstruction, or the
 	// dedup-aware equivalent at a stitch boundary — see
 	// newInstructionTitleAtStitch) — as opposed to a pure tool-loop
 	// continuation, a trace-id change, or a stitch boundary with nothing
@@ -303,6 +303,13 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 	var curTask *Task
 	seq := 0
 	prevNoReply := false
+	// firstRu is the earliest-processed step's RealUsers index — j.Tasks[0]
+	// is always built from this same step (newTask fires unconditionally on
+	// the first non-skipped iteration below), so deriveTitle reads it back
+	// instead of re-parsing that step's request body and re-running
+	// RealUserText a second time over it.
+	var firstRu taskseg.RealUsers
+	firstRuSet := false
 	for ci, l := range chain {
 		for i, m := range l.Manifests {
 			rec := recs[ctxgraph.Loc{Path: m.Path, Line: m.Line}]
@@ -318,6 +325,9 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			// each re-scanning msgs itself — this manifest's real-instruction
 			// regex work used to run up to 2-3 times per step before B3.
 			ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
+			if !firstRuSet {
+				firstRu, firstRuSet = ru, true
+			}
 
 			atStitchBoundary := ci > 0 && i == 0
 			var edge *ctxgraph.Edit
@@ -388,7 +398,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 		}
 	}
 
-	j.Title = deriveTitle(prof, j.Tasks, lang)
+	j.Title = deriveTitle(firstRu, j.Tasks, lang)
 	return j, nil
 }
 
@@ -409,8 +419,8 @@ func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.
 			step.ToolCalls = s.ToolCalls
 			step.Reasoning = strings.TrimSpace(s.Reasoning)
 		}
+		step.NoReply = prof.NoReply(step.Finish, step.RespText)
 	}
-	step.NoReply = prof.NoReply(step.Finish, step.RespText)
 	return step
 }
 
@@ -634,42 +644,18 @@ func newInstructionTitleAtStitch(ru taskseg.RealUsers, m *ctxgraph.Manifest, msg
 // break is worth calling out on its own.
 func titleAtStitchBoundary(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event, stitchEdge *ctxgraph.StitchEdge, lang i18n.Lang) (title string, humanInitiated bool) {
 	newInstr := newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen)
-	title = taskseg.TaskTitle(newInstr, i18n.Story(lang).ToolLoopTitle)
-	if title == i18n.Story(lang).ToolLoopTitle {
-		title = stitchTaskTitle(stitchEdge, lang)
-	}
+	title = taskseg.TaskTitle(newInstr, stitchTaskTitle(stitchEdge, lang))
 	return title, newInstr != ""
 }
 
 // deriveTitle is the Journey's own title: the earliest real user
-// instruction in its very first step (searched over the WHOLE message
-// list, not just the delta — the opening ask, not the latest turn),
-// falling back to the first task with a real title, then a placeholder.
-func deriveTitle(prof taskseg.Profile, tasks []*Task, lang i18n.Lang) string {
-	if len(tasks) > 0 && len(tasks[0].Steps) > 0 {
-		first := tasks[0].Steps[0]
-		if body, ok := first.Rec.Client.Request.Body.(map[string]any); ok {
-			msgs := chatmsg.Messages(body)
-			rawMsgs := chatmsg.RawArray(body)
-			off := chatmsg.MsgOffset(body)
-			best := -1
-			var bestText string
-			for idx, m := range msgs {
-				if m.Role != "user" {
-					continue
-				}
-				text, ok := prof.RealUserText(m, rawMsgs, idx-off)
-				if !ok {
-					continue
-				}
-				if best == -1 || idx < best {
-					best, bestText = idx, text
-				}
-			}
-			if best >= 0 {
-				return taskseg.Preview(bestText)
-			}
-		}
+// instruction in firstRu — j.Tasks[0]'s own step-level RealUsers index,
+// already built by buildFrom's single per-step IndexRealUsers call, not
+// re-parsed here — falling back to the first task with a real title, then
+// a placeholder.
+func deriveTitle(firstRu taskseg.RealUsers, tasks []*Task, lang i18n.Lang) string {
+	if t := taskseg.FirstInstruction(firstRu); t != "" {
+		return t
 	}
 	st := i18n.Story(lang)
 	for _, t := range tasks {

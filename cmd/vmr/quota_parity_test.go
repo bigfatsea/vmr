@@ -406,21 +406,19 @@ func TestQuotaParity_TokensMetric_ReportMatchesRouter(t *testing.T) {
 // cache_read was a real P2.2 bug: it understates cost for every provider that
 // prices cache reads above zero, which is nearly all of them.
 //
-// Only the exactly-charged (usage-bearing) requests participate: a cost
-// account's degraded share isn't recoverable from EndpointRow.CostEstimate,
-// which is already a resolved $ amount (see ProviderQuotaRow.WindowEstimatedPct).
+// Reuses tokensParityFixture's MIXED window (exact usage / degraded
+// estimate / never-forwarded) rather than an all-exact one of its own: a
+// cost account's degraded share used to be silently dropped (costFor
+// returned a hardcoded 0 for any record whose usage wasn't sniffed), the
+// same false-zero N2 already fixed for tokens. componentCost/costFor both
+// now price rc.estInFresh/rc.estOut (Fresh/Out only, no cache components —
+// neither side can tell cache hits apart from an unparseable response) for
+// those records instead of contributing nothing.
 func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 
-	reqs := []parityRequest{
-		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(1000, 200, 50, 300)},
-		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(500, 100, 0, 120)},
-		{model: "real-model", attempts: []parityAttempt{{status: 429}, {status: 200}}, respBody: sseWithUsage(800, 400, 25, 200)},
-		// never forwarded — must not contribute on either side
-		{model: "real-model", attempts: []parityAttempt{{status: 500}}},
-	}
-
+	reqs := tokensParityFixture()
 	lim := core.Limit{Metric: core.MetricCost, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
 		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100}
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
@@ -445,8 +443,15 @@ func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
 	// identity isn't guaranteed even when the math is.
 	if diff := math.Abs(*row.WindowConsumed - want); diff > 1e-9*want {
 		t.Errorf("§2.5 window consumed = $%v, router actually charged $%v (diff %v).\n"+
-			"A gap near the cache_read share means one side dropped that component from the four-component formula.",
+			"A gap near the cache_read share means one side dropped that component from the four-component formula, "+
+			"or one side is silently skipping the degraded (unsniffed-usage) records the other still charges.",
 			*row.WindowConsumed, want, diff)
+	}
+	// The mixed window must also SAY that part of it is a guess — a correct
+	// total presented as if it were authoritative would repeat N2's mistake
+	// on the cost metric instead of just the tokens one.
+	if row.WindowEstimatedPct <= 0 || row.WindowEstimatedPct >= 100 {
+		t.Errorf("WindowEstimatedPct = %v, want strictly between 0 and 100 for a mixed window", row.WindowEstimatedPct)
 	}
 }
 

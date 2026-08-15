@@ -582,24 +582,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			// by-endpoint (epsAll, cross-date — matches the Endpoint
 			// Health section's basis) + by-client, when each bucket
 			// applies to this record.
-			if pricingSrc != nil && rc.endpoint != "" {
-				provider, model := splitEndpointProviderModel(rc.endpoint)
-				pr, ok := pricingSrc.RateFor(provider, model)
-				if ok {
-					c := costFor(pr, rc)
-					addCost(&rep.Overall.CostEstimate, c)
-					addCost(&mr.CostEstimate, c)
-					addCost(&dr.CostEstimate, c)
-					if ea := epsAll[rc.endpoint]; ea != nil {
-						addCost(&ea.CostEstimate, c)
-					}
-					if rc.clientKey != "" {
-						if cl := byClient[rc.clientKey]; cl != nil {
-							addCost(&cl.CostEstimate, c)
-						}
-					}
-				}
-			}
+			accumulateCost(rep, mr, dr, epsAll, byClient, pricingSrc, rc)
 			// Sticky Model effectiveness (sticky.go): buffered per session,
 			// resolved after the pass — it needs each session in order.
 			stickyCol.add(rc)
