@@ -22,7 +22,7 @@ func (rt *Router) logf(format string, args ...any) {
 	}
 }
 
-// Logf is logf, exported so callers outside this package (internal/server,
+// Logf formats and writes structured router access logs, exported for callers (internal/server,
 // for the handful of lines it logs itself — e.g. audit write failures) go
 // through the same nil-safe path and pick up the same timestamp/format
 // instead of falling back to the unstamped global "log" package.

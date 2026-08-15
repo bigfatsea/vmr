@@ -20,7 +20,7 @@ import (
 // settings needed to interpret every provider's pricing (see
 // ProviderPricingConfig for the per-account half).
 type PricingConfig struct {
-	// Currency is the currency `cost`-metric amounts and account overrides
+	// Currency specifies the default monetary unit for cost-metric accounting and overrides
 	// are denominated in. Required only when at least one provider actually
 	// has a metric: cost Limit — a provider whose pricing: block exists
 	// purely to sharpen `vmr report`'s $ estimates for a requests/tokens

@@ -114,7 +114,7 @@ models:
 `, u1, u2, p1Max, p2Max)
 }
 
-// stickyYAML is stickyYAML(u1, u2, extraModelLines): unlike twoEndpointYAML,
+// stickyYAML generates test configuration with sticky routing enabled:
 // sticky defaults to true here (these tests exist to exercise it).
 func stickyYAML(u1, u2, extraModelLines string) string {
 	return fmt.Sprintf(`

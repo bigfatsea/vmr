@@ -229,8 +229,7 @@ func TestWriteConcurrentGoroutinesProduceValidJSONL(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			// Vary body size so short and long encodes race against each
-			// other — a bug in buffer reuse is more likely to surface when
-			// buffer sizes differ between concurrent callers.
+			// other to expose buffer reuse concurrency issues.
 			if err := l.Write(&Record{Model: strings.Repeat("m", i%50+1)}); err != nil {
 				t.Errorf("Write: %v", err)
 			}

@@ -1,12 +1,8 @@
 // Ver 2026-08-02 12:30, by Sonnet 5
 //
-// runProbe's protocol dispatch: a half-open endpoint's background recovery
-// probe must send a body shaped for that endpoint's own protocol, not
-// always the Chat Completions shape — see probe.ResponsesRequest's doc
-// comment for the lockout bug this closes (a Responses endpoint sent a
-// "messages"-shaped probe body would be rejected as missing "input",
-// classified ErrClient, and ReportNeutral'd — leaving the endpoint stuck
-// half-open forever, even though it's perfectly healthy).
+// runProbe protocol dispatch test:
+// Regression test: ensures Responses endpoints send appropriate probe bodies,
+// preventing healthy endpoints from being misclassified and stuck half-open.
 package router
 
 import (

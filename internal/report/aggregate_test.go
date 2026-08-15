@@ -1396,15 +1396,9 @@ func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {
 	}
 }
 
-// TestMarkdownTableCellsWithPercentRenderVerbatim locks in a bug 2.6's
-// mdTable refactor introduced and the real-log verification caught: row()
-// originally passed the joined cell string straight to w(format, ...) as
-// the FORMAT string itself, so any cell containing a literal "%" (every
-// percentage/cache-efficiency cell in this report) got reinterpreted by
-// fmt.Fprintf as a verb and corrupted into "%!s(MISSING)" or similar. Fixed
-// by always passing cells through a literal "%s" verb. Every row here has
-// requests > 0, so pctStr2/cacheEffCell/pctHundred all produce "%" cells —
-// if the bug reappears, "MISSING" shows up in the rendered document.
+// TestMarkdownTableCellsWithPercentRenderVerbatim is a regression test ensuring cells
+// containing a literal "%" (such as percentages) render verbatim without being reinterpreted
+// as format verbs by fmt.Fprintf.
 func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 	rep := &Report2{
 		Overall: Row{TrafficStats: TrafficStats{Requests: 10, OK: 9, TokensIn: 100, TokensInCached: 90, TokensKnown: 10, CacheEfficiency: 0.9, RequestsWithDur: 10, DurMSP95: 500}},

@@ -322,7 +322,7 @@ func contextCurve(steps []*Step) []ContextPoint {
 	return out
 }
 
-// contextUtilization implements ContextUtilization's doc comment: for each
+// contextUtilization computes the context length utilization ratio across turns: for each
 // non-system Event, does any entity extracted from it (extractEntities, the
 // same extraction the compaction step already uses) reappear in a LATER
 // Event's text. j.Events is already in first-appearance order, so "later"

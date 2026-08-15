@@ -136,7 +136,7 @@ func TestComputeModelUsage_FailedOverFromEndpointIsVisible(t *testing.T) {
 }
 
 // TestComputeModelUsage_RepeatedSameEndpointStepsAllCounted is the
-// regression guard for the bug caught while implementing the above fix: a
+// Regression test: ensures that a
 // naive "only bump Steps the first time this (provider,model) entry is
 // created" would undercount every Step after the first one that reuses the
 // same endpoint — the overwhelmingly common case (most Journeys stay on one

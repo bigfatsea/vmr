@@ -116,7 +116,7 @@ func (r *Registry) Flush() error {
 	return nil
 }
 
-// Bucket is bucket exported read-only for an offline consumer (vmr report's
+// Bucket represents a snapshot of quota state exported for offline consumers (vmr report's
 // §2.5 quota-vs-consumption table via LoadFile) — the JSON tags are shared
 // verbatim with the unexported bucket this package uses in memory and on
 // disk, per store.go's own "there is exactly one shape" rule (see

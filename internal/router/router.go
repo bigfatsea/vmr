@@ -218,7 +218,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 
 	// All candidates failed or none were available.
 	if last != nil {
-		// Return the last upstream error verbatim — status, headers
+		// Returns the last upstream error verbatim (status and headers)
 		// (Retry-After included) and body — so the client sees exactly
 		// what a direct call would have shown.
 		copyRespHeaders(w.Header(), last.header)

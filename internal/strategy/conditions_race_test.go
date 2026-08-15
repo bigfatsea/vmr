@@ -22,7 +22,7 @@ func (f fakeCondition) Eligible(*core.Endpoint, core.RequestFacts) bool {
 // RegisterCondition calls (harder than production's real,
 // sequential-from-init() case) racing against concurrent Eligible/RejectedBy
 // reads must never race and must never lose a registration (the same class
-// of lost-update bug internal/adapter's Register had before its
+// Regression test: prevents lost updates during concurrent registration (which internal/adapter's Register previously had before its
 // registerMu fix — see that package's TestGetConcurrentWithRegister).
 func TestEligibleConcurrentWithRegisterCondition(t *testing.T) {
 	t.Parallel()

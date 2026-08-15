@@ -291,7 +291,7 @@ func TestInterpret_CacheHitSkipsSecondCall(t *testing.T) {
 	}
 }
 
-// TestInterpret_CacheKeyIncludesModel covers the bug the plan review found
+// TestInterpret_CacheKeyIncludesModel verifies that cache keys include the model name
 // in the alternative proposal's cache key: switching -llm-model must not
 // silently reuse a different model's cached answer.
 func TestInterpret_CacheKeyIncludesModel(t *testing.T) {

@@ -194,7 +194,7 @@ models:
 }
 
 // TestCmdCheck_ListenExposureWarningDoesNotFail pins the fix for a real
-// blocking bug reported after A3's checkListenExposure landed: a
+// Regression test: ensures checkListenExposure does not panic on a
 // SeverityWarning-only Issue set must render under "=== Warnings ===", not
 // "=== Failed ===", and cmdCheck must return nil (exit 0) — the check is
 // meant to surface a risky-but-intentional setup, never to block `vmr

@@ -115,7 +115,7 @@ type NormalizerStream interface {
 	// ObservedModel is the upstream's own model value when it differed from
 	// the one vmr requested, else "".
 	ObservedModel() string
-	// Usage returns the usage sniffed from this response so far; ok is true
+	// Usage returns the token usage extracted from this response so far; ok is true
 	// only once at least one usage-bearing block has actually been parsed.
 	Usage() (chatmsg.Usage, bool)
 	// OutBytes returns the ASCII/wide byte counts classified so far — the
@@ -828,7 +828,7 @@ func (s *stream) noteUsage(b []byte) {
 	}
 }
 
-// Usage returns the usage sniffed from this response so far; ok is true
+// Usage returns the token usage extracted from this response so far; ok is true
 // only once at least one usage-bearing block has actually been parsed —
 // see quota.go's tokenCharge for the fallback when ok is false. Safe to
 // call concurrently with an in-flight Read/ingest — see qmu's doc comment
