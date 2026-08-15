@@ -629,7 +629,7 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 ### 7.2 token 计量：嗅探 + 降级
 
 ```
-1) 上游 usage（权威）   ← respStream 嗅探，复用 chatmsg 的解析口径
+1) 上游 usage（权威）   ← respnorm.NormalizerStream 嗅探，复用 chatmsg 的解析口径
 2) 本地估算（降级）     ← core.EstimateTextTokens(请求体 / 响应体)
 ```
 
@@ -637,10 +637,10 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 并驱动阶段二的预测看板——那里 ±30% 不可接受。所以**能拿真值就用真值，拿不到才降级，
 并在状态里标出本周期的估算占比**，让使用者知道数字有多可信。
 
-拿不到 usage 的三种情况：上游响应带 `Content-Encoding`（`respStream` 按设计对压缩响应完全不解析）、
+拿不到 usage 的三种情况：上游响应带 `Content-Encoding`（`internal/respnorm` 按设计对压缩响应完全不解析）、
 上游不返回 usage 字段、流被中途截断。
 
-实现要点：挂在 `respStream` 已有的事件切分上嗅探，命中才 JSON 解析，绝大多数 token delta
+实现要点：挂在 `internal/respnorm` 已有的事件切分上嗅探，命中才 JSON 解析，绝大多数 token delta
 事件直接跳过；解析与合并复用 `chatmsg` 既有能力，不在 `router` 里重新实现（守住 CLAUDE.md
 "`chatmsg` 是消息解析唯一真相源"这条不变量）；只在 `forwardSuccess` 成功路径计费（429 基本
 无消耗；中途截断的输入消耗算作可接受的低估）。唯一必须写死的正确性约束：**门禁必须作用于
@@ -988,7 +988,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `respStream` 的增量嗅探），退化路径复用 `core.EstimateTextTokens` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
+| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `core.EstimateTextTokens` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`docs/KNOWN_ISSUES_sonnet-5.md` 已有记录 |
 | 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 
@@ -1426,7 +1426,7 @@ Scope 降级为观察项）、剩两项待 P3/P4。另有一件终态清单之�
 返回前 flush 一次，不需要后台 flusher。计费管线本身从 `chargeQuota` 里抽出为导出函数
 `router.ChargeResponse`（metric 分发 + `model_multipliers` 缩放 + `cost` 定价），`router`
 的流式路径与 `replay` 的一次性路径共用同一份实现，不是两套代码。usage 来源的差异：`replay`
-的响应已经完整缓冲在内存里，所以直接用 `chatmsg.MergeUsageBytes`（与 `respStream.noteUsage`
+的响应已经完整缓冲在内存里，所以直接用 `chatmsg.MergeUsageBytes`（与 `internal/respnorm` 的 `noteUsage`
 内部调用的是同一个函数）从整段字节里提取 usage；提取不到时的降级路径与 `tokenCharge` 同构——
 对请求体、响应体分别跑 `core.EstimateTextTokens`，全部计入 `Fresh`/`Out`（不区分缓存命中）。
 `-dry-run` 从不触碰状态文件（请求根本没有发出）；未配置 `quota:` 的 provider replay 后也不会

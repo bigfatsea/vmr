@@ -15,6 +15,7 @@ import (
 
 	"vmr/internal/core"
 	"vmr/internal/quota"
+	"vmr/internal/respnorm"
 )
 
 // --- model_multipliers: charge-time application ---
@@ -24,7 +25,7 @@ func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 	l := requestsLimit(1000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"heavy-model": 9}}
 	ep := &core.Endpoint{Provider: "p1", Model: "heavy-model", Quota: spec}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -40,7 +41,7 @@ func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 	l := requestsLimit(1000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"*": 3, "named-model": 9}}
 	ep := &core.Endpoint{Provider: "p1", Model: "unnamed-model", Quota: spec}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -56,7 +57,7 @@ func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.
 	l := requestsLimit(1000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"named-model": 9}}
 	ep := &core.Endpoint{Provider: "p1", Model: "other-model", Quota: spec}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -74,7 +75,7 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 	// configures it at all) — must behave identically to P1.
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "any-model", Quota: spec}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -104,7 +105,7 @@ func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 7}}
 
 	body := `{"choices":[{"message":{"content":"hi"}}]}` // no usage field -> degraded estimate path
-	rbody := newRespStream(bytes.NewReader([]byte(body)), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader([]byte(body)), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	if _, err := io.Copy(io.Discard, rbody); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	specB := &core.QuotaSpec{Limits: []core.Limit{l}} // no multiplier configured
 	epA := &core.Endpoint{Provider: "plan-a", Model: "m", Quota: specA}
 	epB := &core.Endpoint{Provider: "plan-b", Model: "m", Quota: specB}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(epA, rbody, creq, chargeNow)

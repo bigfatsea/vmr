@@ -1,16 +1,18 @@
 // Ver 2026-07-26, by Sonnet 5
 //
 // MiniMax-M3-specific response repairs: pattern knowledge for the two
-// thinking-mode leaks response.go's transport state machine buffers for
-// (see response.go's package doc), plus the soft-block detector. Everything
-// here is vendor-specific pattern/marker knowledge; response.go keeps the
+// thinking-mode leaks respnorm.go's transport state machine buffers for
+// (see respnorm.go's package doc), plus the soft-block detector. Everything
+// here is vendor-specific pattern/marker knowledge; respnorm.go keeps the
 // generic transport mechanics (event splitting, model-field rewrite, [DONE]
 // policy, the buffered/passthrough decision) and calls into this file only
 // at the points where it needs to know "does this look like a MiniMax
-// quirk". Split out of response.go — pure move, no behavior change:
-// response.go and responsefix.go together are byte-for-byte the same logic
-// that lived in one file before.
-package router
+// quirk". Originally split out of internal/router's response.go — pure
+// move, no behavior change: respnorm.go and minimax.go together are
+// byte-for-byte the same logic that lived in one file before that first
+// split, and moved again (with router.go/responsefix.go renamed to
+// respnorm.go/minimax.go) into this standalone package in Part 8 batch B7.
+package respnorm
 
 import (
 	"bytes"
@@ -34,7 +36,7 @@ var thinkingProcessEndorsement = regexp.MustCompile(`Looks good\.[ \t]+Pro(?:cee
 // **Draft**", …) as it appears JSON-escaped inside a content/text string
 // value: an escaped newline immediately followed by a small integer and a
 // period. Used only as an observation signal (see
-// respStream.noteThinkingPatternIfSuspected in response.go) when
+// stream.noteThinkingPatternIfSuspected in respnorm.go) when
 // stripThinkingProcess's own literal "Thinking Process:" prefix guard did
 // NOT fire — a content-shape proxy for "this still looks like the leaked
 // outline even though the literal marker guard missed it", not a strip

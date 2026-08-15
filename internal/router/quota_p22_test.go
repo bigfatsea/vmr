@@ -16,6 +16,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/pricing"
 	"vmr/internal/quota"
+	"vmr/internal/respnorm"
 )
 
 func f(v float64) *float64 { return &v }
@@ -68,7 +69,7 @@ func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 	creq := &core.CanonicalRequest{}
 
 	body := `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":1000000,"completion_tokens":1000000,"prompt_tokens_details":{"cached_tokens":500000}}}`
-	rs := newRespStream(strings.NewReader(body), "m", "m", false, "openai", false)
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange(t *tes
 	creq := &core.CanonicalRequest{}
 
 	body := `{"usage":{"prompt_tokens":1000000,"completion_tokens":1000000}}`
-	rs := newRespStream(strings.NewReader(body), "m", "m", false, "openai", false)
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 1_000_000}}
 
 	body := `{"choices":[{"message":{"content":"no usage field here"}}]}`
-	rs := newRespStream(strings.NewReader(body), "m", "m", false, "openai", false)
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestChargeCost_DoesNotConsultModelMultipliers(t *testing.T) {
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}} // no ModelMultipliers configured — the only config.validate()-legal shape for a cost account
 	ep := &core.Endpoint{Provider: "p1", Model: "any-model", Quota: spec, PricingRate: fullRate()}
 	creq := &core.CanonicalRequest{}
-	rbody := newRespStream(bytes.NewReader(nil), "m", "m", false, "openai", false)
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
 

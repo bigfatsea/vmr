@@ -75,6 +75,18 @@ var forbiddenImports = map[string][]string{
 	"vmr/internal/router": {
 		"vmr/internal/server",
 	},
+	// respnorm (the response-normalization state machine — architecture
+	// review's Part 8 batch B7 extracted it from internal/router precisely
+	// so it could be fuzzed at the pure io.Reader level, independent of
+	// Router/Snapshot) sits below router in the routing half, the same
+	// "shared leaf, consumer never imports back" shape as taskseg below
+	// report/story: router.go/quota.go depend on it (Wrap/NormalizerStream),
+	// and it depending back on router or server would be a real import
+	// cycle, not just a layering preference.
+	"vmr/internal/respnorm": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+	},
 	// taskseg (agent-dialect Profile plus, since the architecture review's B3
 	// batch, the session/task-segmentation primitives built on it —
 	// real-instruction indexing, new-task detection, task titling) is the

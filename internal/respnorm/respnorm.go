@@ -1,10 +1,11 @@
 // Ver 2026-07-17 02:00, by Sonnet 5
 //
-// Response normalizer. Guiding principle: what the client receives through
-// VMR must match what it would receive calling the provider directly, except
-// for the virtual-model abstraction (the "model" field is rewritten back to
-// the client's virtual name) and two MiniMax-M3-specific repairs that only
-// engage when their exact upstream shape is detected:
+// Package respnorm is the response normalizer. Guiding principle: what the
+// client receives through VMR must match what it would receive calling the
+// provider directly, except for the virtual-model abstraction (the "model"
+// field is rewritten back to the client's virtual name) and two
+// MiniMax-M3-specific repairs that only engage when their exact upstream
+// shape is detected:
 //
 //   - inline <think>...</think> reasoning inside content (thinking mode):
 //     if persisted into the assistant history it feeds the model its own
@@ -51,12 +52,36 @@
 // This file holds the generic transport mechanics — event splitting, the
 // buffered/passthrough decision, model-field rewrite, [DONE] policy. The
 // MiniMax-specific pattern knowledge behind the two thinking-mode repairs
-// and the soft-block markers lives in responsefix.go; this file calls into
-// it (thinkShapeGuard, stripThinkingProcess, containsSoftBlockMarker, and
-// the thinkOpenMarker/thinkCloseMarker/thinkPattern constants) at the few
-// points where the state machine needs to know "does this look like a
-// MiniMax quirk".
-package router
+// and the soft-block markers lives in minimax.go; this file calls into it
+// (thinkShapeGuard, stripThinkingProcess, containsSoftBlockMarker, and the
+// thinkOpenMarker/thinkCloseMarker/thinkPattern constants) at the few points
+// where the state machine needs to know "does this look like a MiniMax
+// quirk".
+//
+// Extracted from internal/router (architecture review's Part 8 batch B7):
+// router.go/quota.go call only Wrap/NormalizerStream below, never a stream
+// field directly, so the state machine can be fuzzed here at the pure
+// io.Reader level, independent of Router/Snapshot (see respnorm_test.go's
+// FuzzStream) — the real payoff of this batch; splitting the file out of
+// internal/router does not shrink router.go by a single line (response.go/
+// responsefix.go were always separate files there, never inside router.go
+// itself), so file-line-count is not this batch's metric.
+//
+// Usage-sniffing placement: Quota-Aware Routing's usage/byte-count
+// accumulators (noteUsage/countBytes, exposed as Usage()/OutBytes() on
+// NormalizerStream) live on stream, not in a separate router-half
+// decorator. This mixes "response normalization" and "billing sniffing"
+// into one package, which is a real, acknowledged tradeoff — not an
+// oversight. The alternative (a wrapping io.Reader decorator kept in
+// internal/router, layered on top of Wrap's output) would cost one extra
+// interface call and boundary check per streamed chunk on the hot forward
+// path, and this project's one hard constraint is that a refactor must
+// never regress that path (see CLAUDE.md's Invariants section). Sniffing
+// piggybacks on ingest's existing per-chunk loop instead, at zero added
+// cost. Written down here for the same reason core.TokenWeights' zero-value
+// trap and quota.Counters.Cost's "store raw, weight on read" exception are:
+// a tradeoff that isn't written down looks like it was never considered.
+package respnorm
 
 import (
 	"bytes"
@@ -67,6 +92,53 @@ import (
 
 	"vmr/internal/chatmsg"
 )
+
+// Options configures Wrap. ClientModel is the virtual model name the
+// client asked for (rewritten into every "model" field in the response);
+// UpstreamModel is the real model name vmr requested from this endpoint,
+// used only to detect when the upstream answered with something else (see
+// NormalizerStream.ObservedModel). IsSSE and Protocol decide framing/[DONE]
+// policy; Opaque (Content-Encoding present) disables every transform.
+type Options struct {
+	ClientModel   string
+	UpstreamModel string
+	IsSSE         bool
+	Protocol      string // ingress protocol: decides [DONE] policy
+	Opaque        bool   // Content-Encoding present: no transforms at all
+}
+
+// NormalizerStream is what Wrap returns: an io.Reader over the normalized
+// response body, plus the audit-trail/quota-metering facts accumulated
+// while it was read. Applied/RawPreStrip/ObservedModel are valid only after
+// the stream has been fully copied (EOF reached); Usage/OutBytes update
+// incrementally and are safe to read concurrently with an in-flight Read
+// (see the qmu field on stream for why only those two need that guarantee).
+type NormalizerStream interface {
+	io.Reader
+
+	// Applied reports which transforms ran, for the audit trail.
+	Applied() []string
+	// RawPreStrip returns the upstream bytes exactly as received, from the
+	// point just before a think_strip/thinking_process_strip rewrite ran —
+	// nil when neither fired.
+	RawPreStrip() []byte
+	// ObservedModel is the upstream's own model value when it differed from
+	// the one vmr requested, else "".
+	ObservedModel() string
+	// Usage returns the usage sniffed from this response so far; ok is true
+	// only once at least one usage-bearing block has actually been parsed.
+	Usage() (chatmsg.Usage, bool)
+	// OutBytes returns the ASCII/wide byte counts classified so far — the
+	// degraded-estimate input when Usage() has nothing.
+	OutBytes() (ascii, wide int64)
+}
+
+// Wrap normalizes src (an upstream response body) per opts. See the package
+// doc comment for the transport-mode decision and the usage-sniffing
+// placement tradeoff.
+func Wrap(src io.Reader, opts Options) NormalizerStream {
+	return newStream(src, opts.ClientModel, opts.UpstreamModel, opts.IsSSE, opts.Protocol, opts.Opaque)
+}
 
 // Transport modes. A stream starts undecided (SSE) or buffered (non-SSE)
 // and settles once; the only later transition is buffered→passthrough when
@@ -103,7 +175,7 @@ const bufferedCap = 8 << 20
 var modelFieldPattern = regexp.MustCompile(`("model":\s*")([^"]*)"`)
 
 // Group 2 is the upstream's own model value, read once per response before
-// the rewrite overwrites it — see respStream.noteUpstreamModel. Adding the
+// the rewrite overwrites it — see stream.noteUpstreamModel. Adding the
 // group is free for the rewrite itself: ReplaceAll's `${1}` still names the
 // same opener it always did.
 
@@ -137,13 +209,13 @@ var passthroughTokenMarkers = [][]byte{
 	[]byte(`"partial_json"`),
 }
 
-type respStream struct {
+type stream struct {
 	src         io.Reader
 	clientModel string
 	// modelRewriteRepl is the regexp.ReplaceAll template used to rewrite the
 	// "model" field back to clientModel — precomputed once so a virtual
 	// model name containing "$" (a legal YAML `models:` key) can't be
-	// misread as a submatch reference (see newRespStream).
+	// misread as a submatch reference (see newStream).
 	modelRewriteRepl []byte
 	isSSE            bool
 	protocol         string // ingress protocol: decides [DONE] policy
@@ -169,7 +241,7 @@ type respStream struct {
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 
 	// qmu guards ONLY the four fields below — Quota-Aware Routing's usage/
-	// byte-count accumulators — not the rest of respStream's fields. Those
+	// byte-count accumulators — not the rest of stream's fields. Those
 	// stay unsynchronized on purpose (Read is only ever called serially by
 	// transport.go's copyFlush reader goroutine), but Usage()/OutBytes()
 	// are read from forwardSuccess's own goroutine, AFTER copyFlush
@@ -190,13 +262,13 @@ type respStream struct {
 	usageSeen  bool
 }
 
-func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *respStream {
+func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *stream {
 	// "$" is a template metacharacter to regexp.ReplaceAll (see
 	// modelRewriteRepl's use in emitBlock/finalizeBuffered) — escape it so a
 	// virtual model name like "gpt$4" is emitted verbatim instead of being
 	// read as a (nonexistent) submatch reference and silently truncated.
 	escapedClientModel := strings.ReplaceAll(clientModel, "$", "$$")
-	rs := &respStream{
+	rs := &stream{
 		src: src, clientModel: clientModel,
 		modelRewriteRepl: []byte(`${1}` + escapedClientModel + `"`),
 		upstreamModel:    upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true,
@@ -227,7 +299,7 @@ func newRespStream(src io.Reader, clientModel, upstreamModel string, isSSE bool,
 
 // Applied reports which transforms ran, for the audit trail. Valid after
 // the stream has been fully copied.
-func (s *respStream) Applied() []string { return s.applied }
+func (s *stream) Applied() []string { return s.applied }
 
 // RawPreStrip returns the upstream bytes exactly as received, from the point
 // just before a think_strip/thinking_process_strip rewrite ran — nil when
@@ -236,7 +308,7 @@ func (s *respStream) Applied() []string { return s.applied }
 // mode already holds these bytes in memory for the regex pass, so this just
 // keeps that reference alive instead of discarding it. Valid after the
 // stream has been fully copied.
-func (s *respStream) RawPreStrip() []byte { return s.rawPreStrip }
+func (s *stream) RawPreStrip() []byte { return s.rawPreStrip }
 
 // Read does not satisfy the general io.Reader contract: it can return
 // (0, nil) — see the comment above the return statement below — which
@@ -249,7 +321,7 @@ func (s *respStream) RawPreStrip() []byte { return s.rawPreStrip }
 // only ever follows a real blocking read on s.src that already consumed
 // some upstream bytes — but that's incidental to this type's contract, not
 // a promise: don't rely on it, route new consumers through copyFlush.
-func (s *respStream) Read(p []byte) (int, error) {
+func (s *stream) Read(p []byte) (int, error) {
 	if len(s.out) > 0 {
 		n := copy(p, s.out)
 		s.out = s.out[n:]
@@ -293,7 +365,7 @@ func (s *respStream) Read(p []byte) (int, error) {
 	return 0, nil
 }
 
-func (s *respStream) ingest(b []byte) {
+func (s *stream) ingest(b []byte) {
 	// Every source byte flows through here exactly once, in every mode
 	// including opaque (see the P1 dev plan's baseline-facts table) — the
 	// one hook that
@@ -373,7 +445,7 @@ func (s *respStream) ingest(b []byte) {
 // behavior — the whole-body fallback already handles it correctly, just
 // without incremental streaming — it only leaves a trail so `vmr report`
 // can tell a genuinely tiny/malformed response apart from CRLF framing.
-func (s *respStream) noteCRLFFramingIfSuspected(b []byte) {
+func (s *stream) noteCRLFFramingIfSuspected(b []byte) {
 	if bytes.Contains(b, crlfEventSepHint) {
 		s.noteApplied("crlf_framing_suspected")
 	}
@@ -383,7 +455,7 @@ func (s *respStream) noteCRLFFramingIfSuspected(b []byte) {
 // on the first payload-bearing one. Role markers, pings, message_start
 // and empty-content chunks don't decide; they stay withheld (a few tiny
 // events at most) and are released or buffered with everything else.
-func (s *respStream) decide() {
+func (s *stream) decide() {
 	rest := s.pending[s.scanned:]
 	for {
 		i := bytes.Index(rest, eventSep)
@@ -419,7 +491,7 @@ func (s *respStream) decide() {
 // emitComplete releases every complete event in pending, keeping only the
 // partial tail. The block boundary is always an event separator, so the
 // model-field rewrite never straddles a JSON string.
-func (s *respStream) emitComplete() {
+func (s *stream) emitComplete() {
 	i := bytes.LastIndex(s.pending, eventSep)
 	if i < 0 {
 		return
@@ -430,7 +502,7 @@ func (s *respStream) emitComplete() {
 	s.pending = tail
 }
 
-func (s *respStream) emitBlock(block []byte) {
+func (s *stream) emitBlock(block []byte) {
 	if len(block) == 0 {
 		return
 	}
@@ -473,7 +545,7 @@ func (s *respStream) emitBlock(block []byte) {
 // field repeats in every chunk and modelSeen latches after the first.
 // Identical values record nothing at all, so the common case adds no bytes
 // to the audit record.
-func (s *respStream) noteUpstreamModel(block []byte) {
+func (s *stream) noteUpstreamModel(block []byte) {
 	if s.modelSeen || s.upstreamModel == "" {
 		return
 	}
@@ -490,9 +562,9 @@ func (s *respStream) noteUpstreamModel(block []byte) {
 // ObservedModel is the upstream's own model value when it differed from the
 // one vmr requested, else "" — see noteUpstreamModel for why there is no
 // verdict attached.
-func (s *respStream) ObservedModel() string { return s.observedModel }
+func (s *stream) ObservedModel() string { return s.observedModel }
 
-func (s *respStream) finish() {
+func (s *stream) finish() {
 	if s.opaque {
 		return
 	}
@@ -514,7 +586,7 @@ func (s *respStream) finish() {
 	s.notePatternDetectedIfSuspected()
 }
 
-func (s *respStream) finalizeBuffered() {
+func (s *stream) finalizeBuffered() {
 	b := s.buf
 	s.buf = nil
 	raw := b // pre-strip snapshot; only kept (below) if a strip actually fires
@@ -554,7 +626,7 @@ func (s *respStream) finalizeBuffered() {
 // appendDone adds the [DONE] sentinel when — and only when — the client
 // speaks the OpenAI protocol, the response is SSE, and the upstream
 // didn't send its own. Anthropic streams have no [DONE] concept.
-func (s *respStream) appendDone() {
+func (s *stream) appendDone() {
 	if !s.isSSE || s.protocol != "openai" || s.sawDone {
 		return
 	}
@@ -566,7 +638,7 @@ func (s *respStream) appendDone() {
 	s.noteApplied("done_appended")
 }
 
-func (s *respStream) noteApplied(step string) {
+func (s *stream) noteApplied(step string) {
 	for _, a := range s.applied {
 		if a == step {
 			return
@@ -584,14 +656,14 @@ func (s *respStream) noteApplied(step string) {
 // (buffered mode) or not fire at all despite this shape appearing (exactly
 // the failure this exists to catch); the pass/fail decision is deferred to
 // finish()'s notePatternDetectedIfSuspected once every byte has been seen.
-func (s *respStream) noteThinkingPatternIfSuspected(b []byte) {
+func (s *stream) noteThinkingPatternIfSuspected(b []byte) {
 	s.thinkPatternBytes += len(b)
 	s.thinkPatternHits += len(thinkingProcessNumberedMarker.FindAll(b, -1))
 }
 
 // stripFired reports whether either MiniMax thinking-mode repair actually
 // rewrote this response's bytes.
-func (s *respStream) stripFired() bool {
+func (s *stream) stripFired() bool {
 	for _, a := range s.applied {
 		if a == "think_strip" || a == "thinking_process_strip" {
 			return true
@@ -607,7 +679,7 @@ func (s *respStream) stripFired() bool {
 // also decides passthrough vs. buffered mode up in decide()) may have gone
 // blind to a wording change. Tags the audit trail only; never touches a byte
 // of the response and never affects failover/health.
-func (s *respStream) notePatternDetectedIfSuspected() {
+func (s *stream) notePatternDetectedIfSuspected() {
 	if s.stripFired() {
 		return
 	}
@@ -668,7 +740,7 @@ func classifyEvent(ev []byte) verdict {
 // tallies incrementally, once per Read, and the result is byte-for-byte
 // equivalent to running EstimateTextTokens over the full concatenated body
 // (see core.EstimateTokensFromCounts's doc comment).
-func (s *respStream) countBytes(b []byte) {
+func (s *stream) countBytes(b []byte) {
 	var ascii, wide int64
 	for _, c := range b {
 		if c < 0x80 {
@@ -691,7 +763,7 @@ func (s *respStream) countBytes(b []byte) {
 // streamed events (plain content/tool-call deltas) cost one substring scan
 // and nothing else; only an event that actually mentions "usage" pays for a
 // JSON parse.
-func (s *respStream) noteUsage(b []byte) {
+func (s *stream) noteUsage(b []byte) {
 	if !bytes.Contains(b, usageFieldMarker) {
 		return
 	}
@@ -708,9 +780,9 @@ func (s *respStream) noteUsage(b []byte) {
 // only once at least one usage-bearing block has actually been parsed —
 // see quota.go's tokenCharge for the fallback when ok is false. Safe to
 // call concurrently with an in-flight Read/ingest — see qmu's doc comment
-// on respStream for why this specific pair of fields needs that guarantee
+// on stream for why this specific pair of fields needs that guarantee
 // when the rest of the type doesn't.
-func (s *respStream) Usage() (chatmsg.Usage, bool) {
+func (s *stream) Usage() (chatmsg.Usage, bool) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
 	return s.usage, s.usageSeen
@@ -719,7 +791,7 @@ func (s *respStream) Usage() (chatmsg.Usage, bool) {
 // OutBytes returns the ASCII/wide byte counts countBytes has classified so
 // far — the degraded-estimate input when Usage() has nothing. Same
 // concurrency contract as Usage().
-func (s *respStream) OutBytes() (ascii, wide int64) {
+func (s *stream) OutBytes() (ascii, wide int64) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
 	return s.asciiBytes, s.wideBytes

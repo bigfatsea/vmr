@@ -80,14 +80,22 @@ var fileLineLimits = map[string]int{
 	"internal/story/metrics.go":             470,
 	"internal/story/corpus.go":              380,
 	"internal/story/render_corpus.go":       150,
-	// response.go is the router half's counterpart to report/story's
-	// largest files above: a full response-normalization state machine
-	// (passthrough/buffered/opaque transitions, SSE event splitting,
-	// MiniMax quirk trigger points, quota usage sniffing) with no budget of
-	// its own until an architecture review (2026-08-10) flagged it as the
-	// one large file this table didn't cover — same ~15% first-time
-	// headroom convention as the entries above (736 lines at registration).
-	"internal/router/response.go": 850,
+	// internal/respnorm/respnorm.go (formerly internal/router/response.go —
+	// a full response-normalization state machine: passthrough/buffered/
+	// opaque transitions, SSE event splitting, MiniMax quirk trigger points,
+	// quota usage sniffing) got its own budget when an architecture review
+	// (2026-08-10) flagged it as the one large file this table didn't cover
+	// — 850 at 736 lines. Part 8 batch B7 (2026-08-15) moved it into its own
+	// package (see internal/respnorm's package doc comment) for fuzzability,
+	// not to shrink it, and carried the SAME 850-line budget over unchanged
+	// rather than recomputing headroom from the post-move line count: the
+	// point of that batch was explicitly not file size (its own review notes
+	// router.go doesn't shrink by a single line either), so resetting this
+	// number would misrepresent the move as a size fix it never claimed to
+	// be. minimax.go (formerly responsefix.go) is a first-time budget at the
+	// same ~15-20% headroom convention as every other entry here.
+	"internal/respnorm/respnorm.go": 850,
+	"internal/respnorm/minimax.go":  235,
 	// cmd/vmr had NO entry in this table at all until an architecture review
 	// (2026-08-14) noticed cmd_story.go had grown to 741 lines — larger than
 	// most of the internal/ files above that DO have a budget. The CLI is

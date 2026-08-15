@@ -3,7 +3,7 @@
 // Capturing the upstream's self-reported model name — the one piece of
 // evidence that a relay served something other than what was asked for,
 // and the only moment it exists (see noteUpstreamModel).
-package router
+package respnorm
 
 import (
 	"strings"
@@ -29,7 +29,7 @@ func TestUpstreamModelRecordedOnlyWhenItDiffers(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			body := `{"id":"x","model":"` + c.responseModel + `","choices":[]}`
-			rs := newRespStream(strings.NewReader(body), "coding", c.requested, false, "openai", false)
+			rs := newStream(strings.NewReader(body), "coding", c.requested, false, "openai", false)
 			out := readAll(t, rs)
 
 			if got := rs.ObservedModel(); got != c.wantObserved {
@@ -53,7 +53,7 @@ func TestUpstreamModelCapturedOncePerStream(t *testing.T) {
 	src := strings.NewReader(
 		`data: {"id":"a","model":"real-a","object":"chunk"}` + "\n\n" +
 			`data: {"id":"b","model":"real-b","object":"chunk"}` + "\n\n")
-	rs := newRespStream(src, "agent", "asked-for", true, "openai", false)
+	rs := newStream(src, "agent", "asked-for", true, "openai", false)
 	readAll(t, rs)
 
 	if got := rs.ObservedModel(); got != "real-a" {
@@ -65,7 +65,7 @@ func TestUpstreamModelCapturedOncePerStream(t *testing.T) {
 // test, and any caller that doesn't pass one) must record nothing rather
 // than report every response as a mismatch against "".
 func TestUpstreamModelSkippedWhenRequestedNameUnknown(t *testing.T) {
-	rs := newRespStream(strings.NewReader(`{"model":"anything"}`), "coding", "", false, "openai", false)
+	rs := newStream(strings.NewReader(`{"model":"anything"}`), "coding", "", false, "openai", false)
 	readAll(t, rs)
 	if got := rs.ObservedModel(); got != "" {
 		t.Errorf("ObservedModel() = %q, want empty", got)
@@ -75,7 +75,7 @@ func TestUpstreamModelSkippedWhenRequestedNameUnknown(t *testing.T) {
 // A compressed body is never parsed at all (opaque passthrough), so there
 // is nothing to observe — and nothing may be inferred from that silence.
 func TestUpstreamModelNotCapturedFromOpaqueBody(t *testing.T) {
-	rs := newRespStream(strings.NewReader(`{"model":"real"}`), "coding", "asked", false, "openai", true)
+	rs := newStream(strings.NewReader(`{"model":"real"}`), "coding", "asked", false, "openai", true)
 	readAll(t, rs)
 	if got := rs.ObservedModel(); got != "" {
 		t.Errorf("ObservedModel() = %q, want empty for an opaque response", got)

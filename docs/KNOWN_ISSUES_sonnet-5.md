@@ -381,7 +381,7 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   （`docs/VirtualModelRouter_Design_v4_Core.md`），`vmr diagnose` 的 api_key 检查是现有缓解；需要
   默认值时直接在 YAML 里写字面值即可，成本接近零，与项目"环境变量只做显式单一用途、不留隐式旋钮"的
   一贯哲学一致，没有加 shell 风格默认值解析的实际诉求，按 YAGNI 不做。
-- **`report/render.go` 的 `reassembleSSE`（语义重组）与 `router/response.go` 的 SSE 状态机是两套独立
+- **`report/render.go` 的 `reassembleSSE`（语义重组）与 `internal/respnorm` 的 SSE 状态机是两套独立
   实现**——一个字节级保真增量转发、一个整体语义提取，关注点不同，合并成本高于收益。
 - **`internal/adapter/openai` 与 `anthropic` 各有约 4 行的 header 拷贝循环**——凭证 header 名字与格式
   不同，抽公共函数收益不明显；三个协议适配器 `BuildRequest` 结构高度重复（约 30 行骨架三份几乎相同），
@@ -486,7 +486,10 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
 - **`response.go` 缺行数预算**：`internal/archtest/file_sizes_test.go` 的 `fileLineLimits` 加了
   `"internal/router/response.go": 850`（按既有条目 ~15% 余量惯例，从注册时的 736 行取整）。此前
   `response.go` 是全项目认知密度最高的文件之一（三种传输模式状态机 + SSE 事件切分 + MiniMax 双形态
-  思考泄漏修复触发判断 + 额度 usage 嗅探），却是"行数预算"这套护栏机制唯一的覆盖盲区。
+  思考泄漏修复触发判断 + 额度 usage 嗅探），却是"行数预算"这套护栏机制唯一的覆盖盲区。**后续**：架构
+  审查 Part 8 批次 B7（2026-08-15）把该文件连同这条 850 行预算一起搬进独立的 `internal/respnorm`
+  包（`respnorm.go`），预算数字原样带过去——那批次要解决的是可测试性（脱离 Router/Snapshot 做
+  fuzz），不是行数，见该批次自己的验收标准。
 - **`newUserWindow` 常量跨包重复**：`internal/report/session.go`、`internal/story/journey.go` 各自
   独立声明 `const newUserWindow = 8`（同一语义、同一数值的物理重复，没有测试锁定两者必须一致），
   下沉为 `chatmsg.NewUserWindow`（选 `chatmsg` 而非 `ctxgraph`——常量语义是"消息列表位置窗口"，属于
@@ -544,7 +547,7 @@ mutex 内，是全仓库唯一一处"全局锁包住 syscall"。
   `model_multipliers` 缩放 + `cost` 定价尾段抽成导出函数 `router.ChargeResponse`，`router` 的流式路径
   与 `internal/replay` 的一次性路径共用同一实现。`replay.Run` 加载 `<log_dir>/vmr-quota.json`（与
   `vmr start` 同一份状态文件）→ 成功响应（状态码 `< 400`）后计费 → 返回前 flush 一次；usage 用
-  `chatmsg.MergeUsageBytes` 从已完整缓冲的响应体里取（而非 `respStream` 的增量嗅探），拿不到时降级
+  `chatmsg.MergeUsageBytes` 从已完整缓冲的响应体里取（而非 `internal/respnorm` 的增量嗅探），拿不到时降级
   为对请求/响应体分别跑 `core.EstimateTextTokens`。`-dry-run` 与未配置 `quota:` 的 provider 均不触碰
   状态文件。未覆盖：与另一个正在写同一状态文件的进程（如运行中的 `vmr start`）并发时没有跨进程锁，
   这是 `VirtualModelRouter_Design_v4_Quota.md`"多实例共享计数：不做"这条既有取舍的一个具体表现，

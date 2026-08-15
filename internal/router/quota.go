@@ -18,6 +18,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/pricing"
 	"vmr/internal/quota"
+	"vmr/internal/respnorm"
 	"vmr/internal/strategy"
 )
 
@@ -35,7 +36,7 @@ import (
 // endpoint's provider has no quota: configured), and an empty Limits slice
 // are all silent no-ops, never a panic — a statistics helper must not be
 // able to break a response that has already been written to the client.
-func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.CanonicalRequest, now time.Time) {
+func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream, creq *core.CanonicalRequest, now time.Time) {
 	if rt.Quota == nil || ep.Quota == nil || len(ep.Quota.Limits) == 0 {
 		return
 	}
@@ -56,7 +57,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody *respStream, creq *core.C
 // requests) and how much of them came from a degraded estimate (0 = exact).
 // This is chargeQuota's metric dispatch + model-multiplier scaling + cost
 // pricing tail, factored out so a caller that never streams through
-// respStream can drive the exact same pipeline instead of reimplementing
+// respnorm.NormalizerStream can drive the exact same pipeline instead of reimplementing
 // it — currently `vmr replay` (internal/replay), which extracts usage from
 // an already fully-buffered response via chatmsg.MergeUsageBytes; see
 // docs/VirtualModelRouter_Design_v4_Quota.md's known-gap entry ② on
@@ -122,20 +123,20 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 }
 
 // tokenCharge computes one response's token consumption: the upstream's own
-// reported usage when respStream managed to sniff it (exact), degrading to
-// a byte-count estimate when it didn't (opaque response, no usage field, or
-// a stream truncated before any usage-bearing block arrived) — see the
-// design doc's Metering section. estimated equals the full charged total
-// exactly when this is a degraded estimate, 0 when it's exact — accumulated
-// by quota.Registry into each account's running estimated_pct, the one
-// signal /admin/status gives an operator for how much to trust a
-// token-metered account's numbers.
-func tokenCharge(rbody *respStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
+// reported usage when respnorm.NormalizerStream managed to sniff it (exact),
+// degrading to a byte-count estimate when it didn't (opaque response, no
+// usage field, or a stream truncated before any usage-bearing block
+// arrived) — see the design doc's Metering section. estimated equals the
+// full charged total exactly when this is a degraded estimate, 0 when it's
+// exact — accumulated by quota.Registry into each account's running
+// estimated_pct, the one signal /admin/status gives an operator for how
+// much to trust a token-metered account's numbers.
+func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
 	u, sniffed := rbody.Usage()
 	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
 	// server/facts.go — zero extra cost here); response-side comes from bytes
-	// respStream classified incrementally as they arrived (response.go's
+	// respnorm classified incrementally as they arrived (respnorm.go's
 	// countBytes), through the exact same coefficients core.EstimateTextTokens
 	// itself uses. Both are computed unconditionally: they are two field reads
 	// and an integer division, cheaper than branching around them, and

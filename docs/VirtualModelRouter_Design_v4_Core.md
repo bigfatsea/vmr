@@ -130,15 +130,16 @@ internal/strategy          Dimension 接口 + priority 维度 + 稳定多键排�
 internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道任何端点/TTL 细节
 internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——标准表/账号覆盖本身会随配置变更而变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
 internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/EffectiveRate/Complete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，first-match-wins 静态按模型区分（无时间维度——P0-A 移除了曾经的 date_*/hour_* 时间窗，见 docs/VirtualModelRouter_Design_v4_Quota.md 的相应章节），discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
+internal/respnorm          响应归一化器（架构审查 Part 8 批次 B7 从 internal/router 拆出，见该批次的用量嗅探取舍注释）：对外只暴露 `Wrap(src io.Reader, opts Options) NormalizerStream`，router.go/quota.go 只认这一个入口，从不直接引用内部的 `stream` 类型——状态机因此可以脱离 Router/Snapshot、在纯 io.Reader 层面做 fuzz（respnorm_test.go 的 FuzzStream）
+  ├─ respnorm.go  通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）；Quota-Aware Routing 的用量/字节数嗅探（`Usage()`/`OutBytes()`）也内嵌在这里而非独立的路由半区 Reader 装饰器——零性能代价是唯一理由，代价是"响应归一化"包里混了一点"计费嗅探"，取舍写在包注释里
+  └─ minimax.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），respnorm.go 在需要时调用
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
   ├─ limiter.go   并发闸（AcquireSlot/Concurrency）
   ├─ transport.go NewUpstreamClient（diagnose/replay 复用）+ copyFlush（流式转发）
   ├─ logfmt.go    实时路由日志的行格式化
-  ├─ response.go  响应归一化器：通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newRespStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）
-  ├─ responsefix.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），response.go 在需要时调用
   ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
-  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respStream`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
+  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respnorm.NormalizerStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respnorm`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
 internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/core.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -241,7 +242,7 @@ ErrContextLimit 会话历史超出该端点模型的上下文窗口 → 切换�
 
 **与「必须由 Adapter 覆盖」的几项不冲突**：`Authorization` 在 blocklist 里**也是**由 Adapter 用 `Header.Set` 覆盖，blocklist 是第二道防线（如果上游意外处理了一个客户端的 Authorization，VMR 至少不会主动转发）。这种「belt and suspenders」是必要的——Header.Set 覆盖只对 Adapter 构造的请求有效，对 VMR 自己生成的请求（如 `/admin/status`）不适用。
 
-### 5.5 响应侧归一化（`internal/router/response.go`）
+### 5.5 响应侧归一化（`internal/respnorm`）
 
 上游的响应进入 VMR 后、转发到客户端之前，经过一个**归一化层**。响应体不经过 Adapter，协议内透传、**Adapter 之间不做转换**是全文的设计原则。但光透传会让上游的「指纹」原样到达客户端，**部分客户端 SDK 会因此失灵**：
 
@@ -885,7 +886,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 项 | 现状 | 不动的理由 |
 | --- | --- | --- |
 | `cmdCheck`/`cmdStart` 与 `vmr diagnose` 曾各自实现"按生效顺序打印路由表" | **排序部分已统一**为 `router.ModelRoute.EffectiveOrder()`（三处调用同一份 `append+strategy.Sort`）；**打印格式仍分别实现**（输出目标 stdout/logger 不同，且 diagnose 要额外标注连通性测试结果） | 统一打印格式需要 writer+格式抽象，比各自 10 来行的格式化代码更复杂；排序逻辑本身（会随协议/策略演进）已经不重复了，剩下的纯格式化差异不值得再抽象 |
-| `respStream.Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |
+| `internal/respnorm`（原 `router.respStream`）的 `Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |
 | 健康注册表中被配置删除的端点条目跨热重载残留 | 每条目几十字节，重启清零 | 有界（≤ 历史配置的端点总数），加清理逻辑需要 diff 新旧快照，复杂度不成比例 |
 | 测试里存在三个各自为政的 mock 上游（`upstream`/`probeUpstream`/`stallingUpstream`） | 各 30~50 行，职责不同（脚本化状态 / 探针时序 / 停滞） | 测试代码合并会互相牵连；等真实收敛需求出现再说 |
 | `runProbe`（半开端点后台探测）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `probe_timeout` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |

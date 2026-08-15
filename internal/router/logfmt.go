@@ -99,7 +99,7 @@ func capField(f core.RequestFacts) string {
 // EstimatedTokens, computed once at ingress) for a log line whose outcome
 // never learns actual usage — every error/failover tail (build error,
 // network error, upstream error) reads this, since none of them reaches
-// respStream. forwardSuccess's usageTokenField also falls back to this
+// respnorm.Wrap. forwardSuccess's usageTokenField also falls back to this
 // exact string when the upstream never reported usage at all. Appends
 // "(est)" itself rather than relying on fmtutil.FmtTokensCompact to carry
 // an estimate marker — see that function's doc comment.

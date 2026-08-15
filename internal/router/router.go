@@ -21,6 +21,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/health"
 	"vmr/internal/quota"
+	"vmr/internal/respnorm"
 	"vmr/internal/sticky"
 	"vmr/internal/strategy"
 )
@@ -504,13 +505,20 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 	w.WriteHeader(resp.StatusCode)
 
-	// Wrap the upstream body with the response normalizer (response.go):
-	// true streaming by default, buffered only when a MiniMax thinking
-	// shape is detected, raw passthrough when the body is compressed.
+	// Wrap the upstream body with the response normalizer (internal/respnorm):
+	// true streaming by default, buffered only when a known upstream quirk
+	// shape is detected, raw passthrough when the body is compressed — see
+	// that package's doc comment for what triggers buffering.
 	ct := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
 	opaque := resp.Header.Get("Content-Encoding") != ""
-	rbody := newRespStream(body, creq.Model, ep.Model, isSSE, ep.AdapterType, opaque)
+	rbody := respnorm.Wrap(body, respnorm.Options{
+		ClientModel:   creq.Model,
+		UpstreamModel: ep.Model,
+		IsSSE:         isSSE,
+		Protocol:      ep.AdapterType,
+		Opaque:        opaque,
+	})
 
 	// Both SSE and non-SSE bodies go through copyFlush so the stream_idle
 	// watchdog covers every upstream response body: a 200 whose body stalls
@@ -531,9 +539,10 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
 	// rbody.Usage() is safe to read here: chargeQuota (above) already
-	// consumed it, and respStream's own contract is that Usage()/OutBytes()
-	// are stable once copyFlush has returned (see response.go's doc
-	// comment on respStream).
+	// consumed it, and NormalizerStream's own contract is that Usage()/
+	// OutBytes() are stable once copyFlush has returned (see
+	// internal/respnorm's package doc comment on its usage-sniffing
+	// placement).
 	usage, ok := rbody.Usage()
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
 	return true, nil, true
