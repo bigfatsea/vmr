@@ -789,7 +789,36 @@ func TestSweepCacheDirTTLDisabledKeepsEverything(t *testing.T) {
 	sweepCacheDir(dir, 0, time.Now())
 
 	if _, err := os.Stat(path); err != nil {
-		t.Errorf("ttlDays<=0 must disable eviction entirely: %v", err)
+		t.Errorf("ttlDays<=0 must disable time-based eviction: %v", err)
+	}
+}
+
+func TestSweepCacheDirCapEnforcedEvenWithTTLDisabled(t *testing.T) {
+	dir := t.TempDir()
+	var h1, h2 [32]byte
+	h1[0], h2[0] = 1, 2
+	cacheStore(dir, h1, 100, []byte("data-one")) // 8 bytes
+	cacheStore(dir, h2, 100, []byte("data-two")) // 8 bytes
+
+	p1 := filepath.Join(dir, cacheFileName(h1, 100))
+	p2 := filepath.Join(dir, cacheFileName(h2, 100))
+
+	now := time.Now()
+	// Both entries are ancient by mtime — with TTL enabled they'd both be
+	// removed by the time-based pass. TTL is disabled here (ttlDays=0), so
+	// only the capacity cap can be responsible for any eviction.
+	_ = os.Chtimes(p1, now.AddDate(-1, 0, 0), now.AddDate(-1, 0, 0))
+	_ = os.Chtimes(p2, now.AddDate(-1, 0, 0).Add(time.Hour), now.AddDate(-1, 0, 0).Add(time.Hour))
+
+	// Cap of 8 bytes: only the newer entry (p2) fits; the older (p1) must
+	// still be evicted despite ttlDays<=0 — the cap is not gated on TTL.
+	sweepCacheDirWithCap(dir, 0, now, 8)
+
+	if _, err := os.Stat(p1); !os.IsNotExist(err) {
+		t.Errorf("capacity cap must evict the oldest entry even when TTL is disabled, stat err=%v", err)
+	}
+	if _, err := os.Stat(p2); err != nil {
+		t.Errorf("p2 should survive within capacity: %v", err)
 	}
 }
 
@@ -808,6 +837,38 @@ func TestSweepCacheDirRemovesStrayTempFiles(t *testing.T) {
 
 	if _, err := os.Stat(stray); !os.IsNotExist(err) {
 		t.Errorf("a stale leftover .tmp- file from a crashed write should be cleaned up, stat err=%v", err)
+	}
+}
+
+func TestSweepCacheDirEvictsCapacityOverflow(t *testing.T) {
+	dir := t.TempDir()
+	var h1, h2, h3 [32]byte
+	h1[0], h2[0], h3[0] = 1, 2, 3
+	cacheStore(dir, h1, 100, []byte("data-one"))   // 8 bytes
+	cacheStore(dir, h2, 100, []byte("data-two"))   // 8 bytes
+	cacheStore(dir, h3, 100, []byte("data-three")) // 10 bytes
+
+	p1 := filepath.Join(dir, cacheFileName(h1, 100))
+	p2 := filepath.Join(dir, cacheFileName(h2, 100))
+	p3 := filepath.Join(dir, cacheFileName(h3, 100))
+
+	now := time.Now()
+	// h1 is oldest, h2 is middle, h3 is newest
+	_ = os.Chtimes(p1, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+	_ = os.Chtimes(p2, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
+	_ = os.Chtimes(p3, now.Add(-1*time.Hour), now.Add(-1*time.Hour))
+
+	// Cap of 18 bytes: h3 (10 bytes) + h2 (8 bytes) = 18 bytes. Oldest h1 (8 bytes) must be evicted.
+	sweepCacheDirWithCap(dir, 7, now, 18)
+
+	if _, err := os.Stat(p1); !os.IsNotExist(err) {
+		t.Errorf("oldest entry p1 should be evicted on capacity overflow, stat err=%v", err)
+	}
+	if _, err := os.Stat(p2); err != nil {
+		t.Errorf("p2 should survive within capacity: %v", err)
+	}
+	if _, err := os.Stat(p3); err != nil {
+		t.Errorf("p3 should survive within capacity: %v", err)
 	}
 }
 

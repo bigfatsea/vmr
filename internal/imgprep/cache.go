@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,13 +76,14 @@ func cacheStore(dir string, hash [32]byte, maxPx int, data []byte) {
 	}
 }
 
-// sweepState throttles the TTL sweep to at most once per calendar day per
-// cache directory — cheap enough that no dedicated ticker/goroutine is
-// worth the extra lifetime management, mirroring the audit package's
-// rotation-triggered housekeeping (internal/audit/housekeep.go), which is
-// event-triggered rather than timer-driven for the same reason. Keyed by
-// directory (not a single global flag) so tests using different t.TempDir()
-// cache dirs never contend on each other's throttle state.
+// sweepState throttles sweepCacheDir (TTL eviction plus the capacity cap) to
+// at most once per calendar day per cache directory — cheap enough that no
+// dedicated ticker/goroutine is worth the extra lifetime management,
+// mirroring the audit package's rotation-triggered housekeeping
+// (internal/audit/housekeep.go), which is event-triggered rather than
+// timer-driven for the same reason. Keyed by directory (not a single global
+// flag) so tests using different t.TempDir() cache dirs never contend on
+// each other's throttle state.
 var sweepState sync.Map // dir string -> *sweepEntry
 
 type sweepEntry struct {
@@ -107,25 +109,48 @@ func maybeSweepCache(dir string, ttlDays int, now time.Time) {
 	go sweepCacheDir(dir, ttlDays, now)
 }
 
+// defaultCacheCapBytes is the total size cap (50MB) for the image cache
+// directory. When the accumulated size of surviving cache entries exceeds
+// this bound, the oldest entries by mtime are evicted until the total size
+// is under the cap — independently of ttlDays below, since a user who
+// disables time-based eviction (kept-forever) is exactly the case that most
+// needs a disk-space backstop.
+const defaultCacheCapBytes int64 = 50 << 20
+
 // sweepCacheDir deletes cache entries whose mtime is older than ttlDays, plus
 // any stray ".tmp-" temp file left behind by a cacheStore that crashed
 // mid-write (cacheStore's rename is atomic, but a kill -9 between CreateTemp
-// and Rename leaks the temp file forever otherwise). Unlike audit's
-// housekeeping, cache filenames carry no date (they're content hashes), so
-// this is a single os.ReadDir followed by per-entry Info() — bounded by the
-// number of cached images, which in practice is small (distinct source
-// images actually seen, times the number of distinct maxPx values in use).
-// Best-effort throughout: an unreadable/unremovable entry is skipped, not
-// fatal. ttlDays<=0 disables the sweep (entries are kept forever).
+// and Rename leaks the temp file forever otherwise), and enforces
+// defaultCacheCapBytes by evicting the oldest entries once accumulated size
+// exceeds it. Best-effort throughout: an unreadable/unremovable entry is
+// skipped, not fatal. ttlDays<=0 disables only the time-based eviction
+// (entries are kept forever by mtime); the capacity cap still applies. Runs
+// at most once per calendar day per dir (maybeSweepCache's throttle), so the
+// cap is an eventually-enforced bound, not a real-time one — a burst of
+// distinct new images within a day can push the directory over 50MB until
+// the next triggered sweep catches up.
 func sweepCacheDir(dir string, ttlDays int, now time.Time) {
-	if ttlDays <= 0 {
-		return
-	}
+	sweepCacheDirWithCap(dir, ttlDays, now, defaultCacheCapBytes)
+}
+
+func sweepCacheDirWithCap(dir string, ttlDays int, now time.Time, capBytes int64) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return // most common cause: cache dir doesn't exist yet (nothing cached so far)
 	}
-	cutoff := now.AddDate(0, 0, -ttlDays)
+	ttlEnabled := ttlDays > 0
+	var cutoff time.Time
+	if ttlEnabled {
+		cutoff = now.AddDate(0, 0, -ttlDays)
+	}
+	type fileItem struct {
+		name  string
+		size  int64
+		mtime time.Time
+	}
+	var valid []fileItem
+	var totalBytes int64
+
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -138,8 +163,32 @@ func sweepCacheDir(dir string, ttlDays int, now time.Time) {
 		if err != nil {
 			continue
 		}
-		if info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(dir, name))
+		path := filepath.Join(dir, name)
+		if strings.Contains(name, ".tmp-") {
+			if ttlEnabled && info.ModTime().Before(cutoff) {
+				os.Remove(path)
+			}
+			continue
+		}
+		if ttlEnabled && info.ModTime().Before(cutoff) {
+			os.Remove(path)
+			continue
+		}
+		valid = append(valid, fileItem{name: name, size: info.Size(), mtime: info.ModTime()})
+		totalBytes += info.Size()
+	}
+
+	if capBytes > 0 && totalBytes > capBytes {
+		sort.Slice(valid, func(i, j int) bool {
+			return valid[i].mtime.Before(valid[j].mtime)
+		})
+		for _, f := range valid {
+			if totalBytes <= capBytes {
+				break
+			}
+			if err := os.Remove(filepath.Join(dir, f.name)); err == nil {
+				totalBytes -= f.size
+			}
 		}
 	}
 }
