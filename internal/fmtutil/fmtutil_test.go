@@ -65,6 +65,91 @@ func TestFmtPercent(t *testing.T) {
 	}
 }
 
+// TestFmtTokens locks the K/M/B thresholds and rounding for the dense
+// table-cell format — B5 converged internal/report's and internal/story's
+// independently-written fmtTokens onto this function; these cases pin the
+// exact boundary/rounding behavior neither package's own tests exercised
+// directly (only indirectly, through full-report/story golden output).
+func TestFmtTokens(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{5, "5"},
+		{999, "999"},
+		{1000, "1.0K"},
+		{1234, "1.2K"},
+		{999999, "1000.0K"},
+		{1_000_000, "1.00M"},
+		{1_500_000, "1.50M"},
+		{999_999_999, "1000.00M"},
+		{1_000_000_000, "1.00B"},
+		{1_500_000_000, "1.50B"},
+	}
+	for _, c := range cases {
+		if got := FmtTokens(c.n); got != c.want {
+			t.Errorf("FmtTokens(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
+// TestFmtTokensPlain locks the space-separated-unit format ("500 T", "1.2
+// KT") — deliberately no "B" tier (unlike FmtTokens): detail.go's per-request
+// estimate never approaches a billion tokens, so the extra tier was never
+// added here.
+func TestFmtTokensPlain(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 T"},
+		{5, "5 T"},
+		{999, "999 T"},
+		{1000, "1.0 KT"},
+		{1234, "1.2 KT"},
+		{999999, "1000.0 KT"},
+		{1_000_000, "1.0 MT"},
+		{1_500_000, "1.5 MT"},
+		{1_500_000_000, "1500.0 MT"},
+	}
+	for _, c := range cases {
+		if got := FmtTokensPlain(c.n); got != c.want {
+			t.Errorf("FmtTokensPlain(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
+// TestFmtTokensCompact locks the live-log format: always a "KT"/"MT" unit
+// (no bare-number tier below 1000, unlike FmtTokens/FmtTokensPlain), and 2
+// decimals below 1000 instead of K/M's 1 — at 1 decimal a value under 100
+// tokens would round to "0.0KT" and lose the number entirely.
+func TestFmtTokensCompact(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0.00KT"},
+		{5, "0.01KT"},
+		{500, "0.50KT"},
+		{999, "1.00KT"},
+		{1000, "1.0KT"},
+		{1234, "1.2KT"},
+		{999999, "1000.0KT"},
+		{1_000_000, "1.0MT"},
+		{1_500_000, "1.5MT"},
+		{1_500_000_000, "1500.0MT"},
+	}
+	for _, c := range cases {
+		if got := FmtTokensCompact(c.n); got != c.want {
+			t.Errorf("FmtTokensCompact(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 // TestCapStrRuneSafe locks in that CapStr's byte cap never cuts through a
 // UTF-8 sequence — Chinese/emoji session titles and compaction needles near
 // the cap must stay valid UTF-8. Moved from internal/taskseg, where CapStr
