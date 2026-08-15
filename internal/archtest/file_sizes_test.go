@@ -34,6 +34,14 @@ var fileLineLimits = map[string]int{
 	// nearly double the file's actual size.
 	"internal/report/aggregate.go":  600,
 	"internal/report/render_doc.go": 400,
+	// The two files B4 split out of aggregate.go — ingest.go (per-bucket
+	// TrafficStats/Row/HourRow/EndpointRow/ClientRow/WorkloadRow/SessionRow
+	// accumulation) and recextract.go (per-record buildRec2 extraction) —
+	// registered at the same time as the split, same ~15-20% first-time
+	// headroom convention jsonscan's scan.go/rewrite.go used below rather
+	// than left budget-less like aggregate.go was before its own review.
+	"internal/report/ingest.go":     310,
+	"internal/report/recextract.go": 310,
 	// No prior split here — config.go is at 591 lines today. The budget is
 	// a tripwire against the same unnoticed growth pattern that hit
 	// router.go, not a statement that 591 is already too big: if it crosses

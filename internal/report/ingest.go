@@ -220,27 +220,24 @@ func (e *EndpointRow) IngestRequest(rc *rec2) {
 	}
 }
 
-// Ingest accumulates one record into a by-client_key_tag bucket.
+// Ingest accumulates one record into a by-client_key_tag bucket. ttftMS/
+// streamOK are deliberately NOT collected here (unlike Row/HourRow/
+// EndpointRow/SessionRow): ClientRow has never exposed a TTFT/stream
+// percentile, so collecting the raw samples would only grow-then-discard a
+// slice on every streaming/timed record for no reader.
 func (c *ClientRow) Ingest(rc *rec2) {
 	c.TrafficStats.Ingest(rc)
 	if rc.usageOK {
 		c.inToks = append(c.inToks, rc.usage.In)
 		c.outToks = append(c.outToks, rc.usage.Out)
 	}
-	if rc.ttftMS > 0 {
-		c.ttfts = append(c.ttfts, rc.ttftMS)
-	}
-	if rc.streamOK {
-		c.streamMS = append(c.streamMS, rc.streamMS)
-	}
 }
 
-// Ingest accumulates one record into a workload-class bucket.
+// Ingest accumulates one record into a workload-class bucket. streamOK is
+// deliberately NOT collected here — see ClientRow.Ingest's comment; same
+// reasoning, WorkloadRow has never exposed a stream percentile either.
 func (w *WorkloadRow) Ingest(rc *rec2) {
 	w.TrafficStats.Ingest(rc)
-	if rc.streamOK {
-		w.streamMS = append(w.streamMS, rc.streamMS)
-	}
 	w.ToolCalls += len(rc.toolCalls)
 	if len(rc.toolCalls) > 0 {
 		w.RequestsWithToolCalls++

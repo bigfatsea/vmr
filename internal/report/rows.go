@@ -343,7 +343,7 @@ type ClientRow struct {
 	// H - cost (only when pricing configured)
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
 
-	ttfts, streamMS, inToks, outToks []int64
+	inToks, outToks []int64
 }
 
 // WorkloadRow splits traffic by workload class: A+B+C+E(tool_call_rate).
@@ -355,8 +355,6 @@ type WorkloadRow struct {
 	ToolCalls             int     `json:"tool_calls,omitempty"`
 	RequestsWithToolCalls int     `json:"requests_with_tool_calls,omitempty"`
 	ToolCallRate          float64 `json:"tool_call_rate,omitempty"`
-
-	streamMS []int64
 }
 
 // SessionRow is the per-session drill-down (§6 Sessions & Tasks): no latency columns in

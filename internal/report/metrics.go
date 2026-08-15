@@ -73,10 +73,14 @@ func round2(f float64) float64 {
 }
 
 // measuresInput is the raw accumulation finishMeasures turns into
-// percentiles/freshTokens/cacheEff. TrafficStats.Finish (below) is now the
-// primary caller, for the 5 Row types that embed TrafficStats (see rows.go);
-// EndpointRow's finishEndpoint still calls this directly, since EndpointRow
-// deliberately doesn't embed TrafficStats (see that type's doc comment).
+// percentiles/freshTokens/cacheEff. Only two callers left: TrafficStats.Finish
+// (below), for the dur-percentile + token-derived fields the 5 embedding Row
+// types share (see rows.go), and finishEndpoint, the one bucket that still
+// needs all five fields at once (EndpointRow deliberately doesn't embed
+// TrafficStats — see that type's doc comment). finishRow/finishHour/
+// finishSession call percentiles(ttfts)/percentiles(streamMS) directly
+// instead of routing through here — building a measuresInput just to read
+// two of its six fields back out was worse than calling the primitive.
 type measuresInput struct {
 	durs, ttfts, streamMS                        []int64
 	tokensIn, tokensInCached, tokensInCacheWrite int64
@@ -120,9 +124,8 @@ func (s *TrafficStats) Finish() {
 // finishRow computes true percentiles + derived fields for a full Row.
 func finishRow(r *Row) {
 	r.TrafficStats.Finish()
-	m := finishMeasures(measuresInput{ttfts: r.ttfts, streamMS: r.streamMS})
-	r.TTFTMSP50, r.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
-	r.StreamMSP50, r.StreamMSP95 = m.streamMSP50, m.streamMSP95
+	r.TTFTMSP50, r.TTFTMSP95 = percentiles(r.ttfts)
+	r.StreamMSP50, r.StreamMSP95 = percentiles(r.streamMS)
 	if r.Requests > 0 {
 		r.SuccessRate = round2(float64(r.OK) / float64(r.Requests))
 	}
@@ -146,9 +149,8 @@ func finishRow(r *Row) {
 
 func finishHour(h *HourRow) {
 	h.TrafficStats.Finish()
-	m := finishMeasures(measuresInput{ttfts: h.ttfts, streamMS: h.streamMS})
-	h.TTFTMSP50, h.TTFTMSP95 = m.ttftMSP50, m.ttftMSP95
-	h.StreamMSP95 = m.streamMSP95
+	h.TTFTMSP50, h.TTFTMSP95 = percentiles(h.ttfts)
+	_, h.StreamMSP95 = percentiles(h.streamMS)
 	h.ttfts, h.streamMS = nil, nil
 }
 
@@ -180,16 +182,12 @@ func finishEndpoint(e *EndpointRow) {
 
 func finishClient(c *ClientRow) {
 	c.TrafficStats.Finish()
-	// ttfts/streamMS are collected (Ingest, ingest.go) but ClientRow has
-	// never surfaced a percentile from either — unchanged from pre-B4
-	// behavior, just clearing the raw samples here instead of computing and
-	// discarding them.
 	c.InTokP50, c.InTokP95 = percentiles(c.inToks)
 	c.OutTokP50, c.OutTokP95 = percentiles(c.outToks)
 	if c.Requests > 0 {
 		c.SuccessRate = round2(float64(c.OK) / float64(c.Requests))
 	}
-	c.ttfts, c.streamMS, c.inToks, c.outToks = nil, nil, nil, nil
+	c.inToks, c.outToks = nil, nil
 }
 
 func finishWorkload(w *WorkloadRow) {
@@ -197,13 +195,11 @@ func finishWorkload(w *WorkloadRow) {
 	if w.Requests > 0 {
 		w.ToolCallRate = round2(float64(w.RequestsWithToolCalls) / float64(w.Requests))
 	}
-	w.streamMS = nil
 }
 
 func finishSession(s *SessionRow, info *SessionInfo) {
 	s.TrafficStats.Finish()
-	m := finishMeasures(measuresInput{ttfts: s.ttfts})
-	s.TTFTMSP95 = m.ttftMSP95
+	_, s.TTFTMSP95 = percentiles(s.ttfts)
 	// context_growth: last-turn tokens_in / first-turn tokens_in (ts order).
 	// Safe to compare across the whole session since group() now splits a
 	// session at every Contract/Fork edit (one SessionInfo per
