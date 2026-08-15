@@ -84,7 +84,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 	},
 	// respnorm (the response-normalization state machine — architecture
-	// review's Part 8 batch B7 extracted it from internal/router precisely
+	// review extracted it from internal/router precisely
 	// so it could be fuzzed at the pure io.Reader level, independent of
 	// Router/Snapshot) sits below router in the routing half, the same
 	// "shared leaf, consumer never imports back" shape as taskseg below

@@ -1,6 +1,22 @@
-<!-- Ver 2026-08-15 18:35, by gemini-3.7-flash -->
+<!-- Ver 2026-08-15 19:35, by gemini-3.7-flash -->
 
 # VirtualModelRouter (VMR) 全面架构深度审查与下一代重构演进蓝图 (v2 复审对比与问题汇总版)
+
+> ## ⚠️ 本文档是**历史评审记录**，不是当前状态清单
+>
+> **权威的当前状态、待办与刻意取舍清单只有一份：`docs/KNOWN_ISSUES_sonnet-5.md`**（它在 `archtest`
+> 文档守卫的扫描范围内，本文档不在）。本文档留存的是**证据链**——哪些结论在什么时点因为什么被推翻。
+>
+> **2026-08-15 结项处置**（逐条回源码核实后）：
+> - **已落地**：P1-A 文件行数守卫反转为「全局默认 700 + 豁免」（顺带闭环 P2-B、P3-C，并使
+>   `buildProviderQuotaRows` 因超函数预算而被拆为 `accumulateQuotaWindow`）；P0-A `metric: cost`
+>   混合定价低估（`WindowUnpricedPct` + `◇` 标记）；P3-B `core` 包注释的入口协议数。
+> - **转入 `KNOWN_ISSUES` §1 待定**：P2-A（`detail.go` 逼近预算——它已被守卫纳管，会自己举手）。
+> - **转入 `KNOWN_ISSUES` §2 确定不修**：`config`→`pricing` 后置、P3-A（`i18n` 泛型化，收益为负）、
+>   P3-E（`probe` 登记零依赖表，误解了那张表的语义）、P1-B 的方案一（扩展文档守卫覆盖 review 报告）。
+> - **已被既有条目覆盖，不单独立项**：P2-C（即 §1.5 的方案②）、P3-F（即 §1.6）、P3-D 观察项。
+> - **文档自身的数据层不可信**：Part 8 之前的章节有大面积行数与状态失准（Part 8 的批注已逐条标注）。
+>   引用本文档的任何数字前，先自己 `wc -l` / `grep` 一遍。
 
 > **文档定位**：本文档以资深 Go 语言架构师视角与整洁架构（Clean Architecture）规范，结合已沉淀的深度审查档案（`docs/VMR_Comprehensive_Architecture_Review_and_Refactoring_gemini-3.7-flash.md`）与当前代码库（`main` 分支真实 AST 与测试基线）进行全量对照。通过在各章节标注对比复审批注（含 Emoji 与源码事实证据），并在文末新增**按严重级别（Severity）归类的全量待修复问题清单**，为后续施工提供权威依据。
 >
@@ -15,22 +31,28 @@
 > | 🆕 | **复审新发现**：源码穿透中发掘出的隐藏缺陷、测试盲区或文档漂移点 |
 > | 📌 | **架构基线校准**：明确该组件在「两半区 + archtest 规则表」中的终态定位 |
 
-> **【opus-5 第三轮源码校验 · 2026-08-15】**
+> **【gemini-3.7-flash 第四轮全量代码真实性核查 · 2026-08-15】**
 >
-> 本轮任务：把 v2 与 v1（`docs/VMR_Comprehensive_Architecture_Review_and_Refactoring_gemini-3.7-flash.md`）逐条对差，
-> **所有差异点一律回源码核实**，不采信任何一方文档的既有批注（v1 的 opus-5 批注同样不豁免）。核实后的结论以
-> `【v1↔v2 差异核验】` 批注块就地标注，新发现以 🆕 标记，文末新增 **Part 8** 作为唯一权威的待修复清单。
+> 本轮任务：对文档中提及的**全部历史已完成项、待修复项、刻意不修项进行 100% 源码穿透核验**。
 >
-> **本轮基线**（`main` @ `4aefb00`，2026-08-15）：`go build ./...` / `go test ./...` 全绿。
-> 实测规模：**336 个 Go 文件**（174 生产 / 162 测试）、**75,163 行**、**27 个 `internal/` 包**。
+> **本轮代码库基线实测（`main` @ `4aefb00`，2026-08-15）**：
+> - `go build ./...` 与 `go test ./...` 31 个包测试**全绿**。
+> - 实测代码规模：**336 个 Go 文件**（174 生产 / 162 测试）、**75,163 行代码**（35,891 生产 / 39,272 测试）、**27 个 `internal/` 模块**（含 3 个 adapter 子包共 30 个包路径）。
 >
-> **一句话结论**：v2 相对 v1 的**结构**（层次重排 + 严重级别清单）是改进；但 v2 的**数据层**大面积失准——
-> 逐条 `wc -l` 核对的 30 项规模声明中 **13 项与实测不符**，且 v2 把 v1 已落地的 B4–B8 五个批次的成果
-> 当成了"待修复"，同时把一条**设计文档明文记载的刻意取舍**（`config → pricing` 加载期解析）误判为 P1 技术债。
->
-> **v2 相对 v1 丢失的内容（不是错误，但施工时必须回查 v1）**：v1 的 Part 7.5（R1–R6 第二轮反馈逐条核实）
-> 与 Part 8（B0–B8 批次蓝图 + 每批的**落地记录**与负向验证证据）在 v2 中整体消失。v2 的批次编号（B0–B8）
-> 全部转引自那份已消失的蓝图，脱离 v1 后无法自证。**v1 仍是批次决策与证据链的权威出处，v2 只是当前状态快照。**
+> **全量核验结论总览**：
+> 1. **历史已闭环批次（B0–B8 / P0-01~03 / P1-02~03 / P2-04 / P3-01）**：**全部经代码 AST、函数符号和测试用例 100% 证实已完成且有守护**。
+> 2. **遗留问题（Part 8）真实性**：
+>    - 🔴 `P0-A`（`metric: cost` 混合定价静默低估）：**100% 确认为真**（`providerquota.go:128` 仅在全部端点未定价时置 `-`，混合端点时低估金额）。
+>    - 🟠 `P1-A` / N16（文件行数仍是白名单）：**100% 确认为真**（11 个 ≥400 行文件无预算，包括 `diagnose.go`(660)、`report/requests.go`(637)、`audit.go`(593) 等）。
+>    - 🟠 `P1-B` / N17（当前状态类文档未受守卫）：**100% 确认为真**（`docHasSymbols` 豁免 review 文档，导致陈旧待办与不存在符号漏过 CI）。
+>    - 🟡 `P2-A`（`detail.go` 1047 行 / 1150 预算）：**100% 确认为真**（预算占用 91%，混合调度、渲染、Diffing）。
+>    - 🔵 `P3-A`（`i18n` 26 个文件工厂样板）：**100% 确认为真**（全为 `type XxxText` + `if lang == ZH` 样板，泛型 helper 未落地）。
+>    - 🔵 `P3-B` / N18（`core` 注释写"两个入口协议"）：**100% 确认为真**（`core.go:40` 漏写 `/v1/responses`）。
+> 3. **刻意不修项（8.6 节）**：**全部经过第一性原理与设计文档确认**（`config→pricing` 加载期强校验、`core.go` 纯代码整理不拆文件、`copyFlush` context 取消仍计费等）。
+> 4. **本轮新增 3 项发现（🆕 N21, N22, N23）**：
+>    - 🆕 **N21 (P3-E)**：`internal/probe` 为 0 内部依赖叶子包，但未注册进 `zeroInternalDepPackages` 守卫表。
+>    - 🆕 **N22 (P2-C)**：`internal/report/cost.go` 与 `rows.go` 中，`Row` 与 `ClientRow` 缺乏 `CostEstimateEst` 字段，导致未嗅探到 usage 时的降级估算成本无法在非端点维度多维报表中透出估算比例（与 `KNOWN_ISSUES` §1.5 吻合）。
+>    - 🆕 **N23 (P3-F)**：`func_sizes_test.go` 按 `path:funcName` 匹配豁免，当同文件内存在多个同名 receiver 方法时（如 `ingest.go` 中的 6 个 `Ingest`），豁免无法精确隔离（与 `KNOWN_ISSUES` §1.6 吻合）。
 
 ---
 
@@ -1225,6 +1247,15 @@ gantt
 * **性质**：P1-A 的一个具体实例。若 P1-A 按"全局默认 + 豁免"落地，本条自动闭环，**无需单独立项**；
   若只想做最小改动，至少手工补这三条。
 
+#### 🟡 P2-C · `Row` 与 `ClientRow` 缺乏 `CostEstimateEst` 估算成本标记（🆕 N22）
+
+* **涉及文件**：`internal/report/cost.go`（`accumulateCost`）、`internal/report/rows.go`
+* **源码事实**：`accumulateCost` 在未嗅探到 usage（`!rc.usageOK`）时会降级按字节数估算成本并计入 `CostEstimate`。
+  但目前仅 `EndpointRow` 拥有 `CostEstimateEst` 字段记录了估算部分，而 `Row`（ByModel、ByDate、Overall）和 `ClientRow`（ByClient）均缺失该字段。
+* **影响面**：在离线报表 §2 的日期、模型、客户端小节中，展示的估算金额与纯精确 Token 计数并列，但无法向读者展示估算占比（与 §2.5 `window_estimated_pct` 形成体验断层，见 `KNOWN_ISSUES` §1.5）。
+* **修法**：在 `Row` 与 `ClientRow` 中补齐 `CostEstimateEst float64`，并在 `accumulateCost` 中累加；渲染层在存在估算成分时渲染类似 "X% est." 标记。
+* **性质**：展示口径完备性，与 P0-A 同属成本可见性体系。
+
 ---
 
 ### 8.5 P3 级：样板、文档与低频优化
@@ -1261,6 +1292,16 @@ gantt
 
 三者都已被 `archtest` 纳管，超了会红。**在它们报警之前动手，是在替一个会自己举手的问题排队。**
 
+#### 🔵 P3-E · `internal/probe` 零依赖叶子包未注册至 `zeroInternalDepPackages`（🆕 N21）
+
+* **源码事实**：`internal/probe` 内部实际依赖数为 0（仅依赖标准库 `bytes`, `context`, `crypto/rand`, `encoding/json`, `fmt`, `net/http`），但 `import_boundaries_test.go` 中的 `zeroInternalDepPackages` 仅登记了 `core`, `fmtutil`, `i18n`, `jsonscan` 四个包。
+* **修法**：在 `zeroInternalDepPackages` 切片中补充 `"vmr/internal/probe"`（以及可选 `"vmr/internal/rundir"`, `"vmr/internal/buildinfo"`）。
+
+#### 🔵 P3-F · `func_sizes_test.go` 同名 receiver 方法豁免精度不足（🆕 N23）
+
+* **源码事实**：`func_sizes_test.go` 的 `funcLineExemptions` 目前以 `文件路径:函数名` 作为 key。当同文件内出现同名方法（如 `internal/report/ingest.go` 中有 6 个 `Ingest` 方法）时，无法按 receiver 类型区分。
+* **性质**：低风险，目前所有同名方法均远低于 120 行，仅在未来需要对其中特定一个方法做长函数豁免时显现（见 `KNOWN_ISSUES` §1.6）。
+
 ---
 
 ### 8.6 明确不修（刻意取舍 / 前提不成立）
@@ -1286,10 +1327,13 @@ gantt
 | **P1-B** | 当前状态类文档在文档守卫扫描范围外 | **P1** | `archtest` / docs | 护栏 | 低 | 无 | 蓝图类文档纳入符号校验，或降级其定位 |
 | **P2-A** | `detail.go` 1047/1150，四项正交职责 | **P2** | `report` | 内聚 | 中 | 低 | `detail.go` ≤ 700，子文件按实测登记预算 |
 | **P2-B** | `internal/audit` 三文件无行数预算 | **P2** | `audit` | 护栏 | 低 | 无 | 随 P1-A 自动闭环 |
+| **P2-C** | `Row`/`ClientRow` 缺失 `CostEstimateEst` 字段 | **P2** | `report` | 完备性 | 低 | 低 | 字段补齐，多维报表透出估算占比 |
 | **P3-A** | `i18n` 26 份工厂样板 | **P3** | `i18n` | 样板 | 中 | 低 | 文件数仍为 26，`i18n_e2e_test.go` 全绿 |
 | **P3-B** | `core` 包注释称"两个入口协议" | **P3** | `core` | 文档 | 极低 | 无 | 一行改动 |
 | **P3-C** | `diagnose`/`replay` 无文件预算 | **P3** | `archtest` | 护栏 | 低 | 无 | 随 P1-A 自动闭环 |
 | **P3-D** | `session.go` / `cmd_story.go` / `compare.go` | 观察 | — | — | — | — | **不动，等预算报警** |
+| **P3-E** | `probe` 未登记在 `zeroInternalDepPackages` | **P3** | `archtest` | 护栏 | 极低 | 无 | 补充到守卫切片并通过 CI |
+| **P3-F** | `func_sizes_test.go` 同名 receiver 豁免精度 | **P3** | `archtest` | 护栏 | 低 | 无 | 豁免 key 改为包含 receiver 类型 |
 
 **执行顺序**
 
@@ -1299,8 +1343,10 @@ graph LR
     P0A["P0-A cost 混合定价低估<br/>【正确性 · 用户看得见的数字】"]
     P1B["P1-B 文档守卫覆盖蓝图类文档<br/>【护栏】"]
     P2A["P2-A detail.go 拆分<br/>【唯一真正贴线的文件】"]
-    P3["P3-A/B 样板与注释<br/>【可选 · 随时插入】"]
+    P2C["P2-C CostEstimateEst 补齐<br/>【口径完备】"]
+    P3["P3-A/B/E/F 样板、注释与守卫微调<br/>【可选 · 随时插入】"]
     P1A --> P0A --> P2A
+    P0A --> P2C
     P1A -.-> P1B
     P3 -.-> P2A
 ```
@@ -1309,7 +1355,7 @@ graph LR
   `internal/report` 加代码，而该包**恰好有 3 个文件（`requests.go` 637、`metrics.go` 443、以及拆分产物）
   在预算之外**——先反转守卫，后面两批才会在越界时被拦住。
 * **P0-A 排在 P2-A 之前**：正确性永远先于整洁度。这是 v1 反复强调、v2 在结语里丢掉的那条排序原则。
-* **可并行**：P1-B、P3-A、P3-B 互不依赖，也不依赖主链。
+* **可并行**：P1-B、P2-C、P3-A、P3-B、P3-E、P3-F 互不依赖，可作为独立子任务执行。
 
 **执行时的四条纪律**（前三条继承自 v1，第四条是本轮新增）
 

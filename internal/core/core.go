@@ -9,9 +9,8 @@
 // (alongside fmtutil, jsonscan, and i18n, archtest-enforced) that both halves
 // are free to import, so it's the primary place shared domain types go.
 //
-// Admission rule (Part 8 batch B5 of the architecture review): core holds
-// only types two or more packages spanning different halves must agree on
-// the shape of — Endpoint, CanonicalRequest, RequestFacts, ErrorClass,
+// Admission rule: core holds only types two or more packages spanning
+// different halves must agree on the shape of — Endpoint, CanonicalRequest, RequestFacts, ErrorClass,
 // Limit, TokenWeights, Rate, PricingSpec, QuotaSpec. Anything with behavior
 // belongs in the package that owns that behavior, not here by default. The
 // exported functions listed above are the named exception to that rule, not
@@ -37,11 +36,11 @@ import (
 	"time"
 )
 
-// CanonicalRequest is the routing view of a chat request. Both supported
-// ingress protocols (OpenAI chat completions, Anthropic messages) carry
-// top-level "model" and "stream" fields; only those are parsed. Raw keeps
-// every other byte untouched so unknown upstream parameters pass through
-// unchanged — VMR never converts between protocols.
+// CanonicalRequest is the routing view of a chat request. All three supported
+// ingress protocols (OpenAI chat completions, Anthropic messages, OpenAI
+// responses) carry top-level "model" and "stream" fields; only those are
+// parsed. Raw keeps every other byte untouched so unknown upstream
+// parameters pass through unchanged — VMR never converts between protocols.
 type CanonicalRequest struct {
 	Model  string
 	Stream bool

@@ -550,7 +550,7 @@ func TestRespStream_NoDoubleDone(t *testing.T) {
 
 // TestRespStream_DoneAppendNotDuplicatedAcrossFragmentedEventSep locks in a
 // bug FuzzStream's fragmentation-invariance check found (architecture
-// review's Part 8 batch B7 follow-up, testdata/fuzz/FuzzStream/
+// testdata/fuzz/FuzzStream/
 // d2f91c0fe0f7d766): a trailing "\n\n\n" (a complete SSE event separator
 // plus one extra newline) split across two 1-byte Read calls used to fool
 // tailNL into thinking the stream did NOT end with a separator — the first

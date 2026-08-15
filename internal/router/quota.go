@@ -66,8 +66,8 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream
 // has always had.
 //
 // metric: cost prices raw through ep.PricingRate (pricing.EffectiveRate — a
-// deterministic function of the resolved override chain; no time dimension
-// since P0-A dropped promotional/off-peak windows) and writes the resulting
+// deterministic function of the resolved override chain, with no time
+// dimension) and writes the resulting
 // $ amount into Counters.Cost — computed once, here, and never recomputed
 // later from raw tokens (the price table itself can still change across a
 // config reload, which produces a new ep.PricingRate — recomputing from raw

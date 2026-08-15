@@ -86,10 +86,9 @@ type Meta struct {
 	QuotaInputOutsideLogDir bool `json:"quota_input_outside_log_dir,omitempty"`
 }
 
-// TrafficStats is the token/latency/volume core that Row, HourRow, ClientRow,
-// WorkloadRow, and SessionRow all accumulate the same way — extracted so that
-// "6 Row types share a field core but no shared type" (the architecture
-// review's R3 finding) stops meaning 5 near-identical accumulation closures.
+// TrafficStats is the token/latency/volume core Row, HourRow, ClientRow,
+// WorkloadRow, and SessionRow all accumulate the same way — one shared type
+// instead of 5 near-identical accumulation closures.
 // EndpointRow deliberately does NOT embed this: its own Requests/TokensIn/
 // TokensOut/TokensInFresh are `omitempty` where these 5 types are not — an
 // endpoint can have attempts with zero SERVED requests, a distinction this
@@ -105,23 +104,9 @@ type Meta struct {
 // collects raw ttfts but never surfaces a percentile from them) for a shared
 // field set to be honest.
 //
-// Embedding this changes a handful of existing types' JSON zero-value
-// shape, not just their non-zero values — Go's encoding/json flattens an
-// embedded struct using ITS OWN tags, so 5 independently-evolved field sets
-// had to converge on one omitempty convention each. Every such delta:
-//   - CacheEfficiency: ClientRow/WorkloadRow gain omitempty (previously
-//     always rendered "cache_efficiency":0; Row/HourRow/SessionRow already
-//     had it).
-//   - TokensInCached: SessionRow loses omitempty (previously omitted at 0,
-//     now always rendered like the other 4).
-//   - OK/Errors: SessionRow loses omitempty (always rendered now).
-//   - New fields with real values where a type had none before: TokensReasoning
-//     (HourRow/WorkloadRow/SessionRow), DurMSP50 + SlowRequests (SessionRow),
-//     OK + Errors (WorkloadRow — it counted neither before, and inherits the
-//     core's no-omitempty convention, so a workload row now always carries
-//     both).
-//
-// See CHANGELOG.md's B4 entry for the same list from a consumer's viewpoint.
+// Note for anyone changing a tag here: encoding/json flattens an embedded
+// struct using ITS OWN tags, so every omitempty decision below applies to all
+// 5 embedding types at once and changes their emitted JSON shape together.
 type TrafficStats struct {
 	Requests int `json:"requests"`
 	OK       int `json:"ok"`
@@ -748,6 +733,24 @@ type ProviderQuotaRow struct {
 	// — it is indistinguishable from genuinely lower consumption — and it was
 	// the common one.
 	WindowEstimatedPct float64 `json:"window_estimated_pct,omitempty"`
+
+	// WindowUnpricedPct is the share of this account's requests that
+	// WindowConsumed leaves out entirely because no rate resolved for their
+	// endpoint (metric: cost only). WindowEstimatedPct's sibling one step
+	// further out: that one is "priced, but from a degraded estimate", this
+	// one is "not priced at all, so not in the number". Both exist because
+	// WindowConsumed's own guard is all-or-nothing — one unpriced endpoint
+	// among several priced ones rendered a precise, systematically-low figure
+	// that reads like genuinely lower spend.
+	//
+	// In REQUESTS, not currency, deliberately: no rate existing is precisely
+	// why these rows are missing, so a dollar figure would be invented.
+	//
+	// Normally 0 — config.validate already requires a metric: cost account's
+	// configured models to price completely. It goes non-zero when the audit
+	// log outruns the config (a model since renamed or dropped from models:)
+	// or on a legacy "/"-joined label splitEndpointProviderModel won't parse.
+	WindowUnpricedPct float64 `json:"window_unpriced_pct,omitempty"`
 
 	// WindowNoOverlap is true when this report run's audit-log
 	// coverage ([Meta.From, Meta.To]) and this account's current billing

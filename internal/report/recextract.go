@@ -2,9 +2,8 @@
 
 // Per-record extraction and the small standalone builders that read
 // SessionAnalysis after the fact (buildCompactions/buildTools) — split out
-// of aggregate.go (Part 8 batch B4) purely to keep that file focused on
-// orchestration; no behavior change, buildRec2 remains the single place
-// that joins an audit.Record to its ReqInfo into a rec2.
+// of aggregate.go to keep that file focused on orchestration. buildRec2 is
+// the single place that joins an audit.Record to its ReqInfo into a rec2.
 package report
 
 import (

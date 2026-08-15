@@ -11,7 +11,7 @@
 // move, no behavior change: respnorm.go and minimax.go together are
 // byte-for-byte the same logic that lived in one file before that first
 // split, and moved again (with router.go/responsefix.go renamed to
-// respnorm.go/minimax.go) into this standalone package in Part 8 batch B7.
+// respnorm.go/minimax.go) into this standalone package.
 package respnorm
 
 import (

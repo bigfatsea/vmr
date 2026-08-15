@@ -51,9 +51,9 @@ func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T
 // is the precision fix: the router charges PER REQUEST with an exact
 // multiplier (no rounding — see quota.Counters' doc comment), so its real
 // total for N requests at a non-integer multiplier is exactly N*mult. 19
-// requests at 5.5x: 19*5.5=104.5 — not 114 (the pre-2026-08-14 per-charge
-// ceil(5.5)=6 behavior) and not 105 (ceil(19*5.5), the old aggregate-then-
-// ceil formula this test also used to guard against).
+// requests at 5.5x: 19*5.5=104.5 — not 114 (per-charge ceil(5.5)=6) and not
+// 105 (ceil(19*5.5), aggregate-then-ceil). Both are rounding formulas this
+// has to stay clear of.
 func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatchesRouter(t *testing.T) {
 	lim := requestsLimit(100000)
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"deepseek-v4-pro": 5.5}}
@@ -488,5 +488,65 @@ func TestBuildProviderQuotaRows_SortsLiveFirstByPctDesc_ThenNameTieBreak(t *test
 		if got[i] != want[i] {
 			t.Fatalf("sort order = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_MixedPricedAndUnpricedIsFlagged is the
+// two tests above's failure on the unresolved-rate axis instead of the
+// degraded-usage one: WindowConsumed's "-" guard only fires when NOTHING
+// priced, so this rendered a precise $3.00 with 40 requests invisible.
+func TestBuildProviderQuotaRows_CostMetric_MixedPricedAndUnpricedIsFlagged(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	priced := 3.0
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m1", Requests: 60, CostEstimate: &priced},
+		{Endpoint: "openai:acct1:m2", Requests: 40}, // no rate resolved — CostEstimate nil
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 3.0 {
+		t.Fatalf("WindowConsumed = %v, want 3.0 (only the priced endpoint can be valued)", derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowUnpricedPct != 40 {
+		t.Errorf("WindowUnpricedPct = %v, want 40 (40 of 100 requests are absent from that 3.0)", rows[0].WindowUnpricedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged guards the
+// other direction: config.validate already forces every configured model to
+// price, so this is the normal report — a false positive would stamp a "data
+// is missing" warning on a healthy one.
+func TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	a, b := 1.0, 2.0
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m1", Requests: 10, CostEstimate: &a},
+		{Endpoint: "openai:acct1:m2", Requests: 10, CostEstimate: &b},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowUnpricedPct != 0 {
+		t.Errorf("WindowUnpricedPct = %v, want 0 (every endpoint priced)", rows[0].WindowUnpricedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct pins the
+// two guards' interaction: nothing priced already renders "-", and "100%
+// missing" beside it is noise. ◇ is for a number that exists but is short.
+func TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m1", Requests: 25},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed != nil {
+		t.Fatalf("WindowConsumed = %v, want nil (traffic existed, none of it priced)", derefOrNil(rows[0].WindowConsumed))
+	}
+	if rows[0].WindowUnpricedPct != 0 {
+		t.Errorf("WindowUnpricedPct = %v, want 0 — the nil WindowConsumed already says everything", rows[0].WindowUnpricedPct)
 	}
 }

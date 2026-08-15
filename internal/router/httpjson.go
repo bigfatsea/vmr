@@ -10,7 +10,7 @@ import (
 // WriteJSON writes v as the JSON response body with the given status.
 // Shared by router and server (which already depends on router) so every
 // JSON response (success or error) goes through one encoding path. Moved
-// from internal/core in Part 8 batch B5: response writing is routing-half
+// from internal/core: response writing is routing-half
 // behavior, not a shared type both halves need — see core's package
 // comment for the admission rule this follows.
 func WriteJSON(w http.ResponseWriter, status int, v any) {

@@ -3,86 +3,63 @@ package archtest
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
 
-// fileLineLimits pins a finding from an architecture review: router.go had
-// grown to 948 lines against the design doc's own stated ~550-line budget
-// ("若主流程显著变大，说明抽象错了"), and nobody noticed because the budget
-// only ever lived in a comment. A file split
-// (snapshot.go/limiter.go/transport.go/logfmt.go) brought it back to 538.
-// The limit here is set with headroom above that real post-split number,
-// not at the design doc's original round figure — the point is catching
-// regrowth back toward 948, not fighting over every line.
-var fileLineLimits = map[string]int{
+// defaultFileLineLimit bounds every production file under funcBudgetRoots
+// (func_sizes_test.go) that isn't exempted below.
+//
+// A global default rather than the whitelist this used to be, for the reason
+// func_sizes_test.go already gives for functions: a whitelist only constrains
+// what someone remembered to register. Under the old one, 11 production files
+// at 400+ lines had no budget at all while a registered file went red for a
+// single added line — the guard punished the places already cleaned up.
+//
+// 700 comes from the real distribution (169 files; p50 131, p90 503) and was
+// chosen so every file already over it was one this table had registered
+// anyway. Tighten it once the exemption list is shorter, not before.
+const defaultFileLineLimit = 700
+
+// fileLineExemptions overrides the default in EITHER direction. Most entries
+// are tighter than 700: they are tripwires on files a review already split
+// once, and the point is that they cannot drift back up.
+//
+// What this table exists for: router.go once grew to 948 lines against a
+// budget that only ever lived in a design-doc comment, and nobody noticed. A
+// limit is set with headroom over a file's real post-split size — the point
+// is catching regrowth, not fighting over every line.
+var fileLineExemptions = map[string]int{
+	// Convention for every entry: ~15% headroom over the file's real size when
+	// the budget was set — a paragraph's worth of room, not an invitation to
+	// regrow. When one trips, split the file and re-baseline on the result;
+	// raising the number in place is what the failure message tells you not to
+	// do. Only per-entry facts that aren't that convention are noted below.
 	"internal/router/router.go": 700,
-	// internal/report's two largest files, budgeted after the same kind of
-	// split: the renderer used to be one 1053-line aggregate_render.go and
-	// is now render_doc.go (running order + shared table primitive) plus one
-	// section_*.go per numbered section. The budget is what keeps a new
-	// report section arriving as a new file rather than as another 90 lines
-	// appended to whichever file is already the biggest.
-	//
-	// aggregate.go's 1000 dated from before Part 8 batch B4 (TrafficStats
-	// composition + buildInternal decomposition): it was 1015 lines with a
-	// single 625-line buildInternal, and is now 503 with buildInternal at
-	// ~25 (the accumulation half moved to ingest.go, per-record extraction
-	// to recextract.go). Retightened to the same ~15% headroom convention
-	// as the rest of this table instead of leaving 1000 as a stale ceiling
-	// nearly double the file's actual size.
+
+	// render_doc.go's budget is what keeps a new report section arriving as a
+	// new section_*.go rather than as another 90 lines on the biggest file.
 	"internal/report/aggregate.go":  600,
 	"internal/report/render_doc.go": 400,
-	// The two files B4 split out of aggregate.go — ingest.go (per-bucket
-	// TrafficStats/Row/HourRow/EndpointRow/ClientRow/WorkloadRow/SessionRow
-	// accumulation) and recextract.go (per-record buildRec2 extraction) —
-	// registered at the same time as the split, same ~15-20% first-time
-	// headroom convention jsonscan's scan.go/rewrite.go used below rather
-	// than left budget-less like aggregate.go was before its own review.
 	"internal/report/ingest.go":     310,
 	"internal/report/recextract.go": 310,
-	// rows.go is the third file B4 touched and the one it left budget-less:
-	// the batch moved declarations INTO it (TrafficStats plus the per-type
-	// deltas' documentation) while registering only the two files it moved
-	// code OUT to, so the package's largest declaration file — bigger today
-	// than aggregate.go's own budget — was the one thing with no tripwire.
-	// Registered here at the same first-time convention. It is the report's
-	// JSON contract: a new metric adds a field here, so growth is expected —
-	// what this catches is the file absorbing accumulation or rendering logic
-	// again, which belongs in ingest.go/section_*.go.
+	// rows.go is the report's JSON contract: a new metric adds a field, so
+	// growth is expected. What this catches is the file absorbing accumulation
+	// or rendering logic again, which belongs in ingest.go/section_*.go.
 	"internal/report/rows.go": 900,
-	// No prior split here — config.go is at 591 lines today. The budget is
-	// a tripwire against the same unnoticed growth pattern that hit
-	// router.go, not a statement that 591 is already too big: if it crosses
-	// this, split by concern (e.g. a separate file for provider/model
-	// validation) rather than raising the number.
-	"internal/config/config.go": 750,
-	// The three entries below are first-time budgets, not post-split ones
-	// like router.go/aggregate.go/render_doc.go above — an architecture
-	// review (2026-08-03) found these had grown past aggregate.go's own
-	// 1000-line budget (999 lines, effectively at capacity) without ever
-	// having a budget of their own to trip. ~15% headroom over each file's
-	// size at the time this budget was set: enough for a paragraph-sized
-	// addition, not enough to quietly regrow into another 1050-line
-	// aggregate_render.go before anyone notices.
+	// If config.go crosses this, split by concern (e.g. provider/model
+	// validation into its own file).
+	"internal/config/config.go":  750,
 	"internal/report/detail.go":  1150,
 	"internal/report/session.go": 1100,
-	"internal/story/journey.go":  850,
-	// The entries below (decision-spine rendering, rule-derived Findings,
-	// corpus-level statistics, and the shared infra they landed in
-	// compare.go/metrics.go/render_md.go) were pre-registered, not caught
-	// after the fact — same ~15% headroom over each file's line count at
-	// registration time as the detail.go/session.go/journey.go entries
-	// above, a paragraph's worth of room, not an invitation to keep
-	// growing unnoticed.
-	"internal/story/render_md.go":    350,
-	"internal/story/render_spine.go": 380,
-	// toolCallLine and its helpers (the per-tool-call argument renderer
-	// render_spine.go's decision spine calls into) — split out the moment
-	// render_spine.go first crossed its own budget over this, not appended
-	// past 380 in place; same ~15% headroom convention as the
-	// rest of this table.
+
+	"internal/story/journey.go":             850,
+	"internal/story/render_md.go":           350,
+	"internal/story/render_spine.go":        380,
 	"internal/story/render_spine_args.go":   200,
 	"internal/story/findings.go":            580,
 	"internal/story/findings_toolresult.go": 320,
@@ -90,59 +67,26 @@ var fileLineLimits = map[string]int{
 	"internal/story/metrics.go":             470,
 	"internal/story/corpus.go":              380,
 	"internal/story/render_corpus.go":       150,
-	// internal/respnorm/respnorm.go (formerly internal/router/response.go —
-	// a full response-normalization state machine: passthrough/buffered/
-	// opaque transitions, SSE event splitting, MiniMax quirk trigger points,
-	// quota usage sniffing) got its own budget when an architecture review
-	// (2026-08-10) flagged it as the one large file this table didn't cover
-	// — 850 at 736 lines. Part 8 batch B7 (2026-08-15) moved it into its own
-	// package (see internal/respnorm's package doc comment) for fuzzability,
-	// not to shrink it — that batch's own review explicitly disclaims a
-	// line-count win (router.go doesn't shrink by a single line either).
-	// The move itself carried the 850 number over unchanged for exactly that
-	// reason. A B7 follow-up review (2026-08-15) then retuned it once the
-	// file settled at its new post-move size (823 lines, largely the new
-	// package doc comment plus the Options/NormalizerStream/Wrap surface):
-	// 850 only left ~3% headroom, tight enough that an unrelated comment
-	// edit could trip it — that's a real headroom problem independent of
-	// (and not a reversal of) the "this batch isn't about file size" framing
-	// above, so it's retuned to the same ~15% headroom convention every
-	// other entry in this table uses, computed from the size that framing
-	// itself produced rather than the pre-move number. minimax.go (formerly
-	// responsefix.go) is a first-time budget at that same convention.
+
 	"internal/respnorm/respnorm.go": 950,
 	"internal/respnorm/minimax.go":  235,
-	// cmd/vmr had NO entry in this table at all until an architecture review
-	// (2026-08-14) noticed cmd_story.go had grown to 741 lines — larger than
-	// most of the internal/ files above that DO have a budget. The CLI is
-	// thin by design (parse flags, wire, delegate; see CLAUDE.md's module
-	// map), so a subcommand file crossing these is a signal that logic
-	// belongs in an internal package, not that the number should go up.
-	// Same ~15% first-time headroom convention as every other entry here.
+
+	// The CLI is thin by design (parse flags, wire, delegate — see CLAUDE.md's
+	// module map), so a subcommand crossing its budget means logic belongs in
+	// an internal package, not that the number should go up.
 	"cmd/vmr/cmd_story.go":  850,
 	"cmd/vmr/cmd_check.go":  610,
 	"cmd/vmr/cmd_report.go": 500,
 	"cmd/vmr/cmd_status.go": 370,
-	// classify.go had no budget at all before the B1 batch (2026-08-14)
-	// extracted internal/jsonscan out of it and internal/adapter/
-	// fingerprint.go, shrinking it from 566 lines to ~160 specifically so it
-	// would stay a thin error-classification file — a budget-less file can't
-	// tell a contributor "you're rebuilding what B1 just moved out" the way
-	// a tripped test can. jsonscan's own budgets follow the same ~15-20%
-	// headroom convention as every other entry here; scan.go's dropped from
-	// 320 to 190 when the budget tripped and the walkers moved to walk.go
-	// (byte-level primitives vs. range-returning structural walkers), which
-	// is what the "split it, don't raise the number" message asks for — the
-	// new numbers are re-baselined on the post-split files, not inherited.
+
+	// classify.go's budget keeps it a thin error-classification file: the
+	// generic JSON scanning it used to hold lives in internal/jsonscan now, and
+	// a budget-less file can't tell a contributor they're rebuilding it.
 	"internal/adapter/classify.go": 200,
 	"internal/jsonscan/scan.go":    190,
 	"internal/jsonscan/walk.go":    200,
 	"internal/jsonscan/rewrite.go": 300,
-	// internal/taskseg's registration was deliberately deferred past B2 (its
-	// files were still small enough that a budget would have been a
-	// meaningless number) until B3 landed the session/task-boundary
-	// algorithm itself into segment.go — the same first-time ~15-20%
-	// headroom convention as every other entry here.
+
 	"internal/taskseg/taskseg.go":  70,
 	"internal/taskseg/openclaw.go": 150,
 	"internal/taskseg/segment.go":  200,
@@ -152,25 +96,64 @@ var fileLineLimits = map[string]int{
 // reports (blank lines included — this test's own budgets above were set
 // from that same count), so a contributor can reproduce a failure locally
 // without reading this file's counting logic first.
+//
+// Walks funcBudgetRoots (internal/ + cmd/, defined in func_sizes_test.go)
+// rather than only the exemption table's keys: the same "every file is
+// bounded, not just the remembered ones" inversion defaultFileLineLimit's
+// comment describes.
 func TestArchitecture_CoreFileSizes(t *testing.T) {
 	repoRoot := repoRootDir(t)
+	seen := map[string]bool{}
 
-	for rel, limit := range fileLineLimits {
-		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		data, err := os.ReadFile(path)
+	for _, root := range funcBudgetRoots {
+		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			rel, relErr := filepath.Rel(repoRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			rel = filepath.ToSlash(rel)
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Errorf("%s: %v", rel, readErr)
+				return nil
+			}
+			n := bytes.Count(data, []byte("\n"))
+			limit, exempt := fileLineExemptions[rel]
+			if !exempt {
+				limit = defaultFileLineLimit
+			} else {
+				seen[rel] = true
+			}
+			if n > limit {
+				// "another file in the same package", not "under
+				// internal/router" as this message used to say — the table has
+				// covered report/story/config/cmd files for far longer than it
+				// has covered only the router.
+				t.Errorf("%s is %d lines, over its %d-line budget: split it "+
+					"into another file in the same package, don't just raise "+
+					"this number", rel, n, limit)
+			}
+			return nil
+		})
 		if err != nil {
-			t.Errorf("%s: %v", rel, err)
-			continue
+			t.Fatalf("walk %s: %v", root, err)
 		}
-		n := bytes.Count(data, []byte("\n"))
-		if n > limit {
-			// "another file in the same package", not "under internal/router"
-			// as this message used to say — the table has covered report/
-			// story/config/cmd files for far longer than it has covered only
-			// the router.
-			t.Errorf("%s is %d lines, over its %d-line budget: split it "+
-				"into another file in the same package, don't just raise "+
-				"this number", rel, n, limit)
+	}
+
+	// Same reasoning as funcLineExemptions' staleness check: an entry naming
+	// a file that no longer exists reads as "this file is still oversized"
+	// and silently hands its headroom to whatever is written there next.
+	var stale []string
+	for rel := range fileLineExemptions {
+		if !seen[rel] {
+			stale = append(stale, rel)
 		}
+	}
+	sort.Strings(stale)
+	for _, rel := range stale {
+		t.Errorf("archtest's fileLineExemptions lists %s, but no such production file exists (renamed, moved, or deleted) — delete the entry", rel)
 	}
 }

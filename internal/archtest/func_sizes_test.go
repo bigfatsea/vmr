@@ -19,19 +19,17 @@ import (
 // production function under internal/ and cmd/ that isn't listed in
 // funcLineExemptions below.
 //
-// Why this test exists at all: file_sizes_test.go's budget is a hand-kept
-// list of 19 files, and a file can sit comfortably inside its budget while
-// containing one function nobody can hold in their head. internal/report/
-// aggregate.go was exactly that — 975 lines against a 1000-line budget, with
-// a single 639-line buildInternal inside it. The file budget was green the
-// whole time. An architecture review (2026-08-14) flagged function length as
-// the metric that was actually unguarded.
+// Why this test exists at all: a file can sit comfortably inside
+// file_sizes_test.go's budget while containing one function nobody can hold in
+// their head. internal/report/aggregate.go was exactly that — 975 lines
+// against a 1000-line budget, with a single 639-line buildInternal inside it,
+// and the file budget green the whole time.
 //
-// Why a global default with exemptions, rather than a whitelist like
-// fileLineLimits: a whitelist only ever constrains what someone remembered to
-// register, so a brand-new 400-line function lands green. This inverts that —
-// every new function is bounded, and growing past the bound is a deliberate,
-// reviewed act of adding a line to the table below.
+// Why a global default with exemptions, rather than a whitelist: a whitelist
+// only ever constrains what someone remembered to register, so a brand-new
+// 400-line function lands green. This inverts that — growing past the bound is
+// a deliberate, reviewed act of adding a line below. file_sizes_test.go has
+// since been inverted the same way, for the same reason.
 //
 // 120 was picked from the actual distribution (976 production functions;
 // p95 ≈ 50 lines, 20 over 120) so it lands above ordinary code and below the
@@ -61,13 +59,12 @@ var funcLineExemptions = map[string]int{
 	"cmd/vmr/cmd_story.go:compareJourneys": 125,
 
 	// internal/router/router.go's Serve is the failover loop itself — the
-	// design doc's own budget for it is the FILE (see fileLineLimits), on the
+	// design doc's own budget for it is the FILE (see file_sizes_test.go), on
 	// principle that the sequence health→condition→sort→quota→sticky→retry
 	// reads as one thing. Bounded here so it can't quietly absorb more.
 	"internal/router/router.go:Serve":       190,
 	"internal/server/server.go:chatHandler": 175,
 
-	"internal/report/providerquota.go:buildProviderQuotaRows":  155,
 	"internal/report/section_reliability.go:renderReliability": 135,
 
 	// One config-validation pass with many independent checks, and one SSE

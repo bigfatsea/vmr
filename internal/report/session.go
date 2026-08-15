@@ -173,71 +173,48 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 	return a.byKey[fmt.Sprintf("%s\x00%d", path, line)]
 }
 
-// AnalyzeSessions reads the audit files and produces the session grouping
-// plus per-request features. Unparseable lines are skipped (Build counts
-// them); records without a chat body land in Ungrouped.
-//
-// Each file is read and collect()ed independently — collect() is a pure
-// function of one record, with no shared mutable state across records or
-// files (verified: every package-level var it reaches is a constant or a
-// compiled *regexp.Regexp, both safe for concurrent use) — so the per-file
-// work runs on a bounded worker pool (analysisWorkerCount goroutines)
-// instead of strictly one file after another. This was measured as the
-// single largest phase of `vmr report` on an 11-day/6663-record corpus
-// (~48s), so it's the highest-value target for parallelizing this command.
-//
-// This is safe specifically because the only genuinely cross-record step —
-// sort by timestamp, then assignNames/group/linkCompactions — still runs
-// serially afterward, once every file's records are merged back together in
-// original path order (and each file's own records stay in their original
-// line order — ForEachLine within one file is untouched, still a plain
-// sequential scan). A stable sort by TS over that merged, correctly-ordered
-// slice produces byte-identical results to the old strictly-sequential
-// version, tie-breaks included: parallelizing which file gets read first
-// never changes what the final sort sees.
-//
-// ctxgraph.Scan/StitchGraph read the SAME paths independently, in a
-// goroutine alongside collect()'s own pass —
-// group() needs the resulting Graph to assign sessions by Lineage instead
-// of collect()'s former private hash-vector grouping. Running both passes
-// concurrently rather than back-to-back keeps this from roughly doubling
-// `vmr report`'s wall-clock time on a large corpus, at the cost of
-// transiently oversubscribing CPU (each pass already bounds its own worker
-// pool to NumCPU) — an acceptable trade for a command that runs occasionally
-// offline, not in a hot path.
-//
-// On error, every already-dispatched file still finishes reading (unlike
-// the old version, which stopped at the first failing file) before the
-// first error in path order is returned — wasted work on a path that's
-// rare and not performance-sensitive, traded for not needing goroutine
-// cancellation machinery.
 // AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache,
-// always interpreting agent-dialect conventions (real-instruction/no-reply/
-// chat_id detection — see collect()) through taskseg.OpenClawAware — every
-// call re-runs ctxgraph.Scan's JSON-decode/message-hash pass on every input
-// file, same as always. Kept as the stable entry point every existing
-// caller/test already uses, the same "always the default profile" role
-// Build itself plays relative to BuildCached (see build_cached.go's own doc
-// comment on why); AnalyzeSessionsCached is the one Build's cached variant
-// (BuildCached, see build_cached.go) actually calls, and the one that
-// accepts a caller-chosen Profile.
+// always interpreting agent-dialect conventions through taskseg.OpenClawAware.
+// The stable entry point every existing caller/test uses — the same "always
+// the default profile" role Build plays relative to BuildCached. Callers
+// needing a cache or a caller-chosen Profile go to AnalyzeSessionsCached.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
 	return a, err
 }
 
-// AnalyzeSessionsCached is AnalyzeSessions plus a file-hash-keyed cache
-// (ctxgraph.FileCache/ScanCached) for its ctxgraph.Scan pass — the
-// analyzeFile pass just below (report's own, independent per-request
-// parse into ReqInfo) is NOT cached by this: it still reparses every file
-// on every call, same as AnalyzeSessions always has. See
-// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
-// section for why only the ctxgraph.Manifest-based half is cached this
-// round. prior may be nil (identical to AnalyzeSessions). prof is the
-// taskseg.Profile collect() uses to recognize real user instructions, a
-// deliberate no-reply skip, and a framework-specific chat_id — resolved
-// once at cmd/vmr's composition root (see resolveTaskProfile), not decided
-// independently by report and story.
+// AnalyzeSessionsCached reads the audit files and produces the session
+// grouping plus per-request features. Unparseable lines are skipped (Build
+// counts them); records without a chat body land in Ungrouped. prior may be
+// nil. prof is the taskseg.Profile collect() uses to recognize real user
+// instructions, a deliberate no-reply skip, and a framework-specific chat_id —
+// resolved once at cmd/vmr's composition root (see resolveTaskProfile), not
+// decided independently by report and story.
+//
+// The file-hash-keyed cache (ctxgraph.FileCache/ScanCached) covers only the
+// ctxgraph.Scan pass. The analyzeFile pass below — report's own per-request
+// parse into ReqInfo — is NOT cached and reparses every file on every call;
+// see docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+// section for why only the ctxgraph.Manifest-based half is.
+//
+// Per-file work runs on a bounded worker pool (analysisWorkerCount): collect()
+// is a pure function of one record with no shared mutable state, so files are
+// independent. This is safe specifically because the one genuinely
+// cross-record step — sort by timestamp, then assignNames/group/
+// linkCompactions — still runs serially after every file's records are merged
+// back in original path order, each file's own records still in line order. A
+// stable sort by TS over that merged slice is order-independent, tie-breaks
+// included: which file is read first never changes what the sort sees.
+//
+// ctxgraph.Scan/StitchGraph read the same paths in a goroutine alongside
+// collect() (group() needs the resulting Graph to assign sessions by Lineage).
+// Concurrent rather than back-to-back keeps this from roughly doubling
+// wall-clock on a large corpus, at the cost of transiently oversubscribing CPU
+// — acceptable for an offline command, not a hot path.
+//
+// On error, every already-dispatched file finishes reading before the first
+// error in path order is returned: wasted work on a rare, non-performance-
+// sensitive path, traded for not needing goroutine cancellation machinery.
 func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof taskseg.Profile) (*SessionAnalysis, *ctxgraph.FileCache, error) {
 	if prof == nil {
 		return nil, nil, errors.New("report: prof is nil")

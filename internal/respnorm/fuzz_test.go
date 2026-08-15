@@ -1,10 +1,9 @@
 // Ver 2026-08-15, by Sonnet 5
 
 // Fuzz coverage for the transport state machine (Wrap/stream): the one
-// hand-written byte-level state machine in the routing half with no fuzz
-// coverage until this batch (architecture review's Part 8 batch B7) — the
-// real payoff of extracting this package, not a line-count reduction (see
-// respnorm.go's own package doc comment). Runs every fuzzed byte string
+// hand-written byte-level state machine in the routing half, and the reason
+// this is a package of its own (see respnorm.go's package doc). Runs every
+// fuzzed byte string
 // through every {isSSE, protocol, opaque} combination this package's
 // behavior actually branches on, at the pure io.Reader level, independent
 // of Router/Snapshot — the same "expensive-to-hit shapes in seconds instead
@@ -117,8 +116,7 @@ func appliedChangesContent(applied []string) bool {
 	return false
 }
 
-// FuzzStream exercises the transport state machine's invariants (see the
-// architecture review's Part 8 batch B7 entry and its follow-up review):
+// FuzzStream exercises the transport state machine's invariants:
 // no panic/hang on any byte stream; fragmentation-invariance (the SAME
 // bytes delivered in one Read vs. many small Reads must produce
 // byte-identical output — this is what actually exercises the cross-chunk

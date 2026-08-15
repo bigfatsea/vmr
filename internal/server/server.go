@@ -197,24 +197,15 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// still costs only one cheap substring scan (imgprep.HasImageMarker)
 		// before Downscale returns.
 		//
-		// This one call is now the single source of truth for "does this
-		// request have images" across the whole request, not just the audit
-		// trail: images/len(images) feeds both rec.Images below AND
-		// computeRequestFacts' imageCount argument, which drives
-		// RequestFacts.HasImage — consulted by a hard capability Condition
-		// (internal/strategy/conditions.go) with no fallback — and the image
-		// portion of EstimatedTokens. Neither of those re-derives anything
-		// from body; there is exactly one image-detection pass per request,
-		// reused three ways, so a request with no image never pays for a
-		// second scan. That reuse is also why this call can no longer be
-		// skipped when rec==nil && n<=0 (as it once was, purely as an audit-
-		// metadata cost optimization): routing correctness now depends on
-		// it. The condition needs the real, structurally-detected answer
-		// (imgprep walks actual message/content-block shapes) — a plain-text
-		// request that merely quotes something like "image_downscale=512px"
-		// must never be misrouted as needing image support, which is exactly
-		// what the cheap imgprep.HasImageMarker byte-scan this replaced as
-		// the routing signal would do.
+		// This one call is the single source of truth for "does this request
+		// have images": len(images) feeds rec.Images below AND
+		// computeRequestFacts' imageCount, which drives RequestFacts.HasImage
+		// and the image portion of EstimatedTokens. One detection pass per
+		// request, reused three ways — see computeRequestFacts' doc comment
+		// (facts.go) for why the structural answer, not a byte-scan, is what
+		// the routing Condition needs. That dependency is also why this call
+		// cannot be skipped when rec==nil && n<=0: routing correctness, not
+		// just audit metadata, now rests on it.
 		// Skip the work for a model name Serve is about to 404 anyway (same
 		// snap.Models lookup Serve repeats below) — no point decoding/scaling/
 		// caching images for a request that never reaches routing.

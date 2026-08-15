@@ -13,50 +13,33 @@ import (
 )
 
 // Build reads audit JSONL files and aggregates them into a Report2. It calls
-// AnalyzeSessions for grouping (one read), then does its own pass
-// (second read) joining each record to its ReqInfo via sess.Lookup.
+// AnalyzeSessions for grouping (one read), then does its own pass (second
+// read) joining each record to its ReqInfo via sess.Lookup.
 //
 // onRecord (optional, nil = skip) is called once per successfully-parsed
-// record, right where this pass already has both the raw *audit.Record and
-// its *ReqInfo in hand — the same pair a third, independent read used to
-// re-derive for detail export (WriteDetails, before it grew this hook).
-// Detail rendering depends only on a record's own (audit.Record, *ReqInfo)
-// pair, never on anything accumulated across records, so there's no reason
-// it needs its own pass at all: cmd/vmr now hands this pass a
-// DetailWriter.Submit bound to a live worker pool instead, cutting `vmr
-// report`'s total reads of the (possibly gigabyte-scale, zstd-compressed)
-// audit source from three down to two. Build's own success/failure is
-// entirely independent of onRecord's outcome — it doesn't inspect or
-// propagate whatever onRecord does with what it's handed (by design: a
-// broken detail-output directory must not cost the caller an otherwise-good
-// vmr-report.json/md, exactly as before when detail export was a separate,
-// independently-failing step run after Build returned).
+// record, where this pass already holds both the raw *audit.Record and its
+// *ReqInfo. Detail rendering depends only on that pair, never on anything
+// accumulated across records, so it needs no pass of its own: cmd/vmr hands
+// this a DetailWriter.Submit bound to a live worker pool, keeping `vmr
+// report`'s reads of the (possibly gigabyte-scale, zstd-compressed) audit
+// source at two rather than three. Build's own success is independent of
+// onRecord's outcome by design — a broken detail-output directory must not
+// cost the caller an otherwise-good vmr-report.json/md.
 //
-// Unlike the old (now removed) `vmr report` aggregator — which ran its
-// deterministic aggregation first and only attempted session analysis
-// afterward, so a session-analysis failure degraded to a warning instead of
-// losing the whole report — this two-pass design needs AnalyzeSessions to
-// succeed before the second pass can even start (every record's usage/
-// tokens now comes from its ReqInfo, not a second independent extraction).
-// A failure here is fatal to the whole command. In practice the only way
-// AnalyzeSessions fails is a per-file I/O error (bad open, or a read error
-// mid-scan — malformed JSON lines are just skipped, not fatal), and this
-// pass reads the exact same files the same way a moment later, so the
-// error surface is the same either way. The most likely real-world trigger
-// is a race with `internal/audit/housekeep.go`'s rotation sweep — a
-// long-running `vmr start` compressing/deleting a log file out from under
-// a concurrently running `vmr report` — not a code bug, so the message
-// below names that possibility explicitly.
+// An AnalyzeSessions failure is fatal to the whole command: the second pass
+// cannot start without it, since every record's usage/tokens comes from its
+// ReqInfo. In practice it only fails on a per-file I/O error (malformed JSON
+// lines are skipped, not fatal), and the second pass reads the same files the
+// same way moments later, so the error surface is identical either way. The
+// likeliest real trigger is a race with internal/audit/housekeep.go's rotation
+// sweep — a long-running `vmr start` compressing a log out from under a
+// concurrent `vmr report` — so the message below names that explicitly.
 //
-// Build itself is buildInternal (aggregate.go) with no file-hash cache —
-// every call parses every input file's ctxgraph.Scan pass from scratch,
-// same as before this cache existed. Kept as the stable, cache-free entry
-// point every existing caller/test already uses; BuildCached below is the
-// one cmd_report.go actually calls. Always interprets agent-dialect
-// conventions through taskseg.OpenClawAware — the same "Build always passes
-// the default, only BuildCached threads a caller's choice through" split
-// quotas below already established, so this package's ~26 existing Build
-// call sites never need to change.
+// Build is buildInternal (aggregate.go) with no file-hash cache, always
+// interpreting agent-dialect conventions through taskseg.OpenClawAware. Kept
+// as the stable, cache-free entry point every existing caller/test uses;
+// BuildCached below is the one cmd_report.go calls and the one that threads a
+// caller-chosen Profile.
 func Build(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo)) (*Report2, *SessionAnalysis, error) {
 	rep, sess, _, err := buildInternal(paths, now, progress, pricingInfo, pricingSrc, onRecord, taskseg.OpenClawAware, nil, nil)
 	return rep, sess, err

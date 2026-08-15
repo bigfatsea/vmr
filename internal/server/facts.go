@@ -49,23 +49,17 @@ const (
 // substring search. Threading the already-computed count through, instead
 // of re-detecting images here, serves two purposes at once:
 //
-//  1. Correctness: HasImage (imageCount > 0) feeds a hard, unconditional
-//     capability Condition (internal/strategy/conditions.go) with no
-//     fallback — unlike the rest of EstimatedTokens (deliberately
-//     over-inclusive, see the package comment above, and only ever nudges a
-//     soft preference), a false positive here can zero out every candidate
-//     endpoint. A text-only request that merely mentions a quoted
-//     "image..." word (e.g. a coding agent quoting a test assertion like
-//     "image_downscale=512px" back from a tool result) must never be
-//     misrouted as one that actually needs image support — a real incident
-//     this replaced a naive imgprep.HasImageMarker byte-scan to fix.
-//  2. Cost: a request with no image should pay for exactly one
-//     presence check (imgprep.HasImageMarker, inside Downscale) across the
-//     whole request — not that check plus a second, independent
-//     marker-count scan here for the token estimate. Reusing the same
-//     count for both HasImage and the image portion of EstimatedTokens
-//     means the common no-image case never does the image-related work
-//     twice.
+//  1. Correctness: HasImage (imageCount > 0) feeds a hard capability
+//     Condition (internal/strategy/conditions.go) with no fallback, so a
+//     false positive can zero out every candidate endpoint — unlike the rest
+//     of EstimatedTokens, which is deliberately over-inclusive and only nudges
+//     a soft preference. The naive byte-scan this replaced did exactly that in
+//     a real incident: a text-only request quoting something like
+//     "image_downscale=512px" back from a tool result got routed as one
+//     needing image support.
+//  2. Cost: reusing the count means a no-image request pays for exactly one
+//     presence check across the whole request (imgprep.HasImageMarker, inside
+//     Downscale), not that plus a second marker scan for the token estimate.
 func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.RequestFacts {
 	return core.RequestFacts{
 		HasImage:        imageCount > 0,

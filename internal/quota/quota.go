@@ -7,38 +7,29 @@ import (
 	"time"
 )
 
-// Counters is one Limit's accumulated consumption, stored by raw component
-// — never pre-weighted or pre-priced. Charge/Used deal in these units
-// directly; base(metric) (requests count, or an equal-weighted token sum in
-// P1) is applied by the caller via weight.go's BaseAmount, not here. See
-// the design doc's Storage Granularity decision: folding a weighting
-// policy into the stored value would force a data migration every time that
-// policy changes; storing raw components means P2's token_weights/
-// model_multipliers/cost pricing read the exact same history under a
-// different formula.
-// Cost (P2.2) is deliberately the one exception to this type's "never
-// pre-weighted or pre-priced" rule: a metric: cost charge is computed
-// against a price table that changes over time (promotions, list-price
-// updates), so the $ amount MUST be computed and frozen at charge time —
-// re-deriving it later from raw token counts using whatever price happens
-// to be configured when someone reads it would silently rewrite history
-// every time pricing.yaml-equivalent config changes. See
-// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section for
-// the full argument. Fresh/CacheRead/CacheWrite/Out are still recorded alongside
-// Cost even for a cost-metric account (not used for routing decisions on
-// that account, but /admin/status's four-component breakdown is useful
-// regardless of metric — see the design doc's Observability section).
+// Counters is one Limit's accumulated consumption, stored by raw component —
+// never pre-weighted or pre-priced. Charge/Used deal in these units directly;
+// base(metric) is applied by the caller via weight.go's BaseAmount. Per the
+// design doc's Storage Granularity decision: folding a weighting policy into
+// the stored value would force a data migration every time that policy
+// changes, while raw components let token_weights/model_multipliers/cost
+// pricing all read the same history under a different formula.
 //
-// Fresh/CacheRead/CacheWrite/Out/Requests are float64, not int64: an
-// account with model_multipliers configured folds the (possibly
-// fractional — e.g. 4.5) multiplier into these fields at charge time (see
-// ApplyModelMultiplier), and that scaling must land exactly — rounding
-// each charge to the nearest integer (this package's pre-2026-08-14
-// behavior) produces a systematic, unpredictable-magnitude overcharge
-// bias with no relation to what the upstream provider actually bills.
-// Without model_multipliers configured these fields always hold exact
-// integer-valued floats (1.0, 2.0, ...), so a zero-config account's
-// accounting is bit-identical to the old int64 behavior.
+// Cost is the one deliberate exception. A metric: cost charge is computed
+// against a price table that changes over time, so the $ amount must be frozen
+// at charge time — re-deriving it later from raw token counts at whatever
+// price happens to be configured then would silently rewrite history on every
+// pricing edit (see the design doc's "9.2 运行态"). Fresh/CacheRead/
+// CacheWrite/Out are still recorded alongside Cost on a cost-metric account:
+// unused for its routing decisions, but /admin/status's four-component
+// breakdown is useful regardless of metric.
+//
+// These are float64, not int64, because an account with model_multipliers
+// folds a possibly-fractional multiplier into them at charge time (see
+// ApplyModelMultiplier) and that scaling must land exactly — rounding each
+// charge to an integer produces a systematic overcharge bias of
+// unpredictable magnitude, unrelated to what the provider actually bills.
+// Without model_multipliers these always hold integer-valued floats.
 type Counters struct {
 	Fresh      float64 `json:"fresh"`
 	CacheRead  float64 `json:"cache_read"`

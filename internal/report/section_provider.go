@@ -95,7 +95,7 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 		w("\n")
 	}
 	tbl := newTable(w, t.Headers...)
-	anyNoOverlap, anyConfigChanged, anyOverQuota := false, false, false
+	anyNoOverlap, anyConfigChanged, anyOverQuota, anyUnpriced := false, false, false, false
 	for _, r := range rep.ProviderQuotas {
 		liveUsed, pct := "-", "-"
 		if r.Live != nil {
@@ -126,6 +126,13 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 		// recomputed figure that is partly a byte-count estimate must not
 		// render identically to one entirely backed by sniffed usage.
 		windowConsumed := t.FormatEstimatedShare(windowConsumedCell(r.WindowConsumed), r.WindowEstimatedPct)
+		if r.WindowUnpricedPct > 0 {
+			// Traffic no rate resolved for, so absent from the number — one
+			// step past the "X% est." above, which covers traffic that IS in
+			// it. ◇ because ⭐/†/‡ each already mean something else here.
+			windowConsumed += "◇"
+			anyUnpriced = true
+		}
 		if r.WindowNoOverlap {
 			// The report's own audit-log window and this account's
 			// billing period share no time at all — the more extreme,
@@ -149,7 +156,7 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	}
 	// WindowFootnote/StalePeriodFootnote explain the two CONSUMPTION COLUMNS
 	// themselves (what each number is and why the two can't be subtracted),
-	// so they are unconditional. The other three explain MARKERS, and are
+	// so they are unconditional. The other four explain MARKERS, and are
 	// each gated on that marker actually appearing — a report where every
 	// account is healthy must not carry an explanation of a ⭐ it doesn't
 	// contain (⭐ used to print unconditionally while ‡ and † didn't).
@@ -163,6 +170,9 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	}
 	if anyNoOverlap {
 		w("%s", t.NoOverlapFootnote)
+	}
+	if anyUnpriced {
+		w("%s", t.UnpricedFootnote)
 	}
 	w("\n")
 }

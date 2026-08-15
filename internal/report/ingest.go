@@ -2,7 +2,7 @@
 
 // The per-bucket accumulation half of rows.go's TrafficStats/Row/HourRow/
 // EndpointRow/ClientRow/WorkloadRow/SessionRow declarations — split into its
-// own file (Part 8 batch B4) once TrafficStats stopped meaning "6 Row types
+// own file once TrafficStats stopped meaning "6 Row types
 // share a field core but no shared type" (the architecture review's R3
 // finding): aggregate.go's per-record loop now just calls these methods
 // instead of inlining 7 near-identical closures. diagnosticNormMarker

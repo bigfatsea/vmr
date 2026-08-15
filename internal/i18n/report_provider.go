@@ -68,6 +68,11 @@ type ProviderQuotaText struct {
 	// logs against today's period) — only rendered when at least one row
 	// actually has the marker.
 	NoOverlapFootnote string
+	// UnpricedFootnote explains the ◇ marker: part of the account's traffic
+	// could not be priced at all and is absent from the figure (see
+	// ProviderQuotaRow.WindowUnpricedPct). Distinct from "X% est.", which
+	// marks traffic that IS in the figure. Rendered only when a row has it.
+	UnpricedFootnote string
 	// FormatEstimatedShare annotates an already-formatted consumption number
 	// with its degraded-estimate share, so consumption that came from a
 	// byte-count estimate never renders identically to consumption backed by
@@ -114,6 +119,11 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
 			NoOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
 				"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
+			UnpricedFootnote: "> ◇ 该账户本窗口有一部分请求**完全没有计入**左侧金额——本次报表没能为它们的端点解析出费率，" +
+				"所以显示的金额是偏低的。与括号里的\"估算\"不同：\"估算\"的流量在金额里，只是价格来自降级的字节估算；" +
+				"◇ 的流量根本不在金额里。常见成因是审计日志比 config.yaml 更旧（模型改名或已从 models: 移除），" +
+				"因为 `metric: cost` 账户当前配置里的模型在加载期就被强制要求可完整定价。" +
+				"缺失比例见 `vmr-report.json` 的 `window_unpriced_pct`。\n",
 			FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 				if estimatedPct > 0 {
 					return usedStr + "（" + pctHundredStr(estimatedPct) + " 估算）"
@@ -156,6 +166,12 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 		NoOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
 			"archived logs against today's billing period. More extreme than the routine \"windows don't align\" case: the two " +
 			"numbers belong to two entirely unrelated stretches of time, not two views of the same one.\n",
+		UnpricedFootnote: "> ◇ Some of this account's requests in this window are **not in the figure at all** — this report " +
+			"resolved no rate for their endpoint, so the amount shown is systematically low. Different from the parenthesized " +
+			"\"est.\": that traffic IS in the amount, just priced from a degraded byte-count estimate; ◇ traffic is missing " +
+			"outright. The usual cause is an audit log older than config.yaml (a model since renamed or dropped from `models:`), " +
+			"since a `metric: cost` account's currently-configured models are all required to price completely at load time. " +
+			"The missing share is `window_unpriced_pct` in `vmr-report.json`.\n",
 		FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 			if estimatedPct > 0 {
 				return usedStr + " (" + pctHundredStr(estimatedPct) + " est.)"

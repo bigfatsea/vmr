@@ -10,7 +10,7 @@ import (
 
 // TestWriteJSONSetsStatusAndContentType locks in the shape router and
 // server both rely on — moved from internal/core/core_test.go alongside
-// WriteJSON in Part 8 batch B5.
+// WriteJSON.
 func TestWriteJSONSetsStatusAndContentType(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()

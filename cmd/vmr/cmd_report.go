@@ -63,16 +63,12 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 // to "show whatever currency computation used" with a warning, never an
 // error (same philosophy as the rest of this function).
 //
-// cfg/loadErr are cmdReport's single config.Load result,
-// shared with buildProviderQuotas — NOT loaded separately here anymore.
-// Consistency, not performance, is why: if pricing and quota resolution each
-// re-read configPath independently, an edit landing between the two reads
-// would silently mix a pre-edit pricing table with a post-edit quota table
-// (or vice versa) with no error surfaced anywhere. configPath is kept
-// (rather than dropped now that cfg/loadErr replace it) for its remaining
-// use below (the provider-override-count message) — cmdReport prints the
-// one loadErr warning itself now (this function used to print its own
-// near-duplicate of it).
+// cfg/loadErr are cmdReport's single config.Load result, shared with
+// buildProviderQuotas rather than re-read here. Consistency, not performance,
+// is why: two independent reads of configPath would silently mix a pre-edit
+// pricing table with a post-edit quota table if an edit landed between them,
+// with no error surfaced anywhere. configPath itself is still passed for the
+// provider-override-count message below; cmdReport prints the loadErr warning.
 func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Writer, displayCCY string, extraRates map[string]float64) (*pricing.Resolver, *report.Pricing) {
 	standard, err := pricing.LoadStandard()
 	if err != nil {

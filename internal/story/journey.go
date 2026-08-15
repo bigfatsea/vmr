@@ -180,10 +180,9 @@ func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang)
 	return buildFrom(chain, prof, recs, lang)
 }
 
-// BuildAll renders many stitched chains into Journeys. Two independent
-// costs are batched/parallelized here, found by measuring an actual
-// -render-all run against a real 15-file/253-candidate corpus (design-doc
-// review follow-up):
+// BuildAll renders many stitched chains into Journeys. Two independent costs
+// are batched/parallelized here, both identified by measuring a real
+// -render-all run rather than guessed at:
 //
 //  1. I/O: every chain's manifest-record fetch is batched into a single
 //     ctxgraph.FetchRecords call — FetchRecords already groups its reads by
@@ -194,11 +193,11 @@ func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang)
 //     listing path.
 //  2. CPU: buildFrom's own work (re-rendering each manifest's full message
 //     list, event-hash dedup, jsonIndent on tool payloads) turned out to be
-//     the larger cost on that real corpus — a single request's body already
-//     carries its ENTIRE accumulated history, so buildFrom's cost per
-//     lineage grows with the square of its turn count, not linearly. Doing
-//     that serially, one candidate at a time, left 253 candidates' worth of
-//     CPU work on a single core. Each chain's Journey is independent of
+//     the larger cost — a single request's body already carries its ENTIRE
+//     accumulated history, so buildFrom's cost per lineage grows with the
+//     square of its turn count, not linearly, and doing that serially leaves
+//     every candidate's CPU work on one core. Each chain's Journey is
+//     independent of
 //     every other's (buildFrom only reads the shared recs map, never
 //     mutates it), so this runs on the same bounded worker pool
 //     scanWorkerCount uses in internal/ctxgraph.

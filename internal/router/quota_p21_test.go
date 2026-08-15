@@ -91,8 +91,8 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 // quota.Counters' doc comment for why: the multiplier value is now stored
 // as float64 all the way through, so nothing forces a discretization step
 // that would need a rounding policy at all). 7 tokens x 1.5 = 10.5 — a case
-// that would have differed from the pre-2026-08-14 ceil(mult) behavior
-// (which stored 11), so this test would have caught a regression back to it.
+// that a ceil(mult) rounding policy would store as 11, so a regression to
+// one would fail here.
 func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := tokensLimit(1_000_000)

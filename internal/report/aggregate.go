@@ -159,7 +159,7 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 // plus wiring aggState's three phases (scanFiles/finishBuckets/sortBuckets)
 // in sequence — no behavior split from the pre-B4 single function, only a
 // declaration/accumulation split (see rows.go's TrafficStats and
-// ingest.go's per-type Ingest methods) and a phase split (Part 8 batch B4).
+// ingest.go's per-type Ingest methods) and a phase split.
 // Not a MetricAggregator interface: a single-threaded batch loop over one
 // record type has no caller that needs to swap the aggregator at runtime,
 // so an interface would buy polymorphism nobody uses.

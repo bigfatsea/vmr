@@ -58,29 +58,19 @@
 // where the state machine needs to know "does this look like a MiniMax
 // quirk".
 //
-// Extracted from internal/router (architecture review's Part 8 batch B7):
-// router.go/quota.go call only Wrap/NormalizerStream below, never a stream
-// field directly, so the state machine can be fuzzed here at the pure
-// io.Reader level, independent of Router/Snapshot (see respnorm_test.go's
-// FuzzStream) — the real payoff of this batch; splitting the file out of
-// internal/router does not shrink router.go by a single line (response.go/
-// responsefix.go were always separate files there, never inside router.go
-// itself), so file-line-count is not this batch's metric.
+// This is a separate package from internal/router so the state machine can be
+// fuzzed at the pure io.Reader level, independent of Router/Snapshot (see
+// respnorm_test.go's FuzzStream). router.go/quota.go call only Wrap and
+// NormalizerStream, never a stream field directly.
 //
-// Usage-sniffing placement: Quota-Aware Routing's usage/byte-count
-// accumulators (noteUsage/countBytes, exposed as Usage()/OutBytes() on
-// NormalizerStream) live on stream, not in a separate router-half
-// decorator. This mixes "response normalization" and "billing sniffing"
-// into one package, which is a real, acknowledged tradeoff — not an
-// oversight. The alternative (a wrapping io.Reader decorator kept in
-// internal/router, layered on top of Wrap's output) would cost one extra
-// interface call and boundary check per streamed chunk on the hot forward
-// path, and this project's one hard constraint is that a refactor must
-// never regress that path (see CLAUDE.md's Invariants section). Sniffing
-// piggybacks on ingest's existing per-chunk loop instead, at zero added
-// cost. Written down here for the same reason core.TokenWeights' zero-value
-// trap and quota.Counters.Cost's "store raw, weight on read" exception are:
-// a tradeoff that isn't written down looks like it was never considered.
+// Usage-sniffing placement is an acknowledged tradeoff, not an oversight:
+// Quota-Aware Routing's accumulators (noteUsage/countBytes, exposed as
+// Usage()/OutBytes()) live on stream, mixing "response normalization" with
+// "billing sniffing" in one package. The alternative — a decorator in
+// internal/router layered over Wrap's output — costs an interface call and
+// boundary check per streamed chunk on the hot forward path, which this
+// project does not spend (see CLAUDE.md's Invariants). Sniffing piggybacks on
+// ingest's existing per-chunk loop at zero added cost.
 package respnorm
 
 import (
@@ -540,7 +530,7 @@ func (s *stream) emitBlock(block []byte) {
 	// (block-local check wrongly concludes false) — appendDone then splices
 	// in a spurious extra blank line before [DONE] that whole-shot delivery
 	// of the identical bytes never would have. Found by FuzzStream's
-	// fragmentation-invariance check (architecture review's Part 8 batch B7
+	// fragmentation-invariance check (see respnorm_test.go's FuzzStream
 	// follow-up): whole-shot delivery happened to always emit such a split
 	// as one single block, which is why this went unnoticed until chunked
 	// ingestion was fuzzed. emittedTail (bounded to len(eventSep) bytes)
