@@ -131,3 +131,47 @@ func TestDefaultClassify_ContextLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   core.ErrorClass
+	}{
+		{"400 invalid parameter", 400, `{"error":{"message":"invalid temperature"}}`, core.ErrClient},
+		{"400 unknown model (MiniMax)", 400, `{"error":{"message":"invalid params, unknown model 'x' (2013)"}}`, core.ErrEndpoint},
+		{"401 unauthorized", 401, `{}`, core.ErrAuth},
+		{"402 insufficient credits (OpenRouter)", 402, `{"error":{"message":"Insufficient credits"}}`, core.ErrEndpoint},
+		{"403 forbidden", 403, `{}`, core.ErrAuth},
+		{"404 model not found", 404, `{"error":{"message":"model not found"}}`, core.ErrEndpoint},
+		{"408 request timeout", 408, `{}`, core.ErrTransient},
+		{"413 payload too large", 413, `{"error":{"message":"payload too large"}}`, core.ErrClient},
+		{"422 model does not exist", 422, `{"error":{"message":"model does not exist"}}`, core.ErrEndpoint},
+		{"429 rate limit exceeded", 429, `{"error":{"message":"rate limit exceeded, slow down"}}`, core.ErrRateLimit},
+		// Content-policy flags: switch endpoints but never punish health.
+		{"403 moderation flagged (OpenRouter)", 403, `{"error":{"message":"Your input was flagged","metadata":{"reasons":["hate"],"flagged_input":"..."}}}`, core.ErrContent},
+		{"403 guardrail blocked (OpenRouter)", 403, `{"error":{"message":"Request blocked by guardrail: prompt-injection"}}`, core.ErrContent},
+		{"400 content exists risk (DeepSeek)", 400, `{"error":{"message":"Content Exists Risk"}}`, core.ErrContent},
+		{"400 output content violation (MiniMax)", 400, `{"type":"error","error":{"message":"invalid params, output content violation (1027)"}}`, core.ErrContent},
+		{"400 sensitive content in Chinese", 400, `{"error":{"message":"输入包含敏感内容，请修改后重试"}}`, core.ErrContent},
+		{"402 content moderation wins over 402 endpoint rule", 402, `{"error":{"message":"request rejected by content moderation"}}`, core.ErrContent},
+		{"404 content policy wins over 404 endpoint rule", 404, `{"error":{"message":"resource not found due to content policy violation"}}`, core.ErrContent},
+		{"451 unavailable for legal reasons", 451, `{}`, core.ErrContent},
+		{"429 exceeded quota treated as ErrEndpoint", 429, `{"error":{"message":"you have exceeded your quota"}}`, core.ErrEndpoint},
+		{"429 insufficient balance treated as ErrEndpoint", 429, `{"error":{"message":"insufficient balance"}}`, core.ErrEndpoint},
+		{"500 internal server error", 500, `{}`, core.ErrTransient},
+		{"502 bad gateway", 502, `{}`, core.ErrTransient},
+		{"503 service unavailable", 503, `{}`, core.ErrTransient},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(tc.status, []byte(tc.body)); got != tc.want {
+				t.Errorf("status=%d body=%s: got %v want %v", tc.status, tc.body, got, tc.want)
+			}
+		})
+	}
+}
+

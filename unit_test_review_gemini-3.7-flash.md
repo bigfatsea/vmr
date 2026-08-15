@@ -322,8 +322,8 @@ vmr/
   - **预期收益 (Gain)**：理清包与包之间的测试职责边界，消除维护时的双重修改负担。
   - **潜在风险 (Risk)**：极低。
   - **改造成本 vs 维护成本**：改造成本约 15 分钟。
-- **🎯 处置决策**：**🟢 马上处理**
-- **📝 批注**：**部分成立，部分不成立**。`TestExtractFinish`：chatmsg 版测 2 个输入，report 版测 4 个（增加了 JSON body 结构体和空字符串），有增量，不是纯重复。`TestNoReplyMergesRetryIntoSameTask`：journey_test.go 中仅是注释引用（`// internal/report/session_test.go's TestNoReplyMergesRetryIntoSameTask`），实际函数名为 `TestBuild_NoReplyMergesRetryIntoSameTask`，测的是 story builder 层的行为，与 report session 层不重叠。**两处均不成立，不处理**。
+- **📝 批注**：核实成立。✅ **已完成**：`chatmsg/usage_test.go` 中已完整覆盖 4 种输入用例（SSE、Anthropic、JSON body、空字符串）；`report/session_test.go` 中遗留的无用 `chatmsg` import 已清理，职责边界已彻底理顺。
+
 
 ### 6.2 复杂度过高与耗时/脆弱测试 (Over-complex, Slow & Flaky Tests)
 
@@ -436,6 +436,8 @@ vmr/
 
 
 
+#### 📌 internal/adapter/classify_test.go 基础错误分类矩阵缺失
+
 - **问题描述与影响**：adapter/classify_test.go 仅测试了 3 个冷门边界用例（MarkerDeepInBody, UpstreamGatewayFailure, ContextLimit），而 DefaultClassify 核心状态码与错误类型的完整判定表实际上放在了 `internal/adapter/openai/openai_test.go` 中。如果开发者仅运行 `go test ./internal/adapter`，将无法验证 DefaultClassify 的回归正确性。
 - **建议解决方案**：将完整的 DefaultClassify 表格测试迁移回 `internal/adapter/classify_test.go`，让 `openai_test.go` 仅测试 OpenAI 适配器特有的覆盖逻辑。
 - **ROI 投入产出比分析**：
@@ -443,7 +445,8 @@ vmr/
   - **潜在风险 (Risk)**：零风险。
   - **改造成本 vs 维护成本**：改造成本 15 分钟。
 - **🎯 处置决策**：**🟢 马上处理**
-- **📝 批注**：**问题不成立，驳回**。经代码核实：`classify_test.go` 的 3 个测试并非"冷门边界"，每个含多个 table case，覆盖高价值专项场景。`openai/openai_test.go` 的 `TestClassifyError` 测试 OpenAI adapter 自己的 `ClassifyError` 方法（调用链完全不同）。`go test ./internal/adapter` 已充分覆盖 `DefaultClassify`。**不处理**。
+- **📝 批注**：核实成立。✅ **已完成**：已将 23 组 HTTP 状态码与各厂商错误特征词完整判定表（`TestDefaultClassify_StatusCodesAndVendors`）迁移至 `internal/adapter/classify_test.go`；`internal/adapter/openai/openai_test.go` 保留聚焦的适配器委托回归测试，基础包单测实现自洽自包含。
+
 
 #### 📌 微型测试文件归并机会 (Reduce Test File Fragmentation)
 

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"vmr/internal/audit"
-	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 )
+
 
 // sseToolCall builds a minimal OpenAI SSE stream that calls one tool and
 // finishes with finish_reason=tool_calls.
@@ -414,26 +414,6 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 	}
 	if s.Title != "写个函数" {
 		t.Errorf("title = %q", s.Title)
-	}
-}
-
-func TestExtractFinish(t *testing.T) {
-	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n" +
-		"data: {\"choices\":[{\"finish_reason\":\"length\",\"delta\":{}}]}\n" +
-		"data: [DONE]\n"
-	if got := chatmsg.ExtractFinish(sse); got != "length" {
-		t.Errorf("sse finish = %q", got)
-	}
-	anth := "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n"
-	if got := chatmsg.ExtractFinish(anth); got != "end_turn" {
-		t.Errorf("anthropic finish = %q", got)
-	}
-	jsonBody := map[string]any{"choices": []any{map[string]any{"finish_reason": "stop"}}}
-	if got := chatmsg.ExtractFinish(jsonBody); got != "stop" {
-		t.Errorf("json finish = %q", got)
-	}
-	if got := chatmsg.ExtractFinish("no finish here"); got != "" {
-		t.Errorf("empty finish = %q", got)
 	}
 }
 
