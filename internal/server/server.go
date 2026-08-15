@@ -1,7 +1,7 @@
 // Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
-// /admin/status. Anything else is 404.
+// /health, /admin/status. Anything else is 404.
 package server
 
 import (
@@ -24,10 +24,16 @@ type Server struct {
 	rt    *router.Router
 	audit *audit.Logger // nil = auditing disabled
 	inst  instance      // zero value outside `vmr start` (tests, embedding)
+	// started is when this Server began serving — /health's uptime basis.
+	// Separate from inst.startedAt, which only `vmr start` fills in and
+	// which /admin/status therefore reports conditionally: /health has no
+	// conditional shape to fall back on, so it needs a value that always
+	// exists. The two differ by however long config loading took.
+	started time.Time
 }
 
 func New(rt *router.Router, auditLog *audit.Logger) *Server {
-	return &Server{rt: rt, audit: auditLog}
+	return &Server{rt: rt, audit: auditLog, started: time.Now()}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -36,8 +42,42 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages", s.chatHandler("anthropic"))
 	mux.HandleFunc("POST /v1/responses", s.chatHandler("openai-responses"))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /admin/status", s.adminStatus)
 	return mux
+}
+
+// health is the unauthenticated liveness endpoint: it answers "is this
+// process up and serving HTTP", and nothing else. Deliberately outside
+// s.auth and outside admin.go's loopback gate — a liveness probe has no
+// credential to present and rarely originates from 127.0.0.1 (container
+// runtimes, reverse proxies, external monitors).
+//
+// The body carries the current time and uptime rather than a constant "ok"
+// for one reason: a fixed body is indistinguishable from a cached one, so
+// an intermediary could keep answering 200 long after the process died.
+// Both fields move on every request and uptime moves monotonically, so a
+// stale copy is self-evident. Cache-Control says the same thing to
+// well-behaved intermediaries; the moving body covers the rest.
+//
+// Nothing about the instance (config path, PID, models, endpoints, quota)
+// belongs in this response. Adding any of it would turn an unauthenticated
+// liveness ping into an unauthenticated /admin/status — which is
+// loopback-only precisely because it answers those questions.
+//
+// Liveness, not readiness: 200 means the process is up, never "an upstream
+// is healthy". Gating it on endpoint health would have an orchestrator kill
+// a perfectly functional router whenever every provider is down — a restart
+// cannot fix an upstream outage, so that check would only amplify it.
+// Callers who want readiness read /admin/status's health block.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	now := time.Now()
+	router.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"time":           now,
+		"uptime_seconds": int64(now.Sub(s.started).Seconds()),
+	})
 }
 
 // authenticate enforces the router's own optional API keys and reports

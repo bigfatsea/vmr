@@ -74,7 +74,7 @@ Routing half:
 | `pricing` | Three-layer rate resolution (account override → supplement/standard table → unpriced). A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
 | `respnorm` | Response stream normalization: `Wrap` + the buffered/passthrough state machine, model rewrite, SSE splitting, `[DONE]` policy, and the evidence-based vendor quirk repairs. Quota usage sniffing lives here too — a documented tradeoff, see the package doc |
 | `router` | Failover loop (`Serve`/`tryOne`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
-| `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, loopback-only `/admin/status` |
+| `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, loopback-only `/admin/status`, unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/admin/status`) |
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |
 | `diagnose`, `replay` | `vmr diagnose` / `vmr replay` — both reuse the same `Adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses, so what they show is byte-identical to what would really happen |

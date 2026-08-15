@@ -140,7 +140,7 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ logfmt.go    实时路由日志的行格式化
   ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
   └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respnorm.NormalizerStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respnorm`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
-internal/server            HTTP 入口、鉴权、审计录制、五个端点（含 `POST /v1/responses`；header 黑名单见 internal/router.FilterClientHeaders）
+internal/server            HTTP 入口、鉴权、审计录制、六个端点（含 `POST /v1/responses` 与免鉴权的 `GET /health`；header 黑名单见 internal/router.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
 internal/audit             审计日志（JSONL 落盘）+ 共享的日志文件读取（OpenLogFile/ForEachLine，report/replay 共用）+ OutcomeFor（server/replay 共用的 outcome 判定）
@@ -167,6 +167,7 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 | `POST /v1/messages` | Anthropic Messages 协议入口 |
 | `POST /v1/responses` | OpenAI Responses 协议入口（见「协议模型」§3.1） |
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
+| `GET /health` | `{status, time, uptime_seconds}` + `Cache-Control: no-store`；**免鉴权、不限来源**——它是唯一一个绕过 `api_keys` 的端点，代价是它只回答「进程活着且能应答 HTTP」这一个比特，实例信息一律不出现在这里（否则它等价于一个未鉴权的 `/admin/status`）。body 取时间与 uptime 而非固定串：固定 body 与被缓存的 body 无法区分，中间层可能在进程已死后继续答 200。只做 liveness——把 200 与端点健康挂钩，会让编排系统在上游全挂时杀掉一个功能完好的路由进程，而重启修不好上游 |
 | `GET /admin/status` | `instance`（进程身份 + 配置新鲜度）+ `reload`（最近一次热重载结果）+ `sticky.entries` + 端点健康 + 并发指标 JSON（健康部分含 `probing` 字段——某个端点当前是否正被一次后台恢复探测占着单飞名额）；仅接受 loopback 来源 |
 
 **`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `config` 绝对路径 / `started_at` / `uptime_seconds` / `config_stale` / `config_mtime`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）整块省略而非输出零值。

@@ -68,13 +68,19 @@ listen: 127.0.0.1:8800
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited) — worst case
 #                                 # per in-flight request is ~32MB (8MB request + 8MB response-normalization
-#                                 # buffer + 16MB audit response copy); on a shared instance set this explicitly
+#                                 # buffer + 16MB audit response copy), plus a transient decode peak for image
+#                                 # requests (see image_downscale below); on a shared instance set this explicitly
 #                                 # rather than leaving it unlimited (see UserGuide.md's "Per-request memory budget")
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy (env vars are
 #                                      # ignored; write ${HTTPS_PROXY} to reference one explicitly). Declaring this URL
 #                                      # does NOT turn proxying on by itself — see providers[].proxy below.
 # http_proxy: http://127.0.0.1:7890    # same, for http base_urls (e.g. a LAN llama.cpp server)
 # image_downscale: 512           # shrink inline request images to this many px on the long side (0/absent = off); a model's own image_downscale below overrides this
+#                                 # while downscaling, each image is decoded to a bitmap sized by its PIXEL count,
+#                                 # not its byte size (a 4K screenshot is ~1.5MB of base64 but ~33MB decoded) —
+#                                 # a short-lived peak max_request_body_mb cannot see. Images decode one at a time,
+#                                 # and anything over ~64MP is passed through undecoded (decompression-bomb guard).
+#                                 # Serving vision traffic from a shared instance? Set max_concurrency conservatively.
 # image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
 # sticky_ttl: 10m                # global default for Sticky Model's affinity window (0/absent = default 10m);
 #                                 # each endpoint below can override it — see the "cheap" model for an example;
