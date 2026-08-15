@@ -106,3 +106,81 @@ func TestSkipJSONString_ValidInputUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// TestScanners_HostileIndexNeverPanics extends the SkipJSONString guard above
+// to the rest of this package's index-taking exported surface. Same rationale:
+// no in-repo caller passes any of these, but every one of them panicked
+// before, and an exported function in a zero-internal-dependency leaf package
+// has an open caller set. Each case below was verified to panic without the
+// entry guards.
+func TestScanners_HostileIndexNeverPanics(t *testing.T) {
+	// "[  " / "{  " open a container and then run to EOF on whitespace: that
+	// is what walks i up to len(raw) while an over-long end bound keeps the
+	// `i >= end` guard from firing, which is how an out-of-range end reaches
+	// a raw[i] read. A well-formed input never gets that far.
+	arr := []byte("[  ")
+	obj := []byte("{  ")
+	full := []byte(`[{"role":"user"}]`)
+	noVisit := func(start, end int) bool { return false }
+
+	t.Run("SkipJSONValue negative index", func(t *testing.T) {
+		if n, ok := SkipJSONValue(full, -1); ok || n != 0 {
+			t.Errorf("= (%d, %v), want (0, false)", n, ok)
+		}
+	})
+	t.Run("WalkArrayElements negative start", func(t *testing.T) {
+		if found, ok := WalkArrayElements(full, -1, len(full), noVisit); found || ok {
+			t.Errorf("= (%v, %v), want (false, false)", found, ok)
+		}
+	})
+	t.Run("WalkArrayElements end past buffer", func(t *testing.T) {
+		if found, ok := WalkArrayElements(arr, 0, len(arr)+5, noVisit); found || ok {
+			t.Errorf("= (%v, %v), want (false, false)", found, ok)
+		}
+	})
+	t.Run("WalkArrayElements inverted range", func(t *testing.T) {
+		if found, ok := WalkArrayElements(full, 5, 2, noVisit); found || ok {
+			t.Errorf("= (%v, %v), want (false, false)", found, ok)
+		}
+	})
+	t.Run("FirstArrayElement end past buffer", func(t *testing.T) {
+		if b, ok := FirstArrayElement(arr, 0, len(arr)+5); ok || b != nil {
+			t.Errorf("= (%q, %v), want (nil, false)", b, ok)
+		}
+	})
+	t.Run("ElementRole negative start", func(t *testing.T) {
+		if r, ok := ElementRole(full, -1, len(full)); ok || r != "" {
+			t.Errorf("= (%q, %v), want (\"\", false)", r, ok)
+		}
+	})
+	t.Run("ElementRole end past buffer", func(t *testing.T) {
+		if r, ok := ElementRole(obj, 0, len(obj)+5); ok || r != "" {
+			t.Errorf("= (%q, %v), want (\"\", false)", r, ok)
+		}
+	})
+}
+
+// TestSkipJSONWS_OutOfRangeSaturatesForward pins the property the rest of the
+// package leans on: SkipJSONWS can be handed any int, and anything outside
+// the buffer comes back >= len(b), so a caller's `i >= bound` check catches
+// it. A negative index must NOT clamp to 0 — that would silently scan from
+// the start of the buffer and let WalkArrayElements(raw, -1, ...) walk a real
+// array in answer to a nonsense request.
+func TestSkipJSONWS_OutOfRangeSaturatesForward(t *testing.T) {
+	b := []byte("  [1]")
+	for _, i := range []int{-1, -5, -1 << 30} {
+		if got := SkipJSONWS(b, i); got < len(b) {
+			t.Errorf("SkipJSONWS(%q, %d) = %d, want >= len(b)=%d", b, i, got, len(b))
+		}
+	}
+	if got := SkipJSONWS(b, len(b)+3); got < len(b) {
+		t.Errorf("SkipJSONWS(%q, %d) = %d, want >= len(b)=%d", b, len(b)+3, got, len(b))
+	}
+	// Unchanged for every valid index.
+	if got := SkipJSONWS(b, 0); got != 2 {
+		t.Errorf("SkipJSONWS(%q, 0) = %d, want 2", b, got)
+	}
+	if got := SkipJSONWS(b, 3); got != 3 {
+		t.Errorf("SkipJSONWS(%q, 3) = %d, want 3", b, got)
+	}
+}

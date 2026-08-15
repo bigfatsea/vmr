@@ -68,7 +68,6 @@ var funcLineExemptions = map[string]int{
 	"internal/server/server.go:chatHandler": 175,
 
 	"internal/report/providerquota.go:buildProviderQuotaRows":  155,
-	"internal/report/metrics.go:buildFindings":                 130,
 	"internal/report/section_reliability.go:renderReliability": 135,
 
 	// One config-validation pass with many independent checks, and one SSE

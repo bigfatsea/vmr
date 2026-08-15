@@ -13,7 +13,19 @@ import (
 // literals, not shared state, so the duplication carries no drift risk.
 var roleKeyLiteral = []byte(`"role"`)
 
+// SkipJSONWS returns the index of the first non-whitespace byte at or after
+// i. It is total: for ANY i outside [0, len(b)) the result is >= len(b), so
+// the `i >= bound` check every caller already performs before dereferencing
+// trips instead of the dereference panicking. That is the useful property to
+// state, and it is why a negative i saturates forward to len(b) rather than
+// clamping back to 0 — clamping would answer a question the caller did not
+// ask (scan from the start of the buffer) and let a nonsense offset produce
+// a plausible-looking result, which this package treats as worse than a
+// refused one.
 func SkipJSONWS(b []byte, i int) int {
+	if i < 0 {
+		return len(b)
+	}
 	for i < len(b) {
 		switch b[i] {
 		case ' ', '\t', '\n', '\r':
@@ -23,6 +35,18 @@ func SkipJSONWS(b []byte, i int) int {
 		}
 	}
 	return i
+}
+
+// inRange reports whether [start,end) is a usable window into raw. The
+// exported index-taking scanners below validate their window with it up
+// front rather than trusting the caller: an end past len(raw) makes their
+// `i >= end` loop guards stop guarding the buffer (i can reach len(raw)
+// while still being < end, and the next raw[i] panics), and a negative
+// start reaches the same place from the other side. Refusing an impossible
+// window is also the honest answer — silently clamping end to len(raw)
+// would report "scanned this array fine" for a buffer that was truncated.
+func inRange(raw []byte, start, end int) bool {
+	return start >= 0 && end <= len(raw) && start < end
 }
 
 // SkipJSONString advances past the string starting at b[i], returning the
@@ -84,7 +108,7 @@ func IndexUnescapedQuote(b []byte) int {
 // SkipJSONValue advances past one JSON value (string, object, array, number,
 // or literal) starting at b[i].
 func SkipJSONValue(b []byte, i int) (int, bool) {
-	if i >= len(b) {
+	if i < 0 || i >= len(b) {
 		return 0, false
 	}
 	switch b[i] {
@@ -193,6 +217,9 @@ func TopLevelValues(raw, keyLiteral []byte) (ranges [][2]int, ok bool) {
 // scanned (not actually an array, or malformed) — distinct from found=false
 // (scanned fine, visit never returned true).
 func WalkArrayElements(raw []byte, arrStart, arrEnd int, visit func(start, end int) bool) (found, ok bool) {
+	if !inRange(raw, arrStart, arrEnd) {
+		return false, false
+	}
 	i := SkipJSONWS(raw, arrStart)
 	if i >= arrEnd || raw[i] != '[' {
 		return false, false
@@ -236,6 +263,9 @@ func FirstArrayElement(raw []byte, arrStart, arrEnd int) ([]byte, bool) {
 // ElementRole scans one JSON object (raw[elemStart:elemEnd], braces
 // included) for a top-level "role" string key, returning its value.
 func ElementRole(raw []byte, elemStart, elemEnd int) (string, bool) {
+	if !inRange(raw, elemStart, elemEnd) {
+		return "", false
+	}
 	i := SkipJSONWS(raw, elemStart)
 	if i >= elemEnd || raw[i] != '{' {
 		return "", false
