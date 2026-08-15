@@ -617,46 +617,18 @@ type ProviderQuotaRef struct {
 	Every  string  `json:"every"`  // 1mo / 1w / 5h ...
 	Amount float64 `json:"amount"`
 
-	// Limit/Spec  are the resolved config.yaml inputs needed to
-	// compute WindowConsumed/Live below — computation INPUTS, not report
-	// conclusions, so `json:"-"` keeps them out of vmr-report.json:
-	// serializing Spec would dump the account's whole model_multipliers map
-	// into every report (config.mba.yaml's volcengine2 alone has 6 entries).
-	// Both nil exactly when this provider's quota couldn't be resolved from
-	// config.yaml at all (same condition that leaves this whole
-	// ProviderQuotaRef out of the quotas map in the first place — see
-	// cmd_report.go's buildProviderQuotas).
+	// Limit and Spec are input configs excluded from serialized JSON output.
 	Limit *core.Limit     `json:"-"`
 	Spec  *core.QuotaSpec `json:"-"`
 
-	// Live  is this account's real-time quota-registry state,
-	// read from <log_dir>/vmr-quota.json — see LiveQuota's own doc comment.
-	// nil when that file is unreadable/missing, has no bucket for this
-	// account+limit, or the stored bucket's period doesn't match the period
-	// PeriodStart/PeriodEnd computes for "now" (a counter left over from a
-	// previous period the process wasn't running for — see the dev plan's
-	// §5.2 trap; rendering a stale bucket as "本周期已用" would silently
-	// show last period's number as if it were current).
+	// Live holds real-time quota state read from vmr-quota.json.
 	Live *LiveQuota `json:"live,omitempty"`
 
-	// LiveConfigChanged is true when Live is nil specifically because
-	// this provider's quota: metric/every changed since vmr-quota.json was
-	// last written for it — the CURRENT limitKey has no bucket, but an OLDER
-	// one for the same provider does (quota.Registry never deletes a
-	// superseded key, it only lazily resets in place). Distinguishes this
-	// from the generic "process wasn't running through this period, or has
-	// never charged this account at all" story the plain nil-Live case
-	// tells: a config edit is a healthy, running process, not a stopped
-	// one — the renderer must not let the two read the same.
+	// LiveConfigChanged indicates Live is nil because quota config changed since state was stored.
 	LiveConfigChanged bool `json:"live_config_changed,omitempty"`
 }
 
-// LiveQuota is one provider's real-time quota-registry snapshot as of the
-// report run's "now" — the numerator ProviderQuotaRef's static Amount alone
-// was missing (see the quota design specification's
-// the quota design specification). Deliberately NOT derived from anything in this report's own
-// audit-log window — see ProviderQuotaRow's doc comment for why the two
-// consumption numbers must never be combined into one.
+// LiveQuota snapshots real-time quota registry state for a provider at report generation time.
 type LiveQuota struct {
 	Used         float64   `json:"used"` // base(metric) already applied — directly comparable to Amount
 	Pct          float64   `json:"pct"`  // Used/Amount*100, not clamped

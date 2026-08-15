@@ -38,37 +38,8 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// buildPricing  resolves `vmr report`'s $-estimate inputs from
-// config.yaml: the embedded standard price table (always available) plus,
-// when configPath actually loads, every provider's pricing: block (map/
-// overrides) and the global pricing: block's currency/exchange_rate — see
-// internal/config's PricingTable/ProviderPricingPolicies doc comments for
-// why report reuses config's already-validated resolution instead of
-// re-implementing it. Only returns (nil, nil) when the embedded standard
-// table itself fails to parse (should not happen with a well-formed
-// build). When configPath doesn't exist, fails to load, or fails to
-// VALIDATE (a real config error, not just "file absent"), this still
-// returns a usable Resolver/*report.Pricing pair backed by the standard
-// table alone, with no account-specific overrides — NOT an error:
-// `vmr report` must keep working against a bare audit log with no
-// config.yaml in reach (see the design doc's "no config.yaml" degrade
-// section). `vmr report`'s own philosophy is that a pricing problem must
-// never cost the whole report, only its $ column's accuracy.
-//
-// displayCCY/extraRates (report.yaml's currency/exchange_rate, or -currency)
-// are a final, purely cosmetic step layered on top of the above: everything
-// resolves in the accounting currency exactly as before, and only the
-// number actually printed gets rescaled (Resolver.WithDisplayFactor) —
-// missing displayCCY, or a rate this function can't resolve, both degrade
-// to "show whatever currency computation used" with a warning, never an
-// error (same philosophy as the rest of this function).
-//
-// cfg/loadErr are cmdReport's single config.Load result, shared with
-// buildProviderQuotas rather than re-read here. Consistency, not performance,
-// is why: two independent reads of configPath would silently mix a pre-edit
-// pricing table with a post-edit quota table if an edit landed between them,
-// with no error surfaced anywhere. configPath itself is still passed for the
-// provider-override-count message below; cmdReport prints the loadErr warning.
+// buildPricing resolves standard pricing tables and optional provider/global overrides from config.
+// Degrades gracefully to embedded standard pricing if config is missing or invalid.
 func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Writer, displayCCY string, extraRates map[string]float64) (*pricing.Resolver, *report.Pricing) {
 	standard, err := pricing.LoadStandard()
 	if err != nil {
@@ -127,28 +98,8 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	return resolver, summary
 }
 
-// buildProviderQuotas (§2.5) reads configPath and returns each provider's
-// declared quota limit (its first Limit, P1's "exactly one Limit per
-// provider" — see config.QuotaConfig's doc comment) as a read-only
-// reference for `vmr report`'s Provider section, plus  the
-// account's real-time counter read from <log_dir>/vmr-quota.json — see
-// report.LiveQuota's doc comment. Same degrade posture as buildPricing:
-// config unreadable/invalid, or a provider with no quota: block, both just
-// mean no entry for that provider; vmr-quota.json unreadable/missing just
-// means every account's Live stays nil — none of this ever fails the report.
-//
-// now must be the exact same instant the caller later passes to
-// report.BuildCached — see ProviderQuotaRow's doc comment on why
-// PeriodStart/PeriodEndsAt must agree between the two.
-//
-// cfg/loadErr are cmdReport's single config.Load result, shared with buildPricing — see that function's own doc comment
-// for why a second, independent config.Load here would be a consistency
-// bug, not just a wasted read.
-// The second return value is the vmr-quota.json path this call actually
-// read (empty when cfg is unusable) — the caller threads this into
-// Report2.Meta so the sub-table's footnote can name its own source, letting
-// a reader judge whether it's plausibly the same instance that produced the
-// input audit logs.
+// buildProviderQuotas loads declared quota limits from config and live quota state from vmr-quota.json.
+// Returns nil if config or live quota is unavailable without failing report generation.
 func buildProviderQuotas(cfg *config.Config, loadErr error, configPath string, tw io.Writer, now time.Time) (map[string]report.ProviderQuotaRef, string) {
 	if loadErr != nil {
 		// cmdReport already printed one unified warning for cfgErr — a

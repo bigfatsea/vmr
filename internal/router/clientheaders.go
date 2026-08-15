@@ -6,17 +6,8 @@ import (
 	"strings"
 )
 
-// headerBlocklist is the set of client headers vmr never forwards to the
-// upstream. The pass-through policy is "default forward + small blocklist",
-// not a strict whitelist: most client headers (User-Agent, X-Stainless-*,
-// Traceparent, Accept-Language, etc.) are legitimate metadata and are
-// forwarded as-is, so SDK upgrades and tracing work without vmr code
-// changes. The items here are the ones that would cause a security or
-// protocol-correctness problem if leaked to the upstream.
-//
-// "Must override" headers (Authorization, Host, Content-Length, etc.) are
-// also listed here as a defense in depth, but the primary mechanism is
-// adapter.BuildRequest using httpReq.Header.Set to replace them.
+// headerBlocklist defines client headers stripped before proxying to upstream endpoints
+// to prevent security leaks and transport protocol conflicts.
 var headerBlocklist = map[string]struct{}{
 	"authorization":       {}, // credential — adapter injects its own
 	"x-api-key":           {}, // Anthropic credential — same reason

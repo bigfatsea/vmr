@@ -1,8 +1,6 @@
 // Ver 2026-08-14, by Opus 5
 
-// The analytics half's reproduction of the routing half's degraded token
-// estimate — split out of aggregate.go to keep that file under
-// internal/archtest's line budget, the same reason cost.go exists.
+// Package report provides degraded token estimation helpers for offline analytics.
 package report
 
 import (
@@ -10,41 +8,8 @@ import (
 	"vmr/internal/core"
 )
 
-// estimateDegradedTokens reproduces internal/router/quota.go's tokenCharge
-// degraded path for a record whose usage was never sniffed: the request side
-// reuses the pre-routing estimate vmr already computed and persisted
-// (audit.Record.Facts.EstimatedTokens — the SAME value the router read off
-// creq.Facts, not a re-derivation), the response side re-runs
-// core.EstimateTextTokens over the recorded body. Both halves charge entirely
-// to Fresh/Out, exactly as the router does — the degraded path cannot tell
-// cache hits apart.
-//
-// Only called for a record that actually reached an endpoint (rc.endpoint
-// non-empty): the router charges per FORWARDED attempt, so a request whose
-// every attempt failed must contribute nothing here, the same basis
-// EndpointRow's exact token fields already use.
-//
-// Known, deliberate residual: the router counts UPSTREAM bytes (respnorm's
-// ingest hook sees every source byte, including in opaque mode), while the
-// only body an offline reader has is the CLIENT-side one the recorder
-// captured — after model-name rewrite, after any response-normalization strip,
-// and capped at recorderBodyCap. The two agree exactly when no normalization
-// changed the byte count, and differ by that delta when it did. This is why
-// ProviderQuotaRow carries WindowEstimatedPct rather than presenting the
-// recomputed column as authoritative: the estimate is reported as an
-// estimate. Reading the router's own charged number back out of the audit
-// record would make the two agree by construction — and would also make §2.5's
-// recomputed column a readout instead of the independent cross-check it
-// exists to be (see ProviderQuotaRow's doc comment).
-//
-// Facts is nil for a record that never reached fact computation (see
-// audit.Record.Facts's doc comment) — which, for a record with a non-empty
-// endpoint, means exactly one thing: internal/replay's writeReplayRecord,
-// which never populates Facts (see that function's doc comment). For that
-// case the router-side basis isn't Facts.EstimatedTokens either — chargeReplay
-// charges core.EstimateTextTokens(reqBody) directly — so falling back to the
-// same computation here over the recorded client request body reproduces the
-// router's own degraded basis instead of silently contributing zero.
+// estimateDegradedTokens computes input/output token estimates for records where exact
+// usage was not sniffed, falling back to Facts.EstimatedTokens or EstimateTextTokens.
 func estimateDegradedTokens(arec *audit.Record) (inEst, outEst int64) {
 	if arec.Facts != nil {
 		inEst = arec.Facts.EstimatedTokens

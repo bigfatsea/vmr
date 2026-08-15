@@ -130,18 +130,7 @@ func cmdStart(args []string) error {
 
 	rt := router.New(logger)
 
-	// Quota-Aware Routing's consumption registry: lives on the Router (not
-	// the Snapshot), so counts survive a hot reload — see
-	// docs/VirtualModelRouter_Design_v4_Quota.md's Persistence section.
-	// A corrupt or missing state file is never fatal: quota is a statistics
-	// helper that must not be able to stall routing, so Load's error is
-	// only logged and the registry proceeds from zero either way. The
-	// deferred stop()+Flush() covers both of this function's exit paths
-	// (SIGINT/SIGTERM and an unexpected ListenAndServe error) since both
-	// return from this same function — stop() blocks until the flusher
-	// goroutine has actually exited before Flush() runs, so the two can
-	// never race on the same file (see quota.Registry.StartFlusher's doc
-	// comment).
+	// Quota registry lives on Router (surviving hot reloads). Load errors are non-fatal (logged).
 	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
 	if err := qreg.Load(); err != nil {
 		logger.Printf("WARN quota state: %v (starting from zero)", err)

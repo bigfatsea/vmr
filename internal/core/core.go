@@ -1,30 +1,7 @@
 // Ver 2026-07-25, by Sonnet 5
 
-// Package core holds the shared entity layer both co-equal halves (routing:
-// internal/router, internal/server; analytics: internal/report,
-// internal/story) depend on, plus a handful of exported behavior —
-// EstimateTextTokens/EstimateTokensFromCounts, SortedKeys,
-// EndpointLabel/SplitEndpointLabel — that stayed here as a deliberate
-// exception. core is one of the project's zero-internal-dependency packages
-// (alongside fmtutil, jsonscan, and i18n, archtest-enforced) that both halves
-// are free to import, so it's the primary place shared domain types go.
-//
-// Admission rule: core holds only types two or more packages spanning
-// different halves must agree on the shape of — Endpoint, CanonicalRequest, RequestFacts, ErrorClass,
-// Limit, TokenWeights, Rate, PricingSpec, QuotaSpec. Anything with behavior
-// belongs in the package that owns that behavior, not here by default. The
-// exported functions listed above are the named exception to that rule, not
-// a precedent to extend casually: each is shared by three or more
-// cross-half call sites, has no other package that could plausibly own it,
-// and core is the only common ancestor all of them can import. Before
-// adding a new behavior function here, check whether it actually meets that
-// bar — WriteJSON/WriteError and FilterClientHeaders used to live here and
-// all moved to internal/router once the bar was applied retroactively (HTTP
-// response writing and client-header filtering have real owners: router,
-// server, and replay — all routing-half — not "shared infrastructure").
-// FilterClientHeaders in particular looked like it belonged here because
-// core already imports net/http for CanonicalRequest.Header; importing a
-// package is not the same as owning the behavior built on it.
+// Package core defines shared domain entities (Endpoint, CanonicalRequest, RequestFacts,
+// PricingSpec, QuotaSpec) and zero-dependency domain helpers used across routing and analytics.
 package core
 
 import (
@@ -49,18 +26,7 @@ type CanonicalRequest struct {
 	Facts  RequestFacts
 }
 
-// RequestFacts are cheap, request-derived signals computed once per request
-// (never per candidate endpoint) and consulted by strategy.Condition
-// implementations — see docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing section.
-// WantsThinking/HasAudio/HasVideo are typed placeholders only: no
-// detection logic populates them yet (protocol shapes for audio/video input
-// and MiniMax's thinking parameter aren't confirmed), so they are always
-// false until a later change adds the corresponding detection.
-//
-// JSON tags exist so this same value (computed once in server.go) can be
-// persisted verbatim into audit.Record.Facts — vmr's own pre-routing
-// analysis, sitting alongside the raw request rather than recomputed later
-// from it (see audit.Record.Facts's doc comment).
+// RequestFacts holds request-derived signals computed once per request for condition-based routing.
 type RequestFacts struct {
 	HasImage        bool  `json:"has_image,omitempty"`
 	HasAudio        bool  `json:"has_audio,omitempty"`

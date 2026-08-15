@@ -1,24 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// Pricing  is a display-only SUMMARY of the pricing sources used to
-// compute this report's $ estimates — not the resolution engine itself
-// (that's internal/pricing.Resolver, threaded through Build/BuildCached's
-// pricingSrc parameter in build_cached.go/aggregate.go). The two are
-// separate on purpose: this package must never import internal/config (see
-// CLAUDE.md's "report ↛ config" invariant, archtest-enforced), so cmd/vmr's
-// composition root (cmd_report.go) is the only place that ever reads
-// config.yaml, resolves the standard/curated/supplement tables, and builds
-// BOTH a *pricing.Resolver (for aggregate.go to actually price records)
-// and this summary (for rendering — currency label, disclaimer text, and
-// the "what pricing sources fed this report" line in §2's appendix).
-//
-// This replaces an earlier sidecar (a single hand-maintained pricing.yaml
-// file, its raw bytes frozen verbatim into every report for traceability —
-// see git history for that implementation). The pricing model is
-// inherently multi-layered (embedded standard table + optional supplement +
-// per-provider config.yaml overrides), so there is no longer one file's
-// worth of bytes to freeze; this summary is the replacement traceability
-// mechanism.
+// Package report includes Pricing summary metadata used when rendering report cost estimates.
 package report
 
 import (

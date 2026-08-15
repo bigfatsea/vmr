@@ -1,9 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// §2 成本估算's per-record cost formula and endpoint-label parsing — split
-// out of aggregate.go  purely to keep that file under
-// internal/archtest's line budget; aggState.ingestRecord (aggregate.go) is
-// the only caller.
+// Package report provides cost calculation formulas and pricing resolvers for offline reports.
 package report
 
 import (
@@ -12,30 +9,8 @@ import (
 	"vmr/internal/pricing"
 )
 
-// costFor computes one record's estimated cost from its endpoint's
-// resolved rate via pricing.Rate.Cost (shared with
-// internal/router/quota.go's componentCost) — all four components,
-// INCLUDING cache_read (fix: an earlier implementation deliberately left
-// cache_read out of this formula because the four providers in the repo's
-// own sample pricing.yaml all happened to price it at 0; that was a fact
-// about those four rows, not a general truth — the design doc's own market
-// survey found cache-read pricing 5-120x cheaper than fresh input, never
-// actually free, across providers broadly. Excluding it systematically
-// UNDERSTATES cost for any provider/model priced above 0, the dangerous
-// direction (see docs/VirtualModelRouter_Design_v4_Quota.md's market-data
-// section for the full argument).
-//
-// When usage wasn't sniffed (!rc.usageOK), this prices the SAME degraded
-// byte-count estimate (rc.estInFresh/rc.estOut) internal/router/quota.go's
-// tokenCharge degraded branch charges — Fresh/Out only, no cache
-// components, for the same reason the router's degraded branch has none:
-// it cannot tell cache hits apart from an unparseable response. Returning a
-// real (if approximate) amount here instead of a hardcoded 0 is what fixes
-// the "false zero": before this, a provider whose entire window had
-// unsniffable usage rendered a misleadingly precise $0.0000 instead of
-// either a real number or an honest "-". estimated reports whether c came
-// from this degraded path, the same signal TokensEstimated/
-// TokensInFreshEst/TokensOutEst already carry for the tokens metric.
+// costFor computes an estimated cost for a record using pricing.Rate.Cost.
+// Falls back to estimating based on input/output token byte counts when exact usage was not reported.
 func costFor(pr pricing.Rate, rc *rec2) (c float64, estimated bool) {
 	if rc.usageOK {
 		return pr.Cost(rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite, rc.usage.Out), false

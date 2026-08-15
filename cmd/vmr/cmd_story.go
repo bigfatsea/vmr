@@ -51,21 +51,8 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
-// cmdStory renders one agent task's full execution history as a
-// self-contained Markdown narrative — see
-// docs/VirtualModelRouter_Design_v4_Analytics.md's `internal/story`: Journey 视图 section for the design.
-// Step 2: a candidate is no longer always
-// exactly one ctxgraph.Lineage — ctxgraph.StitchGraph resolves Contract/
-// Fork breaks back to their best predecessor where the evidence supports
-// it, and ctxgraph.ChainFrom walks the resulting chain into the ordered
-// list of lineages one Journey actually renders. A lineage that still
-// starts mid-conversation after best-effort stitching (no confident
-// predecessor found) is rendered with an explicit "context was rebuilt
-// here, unresolved" notice rather than silently treated as a fresh start.
-//
-// With no input files given at all, defaults to <-c config.yaml's
-// log_dir>/vmr-audit-* (see resolveInputPaths in auditpaths.go), same
-// convention as cmdReport.
+// cmdStory renders agent task execution history into self-contained Markdown narratives,
+// supporting single-journey inspection, pairwise comparison, and corpus-level analytics.
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
@@ -102,16 +89,7 @@ func cmdStory(args []string) error {
 		return err
 	}
 	llmOpts.CacheDir = llmCacheDir
-	// llmAddrExplicit, not llmOpts.Addr != "", gates every "-llm-addr isn't
-	// supported here" rejection below: report.yaml's llm_addr is a
-	// standing convenience default for the single-journey/-compare case
-	// (so a lone `-journey <id>` never needs -llm-addr typed out), and
-	// none of -render-all/-corpus/a multi-match -journey selector ever
-	// reads llmOpts at all — they'd just silently not use it. Treating
-	// that default's mere presence as a hard error (as this used to)
-	// means anyone with an llm_addr configured for convenience can no
-	// longer run a plain batch render at all; only an -llm-addr the user
-	// actually typed on this invocation is worth rejecting outright.
+	// Only explicit -llm-addr CLI flags trigger rejection for batch modes (-render-all / -corpus).
 	llmAddrExplicit := flagPassed(fs, "llm-addr")
 	if llmAddrExplicit && (*renderAll || *corpus) {
 		return fmt.Errorf("-llm-addr is not supported with -render-all or -corpus (would fire one LLM call per journey) — use -journey to interpret one at a time")
