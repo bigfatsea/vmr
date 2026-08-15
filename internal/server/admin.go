@@ -109,6 +109,11 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if qs := s.rt.QuotaStatus(); len(qs) > 0 {
 		body["quota"] = qs
 	}
+	// Absent (not an empty array) when snap.Cfg.Check() finds no issues —
+	// same "nothing to report" convention reloadBlock / quota above already use.
+	if issues := snap.Cfg.Check(); len(issues) > 0 {
+		body["issues"] = issues
+	}
 	router.WriteJSON(w, http.StatusOK, body)
 }
 

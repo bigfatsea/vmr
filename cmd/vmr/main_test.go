@@ -856,6 +856,44 @@ models:
 	}
 }
 
+// TestCmdStatus_WithIssues verifies that cmdStatus renders WARNING lines when
+// /admin/status reports config.Check() issues.
+func TestCmdStatus_WithIssues(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"issues": []map[string]any{
+				{
+					"field":    "listen",
+					"severity": "warning",
+					"message":  "listen (0.0.0.0:8800) is not loopback-only and no api_keys are configured",
+				},
+			},
+			"time": "2026-07-19T12:00:00Z",
+		})
+	}))
+	defer ts.Close()
+
+	yaml := fmt.Sprintf(`
+listen: %s
+providers:
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+`, ts.Listener.Addr().String())
+
+	path := writeTempFile(t, "config.yaml", yaml)
+	got := captureStdout(t, func() {
+		if err := cmdStatus([]string{"-c", path}); err != nil {
+			t.Fatalf("cmdStatus: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "WARNING: listen (0.0.0.0:8800) is not loopback-only") {
+		t.Errorf("output should show check warning: %q", got)
+	}
+}
+
 // dialHost turns a bind address into something you can actually connect
 // to. cfg.Listen is routinely a wildcard ("0.0.0.0:8800") and lsof reports
 // the same socket as "*:8800" — vmr.sh ps feeds both forms straight into

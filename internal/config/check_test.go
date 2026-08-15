@@ -1,7 +1,11 @@
 // Ver 2026-08-02, by Sonnet 5
 package config
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func mustParse(t *testing.T, yaml string) *Config {
 	t.Helper()
@@ -148,5 +152,28 @@ models:
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai/p1/x" {
 		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai/p1/x", issues)
+	}
+}
+
+// TestCheckIssueJSON verifies that Issue and Severity serialize to and deserialize from JSON cleanly.
+func TestCheckIssueJSON(t *testing.T) {
+	issue := Issue{
+		Field:    "listen",
+		Message:  "listen on 0.0.0.0 is exposed",
+		Severity: SeverityWarning,
+	}
+	data, err := json.Marshal(issue)
+	if err != nil {
+		t.Fatalf("Marshal Issue: %v", err)
+	}
+	var got Issue
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal Issue: %v", err)
+	}
+	if got.Severity != SeverityWarning || got.Field != "listen" || got.Message != issue.Message {
+		t.Errorf("roundtrip mismatch: got %+v, want %+v", got, issue)
+	}
+	if !strings.Contains(string(data), `"severity":"warning"`) {
+		t.Errorf("json %s does not contain severity string 'warning'", string(data))
 	}
 }

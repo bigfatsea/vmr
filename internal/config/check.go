@@ -30,18 +30,41 @@ const (
 	SeverityWarning
 )
 
+func (s Severity) String() string {
+	switch s {
+	case SeverityWarning:
+		return "warning"
+	default:
+		return "error"
+	}
+}
+
+func (s Severity) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
+func (s *Severity) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "warning":
+		*s = SeverityWarning
+	default:
+		*s = SeverityError
+	}
+	return nil
+}
+
 // Issue is one problem Check finds. Provider/Model scope it for callers
 // that want to annotate a specific rendered line (vmr check) — Field names
 // which one ("api_key" | "probe_timeout" | "endpoint" | "listen"); all empty
 // means the issue is global. Endpoint carries the full
 // "protocol/provider/model" key for "endpoint".
 type Issue struct {
-	Provider string
-	Model    string
-	Endpoint string
-	Field    string
-	Message  string
-	Severity Severity
+	Provider string   `json:"provider,omitempty"`
+	Model    string   `json:"model,omitempty"`
+	Endpoint string   `json:"endpoint,omitempty"`
+	Field    string   `json:"field,omitempty"`
+	Message  string   `json:"message"`
+	Severity Severity `json:"severity"`
 }
 
 // Check runs every consistency check beyond validate(). Shared by `vmr

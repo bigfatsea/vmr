@@ -152,3 +152,85 @@ func TestAdminStatusStillLoopbackOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminStatusIssuesBlock verifies that /admin/status includes the "issues" array
+// when config.Check() flags operational issues, and omits it when the config is clean.
+func TestAdminStatusIssuesBlock(t *testing.T) {
+	// Config with non-loopback listen and no API keys -> flags a SeverityWarning listen issue.
+	exposedYAML := `
+listen: 0.0.0.0:18800
+providers:
+  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+`
+	cfg, err := config.Parse([]byte(exposedYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	s := New(rt, nil)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/admin/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Issues []config.Issue `json:"issues"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Field != "listen" || out.Issues[0].Severity != config.SeverityWarning {
+		t.Errorf("got issues %+v, want 1 listen warning", out.Issues)
+	}
+}
+
+func TestAdminStatusNoIssuesBlock(t *testing.T) {
+	// Clean config -> issues field must be absent/omitted.
+	cleanYAML := `
+listen: 127.0.0.1:18800
+providers:
+  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, provider: p1, models: [m1]}
+`
+	cfg, err := config.Parse([]byte(cleanYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	s := New(rt, nil)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/admin/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["issues"]; ok {
+		t.Errorf("issues key must be omitted on clean config, got: %s", string(raw["issues"]))
+	}
+}

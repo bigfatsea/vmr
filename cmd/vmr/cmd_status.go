@@ -107,6 +107,9 @@ type statusResponse struct {
 		TokenWeights     quotaTokenWeightsView `json:"token_weights"`
 		ModelMultipliers map[string]float64    `json:"model_multipliers,omitempty"`
 	} `json:"quota"`
+	// Issues is absent (nil slice) when the running config has no
+	// consistency/operational issues flagged by config.Check().
+	Issues []config.Issue `json:"issues,omitempty"`
 }
 
 func cmdStatus(args []string) error {
@@ -235,6 +238,9 @@ func printStatus(st *statusResponse) {
 		} else {
 			fmt.Println("           no reload has picked it up — check the log, or send SIGHUP to retry")
 		}
+	}
+	for _, is := range st.Issues {
+		fmt.Printf("  WARNING: %s\n", is.Message)
 	}
 	if !st.Reload.At.IsZero() {
 		state := "ok"

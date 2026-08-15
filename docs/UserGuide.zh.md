@@ -493,7 +493,7 @@ models:
 | `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要一条 `protocol: openai-responses` 的端点 |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/admin/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
-| `GET /admin/status` | 进程身份（pid/listen/版本/配置路径/uptime）、配置是否过期的判定、热重载结果、逐端点健康、Sticky Model 注册表大小、并发指标，以及——对每个配了 `quota:` 的 provider——一段展示实时消耗的 `quota` 段（见上文"额度感知路由"），含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback）——下文的 `vmr status` 是这份数据的 CLI 前端 |
+| `GET /admin/status` | 进程身份（pid/listen/版本/配置路径/uptime）、配置是否过期的判定、热重载结果、逐端点健康、Sticky Model 注册表大小、并发指标、操作性告警（`config.Check()` 检出问题时带 `issues`），以及——对每个配了 `quota:` 的 provider——一段展示实时消耗的 `quota` 段（见上文"额度感知路由"），含某个端点当前是否正被一次后台恢复探测占着单飞名额（仅 loopback）——下文的 `vmr status` 是这份数据的 CLI 前端 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
