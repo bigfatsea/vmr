@@ -235,17 +235,62 @@ func TestBuildProviderQuotaRows_CostMetric_SkipsModelMultiplier(t *testing.T) {
 // traffic existed for this cost account, but not a single endpoint
 // had a resolvable price — WindowConsumed must be nil (renders "-"), never
 // a fabricated 0 indistinguishable from "genuinely spent nothing."
+// Requests > 0 on both rows is load-bearing, not decoration: "-" means
+// "this account SERVED traffic that nothing could price". A row with
+// Requests == 0 is a different situation entirely (see
+// _CostMetric_AllAttemptsFailedRendersRealZero below), and this fixture
+// used to leave the field at its zero value — so it was quietly asserting
+// the wrong shape's behavior.
 func TestBuildProviderQuotaRows_CostMetric_NoPricingAnywhereRendersNil(t *testing.T) {
 	lim := costLimit(100)
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", CostEstimate: nil},
-		{Endpoint: "openai:acct1:m2", CostEstimate: nil},
+		{Endpoint: "openai:acct1:m1", Requests: 3, CostEstimate: nil},
+		{Endpoint: "openai:acct1:m2", Requests: 2, CostEstimate: nil},
 	}}
 	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed != nil {
-		t.Fatalf("WindowConsumed = %v, want nil (no endpoint priced)", *rows[0].WindowConsumed)
+		t.Fatalf("WindowConsumed = %v, want nil (served traffic, no endpoint priced)", *rows[0].WindowConsumed)
+	}
+}
+
+// TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero
+// covers the third shape, between "no traffic at all" and "served but
+// unpriced": every attempt against this account failed (upstream 5xx, a
+// connection error), so EndpointsAll carries attempt-grade rows with
+// Requests == 0 and no cost was ever attributed. The router charged exactly
+// $0.00 for such a window (chargeQuota only ever runs from forwardSuccess),
+// so "-" would be a false UNKNOWN — the mirror image of the false ZERO the
+// nil branch exists to prevent, and out of step with what the requests and
+// tokens metrics render for the identical window.
+func TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:m1", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0 {
+		t.Fatalf("WindowConsumed = %v, want a real 0 (nothing was ever forwarded, so nothing was charged)", rows[0].WindowConsumed)
+	}
+}
+
+// A failed endpoint must not drag a sibling that DID serve unpriced traffic
+// out of the "-" verdict either: the two conditions are independent, and
+// the account-level answer is still "unknown".
+func TestBuildProviderQuotaRows_CostMetric_FailedSiblingDoesNotMaskUnpriced(t *testing.T) {
+	lim := costLimit(100)
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai:acct1:dead", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
+		{Endpoint: "openai:acct1:unpriced", Attempts: 2, Requests: 2, CostEstimate: nil},
+	}}
+	quotas := map[string]ProviderQuotaRef{"acct1": {Limit: &lim, Spec: spec}}
+	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if rows[0].WindowConsumed != nil {
+		t.Fatalf("WindowConsumed = %v, want nil (one endpoint served unpriced traffic)", *rows[0].WindowConsumed)
 	}
 }
 

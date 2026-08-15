@@ -18,7 +18,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏或服务阻断级别的缺陷；单机生产环境可稳定运行。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**：中危 4 项、低危 5 项，无高危项。
+- **§1 分布**：中危 6 项、低危 6 项，无高危项。
 
 ---
 
@@ -49,32 +49,45 @@
 - **可能方案**：检测同账户内是否存在未定价端点，在消耗值旁加警示标记或脚注。
 - **性质**：与 B0 修掉的 tokens 部分退化发散同源——「部分不可知」不该渲染成「精确已知」。范围小于当年那次，因为它只影响 `metric: cost` 账户。
 
-### 1.5 [低] 探针请求绕过审计日志
+### 1.5 [中] `vmr report` §2 成本表的 $ 列与 Token 列口径不一致
+
+- **现状**：`internal/report/cost.go` 的 `costFor` 在 usage 未嗅探到时改用降级字节估算定价（这是刻意的假零修复），因此 `Row.CostEstimate` / `ClientRow.CostEstimate` 里含有估算成分；但 §2 三张表与 $ 并排显示的 `tokens_in_fresh` / `tokens_out` 仍然只统计嗅探到 usage 的记录。同一行里两列的基数不同，读者按 $/token 反推单价会得到偏高的结果，且没有任何「含估算」的提示。
+- **对比**：§2.5 没有这个问题（有 `window_estimated_pct`），`EndpointRow` 也已有 `cost_estimate_est` 字段承载这一份；缺的是 `Row` / `ClientRow` 的对应字段。
+- **可能方案**：① §2 加一条脚注说明口径；② 给 `Row` / `ClientRow` 补 `CostEstimateEst`，表里按 §2.5 的既有惯例渲染 "X% est."（要动 `rows.go` / `accumulateCost` / 渲染层三处）。
+- **为什么待定**：方案 ② 会再次改动 `vmr-report.json` 形状，属于展示口径决策而非缺陷修复。
+
+### 1.6 [低] `archtest` 函数长度豁免的键无法区分同文件重名方法
+
+- **现状**：`internal/archtest/func_sizes_test.go` 的 `funcLineExemptions` 以 `文件路径:函数名` 为键，同一文件里的重名方法会共用一条记录——`internal/report/ingest.go` 就有 6 个 `Ingest` 方法。今天全部远低于 120 行默认限额，无实际影响；但一旦为其中一个登记豁免，另外 5 个会一并被放宽。
+- **可能方案**：键改为 `文件:接收者类型.函数名`（`ast.FuncDecl.Recv` 已有类型信息，不需要新依赖）。
+- **为什么待定**：需要真的出现一个必须豁免的重名方法才有意义；现在改属于为不存在的场景加机制。
+
+### 1.7 [低] 探针请求绕过审计日志
 
 - **现状**：`internal/router/probe.go` 的健康探活请求直接与上游交互，不写 `audit.Record`，`vmr report` 看不到探活的 Token 与延迟消耗。
 - **为什么待定**：探活消耗极低；且需先明确探针流量在报表中的呈现口径，避免污染业务 SLO 统计。
 
-### 1.6 [低] 审计落盘的 `write` syscall 在全局锁内
+### 1.8 [低] 审计落盘的 `write` syscall 在全局锁内
 
 - **现状**：`audit.Logger.Write` 的 JSON 编码已通过 `sync.Pool` 移到锁外，但最终写文件的系统调用仍在全局互斥锁内。
 - **可能方案**：带缓冲通道 + 单独写协程，把 syscall 移出请求路径。
 - **为什么待定**：异步写入队列要处理背压策略（丢弃 vs 阻塞）与优雅关停等待；当前直接写入未构成瓶颈。
 
-### 1.7 [低] `/admin/status` 未暴露 `config.Check()` 的操作性告警
+### 1.9 [低] `/admin/status` 未暴露 `config.Check()` 的操作性告警
 
 - **现状**：启动与热重载已自动调用 `config.Check()` 并把问题打到日志 `WARN`，但 `/admin/status` 响应里没有对应的问题列表字段。
 - **改进方案**：在 admin 状态响应中补上该告警集合。
 
-### 1.8 [低] 图片降采样磁盘缓存无容量上限
+### 1.10 [低] 图片降采样磁盘缓存无容量上限
 
 - **现状**：`internal/imgprep` 的缓存按 TTL（默认 7 天）依文件修改时间清理，不限制总字节数。
 - **为什么待定**：降采样后图片体积小，正常使用下磁盘占用可控。
 
-### 1.9 [低] 额度燃尽看板未交付
+### 1.11 [低] 额度燃尽看板未交付
 
 - **现状**：`vmr report` 已有额度与消耗对照子表，但更进一步的长期燃尽曲线与预测看板尚未实现。
 
-### 1.10 [中] 分析半区体量增长与单人可维护性
+### 1.12 [中] 分析半区体量增长与单人可维护性
 
 - **现状**：分析半区（`report`/`story`/`ctxgraph`/`taskseg`/`i18n`）的代码体量已超过在线路由半区。
 - **指导原则**：新的探索性 Agent 分析指标，优先用外部脚本消费稳定的 `vmr-report.json` / `journey-*.json` 数据契约做验证，证明价值后再评估是否合入主仓库。
@@ -100,7 +113,12 @@
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
 - **不合并 `Dimension`（排序）与 `Condition`（淘汰）**：淘汰依赖请求事实，排序只比较端点属性，职责分离保证接口纯粹。
 
-### 2.3 包边界与依赖
+### 2.3 校验与防御性编程
+
+- **`nil` 校验只加在跨包公共入口，且一律 fail-fast，绝不静默兜底**：已加校验的是 `report.AnalyzeSessionsCached` 与 `story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」，深处 panic 会带崩整个进程而不是给出一条可读错误。`taskseg.IndexRealUsers`、`taskseg.HasNewInstruction` 这类**包内被上述入口保护的函数**不再重复校验：调用链上游已经拦过，重复校验只是噪音。
+- **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 会给出**不同的任务标题与任务边界**。真的传进 nil 说明调用方有 bug，静默换一个 Profile 会让报表照常跑完、产出一份错误但看起来完全正常的分析结果，比直接 panic 难查得多。同理，`HasNewInstruction` 的 `cur` 参数也不加判空——构造上不可能为 nil，属于「为不可能发生的场景加校验」。
+
+### 2.4 包边界与依赖
 
 - **`imgprep.ImageInfo` 到 `audit.ImageInfo` 的字段拷贝**：换取 `imgprep` 不依赖 `audit`，保住公共工具包的零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同，强行复用只会增加耦合。
@@ -110,7 +128,7 @@
 - **`i18n` 的 26 个微文件不合并**：它与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并会让「改一节文案」从打开一个几十行的小文件变成在几百行大文件里找。
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
 
-### 2.4 产出与工程惯例
+### 2.5 产出与工程惯例
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
@@ -127,6 +145,6 @@
 2. **JSON 字节扫描引擎独立成包**（`internal/jsonscan`）：零内部依赖，消除 `adapter` 与路由层的重复扫描，有 fuzz 保障边界安全。
 3. **Agent 方言与任务分段收敛**（`internal/taskseg`）：`report` 与 `story` 共用同一份方言识别、任务切分与真用户指令索引，不再各自实现。
 4. **报表聚合与提取解耦**（`internal/report`）：共享 `TrafficStats` 组合结构，单体大函数拆解到 `ingest.go` / `recextract.go`。
-5. **公共叶子层职责净化**（`internal/core`、`internal/fmtutil`）：展示层格式化统一下沉到 `fmtutil`，HTTP 响应辅助函数回到 `router`，`core` 的准入规则写进包注释。
+5. **公共叶子层职责净化**（`internal/core`、`internal/fmtutil`）：展示层格式化统一下沉到 `fmtutil`，HTTP 响应辅助函数与客户端 header 黑名单（`WriteJSON`/`WriteError`/`FilterClientHeaders`）回到 `router`，`core` 的准入规则写进包注释并对自身存量逐条复核过。
 6. **额度与定价引擎精简**（`internal/quota`、`internal/pricing`）：移除分时促销等冗余功能面，固化静态费率覆盖与三层解析。
 7. **架构与文档守卫可执行化**（`internal/archtest`）：包依赖边界、文件行数预算、函数长度预算、文档引用有效性全部变成会失败的测试。

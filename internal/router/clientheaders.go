@@ -1,5 +1,5 @@
 // Ver 2026-07-26, by Sonnet 5
-package core
+package router
 
 import (
 	"net/http"
@@ -44,9 +44,15 @@ var headerBlocklist = map[string]struct{}{
 // removed — applied to every live request (internal/server.chatHandler)
 // before headers reach an adapter, and reused by internal/replay to
 // reconstruct the header set a live request would have carried when
-// rebuilding one from an audit record. Lives in core (moved out of
-// internal/server) so internal/replay doesn't need to import the whole HTTP
-// server package just for this one function.
+// rebuilding one from an audit record.
+//
+// Lives here, not in internal/core: deciding what reaches an upstream is
+// routing-half behavior, and both callers (server, replay) are routing-half
+// packages that already depend on this one. It sat in core only because
+// core was the first place both could reach without importing the HTTP
+// server — the same reasoning that put WriteJSON/WriteError there, and the
+// same reason both moved out once B5 wrote core's admission rule down (see
+// core's package comment: shared TYPES, not behavior with a real owner).
 func FilterClientHeaders(h http.Header) http.Header {
 	out := http.Header{}
 	for k, vs := range h {

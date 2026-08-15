@@ -240,10 +240,17 @@ func escapeHTML(s string) string {
 // result containing a Markdown snippet) can never break out of its block —
 // a fixed ``` fence would silently corrupt the rest of the document the
 // moment real content contains one. Same rationale/implementation as
-// internal/report/render.go's codeFence (duplicated, not exported: it's a
-// tiny, stable, purely cosmetic helper — see that package's chatmsg_compat.go
-// for the general pattern of what does and doesn't get shared), plus an
-// optional lang tag (report's own codeFence has no caller that needs one).
+// internal/report/render.go's codeFence, plus an optional lang tag
+// (report's own codeFence has no caller that needs one).
+//
+// Deliberately duplicated rather than shared: this and escapeHTML just
+// below are tiny, stable, purely cosmetic Markdown helpers with no domain
+// knowledge and no plausible reason to change again — the bar internal/
+// fmtutil's own admission reasoning applies (a shared display helper earns
+// its place when the two copies can drift in a way a reader would notice;
+// these two cannot). Naming both here so the pair isn't re-raised as an
+// oversight every time someone greps for duplicate helpers across the two
+// commands.
 // codeFence itself is the plain "" case every caller but tool-call
 // arguments uses.
 func codeFence(s string) string { return codeFenceLang(s, "") }

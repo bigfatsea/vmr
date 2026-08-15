@@ -9,8 +9,9 @@
 //
 // Relocated from internal/report/render.go + usage.go, where this logic
 // used to live as unexported functions only report's own renderer could
-// reach. internal/report keeps thin delegating wrappers (chatmsg_compat.go)
-// so its own call sites and tests are untouched byte-for-byte.
+// reach. That move originally landed behind a thin delegation layer in
+// report so its call sites stayed untouched; the layer is gone and every
+// consumer now calls this package directly.
 package chatmsg
 
 import (

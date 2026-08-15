@@ -42,6 +42,16 @@ var fileLineLimits = map[string]int{
 	// than left budget-less like aggregate.go was before its own review.
 	"internal/report/ingest.go":     310,
 	"internal/report/recextract.go": 310,
+	// rows.go is the third file B4 touched and the one it left budget-less:
+	// the batch moved declarations INTO it (TrafficStats plus the per-type
+	// deltas' documentation) while registering only the two files it moved
+	// code OUT to, so the package's largest declaration file — bigger today
+	// than aggregate.go's own budget — was the one thing with no tripwire.
+	// Registered here at the same first-time convention. It is the report's
+	// JSON contract: a new metric adds a field here, so growth is expected —
+	// what this catches is the file absorbing accumulation or rendering logic
+	// again, which belongs in ingest.go/section_*.go.
+	"internal/report/rows.go": 900,
 	// No prior split here — config.go is at 591 lines today. The budget is
 	// a tripwire against the same unnoticed growth pattern that hit
 	// router.go, not a statement that 591 is already too big: if it crosses
@@ -118,10 +128,15 @@ var fileLineLimits = map[string]int{
 	// fingerprint.go, shrinking it from 566 lines to ~160 specifically so it
 	// would stay a thin error-classification file — a budget-less file can't
 	// tell a contributor "you're rebuilding what B1 just moved out" the way
-	// a tripped test can. jsonscan's own two files are first-time budgets at
-	// the same ~15-20% headroom convention as every other entry here.
+	// a tripped test can. jsonscan's own budgets follow the same ~15-20%
+	// headroom convention as every other entry here; scan.go's dropped from
+	// 320 to 190 when the budget tripped and the walkers moved to walk.go
+	// (byte-level primitives vs. range-returning structural walkers), which
+	// is what the "split it, don't raise the number" message asks for — the
+	// new numbers are re-baselined on the post-split files, not inherited.
 	"internal/adapter/classify.go": 200,
-	"internal/jsonscan/scan.go":    320,
+	"internal/jsonscan/scan.go":    190,
+	"internal/jsonscan/walk.go":    200,
 	"internal/jsonscan/rewrite.go": 300,
 	// internal/taskseg's registration was deliberately deferred past B2 (its
 	// files were still small enough that a budget would have been a
@@ -133,10 +148,10 @@ var fileLineLimits = map[string]int{
 	"internal/taskseg/segment.go":  200,
 }
 
-// TestArchitecture_CoreFileSizes counts non-blank lines the same way `wc -l`
-// does (this test's own budget above was set from that same count) so a
-// contributor can reproduce a failure locally without reading this file's
-// counting logic first.
+// TestArchitecture_CoreFileSizes counts newlines, exactly what `wc -l`
+// reports (blank lines included — this test's own budgets above were set
+// from that same count), so a contributor can reproduce a failure locally
+// without reading this file's counting logic first.
 func TestArchitecture_CoreFileSizes(t *testing.T) {
 	repoRoot := repoRootDir(t)
 

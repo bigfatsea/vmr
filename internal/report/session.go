@@ -96,7 +96,6 @@ type ReqInfo struct {
 	DetailFile string // deterministic detail filename (assigned in ts order)
 
 	// Aggregates that the SessionRows / Workloads consumers need to roll up.
-	MessagesKnown    int              // requests whose body parsed as a chat object
 	RoleChars        map[string]int64 // per-role displayed-character totals
 	RoleTokens       map[string]int64 // per-role estimated-token totals (core.EstimateTextTokens)
 	Fallbacks        int              // requests that needed >1 attempt
@@ -112,11 +111,15 @@ type ReqInfo struct {
 	// for a record ctxgraph couldn't build a Manifest for at all (body
 	// wasn't a parseable chat object — same case collect() already bails
 	// out of early, see the body-parse guard below).
-	manifest  *ctxgraph.Manifest
-	tailPrev  []string          // previews of the last tailPrevKeep messages
-	realUsers taskseg.RealUsers // absolute idx → RAW (untruncated) text, real user instructions
-	firstText string            // first non-system message text (capped)
-	respText  string            // reassembled response content (compaction linking)
+	manifest *ctxgraph.Manifest
+	tailPrev []string // previews of the last tailPrevKeep messages
+	// realUsers: absolute msg idx → previewed real user instruction. Held for
+	// every record in the corpus (SessionAnalysis keeps all ReqInfo), which is
+	// why taskseg stores the preview rather than the raw text — see
+	// taskseg.IndexRealUsers' doc comment.
+	realUsers taskseg.RealUsers
+	firstText string // first non-system message text (capped)
+	respText  string // reassembled response content (compaction linking)
 	// NoReply is true when the assistant's reply was empty or just "NO_REPLY"
 	// (OpenClaw's skip-on-memory-flush pattern). Such records are typically
 	// retried by the client a few minutes later; the retry carries the
@@ -452,7 +455,6 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 
 	msgs := chatmsg.Messages(body) // anthropic system becomes message #0 — same shape both protocols
 	r.Msgs = len(msgs)
-	r.MessagesKnown = 1 // body parsed as chat object
 	collectRoleUsage(r, body)
 	rawMsgs := chatmsg.RawArray(body)
 	off := chatmsg.MsgOffset(body)

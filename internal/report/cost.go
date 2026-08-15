@@ -94,6 +94,11 @@ func addCost(p **float64, c float64) {
 // name can itself contain ":" or "/" (e.g. OpenRouter's "z-ai/glm-5.2"), so
 // this only ever isolates the first two colon-separated segments and
 // leaves the third — the model — exactly as-is, whatever it contains.
+//
+// Deliberately NOT replaced by core.SplitEndpointLabel, which also accepts
+// the legacy "/"-joined label: widening this one call site would change the $
+// numbers historical reports produce for old-format logs. See that function's
+// doc comment — this duplication is a recorded non-fix, not an oversight.
 func splitEndpointProviderModel(endpoint string) (provider, model string) {
 	parts := strings.SplitN(endpoint, ":", 3)
 	if len(parts) < 3 {

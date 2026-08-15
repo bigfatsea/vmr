@@ -32,6 +32,14 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/router",
 		"vmr/internal/server",
 		"vmr/internal/config",
+		// The other half of story's own "and vice versa" (see its entry
+		// below): the two commands are independent consumers of the same
+		// shared layers, so neither may reach into the other's rendering or
+		// analysis helpers. Only story's direction was ever enforced, which
+		// made the symmetric claim in that comment true by luck rather than
+		// by test — the exact "documented tripwire nobody sees trip" shape
+		// this package exists to eliminate.
+		"vmr/internal/story",
 	},
 	"vmr/internal/ctxgraph": {
 		"vmr/internal/router",
@@ -130,6 +138,24 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/pricing",
 		"vmr/internal/quota",
 	},
+	// chatmsg is the one message/SSE/usage parser ctxgraph, taskseg, report
+	// and story all share (CLAUDE.md's module map), and both the ctxgraph and
+	// taskseg entries above justify their own rules by citing "chatmsg's own
+	// zero-dependency-on-consumers rule" — which, until this entry, did not
+	// exist as a check anywhere. It really does sit at the bottom (its only
+	// internal dependency is fmtutil); the point of writing it down here is
+	// that a parser reaching back into one of its four consumers would make
+	// "one shared parser" structurally impossible, and the two comments that
+	// lean on that rule should be leaning on something enforced.
+	"vmr/internal/chatmsg": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+		"vmr/internal/config",
+		"vmr/internal/report",
+		"vmr/internal/story",
+		"vmr/internal/ctxgraph",
+		"vmr/internal/taskseg",
+	},
 }
 
 // zeroInternalDepPackages must not depend on any other vmr/internal/*
@@ -186,8 +212,16 @@ func TestArchitecture_ImportBoundaries(t *testing.T) {
 		}
 		for _, f := range forbidden {
 			if deps[f] {
-				t.Errorf("%s must not depend on %s: "+
-					"the analysis layer only depends on the audit schema, never on the routing runtime", pkg, f)
+				// Deliberately generic: this message used to assert the
+				// analysis-half rule ("only depends on the audit schema,
+				// never on the routing runtime"), which was true when the
+				// table held only report/ctxgraph/story — it now also holds
+				// routing-half rules (adapter, router, respnorm), where that
+				// sentence was actively misleading. The per-entry reason
+				// lives in forbiddenImports' own comments, which is where a
+				// reader has to go anyway.
+				t.Errorf("%s must not depend on %s (possibly transitively): see the reason "+
+					"recorded on this entry in archtest's forbiddenImports", pkg, f)
 			}
 		}
 	}

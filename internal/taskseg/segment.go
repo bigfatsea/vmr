@@ -10,23 +10,41 @@ import (
 )
 
 // RealUsers indexes one request's real user instructions by absolute
-// message index -> raw (untruncated) instruction text. Built once per
-// request via IndexRealUsers and consumed by HasNewInstruction/
-// LastInstruction — the single point where a request's real-instruction
-// regex work happens, no matter how many boundary/title decisions
-// afterward read from it. Deliberately stores the RAW text, not a preview:
-// callers that want a display string (LastInstruction, TaskTitle's input)
-// truncate on the way out via Preview, so there is exactly one place that
-// decides the truncation length instead of two commands quietly disagreeing
-// on it.
+// message index -> Preview of the instruction text. Built once per request
+// via IndexRealUsers and consumed by HasNewInstruction/LastInstruction —
+// the single point where a request's real-instruction regex work happens,
+// no matter how many boundary/title decisions afterward read from it.
+//
+// The stored value is already Preview'd, and that placement is the whole
+// point rather than an implementation detail (it reverses B3's original
+// "store raw, truncate on read" decision — see IndexRealUsers). Preview is
+// idempotent, so every consumer still calls it on the way out and nothing
+// downstream depends on which side of the map the truncation happened on;
+// exactly one constant (previewLen) still decides the length, so the two
+// commands cannot drift apart on it either.
 type RealUsers map[int]string
 
 // IndexRealUsers scans msgs once, calling prof.RealUserText for every
-// user-role message. report's collect() and story's buildFrom() each call
-// this exactly once per request, in their own main per-request scan, and
-// pass the result down to HasNewInstruction/LastInstruction/a stitch-
-// boundary title lookup instead of re-scanning for each — story used to
-// rerun the same regex up to 2-3 times per request this way.
+// user-role message and storing Preview of what it returns. report's
+// collect() and story's buildFrom() each call this exactly once per
+// request, in their own main per-request scan, and pass the result down to
+// HasNewInstruction/LastInstruction/a stitch-boundary title lookup instead
+// of re-scanning for each — story used to rerun the same regex up to 2-3
+// times per request this way.
+//
+// Why Preview here and not in the consumers (B3 stored the raw text and
+// truncated on read; that is deliberately reversed): report keeps one of
+// these indexes alive per RECORD for the whole corpus (SessionAnalysis
+// holds every ReqInfo), and every record carries the session's entire
+// history — so the same instruction's full text would be retained once per
+// later record in that session, growing quadratically with session length.
+// Two further multipliers made raw storage worse than it looks: an agent
+// instruction can be many KB, and a dialect that strips a metadata envelope
+// returns a SUBSLICE of the message (Go substrings share the backing
+// array), which pins the whole original message even when the useful part
+// is one line. No consumer ever wanted the raw text — all three of them
+// (LastInstruction, FirstInstruction, story's stitch-boundary title) Preview
+// it immediately, and HasNewInstruction reads only the keys.
 func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int) RealUsers {
 	ru := RealUsers{}
 	for i, m := range msgs {
@@ -34,7 +52,7 @@ func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int
 			continue
 		}
 		if text, ok := prof.RealUserText(m, rawMsgs, i-off); ok {
-			ru[i] = text
+			ru[i] = Preview(text)
 		}
 	}
 	return ru
@@ -161,6 +179,13 @@ const previewLen = 80
 // Preview returns a single-line, length-capped excerpt of s: internal
 // whitespace collapsed to single spaces, then capped at previewLen runes
 // with a trailing ellipsis when truncated.
+//
+// Idempotent — Preview(Preview(s)) == Preview(s) — which is what lets
+// IndexRealUsers store an already-previewed value while every consumer
+// keeps calling Preview on the way out (see RealUsers). A truncated result
+// is previewLen runes plus the ellipsis, so re-previewing re-cuts at the
+// same previewLen boundary and re-appends the same ellipsis. Pinned by
+// TestPreviewIsIdempotent.
 func Preview(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)

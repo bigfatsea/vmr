@@ -30,12 +30,48 @@ func TestIndexRealUsers_OnlyRealUserMessages(t *testing.T) {
 	}
 }
 
-func TestIndexRealUsers_StoresRawNotPreview(t *testing.T) {
+// TestIndexRealUsers_StoresPreviewNotRaw pins the reversal of B3's original
+// "store raw, truncate on read" decision: report keeps one index per record
+// for the whole corpus and every record carries the session's full history,
+// so storing raw retained each instruction once per later record in the same
+// session (and, for an envelope-stripping dialect, pinned the entire
+// original message through the returned subslice). No consumer ever wanted
+// raw — see IndexRealUsers' doc comment.
+func TestIndexRealUsers_StoresPreviewNotRaw(t *testing.T) {
 	long := strings.Repeat("a ", 200) // far past previewLen once trimmed
 	msgs := []chatmsg.Message{{Role: "user", Text: long}}
 	ru := IndexRealUsers(Generic, msgs, nil, 0)
-	if ru[0] != long {
-		t.Error("IndexRealUsers must store the raw, untruncated text — truncation happens on read")
+	if ru[0] != Preview(long) {
+		t.Errorf("ru[0] = %q, want the Preview'd form %q", ru[0], Preview(long))
+	}
+	if utf8.RuneCountInString(ru[0]) > previewLen+1 { // +1: the ellipsis
+		t.Errorf("stored value is %d runes, want at most %d — the index must not "+
+			"retain the untruncated text", utf8.RuneCountInString(ru[0]), previewLen+1)
+	}
+}
+
+// TestPreviewIsIdempotent is what makes storing the preview safe: every
+// consumer of a RealUsers value still calls Preview on the way out, so a
+// second application must be a no-op or the two commands' titles would
+// differ by which side of the map truncated. Covers the boundary shapes —
+// exactly at the cap, one past it, and multi-byte runes at the cut.
+func TestPreviewIsIdempotent(t *testing.T) {
+	cases := []string{
+		"",
+		"short",
+		"  collapse   internal \n whitespace  ",
+		strings.Repeat("a", previewLen),
+		strings.Repeat("a", previewLen+1),
+		strings.Repeat("a ", 200),
+		strings.Repeat("中", previewLen+5),
+		strings.Repeat("😀", previewLen+5),
+	}
+	for _, s := range cases {
+		once := Preview(s)
+		if twice := Preview(once); twice != once {
+			t.Errorf("Preview not idempotent for %d-rune input: %q vs %q",
+				utf8.RuneCountInString(s), once, twice)
+		}
 	}
 }
 

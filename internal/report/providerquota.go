@@ -101,7 +101,15 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string]ProviderQuotaRef, no
 			// model_multipliers never applies to a cost account (config.validate
 			// rejects that combination — see ChargeResponse's own comment), so
 			// this branch deliberately skips ApplyModelMultiplier.
-			costSawTraffic[provider] = true
+			// Gated on e.Requests (SERVED — accumulateCost's own basis, NOT the
+			// Forwarded basis MetricRequests needs above): EndpointsAll also
+			// carries attempt-only rows for an endpoint whose every attempt
+			// failed, and counting those made an all-failed window render "-"
+			// when the router had charged exactly $0.00 — a false UNKNOWN
+			// mirroring the false ZERO this guard exists to prevent.
+			if e.Requests > 0 {
+				costSawTraffic[provider] = true
+			}
 			if e.CostEstimate != nil {
 				windowSums[provider] = windowSums[provider].Add(quota.Counters{Cost: *e.CostEstimate})
 				windowCostEstimated[provider] += e.CostEstimateEst

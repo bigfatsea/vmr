@@ -19,9 +19,13 @@
 // cross-half call sites, has no other package that could plausibly own it,
 // and core is the only common ancestor all of them can import. Before
 // adding a new behavior function here, check whether it actually meets that
-// bar — WriteJSON/WriteError used to live here and moved to internal/router
-// once the bar was applied retroactively (HTTP response writing has real
-// owners: router and server, not "shared infrastructure").
+// bar — WriteJSON/WriteError and FilterClientHeaders used to live here and
+// all moved to internal/router once the bar was applied retroactively (HTTP
+// response writing and client-header filtering have real owners: router,
+// server, and replay — all routing-half — not "shared infrastructure").
+// FilterClientHeaders in particular looked like it belonged here because
+// core already imports net/http for CanonicalRequest.Header; importing a
+// package is not the same as owning the behavior built on it.
 package core
 
 import (

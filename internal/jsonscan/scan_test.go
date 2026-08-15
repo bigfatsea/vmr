@@ -160,6 +160,40 @@ func TestScanners_HostileIndexNeverPanics(t *testing.T) {
 	})
 }
 
+// TestSkipJSONValue_BareLiteralAtEOF covers the one shape no in-repo caller
+// produces (every one of them scans inside a container, where a delimiter
+// always arrives before EOF): a scalar that runs to the end of the buffer.
+// Refusing it would contradict SkipJSONValue's own doc comment, and this is an
+// exported leaf-package function whose caller set is open. The negative cases
+// pin the zero-progress rule that must survive alongside it — a buffer that is
+// nothing but a delimiter, or nothing at all, still fails.
+func TestSkipJSONValue_BareLiteralAtEOF(t *testing.T) {
+	cases := []struct {
+		b    string
+		want int // 0 == expect ok=false
+	}{
+		{"123", 3},
+		{"true", 4},
+		{"false", 5},
+		{"null", 4},
+		{"-1.5e10", 7},
+		{"123 ", 3},  // trailing space still wins, unchanged
+		{"123,", 3},  // trailing delimiter still wins, unchanged
+		{`"s"`, 3},   // string branch, untouched by this rule
+		{"[1,2]", 5}, // container branch, untouched by this rule
+		{",", 0},     // delimiter only: no token at all
+		{"}", 0},
+		{" ", 0},
+	}
+	for _, tc := range cases {
+		n, ok := SkipJSONValue([]byte(tc.b), 0)
+		wantOK := tc.want != 0
+		if n != tc.want || ok != wantOK {
+			t.Errorf("SkipJSONValue(%q, 0) = (%d, %v), want (%d, %v)", tc.b, n, ok, tc.want, wantOK)
+		}
+	}
+}
+
 // TestSkipJSONWS_OutOfRangeSaturatesForward pins the property the rest of the
 // package leans on: SkipJSONWS can be handed any int, and anything outside
 // the buffer comes back >= len(b), so a caller's `i >= bound` check catches

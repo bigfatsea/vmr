@@ -114,16 +114,16 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 	// endpoint served + last error class (recompute; ReqInfo unexported)
 	r.endpoint, r.errClass = endpointInfo(arec)
 	r.clientKey = arec.ClientKeyTag
-	// images
-	for _, img := range arec.Images {
-		r.images++
-		if img.Downscaled {
-			r.imagesCompressed++
+	// images + fallbacks: derived from arec only when there is no ReqInfo to
+	// join — the ri != nil block below overwrites both unconditionally, so
+	// computing them first would just be discarded work on every analyzed
+	// record. (r.truncated below is different: it MERGES with ri, so it must
+	// be computed either way.)
+	if ri == nil {
+		r.images, r.imagesCompressed = countImages(arec.Images)
+		if len(arec.Attempts) > 1 {
+			r.fallbacks = 1
 		}
-	}
-	// fallbacks
-	if len(arec.Attempts) > 1 {
-		r.fallbacks = 1
 	}
 	// truncated: ok outcome with a truncated attempt error
 	if arec.Outcome == "ok" {

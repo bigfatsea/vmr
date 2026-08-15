@@ -255,7 +255,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// necessary — it strips legitimate metadata (User-Agent,
 		// X-Stainless-*, Traceparent) and needs code updates when SDKs
 		// add new headers.
-		hdr := core.FilterClientHeaders(r.Header)
+		hdr := router.FilterClientHeaders(r.Header)
 
 		// Computed once, used twice: the routing layer consults it via
 		// CanonicalRequest.Facts, and the audit trail records the exact

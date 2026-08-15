@@ -52,7 +52,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 
 | Package | Owns |
 | --- | --- |
-| `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus `FilterClientHeaders` and the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
+| `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
 | `jsonscan` | JSON byte-range scan/splice engine: `RewriteModel`/`RewriteStream`/`RewriteRoles` and the structural primitives behind them. Fuzz-tested. A function belongs here only if it needs no specific field or role name — otherwise it belongs in `adapter` |
 | `i18n` | EN/ZH text for every `report`/`story` output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
@@ -70,7 +70,7 @@ Routing half:
 | `quota` | Quota accounting: `Counters`/`Registry` keyed by provider *name* (rotating a key must not reset the period), calendar-aware periods, headroom scoring, atomic `vmr-quota.json` persistence |
 | `pricing` | Three-layer rate resolution (account override → supplement/standard table → unpriced). A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
 | `respnorm` | Response stream normalization: `Wrap` + the buffered/passthrough state machine, model rewrite, SSE splitting, `[DONE]` policy, and the evidence-based vendor quirk repairs. Quota usage sniffing lives here too — a documented tradeoff, see the package doc |
-| `router` | Failover loop (`Serve`/`tryOne`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`) |
+| `router` | Failover loop (`Serve`/`tryOne`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
 | `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, loopback-only `/admin/status` |
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |

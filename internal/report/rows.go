@@ -116,7 +116,10 @@ type Meta struct {
 //     now always rendered like the other 4).
 //   - OK/Errors: SessionRow loses omitempty (always rendered now).
 //   - New fields with real values where a type had none before: TokensReasoning
-//     (HourRow/WorkloadRow/SessionRow), DurMSP50 + SlowRequests (SessionRow).
+//     (HourRow/WorkloadRow/SessionRow), DurMSP50 + SlowRequests (SessionRow),
+//     OK + Errors (WorkloadRow — it counted neither before, and inherits the
+//     core's no-omitempty convention, so a workload row now always carries
+//     both).
 //
 // See CHANGELOG.md's B4 entry for the same list from a consumer's viewpoint.
 type TrafficStats struct {
@@ -178,10 +181,17 @@ type Row struct {
 	TokOutPerSec float64 `json:"tok_out_per_sec,omitempty"`
 
 	// D - wire & payload
+	//
+	// No message-count field here on purpose: "messages"/"messages_known"
+	// were declared with JSON tags from this file's first version and never
+	// once written, so they could only ever render as absent (both were
+	// omitempty). Per-request message counts do exist and are reported —
+	// RequestRow.Msgs, from rec2.msgs — the bucket-level roll-up simply
+	// never had an accumulator or a reader. A field in this file is a public
+	// contract; one that cannot carry a value is a promise the report can't
+	// keep.
 	BytesIn          int64            `json:"bytes_in,omitempty"`
 	BytesOut         int64            `json:"bytes_out,omitempty"`
-	Messages         int64            `json:"messages,omitempty"`
-	MessagesKnown    int              `json:"messages_known,omitempty"`
 	RoleChars        map[string]int64 `json:"role_chars,omitempty"`
 	RoleTokens       map[string]int64 `json:"role_tokens,omitempty"`
 	Images           int              `json:"images,omitempty"`
@@ -390,8 +400,14 @@ type SessionRow struct {
 	Images    int              `json:"images,omitempty"`
 
 	// E - workload shape
-	ContextGrowth   float64  `json:"context_growth,omitempty"`   // last_in / first_in
-	CompactionChain []string `json:"compaction_chain,omitempty"` // session ids, head->current
+	//
+	// No compaction_chain field: it was declared here (omitempty []string)
+	// and never written by anything, so it could only render as absent. The
+	// chain itself IS reported — section_sessions.go's renderCompactionChains
+	// walks ContinuedFrom across rows at render time rather than
+	// materializing a per-row copy, which is why no accumulator for it was
+	// ever missed. Same reasoning as the messages fields on Row above.
+	ContextGrowth float64 `json:"context_growth,omitempty"` // last_in / first_in
 
 	ttfts []int64
 }

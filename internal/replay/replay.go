@@ -460,7 +460,7 @@ func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte)
 }
 
 // replayHeaders reconstructs the header set a live request would have
-// carried. core.FilterClientHeaders alone isn't enough here: its blocklist
+// carried. router.FilterClientHeaders alone isn't enough here: its blocklist
 // and audit.Redact's separate credentialHeaders list are independently
 // maintained and don't fully overlap (e.g. "Api-Key"/"X-Auth-Token" are
 // masked by Redact but not blocked from forwarding on live traffic, since
@@ -470,7 +470,7 @@ func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte)
 // garbage where FilterClientHeaders alone wouldn't catch it, so every such
 // header is stripped here too.
 func replayHeaders(h http.Header) http.Header {
-	out := core.FilterClientHeaders(h)
+	out := router.FilterClientHeaders(h)
 	for k := range out {
 		if audit.IsCredentialHeader(k) {
 			out.Del(k)

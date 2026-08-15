@@ -656,6 +656,22 @@ func (s *stream) finalizeBuffered() {
 // appendDone adds the [DONE] sentinel when — and only when — the client
 // speaks the OpenAI protocol, the response is SSE, and the upstream
 // didn't send its own. Anthropic streams have no [DONE] concept.
+//
+// Options.Protocol is the INGRESS adapter's registered type string, not a
+// family name: the three values that reach here are "openai", "anthropic",
+// and "openai-responses" (newStream switches on that last one too). The
+// comparison is deliberately exact rather than a prefix or a family
+// predicate — "openai-responses" starts with "openai" and must NOT get a
+// [DONE]. A future OpenAI-derived ingress (an azure-openai adapter, say)
+// therefore needs its own decision here rather than inheriting one: it is a
+// new registered protocol string, so it falls through to "no [DONE]" until
+// someone states otherwise, which is the safe default (adding a sentinel a
+// client doesn't expect corrupts a stream; omitting one only reaches a
+// client that already tolerates upstreams which never send it). Kept as a
+// literal comparison in the one place the decision is made rather than an
+// isProtocolRequiringDone helper — with three protocols and no translation
+// between them (CLAUDE.md's headline invariant), a predicate function would
+// add a layer without adding a decision.
 func (s *stream) appendDone() {
 	if !s.isSSE || s.protocol != "openai" || s.sawDone {
 		return
@@ -732,6 +748,17 @@ const (
 // shapes are detected by the same rule — the first non-empty content/text
 // value STARTS with the shape's marker — so a reply that merely mentions
 // <think> or "Thinking Process:" mid-text streams through untouched.
+//
+// Why only <think> is checked in BOTH "content" (openai) and "text"
+// (anthropic), while "Thinking Process:" is checked in "content" alone: the
+// <think> repair (thinkPattern) is a field-agnostic regexp that works on
+// either event shape, but stripThinkingProcess is structurally openai-shaped —
+// its own trigger guard and its surviving-content splice both key off
+// contentFieldMarker. Buffering an anthropic response on a "text" value that
+// opened with "Thinking Process:" would cost the whole stream's latency and
+// then strip nothing. Widening this needs the repair rewritten for the
+// anthropic event shape first, and evidence that MiniMax thinking mode is
+// actually reachable over /v1/messages — neither exists today.
 func classifyEvent(ev []byte) verdict {
 	if v, ok := afterMarker(ev, contentFieldMarker); ok {
 		v = trimEscapedWS(v)
