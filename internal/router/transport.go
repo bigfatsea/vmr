@@ -59,6 +59,17 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 // SSE tokens reach the client immediately. A watchdog aborts the copy when the
 // upstream goes silent for longer than idle. On timeout the caller closes the
 // body, which unblocks the reader goroutine.
+//
+// Returning does NOT mean the reader goroutine has stopped touching body. On
+// the two early-return paths (idle timeout, client write error) it may still
+// be inside — or about to start — one more body.Read, whose writes to body's
+// internal state never pass through ch and so have no happens-before edge to
+// whatever the caller reads next. Every normal-path chunk is synchronized by
+// the ch send/receive; only that trailing read is not. Callers that inspect
+// body's state after this returns (forwardSuccess reads Applied()/
+// RawPreStrip()/ObservedModel()) are racing with it — see
+// docs/KNOWN_ISSUES_sonnet-5.md's entry on copyFlush returning before its
+// reader goroutine has stopped touching the body.
 func copyFlush(w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)
 	type chunk struct {

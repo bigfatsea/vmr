@@ -246,13 +246,18 @@ type stream struct {
 	// returns — and on two of copyFlush's return paths (idle timeout,
 	// write error) the reader goroutine is not guaranteed to have exited
 	// yet (see transport.go's copyFlush doc comment and
-	// docs/KNOWN_ISSUES_sonnet-5.md's existing entry on this). Rather
+	// docs/KNOWN_ISSUES_sonnet-5.md's entry on copyFlush returning before
+	// its reader goroutine has stopped touching the body). Rather
 	// than fixing that pre-existing race (a hot-path change out of scope
 	// for this feature), these four fields get their own lock so the NEW code
 	// this feature adds is race-clean without touching the old fields at
-	// all. Worst case under the pre-existing race: this response's very
-	// last chunk of usage/bytes is missed — a benign undercount, not
-	// undefined behavior.
+	// all. Worst case for THESE four, precisely because of this lock: this
+	// response's very last chunk of usage/bytes is missed — a benign
+	// undercount, not undefined behavior. That bound does NOT extend to the
+	// unsynchronized fields the same race also touches (applied,
+	// rawPreStrip, observedModel, read via Applied()/RawPreStrip()/
+	// ObservedModel() on the same post-copyFlush path): those are a genuine
+	// data race on slice/string headers. See the KNOWN_ISSUES entry.
 	qmu        sync.Mutex
 	asciiBytes int64
 	wideBytes  int64
