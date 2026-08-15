@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-15 14:30, by gemini-3.7-flash -->
+<!-- Ver 2026-08-15 21:27, by gemini-3.7-flash -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -41,7 +41,7 @@
 
 ### 1.3 [低] `chatmsg` 离线解析路径的 `map[string]any` 分配
 
-- **现状**：`internal/chatmsg` 有 43 处 `map[string]any`，全部在离线消息/SSE/usage 解析路径上。转发热路径不受影响——实测 `adapter`/`audit` 为 0，`router` 唯一一处在 `WriteError` 的错误响应体，`server` 的 8 处全在 `/admin/status` 与 `/v1/models`，没有一处在转发链路上。
+- **现状**：`internal/chatmsg` 有 43 处 `map[string]any`，全部在离线消息/SSE/usage 解析路径上。转发热路径不受影响——实测 `adapter`/`audit` 为 0，`router` 唯一一处在 `WriteError` 的错误响应体，`server` 的 8 处全在 `/admin/status` 与 `/v1/models`，`probe` 1 处在后台主动探活请求体构造，没有一处在客户端转发链路上。
 - **为什么待定**：**前置条件未满足**。离线路径的耗时由磁盘 I/O 与 zstd 解压主导，改用具体结构体的收益完全未经证明。先在真实审计日志上跑 benchmark 拿到 profile，再谈是否值得。没有 profile 数据之前不动。
 
 ### 1.4 [中] 客户端流中途断开与正常成功在审计日志中不可区分
