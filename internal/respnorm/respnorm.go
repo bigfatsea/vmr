@@ -584,9 +584,7 @@ func (s *stream) noteUpstreamModel(block []byte) {
 	}
 }
 
-// ObservedModel is the upstream's own model value when it differed from the
-// one vmr requested, else "" — see noteUpstreamModel for why there is no
-// verdict attached.
+// ObservedModel returns the upstream's observed model name when different from requested.
 func (s *stream) ObservedModel() string { return s.observedModel }
 
 func (s *stream) finish() {

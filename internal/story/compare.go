@@ -53,9 +53,7 @@ const notableRelThreshold = 0.30
 // rule-derived "notable" flag — no judgment about WHY they differ, only
 // THAT they differ by more than a fixed bar (design doc's "宁可粗糙也不猜语义").
 type MetricDiff struct {
-	// Metric is a stable, English, never-localized identifier — the only
-	// thing tests or any programmatic consumer of compare-*.json should key
-	// off (never Label below, which is display text).
+	// Metric is a stable, non-localized identifier for programmatic consumption.
 	Metric MetricCode `json:"metric"`
 	Label  string     `json:"label"`
 	Kind   MetricKind `json:"kind"`

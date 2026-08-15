@@ -29,10 +29,7 @@ import (
 
 // Finding is one Step-located, rule-derived "worth a second look" flag.
 type Finding struct {
-	// Code is a stable, English, never-localized identifier — the only
-	// thing tests or any programmatic consumer of journey-<id>.json should
-	// key off (never Finding below, which is display text). Mirrors
-	// report.Finding.Code's exact convention.
+	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
 	// StepSeq locates the finding — the Step whose data completed the
 	// pattern match (e.g. the Nth repeat, the step that closed the task

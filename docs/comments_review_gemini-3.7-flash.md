@@ -641,7 +641,7 @@ graph TD
 
 ### 6.4 【Category D】跨函数与跨文件样板化重复注释 (Duplicated Boilerplate Explanations) —— ✅ **[已完成全量治理]**
 
-> 🏆 **治理状态**：**已于 2026-08-16 全量去重完成**。在 `cmd_report.go` 等文件中消除了跨函数的重复长说明。
+> 🏆 **治理状态**：**已于 2026-08-16 全量去重完成**。消除了 `cmd_report.go`、`internal/respnorm`、`internal/report`、`internal/story` 中的跨函数/跨文件样板化 Copy-Paste 注释，确立了单一事实源。
 
 ### 6.5 【Category E】过时 Bug 修复与历史缺陷标记残留 (Stale Bug / Issue Fixation Residues) —— ✅ **[已完成全量治理]**
 

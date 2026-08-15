@@ -439,9 +439,7 @@ type ToolShapeRow struct {
 
 // Finding is one row of the §7 efficiency/waste table.
 type Finding struct {
-	// Code is a stable, English, never-localized identifier — the only
-	// thing tests or any programmatic consumer of vmr-report.json should
-	// key off (never Finding below, which is display text).
+	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
 	// Finding/Value/Implicated/Action are narrative text. They are always
 	// English in this persisted struct, regardless of report language —
