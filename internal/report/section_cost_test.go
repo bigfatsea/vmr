@@ -34,6 +34,9 @@ func TestRenderCostEstimate_ByDateTable(t *testing.T) {
 	if !strings.Contains(out, "2026-07-24") || !strings.Contains(out, "1.2345") {
 		t.Errorf("output missing the by-date row content:\n%s", out)
 	}
+	if !strings.Contains(out, i18n.Cost(i18n.EN).ScopeFootnote) {
+		t.Errorf("output missing the scope footnote:\n%s", out)
+	}
 }
 
 // TestRenderCostEstimate_NoDateData_TableAbsent is the negative case: when
@@ -51,5 +54,8 @@ func TestRenderCostEstimate_NoDateData_TableAbsent(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "Estimated Cost by Date") {
 		t.Errorf("by-date table should be absent when no ByDate row has a CostEstimate:\n%s", out)
+	}
+	if strings.Contains(out, i18n.Cost(i18n.EN).ScopeFootnote) {
+		t.Errorf("scope footnote should not render when there is no data:\n%s", out)
 	}
 }

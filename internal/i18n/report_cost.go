@@ -19,6 +19,7 @@ type CostText struct {
 	NoDataBody            string
 	FrozenSnapshotSummary string
 	Disclaimer            func(asOf, currency string) string
+	ScopeFootnote         string
 }
 
 func Cost(lang Lang) CostText {
@@ -40,6 +41,7 @@ func Cost(lang Lang) CostText {
 			Disclaimer: func(asOf, currency string) string {
 				return "成本估算基于标准价目表（生成于 " + asOf + "）与 config.yaml 的账号覆盖（货币 " + currency + "），不代表报告所涵盖历史请求实际发生时的价格。"
 			},
+			ScopeFootnote: "> 估算成本包含了未嗅探到 usage 的请求（按降级估算定价计入）；而 fresh/out 列仅统计已确认的 Token 数量。若按「估算成本 ÷ Token」反推单价可能偏高。",
 		}
 	}
 	return CostText{
@@ -59,5 +61,6 @@ func Cost(lang Lang) CostText {
 		Disclaimer: func(asOf, currency string) string {
 			return "Cost estimates are based on the standard price table (generated " + asOf + ") plus any config.yaml account overrides (currency " + currency + "); they do not represent the actual prices in effect when the requests in this report historically occurred."
 		},
+		ScopeFootnote: "> Estimated cost includes requests where usage was not sniffed (priced via fallback estimation); the fresh/out columns only count confirmed token usage. Calculating unit price as \"Est. Cost ÷ Tokens\" may yield an inflated figure.",
 	}
 }

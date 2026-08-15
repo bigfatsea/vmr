@@ -105,6 +105,8 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 
 	if !hasDate && !hasModel && !hasEndpoint && !hasClient {
 		w("%s", t.NoDataBody)
+	} else {
+		w("%s\n\n", t.ScopeFootnote)
 	}
 
 	// Pricing is composed from several layers (embedded standard
