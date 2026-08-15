@@ -126,7 +126,7 @@
 - **可能方案**：为内存预算再设一道更低的、可配置的闸门（按已配置的 `image_downscale` 目标尺寸推算，或独立开一个配置项），超过即跳过降采样。
 - **为什么待定**：**前置条件未满足**。够到 64MP 需要刻意构造的输入，正常截图与照片比它低一到两个数量级，目前没有任何实测显示这段峰值在真实负载下造成过内存问题。而且方案本身带一个不能替用户默认决定的取舍——跳过降采样意味着图片以原分辨率送上游、vision token 照付，是**用账单换内存**。先在真实视觉负载上观测到内存突刺，再谈阈值该设多少。
 - **已落地的部分**：`docs/UserGuide.md` / `.zh` 的「单请求内存预算」一节与 `config.example.yaml` / `.zh` 的 `image_downscale` 注释，已写明这段峰值由**像素数**而非字节数决定、逐张释放不累加、以及 64MP 闸门的存在与量纲。把一个未被记账的内存维度变成已知量——这部分零代码变更、零风险，已完成。
-- **登记来源**：`docs/VMR_Comprehensive_Architecture_Review_and_Refactoring_gemini-3.7-flash-v4.md` 的阶段七 VER-02。该报告的初版把这条写成「缺少闸门」，是漏读 `processImage` 所致；闸门一直都在，真正待定的只有阈值量纲这一点。
+- **登记来源**：`archived/VMR_Comprehensive_Architecture_Review_and_Refactoring_gemini-3.7-flash-v4.md` 的阶段七 VER-02。该报告的初版把这条写成「缺少闸门」，是漏读 `processImage` 所致；闸门一直都在，真正待定的只有阈值量纲这一点。
 
 ---
 

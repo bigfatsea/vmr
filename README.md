@@ -9,7 +9,7 @@ That same byte-faithfulness — no protocol translation, ever — is what makes 
 
 English | [简体中文](README.zh.md)
 
-[ Quick Start ](#quick-start) | [ User Guide ](docs/UserGuide.md) | [ Why vmr vs LiteLLM ](docs/Why_vmr_over_LiteLLM.md)
+[ Quick Start ](#quick-start) | [ User Guide ](docs/UserGuide.md)
 
 ```
 [ Agent App / SDK ] ──(Zero Instrumentation)──> [ vmr Router ] ──(Passthrough)──> [ LLM Providers ]
@@ -153,12 +153,9 @@ Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 | **Audit Logging** | Metadata / Summarized JSON | Two-layer raw byte audit + 1-click `vmr replay` |
 | **Agent Forensics** | Flat request logs | Task/Step narratives (`vmr story`) & Divergence Diff |
 
-See **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** for a detailed technical comparison.
-
 ## Learn More
 
 - **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, complete CLI reference.
-- **[Why vmr over LiteLLM](docs/Why_vmr_over_LiteLLM.md)** — detailed architecture and gateway comparison.
 - **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Story](docs/VirtualModelRouter_Design_v4_Analytics.md), plus two topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md) and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
 
 ## Development

@@ -154,7 +154,7 @@ root allowed to see both halves at once.
   (`git log --oneline`).
 - Chinese-language docs live under `docs/`; this file and all code comments are English.
 - **Every doc with a `.zh` sibling updates in the same change** — `README.md`,
-  `docs/UserGuide.md`, `docs/Why_vmr_over_LiteLLM.md`, and every repo-root `*.example.yaml`.
+  `docs/UserGuide.md`, and every repo-root `*.example.yaml`.
   Same keys, structure, and example values; only the prose translates.
 - **`CHANGELOG.md` (Keep a Changelog) is the source of truth for release notes.** Add entries
   under `[Unreleased]` as user/developer-visible changes land, grouped `Added`/`Changed`/`Fixed`;

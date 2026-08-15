@@ -63,8 +63,7 @@ func docHasInternalPaths(docRel string) bool {
 func docHasSymbols(docRel string) bool {
 	return docHasInternalPaths(docRel) ||
 		strings.HasPrefix(docRel, "README") ||
-		strings.HasPrefix(docRel, "docs/UserGuide") ||
-		strings.HasPrefix(docRel, "docs/Why_vmr_over_LiteLLM")
+		strings.HasPrefix(docRel, "docs/UserGuide")
 }
 
 // checkDocRefs returns one message per broken reference found in content.

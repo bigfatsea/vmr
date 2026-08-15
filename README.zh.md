@@ -9,7 +9,7 @@
 
 [English](README.md) | 简体中文
 
-[ 快速开始 ](#快速开始) | [ 用户指南 ](docs/UserGuide.zh.md) | [ 为什么选 vmr 而不是 LiteLLM ](docs/Why_vmr_over_LiteLLM.zh.md)
+[ 快速开始 ](#快速开始) | [ 用户指南 ](docs/UserGuide.zh.md)
 
 ```
 [ Agent 应用 / SDK ] ──(零代码埋点接入)──> [ vmr 透明路由器 ] ──(字节透传)──> [ LLM 上游供应商 ]
@@ -153,12 +153,9 @@ curl http://127.0.0.1:8800/admin/status
 | **审计追溯** | 元数据 / 摘要化 JSON | 双层原始字节记录 + 1-Click `vmr replay` 重放 |
 | **Agent 归因** | 扁平的 HTTP 请求日志 | 任务/Step 叙事还原 (`vmr story`) 与分叉点对比 |
 
-架构对比细节见 **[为什么选 vmr 而不是 LiteLLM](docs/Why_vmr_over_LiteLLM.zh.md)**。
-
 ## 延伸阅读
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr report`、完整 CLI 参考。
-- **[为什么选 vmr 而不是 LiteLLM](docs/Why_vmr_over_LiteLLM.zh.md)** —— 架构细节与网关对比。
 - **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Story](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加两篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
 
 ## 开发
