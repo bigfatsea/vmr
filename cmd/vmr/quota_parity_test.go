@@ -397,6 +397,59 @@ func TestQuotaParity_TokensMetric_ReportMatchesRouter(t *testing.T) {
 	}
 }
 
+// TestQuotaParity_TokensMetric_NonIntegerMultiplier is the tokens-metric
+// counterpart of the requests-metric float-multiplier test above, and the
+// stricter of the two: requests has one integer counter to scale, tokens has
+// FOUR component counters plus a separately-tracked degraded share, and
+// quota.ApplyModelMultiplier scales the exact and the estimated halves in
+// separate statements. A float factor therefore has two independent places
+// to accumulate differently on the two sides — the router scaling each
+// response as it lands, the report scaling one summed window at the end.
+//
+// It also goes further than the requests test could: the multiplier reaches
+// the report side through the real config.yaml pipeline
+// (tokensMultiplierQuotaYAML), so this asserts the wiring as well as the
+// arithmetic rather than restating the formula in the test body.
+func TestQuotaParity_TokensMetric_NonIntegerMultiplier(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	reqs := tokensParityFixture()
+	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000}
+	spec := &core.QuotaSpec{
+		Limits:           []core.Limit{lim},
+		TokenWeights:     core.NewTokenWeights(),
+		ModelMultipliers: map[string]float64{"real-model": 2.5},
+	}
+
+	want := routerCharged(t, reqs, "acct1", spec, nil, now)
+	plain := routerCharged(t, reqs, "acct1",
+		&core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.NewTokenWeights()}, nil, now)
+	if diff := math.Abs(want - 2.5*plain); diff > 1e-9*want {
+		t.Fatalf("fixture sanity: multiplied charge %v is not 2.5x the unmultiplied %v", want, plain)
+	}
+
+	row := reportQuotaRow(t, reqs, "acct1", ts, tokensMultiplierQuotaYAML)
+	if row.WindowConsumed == nil {
+		t.Fatal("WindowConsumed is nil — a tokens account with traffic must report a number, not '-'")
+	}
+	// Relative epsilon, not exact equality: the two sides multiply in a
+	// different order (per-response vs. per-window), which is a legitimate
+	// float difference. What must NOT differ is the value.
+	if diff := math.Abs(*row.WindowConsumed - want); diff > 1e-9*want {
+		t.Errorf("§2.5 window consumed = %v, router actually charged %v (diff %v exceeds relative epsilon) — "+
+			"a non-integer model_multipliers factor is not surviving one of the two paths intact",
+			*row.WindowConsumed, want, diff)
+	}
+	// The estimated share is a fraction of the multiplied total, so it must
+	// be unchanged by the multiplier — a factor applied to only one of the
+	// numerator/denominator would show up right here.
+	if row.WindowEstimatedPct <= 0 || row.WindowEstimatedPct >= 100 {
+		t.Errorf("WindowEstimatedPct = %v, want strictly between 0 and 100 for a mixed window", row.WindowEstimatedPct)
+	}
+}
+
 // TestQuotaParity_CostMetric_ReportMatchesRouter covers the third metric.
 // Unlike tokens, the two sides reach their number by genuinely different
 // routes — the router prices at charge time through ep.PricingRate

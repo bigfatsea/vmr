@@ -220,6 +220,37 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 	s.ttfts = nil
 }
 
+// freshestModel returns the ByModel row with the most fresh (cache-missed)
+// input tokens, for the cache-miss finding's "mostly this model" note.
+//
+// The max is found explicitly rather than by taking the first row that
+// exceeds half the total, for the same reason the two findings above it do:
+// buildFindings runs before aggregate.go sorts rep.ByModel, so the slice is
+// still in Go map-iteration order and "first one seen" is not reproducible
+// across runs.
+//
+// The tie-break is (fresh desc, model asc, protocol asc), and protocol is not
+// decorative: ByModel is keyed by model+protocol (aggregate.go's mk), so one
+// model name can occupy two rows. Name alone is therefore not a total order
+// over these rows and a tie would fall back to map order. No caller reads a
+// field that could differ under such a tie today — a tie needs equal names
+// and equal counts, and only those two are read — but that is what makes the
+// arbitrary pick safe, and it is not a property to leave resting on the
+// caller happening not to grow a third field read.
+func freshestModel(rows []Row) *Row {
+	var best *Row
+	for i := range rows {
+		m := &rows[i]
+		if best == nil || m.TokensInFresh > best.TokensInFresh ||
+			(m.TokensInFresh == best.TokensInFresh &&
+				(m.Model < best.Model ||
+					(m.Model == best.Model && m.Protocol < best.Protocol))) {
+			best = m
+		}
+	}
+	return best
+}
+
 // buildFindings assembles the §7 efficiency/waste table from the finished
 // buckets. One row per actionable finding, each naming the implicated entity
 // and a suggested action.
@@ -270,25 +301,9 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 	if rep.Overall.TokensKnown > 0 {
 		fresh := rep.Overall.TokensInFresh
 		share := float64(fresh) / float64(rep.Overall.TokensIn) * 100
-		// find the by-model split for the implicated note: the model with
-		// the MOST fresh tokens (tie-broken by name), used only if it
-		// actually accounts for at least half the global total — at most
-		// one model can exceed half by construction, so finding the max
-		// explicitly (instead of "first one seen that exceeds half")
-		// removes the same ambient-order dependency as the two findings
-		// above, even though a real tie here would need two models each
-		// at exactly 50%.
-		var domModel *Row
-		for i := range rep.ByModel {
-			m := &rep.ByModel[i]
-			if domModel == nil || m.TokensInFresh > domModel.TokensInFresh ||
-				(m.TokensInFresh == domModel.TokensInFresh && m.Model < domModel.Model) {
-				domModel = m
-			}
-		}
 		dominantModel, dominantTokens := "", ""
-		if domModel != nil && domModel.TokensInFresh > 0 && domModel.TokensInFresh >= fresh/2 {
-			dominantModel, dominantTokens = domModel.Model, fmtutil.FmtTokens(domModel.TokensInFresh)
+		if m := freshestModel(rep.ByModel); m != nil && m.TokensInFresh > 0 && m.TokensInFresh >= fresh/2 {
+			dominantModel, dominantTokens = m.Model, fmtutil.FmtTokens(m.TokensInFresh)
 		}
 		add(FindingCacheMiss, "cache_miss_tokens", tx.CacheMissFinding(
 			fmtutil.FmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens))

@@ -53,3 +53,56 @@ func TestElementRole_EmptyRangeDeclines(t *testing.T) {
 		t.Error("ElementRole with elemStart == elemEnd should decline")
 	}
 }
+
+// TestSkipJSONString_HostileIndex pins the entry guard. Every in-repo caller
+// reaches SkipJSONString through a `case '"'` dispatch on a bounds-checked
+// index, so none of these inputs occurs today — but the function is exported
+// from a leaf package with an open caller set, and both misuse shapes fail
+// badly without the guard: the first three panicked on the b[i+1:] slice,
+// and the last returned (4, true) by locking onto the NEXT quote in the
+// buffer, a confidently wrong offset rather than a refused scan.
+func TestSkipJSONString_HostileIndex(t *testing.T) {
+	cases := []struct {
+		name string
+		b    string
+		i    int
+	}{
+		{"i at len", `"x"`, 3},
+		{"i past len", `"x"`, 9},
+		{"i negative", `"x"`, -1},
+		{"i far negative", `"x"`, -5},
+		{"empty buffer", ``, 0},
+		{"not a quote at i", `a"x"`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n, ok := SkipJSONString([]byte(tc.b), tc.i)
+			if ok || n != 0 {
+				t.Errorf("SkipJSONString(%q, %d) = (%d, %v), want (0, false)", tc.b, tc.i, n, ok)
+			}
+		})
+	}
+}
+
+// TestSkipJSONString_ValidInputUnchanged is the other half: the guard must
+// not have narrowed what the function accepts.
+func TestSkipJSONString_ValidInputUnchanged(t *testing.T) {
+	cases := []struct {
+		b    string
+		i    int
+		want int
+	}{
+		{`"abc"`, 0, 5},
+		{`{"k":"v"}`, 1, 4},
+		{`"a\"b"`, 0, 6},
+		{`""`, 0, 2},
+		{`"unterminated`, 0, 0}, // no closing quote: (0, false)
+	}
+	for _, tc := range cases {
+		n, ok := SkipJSONString([]byte(tc.b), tc.i)
+		wantOK := tc.want != 0
+		if n != tc.want || ok != wantOK {
+			t.Errorf("SkipJSONString(%q, %d) = (%d, %v), want (%d, %v)", tc.b, tc.i, n, ok, tc.want, wantOK)
+		}
+	}
+}

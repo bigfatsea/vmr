@@ -273,6 +273,13 @@ type EndpointRow struct {
 	// endpoint served whose usage was NOT sniffable (the complement of
 	// TokensKnown): the degraded byte-count estimate the routing half charged
 	// for them, reproduced here by tokenest.go's estimateDegradedTokens.
+	// TokensEstimated counts requests that CONTRIBUTED a non-zero estimate,
+	// not every request that missed a usage object — so TokensKnown +
+	// TokensEstimated is deliberately not expected to equal Requests. A
+	// request whose every attempt failed forwards nothing and is charged
+	// nothing (see estimateDegradedTokens' doc comment), so counting it here
+	// would attribute a degraded token charge to a request the router never
+	// charged at all.
 	// Kept in SEPARATE fields rather than folded into TokensInFresh/TokensOut
 	// on purpose — every existing consumer of those two (cache efficiency,
 	// $ estimates, per-endpoint token tables) is asking about measured usage

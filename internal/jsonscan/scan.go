@@ -25,11 +25,25 @@ func SkipJSONWS(b []byte, i int) int {
 	return i
 }
 
-// SkipJSONString advances past the string starting at b[i] (must be '"'),
-// returning the index just after the closing quote. A thin wrapper over
+// SkipJSONString advances past the string starting at b[i], returning the
+// index just after the closing quote. A thin wrapper over
 // IndexUnescapedQuote — the two only differ in what "start" means (b[i] is
 // the opening quote here; IndexUnescapedQuote's b is everything after one).
+//
+// The entry guard is not redundant with the callers, which all reach here
+// via a `case '"'` dispatch on an already-bounds-checked index. It is here
+// because this is an exported function in a zero-internal-dependency leaf
+// package: its callers are an open set, and the two ways it can be misused
+// both fail badly. An out-of-range i panics on the b[i+1:] slice below
+// (SkipJSONValue guards that for its own path, this one did not), and a b[i]
+// that is not a quote returns a confidently wrong offset — the scan would
+// find the NEXT quote in the buffer and report success. Failing the scan is
+// the same choice SkipJSONValue's number branch already makes for malformed
+// input: wrong answers are worse than refused ones.
 func SkipJSONString(b []byte, i int) (int, bool) {
+	if i < 0 || i >= len(b) || b[i] != '"' {
+		return 0, false
+	}
 	j := IndexUnescapedQuote(b[i+1:])
 	if j < 0 {
 		return 0, false

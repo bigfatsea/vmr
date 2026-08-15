@@ -322,6 +322,17 @@ func tokensQuotaYAML(logDir string) string {
 	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        provider: acct1\n        models: [real-model]\n"
 }
 
+// tokensMultiplierQuotaYAML is tokensQuotaYAML with a NON-INTEGER
+// model_multipliers entry. It exists so the tokens parity test can drive the
+// report side through the real config.yaml pipeline (rather than
+// reconstructing the multiplier by hand, which is all the requests-metric
+// test could do): tokens is the one metric where quota.ApplyModelMultiplier
+// scales the sniffed and the degraded halves separately, so a float factor
+// has two independent places to lose precision instead of one.
+func tokensMultiplierQuotaYAML(logDir string) string {
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\n      model_multipliers: {real-model: 2.5}\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        provider: acct1\n        models: [real-model]\n"
+}
+
 // costParityYAML is the metric: cost sibling of quotaYAML/tokensQuotaYAML,
 // used by cmd/vmr/quota_parity_test.go. It pins the four per-1M component
 // prices through providers[].pricing.overrides rather than relying on the

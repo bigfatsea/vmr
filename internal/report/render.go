@@ -290,6 +290,18 @@ func bodyBytes(body any) int64 {
 // re-marshal would produce, since the only consumer needing the bytes rather
 // than their count (estimateDegradedTokens) has to reproduce a byte-count
 // formula the routing half already applied to this same body.
+//
+// json.RawMessage is deliberately NOT given a fast path returning its bytes
+// unchanged, even though that looks like free savings. Reading a record off
+// disk yields map[string]any for a JSON body (json.Unmarshal into an `any`
+// field never produces json.RawMessage), so the RawMessage case only arises
+// for a record built in-process — and json.Marshal compacts it, while
+// returning it verbatim would not. A whitespace-carrying in-process record
+// would then measure differently from the identical record after a disk
+// round-trip, in the one function whose whole job is that they agree. The
+// default branch is not a missed case; it is what keeps the two paths equal.
+// It is also not on any hot path: the production shape is map[string]any,
+// which has to be marshalled either way.
 func bodyRaw(body any) []byte {
 	switch b := body.(type) {
 	case nil:
