@@ -1,9 +1,9 @@
 // Ver 2026-08-07, by Opus 5
 
-// Tests for P2.2's metric: cost charging path (ChargeResponse's MetricCost
+// Tests for the metric: cost charging path (ChargeResponse's MetricCost
 // branch/componentCost, baseAmount's MetricCost case, QuotaStatus's
-// cost-denominated EstimatedPct) — see quota_p21_test.go for the P2.1
-// (token_weights/model_multipliers) tests these sit alongside.
+// cost-denominated EstimatedPct) — see quota_multiplier_test.go for the
+// token_weights/model_multipliers tests these sit alongside.
 package router
 
 import (

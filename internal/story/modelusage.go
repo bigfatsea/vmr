@@ -8,7 +8,7 @@
 // (e.g. "coding"/"agent"), which a client requests once and never changes
 // within a Journey. Reading it here would produce a table that always
 // claims "no model switch ever happened" — see
-// docs/future-strategy/vmr_report_provider_client_cost_analysis_sonnet-5.md's
+// the cost analysis design's
 // §5.5 ① for the full account of this pitfall.
 package story
 
@@ -153,7 +153,7 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 // (internal/archtest's import-boundary rule), and the dev plan's take is
 // that a 12-line duplicate here is cheaper than sinking this into
 // internal/audit before a second real consumer needs it (see
-// docs/future-strategy/vmr_report_provider_client_cost_analysis_sonnet-5.md's
+// the cost analysis design's
 // §5.5 ②).
 func stepUpstream(s *Step) (provider, model string) {
 	if len(s.Rec.Attempts) > 0 {
@@ -172,8 +172,8 @@ func stepUpstream(s *Step) (provider, model string) {
 // "protocol:provider:model" form or the "/"-joined form older audit logs
 // used, returning ("", "") for anything else (including the "-" sentinel
 // ctxgraph.Manifest.Endpoint uses when a request never reached any
-// attempt). A thin wrapper over core.SplitEndpointLabel (batch 5's
-// centralized definition) that discards protocol — byte-identical logic to
+// attempt). A thin wrapper over core.SplitEndpointLabel that discards
+// protocol — byte-identical logic to
 // what this function inlined before, so this is a pure dedup, not a
 // behavior change.
 func splitEndpointLabel(endpoint string) (provider, model string) {

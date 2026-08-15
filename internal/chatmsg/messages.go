@@ -37,7 +37,7 @@ type Message struct {
 // message into the "new" range; those must not open a task. Consumed by
 // internal/taskseg.HasNewInstruction — the one shared implementation
 // report's session.go and story's journey.go both call through (the
-// architecture review's B3 batch converged what used to be two independent
+// converged what used to be two independent
 // copies of this same boundary rule). Declared here rather than in taskseg
 // so the two can't silently drift apart even before B3, and so taskseg
 // itself doesn't have to own a constant that's really about message-list

@@ -21,10 +21,10 @@ var auditFileRE = regexp.MustCompile(`^vmr-audit-(\d{4}-\d{2}-\d{2})\.jsonl(\.zs
 // housekeep does two independent, best-effort passes over dir in a single
 // directory listing:
 //
-//   - compress every plain .jsonl file dated before today (never the file
-//     that might still be open for writing);
-//   - if a retention window is configured (RetentionDays > 0), delete any
-//     audit file — plain or compressed — dated before the cutoff.
+// - compress every plain .jsonl file dated before today (never the file
+// that might still be open for writing);
+// - if a retention window is configured (RetentionDays > 0), delete any
+// audit file — plain or compressed — dated before the cutoff.
 //
 // Both passes key off the date encoded in the filename, not file mtime or
 // content, so this is a single bounded os.ReadDir (one entry per day ever

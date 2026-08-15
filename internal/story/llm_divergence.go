@@ -5,7 +5,7 @@
 // comment for how the three pack shapes coexist through the same
 // Interpret/cacheKey call chain. The evidence pack is deliberately scoped
 // to a small window around the divergence point (not the two full
-// Journeys): docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md's
+// Journeys): the story design specification's
 // own EvidencePack discipline is "a restricted evidence package, must
 // declare what it can't see" — the same discipline already applies to
 // -compare's system-prompt/deliverable excerpts, reused here for a

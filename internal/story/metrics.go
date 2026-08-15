@@ -4,7 +4,7 @@
 // computed over a built Journey. Purely a function of data already sitting
 // on Journey/Step/Event — no re-fetching, no I/O, no LLM calls (the profile
 // layer is rule-derived; the LLM layer above it is optional and not built
-// yet). Two Journeys' Metrics diff directly; that diff is Step 4's 4d
+// yet). Two Journeys' Metrics diff directly; that diff is the comparison
 // module's entire deliverable.
 package story
 
@@ -81,7 +81,7 @@ type Metrics struct {
 	// above — it doesn't participate in corpus.go's Spearman/diff scalar
 	// set (same reason ToolCallDist above doesn't either). ModelSwitches is
 	// also list-typed and itself carries no scalar, but its LENGTH is
-	// registered as MetricModelSwitchCount (batch 4) — one of the thirteen
+	// registered as MetricModelSwitchCount — one of the thirteen
 	// codes compare.go's metricSpecs registers a Value extractor for,
 	// consumed by both Compare and corpus.go; see MetricModelSwitchCount's
 	// own doc comment (compare.go) for why it's a routing-environment

@@ -158,7 +158,7 @@ models:
 }
 
 // TestServe_NoSnapshotInstalled locks in the defensive nil check added
-// after an architecture review flagged Serve's unchecked rt.snap.Load():
+// handling uninitialized router snapshots gracefully:
 // a Router that never had Install called on it (unreachable in the real
 // cmd_start.go startup sequence, which always installs before the HTTP
 // server starts listening, but possible from a test or a future refactor

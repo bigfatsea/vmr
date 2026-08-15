@@ -7,11 +7,11 @@
 // MiniMax-M3-specific repairs that only engage when their exact upstream
 // shape is detected:
 //
-//   - inline <think>...</think> reasoning inside content (thinking mode):
-//     if persisted into the assistant history it feeds the model its own
-//     reasoning next turn and locks it into a feedback loop;
-//   - plain-text "Thinking Process:" + numbered sections + "Final Polish"
-//     drafts (thinking=medium): chain-of-thought shown to the user.
+// - inline <think>...</think> reasoning inside content (thinking mode):
+// if persisted into the assistant history it feeds the model its own
+// reasoning next turn and locks it into a feedback loop;
+// - plain-text "Thinking Process:" + numbered sections + "Final Polish"
+// drafts (thinking=medium): chain-of-thought shown to the user.
 //
 // Two transport modes, chosen per response:
 //

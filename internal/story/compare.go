@@ -1,6 +1,6 @@
 // Ver 2026-07-30 21:00, by Sonnet 5
 
-// Step 4's 4d module: diffing two Journeys'
+// Differential analysis: diffing two Journeys'
 // already-computed Metrics is the whole deliverable — "两份剖面做差就是对比
 // 报告的骨架" — so this file adds no new data collection, only a rule-based
 // diff over JourneySummary.Metrics. Purely a profile-layer feature: every number here is derived by a fixed formula from
@@ -84,7 +84,7 @@ const (
 	MetricContextUtilization   MetricCode = "context_utilization"
 	MetricCompactionCount      MetricCode = "compaction_count"
 	MetricCompactionLossTokens MetricCode = "compaction_loss_tokens"
-	// MetricModelSwitchCount (batch 4) is len(Metrics.ModelSwitches) — a
+	// MetricModelSwitchCount  is len(Metrics.ModelSwitches) — a
 	// ROUTING-ENVIRONMENT variable, not an agent-behavior one: failover,
 	// sticky-TTL expiry, and routing-policy changes all produce a switch
 	// with no change in what the agent itself did. In corpus.go's

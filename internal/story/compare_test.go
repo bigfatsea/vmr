@@ -267,7 +267,7 @@ func TestCompareBasicDiff(t *testing.T) {
 	}
 }
 
-// TestCompare_ModelSwitchCount_Row (batch 4) locks in the registration of
+// TestCompare_ModelSwitchCount_Row  locks in the registration of
 // MetricModelSwitchCount as Compare's 13th row: its A/B values must be
 // len(Metrics.ModelSwitches), not the switches' own content.
 func TestCompare_ModelSwitchCount_Row(t *testing.T) {

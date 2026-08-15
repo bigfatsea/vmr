@@ -7,7 +7,7 @@
 // actually happened; the event stream is built by walking every step and
 // keeping only each message's FIRST appearance).
 //
-// Step 1 scope: one Lineage == one Journey — no cross-lineage stitching
+// Each Journey represents a single Lineage (no cross-lineage stitching)
 // yet (that's phase 2). A Lineage that starts
 // mid-conversation (BrokeFrom != nil) is rendered with an explicit "context
 // was rebuilt here, not yet reconnected" notice rather than silently
@@ -184,23 +184,23 @@ func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang)
 // are batched/parallelized here, both identified by measuring a real
 // -render-all run rather than guessed at:
 //
-//  1. I/O: every chain's manifest-record fetch is batched into a single
-//     ctxgraph.FetchRecords call — FetchRecords already groups its reads by
-//     source file (zstd isn't seekable, so each file is scanned at most
-//     once regardless of how many lines are wanted from it), turning "read
-//     every candidate's records" from one pass over the source files PER
-//     CANDIDATE into one pass total, same fix PreviewTitles applied to the
-//     listing path.
-//  2. CPU: buildFrom's own work (re-rendering each manifest's full message
-//     list, event-hash dedup, jsonIndent on tool payloads) turned out to be
-//     the larger cost — a single request's body already carries its ENTIRE
-//     accumulated history, so buildFrom's cost per lineage grows with the
-//     square of its turn count, not linearly, and doing that serially leaves
-//     every candidate's CPU work on one core. Each chain's Journey is
-//     independent of
-//     every other's (buildFrom only reads the shared recs map, never
-//     mutates it), so this runs on the same bounded worker pool
-//     scanWorkerCount uses in internal/ctxgraph.
+// 1. I/O: every chain's manifest-record fetch is batched into a single
+// ctxgraph.FetchRecords call — FetchRecords already groups its reads by
+// source file (zstd isn't seekable, so each file is scanned at most
+// once regardless of how many lines are wanted from it), turning "read
+// every candidate's records" from one pass over the source files PER
+// CANDIDATE into one pass total, same fix PreviewTitles applied to the
+// listing path.
+// 2. CPU: buildFrom's own work (re-rendering each manifest's full message
+// list, event-hash dedup, jsonIndent on tool payloads) turned out to be
+// the larger cost — a single request's body already carries its ENTIRE
+// accumulated history, so buildFrom's cost per lineage grows with the
+// square of its turn count, not linearly, and doing that serially leaves
+// every candidate's CPU work on one core. Each chain's Journey is
+// independent of
+// every other's (buildFrom only reads the shared recs map, never
+// mutates it), so this runs on the same bounded worker pool
+// scanWorkerCount uses in internal/ctxgraph.
 //
 // Order of the returned slice matches chains; a per-chain error aborts the
 // whole batch (matches BuildChain's own all-or-nothing contract for a

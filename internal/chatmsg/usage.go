@@ -123,10 +123,10 @@ func mergeUsage(obj map[string]any, u Usage) Usage {
 // usageFromObj reads one usage object. The two provider families disagree on
 // whether "total input" already includes cached tokens:
 //
-//   - Anthropic: input_tokens EXCLUDES cache_read/cache_creation — they are
-//     separate counters, so total In is their sum.
-//   - OpenAI/DeepSeek: prompt_tokens is already the total; cached_tokens /
-//     prompt_cache_hit_tokens is a subset carved out for display, not additive.
+// - Anthropic: input_tokens EXCLUDES cache_read/cache_creation — they are
+// separate counters, so total In is their sum.
+// - OpenAI/DeepSeek: prompt_tokens is already the total; cached_tokens /
+// prompt_cache_hit_tokens is a subset carved out for display, not additive.
 //
 // Presence of the "input_tokens" key (Anthropic's field name) selects which
 // rule applies.

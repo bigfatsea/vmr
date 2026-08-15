@@ -38,7 +38,7 @@ func (tw timestampWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// buildPricing (P2.2) resolves `vmr report`'s $-estimate inputs from
+// buildPricing  resolves `vmr report`'s $-estimate inputs from
 // config.yaml: the embedded standard price table (always available) plus,
 // when configPath actually loads, every provider's pricing: block (map/
 // overrides) and the global pricing: block's currency/exchange_rate — see
@@ -130,7 +130,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 // buildProviderQuotas (§2.5) reads configPath and returns each provider's
 // declared quota limit (its first Limit, P1's "exactly one Limit per
 // provider" — see config.QuotaConfig's doc comment) as a read-only
-// reference for `vmr report`'s Provider section, plus (batch 2) the
+// reference for `vmr report`'s Provider section, plus  the
 // account's real-time counter read from <log_dir>/vmr-quota.json — see
 // report.LiveQuota's doc comment. Same degrade posture as buildPricing:
 // config unreadable/invalid, or a provider with no quota: block, both just
@@ -207,16 +207,16 @@ func buildProviderQuotas(cfg *config.Config, loadErr error, configPath string, t
 		} else if _, exists := live[p.Name][limitKey]; !exists && len(live[p.Name]) > 0 {
 			// Distinguishes two different-looking "Live is nil" causes
 			// that the generic stale-period footnote alone conflates:
-			//   - limitKey absent, but this provider DOES have other keys
-			//     on disk → its quota:'s metric/every changed since those
-			//     were last written (Registry never deletes an old key —
-			//     it's lazy-reset, not lazy-cleaned), so the OLD bucket is
-			//     simply keyed differently now. The process is healthy and
-			//     running; the config just moved out from under it.
-			//   - limitKey present but period mismatch (the `if` branch's
-			//     negative), or no data for this provider at all → the
-			//     existing "process wasn't running through this period" or
-			//     "never charged yet" story, unchanged.
+			// - limitKey absent, but this provider DOES have other keys
+			// on disk → its quota:'s metric/every changed since those
+			// were last written (Registry never deletes an old key —
+			// it's lazy-reset, not lazy-cleaned), so the OLD bucket is
+			// simply keyed differently now. The process is healthy and
+			// running; the config just moved out from under it.
+			// - limitKey present but period mismatch (the `if` branch's
+			// negative), or no data for this provider at all → the
+			// existing "process wasn't running through this period" or
+			// "never charged yet" story, unchanged.
 			ref.LiveConfigChanged = true
 		}
 		quotas[p.Name] = ref

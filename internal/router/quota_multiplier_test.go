@@ -1,10 +1,9 @@
 // Ver 2026-08-07, by Opus 5
 
-// Tests for P2.1 (see docs/VirtualModelRouter_Design_v4_Quota.md's
-// "P2 — 计量准确" batch description): account-level model_multipliers
+// Tests for account-level model_multipliers (see docs/VirtualModelRouter_Design_v4_Quota.md): account-level model_multipliers
 // (applied at charge time) and token_weights
 // (applied at read time via baseAmount). See quota_charge_test.go/
-// quota_status_test.go for the P1 tests these extend.
+// quota_status_test.go for the status tests these extend.
 package router
 
 import (

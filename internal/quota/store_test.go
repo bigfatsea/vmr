@@ -38,7 +38,7 @@ func TestStore_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestStore_RoundTrip_CostAndEstimatedCost is TestStore_RoundTrip's P2.2
+// TestStore_RoundTrip_CostAndEstimatedCost is TestStore_RoundTrip's
 // counterpart: Counters.Cost and bucket.EstimatedCost (both added for
 // metric: cost accounting) had no persistence coverage of their own before
 // this — TestStore_RoundTrip only ever charges the P1-era int fields, so a

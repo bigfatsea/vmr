@@ -87,7 +87,7 @@ type Provider struct {
 	// no-op.
 	Quota *QuotaConfig `yaml:"quota"`
 	// Pricing declares this account's price differences from the standard
-	// list price (P2.2) — required (and validated for completeness) when
+	// list price — required (and validated for completeness) when
 	// Quota has a metric: cost limit; optional otherwise, in which case it
 	// only sharpens vmr report's $ estimates. See ProviderPricingConfig's
 	// doc comment (pricing.go).
@@ -289,7 +289,7 @@ type Config struct {
 	Timeouts  Timeouts                `yaml:"timeouts"`
 	Providers []Provider              `yaml:"providers"`
 	Models    map[string]VirtualModel `yaml:"models"`
-	// Pricing is the global pricing block (P2.2) — currency, exchange rate,
+	// Pricing is the global pricing block — currency, exchange rate,
 	// and an optional user supplement/standard-table override. See
 	// PricingConfig's doc comment (pricing.go).
 	Pricing *PricingConfig `yaml:"pricing"`
@@ -560,7 +560,7 @@ func (c *Config) validate() error {
 	// virtual model's endpoint group actually configures it to serve —
 	// resolvePricing (called after this loop) needs this to know which
 	// models a metric: cost provider must have complete pricing for; no
-	// other validation step needed this set before P2.2.
+	// other validation step needed this set.
 	providerModels := map[string]map[string]bool{}
 	for name, m := range c.Models {
 		if len(m.Endpoints) == 0 {

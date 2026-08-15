@@ -374,7 +374,7 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, worst.Title))
 	}
 
-	// provider quota exhaustion (batch 3) — see findings_quota.go.
+	// provider quota exhaustion — see findings_quota.go.
 	if f := quotaExhaustionFinding(rep, lang); f != nil {
 		out = append(out, *f)
 	}
@@ -397,7 +397,7 @@ func buildFindingsForJSON(rep *Report2) []Finding {
 }
 
 // ---- per-record extraction helpers (recompute fields ReqInfo keeps
-//      unexported: bytes, tool-decl bytes, endpoint, error class) ----
+// unexported: bytes, tool-decl bytes, endpoint, error class) ----
 //
 // bodyBytes (sizing a recorded body) is shared with render.go — same
 // package now, one definition.

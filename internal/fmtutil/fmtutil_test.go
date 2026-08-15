@@ -153,7 +153,7 @@ func TestFmtTokensCompact(t *testing.T) {
 // TestCapStrRuneSafe locks in that CapStr's byte cap never cuts through a
 // UTF-8 sequence — Chinese/emoji session titles and compaction needles near
 // the cap must stay valid UTF-8. Moved from internal/taskseg, where CapStr
-// originally landed alongside the B2 batch's Profile move despite carrying
+// originally landed alongside the Profile helpers despite carrying
 // no dialect-specific knowledge of its own (architecture review's B2
 // feedback round).
 func TestCapStrRuneSafe(t *testing.T) {

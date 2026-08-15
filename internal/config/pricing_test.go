@@ -567,7 +567,7 @@ models:
 // cmd/vmr/cmd_report.go's buildPricing performs — and checks the NUMBER
 // RateFor actually returns for a provider with no pricing: block of its
 // own is the converted (CNY) figure, not the raw USD standard-table price.
-// This is the layer the P2 dev plan §12 #4 bug actually manifested at
+// This is the layer a pricing resolution edge-case actually manifested at
 // ("label CNY, compute USD") — a regression here would have shipped a ~7x
 // silently wrong number in every vmr report run for exactly this common
 // case (a plain provider with no per-account pricing override), and
@@ -620,7 +620,7 @@ models:
 // TestPricing_ThreeLayerResolution_PrecedenceOrder pins the design doc's
 // §4.2① precedence chain end to end through internal/config's actual
 // resolvePricing path (not internal/pricing.Merge tested in isolation,
-// which the P2 dev plan's test coverage already exercises against
+// which standard test coverage already exercises against
 // synthetic tables): account override > supplement ∪ standard > standard
 // alone. Uses a REAL standard-table entry
 // (anthropic/claude-3-haiku-20240307) so the "supplement wins over

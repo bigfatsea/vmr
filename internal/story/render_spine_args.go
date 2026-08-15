@@ -111,15 +111,15 @@ func capFull(s string, t i18n.SpineText) string {
 // value shapes present — Args' schema is entirely up to whichever tool the
 // agent declared, so this must degrade sanely for a tool this package has
 // never heard of, not a per-tool-name table:
-//   - every field short/scalar (e.g. {"action":"poll","sessionId":"..."})
-//     → every field, compactly, as key=value pairs, inline — already
-//     complete, nothing to expand
-//   - one field carries the real payload → that field, picked as the
-//     single longest-rendered top-level field (in practice always the
-//     payload — a command/query/content string, or a summarized array, is
-//     never shorter than a tool's other scalar arguments); shown inline
-//     ("key: value") when it's one line no longer than spineInlineLen,
-//     else in its own fenced block, complete up to spineFullCap
+// - every field short/scalar (e.g. {"action":"poll","sessionId":"..."})
+// → every field, compactly, as key=value pairs, inline — already
+// complete, nothing to expand
+// - one field carries the real payload → that field, picked as the
+// single longest-rendered top-level field (in practice always the
+// payload — a command/query/content string, or a summarized array, is
+// never shorter than a tool's other scalar arguments); shown inline
+// ("key: value") when it's one line no longer than spineInlineLen,
+// else in its own fenced block, complete up to spineFullCap
 //
 // Falls back to the args' raw text (same fenced/inline choice, same cap)
 // when Args doesn't decode as a non-empty JSON object at all — defensive:

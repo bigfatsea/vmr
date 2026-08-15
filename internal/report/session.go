@@ -325,7 +325,7 @@ func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
 // collectResponse extracts collect()'s response-derived features (usage,
 // finish reason, tool call names, reassembled text, NoReply) from a
 // record's non-nil client response — split out of collect() itself purely
-// to stay under the architecture review's function-length budget, not
+// to keep function length maintainable, not
 // because it's an independently meaningful step.
 func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
 	r.Usage, r.UsageOK = chatmsg.ExtractUsage(resp.Body)
@@ -457,7 +457,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	// One dedicated pass building the real-instruction index (see
 	// taskseg.IndexRealUsers) rather than folding prof.RealUserText's regex
 	// work into the loop above — the extra array pass is cheap; what matters
-	// (per the B3 batch's perf requirement) is that this regex only runs
+	// (per performance requirements) is that this regex only runs
 	// once per user message, not that it shares a loop with leadSys/firstText.
 	r.realUsers = taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
 	for i := max(0, len(msgs)-tailPrevKeep); i < len(msgs); i++ {

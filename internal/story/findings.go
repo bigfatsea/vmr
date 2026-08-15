@@ -13,7 +13,7 @@
 // Every detector here is pure rule/structure matching — no LLM call, no
 // judgment about WHY something happened, only THAT a structural pattern
 // matched. Findings are explicitly a "candidate/suspect list, not a verdict"
-// (docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md's own
+// (the story design specification's
 // candidate-list framing): wording is "detected N suspected occurrences, recommend manual
 // review", never "the agent made a mistake here".
 package story

@@ -7,7 +7,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-// TestReportPricing_Disclaimer_NilSafe mirrors the pre-P2.2 sidecar's
+// TestReportPricing_Disclaimer_NilSafe mirrors an earlier sidecar's
 // Disclaimer nil-safety contract — the resolution engine itself
 // (internal/pricing.Table/Resolver, the three-layer resolve, discount/
 // time-window matching, canonical-key auto-resolution) moved to

@@ -467,7 +467,7 @@ const (
 	FindingOutputTruncation FindingCode = "output_truncation"
 	FindingSlowRequests     FindingCode = "slow_requests"
 	FindingContextGrowth    FindingCode = "context_growth"
-	// FindingProviderQuotaExhaustion (batch 3) fires from the router's own
+	// FindingProviderQuotaExhaustion  fires from the router's own
 	// real-time counter — see findings_quota.go's quotaExhaustionFinding.
 	FindingProviderQuotaExhaustion FindingCode = "provider_quota_exhaustion"
 )
@@ -598,7 +598,7 @@ type ProviderRow struct {
 }
 
 // ProviderQuotaRef is a config.yaml provider's declared quota limit, plus
-// (batch 2) the computation inputs and Live state buildProviderQuotaRows
+// the computation inputs and Live state buildProviderQuotaRows
 // needs to build §2.5's "额度与消耗对照" sub-table row for the same
 // provider — the same map (cmd_report.go's buildProviderQuotas) feeds both
 // ProviderRow.Quota (below) and that sub-table, so the two never disagree
@@ -617,7 +617,7 @@ type ProviderQuotaRef struct {
 	Every  string  `json:"every"`  // 1mo / 1w / 5h ...
 	Amount float64 `json:"amount"`
 
-	// Limit/Spec (P2, batch 2) are the resolved config.yaml inputs needed to
+	// Limit/Spec  are the resolved config.yaml inputs needed to
 	// compute WindowConsumed/Live below — computation INPUTS, not report
 	// conclusions, so `json:"-"` keeps them out of vmr-report.json:
 	// serializing Spec would dump the account's whole model_multipliers map
@@ -629,7 +629,7 @@ type ProviderQuotaRef struct {
 	Limit *core.Limit     `json:"-"`
 	Spec  *core.QuotaSpec `json:"-"`
 
-	// Live (P2, batch 2) is this account's real-time quota-registry state,
+	// Live  is this account's real-time quota-registry state,
 	// read from <log_dir>/vmr-quota.json — see LiveQuota's own doc comment.
 	// nil when that file is unreadable/missing, has no bucket for this
 	// account+limit, or the stored bucket's period doesn't match the period
@@ -653,8 +653,8 @@ type ProviderQuotaRef struct {
 
 // LiveQuota is one provider's real-time quota-registry snapshot as of the
 // report run's "now" — the numerator ProviderQuotaRef's static Amount alone
-// was missing (see docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md's
-// batch 2, §0.4). Deliberately NOT derived from anything in this report's own
+// was missing (see the quota design specification's
+// the quota design specification). Deliberately NOT derived from anything in this report's own
 // audit-log window — see ProviderQuotaRow's doc comment for why the two
 // consumption numbers must never be combined into one.
 type LiveQuota struct {
@@ -677,23 +677,23 @@ type LiveQuota struct {
 // (providerquota.go's buildProviderQuotaRows) — every config.yaml account
 // that declares a quota:, with two independently-windowed consumption
 // figures placed side by side ON PURPOSE, never subtracted or ratioed
-// against each other (see the dev plan's batch 2 and risk table):
+// against each other (see the quota design specification):
 //
-//   - WindowConsumed is THIS REPORT RUN's own audit-log window, recomputed
-//     post-hoc through the same base(metric)/model_multiplier formula the
-//     router charges with (quota.BaseAmount/ApplyModelMultiplier) — but NOT
-//     a replay of the router's actual charge history. Known small sources
-//     of drift from the router's real number: failed attempts never
-//     charged, config weights/multipliers having changed mid-window, and
-//     (metric: cost only) this report's own pricing resolution possibly
-//     differing from the price in effect at charge time. requests-metric
-//     rounding is NOT a drift source — quota.ApplyModelMultiplier applies
-//     an exact multiplier with no rounding, so per-charge and
-//     aggregate-then-multiply agree exactly (see quota.Counters' doc
-//     comment).
-//   - Live is the router's own real-time counter (see LiveQuota) — the
-//     account's ACTUAL billing period, almost always a different window
-//     than the report's own input files cover.
+// - WindowConsumed is THIS REPORT RUN's own audit-log window, recomputed
+// post-hoc through the same base(metric)/model_multiplier formula the
+// router charges with (quota.BaseAmount/ApplyModelMultiplier) — but NOT
+// a replay of the router's actual charge history. Known small sources
+// of drift from the router's real number: failed attempts never
+// charged, config weights/multipliers having changed mid-window, and
+// (metric: cost only) this report's own pricing resolution possibly
+// differing from the price in effect at charge time. requests-metric
+// rounding is NOT a drift source — quota.ApplyModelMultiplier applies
+// an exact multiplier with no rounding, so per-charge and
+// aggregate-then-multiply agree exactly (see quota.Counters' doc
+// comment).
+// - Live is the router's own real-time counter (see LiveQuota) — the
+// account's ACTUAL billing period, almost always a different window
+// than the report's own input files cover.
 //
 // The renderer must keep both windows labeled, not just this comment.
 type ProviderQuotaRow struct {

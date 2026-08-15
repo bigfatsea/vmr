@@ -274,8 +274,8 @@ cmd_status() {
 # instance that config points at.
 #
 # Three steps, each doing only what it is actually good at:
-#   1. pgrep  — which processes are vmr servers (any checkout, any config)
-#   2. lsof   — which TCP port each one holds (the listen address lives in
+#   1. pgrep — which processes are vmr servers (any checkout, any config)
+#   2. lsof — which TCP port each one holds (the listen address lives in
 #               that process's config, not on its command line, so the
 #               process table alone genuinely cannot tell you)
 #   3. vmr status -addr PORT -brief — everything else, asked of the instance

@@ -46,9 +46,9 @@ func nonNegativeFinite(v float64) bool {
 // Still exactly one entry in Limits; multiple windows, rolling windows, and
 // per-model scope remain documented, explicit load-time errors (see
 // LimitConfig.validate) — never a silent no-op; that's P3. TokenWeights and
-// ModelMultipliers are P2.1: account-level, apply to every Limit on this
+// ModelMultipliers are account-level, apply to every Limit on this
 // provider (see core.QuotaSpec's doc comment for why folding them per-Limit
-// would just be the same fact copied N times). metric: cost is P2.2 — see
+// would just be the same fact copied N times). metric: cost is — see
 // pricing.go for the providers[].pricing block a cost-metric account needs.
 type QuotaConfig struct {
 	Limits           []LimitConfig       `yaml:"limits"`
@@ -64,7 +64,7 @@ type QuotaConfig struct {
 // TokenWeightsConfig is TokenWeights as written in YAML: each component is a
 // pointer so "omitted" (nil, resolves to core.DefaultTokenWeight) and
 // "explicitly set to 0.0" are distinguishable — the same distinction
-// PricingRate's components will need in P2.2 for the same reason (an
+// PricingRate's components will need for the same reason (an
 // omitted weight isn't "this component doesn't count", it's "I didn't say,
 // use the default").
 //
@@ -238,7 +238,7 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 	// entire price differentiation from providers[].pricing instead
 	// (per-model rates), so a model_multipliers block there would be
 	// silently unused — the same fail-fast contract as token_weights
-	// above, not a case P2.1's "requests/tokens don't need this
+	// above, not a case where "requests/tokens don't need this
 	// restriction" reasoning extends to.
 	if len(qc.ModelMultipliers) > 0 && len(qc.Limits) == 1 && qc.Limits[0].Resolved.Metric == core.MetricCost {
 		return fmt.Errorf("provider %q: quota.model_multipliers is configured but this account's only quota.limits entry is metric: cost — cost accounts express per-model price differences via providers[].pricing instead (model_multipliers would never take effect)", providerName)
@@ -251,7 +251,7 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 // supported, see the "cost" case below) is rejected here with a message
 // that names the capability and says it's planned, not "invalid" or
 // "unsupported forever" — see docs/VirtualModelRouter_Design_v4_Quota.md's
-// P3 batch description, which treats a silently ignored quota field as the
+// design specification, which treats a silently ignored quota field as the
 // one failure mode this project cannot tolerate (the same fail-fast
 // contract KnownFields already enforces everywhere else in this config).
 func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) error {

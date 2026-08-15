@@ -63,13 +63,13 @@ type bucket struct {
 	// Estimated is this period's total contributed by degraded (non-usage-
 	// sniffed) TOKEN estimates — requests/tokens accounts only. JSON key
 	// stays "estimated" (not "estimated_tokens") for on-disk compatibility
-	// with a vmr-quota.json file written by a pre-P2.2 build. float64, not
+	// with a vmr-quota.json file written by a earlier build. float64, not
 	// int64: once an account has model_multipliers, this is scaled by the
 	// same fractional multiplier as Counters (see ApplyModelMultiplier) —
 	// see quota.Counters' doc comment for why that scaling must not be
 	// rounded to an integer.
 	Estimated float64 `json:"estimated"`
-	// EstimatedCost (P2.2) is the $ equivalent for a metric: cost account:
+	// EstimatedCost  is the $ equivalent for a metric: cost account:
 	// this period's total Cost that came from a degraded token estimate
 	// (via the resolved rate) rather than sniffed usage — same "how much to
 	// trust this number" signal Estimated gives requests/tokens accounts,
@@ -165,7 +165,7 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 	return b.C, b.Estimated
 }
 
-// AddEstimatedCost (P2.2) bumps provider's limitKey bucket's running
+// AddEstimatedCost  bumps provider's limitKey bucket's running
 // EstimatedCost — the metric: cost analogue of Charge's estimated float64
 // parameter, kept as a separate method rather than overloading Charge's
 // signature: Counters already has a Cost field (Charge/Add sum it exactly

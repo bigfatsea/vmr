@@ -32,7 +32,7 @@ func TestQuotaExhaustionFinding_BelowThresholdDoesNotFire(t *testing.T) {
 	}
 }
 
-// TestQuotaExhaustionFinding_NoLiveDataDoesNotFire is the batch 3 risk-table
+// TestQuotaExhaustionFinding_NoLiveDataDoesNotFire is the risk test
 // guard: a missing real-time counter must never be treated as "0% used" or
 // otherwise fabricate an alert — an estimate must never be the basis of one.
 func TestQuotaExhaustionFinding_NoLiveDataDoesNotFire(t *testing.T) {

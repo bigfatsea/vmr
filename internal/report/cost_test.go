@@ -9,8 +9,8 @@ import (
 
 func rf(v float64) *float64 { return &v }
 
-// TestCostFor_IncludesCacheRead pins the P2.2 fix documented in costFor's
-// own comment: the pre-P2.2 formula silently excluded cache_read, which
+// TestCostFor_IncludesCacheRead pins the cost fix documented in costFor's
+// own comment: an earlier formula silently excluded cache_read, which
 // only looked correct because the repo's own sample pricing.yaml happened
 // to price it at 0 for all four providers. A nonzero cache_read rate must
 // now produce a strictly higher $ figure than the same usage priced with

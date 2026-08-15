@@ -10,7 +10,7 @@ import (
 )
 
 // These cases carry forward the corpus-validated behavior that used to live
-// in internal/report/session_test.go before the B2 refactor batch moved the
+// in internal/report/session_test.go before tests were consolidated here
 // heuristics themselves here and deleted the byte-identical duplicate tests.
 func TestOpenClawAware_ScaffoldingRejected(t *testing.T) {
 	for _, text := range []string{

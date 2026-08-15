@@ -107,10 +107,10 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("%s", t.NoDataBody)
 	}
 
-	// P2.2: pricing is now composed from several layers (embedded standard
+	// Pricing is composed from several layers (embedded standard
 	// table + optional supplement + per-provider config.yaml overrides),
 	// so there's no longer a single file's bytes to freeze verbatim the
-	// way the pre-P2.2 sidecar did — this summary line is the replacement
+	// way an earlier sidecar did — this summary line is the replacement
 	// traceability mechanism (see pricing.go's package doc comment).
 	summary := fmt.Sprintf("standard table generated %s", orDash2(rep.Pricing.StandardGeneratedAt == "", "(unknown)", rep.Pricing.StandardGeneratedAt))
 	if rep.Pricing.Supplement != "" {

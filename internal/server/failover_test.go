@@ -13,7 +13,7 @@ import (
 // assertions (final endpoint header, attempt count, per-endpoint hit count),
 // exercised at the Serve()-unit level instead of over real HTTP. This file
 // used to duplicate that scenario end-to-end; removed as a genuine duplicate
-// (docs/test_review_action_plan_sonnet-5.md Batch 2) rather than trimmed,
+// rather than trimmed,
 // since every assertion here had an exact router-level equivalent.
 
 func TestMaxAttemptsStillCapsWhenSet(t *testing.T) {

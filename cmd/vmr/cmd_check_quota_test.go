@@ -58,7 +58,7 @@ func TestCmdCheck_NoQuotaBlock_SectionAbsent(t *testing.T) {
 	}
 }
 
-// TestCmdCheck_PrintsPricingTableLine pins the P2 dev plan §12 #5 fix
+// TestCmdCheck_PrintsPricingTableLine verifies pricing table summary output
 // (pricingTableLine in cmd_check.go): a config that touches pricing at all
 // — here, a global `pricing:` block — must grow a "pricing_table:" line
 // naming the embedded standard table's generation date, so an operator can

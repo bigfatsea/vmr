@@ -3,7 +3,7 @@
 // Shared test scaffolding for internal/server's integration tests: the base
 // upstream mock, the router-backed httptest.Server it talks to, and the
 // client helper that drives requests at it. Split out of server_test.go
-// (docs/test_review_action_plan_sonnet-5.md Batch 3, T2-2) so that file
+// so that file
 // holds only its own tests, not shared plumbing every other file also uses.
 package server
 
@@ -25,8 +25,7 @@ import (
 
 // newJSONUpstream starts an httptest.Server running handler and registers
 // its cleanup — the one piece of boilerplate every mock upstream in this
-// package repeats verbatim (docs/test_review_action_plan_sonnet-5.md Batch 3,
-// T2-7). Deliberately not a struct each mock embeds: the mocks differ enough
+// package repeats verbatim . Deliberately not a struct each mock embeds: the mocks differ enough
 // in behavior (probeUpstream's four modes, anthUpstream's header capture)
 // that embedding would couple their evolution for no real reuse beyond this.
 func newJSONUpstream(t *testing.T, handler http.HandlerFunc) *httptest.Server {

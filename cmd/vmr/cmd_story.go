@@ -426,7 +426,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	return saveStoryIndex(idx, outDir, lang)
 }
 
-// compareJourneys is Step 4's 4d module: resolve
+// compareJourneys is Differential analysis: resolve
 // both id prefixes, build each Journey, diff their already-computed
 // behavior profiles (story.Compare), and write the result as one Markdown +
 // JSON pair — the same .md+.json convention writeJourneyFile uses for a

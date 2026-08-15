@@ -9,7 +9,7 @@
 // one place that already legitimately knows about both — so it is also the
 // only honest place to assert that the two agree.
 //
-// Why it exists at all: DP2's batch 1 unified the FORMULA behind both sides
+// Why it exists at all: the quota system unified the formula behind both sides
 // (quota.BaseAmount / quota.ApplyModelMultiplier, "one implementation, two
 // consumers"). It did not unify the BASIS — which raw counters get fed into
 // that formula is still decided independently on each side, and nothing
@@ -456,7 +456,7 @@ func TestQuotaParity_TokensMetric_NonIntegerMultiplier(t *testing.T) {
 // (componentCost), the report prices post-hoc through its own
 // pricing.Resolver (cost.go's costFor) — so this pins that both end up on
 // pricing.Rate.Cost with all FOUR components, cache_read included. Dropping
-// cache_read was a real P2.2 bug: it understates cost for every provider that
+// cache_read must be included: excluding it understates cost for every provider that
 // prices cache reads above zero, which is nearly all of them.
 //
 // Reuses tokensParityFixture's MIXED window (exact usage / degraded

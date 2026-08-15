@@ -1,7 +1,7 @@
 // Ver 2026-08-02, by Sonnet 5
 
 // Shared YAML config fixtures for internal/server's integration tests.
-// Consolidated here (docs/test_review_action_plan_sonnet-5.md Batch 3, T2-1)
+// Consolidated here 
 // from eight different test files where each had grown its own — a new test
 // needing a config shape should look here first instead of writing another
 // near-duplicate builder.

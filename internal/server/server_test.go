@@ -2,7 +2,7 @@
 
 // Integration tests: full handler + mock upstreams over real HTTP. Shared
 // mock/fixture/client scaffolding lives in testhelpers_test.go and
-// fixtures_test.go (docs/test_review_action_plan_sonnet-5.md Batch 3) — this
+// fixtures_test.go — this
 // file holds only the tests themselves.
 package server
 

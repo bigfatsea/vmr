@@ -3,7 +3,7 @@
 // §2.5's "额度与消耗对照" sub-table: for every config.yaml account that
 // declares a quota:, places this report run's own recomputed window
 // consumption next to the router's real-time counter — see
-// docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md's batch 2 for
+// the quota design specification for
 // the full rationale and ProviderQuotaRow's doc comment (rows.go) for why
 // the two numbers are never combined into one. Mirrors provider.go/
 // buildProviders: a pure function over already-finished EndpointsAll rows,

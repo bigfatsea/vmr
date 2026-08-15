@@ -121,7 +121,7 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 	return j
 }
 
-// TestMetricValue_ModelSwitchCount_Registered (batch 4, updated when
+// TestMetricValue_ModelSwitchCount_Registered (updated when
 // corpus.go's three hand-maintained registrations were replaced by
 // compare.go's single metricSpecs list) locks in that MetricModelSwitchCount
 // has exactly one entry in metricSpecs, with KindCount and a Value that

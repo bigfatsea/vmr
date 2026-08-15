@@ -10,22 +10,18 @@
 // segment.go holds the session/task-segmentation algorithm itself
 // (real-instruction indexing, new-task/new-instruction detection, task
 // titling, response reassembly, preview truncation) — generic over Profile,
-// not agent-specific on its own, but converged here in the architecture
-// review's B3 batch because report/session.go and story/journey.go used to
+// not agent-specific on its own, but converged here in a shared package
+// because report/session.go and story/journey.go used to
 // each carry an independent copy of it.
 //
 // internal/report's session.go and internal/story's journey.go both call
 // through Profile instead of each hardcoding one agent's conventions —
 // report used to carry its own byte-identical copy of these heuristics
-// (session.go originally, before the architecture review's B2 refactor
-// batch moved it here alongside story's pre-existing internal/story/profile
-// package) — a name change from that package's own to reflect that it's no
+// (previously duplicated across report and story) — a name change from that package's own to reflect that it's no
 // longer story-exclusive: this is the leaf both consumers depend on, never
 // the reverse.
 //
-// Step 1 ships exactly one implementation (OpenClawAware) plus a
-// template-free fallback (Generic) — no Detect-based dispatch/registry yet.
-// That's a deliberate YAGNI call, not an oversight — build the registry when
+// Currently provides one implementation (OpenClawAware) plus a template-free fallback (Generic) — no registry yet (deliberate YAGNI call, not an oversight — build the registry when
 // a second real profile (Pi/Hermes) actually needs one, driven by what real
 // corpus differences turn out to matter, not by guessing now.
 package taskseg

@@ -4,13 +4,13 @@
 // tool-use where the model emits <think>...</think> blocks before each tool
 // call. Without the response normalizer, this shape is pathological:
 //
-//   - Each round's response model field is the upstream name (e.g.
-//     "MiniMax-M3") while the client sent the virtual name ("agent") —
-//     model mismatch on every round.
-//   - Each round's think content (~3K chars) would get stored as the
-//     assistant message and resent next turn, compounding prompt_tokens
-//     round over round until the context limit is hit and the response is
-//     cut off mid-generation (finish_reason=length).
+// - Each round's response model field is the upstream name (e.g.
+// "MiniMax-M3") while the client sent the virtual name ("agent") —
+// model mismatch on every round.
+// - Each round's think content (~3K chars) would get stored as the
+// assistant message and resent next turn, compounding prompt_tokens
+// round over round until the context limit is hit and the response is
+// cut off mid-generation (finish_reason=length).
 //
 // This test asserts that with the normalizer, none of this happens: every
 // round's response model is the virtual model the client sent, no think

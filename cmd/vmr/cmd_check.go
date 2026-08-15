@@ -328,7 +328,7 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 	return line, true
 }
 
-// printProviderPricing renders p's resolved metric: cost pricing (P2.2), if
+// printProviderPricing renders p's resolved metric: cost pricing , if
 // any — one line per upstream model this provider actually resolved a
 // price for (see config.Config.ResolvedPricing), so an operator can see
 // exactly what rate a cost account will be charged at without cross-

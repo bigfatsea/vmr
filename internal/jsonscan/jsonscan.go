@@ -3,7 +3,7 @@
 // Package jsonscan is the zero-dependency JSON byte-range scanning engine
 // behind vmr's byte-splice model/stream/role rewrites: RewriteModel/
 // RewriteStream/RewriteRoles/RewriteInputRoles, which used to live in
-// internal/adapter before the B1 refactor batch moved them here, plus the
+// internal/adapter before being consolidated here, plus the
 // structural primitives internal/adapter's SessionFingerprint and
 // TopLevelProbe still call: TopLevelValues, WalkArrayElements,
 // FirstArrayElement, ElementRole, the Skip* helpers.

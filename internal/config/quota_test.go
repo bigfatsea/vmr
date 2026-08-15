@@ -100,7 +100,7 @@ func TestQuota_Reject_MultipleLimits(t *testing.T) {
 	}
 }
 
-// TestQuota_MetricCost_WithoutPricingCurrency_Rejected pins P2.2's
+// TestQuota_MetricCost_WithoutPricingCurrency_Rejected verifies that metric: cost requires a pricing currency:
 // completeness gate at the point closest to "cost" alone: metric: cost now
 // parses structurally, but an account with no pricing.currency configured
 // at all can't be charged in anything — see resolvePricing.
@@ -131,7 +131,7 @@ func TestQuota_Reject_ModelsScope(t *testing.T) {
 	}
 }
 
-// --- P2.1: model_multipliers / token_weights are now real, accepted fields ---
+// --- model_multipliers / token_weights are accepted fields ---
 
 func TestQuota_ModelMultipliers_HappyPath(t *testing.T) {
 	yaml := withQuotaBlock(`model_multipliers: {"*": 1, heavy-model: 9}
@@ -228,10 +228,10 @@ limits:
 	}
 }
 
-// TestQuota_PricingBlock_AcceptedWhenUnused pins P2.2's structural change:
+// TestQuota_PricingBlock_AcceptedWhenUnused verifies pricing block acceptance:
 // a top-level pricing: block is now a real, known field — accepted (and
 // simply unused) on a config with no metric: cost provider at all. See
-// internal/config/pricing_test.go for the full P2.2 pricing test matrix.
+// internal/config/pricing_test.go for the full pricing test matrix.
 func TestQuota_PricingBlock_AcceptedWhenUnused(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
 		"listen: 127.0.0.1:9900\npricing:\n  currency: USD", 1)

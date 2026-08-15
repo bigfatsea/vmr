@@ -105,7 +105,7 @@ func TestRenderProvidersZH(t *testing.T) {
 	}
 }
 
-// --- batch 2: §2.5 额度与消耗对照 sub-table ---
+// --- §2.5 额度与消耗对照 sub-table ---
 
 func TestRenderProviderQuotaTable_AbsentWhenNoRows(t *testing.T) {
 	out := renderProvidersStr(&Report2{

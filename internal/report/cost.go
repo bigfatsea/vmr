@@ -1,7 +1,7 @@
 // Ver 2026-08-07, by Opus 5
 
 // §2 成本估算's per-record cost formula and endpoint-label parsing — split
-// out of aggregate.go (P2.2) purely to keep that file under
+// out of aggregate.go  purely to keep that file under
 // internal/archtest's line budget; aggState.ingestRecord (aggregate.go) is
 // the only caller.
 package report
@@ -15,7 +15,7 @@ import (
 // costFor computes one record's estimated cost from its endpoint's
 // resolved rate via pricing.Rate.Cost (shared with
 // internal/router/quota.go's componentCost) — all four components,
-// INCLUDING cache_read (P2.2 fix: the pre-P2.2 sidecar deliberately left
+// INCLUDING cache_read (fix: an earlier implementation deliberately left
 // cache_read out of this formula because the four providers in the repo's
 // own sample pricing.yaml all happened to price it at 0; that was a fact
 // about those four rows, not a general truth — the design doc's own market

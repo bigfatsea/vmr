@@ -1,7 +1,6 @@
 // Ver 2026-08-13, by Opus 5
 
-// §7 Provider Quota Exhaustion finding — batch 3 of
-// docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md. Split out of
+// §7 Provider Quota Exhaustion finding (quota design specification). Split out of
 // metrics.go on purpose (see that file's own note in the dev plan on why:
 // buildFindings is already long and internal/report/metrics.go carries no
 // archtest line budget of its own to grow into unnoticed).
@@ -16,7 +15,7 @@ import (
 // quotaExhaustionThresholdPct is the "about to run out" bar — a package
 // constant, not a config.yaml knob, for the same reason internal/ctxgraph's
 // thresholds are: a user can't calibrate a number they have no way to
-// measure against (see the dev plan's batch 3).
+// measure against (see the quota design specification).
 const quotaExhaustionThresholdPct = 90.0
 
 // quotaExhaustionFinding reports the single worst-off account among

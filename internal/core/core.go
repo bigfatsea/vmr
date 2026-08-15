@@ -195,7 +195,7 @@ type Endpoint struct {
 	Quota *QuotaSpec
 
 	// PricingRate is this specific provider+model's resolved pricing
-	// (P2.2), resolved at BuildSnapshot time — unlike Quota, NOT shared
+	// , resolved at BuildSnapshot time — unlike Quota, NOT shared
 	// across every Endpoint expanded from the same provider, because price
 	// is inherently model-scoped (see PricingSpec's doc comment). nil = no
 	// pricing resolved for this provider+model (no providers[].pricing
@@ -297,7 +297,7 @@ type QuotaMetric string
 const (
 	MetricRequests QuotaMetric = "requests"
 	MetricTokens   QuotaMetric = "tokens"
-	// MetricCost is P2.2's Credits/money-denominated metric — see
+	// MetricCost is the Credits/money-denominated metric — see
 	// docs/VirtualModelRouter_Design_v4_Quota.md's pricing/cost sections.
 	// Charging it needs a resolved Endpoint.PricingRate; config.validate()
 	// rejects a metric: cost Limit on any provider+model that doesn't
@@ -414,7 +414,7 @@ type PricingOverride struct {
 	Explicit Rate
 }
 
-// PricingSpec is one provider+model's fully resolved pricing (P2.2):
+// PricingSpec is one provider+model's fully resolved pricing :
 // Base — the rate reachable with no Override present (from the
 // standard/supplement table, or an account override that fully replaces
 // it) — plus zero or more Overrides layered on top, evaluated in written
@@ -441,22 +441,22 @@ type PricingSpec struct {
 
 // QuotaSpec is a provider's full quota configuration: its Limit(s) (P1: just
 // one; already shaped as a slice so P3's multi-window support is additive,
-// not a type change) plus two account-level charge-time modifiers (P2.1):
+// not a type change) plus two account-level charge-time modifiers :
 //
-//   - TokenWeights scales a tokens-metric Limit's four components when read
-//     (applied in baseAmount, at read time — see
-//     docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
-//     for the "store raw components, apply policy on read" principle, which
-//     holds for this field).
-//   - ModelMultipliers scales EVERY component (including Requests) of a
-//     charge by the upstream model actually hit, keyed by that model name
-//     with an optional "*" wildcard fallback; nil/absent-key means 1.0 (no
-//     scaling). Unlike TokenWeights, this one is applied at CHARGE time, not
-//     read time — see the same "9.2 运行态" section's model_multipliers
-//     discussion for why: quota.Counters aggregates per-provider, not
-//     per-model, so once a charge lands there is no way to recover which
-//     slice of a later read came from which upstream model to multiply
-//     retroactively.
+// - TokenWeights scales a tokens-metric Limit's four components when read
+// (applied in baseAmount, at read time — see
+// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
+// for the "store raw components, apply policy on read" principle, which
+// holds for this field).
+// - ModelMultipliers scales EVERY component (including Requests) of a
+// charge by the upstream model actually hit, keyed by that model name
+// with an optional "*" wildcard fallback; nil/absent-key means 1.0 (no
+// scaling). Unlike TokenWeights, this one is applied at CHARGE time, not
+// read time — see the same "9.2 运行态" section's model_multipliers
+// discussion for why: quota.Counters aggregates per-provider, not
+// per-model, so once a charge lands there is no way to recover which
+// slice of a later read came from which upstream model to multiply
+// retroactively.
 type QuotaSpec struct {
 	Limits           []Limit
 	TokenWeights     TokenWeights

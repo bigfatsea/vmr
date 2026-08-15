@@ -17,18 +17,18 @@ import (
 
 // Resolve applies the three-tier default, most to least specific:
 //
-//  1. ~/.vmr/<homeSubdir> — the common case. A persistent per-user dotdir,
-//     NOT the system temp dir: macOS purges $TMPDIR entries not accessed
-//     for ~3 days (and on reboot), which would silently delete audit data —
-//     fatal for data whose whole point is long-term cost accounting (audit
-//     files are the only data source for vmr report).
-//  2. os.TempDir()/<tmpSubdir> — only when the home directory cannot be
-//     resolved (no $HOME in a stripped-down service environment).
-//     Namespaced under a vmr_-prefixed subdir because the system temp dir
-//     is shared with every other process on the machine.
-//  3. <cwd>/<pwdSubdir> — only reached if os.TempDir() itself returns "",
-//     which none of Go's supported platforms actually do. Kept as a
-//     defensive last resort, not a realistic path in practice.
+// 1. ~/.vmr/<homeSubdir> — the common case. A persistent per-user dotdir,
+// NOT the system temp dir: macOS purges $TMPDIR entries not accessed
+// for ~3 days (and on reboot), which would silently delete audit data —
+// fatal for data whose whole point is long-term cost accounting (audit
+// files are the only data source for vmr report).
+// 2. os.TempDir()/<tmpSubdir> — only when the home directory cannot be
+// resolved (no $HOME in a stripped-down service environment).
+// Namespaced under a vmr_-prefixed subdir because the system temp dir
+// is shared with every other process on the machine.
+// 3. <cwd>/<pwdSubdir> — only reached if os.TempDir() itself returns "",
+// which none of Go's supported platforms actually do. Kept as a
+// defensive last resort, not a realistic path in practice.
 func Resolve(homeSubdir, tmpSubdir, pwdSubdir string) string {
 	return resolve(home(), homeSubdir, os.TempDir(), tmpSubdir, cwd(), pwdSubdir)
 }

@@ -297,7 +297,7 @@ func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
 	}
 }
 
-// TestCmdStory_Compare covers Step 4's 4d module: -compare id1,id2 resolves
+// TestCmdStory_Compare covers Differential analysis: -compare id1,id2 resolves
 // two candidate journeys by id prefix and writes one comparison
 // Markdown+JSON pair. Journey B's much larger model time should surface as
 // a notable row.

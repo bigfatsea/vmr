@@ -37,7 +37,7 @@ type EfficiencyText struct {
 	OutputTruncationFinding func(trunc, total int) FindingText
 	SlowRequestsFinding     func(sharePct string, thresholdSec int) FindingText
 	ContextGrowthFinding    func(growthX, sessionID, sessionTitle string) FindingText
-	// ProviderQuotaExhaustionFinding (batch 3) fires from the router's own
+	// ProviderQuotaExhaustionFinding  fires from the router's own
 	// real-time counter (report.ProviderQuotaRow.Live), never from this
 	// report's recomputed window value — see that field's doc comment for
 	// why an estimate must never be the basis of an alert.

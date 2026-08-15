@@ -9,13 +9,13 @@ import (
 
 // DefaultClassify is the error classification shared by the passthrough
 // adapters. Provider quirks verified against live APIs and official docs:
-//   - MiniMax returns 400 (not 404) for an unknown model; its content
-//     violations carry codes 1026/1027;
-//   - DeepSeek's Anthropic endpoint words a bad model "The supported API model
-//     names are …"; its content filter answers 400 with a "risk" message;
-//   - OpenRouter reports insufficient credits as 402 and moderation/guardrail
-//     blocks as 403 with "flagged"/"guardrail" in the body;
-//   - some providers report exhausted quota/balance as 429.
+// - MiniMax returns 400 (not 404) for an unknown model; its content
+// violations carry codes 1026/1027;
+// - DeepSeek's Anthropic endpoint words a bad model "The supported API model
+// names are …"; its content filter answers 400 with a "risk" message;
+// - OpenRouter reports insufficient credits as 402 and moderation/guardrail
+// blocks as 403 with "flagged"/"guardrail" in the body;
+// - some providers report exhausted quota/balance as 429.
 //
 // classifySnippetBytes bounds the body sniff. Some vendors attach verbose
 // debug payloads to 4xx bodies; a marker past the cutoff would misclassify a

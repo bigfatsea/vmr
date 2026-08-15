@@ -1,6 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// Pricing (P2.2) is a display-only SUMMARY of the pricing sources used to
+// Pricing  is a display-only SUMMARY of the pricing sources used to
 // compute this report's $ estimates — not the resolution engine itself
 // (that's internal/pricing.Resolver, threaded through Build/BuildCached's
 // pricingSrc parameter in build_cached.go/aggregate.go). The two are
@@ -12,9 +12,9 @@
 // and this summary (for rendering — currency label, disclaimer text, and
 // the "what pricing sources fed this report" line in §2's appendix).
 //
-// This replaces the pre-P2.2 sidecar (a single hand-maintained pricing.yaml
+// This replaces an earlier sidecar (a single hand-maintained pricing.yaml
 // file, its raw bytes frozen verbatim into every report for traceability —
-// see git history for that implementation). P2.2's pricing model is
+// see git history for that implementation). The pricing model is
 // inherently multi-layered (embedded standard table + optional supplement +
 // per-provider config.yaml overrides), so there is no longer one file's
 // worth of bytes to freeze; this summary is the replacement traceability
@@ -43,7 +43,7 @@ type Pricing struct {
 }
 
 // Disclaimer renders the cost-estimate disclaimer for the appendix/footer.
-// nil-safe (mirrors the pre-P2.2 sidecar's Disclaimer contract).
+// nil-safe (mirrors an earlier sidecar's Disclaimer contract).
 func (p *Pricing) Disclaimer(lang i18n.Lang) string {
 	if p == nil {
 		return ""

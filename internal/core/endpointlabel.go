@@ -7,7 +7,7 @@
 // internal/replay/replay.go) each inlined the same
 // strings.Join([]string{adapterType, provider, model}, ":") literal — the
 // format had no single authoritative definition. See
-// docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md's batch 5 for
+// the quota design specification for
 // the full inventory (2 production sites, 4 parsing sites) and why this
 // batch only unifies the DEFINITION, not every parsing call site's existing
 // behavior — see SplitEndpointLabel's own doc comment for the one parsing
@@ -56,8 +56,7 @@ func EndpointLabel(adapterType, provider, model string) string {
 // splitEndpointProviderModel (colon-only, backs §2's $ cost estimates) — see
 // this package's own file doc comment: widening that one call site to also
 // accept "/" would change historical reports' $ numbers for old-format
-// logs, a distinct, separately-reviewed change (flagged in the P2.2 dev
-// plan's risk table), not a side effect of centralizing the definition.
+// logs, a distinct, separately-reviewed change (a separate behavior change), not a side effect of centralizing the definition.
 func SplitEndpointLabel(label string) (protocol, provider, model string, ok bool) {
 	colonIdx := strings.IndexByte(label, ':')
 	slashIdx := strings.IndexByte(label, '/')

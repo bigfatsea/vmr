@@ -1,6 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// Pricing (P2.2) YAML-shape config types and their validation/resolution —
+// Pricing  YAML-shape config types and their validation/resolution —
 // see docs/VirtualModelRouter_Design_v4_Quota.md's pricing sections
 // (config shape, three-layer resolution, "现状与后续计划" for what's
 // actually shipped) for the full design. Split from config.go per that

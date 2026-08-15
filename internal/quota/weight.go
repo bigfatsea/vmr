@@ -17,10 +17,10 @@ import (
 // Moved here from internal/router/quota.go (originally baseAmount) so both
 // the router's decision path and a read-only offline consumer (vmr report's
 // §2.5 quota-vs-consumption table) share exactly one formula — see
-// docs/future-strategy/vmr_quota_visibility_devplan_opus-5.md's batch 1.
+// the quota design specification.
 //
 // spec must be non-nil with spec.Limits non-empty; every call site is
-// already guarded by that check upstream (P1/P2.1 guarantee exactly one
+// already guarded by that check upstream (configuration guarantees exactly one
 // Limit per provider — see ChargeResponse's own comment).
 func BaseAmount(spec *core.QuotaSpec, c Counters) float64 {
 	switch spec.Limits[0].Metric {
@@ -107,12 +107,12 @@ func ApplyModelMultiplier(spec *core.QuotaSpec, model string, d Counters, estima
 // unweighted estimate by a base(metric)-weighted total reports the wrong
 // share the instant any weight isn't 1.0 (see the two metric branches below
 // for the matching-unit reasoning):
-//   - cost: c.Cost is already the final $ amount (Counters' one "store
-//     pre-priced" exception — see its doc comment), so estimatedCost/c.Cost
-//     is directly comparable.
-//   - tokens: estimated is a raw (unweighted) token count, so it's divided
-//     by the raw four-component token total, not by BaseAmount's
-//     token_weights-weighted sum.
+// - cost: c.Cost is already the final $ amount (Counters' one "store
+// pre-priced" exception — see its doc comment), so estimatedCost/c.Cost
+// is directly comparable.
+// - tokens: estimated is a raw (unweighted) token count, so it's divided
+// by the raw four-component token total, not by BaseAmount's
+// token_weights-weighted sum.
 func EstimatedPct(metric core.QuotaMetric, c Counters, estimated float64, estimatedCost float64) float64 {
 	switch metric {
 	case core.MetricCost:

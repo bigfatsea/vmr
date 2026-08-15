@@ -158,7 +158,7 @@ Follow these rules strictly:
 // DivergenceEvidencePack pairs a structural DivergencePoint fact (which
 // Step, light/heavy severity, which tools) with a bounded window of Step
 // briefs on both sides around it. The prompt's central constraint mirrors
-// docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md's own
+// the story design specification's
 // divergence-interpretation boundary: divergence location is a fact, "why" is always a labeled guess,
 // and the two sides are never ranked as better/worse (VMR has no outcome
 // signal to base that on).

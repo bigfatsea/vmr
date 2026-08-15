@@ -31,7 +31,7 @@ func Provider(lang Lang) ProviderText {
 }
 
 // ProviderQuotaText is section_provider.go's renderProviderQuotaTable text
-// (batch 2's "额度与消耗对照" sub-table), in one language.
+// ("额度与消耗对照" sub-table), in one language.
 type ProviderQuotaText struct {
 	Title               string
 	Intro               string

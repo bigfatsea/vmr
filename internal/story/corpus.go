@@ -1,7 +1,7 @@
 // Ver 2026-08-05, by Sonnet 5
 
 // Corpus-level statistics — "一批 Journey 里找出反复出现的行为
-// 倾向" (docs/future-strategy/vmr_story_journey_deepdive_sonnet-5.md's
+// 倾向" (the story design specification's
 // corpus-level statistics section), built directly on data this package
 // already computes per-Journey (Metrics, Finding) — no new collection, no
 // LLM, pure descriptive statistics. Three deliberate limits, all straight
@@ -9,21 +9,21 @@
 // disciplines, restated here because this is the one file that could
 // otherwise drift into overclaiming):
 //
-//  1. Correlations are Spearman rank correlation (not Pearson) reported as
-//     an effect size (rho) only — no p-values, no significance claims. The
-//     corpus sizes this runs on (tens to low hundreds of Journeys) can't
-//     support a real significance test, and reporting one anyway would
-//     manufacture false confidence.
-//  2. There is no "did the task succeed" label anywhere in this file.
-//     VMR's zero-embedded-instrumentation premise means it structurally
-//     cannot know whether a task was actually accomplished — only rule-
-//     derived proxies (duration, Finding hit rate) are compared, and the
-//     output says so.
-//  3. No multiple-comparison correction. At this corpus scale that kind of
-//     rigor is pure form over substance — the mitigation is reporting
-//     effect size only and requiring a minimum sample size before a
-//     comparison is shown at all, not a Bonferroni correction nobody
-//     would trust the inputs to anyway.
+// 1. Correlations are Spearman rank correlation (not Pearson) reported as
+// an effect size (rho) only — no p-values, no significance claims. The
+// corpus sizes this runs on (tens to low hundreds of Journeys) can't
+// support a real significance test, and reporting one anyway would
+// manufacture false confidence.
+// 2. There is no "did the task succeed" label anywhere in this file.
+// VMR's zero-embedded-instrumentation premise means it structurally
+// cannot know whether a task was actually accomplished — only rule-
+// derived proxies (duration, Finding hit rate) are compared, and the
+// output says so.
+// 3. No multiple-comparison correction. At this corpus scale that kind of
+// rigor is pure form over substance — the mitigation is reporting
+// effect size only and requiring a minimum sample size before a
+// comparison is shown at all, not a Bonferroni correction nobody
+// would trust the inputs to anyway.
 package story
 
 import (

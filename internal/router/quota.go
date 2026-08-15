@@ -42,7 +42,7 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream
 	}
 	// Exactly one Limit per provider (internal/config/quota.go's
 	// validateQuota enforces this at load time) — no min()-across-Limits
-	// merge yet; that's P3 (see the design doc's Core Algorithm section on
+	// merge yet (see the design doc's Core Algorithm section on
 	// multi-window merging).
 	var raw quota.Counters
 	var estimated float64
@@ -185,7 +185,7 @@ func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Co
 // P1's equal-weighted accounting diverges from what a real Credits-style
 // bill would charge (see the design doc's Metering section on why this
 // divergence exists and why surfacing the breakdown is the cheap mitigation
-// for it in P1, ahead of P2's token_weights/cost metric).
+// ahead of token_weights/cost metrics).
 type QuotaProviderStatus struct {
 	Provider     string    `json:"provider"`
 	Metric       string    `json:"metric"`
@@ -217,7 +217,7 @@ type QuotaProviderStatus struct {
 	Requests   float64 `json:"requests"`
 
 	// TokenWeights/ModelMultipliers surface the account-level modifiers
-	// currently in effect (P2.1) — the design doc's Observability section
+	// currently in effect — the design doc's Observability section
 	// calls this out explicitly: "a promotional multiplier left configured
 	// after it expired is a foreseeable failure mode, and showing the
 	// effective value is the cheapest guard against it." TokenWeights is
@@ -308,12 +308,12 @@ func (rt *Router) QuotaStatus() []QuotaProviderStatus {
 //
 // Two invariants this function exists to preserve (see the design doc's
 // Scheduling Flow section):
-//  1. it never reorders ACROSS tiers — priority's ordering intent, or any
-//     other Dimension a future release adds, is never crossed by a quota
-//     decision;
-//  2. it never touches a candidate with no quota: configured — so
-//     configuring quota for one provider can never move an unrelated
-//     provider's position (the "占位重排" placeholder-reorder rule).
+// 1. it never reorders ACROSS tiers — priority's ordering intent, or any
+// other Dimension a future release adds, is never crossed by a quota
+// decision;
+// 2. it never touches a candidate with no quota: configured — so
+// configuring quota for one provider can never move an unrelated
+// provider's position (the "占位重排" placeholder-reorder rule).
 //
 // nil-safe: reg==nil (no quota.Registry wired up) or an empty cands slice
 // both return false without touching cands at all.

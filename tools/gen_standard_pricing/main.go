@@ -12,16 +12,16 @@
 //
 // Two rules that are NOT optional (see the design doc's §4.2① "缺失比过期更
 // 危险" and its §9.1 validation checklist):
-//   - A component absent from the source JSON is OMITTED from the output
-//     row entirely — never written as 0.0. internal/pricing.Rate depends on
-//     this distinction (nil = unknown, *float64(0) = explicitly free) to
-//     safely reject metric: cost accounts with genuinely incomplete pricing
-//     instead of silently under-charging them.
-//   - This script only ever writes standard_price_generated.yaml — never
-//     standard_price_curated.yaml, the hand-maintained file this table is
-//     merged with at load time (see internal/pricing/embed.go). Overwriting
-//     curated.yaml here would silently discard every hand-added row the
-//     next time this script runs.
+// - A component absent from the source JSON is OMITTED from the output
+// row entirely — never written as 0.0. internal/pricing.Rate depends on
+// this distinction (nil = unknown, *float64(0) = explicitly free) to
+// safely reject metric: cost accounts with genuinely incomplete pricing
+// instead of silently under-charging them.
+// - This script only ever writes standard_price_generated.yaml — never
+// standard_price_curated.yaml, the hand-maintained file this table is
+// merged with at load time (see internal/pricing/embed.go). Overwriting
+// curated.yaml here would silently discard every hand-added row the
+// next time this script runs.
 package main
 
 import (

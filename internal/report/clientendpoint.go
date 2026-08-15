@@ -3,7 +3,7 @@
 // §5.5 按客户端的上游归属: for each client_key_tag, which upstream
 // endpoints (protocol:provider:model) it actually hit and how many tokens
 // landed on each. Grouped by client, not a client×endpoint matrix — see
-// docs/future-strategy/vmr_report_provider_client_cost_analysis_sonnet-5.md's
+// the cost analysis design's
 // §3.2 for why: the matrix's sparse cells add nothing a grouped table
 // doesn't already answer.
 //

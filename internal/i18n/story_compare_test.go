@@ -3,7 +3,7 @@ package i18n
 
 import "testing"
 
-// TestMetricLabel_ModelSwitchCount_BothLanguages (batch 4) locks in that
+// TestMetricLabel_ModelSwitchCount_BothLanguages  locks in that
 // MetricLabels' EN and ZH bundles both carry an entry for
 // "model_switch_count" — MetricLabel falls back to the raw code string when
 // a bundle is missing an entry, so a forgotten registration here would be

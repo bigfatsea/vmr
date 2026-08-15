@@ -73,7 +73,7 @@ func renderProviders(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	renderProviderQuotaTable(w, rep, lang)
 }
 
-// renderProviderQuotaTable (batch 2) is §2.5's "额度与消耗对照" sub-table —
+// renderProviderQuotaTable  is §2.5's "额度与消耗对照" sub-table —
 // see rows.go's ProviderQuotaRow doc comment for why WindowConsumed and
 // Live are two independently-windowed numbers that must stay visually
 // separate, never combined into one. Absent entirely when no config.yaml

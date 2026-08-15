@@ -47,7 +47,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/config",
 		"vmr/internal/report",
 		// taskseg started depending on ctxgraph in the architecture review's
-		// B3 batch (Hash/Manifest types for its shared session/task-boundary
+		// taskseg package (Hash/Manifest types for its shared session/task-boundary
 		// primitives) — the same one-directional-dependency risk as report's
 		// entry just above: ctxgraph depending back on taskseg would be a
 		// real import cycle, not just a layering preference.
@@ -163,7 +163,7 @@ var forbiddenImports = map[string][]string{
 // halves import freely, which only stays safe while none of them grows a
 // dependency of its own. core holds the shared types; fmtutil the display
 // formatting; i18n the EN/ZH text tables. jsonscan joined this list when the
-// architecture review's B1 batch extracted it from internal/adapter's
+// extracted from internal/adapter's
 // classify.go/fingerprint.go — a pure JSON byte-range scanning engine with
 // no reason to depend on anything but the standard library.
 // Checked separately from forbiddenImports above because "must

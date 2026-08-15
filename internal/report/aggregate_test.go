@@ -252,7 +252,7 @@ func TestToolWaste(t *testing.T) {
 	}
 }
 
-// TestPricing exercises the P2.2 shape: internal/pricing.Table/Resolver
+// TestPricing exercises pricing resolution: internal/pricing.Table/Resolver
 // feeding Build's pricingSrc parameter, plus the report-local *Pricing
 // summary (Build's pricingInfo parameter) that ends up on rep.Pricing for
 // rendering (Currency/Disclaimer — see pricing.go's doc comment for why
