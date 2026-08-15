@@ -5,6 +5,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
@@ -276,5 +278,76 @@ func TestAuditRecordsStreaming(t *testing.T) {
 	body, _ := r.Client.Response.Body.(string)
 	if !strings.Contains(body, "[DONE]") {
 		t.Errorf("streamed body not captured: %v", r.Client.Response.Body)
+	}
+}
+
+// TestAuditRecordsStreamingClientCanceled verifies that when a client cancels
+// an in-flight streaming request mid-transfer, the audit trail records Outcome as
+// "canceled" and Attempt error as "canceled by client".
+func TestAuditRecordsStreamingClientCanceled(t *testing.T) {
+	slowSSE := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		for i := 0; i < 1000; i++ {
+			if r.Context().Err() != nil {
+				return
+			}
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"chunk%d\"}}]}\n\n", i)
+			fl.Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	defer slowSSE.Close()
+
+	ts, al := newAuditedServer(t, twoEndpointYAML(slowSSE.URL, slowSSE.URL, ""))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "POST", ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"vm","stream":true,"messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	buf := make([]byte, 64)
+	// Read first chunk
+	n, _ := resp.Body.Read(buf)
+	if n == 0 {
+		t.Fatal("expected to receive at least one chunk")
+	}
+	// Cancel client context mid-stream and close body
+	cancel()
+	resp.Body.Close()
+
+	// Wait for server goroutine to finish and write audit line
+	deadline := time.Now().Add(2 * time.Second)
+	var recs []audit.Record
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(al.Path())
+		if err == nil && len(strings.TrimSpace(string(data))) > 0 {
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				var r audit.Record
+				if err := json.Unmarshal([]byte(line), &r); err == nil {
+					recs = append(recs, r)
+				}
+			}
+			if len(recs) > 0 {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	r := recs[0]
+	if r.Outcome != "canceled" {
+		t.Errorf("r.Outcome = %q, want \"canceled\"", r.Outcome)
+	}
+	if len(r.Attempts) != 1 {
+		t.Fatalf("attempts: %d", len(r.Attempts))
+	}
+	if r.Attempts[0].ErrorClass != "canceled" || !strings.Contains(r.Attempts[0].Error, "canceled by client") {
+		t.Errorf("attempt error = (%q, %q), want error_class \"canceled\"", r.Attempts[0].ErrorClass, r.Attempts[0].Error)
 	}
 }

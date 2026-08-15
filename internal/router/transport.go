@@ -6,6 +6,7 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -60,17 +61,12 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 // upstream goes silent for longer than idle. On timeout the caller closes the
 // body, which unblocks the reader goroutine.
 //
-// Returning does NOT mean the reader goroutine has stopped touching body. On
-// the two early-return paths (idle timeout, client write error) it may still
-// be inside — or about to start — one more body.Read, whose writes to body's
-// internal state never pass through ch and so have no happens-before edge to
-// whatever the caller reads next. Every normal-path chunk is synchronized by
-// the ch send/receive; only that trailing read is not. Callers that inspect
-// body's state after this returns (forwardSuccess reads Applied()/
-// RawPreStrip()/ObservedModel()) are racing with it — see
-// docs/KNOWN_ISSUES_sonnet-5.md's entry on copyFlush returning before its
-// reader goroutine has stopped touching the body.
-func copyFlush(w http.ResponseWriter, body io.Reader, idle time.Duration) error {
+// Returning does not wait for the reader goroutine to exit on early-return paths
+// (idle timeout, client write error / disconnect) — the caller closing the body
+// unblocks the reader. Inspection methods on NormalizerStream (Applied, RawPreStrip,
+// ObservedModel, Usage, OutBytes) are protected by a mutex, guaranteeing safe,
+// race-free reads even if a trailing read executes concurrently.
+func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)
 	type chunk struct {
 		data []byte
@@ -101,6 +97,8 @@ func copyFlush(w http.ResponseWriter, body io.Reader, idle time.Duration) error 
 	defer timer.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case c := <-ch:
 			if len(c.data) > 0 {
 				if _, werr := w.Write(c.data); werr != nil {

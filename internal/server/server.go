@@ -161,7 +161,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 				rec.DurMS = time.Since(rec.TS).Milliseconds()
 				rec.TTFTMS = rw.ttftMS
 				rec.Client.Response = rw.message()
-				canceled := rw.status == 0 && r.Context().Err() != nil
+				canceled := r.Context().Err() != nil
 				rec.Outcome = audit.OutcomeFor(rw.status, canceled)
 				if err := s.audit.Write(rec); err != nil {
 					s.rt.Logf("audit: %v", err)

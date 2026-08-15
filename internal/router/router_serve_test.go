@@ -8,6 +8,7 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -237,7 +238,7 @@ func TestCopyFlush_IdleTimeout(t *testing.T) {
 	// idle timeout, not block forever.
 	slowReader := &blockedReader{}
 	w := httptest.NewRecorder()
-	err := copyFlush(w, slowReader, 50*time.Millisecond)
+	err := copyFlush(context.Background(), w, slowReader, 50*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -261,7 +262,7 @@ func TestCopyFlush_ClientDisconnect(t *testing.T) {
 	// disconnect). copyFlush should propagate the write error.
 	src := io.NopCloser(strings.NewReader(strings.Repeat("x", 10000)))
 	w := &errorWriter{}
-	err := copyFlush(w, src, 5*time.Second)
+	err := copyFlush(context.Background(), w, src, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -564,7 +565,7 @@ func TestCopyFlush_NormalData(t *testing.T) {
 	data := "Hello, world!\n"
 	src := io.NopCloser(strings.NewReader(data))
 	w := httptest.NewRecorder()
-	err := copyFlush(w, src, 5*time.Second)
+	err := copyFlush(context.Background(), w, src, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -576,14 +577,16 @@ func TestCopyFlush_NormalData(t *testing.T) {
 // --- context cancellation during copyFlush ---
 
 func TestCopyFlush_ContextCanceledMidStream(t *testing.T) {
-	// Simulate a scenario where the read blocks and the caller's context
-	// is canceled — copyFlush doesn't take a context directly, but a
-	// write error from a disconnected client should still surface.
+	ctx, cancel := context.WithCancel(context.Background())
 	src := &slowReader{delay: 2 * time.Second}
-	w := &errorWriter{}
-	err := copyFlush(w, src, 100*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected error from timeout or write failure")
+	w := httptest.NewRecorder()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	err := copyFlush(ctx, w, src, 5*time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 

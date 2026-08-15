@@ -525,9 +525,12 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// mid-transfer must abort instead of parking the request forever. The
 	// per-chunk Flush is a no-op concern for JSON bodies — Content-Length is
 	// stripped anyway.
-	copyErr := copyFlush(w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
+	copyErr := copyFlush(r.Context(), w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	status := "OK"
-	if copyErr != nil && r.Context().Err() == nil {
+	if r.Context().Err() != nil {
+		status = "CANCELED"
+		att.SetCanceled()
+	} else if copyErr != nil {
 		status = "TRUNCATED" // upstream died mid-stream; the response is already committed
 		att.SetTruncated(copyErr)
 	}
@@ -538,11 +541,11 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	rt.chargeQuota(ep, rbody, creq, time.Now())
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
-	// rbody.Usage() is safe to read here: chargeQuota (above) already
-	// consumed it, and NormalizerStream's own contract is that Usage()/
-	// OutBytes() are stable once copyFlush has returned (see
-	// internal/respnorm's package doc comment on its usage-sniffing
-	// placement).
+	// rbody.Usage() is safe to read here even on copyFlush's early-return
+	// paths (idle timeout, canceled, write error), where the reader
+	// goroutine may still be mid-trailing-read: NormalizerStream's
+	// inspection methods are mutex-guarded internally (see the mu field on
+	// respnorm's stream type), not merely "stable once copyFlush returns".
 	usage, ok := rbody.Usage()
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
 	return true, nil, true

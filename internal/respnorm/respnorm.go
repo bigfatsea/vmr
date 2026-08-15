@@ -99,10 +99,10 @@ type Options struct {
 
 // NormalizerStream is what Wrap returns: an io.Reader over the normalized
 // response body, plus the audit-trail/quota-metering facts accumulated
-// while it was read. Applied/RawPreStrip/ObservedModel are valid only after
-// the stream has been fully copied (EOF reached); Usage/OutBytes update
-// incrementally and are safe to read concurrently with an in-flight Read
-// (see the qmu field on stream for why only those two need that guarantee).
+// while it was read. Applied/RawPreStrip/ObservedModel carry their final
+// value only after the stream has been fully copied (EOF reached); Usage/
+// OutBytes update incrementally. All five are safe to call concurrently with
+// an in-flight Read — see the mu field on stream.
 type NormalizerStream interface {
 	io.Reader
 
@@ -229,40 +229,27 @@ type stream struct {
 	// fixed).
 	emittedTail       []byte
 	upstreamModel     string // the real model name vmr ASKED this endpoint for (ep.Model)
-	observedModel     string // what the upstream actually answered with, recorded only when it differs from upstreamModel
 	modelSeen         bool   // the observed value is captured once per response, not once per SSE chunk
 	thinkTriggered    bool   // buffering was caused by an inline <think> block
 	thinkPatternBytes int    // observation only: cumulative content bytes scanned for the leaked-thinking-process shape
 	thinkPatternHits  int    // cumulative "\n<N>." numbered-marker hits found in those bytes
-	applied           []string
-	rawPreStrip       []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 
-	// qmu guards ONLY the four fields below — Quota-Aware Routing's usage/
-	// byte-count accumulators — not the rest of stream's fields. Those
-	// stay unsynchronized on purpose (Read is only ever called serially by
-	// transport.go's copyFlush reader goroutine), but Usage()/OutBytes()
-	// are read from forwardSuccess's own goroutine, AFTER copyFlush
-	// returns — and on two of copyFlush's return paths (idle timeout,
-	// write error) the reader goroutine is not guaranteed to have exited
-	// yet (see transport.go's copyFlush doc comment and
-	// docs/KNOWN_ISSUES_sonnet-5.md's entry on copyFlush returning before
-	// its reader goroutine has stopped touching the body). Rather
-	// than fixing that pre-existing race (a hot-path change out of scope
-	// for this feature), these four fields get their own lock so the NEW code
-	// this feature adds is race-clean without touching the old fields at
-	// all. Worst case for THESE four, precisely because of this lock: this
-	// response's very last chunk of usage/bytes is missed — a benign
-	// undercount, not undefined behavior. That bound does NOT extend to the
-	// unsynchronized fields the same race also touches (applied,
-	// rawPreStrip, observedModel, read via Applied()/RawPreStrip()/
-	// ObservedModel() on the same post-copyFlush path): those are a genuine
-	// data race on slice/string headers. See the KNOWN_ISSUES entry.
-	qmu        sync.Mutex
-	asciiBytes int64
-	wideBytes  int64
-	usage      chatmsg.Usage
-	usageSeen  bool
+	// mu guards all metadata fields exported via inspection methods
+	// (Applied, RawPreStrip, ObservedModel, Usage, OutBytes). Read is called
+	// serially by transport.go's copyFlush reader goroutine, but inspection
+	// methods are read from forwardSuccess's own goroutine after copyFlush
+	// returns. On early return (idle timeout, client write error / disconnect),
+	// the reader goroutine may still be executing a trailing Read. Guarding all
+	// inspection fields with mu ensures race-free reads in all paths.
+	mu            sync.Mutex
+	applied       []string
+	rawPreStrip   []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
+	observedModel string // what the upstream actually answered with, recorded only when it differs from upstreamModel
+	asciiBytes    int64
+	wideBytes     int64
+	usage         chatmsg.Usage
+	usageSeen     bool
 }
 
 func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *stream {
@@ -302,7 +289,11 @@ func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, pro
 
 // Applied reports which transforms ran, for the audit trail. Valid after
 // the stream has been fully copied.
-func (s *stream) Applied() []string { return s.applied }
+func (s *stream) Applied() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.applied...)
+}
 
 // RawPreStrip returns the upstream bytes exactly as received, from the point
 // just before a think_strip/thinking_process_strip rewrite ran — nil when
@@ -311,7 +302,11 @@ func (s *stream) Applied() []string { return s.applied }
 // mode already holds these bytes in memory for the regex pass, so this just
 // keeps that reference alive instead of discarding it. Valid after the
 // stream has been fully copied.
-func (s *stream) RawPreStrip() []byte { return s.rawPreStrip }
+func (s *stream) RawPreStrip() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rawPreStrip
+}
 
 // Read does not satisfy the general io.Reader contract: it can return
 // (0, nil) — see the comment above the return statement below — which
@@ -399,7 +394,9 @@ func (s *stream) ingest(b []byte) {
 					tail := append([]byte(nil), s.buf[i+len(eventSep):]...)
 					s.buf = nil
 					if thinkPattern.Match(block) {
+						s.mu.Lock()
 						s.rawPreStrip = block
+						s.mu.Unlock()
 						block = thinkPattern.ReplaceAll(block, nil)
 						s.noteApplied("think_strip")
 					}
@@ -580,12 +577,18 @@ func (s *stream) noteUpstreamModel(block []byte) {
 	}
 	s.modelSeen = true
 	if got := string(m[2]); got != s.upstreamModel {
+		s.mu.Lock()
 		s.observedModel = got
+		s.mu.Unlock()
 	}
 }
 
 // ObservedModel returns the upstream's observed model name when different from requested.
-func (s *stream) ObservedModel() string { return s.observedModel }
+func (s *stream) ObservedModel() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.observedModel
+}
 
 func (s *stream) finish() {
 	if s.opaque {
@@ -622,14 +625,18 @@ func (s *stream) finalizeBuffered() {
 	// content/text value STARTS with <think> is the MiniMax thinking shape;
 	// a body that merely quotes the tag mid-text passes through untouched.
 	if thinkShapeGuard(b) && thinkPattern.Match(b) {
+		s.mu.Lock()
 		s.rawPreStrip = raw
+		s.mu.Unlock()
 		b = thinkPattern.ReplaceAll(b, nil)
 		s.noteApplied("think_strip")
 	}
 	if stripped := stripThinkingProcess(b); !bytes.Equal(stripped, b) {
+		s.mu.Lock()
 		if s.rawPreStrip == nil {
 			s.rawPreStrip = raw
 		}
+		s.mu.Unlock()
 		b = stripped
 		s.noteApplied("thinking_process_strip")
 	}
@@ -678,6 +685,8 @@ func (s *stream) appendDone() {
 }
 
 func (s *stream) noteApplied(step string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, a := range s.applied {
 		if a == step {
 			return
@@ -703,6 +712,8 @@ func (s *stream) noteThinkingPatternIfSuspected(b []byte) {
 // stripFired reports whether either MiniMax thinking-mode repair actually
 // rewrote this response's bytes.
 func (s *stream) stripFired() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, a := range s.applied {
 		if a == "think_strip" || a == "thinking_process_strip" {
 			return true
@@ -799,10 +810,10 @@ func (s *stream) countBytes(b []byte) {
 			wide++
 		}
 	}
-	s.qmu.Lock()
+	s.mu.Lock()
 	s.asciiBytes += ascii
 	s.wideBytes += wide
-	s.qmu.Unlock()
+	s.mu.Unlock()
 }
 
 // noteUsage looks for a "usage" object in b and folds it into the running
@@ -817,8 +828,8 @@ func (s *stream) noteUsage(b []byte) {
 	if !bytes.Contains(b, usageFieldMarker) {
 		return
 	}
-	s.qmu.Lock()
-	defer s.qmu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	u := chatmsg.MergeUsageBytes(b, s.usage)
 	s.usage = u
 	if u.In > 0 || u.Out > 0 {
@@ -829,12 +840,10 @@ func (s *stream) noteUsage(b []byte) {
 // Usage returns the token usage extracted from this response so far; ok is true
 // only once at least one usage-bearing block has actually been parsed —
 // see quota.go's tokenCharge for the fallback when ok is false. Safe to
-// call concurrently with an in-flight Read/ingest — see qmu's doc comment
-// on stream for why this specific pair of fields needs that guarantee
-// when the rest of the type doesn't.
+// call concurrently with an in-flight Read/ingest.
 func (s *stream) Usage() (chatmsg.Usage, bool) {
-	s.qmu.Lock()
-	defer s.qmu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.usage, s.usageSeen
 }
 
@@ -842,8 +851,8 @@ func (s *stream) Usage() (chatmsg.Usage, bool) {
 // far — the degraded-estimate input when Usage() has nothing. Same
 // concurrency contract as Usage().
 func (s *stream) OutBytes() (ascii, wide int64) {
-	s.qmu.Lock()
-	defer s.qmu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.asciiBytes, s.wideBytes
 }
 

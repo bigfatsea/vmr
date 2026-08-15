@@ -212,7 +212,9 @@ func (a *Attempt) SetBuildError(err error) {
 }
 
 // SetCanceled records that the client disconnected while this attempt was
-// still in flight (context canceled before any response arrived).
+// still in flight — either before any response arrived, or mid-stream after
+// a 2xx response was already committed (SetSuccessResponse having run first,
+// so Response is left in place; only Error/ErrorClass are set here).
 func (a *Attempt) SetCanceled() {
 	if a == nil {
 		return

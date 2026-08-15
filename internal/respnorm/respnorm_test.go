@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // readAll drains the processor into a string. Reads in a loop because
@@ -1184,5 +1185,58 @@ func TestStream_IoCopyMatchesReadAll(t *testing.T) {
 	}
 	if got.String() != want {
 		t.Errorf("io.Copy = %q, readAll = %q", got.String(), want)
+	}
+}
+
+// TestStream_ConcurrentReadAndInspection locks in race-free access to
+// Applied, RawPreStrip, ObservedModel, Usage, and OutBytes while Read is
+// running concurrently in another goroutine.
+func TestStream_ConcurrentReadAndInspection(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		`data: {"model":"upstream-model-v1","choices":[{"delta":{"content":"<think>reasoning</think>hello"}}],` +
+			`"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n",
+		`data: [DONE]` + "\n\n",
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		for _, c := range chunks {
+			pw.Write([]byte(c))
+			time.Sleep(2 * time.Millisecond)
+		}
+		pw.Close()
+	}()
+
+	rs := newStream(pr, "agent", "virtual-model", true, "openai", false)
+
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_ = rs.Applied()
+				_ = rs.RawPreStrip()
+				_ = rs.ObservedModel()
+				_, _ = rs.Usage()
+				_, _ = rs.OutBytes()
+			}
+		}
+	}()
+
+	readAll(t, rs)
+	close(done)
+
+	// Post-completion inspections must also be safe.
+	if len(rs.Applied()) == 0 {
+		t.Error("expected applied steps to be recorded")
+	}
+	if rs.ObservedModel() != "upstream-model-v1" {
+		t.Errorf("ObservedModel = %q, want %q", rs.ObservedModel(), "upstream-model-v1")
+	}
+	u, ok := rs.Usage()
+	if !ok || u.In != 10 || u.Out != 5 {
+		t.Errorf("Usage = %+v, ok = %v", u, ok)
 	}
 }
