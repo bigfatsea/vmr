@@ -73,13 +73,13 @@ func Spine(lang Lang) SpineText {
 				return "\n… （还有 " + strconv.Itoa(more) + " 字符，完整内容见下方该 Step 的 tool_call 详情）"
 			},
 
-			StepTagPlan:       "📋",
-			StepTagAction:     "🔧",
-			StepTagObserve:    "👀",
-			StepTagRetry:      "🔄",
-			StepTagError:      "⚠️",
-			StepTagCompaction: "🧹",
-			StepTagReport:     "💬",
+			StepTagPlan:       "🔷 📋",
+			StepTagAction:     "🔷 🔧",
+			StepTagObserve:    "🔷 👀",
+			StepTagRetry:      "🔷 🔄",
+			StepTagError:      "🔷 ⚠️",
+			StepTagCompaction: "🔷 🧹",
+			StepTagReport:     "🔷 💬",
 
 			TimelineTitle:  "## 工具调用时序图\n\n",
 			TimelineLegend: "图例：● 正常 · 🔄 疑似重复 · ❌ 本步含错误标记\n\n",
@@ -119,13 +119,13 @@ func Spine(lang Lang) SpineText {
 			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's tool_call section below)"
 		},
 
-		StepTagPlan:       "📋",
-		StepTagAction:     "🔧",
-		StepTagObserve:    "👀",
-		StepTagRetry:      "🔄",
-		StepTagError:      "⚠️",
-		StepTagCompaction: "🧹",
-		StepTagReport:     "💬",
+		StepTagPlan:       "🔷 📋",
+		StepTagAction:     "🔷 🔧",
+		StepTagObserve:    "🔷 👀",
+		StepTagRetry:      "🔷 🔄",
+		StepTagError:      "🔷 ⚠️",
+		StepTagCompaction: "🔷 🧹",
+		StepTagReport:     "🔷 💬",
 
 		TimelineTitle:  "## Tool Call Timeline\n\n",
 		TimelineLegend: "Legend: ● normal · 🔄 suspected repeat · ❌ step carries an error marker\n\n",
