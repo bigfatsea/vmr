@@ -381,6 +381,9 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 
 	var llmSection string
 	if llmOpts.Addr != "" {
+		if llmFindings, err := story.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(llmFindings) > 0 {
+			findings = append(findings, llmFindings...)
+		}
 		pack := story.BuildSingleJourneyEvidencePack(j, m, findings, lang)
 		chars := pack.EstimateChars()
 		fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)

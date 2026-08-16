@@ -148,6 +148,9 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	if !strings.Contains(joinedSwallowed, "README.md") {
 		t.Errorf("README.md (never restated) should be in SwallowedEntities, got %v", c.SwallowedEntities)
 	}
+	if c.PredecessorTextExcerpt == "" || !strings.Contains(c.PredecessorTextExcerpt, "AGENTS.md") {
+		t.Errorf("PredecessorTextExcerpt should contain predecessor text, got %q", c.PredecessorTextExcerpt)
+	}
 
 	// The struct-level assertions above don't prove renderCompactionInfo
 	// actually surfaces any of this in what a reader opens — RenderMarkdown

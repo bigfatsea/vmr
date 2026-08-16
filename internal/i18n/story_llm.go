@@ -25,6 +25,31 @@ type LLMText struct {
 	DivergenceUserPromptPrefix string
 	DivergenceUserPromptSuffix string
 
+	// Phase 1b semantic detectors
+	ToolMisinterpretationSystemPrompt string
+	ToolMisinterpretationUserPrefix   string
+	ToolMisinterpretationUserSuffix   string
+
+	SemanticOscillationSystemPrompt string
+	SemanticOscillationUserPrefix   string
+	SemanticOscillationUserSuffix   string
+
+	GoalDriftSystemPrompt string
+	GoalDriftUserPrefix   string
+	GoalDriftUserSuffix   string
+
+	CompactionConstraintSystemPrompt string
+	CompactionConstraintUserPrefix   string
+	CompactionConstraintUserSuffix   string
+
+	PlanAuditSystemPrompt string
+	PlanAuditUserPrefix   string
+	PlanAuditUserSuffix   string
+
+	CompletionClaimSystemPrompt string
+	CompletionClaimUserPrefix   string
+	CompletionClaimUserSuffix   string
+
 	NoTextReply       string
 	SectionTitle      func(model, scope string) string // scope: "" for the only LLM section in a document, else a short label distinguishing it from another in the same document (-compare's overall vs. divergence-point sections)
 	SectionDisclaimer func(model string) string
@@ -54,6 +79,30 @@ func LLM(lang Lang) LLMText {
 			DivergenceUserPromptPrefix: "以下是两个 Journey 分叉点附近的结构化证据（分叉点本身 + 双方分叉点前后各几步的简要信息）：\n\n```json\n",
 			DivergenceUserPromptSuffix: "\n```\n",
 
+			ToolMisinterpretationSystemPrompt: llmToolMisinterpretationSystemPromptZH,
+			ToolMisinterpretationUserPrefix:   "以下是待审查的工具返回与模型后续推理对（JSON）：\n\n```json\n",
+			ToolMisinterpretationUserSuffix:   "\n```\n",
+
+			SemanticOscillationSystemPrompt: llmSemanticOscillationSystemPromptZH,
+			SemanticOscillationUserPrefix:   "以下是短窗口内多次调用的工具参数序列（JSON）：\n\n```json\n",
+			SemanticOscillationUserSuffix:   "\n```\n",
+
+			GoalDriftSystemPrompt: llmGoalDriftSystemPromptZH,
+			GoalDriftUserPrefix:   "以下是用户初始根目标与执行步骤检查点（JSON）：\n\n```json\n",
+			GoalDriftUserSuffix:   "\n```\n",
+
+			CompactionConstraintSystemPrompt: llmCompactionConstraintSystemPromptZH,
+			CompactionConstraintUserPrefix:   "以下是在 Compaction 中被丢弃的前驱消息文本节选（JSON）：\n\n```json\n",
+			CompactionConstraintUserSuffix:   "\n```\n",
+
+			PlanAuditSystemPrompt: llmPlanAuditSystemPromptZH,
+			PlanAuditUserPrefix:   "以下是制定的计划条目与实际执行的动作摘要（JSON）：\n\n```json\n",
+			PlanAuditUserSuffix:   "\n```\n",
+
+			CompletionClaimSystemPrompt: llmCompletionClaimSystemPromptZH,
+			CompletionClaimUserPrefix:   "以下是终步回复与轨迹中的验证动作/错误信息（JSON）：\n\n```json\n",
+			CompletionClaimUserSuffix:   "\n```\n",
+
 			NoTextReply: "(无文本回复)",
 			SectionTitle: func(model, scope string) string {
 				if scope == "" {
@@ -82,6 +131,30 @@ func LLM(lang Lang) LLMText {
 		DivergenceSystemPrompt:     llmDivergenceSystemPromptEN,
 		DivergenceUserPromptPrefix: "Here is the structured evidence around two Journeys' divergence point (the divergence point itself, plus a few steps before/after it on each side):\n\n```json\n",
 		DivergenceUserPromptSuffix: "\n```\n",
+
+		ToolMisinterpretationSystemPrompt: llmToolMisinterpretationSystemPromptEN,
+		ToolMisinterpretationUserPrefix:   "Here are the suspicious tool-result and next-reasoning pairs (JSON):\n\n```json\n",
+		ToolMisinterpretationUserSuffix:   "\n```\n",
+
+		SemanticOscillationSystemPrompt: llmSemanticOscillationSystemPromptEN,
+		SemanticOscillationUserPrefix:   "Here is the sequence of repeated tool calls with argument variations (JSON):\n\n```json\n",
+		SemanticOscillationUserSuffix:   "\n```\n",
+
+		GoalDriftSystemPrompt: llmGoalDriftSystemPromptEN,
+		GoalDriftUserPrefix:   "Here is the root user intent and step checkpoints (JSON):\n\n```json\n",
+		GoalDriftUserSuffix:   "\n```\n",
+
+		CompactionConstraintSystemPrompt: llmCompactionConstraintSystemPromptEN,
+		CompactionConstraintUserPrefix:   "Here are the predecessor text excerpts dropped during compaction (JSON):\n\n```json\n",
+		CompactionConstraintUserSuffix:   "\n```\n",
+
+		PlanAuditSystemPrompt: llmPlanAuditSystemPromptEN,
+		PlanAuditUserPrefix:   "Here are the plan items and actions taken (JSON):\n\n```json\n",
+		PlanAuditUserSuffix:   "\n```\n",
+
+		CompletionClaimSystemPrompt: llmCompletionClaimSystemPromptEN,
+		CompletionClaimUserPrefix:   "Here is the final response and observed verification actions (JSON):\n\n```json\n",
+		CompletionClaimUserSuffix:   "\n```\n",
 
 		NoTextReply: "(no text reply)",
 		SectionTitle: func(model, scope string) string {
@@ -181,3 +254,227 @@ Follow these rules strictly:
 3. Never judge which side was "better" or "more correct" — VMR only records the process, not whether the task actually achieved the user's goal; that judgment is beyond what the given evidence can support.
 4. You must include a dedicated section titled "What VMR Can't See", stating the blind spots honestly.
 5. Output plain Markdown, not JSON. The first line is a one-sentence conclusion, followed by "## Divergence Interpretation" (with confidence levels) and "## What VMR Can't See".`
+
+// --- Phase 1b Semantic Detector Prompts --------------------------------------
+
+const llmToolMisinterpretationSystemPromptZH = `你是一个 Agent 工具调用与推理自洽性审查助手。你会收到一组疑似存在曲解的工具返回与模型后续推理对（JSON）。
+你的任务是判断模型在工具返回明确报错、否定或异常信息时，是否产生了相反的乐观幻觉（例如工具返回 404/Error，模型却在推理中声称"已成功读取"并继续执行）。
+
+严格遵循：
+1. 仅当模型在推理中明确把失败/错误/否定结果误解为成功或忽略阻断性错误时，才判定为曲解（is_misinterpreted: true）。
+2. 置信度判断：
+   - "HIGH"：工具返回与后续推理存在字面直接矛盾；
+   - "MEDIUM"：工具返回模糊，但模型明显做出了过于乐观的无证据假设；
+   - "LOW"：仅为一般性推测。
+3. 如果模型正确识别了错误并进行了重试、降级或报错处理，必须判定为 is_misinterpreted: false。
+4. evidence_anchor 只放**一段**原样逐字摘录的文字——只摘录工具返回中最能说明问题的那一句原文（禁止改写、概括、增删文字），不要自己再加"工具返回：""推理："这类标签把两段拼在一起。模型推理里的矛盾说法转述在 explanation 字段里说清楚即可，不需要也逐字摘录。
+5. 输出严格为合法 JSON 数组（不要输出任何额外 Markdown 解释或代码块外文本），每个元素包含：
+   - "step_seq": int
+   - "is_misinterpreted": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string（直接引用原文矛盾字句，若无则为空）
+   - "explanation": string（简要说明判定原因）
+   - "suggested_action": string（建议的修复或复核动作）`
+
+const llmToolMisinterpretationSystemPromptEN = `You are an assistant evaluating agent reasoning consistency against tool execution results. You will receive suspicious tool-result and next-reasoning pairs (JSON).
+Your task is to judge whether the model exhibited hallucinated optimism upon receiving errors or negative results (e.g. tool returns 404/Error, but reasoning claims success).
+
+Strict rules:
+1. Mark is_misinterpreted as true only if the model explicitly misinterpreted a failure/error as a success or ignored blocking failures.
+2. Confidence levels:
+   - "HIGH": Direct, undeniable contradiction between tool result and reasoning;
+   - "MEDIUM": Ambiguous result but model made unjustified optimistic assumptions;
+   - "LOW": Speculative.
+3. If the model acknowledged the failure and retried, degraded, or handled it, mark is_misinterpreted as false.
+4. evidence_anchor holds exactly ONE literal excerpt — just the single sentence from the tool result that best proves the problem, copied word-for-word (never paraphrase, summarize, or rewrite it). Do not prepend your own labels like "tool result:"/"reasoning:" and stitch two excerpts together. Describe the reasoning's contradictory claim in explanation instead — it does not need to be quoted verbatim there.
+5. Output strictly a JSON array (no markdown wrap or extra commentary), each element containing:
+   - "step_seq": int
+   - "is_misinterpreted": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_action": string`
+
+const llmSemanticOscillationSystemPromptZH = `你是一个 Agent 循环与振荡检测助手。你会收到若干连续工具调用的候选序列（JSON），同一工具在短窗口内被多次调用但参数有细微变化。
+你的任务是判断这些调用是否属于"换汤不换药的语义死循环/原地打转"（例如搜索词不断替换无用同义词、对同一个不存在的文件反复变换路径尝试），还是属于具有建设性的正常探索（例如二分查找、有效分页、根据报错修正参数）。
+
+严格遵循：
+1. 仅当连续调用的参数变化没有带来实质新信息、且未根据前序结果调整策略时，判定为振荡死循环（is_oscillating: true）。
+2. 置信度判断：
+   - "HIGH"：参数明显为无意义的同义反复或无效试探，且前序已明确失败（在 evidence_anchor 中指出模式）；
+   - "MEDIUM"：探索性较弱但存在微弱进展可能；
+   - "LOW"：较难区分正常探索与无效重试。
+3. evidence_anchor 必须是从候选调用序列的具体参数（如某次调用的 args_brief 原文）里逐字摘录的片段，而不是对"模式"的概括描述——摘录 1-2 次具体调用的原始参数字符串即可；对模式本身的归纳分析放在 explanation 字段。
+4. 输出严格为合法 JSON 数组（不要输出任何额外文本），每个元素包含：
+   - "step_seq": int（最近一次触发振荡的步骤号）
+   - "is_oscillating": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_breakout": string（建议的跳出策略）`
+
+const llmSemanticOscillationSystemPromptEN = `You are an assistant detecting semantic oscillations in agent trajectories. You will receive candidates of consecutive tool invocations (JSON) where the same tool was called repeatedly with slight argument variations.
+Your task is to judge whether these calls represent an unproductive semantic loop / oscillation rather than constructive exploration.
+
+Strict rules:
+1. Mark is_oscillating as true only if argument variations yield no substantial new information and fail to adapt to prior failures.
+2. Confidence levels:
+   - "HIGH": Clear pattern of futile repetitive attempts (point out the pattern in evidence_anchor);
+   - "MEDIUM": Weak exploration with minimal progress;
+   - "LOW": Ambiguous between exploration and loop.
+3. evidence_anchor must be an exact excerpt copied from a specific call's own argument text (e.g. one call's literal args_brief) — not a description of "the pattern" in your own words; quoting 1-2 calls' literal argument strings is enough. Put your own characterization of the pattern in explanation.
+4. Output strictly a JSON array, each element containing:
+   - "step_seq": int
+   - "is_oscillating": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_breakout": string`
+
+const llmGoalDriftSystemPromptZH = `你是一个 Agent 长程任务目标漂移分析助手。你会收到用户的初始根目标（root_user_intent）以及任务执行过程中的关键步骤检查点（JSON）。
+你的任务是评估 Agent 是否在执行过程中严重脱离了初始用户目标（例如被无关的警告或次要脚本吸引，陷入不相关的全库重构或外部探索，无法收敛）。
+
+严格遵循：
+1. 区分"合理子任务"与"目标漂移"：为了完成根目标所必需的调试、依赖安装或环境配置属于正常子任务，不属于漂移。只有当 Agent 彻底遗忘根目标、在无关领域过度展开且无收敛迹象时才判定为漂移。
+2. 置信度判断：
+   - "HIGH"：明确脱离根目标并在无关任务上持续消耗多步；
+   - "MEDIUM"：偏离主线但仍存在微弱间接关联；
+   - "LOW"：疑似漂移但可能属于深层准备。
+3. evidence_anchor 只放**一段**逐字摘录的原文——就是 drift_step_seq 那个 checkpoint 的 reasoning_brief 原文（禁止改写、概括，也不要自己加"checkpoint N:""root_user_intent:"这类标签把它和根目标拼在一起）。根目标是什么、两者为什么冲突，写在 drift_explanation 字段里说明即可，不需要在 evidence_anchor 里逐字重复。
+4. 输出严格为合法 JSON 对象（不要输出任何额外文本）：
+   - "drift_detected": bool
+   - "drift_step_seq": int（首次发生偏离的步骤序号，若无则为 0）
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "drift_explanation": string
+   - "suggested_action": string`
+
+const llmGoalDriftSystemPromptEN = `You are an assistant analyzing long-horizon agent trajectories for goal drift. You will receive the user's initial root intent (root_user_intent) and key step checkpoints (JSON).
+Your task is to judge whether the agent significantly deviated from the root goal.
+
+Strict rules:
+1. Distinguish between necessary subtasks and goal drift: Subtasks required to fulfill the root goal are normal. Drift only applies when the agent abandons the root goal for irrelevant tangents.
+2. Confidence levels:
+   - "HIGH": Clear deviation sustained across multiple steps;
+   - "MEDIUM": Off-track but weak indirect connection exists;
+   - "LOW": Suspected drift.
+3. evidence_anchor holds exactly ONE literal excerpt — the reasoning_brief text of the checkpoint at drift_step_seq, copied word-for-word (never paraphrase or summarize it). Do not prepend labels like "checkpoint N:"/"root_user_intent:" and stitch it to the root goal. Explain what the root goal was and why they conflict in drift_explanation instead — it doesn't need to be quoted verbatim there.
+4. Output strictly a JSON object:
+   - "drift_detected": bool
+   - "drift_step_seq": int
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "drift_explanation": string
+   - "suggested_action": string`
+
+const llmCompactionConstraintSystemPromptZH = `你是一个上下文压缩（Compaction）信息丢失审计助手。你会收到在上下文压缩中被丢弃的前驱消息文本节选（JSON）。
+你的任务是审查被丢弃的文本中是否存在关键的系统级"否定式禁止规则"、"安全边界约束"或"核心格式/质量规范"（例如"严格禁止修改 schema.sql"、"请始终用中文回答"、"严禁提交未测试代码"）。
+
+严格遵循：
+1. 仅当被丢弃文本中包含明确的禁止规则、硬性约束或行为规范时，才判定为 constraint_lost: true。常规的中间讨论、工具输出或已完成的任务描述被丢弃属于正常压缩，不得判定为约束丢失。
+2. 置信度判断：
+   - "HIGH"：存在字面明确的否定式禁止或硬性规范（在 evidence_anchor 中完整引用该约束原句）；
+   - "MEDIUM"：存在隐含的约束但语气较弱；
+   - "LOW"：推测性约束。
+3. evidence_anchor 必须逐字复制被丢弃文本中的约束原句，一字不改（不得省略、替换或补全其中任何词语，包括语气词和标点）——哪怕原句略显口语化也照抄，不要"顺手"改写成更规范的表达。
+4. 输出严格为合法 JSON 数组（不要输出任何额外文本），每个元素包含：
+   - "step_seq": int
+   - "constraint_lost": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string（被丢弃的约束原句摘录）
+   - "explanation": string
+   - "suggested_action": string`
+
+const llmCompactionConstraintSystemPromptEN = `You are an assistant auditing context compaction information loss. You will receive predecessor text excerpts dropped during compaction boundaries (JSON).
+Your task is to judge whether critical negative constraints, safety boundaries, or core behavioral guidelines were lost.
+
+Strict rules:
+1. Mark constraint_lost as true only if explicit negative constraints or hard guidelines were present in the dropped text. Dropping regular intermediate messages or tool outputs is normal.
+2. Confidence levels:
+   - "HIGH": Explicit negative rules or mandatory constraints found (quote the exact rule in evidence_anchor);
+   - "MEDIUM": Implicit or weak constraints;
+   - "LOW": Speculative.
+3. evidence_anchor must be the dropped constraint sentence copied word-for-word, with nothing added, removed, or "cleaned up" (not even filler words or punctuation) — copy it exactly as written even if it reads informally; do not silently rewrite it into more formal phrasing.
+4. Output strictly a JSON array, each element containing:
+   - "step_seq": int
+   - "constraint_lost": bool
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_action": string`
+
+const llmPlanAuditSystemPromptZH = `你是一个 Agent 计划执行审计助手。你会收到 Agent 制定的计划条目列表以及后续实际执行的动作摘要（JSON）。
+你的任务是逐项核销每个计划条目的执行状态（FULFILLED / UNFULFILLED / FAILED），并判断是否存在关键计划条目被未经验证地跳过或脱节。
+
+严格遵循：
+1. 逐项核对：如果后续动作确实执行了该步骤，标记为 FULFILLED；若关键步骤在无解释的情况下被完全跳过却声称全部完成，标记为 UNFULFILLED 并指出 has_misalignment: true。
+2. 置信度判断：
+   - "HIGH"：存在字面明确的计划条目完全未执行且在终步被无视（在 evidence_anchor 中指出条目与未执行事实）；
+   - "MEDIUM"：计划条目部分执行或边界模糊；
+   - "LOW"：无法确定是否执行。
+3. evidence_anchor 只放**一条**未执行条目的原始文本（plan_items 里该条目的 text 字段原文，一字不改地照抄），即使有多条都未执行，也只挑其中最关键的一条放进 evidence_anchor，不要把多条条目拼接在一起（那些不是自己的转述句）；完整的未执行清单已经在 unfulfilled_items 数组里逐条列出，不需要在 evidence_anchor 里重复列全部。若要说明"为什么判定未执行"，写在 explanation 里。
+4. 输出严格为合法 JSON 对象（不要输出任何额外文本）：
+   - "has_misalignment": bool
+   - "unfulfilled_items": [{"seq": int, "text": string, "status": "UNFULFILLED"|"FAILED"}]
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_action": string`
+
+const llmPlanAuditSystemPromptEN = `You are an assistant auditing agent plan fulfillment. You will receive the agent's declared plan items and summaries of subsequent actions taken (JSON).
+Your task is to audit the status of each plan item (FULFILLED / UNFULFILLED / FAILED) and detect whether key plan items were skipped without justification.
+
+Strict rules:
+1. Item-by-item check: If actions executed the step, mark FULFILLED. If key steps were skipped without reason while claiming overall completion, mark UNFULFILLED and set has_misalignment to true.
+2. Confidence levels:
+   - "HIGH": Clear unfulfilled plan item completely ignored in execution (quote item in evidence_anchor);
+   - "MEDIUM": Partially fulfilled or ambiguous;
+   - "LOW": Uncertain.
+3. evidence_anchor holds exactly ONE unfulfilled item's text, copied verbatim (the "text" field of that plan_items entry) — even when several items are unfulfilled, pick only the single most decisive one for evidence_anchor rather than stitching several together; the complete list already lives in unfulfilled_items, so evidence_anchor doesn't need to repeat all of it. Explain WHY it counts as unfulfilled in explanation instead.
+4. Output strictly a JSON object:
+   - "has_misalignment": bool
+   - "unfulfilled_items": [{"seq": int, "text": string, "status": "UNFULFILLED"|"FAILED"}]
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "explanation": string
+   - "suggested_action": string`
+
+const llmCompletionClaimSystemPromptZH = `你是一个 Agent 任务完成声明与验证审计助手。你会收到任务终步的输出回复、最终推理、以及整个任务中观察到的所有验证/测试类命令与未解决错误（JSON）。
+你的任务是判断 Agent 在最终回复中是否做出了强完成声明（如"已成功修复所有问题/全部测试通过"），以及该声明是否有实质性的验证动作与成功结果支撑。
+
+严格遵循：
+1. 判定三态（claim_status）：
+   - "CLAIM_WITH_VERIFICATION"：明确宣称完成，且轨迹中有实质性验证动作（如测试通过、构建成功、核查确认）；
+   - "CLAIM_WITHOUT_VERIFICATION"：明确宣称完成，但轨迹中没有任何对应验证动作（或验证报错后未重试直接宣称完成）；
+   - "NO_COMPLETION_CLAIM"：无明确完成宣称（如任务中途中断、仍在讨论、或如实说明尚未验证）。
+2. 置信度判断：
+   - "HIGH"：终步存在明确的完成断言，且前序毫无对应验证动作（在 evidence_anchor 中引用完成断言原句）；
+   - "MEDIUM"：完成断言较为模糊或验证动作不够充分；
+   - "LOW"：普通说明。
+3. evidence_anchor 必须是完成断言的原句一字不差地复制，包括其中的语气词、标点和修饰词（如"成功"、"完成"）——禁止只摘录半句或省略其中任何词语；宁可整句照抄长一点，也不要为了简洁而删减。
+4. 输出严格为合法 JSON 对象（不要输出任何额外文本）：
+   - "claim_status": "CLAIM_WITH_VERIFICATION" | "CLAIM_WITHOUT_VERIFICATION" | "NO_COMPLETION_CLAIM"
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string（引用完成断言的具体原句）
+   - "missing_verification": string（说明缺失了何种验证）
+   - "suggested_action": string`
+
+const llmCompletionClaimSystemPromptEN = `You are an assistant auditing agent task completion claims against verification evidence. You will receive the final step output, final reasoning, and observed verification commands and unresolved errors (JSON).
+Your task is to judge whether the agent made a strong completion claim and whether that claim is backed by actual verification actions.
+
+Strict rules:
+1. Three states (claim_status):
+   - "CLAIM_WITH_VERIFICATION": Explicit completion claim supported by verification;
+   - "CLAIM_WITHOUT_VERIFICATION": Explicit completion claim without any verification actions;
+   - "NO_COMPLETION_CLAIM": No explicit completion claim.
+2. Confidence levels:
+   - "HIGH": Clear completion assertion with zero verification (quote assertion in evidence_anchor);
+   - "MEDIUM": Ambiguous claim or partial verification;
+   - "LOW": General statement.
+3. evidence_anchor must be the completion assertion copied word-for-word, including its filler words, punctuation, and qualifiers (e.g. "successfully", "all done") — never quote only half the sentence or drop any word from it; a longer verbatim quote is always better than a shortened one.
+4. Output strictly a JSON object:
+   - "claim_status": "CLAIM_WITH_VERIFICATION" | "CLAIM_WITHOUT_VERIFICATION" | "NO_COMPLETION_CLAIM"
+   - "confidence": "HIGH" | "MEDIUM" | "LOW"
+   - "evidence_anchor": string
+   - "missing_verification": string
+   - "suggested_action": string`

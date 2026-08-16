@@ -34,6 +34,12 @@ type StoryFindingsText struct {
 	UnusedToolResult          func(entities string) StoryFindingText
 	UnverifiedEntityReference func(entities string) StoryFindingText
 	ConstraintTextDropped     func(entities string, total int) StoryFindingText
+
+	// Phase 1b (llm_findings.go)
+	ToolResultMisinterpretation func(tool, explanation string) StoryFindingText
+	SemanticOscillation         func(tool string, explanation string) StoryFindingText
+	GoalDrift                   func(driftSeq int, explanation string) StoryFindingText
+	UnverifiedCompletionClaim   func(missing string) StoryFindingText
 }
 
 func StoryFindings(lang Lang) StoryFindingsText {
@@ -102,6 +108,34 @@ func StoryFindings(lang Lang) StoryFindingsText {
 					Action:   "建议人工确认这些实体代表的约束/上下文是否还需要，是否应该在后续轮次里重新强调",
 				}
 			},
+			ToolResultMisinterpretation: func(tool, explanation string) StoryFindingText {
+				return StoryFindingText{
+					Finding:  "疑似工具结果曲解：" + tool + " 返回报错或异常，但后续推理误判为成功",
+					Evidence: explanation,
+					Action:   "建议人工复核模型是否对工具的报错产生了乐观幻觉并在此基础上继续推进",
+				}
+			},
+			SemanticOscillation: func(tool, explanation string) StoryFindingText {
+				return StoryFindingText{
+					Finding:  "疑似语义原地打转：" + tool + " 连续多次调用但参数微调缺乏实质进展",
+					Evidence: explanation,
+					Action:   "建议人工复核该工具调用是否陷入无效重试死循环，考虑提示模型更换探索路径",
+				}
+			},
+			GoalDrift: func(driftSeq int, explanation string) StoryFindingText {
+				return StoryFindingText{
+					Finding:  "疑似长程目标漂移：从 Step " + strconv.Itoa(driftSeq) + " 起执行行为显著脱离初始根目标",
+					Evidence: explanation,
+					Action:   "建议人工复核 Agent 是否陷入次要支线探索或调试泥潭，在 Prompt 中增加阶段性目标对齐提醒",
+				}
+			},
+			UnverifiedCompletionClaim: func(missing string) StoryFindingText {
+				return StoryFindingText{
+					Finding:  "疑似未验证宣称完成：终步明确声称完成任务，但轨迹中缺失对应验证动作",
+					Evidence: missing,
+					Action:   "建议人工复核交付物是否真实可用，要求 Agent 在宣称完成前必须执行测试/构建验证",
+				}
+			},
 		}
 	}
 	return StoryFindingsText{
@@ -166,6 +200,34 @@ func StoryFindings(lang Lang) StoryFindingsText {
 				Finding:  "Suspected constraint text dropped at compaction: " + strconv.Itoa(total) + " entities present before the boundary (e.g. " + entities + ") are gone from the post-compaction content",
 				Evidence: "entities present before compaction, absent after: " + entities + " (an unverified, hypothesis-level check — it only names the pattern, it hasn't confirmed real impact)",
 				Action:   "Manually confirm whether the constraints/context these entities represent still matter and should be re-stated in a later turn",
+			}
+		},
+		ToolResultMisinterpretation: func(tool, explanation string) StoryFindingText {
+			return StoryFindingText{
+				Finding:  "Suspected tool result misinterpretation: " + tool + " returned an error or negative result, but subsequent reasoning claimed success",
+				Evidence: explanation,
+				Action:   "Manually verify whether the model developed hallucinated optimism upon tool failure and proceeded erroneously",
+			}
+		},
+		SemanticOscillation: func(tool, explanation string) StoryFindingText {
+			return StoryFindingText{
+				Finding:  "Suspected semantic oscillation: " + tool + " called repeatedly with slight argument variations yielding no real progress",
+				Evidence: explanation,
+				Action:   "Manually review whether the tool invocation is stuck in a futile retry loop; prompt the agent to change search/investigation direction",
+			}
+		},
+		GoalDrift: func(driftSeq int, explanation string) StoryFindingText {
+			return StoryFindingText{
+				Finding:  "Suspected goal drift: execution significantly deviated from the root user intent starting around Step " + strconv.Itoa(driftSeq),
+				Evidence: explanation,
+				Action:   "Manually check if the agent is stuck in an irrelevant subtask or rabbit hole; add periodic goal-alignment reminders in the prompt",
+			}
+		},
+		UnverifiedCompletionClaim: func(missing string) StoryFindingText {
+			return StoryFindingText{
+				Finding:  "Suspected unverified completion claim: final response claimed task completion, but no supporting verification action was observed in the trajectory",
+				Evidence: missing,
+				Action:   "Manually verify whether the deliverables actually work; instruct the agent to run tests or build verification before claiming completion",
 			}
 		},
 	}

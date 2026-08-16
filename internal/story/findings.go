@@ -26,7 +26,24 @@ import (
 	"vmr/internal/i18n"
 )
 
-// Finding is one Step-located, rule-derived "worth a second look" flag.
+// FindingSource specifies whether a Finding was derived by deterministic rule or LLM inference.
+type FindingSource string
+
+const (
+	SourceRule        FindingSource = "rule"         // default: deterministic rule match
+	SourceLLMInferred FindingSource = "llm_inferred" // LLM semantic detector inference
+)
+
+// FindingConfidence represents the discrete confidence level for LLM-inferred findings.
+type FindingConfidence string
+
+const (
+	ConfidenceHigh   FindingConfidence = "HIGH"   // Direct, undeniable textual evidence anchor
+	ConfidenceMedium FindingConfidence = "MEDIUM" // Indirect evidence requiring inference
+	ConfidenceLow    FindingConfidence = "LOW"    // Elimination or weak heuristic
+)
+
+// Finding is one Step-located, rule-derived or LLM-inferred "worth a second look" flag.
 type Finding struct {
 	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
@@ -39,6 +56,12 @@ type Finding struct {
 	// triggering error) — 0 or more, not required to be contiguous with
 	// StepSeq.
 	RelatedSeq []int `json:"related_seq,omitempty"`
+	// Source indicates whether this finding was rule-derived or LLM-inferred.
+	Source FindingSource `json:"source,omitempty"`
+	// Confidence is the discrete confidence level (only populated for LLM-inferred findings).
+	Confidence FindingConfidence `json:"confidence,omitempty"`
+	// EvidenceAnchor contains a verbatim excerpt from the transcript that triggered the finding.
+	EvidenceAnchor string `json:"evidence_anchor,omitempty"`
 	// Finding/Evidence/Action are narrative text, localized per the lang
 	// ComputeFindings was called with. journey-<id>.json is always built
 	// with i18n.EN (see cmd/vmr/cmd_story.go's writeJourneyFile), matching
@@ -65,6 +88,12 @@ const (
 	FindingUnusedToolResult          FindingCode = "unused_tool_result"
 	FindingUnverifiedEntityReference FindingCode = "unverified_entity_reference"
 	FindingConstraintTextDropped     FindingCode = "constraint_text_dropped_at_compaction"
+
+	// Phase 1b — LLM semantic detectors (see llm_findings.go).
+	FindingToolResultMisinterpretation FindingCode = "tool_result_misinterpretation"
+	FindingSemanticOscillation         FindingCode = "semantic_oscillation"
+	FindingGoalDrift                   FindingCode = "goal_drift"
+	FindingUnverifiedCompletionClaim   FindingCode = "unverified_completion_claim"
 )
 
 // ComputeFindings runs every detector (Phase 1's five plus Phase 2's four,

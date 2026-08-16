@@ -123,6 +123,7 @@ type CompactionInfo struct {
 	TokensBefore, TokensAfter int64
 	SwallowedEntities         []string // seen in the predecessor's last manifest, absent from this step
 	SurvivedEntities          []string // seen in the predecessor's last manifest, still present in this step
+	PredecessorTextExcerpt    string   // Phase 1b: predecessor message text excerpt (<=3000 runes) for constraint loss analysis
 }
 
 // Event is one message's first appearance anywhere in the Journey.
@@ -494,7 +495,9 @@ func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgr
 	// literal tokens the regex matched, so testing for their literal
 	// presence in curText doesn't need re-running (or re-capping) the scan.
 	curTextStr := curText.String()
-	for _, e := range extractEntities(predText.String()) {
+	predTextStr := predText.String()
+	info.PredecessorTextExcerpt, _ = truncateText(predTextStr, 3000)
+	for _, e := range extractEntities(predTextStr) {
 		if strings.Contains(curTextStr, e) {
 			info.SurvivedEntities = append(info.SurvivedEntities, e)
 		} else {

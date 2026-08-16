@@ -364,12 +364,12 @@ func renderFindingsSection(w func(string, ...any), findings []Finding, lang i18n
 		return
 	}
 	for i, f := range findings {
-		w("%s", t.FindingHeader(i+1, string(f.Code), f.StepSeq))
+		w("%s", formatFindingHeader(i, f, findings, t, lang))
 		if len(f.RelatedSeq) > 0 {
 			w("%s", t.FindingRelated(joinInts(f.RelatedSeq)))
 		}
-		if f.Evidence != "" {
-			w("%s", t.FindingEvidence(f.Evidence))
+		if evStr := formatFindingEvidence(f, t, lang); evStr != "" {
+			w("%s", evStr)
 		}
 		if f.Action != "" {
 			w("%s", t.FindingAction(f.Action))
