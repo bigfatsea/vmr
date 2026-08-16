@@ -401,6 +401,7 @@ type JourneySummary struct {
 	Title    string    `json:"title"`
 	From     time.Time `json:"from"`
 	To       time.Time `json:"to"`
+	Partial  bool      `json:"partial,omitempty"`
 	Metrics  Metrics   `json:"metrics"`
 	Findings []Finding `json:"findings,omitempty"`
 }
@@ -413,7 +414,7 @@ type JourneySummary struct {
 // cmd/vmr/cmd_story.go's writeJourneyFile).
 func Summarize(j *Journey) JourneySummary {
 	return JourneySummary{
-		ID: j.ID, Title: j.Title, From: j.From, To: j.To,
+		ID: j.ID, Title: j.Title, From: j.From, To: j.To, Partial: j.Partial,
 		Metrics: ComputeMetrics(j), Findings: ComputeFindings(j, i18n.EN),
 	}
 }

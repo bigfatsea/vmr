@@ -353,7 +353,7 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 		Metrics: Metrics{ModelMS: 9000, ToolCallDist: []ToolCallStat{{Name: "read", Count: 1}}}}
 	md := RenderComparisonMarkdown(Compare(a, b), i18n.EN)
 
-	for _, want := range []string{"j-a", "j-b", "跑A股研究", "跑B股研究", "Model Time", "⚠️", "read"} {
+	for _, want := range []string{"[j-a](journey-j-a.md)", "[j-b](journey-j-b.md)", "跑A股研究", "跑B股研究", "Model Time", "⚠️", "read"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered comparison missing %q:\n%s", want, md)
 		}

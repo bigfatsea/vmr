@@ -164,14 +164,19 @@ type ToolShareDiff struct {
 // to know what was compared, without re-embedding that Journey's entire
 // Metrics a second time (Rows already carries the numbers that matter).
 type JourneyRef struct {
-	ID    string    `json:"id"`
-	Title string    `json:"title"`
-	From  time.Time `json:"from"`
-	To    time.Time `json:"to"`
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	From       time.Time `json:"from"`
+	To         time.Time `json:"to"`
+	ReportFile string    `json:"report_file,omitempty"`
 }
 
 func journeyRef(s JourneySummary) JourneyRef {
-	return JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To}
+	ref := JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To}
+	if s.ID != "" {
+		ref.ReportFile = JourneyReportFile(s.ID, s.Partial)
+	}
+	return ref
 }
 
 // Comparison is A-vs-B's full diff. Field order in Rows is fixed (not sorted by magnitude) so

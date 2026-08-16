@@ -466,50 +466,14 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	// The compare-scoped LLM interpretation layer (internal/story/llm.go) —
-	// entirely optional, switched on by -llm-addr alone.
-	var llmSection string
-	if llmOpts.Addr != "" {
-		pack := story.BuildEvidencePack(jA, jB, cmp, lang)
-		chars := pack.EstimateChars()
-		fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
-		res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
-		if err != nil {
-			// The LLM interpretation layer degrades away on failure —
-			// this must never fail the -compare command itself.
-			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
-		} else {
-			// A non-"" scope: -compare's document can carry a second LLM
-			// section below (the divergence-point-scoped call just below,
-			// when one fires) — without a distinguishing label here, both
-			// would render under the byte-identical heading "## LLM 解读
-			// （模型：X）" with nothing in the outline to tell them apart.
-			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
-		}
-
-		// A second, separately-cached LLM call scoped to just the
-		// divergence point's own evidence window — only fired when
-		// divergence-point detection actually found one (a no-divergence Comparison has nothing for
-		// this section to interpret, and BuildDivergenceEvidencePack's own
-		// contract is to return an empty pack in that case, which isn't
-		// worth spending a call on).
-		if extras.Divergence.Found {
-			divPack := story.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
-			divChars := divPack.EstimateChars()
-			fmt.Fprintf(os.Stderr, "calling %s (model=%s) for the divergence point: evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, divChars, divChars/4)
-			divRes, err := story.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
-			} else {
-				divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
-				if llmSection != "" {
-					llmSection += "\n" + divSection
-				} else {
-					llmSection = divSection
-				}
-			}
-		}
+	if err := ensureJourneyFile(jA, storiesDir, lang); err != nil {
+		return err
 	}
+	if err := ensureJourneyFile(jB, storiesDir, lang); err != nil {
+		return err
+	}
+
+	llmSection := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
 
 	base := "compare-" + jA.ID + "-vs-" + jB.ID
 	if partialA || partialB {
@@ -532,9 +496,45 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
-	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), "")
-	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), "")
+	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), journeyBaseName(jA)+".md")
+	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), journeyBaseName(jB)+".md")
 	return saveStoryIndex(idx, outDir, lang)
+}
+
+// compareLLMSections runs the overall and divergence LLM interpretation
+// calls for -compare, degrading gracefully on failure without failing the command.
+func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
+	if llmOpts.Addr == "" {
+		return ""
+	}
+	var llmSection string
+	pack := story.BuildEvidencePack(jA, jB, cmp, lang)
+	chars := pack.EstimateChars()
+	fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
+	res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
+	} else {
+		llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
+	}
+
+	if extras.Divergence.Found {
+		divPack := story.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
+		divChars := divPack.EstimateChars()
+		fmt.Fprintf(os.Stderr, "calling %s (model=%s) for the divergence point: evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, divChars, divChars/4)
+		divRes, err := story.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
+		} else {
+			divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
+			if llmSection != "" {
+				llmSection += "\n" + divSection
+			} else {
+				llmSection = divSection
+			}
+		}
+	}
+	return llmSection
 }
 
 // renderJourneys renders every given candidate (skipping partial-head ones
@@ -664,6 +664,30 @@ func ensureStoriesDir(outDir string) (string, error) {
 	return storiesDir, nil
 }
 
+// journeyBaseName returns the base filename (without .md/.json extension)
+// for j - the stem shared by both artifacts, derived from story's
+// JourneyReportFile (the single naming source of truth) by dropping the
+// canonical .md extension.
+func journeyBaseName(j *story.Journey) string {
+	return strings.TrimSuffix(story.JourneyReportFile(j.ID, j.Partial), ".md")
+}
+
+// ensureJourneyFile checks if j's journey report markdown file exists in
+// storiesDir. If it does not exist, it renders and writes it (both .md and
+// .json) so that running `vmr story -compare` directly also produces the
+// individual journey reports.
+func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) error {
+	base := journeyBaseName(j)
+	mdPath := filepath.Join(storiesDir, base+".md")
+	if _, err := os.Stat(mdPath); err == nil {
+		return nil
+	}
+	m := story.ComputeMetrics(j)
+	findings := story.ComputeFindings(j, lang)
+	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "")
+	return err
+}
+
 // writeJourneyFile writes j's rendered Markdown plus its behavior-profile
 // JSON (journey-<id>.json, consumed directly by the -compare
 // comparison module) into storiesDir, and returns the Markdown path
@@ -683,10 +707,7 @@ func ensureStoriesDir(outDir string) (string, error) {
 // beginning, without requiring the reader to open it and find the warning
 // line first.
 func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string) (string, error) {
-	base := "journey-" + j.ID
-	if j.Partial {
-		base += "-partial"
-	}
+	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
 	md := story.RenderMarkdown(j, m, findings, lang)
 	if llmSection != "" {

@@ -53,6 +53,19 @@ type Journey struct {
 	Chain []*ctxgraph.Lineage
 }
 
+// JourneyReportFile is the single source of truth for a journey report's
+// markdown filename - cmd/vmr's file writer and compare's link rendering
+// must agree on it, and a private second copy would drift (a silent bad
+// link reads exactly like a working one). The .json sibling shares the
+// stem.
+func JourneyReportFile(id string, partial bool) string {
+	base := "journey-" + id
+	if partial {
+		base += "-partial"
+	}
+	return base + ".md"
+}
+
 // Task is one user-instruction burst within a Journey.
 type Task struct {
 	Title string

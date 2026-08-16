@@ -15,7 +15,7 @@ import "strconv"
 // CompareText is render_compare.go's text, in one language.
 type CompareText struct {
 	Title              string
-	SideBlock          func(label, id, title, from, to string) string
+	SideBlock          func(label, id, title, from, to, file string) string
 	ProfileTitle       string
 	ProfileTableHeader string
 	NotableFootnote    func(thresholdPct float64) string
@@ -67,8 +67,12 @@ func Compare(lang Lang) CompareText {
 	if lang == ZH {
 		return CompareText{
 			Title: "# Journey 对比：A vs B\n\n",
-			SideBlock: func(label, id, title, from, to string) string {
-				return "**" + label + "** " + id + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
+			SideBlock: func(label, id, title, from, to, file string) string {
+				idPart := id
+				if file != "" {
+					idPart = "[" + id + "](" + file + ")"
+				}
+				return "**" + label + "** " + idPart + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
 			},
 			ProfileTitle:       "## 行为剖面对比\n\n",
 			ProfileTableHeader: "| 指标 | A | B | 相对变化 |\n|---|---|---|---|\n",
@@ -150,8 +154,12 @@ func Compare(lang Lang) CompareText {
 	}
 	return CompareText{
 		Title: "# Journey Comparison: A vs B\n\n",
-		SideBlock: func(label, id, title, from, to string) string {
-			return "**" + label + "** " + id + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
+		SideBlock: func(label, id, title, from, to, file string) string {
+			idPart := id
+			if file != "" {
+				idPart = "[" + id + "](" + file + ")"
+			}
+			return "**" + label + "** " + idPart + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
 		},
 		ProfileTitle:       "## Behavior Profile Comparison\n\n",
 		ProfileTableHeader: "| Metric | A | B | Relative Change |\n|---|---|---|---|\n",
