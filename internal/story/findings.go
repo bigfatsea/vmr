@@ -21,7 +21,6 @@ package story
 import (
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"vmr/internal/i18n"
@@ -330,13 +329,18 @@ func lastSentence(s string) string {
 	return s
 }
 
-// entityReferenced reports whether e (from the reasoning side) matches any
-// action-side entity, tolerating either being a substring of the other —
-// see the detector's calibration note above for why exact equality
-// false-positives on real paths.
+func cleanEntityForMatch(s string) string {
+	s = strings.TrimPrefix(s, "~/")
+	s = strings.TrimPrefix(s, "./")
+	return s
+}
+
 func entityReferenced(e string, actionEntities []string) bool {
+	eClean := cleanEntityForMatch(e)
 	for _, a := range actionEntities {
-		if a == e || strings.Contains(a, e) || strings.Contains(e, a) {
+		aClean := cleanEntityForMatch(a)
+		if a == e || strings.Contains(a, e) || strings.Contains(e, a) ||
+			(eClean != "" && (strings.Contains(a, eClean) || strings.Contains(aClean, eClean))) {
 			return true
 		}
 	}
@@ -384,69 +388,7 @@ func detectReasoningActionMismatch(steps []*Step, tx i18n.StoryFindingsText) []F
 
 // --- plan_execution_misalignment ------------------------------------------
 
-// numberedListRe matches "1. " / "1、" style list items, capturing the
-// leading number itself (group 1) alongside the item text (group 2) — the
-// number is what lastNumberedList uses to tell separate lists apart. The
-// detector's own self-limitation (design doc: "自我限定为字符串/实体匹配，
-// 不做语义理解"): a Task whose opening reasoning doesn't use this exact
-// format is silently skipped, never analyzed by looser heuristics.
-var numberedListRe = regexp.MustCompile(`(?m)^\s*(\d+)[.、]\s*(.+)$`)
-
-// lastNumberedList extracts item text from the LAST contiguous numbered
-// list in text — calibrated against real corpus data (logs/vmr-audit-
-// 2026-07-27/28): reasoning routinely enumerates more than one list in the
-// same turn (e.g. "here's how I read the request: 1. ... 2. ... 3. ... 4.
-// ..." — a topic breakdown, not a plan — immediately followed by "let me
-// plan the approach: 1. ... 2. ... 3. ... 4. ..." — the actual plan). The
-// first version matched every numbered line in the whole text and treated
-// them as one 8-item plan, which inflated "unmatched" counts against
-// items that were never meant to be executed in the first place. A run
-// ends and a new one begins whenever the leading number doesn't continue
-// increasing from the previous match — most commonly, it restarts at 1 —
-// and only the LAST run is treated as the plan actually being acted on.
-func lastNumberedList(text string) []string {
-	all := numberedListRe.FindAllStringSubmatch(text, -1)
-	if len(all) == 0 {
-		return nil
-	}
-	var runs [][]string
-	var cur []string
-	prevN := 0
-	for _, m := range all {
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			n = 0
-		}
-		if len(cur) > 0 && n <= prevN {
-			runs = append(runs, cur)
-			cur = nil
-		}
-		cur = append(cur, m[2])
-		prevN = n
-	}
-	if len(cur) > 0 {
-		runs = append(runs, cur)
-	}
-	return runs[len(runs)-1]
-}
-
-// minPlanItems: a single numbered sentence embedded in prose isn't "a plan"
-// in the sense this detector cares about; two or more items is the bar for
-// "the model laid out a multi-step plan".
-const minPlanItems = 2
-
-// maxPlanItems caps how large a numbered list this detector treats as an
-// actionable plan at all — calibrated against real corpus data
-// (logs/vmr-audit-2026-07-1x): past ~8 items, "every single item is
-// unmatched" started dominating the hits, and reading the actual Steps
-// showed why — a long numbered list is far more often a written report,
-// strategic essay, or table-of-contents (never meant to be executed via
-// tool calls turn-by-turn) than a real step-by-step execution plan. A
-// short list with a partial match (e.g. 1 of 4 items missing) is the
-// useful signal; "20 of 20 missing" from a 20-item document is not a
-// suspected execution gap, it's this detector applied outside its scope.
-const maxPlanItems = 8
-
+// Plan parsing logic is housed in plan_parse.go (ExtractActionablePlan).
 func detectPlanExecutionMisalignment(j *Journey, tx i18n.StoryFindingsText) []Finding {
 	var out []Finding
 	for _, task := range j.Tasks {
@@ -458,7 +400,7 @@ func detectPlanExecutionMisalignment(j *Journey, tx i18n.StoryFindingsText) []Fi
 		if planText == "" {
 			planText = first.RespText
 		}
-		items := lastNumberedList(planText)
+		items := ExtractActionablePlan(planText)
 		if len(items) < minPlanItems || len(items) > maxPlanItems {
 			continue
 		}
@@ -492,7 +434,7 @@ func detectPlanExecutionMisalignment(j *Journey, tx i18n.StoryFindingsText) []Fi
 
 		skipped := 0
 		for _, item := range items {
-			if planItemExecuted(item, laterEntities, laterLower) {
+			if planItemExecuted(item.Text, laterEntities, laterLower) {
 				continue
 			}
 			skipped++

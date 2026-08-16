@@ -247,7 +247,7 @@ func stepRoleTag(s *Step, isRepeat bool, t i18n.SpineText) string {
 	if len(s.ToolCalls) > 0 {
 		return t.StepTagAction
 	}
-	if numberedListRe.MatchString(s.Reasoning) || numberedListRe.MatchString(s.RespText) {
+	if len(ExtractActionablePlan(s.Reasoning)) >= minPlanItems || len(ExtractActionablePlan(s.RespText)) >= minPlanItems {
 		return t.StepTagPlan
 	}
 	if s.RespText != "" {
