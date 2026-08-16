@@ -108,9 +108,12 @@
 - **推进方式**：`_eval/calibrate_p1b.go` 已经是一个可直接复用的真实校准工具——扩大 `-input`（覆盖更多日期的日志）与 `-limit`（采样更多 Journey），把输出交给人工逐条标注 TP/FP，即可补完 §3 要求的完整校准报告；不需要另起工具。
 - **登记来源**：`docs/future-strategy/phase1b_implementation_plan_gemini-3.7-flash.md` §7.4.1（Claude Sonnet 5 复核记录，2026-08-17）——该复核发现原有校准脚本是自证循环的假校准（mock LLM 响应、从未调用生产判别器函数），重写为真实校准工具后才有这条真实但尚不完整的结果。
 
----
+### 1.19 [中] JSON 输出的语言策略：`story`/`report` 两个包目前不一致
 
-## 2. 已知，确定不修（刻意取舍）
+- **现状**：在修复 phase1a/1b 复核发现的 3-1（journey JSON 缺 LLM Finding）时，`internal/story` 顺带把 `journey-<id>.json` 的 `Findings`/`LLMFindings` 文本从"固定英文"改成了跟随 `-lang`（`Summarize(j, lang)`），但没有同步改 `internal/story/compare.go`（`MetricDiff.Label` 仍固定英文）也没有改 `internal/report`（`vmr-report.json` 的 `efficiency[]` 仍固定英文，见该包 `buildFindingsForJSON`）。结果是：`journey-<id>.json` 现在跟随语言，`compare-<a>-<b>.json`/`vmr-report.json` 仍固定英文——同一个项目、同一类字段，两条不同规则并存，且 `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3 描述的"JSON 恒英文"规则目前只对后两者仍然成立。
+- **为什么待定**：这不是一个"顺手修"级别的问题——统一到哪个方向（JSON 也跟随 `-lang`，还是把 `story` 这次的改动退回固定英文）会牵动 `report` 包（`Build()` 目前完全不接收 `lang`）、`story.Compare()` 的签名（目前也不接收 `lang`）、两处已经用测试锁死"JSON 恒英文"这个断言的回归测试、以及设计文档 §4.3 的整节重写，需要先定下语言策略原则再动代码。
+- **推进方式**：已有完整方案文档 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，写明了倾向的方向（叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 保持语言无关的机器锚点）、需要动的模块清单、以及当前的阶段性状态。下次要推进这项工作时先读那份文档，不要凭这条条目里的只言片语重新分析一遍。
+- **登记来源**：本条目对应的复核与方案讨论，2026-08-17。
 
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 

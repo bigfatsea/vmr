@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"vmr/internal/audit"
 	"vmr/internal/story"
@@ -1057,14 +1060,47 @@ func TestCmdStory_CorpusExclusivity(t *testing.T) {
 
 // TestCmdStory_JourneyWithLLM mirrors TestCmdStory_CompareWithLLM but for
 // -journey: a real (mock) VMR endpoint, the rendered journey .md gaining the
-// "## LLM Interpretation" section with the mock's reply, and a cache file
+// "## LLM Interpretation" section with the mock's reply, the rendered
+// journey .json gaining populated llm_findings, and a cache file
 // appearing under stories/.llm-cache.
 func TestCmdStory_JourneyWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
 		w.Header().Set("Content-Type", "application/json")
+
+		// Each case matches the actual JSON *key* the corresponding
+		// EvidencePack marshals (see llm_findings_types.go), escaped as it
+		// appears on the wire: the pack's JSON is marshaled once, then
+		// embedded as a string value inside the outer chat-completion
+		// request body, so json.Marshal escapes its quotes a second time
+		// (`"candidates"` becomes `\"candidates\"`) — a bare, unescaped
+		// match never fires. Matching only the escaped key also sidesteps
+		// prose collisions: several of these words (root_user_intent,
+		// plan_items, excerpts, candidates) additionally appear bare, as
+		// English words, inside the system prompts themselves. A branch
+		// that doesn't match falls through to the free-text default, which
+		// the detector fails to parse as JSON and treats as "no finding" —
+		// silently, by design (fail-open).
+		var replyContent string
+		switch {
+		case strings.Contains(bodyStr, `\"verification_commands_observed\"`): // CompletionClaimEvidencePack
+			replyContent = `{"claim_status": "CLAIM_WITHOUT_VERIFICATION", "confidence": "HIGH", "evidence_anchor": "done", "missing_verification": "no build or test executed"}`
+		case strings.Contains(bodyStr, `\"root_user_intent\"`): // GoalDriftEvidencePack; goalDriftResult is a single object, not an array
+			replyContent = `{"drift_detected": false, "drift_step_seq": 0, "confidence": "LOW", "evidence_anchor": "", "drift_explanation": ""}`
+		case strings.Contains(bodyStr, `\"plan_items\"`): // PlanAuditEvidencePack; planAuditResult is a single object, not an array
+			replyContent = `{"has_misalignment": false, "confidence": "LOW", "evidence_anchor": "", "explanation": ""}`
+		case strings.Contains(bodyStr, `\"candidates\"`): // SemanticOscillationEvidencePack
+			replyContent = `[]`
+		case strings.Contains(bodyStr, `\"excerpts\"`): // CompactionConstraintEvidencePack
+			replyContent = `[]`
+		default:
+			replyContent = "一句话结论：这是 mock 的单journey解读内容。"
+		}
+
 		json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
-				{"message": map[string]any{"content": "一句话结论：这是 mock 的单journey解读内容。"}},
+				{"message": map[string]any{"content": replyContent}},
 			},
 		})
 	}))
@@ -1089,9 +1125,73 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 		}
 	}
 
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".json"))
+	if err != nil {
+		t.Fatalf("journey .json not written: %v", err)
+	}
+	var summary story.JourneySummary
+	if err := json.Unmarshal(jsonData, &summary); err != nil {
+		t.Fatalf("unmarshal journey .json: %v", err)
+	}
+	if len(summary.LLMFindings) == 0 {
+		t.Fatalf("expected non-empty llm_findings in journey .json, got: %s", string(jsonData))
+	}
+	f := summary.LLMFindings[0]
+	if f.Code != story.FindingUnverifiedCompletionClaim || f.Confidence != story.ConfidenceHigh || f.Source != story.SourceLLMInferred {
+		t.Errorf("unexpected LLM finding: %+v", f)
+	}
+
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil || len(entries) == 0 {
 		t.Errorf("expected at least one cache file under %s: %v", cacheDir, err)
+	}
+}
+
+// TestCmdStory_JourneyWithRealLLM tests against a live LLM endpoint configured
+// in report.yaml when available and reachable, gracefully skipping otherwise.
+func TestCmdStory_JourneyWithRealLLM(t *testing.T) {
+	reportYamlPath := filepath.Join("..", "..", "report.yaml")
+	configData, err := os.ReadFile(reportYamlPath)
+	if err != nil {
+		t.Skip("no report.yaml found in repo root")
+	}
+	var cfg reportConfig
+	if err := yaml.Unmarshal(configData, &cfg); err != nil || cfg.LLMAddr == "" {
+		t.Skip("report.yaml has no valid llm_addr configured")
+	}
+
+	probeURL := cfg.LLMAddr
+	if !strings.Contains(probeURL, "://") {
+		probeURL = "http://" + probeURL
+	}
+	probeURL = strings.TrimRight(probeURL, "/")
+	probeURL = strings.TrimSuffix(probeURL, "/v1") + "/v1/models"
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, nil)
+	if cfg.LLMKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.LLMKey)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		t.Skipf("configured LLM endpoint %s not reachable: %v", cfg.LLMAddr, err)
+	}
+	resp.Body.Close()
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
+
+	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-report-config", reportYamlPath, path}); err != nil {
+		t.Fatalf("cmdStory with real report.yaml: %v", err)
+	}
+	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	if err != nil {
+		t.Fatalf("journey .md not written: %v", err)
+	}
+	if !strings.Contains(string(mdData), "## LLM") && !strings.Contains(string(mdData), "## AI") && !strings.Contains(string(mdData), "解读") {
+		t.Errorf("expected LLM interpretation section in markdown:\n%s", string(mdData))
 	}
 }
 

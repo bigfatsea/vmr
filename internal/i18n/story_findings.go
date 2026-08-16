@@ -1,13 +1,10 @@
 // Ver 2026-08-05, by Sonnet 5
 
 // Pairs with internal/story/findings.go — the rule-derived, Step-level
-// "suspect list" findings (design doc's "候选/嫌疑清单，不是判决"). Every
-// closure here is called twice by story.ComputeFindings, exactly like
-// internal/report/metrics.go's Finding* closures: once with EN (feeding the
-// always-English journey-<id>.json field) and once with the caller's real
-// language (feeding RenderMarkdown's decision-spine annotations). FindingCode
-// (story.FindingCode) never appears here — it's the caller's stable
-// identifier and never varies by language.
+// "suspect list" findings (design doc's "候选/嫌疑清单，不是判决").
+// Findings text is localized in the target language (for both
+// journey-<id>.md and journey-<id>.json), while FindingCode
+// (story.FindingCode) is the stable identifier and never varies by language.
 package i18n
 
 import "strconv"
@@ -40,6 +37,7 @@ type StoryFindingsText struct {
 	SemanticOscillation         func(tool string, explanation string) StoryFindingText
 	GoalDrift                   func(driftSeq int, explanation string) StoryFindingText
 	UnverifiedCompletionClaim   func(missing string) StoryFindingText
+	LLMConstraintDropped        func(anchor string) StoryFindingText
 }
 
 func StoryFindings(lang Lang) StoryFindingsText {
@@ -136,6 +134,13 @@ func StoryFindings(lang Lang) StoryFindingsText {
 					Action:   "建议人工复核交付物是否真实可用，要求 Agent 在宣称完成前必须执行测试/构建验证",
 				}
 			},
+			LLMConstraintDropped: func(anchor string) StoryFindingText {
+				return StoryFindingText{
+					Finding:  "疑似 compaction 丢失了核心否定式约束/规范：" + anchor,
+					Evidence: "",
+					Action:   "建议在后续对话或 System Prompt 中重新注入该核心约束",
+				}
+			},
 		}
 	}
 	return StoryFindingsText{
@@ -228,6 +233,13 @@ func StoryFindings(lang Lang) StoryFindingsText {
 				Finding:  "Suspected unverified completion claim: final response claimed task completion, but no supporting verification action was observed in the trajectory",
 				Evidence: missing,
 				Action:   "Manually verify whether the deliverables actually work; instruct the agent to run tests or build verification before claiming completion",
+			}
+		},
+		LLMConstraintDropped: func(anchor string) StoryFindingText {
+			return StoryFindingText{
+				Finding:  "Suspected core constraint/policy dropped at compaction: " + anchor,
+				Evidence: "",
+				Action:   "Manually review and re-inject the critical constraint in the system prompt or subsequent turns",
 			}
 		},
 	}

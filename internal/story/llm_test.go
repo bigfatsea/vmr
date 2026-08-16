@@ -71,7 +71,7 @@ func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	s := Summarize(j)
+	s := Summarize(j, i18n.EN)
 	cmp := Compare(s, s)
 
 	pack := BuildEvidencePack(j, j, cmp, i18n.EN)

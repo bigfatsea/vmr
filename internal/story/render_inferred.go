@@ -13,21 +13,13 @@ import "vmr/internal/i18n"
 // and detectLLMPlanMisalignment), a rule-sourced entry is also tagged (normally left
 // bare) so the two independent hits read as clearly distinct verdicts rather than a
 // duplicate.
-func formatFindingHeader(i int, f Finding, all []Finding, t i18n.SpineText, lang i18n.Lang) string {
+func formatFindingHeader(i int, f Finding, all []Finding, t i18n.SpineText) string {
 	codeStr := string(f.Code)
 	switch {
 	case f.Source == SourceLLMInferred:
-		if lang == i18n.ZH {
-			codeStr += " [AI推测 · 置信度: " + string(f.Confidence) + "]"
-		} else {
-			codeStr += " [AI Inferred · " + string(f.Confidence) + "]"
-		}
+		codeStr += t.BadgeLLMInferred(string(f.Confidence))
 	case hasMixedSourceHit(all, f.Code):
-		if lang == i18n.ZH {
-			codeStr += " [规则检测]"
-		} else {
-			codeStr += " [Rule-detected]"
-		}
+		codeStr += t.BadgeRuleDetected
 	}
 	return t.FindingHeader(i+1, codeStr, f.StepSeq)
 }
@@ -52,13 +44,10 @@ func hasMixedSourceHit(findings []Finding, code FindingCode) bool {
 }
 
 // formatFindingEvidence formats the evidence block, including evidence_anchor if present.
-func formatFindingEvidence(f Finding, t i18n.SpineText, lang i18n.Lang) string {
+func formatFindingEvidence(f Finding, t i18n.SpineText) string {
 	ev := f.Evidence
 	if f.EvidenceAnchor != "" {
-		anchorLabel := "原文证据锚点："
-		if lang != i18n.ZH {
-			anchorLabel = "Evidence Anchor: "
-		}
+		anchorLabel := t.LabelEvidenceAnchor
 		if ev != "" {
 			ev += "\n   " + anchorLabel + f.EvidenceAnchor
 		} else {

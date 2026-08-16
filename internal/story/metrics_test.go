@@ -4,6 +4,8 @@
 package story
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -343,12 +345,55 @@ func TestSummarize(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	s := Summarize(j)
+	s := Summarize(j, i18n.EN)
 	if s.ID != j.ID || s.Title != j.Title || !s.From.Equal(j.From) || !s.To.Equal(j.To) {
 		t.Errorf("Summarize identity fields = %+v, want them copied from Journey %+v", s, j)
 	}
 	want := ComputeMetrics(j)
 	if s.Metrics.ModelMS != want.ModelMS || s.Metrics.NetWorkingMS != want.NetWorkingMS {
 		t.Errorf("Summarize.Metrics = %+v, want it to match a fresh ComputeMetrics(j) = %+v", s.Metrics, want)
+	}
+}
+
+func TestSummarize_WithLLMFindings(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "test")
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("start"))
+	path := writeJSONL(t, []audit.Record{r1})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	s := Summarize(j, i18n.EN)
+	dataNoLLM, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(dataNoLLM), "llm_findings") {
+		t.Errorf("expected no llm_findings in JSON when LLMFindings is empty, got: %s", string(dataNoLLM))
+	}
+
+	s.LLMFindings = []Finding{
+		{
+			Code:           FindingToolResultMisinterpretation,
+			StepSeq:        1,
+			Source:         SourceLLMInferred,
+			Confidence:     ConfidenceHigh,
+			EvidenceAnchor: "error returned",
+			Finding:        "AI finding",
+		},
+	}
+	dataWithLLM, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal with LLM: %v", err)
+	}
+	if !strings.Contains(string(dataWithLLM), "llm_findings") {
+		t.Errorf("expected llm_findings in JSON when LLMFindings is populated, got: %s", string(dataWithLLM))
+	}
+	if !strings.Contains(string(dataWithLLM), "llm_inferred") || !strings.Contains(string(dataWithLLM), "HIGH") {
+		t.Errorf("expected source and confidence serialized in llm_findings, got: %s", string(dataWithLLM))
 	}
 }

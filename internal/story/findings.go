@@ -63,10 +63,14 @@ type Finding struct {
 	// EvidenceAnchor contains a verbatim excerpt from the transcript that triggered the finding.
 	EvidenceAnchor string `json:"evidence_anchor,omitempty"`
 	// Finding/Evidence/Action are narrative text, localized per the lang
-	// ComputeFindings was called with. journey-<id>.json is always built
-	// with i18n.EN (see cmd/vmr/cmd_story.go's writeJourneyFile), matching
-	// report's Report2/vmr-report.json convention; a second, target-language
-	// call feeds RenderMarkdown's decision-spine annotations.
+	// ComputeFindings was called with. As of 2026-08-17, journey-<id>.json
+	// and journey-<id>.md are both built from the same target-lang call
+	// (cmd/vmr/cmd_story.go's writeJourneyFile) — this diverges from
+	// report's Report2/vmr-report.json, which still fixes its JSON copy to
+	// i18n.EN. That asymmetry (and whether to resolve it by extending
+	// lang-following to report, or reverting story) is an open decision;
+	// see docs/future-strategy/json_lang_policy_plan_sonnet-5.md and
+	// KNOWN_ISSUES §1.19 before changing either side.
 	Finding  string `json:"finding"`
 	Evidence string `json:"evidence,omitempty"`
 	Action   string `json:"action,omitempty"`
@@ -100,10 +104,11 @@ const (
 // findings_toolresult.go) over j and returns the combined, Step-order-
 // sorted candidate list. Selection (which Steps match, which Code, which
 // RelatedSeq) never depends on lang — only the Finding/Evidence/Action text
-// does; TestComputeFindingsIsDeterministic locks this in the same way
-// report's TestBuildFindingsIsDeterministic does for buildFindings, since
-// journey-<id>.json (always EN) and the rendered Markdown (target lang)
-// must never disagree on WHICH Steps got flagged.
+// does; TestComputeFindingsIsDeterministic locks this in, since
+// journey-<id>.json and the rendered Markdown must never disagree on WHICH
+// Steps got flagged, regardless of which lang either was built with (see
+// the Finding struct's own doc comment for the still-open question of
+// whether journey-<id>.json's *text* should track lang or stay fixed EN).
 func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
 	tx := i18n.StoryFindings(lang)
 	steps := journeySteps(j)

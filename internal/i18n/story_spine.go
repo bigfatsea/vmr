@@ -45,6 +45,10 @@ type SpineText struct {
 	FindingRelated  func(seqs string) string
 	FindingEvidence func(text string) string
 	FindingAction   func(text string) string
+
+	BadgeLLMInferred    func(confidence string) string
+	BadgeRuleDetected   string
+	LabelEvidenceAnchor string
 }
 
 func Spine(lang Lang) SpineText {
@@ -70,7 +74,7 @@ func Spine(lang Lang) SpineText {
 			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 			SpineFindingTag: " ⚠️",
 			SpineValueTruncated: func(more int) string {
-				return "\n… （还有 " + strconv.Itoa(more) + " 字符，完整内容见下方该 Step 的 tool_call 详情）"
+				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下方该 Step 的 tool_call 正文)"
 			},
 
 			StepTagPlan:       "🔷 📋",
@@ -93,6 +97,12 @@ func Spine(lang Lang) SpineText {
 			FindingRelated:  func(seqs string) string { return "   - 相关 Step：" + seqs + "\n" },
 			FindingEvidence: func(text string) string { return "   - 证据：" + text + "\n" },
 			FindingAction:   func(text string) string { return "   - 建议：" + text + "\n" },
+
+			BadgeLLMInferred: func(confidence string) string {
+				return " [AI推测 · 置信度: " + confidence + "]"
+			},
+			BadgeRuleDetected:   " [规则检测]",
+			LabelEvidenceAnchor: "原文证据锚点：",
 		}
 	}
 	return SpineText{
@@ -139,5 +149,11 @@ func Spine(lang Lang) SpineText {
 		FindingRelated:  func(seqs string) string { return "   - related Steps: " + seqs + "\n" },
 		FindingEvidence: func(text string) string { return "   - evidence: " + text + "\n" },
 		FindingAction:   func(text string) string { return "   - action: " + text + "\n" },
+
+		BadgeLLMInferred: func(confidence string) string {
+			return " [AI Inferred · " + confidence + "]"
+		},
+		BadgeRuleDetected:   " [Rule-detected]",
+		LabelEvidenceAnchor: "Evidence Anchor: ",
 	}
 }

@@ -38,7 +38,7 @@ func TestComputeContextRot(t *testing.T) {
 		}},
 	}
 
-	buckets := computeContextRot([]*Journey{j})
+	buckets := computeContextRot([]*Journey{j}, nil)
 
 	if len(buckets) != 5 {
 		t.Fatalf("expected 5 buckets, got %d", len(buckets))

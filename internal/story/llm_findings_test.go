@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
@@ -613,5 +614,40 @@ func TestRenderSpine_MixedSourceSameCode(t *testing.T) {
 	renderFindingsSection(w, []Finding{ruleFinding}, i18n.ZH)
 	if strings.Contains(sb.String(), "[规则检测]") {
 		t.Errorf("a lone rule finding (no LLM sibling) should not be tagged:\n%s", sb.String())
+	}
+}
+
+func TestDetectOscillationCandidates_Deterministic(t *testing.T) {
+	// Construct a step series where multiple tools oscillate in the same window.
+	var steps []*Step
+	for seq := 1; seq <= 6; seq++ {
+		steps = append(steps, &Step{
+			Seq: seq,
+			ToolCalls: []chatmsg.ToolCall{
+				{Name: "tool_b", Args: fmt.Sprintf(`{"arg": %d}`, seq)},
+				{Name: "tool_a", Args: fmt.Sprintf(`{"arg": %d}`, seq)},
+				{Name: "tool_c", Args: fmt.Sprintf(`{"arg": %d}`, seq)},
+			},
+		})
+	}
+
+	var firstRun []OscillationCandidate
+	for i := 0; i < 200; i++ {
+		cands := detectOscillationCandidates(steps)
+		if i == 0 {
+			firstRun = cands
+			if len(firstRun) == 0 {
+				t.Fatalf("expected candidates in first run, got 0")
+			}
+			continue
+		}
+		if len(cands) != len(firstRun) {
+			t.Fatalf("run %d: expected %d candidates, got %d", i, len(firstRun), len(cands))
+		}
+		for k := range cands {
+			if cands[k].ToolName != firstRun[k].ToolName || cands[k].Calls[0].StepSeq != firstRun[k].Calls[0].StepSeq {
+				t.Fatalf("run %d candidate %d mismatch: got %+v, want %+v", i, k, cands[k], firstRun[k])
+			}
+		}
 	}
 }

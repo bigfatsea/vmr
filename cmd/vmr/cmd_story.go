@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"vmr/internal/ctxgraph"
@@ -380,9 +381,17 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	}
 
 	var llmSection string
+	var llmFindings []story.Finding
 	if llmOpts.Addr != "" {
-		if llmFindings, err := story.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(llmFindings) > 0 {
+		if findingsLLM, err := story.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(findingsLLM) > 0 {
+			llmFindings = findingsLLM
 			findings = append(findings, llmFindings...)
+			sort.SliceStable(findings, func(a, b int) bool {
+				if findings[a].StepSeq != findings[b].StepSeq {
+					return findings[a].StepSeq < findings[b].StepSeq
+				}
+				return findings[a].Code < findings[b].Code
+			})
 		}
 		pack := story.BuildSingleJourneyEvidencePack(j, m, findings, lang)
 		chars := pack.EstimateChars()
@@ -398,7 +407,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		}
 	}
 
-	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection)
+	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings)
 	if err != nil {
 		return err
 	}
@@ -438,7 +447,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err != nil {
 		return err
 	}
-	sA, sB := story.Summarize(jA), story.Summarize(jB)
+	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB)
 	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics)
 	extras.Sources = sources
@@ -578,7 +587,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		j.Partial = toRenderPartial[i]
 		m := story.ComputeMetrics(j)
 		findings := story.ComputeFindings(j, lang)
-		outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "")
+		outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil)
 		if err != nil {
 			return err
 		}
@@ -684,7 +693,7 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) erro
 	}
 	m := story.ComputeMetrics(j)
 	findings := story.ComputeFindings(j, lang)
-	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "")
+	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil)
 	return err
 }
 
@@ -706,7 +715,7 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) erro
 // visible self-disclosure that this file's beginning isn't the real
 // beginning, without requiring the reader to open it and find the warning
 // line first.
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string) (string, error) {
+func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding) (string, error) {
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
 	md := story.RenderMarkdown(j, m, findings, lang)
@@ -717,12 +726,17 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 		return "", err
 	}
 	jsonPath := filepath.Join(storiesDir, base+".json")
-	// Summarize computes its own Metrics/Findings using i18n.EN — same
-	// "always-English JSON, target-language Markdown" convention
-	// report.buildFindingsForJSON already established; the duplicated
-	// computation is pure in-memory work, not I/O (see
-	// docs/VirtualModelRouter_Design_v4_Analytics.md's Findings section).
-	data, err := json.MarshalIndent(story.Summarize(j), "", "  ")
+	summary := story.JourneySummary{
+		ID:          j.ID,
+		Title:       j.Title,
+		From:        j.From,
+		To:          j.To,
+		Partial:     j.Partial,
+		Metrics:     m,
+		Findings:    findings,
+		LLMFindings: llmFindings,
+	}
+	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return "", err
 	}

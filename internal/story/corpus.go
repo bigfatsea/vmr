@@ -195,7 +195,7 @@ type CorpusStats struct {
 
 // ComputeCorpusStats is the corpus layer's entire computation: per-metric
 // distributions, per-Finding-Code hit rates, pairwise Spearman
-// correlations among the thirteen behavior-profile metrics, and
+// correlations among the fourteen behavior-profile metrics, and
 // Finding-grouped NetWorkingMS comparisons. All of it is pure, in-memory,
 // zero-LLM aggregation over already-computed Metrics/Findings — journeys
 // themselves are never re-parsed here, matching Findings' own "rules
@@ -289,7 +289,7 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 			HitMedian: hitMed, NoHitMedian: noHitMed, DeltaRel: deltaRel, Notable: notable,
 		})
 	}
-	stats.ContextRot = computeContextRot(journeys)
+	stats.ContextRot = computeContextRot(journeys, findingsPerJourney)
 	stats.ToolSequences = computeToolSequences(journeys)
 	return stats
 }

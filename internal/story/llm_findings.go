@@ -152,7 +152,14 @@ func detectOscillationCandidates(steps []*Step) []OscillationCandidate {
 			}
 		}
 
-		for toolName, calls := range toolCounts {
+		toolNames := make([]string, 0, len(toolCounts))
+		for tn := range toolCounts {
+			toolNames = append(toolNames, tn)
+		}
+		sort.Strings(toolNames)
+
+		for _, toolName := range toolNames {
+			calls := toolCounts[toolName]
 			if emitted[toolName] {
 				continue // already captured this tool from an earlier window
 			}
@@ -168,6 +175,14 @@ func detectOscillationCandidates(steps []*Step) []OscillationCandidate {
 			break
 		}
 	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Calls[0].StepSeq != out[j].Calls[0].StepSeq {
+			return out[i].Calls[0].StepSeq < out[j].Calls[0].StepSeq
+		}
+		return out[i].ToolName < out[j].ToolName
+	})
+
 	return out
 }
 
@@ -315,21 +330,15 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 	if err := parseJSONFromLLM(res.Text, &items); err != nil {
 		return nil
 	}
+	tx := i18n.StoryFindings(lang)
 	var findings []Finding
 	for _, item := range items {
 		if item.ConstraintLost && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
-			findingText := "疑似 compaction 丢失了核心否定式约束/规范：" + item.EvidenceAnchor
-			if lang != i18n.ZH {
-				findingText = "Suspected core constraint/policy dropped at compaction: " + item.EvidenceAnchor
-			}
+			fText := tx.LLMConstraintDropped(item.EvidenceAnchor)
 			evidence := item.Explanation
 			action := item.SuggestedAction
 			if action == "" {
-				if lang == i18n.ZH {
-					action = "建议在后续对话或 System Prompt 中重新注入该核心约束"
-				} else {
-					action = "Manually review and re-inject the critical constraint in the system prompt or subsequent turns"
-				}
+				action = fText.Action
 			}
 			findings = append(findings, Finding{
 				Code:           FindingConstraintTextDropped,
@@ -337,7 +346,7 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 				Source:         SourceLLMInferred,
 				Confidence:     ConfidenceHigh,
 				EvidenceAnchor: item.EvidenceAnchor,
-				Finding:        findingText,
+				Finding:        fText.Finding,
 				Evidence:       evidence,
 				Action:         action,
 			})

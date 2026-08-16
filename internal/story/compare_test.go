@@ -387,7 +387,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 		t.Fatalf("Build B: %v", err)
 	}
 
-	sa, sb := Summarize(jA), Summarize(jB)
+	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
 	cmp := Compare(sa, sb)
 	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics)
 	cmp.Extras = &extras

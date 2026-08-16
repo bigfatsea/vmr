@@ -56,13 +56,14 @@ func isErrorStep(s *Step) bool {
 }
 
 // computeContextRot computes step counts, finding densities, and error rates across context size buckets.
-func computeContextRot(journeys []*Journey) []ContextRotBucket {
+// findingsPerJourney can be passed in to reuse already computed findings from ComputeCorpusStats.
+func computeContextRot(journeys []*Journey, findingsPerJourney [][]Finding) []ContextRotBucket {
 	buckets := make([]ContextRotBucket, len(contextRotRanges))
 	for i, r := range contextRotRanges {
 		buckets[i].Range = r.name
 	}
 
-	for _, j := range journeys {
+	for idx, j := range journeys {
 		stepBucket := map[int]int{}
 		for _, t := range j.Tasks {
 			for _, s := range t.Steps {
@@ -80,7 +81,12 @@ func computeContextRot(journeys []*Journey) []ContextRotBucket {
 			}
 		}
 
-		findings := ComputeFindings(j, i18n.EN)
+		var findings []Finding
+		if idx < len(findingsPerJourney) {
+			findings = findingsPerJourney[idx]
+		} else {
+			findings = ComputeFindings(j, i18n.EN)
+		}
 		for _, f := range findings {
 			if bIdx, ok := stepBucket[f.StepSeq]; ok {
 				buckets[bIdx].FindingCount++

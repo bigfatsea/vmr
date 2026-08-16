@@ -388,6 +388,8 @@ type EfficiencyText struct {
 
 ### 4.3 JSON 契约：叙述字段固定英文，本地化只发生在渲染层
 
+> **2026-08-17 更新提示**：本节描述的是 `vmr-report.json`/`compare-*.json` 目前仍然维持的规则。`journey-<id>.json` 已经在一次未完成的改动里偏离了这条规则（`Finding.Finding`/`Evidence`/`Action` 现在跟随 `-lang`，不再固定英文），这条偏离是否要反过来推广成项目级新规则、还是应该回退，是一个待拍板的开放问题，完整分析见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`。在那份文档给出结论并回填本节之前，不要假定本节当前描述的规则对 `story` 包仍然全部成立。
+
 `vmr-report.json`/`compare-*.json` 里的叙述性字段（`Finding.Finding`/`Implicated`/`Action`、`MetricDiff.Label`）遵循同一条规则：**落盘的 JSON 里永远是英文**，不随 `-lang` 变化；`-lang zh` 只改变 `.md` 里显示的文字，不改变 JSON 一个字节。JSON 因此是稳定的英文机器接口，Markdown 是本地化的人读文档——写一个读 `vmr-report.json` 的脚本时，不需要先搞清楚"这个字段会不会因为运行报告的人选了中文而变成中文"。
 
 两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构不同：

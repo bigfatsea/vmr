@@ -397,24 +397,28 @@ func compactionTotals(steps []*Step) (count int, lossTokens int64) {
 // plus its Metrics profile and rule-derived Findings, so Phase 4d's
 // comparison module can diff two Journeys without re-parsing Markdown.
 type JourneySummary struct {
-	ID       string    `json:"id"`
-	Title    string    `json:"title"`
-	From     time.Time `json:"from"`
-	To       time.Time `json:"to"`
-	Partial  bool      `json:"partial,omitempty"`
-	Metrics  Metrics   `json:"metrics"`
-	Findings []Finding `json:"findings,omitempty"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	From        time.Time `json:"from"`
+	To          time.Time `json:"to"`
+	Partial     bool      `json:"partial,omitempty"`
+	Metrics     Metrics   `json:"metrics"`
+	Findings    []Finding `json:"findings,omitempty"`
+	LLMFindings []Finding `json:"llm_findings,omitempty"`
 }
 
 // Summarize builds j's JourneySummary, computing Metrics and Findings
-// fresh. Findings are always computed with i18n.EN — journey-<id>.json is
-// always-English, same convention report.Report2/vmr-report.json already
-// uses for its own Finding field; a target-language copy is a separate
-// ComputeFindings(j, lang) call the Markdown renderer's caller makes (see
-// cmd/vmr/cmd_story.go's writeJourneyFile).
-func Summarize(j *Journey) JourneySummary {
+// in the specified target language. The finding Code fields remain stable
+// canonical identifiers across languages, while human-readable Finding/Action
+// texts follow lang, keeping .json and .md outputs fully aligned. This is
+// staged progress toward a project-wide lang-follows-everywhere policy that
+// isn't fully applied yet — compare-*.json's MetricDiff.Label and
+// vmr-report.json's efficiency[] still fix to EN; see
+// docs/future-strategy/json_lang_policy_plan_sonnet-5.md before extending
+// or reverting this.
+func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
 	return JourneySummary{
 		ID: j.ID, Title: j.Title, From: j.From, To: j.To, Partial: j.Partial,
-		Metrics: ComputeMetrics(j), Findings: ComputeFindings(j, i18n.EN),
+		Metrics: ComputeMetrics(j), Findings: ComputeFindings(j, lang),
 	}
 }
