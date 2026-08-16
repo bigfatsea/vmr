@@ -30,7 +30,7 @@
 
 - **现状**：`report.Build` 先做一趟会话与任务关系分析（`AnalyzeSessions`，按文件并行），再做一趟指标聚合。GB 级审计日志下要付两次完整的解压与行解析。
 - **可能方案**：合并为单趟流式处理。
-- **为什么待定**：会话分析需要全局上下文做公共前缀匹配与任务链接，单趟流式要引入复杂的暂存与最终对齐逻辑。
+- **为什么待定**：会话与任务分析依赖 `ctxgraph.StitchGraph` 对全量记录建立倒排索引以完成跨文件 Lineage 缝合与时序排序，无法在单趟流式输入中就地确定单条记录归属的 Session/Task ID；两通道已通过 goroutine 并发与 `ScanCached` 文件级缓存降低耗时，在未发生实测 I/O 瓶颈前重构成单趟流式属于引入永久复杂度的过早重构。
 - **触发条件**：实际大规模日志分析中确认这段 I/O 成为显著瓶颈。
 
 ### 1.2 [中] `vmr report` 全内存聚合的记录量上限
@@ -122,7 +122,7 @@
 
 - **环境变量未定义时静默展开为空串，且不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值应在 YAML 里显式写出。
 - **`internal/config` 的三层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 阶段跑完解析，看起来像「配置层反向侵入用例层」，因此被反复提出。但这是 `docs/VirtualModelRouter_Design_v4_Quota.md` 决策表「定价的落点」一行**明文选定的方案**，「只让 report 一侧解析、`metric: cost` 另开一条运行时校验路径」正是同一行里已否决的备选（理由：两份实现容易漂移）。后置还会摧毁「`metric: cost` 费率不齐 = **加载期**错误」这条硬要求——`vmr check` 将不再能在不联网的情况下告诉你费率配错了，一个确定的加载期失败被换成运行期意外。
-- **多协议适配器的 `BuildRequest` 不抽取通用骨架**：协议差异（Header 名、认证方式、字段结构）用独立文件直接表达更直观，参数化抽象反而伤可读性。
+- **多协议适配器（`adapter/{openai,anthropic,openairesponses}`）保持独立子包，不合并也不抽取通用骨架**：三个协议看似相似，底层已存在真实分叉（如 Anthropic 529 错误重试特判、Responses 顶层 `input` 数组与 `RewriteInputRoles`）；独立子包支持编译期 `init()` 静态注册与独立单测，新增协议零侵入。合并成统一参数化结构体只是把类型多态改写为字符串 `if` 分支，可读性与扩展性反而劣化。
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
 - **不合并 `Dimension`（排序）与 `Condition`（淘汰）**：淘汰依赖请求事实，排序只比较端点属性，职责分离保证接口纯粹。
 
@@ -141,7 +141,7 @@
 - **`adapter` 的协议字段字面量不从 `jsonscan` 导出复用**：`"model"`/`"stream"`/`"messages"`/`"input"` 是不可变字节常量而非共享状态；「知道这些字段名的含义」正是把 `TopLevelProbe`/`SessionFingerprint` 留在 `adapter` 的那部分领域知识，也是 `CLAUDE.md` 里「需要具体字段名的函数不属于 `jsonscan`」这条规则的由来。`TopLevelProbe` 本身已经完全构建在 `jsonscan` 的 `Skip*`/`TopLevelValues` 原语之上，**不是第二套扫描器**——把它改成 `ProbeTopLevelFields(raw, fields...)` 等于把字段名当参数传进 `jsonscan`，正面推翻上述规则。理由写在 `adapter/fingerprint.go` 的字面量变量块与 `jsonscan` 的包注释里。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」这个核心体验。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
-- **`i18n` 的 26 个微文件不合并**：它与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并会让「改一节文案」从打开一个几十行的小文件变成在几百行大文件里找。
+- **`i18n` 的 26 个微文件不合并**：它与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并会让「改一节文案」从打开一个几十行的小文件变成在几百行大文件里找。此外，文案中包含大量带参闭包函数（非纯静态字符串），强行合并为单一文件（仅 report 侧即超 1500 行）将直接击穿 `archtest` 700 行全局预算。
 - **`i18n` 的 `type XxxText` + `if lang == ZH` 样板不改写成 `map[Lang]T` + 泛型 `pick`**：这个改写只消掉每个文件 2 行的分支——真正占体量的 struct 定义与两份字段赋值一行都省不掉，26 个文件全改换约 50 行，还要新引入一个泛型 helper 和「key 缺失怎么办」的新问题。收益为负。
 - **`internal/probe` 不登记进 `zeroInternalDepPackages`**：它今天确实零内部依赖，但那张表的语义不是「当前碰巧零依赖的包全登记」，而是「**承诺**永远零依赖、任何包都可无顾虑 import 的叶子工具包」。`probe` 的包注释写明它独立成包是为了避免 `diagnose`→`router` 的 import cycle，是路由半区的协议原语；未来它需要 import `core` 完全合理。登记等于给一个从未做出的承诺加锁。同理不登记 `rundir` / `buildinfo`。
 - **`internal/core/core.go` 不按领域拆成 `endpoint.go`/`quota.go`/`pricing.go`**：同包拆文件不改变任何编译依赖（`go list -deps` 逐字节相同），所以它是代码导航整理，不是架构重构，也就不该被当成一个「问题」。真正解决「core 会不会长成上帝包」的是**准入规则**，那条规则已经写在 `internal/core` 的包注释里并对存量逐条复核过。真要拆是零成本搭车项，但没有它要解决的问题。
