@@ -88,7 +88,8 @@ const (
 	// with no change in what the agent itself did. In corpus.go's
 	// correlation matrix this reads as "did these two groups' routing
 	// environment differ", never as "did the agent behave differently".
-	MetricModelSwitchCount MetricCode = "model_switch_count"
+	MetricModelSwitchCount     MetricCode = "model_switch_count"
+	MetricOutputRepetitionRate MetricCode = "output_repetition_rate"
 )
 
 // metricSpec is one behavior-profile metric's full definition: its stable
@@ -125,6 +126,7 @@ var metricSpecs = []metricSpec{
 	{MetricCompactionCount, "Compaction Count", KindCount, func(m Metrics) float64 { return float64(m.CompactionCount) }},
 	{MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, func(m Metrics) float64 { return float64(m.CompactionLossTokens) }},
 	{MetricModelSwitchCount, "Model Switch Count", KindCount, func(m Metrics) float64 { return float64(len(m.ModelSwitches)) }},
+	{MetricOutputRepetitionRate, "Output Repetition Rate", KindRatio, func(m Metrics) float64 { return m.OutputRepetitionRate }},
 }
 
 func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {

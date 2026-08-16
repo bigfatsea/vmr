@@ -144,6 +144,7 @@ func Compare(lang Lang) CompareText {
 				"compaction_count":       "Compaction 次数",
 				"compaction_loss_tokens": "Compaction 信息损失",
 				"model_switch_count":     "模型切换次数",
+				"output_repetition_rate": "输出重复率",
 			},
 		}
 	}
@@ -226,6 +227,7 @@ func Compare(lang Lang) CompareText {
 			"compaction_count":       "Compaction Count",
 			"compaction_loss_tokens": "Compaction Information Loss",
 			"model_switch_count":     "Model Switch Count",
+			"output_repetition_rate": "Output Repetition Rate",
 		},
 	}
 }

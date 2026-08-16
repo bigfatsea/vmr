@@ -217,8 +217,8 @@ func TestCompareBasicDiff(t *testing.T) {
 	if cmp.A.ID != "j-a" || cmp.B.ID != "j-b" {
 		t.Fatalf("journey refs = %q/%q, want j-a/j-b", cmp.A.ID, cmp.B.ID)
 	}
-	if len(cmp.Rows) != 13 {
-		t.Fatalf("rows = %d, want 13 (one per Metrics field, incl. MetricModelSwitchCount)", len(cmp.Rows))
+	if len(cmp.Rows) != 14 {
+		t.Fatalf("rows = %d, want 14 (one per Metrics field, incl. MetricModelSwitchCount and MetricOutputRepetitionRate)", len(cmp.Rows))
 	}
 
 	var modelRow *MetricDiff
@@ -292,6 +292,27 @@ func TestCompare_ModelSwitchCount_Row(t *testing.T) {
 	}
 	if row.Kind != KindCount {
 		t.Errorf("MetricModelSwitchCount Kind = %v, want KindCount", row.Kind)
+	}
+}
+
+func TestCompare_OutputRepetitionRate_Row(t *testing.T) {
+	a := JourneySummary{Metrics: Metrics{OutputRepetitionRate: 0.12}}
+	b := JourneySummary{Metrics: Metrics{OutputRepetitionRate: 0.65}}
+	cmp := Compare(a, b)
+	var row *MetricDiff
+	for i := range cmp.Rows {
+		if cmp.Rows[i].Metric == MetricOutputRepetitionRate {
+			row = &cmp.Rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("MetricOutputRepetitionRate row missing from Compare's output")
+	}
+	if row.A != 0.12 || row.B != 0.65 {
+		t.Errorf("MetricOutputRepetitionRate A/B = %v/%v, want 0.12/0.65", row.A, row.B)
+	}
+	if row.Kind != KindRatio {
+		t.Errorf("MetricOutputRepetitionRate Kind = %v, want KindRatio", row.Kind)
 	}
 }
 

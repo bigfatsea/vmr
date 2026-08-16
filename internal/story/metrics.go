@@ -41,6 +41,10 @@ type Metrics struct {
 	// wheels".
 	DuplicateActionRate float64 `json:"duplicate_action_rate"`
 
+	// OutputRepetitionRate is the 4-gram redundancy ratio (0.0 ~ 1.0)
+	// across all assistant text outputs (RespText and Reasoning) in a Journey.
+	OutputRepetitionRate float64 `json:"output_repetition_rate"`
+
 	// ErrorRecoveryCount counts Steps that both (a) received an
 	// is_error-marked tool_result since the previous Step and (b) went on to
 	// issue their own tool call anyway — a rough proxy for "the agent tried
@@ -119,6 +123,7 @@ func ComputeMetrics(j *Journey) Metrics {
 
 	m.ToolCallDist, m.ToolCallCount = toolCallDistribution(steps)
 	m.DuplicateActionRate = duplicateActionRate(steps)
+	m.OutputRepetitionRate = ComputeOutputRepetitionRate(j)
 	m.ErrorRecoveryCount = errorRecoveryCount(steps)
 	m.PlanExecRatio = planExecRatio(steps)
 	m.ContextCurve = contextCurve(steps)
@@ -205,7 +210,7 @@ func toolCallDistribution(steps []*Step) ([]ToolCallStat, int) {
 // grouping so both agree on what "the same call" means — two independent
 // definitions here would let a Step get tagged 🔄 by one and skipped by the
 // other for what a reader would see as the identical situation.
-func toolCallKey(tc chatmsg.ToolCall) string { return tc.Name + "\x00" + tc.Args }
+func toolCallKey(tc chatmsg.ToolCall) string { return tc.Name + "\x00" + canonicalizeToolArgs(tc.Args) }
 
 // ToolCallOccurrence is one tool call's repeat status within a Journey —
 // the shared basis for duplicateActionRate (aggregate rate), the
