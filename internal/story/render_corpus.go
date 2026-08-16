@@ -105,6 +105,9 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 	}
 	w("%s", t.GroupCompFootnote)
 
+	renderContextRotSection(&b, stats.ContextRot, lang)
+	renderToolSequenceSection(&b, stats.ToolSequences, lang)
+
 	return b.String()
 }
 

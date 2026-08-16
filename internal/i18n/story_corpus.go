@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-08-16 18:30, by Gemini 3.7 Flash
 
 // Pairs with internal/story/render_corpus.go (the corpus layer's vmr-story-corpus.md).
 package i18n
@@ -28,6 +28,15 @@ type CorpusText struct {
 	NoGroupComparisons      string
 	SkippedGroupComparisons func(codes string) string
 	GroupCompFootnote       string
+
+	ContextRotTitle    string
+	ContextRotHeader   string
+	ContextRotFootnote string
+
+	ToolSeqTitle    string
+	ToolSeqHeader   string
+	NoToolSeq       string
+	ToolSeqFootnote string
 }
 
 func Corpus(lang Lang) CorpusText {
@@ -59,6 +68,15 @@ func Corpus(lang Lang) CorpusText {
 				return "> 以下 Finding 因命中组或未命中组样本数不足 3 个而跳过分组对比（不是没有差异，是数据不够）：" + codes + "\n\n"
 			},
 			GroupCompFootnote: "> ⚠️ = 相对变化 ≥ 30% 且绝对差值超过噪声阈值——一个规则性的\"值得看一眼\"标记，不是\"这个 Finding 导致了更长的耗时\"的确定性结论；VMR 没有任务是否成功的标签，这里比较的是耗时这一个代理指标，不是效果。\n\n",
+
+			ContextRotTitle:    "## Context 增长与质量拐点（Context Rot）\n\n",
+			ContextRotHeader:   "| 上下文区间 | Step 样本数 | Finding 总数 | Finding 密度 | 错误 Step 数 | 错误率 |\n|---|---|---|---|---|---|\n",
+			ContextRotFootnote: "> 按照 Step 输入 Token 大小分桶统计。高上下文区间下的 Finding 密度突增或错误率上升反映了注意力衰减（Context Rot）趋势。错误率基于协议原生错误标记统计。\n\n",
+
+			ToolSeqTitle:    "## 高频工具调用序列模式（N-gram）\n\n",
+			ToolSeqHeader:   "| 工具调用序列 | 出现频次 | 尾步错误率 |\n|---|---|---|\n",
+			NoToolSeq:       "未提取到满足频次阈值的工具调用序列。\n\n",
+			ToolSeqFootnote: "> 基于任务内连续 2-gram 与 3-gram 工具调用统计，展示最高频出现的行为定势与异常关联。\n\n",
 		}
 	}
 	return CorpusText{
@@ -88,5 +106,14 @@ func Corpus(lang Lang) CorpusText {
 			return "> The following Findings were skipped (fewer than 3 journeys on the hit or no-hit side — not evidence of no difference, just not enough data): " + codes + "\n\n"
 		},
 		GroupCompFootnote: "> ⚠️ = relative change ≥ 30% and the absolute difference clears the noise floor — a rule-based \"worth a look\" flag, not a determined \"this Finding caused longer duration\" conclusion; VMR has no task-success label, so this compares duration as a proxy, not outcome.\n\n",
+
+		ContextRotTitle:    "## Context Window Scaling & Quality Inflection (Context Rot)\n\n",
+		ContextRotHeader:   "| Context Range | Step N | Finding N | Finding Density | Error Step N | Error Rate |\n|---|---|---|---|---|---|\n",
+		ContextRotFootnote: "> Bucket statistics by step input tokens. Increases in Finding density or error rate at larger context windows indicate context rot trends. Error rate is computed from protocol-level error markers.\n\n",
+
+		ToolSeqTitle:    "## Frequent Tool Call Sequences (N-gram)\n\n",
+		ToolSeqHeader:   "| Tool Sequence | Occurrences | Tail Step Error Rate |\n|---|---|---|\n",
+		NoToolSeq:       "No tool call sequences met the frequency threshold.\n\n",
+		ToolSeqFootnote: "> Continuous 2-gram and 3-gram tool sequences within task boundaries, showing dominant behavioral patterns and associated error rates.\n\n",
 	}
 }

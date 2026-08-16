@@ -188,7 +188,9 @@ type CorpusStats struct {
 	// but not enough journeys on one side (< corpusMinGroupSize) to compare
 	// — named explicitly rather than silently absent, so "not shown" reads
 	// as "not enough data" and not "nothing found".
-	SkippedGroupComparisons []FindingCode `json:"skipped_group_comparisons,omitempty"`
+	SkippedGroupComparisons []FindingCode         `json:"skipped_group_comparisons,omitempty"`
+	ContextRot              []ContextRotBucket    `json:"context_rot,omitempty"`
+	ToolSequences           []ToolSequencePattern `json:"tool_sequences,omitempty"`
 }
 
 // ComputeCorpusStats is the corpus layer's entire computation: per-metric
@@ -287,5 +289,7 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 			HitMedian: hitMed, NoHitMedian: noHitMed, DeltaRel: deltaRel, Notable: notable,
 		})
 	}
+	stats.ContextRot = computeContextRot(journeys)
+	stats.ToolSequences = computeToolSequences(journeys)
 	return stats
 }
