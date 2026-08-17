@@ -1,7 +1,7 @@
 // Ver 2026-08-02, by Sonnet 5
 
 // Shared YAML config fixtures for internal/server's integration tests.
-// Consolidated here 
+// Consolidated here
 // from eight different test files where each had grown its own — a new test
 // needing a config shape should look here first instead of writing another
 // near-duplicate builder.

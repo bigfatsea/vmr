@@ -106,7 +106,7 @@
 - **现状**：`internal/story/llm_findings.go` 的六个 LLM 判别器（P1b.1~P1b.6）已实现、单测覆盖、且已用 `_eval/calibrate_p1b.go` 对真实生产日志（`logs/vmr-audit-2026-08-13~16`）跑过真实模型（`agent` 虚拟模型）验证：6 个真实 Journey 上机械核验 Evidence Anchor 有效率达到 100%（9/9），六个判别器均在真实数据上被验证过至少一次有效触发，人工抽查全部命中结果判断合理。但这仍不是本方案 §3 定义的正式合入门禁——那需要 30~50 个 Journey、每模块 ≥6 正/负例的系统性黄金样本集，并计算真实 Precision/Recall（需要人工标注 Ground Truth，逐条判断每个 Finding 对错）。
 - **为什么待定**：黄金样本挑选与人工标注是需要投入实际时间的判断性工作，不是能自动化补全的一步；且目前抽样规模下六个判别器都表现良好，没有观察到需要立即处理的误报模式，不构成阻塞性风险。
 - **推进方式**：`_eval/calibrate_p1b.go` 已经是一个可直接复用的真实校准工具——扩大 `-input`（覆盖更多日期的日志）与 `-limit`（采样更多 Journey），把输出交给人工逐条标注 TP/FP，即可补完 §3 要求的完整校准报告；不需要另起工具。
-- **登记来源**：`docs/future-strategy/phase1b_implementation_plan_gemini-3.7-flash.md` §7.4.1（Claude Sonnet 5 复核记录，2026-08-17）——该复核发现原有校准脚本是自证循环的假校准（mock LLM 响应、从未调用生产判别器函数），重写为真实校准工具后才有这条真实但尚不完整的结果。
+- **登记来源**：`archived/phase1b_implementation_plan_gemini-3.7-flash.md` §7.4.1（Claude Sonnet 5 复核记录，2026-08-17）——该复核发现原有校准脚本是自证循环的假校准（mock LLM 响应、从未调用生产判别器函数），重写为真实校准工具后才有这条真实但尚不完整的结果。
 
 ### 1.19 [中] JSON 输出的语言策略：`story`/`report` 两个包目前不一致
 

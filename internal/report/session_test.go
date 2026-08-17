@@ -16,7 +16,6 @@ import (
 	"vmr/internal/i18n"
 )
 
-
 // sseToolCall builds a minimal OpenAI SSE stream that calls one tool and
 // finishes with finish_reason=tool_calls.
 func sseToolCall(tool string) string {

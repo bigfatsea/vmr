@@ -174,4 +174,3 @@ func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 		})
 	}
 }
-
