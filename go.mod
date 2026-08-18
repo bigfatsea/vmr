@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/klauspost/compress v1.19.2
-	golang.org/x/image v0.44.0
+	golang.org/x/image v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
