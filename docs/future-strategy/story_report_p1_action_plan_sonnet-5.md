@@ -413,11 +413,126 @@ bool` 状态跟踪是否在围栏代码块内（trim 后以 `` ``` `` 开头的�
 
 ## 7. 验收清单（对照 DevPlan P1 的验收标准逐项勾）
 
-- [ ] 主力客户端（openclaw/lobster）样例任务，工具结果从完全不显示恢复到接近全覆盖；
+- [x] 主力客户端（openclaw/lobster）样例任务，工具结果从完全不显示恢复到接近全覆盖；
       位置兜底条目在报告中可识别；Finding 检测器证据基础（`toolResultsFor` 输出）未引入推断。
-- [ ] 样例任务脊柱步骤覆盖率达到全覆盖（22/22）；纯问答任务也产出脊柱而不是整节消失。
-- [ ] Compare 报告两侧初始指令可展开查看；证据包体积增量在预期范围内（可用 `-llm-dry-run` 的
+- [x] 样例任务脊柱步骤覆盖率达到全覆盖（22/22）；纯问答任务也产出脊柱而不是整节消失。
+- [x] Compare 报告两侧初始指令可展开查看；证据包体积增量在预期范围内（可用 `-llm-dry-run` 的
       估算数字对比改动前后）。
-- [ ] 即使模型不遵守层级指令，LLM 解读小节目录结构仍然正确；代码块内的 `#` 不受影响。
-- [ ] `go test ./...`、`go test ./internal/archtest/...` 全绿；golden 基线更新且 diff 可解释。
-- [ ] CHANGELOG、KNOWN_ISSUES（§1.20/§1.21）、（如需要）架构文档说明性备注 均已同步。
+- [x] 即使模型不遵守层级指令，LLM 解读小节目录结构仍然正确；代码块内的 `#` 不受影响。
+- [x] `go test ./...`、`go test ./internal/archtest/...` 全绿；golden 基线更新且 diff 可解释。
+- [x] CHANGELOG、KNOWN_ISSUES（§1.20/§1.21，执行中改写为 §1.20/§1.21/§1.22）、
+      架构文档说明性备注 均已同步（细节见 §8）。
+
+---
+
+## 8. 执行记录（2026-08-19，Sonnet 5）
+
+本节是本文写完 ActionPlan 之后、实际落地执行的过程记录与总结——按用户要求补写，不是提前写好
+的计划。**所有改动均未提交，等待人工 review。**
+
+### 8.1 执行顺序与整体结果
+
+按 §2–§5 的 P1.1 → P1.2 → P1.3 → P1.4 顺序实现，每项做完立即 `go build` + 相关包测试，
+最后统一跑 `go test ./... -race`、`go vet ./...`、`gofmt -l .`、`go test ./internal/archtest/...`，
+全部通过（唯一的中间失败是预期内的 golden 基线漂移，`UPDATE_GOLDEN=1` 重跑后逐行核对，
+每一行改动都能对应回 P1.2 的具体改动，无法解释的多余 diff 为零）。
+
+用本机真实审计日志验证（`logs/vmr-audit-2026-07-28.jsonl.zst`，架构文档 §5 用过的同一批样本）：
+
+| 验证项 | 结果 |
+| --- | --- |
+| openclaw 33 次工具调用配对 | 33/33（此前 0/33），0 条位置兜底 |
+| lobster 64 次工具调用配对 | 64/64（此前 0/64），0 条位置兜底 |
+| openclaw 样例脊柱 Step 覆盖 | 22/22（此前 21/22），末尾出现"最终交付物"节，内容是 Step 21 `write` 调用的报告正文 |
+| Compare 初始指令 | 两侧全文正确展开，与证据包（`-llm-dry-run` 69,936 字符）的增量占比 <1.1% |
+
+### 8.2 一处需要澄清的地方（已在 §3.2(c) 写明，执行时确认无误）
+
+架构文档 §7.4a 把"最终交付物"描述为复用 `deliverableStats`（工具调用形态检测），但样例 Journey
+实际缺失的 Step 22 是"无工具调用、纯文本收尾"——两者初看矛盾。执行确认：P1.2 的 (b)（每个 Step
+都渲染，无工具调用的降级为一行摘要）已经独立解决了"Step 22 消失"这个具体问题；(c) 的"最终交付物"
+节是**另一个、锦上添花的加强**，只对以文件写入收尾的 Journey 生效。两者不重叠、不矛盾，§3.2(c)
+的说明在实现前就已经写清楚，实现时未发现需要修正的地方。
+
+### 8.3 执行期间发现的外部并发活动，及独立代码审阅的处理
+
+执行过程中，仓库里出现了两份我没有创建的新文件（`docs/future-strategy/
+cli_architecture_redesign_gemini-3.7-flash.md` 与 `docs/future-strategy/
+story_report_p1_action_plan_review_gemini-3.7-flash.md`）——`/Users/stanford/code/vmr` 与
+`/Volumes/SSD2T/code/vmr` 是同一仓库（符号链接确认），说明有另一个会话在并发工作，其中一份是对
+本文档与本次落地代码的独立源码级审阅，列出 8 条发现（F1–F8）。已经通读全文并逐条核实（不是照单
+全收，也不是因为"是审阅意见"就默认正确）：
+
+**核实为真、已修复的三条**（均已补充回归测试）：
+
+- **F1（高严重度，已修复）**：`positionalToolResults`（位置兜底）原实现用
+  `chatmsg.RawArray(body)` 扫描了 `steps[i+1]` 请求体的**全部**历史消息，而不是该 Step 自己新增的
+  那一段——chat 类 API 每轮都会带上完整历史，未加范围限制的话，更早 Step 已经解决过的历史工具结果
+  会被错误地当成"剩余待配对项"计入 leftover 计数。这既会导致位置兜底在多轮对话里几乎永远因计数
+  不符而失效（假阴性），也存在计数偶然吻合时把历史结果错误安在当前 Step 头上的风险（假阳性，更
+  严重）。复核后确认这是真实缺陷，修法：用 `Step.DeltaStart`（该 Step 自己新增内容的起始位置）
+  加 `chatmsg.MsgOffset` 的下标换算，把扫描范围收紧到该 Step 自己新增的那一段。补了两个回归测试：
+  一个证明"历史里恰好剩 1 条、当前 Step 也恰好缺 1 条"时不会误配（假阳性场景的直接复现），
+  一个证明限定范围后仍能正确找到真正属于当前 Step 的新增结果。
+- **F3（中高严重度，已修复）**：Compare 初始指令原实现直接扫 `j.Events` 里第一个
+  `Role=="user"` 的事件，没有经过 `taskseg.Profile` 的方言过滤——而 Journey/Task 标题
+  （`deriveTitle`）恰恰是经过方言过滤的（`taskseg.FirstInstruction`）。对 OpenClaw 家族客户端，
+  如果真实指令前面混入了一条同样标记为 `role=user` 的脚手架消息（如工具结果图片附件提示），
+  两条逻辑会给出不一致的答案——摘要标题显示过滤后的真实指令，展开的"完整原文"却可能是脚手架噪声，
+  自相矛盾。修法：给 `initialInstructionStats`/`ComputeComparisonExtras` 加一个 `taskseg.Profile`
+  参数（`cmd_story.go` 的 `compareJourneys` 本来就有，两侧 Journey 也是用同一个 Profile
+  构建的），改用 `prof.RealUserText`（`taskseg.FirstInstruction` 底层同一个断言函数，只是不经过
+  它的 `Preview()` 截断）在 Journey 第一个 Step 自己的消息列表里找真实指令，而不是裸扫全局事件流。
+- **F4（中严重度，已修复）**：LLM 标题层级兜底原实现只把 `## ` 单点改写成 `### `——如果模型自己在
+  内部正确地做了两层嵌套（如 `## 1.` 下面嵌 `### 1.1`），改写后两者都变成 `### `，父子关系被拍平
+  成同级标题。修法：改成对围栏外每一个 2–5 级 ATX 标题统一整体下移一级（`## → ###`、
+  `### → ####`……到 6 级封顶），保留模型自己搭的内部层级；同时补上对 `~~~` 围栏的识别
+  （原实现只认 ``` ` ``` ` ``` ```）。补了 7 个测试用例，包括"父子层级在下移后仍保持父子关系"
+  这条最容易被忽略的场景。
+
+**核实为真、判断不在 P1 范围内、已登记为独立 KNOWN_ISSUES 条目的两条**：
+
+- **F5/F8（低严重度，合并登记为 §1.21）**：决策脊柱的指令展示（任务开篇 Step 的 80 字符标题、
+  中途追加指令的 `firstNewUserText`）没有复用 F3 修复里验证过的方言过滤模式。判断依据：影响面
+  有界（渲染层一行预览，不影响 Finding 证据或落盘数据），但要把 `taskseg.Profile` 串到
+  `RenderMarkdown`→`renderDecisionSpine`→`renderSpineBriefStep` 整条调用链上，改动面明显大于
+  F3——这条链路今天完全不接收 Profile。留给下一次touch这条链路时按 F3 已验证的模式（`prof.
+  RealUserText`）一并处理，不在本次顺手做。
+- **F6（低严重度，登记为 §1.22）**：`chatmsg.ToolResultList`/`ToolCallList` 不支持 OpenAI
+  Responses API 的 `function_call`/`function_call_output` 形状——这是一个更早就存在的协议覆盖
+  缺口，与 P1.1 修的 ID 改写问题是两件事。P1.1 的范围是修已支持的两种形状（Chat Completions、
+  Anthropic）里的配对 bug，不是扩展协议覆盖；是否值得投入需要先看 Responses API 流量在真实语料
+  里的占比，本次不展开。
+
+**核实后判断已经处理妥当、无需改动的一条**：
+
+- **F7**：文本型长交付物在脊柱里只有一行摘要，没有独立"交付物小节"——审阅意见自己的结论也是
+  "这需要在文档里说清楚是设计如此，不是遗漏"，而 §3.2(c) 在实现之前就已经写清楚了这一点
+  （见 §8.2）。无需改代码。
+
+**F2**（KNOWN_ISSUES 引用已删除文件导致 archtest 失败）在审阅文档写成时其实已经在本次执行的
+KNOWN_ISSUES 收口步骤里处理完——审阅基于的是我收口之前的中间状态，属于时序上的并发误差，
+不是遗漏。
+
+两份外部文档本身未删除、未修改，留在仓库里供你查阅；`cli_architecture_redesign_gemini-3.7-flash.md`
+是另一个话题，本次执行未读取也未处理。
+
+### 8.4 与最初 ActionPlan 设计的实际出入
+
+- `normalizeToolCallID`/`positionalToolResults` 最终都落在 `internal/story`（前者在
+  `findings_toolresult.go`，后者在 `render_spine_step.go`），没有下沉到 `chatmsg`——因为
+  `chatmsg` 只提供解码原语，实际做"用哪个 ID 配对"判断的逻辑本来就在 `story` 包里
+  （`toolResultsFor`），加一层跨包调用没有收益。
+- `ComputeComparisonExtras` 因 F3 修复新增了 `prof taskseg.Profile` 参数——这是 ActionPlan 原文
+  没有预见到的一处签名变化，影响了 `cmd_story.go` 一处调用与 4 处测试调用，均已同步更新。
+- `downgradeH2Headings` 因 F4 修复重命名为 `downgradeHeadingLevels`（行为从"单点改写"变成"整体
+  下移"，函数名也应该反映这一点）。
+
+### 8.5 尚待你决定的事项
+
+1. **是否需要我恢复或处理**仓库里那两份非我创建的文档（`cli_architecture_redesign_
+   gemini-3.7-flash.md`、`story_report_p1_action_plan_review_gemini-3.7-flash.md`）——本次执行
+   只读取核实了后者的内容，均未改动。
+2. **KNOWN_ISSUES §1.21/§1.22 的后续**：这两条是本次审阅带来的新登记，不是 P1 原计划范围，
+   下次有精力时再排期，不需要现在处理。
+3. 所有代码/文档改动都在工作区，未 `git add`/`git commit`，等待你 review 后决定如何处理。
