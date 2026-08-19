@@ -1,103 +1,131 @@
-// Ver 2026-08-19 15:40, by Opus 5
+// Ver 2026-08-19 18:05, by Opus 5
 
 # vmr 日志分析工具体系 — 需求再理解与第一性原理重构方案
 
-本文是对 `vmr report` / `vmr story` 这两条命令的一次**整体性**重新审视，而不是对上一轮 7 条
-UX 诉求的续写。它包含三部分产出：
+本文是对 `vmr report` / `vmr story` 这两条命令的一次**整体性**重新审视，而不是对某一轮 UX 诉求的
+续写。它包含三部分产出：
 
-1. 对用户原始诉求的重新理解与澄清（抛开既有文档的既定框架）；
-2. 对 `docs/future-strategy/story_report_ux_review_sonnet-5.md`（下称"上一轮报告"）的逐条复核，
-   包括其中**两处判断错误**和**一处根因误判**；
+1. 对用户诉求的重新理解与澄清（抛开既有文档的既定框架）；
+2. 对已有分析记录的复核——包括其中的判断错误与根因误判；
 3. **重点章节**：以第一性原理重排整套日志分析工具体系（第 7 章）。
 
-所有判断都标注了证据来源（`file:line`、实测数字、或外部参考链接）。凡是我没有实际验证、
-只能给出推断的，正文里会明确写"未验证"。
+所有判断都标注证据来源（`file:line`、实测数字、或外部参考链接）。凡是我没有实际验证、只能给出
+推断的，正文里会明确写"未验证"。逐条评审三份前序文档的过程记录在
+`docs/future-strategy/story_report_peer_review_opus-5.md`，本文只保留结论。
 
 ---
 
 ## 0. 摘要（结论先行）
 
-**对"是否只需要一个 story"这个核心问题的回答：不是。但你的直觉指向的那个真问题是对的，
-只是位置偏了一格。**
+**对"是否只需要一个 story"的回答：不是。** 实测：一个 16 天窗口的 2889 条审计记录里，
+Journey 只覆盖 2672 条（**92.5%**），其余 7.5% 结构上不属于任何 Journey；且路由半区最关心的对象
+（provider 账户周期、endpoint 健康度、failover attempt）在 Journey 坐标系里根本没有位置。
+两条命令回答的是**不可互相推导**的两类问题。
 
-- `report` 和 `story` 不能合并，因为它们回答的是**结构上不可互相推导**的两类问题，且
-  `story` 在设计上就看不见一整类流量（见 §3 的删除检验）。
-- 但 `detail report` **确实不该属于 `report`**——它既是 `report` 的下钻终点，也是 `story` 的
-  下钻终点。正确的位置不是"收编进 story"，而是**提升为两者共享的证据层**。你的直觉对了一半。
-- 真正的架构缺陷不是"两条命令没合并"，而是：**同一批 lineage 上跑着两套互不认识的坐标系**
-  （`report` 的 run-scoped `s01/t01/turn N` vs `story` 的内容寻址 `j-<client>-<start>-<end>-<hash>`），
-  两侧内部都用 `path:line` 当主键，但**两侧都没有把它发布出去**。修掉这个缺口，"脊柱链接
-  detail""report 链接 journey"全部变成一次 JSON join，不需要动任何 import 边界。
-- 一个必须先修的分层错配：**人读的 Markdown 里塞了 290KB 事件流，机读的 JSON 里事件流是 0 字节**
-  （实测：`journey-j-openclaw-*.md` 290898 B，其 `.json` 6428 B 且结构上不含消息正文）。
-  你答复的"人读为主、LLM 读为辅"恰好要求把这两者对调。**先补机读层，再删人读层的 fact-layer**
-  ——顺序反了就是真的丢数据。
+**但你的直觉指向的真问题是对的，只是位置偏了一格。** `detail report` 确实不该属于 `report`——
+它既是 `report` 的下钻终点，也是 `story` 的下钻终点，正确的位置是**两者共享的证据层**。
 
-**对上一轮报告的复核结论**：6 条"已直接处理"里 5 条正确、1 条方案可以更稳；2 条"留待确认"里
-**第 8 条（fact-layer / detail 链接）的"不可行"论证是错的**，有三条独立证据推翻它。
+**真正的架构缺陷**不是"两条命令没合并"，而是一张本该完整的 3×2 表格里有四个空格是错的：
 
-**一个独立的新发现（本轮最有操作价值的单点）**：上一轮报告与 `KNOWN_ISSUES §1.21` 把工具调用
-结果配对失败的根因判定为"`opencode` 这个中间网关改写了 tool_call id"。**这个归因不成立。**
-实测证据显示是 **agent 客户端在回写历史时去掉了下划线**，与上游 provider 无关；而且
-**一行归一化（比较前 strip `_`）就能把 07-28 openclaw/lobster 的配对率从 0% 恢复到 100%**，
-且仍然是精确匹配、不引入任何位置推断——也就是说，`§1.21` 里"不修的理由"（不愿引入推断规则）
-在这个修法下不成立。详见 §5。
+| | 宏观（全量聚合） | 中观（单任务叙事） | 微观（单请求法证） |
+| --- | --- | --- | --- |
+| **人读** | `vmr-report.md` ✅ | journey 决策脊柱 ⚠️ 缺一步 | `details/*.md` ✅ |
+| **机读** | `vmr-report.json` ✅ | `journey-*.json` ❌ **事件流 0 字节** | `details/*.json` ⚠️ 审计记录的逐字复制 |
+
+- 中观×人读格里塞了 **204,532 字节的 fact-layer**（占 journey 报告 68%），而中观×机读格的事件流是
+  **0 字节**——最贵的载体装了最适合机读的内容，最适合机读的载体是空的。
+- 中观×人读格自己还有一个洞：决策脊柱**只渲染有 tool_call 的 Step**（`render_spine_step.go` 的
+  `acting` 过滤），实测样例 journey 覆盖 21/22 步，**缺的正是最后一步——没有工具调用、只有最终
+  交付物正文的那一步**。所以"删掉 fact-layer"必须先补脊柱，否则删掉的是整条任务里信息价值最高的
+  那一段。
+- 三个格子之间**没有共同地址**：`report` 用 run-scoped 的 `s01/t01`，`story` 用内容寻址的
+  `j-<client>-<start>-<end>-<hash>`，两侧内部都以 `path:line` 为主键却都没发布出去；
+  `vmr-report.md` 对 `stories/` 的引用命中数是 **0**。
+
+**修复的关键不是合并命令，是三件事**：一套跨半区的稳定坐标（§7.3）、一张双向导航矩阵（§7.5）、
+一个共享证据层（§7.6）。
+
+其中第三件的做法是**先做减法，而不是搬家**。今天的 `details/*.md` 里混着 `s01`/`t01` 这类只在
+report 聚合阶段才存在的位置坐标——但微观层根本不需要知道自己在树上的位置，那是父视图的职责。
+把这些减掉之后，detail 退化成 `f(一条记录, 同 lineage 的前驱)` 的纯函数：文件名可以只从
+`ctxgraph.Manifest` 算出（不必读正文），两个半区各自生成的结果逐字节相同，批次顺序与本机时区
+都不再进入产物。**这一刀下去，"按需生成 detail"从一个需要跨半区协调的难题变成一次幂等写盘。**
+
+**同一把刀还要再挥两次。** 项目自己的第一性原理是 git 模型——消息是 blob、manifest 是 tree、
+**blob 只存一份，tree 只持引用**（设计文档"第一性原理"一节）。但派生产物层今天到处在违反它：
+
+- `details/*.json` 是 `json.MarshalIndent(audit.Record)`（`detail.go:75`）——**审计记录的逐字
+  复制再加美化缩进**。实测 59 条记录的 detail 产物合计 **60MB**，而这 59 条记录的源日志压缩后
+  只有 **334KB**（解压 27MB）。全语料 11374 条按此比例约 **12GB**，而全部审计日志是 645MB。
+  而 `-details` 的默认值是 `true`。
+- 同一份 ~20.5K token 的 system prompt 在 179 份 journey 报告里各存一份全文。
+- 解析缓存也用 `MarshalIndent` 美化（`storyindex.go:81`、`requests.go:58`），一份机器只读、
+  可随时重建的缓存被存成 88MB 的带缩进 JSON。
+
+**减法之后的微观机读层不需要被"生成"——它已经存在**：审计日志本身就是那一格，按 `req` 坐标寻址
+即可。这不是省事，这是消除一个从设计上就注定会与源数据不一致的副本。
+
+**一个独立的高价值发现**：工具调用结果配对失败的根因不是"`opencode` 网关改写 ID"，而是
+**agent 客户端在回写历史时去掉了下划线**；一行归一化即可把配对率从 0% 恢复到 100%，且仍是精确
+匹配、不引入任何推断。详见 §5。
 
 ---
 
-## 1. 前置诊断（本轮工作方式的第一步）
+## 1. 前置诊断
 
 ### 1.1 隐含假设
 
 | # | 假设 | 核查结论 |
 | --- | --- | --- |
-| A1 | report 与 story 是同一脉络的两个层级 | **只成立一半**。原子单位不同且非包含关系：report 的原子是 `audit.Record`（含全部 failover attempt 与失败），story 的原子是 `Step`（一次成功且能挂上 lineage 的往返）。`internal/story/candidates.go` 的 `ListCandidates` 明确排除整链 < 2 个 manifest 的 lineage——即**全部单发请求**（heartbeat/dream_diary 这类定时脚手架的结构特征）。存在一整类流量 story 在设计上看不见 |
-| A2 | detail report 是"辅助 story 的一种方式" | **方向对了一半**。`internal/report/detail.go` 的渲染结构（`renderClientRequest`/`renderAttempts`/`renderRawPreStrip`/`diffHeaderTable`/`renderBodyDiff`）里约一半内容是 story 永远不需要也无法解释的路由半区排障资料。detail 是两者**共同**的下钻终点，不是任一方的附属 |
-| A3 | "story/report 必须严格隔离"是产品原则 | **是代码原则，不是产品原则**。`internal/archtest/import_boundaries_test.go:64-67` 禁止的是 Go 包级 import；它从不禁止两个**产出物**互相链接，也不禁止 `cmd/vmr` 组合根同时驱动两者（CLAUDE.md 明确写了组合根是唯一允许同时看到两半的地方）。上一轮报告把这条读成了"产出物不能耦合"，由此得出过强结论 |
+| A1 | report 与 story 是同一脉络的两个层级 | **只成立一半**。原子单位不同且非包含关系：report 的原子是 `audit.Record`（含全部 failover attempt 与失败），story 的原子是 `Step`（一次成功且能挂上 lineage 的往返）。`internal/story/candidates.go` 的 `ListCandidates` 排除整链 < 2 个 manifest 的 lineage——即全部单发请求。实测 7.5% 的记录不属于任何 Journey |
+| A2 | detail report 是"辅助 story 的一种方式" | **方向对了一半**。`internal/report/detail.go` 的渲染结构（`renderClientRequest`/`renderAttempts`/`renderRawPreStrip`/`diffHeaderTable`/`renderBodyDiff`）里约一半是 story 永远不需要也无法解释的路由半区排障资料。detail 是两者**共同**的下钻终点 |
+| A3 | "story/report 必须严格隔离"是产品原则 | **是代码原则，不是产品原则**。`internal/archtest/import_boundaries_test.go` 的 `forbiddenImports` 禁止的是 Go 包级 import；它不禁止两个**产出物**互相链接，不禁止 `cmd/vmr` 组合根同时驱动两者（CLAUDE.md 明确写了组合根是唯一允许同时看到两半的地方），也不禁止两者共同 import 一个新的共享叶子包 |
 | A4 | story 想链接 detail，必须先改 report 的文件命名机制 | **不成立**，三条独立证据见 §4.8 |
-| A5 | 跑 journey 报告时"顺带"生成 detail 是低成本的 | **成本相差两个数量级**。`vmr report` 的 details 是 `Build` 第二遍扫描里随 `onRecord` **全量**落盘（每请求 1 md + 1 json）。本机 `reports/details/` 现有 118 个文件 = 59 个请求；全语料 11374 条记录 → 22748 个文件 |
+| A5 | 跑 journey 报告时"顺带"生成 detail 是低成本的 | **成本相差两个数量级**。`vmr report` 的 details 是 `Build` 第二遍扫描里随 `onRecord` **全量**落盘（每请求 1 md + 1 json）。全语料 11374 条记录 → 22748 个文件 |
+| A6 | 决策脊柱是 fact-layer 的完整摘要 | **不成立**。脊柱只渲染 `len(s.ToolCalls) > 0` 的 Step，且整条 Journey 无工具调用时提前返回不渲染。这是"删 fact-layer"方案里最容易踩空的一块地板 |
 
-### 1.2 信息缺口
+### 1.2 已裁决的前提
 
-1. **产物的第一读者**——已由你答复填补（见 §1.4）。
-2. **运行节奏与扫描范围**：两条命令各跑一次全量扫描、各持久化一份**同一个类型**的
-   `ctxgraph.FileCache`（`vmr-requests.json` 的 `files` 段 vs `vmr-stories.json` 的 `files` 段）。
-   是否值得合并取决于运行频率——本文按"report 周期性全量、story 针对性单点"这一常见形态给建议，
-   如果你的实际用法不同，§7.4 的结论需要相应调整。
-3. **有无下游程序消费这些 JSON**：`KNOWN_ISSUES §1.15` 的指导原则明确写着"新指标优先用外部脚本
-   消费稳定的 JSON 契约验证"。若该原则正在被实践，JSON 就是硬契约，§7.3 的字段新增必须走
-   `omitempty` 向后兼容路线（本文按这条保守假设写）。
-4. **是否要对外分享**：设计文档 §8 已把"HTML 单文件 + 脱敏"列为可选扩展，并注明"没有脱敏能力
-   之前不应假定这个产物适合对外分享"。本文不假设需要它，但 §7 的分层设计为它留了自然位置。
+以下四条曾是本方案的关键信息缺口，现已由用户裁决填补（裁决原文记录于
+`story_report_suite_reorganization_glm-4.7.md` §0.2；本文按其字面含义采纳，**若记录有出入请指正，
+因为 §7 的几处取舍直接依赖它们**）：
+
+| 前提 | 裁决 | 它约束了什么 |
+| --- | --- | --- |
+| **首要服务对象** | 首先是自己；VMR 同时是开源项目，服务类似的个体开发者与小团队 | 产物必须自解释、零外部依赖；不需要多租户/权限 |
+| **大盘与复盘的关系** | **两者独立并重**，但需要**从大盘一键下钻到微观 Task 链路的统一套件** | 直接否定"合并成一个 story"；把重点从"合并"转向"导航" |
+| **detail 的定位** | 用户分析过程的**辅助阅读素材**——既辅助 Journey 分析，也辅助整体用量分析，还用于特殊任务出错时找原始记录排查 | 确认 detail 是**共享**证据层，不是任一方的附属 |
+| **兼容性** | 没有稳定外部客户、没有历史包袱、JSON 无外部脚本消费，可基于第一性原理从底层重构 | 允许改文件命名、改 JSON 结构、改会话 ID 语义，无需向后兼容层 |
+
+**第五条是我自己补的读者维度**（本轮对话中确认）：**人读为主、LLM 读为辅，两者都要**。
+它的直接推论——产物必须按"变焦倍率 × 读者"两维分层，而不是在同一份文件里堆两个区块——
+是第 7 章整个骨架的来源。折叠（`<details>`）是人读层的手段，对 LLM 是纯噪声（它看到的是展开后的
+全文）；给 LLM 的应该是可切片的 JSON，不是折叠过的 Markdown。
 
 ### 1.3 典型错误（本类问题最容易踩的坑）
 
-1. **把"内容重复"等价成"该合并"。** 重复的是数据源，不是职责。正确检验是逐项问"删掉它之后，
+1. **拿"现状有什么"当"应当有什么"。** 这是本轮最容易犯、也确实反复犯了的错：看到 `renderDetail`
+   依赖 `report.ReqInfo`，就去论证"怎么把这份依赖安顿好"，而不是先问"这些东西本来就该在 detail
+   里吗"；看到机读层是空的，就想把人读层的正文搬过去，而不是先问"正文该有几份"。
+   **一个被现状绑架的前提会派生出一串为它服务的加固设计**——本方案里 S1（detail 依赖）派生出
+   "会话 ID 内容寻址是正确性前提"，S3（搬事件流）派生出"接受 `details/*.json` 这份副本"，
+   都是这样长出来的。识别方法：每当写下"因为 X 现在是这样，所以要 Y"，把它翻成
+   "X 本来就该这样吗"再问一遍。
+2. **把"内容重复"等价成"该合并"。** 重复的是数据源，不是职责。正确检验是逐项问"删掉它之后，
    哪个具体问题回答不了"（§3 就是这个检验）。
-2. **拿 CLI 命令数量当设计单位。** 命令是入口，不是架构。"统一数据层/一次扫描"与"合并成一个
+3. **拿 CLI 命令数量当设计单位。** 命令是入口，不是架构。"统一数据层/一次扫描"与"合并成一个
    命令"是两件独立的事。
-3. **把 `<details>` 折叠当体积问题的解药。** 折叠只减少视觉高度，不减少字节。290KB 的 Markdown
+4. **把 `<details>` 折叠当体积问题的解药。** 折叠只减少视觉高度，不减少字节。290KB 的 Markdown
    在编辑器与 GitHub 里照样卡。fact-layer 的问题不是"它展开着"，是"它在这份文件里"。
-4. **让人读产物依赖另一条命令的运行顺序。** 一份会 404 的链接比没有链接更糟。任何链接方案必须
+5. **在删掉一个视图之前不核查它的替代物覆盖了多少。** A6 就是这么被漏掉的：连续两轮讨论
+   fact-layer 的去留，都没人去数脊柱到底覆盖了几步。
+6. **让人读产物依赖另一条命令的运行顺序。** 一份会 404 的链接比没有链接更糟。任何链接方案必须
    自带存在性证明。
-5. **搬动已校准的判据。** 九个 Finding 检测器、`ctxgraph` 的 `contractLenRatio`/`forkCoverage`
+7. **搬动已校准的判据。** 九个 Finding 检测器、`ctxgraph` 的 `contractLenRatio`/`forkCoverage`
    都在 7112 条记录上校准过（设计文档 §6）；而 `stitch` 的两个阈值**明确尚未校准**（§7 已登记）。
    重构可以动组装方式，不该动这些。
-6. **拿本次两条样例当全语料代表。** 它们的客户端（openclaw/lobster）恰好属于会改写 tool_call id
-   的那一族——§5 证明这是**客户端**特征而非链路特征，是一个已知偏样本。
-
-### 1.4 关键追问与你的答复
-
-> **问**：这套分析产物的第一读者与主要消费方式是什么？
-> **答**：**人读为主、LLM 读为辅，两者都要。**
-
-这条答复的直接推论（本文后续全部据此展开）：
-
-- 产物必须**分层**，而不是在同一份文件里堆两个区块。
-- 人读层的目标函数是**纵向空间与跳转效率**；机读层的目标函数是**完整性与可寻址**。
-  今天这两个目标被压在同一份 Markdown 里互相打架。
-- 折叠（`<details>`）是人读层的手段，对 LLM 读毫无意义（它看到的是展开后的全文，
-  折叠标记只是噪声）。**给 LLM 的应该是 JSON 或按需切片，不是折叠过的 Markdown。**
+8. **拿单一样例当全语料代表。** 本轮的两条样例 journey 的客户端（openclaw/lobster）恰好属于会改写
+   tool_call id 的那一族——§5 证明这是**客户端**特征而非链路特征，是一个已知偏样本。
 
 ---
 
@@ -111,7 +139,7 @@ UX 诉求的续写。它包含三部分产出：
 | --- | --- | --- |
 | `vmr-report.md` / `.json` | §0 摘要 · §1 成本与 Token · §2 成本估算 · §2.5 账户消耗与额度 · §3 可靠性 · §4 延迟吞吐 · §5 负载分布 · §5.5 按客户端的上游归属 · §6 会话与任务（含 §6.5 Sticky · §6.6 端点性价比 · §6.7 Compaction 还原）· §7 效率与浪费 · §8 详单入口 · 附录 | 人 / 脚本 |
 | `vmr-requests.md` / `.json` | 请求索引：按 Chat User 分组，`RequestRow` 列表 + `files` 解析缓存 | 人 / 脚本 |
-| `vmr-requests-<tag>.md` | 该 client 的 Session→Task→Turn 展开 | 人 |
+| `vmr-requests-<tag>.md` | 该 client 的 Session→Task→Turn 展开，每轮链接到 `details/*.md` | 人 |
 | `vmr-requests-cron-<class>.md` | 单发定时脚手架（heartbeat/dream_diary）独立成文件 | 人 |
 | `vmr-requests-failed.jsonl` / `.md` | 失败请求过滤导出 | 人 / 脚本 |
 | `details/*.md` + `*.json` | 逐请求全量详单：Client→VMR、VMR→上游每次 attempt（header diff / body diff / 剥离前原文）、VMR→Client | 人 / 排障 |
@@ -121,24 +149,59 @@ UX 诉求的续写。它包含三部分产出：
 | 产物 | 内容 | 读者 |
 | --- | --- | --- |
 | `stories/vmr-stories.json` / `.md` | 候选 Journey 索引 + `ctxgraph.FileCache` 解析缓存 | 人 / 缓存 |
-| `stories/journey-<id>.md` | 头部元信息 · System Prompt（本轮新增，折叠）· 概览卡 · 模型使用 · **决策脊柱** · **`## t0X`/`### Step N` fact-layer** · 工具调用时序图 · 疑似问题 · （可选）LLM 解读 | 人 |
+| `stories/journey-<id>.md` | 头部元信息 · System Prompt（折叠）· 概览卡 · 模型使用 · **决策脊柱** · **`## t0X`/`### Step N` fact-layer** · 工具调用时序图 · 疑似问题 · （可选）LLM 解读 | 人 |
 | `stories/journey-<id>.json` | `JourneySummary`：ID/Title/From/To/Partial/**Metrics**/**Findings**/**LLMFindings** —— **不含任何消息正文** | 脚本 |
 | `stories/compare-<a>-<b>.md` / `.json` | 行为剖面对比 · 工具对比 · 分叉点 · 端点/缓存/SysPrompt/交付物核查 · 证据溯源 · （可选）两段 LLM 解读 | 人 / 脚本 |
 | `stories/vmr-story-corpus.md` / `.json` | 语料级统计（指标分布、Finding 命中率、相关性） | 人 / 脚本 |
 
-### 2.2 实测数字（本机 `reports/`，2026-08-19）
+### 2.2 实测基线
+
+以下数字全部用**当前工作区代码**构建的二进制实测（含尚未提交的 6 项 UX 改动），或对本机
+`reports/` 产物直接统计。
+
+**单条 Journey 报告的构成**（`-journey 'j-openclaw-20260728T000544*'`，22 轮、33 次工具调用）：
+
+| 区段 | 行数 | 字节 | 占比 |
+| --- | --- | --- | --- |
+| 头部（含 System Prompt 折叠块） | 711 | 50,132 | 17% |
+| **决策脊柱** | 1,100 | 42,809 | **14%** |
+| **fact-layer（`## t01`/`## t02`）** | 2,408 | 204,532 | **68%** |
+| 合计 | 4,243 | 298,732 | |
+
+**与之对应的机读层**：`journey-<id>.json` = **6,428 字节**，`JourneySummary` 结构体
+（`metrics.go:399-407`）**不含任何消息正文字段**。事件流在人读层占 204KB，在机读层占 0 字节。
+
+**决策脊柱的覆盖**：21 / 22 步。唯一缺失的是 **Step 22**——这条 Journey 的最后一步，
+没有工具调用、只有最终报告正文。脊柱内工具结果行（`↩️`/`❌`）**0 条**（33 次调用全部静默降级，
+根因见 §5）。
+
+**Journey 对全量流量的覆盖**（`vmr story` 跑 07-25..08-09 共 16 个日志文件）：
+
+| 指标 | 数值 |
+| --- | --- |
+| 审计记录总数 | 2,889 |
+| 候选 Journey 数 | 220 |
+| Journey 覆盖的记录数 | 2,672（**92.49%**） |
+| 其中 ≤2 轮的 heartbeat 类 | **120 条 journey（55%）**，只覆盖 240 条记录（9%） |
+| 客户端分布 | lobster 179 / pimini 15 / hermes 11 / openclaw 8 / **vmrstory 4** / aiscript 2 |
+| 运行耗时 | 4.52s（冷缓存，含缓存写入） |
+
+**其他实测**：
 
 | 观测 | 数字 | 依据 |
 | --- | --- | --- |
-| journey 报告体积 | openclaw 290898 B / 4066 行；lobster 568394 B / 8512 行 | `ls -la reports/stories/` |
-| **脊柱层 vs fact-layer 占比** | 头部+脊柱 35473 B（**12%**），fact-layer 及其后 255425 B（**88%**） | 以 `## t01` 所在行（948）切分 openclaw 报告统计 |
-| **机读层的事件流** | **0 字节** | `JourneySummary` 结构体（`metrics.go:399-407`）无消息正文字段；`journey-*.json` 实测 6428 B / 10922 B |
-| `vmr-stories.json` 体积 | **88 003 599 B（88MB）** | `ls -la` |
-| 其中索引行 | `journeys`：**3 行** | `json.load` 后计数 |
-| 其中缓存 | `files`：38 个文件条目、11629 条 manifest（含逐消息哈希向量） | 同上 |
-| 缓存的重复条目 | 同一文件同时以绝对路径与相对路径存在两份（`logs/vmr-audit-2026-07-25.jsonl.zst` 与 `/Users/stanford/code/vmr/logs/...`），共 255 条 manifest 重复 | 按 `(basename, line)` 去重后 11629 → 11374 |
-| detail 文件名批次去重实际触发率 | **10 个键 / 11374 条记录 = 0.088%**，受影响记录 20 条 | 按 `(ts_ms, virtual, endpoint, outcome)` 近似 `detailFileName` 的键在全语料上计数（近似：真实实现用 `realModel(rec)` 与 `outcome+errClass`） |
-| 本机 details 目录实际碰撞 | **0 / 59** | `ls reports/details/ \| grep -c -- '-[0-9]\.md$'` |
+| `vmr-stories.json` 体积（长期累积后） | **88MB**，其中 `journeys` 只有 3 行，其余全是 `ctxgraph.FileCache` | `ls -la` + `json.load` |
+| 缓存的重复条目 | 同一文件同时以绝对路径与相对路径存在两份，共 255 条 manifest 重复 | 按 `(basename, line)` 去重后 11629 → 11374 |
+| detail 文件名批次去重实际触发率 | **10 个键 / 11374 条记录 = 0.088%** | 按 `(ts_ms, virtual, endpoint, outcome)` 近似 `detailFileName` 的键在全语料上计数 |
+| **detail 文件名依赖本机时区** | `detail.go:358` 用 `rec.TS.In(fmtutil.DisplayZone)`；`fmtutil/timezone_test.go:13` 锁死 `DisplayZone == time.Local` | 读源码 |
+| 物理读放大 | `vmr report` **3 遍**（`ctxgraph/scan.go:129` + `report/session.go:302` + `report/aggregate.go:198`，前两遍并发）；`vmr story` **2 遍**（`ctxgraph/scan.go:129` + `ctxgraph/records.go:82`） | 读源码 |
+| 自指流量 | `client_key_tag = vmrstory` 共 **21 条记录 / 4 条 journey**——`vmr story -llm-addr` 的解读调用经 VMR 回流进审计日志 | `zstdcat \| grep -o` 全窗口统计 |
+| 半区体量 | 分析半区 21,145 行 / 路由半区 12,552 行（非测试 `.go`） | `find \| cat \| wc -l` |
+| System Prompt 重复 | openclaw 报告头部 50KB（17%）；一条 2 轮 heartbeat journey 全文 20,559 字节中约 68% 是 system prompt；实测窗口里 **179 条 lobster journey 共享同一份 ~20.5K token 的 system prompt** | 渲染产物统计 |
+| **证据层的体积放大** | 59 条记录 → `details/` 合计 **60MB**（`.json` 40MB + `.md` 20MB，平均 709KB + 353KB / 条）；同这 59 条记录的源日志压缩后 **334KB**、解压 27MB。按比例全语料约 **12GB**（全部审计日志 645MB）。`-details` 默认 `true` | `du -ch` + `zstdcat \| wc -c` |
+| **`details/*.json` 是审计记录的逐字复制** | `detail.go:75` 是 `json.MarshalIndent(j.rec, "", "  ")`——原样输出 `audit.Record` 再加缩进，所以派生的 709KB 比源记录的 461KB 还大 54% | 读源码 + 逐字段比对产物结构 |
+| 解析缓存被美化输出 | `storyindex.go:81` / `requests.go:58` 都用 `json.MarshalIndent`——一份机器只读、可随时重建的缓存存成带缩进的 88MB JSON | 读源码 |
+| 既有的内容寻址先例 | `session.go:512` 的 `toolsSig` = `fmt.Sprintf("tools:%d/%x", len(names), sum[:4])`——工具声明集合早就是按内容哈希引用的 | 读源码 |
 
 ### 2.3 它们其实已经是同一个骨架
 
@@ -155,8 +218,8 @@ report: SessionInfo(s01) → TaskInfo(t01) → Turn → RequestRow      story: J
         └─ detail 文件名 = ts_virtual_real_outcome[.md]                  └─ journey-<id>.md
 ```
 
-两侧消费的是**同一个 lineage 划分、同一个 `taskseg.IsNewTask` 任务边界规则**（设计文档
-§3.4 的 taskseg 一节记录了这次收敛：收敛前后跑真实语料，输出逐字节一致）。差别只有两处：
+两侧消费的是**同一个 lineage 划分、同一个 `taskseg.IsNewTask` 任务边界规则**（设计文档 §3.4 记录了
+这次收敛：收敛前后跑真实语料，输出逐字节一致）。差别只有两处：
 
 1. **组装粒度**：`report` 的 `SessionInfo` = 一条 Lineage（跨 compaction 靠 `ContinuedFrom` 弱链接）；
    `story` 的 `Journey` = 一条**缝合链**（`ChainFrom`）。story 多做了一步缝合。
@@ -166,6 +229,18 @@ report: SessionInfo(s01) → TaskInfo(t01) → Turn → RequestRow      story: J
 **结论：同一根骨架上挂了两套互不认识的坐标系。** 这才是"两个报告看起来在做同一件事却无法互相
 跳转"的机制性原因——不是重复渲染，是**没有共同的地址**。
 
+今天的链接现状印证了这一点：
+
+| 边 | 状态 |
+| --- | --- |
+| `vmr-requests-<tag>.md` → `details/*.md` | ✅ 存在（实测 19 处链接） |
+| `compare-*.md` → `journey-*.md` | ✅ 存在，且缺失时自动补生成（`ensureJourneyFile`） |
+| `vmr-stories.md` → `journey-*.md` | ✅ 存在（渲染过才出现） |
+| `vmr-report.md` → `vmr-requests.md` | ✅ 存在（§8） |
+| **`vmr-report.md` → `stories/*`** | ❌ **完全不存在**（对 `stories`/`journey` 的命中数为 0） |
+| **journey 脊柱 Step → `details/*.md`** | ❌ 不存在 |
+| `vmr-report.md` → `details/` | ⚠️ 只有一句纯文本提示，不是链接 |
+
 ---
 
 ## 3. 删除检验：什么能合并、什么不能
@@ -174,153 +249,156 @@ report: SessionInfo(s01) → TaskInfo(t01) → Turn → RequestRow      story: J
 
 | 待删对象 | 删掉后回答不了的问题 | 判定 |
 | --- | --- | --- |
-| `vmr report` 聚合层（§1/§2/§2.5/§5/§5.5/§7） | 这个月花了多少钱、哪个账号快烧爆、缓存有没有生效、哪个 client 在吃额度 | **不可删**。story 完全没有跨任务聚合能力，也不看成本 |
+| `vmr report` 聚合层（§1/§2/§2.5/§5/§5.5/§7） | 这段时间花了多少钱、哪个账号快烧爆、缓存有没有生效、谁在吃额度 | **不可删**。story 没有跨任务聚合能力，也不看成本 |
 | `vmr report` 可靠性层（§3/§4/§6.5/§6.6） | 哪条链路在失败、failover 走了几次、sticky 有没有起作用、哪个端点性价比差 | **不可删**。`Step` 只保留成功往返，`attempt` 层在 story 里根本不存在 |
-| `vmr-requests-cron-*.md` | 定时脚手架跑了多少次、值不值 | **不可删**。`ListCandidates` 在结构上排除全部单发请求（`candidates.go` 的 `total < 2` 分支） |
+| `vmr-requests-cron-*.md` 与失败导出 | 定时脚手架跑了多少次、那些全失败的请求发生了什么 | **不可删**。实测 7.5% 的记录（217 条）不属于任何 Journey；`ListCandidates` 在结构上排除全部单发请求 |
 | `details/*` | 这次 502 到底发生了什么、vmr 改了哪个字节 | **不可删**，且它同时是两侧的下钻终点 |
 | `vmr story` journey 叙事 | agent 是怎么想的、哪一步走偏、上下文怎么演化 | **不可删**。report 的 Session→Task→Turn 只有元数据行，没有因果 |
 | `vmr story -compare` | 两套 agent 框架在同一任务上的行为差异、分叉点在哪 | **不可删** |
 | `vmr story -corpus` | 哪些行为指标与结果相关（跨 Journey） | 可延后，但与 report §7 的口径不同（一个是"浪费"，一个是"行为↔结果相关性"），**不可互相替代** |
-| **journey 报告里的 `## t0X` fact-layer** | ——**没有**。它承载的全部内容，在"机读层有完整事件流 + 证据层有 detail"之后可完整替代 | **唯一真正可删的那一块** |
+| **journey 报告里的 `## t0X` fact-layer** | ——在**两个前置条件都满足后**没有：机读层补上完整的事件流**结构**（正文按 `req` 引用证据层），且脊柱补完到覆盖无工具调用的 Step | **唯一可删的那一块，但它有前提** |
 
 **这张表就是对"是不是只需要一个 story"的正面回答**：八项里七项不可删，唯一可删的那一项恰好就是
-你自己指出的那一项（原诉求 4）。你的判断是对的，只是它的适用范围比"合并两条命令"小得多——
-**可删的是一个渲染区块，不是一条命令。**
+你自己指出的那一项。**可删的是一个渲染区块，不是一条命令。**
+
+需要特别记下的一条修正：早先版本的这张表把 fact-layer 写成"无条件可删"，那是错的——脊柱只覆盖
+有工具调用的 Step（A6），实测样例里缺的正是最终交付物那一步。**前置条件不是形式主义，它是"删掉
+的到底是冗余还是正文"的分界线。**
+
+另外，"运维流量 vs 任务流量"并不对应"report vs story"：实测窗口里 `Daily News Brief`（16 轮）、
+`Daily Finance Brief`（21 轮）这类 cron 任务链**会**形成正常的 Journey。被 story 排除的是
+**结构上的单发请求**（整链 < 2 个 manifest），不是"定时任务"这个类别。
 
 ---
 
-## 4. 对上一轮报告（sonnet-5）的逐条复核
+## 4. 对既有分析记录的复核
 
-### 4.1 第 1 条 · 证据溯源改为按 Journey 精确定位 —— ✅ 认可
+前序的 UX 分析记录（`story_report_ux_review_sonnet-5.md`）有 6 项"已直接处理"、2 项"留待确认"。
+逐条复核结论如下——这不是评审仪式，其中两条的纠正直接决定了第 7 章的形状。
+
+### 4.1 证据溯源改为按 Journey 精确定位 —— ✅ 认可
 
 诊断与修法都对。`SourceFiles`（`storyindex.go`）从 `idx.Journeys[].Files` 取并集，数据本来就已算好
 （`BuildJourneyIndexRow` 遍历 chain 上全部 manifest 的 `.Path`）。这是典型的"数据已算好但没接上"。
 
-**补充一条它没写的前提**：`SourceFiles` 依赖 `idx.Journeys` 里有对应行。这一点由
-`MergeJourneyIndexRows` 保证（fresh 永远是本次运行的完整权威集合），所以安全——但这也意味着
-**索引的 `journeys` 段是 run-scoped 的**，与同一文件里永久累积的 `files` 段语义不一致（见 §7.5）。
+**一个附带的观察**：`SourceFiles` 依赖 `idx.Journeys` 里有对应行，这由 `MergeJourneyIndexRows`
+保证（fresh 永远是本次运行的完整权威集合）——但这也意味着索引的 `journeys` 段是 run-scoped 的，
+与同一文件里永久累积的 `files` 段语义不一致（§7.8 处理）。
 
-### 4.2 第 2 条 · LLM 解读标题层级降一级 —— ✅ 认可结论，⚠️ 方案可以更稳
+### 4.2 LLM 解读标题层级降一级 —— ✅ 认可结论，⚠️ 方案可以更稳
 
 事实澄清是对的：那些 `## 候选根因` 是 prompt 里要求 LLM 输出的，不是 Go 拼的
 （`internal/i18n/story_llm.go`）。选"改 prompt 不改渲染"也对——两次 LLM 调用的证据包内容完全不同，
 不该合并。
 
-**但方案本身有一个结构性弱点它自己也承认了**：文档的**标题层级是结构，不是内容**，
-把结构正确性外包给 LLM 的指令遵从度是脆弱的。更稳的做法：在 `RenderLLMSection` 里对返回文本做
-一次确定性的标题降级（仅在 LLM 段落内，把行首 `## ` 改写为 `### `），代价是十几行代码，
-**必须处理围栏内的 `#` 不能被误改**（LLM 返回文本里出现 ```` ``` ```` 代码块是常态）。
-prompt 侧的指令可以保留作为第一道；渲染侧兜底是第二道。两道并存才是"结构由代码保证"。
+**但文档的**结构**正确性不该外包给 LLM 的指令遵从度**。更稳的做法：在 `RenderLLMSection` 里对
+返回文本做一次确定性的标题降级（仅在 LLM 段落内，行首 `## ` → `### `），**必须跳过围栏内的 `#`**
+（LLM 返回文本里出现代码块是常态）。prompt 侧指令保留作第一道，渲染兜底作第二道。优先级：低。
 
-优先级：低。当前做法在实测上有效，只是没有保证。
+### 4.3 多行/超长工具调用参数默认折叠 —— ✅ 认可
 
-### 4.3 第 3 条 · 多行/超长工具调用参数默认折叠 —— ✅ 认可，含它的实现选择
+"预览用整段拉平后的前 160 字符，而不是严格第一行"这个偏离原始表述的选择，理由（heredoc 的第一行
+`python3 << 'PYEOF'` 没有信息量）成立。
 
-"预览用整段拉平后的前 160 字符，而不是严格第一行"这个偏离你原话的选择，理由（heredoc 的第一行
-`python3 << 'PYEOF'` 没有信息量）是成立的，我认同。真实报告里 Step 4-6 的 exec 命令确实是这个形态。
+### 4.4 脊柱 Step 原始消息折叠而非截断 —— ✅ 认可
 
-### 4.4 第 4 条 · 脊柱 Step 原始消息折叠而非截断 —— ✅ 认可
+`payloadBlock` 已经证明了"折叠而非截断"这个模式，"完整"与"脊柱不膨胀"不冲突。
 
-它对自己第一轮判断的推翻是对的：`payloadBlock` 已经证明了"折叠而非截断"这个模式，"完整"与
-"脊柱不膨胀"不冲突，不需要先决定 fact-layer 去留。
+### 4.5 System Prompt 移到文档头部 —— ✅ 认可，但产生了一个新问题
 
-### 4.5 第 5 条 · System Prompt 移到文档头部 —— ✅ 认可
+`systemPromptEras` 复用 `NewEvents` 的消息级去重来分段（而不是猜），是正确做法；只影响 Markdown
+渲染、不动 JSON 契约的判断也核对无误。这条改动同时是 §7 分层方案的第一块拼图——它把一段"每个读者
+只需要看一次的背景资料"从时间轴里抽出来放到了固定位置。
 
-`systemPromptEras` 复用 `NewEvents` 的消息级去重来分段（而不是猜），是正确做法。
-只影响 Markdown 渲染、不动 JSON 契约的判断也核对无误（`JourneySummary` 确实不含逐消息内容）。
+**但它把资料从"每步重复"变成了"每份报告重复"**：实测窗口里 179 条 lobster journey 各自内嵌一份
+完整的、几乎逐字节相同的 ~20.5K token system prompt；一条 2 轮 heartbeat journey 有 68% 的字节是
+它。这正是 §7.6 要处理的：system prompt 是共享证据，不是每份报告的私产。
 
-**补充**：这条改动同时也是 §7 分层方案的**第一块拼图**——它把一段"每个读者只需要看一次的
-背景资料"从时间轴里抽出来，放到了文档的固定位置。fact-layer 的处置应该沿用同一个思路。
+### 4.6 脊柱补充工具调用结果 —— ✅ 实现认可，❌ 根因判定错误
 
-### 4.6 第 6 条 · 脊柱补充工具调用结果 —— ✅ 实现认可，❌ 根因判定错误
+实现（按 `ToolCall.ID` 精确配对、配不上就干净地不渲染）正确且防御性好。用当前构建重新渲染样例
+journey 复现了它的失效：33 次工具调用，脊柱内工具结果行 **0 条**。
 
-实现（按 `ToolCall.ID` 精确配对、配不上就干净地不渲染）是正确且防御性好的。
+**但它给出的根因是错的**，且这个错误被写进 `KNOWN_ISSUES §1.21` 成为"不修的理由"，并被后续两份
+方案原样继承。完整证据见 §5。
 
-**但它给出的根因是错的**，且这个错误被写进了 `KNOWN_ISSUES §1.21` 成为"不修的理由"。
-完整证据见 §5——这是本轮最有操作价值的单点发现。
+### 4.7 Compare 开篇完整初始 User Message —— ✅ 该做，三个"待拍板"现已定案
 
-### 4.7 第 7 条 · Compare 开篇完整初始 User Message —— ✅ 方向认可，但三个"待拍板"我给明确意见
+1. **要不要设上限**：设。沿用 `renderExcerpt` 既有的"有界 + 折叠 + 截断时标注"惯例。反例
+   （几千字符 JSON 粘贴）真实存在，无界展示会毁掉 compare 报告的可读性。
+2. **放在哪**：保留现有短摘要（`SideBlock` 的 `Title`，负责"扫一眼是什么任务"），**下面新增一个
+   折叠块**。概览与全文各司其职。
+3. **要不要进 `compare-*.json`**：**进**。`BuildEvidencePack`（`llm.go:140-148`）今天给 LLM 的
+   任务描述只有 `journeyTaskTitles`（80 rune 截断）。**分叉点分析的质量直接取决于 LLM 是否理解
+   原始指令**，这是整个证据包里单位 token 价值最高的一段。以 2000 字符为上限，对一个本来就几千
+   字符的证据包是可接受的边际成本。
 
-它列的三点取舍是真实的，但都可以现在就定：
+### 4.8 fact-layer 删除 + 脊柱链接 detail —— ❌ "不可行"论证被推翻，但前提比原设想多
 
-1. **要不要设上限**：设。沿用 `renderExcerpt` 既有的"有界 + 折叠 + 截断时标注"惯例。
-   反例（几千字符 JSON 粘贴）是真实存在的，无界展示会毁掉 compare 报告的可读性。
-2. **放在哪**：保留现有短摘要（`SideBlock` 的 `Title`，负责"扫一眼是什么任务"），
-   **下面新增一个折叠块**。这与 §7 的分层原则一致：概览与全文各司其职。
-3. **要不要进 `compare-*.json`**：**进**。它的顾虑是"进了就会被喂给 LLM，增加成本"——但
-   `BuildEvidencePack`（`llm.go:140-148`）今天给 LLM 的任务描述只有
-   `journeyTaskTitles`（`taskseg.Preview` 的 80 rune 截断）。**分叉点分析的质量直接取决于
-   LLM 是否理解原始指令**，这是整个证据包里单位 token 价值最高的一段。以 2000 字符为上限，
-   对一个本来就几千字符的证据包是可接受的边际成本。
-
-结论：这条**可以做，做法基本按它的推荐**，加上以上三点定案。
-
-### 4.8 第 8 条 · fact-layer 删除 + 脊柱链接 detail —— ❌ "不可行"论证被推翻
-
-它的论证链条是：`story ↛ report` 的 import 边界 → 无法自动生成 detail → 即使只拼路径，
-`detailFileName` 依赖跨批次去重计数器 `used map[string]int` → `story` 侧无法确定性推算文件名
-→ **必须先改 `report` 侧命名机制（换成内容 hash）才能解决**。
+原论证链条：`story ↛ report` 的 import 边界 → 无法自动生成 detail → 即使只拼路径，
+`detailFileName` 依赖跨批次去重计数器 → `story` 侧无法确定性推算文件名 → **必须先改 `report` 侧
+命名机制才能解决**。
 
 **三条独立证据推翻这个结论：**
 
 1. **不需要"推算"，因为映射已经被发布了。** `internal/report/rows.go:499` 的 `RequestRow` 带
-   `DetailFile string \`json:"detail_file,omitempty"\`` 字段，随 `vmr-requests.json` 落盘。
-   本机实测第一条记录：
+   `DetailFile string \`json:"detail_file,omitempty"\`` 字段，随 `vmr-requests.json` 落盘：
    ```json
    {"ts":"2026-07-25T00:53:29+08:00","session":"s01","task":"t01","turn":1, ...,
     "detail_file":"20260725-005329.261_agent_doubao-seed-2.0-lite_ok.md"}
    ```
-   `story` 侧读一个 JSON 文件即可得到"请求 → detail 文件"的权威映射，**既不 import `report`
-   包，也不复制它的命名规则**。这条路径上一轮报告完全没有考虑——它把"不能 import 代码"
-   直接推成了"不能获得信息"。
+   `story` 侧读一个 JSON 即可得到权威映射，既不 import `report` 包，也不复制它的命名规则。
+2. **`report.WriteDetails` 本来就是为这个场景导出的。** `detail.go:219` 的函数注释原文：
+   *"a standalone alternative to Build's onRecord hook … for callers that want detail export
+   without running the full aggregation pass."* 它连同 `AnalyzeSessions` 都是导出的，在 `cmd/vmr`
+   组合根调用不触碰任何 import 边界。
+3. **"自动生成缺失的兄弟产物并链接过去"在 story 内部已是既成模式。** `compareJourneys` 调用
+   `ensureJourneyFile(jA/jB)`，`JourneyRef.ReportFile` 由 `JourneyReportFile(s.ID, s.Partial)`
+   确定性推算并渲染成链接。跨半区做同一件事，唯一的新增要求是"在组合根做"。
 
-2. **`report.WriteDetails` 本来就是为这个场景导出的。** `internal/report/detail.go:219` 的
-   函数注释原文：*"This is a standalone alternative to Build's onRecord hook — a second,
-   independent read of the same audit files, **for callers that want detail export without
-   running the full aggregation pass**."* 它连同 `AnalyzeSessions` 都是导出的。在 `cmd/vmr`
-   这个**唯一允许同时看到两半的组合根**里调用它们，对某个 Journey 的文件子集生成 detail，
-   不触碰任何 import 边界。
+> 这三条只是用来证明"此路不通"不成立。**最终方案走的比它们都更简单的一条**：§7.6(a) 让 detail
+> 退化成纯函数之后，story 既不需要读 `vmr-requests.json` 的映射，也不需要经组合根去跑
+> `report.AnalyzeSessions`——它自己就能算出文件名并渲染。上面三条因此是"退路"，不是"路线"。
 
-3. **"自动生成缺失的兄弟产物并链接过去"在 story 内部已经是既成模式。** `cmd_story.go` 的
-   `compareJourneys` 调用 `ensureJourneyFile(jA, ...)` / `ensureJourneyFile(jB, ...)`，
-   `JourneyRef.ReportFile` 由 `JourneyReportFile(s.ID, s.Partial)` 确定性推算并渲染成链接
-   （`compare.go:174-183`）。跨半区做同一件事，唯一的新增要求是"在组合根做"，而这正是
-   CLAUDE.md 给组合根的定义。
+**原论证里唯一站得住的部分，量化后是边际的**：`detailFileName` 的批次去重计数器实测触发率
+**0.088%**（10 键 / 11374 条），本机 59 个 detail 文件中 0 例。
 
-**它那条顾虑里唯一站得住的部分，我把它量化了**：`detailFileName` 的批次去重计数器
-（`detail.go:354-368`）确实会让同一毫秒 + 同虚拟模型 + 同真实模型 + 同结果的记录带上 `-2` 后缀，
-**且这个后缀取决于本次批次里谁先出现**。全语料实测：**10 个碰撞键 / 11374 条记录 = 0.088%，
-受影响 20 条**；本机 `details/` 59 个文件中 0 例。所以：
+**但复核过程中发现了两个原论证和后续方案都没有的、更硬的前提**：
 
-- **走证据 1（读 `vmr-requests.json`）的路径完全不受影响**——那份映射本身就是全量口径下算出来的。
-- 只有走"按 Journey 子集独立生成 detail"的路径（证据 2）才可能与全量口径不一致，影响面 0.088%。
-- "必须先把命名换成内容 hash"是一个**可选的加固**，不是**前置条件**。上一轮报告把它写成了前置条件。
+- **文件名还依赖本机时区**（`detail.go:358` 的 `rec.TS.In(fmtutil.DisplayZone)`，而
+  `DisplayZone` 默认就是 `time.Local`）。任何"确定性命名"方案必须同时消除计数器和时区两个
+  不确定性来源，只解决前者是不够的。
+- **今天的 detail 正文里混进了只在 report 聚合阶段才存在的坐标。** `renderDetail` 渲染
+  `info.SessionID`/`info.TaskID`/`info.SessSeq`（`detail.go:493-494`）和
+  `info.Parent.DetailFile`（上一轮链接，`detail.go:496`）。`SessionID` 是 `s%02d` **位置序号**——
+  同一条 lineage 在"跑 1 个文件"与"跑 16 个文件"两种批次里会拿到不同编号；`Parent` 落在子集之外时
+  上一轮链接直接断掉。所以按 Journey 子集生成的 detail，**正文**也会与全量 report 生成的不一致。
 
-**但我要给这条加一个上一轮报告和你都没提的前置条件**（见 §7.6）：
-**先把完整事件流补进 `journey-<id>.json`，再删 fact-layer。** 否则删除是真的丢数据——
-今天 fact-layer 是消息正文在派生产物里的**唯一**载体（机读 JSON 里是 0 字节）。
+  **但这不是一个要靠"给会话 ID 也做内容寻址"去兜住的问题**——那是拿现状当约束。第一性原理的答案
+  是把这些坐标**从 detail 里拿掉**：微观层是一片叶子，叶子不需要知道自己在树上的位置，那是父视图
+  的职责（§7.6）。减法做完，子集与全量生成逐字节相同，问题从根上消失。
+
+**还有一个前置条件与 import 边界无关，纯粹是内容层面的**：脊柱不覆盖无工具调用的 Step（A6）。
+删 fact-layer 之前必须先补脊柱，否则删掉的是最终交付物。
 
 ---
 
-## 5. 新发现：工具调用结果配对失败的真实根因，与一行修复
+## 5. 工具调用结果配对失败的真实根因，与一行修复
 
-### 5.1 现有结论
+### 5.1 既有结论
 
-`KNOWN_ISSUES §1.21` 与上一轮报告 §6 记载：openclaw / lobster 两条 Journey 的 tool_call 配对
-成功率 0%；根因判定为——
-
-> "`opencode`（这条链路里 VMR 与 deepseek-v4-pro 之间的代理/网关）在转发时改写了 ID"
-
-并据此判定"不该现在修"，因为唯一的修法（位置兜底）会"在协议保证之外引入一条推断规则"。
+`KNOWN_ISSUES §1.21` 记载：openclaw / lobster 两条 Journey 的 tool_call 配对成功率 0%；根因判定为
+"`opencode`（VMR 与 deepseek-v4-pro 之间的代理/网关）在转发时改写了 ID"，并据此判定"不该现在修"，
+因为唯一的修法（位置兜底）会"在协议保证之外引入一条推断规则"。
 
 ### 5.2 复核方法
 
-直接对原始审计日志做统计（脚本在 `scratchpad/`，逻辑：正则抓响应体 SSE 里的
-`"id":"call…"`，与请求体 `messages[].tool_calls[].id` / `messages[].tool_call_id` 做集合比较，
-按 `client_key_tag` 与 `endpoint` 两种口径分组）。样本：`2026-07-16 / 07-19 / 07-28 / 08-14 / 08-16`
-五个日志文件，合计 4159 条记录。
+直接对原始审计日志做统计：正则抓响应体 SSE 里的 `"id":"call…"`，与请求体
+`messages[].tool_calls[].id` / `messages[].tool_call_id` 做集合比较，按 `client_key_tag` 与
+`endpoint` 两种口径分组。样本：`2026-07-16 / 07-19 / 07-28 / 08-14 / 08-16` 五个日志文件，
+合计 4159 条记录。
 
-### 5.3 结果
+### 5.3 结果：改写在客户端，不在上游
 
 **按 `endpoint` 分组（08-14）**：
 
@@ -332,7 +410,7 @@ prompt 侧的指令可以保留作为第一道；渲染侧兜底是第二道。�
 | `openai:volcengine:doubao-seed-2.1-turbo` | 0.0% (n=271) | 100.0% (n=56) |
 | `openai:cliproxy:gemini-3.7-flash-high` | 0.0% (n=117) | — |
 
-**五个不同的 provider，没有一个经过 `opencode`，却全部呈现同一种改写。**
+五个不同的 provider，**没有一个经过 `opencode`**，却全部呈现同一种改写。
 
 **按 `client_key_tag` 分组（07-28，同一天、同一批上游）**：
 
@@ -343,19 +421,17 @@ prompt 侧的指令可以保留作为第一道；渲染侧兜底是第二道。�
 | `lobster` | **0.0%** (n=64) | 100.0% | **0.0%** | **100.0%** |
 | `openclaw` | **0.0%** (n=33) | 100.0% | **0.0%** | **100.0%** |
 
-**结论（高置信）**：改写发生在**客户端**，不在上游。同一天、同一批端点上，`hermes`/`pimini`
-的 id 两侧完全一致；`lobster`/`openclaw`（同属 OpenClaw 家族）把响应里的 `call_00_xxx` 回写成
-`call00xxx`。`KNOWN_ISSUES §1.21` 把它归因给 `opencode` 网关是**归因错误**——顺带说明，
-07-28 当天 `openai:opencode:deepseek-v4-pro` 这条链路整体的 id 集合交集是 **59.6%**、
-请求侧 76.5% 的 id 仍带下划线，与"这条链路会剥离下划线"的说法直接矛盾。
+**结论（高置信）**：改写发生在**客户端**。同一天、同一批端点上，`hermes`/`pimini` 的 id 两侧完全
+一致；`lobster`/`openclaw`（同属 OpenClaw 家族）把响应里的 `call_00_xxx` 回写成 `call00xxx`。
+顺带说明：07-28 当天 `openai:opencode:deepseek-v4-pro` 链路整体的 id 集合交集是 **59.6%**、
+请求侧 76.5% 的 id 仍带下划线，与"这条链路会剥离下划线"直接矛盾。
 
-（另有第三种形态：`cliproxy:gemini` 链路上出现 `exec1786691703864731…` /
-`process1786697731217703…` 形状的 id，即"工具名 + epoch 微秒"——客户端**自造** id，
-这类无论如何都不可能按 id 配对。）
+（另有第三种形态：`cliproxy:gemini` 链路上出现 `exec1786691703864731…` / `process1786697731217703…`
+形状的 id，即"工具名 + epoch 微秒"——客户端**自造** id，这类无论如何都不可能按 id 配对。）
 
-### 5.4 一行修复：归一化后仍是精确匹配
+### 5.4 修复：归一化后仍是精确匹配
 
-既然改写是**确定性的字符级变换**，配对不需要引入位置推断——只需在比较前对两侧做同一个归一化
+改写是**确定性的字符级变换**，所以配对不需要引入位置推断——只需在比较前对两侧做同一个归一化
 （`strings.ReplaceAll(id, "_", "")`）。实测：
 
 | 文件 | client | 原始匹配率 | 去下划线后匹配率 |
@@ -372,67 +448,107 @@ prompt 侧的指令可以保留作为第一道；渲染侧兜底是第二道。�
 或调用本身来自前一个文件。逐 Step 配对不受此影响。）
 
 **误配风险已核查**：07-28 全文件 548 个唯一 id，归一化后 451 个，减少 97 个——恰好等于
-`lobster(64) + openclaw(33) = 97`，即**归一化合并的全部是真配对，零误合并**。
+`lobster(64) + openclaw(33) = 97`，即归一化合并的全部是真配对，**零误合并**。
 
-### 5.5 建议
+### 5.5 位置兜底：实测安全，但归一化之后它只剩边角场景
 
-1. 把 `KNOWN_ISSUES §1.21` 的根因改写为"**agent 客户端在回写工具调用历史时改写了 id
-   （OpenClaw 家族去下划线；部分链路自造 `name+timestamp` 形态 id）**，与上游 provider 无关"，
-   并附上按 client 分组的对照数据。
-2. 修法：`chatmsg` 的配对逻辑加**归一化回退**——先精确匹配，失败再用归一化键匹配。
-   这**仍然是精确匹配**（只是键做了规范化），不引入任何顺序/位置推断，因此
-   `§1.21` 里"不愿引入推断规则"这条不修理由在这个修法下不成立。
-3. 位置兜底作为第三档（应对自造 id 的客户端）可以保留为待定，配对结果标注来源。
-4. **这条修完之后，第 6 条（脊柱展示工具结果）才真正在你的主力语料上产生可见效果**——
-   目前它对你自己的两个主要 client 全程静默降级。
+对自造 id 的客户端，归一化也救不回来，只能按位置配对。这一档的安全性同样用数据验证过——
+对每个 `assistant(tool_calls)` → 随后连续 `role=tool` 消息组，比较（归一化后的）id 序列是否逐位相同：
+
+| 文件 | 组数 | 顺序完全一致 | 数量一致但顺序不同 | 数量不一致 |
+| --- | --- | --- | --- | --- |
+| 07-16 | 113,315 | 113,315 | 0 | 0 |
+| 08-14 | 32,053 | 32,053 | 0 | 0 |
+| 07-28 | 7,599 | 7,599 | 0 | 0 |
+
+**152,967 组，100% 同序，零数量不匹配。** 范围声明：这验证的是"客户端在同一请求内保持
+tool_calls 与 tool 消息同序"；"响应流顺序 → 客户端回写顺序"这一段未单独验证。
+
+### 5.6 分层纪律：推断与事实的分界线画在哪
+
+三级降级：**精确 ID → 归一化 ID → 位置配对**。分界线**不在归一化那一格**：
+
+- 归一化之后仍然是**精确的一一匹配**，只是键做了规范化，没有引入任何顺序假设——因此
+  **前两级都可以作为 Findings 检测器的证据基础**。
+- 真正的推断只有第三级。**位置配对限制在渲染层，且必须标注"按位置推断，ID 未匹配"**；
+  Findings 层不接受它作为证据。
+
+这条纪律的意义：`§1.21` 里"不愿引入推断规则"这条不修理由，在归一化修法下**根本不成立**——
+它拦住的是第三级，不该连第二级一起拦。
+
+### 5.7 建议
+
+1. 把 `KNOWN_ISSUES §1.21` 的根因改写为"**agent 客户端在回写工具调用历史时改写了 id**
+   （OpenClaw 家族去下划线；部分链路自造 `name+timestamp` 形态 id），与上游 provider 无关"，
+   并附按 client 分组的对照数据。
+2. `chatmsg` 的配对逻辑加归一化回退（先精确、失败再归一化）；渲染层再加位置兜底并标注。
+3. **这条修完之后，脊柱展示工具结果才真正在主力语料上产生可见效果**——目前它对两个主要 client
+   全程静默降级。
 
 ---
 
-## 6. 原始 7 条诉求的重新评估
+## 6. 原始 UX 诉求的最终评估
 
-| # | 原诉求 | 我的评估 |
+| # | 诉求 | 评估 |
 | --- | --- | --- |
 | 1 | compare 开篇挂 journey 链接 | 已生效（`JourneyRef.ReportFile`）。**保持** |
-| 2 | compare 开篇展示完整初始 User Message | **该做**，按 §4.7 的三点定案。但注意它的真正价值是给 **LLM 解读**用，人读侧短摘要已经够 |
-| 3 | 证据溯源只列相关文件 | **已做且正确**（§4.1） |
+| 2 | compare 开篇展示完整初始 User Message | **该做**，按 §4.7 的三点定案。真正的价值在给 LLM 解读用，人读侧短摘要已经够 |
+| 3 | 证据溯源只列相关文件 | **已做且正确** |
 | 4 | 两段 LLM 解读收进大章节 | **已做**，建议补渲染层兜底（§4.2） |
 | 5 | 脊柱 Step 消息完整、不截断 | **已做**（折叠而非截断，正确） |
-| 6 | System Prompt 移到头部折叠 | **已做**（§4.5） |
-| 7 | 脊柱展示工具调用结果 | **已做但对你的主力语料全程静默失效**，需先修 §5 |
-| 8 | 多行工具参数默认折叠 + 首行预览 | **已做**（§4.3） |
-| 9 | 去掉 `## t0X` fact-layer、脊柱挂 detail 链接 | **判断正确，且是 8 项里唯一真正动架构的一项**。但**执行顺序必须是"先补机读层，再删人读层"**，见 §7.6。上一轮报告判定的"不可行"不成立（§4.8） |
+| 6 | System Prompt 移到头部折叠 | **已做**，但引出"每份报告重复一份"的新问题（§7.6） |
+| 7 | 脊柱展示工具调用结果 | **已做但对主力语料全程静默失效**（实测 0/33），需先修 §5 |
+| 8 | 多行工具参数默认折叠 + 首行预览 | **已做** |
+| 9 | 去掉 `## t0X` fact-layer、脊柱挂 detail 链接 | **判断正确，且是唯一真正动架构的一项。但有三个前置条件**：机读层补上事件流结构（正文按引用）、脊柱补完到覆盖无工具调用的 Step、detail 做完减法并改为确定性命名。原"不可行"论证不成立（§4.8） |
 
-> 你在原诉求里说"如果这个拆开不好拆，就用一大块对应整组工具调用"——实际上按 id 精确拆分并不难
-> （`toolResultsFor` 本来就按 id 配对），上一轮报告选了精细方案是对的。§5 修完后它才真正跑得起来。
+> 原诉求里"如果拆开不好拆，就用一大块对应整组工具调用"——按 id 精确拆分并不难
+> （`toolResultsFor` 本来就按 id 配对），精细方案是对的；§5 修完后它才真正跑得起来。整组呈现
+> 保留为第三级兜底的展示形态。
 
 ---
 
 ## 7. 【重点】第一性原理重构：日志分析工具体系
 
-### 7.1 从原料出发：只有一份事实，三类提问，一个共同的证据终点
+### 7.1 从原料出发：三级变焦，一个共享的证据终点
 
 **原料**：append-only 的 JSONL，一条记录 = 一次客户端请求的完整物理事实（客户端 ↔ vmr 层 +
 vmr ↔ 上游每次 attempt 层）。**其余一切都是 view。**
 
-**读者会问的问题，穷举后只有三类**（分类依据是"读者处在什么情境下问"，不是数据维度）：
+读者对它的提问，按"处在什么情境下问"穷举，只有三个**变焦倍率**：
 
-| 类 | 问题 | 主轴 | 今天由谁回答 |
+| 倍率 | 问题 | 主轴 | 今天由谁回答 |
 | --- | --- | --- | --- |
-| **账** | 钱花在哪、额度还剩多少、缓存省了多少、谁在消耗 | 时间 | `vmr report` §1/§2/§2.5/§5/§5.5/§7 |
-| **健** | 哪条链路在失败、延迟多少、failover/sticky 是否生效、端点值不值 | 链路 | `vmr report` §3/§4/§6.5/§6.6 |
-| **事** | 这次任务是怎么被完成的、哪一步走偏、两个 agent 差在哪 | 因果 | `vmr story` |
+| **宏观** | 钱花在哪、额度还剩多少、哪条链路在失败、sticky 有没有用、谁在消耗 | 时间 / 链路 | `vmr report` §0–§7 |
+| **中观** | 这次任务是怎么被完成的、哪一步走偏、两个 agent 差在哪 | 因果 | `vmr story` |
+| **微观** | 这一次请求上游到底收到、返回了什么字节、为什么 failover | 单条记录 | `details/*` |
 
-**"一次具体请求发生了什么"不是第四类提问——它是三类提问共同的下钻终点。**
+"变焦"这个模型比"三类问题"更准确的地方在于：**它们是连续的，不是三个割裂的产品**。读者不会
+在宏观停下——看到某个 client 突增就要问是哪个任务，看到某一步失败就要问上游到底返回了什么。
+一个只能定格在某一倍率的工具，等于强迫读者每次换倍率就换一套坐标重新找位置。
 
-这就是本章最关键的一句判断，也是对你原始设想的修正：
+**关键判断：微观层不是第三个"命令"，它是前两个倍率共同的证据终点。**
+`vmr-requests-failed.md` 的每一行、§7 效率发现的每一条、§3 的每个失败率，最终都要落到某条具体
+记录上；journey 的每一步同样如此。
 
-> 你说"detail report 不过是辅助 story 解决问题的其中一个方式方法"。
-> **方向对了一半：detail 确实是 story 的下钻终点，但它同样是"账"和"健"的下钻终点**
-> （`vmr-requests-failed.md` 的每一行、§7 效率发现的每一条、§3 的每个失败率，最终都要落到某条
-> 具体记录上）。所以正确的结论不是"把 detail 收编进 story"，而是**把 detail 从 `report` 的
-> 附属提升为与两者平级的证据层**。它今天挂在 `reports/details/` 下纯粹是历史原因——report 先做。
+> 你说"detail report 不过是辅助 story 解决问题的其中一个方式方法"。**方向对了一半**：detail 确实
+> 是 story 的下钻终点，但它同样是宏观层的下钻终点。正确的结论不是"把 detail 收编进 story"，
+> 而是**把它从 `report` 的附属提升为与两者平级的共享证据层**。它今天挂在 `reports/details/` 下
+> 纯粹是历史原因——report 先做。
 
-### 7.2 目标模型
+### 7.2 目标模型：3×2 矩阵
+
+变焦倍率是横轴，读者是纵轴。两条轴正交，合起来是这套体系的完整形状：
+
+| | **宏观**（全量聚合） | **中观**（单任务叙事） | **微观**（单请求法证） |
+| --- | --- | --- | --- |
+| **人读**<br>目标：纵向空间与跳转 | `vmr-report.md`<br>`vmr-requests*.md` | `journey-<id>.md`（脊柱 + 链接）<br>`compare-*.md` | `details/<req>.md`（按需渲染） |
+| **机读**（脚本 / LLM）<br>目标：完整性与可寻址 | `vmr-report.json`<br>`vmr-requests.json` | `journey-<id>.json`（结构 + `req` 引用） | **审计日志本身**（按 `req` 坐标寻址） |
+
+最右下角那一格值得单独说明：**它不需要被"生成"，它已经存在**。`details/*.json` 今天是
+`json.MarshalIndent(audit.Record)` 的逐字复制（`detail.go:75`），也就是把源数据解压、加缩进、
+拆成一个个文件重存一遍——59 条记录换来 40MB，而源记录本身压缩后是 334KB。一份注定与源数据
+同构、又注定可能与它不一致的副本，没有存在理由。有了稳定的 `req` 坐标，"取这条记录的原文"是
+一次定位操作，不是一次物化操作。
 
 ```
                         audit JSONL（唯一事实，只读）
@@ -445,195 +561,543 @@ vmr ↔ 上游每次 attempt 层）。**其余一切都是 view。**
         └──────────────────────────┬──────────────────────────┘
                                    │
         ┌──────────────────────────┴──────────────────────────┐
-        │        ★ 坐标层（缺失 —— 本方案的关键新增）           │
-        │   req 地址：<audit-basename>:<line>（两侧都发布）      │
-        │   journey/session 互认：各自索引发布对方能 join 的键    │
+        │        ★ 坐标层（缺失 —— 本方案的关键新增，§7.3）      │
+        │   请求级 req：<audit-basename>:<line>（两侧都发布）     │
+        │   会话级：lineage 内容寻址 ID（s01 退为显示别名）        │
+        │   证据级：文件名 = hash(req)（去批次、去时区、去 -N，    │
+        │           只凭 Manifest 即可算出，无需读正文）           │
         └──────────────────────────┬──────────────────────────┘
                                    │
      ┌──────────────┬──────────────┴───────────────┬──────────────────┐
      ▼              ▼                              ▼                  ▼
-  账 + 健        事（叙事）                     证据层            语料级统计
- vmr report     vmr story                    details/*         story -corpus
- （聚合）       （单任务）              （两者共享的叶子）        （跨任务）
+   宏观           中观                        共享证据层           语料级统计
+ vmr report     vmr story              details/*.md（人读，按需）   story -corpus
+                                       evidence/*.md（共享 blob）
+                                       审计日志本身（机读，按 req）
+        └──────────── 导航矩阵（§7.5，双向）────────────┘
 ```
 
-### 7.3 关键新增：请求级稳定坐标
+**今天矩阵里的五处错**，按修复优先级：
 
-**问题**：两侧内部的真正主键都是 `path:line`（`report` 的
-`SessionAnalysis.byKey`（`session.go:526-533` 的 `recLoc`）、`ctxgraph.Manifest.Path/Line`），
-但**两侧的公开 JSON 都没有发布它**——`RequestRow` 只有 `ts`，`JourneySummary` 连 Step 都没有。
+1. **中观×机读是空的**（事件流 0 字节），而中观×人读塞了 204KB 事件流 —— 载体与内容完全对调。
+2. **中观×人读自己有洞**：脊柱不覆盖无工具调用的 Step，实测缺的是最终交付物。
+3. **格与格之间没有地址**：宏观→中观的链接完全不存在，中观→微观的链接不存在。
+4. **共享内容被复制而不是被引用**（三处，全都违反项目自己的 blob/tree 原则）：
+   system prompt 在 179 份 journey 报告里各存一份全文；`details/*.json` 逐字复制审计记录；
+   解析缓存被美化输出成 88MB。
+5. **微观层被无条件全量物化**：`-details` 默认 `true`，一次全语料 report 会写出约 12GB 派生文件。
 
-**方案**：把它提升为公开字段。
+第 4、5 两条是本轮回头重审时才浮出来的——前几版方案（包括本方案的早期版本）都默认接受了
+"派生产物就该把内容抄一份"这个前提，而项目的第一性原理恰恰相反。
+
+### 7.3 坐标层：三件套
+
+**问题**：两侧内部的真正主键都是 `path:line`（`report` 的 `SessionAnalysis.byKey`——
+`session.go:526-533` 的 `recLoc`；`ctxgraph.Manifest.Path/Line`），但两侧的公开 JSON 都没有发布它。
+
+#### (a) 请求级坐标 `req`
 
 ```jsonc
-// vmr-requests.json 的 requests[] 新增一个字段
+// vmr-requests.json 的 requests[] 新增
 { "ts": "...", "req": "vmr-audit-2026-07-25.jsonl:317", "detail_file": "...", ... }
 
-// journey-<id>.json 的 events/steps（见 7.4）每个 Step 携带同一个键
+// journey-<id>.json 的每个 Step 携带同一个键
 { "seq": 7, "req": "vmr-audit-2026-07-25.jsonl:317", ... }
 ```
 
-**为什么用 `basename:line` 而不是绝对路径或内容 hash**：
+为什么用 `basename:line`：
 
 | 候选 | 优点 | 缺点 | 判定 |
 | --- | --- | --- | --- |
-| 绝对 `path:line` | 已是内部主键，零成本 | housekeeping 压缩会把 `.jsonl` 变成 `.jsonl.zst`，路径变；且不同机器路径不同 | 否 |
-| **`basename:line`（去掉 `.zst`）** | 稳定（轮转只改扩展名、不重排行）、零成本、人可读、可直接 `sed -n` 定位 | 跨目录同名文件理论上冲突（实践中审计文件名带日期，不冲突） | **推荐** |
+| 绝对 `path:line` | 已是内部主键，零成本 | housekeeping 压缩把 `.jsonl` 变成 `.jsonl.zst`，路径变；跨机器路径不同 | 否 |
+| **`basename:line`（规范化掉 `.zst`）** | 稳定（轮转只改扩展名、不重排行）、零成本、人可读、可直接 `sed -n` 定位 | 跨目录同名文件理论冲突（审计文件名带日期，实践中不冲突；落地时加一条断言） | **推荐** |
 | 记录内容 hash | 完全稳定 | 需多算一次哈希；不可读；无法直接定位回原文件 | 备选 |
 
-顺带修掉一个实测缺陷：`ctxgraph.FileCache` 以**路径字符串**为 key，导致同一文件的绝对路径与
-相对路径在缓存里存了两份（实测 255 条 manifest 重复）。规范化成 `basename` 同时解决这个。
+顺带修掉一个实测缺陷：`ctxgraph.FileCache` 以路径字符串为 key，导致同一文件的绝对路径与相对路径
+在缓存里各存一份（实测 255 条 manifest 重复）。规范化成 basename 同时解决它。
 
-**这一步的收益是杠杆式的**——它不改任何 import 边界（两侧都已依赖 `ctxgraph`）、不改文件命名、
-不改渲染，但让下面这些立刻成为一次 JSON join：
+#### (b) 会话级身份：一条 Lineage 一个内容寻址 ID
 
-- story 脊柱的每个 Step → `details/<file>.md`（读 `vmr-requests.json` 的 `{req → detail_file}`）
-- report 的 Session 卡片 → `journey-<id>.md`（读 `vmr-stories.json` 的 `{journey → files}`）
-- 外部脚本把 `vmr-report.json` 的一条 Finding 直接对上某条 Journey 的某个 Step
+`report` 的 `SessionInfo.ID = s%02d` 是 run-scoped 位置序号，`story` 的 Journey ID 是内容寻址。
+把 report 那侧也换成内容寻址不是给它"加一个字段"，而是**认领一个已经存在的事实**：
 
-这正是"两半区、一个契约"原则的自然延伸：**契约从"audit 记录"扩展到"派生索引"**，
-两个包依然互不 import，只是各自发布了对方能读的数据。
+> `report` 的一个 Session **就是**一条 `ctxgraph.Lineage`（`session.go` 的 `group()` 注释原文：
+> "one `SessionInfo` per Lineage"）；`story` 的一个 Journey **就是**若干条 Lineage 缝合成的链
+> （`ChainFrom`）。
 
-**行业对照**：LangSmith（thread → trace → run）、Langfuse（session → trace → observation）、
-OpenTelemetry GenAI（`gen_ai.conversation.id` 串联 span 树）三者的共同点不是"只有一个视图"，
-而是**每一层只有一个稳定 ID，所有视图（仪表盘/会话视图/trace 视图）都用它互相跳转**。
-vmr 今天缺的正是这一条；而它们的仪表盘与 trace 视图从来都是**同一批对象的不同视图**、
-不是两份互不相干的产物——这与本方案 §7.2 的形状一致。
+所以正确的做法是给**Lineage 本身**一个内容寻址 ID（`l-<roothash8>`，与 `deriveID` 取同一个
+`RootHash`），然后：
 
-### 7.4 三层产物（对应"人读为主、LLM 读为辅"）
+- report 的 `SessionInfo.ID` = 该 lineage 的 ID；`s01` 退化为一份报告内部的显示别名（想留就留，
+  它不再承担 identity 职责——这正是设计文档"identity 与展示文案分离"那条纪律）；
+- story 的 `JourneyIndexRow` 增加 `lineages: [l-…, l-…]`（缝合链的成员）。
 
-| 层 | 读者 | 载体 | 内容 | 体积目标 |
-| --- | --- | --- | --- | --- |
-| **叙事层** | 人 | `journey-<id>.md` / `vmr-report.md` / `compare-*.md` | 概览 + **决策脊柱** + Findings + LLM 解读，每一步挂链接 | journey **< 50KB**（今天 290–568KB） |
-| **数据层** | 脚本 / LLM | `journey-<id>.json` / `vmr-report.json` / `vmr-requests.json` | **完整事件流**（Task/Step/Event/ToolCall/ToolResult）+ Metrics + Findings + `req` 坐标 | 不限 |
-| **证据层** | 人 + LLM，按需 | `details/<req>.md` + `.json` | 单请求物理全貌（含 attempt/header/body diff） | 按需生成 |
+于是"report 的会话行 → journey"**不需要查表，它是结构性的**：journey 的成员列表里有没有这条
+lineage，就是答案。这比"两边各自算一个哈希再想办法对上"少一层间接。
 
-**今天的错配是这个方案要修的第一件事**：
+这条的定级：**导航能力，不是正确性前提**。早先版本把它写成正确性前提，理由是"否则子集生成的
+detail 内容不一致"——那个理由在 §7.6 做完减法之后不再成立（detail 里根本不再出现会话坐标）。
+把它降级是一次诚实的修正，也顺带解开了迁移路径上一条不必要的依赖。
+
+#### (c) detail 确定性文件名
 
 ```
-现状：  人读 md ── 290KB 事件流 ─┐          机读 json ── 0 字节事件流
-                                 └── 反了 ──┘
-目标：  人读 md ── 脊柱 + 链接（~40KB）      机读 json ── 完整事件流
+{ts，用记录自带的时区偏移}_{virtual}_{real}_{outcome}_{hash8}.md
 ```
 
-**为什么"给 LLM 的应该是 JSON 而不是折叠 Markdown"**：`<details>`/`<summary>` 对 LLM 是纯噪声
-（它看到的是展开后的全文），而 JSON 的结构让"只取第 7 步"这类切片成为可能。今天
-`BuildSingleJourneyEvidencePack` 之所以要在 Go 里重新组织一遍证据，正是因为没有一份可切片的
-机读全量——补上数据层之后，证据包的构造会变简单而不是变复杂。
+- **`hash8` = `req` 坐标本身的哈希前 8 hex**，即 `hash(basename + ":" + line)`。
+  也就是说文件名与 (a) 的坐标**是同一个身份的两种编码**：前缀 `ts_virtual_real_outcome` 纯粹是
+  给人扫读和按时间排序用的装饰，唯一性由 `hash8` 承担。
+- **不能**用 `Manifest.SysHash + Keys[0]` 的组合——那两个值在一条纯追加的 Journey 内**每一轮都
+  相同**，用作后缀会把偶发碰撞变成整条 Journey 的必然碰撞。
+- 也**不必**用请求体哈希：请求体哈希在"重试重发完全相同 body"时仍会撞，于是又得请回 `-N` 后缀，
+  而 `-N` 恰恰把批次顺序依赖带了回来。坐标是主键，天然唯一，**`-N` 后缀可以彻底删除**。
+- `ts` 用**记录自带的时区偏移**格式化，不走 `fmtutil.DisplayZone`（默认 `time.Local`）。
+  先例是 `deriveID`（`journey.go:571-572` 直接 `root.TS.Format(idTimeLayout)`），也是设计文档
+  "时区：一处显示权威"那条纪律里 story 的既有例外。
 
-### 7.5 索引与缓存分家
+**这个取法带来一个关键性质：文件名可以只从 `ctxgraph.Manifest` 算出，不需要读记录正文。**
+Manifest 里 path/line/ts/model/endpoint/outcome 全都有，而 Manifest 本来就在解析缓存里。于是：
 
-`vmr-stories.json` 今天是一个语义自相矛盾的文件：
+- 任何持有索引的组件（journey 脊柱、requests 索引）**随时可以算出链接目标**，不必先把文件生成出来；
+- 生成变成幂等的"文件在就跳过"，谁生成的、什么时候生成的、跑的是全量还是子集，都不影响结果；
+- §7.5 里"存在才挂链接"那条防御性设计对 detail 这条边**可以取消**——链接永远可算、永远可补。
 
-- `journeys` 段是 **run-scoped** 的（`MergeJourneyIndexRows` 明确丢弃"本次输入文件无法证明"的旧行）；
-- `files` 段是 **永久累积** 的（实测 38 个文件条目、11629 条 manifest）；
-- 结果：**88MB 的"索引"，其中索引本身只有 3 行**。
+**这三件套的杠杆效应**：都不改任何 import 边界（两侧都已依赖 `ctxgraph`），但让下面这些立刻成为
+一次 JSON join —— journey 脊柱的每个 Step → `details/<file>.md`；report 的 session 行 →
+`journey-<id>.md`；外部脚本把 `vmr-report.json` 的一条 Finding 对上某条 Journey 的某个 Step。
+这是"两半区、一个契约"原则的自然延伸：**契约从"audit 记录"扩展到"派生索引"**，两个包依然互不
+import，只是各自发布了对方能读的数据。
 
-建议拆成两个文件：
+**行业对照**：Langfuse（session → trace → observation）、LangSmith（thread → trace → run）、
+OpenTelemetry（metrics / traces / logs 三种信号 + exemplar 把指标数据点关联回 trace 上下文）
+三者的共同点不是"只有一个视图"，而是**每一层只有一个稳定 ID，所有视图都用它互相跳转**；
+它们的仪表盘与 trace 视图从来是同一批对象的不同视图。OTel 并不**要求**三种信号合并，它把力气
+花在定义它们之间的关联键上——这正是本设计的立场。vmr 的差异化（零埋点、字节忠实、单二进制、
+文件产物）不需要放弃这条共性，它需要的只是把已经存在于内存里的主键发布出去。
 
-| 文件 | 语义 | 体积 |
+### 7.4 中观层的两次修补：脊柱补完 + 事件流归位
+
+**(a) 脊柱补完**（删 fact-layer 的硬前提）
+
+`renderDecisionSpine` 今天只收 `len(s.ToolCalls) > 0` 的 Step，且 `if !anyCalls { return }`。三条补齐：
+
+| 补什么 | 形态 | 为什么 |
 | --- | --- | --- |
-| `reports/stories/vmr-stories.json` | 纯索引（`journeys[]`，run-scoped） | KB 级，可随手 `cat` |
-| `reports/.parse-cache.json` | `ctxgraph.FileCache`，**`vmr report` 与 `vmr story` 共用一份** | MB 级，可随时删除重建 |
+| **用户在任务中途追加的指令** | 该 Step 块首一行 `💬 指令 · <原话>`，复用 `foldWhyLine` 折叠惯例 | 今天完全不在脊柱里；它是因果链上最重要的外部输入 |
+| **无 tool_call 的 Step** | 单行进脊柱（`💬 汇报 · RespText 预览`），不再整段消失 | 实测样例 22 步缺 1 步，缺的就是这一类 |
+| **最终交付物** | Journey 末尾一节，复用 compare 已验证的 deliverable 检测（参数形状像文件写入的最后一次调用 + 内容节选） | 实测缺失的 Step 22 正是交付物那一步——整条 Journey 信息价值最高的一段 |
 
-共用缓存不需要任何边界改动——两条命令用的本来就是同一个 `ctxgraph.FileCache` 类型和同一个
-`ScanCached`（设计文档 §3.4 已明确写了这一点）。今天是同一份数据存了两份。
+顺带把"整条 Journey 无工具调用就不渲染脊柱"改为渲染单行块——纯问答 Journey 也应该有脊柱。
 
-### 7.6 迁移路径（分批，每批独立可上线，顺序有依赖）
+**(b) 事件流归位：补结构，不搬正文**
+
+`journey-<id>.json` 补上今天完全缺失的那一层：Task / Step / Event / ToolCall / ToolResult 的
+**完整结构**——顺序、全局去重后的首次出现位置、工具调用与结果的配对关系、每个 Step 的
+`req` 坐标与每条消息的 `ctxgraph` 内容哈希。
+
+**但不把消息正文抄进去。** 这是本方案里最容易走偏的一步：把 204KB 的事件流从 Markdown"搬"到
+JSON，看起来是归位，实际上只是换个文件重复一遍——同一批正文在 `details/` 和审计日志里已经各有
+一份。项目自己的第一性原理（blob 只存一份，tree 只持引用）在这里给出的答案很明确：
+**journey JSON 是 tree，正文是 blob，tree 只该持引用。**
+
+正文的取用路径因此是：`journey-<id>.json` 的某个 Step → `req` 坐标 → 审计日志原记录
+（机读）或 `details/<req>.md`（人读）。对 LLM 消费者，`-llm-addr` 的证据包本来就在 Go 侧构造，
+按需内联它真正要看的那几段即可——这比让它读一份把所有正文都塞进去的巨型 JSON 更省 token，
+也更可控。
+
+保留在 JSON 里的**短文本**是例外且有理由：Step 的 `RespText`/`Reasoning` 摘要、tool_call 的
+参数——它们是"决策"本身而不是"上下文"，体量小、且是脊柱与 Findings 的直接证据，内联比引用更实用。
+边界就一条：**属于对话历史的内容走引用，属于本轮决策的内容可内联。**
+
+这一步**必须先于**删 fact-layer：今天 fact-layer 是这层结构在派生产物里的唯一载体，先删后补 =
+中间存在一个真正丢结构的版本。
+
+补完之后，人读层的 journey 报告结构收敛为：
+
+```
+头部元信息 + System Prompt（链接，见 7.6）
+概览卡 / 模型使用
+决策脊柱          ← 唯一的主体，每步：why + 工具调用(折叠) + 工具结果(折叠) + → detail 链接
+最终交付物
+Findings
+（可选）LLM 解读
+```
+
+预期体积：298KB → **< 50KB**（脊柱现为 42.8KB，加链接与三条补齐）。
+
+**fact-layer 的处置：删渲染，不留开关。** 有人主张保留一个默认关闭的 `full_transcript` 开关作为
+逃生门，理由是"删掉渲染代码省不了多少维护成本（golden test 已锁住），删掉选项则损失一种阅读模式"。
+不采纳，三条理由：golden 基线本身就是维护成本，一个默认关闭的渲染分支意味着两条渲染路径与两套
+基线；用户原话是"完全不必要再重新把它输出一遍"；fact-layer 的独有价值（全局去重后的事件流）
+**正确载体是机读层的 JSON**，用 Markdown 开关承载它是用最贵的载体装最适合机读的内容。
+如果日后真的出现"我要一份人读的完整转录"的需求，它的正确形态是一个**独立产物**
+（`journey-<id>-transcript.md`，按需生成），不是主报告上的一个 flag。
+
+### 7.5 导航矩阵
+
+变焦要连续，链接就必须闭环。目标状态（✅ 已存在 / ➕ 新建）：
+
+| 起点 | 终点 | 状态 | 依赖 |
+| --- | --- | --- | --- |
+| `vmr-report.md` | `vmr-requests.md` / per-client sibling | ✅ | — |
+| `vmr-report.md` | `stories/vmr-stories.md` | ➕ **最大的一块新建**（今天命中数为 0） | 存在性判断 |
+| `vmr-report.md` §8 | `details/` | ⚠️ 今天只有纯文本提示，改为链接 | — |
+| `vmr-requests-<tag>.md` | `details/*.md` | ✅（实测 19 处） | — |
+| `vmr-requests-<tag>.md` 会话行 | `journey-<id>.md` | ➕ 行级 | 会话级内容寻址 ID（7.3b） |
+| `vmr-stories.md` | `journey-*.md` | ✅（渲染过才出现） | — |
+| **journey 脊柱每个 Step** | `details/<req>.md` | ➕ | 7.3a + 7.3c |
+| journey 报告头 | `vmr-stories.md` / `vmr-report.md` | ➕ 返回链接 | 存在性判断 |
+| journey 头部 System Prompt | `evidence/sysprompt-<h8>.md` | ➕ | 7.6b |
+| `details/<req>.md` 头部 | `vmr-requests.md`（索引） | ➕ 自我定位 + 返回 | 7.3a |
+| `compare-*.md` 开篇 | `journey-*.md` | ✅ 含自动补生成 | — |
+| `compare-*.md` 分叉点 | 双侧 `details/<req>.md` | ➕（低优先） | 7.3a + 7.3c |
+
+**两类边，两种策略**——这个区分很重要，早先版本用一条"只链接实际存在的文件"把它们混在一起，
+是把防御性设计套在了不需要防御的地方：
+
+- **指向内容寻址产物的边**（脊柱 → detail、journey 头 → sysprompt blob）：目标文件名可由 Manifest
+  直接算出（§7.3c），生成幂等。**永远渲染链接，缺了就当场补生成。** 不需要 `stat`，不需要开关，
+  不可能 404。
+- **指向另一条命令聚合产物的边**（`vmr-report.md` → `stories/vmr-stories.md`）：目标是另一条命令
+  的分析结论，本命令没有资格也没有必要去算它。**渲染时 `stat` 一次，存在才链接。**
+  零耦合、零协调状态。
+
+**行级 join 发生在 `cmd/vmr` 组合根**：`cmd_report.go` 读到 `stories/vmr-stories.json` 存在时，
+把一份轻量的 `{lineage ID → journey 文件名}` 映射（§7.3b 让这一步成为集合判断而非哈希对表）
+作为普通数据结构传给渲染层。**两个 internal 包仍然互不知道对方存在。**
+
+一条明确的反向裁决：**不让 `vmr report` 去生成 `vmr-stories.*`**。那会让 report 承担 story 的候选
+Journey 计算（`ListCandidates` + `PreviewTitles` + 缝合链解析），扩大而不是缩小耦合面。导航靠
+存在性判断即可。
+
+### 7.6 共享证据层
+
+**(a) detail：先做减法，然后它自然是一片叶子**
+
+有一种主张是把 detail 渲染直接提取成 `report`/`story` 之下的共享叶子包，理由是"detail 本来就是
+单条 `audit.Record` 的纯函数渲染，无 report 侧聚合状态"。**这个理由不成立，但结论成立**——
+区别在于：**不是它本来就纯，而是我们要先把它改纯。** 照那个理由直接搬，搬过去的会是一个仍然
+拖着 `report.ReqInfo` 的包。
+
+先把 `renderDetail(rec *audit.Record, info *ReqInfo, lang)` 用到的东西按性质分清楚：
+
+| 内容 | 性质 | 处置 |
+| --- | --- | --- |
+| `SessionID` / `TaskID` / `TaskSeq` / `SessSeq`（`detail.go:493-494`） | **视图层的位置命名**，run-scoped | **砍掉**。叶子不需要知道自己在树上的位置 |
+| `Compaction` / `Summarizes` / `ContinuesTo`（`detail.go:484-490`） | report 的 §6.7 专属分析结论（跨记录文本匹配） | **砍掉**。那是宏观层的结论，不是这条记录的事实 |
+| `Parent.DetailFile`（上一轮链接，`detail.go:496`） | 关系 | **保留，改由 `ctxgraph` 同 lineage 的前驱给出** |
+| `DeltaStart`（🆕 增量高亮，`detail.go:593-605`） | 关系 | **保留，同上**——它来自 `ctxgraph.Classify`，两个半区算出来必然相同 |
+| `RoleTokens`（`detail.go:578-590`） | **per-record 纯计算** | 保留，直接算。代码里本来就有纯函数回退路径 `roleTok = roleTokens(req.Body)`，`ReqInfo` 那条只是复用优化 |
+| `ToolCalls` / `TraceID` / `ChatID` / `ToolsSig` / `Truncated` / `NoReply`（`detail.go:500-525`） | **per-record 提取**（`collect()`） | 保留，直接算（`NoReply` 需要 `taskseg.Profile`，本身就是叶子） |
+| `Usage` / `UsageOK`（`detail.go:400`） | per-record | 保留，直接算 |
+| `DetailFile`（自己的文件名） | 批次计数器 | **砍掉**，改为 §7.3(c) 的坐标哈希 |
+
+> 一处自我更正：本方案的早期版本把 `RoleTokens` 与 `collect()` 那批字段一并列为"跨记录依赖"，
+> 从而把跨记录面说得比实际大。`detail.go:578-590` 的注释写得很清楚——那只是复用已算好的结果，
+> 并且已有纯函数回退。真正的跨记录面只有上表前四行，而且其中两行是该砍的、两行来自 `ctxgraph`。
+
+减法做完，签名变成：
+
+```go
+// 两个入参都是共享层类型；不再有 report 的影子
+func Render(rec *audit.Record, prev *ctxgraph.Manifest, lang i18n.Lang) (md string)
+```
+
+`prev` 定义为**同一条 `ctxgraph.Lineage` 内的前一个 Manifest**（不是 story 缝合链上的前驱）——
+这样两个半区对"上一轮是谁"给出的答案严格一致；缝合边界的处理留在中观层，那本来就是中观层的语义。
+
+于是它成为一个真正的叶子包，依赖面 `{audit, core, chatmsg, ctxgraph, taskseg, i18n, fmtutil}`
+全是既有叶子，`report` 与 `story` 都 import 它，**archtest 无需改动一行**（禁止的只有两个消费方
+互相引用）。顺带缓解 `KNOWN_ISSUES §1.5`（`detail.go` 1047/1150 逼近行数预算）。
+
+**这一刀砍掉的连锁复杂度，比这一刀本身值钱**：
+
+1. 子集生成 == 全量生成，**逐字节相同**。跨半区协调问题从根上消失。
+2. 生成变成幂等写盘（文件在就跳过），不再有"哪个批次生成的""要不要重生成"。
+3. §7.3(b) 的会话内容寻址从"正确性前提"降级为"导航能力"，迁移路径上少一条硬依赖。
+4. 不再需要 `cmd/vmr` 去跑一遍 `report.AnalyzeSessions` 才能生成 detail——story 只要有 Manifest
+   和记录就能自己渲染。组合根从"必经之路"退回"可选的编排位置"。
+
+**丢了什么，诚实说**：从 detail 文件里点不到"我属于 s01 的第 7 轮"了。这不是损失，是归位——
+链接过来的那一行（requests 索引行、journey 脊柱行）本来就渲染着这个上下文，父视图知道树的形状，
+叶子不必重复一遍。叶子自己保留的是一个**稳定的自我地址**（`req` 坐标）和一条回索引的链接，
+这比一个 run-scoped 的 `s01` 有用得多。
+
+**(b) System Prompt：内容寻址成共享 artifact**
+
+把 system prompt 挪到 journey 报告头部是对的，但它现在**每份报告存一份全文**：实测 179 条 lobster
+journey 各内嵌同一份 ~20.5K token 的 prompt；一条 2 轮 heartbeat journey 有 68% 的字节是它。
+`-render-all` 会产出数 MB 的重复。
+
+**处置**：落成 `evidence/sysprompt-<h8>.md`（`h8` = 该 system 块的 `ctxgraph` 内容哈希，
+天然去重、天然幂等），journey 报告头部只渲染"生效的 Step 区间 + 长度 + 链接"。
+
+**放在 `evidence/` 而不是 `stories/`，是有意的**：它不是 story 的产物，它是一段被两个视图共同
+引用的原始内容——report 的 §6 会话卡片、requests 索引同样可以链它。早先版本把它写成
+`stories/sysprompt-*.md`，是因为"是 story 渲染它的"，那又是一次拿现状定归属。
+
+再往前一步看：这不是一个 system-prompt 专属的机制，而是**证据层的通用命名规则**——
+内容寻址的 blob，谁引用谁链接。项目里早就有这个先例：`session.go:512` 的
+`toolsSig = fmt.Sprintf("tools:%d/%x", len(names), sum[:4])`——**工具声明集合早就是按内容哈希
+引用的**，只是没有把 blob 本身落盘。所以 `evidence/` 下自然容纳三类条目，用同一条命名规则：
+
+| 条目 | 地址 | 引用者 |
+| --- | --- | --- |
+| 单请求详单 | `details/<ts>_<virtual>_<real>_<outcome>_<h8(req)>.md` | requests 索引行、journey 脊柱 Step |
+| system prompt | `evidence/sysprompt-<h8>.md` | journey 报告头、会话卡片 |
+| 工具声明集合 | `evidence/tools-<h8>.md`（`toolsSig` 已在算这个哈希） | detail 头部、report §5 工具形态章节 |
+
+一句话：**同一份内容被 N 个视图引用时，它应该有一个地址，而不是有 N 份拷贝。** 这正是项目
+自己在 `ctxgraph` 那一层已经贯彻的原则，只是从没延伸到派生产物层。
+
+**(c) 证据层的体积纪律：默认按需，不默认全量**
+
+实测：59 条记录的 `details/` 产物合计 60MB（`.json` 40MB + `.md` 20MB），而这 59 条记录的源日志
+压缩后 334KB。按比例，一次全语料 `vmr report` 会写出约 **12GB**——而 `-details` 的默认值是 `true`。
+这不是"存储便宜就无所谓"，它意味着一个常规命令会在用户的磁盘上写出比源数据大一个数量级的
+派生副本，且其中大部分永远不会被打开。
+
+三条处置，按收益排序：
+
+1. **删掉 `details/*.json`。** 它是 `json.MarshalIndent(audit.Record)` 的逐字复制
+   （`detail.go:75`），因为美化缩进甚至比源记录还大 54%（709KB vs 461KB）。有了 `req` 坐标，
+   "取这条记录的原文"是一次定位，不需要预先物化一份。`vmr replay` 今天要求你先跑 `report` 拿到
+   `details/*.json` 才能 `-detail` 它——改成 `vmr replay -req <basename:line>` **反而更强**：
+   不必先跑任何分析命令，直接对着审计日志工作。
+   （唯一的反向考虑：`audit_retention_days` 删源文件时，派生副本能当归档。但那应该是一次显式的
+   导出动作，不是每次跑报表的默认副作用。）
+2. **`-details` 默认改为按需**：`vmr report` 默认只写索引（索引行照常带链接，因为文件名可算），
+   detail 在被真正请求时生成——`vmr story -journey` 为它涉及的记录生成、或显式 `-details` 全量生成。
+   幂等写盘让这件事没有任何协调成本。
+3. **解析缓存不再美化输出**（`storyindex.go:81` / `requests.go:58` 的 `json.MarshalIndent`），
+   并按文件拆成 `.parse-cache/<filehash>.json`——一份机器只读、可随时重建的缓存不需要给人看的
+   缩进，也不该每次运行都读改写一个 88MB 的单体文件（拆开之后，新增一个日志文件就只写一个新条目）。
+
+### 7.7 索引的可用性：先解决噪声，"一键下钻"才成立
+
+导航矩阵把 `vmr-stories.md` 变成了宏观→中观的落地页，那它就必须可用。实测窗口的 220 条候选
+Journey 里：
+
+- **120 条（55%）是 ≤2 轮的 heartbeat poll**，合计只覆盖 240 / 2672 = **9%** 的请求；
+- 真正的任务型 Journey（含 `Daily News Brief` 16 轮、`Daily Finance Brief` 21 轮这类 cron 任务链）
+  是少数派。
+
+一个一半以上是噪声的列表，作为下钻落地页是不可用的。
+
+**处置**：索引行增加**类别列**，判据用已有的结构信号，不引入新的猜测——轮数，加上 `taskseg`
+已经能识别的标题前缀（`[OpenClaw heartbeat poll]` / `cron:` / `[Subagent Context]`）。
+类别取 `task` / `cron` / `heartbeat` / `subagent`，`vmr-stories.md` 默认折叠噪声类，
+JSON 侧照常全量输出（机读层不做取舍）。
+
+### 7.8 索引与缓存分家
+
+`vmr-stories.json` 今天是一个语义自相矛盾的文件：`journeys` 段是 run-scoped 的
+（`MergeJourneyIndexRows` 丢弃"本次输入文件无法证明"的旧行），`files` 段是永久累积的——
+结果是**一个 88MB 的"索引"，其中索引本身只有 3 行**。
+
+| 文件 | 语义 | 形态 |
+| --- | --- | --- |
+| `reports/stories/vmr-stories.json` | 纯索引（`journeys[]`，run-scoped，含 §7.7 的类别列与 §7.3b 的 lineage 成员） | KB 级，缩进保留（人也会看），可随手 `cat` |
+| `reports/.parse-cache/<filehash>.json` | `ctxgraph.FileCache` 的单文件条目，**`vmr report` 与 `vmr story` 共用同一个目录** | 紧凑编码、机器专用、可整目录删除重建 |
+
+三点都不需要任何边界改动——两条命令用的本来就是同一个 `ctxgraph.FileCache` 类型和同一个
+`ScanCached`（设计文档 §3.4 已明确）：
+
+- **共用**：今天是同一份数据在 `vmr-requests.json` 和 `vmr-stories.json` 里各存一份。
+- **拆分到单文件条目**：缓存天然按文件内容哈希分片，拆开之后新增一个日志文件只写一个新条目，
+  不必读改写一个 88MB 的单体；淘汰旧条目也变成删文件。
+- **不再美化输出**：`storyindex.go:81` 与 `requests.go:58` 今天都用 `json.MarshalIndent` —— 给一份
+  机器只读、随时可重建的缓存加缩进，是把"索引"和"缓存"混成一个文件之后顺带继承下来的习惯。
+  索引保留缩进（人会看），缓存用紧凑编码。
+
+顺带修掉一个实测缺陷：缓存以路径字符串为 key，同一文件的绝对路径与相对路径各存一份
+（实测 255 条 manifest 重复）。key 规范化成 §7.3(a) 的 basename 同时解决它。
+
+### 7.9 命令层：为什么不合并成一个 `vmr analyze`
+
+四条理由，按分量排序：
+
+1. **删除检验（§3）证明两组提问都不可删**，合并只会把两组不同的输出塞进一个更长的文档。
+2. **flag 空间是笛卡尔积**：story 已有 6 种模式（无参 / `-journey` / `-render-all` / `-compare` /
+   `-corpus` / `-llm-*`），report 有自己的 8 个 flag 家族；且两者的**默认输入集不同**
+   （story 默认跳过断头 Journey，report 全量），合并后这条差异会被埋进 flag 组合里。
+3. **扫描代价与运行频率天然不同**：`report` 是周期性全量（三遍读 + 全量 detail 落盘），
+   `story` 是针对性单点（两遍读）。合并会强迫低频昂贵的一方拖累高频的一方——这与 §7.8 共用
+   **缓存**（降低成本）方向相反。
+4. **两个动词对应两种心智**：`report`（"最近怎么样"）与 `story`（"这一次发生了什么"）。
+   合并后用户仍要靠 flag 区分，只是换了个地方选择。
+
+**要合并的是数据层与坐标层，不是命令。** 用户要的"统一套件"由导航矩阵 + 共享输出树 +
+共享 `report.yaml` + 共享解析缓存提供，这些要么已是事实、要么低成本可得。
+
+### 7.10 读放大：已核实的事实，但不是现在动的地方
+
+已核实：`vmr report` 对同一批文件做 **3 遍**物理读（`ctxgraph/scan.go:129` 的 `ScanCached` +
+`report/session.go:302` 的 `analyzeFile` + `report/aggregate.go:198` 的 `scanFiles`，前两遍并发）；
+`vmr story` 做 **2 遍**（`ScanCached` + `ctxgraph/records.go:82` 的 `FetchRecords`）。
+
+**但"合并成单遍流式引擎"这个方案不采纳**：`KNOWN_ISSUES §1.1` 已有明确裁决——会话与任务分析依赖
+`ctxgraph.StitchGraph` 对全量记录建立倒排索引，无法在单趟流式输入中就地确定单条记录归属。
+实测也没有瓶颈证据：`vmr story` 处理 2889 条记录、16 个压缩文件、冷缓存耗时 4.52s。
+维持 `§1.1` 的既有触发条件（真实 GB 级语料上确认 I/O 成为显著瓶颈）不变。
+
+把这条事实写进设计文档的目的是**止损**：省得下一轮再从头推一遍读放大，然后再撞一次同一堵墙。
+
+### 7.11 迁移路径
+
+每批独立可上线，顺序有硬依赖。
 
 | 批 | 内容 | 依赖 | 风险 |
 | --- | --- | --- | --- |
-| **1** | `req` 坐标字段进 `RequestRow` 与 story 的 Step JSON；`FileCache` key 规范化为 basename | 无 | 低（纯新增 `omitempty` 字段） |
-| **2** | `journey-<id>.json` 补完整事件流（Task/Step/Event/ToolCall/ToolResult） | 批 1 | 低（新增字段，JSON 体积上升——这是设计意图） |
-| **3** | `chatmsg` 工具配对加归一化回退（§5） | 无 | 低，收益立竿见影 |
-| **4** | 删 `## t0X` fact-layer；脊柱每步挂 detail 链接（**存在才挂**：读 `vmr-requests.json` 判断） | **批 1 + 批 2** | 中（人读产物形态变化，golden 测试要更新） |
-| **5** | 索引与缓存分家、两命令共用缓存 | 批 1 | 中（产物路径变化，需同步 UserGuide/README 及其 `.zh` 兄弟） |
-| **6**（可选） | `vmr story -journey ... -with-evidence`：在 `cmd/vmr` 组合根按 Journey 的文件子集调 `report.AnalyzeSessions` + `report.WriteDetails` | 批 1 | 中（子集口径与全量口径在 0.088% 的记录上文件名可能不一致，见 §4.8） |
+| **0** | **提交工作区里那 6 项已验证的 UX 改动** | 无 | 无。文档描述的是工作区状态而非仓库状态，任何人 checkout 当前 HEAD 都得不到文档描述的行为——后续每一批都建立在这个不一致上 |
+| **1** | `chatmsg` 配对加归一化回退；渲染层加位置兜底并标注（§5） | 无 | 低，收益立竿见影（0/33 → 33/33） |
+| **2** | 脊柱补完三条（指令行 / 汇报行 / 交付物节）（§7.4a） | 无 | 低-中，golden 基线更新 |
+| **3** | `req` 请求级坐标进两侧 JSON；`FileCache` key 规范化为 basename（§7.3a） | 无 | 低（纯新增 `omitempty` 字段） |
+| **4** | **detail 做减法 → 纯叶子包**：砍掉会话坐标与 compaction 链接、`RoleTokens`/`collect()` 那批改为自算、`prev` 改由 ctxgraph 给；文件名改为坐标哈希（去批次 + 去时区 + 去 `-N`）（§7.6a、§7.3c） | 3 | 中（核心架构步；旧 detail 链接全部失效，无兼容包袱、重跑即得，写进 CHANGELOG 的 Changed） |
+| **5** | 证据层瘦身：删 `details/*.json`、`-details` 默认改按需、`vmr replay -req <坐标>`、解析缓存拆分为单文件条目且紧凑编码（§7.6c、§7.8） | 4 | 中（`vmr replay -detail` 的用法变化，需同步 UserGuide 及其 `.zh` 兄弟） |
+| **6** | `journey-<id>.json` 补**结构 + `req` 引用**（不搬正文）（§7.4b） | 3、4 | 低（新增字段） |
+| **7** | 删 fact-layer；脊柱每步挂 detail 链接（**永远挂，缺了当场补生成**）；`vmr story -journey` 按需生成 detail（§7.4b、§7.6a） | **2 + 4 + 6** | 中（人读产物形态变化） |
+| **8** | Lineage 内容寻址 ID（§7.3b）；导航矩阵 Tier 1 → Tier 2（§7.5）；索引类别列（§7.7）；system prompt / tools 声明落成 `evidence/` blob（§7.6b） | 3、4 | 中（`vmr-report.json` 的会话 ID 语义变化，一次定稿） |
 
-**批 4 依赖批 2 是硬依赖**：今天 fact-layer 是消息正文在派生产物里的唯一载体。
-先删后补 = 中间存在一个真正丢数据的版本。这一点你的原始诉求和上一轮报告都没有提到。
+**四条硬依赖，都不是形式主义**：
 
-**验收标准**（每批都要有）：
+- 批 7 依赖批 2 —— 不补脊柱就删 fact-layer，删掉的是最终交付物那一步。
+- 批 7 依赖批 6 —— 今天 fact-layer 是事件流结构在派生产物里的唯一载体，先删后补 = 真丢结构。
+- 批 6、7 依赖批 4 —— 引用要能解析、链接要能算出来，都以确定性命名为前提。
+- 批 5 依赖批 4 —— 删 `details/*.json` 的前提是 `req` 坐标已经能顶替它的寻址职能。
 
-- 批 1：`vmr report` 与 `vmr story` 分别跑同一批日志，用 `req` 字段能把两份 JSON join 上，
-  join 命中率 100%。
-- 批 2：`journey-<id>.json` 的事件流经反向渲染能重建出今天 fact-layer 的等价内容。
-- 批 3：07-28 的 openclaw/lobster 两条 Journey，脊柱工具结果配对率从 0% 升到 >90%。
-- 批 4：`journey-j-openclaw-*.md` 体积 < 50KB，且每个脊柱 Step 的 detail 链接
-  `test -f` 全部为真（或干净地不渲染）。
-- 批 5：`vmr-stories.json` < 100KB；连跑 `vmr report` + `vmr story` 只产生一份解析缓存。
+**批 8 不再是批 7 的前置**。早先版本把"会话内容寻址 ID"排在删 fact-layer 之前，理由是子集生成的
+detail 正文会不一致——批 4 的减法让那个理由消失了，这条依赖随之解开，批 8 可以独立排期。
 
-### 7.7 命令层：为什么不合并成一个 `vmr analyze`
+**验收标准**（每批都要有，且都跑 `go test ./...` + `archtest` + 真实日志重跑肉眼核对）：
 
-三条理由，按分量排序：
-
-1. **删除检验（§3）证明两组提问都不可删**，合并只会把两组不同的输出塞进一个更长的文档。
-2. **扫描代价与运行频率天然不同**：`report` 是周期性全量（两遍扫描 + 全量 detail 落盘），
-   `story` 是针对性单点。合并会强迫低频昂贵的一方拖累高频的一方——这与 §7.5 共用**缓存**
-   （降低成本）方向相反。
-3. **两个动词对应两种心智**：`report`（"最近怎么样"）与 `story`（"这一次发生了什么"）。
-   合并成一个动词后，用户仍然要靠 flag 区分，只是换了个地方选择。
-
-**要合并的是数据层与坐标层，不是命令。** 这是本章与你原始设想最主要的分歧点，
-也是我认为经得起推敲的那一条。
+- 批 1：07-28 的 openclaw/lobster 两条 Journey，脊柱工具结果配对率从 0% 升到 >90%，
+  位置兜底命中的条目带来源标注。
+- 批 2：样例 journey 的脊柱 Step 覆盖率 22/22；末尾出现交付物节；纯问答 Journey 也有脊柱。
+- 批 3：`vmr report` 与 `vmr story` 分别跑同一批日志，用 `req` 字段 join 两份 JSON，命中率 100%；
+  `basename:line` 在全部历史日志上无冲突（加断言）。
+- 批 4：**同一条记录，分别经 `vmr report` 全量路径与 `vmr story` 单 Journey 路径生成的 detail，
+  文件名与正文逐字节相同**；把 `TZ` 换一个值重跑，文件名不变；`internal/report` 与
+  `internal/story` 都只 import 新叶子包，`archtest` 全绿。
+- 批 5：全语料一次 `vmr report` 的派生产物体积从约 12GB 降到索引量级；`vmr replay -req` 在
+  **没跑过任何分析命令**的干净环境下可用。
+- 批 6：`journey-<id>.json` 的结构 + 引用，经一个解析脚本可无损重建出今天 fact-layer 的等价内容。
+- 批 7：`journey-j-openclaw-*.md` < 50KB；每个脊柱 Step 的 detail 链接 `test -f` 全部为真。
+- 批 8：从 `vmr-report.md` 出发，纯靠链接可以走到任意 journey、任意 detail，并从 journey 走回大盘；
+  `vmr-stories.json` < 100KB；连跑两条命令只产生一份解析缓存目录。
 
 ---
 
-## 8. 决策与取舍表
+## 8. 决策与取舍
 
 | 决策 | 备选 | 取舍逻辑 |
 | --- | --- | --- |
-| 保留 `vmr report` / `vmr story` 两个命令 | 合并成一个 `vmr analyze` | 删除检验里八项功能七项不可删；两者扫描代价与运行频率不同；合并只换了选择的位置，没减少选择 |
-| detail 提升为两者共享的证据层 | 保持为 report 的附属 / 收编进 story | 三类提问的下钻终点是同一个东西；今天挂在 report 下是历史顺序，不是逻辑归属 |
-| 新增 `basename:line` 请求坐标并两侧发布 | 让 story 直接 import report / 让 report 改成内容寻址文件名 | 前者违反 archtest 边界；后者是可选加固而非前置条件（碰撞率 0.088%）。发布坐标零边界成本，且同时解决双向链接 |
-| 事件流从人读 Markdown 移到机读 JSON | 保持现状 / 只折叠不移动 | 折叠不减字节；你的答复要求分层。今天是"人读的有 290KB 事件流、机读的有 0 字节"的错配 |
-| 删 fact-layer 前先补 JSON 事件流 | 直接删 | fact-layer 今天是消息正文在派生产物里的唯一载体，先删后补存在真正丢数据的中间版本 |
-| 工具配对用归一化回退（strip `_`），不用位置推断 | 位置兜底 / 不修 | 归一化后仍是精确匹配，不引入推断规则，因此 `§1.21` 的不修理由不成立；实测 0%→100% 且零误合并 |
+| 保留 `vmr report` / `vmr story` 两个命令 | 合并成一个 `vmr analyze` | 删除检验里八项功能七项不可删；flag 空间是笛卡尔积且两者默认输入集不同；扫描代价与运行频率不同；合并只换了选择的位置 |
+| detail 提升为两者共享的证据层 | 保持为 report 的附属 / 收编进 story | 三个变焦倍率的下钻终点是同一个东西；今天挂在 report 下是历史顺序，不是逻辑归属 |
+| **detail 先做减法（砍掉会话坐标与 compaction 链接），再下沉为共享叶子包** | 原样下沉 / 走 `cmd/vmr` 组合根编排 | 原样下沉搬过去的是一个仍拖着 `report.ReqInfo` 的包；组合根编排则是拿现状当约束。减法之后 `Render(rec, prevManifest, lang)` 是真正的纯函数，两半区生成的结果逐字节相同，跨半区协调问题从根上消失 |
+| **叶子不记录自己在树上的位置** | detail 保留 `s01/t01/turn N` 上下文 | 父视图（requests 索引行、journey 脊柱行）本来就渲染着这个上下文；叶子重复一遍换来的是 run-scoped 污染。叶子保留的是稳定自我地址（`req`）+ 回索引链接 |
+| 新增 `basename:line` 请求坐标，并让 detail 文件名 = 该坐标的哈希 | 让 story 直接 import report / 用请求体哈希 / 用 `Manifest.SysHash + Keys[0]` | 第一个违反 archtest；请求体哈希在重发同一 body 时仍会撞，于是要请回 `-N` 后缀、把批次顺序依赖带回来；`SysHash+Keys[0]` 在纯追加 Journey 内每轮相同，会把偶发碰撞变成必然碰撞。坐标是主键，天然唯一，`-N` 可彻底删除，且文件名只从 Manifest 就能算出 |
+| detail 文件名去掉本机时区依赖 | 保持 `fmtutil.DisplayZone` | `DisplayZone` 默认 `time.Local`，同一条记录在不同机器上生成不同文件名；`deriveID` 已有"文件名时间用数据自身属性"的先例 |
+| **journey JSON 补结构与引用，不搬正文** | 把 204KB 事件流从 Markdown 抄进 JSON | 抄过去只是换个文件重复一遍——同一批正文在审计日志里已有一份。项目自己的第一性原理是 blob 只存一份、tree 只持引用；journey JSON 是 tree。边界：属于对话历史的走引用，属于本轮决策的（RespText/Reasoning/tool_call 参数）可内联 |
+| **删掉 `details/*.json`，微观机读层就用审计日志本身** | 保留逐请求 JSON 副本 | 它是 `json.MarshalIndent(audit.Record)` 的逐字复制（`detail.go:75`），因缩进比源记录还大 54%。有了 `req` 坐标，取原文是一次定位而非一次物化；`vmr replay -req` 还比今天的 `-detail <file>` 更强——不必先跑任何分析命令 |
+| **`-details` 默认改为按需生成** | 保持默认 `true` 全量物化 | 实测 59 条记录 → 60MB，全语料约 12GB（源日志 645MB）。文件名可算 + 生成幂等，让"按需"没有任何协调成本；索引行照常带链接 |
+| 解析缓存拆成单文件条目、紧凑编码 | 单体 JSON + `MarshalIndent` | 一份机器只读、随时可重建的缓存不需要给人看的缩进；拆开后新增日志文件只写一个新条目，不必读改写 88MB 单体 |
+| **删 fact-layer 前先补脊柱完整性** | 直接删 | 脊柱只渲染有 tool_call 的 Step，实测样例缺的正是最终交付物那一步 |
+| **删 fact-layer 渲染，不保留 `full_transcript` 开关** | 改默认值 + 留开关 | golden 基线本身就是维护成本，默认关闭的分支是 YAGNI 债；fact-layer 的独有价值（全局去重事件流）的正确载体是 JSON。真需要人读全文时，正确形态是独立产物而非主报告的 flag |
+| 工具配对：精确 + 归一化可作 Finding 证据，只有位置配对限渲染层并标注 | 三级全部限渲染层 / 全部接受 | 归一化后仍是精确一一匹配，不含顺序假设；只有位置配对是推断。实测归一化 0%→100% 零误合并，位置同序 152,967 组 100% |
 | 索引与解析缓存分家、两命令共用缓存 | 保持现状 | 现状是同一文件里 run-scoped 与永久累积两种语义并存，产出 88MB 的"索引"，且同一份数据存了两份 |
-| LLM 解读标题层级由渲染层兜底 | 只靠 prompt 指令 | 文档结构是结构，不该外包给 LLM 的指令遵从度；prompt 保留为第一道，渲染兜底为第二道 |
-| compare 首条 User Message 进 JSON（喂 LLM） | 只在 Markdown 渲染层取数 | 分叉点分析质量直接取决于 LLM 是否理解原始指令；今天它只拿到 80 rune 截断的标题。这是证据包里单位 token 价值最高的一段 |
+| 索引增加类别列并默认折叠噪声 | 保持全量平铺 | 55% 的候选是 ≤2 轮 heartbeat、只覆盖 9% 请求；作为下钻落地页不可用。判据全部来自已有结构信号，不引入新猜测 |
+| System Prompt / 工具声明落成 `evidence/` 下的内容寻址 blob | 每份 journey 内嵌全文 / 放在 `stories/` 下 | 179 份报告各存一份同样的 ~20.5K token 全文；同一份内容被 N 个视图引用时应该有地址而不是 N 份拷贝。放 `stories/` 是拿"谁渲染它"定归属——它是两个视图共同引用的原始内容。`toolsSig` 早就在按内容哈希引用工具集，只是没把 blob 落盘 |
+| **两类链接两种策略**：指向内容寻址产物的边永远渲染并按需补生成；指向另一条命令聚合产物的边才 `stat` | 一律"存在才链接" | 前者的文件名可算、生成幂等，不可能 404，加 `stat` 是把防御性设计套在不需要防御的地方；后者是另一条命令的分析结论，本命令没资格去算 |
+| report 不生成 stories 索引 | 让 report 也生成 `vmr-stories.*` | 那会让 report 承担 story 的候选计算（`ListCandidates` + 缝合链解析），扩大耦合面；存在性判断零耦合、零协调状态 |
+| Lineage 内容寻址 ID：report 的 Session 与 story 的 Journey 成员共用它 | 两边各算一个哈希再对表 / 保持 `s01` | report 的一个 Session 本来就**是**一条 Lineage、Journey 本来就**是**若干条 Lineage 的链；给 Lineage 本身一个 ID，join 变成集合判断而非查表。`s01` 退化为报告内的显示别名，不再承担 identity 职责 |
+| LLM 解读标题层级由渲染层兜底 | 只靠 prompt 指令 | 文档结构是结构，不该外包给 LLM 的指令遵从度；prompt 保留为第一道，渲染兜底为第二道（需跳过围栏内的 `#`） |
+| compare 首条 User Message 进 JSON（喂 LLM） | 只在 Markdown 渲染层取数 | 分叉点分析质量直接取决于 LLM 是否理解原始指令；今天它只拿到 80 rune 截断的标题 |
 
 ### 明确不做
 
 - **不引入数据库或服务端**。Strategy 文档的定位是单二进制、无数据库、零埋点；本方案全部产物
   仍是文件，"像一个 store 那样行为"靠的是稳定地址，不是存储引擎。
-- **不合并两个命令**（理由见 §7.7）。
-- **不让 `story` import `report`**（跨半区的事一律在 `cmd/vmr` 组合根做）。
-- **不为 detail 做全量预生成**（全语料 22748 个文件）；只做"存在才链接" + 可选的按需生成。
-- **不动已校准的检测器阈值**（九个 Finding 检测器、`contractLenRatio`/`forkCoverage`）。
+- **不合并两个命令**（§7.9）。
+- **不让 `story` import `report`**（两者共同 import 新的 detail 叶子包，不互相引用；仍需要
+  跨半区编排时才落到 `cmd/vmr` 组合根）。
+- **不为 detail 做全量预生成**。减法之后全语料是 11374 个 `.md`（`.json` 副本已删），但仍然只在
+  被真正请求时生成——幂等写盘让"按需"零成本。
+- **不把派生产物当归档层**。`details/` 不承担"审计日志被 retention 删除后仍能追溯"的职责；
+  真需要归档是一次显式导出动作，不是每次跑报表的默认副作用。
+- **不做单遍流式扫描引擎**。读放大是真的（report 3 遍 / story 2 遍），但它与 `StitchGraph` 的
+  全量倒排索引约束正面冲突，且实测无瓶颈（2889 条记录 4.52s）。维持 `KNOWN_ISSUES §1.1` 的
+  既有触发条件。
+- **不把 JSON 语言策略绑进本方案的依赖链**。它是独立议题，已有专门方案文档
+  （`json_lang_policy_plan_sonnet-5.md`）；与本方案唯一的交集是"反正要动 journey JSON"，
+  可以并行做，但不该让任一方受阻时卡住另一方。
+- **不动已校准的判据**（九个 Finding 检测器、`contractLenRatio`/`forkCoverage`）。
   未校准的 `stitch` 两个阈值另有 `KNOWN_ISSUES` 条目，不在本方案范围。
-- **不做 HTML/脱敏渲染**。设计文档 §8 已把它列为可选扩展；本方案的分层为它留了位置
-  （叙事层换一个渲染器即可），但不提前实现。
+- **不做 HTML/脱敏渲染**。设计文档 §8 已列为可选扩展；3×2 矩阵为它留了位置（人读那一行换一个
+  渲染器即可），但不提前实现。
 
 ---
 
-## 9. 附录
+## 9. 风险与开放问题
 
-### 9.1 验证方法
+1. **自指流量污染统计。** `vmr story -llm-addr` 的解读调用经 VMR 路由后回流进审计日志：实测
+   `client_key_tag = vmrstory` 共 21 条记录 / 4 条 journey。它不只污染 corpus 统计——**更严重的是
+   污染 `vmr report`**：那些 token 与成本是**分析行为的开销，不是被分析工作负载的开销**，
+   混进一份以"这段时间花了多少钱"为首要问题的报表里是口径错误。建议 report 与 corpus 两侧都提供
+   默认排除（或至少单列一行），并登记 `KNOWN_ISSUES`。
+2. **detail 命名与形态切换的过渡。** 批 4 生效后旧 `reports/` 里的 detail 链接全部失效；
+   批 5 删掉 `details/*.json` 会改变 `vmr replay -detail <file>.json` 的既有用法（替代品
+   `vmr replay -req <basename:line>` 更强——不必先跑分析命令，但它是**不同的命令行**）。
+   无外部消费者，重跑即可，但两条都要写进 `CHANGELOG.md` 的 Changed，并同步
+   `docs/UserGuide.md` 及其 `.zh` 兄弟里的 replay 示例。
+3. **位置兜底的残余风险。** 本语料 152,967 组 100% 同序，但"响应流顺序 → 客户端回写顺序"未单独
+   验证。标注"按位置推断"已让风险对读者可见；若真实语料观测到错配，回退为整组呈现（不声称对应关系）。
+4. **会话 ID 语义变更一次定稿。** `s%02d` → 内容寻址会改变 `vmr-report.json` 的既有字段语义。
+   同属"无兼容包袱"可动范围，但应一次定稿（用哪个哈希、是否保留位置编号作辅助列），避免契约反复。
+5. **`basename:line` 的唯一性假设。** 审计文件名带日期，理论上跨目录同名才会冲突。落地时加断言，
+   不靠假设。
+6. **行业参照的效力边界。** Langfuse / LangSmith / OTel 的三层模型是**同构印证**，不是权威指令；
+   真正的裁决依据仍是 §3 的删除检验与 §2.2 的覆盖率实测。引用它们是为了说明这个结构在行业里被
+   独立收敛过多次。
+
+---
+
+## 10. 附录
+
+### 10.1 验证方法
 
 1. **源码**：通读 `internal/story/`（`candidates.go`/`journey.go`/`storyindex.go`/`compare.go`/
    `metrics.go`/`findings.go`/`render_md.go`/`render_spine*.go`/`llm.go`）、`internal/report/`
-   （`detail.go`/`session.go`/`rows.go`/`requests.go`）、`cmd/vmr/cmd_story.go`/`cmd_report.go`、
+   （`detail.go`/`session.go`/`rows.go`/`requests.go`/`aggregate.go`）、`internal/ctxgraph/`
+   （`scan.go`/`records.go`）、`cmd/vmr/cmd_story.go`/`cmd_report.go`、`internal/fmtutil/timezone*`、
    `internal/archtest/import_boundaries_test.go`，逐条对照真实产物找到生成它的确切位置。
-2. **产物实测**：对本机 `reports/` 下的真实产物做体积/结构统计（`wc -c`、按标题行切分、
-   `python3 -c "import json"` 解析 `vmr-stories.json` / `vmr-requests.json`）。
-3. **全语料统计**：用 `vmr-stories.json` 的 11374 条 manifest（按 `(basename, line)` 去重后）
-   统计 detail 文件名碰撞率——这是一次**近似**（键用 `(ts_ms, virtual, endpoint, outcome)`，
-   真实实现用 `realModel(rec)` 与 `outcome+errClass`），结论的量级可靠，绝对数字有 ±小幅误差。
-4. **原始日志核查**（§5）：`zstdcat` 五个日志文件（07-16 / 07-19 / 07-28 / 08-14 / 08-16，
+2. **产物实测**：对本机 `reports/` 产物做体积/结构统计；用当前工作区代码构建二进制
+   （`go build -o <scratchpad>/vmrbin ./cmd/vmr`）重新渲染样例 journey 与一条 heartbeat journey，
+   按标题行切分统计三个区段的行数与字节、脊柱 Step 覆盖、工具结果行数。
+   证据层体积用 `du -ch reports/details/*.{md,json}` 与
+   `zstdcat <源日志> | wc -c` 对照（59 条记录：派生 60MB vs 源 27MB 解压 / 334KB 压缩）；
+   `details/*.json` 的"逐字复制"用 `json.load` 逐字段比对其结构与 `audit.Record` 一致，
+   并在 `detail.go:75` 找到 `json.MarshalIndent(j.rec, "", "  ")` 作为直接证据。
+3. **覆盖率实测**：`vmrbin story -o <tmp> logs/vmr-audit-2026-07-2[56789]* logs/…-07-3* logs/…-08-0*`
+   → 220 journeys / `sum(requests)`=2672；`zstdcat | wc -l`=2889 → 92.49%。
+4. **全语料统计**：用 `vmr-stories.json` 的 11374 条 manifest（按 `(basename, line)` 去重后）
+   统计 detail 文件名碰撞率——这是**近似**（键用 `(ts_ms, virtual, endpoint, outcome)`，真实实现用
+   `realModel(rec)` 与 `outcome+errClass`），量级可靠，绝对数字有小幅误差。
+5. **原始日志核查**（§5）：`zstdcat` 五个日志文件（07-16 / 07-19 / 07-28 / 08-14 / 08-16，
    合计 4159 条记录）管道进 Python，正则抓响应体 SSE 的 `"id":"call…"` 与请求体的
-   `tool_calls[].id`/`tool_call_id`，按 `client_key_tag` 与 `endpoint` 两种口径做集合比较与
-   形态统计。归一化误合并检查用"归一化前后唯一 id 数之差"对照"两个受影响 client 的 id 计数之和"。
-5. **未做的验证**（诚实声明）：
-   - 没有重新构建二进制、没有重跑 `vmr story` / `vmr report`（本轮不改代码，也避免再产生真实
-     LLM API 调用与费用）。
-   - §5 的按 endpoint 分组统计有一个已知的口径误差：一条记录的历史 id 被归到**该记录最后一次
-     attempt 的 endpoint** 上，而这些 id 实际由更早的轮次产生（可能落在别的 endpoint）。
-     按 `client_key_tag` 分组的那张表不受此影响，§5.3 的结论以它为准。
-   - 没有验证 `basename:line` 在你全部历史日志上无冲突（审计文件名带日期，理论上安全，
-     但批 1 落地时应加一个断言）。
+   `tool_calls[].id`/`tool_call_id`，按 `client_key_tag` 与 `endpoint` 两种口径做集合比较与形态
+   统计；归一化误合并检查用"归一化前后唯一 id 数之差"对照"受影响 client 的 id 计数之和"；
+   顺序安全性用"assistant(tool_calls) → 随后连续 role=tool 消息组的 id 序列逐位比较"，共 152,967 组。
+6. **未做的验证**（诚实声明）：
+   - 没有跑 `vmr report`（12s 量级的耗时数据引自他人实测，未复核）。
+   - §5 的按 endpoint 分组统计有已知口径误差：一条记录的历史 id 被归到该记录**最后一次 attempt**
+     的 endpoint 上，而这些 id 实际由更早的轮次产生。按 `client_key_tag` 分组的那张表不受此影响，
+     §5.3 的结论以它为准。
+   - 位置兜底验证的是"客户端在同一请求内保持同序"，"响应流顺序 → 客户端回写顺序"未单独验证。
+   - 没有验证 `basename:line` 在全部历史日志上无冲突（见 §9.5）。
 
-### 9.2 外部参考
+### 10.2 外部参考
 
 - [Langfuse — Data Model（session / trace / observation 三层，session 为可选顶层）](https://langfuse.com/docs/observability/data-model)
 - [Langfuse — Sessions（session 是共享 `session_id` 的 trace 的虚拟聚合）](https://langfuse.com/docs/observability/features/sessions)
@@ -643,17 +1107,25 @@ vmr 今天缺的正是这一条；而它们的仪表盘与 trace 视图从来都
 - [Uptrace — OpenTelemetry for AI Systems: LLM and Agent Observability (2026)（`gen_ai.conversation.id` 把 span 归入所属会话；Orchestration/LLM/Tool/Memory 四类 span 嵌套）](https://uptrace.dev/blog/opentelemetry-ai-systems)
 
 对照结论：这三套系统的共同点不是"只有一个视图"，而是**每层只有一个稳定 ID、所有视图共用它互相
-跳转**，且仪表盘与 trace 视图是同一批对象的不同视图。vmr 的差异化（零埋点、字节忠实、单二进制、
-文件产物）不需要放弃这条共性——它需要的只是把已经存在于内存里的主键**发布出去**。
+跳转**，且仪表盘与 trace 视图是同一批对象的不同视图。它们提供的是关联**机制**（如 OTel 的
+exemplar 把指标数据点关联回 trace 上下文），不是"必须一键跳转"的合规要求——把机制说成要求会让
+论据在被引用时失真。
 
-### 9.3 本文与既有文档的关系
+### 10.3 本文与既有文档的关系
 
-- 本文**不替代** `story_report_ux_review_sonnet-5.md`——那份是上一轮 7 条 UX 诉求的执行记录，
-  其中 6 项改动已在工作区（未提交）。本文复核它、纠正其中 2 处判断和 1 处根因，并把问题
-  提升到体系层面。
-- 若本文的方案被采纳，需要相应更新的既有条目：
-  - `KNOWN_ISSUES §1.21`（根因改写 + 修法改为归一化回退）
-  - `KNOWN_ISSUES §1.22`（"不可行"论证撤销，改为"分批实施，见本文 §7.6"）
-  - `KNOWN_ISSUES §1.20`（三个待拍板点已在本文 §4.7 定案）
-  - `docs/VirtualModelRouter_Design_v4_Analytics.md` §2.5 / §3.4（产物分层与坐标层）
+- 本文是重构方案的当前权威，取代 `story_report_comprehensive_redesign_gemini-3.7-flash.md` 与
+  `story_report_suite_reorganization_glm-4.7.md`：两者的可取部分（三级变焦、确定性命名、导航矩阵、
+  脊柱完整性、配对分层、Phase 0）已吸收进本文正文，被否决部分及其理由记录在逐条评审文档里。
+- `story_report_ux_review_sonnet-5.md` 是第一轮 6 项 UX 改动的过程记录，仍然有效；那批改动**至今
+  只存在于工作区**，见迁移路径的批 0。
+- 逐条评审记录：`docs/future-strategy/story_report_peer_review_opus-5.md`。
+- 若本方案被采纳，需要相应更新的既有条目：
+  - `KNOWN_ISSUES §1.21`（根因改写为客户端改写 + 修法改为归一化回退 + 位置兜底分层）
+  - `KNOWN_ISSUES §1.22`（"不可行"论证撤销，改为"分批实施，见本文迁移路径"）
+  - `KNOWN_ISSUES §1.20`（三个待拍板点已在 §4.7 定案）
+  - **新增条目**：detail 文件名的时区依赖；自指流量污染统计；候选索引噪声；System Prompt 重复；
+    **派生产物体积放大（59 条记录 → 60MB，`-details` 默认 `true`）**；
+    **`details/*.json` 是审计记录的逐字复制**；**解析缓存被 `MarshalIndent` 美化输出**
+  - `KNOWN_ISSUES §1.5`（`detail.go` 逼近行数预算）——detail 做完减法并下沉后自然缓解，可关闭
+  - `docs/VirtualModelRouter_Design_v4_Analytics.md` §2.5 / §3.4（3×2 矩阵、坐标层、共享证据层）
 - 本文**没有修改任何代码或其他文档**。
