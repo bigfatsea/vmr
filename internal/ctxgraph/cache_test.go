@@ -5,6 +5,7 @@ package ctxgraph
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -86,9 +87,12 @@ func TestScanCached_ColdCacheMatchesScan(t *testing.T) {
 	if len(cache.Files) != 1 {
 		t.Fatalf("expected 1 cache entry, got %d", len(cache.Files))
 	}
-	entry, ok := cache.Files[path]
+	// The cache is keyed by CanonicalPath(path), not the raw scan-input
+	// path — see reqcoord.go: two invocations of the same file (absolute
+	// vs. relative) must land in the same slot.
+	entry, ok := cache.Files[CanonicalPath(path)]
 	if !ok {
-		t.Fatalf("no cache entry for %s", path)
+		t.Fatalf("no cache entry for %s", CanonicalPath(path))
 	}
 	if len(entry.Manifests) != 1 {
 		t.Errorf("cache entry has %d manifests, want 1", len(entry.Manifests))
@@ -130,9 +134,10 @@ func TestScanCached_HitSkipsReparse(t *testing.T) {
 	if len(g2.Lineages) != 1 {
 		t.Fatalf("warm ScanCached produced %d lineages, want 1", len(g2.Lineages))
 	}
-	if !reflect.DeepEqual(cache1.Files[path], cache2.Files[path]) {
+	key := CanonicalPath(path)
+	if !reflect.DeepEqual(cache1.Files[key], cache2.Files[key]) {
 		t.Errorf("warm cache entry changed even though the file didn't:\n got  %+v\n want %+v",
-			cache2.Files[path], cache1.Files[path])
+			cache2.Files[key], cache1.Files[key])
 	}
 }
 
@@ -168,10 +173,11 @@ func TestScanCached_ChangedFileReparses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanCached (after append): %v", err)
 	}
-	if len(cache2.Files[path].Manifests) != 2 {
-		t.Fatalf("cache entry has %d manifests after append, want 2 (should have reparsed)", len(cache2.Files[path].Manifests))
+	key := CanonicalPath(path)
+	if len(cache2.Files[key].Manifests) != 2 {
+		t.Fatalf("cache entry has %d manifests after append, want 2 (should have reparsed)", len(cache2.Files[key].Manifests))
 	}
-	if cache2.Files[path].Hash == cache1.Files[path].Hash {
+	if cache2.Files[key].Hash == cache1.Files[key].Hash {
 		t.Error("hash should have changed after appending to the file")
 	}
 	total := 0
@@ -236,7 +242,7 @@ func TestScanCached_UntouchedPathsCarryForward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanCached (A only): %v", err)
 	}
-	if _, ok := cacheA.Files[pathB]; !ok {
+	if _, ok := cacheA.Files[CanonicalPath(pathB)]; !ok {
 		t.Error("entry for path B should be carried forward even though this call only scanned A")
 	}
 }
@@ -281,8 +287,9 @@ func TestScanCached_NilManifestInCacheTriggersReparse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	key := CanonicalPath(path)
 	corrupt := &FileCache{Files: map[string]CachedFile{
-		path: {Hash: hash, Manifests: []*Manifest{nil}},
+		key: {Hash: hash, Manifests: []*Manifest{nil}},
 	}}
 
 	g, cache, err := ScanCached([]string{path}, corrupt)
@@ -296,8 +303,8 @@ func TestScanCached_NilManifestInCacheTriggersReparse(t *testing.T) {
 	if total != 1 {
 		t.Errorf("graph has %d manifests, want 1 (should have reparsed instead of trusting the corrupt entry)", total)
 	}
-	if len(cache.Files[path].Manifests) != 1 || cache.Files[path].Manifests[0] == nil {
-		t.Errorf("cache entry for %s should have been refreshed with a fresh (non-nil) parse, got %+v", path, cache.Files[path])
+	if len(cache.Files[key].Manifests) != 1 || cache.Files[key].Manifests[0] == nil {
+		t.Errorf("cache entry for %s should have been refreshed with a fresh (non-nil) parse, got %+v", key, cache.Files[key])
 	}
 }
 
@@ -305,5 +312,40 @@ func TestHashFile_MissingFile(t *testing.T) {
 	t.Parallel()
 	if _, err := HashFile("/nonexistent/path.jsonl"); err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+// TestScanCached_HitRebindsManifestPathToCurrentInvocation covers a cache
+// built by one invocation (whatever path spelling that run used) being
+// reused by a LATER, separate invocation that spells the same file's path
+// differently (a different cwd, absolute vs. relative). The cache key
+// already normalizes past this (CanonicalPath), but the cached Manifests'
+// own Path field must also follow the CURRENT run's spelling — it's what
+// BlobIndex.FetchAll/records.go's FetchRecords later os.Open to recover
+// original message content, so a stale Path from a prior run's cwd would
+// fail to open under the current one.
+func TestScanCached_HitRebindsManifestPathToCurrentInvocation(t *testing.T) {
+	t.Parallel()
+	path := writeJSONL(t, []audit.Record{
+		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
+	})
+	_, cache1, err := ScanCached([]string{path}, nil)
+	if err != nil {
+		t.Fatalf("ScanCached (cold): %v", err)
+	}
+
+	// Simulate a later invocation spelling the SAME file differently (e.g.
+	// a relative path from a different cwd) — same bytes, different string.
+	renamed := filepath.Join(filepath.Dir(path), "..", filepath.Base(filepath.Dir(path)), filepath.Base(path))
+	g2, _, err := ScanCached([]string{renamed}, cache1)
+	if err != nil {
+		t.Fatalf("ScanCached (renamed path, warm): %v", err)
+	}
+	if len(g2.Lineages) != 1 || len(g2.Lineages[0].Manifests) != 1 {
+		t.Fatalf("unexpected graph shape: %+v", g2.Lineages)
+	}
+	got := g2.Lineages[0].Manifests[0].Path
+	if got != renamed {
+		t.Errorf("cache-hit Manifest.Path = %q, want it rebound to this invocation's own path %q", got, renamed)
 	}
 }

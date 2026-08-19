@@ -86,7 +86,8 @@ Analytics half:
 | `chatmsg` | Message/SSE/usage parsing and tool-call pairing — the one parser `ctxgraph`/`report`/`story` all share |
 | `ctxgraph` | Content-addressed manifests, edit classification, conversation lineage and cross-lineage stitching |
 | `taskseg` | Agent-dialect `Profile` (`OpenClawAware`, `Generic`) **and** the session/task segmentation algorithm itself, shared by `report` and `story` rather than duplicated in each |
-| `report` | `vmr report`: aggregation into `vmr-report.{json,md}` + `vmr-requests.{json,md}` + `details/*`. A new report section arrives as a new `internal/report/section_*.go` file, not as more lines in an existing one — the `archtest` line budget is what enforces that |
+| `reqdetail` | Two things, both pure functions of one `audit.Record` and nothing else: per-record fact extraction (role token/char shares, tool signature, error class, image counts — `report/session.go`'s own aggregation calls these too, not just detail rendering) and the detail page renderer built on top of it (`details/*.md`, plus its deterministic coordinate-hash filename — `FileName`/`FileNameForRecord`/`FileNameForManifest`). Shared by `report` and `story` so a page is byte-identical regardless of which command renders it |
+| `report` | `vmr report`: aggregation into `vmr-report.{json,md}` + `vmr-requests.{json,md}`, driving `reqdetail` for `details/*`. A new report section arrives as a new `internal/report/section_*.go` file, not as more lines in an existing one — the `archtest` line budget is what enforces that |
 | `story` | `vmr story`: Journey/Task/Step narrative, behavior indicators, findings, journey comparison, corpus statistics, optional LLM interpretation layer |
 
 Shared guards:
@@ -105,8 +106,8 @@ root allowed to see both halves at once.
   three sanctioned deviations: model-name rewrite, `respnorm`'s evidence-based quirk repairs
   (each behind a content guard, fail-open to "unmodified" on any doubt), and `imgprep`'s
   image downscale (the largest — a real unmarshal/rewrite/re-marshal, not a byte splice).
-- **Two halves, one contract.** `report`/`story`/`ctxgraph`/`taskseg`/`chatmsg` never import
-  `router`/`server`/`config`; the JSONL audit record is the only coupling. `archtest`-enforced.
+- **Two halves, one contract.** `report`/`story`/`ctxgraph`/`taskseg`/`chatmsg`/`reqdetail` never
+  import `router`/`server`/`config`; the JSONL audit record is the only coupling. `archtest`-enforced.
 - **`ctxgraph`/`chatmsg` are the single source of truth** for message hashing and message
   parsing. A private re-implementation can silently disagree with `ctxgraph` about where a
   conversation's history got reset — that is a whole bug class, not a style preference.

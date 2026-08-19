@@ -14,7 +14,9 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/reqdetail"
 )
 
 // buildRequestRow maps a rec2 to its per-request export row.
@@ -38,6 +40,7 @@ func buildRequestRow(rc *rec2) RequestRow {
 		Truncated:  rc.truncated,
 		ErrorClass: rc.errClass,
 		DetailFile: rc.detailFile,
+		Req:        ctxgraph.ReqCoord(rc.path, rc.line),
 		Path:       rc.path,
 		Line:       rc.line,
 	}
@@ -104,9 +107,9 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 		}
 	}
 	// bytes (recompute; ReqInfo keeps these unexported)
-	r.bytesIn = bodyBytes(arec.Client.Request.Body)
+	r.bytesIn = reqdetail.BodyBytes(arec.Client.Request.Body)
 	if arec.Client.Response != nil {
-		r.bytesOut = bodyBytes(arec.Client.Response.Body)
+		r.bytesOut = reqdetail.BodyBytes(arec.Client.Response.Body)
 	}
 	// tool declaration bytes (recompute; ReqInfo.declBytes unexported)
 	r.toolDeclCount, r.toolDeclBytes = toolDeclInfo(arec.Client.Request.Body)
@@ -119,7 +122,7 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 	// record. (r.truncated below is different: it MERGES with ri, so it must
 	// be computed either way.)
 	if ri == nil {
-		r.images, r.imagesCompressed = countImages(arec.Images)
+		r.images, r.imagesCompressed = reqdetail.CountImages(arec.Images)
 		if len(arec.Attempts) > 1 {
 			r.fallbacks = 1
 		}
@@ -127,7 +130,7 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 	// truncated: ok outcome with a truncated attempt error
 	if arec.Outcome == "ok" {
 		for _, a := range arec.Attempts {
-			if attemptErrorClass(a) == "truncated" {
+			if reqdetail.AttemptErrorClass(a) == "truncated" {
 				r.truncated = true
 				break
 			}
@@ -186,7 +189,7 @@ func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
 		successEp = servedEp
 	}
 	if len(arec.Attempts) > 0 {
-		errClass = attemptErrorClass(arec.Attempts[len(arec.Attempts)-1])
+		errClass = reqdetail.AttemptErrorClass(arec.Attempts[len(arec.Attempts)-1])
 	}
 	return successEp, errClass
 }

@@ -12,9 +12,16 @@ import (
 	"vmr/internal/audit"
 )
 
+// writeJSONL writes recs to a fresh temp file and returns its path. The
+// basename is derived from t.TempDir()'s own unique suffix (not a fixed
+// "audit.jsonl") — real audit files always carry a date and never collide
+// on basename (see reqcoord.go's CheckPathCollisions), and a fixed name
+// would make two calls within the same test collide on purpose, which
+// defeats any test that scans multiple files at once.
 func writeJSONL(t *testing.T, recs []audit.Record) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit-"+filepath.Base(dir)+".jsonl")
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

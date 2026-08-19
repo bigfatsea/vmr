@@ -432,9 +432,12 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 
 逐文件核对"这个字符串是不是真的被 i18n 覆盖了"时，发现三类设计阶段的文本盘点漏掉的真实硬编码中文，全部已修复——发现方式一致：不是重读设计文档，而是迁移完每个文件后跑 `grep -P '[\x{4e00}-\x{9fff}]'` 对该文件独立复查一遍，全部迁移完成后又做了一次全仓库级扫描：
 
-1. `internal/report/render.go` 的 `truncCell`/`renderMessageSection`——详单页表格截断提示（"共 %d 字符"）和消息占位符（"(空)"）当时被归类成"纯格式化助手函数"，没算进文案盘点；现在接收 `t i18n.DetailText` 参数。
+1. `truncCell`/`renderMessageSection`（详单渲染的 Markdown 原语，P2 阶段随详单渲染整体下沉到
+   `internal/reqdetail`——见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）——
+   详单页表格截断提示（"共 %d 字符"）和消息占位符（"(空)"）当时被归类成"纯格式化助手函数"，没算进
+   文案盘点；现在接收 `t i18n.DetailText` 参数。
 2. `internal/report/pricing.go` 的 `Disclaimer()`——定价免责声明是 `Pricing` 类型的一个方法，直接拼接中文字符串，不在任何一个 section 文件里，盘点时被漏掉；现在签名是 `Disclaimer(lang i18n.Lang) string`。
-3. 三处硬编码的中文顿号"、"——`detail.go` 的 `renderFactsLine`、`story/render_md.go` 的 `renderCompactionInfo` 都用 `strings.Join(xs, "、")` 无条件拼接列表，跟语言设置无关，英文报告里也会显示中文顿号；两侧文本 struct 各加了一个 `ListSep` 字段（`、` vs `, `）。
+3. 三处硬编码的中文顿号"、"——`renderFactsLine`（同上，现在在 `internal/reqdetail/detail.go`）、`story/render_md.go` 的 `renderCompactionInfo` 都用 `strings.Join(xs, "、")` 无条件拼接列表，跟语言设置无关，英文报告里也会显示中文顿号；两侧文本 struct 各加了一个 `ListSep` 字段（`、` vs `, `）。
 
 ### 4.7 扩展性
 

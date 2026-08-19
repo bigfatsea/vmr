@@ -10,7 +10,10 @@
 // same-package dependencies worth naming.
 package report
 
-import "vmr/internal/audit"
+import (
+	"vmr/internal/audit"
+	"vmr/internal/reqdetail"
+)
 
 // TrafficStats.Ingest is the accumulation every embedding bucket shares —
 // see the type's own doc comment (rows.go) for exactly which fields live
@@ -162,7 +165,7 @@ func (e *EndpointRow) IngestAttempt(a audit.Attempt) {
 	} else {
 		e.Failed++
 		e.WastedMS += a.DurMS
-		cls := attemptErrorClass(a)
+		cls := reqdetail.AttemptErrorClass(a)
 		if cls == "" {
 			cls = "unknown"
 		}

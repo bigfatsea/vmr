@@ -1,8 +1,8 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-08-20 00:00, by Sonnet 5
 package report
 
 import (
-	"net/http"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,203 +11,9 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
-	"vmr/internal/core"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
-
-// TestNormDescriptions_AllKnownStepsHaveText guards against a norm step
-// name being added to the router-side trail (internal/respnorm)
-// without a matching entry here — writeNorms falls back to "（未知步骤）"
-// for anything missing, which is silent and easy to forget.
-func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
-	for _, step := range []string{
-		"model_rewrite", "done_appended", "think_strip", "thinking_process_strip",
-		"buffered", "resumed_stream", "soft_block_detected", "opaque",
-		"overflow_raw_passthrough", "crlf_framing_suspected",
-		"thinking_process_pattern_detected",
-	} {
-		var b strings.Builder
-		writeNorms(&b, []string{step}, i18n.Detail(i18n.EN))
-		if strings.Contains(b.String(), "unknown step") {
-			t.Errorf("norm step %q has no description in normDescriptions", step)
-		}
-	}
-}
-
-// TestAttemptUpstreamFallback covers backward compatibility with audit
-// logs written before Attempt.Protocol/Provider/Model existed: the three
-// segments must still be recoverable by splitting Endpoint via
-// core.SplitEndpointLabel, which accepts both the current ":"-joined format
-// and the "/"-joined form older audit logs used — a record with an empty
-// structured triple can in principle carry either, so both must resolve
-// (a prior version of this function only handled "/", silently returning
-// ("","","") for a ":"-joined Endpoint whose structured fields were empty,
-// disagreeing with internal/story/modelusage.go's stepUpstream on the same
-// record).
-func TestAttemptUpstreamFallback(t *testing.T) {
-	for _, tc := range []struct {
-		name                              string
-		a                                 audit.Attempt
-		wantProtocol, wantProv, wantModel string
-	}{
-		{"new log: structured fields used directly",
-			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3", Protocol: "openai", Provider: "minimax", Model: "MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
-		{"structured fields empty, ':'-joined Endpoint: falls back to splitting it",
-			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
-		{"old log: falls back to splitting the '/'-joined Endpoint",
-			audit.Attempt{Endpoint: "openai/minimax/MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
-		{"old log: model name itself contains '/' (OpenRouter-style), only first two separators are structural",
-			audit.Attempt{Endpoint: "openai/openrouter/z-ai/glm-5.2"},
-			"openai", "openrouter", "z-ai/glm-5.2"},
-		{"':'-joined Endpoint, model name itself contains '/' (OpenRouter-style)",
-			audit.Attempt{Endpoint: "openai:openrouter:z-ai/glm-5.2"},
-			"openai", "openrouter", "z-ai/glm-5.2"},
-		{"old log, unparseable endpoint: no crash, empty triple",
-			audit.Attempt{Endpoint: "not-a-real-endpoint"},
-			"", "", ""},
-		{"no attempt at all", audit.Attempt{}, "", "", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			protocol, provider, model := attemptUpstream(tc.a)
-			if protocol != tc.wantProtocol || provider != tc.wantProv || model != tc.wantModel {
-				t.Errorf("attemptUpstream(%+v) = (%q,%q,%q), want (%q,%q,%q)",
-					tc.a, protocol, provider, model, tc.wantProtocol, tc.wantProv, tc.wantModel)
-			}
-		})
-	}
-}
-
-// TestRealModelFallback covers realModel() specifically against an
-// old-format record whose only endpoint info is the "/"-joined Endpoint
-// string — the exact scenario that regressed detail filenames to "_none_"
-// for every historical record before attemptUpstream's fallback was added.
-func TestRealModelFallback(t *testing.T) {
-	rec := &audit.Record{Attempts: []audit.Attempt{{Endpoint: "openai/minimax/MiniMax-M3"}}}
-	if got := realModel(rec); got != "MiniMax-M3" {
-		t.Errorf("realModel = %q, want %q", got, "MiniMax-M3")
-	}
-	if got := realModel(&audit.Record{}); got != "none" {
-		t.Errorf("realModel with no attempts = %q, want none", got)
-	}
-}
-
-func TestDetailFileName(t *testing.T) {
-	// ts's own embedded offset is CST (+08:00); this package's TestMain
-	// pins fmtutil.DisplayZone to UTC, so detailFileName's timestamp
-	// portion must show the UTC-converted value (2026-07-08 16:31:06.804),
-	// not ts's own raw CST wall-clock fields — proof the filename follows
-	// DisplayZone rather than whatever offset the record happened to carry.
-	ts := time.Date(2026, 7, 9, 0, 31, 6, 804_000_000, time.FixedZone("CST", 8*3600))
-	rec := &audit.Record{TS: ts, Model: "agent", Outcome: "ok",
-		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
-	used := map[string]int{}
-	got := detailFileName(rec, used)
-	want := "20260708-163106.804_agent_MiniMax-M3_ok.md"
-	if got != want {
-		t.Errorf("got %q want %q", got, want)
-	}
-	// Same-millisecond collision gets a numeric suffix.
-	if got2 := detailFileName(rec, used); got2 != "20260708-163106.804_agent_MiniMax-M3_ok-2.md" {
-		t.Errorf("collision name = %q", got2)
-	}
-
-	// Error outcome carries the error class; unsafe characters sanitized.
-	rec2 := &audit.Record{TS: ts, Model: "my model/v2", Outcome: "error",
-		Attempts: []audit.Attempt{{Endpoint: "openai:x:y", Model: "y", Error: "network: dial tcp: refused", ErrorClass: "network"}}}
-	got = detailFileName(rec2, map[string]int{})
-	if want := "20260708-163106.804_my-model-v2_y_error-network.md"; got != want {
-		t.Errorf("got %q want %q", got, want)
-	}
-
-	// Rejected request: no model, no attempts.
-	rec3 := &audit.Record{TS: ts, Outcome: "error"}
-	if got := detailFileName(rec3, map[string]int{}); !strings.Contains(got, "rejected") || !strings.Contains(got, "none") {
-		t.Errorf("rejected name = %q", got)
-	}
-}
-
-func TestDetailFileNameSortsByTime(t *testing.T) {
-	// Lexical order of generated names must equal time order.
-	zone := time.FixedZone("CST", 8*3600)
-	times := []time.Time{
-		time.Date(2026, 7, 9, 9, 59, 59, 999_000_000, zone),
-		time.Date(2026, 7, 9, 10, 0, 0, 0, zone),
-		time.Date(2026, 7, 10, 0, 0, 0, 1_000_000, zone),
-	}
-	var prev string
-	for _, ts := range times {
-		name := detailFileName(&audit.Record{TS: ts, Model: "m", Outcome: "ok"}, map[string]int{})
-		if prev != "" && !(prev < name) {
-			t.Errorf("names not sorted: %q then %q", prev, name)
-		}
-		prev = name
-	}
-}
-
-func TestCodeFence(t *testing.T) {
-	// Content containing a triple-backtick run must get a longer fence.
-	out := codeFence("hi\n```go\ncode\n```")
-	if !strings.HasPrefix(out, "````\n") || !strings.HasSuffix(out, "````\n") {
-		t.Errorf("fence not extended:\n%s", out)
-	}
-	if out := codeFence("plain"); !strings.HasPrefix(out, "```\n") {
-		t.Errorf("plain fence wrong:\n%s", out)
-	}
-}
-
-func TestDiffHeaderTable(t *testing.T) {
-	base := http.Header{"Same": {"v"}, "Changed": {"old"}, "Removed": {"gone"}}
-	other := http.Header{"Same": {"v"}, "Changed": {"new"}, "Added": {"fresh"}}
-	table, changed := diffHeaderTable(base, other, i18n.Detail(i18n.EN))
-	if changed != 3 {
-		t.Errorf("changed = %d, want 3", changed)
-	}
-	for _, want := range []string{
-		"| 🟢 | Added | fresh |",
-		"| 🔴 | Removed | ~~gone~~ |",
-		"| 🔶 | Changed | old → new |",
-		"| | Same | v |", // unchanged still listed, unmarked
-	} {
-		if !strings.Contains(table, want) {
-			t.Errorf("table missing %q:\n%s", want, table)
-		}
-	}
-}
-
-func TestRenderBodyDiffMarksChanges(t *testing.T) {
-	client := map[string]any{
-		"model": "agent", "stream": true,
-		"messages": []any{
-			map[string]any{"role": "system", "content": "sys"},
-			map[string]any{"role": "user", "content": "hello"},
-		},
-	}
-	attempt := map[string]any{
-		"model": "MiniMax-M3", "stream": true,
-		"messages": []any{
-			map[string]any{"role": "system", "content": "sys"},
-			map[string]any{"role": "user", "content": "hello resized"},
-		},
-	}
-	var b strings.Builder
-	renderBodyDiff(&b, client, attempt, i18n.Detail(i18n.EN))
-	out := b.String()
-	for _, want := range []string{
-		`| 🔶 | model | "agent" → "MiniMax-M3" |`,
-		"| | stream | true |",         // unchanged field still listed
-		"- #1 system · 3 chars",       // unchanged message still listed, unmarked
-		"🔶 #2 user · 5 → 13 chars",    // changed message marked with sizes
-		"hello resized",               // attempt-side content available inline
-		"Messages diff (2, 1 changed", // summary carries the change count
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
-	}
-}
 
 func TestReassembleSSEOpenAI(t *testing.T) {
 	raw := strings.Join([]string{
@@ -308,125 +114,6 @@ func TestChatMessagesAnthropicSystem(t *testing.T) {
 	}
 }
 
-// TestRenderBodyDiffExcludesResponsesConversationFields proves the
-// param-diff table's "bulky" exclusion — already covering "messages"/
-// "tools"/"system" — also covers openai-responses' "input"/"instructions",
-// so a Responses-protocol detail page doesn't dump the entire conversation
-// twice: once (correctly) under "Messages diff", and again as raw JSON in
-// the top-level param table meant for small metadata fields only.
-func TestRenderBodyDiffExcludesResponsesConversationFields(t *testing.T) {
-	client := map[string]any{
-		"model": "agent", "instructions": "you are helpful",
-		"input": []any{map[string]any{"role": "user", "content": "hi"}},
-	}
-	attempt := map[string]any{
-		"model": "real-model", "instructions": "you are helpful",
-		"input": []any{map[string]any{"role": "user", "content": "hi"}},
-	}
-	var b strings.Builder
-	renderBodyDiff(&b, client, attempt, i18n.Detail(i18n.EN))
-	out := b.String()
-	if strings.Contains(out, "\"input\"") || strings.Contains(out, "| input |") {
-		t.Errorf("input array leaked into the param diff table instead of staying in Messages diff:\n%s", out)
-	}
-	if strings.Contains(out, "| instructions |") {
-		t.Errorf("instructions leaked into the param diff table:\n%s", out)
-	}
-}
-
-func TestRoleChars(t *testing.T) {
-	// openai shape: roles taken as-is, tool_calls counted to assistant.
-	openai := map[string]any{
-		"messages": []any{
-			map[string]any{"role": "system", "content": strings.Repeat("s", 10)},
-			map[string]any{"role": "user", "content": strings.Repeat("u", 30)},
-			map[string]any{"role": "assistant", "content": strings.Repeat("a", 20)},
-			map[string]any{"role": "tool", "content": strings.Repeat("t", 40), "tool_call_id": "c1"},
-		},
-	}
-	rc := roleChars(openai)
-	if rc["system"] != 10 || rc["user"] != 30 || rc["assistant"] != 20 || rc["tool"] != 40 {
-		t.Errorf("openai roleChars = %v", rc)
-	}
-
-	// anthropic shape: top-level system counts as one message; tool_result
-	// parts inside a user message count as "tool", not "user".
-	anthropic := map[string]any{
-		"system": strings.Repeat("s", 5),
-		"messages": []any{
-			map[string]any{"role": "user", "content": []any{
-				map[string]any{"type": "text", "text": strings.Repeat("u", 7)},
-				map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "xx"},
-			}},
-		},
-	}
-	rc = roleChars(anthropic)
-	if rc["system"] != 5 || rc["user"] != 7 || rc["tool"] == 0 {
-		t.Errorf("anthropic roleChars = %v", rc)
-	}
-
-	// openai-responses shape: top-level instructions counts as "system";
-	// function_call/function_call_output Items have no "role" key at all
-	// and must still land under a sensible bucket ("assistant"/"tool"), not
-	// silently vanish into an empty-string role.
-	responses := map[string]any{
-		"instructions": strings.Repeat("s", 5),
-		"input": []any{
-			map[string]any{"role": "user", "content": strings.Repeat("u", 7)},
-			map[string]any{"type": "function_call", "call_id": "c1", "name": "exec", "arguments": strings.Repeat("a", 9)},
-			map[string]any{"type": "function_call_output", "call_id": "c1", "output": strings.Repeat("t", 11)},
-		},
-	}
-	rc = roleChars(responses)
-	if rc["system"] != 5 || rc["user"] != 7 || rc["assistant"] == 0 || rc["tool"] == 0 {
-		t.Errorf("openai-responses roleChars = %v", rc)
-	}
-	if _, hasEmptyRole := rc[""]; hasEmptyRole {
-		t.Errorf("roleChars should never bucket a Responses non-message Item under an empty role: %v", rc)
-	}
-
-	// Non-chat bodies yield nothing.
-	if rc := roleChars("not json"); rc != nil {
-		t.Errorf("string body roleChars = %v", rc)
-	}
-}
-
-// TestRoleTokens locks in that roleTokens shares roleChars' traversal (same
-// per-role attribution) but sizes each fragment with core.EstimateTextTokens
-// instead of a rune count — ascii text should divide down by ~4x, not equal
-// the character count.
-func TestRoleTokens(t *testing.T) {
-	body := map[string]any{
-		"messages": []any{
-			map[string]any{"role": "user", "content": strings.Repeat("u", 40)},
-			map[string]any{"role": "assistant", "content": strings.Repeat("a", 80)},
-		},
-	}
-	rt := roleTokens(body)
-	if rt["user"] != 10 || rt["assistant"] != 20 {
-		t.Errorf("roleTokens = %v, want user=10 assistant=20 (ascii/4)", rt)
-	}
-	if rc := roleTokens("not json"); rc != nil {
-		t.Errorf("string body roleTokens = %v", rc)
-	}
-}
-
-func TestRoleStatLine(t *testing.T) {
-	chars := map[string]int64{"system": 10, "user": 30, "assistant": 20, "tool": 40}
-	got := roleStatLine(chars, false, false)
-	want := "system 10.0% · user 30.0% · assistant 20.0% · tool 40.0%"
-	if got != want {
-		t.Errorf("share-only line:\ngot  %q\nwant %q", got, want)
-	}
-	withChars := roleStatLine(chars, true, false)
-	if !strings.Contains(withChars, "tool 40 (40.0%)") {
-		t.Errorf("withChars line missing counts: %q", withChars)
-	}
-	if roleStatLine(nil, false, false) != "" {
-		t.Error("empty map should render empty line")
-	}
-}
-
 func TestFinalMessageJSON(t *testing.T) {
 	body := map[string]any{
 		"model": "m",
@@ -444,13 +131,31 @@ func TestFinalMessageJSON(t *testing.T) {
 	}
 }
 
+// findByOutcome returns the single details/ .md file whose name contains
+// "_<outcome>_" — coordinate-hash naming (internal/reqdetail.FileName) means
+// tests can no longer hardcode the exact filename, only the decorative
+// parts they control (model/outcome).
+func findByOutcome(t *testing.T, dir, outcome string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".md") && strings.Contains(e.Name(), "_"+outcome+"_") {
+			matches = append(matches, e.Name())
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 %q file in %s, got %v", outcome, dir, matches)
+	}
+	return matches[0]
+}
+
 func TestWriteDetailsEndToEnd(t *testing.T) {
 	// Two records out of time order in the file; INDEX must sort by ts and
-	// the norm trail must be translated in the passthrough note. Source
-	// timestamps carry a +08:00 offset; this package's TestMain pins
-	// fmtutil.DisplayZone to UTC, so the exported filenames below are 8h
-	// earlier than the source records' own local wall-clock fields
-	// (10:00:01+08:00 -> 02:00:01 file name, 09:00:00+08:00 -> 01:00:00).
+	// the norm trail must be translated in the passthrough note.
 	lines := `{"ts":"2026-07-09T10:00:01+08:00","dur_ms":500,"model":"agent","protocol":"openai","stream":false,"outcome":"ok","client":{"addr":"1.2.3.4:5","request":{"method":"POST","path":"/v1/chat/completions","headers":{"Content-Type":["application/json"]},"body":{"model":"agent","messages":[{"role":"user","content":"hi"}]}},"response":{"status":200,"headers":{"Content-Type":["application/json"]},"body":{"model":"agent","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}}},"attempts":[{"endpoint":"openai/prov/real-1","protocol":"openai","provider":"prov","model":"real-1","url":"https://x/v1","dur_ms":450,"request":{"method":"POST","path":"/v1","headers":{"Content-Type":["application/json"]},"body":{"model":"real-1","messages":[{"role":"user","content":"hi"}]}},"response":{"status":200,"headers":{"Content-Type":["application/json"]}},"norm":["model_rewrite"]}]}
 {"ts":"2026-07-09T09:00:00+08:00","dur_ms":100,"model":"agent","protocol":"openai","stream":false,"outcome":"error","client":{"addr":"1.2.3.4:5","request":{"method":"POST","path":"/v1/chat/completions","headers":{},"body":{"model":"agent","messages":[]}}},"attempts":[{"endpoint":"openai/prov/real-1","protocol":"openai","provider":"prov","model":"real-1","url":"https://x/v1","dur_ms":90,"request":{"headers":{},"body":{"model":"real-1","messages":[]}},"error":"network: dial tcp: refused","error_class":"network"}]}
 `
@@ -460,7 +165,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, nil, nil, i18n.EN)
+	n, err := WriteDetails([]string{src}, out, nil, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +173,8 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatalf("n = %d, want 2", n)
 	}
 
-	okFile, err := os.ReadFile(filepath.Join(out, "20260709-020001.000_agent_real-1_ok.md"))
+	okName := findByOutcome(t, out, "ok")
+	okFile, err := os.ReadFile(filepath.Join(out, okName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +190,8 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		}
 	}
 
-	errFile, err := os.ReadFile(filepath.Join(out, "20260709-010000.000_agent_real-1_error-network.md"))
+	errName := findByOutcome(t, out, "error")
+	errFile, err := os.ReadFile(filepath.Join(out, errName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,17 +205,14 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 	}
 
 	// Same-named .json sibling for the ok record.
-	if _, err := os.ReadFile(filepath.Join(out, "20260709-020001.000_agent_real-1_ok.json")); err != nil {
+	jsonName := strings.TrimSuffix(okName, ".md") + ".json"
+	if _, err := os.ReadFile(filepath.Join(out, jsonName)); err != nil {
 		t.Errorf("ok record missing .json sibling: %v", err)
 	}
 
 	// Exports carry the same conversation bodies as the 0600 audit source —
 	// they must not loosen its permissions (owner-only, no group/other bits).
-	for _, p := range []string{
-		out,
-		filepath.Join(out, "20260709-020001.000_agent_real-1_ok.md"),
-		filepath.Join(out, "20260709-020001.000_agent_real-1_ok.json"),
-	} {
+	for _, p := range []string{out, filepath.Join(out, okName), filepath.Join(out, jsonName)} {
 		st, err := os.Stat(p)
 		if err != nil {
 			t.Fatal(err)
@@ -548,7 +252,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN)
+	n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,99 +280,14 @@ func TestWriteDetailsByTag(t *testing.T) {
 	}
 }
 
-// TestRenderDetail_RawPreStrip covers both states of the "② VMR → 上游" raw
-// pre-strip display: full content when the audit record captured it
-// (RawPreStrip populated — see internal/respnorm), and a graceful
-// "not captured" note for records logged before that capture existed.
-func TestRenderDetail_RawPreStrip(t *testing.T) {
-	base := func(rawPreStrip any) *audit.Record {
-		return &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok",
-			Client: audit.Exchange{
-				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: map[string]any{}},
-			},
-			Attempts: []audit.Attempt{{
-				Endpoint: "openai/minimax/MiniMax-M3", URL: "https://x/v1",
-				Request:     audit.Message{Headers: http.Header{}},
-				Response:    &audit.Message{Status: 200, Headers: http.Header{}},
-				Norm:        []string{"buffered", "think_strip", "model_rewrite"},
-				RawPreStrip: rawPreStrip,
-			}},
-		}
-	}
-
-	withRaw := renderDetail(base(`data: {"choices":[{"delta":{"content":"<think>step 1</think>final answer"}}]}`+"\n\n"), nil, i18n.EN)
-	if !strings.Contains(withRaw, "Pre-strip raw content") || !strings.Contains(withRaw, "<think>step 1</think>final answer") {
-		t.Errorf("full pre-strip content not rendered:\n%s", withRaw)
-	}
-	if strings.Contains(withRaw, "didn't retain the pre-strip raw content") {
-		t.Error("should not show the unavailable note when RawPreStrip is populated")
-	}
-
-	withoutRaw := renderDetail(base(nil), nil, i18n.EN)
-	if !strings.Contains(withoutRaw, "didn't retain the pre-strip raw content") {
-		t.Errorf("missing graceful fallback note when RawPreStrip is nil:\n%s", withoutRaw)
-	}
-}
-
-// TestRenderDetail_FactsLine locks in that the detail Markdown surfaces
-// audit.Record.Facts (vmr's own pre-routing analysis) verbatim — no
-// recomputation from the stored request body — and that it appears near
-// the top of the document (before section ① renders the full request),
-// not buried after the detailed sections. A nil Facts (request rejected
-// before fact computation ran) must render nothing, not a blank/zero line.
-func TestRenderDetail_FactsLine(t *testing.T) {
-	base := func(facts *core.RequestFacts) *audit.Record {
-		return &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok",
-			Client: audit.Exchange{
-				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: map[string]any{}},
-			},
-			Facts: facts,
-		}
-	}
-
-	withFacts := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), nil, i18n.EN)
-	if !strings.Contains(withFacts, "VMR pre-routing judgment") {
-		t.Errorf("facts line missing:\n%s", withFacts)
-	}
-	if !strings.Contains(withFacts, "Capabilities required: `image`") {
-		t.Errorf("facts line should list only the detected capability `image`:\n%s", withFacts)
-	}
-	if strings.Contains(withFacts, "`tools`") {
-		t.Errorf("facts line should not list tools when HasTools is false:\n%s", withFacts)
-	}
-	if factsIdx, reqIdx := strings.Index(withFacts, "VMR pre-routing judgment"), strings.Index(withFacts, "① Client"); factsIdx < 0 || reqIdx < 0 || factsIdx > reqIdx {
-		t.Errorf("facts line must appear before section ①, got factsIdx=%d reqIdx=%d", factsIdx, reqIdx)
-	}
-	if !strings.Contains(withFacts, "Estimated token count: 1.2 KT") {
-		t.Errorf("facts line should render the plain (non-EST-suffixed) token estimate:\n%s", withFacts)
-	}
-
-	both := renderDetail(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), nil, i18n.EN)
-	if !strings.Contains(both, "Capabilities required: `image`, `tools`") {
-		t.Errorf("facts line should list both detected capabilities joined by \", \":\n%s", both)
-	}
-	if !strings.Contains(both, "Estimated token count: 500 T") {
-		t.Errorf("facts line should render sub-1000 estimate as plain T:\n%s", both)
-	}
-
-	neither := renderDetail(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), nil, i18n.EN)
-	if !strings.Contains(neither, "Capabilities required: none") {
-		t.Errorf("facts line should show none when no capability is detected:\n%s", neither)
-	}
-
-	withoutFacts := renderDetail(base(nil), nil, i18n.EN)
-	if strings.Contains(withoutFacts, "VMR pre-routing judgment") {
-		t.Errorf("nil Facts must render nothing:\n%s", withoutFacts)
-	}
-}
-
 // TestBuildOnRecordMatchesWriteDetails is the regression test for merging
 // Build's aggregation pass with detail export: Build's onRecord hook
 // (DetailWriter.Submit called inline, one pass over the audit source) must
-// produce byte-identical output to the old two-pass path
-// (AnalyzeSessions -> a separate WriteDetails pass, an independent second
-// read of the same file). Runs both over the same input and diffs every
-// file in both details/ directories.
+// produce byte-identical output (filename AND content) to the old two-pass
+// path (AnalyzeSessions -> a separate WriteDetails pass, an independent
+// second read of the same file). This is also P2's cross-path consistency
+// proof for internal/reqdetail.Render/FileName — see
+// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.3.
 func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	dir := t.TempDir()
 	records := smallAuditRecords()
@@ -679,13 +298,13 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldDir := filepath.Join(dir, "old-details")
-	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil, i18n.EN)
+	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	newDir := filepath.Join(dir, "new-details")
-	dw, err := NewDetailWriter(newDir, i18n.EN)
+	dw, err := NewDetailWriter(newDir, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,16 +335,109 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 		t.Fatalf("file count mismatch: old=%d new=%d", len(oldFiles), len(newFiles))
 	}
 	for _, fi := range oldFiles {
+		// File NAMES must match too, not just content — the whole point of
+		// coordinate-hash naming is that both paths compute the identical
+		// name for the same record, so an os.ReadFile miss here (not just
+		// a content mismatch below) is itself part of what this test guards.
 		oldBytes, err := os.ReadFile(filepath.Join(oldDir, fi.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
 		newBytes, err := os.ReadFile(filepath.Join(newDir, fi.Name()))
 		if err != nil {
-			t.Fatalf("missing in new-details: %s", fi.Name())
+			t.Fatalf("missing in new-details (name mismatch between the two paths): %s", fi.Name())
 		}
 		if string(oldBytes) != string(newBytes) {
 			t.Fatalf("content mismatch for %s:\n--- old ---\n%s\n--- new ---\n%s", fi.Name(), oldBytes, newBytes)
 		}
+	}
+}
+
+// TestWriteDetails_SubsetMatchesFullCorpus is P2.2/P2.3's other headline
+// acceptance criterion: a record's detail page must be byte-identical
+// (name AND content) whether it was rendered as part of a full-corpus scan
+// or a scan of just the one file/subset containing it — proof that detail
+// rendering no longer depends on session/task position (a run-scoped
+// coordinate that shifts with the input file set), only on the record
+// itself and its own lineage predecessor.
+func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
+	dir := t.TempDir()
+	zone := time.FixedZone("CST", 8*3600)
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
+	sys := msg("system", "sys")
+	// Two turns of ONE conversation (r2's opening messages are r1's plus a
+	// reply and a follow-up) so r2 has a real lineage predecessor — the
+	// case that exercises the previous-turn link and delta highlight, the
+	// two features that depend on cross-record correlation.
+	r1 := mkRec(at(0), "", []any{sys, msg("user", "first question")}, nil, sseText("first answer"))
+	r2 := mkRec(at(1), "", []any{sys, msg("user", "first question"), msg("assistant", "first answer"), msg("user", "follow-up question")}, nil, sseText("second answer"))
+	// An unrelated third file that only belongs to the "full corpus" run —
+	// proves the subset run doesn't need it to reproduce r1/r2 identically.
+	other := mkRec(at(5), "", []any{sys, msg("user", "unrelated")}, nil, sseText("unrelated answer"))
+
+	targetPath := filepath.Join(dir, "target.jsonl")
+	writeRecordsTo(t, targetPath, []audit.Record{r1, r2})
+	otherPath := filepath.Join(dir, "other.jsonl")
+	writeRecordsTo(t, otherPath, []audit.Record{other})
+
+	fullSess, err := AnalyzeSessions([]string{targetPath, otherPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullOut := filepath.Join(dir, "full-details")
+	if _, err := WriteDetails([]string{targetPath, otherPath}, fullOut, fullSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
+		t.Fatal(err)
+	}
+
+	subsetSess, err := AnalyzeSessions([]string{targetPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subsetOut := filepath.Join(dir, "subset-details")
+	if _, err := WriteDetails([]string{targetPath}, subsetOut, subsetSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every file target.jsonl produced in the subset run must exist in the
+	// full run under the exact same name, with identical content.
+	subsetFiles, err := os.ReadDir(subsetOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subsetFiles) != 4 { // 2 records × (.md + .json)
+		t.Fatalf("subset details/ entries = %d, want 4", len(subsetFiles))
+	}
+	for _, fi := range subsetFiles {
+		subsetBytes, err := os.ReadFile(filepath.Join(subsetOut, fi.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fullBytes, err := os.ReadFile(filepath.Join(fullOut, fi.Name()))
+		if err != nil {
+			t.Fatalf("%s present in subset run but not in full-corpus run (name not reproducible across input-set size)", fi.Name())
+		}
+		if string(subsetBytes) != string(fullBytes) {
+			t.Fatalf("content differs for %s between subset and full-corpus runs:\n--- subset ---\n%s\n--- full ---\n%s",
+				fi.Name(), subsetBytes, fullBytes)
+		}
+	}
+}
+
+// writeRecordsTo is writeTempJSONL's audit.Record-typed sibling: this
+// test needs mkRec's richer audit.Record fixtures (for a real lineage
+// relationship between r1/r2), not smallAuditRecords' map[string]any shape.
+func writeRecordsTo(t *testing.T, path string, recs []audit.Record) {
+	t.Helper()
+	var b strings.Builder
+	for _, r := range recs {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -37,6 +37,9 @@ type Graph struct {
 // final result once everything is merged and stably sorted by timestamp
 // afterward, single-threaded).
 func Scan(paths []string) (*Graph, error) {
+	if err := CheckPathCollisions(paths); err != nil {
+		return nil, err
+	}
 	results := make([]fileScanResult, len(paths))
 	sem := make(chan struct{}, scanWorkerCount(len(paths)))
 	var wg sync.WaitGroup

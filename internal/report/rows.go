@@ -499,6 +499,13 @@ type RequestRow struct {
 	DetailFile     string  `json:"detail_file,omitempty"`
 	Title          string  `json:"title,omitempty"` // session/task title (index-only)
 
+	// Req is this record's stable cross-command coordinate
+	// (ctxgraph.ReqCoord: CanonicalPath(Path) + ":" + Line) — the join key
+	// external tooling (or a future vmr-stories.json cross-reference) uses
+	// to identify "the same audit record" regardless of which command
+	// produced this row or how its input paths were spelled.
+	Req string `json:"req,omitempty"`
+
 	Path string `json:"-"`
 	Line int    `json:"-"`
 }

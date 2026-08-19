@@ -1,11 +1,12 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-08-20 00:00, by Sonnet 5
 
-// Pairs with internal/report/detail.go (the per-request details/*.md pages).
+// Pairs with internal/reqdetail/detail.go (the per-request details/*.md
+// pages shared by internal/report and internal/story).
 package i18n
 
 import "strconv"
 
-// DetailText is detail.go's text, in one language.
+// DetailText is reqdetail's rendering text, in one language.
 type DetailText struct {
 	NormDescriptions map[string]string
 	UnknownNormStep  string
@@ -18,16 +19,12 @@ type DetailText struct {
 	ListSep       string // joins e.g. multiple detected capabilities ("`image`、`tools`" vs "`image`, `tools`")
 	FactsLine     func(caps, estTokens string) string
 
-	CompactionCallLabel  string
-	CompactionSummarizes func(sessionID string) string
-	CompactionContinues  func(sessionID string) string
-	SessionTaskLine      func(sessionID, taskID string, taskSeq, sessSeq int) string
-	PrevTurnLink         func(ts, file string) string
-	ThisTurnCalls        string // "本轮调用: " prefix
-	TraceLabel           string
-	ChatLabel            string
-	TruncatedWarning     string
-	NoReplyWarning       string
+	PrevTurnLink     func(ts, file string) string
+	ThisTurnCalls    string // "本轮调用: " prefix
+	TraceLabel       string
+	ChatLabel        string
+	TruncatedWarning string
+	NoReplyWarning   string
 
 	ClientRequestTitle string
 	BodyNonJSON        string
@@ -132,12 +129,6 @@ func Detail(lang Lang) DetailText {
 				return "> **VMR 路由前判断**：\n> 请求所需能力：" + caps + "\n> 预估Token数量：" + estTokens + "\n\n"
 			},
 
-			CompactionCallLabel:  "> **[compaction 调用]**",
-			CompactionSummarizes: func(id string) string { return " 压缩会话 " + id + " 的历史" },
-			CompactionContinues:  func(id string) string { return " → 其摘要续接为会话 " + id },
-			SessionTaskLine: func(sessionID, taskID string, taskSeq, sessSeq int) string {
-				return "> **会话 " + sessionID + "** · **任务 " + taskID + "** · 任务内第 " + strconv.Itoa(taskSeq) + " 轮 / 会话内第 " + strconv.Itoa(sessSeq) + " 轮"
-			},
 			PrevTurnLink:     func(ts, file string) string { return " · 上一轮: [" + ts + "](./" + file + ")" },
 			ThisTurnCalls:    "本轮调用: ",
 			TraceLabel:       "trace ",
@@ -284,12 +275,6 @@ func Detail(lang Lang) DetailText {
 			return "> **VMR pre-routing judgment**:\n> Capabilities required: " + caps + "\n> Estimated token count: " + estTokens + "\n\n"
 		},
 
-		CompactionCallLabel:  "> **[compaction call]**",
-		CompactionSummarizes: func(id string) string { return " compacts session " + id + "'s history" },
-		CompactionContinues:  func(id string) string { return " → its summary continues as session " + id },
-		SessionTaskLine: func(sessionID, taskID string, taskSeq, sessSeq int) string {
-			return "> **Session " + sessionID + "** · **Task " + taskID + "** · turn " + strconv.Itoa(taskSeq) + " within task / turn " + strconv.Itoa(sessSeq) + " within session"
-		},
 		PrevTurnLink:     func(ts, file string) string { return " · previous turn: [" + ts + "](./" + file + ")" },
 		ThisTurnCalls:    "this turn's calls: ",
 		TraceLabel:       "trace ",

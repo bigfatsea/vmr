@@ -335,31 +335,37 @@ func FileName(rec *audit.Record, path string, line int) string
 
 ### 3.4 验收标准（对照 DevPlan P2.2 + P2.3）
 
-- [ ] detail 内容不再随输入文件集合大小变化（同一条记录，全量扫描 vs 子集扫描，正文逐字节相同）。
-- [ ] 同一条记录经两条不同路径生成，文件名与正文逐字节一致（§3.3 第 7 步的测试）。
-- [ ] 更换机器时区重跑，文件名不变（§3.3 第 8 步的测试 + 第 9 步的真实语料复现）。
-- [ ] `go test ./internal/archtest/...` 全绿——`internal/reqdetail` 不反向依赖 `report`/`story`，
+- [x] detail 内容不再随输入文件集合大小变化（同一条记录，全量扫描 vs 子集扫描，正文逐字节相同）——
+      `TestWriteDetails_SubsetMatchesFullCorpus`。
+- [x] 同一条记录经两条不同路径生成，文件名与正文逐字节一致（`TestBuildOnRecordMatchesWriteDetails`，
+      逐字节对比而不只对比内容）。
+- [x] 更换机器时区重跑，文件名不变（`TestFileName_TimezoneIndependent` + 真实语料
+      `TZ=America/New_York` 复现，见 §7）。
+- [x] `go test ./internal/archtest/...` 全绿——`internal/reqdetail` 不反向依赖 `report`/`story`，
       两者仍互不 import。
 
 ---
 
-## 4. 需要在实现时确认、不预先假设的几个点
+## 4. 需要在实现时确认、不预先假设的几个点 —— 已按实际执行情况回填，见 §7 执行记录
 
-（按项目风格，这些留给实现阶段用编译器/测试结果确认，不在这里预判答案）
-
-1. `internal/reqdetail` 是否需要专门登记进 `internal/archtest/file_sizes_test.go` 的豁免表——
-   按"全局默认 700 行 + 报警了再拆"的既有原则（KNOWN_ISSUES §1.5 的处置逻辑），先不预先登记，
-   落地后跑 `go test ./internal/archtest/...` 见分晓。
-2. `PrevTurnLink` 的接口缺口（§3.2 "上一轮链接"那段）具体走哪个方向，取决于 `DetailWriter`
-   在 report 侧能多方便地拿到上一条记录的 `*audit.Record`——这个判断只有写代码时才看得清楚。
-3. `RoleTokens`/`ToolCalls` 等提取函数搬进 `internal/reqdetail` 后，`report/session.go` 的
-   `collect` 是否还需要保留自己的字段（`ReqInfo.RoleTokens` 等），还是可以让 `ReqInfo` 直接嵌入
-   `reqdetail` 返回的结构体——如果嵌入更省代码就嵌入，如果两边字段语义有一丁点差异
-   （比如聚合期还需要某个 detail 不需要的额外统计）就保持两份字段、只共享提取函数本身。
+1. **不需要登记豁免**——`internal/reqdetail` 拆成 4 个文件（`facts.go`/`render.go`/`detail.go`/
+   `diff.go`），最大的 584 行，全部在全局 700 行预算内。
+2. **PrevTurnLink 接口缺口按方向 (a) 解决，且比原设想更彻底**：`FileName` 的最终形态从"吃
+   `*audit.Record`"改成"吃拆开的原始字段（`ts, virtual, real, outcome, req`）"，`FileNameForRecord`
+   （吃 `*audit.Record`）与 `FileNameForManifest`（吃 `*ctxgraph.Manifest`）都是它的薄封装——两者
+   永远算出同一个值，因为都只是同一组字段的不同取数路径。副作用：文件名的 `outcome` 段**不再带
+   错误类别后缀**（旧版 `error-network`，新版只有 `error`）——`Manifest` 没有存 `ErrorClass`，
+   要保证两条路径逐字节一致，两边只能都不带这段；hash8 本来就承担唯一性，这段后缀纯属锦上添花，
+   信息在详单正文里仍然可见（`renderAttempts` 逐次尝试都显示错误详情）。
+3. **保持两份字段，只共享提取函数**：`ReqInfo.RoleTokens`/`.ToolCalls` 等字段原样保留（聚合期的
+   `SessionRow`/`WorkloadRow` 等消费方直接读这些字段），`collect()`/`collectResponse()` 内部改成
+   调用 `reqdetail.RoleTokens(body)`/`reqdetail.RoleChars(body)` 等导出函数取值——没有让 `ReqInfo`
+   嵌入 `reqdetail` 的返回结构体，因为两边没有共享结构体的必要（`ReqInfo` 还有一堆
+   `reqdetail` 不关心的字段），嵌入只会增加理解成本。
 
 ---
 
-## 5. 收尾（P2.1–P2.3 共用）
+## 5. 收尾（P2.1–P2.3 共用）—— 已完成，见 §7 执行记录
 
 1. **全量测试与架构边界**：
    ```bash
@@ -396,15 +402,156 @@ func FileName(rec *audit.Record, path string, line int) string
 
 ---
 
-## 6. 验收清单（对照 DevPlan P2 的验收标准逐项勾，完成后填）
+## 6. 验收清单（对照 DevPlan P2 的验收标准逐项勾）
 
-- [ ] 两条命令对同一批日志的机读产物可按坐标互相 join，命中率完全（在 story 结构性覆盖率之内）。
-- [ ] 同一份日志不再因路径写法不同产生重复缓存条目。
-- [ ] 坐标唯一性有断言保护。
-- [ ] 详单内容不再随输入文件集合的大小而变化。
-- [ ] 同一条记录经两条不同路径生成，文件名与正文逐字节一致。
-- [ ] 更换机器时区重跑，文件名不变。
-- [ ] `internal/report`/`internal/story` 都只 import 新叶子包 `internal/reqdetail`，
+- [x] 两条命令对同一批日志的机读产物可按坐标互相 join，命中率完全（在 story 结构性覆盖率之内）——
+      真实语料 322/322（100%），见 §7。
+- [x] 同一份日志不再因路径写法不同产生重复缓存条目——真实语料绝对/相对路径复测确认。
+- [x] 坐标唯一性有断言保护——`ctxgraph.CheckPathCollisions`，`Scan`/`ScanCached` 各自入口调用。
+- [x] 详单内容不再随输入文件集合的大小而变化。
+- [x] 同一条记录经两条不同路径生成，文件名与正文逐字节一致。
+- [x] 更换机器时区重跑，文件名不变（内容里的展示时间戳仍按 `fmtutil.DisplayZone` 正确变化——
+      这是设计意图，不是残留 bug，见 §7）。
+- [x] `internal/report`/`internal/story` 都只 import 新叶子包 `internal/reqdetail`，
       `archtest` 全绿。
-- [ ] `go test ./...`、`go test ./internal/archtest/...` 全绿。
-- [ ] CHANGELOG、KNOWN_ISSUES（§1.20 更新）、架构文档说明性备注均已同步。
+- [x] `go test ./...`、`go test ./internal/archtest/...` 全绿（含 `-race`）。
+- [x] CHANGELOG、KNOWN_ISSUES（§1.5、§1.20 更新）、架构文档说明性备注、CLAUDE.md 模块表均已同步。
+
+---
+
+## 7. 执行记录（2026-08-20，Sonnet 5）
+
+本节是本文写完 ActionPlan 之后、实际落地执行的过程记录——按用户要求补写，不是提前写好的计划。
+**所有改动均未提交，等待人工 review。**
+
+### 7.1 执行顺序与整体结果
+
+按 §2（P2.1）→ §3（P2.2+P2.3 合并执行，原计划就是合并的）顺序实现。每个子步骤做完立即
+`go build` + 相关包测试，最后统一跑 `go test ./... -race`、`go vet ./...`、`gofmt -l .`、
+`go test ./internal/archtest/...`，全部通过。真实语料验证用
+`logs/vmr-audit-2026-07-28.jsonl.zst`（322 条记录，与 P1 用过的同一批样本）：
+
+| 验证项 | 结果 |
+| --- | --- |
+| report/story 坐标 join（`req` 字段） | 322/322（100%） |
+| 同一文件绝对路径 vs 相对路径扫描，缓存条目数 | 1（此前会产生 2 条重复） |
+| 详单文件名唯一性 | 322 个文件，0 个重名，无 `-N` 后缀 |
+| 详单正文含 run-scoped Session/Task 位置行 | 0（已按设计移除） |
+| 更换 `TZ=America/New_York` 重跑，文件名列表 | 与默认时区逐一比对，完全一致 |
+| 同一批文件，`TZ` 不同两次运行，详单正文差异 | 仅标题行的展示时间戳（`fmtutil.DisplayZone` 生效范围内），符合设计——文件名本身不受影响 |
+| 上一轮链接（`prev`）目标文件存在性 | 297 条链接全部可解析到磁盘上的真实文件，0 个失效 |
+
+### 7.2 与最初 ActionPlan 设计的实际出入（按重要性排序）
+
+**1. `Manifest.Path` 不能规范化——这是执行期发现的、原 ActionPlan 没有预见到的真实约束。**
+原计划（§2.2）打算把 `BuildManifest` 里 `Path: path` 改成 `Path: CanonicalPath(path)`，实现到一半
+时读 `internal/ctxgraph/blobindex.go` 才发现：`BlobIndex.FetchAll`（`vmr story` 的 LLM 解读证据包、
+未来任何"取回原始消息正文"的路径都会走它）把 `m.Path` 原样传给 `audit.OpenLogFile` 做真实文件
+I/O——把它改成纯 basename 会让这条路径在所有非当前目录调用下直接 `ENOENT`。改正后的设计：
+`Manifest.Path` 保持调用方传入的原始形态不变（继续可以真实打开），新增一个**独立存储的**
+`Manifest.Req` 字段，在 `BuildManifest` 内一次性算出 `ReqCoord(path, line)` 存住——`Req` 不是
+`Path` 的方法/计算属性，是构造时就固定下来的字符串，这样任何持有 `*Manifest` 的消费者不需要
+知道"该不该规范化"这条规则，直接读 `.Req` 即可。`report` 侧的 `ReqInfo.Path`/`.Line` 同理保持
+原样不变（`session.go` 的 `collect`/`Lookup` 一行都没改）——`RequestRow.Req` 通过
+`ctxgraph.ReqCoord(rc.path, rc.line)` 在装配时现算，规范化只发生在"计算 `req` 字符串"这一步，
+从不发生在"存哪个 `Path`"这一步。这是本次执行里第一原则判断最重要的一次修正。
+
+**2. `FileName` 的详单命名去掉了结构化错误类别后缀——比原计划设想的更彻底。**
+原计划§3.2 只说"文件名对所有记录都必须可算，包括 `ok=false` 的那批"，但没有意识到：一旦要求
+"仅凭 `Manifest` 就能算出与仅凭 `*audit.Record` 算出的名字逐字节相同"，`errorClass(rec)`（读
+`rec.Attempts[].ErrorClass`）就成了死结——`ctxgraph.Manifest` 从不存 `Attempts`，两条路径永远
+对不上。第一性原理的解法：**哈希（`ReqHash8(req)`）本来就承担了唯一性，装饰性前缀不需要再顶一次
+消歧职责**。于是命名公式统一简化为 `{ts}_{virtual}_{real}_{outcome}_{hash8}.md`，`outcome` 只是
+`"ok"`/`"error"`/`"canceled"`，不再拼错误子类。这个错误子类今天仍然完整可见——就在详单正文里
+`renderAttempts` 逐次尝试的展示中——只是从"文件名里能看到"变成"点开文件才能看到"，为的是让
+`FileNameForRecord`/`FileNameForManifest` 永远算出同一个值。
+
+**3. render.go/detail.go 需要下沉的范围比原计划评估的大得多。**
+原 ActionPlan §3.1 只点名了 `RoleTokens`/`ToolCalls`/`TraceID`/`ChatID`/`ToolsSig`/`Truncated`/
+`NoReply`/`Usage` 这一批"detail.go 自己已经有双路径"的字段。实际读 `internal/report/render.go`
+（356 行，detail.go 之外一个独立文件）后发现：这个文件里的 `codeFence`/`details`/`escapeHTML`/
+`escapeCell`/`truncCell`/`jsonIndent`/`roleChars`/`roleTokens`/`roleStatLine`/
+`renderMessageSection`/`fmtCount`/`attemptErrorClass`/`countImages`/`bodyBytes`/`bodyRaw`/`pct`/
+`fmtN`/`tokensTriple`/`ms` 这一整套函数，早就不是"detail.go 专属的渲染原语"——`report/session.go`
+（`collectRoleUsage` 调 `roleChars`/`roleTokens`）、`recextract.go`（`bodyBytes`/`countImages`/
+`attemptErrorClass`）、`section_cost.go`（`details`）、`ingest.go`（`attemptErrorClass`）、
+`tokenest.go`（`bodyRaw`）都在直接调用它们，只是因为同在 `report` 包内所以从未显式暴露过这个
+依赖。第一性原理判断：这批函数全部是"只读 `audit.Record`/裸文本，不碰会话分组状态"的纯函数，
+和架构文档 §7.6(a) 描述的"per-record 纯计算，该下沉"是同一类东西，只是原计划因为只读了
+`detail.go` 一个文件而低估了范围。处置：整批下沉到 `internal/reqdetail`，导出 11 个跨包消费的
+函数（`RoleChars`/`RoleTokens`/`Details`/`BodyBytes`/`BodyRaw`/`AttemptErrorClass`/`CountImages`/
+`ErrorClass`/`RealModel`/`LastEndpoint`/`ToolsSig`），`report` 的 5 个消费方改成调用导出版本。
+`session.go` 里那份手写的 `toolsSig` 实现（与 `reqdetail.ToolsSig` 逻辑相同，此前各自维护一份）
+直接删除，统一用 `reqdetail` 的版本。
+
+**4. `assignNames`/`detailFileNameFromInfo` 的批次计数器被完全消灭，而不只是"detail.go 里"的那份。**
+原计划知道 `detail.go` 里有一个 `used map[string]int` 计数器要删，但没有注意到 `session.go` 里
+还有一份**平行实现**（`detailFileNameFromInfo`，注释原文"mirrors detailFileName for the analysis
+pass"）——这正是架构文档反复强调的"同一件事有两份手写实现，迟早分叉"的活例子。处置：
+`assignNames` 现在直接调 `reqdetail.FileName(r.TS, r.Model, r.realModel, r.Outcome,
+ctxgraph.ReqCoord(r.Path, r.Line))`，`detailFileNameFromInfo`/`displayModelName` 整个函数删除，
+`used` 计数器不再存在于任何地方（`DetailWriter` 结构体里的 `usedMu`/`used` 字段同步删除）。
+
+**5. 顺手清理了两个变成死代码的 `ReqInfo` 私有字段。**
+`errClass`/`endpoint`（`session.go` 的 `collect()` 里赋值）在删除 `detailFileNameFromInfo` 之后
+变成了纯写不读——`grep` 全仓确认没有任何消费方。删除这两个字段与其赋值语句（`ReqInfo.realModel`
+保留，`assignNames` 仍然需要它）。这不在原计划的任务列表里，是删除上游消费方后顺带发现的死代码，
+按"发现即清"处理，不是范围蔓延。
+
+### 7.3 独立并发评审的处理
+
+执行期间，仓库里出现了一份我没有创建的文档
+（`docs/future-strategy/story_report_p2_action_plan_review_gemini-3.7-flash.md`）——与 P1 执行期间
+同样的并发写作模式（另一个会话在独立评审本文档）。已通读全文并逐条核实（针对的是我最初写就、
+尚未执行的 ActionPlan 文本，不是针对最终代码）：
+
+**核实为真、且与我执行期独立发现的问题相同、已通过上面 §7.2 第 1/2 条方式解决的两条**：
+`Manifest.Path` 规范化会破坏 `BlobIndex.FetchAll`；`FileName` 依赖 `rec.Attempts` 里的
+`ErrorClass` 会导致 `FileNameForRecord`/`FileNameForManifest` 分裂。两份评审殊途同归，
+交叉验证了这两处判断的必要性。
+
+**核实为真、原计划确实遗漏、已修复的一条（评审 §2.3）**：`ScanCached` 缓存命中时，直接复用
+`cached.Manifests`——这些 `*Manifest` 的 `Path` 字段是**上一次**运行时的路径拼写，如果本次运行
+换了路径拼写（不同 cwd、绝对↔相对），复用的 `Path` 会与本次实际可访问的路径不一致，等 `story`
+需要靠它读回正文时会失败。这是一个 P2.1 键规范化**放大**了触发概率的既有隐患（规范化之前，
+路径拼写一变就会缓存 MISS，等于每次都用当次路径重新解析，"自愈"了这个问题；规范化之后命中率
+提高，隐患的触发窗口反而变大了）。修复：`scanCachedFile` 命中时把 `cached.Manifests` 里每个
+`Manifest.Path` 重新绑定为本次调用的 `path`（`Req` 不需要重算——它本来就是
+`CanonicalPath(path)` 派生的，跟路径拼写无关）。补了回归测试
+`TestScanCached_HitRebindsManifestPathToCurrentInvocation`。
+
+**核实为真、已补测试覆盖的一条（评审 §3.2）**：`m == nil`（请求体完全没解析成聊天对象）这条
+路径此前没有专门的单测锁定"不 panic、字段合理降级"。补了
+`TestRender_RejectedRecordNoManifest`。
+
+**核实为部分正确、判断为设计品味而非架构违规、采用轻量处置的一条（评审 §2.5）**：评审认为
+`report/session.go`（会话/任务切分分析）反向依赖 `internal/reqdetail`（"详单渲染器"）是分层倒置，
+建议把 `RoleTokens` 等函数搬进 `chatmsg`/`taskseg`。核实结论：这条依赖不违反任何 `archtest`
+强制的规则（`reqdetail` 不反向 import `report`，单向依赖成立）；`chatmsg` 确实能接住
+`RoleTokens`/`RoleChars`，但 `AttemptErrorClass`/`RealModel`/`LastEndpoint`/`CountImages` 这几个
+操作 `audit.Attempt`/`Images` 字段的函数在 `chatmsg`（消息解析包）里没有自然位置，评审方案本身
+并不完整。真正的问题是命名/心智模型：`reqdetail` 不只是"渲染器"，它同时是"per-record 事实提取
+的共享叶子"（这批函数本来就不含任何渲染逻辑），只是包名读起来偏向渲染一侧。采纳的处置：不做
+代码搬迁（收益不确定、`chatmsg` 是被高频依赖的基础包，改动面不成比例），改为在 `CLAUDE.md` 的
+模块表里把 `reqdetail` 的描述从"详单渲染"改写为"两件事：per-record 事实提取 + 详单渲染"，把
+心智模型说清楚。
+
+**核实为已经在实现中做对、评审的建议只是文档措辞问题的一条（评审 §2.4）**：`PrevTurnLink`
+接口缺口最终确实按评审建议的方向解决（`FileNameForManifest`，不需要上一轮完整
+`*audit.Record`），执行时独立收敛到了同一个设计——评审文档写成时我已经落地了这部分代码，
+只是 ActionPlan 文本本身（§3.2 那段"两个可行方向，选哪个留给实现时定"）没有跟着更新，
+本次 §7.2 第 1/2 条 和 §4 的回填已经补上。
+
+**核实为文档措辞误差、不影响代码的一条（评审 §3.1）**：`RequestRow` 的实际构造点是
+`recextract.go:21` 的 `buildRequestRow`，不是原文写的 `rows.go:506` 附近——`rows.go:506`
+只是 `StickyEffect` 的字段注释，我落地时读的是正确的位置（`recextract.go`），这条只是
+ActionPlan 叙述文本的一处笔误，不是代码问题。
+
+两处高 ROI 修复（缓存路径重绑定、`m == nil` 测试覆盖）均已落地并通过测试；`reqdetail` 命名
+的心智模型问题已通过文档描述缓解。评审文档本身未删除、未修改，留在仓库里供你查阅。
+
+### 7.4 尚待你决定的事项
+
+1. 仓库里那份非我创建的评审文档（`story_report_p2_action_plan_review_gemini-3.7-flash.md`）
+   是否需要处理——本次执行只读取核实了内容，未改动、未删除。
+2. 所有代码/文档改动都在工作区，未 `git add`/`git commit`，等待你 review 后决定如何处理。

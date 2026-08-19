@@ -83,6 +83,9 @@ type fileCacheResult struct {
 // untouched, so a cache built from a wider (or different) file set doesn't
 // lose those entries just because this call loaded fewer files.
 func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
+	if err := CheckPathCollisions(paths); err != nil {
+		return nil, nil, err
+	}
 	next := &FileCache{Files: make(map[string]CachedFile, len(paths))}
 	if prior != nil {
 		for k, v := range prior.Files {
@@ -126,20 +129,39 @@ func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
 // every element, so a nil here would panic the whole scan instead of
 // costing one file's worth of re-parse.
 func scanCachedFile(path string, prior *FileCache) fileCacheResult {
+	// key is the FileCache's identity for this file — CanonicalPath(path),
+	// never the raw path used for I/O below: two runs of the same log file
+	// invoked with an absolute path once and a relative path another time
+	// must land in the same cache slot, or the cache accumulates duplicate
+	// entries for what is, on disk, one file (see reqcoord.go's doc
+	// comment). hash/scanFile still take the real path — they open it.
+	key := CanonicalPath(path)
 	hash, err := HashFile(path)
 	if err != nil {
-		return fileCacheResult{path: path, err: err}
+		return fileCacheResult{path: key, err: err}
 	}
 	if prior != nil {
-		if cached, ok := prior.Files[path]; ok && cached.Hash == hash && !hasNilManifest(cached.Manifests) {
-			return fileCacheResult{path: path, entry: cached}
+		if cached, ok := prior.Files[key]; ok && cached.Hash == hash && !hasNilManifest(cached.Manifests) {
+			// Rebind each Manifest's I/O path to this run's own path string
+			// — a cache hit loaded from a prior run's persisted
+			// vmr-requests.json/vmr-stories.json carries whatever path
+			// spelling THAT run used (absolute, relative, a different
+			// cwd...), and BlobIndex.FetchAll/records.go's FetchRecords
+			// later open Manifest.Path directly to recover original
+			// message content. Req is untouched: it's already
+			// CanonicalPath(path)-based (see ReqCoord), so it's identical
+			// under any path spelling and never needs rebinding.
+			for _, m := range cached.Manifests {
+				m.Path = path
+			}
+			return fileCacheResult{path: key, entry: cached}
 		}
 	}
 	res := scanFile(path)
 	if res.err != nil {
-		return fileCacheResult{path: path, err: res.err}
+		return fileCacheResult{path: key, err: res.err}
 	}
-	return fileCacheResult{path: path, entry: CachedFile{Hash: hash, Manifests: res.manifests, NoBody: res.noBody}}
+	return fileCacheResult{path: key, entry: CachedFile{Hash: hash, Manifests: res.manifests, NoBody: res.noBody}}
 }
 
 func hasNilManifest(ms []*Manifest) bool {

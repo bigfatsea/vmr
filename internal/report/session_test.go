@@ -14,6 +14,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 // sseToolCall builds a minimal OpenAI SSE stream that calls one tool and
@@ -74,6 +75,12 @@ func msg(role, content string) map[string]any {
 	return map[string]any{"role": role, "content": content}
 }
 
+// writeJSONL writes recs to a fresh temp file and returns its path. The
+// basename is derived from t.TempDir()'s own unique suffix (not a fixed
+// "audit.jsonl") — real audit files always carry a date and never collide
+// on basename (see ctxgraph's CheckPathCollisions), and a fixed name would
+// make two calls whose paths ever land in the same Scan/ScanCached call
+// collide on purpose.
 func writeJSONL(t *testing.T, recs []audit.Record) string {
 	t.Helper()
 	var b strings.Builder
@@ -85,7 +92,8 @@ func writeJSONL(t *testing.T, recs []audit.Record) string {
 		b.Write(raw)
 		b.WriteByte('\n')
 	}
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit-"+filepath.Base(dir)+".jsonl")
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +314,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
 	}
 	out := filepath.Join(dir, "details")
-	if n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN); err != nil {
+	if n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatalf("n = %d, want 1", n)
@@ -320,7 +328,7 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(t.TempDir(), "details")
-	n, err := WriteDetails([]string{path}, dir, a, nil, i18n.EN)
+	n, err := WriteDetails([]string{path}, dir, a, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,21 +336,32 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatalf("n = %d, want 6", n)
 	}
 
-	// The r3 detail file carries the session header and delta section.
+	// The r3 detail file carries the delta section (previous-turn link +
+	// increment highlight), computed from ctxgraph.Classify against its
+	// lineage predecessor's Manifest — but deliberately NOT a
+	// "Session s01 / Task t02" position line: P2 cut that (see
+	// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3) —
+	// a leaf detail page doesn't know its position in report's session/task
+	// tree, only whoever links to it (a requests-index row, a spine step)
+	// does, and run-scoped session/task numbers would make the SAME
+	// record's detail page differ between a full-corpus run and a subset
+	// run, defeating the entire point of coordinate-based naming.
 	r3 := a.Sessions[0].Tasks[1].Recs[0]
 	body, err := os.ReadFile(filepath.Join(dir, r3.DetailFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"**Session s01** · **Task t02**",
 		"🆕 #7 user", // per-message emoji on the increment
-		"换个方向",      // NewInstruction still surfaces in meta line
+		"换个方向",      // this delta's actual new message content, rendered inline
 		"This turn's increment (vs. the previous turn, +5", // footer summary on the message list (5 msgs in this r3 delta)
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("r3 detail missing %q", want)
 		}
+	}
+	if strings.Contains(string(body), "Session s01") || strings.Contains(string(body), "Task t02") {
+		t.Errorf("r3 detail should not render a run-scoped session/task position line, got:\n%s", body)
 	}
 }
 

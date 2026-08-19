@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/ctxgraph"
 	"vmr/internal/taskseg"
 )
 
@@ -94,7 +95,8 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	if string(wantJSON) != string(gotJSON) {
 		t.Errorf("BuildCached (warm) differs from Build:\nBuild:       %s\nBuildCached: %s", wantJSON, gotJSON)
 	}
-	if cache2.Files[path].Hash != cache1.Files[path].Hash {
+	key := ctxgraph.CanonicalPath(path)
+	if cache2.Files[key].Hash != cache1.Files[key].Hash {
 		t.Error("warm cache entry's hash should be unchanged (file didn't change)")
 	}
 }
@@ -170,8 +172,9 @@ func TestWriteRequestsJSON_RoundTripsFilesAndRows(t *testing.T) {
 	if loaded == nil || len(loaded.Files) != 1 {
 		t.Errorf("LoadRequestsFileCache = %+v, want the same 1-entry cache", loaded)
 	}
-	if loaded.Files[path].Hash != cache.Files[path].Hash {
-		t.Errorf("loaded hash %q != original %q", loaded.Files[path].Hash, cache.Files[path].Hash)
+	key := ctxgraph.CanonicalPath(path)
+	if loaded.Files[key].Hash != cache.Files[key].Hash {
+		t.Errorf("loaded hash %q != original %q", loaded.Files[key].Hash, cache.Files[key].Hash)
 	}
 }
 
@@ -232,7 +235,8 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}
-	if cache2.Files[path].Hash == cache1.Files[path].Hash {
+	key := ctxgraph.CanonicalPath(path)
+	if cache2.Files[key].Hash == cache1.Files[key].Hash {
 		t.Error("hash should differ after appending")
 	}
 	if rep2.Meta.Records != 3 {

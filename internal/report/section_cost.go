@@ -10,6 +10,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // ---- §2 成本估算 ----
@@ -121,5 +122,5 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	if rep.Pricing.ProviderOverrides > 0 {
 		summary += fmt.Sprintf("; %d provider override rule(s) applied", rep.Pricing.ProviderOverrides)
 	}
-	w("%s\n\n", details(t.FrozenSnapshotSummary, summary))
+	w("%s\n\n", reqdetail.Details(t.FrozenSnapshotSummary, summary))
 }

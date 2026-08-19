@@ -14,6 +14,7 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
+	"vmr/internal/reqdetail"
 )
 
 // smallAuditRecords returns a few synthetic records covering ok/error,
@@ -1074,8 +1075,8 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, toolShapeTieRecords())
 
-	wantShape := toolsSig(toolShapeTieNamesA)
-	if other := toolsSig(toolShapeTieNamesB); other < wantShape {
+	wantShape := reqdetail.ToolsSig(toolShapeTieNamesA)
+	if other := reqdetail.ToolsSig(toolShapeTieNamesB); other < wantShape {
 		wantShape = other
 	}
 	wantImplicated := wantShape + "/1 requests"

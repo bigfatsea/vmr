@@ -15,9 +15,15 @@ import (
 	"vmr/internal/taskseg"
 )
 
+// writeJSONL writes recs to a fresh temp file and returns its path. The
+// basename is derived from t.TempDir()'s own unique suffix (not a fixed
+// "audit.jsonl") — real audit files always carry a date and never collide
+// on basename (see ctxgraph's CheckPathCollisions), and a fixed name would
+// make two calls within the same test collide on purpose.
 func writeJSONL(t *testing.T, recs []audit.Record) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit-"+filepath.Base(dir)+".jsonl")
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

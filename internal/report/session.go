@@ -25,7 +25,6 @@
 package report
 
 import (
-	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +39,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/reqdetail"
 	"vmr/internal/taskseg"
 )
 
@@ -128,10 +128,8 @@ type ReqInfo struct {
 	// boundary — the next record's "new instruction" is a retry of
 	// the skipped one, not a fresh user intent.
 	NoReply   bool
-	errClass  string // last attempt error class (filename suffix)
-	realModel string // model segment of the final attempt's endpoint
+	realModel string // model segment of the final attempt's endpoint — assignNames' FileName input
 	declBytes int64  // serialized size of the declared tools array
-	endpoint  string // final attempt endpoint
 	attempts  int
 	durMS     int64
 	ttftMS    int64
@@ -348,16 +346,16 @@ func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
 	r.NoReply = prof.NoReply(r.Finish, r.respText)
 }
 
-// collectRoleUsage accumulates roleChars(body)/roleTokens(body) onto r's
+// collectRoleUsage accumulates reqdetail.RoleChars(body)/reqdetail.RoleTokens(body) onto r's
 // per-role maps, lazily allocating each on first use.
 func collectRoleUsage(r *ReqInfo, body map[string]any) {
-	for role, c := range roleChars(body) {
+	for role, c := range reqdetail.RoleChars(body) {
 		if r.RoleChars == nil {
 			r.RoleChars = map[string]int64{}
 		}
 		r.RoleChars[role] += c
 	}
-	for role, t := range roleTokens(body) {
+	for role, t := range reqdetail.RoleTokens(body) {
 		if r.RoleTokens == nil {
 			r.RoleTokens = map[string]int64{}
 		}
@@ -381,14 +379,12 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 		}
 	}
 	for _, at := range rec.Attempts {
-		if attemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
+		if reqdetail.AttemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
 			r.Truncated = true
 		}
 	}
-	r.errClass = errorClass(rec)
-	r.realModel = realModel(rec)
-	r.endpoint = lastEndpoint(rec)
-	n, compressed := countImages(rec.Images)
+	r.realModel = reqdetail.RealModel(rec)
+	n, compressed := reqdetail.CountImages(rec.Images)
 	r.Images, r.ImagesCompressed = n, compressed
 	r.attempts = len(rec.Attempts)
 	if r.attempts > 1 {
@@ -420,7 +416,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	}
 	r.ToolsDeclared = chatmsg.ToolNames(body)
 	if tools, hasTools := body["tools"]; hasTools || len(r.ToolsDeclared) > 0 {
-		r.ToolsSig = toolsSig(r.ToolsDeclared)
+		r.ToolsSig = reqdetail.ToolsSig(r.ToolsDeclared)
 		if raw, err := json.Marshal(tools); err == nil {
 			r.declBytes = int64(len(raw))
 		}
@@ -504,22 +500,17 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 	return tags
 }
 
-// toolsSig fingerprints a declared tool set: count plus name-list hash.
-func toolsSig(names []string) string {
-	sorted := append([]string(nil), names...)
-	sort.Strings(sorted)
-	sum := md5.Sum([]byte(strings.Join(sorted, ",")))
-	return fmt.Sprintf("tools:%d/%x", len(names), sum[:4])
-}
-
 // ---- grouping ----
 
-// assignNames gives every record its deterministic detail filename in ts
-// order, so WriteDetails and the requests export agree on links.
+// assignNames gives every record its deterministic detail filename, so
+// WriteDetails and the requests export agree on links. No batch-order
+// state (the pre-P2 "used" collision-counter map) is needed any more: the
+// name is keyed by this record's own coordinate hash
+// (reqdetail.FileName/ctxgraph.ReqCoord), which is unique on its own — see
+// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.
 func assignNames(recs []*ReqInfo) {
-	used := map[string]int{}
 	for _, r := range recs {
-		r.DetailFile = detailFileNameFromInfo(r, used)
+		r.DetailFile = reqdetail.FileName(r.TS, r.Model, r.realModel, r.Outcome, ctxgraph.ReqCoord(r.Path, r.Line))
 	}
 }
 
@@ -803,32 +794,4 @@ func stripBracketPrefix(s string) string {
 		}
 	}
 	return s
-}
-
-// ---- filename (shared with detail.go) ----
-
-// detailFileNameFromInfo mirrors detailFileName for the analysis pass, which
-// only has the features captured in collect (not the full record). Endpoint/
-// error class come from those captured features; both passes therefore
-// produce identical names.
-func detailFileNameFromInfo(r *ReqInfo, used map[string]int) string {
-	outcome := r.Outcome
-	if outcome == "error" && r.errClass != "" {
-		outcome += "-" + r.errClass
-	}
-	base := fmt.Sprintf("%s_%s_%s_%s",
-		r.TS.In(fmtutil.DisplayZone).Format("20060102-150405.000"),
-		sanitizeName(displayModelName(r.Model)), sanitizeName(r.realModel), sanitizeName(outcome))
-	used[base]++
-	if n := used[base]; n > 1 {
-		base = fmt.Sprintf("%s-%d", base, n)
-	}
-	return base + ".md"
-}
-
-func displayModelName(model string) string {
-	if model == "" {
-		return "(rejected)"
-	}
-	return model
 }

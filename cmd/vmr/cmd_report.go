@@ -290,7 +290,7 @@ func cmdReport(args []string) error {
 	detailDir := filepath.Join(outDir, "details")
 	var onRecord func(*audit.Record, *report.ReqInfo)
 	if detailsOn {
-		dw, err = report.NewDetailWriter(detailDir, lang)
+		dw, err = report.NewDetailWriter(detailDir, lang, resolveTaskProfile())
 		if err != nil {
 			return err
 		}
