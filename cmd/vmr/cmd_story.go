@@ -158,7 +158,7 @@ func cmdStory(args []string) error {
 		if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
 			return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
 		}
-		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, includePartial, outDir, llmOpts, paths, lang, idx)
+		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, includePartial, outDir, llmOpts, lang, idx)
 	}
 	if *corpus {
 		return corpusStats(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx)
@@ -424,7 +424,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, sources []string, lang i18n.Lang, idx *story.StoryIndex) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -450,7 +450,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB)
 	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics)
-	extras.Sources = sources
+	extras.Sources = story.SourceFiles(idx, jA.ID, jB.ID)
 	cmp.Extras = &extras
 
 	// -llm-dry-run: print the evidence-pack size estimate and return

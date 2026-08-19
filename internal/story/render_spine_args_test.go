@@ -156,11 +156,14 @@ func TestToolCallLine(t *testing.T) {
 		}
 	})
 
-	t.Run("multi-line command: fenced, complete, not reduced to one line", func(t *testing.T) {
+	t.Run("multi-line command: folded, complete inside, not reduced to one line", func(t *testing.T) {
 		cmd := "python3 << 'PYEOF'\nimport pandas\nresult = fetch_eastmoney_ipo_data()\nprint(result)\nPYEOF"
 		got := toolCallLine(tc("exec", jsonArgs(t, map[string]any{"command": cmd})), et)
-		if !strings.HasPrefix(got, "🔧 `exec` `command`:\n```\n") {
-			t.Errorf("toolCallLine(exec) = %q, want the fenced-block lead-in", got)
+		if !strings.HasPrefix(got, "🔧 `exec` `command`: <details><summary>") {
+			t.Errorf("toolCallLine(exec) = %q, want the folded-block lead-in", got)
+		}
+		if !strings.Contains(got, "</summary>\n\n```\n") || !strings.Contains(got, "\n```\n\n</details>") {
+			t.Errorf("toolCallLine(exec) = %q, want a fenced block inside the fold", got)
 		}
 		for _, line := range strings.Split(cmd, "\n") {
 			if !strings.Contains(got, line) {

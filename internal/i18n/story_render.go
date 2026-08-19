@@ -26,6 +26,10 @@ type StoryText struct {
 	SysChangedLine      string
 	NoReplyLine         string
 
+	SysPromptHeaderTitle   string
+	SysPromptHeaderChanged func(eras int) string
+	SysPromptEraSummary    func(fromSeq, toSeq, chars int) string
+
 	ReasoningSummary func(chars int) string
 	ReplySummary     func(preview string) string
 	EmptyEvent       func(head string) string
@@ -68,6 +72,18 @@ func Story(lang Lang) StoryText {
 			},
 			SysChangedLine: "> ⚙️ **system prompt 变更**（换模型 / 换工具集 / 平台注入变化，原因未知，如实标出）\n\n",
 			NoReplyLine:    "- ⏭️ **本轮 LLM 未实际回复**（NO_REPLY 或空内容）——下一轮可能是重试\n\n",
+
+			SysPromptHeaderTitle: "## System Prompt\n\n",
+			SysPromptHeaderChanged: func(eras int) string {
+				return "> ⚙️ 全程共出现 " + strconv.Itoa(eras) + " 版不同的 system prompt（下方按出现顺序分别列出，每版只展示一次）\n\n"
+			},
+			SysPromptEraSummary: func(fromSeq, toSeq, chars int) string {
+				rangeLabel := "Step " + strconv.Itoa(fromSeq)
+				if toSeq > fromSeq {
+					rangeLabel += "–" + strconv.Itoa(toSeq)
+				}
+				return rangeLabel + " · " + strconv.Itoa(chars) + " 字符"
+			},
 
 			ReasoningSummary: func(chars int) string { return "🤔 reasoning · " + strconv.Itoa(chars) + " 字符" },
 			ReplySummary:     func(preview string) string { return "💬 回复 · " + preview },
@@ -112,6 +128,18 @@ func Story(lang Lang) StoryText {
 		},
 		SysChangedLine: "> ⚙️ **System prompt changed** (model switch / toolset switch / platform injection change, reason unknown, marked as observed)\n\n",
 		NoReplyLine:    "- ⏭️ **No actual LLM response this turn** (NO_REPLY or empty content) — the next turn may be a retry\n\n",
+
+		SysPromptHeaderTitle: "## System Prompt\n\n",
+		SysPromptHeaderChanged: func(eras int) string {
+			return "> ⚙️ " + strconv.Itoa(eras) + " distinct system prompt versions appeared over this Journey (listed below in order of first appearance, each shown once)\n\n"
+		},
+		SysPromptEraSummary: func(fromSeq, toSeq, chars int) string {
+			rangeLabel := "Step " + strconv.Itoa(fromSeq)
+			if toSeq > fromSeq {
+				rangeLabel += "–" + strconv.Itoa(toSeq)
+			}
+			return rangeLabel + " · " + strconv.Itoa(chars) + " chars"
+		},
 
 		ReasoningSummary: func(chars int) string { return "🤔 reasoning · " + strconv.Itoa(chars) + " chars" },
 		ReplySummary:     func(preview string) string { return "💬 reply · " + preview },

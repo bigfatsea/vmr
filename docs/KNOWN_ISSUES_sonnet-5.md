@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**：中危 4 项、低危 9 项，无高危项。
+- **§1 分布**：中危 6 项、低危 12 项，无高危项。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
@@ -115,6 +115,27 @@
 - **推进方式**：已有完整方案文档 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，写明了倾向的方向（叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 保持语言无关的机器锚点）、需要动的模块清单、以及当前的阶段性状态。下次要推进这项工作时先读那份文档，不要凭这条条目里的只言片语重新分析一遍。
 - **登记来源**：本条目对应的复核与方案讨论，2026-08-17。
 
+### 1.20 [低] Compare 报告开篇未展示两侧完整初始 User Message
+
+- **现状**：`JourneyRef.Title`（`compare.go`）来自 `taskseg.Preview()`，故意限制在 80 rune 以内——因为它同时被候选 Journey 列表、`vmr-stories.md`、Finding 描述等多处"一行摘要"场景复用，不能单独放大。完整原文其实已经在内存里（`Step.NewEvents[].Msg.Text` 是未截断的原文），只是从未作为独立字段暴露给 `JourneySummary`/`JourneyRef`。
+- **为什么待定**：技术上可行，但有三处需要先拍板的设计选择——要不要给"完整"设一个有界上限（语料库里已出现过反例：某 Journey 的首条消息是几千字符的 JSON 粘贴）、展示位置是替换现有摘要还是新增一个折叠区块、要不要让这段原文也进入 `compare-*.json`（进了就会被 `-llm-addr` 的 evidence pack 一并喂给 LLM，增加调用成本）。这些是产品/成本取舍，不是"漏了一个字段"。
+- **推进方式**：已有完整方案文档 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §4，写明了推荐实现路径（新增 `FirstUserMessageExcerpt`，复用现有折叠展示惯例）和三处待确认的选择点。下次推进前先读那份文档。
+- **登记来源**：本条目对应的复核，2026-08-19。
+
+### 1.21 [低] Journey 报告决策脊柱与工具调用结果配对依赖 `tool_call_id`，部分 agent 客户端的 ID 在响应/请求两侧会被改写
+
+- **现状**：决策脊柱现已展示每个工具调用的配对结果（`toolResultLine`，`render_spine_step.go`），配对键是 `chatmsg.ToolCall.ID`（来自这一轮响应流的重组）精确匹配下一轮请求里 `role=tool` 消息的 `tool_call_id`——这是 F9 因果配对不变量本该保证成立的匹配（`chatmsg/pairing.go`）。但用本机真实审计日志（`~/code/vmr/logs/vmr-audit-2026-07-28.jsonl.zst`）验证两条样例 Journey（openclaw 33 次调用、lobster 64 次调用）后发现：**两条 Journey 的配对成功率都是 0%**。逐条核对原始字节确认：这条 `openai:opencode:deepseek-v4-pro` 链路的响应流里，模型返回的 tool_call id 形如 `call_00_xHodGBOXHzFfUnFh4mZR8555`（带下划线），但同一次调用在下一轮请求的 `tool_calls[].id`/`tool_call_id` 里变成了 `call00xHodGBOXHzFfUnFh4mZR8555`（下划线被去掉）——两次 zstdcat 直接核对原始 JSON 字节确认了这一点，不是 VMR 解析出的错误。这不是 VMR 的 bug（`chatmsg.ReassembleSSE` 逐字段赋值，没有拼接/篡改逻辑），而是 `opencode`（这条链路里 VMR 与 deepseek-v4-pro 之间的代理/网关，从 `EndpointLabel` 的中间字段可见）在转发时改写了 ID——一个上游可观测但 VMR 管不到的行为。
+- **影响**：对这条 `opencode` 链路产生的 Journey，"工具调用结果"折叠块现在完全不出现（不是显示错误，是按设计规则匹配失败后干净地什么都不渲染）——功能对其它 ID 不被中途改写的 provider/client 组合应该是有效的，只是恰好用户给的两份样例都来自这条会改写 ID 的链路，验证时 100% 复现了这个降级。
+- **为什么不现在修**：能让配对起效的办法是加一个位置兜底（同一 Step 的 tool_calls 数量与下一 Step 的 tool_results 数量一致时，按出现顺序位置配对，而不是按 ID），协议语义上是安全的（两个协议都要求 tool_results 顺序与 tool_calls 顺序一致），但这已经不是纯粹的"读取事实"，而是在 ID 对不上时引入一条推断规则——不完全符合脊柱层至今"宁可粗糙也不猜语义"的一贯做法，需要你确认是否接受这种"协议保证的顺序推断"，以及配对结果要不要标注"按位置推断，ID 不匹配"以示区分。
+- **登记来源**：`render_spine_step.go`（`toolResultLine`/`toolResultsFor` 集成）2026-08-19 实现并用真实日志验证时发现；根因定位见当次分析记录 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §6。
+
+### 1.22 [低] Journey 报告 fact-layer（`## t0X`/`### Step N`）与决策脊柱内容重复，理想形态是链接到 `vmr report` 的 per-request detail 文件
+
+- **现状**：决策脊柱之后的 `## t01 · ...`/`### Step N ...` fact-layer 完整重复展示了脊柱已经摘要过的同一批底层数据（带完整消息体）。理想形态是脊柱直接链接到 `vmr report` 生成的 `reports/details/*.md`（`internal/report/detail.go`），点开才看详情。
+- **为什么待定，且不是简单待定**：`internal/story` 与 `internal/report` 被 `archtest`（`import_boundaries_test.go:64-67`）显式禁止互相 import——在 `story` 内部调用 `report` 的渲染函数去"自动生成缺失的 detail report"会直接编译失败/`archtest` 红。即使换成只拼路径不 import 代码，`detail.go` 的文件名（`detailFileName`）依赖跨整批记录累积的去重计数器（`used map[string]int`），`story` 侧无法独立、确定性地推算出对应文件名——这是一个需要先改 `report` 侧命名机制（换成不依赖批次状态的确定性方案，如内容 hash）才能解决的地基问题，不是 `story` 单侧能完成的。
+- **推进方式**：已有完整方案文档 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §7，给出了不违反 import 边界的"仅当文件存在才链接"路径，以及它依赖的 `detailFileName` 命名机制改造前提。这是本次复核 7 条里改动面最大、也最需要先做产品决策（story/report 两个产出物要不要在文件层面耦合）的一条，值得作为独立任务排期，不建议顺手做。
+- **登记来源**：本条目对应的复核，2026-08-19。
+
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 
 ### 2.1 运行时与并发
@@ -191,6 +212,11 @@
 12. **`respnorm` 检查方法并发安全与 `copyFlush` 生命周期同步**（`internal/respnorm`、`internal/router`）：`NormalizerStream` 的所有导出查询方法（`Applied`、`RawPreStrip`、`ObservedModel`、`Usage`、`OutBytes`）统一由互斥锁同步，彻底消除客户端断开或超时提前返回时 reader goroutine 尾读导致的数据竞态风险。
 13. **客户端流式中途断开在审计日志中精确标注 `canceled`**（`internal/router`、`internal/server`）：当客户端在流式传输中途断开或主动取消时，`router` 将 attempt 标记为 `canceled`（`canceled by client`），`server` 将审计记录的 `Outcome` 标注为 `canceled`，消除将未完成请求误计为成功的统计失真。
 14. **图片降采样磁盘缓存容量上限**（`internal/imgprep`）：在 TTL 清理的基础上增加 `defaultCacheCapBytes`（50MB）全局容量上限，超出时按 mtime 自动淘汰最旧条目，且与 TTL 开关解耦——`image_cache_ttl_days<=0`（保留全部条目）时容量上限依然生效，不会跟着一起失效。清扫本身沿用既有的「至多每天触发一次」节流，所以这是一个最终收敛到 50MB 的上限，不是任意时刻都成立的硬顶：单日内的突发写入可能在下一次触发的清扫之前短暂超出。
+15. **Compare 报告"证据溯源"改为按 Journey 精确定位**（`internal/story/storyindex.go` 新增 `SourceFiles`、`cmd/vmr/cmd_story.go`）：此前直接透传本次 `vmr story` 扫描到的全部输入文件，跟两个被比较的 Journey 实际用到哪些文件无关；改为从 `vmr-stories.json` 已经算好的每个 Journey 的 `Files` 字段取并集去重。用真实日志验证：无关文件从 9 个降到 0 个。
+16. **Compare 报告 LLM 解读标题层级**（`internal/i18n/story_llm.go`）：两段 LLM 解读（整体对比、分叉点）各自内部的三个子标题原来跟外层 `## LLM 解读（...）` 平级，改为 `###` 子标题——改动在发给 LLM 的 prompt 文本里，不在渲染代码。
+17. **Journey 报告决策脊柱多行/超长工具调用参数默认折叠**（`internal/story/render_spine_args.go`）：`payloadBlock` 原先对多行或超长单行参数直接展开成一个不折叠的围栏代码块；现在折叠，`<summary>` 里放一段拉平截断的预览（`spinePreviewLen`），展开才是完整内容。
+18. **Journey 报告决策脊柱 Step 的原始消息不再截断**（`internal/story/render_spine_step.go` 的 `foldWhyLine`，取代原 `spineWhyLine` 的硬截断）：原先 `RespText`/`Reasoning` 超过 400/200 字符直接截断丢弃尾部；现在改为跟 `payloadBlock` 一致的折叠惯例——短文本内联，长文本折叠展示预览、展开为完整原文，永不丢内容。
+19. **Journey 报告 system prompt 移至文档头部、按出现顺序折叠一次**（`internal/story/render_md_sysprompt.go`）：原先只在 Step 1（或后续 `SysChanged` 的 Step）的 Messages 区块里出现一次，但恰好挡在决策脊柱与 Step 内容前面；现在在文档最开头单独渲染一个折叠区块（有多个版本时逐个列出各自的 Step 覆盖范围），Step 的 Messages 区块不再重复它。
 
 ---
 

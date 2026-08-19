@@ -4,6 +4,15 @@
 
 > 2 任务 · 3 轮 · 2026-07-29 10:00:00 → 10:00:06
 
+## System Prompt
+
+<details><summary>Step 1–3 · 28 字符</summary>
+
+```
+You are a helpful assistant.
+```
+</details>
+
 ## 概览
 
 - 起始 10:00:00
@@ -22,13 +31,6 @@
 ### 🔷 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
 
 **Messages**
-
-<details><summary>▸ system · You are a helpful assistant.</summary>
-
-```
-You are a helpful assistant.
-```
-</details>
 
 <details><summary>▸ user · 帮我查一下 A 股新股打新收益</summary>
 

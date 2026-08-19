@@ -40,6 +40,15 @@ const spineShortFieldLen = 60
 // general fix — not a bigger number, a different display strategy.
 const spineInlineLen = 120
 
+// spinePreviewLen bounds payloadBlock's collapsed-block summary: a
+// whitespace-flattened (newlines included) prefix of the full value, so a
+// reader scanning the spine sees roughly what the call did without
+// expanding it — a flattened prefix of the WHOLE value rather than a strict
+// first-raw-line cut, since a heredoc's opening line is often just
+// boilerplate (`python3 << 'PYEOF'`) or a bare comment. Longer than
+// spineInlineLen (120) on purpose — a preview is read, not a threshold.
+const spinePreviewLen = 160
+
 // spineFullCap bounds a fenced payload block's total size — generous
 // enough to show the large majority of real shell commands/scripts/URLs/
 // queries in full, but not unbounded: a pathologically large single
@@ -167,8 +176,13 @@ func toolCallLine(tc chatmsg.ToolCall, t i18n.SpineText) string {
 
 // payloadBlock lays out head (the "🔧 `name`" lead-in) plus one payload
 // value, complete: inline as "head key: value" when it's a single line
-// within spineInlineLen, else as its own fenced block under "head key:".
-// key is "" for the no-JSON-object fallback (nothing to label).
+// within spineInlineLen, else a folded <details> block — collapsed by
+// default so a multi-KB command doesn't push the rest of the spine off
+// screen, its <summary> a flattened preview (spinePreviewLen) so a reader
+// scanning the spine without expanding anything still sees roughly what the
+// call did, and the full value (still complete, up to spineFullCap) one
+// click away under "head key:". key is "" for the no-JSON-object fallback
+// (nothing to label).
 func payloadBlock(head, key, val string, t i18n.SpineText) string {
 	label := head
 	if key != "" {
@@ -177,5 +191,7 @@ func payloadBlock(head, key, val string, t i18n.SpineText) string {
 	if !strings.Contains(val, "\n") && len([]rune(val)) <= spineInlineLen {
 		return label + ": " + val + "\n\n"
 	}
-	return label + ":\n" + codeFence(capFull(val, t)) + "\n"
+	preview := oneLineTruncate(val, spinePreviewLen)
+	return label + ": <details><summary>" + preview + "</summary>\n\n" +
+		codeFence(capFull(val, t)) + "\n</details>\n\n"
 }

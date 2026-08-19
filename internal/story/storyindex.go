@@ -149,6 +149,41 @@ func MergeJourneyIndexRows(fresh []JourneyIndexRow, prior []JourneyIndexRow) []J
 	return out
 }
 
+// SourceFiles unions the Files lists of idx's rows matching any of ids —
+// the same file set BuildJourneyIndexRow already computed for each of those
+// Journeys individually, deduplicated and sorted for a stitched pair that
+// shares a boundary file. This is -compare's evidence-provenance source:
+// exactly the files the two Journeys being compared were built from, never
+// the full set of files this run happened to load (that would list every
+// unrelated Journey's log file too — see docs/VirtualModelRouter_Design_v4_Analytics.md's
+// vmr-stories.json section on why the index exists at all). An id with no
+// matching row (shouldn't happen — every id passed here was itself resolved
+// from idx's own candidate set moments earlier) simply contributes nothing.
+func SourceFiles(idx *StoryIndex, ids ...string) []string {
+	if idx == nil {
+		return nil
+	}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	set := map[string]bool{}
+	for _, r := range idx.Journeys {
+		if !want[r.ID] {
+			continue
+		}
+		for _, f := range r.Files {
+			set[f] = true
+		}
+	}
+	files := make([]string, 0, len(set))
+	for f := range set {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files
+}
+
 // RenderStoryIndexMarkdown renders vmr-stories.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
 func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {

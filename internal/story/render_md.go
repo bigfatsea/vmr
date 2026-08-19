@@ -38,6 +38,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) s
 		w("%s", t.BreakWarning(j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind, t), editStatsHint(j.Break.Edit, t)))
 	}
 
+	renderSystemPromptHeader(w, j, t)
 	renderOverviewCard(w, j, m, lang)
 	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang)
@@ -117,9 +118,15 @@ func renderStep(w func(string, ...any), s *Step, t i18n.StoryText, st i18n.Spine
 		renderCompactionInfo(w, s.Compaction, t)
 	}
 
-	if len(s.NewEvents) > 0 {
+	nonSys := make([]*Event, 0, len(s.NewEvents))
+	for _, ev := range s.NewEvents {
+		if ev.Msg.Role != "system" {
+			nonSys = append(nonSys, ev)
+		}
+	}
+	if len(nonSys) > 0 {
 		w("**Messages**\n\n")
-		for _, ev := range s.NewEvents {
+		for _, ev := range nonSys {
 			renderEvent(w, ev, t)
 		}
 	}

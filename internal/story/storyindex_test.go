@@ -189,3 +189,35 @@ func TestJourneyIndexRow_JSONRoundTrip(t *testing.T) {
 		t.Errorf("round-tripped row = %+v, want %+v", got, row)
 	}
 }
+
+func TestSourceFiles(t *testing.T) {
+	if got := SourceFiles(nil, "j-1"); got != nil {
+		t.Errorf("SourceFiles(nil) = %v, want nil", got)
+	}
+
+	idx := &StoryIndex{
+		Journeys: []JourneyIndexRow{
+			{ID: "j-1", Files: []string{"b.jsonl", "a.jsonl"}},
+			{ID: "j-2", Files: []string{"b.jsonl", "c.jsonl"}},
+			{ID: "j-3", Files: []string{"d.jsonl"}},
+		},
+	}
+
+	got := SourceFiles(idx, "j-1", "j-2")
+	want := []string{"a.jsonl", "b.jsonl", "c.jsonl"}
+	if len(got) != len(want) {
+		t.Fatalf("SourceFiles = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SourceFiles[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Missing ID should contribute nothing
+	gotMissing := SourceFiles(idx, "j-nonexistent")
+	if len(gotMissing) != 0 {
+		t.Errorf("SourceFiles(missing) = %v, want empty slice", gotMissing)
+	}
+}
+

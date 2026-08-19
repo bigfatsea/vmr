@@ -184,7 +184,7 @@ const llmSystemPromptZH = `你是一个 Agent 任务执行对比分析助手。�
 3. 核心假设用一张表输出，列为：候选根因 | 直接证据 | 置信度 | 改进建议。置信度只能填"高"/"中"/"低"三档之一：能在给定 JSON 或原文节选里指认出至少一条直接支持的具体证据才标"高"；只有间接证据、需要你自己推断关联的标"中"；仅凭排除法或直觉、没有明确证据锚点的标"低"。低置信度的候选也应该列出（让读者看到"想到了但证据不足"本身就有价值），但必须诚实标低，不能为了让结论显得更确定而拔高置信度，也不能因为不确定就干脆不提。"高"或"中"置信度的候选之后可以附最多 1-2 条可执行的改进建议，"低"置信度的不需要附。表格之后另起一行，用一句话给出你认为最主要的因果链（例如"A → B → C"的箭头形式）——这一句是你的归纳，不是新增事实，不需要额外标注。
 4. 必须专门列一段"VMR 看不到什么"——如宿主 Agent 自身的配置（如是否有类似 loop detection 的机制、工具白名单的来源等），这些不在给定证据里，如实说明是盲区，不要编造。
 5. 不要预设某种特定的结论模板（比如"一定是某个配置文件的差异"），根因判断完全基于这次给定的实际证据。
-6. 输出为 Markdown 正文，不要输出 JSON。第一行是一句话结论，然后依次是"## 候选根因"（含第 3 条要求的表格 + 一句话因果链）、"## 工作方式与阶段解读"、"## VMR 看不到什么"三个小节。`
+6. 输出为 Markdown 正文，不要输出 JSON。第一行是一句话结论，然后依次是"### 候选根因"（含第 3 条要求的表格 + 一句话因果链）、"### 工作方式与阶段解读"、"### VMR 看不到什么"三个小节——用三级标题，因为它们是本报告"LLM 解读"这个大章节下的子章节，不是与其平级的独立章节。`
 
 // llmSystemPromptEN is the same six rules in English — a complete,
 // independently-readable prompt, not a mechanical translation stitched from
@@ -197,7 +197,7 @@ Follow these rules strictly:
 3. Output the core hypotheses as one table with columns: Candidate Root Cause | Direct Evidence | Confidence | Suggested Fix. Confidence is exactly one of "High"/"Medium"/"Low": mark "High" only if you can point to at least one specific piece of directly-supporting evidence in the given JSON or excerpts; "Medium" for indirect evidence requiring your own inference; "Low" for anything based purely on elimination or intuition with no clear evidence anchor. Low-confidence candidates should still be listed (showing "considered but under-evidenced" has its own value), but must be honestly marked low — never inflate confidence to sound more certain, and never omit a candidate just because it's uncertain. "High"/"Medium" candidates may be followed by up to 1-2 actionable suggested fixes; "Low" ones don't need any. After the table, on a new line, give a one-sentence account of what you believe is the primary causal chain (e.g. an "A → B → C" arrow form) — this sentence is your own synthesis, not a new fact, and needs no extra labeling.
 4. You must include a dedicated section titled "What VMR Can't See" — things like the host Agent's own configuration (e.g. whether it has something like loop detection, where its tool allowlist comes from) are not in the given evidence; state honestly that these are blind spots rather than inventing an answer.
 5. Do not presuppose any particular conclusion template (e.g. "it must be a config-file difference") — base the root-cause judgment entirely on the actual evidence given this time.
-6. Output plain Markdown, not JSON. The first line is a one-sentence conclusion, followed in order by "## Candidate Root Causes" (containing rule 3's table plus the one-sentence causal chain), "## Working Style & Phase Interpretation", and "## What VMR Can't See".`
+6. Output plain Markdown, not JSON. The first line is a one-sentence conclusion, followed in order by "### Candidate Root Causes" (containing rule 3's table plus the one-sentence causal chain), "### Working Style & Phase Interpretation", and "### What VMR Can't See" — use level-3 headings, since these are subsections of this report's "LLM Interpretation" section, not standalone sections at the same level as it.`
 
 // llmSingleJourneySystemPromptZH is the single-Journey LLM layer's system prompt — llm_single.go's
 // SingleJourneyEvidencePack pairs Metrics + the rule-derived Findings list
@@ -242,7 +242,7 @@ const llmDivergenceSystemPromptZH = `你是一个 Agent 任务执行分叉点分
 2. 分叉点本身是一个已经确认的结构事实（"从这里开始两者不同了"），不需要你重新论证；你的任务是基于分叉点前后的证据，对"为什么会在这里分道扬镳"给出可能的解释，且必须明确标注这是你的推测，不是确认的因果关系。给出的每条解释附置信度："高"/"中"/"低"，判据同"高"需要能指认具体证据、"低"更接近猜测。
 3. 绝对不要判断哪一方"更好"或"更正确"——VMR 只记录了过程，没有记录任务是否真正达成了用户目标，这个判断超出了给定证据能支持的范围。
 4. 必须专门列一段"VMR 看不到什么"，如实说明盲区。
-5. 输出为 Markdown 正文，不要输出 JSON。第一行是一句话结论，然后依次是"## 分叉点解读"（含置信度）、"## VMR 看不到什么"两个小节。`
+5. 输出为 Markdown 正文，不要输出 JSON。第一行是一句话结论，然后依次是"### 分叉点解读"（含置信度）、"### VMR 看不到什么"两个小节——用三级标题，因为它们是本报告"LLM 解读"这个大章节下的子章节，不是与其平级的独立章节。`
 
 // llmDivergenceSystemPromptEN mirrors llmDivergenceSystemPromptZH — see its
 // doc comment for the rules' rationale.
@@ -253,7 +253,7 @@ Follow these rules strictly:
 2. The divergence point itself is an already-confirmed structural fact ("the two runs differ starting here") — you don't need to re-argue it. Your job is to offer a plausible explanation, based on the surrounding evidence, for why the paths diverged here — and you must explicitly label this as your own speculation, not a confirmed causal claim. Give each explanation a confidence level ("High"/"Medium"/"Low") using the same bar as elsewhere: "High" needs a specific evidence anchor, "Low" is closer to a guess.
 3. Never judge which side was "better" or "more correct" — VMR only records the process, not whether the task actually achieved the user's goal; that judgment is beyond what the given evidence can support.
 4. You must include a dedicated section titled "What VMR Can't See", stating the blind spots honestly.
-5. Output plain Markdown, not JSON. The first line is a one-sentence conclusion, followed by "## Divergence Interpretation" (with confidence levels) and "## What VMR Can't See".`
+5. Output plain Markdown, not JSON. The first line is a one-sentence conclusion, followed by "### Divergence Interpretation" (with confidence levels) and "### What VMR Can't See" — use level-3 headings, since these are subsections of this report's "LLM Interpretation" section, not standalone sections at the same level as it.`
 
 // --- Phase 1b Semantic Detector Prompts --------------------------------------
 

@@ -109,37 +109,9 @@ func renderOverviewCard(w func(string, ...any), j *Journey, m Metrics, lang i18n
 }
 
 // --- decision spine ---------------------------------------------------------
-// toolCallLine and its helpers live in render_spine_args.go (split out to
+// toolCallLine and its helpers live in render_spine_args.go; renderDecisionSpine/
+// renderSpineStep/spineWhyLine live in render_spine_step.go (split out to
 // stay under this file's archtest line budget).
-
-// spineWhyRespCap/spineWhyReasoningCap bound spineWhyLine's length —
-// generous for RespText (in practice always a short one-sentence plan/
-// decision, e.g. "akshare 1.18.79 可用！直接用 Python 获取数据。" — this cap only
-// guards against an unusually verbose reply), tighter for a Reasoning
-// excerpt (that field can run to paragraphs; the full text is one click
-// away in this Step's own LLM Response section, folded).
-const (
-	spineWhyRespCap      = 400
-	spineWhyReasoningCap = 200
-)
-
-// spineWhyLine renders the "why" behind this Step's tool calls, when the
-// model said anything: its own stated reply/plan (RespText) if present, or
-// — when RespText is empty but Reasoning isn't — a short excerpt of that,
-// prefixed 🤔 to mark it as the model's inferred internal reasoning rather
-// than a stated decision (matching render_md.go's own 🤔 convention for
-// the same field). "" when the Step said nothing at all this turn — not
-// every tool-calling Step does, and the spine shouldn't invent a reason
-// where the record has none.
-func spineWhyLine(s *Step) string {
-	if s.RespText != "" {
-		return "> " + oneLineTruncate(s.RespText, spineWhyRespCap) + "\n\n"
-	}
-	if s.Reasoning != "" {
-		return "> 🤔 " + oneLineTruncate(s.Reasoning, spineWhyReasoningCap) + "\n\n"
-	}
-	return ""
-}
 
 // oneLineTruncate collapses s to one line (internal whitespace normalized
 // to single spaces) and rune-truncates it to n.
@@ -150,79 +122,6 @@ func oneLineTruncate(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
-}
-
-// renderDecisionSpine renders the decision spine: one block per Task, one
-// sub-block per tool-calling Step — Step number/time (role-tagged the same
-// way the fact layer's own Step headers are just below, see stepRoleTag —
-// 🔄 for a Step toolCallRepeats flagged as an exact repeat is that tag,
-// not a second marker here), the model's own stated reason for what it's
-// about to do when it said one (spineWhyLine), then every tool call that
-// Step made — complete (toolCallLine), not a same-looking truncated
-// prefix. A Step referenced (as StepSeq or RelatedSeq) by any Finding
-// earns an extra ⚠️ on its header. Renders nothing for a Journey with no
-// tool calls at all (a pure Q&A Journey has no "decisions" to spine) —
-// and, within it, skips any Task whose Steps never called a tool either.
-func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang) {
-	t := i18n.Spine(lang)
-	hit := map[int]bool{}
-	for _, f := range findings {
-		hit[f.StepSeq] = true
-		for _, r := range f.RelatedSeq {
-			hit[r] = true
-		}
-	}
-	repeat := map[int]bool{}
-	for _, o := range toolCallRepeats(journeySteps(j)) {
-		if o.IsRepeat {
-			repeat[o.StepSeq] = true
-		}
-	}
-
-	anyCalls := false
-	for _, task := range j.Tasks {
-		for _, s := range task.Steps {
-			if len(s.ToolCalls) > 0 {
-				anyCalls = true
-			}
-		}
-	}
-	if !anyCalls {
-		return
-	}
-
-	w("%s", t.SpineTitle)
-	for ti, task := range j.Tasks {
-		var acting []*Step
-		for _, s := range task.Steps {
-			if len(s.ToolCalls) > 0 {
-				acting = append(acting, s)
-			}
-		}
-		if len(acting) == 0 {
-			continue
-		}
-		w("%s", t.SpineTaskLine(ti+1, task.Title))
-		for _, s := range acting {
-			renderSpineStep(w, s, repeat[s.Seq], hit[s.Seq], t)
-		}
-	}
-}
-
-// renderSpineStep renders one tool-calling Step's decision-spine block —
-// see renderDecisionSpine.
-func renderSpineStep(w func(string, ...any), s *Step, repeated, flagged bool, t i18n.SpineText) {
-	header := "**" + stepRoleTag(s, repeated, t) + " Step " + strconv.Itoa(s.Seq) + " · " +
-		s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05") + "**"
-	if flagged {
-		header += t.SpineFindingTag
-	}
-	header += "\n\n"
-	w("%s", header)
-	w("%s", spineWhyLine(s))
-	for _, tc := range s.ToolCalls {
-		w("%s", toolCallLine(tc, t))
-	}
 }
 
 // --- Step role tags ----------------------------------------------------------
