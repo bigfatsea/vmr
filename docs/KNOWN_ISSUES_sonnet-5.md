@@ -115,26 +115,24 @@
 - **推进方式**：已有完整方案文档 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，写明了倾向的方向（叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 保持语言无关的机器锚点）、需要动的模块清单、以及当前的阶段性状态。下次要推进这项工作时先读那份文档，不要凭这条条目里的只言片语重新分析一遍。
 - **登记来源**：本条目对应的复核与方案讨论，2026-08-17。
 
-### 1.20 [低] Compare 报告开篇未展示两侧完整初始 User Message
+### 1.20 [低] Journey 报告 fact-layer（`## t0X`/`### Step N`）与决策脊柱内容重复，理想形态是链接到 `vmr report` 的 per-request detail 文件
 
-- **现状**：`JourneyRef.Title`（`compare.go`）来自 `taskseg.Preview()`，故意限制在 80 rune 以内——因为它同时被候选 Journey 列表、`vmr-stories.md`、Finding 描述等多处"一行摘要"场景复用，不能单独放大。完整原文其实已经在内存里（`Step.NewEvents[].Msg.Text` 是未截断的原文），只是从未作为独立字段暴露给 `JourneySummary`/`JourneyRef`。
-- **为什么待定**：技术上可行，但有三处需要先拍板的设计选择——要不要给"完整"设一个有界上限（语料库里已出现过反例：某 Journey 的首条消息是几千字符的 JSON 粘贴）、展示位置是替换现有摘要还是新增一个折叠区块、要不要让这段原文也进入 `compare-*.json`（进了就会被 `-llm-addr` 的 evidence pack 一并喂给 LLM，增加调用成本）。这些是产品/成本取舍，不是"漏了一个字段"。
-- **推进方式**：已有完整方案文档 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §4，写明了推荐实现路径（新增 `FirstUserMessageExcerpt`，复用现有折叠展示惯例）和三处待确认的选择点。下次推进前先读那份文档。
-- **登记来源**：本条目对应的复核，2026-08-19。
+- **现状**：决策脊柱之后的 `## t01 · ...`/`### Step N ...` fact-layer 完整重复展示了脊柱已经摘要过的同一批底层数据（带完整消息体）。理想形态是脊柱直接链接到 detail 文件，点开才看详情。
+- **原"不可行"论证已被推翻**：本条目曾经的判断——`story`/`report` 的 import 边界禁止互相引用、且 `detail.go` 的文件名依赖跨批次去重计数器导致 `story` 侧无法确定性推算——已被 `docs/future-strategy/story_report_architecture_opus-5.md` §4.8/§7.6(a) 推翻：detail 渲染先做减法（砍掉只在 report 聚合阶段才存在的位置坐标），下沉为两半区共用的叶子包，文件名改为由请求级坐标（`basename:line` 的哈希）派生，不再依赖批次计数器，也不需要跨包 import。
+- **不在本次范围内**：这是该架构方案 P2 阶段（坐标层与微观层重建）的工作，需要先建立请求级坐标契约，不是能顺手做的独立修复；已排入 `docs/future-strategy/story_report_dev_plan_opus-5.md` 的 P2，开工前另有该阶段自己的 ActionPlan。
+- **登记来源**：本条目对应的复核，2026-08-19；"不可行"论证的推翻见架构文档同日复核。
 
-### 1.21 [低] Journey 报告决策脊柱与工具调用结果配对依赖 `tool_call_id`，部分 agent 客户端的 ID 在响应/请求两侧会被改写
+### 1.21 [低] 决策脊柱的指令展示未复用 P1.3 为 Compare 新增的方言过滤/全文能力
 
-- **现状**：决策脊柱现已展示每个工具调用的配对结果（`toolResultLine`，`render_spine_step.go`），配对键是 `chatmsg.ToolCall.ID`（来自这一轮响应流的重组）精确匹配下一轮请求里 `role=tool` 消息的 `tool_call_id`——这是 F9 因果配对不变量本该保证成立的匹配（`chatmsg/pairing.go`）。但用本机真实审计日志（`~/code/vmr/logs/vmr-audit-2026-07-28.jsonl.zst`）验证两条样例 Journey（openclaw 33 次调用、lobster 64 次调用）后发现：**两条 Journey 的配对成功率都是 0%**。逐条核对原始字节确认：这条 `openai:opencode:deepseek-v4-pro` 链路的响应流里，模型返回的 tool_call id 形如 `call_00_xHodGBOXHzFfUnFh4mZR8555`（带下划线），但同一次调用在下一轮请求的 `tool_calls[].id`/`tool_call_id` 里变成了 `call00xHodGBOXHzFfUnFh4mZR8555`（下划线被去掉）——两次 zstdcat 直接核对原始 JSON 字节确认了这一点，不是 VMR 解析出的错误。这不是 VMR 的 bug（`chatmsg.ReassembleSSE` 逐字段赋值，没有拼接/篡改逻辑），而是 `opencode`（这条链路里 VMR 与 deepseek-v4-pro 之间的代理/网关，从 `EndpointLabel` 的中间字段可见）在转发时改写了 ID——一个上游可观测但 VMR 管不到的行为。
-- **影响**：对这条 `opencode` 链路产生的 Journey，"工具调用结果"折叠块现在完全不出现（不是显示错误，是按设计规则匹配失败后干净地什么都不渲染）——功能对其它 ID 不被中途改写的 provider/client 组合应该是有效的，只是恰好用户给的两份样例都来自这条会改写 ID 的链路，验证时 100% 复现了这个降级。
-- **为什么不现在修**：能让配对起效的办法是加一个位置兜底（同一 Step 的 tool_calls 数量与下一 Step 的 tool_results 数量一致时，按出现顺序位置配对，而不是按 ID），协议语义上是安全的（两个协议都要求 tool_results 顺序与 tool_calls 顺序一致），但这已经不是纯粹的"读取事实"，而是在 ID 对不上时引入一条推断规则——不完全符合脊柱层至今"宁可粗糙也不猜语义"的一贯做法，需要你确认是否接受这种"协议保证的顺序推断"，以及配对结果要不要标注"按位置推断，ID 不匹配"以示区分。
-- **登记来源**：`render_spine_step.go`（`toolResultLine`/`toolResultsFor` 集成）2026-08-19 实现并用真实日志验证时发现；根因定位见当次分析记录 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §6。
+- **现状**：P1.2 的"💬 指令"单行只在任务中途追加指令时渲染（`renderSpineBriefStep` 的 `taskStepIdx > 0` 分支），任务自己的开篇 Step 仍只靠 Task 标题（`taskseg.Preview` 截断到约 80 字符）展示指令，没有 P1.3 给 Compare 报告加的"有界折叠、完整原文"那一层。而取中途追加指令文本的 `firstNewUserText`（`render_spine_step.go`）只取该 Step `NewEvents` 里第一个 `Role=="user"` 消息，没有像 P1.3 的 `initialInstructionStats` 那样经过 `taskseg.Profile.RealUserText` 的方言过滤——如果 OpenClaw 家族客户端在真实指令前注入了一条同样标记为 `role=user` 的脚手架消息（如工具结果图片附件提示，见 `openclaw.go` 的 `RealUserText` 已识别的几类噪声），会取到错误的文本。
+- **为什么不在本次一并修**：影响面有界（渲染层的一行预览，不影响 Finding 证据或落盘数据），但要把 `taskseg.Profile` 一路串到 `RenderMarkdown` → `renderDecisionSpine` → `renderSpineBriefStep` 的调用链上（`writeJourneyFile`/`RenderMarkdown` 目前都不接收 Profile），改动面比 P1.3 的对应修复更大。P1.3 已经证明了正确做法（`prof.RealUserText`，而不是裸扫 `NewEvents`/`Events`），下次改这条链路时应该复用同一模式，不要重新发明。
+- **登记来源**：2026-08-19 P1 执行期间的独立代码审阅发现。
 
-### 1.22 [低] Journey 报告 fact-layer（`## t0X`/`### Step N`）与决策脊柱内容重复，理想形态是链接到 `vmr report` 的 per-request detail 文件
+### 1.22 [低] `chatmsg.ToolResultList`/`ToolCallList` 未覆盖 OpenAI Responses API 的 `function_call`/`function_call_output` 形状
 
-- **现状**：决策脊柱之后的 `## t01 · ...`/`### Step N ...` fact-layer 完整重复展示了脊柱已经摘要过的同一批底层数据（带完整消息体）。理想形态是脊柱直接链接到 `vmr report` 生成的 `reports/details/*.md`（`internal/report/detail.go`），点开才看详情。
-- **为什么待定，且不是简单待定**：`internal/story` 与 `internal/report` 被 `archtest`（`import_boundaries_test.go:64-67`）显式禁止互相 import——在 `story` 内部调用 `report` 的渲染函数去"自动生成缺失的 detail report"会直接编译失败/`archtest` 红。即使换成只拼路径不 import 代码，`detail.go` 的文件名（`detailFileName`）依赖跨整批记录累积的去重计数器（`used map[string]int`），`story` 侧无法独立、确定性地推算出对应文件名——这是一个需要先改 `report` 侧命名机制（换成不依赖批次状态的确定性方案，如内容 hash）才能解决的地基问题，不是 `story` 单侧能完成的。
-- **推进方式**：已有完整方案文档 `docs/future-strategy/story_report_ux_review_sonnet-5.md` §7，给出了不违反 import 边界的"仅当文件存在才链接"路径，以及它依赖的 `detailFileName` 命名机制改造前提。这是本次复核 7 条里改动面最大、也最需要先做产品决策（story/report 两个产出物要不要在文件层面耦合）的一条，值得作为独立任务排期，不建议顺手做。
-- **登记来源**：本条目对应的复核，2026-08-19。
+- **现状**：`chatmsg.Messages` 已经能把 Responses API 的 `function_call_output` 渲染成人读文本，但结构化提取层 `ToolResultList`/`ToolCallList`（`toolresults.go`/`messages.go`）只覆盖 OpenAI Chat Completions 的 `tool_call_id` 与 Anthropic 的 `tool_use`/`tool_result` 两种形状——`toolResultsFor` 三级配对、三个 Finding 检测器、决策脊柱渲染，对纯 Responses API 流量都不会展示任何工具调用结果。
+- **为什么不在本次一并修**：P1.1 的范围是修那两种已有形状里的 ID 改写问题，不是扩展协议覆盖；这是一个独立的、更早就存在的协议覆盖缺口，需要先确认 Responses API 流量在真实语料里的占比再决定值不值得投入。
+- **登记来源**：2026-08-19 P1 执行期间的独立代码审阅发现。
 
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 
@@ -217,6 +215,10 @@
 17. **Journey 报告决策脊柱多行/超长工具调用参数默认折叠**（`internal/story/render_spine_args.go`）：`payloadBlock` 原先对多行或超长单行参数直接展开成一个不折叠的围栏代码块；现在折叠，`<summary>` 里放一段拉平截断的预览（`spinePreviewLen`），展开才是完整内容。
 18. **Journey 报告决策脊柱 Step 的原始消息不再截断**（`internal/story/render_spine_step.go` 的 `foldWhyLine`，取代原 `spineWhyLine` 的硬截断）：原先 `RespText`/`Reasoning` 超过 400/200 字符直接截断丢弃尾部；现在改为跟 `payloadBlock` 一致的折叠惯例——短文本内联，长文本折叠展示预览、展开为完整原文，永不丢内容。
 19. **Journey 报告 system prompt 移至文档头部、按出现顺序折叠一次**（`internal/story/render_md_sysprompt.go`）：原先只在 Step 1（或后续 `SysChanged` 的 Step）的 Messages 区块里出现一次，但恰好挡在决策脊柱与 Step 内容前面；现在在文档最开头单独渲染一个折叠区块（有多个版本时逐个列出各自的 Step 覆盖范围），Step 的 Messages 区块不再重复它。
+20. **决策脊柱工具调用结果配对改为三级降级**（`internal/story/findings_toolresult.go`、`render_spine_step.go`）：原先只按精确 `tool_call_id` 匹配，而 OpenClaw 家族客户端在回写工具调用历史时会去掉下划线（根因是客户端，不是上游 provider/网关），导致这条链路的配对成功率实测为 0%。现按"精确 ID → 归一化 ID（去下划线）→ 同 Step 内按位置"三级降级：前两级仍是精确的一一匹配，可作为 Finding 检测器的证据；只有第三级是推断，限渲染层使用且标注"按位置推测，ID 未匹配"。
+21. **决策脊柱覆盖补全至 100%**（`internal/story/render_spine_step.go`）：原先只渲染有 `ToolCalls` 的 Step，一个 Task 若没有任何 Step 调用工具、或整条 Journey 都没有工具调用，会整段/整个不渲染。现在每个 Step 都渲染：无工具调用的 Step 降级为一行摘要（任务中途的新用户指令渲染"💬 指令"，否则渲染"💬 汇报"取自 `RespText`/`Reasoning`），脊柱末尾新增"最终交付物"小节（复用 `-compare` 已有的 `deliverableStats` 检测）。
+22. **Compare 报告开篇展示两侧完整初始 User Message**（`internal/story/compare.go` 新增 `InitialInstructionFact`/`initialInstructionStats`、`render_compare.go` 的 `renderInitialInstruction`）：从 `Journey.Events` 的首个 user-role 事件取未截断原文，以 2000 字符为界折叠展示在两侧摘要下方；挂在 `ComparisonExtras` 上，随之自动进入 `-llm-addr` 的证据包，无需额外接线。
+23. **LLM 解读小节标题层级渲染层兜底**（`internal/story/llm.go` 的 `downgradeH2Headings`）：条目 16 的 prompt 侧调整只是第一道防线，不保证模型遵从；现在 `RenderLLMSection` 对返回文本做一次确定性降级——围栏代码块之外、行首 `## ` 一律降为 `### `——文档目录结构不再依赖模型的指令遵从度。
 
 ---
 

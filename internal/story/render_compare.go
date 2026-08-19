@@ -27,6 +27,9 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	w("%s", t.Title)
 	w("%s", t.SideBlock("A", cmp.A.ID, cmp.A.Title, cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
 	w("%s", t.SideBlock("B", cmp.B.ID, cmp.B.Title, cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
+	if cmp.Extras != nil {
+		renderInitialInstruction(w, cmp.Extras.InitialInstruction, t)
+	}
 
 	w("%s", t.ProfileTitle)
 	w("%s", t.ProfileTableHeader)
@@ -204,6 +207,20 @@ func renderSysPrompt(w func(string, ...any), sp SysPromptFact, t i18n.CompareTex
 	w("| B | %s | %d |\n\n", fmtutil.FmtTokens(sp.B.Tokens), sp.B.Changes)
 	renderExcerpt(w, t.SysPromptExcerptLabel("A"), sp.A.Excerpt, sp.A.Truncated, t)
 	renderExcerpt(w, t.SysPromptExcerptLabel("B"), sp.B.Excerpt, sp.B.Truncated, t)
+}
+
+// renderInitialInstruction renders both sides' opening user instruction, in
+// full (bounded — compare.go's initialInstructionExcerptChars), folded
+// underneath the short summary SideBlock already showed. Silent when
+// neither side found one (the defensive Found=false case — shouldn't
+// happen in practice, see InitialInstructionStats' doc comment).
+func renderInitialInstruction(w func(string, ...any), f InitialInstructionFact, t i18n.CompareText) {
+	if !f.A.Found && !f.B.Found {
+		return
+	}
+	w("%s", t.InitialInstructionTitle)
+	renderExcerpt(w, t.InitialInstructionExcerptLabel("A"), f.A.Text, f.A.Truncated, t)
+	renderExcerpt(w, t.InitialInstructionExcerptLabel("B"), f.B.Text, f.B.Truncated, t)
 }
 
 // renderDeliverable renders the final-write-shaped tool call each side

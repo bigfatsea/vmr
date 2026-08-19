@@ -220,4 +220,3 @@ func TestSourceFiles(t *testing.T) {
 		t.Errorf("SourceFiles(missing) = %v, want empty slice", gotMissing)
 	}
 }
-

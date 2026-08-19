@@ -388,6 +388,67 @@ func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T,
 	return InterpretResult{Text: text, Cached: false}, nil
 }
 
+// atxHeading reports whether line opens with an ATX heading marker (1-6
+// '#' followed by a space) and, if so, its level.
+func atxHeading(line string) (level int, ok bool) {
+	n := 0
+	for n < len(line) && n < 6 && line[n] == '#' {
+		n++
+	}
+	if n == 0 || n >= len(line) || line[n] != ' ' {
+		return 0, false
+	}
+	return n, true
+}
+
+// downgradeHeadingLevels shifts every level-2-through-5 ATX heading in text
+// one level deeper (## -> ###, ### -> ####, …, capped at level 6) — a
+// deterministic render-layer fallback for i18n/story_llm.go's prompt
+// instruction (already asks the model to use level-3 subsection headings),
+// since a document's outline structure shouldn't depend on a model's
+// instruction-following (architecture doc §4.2).
+//
+// Shifts EVERY level uniformly, not just "## " -> "### ", because a model
+// that only partially follows the instruction — nesting its own
+// sub-subsections correctly relative to ITS OWN top level, but forgetting
+// that whole block needs to sit one level deeper under this document's own
+// "## LLM Interpretation" wrapper — would otherwise have its internal
+// hierarchy flattened: rewriting only "## " leaves an untouched "### "
+// child at the SAME level as its (now "### ") former parent, turning
+// nested sections into siblings. A uniform +1 shift preserves whatever
+// hierarchy the model built internally. Level 1 is left alone (the prompt
+// never asks for it, and there's no wrapper level below it to preserve
+// nesting against).
+//
+// Skips fenced code blocks — both ``` and ~~~ fences, toggling in/out on
+// each matching fence marker — the LLM's free-text response routinely
+// embeds a code block, and a "## " inside one is literal content, not a
+// heading.
+func downgradeHeadingLevels(text string) string {
+	lines := strings.Split(text, "\n")
+	fence := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case fence != "" && strings.HasPrefix(trimmed, fence):
+			fence = ""
+			continue
+		case fence != "":
+			continue
+		case strings.HasPrefix(trimmed, "```"):
+			fence = "```"
+			continue
+		case strings.HasPrefix(trimmed, "~~~"):
+			fence = "~~~"
+			continue
+		}
+		if lvl, ok := atxHeading(line); ok && lvl >= 2 && lvl < 6 {
+			lines[i] = "#" + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
 // with the "this is interpretation, not fact" banner — always rendered as
 // its own clearly separated section, never blended into the fact-layer
@@ -409,7 +470,7 @@ func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang, scop
 		b.WriteString(t.CachedNote)
 	}
 	b.WriteString("\n")
-	b.WriteString(res.Text)
+	b.WriteString(downgradeHeadingLevels(res.Text))
 	b.WriteString("\n")
 	return b.String()
 }

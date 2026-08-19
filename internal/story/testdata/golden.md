@@ -26,6 +26,24 @@ You are a helpful assistant.
 
 No upstream model switch occurred.
 
+## Decision Spine
+
+**t01 · 帮我查一下 A 股新股打新收益**
+
+**🔷 💬 Step 1 · 10:00:00**
+
+💬 Report · 好的，我来搜索相关数据。
+
+**🔷 💬 Step 2 · 10:00:02**
+
+💬 Report · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
+
+**t02 · 继续，把前10名列出来**
+
+**🔷 💬 Step 3 · 10:00:06**
+
+💬 Report · 好的，前10名的新股打新收益如下…
+
 ## t01 · 帮我查一下 A 股新股打新收益
 
 ### 🔷 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent

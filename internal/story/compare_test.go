@@ -93,7 +93,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	}
 
 	ma, mb := ComputeMetrics(jA), ComputeMetrics(jB)
-	ex := ComputeComparisonExtras(jA, jB, ma, mb)
+	ex := ComputeComparisonExtras(jA, jB, ma, mb, taskseg.Generic)
 
 	if len(ex.Endpoints.A) != 1 || ex.Endpoints.A[0] != "openai:opencode:deepseek-v4-pro" {
 		t.Errorf("Endpoints.A = %v, want [openai:opencode:deepseek-v4-pro]", ex.Endpoints.A)
@@ -140,6 +140,41 @@ func TestComputeComparisonExtras(t *testing.T) {
 	if ex.Deliverable.B.ToolName != "write" || !strings.Contains(ex.Deliverable.B.Excerpt, "findings here") {
 		t.Errorf("Deliverable.B = %+v, want tool_name=write and excerpt containing the content", ex.Deliverable.B)
 	}
+
+	if !ex.InitialInstruction.A.Found || ex.InitialInstruction.A.Text != "do the research" {
+		t.Errorf("InitialInstruction.A = %+v, want Found=true Text=%q", ex.InitialInstruction.A, "do the research")
+	}
+	if !ex.InitialInstruction.B.Found || ex.InitialInstruction.B.Text != "do the research" {
+		t.Errorf("InitialInstruction.B = %+v, want Found=true Text=%q", ex.InitialInstruction.B, "do the research")
+	}
+	if ex.InitialInstruction.A.Truncated {
+		t.Error("a short initial instruction should not be marked truncated")
+	}
+}
+
+// TestInitialInstructionStats_ExcerptTruncation covers the
+// initialInstructionExcerptChars bound: an opening instruction longer than
+// the limit must be cut and flagged, mirroring TestSysPromptStats_
+// ExcerptTruncation's coverage of the same pattern for the system prompt.
+func TestInitialInstructionStats_ExcerptTruncation(t *testing.T) {
+	long := strings.Repeat("x", initialInstructionExcerptChars+500)
+	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	rec := mkExtrasRec(at, "sys", long, "openai:p:m", 100, 10, 0, "stop", nil)
+	path := writeJSONL(t, []audit.Record{rec})
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	got := initialInstructionStats(j, taskseg.Generic)
+	if !got.Found {
+		t.Fatal("expected Found=true for a Journey with a real opening instruction")
+	}
+	if !got.Truncated {
+		t.Error("long initial instruction should be marked Truncated")
+	}
+	if len(got.Text) >= len(long) {
+		t.Errorf("excerpt should be shorter than the original (%d chars): got %d", len(long), len(got.Text))
+	}
 }
 
 // TestSysPromptStats_ExcerptTruncation covers the sysPromptExcerptChars
@@ -156,7 +191,7 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	ex := ComputeComparisonExtras(j, j, m, m)
+	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic)
 	if !ex.SysPrompt.A.Truncated {
 		t.Error("long system prompt should be marked Truncated")
 	}
@@ -181,7 +216,7 @@ func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	ex := ComputeComparisonExtras(j, j, m, m)
+	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic)
 	if !ex.Deliverable.A.Found || !strings.Contains(ex.Deliverable.A.Excerpt, "the real final content") {
 		t.Errorf("Deliverable should pick the LAST write-shaped call: got %+v", ex.Deliverable.A)
 	}
@@ -389,7 +424,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 
 	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
 	cmp := Compare(sa, sb)
-	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics)
+	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, taskseg.Generic)
 	cmp.Extras = &extras
 
 	md := RenderComparisonMarkdown(cmp, i18n.EN)

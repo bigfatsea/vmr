@@ -9,7 +9,18 @@
 // toolResultLine (a tool call's paired result, found via
 // findings_toolresult.go's toolResultsFor — the same tool_call_id pairing
 // the Finding detectors already trust, protocol-guaranteed by F9, see
-// chatmsg/pairing.go's doc comment).
+// chatmsg/pairing.go's doc comment, extended here with an id-normalization
+// fallback — see toolResultsFor's own doc comment — and, render-layer only,
+// a positional fallback (positionalToolResults) for the residual case where
+// even normalization doesn't recover the id).
+//
+// Every Step in a Journey renders here now, not just tool-calling ones
+// (P1.2, story_report_architecture_opus-5.md §7.4a/A6): a Step with no
+// ToolCalls still gets a header line plus, when it has something to show,
+// a one-line summary (renderSpineBriefStep) — a mid-task instruction, a
+// plain report, or nothing at all when the record genuinely has neither
+// (never invented). No Journey and no Task is skipped wholesale anymore
+// either, including a pure Q&A Journey with zero tool calls.
 package story
 
 import (
@@ -28,9 +39,17 @@ import (
 // excerpt (that field can run to paragraphs). Neither caps content anymore:
 // past this length the text folds (collapsed, one click away, complete),
 // it never gets cut.
+//
+// spineBriefLineCap bounds the one-line summaries renderSpineBriefStep
+// renders for a non-tool-calling Step — deliberately NOT run through
+// foldWhyLine's fold convention (that's for a Step's own primary why-line;
+// these are secondary interstitial markers in the spine, truncated, not
+// folded, so a Journey with many such Steps doesn't turn the spine itself
+// into a wall of expandable blocks).
 const (
 	spineWhyRespCap      = 400
 	spineWhyReasoningCap = 200
+	spineBriefLineCap    = 120
 )
 
 // spineWhyLine renders the "why" behind this Step's tool calls, when the
@@ -71,8 +90,11 @@ func foldWhyLine(prefix, text string, capLen int) string {
 // result that came back empty — toolResultsFor already returns nil for a
 // call with no visible answer (the Journey's last Step; see its own doc
 // comment), so a missing entry in results silently renders nothing rather
-// than claiming "no result" where none was ever recorded.
-func toolResultLine(name string, r chatmsg.ToolResult, t i18n.SpineText) string {
+// than claiming "no result" where none was ever recorded. positional marks
+// a level-3 (positionally inferred, ID unmatched) pairing — see
+// positionalToolResults — with an explicit badge; false for a level-1/2
+// (exact or normalized ID) match, which needs no caveat.
+func toolResultLine(name string, r chatmsg.ToolResult, positional bool, t i18n.SpineText) string {
 	if r.Text == "" {
 		return ""
 	}
@@ -80,22 +102,29 @@ func toolResultLine(name string, r chatmsg.ToolResult, t i18n.SpineText) string 
 	if r.IsError {
 		mark = "❌"
 	}
-	return mark + " `" + name + "`: <details><summary>" + oneLineTruncate(r.Text, spinePreviewLen) + "</summary>\n\n" +
+	badge := ""
+	if positional {
+		badge = t.SpinePositionalMatch
+	}
+	return mark + " `" + name + "`" + badge + ": <details><summary>" + oneLineTruncate(r.Text, spinePreviewLen) + "</summary>\n\n" +
 		codeFence(capFull(r.Text, t)) + "\n</details>\n\n"
 }
 
 // renderDecisionSpine renders the decision spine: one block per Task, one
-// sub-block per tool-calling Step — Step number/time (role-tagged the same
-// way the fact layer's own Step headers are just below, see stepRoleTag —
-// 🔄 for a Step toolCallRepeats flagged as an exact repeat is that tag,
-// not a second marker here), the model's own stated reason for what it's
-// about to do when it said one (spineWhyLine), then every tool call that
-// Step made — complete (toolCallLine) — each immediately followed by its
-// own paired result when one was recorded (toolResultLine). A Step
-// referenced (as StepSeq or RelatedSeq) by any Finding earns an extra ⚠️ on
-// its header. Renders nothing for a Journey with no tool calls at all (a
-// pure Q&A Journey has no "decisions" to spine) — and, within it, skips any
-// Task whose Steps never called a tool either.
+// sub-block per Step — Step number/time (role-tagged the same way the fact
+// layer's own Step headers are just below, see stepRoleTag — 🔄 for a Step
+// toolCallRepeats flagged as an exact repeat is that tag, not a second
+// marker here), the model's own stated reason for what it's about to do
+// when it said one (spineWhyLine), then every tool call that Step made —
+// complete (toolCallLine) — each immediately followed by its own paired
+// result when one was recorded (toolResultLine). A Step referenced (as
+// StepSeq or RelatedSeq) by any Finding earns an extra ⚠️ on its header.
+// Every Step renders — a tool-calling one gets the full block
+// (renderSpineStep), any other gets a header plus, when there's something
+// to summarize, one line (renderSpineBriefStep) — so neither a pure Q&A
+// Journey nor a Task with no tool calls disappears from the spine anymore
+// (P1.2; see this file's package comment). Ends with the Journey's final
+// deliverable section, when deliverableStats finds one.
 func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang) {
 	t := i18n.Spine(lang)
 	hit := map[int]bool{}
@@ -117,56 +146,184 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 		idxOf[s] = i
 	}
 
-	anyCalls := false
-	for _, s := range steps {
-		if len(s.ToolCalls) > 0 {
-			anyCalls = true
-			break
-		}
-	}
-	if !anyCalls {
-		return
-	}
-
 	w("%s", t.SpineTitle)
 	for ti, task := range j.Tasks {
-		var acting []*Step
-		for _, s := range task.Steps {
+		w("%s", t.SpineTaskLine(ti+1, task.Title))
+		for si, s := range task.Steps {
 			if len(s.ToolCalls) > 0 {
-				acting = append(acting, s)
+				renderSpineStep(w, steps, idxOf[s], repeat[s.Seq], hit[s.Seq], t)
+			} else {
+				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t)
 			}
 		}
-		if len(acting) == 0 {
-			continue
-		}
-		w("%s", t.SpineTaskLine(ti+1, task.Title))
-		for _, s := range acting {
-			renderSpineStep(w, s, toolResultsFor(steps, idxOf[s]), repeat[s.Seq], hit[s.Seq], t)
-		}
 	}
+	renderFinalDeliverable(w, j, t)
 }
 
-// renderSpineStep renders one tool-calling Step's decision-spine block —
-// see renderDecisionSpine. results pairs by ToolCall.ID (map built once per
-// Step, small — a Step's own ToolCalls count, never the whole Journey's).
-func renderSpineStep(w func(string, ...any), s *Step, results []chatmsg.ToolResult, repeated, flagged bool, t i18n.SpineText) {
+// spineStepHeader renders one Step's header line — shared by renderSpineStep
+// (tool-calling) and renderSpineBriefStep (everything else), so the two
+// forms stay visually consistent (same tag, same Finding flag) and a reader
+// scanning the spine sees one continuous Step sequence regardless of which
+// kind of Step each one is.
+func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
 	header := "**" + stepRoleTag(s, repeated, t) + " Step " + strconv.Itoa(s.Seq) + " · " +
 		s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05") + "**"
 	if flagged {
 		header += t.SpineFindingTag
 	}
-	header += "\n\n"
-	w("%s", header)
+	return header + "\n\n"
+}
+
+// renderSpineStep renders one tool-calling Step's decision-spine block —
+// see renderDecisionSpine. steps/i (rather than a pre-fetched result slice)
+// so it can compute both the id/normalized-id matches (toolResultsFor) and,
+// for whatever's left over, the positional fallback (positionalToolResults)
+// itself — the two levels share the same "which calls are still unresolved"
+// bookkeeping and there's no benefit to splitting that across the caller.
+func renderSpineStep(w func(string, ...any), steps []*Step, i int, repeated, flagged bool, t i18n.SpineText) {
+	s := steps[i]
+	w("%s", spineStepHeader(s, repeated, flagged, t))
 	w("%s", spineWhyLine(s))
 
-	byID := make(map[string]chatmsg.ToolResult, len(results))
-	for _, r := range results {
+	matched := toolResultsFor(steps, i)
+	byID := make(map[string]chatmsg.ToolResult, len(matched))
+	for _, r := range matched {
 		byID[r.CallID] = r
 	}
+	posByID := positionalToolResults(steps, i, byID)
+
 	for _, tc := range s.ToolCalls {
 		w("%s", toolCallLine(tc, t))
 		if r, ok := byID[tc.ID]; ok {
-			w("%s", toolResultLine(tc.Name, r, t))
+			w("%s", toolResultLine(tc.Name, r, false, t))
+		} else if r, ok := posByID[tc.ID]; ok {
+			w("%s", toolResultLine(tc.Name, r, true, t))
 		}
 	}
+}
+
+// positionalToolResults is the third and final pairing level (architecture
+// doc §5.5/§5.6): for whichever of steps[i]'s ToolCalls byID (toolResultsFor's
+// exact+normalized-id matches) didn't resolve, try pairing them by position
+// against the next step's still-unclaimed tool results — safe only when the
+// unresolved-call count equals the unclaimed-result count (the one
+// condition real-corpus verification confirmed is safe; a mismatch means
+// don't guess, not "guess anyway"). Render-layer only: never called from a
+// Finding detector, since a positional pairing is inference, not a fact.
+func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolResult) map[string]chatmsg.ToolResult {
+	s := steps[i]
+	if len(s.ToolCalls) == 0 || i+1 >= len(steps) || steps[i+1].Rec == nil {
+		return nil
+	}
+	knownNorm := make(map[string]bool, len(s.ToolCalls))
+	var unresolved []chatmsg.ToolCall
+	for _, tc := range s.ToolCalls {
+		knownNorm[normalizeToolCallID(tc.ID)] = true
+		if _, ok := byID[tc.ID]; !ok {
+			unresolved = append(unresolved, tc)
+		}
+	}
+	if len(unresolved) == 0 {
+		return nil
+	}
+	body, _ := steps[i+1].Rec.Client.Request.Body.(map[string]any)
+	// steps[i+1]'s body carries the WHOLE conversation so far (every chat
+	// API resends full history), so scanning chatmsg.RawArray(body)
+	// unbounded would pull in every earlier Step's already-resolved tool
+	// results too — inflating the leftover count against every OTHER
+	// unresolved-call Step in the Journey, not just this one. DeltaStart
+	// ("absolute message index where this step's new content begins",
+	// journey.go) plus MsgOffset's index-base correction (RawArray excludes
+	// the synthetic leading system message Messages() prepends) bounds the
+	// scan to exactly the messages steps[i+1] introduced.
+	rawArr := chatmsg.RawArray(body)
+	deltaIdx := steps[i+1].DeltaStart - chatmsg.MsgOffset(body)
+	if deltaIdx > 0 && deltaIdx < len(rawArr) {
+		rawArr = rawArr[deltaIdx:]
+	} else if deltaIdx >= len(rawArr) {
+		rawArr = nil
+	}
+	var leftover []chatmsg.ToolResult
+	for _, r := range chatmsg.ToolResultList(rawArr) {
+		if !knownNorm[normalizeToolCallID(r.CallID)] {
+			leftover = append(leftover, r)
+		}
+	}
+	if len(leftover) != len(unresolved) {
+		return nil
+	}
+	out := make(map[string]chatmsg.ToolResult, len(unresolved))
+	for k, tc := range unresolved {
+		out[tc.ID] = leftover[k]
+	}
+	return out
+}
+
+// renderSpineBriefStep renders a non-tool-calling Step's spine entry: always
+// the header (so the Step stays visible in the sequence — P1.2's coverage
+// fix), then at most one summary line, in priority order:
+//  1. a mid-task instruction — taskStepIdx > 0 (the Task's own opening Step
+//     already carries its instruction in the Task title, see
+//     renderDecisionSpine's SpineTaskLine call, so it's skipped here to
+//     avoid rendering the same instruction twice) and s.HumanInitiated —
+//     the new user text, found via firstNewUserText;
+//  2. a plain report — s.RespText;
+//  3. the model's reasoning, when it said nothing else — s.Reasoning.
+//
+// Renders no summary line at all when none of the three apply (a Step with
+// no tool calls, no new instruction, no reply, and no reasoning — e.g. an
+// NoReply Step) — "宁可粗糙也不猜语义": the header alone still keeps the Step
+// countable, and inventing a line where the record has nothing would be
+// worse than a gap.
+func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repeated, flagged bool, t i18n.SpineText) {
+	w("%s", spineStepHeader(s, repeated, flagged, t))
+	if taskStepIdx > 0 && s.HumanInitiated {
+		if text := firstNewUserText(s); text != "" {
+			w("%s", t.SpineInstructionLine(oneLineTruncate(text, spineBriefLineCap)))
+			return
+		}
+	}
+	if s.RespText != "" {
+		w("%s", t.SpineReportLine(oneLineTruncate(s.RespText, spineBriefLineCap)))
+		return
+	}
+	if s.Reasoning != "" {
+		w("%s", t.SpineReportLine(oneLineTruncate(s.Reasoning, spineBriefLineCap)))
+	}
+}
+
+// firstNewUserText returns s's first newly-introduced user-role message
+// text, or "" — s.NewEvents is already "events first introduced by this
+// Step" (journey.go), so for a HumanInitiated Step (one whose opening
+// carries a genuinely new real user instruction, per taskseg.HasNewInstruction)
+// the triggering user message is necessarily among them; this doesn't
+// re-derive that judgment, only locates the text taskseg already found.
+func firstNewUserText(s *Step) string {
+	for _, ev := range s.NewEvents {
+		if ev.Msg.Role == "user" {
+			return ev.Msg.Text
+		}
+	}
+	return ""
+}
+
+// renderFinalDeliverable renders the Journey's final deliverable section,
+// when deliverableStats (compare.go — the same detection -compare already
+// uses) finds a write-shaped tool call. Deliberately silent when it
+// doesn't: most Journeys don't end on a file write, and
+// renderSpineBriefStep's report line already surfaces "what did the last
+// Step say" for the general case — this section is an enhancement for the
+// specific case a Journey does write a deliverable, not a replacement.
+func renderFinalDeliverable(w func(string, ...any), j *Journey, t i18n.SpineText) {
+	d := deliverableStats(j)
+	if !d.Found {
+		return
+	}
+	w("%s", t.SpineFinalDeliverableTitle)
+	w("%s", t.SpineFinalDeliverableFound(d.StepSeq, d.ToolName))
+	excerpt := d.Excerpt
+	if d.Truncated {
+		excerpt += "\n…"
+	}
+	w("<details><summary>%s</summary>\n\n%s\n</details>\n\n", t.SpineFinalDeliverableExcerptLabel, codeFence(excerpt))
 }

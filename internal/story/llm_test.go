@@ -333,6 +333,88 @@ func TestRenderLLMSection(t *testing.T) {
 	}
 }
 
+// TestDowngradeH2Headings covers the P1.4 render-layer fallback: even
+// though the prompt already asks the model for level-3 subsection
+// headings (i18n/story_llm.go), a model that ignores the instruction and
+// still emits "## X" must not corrupt the document's own outline —
+// RenderLLMSection downgrades it to "### X" deterministically, except
+// inside fenced code blocks, where "## " is literal content.
+func TestDowngradeHeadingLevels(t *testing.T) {
+	t.Run("a stray H2 outside any fence is downgraded to H3", func(t *testing.T) {
+		got := downgradeHeadingLevels("intro\n## 候选根因\nbody")
+		if !strings.Contains(got, "### 候选根因") {
+			t.Errorf("got %q, want the H2 downgraded to H3", got)
+		}
+		if strings.Contains(got, "\n## 候选根因") {
+			t.Errorf("got %q, the original H2 line must not survive", got)
+		}
+	})
+
+	t.Run("a '## ' line inside a ``` fenced code block is left alone", func(t *testing.T) {
+		text := "before\n```\n## not a heading\n```\nafter"
+		got := downgradeHeadingLevels(text)
+		if !strings.Contains(got, "## not a heading") {
+			t.Errorf("got %q, a fenced '## ' line must stay untouched", got)
+		}
+	})
+
+	t.Run("a '## ' line inside a ~~~ fenced code block is left alone", func(t *testing.T) {
+		text := "before\n~~~\n## not a heading\n~~~\nafter"
+		got := downgradeHeadingLevels(text)
+		if !strings.Contains(got, "## not a heading") {
+			t.Errorf("got %q, a ~~~-fenced '## ' line must stay untouched", got)
+		}
+	})
+
+	t.Run("mixed: only the fence-external H2 is downgraded", func(t *testing.T) {
+		text := "## real heading\n```\n## fenced\n```\n## another real heading"
+		got := downgradeHeadingLevels(text)
+		if strings.Count(got, "### real heading") != 1 || !strings.Contains(got, "### another real heading") {
+			t.Errorf("got %q, want both fence-external H2s downgraded", got)
+		}
+		if !strings.Contains(got, "## fenced") {
+			t.Errorf("got %q, want the fenced H2 left untouched", got)
+		}
+	})
+
+	// TestDowngradeHeadingLevels/preserves_the_LLM.s_own_internal_hierarchy
+	// covers the review finding this test was added for: a model that
+	// nests "### 1.1" under its own "## 1." without shifting the whole
+	// block down to fit under this document's outer "## LLM Interpretation"
+	// wrapper. Rewriting only "## " -> "### " would leave "### 1.1" at the
+	// SAME level as the now-"### 1." parent — flattening a two-level
+	// hierarchy into siblings. Every level must shift uniformly by one.
+	t.Run("preserves the LLM's own internal hierarchy: every level shifts by one, not just H2", func(t *testing.T) {
+		text := "## 1. 候选根因\n### 1.1 工具参数错误\n#### 1.1.1 detail"
+		got := downgradeHeadingLevels(text)
+		want := "### 1. 候选根因\n#### 1.1 工具参数错误\n##### 1.1.1 detail"
+		if got != want {
+			t.Errorf("got %q, want %q — parent/child relationship must survive the shift", got, want)
+		}
+	})
+
+	t.Run("level 6 is already the deepest ATX level and stays at 6, not 7", func(t *testing.T) {
+		text := "###### already max depth"
+		if got := downgradeHeadingLevels(text); got != text {
+			t.Errorf("got %q, want unchanged %q (no level 7 in ATX Markdown)", got, text)
+		}
+	})
+
+	t.Run("level 1 is left alone: the prompt never asks for it and there's no wrapper level to nest under", func(t *testing.T) {
+		text := "# top level\nbody"
+		if got := downgradeHeadingLevels(text); got != text {
+			t.Errorf("got %q, want unchanged %q", got, text)
+		}
+	})
+
+	t.Run("no headings at all: text unchanged", func(t *testing.T) {
+		text := "just a paragraph, no headings\n"
+		if got := downgradeHeadingLevels(text); got != text {
+			t.Errorf("got %q, want unchanged %q", got, text)
+		}
+	})
+}
+
 // TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument covers
 // -compare's own real failure mode: two independent LLM calls (the overall
 // comparison, and — when a divergence point was found — a second call

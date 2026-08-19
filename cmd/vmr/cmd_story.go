@@ -449,7 +449,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB)
-	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics)
+	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, prof)
 	extras.Sources = story.SourceFiles(idx, jA.ID, jB.ID)
 	cmp.Extras = &extras
 

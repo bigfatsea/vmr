@@ -12,6 +12,68 @@ import (
 	"vmr/internal/taskseg"
 )
 
+// TestToolResultsFor_NormalizesUnderscoreStrippedID covers P1.1: the
+// OpenClaw family of clients echoes a tool_call id back into the next
+// request's history with its underscores stripped ("call_00_abc" ->
+// "call00abc" — story_report_architecture_opus-5.md §5). toolResultsFor
+// must still pair the two, and the ToolResult it returns must carry the
+// CALL's original id (not the stripped one it found in the request body),
+// so every downstream consumer keying off tc.ID keeps working unchanged.
+func TestToolResultsFor_NormalizesUnderscoreStrippedID(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 28, 0, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "check the weather")
+
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseToolCalls([]any{
+		map[string]any{"id": "call_00_abc", "function": map[string]any{"name": "weather", "arguments": "{}"}},
+	}))
+	assistantEcho := map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+		map[string]any{"id": "call_00_abc", "type": "function", "function": map[string]any{"name": "weather", "arguments": "{}"}},
+	}}
+	// The client's own rewrite: the SAME call answered back with its
+	// underscores stripped, exactly as observed on real openclaw/lobster
+	// traffic.
+	toolResult := map[string]any{"role": "tool", "tool_call_id": "call00abc", "content": "sunny, 25C"}
+	r2 := mkRec(at(1), "", []any{sys, u1, assistantEcho, toolResult}, sseText("it's sunny"))
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	steps := journeySteps(j)
+	if len(steps) != 2 {
+		t.Fatalf("got %d steps, want 2", len(steps))
+	}
+
+	results := toolResultsFor(steps, 0)
+	if len(results) != 1 {
+		t.Fatalf("toolResultsFor = %v, want exactly 1 normalized-id match", results)
+	}
+	if results[0].CallID != "call_00_abc" {
+		t.Errorf("CallID = %q, want it rewritten back to the ORIGINAL call id %q, not the client's stripped form",
+			results[0].CallID, "call_00_abc")
+	}
+	if results[0].Text != "sunny, 25C" {
+		t.Errorf("Text = %q, want %q", results[0].Text, "sunny, 25C")
+	}
+}
+
+func TestNormalizeToolCallID(t *testing.T) {
+	cases := map[string]string{
+		"call_00_xHodGBOXHzFfUnFh4mZR8555": "call00xHodGBOXHzFfUnFh4mZR8555",
+		"already_no_change_needed_here":    "alreadynochangeneededhere",
+		"":                                 "",
+		"noUnderscoresAtAll":               "noUnderscoresAtAll",
+	}
+	for in, want := range cases {
+		if got := normalizeToolCallID(in); got != want {
+			t.Errorf("normalizeToolCallID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDetectUnadaptedRetry(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "sys")

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
@@ -253,14 +254,84 @@ func TestRenderOverviewCard(t *testing.T) {
 func TestRenderDecisionSpine(t *testing.T) {
 	et := i18n.Spine(i18n.EN)
 
-	t.Run("no tool calls anywhere: renders nothing", func(t *testing.T) {
+	t.Run("no tool calls anywhere: still renders the spine, with a report line (P1.2 coverage)", func(t *testing.T) {
 		w, buf := capture()
 		j := journeyOfTasks(
-			&Task{Title: "t1", Steps: []*Step{{Seq: 1, RespText: "just talk"}}},
+			&Task{Title: "t1", Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: "just talk"}}},
 		)
 		renderDecisionSpine(w, j, nil, i18n.EN)
-		if buf.Len() != 0 {
-			t.Errorf("expected no output for a Journey with no tool calls, got %q", buf.String())
+		out := buf.String()
+		if !strings.Contains(out, et.SpineTitle) {
+			t.Errorf("expected the spine title even for a Journey with no tool calls, got %q", out)
+		}
+		if !strings.Contains(out, et.SpineTaskLine(1, "t1")) {
+			t.Errorf("expected the Task line even with no tool calls, got %q", out)
+		}
+		if !strings.Contains(out, et.SpineReportLine("just talk")) {
+			t.Errorf("expected a report one-liner for the no-tool-call Step, got %q", out)
+		}
+	})
+
+	t.Run("mid-task instruction: HumanInitiated Step after the first gets an instruction line, not a report line", func(t *testing.T) {
+		w, buf := capture()
+		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true,
+			NewEvents: []*Event{{Msg: chatmsg.Message{Role: "user", Text: "actually also check b.go"}}}}
+		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		// s1 is the Task's own opening Step — HumanInitiated is skipped there
+		// (the Task title already carries the instruction), but it still gets
+		// its own report line for RespText, same as any other no-tool-call Step.
+		if !strings.Contains(out, et.SpineReportLine("sure")) {
+			t.Errorf("expected the Task's opening Step to still get its report line, got %q", out)
+		}
+		// s2 is mid-task and HumanInitiated — it gets the instruction line
+		// instead of (not in addition to) a report line, since it has no
+		// RespText of its own.
+		if !strings.Contains(out, et.SpineInstructionLine("actually also check b.go")) {
+			t.Errorf("expected an instruction line for the mid-task HumanInitiated Step, got %q", out)
+		}
+	})
+
+	t.Run("a Step with nothing at all still renders its header, no fabricated content", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0))}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		want := "**" + stepRoleTag(s, false, et) + " Step 1 · " + at(0).Format("15:04:05") + "**"
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want the Step header %q even with nothing to summarize", out, want)
+		}
+		if strings.Contains(out, "💬") {
+			t.Errorf("output = %q, must not fabricate an instruction/report line when the Step has none", out)
+		}
+	})
+
+	t.Run("final deliverable section renders when the last write-shaped tool call is found", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)),
+			ToolCalls: []chatmsg.ToolCall{tc("write_file", `{"path":"report.md","content":"final answer"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if !strings.Contains(out, et.SpineFinalDeliverableTitle) {
+			t.Errorf("output = %q, want the final deliverable title", out)
+		}
+		if !strings.Contains(out, "final answer") {
+			t.Errorf("output = %q, want the deliverable excerpt", out)
+		}
+	})
+
+	t.Run("no write-shaped tool call: no final deliverable section", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, et.SpineFinalDeliverableTitle) {
+			t.Errorf("output = %q, must not render a final deliverable section when none was found", out)
 		}
 	})
 
@@ -550,6 +621,121 @@ func TestRenderToolTimeline(t *testing.T) {
 		grid := out[gridStart:]
 		if strings.Contains(grid, "❌") {
 			t.Errorf("grid = %q, must not print ❌ when no Step carries an error marker", grid)
+		}
+	})
+}
+
+// --- positionalToolResults (P1.1 level-3 pairing fallback) -----------------
+
+// TestPositionalToolResults covers the render-only third pairing level:
+// self-generated ids (e.g. cliproxy:gemini's "exec<epoch-micros>" shape —
+// architecture doc §5.3) that neither exact nor normalized id matching can
+// ever recover, paired by position ONLY when the unresolved-call count
+// equals the unclaimed-result count.
+func TestPositionalToolResults(t *testing.T) {
+	nextStepBody := map[string]any{"messages": []any{
+		map[string]any{"role": "tool", "tool_call_id": "exec1786691703864731", "content": "result A"},
+		map[string]any{"role": "tool", "tool_call_id": "exec1786691703864999", "content": "result B"},
+	}}
+	nextStep := &Step{Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: nextStepBody}}}}
+
+	t.Run("same-count leftover pairs by position, in order", func(t *testing.T) {
+		tc1 := chatmsg.ToolCall{ID: "call_self_made_1", Name: "bash"}
+		tc2 := chatmsg.ToolCall{ID: "call_self_made_2", Name: "bash"}
+		s := &Step{ToolCalls: []chatmsg.ToolCall{tc1, tc2}}
+		steps := []*Step{s, nextStep}
+		got := positionalToolResults(steps, 0, map[string]chatmsg.ToolResult{})
+		if len(got) != 2 {
+			t.Fatalf("got %d positional matches, want 2: %+v", len(got), got)
+		}
+		if got[tc1.ID].Text != "result A" {
+			t.Errorf("got[%q].Text = %q, want %q", tc1.ID, got[tc1.ID].Text, "result A")
+		}
+		if got[tc2.ID].Text != "result B" {
+			t.Errorf("got[%q].Text = %q, want %q", tc2.ID, got[tc2.ID].Text, "result B")
+		}
+	})
+
+	t.Run("count mismatch: no guess, returns nil", func(t *testing.T) {
+		tc1 := chatmsg.ToolCall{ID: "call_only_one", Name: "bash"}
+		s := &Step{ToolCalls: []chatmsg.ToolCall{tc1}}
+		steps := []*Step{s, nextStep} // nextStep still has 2 unclaimed results
+		if got := positionalToolResults(steps, 0, map[string]chatmsg.ToolResult{}); got != nil {
+			t.Errorf("got %v, want nil on a 1-call/2-result count mismatch", got)
+		}
+	})
+
+	t.Run("already resolved via byID: nothing left to guess, returns nil", func(t *testing.T) {
+		tc1 := chatmsg.ToolCall{ID: "call_x", Name: "bash"}
+		s := &Step{ToolCalls: []chatmsg.ToolCall{tc1}}
+		byID := map[string]chatmsg.ToolResult{"call_x": {CallID: "call_x", Text: "already matched"}}
+		steps := []*Step{s, nextStep}
+		if got := positionalToolResults(steps, 0, byID); got != nil {
+			t.Errorf("got %v, want nil — no unresolved calls left to pair", got)
+		}
+	})
+
+	t.Run("last Step (no following request): returns nil, no panic", func(t *testing.T) {
+		tc1 := chatmsg.ToolCall{ID: "call_x", Name: "bash"}
+		s := &Step{ToolCalls: []chatmsg.ToolCall{tc1}}
+		steps := []*Step{s}
+		if got := positionalToolResults(steps, 0, map[string]chatmsg.ToolResult{}); got != nil {
+			t.Errorf("got %v, want nil for the Journey's last Step", got)
+		}
+	})
+
+	// TestPositionalToolResults_ScopedToDelta covers a real bug caught in
+	// review before this shipped: every chat API resends the FULL
+	// conversation on each turn, so steps[i+1]'s request body contains not
+	// just its own new messages but every earlier Step's tool results too.
+	// An unscoped scan would count an unrelated, already-resolved HISTORICAL
+	// result as "leftover" for the CURRENT Step's unresolved call — and if
+	// the counts happen to coincide, silently attribute that stale result
+	// to the wrong call. positionalToolResults must bound its scan to
+	// steps[i+1].DeltaStart onward (the messages THAT step actually
+	// introduced), not the whole cumulative body.
+	t.Run("does not attribute an earlier Step's already-resolved historical result to this Step's unresolved call", func(t *testing.T) {
+		s1 := &Step{ToolCalls: []chatmsg.ToolCall{{ID: "self_made_x", Name: "bash"}}}
+		// steps[2].Rec is the cumulative request for the step AFTER s1 —
+		// index 0 is Step 0's own (already-resolved-elsewhere) historical
+		// tool result, index 1 is genuinely new content Step 1 introduced
+		// (no tool result at all — the client dropped answering
+		// self_made_x). DeltaStart=1 says "new content starts at index 1".
+		polluted := &Step{
+			DeltaStart: 1,
+			Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: map[string]any{
+				"messages": []any{
+					map[string]any{"role": "tool", "tool_call_id": "call_real_1", "content": "real answer from an earlier Step"},
+					map[string]any{"role": "user", "content": "continue"},
+				},
+			}}}},
+		}
+		steps := []*Step{{}, s1, polluted}
+		got := positionalToolResults(steps, 1, map[string]chatmsg.ToolResult{})
+		if got != nil {
+			t.Errorf("got %v, want nil — the only leftover entry is HISTORICAL (outside the delta region), must not be guessed as self_made_x's answer", got)
+		}
+	})
+
+	t.Run("still finds a genuinely new leftover result within the delta region, ignoring older history before it", func(t *testing.T) {
+		s1 := &Step{ToolCalls: []chatmsg.ToolCall{{ID: "self_made_2", Name: "bash"}}}
+		nextStep := &Step{
+			DeltaStart: 2, // new content (this Step's own answer) starts at index 2
+			Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: map[string]any{
+				"messages": []any{
+					map[string]any{"role": "tool", "tool_call_id": "old_hist_result", "content": "stale historical result"},
+					map[string]any{"role": "assistant", "content": ""},
+					map[string]any{"role": "tool", "tool_call_id": "exec_new_result_id", "content": "fresh step-2 result"},
+				},
+			}}}},
+		}
+		steps := []*Step{{}, s1, nextStep}
+		got := positionalToolResults(steps, 1, map[string]chatmsg.ToolResult{})
+		if len(got) != 1 {
+			t.Fatalf("got %d matches, want exactly 1: %+v", len(got), got)
+		}
+		if got["self_made_2"].Text != "fresh step-2 result" {
+			t.Errorf("got %+v, want self_made_2 paired with the fresh in-delta result, not the stale historical one", got)
 		}
 	})
 }

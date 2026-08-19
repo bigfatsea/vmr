@@ -17,6 +17,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/taskseg"
 )
 
 // MetricKind tags how a MetricDiff's A/B/values should be rendered — kept as
@@ -262,6 +263,11 @@ func toolShareDiff(a, b []ToolCallStat) []ToolShareDiff {
 const (
 	sysPromptExcerptChars   = 20000
 	deliverableExcerptChars = 6000
+	// initialInstructionExcerptChars is architecture doc §4.7's decided
+	// bound — a real language-model corpus example pastes several thousand
+	// characters of JSON as the opening instruction; unbounded display
+	// would defeat the point of a "3-second overview" up top.
+	initialInstructionExcerptChars = 2000
 )
 
 // ComparisonExtras is the rule-derived evidence beyond the nine Metrics
@@ -278,6 +284,15 @@ type ComparisonExtras struct {
 	FinalContext FinalContextFact `json:"final_context"`
 	Duration     DurationFact     `json:"duration"`
 	Deliverable  DeliverableFact  `json:"deliverable"`
+	// InitialInstruction is each side's opening user instruction, in full
+	// (bounded — see initialInstructionExcerptChars). A short summary
+	// (JourneyRef.Title, taskseg.Preview-truncated to ~80 runes) is already
+	// shown per side by render_compare.go's SideBlock; this is the
+	// additional, folded, full-text block underneath it — and, by living on
+	// ComparisonExtras rather than JourneyRef, it also flows into the
+	// -llm-addr evidence pack for free (EvidencePack embeds the whole
+	// Comparison, Extras included).
+	InitialInstruction InitialInstructionFact `json:"initial_instruction"`
 	// Divergence is the first Step position (in the two Journeys' shared
 	// aligned prefix) where their tool-use structure first differs — a
 	// structural fact ("from here on the two runs differ"), never a root-
@@ -398,19 +413,72 @@ type DeliverableFact struct {
 	B DeliverableStats `json:"b"`
 }
 
+// InitialInstructionStats is one side's opening user instruction, bounded
+// to initialInstructionExcerptChars. Found is false only for a Journey with
+// no user-role Event at all — shouldn't happen in practice (every Journey
+// opens on a real instruction, per journey.go's HumanInitiated doc comment)
+// but this doesn't assume it; a defensive absence, not an error.
+type InitialInstructionStats struct {
+	Found     bool   `json:"found"`
+	Text      string `json:"text,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+type InitialInstructionFact struct {
+	A InitialInstructionStats `json:"a"`
+	B InitialInstructionStats `json:"b"`
+}
+
+// initialInstructionStats finds j's opening instruction — dialect-aware,
+// the same extraction journey.go's deriveTitle uses for j.Title (prof.
+// RealUserText, scoped to the Journey's very first Step, matching
+// deriveTitle's own firstRu scope), just without the Preview() truncation
+// deriveTitle's short summary needs. This deliberately does NOT scan
+// j.Events for the first Role=="user" message: that stream isn't
+// dialect-filtered, and for an agent framework whose client injects
+// scaffold/heartbeat text as role="user" (OpenClawAware — see its
+// RealUserText doc comment), the first such Event can be transport noise,
+// not the real instruction the SideBlock title above this excerpt already
+// (correctly) shows — showing a DIFFERENT, unfiltered text underneath would
+// contradict it rather than expand on it.
+func initialInstructionStats(j *Journey, prof taskseg.Profile) InitialInstructionStats {
+	steps := journeySteps(j)
+	if len(steps) == 0 || steps[0].Rec == nil {
+		return InitialInstructionStats{}
+	}
+	body, _ := steps[0].Rec.Client.Request.Body.(map[string]any)
+	msgs := chatmsg.Messages(body)
+	rawMsgs := chatmsg.RawArray(body)
+	off := chatmsg.MsgOffset(body)
+	for i, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		if raw, ok := prof.RealUserText(m, rawMsgs, i-off); ok {
+			text, truncated := truncateText(raw, initialInstructionExcerptChars)
+			return InitialInstructionStats{Found: true, Text: text, Truncated: truncated}
+		}
+	}
+	return InitialInstructionStats{}
+}
+
 // ComputeComparisonExtras derives ComparisonExtras for jA/jB. ma/mb
 // are the same Metrics Compare(Summarize(jA), Summarize(jB)) already
 // computed — passed in rather than recomputed so a caller that already has
-// both JourneySummary values doesn't pay for ComputeMetrics twice.
-func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics) ComparisonExtras {
+// both JourneySummary values doesn't pay for ComputeMetrics twice. prof is
+// the SAME Profile both Journeys were already built with (cmd_story.go's
+// compareJourneys calls story.BuildChain(chain, prof, lang) for both sides)
+// — initialInstructionStats needs it for dialect-aware extraction.
+func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profile) ComparisonExtras {
 	return ComparisonExtras{
-		Endpoints:    endpointsFact(jA, jB),
-		Cache:        CacheFact{A: cacheStats(jA), B: cacheStats(jB)},
-		SysPrompt:    SysPromptFact{A: sysPromptStats(jA), B: sysPromptStats(jB)},
-		FinalContext: finalContextFact(ma, mb),
-		Duration:     durationFact(jA, jB),
-		Deliverable:  DeliverableFact{A: deliverableStats(jA), B: deliverableStats(jB)},
-		Divergence:   computeDivergence(jA, jB),
+		Endpoints:          endpointsFact(jA, jB),
+		Cache:              CacheFact{A: cacheStats(jA), B: cacheStats(jB)},
+		SysPrompt:          SysPromptFact{A: sysPromptStats(jA), B: sysPromptStats(jB)},
+		FinalContext:       finalContextFact(ma, mb),
+		Duration:           durationFact(jA, jB),
+		Deliverable:        DeliverableFact{A: deliverableStats(jA), B: deliverableStats(jB)},
+		InitialInstruction: InitialInstructionFact{A: initialInstructionStats(jA, prof), B: initialInstructionStats(jB, prof)},
+		Divergence:         computeDivergence(jA, jB),
 	}
 }
 

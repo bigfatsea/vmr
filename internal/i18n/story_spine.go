@@ -27,6 +27,14 @@ type SpineText struct {
 	SpineFindingTag     string                // appended to a spine Step header that hit a Finding
 	SpineValueTruncated func(more int) string // appended to a tool-call payload block capped at spineFullCap
 
+	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
+	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
+	SpinePositionalMatch string                   // appended to a tool result paired by position, not id (level 3)
+
+	SpineFinalDeliverableTitle        string
+	SpineFinalDeliverableFound        func(stepSeq int, toolName string) string
+	SpineFinalDeliverableExcerptLabel string
+
 	StepTagPlan       string
 	StepTagAction     string
 	StepTagObserve    string
@@ -76,6 +84,16 @@ func Spine(lang Lang) SpineText {
 			SpineValueTruncated: func(more int) string {
 				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下方该 Step 的 tool_call 正文)"
 			},
+
+			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
+			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
+			SpinePositionalMatch: "（按位置推测，ID 未匹配）",
+
+			SpineFinalDeliverableTitle: "## 最终交付物\n\n",
+			SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
+				return "Step " + strconv.Itoa(stepSeq) + " · `" + toolName + "`\n\n"
+			},
+			SpineFinalDeliverableExcerptLabel: "交付物节选",
 
 			StepTagPlan:       "🔷 📋",
 			StepTagAction:     "🔷 🔧",
@@ -128,6 +146,16 @@ func Spine(lang Lang) SpineText {
 		SpineValueTruncated: func(more int) string {
 			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's tool_call section below)"
 		},
+
+		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
+		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },
+		SpinePositionalMatch: " (matched by position — ID unmatched)",
+
+		SpineFinalDeliverableTitle: "## Final Deliverable\n\n",
+		SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
+			return "Step " + strconv.Itoa(stepSeq) + " · `" + toolName + "`\n\n"
+		},
+		SpineFinalDeliverableExcerptLabel: "Deliverable excerpt",
 
 		StepTagPlan:       "🔷 📋",
 		StepTagAction:     "🔷 🔧",

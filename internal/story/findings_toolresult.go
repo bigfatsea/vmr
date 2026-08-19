@@ -18,6 +18,17 @@ import (
 	"vmr/internal/i18n"
 )
 
+// normalizeToolCallID strips underscores — the deterministic rewrite the
+// OpenClaw family of clients applies when echoing a tool_call id back into
+// the next request's history ("call_00_xHodG…" -> "call00xHodG…", root-
+// caused to the client, not any upstream provider/gateway —
+// story_report_architecture_opus-5.md §5). Still an exact match, not an
+// inference (zero observed collisions in the verification corpus), so it
+// stays admissible as Finding-detector evidence — the dividing line is
+// between this level and the render-only positional fallback
+// (positionalToolResults, render_spine_step.go), not between exact and this.
+func normalizeToolCallID(id string) string { return strings.ReplaceAll(id, "_", "") }
+
 // toolResultsFor returns the ToolResult entries answering steps[i]'s own
 // ToolCalls. Looked up from the FOLLOWING step's request body rather than
 // steps[i]'s own — a well-formed protocol turn can't get a new response
@@ -27,18 +38,34 @@ import (
 // history. Returns nil for a Step with no ToolCalls, or the Journey's last
 // Step (no following request to look in — its calls' results, if any,
 // aren't visible in what was recorded).
+//
+// Matches in two passes — exact id first, then normalizeToolCallID's
+// underscore-stripped form — and, on a normalized-only match, rewrites the
+// returned ToolResult.CallID back to the ORIGINAL steps[i].ToolCalls[].ID
+// (never the possibly-stripped id the client echoed). Every caller —
+// render_spine_step.go's byID lookup and this file's three Finding
+// detectors' errored[tc.ID]-style lookups — keys off the calling Step's own
+// tc.ID, so this rewrite is what lets every one of them work unchanged: the
+// normalization is fully contained here.
 func toolResultsFor(steps []*Step, i int) []chatmsg.ToolResult {
 	if len(steps[i].ToolCalls) == 0 || i+1 >= len(steps) || steps[i+1].Rec == nil {
 		return nil
 	}
-	ids := make(map[string]bool, len(steps[i].ToolCalls))
+	exact := make(map[string]bool, len(steps[i].ToolCalls))
+	byNorm := make(map[string]string, len(steps[i].ToolCalls)) // normalized id -> original tc.ID
 	for _, tc := range steps[i].ToolCalls {
-		ids[tc.ID] = true
+		exact[tc.ID] = true
+		byNorm[normalizeToolCallID(tc.ID)] = tc.ID
 	}
 	body, _ := steps[i+1].Rec.Client.Request.Body.(map[string]any)
 	var out []chatmsg.ToolResult
 	for _, r := range chatmsg.ToolResultList(chatmsg.RawArray(body)) {
-		if ids[r.CallID] {
+		if exact[r.CallID] {
+			out = append(out, r)
+			continue
+		}
+		if orig, ok := byNorm[normalizeToolCallID(r.CallID)]; ok {
+			r.CallID = orig
 			out = append(out, r)
 		}
 	}

@@ -14,13 +14,15 @@ import "strconv"
 
 // CompareText is render_compare.go's text, in one language.
 type CompareText struct {
-	Title              string
-	SideBlock          func(label, id, title, from, to, file string) string
-	ProfileTitle       string
-	ProfileTableHeader string
-	NotableFootnote    func(thresholdPct float64) string
-	ToolsTitle         string
-	ToolsTableHeader   string
+	Title                          string
+	SideBlock                      func(label, id, title, from, to, file string) string
+	InitialInstructionTitle        string
+	InitialInstructionExcerptLabel func(side string) string
+	ProfileTitle                   string
+	ProfileTableHeader             string
+	NotableFootnote                func(thresholdPct float64) string
+	ToolsTitle                     string
+	ToolsTableHeader               string
 
 	SourcesTitle string
 	SourcesIntro string
@@ -74,8 +76,10 @@ func Compare(lang Lang) CompareText {
 				}
 				return "**" + label + "** " + idPart + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
 			},
-			ProfileTitle:       "## 行为剖面对比\n\n",
-			ProfileTableHeader: "| 指标 | A | B | 相对变化 |\n|---|---|---|---|\n",
+			InitialInstructionTitle:        "## 初始指令\n\n",
+			InitialInstructionExcerptLabel: func(side string) string { return side + " 的初始指令" },
+			ProfileTitle:                   "## 行为剖面对比\n\n",
+			ProfileTableHeader:             "| 指标 | A | B | 相对变化 |\n|---|---|---|---|\n",
 			NotableFootnote: func(thresholdPct float64) string {
 				return "\n> ⚠️ = 相对变化 ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% 且绝对差值超过噪声阈值——一个规则性的\"值得看一眼\"标记，不代表已判断出原因。\n\n"
 			},
@@ -161,8 +165,10 @@ func Compare(lang Lang) CompareText {
 			}
 			return "**" + label + "** " + idPart + "\n> " + title + "\n> " + from + " → " + to + "\n\n"
 		},
-		ProfileTitle:       "## Behavior Profile Comparison\n\n",
-		ProfileTableHeader: "| Metric | A | B | Relative Change |\n|---|---|---|---|\n",
+		InitialInstructionTitle:        "## Initial Instruction\n\n",
+		InitialInstructionExcerptLabel: func(side string) string { return side + "'s initial instruction" },
+		ProfileTitle:                   "## Behavior Profile Comparison\n\n",
+		ProfileTableHeader:             "| Metric | A | B | Relative Change |\n|---|---|---|---|\n",
 		NotableFootnote: func(thresholdPct float64) string {
 			return "\n> ⚠️ = relative change ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% and the absolute difference clears the noise floor — a rule-based \"worth a look\" flag, not a determined cause.\n\n"
 		},
