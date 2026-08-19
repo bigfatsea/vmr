@@ -25,7 +25,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: %s
+        providers: [%s]
         models: [%s]
 `
 
@@ -543,7 +543,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: plain
+        providers: [plain]
         models: [gpt-4o]
 `
 	cfg, err := Parse([]byte(yaml))
@@ -588,7 +588,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `
 	cfg, err := Parse([]byte(yaml))

@@ -17,6 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"vmr/internal/audit"
+	"vmr/internal/config"
 
 	_ "vmr/internal/adapter/openai"
 	_ "vmr/internal/adapter/openairesponses"
@@ -34,14 +35,14 @@ func writeConfig(t *testing.T, dir, upstreamURL string, withModel bool) string {
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
+      - {protocol: openai, providers: [p1], models: [upstream-model]}
 `
 	} else {
 		models = `
 models:
   other:
     endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
+      - {protocol: openai, providers: [p1], models: [upstream-model]}
 `
 	}
 	yaml := fmt.Sprintf(`
@@ -198,7 +199,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, provider: p1, models: [upstream-model]}
+      - {protocol: openai-responses, providers: [p1], models: [upstream-model]}
 `, upstream.URL)
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
@@ -401,6 +402,37 @@ func TestRun_ModelResolutionError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "-model") {
 		t.Errorf("error = %v, want a hint to pass -model explicitly", err)
+	}
+}
+
+// TestResolveModel_MatchesProviderWithinMultiProviderEntry pins that
+// resolveModel matches any provider in a multi-provider entry, not just
+// the first.
+func TestResolveModel_MatchesProviderWithinMultiProviderEntry(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: p2, base_url: {openai: https://b.example/v1}, api_key: k}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, providers: [p1, p2], models: [upstream-model]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"p1", "p2"} {
+		model, err := resolveModel(cfg, "openai", "vm", provider)
+		if err != nil {
+			t.Errorf("provider %q: resolveModel() error = %v", provider, err)
+		}
+		if model != "upstream-model" {
+			t.Errorf("provider %q: resolveModel() = %q, want upstream-model", provider, model)
+		}
+	}
+	if _, err := resolveModel(cfg, "openai", "vm", "ghost"); err == nil {
+		t.Error("provider not in the entry's providers list: want an error, got nil")
 	}
 }
 

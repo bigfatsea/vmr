@@ -25,7 +25,7 @@ providers:
 models:
   m1:
     endpoints:
-      - {protocol: openai, provider: p1, models: [real-model]}
+      - {protocol: openai, providers: [p1], models: [real-model]}
 `, upstreamURL))
 }
 

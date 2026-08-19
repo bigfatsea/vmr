@@ -8,7 +8,7 @@ import (
 
 const proxyTestModels = `
 models:
-  m: {endpoints: [{protocol: openai, provider: p1, models: [x]}]}
+  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
 `
 
 func TestProxyConfigValidation(t *testing.T) {
@@ -55,7 +55,7 @@ providers:
   - {name: off, base_url: {openai: https://b.example}, api_key: k, proxy: false}
   - {name: unset, base_url: {openai: https://c.example}, api_key: k}
 models:
-  m: {endpoints: [{protocol: openai, provider: on, models: [x]}]}
+  m: {endpoints: [{protocol: openai, providers: [on], models: [x]}]}
 `))
 	if err != nil {
 		t.Fatal(err)

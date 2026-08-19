@@ -27,8 +27,8 @@ models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
-      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
+      - {protocol: openai, providers: [p1], models: [model-one], priority: 1}
+      - {protocol: openai, providers: [p2], models: [model-two], priority: 2}
 `, extra, u1, u2)
 }
 
@@ -41,7 +41,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
+      - {protocol: openai, providers: [p1], models: [upstream-model]}
 `
 }
 
@@ -59,10 +59,10 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
-      - {protocol: openai, provider: p3, models: [m3]}
-      - {protocol: openai, provider: p4, models: [m4]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai, providers: [p3], models: [m3]}
+      - {protocol: openai, providers: [p4], models: [m4]}
 `, extra, u1, u2, u3, u4)
 }
 
@@ -81,11 +81,11 @@ models:
     sticky: false
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [model-one]
         priority: 1%s
       - protocol: openai
-        provider: p2
+        providers: [p2]
         models: [model-two]
         priority: 2%s
 `, u1, u2, declP1, declP2)
@@ -104,11 +104,11 @@ models:
     sticky: false
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [model-one]
         priority: 1%s
       - protocol: openai
-        provider: p2
+        providers: [p2]
         models: [model-two]
         priority: 2%s
 `, u1, u2, p1Max, p2Max)
@@ -126,8 +126,8 @@ models:
   vm:
     %s
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one], priority: 1}
-      - {protocol: openai, provider: p2, models: [model-two], priority: 2}
+      - {protocol: openai, providers: [p1], models: [model-one], priority: 1}
+      - {protocol: openai, providers: [p2], models: [model-two], priority: 2}
 `, u1, u2, extraModelLines)
 }
 
@@ -142,10 +142,10 @@ providers:
 models:
   vm-openai:
     endpoints:
-      - {protocol: openai, provider: oai, models: [model-one], priority: 1}
+      - {protocol: openai, providers: [oai], models: [model-one], priority: 1}
   vm-anth:
     endpoints:
-      - {protocol: anthropic, provider: a1, models: [real-a], priority: 1}
-      - {protocol: anthropic, provider: a2, models: [real-b], priority: 2}
+      - {protocol: anthropic, providers: [a1], models: [real-a], priority: 1}
+      - {protocol: anthropic, providers: [a2], models: [real-b], priority: 2}
 `, extra, oai, anth1, anth2)
 }

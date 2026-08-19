@@ -203,7 +203,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [heavy]}
+      - {protocol: openai, providers: [p1], models: [heavy]}
 `)
 	rt := New(nil)
 	rt.Quota = quota.NewRegistry("")
@@ -250,7 +250,7 @@ providers:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000}]
 models:
   m1:
-    endpoints: [{protocol: openai, provider: p1, models: [real-model]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)

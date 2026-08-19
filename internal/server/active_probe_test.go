@@ -43,7 +43,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
+      - {protocol: openai, providers: [p1], models: [model-one]}
 `, u.srv.URL))
 	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired
 

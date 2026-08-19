@@ -29,7 +29,7 @@ providers:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 500}]
 models:
   vm:
-    endpoints: [{protocol: openai, provider: p1, models: [m1]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m1]}]
 `
 
 const noQuotaYAML = `
@@ -38,7 +38,7 @@ providers:
   - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai, provider: p1, models: [m1]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m1]}]
 `
 
 type quotaStatusRow struct {

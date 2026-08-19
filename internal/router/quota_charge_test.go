@@ -355,9 +355,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
-      - {protocol: openai, provider: p3, models: [m3]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai, providers: [p3], models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)

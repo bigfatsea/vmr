@@ -13,11 +13,12 @@
 # try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型
 # `endpoints:` 列表下的每一条，是一个 try-order 候选：它自己声明协议（哪个入口
 # 能打到它——POST /v1/chat/completions 对应 "openai"，POST /v1/messages 对应
-# "anthropic"，POST /v1/responses 对应 "openai-responses"）、一个 provider
-# （按名字去上面的 providers 列表里解析）、以及一份 `models:` 上游模型名列表，
-# 这些模型名共享这一条的 capabilities/max_context_tokens/role_map/sticky_ttl/
-# priority——每个名字都会展开成各自独立、单独做健康跟踪的端点，按列表顺序排列。
-# 一条记录自己的 `capabilities` 是对模型基线的*叠加*（并集——只需要声明这条相
+# "anthropic"，POST /v1/responses 对应 "openai-responses"）、一个或多个 provider
+# （按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
+# `models:` 上游模型名列表，这些模型名共享这一条的 capabilities/
+# max_context_tokens/role_map/sticky_ttl/priority——每个 (provider, model) 对
+# 都会展开成各自独立、单独做健康跟踪的端点，外层按 models 循环、内层按
+# providers 循环。一条记录自己的 `capabilities` 是对模型基线的*叠加*（并集——只需要声明这条相
 # 对共享底线额外多出的部分）；它自己的 `max_context_tokens` 一旦设置就是*覆盖*
 # 基线（一个数字没法做并集）。同一个虚拟模型名可以混合协议：给它一条
 # protocol: openai 的端点组记录，再给一条 protocol: anthropic（或
@@ -29,6 +30,22 @@
 # 和 OpenRouter 明确文档化了兼容 Responses 的端点（MiniMax 暂时还没有），而且
 # 两家都强制无状态用法（store:true / 非空的 previous_response_id 会被上游自
 # 己拒绝——vmr 从不检查或剥离请求字段，它只负责路由）。
+#
+# `providers:` 永远是一个列表——单账号场景写 `providers: [p1]`；当好几个账号
+# 对同一批上游模型来说是可以互换的候选时，写 `providers: [p1, p2]`：每个具名
+# provider 都会先试完当前这个（更优先的）模型，整条记录才会降级到下一个模型
+# （见下面 "agent" 示例，openrouter/openrouter2 共享一条记录）。多账号列表主要
+# 是为了同一个厂商下有好几个账号的场景，这样 try-order 列表就不用给每个账号、
+# 每个模型各写一行。
+#
+# `fallback_endpoints:`（顶层字段，和 `providers`/`models` 平级）是一份端点组
+# 记录列表，会被追加到每个虚拟模型自己 try-order 的末尾——形状和一条
+# models.<name>.endpoints[] 记录完全一样，只是只需要声明一次，不用往每个都想
+# 要同一档低优先级兜底的模型上都粘贴一遍。一条 fallback 只会挂到那些本来就已经
+# 有对应 `protocol` 入口的虚拟模型上（它从不会给一个模型凭空开一个新的入口协
+# 议），一个模型也可以用 `fallback: false` 完全不参与（见下面 "cheap" 示例）。
+# 和普通端点组不同，fallback 的 `priority` 是必填项且必须 > 0——省略/写 0 会
+# 让它悄悄地和模型自己的真实端点抢占同一档位，而不是老老实实排在它们后面。
 
 listen: 127.0.0.1:8800
 # api_keys:                      # 可选：给路由器加一层保护（Bearer 或 x-api-key）。每个 key 的
@@ -120,6 +137,17 @@ listen: 127.0.0.1:8800
 #                                   # （参见 pricing.example.yaml——复制成 pricing.yaml 后按需修改），
 #                                   # 合并进来——canonical key 撞车时你的条目胜出。指向一个不存在
 #                                   # 的路径会在加载期报错，不会静默跳过。
+
+# 全局兜底：追加到每个已经有 openai 协议入口的虚拟模型 try-order 末尾（下面的
+# coding/cheap/agent 都有——claude 是纯 Anthropic 模型，这个块从不会碰到它，
+# 也就不需要给它写 `fallback: false`）。这里的 openrouter2 就是下面
+# providers[] 里的第二个账号，选它只是为了拿一个模型下还没声明过的候选，避免
+# 这个示例也触发 `vmr check` 的"fallback 与模型自身已声明的端点重复"检查。
+fallback_endpoints:
+  - protocol: openai
+    providers: [openrouter2]
+    models: [z-ai/glm-5.2]
+    priority: 90              # fallback 记录必须显式声明且 > 0——见上面的说明段落
 
 providers:
   # base_url 必须包含 provider 自己完整的 API 版本号段（/v1、/v3，随它怎么叫）——
@@ -224,6 +252,16 @@ providers:
     base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}
     api_key: ${DEEPSEEK_API_KEY}
 
+  # 第二个 OpenRouter 账号——比如一个团队/备用 key——放在这里纯粹是为了演示下面
+  # "agent" 示例里的 `providers: [...]` 多账号合并写法，以及上面 models: 之前
+  # 那个顶层 `fallback_endpoints:` 块。实际部署只有在真的有两个同厂商账号时才需要这样
+  # 再加一条 provider 记录。
+  - name: openrouter2
+    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
+    api_key: ${OPENROUTER_API_KEY}   # 真正的第二个账号应该引用自己的 ${VAR}——这里
+                                     # 复用同一个变量，只是为了让这份文件在只设了一个
+                                     # key 的情况下也能干净地加载通过
+
   # 如果某个 provider 的 API 不接受全部 OpenAI 角色，可以按端点组
   # （下面 models.<name>.endpoints[].role_map）做重写——一份简单的旧值->新值
   # 映射，在请求体发往上游之前应用到顶层 "messages" 数组里的 "role" 字段上。
@@ -251,10 +289,10 @@ models:
     # "Sticky Model" 一节。
     endpoints:
       - protocol: openai
-        provider: openrouter
+        providers: [openrouter]
         models: [z-ai/glm-5.2]
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-v4-pro]
 
   cheap:
@@ -262,22 +300,25 @@ models:
                                  # 上面全局设置是开着的（不写就继承全局设置）
     # sticky: false              # 对确实是一次性交互、没有多轮价值需要保护的模型，
                                   # 关掉它的会话亲和性
+    # fallback: false             # 让这个虚拟模型完全不参与上面的 fallback_endpoints: 块——
+                                  # 用于必须严格局限在自己声明的端点内的模型（不写
+                                  # 就继承默认值 true，即参与）
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         # capabilities: [image]        # 这个模型上面没有基线 capabilities，所以这条
         #                              # 端点实际生效的能力集合就是单独的 [image]
         # max_context_tokens: 1000000  # 一旦声明，vmr 就会跳过这条端点，不把它用于
         #                              # 那些它实际服务不了的请求
       - protocol: openai
-        provider: openrouter
+        providers: [openrouter]
         # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
         # 的端点，共享这一条记录的 provider/protocol/capabilities/priority——按
         # 列表顺序依次尝试（每一个仍然有自己独立的 failover/健康状态）。
         models: [tencent/hy3-preview, qwen/qwen3-max]
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-v4-flash]
         # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
                             # 只针对这一条端点覆盖全局 sticky_ttl
@@ -299,15 +340,17 @@ models:
     max_context_tokens: 256000
     endpoints:
       - protocol: openai
-        provider: openrouter
-        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]
+        providers: [openrouter, openrouter2]   # 多账号合并：外层按 models 循环，内层
+        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # 按 providers——gemini-3.6-flash-high
+        #                                                       # 先试 openrouter 再试 openrouter2，
+        #                                                       # 然后 gemini-3.1-pro-high 同样再来一遍
       - protocol: anthropic
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         max_context_tokens: 512000
         capabilities: [image, audio, video, thinking]
       - protocol: openai-responses
-        provider: openrouter
+        providers: [openrouter]
         models: [gemini-3.6-flash-high]
 
   # 仅 Anthropic 的虚拟模型：只能通过 POST /v1/messages 到达。
@@ -317,11 +360,11 @@ models:
   claude:
     endpoints:
       - protocol: anthropic
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
       - protocol: anthropic
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-v4-pro]
       - protocol: anthropic
-        provider: openrouter
+        providers: [openrouter]
         models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 Anthropic 协议来说话

@@ -8,6 +8,7 @@ package router
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"vmr/internal/adapter"
 	"vmr/internal/config"
@@ -107,64 +108,33 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 			return nil, fmt.Errorf("model %q: %w", name, err)
 		}
 		sticky := m.Sticky == nil || *m.Sticky
+		fallbackOK := m.Fallback == nil || *m.Fallback
 		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
 		for _, eg := range m.Endpoints {
-			ad, ok := adapter.Get(eg.Protocol)
-			if !ok { // defensive; config.validate already checked this
-				return nil, fmt.Errorf("model %q: unknown adapter type %q (available: %v)", name, eg.Protocol, adapter.Names())
-			}
-			p, ok := cfg.ProviderByName(eg.Provider)
-			if !ok { // defensive; config.validate already checked this
-				return nil, fmt.Errorf("model %q: unknown provider %q", name, eg.Provider)
-			}
-			baseURL, ok := p.BaseURL[eg.Protocol]
-			if !ok { // defensive; config.validate already checked this
-				return nil, fmt.Errorf("model %q: provider %q has no base_url for protocol %q", name, eg.Provider, eg.Protocol)
-			}
-			stickyTTL := cfg.StickyTTL.D()
-			if eg.StickyTTL != nil {
-				stickyTTL = eg.StickyTTL.D()
+			eps, err := buildEndpoints(cfg, quotaSpecs, m, eg, cfg.StickyTTL.D(), false)
+			if err != nil {
+				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
 			route, ok := routes[eg.Protocol]
 			if !ok {
 				route = &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
 				routes[eg.Protocol] = route
 			}
-			// Capabilities: union of the virtual model's base list and this
-			// endpoint's own (additive) declaration. MaxContextTokens: this
-			// endpoint's own override if set, else the model's base — a
-			// scalar can't be unioned, so it's override-or-inherit instead.
-			// See config.VirtualModel/config.EndpointGroup's doc comments.
-			effCapabilities := mergeCapabilities(m.Capabilities, eg.Capabilities)
-			effMaxContextTokens := m.MaxContextTokens
-			if eg.MaxContextTokens > 0 {
-				effMaxContextTokens = eg.MaxContextTokens
-			}
-			for _, upstreamModel := range eg.Models {
-				ep := &core.Endpoint{
-					Provider:            eg.Provider,
-					AdapterType:         eg.Protocol,
-					BaseURL:             baseURL,
-					FullURL:             ad.ResolveURL(baseURL),
-					APIKey:              p.APIKey,
-					Model:               upstreamModel,
-					Priority:            eg.Priority,
-					RoleMap:             eg.RoleMap,
-					Capabilities:        effCapabilities,
-					ExtraCapabilities:   eg.Capabilities,
-					MaxContextTokens:    effMaxContextTokens,
-					OwnMaxContextTokens: eg.MaxContextTokens,
-					StickyTTL:           stickyTTL,
-					Quota:               quotaSpecs[eg.Provider],
-					PricingRate:         cfg.ResolvedPricing[eg.Provider+"\x00"+upstreamModel],
+			route.Endpoints = append(route.Endpoints, eps...)
+		}
+		// Only attaches to protocols this model already routes — a fallback
+		// augments, it never opens a new ingress.
+		if fallbackOK {
+			for i, fb := range cfg.FallbackEndpoints {
+				route, ok := routes[fb.Protocol]
+				if !ok {
+					continue
 				}
-				// Precompute HealthKey()/Name() once, here, before ep is
-				// ever reachable from a concurrently-read Snapshot (see
-				// core.Endpoint.Freeze's doc comment) — every later call on
-				// the request hot path becomes a plain field read instead
-				// of re-hashing APIKey with SHA-256.
-				ep.Freeze()
-				route.Endpoints = append(route.Endpoints, ep)
+				eps, err := buildEndpoints(cfg, quotaSpecs, m, fb, cfg.StickyTTL.D(), true)
+				if err != nil {
+					return nil, fmt.Errorf("model %q: fallback_endpoints[%d]: %w", name, i, err)
+				}
+				route.Endpoints = append(route.Endpoints, eps...)
 			}
 		}
 		for protocol, route := range routes {
@@ -177,6 +147,70 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// buildEndpoints expands one EndpointGroup (fromFallback marks whether it's
+// a FallbackEndpoints entry) into its *core.Endpoint values — outer loop
+// over Models, inner loop over eg.Providers. Each returned Endpoint is
+// already Freeze()'d.
+func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m config.VirtualModel, eg config.EndpointGroup, globalStickyTTL time.Duration, fromFallback bool) ([]*core.Endpoint, error) {
+	ad, ok := adapter.Get(eg.Protocol)
+	if !ok { // defensive; config.validate already checked this
+		return nil, fmt.Errorf("unknown adapter type %q (available: %v)", eg.Protocol, adapter.Names())
+	}
+	stickyTTL := globalStickyTTL
+	if eg.StickyTTL != nil {
+		stickyTTL = eg.StickyTTL.D()
+	}
+	// Capabilities: union of the virtual model's base list and this
+	// endpoint's own (additive) declaration. MaxContextTokens: this
+	// endpoint's own override if set, else the model's base — a
+	// scalar can't be unioned, so it's override-or-inherit instead.
+	// See config.VirtualModel/config.EndpointGroup's doc comments.
+	effCapabilities := mergeCapabilities(m.Capabilities, eg.Capabilities)
+	effMaxContextTokens := m.MaxContextTokens
+	if eg.MaxContextTokens > 0 {
+		effMaxContextTokens = eg.MaxContextTokens
+	}
+	var eps []*core.Endpoint
+	for _, upstreamModel := range eg.Models {
+		for _, providerName := range eg.Providers {
+			p, ok := cfg.ProviderByName(providerName)
+			if !ok { // defensive; config.validate already checked this
+				return nil, fmt.Errorf("unknown provider %q", providerName)
+			}
+			baseURL, ok := p.BaseURL[eg.Protocol]
+			if !ok { // defensive; config.validate already checked this
+				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, eg.Protocol)
+			}
+			ep := &core.Endpoint{
+				Provider:            providerName,
+				AdapterType:         eg.Protocol,
+				BaseURL:             baseURL,
+				FullURL:             ad.ResolveURL(baseURL),
+				APIKey:              p.APIKey,
+				Model:               upstreamModel,
+				Priority:            eg.Priority,
+				RoleMap:             eg.RoleMap,
+				Capabilities:        effCapabilities,
+				ExtraCapabilities:   eg.Capabilities,
+				MaxContextTokens:    effMaxContextTokens,
+				OwnMaxContextTokens: eg.MaxContextTokens,
+				FromFallback:        fromFallback,
+				StickyTTL:           stickyTTL,
+				Quota:               quotaSpecs[providerName],
+				PricingRate:         cfg.ResolvedPricing[providerName+"\x00"+upstreamModel],
+			}
+			// Precompute HealthKey()/Name() once, here, before ep is
+			// ever reachable from a concurrently-read Snapshot (see
+			// core.Endpoint.Freeze's doc comment) — every later call on
+			// the request hot path becomes a plain field read instead
+			// of re-hashing APIKey with SHA-256.
+			ep.Freeze()
+			eps = append(eps, ep)
+		}
+	}
+	return eps, nil
 }
 
 // BuildQuotaSpecs converts each provider's config.QuotaConfig into a

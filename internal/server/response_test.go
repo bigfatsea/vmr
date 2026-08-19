@@ -88,7 +88,7 @@ providers:
 models:
   agent:
     endpoints:
-      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
+      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -126,7 +126,7 @@ providers:
 models:
   agent:
     endpoints:
-      - {protocol: openai, provider: p1, models: [MiniMax-M3]}
+      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
 `))
 	if err != nil {
 		t.Fatal(err)

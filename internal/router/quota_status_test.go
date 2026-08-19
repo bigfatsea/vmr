@@ -19,7 +19,7 @@ providers:
   - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
 models:
   m1:
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
 `)
 	rt.Install(mustSnapshot(t, cfg))
 	if got := rt.QuotaStatus(); got != nil {
@@ -50,8 +50,8 @@ providers:
 models:
   m1:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1a, m1b]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1a, m1b]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
@@ -96,7 +96,7 @@ providers:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 100000}]
 models:
   m1:
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)

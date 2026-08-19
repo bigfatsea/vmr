@@ -68,7 +68,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, provider: p1, models: [real-model-one]}
+      - {protocol: openai-responses, providers: [p1], models: [real-model-one]}
 `)
 	resp, body := postResponses(t, ts, simpleResponsesReq)
 	if resp.StatusCode != http.StatusOK {
@@ -104,7 +104,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m]}
+      - {protocol: openai, providers: [p1], models: [m]}
 `)
 	resp, body := postResponses(t, ts, simpleResponsesReq)
 	if resp.StatusCode != http.StatusNotFound {
@@ -124,7 +124,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, provider: p1, models: [m]}
+      - {protocol: openai-responses, providers: [p1], models: [m]}
 `)
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/models", nil)
 	resp, err := http.DefaultClient.Do(req)

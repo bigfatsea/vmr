@@ -45,7 +45,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, provider: p1, models: [model-one]}
+      - {protocol: openai-responses, providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)
@@ -79,7 +79,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
+      - {protocol: openai, providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)

@@ -16,6 +16,7 @@
   - [base_url 与 API 版本号](#base_url-与-api-版本号)
   - [角色改写 role_map](#角色改写-role_map)
   - [端点尝试顺序 priority 与 strategy](#端点尝试顺序-priority-与-strategy)
+  - [多 Provider 端点组与全局兜底](#多-provider-端点组与全局兜底)
   - [环境变量](#环境变量)
 - [请求处理与路由](#请求处理与路由)
   - [透传与归一化](#透传与归一化)
@@ -77,13 +78,13 @@ providers:
 models:
   coding:                      # 只有 openai 协议 → 走 /v1/chat/completions
     endpoints:
-      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
+      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
   claude:                      # 只有 anthropic 协议 → 走 /v1/messages
     endpoints:
-      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
+      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # 只有 openai-responses 协议 → 走 /v1/responses
     endpoints:
-      - {protocol: openai-responses, provider: openrouter, models: [z-ai/glm-5.2]}
+      - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
 ```
 
 全部字段与校验规则见设计文档 Part 1 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
@@ -117,6 +118,48 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 ### 端点尝试顺序 priority 与 strategy
 
 `endpoints:` 下每条 entry 都可以写 `priority: N`（整数，缺省 0）；端点按 priority 升序排列后再尝试，打平的情况（最常见——没人去设它）保持配置文件里的原始顺序，因为排序是稳定的。实际用法就是：把端点按你想要的尝试顺序列出来就够了；只有想在不重排列表本身的前提下调整顺序时，才需要显式写 `priority`。`priority` 是虚拟模型 `strategy` 列表里的一个维度（`strategy: [priority]` 是缺省值，截至本文写作时也是唯一实际注册的排序维度——这个列表暂时没有别的可加），所以绝大多数配置都用不上 `strategy`。
+
+### 多 Provider 端点组与全局兜底
+
+以下两种写法纯粹是为了压缩那些原本要在多个账号、多个虚拟模型之间重复粘贴同一条尾部记录的 YAML——都不改变实际可达到什么端点，只改变要写多少行来表达它。
+
+**一条端点组记录里写多个 provider**：`providers:` 永远是一个列表——单账号写 `providers: [p1]`，好几个账号对同一批上游模型来说可以互换时写 `providers: [p1, p2]`——典型是同一个厂商下的好几个账号。
+
+```yaml
+providers:
+  - name: volcengine
+    api_key: ${ARK_KEY_1}
+    base_url: {openai: https://ark.example.com/v3}
+  - name: volcengine2
+    api_key: ${ARK_KEY_2}
+    base_url: {openai: https://ark.example.com/v3}
+
+models:
+  coding:
+    endpoints:
+      - protocol: openai
+        providers: [volcengine, volcengine2]
+        models: [deepseek-v4-pro]
+        priority: 1
+```
+
+这会展开成 `providers` × `models` 那么多个独立的、各自单独做健康跟踪的端点——外层按 `models` 循环，内层按 `providers` 循环，也就是每个具名 provider 都会先试完当前（更优先的）模型，整条记录才会降级到下一个模型。每个账号仍然各自保留自己的 `quota:`/`pricing:`（照旧写在它自己的 `providers[]` 记录上——合并 try-order 那一行不会把账号的配额账本也合并）；`vmr check` 展开后打印的结果，和手写多条记录时完全一样。
+
+**全局兜底端点**：一个顶层的 `fallback_endpoints:` 列表，记录形状和 `models.<name>.endpoints[]` 完全一样，会被追加到*每一个*虚拟模型自己 try-order 的末尾，而不用往每一个都想要同一档兜底的模型上分别粘贴一遍：
+
+```yaml
+fallback_endpoints:
+  - protocol: openai
+    providers: [bai, sensenova]
+    models: [deepseek-v4-flash]
+    priority: 98
+
+models:
+  coding: {endpoints: [...]}   # 上面这条 fallback 会自动追加进来
+  cheap:  {endpoints: [...]}   # 这个也一样
+```
+
+一条 fallback 只会挂到那些本来就已经有对应 `protocol` 入口的虚拟模型上——它是给已有入口做增补，绝不会给一个模型凭空开一个它原本没声明过的新入口（一个纯 Anthropic 的模型不会被 openai 协议的 fallback 碰到）。一个虚拟模型可以用 `fallback: false` 完全不参与。和普通端点组不同，fallback 记录的 `priority` **必须显式声明且 > 0**——省略/写 0 会让它悄悄和模型自己的真实端点抢占同一档位，而不是老老实实排在后面，这正是 `vmr check` 的加载期校验存在的意义：在请求意外路由到那里之前把这类陷阱拦下来。`vmr check` 打印一条来自 fallback 的端点时会带上末尾的 `fallback` 标注，也会对"某条 fallback 悄悄重复了模型自己已经声明过的端点"这种情况打 ⚠️。
 
 ### 环境变量
 
@@ -170,12 +213,12 @@ models:
     max_context_tokens: 128000         # 基线：同上
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
         max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
 ```
 
@@ -201,11 +244,11 @@ models:
     # 才需要显式写 sticky: false
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         # 继承全局的 10 分钟 sticky_ttl
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-chat]
         sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
 ```

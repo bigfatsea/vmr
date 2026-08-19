@@ -104,11 +104,11 @@ models:
   vm:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [model-one]
         priority: 1
       - protocol: openai
-        provider: p2
+        providers: [p2]
         models: [model-two]
         priority: 2
         sticky_ttl: 200ms

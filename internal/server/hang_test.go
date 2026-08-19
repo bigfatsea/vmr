@@ -69,7 +69,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
+      - {protocol: openai, providers: [p1], models: [model-one]}
 `, u.URL)
 	ts := newRouterServer(t, yaml)
 

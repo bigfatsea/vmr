@@ -25,7 +25,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [real-model]
 `
 

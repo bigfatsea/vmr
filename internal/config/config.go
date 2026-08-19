@@ -94,29 +94,26 @@ type Provider struct {
 	Pricing *ProviderPricingConfig `yaml:"pricing"`
 }
 
-// EndpointGroup is one try-order entry under a virtual model: a provider, a
-// protocol face of it, and one or more upstream model names that all share
-// this entry's routing metadata. Models is exhaustive: each name expands
-// into its own independent *core.Endpoint (own health/failover state), in
-// list order, sharing Capabilities/MaxContextTokens/RoleMap/StickyTTL/
-// Priority — the shape that saves repeating those fields once per model when
-// several models behind the same account are interchangeable candidates for
-// one virtual model.
+// EndpointGroup is one try-order entry under a virtual model: one or more
+// providers, a protocol face of them, and one or more upstream model names,
+// all sharing this entry's routing metadata. Each (provider, model) pair
+// expands into its own independent *core.Endpoint — outer loop over Models,
+// inner loop over Providers, so every provider is tried for the preferred
+// model before falling through to the next.
 //
-// Provider resolves by name against Config.Providers; Protocol picks which
-// of that provider's declared BaseURL entries applies — an EndpointGroup
-// referencing a provider that hasn't declared a base_url for Protocol is a
-// validation error, not a silent mismatch.
+// Providers resolves by name against Config.Providers. Protocol picks which
+// of each named provider's declared BaseURL entries applies — a provider
+// with no base_url for Protocol is a validation error, not a silent
+// mismatch.
 //
-// Priority is optional and defaults to 0. Endpoints of equal priority (the
-// common case: nobody sets it) keep their config-file order because Sort is
-// stable — so listing endpoints in the order you want them tried is enough;
-// there is no need to number them.
+// Priority defaults to 0; equal-priority entries keep config-file order
+// (Sort is stable). Config.FallbackEndpoints entries are the exception:
+// Priority there must be set and positive.
 type EndpointGroup struct {
-	Protocol string   `yaml:"protocol"`
-	Provider string   `yaml:"provider"`
-	Models   []string `yaml:"models"`
-	Priority int      `yaml:"priority"`
+	Protocol  string   `yaml:"protocol"`
+	Providers []string `yaml:"providers"`
+	Models    []string `yaml:"models"`
+	Priority  int      `yaml:"priority"`
 
 	// Capabilities and MaxContextTokens drive condition-based routing (see
 	// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
@@ -189,6 +186,11 @@ type VirtualModel struct {
 	// remember to opt in. Explicit false opts a genuinely one-shot virtual
 	// model out.
 	Sticky *bool `yaml:"sticky"`
+
+	// Fallback opts this virtual model into Config.FallbackEndpoints; nil
+	// defaults to true (same polarity as Sticky above). Explicit false opts
+	// out entirely — no partial opt-out of individual entries.
+	Fallback *bool `yaml:"fallback"`
 }
 
 // Duration accepts Go duration strings ("90s", "2m") in YAML.
@@ -289,6 +291,16 @@ type Config struct {
 	Timeouts  Timeouts                `yaml:"timeouts"`
 	Providers []Provider              `yaml:"providers"`
 	Models    map[string]VirtualModel `yaml:"models"`
+	// FallbackEndpoints is appended to the tail of every virtual model's
+	// try-order — declare a shared catch-all tier once instead of pasting
+	// it onto every VirtualModel.Endpoints list. router.BuildSnapshot only
+	// attaches an entry to a model that already has an entry point on the
+	// entry's Protocol (augments an existing ingress, never opens a new
+	// one), unless VirtualModel.Fallback == false. Priority here is
+	// mandatory and must be > 0, unlike an ordinary EndpointGroup: an unset
+	// priority defaults to 0 and would silently compete with a model's own
+	// real endpoints for the same tier.
+	FallbackEndpoints []EndpointGroup `yaml:"fallback_endpoints"`
 	// Pricing is the global pricing block — currency, exchange rate,
 	// and an optional user supplement/standard-table override. See
 	// PricingConfig's doc comment (pricing.go).
@@ -557,10 +569,10 @@ func (c *Config) validate() error {
 		}
 	}
 	// providerModels collects, per provider, every upstream model name any
-	// virtual model's endpoint group actually configures it to serve —
-	// resolvePricing (called after this loop) needs this to know which
-	// models a metric: cost provider must have complete pricing for; no
-	// other validation step needed this set.
+	// virtual model's endpoint group (or a FallbackEndpoints entry) actually
+	// configures it to serve — resolvePricing (called after this loop)
+	// needs this to know which models a metric: cost provider must have
+	// complete pricing for; no other validation step needed this set.
 	providerModels := map[string]map[string]bool{}
 	for name, m := range c.Models {
 		if len(m.Endpoints) == 0 {
@@ -570,44 +582,71 @@ func (c *Config) validate() error {
 			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)
 		}
 		for i, eg := range m.Endpoints {
-			if _, ok := adapter.Get(eg.Protocol); !ok {
-				return fmt.Errorf("model %q endpoint group #%d: unknown protocol %q (available: %v)", name, i+1, eg.Protocol, adapter.Names())
+			if err := c.validateEndpointGroup(fmt.Sprintf("model %q endpoint group #%d", name, i+1), eg, providerModels); err != nil {
+				return err
 			}
-			p, ok := c.ProviderByName(eg.Provider)
-			if !ok {
-				return fmt.Errorf("model %q endpoint group #%d: unknown provider %q", name, i+1, eg.Provider)
-			}
-			if _, ok := p.BaseURL[eg.Protocol]; !ok {
-				return fmt.Errorf("model %q endpoint group #%d: provider %q has no base_url for protocol %q", name, i+1, eg.Provider, eg.Protocol)
-			}
-			if len(eg.Models) == 0 {
-				return fmt.Errorf("model %q endpoint group #%d: models: at least one required", name, i+1)
-			}
-			for j, mn := range eg.Models {
-				if mn == "" {
-					return fmt.Errorf("model %q endpoint group #%d: models[%d]: empty", name, i+1, j)
-				}
-				if providerModels[eg.Provider] == nil {
-					providerModels[eg.Provider] = map[string]bool{}
-				}
-				providerModels[eg.Provider][mn] = true
-			}
-			if eg.MaxContextTokens < 0 {
-				return fmt.Errorf("model %q endpoint group #%d: max_context_tokens must be >= 0", name, i+1)
-			}
-			if eg.StickyTTL != nil {
-				if eg.StickyTTL.D() <= 0 {
-					return fmt.Errorf("model %q endpoint group #%d: sticky_ttl must be positive", name, i+1)
-				}
-				if eg.StickyTTL.D() > core.StickyBackstopTTL {
-					return fmt.Errorf("model %q endpoint group #%d: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-						name, i+1, eg.StickyTTL.D(), core.StickyBackstopTTL, eg.StickyTTL.D(), core.StickyBackstopTTL)
-				}
-			}
+		}
+	}
+	for i, fb := range c.FallbackEndpoints {
+		// See FallbackEndpoints' doc comment for why this is mandatory here.
+		if fb.Priority <= 0 {
+			return fmt.Errorf("fallback_endpoints[%d]: priority must be set and > 0 (an unset priority defaults to 0, which could silently outrank a model's own endpoints)", i)
+		}
+		if err := c.validateEndpointGroup(fmt.Sprintf("fallback_endpoints[%d]", i), fb, providerModels); err != nil {
+			return err
 		}
 	}
 	if err := c.resolvePricing(providerModels); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateEndpointGroup validates one EndpointGroup (ctx names its context
+// for error messages) and records its (provider, model) pairs into
+// providerModels. Shared by both models.<name>.endpoints[] and
+// FallbackEndpoints so the two can't drift on what "valid" means.
+func (c *Config) validateEndpointGroup(ctx string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
+	if _, ok := adapter.Get(eg.Protocol); !ok {
+		return fmt.Errorf("%s: unknown protocol %q (available: %v)", ctx, eg.Protocol, adapter.Names())
+	}
+	if len(eg.Providers) == 0 {
+		return fmt.Errorf("%s: providers: at least one required", ctx)
+	}
+	for _, pn := range eg.Providers {
+		p, ok := c.ProviderByName(pn)
+		if !ok {
+			return fmt.Errorf("%s: unknown provider %q", ctx, pn)
+		}
+		if _, ok := p.BaseURL[eg.Protocol]; !ok {
+			return fmt.Errorf("%s: provider %q has no base_url for protocol %q", ctx, pn, eg.Protocol)
+		}
+	}
+	if len(eg.Models) == 0 {
+		return fmt.Errorf("%s: models: at least one required", ctx)
+	}
+	for j, mn := range eg.Models {
+		if mn == "" {
+			return fmt.Errorf("%s: models[%d]: empty", ctx, j)
+		}
+		for _, pn := range eg.Providers {
+			if providerModels[pn] == nil {
+				providerModels[pn] = map[string]bool{}
+			}
+			providerModels[pn][mn] = true
+		}
+	}
+	if eg.MaxContextTokens < 0 {
+		return fmt.Errorf("%s: max_context_tokens must be >= 0", ctx)
+	}
+	if eg.StickyTTL != nil {
+		if eg.StickyTTL.D() <= 0 {
+			return fmt.Errorf("%s: sticky_ttl must be positive", ctx)
+		}
+		if eg.StickyTTL.D() > core.StickyBackstopTTL {
+			return fmt.Errorf("%s: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
+				ctx, eg.StickyTTL.D(), core.StickyBackstopTTL, eg.StickyTTL.D(), core.StickyBackstopTTL)
+		}
 	}
 	return nil
 }

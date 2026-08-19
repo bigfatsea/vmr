@@ -343,7 +343,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: anthropic, provider: p1, models: [upstream-model]}
+      - {protocol: anthropic, providers: [p1], models: [upstream-model]}
 `)
 
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader([]byte(`{"model":"vm"}`)))

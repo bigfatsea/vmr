@@ -16,6 +16,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [base_url and API versions](#base_url-and-api-versions)
   - [Role remapping (role_map)](#role-remapping-role_map)
   - [Endpoint try-order (priority and strategy)](#endpoint-try-order-priority-and-strategy)
+  - [Multi-provider endpoint groups and global fallbacks](#multi-provider-endpoint-groups-and-global-fallbacks)
   - [Environment variables](#environment-variables)
 - [Request handling and routing](#request-handling-and-routing)
   - [Passthrough and normalization](#passthrough-and-normalization)
@@ -78,13 +79,13 @@ providers:
 models:
   coding:                      # openai protocol only → served via /v1/chat/completions
     endpoints:
-      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}   # no priority field: list order = try order
+      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}   # no priority field: list order = try order
   claude:                      # anthropic protocol only → served via /v1/messages
     endpoints:
-      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
+      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # openai-responses protocol only → served via /v1/responses
     endpoints:
-      - {protocol: openai-responses, provider: openrouter, models: [z-ai/glm-5.2]}
+      - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
 ```
 
 All fields and validation rules: Part 1 §10 of the design doc. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one. Parsing is strict: an unknown or misspelled key (`max_concurency: 8`) is a load error, never a silently ignored no-op you believe is in effect.
@@ -118,6 +119,48 @@ Some OpenAI-compatible providers reject roles their upstream doesn't recognize �
 ### Endpoint try-order (priority and strategy)
 
 Each entry under `endpoints:` can set `priority: N` (an int, default 0); endpoints sort by ascending priority before being tried, and ties (the common case — nobody sets it) keep config-file order because the sort is stable. In practice this means just listing endpoints in the order you want them tried is enough; reach for an explicit `priority` only when you want to reorder without reshuffling the list itself. `priority` is one dimension in a virtual model's `strategy` list (`strategy: [priority]` is the default and, as of this writing, the only ordering dimension actually registered — there's nothing else to add to that list yet), so most configs never need to set `strategy` at all.
+
+### Multi-provider endpoint groups and global fallbacks
+
+Two config shapes exist purely to cut repetition in a try-order list that would otherwise repeat the same tail across several accounts or several virtual models — neither changes what's reachable, only how much YAML it takes to say so.
+
+**Multiple providers in one endpoint-group entry**: `providers:` always takes a list — `providers: [p1]` for the common single-account case, `providers: [p1, p2]` when several accounts are interchangeable candidates for the same upstream model(s) — typically several accounts on the same vendor.
+
+```yaml
+providers:
+  - name: volcengine
+    api_key: ${ARK_KEY_1}
+    base_url: {openai: https://ark.example.com/v3}
+  - name: volcengine2
+    api_key: ${ARK_KEY_2}
+    base_url: {openai: https://ark.example.com/v3}
+
+models:
+  coding:
+    endpoints:
+      - protocol: openai
+        providers: [volcengine, volcengine2]
+        models: [deepseek-v4-pro]
+        priority: 1
+```
+
+This expands into as many independent, individually health-tracked endpoints as `providers` × `models` — outer loop over `models`, inner loop over `providers`, so every named provider is tried for the preferred model before the entry falls through to the next model. Each account keeps its own `quota:`/`pricing:` (declared on its own `providers[]` entry, same as always — merging the try-order line doesn't merge the accounts' quota ledgers); `vmr check` shows the expanded list exactly like a hand-written multi-entry version would.
+
+**Global fallback endpoints**: a top-level `fallback_endpoints:` list, same entry shape as `models.<name>.endpoints[]`, appended to the tail of *every* virtual model's own try-order instead of being pasted onto each one:
+
+```yaml
+fallback_endpoints:
+  - protocol: openai
+    providers: [bai, sensenova]
+    models: [deepseek-v4-flash]
+    priority: 98
+
+models:
+  coding: {endpoints: [...]}   # gets the fallback above appended automatically
+  cheap:  {endpoints: [...]}   # so does this one
+```
+
+A fallback entry only attaches to a virtual model that already has its own entry point on the fallback's `protocol` — it augments an existing ingress, it never opens a new one a model didn't already declare (an anthropic-only model is untouched by an openai-protocol fallback). A virtual model can opt out entirely with `fallback: false`. Unlike an ordinary endpoint-group, `priority` on a fallback entry is **required and must be > 0** — omitted/0 would silently compete at the same tier as a model's own real endpoints instead of trailing behind them, and that's exactly the kind of surprise `vmr check`'s load-time validation exists to catch instead of a request routing there by accident. `vmr check` prints a fallback-origin endpoint with a trailing `fallback` annotation, and flags (⚠️) a fallback that would silently duplicate an endpoint a model already declares for itself.
 
 ### Environment variables
 
@@ -171,12 +214,12 @@ models:
     max_context_tokens: 128000         # base: ditto
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]          # ADDED to the base -> effective: text, tools, image
         max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-chat]        # declares neither -> inherits the base as-is
 ```
 
@@ -202,11 +245,11 @@ models:
     # virtual model (no multi-turn value to protect) needs sticky: false.
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         # inherits the global 10-minute sticky_ttl
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-chat]
         sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
 ```

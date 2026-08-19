@@ -288,9 +288,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: plan-a, models: [ma]}
-      - {protocol: openai, provider: plan-b, models: [mb]}
-      - {protocol: openai, provider: plan-c, models: [mc]}
+      - {protocol: openai, providers: [plan-a], models: [ma]}
+      - {protocol: openai, providers: [plan-b], models: [mb]}
+      - {protocol: openai, providers: [plan-c], models: [mc]}
 `
 }
 
@@ -316,8 +316,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)

@@ -28,7 +28,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
 `
 
 func healthServer(t *testing.T) *Server {

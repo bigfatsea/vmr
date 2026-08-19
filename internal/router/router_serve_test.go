@@ -51,12 +51,12 @@ func mustSnapshot(t *testing.T, cfg *config.Config) *Snapshot {
 func endpointFor(t *testing.T, cfg *config.Config, protocol, virtualModel string) *core.Endpoint {
 	t.Helper()
 	eg := cfg.Models[virtualModel].Endpoints[0]
-	p, ok := cfg.ProviderByName(eg.Provider)
+	p, ok := cfg.ProviderByName(eg.Providers[0])
 	if !ok {
-		t.Fatalf("provider %q not found", eg.Provider)
+		t.Fatalf("provider %q not found", eg.Providers[0])
 	}
 	return &core.Endpoint{
-		Provider:    eg.Provider,
+		Provider:    eg.Providers[0],
 		AdapterType: protocol,
 		BaseURL:     p.BaseURL[protocol],
 		APIKey:      p.APIKey,
@@ -113,9 +113,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
-      - {protocol: openai, provider: p3, models: [m3]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai, providers: [p3], models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)
@@ -144,7 +144,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  real: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  real: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -184,8 +184,8 @@ providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
   - {name: p2, base_url: {anthropic: https://example.com/v1}, api_key: k}
 models:
-  coding: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
-  claude: {endpoints: [{protocol: anthropic, provider: p2, models: [m]}]}
+  coding: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  claude: {endpoints: [{protocol: anthropic, providers: [p2], models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -209,7 +209,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -350,7 +350,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, redirected.srv.URL))
 
 	rt := New(nil)
@@ -385,8 +385,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -417,8 +417,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -447,8 +447,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -487,8 +487,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
-      - {protocol: openai, provider: p2, models: [m2]}
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -525,7 +525,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
 `, u.srv.URL))
 
 	rt := New(nil)

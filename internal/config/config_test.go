@@ -22,7 +22,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [real-model]
         priority: 1
 `
@@ -365,9 +365,9 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai, provider: p, models: [third]}
-      - {protocol: openai, provider: p, models: [first]}
-      - {protocol: openai, provider: p, models: [second]}
+      - {protocol: openai, providers: [p], models: [third]}
+      - {protocol: openai, providers: [p], models: [first]}
+      - {protocol: openai, providers: [p], models: [second]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -422,7 +422,7 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai, provider: dual, models: [x]}
+      - {protocol: openai, providers: [dual], models: [x]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -454,8 +454,8 @@ providers:
 models:
   coding:
     endpoints:
-      - {protocol: openai, provider: openrouter, models: [z-ai/glm-5.2]}
-      - {protocol: anthropic, provider: openrouter, models: [minimax/minimax-m3]}
+      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}
+      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -478,7 +478,7 @@ func TestValidationErrors(t *testing.T) {
 		name, mutate, replacement, wantErr string
 	}{
 		{"bad base_url", "base_url: {openai: https://api.example.com/v1}", "base_url: {openai: not-a-url}", "invalid base_url"},
-		{"unknown provider ref", "provider: p1", "provider: ghost", "unknown provider"},
+		{"unknown provider ref", "providers: [p1]", "providers: [ghost]", "unknown provider"},
 		{"empty models list", "models: [real-model]", "models: []", "at least one required"},
 	}
 	for _, c := range cases {
@@ -592,7 +592,7 @@ func TestExtraRedactHeadersEmptyEntryRejected(t *testing.T) {
 }
 
 func TestEmptySections(t *testing.T) {
-	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai, provider: x, models: [y]}]}}")); err == nil {
+	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai, providers: [x], models: [y]}]}}")); err == nil {
 		t.Error("want error for no providers")
 	}
 	if _, err := Parse([]byte("providers:\n  - {name: p, base_url: {openai: https://x.com}}")); err == nil {
@@ -813,7 +813,7 @@ models:
   m1:
     endpoints:
       - protocol: openai-responses
-        provider: p1
+        providers: [p1]
         models: [real-model]
 `
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
@@ -846,10 +846,10 @@ models:
   agent:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [real-model]
       - protocol: openai-responses
-        provider: p1
+        providers: [p1]
         models: [real-model]
 `
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")

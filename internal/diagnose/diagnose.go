@@ -227,10 +227,12 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		seen := map[epKey]map[string]string{}
 		for _, name := range core.SortedKeys(cfg.Models) {
 			for _, eg := range cfg.Models[name].Endpoints {
-				for _, mn := range eg.Models {
-					k := epKey{eg.Protocol, eg.Provider, mn}
-					if _, ok := seen[k]; !ok {
-						seen[k] = eg.RoleMap
+				for _, pn := range eg.Providers {
+					for _, mn := range eg.Models {
+						k := epKey{eg.Protocol, pn, mn}
+						if _, ok := seen[k]; !ok {
+							seen[k] = eg.RoleMap
+						}
 					}
 				}
 			}

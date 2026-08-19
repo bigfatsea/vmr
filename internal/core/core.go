@@ -146,6 +146,10 @@ type Endpoint struct {
 	// virtual model's base value as-is — display-only (vmr check);
 	// MaxContextTokens above always holds the resolved value routing uses.
 	OwnMaxContextTokens int64
+	// FromFallback marks an endpoint injected from config.Config.
+	// FallbackEndpoints rather than the model's own Endpoints —
+	// display-only (vmr check), no effect on health/sticky/quota/Sort.
+	FromFallback bool
 	// StickyTTL is how long a sticky preference for this endpoint stays
 	// valid, resolved at BuildSnapshot time from the endpoint's own
 	// config.EndpointConfig.StickyTTL override or, absent that, the global

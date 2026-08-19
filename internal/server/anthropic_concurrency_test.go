@@ -154,8 +154,8 @@ providers:
 models:
   bad:
     endpoints:
-      - {protocol: openai, provider: oai, models: [a]}
-      - {protocol: openai, provider: anth, models: [b]}
+      - {protocol: openai, providers: [oai], models: [a]}
+      - {protocol: openai, providers: [anth], models: [b]}
 `
 	_, err := config.Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "no base_url for protocol") {
@@ -178,8 +178,8 @@ providers:
 models:
   coding:
     endpoints:
-      - {protocol: openai, provider: oai, models: [model-one]}
-      - {protocol: anthropic, provider: anth, models: [real-a]}
+      - {protocol: openai, providers: [oai], models: [model-one]}
+      - {protocol: anthropic, providers: [anth], models: [real-a]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 
@@ -268,7 +268,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p, models: [m]}
+      - {protocol: openai, providers: [p], models: [m]}
 `, slow.URL))
 
 	var wg sync.WaitGroup
@@ -311,7 +311,7 @@ providers:
   - {name: p, base_url: {openai: %s}, api_key: k}
 models:
   vm:
-    endpoints: [{protocol: openai, provider: p, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p], models: [m]}]
 `, slow.URL))
 
 	// Occupy the only slot.

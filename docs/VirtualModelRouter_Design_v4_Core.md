@@ -361,12 +361,12 @@ models:
     max_context_tokens: 128000           # 基线：同上
     endpoints:
       - protocol: openai
-        provider: minimax
+        providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]            # 叠加 -> 生效集合 text,image,tools
         max_context_tokens: 1000000      # 覆盖基线，只对这个端点生效
       - protocol: openai
-        provider: deepseek
+        providers: [deepseek]
         models: [deepseek-chat]          # 两者都不声明 -> 原样继承基线
 ```
 
@@ -452,11 +452,11 @@ models:
   openai:
     agent:                          # sticky 默认开启，不用写 sticky: true
       endpoints:
-        - provider: minimax           # 跟随全局 10 分钟
+        - providers: [minimax]        # 跟随全局 10 分钟
           model: MiniMax-M3
           capabilities: [text, image, tools]
           max_context_tokens: 1000000
-        - provider: deepseek          # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
+        - providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
           model: deepseek-chat
           sticky_ttl: 2h
           capabilities: [text, tools]
@@ -465,7 +465,7 @@ models:
     one-shot-summarizer:              # 单次摘要调用，没有多轮价值，显式关闭 sticky
       sticky: false
       endpoints:
-        - provider: minimax
+        - providers: [minimax]
           model: MiniMax-M3
 ```
 
@@ -696,21 +696,37 @@ providers:                       # "我有什么"——扁平列表，一个账�
                                # true 但没配对应 scheme 的代理地址是校验错误（拒绝加载）。yaml.v3 是
                                # YAML 1.2，必须写 true/false（on/off 不是 bool）
 
+# fallback_endpoints: 顶层字段，可选——一份 endpoint-group 记录列表，会被追加到
+# 每个虚拟模型自己 try-order 的末尾（只追加到已经有对应 protocol 入口的模型
+# 上，不会凭空开一个新入口）；记录形状和 models.<name>.endpoints[] 完全一样，
+# priority 在这里例外地是必填项且必须 > 0（省略/0 会悄悄和模型自己的真实
+# 端点抢占同一档位）；一个虚拟模型可以用 fallback: false 完全不参与。
+fallback_endpoints:
+  - protocol: openai
+    providers: [p1, p2]         # 见下面 endpoints[].providers 的说明——同一批可互换账号
+    models: [<上游真实模型名>]
+    priority: 98                # 必填且 > 0，这一点和普通 endpoint-group 不同
+
 models:                          # "对外叫什么、按什么顺序用"——按虚拟模型名分组，协议信息挂在每条 endpoint-group 上
   <virtual-model-name>:
     strategy: [priority]       # 缺省 [priority]
     image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效；写 0 表示对这个模型强制关闭，即使全局开着
     sticky: true                # 可选；Sticky Model 开关，*bool，缺省（不写）视为 true；只有确实不需要
                                  # 会话亲和的单次调用场景才需要显式写 false
+    fallback: true               # 可选；是否参与上面 fallback_endpoints: 的注入，*bool，缺省视为 true；
+                                 # 只有需要严格隔离、不想被全局兜底覆盖的模型才需要显式写 false
     capabilities: [text, tools]   # 可选；这个虚拟模型下所有端点共享的能力基线，缺省 = 无基线（不限制）
     max_context_tokens: 128000    # 可选；同上，端点共享的上下文窗口基线，缺省/0 = 无基线（不限制）
     endpoints:
       - protocol: openai        # openai | anthropic | openai-responses | 未来任何已注册的 adapter 名——引用的
                                  # provider 必须在这个协议下声明了 base_url；同一虚拟模型名可以再挂多条不同
                                  # protocol 的 entry，各入口各自独立可达（见「协议模型」§3）
-        provider: <name>       # 必须引用 providers 列表里已定义的账号名
-        models: [<上游真实模型名>, ...]   # 一个或多个；每个名字展开成独立的、各自健康跟踪的端点，
-                                          # 按列表顺序参与 priority 排序，共享本条 entry 的其余字段
+        providers: [<name>, ...]  # 必须引用 providers 列表里已定义的账号名；始终是列表——单账号写
+                                   # providers: [<name>]，多个账号是同一批上游模型的可互换候选时写
+                                   # providers: [<name>, ...]（见下方说明段落）
+        models: [<上游真实模型名>, ...]   # 一个或多个；每个 (provider, model) 对展开成独立的、各自健康
+                                          # 跟踪的端点——外层按 models 循环、内层按 providers 循环，
+                                          # 共享本条 entry 的其余字段
         priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
         capabilities: [image]        # 可选；叠加在虚拟模型的 capabilities 基线之上（取并集），不是替换；
                                       # 缺省 = 不额外叠加；生效集合一旦非空就是穷尽式的
@@ -726,7 +742,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
-**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即被当作未知字段拒绝加载（不再有专门的迁移提示——早已全量迁移到 `api_keys`，没有外部用户需要照顾这条兼容路径）、已移除的 `probe_mode`（半开端点恢复探测不再有可选的被动模式，永远是后台探测）同样出现即被当作未知字段拒绝加载、listen 可解析、providers/models 非空、每个 provider 的 `name` 非空且在列表内唯一、`base_url` 至少声明一个协议、`base_url` 的每个 key 已注册为 adapter 且值是带 scheme+host 的合法 URL、endpoint-group 的 `protocol` 已注册为 adapter、引用的 provider 存在（按 `name` 在扁平列表里查找）且在该 `protocol` 下声明了 base_url（这是旧版"provider 引用存在于同协议分组内"校验的新等价物）、`models` 列表至少一项且每项非空、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告；`proxy` 没有全局默认可继承，每个 provider 独立决定）、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。
+**多 Provider 端点组与全局 FallbackEndpoints（都是纯粹的配置期展开，不改变运行时候选列表的结构）**：`endpoints[].providers`（始终是列表）让一条 entry 同时代表好几个账号——`router.BuildSnapshot` 里原本"一个 provider 名 + 一份 `models:` → N 个 `core.Endpoint`"的展开循环，外面再套一层按 `eg.Providers` 的循环（外层 `models`、内层 `providers`），得到的每一个 `core.Endpoint` 和手写一条独立 entry 得到的完全一样——各自的 `HealthKey()`（含各自 `APIKey` 的哈希）、各自的 Sticky 绑定、各自按 `Provider` 名读写的配额账本，`core.Endpoint` 结构体本身不需要新增任何字段来表达"这个端点属于一个多账号组"。顶层 `fallback_endpoints:`（`config.Config.FallbackEndpoints`，`[]EndpointGroup`，和 `models.<name>.endpoints[]` 同一个类型）在 `BuildSnapshot` 处理完一个虚拟模型自己的 `endpoints` 之后，对每条 fallback 检查该模型是否已经有这条 `protocol` 对应的路由（`routes[fb.Protocol]` 存在），存在才展开追加，模型可以用 `VirtualModel.Fallback == false` 整体退出。这两个特性合起来解决的是「同账号多个 Key/同优先级多个供应商/跨虚拟模型重复兜底」这三类配置膨胀，但刻意不做的是：把多个物理 Key 合并进*一个* `core.Endpoint`（那会破坏 `Endpoint` 构造后不可变、`HealthKey()` 只算一次这条贯穿 health/sticky/quota 三个子系统的假设）、以及按错误类型分层做「Key 级降级 vs Provider 级跳过」的 Failover（`internal/adapter/classify.go` 目前把 402/404 都归进同一个 `ErrEndpoint`，做不到这种区分，需要新拆错误分类，属于后续批次）——完整分析见 `docs/KNOWN_ISSUES_sonnet-5.md`「配置与协议」一节的 ProviderGroup 记录。
+
+**校验规则**：**YAML 严格解析**（`KnownFields`，未知/拼错的配置键直接拒绝加载——`max_concurency` 这类 typo 绝不静默忽略）、已移除的单把 `api_key` 出现即被当作未知字段拒绝加载（不再有专门的迁移提示——早已全量迁移到 `api_keys`，没有外部用户需要照顾这条兼容路径）、已移除的 `probe_mode`（半开端点恢复探测不再有可选的被动模式，永远是后台探测）同样出现即被当作未知字段拒绝加载、listen 可解析、providers/models 非空、每个 provider 的 `name` 非空且在列表内唯一、`base_url` 至少声明一个协议、`base_url` 的每个 key 已注册为 adapter 且值是带 scheme+host 的合法 URL、endpoint-group 的 `protocol` 已注册为 adapter、`providers` 至少一项（空列表是校验错误）、每一个具名 provider 存在（按 `name` 在扁平列表里查找）且在该 `protocol` 下声明了 base_url（这是旧版"provider 引用存在于同协议分组内"校验的新等价物）、`models` 列表至少一项且每项非空、`fallback_endpoints:` 每条记录复用同一套校验、外加 `priority` 必须显式设置且 > 0（模型自身 `endpoints[]` 的 `priority` 缺省 0 没问题，`fallback_endpoints[]` 不行——见上文说明段落）、`http_proxy`/`https_proxy` 非空时必须是带 scheme+host 的合法 URL、provider `proxy: true` 但没配对应 scheme 的代理 = 校验错误（配置自身就能陈述的矛盾，拒绝加载而不是运行时警告；`proxy` 没有全局默认可继承，每个 provider 独立决定）、`max_context_tokens` 必须 ≥0、`sticky_ttl`（全局与端点级）必须为正且不超过 `internal/sticky.BackstopTTL`（24 小时，见「调度与健康」）、`api_keys` 每一项 ≥16 字符（`minAPIKeyLen`，防止 `audit.KeyTag` 的末 8 位窗口就是整把密钥）；`image_downscale`（全局与模型级）、`audit_retention_days` 负数均在加载期钳制为 0（拒绝配置不如静默纠正——这不是能表达"错误意图"的字段）；`image_cache_ttl_days` 非正数钳制为默认值 7，而不是 0（图片缓存没有 `audit_retention_days` 那种"0=永久保留"的产品含义）。模型级 `image_downscale` 在解析层是 `*int`：省略该字段与显式写 `0` 在校验后仍然是两种不同的状态（前者继承全局，后者强制关闭），这是唯一一个"缺省值"和"显式 0"语义不同的字段。
 
 **`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`probe_timeout` 没有明显小于 `response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型基线 capabilities/max_context_tokens 与每个端点自己叠加/覆盖值的分层展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
 

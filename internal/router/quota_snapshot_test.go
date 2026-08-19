@@ -27,10 +27,10 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [model-a, model-b]
       - protocol: openai
-        provider: p2
+        providers: [p2]
         models: [model-c]
 `
 
@@ -85,7 +85,7 @@ providers:
   - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
 models:
   m1:
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

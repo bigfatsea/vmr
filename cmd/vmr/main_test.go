@@ -28,7 +28,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [real-model]
 `
 
@@ -72,7 +72,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai: https://example.com}, api_key: ""}
 models:
-  m1: {endpoints: [{protocol: openai, provider: p1, models: [real-model]}]}
+  m1: {endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]}
 `)
 	var err error
 	out := captureStdout(t, func() {
@@ -152,7 +152,7 @@ providers:
     base_url: {openai: https://example.com/v1, anthropic: https://example.com/anthropic}
     api_key: test-key
 models:
-  m1: {endpoints: [{protocol: openai, provider: p1, models: [real-model]}]}
+  m1: {endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if strings.Contains(out, "proxy(openai)") || strings.Contains(out, "proxy(anthropic)") {
@@ -182,7 +182,7 @@ providers:
   - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
   - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k}
 models:
-  m1: {endpoints: [{protocol: openai, provider: proxied, models: [m]}]}
+  m1: {endpoints: [{protocol: openai, providers: [proxied], models: [m]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, checkLine(0, "https_proxy", "http://user:xxxxx@127.0.0.1:7890")) {
@@ -219,12 +219,12 @@ models:
     max_context_tokens: 128000
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [with-extra]
         capabilities: [image]
         max_context_tokens: 512000
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [plain]
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
@@ -259,8 +259,8 @@ providers:
     base_url: {openai: https://example.com/v1}
     api_key: test-key
 models:
-  plain: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
-  custom: {image_downscale: 256, endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  plain: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  custom: {image_downscale: 256, endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, checkLine(2, "image_downscale", "256px")) {
@@ -281,8 +281,8 @@ providers:
     base_url: {openai: https://example.com/v1}
     api_key: test-key
 models:
-  a: {endpoints: [{protocol: openai, provider: p1, models: [m1]}]}
-  b: {endpoints: [{protocol: openai, provider: p1, models: [m2]}]}
+  a: {endpoints: [{protocol: openai, providers: [p1], models: [m1]}]}
+  b: {endpoints: [{protocol: openai, providers: [p1], models: [m2]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, "- p=0. p1/m1:\n\nb:\n") {
@@ -468,8 +468,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [real-a], priority: 1}
-      - {protocol: openai, provider: p2, models: [real-b], priority: 2}
+      - {protocol: openai, providers: [p1], models: [real-a], priority: 1}
+      - {protocol: openai, providers: [p2], models: [real-b], priority: 2}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -536,7 +536,7 @@ listen: 0.0.0.0:8800
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -581,8 +581,8 @@ providers:
 models:
   agent:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m-openai]}
-      - {protocol: anthropic, provider: p1, models: [m-anthropic]}
+      - {protocol: openai, providers: [p1], models: [m-openai]}
+      - {protocol: anthropic, providers: [p1], models: [m-anthropic]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -622,7 +622,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -644,7 +644,7 @@ https_proxy: http://127.0.0.1:7890
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: false}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -663,7 +663,7 @@ https_proxy: http://user:pass@127.0.0.1:7890
 providers:
   - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -715,7 +715,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -774,7 +774,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -826,7 +826,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -848,7 +848,7 @@ listen: 127.0.0.1:1
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	if err := cmdStatus([]string{"-c", path}); err == nil {
@@ -879,7 +879,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)

@@ -27,7 +27,7 @@ models:
   m1:
     endpoints:
       - protocol: anthropic
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
@@ -65,7 +65,7 @@ models:
   m1:
     endpoints:
       - protocol: anthropic
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
@@ -107,7 +107,7 @@ models:
   m1:
     endpoints:
       - protocol: anthropic
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
@@ -140,7 +140,7 @@ models:
   m1:
     endpoints:
       - protocol: anthropic
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer

@@ -27,7 +27,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: plan-a
+        providers: [plan-a]
         models: [real-model]
 `
 
@@ -80,7 +80,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: plan-a
+        providers: [plan-a]
         models: [real-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -131,7 +131,7 @@ models:
   m1:
     endpoints:
       - protocol: anthropic
-        provider: anthropic
+        providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -183,7 +183,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [other-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -208,7 +208,7 @@ models:
   m1:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [real-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -262,7 +262,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -295,7 +295,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, provider: p1, models: [m]}]}
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)

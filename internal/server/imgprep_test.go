@@ -59,7 +59,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-one]}
+      - {protocol: openai, providers: [p1], models: [model-one]}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -251,10 +251,10 @@ providers:
   - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [model-one]}]
   vm-small:
     image_downscale: 256
-    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [model-one]}]
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -302,7 +302,7 @@ providers:
 models:
   vm-off:
     image_downscale: 0
-    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [model-one]}]
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -353,7 +353,7 @@ providers:
   - {name: p1, base_url: {openai: %s}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai, provider: p1, models: [model-one]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [model-one]}]
 `, cacheDir, up.URL))
 
 	uri := bigJPEGDataURI(t) // 1600x900

@@ -27,7 +27,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
 `
 
 type instanceBlock struct {
@@ -164,7 +164,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(exposedYAML))
 	if err != nil {
@@ -205,7 +205,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(cleanYAML))
 	if err != nil {

@@ -137,6 +137,10 @@ func cmdCheck(args []string) error {
 	printGlobalSettings(os.Stdout, cfg, issues)
 	fmt.Println()
 	printProviders(os.Stdout, cfg)
+	if len(cfg.FallbackEndpoints) > 0 {
+		fmt.Println()
+		printFallbackEndpoints(os.Stdout, cfg)
+	}
 	fmt.Println()
 	printModels(os.Stdout, cfg, snap, issues)
 
@@ -269,6 +273,20 @@ func printProviders(w io.Writer, cfg *config.Config) {
 		fmt.Fprintln(w, checkLine(2, "proxy", providerProxyLine(p, protocols, descFor)))
 		printProviderQuota(w, cfg, p)
 		printProviderPricing(w, cfg, p)
+	}
+}
+
+// printFallbackEndpoints previews the raw Config.FallbackEndpoints entries
+// (their per-model expansion shows up as `fallback` tags under === Models
+// === below).
+func printFallbackEndpoints(w io.Writer, cfg *config.Config) {
+	fmt.Fprintln(w, "=== Fallback Endpoints ===")
+	for i, fb := range cfg.FallbackEndpoints {
+		fmt.Fprintf(w, "%d:\n", i+1)
+		fmt.Fprintln(w, checkLine(2, "protocol", fb.Protocol))
+		fmt.Fprintln(w, checkLine(2, "providers", strings.Join(fb.Providers, ",")))
+		fmt.Fprintln(w, checkLine(2, "models", strings.Join(fb.Models, ",")))
+		fmt.Fprintln(w, checkLine(2, "priority", fmt.Sprintf("%d", fb.Priority)))
 	}
 }
 
@@ -486,6 +504,10 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 		if m.ImageDownscaleMaxPx != nil {
 			fmt.Fprintln(w, checkLine(2, "image_downscale", fmt.Sprintf("%dpx", *m.ImageDownscaleMaxPx)))
 		}
+		if len(cfg.FallbackEndpoints) > 0 {
+			fallbackOK := m.Fallback == nil || *m.Fallback
+			fmt.Fprintln(w, checkLine(2, "fallback", fmt.Sprintf("%v", fallbackOK)))
+		}
 		for _, protocol := range core.SortedKeys(snap.Models) {
 			route, ok := snap.Models[protocol][name]
 			if !ok {
@@ -513,6 +535,9 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 				}
 				if ep.APIKey == "" {
 					parts = append(parts, warn("key=EMPTY"))
+				}
+				if ep.FromFallback {
+					parts = append(parts, "fallback")
 				}
 				label := fmt.Sprintf("    - p=%d. %s:", ep.Priority, key)
 				line := label

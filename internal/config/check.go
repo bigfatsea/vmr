@@ -156,20 +156,46 @@ func (c *Config) checkProviders() []Issue {
 // declared more than once under one virtual model — almost always a
 // copy-paste mistake (the duplicate is dead weight: failover only ever
 // walks distinct health-tracked endpoints, so the repeat never adds real
-// redundancy).
+// redundancy). Also flags a FallbackEndpoints entry that would duplicate an
+// endpoint the model already declares — mirrors BuildSnapshot's own
+// injection rule (protocol match, not opted out) so this never flags a
+// duplicate that wouldn't actually be injected.
 func (c *Config) checkModels() []Issue {
 	var issues []Issue
 	for _, name := range core.SortedKeys(c.Models) {
+		m := c.Models[name]
 		seen := map[string]bool{}
-		for _, eg := range c.Models[name].Endpoints {
-			for _, mn := range eg.Models {
-				key := eg.Protocol + "/" + eg.Provider + "/" + mn
-				if seen[key] {
-					issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
-						"model %q: endpoint %s declared more than once", name, key)})
+		protocols := map[string]bool{}
+		for _, eg := range m.Endpoints {
+			protocols[eg.Protocol] = true
+			for _, pn := range eg.Providers {
+				for _, mn := range eg.Models {
+					key := eg.Protocol + "/" + pn + "/" + mn
+					if seen[key] {
+						issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
+							"model %q: endpoint %s declared more than once", name, key)})
+						continue
+					}
+					seen[key] = true
+				}
+			}
+		}
+		if m.Fallback == nil || *m.Fallback {
+			for _, fb := range c.FallbackEndpoints {
+				if !protocols[fb.Protocol] {
 					continue
 				}
-				seen[key] = true
+				for _, pn := range fb.Providers {
+					for _, mn := range fb.Models {
+						key := fb.Protocol + "/" + pn + "/" + mn
+						if seen[key] {
+							issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
+								"model %q: fallback endpoint %s duplicates an endpoint already declared under this model", name, key)})
+							continue
+						}
+						seen[key] = true
+					}
+				}
 			}
 		}
 	}

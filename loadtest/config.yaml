@@ -44,32 +44,32 @@ providers:
 # doubles as the scenario label in `vmr report`'s per-model breakdown.
 models:
   baseline:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
   stream_normal:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:stream_normal"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:stream_normal"]}]
   thinking_leak:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:thinking_leak"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:thinking_leak"]}]
   think_tag:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:think_tag"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:think_tag"]}]
   big_response:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:big_response"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:big_response"]}]
   big_image:
     image_downscale: 512    # per-model override — global image_downscale stays off for every other scenario
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
   multi_image:
     image_downscale: 512
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
   gif:
     image_downscale: 512    # on, specifically to confirm GIF still skips the decode path even when downscaling is enabled
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
   long_history:
-    endpoints: [{protocol: openai, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
   failover:
     endpoints:
-      - {protocol: openai, provider: mock_fail1, models: ["scenario:baseline"], priority: 1}
-      - {protocol: openai, provider: mock_fail2, models: ["scenario:baseline"], priority: 2}
-      - {protocol: openai, provider: mock_ok, models: ["scenario:baseline"], priority: 3}
+      - {protocol: openai, providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
+      - {protocol: openai, providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
+      - {protocol: openai, providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
   anthropic_baseline:
-    endpoints: [{protocol: anthropic, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: anthropic, providers: [mock], models: ["scenario:baseline"]}]
   responses_baseline:
-    endpoints: [{protocol: openai-responses, provider: mock, models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-responses, providers: [mock], models: ["scenario:baseline"]}]

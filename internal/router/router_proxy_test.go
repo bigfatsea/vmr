@@ -29,9 +29,9 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai, provider: a, models: [x]}
-      - {protocol: openai, provider: b, models: [x]}
-      - {protocol: openai, provider: c, models: [x]}
+      - {protocol: openai, providers: [a], models: [x]}
+      - {protocol: openai, providers: [b], models: [x]}
+      - {protocol: openai, providers: [c], models: [x]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +99,8 @@ providers:
   - {name: viaproxy, base_url: {openai: http://upstream.invalid/v1}, api_key: k, proxy: true}
   - {name: directp, base_url: {openai: %s/v1}, api_key: k, proxy: false}
 models:
-  m-proxy:  {endpoints: [{protocol: openai, provider: viaproxy, models: [real]}]}
-  m-direct: {endpoints: [{protocol: openai, provider: directp, models: [real]}]}
+  m-proxy:  {endpoints: [{protocol: openai, providers: [viaproxy], models: [real]}]}
+  m-direct: {endpoints: [{protocol: openai, providers: [directp], models: [real]}]}
 `, proxy.URL, upstream.URL))
 	if err != nil {
 		t.Fatal(err)

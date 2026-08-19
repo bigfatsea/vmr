@@ -42,13 +42,13 @@ providers:
   - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
 models:
   plain:
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
   overridden:
     image_downscale: 256
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
   disabled:
     image_downscale: 0
-    endpoints: [{protocol: openai, provider: p1, models: [m]}]
+    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -91,8 +91,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: mapped, models: [m1], role_map: {developer: system}}
-      - {protocol: openai, provider: plain, models: [m2]}
+      - {protocol: openai, providers: [mapped], models: [m1], role_map: {developer: system}}
+      - {protocol: openai, providers: [plain], models: [m2]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -127,12 +127,12 @@ models:
   vm:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [m1]
         capabilities: [text, image, tools]
         max_context_tokens: 200000
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [m2]
 `
 	cfg, err := config.Parse([]byte(yaml))
@@ -176,12 +176,12 @@ models:
     max_context_tokens: 128000
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [extra]
         capabilities: [image]
         max_context_tokens: 512000
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [plain]
 `
 	cfg, err := config.Parse([]byte(yaml))
@@ -267,15 +267,15 @@ providers:
 models:
   defaulted:
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
   disabled:
     sticky: false
     endpoints:
-      - {protocol: openai, provider: p1, models: [m1]}
+      - {protocol: openai, providers: [p1], models: [m1]}
   overridden:
     endpoints:
       - protocol: openai
-        provider: p1
+        providers: [p1]
         models: [m1]
         sticky_ttl: 2h
 `
@@ -317,8 +317,8 @@ models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai, provider: p1, models: [m-openai]}
-      - {protocol: anthropic, provider: p1, models: [m-anthropic]}
+      - {protocol: openai, providers: [p1], models: [m-openai]}
+      - {protocol: anthropic, providers: [p1], models: [m-anthropic]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -355,7 +355,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [model-a, model-b, model-c]}
+      - {protocol: openai, providers: [p1], models: [model-a, model-b, model-c]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

@@ -426,8 +426,14 @@ func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (
 	}
 	var candidates []string
 	for _, eg := range vm.Endpoints {
-		if eg.Protocol == protocol && eg.Provider == provider {
-			candidates = append(candidates, eg.Models...)
+		if eg.Protocol != protocol {
+			continue
+		}
+		for _, pn := range eg.Providers {
+			if pn == provider {
+				candidates = append(candidates, eg.Models...)
+				break
+			}
 		}
 	}
 	switch len(candidates) {

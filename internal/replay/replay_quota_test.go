@@ -30,7 +30,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
+      - {protocol: openai, providers: [p1], models: [upstream-model]}
 `, dir, upstreamURL+"/v1", limitYAML)
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -226,7 +226,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, provider: p1, models: [upstream-model]}
+      - {protocol: openai, providers: [p1], models: [upstream-model]}
 `, dir, upstream.URL+"/v1")
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
