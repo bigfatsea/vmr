@@ -66,7 +66,7 @@
 
 - **源码位置**：[docs/KNOWN_ISSUES_sonnet-5.md:121-123](file:///Users/stanford/code/vmr/docs/KNOWN_ISSUES_sonnet-5.md#L121-L123)
 - **修复核实**：
-  原引用失效的已删除文件 `docs/future-strategy/story_report_ux_review_sonnet-5.md`（§1.20、§1.21、§1.22 三处）已全部清除：
+  原引用失效的已删除文件 `story_report_ux_review_sonnet-5.md`（§1.20、§1.21、§1.22 三处）已全部清除：
   - §1.20 更新为引用 `docs/future-strategy/story_report_architecture_opus-5.md` §4.8/§7.6(a)；
   - §1.21、§1.22 已归档移入 §3 已闭环条目 20 与 22。
   运行 `go test ./internal/archtest/...`，[`doc_refs_test.go`](file:///Users/stanford/code/vmr/internal/archtest/doc_refs_test.go) 测试通过，文档守卫恢复全绿。
