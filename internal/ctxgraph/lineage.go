@@ -2,7 +2,10 @@
 
 package ctxgraph
 
-import "crypto/md5"
+import (
+	"crypto/md5"
+	"encoding/binary"
+)
 
 // Lineage is a maximal run of manifests connected by non-splitting edits
 // (Append/ReplaceTail/Splice) within one SessKey bucket. It is NOT itself a
@@ -92,6 +95,58 @@ func (l *Lineage) RootHash() Hash {
 	var out Hash
 	copy(out[:], h.Sum(nil))
 	return out
+}
+
+// lineageIDCodeLen mirrors internal/story's idCodeLen (deriveID) — same
+// 8-hex-char prefix convention, kept as an independent constant here since
+// ctxgraph is a leaf package and must not depend on story for it.
+const lineageIDCodeLen = 8
+
+// LineageID is l's stable identity: "l-" plus an 8-hex-char prefix of a
+// hash over the root manifest's content AND its own arrival timestamp. A
+// Lineage IS the structural unit report's SessionInfo and story's Journey
+// each already treat as "one session" (report: one SessionInfo per
+// Lineage; story: a Journey is a chain of these) — this gives that unit
+// the single identity both halves should reference instead of each
+// inventing their own (report's run-scoped s%02d, story's own per-Journey
+// hash).
+//
+// Deliberately NOT just RootHash's own prefix (an earlier version of this
+// function was): RootHash is a pure content fingerprint by design — two
+// structurally distinct Lineages with byte-identical opening content
+// (same system prompt, same first user message) hash the same. That is
+// not hypothetical: a real corpus scan (1638 Lineages) found 4 such
+// collisions, all recurring cron/heartbeat jobs firing a fixed message
+// template. internal/story's own deriveID already defends against exactly
+// this by folding in client+start+end alongside a RootHash-derived code
+// (see its own doc comment); a caller here that used RootHash bare would
+// have been relying on a guarantee RootHash never claimed to make. Folding
+// in the root manifest's own arrival timestamp (nanosecond precision — two
+// independent Lineages sharing both identical opening content AND the
+// exact same nanosecond is not a realistic collision to defend against)
+// closes the gap while keeping the id itself content-addressed and stable
+// across independent re-scans of the same data — RootHash's identity
+// semantics for content comparison (Classify/edit-detection) are
+// untouched, only this id's own hash input changed.
+func (l *Lineage) LineageID() string {
+	if len(l.Manifests) == 0 {
+		var zero Hash
+		return "l-" + zero.String()[:lineageIDCodeLen]
+	}
+	root := l.Manifests[0]
+	h := md5.New()
+	if root.HasSys {
+		h.Write(root.SysHash[:])
+	}
+	for _, k := range root.Keys {
+		h.Write(k[:])
+	}
+	var tsBuf [8]byte
+	binary.BigEndian.PutUint64(tsBuf[:], uint64(root.TS.UnixNano()))
+	h.Write(tsBuf[:])
+	var out Hash
+	copy(out[:], h.Sum(nil))
+	return "l-" + out.String()[:lineageIDCodeLen]
 }
 
 // splitBucket takes one SessKey bucket's manifests, already in timestamp

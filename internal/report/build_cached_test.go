@@ -43,7 +43,7 @@ func TestBuildCached_ColdMatchesBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
+	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
 	}
@@ -76,11 +76,11 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
+	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
-	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil)
+	got, _, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (warm): %v", err)
 	}
@@ -112,7 +112,7 @@ func TestBuildCached_WarmPopulatesFactsCache(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	now := time.Now()
 
-	_, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
+	_, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
@@ -198,7 +198,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	path := writeTempJSONL(t, dir, smallAuditRecords()[:2])
 	now := time.Now()
 
-	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
+	_, sess1, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
@@ -217,7 +217,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	}
 	f.Close()
 
-	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil)
+	rep2, sess2, cache2, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}

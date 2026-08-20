@@ -4,6 +4,8 @@
 
 > 2 tasks · 3 turns · 2026-07-29 10:00:00 → 10:00:06
 
+← Back to [vmr-stories.md](vmr-stories.md)
+
 ## System Prompt
 
 - Step 1–3 · 28 chars · → [detail](../evidence/sysprompt-943e842f.md)

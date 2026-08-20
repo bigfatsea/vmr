@@ -26,7 +26,7 @@ import (
 // recomputed here, so the Markdown and JSON outputs for the same Journey
 // are guaranteed to agree on both. Purely a view over already-computed
 // facts — no judgment calls happen here, only formatting.
-func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) string {
+func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists bool) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Story(lang)
@@ -34,6 +34,15 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) s
 	w("# Journey %s\n\n", j.ID)
 	w("> %s\n\n", j.Title)
 	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), j.To.In(fmtutil.DisplayZone).Format("15:04:05")))
+	// Back links (P6.2d): vmr-stories.md is always safe to link — same
+	// directory, this run just wrote it. vmr-report.md is another
+	// command's product, existence-gated by the caller (reportMDExists)
+	// so this function stays a pure formatter with no I/O of its own.
+	reportLink := ""
+	if reportMDExists {
+		reportLink = "../vmr-report.md"
+	}
+	w("%s", t.BackLinkLine(reportLink))
 
 	if j.Break != nil {
 		w("%s", t.BreakWarning(j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind, t), editStatsHint(j.Break.Edit, t)))

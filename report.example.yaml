@@ -85,3 +85,21 @@ llm_cache_dir: ""   # directory for the disk cache of LLM interpretation
                      # the command line, LLM calls are never cached, full
                      # stop — caching only ever happens somewhere you
                      # explicitly named. Overridden by -llm-cache-dir.
+
+# --- Self-traffic exclusion (both commands; see -include-self-traffic) ---
+# `vmr story -llm-addr`'s own interpretation calls route back through this
+# same VMR instance and land in the audit log like any other request — by
+# default, both `vmr report`'s cost/usage totals and `vmr story`'s
+# candidate journey list exclude them (that traffic is the analysis tool's
+# own overhead, not the workload being analyzed). The tag derived from
+# llm_key above (the SAME transform api_keys auth uses, audit.KeyTag)
+# already covers the common case — most deployments don't need to set
+# anything here at all.
+
+self_traffic_client_tags: []   # Extra client_key_tag values to exclude,
+                                # beyond the one auto-derived from llm_key
+                                # above — only needed if -llm-addr traffic
+                                # was ever generated under a DIFFERENT (e.g.
+                                # since-rotated) credential. Pass
+                                # -include-self-traffic on either command to
+                                # disable exclusion entirely for that run.

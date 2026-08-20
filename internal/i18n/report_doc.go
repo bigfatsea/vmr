@@ -8,21 +8,29 @@ import "strconv"
 
 // DocText is render_doc.go's text, in one language.
 type DocText struct {
-	Title               string
-	MetaLine            func(inputs string, format, records, parseErrors int, from, to string) string
-	DetailLinkLine      string
-	SummaryTitle        string
-	SummaryHeaders      [5]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration
-	HighlightsAuto      string
-	NoAnomalies         string
-	CacheWarn           func(workload, cacheEffPct, freshTokens string) string
-	ToolWarn            func(shape string, requests int, schemaBytes, utilPct string, neverCalled int) string
-	EndpointWarn        func(endpoint, errRatePct, topSuffix string) string
-	TopErrorSuffix      func(cls string, n int) string
-	RequestIndexTitle   string
-	RequestIndexBody    string
-	PerClientLabel      string
-	DetailsCaptureBody  string
+	Title          string
+	MetaLine       func(inputs string, format, records, parseErrors int, from, to string) string
+	DetailLinkLine string
+	// StoriesLinkLine is the "vmr-report.md → stories/vmr-stories.md"
+	// edge (P6.2a) — path is relative to vmr-report.md itself.
+	StoriesLinkLine    func(path string, journeyCount int, from, to string) string
+	SummaryTitle       string
+	SummaryHeaders     [5]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration
+	HighlightsAuto     string
+	NoAnomalies        string
+	CacheWarn          func(workload, cacheEffPct, freshTokens string) string
+	ToolWarn           func(shape string, requests int, schemaBytes, utilPct string, neverCalled int) string
+	EndpointWarn       func(endpoint, errRatePct, topSuffix string) string
+	TopErrorSuffix     func(cls string, n int) string
+	RequestIndexTitle  string
+	RequestIndexBody   string
+	PerClientLabel     string
+	DetailsCaptureBody string
+	// DetailsOnDemandBody is DetailsCaptureBody's counterpart for the
+	// default (-details=false) run, where details/*.md was never
+	// materialized (P6.2b) — example is a real "basename:line" coordinate
+	// from this run's own data, "" when this run had no requests at all.
+	DetailsOnDemandBody func(example string) string
 	AppendixTitle       string
 	AppendixInputLine   func(inputs string, format, records, parseErrors int) string
 	AppendixPeriodLine  func(from, to string) string
@@ -33,6 +41,9 @@ type DocText struct {
 	AppendixBillingLine func(suffix string) string
 	AppendixNoPricing   string
 	AppendixSlowThresh  func(sec int) string
+	// AppendixSelfTrafficExcluded (P6.4) reports how many records this
+	// run's self-traffic exclusion skipped — only rendered when > 0.
+	AppendixSelfTrafficExcluded func(n int) string
 }
 
 // Doc returns render_doc.go's text for lang.
@@ -45,6 +56,9 @@ func Doc(lang Lang) DocText {
 					" 条记录（" + strconv.Itoa(parseErrors) + " 坏行）· " + from + " – " + to
 			},
 			DetailLinkLine: "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
+			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
+				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
+			},
 			SummaryTitle:   "§0 摘要",
 			SummaryHeaders: [5]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时"},
 			HighlightsAuto: "**亮点 (auto):**",
@@ -66,7 +80,14 @@ func Doc(lang Lang) DocText {
 			RequestIndexBody:   "每条记录（Chat User -> Session -> Task -> Turn）见 [vmr-requests.md](./vmr-requests.md)。\n",
 			PerClientLabel:     "per-client: ",
 			DetailsCaptureBody: "单请求全量捕获（req/resp/SSE）见 `details/*.md`。\n\n",
-			AppendixTitle:      "附录 数据源与方法论",
+			DetailsOnDemandBody: func(example string) string {
+				s := "本次运行未生成 `details/*.md`（默认按需生成）。用坐标（上表 `req` 列，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标> <审计文件>`"
+				if example != "" {
+					s += "，例如 `vmr replay -print -req " + example + " <审计文件>`"
+				}
+				return s + "；或加 `-details` 全量生成。\n\n"
+			},
+			AppendixTitle: "附录 数据源与方法论",
 			AppendixInputLine: func(inputs string, format, records, parseErrors int) string {
 				return "- 输入: " + inputs + " · format " + strconv.Itoa(format) + " · " + strconv.Itoa(records) +
 					" 记录 / " + strconv.Itoa(parseErrors) + " 坏行\n"
@@ -83,6 +104,9 @@ func Doc(lang Lang) DocText {
 			},
 			AppendixNoPricing:  "未配置定价时不显示 $。",
 			AppendixSlowThresh: func(sec int) string { return "- 慢请求阈值: " + strconv.Itoa(sec) + "s\n" },
+			AppendixSelfTrafficExcluded: func(n int) string {
+				return "- 自指流量: 已从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr story -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
+			},
 		}
 	}
 	return DocText{
@@ -92,6 +116,9 @@ func Doc(lang Lang) DocText {
 				" records (" + strconv.Itoa(parseErrors) + " bad rows) · " + from + " – " + to
 		},
 		DetailLinkLine: "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
+		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
+			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
+		},
 		SummaryTitle:   "§0 Summary",
 		SummaryHeaders: [5]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration"},
 		HighlightsAuto: "**Highlights (auto):**",
@@ -113,7 +140,14 @@ func Doc(lang Lang) DocText {
 		RequestIndexBody:   "Every record (Chat User -> Session -> Task -> Turn) is in [vmr-requests.md](./vmr-requests.md).\n",
 		PerClientLabel:     "per-client: ",
 		DetailsCaptureBody: "Full single-request capture (req/resp/SSE) is in `details/*.md`.\n\n",
-		AppendixTitle:      "Appendix: Data Source & Methodology",
+		DetailsOnDemandBody: func(example string) string {
+			s := "This run did not write `details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the `req` column above, `basename:line`): `vmr replay -print -req <coord> <audit-file>`"
+			if example != "" {
+				s += ", e.g. `vmr replay -print -req " + example + " <audit-file>`"
+			}
+			return s + "; or pass `-details` to materialize all of them.\n\n"
+		},
+		AppendixTitle: "Appendix: Data Source & Methodology",
 		AppendixInputLine: func(inputs string, format, records, parseErrors int) string {
 			return "- Input: " + inputs + " · format " + strconv.Itoa(format) + " · " + strconv.Itoa(records) +
 				" records / " + strconv.Itoa(parseErrors) + " bad rows\n"
@@ -130,5 +164,8 @@ func Doc(lang Lang) DocText {
 		},
 		AppendixNoPricing:  "No $ figures shown when pricing isn't configured.",
 		AppendixSlowThresh: func(sec int) string { return "- Slow-request threshold: " + strconv.Itoa(sec) + "s\n" },
+		AppendixSelfTrafficExcluded: func(n int) string {
+			return "- Self-traffic: excluded " + strconv.Itoa(n) + " analysis request(s) from `vmr story -llm-addr` itself from every total (disable with `-include-self-traffic`).\n"
+		},
 	}
 }

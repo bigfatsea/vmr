@@ -60,12 +60,29 @@ func (t *mdTable) row(cells ...string) {
 	t.w("%s", "| "+strings.Join(cells, " | ")+" |\n")
 }
 
+// StoriesLinkInfo carries the "vmr-report.md → stories/vmr-stories.md"
+// navigation edge (P6.2a, architecture doc §7.5) — this points at ANOTHER
+// COMMAND's aggregate product (vmr story's index), not at anything report
+// itself can compute, so the two-classes-of-edges rule (§7.5) applies:
+// the caller stats the target and passes nil when absent, rather than
+// report reaching into stories/ itself (report never generates story's
+// index — see the architecture doc's explicit "report doesn't generate
+// vmr-stories.*" ruling, kept to avoid widening report's scope into
+// story's candidate computation).
+type StoriesLinkInfo struct {
+	// Path is relative to vmr-report.md itself, e.g. "stories/vmr-stories.md".
+	Path                   string
+	JourneyCount           int
+	FromDisplay, ToDisplay string // pre-formatted, same convention as MetaLine's from/to
+}
+
 // Markdown renders the full vmr-report.md document in lang — see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section:
 // every narrative string comes from internal/i18n, looked up once per
 // section via that section's own Xxx(lang) bundle; nothing here or in any
-// section_*.go file hardcodes a language.
-func Markdown(rep *Report2, lang i18n.Lang) string {
+// section_*.go file hardcodes a language. stories is nil when this run's
+// output root has no vmr-stories.md to link to (see StoriesLinkInfo).
+func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	o := rep.Overall
@@ -83,6 +100,9 @@ func Markdown(rep *Report2, lang i18n.Lang) string {
 		}
 	}
 	w("\n\n")
+	if stories != nil {
+		w("%s", t.StoriesLinkLine(stories.Path, stories.JourneyCount, stories.FromDisplay, stories.ToDisplay))
+	}
 
 	renderSummary(w, rep, o, lang)
 	renderCostTokens(w, rep, o, lang)
@@ -207,7 +227,20 @@ func renderRequestIndexLink(w func(string, ...any), rep *Report2, lang i18n.Lang
 	if !first {
 		w("\n")
 	}
-	w("%s", t.DetailsCaptureBody)
+	if rep.Meta.DetailsEnabled {
+		w("%s", t.DetailsCaptureBody)
+	} else {
+		// Default run (-details=false, P3.3): details/*.md was never
+		// materialized, so this section can't link into it — point at
+		// the on-demand read primitive instead (P6.2b), with a real
+		// coordinate from this run's own data so the example is
+		// copy-pasteable, not a placeholder.
+		example := ""
+		if rows := rep.RequestRows(); len(rows) > 0 {
+			example = rows[0].Req
+		}
+		w("%s", t.DetailsOnDemandBody(example))
+	}
 }
 
 // ---- 附录 ----
@@ -222,6 +255,9 @@ func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	w("%s", t.AppendixStarMark)
 	w("%s", t.AppendixBillingLine(orDash2(rep.Pricing == nil, t.AppendixNoPricing, "")))
 	w("%s", t.AppendixSlowThresh(rep.Meta.SlowThreshold/1000))
+	if rep.Meta.SelfTrafficExcluded > 0 {
+		w("%s", t.AppendixSelfTrafficExcluded(rep.Meta.SelfTrafficExcluded))
+	}
 }
 
 // ---- cell/format helpers ----

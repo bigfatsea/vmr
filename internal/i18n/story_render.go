@@ -14,8 +14,11 @@ import "strconv"
 // StoryText is render_md.go's (plus journey.go's fallback titles') text, in
 // one language.
 type StoryText struct {
-	ListSep             string // joins e.g. swallowed/survived entity lists ("a、b" vs "a, b")
-	JourneyMeta         func(tasks, turns int, from, to string) string
+	ListSep     string // joins e.g. swallowed/survived entity lists ("a、b" vs "a, b")
+	JourneyMeta func(tasks, turns int, from, to string) string
+	// BackLinkLine is the "journey report → return" edge (P6.2d):
+	// vmr-stories.md (always) and, when reportLink != "", vmr-report.md.
+	BackLinkLine        func(reportLink string) string
 	BreakWarning        func(kind, reasonHint, statsHint string) string
 	BreakReasonContract string
 	BreakReasonFork     string
@@ -56,6 +59,13 @@ func Story(lang Lang) StoryText {
 			ListSep: "、",
 			JourneyMeta: func(tasks, turns int, from, to string) string {
 				return "> " + strconv.Itoa(tasks) + " 任务 · " + strconv.Itoa(turns) + " 轮 · " + from + " → " + to + "\n\n"
+			},
+			BackLinkLine: func(reportLink string) string {
+				s := "← 返回 [vmr-stories.md](vmr-stories.md)"
+				if reportLink != "" {
+					s += " · [vmr-report.md](" + reportLink + ")"
+				}
+				return s + "\n\n"
 			},
 			BreakWarning: func(kind, reasonHint, statsHint string) string {
 				return "> ⚠️ **本 journey 的开头是从上一段上下文断裂而来**（" + kind + "：" + reasonHint + "；" + statsHint +
@@ -114,6 +124,13 @@ func Story(lang Lang) StoryText {
 		ListSep: ", ",
 		JourneyMeta: func(tasks, turns int, from, to string) string {
 			return "> " + strconv.Itoa(tasks) + " tasks · " + strconv.Itoa(turns) + " turns · " + from + " → " + to + "\n\n"
+		},
+		BackLinkLine: func(reportLink string) string {
+			s := "← Back to [vmr-stories.md](vmr-stories.md)"
+			if reportLink != "" {
+				s += " · [vmr-report.md](" + reportLink + ")"
+			}
+			return s + "\n\n"
 		},
 		BreakWarning: func(kind, reasonHint, statsHint string) string {
 			return "> ⚠️ **This journey's start is broken off from an earlier context** (" + kind + ": " + reasonHint + "; " + statsHint +

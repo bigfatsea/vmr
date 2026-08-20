@@ -88,7 +88,16 @@ func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
 	if s.Fallbacks > 0 {
 		outcome += t.OutcomeFallback(s.Fallbacks)
 	}
-	tbl.row(s.ID, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
+	id := s.ID
+	if s.Alias != "" {
+		// s.ID is now content-addressed (l-<hash8>) and no longer the
+		// short s%02d readers are used to scanning for within one report
+		// — show both: the alias for at-a-glance reference, the real id
+		// (also this row's join key against story's Journey index) for
+		// anyone following a link.
+		id = s.Alias + " (" + s.ID + ")"
+	}
+	tbl.row(id, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
 }

@@ -104,7 +104,7 @@ func TestGoldenMarkdown(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			got := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), tc.lang)
+			got := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), tc.lang, false)
 
 			if os.Getenv("UPDATE_GOLDEN") != "" {
 				if err := os.WriteFile(tc.goldenMD, []byte(got), 0o644); err != nil {

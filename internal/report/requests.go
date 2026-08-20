@@ -120,10 +120,16 @@ type indexEntry struct {
 // group: vmr-requests-<tag>.md per real client_key_tag,
 // vmr-requests-unresolved.md for sessions carrying no tag,
 // vmr-requests-cron-<tag>.md per scheduled class. Titles come from sess.
-func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang) error {
+// journeyLink (P6.2c) maps a session's id (now a Lineage's content-
+// addressed LineageID, see SessionInfo.ID) to a rendered journey-<id>.md
+// path, when `vmr story` has already produced one in this same output
+// root — nil/empty when it hasn't, in which case no session card grows a
+// journey link (this is the "指向另一条命令聚合产物" edge class, so it's
+// existence-gated by the caller, not something this package computes).
+func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang, journeyLink map[string]string) error {
 	t := i18n.Requests(lang)
 	rows := rep.RequestRows()
-	sessionTitle, taskTitle := titleMaps(sess)
+	sessionTitle, sessionAlias, taskTitle := titleMaps(sess)
 	sessionMeta := map[string]SessionRow{}
 	for _, s := range rep.Sessions {
 		sessionMeta[s.ID] = s
@@ -165,7 +171,7 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 		}
 		header := t.ChatUserHeader(ck, len(groups), tasks, turns)
 		file := "vmr-requests-" + sanitize(ck) + ".md"
-		content := renderChatUserDoc(header, groups, sessionTitle, taskTitle, t)
+		content := renderChatUserDoc(header, groups, sessionTitle, sessionAlias, taskTitle, journeyLink, t)
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
 			return err
 		}
@@ -232,14 +238,16 @@ func tagSummary(rows []RequestRow) tagSummaryData {
 	return s
 }
 
-func titleMaps(sess *SessionAnalysis) (sessionTitle, taskTitle map[string]string) {
+func titleMaps(sess *SessionAnalysis) (sessionTitle, sessionAlias, taskTitle map[string]string) {
 	sessionTitle = map[string]string{}
+	sessionAlias = map[string]string{}
 	taskTitle = map[string]string{}
 	if sess == nil {
 		return
 	}
 	for _, s := range sess.Sessions {
 		sessionTitle[s.ID] = s.Title
+		sessionAlias[s.ID] = s.DisplayAlias
 		for _, t := range s.Tasks {
 			taskTitle[s.ID+"\x00"+t.ID] = t.Title
 		}
@@ -357,14 +365,14 @@ func clientsWithSiblingFile(rep *Report2) map[string]bool {
 
 // renderChatUserDoc renders one Chat User's full detail doc: an H1 header,
 // a legend, then one session card per session (renderSessionCard).
-func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, taskTitle map[string]string, t i18n.RequestsText) string {
+func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", header)
 	w("%s", t.ChatUserLegend)
 	w("---\n\n")
 	for _, g := range groups {
-		renderSessionCard(w, g, sessionTitle, taskTitle, t)
+		renderSessionCard(w, g, sessionTitle, sessionAlias, taskTitle, journeyLink, t)
 	}
 	return b.String()
 }
@@ -456,16 +464,31 @@ func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.Re
 // renderSessionCard renders one session card ("## sNN · ts · N tasks M
 // turns"): one task sub-header per task, each followed by a one-line quote
 // of the task's opening message and its per-turn table.
-func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, taskTitle map[string]string, t i18n.RequestsText) {
+func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText) {
 	label := g.id
 	if label == "" {
 		label = t.Unrouted
+	} else if alias := sessionAlias[g.id]; alias != "" {
+		// g.id is now content-addressed (l-<hash8>) — show the old s%02d
+		// alias alongside it for at-a-glance scannability within this one
+		// report; g.id itself stays the header's primary label since it's
+		// also this card's join key against story's Journey index (P6.2).
+		label = alias + " (" + g.id + ")"
 	}
 	classNote := ""
 	if g.class != "interactive" {
 		classNote = " · " + g.class
 	}
 	w("%s", t.SessionCardHeader(label, fmtDisplayFull(g.rows[0].TS), g.tasks, g.requests, classNote))
+	if journey := journeyLink[g.id]; journey != "" {
+		// journey is a bare "journey-<id>.md" filename (JourneyIndexRow.
+		// Rendered) — vmr-requests-<tag>.md lives directly in {outDir},
+		// one level ABOVE stories/, so the relative link descends into
+		// it rather than climbing out (the opposite direction from
+		// details/'s and evidence/'s "../" links, KNOWN_ISSUES §1.26 —
+		// those two are siblings of stories/ under the same {outDir}).
+		w("%s", t.JourneyLinkLine("stories/"+journey))
+	}
 
 	byTask := map[string][]RequestRow{}
 	var taskOrder []string

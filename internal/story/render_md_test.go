@@ -31,7 +31,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
 
 	for _, want := range []string{
 		"# Journey j-",
@@ -84,7 +84,7 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
 
 	for _, want := range []string{
 		"🤔 I should read both files first.",
@@ -148,7 +148,7 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
 	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "context was sharply contracted") {
 		t.Errorf("rendered Markdown missing break warning:\n%s", md)
 	}
@@ -191,7 +191,7 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
 	if !strings.Contains(md, "content barely overlaps with the previous segment") {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}

@@ -42,7 +42,7 @@ func TestScanFiles_CacheHitNeverOpensFile(t *testing.T) {
 	cache := cacheWithFacts(t, path, 3)
 
 	rep := &Report2{}
-	st := newAggState(rep, &SessionAnalysis{}, nil)
+	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	if err := st.scanFiles([]string{path}, nil, nil, cache); err != nil {
 		t.Fatalf("scanFiles with a valid Facts cache hit should never touch the filesystem, got: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestScanFiles_DetailsPathIgnoresFactsCache(t *testing.T) {
 	cache := cacheWithFacts(t, path, 3)
 
 	rep := &Report2{}
-	st := newAggState(rep, &SessionAnalysis{}, nil)
+	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	onRecord := func(*audit.Record, *ReqInfo) {}
 	if err := st.scanFiles([]string{path}, nil, onRecord, cache); err == nil {
 		t.Error("expected an error opening a nonexistent file when onRecord forces a decode, even with a valid Facts cache present")

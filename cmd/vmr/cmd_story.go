@@ -71,6 +71,7 @@ func cmdStory(args []string) error {
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
+	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -134,6 +135,9 @@ func cmdStory(args []string) error {
 	prof := resolveTaskProfile()
 
 	cands := story.ListCandidates(g)
+	if !*includeSelfTraffic {
+		cands = filterSelfTrafficCandidates(cands, llmKey, rc.SelfTrafficClientTags)
+	}
 
 	// One batched title fetch across every candidate (story.PreviewTitles
 	// groups reads by source file, so this scans each file at most once no
@@ -746,7 +750,8 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
 	story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
-	md := story.RenderMarkdown(j, m, findings, lang)
+	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(storiesDir), "vmr-report.md"))
+	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}

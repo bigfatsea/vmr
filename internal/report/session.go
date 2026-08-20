@@ -138,7 +138,19 @@ type ReqInfo struct {
 
 // SessionInfo is one grouped agent session.
 type SessionInfo struct {
-	ID             string
+	// ID is the underlying ctxgraph.Lineage's content-addressed identity
+	// (Lineage.LineageID(), "l-<hash8>") — a Session IS one Lineage (see
+	// group's own doc comment), so it reuses that unit's identity rather
+	// than inventing a run-scoped one. This is also what makes a report's
+	// session row and a story JourneyIndexRow.Lineages entry joinable by
+	// set membership instead of a cross-command hash-and-compare (see
+	// DevPlan P6.1 / architecture doc §7.3b).
+	ID string
+	// DisplayAlias is the old s%02d positional label, kept purely for
+	// human scannability within a single report (report readers already
+	// use "s01"/"s02" to refer to sessions in conversation) — it carries
+	// no identity role and must never be used as a lookup key.
+	DisplayAlias   string
 	Title          string
 	ChatID         string
 	ContinuedFrom  string // session id this one continues via compaction
@@ -545,6 +557,12 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 
 	sessionOfLineage := make(map[int]*SessionInfo)
 	var order []*SessionInfo
+	// orderLineage[i] is the ctxgraph.Lineage order[i] was built from —
+	// same append point as order itself, so the two slices stay in lock
+	// step. Needed below to derive s.ID from the Lineage's own content-
+	// addressed identity (LineageID) rather than the session's position
+	// in this run's iteration order.
+	var orderLineage []*ctxgraph.Lineage
 	for _, r := range a.Recs {
 		if r.Compaction {
 			a.Compactions = append(a.Compactions, r)
@@ -564,11 +582,13 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 			s = &SessionInfo{}
 			sessionOfLineage[lin.Idx] = s
 			order = append(order, s)
+			orderLineage = append(orderLineage, lin)
 		}
 		attach(s, r)
 	}
 	for i, s := range order {
-		s.ID = fmt.Sprintf("s%02d", i+1)
+		s.ID = orderLineage[i].LineageID()
+		s.DisplayAlias = fmt.Sprintf("s%02d", i+1)
 		for j, t := range s.Tasks {
 			t.ID = fmt.Sprintf("t%02d", j+1)
 		}

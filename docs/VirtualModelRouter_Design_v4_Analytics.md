@@ -64,7 +64,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 `AnalyzeSessions` 失败（唯一的失败面是文件级 I/O：`OpenLogFile` 打开失败 / `ForEachLine` 扫描中途出错——单行 JSON 解析失败只是跳过计数，不会导致整体失败）即整个 `Build` 返回错误，`vmr-report.json`/`.md` 都不写出，不做分文件容错——现实中触发场景几乎只有一种：`vmr start` 常驻进程的 housekeeping 轮转扫描与 `vmr report` 并发读同一份日志时的竞态窗口，属于"重跑就好"的窄场景，不值得为它引入按文件粒度容错的复杂度。
 
-**会话分组算法**（`session.go` 的 `group()`）：一个 `ctxgraph.Lineage` 对应一个 `SessionInfo`——Lineage 已经在结构上把 Contract/Fork 类型的历史重置切成了独立片段（见 §3.2），`group()` 不再自己判断"这是不是同一个会话"，只是消费这个既有分类。每条记录的"这一轮相对上一轮改了什么"（`DeltaStart`/`ReplacedTail`/`SysChanged`）来自 `ctxgraph.Classify(前一条记录的 manifest, 这一条的 manifest)`，不再有报表包自己的哈希向量/LCP 实现——历史上这是两套并行实现（`ReqInfo.keys` + 私有 `lcp()` vs `ctxgraph.Manifest.Keys` + `Classify`），现在统一成一套。任务边界判定（是否开新任务）曾经是报表领域自己的规则、`story` 另有一份独立实现，架构审查 B3 批把两者收敛进了下文 `internal/taskseg` 一节描述的共享算法：`taskseg.IsNewTask`——新 trace id、或 delta 里出现一条不在父级历史里出现过的真实用户指令，就开一个新任务；父级回复是 NoReply（空回复或 OpenClaw 的 `NO_REPLY` 标记）时不开新任务，视为对同一指令的重试。`report`/`story` 都只调用这一份实现，不再各自维护。
+**会话分组算法**（`session.go` 的 `group()`）：一个 `ctxgraph.Lineage` 对应一个 `SessionInfo`——Lineage 已经在结构上把 Contract/Fork 类型的历史重置切成了独立片段（见 §3.2），`group()` 不再自己判断"这是不是同一个会话"，只是消费这个既有分类。`SessionInfo.ID`（P6.1）直接就是这条 Lineage 的内容寻址身份（`Lineage.LineageID()`，`"l-" + RootHash 前 8 位十六进制`，与 `story` 的 Journey id 同一套口径）——run-scoped 的位置序号 `s01`/`s02`……降级为 `SessionInfo.DisplayAlias`，只供人读表格里快速对照，不再承担身份职责；`story` 的 `JourneyIndexRow.Lineages` 携带同一批 id，两侧的会话行/任务因此可以直接按集合成员关系判定归属，不需要各自算一个哈希再对表。每条记录的"这一轮相对上一轮改了什么"（`DeltaStart`/`ReplacedTail`/`SysChanged`）来自 `ctxgraph.Classify(前一条记录的 manifest, 这一条的 manifest)`，不再有报表包自己的哈希向量/LCP 实现——历史上这是两套并行实现（`ReqInfo.keys` + 私有 `lcp()` vs `ctxgraph.Manifest.Keys` + `Classify`），现在统一成一套。任务边界判定（是否开新任务）曾经是报表领域自己的规则、`story` 另有一份独立实现，架构审查 B3 批把两者收敛进了下文 `internal/taskseg` 一节描述的共享算法：`taskseg.IsNewTask`——新 trace id、或 delta 里出现一条不在父级历史里出现过的真实用户指令，就开一个新任务；父级回复是 NoReply（空回复或 OpenClaw 的 `NO_REPLY` 标记）时不开新任务，视为对同一指令的重试。`report`/`story` 都只调用这一份实现，不再各自维护。
 
 **跨会话链接，两条并列信号**：
 - `linkStitchedLineages`：任何 Lineage 从其所在的 SessKey 桶断裂（Contract/Fork）又被 `ctxgraph.StitchGraph` 缝合回某个更早 Lineage 时，直接把 `SessionInfo.ContinuedFrom` 设成前驱会话的 ID——这是纯结构信号，覆盖同一 SessKey 桶内的断裂重连（典型：一次原地改写式的历史压缩，开场白锚点原样保留）。
@@ -202,7 +202,7 @@ vmr story -corpus [-o dir] [file|glob]...
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
-**`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。
+**`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段，每行还带 `lineages`——该 Journey 链上每条 Lineage 的内容寻址 id，供 `report` 侧按集合成员关系 join，见上文会话分组一节；以及 `category`，见下）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。**候选分类**（P6.3，`classifyJourney`）：按标题里的内容标记把候选分成 `task`/`cron`/`heartbeat`/`subagent` 四类（`[cron:...]` 前缀、`[OpenClaw heartbeat poll]`/`[Subagent Context]` 子串——三个字面量拼法已用真实语料核实，不是照抄架构讨论稿的示例），不引入轮数之类的间接推断。`vmr-stories.md` 默认展开 `task`/`cron`，把 `heartbeat`/`subagent` 折进一个 `<details>` 块（真实语料：477 个候选里 127 个是这两类噪声）；`vmr-stories.json` 照常全量输出，不做取舍。
 
 解析缓存不嵌在这个文件里：`{outDir}/.parse-cache/<filehash>.json`，一个输入文件一个分片，与
 `vmr-requests.json`（§2.5）共用同一个目录（P3 的证据层瘦身，见
@@ -430,12 +430,14 @@ type EfficiencyText struct {
 # report.yaml — vmr report/vmr story 专属配置，与 config.yaml 完全独立
 language: zh          # en (默认) | zh
 output: reports        # -o 的默认值
-details: true           # vmr report 专属，-details 的默认值
+details: false           # vmr report 专属，-details 的默认值（默认按需生成，见 §2.5）
 include_partial: false   # vmr story 专属，-include-partial 的默认值
 llm_addr: ""              # vmr story 专属，-llm-addr 的默认值
 llm_model: ""              # vmr story 专属，-llm-model 的默认值
 llm_key: ""                  # vmr story 专属，-llm-key 的默认值；明文或 ${ENV} 都可以
 llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值；两处都不设 = 永不缓存
+self_traffic_client_tags: []   # 两条命令共用，P6.4——额外排除的自指流量 client_key_tag，
+                                # 通常不需要填，llm_key 派生的那一个就够用（见下方说明）
 ```
 
 每个字段都只是命令行同名 flag 的兜底默认值：flag 显式传了就赢，没传才看这份文件，文件里也没有就落到 flag 自己的内建默认（`resolveString`/`resolveBool`/`flagPassed`，`cmd/vmr/reportconfig.go`）——`resolveLanguage` 当初定下的 `-lang` > `report.yaml` > 内建默认这个优先级，后来给其余每个字段原样套用，不是各写一套。两个 bool 字段（`details`/`include_partial`）在 struct 里是指针，不是普通 bool——一个 flag 的零值（`false`）本身就是合法的显式选择，没法靠"是不是零值"判断用户到底传没传，只能用 `flag.FlagSet.Visit` 拿"这个 flag 到底出现在命令行没有"这个事实，report.yaml 侧同理用指针的 nil/非 nil 表达"这个字段到底写没写"。
@@ -443,6 +445,22 @@ llm_cache_dir: ""             # vmr story 专属，-llm-cache-dir 的默认值�
 `llm_key` 是这份文件里唯一可能敏感的字段——`report.yaml` 已经 `.gitignore`，明文写 token 跟 `config.yaml` 里写 provider API key 是同一个安全模型，不需要额外保护。仍然支持 `${ENV_VAR}` 展开（`expandReportEnv`，对整份文件的原始文本做替换，跟 `internal/config` 的 `expandEnv` 同一套 `${NAME}` 语法，各自独立实现，不共享代码——`report.yaml` 刻意不依赖 `internal/config`，见本文件包注释），纯粹是给想复用某个已有环境变量（比如跟 `config.yaml` 的 provider key 共用一个）而不想在两份文件里各写一份明文的人一个可选项，不是强制要求。
 
 `llm_cache_dir` 是唯一没有内建默认值的字段——早期实现里它硬编码成 `{output}/stories/.llm-cache`，只要开了 `-llm-addr` 就自动落盘缓存；现在改成两处（flag、`report.yaml`）都不设就完全不缓存，缓存目录必须是用户显式点名的地方，不再有隐式路径。
+
+**自指流量排除**（P6.4）：`vmr story -llm-addr` 的解读调用经 VMR 自身路由回流进审计日志，混进去的
+token/成本是分析行为本身的开销，不是被分析工作负载的一部分。识别规则只算一次，放在 `cmd/vmr`
+组合根（`selftraffic.go`）：`audit.KeyTag(llm_key)`——跟 `api_keys` 认证给每个 key 打标签用的
+是同一个取尾变换，所以自然算出自指流量在审计日志里会留下的那个 `client_key_tag`，不需要用户
+另外配置。`self_traffic_client_tags` 只在"自指流量用了另一个、已经轮换掉的历史凭证"这种边缘场景
+才需要填，多数部署留空即可。`vmr report`/`vmr story` 各自默认排除，`-include-self-traffic`
+关闭；`vmr-report.json` 的 `meta.self_traffic_excluded` 如实记录排除了多少条。
+
+**`vmr analyze`**（P6.5）：一次调用依次跑 `vmr report`、`vmr story -render-all`，共用同一个 `-o`，
+产出完整互链的套件——`vmr report`/`vmr story` 各自的调用形状不变，`analyze` 只是 `cmd/vmr`
+组合根里的第三个入口，不改变两个 internal 包互不 import 的边界。刻意没有做"一次扫描、一份缓存、
+一次建图"的深度合并：P3 之后两条命令共用同一个内容哈希分片的 `.parse-cache/`，`analyze` 内部
+先跑 `story` 再跑 `report` 时，`report` 那一趟扫描已经是热缓存命中，不是重新解析——真正的单遍
+扫描收益因此有限，而实现成本（把 `AnalyzeSessionsCached` 的扫描与它的图构建拆开，让 `report`/
+`story` 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
 
 默认路径是当前目录下的 `report.yaml`（不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
 

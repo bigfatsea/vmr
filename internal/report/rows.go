@@ -66,6 +66,18 @@ type Meta struct {
 	To               string   `json:"to,omitempty"`
 	SlowThreshold    int      `json:"slow_threshold_ms"`
 	PercentileMethod string   `json:"percentile_method"` // documented in appendix
+	// DetailsEnabled records whether this run wrote details/*.md (the
+	// -details flag) — §8's link line (P6.2b) reads it to decide between
+	// "here are the links" and "here's how to fetch one on demand"
+	// (`vmr replay -print -req <coord>`), since the default run no longer
+	// produces a details/ to link to (P3.3).
+	DetailsEnabled bool `json:"details_enabled,omitempty"`
+	// SelfTrafficExcluded is how many records this run's self-traffic
+	// exclusion (P6.4) skipped from every aggregation bucket — vmr
+	// story's own -llm-addr calls routed back through this instance, not
+	// the workload actually being analyzed. Counted, never silently
+	// dropped; 0 when no exclusion tags were configured or none matched.
+	SelfTrafficExcluded int `json:"self_traffic_excluded,omitempty"`
 
 	// QuotaJSONPath/QuotaInputOutsideLogDir are cmd_report.go's
 	// composition-root facts about §2.5's live-quota counter, set on rep
@@ -362,7 +374,14 @@ type WorkloadRow struct {
 // SessionRow is the per-session drill-down (§6 Sessions & Tasks): no latency columns in
 // Markdown, but the data stays in JSON (P6). context_growth = last/first turn.
 type SessionRow struct {
+	// ID is the underlying Lineage's content-addressed identity
+	// ("l-<hash8>", see SessionInfo.ID's doc comment) — stable across
+	// independent runs/subsets, joinable against story's
+	// JourneyIndexRow.Lineages by set membership. Alias is the old
+	// run-scoped s%02d label, kept only for human scannability within
+	// this one report; never use it as a lookup key (P6.1).
 	ID            string `json:"id"`
+	Alias         string `json:"alias,omitempty"`
 	Title         string `json:"title,omitempty"`
 	Class         string `json:"class,omitempty"`
 	ClientKey     string `json:"client_key,omitempty"`

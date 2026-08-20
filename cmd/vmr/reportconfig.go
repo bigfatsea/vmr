@@ -41,6 +41,13 @@ type reportConfig struct {
 	LLMModel       string `yaml:"llm_model"`       // vmr story's -llm-model default
 	LLMKey         string `yaml:"llm_key"`         // vmr story's -llm-key default; plaintext or "${SOME_ENV_VAR}"
 	LLMCacheDir    string `yaml:"llm_cache_dir"`   // vmr story's -llm-cache-dir default; "" everywhere = no caching, never an implicit path
+	// SelfTrafficClientTags (P6.4) extends the self-traffic exclusion set
+	// beyond the one tag auto-derived from LLMKey — needed only when
+	// -llm-addr traffic was generated under a DIFFERENT, e.g. rotated,
+	// credential than the one currently configured. Most deployments
+	// leave this empty: the LLMKey-derived tag alone is sufficient. See
+	// selftraffic.go.
+	SelfTrafficClientTags []string `yaml:"self_traffic_client_tags"`
 	// Currency is vmr report's -currency default — the currency $ cost
 	// estimates are DISPLAYED in, independent of whatever currency they were
 	// actually computed in (config.yaml's pricing.currency, or USD with no

@@ -253,6 +253,7 @@ func cmdReport(args []string) error {
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
+	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -270,6 +271,10 @@ func cmdReport(args []string) error {
 	}
 	outDir := resolveString(*outDirFlag, rc.Output, "reports")
 	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
+	var excludeClientTags map[string]bool
+	if !*includeSelfTraffic {
+		excludeClientTags = selfTrafficExcludeTags(rc.LLMKey, rc.SelfTrafficClientTags)
+	}
 
 	// Single config.Load, shared by buildPricing and
 	// buildProviderQuotas below — see either function's own doc comment for
@@ -321,7 +326,7 @@ func cmdReport(args []string) error {
 	now := time.Now()
 	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, *configPath, tw, now)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas)
+	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas, excludeClientTags)
 	if err != nil {
 		return err
 	}
@@ -336,12 +341,14 @@ func cmdReport(args []string) error {
 		rep.Meta.QuotaJSONPath = quotaJSONPath
 		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
 	}
+	rep.Meta.DetailsEnabled = detailsOn
 	jsonPath := filepath.Join(outDir, "vmr-report.json")
 	mdPath := filepath.Join(outDir, "vmr-report.md")
 	if err := report.WriteJSON(rep, jsonPath); err != nil {
 		return err
 	}
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, lang)), 0o600); err != nil {
+	storiesLink, lineageToJourney := loadStoriesLink(outDir)
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, lang, storiesLink)), 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
@@ -367,7 +374,7 @@ func cmdReport(args []string) error {
 	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
 		return fmt.Errorf("parse cache: %w", err)
 	}
-	if err := report.WriteRequestsIndex(rep, sess, outDir, lang); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, outDir, lang, lineageToJourney); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests.md"))

@@ -187,7 +187,7 @@ func TestMarkdownAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(rep, i18n.EN)
+	md := Markdown(rep, i18n.EN, nil)
 	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Cost Estimate", "## §8 Request Detail Index"}) {
 		t.Fatalf("Markdown missing expected sections")
 	}
@@ -484,7 +484,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -744,7 +744,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(rep, i18n.EN)
+	md := Markdown(rep, i18n.EN, nil)
 	if !strings.Contains(md, "Quirk Fix × Endpoint") {
 		t.Fatalf("markdown missing the quirk-by-endpoint section:\n%s", md)
 	}
@@ -768,7 +768,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md2 := Markdown(rep2, i18n.EN)
+	md2 := Markdown(rep2, i18n.EN, nil)
 	if strings.Contains(md2, "Quirk Fix") {
 		t.Errorf("quirk section must not render when no endpoint has a non-zero NormCounts:\n%s", md2)
 	}
@@ -808,7 +808,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 
 	// The full index is unaffected: still every request, the plain ok one included.
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil); err != nil {
 		t.Fatal(err)
 	}
 	fullMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
@@ -1209,16 +1209,28 @@ func sessionGrowthTieRecords() []map[string]any {
 // TestBuildFindingsContextGrowthTieIsDeterministic covers the third and
 // last untested tie-break site: buildFindings' worst-session loop for
 // "上下文膨胀". Both sessions in sessionGrowthTieRecords tie exactly on
-// ContextGrowth (x10); session A must always win since "s01" < "s02".
+// ContextGrowth (x10). Session IDs are now content-addressed
+// (Lineage.LineageID, P6.1) rather than positional s01/s02, so which of
+// the two fixture sessions is lexicographically smaller is fixed by their
+// content hashes, not knowable in advance — this test computes it from
+// run 0 instead of hardcoding "s01", then asserts every subsequent run
+// agrees, which is the actual property under test: the tie-break
+// (metrics.go's "s.ID < worst.ID") always resolves to the SAME session
+// across repeated runs on the same input, not whichever session
+// rep.Sessions' as-yet-unsorted order happened to visit first.
 func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, sessionGrowthTieRecords())
 
 	const runs = 8
+	var wantImplicated string
 	for i := 0; i < runs; i++ {
 		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("run %d: Build: %v", i, err)
+		}
+		if len(rep.Sessions) != 2 {
+			t.Fatalf("run %d: sessions = %d, want 2", i, len(rep.Sessions))
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
@@ -1230,8 +1242,19 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 		if found == nil {
 			t.Fatalf("run %d: no 上下文膨胀 finding (both sessions should qualify: growth x10 >= 5)", i)
 		}
-		if !strings.HasPrefix(found.Implicated, "s01 ") {
-			t.Fatalf("run %d: implicated = %q, want it to start with \"s01 \" (tied ContextGrowth must always resolve to the smaller session ID)", i, found.Implicated)
+		if i == 0 {
+			wantImplicated = found.Implicated
+			smaller := rep.Sessions[0].ID
+			if rep.Sessions[1].ID < smaller {
+				smaller = rep.Sessions[1].ID
+			}
+			if !strings.HasPrefix(wantImplicated, smaller+" ") {
+				t.Fatalf("run 0: implicated = %q, want it to start with the lexicographically smaller session id %q (tie-break rule is s.ID < worst.ID)", wantImplicated, smaller)
+			}
+			continue
+		}
+		if found.Implicated != wantImplicated {
+			t.Fatalf("run %d: implicated = %q, want %q (tied ContextGrowth must always resolve to the same session across runs)", i, found.Implicated, wantImplicated)
 		}
 	}
 }
@@ -1298,13 +1321,18 @@ func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	if len(rep.Sessions) != 2 {
 		t.Fatalf("sessions = %d, want 2 (report must split at the Contract break)", len(rep.Sessions))
 	}
-	byID := map[string]*SessionRow{}
+	// Session ids are now content-addressed (Lineage.LineageID, P6.1), not
+	// positional s01/s02 — DisplayAlias still carries the old positional
+	// label (kept purely for human display, see SessionInfo.ID's doc
+	// comment), so use that to pick out "the pre-contract session" and
+	// "the post-contract session" instead of assuming a specific hash.
+	byAlias := map[string]*SessionRow{}
 	for i := range rep.Sessions {
-		byID[rep.Sessions[i].ID] = &rep.Sessions[i]
+		byAlias[rep.Sessions[i].Alias] = &rep.Sessions[i]
 	}
-	s1, s2 := byID["s01"], byID["s02"]
+	s1, s2 := byAlias["s01"], byAlias["s02"]
 	if s1 == nil || s2 == nil {
-		t.Fatalf("expected sessions s01/s02, got %+v", rep.Sessions)
+		t.Fatalf("expected sessions aliased s01/s02, got %+v", rep.Sessions)
 	}
 	if s1.ContextGrowth != 80 {
 		t.Errorf("session 1 ContextGrowth = %v, want 80 (100 -> 8000 within its own pre-contract lineage)", s1.ContextGrowth)
@@ -1365,7 +1393,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 		t.Errorf("swallowed entities = %v, want [drop.go]", c.SwallowedEntities)
 	}
 
-	md := Markdown(rep, i18n.EN)
+	md := Markdown(rep, i18n.EN, nil)
 	if !strings.Contains(md, "§6.7 Compaction Reconstruction") {
 		t.Error("rendered Markdown missing the §6.7 Compaction section header")
 	}
@@ -1388,7 +1416,7 @@ func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {
 	rep := &Report2{Compactions: []CompactionRow{
 		{TS: "2026-07-24T00:00:00Z", TokensIn: 100, TokensOut: 10},
 	}}
-	md := Markdown(rep, i18n.EN)
+	md := Markdown(rep, i18n.EN, nil)
 	if !strings.Contains(md, "2026-07-24 05:00:00") {
 		t.Errorf("compaction TS should render as 05:00:00 in DisplayZone (TEST+05:00), not the source 00:00:00 UTC:\n%s", md)
 	}
@@ -1408,7 +1436,7 @@ func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 				ErrorClasses: map[string]int{"transient": 1}},
 		},
 	}
-	md := Markdown(rep, i18n.EN)
+	md := Markdown(rep, i18n.EN, nil)
 	if strings.Contains(md, "MISSING") {
 		t.Fatalf("rendered Markdown contains a corrupted Printf verb (percent sign in a table cell mishandled):\n%s", md)
 	}

@@ -22,9 +22,12 @@ type RequestsText struct {
 	AllRequestsTitle       string
 	AllRequestsTableHeader string
 	SessionCardHeader      func(label, ts string, tasks, requests int, classNote string) string
-	Unrouted               string
-	TaskHeader             func(label, ts string, turns int) string
-	TurnTableHeader        string
+	// JourneyLinkLine is the "session row → journey" edge (P6.2c) — path
+	// is relative to the vmr-requests-<tag>.md this line is rendered into.
+	JourneyLinkLine func(path string) string
+	Unrouted        string
+	TaskHeader      func(label, ts string, turns int) string
+	TurnTableHeader string
 }
 
 func Requests(lang Lang) RequestsText {
@@ -56,7 +59,8 @@ func Requests(lang Lang) RequestsText {
 			SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 				return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " 任务 " + strconv.Itoa(requests) + " 轮" + classNote + "\n\n"
 			},
-			Unrouted: "（未分组）",
+			JourneyLinkLine: func(path string) string { return "→ 任务叙事见 [" + path + "](" + path + ")\n\n" },
+			Unrouted:        "（未分组）",
 			TaskHeader: func(label, ts string, turns int) string {
 				return "### " + label + " · " + ts + " · " + strconv.Itoa(turns) + " 轮\n\n"
 			},
@@ -90,7 +94,8 @@ func Requests(lang Lang) RequestsText {
 		SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 			return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " tasks " + strconv.Itoa(requests) + " turns" + classNote + "\n\n"
 		},
-		Unrouted: "(ungrouped)",
+		JourneyLinkLine: func(path string) string { return "→ Task narrative in [" + path + "](" + path + ")\n\n" },
+		Unrouted:        "(ungrouped)",
 		TaskHeader: func(label, ts string, turns int) string {
 			return "### " + label + " · " + ts + " · " + strconv.Itoa(turns) + " turns\n\n"
 		},

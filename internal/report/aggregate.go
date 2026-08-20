@@ -125,10 +125,18 @@ type aggState struct {
 	clientEndpointCol *clientEndpointCollector
 	pricingSrc        *pricing.Resolver
 
+	// excludeClientTags is P6.4's self-traffic exclusion set — a record
+	// whose ClientKeyTag is a member never reaches any bucket. Computed
+	// once by cmd/vmr (the identification rule's one definition, see
+	// audit.KeyTag's use in cmd/vmr's selfTrafficExcludeTags) and threaded straight
+	// through; nil/empty means "exclude nothing", the default when no
+	// llm_key is configured.
+	excludeClientTags map[string]bool
+
 	from, to time.Time
 }
 
-func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolver) *aggState {
+func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolver, excludeClientTags map[string]bool) *aggState {
 	sessionInfo := map[string]*SessionInfo{}
 	for _, s := range sess.Sessions {
 		sessionInfo[s.ID] = s
@@ -149,6 +157,7 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 		stickyCol:         newStickyCollector(),
 		clientEndpointCol: newClientEndpointCollector(),
 		pricingSrc:        pricingSrc,
+		excludeClientTags: excludeClientTags,
 	}
 }
 
@@ -163,7 +172,7 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 // Not a MetricAggregator interface: a single-threaded batch loop over one
 // record type has no caller that needs to swap the aggregator at runtime,
 // so an interface would buy polymorphism nobody uses.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef, excludeClientTags map[string]bool) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
 	sess, cache, err := AnalyzeSessionsCached(paths, prior, prof)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
@@ -173,6 +182,22 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 			"whether any input path still exists under its original name (housekeeping renames "+
 			"rotated files to .zst) and that it isn't corrupt", err)
 	}
+	// Self-traffic exclusion (P6.4) must also reach sess.Recs/Compactions
+	// here, not just ingestRecord's own per-record skip below: buildTools/
+	// buildCompactions (§5/§6.7) read straight from sess, a completely
+	// separate pass from the scanFiles loop ingestRecord runs in — an
+	// excluded record's tool calls/compaction entry would otherwise still
+	// surface in those two sections even though it never gets a
+	// RequestRow or contributes to Overall. sess.Sessions is deliberately
+	// left untouched: rep.Sessions (§6) is already correctly filtered
+	// because a self-traffic session never gets a SessionRow in the first
+	// place (every one of its records is skipped in ingestRecord below),
+	// so there is nothing reading sess.Sessions directly that this would
+	// need to protect. Meta.SelfTrafficExcluded is NOT incremented here —
+	// ingestRecord's own per-record check below counts every excluded
+	// record exactly once, from the scanFiles pass every record goes
+	// through regardless of whether it also appears in sess.
+	excludeSelfTrafficFromSessionAnalysis(sess, excludeClientTags)
 
 	rep := &Report2{Meta: Meta{
 		Format: Format, GeneratedAt: now.Format(time.RFC3339), Inputs: paths,
@@ -180,7 +205,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 		PercentileMethod: "true per-bucket from raw dur_ms/ttft_ms/stream_ms; cross-day merges use pre-aggregated *_all/hours_of_day siblings",
 	}}
 
-	st := newAggState(rep, sess, pricingSrc)
+	st := newAggState(rep, sess, pricingSrc, excludeClientTags)
 	if err := st.scanFiles(paths, progress, onRecord, cache); err != nil {
 		return nil, nil, nil, err
 	}
@@ -267,7 +292,13 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 		rf := extractRecordFacts(&arec, line)
 		ff.Records = append(ff.Records, rf)
 		ri := st.sess.Lookup(path, line)
-		if onRecord != nil {
+		// Self-traffic exclusion (P6.4) must gate onRecord too, not just
+		// ingestRecord below: onRecord is the -details detail-page writer
+		// (setupDetailWriter's callback) — without this check it would
+		// still materialize a details/*.md page for an excluded record,
+		// an orphan file no index ever links to (the record's RequestRow
+		// is never created, so nothing points at it).
+		if onRecord != nil && !st.excludeClientTags[arec.ClientKeyTag] {
 			onRecord(&arec, ri)
 		}
 		st.ingestRecord(buildRec2(rf, ri, path), rf.Attempts)
@@ -286,6 +317,16 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 // to every bucket it touches, given the same record's attempt-level facts
 // (needed only by ingestEndpoints, so not part of rec2 itself).
 func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
+	if st.excludeClientTags[rc.clientKey] {
+		// Self-analysis traffic (P6.4): vmr story's own -llm-addr calls
+		// route back through this same instance and land in the audit
+		// log like any other request — but their cost/tokens are the
+		// analysis tool's own overhead, not the workload being analyzed,
+		// so they're excluded from every bucket by default (counted, not
+		// silently dropped — see Meta.SelfTrafficExcluded).
+		st.rep.Meta.SelfTrafficExcluded++
+		return
+	}
 	if st.from.IsZero() || rc.ts.Before(st.from) {
 		st.from = rc.ts
 	}
@@ -407,7 +448,7 @@ func (st *aggState) ingestSecondaryBuckets(rc *rec2) {
 		s := st.sessions[rc.sessionID]
 		if s == nil {
 			info := st.sessionInfo[rc.sessionID]
-			s = &SessionRow{ID: info.ID, Title: info.Title, Tasks: len(info.Tasks),
+			s = &SessionRow{ID: info.ID, Alias: info.DisplayAlias, Title: info.Title, Tasks: len(info.Tasks),
 				ContinuedFrom: info.ContinuedFrom, Class: wc, ClientKey: rc.clientKey}
 			if len(info.Recs) > 0 {
 				s.From = info.Recs[0].TS.Format(time.RFC3339)

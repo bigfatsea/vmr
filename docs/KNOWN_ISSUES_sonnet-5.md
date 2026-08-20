@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**：中危 4 项、低危 18 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。
+- **§1 分布**：中危 5 项、低危 17 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
@@ -185,36 +185,6 @@
   这类差异开始出现在 `cost_estimate` 之外的字段上，说明性质变了，需要重新当作真实 bug 排查。
 - **登记来源**：2026-08-20 P3 批 D 收尾阶段，冷/热缓存输出一致性核实时发现。
 
-### 1.25 [低] `vmr replay -req` 要求同时给坐标和位置参数，允许贴入即用会更顺手
-
-- **现状**：`-req basename:line` 目前必须搭配一个显式的位置参数（原始审计文件路径），且要求它的
-  `CanonicalPath` 与坐标的 basename 一致，否则报错——这是 P3.2 的既定设计（坐标本身不含目录，
-  解析必须有外部输入补全）。代价：从 `vmr-requests.json`/`journey-*.json` 复制到的 `req` 字段
-  （如 `"vmr-audit-2026-07-28.jsonl:317"`）不能直接贴进命令行执行，还要再补一遍文件路径。
-- **可能方案**：位置参数缺省或传入一个目录时，按坐标的 basename 在该目录（或
-  `config.yaml` 的 `log_dir`）下自动定位文件（含 `.zst` 变体），只有显式给了具体文件路径才做
-  一致性校验。
-- **为什么不在 P3 顺手做**：这不是修 bug，是加一项 `vmr replay` 今天完全没有的能力
-  （`-line`/`-ts` 同样要求显式文件路径，`replay` 没有任何"按 log_dir 找文件"的既有逻辑可复用）——
-  跟 DevPlan P6.5"统一的记录选择器"是同一件事的一部分，等 P6 做 CLI 收敛时一并设计更连贯
-  （避免 `-req` 一个 flag 先斩后奏出一套目录搜索规则，等 P6 到了又要跟 `-ts`/新读取原语的规则
-  合并对齐）。
-- **登记来源**：2026-08-20，P3 ActionPlan 的独立并发评审（`story_report_p3_action_plan_review_
-  gemini-3.7-flash.md`）指出，核实为真实可改善的体验问题，非阻断项。
-
-### 1.26 [已在 P5 验证，仅剩 P6 的 `vmr-report.md` 一处未对齐] 证据条目跨目录深度的相对链接规则
-
-- **现状**：P5 落地时核实了这条提醒——`vmr story` 的 `stories/journey-<id>.md` 与 `internal/
-  reqdetail`（`details/<file>.md`）到 `evidence/<file>.md` 的相对路径深度**确实相同**：
-  `stories/`、`details/`、`evidence/` 都是 `{outDir}` 的直接子目录（`cmd_story.go` 的
-  `detailAndEvidenceDirs`/`ensureStoriesDir` 与 `cmd_report.go` 的 `setupDetailWriter` 用的是同一
-  `{outDir}/<name>` 布局），因此都是 `../evidence/<file>.md`，不需要为 `story` 侧另写一条规则——
-  `render_md_sysprompt.go`（系统提示词链接）与 `render_spine_step.go`（详单链接）直接复用了同一个
-  `"../evidence/"`/`"../details/"` 前缀，已用真实语料验证链接可达。**仍未对齐的只剩本条目最初
-  点名的另一半**：根目录的 `vmr-report.md`/`vmr-requests.md` 到 `evidence/` 应为不带 `../` 的
-  `evidence/<file>.md`——这两个文件今天还不链接证据条目，等 P6 让它们也链接时才会真正触发，留给
-  P6 处理，不是本条目当前需要动的部分。
-- **登记来源**：2026-08-20，P3 并发评审 §3.2 首次提出；P5 落地时验证并收窄范围。
 
 ### 1.27 [已决定不做，登记备查] `.parse-cache/` 分片不做孤儿回收（旧 hash 分片、schema 升级后的旧版本分片）
 
@@ -260,6 +230,34 @@
   多考虑一层"没有版本戳时怎么判断"。
 - **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
   §3 M3）提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
+
+### 1.30 [中] `vmr story -render-all`（含经由 `vmr analyze` 触发）在大语料上被系统杀死，不只是慢
+
+- **现状**：本机全量语料（34 个审计文件、11374 条记录）冷启动跑 `vmr analyze`（内部先执行
+  `vmr story -render-all`）在约 10 分钟墙钟、~300s 累计 CPU 时间后被**信号杀死**（进程退出码
+  137 = SIGKILL），story 阶段连候选索引都没写出（`stories/` 目录为空）——不是跑得慢，是没跑完；
+  单日样本（322 条记录、6 个 Journey）同一命令 ~18s 正常完成。**已定位到具体是哪一步**：同一份
+  34 文件语料上，`vmr story`（不带 `-render-all`，只列出候选）18.22s 正常完成，峰值内存
+  （`/usr/bin/time -l` 的 `peak memory footprint`）约 1.07GB——扫描、建图、候选分类这些步骤都不是
+  瓶颈。问题精确定位在 `-render-all` 对全部候选（该语料约 350+ 个非断头候选）逐个渲染 Journey
+  详单+证据这一步。**这不是 P6 引入的回归**：`cmd_analyze.go` 的 `vmr analyze` 内部就是原样调用
+  `cmdStory(storyArgs)`（`storyArgs` 带 `-render-all`），跟用户直接跑 `vmr story -render-all` 是
+  同一条代码路径——这个行为在 P6 之前就存在，P6 只是让它成为 `vmr analyze` 的默认路径，从而更容易
+  被撞到。本机 16GB 物理内存，是否为 OOM 触发的 SIGKILL 未做进一步确认（复现一次完整的
+  `-render-all` 杀死过程再采样内存曲线，成本较高，留给专门排期时做）。
+- **为什么定为中危而不是低危**：`vmr analyze` 是 P6 新增的默认推荐入口，"被杀死而不是报错退出"
+  对用户是一个体验很差的失败模式（无提示、无部分产物、不知道该怎么应对），且触发条件不算罕见——
+  一个月的历史日志量级就可能达到本次实测的规模。
+- **为什么不在 P6 里当场修**：诊断需要真正定位内存/资源峰值发生在哪个阶段（`ctxgraph.Scan` 建图、
+  `story.BuildAll` 逐 Journey 构建、`EnsureJourneyDetails` 材料化详单，还是三者叠加），这本身是
+  一次独立的性能剖析工作，不是本次 P6 范围内能顺手完成的。
+- **可能方向**（未验证，留给专门排期时评估）：已定位到 `-render-all` 逐候选渲染这一步（见上，
+  不是扫描/建图阶段），后续排查可以直接从 `renderAllJourneys`（`cmd_story.go`）与
+  `EnsureJourneyDetails` 入手，用 `pprof`/内存采样确认是持有全部候选的内存膨胀，还是详单材料化
+  的磁盘/内存双重开销；可能的方向包括给候选数量设一个确认阈值或分批处理、把逐 Journey 渲染改成
+  真正的流式（渲染完一个就释放，不在内存里累积已渲染集合）。
+- **登记来源**：2026-08-20，P6 ActionPlan 全量语料验证（`story_report_p6_action_plan_sonnet-5.md`
+  §10.4）时发现。
 
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 
@@ -347,6 +345,8 @@
 22. **Compare 报告开篇展示两侧完整初始 User Message**（`internal/story/compare.go` 新增 `InitialInstructionFact`/`initialInstructionStats`、`render_compare.go` 的 `renderInitialInstruction`）：从 `Journey.Events` 的首个 user-role 事件取未截断原文，以 2000 字符为界折叠展示在两侧摘要下方；挂在 `ComparisonExtras` 上，随之自动进入 `-llm-addr` 的证据包，无需额外接线。
 23. **LLM 解读小节标题层级渲染层兜底**（`internal/story/llm.go` 的 `downgradeH2Headings`）：条目 16 的 prompt 侧调整只是第一道防线，不保证模型遵从；现在 `RenderLLMSection` 对返回文本做一次确定性降级——围栏代码块之外、行首 `## ` 一律降为 `### `——文档目录结构不再依赖模型的指令遵从度。
 24. **Journey 报告 fact-layer 删除，脊柱挂详单链接，系统提示词改为引用**（P5，`internal/story/render_md.go`/`render_md_sysprompt.go`/`render_spine_step.go`/`internal/story/ensure_details.go`）：本清单曾经的 §1.20 记录的目标状态已完全达成——决策脊柱之后 `## t01 · ...`/`### Step N ...` 那一整段重复的 fact-layer 渲染函数（`renderStep`/`renderLLMResponse`/`renderEvent`）已整体删除；每个 Step 改为携带一条指向自己完整记录的"→ detail"链接（`reqdetail.FileNameForManifest`，渲染时按需生成，无需先跑 `vmr report -details`）；`Edit`/`StitchEdge`/`SysChanged`/`Compaction`/`NoReply` 这五类跨记录分析事实（详单渲染器物理上无法重建）原样搬进决策脊柱本身，常规 `Append` 编辑不再逐步显示（默认状态，无信息量）；系统提示词头部从内联全文改为链接到共享证据条目。**顺带修复了一个独立于本次重构的既有缺陷**：系统提示词版本分组（`systemPromptEras`）原先靠扫描每个 Step 新引入的消息判定分组边界，但结构上只能在 Journey 第一步或缝合边界检测到变更——同一条 Lineage 内部发生的系统提示词变更（如会话中途切换模型/工具集）完全检测不到；现在改为直接按 `Manifest.HasSys`/`SysHash` 状态机分组，与决策脊柱自己的"系统提示词变更"判据用同一对字段，不会再互相矛盾。真实语料验证：22 步/33 次调用的样例 Journey，报告体积从 ~312KB 降到 ~107KB；`vmr story` 生成的详单与 `vmr report -details` 对同一条记录（含缝合边界记录，`prev` 均为 `nil`）生成的详单逐字节相同（`TestEnsureJourneyDetails_MatchesReportDetails`）。
+25. **`vmr replay -req` 免位置参数**（P6.5，`internal/replay/replay.go` 的 `resolveReqAuditPath`/`statAuditPathArg`）：曾经的 §1.25——`-req` 现在可以省略位置参数（按坐标 basename 在当前目录/`config.yaml` 的 `log_dir` 下自动定位，含 `.zst` 变体），或传一个目录代替 cwd；传具体文件路径时仍保留原有一致性校验。从 `vmr-requests.json`/`journey-*.json` 复制的 `req` 字段现在可以直接贴进命令行执行。
+26. **导航矩阵六条边补齐，会话身份改为内容寻址，索引分类，自指流量默认排除**（P6.1–P6.4）：`report` 的 `SessionInfo.ID`/`SessionRow.ID` 从 run-scoped `s%02d` 改为底层 `ctxgraph.Lineage` 的内容寻址身份（`l-<hash8>`），与 `story` 的 `JourneyIndexRow.Lineages` 直接集合可 join，位置序号降级为仅供人读的 `alias`；`vmr-report.md`→`stories/vmr-stories.md`、会话行→journey、journey→返回入口、详单→返回索引等六条导航边补齐，真实语料端到端走查确认无死链接；`vmr-stories.md` 按标题内容标记（`[cron:...]`/`[OpenClaw heartbeat poll]`/`[Subagent Context]`，真实语料核实拼法）分类，噪声类默认折叠；`vmr story -llm-addr` 自身产生的分析流量默认从 `vmr report` 的成本统计与 `vmr story` 的候选任务列表中排除（识别规则基于 `report.yaml` 的 `llm_key` 派生，两侧共用同一次计算），`-include-self-traffic` 可关闭。
 
 ---
 

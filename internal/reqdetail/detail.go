@@ -212,6 +212,7 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 	w("# %s [%s] · %s · %s · %s\n\n",
 		DisplayModel(rec), rec.Protocol, outcomeMark(rec.Outcome), ms(rec.DurMS),
 		rec.TS.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05.000"))
+	w("%s", t.BackToIndexLine)
 	renderSessionHeader(&b, m, prev, f, t)
 	stream := t.StreamNo
 	if rec.Stream {

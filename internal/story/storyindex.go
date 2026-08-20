@@ -25,6 +25,19 @@ import (
 	"vmr/internal/i18n"
 )
 
+// JourneyCategory classifies a candidate Journey by structural signals
+// only (see classifyJourney in candidates.go) — CategoryTask is the zero
+// value on purpose, so a real task (the common case) never needs an
+// explicit tag in vmr-stories.json (omitempty on JourneyIndexRow.Category).
+type JourneyCategory string
+
+const (
+	CategoryTask      JourneyCategory = ""
+	CategoryCron      JourneyCategory = "cron"
+	CategoryHeartbeat JourneyCategory = "heartbeat"
+	CategorySubagent  JourneyCategory = "subagent"
+)
+
 // JourneyIndexRow is one candidate Journey's row. Requests/Client/Start/End/
 // Title/Partial/Stitched/Files are cheap — derivable from the chain alone,
 // recomputed on every run. Tasks/Steps/Rendered are only known once the
@@ -45,6 +58,18 @@ type JourneyIndexRow struct {
 	Stitched int       `json:"stitched,omitempty"` // len(chain), only when >1
 	Files    []string  `json:"files"`
 	Rendered string    `json:"rendered,omitempty"` // journey-<id>(-partial).md path, once rendered
+	// Lineages is every ctxgraph.Lineage.LineageID() this Journey's chain
+	// is built from (P6.1) — report's SessionRow.ID uses the same
+	// identity for the single Lineage it represents, so "does report
+	// session X belong to story Journey Y" becomes a set-membership check
+	// against this slice instead of a cross-command hash-and-compare.
+	Lineages []string `json:"lineages,omitempty"`
+	// Category classifies this candidate by title content markers alone
+	// (see classifyJourney) so a noisy scheduled/heartbeat/subagent
+	// candidate can be told apart from a real task-shaped one without
+	// introducing new guessing (P6.3). Omitted (empty string) means
+	// CategoryTask — the common case doesn't need an explicit tag.
+	Category JourneyCategory `json:"category,omitempty"`
 }
 
 // StoryIndex is vmr-stories.json's whole shape: just Journeys. The parse
@@ -106,11 +131,13 @@ func BuildJourneyIndexRow(chain []*ctxgraph.Lineage, title string, partial bool)
 	first, last := head.Manifests[0], tail.Manifests[len(tail.Manifests)-1]
 	requests := 0
 	fileSet := map[string]bool{}
-	for _, l := range chain {
+	lineages := make([]string, len(chain))
+	for i, l := range chain {
 		requests += len(l.Manifests)
 		for _, m := range l.Manifests {
 			fileSet[m.Path] = true
 		}
+		lineages[i] = l.LineageID()
 	}
 	files := make([]string, 0, len(fileSet))
 	for f := range fileSet {
@@ -127,6 +154,8 @@ func BuildJourneyIndexRow(chain []*ctxgraph.Lineage, title string, partial bool)
 		Partial:  partial,
 		Stitched: len(chain),
 		Files:    files,
+		Lineages: lineages,
+		Category: classifyJourney(title),
 	}
 }
 
@@ -195,6 +224,13 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 
 // RenderStoryIndexMarkdown renders vmr-stories.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
+// Rows are split by Category (P6.3): task/cron are real work and stay in
+// the main, always-expanded table; heartbeat/subagent are structural
+// noise (real-corpus measurement: over half a typical candidate list) and
+// go in a collapsed <details> block below it, so the landing page's first
+// screen is dominated by real tasks. vmr-stories.json (the machine layer)
+// is unaffected — it lists every row with no such split, per this
+// project's "machine layer never makes editorial cuts" rule.
 func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {
 	t := i18n.StoryIndexT(lang)
 	var b strings.Builder
@@ -203,28 +239,55 @@ func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {
 		b.WriteString(t.NoCandidatesNote)
 		return b.String()
 	}
-	b.WriteString(t.TableHeader)
+	var visible, noisy []JourneyIndexRow
 	for _, r := range rows {
-		rendered := t.NotRendered
-		if r.Rendered != "" {
-			rendered = "[" + r.Rendered + "](" + r.Rendered + ")"
+		if r.Category == CategoryHeartbeat || r.Category == CategorySubagent {
+			noisy = append(noisy, r)
+		} else {
+			visible = append(visible, r)
 		}
-		taskCol := t.NotRendered
-		if r.Tasks > 0 || r.Steps > 0 {
-			taskCol = strconv.Itoa(r.Tasks)
+	}
+	if len(visible) > 0 {
+		b.WriteString(t.TableHeader)
+		for _, r := range visible {
+			writeStoryIndexRow(&b, r, t)
 		}
-		stepCol := strconv.Itoa(r.Requests)
-		if r.Steps > 0 {
-			stepCol = strconv.Itoa(r.Steps)
+	} else {
+		b.WriteString(t.NoCandidatesNote)
+	}
+	if len(noisy) > 0 {
+		b.WriteString("\n<details>\n<summary>" + t.NoiseFoldSummary(len(noisy)) + "</summary>\n\n")
+		b.WriteString(t.TableHeader)
+		for _, r := range noisy {
+			writeStoryIndexRow(&b, r, t)
 		}
-		title := r.Title
-		if r.Partial {
-			title = "⚠ " + title
-		}
-		b.WriteString("| " + r.ID + " | " + r.Client + " | " +
-			r.Start.In(fmtutil.DisplayZone).Format("01-02 15:04") + " → " + r.End.In(fmtutil.DisplayZone).Format("01-02 15:04") +
-			" | " + taskCol + " | " + stepCol + " | " + title + " | " + rendered + " |\n")
+		b.WriteString("\n</details>\n")
 	}
 	b.WriteString(t.Footer(len(rows)))
 	return b.String()
+}
+
+// writeStoryIndexRow renders one JourneyIndexRow as a table row — shared
+// by RenderStoryIndexMarkdown's visible and collapsed-noise sections so
+// the row format has exactly one definition.
+func writeStoryIndexRow(b *strings.Builder, r JourneyIndexRow, t i18n.StoryIndexText) {
+	rendered := t.NotRendered
+	if r.Rendered != "" {
+		rendered = "[" + r.Rendered + "](" + r.Rendered + ")"
+	}
+	taskCol := t.NotRendered
+	if r.Tasks > 0 || r.Steps > 0 {
+		taskCol = strconv.Itoa(r.Tasks)
+	}
+	stepCol := strconv.Itoa(r.Requests)
+	if r.Steps > 0 {
+		stepCol = strconv.Itoa(r.Steps)
+	}
+	title := r.Title
+	if r.Partial {
+		title = "⚠ " + title
+	}
+	b.WriteString("| " + r.ID + " | " + r.Client + " | " +
+		r.Start.In(fmtutil.DisplayZone).Format("01-02 15:04") + " → " + r.End.In(fmtutil.DisplayZone).Format("01-02 15:04") +
+		" | " + taskCol + " | " + stepCol + " | " + title + " | " + rendered + " |\n")
 }

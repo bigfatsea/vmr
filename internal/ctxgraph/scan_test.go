@@ -129,6 +129,83 @@ func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
 	if first.Manifests[0].Keys[0] != second.Manifests[0].Keys[0] {
 		t.Fatal("test setup invariant broken: both roots should share the same opening message hash")
 	}
+	// LineageID is a thin "l-" + RootHash prefix wrapper — first/second
+	// already proved RootHash differs for these two lineages above, so
+	// this is really asserting the wrapper doesn't accidentally collapse
+	// that distinction (e.g. by truncating to a length short enough to
+	// collide) and that the format is what callers (report's SessionInfo,
+	// story's JourneyIndexRow) will depend on.
+	if first.LineageID() == second.LineageID() {
+		t.Error("LineageID should differ: it wraps RootHash, which already differs for these two lineages")
+	}
+	if got, want := first.LineageID()[:2], "l-"; got != want {
+		t.Errorf("LineageID prefix = %q, want %q", got, want)
+	}
+	if got, want := len(first.LineageID()), len("l-")+lineageIDCodeLen; got != want {
+		t.Errorf("LineageID length = %d, want %d", got, want)
+	}
+}
+
+// TestLineageID_ContentAddressed proves the id is a pure function of the
+// root manifest's content (SysHash/Keys), independent of everything else
+// on the Lineage (Idx, SessKey, later manifests) — the property report's
+// SessionInfo.ID and story's JourneyIndexRow.Lineages both need: the same
+// underlying conversation must resolve to the same id across independent
+// scans/subsets, not just within one run's Idx assignment order.
+func TestLineageID_ContentAddressed(t *testing.T) {
+	t.Parallel()
+	ts0 := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	mkLineage := func(sysHash Hash, hasSys bool, ts time.Time, keys ...Hash) *Lineage {
+		return &Lineage{
+			Idx:       99, // deliberately not 0/1 — id must not depend on scan order
+			SessKey:   "irrelevant-bucket",
+			Manifests: []*Manifest{{SysHash: sysHash, HasSys: hasSys, TS: ts, Keys: keys}},
+		}
+	}
+	h1 := Hash{1, 2, 3}
+	h2 := Hash{9, 9, 9}
+	a := mkLineage(h1, true, ts0, h2)
+	b := mkLineage(h1, true, ts0, h2) // same root content AND same ts, different Lineage value
+	c := mkLineage(h2, true, ts0, h1) // different root content
+
+	if a.LineageID() != b.LineageID() {
+		t.Errorf("same root content and ts should yield the same LineageID: %q vs %q", a.LineageID(), b.LineageID())
+	}
+	if a.LineageID() == c.LineageID() {
+		t.Error("different root content should yield different LineageIDs")
+	}
+
+	// The confirmed real-corpus failure mode this fix closes: two
+	// structurally distinct Lineages (a recurring cron/heartbeat job)
+	// with BYTE-IDENTICAL opening content (same sys hash, same first
+	// message keys) but different arrival times must NOT collide — a
+	// real 1638-Lineage corpus scan found 4 such collisions when this id
+	// was computed from RootHash alone (see this method's own doc
+	// comment). report's session-grouping maps are keyed by this string;
+	// a collision there silently merges two unrelated sessions.
+	sameContentLaterTS := mkLineage(h1, true, ts0.Add(5*time.Minute), h2)
+	if a.LineageID() == sameContentLaterTS.LineageID() {
+		t.Error("identical opening content at a different arrival time must still yield a different LineageID (this is the real collision this method exists to prevent)")
+	}
+
+	// Degenerate case: a root manifest with neither HasSys nor Keys
+	// (RootHash's own doc comment calls this out as a case RootHash
+	// itself collapses to the zero Hash) must still produce a
+	// well-formed, non-panicking, deterministic id — not treated as an
+	// error, and no longer colliding with every other empty-root Lineage
+	// regardless of when it occurred, since ts still feeds the hash.
+	empty1 := mkLineage(Hash{}, false, ts0)
+	empty2 := mkLineage(Hash{}, false, ts0)
+	emptyLaterTS := mkLineage(Hash{}, false, ts0.Add(time.Hour))
+	if empty1.LineageID() != empty2.LineageID() {
+		t.Errorf("two empty-root Lineages at the same ts should still agree: %q vs %q", empty1.LineageID(), empty2.LineageID())
+	}
+	if empty1.LineageID() == emptyLaterTS.LineageID() {
+		t.Error("two empty-root Lineages at different ts must not collide")
+	}
+	if got, want := len(empty1.LineageID()), len("l-")+lineageIDCodeLen; got != want {
+		t.Errorf("empty-root LineageID length = %d, want %d", got, want)
+	}
 }
 
 func TestScan_PureAppendStaysOneLineage(t *testing.T) {

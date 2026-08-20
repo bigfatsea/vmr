@@ -19,7 +19,7 @@ func cmdReplay(args []string) error {
 	cfgPath := fs.String("c", "config.yaml", "path to config file")
 	line := fs.Int("line", 0, "1-based line number to replay (default: the last parsable record in the file); mutually exclusive with -ts and -req")
 	ts := fs.String("ts", "", "replay the record whose timestamp matches this (millisecond precision; accepts either vmr-requests.json's \"ts\" or the raw audit.jsonl \"ts\" field verbatim); mutually exclusive with -line and -req")
-	req := fs.String("req", "", "replay the record at this coordinate (\"basename:line\", as published in vmr-requests.json's \"req\" field or a Manifest's Req) — the audit file argument's basename must match; mutually exclusive with -line and -ts")
+	req := fs.String("req", "", "replay the record at this coordinate (\"basename:line\", as published in vmr-requests.json's \"req\" field or a Manifest's Req) — copy-paste ready: the audit file argument is optional with -req (omit it to search the current directory and config.yaml's log_dir, or pass a directory to search instead; an exact file path still requires its basename to match); mutually exclusive with -line and -ts")
 	print := fs.Bool("print", false, "print the resolved record's raw JSON to stdout and exit — no -provider needed, nothing built or sent; combine with -line/-ts/-req to pick which record")
 	provider := fs.String("provider", "", "provider to replay against (required unless -print; providers.<protocol>.<name>)")
 	model := fs.String("model", "", "override the upstream model name (default: resolved from config for -provider under the record's virtual model)")
@@ -31,12 +31,23 @@ func cmdReplay(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] <audit.jsonl|.jsonl.zst>")
+	// The positional audit-file argument is normally required, EXCEPT with
+	// -req: that locator carries its own file identity (a "basename:line"
+	// coordinate) and can search for the file itself (KNOWN_ISSUES §1.25)
+	// — omit the argument entirely, or pass a directory to search instead
+	// of cwd/log_dir. replay.selectRecord enforces the actual requirement;
+	// this only bounds NArg so a typo'd extra argument still errors here
+	// rather than being silently ignored.
+	if fs.NArg() > 1 {
+		return fmt.Errorf("usage: vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] [audit.jsonl|.jsonl.zst|dir]")
+	}
+	var auditPathArg string
+	if fs.NArg() == 1 {
+		auditPathArg = fs.Arg(0)
 	}
 	opts := replay.Options{
 		ConfigPath: *cfgPath,
-		AuditPath:  fs.Arg(0),
+		AuditPath:  auditPathArg,
 		Line:       *line,
 		TS:         *ts,
 		Req:        *req,

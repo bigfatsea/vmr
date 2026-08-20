@@ -4,6 +4,7 @@ package story
 
 import (
 	"errors"
+	"strings"
 
 	"vmr/internal/ctxgraph"
 )
@@ -17,6 +18,49 @@ var errEmptyLineage = errors.New("story: lineage has no manifests")
 // means the whole process dies mid-flight instead of returning a clean
 // error the caller can report.
 var errNilProfile = errors.New("story: prof is nil")
+
+// classifyJourney tags a candidate Journey by structural signals in its
+// already-derived title alone (P6.3) — it does not re-scan message
+// content or consult turn count. Turn count was in this task's original
+// plan as a second signal, but real-corpus verification
+// (docs/future-strategy/story_report_p6_action_plan_sonnet-5.md §3.1's
+// mandated check, run against the full local logs/ corpus, 477 candidate
+// Journeys) found title markers alone fully separate cron/heartbeat/
+// subagent from real tasks with zero ambiguity — and a short-but-genuine
+// interaction (a real corpus example: "hi back", 2 turns) would be
+// misclassified as noise by a turn-count heuristic with no supporting
+// evidence it helps. Dropping the unused signal follows the same "don't
+// introduce a guess without evidence" rule the category design itself is
+// built on.
+//
+// The three literal markers below are verbatim substrings observed in
+// real title output, not the architecture doc's paraphrased examples
+// (which turned out inexact — see this package's real-corpus survey):
+//   - cron:      title HAS PREFIX "[cron:<job-id> ...]" — OpenClaw's
+//     scheduler always opens the title with this, never buried mid-text.
+//   - heartbeat: title CONTAINS "[OpenClaw heartbeat poll]" — appears
+//     right after OpenClaw's leading timestamp bracket, so a prefix check
+//     alone would miss it.
+//   - subagent:  title CONTAINS "[Subagent Context]" — same shape as
+//     heartbeat, always preceded by the timestamp bracket.
+//
+// All three were disjoint across the full real corpus (0 titles matched
+// more than one), but the checks below still run in a fixed priority
+// order (cron, then heartbeat, then subagent) in case a future client
+// ever combines markers — silently picking one deterministic answer beats
+// depending on map/branch ordering.
+func classifyJourney(title string) JourneyCategory {
+	switch {
+	case strings.HasPrefix(title, "[cron:"):
+		return CategoryCron
+	case strings.Contains(title, "[OpenClaw heartbeat poll]"):
+		return CategoryHeartbeat
+	case strings.Contains(title, "[Subagent Context]"):
+		return CategorySubagent
+	default:
+		return CategoryTask
+	}
+}
 
 // ListCandidates returns the lineages worth offering as a Journey,
 // chronologically. Each returned lineage is a chain TAIL — call

@@ -39,7 +39,12 @@ import (
 // options.
 type Options struct {
 	ConfigPath string
-	AuditPath  string // a single audit .jsonl or .jsonl.zst file; always required
+	// AuditPath is a single audit .jsonl or .jsonl.zst file — required for
+	// TS/Line. For Req it's optional: "" searches the current directory
+	// and config.yaml's log_dir for the coordinate's basename; a
+	// directory searches just that directory; an exact file path keeps
+	// the strict CanonicalPath consistency check (KNOWN_ISSUES §1.25).
+	AuditPath  string
 	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS/Req
 	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line/Req
 	Req        string // "basename:line" coordinate; AuditPath's own canonical basename must match; mutually exclusive with Line/TS
@@ -281,6 +286,52 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []by
 	router.ChargeResponse(reg, ep, raw, estimated, now)
 }
 
+// statAuditPathArg classifies the raw AuditPath argument -req needs to
+// treat differently from -ts/-line: "" (omitted entirely), a directory (a
+// hint to search, not the file itself), or an exact file path (the
+// existing strict-consistency-check behavior, unchanged). A path that
+// doesn't exist yet at all is left to the eventual open call to report —
+// this only distinguishes "is it a directory", so a typo'd file path
+// still gets loadRecordByLine's own, more specific error.
+func statAuditPathArg(raw string) (path string, isDir bool, err error) {
+	if raw == "" {
+		return "", false, nil
+	}
+	if fi, statErr := os.Stat(raw); statErr == nil && fi.IsDir() {
+		return raw, true, nil
+	}
+	return raw, false, nil
+}
+
+// resolveReqAuditPath finds the file a -req coordinate's basename refers
+// to (KNOWN_ISSUES §1.25), searching — in order — dirHint (if given, from
+// a directory positional argument), the current directory (when dirHint
+// is empty, i.e. the positional argument was omitted entirely), and
+// config.yaml's log_dir; each directory is tried with both the bare
+// basename and its .zst variant (plain-first: a live/current-day file is
+// far more commonly what -print is used to inspect than an
+// already-rotated one). config.Load failing is not fatal here — log_dir
+// is only ever an ADDITIONAL place to look, dirHint/cwd already cover the
+// common case of running this from inside the log directory itself.
+func resolveReqAuditPath(basename, dirHint, configPath string) (string, error) {
+	dirs := []string{dirHint}
+	if dirHint == "" {
+		dirs[0] = "."
+	}
+	if cfg, err := config.Load(configPath); err == nil && cfg.LogDir != "" {
+		dirs = append(dirs, cfg.LogDir)
+	}
+	for _, dir := range dirs {
+		for _, name := range []string{basename, basename + ".zst"} {
+			p := filepath.Join(dir, name)
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("-req: couldn't find %q (or its .zst variant) under %v — pass the audit file explicitly as the positional argument", basename, dirs)
+}
+
 // selectRecord dispatches to whichever of Options' three locators is set —
 // Req, TS or Line — after checking that at most one is (Run's -line default
 // is 0, so "not set" and "explicitly line 0" aren't distinguishable, but
@@ -299,23 +350,39 @@ func selectRecord(opts Options) (rv *recordView, path string, line int, err erro
 	if set > 1 {
 		return nil, "", 0, fmt.Errorf("-req, -ts and -line are mutually exclusive; pass only one")
 	}
-	if opts.AuditPath == "" {
-		return nil, "", 0, fmt.Errorf("an audit file argument is required")
-	}
 
+	// -req is the one locator that carries its own file identity (the
+	// coordinate's basename) — see KNOWN_ISSUES §1.25: it alone can go
+	// find its file when the positional argument is omitted or is a
+	// directory, rather than requiring it spelled out. -ts/-line have no
+	// such identity to search with, so they keep requiring an explicit
+	// file (checked below, after this branch returns).
 	if opts.Req != "" {
 		basename, reqLine, perr := ctxgraph.ParseReqCoord(opts.Req)
 		if perr != nil {
 			return nil, "", 0, perr
 		}
-		if got := ctxgraph.CanonicalPath(opts.AuditPath); got != basename {
-			return nil, "", 0, fmt.Errorf("-req %q refers to %q, but the audit file argument %q canonicalizes to %q", opts.Req, basename, opts.AuditPath, got)
+		auditPath, isDir, serr := statAuditPathArg(opts.AuditPath)
+		if serr != nil {
+			return nil, "", 0, serr
 		}
-		rv, foundN, lerr := loadRecordByLine(opts.AuditPath, reqLine)
+		if auditPath == "" || isDir {
+			resolved, rerr := resolveReqAuditPath(basename, auditPath, opts.ConfigPath)
+			if rerr != nil {
+				return nil, "", 0, rerr
+			}
+			auditPath = resolved
+		} else if got := ctxgraph.CanonicalPath(auditPath); got != basename {
+			return nil, "", 0, fmt.Errorf("-req %q refers to %q, but the audit file argument %q canonicalizes to %q", opts.Req, basename, auditPath, got)
+		}
+		rv, foundN, lerr := loadRecordByLine(auditPath, reqLine)
 		if lerr != nil {
 			return nil, "", 0, lerr
 		}
-		return rv, opts.AuditPath, foundN, nil
+		return rv, auditPath, foundN, nil
+	}
+	if opts.AuditPath == "" {
+		return nil, "", 0, fmt.Errorf("an audit file argument is required")
 	}
 	if opts.TS != "" {
 		rv, lineNo, terr := loadRecordByTS(opts.AuditPath, opts.TS)

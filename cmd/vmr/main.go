@@ -8,6 +8,8 @@
 //	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
 //	vmr report   [audit.jsonl]    aggregate audit logs into usage statistics (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*; -details to also render per-request Markdown files, off by default)
 //	vmr story    [audit.jsonl]    render one agent task's full execution history as a narrative (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
+//	vmr analyze  [audit.jsonl]    report + story in one call, same -o for both — the full navigable suite (P6.5), no need to remember to run and point both commands at the same place
+
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (-line/-ts/-req to pick which; -print to just read it, no -provider needed)
 //
@@ -42,6 +44,8 @@ func main() {
 		err = cmdReport(os.Args[2:])
 	case "story":
 		err = cmdStory(os.Args[2:])
+	case "analyze":
+		err = cmdAnalyze(os.Args[2:])
 	case "replay":
 		err = cmdReplay(os.Args[2:])
 	case "diagnose":
@@ -64,7 +68,8 @@ func usage() {
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr report [-c config.yaml] [-o dir] [-details] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (default -o: ./reports; -details off by default — the requests index links to each record's computed detail filename regardless of whether the file exists; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; -currency default: report.yaml's currency, or whatever currency pricing resolved in; no input files => -c's log_dir/vmr-audit-*)
        vmr story [-c config.yaml] [-journey id | -render-all | -compare id1,id2] [-include-partial] [-show-ungrouped] [-o dir] [-lang en|zh] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; -lang default: report.yaml's language, or en; no input files => -c's log_dir/vmr-audit-*)
+       vmr analyze [-c config.yaml] [-o dir] [-details] [-include-partial] [-include-self-traffic] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (report + story in one call, same -o for both; story half always renders every non-partial candidate journey, same as -render-all)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
-       vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] <audit.jsonl|.jsonl.zst>
+       vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] [audit.jsonl|.jsonl.zst|dir]   (the file argument is required for -line/-ts; optional for -req, which can search cwd/log_dir for its coordinate's basename)
        vmr version`)
 }
