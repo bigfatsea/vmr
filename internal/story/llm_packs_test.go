@@ -183,3 +183,69 @@ func TestCacheKey_DiffersAcrossPackTypes(t *testing.T) {
 		t.Errorf("cache keys must differ across pack types: compare=%s single=%s divergence=%s", k1, k2, k3)
 	}
 }
+
+// TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness is P4.3's
+// acceptance test: journey-<id>.json's new (P4.1) "structure" field can, in
+// principle, be large — but EvidencePack (llm.go, the -compare LLM
+// interpretation input) must not grow because of it. This is not
+// hypothetical: BuildEvidencePack takes the full in-memory *Journey (not
+// JourneySummary), and Summarize(j, lang) — which now always computes
+// Structure — sits directly upstream of Compare/BuildEvidencePack in
+// production (cmd_story.go's compareJourneys calls Summarize then Compare
+// then BuildEvidencePack in sequence). Proving the pack's size tracks only
+// step count (via ToolIndexEntry, already bounded by taskseg.Preview), not
+// the richness of the per-step content Structure now also carries, is what
+// keeps that upstream growth from leaking downstream.
+func TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T) {
+	small := buildJourneyWithArgsLen(t, 20)
+	huge := buildJourneyWithArgsLen(t, 200000) // same fixture structure_test.go's volume guard uses
+
+	packFor := func(j *Journey) EvidencePack {
+		s := Summarize(j, i18n.EN) // computes Structure — the thing under test must not leak through
+		cmp := Compare(s, s)
+		return BuildEvidencePack(j, j, cmp, i18n.EN)
+	}
+
+	smallChars := packFor(small).EstimateChars()
+	hugeChars := packFor(huge).EstimateChars()
+
+	// The only per-step field that could possibly grow with argsLen is
+	// ToolIndexEntry.Brief — and Brief comes from RespText (never touched by
+	// this fixture's huge tool-call args), not from the args themselves, so
+	// it should not move at all. Req adds a few bytes per Step regardless of
+	// argsLen. A tiny, step-count-scaled bound (not a proportional-to-
+	// argsLen one) is the right assertion here.
+	diff := hugeChars - smallChars
+	const perStepOverhead = 64 // generous margin for Req string length variance, JSON escaping
+	const steps = 4
+	if diff > perStepOverhead*steps {
+		t.Errorf("EvidencePack grew by %d chars when per-step tool-call args grew by 200000 bytes — want growth bounded by ~%d (step count only), not tracking conversation content size", diff, perStepOverhead*steps)
+	}
+}
+
+// TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness
+// is TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness's
+// -journey counterpart (llm_single.go's BuildSingleJourneyEvidencePack,
+// used by cmd_story.go's renderJourney for the single-Journey LLM
+// interpretation section) — same guard, same reasoning, different pack type.
+func TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T) {
+	small := buildJourneyWithArgsLen(t, 20)
+	huge := buildJourneyWithArgsLen(t, 200000)
+
+	packFor := func(j *Journey) SingleJourneyEvidencePack {
+		m := ComputeMetrics(j)
+		findings := ComputeFindings(j, i18n.EN)
+		_ = Summarize(j, i18n.EN) // computes Structure as a production caller would upstream — must not leak into this pack
+		return BuildSingleJourneyEvidencePack(j, m, findings, i18n.EN)
+	}
+
+	smallChars := packFor(small).EstimateChars()
+	hugeChars := packFor(huge).EstimateChars()
+
+	diff := hugeChars - smallChars
+	const perStepOverhead = 64
+	const steps = 4
+	if diff > perStepOverhead*steps {
+		t.Errorf("SingleJourneyEvidencePack grew by %d chars when per-step tool-call args grew by 200000 bytes — want growth bounded by ~%d (step count only), not tracking conversation content size", diff, perStepOverhead*steps)
+	}
+}

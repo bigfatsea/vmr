@@ -144,6 +144,24 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	if summary.ID != id {
 		t.Errorf("journey-%s.json's own id field = %q, want %q", id, summary.ID, id)
 	}
+	// P4: writeJourneyFile is journey-<id>.json's only production writer,
+	// and it builds JourneySummary via its own literal rather than calling
+	// story.Summarize (which has its own Metrics/Findings it must reuse
+	// rather than recompute — see story.NewJourneySummary's doc comment).
+	// That literal silently missed the Structure field for one build during
+	// P4's own execution (caught only by manually inspecting real-corpus
+	// output, not by any test) — this assertion is what should have caught
+	// it, and is what guards the next field the same way.
+	if len(summary.Structure.Tasks) == 0 {
+		t.Fatal("journey-*.json's structure.tasks is empty — writeJourneyFile likely isn't populating Structure (see story.NewJourneySummary)")
+	}
+	gotSteps := 0
+	for _, task := range summary.Structure.Tasks {
+		gotSteps += len(task.Steps)
+	}
+	if gotSteps != 2 {
+		t.Errorf("structure.tasks has %d steps total, want 2 (matching this fixture's r1/r2)", gotSteps)
+	}
 }
 
 // TestCmdStory_RenderAll covers -render-all: two independent candidate

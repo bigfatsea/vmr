@@ -138,14 +138,18 @@
 
 - **现状**：决策脊柱之后的 `## t01 · ...`/`### Step N ...` fact-layer 完整重复展示了脊柱已经摘要过的同一批底层数据（带完整消息体）。理想形态是脊柱直接链接到 detail 文件，点开才看详情。
 - **原"不可行"论证已被推翻**：本条目曾经的判断——`story`/`report` 的 import 边界禁止互相引用、且 `detail.go` 的文件名依赖跨批次去重计数器导致 `story` 侧无法确定性推算——已被 `docs/future-strategy/story_report_architecture_opus-5.md` §4.8/§7.6(a) 推翻：detail 渲染先做减法（砍掉只在 report 聚合阶段才存在的位置坐标），下沉为两半区共用的叶子包，文件名改为由请求级坐标（`basename:line` 的哈希）派生，不再依赖批次计数器，也不需要跨包 import。
-- **P2 已完成前提，链接本身排在 P5.2**：请求级坐标（`basename:line`，`ctxgraph.Manifest.Req`/
-  `RequestRow.Req`）与详单确定性命名（`internal/reqdetail.FileName`，坐标哈希，无批次计数器、
-  无本机时区依赖）均已落地——同一条记录经 `vmr report` 全量路径与子集路径生成的详单文件名与正文
-  逐字节相同，已用真实语料验证。**脊柱挂链接本身**（把这个坐标/命名接到 `vmr story` 的决策脊柱
-  渲染上）仍未做，按 `docs/future-strategy/story_report_dev_plan_opus-5.md` 排在 P5.2，因为它
-  同时依赖 P4 补齐的机读层结构。
+- **P2/P4 已完成前提，脊柱挂链接与删除 fact-layer 本身排在 P5**：请求级坐标（`basename:line`，
+  `ctxgraph.Manifest.Req`/`RequestRow.Req`）与详单确定性命名（`internal/reqdetail.FileName`，
+  坐标哈希，无批次计数器、无本机时区依赖）均已落地（P2），同一条记录经 `vmr report` 全量路径与
+  子集路径生成的详单文件名与正文逐字节相同，已用真实语料验证。`journey-<id>.json` 的机读层结构
+  （P4，`internal/story/structure.go` 的 `structure` 字段——完整 Task/Step/Event/ToolCall 骨架，
+  每个 Step 带 `req` 坐标，工具调用配对复用脊柱已信任的精确匹配）也已落地并用真实语料验证
+  （`TestBuildStructure_LosslessReconstruction` 锁定无损重建）。**脊柱挂链接、删除 fact-layer
+  本身**仍未做，按 `docs/future-strategy/story_report_dev_plan_opus-5.md` 排在 P5（P5.1/P5.2），
+  P5 的验收可直接以 P4 的无损重建检验为对照。
 - **登记来源**：本条目对应的复核，2026-08-19；"不可行"论证的推翻见架构文档同日复核；P2 完成状态
-  见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`。
+  见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`；P4 完成状态见
+  `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`。
 
 ### 1.21 [低] 决策脊柱的指令展示未复用 P1.3 为 Compare 新增的方言过滤/全文能力
 
@@ -238,6 +242,39 @@
   即可，`vmr report`/`vmr story` 都能从空缓存目录正常冷启动。
 - **登记来源**：2026-08-20，同上并发评审 §2.3 提议补一个 `CleanCacheDir` 辅助函数；核实后判断为
   主动不做，登记在这里防止被重新提出。
+
+### 1.28 [低] `-llm-addr ''` 无法覆盖 `report.yaml` 里配置的默认地址，验证命令容易意外打真实 LLM 调用
+
+- **现状**：`resolveString(flagVal, rcVal, def)`（`cmd/vmr/reportconfig.go:149`）把空字符串等同于
+  "未传"，`if flagVal != "" { return flagVal }` 直接跳过、落回 `rcVal`（`report.yaml` 的
+  `llm_addr`）。本机 `report.yaml` 配了默认地址时，`vmr story -journey ...`（哪怕不显式传
+  `-llm-addr`，或显式传 `-llm-addr ''`）都会真的发起一次 LLM 调用（P4 执行期间验证时复现：
+  `calling http://192.168.0.22:8800/v1/ ...`）。副作用：产生真实调用开销、把分析行为自身的流量
+  回流进审计日志（架构文档 §9.1 点名的自指流量污染，P6.4 才清理）、往被测产物里写入
+  `llm_findings`（干扰体积/结构类验证的可复现性）。
+- **为什么不在本次修**：这是 `resolveString` 的通用三元优先级本身，不是 P4/story 专属逻辑，牵动
+  每一个吃 `-llm-*` flag 的命令，修复方式（区分"显式传空串"与"未传"）需要统一设计，不该在验证一个
+  无关阶段时顺手改掉。P1/P2/P3 的 ActionPlan 验证步骤同样受影响，只是都没人专门记下来。
+- **临时规避**：在没有 `report.yaml`（或其 `llm_addr` 未配置）的目录下跑验证命令；或接受一次真实
+  调用发生并在结果核对时忽略 `llm_findings`/证据包相关字段。
+- **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
+  §3 M5.1）发现，P4 真实语料验证复现。
+
+### 1.29 [低，暂不做] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
+
+- **现状**：P3.7 给解析缓存（`.parse-cache/`）补过 `CacheSchemaVersion`，理由是"改了提取逻辑，旧
+  缓存会被静默复用"。`journey-<id>.json` 今天没有等价机制——P4 之前生成、躺在磁盘上的旧文件与
+  P4 之后重新生成的文件字段名相同但形状不同（没有 `structure`，或未来再改了 `structure` 内部字段），
+  消费者无法仅凭文件本身分辨。
+- **为什么风险比 `.parse-cache/` 小、暂不处理**：`journey-<id>.json` 不是跨运行复用的缓存——它是
+  `vmr story -journey`/`-render-all` 每次针对该 journey 运行都会整份重写的输出，不存在"部分命中、
+  部分陈旧"的静默复用路径；触发条件收窄为"用户手头有一份很久没重新生成过的旧文件，且下游消费者
+  没有做字段存在性判断就假定新形状"，比缓存的"每次运行都可能静默复用"窄得多。
+- **可能方案**：`structure` 内部加一个 `schema_version int` 字段（或复用 P4.3 尚待定的 JSON 语言
+  策略字段一并设计），成本接近零，但**改在这一次新增字段时最便宜**——现在不加，以后每加一版都要
+  多考虑一层"没有版本戳时怎么判断"。
+- **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
+  §3 M3）提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
 
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 

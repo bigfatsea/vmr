@@ -733,16 +733,7 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 		return "", err
 	}
 	jsonPath := filepath.Join(storiesDir, base+".json")
-	summary := story.JourneySummary{
-		ID:          j.ID,
-		Title:       j.Title,
-		From:        j.From,
-		To:          j.To,
-		Partial:     j.Partial,
-		Metrics:     m,
-		Findings:    findings,
-		LLMFindings: llmFindings,
-	}
+	summary := story.NewJourneySummary(j, m, findings, llmFindings)
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return "", err

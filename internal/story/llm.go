@@ -89,7 +89,13 @@ const llmHTTPTimeout = 120 * time.Second
 // is a judgment call; it's the same data journey-<id>.md already renders,
 // just condensed to one line per Step instead of the full body.
 type ToolIndexEntry struct {
-	Seq   int      `json:"seq"`
+	Seq int `json:"seq"`
+	// Req is the Step's request-level coordinate (P2's basename:line,
+	// Manifest.Req) — added in P4.3 so an LLM interpretation that cites a
+	// specific Step ("at step 7 it looked up...") gives a reader or a
+	// future navigation feature (P6.2) something to jump to, without the
+	// evidence pack growing by more than a few bytes per entry.
+	Req   string   `json:"req,omitempty"`
 	Tools []string `json:"tools,omitempty"`
 	Brief string   `json:"brief"`
 }
@@ -111,7 +117,11 @@ func buildToolIndex(j *Journey, lang i18n.Lang) []ToolIndexEntry {
 		if brief == "" {
 			brief = noReply
 		}
-		out = append(out, ToolIndexEntry{Seq: s.Seq, Tools: tools, Brief: brief})
+		req := ""
+		if s.Manifest != nil {
+			req = s.Manifest.Req
+		}
+		out = append(out, ToolIndexEntry{Seq: s.Seq, Req: req, Tools: tools, Brief: brief})
 	}
 	return out
 }

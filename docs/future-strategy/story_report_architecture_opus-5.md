@@ -166,15 +166,20 @@ report 聚合阶段才存在的位置坐标——但微观层根本不需要知�
 
 ### 2.2 实测基线
 
-> **P1（commit `30c5159`）、P2（见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）与
-> P3（见 `docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）均已完成**：本节下方的数字
+> **P1（commit `30c5159`）、P2（见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）、
+> P3（见 `docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）与 P4（见
+> `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`）均已完成**：本节下方的数字
 > （工具结果 0 条、脊柱 21/22 步、detail 文件名批次碰撞率/本机时区依赖、`details/*.json` 逐字复制、
-> §7.10 的 83.8s/71.8s/1.17× 缓存收益等）是这三个阶段之前的历史基线，不是当前状态——保留原文只是
-> 为了保留"问题曾经确实存在"的证据链，读者若要了解当前行为，请以三份 ActionPlan 的执行记录为准，
-> 不要把这里的数字当成现状。P3 批 D 实测的当前数字：同一份 34 文件/177MB 压缩语料，冷启动 ~83.8s
-> 不变，热缓存从 71.8s 降到 ~16.2s（收益 1.17×→~5.2×）——尚未达到 `vmr story` 的个位数秒量级，
-> 差距诊断见 `docs/KNOWN_ISSUES_sonnet-5.md` §1.1/§1.23（`session.go` 的 `collect()`/`analyzeFile`
-> 是报表三趟扫描里唯一仍未接入缓存的一遍）。
+> §7.10 的 83.8s/71.8s/1.17× 缓存收益、`journey-<id>.json` = 6,428 字节且"事件流在机读层占 0 字节"
+> 等）是这四个阶段之前的历史基线，不是当前状态——保留原文只是为了保留"问题曾经确实存在"的证据链，
+> 读者若要了解当前行为，请以四份 ActionPlan 的执行记录为准，不要把这里的数字当成现状。P3 批 D 实测
+> 的当前数字：同一份 34 文件/177MB 压缩语料，冷启动 ~83.8s 不变，热缓存从 71.8s 降到 ~16.2s（收益
+> 1.17×→~5.2×）——尚未达到 `vmr story` 的个位数秒量级，差距诊断见 `docs/KNOWN_ISSUES_sonnet-5.md`
+> §1.1/§1.23（`session.go` 的 `collect()`/`analyzeFile` 是报表三趟扫描里唯一仍未接入缓存的一遍）。
+> P4 已给 `journey-<id>.json` 补上完整的 Task/Step/Event/ToolCall 结构（`structure` 字段，
+> `internal/story/structure.go`）：事件流在机读层不再是 0 字节，真实语料（22 步/33 次工具调用的
+> 样例 Journey）实测 92KB，且已用真实语料证明"无损重建 + 体积随步数而非对话长度增长"两条同时成立
+> （`TestBuildStructure_LosslessReconstruction`/`TestBuildStructure_VolumeBoundedByStepsNotProseLength`）。
 
 以下数字全部用**当前工作区代码**构建的二进制实测（含尚未提交的 6 项 UX 改动），或对本机
 `reports/` 产物直接统计。
