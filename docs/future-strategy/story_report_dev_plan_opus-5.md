@@ -76,7 +76,7 @@ ActionPlan；不沿用本文对后续阶段的任何预判。
 | **P1** ✅ | 中观叙事层补全 | 决策脊柱成为可信、完整的任务叙事 | P0 |
 | **P2** ✅ | 坐标层与微观层重建 | 同一条记录在任意路径下生成的详单逐字节相同 | P0 |
 | **P3** ✅ | 证据层瘦身与共享条目 | 派生产物的体积与重复解析同时回落 | P2 |
-| **P4** | 中观机读层归位 | 机读产物承载完整结构，正文按坐标引用 | P2, P3 |
+| **P4** ✅ | 中观机读层归位 | 机读产物承载完整结构，正文按坐标引用 | P2, P3 |
 | **P5** | 人读层瘦身 | 任务报告回到"脊柱 + 链接"形态 | P1, P4 |
 | **P6** | 套件闭环、命令行收敛与口径收尾 | 一次调用产出完整套件，三层可双向行走，统计口径干净 | P2, P3 |
 
@@ -211,7 +211,14 @@ reconstruction"）已落地，执行记录见
 
 ---
 
-### P4 · 中观机读层归位
+### P4 · 中观机读层归位 ✅ 已完成
+
+**状态**：commit `eb45238`（"feat(story): complete Phase 4 machine-readable structural layer for
+journeys"）已落地，执行记录见 `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md` §8。
+真实语料（openclaw 22 步/33 次调用样例）验证：`journey-<id>.json` 新增 `structure` 字段（完整
+Task/Step/Event/ToolCall 骨架，`req` 坐标覆盖 22/22、工具调用配对 33/33）、无损重建检验
+（`TestBuildStructure_LosslessReconstruction`，哈希匹配）与体积检验（步数驱动、不随对话正文长度
+膨胀）同时通过、`EvidencePack`/`SingleJourneyEvidencePack` 体积不因机读层补全而增长（回归测试锁定）。
 
 **目标**：让任务叙事的机读产物承载**完整结构**，正文按坐标引用而不复制。
 
@@ -225,8 +232,39 @@ reconstruction"）已落地，执行记录见
 
 **阶段验收**：无损重建检验通过，且体积检验通过——两者必须同时成立，否则说明边界划错了。
 
-**对后续的影响**：P5 删除人读事实层的前提在此建立。本阶段若发现某类内容既不适合内联也不适合
-引用，需在验收时明确记录，由 P5 的 ActionPlan 处理。
+**实际结果与原计划的出入**：`Compaction`/`Edit`/`StitchEdge` 这三项图层级分析事实（P4 ActionPlan
+写就时判断"本批不纳入"或未预见）经两轮独立评审后确认为**必须**纳入结构体（`EditRef`/`StitchRef`/
+`CompactionRef`）——它们是 fact-layer 今天在展示、但物理上无法从单条审计记录重新算出的信息，P5.1
+删除 fact-layer 前若不补上会造成永久性信息丢失，直接触发本文"P5 依赖 P4"这条硬依赖。`ToolCallRef`
+最终不携带工具结果正文（只留 `Matched`/`ResultError`）——结果文本本来就作为下一 Step 的
+`NewEvents` 出现，重复内联会违反"同一份内容存两份地址"的原则。"无损重建检验"最终用哈希匹配
+（对每个 `EventRef.Hash` 用 `Req` 坐标取回记录后按 `ctxgraph.BuildManifest` 重建 `Keys`/`MsgIdx`
+查表），不是最初设想的 `DeltaStart` 切片——后者在缝合边界/消息去重场景下不完备。详见
+`story_report_p4_action_plan_sonnet-5.md` §8.2/§8.3。
+
+**对后续的影响**：P5 删除人读事实层的前提在此建立，且 P5 的验收应直接以 P4 的无损重建检验为
+对照，而不是重新设计一套等价性判断。P5 落地前需要确认的几个具体前提（均已在真实语料上验证，
+P5 的 ActionPlan 直接复用，不必重新分析）：
+- `journey-<id>.json` 的 `structure` 字段（`internal/story/structure.go`）已完整覆盖 fact-layer
+  展示的每一类信息（含 Edit/StitchEdge/Compaction 与 Endpoint/DurMS/TTFTMS/Usage），P5.1 删除
+  fact-layer 渲染函数（`render_md.go` 的 `renderStep`/`renderEvent`/`renderCompactionInfo`）不会
+  造成信息丢失。
+- `internal/reqdetail.FileNameForManifest` 的 doc comment 已经明确预留了"a future spine Step's
+  '→ detail' link"这个用途——P5.2 直接调用它计算链接文件名，不需要新设计命名规则。
+- `Step.Rec`/`Step.Manifest` 在生产路径上均非 nil，但 `Step` **没有**存"同一 Lineage 内的上一条
+  Manifest"——`journey.go` 构建时这个值只是一个局部变量（约 349-393 行的 `prevManifest`），未落到
+  `Step` 字段上。P5.2 若要用 `reqdetail.EnsureRendered` 按需生成详单（该函数需要 `prev
+  *ctxgraph.Manifest` 才能保证与 `vmr report -details` 生成的详单逐字节一致，见 P2 的核心不变量），
+  需要先把这个局部变量提升为 `Step` 的导出字段，直接复用 `journey.go` 已经算好的值——不要在
+  `internal/story` 别处重新走一遍这段逻辑（含缝合边界判断），否则就是 P2 执行记录反复提醒过的
+  "同一件事两份手写实现，迟早分叉"。
+- `internal/story` 渲染系统提示词的 era 分组（`render_md_sysprompt.go` 的 `systemPromptEras`）
+  用自己的 `"\n\n---\n\n"` 拼接文本，这与 `internal/reqdetail.EnsureSysPromptEvidence` 内部靠
+  `ctxgraph.LeadingSystemText` 算出的哈希**不是同一份文本**——P5.3 把系统提示词改为链接共享证据
+  条目时，必须用每个 era 起始 Step 的 `Manifest.SysHash`（该 Step `Rec` 对应记录已经保证与
+  `EnsureSysPromptEvidence` 写盘时算出的哈希一致）来定位证据文件名，不能用 `systemPromptEras`
+  自己拼出的文本重新算一次哈希——两者字面不同，会导致链接指向一个从未被 `EnsureSysPromptEvidence`
+  实际写出过的文件名。
 
 ---
 

@@ -126,25 +126,38 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 	for _, want := range []string{
 		"🧵 **Stitched from an earlier fragment**",
 		"compaction",
-		"深入调研这个内存涨价这一波",    // the opening instruction, shared by both lineages
-		"post-break reply", // content unique to the post-break lineage
+		"深入调研这个内存涨价这一波", // the opening instruction, shared by both lineages
+		"../details/", // P5.1: raw message bodies (e.g. "post-break reply") no
+		// longer inline in the Markdown — every Step, including the stitch
+		// boundary, is reachable one click away via its own detail link
+		// instead (P5.2); presence of the link is what this test can check
+		// without also materializing the detail file on disk.
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
 		}
 	}
+	if strings.Contains(md, "post-break reply") {
+		t.Errorf("rendered Markdown should NOT inline raw message content anymore (P5.1) — " +
+			"\"post-break reply\" belongs in the stitch-boundary Step's linked detail page, not the spine")
+	}
 
 	// The shared opening instruction naturally appears more than once
-	// within Step 1 alone (journey title, task title, the event's <summary>
-	// preview, and its fenced body) — that's normal rendering, not
-	// duplication. What must NOT happen is the stitch-boundary task (t02
-	// onward) showing it YET AGAIN: global seen-hash dedup must suppress it
+	// (journey subtitle, t01's own task title) — that's normal rendering,
+	// not duplication. What must NOT happen is the stitch-boundary task
+	// (t02) showing it YET AGAIN: global seen-hash dedup must suppress it
 	// there (its manifest reappears in `second`'s opening, which scans the
 	// whole manifest since deltaStart=0 at a stitch boundary), and the task
 	// title must fall back to the stitch marker instead of re-quoting an
 	// instruction that wasn't actually asked again (see
-	// newInstructionTitleAtStitch).
-	stitchSection := md[strings.Index(md, "## t02"):]
+	// newInstructionTitleAtStitch). P5.1 removed the fact-layer's "## t02"
+	// heading — the decision spine's own Task line ("**t02 · ...**") is now
+	// the only per-Task marker, so that's what isolates the section.
+	t02Idx := strings.Index(md, "**t02")
+	if t02Idx < 0 {
+		t.Fatalf("could not find the t02 task line in the rendered Markdown:\n%s", md)
+	}
+	stitchSection := md[t02Idx:]
 	if strings.Contains(stitchSection, "深入调研这个内存涨价这一波") {
 		t.Errorf("the stitch-boundary task re-shows the shared opening instruction — dedup should have suppressed it:\n%s", stitchSection)
 	}

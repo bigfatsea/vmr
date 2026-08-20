@@ -39,8 +39,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 		"t01 ·",
 		"Step 1 ·",
 		"Step 2 ·",
-		"web_search",
-		"finish: `stop`",
+		"../details/", // P5.2: every Step links to its own full record
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
@@ -48,15 +47,15 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	}
 }
 
-// TestRenderMarkdown_LLMResponseSection locks in the Messages/LLM Response
-// split (design-doc review follow-up: a real reader found the old renderer
-// collapsed a tool-calling step into a bare "🔧 调用工具: read, read" — no
-// arguments, no ids, no reasoning, and even that much only showed up one
-// step later once the reply became history). The response's reasoning and
-// each tool call's full id+arguments (pretty-printed, "json"-tagged) must
-// show up in the step that actually produced them, under "**LLM
-// Response**" — separate from "**Messages**", which stays the delta of
-// what's newly entering context.
+// TestRenderMarkdown_LLMResponseSection locks in the decision spine's
+// per-Step rendering (render_spine_step.go/render_spine_args.go — P5.1
+// removed the fact-layer's separate, duplicate "**LLM Response**" section
+// that used to carry this same information one layer down): a tool-calling
+// Step's own stated reasoning (spineWhyLine) and every tool call's name
+// plus arguments (toolCallLine) must show up directly under that Step's
+// header, not collapsed into a bare tool-name list and not deferred to the
+// NEXT step's history the way the pre-P1.2 renderer used to (design-doc
+// review follow-up this test originally locked in).
 func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "sys")
@@ -88,16 +87,9 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
 
 	for _, want := range []string{
-		"**Messages**",
-		"**LLM Response**",
-		"🤔 reasoning · ",
-		"I should read both files first.",
-		"finish: tool_calls (read, read)",
-		"🔧 **tool_call** `read` [id=call_1]",
-		"```json",
-		`"path": "/a.md"`,
-		"🔧 **tool_call** `read` [id=call_2]",
-		`"path": "/b.md"`,
+		"🤔 I should read both files first.",
+		"🔧 `read`(path=/a.md)",
+		"🔧 `read`(path=/b.md)",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
@@ -105,32 +97,24 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	}
 }
 
-// TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence locks in a fix: a
-// fixed ``` fence around event content breaks the moment the content itself
-// contains a triple-backtick (an agent quoting code, a tool result
-// containing a Markdown snippet) — the embedded backticks close the fence
-// early and corrupt everything rendered after it. codeFence's fence must be
-// longer than any backtick run actually present in the content.
-func TestRenderMarkdown_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
-	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := msg("system", "sys")
+// TestCodeFence_EmbeddedBackticksDontBreakTheFence locks in a fix: a fixed
+// ``` fence around content breaks the moment the content itself contains a
+// triple-backtick (an agent quoting code, a tool result containing a
+// Markdown snippet) — the embedded backticks close the fence early and
+// corrupt everything rendered after it. codeFence's fence must be longer
+// than any backtick run actually present in the content. Tested directly
+// against codeFence (P5.1 removed render_md.go's own event-body caller —
+// renderEvent — but codeFence itself is still exactly what the decision
+// spine's foldWhyLine/payloadBlock fold long content through, so the
+// contract still needs this guarantee).
+func TestCodeFence_EmbeddedBackticksDontBreakTheFence(t *testing.T) {
 	codeBlock := "here's the file:\n```python\nprint('hi')\n```\ndone"
-	u1 := msg("user", codeBlock)
-	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("ok"))
-	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "reply")}, sseText("ok2"))
-
-	path := writeJSONL(t, []audit.Record{r1, r2})
-	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+	fenced := codeFence(codeBlock)
+	if !strings.Contains(fenced, "````\n") {
+		t.Errorf("expected a 4-backtick fence to safely wrap content containing a 3-backtick run:\n%s", fenced)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
-	if !strings.Contains(md, "````\n") {
-		t.Errorf("expected a 4-backtick fence to safely wrap content containing a 3-backtick run:\n%s", md)
-	}
-	if !strings.Contains(md, codeBlock) {
-		t.Errorf("embedded code block content should survive verbatim inside the wider fence:\n%s", md)
+	if !strings.Contains(fenced, codeBlock) {
+		t.Errorf("embedded code block content should survive verbatim inside the wider fence:\n%s", fenced)
 	}
 }
 

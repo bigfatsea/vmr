@@ -134,23 +134,6 @@
 - **推进方式**：已有完整方案文档 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，写明了倾向的方向（叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 保持语言无关的机器锚点）、需要动的模块清单、以及当前的阶段性状态。下次要推进这项工作时先读那份文档，不要凭这条条目里的只言片语重新分析一遍。
 - **登记来源**：本条目对应的复核与方案讨论，2026-08-17。
 
-### 1.20 [低] Journey 报告 fact-layer（`## t0X`/`### Step N`）与决策脊柱内容重复，理想形态是链接到 `vmr report` 的 per-request detail 文件
-
-- **现状**：决策脊柱之后的 `## t01 · ...`/`### Step N ...` fact-layer 完整重复展示了脊柱已经摘要过的同一批底层数据（带完整消息体）。理想形态是脊柱直接链接到 detail 文件，点开才看详情。
-- **原"不可行"论证已被推翻**：本条目曾经的判断——`story`/`report` 的 import 边界禁止互相引用、且 `detail.go` 的文件名依赖跨批次去重计数器导致 `story` 侧无法确定性推算——已被 `docs/future-strategy/story_report_architecture_opus-5.md` §4.8/§7.6(a) 推翻：detail 渲染先做减法（砍掉只在 report 聚合阶段才存在的位置坐标），下沉为两半区共用的叶子包，文件名改为由请求级坐标（`basename:line` 的哈希）派生，不再依赖批次计数器，也不需要跨包 import。
-- **P2/P4 已完成前提，脊柱挂链接与删除 fact-layer 本身排在 P5**：请求级坐标（`basename:line`，
-  `ctxgraph.Manifest.Req`/`RequestRow.Req`）与详单确定性命名（`internal/reqdetail.FileName`，
-  坐标哈希，无批次计数器、无本机时区依赖）均已落地（P2），同一条记录经 `vmr report` 全量路径与
-  子集路径生成的详单文件名与正文逐字节相同，已用真实语料验证。`journey-<id>.json` 的机读层结构
-  （P4，`internal/story/structure.go` 的 `structure` 字段——完整 Task/Step/Event/ToolCall 骨架，
-  每个 Step 带 `req` 坐标，工具调用配对复用脊柱已信任的精确匹配）也已落地并用真实语料验证
-  （`TestBuildStructure_LosslessReconstruction` 锁定无损重建）。**脊柱挂链接、删除 fact-layer
-  本身**仍未做，按 `docs/future-strategy/story_report_dev_plan_opus-5.md` 排在 P5（P5.1/P5.2），
-  P5 的验收可直接以 P4 的无损重建检验为对照。
-- **登记来源**：本条目对应的复核，2026-08-19；"不可行"论证的推翻见架构文档同日复核；P2 完成状态
-  见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`；P4 完成状态见
-  `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`。
-
 ### 1.21 [低] 决策脊柱的指令展示未复用 P1.3 为 Compare 新增的方言过滤/全文能力
 
 - **现状**：P1.2 的"💬 指令"单行只在任务中途追加指令时渲染（`renderSpineBriefStep` 的 `taskStepIdx > 0` 分支），任务自己的开篇 Step 仍只靠 Task 标题（`taskseg.Preview` 截断到约 80 字符）展示指令，没有 P1.3 给 Compare 报告加的"有界折叠、完整原文"那一层。而取中途追加指令文本的 `firstNewUserText`（`render_spine_step.go`）只取该 Step `NewEvents` 里第一个 `Role=="user"` 消息，没有像 P1.3 的 `initialInstructionStats` 那样经过 `taskseg.Profile.RealUserText` 的方言过滤——如果 OpenClaw 家族客户端在真实指令前注入了一条同样标记为 `role=user` 的脚手架消息（如工具结果图片附件提示，见 `openclaw.go` 的 `RealUserText` 已识别的几类噪声），会取到错误的文本。
@@ -219,17 +202,19 @@
 - **登记来源**：2026-08-20，P3 ActionPlan 的独立并发评审（`story_report_p3_action_plan_review_
   gemini-3.7-flash.md`）指出，核实为真实可改善的体验问题，非阻断项。
 
-### 1.26 [低] 证据条目跨目录深度的相对链接规则，只有 `details/` 一处写清楚了
+### 1.26 [已在 P5 验证，仅剩 P6 的 `vmr-report.md` 一处未对齐] 证据条目跨目录深度的相对链接规则
 
-- **现状**：`internal/reqdetail` 目前只有一个证据链接来源——`details/<file>.md` 到
-  `evidence/<file>.md` 的 `../evidence/<file>.md` 相对路径（见 `EnsureRendered`/`renderClientRequest`
-  的实现与 `NewDetailWriter` 的 `evidenceDir` 约定）。P4/P5 让 `vmr story` 的 `stories/journey-
-  <id>.md`/未来的 `vmr-report.md` 也链接同一批证据条目时，各自到 `evidence/` 的相对路径深度不同
-  （`stories/` 同样是 `../evidence/`，根目录的 `vmr-report.md` 则是 `evidence/`，不带 `../`），
-  需要显式对齐，不能想当然复制 `reqdetail` 这一份写法。
-- **为什么现在不需要处理**：P3 范围内没有第二个证据链接来源，写一条"以防万一"的通用规则没有
-  消费方能验证对不对。
-- **登记来源**：2026-08-20，同上并发评审 §3.2，判断为对 P4/P5/P6 有效的前瞻提醒，非 P3 本身缺陷。
+- **现状**：P5 落地时核实了这条提醒——`vmr story` 的 `stories/journey-<id>.md` 与 `internal/
+  reqdetail`（`details/<file>.md`）到 `evidence/<file>.md` 的相对路径深度**确实相同**：
+  `stories/`、`details/`、`evidence/` 都是 `{outDir}` 的直接子目录（`cmd_story.go` 的
+  `detailAndEvidenceDirs`/`ensureStoriesDir` 与 `cmd_report.go` 的 `setupDetailWriter` 用的是同一
+  `{outDir}/<name>` 布局），因此都是 `../evidence/<file>.md`，不需要为 `story` 侧另写一条规则——
+  `render_md_sysprompt.go`（系统提示词链接）与 `render_spine_step.go`（详单链接）直接复用了同一个
+  `"../evidence/"`/`"../details/"` 前缀，已用真实语料验证链接可达。**仍未对齐的只剩本条目最初
+  点名的另一半**：根目录的 `vmr-report.md`/`vmr-requests.md` 到 `evidence/` 应为不带 `../` 的
+  `evidence/<file>.md`——这两个文件今天还不链接证据条目，等 P6 让它们也链接时才会真正触发，留给
+  P6 处理，不是本条目当前需要动的部分。
+- **登记来源**：2026-08-20，P3 并发评审 §3.2 首次提出；P5 落地时验证并收窄范围。
 
 ### 1.27 [已决定不做，登记备查] `.parse-cache/` 分片不做孤儿回收（旧 hash 分片、schema 升级后的旧版本分片）
 
@@ -361,6 +346,7 @@
 21. **决策脊柱覆盖补全至 100%**（`internal/story/render_spine_step.go`）：原先只渲染有 `ToolCalls` 的 Step，一个 Task 若没有任何 Step 调用工具、或整条 Journey 都没有工具调用，会整段/整个不渲染。现在每个 Step 都渲染：无工具调用的 Step 降级为一行摘要（任务中途的新用户指令渲染"💬 指令"，否则渲染"💬 汇报"取自 `RespText`/`Reasoning`），脊柱末尾新增"最终交付物"小节（复用 `-compare` 已有的 `deliverableStats` 检测）。
 22. **Compare 报告开篇展示两侧完整初始 User Message**（`internal/story/compare.go` 新增 `InitialInstructionFact`/`initialInstructionStats`、`render_compare.go` 的 `renderInitialInstruction`）：从 `Journey.Events` 的首个 user-role 事件取未截断原文，以 2000 字符为界折叠展示在两侧摘要下方；挂在 `ComparisonExtras` 上，随之自动进入 `-llm-addr` 的证据包，无需额外接线。
 23. **LLM 解读小节标题层级渲染层兜底**（`internal/story/llm.go` 的 `downgradeH2Headings`）：条目 16 的 prompt 侧调整只是第一道防线，不保证模型遵从；现在 `RenderLLMSection` 对返回文本做一次确定性降级——围栏代码块之外、行首 `## ` 一律降为 `### `——文档目录结构不再依赖模型的指令遵从度。
+24. **Journey 报告 fact-layer 删除，脊柱挂详单链接，系统提示词改为引用**（P5，`internal/story/render_md.go`/`render_md_sysprompt.go`/`render_spine_step.go`/`internal/story/ensure_details.go`）：本清单曾经的 §1.20 记录的目标状态已完全达成——决策脊柱之后 `## t01 · ...`/`### Step N ...` 那一整段重复的 fact-layer 渲染函数（`renderStep`/`renderLLMResponse`/`renderEvent`）已整体删除；每个 Step 改为携带一条指向自己完整记录的"→ detail"链接（`reqdetail.FileNameForManifest`，渲染时按需生成，无需先跑 `vmr report -details`）；`Edit`/`StitchEdge`/`SysChanged`/`Compaction`/`NoReply` 这五类跨记录分析事实（详单渲染器物理上无法重建）原样搬进决策脊柱本身，常规 `Append` 编辑不再逐步显示（默认状态，无信息量）；系统提示词头部从内联全文改为链接到共享证据条目。**顺带修复了一个独立于本次重构的既有缺陷**：系统提示词版本分组（`systemPromptEras`）原先靠扫描每个 Step 新引入的消息判定分组边界，但结构上只能在 Journey 第一步或缝合边界检测到变更——同一条 Lineage 内部发生的系统提示词变更（如会话中途切换模型/工具集）完全检测不到；现在改为直接按 `Manifest.HasSys`/`SysHash` 状态机分组，与决策脊柱自己的"系统提示词变更"判据用同一对字段，不会再互相矛盾。真实语料验证：22 步/33 次调用的样例 Journey，报告体积从 ~312KB 降到 ~107KB；`vmr story` 生成的详单与 `vmr report -details` 对同一条记录（含缝合边界记录，`prev` 均为 `nil`）生成的详单逐字节相同（`TestEnsureJourneyDetails_MatchesReportDetails`）。
 
 ---
 

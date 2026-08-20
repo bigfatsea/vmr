@@ -6,12 +6,7 @@
 
 ## System Prompt
 
-<details><summary>Step 1–3 · 28 字符</summary>
-
-```
-You are a helpful assistant.
-```
-</details>
+- Step 1–3 · 28 字符 · → [详情](../evidence/sysprompt-943e842f.md)
 
 ## 概览
 
@@ -32,9 +27,13 @@ You are a helpful assistant.
 
 **🔷 💬 Step 1 · 10:00:00**
 
+→ [详情](../details/20260729-100000.000_agent_agent_ok_5a3c25bf.md)
+
 💬 汇报 · 好的，我来搜索相关数据。
 
 **🔷 💬 Step 2 · 10:00:02**
+
+→ [详情](../details/20260729-100002.000_agent_agent_ok_3386028d.md)
 
 💬 汇报 · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
 
@@ -42,98 +41,9 @@ You are a helpful assistant.
 
 **🔷 💬 Step 3 · 10:00:06**
 
+→ [详情](../details/20260729-100006.000_agent_agent_ok_588f9830.md)
+
 💬 汇报 · 好的，前10名的新股打新收益如下…
-
-## t01 · 帮我查一下 A 股新股打新收益
-
-### 🔷 💬 Step 1 · 10:00:00 · 1.5s · 40/80/15 · openai:provider:agent
-
-**Messages**
-
-<details><summary>▸ user · 帮我查一下 A 股新股打新收益</summary>
-
-```
-帮我查一下 A 股新股打新收益
-```
-</details>
-
-**LLM Response**
-
-<details><summary>💬 回复 · 好的，我来搜索相关数据。</summary>
-
-```
-好的，我来搜索相关数据。
-```
-</details>
-
-- finish: `stop`
-
-### 🔷 💬 Step 2 · 10:00:02 · 3.2s · 80/200/30 · openai:provider:agent
-
-> 编辑: append（最长相同前缀 1 条消息，内容重合率 33%）
-
-**Messages**
-
-<details><summary>▸ assistant · 好的，我来搜索相关数据。 🔧 tool_call web_search [id=c1] {}</summary>
-
-```
-好的，我来搜索相关数据。
-🔧 tool_call web_search [id=c1]
-{}
-```
-</details>
-
-<details><summary>▸ tool · ↩️ tool_call_id=c1 2026年A股新股打新平均收益率为12.5%，中签率0.03%</summary>
-
-```
-↩️ tool_call_id=c1
-2026年A股新股打新平均收益率为12.5%，中签率0.03%
-```
-</details>
-
-**LLM Response**
-
-<details><summary>💬 回复 · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。</summary>
-
-```
-根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
-```
-</details>
-
-- finish: `stop`
-
-## t02 · 继续，把前10名列出来
-
-### 🔷 💬 Step 3 · 10:00:06 · 5.0s · 100/300/50 · openai:provider:agent
-
-> 编辑: append（最长相同前缀 3 条消息，内容重合率 60%）
-
-**Messages**
-
-<details><summary>▸ assistant · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。</summary>
-
-```
-根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
-```
-</details>
-
-<details><summary>▸ user · 继续，把前10名列出来</summary>
-
-```
-继续，把前10名列出来
-```
-</details>
-
-**LLM Response**
-
-<details><summary>💬 回复 · 好的，前10名的新股打新收益如下…</summary>
-
-```
-好的，前10名的新股打新收益如下…
-```
-</details>
-
-- finish: `stop`
 
 ## 工具调用时序图
 

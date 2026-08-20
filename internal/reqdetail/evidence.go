@@ -54,6 +54,20 @@ func leadingSystem(msgs []chatmsg.Message) (leadSys int, text string) {
 	return leadSys, ctxgraph.LeadingSystemText(msgs, leadSys)
 }
 
+// SysPromptEvidenceFileName is the deterministic evidence filename
+// EnsureSysPromptEvidence writes for a leading system block whose content
+// hash equals sysHash — sysHash is normally a Manifest's own SysHash field
+// (md5 of the same LeadingSystemText EnsureSysPromptEvidence computes from
+// rec — see ctxgraph.Manifest's doc comment on SysHash). Exported so a
+// caller that only has the hash, not rec — e.g. a spine Step's "→ system
+// prompt" link (story_report_p5_action_plan_sonnet-5.md's P5.3) — can
+// compute the same name without re-deriving this package's private naming
+// convention. sysHash.String()[:8] is exactly contentHash8's output for the
+// same text: both are the hex encoding of the same digest's first 4 bytes.
+func SysPromptEvidenceFileName(sysHash ctxgraph.Hash) string {
+	return "sysprompt-" + sysHash.String()[:8] + ".md"
+}
+
 // EnsureSysPromptEvidence writes evidence/sysprompt-<h8>.md under
 // evidenceDir — h8 = hex(md5(text)[:4]), the same digest
 // ctxgraph.Manifest.SysHash carries for this exact record — when rec has a
@@ -74,7 +88,7 @@ func EnsureSysPromptEvidence(evidenceDir string, rec *audit.Record) (filename st
 	if leadSys == 0 {
 		return "", nil
 	}
-	filename = "sysprompt-" + contentHash8(text) + ".md"
+	filename = SysPromptEvidenceFileName(ctxgraph.Hash(md5.Sum([]byte(text))))
 	if err := ensureEvidenceFile(evidenceDir, filename, sysPromptEvidenceBody(text)); err != nil {
 		return "", err
 	}

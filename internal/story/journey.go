@@ -80,6 +80,18 @@ type Step struct {
 	Edge       *ctxgraph.Edit // nil for the Journey's first step, or at a stitch boundary
 	DeltaStart int            // absolute message index where this step's new content begins
 	NewEvents  []*Event       // events first introduced by this step, in order
+	// PrevManifest is the immediately preceding Manifest in this Step's OWN
+	// ctxgraph.Lineage — nil for a Lineage's first Step, including at a
+	// stitch boundary (StitchEdge != nil). Deliberately NOT the predecessor
+	// lineage's tail Manifest at a stitch boundary, even though buildFrom
+	// computes and uses that value locally for sysChanged/CompactionInfo:
+	// internal/report's session grouping (session.go's group/attach) is
+	// strictly per-Lineage too, so a Lineage's first record always has
+	// ReqInfo.Parent == nil on that side — this field exists so
+	// reqdetail.EnsureRendered's "prev" argument can agree with report's,
+	// keeping the two commands' generated detail pages byte-identical for
+	// the same record (see story_report_p5_action_plan_sonnet-5.md §0).
+	PrevManifest *ctxgraph.Manifest
 	// StitchEdge is non-nil exactly when this Step is the first manifest of
 	// a non-first Lineage in the Journey's Chain — the evidence
 	// ctxgraph.StitchGraph found connecting it to the previous Lineage.
@@ -347,6 +359,12 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			var stitchEdge *ctxgraph.StitchEdge
 			var compaction *CompactionInfo
 			var prevManifest *ctxgraph.Manifest
+			// stepPrevManifest becomes Step.PrevManifest — unlike
+			// prevManifest above (which sysChanged/buildCompactionInfo
+			// legitimately want compared across a stitch boundary too),
+			// this one stays nil at a stitch boundary; see Step.PrevManifest's
+			// doc comment for why.
+			var stepPrevManifest *ctxgraph.Manifest
 			var revisesHash *ctxgraph.Hash
 			deltaStart := 0
 			newTask := (ci == 0 && i == 0) || atStitchBoundary
@@ -375,6 +393,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				edge = &e
 				deltaStart = m.LeadSys + e.LCP
 				prevManifest = l.Manifests[i-1]
+				stepPrevManifest = prevManifest
 				traceChanged := m.TraceID != "" && prevManifest.TraceID != "" && m.TraceID != prevManifest.TraceID
 				hasNewInstr := taskseg.HasNewInstruction(ru, taskseg.ManifestKeySet(prevManifest), m, deltaStart, len(msgs))
 				newTask = taskseg.IsNewTask(traceChanged, prevNoReply, hasNewInstr)
@@ -404,7 +423,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			}
 
 			seq++
-			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, prof)
+			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, stepPrevManifest, prof)
 			prevNoReply = step.NoReply
 			appendNewEvents(j, step, m, msgs, rawMsgs, off, deltaStart, revisesHash, seen)
 			curTask.Steps = append(curTask.Steps, step)
@@ -421,10 +440,10 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 // calls, reasoning, NoReply) when the record has a response — split out of
 // buildFrom purely to stay under the architecture review's function-length
 // budget, not because it's an independently meaningful step.
-func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, prof taskseg.Profile) *Step {
+func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, prevManifest *ctxgraph.Manifest, prof taskseg.Profile) *Step {
 	step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
 		SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
-		HumanInitiated: humanInitiated}
+		HumanInitiated: humanInitiated, PrevManifest: prevManifest}
 	if rec.Client.Response != nil {
 		if s := taskseg.ResponseSummary(rec.Client.Response.Body); s != nil {
 			step.Finish = s.Finish

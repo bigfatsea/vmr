@@ -3,23 +3,25 @@
 package story
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/taskseg"
 )
 
 // RenderMarkdown renders j as a self-contained Markdown document in lang:
-// a decision-spine layer (overview card, per-Task action list — see
-// render_spine.go) followed by the event stream organized by Task/Step,
-// each Step's genuinely-new content shown inline and its full recorded body
-// available in a folded <details> block, then a tool-call timeline and the
-// Findings candidate list. m/findings are computed once by the caller
+// a system-prompt header (links to shared evidence, not inline text —
+// render_md_sysprompt.go), an overview card, and the decision spine
+// (render_spine.go/render_spine_step.go) — the spine is the ONLY per-Step
+// content layer; there is no separate per-Task/per-Step "fact layer"
+// walking the full event stream below it (P5.1 removed that duplication —
+// every Step renders exactly once, in the spine, complete with its own
+// "→ detail" link to the full record and, where applicable, the
+// cross-record analysis facts — Edit/StitchEdge/SysChanged/Compaction —
+// the deleted fact-layer used to carry, see spineTransitionLines in
+// render_spine_step.go). m/findings are computed once by the caller
 // (cmd/vmr/cmd_story.go's writeJourneyFile) and passed in rather than
 // recomputed here, so the Markdown and JSON outputs for the same Journey
 // are guaranteed to agree on both. Purely a view over already-computed
@@ -28,7 +30,6 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) s
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Story(lang)
-	st := i18n.Spine(lang)
 
 	w("# Journey %s\n\n", j.ID)
 	w("> %s\n\n", j.Title)
@@ -42,21 +43,6 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) s
 	renderOverviewCard(w, j, m, lang)
 	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang)
-
-	isRepeatStep := map[int]bool{}
-	for _, o := range toolCallRepeats(journeySteps(j)) {
-		if o.IsRepeat {
-			isRepeatStep[o.StepSeq] = true
-		}
-	}
-
-	for ti, task := range j.Tasks {
-		w("## t%02d · %s\n\n", ti+1, task.Title)
-		for _, step := range task.Steps {
-			renderStep(w, step, t, st, isRepeatStep[step.Seq])
-		}
-	}
-
 	renderToolTimeline(w, j, lang)
 	renderFindingsSection(w, findings, lang)
 	return b.String()
@@ -94,131 +80,15 @@ func editStatsHint(e ctxgraph.Edit, t i18n.StoryText) string {
 	return t.EditStatsHint(e.LCP, e.Coverage*100)
 }
 
-func renderStep(w func(string, ...any), s *Step, t i18n.StoryText, st i18n.SpineText, isRepeat bool) {
-	m := s.Manifest
-	w("### %s Step %d · %s · %s", stepRoleTag(s, isRepeat, st), s.Seq, m.TS.In(fmtutil.DisplayZone).Format("15:04:05"), fmtutil.FmtSeconds(msDuration(m.DurMS), 1))
-	if m.TTFTMS > 0 {
-		w(" (ttft %s)", fmtutil.FmtSeconds(msDuration(m.TTFTMS), 1))
-	}
-	if m.UsageOK {
-		w(" · %s/%s/%s", fmtutil.FmtTokens(m.Usage.Fresh()), fmtutil.FmtTokens(m.Usage.CacheRead), fmtutil.FmtTokens(m.Usage.Out))
-	}
-	w(" · %s\n\n", m.Endpoint)
-
-	if s.Edge != nil {
-		w("%s", t.EditLine(s.Edge.Kind.String(), editStatsHint(*s.Edge, t)))
-	}
-	if s.StitchEdge != nil {
-		w("%s", t.StitchLine(s.StitchEdge.Kind.String(), pctStr(s.StitchEdge.Score), pctStr(s.StitchEdge.Confidence)))
-	}
-	if s.SysChanged {
-		w("%s", t.SysChangedLine)
-	}
-	if s.Compaction != nil {
-		renderCompactionInfo(w, s.Compaction, t)
-	}
-
-	nonSys := make([]*Event, 0, len(s.NewEvents))
-	for _, ev := range s.NewEvents {
-		if ev.Msg.Role != "system" {
-			nonSys = append(nonSys, ev)
-		}
-	}
-	if len(nonSys) > 0 {
-		w("**Messages**\n\n")
-		for _, ev := range nonSys {
-			renderEvent(w, ev, t)
-		}
-	}
-
-	renderLLMResponse(w, s, t)
-
-	if s.NoReply {
-		w("%s", t.NoReplyLine)
-	}
-}
-
-// renderLLMResponse shows what the model itself produced this turn — the
-// part the old renderer dropped almost entirely (design-doc review
-// follow-up: a real Journey's tool-calling step rendered as a bare "🔧 调用
-// 工具: read, read", no arguments, no ids, no reasoning; the full content
-// only surfaced later, folded into the NEXT step's Messages section once it
-// became history — one step later than where it actually happened, and
-// only as raw re-serialized text, not the response's own shape). Reasoning
-// and the tool-call block get their own <details>, same folded-by-default
-// convention renderEvent already uses for Messages; a plain-text reply is
-// previewed like a Message so it's still scannable at a glance.
-func renderLLMResponse(w func(string, ...any), s *Step, t i18n.StoryText) {
-	if s.Reasoning == "" && s.RespText == "" && len(s.ToolCalls) == 0 {
-		if s.Finish != "" {
-			w("- finish: `%s`\n\n", s.Finish)
-		}
-		return
-	}
-	w("**LLM Response**\n\n")
-
-	if s.Reasoning != "" {
-		w("<details><summary>%s</summary>\n\n%s</details>\n\n",
-			t.ReasoningSummary(len([]rune(s.Reasoning))), codeFence(s.Reasoning))
-	}
-	if s.RespText != "" {
-		w("<details><summary>%s</summary>\n\n%s</details>\n\n",
-			t.ReplySummary(escapeHTML(taskseg.Preview(s.RespText))), codeFence(s.RespText))
-	}
-	if len(s.ToolCalls) > 0 {
-		names := make([]string, len(s.ToolCalls))
-		for i, tc := range s.ToolCalls {
-			names[i] = tc.Name
-		}
-		var body strings.Builder
-		for _, tc := range s.ToolCalls {
-			fmt.Fprintf(&body, "🔧 **tool_call** `%s` [id=%s]\n%s\n", tc.Name, tc.ID, codeFenceLang(prettyJSON(tc.Args), "json"))
-		}
-		w("<details><summary>finish: %s (%s)</summary>\n\n%s</details>\n\n",
-			s.Finish, strings.Join(names, ", "), body.String())
-	} else if s.Finish != "" {
-		w("- finish: `%s`\n\n", s.Finish)
-	}
-}
-
-// prettyJSON re-indents s if it's valid JSON (tool_calls' arguments arrive
-// as a compact, single-line JSON string), falling back to s verbatim when
-// it isn't — a mid-stream truncation can leave a tool call's arguments
-// incomplete, and this must never panic or drop content on that.
-func prettyJSON(s string) string {
-	var v any
-	if json.Unmarshal([]byte(s), &v) != nil {
-		return s
-	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return s
-	}
-	return string(b)
-}
-
-func renderEvent(w func(string, ...any), ev *Event, t i18n.StoryText) {
-	head := fmt.Sprintf("▸ %s", ev.Msg.Role)
-	if ev.Revises != nil {
-		// The "revision" relation: without this marker, a Splice-rewritten
-		// message would render as an unrelated new Event — reading as "the
-		// same thing said twice" instead of "this replaces that".
-		head += t.RevisionMarker(ev.Revises.String()[:8])
-	}
-	if ev.Msg.Text == "" {
-		w("%s", t.EmptyEvent(head))
-		return
-	}
-	summary := taskseg.Preview(ev.Msg.Text)
-	w("<details><summary>%s · %s</summary>\n\n%s</details>\n\n", head, escapeHTML(summary), codeFence(ev.Msg.Text))
-}
-
 // renderCompactionInfo shows a stitch boundary's information-loss summary
 // (CCR N-4's promise): token counts before/after, plus
 // which file-path/URL-shaped entities the predecessor's tail mentioned but
 // this step's opening doesn't — versus which survived. Folded by default
 // like everything else here; the point is that it's THERE to check, not
-// that every reader needs to open it every time.
+// that every reader needs to open it every time. Called from the decision
+// spine (render_spine_step.go's spineTransitionLines) — P5.1 removed the
+// separate fact-layer that used to be this function's only caller, but the
+// function itself, and the judgment it renders, are unchanged.
 func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.StoryText) {
 	ratio := "—"
 	if c.TokensBefore > 0 {
@@ -235,13 +105,6 @@ func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.Stor
 	w("</details>\n\n")
 }
 
-func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
-}
-
 // codeFence wraps s in a fenced code block whose fence is longer than any
 // backtick run inside s, so message content (an agent quoting code, a tool
 // result containing a Markdown snippet) can never break out of its block —
@@ -250,19 +113,18 @@ func escapeHTML(s string) string {
 // internal/report/render.go's codeFence, plus an optional lang tag
 // (report's own codeFence has no caller that needs one).
 //
-// Deliberately duplicated rather than shared: this and escapeHTML just
-// below are tiny, stable, purely cosmetic Markdown helpers with no domain
-// knowledge and no plausible reason to change again — the bar internal/
-// fmtutil's own admission reasoning applies (a shared display helper earns
-// its place when the two copies can drift in a way a reader would notice;
-// these two cannot). Naming both here so the pair isn't re-raised as an
-// oversight every time someone greps for duplicate helpers across the two
-// commands.
-// codeFence itself is the plain "" case every caller but tool-call
-// arguments uses.
-func codeFence(s string) string { return codeFenceLang(s, "") }
-
-func codeFenceLang(s, lang string) string {
+// Deliberately duplicated rather than shared: this is a tiny, stable,
+// purely cosmetic Markdown helper with no domain knowledge and no
+// plausible reason to change again — the bar internal/fmtutil's own
+// admission reasoning applies (a shared display helper earns its place
+// when the two copies can drift in a way a reader would notice; this one
+// cannot). Naming it here so it isn't re-raised as an oversight every time
+// someone greps for duplicate helpers across the two commands.
+//
+// No longer takes a language tag (P5.1 removed this file's one caller that
+// used one, the deleted fact-layer's tool-call JSON block) — every
+// remaining caller across the package wants a plain fence.
+func codeFence(s string) string {
 	n := 3
 	run := 0
 	for _, r := range s {
@@ -279,13 +141,7 @@ func codeFenceLang(s, lang string) string {
 	if !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	return f + lang + "\n" + s + f + "\n"
-}
-
-// msDuration converts a millisecond count (as stored in the audit record)
-// to a time.Duration for fmtutil.FmtSeconds.
-func msDuration(ms int64) time.Duration {
-	return time.Duration(ms) * time.Millisecond
+	return f + "\n" + s + f + "\n"
 }
 
 // pctStr is story's local 0-decimal alias for fmtutil.FmtPercent —

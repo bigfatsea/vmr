@@ -28,8 +28,10 @@ import (
 	"strings"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // spineWhyRespCap/spineWhyReasoningCap gate foldWhyLine's inline-vs-fold
@@ -127,6 +129,7 @@ func toolResultLine(name string, r chatmsg.ToolResult, positional bool, t i18n.S
 // deliverable section, when deliverableStats finds one.
 func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang) {
 	t := i18n.Spine(lang)
+	storyT := i18n.Story(lang)
 	hit := map[int]bool{}
 	for _, f := range findings {
 		hit[f.StepSeq] = true
@@ -151,9 +154,9 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 		w("%s", t.SpineTaskLine(ti+1, task.Title))
 		for si, s := range task.Steps {
 			if len(s.ToolCalls) > 0 {
-				renderSpineStep(w, steps, idxOf[s], repeat[s.Seq], hit[s.Seq], t)
+				renderSpineStep(w, steps, idxOf[s], repeat[s.Seq], hit[s.Seq], t, storyT)
 			} else {
-				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t)
+				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t, storyT)
 			}
 		}
 	}
@@ -164,14 +167,59 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 // (tool-calling) and renderSpineBriefStep (everything else), so the two
 // forms stay visually consistent (same tag, same Finding flag) and a reader
 // scanning the spine sees one continuous Step sequence regardless of which
-// kind of Step each one is.
+// kind of Step each one is. Includes a "→ detail" link to this Step's own
+// record, computed purely from its Manifest (reqdetail.FileNameForManifest
+// — no I/O, correct whether or not the target file has actually been
+// written yet by EnsureJourneyDetails) — the link always renders (DevPlan
+// P5.2: "名称可算"), so it's never absent just because materialization
+// happened to fail for this one Step (see EnsureJourneyDetails' doc
+// comment on graceful degradation).
 func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
 	header := "**" + stepRoleTag(s, repeated, t) + " Step " + strconv.Itoa(s.Seq) + " · " +
 		s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05") + "**"
 	if flagged {
 		header += t.SpineFindingTag
 	}
-	return header + "\n\n"
+	header += "\n\n"
+	if s.Manifest != nil {
+		header += t.SpineDetailLink("../details/" + reqdetail.FileNameForManifest(s.Manifest))
+	}
+	return header
+}
+
+// spineTransitionLines renders the cross-record analysis facts the deleted
+// fact-layer renderer (render_md.go's former renderStep, removed by P5.1)
+// used to show — Edit/StitchEdge/SysChanged/Compaction — reusing the exact
+// same i18n.StoryText functions and CompactionInfo renderer render_md.go
+// still defines. These are graph-level facts a per-Step detail link
+// (spineStepHeader, above) can never reach — reqdetail renders one record
+// plus one prev Manifest, never a full Edit/StitchGraph/Compaction
+// computation — so the decision spine, the one human-readable layer that
+// survives P5.1, is their only remaining home (see
+// story_report_p5_action_plan_sonnet-5.md §0 point 6). Called from both
+// renderSpineStep and renderSpineBriefStep, right after the header line, so
+// placement is independent of whether the Step happens to have tool calls.
+//
+// s.Edge's ordinary Append case is deliberately silent: within a single
+// Lineage, Append ("cur starts with all of prev's messages") is the
+// overwhelmingly common, structurally uninteresting default — showing it
+// on every Step would bury the spine's "3-second scan" signal under noise
+// for information a reader already assumes unless told otherwise (P4's
+// structure.json still records every Step's EditRef, so nothing is lost by
+// staying silent here, only the "nothing happened" case is elided).
+func spineTransitionLines(w func(string, ...any), s *Step, storyT i18n.StoryText) {
+	if s.Edge != nil && s.Edge.Kind != ctxgraph.Append {
+		w("%s", storyT.EditLine(s.Edge.Kind.String(), editStatsHint(*s.Edge, storyT)))
+	}
+	if s.StitchEdge != nil {
+		w("%s", storyT.StitchLine(s.StitchEdge.Kind.String(), pctStr(s.StitchEdge.Score), pctStr(s.StitchEdge.Confidence)))
+	}
+	if s.SysChanged {
+		w("%s", storyT.SysChangedLine)
+	}
+	if s.Compaction != nil {
+		renderCompactionInfo(w, s.Compaction, storyT)
+	}
 }
 
 // renderSpineStep renders one tool-calling Step's decision-spine block —
@@ -180,9 +228,10 @@ func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
 // for whatever's left over, the positional fallback (positionalToolResults)
 // itself — the two levels share the same "which calls are still unresolved"
 // bookkeeping and there's no benefit to splitting that across the caller.
-func renderSpineStep(w func(string, ...any), steps []*Step, i int, repeated, flagged bool, t i18n.SpineText) {
+func renderSpineStep(w func(string, ...any), steps []*Step, i int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
 	s := steps[i]
 	w("%s", spineStepHeader(s, repeated, flagged, t))
+	spineTransitionLines(w, s, storyT)
 	w("%s", spineWhyLine(s))
 
 	matched := toolResultsFor(steps, i)
@@ -199,6 +248,9 @@ func renderSpineStep(w func(string, ...any), steps []*Step, i int, repeated, fla
 		} else if r, ok := posByID[tc.ID]; ok {
 			w("%s", toolResultLine(tc.Name, r, true, t))
 		}
+	}
+	if s.NoReply {
+		w("%s", storyT.NoReplyLine)
 	}
 }
 
@@ -275,20 +327,19 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 // NoReply Step) — "宁可粗糙也不猜语义": the header alone still keeps the Step
 // countable, and inventing a line where the record has nothing would be
 // worse than a gap.
-func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repeated, flagged bool, t i18n.SpineText) {
+func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
 	w("%s", spineStepHeader(s, repeated, flagged, t))
-	if taskStepIdx > 0 && s.HumanInitiated {
-		if text := firstNewUserText(s); text != "" {
-			w("%s", t.SpineInstructionLine(oneLineTruncate(text, spineBriefLineCap)))
-			return
-		}
-	}
-	if s.RespText != "" {
+	spineTransitionLines(w, s, storyT)
+	switch {
+	case taskStepIdx > 0 && s.HumanInitiated && firstNewUserText(s) != "":
+		w("%s", t.SpineInstructionLine(oneLineTruncate(firstNewUserText(s), spineBriefLineCap)))
+	case s.RespText != "":
 		w("%s", t.SpineReportLine(oneLineTruncate(s.RespText, spineBriefLineCap)))
-		return
-	}
-	if s.Reasoning != "" {
+	case s.Reasoning != "":
 		w("%s", t.SpineReportLine(oneLineTruncate(s.Reasoning, spineBriefLineCap)))
+	}
+	if s.NoReply {
+		w("%s", storyT.NoReplyLine)
 	}
 }
 

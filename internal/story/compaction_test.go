@@ -252,11 +252,14 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 		t.Errorf("unexpected first new event: %q", first.Msg.Text)
 	}
 
-	// Same gap as the compaction test above: the Event.Revises field being
-	// set doesn't by itself prove renderEvent's 🔄 marker actually reaches
-	// RenderMarkdown's output.
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN)
-	if !strings.Contains(md, "🔄[revises") {
-		t.Errorf("RenderMarkdown output should carry the 🔄[revises …] marker for the revising event:\n%s", md)
-	}
+	// P5.1 removed renderEvent (the fact-layer's per-message renderer,
+	// which used to carry a 🔄[revises …] marker on the Markdown message
+	// list itself) — that marker existed to stop a Splice's rewritten
+	// message from reading as an unrelated duplicate WITHIN that inlined
+	// list. There is no inlined message list left to disambiguate: the
+	// decision spine never lists individual NewEvents, and the underlying
+	// fact this test locks in — Event.Revises being computed correctly —
+	// still reaches journey-<id>.json's structure field as EventRef.Revises
+	// (P4), which is what a consumer needing this relationship now reads.
+	// The assertions above are the ones that matter for this test's name.
 }

@@ -3,12 +3,14 @@
 package reqdetail
 
 import (
+	"crypto/md5"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 )
 
 func recWithSysAndTools(sys string, toolNames ...string) *audit.Record {
@@ -101,6 +103,26 @@ func TestEnsureSysPromptEvidence_ContentMatchesFilenameHash(t *testing.T) {
 	wantName := "sysprompt-" + contentHash8("distinctive system prompt text") + ".md"
 	if name != wantName {
 		t.Errorf("filename = %q, want %q", name, wantName)
+	}
+}
+
+// TestSysPromptEvidenceFileName_MatchesEnsureSysPromptEvidence locks down
+// the contract SysPromptEvidenceFileName exists for: a caller holding only a
+// Manifest's SysHash (no rec) — a story spine Step's future "→ system
+// prompt" link — must be able to compute the exact filename
+// EnsureSysPromptEvidence actually wrote, without re-deriving this
+// package's private hash/naming convention.
+func TestSysPromptEvidenceFileName_MatchesEnsureSysPromptEvidence(t *testing.T) {
+	dir := t.TempDir()
+	rec := recWithSysAndTools("distinctive system prompt text")
+	written, err := EnsureSysPromptEvidence(dir, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sysHash := ctxgraph.Hash(md5.Sum([]byte("distinctive system prompt text")))
+	got := SysPromptEvidenceFileName(sysHash)
+	if got != written {
+		t.Errorf("SysPromptEvidenceFileName(sysHash) = %q, want %q (what EnsureSysPromptEvidence actually wrote)", got, written)
 	}
 }
 

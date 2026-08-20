@@ -24,8 +24,9 @@ type SpineText struct {
 
 	SpineTitle          string
 	SpineTaskLine       func(idx int, title string) string
-	SpineFindingTag     string                // appended to a spine Step header that hit a Finding
-	SpineValueTruncated func(more int) string // appended to a tool-call payload block capped at spineFullCap
+	SpineFindingTag     string                      // appended to a spine Step header that hit a Finding
+	SpineValueTruncated func(more int) string       // appended to a tool-call payload block capped at spineFullCap
+	SpineDetailLink     func(relPath string) string // "→ detail" link to this Step's own record, P5.2
 
 	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
@@ -82,8 +83,9 @@ func Spine(lang Lang) SpineText {
 			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 			SpineFindingTag: " ⚠️",
 			SpineValueTruncated: func(more int) string {
-				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下方该 Step 的 tool_call 正文)"
+				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见本 Step 的详情链接)"
 			},
+			SpineDetailLink: func(relPath string) string { return "→ [详情](" + relPath + ")\n\n" },
 
 			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
 			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
@@ -144,8 +146,9 @@ func Spine(lang Lang) SpineText {
 		SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 		SpineFindingTag: " ⚠️",
 		SpineValueTruncated: func(more int) string {
-			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's tool_call section below)"
+			return "\n… (+" + strconv.Itoa(more) + " more chars — full value at this Step's detail link)"
 		},
+		SpineDetailLink: func(relPath string) string { return "→ [detail](" + relPath + ")\n\n" },
 
 		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
 		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },

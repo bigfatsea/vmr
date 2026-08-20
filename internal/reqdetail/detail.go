@@ -22,6 +22,7 @@
 package reqdetail
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -384,7 +385,7 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 		// system" ones.
 		leadSys, sysText := leadingSystem(msgs)
 		if linkEvidence && leadSys > 0 {
-			filename := "sysprompt-" + contentHash8(sysText) + ".md"
+			filename := SysPromptEvidenceFileName(ctxgraph.Hash(md5.Sum([]byte(sysText))))
 			w("%s", t.SysPromptEvidenceLink(fmtCount(len([]rune(sysText))), filename))
 		}
 		deltaStart := 0

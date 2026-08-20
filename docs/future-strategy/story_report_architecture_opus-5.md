@@ -167,19 +167,27 @@ report 聚合阶段才存在的位置坐标——但微观层根本不需要知�
 ### 2.2 实测基线
 
 > **P1（commit `30c5159`）、P2（见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）、
-> P3（见 `docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）与 P4（见
-> `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`）均已完成**：本节下方的数字
+> P3（见 `docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）、P4（见
+> `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`）与 P5（见
+> `docs/future-strategy/story_report_p5_action_plan_sonnet-5.md`）均已完成**：本节下方的数字
 > （工具结果 0 条、脊柱 21/22 步、detail 文件名批次碰撞率/本机时区依赖、`details/*.json` 逐字复制、
-> §7.10 的 83.8s/71.8s/1.17× 缓存收益、`journey-<id>.json` = 6,428 字节且"事件流在机读层占 0 字节"
-> 等）是这四个阶段之前的历史基线，不是当前状态——保留原文只是为了保留"问题曾经确实存在"的证据链，
-> 读者若要了解当前行为，请以四份 ActionPlan 的执行记录为准，不要把这里的数字当成现状。P3 批 D 实测
-> 的当前数字：同一份 34 文件/177MB 压缩语料，冷启动 ~83.8s 不变，热缓存从 71.8s 降到 ~16.2s（收益
-> 1.17×→~5.2×）——尚未达到 `vmr story` 的个位数秒量级，差距诊断见 `docs/KNOWN_ISSUES_sonnet-5.md`
-> §1.1/§1.23（`session.go` 的 `collect()`/`analyzeFile` 是报表三趟扫描里唯一仍未接入缓存的一遍）。
-> P4 已给 `journey-<id>.json` 补上完整的 Task/Step/Event/ToolCall 结构（`structure` 字段，
+> §7.10 的 83.8s/71.8s/1.17× 缓存收益、`journey-<id>.json` = 6,428 字节且"事件流在机读层占 0 字节"、
+> 下方"单条 Journey 报告的构成"表格里 fact-layer 占 68% 体积等）是这五个阶段之前的历史基线，不是
+> 当前状态——保留原文只是为了保留"问题曾经确实存在"的证据链，读者若要了解当前行为，请以五份
+> ActionPlan 的执行记录为准，不要把这里的数字当成现状。P3 批 D 实测的当前数字：同一份 34 文件/
+> 177MB 压缩语料，冷启动 ~83.8s 不变，热缓存从 71.8s 降到 ~16.2s（收益 1.17×→~5.2×）——尚未达到
+> `vmr story` 的个位数秒量级，差距诊断见 `docs/KNOWN_ISSUES_sonnet-5.md` §1.1/§1.23（`session.go`
+> 的 `collect()`/`analyzeFile` 是报表三趟扫描里唯一仍未接入缓存的一遍）。P4 已给
+> `journey-<id>.json` 补上完整的 Task/Step/Event/ToolCall 结构（`structure` 字段，
 > `internal/story/structure.go`）：事件流在机读层不再是 0 字节，真实语料（22 步/33 次工具调用的
 > 样例 Journey）实测 92KB，且已用真实语料证明"无损重建 + 体积随步数而非对话长度增长"两条同时成立
 > （`TestBuildStructure_LosslessReconstruction`/`TestBuildStructure_VolumeBoundedByStepsNotProseLength`）。
+> P5 已删除 fact-layer、给决策脊柱每步补上详单链接、系统提示词改为引用共享证据条目：同一样例
+> Journey 的人读报告从 298,732 字节（fact-layer 占 68%）降到约 107KB；决策脊柱的工具结果配对（P1
+> 已修复）与 22/22 步覆盖不变，但 Edit/StitchEdge/SysChanged/Compaction/NoReply 五类跨记录分析
+> 事实原样搬进了脊柱本身（详单渲染器物理上无法重建它们）；`vmr story` 材料化的详单与 `vmr report
+> -details` 对同一条记录（含缝合边界，`prev` 均为 `nil`）生成的详单已用真实语料与自动化测试
+> （`TestEnsureJourneyDetails_MatchesReportDetails`）验证逐字节相同。
 
 以下数字全部用**当前工作区代码**构建的二进制实测（含尚未提交的 6 项 UX 改动），或对本机
 `reports/` 产物直接统计。
@@ -1320,7 +1328,8 @@ exemplar 把指标数据点关联回 trace 上下文），不是"必须一键跳
 - 若本方案被采纳，需要相应更新的既有条目：
   - `KNOWN_ISSUES §1.21`（根因改写为客户端改写 + 修法改为归一化回退 + 位置兜底分层）
   - `KNOWN_ISSUES §1.22`（"不可行"论证撤销，改为"分批实施，见本文迁移路径"）
-  - `KNOWN_ISSUES §1.20`（三个待拍板点已在 §4.7 定案）
+  - ~~`KNOWN_ISSUES §1.20`（三个待拍板点已在 §4.7 定案）~~ ——P5 落地后目标状态已完全达成，条目已
+    移除并归档为 §3 已闭环第 24 条，不再需要更新
   - `KNOWN_ISSUES §1.1`（多文件输入的两趟扫描开销）——**结论需要改写**：其"无法在单趟流式输入中
     就地确定归属"的论证成立，但回答的不是"读几遍字节"；其触发条件（GB 级语料）**已经满足**
     （9GB 解压、全量报表 72–84 秒）。改写为"扩大缓存载荷"，见 §7.10

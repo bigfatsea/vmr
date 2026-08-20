@@ -414,7 +414,8 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		}
 	}
 
-	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings)
+	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
+	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir)
 	if err != nil {
 		return err
 	}
@@ -482,10 +483,11 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	if err := ensureJourneyFile(jA, storiesDir, lang); err != nil {
+	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
+	if err := ensureJourneyFile(jA, storiesDir, lang, prof, detailDir, evidenceDir); err != nil {
 		return err
 	}
-	if err := ensureJourneyFile(jB, storiesDir, lang); err != nil {
+	if err := ensureJourneyFile(jB, storiesDir, lang, prof, detailDir, evidenceDir); err != nil {
 		return err
 	}
 
@@ -590,11 +592,12 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		return err
 	}
 	t := i18n.CLI(lang)
+	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	for i, j := range journeys {
 		j.Partial = toRenderPartial[i]
 		m := story.ComputeMetrics(j)
 		findings := story.ComputeFindings(j, lang)
-		outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil)
+		outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
 		if err != nil {
 			return err
 		}
@@ -669,6 +672,16 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	return saveStoryIndex(idx, outDir, lang)
 }
 
+// detailAndEvidenceDirs returns {outDir}/details and {outDir}/evidence — the
+// same layout internal/report's DetailWriter uses (setupDetailWriter/
+// NewDetailWriter in cmd_report.go), shared so a detail page materialized
+// by either command is reachable at the same path and a decision spine's
+// "→ detail" link (P5.2, story.EnsureJourneyDetails) resolves regardless of
+// which command wrote it first.
+func detailAndEvidenceDirs(outDir string) (detailDir, evidenceDir string) {
+	return filepath.Join(outDir, "details"), filepath.Join(outDir, "evidence")
+}
+
 // ensureStoriesDir creates (if needed) and returns {outDir}/stories.
 // 0o700: story output embeds full conversation bodies, same sensitivity
 // as internal/report's details/ — must not loosen that.
@@ -692,7 +705,7 @@ func journeyBaseName(j *story.Journey) string {
 // storiesDir. If it does not exist, it renders and writes it (both .md and
 // .json) so that running `vmr story -compare` directly also produces the
 // individual journey reports.
-func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) error {
+func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string) error {
 	base := journeyBaseName(j)
 	mdPath := filepath.Join(storiesDir, base+".md")
 	if _, err := os.Stat(mdPath); err == nil {
@@ -700,7 +713,7 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) erro
 	}
 	m := story.ComputeMetrics(j)
 	findings := story.ComputeFindings(j, lang)
-	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil)
+	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
 	return err
 }
 
@@ -722,9 +735,17 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang) erro
 // visible self-disclosure that this file's beginning isn't the real
 // beginning, without requiring the reader to open it and find the warning
 // line first.
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding) (string, error) {
+//
+// Before rendering, EnsureJourneyDetails materializes this Journey's own
+// Step detail pages (and system-prompt/tool evidence blobs) under
+// detailDir/evidenceDir — P5.2's "渲染时目标缺失即按需补生成": the decision
+// spine's "→ detail" links and the system-prompt header's evidence links
+// must resolve without requiring the caller to have separately run
+// `vmr report -details` first.
+func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string) (string, error) {
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
+	story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
 	md := story.RenderMarkdown(j, m, findings, lang)
 	if llmSection != "" {
 		md += "\n" + llmSection

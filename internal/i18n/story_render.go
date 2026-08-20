@@ -28,12 +28,14 @@ type StoryText struct {
 
 	SysPromptHeaderTitle   string
 	SysPromptHeaderChanged func(eras int) string
-	SysPromptEraSummary    func(fromSeq, toSeq, chars int) string
-
-	ReasoningSummary func(chars int) string
-	ReplySummary     func(preview string) string
-	EmptyEvent       func(head string) string
-	RevisionMarker   func(hash string) string
+	// SysPromptEraLink is one era's line when it has a system prompt: the
+	// effective Step range, a char-count summary, and a link to the shared
+	// evidence blob (P5.3 — full text no longer inlines here).
+	SysPromptEraLink func(fromSeq, toSeq, chars int, relPath string) string
+	// SysPromptEraNoSys is the line for an era with no leading system
+	// block at all (HasSys == false) — rendered as-is, not silently
+	// skipped, so the effective-range list stays complete.
+	SysPromptEraNoSys func(fromSeq, toSeq int) string
 
 	CompactionSummary func(before, after, ratio string, swallowed, survived int) string
 	SwallowedEntities func(entities string) string
@@ -77,18 +79,20 @@ func Story(lang Lang) StoryText {
 			SysPromptHeaderChanged: func(eras int) string {
 				return "> ⚙️ 全程共出现 " + strconv.Itoa(eras) + " 版不同的 system prompt（下方按出现顺序分别列出，每版只展示一次）\n\n"
 			},
-			SysPromptEraSummary: func(fromSeq, toSeq, chars int) string {
+			SysPromptEraLink: func(fromSeq, toSeq, chars int, relPath string) string {
 				rangeLabel := "Step " + strconv.Itoa(fromSeq)
 				if toSeq > fromSeq {
 					rangeLabel += "–" + strconv.Itoa(toSeq)
 				}
-				return rangeLabel + " · " + strconv.Itoa(chars) + " 字符"
+				return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " 字符 · → [详情](" + relPath + ")\n"
 			},
-
-			ReasoningSummary: func(chars int) string { return "🤔 reasoning · " + strconv.Itoa(chars) + " 字符" },
-			ReplySummary:     func(preview string) string { return "💬 回复 · " + preview },
-			EmptyEvent:       func(head string) string { return head + " (空)\n\n" },
-			RevisionMarker:   func(hash string) string { return " 🔄[修订 " + hash + "]" },
+			SysPromptEraNoSys: func(fromSeq, toSeq int) string {
+				rangeLabel := "Step " + strconv.Itoa(fromSeq)
+				if toSeq > fromSeq {
+					rangeLabel += "–" + strconv.Itoa(toSeq)
+				}
+				return "- " + rangeLabel + " ·（无 system prompt）\n"
+			},
 
 			CompactionSummary: func(before, after, ratio string, swallowed, survived int) string {
 				return "📉 信息损失: " + before + " → " + after + " tokens（" + ratio + "）· " + strconv.Itoa(swallowed) + " 个实体消失 / " + strconv.Itoa(survived) + " 个存活"
@@ -133,18 +137,20 @@ func Story(lang Lang) StoryText {
 		SysPromptHeaderChanged: func(eras int) string {
 			return "> ⚙️ " + strconv.Itoa(eras) + " distinct system prompt versions appeared over this Journey (listed below in order of first appearance, each shown once)\n\n"
 		},
-		SysPromptEraSummary: func(fromSeq, toSeq, chars int) string {
+		SysPromptEraLink: func(fromSeq, toSeq, chars int, relPath string) string {
 			rangeLabel := "Step " + strconv.Itoa(fromSeq)
 			if toSeq > fromSeq {
 				rangeLabel += "–" + strconv.Itoa(toSeq)
 			}
-			return rangeLabel + " · " + strconv.Itoa(chars) + " chars"
+			return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " chars · → [detail](" + relPath + ")\n"
 		},
-
-		ReasoningSummary: func(chars int) string { return "🤔 reasoning · " + strconv.Itoa(chars) + " chars" },
-		ReplySummary:     func(preview string) string { return "💬 reply · " + preview },
-		EmptyEvent:       func(head string) string { return head + " (empty)\n\n" },
-		RevisionMarker:   func(hash string) string { return " 🔄[revises " + hash + "]" },
+		SysPromptEraNoSys: func(fromSeq, toSeq int) string {
+			rangeLabel := "Step " + strconv.Itoa(fromSeq)
+			if toSeq > fromSeq {
+				rangeLabel += "–" + strconv.Itoa(toSeq)
+			}
+			return "- " + rangeLabel + " · (no system prompt)\n"
+		},
 
 		CompactionSummary: func(before, after, ratio string, swallowed, survived int) string {
 			return "📉 Information loss: " + before + " → " + after + " tokens (" + ratio + ") · " + strconv.Itoa(swallowed) + " entities disappeared / " + strconv.Itoa(survived) + " survived"
