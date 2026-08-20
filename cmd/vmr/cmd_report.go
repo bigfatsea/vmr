@@ -374,7 +374,7 @@ func cmdReport(args []string) error {
 	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
 		return fmt.Errorf("parse cache: %w", err)
 	}
-	if err := report.WriteRequestsIndex(rep, sess, outDir, lang, lineageToJourney); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, outDir, lang, lineageToJourney, detailsOn); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests.md"))
@@ -391,7 +391,7 @@ func cmdReport(args []string) error {
 		return fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, outDir, lang); err != nil {
+	if err := report.WriteFailedIndex(rows, outDir, lang, detailsOn); err != nil {
 		return fmt.Errorf("failed-requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests-failed.md"))

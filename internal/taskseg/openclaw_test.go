@@ -90,6 +90,57 @@ func TestOpenClawAware_NonUserRoleRejected(t *testing.T) {
 	}
 }
 
+// TestOpenClawAware_BareMessageStripsScaffoldingBrackets pins a real corpus
+// leak: a "bare" message (no (untrusted metadata) envelope) glues a
+// timestamp bracket and a message_id bracket directly onto the real
+// instruction, and neither used to be stripped on this path — the message
+// only got envelope handling, which bare messages never trigger.
+func TestOpenClawAware_BareMessageStripsScaffoldingBrackets(t *testing.T) {
+	text, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user",
+		Text: "[Tue 2026-07-28 00:05 GMT+8] [message_id: om_x100b694c53b4eca8b1cd50932b7aefe] 修一下这个 bug"}, nil, -1)
+	if !ok {
+		t.Fatal("bare message with scaffolding brackets not recognized as real")
+	}
+	if strings.Contains(text, "[") || strings.Contains(text, "]") {
+		t.Errorf("scaffolding brackets leaked into stripped text: %q", text)
+	}
+	if !strings.Contains(text, "修一下这个 bug") {
+		t.Errorf("stripped text lost the real instruction: %q", text)
+	}
+}
+
+// TestOpenClawAware_BareMessagePureScaffoldingRejected is the boundary case
+// for the above: only the two known brackets, nothing real behind them.
+func TestOpenClawAware_BareMessagePureScaffoldingRejected(t *testing.T) {
+	if _, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user",
+		Text: "[Tue 2026-07-28 00:05 GMT+8] [message_id: om_x100b694c53b4eca8b1cd50932b7aefe]"}, nil, -1); ok {
+		t.Error("pure scaffolding brackets with nothing real left should not count as real")
+	}
+}
+
+// TestOpenClawAware_BareMessageLeadingUserBracketSurvives pins the
+// narrow-regex design: timestampBracketRe must NOT match an arbitrary
+// leading bracket a real message legitimately opens with (a bug prefix, a
+// priority tag, a numbered reference) — only OpenClaw's own day-name
+// timestamp shape. A generic "strip any leading bracket" rule here would
+// both mangle this text and, for a message that's ONLY the bracket (e.g.
+// "[WIP]"), wrongly reject it as pure scaffolding.
+func TestOpenClawAware_BareMessageLeadingUserBracketSurvives(t *testing.T) {
+	for _, text := range []string{
+		"[Bug] login page throws a 500",
+		"[P0] fix the crash",
+		"[1] see the referenced doc",
+	} {
+		got, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: text}, nil, -1)
+		if !ok {
+			t.Errorf("legitimate bracket-prefixed message rejected: %q", text)
+		}
+		if got != text {
+			t.Errorf("legitimate bracket-prefixed message mangled: got %q, want unchanged %q", got, text)
+		}
+	}
+}
+
 func TestOpenClawAware_NoReply(t *testing.T) {
 	cases := []struct {
 		finish, content string

@@ -54,9 +54,8 @@ const spinePreviewLen = 160
 // queries in full, but not unbounded: a pathologically large single
 // argument (a multi-KB file write's content, say) would otherwise make one
 // Step's block dwarf the rest of the document. The byte-identical full
-// value is always available one section down regardless — render_md.go's
-// renderLLMResponse renders every tool call's complete prettyJSON args,
-// unconditionally, never summarized — so capping here only affects the
+// value is always available regardless, via this Step's own detail link
+// (reqdetail, see ensure_details.go) — so capping here only affects the
 // spine's own copy, never the reader's ability to see the rest.
 const spineFullCap = 3000
 
@@ -103,16 +102,16 @@ func scalarSummary(raw any) (s string, big bool) {
 	}
 }
 
-// capFull rune-truncates s to spineFullCap, appending t's localized "more
-// content lives in this Step's own tool_call section" note when it does —
-// this must never look like a silent cut, since it changes what a reader
-// entering `-journey` to read this exact command believes they've seen.
+// capFull rune-truncates s to spineFullCap for a tool call's own arguments,
+// appending t's localized "more content lives in this Step's own detail
+// link" note when it does — this must never look like a silent cut, since
+// it changes what a reader entering `-journey` to read this exact command
+// believes they've seen. Thin wrapper over capFullWith (render_spine_step.go)
+// with the argument-specific text; toolResultLine uses capFullWith directly
+// with a distinct text, since a paired tool result's full text actually
+// lives in the NEXT Step's detail link, not this one.
 func capFull(s string, t i18n.SpineText) string {
-	r := []rune(s)
-	if len(r) <= spineFullCap {
-		return s
-	}
-	return string(r[:spineFullCap]) + t.SpineValueTruncated(len(r)-spineFullCap)
+	return capFullWith(s, t.SpineValueTruncated)
 }
 
 // toolCallLine renders one tool_call's complete display block: "🔧

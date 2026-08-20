@@ -81,9 +81,9 @@ func Doc(lang Lang) DocText {
 			PerClientLabel:     "per-client: ",
 			DetailsCaptureBody: "单请求全量捕获（req/resp/SSE）见 `details/*.md`。\n\n",
 			DetailsOnDemandBody: func(example string) string {
-				s := "本次运行未生成 `details/*.md`（默认按需生成）。用坐标（上表 `req` 列，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标> <审计文件>`"
+				s := "本次运行未生成 `details/*.md`（默认按需生成）。用坐标（`vmr-requests.md` 的『文件』列，未生成详单时显示为该坐标，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标>`"
 				if example != "" {
-					s += "，例如 `vmr replay -print -req " + example + " <审计文件>`"
+					s += "，例如 `vmr replay -print -req " + example + "`"
 				}
 				return s + "；或加 `-details` 全量生成。\n\n"
 			},
@@ -141,9 +141,9 @@ func Doc(lang Lang) DocText {
 		PerClientLabel:     "per-client: ",
 		DetailsCaptureBody: "Full single-request capture (req/resp/SSE) is in `details/*.md`.\n\n",
 		DetailsOnDemandBody: func(example string) string {
-			s := "This run did not write `details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the `req` column above, `basename:line`): `vmr replay -print -req <coord> <audit-file>`"
+			s := "This run did not write `details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the \"File\" column of `vmr-requests.md` shows it as this coordinate when no details were generated, `basename:line`): `vmr replay -print -req <coord>`"
 			if example != "" {
-				s += ", e.g. `vmr replay -print -req " + example + " <audit-file>`"
+				s += ", e.g. `vmr replay -print -req " + example + "`"
 			}
 			return s + "; or pass `-details` to materialize all of them.\n\n"
 		},

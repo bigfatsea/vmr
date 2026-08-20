@@ -109,7 +109,22 @@ func toolResultLine(name string, r chatmsg.ToolResult, positional bool, t i18n.S
 		badge = t.SpinePositionalMatch
 	}
 	return mark + " `" + name + "`" + badge + ": <details><summary>" + oneLineTruncate(r.Text, spinePreviewLen) + "</summary>\n\n" +
-		codeFence(capFull(r.Text, t)) + "\n</details>\n\n"
+		codeFence(capFullWith(r.Text, t.SpineResultValueTruncated)) + "\n</details>\n\n"
+}
+
+// capFullWith is capFull's (render_spine_args.go) shared truncation core,
+// parameterized on which localized "where's the rest" text to append —
+// capFull uses it for a tool call's own arguments, where "this Step's
+// detail link" is correct; toolResultLine above uses it for a paired
+// result, whose full text actually lives in the NEXT Step's request
+// record, not this one — hence a distinct SpineResultValueTruncated text
+// rather than reusing SpineValueTruncated.
+func capFullWith(s string, tail func(more int) string) string {
+	r := []rune(s)
+	if len(r) <= spineFullCap {
+		return s
+	}
+	return string(r[:spineFullCap]) + tail(len(r)-spineFullCap)
 }
 
 // renderDecisionSpine renders the decision spine: one block per Task, one
@@ -154,7 +169,7 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 		w("%s", t.SpineTaskLine(ti+1, task.Title))
 		for si, s := range task.Steps {
 			if len(s.ToolCalls) > 0 {
-				renderSpineStep(w, steps, idxOf[s], repeat[s.Seq], hit[s.Seq], t, storyT)
+				renderSpineStep(w, steps, idxOf[s], si, repeat[s.Seq], hit[s.Seq], t, storyT)
 			} else {
 				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t, storyT)
 			}
@@ -228,10 +243,18 @@ func spineTransitionLines(w func(string, ...any), s *Step, storyT i18n.StoryText
 // for whatever's left over, the positional fallback (positionalToolResults)
 // itself — the two levels share the same "which calls are still unresolved"
 // bookkeeping and there's no benefit to splitting that across the caller.
-func renderSpineStep(w func(string, ...any), steps []*Step, i int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
+// taskStepIdx (like renderSpineBriefStep's) gates the mid-task instruction
+// line — a mid-task user instruction very often triggers an immediate tool
+// call, so this path needs the same s.Instruction rendering
+// renderSpineBriefStep already has, or that instruction is invisible
+// whenever the Step that carries it also happens to call a tool.
+func renderSpineStep(w func(string, ...any), steps []*Step, i, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
 	s := steps[i]
 	w("%s", spineStepHeader(s, repeated, flagged, t))
 	spineTransitionLines(w, s, storyT)
+	if taskStepIdx > 0 && s.Instruction != "" {
+		w("%s", t.SpineInstructionLine(s.Instruction))
+	}
 	w("%s", spineWhyLine(s))
 
 	matched := toolResultsFor(steps, i)
@@ -317,8 +340,8 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 //  1. a mid-task instruction — taskStepIdx > 0 (the Task's own opening Step
 //     already carries its instruction in the Task title, see
 //     renderDecisionSpine's SpineTaskLine call, so it's skipped here to
-//     avoid rendering the same instruction twice) and s.HumanInitiated —
-//     the new user text, found via firstNewUserText;
+//     avoid rendering the same instruction twice) and s.Instruction != ""
+//     — via s.Instruction (buildFrom, taskseg.LastInstruction);
 //  2. a plain report — s.RespText;
 //  3. the model's reasoning, when it said nothing else — s.Reasoning.
 //
@@ -331,8 +354,8 @@ func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repe
 	w("%s", spineStepHeader(s, repeated, flagged, t))
 	spineTransitionLines(w, s, storyT)
 	switch {
-	case taskStepIdx > 0 && s.HumanInitiated && firstNewUserText(s) != "":
-		w("%s", t.SpineInstructionLine(oneLineTruncate(firstNewUserText(s), spineBriefLineCap)))
+	case taskStepIdx > 0 && s.Instruction != "":
+		w("%s", t.SpineInstructionLine(s.Instruction))
 	case s.RespText != "":
 		w("%s", t.SpineReportLine(oneLineTruncate(s.RespText, spineBriefLineCap)))
 	case s.Reasoning != "":
@@ -341,21 +364,6 @@ func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repe
 	if s.NoReply {
 		w("%s", storyT.NoReplyLine)
 	}
-}
-
-// firstNewUserText returns s's first newly-introduced user-role message
-// text, or "" — s.NewEvents is already "events first introduced by this
-// Step" (journey.go), so for a HumanInitiated Step (one whose opening
-// carries a genuinely new real user instruction, per taskseg.HasNewInstruction)
-// the triggering user message is necessarily among them; this doesn't
-// re-derive that judgment, only locates the text taskseg already found.
-func firstNewUserText(s *Step) string {
-	for _, ev := range s.NewEvents {
-		if ev.Msg.Role == "user" {
-			return ev.Msg.Text
-		}
-	}
-	return ""
 }
 
 // renderFinalDeliverable renders the Journey's final deliverable section,

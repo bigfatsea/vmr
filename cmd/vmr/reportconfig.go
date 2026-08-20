@@ -163,6 +163,22 @@ func resolveString(flagVal, rcVal, def string) string {
 	return def
 }
 
+// resolveStringExplicit is resolveString's flagPassed-aware counterpart,
+// same shape as resolveBool: for a flag where the caller needs to
+// explicitly pass "" to clear rcVal (e.g. -llm-addr ” to force off LLM
+// calls despite report.yaml configuring a default address), resolveString's
+// "empty means not passed" rule can't express that — explicit says so
+// instead.
+func resolveStringExplicit(explicit bool, flagVal, rcVal, def string) string {
+	if explicit {
+		return flagVal
+	}
+	if rcVal != "" {
+		return rcVal
+	}
+	return def
+}
+
 // resolveBool applies the same merge order to a bool flag, where "not
 // passed" can't be read off the flag's own value (false is a valid explicit
 // choice) — flagPassed says whether the user actually typed the flag.

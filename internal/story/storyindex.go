@@ -26,13 +26,16 @@ import (
 )
 
 // JourneyCategory classifies a candidate Journey by structural signals
-// only (see classifyJourney in candidates.go) — CategoryTask is the zero
-// value on purpose, so a real task (the common case) never needs an
-// explicit tag in vmr-stories.json (omitempty on JourneyIndexRow.Category).
+// only (see classifyJourney in candidates.go). CategoryTask is an explicit
+// value, not the zero value — a real task (the common case) is the one
+// consumers most need to be able to filter on, so it serializes into
+// vmr-stories.json like the other three rather than relying on field
+// absence to mean "task" (P7.4: JSON readers no longer need to know that
+// convention).
 type JourneyCategory string
 
 const (
-	CategoryTask      JourneyCategory = ""
+	CategoryTask      JourneyCategory = "task"
 	CategoryCron      JourneyCategory = "cron"
 	CategoryHeartbeat JourneyCategory = "heartbeat"
 	CategorySubagent  JourneyCategory = "subagent"
@@ -67,9 +70,10 @@ type JourneyIndexRow struct {
 	// Category classifies this candidate by title content markers alone
 	// (see classifyJourney) so a noisy scheduled/heartbeat/subagent
 	// candidate can be told apart from a real task-shaped one without
-	// introducing new guessing (P6.3). Omitted (empty string) means
-	// CategoryTask — the common case doesn't need an explicit tag.
-	Category JourneyCategory `json:"category,omitempty"`
+	// introducing new guessing (P6.3). Always present — including the
+	// common CategoryTask case (P7.4) — so a JSON consumer never has to
+	// treat field absence as a fourth, implicit category value.
+	Category JourneyCategory `json:"category"`
 }
 
 // StoryIndex is vmr-stories.json's whole shape: just Journeys. The parse
@@ -135,7 +139,11 @@ func BuildJourneyIndexRow(chain []*ctxgraph.Lineage, title string, partial bool)
 	for i, l := range chain {
 		requests += len(l.Manifests)
 		for _, m := range l.Manifests {
-			fileSet[m.Path] = true
+			// CanonicalPath, not the raw m.Path, so Files uses the same
+			// coordinate spelling as req (P7.4) — both derive from the
+			// same underlying file, and a consumer joining the two
+			// shouldn't have to re-normalize one of them first.
+			fileSet[ctxgraph.CanonicalPath(m.Path)] = true
 		}
 		lineages[i] = l.LineageID()
 	}

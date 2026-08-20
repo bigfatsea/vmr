@@ -82,7 +82,7 @@ func cmdStory(args []string) error {
 	}
 	outDir := resolveString(*outDirFlag, rc.Output, "reports")
 	includePartial := resolveBool(flagPassed(fs, "include-partial"), *includePartialFlag, rc.IncludePartial)
-	llmAddr := resolveString(*llmAddrFlag, rc.LLMAddr, "")
+	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *llmAddrFlag, rc.LLMAddr, "")
 	llmModel := resolveString(*llmModelFlag, rc.LLMModel, "")
 	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
 	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")

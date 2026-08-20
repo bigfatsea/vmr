@@ -24,20 +24,6 @@ type openClawAware struct{}
 
 func (openClawAware) Name() string { return "openclaw" }
 
-// openClawEnvelopeRe matches OpenClaw's "Conversation info (untrusted
-// metadata)" / "Sender (untrusted metadata)" JSON blocks glued onto the
-// front of real inbound messages.
-var openClawEnvelopeRe = regexp.MustCompile(`(?s)(?:Conversation info|Sender) \(untrusted metadata\):\s*` + "```" + `(?:json)?\n.*?` + "```" + `\s*`)
-
-func stripOpenClawEnvelope(text string) string {
-	return strings.TrimSpace(openClawEnvelopeRe.ReplaceAllString(text, ""))
-}
-
-// leadingBracketRe matches OpenClaw's "[Day Mon DD HH:MM TZ]" user-typed-
-// time prefix, so a message that's just a timestamp plus an
-// (already-stripped) envelope isn't mistaken for a real instruction.
-var leadingBracketRe = regexp.MustCompile(`^\[[^\]]*\]\s*`)
-
 // RealUserText's classification rules: transport scaffolding never counts —
 // OpenClaw runtime wrappers, tool-produced image attachments, compaction
 // summaries, and anthropic messages that are purely tool_result parts.
@@ -64,6 +50,21 @@ func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) 
 		text = stripOpenClawEnvelope(text)
 		if leadingBracketRe.ReplaceAllString(text, "") == "" {
 			return "", false // just a timestamp bracket, nothing real left
+		}
+	} else {
+		// Bare message: peel timestamp/message_id brackets off the front
+		// in a loop, order-agnostic — not a generic "strip any leading
+		// bracket" rule (misfires on a message that opens with one).
+		for {
+			stripped := timestampBracketRe.ReplaceAllString(text, "")
+			stripped = messageIDBracketRe.ReplaceAllString(stripped, "")
+			if stripped == text {
+				break
+			}
+			text = stripped
+		}
+		if strings.TrimSpace(text) == "" {
+			return "", false // only scaffolding brackets, nothing real left
 		}
 	}
 	if rawIdx >= 0 && rawIdx < len(rawMsgs) {

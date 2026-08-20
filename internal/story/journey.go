@@ -126,6 +126,15 @@ type Step struct {
 	// True for the Journey's very first step by construction — every
 	// Journey opens on a real instruction.
 	HumanInitiated bool
+	// Instruction is this Step's triggering real-user instruction, already
+	// filtered through prof.RealUserText and preview-truncated (see
+	// taskseg.LastInstruction/Preview) — "" when the Step isn't
+	// HumanInitiated (or is the Journey's first step, whose instruction is
+	// already shown via the Task title instead) or the delta range had no
+	// real instruction. Computed once in buildFrom from the same `ru` index
+	// newTask's title derivation already uses, not re-derived from raw
+	// NewEvents text.
+	Instruction string
 
 	Finish    string
 	NoReply   bool
@@ -307,6 +316,36 @@ func manifestLocs(l *ctxgraph.Lineage) []ctxgraph.Loc {
 	return locs
 }
 
+// stepContinuation resolves buildFrom's i > 0, non-stitch-boundary case: the
+// applied Edit, delta range, previous Manifest, whether this step opens a
+// new Task, whether it's HumanInitiated, its filtered+preview-truncated
+// triggering instruction (Step.Instruction, "" when not HumanInitiated),
+// and the "revision" relation for a Splice edge's divergence point — split
+// out of buildFrom purely to stay under the architecture review's
+// function-length budget.
+func stepContinuation(l *ctxgraph.Lineage, i int, m *ctxgraph.Manifest, ru taskseg.RealUsers, msgs []chatmsg.Message, prevNoReply bool) (edge *ctxgraph.Edit, deltaStart int, prevManifest *ctxgraph.Manifest, newTask, humanInitiated bool, instr string, revisesHash *ctxgraph.Hash) {
+	e := l.Edges[i-1]
+	edge = &e
+	deltaStart = m.LeadSys + e.LCP
+	prevManifest = l.Manifests[i-1]
+	traceChanged := m.TraceID != "" && prevManifest.TraceID != "" && m.TraceID != prevManifest.TraceID
+	hasNewInstr := taskseg.HasNewInstruction(ru, taskseg.ManifestKeySet(prevManifest), m, deltaStart, len(msgs))
+	newTask = taskseg.IsNewTask(traceChanged, prevNoReply, hasNewInstr)
+	humanInitiated = hasNewInstr
+	if humanInitiated {
+		instr = taskseg.LastInstruction(ru, deltaStart)
+	}
+	// The "revision" relation: a Splice edge's divergence point
+	// (prevManifest.Keys[e.LCP]) is a message being rewritten in place, not
+	// a coincidental new one — attached to the first NewEvent below, so it
+	// doesn't render as "the same thing said twice".
+	if e.Kind == ctxgraph.Splice && e.LCP < len(prevManifest.Keys) {
+		h := prevManifest.Keys[e.LCP]
+		revisesHash = &h
+	}
+	return
+}
+
 // buildFrom is BuildChain's actual assembly logic, factored out so BuildAll
 // can share one batched recs lookup across many chains instead of each
 // chain doing its own FetchRecords call. chain is oldest-lineage-first
@@ -374,6 +413,11 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			// own cases; a plain tool-loop continuation (neither branch
 			// fires) correctly stays false.
 			humanInitiated := ci == 0 && i == 0
+			// instr becomes Step.Instruction — stays "" for the Journey's
+			// first step and at a stitch boundary (both cases' instruction
+			// is already shown via the Task title, see Step.Instruction's
+			// doc comment); only the i > 0 case below computes it.
+			var instr string
 
 			switch {
 			case atStitchBoundary:
@@ -389,24 +433,9 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				// computed delta) is what correctly suppresses content the
 				// predecessor already showed.
 			case i > 0:
-				e := l.Edges[i-1]
-				edge = &e
-				deltaStart = m.LeadSys + e.LCP
-				prevManifest = l.Manifests[i-1]
+				edge, deltaStart, prevManifest, newTask, humanInitiated, instr, revisesHash =
+					stepContinuation(l, i, m, ru, msgs, prevNoReply)
 				stepPrevManifest = prevManifest
-				traceChanged := m.TraceID != "" && prevManifest.TraceID != "" && m.TraceID != prevManifest.TraceID
-				hasNewInstr := taskseg.HasNewInstruction(ru, taskseg.ManifestKeySet(prevManifest), m, deltaStart, len(msgs))
-				newTask = taskseg.IsNewTask(traceChanged, prevNoReply, hasNewInstr)
-				humanInitiated = hasNewInstr
-				// The "revision" relation: a Splice edge's divergence
-				// point (prevManifest.Keys[e.LCP]) is a message being
-				// rewritten in place, not a coincidental new one — recorded
-				// here and attached to the first NewEvent below, so it
-				// doesn't render as "the same thing said twice".
-				if e.Kind == ctxgraph.Splice && e.LCP < len(prevManifest.Keys) {
-					h := prevManifest.Keys[e.LCP]
-					revisesHash = &h
-				}
 			}
 			sysChanged := prevManifest != nil &&
 				(m.HasSys != prevManifest.HasSys || (m.HasSys && prevManifest.HasSys && m.SysHash != prevManifest.SysHash))
@@ -423,7 +452,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			}
 
 			seq++
-			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, stepPrevManifest, prof)
+			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, instr, stepPrevManifest, prof)
 			prevNoReply = step.NoReply
 			appendNewEvents(j, step, m, msgs, rawMsgs, off, deltaStart, revisesHash, seen)
 			curTask.Steps = append(curTask.Steps, step)
@@ -440,10 +469,10 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 // calls, reasoning, NoReply) when the record has a response — split out of
 // buildFrom purely to stay under the architecture review's function-length
 // budget, not because it's an independently meaningful step.
-func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, prevManifest *ctxgraph.Manifest, prof taskseg.Profile) *Step {
+func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, instr string, prevManifest *ctxgraph.Manifest, prof taskseg.Profile) *Step {
 	step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
 		SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
-		HumanInitiated: humanInitiated, PrevManifest: prevManifest}
+		HumanInitiated: humanInitiated, Instruction: instr, PrevManifest: prevManifest}
 	if rec.Client.Response != nil {
 		if s := taskseg.ResponseSummary(rec.Client.Response.Body); s != nil {
 			step.Finish = s.Finish

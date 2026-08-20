@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/story"
 )
 
@@ -375,7 +376,7 @@ func TestCmdStory_Compare(t *testing.T) {
 	md := string(mdData)
 	linkA := "[" + idA + "](journey-" + idA + ".md)"
 	linkB := "[" + idB + "](journey-" + idB + ".md)"
-	for _, want := range []string{linkA, linkB, "调研一下 A 股新股打新收益", "帮我写个 release note", "Model Time", "Evidence Provenance", path} {
+	for _, want := range []string{linkA, linkB, "调研一下 A 股新股打新收益", "帮我写个 release note", "Model Time", "Evidence Provenance", ctxgraph.CanonicalPath(path)} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
 		}
@@ -412,8 +413,9 @@ func TestCmdStory_Compare(t *testing.T) {
 	// input path(s) this comparison was built from, not just be left empty —
 	// otherwise the "证据溯源" text above would be asserting against a
 	// section that silently renders nothing.
-	if cmp.Extras == nil || len(cmp.Extras.Sources) != 1 || cmp.Extras.Sources[0] != path {
-		t.Errorf("comparison json Extras.Sources = %+v, want [%q]", extrasSources(cmp), path)
+	wantSource := ctxgraph.CanonicalPath(path)
+	if cmp.Extras == nil || len(cmp.Extras.Sources) != 1 || cmp.Extras.Sources[0] != wantSource {
+		t.Errorf("comparison json Extras.Sources = %+v, want [%q]", extrasSources(cmp), wantSource)
 	}
 }
 

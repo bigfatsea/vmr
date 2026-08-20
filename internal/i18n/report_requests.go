@@ -51,7 +51,7 @@ func Requests(lang Lang) RequestsText {
 			ScheduledTableHeader: "| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n",
 			FailedIndexTitle:     "VMR 失败请求索引",
 			FailedIndexIntro: func(n int) string {
-				return "专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，按时间排序，每条直链到对应的 details/*.md + *.json。不影响其他报表——这些记录在 vmr-requests.md 及其分组 sibling 文件里照常出现，本文件只是额外的索引。共 " + strconv.Itoa(n) + " 条。\n\n"
+				return "专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，按时间排序，每条直链到对应的 details/*.md。不影响其他报表——这些记录在 vmr-requests.md 及其分组 sibling 文件里照常出现，本文件只是额外的索引。共 " + strconv.Itoa(n) + " 条。\n\n"
 			},
 			FailedTableHeader:      "| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n",
 			AllRequestsTitle:       "全部请求（时间序）",
@@ -86,7 +86,7 @@ func Requests(lang Lang) RequestsText {
 		ScheduledTableHeader: "| Time | finish | dur | fresh/cached/out | cache-eff⭐ | File |\n|---|---|---|---|---|---|\n",
 		FailedIndexTitle:     "VMR Failed Request Index",
 		FailedIndexIntro: func(n int) string {
-			return "Dedicated for error analysis: every request with outcome error / canceled, plus outcome=ok but truncated (stream broke mid-way), sorted by time, each linking straight to its details/*.md + *.json. Purely additive — these records still appear as usual in vmr-requests.md and its per-group sibling files; this file is just an extra index. " + strconv.Itoa(n) + " total.\n\n"
+			return "Dedicated for error analysis: every request with outcome error / canceled, plus outcome=ok but truncated (stream broke mid-way), sorted by time, each linking straight to its details/*.md. Purely additive — these records still appear as usual in vmr-requests.md and its per-group sibling files; this file is just an extra index. " + strconv.Itoa(n) + " total.\n\n"
 		},
 		FailedTableHeader:      "| Time | Session/Task | VM/API | outcome⭐ | dur | File |\n|---|---|---|---|---|---|\n",
 		AllRequestsTitle:       "All Requests (chronological)",

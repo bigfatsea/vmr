@@ -47,8 +47,8 @@ func TestBuildJourneyIndexRow_CheapFields(t *testing.T) {
 	if len(row.Files) != 1 {
 		t.Fatalf("Files = %v, want exactly 1 (both manifests share the same source file)", row.Files)
 	}
-	if row.Files[0] != chain[0].Manifests[0].Path {
-		t.Errorf("Files[0] = %q, want %q", row.Files[0], chain[0].Manifests[0].Path)
+	if want := ctxgraph.CanonicalPath(chain[0].Manifests[0].Path); row.Files[0] != want {
+		t.Errorf("Files[0] = %q, want %q (CanonicalPath, matching req's coordinate spelling)", row.Files[0], want)
 	}
 	// Not built yet — the caller (renderJourney etc.) fills these in only
 	// once story.BuildChain has actually run.

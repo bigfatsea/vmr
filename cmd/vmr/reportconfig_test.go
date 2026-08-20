@@ -203,6 +203,21 @@ func TestResolveString(t *testing.T) {
 	}
 }
 
+func TestResolveStringExplicit(t *testing.T) {
+	if got := resolveStringExplicit(true, "", "yaml", "def"); got != "" {
+		t.Errorf("an explicitly-passed empty flag must win even over a report.yaml value: got %q", got)
+	}
+	if got := resolveStringExplicit(false, "", "yaml", "def"); got != "yaml" {
+		t.Errorf("report.yaml's value must apply when the flag wasn't explicitly passed: got %q", got)
+	}
+	if got := resolveStringExplicit(false, "", "", "def"); got != "def" {
+		t.Errorf("built-in default should apply when neither flag nor report.yaml is set: got %q", got)
+	}
+	if got := resolveStringExplicit(true, "cli", "yaml", "def"); got != "cli" {
+		t.Errorf("an explicitly-passed non-empty flag must win: got %q", got)
+	}
+}
+
 func TestResolveBool(t *testing.T) {
 	yes, no := true, false
 	if got := resolveBool(true, false, &yes); got != false {

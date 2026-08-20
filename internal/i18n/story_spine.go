@@ -22,11 +22,12 @@ type SpineText struct {
 	TagContextCompacted string
 	TagsLine            func(tags string) string
 
-	SpineTitle          string
-	SpineTaskLine       func(idx int, title string) string
-	SpineFindingTag     string                      // appended to a spine Step header that hit a Finding
-	SpineValueTruncated func(more int) string       // appended to a tool-call payload block capped at spineFullCap
-	SpineDetailLink     func(relPath string) string // "→ detail" link to this Step's own record, P5.2
+	SpineTitle                string
+	SpineTaskLine             func(idx int, title string) string
+	SpineFindingTag           string                      // appended to a spine Step header that hit a Finding
+	SpineValueTruncated       func(more int) string       // appended to a tool-call payload block capped at spineFullCap
+	SpineResultValueTruncated func(more int) string       // same, for a paired tool RESULT — points to the NEXT Step's detail link, not this one (the result's full text lives there)
+	SpineDetailLink           func(relPath string) string // "→ detail" link to this Step's own record, P5.2
 
 	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
@@ -84,6 +85,9 @@ func Spine(lang Lang) SpineText {
 			SpineFindingTag: " ⚠️",
 			SpineValueTruncated: func(more int) string {
 				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见本 Step 的详情链接)"
+			},
+			SpineResultValueTruncated: func(more int) string {
+				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下一步的详情链接)"
 			},
 			SpineDetailLink: func(relPath string) string { return "→ [详情](" + relPath + ")\n\n" },
 
@@ -147,6 +151,9 @@ func Spine(lang Lang) SpineText {
 		SpineFindingTag: " ⚠️",
 		SpineValueTruncated: func(more int) string {
 			return "\n… (+" + strconv.Itoa(more) + " more chars — full value at this Step's detail link)"
+		},
+		SpineResultValueTruncated: func(more int) string {
+			return "\n… (+" + strconv.Itoa(more) + " more chars — full value at the next Step's detail link)"
 		},
 		SpineDetailLink: func(relPath string) string { return "→ [detail](" + relPath + ")\n\n" },
 

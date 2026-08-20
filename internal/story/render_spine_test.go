@@ -275,7 +275,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 	t.Run("mid-task instruction: HumanInitiated Step after the first gets an instruction line, not a report line", func(t *testing.T) {
 		w, buf := capture()
 		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
-		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true,
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: "actually also check b.go",
 			NewEvents: []*Event{{Msg: chatmsg.Message{Role: "user", Text: "actually also check b.go"}}}}
 		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
 		renderDecisionSpine(w, j, nil, i18n.EN)
@@ -291,6 +291,23 @@ func TestRenderDecisionSpine(t *testing.T) {
 		// RespText of its own.
 		if !strings.Contains(out, et.SpineInstructionLine("actually also check b.go")) {
 			t.Errorf("expected an instruction line for the mid-task HumanInitiated Step, got %q", out)
+		}
+	})
+
+	t.Run("mid-task instruction that ALSO triggers a tool call still gets an instruction line", func(t *testing.T) {
+		w, buf := capture()
+		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: "actually also check b.go",
+			ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"b.go"}`)}}
+		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		// s2 has a tool call, so it renders via renderSpineStep (not
+		// renderSpineBriefStep) — the instruction line must still appear;
+		// this is the case a mid-task instruction most commonly falls into
+		// in real usage (an instruction almost always triggers a tool call).
+		if !strings.Contains(out, et.SpineInstructionLine("actually also check b.go")) {
+			t.Errorf("expected an instruction line for the mid-task, tool-calling Step, got %q", out)
 		}
 	})
 
