@@ -382,18 +382,38 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 	return out
 }
 
-// buildFindingsForJSON is buildFindings fixed to English — the only
-// call Build itself makes (aggregate.go), so Report2.Efficiency (and
-// therefore vmr-report.json) never varies with the report's display
-// language. Markdown rendering computes its own, separately localized copy
-// by calling buildFindings again directly (section_efficiency.go); see
-// docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约：叙述字段固定
-// 英文" subsection for why the two diverge on purpose. Kept as its own named
-// function (not an inline i18n.EN literal at the call site) so aggregate.go's
-// own call site never needs to import internal/i18n itself — see that file's
-// line-count budget note.
+// buildFindingsForJSON is buildFindings fixed to English — the only call
+// Build itself makes (aggregate.go), so this is Report2.Efficiency's
+// language-agnostic default: a deterministic baseline Build computes
+// without needing a lang parameter. cmd_report.go overwrites it with the
+// report's actual display language before writing vmr-report.json — see
+// LocalizeEfficiency, below. Kept as its own named function (not an inline
+// i18n.EN literal at the call site) so aggregate.go's own call site never
+// needs to import internal/i18n itself — see that file's line-count budget
+// note.
 func buildFindingsForJSON(rep *Report2) []Finding {
 	return buildFindings(rep, i18n.EN)
+}
+
+// LocalizeEfficiency recomputes rep.Efficiency in lang, overwriting the
+// English default Build/BuildCached always populate internally
+// (buildFindingsForJSON) — call this once, after Build/BuildCached
+// returns, before WriteJSON, so vmr-report.json's efficiency[] narrative
+// fields match the language the accompanying Markdown will render in.
+// Build/BuildCached deliberately stay language-agnostic (no lang
+// parameter) — see json_lang_policy_plan_sonnet-5.md §3.1 for why this
+// path was chosen over adding lang to their signatures. Cheap and pure:
+// same already-aggregated rep, no I/O, and buildFindings' "pick the worst
+// one" selection logic doesn't depend on lang (TestBuildFindingsIsDeterministic
+// already pins that), so this can never select a different set of Codes
+// than the English default did — only their rendered text changes.
+//
+// section_efficiency.go's own Markdown renderer deliberately does NOT read
+// rep.Efficiency after this runs — it keeps computing its own independent
+// buildFindings(rep, lang) call, so Markdown rendering never depends on
+// whether (or when) a caller happened to call LocalizeEfficiency first.
+func LocalizeEfficiency(rep *Report2, lang i18n.Lang) {
+	rep.Efficiency = buildFindings(rep, lang)
 }
 
 // ---- per-record extraction helpers (recompute fields ReqInfo keeps

@@ -16,9 +16,9 @@ import (
 // diff table with notable rows starred, and a tool-usage side-by-side.
 // Purely a view over already-computed Comparison data — same fact-layer-
 // renderer convention as RenderMarkdown (no judgment calls happen here).
-// cmp.Rows[].Label is always English (Compare never sees lang); this
-// function looks up each row's localized label from its stable
-// Metric code via i18n.MetricLabel instead of using Label directly.
+// cmp.Rows[].Label is already localized (Compare(a, b, lang) computed it
+// with the same lang the caller passes here) — this function reads it
+// directly rather than looking it up a second time.
 func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
@@ -38,7 +38,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 		if r.Notable {
 			mark = " ⚠️"
 		}
-		w("| %s%s | %s | %s | %s |\n", i18n.MetricLabel(lang, string(r.Metric)), mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDeltaRel(r.DeltaRel))
+		w("| %s%s | %s | %s | %s |\n", r.Label, mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDeltaRel(r.DeltaRel))
 	}
 	w("%s", t.NotableFootnote(notableRelThreshold*100))
 

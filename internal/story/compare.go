@@ -17,139 +17,9 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
-
-// MetricKind tags how a MetricDiff's A/B/values should be rendered — kept as
-// a string tag (not a formatting closure) so Comparison stays a plain,
-// JSON-serializable value.
-type MetricKind string
-
-const (
-	KindMillis   MetricKind = "ms"       // milliseconds, rendered via fmtutil.FmtSeconds
-	KindTokens   MetricKind = "tokens"   // token count, rendered via fmtutil.FmtTokens
-	KindCount    MetricKind = "count"    // plain integer
-	KindRatio    MetricKind = "ratio"    // 0..1 fraction, rendered as a percentage
-	KindMultiple MetricKind = "multiple" // an unbounded ratio (e.g. model/tool time), rendered as "x.xx×"
-)
-
-// notableFloor is the minimum |A-B| a Kind needs to clear before a large
-// RELATIVE difference is worth flagging — otherwise a tiny Journey (e.g. one
-// tool call vs zero) reports a meaningless "∞% different" on pure noise.
-// Values are deliberately generous rather than precise: this is a triage
-// flag ("worth a second look"), not a statistical test.
-var notableFloor = map[MetricKind]float64{
-	KindMillis:   2000, // 2s
-	KindTokens:   200,
-	KindCount:    2,
-	KindRatio:    0.05, // 5 percentage points
-	KindMultiple: 0.3,
-}
-
-// notableRelThreshold is the relative-difference bar (see MetricDiff.DeltaRel)
-// a row must also clear, in addition to notableFloor, to be flagged.
-const notableRelThreshold = 0.30
-
-// MetricDiff is one behavior-profile metric's value in both Journeys, plus a
-// rule-derived "notable" flag — no judgment about WHY they differ, only
-// THAT they differ by more than a fixed bar (design doc's "宁可粗糙也不猜语义").
-type MetricDiff struct {
-	// Metric is a stable, non-localized identifier for programmatic consumption.
-	Metric MetricCode `json:"metric"`
-	Label  string     `json:"label"`
-	Kind   MetricKind `json:"kind"`
-	A      float64    `json:"a"`
-	B      float64    `json:"b"`
-	// DeltaRel is (B-A) / max(|A|,|B|) — signed relative change from A to B,
-	// 0 when both are exactly 0 (no signal, not a 0% "no change" claim).
-	DeltaRel float64 `json:"delta_rel"`
-	Notable  bool    `json:"notable"`
-}
-
-// MetricCode identifies which behavior-profile metric a MetricDiff row is,
-// independent of its (localized) display Label. See MetricDiff.Metric.
-type MetricCode string
-
-const (
-	MetricModelMS              MetricCode = "model_ms"
-	MetricAgentExecMS          MetricCode = "agent_exec_ms"
-	MetricHumanIdleMS          MetricCode = "human_idle_ms"
-	MetricNetWorkingMS         MetricCode = "net_working_ms"
-	MetricModelToolRatio       MetricCode = "model_tool_ratio"
-	MetricToolCallCount        MetricCode = "tool_call_count"
-	MetricDuplicateActionRate  MetricCode = "duplicate_action_rate"
-	MetricErrorRecoveryCount   MetricCode = "error_recovery_count"
-	MetricPlanExecRatio        MetricCode = "plan_exec_ratio"
-	MetricContextUtilization   MetricCode = "context_utilization"
-	MetricCompactionCount      MetricCode = "compaction_count"
-	MetricCompactionLossTokens MetricCode = "compaction_loss_tokens"
-	// MetricModelSwitchCount  is len(Metrics.ModelSwitches) — a
-	// ROUTING-ENVIRONMENT variable, not an agent-behavior one: failover,
-	// sticky-TTL expiry, and routing-policy changes all produce a switch
-	// with no change in what the agent itself did. In corpus.go's
-	// correlation matrix this reads as "did these two groups' routing
-	// environment differ", never as "did the agent behave differently".
-	MetricModelSwitchCount     MetricCode = "model_switch_count"
-	MetricOutputRepetitionRate MetricCode = "output_repetition_rate"
-)
-
-// metricSpec is one behavior-profile metric's full definition: its stable
-// Code, its (English, un-localized — see MetricDiff.Label) display Label,
-// how to render it (Kind), and how to pull its value out of a Metrics
-// value. metricSpecs below is the ONE authoritative list of the behavior-
-// profile metrics vmr tracks — both Compare's per-row diff and corpus.go's
-// per-metric distribution/correlation/Markdown-rendering range over this
-// same slice, instead of each independently declaring which metrics exist
-// (corpus.go used to hand-maintain its own copy of this exact
-// code/kind/extractor mapping across three separate declarations, kept in
-// sync with Compare only by a comment asserting they matched).
-type metricSpec struct {
-	Code  MetricCode
-	Label string
-	Kind  MetricKind
-	Value func(Metrics) float64
-}
-
-// metricSpecs' order is Comparison.Rows' order — fixed, not sorted by
-// magnitude, so repeated runs against the same two Summaries produce
-// byte-identical output (see Comparison's own doc comment).
-var metricSpecs = []metricSpec{
-	{MetricModelMS, "Model Time", KindMillis, func(m Metrics) float64 { return float64(m.ModelMS) }},
-	{MetricAgentExecMS, "Agent-Side Execution Time", KindMillis, func(m Metrics) float64 { return float64(m.AgentExecMS) }},
-	{MetricHumanIdleMS, "Human Idle Time", KindMillis, func(m Metrics) float64 { return float64(m.HumanIdleMS) }},
-	{MetricNetWorkingMS, "Net Working Time", KindMillis, func(m Metrics) float64 { return float64(m.NetWorkingMS) }},
-	{MetricModelToolRatio, "Model/Tool Time Ratio", KindMultiple, func(m Metrics) float64 { return m.ModelToToolRatio }},
-	{MetricToolCallCount, "Tool Call Count", KindCount, func(m Metrics) float64 { return float64(m.ToolCallCount) }},
-	{MetricDuplicateActionRate, "Duplicate Action Rate", KindRatio, func(m Metrics) float64 { return m.DuplicateActionRate }},
-	{MetricErrorRecoveryCount, "Error Recovery Count", KindCount, func(m Metrics) float64 { return float64(m.ErrorRecoveryCount) }},
-	{MetricPlanExecRatio, "Plan/Execution Ratio", KindRatio, func(m Metrics) float64 { return m.PlanExecRatio }},
-	{MetricContextUtilization, "Context Utilization", KindRatio, func(m Metrics) float64 { return m.ContextUtilization }},
-	{MetricCompactionCount, "Compaction Count", KindCount, func(m Metrics) float64 { return float64(m.CompactionCount) }},
-	{MetricCompactionLossTokens, "Compaction Information Loss", KindTokens, func(m Metrics) float64 { return float64(m.CompactionLossTokens) }},
-	{MetricModelSwitchCount, "Model Switch Count", KindCount, func(m Metrics) float64 { return float64(len(m.ModelSwitches)) }},
-	{MetricOutputRepetitionRate, "Output Repetition Rate", KindRatio, func(m Metrics) float64 { return m.OutputRepetitionRate }},
-}
-
-func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {
-	d := MetricDiff{Metric: code, Label: label, Kind: kind, A: a, B: b}
-	denom := a
-	if abs(b) > abs(a) {
-		denom = b
-	}
-	if denom != 0 {
-		d.DeltaRel = (b - a) / abs(denom)
-	}
-	floor := notableFloor[kind]
-	d.Notable = abs(b-a) >= floor && abs(d.DeltaRel) >= notableRelThreshold
-	return d
-}
-
-func abs(f float64) float64 {
-	if f < 0 {
-		return -f
-	}
-	return f
-}
 
 // ToolShareDiff is one tool name's call-count share in each Journey, for the
 // side-by-side tool-usage comparison — a qualitative complement to the
@@ -203,19 +73,16 @@ type Comparison struct {
 
 // Compare diffs a and b's Metrics — the whole of Phase 4d ("两份剖面做差就是对比报告的骨架"). Order is fixed:
 // caller decides which Journey is "A" and which is "B" (e.g. baseline vs
-// candidate); Compare doesn't sort or normalize that choice away.
-func Compare(a, b JourneySummary) Comparison {
+// candidate); Compare doesn't sort or normalize that choice away. lang
+// picks each row's localized Label (i18n.MetricLabel) — the same lookup
+// Markdown rendering already used, now folded into the JSON-producing path
+// too (json_lang_policy_plan_sonnet-5.md), so compare-*.json's rows[].label
+// matches the compare-*.md table generated from the same call.
+func Compare(a, b JourneySummary, lang i18n.Lang) Comparison {
 	ma, mb := a.Metrics, b.Metrics
-	// Labels here are fixed English literals, not routed through i18n —
-	// Compare is deliberately language-agnostic (see
-	// docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection):
-	// the JSON these rows serialize into (compare-*.json) is always English,
-	// exactly like report.Finding's persisted copy. RenderComparisonMarkdown
-	// looks up the localized label per row via i18n.MetricLabel(lang,
-	// string(row.Metric)) at render time — see render_compare.go.
 	rows := make([]MetricDiff, len(metricSpecs))
 	for i, spec := range metricSpecs {
-		rows[i] = metricDiff(spec.Code, spec.Label, spec.Kind, spec.Value(ma), spec.Value(mb))
+		rows[i] = metricDiff(spec.Code, i18n.MetricLabel(lang, string(spec.Code)), spec.Kind, spec.Value(ma), spec.Value(mb))
 	}
 	return Comparison{A: journeyRef(a), B: journeyRef(b), Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }

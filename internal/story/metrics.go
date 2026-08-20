@@ -414,19 +414,17 @@ type JourneySummary struct {
 // Summarize builds j's JourneySummary, computing Metrics and Findings
 // in the specified target language. The finding Code fields remain stable
 // canonical identifiers across languages, while human-readable Finding/Action
-// texts follow lang, keeping .json and .md outputs fully aligned. This is
-// staged progress toward a project-wide lang-follows-everywhere policy that
-// isn't fully applied yet — compare-*.json's MetricDiff.Label and
-// vmr-report.json's efficiency[] still fix to EN; see
-// docs/future-strategy/json_lang_policy_plan_sonnet-5.md before extending
-// or reverting this.
+// texts follow lang, keeping .json and .md outputs fully aligned —
+// compare-*.json's MetricDiff.Label and vmr-report.json's efficiency[]
+// follow the same lang-follows-everywhere policy (P8,
+// docs/future-strategy/json_lang_policy_plan_sonnet-5.md).
 //
 // The -compare path (cmd_story.go's compareJourneys) calls this on both
-// sides purely to get Metrics for Compare(sA, sB) — Compare/journeyRef only
-// ever project ID/Title/From/To/Metrics out of the result, so the Structure
-// this also computes (P4) is built and discarded on that path. Millisecond-
-// scale waste, not worth a second entry point for; noted here so it reads
-// as a known, accepted cost rather than an oversight.
+// sides purely to get Metrics for Compare(sA, sB, lang) — Compare/journeyRef
+// only ever project ID/Title/From/To/Metrics out of the result, so the
+// Structure this also computes (P4) is built and discarded on that path.
+// Millisecond-scale waste, not worth a second entry point for; noted here
+// so it reads as a known, accepted cost rather than an oversight.
 func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
 	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil)
 }

@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/story/render_compare.go (compare-*.md) and the 12
+// Pairs with internal/story/render_compare.go (compare-*.md) and the 14
 // behavior-profile metric labels internal/story/compare.go's Compare
 // produces. MetricLabel takes the metric code as a plain string (not
 // story.MetricCode) — internal/i18n must not import internal/story (it

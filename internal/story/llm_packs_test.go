@@ -202,7 +202,7 @@ func TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T
 
 	packFor := func(j *Journey) EvidencePack {
 		s := Summarize(j, i18n.EN) // computes Structure — the thing under test must not leak through
-		cmp := Compare(s, s)
+		cmp := Compare(s, s, i18n.EN)
 		return BuildEvidencePack(j, j, cmp, i18n.EN)
 	}
 

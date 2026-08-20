@@ -53,7 +53,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 全部实现在 `internal/report` 一个包里：`aggregate.go`（`buildInternal` 及其 `aggState`/`scanFiles`/`finishBuckets`/`sortBuckets` 三段式——单遍扫描输入文件、收尾、排序，`Build`/`BuildCached` 两个对外入口本身在 `build_cached.go`）、`ingest.go`（各 Row 类型的累加半区：`TrafficStats.Ingest`/`Finish` 是 `Row`/`HourRow`/`ClientRow`/`WorkloadRow`/`SessionRow` 共享的 token/时延/量级核心，`EndpointRow` 因 attempt/request 两种粒度不共用它，单独留着 `IngestAttempt`/`IngestRequest`）、`recextract.go`（`buildRec2` 等单条记录抽取）、`session.go`（会话/任务分组）、`rows.go`（`Report2`、`TrafficStats` 及各 Row 类型 = `vmr-report.json` 的公开 schema）、`metrics.go`（派生指标 + `buildFindings`）、`render_doc.go`（章节运行顺序 + 共享的 `mdTable`）+ 一个章节一个文件的 `section_*.go`（**新增章节 = 新增文件，不是把某个文件改大**，`internal/archtest` 的行数预算逼着遵守这条）、`detail.go`/`render.go`（逐请求详单）、`requests.go`（`vmr-requests.md` 索引）、`cost.go`（`costFor` 成本公式 + 端点标签拆分）、`pricing.go`（定价摘要类型——实际的三层解析引擎在 `internal/pricing`，见其包注释的"两个消费者"说明）。与审计记录格式强耦合：改动 `audit.Record` 结构必须同步改这个包及其测试。
 
-**输出语言**：`vmr-report.md`/`vmr-requests*.md`/`details/*.md` 的文案（英文/中文，默认英文）来自渲染函数新增的 `lang i18n.Lang` 参数；`vmr-report.json` 的叙述性字段（`Finding.Finding` 等）固定英文，不随语言变化——`Build` 本身完全不接收 `lang`。完整机制（`internal/i18n` 架构、`report.yaml`/`-lang`、JSON/Markdown 语言契约）见 §4。
+**输出语言**：`vmr-report.md`/`vmr-requests*.md`/`details/*.md` 的文案（英文/中文，默认英文）来自渲染函数新增的 `lang i18n.Lang` 参数；`vmr-report.json` 的叙述性字段（`Finding.Finding` 等）跟随同一个 `lang`——`Build` 本身仍不接收 `lang` 参数，`cmd_report.go` 在写 JSON 之前调用 `report.LocalizeEfficiency(rep, lang)` 按实际语言覆写。完整机制（`internal/i18n` 架构、`report.yaml`/`-lang`、JSON/Markdown 语言契约）见 §4。
 
 ### 2.1 两遍读取：`AnalyzeSessions` + `Build`
 
@@ -193,7 +193,7 @@ vmr story -journey <id前缀或恰好命中一个的通配符>|-compare id1,id2 
 vmr story -corpus [-o dir] [file|glob]...
 ```
 
-**输出语言**：与 `vmr report` 同一套机制（见 §4），`Build`/`BuildChain`/`BuildAll` 多一个 `lang i18n.Lang` 参数。唯一的例外是 `journey.go` 自己的两个标题占位符（无真实用户指令时的兜底："(tool loop continuation)"/"(untitled)"）——它们**跟随** `lang`，不像 `Finding`/`MetricDiff` 那样固定英文：`Journey.Title`/`Task.Title` 本来就是用户原话的逐字引用、从不保证是英文，`Journey` 另有内容寻址的 `ID` 承担 identity 职责，`Title` 从未被当成 identity 用过，所以这里跟随语言不会重演"展示文案被当成 identity"的问题。`journey-<id>.json`/`compare-*.json` 里其余的叙述字段（`MetricDiff.Label`）仍然固定英文——`Compare` 本身不接收 `lang`（§4.2）。
+**输出语言**：与 `vmr report` 同一套机制（见 §4），`Build`/`BuildChain`/`BuildAll` 多一个 `lang i18n.Lang` 参数，`Compare` 同样接收 `lang`（§4.3）——`journey-<id>.json`/`compare-*.json` 里的叙述字段（`Finding`/`MetricDiff.Label` 等）都跟随它。`journey.go` 自己的两个标题占位符（无真实用户指令时的兜底："(tool loop continuation)"/"(untitled)"）同样跟随 `lang`：`Journey.Title`/`Task.Title` 本来就是用户原话的逐字引用、从不保证是英文，`Journey` 另有内容寻址的 `ID` 承担 identity 职责，`Title` 从未被当成 identity 用过，所以这里跟随语言不会重演"展示文案被当成 identity"的问题。
 
 - **无参数**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览）。`-journey` 接受逗号分隔的多个 id/id 前缀/`path.Match` 风格通配符，合并去重后渲染全部匹配——只匹配到一个走单 Journey 渲染路径，匹配到多个则复用 `-render-all` 的批处理路径（`renderJourneys`，`cmd_story.go`）。任一 token 一个都没匹配上，整个命令报错（不静默丢弃），避免拼错的 token 被悄悄漏掉。
 - **`-render-all`**：批量渲染全部非断头候选，共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
@@ -406,21 +406,61 @@ type EfficiencyText struct {
 
 ### 4.2 identity 与展示文案分离
 
-展示文案一度被当成 identity 用，且已经泄漏进 JSON——`internal/report/metrics.go` 的 `buildFindings` 产出的 `Finding{Finding: "工具 schema 浪费", ...}` 这个字符串本身既写进 `vmr-report.json` 的 `efficiency[].finding` 字段，又被 `aggregate_test.go` 直接当 identity 比较；`internal/story/compare.go` 的 `metricDiff("模型时间", ...)` 是同一个模式，12 个标签写进 `compare-*.json` 的 `rows[].label`，`compare_test.go` 同样按标签字符串断言。只要标题字符串还兼职 identity，语言一旦可配置，测试就会在切换语言时随机失败。
+展示文案一度被当成 identity 用，且已经泄漏进 JSON——`internal/report/metrics.go` 的 `buildFindings` 产出的 `Finding{Finding: "工具 schema 浪费", ...}` 这个字符串本身既写进 `vmr-report.json` 的 `efficiency[].finding` 字段，又被 `aggregate_test.go` 直接当 identity 比较；`internal/story/compare.go` 的 `metricDiff("模型时间", ...)` 是同一个模式，14 个标签写进 `compare-*.json` 的 `rows[].label`，`compare_test.go` 同样按标签字符串断言。只要标题字符串还兼职 identity，语言一旦可配置，测试就会在切换语言时随机失败。
 
 修法：`Finding`/`MetricDiff` 各自新增一个不随语言变化的稳定编码字段——`Finding.Code`（`FindingCode`，如 `tool_schema_waste`）、`MetricDiff.Metric`（`MetricCode`，如 `model_ms`）——测试和任何未来的程序化消费者都只依赖编码，`Finding`/`Label` 变回纯展示文案。这一步在引入 `internal/i18n` 之前就独立完成、独立验证，把"改 identity"和"改语言"两件事的风险分开。
 
-### 4.3 JSON 契约：叙述字段固定英文，本地化只发生在渲染层
+### 4.3 JSON 契约：叙述字段跟随 `-lang`，`Code`/`EvidenceAnchor` 是稳定机器锚点
 
-> **2026-08-17 更新提示**：本节描述的是 `vmr-report.json`/`compare-*.json` 目前仍然维持的规则。`journey-<id>.json` 已经在一次未完成的改动里偏离了这条规则（`Finding.Finding`/`Evidence`/`Action` 现在跟随 `-lang`，不再固定英文），这条偏离是否要反过来推广成项目级新规则、还是应该回退，是一个待拍板的开放问题，完整分析见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`。在那份文档给出结论并回填本节之前，不要假定本节当前描述的规则对 `story` 包仍然全部成立。
+`journey-<id>.json`、`compare-*.json`、`vmr-report.json` 三种产物的叙述性字段
+（`Finding.Finding`/`Implicated`/`Action`、`MetricDiff.Label`）**统一跟随 `-lang`**，
+与同一次调用产出的 `.md` 用词一致——不再存在"JSON 版本固定英文、只有 Markdown 跟随语言"的
+特例。程序化消费方唯一应该依赖的稳定锚点是 `FindingCode`/`MetricCode` 这类枚举标识符（如
+`tool_schema_waste`/`model_ms`，§4.2 已经把它们从展示文案里分离出来）和 `EvidenceAnchor` 这类
+原文逐字摘录——它们从不参与本地化，`Code` 已经是"写一个脚本时不用先判断这次报告用了哪种语言"
+这句话的全部依据，叙述句子再额外锁死英文是重复保险，不是唯一防线。
 
-`vmr-report.json`/`compare-*.json` 里的叙述性字段（`Finding.Finding`/`Implicated`/`Action`、`MetricDiff.Label`）遵循同一条规则：**落盘的 JSON 里永远是英文**，不随 `-lang` 变化；`-lang zh` 只改变 `.md` 里显示的文字，不改变 JSON 一个字节。JSON 因此是稳定的英文机器接口，Markdown 是本地化的人读文档——写一个读 `vmr-report.json` 的脚本时，不需要先搞清楚"这个字段会不会因为运行报告的人选了中文而变成中文"。
+这条规则最早只对 `journey-<id>.json` 成立（修 phase1a/1b 复核问题 3-1 时的副产品），是一次没有
+配套决定的局部改动；`compare-*.json`/`vmr-report.json` 曾经维持相反的规则（叙述字段固定英文），
+两条规则在同一个项目里并存过一段时间，登记在 `docs/KNOWN_ISSUES_sonnet-5.md` 曾经的 `§1.19`。
+`docs/future-strategy/json_lang_policy_plan_sonnet-5.md` 论证了统一方向并给出实施大纲，
+`docs/future-strategy/story_report_p8_action_plan_sonnet-5.md`（P8 阶段）按该方案落地，把
+`compare-*.json`/`vmr-report.json` 也改成跟随 `-lang`，本节正文回填的就是落地后的最终状态。
 
-两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构不同：
-- **`MetricDiff.Label`**（12 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary) Comparison` 完全不接收 `lang`，`Label` 是硬编码英文字面量直接进 JSON；渲染 `compare-*.md` 时，`RenderComparisonMarkdown(cmp, lang)` 拿每行的 `Metric` 编码，用一张纯静态的 `i18n.MetricLabel(lang, code)` 查表换成目标语言。
-- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子，如"gpt-tools-v2/12 请求"）：不能只查一张标题表——`buildFindings(rep *Report2, lang i18n.Lang) []Finding` 保留 `lang` 参数，但**被调用两次**：`report.Build` 内部通过不导出的包装函数 `buildFindingsForJSON(rep) { return buildFindings(rep, i18n.EN) }` 调用，固定传英文写进 JSON；`section_efficiency.go` 的 `renderEfficiency` 直接再调一次 `buildFindings(rep, lang)`，拿一份只用于本次渲染、渲染完即丢弃的本地化副本，不回写 `rep.Efficiency`。两次调用读的是同一个已聚合完毕的 `rep`，"挑出最浪费的那个 tool/workload"这一步的选择逻辑不依赖 `lang`，因此两次调用必然选中同一批 `Code`（`TestBuildFindingsIsDeterministic` 一类的既有测试已经覆盖"选择结果确定"这条前提）。`Build` 自身的签名和函数体因此完全不需要改动——`aggregate.go` 里唯一的改动是把调用目标从 `buildFindings(rep)` 换成 `buildFindingsForJSON(rep)`，不新增参数、不新增 import，`aggregate.go` 因此不用为这个特性在文件行数预算里再占一行。
+两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构、以及各自函数签名要不要动
+的取舍不同：
+- **`MetricDiff.Label`**（14 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary, lang
+  i18n.Lang) Comparison` 直接接收 `lang`，循环体里对每一行调用
+  `i18n.MetricLabel(lang, string(spec.Code))`（一张纯静态查表，`internal/i18n/story_compare.go`）
+  算出本地化 `Label` 直接写进 `Comparison.Rows`。渲染 `compare-*.md` 时，
+  `RenderComparisonMarkdown(cmp, lang)` 直接读 `cmp.Rows[].Label`，不再重复查表——它已经是
+  `Compare` 用同一个 `lang` 算好的值。`MetricDiff.Label` 相关的纯计算机制（`MetricKind`/
+  `MetricDiff`/`MetricCode`/`metricSpec`/`metricSpecs`/`metricDiff`）拆到了独立文件
+  `internal/story/compare_metrics.go`（P8.1，为了给 `compare.go` 腾出行数预算）。
+- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子，如"gpt-tools-v2/12 请求"）：
+  不能只查一张标题表——`buildFindings(rep *Report2, lang i18n.Lang) []Finding` 保留 `lang`
+  参数，`report.Build`/`BuildCached` 自身**不接收** `lang`（刻意保持语言无关，见下段），内部仍然
+  通过不导出的包装函数 `buildFindingsForJSON(rep) { return buildFindings(rep, i18n.EN) }`
+  算出一份英文默认值写进 `rep.Efficiency`；`cmd_report.go` 在调用 `WriteJSON` 之前，用它已经
+  拿到手的 `lang` 调用新增的导出函数 `report.LocalizeEfficiency(rep, lang)`
+  （`rep.Efficiency = buildFindings(rep, lang)`）覆写这份默认值，`vmr-report.json` 因此落盘的
+  是按实际语言算出的版本。`section_efficiency.go` 的 `renderEfficiency`**不读**被覆写后的
+  `rep.Efficiency`，继续保留它自己独立调用 `buildFindings(rep, lang)` 的既有实现，理由见下段。
 
-`story.Interpret`（LLM 解读层）的 system prompt 本身明确指示模型"用 en/中文回答"，见 §4.5。
+**为什么 `story`/`report` 两侧选了不同的机制，而不是都给 `Build` 加 `lang` 参数**：`Compare`
+把 `lang` 直接做成函数参数，同一次调用产出的 `Label` 保证和调用时的 `lang` 一致，`RenderCompar
+isonMarkdown` 复用 `cmp.Rows[].Label` 没有额外的顺序依赖风险。`report` 这边选择的是"`Build()`
+之后由 `cmd_report.go` 按特定顺序覆写 `rep.Efficiency`"——如果 `renderEfficiency` 也去读被覆写后
+的值，就会引入一条隐藏的调用顺序契约（`Markdown()` 必须在 `LocalizeEfficiency()` 之后调用，
+否则读到英文默认值），任何未来新增的调用点（测试、脚本、`Markdown()` 的其它调用方）一旦不遵守
+这个顺序就会静默产出语言不一致的输出，且没有编译期或运行期报错。给 `Build`/`BuildCached`
+（分别已有 6/9 个参数）加 `lang` 参数本可以避免这个顺序依赖，但会牵动这两个已经很长的函数和
+`internal/report` 包内所有直接调用它们的测试（数十处），改动面比"新增一个下游覆写步骤 + 渲染层
+保持独立计算"大两个数量级，选后者是这次的权衡结果——多付出的成本只是一次内存内的纯函数重复
+调用（`buildFindings` 本身零 I/O），可忽略不计。
+
+`story.Interpret`（LLM 解读层）的 system prompt 本身明确指示模型"用 en/中文回答"，见 §4.5，
+从来不受这条规则约束、也不需要约束——它产出的是模型生成的自由文本，不是模板拼句。
 
 ### 4.4 配置与命令行
 
@@ -503,7 +543,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 | 报表的独立 compaction 文本匹配（`linkCompactions`）与 `ctxgraph` 的结构化缝合（`linkStitchedLineages`）并存，不用后者取代前者 | 统一成一套机制 | 两者覆盖不同场景：结构化缝合基于精确哈希匹配，对"零字面重合的历史重写"没有信号；文本匹配能覆盖这个盲区，代价是精度较低。合并会让报表在最需要它的场景（标准的独立摘要调用）里失去唯一还有效的信号 |
 | `internal/chatmsg` 承接三方（`ctxgraph`/`story`/`report`）共享的消息解析/实体抽取，不各自维护一份 | 各包各自实现 | 曾经真实发生过：`extractEntities` 一度是 `story` 包的私有函数，`report` 需要同样的能力时面临"复制一份"或"下沉"的选择——下沉到两者都已依赖的 `chatmsg`，换来的是以后只有一处规则要维护，不增加任何一方的依赖面 |
 | 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`story` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |
-| 叙述字段（`Finding.Finding`/`MetricDiff.Label`）在 JSON 里固定英文，只有 Markdown 跟随 `-lang`（§4.3） | JSON 也跟随语言 | JSON 是给脚本消费的机器接口；固定英文让任何下游消费者不用先判断"这次报告是用哪个语言生成的"再解析同一个字段 |
+| 叙述字段（`Finding.Finding`/`MetricDiff.Label`）跟随 `-lang`，与 Markdown 一致（§4.3） | JSON 里固定英文，只有 Markdown 本地化 | `Code`/`MetricCode`/`EvidenceAnchor` 已经是程序化消费方唯一应该依赖的稳定锚点（§4.2）；叙述句子再额外锁死英文是重复保险，不是唯一防线。这个项目里唯一真实存在的 JSON 消费脚本（`_eval/calibrate_p1b.go`）只匹配 `EvidenceAnchor`，从不依赖叙述文本本身；≤3 人、聚焦中国大陆场景的团队，`report.yaml` 的 `language: zh` 基本等于"全程只想看中文"，JSON 里混一半英文对这个使用模式没有实际价值，只增加认知负担 |
 | 动态拼句用函数值字段（`func(args...) FindingText`），不用位置化占位符模板（§4.1） | 一个格式串 + 两语言共享同一套 `%s` 占位符顺序 | 中英文语序天然不同；共享模板要求译者数第几个占位符对应哪个参数，是一类肉眼难查的错误源，`go vet` 的 printf 检查覆盖不到"两边模板参数对不上"这类错误。函数字段让每个语言分支各自是独立类型检查过的 `Sprintf` 调用 |
 
 ## 6. 实测结论（真实语料，7112 条记录 / 809K 条消息实例 / 752 会话）

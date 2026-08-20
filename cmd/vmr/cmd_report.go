@@ -342,6 +342,7 @@ func cmdReport(args []string) error {
 		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
 	}
 	rep.Meta.DetailsEnabled = detailsOn
+	report.LocalizeEfficiency(rep, lang)
 	jsonPath := filepath.Join(outDir, "vmr-report.json")
 	mdPath := filepath.Join(outDir, "vmr-report.md")
 	if err := report.WriteJSON(rep, jsonPath); err != nil {

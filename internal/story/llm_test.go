@@ -48,7 +48,7 @@ func testPack(t *testing.T) EvidencePack {
 	t.Helper()
 	a := JourneySummary{ID: "j-a", Title: "A", Metrics: Metrics{ModelMS: 1000}}
 	b := JourneySummary{ID: "j-b", Title: "B", Metrics: Metrics{ModelMS: 2000}}
-	cmp := Compare(a, b)
+	cmp := Compare(a, b, i18n.EN)
 	return EvidencePack{Comparison: cmp, TaskTitlesA: []string{"t1"}, TaskTitlesB: []string{"t1"}}
 }
 
@@ -72,7 +72,7 @@ func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	s := Summarize(j, i18n.EN)
-	cmp := Compare(s, s)
+	cmp := Compare(s, s, i18n.EN)
 
 	pack := BuildEvidencePack(j, j, cmp, i18n.EN)
 

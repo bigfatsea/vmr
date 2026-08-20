@@ -13,14 +13,18 @@ import (
 
 // ---- §7 效率与浪费 ----
 //
-// This section does NOT render rep.Efficiency directly — that field is
-// always English (report.Build populates it via buildFindingsForJSON, fixed
-// to i18n.EN, so vmr-report.json's efficiency[] never varies by language;
-// see docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection).
-// Markdown rendering needs its own localized copy, so it calls buildFindings
-// again with the caller's real lang — a second, cheap, in-memory-only call
-// over the same already-aggregated rep; the result is used only for display
-// and never written back into rep.Efficiency.
+// This section does NOT render rep.Efficiency directly, even though by the
+// time this runs it may already hold the correctly localized copy
+// (cmd_report.go calls report.LocalizeEfficiency(rep, lang) before
+// WriteJSON, ahead of Markdown — see docs/VirtualModelRouter_Design_v4_Analytics.md's
+// "JSON 契约" subsection). Deliberately: reading it here would make
+// Markdown's language correctness depend on WriteJSON having already run
+// with this exact lang, an ordering contract with no compiler or runtime
+// enforcement. Markdown computes its own independent localized copy
+// instead, calling buildFindings again with the caller's real lang — a
+// second, cheap, in-memory-only call over the same already-aggregated rep
+// — so it's self-sufficient regardless of call order, and never writes
+// back into rep.Efficiency.
 func renderEfficiency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
 	t := i18n.Efficiency(lang)
 	w("## %s\n\n", t.Title)

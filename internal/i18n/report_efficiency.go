@@ -3,11 +3,13 @@
 // Pairs with internal/report/section_efficiency.go (§7 Efficiency & Waste)
 // and internal/report/metrics.go's buildFindings. See
 // docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection: the
-// six Finding* closures here are called twice by report.buildFindings — once
-// with EN (feeding the always-English Report2.Efficiency JSON field) and
-// once with the caller's real language (feeding renderEfficiency's Markdown
-// output only). Code (report.FindingCode) never appears here — it's the
-// caller's stable identifier and never varies by language.
+// six Finding* closures here are called with EN by Build (populating
+// Report2.Efficiency's language-agnostic default), again with the report's
+// real language by cmd_report.go's LocalizeEfficiency (overwriting it
+// before vmr-report.json is written), and again independently by
+// renderEfficiency for the Markdown output — three calls, same selection
+// logic, only the text differs. Code (report.FindingCode) never appears
+// here — it's the caller's stable identifier and never varies by language.
 package i18n
 
 import "strconv"

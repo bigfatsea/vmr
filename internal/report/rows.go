@@ -460,12 +460,13 @@ type ToolShapeRow struct {
 type Finding struct {
 	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
-	// Finding/Value/Implicated/Action are narrative text. They are always
-	// English in this persisted struct, regardless of report language —
-	// buildFindings is always called with i18n.EN to populate Report2.
-	// A localized copy for Markdown rendering is produced separately, by
-	// calling buildFindings again with the target language; it is never
-	// derived from this struct after the fact.
+	// Finding/Value/Implicated/Action are narrative text. Build populates
+	// them with the English default (buildFindingsForJSON); cmd_report.go
+	// overwrites Report2.Efficiency with the report's actual display
+	// language (LocalizeEfficiency) before writing vmr-report.json, so
+	// the persisted JSON follows -lang like the Markdown does. Markdown
+	// rendering computes its own separate localized copy rather than
+	// reading this struct post-overwrite — see section_efficiency.go.
 	Finding    string `json:"finding"`
 	Metric     string `json:"metric"`
 	Value      string `json:"value"`

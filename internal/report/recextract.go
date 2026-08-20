@@ -55,7 +55,11 @@ func buildRequestRow(rc *rec2) RequestRow {
 }
 
 // WriteJSON writes the aggregate report JSON (vmr-report.json). Per-request
-// rows are NOT included (they live in vmr-requests.json).
+// rows are NOT included (they live in vmr-requests.json). Call
+// LocalizeEfficiency(rep, lang) first if rep.Efficiency should reflect the
+// report's actual display language — WriteJSON serializes rep exactly as
+// given, it never localizes anything itself; a caller that skips
+// LocalizeEfficiency gets Build's English default silently, with no error.
 func WriteJSON(rep *Report2, path string) error {
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {

@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**（2026-08-20 P7 收尾后重算）：中危 6 项、低危 16 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。`1.32`（`vmr analyze` 强制 `-render-all`，中危）仍待 P9 处理；`1.21`/`1.28`/`1.31` 三项已由 P7 修复并移入 §3；`1.33`/`1.34`（集中登记的文档与小口径缺口）各自四项/三项已由 P7 处理，剩余子项留给 P9；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
+- **§1 分布**（2026-08-20 P8 收尾后重算）：中危 5 项、低危 16 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。`1.32`（`vmr analyze` 强制 `-render-all`，中危）仍待 P9 处理；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）已修复并移入 §3；`1.33`/`1.34`（集中登记的文档与小口径缺口）各自四项/三项已由 P7 处理，剩余子项留给 P9；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
@@ -147,22 +147,6 @@
 - **为什么待定**：黄金样本挑选与人工标注是需要投入实际时间的判断性工作，不是能自动化补全的一步；且目前抽样规模下六个判别器都表现良好，没有观察到需要立即处理的误报模式，不构成阻塞性风险。
 - **推进方式**：`_eval/calibrate_p1b.go` 已经是一个可直接复用的真实校准工具——扩大 `-input`（覆盖更多日期的日志）与 `-limit`（采样更多 Journey），把输出交给人工逐条标注 TP/FP，即可补完 §3 要求的完整校准报告；不需要另起工具。
 - **登记来源**：`archived/phase1b_implementation_plan_gemini-3.7-flash.md` §7.4.1（Claude Sonnet 5 复核记录，2026-08-17）——该复核发现原有校准脚本是自证循环的假校准（mock LLM 响应、从未调用生产判别器函数），重写为真实校准工具后才有这条真实但尚不完整的结果。
-
-### 1.19 [中] JSON 输出的语言策略：`story`/`report` 两个包目前不一致
-
-- **现状**：在修复 phase1a/1b 复核发现的 3-1（journey JSON 缺 LLM Finding）时，`internal/story` 顺带把 `journey-<id>.json` 的 `Findings`/`LLMFindings` 文本从"固定英文"改成了跟随 `-lang`（`Summarize(j, lang)`），但没有同步改 `internal/story/compare.go`（`MetricDiff.Label` 仍固定英文）也没有改 `internal/report`（`vmr-report.json` 的 `efficiency[]` 仍固定英文，见该包 `buildFindingsForJSON`）。结果是：`journey-<id>.json` 现在跟随语言，`compare-<a>-<b>.json`/`vmr-report.json` 仍固定英文——同一个项目、同一类字段，两条不同规则并存，且 `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3 描述的"JSON 恒英文"规则目前只对后两者仍然成立。
-- **为什么待定**：这不是一个"顺手修"级别的问题——统一到哪个方向（JSON 也跟随 `-lang`，还是把 `story` 这次的改动退回固定英文）会牵动 `report` 包（`Build()` 目前完全不接收 `lang`）、`story.Compare()` 的签名（目前也不接收 `lang`）、两处已经用测试锁死"JSON 恒英文"这个断言的回归测试、以及设计文档 §4.3 的整节重写，需要先定下语言策略原则再动代码。
-- **推进方式**：已有完整方案文档 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，写明了倾向的方向（叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 保持语言无关的机器锚点）、需要动的模块清单、以及当前的阶段性状态。下次要推进这项工作时先读那份文档，不要凭这条条目里的只言片语重新分析一遍。
-- **⚠️ 一处需要澄清的记载冲突（2026-08-20 复核）**：
-  `docs/future-strategy/story_report_dev_plan_opus-5.md` §5 把这一项列为"**已并行完成**（commit
-  `f90d847`）"。**这个记载是错的**，本条目才是对的：`f90d847` 提交的是那次"意外的、局部的先行改动"
-  加上方案文档本身，而方案文档开篇第一句就写着"方案本身尚未落地"。已用真实语料复验：同一次
-  `-lang zh` 运行下，`journey-*.json` 的 `findings[].finding` 是中文，`vmr-report.json` 的
-  `efficiency[].finding` 仍是英文（`internal/report/metrics.go` 的 `buildFindingsForJSON` 明写
-  "fixed to English"）。DevPlan 那一行已同步订正。
-  **教训**：这是"两份文档各自记着同一件事的不同状态"的一个实例——本文件是唯一权威的当前状态清单，
-  其它文档提到某项是否完成时应链接到这里，而不是各自复述一遍。
-- **登记来源**：本条目对应的复核与方案讨论，2026-08-17；2026-08-20 六阶段复盘时实测复验并订正 DevPlan。
 
 ### 1.22 [低] `chatmsg.ToolResultList`/`ToolCallList` 未覆盖 OpenAI Responses API 的 `function_call`/`function_call_output` 形状
 
@@ -449,6 +433,7 @@
 27. **默认 `vmr report` 产出的请求索引死链接清零**（P7.1，`internal/report/requests.go`）：`detailLink` 改为 `detailCell(r, detailsOn)`——默认（`-details=false`）模式渲染 `r.Req`（已发布的 `basename:line` 坐标）为行内代码，`-details` 模式保持原有 Markdown 链接。真实语料验证：单日样本 `vmr-requests.md`/`vmr-requests-failed.md` 默认路径下死链接从 322/322、7/7 降到 0；`-details` 模式 322/322 链接 100% 可达。曾登记为 §1.31。
 28. **决策脊柱指令展示的方言过滤漏洞补齐**（P7.2，`internal/taskseg/openclaw.go`/`openclaw_brackets.go`、`internal/story/journey.go`/`render_spine_step.go`）：`openClawAware.RealUserText` 此前只在 `(untrusted metadata)` 信封分支内间接处理时间戳方括号，"裸"消息（无信封）上的 `[timestamp]`/`[message_id: ...]` 脚手架前缀完全未被剥离；新增 `messageIDBracketRe` 与窄范围的 `timestampBracketRe`（仅匹配 OpenClaw 的日期前缀形状，不是通配任意方括号——P7 内部独立复核发现首版误用了通配的 `leadingBracketRe`，会误伤"用户消息本来就以方括号开头"的合法场景，如 `[Bug] fix the crash`，已改用窄正则并补回归测试），裸消息路径循环剥离两种已知前缀。脊柱"💬 指令"行同时从"直接读未过滤的 `NewEvents` 原文（`firstNewUserText`）"改为读 `buildFrom` 构建期已算好并存入 `Step.Instruction` 的过滤后文本（`taskseg.LastInstruction`），与任务标题走同一套过滤规则；**同一次复核还发现该行原先只在无工具调用的 Step 上渲染**（P1.2/P6 遗留缺口，`renderSpineStep` 从未接入过），中途指令绝大多数情况下会立即触发工具调用，导致该行此前在真实场景里近乎不可见——已同步补齐 `renderSpineStep` 的渲染分支。真实语料验证：含 `[message_id: ...]` 标记的样例任务标题不再泄漏该标记（此前 `**t01 · [Tue 2026-07-28 00:05 GMT+8] [message_id: om_x100b694c53b4eca8b1cd50932b7aefe] o…**`，现为 `ou_ad279066d244fb4f7d91240743d30935: 去统计一下…`）。曾登记为 §1.21。
 29. **`-llm-addr ''` 现在能真正关闭 LLM 调用**（P7.3，`cmd/vmr/reportconfig.go`/`cmd_story.go`）：新增 `resolveStringExplicit`（与既有 `resolveBool(explicit, ...)` 同构），`cmd_story.go` 的 `-llm-addr` 解析改用它——显式传空串不再回退到 `report.yaml` 的默认地址。真实验证：配置了 `llm_addr` 的目录下，`vmr story -llm-addr ''` 不再发起 LLM 调用；不传该 flag 时仍按 `report.yaml` 默认值触发（沿用既有行为）。曾登记为 §1.28。
+30. **JSON 输出的语言策略统一：`journey-<id>.json`/`compare-*.json`/`vmr-report.json` 三种产物同一次 `-lang` 下语言一致**（P8，`internal/story/compare.go`/`compare_metrics.go`（新增）、`internal/report/metrics.go`、`cmd/vmr/cmd_report.go`/`cmd_story.go`）：落地方向见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，回填进 `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3（整节重写，不是打补丁）。`story.Compare(a, b JourneySummary)` 改为 `Compare(a, b JourneySummary, lang i18n.Lang)`，循环体改用 `i18n.MetricLabel(lang, string(spec.Code))` 直接算出本地化 `Label`（`metricSpec.Label` 字段随之删除——改动后全仓唯一读取点消失）；`render_compare.go` 的渲染层不再重复查表，直接读 `cmp.Rows[].Label`。`report` 侧刻意**不**给 `Build`/`BuildCached` 加 `lang` 参数（两者已有 6/9 个参数，且没有任何内部逻辑依赖 `rep.Efficiency` 的英文文本本身），改为新增导出函数 `report.LocalizeEfficiency(rep, lang)`，`cmd_report.go` 在写 JSON 前调用它覆写 `rep.Efficiency`；`section_efficiency.go` 的 Markdown 渲染路径刻意保留独立计算，不依赖这条覆写的调用顺序。真实语料验证：同一次 `vmr report -lang zh` 下 `vmr-report.json` 的 `efficiency[].finding`（如"工具 schema 浪费"）与 `vmr-report.md` §7 表格文案逐字一致，且与 `-lang en` 选中的 `Code` 集合完全相同（证明覆写只改文本、不改选择逻辑）；`vmr story -compare` 的 `compare-*.json` 的 `rows[].label`（如"模型时间"）与 `compare-*.md` 表格逐字一致。曾登记为 §1.19。
 
 ---
 
@@ -469,10 +454,11 @@
 
 ### 4.1 总表
 
-> **覆盖范围的一处如实声明（2026-08-20，P7 收尾后更新）**：本表建成时覆盖的是当时的 §1 全部条目；
-> 此后 P1–P6 期间陆续新增的 `1.18`/`1.19`/`1.22`/`1.23`/`1.29`/`1.30` 一直没有补进来，其余仍待补——
+> **覆盖范围的一处如实声明（2026-08-20，P8 收尾后更新）**：本表建成时覆盖的是当时的 §1 全部条目；
+> 此后 P1–P6 期间陆续新增的 `1.18`/`1.22`/`1.23`/`1.29`/`1.30` 一直没有补进来，其余仍待补——
 > **一张只覆盖一半条目的 ROI 表，它的"高 ROI 为 0 条"结论就只对那一半成立**，这一点下面 §4.2 已订正。
-> `1.21`/`1.28`/`1.31` 三条已由 P7 修复，随之移出本表（见 §3 第 27–29 项）。
+> `1.21`/`1.28`/`1.31` 三条已由 P7 修复（见 §3 第 27–29 项）、`1.19` 已由 P8 修复（见 §3 第 30 项），
+> 均已移出本表。
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |

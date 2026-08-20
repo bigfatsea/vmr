@@ -63,7 +63,7 @@ var fileLineExemptions = map[string]int{
 	"internal/story/render_spine_args.go":   200,
 	"internal/story/findings.go":            580,
 	"internal/story/findings_toolresult.go": 320,
-	"internal/story/compare.go":             850,
+	"internal/story/compare.go":             820,
 	"internal/story/metrics.go":             470,
 	"internal/story/corpus.go":              380,
 	"internal/story/render_corpus.go":       150,
