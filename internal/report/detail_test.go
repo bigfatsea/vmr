@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -204,15 +206,17 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		}
 	}
 
-	// Same-named .json sibling for the ok record.
-	jsonName := strings.TrimSuffix(okName, ".md") + ".json"
-	if _, err := os.ReadFile(filepath.Join(out, jsonName)); err != nil {
-		t.Errorf("ok record missing .json sibling: %v", err)
+	// No .json sibling anymore — the raw record is addressable straight
+	// from the source audit log via its coordinate (audit.LineAt /
+	// `vmr replay -req -print`), so a same-named copy under details/ would
+	// just be a byte-for-byte duplicate.
+	if _, err := os.ReadFile(filepath.Join(out, strings.TrimSuffix(okName, ".md")+".json")); err == nil {
+		t.Errorf("ok record has a .json sibling, want none (removed in P3.1)")
 	}
 
 	// Exports carry the same conversation bodies as the 0600 audit source —
 	// they must not loosen its permissions (owner-only, no group/other bits).
-	for _, p := range []string{out, filepath.Join(out, okName), filepath.Join(out, jsonName)} {
+	for _, p := range []string{out, filepath.Join(out, okName)} {
 		st, err := os.Stat(p)
 		if err != nil {
 			t.Fatal(err)
@@ -265,18 +269,24 @@ func TestWriteDetailsByTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detailFiles) != 6 { // 3 records × (.md + .json), tags notwithstanding
-		t.Fatalf("details/ entries = %d, want 6: %v", len(detailFiles), detailFiles)
+	if len(detailFiles) != 3 { // 3 records × .md only (no .json sibling, see P3.1), tags notwithstanding
+		t.Fatalf("details/ entries = %d, want 3: %v", len(detailFiles), detailFiles)
 	}
 
-	// Nothing else gets written next to details/ — WriteDetails no longer
-	// produces any tag-aware output of its own.
+	// Nothing tag-aware gets written next to details/ — WriteDetails
+	// produces no output of its own beyond the per-record detail pages and
+	// (since P3.4) their shared evidence/ blobs, a sibling directory.
 	topEntries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(topEntries) != 1 || topEntries[0].Name() != "details" {
-		t.Errorf("top-level entries = %v, want exactly details/", topEntries)
+	var names []string
+	for _, e := range topEntries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	if want := []string{"details", "evidence"}; !slices.Equal(names, want) {
+		t.Errorf("top-level entries = %v, want %v", names, want)
 	}
 }
 
@@ -404,8 +414,8 @@ func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(subsetFiles) != 4 { // 2 records × (.md + .json)
-		t.Fatalf("subset details/ entries = %d, want 4", len(subsetFiles))
+	if len(subsetFiles) != 2 { // 2 records × .md only (no .json sibling, see P3.1)
+		t.Fatalf("subset details/ entries = %d, want 2", len(subsetFiles))
 	}
 	for _, fi := range subsetFiles {
 		subsetBytes, err := os.ReadFile(filepath.Join(subsetOut, fi.Name()))

@@ -81,60 +81,49 @@ func sortRows(rows []Row, key string) {
 	})
 }
 
-// buildRec2 extracts the aggregator's per-record fields from an audit.Record joined
-// to its ReqInfo (which may be nil for records the analyzer skipped).
-func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
-	// date/hour bucket keys use fmtutil.DisplayZone, not arec.TS's own offset.
+// buildRec2 joins rf — one record's arec-derived facts, either freshly
+// extracted (extractRecordFacts) or replayed from the parse cache
+// (factscache.go) — with ri (its ReqInfo, nil for a record the session
+// analyzer didn't correlate) into the aggregator's working struct. This is
+// the ONLY place that performs this join: both scanFiles' fresh-decode
+// path and its cache-hit path call it, so a cache hit and a cache miss can
+// never disagree about how ReqInfo overrides rf.
+func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
+	// date/hour bucket keys use fmtutil.DisplayZone, not rf.TS's own offset.
 	r := &rec2{
-		ts:       arec.TS,
-		date:     arec.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
-		hour:     arec.TS.In(fmtutil.DisplayZone).Hour(),
-		model:    arec.Model,
-		protocol: arec.Protocol,
-		outcome:  arec.Outcome,
-		stream:   arec.Stream,
-		durMS:    arec.DurMS,
-		ttftMS:   arec.TTFTMS,
-		path:     path,
-		line:     line,
+		ts:            rf.TS,
+		date:          rf.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
+		hour:          rf.TS.In(fmtutil.DisplayZone).Hour(),
+		model:         rf.Model,
+		protocol:      rf.Protocol,
+		outcome:       rf.Outcome,
+		stream:        rf.Stream,
+		durMS:         rf.DurMS,
+		ttftMS:        rf.TTFTMS,
+		path:          path,
+		line:          rf.Line,
+		bytesIn:       rf.BytesIn,
+		bytesOut:      rf.BytesOut,
+		toolDeclCount: rf.ToolDeclCount,
+		toolDeclBytes: rf.ToolDeclBytes,
+		endpoint:      rf.Endpoint,
+		errClass:      rf.ErrorClass,
+		clientKey:     rf.ClientKey,
+		truncated:     rf.TruncatedRaw, // may be OR'd with ri.Truncated below
 	}
-	if arec.DurMS > 0 && arec.TTFTMS > 0 {
-		r.streamMS = arec.DurMS - arec.TTFTMS
+	if rf.DurMS > 0 && rf.TTFTMS > 0 {
+		r.streamMS = rf.DurMS - rf.TTFTMS
 		if r.streamMS < 0 {
 			r.streamMS = 0
 		} else {
 			r.streamOK = true
 		}
 	}
-	// bytes (recompute; ReqInfo keeps these unexported)
-	r.bytesIn = reqdetail.BodyBytes(arec.Client.Request.Body)
-	if arec.Client.Response != nil {
-		r.bytesOut = reqdetail.BodyBytes(arec.Client.Response.Body)
-	}
-	// tool declaration bytes (recompute; ReqInfo.declBytes unexported)
-	r.toolDeclCount, r.toolDeclBytes = toolDeclInfo(arec.Client.Request.Body)
-	// endpoint served + last error class (recompute; ReqInfo unexported)
-	r.endpoint, r.errClass = endpointInfo(arec)
-	r.clientKey = arec.ClientKeyTag
-	// images + fallbacks: derived from arec only when there is no ReqInfo to
-	// join — the ri != nil block below overwrites both unconditionally, so
-	// computing them first would just be discarded work on every analyzed
-	// record. (r.truncated below is different: it MERGES with ri, so it must
-	// be computed either way.)
+	// images + fallbacks: the rf-derived half only matters when there is no
+	// ReqInfo to join — the ri != nil block below overwrites both
+	// unconditionally.
 	if ri == nil {
-		r.images, r.imagesCompressed = reqdetail.CountImages(arec.Images)
-		if len(arec.Attempts) > 1 {
-			r.fallbacks = 1
-		}
-	}
-	// truncated: ok outcome with a truncated attempt error
-	if arec.Outcome == "ok" {
-		for _, a := range arec.Attempts {
-			if reqdetail.AttemptErrorClass(a) == "truncated" {
-				r.truncated = true
-				break
-			}
-		}
+		r.images, r.imagesCompressed, r.fallbacks = rf.ImagesRaw, rf.ImagesCompressedRaw, rf.FallbacksRaw
 	}
 	// join ReqInfo (grouping + expensive features it already computed)
 	if ri != nil {
@@ -162,7 +151,7 @@ func buildRec2(arec *audit.Record, ri *ReqInfo, path string, line int) *rec2 {
 		r.workloadClass = workloadClassOf(ri)
 	}
 	if !r.usageOK && r.endpoint != "" {
-		r.estInFresh, r.estOut = estimateDegradedTokens(arec)
+		r.estInFresh, r.estOut = rf.EstInFresh, rf.EstOut
 	}
 	return r
 }

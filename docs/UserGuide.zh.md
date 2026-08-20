@@ -416,11 +416,13 @@ Markdown 按九个编号章节组织，每章回答一个运维问题。下面�
 
 #### 逐请求详单
 
-`vmr report` 还会把每条记录导出为一个人类可读的 Markdown 详单**外加一个同名 JSON 文件**（原始 record，方便 jq/脚本查询），落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），紧接一段 `VMR 路由前判断`，读上文提到的 `facts` 对象——只列出**实际探测到**的能力（`image`、`tools`，各自渲染成一个反引号包裹的小标签，都没探测到时显示"无"），加预估 token 数——该记录没有 `facts` 时这一段完全不出现，再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（字段缺失的旧格式日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。加 `-details=false` 可关闭详单导出。
+`vmr report` 还可以把每条记录渲染成一个人类可读的 Markdown 详单，落在 `{out}/details/` 下，用于深挖单个请求：头部一行定位（trace / chat user / tools，取值加粗），紧接一段 `VMR 路由前判断`，读上文提到的 `facts` 对象——只列出**实际探测到**的能力（`image`、`tools`，各自渲染成一个反引号包裹的小标签，都没探测到时显示"无"），加预估 token 数——该记录没有 `facts` 时这一段完全不出现，再是**完整消息列表**（每条消息默认 `<details>` 折叠；本轮新增的消息在 summary 上加 🆕 前缀，末尾追加一行 `🆕 本轮增量（相对上一轮,+N 条,#1–#M 为历史上下文）` 汇总）、每次上游尝试的 headers 与 body 字段全量对照（变化项以 emoji 标记：🟢 新增 / 🔴 删除 / 🔶 变化）——若该次尝试剥离了 `<think>…</think>` 推理块，还会展示剥离前的完整内容及对应原始 SSE（字段缺失的旧格式日志显示"未保留"提示）、客户端响应部分把 SSE 流重组成模型实际输出并保留原始事件全文。文件名以零填充时间戳开头，按名字排序即按时间排序。
+
+详单渲染默认关闭——大语料上默认全量渲染会写出比源数据大好几倍的派生 Markdown，其中大部分永远不会被打开。加 `-details` 可以一次性把所有记录的详单都渲染出来。不管开不开，下面的请求索引始终带着每条记录的详单文件名链接（这个文件名是从记录自己的时间戳/模型/结果加一段内容短哈希算出来的，不依赖文件是否真的存在——想直接读一条记录的原始 JSON、完全不渲染任何东西，用 `vmr replay -req 坐标 -print`）。`-details` 关闭时，链接指向的文件在磁盘上暂时不存在，要用 `-details` 重跑一次才会生成。
 
 #### 索引文件
 
-`vmr-requests.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）是一份纯索引：每个分组一条 `## Chat User: <key> · N 会话 N 任务 N 轮`（或 `## 定时任务 · <class> 单发会话 × N`），带一行摘要引用块和指向该分组自己那份完整详单的链接。真正的 **Chat User → Session → Task → Turn** 展开——每个会话一个 `## sNN · <时间> · N 任务 N 轮` 标题，每个任务一个 `### tNN · <时间> · N 轮` 标题，带首条消息的引用块和轮次表（`轮 / 时间 / msgs / finish / dur / ttft / fresh/cached/out / cache-eff⭐ / 文件`；所有时间戳统一转本机系统默认时区，不管原始记录自带什么时区）——只存在于对应的独立文件里，不会在索引里重复一遍。独立文件的命名：每个真实 `client_key_tag` 对应 `vmr-requests-<tag>.md`，没有标签的会话归到 `vmr-requests-unresolved.md`，每个定时任务类别对应 `vmr-requests-cron-<class>.md`（`heartbeat` 这一个的文件名固定是 `vmr-requests-cron-hartbeat.md`；以后新增的定时任务类别照 `-cron-<class>` 这个模式来）。单发的定时会话（heartbeat/dream_diary——只有一次请求、没有真实来回）不管是哪个客户端发起的，永远归到它对应类别的 cron 文件里，这样一堆近乎重复的轮询请求既不会淹没真实对话，也不会同时出现在两种分组下；轮次数大于一的定时会话（真正的多步 cron 任务）则作为普通会话卡片挂在自己调用方名下。索引文末的 `# 全部请求（时间序）` 依旧是一张不分组的时间序全量表。每一处"文件"列都同时链接到 Markdown 详单和同名的 JSON 详单。
+`vmr-requests.md`（与 `vmr-report.md` 并列，在 `details/` 上一级）是一份纯索引：每个分组一条 `## Chat User: <key> · N 会话 N 任务 N 轮`（或 `## 定时任务 · <class> 单发会话 × N`），带一行摘要引用块和指向该分组自己那份完整详单的链接。真正的 **Chat User → Session → Task → Turn** 展开——每个会话一个 `## sNN · <时间> · N 任务 N 轮` 标题，每个任务一个 `### tNN · <时间> · N 轮` 标题，带首条消息的引用块和轮次表（`轮 / 时间 / msgs / finish / dur / ttft / fresh/cached/out / cache-eff⭐ / 文件`；所有时间戳统一转本机系统默认时区，不管原始记录自带什么时区）——只存在于对应的独立文件里，不会在索引里重复一遍。独立文件的命名：每个真实 `client_key_tag` 对应 `vmr-requests-<tag>.md`，没有标签的会话归到 `vmr-requests-unresolved.md`，每个定时任务类别对应 `vmr-requests-cron-<class>.md`（`heartbeat` 这一个的文件名固定是 `vmr-requests-cron-hartbeat.md`；以后新增的定时任务类别照 `-cron-<class>` 这个模式来）。单发的定时会话（heartbeat/dream_diary——只有一次请求、没有真实来回）不管是哪个客户端发起的，永远归到它对应类别的 cron 文件里，这样一堆近乎重复的轮询请求既不会淹没真实对话，也不会同时出现在两种分组下；轮次数大于一的定时会话（真正的多步 cron 任务）则作为普通会话卡片挂在自己调用方名下。索引文末的 `# 全部请求（时间序）` 依旧是一张不分组的时间序全量表。每一处"文件"列都链接到该记录的 Markdown 详单（只有本次运行加了 `-details` 才真的存在于磁盘上，见上文"逐请求详单文件"一节）。
 
 **错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）**：每次 `vmr report` 运行都会额外写一份按时间排序的过滤视图——只包含 `outcome == error`/`canceled`，以及任何"ok 但被截断"的响应——这样排查"到底哪里出了问题"不用先翻过全部成功的请求。纯叠加：不会把这些请求从 `vmr-report.md`、`vmr-requests.md` 或它们所属的会话分组里挪走，只是多了一条过滤后直达同一批记录的路径。`.md` 是人类可读的索引（和 `vmr-requests.md` 各个子文件同一种"一行摘要+链接"格式）；`.jsonl` 是没有会话/任务分组、也没有自己文件缓存段的扁平逐行 dump，给 `jq`/脚本用。
 
@@ -540,11 +542,11 @@ models:
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details=false` 关闭）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文。`-currency` 决定 $ 列的展示币种，和它实际计算时用的币种相互独立（见上文[成本估算与定价](#成本估算与定价)） |
+| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details` 才渲染，默认关闭；索引照样带上每条记录算好的文件名链接）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文。`-currency` 决定 $ 列的展示币种，和它实际计算时用的币种相互独立（见上文[成本估算与定价](#成本估算与定价)） |
 | `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
-| `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-detail file`（`vmr report` 产出的 `details/*.json` 文件，不用数行）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥 |
+| `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-req basename:line`（`vmr-requests.json` 里 `"req"` 字段发布的坐标，不用数行，只需要该文件自己的 basename）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥。`-print`（不带 `-provider`）完全跳过请求构造，只打印解析到的记录原始 JSON——是"真的回放"的只读版本 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/admin/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
@@ -564,10 +566,15 @@ models:
 ./vmr replay -c config.yaml -provider openrouter \
     "$(./vmr check -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
 
-# 是在 vmr-requests.md / vmr-report.md 里找到的那条失败请求？
-# 直接指向它的 details/*.json，不用数行号。
+# 是在 vmr-requests.json/.md 里找到的那条失败请求？
+# 直接用它的 "req" 坐标，不用数行号。
 ./vmr replay -c config.yaml -provider openrouter -dry-run \
-    -detail out/details/20260713-153042.100_coding_z-ai-glm-5.2_error.json
+    -req vmr-audit-2026-07-13.jsonl:317 \
+    "$(./vmr check -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
+
+# 只想看看这条记录长什么样，不构造也不发送任何请求？
+./vmr replay -c config.yaml -print -line 317 \
+    "$(./vmr check -c config.yaml log)/vmr-audit-2026-07-13.jsonl"
 
 # 或者用 vmr-requests.json / vmr-report.md 里看到的精确时间戳来定位。
 ./vmr replay -c config.yaml -provider openrouter -dry-run \

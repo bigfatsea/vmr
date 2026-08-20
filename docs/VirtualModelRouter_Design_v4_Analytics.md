@@ -45,9 +45,9 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 ## 2. `vmr report`：聚合报表
 
 ```
-vmr report [-c config.yaml] [-o dir] [-details=false] <file|glob>...
+vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
     # 输出 vmr-report.json + vmr-report.md + vmr-requests.json + vmr-requests.md（+ 按 client_key_tag 的 sibling）
-    # + {out}/details/ 逐请求详单（-details=false 关闭；只要定价数据解析出结果就渲染 §2 成本估算——
+    # + {out}/details/ 逐请求详单（-details 才渲染，默认关闭——见 §2.5；只要定价数据解析出结果就渲染 §2 成本估算——
     # 内置标准表始终生效，-c 指定的 config.yaml 若能读到会在其上叠加账号覆盖，见 §2.1）
 ```
 
@@ -88,11 +88,26 @@ vmr report [-c config.yaml] [-o dir] [-details=false] <file|glob>...
 
 ### 2.5 逐请求详单与索引
 
-每条审计记录导出一个 Markdown 文件 + 同名 JSON 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调），不再单独扫一遍。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
+每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 的证据层瘦身，`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 A）。**渲染默认关闭**（`-details`，内置默认 `false`）——`vmr-requests.json`/`.md` 的每一行始终带着这条记录的详单文件名（`internal/reqdetail.FileName`，从记录自身的时间戳/模型/结果与坐标短哈希算出，不依赖文件是否已经生成），显式传 `-details` 才会把这一批文件全部渲染出来。渲染入口是 `internal/reqdetail.EnsureRendered`：目标文件已存在就跳过（`report`/`story` 未来的任意调用方都可能对同一条记录发出请求，坐标命名保证同名文件必然是同一份内容，跳过是正确的短路而不是近似），否则渲染后走临时文件+改名写入，不会在进程被杀时留下半截文件。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调，`-details` 关闭时这个回调是 `nil`），不再单独扫一遍。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 
-`vmr-requests.json`（此前是 `vmr-requests.jsonl`）是 `vmr-requests.md` 背后的数据层：`requests` 字段是原来 `.jsonl` 每行一条的 `RequestRow` 列表，改用单一 JSON 文档（不再是逐行 JSONL）是因为多了一个 `files` 字段——一份文件级、按内容哈希索引的解析缓存（`{path: {hash, manifests: [...]}}`），跟 `internal/story` 的 `vmr-stories.json`（§3.4）用的是完全同一个 `ctxgraph.FileCache`/`ScanCached` 类型和机制。`AnalyzeSessionsCached`（`session.go`）把这份缓存喂给它自己的 `ctxgraph.Scan` 那一趟——文件内容哈希没变就跳过 `BuildManifest` 的 JSON 解析+逐消息哈希，直接复用缓存里的 Manifest。**这一轮只缓存了这一半**：`Build`（`aggregate.go`）里那趟独立的、report 自己的每请求解析（"single pass over files, joined to ReqInfo"，产出 `ReqInfo`/`RequestRow` 的那一趟，跟"关键决策与取舍"表里提到的与 `ctxgraph.Scan` 各扫一遍同一批文件是同一处重复扫描）仍然每次全量重跑，没有缓存——把 report 也改成直接消费 `ctxgraph.Manifest`、彻底消掉这个重复扫描，是比这次缓存更大的一步重构，本轮刻意不做，见"关键决策与取舍"表相应行。`vmr-requests-failed.jsonl` 是 `RequestRow` 的一份过滤导出，不是独立缓存，继续保持逐行 JSONL 格式不变。`BuildCached`/`Build` 两个入口并存：前者接受一份先前的 `*ctxgraph.FileCache` 并把更新后的缓存一并返回，`cmd_report.go` 用的是它；`Build` 是它的无缓存瘦封装，保留给全部既有调用方（含测试）用，行为完全不变。
+`vmr-requests.json`（此前是 `vmr-requests.jsonl`）是 `vmr-requests.md` 背后的数据层：`requests`
+字段是原来 `.jsonl` 每行一条的 `RequestRow` 列表。解析缓存不再嵌在这个文件里——`files` 段已经拆到
+独立的 `{outDir}/.parse-cache/<filehash>.json` 分片目录（`internal/ctxgraph` 的
+`LoadCacheDir`/`SaveCacheDir`），与 `internal/story` 的 `vmr-stories.json`（§3.4）共用同一个目录，
+索引文件本身回到人可读的规模（P3 的证据层瘦身，见
+`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 D）。缓存条目现在也不再只装
+manifest 这一半：`AnalyzeSessionsCached` 把它喂给 `ctxgraph.ScanCached`（文件内容哈希 + schema
+版本都没变就跳过 `BuildManifest` 的 JSON 解析+逐消息哈希，复用缓存里的 Manifest），`Build`
+（`aggregate.go`）自己的第二遍扫描（每请求解析，产出 `ReqInfo`/`RequestRow` 那一趟）现在也查同一份
+缓存的 `facts` 字段（`internal/report/factscache.go`）——两趟都命中时，一次重跑不再重新打开、
+解码该文件。真实 34 文件/177MB 压缩语料上实测：全量冷启动 ~83.8s 不变，热缓存从 ~71.8s
+降到 ~16.2s（收益从 ~1.17× 提到 ~5.2×）；`vmr replay -req <坐标>` 之类的一次性读取因为不跑聚合，
+不受这条影响。`vmr-requests-failed.jsonl` 是 `RequestRow` 的一份过滤导出，不是独立缓存，继续保持
+逐行 JSONL 格式不变。`BuildCached`/`Build` 两个入口并存：前者接受一份先前的 `*ctxgraph.FileCache`
+并把更新后的缓存一并返回，`cmd_report.go` 用的是它；`Build` 是它的无缓存瘦封装，保留给全部既有
+调用方（含测试）用，行为完全不变。
 
 ### 2.6 Markdown 渲染：九个编号章节
 
@@ -187,13 +202,22 @@ vmr story -corpus [-o dir] [file|glob]...
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
-**`vmr-stories.json`/`.md`——候选列表落盘 + 文件级解析缓存**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（数据 + 缓存）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。
+**`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。
 
-`vmr-stories.json` 的 `files` 段同时是一份内容哈希索引的解析缓存：`{path: {hash, manifests: [...]}}`，`manifests` 是 `ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按 `Path`/`Line` 回原始审计文件按需取，缓存本身体积很小）。下一次运行先加载这份缓存，对每个输入文件重新算一次内容哈希（`ctxgraph.HashFile`，对磁盘上原始字节做 sha256，不关心是否被 housekeeping 压缩过——一份文件从 `.jsonl` 压缩成 `.jsonl.zst` 后字节和路径都变了，天然被当成"没缓存过"重新解析一次，一次性代价，不是错误）：哈希命中的文件直接复用缓存的 `manifests`，跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希（这是整个扫描过程里真正贵的部分）；未命中（内容变了，或是全新文件）才重新解析。
+解析缓存不嵌在这个文件里：`{outDir}/.parse-cache/<filehash>.json`，一个输入文件一个分片，与
+`vmr-requests.json`（§2.5）共用同一个目录（P3 的证据层瘦身，见
+`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 D）。分片装的是
+`ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按
+`Path`/`Line` 回原始审计文件按需取，缓存本身体积很小），外加 schema 版本戳。下一次运行先加载这份
+缓存，对每个输入文件重新算一次内容哈希（`ctxgraph.HashFile`，对磁盘上原始字节做 sha256，不关心
+是否被 housekeeping 压缩过——一份文件从 `.jsonl` 压缩成 `.jsonl.zst` 后字节和路径都变了，天然被
+当成"没缓存过"重新解析一次，一次性代价，不是错误）：哈希与版本都命中的文件直接复用缓存的
+`manifests`，跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希（这是整个扫描过程里真正贵的部分）；
+未命中（内容变了、版本升级、或是全新文件）才重新解析。
 
 **关键设计取舍：只缓存"文件 → Manifest 解析结果"这一层，绝不缩小参与图重建的文件集合**——`ctxgraph.ScanCached`（`internal/ctxgraph/cache.go`）拿到每个文件"命中缓存的旧 Manifest 或新解析的 Manifest"之后，永远把**全部**文件的 Manifest 合并成一份完整集合，再整体跑一遍分桶/拆 lineage/`StitchGraph`——从不因为某个文件"没变"或"是新出现的"就把它排除在图重建之外。这不是留在桌面上没做的优化，是刻意的正确性边界：`StitchGraph` 的同 SessKey 桶续接搜索**没有时间上限**（用户可以走开几天再回来同一个锚点，见 §3.3 的缝合小节），一个全新文件里的记录完全可能续接到一个"看起来早就定型"的旧 Journey 后面，把它的 ID（`<end>` 分量）往后推——如果只按"这个文件是否被某个已知 Journey 引用过"来决定要不要把它纳入图重建，一个全新文件永远查不到任何引用（它是新的），这条续接就会被静默漏掉。因为 Manifest 本身很轻（一条消息一个 16 字节哈希，不含正文），"整体重建图"这一步的开销正比于请求条数而不是原始字节数，缓存跳过昂贵的解析步骤之后，重建图这一步本身已经便宜到不需要再做更激进的局部/增量式图更新。
 
-`vmr-requests.json`（§2.5）用的是完全同一套 `ctxgraph.FileCache`/`ScanCached` 机制、同一条设计取舍——两个产物的"索引 + 缓存合一"需求本质相通，实现上共用 `internal/ctxgraph` 这一层，不是分别发明两套缓存格式。
+`vmr-requests.json`（§2.5）用的是完全同一套 `ctxgraph.FileCache`/`ScanCached`/`.parse-cache/` 机制、同一条设计取舍——两个产物的解析缓存需求本质相通，实现上共用 `internal/ctxgraph` 这一层、共用同一个磁盘目录，不是分别发明两套缓存格式。
 
 **数据模型**（`journey.go`）：
 

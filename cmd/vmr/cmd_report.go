@@ -13,7 +13,9 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
 	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/report"
@@ -221,11 +223,33 @@ func allPathsOutsideDir(paths []string, dir string) bool {
 // defaults to <-c config.yaml's log_dir>/vmr-audit-* (see resolveInputPaths
 // in auditpaths.go) — the common case of "just report on this instance's
 // own logs" needs no arguments beyond an optional -c.
+// setupDetailWriter creates {outDir}/details and starts the detail-page
+// worker pool when detailsOn — Build's onRecord hook (nil when !detailsOn)
+// renders+writes each record's detail page during the aggregation pass
+// itself, on its own worker pool, so there's no separate third read of the
+// audit source for detail export. Build's own success/failure never
+// depends on this: a detail-write failure surfaces only when the returned
+// *report.DetailWriter's Close is checked, well after vmr-report.json/md
+// are already safely on disk — same robustness the old separate-
+// WriteDetails-step had, just without the extra pass.
+func setupDetailWriter(outDir string, detailsOn bool, lang i18n.Lang, tw io.Writer) (dw *report.DetailWriter, detailDir string, onRecord func(*audit.Record, *report.ReqInfo), err error) {
+	detailDir = filepath.Join(outDir, "details")
+	if !detailsOn {
+		return nil, detailDir, nil, nil
+	}
+	dw, err = report.NewDetailWriter(detailDir, lang, resolveTaskProfile())
+	if err != nil {
+		return nil, detailDir, nil, err
+	}
+	fmt.Fprintf(tw, "detail export: writing into %s (runs concurrently with the pass below)\n", detailDir)
+	return dw, detailDir, dw.Submit, nil
+}
+
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block) — see PricingTable's doc comment for the no-config.yaml degrade")
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
-	detailsFlag := fs.Bool("details", true, "also export one Markdown+JSON file per request into {out}/details/ (default: report.yaml's details, or true)")
+	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: report.yaml's details, or false — the requests index links to each record's detail filename regardless, computed without needing the file to exist; pass -details to materialize them all up front)")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
 	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
@@ -278,36 +302,22 @@ func cmdReport(args []string) error {
 		return err
 	}
 
-	// Build's onRecord hook (nil when -details=false) renders+writes each
-	// record's detail page during the aggregation pass itself, on its own
-	// worker pool — no separate third read of the audit source for detail
-	// export anymore. Build's own success/failure never depends on this:
-	// a detail-write failure surfaces only when dw.Close() is checked below,
-	// well after vmr-report.json/md are already safely on disk — same
-	// robustness the old separate-WriteDetails-step had, just without the
-	// extra pass.
-	var dw *report.DetailWriter
-	detailDir := filepath.Join(outDir, "details")
-	var onRecord func(*audit.Record, *report.ReqInfo)
-	if detailsOn {
-		dw, err = report.NewDetailWriter(detailDir, lang, resolveTaskProfile())
-		if err != nil {
-			return err
-		}
-		onRecord = dw.Submit
-		fmt.Fprintf(tw, "detail export: writing into %s (runs concurrently with the pass below)\n", detailDir)
+	dw, detailDir, onRecord, err := setupDetailWriter(outDir, detailsOn, lang, tw)
+	if err != nil {
+		return err
 	}
 
 	// The gap between this line's timestamp and the first "[1/N]" line below
 	// is session analysis (AnalyzeSessions) — a full, currently silent pass
 	// over every input file that Build() always runs before its own
-	// per-file aggregation loop starts printing. priorCache (from a
-	// previous run's vmr-requests.json, if any) lets that pass skip
-	// re-parsing/re-hashing any input file whose content hasn't changed —
-	// see docs/VirtualModelRouter_Design_v4_Analytics.md's
-	// vmr-requests.json section.
+	// per-file aggregation loop starts printing. priorCache (from
+	// {outDir}/.parse-cache, shared with `vmr story` — see
+	// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+	// section) lets that pass skip re-parsing/re-hashing any input file
+	// whose content hasn't changed.
 	reqPath := filepath.Join(outDir, "vmr-requests.json")
-	priorCache := report.LoadRequestsFileCache(reqPath)
+	cacheDir := filepath.Join(outDir, ".parse-cache")
+	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 	now := time.Now()
 	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, *configPath, tw, now)
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
@@ -343,16 +353,20 @@ func cmdReport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("details: %w", err)
 		}
-		fmt.Fprintf(tw, "%d detail file(s) (.md + .json) in %s\n", n, detailDir)
+		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
 	}
 
-	// Requests index (+ per-tag siblings) + json (data + file-hash cache).
+	// Requests index (+ per-tag siblings) + json (data only — the parse
+	// cache is persisted separately, into cacheDir, right below).
 	rows := rep.RequestRows()
-	nReq, err := report.WriteRequestsJSON(rows, cache, reqPath)
+	nReq, err := report.WriteRequestsJSON(rows, reqPath)
 	if err != nil {
 		return fmt.Errorf("requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
+	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
+		return fmt.Errorf("parse cache: %w", err)
+	}
 	if err := report.WriteRequestsIndex(rep, sess, outDir, lang); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
@@ -360,8 +374,8 @@ func cmdReport(args []string) error {
 
 	// Failed-requests index: a dedicated error-analysis view (outcome ==
 	// error|canceled, plus ok-but-truncated), each row linking to its
-	// details/*.md+*.json. Purely additive — every other report/requests
-	// output above is unaffected and still lists these same failed requests
+	// details/*.md. Purely additive — every other report/requests output
+	// above is unaffected and still lists these same failed requests
 	// inline as before.
 	failedRows := report.FailedRequestRows(rows)
 	failedJSONLPath := filepath.Join(outDir, "vmr-requests-failed.jsonl")

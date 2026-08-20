@@ -7,7 +7,6 @@
 package main
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -68,43 +67,44 @@ func TestCmdReplay_TSFlag(t *testing.T) {
 	}
 }
 
-// detailFileJSON mimics what `vmr report`'s WriteDetails actually writes
-// under details/*.json: json.MarshalIndent of the raw audit.Record, no
-// JSONL framing (see internal/report/detail.go).
-func detailFileJSON(t *testing.T) string {
-	t.Helper()
-	rec := map[string]any{
-		"model": "m1", "protocol": "openai", "stream": false,
-		"client": map[string]any{"request": map[string]any{
-			"headers": map[string]any{},
-			"body":    map[string]any{"model": "m1", "messages": []any{map[string]any{"role": "user", "content": "from-detail"}}},
-		}},
-	}
-	data, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return writeTempFile(t, "20260713-153042.100_m1_real-model_ok.json", string(data))
-}
-
-func TestCmdReplay_DetailFlag(t *testing.T) {
+func TestCmdReplay_ReqFlag(t *testing.T) {
 	path := diagnoseConfigYAML(t, "http://127.0.0.1:1/unreachable")
-	detailPath := detailFileJSON(t)
+	auditPath := replayAuditFile(t)
 	got := captureStdout(t, func() {
-		if err := cmdReplay([]string{"-c", path, "-provider", "p1", "-dry-run", "-detail", detailPath}); err != nil {
-			t.Fatalf("cmdReplay -detail: %v", err)
+		if err := cmdReplay([]string{"-c", path, "-provider", "p1", "-dry-run", "-req", "audit.jsonl:1", auditPath}); err != nil {
+			t.Fatalf("cmdReplay -req: %v", err)
 		}
 	})
-	if !strings.Contains(got, "DRY-RUN") || !strings.Contains(got, "from-detail") {
+	if !strings.Contains(got, "DRY-RUN") {
 		t.Errorf("dry-run output missing expected markers: %q", got)
 	}
 }
 
-func TestCmdReplay_DetailWithAuditFileErrors(t *testing.T) {
+func TestCmdReplay_ReqMismatchedBasenameErrors(t *testing.T) {
 	path := diagnoseConfigYAML(t, "http://127.0.0.1:1/unreachable")
-	detailPath := detailFileJSON(t)
 	auditPath := replayAuditFile(t)
-	if err := cmdReplay([]string{"-c", path, "-provider", "p1", "-dry-run", "-detail", detailPath, auditPath}); err == nil {
-		t.Error("cmdReplay -detail with an extra audit file argument should return an error")
+	if err := cmdReplay([]string{"-c", path, "-provider", "p1", "-dry-run", "-req", "other-file.jsonl:1", auditPath}); err == nil {
+		t.Error("cmdReplay -req with a mismatched basename should return an error")
+	}
+}
+
+func TestCmdReplay_PrintFlag(t *testing.T) {
+	path := diagnoseConfigYAML(t, "http://127.0.0.1:1/unreachable")
+	auditPath := replayAuditFile(t)
+	got := captureStdout(t, func() {
+		if err := cmdReplay([]string{"-c", path, "-print", "-line", "1", auditPath}); err != nil {
+			t.Fatalf("cmdReplay -print: %v", err)
+		}
+	})
+	if !strings.Contains(got, `"model":"m1"`) {
+		t.Errorf("-print output missing the raw record: %q", got)
+	}
+}
+
+func TestCmdReplay_PrintDoesNotRequireProvider(t *testing.T) {
+	path := diagnoseConfigYAML(t, "http://127.0.0.1:1/unreachable")
+	auditPath := replayAuditFile(t)
+	if err := cmdReplay([]string{"-c", path, "-print", "-line", "1", auditPath}); err != nil {
+		t.Errorf("cmdReplay -print without -provider: %v, want no error", err)
 	}
 }

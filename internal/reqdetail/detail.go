@@ -190,7 +190,18 @@ func callsCell(calls []string) string {
 // ctxgraph.Lineage (nil for a lineage's first record, or when m is nil) —
 // NOT internal/story's stitched-chain predecessor; that distinction is a
 // mid-tier concern this leaf does not know about.
-func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest, prof taskseg.Profile, lang i18n.Lang) string {
+// linkEvidence, when true, switches the system prompt and declared tool
+// set from inline rendering to a link into ../evidence/ — see
+// renderClientRequest and evidence.go. Render never touches the
+// filesystem either way (true just changes which pure string it writes):
+// the linked-to file's actual write is EnsureSysPromptEvidence/
+// EnsureToolsEvidence's job, called separately by whichever caller drives
+// EnsureRendered (see report/detail.go's writeOneDetail) — both that write
+// and this link name the file with the exact same content hash, so the
+// two can never disagree about the filename. Pass false to keep the old
+// fully-inline rendering (every test that doesn't care about evidence
+// linking uses this).
+func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest, prof taskseg.Profile, lang i18n.Lang, linkEvidence bool) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Detail(lang)
@@ -221,7 +232,7 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
 	renderFactsLine(&b, rec, t)
 
-	renderClientRequest(&b, rec, m, prev, f, t)
+	renderClientRequest(&b, rec, m, prev, f, t, linkEvidence)
 	renderAttempts(&b, rec, t)
 	renderClientResponse(&b, rec, t)
 	return b.String()
@@ -311,7 +322,7 @@ func renderSessionHeader(b *strings.Builder, m, prev *ctxgraph.Manifest, f sessi
 // computation internal/report's session.go attach() already runs for
 // exactly this purpose (see edit.go's Classify), so both packages derive
 // it identically instead of one trusting the other's precomputed copy.
-func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgraph.Manifest, f sessionFeatures, t i18n.DetailText) {
+func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgraph.Manifest, f sessionFeatures, t i18n.DetailText, linkEvidence bool) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	req := rec.Client.Request
 	w("## %s\n\n", t.ClientRequestTitle)
@@ -345,20 +356,36 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 		b.WriteString(Details(t.ParamsSummary(len(params)), codeFence(jsonIndent(params))))
 	}
 	if arr, _ := obj["tools"].([]any); len(arr) > 0 {
-		var tb strings.Builder
-		for i, tn := range arr {
-			name := "?"
-			if i < len(tools) {
-				name = tools[i]
+		if linkEvidence {
+			filename := "tools-" + toolsHash8(tools) + ".md"
+			w("%s", t.ToolsEvidenceLink(len(arr), filename))
+		} else {
+			var tb strings.Builder
+			for i, tn := range arr {
+				name := "?"
+				if i < len(tools) {
+					name = tools[i]
+				}
+				tb.WriteString(Details(escapeHTML(name), codeFence(jsonIndent(tn))))
 			}
-			tb.WriteString(Details(escapeHTML(name), codeFence(jsonIndent(tn))))
+			b.WriteString(Details(t.ToolsSummary(len(arr), escapeHTML(taskseg.Preview(strings.Join(tools, ", ")))), tb.String()))
 		}
-		b.WriteString(Details(t.ToolsSummary(len(arr), escapeHTML(taskseg.Preview(strings.Join(tools, ", ")))), tb.String()))
 	}
 	if len(msgs) > 0 {
 		w("\n### %s\n\n", t.MessagesTitle(len(msgs)))
 		if line := roleStatLine(RoleTokens(req.Body), true, true); line != "" {
 			w("%s", t.RoleTokenShare(line))
+		}
+		// leadSys is recomputed here (not read off m.LeadSys) so this
+		// works even when m is nil — the same reasoning evidence.go's
+		// leadingSystem gives for not depending on a caller-supplied
+		// Manifest; both compute it identically from msgs alone, so
+		// they can never disagree about which messages are "leading
+		// system" ones.
+		leadSys, sysText := leadingSystem(msgs)
+		if linkEvidence && leadSys > 0 {
+			filename := "sysprompt-" + contentHash8(sysText) + ".md"
+			w("%s", t.SysPromptEvidenceLink(fmtCount(len([]rune(sysText))), filename))
 		}
 		deltaStart := 0
 		haveDelta := prev != nil && m != nil
@@ -370,6 +397,9 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 			}
 		}
 		for i, msg := range msgs {
+			if linkEvidence && i < leadSys {
+				continue // already covered by the evidence link above
+			}
 			prefix := ""
 			if haveDelta && i >= deltaStart {
 				prefix = "🆕 "

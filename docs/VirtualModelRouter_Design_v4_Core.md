@@ -813,7 +813,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 代理纯显式两级解析：provider 级 `proxy`（**缺省 false，无全局默认可继承**）→ `http(s)_proxy` 的 URL，**无环境变量回退**；按解析结果分组建 Client | `http(s)_proxy` 一配上就对全体 provider 默认生效 / 单一 `ProxyFromEnvironment` / config 优先 + env 回退 / 每请求动态 Proxy 回调 / config 级 `no_proxy` 清单 / 一层可翻转的全局默认开关 | "配了代理 URL 就默认全体生效"这个初版设计混淆了"代理在哪"和"要不要用"两件事：给单个海外 provider 配代理，会不知不觉把所有 provider 都导流进去，直到有人手工给每个国内 provider 补一条 `proxy: false` 才能收住——补漏式配置容易漏，且新增 provider 默认就"继承"了代理。纯环境变量是全有全无：国内直连 + 海外走代理混配时只能靠 `NO_PROXY` 在 vmr 之外绕。env 回退也不采用：隐式旋钮悄悄决定流量走向，最容易被忽略、排障时最难想到——流量去哪必须在 config.yaml 里读得出来，要引用 env 就显式写 `${HTTPS_PROXY}`。provider 级布尔开关粒度恰好（provider ≙ base_url ≙ host），config 级 `no_proxy` 因此多余。全显式的附带收益：`proxy: true` 无代理可跟从这个矛盾变成静态可判的校验错误；解析不再依赖运行环境，热重载语义完整。每请求回调换取不到任何灵活性——解析对 provider 是静态的，快照期分组建 Client（典型 1~2 组，连接池按组共享，请求期零开销）。**2026-08-02 追加简化**：中间还短暂存在过一层"没写就跟随全局 `proxy` 开关（同样缺省 false）"，供"多数 provider 都要代理、少数国内厂商直连"这种反过来的部署场景整体翻转默认值。上线后复核真实配置：从未用过这层——所有 provider 要么显式 `proxy: true`，要么直接不写，全局开关始终缺省关闭。既然文档自己都写"推荐保持关闭，个别 provider 自己开"，这层为小概率场景保留的翻转能力就是从未使用的可选特性，遂删——`Provider.Proxy` 从三态 `*bool` 收窄为普通 `bool`，`Config.Proxy` 字段、它专属的矛盾校验、`vmr check` 里"继承全局但 scheme 不匹配"那条一致性检查一并去掉。真要出现"多数需要代理"的部署，逐个 provider 显式 `proxy: true` 也不过是多写几行 YAML，不构成恢复这层的理由 |
 | `vmr diagnose` 对走代理的 provider 跳过直连 DNS/TLS 检查，只测代理本身可达性 | 不论是否配代理，一律先测目标 host 的直连 DNS/TLS | `router.NewUpstreamClient` 对走代理的 provider 从不直连目标 host——直连检查测的是一件真实请求路径上根本不会发生的事，只会把"只能通过代理访问"（项目本身面向的国内网络场景很常见）的健康 provider 误报成故障 |
 | `vmr diagnose` Phase 2/3 有界并发（`checkConcurrency=8`），每个检查写自己的预分配槽位、不加锁 | 顺序执行 / 无界并发 | diagnose 恰好是"怀疑某个 provider 有问题"时才会跑的工具，顺序执行下 N 个同时不可达的 provider 会把等待时间线性放大到分钟级——这正是最需要快速给出结论的场景；无界并发在配置规模较大或 provider 端有并发连接限制时无必要地激进，8 是与 `router.go` 连接池 `MaxIdleConnsPerHost` 同量级的保守取值 |
-| `vmr replay` 定位记录支持 `-line`/`-ts`/`-detail` 三种互斥方式 | 只保留 `-line`（原始设计） | `-line` 要求用户先数出目标记录在文件里是第几行，这个坐标在 jq/vmr report 等实际排障工作流里根本拿不到，文件按天轮转后也对不上；`-ts` 匹配 `ts` 字段（容忍 `vmr-requests.json` 的毫秒精度与原始审计日志的纳秒精度），`-detail` 直接读 `vmr report` 已生成的 `details/*.json`（一文件一条记录，天然无歧义）——两者都是用户真实拿在手上的定位符；`-line` 保留作为脚本化场景的兜底，不删 |
+| `vmr replay` 定位记录支持 `-line`/`-ts`/`-req` 三种互斥方式 | 只保留 `-line`（原始设计）；曾经的 `-detail FILE`（直接读 `vmr report` 生成的 `details/*.json`）已随该副本一起移除 | `-line` 要求用户先数出目标记录在文件里是第几行，这个坐标在 jq/vmr report 等实际排障工作流里根本拿不到，文件按天轮转后也对不上；`-ts` 匹配 `ts` 字段（容忍 `vmr-requests.json` 的毫秒精度与原始审计日志的纳秒精度）；`-req basename:line` 匹配 `vmr-requests.json`/`vmr-stories.json` 发布的跨命令坐标（见 Part 2 的坐标层），仍需搭配原始审计文件参数按 basename 校验一致，不再需要一份自包含的详单副本——`details/*.json` 已删除（Part 2 的证据层瘦身，见 `story_report_p3_action_plan_sonnet-5.md`），原始记录改由 `-req`/`-line`/`-ts` 三者之一定位后用 `-print` 直读；`-line` 保留作为脚本化场景的兜底，不删 |
 | `vmr replay --record` 写出的记录字段布局模仿真实流量的约定（`Client.Response` 存全量，`Attempts[0].Response.Body` 仅失败时存） | 无条件把响应体存两份 | 让 replay 产出的记录能被 `vmr report`/`jq`/再次 `vmr replay` 当作普通审计记录正确消费，不需要为"这是 replay 产出的"开一条特殊解析路径；`Client.Request.Body` 存的是回放前的原文（虚拟模型名），不是改写后发给上游的字节——同一约定，读侧不用区分来源 |
 | `vmr replay` 重建请求头时，在 `router.FilterClientHeaders` 之外再按 `audit.IsCredentialHeader` 剔除一遍 | 只用 `FilterClientHeaders`（与 chatHandler 共用同一份逻辑） | 两张表故意不同源：`headerBlocklist` 决定"活的请求转发前要不要剔除"，`credentialHeaders` 决定"记审计时要不要打码"，交集不是全集（`Api-Key`/`X-Auth-Token` 只在后者）。replay 的输入是**审计记录里已经打码的值**，不是活的请求——直接套用 `FilterClientHeaders` 会把打码占位符当真实凭据转发给上游 |
 | `router.ModelRoute.EffectiveOrder()` / `router.IngressPath` / `audit.OutcomeFor` 从各命令各自实现改为导出共享 | 维持"各自一份、不值得统一"的既有先例 | 这三处不是"恰好长得像"的独立实现，是 `vmr diagnose`/`vmr replay` 新增后同一段路由排序/协议路径/结果判定逻辑第三、四次被复制——多份拷贝下次协议/排序规则变化时会不同步漂移，且提取成本低（纯函数，无状态），故这三处选择统一，其余仍按既有判断维持现状 |
@@ -933,11 +933,21 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 从一条审计记录重建请求、重发到指定 provider。核心约束：`audit.Message.Body` 是 `any` 类型（合法 JSON 存成 `json.RawMessage`，反序列化进 `any` 字段会变成 `map[string]interface{}`，原始字节丢失），所以 replay 不能直接 `json.Unmarshal` 进 `audit.Record`——包内有一个私有的 `recordView`，专门用 `json.RawMessage` 接住 `client.request.body`。
 
-**定位要回放哪条记录**，三种互斥方式：
+**定位要回放哪条记录**，三种互斥方式（均需搭配位置参数指定原始审计文件——`-detail <file>` 那种
+"自包含、不需要原始审计文件"的第四种方式已随 `details/*.json` 副本一起移除，见 Part 2 的证据层瘦身，
+`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）：
 
-* `-detail <file>`：直接读一个 `vmr report` 生成的 `details/*.json` 文件——这类文件本来就是 `json.MarshalIndent(&rec, ...)` 的单条完整记录，不用扫描、没有行号歧义，也是用户排障时最先拿到手的东西（先跑 `vmr report`，在 `vmr-requests.md` 里定位到失败请求，再回放）。
+* `-req basename:line`：`vmr-requests.json`/`vmr-stories.json` 发布的跨命令坐标（Part 2 §7.3
+  坐标层），用户排障时最先拿到手的定位符——先跑 `vmr report`，在 `vmr-requests.md`/`.json` 里定位到
+  失败请求的 `req` 字段，直接拿来用，不用数行号。`internal/ctxgraph.CanonicalPath` 校验位置参数的
+  basename 与坐标一致（不一致报错，不静默按行号裸猜）。
 * `-ts <timestamp>`：按毫秒精度匹配 `ts` 字段，容忍两种精度来源——`vmr-requests.json` 用毫秒精度格式化，原始 `audit.jsonl` 是 `time.Time` 默认的纳秒精度序列化；`time.Parse(time.RFC3339, ...)` 对两种精度都能正确解析（Go 对小数秒位数天然宽容，与 layout 声明的精度无关），双方都 `Truncate(time.Millisecond)` 后比较即可统一。同一毫秒内有多条记录匹配时报错要求改用 `-line`，不做静默猜测。
 * `-line N`：原始的、基于行号的兜底方式（默认 0 = 文件最后一条可解析记录），行号在实际排障流程里很难提前知道，保留是因为脚本化场景仍然有用，零维护成本。
+
+**`-print`**：与上面三种定位方式正交的一个开关——跳过请求构造/`-provider` 必填校验，把定位到的
+记录原始字节（`internal/audit.LineAt`）直接打印到 stdout 后返回。这是"读"而不是"重放"：
+`details/*.json` 副本删除后，`vmr replay -req COORD -print` 是"看一眼这条记录长什么样"的唯一入口，
+不需要先跑一遍分析命令、也不需要配置任何 provider。
 
 **重建请求**：`replayHeaders()` 在 `router.FilterClientHeaders`（与 `chatHandler` 共用同一份 blocklist）之外，额外按 `audit.IsCredentialHeader` 剔除一遍——原因见「审计日志」的约定 3：审计记录里的凭证类 header 存的是打码占位符，`FilterClientHeaders` 的黑名单和 `audit` 的打码列表是两张故意不完全重合的表，直接套用前者会把打码值当真凭据转发给上游。model 字段用记录里的**虚拟名**（不是 `Attempts[*]` 里已经改写过的真实上游名）过 `Adapter.BuildRequest`，与真实流量走同一条改写路径。`-stream true|false` 覆盖时会真正改写 body 顶层 `stream` 字段（`jsonscan.RewriteStream`，与 model 改写共用同一个顶层字段 splice 扫描器；记录的 body 没有该键时走 generic 路径补上）——上游读的是 body 里的字段，只改本地簿记等于没改；`--record` 产出的记录同步反映覆盖后的请求。
 

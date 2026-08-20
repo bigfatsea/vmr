@@ -112,9 +112,11 @@ func cmdStory(args []string) error {
 	storiesDir := filepath.Join(outDir, "stories")
 	indexPath := filepath.Join(storiesDir, "vmr-stories.json")
 	prior := story.LoadStoryIndex(indexPath)
+	cacheDir := filepath.Join(outDir, ".parse-cache") // shared with `vmr report` — see cmd_report.go
+	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 
 	fmt.Printf("scanning %d file(s)...\n", len(paths))
-	g, fileCache, err := ctxgraph.ScanCached(paths, &prior.Files)
+	g, fileCache, err := ctxgraph.ScanCached(paths, priorCache)
 	if err != nil {
 		return err
 	}
@@ -151,7 +153,7 @@ func cmdStory(args []string) error {
 		partial := story.IsPartialHead(chains[i], firstPath)
 		freshRows[i] = story.BuildJourneyIndexRow(chains[i], titles[l], partial)
 	}
-	idx := &story.StoryIndex{Files: *fileCache, Journeys: story.MergeJourneyIndexRows(freshRows, prior.Journeys)}
+	idx := &story.StoryIndex{Cache: fileCache, Journeys: story.MergeJourneyIndexRows(freshRows, prior.Journeys)}
 
 	if *compare != "" {
 		ids := strings.Split(*compare, ",")
@@ -205,9 +207,11 @@ func updateJourneyRow(idx *story.StoryIndex, id string, tasks, steps int, render
 }
 
 // saveStoryIndex writes vmr-stories.json + vmr-stories.md into storiesDir
-// (creating it if needed) — called at every branch's normal (non-dry-run)
-// exit point, so `vmr story` leaves this pair behind regardless of which
-// flags were passed, per the design doc's vmr-stories.json section.
+// (creating it if needed), plus this run's parse cache into
+// {outDir}/.parse-cache (shared with `vmr report` — see cmd_report.go) —
+// called at every branch's normal (non-dry-run) exit point, so `vmr story`
+// leaves this triple behind regardless of which flags were passed, per the
+// design doc's vmr-stories.json section.
 func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error {
 	storiesDir, err := ensureStoriesDir(outDir)
 	if err != nil {
@@ -217,7 +221,10 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 		return err
 	}
 	md := story.RenderStoryIndexMarkdown(idx.Journeys, lang)
-	return os.WriteFile(filepath.Join(storiesDir, "vmr-stories.md"), []byte(md), 0o600)
+	if err := os.WriteFile(filepath.Join(storiesDir, "vmr-stories.md"), []byte(md), 0o600); err != nil {
+		return err
+	}
+	return ctxgraph.SaveCacheDir(filepath.Join(outDir, ".parse-cache"), idx.Cache)
 }
 
 // resolveJourneyID finds the candidate chain whose ID (the content-addressed

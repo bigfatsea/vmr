@@ -6,10 +6,10 @@
 //	vmr check    -c config.yaml   validate config and print a summary (or, with a trailing log|cache arg, just that resolved directory — vmr.sh uses this)
 //	vmr status   -c config.yaml   show identity + endpoint health of a running instance
 //	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
-//	vmr report   [audit.jsonl]    aggregate audit logs into usage statistics (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
+//	vmr report   [audit.jsonl]    aggregate audit logs into usage statistics (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*; -details to also render per-request Markdown files, off by default)
 //	vmr story    [audit.jsonl]    render one agent task's full execution history as a narrative (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
-//	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (or -detail FILE, no audit file needed)
+//	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (-line/-ts/-req to pick which; -print to just read it, no -provider needed)
 //
 // Each subcommand lives in its own cmd_*.go file; this file is only the
 // dispatcher, usage text, and the adapter blank-import registration point.
@@ -62,10 +62,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
        vmr check [-c config.yaml] [log|cache]   (prints just that resolved directory instead of the full summary)
        vmr status [-c config.yaml | -addr host:port] [-brief]   (./vmr.sh ps lists every instance on this machine)
-       vmr report [-c config.yaml] [-o dir] [-details=false] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (default -o: ./reports; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; -currency default: report.yaml's currency, or whatever currency pricing resolved in; no input files => -c's log_dir/vmr-audit-*)
+       vmr report [-c config.yaml] [-o dir] [-details] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (default -o: ./reports; -details off by default — the requests index links to each record's computed detail filename regardless of whether the file exists; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; -currency default: report.yaml's currency, or whatever currency pricing resolved in; no input files => -c's log_dir/vmr-audit-*)
        vmr story [-c config.yaml] [-journey id | -render-all | -compare id1,id2] [-include-partial] [-show-ungrouped] [-o dir] [-lang en|zh] [audit.jsonl|glob]...   (default -o: ./reports; no -journey/-render-all lists candidates; -lang default: report.yaml's language, or en; no input files => -c's log_dir/vmr-audit-*)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
-       vmr replay [-c config.yaml] -provider NAME [-line N | -ts TS] [flags] <audit.jsonl|.jsonl.zst>
-       vmr replay [-c config.yaml] -provider NAME -detail FILE [flags]
+       vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] <audit.jsonl|.jsonl.zst>
        vmr version`)
 }

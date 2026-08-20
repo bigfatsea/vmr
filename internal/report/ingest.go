@@ -10,11 +10,6 @@
 // same-package dependencies worth naming.
 package report
 
-import (
-	"vmr/internal/audit"
-	"vmr/internal/reqdetail"
-)
-
 // TrafficStats.Ingest is the accumulation every embedding bucket shares —
 // see the type's own doc comment (rows.go) for exactly which fields live
 // here vs stay on each row type. Requests/OK/Errors/tokens/duration-basis
@@ -142,16 +137,16 @@ func (h *HourRow) Ingest(rc *rec2) {
 // request-grade counters below — that conflation is the exact basis bug
 // cmd/vmr/quota_parity_test.go's comment records having happened once
 // already.
-func (e *EndpointRow) IngestAttempt(a audit.Attempt) {
+func (e *EndpointRow) IngestAttempt(a attemptFacts) {
 	e.Attempts++
 	// Forwarded is OK's condition WITHOUT `Error == ""` — see its own
 	// doc comment (rows.go): a truncated 2xx still got forwarded and
 	// still got charged, so only this count reproduces the router's
 	// requests-metric quota charging exactly.
-	if a.Response != nil && a.Response.Status < 400 {
+	if a.HasResponse && a.Status < 400 {
 		e.Forwarded++
 	}
-	if a.Error == "" && a.Response != nil && a.Response.Status < 400 {
+	if a.Error == "" && a.HasResponse && a.Status < 400 {
 		e.OK++
 		for _, n := range a.Norm {
 			if !diagnosticNormMarker[n] {
@@ -165,7 +160,7 @@ func (e *EndpointRow) IngestAttempt(a audit.Attempt) {
 	} else {
 		e.Failed++
 		e.WastedMS += a.DurMS
-		cls := reqdetail.AttemptErrorClass(a)
+		cls := a.ErrorClass // precomputed by attemptFactsFrom (factscache.go), same reqdetail.AttemptErrorClass value
 		if cls == "" {
 			cls = "unknown"
 		}

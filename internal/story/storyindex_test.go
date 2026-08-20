@@ -110,34 +110,40 @@ func TestMergeJourneyIndexRows_FreshBuiltFieldsWinOverPrior(t *testing.T) {
 	}
 }
 
+// TestStoryIndex_SaveLoadRoundTrip covers Save/LoadStoryIndex's remaining
+// job — Journeys only; the parse cache used to round-trip through this
+// same file (a "files" section) but has since moved to its own
+// content-hash-sharded directory (see ctxgraph's own
+// TestSaveCacheDir_LoadCacheDir_RoundTrip) and Cache's json:"-" tag.
 func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
 	chain := twoStepChain(t)
 	idx := &StoryIndex{
-		Files: ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{
-			chain[0].Manifests[0].Path: {Hash: "deadbeef", Manifests: chain[0].Manifests, NoBody: 1},
-		}},
+		Cache:    &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{"x": {Hash: "deadbeef"}}},
 		Journeys: []JourneyIndexRow{BuildJourneyIndexRow(chain, "t", false)},
 	}
 	path := filepath.Join(t.TempDir(), "vmr-stories.json")
 	if err := idx.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "deadbeef") {
+		t.Error("vmr-stories.json should not embed Cache's content (json:\"-\")")
+	}
 	got := LoadStoryIndex(path)
 	if len(got.Journeys) != 1 || got.Journeys[0].ID != idx.Journeys[0].ID {
 		t.Fatalf("round-tripped Journeys = %+v, want %+v", got.Journeys, idx.Journeys)
 	}
-	if len(got.Files.Files) != 1 {
-		t.Fatalf("round-tripped Files has %d entries, want 1", len(got.Files.Files))
-	}
-	entry := got.Files.Files[chain[0].Manifests[0].Path]
-	if entry.Hash != "deadbeef" || len(entry.Manifests) != 2 {
-		t.Errorf("round-tripped cache entry = %+v, want hash deadbeef, 2 manifests", entry)
+	if got.Cache != nil {
+		t.Errorf("LoadStoryIndex should leave Cache nil (load it separately via ctxgraph.LoadCacheDir), got %+v", got.Cache)
 	}
 }
 
 func TestLoadStoryIndex_MissingFileReturnsEmpty(t *testing.T) {
 	idx := LoadStoryIndex(filepath.Join(t.TempDir(), "does-not-exist.json"))
-	if idx == nil || idx.Files.Files == nil || len(idx.Journeys) != 0 {
+	if idx == nil || len(idx.Journeys) != 0 {
 		t.Errorf("expected an empty, non-nil index for a missing file, got %+v", idx)
 	}
 }
@@ -148,7 +154,7 @@ func TestLoadStoryIndex_CorruptFileDegradesToEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	idx := LoadStoryIndex(path)
-	if idx == nil || idx.Files.Files == nil || len(idx.Journeys) != 0 {
+	if idx == nil || len(idx.Journeys) != 0 {
 		t.Errorf("expected a corrupt file to degrade to an empty index, got %+v", idx)
 	}
 }

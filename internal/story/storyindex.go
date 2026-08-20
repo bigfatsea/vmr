@@ -47,19 +47,31 @@ type JourneyIndexRow struct {
 	Rendered string    `json:"rendered,omitempty"` // journey-<id>(-partial).md path, once rendered
 }
 
-// StoryIndex is vmr-stories.json's whole shape.
+// StoryIndex is vmr-stories.json's whole shape: just Journeys. The parse
+// cache used to live here too, as a "files" section — it's since moved to
+// its own content-hash-sharded directory shared with internal/report
+// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache — one level
+// above storiesDir), so this index stays purely human-scale (see
+// docs/future-strategy/story_report_p3_action_plan_sonnet-5.md batch D).
 type StoryIndex struct {
-	Files    ctxgraph.FileCache `json:"files"`
-	Journeys []JourneyIndexRow  `json:"journeys"`
+	Journeys []JourneyIndexRow `json:"journeys"`
+	// Cache is this run's own ScanCached result, carried on StoryIndex
+	// purely as a convenience — every cmdStory branch already threads idx
+	// through to saveStoryIndex, so riding along here saves plumbing it as
+	// a second parameter everywhere. Never serialized into
+	// vmr-stories.json (json:"-"): saveStoryIndex persists it separately,
+	// via ctxgraph.SaveCacheDir, at the same point it saves idx itself.
+	Cache *ctxgraph.FileCache `json:"-"`
 }
 
 // LoadStoryIndex reads path if present. A missing, unreadable, or corrupt
-// file all degrade the same way — an empty index (no cache hits, no prior
-// Journey rows) — the same best-effort-cache contract internal/imgprep's
-// disk cache uses: a bad cache must never fail or corrupt the actual run,
-// only cost it the speedup and the Tasks/Rendered carry-forward.
+// file all degrade the same way — an empty index (no prior Journey rows) —
+// the same best-effort-cache contract internal/imgprep's disk cache uses:
+// a bad index must never fail or corrupt the actual run, only cost it the
+// Tasks/Rendered carry-forward. Cache is left nil — load it separately via
+// ctxgraph.LoadCacheDir, same as internal/report's cmd_report.go does.
 func LoadStoryIndex(path string) *StoryIndex {
-	empty := &StoryIndex{Files: ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{}}}
+	empty := &StoryIndex{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return empty
@@ -67,9 +79,6 @@ func LoadStoryIndex(path string) *StoryIndex {
 	var idx StoryIndex
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return empty
-	}
-	if idx.Files.Files == nil {
-		idx.Files.Files = map[string]ctxgraph.CachedFile{}
 	}
 	return &idx
 }

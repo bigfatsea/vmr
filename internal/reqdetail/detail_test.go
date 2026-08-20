@@ -369,7 +369,7 @@ func TestRender_RawPreStrip(t *testing.T) {
 		}
 	}
 
-	withRaw := Render(base(`data: {"choices":[{"delta":{"content":"<think>step 1</think>final answer"}}]}`+"\n\n"), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	withRaw := Render(base(`data: {"choices":[{"delta":{"content":"<think>step 1</think>final answer"}}]}`+"\n\n"), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(withRaw, "Pre-strip raw content") || !strings.Contains(withRaw, "<think>step 1</think>final answer") {
 		t.Errorf("full pre-strip content not rendered:\n%s", withRaw)
 	}
@@ -377,7 +377,7 @@ func TestRender_RawPreStrip(t *testing.T) {
 		t.Error("should not show the unavailable note when RawPreStrip is populated")
 	}
 
-	withoutRaw := Render(base(nil), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	withoutRaw := Render(base(nil), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(withoutRaw, "didn't retain the pre-strip raw content") {
 		t.Errorf("missing graceful fallback note when RawPreStrip is nil:\n%s", withoutRaw)
 	}
@@ -399,7 +399,7 @@ func TestRender_FactsLine(t *testing.T) {
 		}
 	}
 
-	withFacts := Render(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	withFacts := Render(base(&core.RequestFacts{HasImage: true, HasTools: false, EstimatedTokens: 1234}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(withFacts, "VMR pre-routing judgment") {
 		t.Errorf("facts line missing:\n%s", withFacts)
 	}
@@ -416,7 +416,7 @@ func TestRender_FactsLine(t *testing.T) {
 		t.Errorf("facts line should render the plain (non-EST-suffixed) token estimate:\n%s", withFacts)
 	}
 
-	both := Render(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	both := Render(base(&core.RequestFacts{HasImage: true, HasTools: true, EstimatedTokens: 500}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(both, "Capabilities required: `image`, `tools`") {
 		t.Errorf("facts line should list both detected capabilities joined by \", \":\n%s", both)
 	}
@@ -424,12 +424,12 @@ func TestRender_FactsLine(t *testing.T) {
 		t.Errorf("facts line should render sub-1000 estimate as plain T:\n%s", both)
 	}
 
-	neither := Render(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	neither := Render(base(&core.RequestFacts{HasImage: false, HasTools: false, EstimatedTokens: 10}), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(neither, "Capabilities required: none") {
 		t.Errorf("facts line should show none when no capability is detected:\n%s", neither)
 	}
 
-	withoutFacts := Render(base(nil), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	withoutFacts := Render(base(nil), "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if strings.Contains(withoutFacts, "VMR pre-routing judgment") {
 		t.Errorf("nil Facts must render nothing:\n%s", withoutFacts)
 	}
@@ -474,7 +474,7 @@ func TestRender_RejectedRecordNoManifest(t *testing.T) {
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: "not a json object"},
 		},
 	}
-	got := Render(rec, "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN)
+	got := Render(rec, "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
 	if !strings.Contains(got, "(rejected)") {
 		t.Errorf("rejected record's overview should show (rejected) for the missing model, got:\n%s", got)
 	}

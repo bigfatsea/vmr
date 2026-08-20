@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,7 +53,6 @@ type detailJob struct {
 	info *ReqInfo
 	path string
 	line int
-	name string
 	wg   *sync.WaitGroup
 }
 
@@ -74,24 +72,20 @@ func (j detailJob) manifestsFor() (m, prev *ctxgraph.Manifest) {
 	return m, prev
 }
 
-// writeOneDetail renders and writes one record's .md + .json pair. Errors
-// are reported through recordErr rather than returned, since this runs on a
-// worker goroutine, not the caller's.
-func writeOneDetail(dir string, lang i18n.Lang, prof taskseg.Profile, j detailJob, n *int64, recordErr func(error)) {
+// writeOneDetail renders one record's detail page if it isn't already on
+// disk, via reqdetail.EnsureRendered — idempotent (a rerun over the same
+// records skips every file it already wrote) and, since P3.1, without a
+// same-named .json copy of the raw record: that used to be a byte-for-byte
+// duplicate of data that already exists, addressably, in the source audit
+// log (see internal/audit.LineAt and `vmr replay -req COORD -print`, its
+// replacement) — see docs/future-strategy/story_report_architecture_opus-5.md
+// §7.6c. Errors are reported through recordErr rather than returned, since
+// this runs on a worker goroutine, not the caller's.
+func writeOneDetail(dir, evidenceDir string, lang i18n.Lang, prof taskseg.Profile, j detailJob, n *int64, recordErr func(error)) {
 	m, prev := j.manifestsFor()
-	md := reqdetail.Render(j.rec, j.path, j.line, m, prev, prof, lang)
-	if err := os.WriteFile(filepath.Join(dir, j.name), []byte(md), 0o600); err != nil {
+	if _, err := reqdetail.EnsureRendered(dir, j.rec, j.path, j.line, m, prev, prof, lang, evidenceDir); err != nil {
 		recordErr(err)
 		return
-	}
-	// Same-named .json alongside the .md: the raw record, for readers who
-	// want to jq/query a single request instead of parsing the Markdown.
-	if raw, err := json.MarshalIndent(j.rec, "", "  "); err == nil {
-		jsonName := strings.TrimSuffix(j.name, ".md") + ".json"
-		if err := os.WriteFile(filepath.Join(dir, jsonName), raw, 0o600); err != nil {
-			recordErr(err)
-			return
-		}
 	}
 	atomic.AddInt64(n, 1)
 }
@@ -111,14 +105,15 @@ func writeOneDetail(dir string, lang i18n.Lang, prof taskseg.Profile, j detailJo
 // coordinate hash makes every name unique on its own, so submit/Submit no
 // longer need a mutex-guarded `used` fallback-naming map.
 type DetailWriter struct {
-	dir      string
-	lang     i18n.Lang
-	prof     taskseg.Profile
-	jobs     chan detailJob
-	poolWG   sync.WaitGroup
-	n        int64
-	errMu    sync.Mutex
-	firstErr error
+	dir         string
+	evidenceDir string
+	lang        i18n.Lang
+	prof        taskseg.Profile
+	jobs        chan detailJob
+	poolWG      sync.WaitGroup
+	n           int64
+	errMu       sync.Mutex
+	firstErr    error
 }
 
 // NewDetailWriter creates dir and starts the worker pool (detailWorkerCount
@@ -126,6 +121,13 @@ type DetailWriter struct {
 // resolves the two dialect-aware judgments Render needs (NoReply, chat-id
 // extraction) — pass the same Profile the caller's session analysis uses.
 // Callers must eventually call Close to drain it.
+//
+// Shared evidence blobs (system prompt, declared tool set — see
+// internal/reqdetail's evidence.go) go into "evidence" next to dir's own
+// parent, i.e. dir's sibling — dir is always {outDir}/details (every
+// caller follows this convention), so this resolves to {outDir}/evidence,
+// matching internal/story's own future use of the same directory (P3.4's
+// scope is `vmr report` only; the convention itself is package-agnostic).
 func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailWriter, error) {
 	// 0o700/0o600 throughout: detail files carry the same full conversation
 	// bodies as the audit JSONL they were derived from, which is
@@ -135,17 +137,18 @@ func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailW
 	}
 	numWorkers := detailWorkerCount()
 	dw := &DetailWriter{
-		dir:  dir,
-		lang: lang,
-		prof: prof,
-		jobs: make(chan detailJob, numWorkers*4),
+		dir:         dir,
+		evidenceDir: filepath.Join(filepath.Dir(dir), "evidence"),
+		lang:        lang,
+		prof:        prof,
+		jobs:        make(chan detailJob, numWorkers*4),
 	}
 	dw.poolWG.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer dw.poolWG.Done()
 			for j := range dw.jobs {
-				writeOneDetail(dw.dir, dw.lang, dw.prof, j, &dw.n, dw.recordErr)
+				writeOneDetail(dw.dir, dw.evidenceDir, dw.lang, dw.prof, j, &dw.n, dw.recordErr)
 				if j.wg != nil {
 					j.wg.Done()
 				}
@@ -178,17 +181,10 @@ func (dw *DetailWriter) hasErr() bool {
 // nil); WriteDetails passes its own scan-loop path/line explicitly since it
 // has them regardless of whether Lookup found a ReqInfo.
 func (dw *DetailWriter) submit(rec *audit.Record, info *ReqInfo, path string, line int, wg *sync.WaitGroup) {
-	name := ""
-	if info != nil {
-		name = info.DetailFile // assigned in ts order by the analysis
-	}
-	if name == "" {
-		name = reqdetail.FileNameForRecord(rec, path, line)
-	}
 	if wg != nil {
 		wg.Add(1)
 	}
-	dw.jobs <- detailJob{rec: rec, info: info, path: path, line: line, name: name, wg: wg}
+	dw.jobs <- detailJob{rec: rec, info: info, path: path, line: line, wg: wg}
 }
 
 // Submit queues one record's render+write, fire-and-forget — the exported

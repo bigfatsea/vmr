@@ -39,6 +39,26 @@ func ReqCoord(path string, line int) string {
 	return CanonicalPath(path) + ":" + strconv.Itoa(line)
 }
 
+// ParseReqCoord splits a "basename:line" coordinate (as published in
+// vmr-requests.json's "req" field or a Manifest's Req) back into its two
+// parts. It does not resolve basename to a real filesystem path — Req is
+// an identity string, never an I/O path (see CanonicalPath's doc comment);
+// the caller must supply the real path separately (typically an existing
+// positional audit-file argument) and can cross-check it against basename
+// via CanonicalPath.
+func ParseReqCoord(req string) (basename string, line int, err error) {
+	i := strings.LastIndexByte(req, ':')
+	if i < 0 {
+		return "", 0, fmt.Errorf("ctxgraph: %q is not a valid req coordinate (want \"basename:line\")", req)
+	}
+	basename = req[:i]
+	line, err = strconv.Atoi(req[i+1:])
+	if err != nil || basename == "" || line <= 0 {
+		return "", 0, fmt.Errorf("ctxgraph: %q is not a valid req coordinate (want \"basename:line\")", req)
+	}
+	return basename, line, nil
+}
+
 // ReqHash8 is the coordinate's content-addressed short form used for
 // deterministic filenames (internal/reqdetail's detail pages): md5 of the
 // req string, first 4 bytes rendered as 8 hex characters — the same

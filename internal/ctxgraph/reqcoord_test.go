@@ -66,6 +66,36 @@ func TestReqHash8_DeterministicAndDistinct(t *testing.T) {
 	}
 }
 
+func TestParseReqCoord(t *testing.T) {
+	basename, line, err := ParseReqCoord("vmr-audit-2026-07-25.jsonl:317")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if basename != "vmr-audit-2026-07-25.jsonl" || line != 317 {
+		t.Errorf("ParseReqCoord = (%q, %d), want (%q, 317)", basename, line, "vmr-audit-2026-07-25.jsonl")
+	}
+}
+
+func TestParseReqCoord_RoundTripsWithReqCoord(t *testing.T) {
+	req := ReqCoord("logs/vmr-audit-2026-07-25.jsonl.zst", 42)
+	basename, line, err := ParseReqCoord(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if basename != CanonicalPath("logs/vmr-audit-2026-07-25.jsonl.zst") || line != 42 {
+		t.Errorf("round trip mismatch: basename=%q line=%d", basename, line)
+	}
+}
+
+func TestParseReqCoord_RejectsMalformed(t *testing.T) {
+	cases := []string{"", "no-colon-here", "file.jsonl:", "file.jsonl:abc", "file.jsonl:0", "file.jsonl:-1"}
+	for _, req := range cases {
+		if _, _, err := ParseReqCoord(req); err == nil {
+			t.Errorf("ParseReqCoord(%q): expected an error, got nil", req)
+		}
+	}
+}
+
 func TestCheckPathCollisions_NoCollision(t *testing.T) {
 	paths := []string{
 		"/dir1/vmr-audit-2026-07-25.jsonl.zst",

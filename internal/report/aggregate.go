@@ -181,7 +181,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 	}}
 
 	st := newAggState(rep, sess, pricingSrc)
-	if err := st.scanFiles(paths, progress, onRecord); err != nil {
+	if err := st.scanFiles(paths, progress, onRecord, cache); err != nil {
 		return nil, nil, nil, err
 	}
 	st.finishBuckets(pricingInfo, quotas, now, progress)
@@ -190,36 +190,30 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 }
 
 // scanFiles is buildInternal's single pass over the input files, joined to
-// ReqInfo via st.sess.Lookup — the phase that does all the I/O.
-func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo)) error {
+// ReqInfo via st.sess.Lookup. cache is the same *ctxgraph.FileCache
+// AnalyzeSessionsCached already returned (hash-fresh for every path in
+// paths — see ScanCached's postcondition) — a file whose cached Facts are
+// still valid skips reopening/re-decoding it entirely (ingestCachedFile);
+// everything else falls back to a real read (scanAndCacheFile), which
+// also populates cache for next time. The cache-hit shortcut only applies
+// when onRecord is nil (-details off): a caller that needs the raw
+// audit.Record for detail rendering needs the file open regardless, so
+// there is nothing to save by skipping decode in that case (see
+// docs/future-strategy/story_report_architecture_opus-5.md §7.6c on why
+// -details' own cost stays separate).
+func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo), cache *ctxgraph.FileCache) error {
 	for fileIdx, path := range paths {
 		fileStart := time.Now()
+		key := ctxgraph.CanonicalPath(path)
 		var fileRecords int
-		f, err := audit.OpenLogFile(path)
+		var err error
+		if ff, ok := loadCachedFacts(cache, key); onRecord == nil && ok {
+			fileRecords = st.ingestCachedFile(path, ff)
+		} else {
+			fileRecords, err = st.scanAndCacheFile(path, key, cache, onRecord)
+		}
 		if err != nil {
 			return err
-		}
-		line := 0
-		scanErr := audit.ForEachLine(f, audit.MaxLogLine, func(lineBytes []byte) {
-			line++
-			var arec audit.Record
-			if err := json.Unmarshal(lineBytes, &arec); err != nil {
-				st.rep.Meta.ParseErrors++
-				return
-			}
-			st.rep.Meta.Records++
-			fileRecords++
-			ri := st.sess.Lookup(path, line)
-			if onRecord != nil {
-				onRecord(&arec, ri)
-			}
-			st.ingestRecord(&arec, ri, path, line)
-		}, func() {
-			st.rep.Meta.ParseErrors++
-		})
-		f.Close()
-		if scanErr != nil {
-			return fmt.Errorf("%s: %w", path, scanErr)
 		}
 		if progress != nil {
 			fmt.Fprintf(progress, "[%d/%d] %s  done: %d records (%s)\n",
@@ -229,19 +223,77 @@ func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(
 	return nil
 }
 
-// ingestRecord joins one audit.Record to its ReqInfo and fans it out to
-// every bucket it touches.
-func (st *aggState) ingestRecord(arec *audit.Record, ri *ReqInfo, path string, line int) {
-	if st.from.IsZero() || arec.TS.Before(st.from) {
-		st.from = arec.TS
+// ingestCachedFile replays one file's cached recordFacts — no file I/O, no
+// JSON decode of the record bodies — through the exact same
+// buildRec2/ingestRecord path a fresh decode would use. Returns the record
+// count for the progress line.
+func (st *aggState) ingestCachedFile(path string, ff fileFacts) int {
+	st.rep.Meta.Records += len(ff.Records)
+	st.rep.Meta.ParseErrors += ff.ParseErrors
+	for _, rf := range ff.Records {
+		ri := st.sess.Lookup(path, rf.Line)
+		st.ingestRecord(buildRec2(rf, ri, path), rf.Attempts)
 	}
-	if arec.TS.After(st.to) {
-		st.to = arec.TS
-	}
-	rc := buildRec2(arec, ri, path, line)
+	return len(ff.Records)
+}
 
+// scanAndCacheFile is scanFiles' fresh-decode path: open path, decode
+// every line, extract+ingest each record, then store the freshly
+// extracted facts back into cache — regardless of why this path was taken
+// (a genuine cache miss, or onRecord forcing a decode a Facts hit would
+// otherwise have skipped) — so a later -details=false run over the same
+// file benefits even if this run needed the raw records for detail
+// rendering. cache may be nil (no prior/output cache at all, e.g. a caller
+// using Build instead of BuildCached); storeCachedFacts/loadCachedFacts
+// both treat that as a no-op rather than a special case here.
+func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache, onRecord func(*audit.Record, *ReqInfo)) (int, error) {
+	f, err := audit.OpenLogFile(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	var ff fileFacts
+	line := 0
+	scanErr := audit.ForEachLine(f, audit.MaxLogLine, func(lineBytes []byte) {
+		line++
+		var arec audit.Record
+		if err := json.Unmarshal(lineBytes, &arec); err != nil {
+			st.rep.Meta.ParseErrors++
+			ff.ParseErrors++
+			return
+		}
+		st.rep.Meta.Records++
+		rf := extractRecordFacts(&arec, line)
+		ff.Records = append(ff.Records, rf)
+		ri := st.sess.Lookup(path, line)
+		if onRecord != nil {
+			onRecord(&arec, ri)
+		}
+		st.ingestRecord(buildRec2(rf, ri, path), rf.Attempts)
+	}, func() {
+		st.rep.Meta.ParseErrors++
+		ff.ParseErrors++
+	})
+	if scanErr != nil {
+		return 0, fmt.Errorf("%s: %w", path, scanErr)
+	}
+	storeCachedFacts(cache, key, ff)
+	return len(ff.Records), nil
+}
+
+// ingestRecord fans rc (already joined to its ReqInfo — see buildRec2) out
+// to every bucket it touches, given the same record's attempt-level facts
+// (needed only by ingestEndpoints, so not part of rec2 itself).
+func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
+	if st.from.IsZero() || rc.ts.Before(st.from) {
+		st.from = rc.ts
+	}
+	if rc.ts.After(st.to) {
+		st.to = rc.ts
+	}
 	mr, dr := st.ingestRowBuckets(rc)
-	st.ingestEndpoints(arec, rc)
+	st.ingestEndpoints(attempts, rc)
 	st.ingestSecondaryBuckets(rc)
 	// cost (if pricing): overall + by-model + by-date + by-endpoint (epsAll,
 	// cross-date — matches the Endpoint Health section's basis) + by-client,
@@ -298,7 +350,7 @@ func (st *aggState) ingestRowBuckets(rc *rec2) (mr, dr *Row) {
 }
 
 // ingestEndpoints updates Endpoints/EndpointsAll from one record's attempts.
-func (st *aggState) ingestEndpoints(arec *audit.Record, rc *rec2) {
+func (st *aggState) ingestEndpoints(attempts []attemptFacts, rc *rec2) {
 	// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does NOT
 	// make the request-level half fire once. EndpointLabel is
 	// protocol:provider:model with no key component, so one provider's
@@ -306,7 +358,7 @@ func (st *aggState) ingestEndpoints(arec *audit.Record, rc *rec2) {
 	// its keys matched twice, double-counting every request-level metric on
 	// that row (caught by cmd/vmr/quota_parity_test.go's tokens case).
 	reqAttributed := false
-	for _, a := range arec.Attempts {
+	for _, a := range attempts {
 		k := rc.date + "\x00" + a.Endpoint
 		e := st.eps[k]
 		if e == nil {

@@ -19,6 +19,7 @@ package reqdetail
 
 import (
 	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -126,10 +127,18 @@ func CountImages(images []audit.ImageInfo) (total, compressed int) {
 // the same "count/short-hash" convention ctxgraph.ReqHash8 uses for the
 // request coordinate, applied to a tool name list instead.
 func ToolsSig(names []string) string {
+	return fmt.Sprintf("tools:%d/%s", len(names), toolsHash8(names))
+}
+
+// toolsHash8 is ToolsSig's hash half, factored out so
+// EnsureToolsEvidence (evidence.go) can name its shared evidence file by
+// the exact same content address instead of recomputing a slightly
+// different hash and silently drifting from what ToolsSig displays.
+func toolsHash8(names []string) string {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	sum := md5.Sum([]byte(strings.Join(sorted, ",")))
-	return fmt.Sprintf("tools:%d/%x", len(names), sum[:4])
+	return hex.EncodeToString(sum[:4])
 }
 
 // RoleChars sums displayed characters (runes) per role across a request

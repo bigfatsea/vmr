@@ -56,6 +56,42 @@ func (z zstdReadCloser) Close() error {
 	return z.f.Close()
 }
 
+// LineAt returns the raw bytes of path's 1-based logical line — the same
+// counting ForEachLine already uses (a too-long skipped line still advances
+// the counter, so this stays aligned with whatever wrote the line number a
+// caller is passing in, e.g. a ctxgraph coordinate or vmr-requests.json's
+// own row order). It does not unmarshal: callers decode into whatever shape
+// they need (a full audit.Record for a "read" consumer, a partial view for
+// replay). Unlike ForEachLine's callers elsewhere, line 0 is not special
+// here — it's simply not found, since a coordinate-addressed line is always
+// a concrete positive number.
+func LineAt(path string, line int) ([]byte, error) {
+	if line <= 0 {
+		return nil, fmt.Errorf("%s: line %d is not a valid 1-based line number", path, line)
+	}
+	rc, err := OpenLogFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+
+	var found []byte
+	n := 0
+	scanErr := ForEachLine(rc, MaxLogLine, func(lb []byte) {
+		n++
+		if n == line && found == nil {
+			found = append([]byte(nil), lb...) // ForEachLine reuses its buffer; copy before it's overwritten
+		}
+	}, nil)
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	if found == nil {
+		return nil, fmt.Errorf("%s: line %d not found", path, line)
+	}
+	return found, nil
+}
+
 // ForEachLine invokes fn for every non-empty line in r (trailing \n
 // stripped). Lines longer than maxLine are drained with bounded memory and
 // reported via onSkip (nilable) instead of failing the scan. The line slice

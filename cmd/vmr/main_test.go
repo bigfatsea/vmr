@@ -359,9 +359,38 @@ func captureStdout(t *testing.T, fn func()) string {
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
 // report.BuildCached: glob expansion, output directory creation, and
-// writing both the JSON and Markdown artifacts, plus the session-analysis
-// outputs (vmr-requests.json/.md + details/).
+// writing both the JSON and Markdown artifacts. -details is off by
+// default (see TestCmdReport_DetailsOffByDefault for that), so it's passed
+// explicitly here to also cover the session-analysis-driven details/
+// output in the same pass.
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "out")
+
+	if err := cmdReport([]string{"-o", outDir, "-details", auditPath}); err != nil {
+		t.Fatalf("cmdReport: %v", err)
+	}
+	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.json", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
+			t.Errorf("expected %s to be written: %v", name, err)
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(outDir, "details")); err != nil || !fi.IsDir() {
+		t.Errorf("expected details/ directory to be written: %v", err)
+	}
+}
+
+// TestCmdReport_DetailsOffByDefault locks in P3.3's default flip: a plain
+// `vmr report` run (no -details, no report.yaml) must not materialize
+// details/ at all, while vmr-requests.json still carries a non-empty "req"
+// (and, once P4/P5 wire a consumer, a computable detail filename) for
+// every row — the index never needs the file to exist to link to it.
+func TestCmdReport_DetailsOffByDefault(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
 	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
@@ -373,13 +402,15 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	if err := cmdReport([]string{"-o", outDir, auditPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.json", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
-		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
-			t.Errorf("expected %s to be written: %v", name, err)
-		}
+	if _, err := os.Stat(filepath.Join(outDir, "details")); err == nil {
+		t.Error("details/ should not exist when -details wasn't passed")
 	}
-	if fi, err := os.Stat(filepath.Join(outDir, "details")); err != nil || !fi.IsDir() {
-		t.Errorf("expected details/ directory to be written: %v", err)
+	data, err := os.ReadFile(filepath.Join(outDir, "vmr-requests.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"req":`) {
+		t.Error("vmr-requests.json rows should still carry a \"req\" coordinate with -details off")
 	}
 }
 

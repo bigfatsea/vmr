@@ -3,10 +3,12 @@
 package ctxgraph
 
 import (
+	"crypto/md5"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 )
 
 func mkAuditRec(ts time.Time, body map[string]any) audit.Record {
@@ -226,6 +228,60 @@ func TestBuildManifest_SessKey_AnchorFallback(t *testing.T) {
 	want := "anchor:" + m.Keys[0].String()
 	if m.SessKey != want {
 		t.Errorf("SessKey = %q, want %q", m.SessKey, want)
+	}
+}
+
+func TestLeadingSystemText_SingleMessage(t *testing.T) {
+	t.Parallel()
+	msgs := []chatmsg.Message{{Role: "system", Text: "you are helpful"}, {Role: "user", Text: "hi"}}
+	if got := LeadingSystemText(msgs, 1); got != "you are helpful" {
+		t.Errorf("LeadingSystemText = %q, want %q", got, "you are helpful")
+	}
+}
+
+func TestLeadingSystemText_ConcatenatesMultipleLeadingMessages(t *testing.T) {
+	t.Parallel()
+	msgs := []chatmsg.Message{
+		{Role: "system", Text: "part one"},
+		{Role: "system", Text: "part two"},
+		{Role: "user", Text: "hi"},
+	}
+	if got := LeadingSystemText(msgs, 2); got != "part onepart two" {
+		t.Errorf("LeadingSystemText = %q, want %q", got, "part onepart two")
+	}
+}
+
+func TestLeadingSystemText_ZeroLeadSysIsEmpty(t *testing.T) {
+	t.Parallel()
+	msgs := []chatmsg.Message{{Role: "user", Text: "hi"}}
+	if got := LeadingSystemText(msgs, 0); got != "" {
+		t.Errorf("LeadingSystemText = %q, want empty", got)
+	}
+}
+
+// TestLeadingSystemText_MatchesBuildManifestSysHash locks in the property
+// EnsureSysPromptEvidence (internal/reqdetail) depends on: the text this
+// function returns for a Manifest's own LeadSys must hash to that exact
+// Manifest's SysHash, or the evidence blob written under that hash's
+// filename would not actually be the text the hash names.
+func TestLeadingSystemText_MatchesBuildManifestSysHash(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "system", "content": "part one"},
+			map[string]any{"role": "system", "content": "part two"},
+			map[string]any{"role": "user", "content": "hi"},
+		},
+	}
+	rec := mkAuditRec(time.Now(), body)
+	m, ok := BuildManifest(&rec, "f", 1)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	msgs := chatmsg.Messages(body)
+	text := LeadingSystemText(msgs, m.LeadSys)
+	if got := md5.Sum([]byte(text)); got != m.SysHash {
+		t.Errorf("md5(LeadingSystemText(...)) = %x, want SysHash %x", got, m.SysHash)
 	}
 }
 

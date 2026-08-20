@@ -113,10 +113,8 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		}
 	}
 
-	var sysText strings.Builder
 	for i, msg := range msgs {
 		if msg.Role == "system" && i == m.LeadSys {
-			sysText.WriteString(msg.Text)
 			m.LeadSys++
 			continue
 		}
@@ -136,7 +134,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		// SysChanged detection would agree with this package's); that duplicate
 		// copy was later deleted — session.go now reads
 		// SysHash straight from here instead of recomputing it.
-		m.SysHash = md5.Sum([]byte(sysText.String()))
+		m.SysHash = md5.Sum([]byte(LeadingSystemText(msgs, m.LeadSys)))
 		m.HasSys = true
 	}
 
@@ -151,6 +149,27 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		m.SessKey = "anchor:" + m.Keys[0].String()
 	}
 	return m, true
+}
+
+// LeadingSystemText concatenates the raw text of msgs[0:leadSys] — the
+// exact slice-and-join BuildManifest uses to compute SysHash. Exported so
+// any consumer materializing "the text behind a given SysHash" (e.g.
+// internal/reqdetail's system-prompt evidence blob) derives it from this
+// one function instead of re-implementing the concatenation and silently
+// drifting from what the hash actually covers. leadSys is normally a
+// Manifest's own LeadSys field; out-of-range values degrade to "" rather
+// than panicking, since a caller holding a stale/foreign leadSys value
+// (mismatched against msgs) should get an empty, clearly-wrong result it
+// can notice, not a crash.
+func LeadingSystemText(msgs []chatmsg.Message, leadSys int) string {
+	if leadSys <= 0 || leadSys > len(msgs) {
+		return ""
+	}
+	var b strings.Builder
+	for _, msg := range msgs[:leadSys] {
+		b.WriteString(msg.Text)
+	}
+	return b.String()
 }
 
 // lastEndpoint mirrors internal/report/detail.go's helper of the same name

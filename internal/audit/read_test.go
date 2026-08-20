@@ -38,6 +38,45 @@ func TestForEachLineHandlesFinalLineWithoutNewline(t *testing.T) {
 	}
 }
 
+func TestLineAt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LineAt(path, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "line2" {
+		t.Errorf("LineAt(2) = %q, want %q", got, "line2")
+	}
+}
+
+func TestLineAt_OutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(path, []byte("line1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LineAt(path, 5); err == nil {
+		t.Error("expected an error for a line past EOF, got nil")
+	}
+}
+
+func TestLineAt_RejectsNonPositiveLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(path, []byte("line1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{0, -1} {
+		if _, err := LineAt(path, n); err == nil {
+			t.Errorf("LineAt(%d): expected an error, got nil", n)
+		}
+	}
+}
+
 func TestOpenLogFile_Plain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vmr-audit-2026-07-07.jsonl")
 	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o600); err != nil {

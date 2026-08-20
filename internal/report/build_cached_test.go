@@ -101,6 +101,27 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	}
 }
 
+// TestBuildCached_WarmPopulatesFactsCache proves BuildCached's cold run
+// leaves behind a non-empty Facts entry — the precondition
+// factscache_test.go's TestScanFiles_CacheHitNeverOpensFile relies on to
+// test the hit path in isolation, and by itself already enough to prove
+// storeCachedFacts actually ran (a bug there would silently leave every
+// future run paying the pre-P3.6 cost, without ever failing this loudly).
+func TestBuildCached_WarmPopulatesFactsCache(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, smallAuditRecords())
+	now := time.Now()
+
+	_, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildCached (cold): %v", err)
+	}
+	key := ctxgraph.CanonicalPath(path)
+	if len(cache.Files[key].Facts) == 0 {
+		t.Error("cold run should have populated the file's Facts cache entry")
+	}
+}
+
 // TestAnalyzeSessionsCached_NilProfileErrors pins the fail-fast guard for a
 // nil taskseg.Profile: without it, collect() only calls prof.RealUserText
 // once inside one of AnalyzeSessionsCached's per-file worker goroutines
@@ -135,17 +156,17 @@ func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 	}
 }
 
-func TestWriteRequestsJSON_RoundTripsFilesAndRows(t *testing.T) {
+// TestWriteRequestsJSON_RoundTripsRows covers WriteRequestsJSON's own
+// remaining job — the parse cache used to round-trip through this same
+// file (a "files" section) but has since moved to its own
+// content-hash-sharded directory; see ctxgraph's own
+// TestSaveCacheDir_LoadCacheDir_RoundTrip for that half now.
+func TestWriteRequestsJSON_RoundTripsRows(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTempJSONL(t, dir, smallAuditRecords())
-	_, _, cache, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil)
-	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
-	}
 	rows := []RequestRow{{TS: "2026-07-24T00:00:00Z", Outcome: "ok"}, {TS: "2026-07-24T00:01:00Z", Outcome: "error"}}
 
 	outPath := filepath.Join(dir, "vmr-requests.json")
-	n, err := WriteRequestsJSON(rows, cache, outPath)
+	n, err := WriteRequestsJSON(rows, outPath)
 	if err != nil {
 		t.Fatalf("WriteRequestsJSON: %v", err)
 	}
@@ -164,43 +185,8 @@ func TestWriteRequestsJSON_RoundTripsFilesAndRows(t *testing.T) {
 	if len(idx.Requests) != 2 {
 		t.Errorf("got %d requests, want 2", len(idx.Requests))
 	}
-	if len(idx.Files.Files) != 1 {
-		t.Errorf("got %d file cache entries, want 1", len(idx.Files.Files))
-	}
-
-	loaded := LoadRequestsFileCache(outPath)
-	if loaded == nil || len(loaded.Files) != 1 {
-		t.Errorf("LoadRequestsFileCache = %+v, want the same 1-entry cache", loaded)
-	}
-	key := ctxgraph.CanonicalPath(path)
-	if loaded.Files[key].Hash != cache.Files[key].Hash {
-		t.Errorf("loaded hash %q != original %q", loaded.Files[key].Hash, cache.Files[key].Hash)
-	}
-}
-
-func TestWriteRequestsJSON_NilCacheWritesEmptyFilesSection(t *testing.T) {
-	dir := t.TempDir()
-	outPath := filepath.Join(dir, "vmr-requests.json")
-	if _, err := WriteRequestsJSON(nil, nil, outPath); err != nil {
-		t.Fatalf("WriteRequestsJSON: %v", err)
-	}
-	loaded := LoadRequestsFileCache(outPath)
-	if loaded == nil || len(loaded.Files) != 0 {
-		t.Errorf("expected a non-nil, empty cache, got %+v", loaded)
-	}
-}
-
-func TestLoadRequestsFileCache_MissingOrCorruptDegradesToNil(t *testing.T) {
-	dir := t.TempDir()
-	if got := LoadRequestsFileCache(filepath.Join(dir, "does-not-exist.json")); got != nil {
-		t.Errorf("missing file should return nil, got %+v", got)
-	}
-	corruptPath := filepath.Join(dir, "corrupt.json")
-	if err := os.WriteFile(corruptPath, []byte("{not valid"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := LoadRequestsFileCache(corruptPath); got != nil {
-		t.Errorf("corrupt file should return nil, got %+v", got)
+	if strings.Contains(string(data), `"files"`) {
+		t.Error("vmr-requests.json should no longer embed a \"files\" cache section")
 	}
 }
 

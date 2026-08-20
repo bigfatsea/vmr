@@ -26,14 +26,16 @@ type DetailText struct {
 	TruncatedWarning string
 	NoReplyWarning   string
 
-	ClientRequestTitle string
-	BodyNonJSON        string
-	ParamsSummary      func(n int) string
-	ToolsSummary       func(n int, preview string) string
-	MessagesTitle      func(n int) string
-	RoleTokenShare     func(line string) string
-	HistoryVsNewNote   func(deltaStart int) string
-	IncrementNote      func(n, deltaStart int) string
+	ClientRequestTitle    string
+	BodyNonJSON           string
+	ParamsSummary         func(n int) string
+	ToolsSummary          func(n int, preview string) string
+	SysPromptEvidenceLink func(chars, file string) string
+	ToolsEvidenceLink     func(n int, file string) string
+	MessagesTitle         func(n int) string
+	RoleTokenShare        func(line string) string
+	HistoryVsNewNote      func(deltaStart int) string
+	IncrementNote         func(n, deltaStart int) string
 
 	AttemptsTitle          func(n int) string
 	NoAttempts             string
@@ -140,8 +142,14 @@ func Detail(lang Lang) DetailText {
 			BodyNonJSON:        "Body（非 JSON）",
 			ParamsSummary:      func(n int) string { return "请求参数 (" + strconv.Itoa(n) + ")" },
 			ToolsSummary:       func(n int, preview string) string { return "Tools (" + strconv.Itoa(n) + "): " + preview },
-			MessagesTitle:      func(n int) string { return "Messages (" + strconv.Itoa(n) + ")" },
-			RoleTokenShare:     func(line string) string { return "角色 Token 估算占比：" + line + "\n\n" },
+			SysPromptEvidenceLink: func(chars, file string) string {
+				return "**System Prompt**（" + chars + " 字符） → [" + file + "](../evidence/" + file + ")\n\n"
+			},
+			ToolsEvidenceLink: func(n int, file string) string {
+				return "**Tools**（" + strconv.Itoa(n) + " 个） → [" + file + "](../evidence/" + file + ")\n\n"
+			},
+			MessagesTitle:  func(n int) string { return "Messages (" + strconv.Itoa(n) + ")" },
+			RoleTokenShare: func(line string) string { return "角色 Token 估算占比：" + line + "\n\n" },
 			HistoryVsNewNote: func(deltaStart int) string {
 				return "#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文（↺）,#" + strconv.Itoa(deltaStart+1) + " 起为本轮新增（🆕）\n\n"
 			},
@@ -286,8 +294,14 @@ func Detail(lang Lang) DetailText {
 		BodyNonJSON:        "Body (non-JSON)",
 		ParamsSummary:      func(n int) string { return "Request Params (" + strconv.Itoa(n) + ")" },
 		ToolsSummary:       func(n int, preview string) string { return "Tools (" + strconv.Itoa(n) + "): " + preview },
-		MessagesTitle:      func(n int) string { return "Messages (" + strconv.Itoa(n) + ")" },
-		RoleTokenShare:     func(line string) string { return "Estimated token share by role: " + line + "\n\n" },
+		SysPromptEvidenceLink: func(chars, file string) string {
+			return "**System Prompt** (" + chars + " chars) → [" + file + "](../evidence/" + file + ")\n\n"
+		},
+		ToolsEvidenceLink: func(n int, file string) string {
+			return "**Tools** (" + strconv.Itoa(n) + ") → [" + file + "](../evidence/" + file + ")\n\n"
+		},
+		MessagesTitle:  func(n int) string { return "Messages (" + strconv.Itoa(n) + ")" },
+		RoleTokenShare: func(line string) string { return "Estimated token share by role: " + line + "\n\n" },
 		HistoryVsNewNote: func(deltaStart int) string {
 			return "#1–#" + strconv.Itoa(deltaStart) + " are prior context (↺), #" + strconv.Itoa(deltaStart+1) + "+ are new this turn (🆕)\n\n"
 		},

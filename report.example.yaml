@@ -26,9 +26,11 @@ output: reports   # -o's default (built-in default: "reports"). Both
                   # `vmr report` and `vmr story` share this one field —
                   # there's no separate per-command output setting.
 
-details: true   # vmr report only. Whether to also export one Markdown+JSON
+details: false   # vmr report only. Whether to also render one Markdown
                  # file per request into {output}/details/ (built-in
-                 # default: true). Overridden by -details.
+                 # default: false — the requests index links to each
+                 # record's detail filename regardless, computed without
+                 # needing the file to exist). Overridden by -details.
 
 currency: ""   # vmr report only. Display currency for $ cost estimates,
                # e.g. "CNY" or "JPY" — independent of whatever currency the

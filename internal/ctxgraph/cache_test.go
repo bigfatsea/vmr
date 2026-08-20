@@ -349,3 +349,137 @@ func TestScanCached_HitRebindsManifestPathToCurrentInvocation(t *testing.T) {
 		t.Errorf("cache-hit Manifest.Path = %q, want it rebound to this invocation's own path %q", got, renamed)
 	}
 }
+
+// TestScanCached_SchemaVersionMismatchReparses: a hash match alone must not
+// be trusted when the entry's SchemaVersion predates the current
+// extraction logic — see CacheSchemaVersion's doc comment.
+func TestScanCached_SchemaVersionMismatchReparses(t *testing.T) {
+	t.Parallel()
+	path := writeJSONL(t, []audit.Record{
+		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
+	})
+	_, cache1, err := ScanCached([]string{path}, nil)
+	if err != nil {
+		t.Fatalf("ScanCached (cold): %v", err)
+	}
+	key := CanonicalPath(path)
+	stale := cache1.Files[key]
+	stale.SchemaVersion = CacheSchemaVersion - 1 // simulate an older cache
+	cache1.Files[key] = stale
+
+	g2, cache2, err := ScanCached([]string{path}, cache1)
+	if err != nil {
+		t.Fatalf("ScanCached (warm, stale schema): %v", err)
+	}
+	if len(g2.Lineages) != 1 {
+		t.Fatalf("warm ScanCached produced %d lineages, want 1", len(g2.Lineages))
+	}
+	if cache2.Files[key].SchemaVersion != CacheSchemaVersion {
+		t.Errorf("reparsed entry's SchemaVersion = %d, want current %d", cache2.Files[key].SchemaVersion, CacheSchemaVersion)
+	}
+}
+
+func TestSaveCacheDir_LoadCacheDir_RoundTrip(t *testing.T) {
+	t.Parallel()
+	path := writeJSONL(t, []audit.Record{
+		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
+	})
+	_, cache, err := ScanCached([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := SaveCacheDir(dir, cache); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || filepath.Ext(entries[0].Name()) != ".json" {
+		t.Fatalf("dir entries = %v, want exactly one .json shard", entries)
+	}
+
+	loaded := LoadCacheDir(dir)
+	if loaded == nil {
+		t.Fatal("LoadCacheDir returned nil")
+	}
+	key := CanonicalPath(path)
+	if !reflect.DeepEqual(loaded.Files[key], cache.Files[key]) {
+		t.Errorf("round-tripped entry differs:\n got  %+v\n want %+v", loaded.Files[key], cache.Files[key])
+	}
+}
+
+func TestSaveCacheDir_SkipsExistingShard(t *testing.T) {
+	t.Parallel()
+	path := writeJSONL(t, []audit.Record{
+		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
+	})
+	_, cache, err := ScanCached([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := SaveCacheDir(dir, cache); err != nil {
+		t.Fatal(err)
+	}
+	shard := filepath.Join(dir, cache.Files[CanonicalPath(path)].Hash+".json")
+	fi1, err := os.Stat(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCacheDir(dir, cache); err != nil {
+		t.Fatal(err)
+	}
+	fi2, err := os.Stat(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi1.ModTime().Equal(fi2.ModTime()) {
+		t.Error("second SaveCacheDir rewrote an unchanged shard instead of skipping it")
+	}
+}
+
+func TestLoadCacheDir_MissingDirReturnsNil(t *testing.T) {
+	t.Parallel()
+	if got := LoadCacheDir(filepath.Join(t.TempDir(), "does-not-exist")); got != nil {
+		t.Errorf("LoadCacheDir(missing) = %+v, want nil", got)
+	}
+}
+
+// TestLoadCacheDir_CorruptShardIsSkipped: a truncated-write-corrupted shard
+// (same real-world cause as TestScanCached_NilManifestInCacheTriggersReparse's
+// scenario, just at the sharded-file layer instead of the in-memory one)
+// must degrade to "this one file's entry is missing" — never fail the
+// whole load or propagate a decode error to the caller. A sibling valid
+// shard in the same directory must still load correctly.
+func TestLoadCacheDir_CorruptShardIsSkipped(t *testing.T) {
+	t.Parallel()
+	path := writeJSONL(t, []audit.Record{
+		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
+	})
+	_, cache, err := ScanCached([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := SaveCacheDir(dir, cache); err != nil {
+		t.Fatal(err)
+	}
+	// A second, corrupt shard alongside the valid one.
+	if err := os.WriteFile(filepath.Join(dir, "deadbeef.json"), []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadCacheDir(dir)
+	if loaded == nil {
+		t.Fatal("LoadCacheDir returned nil even though a valid shard exists alongside the corrupt one")
+	}
+	key := CanonicalPath(path)
+	if _, ok := loaded.Files[key]; !ok {
+		t.Error("the valid shard's entry is missing — a corrupt sibling shard should not affect it")
+	}
+	if len(loaded.Files) != 1 {
+		t.Errorf("loaded %d entries, want exactly 1 (the corrupt shard must be skipped, not partially decoded)", len(loaded.Files))
+	}
+}

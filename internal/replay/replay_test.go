@@ -18,6 +18,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
+	"vmr/internal/ctxgraph"
 
 	_ "vmr/internal/adapter/openai"
 	_ "vmr/internal/adapter/openairesponses"
@@ -651,69 +652,69 @@ func TestRun_LineAndTSMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// --- -detail locator ---
+// --- -req locator ---
 
-// writeDetailFile mimics what internal/report/detail.go's WriteDetails
-// actually produces: json.MarshalIndent(&rec, "", "  ") into its own file,
-// one record, no JSONL framing.
-func writeDetailFile(t *testing.T, dir, name string, rec *audit.Record) string {
-	t.Helper()
-	data, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func TestRun_DetailFileSelectsRecord(t *testing.T) {
+func TestRun_ReqSelectsRecord(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
-	detailPath := writeDetailFile(t, dir, "20260713-153042.100_vm_upstream-model_ok.json", chatRecord("vm", "from-detail-file"))
+	auditPath := writeAuditLine(t, dir, "audit.jsonl",
+		chatRecord("vm", "not-this-one"), chatRecord("vm", "this-one"))
 
 	var out bytes.Buffer
 	err := Run(context.Background(), Options{
-		ConfigPath: cfgPath, Provider: "p1", DryRun: true, DetailPath: detailPath,
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true,
+		Req: ctxgraph.ReqCoord(auditPath, 2),
 	}, &out)
 	if err != nil {
-		t.Fatalf("Run -detail: %v", err)
+		t.Fatalf("Run -req: %v", err)
 	}
-	if !strings.Contains(out.String(), "from-detail-file") {
-		t.Errorf("dry-run output = %q, want the detail file's body", out.String())
+	if !strings.Contains(out.String(), "this-one") || strings.Contains(out.String(), "not-this-one") {
+		t.Errorf("dry-run output = %q, want only the record at line 2", out.String())
 	}
 }
 
-func TestRun_DetailFileRejectsAuditPath(t *testing.T) {
+func TestRun_ReqRejectsMismatchedBasename(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
-	detailPath := writeDetailFile(t, dir, "detail.json", chatRecord("vm", "hi"))
 	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
 
 	err := Run(context.Background(), Options{
-		ConfigPath: cfgPath, Provider: "p1", DryRun: true, DetailPath: detailPath, AuditPath: auditPath,
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true,
+		Req: "some-other-file.jsonl:1",
 	}, &bytes.Buffer{})
 	if err == nil {
-		t.Error("expected an error when -detail is combined with an audit file")
+		t.Error("expected an error when -req's basename doesn't match the audit file argument")
 	}
 }
 
-func TestRun_DetailFileRejectsLineOrTS(t *testing.T) {
+func TestRun_ReqRejectsMalformedCoordinate(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
-	detailPath := writeDetailFile(t, dir, "detail.json", chatRecord("vm", "hi"))
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true, Req: "not-a-coordinate",
+	}, &bytes.Buffer{})
+	if err == nil {
+		t.Error("expected an error for a malformed -req coordinate")
+	}
+}
+
+func TestRun_ReqMutuallyExclusiveWithLineAndTS(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+	req := ctxgraph.ReqCoord(auditPath, 1)
 
 	if err := Run(context.Background(), Options{
-		ConfigPath: cfgPath, Provider: "p1", DryRun: true, DetailPath: detailPath, Line: 3,
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true, Req: req, Line: 1,
 	}, &bytes.Buffer{}); err == nil {
-		t.Error("expected an error when -detail is combined with -line")
+		t.Error("expected an error when -req and -line are both set")
 	}
 	if err := Run(context.Background(), Options{
-		ConfigPath: cfgPath, Provider: "p1", DryRun: true, DetailPath: detailPath, TS: "2026-07-13T15:30:42.000Z",
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true, Req: req, TS: "2026-07-13T15:30:42.000Z",
 	}, &bytes.Buffer{}); err == nil {
-		t.Error("expected an error when -detail is combined with -ts")
+		t.Error("expected an error when -req and -ts are both set")
 	}
 }
 
@@ -722,7 +723,60 @@ func TestRun_MissingLocatorRequiresAuditPath(t *testing.T) {
 	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
 	err := Run(context.Background(), Options{ConfigPath: cfgPath, Provider: "p1", DryRun: true}, &bytes.Buffer{})
 	if err == nil {
-		t.Error("expected an error when neither -detail nor an audit file argument is given")
+		t.Error("expected an error when no audit file argument is given")
+	}
+}
+
+// --- -print ---
+
+func TestRunPrint_OutputsRawRecordBytes(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+
+	var out bytes.Buffer
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Print: true, Line: 1,
+	}, &out)
+	if err != nil {
+		t.Fatalf("Run -print: %v", err)
+	}
+	raw, err := audit.LineAt(auditPath, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSuffix(out.String(), "\n"); got != string(raw) {
+		t.Errorf("-print output = %q, want the raw line %q", got, raw)
+	}
+}
+
+func TestRunPrint_DoesNotRequireProvider(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Print: true, Line: 1,
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Errorf("Run -print without -provider: %v, want no error", err)
+	}
+}
+
+func TestRunPrint_WithReq(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "first"), chatRecord("vm", "second"))
+
+	var out bytes.Buffer
+	err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Print: true, Req: ctxgraph.ReqCoord(auditPath, 2),
+	}, &out)
+	if err != nil {
+		t.Fatalf("Run -print -req: %v", err)
+	}
+	if !strings.Contains(out.String(), "second") || strings.Contains(out.String(), "first") {
+		t.Errorf("-print -req output = %q, want only line 2's record", out.String())
 	}
 }
 

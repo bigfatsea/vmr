@@ -29,32 +29,28 @@ import (
 	"strings"
 	"time"
 
-	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
-// RequestsIndex is vmr-requests.json's whole shape: Requests is exactly
-// what vmr-requests.jsonl used to hold (one row per request), plus Files —
-// the file-hash-keyed parse cache (see ctxgraph.FileCache/ScanCached) for
-// AnalyzeSessionsCached's ctxgraph.Scan pass, same "index doubles as cache"
-// reasoning internal/story's vmr-stories.json uses (see
-// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
-// section). vmr-requests-failed.jsonl stays a plain flat JSONL — it's a
-// filtered dump of Requests, not itself an independent cache.
+// RequestsIndex is vmr-requests.json's whole shape: one row per request.
+// The parse cache used to live here too, as a "files" section (see
+// ctxgraph.FileCache/ScanCached) — it's since moved to its own
+// content-hash-sharded directory shared with internal/story
+// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache), so this
+// index stays purely human-scale (see
+// docs/future-strategy/story_report_p3_action_plan_sonnet-5.md batch D).
+// vmr-requests-failed.jsonl stays a plain flat JSONL — it's a filtered
+// dump of Requests, not itself an independent cache.
 type RequestsIndex struct {
-	Files    ctxgraph.FileCache `json:"files"`
-	Requests []RequestRow       `json:"requests"`
+	Requests []RequestRow `json:"requests"`
 }
 
-// WriteRequestsJSON writes vmr-requests.json — RequestsIndex's rows plus
-// cache's files section (cache may be nil: an empty files section, e.g.
-// when the caller used Build instead of BuildCached).
-func WriteRequestsJSON(rows []RequestRow, cache *ctxgraph.FileCache, path string) (n int, err error) {
-	idx := RequestsIndex{Requests: rows, Files: ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{}}}
-	if cache != nil {
-		idx.Files = *cache
-	}
+// WriteRequestsJSON writes vmr-requests.json — RequestsIndex's rows only;
+// the parse cache is persisted separately (see RequestsIndex's doc
+// comment).
+func WriteRequestsJSON(rows []RequestRow, path string) (n int, err error) {
+	idx := RequestsIndex{Requests: rows}
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return 0, err
@@ -63,23 +59,6 @@ func WriteRequestsJSON(rows []RequestRow, cache *ctxgraph.FileCache, path string
 		return 0, err
 	}
 	return len(rows), nil
-}
-
-// LoadRequestsFileCache reads path's "files" section for BuildCached's
-// prior cache argument. Best-effort, same contract as
-// internal/story.LoadStoryIndex: a missing, unreadable, or corrupt file all
-// degrade to nil ("no cache, parse everything fresh") rather than failing
-// the caller.
-func LoadRequestsFileCache(path string) *ctxgraph.FileCache {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var idx RequestsIndex
-	if err := json.Unmarshal(data, &idx); err != nil || idx.Files.Files == nil {
-		return nil
-	}
-	return &idx.Files
 }
 
 // WriteRequestsJSONL writes one RequestRow per line — used for
@@ -597,15 +576,19 @@ func cacheEffTurn(r RequestRow) string {
 	return pctStr(r.CacheEff)
 }
 
-// detailLink renders the "文件" column: one link to the human-readable
-// Markdown detail and one to the same-named JSON (detail.go always writes
-// both — the JSON is the raw record, for jq/ad-hoc querying).
+// detailLink renders the "文件" column: a link to the record's Markdown
+// detail page. f (RequestRow.DetailFile) is always computable — see
+// reqdetail.FileName — regardless of whether -details was passed for this
+// run, so the link is always rendered; the target simply won't exist on
+// disk until a run with -details generates it (see P3.3). There is no
+// same-named JSON sibling to link to anymore — see P3.1: the raw record is
+// addressable straight from the source audit log instead (`vmr replay -req
+// COORD -print`).
 func detailLink(f string) string {
 	if f == "" {
 		return "-"
 	}
-	base := strings.TrimSuffix(f, ".md")
-	return fmt.Sprintf("[Ⓜ️ Markdown](details/%s), [JSON](details/%s.json)", f, base)
+	return fmt.Sprintf("[Ⓜ️ Markdown](details/%s)", f)
 }
 
 func sessTaskCell(r RequestRow) string {

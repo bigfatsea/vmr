@@ -22,23 +22,29 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 )
 
 // Options configures one replay run. There are three ways to pick which
-// record to replay — DetailPath (a single-record file `vmr report` already
-// wrote), TS (an exact-enough timestamp match within AuditPath), or Line (a
-// raw line number within AuditPath, the least ergonomic but zero-ambiguity
-// fallback) — and they're mutually exclusive; Run validates that.
+// record within AuditPath to replay — Req (a "basename:line" coordinate,
+// as published in vmr-requests.json's "req" field or a Manifest's Req), TS
+// (an exact-enough timestamp match), or Line (a raw line number, the least
+// ergonomic but zero-ambiguity fallback) — and they're mutually exclusive;
+// Run validates that. Print short-circuits everything below record
+// selection: it prints the resolved record's raw bytes and returns,
+// without requiring Provider or any of the request-building/sending
+// options.
 type Options struct {
 	ConfigPath string
-	AuditPath  string // a single audit .jsonl or .jsonl.zst file; required unless DetailPath is set
-	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS
-	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line
-	DetailPath string // a `vmr report` details/*.json file, read directly as the one record it holds — AuditPath/Line/TS unused
-	Provider   string // required: name of a providers[] entry to replay against
+	AuditPath  string // a single audit .jsonl or .jsonl.zst file; always required
+	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS/Req
+	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line/Req
+	Req        string // "basename:line" coordinate; AuditPath's own canonical basename must match; mutually exclusive with Line/TS
+	Print      bool   // print the resolved record's raw JSON to stdout and return — no -provider needed, nothing sent
+	Provider   string // required unless Print: name of a providers[] entry to replay against
 	Model      string // override the upstream model name; "" = resolved from config
 	Protocol   string // override the protocol; "" = the record's own protocol
 	Stream     *bool  // nil = use the record's own stream value
@@ -67,16 +73,65 @@ type recordView struct {
 	} `json:"client"`
 }
 
+// buildReplayEndpoint resolves everything Run needs to actually send (or
+// dry-run print) rv's request: the adapter for its protocol, -provider's
+// config entry, and the hand-built core.Endpoint BuildRequest/chargeReplay
+// need — the same resolution BuildSnapshot performs for live traffic, done
+// here directly since ep never goes through BuildSnapshot itself (it's
+// built from -provider/-model, not looked up from a virtual model's
+// endpoint list).
+func buildReplayEndpoint(cfg *config.Config, opts Options, rv *recordView) (ad adapter.Adapter, protocol string, providerCfg config.Provider, ep *core.Endpoint, err error) {
+	protocol = opts.Protocol
+	if protocol == "" {
+		protocol = rv.Protocol
+	}
+	ad, ok := adapter.Get(protocol)
+	if !ok {
+		return nil, "", providerCfg, nil, fmt.Errorf("unknown protocol %q (available: %v)", protocol, adapter.Names())
+	}
+	providerCfg, ok = cfg.ProviderByName(opts.Provider)
+	if !ok {
+		return nil, "", providerCfg, nil, fmt.Errorf("provider %q not found in %s", opts.Provider, opts.ConfigPath)
+	}
+	baseURL, ok := providerCfg.BaseURL[protocol]
+	if !ok {
+		return nil, "", providerCfg, nil, fmt.Errorf("provider %q has no base_url for protocol %q in %s", opts.Provider, protocol, opts.ConfigPath)
+	}
+
+	model := opts.Model
+	if model == "" {
+		if model, err = resolveModel(cfg, protocol, rv.Model, opts.Provider); err != nil {
+			return nil, "", providerCfg, nil, err
+		}
+	}
+
+	ep = &core.Endpoint{
+		Provider:    opts.Provider,
+		AdapterType: protocol,
+		BaseURL:     baseURL,
+		APIKey:      providerCfg.APIKey,
+		Model:       model,
+		// chargeReplay needs these resolved directly, the same as above.
+		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
+		PricingRate: cfg.ResolvedPricing[opts.Provider+"\x00"+model],
+	}
+	ep.FullURL = ad.ResolveURL(baseURL)
+	return ad, protocol, providerCfg, ep, nil
+}
+
 // Run replays one audit record end to end: load config, locate the record,
 // resolve which endpoint to hit, rebuild the request via the same adapter
 // path `vmr start` uses, then either print it (DryRun) or send it and print
 // the upstream response to stdout.
 func Run(ctx context.Context, opts Options, stdout io.Writer) error {
-	if opts.Provider == "" {
-		return fmt.Errorf("-provider is required")
-	}
 	if opts.Line < 0 {
 		return fmt.Errorf("-line must be >= 0")
+	}
+	if opts.Print {
+		return runPrint(opts, stdout)
+	}
+	if opts.Provider == "" {
+		return fmt.Errorf("-provider is required")
 	}
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
@@ -102,52 +157,19 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "WARN quota state: %v (starting from zero)\n", err)
 	}
 	defer qreg.Flush()
-	rv, replayOf, err := selectRecord(opts)
+	rv, path, line, err := selectRecord(opts)
 	if err != nil {
 		return err
 	}
+	replayOf := fmt.Sprintf("%s:%d", path, line)
 	if len(rv.Client.Request.Body) == 0 || rv.Client.Request.Body[0] != '{' {
 		return fmt.Errorf("%s: client request body is not a JSON object; only JSON chat/messages requests can be replayed", replayOf)
 	}
 
-	protocol := opts.Protocol
-	if protocol == "" {
-		protocol = rv.Protocol
+	ad, protocol, providerCfg, ep, err := buildReplayEndpoint(cfg, opts, rv)
+	if err != nil {
+		return err
 	}
-	ad, ok := adapter.Get(protocol)
-	if !ok {
-		return fmt.Errorf("unknown protocol %q (available: %v)", protocol, adapter.Names())
-	}
-	providerCfg, ok := cfg.ProviderByName(opts.Provider)
-	if !ok {
-		return fmt.Errorf("provider %q not found in %s", opts.Provider, opts.ConfigPath)
-	}
-	baseURL, ok := providerCfg.BaseURL[protocol]
-	if !ok {
-		return fmt.Errorf("provider %q has no base_url for protocol %q in %s", opts.Provider, protocol, opts.ConfigPath)
-	}
-
-	model := opts.Model
-	if model == "" {
-		if model, err = resolveModel(cfg, protocol, rv.Model, opts.Provider); err != nil {
-			return err
-		}
-	}
-
-	ep := &core.Endpoint{
-		Provider:    opts.Provider,
-		AdapterType: protocol,
-		BaseURL:     baseURL,
-		APIKey:      providerCfg.APIKey,
-		Model:       model,
-		// Same resolution BuildSnapshot performs for live traffic — ep
-		// never goes through BuildSnapshot itself (it's hand-built above
-		// from -provider/-model, not looked up from a virtual model's
-		// endpoint list), so chargeReplay needs these resolved directly.
-		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
-		PricingRate: cfg.ResolvedPricing[opts.Provider+"\x00"+model],
-	}
-	ep.FullURL = ad.ResolveURL(baseURL)
 
 	stream := rv.Stream
 	if opts.Stream != nil && *opts.Stream != rv.Stream {
@@ -260,65 +282,75 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []by
 }
 
 // selectRecord dispatches to whichever of Options' three locators is set —
-// DetailPath, TS or Line — after checking that at most one is (Run's -line
-// default is 0, so "not set" and "explicitly line 0" aren't distinguishable,
-// but line 0 was never a valid 1-based line number anyway). It returns the
-// record plus a provenance string (used for -record's ReplayOf and in error
-// messages) that reads the same regardless of which locator found it.
-func selectRecord(opts Options) (*recordView, string, error) {
+// Req, TS or Line — after checking that at most one is (Run's -line default
+// is 0, so "not set" and "explicitly line 0" aren't distinguishable, but
+// line 0 was never a valid 1-based line number anyway). It returns the
+// record plus the (path, 1-based line) it was found at — the same
+// coordinate regardless of which locator found it, so callers (Run's
+// -record provenance, runPrint's raw re-fetch) don't need to know which
+// locator was used.
+func selectRecord(opts Options) (rv *recordView, path string, line int, err error) {
 	set := 0
-	for _, v := range []bool{opts.DetailPath != "", opts.TS != "", opts.Line != 0} {
+	for _, v := range []bool{opts.Req != "", opts.TS != "", opts.Line != 0} {
 		if v {
 			set++
 		}
 	}
 	if set > 1 {
-		return nil, "", fmt.Errorf("-detail, -ts and -line are mutually exclusive; pass only one")
+		return nil, "", 0, fmt.Errorf("-req, -ts and -line are mutually exclusive; pass only one")
 	}
-
-	if opts.DetailPath != "" {
-		if opts.AuditPath != "" {
-			return nil, "", fmt.Errorf("-detail already selects one record; don't also pass an audit file")
-		}
-		rv, err := loadDetailFile(opts.DetailPath)
-		if err != nil {
-			return nil, "", err
-		}
-		return rv, opts.DetailPath, nil
-	}
-
 	if opts.AuditPath == "" {
-		return nil, "", fmt.Errorf("an audit file argument is required (or pass -detail)")
+		return nil, "", 0, fmt.Errorf("an audit file argument is required")
+	}
+
+	if opts.Req != "" {
+		basename, reqLine, perr := ctxgraph.ParseReqCoord(opts.Req)
+		if perr != nil {
+			return nil, "", 0, perr
+		}
+		if got := ctxgraph.CanonicalPath(opts.AuditPath); got != basename {
+			return nil, "", 0, fmt.Errorf("-req %q refers to %q, but the audit file argument %q canonicalizes to %q", opts.Req, basename, opts.AuditPath, got)
+		}
+		rv, foundN, lerr := loadRecordByLine(opts.AuditPath, reqLine)
+		if lerr != nil {
+			return nil, "", 0, lerr
+		}
+		return rv, opts.AuditPath, foundN, nil
 	}
 	if opts.TS != "" {
-		rv, lineNo, err := loadRecordByTS(opts.AuditPath, opts.TS)
-		if err != nil {
-			return nil, "", err
+		rv, lineNo, terr := loadRecordByTS(opts.AuditPath, opts.TS)
+		if terr != nil {
+			return nil, "", 0, terr
 		}
-		return rv, fmt.Sprintf("%s:%d", opts.AuditPath, lineNo), nil
+		return rv, opts.AuditPath, lineNo, nil
 	}
-	rv, lineNo, err := loadRecordByLine(opts.AuditPath, opts.Line)
-	if err != nil {
-		return nil, "", err
+	rv, lineNo, lerr := loadRecordByLine(opts.AuditPath, opts.Line)
+	if lerr != nil {
+		return nil, "", 0, lerr
 	}
-	return rv, fmt.Sprintf("%s:%d", opts.AuditPath, lineNo), nil
+	return rv, opts.AuditPath, lineNo, nil
 }
 
-// loadDetailFile reads a `vmr report` details/*.json file directly as one
-// record — no scanning needed, since WriteDetails (internal/report/detail.go)
-// always writes exactly one audit.Record per such file (json.MarshalIndent,
-// no surrounding array or extra lines), unlike an audit .jsonl which packs
-// many records one per line.
-func loadDetailFile(path string) (*recordView, error) {
-	data, err := os.ReadFile(path)
+// runPrint implements Options.Print: locate the record exactly as the
+// normal path would (so -req/-ts/-line all work the same way here too),
+// then re-fetch and print its raw bytes rather than the partial recordView
+// selectRecord decoded — a "read" consumer wants the record as it is on
+// disk (every field, including response/attempts), not the subset replay
+// itself needs to resend the request.
+func runPrint(opts Options, stdout io.Writer) error {
+	_, path, line, err := selectRecord(opts)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var rv recordView
-	if err := json.Unmarshal(data, &rv); err != nil {
-		return nil, fmt.Errorf("%s: not a valid record: %w", path, err)
+	raw, err := audit.LineAt(path, line)
+	if err != nil {
+		return err
 	}
-	return &rv, nil
+	if _, err := stdout.Write(raw); err != nil {
+		return err
+	}
+	_, err = stdout.Write([]byte("\n"))
+	return err
 }
 
 // loadRecordByTS scans path for the record whose arrival timestamp matches

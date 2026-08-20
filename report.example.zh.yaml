@@ -21,9 +21,10 @@ language: en   # en（默认）| zh —— vmr-report.md / vmr-requests*.md /
 output: reports   # -o 的默认值（内置默认："reports"）。`vmr report` 和
                   # `vmr story` 共用这一个字段——没有分别的按命令输出设置。
 
-details: true   # 只对 vmr report 有效。是否额外为每个请求各导出一份
-                 # Markdown+JSON 文件到 {output}/details/（内置默认：true）。
-                 # 会被 -details 覆盖。
+details: false   # 只对 vmr report 有效。是否额外为每个请求各渲染一份
+                 # Markdown 文件到 {output}/details/（内置默认：false——
+                 # 请求索引照常带上每条记录的详单文件名链接，这个文件名
+                 # 不依赖文件是否真的存在就能算出来）。会被 -details 覆盖。
 
 currency: ""   # 只对 vmr report 有效。$ 成本估算的展示币种，比如 "CNY" 或
                # "JPY"——和这些估算实际"计算"时用的币种（config.yaml 的
