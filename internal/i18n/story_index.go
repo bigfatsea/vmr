@@ -12,8 +12,9 @@ type StoryIndexText struct {
 	NotRendered      string
 	Footer           func(n int) string
 	NoCandidatesNote string
-	// NoiseFoldSummary is the <summary> line for the collapsed
-	// heartbeat/cron/subagent block (P6.3) — n is how many rows it holds.
+	// NoiseFoldSummary is the <summary> line for the collapsed heartbeat
+	// block (P6.3, narrowed to heartbeat-only by P14.1's IsNoiseCategory —
+	// cron/subagent moved into the main table) — n is how many rows it holds.
 	NoiseFoldSummary func(n int) string
 }
 
@@ -28,7 +29,7 @@ func StoryIndexT(lang Lang) StoryIndexText {
 			},
 			NoCandidatesNote: "没有候选 journey。\n",
 			NoiseFoldSummary: func(n int) string {
-				return "定时/心跳/子代理任务（" + strconv.Itoa(n) + " 个，默认折叠）"
+				return "心跳任务（" + strconv.Itoa(n) + " 个，默认折叠）"
 			},
 		}
 	}
@@ -41,7 +42,7 @@ func StoryIndexT(lang Lang) StoryIndexText {
 		},
 		NoCandidatesNote: "No candidate journeys.\n",
 		NoiseFoldSummary: func(n int) string {
-			return "Scheduled/heartbeat/subagent journeys (" + strconv.Itoa(n) + ", collapsed by default)"
+			return "Heartbeat journeys (" + strconv.Itoa(n) + ", collapsed by default)"
 		},
 	}
 }

@@ -44,6 +44,10 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 	}
 	w("\n")
 
+	if note := anthropicCoverageNote(stats.ProtocolShare, t); note != "" {
+		w("%s", note)
+	}
+
 	w("%s", t.FindingRateTitle)
 	if len(stats.FindingRate) == 0 {
 		w("%s", t.NoFindings)

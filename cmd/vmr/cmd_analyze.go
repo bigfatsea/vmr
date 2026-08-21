@@ -28,15 +28,19 @@ import (
 	"vmr/internal/story"
 )
 
-// taskOnlyCandidates filters su.cands down to the CategoryTask rows (P9.2,
-// architecture doc §7.7's classifier, already computed by setupStoryRun's
-// BuildJourneyIndexRow call — no new classification logic here). cands and
-// freshRows are parallel arrays (same index = same candidate), the
+// renderableCandidates filters su.cands down to the non-noise rows
+// (P14.1's story.IsNoiseCategory, already computed by setupStoryRun's
+// BuildJourneyIndexRow call — no new classification logic here). Before
+// P14.1 this kept CategoryTask only (P9.2); KNOWN_ISSUES §1.42 found that
+// left cron/subagent candidates visible in the index but permanently
+// unrenderable by default, contradicting the index's own display split —
+// story.IsNoiseCategory is now the one place both answers come from. cands
+// and freshRows are parallel arrays (same index = same candidate), the
 // invariant setupStoryRun's own doc comment states and relies on.
-func taskOnlyCandidates(su *storySetup) []*ctxgraph.Lineage {
+func renderableCandidates(su *storySetup) []*ctxgraph.Lineage {
 	var out []*ctxgraph.Lineage
 	for i, l := range su.cands {
-		if su.freshRows[i].Category == story.CategoryTask {
+		if !story.IsNoiseCategory(su.freshRows[i].Category) {
 			out = append(out, l)
 		}
 	}
@@ -62,11 +66,76 @@ type analyzeRun struct {
 	compareArg         string
 	journeyArg         string
 	renderAllFlag      bool
-	detailsOn          bool
-	displayCCY         string
-	exchangeRate       map[string]float64
-	selfTrafficTags    []string
-	showUngrouped      bool
+	// macroOnly/listOnly/storyOnly (P15.1) are the three modes
+	// `vmr report`/`vmr story` each had that the default suite couldn't
+	// previously express — see cmdReport/cmdStory's own doc comments for
+	// why they now translate into these instead of keeping a second,
+	// independent dispatch. storyOnly was added after an independent
+	// review (2026-08-21) caught that its first cut left this as an
+	// internal-only field only cmdStory's forwarder could set — a direct
+	// `vmr analyze` user had no way to reach "render every candidate,
+	// skip the macro report" (what bare `vmr story -render-all` always
+	// did), contradicting analyze's own "single entry point, strictly
+	// covers every alias behavior" premise. Unlike macroOnly/listOnly,
+	// storyOnly composes with renderAllFlag rather than excluding it —
+	// -story-only alone means "default suite's non-noise scope, story
+	// half only"; -story-only -render-all means "every candidate, story
+	// half only" (cmdStory's -render-all forwarding target).
+	macroOnly       bool
+	listOnly        bool
+	storyOnly       bool
+	detailsOn       bool
+	displayCCY      string
+	exchangeRate    map[string]float64
+	selfTrafficTags []string
+	showUngrouped   bool
+}
+
+// validateAnalyzeModeFlags checks the mutual-exclusion rules across
+// cmdAnalyze's mode-selecting flags — split out once folding P15.1's new
+// modes into cmdAnalyze inline pushed it over archtest's per-function line
+// budget (a "composition, not an algorithm" split, same reasoning as
+// analyzeRun's own). Returns whether exactly one of -journey/-compare/
+// -corpus was given. -story-only is deliberately NOT exclusive with
+// -render-all (unlike -macro-only/-list-only) — it composes with it,
+// see analyzeRun.storyOnly's own doc comment.
+func validateAnalyzeModeFlags(journeyArg, compareArg string, corpusFlag, renderAllFlag, macroOnlyFlag, listOnlyFlag, storyOnlyFlag, detailsPassed bool) (bool, error) {
+	selectorCount := 0
+	if journeyArg != "" {
+		selectorCount++
+	}
+	if compareArg != "" {
+		selectorCount++
+	}
+	if corpusFlag {
+		selectorCount++
+	}
+	if selectorCount > 1 {
+		return false, fmt.Errorf("-journey/-compare/-corpus are mutually exclusive — pick one zoom level per call")
+	}
+	hasSelector := selectorCount == 1
+	if renderAllFlag && hasSelector {
+		return false, fmt.Errorf("-render-all has no effect with -journey/-compare/-corpus (it only controls the default suite's rendering scope) — drop one or the other")
+	}
+	exclusiveCount := 0
+	for _, f := range []bool{macroOnlyFlag, listOnlyFlag, storyOnlyFlag} {
+		if f {
+			exclusiveCount++
+		}
+	}
+	if exclusiveCount > 1 {
+		return false, fmt.Errorf("-macro-only/-list-only/-story-only are mutually exclusive — pick one")
+	}
+	if (macroOnlyFlag || listOnlyFlag) && (hasSelector || renderAllFlag) {
+		return false, fmt.Errorf("-macro-only/-list-only replace the default suite entirely — mutually exclusive with -journey/-compare/-corpus/-render-all")
+	}
+	if storyOnlyFlag && hasSelector {
+		return false, fmt.Errorf("-story-only replaces the default suite entirely — mutually exclusive with -journey/-compare/-corpus (but composes with -render-all)")
+	}
+	if listOnlyFlag && detailsPassed {
+		return false, fmt.Errorf("-details has no effect with -list-only (it never renders, let alone materializes, any journey) — drop one or the other")
+	}
+	return hasSelector, nil
 }
 
 func cmdAnalyze(args []string) error {
@@ -82,7 +151,14 @@ func cmdAnalyze(args []string) error {
 	compareArg := fs.String("compare", "", "zoom into a pairwise comparison: -compare id1,id2 (each an id or id prefix). Mutually exclusive with -journey/-corpus; only this half runs (no macro report)")
 	corpusFlag := fs.Bool("corpus", false, "zoom into corpus-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey. Mutually exclusive with -journey/-compare; only this half runs (no macro report)")
 	// Default-suite-only scope knob (P9.2) — meaningless (rejected) with a selector above.
-	renderAllFlag := fs.Bool("render-all", false, "default suite only: materialize every non-partial candidate journey, not just category=task ones (default: task-only — cron/heartbeat/subagent candidates still appear in the index, just not pre-rendered; render one on demand with -journey <id>)")
+	renderAllFlag := fs.Bool("render-all", false, "default suite only: materialize every non-partial candidate journey, including heartbeat ones (default: excludes only heartbeat candidates — P14.1's story.IsNoiseCategory; render one on demand with -journey <id>)")
+	// P15.1: the three modes bare `vmr report`/bare `vmr story` (with and
+	// without -render-all) each had that the default suite couldn't
+	// express — mutually exclusive with the selectors above and each
+	// other; -story-only alone composes with -render-all (see below).
+	macroOnlyFlag := fs.Bool("macro-only", false, "default suite only: run just the macro report half (equivalent to `vmr report`) — no candidate scan, no journey rendering, no stories/ output. Mutually exclusive with -journey/-compare/-corpus/-render-all/-list-only/-story-only")
+	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them (equivalent to bare `vmr story`) — writes stories/vmr-stories.{md,json} listing every candidate, but no journey-*.md. Mutually exclusive with -journey/-compare/-corpus/-render-all/-macro-only/-story-only/-details")
+	storyOnlyFlag := fs.Bool("story-only", false, "default suite only: run just the story half, skipping the macro report — no vmr-report.{json,md}/vmr-requests* written. Composes with -render-all (equivalent to `vmr story -render-all`); alone, equivalent to `vmr story`'s default non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-corpus/-macro-only/-list-only")
 	// story-half flags.
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
@@ -97,22 +173,9 @@ func cmdAnalyze(args []string) error {
 		return err
 	}
 
-	selectorCount := 0
-	if *journeyArg != "" {
-		selectorCount++
-	}
-	if *compareArg != "" {
-		selectorCount++
-	}
-	if *corpusFlag {
-		selectorCount++
-	}
-	if selectorCount > 1 {
-		return fmt.Errorf("-journey/-compare/-corpus are mutually exclusive — pick one zoom level per call")
-	}
-	hasSelector := selectorCount == 1
-	if *renderAllFlag && hasSelector {
-		return fmt.Errorf("-render-all has no effect with -journey/-compare/-corpus (it only controls the default suite's rendering scope) — drop one or the other")
+	hasSelector, err := validateAnalyzeModeFlags(*journeyArg, *compareArg, *corpusFlag, *renderAllFlag, *macroOnlyFlag, *listOnlyFlag, *storyOnlyFlag, flagPassed(fs, "details"))
+	if err != nil {
+		return err
 	}
 
 	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
@@ -168,6 +231,9 @@ func cmdAnalyze(args []string) error {
 		compareArg:      *compareArg,
 		journeyArg:      *journeyArg,
 		renderAllFlag:   *renderAllFlag,
+		macroOnly:       *macroOnlyFlag,
+		listOnly:        *listOnlyFlag,
+		storyOnly:       *storyOnlyFlag,
 		detailsOn:       resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
 		displayCCY:      resolveString(*currencyFlag, rc.Currency, ""),
 		exchangeRate:    rc.ExchangeRate,
@@ -176,23 +242,35 @@ func cmdAnalyze(args []string) error {
 	})
 }
 
-// dispatchAnalyze runs setupStoryRun once (needed by every mode) and then
-// routes to exactly one of: -corpus, -compare, -journey, or the default
-// suite — see cmd_analyze.go's package comment for the "pure CLI routing"
-// constraint this implements.
+// dispatchAnalyze routes to exactly one of: -macro-only, -corpus, -compare,
+// -journey, -list-only, or the default suite — see cmd_analyze.go's package
+// comment for the "pure CLI routing" constraint this implements.
 func dispatchAnalyze(r *analyzeRun) error {
-	// Story half's setup runs unconditionally and first, for every mode —
-	// same rationale cmd_analyze.go carried before P9.1: report.Markdown
-	// links to stories/vmr-stories.md when that file already exists at
-	// render time (loadStoriesLink, P6.2a), so running story's setup+index
-	// write before the report half means a first-ever `analyze` call
-	// already gets that edge right.
+	// -macro-only is handled before setupStoryRun runs at all (P15.1): bare
+	// `vmr report` never scans/stitches the story-half candidate graph or
+	// touches stories/.parse-cache, so running setupStoryRun first and
+	// merely skipping its output would leave -macro-only doing strictly
+	// more work — and possibly more I/O — than the alias it stands in for,
+	// breaking "produces the same output" into "produces the same output,
+	// slower and with side effects".
+	if r.macroOnly {
+		return runReportHalf(r)
+	}
+
+	// Story half's setup runs unconditionally and first, for every
+	// remaining mode — same rationale cmd_analyze.go carried before P9.1:
+	// report.Markdown links to stories/vmr-stories.md when that file
+	// already exists at render time (loadStoriesLink, P6.2a), so running
+	// story's setup+index write before the report half means a first-ever
+	// `analyze` call already gets that edge right.
 	su, err := setupStoryRun(r.paths, r.outDir, r.includeSelfTraffic, r.llmKey, r.selfTrafficTags, r.showUngrouped, r.lang)
 	if err != nil {
 		return err
 	}
 
 	switch {
+	case r.listOnly:
+		return listJourneys(su.idx, su.g, r.outDir, r.includePartial, r.lang)
 	case r.corpusFlag:
 		return corpusStats(su.cands, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx)
 	case r.compareArg != "":
@@ -229,14 +307,14 @@ func dispatchAnalyze(r *analyzeRun) error {
 		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx,
 			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true)
 	default:
-		// Default suite: story half (P9.2's category=task scope unless
+		// Default suite: story half (P14.1's non-noise scope unless
 		// -render-all) first, then the macro report half.
 		scope := su.cands
 		if !r.renderAllFlag {
-			scope = taskOnlyCandidates(su)
+			scope = renderableCandidates(su)
 		}
 		// materializeDetails = r.renderAllFlag (P13.1): -render-all is an
-		// explicit "materialize everything" ask; the default task-only
+		// explicit "materialize everything" ask; the default non-noise
 		// suite is not — it renders every spine's "→ detail" links (a
 		// pure function of each Step's own Manifest, see
 		// EnsureJourneyDetails' doc comment) without writing the target
@@ -247,22 +325,32 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}
-
-		var excludeClientTags map[string]bool
-		if !r.includeSelfTraffic {
-			excludeClientTags = selfTrafficExcludeTags(r.llmKey, r.selfTrafficTags)
+		if r.storyOnly {
+			return nil
 		}
-		if err := runReport(r.paths, timestampWriter{w: os.Stdout}, reportRunOpts{
-			configPath:        r.configPath,
-			outDir:            r.outDir,
-			detailsOn:         r.detailsOn,
-			lang:              r.lang,
-			displayCCY:        r.displayCCY,
-			exchangeRate:      r.exchangeRate,
-			excludeClientTags: excludeClientTags,
-		}); err != nil {
-			return fmt.Errorf("analyze (report half): %w", err)
-		}
-		return nil
+		return runReportHalf(r)
 	}
+}
+
+// runReportHalf runs the macro report half against r's already-resolved
+// options — the one call site both the default suite's second step and
+// -macro-only route through, so "produces the same report" is structural,
+// not a maintained-in-parallel promise (P15.1/P15.2).
+func runReportHalf(r *analyzeRun) error {
+	var excludeClientTags map[string]bool
+	if !r.includeSelfTraffic {
+		excludeClientTags = selfTrafficExcludeTags(r.llmKey, r.selfTrafficTags)
+	}
+	if err := runReport(r.paths, timestampWriter{w: os.Stdout}, reportRunOpts{
+		configPath:        r.configPath,
+		outDir:            r.outDir,
+		detailsOn:         r.detailsOn,
+		lang:              r.lang,
+		displayCCY:        r.displayCCY,
+		exchangeRate:      r.exchangeRate,
+		excludeClientTags: excludeClientTags,
+	}); err != nil {
+		return fmt.Errorf("analyze (report half): %w", err)
+	}
+	return nil
 }

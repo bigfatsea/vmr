@@ -54,7 +54,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang)
 	renderToolTimeline(w, j, lang)
-	renderFindingsSection(w, findings, lang)
+	renderFindingsSection(w, j, findings, lang)
 	return b.String()
 }
 

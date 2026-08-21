@@ -561,7 +561,7 @@ func TestRenderSpine_InferredFindingRendering(t *testing.T) {
 		sb.WriteString(fmt.Sprintf(format, args...))
 	}
 
-	renderFindingsSection(w, []Finding{finding}, i18n.ZH)
+	renderFindingsSection(w, &Journey{}, []Finding{finding}, i18n.ZH)
 	rendered := sb.String()
 
 	if !strings.Contains(rendered, "[AI推测 · 置信度: HIGH]") {
@@ -598,7 +598,7 @@ func TestRenderSpine_MixedSourceSameCode(t *testing.T) {
 	w := func(format string, args ...any) {
 		sb.WriteString(fmt.Sprintf(format, args...))
 	}
-	renderFindingsSection(w, []Finding{ruleFinding, llmFinding}, i18n.ZH)
+	renderFindingsSection(w, &Journey{}, []Finding{ruleFinding, llmFinding}, i18n.ZH)
 	rendered := sb.String()
 
 	if !strings.Contains(rendered, "[规则检测]") {
@@ -611,7 +611,7 @@ func TestRenderSpine_MixedSourceSameCode(t *testing.T) {
 	// A single-source hit (no sibling with the other Source) must NOT pick
 	// up the [规则检测] tag — it stays bare, as before this change.
 	sb.Reset()
-	renderFindingsSection(w, []Finding{ruleFinding}, i18n.ZH)
+	renderFindingsSection(w, &Journey{}, []Finding{ruleFinding}, i18n.ZH)
 	if strings.Contains(sb.String(), "[规则检测]") {
 		t.Errorf("a lone rule finding (no LLM sibling) should not be tagged:\n%s", sb.String())
 	}

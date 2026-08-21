@@ -176,6 +176,38 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
+// TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded locks in P14.1: cron and
+// subagent candidates stay in the main table alongside task (KNOWN_ISSUES
+// §1.42 — real-corpus measurement found both categories had double-digit-
+// request candidates, including the single largest journey in the corpus,
+// so folding them away as noise hid legitimate work); only heartbeat goes
+// into the collapsed block.
+func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
+	rows := []JourneyIndexRow{
+		{ID: "j-task", Category: CategoryTask, Title: "task row", Requests: 1},
+		{ID: "j-cron", Category: CategoryCron, Title: "cron row", Requests: 1},
+		{ID: "j-subagent", Category: CategorySubagent, Title: "subagent row", Requests: 1},
+		{ID: "j-heartbeat", Category: CategoryHeartbeat, Title: "heartbeat row", Requests: 1},
+	}
+	md := RenderStoryIndexMarkdown(rows, i18n.EN)
+
+	beforeDetails := md
+	if i := strings.Index(md, "<details>"); i >= 0 {
+		beforeDetails = md[:i]
+	}
+	for _, id := range []string{"j-task", "j-cron", "j-subagent"} {
+		if !strings.Contains(beforeDetails, id) {
+			t.Errorf("%s should be in the main table (before <details>), got:\n%s", id, md)
+		}
+	}
+	if strings.Contains(beforeDetails, "j-heartbeat") {
+		t.Errorf("j-heartbeat should be folded into <details>, found in main table:\n%s", md)
+	}
+	if !strings.Contains(md, "j-heartbeat") {
+		t.Errorf("j-heartbeat should still appear somewhere (in the folded block):\n%s", md)
+	}
+}
+
 // TestRenderStoryIndexMarkdown_EscapesTitle locks in a fix beyond
 // KNOWN_ISSUES §1.37's original scope, found during P12's independent
 // review: a Journey title containing a literal "|" written straight into

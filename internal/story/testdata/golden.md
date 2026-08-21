@@ -53,5 +53,7 @@ No upstream model switch occurred.
 
 ## Suspected Issues (candidate list, not a verdict)
 
+> ⚠️ Every request in this journey is non-Anthropic protocol. The following signals depend on a field only ever populated for Anthropic protocol and structurally cannot fire on this journey — their absence doesn't mean "checked, no issue found": error_retry_unadapted, error_then_unverified_success, error_recovery_count, decision spine's tool-result ❌ badge, structure.json's ToolCalls[].ResultError
+
 No rule-detectable suspected issues.
 

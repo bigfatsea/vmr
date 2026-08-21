@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -294,6 +295,60 @@ func TestComputeCorpusStats(t *testing.T) {
 			t.Error("Notable = false, want true (both notableFloor[KindMillis] and notableRelThreshold are cleared)")
 		}
 	})
+
+	// P14.2 (KNOWN_ISSUES §1.43): ComputeCorpusStats' ProtocolShare field is
+	// populated straight from protocolShare (tested in isolation below,
+	// since ComputeMetrics needs a fuller Step fixture than this field
+	// alone) — this only pins that the two stay wired together.
+	t.Run("protocol share is populated on real journeys", func(t *testing.T) {
+		journeys := []*Journey{buildTestJourney(t, 2, false)} // mkRec sets Protocol: "openai"
+		stats := ComputeCorpusStats(journeys)
+		if got, want := stats.ProtocolShare["openai"], 1.0; math.Abs(got-want) > 1e-9 {
+			t.Errorf("ProtocolShare[openai] = %v, want %v", got, want)
+		}
+	})
+}
+
+// P14.2 (KNOWN_ISSUES §1.43): protocolShare's denominator is Steps, not
+// journeys or requests — a Journey literal with bare Manifest.Protocol
+// values is enough here, no need for ComputeMetrics' fuller Step fixture.
+func TestProtocolShare(t *testing.T) {
+	mkJourney := func(protocols ...string) *Journey {
+		steps := make([]*Step, len(protocols))
+		for i, p := range protocols {
+			steps[i] = &Step{Manifest: &ctxgraph.Manifest{Protocol: p}}
+		}
+		return &Journey{Tasks: []*Task{{Steps: steps}}}
+	}
+
+	t.Run("tallied across every step's manifest", func(t *testing.T) {
+		journeys := []*Journey{
+			mkJourney("openai", "openai", "openai"),
+			mkJourney("anthropic"),
+		}
+		share := protocolShare(journeys)
+		if got, want := share["openai"], 0.75; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[openai] = %v, want %v (3/4 steps)", got, want)
+		}
+		if got, want := share["anthropic"], 0.25; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[anthropic] = %v, want %v (1/4 steps)", got, want)
+		}
+	})
+
+	t.Run("empty when there are no steps at all", func(t *testing.T) {
+		share := protocolShare([]*Journey{{Tasks: []*Task{{Steps: nil}}}})
+		if len(share) != 0 {
+			t.Errorf("share = %+v, want empty (no steps to tally)", share)
+		}
+	})
+
+	t.Run("skips steps with a nil manifest", func(t *testing.T) {
+		j := &Journey{Tasks: []*Task{{Steps: []*Step{{Manifest: nil}, {Manifest: &ctxgraph.Manifest{Protocol: "openai"}}}}}}
+		share := protocolShare([]*Journey{j})
+		if got, want := share["openai"], 1.0; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[openai] = %v, want %v (nil-manifest step excluded from the denominator)", got, want)
+		}
+	})
 }
 
 func TestRenderCorpusMarkdown(t *testing.T) {
@@ -390,6 +445,50 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		// renders.
 		if !strings.Contains(md, et.MetricDistTitle) {
 			t.Errorf("expected metric distribution section title even with an empty MetricDist:\n%s", md)
+		}
+	})
+
+	// P14.2 (KNOWN_ISSUES §1.43): the disclosure note fires on ANY non-100%
+	// Anthropic share — no intermediate cliff (an independent review,
+	// 2026-08-21, found the original 1% threshold silently went dark on a
+	// corpus at 1.2% Anthropic, reintroducing the exact ambiguity this note
+	// exists to close) — and must name every affected code, including the
+	// ones a first cut of this feature missed (FindingUnverifiedSuccess,
+	// the ContextRot/ToolSequence error-rate sections — see
+	// anthropicOnlyCoverage's own doc comment for how they were found:
+	// isErrorMarker, not just ToolResult.IsError directly).
+	t.Run("anthropic coverage note fires on any non-100% Anthropic share", func(t *testing.T) {
+		mostlyOpenAI := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai": 0.995, "anthropic": 0.005}}
+		md := RenderCorpusMarkdown(mostlyOpenAI, i18n.EN)
+		for _, code := range []string{
+			string(FindingUnadaptedRetry), string(FindingUnverifiedSuccess), string(MetricErrorRecoveryCount),
+			"Context Rot error rate", "Tool Sequence error rate",
+		} {
+			if !strings.Contains(md, code) {
+				t.Errorf("expected coverage note to name %q:\n%s", code, md)
+			}
+		}
+
+		// Even a corpus dominated by Anthropic traffic (98.8%!) still has
+		// a slice the disclosed signals are blind on — this is the exact
+		// case the old 1%-threshold cliff (at 1.2% Anthropic) silently
+		// suppressed.
+		mostlyAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai": 0.012, "anthropic": 0.988}}
+		md2 := RenderCorpusMarkdown(mostlyAnthropic, i18n.EN)
+		if !strings.Contains(md2, string(FindingUnadaptedRetry)) {
+			t.Errorf("coverage note should still fire at 98.8%% Anthropic (not literally 100%%):\n%s", md2)
+		}
+
+		pureAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"anthropic": 1.0}}
+		md3 := RenderCorpusMarkdown(pureAnthropic, i18n.EN)
+		if strings.Contains(md3, string(FindingUnadaptedRetry)) {
+			t.Errorf("coverage note should not fire on a 100%% Anthropic corpus (nothing is blind):\n%s", md3)
+		}
+
+		noShare := CorpusStats{JourneyCount: 1}
+		md4 := RenderCorpusMarkdown(noShare, i18n.EN)
+		if strings.Contains(md4, string(FindingUnadaptedRetry)) {
+			t.Errorf("coverage note should not fire on an empty ProtocolShare (nothing to disclose):\n%s", md4)
 		}
 	})
 }

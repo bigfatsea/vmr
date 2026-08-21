@@ -191,6 +191,12 @@ type CorpusStats struct {
 	SkippedGroupComparisons []FindingCode         `json:"skipped_group_comparisons,omitempty"`
 	ContextRot              []ContextRotBucket    `json:"context_rot,omitempty"`
 	ToolSequences           []ToolSequencePattern `json:"tool_sequences,omitempty"`
+	// ProtocolShare is each ctxgraph.Manifest.Protocol value's fraction of
+	// this corpus's Steps (P14.2's disclosure discipline — KNOWN_ISSUES
+	// §1.43). Populated unconditionally, at zero inference cost (a straight
+	// tally of a field every Step already carries) — anthropicCoverageNote
+	// decides whether it's worth printing.
+	ProtocolShare map[string]float64 `json:"protocol_share,omitempty"`
 }
 
 // ComputeCorpusStats is the corpus layer's entire computation: per-metric
@@ -216,6 +222,7 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 		metrics[i] = ComputeMetrics(j)
 		findingsPerJourney[i] = ComputeFindings(j, i18n.EN)
 	}
+	stats.ProtocolShare = protocolShare(journeys)
 
 	values := make(map[MetricCode][]float64, len(metricSpecs))
 	for _, spec := range metricSpecs {

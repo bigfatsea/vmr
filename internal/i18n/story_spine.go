@@ -55,6 +55,14 @@ type SpineText struct {
 	FindingRelated  func(seqs string) string
 	FindingEvidence func(text string) string
 	FindingAction   func(text string) string
+	// AnthropicOnlyCoverageNote is P14.2's per-journey disclosure line
+	// (KNOWN_ISSUES §1.43) — same wording/role as story_corpus.go's field
+	// of the same name, printed when THIS journey has no Anthropic-protocol
+	// Steps at all, naming the signals (Findings, the decision spine's own
+	// ❌/↩️ tool-result badge, structure.json's ToolCalls[].ResultError)
+	// that read as clean/absent for structural reasons on this journey, not
+	// because nothing was found.
+	AnthropicOnlyCoverageNote func(codes string) string
 
 	BadgeLLMInferred    func(confidence string) string
 	BadgeRuleDetected   string
@@ -121,6 +129,9 @@ func Spine(lang Lang) SpineText {
 			FindingRelated:  func(seqs string) string { return "   - 相关 Step：" + seqs + "\n" },
 			FindingEvidence: func(text string) string { return "   - 证据：" + text + "\n" },
 			FindingAction:   func(text string) string { return "   - 建议：" + text + "\n" },
+			AnthropicOnlyCoverageNote: func(codes string) string {
+				return "> ⚠️ 本 journey 全部请求均为非 Anthropic 协议。以下信号依赖仅 Anthropic 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题：" + codes + "\n\n"
+			},
 
 			BadgeLLMInferred: func(confidence string) string {
 				return " [AI推测 · 置信度: " + confidence + "]"
@@ -187,6 +198,9 @@ func Spine(lang Lang) SpineText {
 		FindingRelated:  func(seqs string) string { return "   - related Steps: " + seqs + "\n" },
 		FindingEvidence: func(text string) string { return "   - evidence: " + text + "\n" },
 		FindingAction:   func(text string) string { return "   - action: " + text + "\n" },
+		AnthropicOnlyCoverageNote: func(codes string) string {
+			return "> ⚠️ Every request in this journey is non-Anthropic protocol. The following signals depend on a field only ever populated for Anthropic protocol and structurally cannot fire on this journey — their absence doesn't mean \"checked, no issue found\": " + codes + "\n\n"
+		},
 
 		BadgeLLMInferred: func(confidence string) string {
 			return " [AI Inferred · " + confidence + "]"

@@ -410,10 +410,14 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	return nil
 }
 
-// cmdReport is `vmr report`'s standalone flag set — kept fully independent
-// (see P9.3, cmd_analyze.go's own doc comment): its flags, defaults, and
-// output are unchanged from before the CLI convergence, it just now hands
-// off to the shared runReport pipeline instead of running it inline.
+// cmdReport is `vmr report`'s own flag set (P15.2: unchanged from before the
+// CLI convergence — same flags, same defaults, same resolution helpers) —
+// but no longer runs its own dispatch. It resolves its flags exactly as it
+// always has, then hands the result to dispatchAnalyze with macroOnly: true
+// (cmd_analyze.go's -macro-only, P15.1) — the same call cmdAnalyze itself
+// makes for `-macro-only`, so "vmr report produces what vmr analyze
+// -macro-only produces" is structural, not a promise kept by hand across
+// two independent implementations (KNOWN_ISSUES §1.38).
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block) — see PricingTable's doc comment for the no-config.yaml degrade")
@@ -422,7 +426,15 @@ func cmdReport(args []string) error {
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
 	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
-	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
+	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
+	// P15.3: cmd_analyze.go/cmd_story.go both resolve -llm-key for
+	// self-traffic exclusion (it identifies PAST self-analysis traffic,
+	// independent of whether this run makes a new LLM call — see
+	// cmd_analyze.go's own comment on this) — cmdReport never had this
+	// flag, so `vmr report`'s self-traffic exclusion could only ever read
+	// report.yaml's llm_key, never override it per-call like its siblings
+	// (KNOWN_ISSUES §1.34/§1.38).
+	llmKeyFlag := fs.String("llm-key", "", "identifies past self-analysis traffic to exclude from totals — not used to make a new LLM call (vmr report never does). Default: report.yaml's llm_key")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -431,36 +443,25 @@ func cmdReport(args []string) error {
 		return err
 	}
 
-	tw := timestampWriter{w: os.Stdout}
-
-	rc := resolveReportConfig(*reportConfigPath, tw)
-	lang, err := resolveLanguage(*langFlag, rc, tw)
+	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
+	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
 	if err != nil {
 		return err
 	}
-	outDir := resolveString(*outDirFlag, rc.Output, "reports")
-	detailsOn := resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details)
-	var excludeClientTags map[string]bool
-	if !*includeSelfTraffic {
-		excludeClientTags = selfTrafficExcludeTags(rc.LLMKey, rc.SelfTrafficClientTags)
-	}
-	displayCCY := resolveString(*currencyFlag, rc.Currency, "")
+	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
 
-	// Deliberately does NOT say "an alias for vmr analyze" — vmr analyze's
-	// default has no report-only mode (it also renders task journeys), so
-	// a user who took that literally and switched commands would see
-	// different output/timing than they expected. The honest framing is
-	// "still fully supported, analyze is the recommended default for a
-	// navigable full suite" (independent review, 2026-08-21 — see this
-	// file's P9 ActionPlan §4.3's "执行记录" for why the wording changed).
-	fmt.Fprintln(os.Stderr, "vmr report: deprecated alias — `vmr analyze` now produces the full navigable suite (macro report + task journeys) from a single call; if you only want the macro report, `vmr report` remains fully supported. See `vmr analyze -h`.")
-	return runReport(paths, tw, reportRunOpts{
-		configPath:        *configPath,
-		outDir:            outDir,
-		detailsOn:         detailsOn,
-		lang:              lang,
-		displayCCY:        displayCCY,
-		exchangeRate:      rc.ExchangeRate,
-		excludeClientTags: excludeClientTags,
+	fmt.Fprintln(os.Stderr, "vmr report: alias for `vmr analyze -macro-only` — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
+	return dispatchAnalyze(&analyzeRun{
+		paths:              paths,
+		configPath:         *configPath,
+		outDir:             resolveString(*outDirFlag, rc.Output, "reports"),
+		lang:               lang,
+		includeSelfTraffic: *includeSelfTraffic,
+		llmKey:             llmKey,
+		macroOnly:          true,
+		detailsOn:          resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
+		displayCCY:         resolveString(*currencyFlag, rc.Currency, ""),
+		exchangeRate:       rc.ExchangeRate,
+		selfTrafficTags:    rc.SelfTrafficClientTags,
 	})
 }

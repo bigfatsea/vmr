@@ -52,13 +52,18 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
-// cmdStory is `vmr story`'s standalone flag set — kept fully independent
-// (see P9.3, cmd_analyze.go's own doc comment): its flags, defaults, and
-// output (including -render-all always meaning "every candidate", with no
-// P9.2 category filtering — that filtering is a `vmr analyze`-only default,
-// not a change to what -render-all itself means) are unchanged from before
-// the CLI convergence; it just now hands off to the shared setupStoryRun
-// pipeline instead of running it inline.
+// cmdStory is `vmr story`'s own flag set (P15.2: unchanged from before the
+// CLI convergence — same flags, same defaults, including -render-all always
+// meaning "every candidate", with no P9.2/P14.1 category filtering — that
+// filtering is a `vmr analyze`-only default, not a change to what
+// -render-all itself means). It no longer dispatches on its own: it
+// resolves its flags, then hands the result to dispatchAnalyze — the same
+// function cmdAnalyze itself calls — so `vmr story`'s five call shapes
+// (bare/-journey/-compare/-corpus/-render-all) can't drift from what `vmr
+// analyze` does for the equivalent flags the way they had (KNOWN_ISSUES
+// §1.38): resolveLLMOptions is now called lazily, through the same
+// resolveLLMOpts closure cmdAnalyze builds, instead of unconditionally up
+// front — matching the on-demand validation P9 already gave cmdAnalyze.
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
@@ -76,30 +81,9 @@ func cmdStory(args []string) error {
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
-	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
+	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
-	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
-	if err != nil {
-		return err
-	}
-	outDir := resolveString(*outDirFlag, rc.Output, "reports")
-	includePartial := resolveBool(flagPassed(fs, "include-partial"), *includePartialFlag, rc.IncludePartial)
-	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *llmAddrFlag, rc.LLMAddr, "")
-	llmModel := resolveString(*llmModelFlag, rc.LLMModel, "")
-	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
-	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")
-	llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *llmDryRun)
-	if err != nil {
-		return err
-	}
-	llmOpts.CacheDir = llmCacheDir
-	// Only explicit -llm-addr CLI flags trigger rejection for batch modes (-render-all / -corpus).
-	llmAddrExplicit := flagPassed(fs, "llm-addr")
-	if llmAddrExplicit && (*renderAll || *corpus) {
-		return fmt.Errorf("-llm-addr is not supported with -render-all or -corpus (would fire one LLM call per journey) — use -journey to interpret one at a time")
 	}
 	if *corpus && (*compare != "" || *journeyArg != "" || *renderAll) {
 		return fmt.Errorf("-corpus is exclusive with -journey/-render-all/-compare — run it on its own")
@@ -109,56 +93,61 @@ func cmdStory(args []string) error {
 		return err
 	}
 
-	// -journey/-compare/-corpus/-render-all all carry over to `vmr analyze`
-	// unchanged (same flag, same output). Bare `vmr story` (no selector) is
-	// the one case that does NOT — it lists candidates only, while bare
-	// `vmr analyze` renders the default (task-only) suite — so the hint
-	// calls that out explicitly rather than implying a blanket 1:1 swap
-	// (independent review, 2026-08-21 — see this file's P9 ActionPlan
-	// §4.3's "执行记录").
-	fmt.Fprintln(os.Stderr, "vmr story: deprecated alias — for the same output, use `vmr analyze` with -journey/-compare/-corpus/-render-all (bare `vmr analyze`, unlike bare `vmr story`, also renders the default task-only suite rather than just listing). `vmr story` remains fully supported. See `vmr analyze -h`.")
-
-	su, err := setupStoryRun(paths, outDir, *includeSelfTraffic, llmKey, rc.SelfTrafficClientTags, *showUngrouped, lang)
+	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
+	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
 	if err != nil {
 		return err
 	}
+	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *llmAddrFlag, rc.LLMAddr, "")
+	llmModel := resolveString(*llmModelFlag, rc.LLMModel, "")
+	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
+	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")
+	llmAddrExplicit := flagPassed(fs, "llm-addr")
+	hasSelector := *compare != "" || *journeyArg != ""
+	if llmAddrExplicit && (*corpus || *renderAll || !hasSelector) {
+		return fmt.Errorf("-llm-addr is not supported with -render-all, -corpus, or bare `vmr story` (would fire one LLM call per journey, or never be used at all) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
+	}
 
-	if *compare != "" {
-		ids := strings.Split(*compare, ",")
-		if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
-			return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
-		}
-		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, includePartial, outDir, llmOpts, lang, su.idx)
-	}
-	if *corpus {
-		return corpusStats(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx)
-	}
-	if *journeyArg != "" {
-		ids := make([]string, len(su.cands))
-		for i, ch := range su.chains {
-			ids[i] = story.ID(ch)
-		}
-		targets, err := resolveJourneySelector(su.cands, ids, *journeyArg)
-		if err != nil {
-			return err
-		}
-		if len(targets) == 1 {
-			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, includePartial, outDir, llmOpts, lang, su.idx)
-		}
-		if llmAddrExplicit {
-			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), *journeyArg)
-		}
-		// true: a -journey selector naming several targets is still a
-		// user-named set, not the default suite's implicit batch (P13.1,
-		// see renderJourneys' doc comment).
-		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx,
-			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true)
-	}
-	if *renderAll {
-		// true: -render-all is an explicit "materialize everything" ask.
-		return renderAllJourneys(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx, true)
-	}
-	return listJourneys(su.idx, su.g, outDir, includePartial, lang)
+	// -journey/-compare/-corpus/-render-all all carry over to `vmr analyze`
+	// unchanged (same flag, same output). Bare `vmr story` (no selector) is
+	// the one case that does NOT — it lists candidates only, while bare
+	// `vmr analyze` renders the default suite — so the hint calls that out
+	// explicitly rather than implying a blanket 1:1 swap (independent
+	// review, 2026-08-21 — see this file's P9 ActionPlan §4.3's "执行记录").
+	// `-list-only` (P15.1) is bare `vmr story`'s real equivalent.
+	fmt.Fprintln(os.Stderr, "vmr story: alias for `vmr analyze` with -list-only (bare) or -journey/-compare/-corpus/-render-all (unchanged) — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
+
+	return dispatchAnalyze(&analyzeRun{
+		paths:              paths,
+		configPath:         *configPath,
+		outDir:             resolveString(*outDirFlag, rc.Output, "reports"),
+		lang:               lang,
+		includePartial:     resolveBool(flagPassed(fs, "include-partial"), *includePartialFlag, rc.IncludePartial),
+		includeSelfTraffic: *includeSelfTraffic,
+		llmKey:             llmKey,
+		llmAddrExplicit:    llmAddrExplicit,
+		resolveLLMOpts: func() (llmCLIOptions, error) {
+			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *llmDryRun)
+			if err != nil {
+				return llmCLIOptions{}, err
+			}
+			llmOpts.CacheDir = llmCacheDir
+			return llmOpts, nil
+		},
+		corpusFlag:    *corpus,
+		compareArg:    *compare,
+		journeyArg:    *journeyArg,
+		renderAllFlag: *renderAll,
+		listOnly:      !hasSelector && !*corpus && !*renderAll,
+		// storyOnly (a real cmdAnalyze flag, -story-only — see analyzeRun's
+		// own doc comment): `vmr story -render-all` alone never ran the
+		// report half, and `vmr analyze -story-only -render-all` is now its
+		// exact, publicly-reachable equivalent — not an internal-only field
+		// only this forwarder could set.
+		storyOnly:       *renderAll && !hasSelector,
+		selfTrafficTags: rc.SelfTrafficClientTags,
+		showUngrouped:   *showUngrouped,
+	})
 }
 
 // updateJourneyRow finds id's row in idx.Journeys and fills in the

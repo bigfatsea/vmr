@@ -151,11 +151,14 @@ func journeyFileNames(t *testing.T, dir string) []string {
 	return out
 }
 
-// TestCmdAnalyze_DefaultSuiteScopeIsTaskOnly covers P9.2: the default suite
-// (no selector, no -render-all) only materializes category=task candidates
-// — a heartbeat-titled candidate stays in the index but doesn't get a
-// journey-*.md until -render-all (or a targeted -journey) asks for it.
-func TestCmdAnalyze_DefaultSuiteScopeIsTaskOnly(t *testing.T) {
+// TestCmdAnalyze_DefaultSuiteExcludesHeartbeat covers P14.1 (originally
+// P9.2, narrowed by P14.1/story.IsNoiseCategory — see
+// TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent for the categories that
+// changed): the default suite (no selector, no -render-all) excludes only
+// heartbeat candidates — a heartbeat-titled candidate stays in the index
+// but doesn't get a journey-*.md until -render-all (or a targeted -journey)
+// asks for it.
+func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
 
@@ -209,6 +212,70 @@ func TestCmdAnalyze_DefaultSuiteScopeIsTaskOnly(t *testing.T) {
 	got2 := journeyFileNames(t, filepath.Join(outDir2, "stories"))
 	if len(got2) != 2 {
 		t.Fatalf("-render-all should render both candidates, got %d: %v", len(got2), got2)
+	}
+}
+
+// TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent locks in P14.1
+// (KNOWN_ISSUES §1.42): before this, cron/subagent candidates appeared in
+// the index but the default suite never rendered them, so their index row
+// linked to a journey-*.md that was never written — real-corpus measurement
+// found both categories had double-digit-request candidates (subagent's
+// largest was the biggest journey in the whole corpus), so folding them out
+// of the default render scope was hiding legitimate work, not noise. Only
+// heartbeat stays unrendered by default.
+func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	// [cron:job-id ...] and "... [Subagent Context] ..." are the literal
+	// title markers classifyJourney (internal/story/candidates.go) checks
+	// for — resolveTaskProfile() defaults to OpenClawAware, whose
+	// bracket-stripping regexes don't touch either marker.
+	cronU1 := storyMsg("user", "[cron:daily-report 0 9 * * *] generate the report")
+	cronR1 := storyRec(at(0), []any{sys, cronU1}, storySSE("start"))
+	cronR2 := storyRec(at(1), []any{sys, cronU1, storyMsg("assistant", "done")}, storySSE("done"))
+
+	subU1 := storyMsg("user", "[Subagent Context] investigate the failing test")
+	subR1 := storyRec(at(20), []any{sys, subU1}, storySSE("start"))
+	subR2 := storyRec(at(21), []any{sys, subU1, storyMsg("assistant", "done")}, storySSE("done"))
+
+	hbU1 := storyMsg("user", "[OpenClaw heartbeat poll] check in")
+	hbR1 := storyRec(at(30), []any{sys, hbU1}, storySSE("ack"))
+	hbR2 := storyRec(at(31), []any{sys, hbU1, storyMsg("assistant", "ack")}, storySSE("ack2"))
+
+	path := writeStoryJSONL(t, []audit.Record{cronR1, cronR2, subR1, subR2, hbR1, hbR2})
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
+		t.Fatalf("cmdAnalyze (default suite): %v", err)
+	}
+
+	idx := story.LoadStoryIndex(filepath.Join(outDir, "stories", "vmr-stories.json"))
+	if len(idx.Journeys) != 3 {
+		t.Fatalf("index should list all three candidates, got %d: %+v", len(idx.Journeys), idx.Journeys)
+	}
+
+	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	if len(got) != 2 {
+		t.Fatalf("default suite should render the cron and subagent candidates (2), got %d: %v", len(got), got)
+	}
+
+	var cronRendered, subagentRendered, heartbeatRendered bool
+	for _, row := range idx.Journeys {
+		switch row.Category {
+		case story.CategoryCron:
+			cronRendered = row.Rendered != ""
+		case story.CategorySubagent:
+			subagentRendered = row.Rendered != ""
+		case story.CategoryHeartbeat:
+			heartbeatRendered = row.Rendered != ""
+		}
+	}
+	if !cronRendered || !subagentRendered {
+		t.Errorf("cron and subagent rows should both have a Rendered link, got cron=%v subagent=%v", cronRendered, subagentRendered)
+	}
+	if heartbeatRendered {
+		t.Error("heartbeat row should stay unrendered by default")
 	}
 }
 

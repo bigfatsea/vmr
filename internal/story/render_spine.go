@@ -254,10 +254,17 @@ func joinInts(ns []int) string {
 
 // renderFindingsSection renders findings.go's candidate list — the one
 // place in the document every Finding's full text (not just the ⚠️ mark
-// the decision spine adds) is shown.
-func renderFindingsSection(w func(string, ...any), findings []Finding, lang i18n.Lang) {
+// the decision spine adds) is shown. j is used only for P14.2's
+// per-journey anthropicOnlyCoverage disclosure (KNOWN_ISSUES §1.43) — an
+// independent review (2026-08-21) found the original design scoped this
+// disclosure to -corpus only, which the default suite (every direct
+// `vmr analyze`/`vmr story -journey` reader's actual path) never touches.
+func renderFindingsSection(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang) {
 	t := i18n.Spine(lang)
 	w("%s", t.FindingsTitle)
+	if note := journeyAnthropicCoverageNote(j, t); note != "" {
+		w("%s", note)
+	}
 	if len(findings) == 0 {
 		w("%s", t.FindingsNone)
 		return

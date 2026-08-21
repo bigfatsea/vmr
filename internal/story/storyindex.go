@@ -41,6 +41,20 @@ const (
 	CategorySubagent  JourneyCategory = "subagent"
 )
 
+// IsNoiseCategory reports whether cat should be folded out of the primary
+// index view and excluded from the default suite's render scope — the one
+// judgment RenderStoryIndexMarkdown's display split and cmd/vmr's default
+// render scope both defer to (P14.1; before this they answered differently
+// for CategoryCron and CategorySubagent — KNOWN_ISSUES §1.42). Real-corpus
+// measurement is the only evidence this classification rests on: heartbeat
+// topped out at 7 requests per candidate across 107 candidates (0 ever
+// reached 10); cron and subagent both had double-digit-request candidates,
+// including the single largest journey in the corpus (subagent, 91
+// requests) — so only heartbeat qualifies as noise.
+func IsNoiseCategory(cat JourneyCategory) bool {
+	return cat == CategoryHeartbeat
+}
+
 // JourneyIndexRow is one candidate Journey's row. Requests/Client/Start/End/
 // Title/Partial/Stitched/Files are cheap — derivable from the chain alone,
 // recomputed on every run. Tasks/Steps/Rendered are only known once the
@@ -231,13 +245,17 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 
 // RenderStoryIndexMarkdown renders vmr-stories.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
-// Rows are split by Category (P6.3): task/cron are real work and stay in
-// the main, always-expanded table; heartbeat/subagent are structural
-// noise (real-corpus measurement: over half a typical candidate list) and
-// go in a collapsed <details> block below it, so the landing page's first
-// screen is dominated by real tasks. vmr-stories.json (the machine layer)
-// is unaffected — it lists every row with no such split, per this
-// project's "machine layer never makes editorial cuts" rule.
+// Rows are split by IsNoiseCategory (P14.1): task/cron/subagent are real
+// work and stay in the main, always-expanded table; only heartbeat is
+// structural noise (real-corpus measurement: 0/107 heartbeat candidates
+// ever reached 10 requests, while cron and subagent both had double-digit
+// candidates — see IsNoiseCategory's doc comment) and goes in a collapsed
+// <details> block below it, so the landing page's first screen is
+// dominated by real work. Before P14.1 this split also folded subagent —
+// KNOWN_ISSUES §1.42 — which hid the single largest journey in the corpus.
+// vmr-stories.json (the machine layer) is unaffected — it lists every row
+// with no such split, per this project's "machine layer never makes
+// editorial cuts" rule.
 func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {
 	t := i18n.StoryIndexT(lang)
 	var b strings.Builder
@@ -248,7 +266,7 @@ func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {
 	}
 	var visible, noisy []JourneyIndexRow
 	for _, r := range rows {
-		if r.Category == CategoryHeartbeat || r.Category == CategorySubagent {
+		if IsNoiseCategory(r.Category) {
 			noisy = append(noisy, r)
 		} else {
 			visible = append(visible, r)
