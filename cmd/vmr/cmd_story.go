@@ -52,8 +52,13 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
-// cmdStory renders agent task execution history into self-contained Markdown narratives,
-// supporting single-journey inspection, pairwise comparison, and corpus-level analytics.
+// cmdStory is `vmr story`'s standalone flag set — kept fully independent
+// (see P9.3, cmd_analyze.go's own doc comment): its flags, defaults, and
+// output (including -render-all always meaning "every candidate", with no
+// P9.2 category filtering — that filtering is a `vmr analyze`-only default,
+// not a change to what -render-all itself means) are unchanged from before
+// the CLI convergence; it just now hands off to the shared setupStoryRun
+// pipeline instead of running it inline.
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
@@ -104,93 +109,52 @@ func cmdStory(args []string) error {
 		return err
 	}
 
-	// indexPath is computed (and LoadStoryIndex'd) up front, before
-	// anything is scanned — this is a pure string join plus a best-effort
-	// file read, no directory creation, so it stays safe to do even on an
-	// -llm-dry-run path that must leave reports/stories/ untouched if it
-	// returns early (ensureStoriesDir/idx.Save only happen once each
-	// branch below reaches its own normal write point).
-	storiesDir := filepath.Join(outDir, "stories")
-	indexPath := filepath.Join(storiesDir, "vmr-stories.json")
-	prior := story.LoadStoryIndex(indexPath)
-	cacheDir := filepath.Join(outDir, ".parse-cache") // shared with `vmr report` — see cmd_report.go
-	priorCache := ctxgraph.LoadCacheDir(cacheDir)
+	// -journey/-compare/-corpus/-render-all all carry over to `vmr analyze`
+	// unchanged (same flag, same output). Bare `vmr story` (no selector) is
+	// the one case that does NOT — it lists candidates only, while bare
+	// `vmr analyze` renders the default (task-only) suite — so the hint
+	// calls that out explicitly rather than implying a blanket 1:1 swap
+	// (independent review, 2026-08-21 — see this file's P9 ActionPlan
+	// §4.3's "执行记录").
+	fmt.Fprintln(os.Stderr, "vmr story: deprecated alias — for the same output, use `vmr analyze` with -journey/-compare/-corpus/-render-all (bare `vmr analyze`, unlike bare `vmr story`, also renders the default task-only suite rather than just listing). `vmr story` remains fully supported. See `vmr analyze -h`.")
 
-	fmt.Printf("scanning %d file(s)...\n", len(paths))
-	g, fileCache, err := ctxgraph.ScanCached(paths, priorCache)
+	su, err := setupStoryRun(paths, outDir, *includeSelfTraffic, llmKey, rc.SelfTrafficClientTags, *showUngrouped, lang)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%d lineage(s), %d ungrouped record(s), %d unparseable record(s)\n", len(g.Lineages), len(g.Ungrouped), g.NoBody)
-	if *showUngrouped {
-		printUngrouped(g.Ungrouped, lang)
-	}
-	firstPath := paths[0]
-
-	ctxgraph.StitchGraph(g)
-	byIdx := ctxgraph.LineageIndex(g)
-
-	// resolveTaskProfile is the shared cmd/vmr composition-root entry point
-	// `vmr report` also calls — see its own doc comment.
-	prof := resolveTaskProfile()
-
-	cands := story.ListCandidates(g)
-	if !*includeSelfTraffic {
-		cands = filterSelfTrafficCandidates(cands, llmKey, rc.SelfTrafficClientTags)
-	}
-
-	// One batched title fetch across every candidate (story.PreviewTitles
-	// groups reads by source file, so this scans each file at most once no
-	// matter how many candidates), reused both by the index rows below and
-	// by listJourneys' stdout listing — the index is now the single place
-	// that derives a candidate's cheap fields, no branch recomputes them.
-	chains := make([][]*ctxgraph.Lineage, len(cands))
-	for i, l := range cands {
-		chains[i] = ctxgraph.ChainFrom(l, byIdx)
-	}
-	titles, err := story.PreviewTitles(chains, prof, lang)
-	if err != nil {
-		return err
-	}
-	freshRows := make([]story.JourneyIndexRow, len(cands))
-	for i, l := range cands {
-		partial := story.IsPartialHead(chains[i], firstPath)
-		freshRows[i] = story.BuildJourneyIndexRow(chains[i], titles[l], partial)
-	}
-	idx := &story.StoryIndex{Cache: fileCache, Journeys: story.MergeJourneyIndexRows(freshRows, prior.Journeys)}
 
 	if *compare != "" {
 		ids := strings.Split(*compare, ",")
 		if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
 			return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
 		}
-		return compareJourneys(cands, byIdx, ids[0], ids[1], firstPath, prof, includePartial, outDir, llmOpts, lang, idx)
+		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, includePartial, outDir, llmOpts, lang, su.idx)
 	}
 	if *corpus {
-		return corpusStats(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx)
+		return corpusStats(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx)
 	}
 	if *journeyArg != "" {
-		ids := make([]string, len(cands))
-		for i, ch := range chains {
+		ids := make([]string, len(su.cands))
+		for i, ch := range su.chains {
 			ids[i] = story.ID(ch)
 		}
-		targets, err := resolveJourneySelector(cands, ids, *journeyArg)
+		targets, err := resolveJourneySelector(su.cands, ids, *journeyArg)
 		if err != nil {
 			return err
 		}
 		if len(targets) == 1 {
-			return renderJourney(targets[0], byIdx, firstPath, prof, includePartial, outDir, llmOpts, lang, idx)
+			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, includePartial, outDir, llmOpts, lang, su.idx)
 		}
 		if llmAddrExplicit {
 			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), *journeyArg)
 		}
-		return renderJourneys(targets, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
+		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx,
 			"no matching journeys to render (all skipped as partial-head; pass -include-partial)")
 	}
 	if *renderAll {
-		return renderAllJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx)
+		return renderAllJourneys(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx)
 	}
-	return listJourneys(idx, g, outDir, includePartial, lang)
+	return listJourneys(su.idx, su.g, outDir, includePartial, lang)
 }
 
 // updateJourneyRow finds id's row in idx.Journeys and fills in the
@@ -559,15 +523,36 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 	return llmSection
 }
 
+// renderBatchSize bounds how many candidates renderJourneys builds into
+// memory in a single story.BuildAll call. BuildAll does ONE combined
+// ctxgraph.FetchRecords across its whole input — a deliberate efficiency
+// choice for the common case (a handful to a few dozen candidates: shares
+// I/O instead of paying it once per candidate) that turns into an
+// unbounded-memory liability once the batch is large. Real-corpus
+// measurement (P9 ActionPlan §3's 收尾 run, 34 files/1638 lineages) found
+// this is what actually exhausts memory on a multi-day corpus — not
+// candidate *count* but candidate *volume*: P9.2's category=task default
+// still batches 234 candidates totaling 9259 requests in one BuildAll call
+// (the long real task conversations that make up "task" dominate total
+// volume; heartbeat/cron/subagent are mostly a handful of requests each),
+// and that alone drove peak memory footprint to ~35GB and got the process
+// killed — category filtering alone does not bound memory, only count.
+// Chunking bounds peak memory to one batch's worth regardless of how many
+// total candidates are being rendered; each batch's records/Journeys are
+// eligible for GC once its writes complete, before the next batch fetches.
+// Not exposed as a flag — an internal batching detail, not a semantic
+// knob; 20 is a conservative constant, not tuned against a target memory
+// budget (no per-request byte-size accounting exists to make a tighter,
+// principled bound cheap to compute here).
+const renderBatchSize = 20
+
 // renderJourneys renders every given candidate (skipping partial-head ones
-// unless includePartial) in one batched pass — story.BuildAll shares a
-// single FetchRecords call across every candidate (same fix PreviewTitles
-// applied to the listing path), so this costs about the same I/O as just
-// listing, not N times more. Shared by renderAllJourneys (-render-all,
-// every candidate) and -journey's multi-match dispatch (a comma-list/glob
-// selector that resolved to more than one journey) — the two differ only
-// in which candidates they pass in and the message printed when none of
-// them survive the partial-head filter.
+// unless includePartial), in batches of at most renderBatchSize (see its
+// own doc comment for why). Shared by renderAllJourneys (-render-all/the
+// default suite's category=task scope, P9.2) and -journey's multi-match
+// dispatch (a comma-list/glob selector that resolved to more than one
+// journey) — the two differ only in which candidates they pass in and the
+// message printed when none of them survive the partial-head filter.
 func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
@@ -587,31 +572,39 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		return saveStoryIndex(idx, outDir, lang)
 	}
 
-	journeys, err := story.BuildAll(toRender, prof, lang)
-	if err != nil {
-		return err
-	}
 	storiesDir, err := ensureStoriesDir(outDir)
 	if err != nil {
 		return err
 	}
 	t := i18n.CLI(lang)
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
-	for i, j := range journeys {
-		j.Partial = toRenderPartial[i]
-		m := story.ComputeMetrics(j)
-		findings := story.ComputeFindings(j, lang)
-		outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
+	rendered := 0
+	for start := 0; start < len(toRender); start += renderBatchSize {
+		end := start + renderBatchSize
+		if end > len(toRender) {
+			end = len(toRender)
+		}
+		journeys, err := story.BuildAll(toRender[start:end], prof, lang)
 		if err != nil {
 			return err
 		}
-		fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
-		updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.Base(outPath))
+		for i, j := range journeys {
+			j.Partial = toRenderPartial[start+i]
+			m := story.ComputeMetrics(j)
+			findings := story.ComputeFindings(j, lang)
+			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
+			if err != nil {
+				return err
+			}
+			fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
+			updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.Base(outPath))
+		}
+		rendered += len(journeys)
 	}
 	if skippedPartial > 0 {
 		fmt.Print(t.AllRenderedSkipped(skippedPartial))
 	}
-	fmt.Print(t.AllRenderedNote(len(journeys), storiesDir))
+	fmt.Print(t.AllRenderedNote(rendered, storiesDir))
 	return saveStoryIndex(idx, outDir, lang)
 }
 

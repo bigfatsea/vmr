@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**（2026-08-20 P8 收尾后重算）：中危 5 项、低危 16 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。`1.32`（`vmr analyze` 强制 `-render-all`，中危）仍待 P9 处理；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）已修复并移入 §3；`1.33`/`1.34`（集中登记的文档与小口径缺口）各自四项/三项已由 P7 处理，剩余子项留给 P9；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
+- **§1 分布**（2026-08-21 P9 收尾后重算）：中危 3 项、低危 14 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）、`1.30`/`1.32`/`1.33`/`1.34`（P9，CLI 收敛 + 大语料 SIGKILL 根治 + 自指流量输入对称）已全部修复并移入 §3；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
@@ -230,117 +230,6 @@
 - **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
   §3 M3）提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
 
-### 1.30 [中] `vmr story -render-all`（含经由 `vmr analyze` 触发）在大语料上被系统杀死，不只是慢
-
-- **现状**：本机全量语料（34 个审计文件、11374 条记录）冷启动跑 `vmr analyze`（内部先执行
-  `vmr story -render-all`）在约 10 分钟墙钟、~300s 累计 CPU 时间后被**信号杀死**（进程退出码
-  137 = SIGKILL），story 阶段连候选索引都没写出（`stories/` 目录为空）——不是跑得慢，是没跑完；
-  单日样本（322 条记录、6 个 Journey）同一命令 ~18s 正常完成。**已定位到具体是哪一步**：同一份
-  34 文件语料上，`vmr story`（不带 `-render-all`，只列出候选）18.22s 正常完成，峰值内存
-  （`/usr/bin/time -l` 的 `peak memory footprint`）约 1.07GB——扫描、建图、候选分类这些步骤都不是
-  瓶颈。问题精确定位在 `-render-all` 对全部候选（该语料约 350+ 个非断头候选）逐个渲染 Journey
-  详单+证据这一步。**这不是 P6 引入的回归**：`cmd_analyze.go` 的 `vmr analyze` 内部就是原样调用
-  `cmdStory(storyArgs)`（`storyArgs` 带 `-render-all`），跟用户直接跑 `vmr story -render-all` 是
-  同一条代码路径——这个行为在 P6 之前就存在，P6 只是让它成为 `vmr analyze` 的默认路径，从而更容易
-  被撞到。本机 16GB 物理内存，是否为 OOM 触发的 SIGKILL 未做进一步确认（复现一次完整的
-  `-render-all` 杀死过程再采样内存曲线，成本较高，留给专门排期时做）。
-- **为什么定为中危而不是低危**：`vmr analyze` 是 P6 新增的默认推荐入口，"被杀死而不是报错退出"
-  对用户是一个体验很差的失败模式（无提示、无部分产物、不知道该怎么应对），且触发条件不算罕见——
-  一个月的历史日志量级就可能达到本次实测的规模。
-- **为什么不在 P6 里当场修**：诊断需要真正定位内存/资源峰值发生在哪个阶段（`ctxgraph.Scan` 建图、
-  `story.BuildAll` 逐 Journey 构建、`EnsureJourneyDetails` 材料化详单，还是三者叠加），这本身是
-  一次独立的性能剖析工作，不是本次 P6 范围内能顺手完成的。
-- **重新评估（2026-08-20 六阶段复盘）——这条被归错类了：它首先是一个默认值设计问题，其次才是性能问题**：
-  1. **根因不在渲染实现，在渲染范围**。`vmr analyze` 无条件给 story 侧加 `-render-all`
-     （`cmd/vmr/cmd_analyze.go`，代码注释里论证过"套件的链接要能落到真文件上"），于是
-     **每一个候选 journey 的每一步都会触发 `EnsureJourneyDetails`**。单日样本实测：
-     `vmr report` 默认产出 1.5MB，`vmr analyze` 默认产出 **164MB**（其中 `details/` 160MB、
-     306 份、平均 532KB），而这一批的源日志压缩后只有 5.0MB。按同比例外推全量语料约 5.7GB。
-  2. **这直接抵消了 P3.3 的核心交付**。P3.3 的验收标准原文是"默认运行的产物集合回到索引量级"；
-     `vmr analyze` 把"默认全量物化详单"从 `-details=true` 这条路搬到了 `-render-all` 这条路，
-     换了个开关，行为回到原点。两个阶段的决定在这里直接冲突，而没有任何一处文档登记过这个冲突
-     ——这正是本条最该被记住的部分。（`vmr analyze -details` 因此也是误导性的：不传它，
-     95% 的详单照样会被写出来。）
-  3. **最便宜的修法不需要任何性能剖析**：P6.3 已经算出了每个候选的 `category`
-     （`task`/`cron`/`heartbeat`/`subagent`），`vmr-stories.md` 也已经按它折叠噪声类，
-     但**渲染范围没有复用这个分类**。默认只渲染 `category == task`（单日样本 6 条候选里
-     多数是 task，全量语料 477 条候选里 238 条是 task、239 条是 cron/heartbeat/subagent），
-     体积与内存峰值立刻减半以上，且删掉的正是最没人读的那一半。这是一次默认值决策 + 一处
-     条件判断，不是一次重构。
-  4. 剖析（pprof / 流式渲染 / 分批）仍然值得做，但它应该排在第 3 点**之后**：先把不该做的工作
-     不做，再优化剩下该做的工作。反过来做等于花力气把一堆没人要的产物生成得更快。
-- **可能方向**（未验证，留给专门排期时评估）：已定位到 `-render-all` 逐候选渲染这一步（见上，
-  不是扫描/建图阶段），后续排查可以直接从 `renderAllJourneys`（`cmd_story.go`）与
-  `EnsureJourneyDetails` 入手，用 `pprof`/内存采样确认是持有全部候选的内存膨胀，还是详单材料化
-  的磁盘/内存双重开销；可能的方向包括给候选数量设一个确认阈值或分批处理、把逐 Journey 渲染改成
-  真正的流式（渲染完一个就释放，不在内存里累积已渲染集合）。
-- **登记来源**：2026-08-20，P6 ActionPlan 全量语料验证（`story_report_p6_action_plan_sonnet-5.md`
-  §10.4）时发现；同日六阶段复盘重新定性为默认值设计问题。
-
-### 1.32 [中] `vmr analyze` 强制 `-render-all`，把 P3.3 的"默认按需生成详单"退回成"默认全量"
-
-- **现状与数据**：见 §1.30 的重新评估第 1–2 点（单日样本 `vmr report` 1.5MB vs `vmr analyze` 164MB）。
-  本条与 §1.30 是同一个根因的两种表现：§1.30 记的是"大语料下会被 SIGKILL"这个失败模式，
-  本条记的是"即使不被杀死，默认行为也已经违背了 P3 的核心交付"这个设计冲突。两条应该一起裁决，
-  单独修任何一条都只能解决一半。
-- **需要拍板的是范围，不是实现**：`vmr analyze` 的默认渲染集合该是"全部候选"还是"`category == task`
-  的候选"？前者保证任何一条导航边都落在真文件上，代价是 100× 的产物体积；后者把体积和内存拉回
-  可用区间，代价是噪声类 journey 的链接要按需生成（而按需生成本来就是 P3.3 建立的能力）。
-  **本条不替这个决定给答案，只要求它被显式做一次**——今天它是被 `cmd_analyze.go` 里一行
-  `append(common(), "-render-all")` 默认掉的。
-- **登记来源**：2026-08-20 六阶段复盘（同上一条）。
-
-### 1.33 [低，部分闭环] P1–P6 落地后遗留的一批文档/文案与实现不一致
-
-每条都已对源码核实，均不影响运行正确性，但都会误导读者；集中登记以免被当成六个独立的新发现反复提出。
-**P7（2026-08-20）已处理其中四项**（见下方各自的✅标注），剩余两项——执行顺序文档、README
-缺失——都是 P9（CLI 收敛）范围，随那次改动一并处理。
-
-- **`vmr analyze` 的执行顺序在四处文档里写反了**：`docs/UserGuide.md`/`.zh`、
-  `docs/VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md` 都写"先 `vmr report` 后
-  `vmr story`"，实际是 `cmdStory` 先、`cmdReport` 后。**而这个顺序是承重的**——`cmd_analyze.go`
-  的注释写明了 story 先跑才能让"报表 → 任务索引"这条边在首次调用就命中。把一个承重决策的方向写反，
-  下一个读者会照着文档改回去。**留待 P9**（`story_report_dev_plan_2_sonnet-5.md` P9.4）。
-- **`README.md`/`README.zh.md` 完全没有出现 `vmr analyze`**（`grep -c` = 0）。架构文档 §10.3 把
-  README 的命令示例列为必须同步项，且 `analyze` 是新的推荐入口、README 是开源项目的门面。
-  **留待 P9**（P9.4）。
-- ✅ **失败请求索引的说明文案仍承诺 `.json` 副本**——P7.5 已改写 `internal/i18n/report_requests.go`
-  EN/ZH 两处及 `internal/report/requests.go` 的 `WriteFailedIndex` doc comment，不再提 `.json`。
-- ✅ **§8 的按需读取提示引用了一个不存在的列**——P7.1 顺带解决：默认模式下"文件"列本身就渲染
-  `req` 坐标了，`internal/i18n/report_doc.go` 的提示语同步改写；**独立复核发现首版措辞"上表
-  『文件』列"仍不准确**（该提示语出现在 `vmr-report.md` §8，那一节本身只是一行指向
-  `vmr-requests.md` 的链接，没有表格，"上表"无所指），已改为"`vmr-requests.md` 的『文件』列
-  （未生成详单时显示为坐标）"，并顺带把示例命令 `vmr replay -print -req <坐标> <审计文件>`
-  精简为 `vmr replay -print -req <坐标>`（P6.5 已交付 `-req` 免位置参数，示例不必再带审计文件）。
-- ✅ **`spineFullCap` 的注释用一个已删除的函数论证自己**——P7.5 已重写
-  `internal/story/render_spine_args.go` 的该处 doc comment，改为描述当前机制（该 Step 自己的
-  详单链接）。
-- ✅ **工具结果的截断提示指错了地方**——P7.5 已拆分 `capFull`/`capFullWith`：工具调用参数仍用
-  "本 Step 的详情链接"，工具结果改用新增的 `SpineResultValueTruncated`（"下一步的详情链接"）。
-- **登记来源**：2026-08-20 六阶段复盘（同上一条）；四项已处理状态见 2026-08-20 P7。
-
-### 1.34 [低，部分闭环] P6 落地后的四处小口径缺口
-
-同样集中登记，单条都不值得单独立项，但都属于"契约上说好的事没做到"。
-**P7（2026-08-20）已处理其中三项**（见下方✅标注），剩余一项——自指流量识别规则的输入不对称——
-在 P9 单一 flag 集合收敛后自然消失，届时一并确认闭环（`story_report_dev_plan_2_sonnet-5.md` P9.5）。
-
-- ✅ **`evidence/` 的 report 侧引用者从未实现**——P7.5 已在架构文档
-  `story_report_architecture_opus-5.md` §7.6(b) 的两格加"设计预留，未实现"批注（不删除、不新增
-  代码——判断仍是"大概率永远不需要做"，见批注本身）。
-- ✅ **`JourneyIndexRow.Category` 用零值 + `omitempty` 表达最重要的那一类**——P7.4 已把
-  `CategoryTask` 改为显式 `"task"`，`Category` 字段去掉 `omitempty`，四类候选现在都显式序列化。
-- ✅ **`vmr-stories.json` 的 `journeys[].files` 用原始路径而非坐标口径**——P7.4 已把
-  `BuildJourneyIndexRow` 的 `fileSet` 收集改为 `ctxgraph.CanonicalPath(m.Path)`，与 `req` 坐标
-  拼法一致（真实语料核实：`vmr-audit-2026-07-28.jsonl` 与 `req` 字段的 basename 逐字节一致）。
-- **自指流量的识别规则只定义一处，但输入有两处**：`selfTrafficExcludeTags` 确实只有一份实现
-  （P6.4 的核心纪律成立），但喂给它的 `llmKey` 来源不同——`cmd_story.go` 走
-  `resolveString(*llmKeyFlag, rc.LLMKey, "")`（flag 可覆盖），`cmd_report.go` 只用 `rc.LLMKey`
-  （report 没有 `-llm-key` flag）。于是 `vmr story -llm-key X` 与 `vmr report` 会排除不同的集合。
-  `vmr analyze` 不受影响（它不透传 `-llm-key`）。触发条件明确且窄，但这正是"规则一处、
-  **输入两处**"这类分叉的一个变体，至少应在 doc comment 里写明前提。**留待 P9**（P9.5）。
-- **登记来源**：2026-08-20 六阶段复盘（同上一条）；三项已处理状态见 2026-08-20 P7。
-
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 
 ### 2.1 运行时与并发
@@ -434,6 +323,10 @@
 28. **决策脊柱指令展示的方言过滤漏洞补齐**（P7.2，`internal/taskseg/openclaw.go`/`openclaw_brackets.go`、`internal/story/journey.go`/`render_spine_step.go`）：`openClawAware.RealUserText` 此前只在 `(untrusted metadata)` 信封分支内间接处理时间戳方括号，"裸"消息（无信封）上的 `[timestamp]`/`[message_id: ...]` 脚手架前缀完全未被剥离；新增 `messageIDBracketRe` 与窄范围的 `timestampBracketRe`（仅匹配 OpenClaw 的日期前缀形状，不是通配任意方括号——P7 内部独立复核发现首版误用了通配的 `leadingBracketRe`，会误伤"用户消息本来就以方括号开头"的合法场景，如 `[Bug] fix the crash`，已改用窄正则并补回归测试），裸消息路径循环剥离两种已知前缀。脊柱"💬 指令"行同时从"直接读未过滤的 `NewEvents` 原文（`firstNewUserText`）"改为读 `buildFrom` 构建期已算好并存入 `Step.Instruction` 的过滤后文本（`taskseg.LastInstruction`），与任务标题走同一套过滤规则；**同一次复核还发现该行原先只在无工具调用的 Step 上渲染**（P1.2/P6 遗留缺口，`renderSpineStep` 从未接入过），中途指令绝大多数情况下会立即触发工具调用，导致该行此前在真实场景里近乎不可见——已同步补齐 `renderSpineStep` 的渲染分支。真实语料验证：含 `[message_id: ...]` 标记的样例任务标题不再泄漏该标记（此前 `**t01 · [Tue 2026-07-28 00:05 GMT+8] [message_id: om_x100b694c53b4eca8b1cd50932b7aefe] o…**`，现为 `ou_ad279066d244fb4f7d91240743d30935: 去统计一下…`）。曾登记为 §1.21。
 29. **`-llm-addr ''` 现在能真正关闭 LLM 调用**（P7.3，`cmd/vmr/reportconfig.go`/`cmd_story.go`）：新增 `resolveStringExplicit`（与既有 `resolveBool(explicit, ...)` 同构），`cmd_story.go` 的 `-llm-addr` 解析改用它——显式传空串不再回退到 `report.yaml` 的默认地址。真实验证：配置了 `llm_addr` 的目录下，`vmr story -llm-addr ''` 不再发起 LLM 调用；不传该 flag 时仍按 `report.yaml` 默认值触发（沿用既有行为）。曾登记为 §1.28。
 30. **JSON 输出的语言策略统一：`journey-<id>.json`/`compare-*.json`/`vmr-report.json` 三种产物同一次 `-lang` 下语言一致**（P8，`internal/story/compare.go`/`compare_metrics.go`（新增）、`internal/report/metrics.go`、`cmd/vmr/cmd_report.go`/`cmd_story.go`）：落地方向见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，回填进 `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3（整节重写，不是打补丁）。`story.Compare(a, b JourneySummary)` 改为 `Compare(a, b JourneySummary, lang i18n.Lang)`，循环体改用 `i18n.MetricLabel(lang, string(spec.Code))` 直接算出本地化 `Label`（`metricSpec.Label` 字段随之删除——改动后全仓唯一读取点消失）；`render_compare.go` 的渲染层不再重复查表，直接读 `cmp.Rows[].Label`。`report` 侧刻意**不**给 `Build`/`BuildCached` 加 `lang` 参数（两者已有 6/9 个参数，且没有任何内部逻辑依赖 `rep.Efficiency` 的英文文本本身），改为新增导出函数 `report.LocalizeEfficiency(rep, lang)`，`cmd_report.go` 在写 JSON 前调用它覆写 `rep.Efficiency`；`section_efficiency.go` 的 Markdown 渲染路径刻意保留独立计算，不依赖这条覆写的调用顺序。真实语料验证：同一次 `vmr report -lang zh` 下 `vmr-report.json` 的 `efficiency[].finding`（如"工具 schema 浪费"）与 `vmr-report.md` §7 表格文案逐字一致，且与 `-lang en` 选中的 `Code` 集合完全相同（证明覆写只改文本、不改选择逻辑）；`vmr story -compare` 的 `compare-*.json` 的 `rows[].label`（如"模型时间"）与 `compare-*.md` 表格逐字一致。曾登记为 §1.19。
+31. **`vmr analyze` 大语料 SIGKILL 根治：默认渲染范围收窄 + 批处理，两者缺一不可**（P9.2，`cmd/vmr/cmd_analyze.go` 的 `taskOnlyCandidates`、`cmd_story.go` 的 `renderJourneys`/`renderBatchSize`）：`vmr analyze` 默认套件（无选择器）现在只物化 `category == task` 的候选（`cron`/`heartbeat`/`subagent` 仍进索引，`heartbeat`/`subagent` 按既有规则折叠、`cron` 与 `task` 一样留在主表，只是"报告"列显示未生成），`-render-all` 保留全量物化。**但真实全量语料（34 文件、11274 条记录）验证发现，仅做分类过滤不足以解决 SIGKILL**：`task` 类候选虽只占全部候选数的 49%（234/473），却占了 83.5%的请求量（9259/11086）——真正长的任务对话本来就分在 `task` 类，过滤类别并不能按比例削减渲染批次的实际数据量。根因定位到 `story.BuildAll` 内部对整批候选做**一次性** `ctxgraph.FetchRecords`（`internal/story/journey.go`）——这原本是刻意的 I/O 优化（共享一次文件扫描），但在大批量下变成无界内存：`renderAllJourneys` 默认套件仅按类别过滤后拿 234 个候选一次性构建，实测峰值内存（`peak memory footprint`）约 35.5GB，进程被系统杀死。修法：`cmd_story.go` 的 `renderJourneys` 改为按 `renderBatchSize`（20）分批调用 `story.BuildAll`，每批构建完立即写盘、下一批开始前上一批可以被 GC——不改变 `internal/story`/`internal/report` 任何一行（改动全在 `cmd/vmr`）。真实语料验证：同一份 34 文件语料，`vmr analyze` 默认套件（234 个 task 候选、9259 条请求）从 SIGKILL（约 35.5GB 峰值）→ **正常退出**，峰值内存 **4.59GB**，总耗时 413s（~6.9 分钟），输出目录 3.5GB（`stories/` 58MB + `details/` 8343 个文件，约 3.44GB）。曾登记为 §1.30/§1.32。
+32. **`vmr report`/`vmr story` 降级为过渡别名，`vmr analyze` 成为单一分析入口**（P9.1/P9.3，`cmd/vmr/cmd_analyze.go`/`cmd_report.go`/`cmd_story.go`/`cmd_story_setup.go`）：`vmr analyze` 收敛为一套 flag 集合（`vmr report`/`vmr story` 曾各自拥有的并集），`-journey`/`-compare`/`-corpus` 三个互斥的变焦选择器各自只跑对应的 story 侧单一视图（不跑宏观报表）；不带选择器是默认套件，先跑 story 半区再跑 report 半区（`report.Markdown` 需要 `stories/vmr-stories.md` 已存在才挂链接，story 先跑让这条边在首次调用就命中）。`cmd_report.go`/`cmd_story.go` 提炼出共享执行函数 `runReport`/`setupStoryRun`（连同既有的 `renderJourney`/`renderJourneys`/`renderAllJourneys`/`compareJourneys`/`corpusStats`），`cmd_analyze.go` 只做 flag 解析与按选择器分派，不重新实现任何渲染/聚合逻辑；`vmr report`/`vmr story` 各自保留独立的 `flag.NewFlagSet`、独立默认值，产出与收敛前逐字节相同，仅在调用时向 stderr 打印一行迁移提示。全程未改动 `internal/report`/`internal/story` 任何一行（`git diff` 验证为空）。曾登记为 §1.33 两项遗留（执行顺序文档订正、README 补 `vmr analyze` 示例）。
+33. **四处文档"先 report 后 story"执行顺序订正**（P9.4，`docs/UserGuide.md`/`.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md`）：均已改为准确描述"story 先、report 后"；`README.md`/`README.zh.md` 补充 `vmr analyze` 快速上手示例与能力条目（`grep -c 'vmr analyze'` 从 0 变为 2）。曾登记为 §1.33。
+34. **自指流量识别规则的输入不对称随统一 flag 集合自然消失**（P9.5，`cmd/vmr/cmd_analyze.go`）：`cmdAnalyze` 只解析一次 `llmKey`（`-llm-key` flag 或 `report.yaml` 的 `llm_key`），同时喂给 story 半区（`filterSelfTrafficCandidates`）与 report 半区（`selfTrafficExcludeTags` → `runReport` 的 `excludeClientTags`），不再是"`vmr story` 能被 flag 覆盖、`vmr report` 只认 `report.yaml`"两条独立路径。落地过程中发现一个真实的连带缺陷并修复：`resolveLLMOptions`（校验 `-llm-addr`/`-llm-model`/`-llm-key` 组合）若无条件调用，会让单独设置 `-llm-key`（不带 `-llm-addr`，这正是"仅用于排除自指流量、不在这次运行发起 LLM 调用"的合理用法）在 `-corpus`/默认套件模式下直接报错退出——即便这两种模式从不消费 `llmOpts`。修法：`resolveLLMOptions` 只在 `-journey`/`-compare` 分支里按需调用（`dispatchAnalyze` 的 `resolveLLMOpts` 闭包），`llmKey` 本身的解析与自指流量排除逻辑不再依赖它。真实语料验证：`vmr analyze -llm-key <key>`（`report.yaml` 不存在、无 `-llm-addr`）在默认套件下正常运行，`vmr-stories.json` 与 `vmr-report.json` 的 `meta.self_traffic_excluded` 排除同一批自指流量记录。曾登记为 §1.34。
 
 ---
 
@@ -454,15 +347,15 @@
 
 ### 4.1 总表
 
-> **覆盖范围的一处如实声明（2026-08-20，P8 收尾后更新）**：本表建成时覆盖的是当时的 §1 全部条目；
-> 此后 P1–P6 期间陆续新增的 `1.18`/`1.22`/`1.23`/`1.29`/`1.30` 一直没有补进来，其余仍待补——
+> **覆盖范围的一处如实声明（2026-08-21，P9 收尾后更新）**：本表建成时覆盖的是当时的 §1 全部条目；
+> 此后陆续新增的 `1.18`/`1.22`/`1.23`/`1.29` 已补进本表，其余仍待补——
 > **一张只覆盖一半条目的 ROI 表，它的"高 ROI 为 0 条"结论就只对那一半成立**，这一点下面 §4.2 已订正。
-> `1.21`/`1.28`/`1.31` 三条已由 P7 修复（见 §3 第 27–29 项）、`1.19` 已由 P8 修复（见 §3 第 30 项），
-> 均已移出本表。
+> `1.21`/`1.28`/`1.31` 三条已由 P7 修复（见 §3 第 27–29 项）、`1.19` 已由 P8 修复（见 §3 第 30 项）、
+> `1.30`/`1.32`/`1.33`/`1.34` 已由 P9 修复（见 §3 第 31–34 项），均已移出本表——本表当前不再有任何
+> 高 ROI 条目待处理。
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| 1.32 | `vmr analyze` 强制 `-render-all`（含 §1.30 的 SIGKILL） | 低→中 | 中 | 已证 | **高** | 实测 164MB vs 1.5MB。最便宜的修法（默认只渲染 `category == task`）复用 P6.3 已算好的分类，是一次默认值决策而非重构；性能剖析应排在它之后。P9.2 已排期处理 |
 | 1.13 | 额度燃尽看板 | 高 | 低 | 中 | **中** | 产品价值而非技术债，按产品路线排期，不与本表其他条目抢顺序 |
 | 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 11253 条里 `openairesponses` **0 条**。触发条件量化为"`vmr-requests.json` 出现该 protocol"，在那之前不投入 |
 | 1.5 | 几个文件贴着行数预算线 | 低 | 低 | 低→中 | **低→高** | **最典型的时间相关条目**：拆分成本不随时间变化，但价值在预算报警那天从"没人被卡住"跳到"挡住了下一次提交"。守卫会自己举手，提前做纯属排队 |
@@ -480,11 +373,10 @@
 
 ### 4.2 分档结论
 
-- **高 ROI（原 2 条，2026-08-20 新增；`1.31` 已由 P7 修复移入 §3，剩 `1.32`）**：这是本表建成以来
-  第一次出现高 ROI 条目，正是下面那条"补充判据"预言的异常形态：价值已证、成本低、却还在等。两条
-  同源——都是 P1–P6 重构的"最后一公里"，都出在 `vmr analyze` 这个 P6 新增的默认入口上，都因为验收
-  走查跑的是 `analyze` 而不是用户日常会跑的 `report` 而被系统性跳过。`1.31` 已在 P7 排掉；`1.32`
-  留给 P9（`story_report_dev_plan_2_sonnet-5.md` P9.2 已排期）。
+- **高 ROI（0 条，2026-08-21 更新）**：`1.31`（P7）、`1.32`（P9）已先后修复移入 §3——本表当前
+  没有"价值已证、成本低、却还在等"的异常条目。这两条的教训值得留存：**P6 的验收走查用的是
+  `vmr analyze`（最全的那条路径），而用户日常跑的是 `vmr report`（默认路径），默认路径上的缺陷
+  因此被系统性地跳过了。验收要在默认路径上做，不能在最全的那条路径上做。**
 - **中 ROI（2 条，看触发；`1.28` 已由 P7 修复移入 §3）**：`1.13` 按产品路线排；`1.1` 是 P3.6 之后
   **收益已经用真实语料证明**（5.2× 缓存收益）、只是正确性风险需要额外测试基础设施兜底的条目——与
   "收益未经测量"的低 ROI 组本质不同。原 `1.16`（并发竞态）、`1.4`（流式断开审计语义）与
@@ -496,12 +388,10 @@
   是"还不知道值不值得"，而先做优化再测量正是这个项目一贯拒绝的顺序。`1.5`/`1.6`/`1.8` 则是守卫或真实反馈会
   自己举手的事。
 
-**关于这张表本身的一个观察（2026-08-20 更新）**：这段原文写的是"13 条里高 ROI 为 0 条；没有一条是
-'高价值但一直没做'……如果哪天这张表里出现了「价值高 + 成本低 + 却还在等」的条目，那才是需要解释的异常"。
-**那一天到了**：`1.31`/`1.32` 正是这样的条目。它们的解释也很清楚，值得单独记住——
-**P6 的验收走查用的是 `vmr analyze`（最全的那条路径），而用户日常跑的是 `vmr report`（默认路径），
-默认路径上的缺陷因此被系统性地跳过了。验收要在默认路径上做，不能在最全的那条路径上做。**
-这条清单原本的干净不是假的，只是它的干净取决于**发现问题的那次检查覆盖了哪条路径**。
+**关于这张表本身的一个观察**：这段原文写的是"13 条里高 ROI 为 0 条；没有一条是'高价值但一直没做'
+……如果哪天这张表里出现了「价值高 + 成本低 + 却还在等」的条目，那才是需要解释的异常"。这个异常曾经
+出现过一次（`1.31`/`1.32`），也已经在 P7/P9 两个阶段分别排掉——**这张表的健康状态不是"从未出现过
+异常"，是"异常出现后被正确识别、排上日程、修掉"**。
 
 **一个补充判据**：`1.16`（原条目，现已闭环）是这张表里第一条**从源码注释里捞出来、而不是从代码里读出来**的条目——
 它早就写在 `respnorm` 的 `qmu` 注释里，注释还写着「见本文件的既有条目」，而那个条目当时并不存在。

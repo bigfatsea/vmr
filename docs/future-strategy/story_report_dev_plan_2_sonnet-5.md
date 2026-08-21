@@ -101,7 +101,7 @@ JSON 构造路径；`JourneyIndexRow.Category` 的 `CategoryTask` 是空字符�
 | --- | --- | --- | --- | --- |
 | **P7**✅ | 正确性归位 | 默认路径死链接清零；方言过滤漏洞修复；flag 语义陷阱修复；机读契约与文案缺口归位 | P0–P6 | 高（`§1.31` 是该表第一次出现的"价值高+成本低+还在等"异常项）——**已完成，2026-08-20，见 `story_report_p7_action_plan_sonnet-5.md` §10 执行记录** |
 | **P8**✅ | JSON 语言策略统一 | `journey`/`compare`/`report` 三种 JSON 产物的叙述字段在同一次 `-lang` 下语言一致 | 与 P7 无硬依赖，紧随其后 | 中（架构文档已明确"独立议题，可并行，不卡主线"）——**已完成，2026-08-20，见 `story_report_p8_action_plan_sonnet-5.md` §8 执行记录** |
-| **P9** | CLI 命令层真正收敛 | `vmr analyze` 成为唯一分析入口（含三级变焦选择器与默认渲染范围裁决）；`report`/`story` 降级为打印提示的过渡别名 | P7, P8 | 中（架构完整性 + 消除"文档说收敛、代码是三个动词"的自相矛盾，且一并解决 `§1.30` 的 SIGKILL） |
+| **P9**✅ | CLI 命令层真正收敛 | `vmr analyze` 成为唯一分析入口（含三级变焦选择器与默认渲染范围裁决）；`report`/`story` 降级为打印提示的过渡别名 | P7, P8 | 中（架构完整性 + 消除"文档说收敛、代码是三个动词"的自相矛盾，且一并解决 `§1.30` 的 SIGKILL）——**已完成，2026-08-21，见 `story_report_p9_action_plan_sonnet-5.md` §10 执行记录**（实测发现范围收窄不足以根治 SIGKILL，追加了批处理修法，全量语料从 SIGKILL 降到 4.6GB 峰值正常退出） |
 | **P10** | 历史文档与规划遗留清理 | 修复权威文档里指向已删除文件的死引用；给已被吸收的参考文档补"已采纳"指针；`KNOWN_ISSUES §4` ROI 表补全并把 P7–P9 闭环项移入已闭环 | P7, P8, P9 | 低成本、纯文档，防止死引用与过期结论持续误导下一个读者 |
 
 ---
@@ -164,15 +164,20 @@ JSON 构造路径；`JourneyIndexRow.Category` 的 `CategoryTask` 是空字符�
 
 ---
 
-### P9 · CLI 命令层真正收敛
+### P9 · CLI 命令层真正收敛 ✅ 已完成（2026-08-21）
+
+执行细节、真实语料验证结果、与本节设计的两处实现期落差（默认渲染范围收窄本身不足以解决 SIGKILL，
+追加了批处理修法；`resolveLLMOptions` 无条件调用会让纯 `-llm-key` 用法在批量模式下报错，改为按需
+调用）见 `story_report_p9_action_plan_sonnet-5.md` §10"执行记录"，本节原文保留不动（作为阶段开工前
+的设计依据），不在此重复。
 
 **目标**：落地 §1 的决策——`vmr analyze` 成为唯一分析入口，`vmr report`/`vmr story` 降级为打印
 迁移提示的过渡别名；`vmr analyze` 默认渲染范围随之一次性做对，不再依赖"寄居在即将重写的文件
 里"这一权宜状态。
 
 **范围**：`cmd/vmr` 的子命令分派与三套现有 `flag.NewFlagSet`；`README.md`/`.zh`、
-`docs/UserGuide.md`/`.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md` §7.9 对应表述、
-`CHANGELOG.md`。不改变 `internal/report`/`internal/story` 的包边界——两包仍互不 import，
+`docs/UserGuide.md`/`.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md` §4.4（配置与命令行）
+对应表述、`CHANGELOG.md`。不改变 `internal/report`/`internal/story` 的包边界——两包仍互不 import，
 `cmd/vmr` 依旧是唯一同时看到两半区的组合根。
 
 | 任务 | 说明 | 验收标准 |
@@ -180,7 +185,7 @@ JSON 构造路径；`JourneyIndexRow.Category` 的 `CategoryTask` 是空字符�
 | **P9.1** `vmr analyze` 单一入口 + 三级变焦选择器 | 收敛三套独立 flag 集合为一套；`-journey`/`-compare`/`-corpus` 互斥，选中其一时行为等价于今天 `vmr story` 的对应模式（纯 CLI 层路由，不重新实现渲染/聚合逻辑）；不带选择器时是默认套件模式 | 每种现有 `vmr story` 调用方式，在新入口下用等价参数得到逐字节相同的产物；`internal/report`/`internal/story` 的 diff 为零 |
 | **P9.2** 默认渲染范围改为 `category == task` | 复用 P6.3 已算好的候选分类，默认套件模式只对 `task` 类候选做完整物化；`cron`/`heartbeat`/`subagent` 仍进索引（P6.3 的折叠展示不变）但不强制材料化；保留一个显式全量物化开关（沿用现有 `-render-all` 语义） | 全量语料默认路径不再复现 SIGKILL（`§1.30` 闭环）；单日样本产物体积从 164MB 级降到与"仅任务类候选"相称的量级 |
 | **P9.3** `report`/`story` 降级为过渡别名 | 内部直接映射到 `analyze` 的等价调用，不重复实现分析逻辑；每次调用打印一行 stderr 迁移提示（含等价 `vmr analyze` 写法） | 两个子命令仍能跑完并产出与之前一致的结果，且打印提示 |
-| **P9.4** 文档与门面同步 | `docs/UserGuide.md`/`.zh` 改为以 `analyze` 为主入口；`README.md`/`.zh` 补上 `analyze` 示例（当前完全没有，`grep -c` = 0）；`VirtualModelRouter_Design_v4_Analytics.md` §7.9 表述从"新增第三个动词"改为"收敛为一个动词"；`docs/VirtualModelRouter_Design_v4_Strategy.md` §"额度看板"一节点名 `vmr story`/`vmr story -compare` 要求"保持独立高效"，命令拼写变化后措辞需要跟着更新（架构文档 §10.3 已点名这处，不是本次新发现）；`CHANGELOG.md` 记一条 `Changed`（破坏性变更，`report`/`story` 仍可用但已弃用）；同时修正四处写反的 `vmr analyze` 执行顺序说明（`UserGuide.md`/`.zh`、`VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md`，应为 story 先、report 后） | 文档与实现一致；`grep -c 'vmr analyze' README.md` > 0 |
+| **P9.4** 文档与门面同步 | `docs/UserGuide.md`/`.zh` 改为以 `analyze` 为主入口；`README.md`/`.zh` 补上 `analyze` 示例（当前完全没有，`grep -c` = 0）；`VirtualModelRouter_Design_v4_Analytics.md` §4.4（配置与命令行，`vmr analyze` 的描述段落——已核实该文档没有 §7.9，此前误引了 `story_report_architecture_opus-5.md` 的章节号）表述从"新增第三个动词"改为"收敛为一个动词"；`docs/VirtualModelRouter_Design_v4_Strategy.md` §"额度看板"一节点名 `vmr story`/`vmr story -compare` 要求"保持独立高效"，命令拼写变化后措辞需要跟着更新（架构文档 §10.3 已点名这处，不是本次新发现）；`CHANGELOG.md` 记一条 `Changed`（破坏性变更，`report`/`story` 仍可用但已弃用）；同时修正四处写反的 `vmr analyze` 执行顺序说明（`UserGuide.md`/`.zh`、`VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md`，应为 story 先、report 后） | 文档与实现一致；`grep -c 'vmr analyze' README.md` > 0 |
 | **P9.5** 自指流量输入不对称随收敛自然消失 | `KNOWN_ISSUES §1.34` 记录的"`cmd_story.go` 有 `-llm-key` flag 可覆盖、`cmd_report.go` 没有对应 flag、只用 `rc.LLMKey`"这处不对称，在单一 flag 集合下不再是两份独立实现——`-llm-key` 对所有模式统一生效。P9.1 收敛 flag 集合时这条会自然成立，本任务只是确认它成立并在验收里显式核对，不需要额外代码路径 | `vmr analyze -llm-key X`（不论是否带变焦选择器）与自指流量排除口径一致，不再区分"跑的是报表还是叙事"；`KNOWN_ISSUES §1.34` 该条移入已闭环 |
 
 **阶段验收**：一次端到端走查——`vmr analyze` 默认调用、`-journey`、`-compare`、`-corpus` 四种

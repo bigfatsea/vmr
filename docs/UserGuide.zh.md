@@ -369,12 +369,15 @@ jq '.model, .outcome, .attempts[0].norm' vmr-audit-2026-07-08.jsonl
 
 ### 用量与成本报表 vmr report
 
+推荐的入口是下文的 `vmr analyze`——它一次调用就能跑完本节描述的全部内容，外加 [Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)，共用同一个输出目录。`vmr report` 本身仍完全可用，只想单独跑宏观报表时用它——两条路径渲染出的内容逐字节相同，本节描述的产物对两者都成立。
+
 ```bash
 ./vmr report "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # → vmr-report.json + vmr-report.md + vmr-requests.json（明文/.zst 混着传也行）
 ./vmr report                                                          # 同上，完全不带 glob——见下文
+./vmr analyze                                                         # 上面那份报表，外加任务 journey，一次调用搞定——见下文
 ```
 
-**大多数情况不需要指定输入文件。** `vmr report` 和 `vmr story` 都接受零个位置参数：完全不写 glob，两者会自己从 `-c config.yaml` 的 `log_dir` 解析出来（`<log_dir>/vmr-audit-*`，明文 `.jsonl` 和压缩过的 `.jsonl.zst` 都能匹配）——只为读这一个字段而加载一次 config。所以对着你正在跑的这个实例做报表，直接 `./vmr report`（或 `./vmr story`）就够了；上面那种 `$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*` 的写法是留给指向*另一个*目录（别的实例的日志、归档的文件集）或自定义 glob 的场景用的。
+**大多数情况不需要指定输入文件。** `vmr report`、`vmr story`、`vmr analyze` 都接受零个位置参数：完全不写 glob，三者都会自己从 `-c config.yaml` 的 `log_dir` 解析出来（`<log_dir>/vmr-audit-*`，明文 `.jsonl` 和压缩过的 `.jsonl.zst` 都能匹配）——只为读这一个字段而加载一次 config。所以对着你正在跑的这个实例做报表，直接 `./vmr report`（或 `./vmr story`、`./vmr analyze`）就够了；上面那种 `$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*` 的写法是留给指向*另一个*目录（别的实例的日志、归档的文件集）或自定义 glob 的场景用的。
 
 `vmr report` 同时统计 tokens 与字节（上游不回报 usage 时以字节兜底）。
 
@@ -446,20 +449,20 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
 
 ### Agent 任务叙事重建 vmr story
 
-`vmr report` 回答的是"这段时间总共花了多少、整体怎么样"；`vmr story` 读的是同一份审计 JSONL，但回答的是"这一个任务具体发生了什么，一步一步地看"——它把单次 Agent 任务的完整执行过程重建成上下文演化过程：每一轮进了什么新内容、模型拿它做了什么，以及（如果发生过）一次历史压缩具体丢了什么。
+`vmr report` 回答的是"这段时间总共花了多少、整体怎么样"；`vmr story` 读的是同一份审计 JSONL，但回答的是"这一个任务具体发生了什么，一步一步地看"——它把单次 Agent 任务的完整执行过程重建成上下文演化过程：每一轮进了什么新内容、模型拿它做了什么，以及（如果发生过）一次历史压缩具体丢了什么。和 `vmr report` 一样，推荐的入口是 `vmr analyze`——下面每个 `-journey`/`-compare`/`-corpus`/`-render-all` 例子都能原样换成 `vmr analyze <同样的 flag>`，只变焦进那一个视图、不顺带跑宏观报表；`vmr story` 本身仍完全可用。
 
 ```bash
-./vmr story "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"           # 列出候选任务
-./vmr story -journey j-agent-20260716T152238-20260716T153122-42f908fa \
-    "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"                   # 按 id（前缀即可）渲染一个
-./vmr story -journey 'j-agent-*,j-openclaw-*' \
+./vmr story "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"           # 列出候选任务（vmr analyze 没有对应的纯列表模式——见下文）
+./vmr analyze -journey j-agent-20260716T152238-20260716T153122-42f908fa \
+    "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"                   # 按 id（前缀即可）渲染一个——vmr story -journey 行为完全相同
+./vmr analyze -journey 'j-agent-*,j-openclaw-*' \
     "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"                   # 批量渲染两个模式各自匹配到的全部候选
-./vmr story -render-all "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # 一次批量渲染全部候选
-./vmr story -corpus "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"       # 跨全部候选的语料级统计
-./vmr story                                                                       # 和 vmr report 一样的文件解析捷径——不用写 glob
+./vmr analyze -render-all "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"   # 渲染全部候选（task + cron + heartbeat + subagent），不局限于默认套件的 category=task 子集
+./vmr analyze -corpus "$(./vmr check -c config.yaml log)/vmr-audit-*.jsonl*"       # 跨全部候选的语料级统计
+./vmr analyze                                                                       # 默认套件：宏观报表 + 每个 category=task journey，一次调用搞定，不用写 glob
 ```
 
-不带 `-journey` 时列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个传给 `-journey`。`-journey` 接受逗号分隔的多个 token，每个 token 要么是 id/id 前缀，要么是匹配完整 id 的 shell 风格通配符（`*`、`?`、`[...]`）——通配符记得在 shell 里加引号，避免被 shell 自己展开。选择器只解出一个 journey 时直接渲染（也是唯一支持 `-llm-addr` 的形式）；解出不止一个时走 `-render-all` 同一条批处理路径，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/stories/journey-<id>.md`（叙事正文）与 `journey-<id>.json`（同一任务的行为剖面，见下文）——权限与 `details/` 一致（0600/0700），两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
+`vmr story` 不带 `-journey` 时列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个传给 `-journey`（`vmr analyze` 没有对应的纯列表模式：它自己不带选择器时渲染的是默认套件，见下文[命令行与端点参考](#命令行与端点参考)）。`-journey` 接受逗号分隔的多个 token，每个 token 要么是 id/id 前缀，要么是匹配完整 id 的 shell 风格通配符（`*`、`?`、`[...]`）——通配符记得在 shell 里加引号，避免被 shell 自己展开。选择器只解出一个 journey 时直接渲染（也是唯一支持 `-llm-addr` 的形式）；解出不止一个时走 `-render-all` 同一条批处理路径，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/stories/journey-<id>.md`（叙事正文）与 `journey-<id>.json`（同一任务的行为剖面，见下文）——权限与 `details/` 一致（0600/0700），两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
 
 不管带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会额外写一份 `{out}/stories/vmr-stories.json`/`.md`——候选索引（字段和上面终端列表一致，外加每个候选的 chain 涉及哪些文件、渲染过就带上 `journey-<id>.md` 的链接），把以前"跑完只打印到终端、关掉就找不到"的候选列表落了盘。`vmr-stories.json` 的 `files` 字段同时是一份按内容哈希索引的解析缓存——没变过的输入文件直接复用已解析的结果，不用重新扫；变了的或全新的文件才重新解析，Journey 关系图始终基于完整文件集重建，不会因为缓存而漏看任何文件，只是省掉了解析这一步的开销。设计说明见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的 `vmr-stories.json` 一节。
 
@@ -542,9 +545,9 @@ models:
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
-| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details` 才渲染，默认关闭；索引照样带上每条记录算好的文件名链接）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文。`-currency` 决定 $ 列的展示币种，和它实际计算时用的币种相互独立（见上文[成本估算与定价](#成本估算与定价)） |
-| `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | 把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事（见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）；不带参数列出候选任务及其 id，`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"）。`vmr-stories.md` 里的候选按类别分组（`task`/`cron`/`heartbeat`/`subagent`，判据是标题里的内容标记）——`heartbeat`/`subagent` 默认折叠进一个 `<details>` 块，避免真实任务被定时轮询淹没；`vmr-stories.json` 仍然全量列出每个候选。`vmr story -llm-addr` 自身产生的分析流量默认不出现在候选列表里（共用的排除机制见下方 `vmr analyze` 一行） |
-| `vmr analyze [-c config.yaml] [-o dir] [-details] [-include-partial] [-include-self-traffic] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 依次跑 `vmr report` 与 `vmr story -render-all`，共用同一个 `-o`——一次调用即可得到完整可导航的套件（`vmr-report.md` + `vmr-requests.md` + `stories/vmr-stories.md` + 全部已渲染 journey，互相链接），不用担心两条命令的产物落到了不同目录。flag 是两条命令各自 flag 的并集子集；`vmr report`/`vmr story` 本身不变，仍可独立使用。`-include-self-traffic` 关闭两侧默认的自指流量排除——识别规则只算一次（基于 `report.yaml` 的 `llm_key`，与 `api_keys` 认证同一种取尾变换，外加可选的 `self_traffic_client_tags` 显式列表），`vmr report`/`vmr story` 共用同一份结果 |
+| `vmr analyze [-c config.yaml] [-o dir] [-journey <id\|id前缀\|通配符>[,...] \| -compare <id1,id2> \| -corpus] [-render-all] [-details] [-include-partial] [-include-self-traffic] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 唯一的分析入口（P9）：一套 flag 集合、三个互斥的变焦选择器。**不带选择器** —— 默认套件 —— 先跑 story 半区、再跑 report 半区，共用同一个 `-o`：`vmr-report.md` + `vmr-requests.md` + `stories/vmr-stories.md` + 每个已渲染的 `category=task` journey（`cron`/`heartbeat`/`subagent` 候选仍进索引，只是不预先渲染——见下文），全部互相链接。`-render-all` 把默认套件的渲染范围放宽到不分类别的全部候选。**`-journey`**/**`-compare`**/**`-corpus`** 各自只变焦进单个/成对/语料统计这一种视图（各自渲染什么见上文[Agent 任务叙事重建](#agent-任务叙事重建-vmr-story)）——只跑这一个 story 侧视图，不跑宏观报表半区；`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染（只匹配到一个就直接渲染，多个就批处理）。`-render-all` 与任一选择器同传会直接报错（它只是默认套件的渲染范围开关）。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-corpus`、多匹配的 `-journey`，也不支持默认套件——批量场景下按 journey 逐次调用 LLM 没有意义）。`vmr-stories.md` 里的候选按类别分组（`task`/`cron`/`heartbeat`/`subagent`，判据是标题里的内容标记）——`heartbeat`/`subagent` 默认折叠进一个 `<details>` 块，避免真实任务被定时轮询淹没（`cron` 与 `task` 一样留在主表里，只是在默认套件下可能还没渲染）；`vmr-stories.json` 仍然全量列出每个候选。`-include-self-traffic` 关闭两侧默认的自指流量排除——识别规则只算一次（基于 `report.yaml` 的 `llm_key`，与 `api_keys` 认证同一种取尾变换，外加可选的 `self_traffic_client_tags` 显式列表），每种模式共用同一份结果。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 分析；`-lang`/`report.yaml` 控制输出语言，`-currency` 决定 $ 列的展示币种（见上文[成本估算与定价](#成本估算与定价)） |
+| `vmr report [-c config.yaml] [-o dir] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | **已弃用的别名命令**——运行时向 stderr 打印一行迁移提示，行为与之前完全一致：审计日志（明文或 `.zst`）→ 用量统计 + 会话/工具分析 + 逐请求特征（`vmr-requests.json`）+ 错误/截断索引（`vmr-requests-failed.jsonl`/`.md`）+ 详单（`-details` 才渲染，默认关闭；索引照样带上每条记录算好的文件名链接）；只要定价数据能解析出结果就渲染 §2 成本估算章节——内置标准表始终生效，`-c` 指定的 config.yaml 若能读到，会在其上叠加账号覆盖（见上文[成本估算与定价](#成本估算与定价)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 出报表。输出语言默认英文，`-lang` 或 `report.yaml` 的 `language:`（见上文[输出语言](#输出语言)）可切换成中文。`-currency` 决定 $ 列的展示币种，和它实际计算时用的币种相互独立（见上文[成本估算与定价](#成本估算与定价)）。仍完全可用——只想要宏观报表、不需要 `vmr analyze` 顺带渲染任务 journey 时用它 |
+| `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | **已弃用的别名命令**——运行时向 stderr 打印一行迁移提示，行为与之前完全一致：把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事；不带参数列出候选任务及其 id（不同于 `vmr analyze` 不带选择器时会直接渲染默认套件），`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选、不做任何类别过滤——那是 `vmr analyze` 独有的默认值行为），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"）。`vmr-stories.md` 里的候选分类规则与上文 `vmr analyze` 一致。仍完全可用——这里的每个 flag 在 `vmr analyze` 下行为完全相同 |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/admin/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
 | `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-req basename:line`（`vmr-requests.json` 里 `"req"` 字段发布的坐标）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥。用 `-req` 时位置参数（审计文件）可以省略，直接把 `req` 字段贴进命令行就能用：省略时按坐标的 basename 在当前目录和 `-c config.yaml` 的 `log_dir` 下搜索（含 `.zst` 变体），传一个目录则只在该目录下搜索，传具体文件路径仍保留原有的一致性校验。`-ts`/`-line` 仍然要求显式给出文件——它们本身不带可用来搜索的文件名。`-print`（不带 `-provider`）完全跳过请求构造，只打印解析到的记录原始 JSON——是"真的回放"的只读版本 |

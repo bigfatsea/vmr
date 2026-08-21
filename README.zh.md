@@ -69,6 +69,7 @@ Task 1: Search codebase and outline implementation
 ### 柱石 B：运行后审计、叙事与重放
 - **两层真实字节记录**：无伪造记录客户端↔VMR、VMR↔上游双层原始字节。
 - **1-Click 故障重试 (`vmr replay`)**：基于历史日志字节，1-Click 无损重发快速复现线上故障。
+- **统一分析入口 (`vmr analyze`)**：一条命令、一个输出目录——默认一次调用产出完整可导航套件（聚合报表 + 任务 journey），或用 `-journey`/`-compare`/`-corpus` 只变焦进某一个视图。
 - **聚合统计报告 (`vmr report`)**：自动归组为会话 → 任务 → 轮次，标注增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费。
 - **Agent 任务叙事 (`vmr story`)**：把单个任务的完整执行过程还原成逐 Step 的故事——进了什么上下文、模型拿它做了什么、哪一次压缩事件悄悄丢了信息。
 - **行为剖面与分叉点对比 (`vmr story -compare`)**：自动对比 9 项行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
@@ -141,6 +142,14 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
 curl http://127.0.0.1:8800/admin/status
 ```
 </details>
+
+### 4. 分析
+
+```bash
+./vmr analyze -c config.yaml   # 一次调用、一个输出目录：聚合报表 + 每个任务 journey，互相链接
+```
+
+`-journey <id>`/`-compare id1,id2`/`-corpus` 可以只变焦进单个任务叙事、一次成对行为对比，或语料级统计，而不是默认的完整套件。
 
 更多细节见 **[用户指南](docs/UserGuide.zh.md)**。
 

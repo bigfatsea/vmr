@@ -245,6 +245,156 @@ func setupDetailWriter(outDir string, detailsOn bool, lang i18n.Lang, tw io.Writ
 	return dw, detailDir, dw.Submit, nil
 }
 
+// reportRunOpts bundles vmr report's already-resolved parameters — every
+// value cmdReport itself derives from its own flags/report.yaml before the
+// pipeline in runReport starts doing anything. Factored out (P9.1) so
+// cmdAnalyze can drive the exact same pipeline from its own unified flag
+// set's resolution, instead of the pre-P9 approach of re-serializing
+// resolved values into a []string and having cmdReport re-parse them.
+type reportRunOpts struct {
+	configPath        string
+	outDir            string
+	detailsOn         bool
+	lang              i18n.Lang
+	displayCCY        string
+	exchangeRate      map[string]float64
+	excludeClientTags map[string]bool
+}
+
+// runReport executes vmr report's full pipeline — session analysis,
+// aggregation, pricing/quota resolution, and every derived file it writes
+// (vmr-report.{json,md}, details/*, vmr-requests*.{json,md,jsonl}) — against
+// already-resolved opts. This is the same pipeline cmdReport's own body ran
+// inline before P9.1; the split has no behavior change of its own, only a
+// different caller (cmdAnalyze, see cmd_analyze.go) can now reach it without
+// going through vmr report's own flag.FlagSet.
+func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
+	// Single config.Load, shared by buildPricing and
+	// buildProviderQuotas below — see either function's own doc comment for
+	// why splitting this into two independent loads would be a consistency
+	// bug (a config edit landing between them), not just a wasted read. A
+	// load failure here is NOT fatal to `vmr report`: both callees degrade
+	// independently (pricing falls back to the embedded standard table;
+	// the quota section simply doesn't render) — see cfgErr's threading
+	// below, never returned as this function's own error.
+	cfg, cfgErr := config.Load(opts.configPath)
+	if cfgErr != nil {
+		// One unified warning for both degrade paths — buildPricing
+		// and buildProviderQuotas used to each print their own near-
+		// duplicate of this, so a bare-logs `vmr report` run reliably saw
+		// two warnings naming the same unreadable file.
+		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides), §2.5 renders without quota references\n", opts.configPath, cfgErr)
+	}
+
+	pricingSrc, pricingInfo := buildPricing(cfg, cfgErr, opts.configPath, tw, opts.displayCCY, opts.exchangeRate)
+
+	// 0o700/0o600: report outputs embed full conversation bodies from the
+	// 0600 audit files - the derived copies must not loosen that. Created
+	// up front now (used to happen after Build succeeded): the detail
+	// writer below needs its output directory to exist before Build's
+	// aggregation pass starts feeding it records, since detail rendering
+	// now happens inside that same pass instead of as a separate step
+	// afterward.
+	if err := os.MkdirAll(opts.outDir, 0o700); err != nil {
+		return err
+	}
+
+	dw, detailDir, onRecord, err := setupDetailWriter(opts.outDir, opts.detailsOn, opts.lang, tw)
+	if err != nil {
+		return err
+	}
+
+	// The gap between this line's timestamp and the first "[1/N]" line below
+	// is session analysis (AnalyzeSessions) — a full, currently silent pass
+	// over every input file that Build() always runs before its own
+	// per-file aggregation loop starts printing. priorCache (from
+	// {outDir}/.parse-cache, shared with `vmr story` — see
+	// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+	// section) lets that pass skip re-parsing/re-hashing any input file
+	// whose content hasn't changed.
+	reqPath := filepath.Join(opts.outDir, "vmr-requests.json")
+	cacheDir := filepath.Join(opts.outDir, ".parse-cache")
+	priorCache := ctxgraph.LoadCacheDir(cacheDir)
+	now := time.Now()
+	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, opts.configPath, tw, now)
+	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
+	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas, opts.excludeClientTags)
+	if err != nil {
+		return err
+	}
+	// Name the live-quota counter's own source path in the report, and
+	// flag when every input audit log lies outside this instance's log_dir
+	// — the one-machine variant of "the live column may be from a different
+	// instance than the logs being analyzed" that can happen today (copying
+	// a colleague's audit logs onto a machine with its own healthy
+	// vmr-quota.json). Only meaningful when the sub-table actually has
+	// something to render.
+	if quotaJSONPath != "" && len(rep.ProviderQuotas) > 0 {
+		rep.Meta.QuotaJSONPath = quotaJSONPath
+		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
+	}
+	rep.Meta.DetailsEnabled = opts.detailsOn
+	report.LocalizeEfficiency(rep, opts.lang)
+	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
+	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
+	if err := report.WriteJSON(rep, jsonPath); err != nil {
+		return err
+	}
+	storiesLink, lineageToJourney := loadStoriesLink(opts.outDir)
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink)), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
+	fmt.Fprintf(tw, "%s\n", jsonPath)
+	fmt.Fprintf(tw, "%s\n", mdPath)
+
+	if dw != nil {
+		n, err := dw.Close()
+		if err != nil {
+			return fmt.Errorf("details: %w", err)
+		}
+		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
+	}
+
+	// Requests index (+ per-tag siblings) + json (data only — the parse
+	// cache is persisted separately, into cacheDir, right below).
+	rows := rep.RequestRows()
+	nReq, err := report.WriteRequestsJSON(rows, reqPath)
+	if err != nil {
+		return fmt.Errorf("requests export: %w", err)
+	}
+	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
+	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
+		return fmt.Errorf("parse cache: %w", err)
+	}
+	if err := report.WriteRequestsIndex(rep, sess, opts.outDir, opts.lang, lineageToJourney, opts.detailsOn); err != nil {
+		return fmt.Errorf("requests index: %w", err)
+	}
+	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests.md"))
+
+	// Failed-requests index: a dedicated error-analysis view (outcome ==
+	// error|canceled, plus ok-but-truncated), each row linking to its
+	// details/*.md. Purely additive — every other report/requests output
+	// above is unaffected and still lists these same failed requests
+	// inline as before.
+	failedRows := report.FailedRequestRows(rows)
+	failedJSONLPath := filepath.Join(opts.outDir, "vmr-requests-failed.jsonl")
+	nFailed, err := report.WriteRequestsJSONL(failedRows, failedJSONLPath)
+	if err != nil {
+		return fmt.Errorf("failed-requests export: %w", err)
+	}
+	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
+	if err := report.WriteFailedIndex(rows, opts.outDir, opts.lang, opts.detailsOn); err != nil {
+		return fmt.Errorf("failed-requests index: %w", err)
+	}
+	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests-failed.md"))
+	return nil
+}
+
+// cmdReport is `vmr report`'s standalone flag set — kept fully independent
+// (see P9.3, cmd_analyze.go's own doc comment): its flags, defaults, and
+// output are unchanged from before the CLI convergence, it just now hands
+// off to the shared runReport pipeline instead of running it inline.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block) — see PricingTable's doc comment for the no-config.yaml degrade")
@@ -275,126 +425,23 @@ func cmdReport(args []string) error {
 	if !*includeSelfTraffic {
 		excludeClientTags = selfTrafficExcludeTags(rc.LLMKey, rc.SelfTrafficClientTags)
 	}
-
-	// Single config.Load, shared by buildPricing and
-	// buildProviderQuotas below — see either function's own doc comment for
-	// why splitting this into two independent loads would be a consistency
-	// bug (a config edit landing between them), not just a wasted read. A
-	// load failure here is NOT fatal to `vmr report`: both callees degrade
-	// independently (pricing falls back to the embedded standard table;
-	// the quota section simply doesn't render) — see cfgErr's threading
-	// below, never returned as this function's own error.
-	cfg, cfgErr := config.Load(*configPath)
-	if cfgErr != nil {
-		// One unified warning for both degrade paths — buildPricing
-		// and buildProviderQuotas used to each print their own near-
-		// duplicate of this, so a bare-logs `vmr report` run reliably saw
-		// two warnings naming the same unreadable file.
-		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides), §2.5 renders without quota references\n", *configPath, cfgErr)
-	}
-
 	displayCCY := resolveString(*currencyFlag, rc.Currency, "")
-	pricingSrc, pricingInfo := buildPricing(cfg, cfgErr, *configPath, tw, displayCCY, rc.ExchangeRate)
 
-	// 0o700/0o600: report outputs embed full conversation bodies from the
-	// 0600 audit files - the derived copies must not loosen that. Created
-	// up front now (used to happen after Build succeeded): the detail
-	// writer below needs its output directory to exist before Build's
-	// aggregation pass starts feeding it records, since detail rendering
-	// now happens inside that same pass instead of as a separate step
-	// afterward.
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
-		return err
-	}
-
-	dw, detailDir, onRecord, err := setupDetailWriter(outDir, detailsOn, lang, tw)
-	if err != nil {
-		return err
-	}
-
-	// The gap between this line's timestamp and the first "[1/N]" line below
-	// is session analysis (AnalyzeSessions) — a full, currently silent pass
-	// over every input file that Build() always runs before its own
-	// per-file aggregation loop starts printing. priorCache (from
-	// {outDir}/.parse-cache, shared with `vmr story` — see
-	// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
-	// section) lets that pass skip re-parsing/re-hashing any input file
-	// whose content hasn't changed.
-	reqPath := filepath.Join(outDir, "vmr-requests.json")
-	cacheDir := filepath.Join(outDir, ".parse-cache")
-	priorCache := ctxgraph.LoadCacheDir(cacheDir)
-	now := time.Now()
-	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, *configPath, tw, now)
-	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
-	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas, excludeClientTags)
-	if err != nil {
-		return err
-	}
-	// Name the live-quota counter's own source path in the report, and
-	// flag when every input audit log lies outside this instance's log_dir
-	// — the one-machine variant of "the live column may be from a different
-	// instance than the logs being analyzed" that can happen today (copying
-	// a colleague's audit logs onto a machine with its own healthy
-	// vmr-quota.json). Only meaningful when the sub-table actually has
-	// something to render.
-	if quotaJSONPath != "" && len(rep.ProviderQuotas) > 0 {
-		rep.Meta.QuotaJSONPath = quotaJSONPath
-		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
-	}
-	rep.Meta.DetailsEnabled = detailsOn
-	report.LocalizeEfficiency(rep, lang)
-	jsonPath := filepath.Join(outDir, "vmr-report.json")
-	mdPath := filepath.Join(outDir, "vmr-report.md")
-	if err := report.WriteJSON(rep, jsonPath); err != nil {
-		return err
-	}
-	storiesLink, lineageToJourney := loadStoriesLink(outDir)
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, lang, storiesLink)), 0o600); err != nil {
-		return err
-	}
-	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
-	fmt.Fprintf(tw, "%s\n", jsonPath)
-	fmt.Fprintf(tw, "%s\n", mdPath)
-
-	if dw != nil {
-		n, err := dw.Close()
-		if err != nil {
-			return fmt.Errorf("details: %w", err)
-		}
-		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
-	}
-
-	// Requests index (+ per-tag siblings) + json (data only — the parse
-	// cache is persisted separately, into cacheDir, right below).
-	rows := rep.RequestRows()
-	nReq, err := report.WriteRequestsJSON(rows, reqPath)
-	if err != nil {
-		return fmt.Errorf("requests export: %w", err)
-	}
-	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
-	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
-		return fmt.Errorf("parse cache: %w", err)
-	}
-	if err := report.WriteRequestsIndex(rep, sess, outDir, lang, lineageToJourney, detailsOn); err != nil {
-		return fmt.Errorf("requests index: %w", err)
-	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests.md"))
-
-	// Failed-requests index: a dedicated error-analysis view (outcome ==
-	// error|canceled, plus ok-but-truncated), each row linking to its
-	// details/*.md. Purely additive — every other report/requests output
-	// above is unaffected and still lists these same failed requests
-	// inline as before.
-	failedRows := report.FailedRequestRows(rows)
-	failedJSONLPath := filepath.Join(outDir, "vmr-requests-failed.jsonl")
-	nFailed, err := report.WriteRequestsJSONL(failedRows, failedJSONLPath)
-	if err != nil {
-		return fmt.Errorf("failed-requests export: %w", err)
-	}
-	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, outDir, lang, detailsOn); err != nil {
-		return fmt.Errorf("failed-requests index: %w", err)
-	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(outDir, "vmr-requests-failed.md"))
-	return nil
+	// Deliberately does NOT say "an alias for vmr analyze" — vmr analyze's
+	// default has no report-only mode (it also renders task journeys), so
+	// a user who took that literally and switched commands would see
+	// different output/timing than they expected. The honest framing is
+	// "still fully supported, analyze is the recommended default for a
+	// navigable full suite" (independent review, 2026-08-21 — see this
+	// file's P9 ActionPlan §4.3's "执行记录" for why the wording changed).
+	fmt.Fprintln(os.Stderr, "vmr report: deprecated alias — `vmr analyze` now produces the full navigable suite (macro report + task journeys) from a single call; if you only want the macro report, `vmr report` remains fully supported. See `vmr analyze -h`.")
+	return runReport(paths, tw, reportRunOpts{
+		configPath:        *configPath,
+		outDir:            outDir,
+		detailsOn:         detailsOn,
+		lang:              lang,
+		displayCCY:        displayCCY,
+		exchangeRate:      rc.ExchangeRate,
+		excludeClientTags: excludeClientTags,
+	})
 }

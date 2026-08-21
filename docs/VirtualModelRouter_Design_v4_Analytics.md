@@ -486,21 +486,49 @@ self_traffic_client_tags: []   # 两条命令共用，P6.4——额外排除的�
 
 `llm_cache_dir` 是唯一没有内建默认值的字段——早期实现里它硬编码成 `{output}/stories/.llm-cache`，只要开了 `-llm-addr` 就自动落盘缓存；现在改成两处（flag、`report.yaml`）都不设就完全不缓存，缓存目录必须是用户显式点名的地方，不再有隐式路径。
 
-**自指流量排除**（P6.4）：`vmr story -llm-addr` 的解读调用经 VMR 自身路由回流进审计日志，混进去的
+**自指流量排除**（P6.4）：`vmr analyze -llm-addr` 的解读调用经 VMR 自身路由回流进审计日志，混进去的
 token/成本是分析行为本身的开销，不是被分析工作负载的一部分。识别规则只算一次，放在 `cmd/vmr`
 组合根（`selftraffic.go`）：`audit.KeyTag(llm_key)`——跟 `api_keys` 认证给每个 key 打标签用的
 是同一个取尾变换，所以自然算出自指流量在审计日志里会留下的那个 `client_key_tag`，不需要用户
 另外配置。`self_traffic_client_tags` 只在"自指流量用了另一个、已经轮换掉的历史凭证"这种边缘场景
-才需要填，多数部署留空即可。`vmr report`/`vmr story` 各自默认排除，`-include-self-traffic`
-关闭；`vmr-report.json` 的 `meta.self_traffic_excluded` 如实记录排除了多少条。
+才需要填，多数部署留空即可。每种模式（默认套件、`-journey`、`-compare`、`-corpus`）都默认排除，
+`-include-self-traffic` 关闭；`vmr-report.json` 的 `meta.self_traffic_excluded` 如实记录排除了
+多少条。`vmr report`/`vmr story` 两个过渡别名各自保留自己原来的排除口径不变（P9.5 之前，
+`cmd_report.go` 没有 `-llm-key` flag，只读 `report.yaml` 的 `llm_key`；这处输入不对称只在统一
+入口 `vmr analyze` 下自然消失，见下）。
 
-**`vmr analyze`**（P6.5）：一次调用依次跑 `vmr report`、`vmr story -render-all`，共用同一个 `-o`，
-产出完整互链的套件——`vmr report`/`vmr story` 各自的调用形状不变，`analyze` 只是 `cmd/vmr`
-组合根里的第三个入口，不改变两个 internal 包互不 import 的边界。刻意没有做"一次扫描、一份缓存、
-一次建图"的深度合并：P3 之后两条命令共用同一个内容哈希分片的 `.parse-cache/`，`analyze` 内部
-先跑 `story` 再跑 `report` 时，`report` 那一趟扫描已经是热缓存命中，不是重新解析——真正的单遍
-扫描收益因此有限，而实现成本（把 `AnalyzeSessionsCached` 的扫描与它的图构建拆开，让 `report`/
-`story` 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
+**`vmr analyze`**（P9，取代 P6.5 的临时实现）：单一分析入口，一套 flag 集合是 `vmr report`/
+`vmr story` 曾经各自拥有的 flag 的并集。`-journey`/`-compare`/`-corpus` 三个互斥的变焦选择器
+分别路由进单任务叙事、成对对比、语料统计——选中其一时**只跑 story 半区那一个视图，不跑宏观报表**
+（等价于以前单独跑 `vmr story` 的对应模式）；不带选择器是默认套件模式，先跑 story 半区、再跑
+report 半区，共用同一个 `-o`，产出完整互链的套件。默认套件只物化 `category == task` 的候选
+journey（P9.2，见下方"默认渲染范围"）；`-render-all` 是唯一在默认套件下才有意义的额外 flag，
+放宽到物化全部候选，和任一选择器同传会直接报错——它是渲染范围开关，不是第四个选择器。
+
+`vmr report`/`vmr story` 降级为过渡别名：仍是独立的 `flag.NewFlagSet`、独立的默认值、产出与
+收敛前逐字节相同，调用时向 stderr 打印一行迁移提示，不强制任何人切换。三者在 `cmd/vmr` 内部
+共享同一套执行函数（`runReport`/`setupStoryRun` 及既有的 `renderJourney`/`renderAllJourneys`/
+`compareJourneys`/`corpusStats`），`cmdAnalyze` 本身只做 flag 解析与按选择器路由，不重新实现任何
+渲染或聚合逻辑——`internal/report`/`internal/story` 不因这次收敛发生任何改动，两个 internal 包
+依旧互不 import，`cmd/vmr` 依旧是唯一同时看到两半区的组合根。
+
+**默认渲染范围**（P9.2）：`vmr analyze` 默认套件曾经（P6.5）无条件给 story 半区加
+`-render-all`，全量语料下把每个候选（含定时轮询等噪声类）都渲染成 journey + 详单，实测 34 文件
+语料下会被系统杀死（`KNOWN_ISSUES §1.30`）。现在默认只渲染 `BuildJourneyIndexRow` 已经算出的
+`category == task` 候选（P6.3 的分类器，判据是标题内容标记，不引入新猜测）；`cron`/`heartbeat`/
+`subagent` 候选依旧全量进 `vmr-stories.json`/`.md` 索引——`heartbeat`/`subagent` 按 P6.3 既有
+规则折叠进 `<details>`，`cron` 与 `task` 一样留在主表（只是默认套件下"报告"列显示为未生成）。
+读者可以对某个未渲染的候选单独跑 `vmr analyze -journey <id>` 按需补渲染，或传 `-render-all`
+一次性物化全部——两条路径都是幂等写盘，不产生"哪个批次生成的"这类协调成本。
+
+刻意没有做"一次扫描、一份缓存、一次建图"的深度合并：P3 之后两条命令共用同一个内容哈希分片的
+`.parse-cache/`，`analyze` 内部先跑 story 再跑 report 时，report 那一趟扫描已经是热缓存命中，
+不是重新解析——真正的单遍扫描收益因此有限，而实现成本（把 `AnalyzeSessionsCached` 的扫描与它的
+图构建拆开，让 report/story 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
+
+**顺序不是任意的**：story 半区必须先跑、report 半区后跑——`report.Markdown` 只在渲染时
+`stories/vmr-stories.md` 已存在才会挂链接（`loadStoriesLink`，P6.2a），story 先跑能让这条边
+在**第一次** `vmr analyze` 调用就命中，而不是要等到第二次运行。
 
 默认路径是当前目录下的 `report.yaml`（不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。
 

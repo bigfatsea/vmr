@@ -112,6 +112,6 @@ VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略，但*
 
 ### Analytics 侧：Agent Story 与 Audit 丰富化
 
-1. 保持现有 [`UserGuide.md`](UserGuide.md#agent-task-narratives-vmr-story) 中的 `vmr story` 与 `vmr story -compare` 分析指令独立高效——**不因为 Router 侧引入额度状态就去耦合它**，`ctxgraph`/`chatmsg` 是两侧共用的解析层，`report`/`story` 本身仍是审计日志的只读离线消费者。
+1. 保持现有 [`UserGuide.md`](UserGuide.md#agent-task-narratives-vmr-story) 中 `vmr analyze -journey`/`-compare`（P9 起单一入口下的等价写法，`vmr story`/`vmr story -compare` 作为过渡别名仍可用）这条分析指令独立高效——**不因为 Router 侧引入额度状态就去耦合它**，`ctxgraph`/`chatmsg` 是两侧共用的解析层，`report`/`story` 本身仍是审计日志的只读离线消费者。
 2. 在 `vmr report` 的用量报告中追加基于 Token-Plan 本地额度的消耗进度与预测看板。
 3. 复用现有 `ClientKeyTag`，在 `report`/`story` 中新增按员工/业务线的套餐消耗占比与成本归因视图（见 4.3），把"多人共享调度"的可见性需求用既有数据契约交付，不新增采集机制。
