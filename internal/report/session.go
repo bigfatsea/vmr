@@ -518,8 +518,7 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 // WriteDetails and the requests export agree on links. No batch-order
 // state (the pre-P2 "used" collision-counter map) is needed any more: the
 // name is keyed by this record's own coordinate hash
-// (reqdetail.FileName/ctxgraph.ReqCoord), which is unique on its own — see
-// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.
+// (reqdetail.FileName/ctxgraph.ReqCoord), which is unique on its own.
 func assignNames(recs []*ReqInfo) {
 	for _, r := range recs {
 		r.DetailFile = reqdetail.FileName(r.TS, r.Model, r.realModel, r.Outcome, ctxgraph.ReqCoord(r.Path, r.Line))

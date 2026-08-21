@@ -24,9 +24,8 @@ import (
 // s.PrevManifest (nil at a Lineage's first Step, including a stitch
 // boundary — see its own doc comment on Step) is passed straight through:
 // this is what keeps a page EnsureJourneyDetails writes byte-identical to
-// the one `vmr report -details` would write for the same record, the P2
-// invariant story_report_p5_action_plan_sonnet-5.md §0 (point 2) traces
-// through internal/report/session.go's own per-Lineage "prev" semantics.
+// the one `vmr report -details` would write for the same record, matching
+// internal/report/session.go's own per-Lineage "prev" semantics.
 //
 // A per-Step failure is reported to w, not returned — `vmr story` is a
 // read-only offline analysis tool, and a single record that fails to

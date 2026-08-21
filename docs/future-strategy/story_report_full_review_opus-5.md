@@ -21,10 +21,8 @@
    论证的起点，不是禁止重新论证的封条"——前提变了就要重新提。
 
 复查完成后，另有四份独立审阅报告被逐项核实——三份针对架构落地
-（gpt-5.6-terra / Gemini 3.7 Flash / Sonnet 5），一份针对本轮改动本身
-（`story_report_uncommitted_review_gemini-3.7-flash.md`）。其中经实测确认成立的发现已有机并入
-本文正文与 Package；核实过程与不采纳理由记录在 `story_report_review_triage_opus-5.md`，
-本文只保留结论。第 6 章是基于全部结论编制的后续开发计划。
+（gpt-5.6-terra / Gemini 3.7 Flash / Sonnet 5），一份针对本轮改动本身。其中经实测确认成立的发现已有机并入
+本文正文与 Package，本文只保留结论。第 6 章是基于全部结论编制的后续开发计划。
 
 ### 0.2 复查范围与证据基线
 
@@ -32,7 +30,7 @@
 | --- | --- |
 | 代码基线 | `a4a1e00`（P10 收尾）+ 工作区未提交改动 |
 | Commit 范围 | `b098ca9`(P0) → `a4a1e00`(P10)，共 11 个阶段提交 |
-| 规划文档 | `story_report_architecture_opus-5.md`（方案权威）、`story_report_dev_plan_opus-5.md`（P0–P6）、`story_report_dev_plan_2_sonnet-5.md`（P7–P10） |
+| 规划文档 | `story_report_architecture_opus-5.md`（方案权威，涵盖 P0–P10 落地） |
 | 验证二进制 | 工作区代码 `go build -o <scratchpad>/vmrbin ./cmd/vmr` |
 | 基线健康度 | `go build ./...` / `go test ./...` / `go test ./internal/archtest/...` / `gofmt -l` / `go vet ./...` 全绿 |
 
@@ -489,7 +487,7 @@ P7.1 把这一列的判据定为 `detailsOn`（report 半区自己的 flag），
 
 > 有一种相反的意见值得记下并明确否决：**承认三条稳定入口、去掉 deprecated 叙述**。
 > 它的论据是"实现不完整所以 alias 名不副实"——但这论证的是**应该补完**，不是**应该反悔**。
-> `story_report_dev_plan_2_sonnet-5.md` §1 记载的是用户已拍板"真正收敛为一个入口"，
+> 此前已拍板"真正收敛为一个入口"，
 > 以"实现没做完"为由推翻一次产品决策，方向是反的。
 
 ### 2.5 架构文档自身：四条被实践修正的结论
@@ -695,8 +693,7 @@ cron 有 44 条 ≥10 请求；subagent 更极端——20 条里 16 条 ≥10，
 ### 2.11 复查方法论：四轮验证共享同一个盲点
 
 本次复查之后，另有三份独立审阅报告（gpt-5.6-terra / Gemini 3.7 Flash / Sonnet 5）对同一批
-commit 做了各自的复核。逐项核实的过程与结论记录在 `story_report_review_triage_opus-5.md`。
-其中一条横向观察值得写进本文，因为它解释了前面几乎所有"最重"条目为什么能存活到今天：
+commit 做了各自的复核。其中一条横向观察值得写进本文，因为它解释了前面几乎所有"最重"条目为什么能存活到今天：
 
 **三份独立报告，没有一份测量过默认 `vmr analyze` 的产物体积。**
 

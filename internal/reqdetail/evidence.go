@@ -60,9 +60,8 @@ func leadingSystem(msgs []chatmsg.Message) (leadSys int, text string) {
 // (md5 of the same LeadingSystemText EnsureSysPromptEvidence computes from
 // rec — see ctxgraph.Manifest's doc comment on SysHash). Exported so a
 // caller that only has the hash, not rec — e.g. a spine Step's "→ system
-// prompt" link (story_report_p5_action_plan_sonnet-5.md's P5.3) — can
-// compute the same name without re-deriving this package's private naming
-// convention. sysHash.String()[:8] is exactly contentHash8's output for the
+// prompt" link — can compute the same name without re-deriving this package's
+// private naming convention. sysHash.String()[:8] is exactly contentHash8's output for the
 // same text: both are the hex encoding of the same digest's first 4 bytes.
 func SysPromptEvidenceFileName(sysHash ctxgraph.Hash) string {
 	return "sysprompt-" + sysHash.String()[:8] + ".md"

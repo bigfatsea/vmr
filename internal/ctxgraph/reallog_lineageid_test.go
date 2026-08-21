@@ -14,12 +14,11 @@ import (
 var realLogsGlob = "../../logs/*.jsonl.zst"
 
 // TestRealCorpus_LineageIDHasNoCollisions is a permanent regression guard
-// for the bug an independent review (docs/future-strategy/
-// story_report_p6_action_plan_review_gemini-3.7-flash.md §1.1) caught in
-// LineageID's first implementation: computing it from RootHash alone
-// collided for real, structurally distinct Lineages (confirmed on this
-// exact corpus: 4 collision groups among 1638 Lineages, all recurring
-// cron/heartbeat jobs sharing a byte-identical opening message template).
+// for a bug caught in LineageID's first implementation: computing it from
+// RootHash alone collided for real, structurally distinct Lineages
+// (confirmed on this exact corpus: 4 collision groups among 1638 Lineages,
+// all recurring cron/heartbeat jobs sharing a byte-identical opening message
+// template).
 // report's session-grouping maps are keyed by this string (SessionInfo.ID)
 // — a collision there silently merges two unrelated sessions' tokens/
 // requests into one, which no synthetic fixture is likely to reproduce as

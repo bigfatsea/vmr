@@ -2,8 +2,7 @@
 
 // vmr analyze: the single analysis entry point (P9.1, architecture doc
 // §7.9's target model, superseding the P6.5 "third verb" interim state —
-// see the CHANGELOG and docs/future-strategy/story_report_dev_plan_2_sonnet-5.md
-// P9 for the full before/after). One flag set, the union of what `vmr
+// see the CHANGELOG for the full before/after). One flag set, the union of what `vmr
 // report`/`vmr story` each had; three mutually exclusive zoom selectors
 // (-journey/-compare/-corpus) route into exactly the single/pairwise/corpus
 // view `vmr story` already renders for that selector — no selector means

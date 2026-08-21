@@ -80,8 +80,7 @@ type JourneyIndexRow struct {
 // cache used to live here too, as a "files" section — it's since moved to
 // its own content-hash-sharded directory shared with internal/report
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache — one level
-// above storiesDir), so this index stays purely human-scale (see
-// docs/future-strategy/story_report_p3_action_plan_sonnet-5.md batch D).
+// above storiesDir), so this index stays purely human-scale.
 type StoryIndex struct {
 	Journeys []JourneyIndexRow `json:"journeys"`
 	// Cache is this run's own ScanCached result, carried on StoryIndex

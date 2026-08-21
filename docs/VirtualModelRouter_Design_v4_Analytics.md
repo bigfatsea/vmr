@@ -88,7 +88,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 ### 2.5 逐请求详单与索引
 
-每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 的证据层瘦身，`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 A）。**渲染默认关闭**（`-details`，内置默认 `false`）——`vmr-requests.json`/`.md` 的每一行始终带着这条记录的详单文件名（`internal/reqdetail.FileName`，从记录自身的时间戳/模型/结果与坐标短哈希算出，不依赖文件是否已经生成），显式传 `-details` 才会把这一批文件全部渲染出来。渲染入口是 `internal/reqdetail.EnsureRendered`：目标文件已存在就跳过（`report`/`story` 任意调用方都可能对同一条记录发出请求——P5 落地后 `vmr story` 的决策脊柱正是这样一个调用方，见 §3.5b——坐标命名保证同名文件必然是同一份内容，跳过是正确的短路而不是近似），否则渲染后走临时文件+改名写入，不会在进程被杀时留下半截文件。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调，`-details` 关闭时这个回调是 `nil`），不再单独扫一遍；`vmr story` 侧由 `internal/story.EnsureJourneyDetails`驱动同一个 `EnsureRendered`，只材料化被渲染 Journey 自己的 Step 集合，不是全语料。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
+每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 阶段的证据层瘦身）。**渲染默认关闭**（`-details`，内置默认 `false`）——`vmr-requests.json`/`.md` 的每一行始终带着这条记录的详单文件名（`internal/reqdetail.FileName`，从记录自身的时间戳/模型/结果与坐标短哈希算出，不依赖文件是否已经生成），显式传 `-details` 才会把这一批文件全部渲染出来。渲染入口是 `internal/reqdetail.EnsureRendered`：目标文件已存在就跳过（`report`/`story` 任意调用方都可能对同一条记录发出请求——P5 落地后 `vmr story` 的决策脊柱正是这样一个调用方，见 §3.5b——坐标命名保证同名文件必然是同一份内容，跳过是正确的短路而不是近似），否则渲染后走临时文件+改名写入，不会在进程被杀时留下半截文件。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调，`-details` 关闭时这个回调是 `nil`），不再单独扫一遍；`vmr story` 侧由 `internal/story.EnsureJourneyDetails`驱动同一个 `EnsureRendered`，只材料化被渲染 Journey 自己的 Step 集合，不是全语料。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 
@@ -96,8 +96,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 字段是原来 `.jsonl` 每行一条的 `RequestRow` 列表。解析缓存不再嵌在这个文件里——`files` 段已经拆到
 独立的 `{outDir}/.parse-cache/<filehash>.json` 分片目录（`internal/ctxgraph` 的
 `LoadCacheDir`/`SaveCacheDir`），与 `internal/story` 的 `vmr-stories.json`（§3.4）共用同一个目录，
-索引文件本身回到人可读的规模（P3 的证据层瘦身，见
-`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 D）。缓存条目现在也不再只装
+索引文件本身回到人可读的规模（见 P3 阶段的证据层瘦身）。缓存条目现在也不再只装
 manifest 这一半：`AnalyzeSessionsCached` 把它喂给 `ctxgraph.ScanCached`（文件内容哈希 + schema
 版本都没变就跳过 `BuildManifest` 的 JSON 解析+逐消息哈希，复用缓存里的 Manifest），`Build`
 （`aggregate.go`）自己的第二遍扫描（每请求解析，产出 `ReqInfo`/`RequestRow` 那一趟）现在也查同一份
@@ -205,8 +204,7 @@ vmr story -corpus [-o dir] [file|glob]...
 **`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段，每行还带 `lineages`——该 Journey 链上每条 Lineage 的内容寻址 id，供 `report` 侧按集合成员关系 join，见上文会话分组一节；以及 `category`，见下）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。**候选分类**（P6.3，`classifyJourney`）：按标题里的内容标记把候选分成 `task`/`cron`/`heartbeat`/`subagent` 四类（`[cron:...]` 前缀、`[OpenClaw heartbeat poll]`/`[Subagent Context]` 子串——三个字面量拼法已用真实语料核实，不是照抄架构讨论稿的示例），不引入轮数之类的间接推断。`vmr-stories.md` 默认展开 `task`/`cron`，把 `heartbeat`/`subagent` 折进一个 `<details>` 块（真实语料：477 个候选里 127 个是这两类噪声）；`vmr-stories.json` 照常全量输出，不做取舍。
 
 解析缓存不嵌在这个文件里：`{outDir}/.parse-cache/<filehash>.json`，一个输入文件一个分片，与
-`vmr-requests.json`（§2.5）共用同一个目录（P3 的证据层瘦身，见
-`docs/future-strategy/story_report_p3_action_plan_sonnet-5.md` 批 D）。分片装的是
+`vmr-requests.json`（§2.5）共用同一个目录（见 P3 阶段的证据层瘦身）。分片装的是
 `ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按
 `Path`/`Line` 回原始审计文件按需取，缓存本身体积很小），外加 schema 版本戳。下一次运行先加载这份
 缓存，对每个输入文件重新算一次内容哈希（`ctxgraph.HashFile`，对磁盘上原始字节做 sha256，不关心
@@ -424,8 +422,7 @@ type EfficiencyText struct {
 配套决定的局部改动；`compare-*.json`/`vmr-report.json` 曾经维持相反的规则（叙述字段固定英文），
 两条规则在同一个项目里并存过一段时间，登记在 `docs/KNOWN_ISSUES_sonnet-5.md` 曾经的 `§1.19`。
 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md` 论证了统一方向并给出实施大纲，
-`docs/future-strategy/story_report_p8_action_plan_sonnet-5.md`（P8 阶段）按该方案落地，把
-`compare-*.json`/`vmr-report.json` 也改成跟随 `-lang`，本节正文回填的就是落地后的最终状态。
+P8 阶段按该方案落地，把 `compare-*.json`/`vmr-report.json` 也改成跟随 `-lang`，本节正文回填的就是落地后的最终状态。
 
 两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构、以及各自函数签名要不要动
 的取舍不同：
@@ -543,7 +540,7 @@ journey（P9.2，见下方"默认渲染范围"）；`-render-all` 是唯一在�
 逐文件核对"这个字符串是不是真的被 i18n 覆盖了"时，发现三类设计阶段的文本盘点漏掉的真实硬编码中文，全部已修复——发现方式一致：不是重读设计文档，而是迁移完每个文件后跑 `grep -P '[\x{4e00}-\x{9fff}]'` 对该文件独立复查一遍，全部迁移完成后又做了一次全仓库级扫描：
 
 1. `truncCell`/`renderMessageSection`（详单渲染的 Markdown 原语，P2 阶段随详单渲染整体下沉到
-   `internal/reqdetail`——见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）——
+   `internal/reqdetail`）——
    详单页表格截断提示（"共 %d 字符"）和消息占位符（"(空)"）当时被归类成"纯格式化助手函数"，没算进
    文案盘点；现在接收 `t i18n.DetailText` 参数。
 2. `internal/report/pricing.go` 的 `Disclaimer()`——定价免责声明是 `Pricing` 类型的一个方法，直接拼接中文字符串，不在任何一个 section 文件里，盘点时被漏掉；现在签名是 `Disclaimer(lang i18n.Lang) string`。

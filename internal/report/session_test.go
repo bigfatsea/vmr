@@ -339,8 +339,7 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 	// The r3 detail file carries the delta section (previous-turn link +
 	// increment highlight), computed from ctxgraph.Classify against its
 	// lineage predecessor's Manifest — but deliberately NOT a
-	// "Session s01 / Task t02" position line: P2 cut that (see
-	// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3) —
+	// "Session s01 / Task t02" position line:
 	// a leaf detail page doesn't know its position in report's session/task
 	// tree, only whoever links to it (a requests-index row, a spine step)
 	// does, and run-scoped session/task numbers would make the SAME

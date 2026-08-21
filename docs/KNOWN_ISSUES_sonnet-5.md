@@ -91,8 +91,7 @@
 - **`internal/report/detail.go` 那一条已闭环**：P2 阶段（详单渲染下沉为 `internal/reqdetail`）把它从
   1047/1150（91%，四项正交职责混在一个文件）拆成了 286 行的薄封装层（worker pool 调度 +
   `ReqInfo`→`reqdetail` 的参数翻译），渲染/字段提取/diffing 三项职责随之下沉到
-  `internal/reqdetail` 的独立文件——与本条早先"自然的拆法是三分"的预判一致。见
-  `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`。
+  `internal/reqdetail` 的独立文件——与本条早先"自然的拆法是三分"的预判一致。
 
 ### 1.6 [低] §2.5 表格的标记符号已达四个
 
@@ -193,7 +192,7 @@
 - **触发条件**：决定投入时，先补一套对等的 cold/warm 一致性测试（参照
   `TestBuildCached_WarmMatchesBuild`/`TestScanFiles_CacheHitNeverOpensFile` 的模式）再动手，不要
   只凭"结果看起来对"就上线。
-- **登记来源**：2026-08-20 P3 批 D（`story_report_p3_action_plan_sonnet-5.md`）执行期间，为验证
+- **登记来源**：2026-08-20 P3 批 D 执行期间，为验证
   P3.6 缓存收益在真实语料上的实际效果（34 文件/177MB 压缩语料）时发现——原计划预期热缓存降到
   个位数秒，实测 16.2s，差距诊断到这一遍身上。
 
@@ -238,8 +237,7 @@
 - **可能方案**：`structure` 内部加一个 `schema_version int` 字段（或复用 P4.3 尚待定的 JSON 语言
   策略字段一并设计），成本接近零，但**改在这一次新增字段时最便宜**——现在不加，以后每加一版都要
   多考虑一层"没有版本戳时怎么判断"。
-- **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
-  §3 M3）提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
+- **登记来源**：2026-08-20，P4 独立评审提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
 
 ### 1.35 [高] 证据层的"默认按需、体积与信息量相称"纪律在 `vmr analyze` 上从未成立
 

@@ -1,7 +1,6 @@
 // Ver 2026-08-20, by Sonnet 5
 
-// Regression coverage for Step.PrevManifest's stitch-boundary rule (P5.2,
-// see story_report_p5_action_plan_sonnet-5.md §0 point 2 and §2.2 step 1):
+// Regression coverage for Step.PrevManifest's stitch-boundary rule:
 // it must be nil at a Lineage's first Step, INCLUDING a stitch boundary —
 // not the predecessor lineage's tail Manifest, even though buildFrom
 // computes and uses that value locally for sysChanged/CompactionInfo. This

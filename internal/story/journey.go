@@ -90,7 +90,7 @@ type Step struct {
 	// ReqInfo.Parent == nil on that side — this field exists so
 	// reqdetail.EnsureRendered's "prev" argument can agree with report's,
 	// keeping the two commands' generated detail pages byte-identical for
-	// the same record (see story_report_p5_action_plan_sonnet-5.md §0).
+	// the same record.
 	PrevManifest *ctxgraph.Manifest
 	// StitchEdge is non-nil exactly when this Step is the first manifest of
 	// a non-first Lineage in the Journey's Chain — the evidence

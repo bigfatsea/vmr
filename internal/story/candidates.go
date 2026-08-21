@@ -22,13 +22,11 @@ var errNilProfile = errors.New("story: prof is nil")
 // classifyJourney tags a candidate Journey by structural signals in its
 // already-derived title alone (P6.3) — it does not re-scan message
 // content or consult turn count. Turn count was in this task's original
-// plan as a second signal, but real-corpus verification
-// (docs/future-strategy/story_report_p6_action_plan_sonnet-5.md §3.1's
-// mandated check, run against the full local logs/ corpus, 477 candidate
-// Journeys) found title markers alone fully separate cron/heartbeat/
-// subagent from real tasks with zero ambiguity — and a short-but-genuine
-// interaction (a real corpus example: "hi back", 2 turns) would be
-// misclassified as noise by a turn-count heuristic with no supporting
+// plan as a second signal, but real-corpus verification (run against the full
+// local logs/ corpus, 477 candidate Journeys) found title markers alone fully
+// separate cron/heartbeat/subagent from real tasks with zero ambiguity — and
+// a short-but-genuine interaction (a real corpus example: "hi back", 2 turns)
+// would be misclassified as noise by a turn-count heuristic with no supporting
 // evidence it helps. Dropping the unused signal follows the same "don't
 // introduce a guess without evidence" rule the category design itself is
 // built on.

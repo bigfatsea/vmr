@@ -440,11 +440,10 @@ func TestRender_FactsLine(t *testing.T) {
 // timezone (fmtutil.DisplayZone, which defaults to time.Local) — only the
 // record's own embedded offset matters. FileName's implementation simply
 // never references DisplayZone (unlike the pre-P2 detailFileName, which
-// called ts.In(fmtutil.DisplayZone) — see
-// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.3 step 8),
-// so this locks that in by mutating DisplayZone directly, the same way
-// this package's own tests are allowed to (see fmtutil's package doc: zero
-// production writes, only _test.go writes this var).
+// called ts.In(fmtutil.DisplayZone)), so this locks that in by mutating
+// DisplayZone directly, the same way this package's own tests are allowed to
+// (see fmtutil's package doc: zero production writes, only _test.go writes
+// this var).
 func TestFileName_TimezoneIndependent(t *testing.T) {
 	ts := time.Date(2026, 7, 9, 0, 31, 6, 804_000_000, time.FixedZone("CST", 8*3600))
 	req := ctxgraph.ReqCoord("vmr-audit-2026-07-08.jsonl", 42)

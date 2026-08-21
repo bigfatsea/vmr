@@ -8,8 +8,7 @@
 // Manifest) translation, while the actual rendering and naming logic lives
 // in internal/reqdetail — the leaf both this package and internal/story
 // render detail pages through, so a page generated via either package's
-// code path is byte-identical (see reqdetail's package doc and
-// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3).
+// code path is byte-identical (see reqdetail's package doc).
 package report
 
 import (

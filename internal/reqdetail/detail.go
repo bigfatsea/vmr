@@ -11,9 +11,8 @@
 // dialect-aware judgments — NoReply and chat-id extraction): no
 // report.ReqInfo, no session/task position, no cross-record analysis
 // conclusion. That is a deliberate subtraction, not an oversight — see
-// docs/future-strategy/story_report_architecture_opus-5.md §7.6a and
-// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.1's
-// classification table for exactly which fields were cut and why: a leaf
+// docs/future-strategy/story_report_architecture_opus-5.md §7.6a for
+// why these fields were cut: a leaf
 // does not need to know its own position in a tree the caller already
 // renders around it (session id, task id, turn number, the compaction
 // links a report-side text match established) — that context belongs to

@@ -166,15 +166,12 @@ report 聚合阶段才存在的位置坐标——但微观层根本不需要知�
 
 ### 2.2 实测基线
 
-> **P1（commit `30c5159`）、P2（见 `docs/future-strategy/story_report_p2_action_plan_sonnet-5.md`）、
-> P3（见 `docs/future-strategy/story_report_p3_action_plan_sonnet-5.md`）、P4（见
-> `docs/future-strategy/story_report_p4_action_plan_sonnet-5.md`）与 P5（见
-> `docs/future-strategy/story_report_p5_action_plan_sonnet-5.md`）均已完成**：本节下方的数字
+> **P1（commit `30c5159`）、P2、P3、P4 与 P5 均已完成**：本节下方的数字
 > （工具结果 0 条、脊柱 21/22 步、detail 文件名批次碰撞率/本机时区依赖、`details/*.json` 逐字复制、
 > §7.10 的 83.8s/71.8s/1.17× 缓存收益、`journey-<id>.json` = 6,428 字节且"事件流在机读层占 0 字节"、
 > 下方"单条 Journey 报告的构成"表格里 fact-layer 占 68% 体积等）是这五个阶段之前的历史基线，不是
-> 当前状态——保留原文只是为了保留"问题曾经确实存在"的证据链，读者若要了解当前行为，请以五份
-> ActionPlan 的执行记录为准，不要把这里的数字当成现状。P3 批 D 实测的当前数字：同一份 34 文件/
+> 当前状态——保留原文只是为了保留"问题曾经确实存在"的证据链，读者若要了解当前行为，请以各阶段
+> 落地实现为准，不要把这里的数字当成现状。P3 批 D 实测的当前数字：同一份 34 文件/
 > 177MB 压缩语料，冷启动 ~83.8s 不变，热缓存从 71.8s 降到 ~16.2s（收益 1.17×→~5.2×）——尚未达到
 > `vmr story` 的个位数秒量级，差距诊断见 `docs/KNOWN_ISSUES_sonnet-5.md` §1.1/§1.23（`session.go`
 > 的 `collect()`/`analyzeFile` 是报表三趟扫描里唯一仍未接入缓存的一遍）。P4 已给
@@ -189,7 +186,7 @@ report 聚合阶段才存在的位置坐标——但微观层根本不需要知�
 > -details` 对同一条记录（含缝合边界，`prev` 均为 `nil`）生成的详单已用真实语料与自动化测试
 > （`TestEnsureJourneyDetails_MatchesReportDetails`）验证逐字节相同。
 >
-> **P6（见 `docs/future-strategy/story_report_p6_action_plan_sonnet-5.md`）也已完成**：会话身份
+> **P6 也已完成**：会话身份
 > 改为内容寻址（`l-<hash8>`，与 Journey id 同一套 `RootHash` 前缀口径）；导航矩阵六条边补齐
 > （`vmr-report.md`→`stories/vmr-stories.md`、会话行→journey、journey→返回入口、详单→返回索引、
 > report §8 从纯文本提示改为按需读取原语的示例坐标），真实语料端到端走查确认无死链接；
@@ -806,7 +803,7 @@ Findings
 >
 > 唯一剩余的减法是把工具结果也降级为引用（P4 已经在机读层做了这个判断：`ToolCallRef` 不带结果
 > 正文，因为结果本来就作为下一 Step 的 `NewEvents` 存在）——人读层是否跟进是一个独立的可读性
-> vs 体积权衡，留给报告体积真正成为痛点时再决定（`story_report_dev_plan_2_sonnet-5.md` §5 已登记）。
+> vs 体积权衡，留给报告体积真正成为痛点时再决定。
 
 **fact-layer 的处置：删渲染，不留开关。** 有人主张保留一个默认关闭的 `full_transcript` 开关作为
 逃生门，理由是"删掉渲染代码省不了多少维护成本（golden test 已锁住），删掉选项则损失一种阅读模式"。
@@ -1097,7 +1094,7 @@ JSON 侧照常全量输出（机读层不做取舍）。
 >    原样保留——命令数从 2 变成 3。P6 ActionPlan 论证过这个收窄（保留旧入口成本极低、删除不可逆），
 >    但它同时写明"这是一个需要在实现前拍板的决策，建议落地前询问确认"，实际执行时没有走这一步。
 >    ~~**这条至今仍是一个开放决策**~~ **已在 P9 结案（2026-08-21 复查确认）**：用户拍板"真正收敛
->    为一个入口"（`story_report_dev_plan_2_sonnet-5.md` §1），P9.1 落地 `vmr analyze` 为唯一分析
+>    为一个入口"，P9.1 落地 `vmr analyze` 为唯一分析
 >    入口、P9.3 把 `report`/`story` 降级为打印迁移提示的过渡别名。**本表这一行现在成立。**
 >    唯一的遗留是 P9.1 验收标准里的"收敛三套 flag 集合为一套"——实际是新增第四套（`analyze` 的
 >    并集）+ 保留原两套，两个别名各自保留了完整的分派逻辑并已经出现分叉，登记为
@@ -1180,7 +1177,7 @@ JSON 侧照常全量输出（机读层不做取舍）。
 
 ### 7.11 迁移路径
 
-> **落地状态说明**：本节初始设计的 8 个批次已在 `story_report_dev_plan_opus-5.md` 中映射为 **P0～P6 六个执行阶段**，并已于 commit `b098ca9`（P0）至 `2c45a58`（P6）全部完成落地与真实语料验证。下方表格与验收标准保留为设计期依赖论证与历史参照。
+> **落地状态说明**：本节初始设计的 8 个批次已映射为 **P0～P6 六个执行阶段**，并已于 commit `b098ca9`（P0）至 `2c45a58`（P6）全部完成落地与真实语料验证。下方表格与验收标准保留为设计期依赖论证与历史参照。
 
 每批独立可上线，顺序有硬依赖。
 
@@ -1420,12 +1417,10 @@ exemplar 把指标数据点关联回 trace 上下文），不是"必须一键跳
 - `story_report_ux_review_sonnet-5.md`（已归档，不在版本控制范围内）是第一轮 6 项 UX 改动的过程
   记录。
 - 逐条评审记录：`story_report_peer_review_opus-5.md`（已归档，不在版本控制范围内）。
-- **本方案已全部落地**（P0–P9，见 `story_report_dev_plan_opus-5.md`/`story_report_dev_plan_2_sonnet-5.md`
-  与各阶段 ActionPlan 的执行记录）。本节原先在此列出的"若本方案被采纳，需要相应更新的既有条目"
+- **本方案已全部落地**（P0–P9）。本节原先在此列出的"若本方案被采纳，需要相应更新的既有条目"
   清单是落地前的待办快照，写就时尚不知道每一条最终会按原方案落地还是改道——例如清单曾预判
   `KNOWN_ISSUES §1.22` 会"分批实施"，但该条目最终实际处置是"决定不做"。该清单已随各阶段
   ActionPlan 与 `KNOWN_ISSUES §3` 的执行记录逐条兑现或改道，不再需要在这里重复维护；
   `KNOWN_ISSUES_sonnet-5.md` 是当前状态的唯一权威来源，本文不再是它的待办输入。
-- 阶段划分与验收边界见 `docs/future-strategy/story_report_dev_plan_opus-5.md`；
-  每个阶段开工前另行编写该阶段的 ActionPlan，本文不承担执行级细节。
+- 各阶段已全部完成落地，本文不承担执行级细节。
 - 本文**没有修改任何代码或其他文档**。

@@ -7,10 +7,8 @@
 // guarantee internal/report/detail_test.go's TestBuildOnRecordMatchesWriteDetails
 // locks on the report side alone. This is the one place both commands'
 // production entry points (cmdStory/cmdReport) run against the same source
-// file and get diffed, including a stitch-boundary record — the scenario
-// story_report_p5_action_plan_sonnet-5.md §0 (point 2) traces through in
-// detail: Step.PrevManifest must stay nil there, or the two commands would
-// silently disagree.
+// file and get diffed, including a stitch-boundary record: Step.PrevManifest
+// must stay nil there, or the two commands would silently disagree.
 package main
 
 import (

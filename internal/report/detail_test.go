@@ -295,9 +295,8 @@ func TestWriteDetailsByTag(t *testing.T) {
 // (DetailWriter.Submit called inline, one pass over the audit source) must
 // produce byte-identical output (filename AND content) to the old two-pass
 // path (AnalyzeSessions -> a separate WriteDetails pass, an independent
-// second read of the same file). This is also P2's cross-path consistency
-// proof for internal/reqdetail.Render/FileName — see
-// docs/future-strategy/story_report_p2_action_plan_sonnet-5.md §3.3.
+// second read of the same file). This is also the cross-path consistency
+// proof for internal/reqdetail.Render/FileName.
 func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	dir := t.TempDir()
 	records := smallAuditRecords()

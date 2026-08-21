@@ -91,10 +91,8 @@ func TestIngestRecord_NoExclusionByDefault(t *testing.T) {
 	}
 }
 
-// TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak covers a real gap an
-// independent review caught (docs/future-strategy/
-// story_report_p6_action_plan_review_gemini-3.7-flash.md §1.2):
-// buildTools/buildCompactions (§5/§6.7) read straight from
+// TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak covers a regression
+// guard where buildTools/buildCompactions (§5/§6.7) read straight from
 // SessionAnalysis, a separate pass from ingestRecord's own per-record
 // skip — an excluded record's tool declaration or compaction entry used
 // to still surface in those two sections even though Overall/ByClient

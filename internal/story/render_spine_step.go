@@ -218,8 +218,7 @@ func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
 // (spineStepHeader, above) can never reach — reqdetail renders one record
 // plus one prev Manifest, never a full Edit/StitchGraph/Compaction
 // computation — so the decision spine, the one human-readable layer that
-// survives P5.1, is their only remaining home (see
-// story_report_p5_action_plan_sonnet-5.md §0 point 6). Called from both
+// survives P5.1, is their only remaining home. Called from both
 // renderSpineStep and renderSpineBriefStep, right after the header line, so
 // placement is independent of whether the Step happens to have tool calls.
 //

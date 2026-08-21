@@ -1,28 +1,22 @@
 // Ver 2026-08-20, by Sonnet 5
 
 // The Task/Step/Event/ToolCall structural skeleton journey-<id>.json
-// publishes as its "structure" field — story_report_p4_action_plan_sonnet-5.md's
-// P4.1+P4.2. This is assembly, not new computation: everything here already
-// sits on Journey/Step/Event (see journey.go); the judgment call this file
-// makes is the inline-vs-reference boundary (architecture doc §7.4b): a
-// Step's OWN decision content (RespText/Reasoning/tool-call args, plus rule-
-// derived classifications ABOUT content — edit kind, stitch evidence,
+// publishes as its "structure" field (architecture doc §7.4b). This is assembly,
+// not new computation: everything here already sits on Journey/Step/Event
+// (see journey.go); the judgment call this file makes is the inline-vs-reference
+// boundary: a Step's OWN decision content (RespText/Reasoning/tool-call args,
+// plus rule-derived classifications ABOUT content — edit kind, stitch evidence,
 // compaction token/entity counts) is inlined and bounded; an ordinary
 // conversation-history MESSAGE (NewEvents, and a tool call's RESULT text —
 // see ToolCallRef's doc comment for why the result is history, not
 // decision) is a reference only — the audit log is the one place message
 // bodies live, journey-<id>.json is tree, not blob.
 //
-// Two rounds of independent review (story_report_p4_action_plan_review_
-// gemini-3.7-flash.md, story_report_p4_action_plan_review_pi.md) caught real
-// gaps in this file's first draft — most importantly that Edit/StitchEdge/
-// Compaction are GRAPH-level analysis facts with no other machine-readable
-// home (they cannot be recomputed from a single audit record via Req the
-// way NewEvents' text can), and that a tool result is conversation history
-// (it reappears verbatim as the next Step's tool-role NewEvent) rather than
-// this-turn decision content. Both are reflected in the shape below — see
-// story_report_p4_action_plan_sonnet-5.md's execution record for the full
-// account.
+// Edit/StitchEdge/Compaction are GRAPH-level analysis facts with no other
+// machine-readable home (they cannot be recomputed from a single audit record
+// via Req the way NewEvents' text can), and a tool result is conversation
+// history (it reappears verbatim as the next Step's tool-role NewEvent) rather
+// than this-turn decision content. Both are reflected in the shape below.
 package story
 
 import (

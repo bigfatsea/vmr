@@ -38,8 +38,7 @@ import (
 // ctxgraph.FileCache/ScanCached) — it's since moved to its own
 // content-hash-sharded directory shared with internal/story
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache), so this
-// index stays purely human-scale (see
-// docs/future-strategy/story_report_p3_action_plan_sonnet-5.md batch D).
+// index stays purely human-scale.
 // vmr-requests-failed.jsonl stays a plain flat JSONL — it's a filtered
 // dump of Requests, not itself an independent cache.
 type RequestsIndex struct {
