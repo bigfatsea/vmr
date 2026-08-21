@@ -90,8 +90,9 @@ func writeOneDetail(dir, evidenceDir string, lang i18n.Lang, prof taskseg.Profil
 	atomic.AddInt64(n, 1)
 }
 
-// DetailWriter is a bounded worker pool that renders and writes one .md +
-// one .json per submitted record — the reusable half of what used to be
+// DetailWriter is a bounded worker pool that renders and writes one .md per
+// submitted record (the same-named .json copy is gone since P3.1 — see
+// writeOneDetail) — the reusable half of what used to be
 // WriteDetails' own, self-contained implementation. It has two callers now:
 // WriteDetails itself (drives it from its own file-scanning loop, one
 // submit per record, batched per file via a *sync.WaitGroup so its progress

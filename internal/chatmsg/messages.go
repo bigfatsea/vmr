@@ -7,7 +7,8 @@
 // JSON, no dependency on audit/router/config, so both consumers can depend
 // on it without a layering conflict.
 //
-// Relocated from internal/report/render.go + usage.go, where this logic
+// Relocated from what was then internal/report's own renderer (that file
+// has since moved again, to internal/reqdetail/render.go), where this logic
 // used to live as unexported functions only report's own renderer could
 // reach. That move originally landed behind a thin delegation layer in
 // report so its call sites stayed untouched; the layer is gone and every

@@ -9,9 +9,7 @@ core's, and neither is an afterthought to the other.
 - **Routing half** — hides provider, account, key, priority, and failover behind a stable
   virtual model name (`coding`, `agent`, `claude`), with error-aware failover,
   prompt-cache session stickiness, and token-plan quota pacing.
-- **Analytics half** — `vmr report` (aggregate statistics) and `vmr story` (single-task
-  narrative reconstruction): read-only, offline consumers of the routing half's JSONL
-  audit log. Neither is on the request path.
+- **Analytics half** — `vmr analyze` (unified entry point producing the full navigable suite, or zooming into specific views with `-journey`/`-compare`/`-corpus`; `vmr report` and `vmr story` retained as deprecated transition aliases): read-only, offline consumers of the routing half's JSONL audit log. Neither is on the request path.
 
 Three ingress protocols, **never translated into each other** — `POST /v1/chat/completions`
 (OpenAI), `POST /v1/messages` (Anthropic), `POST /v1/responses` (OpenAI Responses). Each
@@ -43,6 +41,7 @@ go build -o vmr ./cmd/vmr
 go test ./...              # add -race for anything touching health/audit/router concurrency
 ./vmr check -c config.yaml # validate config + print effective routing table (no network I/O)
 ./vmr start -c config.yaml # foreground
+./vmr analyze              # full navigable analytics suite (macro report + task journeys)
 ./vmr.sh {start|stop|restart|status|logs}  # dev supervisor; never builds, build first
 ```
 
@@ -58,7 +57,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
 | `jsonscan` | JSON byte-range scan/splice engine: `RewriteModel`/`RewriteStream`/`RewriteRoles` and the structural primitives behind them. Fuzz-tested. A function belongs here only if it needs no specific field or role name — otherwise it belongs in `adapter` |
-| `i18n` | EN/ZH text for every `report`/`story` output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
+| `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, `i18n/story_*.go` next to `internal/story`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 
 Routing half:
 

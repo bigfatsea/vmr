@@ -4,12 +4,23 @@ package chatmsg
 
 // PairingReport summarizes tool_call/tool_result id pairing within one
 // request's raw message list. F9: this causal edge is protocol-given, not
-// inferred — a well-formed request body can never carry
-// a tool_call the model issued without a matching tool_result answering it
-// (the API would reject a continuation that skipped one), so a 100% pairing
-// rate is an invariant of the data, not a heuristic outcome. Covers both
-// protocol shapes: OpenAI's top-level `tool_calls`/`tool_call_id`, and
-// Anthropic's content-part `tool_use`/`tool_result` (`tool_use_id`).
+// inferred — a well-formed request body can never carry a tool_call the
+// model issued without a matching tool_result answering it (the API would
+// reject a continuation that skipped one), so pairing is an invariant of
+// the data, not a heuristic outcome. Covers both protocol shapes: OpenAI's
+// top-level `tool_calls`/`tool_call_id`, and Anthropic's content-part
+// `tool_use`/`tool_result` (`tool_use_id`).
+//
+// The invariant holds on the IDS AS RECORDED, which is not the same as
+// "raw string equality always pairs": the OpenClaw family of clients strips
+// underscores when echoing an id back into the next request's history, so
+// on that traffic exact-string pairing measures 0% while normalized pairing
+// measures 100% (story_report_architecture_opus-5.md §5, verified on five
+// real log files). This checker deliberately does NOT normalize — it is the
+// strict form, used by internal/story's F9 regression test over synthetic
+// fixtures. A caller pairing REAL client traffic wants the two-pass form
+// (exact, then underscore-stripped) internal/story's toolResultsFor
+// implements.
 type PairingReport struct {
 	Calls         int      // total tool_call / tool_use blocks found
 	Results       int      // total tool_call_id / tool_use_id references found

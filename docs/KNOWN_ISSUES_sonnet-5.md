@@ -19,12 +19,19 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**（2026-08-21 P9 收尾后重算）：中危 3 项、低危 14 项，无高危项（另有 1 项已评估决定不做，登记备查，不计入分布）。`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）、`1.30`/`1.32`/`1.33`/`1.34`（P9，CLI 收敛 + 大语料 SIGKILL 根治 + 自指流量输入对称）已全部修复并移入 §3；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
+- **§1 分布**（2026-08-21 全面复查 + 三份独立审阅报告核实后重算）：**高危 3 项**（`1.35`/`1.36` 同属"证据层体积纪律"，`1.41` 是"渲染表示正确性"且是前两项的硬前置）、中危 8 项（含 `[中低]` 2 项）、低危 15 项（另有 1 项已评估决定不做，登记备查，不计入分布）；3 + 8 + 15 = 26，加 `1.27` 共 27 条。`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）、`1.30`/`1.33`/`1.34`（P9）已修复并移入 §3；`1.32` 的闭环判定已在本次复查中**撤回**（见 §3 第 31 项的订正与新登记的 `1.35`）；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
+- **三项高危的性质**：都不是稳定性/安全性缺陷（默认路径仍能正常跑完）。`1.35`/`1.36` 是**派生产物体积比源数据大一个数量级**，且约 93% 的字节是同一批内容的重复拷贝；`1.41` 更严重一格——它产出的不是多余内容而是**错误内容**（同一次 `-lang zh` 运行产出中文报告 + 英文详单；删 `evidence/` 后 45 条链接永久失效），且它是前两项的技术前置。三项都符合 §4 自述的"价值高 + 成本低 + 还在等"这个需要解释的异常形态：修法所需机制全部现成。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
 
 ## 1. 待定与待解决问题
+
+> **标题方括号里的是严重程度（这件事现在有多糟），不是优先级。** 它与 §4 的 ROI
+> （价值 ÷（成本 + 风险）——这件事现在做有多划算）是**两个正交的轴**，不该也不会一致：
+> `1.5`（文件贴行数预算线）严重程度低而 ROI 可以很高，因为它几乎免费；`1.13`（额度看板）
+> 严重程度低而 ROI 中，因为价值高但成本也高。**把两个轴对齐会毁掉信息量**——那正是这里同时保留
+> 两套评级的原因。要排期看 §4，要判断"现在有多糟"看这里。
 
 ### 1.1 [低，已部分闭环] `vmr report` 多文件输入的三趟扫描开销——聚合那一趟已缓存，会话分析那一趟仍未缓存
 
@@ -72,10 +79,14 @@
 
 ### 1.5 [低] 几个文件贴着行数预算线
 
-- **现状（2026-08-20 复核）**：`internal/story/compare.go`(846/850)、`cmd/vmr/cmd_story.go`(**780**/850) 贴线。
-  P6 期间 `cmd_story.go` 又长了 24 行（自指流量过滤、类别分组），余量从 94 行降到 70 行；
-  `compare.go` 未变。趋势方向是收紧的，但仍未触线。
-  处置不变：都已被 `archtest` 的 `file_sizes_test.go` 纳管，超预算会自己举手——预算报警了再拆，
+- **现状（2026-08-21 复核）**：全仓真正贴线的只剩一个——**`internal/config/config.go` 699/700
+  （余量 1 行）**。它原本挂着一条 750 的豁免，本轮随 `detail.go` 的豁免收紧被一并移除：
+  699 < 默认的 700，按豁免表自身的语义就不该有豁免，留着等于预授权 51 行未挣得的增长
+  （正是 `detail.go` 那条 1150 被收紧的同一个理由）。**代价要说清楚：config.go 的下一次增行就会
+  触线**，届时 `archtest` 会要求按职责拆分（如把 provider/model 校验单独成文件）而不是重新加豁免。
+  这是有意留下的响亮失败，不是遗漏。
+  `internal/story/compare.go`(713/850)、`cmd/vmr/cmd_story.go`(773/850) 均受 `archtest` 约束但
+  余量充足，不应再表述为即将触线。处置不变：超预算会自己举手——预算报警了再拆，
   拆完按实测 +15~20% 重新登记，提前拆是替一个会自己举手的问题排队。
 - **`internal/report/detail.go` 那一条已闭环**：P2 阶段（详单渲染下沉为 `internal/reqdetail`）把它从
   1047/1150（91%，四项正交职责混在一个文件）拆成了 286 行的薄封装层（worker pool 调度 +
@@ -230,6 +241,197 @@
 - **登记来源**：2026-08-20，P4 ActionPlan 独立评审（`story_report_p4_action_plan_review_pi.md`
   §3 M3）提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
 
+### 1.35 [高] 证据层的"默认按需、体积与信息量相称"纪律在 `vmr analyze` 上从未成立
+
+- **现状（2026-08-21 实测）**：单日真实语料（322 条记录）默认 `vmr analyze` 产出 **164MB**，
+  其中 `details/` 160MB / 306 份详单——与 P6 复盘记录的数字逐字相同。P9.2 的修法（默认只渲染
+  `category == task` 候选）在该样本上过滤掉 **0 个**候选（6/6 全是 `task`）；P9 自己的全量语料
+  执行记录也显示 task 类占候选数量的 49% 却占 **83.5% 的请求量**，按类别过滤削不掉数据量。
+  全量语料默认路径产出 **3.5GB / 8343 份详单**。
+- **根因**（与 P9.2 的诊断不同）：`cmd/vmr/cmd_story.go` 的 `writeJourneyFile` **无条件**调用
+  `story.EnsureJourneyDetails`，不区分"用户点名下钻一条 journey"与"批量渲染全部候选"。
+  架构文档 §7.5 本来就写明"渲染即生成"的成本与被渲染的链接条数成正比、请求索引不能每行挂链接，
+  但这条边界没有被套用到批量渲染模式上。
+- **`§1.32` 的"已闭环"判定应当撤回**：形态只是从"`analyze` 强制 `-render-all`"换成了"默认渲染
+  全部 task 候选、每步物化"，P9 解决的是它的下游症状（SIGKILL），纪律本身仍未成立。
+- **修法**：`writeJourneyFile` 增加"是否物化详单"入参；单条路径传 true，批量路径传 false，
+  `-details`/`-render-all` 显式要求时传 true。改动面全在 `cmd/vmr`，`internal/*` 零 diff。
+  详单文件名可算、生成幂等——批量模式只挂链接不生成不会产生死链接。
+- **必须同批补一条常驻守卫**：断言默认套件模式产出的 `details/` 文件数为 0（或不超过显式请求数）。
+  这条纪律已经被三次验收系统性绕过（P3.3 只验 `vmr report`、P6.5 验的是导航闭合、P9.2 验的是
+  不再 SIGKILL），共同点是"没有自动检查，每次靠人记得去量"。P4.2 的体积守卫是唯一一条至今没有
+  退化的纪律，也是唯一一条写成了常驻测试的。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.1 / Package A。
+
+### 1.36 [高] 详单内部约 93% 的字节是同一批内容的第二/第三份拷贝
+
+- **现状（2026-08-21 实测，306 份详单 / 152MB）**：
+  - `Raw SSE, full` 折叠块 **62.4MB（41.1%）**——`reqdetail/detail.go` 的
+    `Details(t.RawSSEFull(...), codeFence(body))` 把 `rec.Client.Response.Body` 一字不差地嵌进去；
+  - ① Client → VMR Request 段 82.9MB，其中 **79.2MB（该段的 95.5%、总量的 52%）**位于第一个 `🆕`
+    标记之前，即上一轮详单已经渲染过一遍的历史消息；
+  - 本轮真正新增的内容约 6.7MB（4.4%）。
+- **性质**：与 P3.1 删 `details/*.json` 的论证**逐字同构**（"它是审计记录的逐字复制……有了 `req`
+  坐标，取原文是一次定位而非一次物化"）。架构文档 §7.6c 只砍了 `.json` 那一份，从未审视 `.md`
+  **内部**的两处同性质复制——这是设计期盲区，不是实现走样。
+- **两条修法所需的机制都已在仓库里**：
+  1. Raw SSE 块 → 一行带 `req` 坐标的取用提示（`vmr replay -req COORD -print`，P3.2 已交付）。
+     重组后的模型输出/reasoning/tool_calls 保留——那是解读，不是复制。**立减约 41%**。
+  2. ① 段只渲染 `deltaStart` 之后的消息，历史折叠为一行指向 `renderSessionHeader` **已经在渲染**
+     的 `PrevTurnLink`。`prev == nil`（lineage 首条、缝合边界）仍全文渲染，链条有起点。
+     **再减约 52%**。
+- **必须守住的不变量**：改完后 `vmr report -details` 与 `vmr analyze -journey` 两条路径对同一条
+  记录生成的详单仍须逐字节相同（P2 的核心不变量）。
+- **取舍**：修法 2 让"单份详单自包含"变成"要顺链回溯"。`Manifest.SysHash` 走 evidence 引用的
+  先例已证明这种取舍在证据层里可接受。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.2 / Package A。
+
+### 1.37 [中] `internal/story` 的三处 `<summary>` 未转义，已在真实语料上吞掉内容
+
+- **现状**：`internal/reqdetail` 与 `internal/story` 都用 `<details><summary>用户内容</summary>`
+  这个模式。`reqdetail` 转义（`render.go` 的 `escapeHTML`）；`internal/story` 三处都不转义：
+  `render_spine_args.go` 的 `payloadBlock`、`render_spine_step.go` 的 `toolResultLine` 与
+  `foldWhyLine`。两处 inline 分支（`payloadBlock` ≤120 字符、`foldWhyLine` 短文本）同样把原文
+  裸写进 Markdown 正文。
+- **实测后果**：`journey-j-pimini-…-754b71e2.md` 的一条 `read` 结果 summary 以
+  `<!-- Ver … --> <!-- keywords: …` 开头，渲染时被浏览器当 HTML 注释**静默吞掉**——读者不会知道
+  自己少看了东西。同类风险还包括内容里出现 `</summary>`/`</details>` 直接破坏折叠块结构。
+- **一处值得记下的观察**：`story/render_md.go` 的 `codeFence` doc comment 花七行论证"故意重复而
+  不共享，因为两份拷贝不会以读者能察觉的方式漂移"。这个论证对 `codeFence` 本身成立，但它掩盖了
+  真正漂移的东西——不是 `codeFence`，是**没有被一起复制过去的 `escapeHTML`**。
+- **修法**：三处 `<summary>` 转义 `< > &`；两处 inline 分支转义或改走 fence；把 `escapeHTML` 的
+  归属定一次（各留一份并互相点名，或下沉）。回归测试用上面那条真实反例钉住。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.7 / Package B。
+
+### 1.38 [中] `vmr report`/`vmr story` 别名保留了各自完整的分派逻辑，已经出现分叉
+
+- **现状**：P9.1 的验收标准原文是"收敛三套独立 flag 集合为一套"，实际交付是**新增第四套
+  （`analyze` 的并集）+ 原样保留 `report`/`story` 两套**。`cmd_story.go` 的分派分支与
+  `cmd_analyze.go` 的 `dispatchAnalyze` 是同一件事的两份手写实现，互斥规则已经不一致
+  （`-render-all` 与选择器共存、`-llm-addr` 的批量拒绝集合、`resolveLLMOptions` 是否按需调用）。
+- **分叉已经发生，不是理论风险**：P9 执行记录承认 `resolveLLMOptions` 无条件调用会让纯 `-llm-key`
+  用法在批量模式下报错，并在 `analyze` 侧改为按需调用——`cmd_story.go` 的同一个缺陷原样留着。
+- **`§1.34` 的 `-llm-key` 不对称也只在一侧消失**：P9.5 声称"收敛后自然成立"，但 `cmd_report.go`
+  至今没有 `-llm-key` flag，仍只读 `rc.LLMKey`。别名路径上不对称原样存在。
+- **修法**：别名改为"解析 args → 翻译为 `analyze` 等价 args → 调 `cmdAnalyze`"，让分叉在结构上
+  不可能发生。**一处需要先判的真实风险**：`vmr story` 无选择器是"只列表"，`vmr analyze` 无选择器
+  是"渲染默认套件"——翻译层需要一个内部的"只列表"模式，或让 `cmdStory` 保留这一个分支。
+  不要为了形式上的薄化改变别名的产出。
+- **不是"现在必须做"**：两个别名何时真正移除是一次独立决定（DevPlan2 P9 结语）。但**在移除之前
+  它们应当是薄的**。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.4 / Package C。
+
+### 1.39 [中低] P2/P3 留下一批成体系的死代码（约 250 行）
+
+- **现状**（`deadcode` 全仓扫描 + 人工核对生产路径引用）：
+  - `ctxgraph/blobindex.go` 整个文件（125 行）——`Lookup`/`Len`/`FetchAll` 生产与测试双零引用，
+    `records.go` 的注释明写"use this instead of BlobIndex.FetchAll"；但 `buildGraph` 仍在每次
+    扫描时构造并逐哈希填充它（单日语料 22135 次 `firstSeen`）。成本量级很小（全量约 2.6MB map），
+    **问题不在性能，在于一个废弃子系统还挂在 `Graph` 的公开字段上**。
+  - 六个"非缓存版/单条版"死函数：`report.Build`、`report.WriteDetails`、`report.AnalyzeSessions`、
+    `ctxgraph.Scan`、`story.Build`、`story.PreviewTitle`——各自的缓存版/批量版是唯一生产路径。
+  - 零引用小函数：`chatmsg.ExtractFinish`、`cmd/vmr.configFlag`、`health.Registry.Available`、
+    `reqdetail.ErrorClass`、`reqdetail.contentHash8`。
+- **共同模式**：一个函数的缓存版/批量版成为唯一生产路径之后，旧版留在原地，各自还带着测试。
+- **明确保留**：`chatmsg.CheckToolPairing`/`PairingReport`（97 行）只被 `story/invariants_test.go`
+  引用，但它是 F9 不变量的可执行断言，属于有意的测试基础设施——已在其 doc comment 里写明。
+- **同批建议**：`archtest` 的文档引用守卫（`doc_refs_test.go`）只覆盖 `CLAUDE.md`/`README*`/
+  `docs/` 顶层，**不守源码注释里的 `internal/<pkg>/<file>.go` 路径引用**。本次复查发现三处引用
+  已不存在的 report 侧 render.go（P2 移为 `internal/reqdetail/render.go`；这里刻意不写全那个已
+  失效的路径——`doc_refs_test.go` 会对它报错，本条登记时实测撞到过一次，恰好是这条守卫价值的
+  现场演示）。`CLAUDE.md`
+  要求注释只写非显然的 why，这类交叉引用正是 why 的载体，指错地方就是误导。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.6 / Package D。
+
+### 1.40 [低] 工具调用 id 归一化落在 `internal/story`，不在 `chatmsg`
+
+- **现状**：架构文档 §5.7 建议 2 的原话是"`chatmsg` 的配对逻辑加归一化回退"。实际实现
+  （`normalizeToolCallID` + 两趟匹配）在 `internal/story/findings_toolresult.go` 的
+  `toolResultsFor` 里。
+- **为什么登记**：`CLAUDE.md` 的不变量写的是"`ctxgraph`/`chatmsg` 是消息哈希与消息解析的单一
+  真源……私有再实现会与之静默分歧，这是一整类 bug"。今天 `internal/report` 半区不做工具配对，
+  所以没有第二个消费方、不是活的 bug；但这是一处**已经发生的真源外移**。
+- **触发条件**：出现第二个需要按 id 配对工具结果的消费方（`report` 侧的工具形态章节、或架构文档
+  §7.12 的只读服务）。到那时应把归一化下沉到 `chatmsg`，而不是再写第三份。
+- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §1 R1。
+
+### 1.41 [高] 详单的"跳过已存在文件"谓词假设"同名即同内容"，实测在两个维度上不成立
+
+- **现状**：`reqdetail.EnsureRendered` 的跳过条件是 `os.Stat(target) == nil`。它的 doc comment 在
+  自己的论证中间写下了自己的反证——同一句话既说明文件名是 `(rec.TS, rec.Model, RealModel, Outcome,
+  req)` 的纯函数（不含 `lang`/`linkEvidence`），又说明 `Render` 是 `(rec, m, prev, prof, lang,
+  linkEvidence)` 的纯函数，然后据此断言"存在性检查是充分的"。
+- **实测（2026-08-21，真实语料）**：
+  - **语言维度**：同一输出目录先 `-lang en` 后 `-lang zh` 渲染同一条 journey——journey 报告变成中文，
+    而它链接的 **22 份详单全部仍是英文**；与全新中文目录生成的同名文件 `diff` 判定 DIFFERENT。
+  - **evidence 模式维度**：删掉 `evidence/` 后重跑同一条 journey——evidence 目录**未重建**（0 文件），
+    因为 evidence 的生成位于"文件不存在"分支内、而详单全部命中跳过。结果：journey 报告头部 1 条 +
+    22 份详单各 2 条 = **45 条链接永久失效，任何次数的重跑都不会修复**。
+  - **哈希碰撞维度（实测安全，机制相同）**：全量 11,274 条记录测得 `hash8` **0 次碰撞**、文件名
+    **0 次碰撞**；且详单文件名的区分度并不只来自 hash8——前缀 `ts_virtual_real_outcome` 自身已近乎
+    唯一（11,264/11,274，仅 10 个前缀被两条记录共享），真实文件名碰撞需要"hash8 碰撞 ∧ 前缀相同"，
+    条件概率约 `10 × 2⁻³² ≈ 2×10⁻⁹`。证据层（`evidence/<kind>-<h8>.md`）h8 是唯一判据，但实测命名
+    空间四日抽样只有 71 项，先验碰撞概率约 `6×10⁻⁷`。
+- **根因**：谓词 `文件存在 ⇒ 内容正确` 本身是错的——把"记录身份稳定"（成立）当成了"渲染表示稳定"
+  （不成立）。三个维度是同一个缺陷的三种触发方式。
+- **这是"证据层体积减法"（`§1.36`）的硬前置**：那些减法改变 `Render` 输出而不改变文件名，
+  在谓词修好之前，任何已经跑过 `analyze` 的输出目录都会永久复用旧详单，减法一次都不会生效
+  （唯一绕过方式是手动 `rm -rf details/`，不是可交付方案）。
+- **修法方向**：把跳过谓词从假设改成校验——页面内写入机器可读的渲染指纹（语言 + evidence 模式 +
+  模板版本），命中 `Stat` 后读该行比对，不匹配即原子重写。保留"文件名只凭 Manifest 就能算出、
+  无需 I/O"这条 P2 核心性质。
+- **两条明确否决的备选**（写下以免重提）：把 `lang` 编进文件名（会让同一条记录在两种语言下有两个
+  地址，破坏 P2 的"一条记录一个稳定地址"，并让脊柱链接与 `RequestRow.detail_file` 跟着分叉）；
+  每份详单配 sidecar 元数据文件（产物文件数翻倍，而 P3.1 刚为消除同构副本删掉了 `details/*.json`）。
+  **不换更长的哈希**：换 SHA-256 要动四处命名口径 + 架构文档写死的哈希惯例 + 全部既有产物失效，
+  为 `10⁻⁹` 量级风险付这个代价不成比例；其唯一真实后果由本条的"校验而非假设"顺带覆盖。
+- **登记来源**：2026-08-21 全面复查（`story_report_full_review_opus-5.md` §2.8）。问题由
+  gpt-5.6-terra 的独立审阅报告首先提出（其 Package 1/2），本次经实测确认并合并为一条。
+
+### 1.42 [中] 索引的"显示"策略与套件的"渲染"策略对 `cron` 的判定相反
+
+- **现状**：项目里有两条独立的"重要 vs 噪声"分类线，对同一个类别给出相反答案——
+  `internal/story/storyindex.go` 的索引渲染只折叠 `heartbeat` 与 `subagent`（**cron 与 task 并列
+  显示在首屏**）；`cmd/vmr/cmd_analyze.go` 的 `taskOnlyCandidates` 只渲染 `CategoryTask`
+  （**cron 不渲染**）。
+- **实测（2026-08-21）**：单日 07-15 默认 `vmr analyze`，候选 12 task + 10 cron + 1 heartbeat；
+  `vmr-stories.md` 首屏可见 22 行，**只有 8 行有 journey 链接**——10 个 cron 行全部以一等公民身份
+  显示且全部点不进去。而架构文档 §7.7 设立类别列的全部目的就是"让索引成为可用的下钻落地页"。
+- **哪些才是噪声，实测给了答案**（全量 477 候选）：task 238 / 9,274 req；**cron 112 / 1,032 req
+  （44 条 ≥10 req，max 30）**；heartbeat 107 / 229 req（**0 条 ≥10，max 7**）；**subagent 20 /
+  563 req（16 条 ≥10，max 91——全语料单条最大的 journey）**。三类"噪声"里**只有 heartbeat 的定性
+  被数据支持**；subagent 更极端，既被折叠又不被渲染，却包含全语料最长的一条。
+- **修法方向**：让两条线合并成一条判据（显示即可渲染），只把 heartbeat 归为噪声。
+- **排期约束**：这会把默认渲染量从 238 条抬到约 370 条，**必须排在 `§1.35`/`§1.36` 的体积修复之后**，
+  否则是给已知的体积问题加码。
+- **一个明确否决的备选**：在分类器上叠加"cron 且 chain>3 且 ToolCalls≥10 就升级为 task"的复合阈值。
+  §7.7 原文是"判据用已有的结构信号，**不引入新的猜测**"，而 `ToolCalls >= 10` 是未校准的新猜测；
+  更重要的是它解决错了问题——`[cron:…]` 前缀是客户端自己打的，分类是准确的，真问题是同一个准确的
+  分类被两条策略各答了一次且答案相反。
+- **登记来源**：2026-08-21 全面复查（`story_report_full_review_opus-5.md` §2.9）。方向由
+  Gemini 3.7 Flash 的独立审阅报告提出（其 P1-2），本次实测发现规模比其描述严重，并由此定位到
+  两条策略互相拆台这个它未发现的根因。
+
+### 1.43 [中低] 三个 Finding 检测器在 99.48% 的语料上结构性沉默，且未向读者披露
+
+- **现状**：`chatmsg.ToolResult.IsError` 只在 Anthropic 协议下被填充（字段注释原文：
+  "always false for OpenAI-shaped results"）。`detectUnadaptedRetry` 与 `ErrorRecoveryCount` 等
+  依赖它。实测全量 11,274 条协议分布：**openai 99.48% / anthropic 0.52% / openairesponses 0.00%**。
+  即这些检测器在 99.48% 的语料上**结构性地无法触发**。
+- **取舍本身正确且已登记**：§2.4 有一条逐字针对此事的裁决——对 495,672 条真实 OpenAI 工具结果实测
+  扫描，`{"error": ...}` 等结构化 JSON 错误字段出现 **0 条（0.00%）**，做内容嗅探只会引入海量假阳性。
+  **任何"加内容嗅探"的提案都被这条实测挡住，不必重新论证。**
+- **缺的不是能力，是披露**：今天一份 Findings 输出里"没有 `error_retry_unadapted`"对读者意味着两种
+  完全不同的事——"检查过了，没问题"和"这个检测器对你这批数据结构性沉默"——产物里没有任何地方
+  区分它们。
+- **修法方向**：在 Findings 章节标注哪些检测器对本批数据不适用及原因。零推断、低成本，与 §5.6
+  的"推断与事实的分界线"纪律完全兼容——披露覆盖率不引入任何新判据。
+- **登记来源**：2026-08-21 全面复查（`story_report_full_review_opus-5.md` §2.10）。诊断由
+  Gemini 3.7 Flash 的独立审阅报告提出（其 P1-1），其建议（加内容嗅探）被 §2.4 的既有实测推翻，
+  本条只保留其诊断并转向披露。
+
+## 2. 刻意取舍，不是缺陷
+
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
 
 ### 2.1 运行时与并发
@@ -323,7 +525,7 @@
 28. **决策脊柱指令展示的方言过滤漏洞补齐**（P7.2，`internal/taskseg/openclaw.go`/`openclaw_brackets.go`、`internal/story/journey.go`/`render_spine_step.go`）：`openClawAware.RealUserText` 此前只在 `(untrusted metadata)` 信封分支内间接处理时间戳方括号，"裸"消息（无信封）上的 `[timestamp]`/`[message_id: ...]` 脚手架前缀完全未被剥离；新增 `messageIDBracketRe` 与窄范围的 `timestampBracketRe`（仅匹配 OpenClaw 的日期前缀形状，不是通配任意方括号——P7 内部独立复核发现首版误用了通配的 `leadingBracketRe`，会误伤"用户消息本来就以方括号开头"的合法场景，如 `[Bug] fix the crash`，已改用窄正则并补回归测试），裸消息路径循环剥离两种已知前缀。脊柱"💬 指令"行同时从"直接读未过滤的 `NewEvents` 原文（`firstNewUserText`）"改为读 `buildFrom` 构建期已算好并存入 `Step.Instruction` 的过滤后文本（`taskseg.LastInstruction`），与任务标题走同一套过滤规则；**同一次复核还发现该行原先只在无工具调用的 Step 上渲染**（P1.2/P6 遗留缺口，`renderSpineStep` 从未接入过），中途指令绝大多数情况下会立即触发工具调用，导致该行此前在真实场景里近乎不可见——已同步补齐 `renderSpineStep` 的渲染分支。真实语料验证：含 `[message_id: ...]` 标记的样例任务标题不再泄漏该标记（此前 `**t01 · [Tue 2026-07-28 00:05 GMT+8] [message_id: om_x100b694c53b4eca8b1cd50932b7aefe] o…**`，现为 `ou_ad279066d244fb4f7d91240743d30935: 去统计一下…`）。曾登记为 §1.21。
 29. **`-llm-addr ''` 现在能真正关闭 LLM 调用**（P7.3，`cmd/vmr/reportconfig.go`/`cmd_story.go`）：新增 `resolveStringExplicit`（与既有 `resolveBool(explicit, ...)` 同构），`cmd_story.go` 的 `-llm-addr` 解析改用它——显式传空串不再回退到 `report.yaml` 的默认地址。真实验证：配置了 `llm_addr` 的目录下，`vmr story -llm-addr ''` 不再发起 LLM 调用；不传该 flag 时仍按 `report.yaml` 默认值触发（沿用既有行为）。曾登记为 §1.28。
 30. **JSON 输出的语言策略统一：`journey-<id>.json`/`compare-*.json`/`vmr-report.json` 三种产物同一次 `-lang` 下语言一致**（P8，`internal/story/compare.go`/`compare_metrics.go`（新增）、`internal/report/metrics.go`、`cmd/vmr/cmd_report.go`/`cmd_story.go`）：落地方向见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，回填进 `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3（整节重写，不是打补丁）。`story.Compare(a, b JourneySummary)` 改为 `Compare(a, b JourneySummary, lang i18n.Lang)`，循环体改用 `i18n.MetricLabel(lang, string(spec.Code))` 直接算出本地化 `Label`（`metricSpec.Label` 字段随之删除——改动后全仓唯一读取点消失）；`render_compare.go` 的渲染层不再重复查表，直接读 `cmp.Rows[].Label`。`report` 侧刻意**不**给 `Build`/`BuildCached` 加 `lang` 参数（两者已有 6/9 个参数，且没有任何内部逻辑依赖 `rep.Efficiency` 的英文文本本身），改为新增导出函数 `report.LocalizeEfficiency(rep, lang)`，`cmd_report.go` 在写 JSON 前调用它覆写 `rep.Efficiency`；`section_efficiency.go` 的 Markdown 渲染路径刻意保留独立计算，不依赖这条覆写的调用顺序。真实语料验证：同一次 `vmr report -lang zh` 下 `vmr-report.json` 的 `efficiency[].finding`（如"工具 schema 浪费"）与 `vmr-report.md` §7 表格文案逐字一致，且与 `-lang en` 选中的 `Code` 集合完全相同（证明覆写只改文本、不改选择逻辑）；`vmr story -compare` 的 `compare-*.json` 的 `rows[].label`（如"模型时间"）与 `compare-*.md` 表格逐字一致。曾登记为 §1.19。
-31. **`vmr analyze` 大语料 SIGKILL 根治：默认渲染范围收窄 + 批处理，两者缺一不可**（P9.2，`cmd/vmr/cmd_analyze.go` 的 `taskOnlyCandidates`、`cmd_story.go` 的 `renderJourneys`/`renderBatchSize`）：`vmr analyze` 默认套件（无选择器）现在只物化 `category == task` 的候选（`cron`/`heartbeat`/`subagent` 仍进索引，`heartbeat`/`subagent` 按既有规则折叠、`cron` 与 `task` 一样留在主表，只是"报告"列显示未生成），`-render-all` 保留全量物化。**但真实全量语料（34 文件、11274 条记录）验证发现，仅做分类过滤不足以解决 SIGKILL**：`task` 类候选虽只占全部候选数的 49%（234/473），却占了 83.5%的请求量（9259/11086）——真正长的任务对话本来就分在 `task` 类，过滤类别并不能按比例削减渲染批次的实际数据量。根因定位到 `story.BuildAll` 内部对整批候选做**一次性** `ctxgraph.FetchRecords`（`internal/story/journey.go`）——这原本是刻意的 I/O 优化（共享一次文件扫描），但在大批量下变成无界内存：`renderAllJourneys` 默认套件仅按类别过滤后拿 234 个候选一次性构建，实测峰值内存（`peak memory footprint`）约 35.5GB，进程被系统杀死。修法：`cmd_story.go` 的 `renderJourneys` 改为按 `renderBatchSize`（20）分批调用 `story.BuildAll`，每批构建完立即写盘、下一批开始前上一批可以被 GC——不改变 `internal/story`/`internal/report` 任何一行（改动全在 `cmd/vmr`）。真实语料验证：同一份 34 文件语料，`vmr analyze` 默认套件（234 个 task 候选、9259 条请求）从 SIGKILL（约 35.5GB 峰值）→ **正常退出**，峰值内存 **4.59GB**，总耗时 413s（~6.9 分钟），输出目录 3.5GB（`stories/` 58MB + `details/` 8343 个文件，约 3.44GB）。曾登记为 §1.30/§1.32。
+31. **`vmr analyze` 大语料 SIGKILL 根治：默认渲染范围收窄 + 批处理，两者缺一不可**（P9.2，`cmd/vmr/cmd_analyze.go` 的 `taskOnlyCandidates`、`cmd_story.go` 的 `renderJourneys`/`renderBatchSize`）：`vmr analyze` 默认套件（无选择器）现在只物化 `category == task` 的候选（`cron`/`heartbeat`/`subagent` 仍进索引，`heartbeat`/`subagent` 按既有规则折叠、`cron` 与 `task` 一样留在主表，只是"报告"列显示未生成），`-render-all` 保留全量物化。**但真实全量语料（34 文件、11274 条记录）验证发现，仅做分类过滤不足以解决 SIGKILL**：`task` 类候选虽只占全部候选数的 49%（234/473），却占了 83.5%的请求量（9259/11086）——真正长的任务对话本来就分在 `task` 类，过滤类别并不能按比例削减渲染批次的实际数据量。根因定位到 `story.BuildAll` 内部对整批候选做**一次性** `ctxgraph.FetchRecords`（`internal/story/journey.go`）——这原本是刻意的 I/O 优化（共享一次文件扫描），但在大批量下变成无界内存：`renderAllJourneys` 默认套件仅按类别过滤后拿 234 个候选一次性构建，实测峰值内存（`peak memory footprint`）约 35.5GB，进程被系统杀死。修法：`cmd_story.go` 的 `renderJourneys` 改为按 `renderBatchSize`（20）分批调用 `story.BuildAll`，每批构建完立即写盘、下一批开始前上一批可以被 GC——不改变 `internal/story`/`internal/report` 任何一行（改动全在 `cmd/vmr`）。真实语料验证：同一份 34 文件语料，`vmr analyze` 默认套件（234 个 task 候选、9259 条请求）从 SIGKILL（约 35.5GB 峰值）→ **正常退出**，峰值内存 **4.59GB**，总耗时 413s（~6.9 分钟），输出目录 3.5GB（`stories/` 58MB + `details/` 8343 个文件，约 3.44GB）。曾登记为 §1.30/§1.32。**2026-08-21 复查订正：本项闭环的是 SIGKILL（`§1.30`）这一个症状，`§1.32`（`analyze` 抵消 P3.3 的"默认按需"）的闭环判定已撤回**——形态只是从"强制 `-render-all`"换成了"默认渲染全部 task 候选、每步物化详单"，默认路径仍写 3.5GB 派生产物，纪律未成立。真实根因不是"渲染了不该渲染的候选类别"，而是 `writeJourneyFile` 无条件调用 `EnsureJourneyDetails`，不区分单条下钻与批量渲染。重新登记为 `§1.35`。
 32. **`vmr report`/`vmr story` 降级为过渡别名，`vmr analyze` 成为单一分析入口**（P9.1/P9.3，`cmd/vmr/cmd_analyze.go`/`cmd_report.go`/`cmd_story.go`/`cmd_story_setup.go`）：`vmr analyze` 收敛为一套 flag 集合（`vmr report`/`vmr story` 曾各自拥有的并集），`-journey`/`-compare`/`-corpus` 三个互斥的变焦选择器各自只跑对应的 story 侧单一视图（不跑宏观报表）；不带选择器是默认套件，先跑 story 半区再跑 report 半区（`report.Markdown` 需要 `stories/vmr-stories.md` 已存在才挂链接，story 先跑让这条边在首次调用就命中）。`cmd_report.go`/`cmd_story.go` 提炼出共享执行函数 `runReport`/`setupStoryRun`（连同既有的 `renderJourney`/`renderJourneys`/`renderAllJourneys`/`compareJourneys`/`corpusStats`），`cmd_analyze.go` 只做 flag 解析与按选择器分派，不重新实现任何渲染/聚合逻辑；`vmr report`/`vmr story` 各自保留独立的 `flag.NewFlagSet`、独立默认值，产出与收敛前逐字节相同，仅在调用时向 stderr 打印一行迁移提示。全程未改动 `internal/report`/`internal/story` 任何一行（`git diff` 验证为空）。曾登记为 §1.33 两项遗留（执行顺序文档订正、README 补 `vmr analyze` 示例）。
 33. **四处文档"先 report 后 story"执行顺序订正**（P9.4，`docs/UserGuide.md`/`.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md`）：均已改为准确描述"story 先、report 后"；`README.md`/`README.zh.md` 补充 `vmr analyze` 快速上手示例与能力条目（`grep -c 'vmr analyze'` 从 0 变为 2）。曾登记为 §1.33。
 34. **自指流量识别规则的输入不对称随统一 flag 集合自然消失**（P9.5，`cmd/vmr/cmd_analyze.go`）：`cmdAnalyze` 只解析一次 `llmKey`（`-llm-key` flag 或 `report.yaml` 的 `llm_key`），同时喂给 story 半区（`filterSelfTrafficCandidates`）与 report 半区（`selfTrafficExcludeTags` → `runReport` 的 `excludeClientTags`），不再是"`vmr story` 能被 flag 覆盖、`vmr report` 只认 `report.yaml`"两条独立路径。落地过程中发现一个真实的连带缺陷并修复：`resolveLLMOptions`（校验 `-llm-addr`/`-llm-model`/`-llm-key` 组合）若无条件调用，会让单独设置 `-llm-key`（不带 `-llm-addr`，这正是"仅用于排除自指流量、不在这次运行发起 LLM 调用"的合理用法）在 `-corpus`/默认套件模式下直接报错退出——即便这两种模式从不消费 `llmOpts`。修法：`resolveLLMOptions` 只在 `-journey`/`-compare` 分支里按需调用（`dispatchAnalyze` 的 `resolveLLMOpts` 闭包），`llmKey` 本身的解析与自指流量排除逻辑不再依赖它。真实语料验证：`vmr analyze -llm-key <key>`（`report.yaml` 不存在、无 `-llm-addr`）在默认套件下正常运行，`vmr-stories.json` 与 `vmr-report.json` 的 `meta.self_traffic_excluded` 排除同一批自指流量记录。曾登记为 §1.34。
@@ -352,11 +554,23 @@
 > 已补一行（见上）；`1.23` 与 `1.1` 是同一件事的两个登记入口，共用 `1.1` 那一行评分，不重复列出；
 > `1.29`（已决定暂不做）与 `1.27`（已决定不做）性质上属于"取舍已定"而非"待评估"，与 §2/§3 同类，
 > 不需要单独 ROI 行。`1.21`/`1.28`/`1.31` 三条已由 P7 修复（见 §3 第 27–29 项）、`1.19` 已由 P8
-> 修复（见 §3 第 30 项）、`1.30`/`1.32`/`1.33`/`1.34` 已由 P9 修复（见 §3 第 31–34 项），均已移出
-> 本表——**本表当前覆盖 §1 全部真正待评估的条目，不再有遗漏**。
+> 修复（见 §3 第 30 项）、`1.30`/`1.33`/`1.34` 已由 P9 修复（见 §3 第 31–34 项），均已移出
+> 本表。**2026-08-21 全面复查 + 三份独立审阅核实后补入**：新增的 `1.35`–`1.43` 九条中，
+> `1.35`/`1.36`/`1.37`/`1.38`/`1.39`/`1.41`/`1.42`/`1.43` 各有一行（见下）；
+> `1.40`（归一化配对的真源位置）与 `1.29`/`1.27` 同类——触发条件已量化、结论已定，不需要单独
+> ROI 行。`1.32` 的闭环判定已撤回，其内容并入 `1.35`。
+> **本表当前覆盖 §1 全部真正待评估的条目，不再有遗漏**。
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| 1.41 | 详单跳过谓词假设"同名即同内容" | **低** | 中 | **已证** | **高** | 唯一一条会产出**错误内容**而非多余内容的缺陷（实测：中文报告 + 英文详单；删 evidence 后 45 条链接永久死亡）。改动面是一行指纹 + 一次比对；风险为中是因为要守住"文件名无需 I/O 即可算出"这条 P2 核心性质。**是 `1.36` 的硬前置**——谓词不修，任何详单内容减法在已有目录上永不生效 |
+| 1.35 | 证据层"默认按需"在 `vmr analyze` 上从未成立 | **低** | 低 | **已证** | **高** | 改动面是 `writeJourneyFile` 一个入参 + 三个调用点，`internal/*` 零 diff；收益已实测（单日 164MB、全量 3.5GB）。**这是本表自述的那个"需要解释的异常"再次出现**——第四次了，所以修法必须附带一条常驻守卫，否则会有第五次 |
+| 1.36 | 详单内部约 93% 是重复拷贝 | **低** | 中 | **已证** | **高** | 两条减法的机制全部现成（`req` 坐标 + `PrevTurnLink`），各自独立可交付；风险是中而非低，因为必须守住"两条路径生成的详单逐字节相同"这条 P2 核心不变量——这也正是该配一次差分测试的地方 |
+| 1.37 | `internal/story` 三处 `<summary>` 未转义 | **低** | 低 | 中 | **中→高** | 已在真实语料上观察到内容被静默吞掉（HTML 注释），不是理论风险；改动是三个调用点加一次 `escapeHTML`。ROI 的上界取决于"人读产物有多重要"——它是中观层唯一的人读载体 |
+| 1.38 | 别名保留完整分派逻辑、已分叉 | 中 | 中 | 中 | **中** | 分叉已经发生（`resolveLLMOptions` 在一侧修了、另一侧没修），不是预防性重构。但两个别名的移除时机本身未定，若近期就移除则本条自动消失——**先确认别名的去留，再决定要不要薄化** |
+| 1.39 | P2/P3 留下的成体系死代码（约 250 行） | 低 | 低 | 低→中 | **中** | 纯删除 + 删对应测试，风险几乎全在"删错了不该删的"（用 `deadcode` 复扫兜底）。价值不在行数，在于下一个读者不会再花时间去理解一个废弃子系统（`blobindex.go` 尤甚——它还挂在 `Graph` 的公开字段上） |
+| 1.42 | 索引显示与默认渲染对 `cron` 判定相反 | 低 | 低 | 中 | **中** | 实测单日索引首屏 22 行只有 8 行可点；数据只支持把 heartbeat 归为噪声（cron 有 44 条 ≥10 请求、subagent 含全语料最长的一条）。**排期上必须排在 `1.35`/`1.36` 之后**——它会把默认渲染量从 238 抬到约 370 条 |
+| 1.43 | 三个 Finding 检测器在 99.48% 语料上沉默且未披露 | **低** | 无 | 中 | **中** | 取舍已由 §2.4 的 495,672 条实测定案，缺的只是披露。零推断、零新判据，改的是呈现层的一段标注 |
 | 1.13 | 额度燃尽看板 | 高 | 低 | 中 | **中** | 产品价值而非技术债，按产品路线排期，不与本表其他条目抢顺序 |
 | 1.18 | Phase 1b 六个 LLM 判别器未完成黄金样本校准 | 高 | 低 | 中 | **中** | 校准是人工标注投入（30–50 个 Journey 逐条判断 TP/FP），无法自动化；六个判别器在真实语料上已达 100% Evidence Anchor 有效率、人工抽查判断合理，当前没有观察到需要立即处理的误报模式，不构成阻塞性风险。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力投入的时间，不在代码**，这是它与本表其余"低 ROI、缺 profile/前置条件"条目的本质区别 |
 | 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 11253 条里 `openairesponses` **0 条**。触发条件量化为"`vmr-requests.json` 出现该 protocol"，在那之前不投入 |
@@ -375,11 +589,21 @@
 
 ### 4.2 分档结论
 
-- **高 ROI（0 条，2026-08-21 更新）**：`1.31`（P7）、`1.32`（P9）已先后修复移入 §3——本表当前
-  没有"价值已证、成本低、却还在等"的异常条目。这两条的教训值得留存：**P6 的验收走查用的是
-  `vmr analyze`（最全的那条路径），而用户日常跑的是 `vmr report`（默认路径），默认路径上的缺陷
-  因此被系统性地跳过了。验收要在默认路径上做，不能在最全的那条路径上做。**
-- **中 ROI（3 条，看触发；`1.28` 已由 P7 修复移入 §3）**：`1.13` 按产品路线排；`1.1`（含 `1.23`）
+- **高 ROI（3 条，2026-08-21 全面复查 + 三份独立审阅核实后更新）**：`1.41`/`1.35`/`1.36`——
+  三条都是"价值已实测、成本低、修法所需机制全部现成、却还在等"，正是下面那段原文说的**需要解释的
+  异常**。`1.31`（P7）已修复移入 §3；`1.32` 曾被记为 P9 修复，本次复查**撤回**了那个判定并重新
+  登记为 `1.35`。
+  P7/P9 那两条的教训**没有生效，同一个机制又犯了两次**：P6 的验收走查用的是 `vmr analyze`
+  （最全的那条路径），而用户日常跑的是 `vmr report`（默认路径）——当时的结论是"验收要在默认路径
+  上做"。P9 之后 `vmr analyze` **本身就是默认路径**了，而 P9.2 的验收对象换成了"不再 SIGKILL"，
+  体积纪律再一次没有被量；此后三份独立审阅报告**没有一份测量过默认路径的产物体积**。
+  **更普适的那条教训是：验收对象要是"那条纪律现在还成立吗"，而不是"这次改动做了什么"。**
+  这也是为什么 `1.35` 的修法被要求附带一条常驻守卫——P4.2 是全仓唯一一条把纪律写成常驻自动检查
+  的任务，也是唯一一条至今没有退化的纪律。
+- **中 ROI（8 条，看触发；`1.28` 已由 P7 修复移入 §3）**：`1.37`（人读产物转义，已有真实反例，
+  上界取决于人读层的权重）；`1.38`（别名分叉，先补齐 analyze 缺失的两个模式再薄化）；
+  `1.42`（两条分类线互相拆台，排在体积修复之后）；`1.43`（检测器覆盖率披露，零推断）；
+  `1.39`（死代码，价值在可读性不在行数）；`1.13` 按产品路线排；`1.1`（含 `1.23`）
   是 P3.6 之后**收益已经用真实语料证明**（5.2× 缓存收益）、只是正确性风险需要额外测试基础设施
   兜底的条目——与"收益未经测量"的低 ROI 组本质不同；`1.18` 是校准投入而非代码工作、且当前无阻塞
   性误报信号，等黄金样本标注窗口再推进。原 `1.16`（并发竞态）、`1.4`（流式断开审计语义）与
@@ -392,9 +616,11 @@
   自己举手的事。
 
 **关于这张表本身的一个观察**：这段原文写的是"13 条里高 ROI 为 0 条；没有一条是'高价值但一直没做'
-……如果哪天这张表里出现了「价值高 + 成本低 + 却还在等」的条目，那才是需要解释的异常"。这个异常曾经
-出现过一次（`1.31`/`1.32`），也已经在 P7/P9 两个阶段分别排掉——**这张表的健康状态不是"从未出现过
-异常"，是"异常出现后被正确识别、排上日程、修掉"**。
+……如果哪天这张表里出现了「价值高 + 成本低 + 却还在等」的条目，那才是需要解释的异常"。这个异常已经
+出现过两轮：第一轮（`1.31`/`1.32`）由 P7/P9 排掉，第二轮（`1.35`/`1.36`）是 2026-08-21 全面复查
+新登记的，其中 `1.35` 还是第一轮那条被误判为已闭环的同一件事。
+**这张表的健康状态不是"从未出现过异常"，是"异常出现后被正确识别、排上日程、修掉"——
+而 `1.32` 的误判说明"识别"这一步本身也会出错，识别的依据必须是实测数字，不是阶段执行记录的自述。**
 
 **一个补充判据**：`1.16`（原条目，现已闭环）是这张表里第一条**从源码注释里捞出来、而不是从代码里读出来**的条目——
 它早就写在 `respnorm` 的 `qmu` 注释里，注释还写着「见本文件的既有条目」，而那个条目当时并不存在。

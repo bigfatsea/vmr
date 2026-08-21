@@ -49,7 +49,7 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // multiply-and-format line — one at 1 decimal, one at 0 — and a comment in
 // story claiming the two "matched" report's, which had already gone stale.
 // Both packages' pctStr are now thin aliases over this, the same pattern
-// internal/report/render.go's fmtBytes already uses for FmtBytes.
+// FmtBytes already established for byte counts.
 func FmtPercent(f float64, decimals int) string {
 	return fmt.Sprintf("%.*f%%", decimals, f*100)
 }

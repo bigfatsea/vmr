@@ -402,7 +402,7 @@ func cmdReport(args []string) error {
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: report.yaml's details, or false — the requests index links to each record's detail filename regardless, computed without needing the file to exist; pass -details to materialize them all up front)")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
-	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
+	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
 	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
 	if err := fs.Parse(args); err != nil {
 		return err

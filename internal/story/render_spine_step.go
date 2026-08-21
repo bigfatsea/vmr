@@ -190,8 +190,16 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 // happened to fail for this one Step (see EnsureJourneyDetails' doc
 // comment on graceful degradation).
 func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
-	header := "**" + stepRoleTag(s, repeated, t) + " Step " + strconv.Itoa(s.Seq) + " · " +
-		s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05") + "**"
+	// s.Manifest is non-nil on every production path (journey.go's buildStep
+	// always sets it); the guard is for test fixtures that construct a Step
+	// by hand. It has to cover the timestamp too — the old form dereferenced
+	// s.Manifest.TS above the check, so the check could never have saved a
+	// nil from panicking.
+	ts := ""
+	if s.Manifest != nil {
+		ts = " · " + s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05")
+	}
+	header := "**" + stepRoleTag(s, repeated, t) + " Step " + strconv.Itoa(s.Seq) + ts + "**"
 	if flagged {
 		header += t.SpineFindingTag
 	}

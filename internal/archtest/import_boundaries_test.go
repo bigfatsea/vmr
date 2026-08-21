@@ -156,6 +156,16 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/ctxgraph",
 		"vmr/internal/taskseg",
 	},
+	// reqdetail is the shared detail-rendering leaf imported by both report
+	// and story — it must not import either consumer back, nor any runtime
+	// routing package.
+	"vmr/internal/reqdetail": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+		"vmr/internal/config",
+		"vmr/internal/report",
+		"vmr/internal/story",
+	},
 }
 
 // zeroInternalDepPackages must not depend on any other vmr/internal/*

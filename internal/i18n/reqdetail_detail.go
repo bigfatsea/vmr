@@ -12,7 +12,6 @@ type DetailText struct {
 	UnknownNormStep  string
 
 	StreamYes, StreamNo string
-	NoValue             string    // "-"
 	OverviewHeaders     [9]string // vm, upstream endpoint, outcome, dur, ttft, attempts, stream, tokens, client
 
 	FactsCapsNone string
@@ -129,7 +128,6 @@ func Detail(lang Lang) DetailText {
 			UnknownNormStep: "（未知步骤）",
 
 			StreamYes: "是", StreamNo: "否",
-			NoValue:         "-",
 			OverviewHeaders: [9]string{"虚拟模型", "上游端点", "结果", "耗时", "首字延迟", "尝试次数", "stream", "Tokens In/CacheHit/Out", "客户端"},
 
 			FactsCapsNone: "无",
@@ -282,7 +280,6 @@ func Detail(lang Lang) DetailText {
 		UnknownNormStep: "(unknown step)",
 
 		StreamYes: "yes", StreamNo: "no",
-		NoValue:         "-",
 		OverviewHeaders: [9]string{"Virtual Model", "Upstream Endpoint", "Outcome", "Duration", "TTFT", "Attempts", "stream", "Tokens In/CacheHit/Out", "Client"},
 
 		FactsCapsNone: "none",

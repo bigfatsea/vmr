@@ -51,10 +51,13 @@ var fileLineExemptions = map[string]int{
 	// growth is expected. What this catches is the file absorbing accumulation
 	// or rendering logic again, which belongs in ingest.go/section_*.go.
 	"internal/report/rows.go": 900,
-	// If config.go crosses this, split by concern (e.g. provider/model
-	// validation into its own file).
-	"internal/config/config.go":  750,
-	"internal/report/detail.go":  1150,
+	// detail.go was split into internal/reqdetail in P2, slimming it to ~286
+	// lines. internal/config/config.go used to carry a 750 exemption here; it
+	// is 699 lines, i.e. under the default, so the exemption was dropped
+	// rather than kept as pre-authorized headroom. When it does cross 700,
+	// split it by concern (e.g. provider/model validation into its own file)
+	// — do not re-add an exemption.
+	"internal/report/detail.go":  350,
 	"internal/report/session.go": 1100,
 
 	"internal/story/journey.go":             850,

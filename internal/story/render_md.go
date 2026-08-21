@@ -119,8 +119,9 @@ func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.Stor
 // result containing a Markdown snippet) can never break out of its block —
 // a fixed ``` fence would silently corrupt the rest of the document the
 // moment real content contains one. Same rationale/implementation as
-// internal/report/render.go's codeFence, plus an optional lang tag
-// (report's own codeFence has no caller that needs one).
+// internal/reqdetail/render.go's codeFence (that copy moved out of
+// internal/report in P2). Takes no language tag — P5.1 removed this file's
+// one caller that used one, the deleted fact-layer's tool-call JSON block.
 //
 // Deliberately duplicated rather than shared: this is a tiny, stable,
 // purely cosmetic Markdown helper with no domain knowledge and no
@@ -129,10 +130,6 @@ func renderCompactionInfo(w func(string, ...any), c *CompactionInfo, t i18n.Stor
 // when the two copies can drift in a way a reader would notice; this one
 // cannot). Naming it here so it isn't re-raised as an oversight every time
 // someone greps for duplicate helpers across the two commands.
-//
-// No longer takes a language tag (P5.1 removed this file's one caller that
-// used one, the deleted fact-layer's tool-call JSON block) — every
-// remaining caller across the package wants a plain fence.
 func codeFence(s string) string {
 	n := 3
 	run := 0

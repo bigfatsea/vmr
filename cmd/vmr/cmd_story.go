@@ -75,7 +75,7 @@ func cmdStory(args []string) error {
 	llmCacheDirFlag := fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever (no implicit default path)")
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
-	reportConfigPath := fs.String("report-config", "", "vmr report/vmr story sidecar config yaml; absent => auto-load ./report.yaml if present")
+	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
 	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr story -llm-addr's own self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
 	if err := fs.Parse(args); err != nil {
 		return err
