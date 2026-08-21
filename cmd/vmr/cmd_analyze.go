@@ -224,8 +224,10 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if r.llmAddrExplicit {
 			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), r.journeyArg)
 		}
+		// true: a -journey selector naming several targets is still a
+		// user-named set, not the default suite's implicit batch (P13.1).
 		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx,
-			"no matching journeys to render (all skipped as partial-head; pass -include-partial)")
+			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true)
 	default:
 		// Default suite: story half (P9.2's category=task scope unless
 		// -render-all) first, then the macro report half.
@@ -233,7 +235,16 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if !r.renderAllFlag {
 			scope = taskOnlyCandidates(su)
 		}
-		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx); err != nil {
+		// materializeDetails = r.renderAllFlag (P13.1): -render-all is an
+		// explicit "materialize everything" ask; the default task-only
+		// suite is not — it renders every spine's "→ detail" links (a
+		// pure function of each Step's own Manifest, see
+		// EnsureJourneyDetails' doc comment) without writing the target
+		// files, closing KNOWN_ISSUES §1.35 (the default suite's
+		// unconditional per-Step materialization that made every `vmr
+		// analyze` run write 160MB+/details regardless of whether anyone
+		// reads them).
+		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}
 

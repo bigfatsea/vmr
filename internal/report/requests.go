@@ -125,8 +125,9 @@ type indexEntry struct {
 // root — nil/empty when it hasn't, in which case no session card grows a
 // journey link (this is the "指向另一条命令聚合产物" edge class, so it's
 // existence-gated by the caller, not something this package computes).
-func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang, journeyLink map[string]string, detailsOn bool) error {
+func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang, journeyLink map[string]string, detailDir string) error {
 	t := i18n.Requests(lang)
+	detailSet := buildDetailFileSet(detailDir)
 	rows := rep.RequestRows()
 	sessionTitle, sessionAlias, taskTitle := titleMaps(sess)
 	sessionMeta := map[string]SessionRow{}
@@ -170,7 +171,7 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 		}
 		header := t.ChatUserHeader(ck, len(groups), tasks, turns)
 		file := "vmr-requests-" + sanitize(ck) + ".md"
-		content := renderChatUserDoc(header, groups, sessionTitle, sessionAlias, taskTitle, journeyLink, t, detailsOn)
+		content := renderChatUserDoc(header, groups, sessionTitle, sessionAlias, taskTitle, journeyLink, t, detailSet)
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
 			return err
 		}
@@ -183,7 +184,7 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 		sort.SliceStable(occ, func(i, j int) bool { return occ[i].TS < occ[j].TS })
 		header := t.CronHeader(cls, len(occ))
 		file := "vmr-requests-cron-" + cronFileTag(cls) + ".md"
-		content := renderScheduledDoc(header, occ, t, detailsOn)
+		content := renderScheduledDoc(header, occ, t, detailSet)
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
 			return err
 		}
@@ -201,7 +202,7 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 		w("%s", t.GroupDetailLink(e.file))
 	}
 	w("---\n\n")
-	writeAllRequestsFooter(w, rows, t, detailsOn)
+	writeAllRequestsFooter(w, rows, t, detailSet)
 	return os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(b.String()), 0o600)
 }
 
@@ -364,14 +365,14 @@ func clientsWithSiblingFile(rep *Report2) map[string]bool {
 
 // renderChatUserDoc renders one Chat User's full detail doc: an H1 header,
 // a legend, then one session card per session (renderSessionCard).
-func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText, detailsOn bool) string {
+func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText, detailSet map[string]struct{}) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", header)
 	w("%s", t.ChatUserLegend)
 	w("---\n\n")
 	for _, g := range groups {
-		renderSessionCard(w, g, sessionTitle, sessionAlias, taskTitle, journeyLink, t, detailsOn)
+		renderSessionCard(w, g, sessionTitle, sessionAlias, taskTitle, journeyLink, t, detailSet)
 	}
 	return b.String()
 }
@@ -379,7 +380,7 @@ func renderChatUserDoc(header string, groups []*sessGroup, sessionTitle, session
 // renderScheduledDoc renders one scheduled class's full detail doc: an H1
 // header, a summary blockquote, then a flat chronological table — the same
 // shape the old collapsed rollup section used, just as its own file.
-func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText, detailsOn bool) string {
+func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText, detailSet map[string]struct{}) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", header)
@@ -397,7 +398,7 @@ func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText, de
 	w("%s", t.ScheduledTableHeader)
 	for _, r := range occ {
 		w("| %s | %s | %s | %s | %s | %s |\n",
-			fmtDisplayFull(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailsOn))
+			fmtDisplayFull(r.TS), finishCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailSet))
 	}
 	w("\n")
 	return b.String()
@@ -420,11 +421,13 @@ func FailedRequestRows(rows []RequestRow) []RequestRow {
 
 // WriteFailedIndex writes vmr-requests-failed.md: a flat, time-ordered index
 // of every failed request (FailedRequestRows), each row's "文件" column a
-// detailCell (a details/*.md link when detailsOn, else the req coordinate).
-// This is a dedicated error-analysis index — it does not remove or alter
-// failed requests anywhere else; vmr-requests.md and every per-group
-// sibling keep listing them exactly as before.
-func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailsOn bool) error {
+// detailCell (a details/*.md link when the target actually exists on disk,
+// else the req coordinate — see detailCell's own doc comment, P13.4). This
+// is a dedicated error-analysis index — it does not remove or alter failed
+// requests anywhere else; vmr-requests.md and every per-group sibling keep
+// listing them exactly as before.
+func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir string) error {
+	detailSet := buildDetailFileSet(detailDir)
 	t := i18n.Requests(lang)
 	failed := FailedRequestRows(rows)
 	sort.SliceStable(failed, func(i, j int) bool { return failed[i].TS < failed[j].TS })
@@ -440,7 +443,7 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailsOn b
 	for _, r := range failed {
 		w("| %s | %s | %s/%s | %s | %s | %s |\n",
 			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
-			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailsOn))
+			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
 	}
 	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
 }
@@ -448,7 +451,7 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailsOn b
 // writeAllRequestsFooter appends the flat "all requests, chronological"
 // table covering every row regardless of grouping — kept only in the main
 // index, since it's the one place a cross-group chronological view belongs.
-func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.RequestsText, detailsOn bool) {
+func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.RequestsText, detailSet map[string]struct{}) {
 	w("# %s\n\n", t.AllRequestsTitle)
 	all := append([]RequestRow(nil), rows...)
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS < all[j].TS })
@@ -456,7 +459,7 @@ func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.Re
 	for _, r := range all {
 		w("| %s | %s | %s/%s | %s | %s | %s | %s | %s |\n",
 			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
-			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailsOn))
+			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailSet))
 	}
 	w("\n")
 }
@@ -464,7 +467,7 @@ func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.Re
 // renderSessionCard renders one session card ("## sNN · ts · N tasks M
 // turns"): one task sub-header per task, each followed by a one-line quote
 // of the task's opening message and its per-turn table.
-func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText, detailsOn bool) {
+func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessionAlias, taskTitle, journeyLink map[string]string, t i18n.RequestsText, detailSet map[string]struct{}) {
 	label := g.id
 	if label == "" {
 		label = t.Unrouted
@@ -518,7 +521,7 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessi
 			w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 				turnCell(r.Turn), fmtDisplayTime(r.TS), msgsCell(r.Msgs),
 				finishCell(r), fmtDurMS(r.DurMS), msOrDash(r.TTFTMS),
-				freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailsOn))
+				freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailSet))
 		}
 		w("\n")
 	}
@@ -599,26 +602,60 @@ func cacheEffTurn(r RequestRow) string {
 	return pctStr(r.CacheEff)
 }
 
-// detailCell renders the "文件" column. When detailsOn (this run actually
-// wrote details/), it's a link to the record's Markdown detail page — same
-// as before, and the target is guaranteed to exist (see P3.3). When !
-// detailsOn, details/ was never generated this run, so a Markdown link
-// would 404; instead it renders r.Req, the record's stable req coordinate
-// (basename:line, already computed and published in vmr-requests.json —
-// see ctxgraph.ReqCoord) as inline code, letting the reader look the record
-// up on demand (`vmr replay -req COORD -print`, or a future -details run)
-// without ever producing a dead link.
-func detailCell(r RequestRow, detailsOn bool) string {
-	if !detailsOn {
-		if r.Req == "" {
-			return "-"
-		}
-		return "`" + r.Req + "`"
+// buildDetailFileSet lists detailDir once and returns its .md basenames as
+// a set — detailCell's existence check (P13.4) would otherwise be one
+// os.Stat per row, and a full request index re-renders every row across
+// several tables (per-session cards, the scheduled rollup, the failed
+// index, the all-requests footer): a real full-corpus run (11k+ requests,
+// story_report_full_review_opus-5.md's M12) would issue 20,000+ redundant
+// stat syscalls — most of them ENOENT lookups against an empty or
+// nonexistent directory on the common (default suite) path — for
+// information one os.ReadDir already gives in full. A missing directory
+// returns a nil (empty) set, not an error. Hidden files (dotfiles, a
+// stray .reqdetail-*.tmp from an interrupted atomic write) and non-.md
+// entries are excluded so they can never be mistaken for a real detail
+// page's presence.
+func buildDetailFileSet(detailDir string) map[string]struct{} {
+	entries, err := os.ReadDir(detailDir)
+	if err != nil {
+		return nil
 	}
-	if r.DetailFile == "" {
+	set := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		set[name] = struct{}{}
+	}
+	return set
+}
+
+// detailCell renders the "文件" column. detailSet (buildDetailFileSet) is
+// {outDir}/details' current contents, always computed regardless of
+// whether this run's -details flag was passed — the criterion (P13.4,
+// KNOWN_ISSUES §1.35/§2.3) is whether r.DetailFile actually exists right
+// now, not whether a flag was set: since `vmr analyze` runs the story half
+// (which may batch-materialize details for -render-all, P13.1) before the
+// report half, a flag-only check could claim "no details were written"
+// while 306 of them sit on disk, or the reverse. r.DetailFile itself is
+// always computed (session.go, a pure function of the record's identity)
+// whether or not anything was ever written to it — see FileName's own doc
+// comment for why an existence check, not the filename's mere presence, is
+// what's authoritative here. When the target isn't there, this falls back
+// to r.Req, the record's stable req coordinate (basename:line,
+// ctxgraph.ReqCoord) as inline code, letting the reader fetch it on demand
+// (`vmr replay -req COORD -print`) without ever producing a dead link.
+func detailCell(r RequestRow, detailSet map[string]struct{}) string {
+	if r.DetailFile != "" {
+		if _, ok := detailSet[r.DetailFile]; ok {
+			return fmt.Sprintf("[Ⓜ️ Markdown](details/%s)", r.DetailFile)
+		}
+	}
+	if r.Req == "" {
 		return "-"
 	}
-	return fmt.Sprintf("[Ⓜ️ Markdown](details/%s)", r.DetailFile)
+	return "`" + r.Req + "`"
 }
 
 func sessTaskCell(r RequestRow) string {

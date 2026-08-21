@@ -245,6 +245,26 @@ func setupDetailWriter(outDir string, detailsOn bool, lang i18n.Lang, tw io.Writ
 	return dw, detailDir, dw.Submit, nil
 }
 
+// detailDirHasFiles reports whether dir already contains at least one
+// entry. A missing directory is "no", not an error.
+func detailDirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) > 0
+}
+
+// detailsPresentFor (P13.4, KNOWN_ISSUES §1.35/§2.3) is the criterion for
+// Meta.DetailsEnabled: detailsOn alone covers this run's OWN -details
+// writer (guaranteed to finish by the time this command returns, even
+// though it hasn't flushed to disk yet at the point runReport reads this);
+// the OR checks for detail pages a DIFFERENT half of the same `vmr
+// analyze` invocation already wrote and flushed before this command ever
+// started — story's batch materialization under -render-all (P13.1). A
+// flag-only check goes stale the moment two halves of one invocation can
+// populate details/ independently.
+func detailsPresentFor(detailsOn bool, detailDir string) bool {
+	return detailsOn || detailDirHasFiles(detailDir)
+}
+
 // reportRunOpts bundles vmr report's already-resolved parameters — every
 // value cmdReport itself derives from its own flags/report.yaml before the
 // pipeline in runReport starts doing anything. Factored out (P9.1) so
@@ -303,7 +323,6 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	if err != nil {
 		return err
 	}
-
 	// The gap between this line's timestamp and the first "[1/N]" line below
 	// is session analysis (AnalyzeSessions) — a full, currently silent pass
 	// over every input file that Build() always runs before its own
@@ -333,7 +352,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		rep.Meta.QuotaJSONPath = quotaJSONPath
 		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
 	}
-	rep.Meta.DetailsEnabled = opts.detailsOn
+	rep.Meta.DetailsEnabled = detailsPresentFor(opts.detailsOn, detailDir) // see its own doc comment
 	report.LocalizeEfficiency(rep, opts.lang)
 	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
 	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
@@ -367,7 +386,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
 		return fmt.Errorf("parse cache: %w", err)
 	}
-	if err := report.WriteRequestsIndex(rep, sess, opts.outDir, opts.lang, lineageToJourney, opts.detailsOn); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, opts.outDir, opts.lang, lineageToJourney, detailDir); err != nil {
 		return fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests.md"))
@@ -384,7 +403,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		return fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, opts.outDir, opts.lang, opts.detailsOn); err != nil {
+	if err := report.WriteFailedIndex(rows, opts.outDir, opts.lang, detailDir); err != nil {
 		return fmt.Errorf("failed-requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests-failed.md"))

@@ -148,11 +148,15 @@ func cmdStory(args []string) error {
 		if llmAddrExplicit {
 			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), *journeyArg)
 		}
+		// true: a -journey selector naming several targets is still a
+		// user-named set, not the default suite's implicit batch (P13.1,
+		// see renderJourneys' doc comment).
 		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx,
-			"no matching journeys to render (all skipped as partial-head; pass -include-partial)")
+			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true)
 	}
 	if *renderAll {
-		return renderAllJourneys(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx)
+		// true: -render-all is an explicit "materialize everything" ask.
+		return renderAllJourneys(su.cands, su.byIdx, su.firstPath, su.prof, includePartial, outDir, lang, su.idx, true)
 	}
 	return listJourneys(su.idx, su.g, outDir, includePartial, lang)
 }
@@ -383,7 +387,8 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	}
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
-	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir)
+	// true: a single named -journey target, not a batch scope (P13.1).
+	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, true)
 	if err != nil {
 		return err
 	}
@@ -551,9 +556,14 @@ const renderBatchSize = 20
 // own doc comment for why). Shared by renderAllJourneys (-render-all/the
 // default suite's category=task scope, P9.2) and -journey's multi-match
 // dispatch (a comma-list/glob selector that resolved to more than one
-// journey) — the two differ only in which candidates they pass in and the
-// message printed when none of them survive the partial-head filter.
-func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string) error {
+// journey) — the two differ only in which candidates they pass in, the
+// message printed when none of them survive the partial-head filter, and
+// (P13.1) materializeDetails: a -journey selector is still a user-named
+// target set even when it resolves to more than one match, so both of
+// this function's callers in cmd_story.go/cmd_analyze.go pass true for it;
+// only renderAllJourneys' own default-suite caller (not -render-all) ever
+// passes false — see writeJourneyFile's doc comment for what false means.
+func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string, materializeDetails bool) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
@@ -592,7 +602,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 			j.Partial = toRenderPartial[start+i]
 			m := story.ComputeMetrics(j)
 			findings := story.ComputeFindings(j, lang)
-			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
+			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, materializeDetails)
 			if err != nil {
 				return err
 			}
@@ -609,10 +619,16 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 }
 
 // renderAllJourneys renders every non-partial candidate journey — see
-// renderJourneys.
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+// renderJourneys. materializeDetails (P13.1) distinguishes an explicit
+// "render everything, details included" ask (vmr story -render-all, or
+// vmr analyze -render-all) from the default suite's implicit
+// category=task batch (cmd_analyze.go's dispatchAnalyze passes false
+// there) — the latter is exactly the unbounded-materialization case
+// KNOWN_ISSUES §1.35 diagnosed (238+ candidates' worth of Step detail
+// pages written on every run whether or not anyone reads them).
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, materializeDetails bool) error {
 	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
-		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)")
+		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)", materializeDetails)
 }
 
 // corpusStats builds every non-partial candidate journey (same
@@ -701,16 +717,27 @@ func journeyBaseName(j *story.Journey) string {
 // ensureJourneyFile checks if j's journey report markdown file exists in
 // storiesDir. If it does not exist, it renders and writes it (both .md and
 // .json) so that running `vmr story -compare` directly also produces the
-// individual journey reports.
+// individual journey reports. Either way it also ensures j's own Step
+// detail pages are materialized (P13.1 fix, caught by independent review
+// of this phase's ActionPlan): the .md existing is NOT proof its details
+// were ever materialized — the default suite (materializeDetails=false)
+// can have written this exact journey-<id>.md with none of its Step
+// details, and -compare naming that same journey later must not silently
+// leave every one of its "→ detail" links 404 forever. EnsureJourneyDetails
+// is cheap to call unconditionally here: EnsureRendered's fingerprint check
+// (P12) makes an already-materialized Step a fast skip, not a rewrite.
 func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string) error {
 	base := journeyBaseName(j)
 	mdPath := filepath.Join(storiesDir, base+".md")
 	if _, err := os.Stat(mdPath); err == nil {
+		story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
 		return nil
 	}
 	m := story.ComputeMetrics(j)
 	findings := story.ComputeFindings(j, lang)
-	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir)
+	// true: both -compare sides are user-named targets, same as a single
+	// -journey render (P13.1) — not a batch scope.
+	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, true)
 	return err
 }
 
@@ -738,11 +765,20 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof
 // detailDir/evidenceDir — P5.2's "渲染时目标缺失即按需补生成": the decision
 // spine's "→ detail" links and the system-prompt header's evidence links
 // must resolve without requiring the caller to have separately run
-// `vmr report -details` first.
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string) (string, error) {
+// `vmr report -details` first. materializeDetails gates this (P13.1): a
+// user-named target (single -journey, either -compare side) always passes
+// true; a batch render (-journey matching several, the default suite, or
+// -render-all) decides per-caller — see renderJourneys/renderAllJourneys'
+// own doc comments. When false, the spine's link text still renders (it's
+// a pure function of the Step's own Manifest — see EnsureJourneyDetails'
+// doc comment) and just points at a file that doesn't exist yet, the same
+// already-accepted failure mode a per-Step render error produces.
+func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, materializeDetails bool) (string, error) {
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
-	story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
+	if materializeDetails {
+		story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
+	}
 	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(storiesDir), "vmr-report.md"))
 	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil)
 	if llmSection != "" {

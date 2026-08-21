@@ -19,8 +19,8 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**（2026-08-21 P12 执行后重算，含外部独立审阅处置后的最终结果）：**高危 2 项**（`1.35`/`1.36`，同属"证据层体积纪律"）、中危 6 项（含 `[中低]` 1 项）、低危 15 项（另有 1 项已评估决定不做，登记备查，不计入分布）；2 + 6 + 15 = 23，加 `1.27` 共 24 条。`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11，死代码清理，判定同批大幅订正）、`1.41`/`1.37`（P12，渲染表示正确性——详单跳过谓词改为校验、`internal/story` 12 处未转义注入点补齐）已修复并移入 §3；`1.32` 的闭环判定已在 2026-08-21 全面复查中**撤回**（见 §3 第 31 项的订正与新登记的 `1.35`）；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
-- **两项高危的性质**：都不是稳定性/安全性缺陷（默认路径仍能正常跑完），是**派生产物体积比源数据大一个数量级**，且约 93% 的字节是同一批内容的重复拷贝。`1.41`（曾经的第三项高危——它产出的不是多余内容而是**错误内容**，且是前两项的技术前置）已由 P12 修复：跳过谓词从"文件存在即内容正确"的假设改为读取页面内渲染指纹并比对。`1.35`/`1.36` 仍符合 §4 自述的"价值高 + 成本低 + 还在等"这个需要解释的异常形态：修法所需机制全部现成，且现在不再有前置阻塞。
+- **§1 分布**（2026-08-21 P13 执行后重算，含外部独立审阅处置后的最终结果）：**高危 0 项**、中危 6 项（含 `[中低]` 1 项）、低危 15 项（另有 1 项已评估决定不做，登记备查，不计入分布）；0 + 6 + 15 = 21，加 `1.27` 共 22 条。`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8，JSON 语言策略统一）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11，死代码清理，判定同批大幅订正）、`1.41`/`1.37`（P12，渲染表示正确性）、`1.35`/`1.36`（P13，证据层体积纪律归位）已修复并移入 §3；原 `1.24`（浮点 1 ULP）经重新分类后移入 §2.5——它是浮点算术的性质，不是待办。
+- **不再有高危条目**。`1.41`（曾经的第三项高危——它产出的不是多余内容而是**错误内容**，且是 `1.35`/`1.36` 的技术前置）已由 P12 修复；`1.35`/`1.36` 本身（体积纪律从未成立、详单内部约 93% 是重复拷贝）已由 P13 修复——默认 `vmr analyze` 真实语料实测从 47MB/253 份详单降到 3.0MB/0 份详单，`-render-all` 全量物化的详单体积降约 86%，详见 §3 第 38 项。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
 ---
@@ -239,51 +239,6 @@
   多考虑一层"没有版本戳时怎么判断"。
 - **登记来源**：2026-08-20，P4 独立评审提出，核实为真实但低优先级，留给 P5/P6 触及 `journey-<id>.json` 形状时一并考虑。
 
-### 1.35 [高] 证据层的"默认按需、体积与信息量相称"纪律在 `vmr analyze` 上从未成立
-
-- **现状（2026-08-21 实测）**：单日真实语料（322 条记录）默认 `vmr analyze` 产出 **164MB**，
-  其中 `details/` 160MB / 306 份详单——与 P6 复盘记录的数字逐字相同。P9.2 的修法（默认只渲染
-  `category == task` 候选）在该样本上过滤掉 **0 个**候选（6/6 全是 `task`）；P9 自己的全量语料
-  执行记录也显示 task 类占候选数量的 49% 却占 **83.5% 的请求量**，按类别过滤削不掉数据量。
-  全量语料默认路径产出 **3.5GB / 8343 份详单**。
-- **根因**（与 P9.2 的诊断不同）：`cmd/vmr/cmd_story.go` 的 `writeJourneyFile` **无条件**调用
-  `story.EnsureJourneyDetails`，不区分"用户点名下钻一条 journey"与"批量渲染全部候选"。
-  架构文档 §7.5 本来就写明"渲染即生成"的成本与被渲染的链接条数成正比、请求索引不能每行挂链接，
-  但这条边界没有被套用到批量渲染模式上。
-- **`§1.32` 的"已闭环"判定应当撤回**：形态只是从"`analyze` 强制 `-render-all`"换成了"默认渲染
-  全部 task 候选、每步物化"，P9 解决的是它的下游症状（SIGKILL），纪律本身仍未成立。
-- **修法**：`writeJourneyFile` 增加"是否物化详单"入参；单条路径传 true，批量路径传 false，
-  `-details`/`-render-all` 显式要求时传 true。改动面全在 `cmd/vmr`，`internal/*` 零 diff。
-  详单文件名可算、生成幂等——批量模式只挂链接不生成不会产生死链接。
-- **必须同批补一条常驻守卫**：断言默认套件模式产出的 `details/` 文件数为 0（或不超过显式请求数）。
-  这条纪律已经被三次验收系统性绕过（P3.3 只验 `vmr report`、P6.5 验的是导航闭合、P9.2 验的是
-  不再 SIGKILL），共同点是"没有自动检查，每次靠人记得去量"。P4.2 的体积守卫是唯一一条至今没有
-  退化的纪律，也是唯一一条写成了常驻测试的。
-- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.1 / Package A。
-
-### 1.36 [高] 详单内部约 93% 的字节是同一批内容的第二/第三份拷贝
-
-- **现状（2026-08-21 实测，306 份详单 / 152MB）**：
-  - `Raw SSE, full` 折叠块 **62.4MB（41.1%）**——`reqdetail/detail.go` 的
-    `Details(t.RawSSEFull(...), codeFence(body))` 把 `rec.Client.Response.Body` 一字不差地嵌进去；
-  - ① Client → VMR Request 段 82.9MB，其中 **79.2MB（该段的 95.5%、总量的 52%）**位于第一个 `🆕`
-    标记之前，即上一轮详单已经渲染过一遍的历史消息；
-  - 本轮真正新增的内容约 6.7MB（4.4%）。
-- **性质**：与 P3.1 删 `details/*.json` 的论证**逐字同构**（"它是审计记录的逐字复制……有了 `req`
-  坐标，取原文是一次定位而非一次物化"）。架构文档 §7.6c 只砍了 `.json` 那一份，从未审视 `.md`
-  **内部**的两处同性质复制——这是设计期盲区，不是实现走样。
-- **两条修法所需的机制都已在仓库里**：
-  1. Raw SSE 块 → 一行带 `req` 坐标的取用提示（`vmr replay -req COORD -print`，P3.2 已交付）。
-     重组后的模型输出/reasoning/tool_calls 保留——那是解读，不是复制。**立减约 41%**。
-  2. ① 段只渲染 `deltaStart` 之后的消息，历史折叠为一行指向 `renderSessionHeader` **已经在渲染**
-     的 `PrevTurnLink`。`prev == nil`（lineage 首条、缝合边界）仍全文渲染，链条有起点。
-     **再减约 52%**。
-- **必须守住的不变量**：改完后 `vmr report -details` 与 `vmr analyze -journey` 两条路径对同一条
-  记录生成的详单仍须逐字节相同（P2 的核心不变量）。
-- **取舍**：修法 2 让"单份详单自包含"变成"要顺链回溯"。`Manifest.SysHash` 走 evidence 引用的
-  先例已证明这种取舍在证据层里可接受。
-- **登记来源**：2026-08-21 全面复查，`story_report_full_review_opus-5.md` §2.2 / Package A。
-
 ### 1.38 [中] `vmr report`/`vmr story` 别名保留了各自完整的分派逻辑，已经出现分叉
 
 - **现状**：P9.1 的验收标准原文是"收敛三套独立 flag 集合为一套"，实际交付是**新增第四套
@@ -328,8 +283,8 @@
   563 req（16 条 ≥10，max 91——全语料单条最大的 journey）**。三类"噪声"里**只有 heartbeat 的定性
   被数据支持**；subagent 更极端，既被折叠又不被渲染，却包含全语料最长的一条。
 - **修法方向**：让两条线合并成一条判据（显示即可渲染），只把 heartbeat 归为噪声。
-- **排期约束**：这会把默认渲染量从 238 条抬到约 370 条，**必须排在 `§1.35`/`§1.36` 的体积修复之后**，
-  否则是给已知的体积问题加码。
+- **排期约束（已满足）**：这会把默认渲染量从 238 条抬到约 370 条，本应排在体积修复之后，否则是给
+  已知的体积问题加码——`§1.35`/`§1.36` 已由 P13 修复（见 §3 第 38 项），前置条件已满足，可以排期。
 - **一个明确否决的备选**：在分类器上叠加"cron 且 chain>3 且 ToolCalls≥10 就升级为 task"的复合阈值。
   §7.7 原文是"判据用已有的结构信号，**不引入新的猜测**"，而 `ToolCalls >= 10` 是未校准的新猜测；
   更重要的是它解决错了问题——`[cron:…]` 前缀是客户端自己打的，分类是准确的，真问题是同一个准确的
@@ -458,6 +413,61 @@
 35. **P2/P3 遗留死代码清空，文档引用守卫扩展到源码注释**（P11.1/P11.2/P11.4，`internal/ctxgraph`/`internal/story`/`internal/chatmsg`/`internal/reqdetail`/`cmd/vmr`/`internal/archtest`）：`story_report_full_review_opus-5.md` §2.6 把六个"非缓存版/单条版"函数整批列为待删死代码，P11 开工前用 `deadcode` 的 `main()` 可达性分析 + 逐个读调用点复核，发现这个判定对其中五个是错的——它们要么是缓存正确性/单双遍等价性差分测试的独立参照实现，要么是 `internal/ctxgraph`/`internal/story` 两个包几乎每个测试文件搭建 fixture 的公共构造入口，且都被 Phase 1b 校准工具（`§1.18`）直接调用，只是该工具所在目录名前缀下划线，`go build ./...` 的可达性分析天然看不到它，不代表是死代码；`health.Registry.Available` 同样从待删名单移出，它是唯一无副作用的可用性查询方法，两个包的测试断言依赖它检查状态而没有替代路径。**实际删除的**：一个完全自我闭环、除自己的专属测试外无任何消费方的废弃索引子系统（连同其在 `Graph` 上的公开字段与扫描期的填充循环）、六个真正零引用的小函数（含 `deadcode` 复扫时新发现、原复查未列出的一个 —— `vmr check` 的旧版本 provider-proxy 渲染器，早被同文件里的新版本取代，其三个专属测试改为直接测试两者共享的底层逻辑，覆盖不丢）。同时把 `internal/archtest` 的文档引用守卫从"只覆盖顶层 docs/ 与 README"扩展为常驻测试 `TestArchitecture_DocReferences_SourceComments`，覆盖 `internal/`+`cmd/` 全部非测试源文件的注释——本次复查曾指出这类守卫"只守文档、不守源码注释"是本轮死引用两阶段未被发现的原因，扩大扫描范围后当场额外揪出两处同类历史死引用与三处因包名列表未加分隔符导致路径正则误判的假阳性，均已订正。曾登记为 §1.39（判定与范围均在 P11 开工前的重新核实中大幅修正，见 `story_report_p11_action_plan_sonnet-5.md` §0）。
 36. **详单跳过谓词从"假设"改为"校验"**（P12.1，`internal/reqdetail/render.go`/`detail.go`/`ensure.go`）：`EnsureRendered` 曾经的跳过条件是 `os.Stat(target) == nil`，把"文件名可从 Manifest 算出"（成立）误当成"同名文件内容正确"（不成立）——`Render` 的输出还依赖文件名不携带的 `lang`/`linkEvidence` 两个轴。改法：`Render` 输出的第一行固定写入一行机器可读、渲染时不可见的 HTML 注释指纹（`<!-- reqdetail:v<模板版本> lang=<en|zh> evidence=<true|false> -->`，`renderFingerprint`），`EnsureRendered` 改为有界读取目标文件的第一行（`readRenderFingerprint`，只读一行，不读整份文件）与期望指纹比对，不匹配（含"文件不存在"）才重新渲染并原子覆盖写入；新增的 `renderTemplateVersion` 常量是给未来"改变 `Render` 输出形状但不改变文件名"的改动（例如详单内容减法）预留的第三个失效维度，届时只需把这个数字加一，不需要再引入新参数——`TestEnsureRendered_RewritesOnStaleTemplateVersion` 用一个手写的旧版本指纹钉住这条路径本身可用，不必真的先动这个常量。**独立外部审阅（gemini-3.7-flash）当场指出首版实现有一处真实回归**：`linkEvidence` 分支被放在指纹比对之后，导致"evidence 模式不变、detail 页面指纹已匹配"这一种情况会在函数第一个 `return` 处直接退出，`EnsureSysPromptEvidence`/`EnsureToolsEvidence` 根本没有机会执行——这恰好是本条要修的 M9 场景本身（删掉 `evidence/` 后重跑），只是从"文件层面整体命中跳过"换成了"指纹匹配后跳过"，同一个 bug 换了个位置原样复现。修法：两个 `Ensure*Evidence` 调用挪到指纹比对**之前**、只要 `linkEvidence` 为真就无条件执行——它们自带的内容寻址幂等检查（`ensureEvidenceFile` 内部的 `os.Stat`）让命中的常见情形仍是一次廉价 stat，不是每次都重新生成。复核方法：先按审阅指出的错误顺序在本地临时还原一遍，确认新增的 `TestEnsureRendered_RebuildsDeletedEvidence`（evidence 模式全程不变、只删除 `evidence/` 目录后重跑，断言证据文件被重建）确实先失败、修复后再通过，而不是仅凭代码走查判定。真实语料验证（`~/.vmr/logs` 下 2 个文件 18 条真实记录，改动前后各跑一次 `vmr report -details`）：18 份详单逐份核对均为**恰好新增一行指纹**，无其它字节差异（这批真实记录都不含 `<`/`>`/`&`，未触发 P12.2/P12.3 的转义路径）。常驻回归测试：`TestEnsureRendered_RewritesOnLanguageChange`（同目录先 EN 后 ZH，详单从"① Client → VMR Request"变为"① Client → VMR 请求"）、`TestEnsureRendered_RewritesOnEvidenceModeChange`（内联切到证据链接）、`TestEnsureRendered_RebuildsDeletedEvidence`（真正的 M9 场景：evidence 模式不变，删除后重建）、`TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint`（无指纹的旧版本详单文件被判定为过期并重写）、`TestEnsureRendered_RewritesOnStaleTemplateVersion`。曾登记为 §1.41。
 37. **`internal/story` 的原文注入点补齐转义**（P12.2/P12.3，`internal/story/render_spine_args.go`/`render_spine_step.go`/`render_md.go`/`storyindex.go`/`render_compare.go`）：把 `internal/reqdetail` 已有的 `escapeHTML`/`escapeCell` 分别导出为 `EscapeHTML`/`EscapeCell`（`internal/reqdetail/render.go`），`internal/story` 新增两个三行的本地薄包装直接调用它们（`render_md.go`），不再维持独立实现——`internal/story` 已经在生产代码里 import `internal/reqdetail`（`ensure_details.go`/`render_spine_step.go` 的 `FileNameForManifest`），下沉不新增依赖边界，也是这次真正堵住"两份拷贝会静默漂移"这个已经发生过的失效模式的地方（`codeFence` 继续按原样各自保留一份，理由不变——它不依赖这个失效模式）。**修法范围比原登记的 3 处 `<summary>` + 2 处 inline 分支扩大了 7 处，分两批发现**：P12 开工前通读决策脊柱两个文件全文（而不只是原登记点名的行号）先发现 4 处（`toolCallLine` 的 `allShort` 分支、`SpineTaskLine`/`SpineInstructionLine`（两处调用点）/`SpineReportLine`（两处调用点）），全部按"截断/拉平在先、转义在后"处理，避免转义膨胀打乱既有截断长度语义；`codeFence` 包裹的完整内容不转义（CommonMark 不解析围栏代码块内的 HTML，这是判断要不要转义的唯一标准）。**独立外部审阅（gemini-3.7-flash）随后指出这一批的边界划得不对**：`render_md.go` 已经因为要放 `escapeHTML` 薄包装而被本次改动触及，声称它是"未计划修改的文件"不成立；更重要的是 `storyindex.go` 索引表格里的标题列比已修的 `<summary>` 注入点更严重——原文里一个 `|` 字符（例如任务标题引用了 `ps aux | grep vmr` 这样稀松平常的 shell 管道）会被 GFM 表格解析成额外一列，撕裂 `vmr-stories.md`（**首要导航入口**）的那一整行，不是"读者少看一段内容"，是"这一行、以及视觉上跟在后面的整张表格都乱了"。核实后追加修复 3 处：`render_md.go` 的 `j.Title`（顶层引用块）、`storyindex.go` 的标题列（`escapeCell(escapeHTML(...))`，两个函数一起用——单独 `escapeCell` 挡不住 `<!--`，单独 `escapeHTML` 挡不住 `|` 撕裂表格）、`render_compare.go` 的 `SideBlock`/`DivergenceHeavy`/`DivergenceLight` 的标题参数（复核 `storyindex.go`/`render_compare.go`/`render_md.go` 全文时一并发现，审阅本身未点名后两处的 `Divergence*` 部分）。至此全部 12 处原文注入点统一处理完毕，不再保留"明确不做的扩大"这条登记（原计划留出的 `§1.44` 已随之撤回）。常驻回归测试用 DevPlan 引用的真实反例形状（`"<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"`）钉住：`render_spine_args_test.go` 的 `TestToolCallLine` 新增 4 个子测试（inline/折叠/`allShort`/`<script>`+`&` 组合）、`render_spine_test.go` 新增 `TestRenderDecisionSpine` 的 4 个子测试加独立的 `TestFoldWhyLine_Escapes`/`TestToolResultLine_EscapesSummary`、`storyindex_test.go` 的 `TestRenderStoryIndexMarkdown_EscapesTitle`（断言标题里的 `|` 转义为 `\|` 而非撕裂列数）、`render_md_test.go` 的 `TestRenderMarkdown_EscapesJourneyTitle`、`compare_test.go` 的 `TestRenderComparisonMarkdown_EscapesTitles`。曾登记为 §1.37。
+38. **证据层体积纪律归位：批量渲染只挂链接、详单内部两处逐字复制削减、链接判据从 flag 改为事实**
+    （P13.1–P13.4，`cmd/vmr/cmd_story.go`/`cmd_analyze.go`、`internal/reqdetail/detail.go`/
+    `render.go`、`internal/report/requests.go`/`rows.go`、`cmd/vmr/cmd_report.go`）：这条纪律
+    第四次被提出（P3.3 → P6.5 → P9.2 → 本次），前三次都因为没有守卫而退化，详见下文。
+    - **P13.1**：`writeJourneyFile`/`renderJourneys`/`renderAllJourneys` 新增 `materializeDetails`
+      入参——单条下钻（`renderJourney`、`-compare` 的 `ensureJourneyFile`）与 `-journey` 命中多个
+      （即使解析出多个目标，仍是用户点名，不是默认套件的隐式批量）恒传 `true`；`-render-all`
+      （无论是 `vmr story -render-all` 的完整全量，还是 `vmr analyze -render-all` 把默认套件范围从
+      task-only 扩到全部候选）也传 `true`——这是用户主动要求"我全都要"；只有无 selector 的默认套件
+      （`cmd_analyze.go` 的 `taskOnlyCandidates` 分支）传 `false`。脊柱的"→ detail"链接文本是
+      Manifest 的纯函数，与目标文件是否存在无关（`EnsureJourneyDetails` 自身 doc comment 已经这样
+      论证），所以批量模式下链接照常渲染，只是可能暂未物化，不产生死链接。
+    - **P13.2**：`renderClientResponse` 的 `Details(t.RawSSEFull(...), codeFence(body))`
+      （响应体原始 SSE 全文，`rec.Client.Response.Body` 的逐字复制）改为一行带 `ctxgraph.ReqCoord`
+      坐标的取用提示（`RawSSERef`，指向 `vmr replay -print -req <coord>`）；`renderStreamSummary`
+      重组后的模型输出（reasoning/content/tool_calls）不变——那是解读，不是复制。
+    - **P13.3**：`renderClientRequest` 的消息渲染循环新增折叠分支——`haveDelta && i < deltaStart`
+      时不再逐条渲染历史消息，只在第一次命中时输出一行指向 `prev` 自己详单页的链接
+      （`HistoryFoldedNote`，复用 `FileNameForManifest`）；`prev == nil`（lineage 首条、缝合边界）
+      或 `deltaStart == 0`（同一 lineage 内容全量重置）时不折叠，全文渲染，链条有起点。
+      `renderTemplateVersion`（P12 交付）从 1 提到 2，让所有已写盘的旧详单在下次 `EnsureRendered`
+      时被判定为过期并重写，不需要引入第四个指纹参数。
+    - **P13.4**：`internal/report` 的 `detailCell` 判据从"本次是否开了 `-details` 开关"改为
+      `r.DetailFile` 是否真实存在于 `details/` 目录——`vmr analyze` 的 story/report 两个半区各自
+      可能独立物化，纯 flag 判据在这之后就不可靠。`Meta.DetailsEnabled`（喂给报表 §8 的整体性
+      判据）改为 `opts.detailsOn || detailDirHasFiles(detailDir)`（`detailsPresentFor`，
+      `cmd_report.go`），在 `report.Markdown` 渲染前、`BuildCached` 之前检查——即报表半区自己的
+      `-details` 写入尚未落盘时，也能看到 story 半区（P13.1 的 `-render-all` 路径）已经写下的文件。
+    - **P13.5**：新增 `TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails`（默认套件 `details/`
+      为 0 或不存在、脊柱链接仍渲染；`-render-all` 材料化非空）——人为把 P13.1 的判断改回"无条件
+      物化"，测试当场失败，改回来后通过，不是只凭代码走查判定守卫有效。
+    - **真实语料验证**（本仓库 `logs/` 下 2026-07-15 单日 394 条记录、07-15 全量 34 文件 11353 条
+      记录）：默认 `vmr analyze` 从 **47MB / 253 份详单 → 3.0MB / 0 份详单**；`-render-all` 从
+      **49MB（`details/` 45MB）→ 10MB（`details/` 6.1MB）**，同一批 302 份详单体积降约 86%；
+      `vmr report -details` 与 `vmr analyze -render-all` 对同一批记录生成的 302 份共有详单逐字节
+      比对**全部相同**（P2 核心不变量，改动前后各跑一遍二进制对照）。
+    - **独立外部审阅（gemini-3.7-flash）核查处置**：审阅走查 `ensureJourneyFile`
+      指出一处 P13.1 引入的真实回归——该函数发现 `journey-<id>.md` 已存在（例如默认套件先渲染过、
+      未物化详单）时直接 `return nil`，导致后续 `-compare` 点名同一个候选永远不会补齐它的详单，
+      链接永久 404，且无论重跑多少次都不会自愈（P13.1 之前"`.md` 存在 ⇒ 详单也存在"这条假设一直
+      成立，P13.1 把它悄悄破坏了）。**采纳，已修复**：`ensureJourneyFile` 的早退分支也无条件调用
+      `EnsureJourneyDetails`（P12 的指纹幂等检查让已物化的 Step 是一次快速跳过，不是重新渲染）；
+      复核方法与 §36 一致——先在本地还原审阅指出的错误顺序，确认新增的
+      `TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists` 先失败，再验证修复后
+      通过。审阅还指出 `detailCell` 若对全量语料的每一行都做一次 `os.Stat`，请求索引的多个渲染
+      函数（会话卡片、定时任务卡片、失败索引、全量表）会叠加出两万次以上的系统调用；**采纳，
+      已优化**：新增 `buildDetailFileSet`（一次 `os.ReadDir` 建立 `map[string]struct{}`，过滤隐藏
+      文件与非 `.md` 条目），`WriteRequestsIndex`/`WriteFailedIndex` 各自在入口调用一次，
+      `detailCell` 改为纯内存 `map` 查找；外部 API（两个 `Write*Index` 函数自身的签名）不变，
+      `cmd_report.go`/既有测试无需跟着改。审阅额外建议的两个测试补强（`-journey` 精准物化断言、
+      `linkEvidence=true` 且 `LCP=0` 边界）均已采纳，作为
+      `TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails`/
+      `TestRenderClientRequest_EvidenceLinkedZeroLCPDoesNotFold` 落地。
+    - **本条闭环的是 §1.35（体积纪律从未成立）与 §1.36（详单内部约 93% 是重复拷贝）两项**，详见
+      `story_report_p13_action_plan_sonnet-5.md`。
 
 ---
 
@@ -485,7 +495,7 @@
 > 不需要单独 ROI 行。`1.21`/`1.28`/`1.31` 三条已由 P7 修复（见 §3 第 27–29 项）、`1.19` 已由 P8
 > 修复（见 §3 第 30 项）、`1.30`/`1.33`/`1.34` 已由 P9 修复（见 §3 第 31–34 项），均已移出
 > 本表。**2026-08-21 全面复查 + 三份独立审阅核实后补入**：新增的 `1.35`–`1.43` 九条中，
-> `1.35`/`1.36`/`1.38`/`1.42`/`1.43` 各有一行（见下）；
+> `1.38`/`1.42`/`1.43` 各有一行（见下，`1.35`/`1.36` 已由 P13 修复移出本表——见 §3 第 38 项）；
 > `1.40`（归一化配对的真源位置）与 `1.29`/`1.27` 同类——触发条件已量化、结论已定，不需要单独
 > ROI 行。`1.32` 的闭环判定已撤回，其内容并入 `1.35`。`1.39`（P2/P3 遗留死代码）已由 P11
 > 清理（见 §3 第 35 项）、`1.41`/`1.37`（渲染表示正确性）已由 P12 清理（见 §3 第 36–37 项），
@@ -495,10 +505,8 @@
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| 1.35 | 证据层"默认按需"在 `vmr analyze` 上从未成立 | **低** | 低 | **已证** | **高** | 改动面是 `writeJourneyFile` 一个入参 + 三个调用点，`internal/*` 零 diff；收益已实测（单日 164MB、全量 3.5GB）。**这是本表自述的那个"需要解释的异常"再次出现**——第四次了，所以修法必须附带一条常驻守卫，否则会有第五次。**`1.41` 这个硬前置已由 P12 排除**，现在可以直接排期 |
-| 1.36 | 详单内部约 93% 是重复拷贝 | **低** | 中 | **已证** | **高** | 两条减法的机制全部现成（`req` 坐标 + `PrevTurnLink`），各自独立可交付；风险是中而非低，因为必须守住"两条路径生成的详单逐字节相同"这条 P2 核心不变量——这也正是该配一次差分测试的地方。**`1.41` 这个硬前置已由 P12 排除**，现在可以直接排期 |
 | 1.38 | 别名保留完整分派逻辑、已分叉 | 中 | 中 | 中 | **中** | 分叉已经发生（`resolveLLMOptions` 在一侧修了、另一侧没修），不是预防性重构。但两个别名的移除时机本身未定，若近期就移除则本条自动消失——**先确认别名的去留，再决定要不要薄化** |
-| 1.42 | 索引显示与默认渲染对 `cron` 判定相反 | 低 | 低 | 中 | **中** | 实测单日索引首屏 22 行只有 8 行可点；数据只支持把 heartbeat 归为噪声（cron 有 44 条 ≥10 请求、subagent 含全语料最长的一条）。**排期上必须排在 `1.35`/`1.36` 之后**——它会把默认渲染量从 238 抬到约 370 条 |
+| 1.42 | 索引显示与默认渲染对 `cron` 判定相反 | 低 | 低 | 中 | **中** | 实测单日索引首屏 22 行只有 8 行可点；数据只支持把 heartbeat 归为噪声（cron 有 44 条 ≥10 请求、subagent 含全语料最长的一条）。**前置条件已满足**（`1.35`/`1.36` 已由 P13 修复）——它会把默认渲染量从 238 抬到约 370 条，现在体积已经先降下来，可以排期 |
 | 1.43 | 三个 Finding 检测器在 99.48% 语料上沉默且未披露 | **低** | 无 | 中 | **中** | 取舍已由 §2.4 的 495,672 条实测定案，缺的只是披露。零推断、零新判据，改的是呈现层的一段标注 |
 | 1.13 | 额度燃尽看板 | 高 | 低 | 中 | **中** | 产品价值而非技术债，按产品路线排期，不与本表其他条目抢顺序 |
 | 1.18 | Phase 1b 六个 LLM 判别器未完成黄金样本校准 | 高 | 低 | 中 | **中** | 校准是人工标注投入（30–50 个 Journey 逐条判断 TP/FP），无法自动化；六个判别器在真实语料上已达 100% Evidence Anchor 有效率、人工抽查判断合理，当前没有观察到需要立即处理的误报模式，不构成阻塞性风险。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力投入的时间，不在代码**，这是它与本表其余"低 ROI、缺 profile/前置条件"条目的本质区别 |
@@ -518,17 +526,13 @@
 
 ### 4.2 分档结论
 
-- **高 ROI（2 条，2026-08-21 全面复查 + 三份独立审阅核实后更新，`1.41` 已由 P12 修复移入 §3）**：
-  `1.35`/`1.36`——两条都是"价值已实测、成本低、修法所需机制全部现成、却还在等"，正是下面那段原文
-  说的**需要解释的异常**。`1.31`（P7）已修复移入 §3；`1.32` 曾被记为 P9 修复，本次复查**撤回**了
-  那个判定并重新登记为 `1.35`。
-  P7/P9 那两条的教训**没有生效，同一个机制又犯了两次**：P6 的验收走查用的是 `vmr analyze`
-  （最全的那条路径），而用户日常跑的是 `vmr report`（默认路径）——当时的结论是"验收要在默认路径
-  上做"。P9 之后 `vmr analyze` **本身就是默认路径**了，而 P9.2 的验收对象换成了"不再 SIGKILL"，
-  体积纪律再一次没有被量；此后三份独立审阅报告**没有一份测量过默认路径的产物体积**。
-  **更普适的那条教训是：验收对象要是"那条纪律现在还成立吗"，而不是"这次改动做了什么"。**
-  这也是为什么 `1.35` 的修法被要求附带一条常驻守卫——P4.2 是全仓唯一一条把纪律写成常驻自动检查
-  的任务，也是唯一一条至今没有退化的纪律。
+- **高 ROI（0 条——2026-08-21 P13 执行后，`1.35`/`1.36` 已修复移入 §3，见第 38 项）**：
+  这两条曾是"价值已实测、成本低、修法所需机制全部现成、却还在等"这个需要解释的异常本身，
+  第四次被提出（P3.3 → P6.5 → P9.2 → P13）才真正闭环——前三次都因为没有配套的常驻守卫而退化。
+  P13.5 补上了那条守卫（`TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails`，人为反证过）。
+  **更普适的那条教训**（这条本身不因 `1.35`/`1.36` 关闭而失效，留给以后同类条目参考）：
+  验收对象要是"那条纪律现在还成立吗"，而不是"这次改动做了什么"——P4.2 至今仍是全仓唯一一条
+  从一开始就把纪律写成常驻自动检查、也至今没有退化的任务，P13.5 是第二条。
 - **中 ROI（6 条，看触发；`1.28` 已由 P7 修复移入 §3，`1.39` 已由 P11 清理移入 §3，
   `1.37` 已由 P12 修复移入 §3）**：
   `1.38`（别名分叉，先补齐 analyze 缺失的两个模式再薄化）；

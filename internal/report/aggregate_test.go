@@ -484,7 +484,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, false); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -787,7 +787,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 	rows := rep.RequestRows()
 
-	if err := WriteFailedIndex(rows, dir, i18n.EN, false); err != nil {
+	if err := WriteFailedIndex(rows, dir, i18n.EN, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
 	failedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
@@ -808,7 +808,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 
 	// The full index is unaffected: still every request, the plain ok one included.
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, false); err != nil {
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
 	fullMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
@@ -829,7 +829,7 @@ func TestWriteFailedIndex(t *testing.T) {
 
 func TestWriteFailedIndexEmpty(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteFailedIndex(nil, dir, i18n.EN, false); err != nil {
+	if err := WriteFailedIndex(nil, dir, i18n.EN, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))

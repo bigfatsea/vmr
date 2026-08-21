@@ -236,7 +236,7 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 
 	renderClientRequest(&b, rec, m, prev, f, t, linkEvidence)
 	renderAttempts(&b, rec, t)
-	renderClientResponse(&b, rec, t)
+	renderClientResponse(&b, rec, path, line, t)
 	return b.String()
 }
 
@@ -398,9 +398,28 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 				w("%s", t.HistoryVsNewNote(deltaStart))
 			}
 		}
+		foldedHistory := false
 		for i, msg := range msgs {
 			if linkEvidence && i < leadSys {
 				continue // already covered by the evidence link above
+			}
+			// P13.3 (KNOWN_ISSUES §1.36): messages before deltaStart are
+			// byte-identical to what prev's own detail page already
+			// rendered (deltaStart is exactly the point renderSessionHeader
+			// tags with the "🆕 rest is new" split) — folding them into one
+			// link instead of re-rendering each is the same cut the
+			// evidence-link branch above already makes for the leading
+			// system prompt, applied to the rest of the shared history.
+			// prev == nil (haveDelta false: a lineage's first Step, or a
+			// stitch boundary) always falls through to full rendering — the
+			// chain has to have a starting point somewhere.
+			if haveDelta && i < deltaStart {
+				if !foldedHistory {
+					w("%s", t.HistoryFoldedNote(deltaStart,
+						prev.TS.In(fmtutil.DisplayZone).Format("15:04:05.000"), FileNameForManifest(prev)))
+					foldedHistory = true
+				}
+				continue
 			}
 			prefix := ""
 			if haveDelta && i >= deltaStart {
@@ -511,8 +530,11 @@ func writeNorms(b *strings.Builder, norms []string, t i18n.DetailText) {
 }
 
 // renderClientResponse emits section ③: what the client received, with the
-// stream reassembled into the actual model output.
-func renderClientResponse(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
+// stream reassembled into the actual model output. path/line are the
+// record's own coordinate (ctxgraph.ReqCoord) — P13.2's raw-SSE reference
+// line uses it to point at `vmr replay -print -req <coord>` instead of
+// inlining rec.Client.Response.Body's raw bytes a second time (see below).
+func renderClientResponse(b *strings.Builder, rec *audit.Record, path string, line int, t i18n.DetailText) {
 	w := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	w("## %s\n\n", t.ClientResponseTitle)
 	resp := rec.Client.Response
@@ -543,7 +565,16 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record, t i18n.DetailTe
 		if s := chatmsg.ReassembleSSE(body); s != nil {
 			w("\n### %s\n\n", t.ModelOutputSSE(s.Events))
 			renderStreamSummary(b, s, t)
-			b.WriteString(Details(t.RawSSEFull(s.Events, fmtutil.FmtBytes(int64(len(body)))), codeFence(body)))
+			// P13.2 (KNOWN_ISSUES §1.36): the raw SSE bytes are a verbatim
+			// copy of what renderStreamSummary just reassembled above —
+			// unlike that reassembly (reasoning/content/tool_calls, which
+			// IS interpretation), inlining the wire bytes a second time is
+			// pure duplication (41% of a real-corpus detail page's size,
+			// per the 2026-08-21 review). ctxgraph.ReqCoord + `vmr replay
+			// -print -req` (P3.2) already exists as the "fetch this exact
+			// record's raw bytes on demand" primitive — reuse it instead
+			// of a second physical copy.
+			w("%s", t.RawSSERef(s.Events, fmtutil.FmtBytes(int64(len(body))), ctxgraph.ReqCoord(path, line)))
 		} else {
 			renderRawBody(b, t.BodyNonJSONSSE, body, t)
 		}

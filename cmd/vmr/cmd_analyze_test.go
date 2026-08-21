@@ -212,6 +212,166 @@ func TestCmdAnalyze_DefaultSuiteScopeIsTaskOnly(t *testing.T) {
 	}
 }
 
+// detailFileCount counts the entries under {dir}/details, treating a
+// missing directory as 0 — the P13.5 guard needs to distinguish "not
+// created at all" from "created but empty" from "populated", and both the
+// first two count as compliant with "batch mode does not materialize".
+func detailFileCount(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(dir, "details"))
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+// TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails covers P13.1/P13.5
+// (KNOWN_ISSUES §1.35): the default suite (no selector, no -render-all)
+// must render every candidate's decision-spine "→ detail" links without
+// writing the target files — this discipline has been stated three times
+// before (P3.3 → P6.5 → P9.2) and regressed each time because nothing
+// asserted it as a standing test. -render-all opts back into full
+// materialization (an explicit "materialize everything" ask), and a
+// targeted -journey render always materializes its own journey regardless
+// of the default suite's batch scope.
+func TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+	u1 := storyMsg("user", "P13.5 guard fixture opening instruction")
+	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
+	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
+	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
+		t.Fatalf("cmdAnalyze (default suite): %v", err)
+	}
+	if n := detailFileCount(t, outDir); n != 0 {
+		t.Errorf("default suite materialized %d detail file(s), want 0 (batch mode should only link, not generate — P13.1)", n)
+	}
+	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	if len(got) != 1 {
+		t.Fatalf("default suite should still render the 1 task candidate's journey report, got %d: %v", len(got), got)
+	}
+	md, err := os.ReadFile(filepath.Join(outDir, "stories", got[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md), "../details/") {
+		t.Errorf("journey report should still carry a decision-spine detail link (target need not exist yet), got:\n%s", md)
+	}
+
+	// -render-all is an explicit "materialize everything" ask — opts back
+	// into writing the detail files the default suite above skipped.
+	outDir2 := filepath.Join(t.TempDir(), "out2")
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir2, "-render-all", path}) }); err != nil {
+		t.Fatalf("cmdAnalyze -render-all: %v", err)
+	}
+	if n := detailFileCount(t, outDir2); n == 0 {
+		t.Error("-render-all should materialize detail files, got 0")
+	}
+}
+
+// TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails covers P13.5
+// (independent review's F-03): a targeted -journey render must materialize
+// exactly the named journey's own Step details, not every candidate's —
+// distinguishing "the default suite's implicit batch skips details"
+// (P13.1) from "a -journey selector always materializes, even multi-match"
+// (this file's §0.4 judgment call) requires both directions to hold, not
+// just the batch-skips-it half P13.5's other test already covers.
+func TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	aU1 := storyMsg("user", "candidate A for the F-03 targeted-materialization test")
+	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
+	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+
+	bU1 := storyMsg("user", "candidate B for the F-03 targeted-materialization test")
+	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
+	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+
+	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	if err != nil {
+		t.Fatalf("setupStoryRun: %v", err)
+	}
+	if len(su.chains) != 2 {
+		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
+	}
+	idA := story.ID(su.chains[0])
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-journey", idA, path})
+	}); err != nil {
+		t.Fatalf("cmdAnalyze -journey %s: %v", idA, err)
+	}
+	if n := detailFileCount(t, outDir); n != 2 {
+		t.Errorf("named journey has 2 records — want exactly 2 detail files (only its own), got %d", n)
+	}
+}
+
+// TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists covers
+// a P13.1 regression an independent review of this phase's ActionPlan
+// caught before it shipped: ensureJourneyFile's "journey-<id>.md already
+// exists, nothing to do" early return predates P13.1, back when a
+// journey's .md existing WAS proof its Step details existed too (every
+// write always materialized both). P13.1 broke that assumption — the
+// default suite can leave a journey-<id>.md on disk with none of its
+// details/. Running the default suite first, then -compare naming one of
+// those same candidates, must still materialize that journey's details —
+// not silently leave every "→ detail" link 404 forever because the .md
+// already existed.
+func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	aU1 := storyMsg("user", "candidate A for the F-01 regression test")
+	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
+	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+
+	bU1 := storyMsg("user", "candidate B for the F-01 regression test")
+	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
+	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+
+	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	// Step 1: the default suite renders both (task-classified) candidates'
+	// journey-*.md but — per P13.1 — materializes neither one's details/.
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
+		t.Fatalf("cmdAnalyze (default suite): %v", err)
+	}
+	if n := detailFileCount(t, outDir); n != 0 {
+		t.Fatalf("precondition failed: default suite already materialized %d detail file(s)", n)
+	}
+
+	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	if err != nil {
+		t.Fatalf("setupStoryRun: %v", err)
+	}
+	if len(su.chains) != 2 {
+		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
+	}
+	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+
+	// Step 2: -compare names two candidates whose journey-*.md ALREADY
+	// exists from step 1. Their details/ must still get materialized now.
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
+	}); err != nil {
+		t.Fatalf("cmdAnalyze -compare: %v", err)
+	}
+	if n := detailFileCount(t, outDir); n == 0 {
+		t.Error("-compare left both named journeys' details/ empty even though their journey-*.md pre-existed (F-01 regression)")
+	}
+}
+
 // TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly covers P9.1: a zoom
 // selector routes into that one story-side view and does NOT also run the
 // macro report half — "选中其一时行为等价于今天 vmr story 的对应模式", not

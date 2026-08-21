@@ -41,7 +41,11 @@ type DetailText struct {
 	MessagesTitle         func(n int) string
 	RoleTokenShare        func(line string) string
 	HistoryVsNewNote      func(deltaStart int) string
-	IncrementNote         func(n, deltaStart int) string
+	// HistoryFoldedNote (P13.3) replaces re-rendering each message before
+	// deltaStart with one link to the previous turn's own detail page —
+	// those messages are byte-identical to what that page already shows.
+	HistoryFoldedNote func(n int, ts, file string) string
+	IncrementNote     func(n, deltaStart int) string
 
 	AttemptsTitle          func(n int) string
 	NoAttempts             string
@@ -62,10 +66,15 @@ type DetailText struct {
 	ResponseHeadersDiffSummary func(union, changed int) string
 	EmptyBody                  string
 	ModelOutputSSE             func(events int) string
-	RawSSEFull                 func(events int, size string) string
-	BodyNonJSONSSE             string
-	ModelOutputTitle           string
-	FullResponseJSON           func(size string) string
+	// RawSSERef (P13.2) points at the coordinate-based retrieval primitive
+	// (`vmr replay -print -req <coord>`, P3.2) instead of inlining the raw
+	// SSE bytes a second time — renderStreamSummary just reassembled the
+	// same bytes into reasoning/content/tool_calls above this line, which
+	// is interpretation and stays; this was pure duplication.
+	RawSSERef        func(events int, size, coord string) string
+	BodyNonJSONSSE   string
+	ModelOutputTitle string
+	FullResponseJSON func(size string) string
 
 	ReasoningChars    func(chars string) string
 	ToolCallArgsChars func(name, id, chars string) string
@@ -159,6 +168,9 @@ func Detail(lang Lang) DetailText {
 			HistoryVsNewNote: func(deltaStart int) string {
 				return "#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文（↺）,#" + strconv.Itoa(deltaStart+1) + " 起为本轮新增（🆕）\n\n"
 			},
+			HistoryFoldedNote: func(n int, ts, file string) string {
+				return "↺ #1–#" + strconv.Itoa(n) + "（历史上下文）—— 见上一轮详单：[" + ts + "](./" + file + ")\n\n"
+			},
 			IncrementNote: func(n, deltaStart int) string {
 				return "\n🆕 **本轮增量（相对上一轮,+" + strconv.Itoa(n) + " 条,#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文）**\n"
 			},
@@ -190,8 +202,8 @@ func Detail(lang Lang) DetailText {
 			ModelOutputSSE: func(events int) string {
 				return "模型输出（由 " + strconv.Itoa(events) + " 个 SSE 事件重组）"
 			},
-			RawSSEFull: func(events int, size string) string {
-				return "原始 SSE 全文（" + strconv.Itoa(events) + " events · " + size + "）"
+			RawSSERef: func(events int, size, coord string) string {
+				return "原始 SSE：" + strconv.Itoa(events) + " 个事件，" + size + " —— 按坐标取回原文：`vmr replay -print -req " + coord + "`\n\n"
 			},
 			BodyNonJSONSSE:   "Body（非 JSON/SSE）",
 			ModelOutputTitle: "模型输出",
@@ -311,6 +323,9 @@ func Detail(lang Lang) DetailText {
 		HistoryVsNewNote: func(deltaStart int) string {
 			return "#1–#" + strconv.Itoa(deltaStart) + " are prior context (↺), #" + strconv.Itoa(deltaStart+1) + "+ are new this turn (🆕)\n\n"
 		},
+		HistoryFoldedNote: func(n int, ts, file string) string {
+			return "↺ #1–#" + strconv.Itoa(n) + " (prior context) — see the previous turn's detail page: [" + ts + "](./" + file + ")\n\n"
+		},
 		IncrementNote: func(n, deltaStart int) string {
 			return "\n🆕 **This turn's increment (vs. the previous turn, +" + strconv.Itoa(n) + ", #1–#" + strconv.Itoa(deltaStart) + " are prior context)**\n"
 		},
@@ -342,8 +357,8 @@ func Detail(lang Lang) DetailText {
 		ModelOutputSSE: func(events int) string {
 			return "Model Output (reassembled from " + strconv.Itoa(events) + " SSE events)"
 		},
-		RawSSEFull: func(events int, size string) string {
-			return "Raw SSE, full (" + strconv.Itoa(events) + " events · " + size + ")"
+		RawSSERef: func(events int, size, coord string) string {
+			return "Raw SSE: " + strconv.Itoa(events) + " events, " + size + " — fetch the exact bytes: `vmr replay -print -req " + coord + "`\n\n"
 		},
 		BodyNonJSONSSE:   "Body (non-JSON/SSE)",
 		ModelOutputTitle: "Model Output",

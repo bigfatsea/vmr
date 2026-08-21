@@ -486,3 +486,190 @@ func TestRender_RejectedRecordNoManifest(t *testing.T) {
 		t.Errorf("FileNameForRecord for a rejected record = %q, want the (rejected)/none fallbacks", name)
 	}
 }
+
+// sseBody builds a minimal valid SSE response body chatmsg.ReassembleSSE
+// accepts, carrying text as the assistant's content — same shape
+// cmd/vmr's storySSE test helper uses.
+func sseBody(text string) string {
+	return `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"` + text + `"}}],"model":"agent"}
+data: {"choices":[{"index":0,"finish_reason":"stop","delta":{}}]}
+data: [DONE]`
+}
+
+// TestRenderClientResponse_RawSSEIsReferenceNotCopy covers P13.2
+// (KNOWN_ISSUES §1.36): the raw SSE wire body must no longer be inlined
+// verbatim — only referenced by the record's own req coordinate — while
+// the reassembled model output (renderStreamSummary's job, not a copy of
+// the wire bytes) still renders in full.
+func TestRenderClientResponse_RawSSEIsReferenceNotCopy(t *testing.T) {
+	rec := &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok", Stream: true,
+		Client: audit.Exchange{
+			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: map[string]any{}},
+			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: sseBody("distinctive-reply-marker")},
+		},
+	}
+	got := Render(rec, "vmr-audit-2026-07-08.jsonl", 42, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
+
+	// The reassembled content still renders in full (interpretation, not a
+	// copy of the wire bytes).
+	if !strings.Contains(got, "distinctive-reply-marker") {
+		t.Errorf("reassembled model output missing, got:\n%s", got)
+	}
+	// The raw wire structure (only present in a verbatim SSE dump, never in
+	// the reassembled summary) must be gone.
+	if strings.Contains(got, `"delta":{"role":"assistant"`) {
+		t.Errorf("raw SSE wire body still inlined verbatim, got:\n%s", got)
+	}
+	// A coordinate-based reference to fetch it on demand takes its place.
+	coord := ctxgraph.ReqCoord("vmr-audit-2026-07-08.jsonl", 42)
+	if !strings.Contains(got, coord) || !strings.Contains(got, "vmr replay -print -req") {
+		t.Errorf("missing coordinate-based raw-SSE retrieval reference (want %q + \"vmr replay -print -req\"), got:\n%s", coord, got)
+	}
+}
+
+// deltaFixture builds two related records sharing a common opening
+// system+user prefix, for exercising P13.3's history-folding path:
+// prevRec's messages are entirely covered by curRec's, so
+// ctxgraph.Classify(prevManifest, curManifest).LCP > 0 and deltaStart
+// lands after the shared prefix. lcp0 additionally makes curRec share
+// NOTHING with prevRec (LCP == 0, and no leading system message at all),
+// exercising the deltaStart == 0 boundary where nothing should fold.
+func deltaFixture(t *testing.T, lcp0 bool) (curRec *audit.Record, curManifest, prevManifest *ctxgraph.Manifest) {
+	t.Helper()
+	at := func(m int) time.Time { return time.Date(2026, 8, 21, 9, m, 0, 0, time.UTC) }
+	prevRec := &audit.Record{TS: at(0), Model: "agent", Outcome: "ok",
+		Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"messages": []any{
+			map[string]any{"role": "system", "content": "sys"},
+			map[string]any{"role": "user", "content": "prev-only-content-marker"},
+		}}}},
+	}
+	curMsgs := []any{
+		map[string]any{"role": "system", "content": "sys"},
+		map[string]any{"role": "user", "content": "prev-only-content-marker"},
+		map[string]any{"role": "assistant", "content": "new-reply-marker"},
+		map[string]any{"role": "user", "content": "new-continue-marker"},
+	}
+	if lcp0 {
+		// No leading system message and no shared content at all — LeadSys
+		// == 0 and LCP == 0, so deltaStart == 0.
+		curMsgs = []any{map[string]any{"role": "user", "content": "totally-unrelated-content"}}
+	}
+	curRec = &audit.Record{TS: at(1), Model: "agent", Outcome: "ok",
+		Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"messages": curMsgs}}},
+	}
+	var ok bool
+	prevManifest, ok = ctxgraph.BuildManifest(prevRec, "vmr-audit-2026-07-08.jsonl", 41)
+	if !ok {
+		t.Fatal("BuildManifest(prevRec) returned ok=false")
+	}
+	curManifest, ok = ctxgraph.BuildManifest(curRec, "vmr-audit-2026-07-08.jsonl", 42)
+	if !ok {
+		t.Fatal("BuildManifest(curRec) returned ok=false")
+	}
+	return curRec, curManifest, prevManifest
+}
+
+// TestRenderClientRequest_FoldsHistoryBeforeDelta covers P13.3
+// (KNOWN_ISSUES §1.36): messages before deltaStart (the shared prefix with
+// prev) fold into one link to prev's own detail page instead of each
+// being re-rendered in full.
+func TestRenderClientRequest_FoldsHistoryBeforeDelta(t *testing.T) {
+	curRec, curManifest, prevManifest := deltaFixture(t, false)
+	got := Render(curRec, "vmr-audit-2026-07-08.jsonl", 42, curManifest, prevManifest, taskseg.OpenClawAware, i18n.EN, false)
+
+	if strings.Contains(got, "prev-only-content-marker") {
+		t.Errorf("history before deltaStart should be folded, not re-rendered, got:\n%s", got)
+	}
+	if !strings.Contains(got, "new-reply-marker") || !strings.Contains(got, "new-continue-marker") {
+		t.Errorf("messages at/after deltaStart must still render in full, got:\n%s", got)
+	}
+	if n := strings.Count(got, "🆕"); n < 2 {
+		t.Errorf("want at least 2 🆕-prefixed messages (reply+continue), got %d in:\n%s", n, got)
+	}
+	prevLink := FileNameForManifest(prevManifest)
+	if !strings.Contains(got, prevLink) {
+		t.Errorf("folded-history note must link to the previous turn's own page (%s), got:\n%s", prevLink, got)
+	}
+	if n := strings.Count(got, prevLink); n < 1 {
+		t.Errorf("folded-history link should appear exactly once (not once per folded message), got %d in:\n%s", n, got)
+	}
+}
+
+// TestRenderClientRequest_NoDeltaRendersFullHistory covers the prev == nil
+// case (a lineage's first Step, or a stitch boundary, per §2.2's "the
+// chain has to have a starting point somewhere") — folding must never
+// trigger without a previous turn to point at.
+func TestRenderClientRequest_NoDeltaRendersFullHistory(t *testing.T) {
+	curRec, curManifest, _ := deltaFixture(t, false)
+	got := Render(curRec, "vmr-audit-2026-07-08.jsonl", 42, curManifest, nil, taskseg.OpenClawAware, i18n.EN, false)
+	if !strings.Contains(got, "prev-only-content-marker") {
+		t.Errorf("with prev == nil, every message must render in full (no folding), got:\n%s", got)
+	}
+}
+
+// TestRenderClientRequest_EvidenceLinkedZeroLCPDoesNotFold covers a
+// boundary the independent review of this phase's ActionPlan flagged for
+// explicit coverage (F-05): linkEvidence=true AND a leading system prompt
+// (leadSys > 0) AND LCP == 0 against prev — so deltaStart == leadSys, not
+// 0. The evidence-skip branch (i < leadSys) already consumes every index
+// the fold branch could have folded, so foldedHistory must stay false: the
+// system prompt gets an evidence link (not folded, not inlined) and the
+// sole user message renders in full with the 🆕 prefix (not folded either,
+// since deltaStart == leadSys means the loop's i < deltaStart never fires
+// once evidence-skip has already handled [0, leadSys)).
+func TestRenderClientRequest_EvidenceLinkedZeroLCPDoesNotFold(t *testing.T) {
+	prevRec := &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok",
+		Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"messages": []any{
+			map[string]any{"role": "system", "content": "old-sys"},
+			map[string]any{"role": "user", "content": "prev-marker"},
+		}}}},
+	}
+	curRec := &audit.Record{TS: time.Now(), Model: "agent", Outcome: "ok",
+		Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"messages": []any{
+			map[string]any{"role": "system", "content": "new-sys-content"},
+			map[string]any{"role": "user", "content": "totally-different-user-msg"},
+		}}}},
+	}
+	prevManifest, ok := ctxgraph.BuildManifest(prevRec, "vmr-audit-2026-07-08.jsonl", 41)
+	if !ok {
+		t.Fatal("BuildManifest(prevRec) returned ok=false")
+	}
+	curManifest, ok := ctxgraph.BuildManifest(curRec, "vmr-audit-2026-07-08.jsonl", 42)
+	if !ok {
+		t.Fatal("BuildManifest(curRec) returned ok=false")
+	}
+	if curManifest.LeadSys == 0 {
+		t.Fatal("fixture invalid: want curRec to have a leading system message")
+	}
+
+	got := Render(curRec, "vmr-audit-2026-07-08.jsonl", 42, curManifest, prevManifest, taskseg.OpenClawAware, i18n.EN, true)
+
+	if !strings.Contains(got, "System Prompt") || !strings.Contains(got, "../evidence/") {
+		t.Errorf("system prompt should get an evidence link (not folded, not inlined), got:\n%s", got)
+	}
+	// "prior context" alone would also match the unrelated, always-present
+	// IncrementNote summary line — check for HistoryFoldedNote's own
+	// distinguishing wording instead.
+	if strings.Contains(got, "previous turn's detail page") {
+		t.Errorf("no folded-history note should appear when deltaStart == leadSys, got:\n%s", got)
+	}
+	if !strings.Contains(got, "totally-different-user-msg") {
+		t.Errorf("the sole user message must still render in full, got:\n%s", got)
+	}
+}
+
+// TestRenderClientRequest_ZeroLCPRendersFullHistory covers the
+// deltaStart == 0 boundary (prev != nil but nothing is shared, e.g. a
+// same-lineage full context reset) — the loop condition is i < deltaStart,
+// which is never true when deltaStart is 0, so nothing should fold and
+// every message renders with the 🆕 prefix.
+func TestRenderClientRequest_ZeroLCPRendersFullHistory(t *testing.T) {
+	curRec, curManifest, prevManifest := deltaFixture(t, true)
+	got := Render(curRec, "vmr-audit-2026-07-08.jsonl", 42, curManifest, prevManifest, taskseg.OpenClawAware, i18n.EN, false)
+	if !strings.Contains(got, "totally-unrelated-content") {
+		t.Errorf("with deltaStart == 0, the message must render in full (no folding), got:\n%s", got)
+	}
+	if !strings.Contains(got, "🆕") {
+		t.Errorf("with deltaStart == 0, the sole message should still carry the 🆕 prefix, got:\n%s", got)
+	}
+}

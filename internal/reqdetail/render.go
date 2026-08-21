@@ -60,8 +60,11 @@ func EscapeHTML(s string) string {
 // render logic) are unchanged. Bumping this is the mechanism a future
 // change (e.g. a content-volume reduction) uses to force EnsureRendered to
 // rewrite every existing page instead of introducing a fourth axis
-// alongside lang/linkEvidence — see renderFingerprint.
-const renderTemplateVersion = 1
+// alongside lang/linkEvidence — see renderFingerprint. Bumped to 2 by
+// P13.2/P13.3 (KNOWN_ISSUES §1.36): the raw SSE full-body block became a
+// coordinate reference, and history messages before deltaStart fold into a
+// link to the previous turn's own page instead of being re-rendered.
+const renderTemplateVersion = 2
 
 // renderFingerprint is a one-line, machine-checkable summary of every input
 // to Render's output shape that FileName does NOT capture: language,
