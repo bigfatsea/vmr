@@ -81,9 +81,9 @@ func spineWhyLine(s *Step) string {
 func foldWhyLine(prefix, text string, capLen int) string {
 	flat := strings.Join(strings.Fields(text), " ")
 	if len([]rune(flat)) <= capLen {
-		return prefix + flat + "\n\n"
+		return prefix + escapeHTML(flat) + "\n\n"
 	}
-	return prefix + "<details><summary>" + oneLineTruncate(text, capLen) + "</summary>\n\n" +
+	return prefix + "<details><summary>" + escapeHTML(oneLineTruncate(text, capLen)) + "</summary>\n\n" +
 		codeFence(text) + "\n</details>\n\n"
 }
 
@@ -108,7 +108,7 @@ func toolResultLine(name string, r chatmsg.ToolResult, positional bool, t i18n.S
 	if positional {
 		badge = t.SpinePositionalMatch
 	}
-	return mark + " `" + name + "`" + badge + ": <details><summary>" + oneLineTruncate(r.Text, spinePreviewLen) + "</summary>\n\n" +
+	return mark + " `" + name + "`" + badge + ": <details><summary>" + escapeHTML(oneLineTruncate(r.Text, spinePreviewLen)) + "</summary>\n\n" +
 		codeFence(capFullWith(r.Text, t.SpineResultValueTruncated)) + "\n</details>\n\n"
 }
 
@@ -166,7 +166,7 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 
 	w("%s", t.SpineTitle)
 	for ti, task := range j.Tasks {
-		w("%s", t.SpineTaskLine(ti+1, task.Title))
+		w("%s", t.SpineTaskLine(ti+1, escapeHTML(task.Title)))
 		for si, s := range task.Steps {
 			if len(s.ToolCalls) > 0 {
 				renderSpineStep(w, steps, idxOf[s], si, repeat[s.Seq], hit[s.Seq], t, storyT)
@@ -260,7 +260,7 @@ func renderSpineStep(w func(string, ...any), steps []*Step, i, taskStepIdx int, 
 	w("%s", spineStepHeader(s, repeated, flagged, t))
 	spineTransitionLines(w, s, storyT)
 	if taskStepIdx > 0 && s.Instruction != "" {
-		w("%s", t.SpineInstructionLine(s.Instruction))
+		w("%s", t.SpineInstructionLine(escapeHTML(s.Instruction)))
 	}
 	w("%s", spineWhyLine(s))
 
@@ -362,11 +362,11 @@ func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repe
 	spineTransitionLines(w, s, storyT)
 	switch {
 	case taskStepIdx > 0 && s.Instruction != "":
-		w("%s", t.SpineInstructionLine(s.Instruction))
+		w("%s", t.SpineInstructionLine(escapeHTML(s.Instruction)))
 	case s.RespText != "":
-		w("%s", t.SpineReportLine(oneLineTruncate(s.RespText, spineBriefLineCap)))
+		w("%s", t.SpineReportLine(escapeHTML(oneLineTruncate(s.RespText, spineBriefLineCap))))
 	case s.Reasoning != "":
-		w("%s", t.SpineReportLine(oneLineTruncate(s.Reasoning, spineBriefLineCap)))
+		w("%s", t.SpineReportLine(escapeHTML(oneLineTruncate(s.Reasoning, spineBriefLineCap))))
 	}
 	if s.NoReply {
 		w("%s", storyT.NoReplyLine)

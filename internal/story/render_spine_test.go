@@ -489,6 +489,127 @@ func TestRenderDecisionSpine(t *testing.T) {
 			t.Errorf("output = %q, must not invent a why-line when the Step said nothing", out)
 		}
 	})
+
+	// The following lock in KNOWN_ISSUES §1.37/P12.2-3 for every raw-text
+	// insertion point in the spine that isn't already covered by
+	// TestToolCallLine (render_spine_args_test.go): task titles, mid-task
+	// instructions, report lines and why-lines are all user/model-derived
+	// text written straight into the document body — real corpus content
+	// (an HTML comment header) has actually triggered silent content loss
+	// through exactly this path.
+	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"
+
+	t.Run("task title is escaped", func(t *testing.T) {
+		w, buf := capture()
+		j := journeyOfTasks(&Task{Title: adversarial, Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: "ok"}}})
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, "<!--") {
+			t.Errorf("task title leaked a raw HTML comment marker: %q", out)
+		}
+		if !strings.Contains(out, "&lt;!--") || !strings.Contains(out, "real content after") {
+			t.Errorf("output = %q, want the task title escaped with its trailing content preserved", out)
+		}
+	})
+
+	t.Run("mid-task instruction line is escaped", func(t *testing.T) {
+		w, buf := capture()
+		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
+		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: adversarial}
+		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, "<!--") {
+			t.Errorf("instruction line leaked a raw HTML comment marker: %q", out)
+		}
+		if !strings.Contains(out, "&lt;!--") {
+			t.Errorf("output = %q, want the instruction escaped", out)
+		}
+	})
+
+	t.Run("brief Step's report line (RespText) is escaped", func(t *testing.T) {
+		w, buf := capture()
+		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: adversarial}}})
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, "<!--") {
+			t.Errorf("report line leaked a raw HTML comment marker: %q", out)
+		}
+		if !strings.Contains(out, "&lt;!--") {
+			t.Errorf("output = %q, want the report line escaped", out)
+		}
+	})
+
+	t.Run("why-line (RespText on a tool-calling Step) is escaped", func(t *testing.T) {
+		w, buf := capture()
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: adversarial, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
+		j := journeyOf(s)
+		renderDecisionSpine(w, j, nil, i18n.EN)
+		out := buf.String()
+		if strings.Contains(out, "<!--") {
+			t.Errorf("why-line leaked a raw HTML comment marker: %q", out)
+		}
+		if !strings.Contains(out, "&lt;!--") {
+			t.Errorf("output = %q, want the why-line escaped", out)
+		}
+	})
+}
+
+// --- foldWhyLine / toolResultLine escaping (KNOWN_ISSUES §1.37/P12.2-3) ---
+
+// TestFoldWhyLine_Escapes covers both of foldWhyLine's branches directly —
+// inline (short enough to stay on one line) and folded (<details><summary>,
+// over capLen) — against the real-corpus adversarial shape that used to
+// get silently swallowed by a Markdown renderer.
+func TestFoldWhyLine_Escapes(t *testing.T) {
+	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> keywords"
+
+	t.Run("inline branch", func(t *testing.T) {
+		got := foldWhyLine("> ", adversarial, spineWhyRespCap)
+		if strings.Contains(got, "<!--") {
+			t.Errorf("foldWhyLine(inline) leaked a raw HTML comment marker: %q", got)
+		}
+		if !strings.Contains(got, "&lt;!--") {
+			t.Errorf("foldWhyLine(inline) = %q, want the escaped form", got)
+		}
+	})
+
+	t.Run("folded branch: summary escaped, fenced full text left raw", func(t *testing.T) {
+		long := adversarial + strings.Repeat(" filler", 100)
+		got := foldWhyLine("> ", long, spineWhyReasoningCap)
+		summaryEnd := strings.Index(got, "</summary>")
+		if summaryEnd < 0 {
+			t.Fatalf("foldWhyLine(folded) missing a <summary> block: %q", got)
+		}
+		if strings.Contains(got[:summaryEnd], "<!--") {
+			t.Errorf("foldWhyLine(folded) summary leaked a raw HTML comment marker: %q", got[:summaryEnd])
+		}
+		if !strings.Contains(got[:summaryEnd], "&lt;!--") {
+			t.Errorf("foldWhyLine(folded) summary = %q, want the escaped form", got[:summaryEnd])
+		}
+		if !strings.Contains(got[summaryEnd:], "<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->") {
+			t.Errorf("foldWhyLine(folded) fenced body should keep the raw, unescaped full text: %q", got[summaryEnd:])
+		}
+	})
+}
+
+// TestToolResultLine_EscapesSummary covers the one remaining <summary>
+// injection point named in KNOWN_ISSUES §1.37 that isn't reachable through
+// TestToolCallLine (which covers the call side, not the paired result).
+func TestToolResultLine_EscapesSummary(t *testing.T) {
+	et := i18n.Spine(i18n.EN)
+	r := chatmsg.ToolResult{CallID: "1", Text: "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"}
+	got := toolResultLine("read", r, false, et)
+	summaryEnd := strings.Index(got, "</summary>")
+	if summaryEnd < 0 {
+		t.Fatalf("toolResultLine missing a <summary> block: %q", got)
+	}
+	if strings.Contains(got[:summaryEnd], "<!--") {
+		t.Errorf("toolResultLine summary leaked a raw HTML comment marker: %q", got[:summaryEnd])
+	}
+	if !strings.Contains(got[:summaryEnd], "&lt;!--") || !strings.Contains(got[:summaryEnd], "real content after") {
+		t.Errorf("toolResultLine summary = %q, want the escaped form with the trailing content preserved", got[:summaryEnd])
+	}
 }
 
 // --- stepRoleTag ----------------------------------------------------------

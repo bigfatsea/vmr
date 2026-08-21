@@ -29,7 +29,7 @@ func headerTable(h http.Header, t i18n.DetailText) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "| %s | %s |\n|---|---|\n", t.HeaderColumn, t.ValueColumn)
 	for _, k := range keys {
-		fmt.Fprintf(&b, "| %s | %s |\n", k, escapeCell(truncCell(strings.Join(h[k], ", "), 120, t)))
+		fmt.Fprintf(&b, "| %s | %s |\n", k, EscapeCell(truncCell(strings.Join(h[k], ", "), 120, t)))
 	}
 	return b.String()
 }
@@ -59,15 +59,15 @@ func diffHeaderTable(base, other http.Header, t i18n.DetailText) (string, int) {
 		switch {
 		case !inBase:
 			changed++
-			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, escapeCell(truncCell(ovs, 120, t)))
+			fmt.Fprintf(&b, "| 🟢 | %s | %s |\n", k, EscapeCell(truncCell(ovs, 120, t)))
 		case !inOther:
 			changed++
-			fmt.Fprintf(&b, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(truncCell(bs, 120, t)))
+			fmt.Fprintf(&b, "| 🔴 | %s | ~~%s~~ |\n", k, EscapeCell(truncCell(bs, 120, t)))
 		case bs != ovs:
 			changed++
-			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, escapeCell(truncCell(bs, 60, t)), escapeCell(truncCell(ovs, 60, t)))
+			fmt.Fprintf(&b, "| 🔶 | %s | %s → %s |\n", k, EscapeCell(truncCell(bs, 60, t)), EscapeCell(truncCell(ovs, 60, t)))
 		default:
-			fmt.Fprintf(&b, "| | %s | %s |\n", k, escapeCell(truncCell(bs, 120, t)))
+			fmt.Fprintf(&b, "| | %s | %s |\n", k, EscapeCell(truncCell(bs, 120, t)))
 		}
 	}
 	return b.String(), changed
@@ -128,15 +128,15 @@ func renderBodyDiff(b *strings.Builder, clientBody, attemptBody any, t i18n.Deta
 		switch {
 		case !inC:
 			changed++
-			fmt.Fprintf(&tb, "| 🟢 | %s | %s |\n", k, escapeCell(summarizeVal(av, t)))
+			fmt.Fprintf(&tb, "| 🟢 | %s | %s |\n", k, EscapeCell(summarizeVal(av, t)))
 		case !inA:
 			changed++
-			fmt.Fprintf(&tb, "| 🔴 | %s | ~~%s~~ |\n", k, escapeCell(summarizeVal(cv, t)))
+			fmt.Fprintf(&tb, "| 🔴 | %s | ~~%s~~ |\n", k, EscapeCell(summarizeVal(cv, t)))
 		case !reflect.DeepEqual(cv, av):
 			changed++
-			fmt.Fprintf(&tb, "| 🔶 | %s | %s → %s |\n", k, escapeCell(summarizeVal(cv, t)), escapeCell(summarizeVal(av, t)))
+			fmt.Fprintf(&tb, "| 🔶 | %s | %s → %s |\n", k, EscapeCell(summarizeVal(cv, t)), EscapeCell(summarizeVal(av, t)))
 		default:
-			fmt.Fprintf(&tb, "| | %s | %s |\n", k, escapeCell(summarizeVal(cv, t)))
+			fmt.Fprintf(&tb, "| | %s | %s |\n", k, EscapeCell(summarizeVal(cv, t)))
 		}
 	}
 	b.WriteString(Details(t.BodyFieldDiffSummary(len(sorted), changed), tb.String()))
@@ -218,13 +218,13 @@ func renderToolsDiff(b *strings.Builder, clientTools, attemptTools any, t i18n.D
 		case i >= len(cArr):
 			changed++
 			tb.WriteString(t.ToolUpstreamOnly(name(aNames, i)))
-			tb.WriteString(Details(t.ToolDefUpstream+escapeHTML(name(aNames, i)), codeFence(jsonIndent(aArr[i]))))
+			tb.WriteString(Details(t.ToolDefUpstream+EscapeHTML(name(aNames, i)), codeFence(jsonIndent(aArr[i]))))
 		case reflect.DeepEqual(cArr[i], aArr[i]):
 			fmt.Fprintf(&tb, "- %s\n", name(cNames, i))
 		default:
 			changed++
 			tb.WriteString(t.ToolChanged(name(cNames, i)))
-			tb.WriteString(Details(t.ToolDefUpstream+escapeHTML(name(aNames, i))+t.SeeClientSide, codeFence(jsonIndent(aArr[i]))))
+			tb.WriteString(Details(t.ToolDefUpstream+EscapeHTML(name(aNames, i))+t.SeeClientSide, codeFence(jsonIndent(aArr[i]))))
 		}
 	}
 	label := t.ToolsDiffNoChange(n)

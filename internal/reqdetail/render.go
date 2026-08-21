@@ -36,17 +36,55 @@ func codeFence(s string) string {
 	return f + "\n" + s + f + "\n"
 }
 
-// escapeHTML neutralizes content destined for a <summary> line, where raw
-// < > & would be parsed as HTML.
-func escapeHTML(s string) string {
+// EscapeHTML neutralizes user/model-derived text before it enters raw
+// Markdown/HTML output (a <summary> line, a bare paragraph) — unescaped
+// < > & get parsed as HTML, up to and including an unescaped <!-- that
+// silently swallows everything up to the next --> a renderer finds,
+// which real corpus content has actually triggered (see KNOWN_ISSUES
+// §1.37). Exported so internal/story can call this exact implementation
+// instead of maintaining its own copy — see internal/story/render_md.go's
+// escapeHTML wrapper for why a second copy is the failure mode this
+// avoids. Content already inside a codeFence block never needs this:
+// CommonMark doesn't parse HTML inside a fenced code block, which is the
+// one rule that decides whether a given piece of text needs escaping.
+func EscapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
 }
 
-// escapeCell neutralizes a value for use inside a Markdown table cell.
-func escapeCell(s string) string {
+// renderTemplateVersion bumps whenever a change to Render's OUTPUT SHAPE
+// should invalidate every previously-written detail page, even though the
+// record and its filename (FileName — a pure function of identity, not of
+// render logic) are unchanged. Bumping this is the mechanism a future
+// change (e.g. a content-volume reduction) uses to force EnsureRendered to
+// rewrite every existing page instead of introducing a fourth axis
+// alongside lang/linkEvidence — see renderFingerprint.
+const renderTemplateVersion = 1
+
+// renderFingerprint is a one-line, machine-checkable summary of every input
+// to Render's output shape that FileName does NOT capture: language,
+// evidence-link mode, and the template version itself. Written as the
+// page's first line (an HTML comment, invisible when rendered) so
+// EnsureRendered's existence check can read just this one line — via
+// readRenderFingerprint (ensure.go) — instead of re-rendering or reading
+// the whole page to decide whether a pre-existing file is still current.
+// This is what replaces the "same filename implies same content" assumption
+// KNOWN_ISSUES §1.41 documents as false (proven false on two real axes:
+// -lang and evidence linking) with an actual check.
+func renderFingerprint(lang i18n.Lang, linkEvidence bool) string {
+	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t -->\n", renderTemplateVersion, lang, linkEvidence)
+}
+
+// EscapeCell neutralizes a value for use inside a Markdown table cell: an
+// unescaped "|" splits into extra columns (corrupting that row and every
+// later column in it, not just eating content the way an unescaped "<!--"
+// does), and a literal newline breaks the one-line-per-row structure
+// GFM tables depend on. Exported for the same reason as EscapeHTML — see
+// its doc comment — internal/story's index table (storyindex.go) writes
+// user-derived titles into table cells too.
+func EscapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
@@ -129,7 +167,7 @@ func renderMessageSection(idx int, m chatmsg.Message, prefix string, t i18n.Deta
 		return t.EmptyMessage(prefix, head)
 	}
 	chars := len([]rune(m.Text))
-	summary := t.MessageSummary(prefix, head, fmtCount(chars), escapeHTML(taskseg.Preview(m.Text)))
+	summary := t.MessageSummary(prefix, head, fmtCount(chars), EscapeHTML(taskseg.Preview(m.Text)))
 	return Details(summary, codeFence(m.Text))
 }
 

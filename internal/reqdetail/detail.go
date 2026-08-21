@@ -203,6 +203,7 @@ func callsCell(calls []string) string {
 // linking uses this).
 func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest, prof taskseg.Profile, lang i18n.Lang, linkEvidence bool) string {
 	var b strings.Builder
+	b.WriteString(renderFingerprint(lang, linkEvidence))
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Detail(lang)
 	f := extractSessionFeatures(rec, prof)
@@ -229,7 +230,7 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 	w("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n|---|---|---|---|---|---|---|---|---|\n",
 		oh[0], oh[1], oh[2], oh[3], oh[4], oh[5], oh[6], oh[7], oh[8])
 	w("| %s | %s | %s | %s | %s | %d | %s | %s | %s |\n\n",
-		escapeCell(DisplayModel(rec)), escapeCell(LastEndpoint(rec)), outcomeMark(rec.Outcome),
+		EscapeCell(DisplayModel(rec)), EscapeCell(LastEndpoint(rec)), outcomeMark(rec.Outcome),
 		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
 	renderFactsLine(&b, rec, t)
 
@@ -367,9 +368,9 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 				if i < len(tools) {
 					name = tools[i]
 				}
-				tb.WriteString(Details(escapeHTML(name), codeFence(jsonIndent(tn))))
+				tb.WriteString(Details(EscapeHTML(name), codeFence(jsonIndent(tn))))
 			}
-			b.WriteString(Details(t.ToolsSummary(len(arr), escapeHTML(taskseg.Preview(strings.Join(tools, ", ")))), tb.String()))
+			b.WriteString(Details(t.ToolsSummary(len(arr), EscapeHTML(taskseg.Preview(strings.Join(tools, ", ")))), tb.String()))
 		}
 	}
 	if len(msgs) > 0 {
@@ -587,7 +588,7 @@ func renderStreamSummary(b *strings.Builder, s *chatmsg.StreamSummary, t i18n.De
 		if len(args) <= toolArgsInlineThreshold {
 			w("🔧 **tool_call** `%s` [id=%s]\n\n%s\n", tc.Name, tc.ID, codeFence(args))
 		} else {
-			b.WriteString(Details(t.ToolCallArgsChars(escapeHTML(tc.Name), escapeHTML(tc.ID), fmtCount(len([]rune(args)))), codeFence(args)))
+			b.WriteString(Details(t.ToolCallArgsChars(EscapeHTML(tc.Name), EscapeHTML(tc.ID), fmtCount(len([]rune(args)))), codeFence(args)))
 		}
 	}
 	if s.Finish != "" || s.Model != "" {

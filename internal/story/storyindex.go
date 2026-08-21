@@ -290,7 +290,7 @@ func writeStoryIndexRow(b *strings.Builder, r JourneyIndexRow, t i18n.StoryIndex
 	if r.Steps > 0 {
 		stepCol = strconv.Itoa(r.Steps)
 	}
-	title := r.Title
+	title := escapeCell(escapeHTML(r.Title))
 	if r.Partial {
 		title = "⚠ " + title
 	}

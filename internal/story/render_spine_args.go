@@ -165,7 +165,7 @@ func toolCallLine(tc chatmsg.ToolCall, t i18n.SpineText) string {
 	if allShort {
 		parts := make([]string, len(fields))
 		for i, f := range fields {
-			parts[i] = f.key + "=" + f.val
+			parts[i] = f.key + "=" + escapeHTML(f.val)
 		}
 		return head + "(" + strings.Join(parts, ", ") + ")\n\n"
 	}
@@ -188,9 +188,9 @@ func payloadBlock(head, key, val string, t i18n.SpineText) string {
 		label += " `" + key + "`"
 	}
 	if !strings.Contains(val, "\n") && len([]rune(val)) <= spineInlineLen {
-		return label + ": " + val + "\n\n"
+		return label + ": " + escapeHTML(val) + "\n\n"
 	}
 	preview := oneLineTruncate(val, spinePreviewLen)
-	return label + ": <details><summary>" + preview + "</summary>\n\n" +
+	return label + ": <details><summary>" + escapeHTML(preview) + "</summary>\n\n" +
 		codeFence(capFull(val, t)) + "\n</details>\n\n"
 }

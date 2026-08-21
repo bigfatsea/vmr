@@ -220,4 +220,63 @@ func TestToolCallLine(t *testing.T) {
 			t.Errorf("toolCallLine(oversized) = %q, want it to name the exact overage", got)
 		}
 	})
+
+	// The following three lock in KNOWN_ISSUES §1.37/P12.2-3: real corpus
+	// content (an HTML comment header, e.g. "<!-- Ver ... -->") landing in
+	// a tool call's arguments must render literally, never get parsed as
+	// HTML by whatever renders the Markdown — which is exactly what used
+	// to silently swallow content on a real journey report.
+	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"
+
+	t.Run("all-short fields: the value is escaped, not interpreted as HTML", func(t *testing.T) {
+		got := toolCallLine(tc("note", jsonArgs(t, map[string]any{"text": adversarial})), et)
+		if strings.Contains(got, "<!--") {
+			t.Errorf("toolCallLine(all-short) leaked a raw HTML comment marker: %q", got)
+		}
+		if !strings.Contains(got, "&lt;!--") || !strings.Contains(got, "real content after") {
+			t.Errorf("toolCallLine(all-short) = %q, want the escaped form with the trailing content preserved", got)
+		}
+	})
+
+	t.Run("inline payload: the value is escaped", func(t *testing.T) {
+		got := toolCallLine(tc("read", jsonArgs(t, map[string]any{"path": adversarial})), et)
+		if strings.Contains(got, "<!--") {
+			t.Errorf("toolCallLine(inline payload) leaked a raw HTML comment marker: %q", got)
+		}
+		if !strings.Contains(got, "&lt;!--") {
+			t.Errorf("toolCallLine(inline payload) = %q, want the escaped form", got)
+		}
+	})
+
+	t.Run("folded payload: the <summary> preview is escaped, the fenced full value is not (fences are already safe)", func(t *testing.T) {
+		long := adversarial + strings.Repeat(" filler", 30)
+		got := toolCallLine(tc("exec", jsonArgs(t, map[string]any{"command": long})), et)
+		summaryEnd := strings.Index(got, "</summary>")
+		if summaryEnd < 0 {
+			t.Fatalf("toolCallLine(folded payload) missing a <summary> block: %q", got)
+		}
+		if strings.Contains(got[:summaryEnd], "<!--") {
+			t.Errorf("toolCallLine(folded payload) summary leaked a raw HTML comment marker: %q", got[:summaryEnd])
+		}
+		if !strings.Contains(got[:summaryEnd], "&lt;!--") {
+			t.Errorf("toolCallLine(folded payload) summary = %q, want the escaped form", got[:summaryEnd])
+		}
+		// Past the summary, inside the fenced block, the raw marker is
+		// fine and expected — CommonMark doesn't parse HTML inside a
+		// fenced code block, and the fenced copy must stay byte-identical
+		// to the real argument.
+		if !strings.Contains(got[summaryEnd:], "<!-- Ver 2026-07-24 14:45, by Sonnet 5 -->") {
+			t.Errorf("toolCallLine(folded payload) fenced body should keep the raw, unescaped full value: %q", got[summaryEnd:])
+		}
+	})
+
+	t.Run("other HTML metacharacters (< > &) are escaped too, not just <!--", func(t *testing.T) {
+		got := toolCallLine(tc("note", jsonArgs(t, map[string]any{"text": `<script>alert(1)</script> foo & bar`})), et)
+		if strings.Contains(got, "<script>") || strings.Contains(got, "</script>") {
+			t.Errorf("toolCallLine leaked a raw <script> tag: %q", got)
+		}
+		if !strings.Contains(got, "&lt;script&gt;") || !strings.Contains(got, "foo &amp; bar") {
+			t.Errorf("toolCallLine = %q, want &, <, > all escaped", got)
+		}
+	})
 }

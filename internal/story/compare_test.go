@@ -403,6 +403,25 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 	}
 }
 
+// TestRenderComparisonMarkdown_EscapesTitles covers the injection point
+// found during P12's independent review, beyond KNOWN_ISSUES §1.37's
+// original scope: SideBlock's title is written into a blockquote, the same
+// class of defect as the decision spine's own unescaped points, just in a
+// file this stage's plan initially left out.
+func TestRenderComparisonMarkdown_EscapesTitles(t *testing.T) {
+	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"
+	a := JourneySummary{ID: "j-a", Title: adversarial, From: time.Now(), To: time.Now()}
+	b := JourneySummary{ID: "j-b", Title: "跑B股研究", From: time.Now(), To: time.Now()}
+	md := RenderComparisonMarkdown(Compare(a, b, i18n.EN), i18n.EN)
+
+	if strings.Contains(md, "<!--") {
+		t.Errorf("rendered comparison leaked a raw HTML comment marker from a side's title:\n%s", md)
+	}
+	if !strings.Contains(md, "&lt;!--") {
+		t.Errorf("rendered comparison missing the escaped title, got:\n%s", md)
+	}
+}
+
 // TestRenderComparisonMarkdown_WithExtras covers the ComparisonExtras
 // rendered sections end to end via a real ComputeComparisonExtras call,
 // not hand-built fixture data.

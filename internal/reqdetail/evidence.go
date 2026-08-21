@@ -136,7 +136,7 @@ func toolsEvidenceBody(arr []any, names []string) string {
 		if i < len(names) {
 			name = names[i]
 		}
-		b.WriteString(Details(escapeHTML(name), codeFence(jsonIndent(tn))))
+		b.WriteString(Details(EscapeHTML(name), codeFence(jsonIndent(tn))))
 	}
 	return b.String()
 }

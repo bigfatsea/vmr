@@ -25,8 +25,8 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	t := i18n.Compare(lang)
 
 	w("%s", t.Title)
-	w("%s", t.SideBlock("A", cmp.A.ID, cmp.A.Title, cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
-	w("%s", t.SideBlock("B", cmp.B.ID, cmp.B.Title, cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
+	w("%s", t.SideBlock("A", cmp.A.ID, escapeHTML(cmp.A.Title), cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
+	w("%s", t.SideBlock("B", cmp.B.ID, escapeHTML(cmp.B.Title), cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
 	if cmp.Extras != nil {
 		renderInitialInstruction(w, cmp.Extras.InitialInstruction, t)
 	}
@@ -138,9 +138,9 @@ func renderDivergence(w func(string, ...any), d DivergencePoint, t i18n.CompareT
 	}
 	switch d.Severity {
 	case DivergenceHeavy:
-		w("%s", t.DivergenceHeavy(d.Index, d.TaskTitle, d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", "), strings.Join(d.BTools, ", ")))
+		w("%s", t.DivergenceHeavy(d.Index, escapeHTML(d.TaskTitle), d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", "), strings.Join(d.BTools, ", ")))
 	case DivergenceLight:
-		w("%s", t.DivergenceLight(d.Index, d.TaskTitle, d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", ")))
+		w("%s", t.DivergenceLight(d.Index, escapeHTML(d.TaskTitle), d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", ")))
 	}
 	w("%s", t.DivergenceFootnote)
 }

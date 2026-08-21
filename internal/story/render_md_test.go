@@ -47,6 +47,35 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	}
 }
 
+// TestRenderMarkdown_EscapesJourneyTitle covers the injection point found
+// during P12's independent review, beyond KNOWN_ISSUES §1.37's original
+// scope: j.Title (deriveTitle, from the same raw first-user-message text
+// as every other title in this package) is written into a top-level
+// blockquote, not a <details><summary> fold — the same class of defect as
+// the decision spine's own unescaped points, just in a file this stage's
+// plan initially left out.
+func TestRenderMarkdown_EscapesJourneyTitle(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after")
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("ok"))
+
+	path := writeJSONL(t, []audit.Record{r1})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+
+	if strings.Contains(md, "<!--") {
+		t.Errorf("rendered Markdown leaked a raw HTML comment marker from the Journey title:\n%s", md)
+	}
+	if !strings.Contains(md, "&lt;!--") {
+		t.Errorf("rendered Markdown missing the escaped title, got:\n%s", md)
+	}
+}
+
 // TestRenderMarkdown_LLMResponseSection locks in the decision spine's
 // per-Step rendering (render_spine_step.go/render_spine_args.go — P5.1
 // removed the fact-layer's separate, duplicate "**LLM Response**" section

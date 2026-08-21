@@ -176,6 +176,50 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
+// TestRenderStoryIndexMarkdown_EscapesTitle locks in a fix beyond
+// KNOWN_ISSUES §1.37's original scope, found during P12's independent
+// review: a Journey title containing a literal "|" written straight into
+// this table's cells doesn't just lose content the way an unescaped
+// "<!--" does — it splits into extra columns and corrupts that row (and
+// visually, everything after it) in vmr-stories.md, the primary
+// navigation surface. A real task instruction quoting a shell pipe
+// ("ps aux | grep vmr") is a completely ordinary way to trigger this.
+func TestRenderStoryIndexMarkdown_EscapesTitle(t *testing.T) {
+	row := JourneyIndexRow{ID: "l-deadbeef", Title: "ps aux | grep vmr <!-- keywords -->", Requests: 1}
+	md := RenderStoryIndexMarkdown([]JourneyIndexRow{row}, i18n.EN)
+
+	lines := strings.Split(md, "\n")
+	var rowLine string
+	for _, l := range lines {
+		if strings.Contains(l, row.ID) {
+			rowLine = l
+			break
+		}
+	}
+	if rowLine == "" {
+		t.Fatalf("rendered markdown missing the row for %s:\n%s", row.ID, md)
+	}
+	// writeStoryIndexRow's own format string is 7 columns: id, client,
+	// window, tasks, steps, title, rendered — that's 8 unescaped "|"
+	// separators. The title's own "|" must survive escaped ("\|", still a
+	// literal "|" character but no longer a column delimiter to a GFM
+	// table parser) rather than as a 9th bare delimiter.
+	if !strings.Contains(rowLine, `aux \| grep`) {
+		t.Errorf("row = %q, want the title's literal \"|\" escaped as \"\\|\", not left as a bare column delimiter", rowLine)
+	}
+	const wantUnescapedColumnSeparators = 8
+	unescaped := strings.ReplaceAll(rowLine, `\|`, "")
+	if n := strings.Count(unescaped, "|"); n != wantUnescapedColumnSeparators {
+		t.Errorf("row (with escaped pipes removed) = %q has %d unescaped \"|\" characters, want exactly %d", unescaped, n, wantUnescapedColumnSeparators)
+	}
+	if strings.Contains(rowLine, "<!--") {
+		t.Errorf("row = %q, want the HTML comment marker escaped, not raw", rowLine)
+	}
+	if !strings.Contains(rowLine, "&lt;!--") {
+		t.Errorf("row = %q, want the escaped form present", rowLine)
+	}
+}
+
 func TestJourneyIndexRow_JSONRoundTrip(t *testing.T) {
 	chain := twoStepChain(t)
 	row := BuildJourneyIndexRow(chain, "t", false)

@@ -9,6 +9,7 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // RenderMarkdown renders j as a self-contained Markdown document in lang:
@@ -32,7 +33,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 	t := i18n.Story(lang)
 
 	w("# Journey %s\n\n", j.ID)
-	w("> %s\n\n", j.Title)
+	w("> %s\n\n", escapeHTML(j.Title))
 	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), j.To.In(fmtutil.DisplayZone).Format("15:04:05")))
 	// Back links (P6.2d): vmr-stories.md is always safe to link — same
 	// directory, this run just wrote it. vmr-report.md is another
@@ -148,6 +149,30 @@ func codeFence(s string) string {
 		s += "\n"
 	}
 	return f + "\n" + s + f + "\n"
+}
+
+// escapeHTML neutralizes user/model-derived text before it enters raw
+// Markdown/HTML output. Re-exported from internal/reqdetail rather than
+// reimplemented: P12's review found this exact helper was the one piece
+// NOT copied when this package's folded-block rendering pattern (fence +
+// summary + escape) was duplicated from reqdetail — codeFence (just
+// above) came along, escapeHTML didn't, and that gap is what let content
+// silently disappear on real corpus data (KNOWN_ISSUES §1.37). Sharing
+// the one three-line implementation removes this failure mode
+// structurally; codeFence stays duplicated on purpose (see its own doc
+// comment) because it can't drift the same way.
+func escapeHTML(s string) string {
+	return reqdetail.EscapeHTML(s)
+}
+
+// escapeCell neutralizes a value for use inside a Markdown table cell — see
+// reqdetail.EscapeCell's doc comment. storyindex.go's index table writes
+// user-derived Journey titles into cells; an unescaped "|" splits a title
+// containing one (e.g. a task whose instruction quotes a shell pipe) into
+// extra columns, corrupting that row of the primary navigation surface,
+// not just a single Journey report.
+func escapeCell(s string) string {
+	return reqdetail.EscapeCell(s)
 }
 
 // pctStr is story's local 0-decimal alias for fmtutil.FmtPercent —
