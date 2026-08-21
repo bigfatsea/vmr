@@ -4,7 +4,11 @@
 
 > **文档性质**：这是一份方案/大纲文档，**不是实施记录**。截至本文档写就时，方案本身尚未落地——只有一次意外的、局部的先行改动（见第 1 节），本文档的目的是把方向定下来、把改动范围列出来，供下一次正式推进时直接对照执行，而不是从零重新分析一遍。
 >
-> **背景**：`docs/future-strategy/phase1a_phase1b_implementation_review_opus-5.md` 复核发现问题 3-1（`journey-<id>.json` 缺 LLM Finding），`docs/future-strategy/phase1_issues_implementation_plan_gemini-3.7-flash.md` 给出了修复方案并已落地。修复过程中，`internal/story` 顺带把 `journey-<id>.json` 的叙述文本从"固定英文"改成了"跟随 `-lang`"，这个改动本身没有在原计划里，复核后发现它撞上了一条项目级、有专门回归测试守护的既有规则（`docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3《JSON 契约：叙述字段固定英文》）。经讨论，我们认为"JSON 也应该跟随目标语言"这个方向本身是对的，但完整统一是一次跨 `report`/`story` 两个包、涉及签名变更和测试反转的改动，不适合在修 3-1 的过程中顺手做完，因此单独立项、写成这份方案文档，本次先暂停在一个自洽的中间状态。
+> **现状（2026-08-21）**：本文档 §2/§3/§5 定型的方向已被 `story_report_dev_plan_2_sonnet-5.md` P8
+> 基本全盘采纳落地（见该文件 P8 小节与 `story_report_p8_action_plan_sonnet-5.md` §8 执行记录）。
+> 本文档保留作实施期的模块级大纲参考，不需要作为独立提案重新论证方向。
+>
+> **背景**：`phase1a_phase1b_implementation_review_opus-5.md`（已归档，不在版本控制范围内）复核发现问题 3-1（`journey-<id>.json` 缺 LLM Finding），`phase1_issues_implementation_plan_gemini-3.7-flash.md`（已归档，不在版本控制范围内）给出了修复方案并已落地。修复过程中，`internal/story` 顺带把 `journey-<id>.json` 的叙述文本从"固定英文"改成了"跟随 `-lang`"，这个改动本身没有在原计划里，复核后发现它撞上了一条项目级、有专门回归测试守护的既有规则（`docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3《JSON 契约：叙述字段固定英文》）。经讨论，我们认为"JSON 也应该跟随目标语言"这个方向本身是对的，但完整统一是一次跨 `report`/`story` 两个包、涉及签名变更和测试反转的改动，不适合在修 3-1 的过程中顺手做完，因此单独立项、写成这份方案文档，本次先暂停在一个自洽的中间状态。
 
 ---
 

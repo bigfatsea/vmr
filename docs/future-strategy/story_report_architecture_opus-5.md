@@ -11,7 +11,7 @@
 
 所有判断都标注证据来源（`file:line`、实测数字、或外部参考链接）。凡是我没有实际验证、只能给出
 推断的，正文里会明确写"未验证"。逐条评审三份前序文档的过程记录在
-`docs/future-strategy/story_report_peer_review_opus-5.md`，本文只保留结论。
+`story_report_peer_review_opus-5.md`（已归档，不在版本控制范围内），本文只保留结论。
 
 ---
 
@@ -93,7 +93,7 @@ report 聚合阶段才存在的位置坐标——但微观层根本不需要知�
 ### 1.2 已裁决的前提
 
 以下四条曾是本方案的关键信息缺口，现已由用户裁决填补（裁决原文记录于
-`story_report_suite_reorganization_glm-4.7.md` §0.2；本文按其字面含义采纳，**若记录有出入请指正，
+`story_report_suite_reorganization_glm-4.7.md` §0.2（已归档，不在版本控制范围内）；本文按其字面含义采纳，**若记录有出入请指正，
 因为 §7 的几处取舍直接依赖它们**）：
 
 | 前提 | 裁决 | 它约束了什么 |
@@ -319,7 +319,7 @@ report: SessionInfo(s01) → TaskInfo(t01) → Turn → RequestRow      story: J
 
 ## 4. 对既有分析记录的复核
 
-前序的 UX 分析记录（`story_report_ux_review_sonnet-5.md`）有 6 项"已直接处理"、2 项"留待确认"。
+前序的 UX 分析记录（`story_report_ux_review_sonnet-5.md`，已归档，不在版本控制范围内）有 6 项"已直接处理"、2 项"留待确认"。
 逐条复核结论如下——这不是评审仪式，其中两条的纠正直接决定了第 7 章的形状。
 
 ### 4.1 证据溯源改为按 Journey 精确定位 —— ✅ 认可
@@ -1370,30 +1370,18 @@ exemplar 把指标数据点关联回 trace 上下文），不是"必须一键跳
 ### 10.3 本文与既有文档的关系
 
 - 本文是重构方案的当前权威，取代 `story_report_comprehensive_redesign_gemini-3.7-flash.md` 与
-  `story_report_suite_reorganization_glm-4.7.md`：两者的可取部分（三级变焦、确定性命名、导航矩阵、
-  脊柱完整性、配对分层、Phase 0）已吸收进本文正文，被否决部分及其理由记录在逐条评审文档里。
-- `story_report_ux_review_sonnet-5.md` 是第一轮 6 项 UX 改动的过程记录，仍然有效；那批改动**至今
-  只存在于工作区**，见迁移路径的批 0。
-- 逐条评审记录：`docs/future-strategy/story_report_peer_review_opus-5.md`。
-- 若本方案被采纳，需要相应更新的既有条目：
-  - `KNOWN_ISSUES §1.21`（根因改写为客户端改写 + 修法改为归一化回退 + 位置兜底分层）
-  - `KNOWN_ISSUES §1.22`（"不可行"论证撤销，改为"分批实施，见本文迁移路径"）
-  - ~~`KNOWN_ISSUES §1.20`（三个待拍板点已在 §4.7 定案）~~ ——P5 落地后目标状态已完全达成，条目已
-    移除并归档为 §3 已闭环第 24 条，不再需要更新
-  - `KNOWN_ISSUES §1.1`（多文件输入的两趟扫描开销）——**结论需要改写**：其"无法在单趟流式输入中
-    就地确定归属"的论证成立，但回答的不是"读几遍字节"；其触发条件（GB 级语料）**已经满足**
-    （9GB 解压、全量报表 72–84 秒）。改写为"扩大缓存载荷"，见 §7.10
-  - **新增条目**：detail 文件名的时区依赖；自指流量污染统计；候选索引噪声；System Prompt 重复；
-    **派生产物体积放大（59 条记录 → 60MB，`-details` 默认 `true`）**；
-    **`details/*.json` 是审计记录的逐字复制**；**解析缓存被 `MarshalIndent` 美化输出**；
-    **解析缓存缺少 schema 版本戳（改了提取逻辑会静默复用旧缓存）**
-  - `KNOWN_ISSUES §1.5`（`detail.go` 逼近行数预算）——detail 做完减法并下沉后自然缓解，可关闭
-  - `docs/VirtualModelRouter_Design_v4_Analytics.md` §2.5 / §3.4（3×2 矩阵、坐标层、共享证据层）
-  - `docs/UserGuide.md` **及其中文兄弟**——命令行收敛（§7.9）改动的是用户每天敲的东西，
-    这一处同步不是收尾工作，是变更的一部分；`README.md`/`README.zh.md` 里的命令示例同理
-  - `docs/VirtualModelRouter_Design_v4_Strategy.md` 的 Analytics 侧路线——那里承诺的
-    "保持 `vmr story` 与 `vmr story -compare` 独立高效"仍然成立（能力不变、成本更低），
-    但**命令的拼写会变**，措辞需要相应更新
+  `story_report_suite_reorganization_glm-4.7.md`（两份均已归档，不在版本控制范围内）：两者的可取
+  部分（三级变焦、确定性命名、导航矩阵、脊柱完整性、配对分层、Phase 0）已吸收进本文正文，被否决
+  部分及其理由记录在逐条评审文档里。
+- `story_report_ux_review_sonnet-5.md`（已归档，不在版本控制范围内）是第一轮 6 项 UX 改动的过程
+  记录。
+- 逐条评审记录：`story_report_peer_review_opus-5.md`（已归档，不在版本控制范围内）。
+- **本方案已全部落地**（P0–P9，见 `story_report_dev_plan_opus-5.md`/`story_report_dev_plan_2_sonnet-5.md`
+  与各阶段 ActionPlan 的执行记录）。本节原先在此列出的"若本方案被采纳，需要相应更新的既有条目"
+  清单是落地前的待办快照，写就时尚不知道每一条最终会按原方案落地还是改道——例如清单曾预判
+  `KNOWN_ISSUES §1.22` 会"分批实施"，但该条目最终实际处置是"决定不做"。该清单已随各阶段
+  ActionPlan 与 `KNOWN_ISSUES §3` 的执行记录逐条兑现或改道，不再需要在这里重复维护；
+  `KNOWN_ISSUES_sonnet-5.md` 是当前状态的唯一权威来源，本文不再是它的待办输入。
 - 阶段划分与验收边界见 `docs/future-strategy/story_report_dev_plan_opus-5.md`；
   每个阶段开工前另行编写该阶段的 ActionPlan，本文不承担执行级细节。
 - 本文**没有修改任何代码或其他文档**。

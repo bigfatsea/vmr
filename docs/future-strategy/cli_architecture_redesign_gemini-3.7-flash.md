@@ -2,7 +2,12 @@
 
 # vmr 命令层重构设计规范 — 一个分析动词，一个读取原语
 
-本文档作为 [docs/future-strategy/story_report_architecture_opus-5.md](file:///Users/stanford/code/vmr/docs/future-strategy/story_report_architecture_opus-5.md) §7.9 的专项实施设计，定义 `vmr` 日志分析与法证命令体系的全新交互规范。
+> **现状（2026-08-21）**：本文档的核心方向已被 `story_report_dev_plan_2_sonnet-5.md` P9 采纳
+> 落地，但**不是全盘照抄**——P9 明确未采纳本文档提议的 `vmr cat` 新命令与 `--long-flag`/短选项
+> 风格，理由见 DevPlan2 §1。本文档保留作 P9 实施期的模块级设计细节参考，重新讨论前请先看
+> DevPlan2 §1 与 P9 的采纳/未采纳边界，避免把已拍板的问题重新提出一遍。
+
+本文档作为 `story_report_architecture_opus-5.md` §7.9 的专项实施设计，定义 `vmr` 日志分析与法证命令体系的全新交互规范。
 
 ---
 
@@ -61,7 +66,7 @@ vmr — Virtual Model Router & Forensic Analytics
 * **裁决理由**：`report` 带有强烈的“静态宏观报表”暗示；`story` 带有强烈的“叙事文本”暗示。`analyze` 统一涵盖了“全量聚合统计”、“任务因果建图”与“语料挖掘”，是容纳三级变焦最贴切的动词。
 
 ### 3.2 运行模式与变焦选择器（Zoom Selectors）
-`vmr analyze` 仅通过 **互斥的变焦选择器 Flag** 切换输出范围，所有模式共享一次扫描、一套增量缓存（`.parse-cache/`）与一套上下文图（[internal/ctxgraph](file:///Users/stanford/code/vmr/internal/ctxgraph)）：
+`vmr analyze` 仅通过 **互斥的变焦选择器 Flag** 切换输出范围，所有模式共享一次扫描、一套增量缓存（`.parse-cache/`）与一套上下文图（`internal/ctxgraph`）：
 
 | 变焦模式 | CLI 语法 | 默认产物与行为 | 性能与 I/O 契约 |
 | :--- | :--- | :--- | :--- |
@@ -203,4 +208,4 @@ vmr replay -p openrouter 2026-07-13:317 --model z-ai/glm-5.2 --stream=true
 3. **只读安全性与 0600 权限**：
    * 所有分析命令（`analyze`, `cat`）均为**纯只读操作**，绝不修改原始审计日志。生成的 `reports/` 目录与 `evidence/` 文件保持 `0600` 权限纪律（防敏感对话泄漏）。
 4. **向后兼容与过渡期**：
-   * 在 [cmd/vmr/main.go](file:///Users/stanford/code/vmr/cmd/vmr/main.go) 中，暂时保留 `report` 和 `story` 关键字作为 `analyze` 的 Alias，并打印 Deprecation 提示（告知映射关系），确保旧脚本不立即中断，但文档与新输出全面切换为新规范。
+   * 在 `cmd/vmr/main.go` 中，暂时保留 `report` 和 `story` 关键字作为 `analyze` 的 Alias，并打印 Deprecation 提示（告知映射关系），确保旧脚本不立即中断，但文档与新输出全面切换为新规范。
