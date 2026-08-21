@@ -7,6 +7,12 @@
 > **基线**：commit `4ef2665`（2026-07-27）。所有"已实现/未实现"判定均通过读源码、配置、CLI flag 逐条实测，不依赖任何历史文档的自述。
 >
 > **竞品数据**：2026-07-27 通过 GitHub API 实时拉取 star / 语言 / 最后推送时间，非引用二手清单。
+>
+> **CLI 表述已过期（2026-08-21 标注）**：本文档的基线 commit `4ef2665` 早于 `vmr report`/`vmr story`
+> → `vmr analyze` 单一入口收敛（P9，见 `story_report_architecture_opus-5.md`）。全文出现的
+> `vmr report`/`vmr story` 命令示例应读作 `vmr analyze` 的等价历史写法；`vmr report`/`vmr story`
+> 今天仍可用，但已降级为过渡别名。此标注只覆盖 CLI 命令层——本文档关于业务战略、竞品格局的判断
+> 是否仍然现行，不在本次标注评估范围内。
 
 ---
 

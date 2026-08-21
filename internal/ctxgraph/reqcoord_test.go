@@ -44,7 +44,7 @@ func TestBuildManifest_SetsReqFromRawPathAndKeepsPathRaw(t *testing.T) {
 		t.Fatal("BuildManifest returned ok=false")
 	}
 	if m.Path != "logs/vmr-audit-2026-07-25.jsonl.zst" {
-		t.Errorf("Manifest.Path = %q, want the raw scan-input path unchanged (BlobIndex.FetchAll opens it as-is)", m.Path)
+		t.Errorf("Manifest.Path = %q, want the raw scan-input path unchanged (FetchRecords opens it as-is)", m.Path)
 	}
 	if want := "vmr-audit-2026-07-25.jsonl:42"; m.Req != want {
 		t.Errorf("Manifest.Req = %q, want %q", m.Req, want)

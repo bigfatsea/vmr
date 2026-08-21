@@ -52,18 +52,44 @@ var (
 // resolve. Review reports and strategy material are excluded on purpose:
 // they discuss historical and hypothetical package names as part of their
 // argument, and rewriting history to satisfy a guard is the wrong trade.
+// Production .go source files (docRel ending in ".go") are held to this
+// same standard unconditionally — a source comment citing a moved/deleted
+// file or doc is exactly the class of drift this guard exists to catch
+// (see TestArchitecture_DocReferences_SourceComments), and unlike a dated
+// review report a source comment claims to describe the code as it is now.
 func docHasInternalPaths(docRel string) bool {
-	return docRel == "CLAUDE.md" ||
+	return strings.HasSuffix(docRel, ".go") ||
+		docRel == "CLAUDE.md" ||
 		strings.HasPrefix(docRel, "docs/VirtualModelRouter_Design_v4_") ||
 		docRel == "docs/KNOWN_ISSUES_sonnet-5.md"
 }
 
 // docHasSymbols marks the docs that describe current state and therefore
-// must not name a Go symbol that does not exist.
+// must not name a Go symbol that does not exist. Deliberately NOT extended
+// to .go source files the way docHasInternalPaths is: Go doc comments
+// backtick-quote all sorts of things (parameter names, stdlib types) in a
+// `pkg.Symbol`-like shape that would make repo-wide symbol checking noisy
+// far beyond what this task set out to guard — path references only.
 func docHasSymbols(docRel string) bool {
-	return docHasInternalPaths(docRel) ||
+	return docRel == "CLAUDE.md" ||
+		strings.HasPrefix(docRel, "docs/VirtualModelRouter_Design_v4_") ||
+		docRel == "docs/KNOWN_ISSUES_sonnet-5.md" ||
 		strings.HasPrefix(docRel, "README") ||
 		strings.HasPrefix(docRel, "docs/UserGuide")
+}
+
+// docHasMarkdownLinks marks the docs whose `[text](target.md)` syntax means
+// what it means in a normal Markdown document: a same-repo cross-reference
+// that must resolve. .go source files are excluded — a `[label](x.md)`
+// string inside a Go source file is, in this codebase, i18n/render text
+// being assembled into a *generated* report (e.g. i18n/report_doc.go's
+// "[vmr-requests.md](./vmr-requests.md)", which names an output artifact
+// that will exist next to the rendered file at runtime, and
+// report/render_doc.go's `[-%s](./vmr-requests-%s.md)`, a printf template
+// with no meaning as a repo path at all) — not a claim that some path
+// exists in this checkout right now.
+func docHasMarkdownLinks(docRel string) bool {
+	return !strings.HasSuffix(docRel, ".go")
 }
 
 // checkDocRefs returns one message per broken reference found in content.
@@ -87,20 +113,22 @@ func checkDocRefs(w docWorld, docRel, content string) []string {
 		}
 	}
 
-	for _, m := range reMarkdownLink.FindAllStringSubmatch(content, -1) {
-		target := m[1]
-		// http(s) is someone else's uptime problem; file:// carries a
-		// machine-specific absolute path that says nothing about this
-		// checkout.
-		if strings.Contains(target, "://") {
-			continue
-		}
-		resolved := filepath.Join(docDir, target)
-		if filepath.IsAbs(target) {
-			resolved = target
-		}
-		if !exists(filepath.Clean(resolved)) {
-			problems = append(problems, docRel+": link target "+target+" does not exist")
+	if docHasMarkdownLinks(docRel) {
+		for _, m := range reMarkdownLink.FindAllStringSubmatch(content, -1) {
+			target := m[1]
+			// http(s) is someone else's uptime problem; file:// carries a
+			// machine-specific absolute path that says nothing about this
+			// checkout.
+			if strings.Contains(target, "://") {
+				continue
+			}
+			resolved := filepath.Join(docDir, target)
+			if filepath.IsAbs(target) {
+				resolved = target
+			}
+			if !exists(filepath.Clean(resolved)) {
+				problems = append(problems, docRel+": link target "+target+" does not exist")
+			}
 		}
 	}
 
@@ -254,6 +282,75 @@ func TestArchitecture_DocReferences(t *testing.T) {
 	}
 }
 
+// goFileComments extracts only the comment text of a Go source file — not
+// string literals, not identifiers, not import paths — via go/parser's own
+// AST rather than a full-text regex scan. This matters for a file like
+// internal/i18n/report_doc.go: its *string literals* legitimately contain
+// `[vmr-requests.md](./vmr-requests.md)`-shaped text (rendered into
+// generated reports), and a full-text scan has no way to distinguish that
+// from a comment's documentation claim without a growing pile of
+// docHasMarkdownLinks-style exceptions. Restricting the input to comments
+// makes the distinction structural instead of enumerated.
+func goFileComments(path string) (string, error) {
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, cg := range node.Comments {
+		b.WriteString(cg.Text())
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+// TestArchitecture_DocReferences_SourceComments extends the same guard to
+// production .go source comments under internal/ and cmd/ — the class of
+// drift TestArchitecture_DocReferences never saw: a comment citing a file
+// that has since moved (internal/report/render.go, moved to
+// internal/reqdetail/render.go in P2) or a docs/future-strategy/*.md plan
+// document that has since been archived. Both classes were found live in
+// this tree during the 2026-08-21 review (story_report_full_review_opus-5.md
+// §2.6/§4.1) and went unnoticed for two phases specifically because nothing
+// checked source comments — see that review's account of the same dead
+// reference tripping this package's own doc-reference guard the moment it
+// was typed into KNOWN_ISSUES, while the identical dead reference sat
+// unnoticed in three .go files' comments the whole time.
+//
+// _test.go files are excluded (same convention loadDocWorld already uses
+// for symbol extraction) and so is _eval/ (a standalone calibration tool
+// with its own compile guard — TestArchitecture_EvalToolsCompile — rather
+// than being folded into the internal/+cmd/ production surface this test
+// walks).
+func TestArchitecture_DocReferences_SourceComments(t *testing.T) {
+	root := repoRootDir(t)
+	w := loadDocWorld(t, root)
+
+	for _, top := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			comments, rerr := goFileComments(path)
+			if rerr != nil {
+				return rerr
+			}
+			docRel, rerr := filepath.Rel(root, path)
+			if rerr != nil {
+				return rerr
+			}
+			for _, p := range checkDocRefs(w, docRel, comments) {
+				t.Error(p)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s for source comment references: %v", top, err)
+		}
+	}
+}
+
 // TestArchitecture_DocReferences_Negative drives checkDocRefs over synthetic
 // broken references to prove the guard actually trips. Without this, a regex
 // that silently stops matching would leave TestArchitecture_DocReferences
@@ -277,6 +374,10 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"missing symbol behind a selector", "CLAUDE.md", "`adapter.NoSuchTypeX.Model`"},
 		{"missing symbol in a design doc", "docs/VirtualModelRouter_Design_v4_Core.md", "`router.NoSuchFuncX`"},
 		{"missing symbol in a README", "README.md", "`report.NoSuchRowX`"},
+		// The .go-source-comment branch: same checkDocRefs, a source file
+		// docRel instead of a doc's.
+		{"missing source file in a .go comment", "internal/report/detail.go", "see internal/report/nosuchfile.go"},
+		{"missing future-strategy doc in a .go comment", "internal/report/detail.go", "see docs/future-strategy/nosuch_xyz.md"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,6 +396,18 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"CLAUDE.md", "see internal/router/router.go and docs/UserGuide.md"},
 		{"CLAUDE.md", "one section per internal/report/section_*.go"},
 		{"CLAUDE.md", "`time.Duration` and `json.RawMessage` are out of scope"},
+		{"internal/report/detail.go", "see docs/future-strategy/story_report_architecture_opus-5.md"},
+		{"internal/report/detail.go", "moved to internal/reqdetail/render.go"},
+		// A .go source comment is NOT held to docHasSymbols (too noisy —
+		// see docHasSymbols' doc comment), so a bogus `pkg.Symbol` mention
+		// in one must stay silent even though the same text would trip in
+		// CLAUDE.md/a README above.
+		{"internal/report/detail.go", "`core.NoSuchSymbolX` is unrelated prose"},
+		// Markdown-link syntax in a .go file is i18n/render text describing
+		// a *generated* artifact's own links, not a repo cross-reference —
+		// see docHasMarkdownLinks. This must stay silent even though the
+		// identical text in a real .md doc would trip above.
+		{"internal/i18n/report_doc.go", `"see [vmr-requests.md](./vmr-requests.md)"`},
 	}
 	for _, tc := range ok {
 		if got := checkDocRefs(w, tc.docRel, tc.content); len(got) != 0 {

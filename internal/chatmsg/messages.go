@@ -335,10 +335,10 @@ func jsonIndent(v any) string {
 // Nested walks a chain of map keys, returning nil the moment any link isn't
 // a map[string]any. Exported so internal/ctxgraph (which already imports
 // chatmsg for Messages/ExtractUsage) doesn't need its own private copy —
-// internal/report/usage.go used to keep a third one, deleted as tech-debt
-// cleanup during the Step 3 migration onto ctxgraph; at that point two
-// independent copies for a 12-line helper stopped being cheaper than one
-// shared export.
+// report package used to keep a third copy in its own usage-extraction
+// file, deleted as tech-debt cleanup during the Step 3 migration onto
+// ctxgraph; at that point two independent copies for a 12-line helper
+// stopped being cheaper than one shared export.
 func Nested(obj map[string]any, keys ...string) any {
 	var cur any = obj
 	for _, k := range keys {

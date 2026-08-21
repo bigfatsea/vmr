@@ -249,48 +249,6 @@ func TestScan_DifferentSessKeysAreIndependentBuckets(t *testing.T) {
 	}
 }
 
-func TestScan_BlobIndexFetchAllRecoversOriginalContent(t *testing.T) {
-	t.Parallel()
-	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
-	body := chatBody(sysMsg("sys"), userMsg("hello there"), assistantMsg("hi back"))
-	rec := mkAuditRec(at, body)
-	path := writeJSONL(t, []audit.Record{rec})
-	g, err := Scan([]string{path})
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(g.Lineages) != 1 || len(g.Lineages[0].Manifests) != 1 {
-		t.Fatalf("unexpected graph shape: %d lineages", len(g.Lineages))
-	}
-	m := g.Lineages[0].Manifests[0]
-	if len(m.Keys) != 2 {
-		t.Fatalf("expected 2 keys, got %d", len(m.Keys))
-	}
-	fetched, err := g.Index.FetchAll(m.Keys)
-	if err != nil {
-		t.Fatalf("FetchAll: %v", err)
-	}
-	if fetched[m.Keys[0]].Text != "hello there" {
-		t.Errorf("fetched[0].Text = %q, want %q", fetched[m.Keys[0]].Text, "hello there")
-	}
-	if fetched[m.Keys[1]].Text != "hi back" {
-		t.Errorf("fetched[1].Text = %q, want %q", fetched[m.Keys[1]].Text, "hi back")
-	}
-
-	// Lookup/Len are BlobIndex's other public accessors (FetchAll reads
-	// idx.refs directly, so neither is exercised by the assertions above).
-	if got := g.Index.Len(); got != 2 {
-		t.Errorf("Index.Len() = %d, want 2", got)
-	}
-	ref, ok := g.Index.Lookup(m.Keys[0])
-	if !ok || ref.Path != path || ref.Line != 1 || ref.Idx != m.MsgIdx[0] {
-		t.Errorf("Lookup(m.Keys[0]) = %+v, %v, want {%s 1 %d}, true", ref, ok, path, m.MsgIdx[0])
-	}
-	if _, ok := g.Index.Lookup(Hash{}); ok {
-		t.Error("Lookup of a hash that was never indexed should report ok=false")
-	}
-}
-
 func TestScan_NoBodyRecordsCounted(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)

@@ -30,17 +30,6 @@ import (
 	"vmr/internal/core"
 )
 
-// ErrorClass returns rec's last attempt's structured error class, "" when
-// the record never errored (or never reached an attempt at all).
-func ErrorClass(rec *audit.Record) string {
-	for i := len(rec.Attempts) - 1; i >= 0; i-- {
-		if cls := AttemptErrorClass(rec.Attempts[i]); cls != "" {
-			return cls
-		}
-	}
-	return ""
-}
-
 // AttemptErrorClass returns one attempt's structured error class, falling
 // back to parsing the free-text Error field for logs written before
 // ErrorClass existed: HTTP-classified failures stored the bare class name

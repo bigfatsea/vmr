@@ -2,9 +2,10 @@
 
 // Package i18n holds the two-language (English/Chinese) text vmr report and
 // vmr story render into their Markdown/CLI output. It is a zero-dependency
-// leaf package, same tier as internal/core/internal/fmtutil: it declares no
-// import on internal/config/router/server/report/story, so report and story
-// can depend on it without violating internal/archtest's import boundaries,
+// leaf package, same tier as internal/core and internal/fmtutil: it
+// declares no import on internal/config, internal/router, internal/server,
+// internal/report, or internal/story, so report and story can depend on it
+// without violating internal/archtest's import boundaries,
 // and cmd/vmr can depend on it to parse -lang/report.yaml without either of
 // them needing to know about configuration at all.
 //

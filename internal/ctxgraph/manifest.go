@@ -23,11 +23,12 @@ type Manifest struct {
 	// CanonicalPath(Path) + ":" + Line (see reqcoord.go's ReqCoord). Path
 	// itself cannot serve this role — it is whatever the scan caller
 	// passed (absolute or relative, with or without a compression suffix),
-	// and must stay that way for BlobIndex.FetchAll's later os.Open. Req
-	// is computed once here, at the one place that still has the original
-	// scan-input path in scope, so every other consumer (internal/report's
-	// RequestRow.Req, internal/reqdetail's filenames) reads the same
-	// already-normalized string instead of each re-deriving it.
+	// and must stay that way for FetchRecords' later os.Open (records.go).
+	// Req is computed once here, at the one place that still has the
+	// original scan-input path in scope, so every other consumer
+	// (internal/report's RequestRow.Req, internal/reqdetail's filenames)
+	// reads the same already-normalized string instead of each
+	// re-deriving it.
 	Req string `json:"req,omitempty"`
 
 	TS       time.Time     `json:"ts"`
@@ -64,8 +65,9 @@ type Manifest struct {
 
 	// Keys is one hash per non-leading-system message, in original order.
 	// MsgIdx[i] is the index of Keys[i]'s message within chatmsg.Messages'
-	// output for this request — the coordinate BlobIndex needs to refetch
-	// that message's actual text later (see blobindex.go).
+	// output for this request — used by edit classification (edit.go) and
+	// lineage stitching (stitch.go) to recognize the same message across
+	// manifests without re-parsing content.
 	Keys   []Hash `json:"keys,omitempty"`
 	MsgIdx []int  `json:"msg_idx,omitempty"`
 
@@ -93,11 +95,12 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 	off := chatmsg.MsgOffset(body)
 
 	m := &Manifest{
-		// Path stays exactly as passed in — BlobIndex.FetchAll later opens
-		// this same string via audit.OpenLogFile to recover original
-		// message content, so it must remain a real, resolvable path, not
-		// a bare basename. Req is the separate, normalized identity: see
-		// reqcoord.go for why the two cannot be the same field.
+		// Path stays exactly as passed in — FetchRecords (records.go)
+		// later opens this same string via audit.OpenLogFile to recover
+		// original record content, so it must remain a real, resolvable
+		// path, not a bare basename. Req is the separate, normalized
+		// identity: see reqcoord.go for why the two cannot be the same
+		// field.
 		Path: path, Line: line, Req: ReqCoord(path, line), TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
 		Stream: rec.Stream, DurMS: rec.DurMS, TTFTMS: rec.TTFTMS,

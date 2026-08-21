@@ -1,14 +1,12 @@
 // Ver 2026-08-02, by Sonnet 5
 
 // Config-summary rendering shared by cmd_start.go (startup/reload banner)
-// and cmd_check.go (`vmr check` output): configFlag, logConfigSummary, and
-// the provider-proxy-line helpers both draw on.
+// and cmd_check.go (`vmr check` output): logConfigSummary and the
+// provider-proxy-entry helpers both draw on.
 package main
 
 import (
 	"bytes"
-	"flag"
-	"fmt"
 	"log"
 	"net/url"
 	"sort"
@@ -17,15 +15,6 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/router"
 )
-
-func configFlag(args []string, cmd string) (string, error) {
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	path := fs.String("c", "config.yaml", "path to config file")
-	if err := fs.Parse(args); err != nil {
-		return "", err
-	}
-	return *path, nil
-}
 
 // logConfigSummary prints what the running instance is actually configured
 // to do, by calling the exact same section renderers `vmr check` uses
@@ -62,7 +51,7 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 // providerProxyEntry is one provider's resolved proxy setting, keyed by its
 // "protocol/name" for display — the human-readable description (direct /
 // direct (proxy: false) / redacted proxy URL) cmd_check.go's printProviders
-// and providerProxyLines each render their own way.
+// renders per-provider via providerProxyLine.
 type providerProxyEntry struct {
 	Name  string
 	Proxy string
@@ -99,15 +88,4 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 		}
 	}
 	return entries
-}
-
-// providerProxyLines renders providerProxyEntries as flat "provider a/b
-// proxy=c" lines, kept for cmdCheck's one-line-per-provider "vmr check" output.
-func providerProxyLines(cfg *config.Config) []string {
-	entries := providerProxyEntries(cfg)
-	lines := make([]string, len(entries))
-	for i, e := range entries {
-		lines[i] = fmt.Sprintf("provider %s proxy=%s", e.Name, e.Proxy)
-	}
-	return lines
 }

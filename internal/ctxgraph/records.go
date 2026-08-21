@@ -20,17 +20,17 @@ type Loc struct {
 // audit.Record at each, batched per file (each file opened and scanned at
 // most once regardless of how many lines are wanted from it — zstd isn't
 // seekable, so one streaming pass per file is the only efficient access
-// pattern, same rationale as BlobIndex.FetchAll) and the per-file reads run
-// on the same bounded worker pool Scan uses (scanWorkerCount): decoding a
-// full audit.Record per wanted line is real CPU work (zstd decompression +
-// json.Unmarshal, not just a hash), so a caller batching many lineages at
-// once (internal/story.BuildAll) previously spent the whole wall-clock
-// serially on one core — see design-doc review follow-up: -render-all's
-// first cut was ~15x slower than the list-only scan on a real 15-file/253-
-// candidate corpus, entirely from this loop running one file at a time.
-// Callers needing more than a single message's text — internal/story
-// building a Journey's Steps needs each manifest's complete
-// request/response — use this instead of BlobIndex.FetchAll.
+// pattern) and the per-file reads run on the same bounded worker pool Scan
+// uses (scanWorkerCount): decoding a full audit.Record per wanted line is
+// real CPU work (zstd decompression + json.Unmarshal, not just a hash), so
+// a caller batching many lineages at once (internal/story.BuildAll)
+// previously spent the whole wall-clock serially on one core — see
+// design-doc review follow-up: -render-all's first cut was ~15x slower
+// than the list-only scan on a real 15-file/253-candidate corpus, entirely
+// from this loop running one file at a time. Callers needing more than a
+// single message's text — internal/story building a Journey's Steps needs
+// each manifest's complete request/response — use this rather than
+// re-deriving message text from Manifest.Keys alone.
 func FetchRecords(locs []Loc) (map[Loc]*audit.Record, error) {
 	byPath := map[string]map[int]bool{}
 	for _, loc := range locs {

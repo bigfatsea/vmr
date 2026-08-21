@@ -32,28 +32,21 @@ func TestIDMatchesDeriveID(t *testing.T) {
 	}
 }
 
-// TestPreviewTitle_NilProfileErrors and TestPreviewTitles_NilProfileErrors
-// pin the fail-fast guard for a nil taskseg.Profile — see the same-named
-// guards in journey_test.go for why this matters more than a nicer error
-// message (titleFromRecord would otherwise panic on prof.RealUserText).
-func TestPreviewTitle_NilProfileErrors(t *testing.T) {
-	if _, err := PreviewTitle([]*ctxgraph.Lineage{{}}, nil, i18n.EN); err == nil {
-		t.Error("PreviewTitle with a nil Profile should return an error, not panic")
-	}
-}
-
+// TestPreviewTitles_NilProfileErrors pins the fail-fast guard for a nil
+// taskseg.Profile — see the same-named guards in journey_test.go for why
+// this matters more than a nicer error message (titleFromRecord would
+// otherwise panic on prof.RealUserText).
 func TestPreviewTitles_NilProfileErrors(t *testing.T) {
 	if _, err := PreviewTitles([][]*ctxgraph.Lineage{{{}}}, nil, i18n.EN); err == nil {
 		t.Error("PreviewTitles with a nil Profile should return an error, not panic")
 	}
 }
 
-// TestPreviewTitleAndPreviewTitlesAgree covers both the single-chain
-// PreviewTitle path and the batched PreviewTitles path (the one
-// cmd_story.go's listing actually uses) against the same fixture — both
-// must return the fixture's own real opening instruction, and must agree
-// with each other.
-func TestPreviewTitleAndPreviewTitlesAgree(t *testing.T) {
+// TestPreviewTitles_ReturnsRealOpeningInstruction covers the batched path
+// (the one cmd_story.go's listing actually uses) against a fixture whose
+// real opening instruction is known — the result must be that instruction,
+// keyed by the chain's tail lineage.
+func TestPreviewTitles_ReturnsRealOpeningInstruction(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "sys")
 	u1 := msg("user", "调研一下 A 股新股打新收益")
@@ -63,20 +56,12 @@ func TestPreviewTitleAndPreviewTitlesAgree(t *testing.T) {
 	l := onlyLineage(t, path)
 	chain := []*ctxgraph.Lineage{l}
 
-	single, err := PreviewTitle(chain, taskseg.OpenClawAware, i18n.EN)
-	if err != nil {
-		t.Fatalf("PreviewTitle: %v", err)
-	}
-	if single != "调研一下 A 股新股打新收益" {
-		t.Errorf("PreviewTitle = %q, want the fixture's opening instruction", single)
-	}
-
 	batched, err := PreviewTitles([][]*ctxgraph.Lineage{chain}, taskseg.OpenClawAware, i18n.EN)
 	if err != nil {
 		t.Fatalf("PreviewTitles: %v", err)
 	}
-	if got := batched[l]; got != single {
-		t.Errorf("PreviewTitles[tail] = %q, want it to agree with PreviewTitle = %q", got, single)
+	if got := batched[l]; got != "调研一下 A 股新股打新收益" {
+		t.Errorf("PreviewTitles[tail] = %q, want the fixture's opening instruction", got)
 	}
 }
 

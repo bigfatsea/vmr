@@ -16,7 +16,6 @@ package reqdetail
 
 import (
 	"crypto/md5"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,17 +25,6 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 )
-
-// contentHash8 is the same md5-prefix-hex short form ctxgraph.ReqHash8 and
-// toolsHash8 already use, applied to arbitrary evidence content instead of
-// a coordinate or a tool-name list — kept as its own tiny function (not a
-// call to ReqHash8, which is documented as a coordinate's hash
-// specifically) so a reader never has to wonder whether this hash means
-// "this content" or "this request".
-func contentHash8(text string) string {
-	sum := md5.Sum([]byte(text))
-	return hex.EncodeToString(sum[:4])
-}
 
 // leadingSystem returns how many of msgs' leading messages are contiguous
 // role=="system" messages, and their concatenated text — mirrors
@@ -61,8 +49,9 @@ func leadingSystem(msgs []chatmsg.Message) (leadSys int, text string) {
 // rec — see ctxgraph.Manifest's doc comment on SysHash). Exported so a
 // caller that only has the hash, not rec — e.g. a spine Step's "→ system
 // prompt" link — can compute the same name without re-deriving this package's
-// private naming convention. sysHash.String()[:8] is exactly contentHash8's output for the
-// same text: both are the hex encoding of the same digest's first 4 bytes.
+// private naming convention. sysHash.String()[:8] is exactly what
+// EnsureSysPromptEvidence itself computes for the same text: both are the
+// hex encoding of the same digest's first 4 bytes.
 func SysPromptEvidenceFileName(sysHash ctxgraph.Hash) string {
 	return "sysprompt-" + sysHash.String()[:8] + ".md"
 }

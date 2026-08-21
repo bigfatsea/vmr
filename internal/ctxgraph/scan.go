@@ -13,8 +13,7 @@ import (
 )
 
 // Graph is the result of scanning a set of audit files: every SessKey
-// bucket split into lineages at its structural breaks, plus a blob index
-// for recovering original message content on demand.
+// bucket split into lineages at its structural breaks.
 type Graph struct {
 	Lineages []*Lineage
 	// Ungrouped holds manifests that parsed but derived no SessKey at all
@@ -26,7 +25,6 @@ type Graph struct {
 	// chat object at all (rejected requests, malformed JSON) — these never
 	// become a Manifest in the first place.
 	NoBody int
-	Index  *BlobIndex
 }
 
 // Scan reads paths (audit JSONL, optionally .zst-compressed — see
@@ -67,16 +65,15 @@ func Scan(paths []string) (*Graph, error) {
 }
 
 // buildGraph is Scan's shared tail: sort every already-parsed Manifest by
-// timestamp, bucket by SessKey, split each bucket into lineages, and build
-// the blob inverted index — pure in-memory work over Manifests, with no
-// dependency on where they came from (freshly parsed this call, or reused
-// from a cache — see ScanCached in cache.go). Manifest count, not source
-// file bytes, is what this scales with, so it stays cheap even when most of
-// the corpus is cache-sourced.
+// timestamp, bucket by SessKey, and split each bucket into lineages — pure
+// in-memory work over Manifests, with no dependency on where they came from
+// (freshly parsed this call, or reused from a cache — see ScanCached in
+// cache.go). Manifest count, not source file bytes, is what this scales
+// with, so it stays cheap even when most of the corpus is cache-sourced.
 func buildGraph(all []*Manifest, noBody int) *Graph {
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS.Before(all[j].TS) })
 
-	g := &Graph{Index: newBlobIndex(), NoBody: noBody}
+	g := &Graph{NoBody: noBody}
 	buckets := map[string][]*Manifest{}
 	var order []string
 	for _, m := range all {
@@ -88,9 +85,6 @@ func buildGraph(all []*Manifest, noBody int) *Graph {
 			order = append(order, m.SessKey)
 		}
 		buckets[m.SessKey] = append(buckets[m.SessKey], m)
-		for i, h := range m.Keys {
-			g.Index.firstSeen(h, BlobRef{Path: m.Path, Line: m.Line, Idx: m.MsgIdx[i]})
-		}
 	}
 
 	idx := 0

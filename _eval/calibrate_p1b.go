@@ -7,9 +7,7 @@
 // calibration script: it mocked the LLM's HTTP response with a hand-written
 // "correct answer" and re-parsed that same string with a hand-rolled copy of
 // the threshold logic, never calling story.ComputeLLMFindings (the actual
-// production entry point) at all. See docs/future-strategy/
-// phase1b_implementation_plan_gemini-3.7-flash.md §7.2 for the full account
-// of what was wrong with it.
+// production entry point) at all.
 //
 // This version calls the real production path: story.ComputeLLMFindings
 // against real Journeys reconstructed from real production audit logs

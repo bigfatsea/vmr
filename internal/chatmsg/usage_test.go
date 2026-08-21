@@ -114,25 +114,6 @@ func TestExtractUsage_NoUsage(t *testing.T) {
 	}
 }
 
-func TestExtractFinish(t *testing.T) {
-	t.Parallel()
-	sse := sseText("hi") // finish_reason "stop"
-	if got := ExtractFinish(sse); got != "stop" {
-		t.Errorf("ExtractFinish(sse) = %q, want stop", got)
-	}
-	anth := map[string]any{"stop_reason": "end_turn"}
-	if got := ExtractFinish(anth); got != "end_turn" {
-		t.Errorf("ExtractFinish(anthropic) = %q, want end_turn", got)
-	}
-	jsonBody := map[string]any{"choices": []any{map[string]any{"finish_reason": "stop"}}}
-	if got := ExtractFinish(jsonBody); got != "stop" {
-		t.Errorf("ExtractFinish(openai json) = %q, want stop", got)
-	}
-	if got := ExtractFinish("no finish here"); got != "" {
-		t.Errorf("ExtractFinish(no finish) = %q, want empty", got)
-	}
-}
-
 // TestUsage_Fresh pins the one formula this type's own doc comment states
 // ("In - CacheRead - CacheWrite is the fresh portion") — previously
 // hand-written at four independent call sites (internal/router/quota.go,

@@ -212,24 +212,26 @@ func (dw *DetailWriter) Close() (int, error) {
 }
 
 // WriteDetails renders every record in the given audit files into dir (one
-// .md + one same-named .json per record, in lang). Returns the number of
-// record files written. Reruns overwrite deterministically — every name is
-// the record's own coordinate hash (internal/reqdetail.FileName), so unlike
-// before P2 there is no batch-order or cross-run dependency to keep paths
-// aligned for: any subset of files, scanned via any path spelling, names
-// each record the same way.
+// .md per record, in lang — no same-named .json since P3.1). Returns the
+// number of record files written. Reruns overwrite deterministically —
+// every name is the record's own coordinate hash
+// (internal/reqdetail.FileName), so unlike before P2 there is no
+// batch-order or cross-run dependency to keep paths aligned for: any
+// subset of files, scanned via any path spelling, names each record the
+// same way.
 //
 // sess (optional, nil = plain mode) supplies the session grouping: detail
 // pages gain a previous-turn link and delta highlight when sess correlates
 // this record to a lineage predecessor.
 //
-// This is a standalone alternative to Build's onRecord hook — a second,
-// independent read of the same audit files, for callers that want detail
-// export without running the full aggregation pass. `vmr report` itself no
-// longer calls this (Build's hook covers it in one pass instead); it stays
-// for tests and any other standalone use.
-//
 // progress (optional, nil = silent) gets one line per input file.
+//
+// Deprecated: WriteDetails is retained only as the two-pass differential
+// baseline TestBuildOnRecordMatchesWriteDetails (detail_test.go) diffs
+// Build's single-pass onRecord hook against, byte-for-byte. `vmr report`
+// itself no longer calls this — Build's onRecord hook covers detail export
+// in the same pass session analysis already runs. Production callers use
+// BuildCached with an onRecord hook (see DetailWriter.Submit), not this.
 func WriteDetails(paths []string, dir string, sess *SessionAnalysis, progress io.Writer, lang i18n.Lang, prof taskseg.Profile) (int, error) {
 	dw, err := NewDetailWriter(dir, lang, prof)
 	if err != nil {

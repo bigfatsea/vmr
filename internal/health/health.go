@@ -47,7 +47,15 @@ func (r *Registry) get(key string) *state {
 	return s
 }
 
-// Available reports whether the endpoint would be tried now, without side effects.
+// Available reports whether the endpoint would be tried now, without side
+// effects — it never claims the half-open probe slot Acquire does. This is
+// the only side-effect-free way to inspect routing eligibility, which is
+// exactly why it has no caller in this package's own routing loop
+// (that loop needs Acquire's claim) yet stays load-bearing: tests in this
+// package and internal/router assert endpoint state via this method
+// precisely because calling Acquire to check would itself change the
+// state being asserted. Do not read "no production caller" as "delete" —
+// see docs/KNOWN_ISSUES_sonnet-5.md §3 item 35.
 func (r *Registry) Available(key string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

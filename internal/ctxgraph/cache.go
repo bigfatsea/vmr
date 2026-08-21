@@ -177,9 +177,9 @@ func scanCachedFile(path string, prior *FileCache) fileCacheResult {
 			// — a cache hit loaded from a prior run's persisted
 			// vmr-requests.json/vmr-stories.json carries whatever path
 			// spelling THAT run used (absolute, relative, a different
-			// cwd...), and BlobIndex.FetchAll/records.go's FetchRecords
-			// later open Manifest.Path directly to recover original
-			// message content. Req is untouched: it's already
+			// cwd...), and records.go's FetchRecords later opens
+			// Manifest.Path directly to recover original record content.
+			// Req is untouched: it's already
 			// CanonicalPath(path)-based (see ReqCoord), so it's identical
 			// under any path spelling and never needs rebinding.
 			for _, m := range cached.Manifests {
@@ -208,11 +208,11 @@ func hasNilManifest(ms []*Manifest) bool {
 // LoadCacheDir reads dir (a shared .parse-cache/ directory — see
 // FileCache's doc comment) into a FileCache: one CachedFile per <hash>.json
 // shard, keyed by each shard's own embedded CanonicalPath rather than by
-// the shard's filename. Best-effort like internal/report/LoadRequestsFileCache
-// used to be: a missing dir, or a shard that fails to parse, is skipped
-// rather than failing the whole load — the cache is a fully re-derivable
-// artifact, so a corrupt shard just costs that one file's worth of re-parse
-// on the next scan, not a hard error.
+// the shard's filename. Best-effort the same way report's own now-removed
+// file-cache loader used to be: a missing dir, or a shard that fails to
+// parse, is skipped rather than failing the whole load — the cache is a
+// fully re-derivable artifact, so a corrupt shard just costs that one
+// file's worth of re-parse on the next scan, not a hard error.
 func LoadCacheDir(dir string) *FileCache {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

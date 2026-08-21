@@ -16,26 +16,9 @@ import (
 // their ids.
 func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 
-// PreviewTitle returns what a Journey's title would be, fetching only
-// chain[0]'s ROOT record (not every manifest's, unlike BuildChain) — cheap
-// enough to call once, but see PreviewTitles when calling this for every
-// candidate in a listing: one FetchRecords per chain forces one full-file
-// scan per chain even when many chains' roots share the same source file.
-func PreviewTitle(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (string, error) {
-	if prof == nil {
-		return "", errNilProfile
-	}
-	root := chain[0].Manifests[0]
-	loc := ctxgraph.Loc{Path: root.Path, Line: root.Line}
-	recs, err := ctxgraph.FetchRecords([]ctxgraph.Loc{loc})
-	if err != nil {
-		return "", err
-	}
-	return titleFromRecord(recs[loc], prof, lang), nil
-}
-
-// PreviewTitles is PreviewTitle for many chains at once, batching every
-// chain's root-record fetch into one ctxgraph.FetchRecords call —
+// PreviewTitles fetches what each candidate chain's Journey title would be
+// without doing the full BuildChain, batching every chain's root-record
+// fetch into one ctxgraph.FetchRecords call —
 // FetchRecords already groups its work by source file (zstd isn't seekable,
 // so each file is scanned at most once regardless of how many lines are
 // wanted from it), so this turns what used to be one full-file scan PER

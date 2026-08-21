@@ -100,7 +100,7 @@ func TestEnsureSysPromptEvidence_ContentMatchesFilenameHash(t *testing.T) {
 	if !strings.Contains(string(data), "distinctive system prompt text") {
 		t.Errorf("evidence file content missing the system prompt text: %q", data)
 	}
-	wantName := "sysprompt-" + contentHash8("distinctive system prompt text") + ".md"
+	wantName := SysPromptEvidenceFileName(ctxgraph.Hash(md5.Sum([]byte("distinctive system prompt text"))))
 	if name != wantName {
 		t.Errorf("filename = %q, want %q", name, wantName)
 	}

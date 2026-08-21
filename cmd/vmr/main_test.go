@@ -645,9 +645,13 @@ models:
 	}
 }
 
-// --- providerProxyLines tests ---
+// --- providerProxyEntries tests ---
+//
+// These exercise providerProxyEntries/redactProxyURL directly (the shared
+// logic printProviders' providerProxyLine actually renders through), not a
+// separate formatting wrapper — see printProviders in cmd_check.go.
 
-func TestProviderProxyLines_Direct(t *testing.T) {
+func TestProviderProxyEntries_Direct(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
@@ -659,16 +663,16 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := providerProxyLines(cfg)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	entries := providerProxyEntries(cfg)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if !strings.Contains(lines[0], "proxy=direct") {
-		t.Errorf("expected direct, got %q", lines[0])
+	if entries[0].Proxy != "direct" {
+		t.Errorf("expected direct, got %q", entries[0].Proxy)
 	}
 }
 
-func TestProviderProxyLines_ProxyFalse(t *testing.T) {
+func TestProviderProxyEntries_ProxyFalse(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
@@ -681,13 +685,13 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := providerProxyLines(cfg)
-	if !strings.Contains(lines[0], "direct") {
-		t.Errorf("expected direct, got %q", lines[0])
+	entries := providerProxyEntries(cfg)
+	if !strings.Contains(entries[0].Proxy, "direct") {
+		t.Errorf("expected direct, got %q", entries[0].Proxy)
 	}
 }
 
-func TestProviderProxyLines_ProxyURL(t *testing.T) {
+func TestProviderProxyEntries_ProxyURL(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 https_proxy: http://user:pass@127.0.0.1:7890
@@ -700,13 +704,13 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := providerProxyLines(cfg)
+	entries := providerProxyEntries(cfg)
 	// Credentials in the proxy URL must be redacted.
-	if strings.Contains(lines[0], "user:pass") {
-		t.Errorf("proxy URL credentials not redacted: %q", lines[0])
+	if strings.Contains(entries[0].Proxy, "user:pass") {
+		t.Errorf("proxy URL credentials not redacted: %q", entries[0].Proxy)
 	}
-	if !strings.Contains(lines[0], "127.0.0.1:7890") {
-		t.Errorf("proxy URL host missing: %q", lines[0])
+	if !strings.Contains(entries[0].Proxy, "127.0.0.1:7890") {
+		t.Errorf("proxy URL host missing: %q", entries[0].Proxy)
 	}
 }
 
