@@ -145,6 +145,27 @@ models:
 
 这会展开成 `providers` × `models` 那么多个独立的、各自单独做健康跟踪的端点——外层按 `models` 循环，内层按 `providers` 循环，也就是每个具名 provider 都会先试完当前（更优先的）模型，整条记录才会降级到下一个模型。每个账号仍然各自保留自己的 `quota:`/`pricing:`（照旧写在它自己的 `providers[]` 记录上——合并 try-order 那一行不会把账号的配额账本也合并）；`vmr check` 展开后打印的结果，和手写多条记录时完全一样。
 
+**同一个厂商好几把 Key，写在一条 `providers[]` 记录里**：像上面 `volcengine`/`volcengine2` 那样手写，账号一多就烦。`api_keys:`（一个具名映射表，不是列表——label 会成为生成出来的名字的一部分）能自动做同样的展开，纯粹是配置期的语法糖：
+
+```yaml
+providers:
+  - name: volcengine
+    base_url: {openai: https://ark.example.com/v3}
+    api_keys:
+      main: ${ARK_KEY_1}
+      backup: ${ARK_KEY_2}
+
+models:
+  coding:
+    endpoints:
+      - protocol: openai
+        providers: [volcengine]        # 加载时被改写为 [volcengine-main, volcengine-backup]
+        models: [deepseek-v4-pro]
+        priority: 1
+```
+
+这一步完全在 `config.Parse` 里完成，先于校验和 `BuildSnapshot`：`volcengine` 会变成两条独立的 `Provider`，名字分别是 `volcengine-main`/`volcengine-backup`，配置里任何地方对 `providers: [volcengine]` 的引用——包括 `fallback_endpoints:`——都会被自动改写成展开后的名字列表。改写完之后，它和手写两条 `providers[]` 记录没有任何区别：各自独立的 `quota:`/健康度/Sticky 绑定，`vmr check` 里各自一行，各自的审计记录（`openai:volcengine-main:deepseek-v4-pro`）。一个 provider 只能二选一写 `api_key:` 或 `api_keys:`，两个都写是加载期错误。`vmr check` 里谁排第一不跟着 YAML 书写顺序走——`api_keys:` 就是个普通 map；但没配 `quota:` 时，排在前面的那把才是实际在用的，其余纯冷备，`vmr check`/启动日志每次都会打印真实生效的顺序，所以不是不可知，只是没法靠调整 YAML 顺序去指定它。想让几把 Key 都真正参与流量分配，跟顺序无关，就给每把 Key 各自配一份 `quota:`，让 vmr 的配额水位打分接管。
+
 **全局兜底端点**：一个顶层的 `fallback_endpoints:` 列表，记录形状和 `models.<name>.endpoints[]` 完全一样，会被追加到*每一个*虚拟模型自己 try-order 的末尾，而不用往每一个都想要同一档兜底的模型上分别粘贴一遍：
 
 ```yaml

@@ -146,6 +146,27 @@ models:
 
 This expands into as many independent, individually health-tracked endpoints as `providers` × `models` — outer loop over `models`, inner loop over `providers`, so every named provider is tried for the preferred model before the entry falls through to the next model. Each account keeps its own `quota:`/`pricing:` (declared on its own `providers[]` entry, same as always — merging the try-order line doesn't merge the accounts' quota ledgers); `vmr check` shows the expanded list exactly like a hand-written multi-entry version would.
 
+**Several keys on one vendor, one `providers[]` entry**: writing the `volcengine`/`volcengine2` pair above by hand gets old once there are more than two accounts on the same vendor. `api_keys:` (a labeled mapping, not a list — the label becomes part of the generated name) does the same expansion for you, purely as config-time sugar:
+
+```yaml
+providers:
+  - name: volcengine
+    base_url: {openai: https://ark.example.com/v3}
+    api_keys:
+      main: ${ARK_KEY_1}
+      backup: ${ARK_KEY_2}
+
+models:
+  coding:
+    endpoints:
+      - protocol: openai
+        providers: [volcengine]        # rewritten at load time to [volcengine-main, volcengine-backup]
+        models: [deepseek-v4-pro]
+        priority: 1
+```
+
+This is resolved entirely in `config.Parse`, before validation or `BuildSnapshot` ever run: `volcengine` becomes two independent `Provider` entries named `volcengine-main`/`volcengine-backup`, and every `providers: [volcengine]` reference anywhere in the config — including `fallback_endpoints:` — is rewritten to the expanded name list automatically. From that point on it's indistinguishable from having hand-written two `providers[]` entries: independent `quota:`/health/Sticky per key, its own line in `vmr check`'s effective routing table, its own audit trail (`openai:volcengine-main:deepseek-v4-pro`). A provider sets `api_key:` or `api_keys:`, never both. Which key `vmr check` lists first isn't pinned to write order — `api_keys:` is an ordinary map — but with no `quota:` configured, whichever one comes first is the only one traffic uses, the rest are pure cold standby; `vmr check`/the startup log always show the actual resolved order, so it's never a mystery, just not something you can dictate by reordering the YAML. Give each key its own `quota:` if you want vmr's headroom-aware scoring to spread traffic across all of them regardless of order.
+
 **Global fallback endpoints**: a top-level `fallback_endpoints:` list, same entry shape as `models.<name>.endpoints[]`, appended to the tail of *every* virtual model's own try-order instead of being pasted onto each one:
 
 ```yaml

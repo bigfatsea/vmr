@@ -336,6 +336,19 @@ providers:
     api_key: ${OPENROUTER_API_KEY}   # a real second account would reference its own ${VAR} — reused
                                      # here only so this file keeps loading cleanly with one key set
 
+  # The openrouter/openrouter2 pair above, written the short way: api_keys:
+  # (a labeled mapping, not a list) expands one provider entry into as many
+  # as it has keys — "openrouter" here would become "openrouter-main" /
+  # "openrouter-backup", and every `providers: [openrouter]` reference
+  # anywhere in this file (including fallback_endpoints:) would be rewritten
+  # to match automatically. A provider sets api_key: or api_keys:, never
+  # both. See docs/UserGuide.md's "Several keys on one vendor" section.
+  # - name: openrouter
+  #   base_url: {openai: https://openrouter.ai/api/v1}
+  #   api_keys:
+  #     main: ${OPENROUTER_KEY_MAIN}
+  #     backup: ${OPENROUTER_KEY_BACKUP}
+
   # A provider whose API doesn't accept all OpenAI roles can have it rewritten
   # per endpoint-group (models.<name>.endpoints[].role_map below) — a plain
   # old->new mapping applied to "role" values inside the top-level "messages"
