@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-05 03:00, by Sonnet 5 -->
+<!-- Ver 2026-08-22 16:00, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
@@ -88,7 +88,13 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 ### 2.5 逐请求详单与索引
 
-每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 阶段的证据层瘦身）。**渲染默认关闭**（`-details`，内置默认 `false`）——`vmr-requests.json`/`.md` 的每一行始终带着这条记录的详单文件名（`internal/reqdetail.FileName`，从记录自身的时间戳/模型/结果与坐标短哈希算出，不依赖文件是否已经生成），显式传 `-details` 才会把这一批文件全部渲染出来。渲染入口是 `internal/reqdetail.EnsureRendered`：目标文件已存在就跳过（`report`/`story` 任意调用方都可能对同一条记录发出请求——P5 落地后 `vmr story` 的决策脊柱正是这样一个调用方，见 §3.5b——坐标命名保证同名文件必然是同一份内容，跳过是正确的短路而不是近似），否则渲染后走临时文件+改名写入，不会在进程被杀时留下半截文件。渲染+写盘跑在有界 worker 池上，与 `Build` 的聚合循环共享同一趟文件扫描（`onRecord` 回调，`-details` 关闭时这个回调是 `nil`），不再单独扫一遍；`vmr story` 侧由 `internal/story.EnsureJourneyDetails`驱动同一个 `EnsureRendered`，只材料化被渲染 Journey 自己的 Step 集合，不是全语料。详单头部展示虚拟模型/端点/结果/耗时/token 明细，正文按请求物理路径分三段（Client→VMR、VMR→上游每次 attempt、VMR→Client），Messages 区默认折叠。
+每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 阶段的证据层瘦身）。
+
+**详单渲染机制与演进（P12–P13 治理）**：
+1. **渲染默认按需关闭与懒物化（Lazy Materialization, P13）**：在批量分析套件（`vmr analyze` 默认套件）下，索引表格与决策脊柱直接基于纯函数生成指向详单的相对链接（`internal/reqdetail.FileName`），**但不预先物化全量详单文件**；只有在用户单点钻取具体 Journey（`-journey`）、显式传入 `-details` 或 `-render-all` 时，才真正将详单渲染写盘。这使得默认套件的写盘体积与耗时大幅下降（实测从数百 MB 降至数 MB）。
+2. **模板指纹与版本感知重绘（`renderTemplateVersion`, P12）**：`internal/reqdetail` 引入了模板版本常量。当详单渲染结构、Markdown 转义规则或样式更新时递增版本号，`EnsureRendered` 在检查已存在的落盘文件时不仅核对指纹与前驱，还会比对模板版本，自动失效并重绘陈旧文件，保证渲染结果与当前代码逻辑完全一致。
+3. **单轮差分与坐标回溯（P13 证据层瘦身）**：详单页不再为每一轮请求重复全量内联跨轮累积的历史消息，而是展示本轮增量消息（Messages）与模型响应（LLM Response），并提供指向前驱轮次的坐标超链接；系统提示词与工具声明证据通过内容哈希命名（`sysHash`）全局去重（`EnsureSysPromptEvidence`）。
+4. **渲染防御与转义（P12）**：详单渲染与决策脊柱严格对全部 9 处原始文本输入点执行 HTML/Markdown 转义（`escapeHTML`），杜绝用户或模型原始输出中的未闭合注释（如 `<!--`）造成下游正文被静默吞噬。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 
@@ -201,7 +207,7 @@ vmr story -corpus [-o dir] [file|glob]...
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头 Journey 的文件名带 `-partial` 后缀（`journey-<id>-partial.md`/`.json`）——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化，后缀是这个不稳定性的自我声明，不需要打开正文找警示语才知道。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
-**`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段，每行还带 `lineages`——该 Journey 链上每条 Lineage 的内容寻址 id，供 `report` 侧按集合成员关系 join，见上文会话分组一节；以及 `category`，见下）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。**候选分类**（P6.3，`classifyJourney`）：按标题里的内容标记把候选分成 `task`/`cron`/`heartbeat`/`subagent` 四类（`[cron:...]` 前缀、`[OpenClaw heartbeat poll]`/`[Subagent Context]` 子串——三个字面量拼法已用真实语料核实，不是照抄架构讨论稿的示例），不引入轮数之类的间接推断。`vmr-stories.md` 默认展开 `task`/`cron`，把 `heartbeat`/`subagent` 折进一个 `<details>` 块（真实语料：477 个候选里 127 个是这两类噪声）；`vmr-stories.json` 照常全量输出，不做取舍。
+**`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段，每行还带 `lineages`——该 Journey 链上每条 Lineage 的内容寻址 id，供 `report` 侧按集合成员关系 join，见上文会话分组一节；以及 `category`，见下）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。**候选分类与噪声折叠**（P6.3 + P14 统一判据 `story.IsNoiseCategory`）：按标题里的内容标记把候选分成 `task`/`cron`/`heartbeat`/`subagent` 四类（`[cron:...]` 前缀、`[OpenClaw heartbeat poll]`/`[Subagent Context]` 子串——字面量拼法已用真实语料核实）。经 P14 统一，**仅 `heartbeat`（高频无实质动作的心跳轮询）属于噪声并默认折叠进 `<details>` 块**；`cron`（定时长任务）与 `subagent`（子代理多步任务）均承载实质工作流，与 `task` 一同在主表平权展开并纳入默认套件的预渲染范围；`vmr-stories.json` 照常全量输出，不做取舍。
 
 解析缓存不嵌在这个文件里：`{outDir}/.parse-cache/<filehash>.json`，一个输入文件一个分片，与
 `vmr-requests.json`（§2.5）共用同一个目录（见 P3 阶段的证据层瘦身）。分片装的是
@@ -494,13 +500,17 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 `cmd_report.go` 没有 `-llm-key` flag，只读 `report.yaml` 的 `llm_key`；这处输入不对称只在统一
 入口 `vmr analyze` 下自然消失，见下）。
 
-**`vmr analyze`**（P9，取代 P6.5 的临时实现）：单一分析入口，一套 flag 集合是 `vmr report`/
-`vmr story` 曾经各自拥有的 flag 的并集。`-journey`/`-compare`/`-corpus` 三个互斥的变焦选择器
-分别路由进单任务叙事、成对对比、语料统计——选中其一时**只跑 story 半区那一个视图，不跑宏观报表**
-（等价于以前单独跑 `vmr story` 的对应模式）；不带选择器是默认套件模式，先跑 story 半区、再跑
-report 半区，共用同一个 `-o`，产出完整互链的套件。默认套件只物化 `category == task` 的候选
-journey（P9.2，见下方"默认渲染范围"）；`-render-all` 是唯一在默认套件下才有意义的额外 flag，
-放宽到物化全部候选，和任一选择器同传会直接报错——它是渲染范围开关，不是第四个选择器。
+**`vmr analyze`**（P9 + P14/P15 CLI 与模式收敛）：单一分析入口，一套 flag 集合是 `vmr report`/`vmr story` 曾经各自拥有的 flag 的并集。
+- **变焦与子集模式（互斥选择器）**：
+  - `-journey`/`-compare`/`-corpus`：单任务叙事、成对对比、语料统计——选中其一时**只跑 story 半区对应视图，不跑宏观报表**；
+  - `-macro-only`（P15）：**仅运行宏观聚合报表**（等价于以前的 `vmr report`）；
+  - `-list-only`（P15）：**仅生成候选索引与列表**，不执行任何 Journey 渲染；
+  - `-story-only`（P15）：**仅运行叙事套件**，不生成宏观报表。
+- **默认全套件模式**（无上述互斥选择器）：先跑 story 半区、再跑 report 半区，共用同一个 `-o` 目录，产出完整互链的套件。
+- **渲染范围与物化控制开关**：
+  - 默认预渲染范围（P14）：默认只预渲染**非噪声候选**（`!story.IsNoiseCategory`，即 `task`/`cron`/`subagent` 均纳入预渲染，仅 `heartbeat` 跳过预渲染并折叠）；
+  - `-render-all`：将渲染范围放宽到物化全部候选（含 `heartbeat`）；
+  - `-details`：显式为所有被渲染的 Step 物化全量 `details/*.md` 文件（默认按需懒加载生成，见 §2.5）。
 
 `vmr report`/`vmr story` 降级为过渡别名：仍是独立的 `flag.NewFlagSet`、独立的默认值、产出与
 收敛前逐字节相同，调用时向 stderr 打印一行迁移提示，不强制任何人切换。三者在 `cmd/vmr` 内部
@@ -508,15 +518,6 @@ journey（P9.2，见下方"默认渲染范围"）；`-render-all` 是唯一在�
 `compareJourneys`/`corpusStats`），`cmdAnalyze` 本身只做 flag 解析与按选择器路由，不重新实现任何
 渲染或聚合逻辑——`internal/report`/`internal/story` 不因这次收敛发生任何改动，两个 internal 包
 依旧互不 import，`cmd/vmr` 依旧是唯一同时看到两半区的组合根。
-
-**默认渲染范围**（P9.2）：`vmr analyze` 默认套件曾经（P6.5）无条件给 story 半区加
-`-render-all`，全量语料下把每个候选（含定时轮询等噪声类）都渲染成 journey + 详单，实测 34 文件
-语料下会被系统杀死（`KNOWN_ISSUES §1.30`）。现在默认只渲染 `BuildJourneyIndexRow` 已经算出的
-`category == task` 候选（P6.3 的分类器，判据是标题内容标记，不引入新猜测）；`cron`/`heartbeat`/
-`subagent` 候选依旧全量进 `vmr-stories.json`/`.md` 索引——`heartbeat`/`subagent` 按 P6.3 既有
-规则折叠进 `<details>`，`cron` 与 `task` 一样留在主表（只是默认套件下"报告"列显示为未生成）。
-读者可以对某个未渲染的候选单独跑 `vmr analyze -journey <id>` 按需补渲染，或传 `-render-all`
-一次性物化全部——两条路径都是幂等写盘，不产生"哪个批次生成的"这类协调成本。
 
 刻意没有做"一次扫描、一份缓存、一次建图"的深度合并：P3 之后两条命令共用同一个内容哈希分片的
 `.parse-cache/`，`analyze` 内部先跑 story 再跑 report 时，report 那一趟扫描已经是热缓存命中，
@@ -570,6 +571,11 @@ journey（P9.2，见下方"默认渲染范围"）；`-render-all` 是唯一在�
 | 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`story` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |
 | 叙述字段（`Finding.Finding`/`MetricDiff.Label`）跟随 `-lang`，与 Markdown 一致（§4.3） | JSON 里固定英文，只有 Markdown 本地化 | `Code`/`MetricCode`/`EvidenceAnchor` 已经是程序化消费方唯一应该依赖的稳定锚点（§4.2）；叙述句子再额外锁死英文是重复保险，不是唯一防线。这个项目里唯一真实存在的 JSON 消费脚本（`_eval/calibrate_p1b.go`）只匹配 `EvidenceAnchor`，从不依赖叙述文本本身；≤3 人、聚焦中国大陆场景的团队，`report.yaml` 的 `language: zh` 基本等于"全程只想看中文"，JSON 里混一半英文对这个使用模式没有实际价值，只增加认知负担 |
 | 动态拼句用函数值字段（`func(args...) FindingText`），不用位置化占位符模板（§4.1） | 一个格式串 + 两语言共享同一套 `%s` 占位符顺序 | 中英文语序天然不同；共享模板要求译者数第几个占位符对应哪个参数，是一类肉眼难查的错误源，`go vet` 的 printf 检查覆盖不到"两边模板参数对不上"这类错误。函数字段让每个语言分支各自是独立类型检查过的 `Sprintf` 调用 |
+| 详单渲染按需懒物化（§2.5，P13） | 默认套件批量全量写盘 `details/*.md` | 批量模式预生成数百个 Journey 的详单会产生数百 MB 磁盘写入与数十秒延迟；纯函数链接生成允许按需懒加载，只在用户单点钻取（`-journey`）或显式 `-details` 时物化，兼顾可读性与执行效率 |
+| 详单单轮差分与坐标回溯（§2.5，P13） | 每一轮详单内联完整累积历史消息 | 累积内联导致历史轮次呈 $O(n^2)$ 冗余膨胀；单轮增量展示 + 前驱坐标超链接消除了跨 Step 冗余，且通过坐标保持了完整的可追溯性 |
+| 详单模板版本感知（`renderTemplateVersion`，§2.5，P12） | 静态文件命中即跳过 | 渲染模板、转义与样式升级后，若只依赖数据指纹会导致磁盘旧文件呈现陈旧视图；引入版本号让陈旧文件在下次执行时自动重绘 |
+| 候选噪声分类收敛：仅 Heartbeat 折叠（§3.4，P14） | 同时折叠 Heartbeat、Cron、Subagent | 实测显示只有高频空转的心跳轮询（Heartbeat，通常 <10 轮）属于噪声；Cron 和 Subagent 承载实质工作流，应与 Task 平权展开并纳入默认套件预渲染范围 |
+| CLI 模式收敛：`vmr analyze` 单一入口 + 离散正交模式开关（§4.4，P15） | 引入层级枚举或保持多命令分散 | 保持 Unix 扁平命令行风格，通过 `-macro-only`、`-list-only`、`-story-only` 等离散布尔开关表达子集视图，学习成本最低且与现有旗标习惯一致 |
 
 ## 6. 实测结论（真实语料，7112 条记录 / 809K 条消息实例 / 752 会话）
 
