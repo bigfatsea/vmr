@@ -171,6 +171,33 @@ func TestRespStream_OneByteReads(t *testing.T) {
 	}
 }
 
+// TestStream_OutTokens_ChunkingIndependent locks in that the degraded
+// token estimate does not depend on how the source happened to split its
+// Read calls — tokenutil.EstimateFromStats' rounding must apply once, over
+// the accumulated CharStats total, not once per chunk. Regression for a
+// real bug: rounding per chunk instead of once made a 1-byte-per-Read
+// source (a realistic shape for real upstream SSE framing) estimate 0
+// tokens for content that estimates in the hundreds read whole.
+func TestStream_OutTokens_ChunkingIndependent(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat(`data: {"choices":[{"delta":{"content":"hello world, streamed SSE content"}}]}`+"\n\n", 50)
+
+	whole := newStream(strings.NewReader(body), "agent", "", true, "openai", false)
+	readAll(t, whole)
+	wholeTokens := whole.OutTokens()
+
+	chunked := newStream(oneByteReader{src: strings.NewReader(body)}, "agent", "", true, "openai", false)
+	readAll(t, chunked)
+	chunkedTokens := chunked.OutTokens()
+
+	if wholeTokens == 0 {
+		t.Fatal("wholeTokens = 0, test body too short to be meaningful")
+	}
+	if wholeTokens != chunkedTokens {
+		t.Errorf("OutTokens depends on read chunking: whole=%d one-byte-reads=%d", wholeTokens, chunkedTokens)
+	}
+}
+
 // oneByteReader is a test helper: yields one byte per Read call,
 // exercising the worst case for event assembly.
 type oneByteReader struct{ src io.Reader }
@@ -1189,7 +1216,7 @@ func TestStream_IoCopyMatchesReadAll(t *testing.T) {
 }
 
 // TestStream_ConcurrentReadAndInspection locks in race-free access to
-// Applied, RawPreStrip, ObservedModel, Usage, and OutBytes while Read is
+// Applied, RawPreStrip, ObservedModel, Usage, and OutTokens while Read is
 // running concurrently in another goroutine.
 func TestStream_ConcurrentReadAndInspection(t *testing.T) {
 	t.Parallel()
@@ -1220,7 +1247,7 @@ func TestStream_ConcurrentReadAndInspection(t *testing.T) {
 				_ = rs.RawPreStrip()
 				_ = rs.ObservedModel()
 				_, _ = rs.Usage()
-				_, _ = rs.OutBytes()
+				_ = rs.OutTokens()
 			}
 		}
 	}()

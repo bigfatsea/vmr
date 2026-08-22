@@ -64,7 +64,7 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 // Returning does not wait for the reader goroutine to exit on early-return paths
 // (idle timeout, client write error / disconnect) — the caller closing the body
 // unblocks the reader. Inspection methods on NormalizerStream (Applied, RawPreStrip,
-// ObservedModel, Usage, OutBytes) are protected by a mutex, guaranteeing safe,
+// ObservedModel, Usage, OutTokens) are protected by a mutex, guaranteeing safe,
 // race-free reads even if a trailing read executes concurrently.
 func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)

@@ -28,6 +28,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/tokenutil"
 )
 
 // AttemptErrorClass returns one attempt's structured error class, falling
@@ -140,12 +141,11 @@ func RoleChars(body any) map[string]int64 {
 }
 
 // RoleTokens is RoleChars' token-estimate sibling: same per-role traversal,
-// but each text fragment is sized with core.EstimateTextTokens (the same
-// formula behind core.RequestFacts.EstimatedTokens) instead of a raw rune
-// count — a token share is a much closer proxy for "what's actually costing
-// money in this conversation" than a character share.
+// but each text fragment is sized with tokenutil.EstimateText
+// instead of a raw rune count — a token share is a much closer proxy for
+// "what's actually costing money in this conversation" than a character share.
 func RoleTokens(body any) map[string]int64 {
-	return roleMeasure(body, func(s string) int64 { return core.EstimateTextTokens([]byte(s)) })
+	return roleMeasure(body, func(s string) int64 { return tokenutil.EstimateText(s) })
 }
 
 // roleMeasure walks a request body's conversation once, calling measure on

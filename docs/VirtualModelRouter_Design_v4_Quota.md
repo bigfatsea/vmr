@@ -627,7 +627,7 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 
 ```
 1) 上游 usage（权威）   ← respnorm.NormalizerStream 嗅探，复用 chatmsg 的解析口径
-2) 本地估算（降级）     ← core.EstimateTextTokens(请求体 / 响应体)
+2) 本地估算（降级）     ← tokenutil.Estimate(请求体 / 响应体)
 ```
 
 不能只用估算：误差约 ±30%，对"三个账号里选哪个"无所谓，但计数器同时要回答"这个月烧到 80% 了没有"，
@@ -644,7 +644,7 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 重组后的完整事件（以及缓冲模式下的完整响应体），绝不能作用于原始 TCP 分片**——一个 usage
 对象被网络层从中间切开时，逐分片检测会静默漏扫；相关的误报/边界场景已评估，见 §12.2。
 
-**降级时的分量拆分**：`core.EstimateTextTokens` 只能给出总量，拆不出 cache 命中比例。
+**降级时的分量拆分**：`tokenutil.Estimate` 只能给出总量，拆不出 cache 命中比例。
 所以降级路径按**无缓存**折算——请求体估算全部计入 `in_fresh`，响应体估算全部计入 `out`。
 这个方向是**保守的（高估消耗）**：对闸而言偏安全，对桶而言会略微少用套餐。
 每一笔降级计量都累加进 `account.estimated`，`/admin/status` 因此能给出本周期的估算占比，
@@ -1033,7 +1033,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `core.EstimateTextTokens` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
+| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `tokenutil.Estimate` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`docs/KNOWN_ISSUES_sonnet-5.md` 已有记录 |
 | 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 
@@ -1159,7 +1159,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 标准列表价会过期 | 接受 | 随二进制内置的是快照 | 表内带生成时间戳，报表免责声明与 `vmr check` 一并显示；`tools/` 下有刷新脚本，用户也可自备标准表 |
 | `cost` 档分量比例与价目表不同 | 接受 | 按模型的绝对费率已能覆盖绝大多数情形 | 改用 `tokens` + `token_weights`（换取精确比例，损失按模型粒度） |
 | 无 config.yaml 时跑 `vmr report` | 接受降级 | 账号覆盖存在 config.yaml 里 | 只拿到标准列表价，$ 数字不含该账号折扣；需在用户文档写明 |
-| 降级估算拆不出缓存分量 | 保守按无缓存折算 | `EstimateTextTokens` 只给总量 | 高估消耗（对闸安全、对桶略少用）；计入 `estimated` 占比，`/admin/status` 可见 |
+| 降级估算拆不出缓存分量 | 保守按无缓存折算 | `tokenutil.Estimate` 只给总量 | 高估消耗（对闸安全、对桶略少用）；计入 `estimated` 占比，`/admin/status` 可见 |
 | 额度耗尽硬熔断 | 不做 | 按估算值执行破坏性动作 = 自制故障 | 硬信号是上游 402/429，既有 health 状态机已覆盖 |
 | 精确滑动窗口 | 不做 | 需存每请求时间戳，内存与持久化高一个量级 | 分桶误差 ≤ 1/K（12 桶即 ≤ 8.3%） |
 | 周期边界精确复刻厂商账单 | 不做 | 厂商账单时区与小时精度不公开 | 本地时区 + 日级锚点的近似，需在用户文档写明 |
@@ -1492,7 +1492,7 @@ archtest 有 700 行预算，当前 561 行。
 的流式路径与 `replay` 的一次性路径共用同一份实现，不是两套代码。usage 来源的差异：`replay`
 的响应已经完整缓冲在内存里，所以直接用 `chatmsg.MergeUsageBytes`（与 `internal/respnorm` 的 `noteUsage`
 内部调用的是同一个函数）从整段字节里提取 usage；提取不到时的降级路径与 `tokenCharge` 同构——
-对请求体、响应体分别跑 `core.EstimateTextTokens`，全部计入 `Fresh`/`Out`（不区分缓存命中）。
+对请求体、响应体分别跑 `tokenutil.Estimate`，全部计入 `Fresh`/`Out`（不区分缓存命中）。
 `-dry-run` 从不触碰状态文件（请求根本没有发出）；未配置 `quota:` 的 provider replay 后也不会
 新建 `vmr-quota.json`（与改动前行为一致）。**未覆盖**：`vmr replay` 与正在运行的 `vmr start`
 并发写同一状态文件时没有跨进程锁，后写入者的一次 `Flush` 会整体覆盖前者——这本来就是

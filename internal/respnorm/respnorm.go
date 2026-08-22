@@ -64,8 +64,8 @@
 // NormalizerStream, never a stream field directly.
 //
 // Usage-sniffing placement is an acknowledged tradeoff, not an oversight:
-// Quota-Aware Routing's accumulators (noteUsage/countBytes, exposed as
-// Usage()/OutBytes()) live on stream, mixing "response normalization" with
+// Quota-Aware Routing's accumulators (noteUsage/countTokens, exposed as
+// Usage()/OutTokens()) live on stream, mixing "response normalization" with
 // "billing sniffing" in one package. The alternative — a decorator in
 // internal/router layered over Wrap's output — costs an interface call and
 // boundary check per streamed chunk on the hot forward path, which this
@@ -81,6 +81,7 @@ import (
 	"sync"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/tokenutil"
 )
 
 // Options configures Wrap. ClientModel is the virtual model name the
@@ -101,7 +102,7 @@ type Options struct {
 // response body, plus the audit-trail/quota-metering facts accumulated
 // while it was read. Applied/RawPreStrip/ObservedModel carry their final
 // value only after the stream has been fully copied (EOF reached); Usage/
-// OutBytes update incrementally. All five are safe to call concurrently with
+// OutTokens update incrementally. All five are safe to call concurrently with
 // an in-flight Read — see the mu field on stream.
 type NormalizerStream interface {
 	io.Reader
@@ -118,9 +119,9 @@ type NormalizerStream interface {
 	// Usage returns the token usage extracted from this response so far; ok is true
 	// only once at least one usage-bearing block has actually been parsed.
 	Usage() (chatmsg.Usage, bool)
-	// OutBytes returns the ASCII/wide byte counts classified so far — the
-	// degraded-estimate input when Usage() has nothing.
-	OutBytes() (ascii, wide int64)
+	// OutTokens returns the estimated token count of bytes emitted downstream so far —
+	// the degraded-estimate input when Usage() has nothing.
+	OutTokens() int64
 }
 
 // Wrap normalizes src (an upstream response body) per opts. See the package
@@ -236,7 +237,7 @@ type stream struct {
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
 
 	// mu guards all metadata fields exported via inspection methods
-	// (Applied, RawPreStrip, ObservedModel, Usage, OutBytes). Read is called
+	// (Applied, RawPreStrip, ObservedModel, Usage, OutTokens). Read is called
 	// serially by transport.go's copyFlush reader goroutine, but inspection
 	// methods are read from forwardSuccess's own goroutine after copyFlush
 	// returns. On early return (idle timeout, client write error / disconnect),
@@ -244,10 +245,9 @@ type stream struct {
 	// inspection fields with mu ensures race-free reads in all paths.
 	mu            sync.Mutex
 	applied       []string
-	rawPreStrip   []byte // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
-	observedModel string // what the upstream actually answered with, recorded only when it differs from upstreamModel
-	asciiBytes    int64
-	wideBytes     int64
+	rawPreStrip   []byte              // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
+	observedModel string              // what the upstream actually answered with, recorded only when it differs from upstreamModel
+	outStats      tokenutil.CharStats // classified across every ingest() call; EstimateFromStats' rounding is applied once, in OutTokens(), not per chunk
 	usage         chatmsg.Usage
 	usageSeen     bool
 }
@@ -371,9 +371,9 @@ func (s *stream) ingest(b []byte) {
 	// including opaque (see the P1 dev plan's baseline-facts table) — the
 	// one hook that
 	// can classify 100% of a response's bytes for the degraded token
-	// estimate (see OutBytes/tokenCharge in quota.go), unlike emitBlock/
+	// estimate (see OutTokens/tokenCharge in quota.go), unlike emitBlock/
 	// finalizeBuffered below which only ever see the non-opaque paths.
-	s.countBytes(b)
+	s.countTokens(b)
 	if s.opaque {
 		s.out = append(s.out, b...)
 		return
@@ -794,25 +794,21 @@ func classifyEvent(ev []byte) verdict {
 	return verdictUndecided
 }
 
-// countBytes classifies every byte of b by UTF-8 lead byte (ASCII vs. wide),
-// the same split core.EstimateTextTokens uses — feeding Quota-Aware
-// Routing's degraded token estimate (see quota.go's tokenCharge) without
-// buffering a whole response body just to hand it to that function: this
-// tallies incrementally, once per Read, and the result is byte-for-byte
-// equivalent to running EstimateTextTokens over the full concatenated body
-// (see core.EstimateTokensFromCounts's doc comment).
-func (s *stream) countBytes(b []byte) {
-	var ascii, wide int64
-	for _, c := range b {
-		if c < 0x80 {
-			ascii++
-		} else {
-			wide++
-		}
-	}
+// countTokens classifies the text in b with tokenutil.Analyze and folds it
+// into the running CharStats total — feeding Quota-Aware Routing's degraded
+// token estimate (see quota.go's tokenCharge) without buffering a whole
+// response body just to hand it to tokenutil.Estimate: this tallies
+// incrementally, once per Read. Deliberately does NOT call
+// tokenutil.Estimate/EstimateFromStats here — that formula ends in
+// math.Round, and rounding per chunk instead of once over the combined
+// total is not the same computation (many small chunks each round toward
+// zero, and real upstream SSE framing delivers plenty of those): OutTokens
+// applies EstimateFromStats exactly once, keeping this byte-for-byte
+// equivalent to running tokenutil.Estimate over the full concatenated body.
+func (s *stream) countTokens(b []byte) {
+	stats := tokenutil.Analyze(b)
 	s.mu.Lock()
-	s.asciiBytes += ascii
-	s.wideBytes += wide
+	s.outStats.Add(stats)
 	s.mu.Unlock()
 }
 
@@ -847,13 +843,16 @@ func (s *stream) Usage() (chatmsg.Usage, bool) {
 	return s.usage, s.usageSeen
 }
 
-// OutBytes returns the ASCII/wide byte counts countBytes has classified so
-// far — the degraded-estimate input when Usage() has nothing. Same
-// concurrency contract as Usage().
-func (s *stream) OutBytes() (ascii, wide int64) {
+// OutTokens returns the estimated token count over all bytes countTokens has
+// classified so far — the degraded-estimate input when Usage() has nothing.
+// Applies tokenutil.EstimateFromStats' rounding exactly once, over the
+// accumulated CharStats total, so the result doesn't depend on how the
+// underlying reader happened to chunk its Read calls. Same concurrency
+// contract as Usage().
+func (s *stream) OutTokens() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.asciiBytes, s.wideBytes
+	return tokenutil.EstimateFromStats(s.outStats)
 }
 
 // afterMarker returns the bytes following the first occurrence of marker.

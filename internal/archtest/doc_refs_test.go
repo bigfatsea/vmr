@@ -391,7 +391,7 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 	// or the guard would be unusable noise rather than a signal.
 	ok := []struct{ docRel, content string }{
 		{"CLAUDE.md", "response normalization lives in `internal/respnorm`"},
-		{"CLAUDE.md", "`core.EstimateTextTokens` shares its coefficients"},
+		{"CLAUDE.md", "`tokenutil.Estimate` shares its coefficients"},
 		{"CLAUDE.md", "`i18n.LLM(lang).SystemPrompt` is the prompt"},
 		{"CLAUDE.md", "see internal/router/router.go and docs/UserGuide.md"},
 		{"CLAUDE.md", "one section per internal/report/section_*.go"},

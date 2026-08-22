@@ -97,7 +97,7 @@ type ReqInfo struct {
 
 	// Aggregates that the SessionRows / Workloads consumers need to roll up.
 	RoleChars        map[string]int64 // per-role displayed-character totals
-	RoleTokens       map[string]int64 // per-role estimated-token totals (core.EstimateTextTokens)
+	RoleTokens       map[string]int64 // per-role estimated-token totals (tokenutil.Estimate)
 	Fallbacks        int              // requests that needed >1 attempt
 	Images           int              // inline request images detected
 	ImagesCompressed int              // subset that triggered downscaling

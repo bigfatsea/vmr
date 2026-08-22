@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"vmr/internal/chatmsg"
-	"vmr/internal/core"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
+	"vmr/internal/tokenutil"
 )
 
 // ToolShareDiff is one tool name's call-count share in each Journey, for the
@@ -466,7 +466,7 @@ func systemMessageTexts(s *Step) []string {
 	return parts
 }
 
-// systemTokenCount sums core.EstimateTextTokens over texts — the same
+// systemTokenCount sums tokenutil.EstimateText over texts — the same
 // estimator contextCurve() uses for its own SystemTokens field, so the two
 // numbers are computed the same way. They aren't guaranteed identical for a
 // given Step, though: this sums only the leading system-role block (LeadSys
@@ -479,7 +479,7 @@ func systemMessageTexts(s *Step) []string {
 func systemTokenCount(texts []string) int64 {
 	var tokens int64
 	for _, t := range texts {
-		tokens += core.EstimateTextTokens([]byte(t))
+		tokens += tokenutil.EstimateText(t)
 	}
 	return tokens
 }

@@ -13,6 +13,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
+	"vmr/internal/tokenutil"
 )
 
 func tokensLimit(amount float64) core.Limit {
@@ -228,7 +229,7 @@ func TestChargeQuota_Tokens_TruncatedMidStream_Degrades(t *testing.T) {
 
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
-	wantOutInt := core.EstimateTokensFromCounts(int64(len(partial)), 0) // pure ASCII partial body
+	wantOutInt := tokenutil.Estimate([]byte(partial))
 	wantOut := float64(wantOutInt)
 	if used.Fresh != 15 {
 		t.Fatalf("Fresh = %v, want 15 (creq.Facts.EstimatedTokens)", used.Fresh)
@@ -261,7 +262,7 @@ func TestChargeQuota_Tokens_DegradedEstimate_NoUsageField(t *testing.T) {
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 
-	wantOutInt := core.EstimateTokensFromCounts(int64(len(body)), 0) // pure ASCII body
+	wantOutInt := tokenutil.Estimate([]byte(body))
 	wantOut := float64(wantOutInt)
 	if used.Fresh != 42 {
 		t.Fatalf("Fresh = %v, want 42 (creq.Facts.EstimatedTokens)", used.Fresh)

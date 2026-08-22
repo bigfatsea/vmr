@@ -26,6 +26,7 @@ import (
 	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
+	"vmr/internal/tokenutil"
 )
 
 // Options configures one replay run. There are three ways to pick which
@@ -270,7 +271,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 // has the complete request/response bytes in hand (reqBody/respBody), so
 // chatmsg.MergeUsageBytes — the exact function respnorm's own usage sniffing
 // calls internally — reads it directly from the buffered bytes instead, and
-// the degraded estimate comes from core.EstimateTextTokens over the raw
+// the degraded estimate comes from tokenutil.Estimate over the raw
 // request/response bytes rather than from an incremental byte tally.
 //
 // Everything after "how usage was obtained" is router.TokenCounters, not a
@@ -282,7 +283,7 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []by
 	}
 	u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{})
 	raw, estimated := router.TokenCounters(u, u.In > 0 || u.Out > 0,
-		core.EstimateTextTokens(reqBody), core.EstimateTextTokens(respBody))
+		tokenutil.Estimate(reqBody), tokenutil.Estimate(respBody))
 	router.ChargeResponse(reg, ep, raw, estimated, now)
 }
 

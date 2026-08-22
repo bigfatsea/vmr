@@ -117,6 +117,7 @@ cmd/vmr                    CLI（stdlib flag），一命令一文件：main.go�
 
 internal/core              CanonicalRequest（含 RequestFacts）、ErrorClass、Endpoint（无依赖的共享类型；HealthKey()/Name() 由 BuildSnapshot 调 Freeze() 预计算一次，见 §11"无中心 IR"决策行）
 internal/fmtutil           FmtBytes/FmtTokens/FmtSeconds：展示格式化，从 core 拆出，router 实时日志与 report 渲染共用（不该为了打印一个数字而依赖 core 的路由域类型）
+internal/tokenutil         零依赖、零分配的 token 估算：Analyze 按字符类型（英文字母/数字/英文符号/CJK/空白/其他）线性回归加权（Estimate/EstimateText/EstimateFromStats），server.facts、reqdetail、report、story、replay 等所有需要"廉价估算一段文本大概多少 token"的调用点共用同一份系数，不各自实现一份
 internal/rundir            默认目录解析公式（~/.vmr → 系统临时目录 → cwd），config 的 log_dir/image_cache_dir 缺省值共用
 internal/config            YAML 加载、${ENV} 展开、校验、热加载 watch；quota.go：Provider.Quota 的 YAML 形状（QuotaConfig/LimitConfig）与校验（P1/P3 范围之外的字段一律加载期报错，见 §6.6）；pricing.go（P2.2）：全局 `pricing:` 块与 `Provider.Pricing` 的 YAML 形状，`validate()` 阶段调 `internal/pricing` 做三层解析，`metric: cost` 账号的四分量费率不齐即加载期报错
 internal/jsonscan          零依赖的 JSON 字节范围扫描引擎（架构审查 B1 批次从 internal/adapter 拆出）：RewriteModel/RewriteStream/RewriteRoles/RewriteInputRoles（顶层 model/stream/role 字段 byte-splice 重写，`rewriteRolesInTopLevelArray` 同时驱动 messages 与 input 两种顶层数组形态）+ 底层扫描原语 TopLevelValues/WalkArrayElements/FirstArrayElement/ElementRole/Skip* + MarshalNoEscape；internal/adapter 的 SessionFingerprint/TopLevelProbe 仍调用这些原语但函数本身留在 adapter——判据：只有不需要知道任何具体字段名/角色名的纯词法函数才搬进本包
@@ -131,7 +132,7 @@ internal/sticky            Sticky Model 亲和注册表：Peek/Set，不知道�
 internal/quota             额度感知路由的记账半区（见 §6.6）：quota.go（Counters/Registry，Charge/Used，按 provider 名字记账不含 key 哈希；Counters.Cost 是 P2.2 唯一一个"计费时算好、不在读取时重算"的字段——标准表/账号覆盖本身会随配置变更而变化，历史金额只有计费那一刻能正确回答）、period.go（周期数学，(every,since) 推算窗口边界含月末截断）、score.go（Headroom/ScoreForLimit）、store.go（vmr-quota.json 原子落盘）；只依赖 core，config 与 router 都依赖它，它不依赖两者
 internal/pricing           额度感知路由的定价解析引擎（P2.2，见 §6.6）：Rate/Table（per-1M 四分量费率，nil 分量=未知，绝不是免费）、resolve.go（Resolve/EffectiveRate/Complete——账号覆盖 → 补充表∪标准表 → 无费率的三层解析，first-match-wins 静态按模型区分（无时间维度——P0-A 移除了曾经的 date_*/hour_* 时间窗，见 docs/VirtualModelRouter_Design_v4_Quota.md 的相应章节），discount 递归作用于"下层解析出的费率"而非恒定的 Base）、embed.go（go:embed 内置的 standard_price_generated.yaml + standard_price_curated.yaml）、resolver.go（Resolver，`vmr report` 用的按 provider+model 记忆化解析）；只依赖 core，config 与 report 都依赖它，它不依赖两者
 internal/respnorm          响应归一化器（架构审查 Part 8 批次 B7 从 internal/router 拆出，见该批次的用量嗅探取舍注释）：对外只暴露 `Wrap(src io.Reader, opts Options) NormalizerStream`，router.go/quota.go 只认这一个入口，从不直接引用内部的 `stream` 类型——状态机因此可以脱离 Router/Snapshot、在纯 io.Reader 层面做 fuzz（respnorm_test.go 的 FuzzStream）
-  ├─ respnorm.go  通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）；Quota-Aware Routing 的用量/字节数嗅探（`Usage()`/`OutBytes()`）也内嵌在这里而非独立的路由半区 Reader 装饰器——零性能代价是唯一理由，代价是"响应归一化"包里混了一点"计费嗅探"，取舍写在包注释里
+  ├─ respnorm.go  通用状态机（事件切分/model 改写/[DONE] 策略/缓冲-直通决策）；`newStream` 按协议短路（`!isSSE`→buffered、`openai-responses`→passthrough，理由同 `!isSSE` 那条——没有已知怪癖形态就不等，见 §3.1）；Quota-Aware Routing 的用量/降级估算嗅探（`Usage()`/`OutTokens()`）也内嵌在这里而非独立的路由半区 Reader 装饰器——零性能代价是唯一理由，代价是"响应归一化"包里混了一点"计费嗅探"，取舍写在包注释里
   └─ minimax.go  MiniMax quirk 知识（<think>/Thinking Process 剥离、soft-block marker），respnorm.go 在需要时调用
 internal/router            failover 循环（Serve/tryOne + handleErrorResponse/forwardSuccess，核心，router.go）
   ├─ snapshot.go  ModelRoute/Snapshot 类型 + BuildSnapshot + Install；ModelRoute.EffectiveOrder（start/check/diagnose 三处共用）
@@ -395,15 +396,7 @@ models:
 
 **估算公式**：所有估算都遵循同一条成本原则——优先用长度、字节数、廉价的存在性标记去推断，不解析内容本身；推断可以不精确，代价由 failover 兜底（多用一次大上下文模型是可以接受的代价，解析成本和实现复杂度不是）。
 
-* **文本**：英文按 4 字节/token；中文分词器效率差异很大，在实际对接厂商分词器细节未知的情况下取偏保守的 2 字节/token（比调研到的所有已知分词器的真实开销都高，故意往"多算"的方向走）。单趟扫描原始字节按 `b >= 0x80` 分类，不解码 UTF-8 rune：
-  ```go
-  var asciiBytes, wideBytes int64
-  for _, b := range raw {
-      if b < 0x80 { asciiBytes++ } else { wideBytes++ }
-  }
-  EstimatedTokens = asciiBytes/4 + wideBytes/2
-  ```
-  直接扫整个原始请求体字节（含 JSON 结构符号），不特意抽取 message content——结构性开销本身也会被计入分子，进一步把估算往偏高的方向推。
+* **文本**：按字符类型加权线性回归公式估算（`tokenutil.Estimate`），直接扫描原始请求体字节（含 JSON 结构符号），兼顾中英文、标点与数字。
 * **图片**：不解析像素，按检测到的图片数量乘一个固定常量——每张 3000 token，取自"1920×1080 全高清截图"（agent/coding 工具最常见的附件尺寸）在高分辨率档的实测开销（约 2691 token）留一点余量。图片数量复用 `imgprep.Downscale` 结构化遍历算出的 `imageCount`（同一个值也驱动上文①的 `HasImage`），零新增成本。
 * **文档类附件（PDF 及其他未识别的二进制附件）**：DOCX/XLSX 在 vmr 实际代理的原始 API 层不会被当作独立二进制附件编码进请求体——两家协议官方文档都要求客户端"转换成纯文本后直接放进消息内容"，已经被文本估算覆盖。真正需要单独处理的只有 PDF（两家协议原生支持内联 PDF）和"检测到某种文件附件但格式未识别"的兜底场景。不做页数解析，直接按体积折算：`EstimatedTokens += 附件字段的原始 base64 字节数 / 20`——常量 20 校准自 PDF 每页开销 1500-3000 token、常见页面 50-150KB 原始体积的比例区间，不区分格式，统一用同一个保守常量处理，检测走与图片同一模式的廉价标记扫描。已知偏差：对图片/扫描件密集的 PDF 会大幅高估，是可接受的方向性偏差（无非多倾向大上下文端点）。唯一无法解决的盲区：客户端若用 Files API 模式（先上传拿 `file_id`，后续消息只带引用），真正的文件字节根本不在 vmr 看到的请求体里，无法估算，由 failover 兜底。
 * **音频/视频**：不做数值估算，只做能力判定（见①）——两家官方都未公布精确的时长换算公式，且从字节里可靠拿到时长还需要解码容器格式，不是廉价操作。

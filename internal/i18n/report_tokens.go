@@ -54,7 +54,7 @@ func Tokens(lang Lang) TokensText {
 			ByModelHeaders:      [7]string{"模型", "协议", "请求", "缓存效率⭐", "fresh", "cached", "out"},
 			RoleCharsTitle:      "**请求消息字符、预估Token及占比**",
 			RoleHeaders:         [4]string{"角色", "字符", "预估Token⭐", "占比⭐"},
-			EstimatedTokensNote: "\n> 预估Token⭐：上游 usage 不按角色拆分，无法拿到真实值，这里用粗估口径（ASCII ~4B/token，多字节 UTF-8 ~2B/token，同 §1 计费口径）；占比按预估Token 计算。\n",
+			EstimatedTokensNote: "\n> 预估Token⭐：上游 usage 不按角色拆分，无法拿到真实值，这里使用估算公式计算；占比按预估Token 计算。\n",
 			TakeawayNote:        "> takeaway: tool 结果占比最大时，上下文优化的首要杠杆是压缩 tool 返回，而非 system prompt。\n\n",
 		}
 	}
@@ -80,7 +80,7 @@ func Tokens(lang Lang) TokensText {
 		ByModelHeaders:      [7]string{"Model", "Protocol", "Requests", "Cache Efficiency⭐", "fresh", "cached", "out"},
 		RoleCharsTitle:      "**Request Message Characters, Estimated Tokens & Share**",
 		RoleHeaders:         [4]string{"Role", "Chars", "Est. Tokens⭐", "Share⭐"},
-		EstimatedTokensNote: "\n> Est. Tokens⭐: upstream usage isn't broken down by role, so this is a rough estimate (ASCII ~4B/token, multi-byte UTF-8 ~2B/token, same basis as §1's billing); share is computed on estimated tokens.\n",
+		EstimatedTokensNote: "\n> Est. Tokens⭐: upstream usage isn't broken down by role, so this is an estimate; share is computed on estimated tokens.\n",
 		TakeawayNote:        "> takeaway: when tool results dominate, the first lever for context optimization is compressing tool output, not the system prompt.\n\n",
 	}
 }

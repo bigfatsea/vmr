@@ -314,9 +314,8 @@ func TestRoleChars(t *testing.T) {
 }
 
 // TestRoleTokens locks in that RoleTokens shares RoleChars' traversal (same
-// per-role attribution) but sizes each fragment with core.EstimateTextTokens
-// instead of a rune count — ascii text should divide down by ~4x, not equal
-// the character count.
+// per-role attribution) but sizes each fragment with tokenutil.EstimateText
+// instead of a rune count.
 func TestRoleTokens(t *testing.T) {
 	body := map[string]any{
 		"messages": []any{
@@ -325,8 +324,9 @@ func TestRoleTokens(t *testing.T) {
 		},
 	}
 	rt := RoleTokens(body)
-	if rt["user"] != 10 || rt["assistant"] != 20 {
-		t.Errorf("RoleTokens = %v, want user=10 assistant=20 (ascii/4)", rt)
+	// 40 * 0.206 = 8.24 -> 8; 80 * 0.206 = 16.48 -> 16
+	if rt["user"] != 8 || rt["assistant"] != 16 {
+		t.Errorf("RoleTokens = %v, want user=8 assistant=16", rt)
 	}
 	if rc := RoleTokens("not json"); rc != nil {
 		t.Errorf("string body RoleTokens = %v", rc)

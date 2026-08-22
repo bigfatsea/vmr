@@ -18,6 +18,7 @@ import (
 
 	"vmr/internal/core"
 	"vmr/internal/jsonscan"
+	"vmr/internal/tokenutil"
 )
 
 const (
@@ -64,7 +65,7 @@ func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.Reques
 	return core.RequestFacts{
 		HasImage:        imageCount > 0,
 		HasTools:        hasTools,
-		EstimatedTokens: core.EstimateTextTokens(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
+		EstimatedTokens: tokenutil.Estimate(body) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body),
 	}
 }
 

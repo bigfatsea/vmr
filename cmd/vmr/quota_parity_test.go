@@ -44,6 +44,7 @@ import (
 	"vmr/internal/quota"
 	"vmr/internal/report"
 	"vmr/internal/router"
+	"vmr/internal/tokenutil"
 )
 
 // parityAttempt is one upstream try in a synthetic request: the status the
@@ -133,7 +134,7 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 // catch, one level down.
 func (r parityRequest) tokenCharge() (quota.Counters, float64) {
 	u, sniffed := chatmsg.ExtractUsage(r.respBody)
-	return router.TokenCounters(u, sniffed, r.estTokens, core.EstimateTextTokens([]byte(r.respBody)))
+	return router.TokenCounters(u, sniffed, r.estTokens, tokenutil.Estimate([]byte(r.respBody)))
 }
 
 // routerCharged replays the same requests through internal/router's REAL

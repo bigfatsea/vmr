@@ -6,6 +6,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/tokenutil"
 )
 
 // TestEstimateDegradedTokens_FactsPresent pins the primary path: when Facts
@@ -23,7 +24,7 @@ func TestEstimateDegradedTokens_FactsPresent(t *testing.T) {
 	if inEst != 4242 {
 		t.Errorf("inEst = %d, want Facts.EstimatedTokens (4242) verbatim", inEst)
 	}
-	wantOut := core.EstimateTextTokens([]byte("some response text"))
+	wantOut := tokenutil.Estimate([]byte("some response text"))
 	if outEst != wantOut {
 		t.Errorf("outEst = %d, want %d", outEst, wantOut)
 	}
@@ -32,7 +33,7 @@ func TestEstimateDegradedTokens_FactsPresent(t *testing.T) {
 // TestEstimateDegradedTokens_FactsNil pins the fallback this test file exists
 // to cover: internal/replay's writeReplayRecord never populates Facts, so a
 // replay record reaching this function (endpoint non-empty, usage
-// unparseable) must fall back to core.EstimateTextTokens over the recorded
+// unparseable) must fall back to tokenutil.Estimate over the recorded
 // client request body — the exact basis internal/replay's chargeReplay
 // charges the router's own quota with — rather than silently contributing 0.
 func TestEstimateDegradedTokens_FactsNil(t *testing.T) {
@@ -45,9 +46,9 @@ func TestEstimateDegradedTokens_FactsNil(t *testing.T) {
 		},
 	}
 	inEst, _ := estimateDegradedTokens(arec)
-	wantIn := core.EstimateTextTokens([]byte(reqBody))
+	wantIn := tokenutil.Estimate([]byte(reqBody))
 	if inEst != wantIn {
-		t.Errorf("inEst = %d, want %d (core.EstimateTextTokens over the raw request body, matching internal/replay's chargeReplay)", inEst, wantIn)
+		t.Errorf("inEst = %d, want %d (tokenutil.Estimate over the raw request body, matching internal/replay's chargeReplay)", inEst, wantIn)
 	}
 	if inEst == 0 {
 		t.Error("inEst = 0: the pre-fix bug this test guards against — a nil Facts silently dropping the request-side estimate")

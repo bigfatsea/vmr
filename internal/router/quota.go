@@ -163,14 +163,10 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	u, sniffed := rbody.Usage()
 	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
-	// server/facts.go — zero extra cost here); response-side comes from bytes
-	// respnorm classified incrementally as they arrived (respnorm.go's
-	// countBytes), through the exact same coefficients core.EstimateTextTokens
-	// itself uses. Both are computed unconditionally: they are two field reads
-	// and an integer division, cheaper than branching around them, and
-	// TokenCounters ignores them entirely when usage was sniffed.
-	ascii, wide := rbody.OutBytes()
-	return TokenCounters(u, sniffed, creq.Facts.EstimatedTokens, core.EstimateTokensFromCounts(ascii, wide))
+	// server/facts.go — zero extra cost here); response-side comes from
+	// rbody.OutTokens() (respnorm.go), through the exact same formula tokenutil.Estimate
+	// itself uses.
+	return TokenCounters(u, sniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
 }
 
 // TokenCounters turns one response's usage into the raw four-component

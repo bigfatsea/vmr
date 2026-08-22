@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"vmr/internal/chatmsg"
-	"vmr/internal/core"
 	"vmr/internal/i18n"
+	"vmr/internal/tokenutil"
 )
 
 // Metrics is one Journey's behavior profile (the design doc's nine-indicator
@@ -186,7 +186,7 @@ func toolCallDistribution(steps []*Step) ([]ToolCallStat, int) {
 				names = append(names, tc.Name)
 			}
 			counts[tc.Name]++
-			tk := core.EstimateTextTokens([]byte(tc.Args))
+			tk := tokenutil.EstimateText(tc.Args)
 			tokens[tc.Name] += tk
 			totalTokens += tk
 			total++
@@ -310,7 +310,7 @@ func contextCurve(steps []*Step) []ContextPoint {
 		body, _ := s.Rec.Client.Request.Body.(map[string]any)
 		p := ContextPoint{Seq: s.Seq}
 		for _, msg := range chatmsg.Messages(body) {
-			tk := core.EstimateTextTokens([]byte(msg.Text))
+			tk := tokenutil.EstimateText(msg.Text)
 			switch msg.Role {
 			case "system":
 				p.SystemTokens += tk
@@ -352,7 +352,7 @@ func contextUtilization(j *Journey) float64 {
 			continue
 		}
 		entities := extractEntities(ev.Msg.Text)
-		info[i] = scanned{tokens: core.EstimateTextTokens([]byte(ev.Msg.Text)), entities: entities}
+		info[i] = scanned{tokens: tokenutil.EstimateText(ev.Msg.Text), entities: entities}
 		for _, e := range entities {
 			lastSeen[e] = i
 		}

@@ -56,6 +56,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | --- | --- |
 | `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
+| `tokenutil` | Fast zero-allocation token estimation: `Estimate`, `EstimateText`, `Analyze`, `EstimateFromStats` |
 | `jsonscan` | JSON byte-range scan/splice engine: `RewriteModel`/`RewriteStream`/`RewriteRoles` and the structural primitives behind them. Fuzz-tested. A function belongs here only if it needs no specific field or role name — otherwise it belongs in `adapter` |
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, `i18n/story_*.go` next to `internal/story`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 

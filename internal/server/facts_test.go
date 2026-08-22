@@ -18,15 +18,14 @@ func TestComputeRequestFacts_PlainText(t *testing.T) {
 	}
 }
 
-func TestComputeRequestFacts_ChineseCostsMoreThanEnglishPerByte(t *testing.T) {
-	// Same byte count (roughly), but Chinese should estimate more tokens
-	// than an equal-length ASCII string — the whole point of the split.
-	en := []byte(`{"model":"agent","messages":[{"role":"user","content":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`)
-	zh := []byte(`{"model":"agent","messages":[{"role":"user","content":"我我我我我我我我我我"}]}`) // 10 CJK chars = 30 bytes, similar payload size to the ascii run above
+func TestComputeRequestFacts_ChineseCostsMoreThanEnglishPerChar(t *testing.T) {
+	// For equal character count, Chinese estimates more tokens than English letters (0.507 vs 0.206).
+	en := []byte(`{"model":"agent","messages":[{"role":"user","content":"aaaaaaaaaa"}]}`)
+	zh := []byte(`{"model":"agent","messages":[{"role":"user","content":"我我我我我我我我我我"}]}`)
 	enFacts := computeRequestFacts(en, 0, false)
 	zhFacts := computeRequestFacts(zh, 0, false)
 	if zhFacts.EstimatedTokens <= enFacts.EstimatedTokens {
-		t.Errorf("expected Chinese text to estimate more tokens per byte than English: en=%d zh=%d", enFacts.EstimatedTokens, zhFacts.EstimatedTokens)
+		t.Errorf("expected Chinese text to estimate more tokens per character than English: en=%d zh=%d", enFacts.EstimatedTokens, zhFacts.EstimatedTokens)
 	}
 }
 
