@@ -155,8 +155,8 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 		}
 	}
 	l := spec.Limits[0]
-	c, _ := reg.Used(provider, string(l.Metric)+"/"+l.EveryText, quota.PeriodStart(l, now))
-	return quota.BaseAmount(spec, c)
+	c, _ := reg.Used(provider, quota.LimitKey(l, ""), quota.PeriodStart(l, now))
+	return quota.BaseAmount(l, c)
 }
 
 // reportWindowConsumed runs the real `vmr report` pipeline over the same
@@ -283,8 +283,9 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	reqs = append(reqs, parityRequest{model: "real-model", attempts: []parityAttempt{{status: 503}}})
 
 	lim := core.Limit{Metric: core.MetricRequests, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
-		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100000}
-	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, ModelMultipliers: map[string]float64{"real-model": 5.5}}
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100000,
+		ModelMultipliers: map[string]float64{"real-model": 5.5}}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 
 	want := routerCharged(t, reqs, "acct1", spec, nil, now)
 	if want != 104.5 {
@@ -296,7 +297,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	// YAML pipeline (quotaYAML declares no model_multipliers). Reproducing
 	// the router's formula here is the point; the end-to-end basis is
 	// covered by the test above.
-	unit, _ := quota.ApplyModelMultiplier(spec, "real-model", quota.Counters{Requests: 1}, 0)
+	unit, _ := quota.ApplyModelMultiplier(lim, "real-model", quota.Counters{Requests: 1}, 0)
 	var forwarded float64
 	for _, r := range reqs {
 		for _, a := range r.attempts {
@@ -305,7 +306,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 			}
 		}
 	}
-	got := quota.BaseAmount(spec, quota.Counters{Requests: unit.Requests * forwarded})
+	got := quota.BaseAmount(lim, quota.Counters{Requests: unit.Requests * forwarded})
 	if diff := math.Abs(got - want); diff > 1e-9*want {
 		t.Errorf("recomputed = %v, router charged %v (diff %v exceeds relative epsilon)", got, want, diff)
 	}
@@ -374,8 +375,9 @@ func TestQuotaParity_TokensMetric_ReportMatchesRouter(t *testing.T) {
 
 	reqs := tokensParityFixture()
 	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
-		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000}
-	spec := &core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.NewTokenWeights()}
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000,
+		TokenWeights: core.NewTokenWeights()}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 
 	want := routerCharged(t, reqs, "acct1", spec, nil, now)
 	if want <= 0 {
@@ -415,17 +417,16 @@ func TestQuotaParity_TokensMetric_NonIntegerMultiplier(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 
 	reqs := tokensParityFixture()
-	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
-		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000}
-	spec := &core.QuotaSpec{
-		Limits:           []core.Limit{lim},
-		TokenWeights:     core.NewTokenWeights(),
-		ModelMultipliers: map[string]float64{"real-model": 2.5},
-	}
+	plainLim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000,
+		TokenWeights: core.NewTokenWeights()}
+	lim := plainLim
+	lim.ModelMultipliers = map[string]float64{"real-model": 2.5}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 
 	want := routerCharged(t, reqs, "acct1", spec, nil, now)
 	plain := routerCharged(t, reqs, "acct1",
-		&core.QuotaSpec{Limits: []core.Limit{lim}, TokenWeights: core.NewTokenWeights()}, nil, now)
+		&core.QuotaSpec{Limits: []core.Limit{plainLim}}, nil, now)
 	if diff := math.Abs(want - 2.5*plain); diff > 1e-9*want {
 		t.Fatalf("fixture sanity: multiplied charge %v is not 2.5x the unmultiplied %v", want, plain)
 	}

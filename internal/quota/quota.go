@@ -3,9 +3,128 @@
 package quota
 
 import (
+	"strings"
 	"sync"
 	"time"
+
+	"vmr/internal/core"
 )
+
+// wildcardToken is core.Limit.Models' reserved "per-model, unrestricted"
+// marker — never a literal upstream model name. See core.Limit.Models' doc
+// comment for the three Scope shapes this and PerModel/AppliesToModel below
+// all key off of.
+const wildcardToken = "*"
+
+// IsWildcardModels reports whether models is exactly the reserved
+// []string{"*"} shape — "per-model, applies to every model" — as opposed to
+// an explicit restricted list. config.validateQuota rejects "*" combined
+// with any other entry, so this is the only shape that ever needs checking;
+// a caller never has to also handle "*" mixed into a longer slice.
+func IsWildcardModels(models []string) bool {
+	return len(models) == 1 && models[0] == wildcardToken
+}
+
+// PerModel reports whether l uses independent per-model accounting — true
+// whenever Models is set at all (either shape), false only when it's
+// nil/empty ("shared", one pool for every model). See core.Limit.Models'
+// doc comment: presence of Models, not which shape, is what decides this.
+func PerModel(l core.Limit) bool {
+	return len(l.Models) > 0
+}
+
+// AppliesToModel reports whether l's Scope covers model — shared (no
+// Models) matches everything, the wildcard matches everything, an explicit
+// list matches only its named entries. Shared by router (charge/score
+// eligibility) and config (Scope validation), the same "one formula, every
+// consumer" reason LimitKey/BaseAmount live here instead of being
+// reimplemented at each call site.
+func AppliesToModel(l core.Limit, model string) bool {
+	if len(l.Models) == 0 || IsWildcardModels(l.Models) {
+		return true
+	}
+	for _, m := range l.Models {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
+// ModelSetsOverlap reports whether two non-empty Scope lists could ever
+// match the same real model — the wildcard overlaps with anything (by
+// definition it matches every model, including whatever the other list
+// names); two explicit lists overlap iff they share at least one entry.
+// config.validateQuota uses this to detect two per-model Limits that would
+// collide on the same live bucket key for some real model — see
+// PerModelPrefix/ExtractModel's doc comments for why a per-model Limit's
+// bucket key can't be computed statically at config-validate time the way a
+// shared Limit's can, which is exactly why this overlap check exists instead
+// of just comparing two precomputed keys for equality.
+func ModelSetsOverlap(a, b []string) bool {
+	if IsWildcardModels(a) || IsWildcardModels(b) {
+		return true
+	}
+	for _, m := range a {
+		for _, n := range b {
+			if m == n {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// LimitKey returns l's Registry storage key for a charge/read against
+// model. Two shapes, matching core.Limit.Models' two accounting modes:
+//   - shared (Models unset): "metric/every" — model is ignored; every
+//     matching endpoint's charges land in the same bucket, exactly P1/P2's
+//     original single-bucket-per-Limit shape.
+//   - per-model (Models set, wildcard or restricted list): "metric/every
+//     #model=<model>" — keyed by the ACTUAL model this charge/read is for,
+//     not by l's declared Scope list. This is why a per-model Limit's set
+//     of live bucket keys can't be enumerated from config alone (a "*"
+//     Limit's membership is open-ended until traffic actually arrives) —
+//     see PerModelPrefix/ExtractModel for how a caller walks the Registry's
+//     actual keys instead.
+//
+// Shared by router (charge/score) and any offline reader (vmr report's
+// §2.5 table) — one formula, every consumer, the same reason
+// BaseAmount/ApplyModelMultiplier live here instead of being reimplemented
+// at each call site.
+func LimitKey(l core.Limit, model string) string {
+	base := string(l.Metric) + "/" + l.EveryText
+	if !PerModel(l) {
+		return base
+	}
+	return base + "#model=" + model
+}
+
+// PerModelPrefix returns the key prefix every live bucket LimitKey produces
+// for l shares, when l is per-model — e.g. "requests/1d#model=". Used
+// together with ExtractModel to enumerate which models have actually been
+// charged against a per-model Limit (its Scope alone doesn't say — "*"
+// covers an open-ended set, and even a restricted list only says which
+// models COULD have a bucket, not which ones actually do yet). Callers:
+// router.QuotaStatus (walks the live Registry) and vmr report's §2.5 table
+// (walks the offline quota.LoadFile snapshot) — both need the same prefix,
+// computed the same way, so this isn't reimplemented on either side.
+func PerModelPrefix(l core.Limit) string {
+	return string(l.Metric) + "/" + l.EveryText + "#model="
+}
+
+// ExtractModel reports whether limitKey is a live bucket key belonging to
+// l (i.e. starts with l's PerModelPrefix) and, if so, the model it's keyed
+// by. ok=false for any key that isn't one of l's own per-model buckets —
+// including, deliberately, a shared Limit's plain "metric/every" key (no
+// prefix to strip) and another Limit's differently-scoped per-model keys.
+func ExtractModel(l core.Limit, limitKey string) (model string, ok bool) {
+	prefix := PerModelPrefix(l)
+	if !PerModel(l) || !strings.HasPrefix(limitKey, prefix) {
+		return "", false
+	}
+	return limitKey[len(prefix):], true
+}
 
 // Counters is one Limit's accumulated consumption, stored by raw component —
 // never pre-weighted or pre-priced. Charge/Used deal in these units directly;
@@ -106,6 +225,30 @@ type Registry struct {
 // call Load/Flush) — Charge/Used still work purely in memory.
 func NewRegistry(path string) *Registry {
 	return &Registry{accounts: map[string]map[string]*bucket{}, path: path}
+}
+
+// Keys returns every limitKey currently on record for provider — including
+// ones from a since-changed config (§9.3's orphan-key caveat applies here
+// too: this never cleans up, it just reports what's there). Needed to
+// enumerate a per-model Limit's actual live buckets (see PerModelPrefix/
+// ExtractModel): a "*" Scope's membership is open-ended, so which models
+// have a bucket is a live-Registry fact, not something derivable from
+// config alone. A shared Limit never needs this — its one key is already
+// computable from the Limit itself. Order is unspecified; callers that need
+// determinism (e.g. QuotaStatus's stable /admin/status rendering) sort the
+// result themselves.
+func (r *Registry) Keys(provider string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byLimit := r.accounts[provider]
+	if len(byLimit) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(byLimit))
+	for k := range byLimit {
+		out = append(out, k)
+	}
+	return out
 }
 
 func (r *Registry) getLocked(provider, limitKey string) *bucket {

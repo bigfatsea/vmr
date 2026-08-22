@@ -233,11 +233,7 @@ func BuildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
 		for i, lc := range p.Quota.Limits {
 			limits[i] = lc.Resolved
 		}
-		out[p.Name] = &core.QuotaSpec{
-			Limits:           limits,
-			TokenWeights:     p.Quota.ResolvedTokenWeights,
-			ModelMultipliers: p.Quota.ModelMultipliers,
-		}
+		out[p.Name] = &core.QuotaSpec{Limits: limits}
 	}
 	return out
 }

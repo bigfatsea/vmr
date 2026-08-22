@@ -65,6 +65,15 @@ func (z zstdReadCloser) Close() error {
 // replay). Unlike ForEachLine's callers elsewhere, line 0 is not special
 // here — it's simply not found, since a coordinate-addressed line is always
 // a concrete positive number.
+//
+// Uses scanLines directly (not ForEachLine) so it can stop the moment the
+// target line is found instead of decompressing/scanning the rest of the
+// file for nothing — a coordinate lookup is supposed to be a single-record
+// fetch, not a full-file pass. Measured effect on a real 373-record/380MB
+// (decompressed) audit file: line 5 and line 373 (last) used to cost the
+// same ~0.2-0.8s either way, because the old ForEachLine-based loop had no
+// way to signal "stop" back into the scan; now cost is proportional to how
+// far into the file the target line actually is.
 func LineAt(path string, line int) ([]byte, error) {
 	if line <= 0 {
 		return nil, fmt.Errorf("%s: line %d is not a valid 1-based line number", path, line)
@@ -77,12 +86,14 @@ func LineAt(path string, line int) ([]byte, error) {
 
 	var found []byte
 	n := 0
-	scanErr := ForEachLine(rc, MaxLogLine, func(lb []byte) {
+	scanErr := scanLines(rc, MaxLogLine, func(lb []byte) bool {
 		n++
-		if n == line && found == nil {
-			found = append([]byte(nil), lb...) // ForEachLine reuses its buffer; copy before it's overwritten
+		if n == line {
+			found = append([]byte(nil), lb...) // scanLines reuses its buffer; copy before it's overwritten
+			return false                       // this is the only line LineAt wants — stop scanning
 		}
-	}, nil)
+		return true
+	}, func() { n++ }) // a skipped (too-long) line must still advance n, or a later target line would be misidentified
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -95,8 +106,22 @@ func LineAt(path string, line int) ([]byte, error) {
 // ForEachLine invokes fn for every non-empty line in r (trailing \n
 // stripped). Lines longer than maxLine are drained with bounded memory and
 // reported via onSkip (nilable) instead of failing the scan. The line slice
-// is reused between calls — fn must not retain it.
+// is reused between calls — fn must not retain it. A thin wrapper over
+// scanLines that always continues to EOF — every caller here wants every
+// line; LineAt is the one exception and calls scanLines directly.
 func ForEachLine(r io.Reader, maxLine int, fn func(line []byte), onSkip func()) error {
+	return scanLines(r, maxLine, func(line []byte) bool {
+		fn(line)
+		return true
+	}, onSkip)
+}
+
+// scanLines is the shared line-splitting loop behind ForEachLine and
+// LineAt. fn returns false to stop scanning immediately — the rest of r is
+// never read. onSkip fires instead of fn for a line beyond maxLine and
+// cannot itself stop the scan (it never has a reason to: a too-long line is
+// never what a coordinate lookup is looking for).
+func scanLines(r io.Reader, maxLine int, fn func(line []byte) bool, onSkip func()) error {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var buf []byte
 	tooLong := false
@@ -122,7 +147,9 @@ func ForEachLine(r io.Reader, maxLine int, fn func(line []byte), onSkip func()) 
 				onSkip()
 			}
 		case len(line) > 0:
-			fn(line)
+			if !fn(line) {
+				return nil
+			}
 		}
 		buf, tooLong = buf[:0], false
 		if err == io.EOF {

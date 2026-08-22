@@ -435,22 +435,25 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
 			amount += " " + cfg.Pricing.Currency
 		}
-		fmt.Fprintln(w, checkLine(4, string(l.Metric), fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)))
-	}
-	// token_weights is always resolved (defaults to all 1.0), but only
-	// printed when the account actually configured it non-default — an
-	// all-1.0 line on every quota-configured provider would be noise on the
-	// common case (P1-style plain token/request counting).
-	tw := p.Quota.ResolvedTokenWeights
-	if tw != core.NewTokenWeights() {
-		fmt.Fprintln(w, checkLine(4, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", tw.InFresh, tw.CacheRead, tw.CacheWrite, tw.Out)))
-	}
-	if len(p.Quota.ModelMultipliers) > 0 {
-		parts := make([]string, 0, len(p.Quota.ModelMultipliers))
-		for _, model := range core.SortedKeys(p.Quota.ModelMultipliers) {
-			parts = append(parts, fmt.Sprintf("%s=%g", model, p.Quota.ModelMultipliers[model]))
+		detail := fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)
+		if len(l.Models) > 0 {
+			detail += " models=" + strings.Join(l.Models, ",")
 		}
-		fmt.Fprintln(w, checkLine(4, "model_multipliers", strings.Join(parts, " ")))
+		fmt.Fprintln(w, checkLine(4, string(l.Metric), detail))
+		// token_weights is always resolved (defaults to all 1.0), but only
+		// printed when this Limit actually configured it non-default — an
+		// all-1.0 line on every Limit would be noise on the common case
+		// (plain token/request counting).
+		if tw := l.TokenWeights; tw != core.NewTokenWeights() {
+			fmt.Fprintln(w, checkLine(6, "token_weights", fmt.Sprintf("in_fresh=%g cache_read=%g cache_write=%g out=%g", tw.InFresh, tw.CacheRead, tw.CacheWrite, tw.Out)))
+		}
+		if len(l.ModelMultipliers) > 0 {
+			parts := make([]string, 0, len(l.ModelMultipliers))
+			for _, model := range core.SortedKeys(l.ModelMultipliers) {
+				parts = append(parts, fmt.Sprintf("%s=%g", model, l.ModelMultipliers[model]))
+			}
+			fmt.Fprintln(w, checkLine(6, "model_multipliers", strings.Join(parts, " ")))
+		}
 	}
 }
 

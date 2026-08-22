@@ -624,17 +624,32 @@ type ProviderRow struct {
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
 
 	// Quota is a read-only snapshot of this account's config.yaml quota
-	// declaration, purely as a reference point — see ProviderQuotaRef's own
+	// declaration — one entry per Limit (P3: a provider can carry more than
+	// one window) — purely as a reference point, see ProviderQuotaRef's own
 	// doc comment for what it deliberately is NOT.
-	Quota *ProviderQuotaRef `json:"quota,omitempty"`
+	Quota []ProviderQuotaRef `json:"quota,omitempty"`
 }
 
-// ProviderQuotaRef is a config.yaml provider's declared quota limit, plus
-// the computation inputs and Live state buildProviderQuotaRows
-// needs to build §2.5's "额度与消耗对照" sub-table row for the same
-// provider — the same map (cmd_report.go's buildProviderQuotas) feeds both
-// ProviderRow.Quota (below) and that sub-table, so the two never disagree
-// on what an account's declared quota is.
+// ProviderQuotaRef is one row's worth of a config.yaml provider's declared
+// quota Limits, plus the computation inputs and Live state
+// buildProviderQuotaRows needs to build §2.5's "额度与消耗对照" sub-table
+// row for it — the same map (cmd_report.go's buildProviderQuotas) feeds
+// both ProviderRow.Quota (below) and that sub-table, so the two never
+// disagree on what an account's declared quota is.
+//
+// A SHARED Limit (quota.PerModel(*Limit) false) contributes exactly one
+// ref, Model left "". A PER-MODEL Limit contributes one ref PER MODEL THAT
+// ACTUALLY HAS LIVE QUOTA STATE — buildProviderQuotas enumerates
+// vmr-quota.json's own keys for that Limit (quota.ExtractModel) the same
+// way router.QuotaStatus enumerates the live Registry, since a per-model
+// Limit's real membership (especially the wildcard shape) isn't derivable
+// from config alone. A per-model Limit with no live buckets yet (nothing
+// charged against it since vmr-quota.json was last written) contributes
+// ZERO refs, and so is silently absent from §2.5 until its first charge —
+// a documented gap, not an oversight: filling it would mean also
+// enumerating models from this run's own audit corpus and merging that
+// with the live-file enumeration, which is more machinery than the current
+// benefit (a table row you'd see one report run earlier) justifies.
 //
 // ProviderRow.Quota itself only ever round-trips into vmr-report.json now
 // — the Markdown main table renders no quota column at all, to
@@ -648,10 +663,24 @@ type ProviderQuotaRef struct {
 	Metric string  `json:"metric"` // requests | tokens | cost
 	Every  string  `json:"every"`  // 1mo / 1w / 5h ...
 	Amount float64 `json:"amount"`
+	// Models is what this ref/row is scoped to for DISPLAY: the specific
+	// model for a per-model ref (mirrors router.QuotaStatus's same choice —
+	// "which model is THIS row" is the useful answer, not "which models
+	// could this Limit ever cover"), or the Limit's own declared Scope for
+	// a shared ref (always empty, since a shared Limit's Scope is always
+	// nil). Omitted from JSON when empty.
+	Models []string `json:"models,omitempty"`
+	// Model is the specific upstream model this ref is about, when Limit is
+	// per-model — "" for a shared ref. Used to match this ref against
+	// EndpointsAll traffic (accumulateQuotaWindow) and to compute its own
+	// LimitKey; Models above is derived from this for display.
+	Model string `json:"-"`
 
-	// Limit and Spec are input configs excluded from serialized JSON output.
-	Limit *core.Limit     `json:"-"`
-	Spec  *core.QuotaSpec `json:"-"`
+	// Limit is this entry's resolved config, excluded from serialized JSON
+	// output (Metric/Every/Amount/Models above already surface what a
+	// reader needs; Limit itself carries TokenWeights/ModelMultipliers,
+	// which quota.BaseAmount/ApplyModelMultiplier read directly).
+	Limit *core.Limit `json:"-"`
 
 	// Live holds real-time quota state read from vmr-quota.json.
 	Live *LiveQuota `json:"live,omitempty"`
@@ -705,6 +734,10 @@ type ProviderQuotaRow struct {
 	Metric   string  `json:"metric"`
 	Every    string  `json:"every"`
 	Amount   float64 `json:"amount"`
+	// Models is this Limit's Scope (see ProviderQuotaRef.Models) — the
+	// column that tells apart a provider's several rows when it carries
+	// more than one Limit (P3).
+	Models []string `json:"models,omitempty"`
 
 	// WindowConsumed is a pointer so a metric: cost account with NO
 	// resolvable pricing for any of its endpoints (CostEstimate nil

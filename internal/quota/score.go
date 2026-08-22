@@ -90,12 +90,77 @@ func Headroom(usedFrac, timeLeftFrac float64) float64 {
 // used must already be in l.Metric's unit (the caller applies base(metric)
 // — requests count or equal-weighted token sum, see the design doc's
 // Metering section — before calling this; this function only knows ratios).
-// P1 callers always pass a provider's single Limit; a future multi-Limit
-// batch takes the min() of this across every Limit at the call site (see
-// the design doc's Core Algorithm section on multi-window merging), not
-// inside this function.
+// This is the raw per-Limit ratio ScoreForLimits below assigns a
+// bucket-or-gate role to — call it directly only when a provider has
+// exactly one Limit (P1/P2's shape) or when the role has already been
+// decided elsewhere.
 func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 	start := PeriodStart(l, now)
 	end := PeriodEnd(l, now)
 	return Headroom(UsedFrac(used, l.Amount), TimeLeftFrac(now, start, end))
+}
+
+// BucketIndex returns the index of limits' bucket Limit — the longest
+// tumbling period among them (see the design doc's §5.2 bucket-vs-gate
+// rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). This package
+// carries no rolling windows yet (see core.Limit's doc comment), so every
+// Limit is tumbling and this always resolves to a real index for a
+// non-empty slice — the "all-rolling has no bucket" branch §5.2 also
+// describes doesn't apply until rolling windows exist. len(limits)==0
+// returns -1 (unreachable from ScoreForLimits, which guards it first).
+func BucketIndex(limits []core.Limit) int {
+	if len(limits) == 0 {
+		return -1
+	}
+	bi := 0
+	bh := nominalUnitHours(limits[0].EveryUnit, limits[0].EveryN)
+	for i := 1; i < len(limits); i++ {
+		h := nominalUnitHours(limits[i].EveryUnit, limits[i].EveryN)
+		if h > bh {
+			bi, bh = i, h
+		}
+	}
+	return bi
+}
+
+// ScoreForLimits composes a whole provider's score across every one of its
+// Limits (P3: multi-window) via the bucket-vs-gate rule: the longest-period
+// Limit is scored as a bucket (its raw headroom passes through unchanged —
+// underuse can push the score above 1.0, "use it or lose it"); every other
+// Limit is scored as a gate, hard-capped at 1.0 (`min(1, raw)`) — underuse
+// never boosts past neutral, only nearness-to-saturation (raw<1) suppresses.
+// The provider's score is the min across all of them — "the tightest
+// constraint decides".
+//
+// The gate cap is a flat ceiling, not a graduated reserve band — an earlier
+// version eased a gate toward suppression starting at raw < 2× pace (a
+// `GateReserve` constant), but that early-warning margin had no data behind
+// it, just an arbitrary "how early should this start" choice. `min(1, raw)`
+// keeps the one property that actually matters (a gate can never lift the
+// score above what pure on-pace consumption would give) without the extra
+// tunable.
+//
+// used[i] must already have base(limits[i].Metric) applied (see
+// ScoreForLimit) and align index-for-index with limits — the caller (
+// internal/router/quota.go's scoreForEndpoint) is the one walking each
+// Limit's Scope-filtered Counters, this function only merges the results.
+//
+// Degenerates to plain ScoreForLimit when len(limits)==1: that one Limit is
+// trivially both the longest and the only one, so it always gets bucket
+// treatment (no gate cap) — byte-identical to P1/P2's single-Limit
+// behavior, which is the "zero regression for existing configs" property.
+func ScoreForLimits(limits []core.Limit, used []float64, now time.Time) float64 {
+	bi := BucketIndex(limits)
+	score := HeadroomCap
+	for i, l := range limits {
+		raw := ScoreForLimit(l, used[i], now)
+		h := raw
+		if i != bi && h > 1 {
+			h = 1
+		}
+		if h < score {
+			score = h
+		}
+	}
+	return score
 }

@@ -12,12 +12,10 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/config"
-	"vmr/internal/core"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
-	"vmr/internal/quota"
 	"vmr/internal/report"
 )
 
@@ -98,83 +96,6 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 		}
 	}
 	return resolver, summary
-}
-
-// buildProviderQuotas loads declared quota limits from config and live quota state from vmr-quota.json.
-// Returns nil if config or live quota is unavailable without failing report generation.
-func buildProviderQuotas(cfg *config.Config, loadErr error, configPath string, tw io.Writer, now time.Time) (map[string]report.ProviderQuotaRef, string) {
-	if loadErr != nil {
-		// cmdReport already printed one unified warning for cfgErr — a
-		// second, near-identical one here would just repeat it.
-		// configPath is kept in the signature purely so this function's
-		// doc comment / callers stay symmetric with buildPricing's.
-		return nil, ""
-	}
-	quotaJSONPath := filepath.Join(cfg.LogDir, "vmr-quota.json")
-	live, err := quota.LoadFile(quotaJSONPath)
-	if err != nil {
-		fmt.Fprintf(tw, "provider quotas: %s not usable (%v) — §2.5's real-time columns render as \"-\"\n", quotaJSONPath, err)
-	}
-	quotas := map[string]report.ProviderQuotaRef{}
-	for _, p := range cfg.Providers {
-		if p.Quota == nil || len(p.Quota.Limits) == 0 {
-			continue
-		}
-		// Limits[0] is the only correct read here — config.validateQuota
-		// rejects len(Limits) > 1 at load time (P1's "exactly one Limit per
-		// provider"; see TestQuota_Reject_MultipleLimits in internal/config),
-		// so this can never silently drop a second window. P3 (multi-window
-		// quota) will need this whole function rewritten to fold across
-		// every Limit, not just widened past index 0.
-		lim := p.Quota.Limits[0].Resolved
-		spec := &core.QuotaSpec{
-			Limits:           []core.Limit{lim},
-			TokenWeights:     p.Quota.ResolvedTokenWeights,
-			ModelMultipliers: p.Quota.ModelMultipliers,
-		}
-		ref := report.ProviderQuotaRef{
-			Metric: string(lim.Metric),
-			Every:  lim.EveryText,
-			Amount: lim.Amount,
-			Limit:  &lim,
-			Spec:   spec,
-		}
-		// §5.2's stale-period trap: quota.Registry resets lazily, so a
-		// bucket still on disk from a period the process wasn't running
-		// through must NOT be rendered as "this period's usage" — only a
-		// bucket whose stored PeriodStart matches what PeriodStart(lim, now)
-		// computes for right now qualifies as Live.
-		limitKey := string(lim.Metric) + "/" + lim.EveryText
-		periodStart := quota.PeriodStart(lim, now)
-		if b, ok := live[p.Name][limitKey]; ok && b.PeriodStartTime().Equal(periodStart) {
-			used := quota.BaseAmount(spec, b.C)
-			var pct float64
-			if lim.Amount > 0 {
-				pct = used / lim.Amount * 100
-			}
-			ref.Live = &report.LiveQuota{
-				Used: used, Pct: pct,
-				PeriodStart: periodStart, PeriodEndsAt: quota.PeriodEnd(lim, now),
-				EstimatedPct: quota.EstimatedPct(lim.Metric, b.C, b.Estimated, b.EstimatedCost),
-			}
-		} else if _, exists := live[p.Name][limitKey]; !exists && len(live[p.Name]) > 0 {
-			// Distinguishes two different-looking "Live is nil" causes
-			// that the generic stale-period footnote alone conflates:
-			// - limitKey absent, but this provider DOES have other keys
-			// on disk → its quota:'s metric/every changed since those
-			// were last written (Registry never deletes an old key —
-			// it's lazy-reset, not lazy-cleaned), so the OLD bucket is
-			// simply keyed differently now. The process is healthy and
-			// running; the config just moved out from under it.
-			// - limitKey present but period mismatch (the `if` branch's
-			// negative), or no data for this provider at all → the
-			// existing "process wasn't running through this period" or
-			// "never charged yet" story, unchanged.
-			ref.LiveConfigChanged = true
-		}
-		quotas[p.Name] = ref
-	}
-	return quotas, quotaJSONPath
 }
 
 // allPathsOutsideDir reports whether EVERY entry in paths resolves

@@ -1,8 +1,9 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-08-22, by Sonnet 5
 
-// Tests for account-level model_multipliers (see docs/VirtualModelRouter_Design_v4_Quota.md): account-level model_multipliers
-// (applied at charge time) and token_weights
-// (applied at read time via baseAmount). See quota_charge_test.go/
+// Tests for per-Limit model_multipliers (see docs/VirtualModelRouter_Design_v4_Quota.md):
+// model_multipliers (applied at charge time) and token_weights (applied at
+// read time via BaseAmount) — both moved from QuotaSpec down to core.Limit
+// in P3 (see core.Limit's doc comment for why). See quota_charge_test.go/
 // quota_status_test.go for the status tests these extend.
 package router
 
@@ -22,7 +23,8 @@ import (
 func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := requestsLimit(1000)
-	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"heavy-model": 9}}
+	l.ModelMultipliers = map[string]float64{"heavy-model": 9}
+	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "heavy-model", Quota: spec}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
@@ -38,7 +40,8 @@ func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := requestsLimit(1000)
-	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"*": 3, "named-model": 9}}
+	l.ModelMultipliers = map[string]float64{"*": 3, "named-model": 9}
+	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "unnamed-model", Quota: spec}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
@@ -54,7 +57,8 @@ func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := requestsLimit(1000)
-	spec := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"named-model": 9}}
+	l.ModelMultipliers = map[string]float64{"named-model": 9}
+	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "other-model", Quota: spec}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
 	creq := &core.CanonicalRequest{}
@@ -70,7 +74,7 @@ func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.
 func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := requestsLimit(1000)
-	// ModelMultipliers left nil entirely (the common case: no account
+	// ModelMultipliers left nil entirely (the common case: no Limit
 	// configures it at all) — must behave identically to P1.
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "any-model", Quota: spec}
@@ -95,11 +99,9 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := tokensLimit(1_000_000)
-	spec := &core.QuotaSpec{
-		Limits:           []core.Limit{l},
-		ModelMultipliers: map[string]float64{"m": 1.5},
-		TokenWeights:     core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1},
-	}
+	l.ModelMultipliers = map[string]float64{"m": 1.5}
+	l.TokenWeights = core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}
+	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "m", Quota: spec}
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 7}}
 
@@ -121,9 +123,11 @@ func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 // providers that happen to share a registry.
 func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
-	l := requestsLimit(1000)
-	specA := &core.QuotaSpec{Limits: []core.Limit{l}, ModelMultipliers: map[string]float64{"*": 5}}
-	specB := &core.QuotaSpec{Limits: []core.Limit{l}} // no multiplier configured
+	lA := requestsLimit(1000)
+	lA.ModelMultipliers = map[string]float64{"*": 5}
+	lB := requestsLimit(1000) // no multiplier configured
+	specA := &core.QuotaSpec{Limits: []core.Limit{lA}}
+	specB := &core.QuotaSpec{Limits: []core.Limit{lB}}
 	epA := &core.Endpoint{Provider: "plan-a", Model: "m", Quota: specA}
 	epB := &core.Endpoint{Provider: "plan-b", Model: "m", Quota: specB}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
@@ -132,8 +136,8 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	rt.chargeQuota(epA, rbody, creq, chargeNow)
 	rt.chargeQuota(epB, rbody, creq, chargeNow)
 
-	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(l, chargeNow))
-	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(l, chargeNow))
+	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(lA, chargeNow))
+	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(lB, chargeNow))
 	if usedA.Requests != 5 {
 		t.Fatalf("plan-a Requests = %v, want 5", usedA.Requests)
 	}
@@ -142,15 +146,13 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	}
 }
 
-// --- token_weights: read-time application via baseAmount ---
+// --- token_weights: read-time application via BaseAmount ---
 
 func TestBaseAmount_TokenWeights_AllDefault_MatchesP1EqualWeightedSum(t *testing.T) {
-	spec := &core.QuotaSpec{
-		Limits:       []core.Limit{tokensLimit(1_000_000)},
-		TokenWeights: core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1},
-	}
+	l := tokensLimit(1_000_000)
+	l.TokenWeights = core.TokenWeights{InFresh: 1, CacheRead: 1, CacheWrite: 1, Out: 1}
 	c := quota.Counters{Fresh: 80, CacheRead: 20, CacheWrite: 5, Out: 50}
-	got := quota.BaseAmount(spec, c)
+	got := quota.BaseAmount(l, c)
 	want := float64(80 + 20 + 5 + 50)
 	if got != want {
 		t.Fatalf("baseAmount = %v, want %v (equal-weighted sum, P1-identical)", got, want)
@@ -158,12 +160,10 @@ func TestBaseAmount_TokenWeights_AllDefault_MatchesP1EqualWeightedSum(t *testing
 }
 
 func TestBaseAmount_TokenWeights_Applied(t *testing.T) {
-	spec := &core.QuotaSpec{
-		Limits:       []core.Limit{tokensLimit(1_000_000)},
-		TokenWeights: core.TokenWeights{InFresh: 1.0, CacheRead: 0.1, CacheWrite: 1.25, Out: 4.0},
-	}
+	l := tokensLimit(1_000_000)
+	l.TokenWeights = core.TokenWeights{InFresh: 1.0, CacheRead: 0.1, CacheWrite: 1.25, Out: 4.0}
 	c := quota.Counters{Fresh: 100, CacheRead: 100, CacheWrite: 8, Out: 10}
-	got := quota.BaseAmount(spec, c)
+	got := quota.BaseAmount(l, c)
 	want := 100*1.0 + 100*0.1 + 8*1.25 + 10*4.0 // = 100 + 10 + 10 + 40 = 160
 	if got != want {
 		t.Fatalf("baseAmount = %v, want %v", got, want)
@@ -172,14 +172,12 @@ func TestBaseAmount_TokenWeights_Applied(t *testing.T) {
 
 func TestBaseAmount_Requests_UnaffectedByTokenWeights(t *testing.T) {
 	// token_weights must never touch a requests-metric Limit — requests
-	// counts by definition (base(requests) = 1 per call), and this spec sets
+	// counts by definition (base(requests) = 1 per call), and this Limit sets
 	// deliberately skewed weights to prove they're simply never read.
-	spec := &core.QuotaSpec{
-		Limits:       []core.Limit{requestsLimit(1000)},
-		TokenWeights: core.TokenWeights{InFresh: 99, CacheRead: 99, CacheWrite: 99, Out: 99},
-	}
+	l := requestsLimit(1000)
+	l.TokenWeights = core.TokenWeights{InFresh: 99, CacheRead: 99, CacheWrite: 99, Out: 99}
 	c := quota.Counters{Requests: 7, Fresh: 1000} // Fresh present but irrelevant to a requests Limit
-	got := quota.BaseAmount(spec, c)
+	got := quota.BaseAmount(l, c)
 	if got != 7 {
 		t.Fatalf("baseAmount = %v, want 7 (requests metric ignores TokenWeights entirely)", got)
 	}
@@ -197,9 +195,7 @@ providers:
     base_url: {openai: `+u.srv.URL+`}
     api_key: k1
     quota:
-      token_weights: {cache_read: 0.1}
-      model_multipliers: {heavy: 2}
-      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000}]
+      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {cache_read: 0.1}, model_multipliers: {heavy: 2}}]
 models:
   vm:
     endpoints:
@@ -214,8 +210,8 @@ models:
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 
-	spec := rt.Snapshot().Models["openai"]["vm"].Endpoints[0].Quota
-	ps := quota.PeriodStart(spec.Limits[0], time.Now())
+	l := rt.Snapshot().Models["openai"]["vm"].Endpoints[0].Quota.Limits[0]
+	ps := quota.PeriodStart(l, time.Now())
 	used, _ := rt.Quota.Used("p1", "tokens/1mo", ps)
 	// Raw usage: prompt_tokens=100 (fresh=100-50=50), cache_read=50, out=10.
 	// model_multipliers doubles every component before it's stored:
@@ -223,9 +219,9 @@ models:
 	if used.Fresh != 100 || used.CacheRead != 100 || used.Out != 20 {
 		t.Fatalf("stored counters = %+v, want Fresh=100 CacheRead=100 Out=20 (2x model_multiplier applied at charge time)", used)
 	}
-	// Reading it back through baseAmount applies token_weights on top:
+	// Reading it back through BaseAmount applies token_weights on top:
 	// 100*1 (in_fresh default) + 100*0.1 (cache_read override) + 20*1 (out default) = 130.
-	got := quota.BaseAmount(spec, used)
+	got := quota.BaseAmount(l, used)
 	if got != 130 {
 		t.Fatalf("baseAmount = %v, want 130 (charge-time multiplier x read-time token_weights composed correctly)", got)
 	}
@@ -246,8 +242,7 @@ providers:
     base_url: {openai: https://example.com}
     api_key: k1
     quota:
-      token_weights: {out: 5.0}
-      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000}]
+      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {out: 5.0}}]
 models:
   m1:
     endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]

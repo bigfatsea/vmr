@@ -7,27 +7,25 @@ import (
 )
 
 // BaseAmount applies base(metric) to a raw Counters value — requests: the
-// count itself; tokens: spec.TokenWeights' four-component weighted sum
+// count itself; tokens: l.TokenWeights' four-component weighted sum
 // (token_weights all 1.0 — core.DefaultTokenWeight — is the zero-config
-// default, so an unconfigured account gets the plain equal-weighted sum
-// back exactly); cost: Counters.Cost as-is (already the final $ amount,
-// computed once at charge time — see quota.Counters' doc comment on why cost
-// is the one exception to "store raw, weight on read").
+// default, so an unconfigured Limit gets the plain equal-weighted sum back
+// exactly); cost: Counters.Cost as-is (already the final $ amount, computed
+// once at charge time — see quota.Counters' doc comment on why cost is the
+// one exception to "store raw, weight on read").
 //
 // Moved here from internal/router/quota.go (originally baseAmount) so both
 // the router's decision path and a read-only offline consumer (vmr report's
 // §2.5 quota-vs-consumption table) share exactly one formula — see
-// the quota design specification.
-//
-// spec must be non-nil with spec.Limits non-empty; every call site is
-// already guarded by that check upstream (configuration guarantees exactly one
-// Limit per provider — see ChargeResponse's own comment).
-func BaseAmount(spec *core.QuotaSpec, c Counters) float64 {
-	switch spec.Limits[0].Metric {
+// the quota design specification. Takes a core.Limit (not the whole
+// QuotaSpec) since P3: TokenWeights is per-Limit, not account-level — see
+// core.Limit.TokenWeights' doc comment.
+func BaseAmount(l core.Limit, c Counters) float64 {
+	switch l.Metric {
 	case core.MetricRequests:
 		return c.Requests
 	case core.MetricTokens:
-		w := spec.TokenWeights
+		w := l.TokenWeights
 		return c.Fresh*w.InFresh + c.CacheRead*w.CacheRead +
 			c.CacheWrite*w.CacheWrite + c.Out*w.Out
 	case core.MetricCost:
@@ -37,31 +35,30 @@ func BaseAmount(spec *core.QuotaSpec, c Counters) float64 {
 	}
 }
 
-// modelMultiplier resolves spec's charge-time scaling factor for model: an
-// exact match in spec.ModelMultipliers, else its "*" wildcard entry, else
-// 1.0 (no scaling — the zero-config default, and also what an account with
-// no model_multipliers configured at all gets, since spec.ModelMultipliers
-// is then a nil map). spec may be nil (no quota: configured for this
-// endpoint's provider), in which case this returns 1.0.
-func modelMultiplier(spec *core.QuotaSpec, model string) float64 {
-	if spec == nil || len(spec.ModelMultipliers) == 0 {
+// modelMultiplier resolves l's charge-time scaling factor for model: an
+// exact match in l.ModelMultipliers, else its "*" wildcard entry, else 1.0
+// (no scaling — the zero-config default, and also what a Limit with no
+// model_multipliers configured at all gets, since l.ModelMultipliers is
+// then a nil map).
+func modelMultiplier(l core.Limit, model string) float64 {
+	if len(l.ModelMultipliers) == 0 {
 		return 1.0
 	}
-	if m, ok := spec.ModelMultipliers[model]; ok {
+	if m, ok := l.ModelMultipliers[model]; ok {
 		return m
 	}
-	if m, ok := spec.ModelMultipliers["*"]; ok {
+	if m, ok := l.ModelMultipliers["*"]; ok {
 		return m
 	}
 	return 1.0
 }
 
 // ApplyModelMultiplier scales d (and its accompanying degraded-estimate
-// marker) by spec's account-level model_multipliers, resolved for model —
-// see modelMultiplier. This MUST happen at charge time, not read time — see
-// core.QuotaSpec's doc comment on ModelMultipliers for why: Counters
-// aggregates per provider, not per model, so once a charge lands there is
-// no way to later recover which slice of a read came from which upstream
+// marker) by l's own model_multipliers, resolved for model — see
+// modelMultiplier. This MUST happen at charge time, not read time — see
+// core.Limit's doc comment on ModelMultipliers for why: Counters aggregates
+// per (provider, Limit), not per model, so once a charge lands there is no
+// way to later recover which slice of a read came from which upstream
 // model.
 //
 // Every component (including Requests) is scaled by exact multiplication —
@@ -75,8 +72,8 @@ func modelMultiplier(spec *core.QuotaSpec, model string) float64 {
 // 2.9 → +3.4%, so nearby multiplier values produce wildly different bias).
 // Counters is float64 for exactly this reason (see its doc comment) — with
 // nowhere left that needs an integer, there is nothing to round.
-func ApplyModelMultiplier(spec *core.QuotaSpec, model string, d Counters, estimated float64) (Counters, float64) {
-	mult := modelMultiplier(spec, model)
+func ApplyModelMultiplier(l core.Limit, model string, d Counters, estimated float64) (Counters, float64) {
+	mult := modelMultiplier(l, model)
 	if mult == 1.0 {
 		return d, estimated
 	}

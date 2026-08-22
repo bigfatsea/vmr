@@ -11,22 +11,22 @@ import (
 )
 
 func TestBaseAmount_Requests(t *testing.T) {
-	spec := &core.QuotaSpec{Limits: []core.Limit{{Metric: core.MetricRequests}}}
-	got := BaseAmount(spec, Counters{Requests: 7, Fresh: 999})
+	l := core.Limit{Metric: core.MetricRequests}
+	got := BaseAmount(l, Counters{Requests: 7, Fresh: 999})
 	if got != 7 {
 		t.Fatalf("BaseAmount(requests) = %v, want 7", got)
 	}
 }
 
 func TestBaseAmount_Tokens(t *testing.T) {
-	spec := &core.QuotaSpec{
-		Limits: []core.Limit{{Metric: core.MetricTokens}},
+	l := core.Limit{
+		Metric: core.MetricTokens,
 		TokenWeights: core.TokenWeights{
 			InFresh: 1.0, CacheRead: 0.1, CacheWrite: 1.25, Out: 4.0,
 		},
 	}
 	c := Counters{Fresh: 100, CacheRead: 100, CacheWrite: 100, Out: 100}
-	got := BaseAmount(spec, c)
+	got := BaseAmount(l, c)
 	want := 100*1.0 + 100*0.1 + 100*1.25 + 100*4.0
 	if got != want {
 		t.Fatalf("BaseAmount(tokens) = %v, want %v", got, want)
@@ -34,35 +34,32 @@ func TestBaseAmount_Tokens(t *testing.T) {
 }
 
 func TestBaseAmount_Cost(t *testing.T) {
-	spec := &core.QuotaSpec{Limits: []core.Limit{{Metric: core.MetricCost}}}
-	got := BaseAmount(spec, Counters{Cost: 12.34, Fresh: 999})
+	l := core.Limit{Metric: core.MetricCost}
+	got := BaseAmount(l, Counters{Cost: 12.34, Fresh: 999})
 	if got != 12.34 {
 		t.Fatalf("BaseAmount(cost) = %v, want 12.34", got)
 	}
 }
 
 func TestModelMultiplier_ExactWildcardDefault(t *testing.T) {
-	spec := &core.QuotaSpec{ModelMultipliers: map[string]float64{
+	l := core.Limit{ModelMultipliers: map[string]float64{
 		"glm-5.2": 4.5,
 		"*":       2.0,
 	}}
-	if got := modelMultiplier(spec, "glm-5.2"); got != 4.5 {
+	if got := modelMultiplier(l, "glm-5.2"); got != 4.5 {
 		t.Fatalf("exact match = %v, want 4.5", got)
 	}
-	if got := modelMultiplier(spec, "other-model"); got != 2.0 {
+	if got := modelMultiplier(l, "other-model"); got != 2.0 {
 		t.Fatalf("wildcard fallback = %v, want 2.0", got)
 	}
-	if got := modelMultiplier(&core.QuotaSpec{}, "other-model"); got != 1.0 {
+	if got := modelMultiplier(core.Limit{}, "other-model"); got != 1.0 {
 		t.Fatalf("no model_multipliers configured = %v, want 1.0", got)
-	}
-	if got := modelMultiplier(nil, "other-model"); got != 1.0 {
-		t.Fatalf("nil spec = %v, want 1.0", got)
 	}
 }
 
 func TestApplyModelMultiplier_ExactMultiplyNoRounding(t *testing.T) {
-	spec := &core.QuotaSpec{ModelMultipliers: map[string]float64{"m": 1.5}}
-	d, est := ApplyModelMultiplier(spec, "m", Counters{Fresh: 3, Out: 1, Requests: 1}, 5)
+	l := core.Limit{ModelMultipliers: map[string]float64{"m": 1.5}}
+	d, est := ApplyModelMultiplier(l, "m", Counters{Fresh: 3, Out: 1, Requests: 1}, 5)
 	// Exact multiplication, no rounding in either direction — see
 	// quota.Counters' doc comment for why: 3*1.5=4.5, 1*1.5=1.5, 5*1.5=7.5.
 	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || est != 7.5 {
@@ -71,9 +68,9 @@ func TestApplyModelMultiplier_ExactMultiplyNoRounding(t *testing.T) {
 }
 
 func TestApplyModelMultiplier_NoScalingIsIdentity(t *testing.T) {
-	spec := &core.QuotaSpec{}
+	l := core.Limit{}
 	in := Counters{Fresh: 3, Out: 1, Requests: 1}
-	d, est := ApplyModelMultiplier(spec, "m", in, 5)
+	d, est := ApplyModelMultiplier(l, "m", in, 5)
 	if d != in || est != 5 {
 		t.Fatalf("ApplyModelMultiplier with no multiplier configured = %+v est=%v, want identity", d, est)
 	}

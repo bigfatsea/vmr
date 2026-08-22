@@ -4,9 +4,9 @@
 // what a provider account has consumed against its configured Limit(s) and
 // computing the headroom score the router reorders candidates by. See
 // docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
-// "现状与后续计划" section for what's actually shipped (currently: one
-// Limit per provider, tumbling windows only; multi-window/rolling windows
-// are P3, not yet delivered).
+// "现状与后续计划" section for what's actually shipped (currently: one or
+// more tumbling Limits per provider, P3's bucket-vs-gate multi-window
+// merge; rolling windows remain undelivered).
 //
 // Depends only on core + the standard library — no I/O beyond store.go's
 // file persistence, and the period/score math here is pure functions, fully
@@ -30,6 +30,10 @@ type stepper func(since time.Time, k int) time.Time
 
 func stepFor(unit string, everyN int) stepper {
 	switch unit {
+	case "min":
+		return func(since time.Time, k int) time.Time {
+			return since.Add(time.Duration(everyN*k) * time.Minute)
+		}
 	case "h":
 		return func(since time.Time, k int) time.Time {
 			return since.Add(time.Duration(everyN*k) * time.Hour)
@@ -59,6 +63,8 @@ func stepFor(unit string, everyN int) stepper {
 // with a short walk to the real boundary.
 func nominalUnitHours(unit string, everyN int) float64 {
 	switch unit {
+	case "min":
+		return float64(everyN) / 60
 	case "h":
 		return float64(everyN)
 	case "d":
@@ -159,24 +165,13 @@ func daysInMonth(y int, m time.Month) int {
 }
 
 // DefaultSince resolves the config-time default anchor for a Limit whose
-// `since` field was left empty (see config.LimitConfig.Since's doc
-// comment): "mo" -> the 1st of the current month, "w" -> this week's Monday,
-// "h"/"d" -> today at midnight — all in fmtutil.DisplayZone. Evaluated once
-// at config-load time, not on the request hot path.
-func DefaultSince(unit string, now time.Time) time.Time {
-	now = now.In(fmtutil.DisplayZone)
-	y, m, d := now.Date()
-	loc := now.Location()
-	switch unit {
-	case "mo":
-		return time.Date(y, m, 1, 0, 0, 0, 0, loc)
-	case "w":
-		// ISO week: Monday is day 1. time.Weekday numbers Sunday as 0, so
-		// (weekday+6)%7 gives "days since Monday" for every day including
-		// Sunday itself (weekday=0 -> offset 6).
-		offset := (int(now.Weekday()) + 6) % 7
-		return time.Date(y, m, d, 0, 0, 0, 0, loc).AddDate(0, 0, -offset)
-	default: // "h", "d"
-		return time.Date(y, m, d, 0, 0, 0, 0, loc)
-	}
+// `since` field was left empty (see config.LimitConfig.Since's doc comment):
+// the anchor is simply now, in fmtutil.DisplayZone — the moment config was
+// loaded/reloaded, with no per-unit calendar alignment. Omitting `since` is
+// itself the declaration "I don't care which exact minute/hour/day this
+// window's boundary falls on" (see the design doc's DefaultSince decision
+// note); a user who does care writes an explicit `since`. Evaluated once at
+// config-load time, not on the request hot path.
+func DefaultSince(now time.Time) time.Time {
+	return now.In(fmtutil.DisplayZone)
 }

@@ -283,19 +283,22 @@ const (
 // separate YAML-shape/runtime-shape types (the config.EndpointGroup ->
 // core.Endpoint precedent).
 //
-// P1 supports exactly one Limit per provider, tumbling only (no Rolling
-// field here at all — config.LimitConfig.Rolling exists solely to produce a
-// clear "not yet supported" load error, never reaches this type).
+// P3: a provider's core.QuotaSpec carries one or more of these (tumbling
+// only — no Rolling field here at all, config.LimitConfig.Rolling exists
+// solely to produce a clear "not yet supported" load error, never reaches
+// this type). TokenWeights/ModelMultipliers live per-Limit, not on
+// QuotaSpec — see this field's own doc comment for why that's a P3 reversal
+// of the original P2 placement.
 type Limit struct {
 	Metric QuotaMetric
 	EveryN int
-	// EveryUnit is one of "h"/"d"/"w"/"mo" — see period.go's PeriodStart/
-	// PeriodEnd for the calendar arithmetic each implies.
+	// EveryUnit is one of "min"/"h"/"d"/"w"/"mo" — see period.go's
+	// PeriodStart/PeriodEnd for the calendar arithmetic each implies.
 	EveryUnit string
 	// EveryText is the original "every" text (e.g. "1mo", "2w") — used
-	// as-is for quota.Registry's limitKey and for display (vmr check,
-	// /admin/status), so a human-readable value never needs reconstructing
-	// from EveryN+EveryUnit.
+	// as-is for quota.LimitKey and for display (vmr check, /admin/status),
+	// so a human-readable value never needs reconstructing from
+	// EveryN+EveryUnit.
 	EveryText string
 	// Since is the resolved period anchor — either the config's explicit
 	// value or the unit-specific default (see config.LimitConfig.Since's
@@ -303,6 +306,46 @@ type Limit struct {
 	// PeriodStart/PeriodEnd never reparses a string.
 	Since  time.Time
 	Amount float64
+	// Models is this Limit's Scope — it decides BOTH which models this
+	// Limit applies to AND whether they share one pool or each get an
+	// independent one (see quota.LimitKey's doc comment for the bucket-key
+	// consequence). Three shapes, one field:
+	//   - nil/empty: "shared" — every model on the provider draws down ONE
+	//     combined pool. The zero-config default, and the only shape P1/P2
+	//     ever had.
+	//   - exactly []string{"*"}: "per-model, unrestricted" — the rule
+	//     applies to every model on the provider, but each one gets its OWN
+	//     independent pool. "*" is a reserved token, never a literal model
+	//     name; config validation rejects it combined with any other entry
+	//     (redundant — "*" already covers everything a named entry would).
+	//   - any other non-empty slice: "per-model, restricted" — only the
+	//     named models draw down this Limit, each with its own independent
+	//     pool; every other model on the provider is unaffected by it,
+	//     exactly as if this Limit didn't exist for them.
+	// The distinguishing rule is simply "was Models set at all" — presence
+	// (in either per-model shape) always means independent-per-model
+	// accounting; only its absence means a shared pool. This deliberately
+	// has no separate mode field: one field answers both "which models"
+	// and "shared or independent", and the two questions never disagree.
+	Models []string
+	// TokenWeights is this Limit's own per-component scaling factor,
+	// applied when Metric==MetricTokens (see TokenWeights' own doc comment
+	// for the formula and zero-value trap). Moved here from QuotaSpec in
+	// P3: once a provider can carry more than one window, "how much a
+	// component counts" turns out to differ by window in observed plans
+	// (e.g. a short RPM gate that counts every token type equally vs. a
+	// monthly Credits bucket that discounts cache reads) — see
+	// docs/VirtualModelRouter_Design_v4_Quota.md's §12.1 revision note on
+	// "折算规则的层级" for the full reversal record: the original P2
+	// reasoning (one ratio shared account-wide) held only as long as every
+	// observed plan's windows shared one ratio, which is no longer assumed
+	// true from P3 on.
+	TokenWeights TokenWeights
+	// ModelMultipliers is this Limit's own charge-time model scaling table
+	// — same P3 relocation and reasoning as TokenWeights above (see its doc
+	// comment); resolves via ApplyModelMultiplier the same way it always
+	// has, just read from the Limit instead of the account.
+	ModelMultipliers map[string]float64
 }
 
 // TokenWeights is the account-level per-component scaling factor applied to
@@ -409,28 +452,14 @@ type PricingSpec struct {
 	Currency string
 }
 
-// QuotaSpec is a provider's full quota configuration: its Limit(s) (P1: just
-// one; already shaped as a slice so P3's multi-window support is additive,
-// not a type change) plus two account-level charge-time modifiers :
-//
-// - TokenWeights scales a tokens-metric Limit's four components when read
-// (applied in baseAmount, at read time — see
-// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
-// for the "store raw components, apply policy on read" principle, which
-// holds for this field).
-// - ModelMultipliers scales EVERY component (including Requests) of a
-// charge by the upstream model actually hit, keyed by that model name
-// with an optional "*" wildcard fallback; nil/absent-key means 1.0 (no
-// scaling). Unlike TokenWeights, this one is applied at CHARGE time, not
-// read time — see the same "9.2 运行态" section's model_multipliers
-// discussion for why: quota.Counters aggregates per-provider, not
-// per-model, so once a charge lands there is no way to recover which
-// slice of a later read came from which upstream model to multiply
-// retroactively.
+// QuotaSpec is a provider's full quota configuration: one or more Limits
+// (P3: multi-window). TokenWeights/ModelMultipliers are no longer carried
+// here — each now lives on the individual Limit it modifies (see Limit's
+// own doc comments) — because P3 observed real plans whose windows don't
+// all share one ratio, the premise P1/P2's account-level placement depended
+// on.
 type QuotaSpec struct {
-	Limits           []Limit
-	TokenWeights     TokenWeights
-	ModelMultipliers map[string]float64
+	Limits []Limit
 }
 
 // SortedKeys returns m's keys in sorted order. A recurring need across

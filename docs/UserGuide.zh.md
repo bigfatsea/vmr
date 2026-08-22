@@ -272,16 +272,26 @@ providers:
     api_key: ${PLAN_A_KEY}
     quota:
       limits:
+        # 一个 provider 可以配多条窗口（P3）——最紧的约束说了算：短窗口扮演
+        # 限速用的"闸"（只能压制分数，绝不会把分数往上抬），账号里周期最长
+        # 的那条窗口是"桶"（用不完真的算浪费，所以桶里有富余时会主动抬高
+        # 分数——"不用就作废"）。只配一条窗口仍是最常见的写法，行为和以前
+        # 完全一样。
         - metric: requests       # 或 tokens（输入+输出，等权重）
-          every: 1mo             # N{h,d,w,mo} —— 也可以是 5h、2w、3d
-          since: 2026-08-01      # 周期锚点；后续周期自动推算
-                                  # （缺省值：1mo -> 当月 1 日，1w -> 周一，其余 -> 当日）
+          every: 1min            # N{min,h,d,w,mo} —— 也可以是 5h、2w、3d
+          amount: 60              # 一条按分钟限速的闸
+        - metric: requests
+          every: 1mo             # 这里周期最长——它是桶
+          since: 2026-08-01      # 周期锚点；后续周期自动推算。完全不写就直接取
+                                  # 配置加载/热重载那一刻的当前时间，不做任何日历
+                                  # 对齐——可接受写法：YYYY-MM-DD、RFC3339，或者
+                                  # 纯时间 hh:mm[:ss]（仅限 every 是 min/h 的 Limit）
           amount: 90000          # 该窗口的上限，按 vmr 自己观测到的口径填写——见下文
 ```
 
 没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
 
-**目前交付的范围**（完整现状见 `docs/VirtualModelRouter_Design_v4_Quota.md`「现状与后续计划」一节）：每个 provider 恰好一条 `limits:`，`metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。单账号多条窗口、`rolling: true`、`models:` 子额度——写了仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次（P3）提供。没有一项会被静默忽略；如果你写了这些字段而配置居然加载成功了，那是 bug，不是特性。
+**目前交付的范围**（完整现状见 `docs/VirtualModelRouter_Design_v4_Quota.md`「现状与后续计划」一节）：每个 provider 可以配任意条 `limits:`，每条各自的 `metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。`rolling: true` 仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次提供。一条 Limit 还可以用 `models: [名字, ...]` 把它限定到具体的上游模型——省略等于"这个 provider 下所有模型都算"，例子见下文。
 
 **`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/admin/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
 
@@ -291,28 +301,65 @@ providers:
 
 `vmr replay -provider NAME ...` 会按成功（状态码 `< 400`）响应计入同一份额度状态——它是拿真实流量打真实上游账号，所以计费方式和实时流量一致。`-dry-run` 从不计费（本来就没有发出请求）。
 
-**如何查看**：`vmr check` 会打印每个 provider 配置的额度（以及周期边界所依据的生效时区——见下面的时区提示）；`/admin/status` 的 `quota` 段和 `vmr status` 会展示实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`、原始的 fresh/cache_read/cache_write/output 四分量明细，以及配置了的话该账号生效中的 `token_weights`/`model_multipliers`）；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
+**如何查看**：`vmr check` 会打印每个 provider 配置的每一条额度（以及周期边界所依据的生效时区——见下面的时区提示）；`/admin/status` 的 `quota` 段和 `vmr status` 会按 Limit 逐条展示——它的 `role`（`bucket` 还是 `gate`，见下文）、实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`）、原始的 fresh/cache_read/cache_write/output 四分量明细，以及配置了的话这条 Limit 自己的 `token_weights`/`model_multipliers`/`models` 子范围；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
+
+**桶 vs 闸：一个 provider 配多条 Limit 时怎么归并。** 周期**最长**的那条 Limit 是账号的"桶"——它的余量真的是"不用就浪费"，所以桶里有富余会主动抬高分数。其余更短的 Limit 都是"闸"——厂商用来削峰的限速器，用满它没有任何经济价值，所以闸只能把分数往它自己的饱和点压，绝不会把分数抬到比桶自己给出的分数更高。一个 provider 的最终分数是它所有 Limit 分数里最紧的（取 min）。只配一条 Limit 时（最常见的写法），它自己就是桶，行为和上文 P1/P2 描述的完全一样。
 
 周期边界（以及所有面向人的时间戳）都按 vmr 进程所在服务器的本地时区渲染（`vmr check` 的 `timezone:` 一行会打印出实际生效的值）——容器里如果没设 `TZ`，会悄悄按 UTC 处理，跟你以为的时区可能差好几个小时，且没有其它任何提示，值得部署后检查一下这一行。
 
-#### 让数字更精确：`token_weights` 与 `model_multipliers`（P2.1）
+#### 让数字更精确：`token_weights` 与 `model_multipliers`（P2.1，P3 起改为按 Limit 配置）
 
-一个普通的 `metric: tokens` 账号对新鲜输入、缓存读、缓存写、输出四个分量**等权重**计数——对一个纯粹按"总 Token 数"计费的套餐是准确的，但对 Credits 制套餐会**系统性高估**消耗：这类套餐的缓存命中价格往往只是新鲜输入的一个零头（市场实测比例从 5 倍到 120 倍不等）。一个实际只花掉预算 15% 的账号，在等权计数下可能显示为"已耗尽"，被降权，白白浪费掉套餐里没花完的大头。
+一个普通的 `metric: tokens` Limit 对新鲜输入、缓存读、缓存写、输出四个分量**等权重**计数——对一个纯粹按"总 Token 数"计费的套餐是准确的，但对 Credits 制套餐会**系统性高估**消耗：这类套餐的缓存命中价格往往只是新鲜输入的一个零头（市场实测比例从 5 倍到 120 倍不等）。一个实际只花掉预算 15% 的账号，在等权计数下可能显示为"已耗尽"，被降权，白白浪费掉套餐里没花完的大头。
 
 ```yaml
 providers:
   - name: plan-d
     quota:
-      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
-        - {metric: tokens, every: 1mo, amount: 1249000000}
+        - metric: tokens
+          every: 1mo
+          amount: 1249000000
+          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+          model_multipliers: {"*": 1.0, heavy-model: 9}
 ```
 
-- **`token_weights`** 在计算 headroom 以及 `/admin/status` 的 `used`/`pct` 时，对 `metric: tokens` 账号的四个分量重新加权——账号级（对该 provider 下所有 `limits:` 条目生效），未写的分量缺省为 `1.0`，且只对确实配了 `metric: tokens` Limit 的账号生效（配在纯 `requests` 账号上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例是**按模型分化**的，改用带 `pricing:` 块的 `metric: cost`（见下文）——按模型分化的价格没法用一组共享比例表达。
-- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按 provider 聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只影响 `requests`/`tokens` 档；纯 `cost` 账号的价格分化完全由 `pricing:` 块承担，两者同时配置是加载期错误。
+- **`token_weights`** 在计算 headroom 以及 `/admin/status` 的 `used`/`pct` 时，对 `metric: tokens` Limit 的四个分量重新加权——**按 Limit 配置**（一个 provider 配了几条窗口，就各自写各自的一份；因为实测发现同一账号的不同窗口未必共用同一套折算比例），未写的分量缺省为 `1.0`，且只对自身 `metric` 就是 `tokens` 的 Limit 生效（配在 `requests`/`cost` 的 Limit 上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例是**按模型分化**的，改用带 `pricing:` 块的 `metric: cost`（见下文）——按模型分化的价格没法用一组共享比例表达。
+- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。P3 起同样**按 Limit 配置**，理由同上。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按（provider、Limit）聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只影响 `requests`/`tokens` 档；`cost` 档的价格分化完全由 `pricing:` 块承担，同一条 Limit 上两者同时配置是加载期错误。
 
 两个字段都不配置时行为不变——`token_weights` 缺省等同于 P1 一直在用的纯等权求和，`model_multipliers` 缺省让每笔计费保持 1 倍。
+
+**`models:` —— 一个字段，三种写法。** `models:` 同时决定"这条 Limit 对哪些模型生效"和"这些模型是共享一个池还是各自独立"：
+
+| 写法 | 适用哪些模型 | 计数池 |
+|---|---|---|
+| 不写 | provider 下所有模型 | 一个共享池 |
+| `["*"]` | provider 下所有模型 | 每个模型**各自独立**一个池 |
+| `[a, b, ...]` | 只有列出的模型 | 列出的每个模型**各自独立**一个池 |
+
+判定规则很简单：**只要 `models:` 被设置了（不管写的是 `"*"` 还是具体列表），这条 Limit 就是按模型独立计数；只有完全不写 `models:`，才是共享一个池。** 不需要另外一个 `mode:` 字段来回答"共享还是独立"这个问题。
+
+```yaml
+providers:
+  - name: plan-with-submodel-cap
+    quota:
+      limits:
+        - {metric: requests, every: 1mo, amount: 50000}                        # 账号级，一个共享池
+        - {metric: requests, every: 1d, amount: 200, models: [premium-model]}  # 只有 premium-model，它自己独立一个池
+
+  - name: plan-per-model-rpm
+    quota:
+      limits:
+        - {metric: requests, every: 1min, amount: 60, models: ["*"]}  # 每个模型各自 60 次/分钟，互不影响
+        - {metric: requests, every: 1mo,  amount: 90000}              # 账号级，一个共享池
+```
+
+`"*"` 是一个保留 token，不是通配符模式——`models: ["gpt-*"]` 匹配不到任何东西（没有前缀匹配这回事），
+把 `"*"` 和一个具名条目写在一起（`models: ["*", "premium-model"]`）是加载期错误，因为通配符已经覆盖了
+那个具名条目本来要加的范围。一个端点只会跟 Scope 覆盖了它自己上游模型的那些 Limit 打交道（不限
+Scope、通配、或者具名命中都算）——一条 Limit 如果没把某个端点的模型囊括进去，既不会因为它计费，也
+不会用它约束它的分数，就像这条 Limit 对这个端点根本不存在一样。`/admin/status`/`vmr status` 对一条
+按模型独立计数的 Limit，只展示**真的产生过计费**的那些模型各一行——`"*"` 这条 Limit 的行数会随着
+新模型开始产生流量而增长，不是配置阶段就能定死的。
 
 #### 定价与 cost 计量档位
 

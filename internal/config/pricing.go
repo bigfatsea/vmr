@@ -281,7 +281,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 		if p.Pricing != nil {
 			needsTable = true
 		}
-		if p.Quota != nil && len(p.Quota.Limits) == 1 && p.Quota.Limits[0].Resolved.Metric == core.MetricCost {
+		if p.Quota != nil && hasCostLimit(p.Quota.Limits) {
 			costProviders[p.Name] = true
 			needsTable = true
 		}

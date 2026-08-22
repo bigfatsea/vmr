@@ -90,16 +90,16 @@ func TestBuildProvidersQuotaRef(t *testing.T) {
 		{Endpoint: "openai:withquota:m", TokensIn: 10},
 		{Endpoint: "openai:noquota:m", TokensIn: 5},
 	}}
-	quotas := map[string]ProviderQuotaRef{
-		"withquota": {Metric: "tokens", Every: "1mo", Amount: 20000},
+	quotas := map[string][]ProviderQuotaRef{
+		"withquota": {{Metric: "tokens", Every: "1mo", Amount: 20000}},
 	}
 	rows := buildProviders(rep, quotas)
 	byName := map[string]ProviderRow{}
 	for _, r := range rows {
 		byName[r.Provider] = r
 	}
-	if byName["withquota"].Quota == nil || byName["withquota"].Quota.Amount != 20000 {
-		t.Errorf("withquota.Quota = %+v, want amount 20000", byName["withquota"].Quota)
+	if len(byName["withquota"].Quota) != 1 || byName["withquota"].Quota[0].Amount != 20000 {
+		t.Errorf("withquota.Quota = %+v, want one entry, amount 20000", byName["withquota"].Quota)
 	}
 	if byName["noquota"].Quota != nil {
 		t.Errorf("noquota.Quota = %+v, want nil", byName["noquota"].Quota)

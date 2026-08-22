@@ -14,8 +14,9 @@ import (
 
 // buildProviders rolls rep.EndpointsAll up by provider name. quotas (nil
 // when config.yaml wasn't readable, or an account declares no quota) is
-// looked up by provider name and copied as-is into ProviderRow.Quota.
-func buildProviders(rep *Report2, quotas map[string]ProviderQuotaRef) []ProviderRow {
+// looked up by provider name — one entry per Limit (P3) — and copied as-is
+// into ProviderRow.Quota.
+func buildProviders(rep *Report2, quotas map[string][]ProviderQuotaRef) []ProviderRow {
 	byProvider := map[string]*ProviderRow{}
 	models := map[string]map[string]bool{}
 	durSum := map[string]int64{}
@@ -80,9 +81,8 @@ func buildProviders(rep *Report2, quotas map[string]ProviderQuotaRef) []Provider
 		sort.Strings(ms)
 		pr.Models = ms
 
-		if q, ok := quotas[provider]; ok {
-			qc := q
-			pr.Quota = &qc
+		if refs, ok := quotas[provider]; ok {
+			pr.Quota = refs
 		}
 		out = append(out, *pr)
 	}

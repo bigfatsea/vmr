@@ -173,9 +173,13 @@ providers:
     # 账单周期已经过去的比例而言，余量最充裕"的那个账号——不是绝对剩余额度最多
     # 的那个（一个即将重置的套餐"赢面"要小于一个额度还没用完、但即将过期的套餐）。
     #
-    # 依然是每个 provider 只能有*一条* limits: 记录（多窗口/滚动窗口/models: 子
-    # 额度目前仍是加载期的"计划在后续批次支持"报错，不是静默无操作——那是 P3
-    # 的事）。metric: cost 和 pricing: 块现在已经支持了（P2.2）——参见下面的
+    # 一个 provider 现在可以配任意条 limits:（P3）——最紧的约束说了算：账号里
+    # *周期最长*的那条窗口是它的"桶"（余量真的是不用就浪费，所以桶里有富余会
+    # 主动抬高分数——"不用就作废"）；其余更短的窗口都是"闸"（厂商用来削峰的
+    # 限速器，用满它没有经济价值，所以闸只能把分数往它自己的饱和点压，绝不会
+    # 抬到比桶自己给出的分数更高）。只配一条依然是最常见的写法，行为和以前
+    # 完全一样。rolling: true 仍是加载期的"计划在后续批次支持"报错，不是静默
+    # 无操作。metric: cost 和 pricing: 块已经支持（P2.2）——参见下面的
     # plan-e/plan-f 示例以及 providers[].pricing 自己的注释块。
     #
     # amount 必须按 VMR 自己实际观测到的口径来校准，不能照抄套餐的宣传数字：
@@ -186,28 +190,45 @@ providers:
     # quota:
     #   limits:
     #     - metric: requests       # 或者：tokens，或者：cost（需要一个 pricing: 块，见下文）
-    #       every: 1mo             # N{h,d,w,mo}——也可以是 5h、2w、3d
-    #       since: 2026-08-01      # 周期锚点；后续每个周期都会自动推算
-    #                              #（缺省规则：1mo -> 每月 1 号，1w -> 周一，
-    #                              # 其他情况 -> 今天）
+    #       every: 1min            # N{min,h,d,w,mo}——也可以是 5h、2w、3d
+    #       amount: 60             # 一条按分钟限速的闸（限速，不是账单周期）
+    #
+    #     - metric: requests
+    #       every: 1mo             # 这里周期最长——它是桶
+    #       since: 2026-08-01      # 周期锚点；后续每个周期都会自动推算。完全不写
+    #                              # 就直接取配置加载/热重载那一刻的当前时间，
+    #                              # 不做任何日历对齐——可接受写法：YYYY-MM-DD、
+    #                              # RFC3339，或者纯时间 hh:mm[:ss]（仅限
+    #                              # every 是 min/h 的 Limit）
     #       amount: 90000          # 这个窗口的上限，单位是 vmr 自己观测到的口径
     #
-    #   # token_weights（P2.1）：对 metric: tokens 档 Limit 的 base(tokens) 求和
-    #   # 做逐分量的缩放——账号级，对这个 provider 下所有 Limit 都生效。整体不写，
-    #   # 或者某个分量不写，都缺省为 1.0（也就是最朴素的等权 token 总数）——只在
-    #   # 账号确实配了 metric: tokens 档时才有意义（也只有这种情况下配置校验才会
-    #   # 接受它）。当账号自己 Credits 制的折算比例（比如缓存命中读只算新鲜输入
-    #   # 的一部分价格）在所有模型间是统一的时候用它；如果这个比例是*按模型*分化
-    #   # 的，改用带 pricing: 块的 metric: cost（见下面 plan-e/plan-f）。
-    #   # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #       # token_weights（P2.1）：对 metric: tokens 档 Limit 的 base(tokens) 求和
+    #       # 做逐分量的缩放——P3 起按 Limit 配置（实测发现同一账号的不同窗口未必
+    #       # 共用同一套折算比例）。整体不写，或者某个分量不写，都缺省为 1.0（也
+    #       # 就是最朴素的等权 token 总数）——只在这条 Limit 自己的 metric 就是
+    #       # tokens 时才有意义（也只有这种情况下配置校验才会接受它）。当账号自己
+    #       # Credits 制的折算比例（比如缓存命中读只算新鲜输入的一部分价格）在所
+    #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，改用带
+    #       # pricing: 块的 metric: cost（见下面 plan-e/plan-f）。
+    #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
     #
-    #   # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
-    #   # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。"*"
-    #   # 是通配兜底，用于任何没有具名列出的模型；一个既没有具名项也没有 "*"
-    #   # 的账号不缩放（1.0）。只影响 metric: requests/tokens——metric: cost
-    #   # 账号的价格分化完全来自 pricing: 块（两者同时配置在纯 cost 账号上是
-    #   # 加载期错误）。
-    #   # model_multipliers: {"*": 1.0, heavy-model: 9}
+    #       # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
+    #       # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。P3
+    #       # 起同样按 Limit 配置。"*" 是通配兜底，用于任何没有具名列出的模型；
+    #       # 一条既没有具名项也没有 "*" 的 Limit 不缩放（1.0）。只影响
+    #       # metric: requests/tokens——cost 档的价格分化完全来自 pricing: 块
+    #       # （同一条 Limit 上两者同时配置是加载期错误）。
+    #       # model_multipliers: {"*": 1.0, heavy-model: 9}
+    #
+    #       # models（Scope）：同时决定"这条 Limit 对哪些模型生效"和"这些模型是
+    #       # 共享一个池还是各自独立"。不写（上面这个形态）＝这个 provider 下所有
+    #       # 模型，共享一个池。只要设置了这个字段——不管是 "*" 还是具体列表——
+    #       # 就切换成按模型独立计数：
+    #       #   models: ["*"]                 # 所有模型，但每个模型各自独立一个池（比如按模型限速）
+    #       #   models: [premium-model]        # 只有这一个模型，它自己独立一个池；其它模型不受这条 Limit 影响
+    #       # "*" 是保留 token，不是通配符——"gpt-*" 匹配不到任何东西，把 "*"
+    #       # 和一个具名条目写在一起是加载期错误（通配符已经覆盖了它）。
+    #       # /admin/status 只展示真的产生过计费的模型各一行，不是每条 Limit 一行。
 
   # 一个 Credits 制账号，如果它按模型分化的价格不是简单的统一比例（那种情况上面
   # 的 token_weights 就够了）——metric: cost（P2.2）按真实金额给它计费，价格
@@ -231,6 +252,17 @@ providers:
   #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
   #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
   #       - {model: "*", discount: 0.6}  # 兜底：这个账号上其余所有模型统一按列表价 6 折
+
+  # 一个完整的 Scope 组合示例：账号总限（共享池）叠加某个具体模型的独立子额度——
+  # 这是一种合法且常见的组合，不是冲突（不同窗口的共享 Limit 和按模型 Limit 从来
+  # 不会撞到同一个 bucket key；一般规则见上面 models: 那段注释）。
+  # - name: plan-with-submodel-cap
+  #   base_url: {openai: https://api.example.com/v1}
+  #   api_key: ${EXAMPLE_API_KEY}
+  #   quota:
+  #     limits:
+  #       - {metric: requests, every: 1mo, amount: 50000}                       # 账号下所有模型，共享一个池
+  #       - {metric: requests, every: 1d, amount: 200, models: [premium-model]} # 只有 premium-model，它自己独立一个池
 
   - name: openrouter
     # OpenRouter 在同一个 base 上支持全部三种接入面——包括一个（截至撰写本文时

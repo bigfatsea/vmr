@@ -180,9 +180,9 @@ func TestChargeCost_DoesNotConsultModelMultipliers(t *testing.T) {
 // --- baseAmount: metric: cost returns Counters.Cost directly ---
 
 func TestBaseAmount_MetricCost_ReturnsStoredCost(t *testing.T) {
-	spec := &core.QuotaSpec{Limits: []core.Limit{costLimit(1000)}}
+	l := costLimit(1000)
 	c := quota.Counters{Cost: 42.5, Fresh: 999999} // Fresh present but irrelevant to a cost Limit
-	got := quota.BaseAmount(spec, c)
+	got := quota.BaseAmount(l, c)
 	if got != 42.5 {
 		t.Fatalf("baseAmount = %v, want 42.5 (Counters.Cost directly, not re-derived from Fresh)", got)
 	}

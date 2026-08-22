@@ -55,10 +55,11 @@ func TestBuildProviderQuotas_LivePopulatedWhenPeriodMatches(t *testing.T) {
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, now)
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.Live == nil {
 		t.Fatal("Live should be populated when the on-disk period matches now")
 	}
@@ -85,10 +86,11 @@ func TestBuildProviderQuotas_StalePeriod_LiveStaysNil(t *testing.T) {
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, now)
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.Live != nil {
 		t.Errorf("Live = %+v, want nil (stale period must be suppressed, not shown as current)", ref.Live)
 	}
@@ -141,10 +143,11 @@ func TestBuildProviderQuotas_ConfigChanged_FlagsDistinctlyFromStalePeriod(t *tes
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, now)
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.Live != nil {
 		t.Errorf("Live = %+v, want nil (current limitKey has no bucket)", ref.Live)
 	}
@@ -164,10 +167,11 @@ func TestBuildProviderQuotas_NoDataAtAll_LiveConfigChangedStaysFalse(t *testing.
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, time.Now())
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.LiveConfigChanged {
 		t.Error("LiveConfigChanged must be false when there's no vmr-quota.json at all (no other key to infer a config change from)")
 	}
@@ -183,10 +187,11 @@ func TestBuildProviderQuotas_MissingQuotaJSON_AllLiveNilNoError(t *testing.T) {
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, time.Now())
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.Live != nil {
 		t.Errorf("Live = %+v, want nil when vmr-quota.json doesn't exist", ref.Live)
 	}
@@ -208,10 +213,11 @@ func TestBuildProviderQuotas_CorruptQuotaJSON_WarnsButDoesNotPanic(t *testing.T)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, time.Now())
-	ref, ok := quotas["acct1"]
+	refs, ok := quotas["acct1"]
 	if !ok {
 		t.Fatal("acct1 missing from quotas map")
 	}
+	ref := refs[0]
 	if ref.Live != nil {
 		t.Errorf("Live = %+v, want nil on a corrupt vmr-quota.json", ref.Live)
 	}
@@ -330,7 +336,7 @@ func tokensQuotaYAML(logDir string) string {
 // scales the sniffed and the degraded halves separately, so a float factor
 // has two independent places to lose precision instead of one.
 func tokensMultiplierQuotaYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\n      model_multipliers: {real-model: 2.5}\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000, model_multipliers: {real-model: 2.5}}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
 }
 
 // costParityYAML is the metric: cost sibling of quotaYAML/tokensQuotaYAML,
@@ -387,10 +393,11 @@ func TestBuildProviderQuotas_EstimatedPctWiredFromBucket(t *testing.T) {
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
 	quotas, _ := buildProviderQuotas(cfg, cfgErr, configPath, &tw, now)
-	ref, ok := quotas["acct1"]
-	if !ok || ref.Live == nil {
+	refs, ok := quotas["acct1"]
+	if !ok || len(refs) == 0 || refs[0].Live == nil {
 		t.Fatal("acct1's Live should be populated")
 	}
+	ref := refs[0]
 	if got, want := ref.Live.EstimatedPct, 10.0; got != want {
 		t.Errorf("Live.EstimatedPct = %v, want %v", got, want)
 	}

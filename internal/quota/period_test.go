@@ -191,28 +191,18 @@ func TestPeriodStartEnd_Invariant_Sweep(t *testing.T) {
 func TestDefaultSince(t *testing.T) {
 	loc := time.UTC
 	withDisplayZone(t, loc)
-	now := time.Date(2026, 8, 7, 15, 30, 0, 0, loc) // a Friday
-	if got, want := DefaultSince("mo", now), time.Date(2026, 8, 1, 0, 0, 0, 0, loc); !got.Equal(want) {
-		t.Errorf("mo default = %v, want %v", got, want)
-	}
-	if got, want := DefaultSince("w", now), time.Date(2026, 8, 3, 0, 0, 0, 0, loc); !got.Equal(want) { // Monday of that week
-		t.Errorf("w default = %v, want %v", got, want)
-	}
-	if got, want := DefaultSince("d", now), time.Date(2026, 8, 7, 0, 0, 0, 0, loc); !got.Equal(want) {
-		t.Errorf("d default = %v, want %v", got, want)
-	}
-	if got, want := DefaultSince("h", now), time.Date(2026, 8, 7, 0, 0, 0, 0, loc); !got.Equal(want) {
-		t.Errorf("h default = %v, want %v", got, want)
+	now := time.Date(2026, 8, 7, 15, 30, 12, 0, loc) // a Friday, mid-second
+	if got := DefaultSince(now); !got.Equal(now) {
+		t.Errorf("DefaultSince = %v, want now unchanged (%v)", got, now)
 	}
 }
 
-func TestDefaultSince_SundayIsEndOfISOWeek(t *testing.T) {
-	loc := time.UTC
-	withDisplayZone(t, loc)
-	sunday := time.Date(2026, 8, 9, 12, 0, 0, 0, loc)
-	got := DefaultSince("w", sunday)
-	want := time.Date(2026, 8, 3, 0, 0, 0, 0, loc) // preceding Monday
-	if !got.Equal(want) {
-		t.Fatalf("Sunday's week-start = %v, want %v", got, want)
+func TestDefaultSince_ConvertsToDisplayZone(t *testing.T) {
+	withDisplayZone(t, time.UTC)
+	other := time.FixedZone("UTC+8", 8*3600)
+	now := time.Date(2026, 8, 7, 23, 30, 0, 0, other)
+	got := DefaultSince(now)
+	if !got.Equal(now) || got.Location() != time.UTC {
+		t.Fatalf("DefaultSince(%v) = %v, want same instant in DisplayZone (UTC)", now, got)
 	}
 }

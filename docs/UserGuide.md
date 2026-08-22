@@ -273,17 +273,29 @@ providers:
     api_key: ${PLAN_A_KEY}
     quota:
       limits:
+        # a provider can carry more than one window (P3) — the tightest
+        # constraint decides: a short window acts as a rate-limiting "gate"
+        # (it can only suppress the score, never boost it), the longest
+        # window on the account is its "bucket" (an underused bucket DOES
+        # boost the score — "use it or lose it"). One entry is still the
+        # common case and behaves exactly like before.
         - metric: requests       # or: tokens (input + output, equal-weighted)
-          every: 1mo             # N{h,d,w,mo} — also valid: 5h, 2w, 3d
+          every: 1min            # N{min,h,d,w,mo} — also valid: 5h, 2w, 3d
+          amount: 60              # a short RPM-style gate
+        - metric: requests
+          every: 1mo             # the longest window here -> this one is the bucket
           since: 2026-08-01      # period anchor; every later period is derived
-                                  # automatically (defaults: 1mo -> the 1st of the
-                                  # month, 1w -> Monday, else today)
+                                  # automatically. Omit entirely to anchor at
+                                  # config load/reload time itself (no calendar
+                                  # alignment) — accepted forms: YYYY-MM-DD,
+                                  # RFC3339, or a bare hh:mm[:ss] for min/h
+                                  # Limits only
           amount: 90000          # this window's cap, in vmr's OWN observed unit — see below
 ```
 
 An endpoint with no `quota:` block behaves exactly as before — this is entirely opt-in, per provider.
 
-**Scope so far** (see `docs/VirtualModelRouter_Design_v4_Quota.md`'s "现状与后续计划" section for the full current-status breakdown): exactly one `limits:` entry per provider, `metric: requests`, `metric: tokens`, or `metric: cost` (see [Pricing and cost-metric quota](#pricing-and-cost-metric-quota) below), tumbling (non-rolling) windows only. Multiple windows on one account, `rolling: true`, and a per-Limit `models:` scope remain a **load-time error** naming the field and saying it's planned for a later batch (P3). None of them are silently ignored; if you write one and vmr accepts the config anyway, that's a bug, not a feature.
+**Scope so far** (see `docs/VirtualModelRouter_Design_v4_Quota.md`'s "现状与后续计划" section for the full current-status breakdown): any number of `limits:` entries per provider, each `metric: requests`, `metric: tokens`, or `metric: cost` (see [Pricing and cost-metric quota](#pricing-and-cost-metric-quota) below), tumbling (non-rolling) windows only. `rolling: true` remains a **load-time error** naming the field and saying it's planned for a later batch. A Limit can also be scoped to specific upstream models via `models: [name, ...]` — omitted means "every model on this provider"; see the `models:` example below.
 
 **`amount` must be calibrated to what vmr itself observes, not the plan's marketing number.** Some vendors bill "one user turn" as a single unit, but an agentic client (tool calls, retries, multi-step workflows) turns that into anywhere from one to twenty-plus real HTTP requests vmr actually sees and counts. Set `amount` from your own traffic — a few days of `/admin/status`'s `quota` section, or a `vmr report` run — not from the number on the pricing page. Getting this wrong doesn't break anything (an under-provisioned account just gets deprioritized sooner than it should), but it does make the routing decision less accurate than it could be.
 
@@ -293,28 +305,59 @@ For `metric: tokens`, vmr prefers the upstream's own reported usage (exact) and 
 
 `vmr replay -provider NAME ...` charges against the same quota state a live request would, on a successful (`<400`) response — it's replaying real traffic against a real upstream account, so it counts the same way. `-dry-run` never charges (nothing is sent).
 
-**Checking it**: `vmr check` prints each provider's configured limit (and the effective timezone period boundaries are computed in — see the timezone note below); `/admin/status`'s `quota` section and `vmr status` show live consumption (`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`, the raw fresh/cache-read/cache-write/output breakdown, and — when configured — the account's effective `token_weights`/`model_multipliers`); a response's `X-VMR-Route-Reason` header shows `pick=quota` when reordering actually changed which endpoint went first.
+**Checking it**: `vmr check` prints each provider's configured limit(s) (and the effective timezone period boundaries are computed in — see the timezone note below); `/admin/status`'s `quota` section and `vmr status` show one row per Limit — its `role` (`bucket` or `gate`, see below), live consumption (`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`), the raw fresh/cache-read/cache-write/output breakdown, and — when configured — that Limit's own `token_weights`/`model_multipliers`/`models` scope; a response's `X-VMR-Route-Reason` header shows `pick=quota` when reordering actually changed which endpoint went first.
+
+**Bucket vs. gate, when a provider carries more than one Limit.** The Limit with the *longest* period is the account's "bucket" — its unused headroom really is being wasted if it isn't spent ("use it or lose it"), so an underused bucket actively boosts the score. Every other, shorter Limit is a "gate" — a rate limiter the vendor uses to smooth load, with no economic value in maxing it out, so a gate can only ever suppress the score toward its own saturation and never boost it above what the bucket alone would give. The provider's score is the tightest (minimum) of all its Limits' scores. With a single Limit (the common case), it's simply the account's bucket and this degenerates to exactly the P1/P2 behavior described above.
 
 Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying.
 
-#### Making the numbers precise: `token_weights` and `model_multipliers` (P2.1)
+#### Making the numbers precise: `token_weights` and `model_multipliers` (P2.1, per-Limit since P3)
 
-A plain `metric: tokens` account counts fresh input, cache-read, cache-write, and output tokens with **equal weight** — accurate for a straightforward "total tokens" plan, but it *overestimates* consumption on a Credits-style plan where a cache hit is billed at a fraction of a fresh token's price (observed in the market anywhere from 5x to 120x cheaper). An account that's actually only 15% through its real budget can show as "exhausted" under equal weighting, get deprioritized, and waste the unused majority of a plan you already paid for.
+A plain `metric: tokens` Limit counts fresh input, cache-read, cache-write, and output tokens with **equal weight** — accurate for a straightforward "total tokens" plan, but it *overestimates* consumption on a Credits-style plan where a cache hit is billed at a fraction of a fresh token's price (observed in the market anywhere from 5x to 120x cheaper). An account that's actually only 15% through its real budget can show as "exhausted" under equal weighting, get deprioritized, and waste the unused majority of a plan you already paid for.
 
 ```yaml
 providers:
   - name: plan-d
     quota:
-      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
-        - {metric: tokens, every: 1mo, amount: 1249000000}
+        - metric: tokens
+          every: 1mo
+          amount: 1249000000
+          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+          model_multipliers: {"*": 1.0, heavy-model: 9}
 ```
 
-- **`token_weights`** rescales a `metric: tokens` account's four components when computing headroom and `/admin/status`'s `used`/`pct` — account-level (applies to every `limits:` entry on that provider), defaults to `1.0` on every component you don't mention, and only takes effect on an account that actually has a `metric: tokens` limit (configuring it on a `requests`-only account is a load-time error). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model*, use `metric: cost` with a `pricing:` block instead (see below), because a price that differs per model can't be expressed as one shared ratio.
-- **`model_multipliers`** scales *every* component of a charge (including `requests`) by which upstream model actually got hit — `"*"` is a wildcard fallback, an unmatched model with no wildcard is unscaled (`1.0`). Unlike `token_weights`, this is applied **the moment the charge is recorded**, not when it's later read back — vmr's internal counters aggregate per provider, not per model, so there'd be no way to retroactively figure out which slice of a later read came from which model. A non-integer multiplier scales *exactly* — no rounding (e.g. 1.5x of 3 tokens charges as 4.5, not 4 or 5) — since how a real upstream account itself rounds a fractional multiplier isn't observable from here, rounding one way or the other would just be a guess dressed as precision, and the direction it happened to round in the past (up) compounded into a systematic, config-value-dependent overcharge (2.5x → +20% per charge, 4.5x → +11.1%, 2.9x → +3.4% — nowhere near proportional to how far the value is from an integer). `model_multipliers` only affects `requests`/`tokens` metrics; a `cost`-only account's price differentiation comes entirely from its `pricing:` block, and configuring both is a load-time error.
+- **`token_weights`** rescales a `metric: tokens` Limit's four components when computing headroom and `/admin/status`'s `used`/`pct` — **per-Limit** (each `limits:` entry has its own; a provider with several windows writes it separately on each one it should affect, since observed plans don't always weight every window the same way), defaults to `1.0` on every component you don't mention, and only takes effect on a Limit whose own `metric` is `tokens` (configuring it on a `requests`/`cost` Limit is a load-time error). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model*, use `metric: cost` with a `pricing:` block instead (see below), because a price that differs per model can't be expressed as one shared ratio.
+- **`model_multipliers`** scales *every* component of a charge (including `requests`) by which upstream model actually got hit — `"*"` is a wildcard fallback, an unmatched model with no wildcard is unscaled (`1.0`). Also **per-Limit** since P3, same reasoning as `token_weights`. Unlike `token_weights`, this is applied **the moment the charge is recorded**, not when it's later read back — vmr's internal counters aggregate per (provider, Limit), not per model, so there'd be no way to retroactively figure out which slice of a later read came from which model. A non-integer multiplier scales *exactly* — no rounding (e.g. 1.5x of 3 tokens charges as 4.5, not 4 or 5) — since how a real upstream account itself rounds a fractional multiplier isn't observable from here, rounding one way or the other would just be a guess dressed as precision, and the direction it happened to round in the past (up) compounded into a systematic, config-value-dependent overcharge (2.5x → +20% per charge, 4.5x → +11.1%, 2.9x → +3.4% — nowhere near proportional to how far the value is from an integer). `model_multipliers` only affects `requests`/`tokens` Limits; a `cost` Limit's price differentiation comes entirely from its `pricing:` block, and configuring both on the same Limit is a load-time error.
 
-Neither field changes anything for an account that doesn't configure it — `token_weights` unset defaults to the exact equal-weighted sum P1 always used, and `model_multipliers` unset leaves every charge at 1x.
+Neither field changes anything for a Limit that doesn't configure it — `token_weights` unset defaults to the exact equal-weighted sum P1 always used, and `model_multipliers` unset leaves every charge at 1x.
+
+**`models:` — three shapes, one field.** `models:` decides BOTH which upstream models a Limit applies to AND whether they share one pool or each get an independent one:
+
+| Write it as | Which models | Pool |
+|---|---|---|
+| omitted | every model on the provider | one shared pool |
+| `["*"]` | every model on the provider | each model gets its OWN independent pool |
+| `[a, b, ...]` | only the named models | each named model gets its OWN independent pool |
+
+The distinguishing rule is simply *whether `models:` was set at all* — presence, in either shape, always means independent per-model accounting; only its absence means a shared pool. There's no separate `mode:` field to keep in sync with it.
+
+```yaml
+providers:
+  - name: plan-with-submodel-cap
+    quota:
+      limits:
+        - {metric: requests, every: 1mo, amount: 50000}                        # account-wide, one shared pool
+        - {metric: requests, every: 1d, amount: 200, models: [premium-model]}  # only premium-model, its own independent pool
+
+  - name: plan-per-model-rpm
+    quota:
+      limits:
+        - {metric: requests, every: 1min, amount: 60, models: ["*"]}  # every model gets its own 60/min, independently
+        - {metric: requests, every: 1mo,  amount: 90000}              # account-wide, one shared pool
+```
+
+`"*"` is a reserved token, not a glob pattern — `models: ["gpt-*"]` matches nothing (there's no prefix matching), and combining `"*"` with a named entry (`models: ["*", "premium-model"]`) is a load-time error, since the wildcard already covers whatever the named entry would add. An endpoint only interacts with the Limits whose Scope covers its own upstream model (unscoped, wildcard, or a matching name) — a Limit that doesn't cover a given endpoint neither charges against it nor constrains its score, the same as if that Limit didn't exist for that endpoint. `/admin/status`/`vmr status` show one row per model that has actually been charged against a per-model Limit — a `"*"` Limit's row count grows as new models send traffic, not fixed at config time.
 
 #### Pricing and cost-metric quota
 

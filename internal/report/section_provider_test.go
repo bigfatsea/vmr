@@ -44,7 +44,7 @@ func TestRenderProvidersWithQuotaAndCost(t *testing.T) {
 		Pricing: &Pricing{Currency: "USD"},
 		Providers: []ProviderRow{
 			{Provider: "priced-quota", Requests: 5, RequestsOK: 5, CostEstimate: f64(1.23),
-				Quota: &ProviderQuotaRef{Metric: "tokens", Every: "1mo", Amount: 20000}},
+				Quota: []ProviderQuotaRef{{Metric: "tokens", Every: "1mo", Amount: 20000}}},
 			{Provider: "no-quota", Requests: 2, RequestsOK: 2, CostEstimate: f64(0.1)},
 		},
 	}
@@ -94,7 +94,7 @@ func TestRenderProvidersNoQuotaAnywhereOmitsQuotaColumn(t *testing.T) {
 func TestRenderProvidersZH(t *testing.T) {
 	rep := &Report2{
 		Providers: []ProviderRow{{Provider: "p1", Requests: 1, RequestsOK: 1,
-			Quota: &ProviderQuotaRef{Metric: "tokens", Every: "1mo", Amount: 1000}}},
+			Quota: []ProviderQuotaRef{{Metric: "tokens", Every: "1mo", Amount: 1000}}}},
 	}
 	out := renderProvidersStr(rep, i18n.ZH)
 	if !strings.Contains(out, "§2.5 账户（Provider）消耗与额度") {

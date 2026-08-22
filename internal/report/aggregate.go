@@ -172,7 +172,7 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 // Not a MetricAggregator interface: a single-threaded batch loop over one
 // record type has no caller that needs to swap the aggregator at runtime,
 // so an interface would buy polymorphism nobody uses.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string]ProviderQuotaRef, excludeClientTags map[string]bool) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
+func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string][]ProviderQuotaRef, excludeClientTags map[string]bool) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
 	sess, cache, err := AnalyzeSessionsCached(paths, prior, prof)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
@@ -464,7 +464,7 @@ func (st *aggState) ingestSecondaryBuckets(rc *rec2) {
 // efficiency, ...) and the buckets built post-hoc from the finished ones
 // (Tools/Providers/ProviderQuotas/Compactions/Sticky/ClientEndpoints/
 // Efficiency) — see metrics.go's finishX functions for the per-bucket math.
-func (st *aggState) finishBuckets(pricingInfo *Pricing, quotas map[string]ProviderQuotaRef, now time.Time, progress io.Writer) {
+func (st *aggState) finishBuckets(pricingInfo *Pricing, quotas map[string][]ProviderQuotaRef, now time.Time, progress io.Writer) {
 	rep := st.rep
 	if !st.from.IsZero() {
 		rep.Meta.From = st.from.Format(time.RFC3339)

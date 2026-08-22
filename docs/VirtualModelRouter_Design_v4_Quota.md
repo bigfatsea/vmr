@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-13 15:30, by Opus 5 -->
+<!-- Ver 2026-08-22, by Sonnet 5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Token-Plan 额度感知路由（Quota-Aware Routing）
 
@@ -454,34 +454,37 @@ raw(L)            = (1 - used_frac) / max(time_left_frac, ε)
 **rolling 窗口永远不能当桶**——这是必须显式写死的一条边界，否则会静默算错：
 滚动窗口的额度是持续再生的，不存在"到期作废"，因此 use-it-or-lose-it 对它不成立。
 而且它的 `time_left_frac ≡ 1`，`raw` 恒 ≤ 1，当桶时永远给不出 `> 1` 的提升信号，
-表现会退化成一个没有 `GateReserve` 缩放的畸形闸。
+表现会退化成一个和闸一模一样、却顶着"桶"名义的畸形结构。
 所以：**若一个账号的所有 Limit 都是 rolling，则它没有桶，全部按闸处理**——
 语义上正确（没有会作废的额度，就没有"该主动烧掉"的理由）。
 
 ```
-headroom(L) = raw(L)                            L 是桶
-            = min(1, raw(L) / GateReserve)      L 是闸    (GateReserve = 0.5)
+headroom(L) = raw(L)              L 是桶
+            = min(1, raw(L))      L 是闸
 
 score(provider) = min( over all its Limits ) headroom(L)      // 最紧的约束说了算
                   再 clamp 到 [0, HeadroomCap]                 // HeadroomCap = 5
 ```
 
-闸的形式含义：**`raw ≥ GateReserve`（即剩余额度比例仍不低于剩余时间比例的一半）时保持中性 1.0，
-低于该线后线性收紧到 0。** 于是闸永远只能把分数往下拉，不会把一个账号顶上去。
+闸的公式是一个**硬封顶**，不是渐进压制：`raw ≥ 1`（没落后于自己的节奏）时贡献中性的 `1.0`，
+一旦落后（`raw < 1`）就和桶用同一条曲线往下掉。**这条硬封顶只做一件事——闸永远不会把分数抬到
+比"刚好按节奏消耗"更高——不需要一个额外的、可调的"提前预警"缓冲带。**
 
-> 不要把它读成"消耗速率不超过 N 倍就中性"——`raw` 与"超额消耗倍数"的对应关系随窗口进度变化，
-> 不是一个固定倍数。判据就是 `raw` 本身。
+> 历史版本曾在 `raw < 2×`（`GateReserve=0.5`）时就提前开始压制，理由是给一点安全边际。
+> 复核后拿掉了这条：这个缓冲带的具体宽度（2 倍还是 3 倍）没有任何数据支撑，是一个纯拍脑袋的
+> 调参数字，而"闸不能把分数抬过中性值"这条真正要紧的不变量，硬封顶已经完整给出，不需要额外的
+> 缓冲带才能成立。少一个无依据的魔数，比多一点"提前警觉"更值。
 
 验证（类型 A，三层窗口）：5h 窗口已用 5500/6000（剩 8.3%）且只剩 1h（时间剩 20%）：
 
 ```
-raw(5h)  = 0.083 / 0.2         = 0.417
-闸(5h)   = min(1, 0.417 / 0.5) = 0.833
-桶(月)   = 1.0                            （按进度消耗）
-score    = min(0.833, 1.0)     = 0.833
+raw(5h)  = 0.083 / 0.2    = 0.417
+闸(5h)   = min(1, 0.417)  = 0.417
+桶(月)   = 1.0                       （按进度消耗）
+score    = min(0.417, 1.0) = 0.417
 ```
 
-轻度压制，5h 窗口翻转后自动恢复；月度桶的进度不受影响。符合直觉。
+压制幅度直接等于窗口自己落后节奏的比例，5h 窗口翻转后自动恢复；月度桶的进度不受影响。
 
 **退化行为**：只配一条月度 Limit 时，整套机制退化成 `(1-已用比例)/(剩余时间比例)` 一个除法。
 简单场景保持简单。
@@ -737,14 +740,15 @@ providers:
         - {metric: requests, every: 1w, amount: 45000}
         - {metric: requests, every: 1mo, amount: 90000}   # 周期最长的 tumbling → 桶
 
-  # ── 类型 B：次数制 + 滚动短窗 + 模型倍率 ──────────────────────
-  # amount 按 vmr 可观测的“上游 API 调用次数”配置，不是厂商标称的“提问数”（§2.4）
+  # ── 类型 B：次数制 + 短窗速率闸 + 模型倍率 ─────────────────────
+  # amount 按 vmr 可观测的“上游 API 调用次数”配置，不是厂商标称的“提问数”（§2.4）。
+  # rolling 仍不支持（见 §14.3「实际交付 vs 原始终态」）——用 min/h 级 tumbling 窗口
+  # 近似同一类“短窗速率闸”场景；token_weights/model_multipliers 按 Limit 各写一份。
   - name: plan-b
     quota:
-      model_multipliers: {premium-model: 3}    # 账号级：两条 Limit 共用，不重复书写
       limits:
-        - {metric: requests, every: 5h, rolling: true, amount: 7000}
-        - {metric: requests, every: 7d, amount: 35000}
+        - {metric: requests, every: 1min, amount: 120, model_multipliers: {premium-model: 3}}
+        - {metric: requests, every: 7d, amount: 35000, model_multipliers: {premium-model: 3}}
 
   # ── 类型 C：纯 Token 桶，什么都不配 = 分量 1:1:1:1 ─────────────
   - name: plan-c
@@ -753,15 +757,24 @@ providers:
         - {metric: tokens, every: 1w, since: 2026-08-14, amount: 65000000}
 
   # ── 类型 D：Token 桶 + 分量权重 + 模型系数 ────────────────────
-  # 账号内各模型共用一套分量比例 → 用 tokens + token_weights，不必去维护费率表
+  # 账号内各模型共用一套分量比例 → 用 tokens + token_weights，不必去维护费率表。
+  # token_weights/model_multipliers 是 Limit 自己的字段（见 §12.1「折算规则的层级」
+  # 一行的订正）——三条窗口若真的共用同一套比例，就得三处各写一遍；这里假设 5h 的
+  # 速率闸窗口够短，厂商对它不做缓存折扣区分，所以只在两条更长的窗口上写了权重。
   - name: plan-d
     quota:
-      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
         - {metric: tokens, every: 5h,  amount: 83000000}
-        - {metric: tokens, every: 1w,  amount: 624000000}
-        - {metric: tokens, every: 1mo, amount: 1249000000}
+        - metric: tokens
+          every: 1w
+          amount: 624000000
+          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+          model_multipliers: {"*": 1.0, heavy-model: 9}
+        - metric: tokens
+          every: 1mo
+          amount: 1249000000
+          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+          model_multipliers: {"*": 1.0, heavy-model: 9}
 
   # ── 类型 E：金额 / Credits 制，单层窗口 ───────────────────────
   # 分量费率按模型分化 → 走 cost；价格三层解析（§4.2 ①）
@@ -786,12 +799,21 @@ providers:
         - {metric: cost, every: 1w,  amount: 30}
         - {metric: cost, every: 1mo, amount: 60}
 
-  # ── 模型级独立子额度（Scope） ────────────────────────────────
+  # ── 模型级独立子额度（Scope，已交付 P3）────────────────────────
+  # models: 同时决定"哪些模型适用"和"是否独立计数"——不写 = 共享一个池，
+  # 写了（无论是 "*" 还是具体列表）= 命中的每个模型各自独立开一个 bucket。
   - name: plan-with-submodel-cap
     quota:
       limits:
-        - {metric: requests, every: 1mo, amount: 50000}                       # 账号总限
-        - {metric: requests, every: 1d, amount: 200, models: [premium-model]} # 仅约束该模型
+        - {metric: requests, every: 1mo, amount: 50000}                       # 账号总限，共享池
+        - {metric: requests, every: 1d, amount: 200, models: [premium-model]} # 仅 premium-model 适用，它自己独立一个 bucket
+
+  # ── 按模型独立限速，覆盖账号下全部模型（Scope 通配，已交付 P3）─────
+  - name: plan-per-model-rpm
+    quota:
+      limits:
+        - {metric: requests, every: 1min, amount: 60, models: ["*"]}  # 每个模型各自 60 次/分钟，互不影响
+        - {metric: requests, every: 1mo,  amount: 90000}              # 账号总限，共享池
 ```
 
 **全局定价字段**（`pricing`）：
@@ -815,16 +837,18 @@ providers:
 ④ 全表中形如 `*/<model>` 的**唯一**匹配。**四步都命中不了、或第 ④ 步匹配到多条（有歧义）
 时不做猜测**，按"无费率"处理——猜错一个费率比没有费率危险得多。
 
-**窗口级字段**（`limits[]`，描述"在多长的周期里累计多少"）：
+**窗口级字段**（`limits[]`，描述"在多长的周期里累计多少，以及这条 Limit 自己的折算规则"）：
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
 | `metric` | `requests` \| `tokens` \| `cost` | 必填 |
-| `every` | `N{h,d,w,mo}`，覆盖"数小时/数日/数周/数月" | 必填 |
-| `since` | 周期锚点时间，后续周期自动推算 | `1mo`→每月 1 日、`1w`→周一、其余→当日 0 点 |
-| `rolling` | 滚动窗口（分桶近似）；否则固定对齐窗口。**rolling 永不当桶**（§5.2） | `false` |
+| `every` | `N{min,h,d,w,mo}`，覆盖"数分钟/数小时/数日/数周/数月" | 必填 |
+| `since` | 周期锚点时间，后续周期自动推算。三种写法：`YYYY-MM-DD`（当日 0 点）、RFC3339 完整时间戳（精确到秒+时区）、纯时间 `hh:mm[:ss]`（今天该时刻，**仅 `every: min/h` 合法**，`d/w/mo` 上用会在加载期报错——省得为了表达"每小时的第几分钟"硬凑一个无意义的日期） | 不写＝直接取配置加载/热重载那一刻的当前时间，不做任何日历对齐——不写本身就是"不关心精确对齐到哪一刻"的声明，真在意就显式写 `since` |
+| `rolling` | 滚动窗口（分桶近似）；否则固定对齐窗口。**rolling 永不当桶**（§5.2）。仍是加载期"计划在后续批次支持"报错——见 §14.3「实际交付 vs 原始终态」，未随 P3 交付 | `false` |
 | `amount` | 该窗口上限（vmr 可观测口径；`cost` 档为 `pricing.currency` 的币种） | 必填，>0 |
-| `models` | 该 Limit 只约束这些上游模型（Scope） | 全部 |
+| `models` | 该 Limit 的 Scope，已随 P3 交付。**不写**＝所有模型共享一个池；写 **`["*"]`**＝规则适用全部模型，但每个模型各自独立开一个 bucket；写**具体列表**＝只有列出的模型适用，且同样各自独立。写不写这个字段，同时决定了"哪些模型适用"和"是否独立计数"——不需要额外的 `mode:` 字段。见 §12.1「Scope 的判定」一行 | 全部（共享） |
+| `token_weights` | 仅本条 Limit 生效的分量权重，只在 `metric: tokens` 时合法——**按 Limit 配置，不是账号级**，见 §12.1「折算规则的层级」一行的订正 | 全 `1.0` |
+| `model_multipliers` | 仅本条 Limit 生效的按模型倍率，`metric: cost` 时非法——**按 Limit 配置**，理由同上 | 未命中模型/无通配 = `1.0` |
 
 **命名**：额度块叫 `quota`、价格块叫 `pricing`，都不叫 `budget`。`vmr report` 已有一套以金额为中心的
 成本估算，配置里再出现一个 `budget` 却可能指次数或 token，是可预见的混淆源。
@@ -833,12 +857,15 @@ providers:
 
 * `metric` 枚举；`every` 语法与 `N > 0`；`amount > 0`；`since` 可解析；
 * `model_multipliers` / `token_weights` 的值 `> 0`；
-* 某 provider 的 Limit **全是 `cost`** 却配了 `model_multipliers` → 报错，提示改用 `pricing.overrides`
-  （同一件事只留一种写法）；
+* 某条 `metric: cost` 的 Limit 却配了 `model_multipliers` → 报错，提示改用 `pricing.overrides`
+  （同一件事只留一种写法；这条校验现在按 Limit 各自判断，不再是"整个账号是不是全 cost"）；
 * `overrides` 每条规则的 `discount` 与显式费率**二选一**，同时出现是错误；`currency` 只对显式
   费率有意义，和 `discount` 一起写同样是错误（`discount` 是无量纲乘数，不存在币种）；
-* `token_weights` 出现在**没有任何 `metric: tokens` 的 Limit** 的账号上 → 报错（配了不生效的字段，
-  按 `KnownFields` 的同一精神必须显式失败，不能静默无效）；
+* `token_weights` 出现在**自己 `metric` 不是 `tokens`** 的 Limit 上 → 报错（配了不生效的字段，
+  按 `KnownFields` 的同一精神必须显式失败，不能静默无效；同一 provider 下别的 Limit 是不是
+  `tokens` 不影响这条判断，因为折算规则已经是 Limit 自己的字段——见 §12.1 的订正）；
+* 同一 provider 下两条 Limit 的 `(metric, every, models)` 完全相同 → 报错（重复 key；`models`
+  纳入判重是因为 Scope 让"同 metric+every 但约束不同模型"成为合法写法，判重必须能分辨两者）；
 * `pricing.map` 的每一条显式映射，其 canonical key 必须在合并后的标准表∪补充表里存在 → 否则**加载期错误**：
   用户手写的映射打错字时，若继续按四步解析往下走，可能静默匹配到**另一个模型**的费率——
   正是本节"有歧义不猜"要防的那类失败，只是这次的歧义来自 typo 而不是表本身；
@@ -885,22 +912,26 @@ package quota   // internal/quota，仅依赖 core（周期数学是纯函数，
 // float64，不是 int64：model_multipliers 一旦配置，就要求这些字段能精确
 // 存下一个非整数倍率的计费结果（不取整——见上文"精度"一段），未配置时
 // 它们永远是精确的整数值浮点数，与整数语义等价。
-// Cost 是例外：metric: cost 的账号在计费那一刻就把 $ 金额算好写入这里，
+// Cost 是例外：metric: cost 的 Limit 在计费那一刻就把 $ 金额算好写入这里，
 // 之后费率表再变也不影响已记录的历史值（理由见上）；requests/tokens 档它恒为 0。
 type Counters struct {
     Fresh, CacheRead, CacheWrite, Out, Requests float64
     Cost float64
 }
 
-type Registry struct {           // 形状对齐 health.Registry：挂在 Router 上，不在 Snapshot 里
+// bucket 是一个 (provider, limitKey) 的实时状态：当前认为自己在哪个周期、
+// 该周期内累计了多少。惰性重置——见下文 Registry.Charge/Used。
+type bucket struct {
+    PeriodStart int64
+    C           Counters
+    Estimated   float64
+}
+
+type Registry struct {                        // 形状对齐 health.Registry：挂在 Router 上，不在 Snapshot 里
     mu       sync.Mutex
-    accounts map[string]*account // key: provider name
+    accounts map[string]map[string]*bucket     // provider name -> limitKey -> bucket
     path     string
     dirty    bool
-}
-type account struct {
-    rings     map[string]*Ring   // 每条 Limit 一个环（key = Limit 的稳定标识）
-    estimated float64            // 本周期由降级估算贡献的量，用于标注可信度
 }
 ```
 
@@ -952,6 +983,25 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 > `PricingConfig`/`PricingOverride` 直接适用**：同样不需要自定义 `UnmarshalYAML`，用普通字段
 > +`validate()` 阶段解析进 `Resolved` 字段（或等价命名）即可，不必为了"看起来更 YAML 原生"
 > 而增加一个不必要的接口实现。
+
+> **P3 实测确认，三处订正**：多 Limit 部分与 §5.2/§6/§7 描述的算法一致落地，但落地后又经过
+> 一轮复核，两处公式被简化：
+> 1. **`quota.LimitKey` 不是"metric/every + 排序后的模型列表"，是"metric/every + 实际计费的
+>    那一个模型"**（per-model Limit 才有这个后缀，形如 `requests/1min#model=deepseek-r1`）——
+>    见 §9.1「窗口级字段」表 `models` 一行：Scope 不只决定"哪些模型适用"，还决定"是否共享一个池"，
+>    一条 `models: ["*"]`/`models: [具体列表]` 的 Limit 会给每个实际命中的模型各开一个独立
+>    bucket，而不是把它们的消耗都记进同一个共享计数器。
+> 2. **闸的公式从 `min(1, raw/GateReserve)` 简化成 `min(1, raw)`**，`GateReserve=0.5` 这个
+>    没有数据支撑的魔数已经拿掉，见 §5.2 本节自己的订正说明。
+> 3. `router.ChargeResponse`/`reorderByQuota` 按 `Scope` 过滤后遍历每条 Limit，这一点未变。
+>
+> **唯一未随 P3 交付的是 rolling 窗口**（§14.3 已把它移出这一批范围，理由见「实际
+> 交付 vs 原始终态」一节）——`Registry` 因此没有走上面早先设想的 `account{rings
+> map[string]*Ring}` 形状，而是更简单的 `map[string]map[string]*bucket`（provider name →
+> `LimitKey` → bucket），每个 bucket 仍是"惰性重置的单一计数器"，同一套结构从 P1 沿用到
+> 现在没有变过。等哪天真的交付 rolling，再把 `bucket` 换成能装下 `Ring` 的接口/联合类型，
+> 不必现在为一个还没有真实需求的功能预留骨架（§14.1 里已经因为同一条理由永久砍掉过
+> `Source` 抽象，这里是同一个原则的另一次应用）。
 
 ### 9.3 持久化
 
@@ -1039,7 +1089,8 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 计量单位 | requests / tokens / cost 三档最终都要有，分两批交付（§14） | 三者各自覆盖的市场份额都不小：Coding Plan 74% 按次数、Token Plan 94% 按 Token/Credits；漏掉任一档都会让功能对相应人群失效 | 只做 tokens（对 Coding Plan 失效）；只做 requests（对 62% 的 Token Plan 失效）|
 | 权重信号 | `headroom = 剩余额度比例 / 剩余时间比例` | 目标是"过期前烧完"，配速问题不是存量问题；无量纲故可跨 metric 比较 | `remaining/total`——重置日不对齐时信号反向，且多窗口/多 metric 下无定义 |
 | 多窗口归并 | 取所有 Limit 的 `min` | "最紧的约束说了算"是多约束的标准语义，一个循环 | 加权平均（会让一个已触顶的闸被其他窗口稀释掉） |
-| 桶 vs 闸 | 周期最长者为桶，其余为闸（闸只压制不提升） | 用满 5h 窗口没有经济价值，只有计费周期的未用额度对应真实浪费；零配置且在每个观察到的套餐上都成立 | 全部当桶（会在 5h 窗口末尾制造无意义的冲量） |
+| 桶 vs 闸 | 周期最长者为桶，其余为闸（闸只压制不提升） | 用满 5h 窗口没有经济价值，只有计费周期的未用额度对应真实浪费；零配置且在每个观察到的套餐上都成立 | 全部当桶（会在 5h 窗口末尾制造无意义的冲量）；全部当闸、不区分角色（会让 P1/P2 已经在跑的"周期过完前主动多用没花完的预付费额度"这个能力也一起消失——是否需要保留这条能力，取决于账号是否真的存在"过期作废的预付费额度"，不是一个能从代码本身推出答案的问题）|
+| 闸的压制公式 | **P3 复核后订正为硬封顶** `min(1, raw)`，不再是渐进带 `min(1, raw/GateReserve)` | `GateReserve=0.5`（"提前几倍开始压制"）这个具体系数没有任何数据支撑，是纯拍脑袋的调参数字；闸真正必须成立的不变量只有"不能把分数抬过中性值 1.0"，硬封顶已经完整给出这条，不需要额外的缓冲带才能成立 | 保留渐进带（多一个无依据的魔数，换不来任何已证实的收益） |
 | 分配策略 | 贪心取最高 score（稳定排序） | 无状态、确定性、failover 顺序自动正确、对 prefix cache 友好 | SWRR——需持久化累加器、只解决"选谁"、撒开流量反伤 cache |
 | 接入点 | `Sort` 之后、`sticky` 之前的独立一步 | Sticky 已是同形状先例；`Dimension.Compare` 结构上看不到请求，且是 CLAUDE.md 明令不得扩展的接口 | 新增 `Dimension` |
 | 重排粒度 | 并列梯队内，只在"挂了 Limit"的成员之间做占位重排 | 保住 `priority` 语义；让配置一个 Provider 的额度不产生隔空影响 | 全局重排；把未挂额度端点当 score=0 |
@@ -1048,7 +1099,8 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 周期重置 | 惰性比较桶起点 | 无 goroutine、无漏重置、无时钟回拨、重启自动补偿 | 定时器/cron 式重置 |
 | 周期表达 | `(every, since)` 二元组 | 一个机制覆盖数小时/数日/数周/数月 + 任意锚点，免掉字段膨胀 | `reset_period` + `reset_day`（装不下 5h/周，且要不断加字段） |
 | 分量加权 | **必做**，两条路径：账号内比例统一走 `tokens` + `token_weights`；按模型分化走 `cost` + 费率表 | Credits 制套餐 cache read 比 fresh input 便宜 5～120 倍，等权总量记账高估 3～8 倍；而类型 D 这类非金额套餐不该被迫去反推货币单价 | 只做等权总 token（高估 3～8 倍）；只做 `cost`（逼着 token 桶套餐维护价目表）；per-provider 四个**金额**全局权重（费率实际按模型给出） |
-| 折算规则的层级 | 账号级（`providers[].quota`），不放窗口级 | 一次调用扣多少是"账号怎么记账"，在多长窗口累计是"厂商怎么切周期"，两者正交；观察到的套餐里同账号各窗口的系数完全一致 | 每条 Limit 各写一份（同一事实抄 N 遍，"三处改了两处"的经典 bug 源） |
+| 折算规则的层级 | **P3 订正为按 Limit**（`limits[].token_weights`/`.model_multipliers`），不再是账号级 | P1/P2 时"同账号各窗口系数一致"只是当时唯一观测到的样本；P3 引入多窗口后遇到的真实场景是**同一账号的短窗速率闸与长周期账单桶折算方式不同**（例：闸按次数不分缓存命中、桶按 Credits 精确折算），账号级字段装不下这种差异，会逼用户为了"给一条窗口设权重"而让另一条窗口被迫共享同一套不适用的比例——这比"同一事实抄 N 遍"的重复风险更危险，因为它不是维护成本问题，是**表达力不够，装不下真实存在的配置需求**。抄 N 遍的风险仍然存在，但通过 `config.validate()` 的显式校验（`token_weights` 只在自己是 `tokens` 的 Limit 上合法）缓解——写错位置是加载期错误，不是运行期悄悄失效 | 继续账号级（P1/P2 原决策，装不下折算方式随窗口分化的账号）；折中方案——账号级默认值 + 逐 Limit 覆盖（两套语义共存，"这条 Limit 到底用了哪个值"需要读两处配置才能确定，复杂度不比"就是有点重复"更低） |
+| Scope 的判定 | `models:` 一个字段同时决定"哪些模型适用"与"是否独立计数"——不写＝共享一个池；写了（`"*"` 或具体列表）＝命中的每个模型各自独立一个 bucket | 真实需求是三态，不是"共享/不共享"二元：账号总限（共享）、给每个模型各自开一份同样的限速（`"*"`）、只给几个具名模型各自开子额度（具体列表），后两种在经济含义上都是"每个模型互不影响"，唯一的区别只是成员范围——用同一个字段的"空/`*`/列表"三种写法表达，不需要另开一个 `mode:` 字段来回答"共享还是独立"，也就不会出现 `mode` 与 `models` 互相矛盾（比如 `mode: shared` 却给了 `models:` 列表）这种需要额外校验的组合 | 独立的 `mode: shared \| per_model` 字段（gemini 方案原提议，两个字段表达同一组信息，多一种"写错组合"的可能）；`models:` 列表语义为"共享池限定到这几个模型"（即最初方案落地时的实现——不是真实需求，也和"共享/独立"两种真实场景都对不上，被撤回） |
 | 定价来源 | 两层：随二进制内置的**标准列表价** + `config.yaml` 里的 **per-provider 覆盖** | 今天的 `pricing.yaml` 实为"与 config.yaml 逐条对齐的部署清单"，不写就完全没有 $ 估算；标准表消除这个断崖，覆盖写在账号侧只补差异 | 继续手写全量 `pricing.yaml`（入门断崖 + 两文件漂移）；只要标准表（对国产第一方覆盖不足，见 §13） |
 | 定价的落点 | 并入 `config.yaml` 的 `providers[].pricing`，解析逻辑放新叶子包 `internal/pricing`（P1 交付后修订，原方案只规划了 `cmd` 侧） | 已核对 `LoadPricing` 在 `cmd` 侧、`report` 只接收已解析的表，故不触碰 `report ↛ config` 禁令；更关键的是 `cost` 把定价放到了请求路径上，独立 `pricing.yaml` 根本不在热重载链路里。P1 已经验证并投入使用同一个模式（`internal/config` 依赖只依赖 `core` 的叶子包 `internal/quota`，在 `validate()` 阶段把配置解析成运行态值）——`internal/pricing` 是这条模式在定价上的复用，让 `metric: cost` 的费率校验和 P1 的额度校验一样发生在加载期，而不必等 `vmr report` 跑一次才发现 | 保留独立文件（需另建文件监听 + 原子换表，凭空多一个子系统）；只让 `cmd/vmr/cmd_report.go` 一侧解析、`metric: cost` 另开一条运行时校验路径（两份实现，容易漂移） |
 | 折扣与促销 | 归入价格层：`discount` 或显式费率，静态按模型区分（P0-A 移除了曾经的 `date_*`/`hour_*` 时间窗功能面，见"②格式要不要向上游看齐"一节） | 写进价格层则**额度计量与 `vmr report` 的 $ 数字同时变准**；只写进 `model_multipliers` 会让报表按列表价系统性高报 | 用 `model_multipliers` 表达折扣（把价格概念塞进额度字段，且报表仍按列表价） |
@@ -1136,6 +1188,8 @@ Bucket/Gate 归一化简化、Rolling 窗口 Ring 的适用范围——
   **上一轮批评 gemini 文档"打空头勾"，这里必须对自己用同一把尺。**
 * **Scope（`models:`）降级为"有真实案例才做"**：证据本来就弱——用量接口返回的"模型级明细"很可能只是
   展示明细，而非各自独立的额度池。按未证实的猜测建结构，正是本文一直在拒绝的做法。
+  **（P3 订正：真实案例出现后已交付，见 §15.2 第 8 项——降级判定本身没有错，"有证据再做"这条
+  门槛也确实被满足了，不是被放弃了）**
 
 剩下的十二项不靠"裁剪"解决，靠**分批**：因为它们不是同一个问题的十二个面，
 而是**一条精度阶梯**上的十二级——而第一级就已经能解决主要问题。
@@ -1195,7 +1249,7 @@ Bucket/Gate 归一化简化、Rolling 窗口 Ring 的适用范围——
 |---|---|---|---|---|
 | **P1 单桶均衡** | 多套餐按剩余进度自动分流 | 81 个在售套餐中只有 5 个既无请求限额也无 token 限额 → **约 94% 能配出一条计费周期桶** | 少 | ✅ **已交付**（2026-08-07） |
 | **P2 计量准确** | 百分比可信；Credits 制套餐精确记账 | Token Plan 的 Credits/金额制账号（约占在售的 1/3） | 中（范围已按 P1 实测经验修订，见下方 P2 一节） | ✅ **已交付**（2026-08-07，2026-08-09 交付后复核修完七项问题——见「现状与后续计划」一节） |
-| **P3 多约束** | 少撞短窗限额造成的 429 抖动 | 多窗口套餐（类型 A / B / D / F） | 中 | 触发条件未满足（见下方） |
+| **P3 多约束** | 少撞短窗限额造成的 429 抖动 | 多窗口套餐（类型 A / B / D / F） | 中 | ✅ **已交付**（2026-08-22，rolling 窗口除外——见下方 P3 一节） |
 | **P4 校准与看板** | 消除本地计数的系统性偏差；成本归因 | — | 小而深 | 未排期 |
 
 当前逐项落地状态（哪些机制已实现、哪些还没有、已知缺口与下一步建议）见文末「现状与后续计划」一节。
@@ -1267,30 +1321,39 @@ per-provider 定价并入 `config.yaml`」与「9.2 运行态」两处关于依�
    `vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都必须挡住，不能只有
    `vmr report` 侧能发现
 
-#### P3 — 多约束（防 429 抖动）
+#### P3 — 多约束（防 429 抖动）✅ 已交付（rolling 除外）
 
-**触发条件**：P1/P2 上线后的运行数据显示 429 频率或其尾延迟代价确实值得——**不是排期到了就做**。
+**实际触发方式，与原计划不同**：原定触发条件是"P1/P2 上线后的运行数据显示 429 频率或尾延迟代价确实
+值得"——**这条没有被满足**，P3 是在没有这份运行数据的情况下，因为用户有一个具体 provider 需要复合窗口
+配额（短窗 RPM 限速 + 长周期账单）而直接立项的。这是对原计划的一次诚实偏离，不是补写理由让它看起来符合
+计划：**用真实、具体的配置需求替代了"等数据"这个原定前提**，两者都是合法的立项依据，只是这次走的是
+后者。记在这里是为了不让后来者误读"P3 已交付"等于"429 数据已经证明它值得"。
 
-**范围**：一个 provider 多条 Limit + `min()` 归并；桶/闸角色（最长 tumbling 为桶，全 rolling 则无桶）；
-rolling 窗口 + 环形分桶；Scope（`models:`，仍以出现真实案例为前提）
+**范围**：一个 provider 多条 Limit + `min()` 归并；桶/闸角色（最长 tumbling 为桶）；Scope（`models:`）。
+**不含 rolling 窗口 + 环形分桶**——见下方"未随 P3 交付"。
 
-**立项时需一并复核的两个开放问题**（2026-08，源自对本文档的一轮 ROI 复核；判定依据见 §12.2）：
+**立项时一并复核的两个开放问题**（源自 2026-08 对本文档的一轮 ROI 复核；判定依据见 §12.2）的处置结果：
 
-1. **Bucket/Gate 显式分层是否值得保留**：§5.2 的判定规则（最长 tumbling 为桶、`GateReserve=0.5`）是当前的终态描述，
-   但这套分层+魔数对"90%+ 账号只有 1～2 条 Limit"这个实测分布是否划算，值得在 P1/P2 攒够真实多窗口配置数据后
-   重新核算，对照统一 `min(raw)` + 单一 `clamp(0, 2.0)` 的简化版。**若改用简化版，必须显式补一条测试钉住
-   "闸不产生超过桶自身信号的提升"这条不变量**——纯 `min(raw)` 在"桶宽裕、闸也宽裕"的角落场景下会让闸的
-   `raw > 1` 直接参与取值（例：桶 raw=3.0、闸 raw=1.2 时，`min` 给出 1.2 而非当前设计的 `min(3.0, 1)=1.0`），
-   不是纯粹的记法简化，而是真实改变了闸的角色边界。
-2. **Rolling 窗口是否值得为所有账号做 Ring**：§8 给的 ≤1/K 误差界，前提是该账号的消耗几乎全部经过 vmr。
-   对典型的 5 小时滚动个人/团队共享套餐（同一账号被多个 CLI 工具或团队成员直连消费），本地环形分桶看到的
-   只是经过 vmr 这一路的流量，账外消耗会让"剩余额度"系统性失真——且失真方向恰好最危险：显示宽裕、实际
-   已被打满，于是继续把新会话导向一个马上要 429 的账号，**这正是 Ring 本该缓解的那类抖动，账外消耗明显时
-   反而缓解不了**。**结论**：Ring 只对"确认单一 API key、流量完全经 vmr"的账号有意义；账外消耗明显的账号，
-   继续依赖 health 的被动冷却即可，不必单独为它建 Ring。P3 立项时按账号逐一判断，不是全量套用。
+1. **Bucket/Gate 显式分层是否值得保留 → 保留，未简化为 `min(raw)`。** 理由三条：
+   ① 它是已经完整论证过的公式，照抄不是重新发明；
+   ② 单 Limit 时严格退化成 P1/P2 的既有行为（`BucketIndex` 对长度为 1 的切片必然返回唯一索引，
+   该 Limit 100% 拿到桶待遇、不套 `GateReserve` 折算），是"零回归"这个约束下最安全的选择；
+   ③ 代码量差异可忽略——分层版本比纯 `min(raw)` 只多一次"找最长周期的下标"外加对非桶下标应用
+   `min(1, raw/GateReserve)`，换来的是明确避开了开放问题①指出的角落场景（桶宽裕、闸也宽裕时，
+   `min(raw)` 会让闸自己的 `raw>1` 直接决定分数，等于闸在提升流量——`internal/quota/score.go` 的
+   `TestScoreForLimits_GateNeverBoosts` 把这条不变量钉成了断言）。
+2. **Rolling 窗口是否值得为所有账号做 Ring → 本批不做，范围内明确砍掉。** 立项时的真实需求是
+   "RPM 级速率限制"（短 tumbling 窗口，配合新增的 `min` 时间单位即可表达），不是"厂商账外还有其他
+   消费者分走同一份额度"这类需要 Ring 平滑的场景——本文档原始开放问题②担心的"Ring 对账外消耗明显的
+   账号反而缓解不了抖动"这条顾虑因此还没有实测数据可评估。按 §14.1"没有第二个真实案例前不要搭结构"
+   的同一条原则，Ring 留给出现具体需求时再做——`core.Limit`/`config.LimitConfig` 都已经预留了
+   `rolling` 字段（P1 起就是"计划中"的加载期错误，从未被静默接受过），届时只需要新增窗口实现，
+   不触碰配置形状。
 
-**验收**：§5.2 的类型 A 算例（`score = 0.833`）作为数值断言；
-5h 窗口接近饱和时该账号被压制、窗口翻转后自动恢复，且月度桶进度不因此失衡
+**验收**（已通过，见 `internal/quota/score_test.go`）：§5.2 的类型 A 算例（`score ≈ 0.833`，
+`TestScoreForLimits_TypeA`）作为数值断言；闸不产生超过桶自身信号的提升
+（`TestScoreForLimits_GateNeverBoosts`）；单 Limit 严格退化成 P1/P2 行为
+（`TestScoreForLimits_DegeneratesToScoreForLimit`）。
 
 #### P4 — 校准与看板
 
@@ -1374,14 +1437,17 @@ archtest 有 700 行预算，当前 561 行。
 
 ### 15.1 一句话结论
 
-**P1、P2 已全部交付并投入使用；P3、P4 未启动**（P3 的触发条件本就是"有真实运行数据再判断"，
-不是排期到了就做）。按 §14.1 自评的十四项终态机制计，已落地十项、永久砍掉两项（`Source` 抽象、
-Scope 降级为观察项）、剩两项待 P3/P4。另有一件终态清单之外的事已经交付：**`vmr-quota.json`
-从进程私有状态升级成了对外可读的格式**——`vmr report` 现在把它的实时计数器与从审计日志重算
-的窗口消耗并排展示（§11），这带出两条必须写死的契约（§9.3 的读取前提、§12.1 的"额度公式
-唯一实现 + 差分测试"纪律）。真正影响可用性的剩余缺口只有一处：**内置标准价目表的
-四分量完整率不高**，使 `metric: cost` 在多数模型上必须靠账号覆盖（`providers[].pricing.overrides`）
-才配得起来——这是 §4.2①、§13 早已如实写明的风险，不是实施偏差，但需要用户明确知道，见下方 §15.3。
+**P1、P2、P3 已全部交付并投入使用（P3 的 rolling 窗口子功能面除外）；P4 未启动**。P3 的立项方式
+与原计划不同——不是等到"429 数据证明值得"，而是有具体 provider 的复合窗口需求直接触发的，见
+§14.3 P3 一节的诚实记录。按 §14.1 自评的十四项终态机制计，已落地十二项、永久砍掉一项
+（`Source` 抽象）、剩一项待 P4（环形分桶/rolling）。另有一件终态清单之外的事已经交付：
+**`vmr-quota.json` 从进程私有状态升级成了对外可读的格式**——`vmr report` 现在把它的实时计数器
+与从审计日志重算的窗口消耗并排展示（§11），这带出两条必须写死的契约（§9.3 的读取前提、§12.1 的
+"额度公式唯一实现 + 差分测试"纪律），P3 后两者都已按多 Limit 重新验证过（`cmd/vmr/quota_parity_test.go`
+仍然只驱动路由半区的真实入口，没有另开一条"多 Limit 版"的复算路径）。真正影响可用性的剩余缺口
+有两处：**内置标准价目表的四分量完整率不高**（见下方 §15.3①，P2 起就如实记录的已知限制）；
+**`vmr-quota.json` 里被替换的 `limitKey` 从不清理**（见下方 §15.3⑥，P3 上线后风险窗口已经打开，
+不再适合继续"等 P3 一起做"）。
 
 ### 15.2 终态十四项机制逐项现状
 
@@ -1389,22 +1455,23 @@ Scope 降级为观察项）、剩两项待 P3/P4。另有一件终态清单之�
 
 | # | 机制 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | 三种 metric（requests / tokens / cost） | ✅ 全部落地 | `core.QuotaMetric`；`router/quota.go` 的 `chargeQuota` |
-| 2 | 多窗口 + `min()` 归并 | ⬜ P3 | 配置层显式拒绝多条 Limit（不是静默忽略） |
-| 3 | 桶 / 闸角色 | ⬜ P3 | 单条 Limit 时它自己就是桶，判定逻辑尚未需要 |
-| 4 | 环形分桶（rolling） | ⬜ P3 | `rolling: true` 是加载期"计划中"错误 |
-| 5 | `(every, since)` 周期数学 | ✅ | 含月末截断、跨年、DST |
-| 6 | `model_multipliers` | ✅ P2 | 账号级、**计费时**套用，精确相乘、不取整（§9.2） |
-| 7 | `token_weights` | ✅ P2 | 账号级、**读取时**套用，缺省全 1.0 |
-| 8 | Scope（`models:`） | ⬜ 降级为"有真实案例才做" | §14.1 已定案；配置层显式拒绝 |
+| 1 | 三种 metric（requests / tokens / cost） | ✅ 全部落地 | `core.QuotaMetric`；`router/quota.go` 的 `ChargeResponse` |
+| 2 | 多窗口 + `min()` 归并 | ✅ P3 | `config.QuotaConfig.Limits` 不再限制为一条；`quota.ScoreForLimits` 按桶/闸规则归并 |
+| 3 | 桶 / 闸角色 | ✅ P3 | `quota.BucketIndex` + `ScoreForLimits`（最长周期为桶，闸硬封顶 `min(1,raw)`——已去掉 `GateReserve` 魔数），单 Limit 时严格退化为 P1/P2 行为 |
+| 4 | 环形分桶（rolling） | ⬜ P4（本批范围内明确排除，非顺延） | `rolling: true` 仍是加载期"计划中"错误；见 §14.3 P3 一节"未随 P3 交付"的说明 |
+| 5 | `(every, since)` 周期数学 | ✅ | 含月末截断、跨年、DST；P3 新增 `min` 单位 |
+| 6 | `model_multipliers` | ✅ P2，**P3 起改为按 Limit 配置** | 每条 Limit 各自的字段，**计费时**套用，精确相乘、不取整（§9.2）；见 §12.1「折算规则的层级」的订正 |
+| 7 | `token_weights` | ✅ P2，**P3 起改为按 Limit 配置** | 每条 Limit 各自的字段，**读取时**套用，缺省全 1.0；理由同上 |
+| 8 | Scope（`models:`） | ✅ P3 | 出现真实案例后按 §14.1 的门槛交付；三态语义（不写＝共享、`"*"`＝按模型独立不限成员、具体列表＝按模型独立限定成员），`quota.LimitKey` 按"实际计费的模型"生成 key，不是按 Limit 声明的列表 |
 | 9 | 标准定价表 + 生成脚本 | ✅ P2 | `internal/pricing` 的 `go:embed` 双表 + `tools/gen_standard_pricing` |
 | 10 | per-provider 价格覆盖 + ID 映射 | ✅ P2（时间窗子功能面已于 P0-A 移除） | `providers[].pricing` 的 `map`/`overrides`（`discount`/显式费率/`"*"` 通配，静态按模型区分，无时间维度） |
 | 11 | `Source` 抽象（官方用量 API） | ⛔ 永久砍掉 | §14.1 已定案：写第一个适配器时再抽（P4） |
 | 12 | 持久化 + 惰性重置 | ✅ P1 | `vmr-quota.json`（0600），5s flusher + 退出前强制 flush。已成为**对外可读**的格式：`quota.LoadFile`/`Bucket` 供离线消费者只读加载（不构造 `Registry`、不加锁、不写盘），读取契约见 §9.3 |
-| 13 | 梯队占位重排 | ✅ P1 | `reorderByQuota`，只重排挂了 Limit 的成员 |
+| 13 | 梯队占位重排 | ✅ P1，P3 扩展到 Scope | `reorderByQuota`，只重排"挂了至少一条适用 Limit"的成员——一条 Limit 的 `models:` 没覆盖到某端点的模型，对该端点等同于没配这条 Limit |
 | 14 | usage 嗅探 + 降级估算 | ✅ P1 | 事件级门禁 + 字节估算兜底 |
 
-十四项里：**已落地 10、P3 待做 3（#2/#3/#4）、降级为观察项 1（#8）、永久砍掉 1（#11）。**
+十四项里：**已落地 12 项（#1、2、3、5、6、7、8、9、10、12、13、14）、P4 待做 1 项
+（#4，本批范围内明确排除的环形分桶）、永久砍掉 1 项（#11）。**
 
 ### 15.3 已知缺口与后续建议
 
@@ -1455,24 +1522,27 @@ Scope 降级为观察项）、剩两项待 P3/P4。另有一件终态清单之�
 用户自备的完整表，两者要出现负数/NaN 都得先绕过生成脚本或手工构造整表。**暂缓理由**：ROI 不足，
 登记备查，不排期。
 
-**⑥ 状态文件里被替换的 `limitKey` 从不清理（随 P3 一并做）。**
-改一次 `every`/`metric`，旧 key 的桶就永久留在 `vmr-quota.json` 里（§9.3、§13 各有一条）。
+**⑥ 状态文件里被替换的 `limitKey` 从不清理（P3 已上线，这条不再适合继续"等一起做"）。**
+改一次 `every`/`metric`/`models`，旧 key 的桶就永久留在 `vmr-quota.json` 里（§9.3、§13 各有一条）。
 路由半区自己不受影响（只读当前 key），代价全落在离线读者身上：它看到"该账号有数据、
 但当前 key 没有"，只能提示"配置改过"，而**说不出改于何时**——文件里没有这个信息，
 一次半年前的修改和昨天的修改看起来完全一样。**处置**：清理必须由路由半区做
 （它是唯一写者），在 `Registry.Load` 之后、首次 `Flush` 之前用当前配置解析出的合法 key
-集合过滤一次，约 10 行。**不单独排期的理由**：P3 会重写 `limitKey` 的构成规则（多窗口后
-一个 provider 名下本来就会有多个合法 key），届时孤儿桶问题会显著放大，两件事一起做成本最低；
-在那之前离线侧已有明确标记，不会把旧数据误读成当前数据。
+集合过滤一次，约 10 行。**状态更新**：本条原先的"不单独排期"理由是"P3 会重写 `limitKey`
+构成规则，两件事一起做成本最低"——P3 现在已经交付（`quota.LimitKey` 确实按计划加上了
+`models` 后缀），触发条件已经成立，**这条不再是一个可以合理拖延的项**：一个 provider 现在
+可以同时有好几条 Limit，改一条窗口的 `every`/加一个 `models:` 都会立刻产生孤儿桶，风险窗口
+比 P1/P2 单 Limit 时代明显放大。列入下一个小版本的候选项，不必等到 P4。
 
-**⑦ P3 放开多窗口时，离线消费者需要同批改造（登记备查）。**
-当前"一个 provider 恰好一条 Limit"这个前提被配置层显式拒绝多条 Limit 钉死，离线侧因此普遍
-写成"取该 provider 的第一条 Limit"，并按 provider 名做排序 tie-break。P3 放开后这两处都不再
-成立——前者会漏掉窗口，后者会让同一个 provider 的多行失去唯一序（确定性排序测试会开始
-flaky）。这不是缺陷，是被显式记录的前向依赖：**P3 的范围里必须包含离线消费者，而不只是
-路由半区**。
+**⑦ P3 放开多窗口时，离线消费者需要同批改造。✅ 已随 P3 交付。**
+当前实现里 `internal/report` 的 `map[string]ProviderQuotaRef`（单 Limit）已经改成了
+`map[string][]ProviderQuotaRef`（一个 provider 对应它的每条 Limit），`buildProviderQuotaRows`/
+`accumulateQuotaWindow` 按 `(provider, quota.LimitKey)` 聚合、并按 `Scope` 过滤每条端点的流量该
+计入哪些 Limit——§2.5 的额度对照表现在一个 Limit 一行，不再是"只取第一条"。`cmd/vmr/
+quota_parity_test.go` 的差分测试相应扩展，仍然只驱动 `router.ChargeResponse`/`quota.BaseAmount`
+这些路由半区的真实入口，没有另开一条离线复算公式——这条纪律（§12.1「额度公式的唯一实现」）
+在多 Limit 下继续成立。
 
-**按计划就该在后面做的**（P3/P4 各自的范围与触发条件已在上文对应小节说明，不在此重复）：
-P3 触发条件是"P1/P2 上线后的运行数据显示 429 频率或尾延迟代价确实值得"，不是排期到了就做；
-P4 里"标准表刷新纳入定期流程"是当前最接近可以立刻做的一项——脚本已经有了，缺的只是把
-"什么时候跑、谁跑"定下来。
+**按计划就该在后面做的**：P4 的范围与触发条件见 §14.3 P4 一节；其中"标准表刷新纳入定期流程"
+是当前最接近可以立刻做的一项——脚本已经有了，缺的只是把"什么时候跑、谁跑"定下来。上面的
+⑥ 现在也是一个现实的候选项，不必等到 P4 才做。

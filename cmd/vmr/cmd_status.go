@@ -97,6 +97,8 @@ type statusResponse struct {
 		Provider         string                `json:"provider"`
 		Metric           string                `json:"metric"`
 		Every            string                `json:"every"`
+		Models           []string              `json:"models,omitempty"`
+		Role             string                `json:"role"`
 		Amount           float64               `json:"amount"`
 		Used             float64               `json:"used"`
 		Pct              float64               `json:"pct"`
@@ -279,9 +281,13 @@ func printStatus(st *statusResponse) {
 		if q.Metric != "cost" {
 			usedStr, amountStr = numStr(q.Used), numStr(q.Amount)
 		}
-		fmt.Printf("quota %-12s %s/%s  used=%s/%s (%.1f%%)  headroom=%.2f  resets %s%s\n",
-			q.Provider, q.Metric, q.Every, usedStr, amountStr, q.Pct, q.Headroom,
-			q.PeriodEndsAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"), estNote)
+		scopeNote := ""
+		if len(q.Models) > 0 {
+			scopeNote = " models=" + strings.Join(q.Models, ",")
+		}
+		fmt.Printf("quota %-12s %s/%s [%s]  used=%s/%s (%.1f%%)  headroom=%.2f  resets %s%s%s\n",
+			q.Provider, q.Metric, q.Every, q.Role, usedStr, amountStr, q.Pct, q.Headroom,
+			q.PeriodEndsAt.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"), estNote, scopeNote)
 		tw := q.TokenWeights
 		if tw != allDefaultTokenWeights {
 			fmt.Printf("  token_weights: in_fresh=%g cache_read=%g cache_write=%g out=%g\n",
