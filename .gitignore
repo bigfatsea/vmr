@@ -6,6 +6,7 @@
 *.exe
 skills-lock.json
 *.local.yaml
+*.bak
 
 # Local config with real keys (use config.example.yaml as template)
 /config.yaml
