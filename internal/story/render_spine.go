@@ -1,10 +1,9 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// The decision-spine layer (see docs/future-strategy/
-// vmr_story_journey_deepdive_sonnet-5.md's decision-spine section) on top
-// of render_md.go's existing fact-layer renderer: a 3-second overview card,
-// a compact per-Task action list, per-Step role tags, and an optional
-// tool-call timeline. Every function here is pure formatting/aggregation over
+// The decision-spine layer (see docs/VirtualModelRouter_Design_v4_Analytics.md
+// §3.5b decision-spine section) on top of render_md.go's existing fact-layer
+// renderer: a 3-second overview card, a compact per-Task action list, per-Step
+// role tags, and an optional tool-call timeline. Every function here is pure formatting/aggregation over
 // data render_md.go's renderStep already has (Task/Step/Event, Metrics,
 // Finding) — no new fields on Journey/Step, no new computation beyond what
 // toolCallRepeats/ComputeFindings already produce. render_md.go calls into
