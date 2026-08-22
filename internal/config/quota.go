@@ -194,8 +194,8 @@ var pureTimePattern = regexp.MustCompile(`^([0-9]{1,2}):([0-9]{2})(?::([0-9]{2})
 // fmtutil.DisplayZone) — the third form only makes sense for a "min"/"h"
 // Limit, where "which calendar day" is irrelevant and RFC3339 would force
 // spelling out an arbitrary date just to say "align to the top of the
-// hour" (see docs/VirtualModelRouter_Design_Quota_Refactor_gemini-3.7-flash.md
-// appendix C.3's decision). unit enforces that restriction; ok=false with a
+// hour" (see docs/VirtualModelRouter_Design_v4_Quota.md §9.1 and §12.2).
+// unit enforces that restriction; ok=false with a
 // nil error means the field was empty — the caller applies the default
 // (quota.DefaultSince) in that case, not this function, which has no
 // access to "now".
