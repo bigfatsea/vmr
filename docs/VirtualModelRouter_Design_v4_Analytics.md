@@ -15,7 +15,9 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 - **`vmr report`**：横向聚合。跨全部请求统计成本、延迟、错误率、缓存效率、会话/任务分布——回答"这段时间整体花了多少、哪里在浪费"。
 - **`vmr story`**：纵向还原。把一条 Agent 任务的完整执行过程重建成可读的叙事流——回答"这一个任务具体是怎么做的、哪一步开始跑偏"。
 
-两者服务四类具体场景，落在事实层（原始记录）/剖面层（规则派生指标）/解读层（§7 尚未实现的 LLM 注解）三层里不同的层：单 Agent 调优（"这次改了 prompt，工具调用是变多还是变少了"——剖面层，`vmr story` 的九项指标 + 模型使用/切换 + §3.7 对比）、跨框架/跨模型横向比较（"Claude Code 和 OpenClaw 跑同一类任务谁更省"——同样是剖面层，跨 Journey 对比）、事故复盘（"这次为什么突然开始乱猜文件路径"——事实层，`vmr story` 的完整叙事 + compaction 信息损失摘要）、上下文工程（"这个 Agent 的上下文预算都花在哪了"——`vmr story` 的上下文构成演化曲线 + `vmr report` 的 §1 token 经济）。四类场景没有一类需要 LLM 参与——这也是为什么剖面层先于解读层实现（§4）。
+两者服务四类具体场景，落在事实层（原始记录）/剖面层（规则派生指标）/解读层（可选的 LLM 注解，见 §3.5c/§3.7）三层里不同的层：单 Agent 调优（"这次改了 prompt，工具调用是变多还是变少了"——剖面层，`vmr story` 的九项指标 + 模型使用/切换 + §3.7 对比）、跨框架/跨模型横向比较（"Claude Code 和 OpenClaw 跑同一类任务谁更省"——同样是剖面层，跨 Journey 对比）、事故复盘（"这次为什么突然开始乱猜文件路径"——事实层，`vmr story` 的完整叙事 + compaction 信息损失摘要）、上下文工程（"这个 Agent 的上下文预算都花在哪了"——`vmr story` 的上下文构成演化曲线 + `vmr report` 的 §1 token 经济）。四类场景没有一类**必须**依赖 LLM——这也是为什么剖面层先于解读层实现，解读层至今仍是可选、可整体降级的第三层，不生产任何规则层给不出的数字。
+
+两者也是同一份数据的**两个连续变焦倍率**，不是两个割裂的产品：`vmr report` 是宏观（全量聚合，回答"钱花在哪、哪条链路在失败"），`vmr story` 是中观（单任务叙事，回答"这一步为什么跑偏"），逐请求详单（§2.5）是两者共同的微观下钻终点（回答"这一次上游到底收发了什么字节"）——读者的提问天然会跨倍率移动（宏观层看到某个 client 突增就想问是哪个任务，中观层看到某一步失败就想知道上游具体返回了什么），`vmr analyze` 的 `-journey`/`-compare`/`-corpus` 变焦选择器与索引→详单的导航链接正是为了让这种移动零成本，而不是逼读者每换一次倍率就重新定位。
 
 两者共享同一个底层事实来源——`internal/ctxgraph` 把审计记录建模成内容寻址的 manifest（消息哈希向量）序列 + 编辑分类 + lineage 图（见 §3），`vmr report` 的会话分组、`vmr story` 的任务叙事都是这张图上的查询，不是两套独立算法。这不是巧合：Agent 场景里"一个会话有几个任务""这次压缩丢了什么""这一步是不是新指令"这些问题，本质都是对同一份 manifest 序列做差分，用两套启发式各自回答一遍只会导致两者迟早不一致。
 
@@ -94,7 +96,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 1. **渲染默认按需关闭与懒物化（Lazy Materialization, P13）**：在批量分析套件（`vmr analyze` 默认套件）下，索引表格与决策脊柱直接基于纯函数生成指向详单的相对链接（`internal/reqdetail.FileName`），**但不预先物化全量详单文件**；只有在用户单点钻取具体 Journey（`-journey`）、显式传入 `-details` 或 `-render-all` 时，才真正将详单渲染写盘。这使得默认套件的写盘体积与耗时大幅下降（实测从数百 MB 降至数 MB）。
 2. **模板指纹与版本感知重绘（`renderTemplateVersion`, P12）**：`internal/reqdetail` 引入了模板版本常量。当详单渲染结构、Markdown 转义规则或样式更新时递增版本号，`EnsureRendered` 在检查已存在的落盘文件时不仅核对指纹与前驱，还会比对模板版本，自动失效并重绘陈旧文件，保证渲染结果与当前代码逻辑完全一致。
 3. **单轮差分与坐标回溯（P13 证据层瘦身）**：详单页不再为每一轮请求重复全量内联跨轮累积的历史消息，而是展示本轮增量消息（Messages）与模型响应（LLM Response），并提供指向前驱轮次的坐标超链接；系统提示词与工具声明证据通过内容哈希命名（`sysHash`）全局去重（`EnsureSysPromptEvidence`）。
-4. **渲染防御与转义（P12）**：详单渲染与决策脊柱严格对全部 9 处原始文本输入点执行 HTML/Markdown 转义（`escapeHTML`），杜绝用户或模型原始输出中的未闭合注释（如 `<!--`）造成下游正文被静默吞噬。
+4. **渲染防御与转义（P12）**：详单渲染与决策脊柱对全部已识别的原始文本输入点执行 HTML/Markdown 转义（`escapeHTML`/`escapeCell`），杜绝用户或模型原始输出中的未闭合注释（如 `<!--`）或表格分隔符（`|`）造成下游正文被静默吞噬或表格撕裂；具体覆盖点清单与两轮独立审阅发现遗漏点的演进过程见 `docs/KNOWN_ISSUES_sonnet-5.md` 的"已闭环"记录（P12.2/P12.3）。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 
@@ -426,7 +428,8 @@ type EfficiencyText struct {
 
 这条规则最早只对 `journey-<id>.json` 成立（修 phase1a/1b 复核问题 3-1 时的副产品），是一次没有
 配套决定的局部改动；`compare-*.json`/`vmr-report.json` 曾经维持相反的规则（叙述字段固定英文），
-两条规则在同一个项目里并存过一段时间，登记在 `docs/KNOWN_ISSUES_sonnet-5.md` 曾经的 `§1.19`。
+两条规则在同一个项目里并存过一段时间，登记在 `docs/KNOWN_ISSUES_sonnet-5.md` 的"已闭环"记录里
+（P8，JSON 语言策略统一）。
 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md` 论证了统一方向并给出实施大纲，
 P8 阶段按该方案落地，把 `compare-*.json`/`vmr-report.json` 也改成跟随 `-lang`，本节正文回填的就是落地后的最终状态。
 
