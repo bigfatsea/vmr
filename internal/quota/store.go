@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"vmr/internal/core"
 )
 
 // DefaultFlushInterval is the standard background persistence period for quota counters.
@@ -54,6 +56,52 @@ func (r *Registry) Load() error {
 		r.accounts = ff.Accounts
 	}
 	return nil
+}
+
+// Prune removes in-memory and persisted bucket entries that no longer match
+// any configured Limit in valid, keeping on-disk state from accumulating
+// orphan keys across config edits. Returns the number of pruned keys.
+func (r *Registry) Prune(valid map[string][]core.Limit) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pruned := 0
+	for provider, limits := range r.accounts {
+		configured, ok := valid[provider]
+		if !ok || len(configured) == 0 {
+			pruned += len(limits)
+			delete(r.accounts, provider)
+			r.dirty = true
+			continue
+		}
+		for key := range limits {
+			keep := false
+			for _, l := range configured {
+				if !PerModel(l) {
+					if key == LimitKey(l, "") {
+						keep = true
+						break
+					}
+				} else if model, ok := ExtractModel(l, key); ok {
+					if IsWildcardModels(l.Models) || AppliesToModel(l, model) {
+						keep = true
+						break
+					}
+				}
+			}
+			if !keep {
+				delete(limits, key)
+				pruned++
+				r.dirty = true
+			}
+		}
+		if len(limits) == 0 {
+			delete(r.accounts, provider)
+		}
+	}
+	return pruned
 }
 
 // Flush atomically writes the current state to Registry's path. A no-op

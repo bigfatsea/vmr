@@ -169,7 +169,7 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 | `POST /v1/responses` | OpenAI Responses 协议入口（见「协议模型」§3.1） |
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
 | `GET /health` | `{status, time, uptime_seconds}` + `Cache-Control: no-store`；**免鉴权、不限来源**——它是唯一一个绕过 `api_keys` 的端点，代价是它只回答「进程活着且能应答 HTTP」这一个比特，实例信息一律不出现在这里（否则它等价于一个未鉴权的 `/status`）。body 取时间与 uptime 而非固定串：固定 body 与被缓存的 body 无法区分，中间层可能在进程已死后继续答 200。只做 liveness——把 200 与端点健康挂钩，会让编排系统在上游全挂时杀掉一个功能完好的路由进程，而重启修不好上游 |
-| `GET /status` | `instance`（进程身份 + 运行环境 + `config` 子对象含新鲜度/重载/告警 + `concurrency`）+ `system`（goroutines/内存/磁盘余量）+ `traffic`（固定原子计数器：请求按协议/结果分类、全局 5 分量 token、`sticky.entries`）+ 端点健康 + `quota` + `audit`/`image_cache` 磁盘占用 JSON（健康部分含 `probing` 字段--某个端点当前是否正被一次后台恢复探测占着单飞名额；详见 `docs/STATUS_REPORT_DESIGN_gemini.md`）；受 `api_keys` 鉴权保护 |
+| `GET /status` | `instance`（进程身份 + 运行环境 + `config` 子对象含新鲜度/重载/告警 + `concurrency`）+ `system`（goroutines/内存/磁盘余量）+ `traffic`（固定原子计数器：请求按协议/结果分类、全局 5 分量 token、`sticky.entries`）+ 端点健康 + `quota` + `audit`/`image_cache` 磁盘占用 JSON（健康部分含 `probing` 字段--某个端点当前是否正被一次后台恢复探测占着单飞名额）；受 `api_keys` 鉴权保护 |
 | `GET /status.html` | 自包含单页可视化看板（CSR）：免鉴权直出静态外壳（不含任何数据），前端 JS 拉 `GET /status` 渲染并弹窗鉴权；零外部 CDN 依赖，`//go:embed` 进二进制 |
 
 **`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `go_version` / `os_arch` / `cwd` / `executable` / `started_at` / `uptime_seconds` + 人类可读 `uptime`，以及嵌套的 `config`（`path` 绝对路径 / `mtime` / `stale` / `reload` / `issues`）与 `concurrency`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config.path` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）`config` 整块省略而非输出零值。

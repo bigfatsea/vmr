@@ -513,9 +513,14 @@ func (l *Logger) scheduleHousekeeping() {
 	}()
 }
 
+// ActiveLogPath returns the path of the active audit log file for dir on date now.
+func ActiveLogPath(dir string, now time.Time) string {
+	return filepath.Join(dir, "vmr-audit-"+now.Format("2006-01-02")+".jsonl")
+}
+
 // Path returns the file the next write would go to.
 func (l *Logger) Path() string {
-	return filepath.Join(l.dir, "vmr-audit-"+l.now().Format("2006-01-02")+".jsonl")
+	return ActiveLogPath(l.dir, l.now())
 }
 
 // writeBufPool pools the *bytes.Buffer used to encode a Record before it's

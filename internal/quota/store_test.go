@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"vmr/internal/core"
 )
 
 func TestStore_RoundTrip(t *testing.T) {
@@ -204,4 +206,65 @@ func TestStore_EmptyPathFlusherIsNoOp(t *testing.T) {
 	r := NewRegistry("")
 	stop := r.StartFlusher(10 * time.Millisecond)
 	stop() // must return promptly, not block forever
+}
+
+func TestStore_PruneOrphanKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	r := NewRegistry(path)
+	ps := time.Now()
+
+	// Seed state with multiple providers and keys
+	r.Charge("removed-provider", "requests/1mo", ps, Counters{Requests: 10}, 0)
+	r.Charge("active-p1", "requests/1mo", ps, Counters{Requests: 5}, 0)               // old every
+	r.Charge("active-p1", "requests/1d", ps, Counters{Requests: 2}, 0)                // current every
+	r.Charge("active-p2", "requests/1d#model=gpt-4o", ps, Counters{Requests: 3}, 0)   // allowed model
+	r.Charge("active-p2", "requests/1d#model=orphan-m", ps, Counters{Requests: 4}, 0) // orphan model
+
+	if err := r.Flush(); err != nil {
+		t.Fatalf("initial Flush: %v", err)
+	}
+
+	valid := map[string][]core.Limit{
+		"active-p1": {
+			{Metric: core.MetricRequests, EveryText: "1d"},
+		},
+		"active-p2": {
+			{Metric: core.MetricRequests, EveryText: "1d", Models: []string{"gpt-4o"}},
+		},
+	}
+
+	pruned := r.Prune(valid)
+	if pruned != 3 { // removed-provider (1), active-p1 old key (1), active-p2 orphan model (1)
+		t.Fatalf("pruned = %d, want 3", pruned)
+	}
+
+	if err := r.Flush(); err != nil {
+		t.Fatalf("Flush after prune: %v", err)
+	}
+
+	// Reload in fresh registry and verify
+	r2 := NewRegistry(path)
+	if err := r2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// removed-provider should be gone
+	if c, _ := r2.Used("removed-provider", "requests/1mo", ps); c.Requests != 0 {
+		t.Errorf("removed-provider still exists with requests=%v", c.Requests)
+	}
+	// active-p1 old key gone, new key preserved
+	if c, _ := r2.Used("active-p1", "requests/1mo", ps); c.Requests != 0 {
+		t.Errorf("active-p1 old key still exists with requests=%v", c.Requests)
+	}
+	if c, _ := r2.Used("active-p1", "requests/1d", ps); c.Requests != 2 {
+		t.Errorf("active-p1 valid key = %v, want 2", c.Requests)
+	}
+	// active-p2 orphan model gone, gpt-4o preserved
+	if c, _ := r2.Used("active-p2", "requests/1d#model=orphan-m", ps); c.Requests != 0 {
+		t.Errorf("active-p2 orphan model still exists with requests=%v", c.Requests)
+	}
+	if c, _ := r2.Used("active-p2", "requests/1d#model=gpt-4o", ps); c.Requests != 3 {
+		t.Errorf("active-p2 gpt-4o = %v, want 3", c.Requests)
+	}
 }

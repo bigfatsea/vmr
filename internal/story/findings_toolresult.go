@@ -18,17 +18,6 @@ import (
 	"vmr/internal/i18n"
 )
 
-// normalizeToolCallID strips underscores — the deterministic rewrite the
-// OpenClaw family of clients applies when echoing a tool_call id back into
-// the next request's history ("call_00_xHodG…" -> "call00xHodG…", root-
-// caused to the client, not any upstream provider/gateway —
-// story_report_architecture_opus-5.md §5). Still an exact match, not an
-// inference (zero observed collisions in the verification corpus), so it
-// stays admissible as Finding-detector evidence — the dividing line is
-// between this level and the render-only positional fallback
-// (positionalToolResults, render_spine_step.go), not between exact and this.
-func normalizeToolCallID(id string) string { return strings.ReplaceAll(id, "_", "") }
-
 // toolResultsFor returns the ToolResult entries answering steps[i]'s own
 // ToolCalls. Looked up from the FOLLOWING step's request body rather than
 // steps[i]'s own — a well-formed protocol turn can't get a new response
@@ -39,7 +28,7 @@ func normalizeToolCallID(id string) string { return strings.ReplaceAll(id, "_", 
 // Step (no following request to look in — its calls' results, if any,
 // aren't visible in what was recorded).
 //
-// Matches in two passes — exact id first, then normalizeToolCallID's
+// Matches in two passes — exact id first, then chatmsg.NormalizeToolCallID's
 // underscore-stripped form — and, on a normalized-only match, rewrites the
 // returned ToolResult.CallID back to the ORIGINAL steps[i].ToolCalls[].ID
 // (never the possibly-stripped id the client echoed). Every caller —
@@ -55,7 +44,7 @@ func toolResultsFor(steps []*Step, i int) []chatmsg.ToolResult {
 	byNorm := make(map[string]string, len(steps[i].ToolCalls)) // normalized id -> original tc.ID
 	for _, tc := range steps[i].ToolCalls {
 		exact[tc.ID] = true
-		byNorm[normalizeToolCallID(tc.ID)] = tc.ID
+		byNorm[chatmsg.NormalizeToolCallID(tc.ID)] = tc.ID
 	}
 	body, _ := steps[i+1].Rec.Client.Request.Body.(map[string]any)
 	var out []chatmsg.ToolResult
@@ -64,7 +53,7 @@ func toolResultsFor(steps []*Step, i int) []chatmsg.ToolResult {
 			out = append(out, r)
 			continue
 		}
-		if orig, ok := byNorm[normalizeToolCallID(r.CallID)]; ok {
+		if orig, ok := byNorm[chatmsg.NormalizeToolCallID(r.CallID)]; ok {
 			r.CallID = orig
 			out = append(out, r)
 		}

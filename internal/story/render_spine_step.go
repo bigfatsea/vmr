@@ -300,7 +300,7 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 	knownNorm := make(map[string]bool, len(s.ToolCalls))
 	var unresolved []chatmsg.ToolCall
 	for _, tc := range s.ToolCalls {
-		knownNorm[normalizeToolCallID(tc.ID)] = true
+		knownNorm[chatmsg.NormalizeToolCallID(tc.ID)] = true
 		if _, ok := byID[tc.ID]; !ok {
 			unresolved = append(unresolved, tc)
 		}
@@ -327,7 +327,7 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 	}
 	var leftover []chatmsg.ToolResult
 	for _, r := range chatmsg.ToolResultList(rawArr) {
-		if !knownNorm[normalizeToolCallID(r.CallID)] {
+		if !knownNorm[chatmsg.NormalizeToolCallID(r.CallID)] {
 			leftover = append(leftover, r)
 		}
 	}

@@ -125,3 +125,21 @@ func TestCheckToolPairing_Empty(t *testing.T) {
 		t.Errorf("empty input should report OK with zero calls/results, got %+v", r)
 	}
 }
+
+func TestNormalizeToolCallID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"call_00_xHodG", "call00xHodG"},
+		{"call_abc_123_xyz", "callabc123xyz"},
+		{"tooluse_123", "tooluse123"},
+		{"alreadyclean123", "alreadyclean123"},
+	}
+	for _, tc := range cases {
+		if got := NormalizeToolCallID(tc.in); got != tc.want {
+			t.Errorf("NormalizeToolCallID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

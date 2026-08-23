@@ -10,6 +10,13 @@
 // Step's flattened-and-deduped text blob with no per-call boundary.
 package chatmsg
 
+import "strings"
+
+// NormalizeToolCallID strips underscores from a tool call ID — the deterministic
+// rewrite that the OpenClaw family of clients applies when echoing a tool_call id
+// back into the next request's history ("call_00_xHodG…" -> "call00xHodG…").
+func NormalizeToolCallID(id string) string { return strings.ReplaceAll(id, "_", "") }
+
 // ToolResult is one tool_call's answering tool_result, decoded from a
 // request body's raw message list.
 type ToolResult struct {

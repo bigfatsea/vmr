@@ -216,7 +216,10 @@ func (s *Server) auditBlock(snap *router.Snapshot) map[string]any {
 	if snap.Cfg.LogDir == "" {
 		return nil
 	}
-	todayFile := filepath.Join(snap.Cfg.LogDir, "vmr-audit-"+time.Now().Format("2006-01-02")+".jsonl")
+	todayFile := audit.ActiveLogPath(snap.Cfg.LogDir, time.Now())
+	if s.audit != nil {
+		todayFile = s.audit.Path()
+	}
 	var activeBytes int64
 	if fi, err := os.Stat(todayFile); err == nil {
 		activeBytes = fi.Size()

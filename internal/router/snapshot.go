@@ -281,6 +281,9 @@ func (rt *Router) Install(s *Snapshot) {
 		}
 	}
 	rt.installLimiter(s.Cfg.MaxConcurrency)
+	if rt.Quota != nil {
+		rt.Quota.Prune(s.ProviderLimits())
+	}
 	if old := rt.snap.Swap(s); old != nil {
 		// Release the previous pools' idle connections now instead of
 		// waiting for GC. In-flight requests still holding the old
@@ -289,6 +292,24 @@ func (rt *Router) Install(s *Snapshot) {
 			c.CloseIdleConnections()
 		}
 	}
+}
+
+// ProviderLimits returns a map of provider name -> configured Limits from this snapshot.
+func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
+	if s == nil || s.Cfg == nil {
+		return nil
+	}
+	out := make(map[string][]core.Limit, len(s.Cfg.Providers))
+	for _, p := range s.Cfg.Providers {
+		if p.Quota != nil && len(p.Quota.Limits) > 0 {
+			limits := make([]core.Limit, len(p.Quota.Limits))
+			for i, lc := range p.Quota.Limits {
+				limits[i] = lc.Resolved
+			}
+			out[p.Name] = limits
+		}
+	}
+	return out
 }
 
 func (rt *Router) Snapshot() *Snapshot { return rt.snap.Load() }

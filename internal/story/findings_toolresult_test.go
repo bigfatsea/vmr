@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -68,8 +69,8 @@ func TestNormalizeToolCallID(t *testing.T) {
 		"noUnderscoresAtAll":               "noUnderscoresAtAll",
 	}
 	for in, want := range cases {
-		if got := normalizeToolCallID(in); got != want {
-			t.Errorf("normalizeToolCallID(%q) = %q, want %q", in, got, want)
+		if got := chatmsg.NormalizeToolCallID(in); got != want {
+			t.Errorf("chatmsg.NormalizeToolCallID(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
