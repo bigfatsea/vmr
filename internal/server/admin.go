@@ -65,6 +65,9 @@ var vmrVersion = sync.OnceValue(func() string { return buildinfo.Read().Short() 
 // adminStatus reports process identity, config freshness, system resources,
 // traffic telemetry, per-endpoint health and quota gauges.
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
+	// Same rationale as /health's header — every field moves on every request
+	// and the dashboard polls this endpoint.
+	w.Header().Set("Cache-Control", "no-store")
 	snap := s.rt.Snapshot()
 	now := time.Now()
 	type epStatus struct {

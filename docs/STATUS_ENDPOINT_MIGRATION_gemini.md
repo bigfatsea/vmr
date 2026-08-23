@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-23 12:58, by Gemini 3.7 Flash -->
+<!-- Ver 2026-08-23 17:33, by Gemini 3.7 Flash -->
 
 # VMR `/status` 端点改造与局域网访问方案设计
 
@@ -331,6 +331,7 @@ ok  	vmr/tools/gen_standard_pricing	2.507s
 1. **旧脚本兼容性（Breaking Change）**:
    - 若用户有外部监控脚本或 curl 请求硬编码了 `GET /admin/status`，在升级后将收到 `404 Not Found`。
    - 解决方案：外部脚本需将请求路径修改为 `GET /status`，且在服务端配置了 `api_keys` 时必须在 Header 中携带 `Authorization: Bearer <key>` 或 `x-api-key: <key>`。
+   - 同批变更同时重构了 JSON payload 的形状（顶层字段归入 `instance.config`/`instance.concurrency`，新增 `system`/`traffic` 块，见 STATUS_REPORT_DESIGN 与 CHANGELOG）——用 `jq` 等工具解析旧字段的脚本同样需要按新形状改写。项目原则是 CLI/Server 版本必须匹配、不做兼容性处理（KNOWN_ISSUES §2.2）；外部消费者的形状破坏仅在此提示，不设兼容层。
 2. **URL Query Param 鉴权暂不支持**:
    - 遵照决策，目前仅支持 Header 鉴权，暂不开放 `?key=` 或 `?api_key=` 查询参数鉴权，以防敏感 Token 泄漏在中间代理的访问日志或浏览器历史中。
 3. **多 Key 场景下的 CLI 缺省行为**:

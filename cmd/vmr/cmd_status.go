@@ -109,17 +109,12 @@ type statusResponse struct {
 		Available     bool      `json:"available"`
 		Probing       bool      `json:"probing"`
 		// Serving is health.Status.Serving — see its doc comment. Used below
-		// instead of Available (which stays true through the entire
-		// half-open window) to decide the COOLDOWN vs half-open vs ok split.
-		// A pointer, not a bare bool: a `vmr status` binary built after this
-		// field was added can still query an older, already-running `vmr
-		// start` process (e.g. right after a Homebrew tap upgrade, before
-		// the service is restarted) whose /status predates it — the
-		// JSON response then omits "serving" entirely, and a bare bool
-		// would silently decode to false, misrendering every healthy
-		// endpoint as half-open. nil means "server didn't send it", not
-		// "not serving".
-		Serving *bool `json:"serving"`
+		// instead of Available (which stays true through the entire half-open
+		// window) to decide the COOLDOWN vs half-open vs ok split. A bare bool,
+		// not a pointer: CLI and server must be the same vmr version (a shape
+		// mismatch hard-errors at instance.config long before this field is
+		// reached), so there is no older-server case to defend against.
+		Serving bool `json:"serving"`
 	} `json:"models"`
 	// Quota is absent (nil slice) from the JSON entirely when no provider
 	// has quota: configured — server/admin.go only sets the "quota" key

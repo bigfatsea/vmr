@@ -233,23 +233,10 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	statusResp, err := http.Get(ts.URL + "/status")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer statusResp.Body.Close()
-	var out struct {
-		Models map[string][]struct {
-			Endpoint      string    `json:"endpoint"`
-			Available     bool      `json:"available"`
-			Fails         int       `json:"consecutive_failures"`
-			LastError     string    `json:"last_error"`
-			CooldownUntil time.Time `json:"cooldown_until"`
-		} `json:"models"`
-	}
-	if err := json.NewDecoder(statusResp.Body).Decode(&out); err != nil {
-		t.Fatal(err)
-	}
+	// Poll /status instead of reading it once: hits is incremented inside the
+	// probe handler while ReportFailure runs after the response is written,
+	// so a single read right after hits==2 races that window and sees the
+	// stale fails=1 (observed flaky under full-repo parallel -race runs).
 	var p1 *struct {
 		Endpoint      string    `json:"endpoint"`
 		Available     bool      `json:"available"`
@@ -257,13 +244,42 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		LastError     string    `json:"last_error"`
 		CooldownUntil time.Time `json:"cooldown_until"`
 	}
-	for i, ep := range out.Models["vm [openai]"] {
-		if ep.Endpoint == "openai/p1/model-one" {
-			p1 = &out.Models["vm [openai]"][i]
+	for {
+		statusResp, err := http.Get(ts.URL + "/status")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if p1 == nil {
-		t.Fatal("p1 missing from /status")
+		var out struct {
+			Models map[string][]struct {
+				Endpoint      string    `json:"endpoint"`
+				Available     bool      `json:"available"`
+				Fails         int       `json:"consecutive_failures"`
+				LastError     string    `json:"last_error"`
+				CooldownUntil time.Time `json:"cooldown_until"`
+			} `json:"models"`
+		}
+		err = json.NewDecoder(statusResp.Body).Decode(&out)
+		statusResp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, ep := range out.Models["vm [openai]"] {
+			if ep.Endpoint == "openai/p1/model-one" {
+				p1 = &out.Models["vm [openai]"][i]
+			}
+		}
+		if p1 == nil {
+			t.Fatal("p1 missing from /status")
+		}
+		if !p1.Available && p1.Fails >= 2 && p1.LastError == "endpoint" {
+			break
+		}
+		if time.Now().After(deadline) {
+			// One final assertion through the checks below, so the failure
+			// message shows the last observed health state rather than a bare timeout.
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	// fails must have grown past the initial rate-limit failure (proves
 	// ReportFailure ran, not ReportNeutral, which would have left fails

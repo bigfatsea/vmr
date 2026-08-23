@@ -100,19 +100,11 @@ func printStatus(st *statusResponse) {
 	for _, name := range core.SortedKeys(st.Models) {
 		fmt.Println(name) // key is already "name [protocol]"
 		for _, ep := range st.Models[name] {
-			// notServing falls back to the pre-Serving-field heuristic
-			// (Fails>0) when an older server's response omits "serving"
-			// entirely (ep.Serving == nil) — see the Serving field's doc
-			// comment for why that's a real, not just theoretical, case.
-			notServing := ep.Fails > 0
-			if ep.Serving != nil {
-				notServing = !*ep.Serving
-			}
 			state := "ok"
 			if !ep.Available {
 				state = fmt.Sprintf("COOLDOWN until %s (%s, fails=%d)",
 					ep.CooldownUntil.In(fmtutil.DisplayZone).Format("15:04:05"), ep.LastError, ep.Fails)
-			} else if notServing {
+			} else if !ep.Serving {
 				// Available (cooldown expired) but not Serving: the
 				// half-open window — real traffic isn't routed here yet,
 				// only a background probe, whether or not one currently

@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-23 06:55, by gemini-3.7-flash -->
+<!-- Ver 2026-08-23 17:33, by gemini-3.7-flash -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -213,7 +213,8 @@
 
 ### 2.2 配置与协议
 
-- **CLI 与 Server 版本必须匹配，`/status` payload 形状不兼容时直接报错，不做双形状兼容解析**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`json.RawMessage` 式的兼容层只覆盖一个滚动升级窗口，却会永久留在代码里，违反 KISS。`vmr.sh ps` 的 `|| true` 退化为标注行是它自己的容错，不受此限；错误信息会明确提示"server and client vmr versions differ"。字段*新增*（旧 server 缺失新 key）与形状*变更*（类型不匹配）是两种不同情形：前者无法也不需报错（缺失 key 无法与"老版本没有这个字段"区分），后者自然报错——`serving` 的 `*bool` 兜底属于前者，保留。
+- **CLI 与 Server 版本必须匹配，任何不一致造成的问题直接报错，不做兼容性处理**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`json.RawMessage` 式的兼容层只覆盖一个滚动升级窗口，却会永久留在代码里，违反 KISS。`vmr.sh ps` 的 `|| true` 退化为标注行是它自己的容错，不受此限；错误信息会明确提示"server and client vmr versions differ"。这条原则覆盖字段*新增*与形状*变更*两种情形：曾为"旧 server 缺失新 key"保留的 `serving` 字段 `*bool` 兜底，在 `instance.config` 由 string 改为 object 后实际已不可达（新 CLI 解析旧 server 响应时在 `config` 处即硬失败，永远走不到 `serving`），已作为死代码删除（2026-08-23，`vmr status` review P4 落地）——版本必须匹配的原则不再留任何字段级例外。
+- **`/status` 的 `traffic.by_status` 在流式中途截断时记为 `error`，与审计顶层 `outcome` 对同一请求记 `ok` 口径不同（刻意保留，不做对齐）**：`forwardSuccess` 里 `RecordOutcome` 把 TRUNCATED 计入 `error`——它回答的问题是"客户端是否拿到了完整响应"；而审计侧对 HTTP 200 且非取消的请求顶层记 `ok`，截断信息记录在 attempt 的 `ErrorClass` 上——它回答的问题是"HTTP 交换是否在传输层正常完成"。两个账本回答的问题不同，各自口径内部自洽；强行对齐会让其中一个失去自己的语义。两处代码（`Telemetry.RecordOutcome` 的 doc comment 与 `forwardSuccess` 调用点）已互相指向本条。若未来有人对账时发现 `/status` 错误数与 `vmr report` 错误数不一致，先查这里再报 bug。
 
 - **环境变量未定义时静默展开为空串，且不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值应在 YAML 里显式写出。
 - **`internal/config` 的三层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 阶段跑完解析，看起来像「配置层反向侵入用例层」，因此被反复提出。但这是 `docs/VirtualModelRouter_Design_v4_Quota.md` 决策表「定价的落点」一行**明文选定的方案**，「只让 report 一侧解析、`metric: cost` 另开一条运行时校验路径」正是同一行里已否决的备选（理由：两份实现容易漂移）。后置还会摧毁「`metric: cost` 费率不齐 = **加载期**错误」这条硬要求——`vmr check` 将不再能在不联网的情况下告诉你费率配错了，一个确定的加载期失败被换成运行期意外。

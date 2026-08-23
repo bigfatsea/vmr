@@ -558,6 +558,9 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	if ok {
 		rt.Telemetry.RecordTokens(usage.Fresh(), usage.CacheWrite, usage.CacheRead, usage.Reasoning, usage.Out)
 	}
+	// TRUNCATED counts as error here while the audit record's top-level
+	// outcome says ok (see audit.OutcomeFor) — deliberate split, see
+	// Telemetry.RecordOutcome's doc comment.
 	rt.Telemetry.RecordOutcome(copyErr == nil && status != "CANCELED", status == "CANCELED")
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
 	return true, nil, true

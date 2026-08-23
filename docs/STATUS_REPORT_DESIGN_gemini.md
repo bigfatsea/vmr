@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-23 14:35, by Gemini -->
+<!-- Ver 2026-08-23 17:33, by Gemini -->
 
 # VMR `GET /status` 运行态状态报告全景设计与字段梯队分析
 
@@ -81,7 +81,7 @@
 
 ### 3.4 `traffic` 流量：固定维度原子累加器与 5 分量 Token
 1. **请求计数（Option 2A 决策）**：
-   - `traffic.requests` 仅包含编译期确定的固定维度：`total`, `by_protocol` (`openai`/`anthropic`/`responses`), `by_status` (`ok`/`canceled`/`error`)。
+   - `traffic.requests` 仅包含编译期确定的固定维度：`total`, `by_protocol` (`openai`/`anthropic`/`openai-responses`), `by_status` (`ok`/`canceled`/`error`)。
    - **优势**：拒绝使用动态字符串 Map 记录每个模型和端点的请求数，彻底规避热重载时的 Map 垃圾残留与并发锁同步问题，仅用不到 10 个 `atomic.Uint64` 变量实现零开销统计。
 2. **Token 消耗（Option 1A 决策）**：
    - `traffic.tokens.total` 统一记录全局 5 分量：`in` (Fresh), `cache_write`, `cache_read`, `reasoning` (思考/推理 Token), `out` (生成)。
@@ -143,8 +143,8 @@
 | 候选字段 | 数据类型 | 数据来源 | 业务与运维含义 | 采集开销 | 安全/敏感度 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `traffic.requests.total` | `uint64` | Server 原子计数器 | 启动以来累计处理的 HTTP 请求总数 | 零 | 安全 |
-| `traffic.requests.by_protocol` | `map[string]uint64` | 协议入口原子累加 | 按协议分类 (`openai`, `anthropic`, `responses`) | 极低 | 安全 |
-| `traffic.requests.by_status` | `map[string]uint64` | 响应归一化原子累加 | 按结果状态分类 (`ok`, `canceled`, `error`) | 极低 | 安全 |
+| `traffic.requests.by_protocol` | `map[string]uint64` | 协议入口原子累加 | 按协议分类 (`openai`, `anthropic`, `openai-responses`) | 极低 | 安全 |
+| `traffic.requests.by_status` | `map[string]uint64` | 响应归一化原子累加 | 按结果状态分类 (`ok`, `canceled`, `error`；截断计为 `error`，与审计顶层 `outcome` 的口径差异见 KNOWN_ISSUES §2.2) | 极低 | 安全 |
 | `traffic.tokens.total` | `struct` | Usage Sniffing 累加 | 包含 `in`, `cache_write`, `cache_read`, `reasoning`, `out` 5 分量总计 | 零 | 安全 |
 | `traffic.sticky.entries` | `int` | `sticky.Registry.Len()` | 内存中注册的活跃会话指纹总数 | 极低 (已实现) | 安全 |
 
@@ -298,7 +298,8 @@
       "total": 1420,
       "by_protocol": {
         "openai": 820,
-        "anthropic": 600
+        "anthropic": 600,
+        "openai-responses": 0
       },
       "by_status": {
         "ok": 1395,
@@ -347,6 +348,9 @@
   },
 
   // 5. 额度感知与配速状态 (Tier 1，未配置 quota 时整块省略)
+  // 注：本样例为示意（早期设计稿），字段命名与嵌套以实现为准——
+  // 实际实现中窗口字段为 every、无 score、token 明细平铺为
+  // token_weights + model_multipliers，见 internal/server/admin.go。
   "quota": [
     {
       "provider": "openrouter-main",
@@ -409,10 +413,8 @@
    - `log_dir` 与 `image_cache_dir` 均为扁平单层目录，文件数在几十至几百个，现场 `os.ReadDir` 耗时约 0.1~0.2ms。
    - 彻底摆脱在写入链路维护累加器的状态负担，保持代码极度简洁（KISS 原则）。
 
-### 7.3 向后兼容性策略 (Backward Compatibility)
-1. **CLI 兼容性**：
-   - `cmd/vmr/cmd_status.go` 采用强类型结构体反序列化，Go 的 `json.Unmarshal` 默认会忽略未定义的键。
-   - 结构体的演进不会影响老版本客户端。
+### 7.3 版本一致性策略 (Version Consistency)
+1. **CLI 与 Server 版本必须匹配，形状不兼容直接报错**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`fetchStatus` 对 `json.Unmarshal` 失败统一报 "server and client vmr versions differ"，不做任何双形状兼容解析（决策全文见 `docs/KNOWN_ISSUES_sonnet-5.md` §2.2）。
 2. **渐进式渲染**：
    - CLI 客户端可在后续迭代中按需引入对 `system` 内存、`traffic` 吞吐的终端高亮排版渲染。
 

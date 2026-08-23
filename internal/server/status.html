@@ -79,7 +79,7 @@
     .badge-danger { background: var(--red-bg); color: var(--red); border-color: rgba(248, 81, 73, 0.3); }
     
     .controls { display: flex; align-items: center; gap: 10px; }
-    select, button, input {
+    button, input {
       font-family: inherit;
       font-size: 13px;
       background: var(--card-bg);
@@ -90,7 +90,7 @@
       outline: none;
       transition: all 0.15s ease;
     }
-    select:hover, button:hover, input:hover { border-color: var(--text-muted); }
+    button:hover, input:hover { border-color: var(--text-muted); }
     button { cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500; }
     button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
     button.primary:hover { background: var(--accent-hover); }
@@ -266,13 +266,6 @@
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
     .hidden { display: none !important; }
 
-    /* Spinner */
-    .spin {
-      display: inline-block;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
-
     @media (max-width: 768px) {
       .grid-4, .grid-2 { grid-template-columns: 1fr; }
       header { flex-direction: column; align-items: flex-start; }
@@ -294,17 +287,6 @@
       </div>
       <div class="controls">
         <span class="badge badge-success" id="badge-uptime">uptime: ...</span>
-        <select id="select-refresh" title="Auto-refresh interval">
-          <option value="5">Refresh: 5s</option>
-          <option value="15" selected>Refresh: 15s</option>
-          <option value="30">Refresh: 30s</option>
-          <option value="60">Refresh: 60s</option>
-          <option value="0">Refresh: Off</option>
-        </select>
-        <button id="btn-refresh" title="Manual refresh">
-          <span id="refresh-icon">⟳</span>
-          <span id="countdown-text">15s</span>
-        </button>
         <button id="btn-auth" title="Manage API Key">🔑 Key</button>
       </div>
     </header>
@@ -366,8 +348,8 @@
             </span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">OpenAI / Anthropic</span>
-            <span class="stat-val" id="metric-protocols">0 / 0</span>
+            <span class="stat-label">OpenAI / Anthropic / Responses</span>
+            <span class="stat-val" id="metric-protocols">0 / 0 / 0</span>
           </div>
         </div>
       </div>
@@ -384,6 +366,10 @@
           <div class="stat-item">
             <span class="stat-label">Cache Read (Hit %)</span>
             <span class="stat-val" id="metric-tokens-cache">0 (0%)</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Cache Write / Reasoning</span>
+            <span class="stat-val" id="metric-tokens-cw-reasoning">0 / 0</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">Sticky Sessions</span>
@@ -481,8 +467,10 @@
     };
 
     // --- State & Timers ---
-    let refreshSeconds = 15;
-    let countdown = 15;
+    // Fixed 5-minute auto refresh — deliberately not configurable, and no
+    // manual-refresh control (a browser reload of the page covers that).
+    const REFRESH_SECONDS = 300;
+    let countdown = REFRESH_SECONDS;
     let startedAt = null;
     let lastData = null;
 
@@ -540,6 +528,7 @@
       tokensTotal: document.getElementById('metric-tokens-total'),
       tokensInOut: document.getElementById('metric-tokens-inout'),
       tokensCache: document.getElementById('metric-tokens-cache'),
+      tokensCwReasoning: document.getElementById('metric-tokens-cw-reasoning'),
       sticky: document.getElementById('metric-sticky'),
       audit: document.getElementById('metric-audit'),
       imageCache: document.getElementById('metric-image-cache'),
@@ -548,10 +537,6 @@
       quotaSection: document.getElementById('quota-section'),
       quotaTbody: document.getElementById('quota-tbody'),
       quotaCount: document.getElementById('badge-quota-count'),
-      countdownText: document.getElementById('countdown-text'),
-      refreshIcon: document.getElementById('refresh-icon'),
-      btnRefresh: document.getElementById('btn-refresh'),
-      selectRefresh: document.getElementById('select-refresh'),
       btnAuth: document.getElementById('btn-auth'),
       authModal: document.getElementById('auth-modal'),
       inputApiKey: document.getElementById('input-api-key'),
@@ -636,7 +621,7 @@
       dom.reqCancel.textContent = `Cancel: ${fmtNum(byStat.canceled || 0)}`;
       dom.reqErr.textContent = `Err: ${fmtNum(byStat.error || 0)}`;
       const byProto = reqs.by_protocol || {};
-      dom.protocols.textContent = `${fmtNum(byProto.openai || 0)} / ${fmtNum(byProto.anthropic || 0)}`;
+      dom.protocols.textContent = `${fmtNum(byProto.openai || 0)} / ${fmtNum(byProto.anthropic || 0)} / ${fmtNum(byProto['openai-responses'] || 0)}`;
 
       // Tokens
       const totalToks = (toks.in || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0) + (toks.out || 0);
@@ -645,6 +630,7 @@
       const totalIn = (toks.in || 0) + (toks.cache_read || 0);
       const hitPct = totalIn > 0 ? Math.round(((toks.cache_read || 0) / totalIn) * 100) : 0;
       dom.tokensCache.textContent = `${fmtNum(toks.cache_read || 0)} (${hitPct}%)`;
+      dom.tokensCwReasoning.textContent = `${fmtNum(toks.cache_write || 0)} / ${fmtNum(toks.reasoning || 0)}`;
       dom.sticky.textContent = traf.sticky ? traf.sticky.entries : 0;
 
       // Storage
@@ -783,7 +769,6 @@
 
     // --- Data Fetching ---
     async function fetchStatus() {
-      dom.refreshIcon.classList.add('spin');
       const key = Auth.getKey();
       const headers = {};
       if (key) {
@@ -804,9 +789,7 @@
         const data = await resp.json();
         dom.authModal.classList.add('hidden');
         renderDashboard(data);
-        countdown = refreshSeconds;
       } catch (err) {
-        console.error('Fetch status failed:', err);
         // Surface transport failure (vmr down / network gone) instead of
         // silently leaving the last snapshot on screen as if it were live.
         dom.banners.innerHTML = `
@@ -814,24 +797,12 @@
             <span>⚠️</span>
             <div><strong>Cannot reach vmr:</strong> ${esc(err.message)} - showing the last successful snapshot, if any.</div>
           </div>`;
-      } finally {
-        dom.refreshIcon.classList.remove('spin');
       }
     }
 
     updateAuthButton();
 
     // --- Event Listeners ---
-    dom.selectRefresh.addEventListener('change', (e) => {
-      refreshSeconds = parseInt(e.target.value, 10);
-      countdown = refreshSeconds;
-      dom.countdownText.textContent = refreshSeconds > 0 ? `${countdown}s` : 'Off';
-    });
-
-    dom.btnRefresh.addEventListener('click', () => {
-      fetchStatus();
-    });
-
     dom.btnAuth.addEventListener('click', () => {
       dom.inputApiKey.value = Auth.getKey();
       dom.authError.classList.add('hidden');
@@ -869,16 +840,11 @@
         dom.uptime.textContent = `uptime: ${fmtDurationSec(upSec)}`;
       }
 
-      // Auto-refresh countdown
-      if (refreshSeconds > 0) {
-        countdown--;
-        if (countdown <= 0) {
-          countdown = refreshSeconds;
-          fetchStatus();
-        }
-        dom.countdownText.textContent = `${countdown}s`;
-      } else {
-        dom.countdownText.textContent = 'Off';
+      // Auto-refresh on the fixed interval
+      countdown--;
+      if (countdown <= 0) {
+        countdown = REFRESH_SECONDS;
+        fetchStatus();
       }
 
       // Endpoint cooldown countdowns
