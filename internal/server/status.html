@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<!-- Ver 2026-08-23 15:42, by Gemini -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Status Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --green-bg: rgba(63, 185, 80, 0.15);
+      --yellow: #d29922;
+      --yellow-bg: rgba(210, 153, 34, 0.15);
+      --red: #f85149;
+      --red-bg: rgba(248, 81, 73, 0.15);
+      --purple: #bc8cff;
+      --cyan: #39c5cf;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 24px 16px;
+    }
+    .container { max-width: 1280px; margin: 0 auto; }
+    
+    /* Header */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 20px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 20px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--card-border);
+      color: var(--text);
+      border: 1px solid transparent;
+    }
+    .badge-primary { background: rgba(88, 166, 255, 0.15); color: var(--accent); border-color: rgba(88, 166, 255, 0.3); }
+    .badge-success { background: var(--green-bg); color: var(--green); border-color: rgba(63, 185, 80, 0.3); }
+    .badge-warning { background: var(--yellow-bg); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
+    .badge-danger { background: var(--red-bg); color: var(--red); border-color: rgba(248, 81, 73, 0.3); }
+    
+    .controls { display: flex; align-items: center; gap: 10px; }
+    select, button, input {
+      font-family: inherit;
+      font-size: 13px;
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    select:hover, button:hover, input:hover { border-color: var(--text-muted); }
+    button { cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
+    button.primary:hover { background: var(--accent-hover); }
+    
+    /* Banners */
+    .banner {
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .banner-warning { background: var(--yellow-bg); border: 1px solid rgba(210, 153, 34, 0.4); color: var(--yellow); }
+    .banner-danger { background: var(--red-bg); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--red); }
+    .banner strong { font-weight: 600; }
+
+    /* Grid Layouts */
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-main { font-size: 24px; font-weight: 700; color: var(--text-bright); font-family: var(--font-mono); }
+    .stat-list { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    .stat-item { display: flex; justify-content: space-between; align-items: center; }
+    .stat-label { color: var(--text-muted); }
+    .stat-val { font-family: var(--font-mono); font-weight: 600; color: var(--text-bright); }
+
+    /* Progress bar */
+    .progress-bar-bg {
+      height: 6px;
+      background: #21262d;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .fill-green { background: var(--green); }
+    .fill-yellow { background: var(--yellow); }
+    .fill-red { background: var(--red); }
+
+    /* Section Headings */
+    .section-head {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin: 24px 0 12px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Model Cards & Tables */
+    .model-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .model-header {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .model-name { font-size: 15px; font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
+    
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+    th {
+      padding: 10px 16px;
+      background: #11151c;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+      font-family: var(--font-mono);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255, 255, 255, 0.015); }
+    
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .pill-ok { background: var(--green-bg); color: var(--green); }
+    .pill-cooldown { background: var(--yellow-bg); color: var(--yellow); }
+    .pill-halfopen { background: rgba(57, 197, 207, 0.15); color: var(--cyan); }
+    .pill-probing { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+
+    /* Quota Card */
+    .quota-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .quota-title {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text-bright);
+    }
+    .quota-meta { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+    
+    /* Modals */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+    }
+    .modal h2 { font-size: 18px; color: var(--text-bright); }
+    .modal p { font-size: 13px; color: var(--text-muted); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .hidden { display: none !important; }
+
+    /* Spinner */
+    .spin {
+      display: inline-block;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    @media (max-width: 768px) {
+      .grid-4, .grid-2 { grid-template-columns: 1fr; }
+      header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <h1>VMR Dashboard</h1>
+        <div class="badges">
+          <span class="badge badge-primary" id="badge-version">v...</span>
+          <span class="badge" id="badge-pid">PID:...</span>
+          <span class="badge" id="badge-listen">...</span>
+          <span class="badge" id="badge-osarch">...</span>
+        </div>
+      </div>
+      <div class="controls">
+        <span class="badge badge-success" id="badge-uptime">uptime: ...</span>
+        <select id="select-refresh" title="Auto-refresh interval">
+          <option value="5">Refresh: 5s</option>
+          <option value="15" selected>Refresh: 15s</option>
+          <option value="30">Refresh: 30s</option>
+          <option value="60">Refresh: 60s</option>
+          <option value="0">Refresh: Off</option>
+        </select>
+        <button id="btn-refresh" title="Manual refresh">
+          <span id="refresh-icon">⟳</span>
+          <span id="countdown-text">15s</span>
+        </button>
+        <button id="btn-auth" title="Manage API Key">🔑 Key</button>
+      </div>
+    </header>
+
+    <!-- Banners Container -->
+    <div id="banners-container"></div>
+
+    <!-- Core Metrics Grid -->
+    <div class="grid-4">
+      <!-- Concurrency -->
+      <div class="card">
+        <div class="card-title">
+          <span>Concurrency</span>
+          <span id="metric-concurrency-pct">0%</span>
+        </div>
+        <div class="card-main" id="metric-concurrency-val">0 / 0</div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="bar-concurrency" style="width: 0%"></div>
+        </div>
+        <div class="stat-list">
+          <div class="stat-item">
+            <span class="stat-label">Waiting Queue</span>
+            <span class="stat-val" id="metric-waiting">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- System Resources -->
+      <div class="card">
+        <div class="card-title">System Resources</div>
+        <div class="card-main" id="metric-heap">0 MB</div>
+        <div class="stat-list">
+          <div class="stat-item">
+            <span class="stat-label">Sys Memory</span>
+            <span class="stat-val" id="metric-sys">0 MB</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Goroutines</span>
+            <span class="stat-val" id="metric-goroutines">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Disk Free</span>
+            <span class="stat-val" id="metric-disk">0 GB</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Traffic Telemetry -->
+      <div class="card">
+        <div class="card-title">Traffic Requests</div>
+        <div class="card-main" id="metric-requests-total">0</div>
+        <div class="stat-list">
+          <div class="stat-item">
+            <span class="stat-label">Status</span>
+            <span class="stat-val">
+              <span style="color:var(--green)" id="metric-req-ok">OK: 0</span> ·
+              <span style="color:var(--text-muted)" id="metric-req-cancel">Cancel: 0</span> ·
+              <span style="color:var(--red)" id="metric-req-err">Err: 0</span>
+            </span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">OpenAI / Anthropic</span>
+            <span class="stat-val" id="metric-protocols">0 / 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token Telemetry -->
+      <div class="card">
+        <div class="card-title">Token Breakdown</div>
+        <div class="card-main" id="metric-tokens-total">0</div>
+        <div class="stat-list">
+          <div class="stat-item">
+            <span class="stat-label">Fresh In / Out</span>
+            <span class="stat-val" id="metric-tokens-inout">0 / 0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Cache Read (Hit %)</span>
+            <span class="stat-val" id="metric-tokens-cache">0 (0%)</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Sticky Sessions</span>
+            <span class="stat-val" id="metric-sticky">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Storage & Audit Strip -->
+    <div class="card" id="card-storage" style="margin-bottom: 20px;">
+      <div class="stat-list" style="display:flex; flex-direction:row; flex-wrap:wrap; justify-content:space-between; gap:16px;">
+        <div class="stat-item" style="gap:8px;">
+          <span class="stat-label">Audit Log:</span>
+          <span class="stat-val" id="metric-audit">Disabled</span>
+        </div>
+        <div class="stat-item" style="gap:8px;">
+          <span class="stat-label">Image Cache:</span>
+          <span class="stat-val" id="metric-image-cache">Disabled</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quota & Budgets Section -->
+    <div id="quota-section" class="hidden">
+      <div class="section-head">
+        <span>Quota & Rate Limit Budgets</span>
+        <span class="badge" id="badge-quota-count">0 budgets</span>
+      </div>
+      <div class="model-card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>PROVIDER</th>
+                <th style="white-space: nowrap; min-width: 140px;">METRIC / WINDOW</th>
+                <th style="white-space: nowrap;">ROLE</th>
+                <th style="min-width: 200px;">USAGE / LIMIT (PCT)</th>
+                <th style="white-space: nowrap;">HEADROOM</th>
+                <th style="white-space: nowrap; min-width: 110px;">RESETS IN</th>
+                <th>SCOPE</th>
+              </tr>
+            </thead>
+            <tbody id="quota-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Virtual Models & Endpoints -->
+    <div class="section-head">
+      <span>Virtual Models & Endpoint Topology</span>
+      <span class="badge" id="badge-model-count">0 models</span>
+    </div>
+    <div id="models-container"></div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Authentication Required</h2>
+      <p>This VMR instance is protected with API Key authentication. Please enter your API Key to access the dashboard:</p>
+      <input type="password" id="input-api-key" placeholder="Enter API Key (e.g. sk-...)" autocomplete="off">
+      <div id="auth-error" style="color:var(--red); font-size:12px;" class="hidden"></div>
+      <div class="modal-actions">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Auth Management ---
+    const Auth = {
+      getKey() {
+        return localStorage.getItem('vmr_status_key') || '';
+      },
+      setKey(k) {
+        localStorage.setItem('vmr_status_key', k.trim());
+      },
+      clearKey() {
+        localStorage.removeItem('vmr_status_key');
+      }
+    };
+
+    // --- State & Timers ---
+    let refreshSeconds = 15;
+    let countdown = 15;
+    let startedAt = null;
+    let lastData = null;
+
+    // --- Formatting Helpers ---
+    function fmtNum(n) {
+      if (n === undefined || n === null) return '0';
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return n.toLocaleString();
+    }
+
+    function fmtDurationSec(sec) {
+      if (sec < 0) sec = 0;
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      if (d > 0) return `${d}d ${h}h ${m}m`;
+      if (h > 0) return `${h}h ${m}m ${s}s`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
+    // --- DOM Elements ---
+    const dom = {
+      version: document.getElementById('badge-version'),
+      pid: document.getElementById('badge-pid'),
+      listen: document.getElementById('badge-listen'),
+      osarch: document.getElementById('badge-osarch'),
+      uptime: document.getElementById('badge-uptime'),
+      banners: document.getElementById('banners-container'),
+      concurrencyVal: document.getElementById('metric-concurrency-val'),
+      concurrencyPct: document.getElementById('metric-concurrency-pct'),
+      concurrencyBar: document.getElementById('bar-concurrency'),
+      waiting: document.getElementById('metric-waiting'),
+      heap: document.getElementById('metric-heap'),
+      sys: document.getElementById('metric-sys'),
+      goroutines: document.getElementById('metric-goroutines'),
+      disk: document.getElementById('metric-disk'),
+      requestsTotal: document.getElementById('metric-requests-total'),
+      reqOk: document.getElementById('metric-req-ok'),
+      reqCancel: document.getElementById('metric-req-cancel'),
+      reqErr: document.getElementById('metric-req-err'),
+      protocols: document.getElementById('metric-protocols'),
+      tokensTotal: document.getElementById('metric-tokens-total'),
+      tokensInOut: document.getElementById('metric-tokens-inout'),
+      tokensCache: document.getElementById('metric-tokens-cache'),
+      sticky: document.getElementById('metric-sticky'),
+      audit: document.getElementById('metric-audit'),
+      imageCache: document.getElementById('metric-image-cache'),
+      modelsContainer: document.getElementById('models-container'),
+      modelCount: document.getElementById('badge-model-count'),
+      quotaSection: document.getElementById('quota-section'),
+      quotaTbody: document.getElementById('quota-tbody'),
+      quotaCount: document.getElementById('badge-quota-count'),
+      countdownText: document.getElementById('countdown-text'),
+      refreshIcon: document.getElementById('refresh-icon'),
+      btnRefresh: document.getElementById('btn-refresh'),
+      selectRefresh: document.getElementById('select-refresh'),
+      btnAuth: document.getElementById('btn-auth'),
+      authModal: document.getElementById('auth-modal'),
+      inputApiKey: document.getElementById('input-api-key'),
+      authError: document.getElementById('auth-error'),
+      btnAuthSave: document.getElementById('btn-auth-save'),
+      btnAuthCancel: document.getElementById('btn-auth-cancel'),
+    };
+
+    // --- Render Logic ---
+    function renderDashboard(data) {
+      lastData = data;
+      const inst = data.instance || {};
+      const sys = data.system || {};
+      const traf = data.traffic || {};
+      const reqs = traf.requests || {};
+      const toks = (traf.tokens && traf.tokens.total) || {};
+
+      // Header
+      dom.version.textContent = inst.version || 'unknown';
+      dom.pid.textContent = `PID: ${inst.pid || '-'}`;
+      dom.listen.textContent = inst.listen || '-';
+      dom.osarch.textContent = `${inst.os_arch || ''} (${inst.go_version || ''})`;
+      if (inst.started_at) {
+        startedAt = new Date(inst.started_at).getTime();
+      }
+      dom.uptime.textContent = `uptime: ${inst.uptime || '-'}`;
+
+      // Tooltip for cwd & executable
+      if (inst.cwd || inst.executable) {
+        document.querySelector('.brand').title = `CWD: ${inst.cwd || '-'}\nBIN: ${inst.executable || '-'}`;
+      }
+
+      // Banners
+      dom.banners.innerHTML = '';
+      const cfg = inst.config || {};
+      if (cfg.stale) {
+        dom.banners.innerHTML += `
+          <div class="banner banner-warning">
+            <span>⚠️</span>
+            <div><strong>Configuration Stale:</strong> The config file on disk has been modified since this process started or last reloaded.</div>
+          </div>`;
+      }
+      if (cfg.reload && !cfg.reload.ok && cfg.reload.error) {
+        dom.banners.innerHTML += `
+          <div class="banner banner-danger">
+            <span>❌</span>
+            <div><strong>Hot Reload Rejected:</strong> ${cfg.reload.error} (at ${new Date(cfg.reload.at).toLocaleTimeString()})</div>
+          </div>`;
+      }
+      if (cfg.issues && cfg.issues.length > 0) {
+        cfg.issues.forEach(iss => {
+          dom.banners.innerHTML += `
+            <div class="banner banner-warning">
+              <span>⚠️</span>
+              <div><strong>Config Issue [${iss.severity || 'WARNING'}]:</strong> ${iss.message}</div>
+            </div>`;
+        });
+      }
+
+      // Concurrency
+      const conc = inst.concurrency || { limit: 0, in_flight: 0, waiting: 0 };
+      dom.concurrencyVal.textContent = `${conc.in_flight} / ${conc.limit > 0 ? conc.limit : '∞'}`;
+      dom.waiting.textContent = conc.waiting;
+      let concPct = conc.limit > 0 ? Math.round((conc.in_flight / conc.limit) * 100) : 0;
+      if (concPct > 100) concPct = 100;
+      dom.concurrencyPct.textContent = `${concPct}%`;
+      dom.concurrencyBar.style.width = `${concPct}%`;
+      dom.concurrencyBar.className = 'progress-bar-fill ' + (concPct > 90 ? 'fill-red' : concPct > 70 ? 'fill-yellow' : 'fill-green');
+
+      // System
+      dom.heap.textContent = sys.memory ? sys.memory.heap_alloc : '0 B';
+      dom.sys.textContent = sys.memory ? sys.memory.sys : '0 B';
+      dom.goroutines.textContent = sys.goroutines || 0;
+      dom.disk.textContent = sys.disk ? sys.disk.free_space : '0 B';
+
+      // Traffic
+      dom.requestsTotal.textContent = fmtNum(reqs.total || 0);
+      const byStat = reqs.by_status || {};
+      dom.reqOk.textContent = `OK: ${fmtNum(byStat.ok || 0)}`;
+      dom.reqCancel.textContent = `Cancel: ${fmtNum(byStat.canceled || 0)}`;
+      dom.reqErr.textContent = `Err: ${fmtNum(byStat.error || 0)}`;
+      const byProto = reqs.by_protocol || {};
+      dom.protocols.textContent = `${fmtNum(byProto.openai || 0)} / ${fmtNum(byProto.anthropic || 0)}`;
+
+      // Tokens
+      const totalToks = (toks.in || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0) + (toks.out || 0);
+      dom.tokensTotal.textContent = fmtNum(totalToks);
+      dom.tokensInOut.textContent = `${fmtNum(toks.in || 0)} / ${fmtNum(toks.out || 0)}`;
+      const totalIn = (toks.in || 0) + (toks.cache_read || 0);
+      const hitPct = totalIn > 0 ? Math.round(((toks.cache_read || 0) / totalIn) * 100) : 0;
+      dom.tokensCache.textContent = `${fmtNum(toks.cache_read || 0)} (${hitPct}%)`;
+      dom.sticky.textContent = traf.sticky ? traf.sticky.entries : 0;
+
+      // Storage
+      if (data.audit) {
+        dom.audit.textContent = `Active ${data.audit.active_file_size} · Total ${data.audit.total_size} (${data.audit.retention_days}d retention)`;
+      } else {
+        dom.audit.textContent = 'Disabled';
+      }
+      if (data.image_cache) {
+        dom.imageCache.textContent = `${data.image_cache.size} / ${data.image_cache.capacity}`;
+      } else {
+        dom.imageCache.textContent = 'Disabled';
+      }
+
+      // Models
+      renderModels(data.models || {});
+
+      // Quota
+      if (data.quota && data.quota.length > 0) {
+        dom.quotaSection.classList.remove('hidden');
+        renderQuota(data.quota);
+      } else {
+        dom.quotaSection.classList.add('hidden');
+      }
+    }
+
+    function renderModels(modelsMap) {
+      dom.modelsContainer.innerHTML = '';
+      const modelKeys = Object.keys(modelsMap).sort();
+      dom.modelCount.textContent = `${modelKeys.length} models`;
+
+      if (modelKeys.length === 0) {
+        dom.modelsContainer.innerHTML = '<div class="card" style="color:var(--text-muted)">No virtual models configured.</div>';
+        return;
+      }
+
+      modelKeys.forEach(mKey => {
+        const endpoints = modelsMap[mKey] || [];
+        let html = `
+          <div class="model-card">
+            <div class="model-header">
+              <span class="model-name">${mKey}</span>
+              <span class="badge">${endpoints.length} endpoints</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 60px">PRI</th>
+                    <th>ENDPOINT</th>
+                    <th>PROTOCOL</th>
+                    <th>STATUS</th>
+                    <th>FAILS</th>
+                    <th>LAST ERROR</th>
+                  </tr>
+                </thead>
+                <tbody>`;
+        
+        endpoints.forEach(ep => {
+          let statusBadge = '';
+          const now = Date.now();
+          const cdUntil = ep.cooldown_until ? new Date(ep.cooldown_until).getTime() : 0;
+
+          if (cdUntil > now) {
+            const secRem = Math.ceil((cdUntil - now) / 1000);
+            statusBadge = `<span class="status-pill pill-cooldown">COOLDOWN (${secRem}s)</span>`;
+          } else if (ep.probing) {
+            statusBadge = `<span class="status-pill pill-probing">PROBING...</span>`;
+          } else if (ep.serving === false && ep.available === true) {
+            statusBadge = `<span class="status-pill pill-halfopen">HALF-OPEN</span>`;
+          } else if (ep.available) {
+            statusBadge = `<span class="status-pill pill-ok">OK</span>`;
+          } else {
+            statusBadge = `<span class="status-pill pill-cooldown">DOWN</span>`;
+          }
+
+          html += `
+            <tr>
+              <td><span class="badge">P${ep.priority}</span></td>
+              <td style="color:var(--text-bright)">${ep.endpoint}</td>
+              <td><span class="badge badge-primary">${ep.protocol}</span></td>
+              <td>${statusBadge}</td>
+              <td>${ep.consecutive_failures || 0}</td>
+              <td style="color:var(--text-muted); font-size:12px;">${ep.last_error || '-'}</td>
+            </tr>`;
+        });
+
+        html += `</tbody></table></div></div>`;
+        dom.modelsContainer.innerHTML += html;
+      });
+    }
+
+    function renderQuota(quotaList) {
+      dom.quotaTbody.innerHTML = '';
+      dom.quotaCount.textContent = `${quotaList.length} budgets`;
+
+      quotaList.forEach(q => {
+        let pct = Math.round(q.pct * 100);
+        let barColorClass = pct > 90 ? 'fill-red' : pct > 70 ? 'fill-yellow' : 'fill-green';
+        let resetsIn = '-';
+        if (q.period_ends_at) {
+          const remSec = Math.max(0, Math.floor((new Date(q.period_ends_at).getTime() - Date.now()) / 1000));
+          resetsIn = fmtDurationSec(remSec);
+        }
+
+        let scopeText = q.models && q.models.length > 0 ? `[${q.models.join(', ')}]` : 'all models';
+
+        dom.quotaTbody.innerHTML += `
+          <tr>
+            <td style="color:var(--text-bright); font-weight:600; white-space: nowrap;">${q.provider}</td>
+            <td style="white-space: nowrap;"><span class="badge badge-primary" style="white-space: nowrap;">${q.metric} / ${q.every}</span></td>
+            <td style="white-space: nowrap;"><span class="badge ${q.role === 'gate' ? 'badge-danger' : 'badge-primary'}">${q.role}</span></td>
+            <td>
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                <span>${fmtNum(q.used)} / ${fmtNum(q.amount)}</span>
+                <span style="font-weight:600;">${pct}%</span>
+              </div>
+              <div class="progress-bar-bg" style="margin-top:0;">
+                <div class="progress-bar-fill ${barColorClass}" style="width: ${Math.min(100, pct)}%"></div>
+              </div>
+            </td>
+            <td style="font-weight:600; white-space: nowrap;">${q.headroom.toFixed(2)}</td>
+            <td style="color:var(--text-muted); white-space: nowrap;">${resetsIn}</td>
+            <td style="color:var(--text-muted); font-size:12px;">${scopeText}</td>
+          </tr>`;
+      });
+    }
+
+    // --- Data Fetching ---
+    async function fetchStatus() {
+      dom.refreshIcon.classList.add('spin');
+      const key = Auth.getKey();
+      const headers = {};
+      if (key) {
+        headers['Authorization'] = 'Bearer ' + key;
+      }
+
+      try {
+        const resp = await fetch('/status', { headers });
+        if (resp.status === 401) {
+          dom.authModal.classList.remove('hidden');
+          dom.authError.textContent = key ? 'API Key is invalid or expired. Please re-enter:' : '';
+          dom.authError.classList.toggle('hidden', !key);
+          return;
+        }
+        if (!resp.ok) {
+          throw new Error(`Server returned HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        dom.authModal.classList.add('hidden');
+        renderDashboard(data);
+        countdown = refreshSeconds;
+      } catch (err) {
+        console.error('Fetch status failed:', err);
+      } finally {
+        dom.refreshIcon.classList.remove('spin');
+      }
+    }
+
+    // --- Event Listeners ---
+    dom.selectRefresh.addEventListener('change', (e) => {
+      refreshSeconds = parseInt(e.target.value, 10);
+      countdown = refreshSeconds;
+      dom.countdownText.textContent = refreshSeconds > 0 ? `${countdown}s` : 'Off';
+    });
+
+    dom.btnRefresh.addEventListener('click', () => {
+      fetchStatus();
+    });
+
+    dom.btnAuth.addEventListener('click', () => {
+      dom.inputApiKey.value = Auth.getKey();
+      dom.authError.classList.add('hidden');
+      dom.authModal.classList.remove('hidden');
+      dom.inputApiKey.focus();
+    });
+
+    dom.btnAuthCancel.addEventListener('click', () => {
+      dom.authModal.classList.add('hidden');
+    });
+
+    dom.btnAuthSave.addEventListener('click', () => {
+      const val = dom.inputApiKey.value.trim();
+      if (val) {
+        Auth.setKey(val);
+      } else {
+        Auth.clearKey();
+      }
+      dom.authModal.classList.add('hidden');
+      fetchStatus();
+    });
+
+    dom.inputApiKey.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        dom.btnAuthSave.click();
+      }
+    });
+
+    // --- 1s Ticker for Timers & Countdown ---
+    setInterval(() => {
+      // Uptime tick
+      if (startedAt) {
+        const upSec = Math.floor((Date.now() - startedAt) / 1000);
+        dom.uptime.textContent = `uptime: ${fmtDurationSec(upSec)}`;
+      }
+
+      // Auto-refresh countdown
+      if (refreshSeconds > 0) {
+        countdown--;
+        if (countdown <= 0) {
+          countdown = refreshSeconds;
+          fetchStatus();
+        }
+        dom.countdownText.textContent = `${countdown}s`;
+      } else {
+        dom.countdownText.textContent = 'Off';
+      }
+
+      // Endpoint cooldown countdowns
+      if (lastData && lastData.models) {
+        document.querySelectorAll('.pill-cooldown').forEach(el => {
+          const match = el.textContent.match(/COOLDOWN \((\d+)s\)/);
+          if (match) {
+            let s = parseInt(match[1], 10) - 1;
+            if (s > 0) {
+              el.textContent = `COOLDOWN (${s}s)`;
+            } else {
+              el.textContent = `COOLDOWN (0s)`;
+            }
+          }
+        });
+      }
+    }, 1000);
+
+    // Initial Load
+    fetchStatus();
+  </script>
+</body>
+</html>
