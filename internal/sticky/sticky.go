@@ -95,7 +95,7 @@ func (r *Registry) Set(key, endpointKey string) {
 	}
 }
 
-// Len reports the current entry count — for /admin/status or tests, not on
+// Len reports the current entry count — for /status or tests, not on
 // any request path.
 func (r *Registry) Len() int {
 	r.mu.Lock()

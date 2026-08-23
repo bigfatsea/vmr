@@ -56,7 +56,7 @@ func (rt *Router) AcquireSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-// Concurrency reports the gate state for /admin/status.
+// Concurrency reports the gate state for /status.
 func (rt *Router) Concurrency() (limit int, inFlight, waiting int64) {
 	if l := rt.limiter.Load(); l != nil {
 		limit = l.cap

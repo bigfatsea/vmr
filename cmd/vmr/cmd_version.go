@@ -8,7 +8,7 @@ import (
 )
 
 // cmdVersion prints the build identity of *this* binary. The same value is
-// reported by a running instance under /admin/status's instance block, so
+// reported by a running instance under /status's instance block, so
 // `vmr version` and `vmr.sh ps` can be compared directly to answer "is that
 // process running the binary I just built?" — which vmr.sh's warn_if_stale
 // can only ever guess at from file mtimes.

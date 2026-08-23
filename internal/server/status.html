@@ -50,6 +50,19 @@
     }
     .brand { display: flex; align-items: center; gap: 12px; }
     .brand h1 { font-size: 20px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
+    .github-link {
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s ease, transform 0.15s ease;
+      text-decoration: none;
+      vertical-align: middle;
+    }
+    .github-link:hover {
+      color: var(--text-bright);
+      transform: scale(1.1);
+    }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .badge {
       font-family: var(--font-mono);
@@ -426,6 +439,17 @@
       <span class="badge" id="badge-model-count">0 models</span>
     </div>
     <div id="models-container"></div>
+
+    <!-- Footer -->
+    <footer style="margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted);">
+      <div>Virtual Model Router (VMR)</div>
+      <div>
+        <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener noreferrer" style="color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="github-link">
+          <span>bigfatsea/vmr</span>
+          <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        </a>
+      </div>
+    </footer>
   </div>
 
   <!-- Auth Modal -->
@@ -469,6 +493,15 @@
       if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
       if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
       return n.toLocaleString();
+    }
+
+    // esc HTML-escapes before interpolating into innerHTML. Every interpolated
+    // value below is operator-configured content (provider/endpoint/model
+    // names, YAML error text) rather than remote input, but the dashboard is
+    // reachable wherever /status is, so unescaped interpolation would make a
+    // mere quoting slip in a config string into markup.
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
     function fmtDurationSec(sec) {
@@ -551,6 +584,8 @@
         document.querySelector('.brand').title = `CWD: ${inst.cwd || '-'}\nBIN: ${inst.executable || '-'}`;
       }
 
+      updateAuthButton();
+
       // Banners
       dom.banners.innerHTML = '';
       const cfg = inst.config || {};
@@ -565,7 +600,7 @@
         dom.banners.innerHTML += `
           <div class="banner banner-danger">
             <span>❌</span>
-            <div><strong>Hot Reload Rejected:</strong> ${cfg.reload.error} (at ${new Date(cfg.reload.at).toLocaleTimeString()})</div>
+            <div><strong>Hot Reload Rejected:</strong> ${esc(cfg.reload.error)} (at ${new Date(cfg.reload.at).toLocaleTimeString()})</div>
           </div>`;
       }
       if (cfg.issues && cfg.issues.length > 0) {
@@ -573,7 +608,7 @@
           dom.banners.innerHTML += `
             <div class="banner banner-warning">
               <span>⚠️</span>
-              <div><strong>Config Issue [${iss.severity || 'WARNING'}]:</strong> ${iss.message}</div>
+              <div><strong>Config Issue [${esc(iss.severity || 'WARNING')}]:</strong> ${esc(iss.message)}</div>
             </div>`;
         });
       }
@@ -651,7 +686,7 @@
         let html = `
           <div class="model-card">
             <div class="model-header">
-              <span class="model-name">${mKey}</span>
+              <span class="model-name">${esc(mKey)}</span>
               <span class="badge">${endpoints.length} endpoints</span>
             </div>
             <div class="table-wrap">
@@ -689,11 +724,11 @@
           html += `
             <tr>
               <td><span class="badge">P${ep.priority}</span></td>
-              <td style="color:var(--text-bright)">${ep.endpoint}</td>
-              <td><span class="badge badge-primary">${ep.protocol}</span></td>
+              <td style="color:var(--text-bright)">${esc(ep.endpoint)}</td>
+              <td><span class="badge badge-primary">${esc(ep.protocol)}</span></td>
               <td>${statusBadge}</td>
               <td>${ep.consecutive_failures || 0}</td>
-              <td style="color:var(--text-muted); font-size:12px;">${ep.last_error || '-'}</td>
+              <td style="color:var(--text-muted); font-size:12px;">${esc(ep.last_error || '-')}</td>
             </tr>`;
         });
 
@@ -707,7 +742,8 @@
       dom.quotaCount.textContent = `${quotaList.length} budgets`;
 
       quotaList.forEach(q => {
-        let pct = Math.round(q.pct * 100);
+        // Server-side pct is already Used/Amount*100 (e.g. 48.2 for 48.2%) - do not multiply again.
+        let pct = Math.round(q.pct);
         let barColorClass = pct > 90 ? 'fill-red' : pct > 70 ? 'fill-yellow' : 'fill-green';
         let resetsIn = '-';
         if (q.period_ends_at) {
@@ -715,13 +751,13 @@
           resetsIn = fmtDurationSec(remSec);
         }
 
-        let scopeText = q.models && q.models.length > 0 ? `[${q.models.join(', ')}]` : 'all models';
+        let scopeText = q.models && q.models.length > 0 ? `[${q.models.map(esc).join(', ')}]` : 'all models';
 
         dom.quotaTbody.innerHTML += `
           <tr>
-            <td style="color:var(--text-bright); font-weight:600; white-space: nowrap;">${q.provider}</td>
-            <td style="white-space: nowrap;"><span class="badge badge-primary" style="white-space: nowrap;">${q.metric} / ${q.every}</span></td>
-            <td style="white-space: nowrap;"><span class="badge ${q.role === 'gate' ? 'badge-danger' : 'badge-primary'}">${q.role}</span></td>
+            <td style="color:var(--text-bright); font-weight:600; white-space: nowrap;">${esc(q.provider)}</td>
+            <td style="white-space: nowrap;"><span class="badge badge-primary" style="white-space: nowrap;">${esc(q.metric)} / ${esc(q.every)}</span></td>
+            <td style="white-space: nowrap;"><span class="badge ${q.role === 'gate' ? 'badge-danger' : 'badge-primary'}">${esc(q.role)}</span></td>
             <td>
               <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                 <span>${fmtNum(q.used)} / ${fmtNum(q.amount)}</span>
@@ -736,6 +772,13 @@
             <td style="color:var(--text-muted); font-size:12px;">${scopeText}</td>
           </tr>`;
       });
+    }
+
+    // Reflects the stored key (masked) on the Key button so a shared screen
+    // never shows the credential while still telling the operator one is in use.
+    function updateAuthButton() {
+      const key = Auth.getKey();
+      dom.btnAuth.textContent = key ? `🔑 ***${key.slice(-4)}` : '🔑 Key';
     }
 
     // --- Data Fetching ---
@@ -764,10 +807,19 @@
         countdown = refreshSeconds;
       } catch (err) {
         console.error('Fetch status failed:', err);
+        // Surface transport failure (vmr down / network gone) instead of
+        // silently leaving the last snapshot on screen as if it were live.
+        dom.banners.innerHTML = `
+          <div class="banner banner-danger">
+            <span>⚠️</span>
+            <div><strong>Cannot reach vmr:</strong> ${esc(err.message)} - showing the last successful snapshot, if any.</div>
+          </div>`;
       } finally {
         dom.refreshIcon.classList.remove('spin');
       }
     }
+
+    updateAuthButton();
 
     // --- Event Listeners ---
     dom.selectRefresh.addEventListener('change', (e) => {
@@ -798,6 +850,7 @@
       } else {
         Auth.clearKey();
       }
+      updateAuthButton();
       dom.authModal.classList.add('hidden');
       fetchStatus();
     });

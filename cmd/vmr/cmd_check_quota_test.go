@@ -233,7 +233,7 @@ models:
 }
 
 // TestCmdStatus_RendersQuotaLine mirrors TestCmdStatus_WithMockServer but
-// adds a "quota" array to the mocked /admin/status payload — pinning that
+// adds a "quota" array to the mocked /status payload — pinning that
 // server/admin.go's new section actually reaches a human-readable line in
 // `vmr status`, not just the JSON struct (see cmd_status.go's statusResponse.Quota).
 func TestCmdStatus_RendersQuotaLine(t *testing.T) {

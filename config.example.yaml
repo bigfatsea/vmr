@@ -213,7 +213,7 @@ providers:
     # marketing number: some vendors bill "one user turn" as a single unit
     # while an agentic client (tool calls, retries) turns that into a dozen-plus
     # real HTTP requests vmr sees — set amount from your own `vmr report`
-    # numbers (or a few days of /admin/status's quota section) once traffic is
+    # numbers (or a few days of /status's quota section) once traffic is
     # flowing, not from the vendor's published quota.
     # quota:
     #   limits:
@@ -264,7 +264,7 @@ providers:
     #       #   models: [premium-model]        # only this model, its own pool; every other model is untouched by this Limit
     #       # "*" is a reserved token, not a glob — "gpt-*" matches nothing,
     #       # and combining "*" with a named entry is a load-time error (the
-    #       # wildcard already covers it). /admin/status shows one row per
+    #       # wildcard already covers it). /status shows one row per
     #       # model that has actually been charged, not one row per Limit.
 
   # A Credits-style account whose per-model price differs (not just a

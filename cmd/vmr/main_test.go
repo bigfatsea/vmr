@@ -723,6 +723,13 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
+			"instance": map[string]any{
+				"concurrency": map[string]any{
+					"limit":     8,
+					"in_flight": 2,
+					"waiting":   0,
+				},
+			},
 			"models": map[string]any{
 				"vm [openai]": []map[string]any{
 					{
@@ -735,12 +742,7 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 					},
 				},
 			},
-			"concurrency": map[string]any{
-				"limit":     8,
-				"in_flight": 2,
-				"waiting":   0,
-			},
-			"time": "2026-07-19T12:00:00Z",
+			"current_time": "2026-07-19T12:00:00Z",
 		})
 	}))
 	defer ts.Close()
@@ -830,7 +832,7 @@ models:
 // a version-skew gap an independent review found: a `vmr status` binary
 // built after the Serving field was added can still query an older,
 // already-running `vmr start` process (e.g. right after a Homebrew tap
-// upgrade, before the service restarts) whose /admin/status response omits
+// upgrade, before the service restarts) whose /status response omits
 // "serving" entirely. A healthy endpoint (available=true, fails=0, no
 // "serving" key at all) must still render "ok", not misread the absent
 // field as serving=false and render a false "half-open" alarm.
@@ -892,19 +894,23 @@ models:
 }
 
 // TestCmdStatus_WithIssues verifies that cmdStatus renders WARNING lines when
-// /admin/status reports config.Check() issues.
+// /status reports config.Check() issues.
 func TestCmdStatus_WithIssues(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"issues": []map[string]any{
-				{
-					"field":    "listen",
-					"severity": "warning",
-					"message":  "listen (0.0.0.0:8800) is not loopback-only and no api_keys are configured",
+			"instance": map[string]any{
+				"config": map[string]any{
+					"issues": []map[string]any{
+						{
+							"field":    "listen",
+							"severity": "warning",
+							"message":  "listen (0.0.0.0:8800) is not loopback-only and no api_keys are configured",
+						},
+					},
 				},
 			},
-			"time": "2026-07-19T12:00:00Z",
+			"current_time": "2026-07-19T12:00:00Z",
 		})
 	}))
 	defer ts.Close()
@@ -929,10 +935,56 @@ models:
 	}
 }
 
+// TestCmdStatus_WithAPIKeys verifies that cmdStatus automatically injects the
+// configured API key into the Authorization header.
+func TestCmdStatus_WithAPIKeys(t *testing.T) {
+	const expectedKey = "test-secret-key-12345678"
+	var receivedAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		if receivedAuth != "Bearer "+expectedKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"time": "2026-07-19T12:00:00Z",
+		})
+	}))
+	defer ts.Close()
+
+	yaml := fmt.Sprintf(`
+listen: %s
+api_keys:
+  - %s
+providers:
+  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+`, ts.Listener.Addr().String(), expectedKey)
+
+	path := writeTempFile(t, "config.yaml", yaml)
+	if err := cmdStatus([]string{"-c", path}); err != nil {
+		t.Fatalf("cmdStatus with api_keys: %v", err)
+	}
+	if receivedAuth != "Bearer "+expectedKey {
+		t.Errorf("received auth = %q, want Bearer %s", receivedAuth, expectedKey)
+	}
+
+	// Also test -key flag with -addr
+	receivedAuth = ""
+	if err := cmdStatus([]string{"-addr", ts.Listener.Addr().String(), "-key", expectedKey}); err != nil {
+		t.Fatalf("cmdStatus with -addr and -key: %v", err)
+	}
+	if receivedAuth != "Bearer "+expectedKey {
+		t.Errorf("received auth via -key = %q, want Bearer %s", receivedAuth, expectedKey)
+	}
+}
+
 // dialHost turns a bind address into something you can actually connect
 // to. cfg.Listen is routinely a wildcard ("0.0.0.0:8800") and lsof reports
 // the same socket as "*:8800" — vmr.sh ps feeds both forms straight into
-// `vmr status -addr`, and /admin/status is loopback-only regardless.
+// `vmr status -addr`.
 func TestDialHostRewritesWildcardBinds(t *testing.T) {
 	cases := map[string]string{
 		"0.0.0.0:8800":   "127.0.0.1:8800",

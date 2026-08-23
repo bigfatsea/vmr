@@ -91,7 +91,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	// The classification must also carry a real health consequence:
 	// ErrEndpoint's long cooldown, not ErrClient's "say nothing about
 	// health" or ErrTransient's short one.
-	statusResp, err := http.Get(ts.URL + "/admin/status")
+	statusResp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 		}
 	}
 	if p1 == nil {
-		t.Fatal("p1 missing from /admin/status")
+		t.Fatal("p1 missing from /status")
 	}
 	if p1.Available || p1.Fails != 1 || p1.LastError != "endpoint" {
 		t.Errorf("p1 health = %+v, want cooling down, fails=1, last_error=endpoint", p1)
@@ -416,7 +416,7 @@ func TestAdminStatus(t *testing.T) {
 	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
 	chat(t, ts, simpleReq, nil) // u1 fails once → cooldown
 
-	resp, err := http.Get(ts.URL + "/admin/status")
+	resp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}

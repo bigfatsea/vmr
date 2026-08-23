@@ -109,13 +109,14 @@ func maybeSweepCache(dir string, ttlDays int, now time.Time) {
 	go sweepCacheDir(dir, ttlDays, now)
 }
 
-// defaultCacheCapBytes is the total size cap (50MB) for the image cache
+// DefaultCacheCapBytes is the total size cap (50MB) for the image cache
 // directory. When the accumulated size of surviving cache entries exceeds
 // this bound, the oldest entries by mtime are evicted until the total size
 // is under the cap — independently of ttlDays below, since a user who
 // disables time-based eviction (kept-forever) is exactly the case that most
 // needs a disk-space backstop.
-const defaultCacheCapBytes int64 = 50 << 20
+const DefaultCacheCapBytes int64 = 50 << 20
+const defaultCacheCapBytes = DefaultCacheCapBytes
 
 // sweepCacheDir deletes cache entries whose mtime is older than ttlDays, plus
 // any stray ".tmp-" temp file left behind by a cacheStore that crashed

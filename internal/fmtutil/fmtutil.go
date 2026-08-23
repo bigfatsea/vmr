@@ -23,6 +23,10 @@ import (
 // their own copy of this threshold logic.
 func FmtBytes(n int64) string {
 	switch {
+	case n >= 1<<40:
+		return fmt.Sprintf("%.1fTB", float64(n)/(1<<40))
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1fGB", float64(n)/(1<<30))
 	case n >= 1<<20:
 		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
 	case n >= 1<<10:
@@ -30,6 +34,24 @@ func FmtBytes(n int64) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
+}
+
+// FmtDuration renders a duration into a human-readable string like "3h 34m 5s", "12m 30s", "45s".
+func FmtDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < 0 {
+		d = 0
+	}
+	h := int64(d / time.Hour)
+	m := int64((d % time.Hour) / time.Minute)
+	s := int64((d % time.Minute) / time.Second)
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 // FmtSeconds renders d as fixed-decimal seconds ("6.32s") instead of

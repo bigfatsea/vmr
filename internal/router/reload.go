@@ -1,6 +1,6 @@
 // Ver 2026-07-28 14:25, by Opus 5
 
-// Hot-reload outcome tracking, exposed through /admin/status.
+// Hot-reload outcome tracking, exposed through /status.
 //
 // The failure mode this closes: a rejected reload is, by design, silent to
 // everyone except the log. `vmr start`'s reload closure logs "rejected,

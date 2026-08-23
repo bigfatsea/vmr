@@ -140,7 +140,7 @@ internal/router            failover 循环（Serve/tryOne + handleErrorResponse/
   ├─ transport.go NewUpstreamClient（diagnose/replay 复用）+ copyFlush（流式转发）
   ├─ logfmt.go    实时路由日志的行格式化
   ├─ probe.go  半开端点的后台探测 goroutine；按 `ep.AdapterType` 分派 `probe.Request`/`probe.ResponsesRequest`（见 §3.1）
-  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respnorm.NormalizerStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respnorm`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/admin/status 用）
+  └─ quota.go  额度感知路由的决策半区（见 §6.6）：chargeQuota/tokenCharge 从 `respnorm.NormalizerStream` 嗅探成功响应的用量，交给导出函数 `ChargeResponse`——metric 分发（requests/tokens/cost）、componentCost（P2.2，metric: cost 按 ep.PricingRate 在计费时刻算出 $ 金额）、applyModelMultiplier（P2.1，计费时套用账号级模型倍率）；`ChargeResponse` 单独导出正是为了让 `internal/replay`（已完整缓冲响应、不经过 `respnorm`）复用同一条计费管线，见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。reorderByQuota（`Sort` 之后、Sticky 之前的同梯队内重排，baseAmount 在读取时套用 token_weights）、QuotaStatus（/status 用）
 internal/server            HTTP 入口、鉴权、审计录制、六个端点（含 `POST /v1/responses` 与免鉴权的 `GET /health`；header 黑名单见 internal/router.FilterClientHeaders）
   └─ facts.go  RequestFacts 计算：文本/图片/文档 token 粗估；model/stream/hasTools 由调用方（server.go 的 adapter.TopLevelProbe 调用）传入，不在这里重新扫描
 
@@ -168,14 +168,15 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 | `POST /v1/messages` | Anthropic Messages 协议入口 |
 | `POST /v1/responses` | OpenAI Responses 协议入口（见「协议模型」§3.1） |
 | `GET /v1/models` | 全部 Virtual Model，合并格式，带 `vmr_protocol` 字段 |
-| `GET /health` | `{status, time, uptime_seconds}` + `Cache-Control: no-store`；**免鉴权、不限来源**——它是唯一一个绕过 `api_keys` 的端点，代价是它只回答「进程活着且能应答 HTTP」这一个比特，实例信息一律不出现在这里（否则它等价于一个未鉴权的 `/admin/status`）。body 取时间与 uptime 而非固定串：固定 body 与被缓存的 body 无法区分，中间层可能在进程已死后继续答 200。只做 liveness——把 200 与端点健康挂钩，会让编排系统在上游全挂时杀掉一个功能完好的路由进程，而重启修不好上游 |
-| `GET /admin/status` | `instance`（进程身份 + 配置新鲜度）+ `reload`（最近一次热重载结果）+ `sticky.entries` + 端点健康 + 并发指标 JSON（健康部分含 `probing` 字段——某个端点当前是否正被一次后台恢复探测占着单飞名额）；仅接受 loopback 来源 |
+| `GET /health` | `{status, time, uptime_seconds}` + `Cache-Control: no-store`；**免鉴权、不限来源**——它是唯一一个绕过 `api_keys` 的端点，代价是它只回答「进程活着且能应答 HTTP」这一个比特，实例信息一律不出现在这里（否则它等价于一个未鉴权的 `/status`）。body 取时间与 uptime 而非固定串：固定 body 与被缓存的 body 无法区分，中间层可能在进程已死后继续答 200。只做 liveness——把 200 与端点健康挂钩，会让编排系统在上游全挂时杀掉一个功能完好的路由进程，而重启修不好上游 |
+| `GET /status` | `instance`（进程身份 + 运行环境 + `config` 子对象含新鲜度/重载/告警 + `concurrency`）+ `system`（goroutines/内存/磁盘余量）+ `traffic`（固定原子计数器：请求按协议/结果分类、全局 5 分量 token、`sticky.entries`）+ 端点健康 + `quota` + `audit`/`image_cache` 磁盘占用 JSON（健康部分含 `probing` 字段--某个端点当前是否正被一次后台恢复探测占着单飞名额；详见 `docs/STATUS_REPORT_DESIGN_gemini.md`）；受 `api_keys` 鉴权保护 |
+| `GET /status.html` | 自包含单页可视化看板（CSR）：免鉴权直出静态外壳（不含任何数据），前端 JS 拉 `GET /status` 渲染并弹窗鉴权；零外部 CDN 依赖，`//go:embed` 进二进制 |
 
-**`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `config` 绝对路径 / `started_at` / `uptime_seconds` / `config_stale` / `config_mtime`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）整块省略而非输出零值。
+**`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `go_version` / `os_arch` / `cwd` / `executable` / `started_at` / `uptime_seconds` + 人类可读 `uptime`，以及嵌套的 `config`（`path` 绝对路径 / `mtime` / `stale` / `reload` / `issues`）与 `concurrency`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config.path` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）`config` 整块省略而非输出零值。
 
 `version` 来自 `internal/buildinfo`：Go 默认把 VCS 状态压进任何仓库内构建的二进制，`runtime/debug.ReadBuildInfo()` 运行时读得到，**不需要 ldflags/生成文件/Makefile**。渲染为 `fbc034c` 或 `fbc034c-dirty`，后者说明该二进制的源码不在任何 commit 里。不编造 semver——没有能递增它的发布流程。
 
-**`config_stale` + `reload` 块**关掉一个静默失败面：热重载拒绝坏配置后继续用旧快照服务（这是对的），代价是进程会一直服务一份与磁盘不符的配置而外部看不出来。`ConfigStale` 拿配置文件 mtime 与**最后一次成功加载**的时刻（`ReloadState.OKAt`：进程启动或最后一次被接受的重载）相比——用 `OKAt` 而非最后一次*尝试*是关键，否则被拒的那次重载会抹掉自己的证据。它同时覆盖"重载被拒"和"重载压根没触发"（fsnotify 不可用、编辑器换 inode）两种形态，`vmr status` 印成顶部 WARNING 行。
+**`config.stale` + `config.reload` 块**关掉一个静默失败面：热重载拒绝坏配置后继续用旧快照服务（这是对的），代价是进程会一直服务一份与磁盘不符的配置而外部看不出来。`ConfigStale` 拿配置文件 mtime 与**最后一次成功加载**的时刻（`ReloadState.OKAt`：进程启动或最后一次被接受的重载）相比--用 `OKAt` 而非最后一次*尝试*是关键，否则被拒的那次重载会抹掉自己的证据。它同时覆盖"重载被拒"和"重载压根没触发"（fsnotify 不可用、编辑器换 inode）两种形态，`vmr status` 印成顶部 WARNING 行。
 
 鉴权（可选 `api_keys`，字符串列表）同时接受 `Authorization: Bearer` 与 `x-api-key`，作用于 `/v1/*`。命中哪把 key 就用 `audit.KeyTag`（那把 key 自身的尾部）给这次请求打上 `client_key_tag`，供 `vmr report` 事后按调用方分组导出（见「审计日志」）——`api_keys` 是唯一的鉴权面，`authenticate()` 只有这一条代码路径。不配置 `api_keys` 时鉴权整体关闭，但 `authenticate()` 仍会对客户端自愿发来的 `Authorization`/`x-api-key` 值调用同一个 `audit.KeyTag`（无 16 字符下限——这个模式下它不是需要保护的密钥），让纯内网场景下客户端可以零 vmr 侧配置地自报身份标签；不发任何凭证的请求依旧是未打标签的记录。
 
@@ -242,7 +243,7 @@ ErrContextLimit 会话历史超出该端点模型的上下文窗口 → 切换�
 | `Host` / `Content-Length` / `Transfer-Encoding` / `Connection` | Go Transport 自动管理，传过去会冲突 |
 | `Accept-Encoding` | 手工设置会关闭 Go Transport 的透明 gzip：上游若返回压缩体，响应归一化的 regex 会在 gzip 字节上跑，且客户端只收到 Content-Type（拿不到 Content-Encoding）——必须让 Transport 自己协商并解压，各层始终处理明文 |
 
-**与「必须由 Adapter 覆盖」的几项不冲突**：`Authorization` 在 blocklist 里**也是**由 Adapter 用 `Header.Set` 覆盖，blocklist 是第二道防线（如果上游意外处理了一个客户端的 Authorization，VMR 至少不会主动转发）。这种「belt and suspenders」是必要的——Header.Set 覆盖只对 Adapter 构造的请求有效，对 VMR 自己生成的请求（如 `/admin/status`）不适用。
+**与「必须由 Adapter 覆盖」的几项不冲突**：`Authorization` 在 blocklist 里**也是**由 Adapter 用 `Header.Set` 覆盖，blocklist 是第二道防线（如果上游意外处理了一个客户端的 Authorization，VMR 至少不会主动转发）。这种「belt and suspenders」是必要的——Header.Set 覆盖只对 Adapter 构造的请求有效，对 VMR 自己生成的请求（如 `/status`）不适用。
 
 ### 5.5 响应侧归一化（`internal/respnorm`）
 
@@ -547,9 +548,9 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 * 两个聊天入口共用一个信号量；超限请求**在内存中挂起等待**（channel 阻塞，近似 FIFO），不排队列、不设等待超时（客户端自有超时，服务端再加一层是重复机制）。
 * **闸在请求体缓冲完成之后获取**：慢客户端的上传阶段不占槽，闸覆盖的是 CPU（图片降采样）与上游往返阶段——否则几个慢 POST 就能占满全局并发饿死正常请求。
 * 等待期间客户端断开 → 立即出队。
-* 只闸聊天入口；`/v1/models`、`/admin/status` 不受限。
+* 只闸聊天入口；`/v1/models`、`/status` 不受限。
 * 热重载仅当容量变化才换信号量；换闸瞬间新旧持有者叠加、短暂超额（秒级边界行为，可接受）。
-* `/admin/status` 暴露 `limit` / `in_flight` / `waiting`。
+* `/status` 暴露 `limit` / `in_flight` / `waiting`。
 
 每 Endpoint 的 rpm/并发精细限流是另一个问题（服务于主动避免 429），在路线图中。
 
@@ -568,7 +569,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 | 文件 | 每天一个：`vmr-audit-YYYY-MM-DD.jsonl`（本地时区，写入时轮转），权限 0600——记录里 `ts` 字段的时区含义见 `docs/VirtualModelRouter_Design_v4_Analytics.md` 的审计日志输入契约一节 |
 | 时机 | 请求完成后追加一行（含流式全程），不影响 TTFB |
 | 失败 | 写盘失败仅打 stderr 日志，绝不影响请求服务 |
-| 覆盖 | 两个聊天入口的所有请求，含被 vmr 拒绝的（401/413/坏 JSON/未知模型/协议不符）；`/v1/models`、`/admin/status` 不记 |
+| 覆盖 | 两个聊天入口的所有请求，含被 vmr 拒绝的（401/413/坏 JSON/未知模型/协议不符）；`/v1/models`、`/status` 不记 |
 
 ### 9.2 记录结构（JSONL，每行一个 Record）
 

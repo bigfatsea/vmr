@@ -44,7 +44,9 @@ type Router struct {
 	inFlight atomic.Int64
 	waiting  atomic.Int64
 
-	reloads reloadTracker // see reload.go: last hot-reload outcome, for /admin/status
+	reloads reloadTracker // see reload.go: last hot-reload outcome, for /status
+
+	Telemetry Telemetry // see telemetry.go: in-memory process-lifetime traffic counters
 }
 
 func New(logger *log.Logger) *Router {
@@ -59,21 +61,24 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	start := time.Now()
 	snap := rt.snap.Load()
 	if snap == nil {
-		// Only reachable if a caller invokes Serve before Install ever ran —
+		// Only reachable if a caller invokes Serve before Install ever ran -
 		// the real cmd_start.go startup sequence always calls Install with
 		// the first BuildSnapshot before the HTTP server starts listening,
 		// so this never fires in production. A defensive 503 here is strictly
 		// better than the nil-pointer panic snap.Models would otherwise be.
+		rt.Telemetry.RecordOutcome(false, false)
 		WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
 		return
 	}
 	route, ok := snap.Models[protocol][creq.Model]
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
+			rt.Telemetry.RecordOutcome(false, false)
 			WriteError(w, http.StatusNotFound, "not_found_error",
 				fmt.Sprintf("model %q speaks the %s protocol; call it via POST %s", creq.Model, other, IngressPath(other)))
 			return
 		}
+		rt.Telemetry.RecordOutcome(false, false)
 		WriteError(w, http.StatusNotFound, "not_found_error",
 			fmt.Sprintf("model %q not found; models on this endpoint: %s",
 				creq.Model, strings.Join(modelNames(snap, protocol), ", ")))
@@ -239,6 +244,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		}
 		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
 	}
+	rt.Telemetry.RecordOutcome(false, r.Context().Err() != nil)
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
 }
 
@@ -399,6 +405,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			// forever and the endpoint is locked out until process restart.
 			rt.Health.ReportNeutral(key)
 			att.SetCanceled()
+			rt.Telemetry.RecordOutcome(false, true)
 			return true, nil, false
 		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
@@ -476,6 +483,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		// how execution got here), so a second "class=client" field would
 		// repeat information the branch itself already carries.
 		rt.logf("%s, %s, status/class=%d(%s, %dx)", logPrefix, tokenEst, resp.StatusCode, fmtDur(time.Since(start)), attempt)
+		rt.Telemetry.RecordOutcome(false, false)
 		return true, nil, false
 	}
 	cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
@@ -547,6 +555,10 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// inspection methods are mutex-guarded internally (see the mu field on
 	// respnorm's stream type), not merely "stable once copyFlush returns".
 	usage, ok := rbody.Usage()
+	if ok {
+		rt.Telemetry.RecordTokens(usage.Fresh(), usage.CacheWrite, usage.CacheRead, usage.Reasoning, usage.Out)
+	}
+	rt.Telemetry.RecordOutcome(copyErr == nil && status != "CANCELED", status == "CANCELED")
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
 	return true, nil, true
 }

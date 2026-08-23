@@ -24,10 +24,31 @@ func TestFmtBytes(t *testing.T) {
 		{1536, "1.5KB"},
 		{1 << 20, "1.0MB"},
 		{3*(1<<20) + (1 << 19), "3.5MB"},
+		{500 * (1 << 30), "500.0GB"},
+		{2 * (1 << 40), "2.0TB"},
 	}
 	for _, c := range cases {
 		if got := FmtBytes(c.n); got != c.want {
 			t.Errorf("FmtBytes(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
+func TestFmtDuration(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{45 * time.Second, "45s"},
+		{12*time.Minute + 30*time.Second, "12m 30s"},
+		{3*time.Hour + 34*time.Minute + 5*time.Second, "3h 34m 5s"},
+		{25*time.Hour + 10*time.Second, "25h 0m 10s"},
+	}
+	for _, c := range cases {
+		if got := FmtDuration(c.d); got != c.want {
+			t.Errorf("FmtDuration(%v) = %q, want %q", c.d, got, c.want)
 		}
 	}
 }

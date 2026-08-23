@@ -157,7 +157,7 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 // arrived) — see the design doc's Metering section. estimated equals the
 // full charged total exactly when this is a degraded estimate, 0 when it's
 // exact — accumulated by quota.Registry into each account's running
-// estimated_pct, the one signal /admin/status gives an operator for how
+// estimated_pct, the one signal /status gives an operator for how
 // much to trust a token-metered account's numbers.
 func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
 	u, sniffed := rbody.Usage()
@@ -202,7 +202,7 @@ func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Co
 }
 
 // QuotaProviderStatus is one (provider, Limit) pair's live state, for
-// /admin/status's quota section and `vmr status` — P3: one row per Limit,
+// /status's quota section and `vmr status` — P3: one row per Limit,
 // not per provider, now that a provider can carry more than one window
 // (see docs/VirtualModelRouter_Design_v4_Quota.md's §5.2). Fresh/CacheRead/
 // CacheWrite/Out/Requests are the raw stored components (see
@@ -272,7 +272,7 @@ type TokenWeightsView struct {
 }
 
 // QuotaStatus reports every quota-configured provider's live state, sorted
-// by provider name then window for a stable /admin/status/`vmr status`
+// by provider name then window for a stable /status/`vmr status`
 // rendering. nil-safe: returns nil when no quota.Registry is wired up
 // (rt.Quota==nil) or no Snapshot has been installed yet — same "absent, not
 // a zeroed row" contract server/admin.go's reloadBlock already uses for an

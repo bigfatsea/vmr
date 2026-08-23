@@ -1,7 +1,7 @@
 // Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
-// /health, /admin/status. Anything else is 404.
+// /health, /status, /status.html. Anything else is 404.
 package server
 
 import (
@@ -26,7 +26,7 @@ type Server struct {
 	inst  instance      // zero value outside `vmr start` (tests, embedding)
 	// started is when this Server began serving — /health's uptime basis.
 	// Separate from inst.startedAt, which only `vmr start` fills in and
-	// which /admin/status therefore reports conditionally: /health has no
+	// which /status therefore reports conditionally: /health has no
 	// conditional shape to fall back on, so it needs a value that always
 	// exists. The two differ by however long config loading took.
 	started time.Time
@@ -43,15 +43,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", s.chatHandler("openai-responses"))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
 	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("GET /admin/status", s.adminStatus)
+	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
+	mux.HandleFunc("GET /status.html", s.statusPage)
 	return mux
 }
 
 // health is the unauthenticated liveness endpoint: it answers "is this
 // process up and serving HTTP", and nothing else. Deliberately outside
-// s.auth and outside admin.go's loopback gate — a liveness probe has no
-// credential to present and rarely originates from 127.0.0.1 (container
-// runtimes, reverse proxies, external monitors).
+// s.auth — a liveness probe has no credential to present and rarely
+// originates from 127.0.0.1 (container runtimes, reverse proxies, external
+// monitors).
 //
 // The body carries the current time and uptime rather than a constant "ok"
 // for one reason: a fixed body is indistinguishable from a cached one, so
@@ -62,14 +63,14 @@ func (s *Server) Handler() http.Handler {
 //
 // Nothing about the instance (config path, PID, models, endpoints, quota)
 // belongs in this response. Adding any of it would turn an unauthenticated
-// liveness ping into an unauthenticated /admin/status — which is
-// loopback-only precisely because it answers those questions.
+// liveness ping into an unauthenticated /status — which is auth-gated
+// precisely because it answers those questions.
 //
 // Liveness, not readiness: 200 means the process is up, never "an upstream
 // is healthy". Gating it on endpoint health would have an orchestrator kill
 // a perfectly functional router whenever every provider is down — a restart
 // cannot fix an upstream outage, so that check would only amplify it.
-// Callers who want readiness read /admin/status's health block.
+// Callers who want readiness read /status's health block.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	now := time.Now()
@@ -145,6 +146,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		s.rt.Telemetry.RecordRequest(protocol)
 		var rec *audit.Record
 		if s.audit != nil {
 			rec = &audit.Record{
@@ -174,6 +176,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.ClientKeyTag = tag
 		}
 		if !authed {
+			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}
@@ -186,6 +189,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.Client.Request.Body = audit.EncodeBody(body)
 		}
 		if err != nil {
+			s.rt.Telemetry.RecordOutcome(false, false)
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
 				router.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds limit")
@@ -204,10 +208,12 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// independent top-level scan for tools later in computeRequestFacts.
 		probeModel, probeStream, probeHasTools, probeOK := adapter.TopLevelProbe(body)
 		if !probeOK {
+			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
 			return
 		}
 		if probeModel == "" {
+			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
 			return
 		}
@@ -222,6 +228,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// not client I/O.
 		release, ok := s.rt.AcquireSlot(r.Context())
 		if !ok {
+			s.rt.Telemetry.RecordOutcome(false, true)
 			return // client canceled while waiting; nothing to write
 		}
 		defer release()

@@ -279,7 +279,7 @@ cmd_status() {
 #               that process's config, not on its command line, so the
 #               process table alone genuinely cannot tell you)
 #   3. vmr status -addr PORT -brief — everything else, asked of the instance
-#               itself over /admin/status. Deliberately not parsed here:
+#               itself over /status. Deliberately not parsed here:
 #               the binary already speaks JSON, and making bash do it would
 #               either drag in a jq dependency or hand-roll a JSON parser.
 #
@@ -289,7 +289,7 @@ cmd_status() {
 #
 # Degradations, both deliberately non-fatal: no lsof → no port, so the row
 # falls back to the -c argument off the command line; a process that has a
-# port but doesn't answer /admin/status (starting up, wedged, or not a vmr
+# port but doesn't answer /status (starting up, wedged, or not a vmr
 # at all) → same fallback row, flagged, rather than a disappeared instance.
 listen_addr_of() {
   command -v lsof >/dev/null 2>&1 || return 0
@@ -340,7 +340,7 @@ cmd_ps() {
       # a resolved path.
       cfgarg="$(ps -o command= -p "$pid" 2>/dev/null | sed -n 's/.*-c[= ]\([^ ]*\).*/\1/p')"
       if [[ -n "$addr" ]]; then
-        why="no answer on /admin/status"
+        why="no answer on /status"
       else
         why="port unknown (lsof)"
       fi

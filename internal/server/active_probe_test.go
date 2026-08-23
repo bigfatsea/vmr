@@ -233,7 +233,7 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	statusResp, err := http.Get(ts.URL + "/admin/status")
+	statusResp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		}
 	}
 	if p1 == nil {
-		t.Fatal("p1 missing from /admin/status")
+		t.Fatal("p1 missing from /status")
 	}
 	// fails must have grown past the initial rate-limit failure (proves
 	// ReportFailure ran, not ReportNeutral, which would have left fails

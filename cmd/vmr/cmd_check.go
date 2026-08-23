@@ -417,7 +417,7 @@ func ratePart(v *float64) string {
 }
 
 // printProviderQuota renders p's quota: block, if any — purely static
-// (config-derived), never reads Registry state (that's /admin/status's and
+// (config-derived), never reads Registry state (that's /status's and
 // `vmr status`'s job, see server/admin.go). Absent entirely for a provider
 // with no quota: configured, same as every other optional section here.
 func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {

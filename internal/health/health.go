@@ -163,7 +163,7 @@ func backoff(base, cap time.Duration, fails int) time.Duration {
 // field — plus left a window between the two locked reads where another
 // goroutine's ReportSuccess/ReportFailure could change the state being
 // classified out from under it. Status/Acquire/Available stay as their own
-// methods: Status backs /admin/status's full health view, and Acquire is
+// methods: Status backs /status's full health view, and Acquire is
 // still used standalone by the router's per-attempt loop once a candidate
 // has already passed this filter.
 func (r *Registry) Classify(key string, now time.Time) (available, needsProbe bool) {
@@ -188,7 +188,7 @@ func (r *Registry) Classify(key string, now time.Time) (available, needsProbe bo
 	return false, true
 }
 
-// Status is one endpoint's health as exposed by /admin/status.
+// Status is one endpoint's health as exposed by /status.
 type Status struct {
 	Fails         int       `json:"consecutive_failures"`
 	CooldownUntil time.Time `json:"cooldown_until,omitzero"`
@@ -207,7 +207,7 @@ type Status struct {
 	// slot — a background probe (see internal/router/probe.go) is
 	// currently deciding whether the endpoint has recovered. Purely observational:
 	// nothing reads this field to make a routing decision, it exists so
-	// `vmr status` and /admin/status can show *why* a half-open endpoint
+	// `vmr status` and /status can show *why* a half-open endpoint
 	// (Available==true, Fails>0) isn't being tried right this moment.
 	Probing bool `json:"probing,omitempty"`
 	// Serving mirrors Classify's available return value: true only when

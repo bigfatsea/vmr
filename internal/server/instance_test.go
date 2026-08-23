@@ -1,6 +1,6 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-08-23 13:05, by Gemini 3.7 Flash
 
-// /admin/status's "instance" block: the facts that let a caller who only
+// /status's "instance" block: the facts that let a caller who only
 // has a port tell which vmr answered it (vmr.sh ps is built entirely on
 // this — see cmd_status.go's -addr/-brief).
 package server
@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -30,13 +29,25 @@ models:
       - {protocol: openai, providers: [p1], models: [m1]}
 `
 
+type configSubBlock struct {
+	Path   string         `json:"path"`
+	Mtime  time.Time      `json:"mtime"`
+	Stale  bool           `json:"stale"`
+	Issues []config.Issue `json:"issues"`
+}
+
 type instanceBlock struct {
-	PID     int    `json:"pid"`
-	Listen  string `json:"listen"`
-	Config  string `json:"config"`
-	Models  int    `json:"models"`
-	Uptime  int64  `json:"uptime_seconds"`
-	Started string `json:"started_at"`
+	PID        int             `json:"pid"`
+	Listen     string          `json:"listen"`
+	Config     *configSubBlock `json:"config"`
+	Models     int             `json:"models"`
+	Uptime     int64           `json:"uptime_seconds"`
+	UptimeStr  string          `json:"uptime"`
+	Started    string          `json:"started_at"`
+	GoVersion  string          `json:"go_version"`
+	OSArch     string          `json:"os_arch"`
+	Cwd        string          `json:"cwd"`
+	Executable string          `json:"executable"`
 }
 
 func fetchInstance(t *testing.T, withInstance bool, cfgPath string, started time.Time) instanceBlock {
@@ -58,7 +69,7 @@ func fetchInstance(t *testing.T, withInstance bool, cfgPath string, started time
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/admin/status")
+	resp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +86,7 @@ func fetchInstance(t *testing.T, withInstance bool, cfgPath string, started time
 // The listen address reported is the *configured* one, not the ephemeral
 // port httptest bound — that's the point: vmr.sh ps finds the port via
 // lsof and asks the instance what it thinks it is serving.
-func TestAdminStatusInstanceBlock(t *testing.T) {
+func TestStatusInstanceBlock(t *testing.T) {
 	started := time.Now().Add(-90 * time.Second)
 	inst := fetchInstance(t, true, "testdata/rel.yaml", started)
 
@@ -90,19 +101,25 @@ func TestAdminStatusInstanceBlock(t *testing.T) {
 	}
 	// Absolute: the process may have been started from any directory, and
 	// the relative path it was handed means nothing to a reader elsewhere.
-	if !filepath.IsAbs(inst.Config) {
-		t.Errorf("config = %q, want an absolute path", inst.Config)
+	if inst.Config == nil || !filepath.IsAbs(inst.Config.Path) {
+		t.Errorf("config.path = %+v, want an absolute path", inst.Config)
 	}
-	if filepath.Base(inst.Config) != "rel.yaml" {
-		t.Errorf("config = %q, want it to still name rel.yaml", inst.Config)
+	if inst.Config == nil || filepath.Base(inst.Config.Path) != "rel.yaml" {
+		t.Errorf("config.path = %+v, want it to still name rel.yaml", inst.Config)
 	}
 	// Whole seconds, derived server-side so a clock-skewed reader can't
 	// compute a negative uptime from started_at.
 	if inst.Uptime < 89 || inst.Uptime > 95 {
 		t.Errorf("uptime_seconds = %d, want ~90", inst.Uptime)
 	}
+	if inst.UptimeStr == "" {
+		t.Error("uptime missing")
+	}
 	if inst.Started == "" {
 		t.Error("started_at missing")
+	}
+	if inst.Cwd == "" || inst.Executable == "" || inst.GoVersion == "" || inst.OSArch == "" {
+		t.Errorf("expected runtime and path fields: %+v", inst)
 	}
 }
 
@@ -110,52 +127,129 @@ func TestAdminStatusInstanceBlock(t *testing.T) {
 // so does anything embedding it — the block must degrade to "what the
 // process can answer about itself" rather than emitting zero values that
 // read as real data (pid 0, uptime 0, config "").
-func TestAdminStatusInstanceBlockWithoutWithInstance(t *testing.T) {
+func TestStatusInstanceBlockWithoutWithInstance(t *testing.T) {
 	inst := fetchInstance(t, false, "", time.Time{})
 
 	if inst.PID <= 0 || inst.Listen == "" || inst.Models != 1 {
 		t.Errorf("process-derived fields must still be present: %+v", inst)
 	}
-	if inst.Config != "" {
-		t.Errorf("config = %q, want it omitted when unknown", inst.Config)
+	if inst.Config != nil && inst.Config.Path != "" {
+		t.Errorf("config.path = %q, want it omitted when unknown", inst.Config.Path)
 	}
 	if inst.Started != "" || inst.Uptime != 0 {
 		t.Errorf("started_at/uptime must be omitted when unknown: %+v", inst)
 	}
 }
 
-// The admin surface stays loopback-only after this change — the instance
-// block adds a config path to a response that must never leave the host.
-func TestAdminStatusStillLoopbackOnly(t *testing.T) {
-	cfg, err := config.Parse([]byte(instanceYAML))
+// TestStatus_AuthMatrix verifies that /status allows any source IP when no
+// api_keys are configured, enforces authentication when api_keys are set,
+// and rejects the old /admin/status path with 404.
+func TestStatus_AuthMatrix(t *testing.T) {
+	// 1. Unauthenticated server (no api_keys): allow any source IP
+	cfgOpen, err := config.Parse([]byte(instanceYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := router.New(nil)
-	snap, err := router.BuildSnapshot(cfg)
+	rtOpen := router.New(nil)
+	snapOpen, err := router.BuildSnapshot(cfgOpen)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.Install(snap)
-	h := New(rt, nil).WithInstance("config.yaml", time.Now()).Handler()
+	rtOpen.Install(snapOpen)
+	hOpen := New(rtOpen, nil).Handler()
 
-	for _, remote := range []string{"203.0.113.7:1234", "10.0.0.5:5678"} {
-		req := httptest.NewRequest("GET", "/admin/status", nil)
+	for _, remote := range []string{"127.0.0.1:1234", "203.0.113.7:1234", "10.0.0.5:5678"} {
+		req := httptest.NewRequest("GET", "/status", nil)
 		req.RemoteAddr = remote
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusForbidden {
-			t.Errorf("remote %s: status = %d, want 403 (body: %s)", remote, w.Code, w.Body.String())
+		hOpen.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("unauth server, remote %s: status = %d, want 200", remote, w.Code)
 		}
-		if got := w.Body.String(); strings.Contains(got, "config") {
-			t.Errorf("remote %s: response leaked config info: %s", remote, got)
+	}
+
+	// Old /admin/status must return 404
+	reqOld := httptest.NewRequest("GET", "/admin/status", nil)
+	wOld := httptest.NewRecorder()
+	hOpen.ServeHTTP(wOld, reqOld)
+	if wOld.Code != http.StatusNotFound {
+		t.Errorf("old /admin/status: status = %d, want 404", wOld.Code)
+	}
+
+	// 2. Authenticated server (api_keys configured)
+	const authedYAML = `
+listen: 0.0.0.0:18800
+api_keys:
+  - secret-token-12345678
+providers:
+  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, providers: [p1], models: [m1]}
+`
+	cfgAuthed, err := config.Parse([]byte(authedYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtAuthed := router.New(nil)
+	snapAuthed, err := router.BuildSnapshot(cfgAuthed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtAuthed.Install(snapAuthed)
+	hAuthed := New(rtAuthed, nil).Handler()
+
+	// Missing key -> 401
+	{
+		req := httptest.NewRequest("GET", "/status", nil)
+		req.RemoteAddr = "10.0.0.5:5678"
+		w := httptest.NewRecorder()
+		hAuthed.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("authed server, missing key: status = %d, want 401", w.Code)
+		}
+	}
+
+	// Wrong key -> 401
+	{
+		req := httptest.NewRequest("GET", "/status", nil)
+		req.Header.Set("Authorization", "Bearer invalid-key-12345678")
+		w := httptest.NewRecorder()
+		hAuthed.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("authed server, wrong key: status = %d, want 401", w.Code)
+		}
+	}
+
+	// Correct key via Bearer Header -> 200
+	{
+		req := httptest.NewRequest("GET", "/status", nil)
+		req.RemoteAddr = "192.168.1.100:5678"
+		req.Header.Set("Authorization", "Bearer secret-token-12345678")
+		w := httptest.NewRecorder()
+		hAuthed.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("authed server, valid Bearer key: status = %d, want 200", w.Code)
+		}
+	}
+
+	// Correct key via x-api-key Header -> 200
+	{
+		req := httptest.NewRequest("GET", "/status", nil)
+		req.RemoteAddr = "192.168.1.100:5678"
+		req.Header.Set("x-api-key", "secret-token-12345678")
+		w := httptest.NewRecorder()
+		hAuthed.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("authed server, valid x-api-key: status = %d, want 200", w.Code)
 		}
 	}
 }
 
-// TestAdminStatusIssuesBlock verifies that /admin/status includes the "issues" array
+// TestStatusIssuesBlock verifies that /status includes the "issues" array
 // when config.Check() flags operational issues, and omits it when the config is clean.
-func TestAdminStatusIssuesBlock(t *testing.T) {
+func TestStatusIssuesBlock(t *testing.T) {
 	// Config with non-loopback listen and no API keys -> flags a SeverityWarning listen issue.
 	exposedYAML := `
 listen: 0.0.0.0:18800
@@ -180,23 +274,28 @@ models:
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/admin/status")
+	resp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Issues []config.Issue `json:"issues"`
+		Instance struct {
+			Config struct {
+				Issues []config.Issue `json:"issues"`
+			} `json:"config"`
+		} `json:"instance"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Issues) != 1 || out.Issues[0].Field != "listen" || out.Issues[0].Severity != config.SeverityWarning {
-		t.Errorf("got issues %+v, want 1 listen warning", out.Issues)
+	issues := out.Instance.Config.Issues
+	if len(issues) != 1 || issues[0].Field != "listen" || issues[0].Severity != config.SeverityWarning {
+		t.Errorf("got issues %+v, want 1 listen warning", issues)
 	}
 }
 
-func TestAdminStatusNoIssuesBlock(t *testing.T) {
+func TestStatusNoIssuesBlock(t *testing.T) {
 	// Clean config -> issues field must be absent/omitted.
 	cleanYAML := `
 listen: 127.0.0.1:18800
@@ -221,16 +320,149 @@ models:
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/admin/status")
+	resp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	var out struct {
+		Instance struct {
+			Config *struct {
+				Issues []config.Issue `json:"issues"`
+			} `json:"config"`
+		} `json:"instance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := raw["issues"]; ok {
-		t.Errorf("issues key must be omitted on clean config, got: %s", string(raw["issues"]))
+	if out.Instance.Config != nil && len(out.Instance.Config.Issues) > 0 {
+		t.Errorf("expected no issues block, got: %+v", out.Instance.Config.Issues)
+	}
+}
+
+func TestStatus_SystemTrafficBlocks(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	s := New(rt, nil).WithInstance("/tmp/config.yaml", time.Now().Add(-10*time.Second))
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		System struct {
+			Goroutines int `json:"goroutines"`
+			Memory     struct {
+				HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
+				HeapAlloc      string `json:"heap_alloc"`
+				SysBytes       uint64 `json:"sys_bytes"`
+				Sys            string `json:"sys"`
+			} `json:"memory"`
+			Disk struct {
+				FreeSpaceBytes uint64 `json:"free_space_bytes"`
+				FreeSpace      string `json:"free_space"`
+			} `json:"disk"`
+		} `json:"system"`
+		Traffic struct {
+			Requests struct {
+				Total      uint64            `json:"total"`
+				ByProtocol map[string]uint64 `json:"by_protocol"`
+				ByStatus   map[string]uint64 `json:"by_status"`
+			} `json:"requests"`
+			Tokens struct {
+				Total struct {
+					In         uint64 `json:"in"`
+					CacheWrite uint64 `json:"cache_write"`
+					CacheRead  uint64 `json:"cache_read"`
+					Reasoning  uint64 `json:"reasoning"`
+					Out        uint64 `json:"out"`
+				} `json:"total"`
+			} `json:"tokens"`
+			Sticky struct {
+				Entries int `json:"entries"`
+			} `json:"sticky"`
+		} `json:"traffic"`
+		CurrentTime string `json:"current_time"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+
+	if out.System.Goroutines <= 0 {
+		t.Errorf("expected positive goroutine count, got %d", out.System.Goroutines)
+	}
+	if out.System.Memory.SysBytes <= 0 || out.System.Memory.Sys == "" {
+		t.Errorf("expected memory sys bytes/string, got %+v", out.System.Memory)
+	}
+	if out.Traffic.Requests.ByProtocol == nil || out.Traffic.Requests.ByStatus == nil {
+		t.Errorf("expected initialized protocol/status maps in traffic: %+v", out.Traffic)
+	}
+	if out.CurrentTime == "" {
+		t.Error("expected non-empty current_time")
+	}
+}
+
+// TestStatus_ImageCacheEnabled_Semantics pins what "enabled" means in the
+// image_cache block: the global image_downscale, OR any virtual model with a
+// positive explicit override (config models[].image_downscale), which wins
+// over the global per EffectiveImageDownscaleMaxPx. A global-off + one-model-on
+// config must report enabled=true, since that model's images really are
+// downscaled and cached.
+func TestStatus_ImageCacheEnabled_Semantics(t *testing.T) {
+	const perModelYAML = `
+listen: 127.0.0.1:18800
+providers:
+  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k}
+models:
+  vm:
+    image_downscale: 256
+    endpoints:
+      - {protocol: openai, providers: [p1], models: [m]}
+`
+	cfg, err := config.Parse([]byte(perModelYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ImageDownscaleMaxPx != 0 {
+		t.Fatalf("setup: global image_downscale must be 0/absent, got %d", cfg.ImageDownscaleMaxPx)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	s := New(rt, nil)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		ImageCache struct {
+			Enabled bool `json:"enabled"`
+		} `json:"image_cache"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.ImageCache.Enabled {
+		t.Error("image_cache.enabled = false, want true (global off but model vm sets image_downscale: 256)")
 	}
 }

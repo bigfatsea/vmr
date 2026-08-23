@@ -1,6 +1,6 @@
 // Ver 2026-08-07, by Opus 5
 
-// /admin/status's "quota" section — see internal/router/quota.go's
+// /status's "quota" section — see internal/router/quota.go's
 // QuotaStatus and docs/VirtualModelRouter_Design_v4_Quota.md's
 // observability section.
 package server
@@ -52,12 +52,12 @@ type quotaStatusRow struct {
 	EstimatedPct float64 `json:"estimated_pct"`
 }
 
-func fetchAdminStatusRaw(t *testing.T, rt *router.Router) map[string]json.RawMessage {
+func fetchStatusRaw(t *testing.T, rt *router.Router) map[string]json.RawMessage {
 	t.Helper()
 	s := New(rt, nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/admin/status")
+	resp, err := http.Get(ts.URL + "/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestAdminStatus_QuotaSection_Present(t *testing.T) {
 	ps := quota.PeriodStart(l, time.Now())
 	rt.Quota.Charge("p1", "requests/1mo", ps, quota.Counters{Requests: 5}, 0)
 
-	out := fetchAdminStatusRaw(t, rt)
+	out := fetchStatusRaw(t, rt)
 	raw, ok := out["quota"]
 	if !ok {
 		t.Fatalf("response missing \"quota\" key: %v", out)
@@ -102,6 +102,14 @@ func TestAdminStatus_QuotaSection_Present(t *testing.T) {
 	if r.Provider != "p1" || r.Metric != "requests" || r.Every != "1mo" || r.Amount != 500 || r.Used != 5 {
 		t.Fatalf("row = %+v", r)
 	}
+	// pct is already Used/Amount*100 (percent, not a 0-1 fraction) - a
+	// consumer that re-multiplies it (e.g. a dashboard progress bar doing
+	// pct*100) renders every quota row ~100x wrong. The /status.html
+	// dashboard hit exactly this; the assertion here pins the server-side
+	// contract so the next consumer doesn't re-derive it wrong.
+	if r.Pct != 1.0 { // 5/500*100
+		t.Fatalf("pct = %v, want 1.0 (percent-scaled Used/Amount*100)", r.Pct)
+	}
 }
 
 func TestAdminStatus_QuotaSection_AbsentWhenUnconfigured(t *testing.T) {
@@ -116,7 +124,7 @@ func TestAdminStatus_QuotaSection_AbsentWhenUnconfigured(t *testing.T) {
 	rt := router.New(nil)
 	rt.Install(snap)
 
-	out := fetchAdminStatusRaw(t, rt)
+	out := fetchStatusRaw(t, rt)
 	if _, ok := out["quota"]; ok {
 		t.Fatalf("response has a \"quota\" key with no provider configured: %v", out)
 	}
@@ -137,7 +145,7 @@ func TestAdminStatus_QuotaSection_AbsentWithoutRegistry(t *testing.T) {
 	rt := router.New(nil)
 	rt.Install(snap)
 
-	out := fetchAdminStatusRaw(t, rt)
+	out := fetchStatusRaw(t, rt)
 	if _, ok := out["quota"]; ok {
 		t.Fatalf("response has a \"quota\" key with no Registry wired up: %v", out)
 	}

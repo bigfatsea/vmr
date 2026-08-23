@@ -243,7 +243,7 @@ func (e *Endpoint) computeHealthKey() string {
 }
 
 // Name is the human-readable, "/"-joined endpoint identity used by
-// internal/server/admin.go's /admin/status and live log lines — a DIFFERENT
+// internal/server/admin.go's /status and live log lines — a DIFFERENT
 // format from endpointlabel.go's EndpointLabel (":"-joined), which is the
 // audit-log's on-disk contract instead. The two coexist on purpose: this one
 // is free to change shape without touching a single historical audit
@@ -296,7 +296,7 @@ type Limit struct {
 	// PeriodStart/PeriodEnd for the calendar arithmetic each implies.
 	EveryUnit string
 	// EveryText is the original "every" text (e.g. "1mo", "2w") — used
-	// as-is for quota.LimitKey and for display (vmr check, /admin/status),
+	// as-is for quota.LimitKey and for display (vmr check, /status),
 	// so a human-readable value never needs reconstructing from
 	// EveryN+EveryUnit.
 	EveryText string

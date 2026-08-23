@@ -140,7 +140,7 @@ func ExtractModel(l core.Limit, limitKey string) (model string, ok bool) {
 // price happens to be configured then would silently rewrite history on every
 // pricing edit (see the design doc's "9.2 运行态"). Fresh/CacheRead/
 // CacheWrite/Out are still recorded alongside Cost on a cost-metric account:
-// unused for its routing decisions, but /admin/status's four-component
+// unused for its routing decisions, but /status's four-component
 // breakdown is useful regardless of metric.
 //
 // These are float64, not int64, because an account with model_multipliers
@@ -235,7 +235,7 @@ func NewRegistry(path string) *Registry {
 // have a bucket is a live-Registry fact, not something derivable from
 // config alone. A shared Limit never needs this — its one key is already
 // computable from the Limit itself. Order is unspecified; callers that need
-// determinism (e.g. QuotaStatus's stable /admin/status rendering) sort the
+// determinism (e.g. QuotaStatus's stable /status rendering) sort the
 // result themselves.
 func (r *Registry) Keys(provider string) []string {
 	r.mu.Lock()
@@ -330,7 +330,7 @@ func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.
 // EstimatedCostFor returns provider's limitKey bucket's running
 // EstimatedCost as of periodStart (lazily resetting first, same as Used) —
 // a small dedicated accessor rather than growing Used's return shape,
-// since only /admin/status's cost-metric rendering needs it.
+// since only /status's cost-metric rendering needs it.
 func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.Time) float64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()

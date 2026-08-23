@@ -94,7 +94,7 @@ func ApplyModelMultiplier(l core.Limit, model string, d Counters, estimated floa
 // this ratio) for the same "one formula, two independent consumers" reason
 // BaseAmount was moved: a read-only offline consumer (vmr report's §2.5
 // live-quota column) needs the exact same share router.QuotaStatus reports
-// for /admin/status, not a re-derivation of it — see
+// for /status, not a re-derivation of it — see
 // docs/VirtualModelRouter_Design_v4_Quota.md's "额度公式的唯一实现"
 // decision row.
 //

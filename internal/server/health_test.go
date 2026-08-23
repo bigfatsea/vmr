@@ -4,7 +4,7 @@
 // matter here are the negative ones: that it stays reachable without a
 // credential and from a non-loopback address (otherwise it cannot serve a
 // container probe at all), and that its body never grows an instance
-// detail (otherwise it becomes an unauthenticated /admin/status).
+// detail (otherwise it becomes an unauthenticated /status).
 package server
 
 import (
@@ -75,20 +75,20 @@ func TestHealth_NoAuthRequired(t *testing.T) {
 	}
 }
 
-// The one thing /admin/status refuses, /health must allow — container
-// runtimes and reverse proxies probe from the pod/bridge network.
+// /health is reachable without credentials from any network; /status enforces
+// auth when api_keys is configured.
 func TestHealth_NonLoopbackAllowed(t *testing.T) {
 	resp, _ := getHealth(t, healthServer(t), "10.244.3.17:41000")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d from non-loopback, want 200", resp.StatusCode)
 	}
 	// The contrast that gives the previous line its meaning.
-	req := httptest.NewRequest("GET", "/admin/status", nil)
+	req := httptest.NewRequest("GET", "/status", nil)
 	req.RemoteAddr = "10.244.3.17:41000"
 	w := httptest.NewRecorder()
 	healthServer(t).Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("/admin/status from non-loopback = %d, want 403", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("/status from non-loopback without key = %d, want 401", w.Code)
 	}
 }
 
@@ -117,11 +117,11 @@ func TestHealth_BodyMovesAndIsNotCacheable(t *testing.T) {
 }
 
 // The guard that matters most: this endpoint is unauthenticated and
-// reachable from anywhere, so every field in it is public. /admin/status
-// stays loopback-only precisely because it answers questions this one must
+// reachable from anywhere, so every field in it is public. /status
+// stays auth-gated precisely because it answers questions this one must
 // never answer — adding any of them here silently removes that protection.
 // If you are here because this test failed, the fix is almost certainly to
-// put your new field in /admin/status instead.
+// put your new field in /status instead.
 func TestHealth_LeaksNoInstanceDetail(t *testing.T) {
 	_, body := getHealth(t, healthServer(t), "203.0.113.9:41000")
 	want := map[string]bool{"status": true, "time": true, "uptime_seconds": true}

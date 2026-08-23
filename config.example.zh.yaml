@@ -186,7 +186,7 @@ providers:
     # 有些厂商把"一次用户交互"计成一个单位，但一个 agent 类客户端（带工具调用、
     # 重试）会把它变成十几次甚至更多真实的 HTTP 请求，vmr 看到的是这些真实请求
     # ——等流量真的跑起来之后，用你自己 `vmr report` 的数字（或者
-    # /admin/status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
+    # /status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
     # quota:
     #   limits:
     #     - metric: requests       # 或者：tokens，或者：cost（需要一个 pricing: 块，见下文）
@@ -228,7 +228,7 @@ providers:
     #       #   models: [premium-model]        # 只有这一个模型，它自己独立一个池；其它模型不受这条 Limit 影响
     #       # "*" 是保留 token，不是通配符——"gpt-*" 匹配不到任何东西，把 "*"
     #       # 和一个具名条目写在一起是加载期错误（通配符已经覆盖了它）。
-    #       # /admin/status 只展示真的产生过计费的模型各一行，不是每条 Limit 一行。
+    #       # /status 只展示真的产生过计费的模型各一行，不是每条 Limit 一行。
 
   # 一个 Credits 制账号，如果它按模型分化的价格不是简单的统一比例（那种情况上面
   # 的 token_weights 就够了）——metric: cost（P2.2）按真实金额给它计费，价格

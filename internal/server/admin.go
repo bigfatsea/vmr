@@ -1,24 +1,27 @@
-// Ver 2026-07-28 14:45, by Opus 5
+// Ver 2026-08-23 14:50, by Gemini
 
-// The loopback-only admin surface: /admin/status. Split out of server.go,
+// The admin surface: /status. Split out of server.go,
 // which is the client-facing HTTP surface (auth, chat ingress, models) —
 // this file answers questions about the *process*, not about a request.
 package server
 
 import (
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/buildinfo"
+	"vmr/internal/fmtutil"
 	"vmr/internal/health"
+	"vmr/internal/imgprep"
 	"vmr/internal/router"
 )
 
-// instance is the process-level identity /admin/status reports so a caller
+// instance is the process-level identity /status reports so a caller
 // who reached this port can tell *which* vmr answered: with several
 // instances on one machine (different configs, different ports), the port
 // is all a discovery tool has to go on, and everything else about the
@@ -29,9 +32,11 @@ import (
 type instance struct {
 	configPath string
 	startedAt  time.Time
+	cwd        string
+	executable string
 }
 
-// WithInstance records who this process is, for /admin/status. Separate
+// WithInstance records who this process is, for /status. Separate
 // from New (rather than two more parameters) because only `vmr start` can
 // answer these — every test constructs a Server without them, and their
 // absence is a fully valid state: adminStatus just omits the fields.
@@ -41,7 +46,14 @@ func (s *Server) WithInstance(configPath string, startedAt time.Time) *Server {
 	if abs, err := filepath.Abs(configPath); err == nil {
 		configPath = abs
 	}
-	s.inst = instance{configPath: configPath, startedAt: startedAt}
+	cwd, _ := os.Getwd()
+	exe, _ := os.Executable()
+	s.inst = instance{
+		configPath: configPath,
+		startedAt:  startedAt,
+		cwd:        cwd,
+		executable: exe,
+	}
 	return s
 }
 
@@ -50,14 +62,9 @@ func (s *Server) WithInstance(configPath string, startedAt time.Time) *Server {
 // on every call.
 var vmrVersion = sync.OnceValue(func() string { return buildinfo.Read().Short() })
 
-// adminStatus reports process identity, config freshness, per-endpoint
-// health and live gauges. Loopback callers only.
+// adminStatus reports process identity, config freshness, system resources,
+// traffic telemetry, per-endpoint health and quota gauges.
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil || !net.ParseIP(host).IsLoopback() {
-		router.WriteError(w, http.StatusForbidden, "permission_error", "admin endpoints are loopback-only")
-		return
-	}
 	snap := s.rt.Snapshot()
 	now := time.Now()
 	type epStatus struct {
@@ -83,81 +90,206 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	limit, inFlight, waiting := s.rt.Concurrency()
+
 	body := map[string]any{
-		"instance": s.instanceBlock(snap, len(out)),
-		"models":   out,
-		"concurrency": map[string]any{
-			"limit": limit, "in_flight": inFlight, "waiting": waiting,
-		},
-		// Sticky Model's live registry size. sticky.Registry.Len has carried
-		// a "for /admin/status or tests" comment since it was written but was
-		// never actually wired up — session affinity is otherwise entirely
-		// invisible, which makes "why does this conversation keep landing on
-		// the same endpoint" unanswerable without reading the audit log.
-		"sticky": map[string]any{"entries": s.rt.Sticky.Len()},
-		"time":   now,
+		"instance":     s.instanceBlock(snap, len(out)),
+		"system":       s.systemBlock(snap),
+		"traffic":      s.trafficBlock(),
+		"models":       out,
+		"current_time": now,
 	}
-	if rl, ok := reloadBlock(s.rt.ReloadState()); ok {
-		body["reload"] = rl
-	}
+
 	// Absent (not an empty array) when no quota.Registry is wired up or no
-	// provider has quota: configured — same "nothing to report" convention
-	// reloadBlock above already uses, so a caller doesn't have to
-	// distinguish "quota feature not in use" from "quota feature broken,
-	// zero providers found".
+	// provider has quota: configured.
 	if qs := s.rt.QuotaStatus(); len(qs) > 0 {
 		body["quota"] = qs
 	}
-	// Absent (not an empty array) when snap.Cfg.Check() finds no issues —
-	// same "nothing to report" convention reloadBlock / quota above already use.
-	if issues := snap.Cfg.Check(); len(issues) > 0 {
-		body["issues"] = issues
+	if ab := s.auditBlock(snap); ab != nil {
+		body["audit"] = ab
 	}
+	if icb := s.imageCacheBlock(snap); icb != nil {
+		body["image_cache"] = icb
+	}
+
 	router.WriteJSON(w, http.StatusOK, body)
 }
 
-// instanceBlock assembles process identity plus the config-freshness
-// verdict. Takes the caller's snapshot rather than loading its own: a hot
-// reload landing between the two loads would report one config's listen
-// address next to another's model count. models is the virtual-model count,
-// already computed by the caller as the size of the health map.
+// instanceBlock assembles process identity, execution environment,
+// concurrency throttles, and config freshness / warnings.
 func (s *Server) instanceBlock(snap *router.Snapshot, models int) map[string]any {
 	inst := map[string]any{
-		"pid":     os.Getpid(),
-		"listen":  snap.Cfg.Listen,
-		"models":  models,
-		"version": vmrVersion(),
+		"pid":        os.Getpid(),
+		"listen":     snap.Cfg.Listen,
+		"models":     models,
+		"version":    vmrVersion(),
+		"go_version": runtime.Version(),
+		"os_arch":    runtime.GOOS + "/" + runtime.GOARCH,
 	}
-	if s.inst.configPath != "" {
-		inst["config"] = s.inst.configPath
+	if s.inst.cwd != "" {
+		inst["cwd"] = s.inst.cwd
+	}
+	if s.inst.executable != "" {
+		inst["executable"] = s.inst.executable
 	}
 	if !s.inst.startedAt.IsZero() {
 		inst["started_at"] = s.inst.startedAt
 		inst["uptime_seconds"] = int64(time.Since(s.inst.startedAt).Seconds())
+		inst["uptime"] = fmtutil.FmtDuration(time.Since(s.inst.startedAt))
 	}
-	// config_stale answers the question a rejected — or never-triggered —
-	// reload leaves open: is the file on disk still what this process is
-	// serving? Compared against the last time the config was *successfully*
-	// read (process start, or the last accepted reload), never against the
-	// last attempt, or a rejected reload would clear its own warning.
+
+	limit, inFlight, waiting := s.rt.Concurrency()
+	inst["concurrency"] = map[string]any{
+		"limit": limit, "in_flight": inFlight, "waiting": waiting,
+	}
+
+	cfgBlock := map[string]any{}
+	if s.inst.configPath != "" {
+		cfgBlock["path"] = s.inst.configPath
+	}
 	if s.inst.configPath != "" && !s.inst.startedAt.IsZero() {
 		loadedAt := s.inst.startedAt
 		if okAt := s.rt.ReloadState().OKAt; okAt.After(loadedAt) {
 			loadedAt = okAt
 		}
 		if stale, mtime := router.ConfigStale(s.inst.configPath, loadedAt); !mtime.IsZero() {
-			inst["config_mtime"] = mtime
-			inst["config_stale"] = stale
+			cfgBlock["mtime"] = mtime
+			cfgBlock["stale"] = stale
 		}
+	}
+	if rl, ok := reloadBlock(s.rt.ReloadState()); ok {
+		cfgBlock["reload"] = rl
+	}
+	if issues := snap.Cfg.Check(); len(issues) > 0 {
+		cfgBlock["issues"] = issues
+	}
+	if len(cfgBlock) > 0 {
+		inst["config"] = cfgBlock
 	}
 	return inst
 }
 
-// reloadBlock renders the last hot-reload attempt. The bool is "there is
-// something to report": no reload having happened yet is the normal steady
-// state, and it should be an absent block rather than a row of zeroes that
-// reads like a failure.
+// systemBlock returns lightweight runtime memory, goroutine, and disk free space.
+func (s *Server) systemBlock(snap *router.Snapshot) map[string]any {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+
+	mem := map[string]any{
+		"heap_alloc_bytes": ms.HeapAlloc,
+		"heap_alloc":       fmtutil.FmtBytes(int64(ms.HeapAlloc)),
+		"sys_bytes":        ms.Sys,
+		"sys":              fmtutil.FmtBytes(int64(ms.Sys)),
+	}
+
+	targetDir := snap.Cfg.LogDir
+	if targetDir == "" {
+		targetDir = "."
+	}
+	freeBytes, _ := diskFreeSpace(targetDir)
+
+	disk := map[string]any{
+		"free_space_bytes": freeBytes,
+		"free_space":       fmtutil.FmtBytes(int64(freeBytes)),
+	}
+
+	return map[string]any{
+		"goroutines": runtime.NumGoroutine(),
+		"memory":     mem,
+		"disk":       disk,
+	}
+}
+
+// trafficBlock extracts current in-memory traffic counters and sticky registry size.
+func (s *Server) trafficBlock() map[string]any {
+	tSnap := s.rt.Telemetry.Snapshot()
+	return map[string]any{
+		"requests": tSnap.Requests,
+		"tokens":   tSnap.Tokens,
+		"sticky":   map[string]any{"entries": s.rt.Sticky.Len()},
+	}
+}
+
+// auditBlock summarizes audit logging status and on-disk size.
+func (s *Server) auditBlock(snap *router.Snapshot) map[string]any {
+	if snap.Cfg.LogDir == "" {
+		return nil
+	}
+	todayFile := filepath.Join(snap.Cfg.LogDir, "vmr-audit-"+time.Now().Format("2006-01-02")+".jsonl")
+	var activeBytes int64
+	if fi, err := os.Stat(todayFile); err == nil {
+		activeBytes = fi.Size()
+	}
+	totalBytes := dirTotalSize(snap.Cfg.LogDir)
+
+	return map[string]any{
+		"enabled":                s.audit != nil,
+		"active_file_size_bytes": activeBytes,
+		"active_file_size":       fmtutil.FmtBytes(activeBytes),
+		"total_size_bytes":       totalBytes,
+		"total_size":             fmtutil.FmtBytes(totalBytes),
+		"retention_days":         audit.RetentionDays(),
+	}
+}
+
+// imageCacheBlock summarizes image downscale cache disk status.
+func (s *Server) imageCacheBlock(snap *router.Snapshot) map[string]any {
+	// enabled means "some model actually downscales (and therefore caches)
+	// inline images": the global image_downscale, OR any virtual model with
+	// a positive explicit override (config models[].image_downscale) - a
+	// per-model override always wins over the global setting (see
+	// ModelRoute.EffectiveImageDownscaleMaxPx), so global-off + one-model-on
+	// still has the cache in use. Per-model settings themselves are config
+	// detail (vmr check shows them); this is only the runtime yes/no.
+	enabled := snap.Cfg.ImageDownscaleMaxPx > 0
+	if !enabled {
+		for _, byName := range snap.Models {
+			for _, r := range byName {
+				if r != nil && r.ImageDownscaleMaxPx != nil && *r.ImageDownscaleMaxPx > 0 {
+					enabled = true
+					break
+				}
+			}
+			if enabled {
+				break
+			}
+		}
+	}
+	cacheDir := snap.Cfg.ImageCacheDir
+	var sizeBytes int64
+	if cacheDir != "" {
+		sizeBytes = dirTotalSize(cacheDir)
+	}
+	return map[string]any{
+		"enabled":        enabled,
+		"size_bytes":     sizeBytes,
+		"size":           fmtutil.FmtBytes(sizeBytes),
+		"capacity_bytes": imgprep.DefaultCacheCapBytes,
+		"capacity":       fmtutil.FmtBytes(imgprep.DefaultCacheCapBytes),
+	}
+}
+
+// dirTotalSize sums sizes of all regular files in dir without recursion.
+func dirTotalSize(dir string) int64 {
+	if dir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+// reloadBlock renders the last hot-reload attempt.
 func reloadBlock(rs router.ReloadState) (map[string]any, bool) {
 	if rs.At.IsZero() {
 		return nil, false
