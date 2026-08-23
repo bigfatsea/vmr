@@ -131,6 +131,30 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	}
 }
 
+// TestVendorQuirkThoughtSignatureContinuesFailover locks in failover when
+// Google returns a 400 rejection for missing thought_signature on a tool call.
+// The router must classify this as ErrEndpoint and proceed to candidate #2.
+func TestVendorQuirkThoughtSignatureContinuesFailover(t *testing.T) {
+	u1, u2 := newUpstream(t), newUpstream(t)
+	u1.status.Store(400)
+	u1.errBody.Store(`{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`)
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
+
+	resp, body := chat(t, ts, simpleReq, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s (must fail over past thought_signature 400 rejection)", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+		t.Errorf("endpoint=%s, want p2 (p1's thought_signature 400 must failover to p2)", got)
+	}
+	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
+		t.Errorf("attempts=%s, want 2", got)
+	}
+	if u2.hits.Load() != 1 {
+		t.Errorf("p2 hits=%d, want 1", u2.hits.Load())
+	}
+}
+
 // TestCooldownFiltersEndpointUntilRetryAfterExpires checks that a
 // rate-limited endpoint is filtered out for the duration of Retry-After —
 // recovery itself (the half-open endpoint getting probed and rejoining

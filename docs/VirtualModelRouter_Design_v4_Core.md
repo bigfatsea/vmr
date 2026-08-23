@@ -221,13 +221,16 @@ ErrContextLimit 会话历史超出该端点模型的上下文窗口 → 切换�
 * MiniMax 未知模型返回 400（非 404）；内容违规错误码 1026/1027；
 * DeepSeek Anthropic 口对错模型名的措辞是 "The supported API model names are …"；内容风险走 400 + "risk" 类消息（其官方错误码表 400/401/402/422/429/500/503 中无内容专码）；
 * OpenRouter：402 余额不足；**403 = moderation flag / guardrail 拦截**（body 带 "flagged"、`metadata.reasons`）；429 与 503 都可能带 Retry-After；
+* Google Gemini：多轮工具调用上下文若缺失思维签名，返回 400 `INVALID_ARGUMENT`（"missing a thought_signature in functionCall parts"）；
 * 有厂商额度耗尽也发 429（body 见 insufficient/quota/balance/credit）。
 
-嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451；上下文超限类 = {context_length_exceeded, context_window_exceeded, maximum context length, context window, prompt is too long, input is too long, reduce the length of the messages}（中英并收，如"上下文长度"/"超出上下文"）。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
+嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451；上下文超限类 = {context_length_exceeded, context_window_exceeded, maximum context length, context window, prompt is too long, input is too long, reduce the length of the messages}（中英并收，如"上下文长度"/"超出上下文"）；厂商专属约束类（`vendorQuirkHint`）= {thought_signature, thought-signature, thought signature}（Google Gemini 思维签名与工具调用绑定校验）。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
 
 `maxOutputHint`（请求自身 `max_tokens`/输出长度参数超限嗅探，如 Anthropic 的 "maximum allowed number of output tokens"、OpenAI 的 "completion tokens"）是上下文超限词表判定前必须先排除的一类窄嗅探：这类错误换任何端点都解决不了（是客户端自己填的参数超出该端点上限，不是会话历史撑爆了窗口），继续归为 `ErrClient` 更合适；不排除它会让 `context_length_exceeded` 这类词表误吞一部分本该保持 `ErrClient` 的请求（部分厂商的输出超限措辞会在同一句话里同时提到"context"/"tokens"）。
 
-`upstreamHint`（网关转发失败嗅探）是这套宽松取舍里唯一一处刻意收窄的例外：只匹配"upstream request failed" / "upstream error" / "upstream connect error" / "error from provider" / "bad gateway" / "gateway timeout" 这类**明确把失败归给转发这一跳本身**的措辞，不匹配单独出现的 "upstream"/"gateway" 字样——那样宽松匹配的话会连带命中真正的请求内容错误（错误信息里恰好提到这两个词）。触发场景：某个 relay/网关层自己转发失败，返回一个不点名任何请求字段的 4xx（例：`{"message":"Error from provider (X): Upstream request failed", ...}`），若无此规则会被兜底判成 `ErrClient` 而直接放弃 failover——换任何端点都不会重试，即便队列里还有健康的候选，这正是这条规则要堵上的口子。判定顺序：内容词表 > 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
+`upstreamHint`（网关转发失败嗅探）是这套宽松取舍里唯一一处刻意收窄的例外：只匹配"upstream request failed" / "upstream error" / "upstream connect error" / "error from provider" / "bad gateway" / "gateway timeout" 这类**明确把失败归给转发这一跳本身**的措辞，不匹配单独出现的 "upstream"/"gateway" 字样——那样宽松匹配的话会连带命中真正的请求内容错误（错误信息里恰好提到这两个词）。触发场景：某个 relay/网关层自己转发失败，返回一个不点名任何请求字段的 4xx（例：`{"message":"Error from provider (X): Upstream request failed", ...}`），若无此规则会被兜底判成 `ErrClient` 而直接放弃 failover——换任何端点都不会重试，即便队列里还有健康的候选，这正是这条规则要堵上的口子。
+
+`vendorQuirkHint`（厂商专属约束嗅探）与 `upstreamHint` 类似，针对单一供应商特有的非标协议约束（如 Google Gemini 的 `thought_signature` 强制校验）。由于这类错误换其他候选端点（如 OpenRouter / DeepSeek）即可立即成功，因此归类为 `ErrEndpoint` 继续 failover，避免被兜底误判为全局致命的 `ErrClient` 导致中断重试循环。判定顺序：内容词表 > 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > `vendorQuirkHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
 
 **已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，见下文「响应侧归一化」），但**仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康——这是先把频率变成可量化的数字，再决定要不要做请求预处理插件（见「路线图」）的第一阶段。把这类响应变成主动拦截或自动 failover 仍是未实现的未来方向。
 

@@ -15,6 +15,8 @@ import (
 // names are …"; its content filter answers 400 with a "risk" message;
 // - OpenRouter reports insufficient credits as 402 and moderation/guardrail
 // blocks as 403 with "flagged"/"guardrail" in the body;
+// - Google Gemini rejects multi-turn tool calls lacking thought_signature as
+// 400 INVALID_ARGUMENT;
 // - some providers report exhausted quota/balance as 429.
 //
 // classifySnippetBytes bounds the body sniff. Some vendors attach verbose
@@ -85,10 +87,25 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		if upstreamHint(snippet) {
 			return core.ErrEndpoint
 		}
+		// Vendor-specific protocol constraints (e.g. Gemini's thought_signature
+		// requirement on tool-call history) that other endpoints behind the same
+		// virtual model do not enforce — switching helps, so continue failover.
+		if vendorQuirkHint(snippet) {
+			return core.ErrEndpoint
+		}
 		return core.ErrClient
 	default:
 		return core.ErrTransient
 	}
+}
+
+// vendorQuirkHint spots rejections caused by vendor-specific protocol
+// constraints (e.g. Gemini's thought_signature requirement on tool calls)
+// that other candidate endpoints behind the same virtual model do NOT
+// enforce. Kept narrow to avoid swallowing genuine malformed-request errors.
+func vendorQuirkHint(snippet string) bool {
+	return containsAny(snippet,
+		"thought_signature", "thought-signature", "thought signature")
 }
 
 // upstreamHint spots a relay/gateway reporting its own forwarding failure

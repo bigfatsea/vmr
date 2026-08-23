@@ -142,6 +142,7 @@ func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 	}{
 		{"400 invalid parameter", 400, `{"error":{"message":"invalid temperature"}}`, core.ErrClient},
 		{"400 unknown model (MiniMax)", 400, `{"error":{"message":"invalid params, unknown model 'x' (2013)"}}`, core.ErrEndpoint},
+		{"400 google missing thought_signature", 400, `{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`, core.ErrEndpoint},
 		{"401 unauthorized", 401, `{}`, core.ErrAuth},
 		{"402 insufficient credits (OpenRouter)", 402, `{"error":{"message":"Insufficient credits"}}`, core.ErrEndpoint},
 		{"403 forbidden", 403, `{}`, core.ErrAuth},
@@ -170,6 +171,44 @@ func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 			t.Parallel()
 			if got := DefaultClassify(tc.status, []byte(tc.body)); got != tc.want {
 				t.Errorf("status=%d body=%s: got %v want %v", tc.status, tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultClassify_VendorQuirks(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		{
+			"Google Gemini thought_signature missing in tool call (live shape)",
+			`{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`,
+			core.ErrEndpoint,
+		},
+		{
+			"Google Gemini thought-signature hyphenated variant",
+			`{"error":{"message":"missing thought-signature in functionCall"}}`,
+			core.ErrEndpoint,
+		},
+		{
+			"Google Gemini thought signature spaced variant",
+			`{"error":{"message":"invalid tool call: thought signature mismatch"}}`,
+			core.ErrEndpoint,
+		},
+		{
+			"Generic invalid argument stays ErrClient",
+			`{"error":{"code":400,"message":"invalid argument: temperature must be between 0 and 2","status":"INVALID_ARGUMENT"}}`,
+			core.ErrClient,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
 	}
