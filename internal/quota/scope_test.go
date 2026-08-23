@@ -116,6 +116,14 @@ func TestPerModelPrefixAndExtractModel(t *testing.T) {
 	if _, ok := ExtractModel(shared, "tokens/1mo#model=heavy-model"); ok {
 		t.Error("ExtractModel on a shared Limit must always report ok=false — a shared Limit has no per-model buckets")
 	}
+
+	restricted := core.Limit{Metric: core.MetricRequests, EveryText: "1d", Models: []string{"lite-a", "lite-b"}}
+	if _, ok := ExtractModel(restricted, "requests/1d#model=heavy-model"); ok {
+		t.Error("ExtractModel must reject a key whose model is outside restricted Scope")
+	}
+	if m, ok := ExtractModel(restricted, "requests/1d#model=lite-a"); !ok || m != "lite-a" {
+		t.Fatalf("ExtractModel(in-scope) = (%q, %v), want (lite-a, true)", m, ok)
+	}
 }
 
 func TestRegistry_Keys(t *testing.T) {

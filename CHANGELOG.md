@@ -18,6 +18,17 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 
 ## [Unreleased]
 
+### Added
+- `vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]` — fire a minimal real request at every configured (virtual model × provider × upstream model) combination **through a running vmr instance**, unlike `vmr diagnose`'s direct-to-upstream probe. Each request goes through the live router (auth, health, conditions, quota metering, audit recording all apply) and warms per-model quota buckets into existence — a per-model Limit's row only appears on `/status` once a request has charged it, so smoke after a fresh config makes every quota row visible. `-provider`/`-target-model`/`-model` filter the run, `-json` for scripting; exits non-zero if any smoke failed
+- Pinned routing: a request may carry `X-VMR-Provider` (pin to one provider) and `X-VMR-Target-Model` (pin to one upstream target model) headers to force it onto a specific backend within the requested virtual model's own endpoint set — defeating priority/order/quota/sticky so an operator can probe the exact backend they mean (this is how `vmr smoke` targets each endpoint). Strictly a narrowing lens (only filters endpoints the model already declares, post health/condition/context filtering); the headers are consumed by the router, stripped before forwarding so they never reach the upstream, and reported in `X-VMR-Route-Reason` as `pin=provider=…,model=…` and in the no-candidates error message. Requests without the headers are byte-identical to before
+
+### Fixed
+- `/status`/`vmr status` quota rows: the `role` (`bucket`/`gate`) is now derived per model's applicable-Limit subset — the same `applicableLimits` + `BucketIndex` path routing's scoring uses — instead of one global derivation across the provider's whole Limits list. A provider with two same-period Limits on disjoint model scopes (e.g. a 500/day Lite bucket and a 20/day Flash limit) previously displayed the second Limit's rows as `gate` even though for those models it IS the bucket; shared (unscoped) Limits keep the global derivation, since a shared Limit's role can legitimately differ per model
+- `vmr smoke`: the minimal probe request now uses `max_tokens`/`max_output_tokens: 4` instead of 1 — upstreams with a strict minimum bound (Bai/DeepSeek rejects `max_tokens <= 2` with a 400) no longer fail every smoke against them
+
+### Changed
+- `/status.html`: the quota table's ROLE column is gone — the role now colors the METRIC / WINDOW badge (blue = bucket, red = gate) with the full explanation on hover. USAGE / LIMIT (PCT) became USAGE / LIMIT (%): percentages render with up to two decimals (smoke's fresh sub-1% usage is no longer rounded away to 0%), and K/M/B magnitudes drop trailing decimal zeros ("10.00M" → "10M", "250.0K" → "250K")
+
 ## [0.6] - 2026-08-23
 ### Added
 - `internal/quota`: Automatic orphan `limitKey` pruning (`Registry.Prune`) during snapshot installation and hot reloads — removes stale keys when limits or model scopes change, preventing persistent disk state bloat in `vmr-quota.json` and eliminating offline report noise

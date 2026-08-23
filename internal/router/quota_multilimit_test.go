@@ -259,3 +259,70 @@ func TestChargeQuota_MultiLimit_TokensOnlyFetchedWhenSomeLimitNeedsIt(t *testing
 		t.Fatalf("Requests = %v, want 1", used.Requests)
 	}
 }
+
+// TestQuotaStatus_RoleIsPerModelNotGlobal pins the display-layer fix for the
+// bucket-vs-gate ROLE shown on /status: two same-period (1d) Limits with
+// disjoint Scopes plus a shorter wildcard Limit. The old rendering derived
+// ONE global BucketIndex across all three Limits — first 1d won, so the
+// Flash model's own 1d row displayed "gate" even though scoring
+// (scoreForEndpoint → applicableLimits → BucketIndex) treats it as that
+// model's bucket. The role must be derived per model's applicable subset,
+// exactly what routing does.
+func TestQuotaStatus_RoleIsPerModelNotGlobal(t *testing.T) {
+	rt := New(nil)
+	rt.Quota = quota.NewRegistry("")
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+providers:
+  - name: google
+    base_url: {openai: https://example.com}
+    api_key: k1
+    quota:
+      limits:
+        - {metric: requests, every: 1d, amount: 500, models: [lite]}
+        - {metric: requests, every: 1d, amount: 20, models: [flash]}
+        - {metric: tokens, every: 1min, amount: 250000, models: ["*"]}
+models:
+  m1:
+    endpoints:
+      - {protocol: openai, providers: [google], models: [lite, flash]}
+`)
+	snap := mustSnapshot(t, cfg)
+	rt.Install(snap)
+
+	// Charge once per model so each per-model Limit has a live row.
+	for _, m := range []string{"lite", "flash"} {
+		ep := &core.Endpoint{Provider: "google", Model: m, Quota: snap.Models["openai"]["m1"].Endpoints[0].Quota}
+		ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, chargeNow)
+	}
+
+	st := rt.QuotaStatus()
+	if len(st) != 4 {
+		// Two 1d rows (one per restricted-scope Limit's charged model) plus
+		// two 1min rows — the wildcard is itself per-model accounting, so it
+		// also renders one row per charged model.
+		t.Fatalf("rows = %d, want 4, got %+v", len(st), st)
+	}
+	role := func(model string) string {
+		for _, row := range st {
+			if len(row.Models) == 1 && row.Models[0] == model {
+				return row.Role
+			}
+		}
+		t.Fatalf("no row for model %q in %+v", model, st)
+		return ""
+	}
+	// Each model's own 1d Limit is ITS bucket; the shared 1min wildcard is
+	// a gate for both.
+	if got := role("lite"); got != "bucket" {
+		t.Errorf("lite 1d role = %q, want bucket", got)
+	}
+	if got := role("flash"); got != "bucket" {
+		t.Errorf("flash 1d role = %q, want bucket (was gate under the global derivation)", got)
+	}
+	for _, row := range st {
+		if row.Metric == "tokens" && row.Role != "gate" {
+			t.Errorf("1min wildcard role = %q, want gate for both models", row.Role)
+		}
+	}
+}

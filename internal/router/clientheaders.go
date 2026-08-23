@@ -29,6 +29,12 @@ var headerBlocklist = map[string]struct{}{
 	// Blocking it lets the Transport negotiate gzip itself and hand every
 	// layer plaintext.
 	"accept-encoding": {},
+	// Internal routing-pin headers (vmr smoke, manual debugging): consumed
+	// by router.Serve via r.Header (see pin.go) and never forwarded — an
+	// internal control header must not leak to an upstream as if it were
+	// client metadata.
+	"x-vmr-provider":     {},
+	"x-vmr-target-model": {},
 }
 
 // FilterClientHeaders returns a copy of h with headerBlocklist entries

@@ -337,7 +337,6 @@ func (rt *Router) QuotaStatus() []QuotaProviderStatus {
 // keys (reg.Keys) and renders one row per key that quota.ExtractModel
 // recognizes as belonging to l.
 func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []core.Limit, now time.Time) []QuotaProviderStatus {
-	bi := quota.BucketIndex(limits)
 	var liveKeys []string
 	for _, l := range limits {
 		if quota.PerModel(l) {
@@ -346,12 +345,9 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 		}
 	}
 	var out []QuotaProviderStatus
-	for i, l := range limits {
-		role := "gate"
-		if i == bi {
-			role = "bucket"
-		}
+	for _, l := range limits {
 		if !quota.PerModel(l) {
+			role := limitRoleForModel(limits, l, "")
 			out = append(out, quotaStatusRow(reg, provider, l, "", role, now))
 			continue
 		}
@@ -360,10 +356,30 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 			if !ok {
 				continue
 			}
+			role := limitRoleForModel(limits, l, model)
 			out = append(out, quotaStatusRow(reg, provider, l, model, role, now))
 		}
 	}
 	return out
+}
+
+// limitRoleForModel determines whether l acts as the bucket or a gate for
+// model, mirroring the exact applicableLimits + BucketIndex logic
+// scoreForEndpoint uses during routing. model is "" for a shared Limit.
+func limitRoleForModel(limits []core.Limit, l core.Limit, model string) string {
+	app := limits
+	if model != "" {
+		app = applicableLimits(limits, model)
+	}
+	bi := quota.BucketIndex(app)
+	if bi < 0 || bi >= len(app) {
+		return "gate"
+	}
+	bucket := app[bi]
+	if bucket.Metric == l.Metric && bucket.EveryText == l.EveryText && bucket.Amount == l.Amount && bucket.Since.Equal(l.Since) {
+		return "bucket"
+	}
+	return "gate"
 }
 
 // quotaStatusRow builds one QuotaProviderStatus row for l. model is ""

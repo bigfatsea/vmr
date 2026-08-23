@@ -570,7 +570,7 @@ passthrough() {
   local sub="$1"; shift
   local args=("$@")
   case "$sub" in
-    start|check|status|diagnose|replay|report|story)
+    start|check|status|diagnose|smoke|replay|report|story)
       has_c_flag "$@" || args=(-c "$CFG" "$@")
       ;;
   esac

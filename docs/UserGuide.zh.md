@@ -619,17 +619,33 @@ models:
 | `vmr story [-journey <id\|id前缀\|通配符>[,...] \| -render-all \| -compare <id1,id2> \| -corpus] [-lang en\|zh] [-report-config report.yaml] [glob...]` | `vmr analyze` 的别名——不带参数时转发为 `-list-only`；`-render-all`（无其它选择器）转发为 `-story-only -render-all`；`-journey`/`-compare`/`-corpus` 原样转发。解析自己的 flag，再和其它每种模式一样转发进同一套分派逻辑：把一次 Agent 任务的完整执行过程还原成可读的 Markdown 叙事；不带参数列出候选任务及其 id（不同于 `vmr analyze` 不带选择器时会直接渲染默认套件），`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染——只匹配到一个就直接渲染，多个就走 `-render-all` 同一条批处理路径（`-render-all` 本身是一次批量渲染全部候选、不做任何类别过滤——那是 `vmr analyze` 独有的默认值行为；转发为 `vmr analyze -story-only -render-all`，因此这里从不跑宏观报表半区，和不带参数的 `-render-all` 一贯的行为一致），`-compare id1,id2` 对比两个已渲染任务的行为剖面（含分叉点检测），`-corpus` 计算跨全部候选的语料级统计。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-render-all`/`-corpus`，也不支持多匹配的 `-journey`或不带参数的 `vmr story`——现在按需解析，校验错误只会在真正用得到它的模式上出现）。`-lang`/`report.yaml` 控制输出语言，与 `vmr report` 一致；`glob` 同样是可选的（见上文"大多数情况不需要指定输入文件"）。`vmr-stories.md` 里的候选分类规则与上文 `vmr analyze` 一致。仍完全可用——这里的每个 flag 在 `vmr analyze` 下行为完全相同 |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
+| `vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]` | 对每个配置的（虚拟模型 × provider × 上游模型）组合，通过一个**正在运行的 vmr 实例**发一次真实的最小请求——和 `diagnose` 直连上游的探测不同，每条请求都走真实路由器，鉴权、健康、条件过滤、quota 计量、审计记录全部生效。每条请求都会用 `X-VMR-Provider` / `X-VMR-Target-Model` 头钉在它报告的那个后端上（见下文"钉住路由"小节），所以它报告的就是它点名的那一个后端，而不是按优先级/顺序/quota 选出来的那个——同时它会把 per-model 的 quota 桶**暖出来**：per-model 的 Limit 只有在某条请求真正计过费后，`/status` 上才会出现这一行（新配置跑一次 smoke 就能让每条 quota 行都可见）。`-provider`/`-target-model`/`-model` 过滤本次运行；`-addr`/`-key` 指向非 config 自身 `listen` 的实例；`-json` 供脚本消费；只要有检查失败就以非零退出码结束 |
 | `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-req basename:line`（`vmr-requests.json` 里 `"req"` 字段发布的坐标）、`-ts <timestamp>`（匹配 `vmr-requests.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥。用 `-req` 时位置参数（审计文件）可以省略，直接把 `req` 字段贴进命令行就能用：省略时按坐标的 basename 在当前目录和 `-c config.yaml` 的 `log_dir` 下搜索（含 `.zst` 变体），传一个目录则只在该目录下搜索，传具体文件路径仍保留原有的一致性校验。`-ts`/`-line` 仍然要求显式给出文件——它们本身不带可用来搜索的文件名。`-print`（不带 `-provider`）完全跳过请求构造，只打印解析到的记录原始 JSON——是"真的回放"的只读版本 |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
-| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh report …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`replay`/`report`/`story` 都算——`report`/`story` 也在内，因为不给 glob 时两者都要靠它解析 `log_dir`，见上文"大多数情况不需要指定输入文件"）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
+| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh report …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`smoke`/`replay`/`report`/`story` 都算——`report`/`story` 也在内，因为不给 glob 时两者都要靠它解析 `log_dir`，见上文"大多数情况不需要指定输入文件"）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
 
-经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
+经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及请求被钉住时才出现的 `pin=`，和真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
+
+### 钉住路由（`X-VMR-Provider` / `X-VMR-Target-Model`）
+
+`vmr smoke`（以及手工 `curl`）可以用两个请求头，把某一条请求强制钉到某个具体上游后端上——头加在 `model` 指明虚拟模型的那条请求上：
+
+- `X-VMR-Provider: google`——钉到某一个 provider
+- `X-VMR-Target-Model: gemini-3.1-flash-lite`——钉到某一个上游目标模型
+
+两者都是**收窄透镜，绝不是开口**：它们只过滤请求的虚拟模型下已经配置好的端点（在健康/条件/上下文过滤之后），所以钉永远够不到模型没声明过的上游——它只是压过优先级/顺序/quota/sticky，让运维能直接探测他点名的那一个后端。钉不住任何东西时，错误信息里会带上钉的名字。这两个头被路由器消费并在转发前剥掉，永远到不了上游；`X-VMR-Route-Reason` 会报告 `pin=provider=…,model=…` 让响应自我解释。不带这两个头的请求与之前逐字节相同——钉住是按请求可选加入的。
 
 ```bash
 # 怀疑配置有问题——先诊断一遍，而不是对着日志里的 401 干瞪眼。
 ./vmr diagnose -c config.yaml
+
+# 暖出每个后端的 quota 桶，并证明经过一个在线 vmr 的端到端可达。
+./vmr smoke -c config.yaml
+
+# 修复后只重测某一个 provider（curl 也能用同一组钉头）。
+./vmr smoke -c config.yaml -provider google
 
 # 某个请求失败了，先看看 vmr 本来会发出什么，不真的发送。
 ./vmr replay -c config.yaml -provider openrouter -dry-run \

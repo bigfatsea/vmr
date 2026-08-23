@@ -18,6 +18,7 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,12 +29,13 @@ import (
 // routeReason describes how the candidate list for one request was arrived
 // at. Every field is a count the failover loop already had on hand.
 type routeReason struct {
-	total       int  // endpoints configured for this virtual model
-	healthOK    int  // survived the health filter
-	afterCond   int  // survived hard capability conditions
-	ctxFallback bool // every declared context window looked too small; fell back
-	quota       bool // Quota-Aware Routing's reorderByQuota actually moved the front candidate
-	sticky      bool // a sticky pointer reordered the list
+	total       int    // endpoints configured for this virtual model
+	healthOK    int    // survived the health filter
+	afterCond   int    // survived hard capability conditions
+	ctxFallback bool   // every declared context window looked too small; fell back
+	quota       bool   // Quota-Aware Routing's reorderByQuota actually moved the front candidate
+	sticky      bool   // a sticky pointer reordered the list
+	pin         string // pinned routing (X-VMR-Provider/X-VMR-Target-Model) narrows candidates; empty = none
 }
 
 // String renders only what actually happened: the overwhelmingly common
@@ -56,6 +58,9 @@ func (rr routeReason) String() string {
 	parts := []string{
 		"pick=" + pick,
 		"eligible=" + strconv.Itoa(rr.afterCond) + "/" + strconv.Itoa(rr.total),
+	}
+	if rr.pin != "" {
+		parts = append(parts, "pin="+rr.pin)
 	}
 	if n := rr.total - rr.healthOK; n > 0 {
 		parts = append(parts, "cooldown="+strconv.Itoa(n))
@@ -103,4 +108,25 @@ func headerSafe(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// noCandidatesMessage explains why a request reached Serve's all-failed
+// branch with nothing to try. Cases are ordered by specificity: a pin that
+// matched nothing is the most precise thing to say (the operator asked for
+// a specific provider/target model this model doesn't serve, or that's
+// currently unhealthy); next, health had candidates but a condition
+// rejected every one of them (name which — see
+// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
+// section); only then the generic "nothing was ever available".
+func noCandidatesMessage(creq *core.CanonicalRequest, reason routeReason, attempts int, healthOK []*core.Endpoint) string {
+	if attempts > 0 {
+		return fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
+	}
+	if reason.pin != "" {
+		return fmt.Sprintf("pinned request (pin=%s) matched no available endpoint for model %q", reason.pin, creq.Model)
+	}
+	if len(healthOK) > 0 {
+		return fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
+	}
+	return fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model)
 }

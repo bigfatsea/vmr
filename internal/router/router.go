@@ -137,6 +137,14 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		candidates = hardFiltered
 		reason.ctxFallback = true
 	}
+
+	// Pinned routing (X-VMR-Provider / X-VMR-Target-Model): narrow the
+	// candidates to the requested provider/target model before sorting, so
+	// the pin wins over priority/order — that is the entire point (see
+	// pin.go). A pin matching nothing leaves an empty candidate set, which
+	// fails below exactly like any other no-available-endpoint request,
+	// with the pin named in the message. No pin headers = no-op.
+	candidates, reason.pin = applyPinToCandidates(candidates, r)
 	strategy.Sort(candidates, route.Dims)
 
 	// Quota-Aware Routing: within each priority tier Sort just established,
@@ -232,17 +240,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		w.Write(last.body)
 	} else {
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
-		msg := fmt.Sprintf("no available endpoint for model %q (all cooling down or none configured)", creq.Model)
-		if attempts > 0 {
-			msg = fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
-		} else if len(healthOK) > 0 {
-			// Health had candidates; a Condition rejected every one of
-			// them — name which one(s) so the operator doesn't have to
-			// guess (see docs/VirtualModelRouter_Design_v4_Core.md's
-			// Condition-based Routing section).
-			msg = fmt.Sprintf("no endpoint for model %q accepts this request (%s)", creq.Model, rejectionSummary(healthOK, creq.Facts))
-		}
-		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
+		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(creq, reason, attempts, healthOK))
 	}
 	rt.Telemetry.RecordOutcome(false, r.Context().Err() != nil)
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-08-23 15:42, by Gemini -->
+<!-- Ver 2026-08-23 23:05, by Gemini -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -36,7 +36,7 @@
       padding: 24px 16px;
     }
     .container { max-width: 1280px; margin: 0 auto; }
-    
+
     /* Header */
     header {
       display: flex;
@@ -77,7 +77,7 @@
     .badge-success { background: var(--green-bg); color: var(--green); border-color: rgba(63, 185, 80, 0.3); }
     .badge-warning { background: var(--yellow-bg); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
     .badge-danger { background: var(--red-bg); color: var(--red); border-color: rgba(248, 81, 73, 0.3); }
-    
+
     .controls { display: flex; align-items: center; gap: 10px; }
     button, input {
       font-family: inherit;
@@ -94,7 +94,7 @@
     button { cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500; }
     button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
     button.primary:hover { background: var(--accent-hover); }
-    
+
     /* Banners */
     .banner {
       padding: 12px 16px;
@@ -112,7 +112,7 @@
     /* Grid Layouts */
     .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
     .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; margin-bottom: 20px; }
-    
+
     .card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -133,6 +133,7 @@
       align-items: center;
     }
     .card-main { font-size: 24px; font-weight: 700; color: var(--text-bright); font-family: var(--font-mono); }
+    .card-main-label { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-right: 6px; }
     .stat-list { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
     .stat-item { display: flex; justify-content: space-between; align-items: center; }
     .stat-label { color: var(--text-muted); }
@@ -184,7 +185,7 @@
       align-items: center;
     }
     .model-name { font-size: 15px; font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
-    
+
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
     th {
@@ -202,7 +203,7 @@
     }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(255, 255, 255, 0.015); }
-    
+
     .status-pill {
       display: inline-flex;
       align-items: center;
@@ -236,7 +237,7 @@
       color: var(--text-bright);
     }
     .quota-meta { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
-    
+
     /* Modals */
     .modal-overlay {
       position: fixed;
@@ -298,10 +299,7 @@
     <div class="grid-4">
       <!-- Concurrency -->
       <div class="card">
-        <div class="card-title">
-          <span>Concurrency</span>
-          <span id="metric-concurrency-pct">0%</span>
-        </div>
+        <div class="card-title">Concurrency</div>
         <div class="card-main" id="metric-concurrency-val">0 / 0</div>
         <div class="progress-bar-bg">
           <div class="progress-bar-fill" id="bar-concurrency" style="width: 0%"></div>
@@ -317,11 +315,11 @@
       <!-- System Resources -->
       <div class="card">
         <div class="card-title">System Resources</div>
-        <div class="card-main" id="metric-heap">0 MB</div>
+        <div class="card-main"><span id="metric-sys">0 MB</span><span class="card-main-label" style="margin-right:0; margin-left:6px;">Sys Memory</span></div>
         <div class="stat-list">
           <div class="stat-item">
-            <span class="stat-label">Sys Memory</span>
-            <span class="stat-val" id="metric-sys">0 MB</span>
+            <span class="stat-label">Heap Allocated</span>
+            <span class="stat-val" id="metric-heap">0 MB</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">Goroutines</span>
@@ -336,15 +334,17 @@
 
       <!-- Traffic Telemetry -->
       <div class="card">
-        <div class="card-title">Traffic Requests</div>
+        <div class="card-title">Requests</div>
         <div class="card-main" id="metric-requests-total">0</div>
         <div class="stat-list">
           <div class="stat-item">
-            <span class="stat-label">Status</span>
+            <span class="stat-label" style="color:var(--green)">OK</span>
+            <span class="stat-val" style="color:var(--green)" id="metric-req-ok">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Cancel / <span style="color:var(--red)">Error</span></span>
             <span class="stat-val">
-              <span style="color:var(--green)" id="metric-req-ok">OK: 0</span> ·
-              <span style="color:var(--text-muted)" id="metric-req-cancel">Cancel: 0</span> ·
-              <span style="color:var(--red)" id="metric-req-err">Err: 0</span>
+              <span id="metric-req-cancel">0</span> / <span style="color:var(--red)" id="metric-req-err">0</span>
             </span>
           </div>
           <div class="stat-item">
@@ -356,7 +356,7 @@
 
       <!-- Token Telemetry -->
       <div class="card">
-        <div class="card-title">Token Breakdown</div>
+        <div class="card-title">Tokens</div>
         <div class="card-main" id="metric-tokens-total">0</div>
         <div class="stat-list">
           <div class="stat-item">
@@ -406,8 +406,7 @@
               <tr>
                 <th>PROVIDER</th>
                 <th style="white-space: nowrap; min-width: 140px;">METRIC / WINDOW</th>
-                <th style="white-space: nowrap;">ROLE</th>
-                <th style="min-width: 200px;">USAGE / LIMIT (PCT)</th>
+                <th style="min-width: 200px;">USAGE / LIMIT (%)</th>
                 <th style="white-space: nowrap;">HEADROOM</th>
                 <th style="white-space: nowrap; min-width: 110px;">RESETS IN</th>
                 <th>SCOPE</th>
@@ -477,10 +476,26 @@
     // --- Formatting Helpers ---
     function fmtNum(n) {
       if (n === undefined || n === null) return '0';
-      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
-      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      if (n >= 1e9) return trimZeros((n / 1e9).toFixed(2)) + 'B';
+      if (n >= 1e6) return trimZeros((n / 1e6).toFixed(2)) + 'M';
+      if (n >= 1e3) return trimZeros((n / 1e3).toFixed(1)) + 'K';
       return n.toLocaleString();
+    }
+
+    // trimZeros strips a formatted decimal's trailing zeros ("10.00"->"10",
+    // "250.0"->"250", "1.50"->"1.5") without touching meaningful integer
+    // zeros ("100" stays "100").
+    function trimZeros(s) {
+      return s.replace(/\.0+$|(\.\d*[1-9])0+$/, '$1');
+    }
+
+    // fmtPct renders a percentage with up to two decimals ("48.23", "5",
+    // "0.2") — quota percentages are routinely fractional, and rounding
+    // them to whole numbers hides exactly the low-usage state smoke just
+    // created.
+    function fmtPct(p) {
+      if (!isFinite(p)) return '0';
+      return trimZeros(p.toFixed(2));
     }
 
     // esc HTML-escapes before interpolating into innerHTML. Every interpolated
@@ -513,7 +528,6 @@
       uptime: document.getElementById('badge-uptime'),
       banners: document.getElementById('banners-container'),
       concurrencyVal: document.getElementById('metric-concurrency-val'),
-      concurrencyPct: document.getElementById('metric-concurrency-pct'),
       concurrencyBar: document.getElementById('bar-concurrency'),
       waiting: document.getElementById('metric-waiting'),
       heap: document.getElementById('metric-heap'),
@@ -604,7 +618,6 @@
       dom.waiting.textContent = conc.waiting;
       let concPct = conc.limit > 0 ? Math.round((conc.in_flight / conc.limit) * 100) : 0;
       if (concPct > 100) concPct = 100;
-      dom.concurrencyPct.textContent = `${concPct}%`;
       dom.concurrencyBar.style.width = `${concPct}%`;
       dom.concurrencyBar.className = 'progress-bar-fill ' + (concPct > 90 ? 'fill-red' : concPct > 70 ? 'fill-yellow' : 'fill-green');
 
@@ -617,9 +630,9 @@
       // Traffic
       dom.requestsTotal.textContent = fmtNum(reqs.total || 0);
       const byStat = reqs.by_status || {};
-      dom.reqOk.textContent = `OK: ${fmtNum(byStat.ok || 0)}`;
-      dom.reqCancel.textContent = `Cancel: ${fmtNum(byStat.canceled || 0)}`;
-      dom.reqErr.textContent = `Err: ${fmtNum(byStat.error || 0)}`;
+      dom.reqOk.textContent = fmtNum(byStat.ok || 0);
+      dom.reqCancel.textContent = fmtNum(byStat.canceled || 0);
+      dom.reqErr.textContent = fmtNum(byStat.error || 0);
       const byProto = reqs.by_protocol || {};
       dom.protocols.textContent = `${fmtNum(byProto.openai || 0)} / ${fmtNum(byProto.anthropic || 0)} / ${fmtNum(byProto['openai-responses'] || 0)}`;
 
@@ -688,7 +701,7 @@
                   </tr>
                 </thead>
                 <tbody>`;
-        
+
         endpoints.forEach(ep => {
           let statusBadge = '';
           const now = Date.now();
@@ -728,9 +741,17 @@
       dom.quotaCount.textContent = `${quotaList.length} budgets`;
 
       quotaList.forEach(q => {
-        // Server-side pct is already Used/Amount*100 (e.g. 48.2 for 48.2%) - do not multiply again.
-        let pct = Math.round(q.pct);
-        let barColorClass = pct > 90 ? 'fill-red' : pct > 70 ? 'fill-yellow' : 'fill-green';
+        // Server-side pct is already Used/Amount*100 (e.g. 48.23 for
+        // 48.23%) - do not multiply again.
+        const pct = q.pct;
+        const isBucket = q.role === 'bucket';
+        // The badge color carries the role the dedicated ROLE column used
+        // to state: blue = bucket, red = gate, with the full explanation on
+        // hover so the table stays compact.
+        const roleHint = isBucket
+          ? 'Bucket - longest-period limit; unused allowance is real waste, so spare headroom raises routing priority'
+          : 'Gate - shorter-period rate cap; near-saturation lowers routing priority, never boosts it';
+        const barColorClass = pct > 90 ? 'fill-red' : pct > 70 ? 'fill-yellow' : 'fill-green';
         let resetsIn = '-';
         if (q.period_ends_at) {
           const remSec = Math.max(0, Math.floor((new Date(q.period_ends_at).getTime() - Date.now()) / 1000));
@@ -742,12 +763,11 @@
         dom.quotaTbody.innerHTML += `
           <tr>
             <td style="color:var(--text-bright); font-weight:600; white-space: nowrap;">${esc(q.provider)}</td>
-            <td style="white-space: nowrap;"><span class="badge badge-primary" style="white-space: nowrap;">${esc(q.metric)} / ${esc(q.every)}</span></td>
-            <td style="white-space: nowrap;"><span class="badge ${q.role === 'gate' ? 'badge-danger' : 'badge-primary'}">${esc(q.role)}</span></td>
+            <td style="white-space: nowrap;"><span class="badge ${isBucket ? 'badge-primary' : 'badge-danger'}" style="white-space: nowrap; cursor: help;" title="${roleHint}">${esc(q.metric)} / ${esc(q.every)}</span></td>
             <td>
               <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                 <span>${fmtNum(q.used)} / ${fmtNum(q.amount)}</span>
-                <span style="font-weight:600;">${pct}%</span>
+                <span style="font-weight:600;">${fmtPct(pct)}%</span>
               </div>
               <div class="progress-bar-bg" style="margin-top:0;">
                 <div class="progress-bar-fill ${barColorClass}" style="width: ${Math.min(100, pct)}%"></div>

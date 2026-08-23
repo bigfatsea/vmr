@@ -911,8 +911,6 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `audit.Logger.Close` 不等待后台 housekeeping 收尾 | `hkWG.Wait()` 只给测试用 | 压缩 crash-safe（tmp+rename+重启续跑），housekeeping 只碰已轮转的历史文件、与 Close 关闭的当日 fd 零交集；让关停阻塞在一次可能数 GB 的 zstd 上没有收益。Close 后的迟到 Write 由 `closed` 标志拒绝，不会重开文件 |
 | `vmr report` 不区分 `vmr replay --record` 产出的记录（`replay_of` 字段）与真实流量 | 指向包含两者的 glob 时，回放记录会被当普通请求计入统计 | 属于用户主动行为——`--record` 默认不写、写了也是独立文件，只有显式把 glob 指向它才会混入；混入本身有时是期望行为（比如想验证回放请求的 token 用量）。真出现"不小心混进日常统计"的抱怨再加过滤 |
 
----
-
 ## 15. 调试工具：`vmr diagnose` / `vmr replay`
 
 两者都不新造路由/协议逻辑：请求怎么建、上游 client 怎么造，跟 `vmr start` 走的是同一段代码（`Adapter.BuildRequest`、`router.NewUpstreamClient`），保证"诊断/回放看到的"和"真实流量会发生的"字节级一致——这是二者存在的前提，不是附加特性。
@@ -950,3 +948,13 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 **重建请求**：`replayHeaders()` 在 `router.FilterClientHeaders`（与 `chatHandler` 共用同一份 blocklist）之外，额外按 `audit.IsCredentialHeader` 剔除一遍——原因见「审计日志」的约定 3：审计记录里的凭证类 header 存的是打码占位符，`FilterClientHeaders` 的黑名单和 `audit` 的打码列表是两张故意不完全重合的表，直接套用前者会把打码值当真凭据转发给上游。model 字段用记录里的**虚拟名**（不是 `Attempts[*]` 里已经改写过的真实上游名）过 `Adapter.BuildRequest`，与真实流量走同一条改写路径。`-stream true|false` 覆盖时会真正改写 body 顶层 `stream` 字段（`jsonscan.RewriteStream`，与 model 改写共用同一个顶层字段 splice 扫描器；记录的 body 没有该键时走 generic 路径补上）——上游读的是 body 里的字段，只改本地簿记等于没改；`--record` 产出的记录同步反映覆盖后的请求。
 
 **`--record`**：把这次回放的请求/响应也写一条 `audit.Record`，追加到用户指定的独立文件（不写入常规 `log_dir`，不会被 `vmr report` 的常规 glob 意外扫到）。字段布局刻意模仿真实流量的既有约定，而不是简单地把能填的都填满：`Client.Request.Body` 存回放前的原文（虚拟模型名，不是发给上游的改写后字节——那部分在 `Attempts[0].Request.Body`）；`Client.Response` 存完整响应；`Attempts[0].Response.Body` 只在失败（状态码 ≥400）时存，成功时省略——与 `router.tryOne` 的既有约定一致（透传恒等，省略是因为与 `Client.Response.Body` 字节相同）。这样 `--record` 产出的文件可以被 `vmr report`/`jq`/再次 `vmr replay` 当成普通审计记录正确消费，不需要为"这是回放产出的"单开一条解析路径；记录本身带 `replay_of` 字段（"来源文件:行号"）标注来源，供人工排查。`DurMS`/`Attempts[0].DurMS` 测的是完整响应体传输完成后的总耗时，不是拿到响应头就停表——与 server/router 对这两个字段"总耗时"的定义一致，否则一个响应头快、body 慢的请求会被记成"很快"。
+
+### 15.3 `vmr smoke` 与钉住路由（`X-VMR-Provider` / `X-VMR-Target-Model`）
+
+`vmr smoke` 是 `vmr diagnose` 的**在线**镜像：diagnose 作为一次性进程直连上游、回答"现在直连会发生什么"（离线、不碰运行中的 vmr）；smoke 则要求**一个正在运行的 vmr 实例**在监听，把最小请求打进它的真实入口，回答"这个正在跑的路由器能不能把每个配置的后端都送通"——鉴权、健康、条件过滤、quota 计量、审计记录全部真实生效。它顺带解决一个 `diagnose` 解决不了的问题：per-model 的 quota 桶是惰性分配的，只有真实流量计过费才存在，`/status` 才会渲染那一行（见 Part 2/Quota 文档的惰性桶说明）；新配置一跑 `vmr smoke`，每条 quota 行都暖出来了。
+
+如何把请求钉到具体后端：请求头 `X-VMR-Provider`（钉到某个 provider）与 `X-VMR-Target-Model`（钉到某个上游目标模型），加在 `model` 指明虚拟模型的那条请求上。路由器在 `strategy.Sort` 之前按这两个头收窄候选集（见 `internal/router/pin.go`），所以**钉压过 priority/order/quota/sticky**——这正是它的目的：运维想探测的往往不是按优先级该选的那个，而是他点名的那一个。
+
+设计上刻意钉死的一条边界：**钉只是收窄，不是开口**。它只过滤请求的虚拟模型下已经配置好的端点（健康/条件/上下文过滤之后），钉永远够不到模型没声明过的上游——不引入任何配置作者没创建过的路由面。钉不住任何东西时按普通的"无可用端点"路径失败，但错误信息里带上钉的名字（`pinned request (pin=...) matched no available endpoint for model ...`），运维一眼看出是"钉的 provider 这个模型根本没挂"还是"挂了但当前不健康"。
+
+两个头被路由器消费，并且写进 `FilterClientHeaders` 的 blocklist——**转发前剥掉，绝不泄漏给上游**（一个内部控制头流到 Google/OpenRouter 的上游请求里会被当成客户端元数据，是纯噪音）。`X-VMR-Route-Reason` 以 `pin=provider=…,model=…` 上报，响应自我解释。不带这两个头的请求逐字节等价于旧行为——钉住是按请求可选加入的，生产流量不受影响。

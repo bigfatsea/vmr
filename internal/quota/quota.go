@@ -123,7 +123,11 @@ func ExtractModel(l core.Limit, limitKey string) (model string, ok bool) {
 	if !PerModel(l) || !strings.HasPrefix(limitKey, prefix) {
 		return "", false
 	}
-	return limitKey[len(prefix):], true
+	m := limitKey[len(prefix):]
+	if !AppliesToModel(l, m) {
+		return "", false
+	}
+	return m, true
 }
 
 // Counters is one Limit's accumulated consumption, stored by raw component —

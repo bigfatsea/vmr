@@ -11,6 +11,7 @@
 //	vmr story    [audit.jsonl]    deprecated alias for vmr analyze (-journey/-compare/-corpus/-render-all) — render one agent task's full execution history as a narrative (default -o: ./reports; default input: -c config.yaml's log_dir/vmr-audit-*)
 
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
+//	vmr smoke   -c config.yaml   fire a minimal real request at every configured backend through a running vmr (warms quota buckets, proves E2E reachability; -provider/-target-model/-model filter the run, pinned via X-VMR-* headers)
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (-line/-ts/-req to pick which; -print to just read it, no -provider needed)
 //
 // Each subcommand lives in its own cmd_*.go file; this file is only the
@@ -48,6 +49,8 @@ func main() {
 		err = cmdAnalyze(os.Args[2:])
 	case "replay":
 		err = cmdReplay(os.Args[2:])
+	case "smoke":
+		err = cmdSmoke(os.Args[2:])
 	case "diagnose":
 		err = cmdDiagnose(os.Args[2:])
 	case "version":
@@ -70,6 +73,7 @@ func usage() {
        vmr report [-c config.yaml] [-o dir] [-details] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (deprecated alias for vmr analyze, macro report only — details off by default; the requests index links to each record's computed detail filename regardless of whether the file exists; $ estimates use the built-in standard price table plus -c's config.yaml pricing overrides, if reachable; -lang default: report.yaml's language, or en; -currency default: report.yaml's currency, or whatever currency pricing resolved in; no input files => -c's log_dir/vmr-audit-*)
        vmr story [-c config.yaml] [-journey id | -render-all | -compare id1,id2] [-include-partial] [-show-ungrouped] [-o dir] [-lang en|zh] [audit.jsonl|glob]...   (deprecated alias for vmr analyze; no -journey/-render-all lists candidates; -lang default: report.yaml's language, or en; no input files => -c's log_dir/vmr-audit-*)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
+       vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]
        vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] [audit.jsonl|.jsonl.zst|dir]   (the file argument is required for -line/-ts; optional for -req, which can search cwd/log_dir for its coordinate's basename)
        vmr version`)
 }
