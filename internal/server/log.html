@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-14, by ox-alpha -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Live Log</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--card-border);
+      background: var(--card-bg);
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 700; color: var(--text-bright); }
+    #conn-state {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 10px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+    }
+    #conn-state.live { color: var(--green); border-color: rgba(63,185,80,.3); background: rgba(63,185,80,.15); }
+    #conn-state.connecting { color: var(--yellow); border-color: rgba(210,153,34,.3); background: rgba(210,153,34,.15); }
+    #conn-state.down { color: var(--red); border-color: rgba(248,81,73,.3); background: rgba(248,81,73,.15); }
+    .spacer { flex: 1; }
+    #line-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 5px 12px;
+      cursor: pointer;
+      outline: none;
+    }
+    button:hover { border-color: var(--text-muted); }
+    button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
+    button.primary:hover { background: var(--accent-hover); }
+
+    main { position: relative; flex: 1; min-height: 0; display: flex; }
+    pre#log {
+      flex: 1;
+      overflow-y: auto;
+      margin: 0;
+      padding: 12px 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #jump-bottom {
+      position: absolute;
+      right: 24px;
+      bottom: 20px;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,.5);
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      width: min(420px, calc(100vw - 32px));
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 24px;
+    }
+    .modal h2 { font-size: 16px; color: var(--text-bright); margin-bottom: 10px; }
+    .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
+    .modal input {
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      outline: none;
+      margin-bottom: 14px;
+    }
+    .modal input:focus { border-color: var(--accent); }
+    #auth-error { color: var(--red); font-size: 12px; margin: -6px 0 10px; }
+    #auth-error.hidden { display: none; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>VMR Live Log</h1>
+    <span id="conn-state" class="connecting">connecting</span>
+    <div class="spacer"></div>
+    <span id="line-count">0 lines</span>
+    <button id="btn-clear" title="Clear the displayed log">&#128465;&#65039; Clear</button>
+    <button id="btn-key">&#128273; Key</button>
+    <button id="btn-retry" class="primary" style="display:none;">Retry</button>
+  </header>
+
+  <main>
+    <pre id="log"></pre>
+    <button id="jump-bottom">&darr; Bottom</button>
+  </main>
+
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Authentication Required</h2>
+      <p>This VMR instance is protected with API Key authentication. Please enter your API Key to view the live log:</p>
+      <input type="password" id="input-api-key" placeholder="Enter API Key (e.g. sk-...)" autocomplete="off">
+      <div id="auth-error" class="hidden">Invalid or expired key — please re-enter:</div>
+      <div class="modal-actions">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    // Same credential store as status.html: one key per vmr instance serves
+    // both pages, so entering it once unlocks both.
+    const Auth = {
+      getKey() { return localStorage.getItem('vmr_status_key') || ''; },
+      setKey(k) { localStorage.setItem('vmr_status_key', k.trim()); },
+      clearKey() { localStorage.removeItem('vmr_status_key'); }
+    };
+
+    const dom = {
+      state: document.getElementById('conn-state'),
+      count: document.getElementById('line-count'),
+      log: document.getElementById('log'),
+      jump: document.getElementById('jump-bottom'),
+      retry: document.getElementById('btn-retry'),
+      keyBtn: document.getElementById('btn-key'),
+      clearBtn: document.getElementById('btn-clear'),
+      modal: document.getElementById('auth-modal'),
+      input: document.getElementById('input-api-key'),
+      authError: document.getElementById('auth-error'),
+      btnCancel: document.getElementById('btn-auth-cancel'),
+      btnSave: document.getElementById('btn-auth-save')
+    };
+
+    let controller = null;   // AbortController for the in-flight stream
+    let lineTotal = 0;
+    let nearBottom = true;   // auto-scroll only while the user hasn't scrolled up
+
+    function setState(cls, label) {
+      dom.state.className = cls;
+      dom.state.textContent = label;
+      dom.retry.style.display = cls === 'down' ? '' : 'none';
+    }
+
+    // esc isn't needed anywhere below on purpose: lines go in via
+    // textContent/createTextNode, never innerHTML, so a log line containing
+    // markup-shaped bytes renders as text.
+    function appendLine(text) {
+      dom.log.appendChild(document.createTextNode(text + '\n'));
+      lineTotal++;
+      dom.count.textContent = lineTotal.toLocaleString() + ' lines';
+      if (nearBottom) dom.log.scrollTop = dom.log.scrollHeight;
+    }
+
+    dom.log.addEventListener('scroll', () => {
+      nearBottom = dom.log.scrollTop + dom.log.clientHeight >= dom.log.scrollHeight - 40;
+      dom.jump.style.display = nearBottom ? 'none' : '';
+    });
+    dom.jump.addEventListener('click', () => {
+      nearBottom = true;
+      dom.jump.style.display = 'none';
+      dom.log.scrollTop = dom.log.scrollHeight;
+    });
+
+    function keyHeaders() {
+      const h = {};
+      const k = Auth.getKey();
+      if (k) h['Authorization'] = 'Bearer ' + k;
+      return h;
+    }
+
+    async function connect() {
+      if (controller) controller.abort();
+      controller = new AbortController();
+      setState('connecting', 'connecting');
+
+      try {
+        const resp = await fetch('/log', { headers: keyHeaders(), signal: controller.signal });
+        if (resp.status === 401) {
+          promptForKey(false);
+          return;
+        }
+        if (!resp.ok || !resp.body) {
+          throw new Error('HTTP ' + resp.status);
+        }
+        setState('live', 'live');
+        await readStream(resp.body.getReader());
+        // Server closed the stream (restart/shutdown) — not an error.
+        setState('down', 'disconnected');
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // superseded by a newer connect()
+        setState('down', 'disconnected');
+      }
+    }
+
+    // readStream chunks raw bytes and splits them into complete lines; a
+    // partial trailing line is held back until its newline arrives.
+    async function readStream(reader) {
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          if (line !== '') appendLine(line);
+        }
+      }
+      if (buf !== '') appendLine(buf);
+    }
+
+    function promptForKey(afterFailure) {
+      dom.authError.classList.toggle('hidden', !afterFailure);
+      dom.modal.classList.remove('hidden');
+      dom.input.value = '';
+      dom.input.focus();
+    }
+
+    dom.btnSave.addEventListener('click', () => {
+      const k = dom.input.value.trim();
+      if (!k) return;
+      Auth.setKey(k);
+      dom.modal.classList.add('hidden');
+      connect();
+    });
+    dom.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') dom.btnSave.click();
+    });
+    dom.btnCancel.addEventListener('click', () => {
+      dom.modal.classList.add('hidden');
+      setState('down', 'auth required');
+    });
+
+    // Clear wipes only the local view: the server's ring buffer and the
+    // live stream are untouched, so new lines keep arriving right after.
+    dom.clearBtn.addEventListener('click', () => {
+      dom.log.textContent = '';
+      lineTotal = 0;
+      dom.count.textContent = '0 lines';
+    });
+
+    dom.keyBtn.addEventListener('click', () => {
+      const k = Auth.getKey();
+      const next = prompt('API Key' + (k ? ' (currently ***' + k.slice(-4) + ')' : '') + ' — leave empty to clear:', k);
+      if (next === null) return;
+      if (next.trim() === '') Auth.clearKey();
+      else Auth.setKey(next);
+      refreshKeyButton();
+      connect();
+    });
+    function refreshKeyButton() {
+      const k = Auth.getKey();
+      dom.keyBtn.textContent = k ? '\u{1F511} ***' + k.slice(-4) : '\u{1F511} Key';
+    }
+
+    dom.retry.addEventListener('click', connect);
+
+    refreshKeyButton();
+    connect();
+  </script>
+</body>
+</html>

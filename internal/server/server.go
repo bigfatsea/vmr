@@ -1,7 +1,7 @@
 // Ver 2026-07-24 12:35, by Sonnet 5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
-// /health, /status, /status.html. Anything else is 404.
+// /health, /status, /status.html, /log, /log.html. Anything else is 404.
 package server
 
 import (
@@ -17,13 +17,15 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/imgprep"
+	"vmr/internal/logtee"
 	"vmr/internal/router"
 )
 
 type Server struct {
-	rt    *router.Router
-	audit *audit.Logger // nil = auditing disabled
-	inst  instance      // zero value outside `vmr start` (tests, embedding)
+	rt     *router.Router
+	audit  *audit.Logger // nil = auditing disabled
+	inst   instance      // zero value outside `vmr start` (tests, embedding)
+	logTee *logtee.Tee   // nil = live-log streaming unavailable (/log answers 503)
 	// started is when this Server began serving — /health's uptime basis.
 	// Separate from inst.startedAt, which only `vmr start` fills in and
 	// which /status therefore reports conditionally: /health has no
@@ -45,6 +47,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
 	mux.HandleFunc("GET /status.html", s.statusPage)
+	mux.HandleFunc("GET /log", s.auth(s.adminLog))
+	mux.HandleFunc("GET /log.html", s.logPage)
 	return mux
 }
 

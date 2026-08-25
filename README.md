@@ -141,6 +141,7 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
 # Status & Health (JSON & Web Dashboard)
 curl http://127.0.0.1:8800/status
 # Or open http://127.0.0.1:8800/status.html in your browser
+# Live console log (tail -f in the browser): http://127.0.0.1:8800/log.html
 ```
 </details>
 

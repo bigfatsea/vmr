@@ -18,6 +18,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/fmtutil"
+	"vmr/internal/logtee"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 	"vmr/internal/server"
@@ -95,7 +96,13 @@ func cmdStart(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	logger := log.New(stampWriter{os.Stderr}, "", 0)
+	// The tee feeds /log's live stream: every logger line reaches both
+	// stderr and the ring buffer, stamped identically (the stampWriter wraps
+	// the fan-out, so both copies carry the same timestamp). One instance,
+	// one interception point — hot reloads never touch the logger, so the
+	// tee survives them untouched.
+	tee := logtee.New(logtee.DefaultCapLines)
+	logger := log.New(stampWriter{io.MultiWriter(os.Stderr, tee)}, "", 0)
 	startTime := time.Now()
 
 	cfg, err := config.Load(*path)
@@ -201,8 +208,9 @@ func cmdStart(args []string) error {
 	}()
 
 	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           server.New(rt, auditLog).WithInstance(*path, startTime).Handler(),
+		Addr: cfg.Listen,
+		Handler: server.New(rt, auditLog).WithLogTee(tee).
+			WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(cfg.Models))

@@ -141,6 +141,7 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
 # 探针与健康状态 (JSON 与 Web 可视化看板)
 curl http://127.0.0.1:8800/status
 # 或在浏览器中打开 http://127.0.0.1:8800/status.html 访问可视化看板
+# 实时控制台日志（浏览器版 tail -f）：http://127.0.0.1:8800/log.html
 ```
 </details>
 
