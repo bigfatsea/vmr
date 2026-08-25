@@ -208,13 +208,12 @@ func TestDefaultClassify_VendorQuirks(t *testing.T) {
 			core.ErrQuirk,
 		},
 		{
-			// The literal body from audit line 513 of the 2026-08-25 incident
-			// (FAILOVER_INCIDENT_2026-08-25.md): a healthy endpoint rejecting a
-			// conversation whose history lacks the previous turn's
-			// reasoning_content — the request/history shape is wrong for THIS
-			// vendor, not evidence of an unhealthy endpoint. Must fail over with
-			// zero cooldown (ErrQuirk), not dead-end (ErrClient) or cool down
-			// (ErrEndpoint).
+			// The literal body from audit line 513 of the 2026-08-25 incident: a
+			// healthy endpoint rejecting a conversation whose history lacks the
+			// previous turn's reasoning_content — the request/history shape is
+			// wrong for THIS vendor, not evidence of an unhealthy endpoint. Must
+			// fail over with zero cooldown (ErrQuirk), not dead-end (ErrClient)
+			// or cool down (ErrEndpoint).
 			"DeepSeek thinking-mode reasoning_content pass-back requirement",
 			"The `reasoning_content` in the thinking mode must be passed back to the API.",
 			core.ErrQuirk,

@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-25 22:49, by gemini-3.7-flash -->
+<!-- Ver 2026-08-25 23:20, by gemini-3.7-flash -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**（2026-08-23 全面复核并闭环 1.40/1.45/1.47 后重算；2026-08-25 复盘新增 1.48）：**高危 0 项**、中危 2 项、低危 13 项，合计 **15 条**。`1.40`（工具 ID 归一化下沉 `chatmsg`）、`1.45`（Quota 孤儿 Key 修剪）与 `1.47`（Server 审计路径收敛）已全部完成落地并移入 §3；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15`、`1.27` 与 `1.46` 经重新分类后移入 §2；原 `1.23` 已并入 `1.1`。
+- **§1 分布**：**高危 0 项**、中危 2 项、低危 13 项，合计 **15 条**。`1.40`（工具 ID 归一化下沉 `chatmsg`）、`1.45`（Quota 孤儿 Key 修剪）与 `1.47`（Server 审计路径收敛）已全部完成落地并移入 §3；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15`、`1.27` 与 `1.46` 经重新分类后移入 §2；原 `1.23` 已并入 `1.1`。
 - **不再有高危条目，也不再有 `[中低]` 条目**。`1.41`（曾经的第三项高危——它产出的不是多余内容而是**错误内容**，且是 `1.35`/`1.36` 的技术前置）已由 P12 修复；`1.35`/`1.36` 本身（体积纪律从未成立、详单内部约 93% 是重复拷贝）已由 P13 修复——默认 `vmr analyze` 真实语料实测从 47MB/253 份详单降到 3.0MB/0 份详单，`-render-all` 全量物化的详单体积降约 86%，详见 §3 第 38 项。`1.43`（唯一的 `[中低]` 条目——检测器覆盖率披露）已由 P14 修复，详见 §3 第 40 项。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
@@ -159,18 +159,21 @@
 
 ### 1.48 [低] 错误分类词表的长期形态：端点级 quirk 统一模块（含 sticky 降级优化）未做
 
-- **现状**：2026-08-25 故障复盘（`FAILOVER_INCIDENT_2026-08-25.md`）暴露三类误判，已按最小修复闭环
-  （§3 第 45 条：新增 `ErrQuirk` 类 + 三处词表补充）。全量方案——每 vendor 一个编译期注册的 quirk
-  profile 文件（marker 表 / 建议分类 / sticky 策略字段统一声明），替代散在 `DefaultClassify` 里的全局
-  词表——经评审**延后**：三类误判用最小修复已完全覆盖，"全局词表作用域错位、只长不拆"的批评在今天
-  四张表约 30 词的规模下是前瞻性的，现在上机制是替一个不会自己举手的问题排队。事故报告 §七 留有
-  完整设计（含 review 勘误后的修正：profile 按 model glob 匹配而非 provider 名等），升级时可直接复用。
+- **现状**：错误分类的 vendor 知识散在 `DefaultClassify` 的全局词表里（contentHint /
+  contextLimitHint / upstreamHint / vendorQuirkHint / authHint，约 30 词）。已知的厂商专属约束类
+  误判（DeepSeek 思考模式 rc 回传、Google thought_signature）已由 `ErrQuirk` 类 + 词条修复覆盖
+  （§3 第 45 条），词表之间尚未互相干扰。全量方案——每 vendor 一个编译期注册的 quirk profile
+  （marker 表 / 建议分类 / sticky 策略字段统一声明），替代散在全局词表里的 vendor 知识——经评审
+  **延后**：当前词表规模下收益前瞻，现在上机制是替一个不会自己举手的问题排队。
+- **可能方案（升级时直接可用）**：每 vendor 一个编译期注册的 quirk profile；profile 按 **model
+  glob** 匹配（不按 provider 名——provider 名是用户 config 自起名，改名即静默失效，且按 provider
+  收窄会让经中继转发的流量退回旧行为）；字段含 marker 表、建议分类、sticky 策略；`DefaultClassify`
+  保留为无 profile 命中时的兜底通用分类。
 - **附带优化（一并待定）**：quirk 命中时对 sticky 会话做降级——被 quirk 拒绝的会话若粘在同一端点，
   后续每一轮都会再付一次 ~1–2s 的失败往返才 failover；降级（清除该会话粘性或降低权重）可消除这段
   重复延迟，但要动 sticky 注册表与 router 的交互面，非词表改动可比。
 - **触发条件**：全局词表继续增长并开始出现互相干扰/误命中（某条 marker 在另一家厂商的错误语境下
   被复用），或 sticky 重复往返在真实负载中可观测地拖慢中毒会话。
-- **登记来源**：2026-08-25，故障复盘评审决策（用户拍板延后）。
 
 ## 2. 刻意取舍，不是缺陷
 
@@ -200,7 +203,7 @@
 - **环境变量未定义时静默展开为空串，且不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值应在 YAML 里显式写出。
 - **`internal/config` 的三层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 阶段跑完解析，看起来像「配置层反向侵入用例层」，因此被反复提出。但这是 `docs/VirtualModelRouter_Design_v4_Quota.md` 决策表「定价的落点」一行**明文选定的方案**，「只让 report 一侧解析、`metric: cost` 另开一条运行时校验路径」正是同一行里已否决的备选（理由：两份实现容易漂移）。后置还会摧毁「`metric: cost` 费率不齐 = **加载期**错误」这条硬要求——`vmr check` 将不再能在不联网的情况下告诉你费率配错了，一个确定的加载期失败被换成运行期意外。
 - **多协议适配器（`adapter/{openai,anthropic,openairesponses}`）保持独立子包，不合并也不抽取通用骨架**：三个协议看似相似，底层已存在真实分叉（如 Anthropic 529 错误重试特判、Responses 顶层 `input` 数组与 `RewriteInputRoles`）；独立子包支持编译期 `init()` 静态注册与独立单测，新增协议零侵入。合并成统一参数化结构体只是把类型多态改写为字符串 `if` 分支，可读性与扩展性反而劣化。
-- **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。（2026-08-25 复盘评估过"端点级 quirk 模块"**编译期**注册表方案，因当前词表规模小、收益前瞻而延后，登记 §1.48——延后的是规模机制，不是这条取舍本身。）
+- **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
 - **不合并 `Dimension`（排序）与 `Condition`（淘汰）**：淘汰依赖请求事实，排序只比较端点属性，职责分离保证接口纯粹。
 - **ProviderGroup 方案的多 Key 部分（`api_keys:`）已实现（2026-08-22，`internal/config/apikeys.go`），均衡策略与分级 Failover 仍然不做**：早先设想的"运行时 KeyPool"（一个 Provider 账号内部再拆多把 Key、请求期在池内随机选）会违反 `core.Endpoint` "构造后不可变、`HealthKey()` 只算一次"这条贯穿 health/sticky/quota 三个子系统的不变式——`HealthKey()` 在 `Classify`/`Acquire`/`ReportFailure`/`sticky.Peek`/`findByHealthKey` 等多处调用点都被当作端点的终身稳定身份使用，运行时换 Key 会让这个身份跟着漂移。实际落地的是"配置期展开成多个独立 `core.Endpoint`"：`Provider.APIKeys`（具名映射表，`{label: key, ...}`）在 `config.Parse` 里、`validate()`/`BuildSnapshot` 之前展开成 `<name>-<label>` 命名的独立 `Provider`，并就地重写 `endpoints[].providers`/`fallback_endpoints[].providers` 的引用——下游 quota/health/sticky/audit/report/story 全部按 `Provider.Name` 字符串解析，零改动。当初设想的三处工作量，前两处被这个展开形状本身架构性绕开，不是被实现：①**均衡策略**——`strategy.Sort` 稳定排序本身不变，同优先级仍按 `Config.Providers` 列表顺序决出第一名；但 `api_keys:` 展开出的几个 Provider 在这份列表里的相对顺序不保证等于 YAML 书写顺序（`Provider.APIKeys` 是普通 Go map，特意不做有序解析——round-robin/random `strategy.Dimension` 依然不做，谁排第一因此也不可预先指定，只能读 `vmr check`/启动日志的实际展开结果），没配 quota 时排第一的那个继续吃全部流量、其余纯冷备；②**配额聚合**——因为每把展开出来的 key 是独立 Provider 名、独立 quota 池，"同一 Provider 名下几把 Key 共享 `{every, since, amount}`"这个对齐难题根本不存在了。第三处维持原判：③**分级 Failover**（402 跳 Key / 5xx 跳 Provider）仍不做——`internal/adapter/classify.go` 目前共用 `ErrEndpoint` 的 402/404 未拆分，候选列表经 `strategy.Sort`/配额重排/Sticky 重排后也不保证同源 key 仍然相邻，这两个前提没变，仍然留到看到真实需求后再单独立项。
 
@@ -405,7 +408,7 @@
 42. **工具调用 ID 归一化下沉至 `chatmsg`**：`internal/chatmsg/toolresults.go` 导出 `NormalizeToolCallID`，`internal/story`（`findings_toolresult.go` 与 `render_spine_step.go`）统一复用，消除了去下划线归一化逻辑的真源外移。曾登记为 §1.40。
 43. **Quota 状态文件孤儿 `limitKey` 自动修剪**：`internal/quota/store.go` 的 `Registry.Prune` 配合 `Snapshot.ProviderLimits` 与 `rt.Install` 在路由装载与热重载时基于配置白名单自动修剪废弃 Key，设置 dirty 并在下一次 Flush 时持久化到 `vmr-quota.json`，防止脏数据持久化积累并消除离线读者噪声。曾登记为 §1.45。
 44. **Server 审计日志路径单一真源收敛**：`internal/audit/audit.go` 导出 `ActiveLogPath`，`internal/server/admin.go` 的 `auditBlock` 统一复用，消除了命名知识与硬编码格式字符串的重复。曾登记为 §1.47。
-45. **错误分类三类误判修复（新增 ErrQuirk 类 + 词表补充）**：2026-08-25 故障复盘确认三类真实错误落入兜底 `ErrClient`（永不 failover）：DeepSeek 思考模式的 reasoning_content 回传拒绝（400）、bai 的 "Input token exceed the limit"（400，可与 `quota_limit_reached` 同现）、cliproxy 以 400 回报自身 OAuth 刷新失败（invalid_grant）。修复：core 新增 `ErrQuirk` 类（切换 + 零冷却，同 ErrContent/ErrContextLimit；不复用 ErrContextLimit 为保审计标签诚实性）；`vendorQuirkHint` 增加 "must be passed back" 且映射从 ErrEndpoint 改为 ErrQuirk（thought_signature 同步从长冷却误伤中修正）；`contextLimitHint` 增加 "input token exceed"；新增 `authHint`（OAuth 标准错误码 → ErrAuth）；router/probe 的 neutral 分支同步收录 ErrQuirk。全量 quirk 模块方向延后待定，登记为 §1.48。
+45. **错误分类词表补齐三类误判（新增 `ErrQuirk` 类 + `authHint` + 词条补充）**：vendor 专属协议约束拒绝（DeepSeek 思考模式 reasoning_content 回传、Google thought_signature）归 `ErrQuirk`（切换 + 零冷却，同 ErrContent/ErrContextLimit；不复用 ErrContextLimit 为保审计标签诚实性）；OAuth 标准错误码（`invalid_grant`/`invalid_token`/`token has expired`）归 `ErrAuth`；bai 的 "Input token exceed the limit"（可与 `quota_limit_reached` 同现）归 `ErrContextLimit`。此前三者均落入兜底 `ErrClient`（永不 failover）而中断重试。全量 quirk 模块方向延后，登记为 §1.48。
 
 ---
 
@@ -426,7 +429,7 @@
 
 ### 4.1 总表
 
-> **覆盖范围的一处如实声明（2026-08-23，全面复核并闭环 1.40/1.45/1.47 后更新；2026-08-25 新增 1.48 后共 15 条）**：本表覆盖 §1 全部待评估条目（共 15 条，无遗漏）。`1.22` 已给出量化"不做"结论（本表一行）；`1.18` 正常列出；`1.29`（暂不做）已给出明确重估触发条件；原 `1.23` 已并入 `1.1`；原 `1.46`（版本错配）经评审确认"CLI 与 Server 版本必须匹配、直接报错"后移入 §2.2，不再列入本表；`1.40`、`1.45`、`1.47`、`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15` 与 `1.27` 重新归类为 §2 的工程惯例与架构哲学，均已移出本表。
+> **覆盖范围声明**：本表覆盖 §1 全部待评估条目（共 15 条，无遗漏）。`1.22` 已给出量化"不做"结论（本表一行）；`1.18` 正常列出；`1.29`（暂不做）已给出明确重估触发条件；原 `1.23` 已并入 `1.1`；原 `1.46`（版本错配）经评审确认"CLI 与 Server 版本必须匹配、直接报错"后移入 §2.2，不再列入本表；`1.40`、`1.45`、`1.47`、`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15` 与 `1.27` 重新归类为 §2 的工程惯例与架构哲学，均已移出本表。
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -443,7 +446,7 @@
 | 1.10 | 审计 `write` syscall 在全局锁内 | 高 | 中 | 未证 | **低** | 异步队列要处理背压策略（丢弃 vs 阻塞）与优雅关停等待，**换来的是一个尚未被证明存在的瓶颈**。高并发压测顶到写锁再说 |
 | 1.14 | 滑动时间窗限流模型 | 中高 | 低 | 低 | **低** | 当前日历对齐的近似对目标场景（月度/日度 token plan）够用。属产品路线 |
 | 1.17 | `imgprep` 解码闸门的阈值量纲 | 中 | 中低 | 未证 | **低** | 闸门已存在（`maxDecodePixels`，防炸弹），缺的只是一道按内存预算设的更低阈值。**前置条件未满足**：无任何实测显示该峰值造成过问题，而方案自带「用账单换内存」的取舍，不能替用户默认决定。零风险的一半（文档记账）已落地。**真实视觉负载观测到内存突刺时重估** |
-| 1.48 | 错误分类词表的长期形态：端点级 quirk 统一模块（含 sticky 降级） | 中 | 中 | 低→中 | **低** | 当天三类误判已被最小修复完全覆盖（§3 第 45 条），现在上机制是替一个不会自己举手的问题排队。触发条件：全局词表增长到出现互相干扰/误命中，或 sticky 重复往返在真实负载中可观测地拖慢中毒会话 |
+| 1.48 | 错误分类词表的长期形态：端点级 quirk 统一模块（含 sticky 降级） | 中 | 中 | 低→中 | **低** | 已知三类误判已被最小修复覆盖（§3 第 45 条），现在上机制是替一个不会自己举手的问题排队。触发条件：全局词表增长到出现互相干扰/误命中，或 sticky 重复往返在真实负载中可观测地拖慢中毒会话 |
 
 ### 4.2 分档结论
 

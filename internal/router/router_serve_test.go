@@ -471,12 +471,12 @@ models:
 // --- Serve: vendor protocol-quirk rejection fails over without cooldown ---
 
 // TestServe_VendorQuirkFailsOverWithoutCooldown pins the 2026-08-25
-// incident's dominant failure (FAILOVER_INCIDENT_2026-08-25.md): a healthy
-// endpoint rejecting a conversation whose history lacks the previous turn's
-// reasoning_content (DeepSeek thinking-mode) must fail over to the next
-// candidate WITHOUT cooling the endpoint down — the history shape is wrong
-// for THIS vendor's rules, which says nothing about endpoint health. The
-// literal body from audit line 513.
+// incident's dominant failure mode: a healthy endpoint rejecting a
+// conversation whose history lacks the previous turn's reasoning_content
+// (DeepSeek thinking-mode) must fail over to the next candidate WITHOUT
+// cooling the endpoint down — the history shape is wrong for THIS vendor's
+// rules, which says nothing about endpoint health. The literal body from
+// audit line 513.
 func TestServe_VendorQuirkFailsOverWithoutCooldown(t *testing.T) {
 	u1 := newMockUpstream(t, 400, "The `reasoning_content` in the thinking mode must be passed back to the API.")
 	u2 := newMockUpstream(t, 200, `{"id":"ok","model":"m2"}`)

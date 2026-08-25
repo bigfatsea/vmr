@@ -74,7 +74,7 @@ OpenAI 官方力推的下一代协议（`POST /v1/responses`，[迁移指南](ht
 
 **`internal/replay` 不需要专门适配，已验证**：`vmr replay` 的请求重建全程走 `Adapter.BuildRequest`/`router.IngressPath`，两者都已经是协议无关的（前者靠注册表分派到 `OpenAIResponses.BuildRequest`，后者已修好三路分支）——一条 `protocol: openai-responses` 的审计记录不需要 `internal/replay` 包本身有任何改动就能正确重放，回归测试见 `internal/replay/replay_test.go` 的 `TestRun_RealReplayOpenAIResponsesProtocol`。
 
-`internal/chatmsg`（Part 2 分析工具的共享解析层）对 Responses 的 `input`/`output` 结构做了完整的消息级解析：请求侧 `Messages`/`RawArray` 把顶层 `instructions`+`input`（数组或裸字符串）归一化成与 anthropic `system`+`messages` 同构的形状，`ctxgraph.BuildManifest` 据此正确计算 SessKey，`vmr report`/`vmr story` 能对 Responses 流量分组会话、切任务边界；响应侧 `FinalMessage`/`ReassembleSSE` 把顶层 `output[]`（非流式）与 `response.completed` 事件里嵌套的 `response.output[]`（流式）都解析成 `StreamSummary`（含 `reasoning` Item 的摘要文本），供 `vmr report`/`vmr story` 还原助手回复。**明确不做的只有一项**：错误分类词表没有针对 Responses 入口形态本身的专属 sniff——`ClassifyError` 起步复用 `DefaultClassify`，遵循「必须做 body 嗅探，因为实测显示各家习惯不一」这条原则本身要求的前提：先有真实错误样本，再补词表，不能凭空编造。共享词表随后续真实样本增长（2026-08-25 起含 DeepSeek rc 措辞、bai 上下文超限措辞、OAuth invalid_grant），但都是按错误语义进的全局词表，不按入口协议分家。
+`internal/chatmsg`（Part 2 分析工具的共享解析层）对 Responses 的 `input`/`output` 结构做了完整的消息级解析：请求侧 `Messages`/`RawArray` 把顶层 `instructions`+`input`（数组或裸字符串）归一化成与 anthropic `system`+`messages` 同构的形状，`ctxgraph.BuildManifest` 据此正确计算 SessKey，`vmr report`/`vmr story` 能对 Responses 流量分组会话、切任务边界；响应侧 `FinalMessage`/`ReassembleSSE` 把顶层 `output[]`（非流式）与 `response.completed` 事件里嵌套的 `response.output[]`（流式）都解析成 `StreamSummary`（含 `reasoning` Item 的摘要文本），供 `vmr report`/`vmr story` 还原助手回复。**明确不做的只有一项**：错误分类词表没有针对 Responses 入口形态本身的专属 sniff——`ClassifyError` 起步复用 `DefaultClassify`，遵循「必须做 body 嗅探，因为实测显示各家习惯不一」这条原则本身要求的前提：先有真实错误样本，再补词表，不能凭空编造。共享词表随真实样本增长（含 DeepSeek rc 措辞、bai 上下文超限措辞、OAuth invalid_grant），但都是按错误语义进的全局词表，不按入口协议分家。
 
 ---
 
@@ -222,7 +222,7 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 
 `ErrContextLimit`（架构复核 P0-B 发现并修复的健壮性缺口）与 `ErrContent` 是同一类"按请求不按端点"的错误，处理方式完全一致（`ReportNeutral`，零冷却）：会话历史超出这个端点声明的上下文窗口，纯粹是"这个端点的模型窗口太小"，跟端点是否健康无关；候选列表里窗口更大的端点很可能成功，必须继续 failover 而不是原样把 400 返回客户端——修复前，这类请求落到兜底的 `ErrClient`，直接中断长上下文 agent 任务，即使候选里还有窗口更大的端点。`contextLimitHint` 嗅探词表命中前必须先排除 `maxOutputHint`（见下）：两者对应完全不同的失败原因，混淆会导致该切换的没切换、不该切换的却切换了。
 
-`ErrQuirk`（2026-08-25 故障复盘新增，见 `FAILOVER_INCIDENT_2026-08-25.md`）与前两者同属"按请求不按端点"的错误，处理完全一致（`ReportNeutral`，零冷却）：端点用自己专属的协议约束拒绝了这条请求的历史形态（DeepSeek 思考模式要求每轮把 reasoning_content 回传、Google 要求工具调用带 thought_signature），端点本身完全健康，换一个不执行该约束的候选常能成功。修复前的行为是归 `ErrEndpoint` 长冷却——一个健康的端点因为"别的会话没带对历史"被打下线 10 分钟。不复用 `ErrContextLimit`：两者成因不同（窗口大小 vs 协议约束），审计标签分开，分析侧的 error_classes 分桶才能区分这两种失败。
+`ErrQuirk` 与前两者同属"按请求不按端点"的错误，处理完全一致（`ReportNeutral`，零冷却）：端点用自己专属的协议约束拒绝了这条请求的历史形态（DeepSeek 思考模式要求每轮把 reasoning_content 回传、Google 要求工具调用带 thought_signature），端点本身完全健康，换一个不执行该约束的候选常能成功。修复前的行为是归 `ErrEndpoint` 长冷却——一个健康的端点因为"别的会话没带对历史"被打下线 10 分钟。不复用 `ErrContextLimit`：两者成因不同（窗口大小 vs 协议约束），审计标签分开，分析侧的 error_classes 分桶才能区分这两种失败。
 
 分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic 的 529）。**必须做 body 嗅探**，因为实测/官方文档显示各家习惯不一：
 
@@ -230,8 +230,8 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 * DeepSeek Anthropic 口对错模型名的措辞是 "The supported API model names are …"；内容风险走 400 + "risk" 类消息（其官方错误码表 400/401/402/422/429/500/503 中无内容专码）；思考模式口对缺上一轮 reasoning_content 的历史返回 400 "must be passed back"；
 * OpenRouter：402 余额不足；**403 = moderation flag / guardrail 拦截**（body 带 "flagged"、`metadata.reasons`）；429 与 503 都可能带 Retry-After；
 * Google Gemini：多轮工具调用上下文若缺失思维签名，返回 400 `INVALID_ARGUMENT`（"missing a thought_signature in functionCall parts"）；
-* bai 的上下文超限措辞是 "Input token exceed the limit"，且可与自身 `quota_limit_reached` 码同现于一个 body（2026-08-25 实测）；
-* 中转型上游会以 400 回报自身的 OAuth 令牌刷新失败（body 即 `invalid_grant`）——与请求内容无关（2026-08-25 实测）；
+* bai 的上下文超限措辞是 "Input token exceed the limit"，且可与自身 `quota_limit_reached` 码同现于一个 body；
+* 中转型上游会以 400 回报自身的 OAuth 令牌刷新失败（body 即 `invalid_grant`）——与请求内容无关；
 * 有厂商额度耗尽也发 429（body 见 insufficient/quota/balance/credit）。
 
 嗅探词表：模型类 = `model` × {unknown, not found, does not exist, invalid model, supported}；内容类 = {content_filter, content_policy, moderation, flagged, guardrail, inappropriate, exists risk, data_inspection, (1026), (1027), sensitive, 敏感, 违规, 合规}（中英并收）+ 状态码 451；上下文超限类 = {context_length_exceeded, context_window_exceeded, maximum context length, context window, prompt is too long, input is too long, input token exceed, reduce the length of the messages}（中英并收，如"上下文长度"/"超出上下文"）；厂商专属约束类（`vendorQuirkHint`）= {thought_signature, thought-signature, thought signature, must be passed back}（Google Gemini 思维签名、DeepSeek 思考模式 rc 回传——用完整短语而非裸字段名，避免吞掉无关错误的描述文字）；认证类（`authHint`）= {invalid_grant, invalid_token, token has expired}（OAuth 标准错误码，协议保留字而非自由文本，误报面近零）。取舍：误判的代价只是一次无害切换，漏判的代价是永不 failover（400 被当 ErrClient）或误罚健康端点（403 被当 ErrAuth）——宁可宽。
@@ -240,7 +240,7 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 
 `upstreamHint`（网关转发失败嗅探）是这套宽松取舍里唯一一处刻意收窄的例外：只匹配"upstream request failed" / "upstream error" / "upstream connect error" / "error from provider" / "bad gateway" / "gateway timeout" 这类**明确把失败归给转发这一跳本身**的措辞，不匹配单独出现的 "upstream"/"gateway" 字样——那样宽松匹配的话会连带命中真正的请求内容错误（错误信息里恰好提到这两个词）。触发场景：某个 relay/网关层自己转发失败，返回一个不点名任何请求字段的 4xx（例：`{"message":"Error from provider (X): Upstream request failed", ...}`），若无此规则会被兜底判成 `ErrClient` 而直接放弃 failover——换任何端点都不会重试，即便队列里还有健康的候选，这正是这条规则要堵上的口子。
 
-`vendorQuirkHint`（厂商专属约束嗅探）与 `upstreamHint` 类似，针对单一供应商特有的非标协议约束（如 Google Gemini 的 `thought_signature` 强制校验、DeepSeek 思考模式的 reasoning_content 回传要求）。由于这类错误换其他候选端点（如 OpenRouter / DeepSeek）即可立即成功，且端点本身完全健康，2026-08-25 起归类为 `ErrQuirk`（切换 + 零冷却；此前归 `ErrEndpoint` 长冷却，会误伤健康端点），避免被兜底误判为全局致命的 `ErrClient` 导致中断重试循环。判定顺序：内容词表 > 认证词表（OAuth 标准错误码）> 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > `vendorQuirkHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
+`vendorQuirkHint`（厂商专属约束嗅探）与 `upstreamHint` 类似，针对单一供应商特有的非标协议约束（如 Google Gemini 的 `thought_signature` 强制校验、DeepSeek 思考模式的 reasoning_content 回传要求）。由于这类错误换其他候选端点（如 OpenRouter / DeepSeek）即可立即成功，且端点本身完全健康，归类为 `ErrQuirk`（切换 + 零冷却），避免被兜底误判为全局致命的 `ErrClient` 导致中断重试循环。判定顺序：内容词表 > 认证词表（OAuth 标准错误码）> 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > `vendorQuirkHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
 
 **已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，见下文「响应侧归一化」），但**仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康——这是先把频率变成可量化的数字，再决定要不要做请求预处理插件（见「路线图」）的第一阶段。把这类响应变成主动拦截或自动 failover 仍是未实现的未来方向。
 
@@ -788,7 +788,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | failover 默认穷尽全部候选 | 固定尝试上限（旧默认 3） | 配了兜底端点就该兜到底，固定上限会让后位端点永远轮不到；尾延迟由可选 max_attempts 与各超时约束 |
 | 内容合规错误：切换但零惩罚（ErrContent） | 当普通 4xx 处理 | 该错误按请求不按端点：不切换会中断长程任务，惩罚健康会让一条敏感请求打掉整个端点；靠 403/451 + 中英文词表嗅探识别 |
 | 上下文超限：切换但零惩罚（ErrContextLimit，架构复核 P0-B） | 原先兜底归 ErrClient，直接返回客户端 | 窗口大小是端点的静态属性，不是端点故障；长上下文 agent 任务打到窗口偏小的端点不该直接中断，候选里窗口更大的端点很可能成功。用 `maxOutputHint` 先排除"请求自身 `max_tokens` 参数超限"这类换端点也解决不了的情形，避免误伤 |
-| vendor 协议约束拒绝单列 ErrQuirk：切换 + 零冷却（同 ErrContent/ErrContextLimit，2026-08-25 复盘） | 归 ErrEndpoint；或复用 ErrContextLimit | 归 ErrEndpoint 会记长冷却，误伤健康端点（thought_signature 拒绝曾把健康端点打冷却 10 分钟）；复用 ErrContextLimit 则审计标签分不开两种成因不同的历史形态拒绝（窗口大小 vs 协议约束），污染分析侧 error_classes 分桶 |
+| vendor 协议约束拒绝单列 ErrQuirk：切换 + 零冷却（同 ErrContent/ErrContextLimit） | 归 ErrEndpoint；或复用 ErrContextLimit | 归 ErrEndpoint 会记长冷却，误伤健康端点（thought_signature 拒绝曾把健康端点打冷却 10 分钟）；复用 ErrContextLimit 则审计标签分不开两种成因不同的历史形态拒绝（窗口大小 vs 协议约束），污染分析侧 error_classes 分桶 |
 | 配额窗口与余额耗尽同罪同罚 | 按窗口设 5h 级长冷却 | 厂商信号无法可靠区分两者；封顶 1h 的探针成本 ≤1 失败请求/小时/端点，恢复及时性优先 |
 | 审计双层结构、成功 body 去重 | 每层完整存两份 | 透传恒等，重复存储只膨胀文件；失败 body 各自保留因为各不相同 |
 | 审计凭证掩码（留末 4 位） | 完整记录 header | 密钥落盘外泄风险 > 取证价值；末 4 位足以区分 Key |
