@@ -18,6 +18,7 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-25
 ### Added
 - `GET /log` and `GET /log.html` — the live console log (the access log `vmr start` prints to stderr) streamed over HTTP as an endless `text/plain` connection: replay of the most recent ~512 lines first, then live following, replacing browser-side `tail -f`. `/log` is auth-gated via `api_keys` like `/status`; `/log.html` is the unauthenticated viewer shell that opens it, sharing `/status.html`'s key prompt and stored key, with auto-scroll pause on scroll-up and a Clear button for the local view; the two pages cross-link to each other. Idle connections receive a keepalive newline every 30s; slow readers never slow the logging hot path (their lines are skipped with a marker instead)
 - `vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]` — fire a minimal real request at every configured (virtual model × provider × upstream model) combination **through a running vmr instance**, unlike `vmr diagnose`'s direct-to-upstream probe. Each request goes through the live router (auth, health, conditions, quota metering, audit recording all apply) and warms per-model quota buckets into existence — a per-model Limit's row only appears on `/status` once a request has charged it, so smoke after a fresh config makes every quota row visible. `-provider`/`-target-model`/`-model` filter the run, `-json` for scripting; exits non-zero if any smoke failed
@@ -29,6 +30,8 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 - `vmr smoke`: the minimal probe request now uses `max_tokens`/`max_output_tokens: 4` instead of 1 — upstreams with a strict minimum bound (Bai/DeepSeek rejects `max_tokens <= 2` with a 400) no longer fail every smoke against them
 
 ### Changed
+- `/status.html`: the requests summary's protocol row is relabeled `By Protocol` (was `OpenAI / Anthropic / Responses`) with the full three-way breakdown on hover — the label was an implementation detail, not a fact about the request; the value still shows the per-protocol request counts
+- `/status.html` and `/log.html` share one inline-SVG favicon — a V stroke on a theme-colored rounded square — replacing an emoji glyph whose rendering varied by system; the mark stays a single V (three letters would blur at favicon size). The mutual nav links now carry the destination page's emoji (`💾 Log` from the status page, `🎛️ Status` from the log page) so the icon matches wherever the link lands
 - `/status.html`: the quota table's ROLE column is gone — the role now colors the METRIC / WINDOW badge (blue = bucket, red = gate) with the full explanation on hover. USAGE / LIMIT (PCT) became USAGE / LIMIT (%): percentages render with up to two decimals (smoke's fresh sub-1% usage is no longer rounded away to 0%), and K/M/B magnitudes drop trailing decimal zeros ("10.00M" → "10M", "250.0K" → "250K")
 
 ## [0.6] - 2026-08-23
