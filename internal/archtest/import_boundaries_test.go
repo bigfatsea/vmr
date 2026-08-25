@@ -185,6 +185,7 @@ var zeroInternalDepPackages = []string{
 	"vmr/internal/fmtutil",
 	"vmr/internal/i18n",
 	"vmr/internal/jsonscan",
+	"vmr/internal/logtee",
 	"vmr/internal/tokenutil",
 }
 

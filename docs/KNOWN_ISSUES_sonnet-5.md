@@ -174,6 +174,8 @@
 - **`/status` 的 `traffic.requests` 计数含未鉴权/被拒请求**（401/413/坏 JSON/未知模型都计入 `total` 与 `by_protocol`，并按 `by_status` 记入 `error`）：口径是"进程见过多少 HTTP 请求"，不是"成功路由了多少"。区分两者需要把 `RecordRequest` 移到鉴权之后并单独统计被拒请求——为一个展示字段增加两条埋点路径不值得。被拒请求的精确语义在审计日志里，`/status` 只给趋势。
 - **`traffic` 的 `by_status` 按请求（而非 attempt）计数，且不保证 `ok+canceled+error == total`**：failover 重试失败的中间 attempt 不计入（只在终态记一次），客户端在上游响应头到达前断开、`router` 未初始化、协议错配 404 等少数路径不记或记入 error。这是展示语义，不是路由语义；审计日志的 attempt 级记录才是精确账本。
 - **`system.disk.free_space` 在 Windows 上是桩（恒为 0）**：`syscall.Statfs` 无 Windows 等价物，`disk_windows.go` 返回 `0, nil`，看板显示 "0 B"。为补齐它需要 `golang.org/x/sys/windows` 的 `GetDiskFreeSpaceEx` 或手写 `syscall` 胶水——而 Windows 不是目标部署平台（目标：macOS/Linux 单机 + 局域网），为一个桩写平台胶水违反 YAGNI。
+- **`/log` 的慢订阅者以「丢行 + 标记」处理，永不让日志热路径阻塞**：日志行产自请求热路径（`rt.logf`），任何同步投递都可能拖垮路由。每个订阅者一条有界 channel（64 行），满则丢行并插入 `... dropped N lines ...` 标记——静默丢失会误导排障成"vmr 没打日志"，标记一行代码换回可诊断性。`log.html` 同样不做自动重连（只提供手动重试按钮），避免服务重启风暴下的重连洪水。
+- **启动 banner 与 panic 直写 stderr，tee 不捕获**：banner 只在进程启动出现一次，panic 时进程将死，两者都不值得为 `/log` 引入第二条写入路径。
 
 ### 2.2 配置与协议
 
@@ -192,6 +194,7 @@
 - **`/status` 的网络可达性与身份认证解耦，且复用聊天入口的同一把 `api_keys`**：网络范围由 `listen` 绑定决定，认证由 `api_keys` 决定——未配 `api_keys` 时任何能连到端口的人都能读 `/status`（这是 2026-08-23 的显式决策，替代了旧的 loopback-only 拦截）。这把 key 同时是聊天客户端的管理凭证：任何持有客户端 key 的用户都能看到全部端点名、provider 身份、quota 消耗与配置路径。对一个单人/小团队的代理这是正确的简化；如果未来出现"多租户客户端 + 独立管理面"的真实需求，再加独立的 `admin_keys`，而不是现在就分。`config.Check()` 对"非 loopback 且无 api_keys"给出 warning 级告警（`vmr check` 与 `/status` 的 `issues` 都会显示）作为安全兜底。
 - **`vmr status -addr` 回退读取本地 config 的 `api_keys[0]` 并发送到目标地址**：`-addr` 显式指向别的实例时，若本地 `./config.yaml`（或 `-c`）配了 key，会把它当作 Bearer 发给那个目标。设计意图是让 `./vmr.sh ps` 对本机多实例免手工传 key；代价是"你本地 config 里的 key 会被发给任何你显式指定的地址"。这是 CLI 的默认便利行为、不是网络层漏洞——目标地址是使用者自己敲的；且只发 key、key 不出现在 URL 或日志。若未来出现"同一台机器上多份 config 各自有 key 且互相不信任"的场景，再改成 loopback-only 回退。
 - **看板（`/status.html`）把 API key 存 `localStorage`，且静态外壳免鉴权直出**：外壳不含任何数据，数据请求走 `/status` 的 `s.auth()`；key 只在浏览器本地持久化，不进 URL、不进服务端日志。内插到 `innerHTML` 的所有配置派生字符串（provider/endpoint/model 名、YAML 错误文本）均已 HTML 转义（`esc()`），"配置内容注入标记"只剩配置所有者自己攻击自己这一种残余面。
+- **`/log` 与 `/status` 同用一把 `api_keys` 鉴权；`/log.html` 免鉴权直出静态外壳且复用 `localStorage['vmr_status_key']`**：日志行含 client key tag / endpoint / 模型名 / 用量，属敏感面，绝不裸奔；外壳不含任何数据，与 `/status.html` 同一模式，key 只存浏览器本地、不进 URL 与服务端日志——浏览器导航到裸入口 `/log` 带不了 header，故页面靠 JS 请求带信。**输出为 `text/plain` 而非 SSE/JSONL**：日志在源头（`logfmt.go`）就已是格式化文本，出 JSONL 需自解析或双路渲染；若未来出现机器消费方，再增量加 `/log.jsonl`（同一 tee、不同渲染），不是欠债。**无查询参数**——回放窗口就是固定 512 行缓冲，参数化会制造"要了 5000 只给 512"的错觉。
 
 - **`nil` 校验只加在跨包公共入口，且一律 fail-fast，绝不静默兜底**：已加校验的是 `report.AnalyzeSessionsCached` 与 `story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」，深处 panic 会带崩整个进程而不是给出一条可读错误。`taskseg.IndexRealUsers`、`taskseg.HasNewInstruction` 这类**包内被上述入口保护的函数**不再重复校验：调用链上游已经拦过，重复校验只是噪音。
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码**零写入点**——全仓 8 处写入全在 `_test.go`，且相关测试包无一使用 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是这个 var 存在的理由之一（写在它自己的注释里），加锁保护的是一条不存在的写路径，与本节「不为不可能发生的场景加校验」同判据。
