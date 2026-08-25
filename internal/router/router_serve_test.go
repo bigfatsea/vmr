@@ -468,6 +468,48 @@ models:
 	}
 }
 
+// --- Serve: vendor protocol-quirk rejection fails over without cooldown ---
+
+// TestServe_VendorQuirkFailsOverWithoutCooldown pins the 2026-08-25
+// incident's dominant failure (FAILOVER_INCIDENT_2026-08-25.md): a healthy
+// endpoint rejecting a conversation whose history lacks the previous turn's
+// reasoning_content (DeepSeek thinking-mode) must fail over to the next
+// candidate WITHOUT cooling the endpoint down — the history shape is wrong
+// for THIS vendor's rules, which says nothing about endpoint health. The
+// literal body from audit line 513.
+func TestServe_VendorQuirkFailsOverWithoutCooldown(t *testing.T) {
+	u1 := newMockUpstream(t, 400, "The `reasoning_content` in the thinking mode must be passed back to the API.")
+	u2 := newMockUpstream(t, 200, `{"id":"ok","model":"m2"}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p2, base_url: {openai: %s}, api_key: k2}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai, providers: [p2], models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 {
+		t.Fatalf("status=%d, want 200 (quirk rejection should failover to u2)", w.Code)
+	}
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p2/m2" {
+		t.Errorf("endpoint=%s, want openai/p2/m2", got)
+	}
+	// u1 must still be available (no cooldown applied for quirk rejections).
+	endpoint := endpointFor(t, cfg, "openai", "vm")
+	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
+		t.Error("u1 should still be available after a quirk rejection (no cooldown)")
+	}
+}
+
 // --- Serve: context-window overflow fails over without cooldown ---
 
 // TestServe_ContextLimitFailsOverWithoutCooldown pins P0-B: a long-context

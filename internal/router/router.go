@@ -456,13 +456,15 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 	}
 	att.SetErrorResponse(resp.Header, auditBody, resp.StatusCode, class)
 
-	if class == core.ErrContent || class == core.ErrContextLimit {
-		// Content-policy flag or context-window overflow: both are facts
-		// about this particular request (vendor sensitivity; this
-		// endpoint's model's window size), not evidence the endpoint is
-		// unhealthy. Keep failing over — another candidate may accept the
-		// content, or have a larger window — but leave the endpoint's
-		// health untouched; only release a probe slot if held.
+	if class == core.ErrContent || class == core.ErrContextLimit || class == core.ErrQuirk {
+		// Content-policy flag, context-window overflow, or a vendor-specific
+		// protocol-constraint rejection: all facts about this particular
+		// request (vendor sensitivity; this endpoint's model's window size;
+		// the history shape THIS endpoint enforces), not evidence the
+		// endpoint is unhealthy. Keep failing over — another candidate may
+		// accept the content, have a larger window, or not enforce the quirk —
+		// but leave the endpoint's health untouched; only release a probe
+		// slot if held.
 		rt.Health.ReportNeutral(key)
 		rt.logf("%s, %s, status=%d, class=%s, attempt=%d (no cooldown)", logPrefix, tokenEst, resp.StatusCode, class, attempt)
 		return false, uerr, false

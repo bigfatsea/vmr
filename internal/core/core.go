@@ -56,6 +56,18 @@ const (
 	// too large — switching endpoints can't fix a client-supplied number).
 	ErrContextLimit
 
+	// ErrQuirk is a vendor-specific protocol constraint rejecting the
+	// request because of the conversation history's shape (e.g. DeepSeek
+	// thinking-mode requiring reasoning_content passed back on every turn,
+	// Google requiring thought_signature on tool calls): a mismatch between
+	// what the CLIENT sent and what THIS endpoint enforces, not evidence the
+	// endpoint is unhealthy. Switch WITHOUT health penalty, same treatment
+	// as ErrContent/ErrContextLimit. Deliberately NOT folded into
+	// ErrContextLimit: the audit label should say which of the two request-
+	// shape rejection families fired, and report/story bucket error_classes
+	// by these exact strings.
+	ErrQuirk
+
 	// The four below never reach Health.ReportFailure/ReportNeutral — they
 	// occur before a response classification is possible (build/network) or
 	// after the health outcome for this attempt was already reported
@@ -86,6 +98,8 @@ func (c ErrorClass) String() string {
 		return "content"
 	case ErrContextLimit:
 		return "context_limit"
+	case ErrQuirk:
+		return "quirk"
 	case ErrBuild:
 		return "build"
 	case ErrNetwork:

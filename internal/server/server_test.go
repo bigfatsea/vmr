@@ -133,7 +133,9 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 
 // TestVendorQuirkThoughtSignatureContinuesFailover locks in failover when
 // Google returns a 400 rejection for missing thought_signature on a tool call.
-// The router must classify this as ErrEndpoint and proceed to candidate #2.
+// The router must classify this as ErrQuirk and proceed to candidate #2
+// (zero cooldown — see TestServe_VendorQuirkFailsOverWithoutCooldown in
+// router_serve_test.go).
 func TestVendorQuirkThoughtSignatureContinuesFailover(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(400)

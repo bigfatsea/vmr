@@ -207,9 +207,8 @@ func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 // ReportFailure, not ReportNeutral: the fail count actually increases and the
 // endpoint gets ErrEndpoint's long cooldown. Without this, a future edit that
 // widened runProbe's "no cooldown" branch (e.g. adding ErrEndpoint to the
-// `class == core.ErrContent || class == core.ErrClient` check) would silently
-// stop cooling down an endpoint that keeps failing this way, and nothing
-// here or in TestUpstreamGatewayFailureContinuesFailover (server_test.go,
+// request-specific class check) would silently stop cooling down an endpoint
+// that keeps failing this way, and nothing here or in TestUpstreamGatewayFailureContinuesFailover (server_test.go,
 // which covers the same body on the *synchronous* tryOne path) would catch
 // it.
 func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {

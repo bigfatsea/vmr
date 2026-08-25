@@ -12,12 +12,14 @@ import (
 // - MiniMax returns 400 (not 404) for an unknown model; its content
 // violations carry codes 1026/1027;
 // - DeepSeek's Anthropic endpoint words a bad model "The supported API model
-// names are …"; its content filter answers 400 with a "risk" message;
+// names are …"; its content filter answers 400 with a "risk" message; its
+// thinking-mode endpoint rejects tool-call histories missing the previous
+// turn's reasoning_content with 400 "must be passed back";
 // - OpenRouter reports insufficient credits as 402 and moderation/guardrail
-// blocks as 403 with "flagged"/"guardrail" in the body;
+// blocks as 403 with "flagged"/"guardrail" in the body; some providers
+// report exhausted quota/balance as 429;
 // - Google Gemini rejects multi-turn tool calls lacking thought_signature as
 // 400 INVALID_ARGUMENT;
-// - some providers report exhausted quota/balance as 429.
 //
 // classifySnippetBytes bounds the body sniff. Some vendors attach verbose
 // debug payloads to 4xx bodies; a marker past the cutoff would misclassify a
@@ -60,6 +62,13 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		if contentHint(snippet) {
 			return core.ErrContent
 		}
+		// OAuth-standard error codes next (RFC 6749/6750): an expired or revoked
+		// grant arriving on a non-401 status (e.g. a relay answering its own
+		// token-refresh failure with 400 invalid_grant) is an auth problem —
+		// long cooldown + switch; mirrors 403's "content before auth" shape.
+		if authHint(snippet) {
+			return core.ErrAuth
+		}
 		// Context-window overflow next: OpenAI-shaped context_length_exceeded
 		// wording contains "model" ("this model's maximum context length is
 		// ..."), so it must be checked before the model-unknown rule below or
@@ -87,11 +96,13 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 		if upstreamHint(snippet) {
 			return core.ErrEndpoint
 		}
-		// Vendor-specific protocol constraints (e.g. Gemini's thought_signature
+		// Vendor-specific protocol constraints (DeepSeek thinking-mode's
+		// reasoning_content pass-back requirement, Gemini's thought_signature
 		// requirement on tool-call history) that other endpoints behind the same
-		// virtual model do not enforce — switching helps, so continue failover.
+		// virtual model do not enforce — the endpoint is healthy, the request
+		// history just doesn't fit its rules: failover without health penalty.
 		if vendorQuirkHint(snippet) {
-			return core.ErrEndpoint
+			return core.ErrQuirk
 		}
 		return core.ErrClient
 	default:
@@ -99,13 +110,24 @@ func DefaultClassify(status int, body []byte) core.ErrorClass {
 	}
 }
 
+// authHint spots OAuth-standard error codes (RFC 6749/6750) in a 4xx body:
+// protocol-reserved tokens, not free-form error prose, so near-zero false
+// positives.
+func authHint(snippet string) bool {
+	return containsAny(snippet,
+		"invalid_grant", "invalid_token", "token has expired")
+}
+
 // vendorQuirkHint spots rejections caused by vendor-specific protocol
-// constraints (e.g. Gemini's thought_signature requirement on tool calls)
-// that other candidate endpoints behind the same virtual model do NOT
-// enforce. Kept narrow to avoid swallowing genuine malformed-request errors.
+// constraints (DeepSeek thinking-mode requiring reasoning_content passed back
+// on every turn, Gemini's thought_signature requirement on tool calls) that
+// other candidate endpoints behind the same virtual model do NOT enforce.
+// Kept narrow to avoid swallowing genuine malformed-request errors; markers
+// are full phrases where a bare field name could appear in unrelated prose.
 func vendorQuirkHint(snippet string) bool {
 	return containsAny(snippet,
-		"thought_signature", "thought-signature", "thought signature")
+		"thought_signature", "thought-signature", "thought signature",
+		"must be passed back")
 }
 
 // upstreamHint spots a relay/gateway reporting its own forwarding failure
@@ -136,7 +158,7 @@ func contextLimitHint(snippet string) bool {
 	return containsAny(snippet,
 		"context_length_exceeded", "context_window_exceeded",
 		"maximum context length", "context window",
-		"prompt is too long", "input is too long",
+		"prompt is too long", "input is too long", "input token exceed",
 		"reduce the length of the messages",
 		"上下文长度", "上下文过长", "超出上下文", "超过最大上下文", "超出最大上下文")
 }

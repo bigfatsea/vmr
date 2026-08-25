@@ -141,8 +141,17 @@ func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 		want   core.ErrorClass
 	}{
 		{"400 invalid parameter", 400, `{"error":{"message":"invalid temperature"}}`, core.ErrClient},
+		// The literal body from audit line 455 of the 2026-08-25 incident: bai
+		// words a context-window overflow as "Input token exceed the limit"
+		// alongside its own quota_limit_reached code — the context wording must
+		// win (failover-eligible, zero cooldown) over the ErrClient fallback.
+		{"400 input token exceed (bai)", 400, `{"error":{"code":"1210","message":"Input token exceed the limit","data":{"quota_limit_reached":true}}}`, core.ErrContextLimit},
+		// The literal body from audit line 109 of the same incident: cliproxy
+		// answering its own token-refresh failure with 400 invalid_grant — an
+		// auth-layer problem on a non-401 status (long cooldown + switch).
+		{"400 invalid_grant (OAuth refresh failure)", 400, `{"error":"invalid_grant","error_description":"Bad Request"}`, core.ErrAuth},
 		{"400 unknown model (MiniMax)", 400, `{"error":{"message":"invalid params, unknown model 'x' (2013)"}}`, core.ErrEndpoint},
-		{"400 google missing thought_signature", 400, `{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`, core.ErrEndpoint},
+		{"400 google missing thought_signature", 400, `{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`, core.ErrQuirk},
 		{"401 unauthorized", 401, `{}`, core.ErrAuth},
 		{"402 insufficient credits (OpenRouter)", 402, `{"error":{"message":"Insufficient credits"}}`, core.ErrEndpoint},
 		{"403 forbidden", 403, `{}`, core.ErrAuth},
@@ -186,17 +195,29 @@ func TestDefaultClassify_VendorQuirks(t *testing.T) {
 		{
 			"Google Gemini thought_signature missing in tool call (live shape)",
 			`{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call default_api:exec , position 2. Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more details.","status":"INVALID_ARGUMENT"}}`,
-			core.ErrEndpoint,
+			core.ErrQuirk,
 		},
 		{
 			"Google Gemini thought-signature hyphenated variant",
 			`{"error":{"message":"missing thought-signature in functionCall"}}`,
-			core.ErrEndpoint,
+			core.ErrQuirk,
 		},
 		{
 			"Google Gemini thought signature spaced variant",
 			`{"error":{"message":"invalid tool call: thought signature mismatch"}}`,
-			core.ErrEndpoint,
+			core.ErrQuirk,
+		},
+		{
+			// The literal body from audit line 513 of the 2026-08-25 incident
+			// (FAILOVER_INCIDENT_2026-08-25.md): a healthy endpoint rejecting a
+			// conversation whose history lacks the previous turn's
+			// reasoning_content — the request/history shape is wrong for THIS
+			// vendor, not evidence of an unhealthy endpoint. Must fail over with
+			// zero cooldown (ErrQuirk), not dead-end (ErrClient) or cool down
+			// (ErrEndpoint).
+			"DeepSeek thinking-mode reasoning_content pass-back requirement",
+			"The `reasoning_content` in the thinking mode must be passed back to the API.",
+			core.ErrQuirk,
 		},
 		{
 			"Generic invalid argument stays ErrClient",

@@ -114,6 +114,7 @@ func TestErrorClassString(t *testing.T) {
 		ErrTransient:    "transient",
 		ErrContent:      "content",
 		ErrContextLimit: "context_limit",
+		ErrQuirk:        "quirk",
 		ErrBuild:        "build",
 		ErrNetwork:      "network",
 		ErrCanceled:     "canceled",

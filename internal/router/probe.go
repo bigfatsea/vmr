@@ -89,14 +89,14 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 
 	if resp.StatusCode >= 400 {
 		class := ad.ClassifyError(resp.StatusCode, respBody)
-		if class == core.ErrContent || class == core.ErrClient || class == core.ErrContextLimit {
+		if class == core.ErrContent || class == core.ErrClient || class == core.ErrContextLimit || class == core.ErrQuirk {
 			// Request-specific outcomes — the probe prompt itself got
-			// flagged/rejected/(implausibly) overflowed the window — say
-			// nothing about the endpoint's health, same rule tryOne applies
-			// to these classes for real traffic. ErrContextLimit is
-			// essentially unreachable here in practice (probe.Request's body
-			// is a fixed few dozen tokens), included for consistency rather
-			// than a live gap.
+			// flagged/rejected/(implausibly) overflowed the window or tripped a
+			// vendor protocol quirk — say nothing about the endpoint's health,
+			// same rule tryOne applies to these classes for real traffic.
+			// ErrContextLimit/ErrQuirk are essentially unreachable here in
+			// practice (probe.Request's body is a fixed few dozen tokens),
+			// included for consistency rather than a live gap.
 			rt.Health.ReportNeutral(key)
 			rt.logf("%s, status=%d, class=%s, dur=%s (no cooldown)", logPrefix, resp.StatusCode, class, fmtDur(dur))
 			return
