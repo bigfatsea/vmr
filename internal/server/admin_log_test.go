@@ -243,7 +243,7 @@ func TestLogPage_ServesHTML(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body := w.Body.String()
-	for _, marker := range []string{"VMR Live Log", "vmr_status_key", "readStream", "btn-clear"} {
+	for _, marker := range []string{"VMR Live Log", "vmr_status_key", "readStream", "btn-clear", `href="/status.html"`} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("body missing %q", marker)
 		}

@@ -610,9 +610,9 @@ models:
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
 | `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、逐端点健康与实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |
-| `GET /status.html` | 浏览器可视化看板：纯客户端渲染 (CSR) 单页面暗黑看板，支持实时自动轮询（5s/15s/30s/60s）、端点健康/冷却倒计时徽章、交互式 API Key 弹窗鉴权与零外部 CDN 依赖 |
+| `GET /status.html` | 浏览器可视化看板：纯客户端渲染 (CSR) 单页面暗黑看板，支持实时自动轮询（5s/15s/30s/60s）、端点健康/冷却倒计时徽章、交互式 API Key 弹窗鉴权、零外部 CDN 依赖，并提供指向实时日志页的链接 |
 | `GET /log` | 进程实时控制台日志，以永不关闭的 `text/plain` 流输出——一行日志对应一行输出，与 stderr 逐字节一致：先回放最近若干行，再持续跟随新行，等于浏览器里的 `tail -f`。与 `/status` 一样受 `api_keys` 鉴权保护。无任何查询参数；回放窗口是固定的内存环形缓冲（最近约 512 行），空闲连接每 30 秒收到一个保活空行。这是 access log 视角（路由决策、token 用量、failover），不是 audit JSONL |
-| `GET /log.html` | 浏览器实时日志页：暗色终端风格查看器，自行打开 `/log`——先尝试不带 Key 直连，失败则弹出与 `/status.html` 相同的 API Key 输入框（两页共用已保存的 Key）；向上滚动时暂停自动滚底，断开后提供手动重试按钮，并提供 Clear 按钮一键清空本地显示（不影响服务端缓冲与实时流） |
+| `GET /log.html` | 浏览器实时日志页：暗色终端风格查看器，自行打开 `/log`——先尝试不带 Key 直连，失败则弹出与 `/status.html` 相同的 API Key 输入框（两页共用已保存的 Key）；向上滚动时暂停自动滚底，断开后提供手动重试按钮，提供 Clear 按钮一键清空本地显示（不影响服务端缓冲与实时流），并提供指向状态看板的链接 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 健康与并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-key KEY` 传递 API key；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |

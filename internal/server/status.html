@@ -50,6 +50,18 @@
     }
     .brand { display: flex; align-items: center; gap: 12px; }
     .brand h1 { font-size: 20px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
+    .nav-link {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 10px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: var(--card-border);
+      color: var(--text);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-link:hover { border-color: var(--text-muted); color: var(--text-bright); }
     .github-link {
       color: var(--text-muted);
       display: inline-flex;
@@ -288,6 +300,7 @@
       </div>
       <div class="controls">
         <span class="badge badge-success" id="badge-uptime">uptime: ...</span>
+        <a href="/log.html" class="nav-link" title="Live console log (tail -f)">📜 Log</a>
         <button id="btn-auth" title="Manage API Key">🔑 Key</button>
       </div>
     </header>

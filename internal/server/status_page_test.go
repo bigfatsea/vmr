@@ -54,4 +54,7 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	if !strings.Contains(body, "fetchStatus") {
 		t.Errorf("body missing 'fetchStatus'")
 	}
+	if !strings.Contains(body, `href="/log.html"`) {
+		t.Errorf("body missing cross-link to /log.html")
+	}
 }
