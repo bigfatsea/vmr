@@ -99,22 +99,30 @@ type statusResponse struct {
 			Entries int `json:"entries"`
 		} `json:"sticky"`
 	} `json:"traffic"`
-	Models map[string][]struct {
-		Endpoint      string    `json:"endpoint"`
-		Protocol      string    `json:"protocol"`
-		Priority      int       `json:"priority"`
-		Fails         int       `json:"consecutive_failures"`
-		CooldownUntil time.Time `json:"cooldown_until"`
-		LastError     string    `json:"last_error"`
-		Available     bool      `json:"available"`
-		Probing       bool      `json:"probing"`
-		// Serving is health.Status.Serving — see its doc comment. Used below
-		// instead of Available (which stays true through the entire half-open
-		// window) to decide the COOLDOWN vs half-open vs ok split. A bare bool,
-		// not a pointer: CLI and server must be the same vmr version (a shape
-		// mismatch hard-errors at instance.config long before this field is
-		// reached), so there is no older-server case to defend against.
-		Serving bool `json:"serving"`
+	Models []struct {
+		ID               string   `json:"id"`
+		Protocol         string   `json:"protocol"`
+		Capabilities     []string `json:"capabilities"`
+		MaxContextTokens int64    `json:"max_context_tokens"`
+		Endpoints        []struct {
+			Endpoint      string    `json:"endpoint"`
+			Protocol      string    `json:"protocol"`
+			Priority      int       `json:"priority"`
+			Fails         int       `json:"consecutive_failures"`
+			CooldownUntil time.Time `json:"cooldown_until"`
+			LastError     string    `json:"last_error"`
+			Available     bool      `json:"available"`
+			Probing       bool      `json:"probing"`
+			// Serving is health.Status.Serving — see its doc comment. Used below
+			// instead of Available (which stays true through the entire half-open
+			// window) to decide the COOLDOWN vs half-open vs ok split. A bare bool,
+			// not a pointer: CLI and server must be the same vmr version (a shape
+			// mismatch hard-errors at instance.config long before this field is
+			// reached), so there is no older-server case to defend against.
+			Serving          bool     `json:"serving"`
+			Capabilities     []string `json:"capabilities"`
+			MaxContextTokens int64    `json:"max_context_tokens"`
+		} `json:"endpoints"`
 	} `json:"models"`
 	// Quota is absent (nil slice) from the JSON entirely when no provider
 	// has quota: configured — server/admin.go only sets the "quota" key

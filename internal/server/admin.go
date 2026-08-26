@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/buildinfo"
+	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/health"
 	"vmr/internal/imgprep"
@@ -62,6 +64,34 @@ func (s *Server) WithInstance(configPath string, startedAt time.Time) *Server {
 // on every call.
 var vmrVersion = sync.OnceValue(func() string { return buildinfo.Read().Short() })
 
+// endpointStatus is one upstream endpoint inside a /status model entry:
+// identity plus live health, and the endpoint's own capabilities /
+// context-window override. capabilities/max_context_tokens are always
+// emitted ([] / 0 = unconstrained — the same reading as
+// core.Endpoint.HasCapability) so consumers can rely on the keys.
+type endpointStatus struct {
+	Endpoint string `json:"endpoint"`
+	Protocol string `json:"protocol"`
+	Priority int    `json:"priority"`
+	health.Status
+	Capabilities     []string `json:"capabilities"`
+	MaxContextTokens int64    `json:"max_context_tokens"`
+}
+
+// modelStatus is one virtual-model × protocol face in /status's models
+// array — the same name may exist in both protocol groups, and mixing their
+// endpoints under one key reads as one model with double the endpoints.
+// Capabilities is the union across endpoints and MaxContextTokens their
+// maximum: what an agent configuring this virtual model may rely on overall;
+// per-endpoint values live on each endpointStatus.
+type modelStatus struct {
+	ID               string           `json:"id"`
+	Protocol         string           `json:"protocol"`
+	Capabilities     []string         `json:"capabilities"`
+	MaxContextTokens int64            `json:"max_context_tokens"`
+	Endpoints        []endpointStatus `json:"endpoints"`
+}
+
 // adminStatus reports process identity, config freshness, system resources,
 // traffic telemetry, per-endpoint health and quota gauges.
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
@@ -70,35 +100,38 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	snap := s.rt.Snapshot()
 	now := time.Now()
-	type epStatus struct {
-		Endpoint string `json:"endpoint"`
-		Protocol string `json:"protocol"`
-		Priority int    `json:"priority"`
-		health.Status
-	}
-	// Keyed "name [protocol]": the same virtual-model name may exist in
-	// both protocol groups, and mixing their endpoints under one
-	// key reads as one model with double the endpoints.
-	out := map[string][]epStatus{}
-	for protocol, byName := range snap.Models {
-		for name, route := range byName {
-			key := name + " [" + protocol + "]"
+	// One entry per (virtual model, protocol), sorted — deterministic JSON
+	// between polls of an unchanged config.
+	models := []modelStatus{}
+	for _, protocol := range core.SortedKeys(snap.Models) {
+		for _, name := range core.SortedKeys(snap.Models[protocol]) {
+			route := snap.Models[protocol][name]
+			m := modelStatus{
+				ID:               name,
+				Protocol:         protocol,
+				Capabilities:     unionCapabilities(route.Endpoints),
+				MaxContextTokens: maxContextTokens(route.Endpoints),
+				Endpoints:        make([]endpointStatus, 0, len(route.Endpoints)),
+			}
 			for _, ep := range route.Endpoints {
-				out[key] = append(out[key], epStatus{
-					Endpoint: ep.Name(),
-					Protocol: protocol,
-					Priority: ep.Priority,
-					Status:   s.rt.Health.Status(ep.HealthKey(), now),
+				m.Endpoints = append(m.Endpoints, endpointStatus{
+					Endpoint:         ep.Name(),
+					Protocol:         protocol,
+					Priority:         ep.Priority,
+					Status:           s.rt.Health.Status(ep.HealthKey(), now),
+					Capabilities:     nonNilStrings(ep.Capabilities),
+					MaxContextTokens: ep.MaxContextTokens,
 				})
 			}
+			models = append(models, m)
 		}
 	}
 
 	body := map[string]any{
-		"instance":     s.instanceBlock(snap, len(out)),
+		"instance":     s.instanceBlock(snap, len(models), instanceBaseURLs(requestScheme(r), r.Host)),
 		"system":       s.systemBlock(snap),
 		"traffic":      s.trafficBlock(),
-		"models":       out,
+		"models":       models,
 		"current_time": now,
 	}
 
@@ -118,8 +151,9 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // instanceBlock assembles process identity, execution environment,
-// concurrency throttles, and config freshness / warnings.
-func (s *Server) instanceBlock(snap *router.Snapshot, models int) map[string]any {
+// concurrency throttles, config freshness / warnings, and the base_urls
+// derived from the request that asked for this status.
+func (s *Server) instanceBlock(snap *router.Snapshot, models int, baseURLs map[string]string) map[string]any {
 	inst := map[string]any{
 		"pid":        os.Getpid(),
 		"listen":     snap.Cfg.Listen,
@@ -127,6 +161,7 @@ func (s *Server) instanceBlock(snap *router.Snapshot, models int) map[string]any
 		"version":    vmrVersion(),
 		"go_version": runtime.Version(),
 		"os_arch":    runtime.GOOS + "/" + runtime.GOARCH,
+		"base_urls":  baseURLs,
 	}
 	if s.inst.cwd != "" {
 		inst["cwd"] = s.inst.cwd
@@ -169,6 +204,71 @@ func (s *Server) instanceBlock(snap *router.Snapshot, models int) map[string]any
 		inst["config"] = cfgBlock
 	}
 	return inst
+}
+
+// unionCapabilities merges the endpoints' effective capability sets into one
+// sorted, deduplicated list — the model-level answer to "what can this model
+// do". Empty means unconstrained (matches core.Endpoint.HasCapability's
+// len==0 reading) but is still emitted, as [].
+func unionCapabilities(endpoints []*core.Endpoint) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, ep := range endpoints {
+		for _, c := range ep.Capabilities {
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
+	sort.Strings(out) // deterministic JSON regardless of endpoint iteration order
+	return nonNilStrings(out)
+}
+
+// nonNilStrings turns a nil slice into an empty one so it marshals as JSON
+// [] instead of null — capabilities is documented as always an array.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// maxContextTokens is the largest context window any endpoint of the model
+// offers; 0 means no endpoint declares a limit (unconstrained).
+func maxContextTokens(endpoints []*core.Endpoint) int64 {
+	var max int64
+	for _, ep := range endpoints {
+		if ep.MaxContextTokens > max {
+			max = ep.MaxContextTokens
+		}
+	}
+	return max
+}
+
+// instanceBaseURLs derives the client-facing base URL for each ingress
+// protocol from the request itself, not from listen: whatever host the
+// caller used to reach /status (and whether over TLS) is exactly what it
+// should point its client at — 127.0.0.1 stays 127.0.0.1, localhost stays
+// localhost, a LAN IP stays that IP. Display only; never consulted for
+// auth or routing.
+func instanceBaseURLs(scheme, host string) map[string]string {
+	if host == "" {
+		host = "127.0.0.1" // Host-less request fallback
+	}
+	base := scheme + "://" + host + "/v1/"
+	return map[string]string{
+		"openai":           base,
+		"anthropic":        base,
+		"openai-responses": base,
+	}
+}
+
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 // systemBlock returns lightweight runtime memory, goroutine, and disk free space.

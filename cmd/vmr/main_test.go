@@ -730,15 +730,19 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 					"waiting":   0,
 				},
 			},
-			"models": map[string]any{
-				"vm [openai]": []map[string]any{
-					{
-						"endpoint":             "openai/p1/m",
-						"protocol":             "openai",
-						"priority":             1,
-						"consecutive_failures": 0,
-						"available":            true,
-						"serving":              true,
+			"models": []map[string]any{
+				{
+					"id":       "vm",
+					"protocol": "openai",
+					"endpoints": []map[string]any{
+						{
+							"endpoint":             "openai/p1/m",
+							"protocol":             "openai",
+							"priority":             1,
+							"consecutive_failures": 0,
+							"available":            true,
+							"serving":              true,
+						},
 					},
 				},
 			},
@@ -787,16 +791,20 @@ func TestCmdStatus_HalfOpenRendersDistinctFromOK(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"models": map[string]any{
-				"vm [openai]": []map[string]any{
-					{
-						"endpoint":             "openai/p1/m",
-						"protocol":             "openai",
-						"priority":             1,
-						"consecutive_failures": 3,
-						"last_error":           "transient",
-						"available":            true,
-						"serving":              false,
+			"models": []map[string]any{
+				{
+					"id":       "vm",
+					"protocol": "openai",
+					"endpoints": []map[string]any{
+						{
+							"endpoint":             "openai/p1/m",
+							"protocol":             "openai",
+							"priority":             1,
+							"consecutive_failures": 3,
+							"last_error":           "transient",
+							"available":            true,
+							"serving":              false,
+						},
 					},
 				},
 			},

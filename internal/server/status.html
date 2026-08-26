@@ -673,7 +673,7 @@
       }
 
       // Models
-      renderModels(data.models || {});
+      renderModels(data.models || []);
 
       // Quota
       if (data.quota && data.quota.length > 0) {
@@ -684,22 +684,31 @@
       }
     }
 
-    function renderModels(modelsMap) {
+    function renderModels(models) {
       dom.modelsContainer.innerHTML = '';
-      const modelKeys = Object.keys(modelsMap).sort();
-      dom.modelCount.textContent = `${modelKeys.length} models`;
+      const list = Array.isArray(models) ? models : [];
+      dom.modelCount.textContent = `${list.length} models`;
 
-      if (modelKeys.length === 0) {
+      if (list.length === 0) {
         dom.modelsContainer.innerHTML = '<div class="card" style="color:var(--text-muted)">No virtual models configured.</div>';
         return;
       }
 
-      modelKeys.forEach(mKey => {
-        const endpoints = modelsMap[mKey] || [];
+      list.forEach(m => {
+        const endpoints = m.endpoints || [];
+        // Same "<name> [<protocol>]" label format as vmr status / vmr
+        // diagnose render (core.ModelLabel server-side).
+        const modelLabel = `${m.id} [${m.protocol}]`;
+        // Empty capabilities / zero context mean unconstrained — say so,
+        // never render a bare empty badge that reads as "supports nothing".
+        const capsMeta = m.capabilities && m.capabilities.length > 0 ? m.capabilities.join(', ') : 'unconstrained';
+        const ctxMeta = m.max_context_tokens > 0 ? `${fmtCtx(m.max_context_tokens)} tok` : 'unconstrained';
         let html = `
           <div class="model-card">
             <div class="model-header">
-              <span class="model-name">${esc(mKey)}</span>
+              <span class="model-name">${esc(modelLabel)}</span>
+              <span class="badge" title="capabilities (union across endpoints)">${esc(capsMeta)}</span>
+              <span class="badge" title="largest context window across endpoints">ctx: ${esc(ctxMeta)}</span>
               <span class="badge">${endpoints.length} endpoints</span>
             </div>
             <div class="table-wrap">
@@ -711,6 +720,7 @@
                     <th>PROTOCOL</th>
                     <th>STATUS</th>
                     <th>FAILS</th>
+                    <th>CTX / CAPS</th>
                     <th>LAST ERROR</th>
                   </tr>
                 </thead>
@@ -734,6 +744,9 @@
             statusBadge = `<span class="status-pill pill-cooldown">DOWN</span>`;
           }
 
+          const epCtx = ep.max_context_tokens > 0 ? fmtCtx(ep.max_context_tokens) : '—';
+          const epCaps = ep.capabilities && ep.capabilities.length > 0 ? ep.capabilities.join(',') : '—';
+
           html += `
             <tr>
               <td><span class="badge">P${ep.priority}</span></td>
@@ -741,6 +754,7 @@
               <td><span class="badge badge-primary">${esc(ep.protocol)}</span></td>
               <td>${statusBadge}</td>
               <td>${ep.consecutive_failures || 0}</td>
+              <td style="color:var(--text-muted); font-size:12px; white-space:nowrap;">${esc(epCtx)} · ${esc(epCaps)}</td>
               <td style="color:var(--text-muted); font-size:12px;">${esc(ep.last_error || '-')}</td>
             </tr>`;
         });
@@ -748,6 +762,12 @@
         html += `</tbody></table></div></div>`;
         dom.modelsContainer.innerHTML += html;
       });
+    }
+
+    // Compact context-window rendering for the endpoint table: 200000 -> "200k",
+    // smaller values as-is.
+    function fmtCtx(n) {
+      return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
     }
 
     function renderQuota(quotaList) {

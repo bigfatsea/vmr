@@ -7,6 +7,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -138,6 +139,76 @@ func TestStatusInstanceBlockWithoutWithInstance(t *testing.T) {
 	}
 	if inst.Started != "" || inst.Uptime != 0 {
 		t.Errorf("started_at/uptime must be omitted when unknown: %+v", inst)
+	}
+}
+
+// TestStatusInstanceBaseURLs pins what base_urls means: an echo of the
+// request that asked for this status, not of listen — whatever host the
+// caller used (and whether over TLS) is exactly what it should point its
+// client at.
+func TestStatusInstanceBaseURLs(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	s := New(rt, nil)
+
+	fetchBaseURLs := func(body []byte) map[string]string {
+		t.Helper()
+		var out struct {
+			Instance struct {
+				BaseURLs map[string]string `json:"base_urls"`
+			} `json:"instance"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Instance.BaseURLs
+	}
+
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	want := "http://" + ts.Listener.Addr().String() + "/v1/"
+	baseURLs := fetchBaseURLs(body)
+	for _, proto := range []string{"openai", "anthropic", "openai-responses"} {
+		if got := baseURLs[proto]; got != want {
+			t.Errorf("base_urls[%s] = %q, want %q", proto, got, want)
+		}
+	}
+
+	// The Host header is echoed verbatim: localhost stays localhost.
+	req := httptest.NewRequest("GET", "/status", nil)
+	req.Host = "localhost:8800"
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if got := fetchBaseURLs(w.Body.Bytes())["openai"]; got != "http://localhost:8800/v1/" {
+		t.Errorf("base_urls[openai] = %q, want http://localhost:8800/v1/", got)
+	}
+
+	// Over TLS the advertised scheme is https.
+	tlsSrv := httptest.NewTLSServer(s.Handler())
+	defer tlsSrv.Close()
+	tlsResp, err := tlsSrv.Client().Get(tlsSrv.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsBody, _ := io.ReadAll(tlsResp.Body)
+	tlsResp.Body.Close()
+	wantTLS := "https://" + tlsSrv.Listener.Addr().String() + "/v1/"
+	if got := fetchBaseURLs(tlsBody)["openai"]; got != wantTLS {
+		t.Errorf("base_urls[openai] over TLS = %q, want %q", got, wantTLS)
 	}
 }
 

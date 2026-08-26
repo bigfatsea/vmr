@@ -97,12 +97,16 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	}
 	defer statusResp.Body.Close()
 	var out struct {
-		Models map[string][]struct {
-			Endpoint      string    `json:"endpoint"`
-			Available     bool      `json:"available"`
-			Fails         int       `json:"consecutive_failures"`
-			LastError     string    `json:"last_error"`
-			CooldownUntil time.Time `json:"cooldown_until"`
+		Models []struct {
+			ID        string `json:"id"`
+			Protocol  string `json:"protocol"`
+			Endpoints []struct {
+				Endpoint      string    `json:"endpoint"`
+				Available     bool      `json:"available"`
+				Fails         int       `json:"consecutive_failures"`
+				LastError     string    `json:"last_error"`
+				CooldownUntil time.Time `json:"cooldown_until"`
+			} `json:"endpoints"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(statusResp.Body).Decode(&out); err != nil {
@@ -115,9 +119,14 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 		LastError     string    `json:"last_error"`
 		CooldownUntil time.Time `json:"cooldown_until"`
 	}
-	for i, ep := range out.Models["vm [openai]"] {
-		if ep.Endpoint == "openai/p1/model-one" {
-			p1 = &out.Models["vm [openai]"][i]
+	for mi := range out.Models {
+		if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai" {
+			continue
+		}
+		for i, ep := range out.Models[mi].Endpoints {
+			if ep.Endpoint == "openai/p1/model-one" {
+				p1 = &out.Models[mi].Endpoints[i]
+			}
 		}
 	}
 	if p1 == nil {
@@ -448,16 +457,29 @@ func TestAdminStatus(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Models map[string][]struct {
-			Endpoint  string `json:"endpoint"`
-			Available bool   `json:"available"`
-			Fails     int    `json:"consecutive_failures"`
+		Models []struct {
+			ID        string `json:"id"`
+			Protocol  string `json:"protocol"`
+			Endpoints []struct {
+				Endpoint  string `json:"endpoint"`
+				Available bool   `json:"available"`
+				Fails     int    `json:"consecutive_failures"`
+			} `json:"endpoints"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	eps := out.Models["vm [openai]"]
+	var eps []struct {
+		Endpoint  string `json:"endpoint"`
+		Available bool   `json:"available"`
+		Fails     int    `json:"consecutive_failures"`
+	}
+	for _, m := range out.Models {
+		if m.ID == "vm" && m.Protocol == "openai" {
+			eps = m.Endpoints
+		}
+	}
 	if len(eps) != 2 {
 		t.Fatalf("endpoints: %+v", eps)
 	}

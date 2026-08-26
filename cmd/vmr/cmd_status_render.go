@@ -97,9 +97,15 @@ func printStatus(st *statusResponse) {
 			fmt.Printf("  model_multipliers: %s\n", strings.Join(parts, " "))
 		}
 	}
-	for _, name := range core.SortedKeys(st.Models) {
-		fmt.Println(name) // key is already "name [protocol]"
-		for _, ep := range st.Models[name] {
+	for _, m := range st.Models {
+		fmt.Println(core.ModelLabel(m.ID, m.Protocol))
+		if len(m.Capabilities) > 0 {
+			fmt.Printf("  capabilities: %s\n", strings.Join(m.Capabilities, ", "))
+		}
+		if m.MaxContextTokens > 0 {
+			fmt.Printf("  max_context_tokens: %d\n", m.MaxContextTokens)
+		}
+		for _, ep := range m.Endpoints {
 			state := "ok"
 			if !ep.Available {
 				state = fmt.Sprintf("COOLDOWN until %s (%s, fails=%d)",

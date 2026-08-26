@@ -17,6 +17,12 @@ See this file's row in `CLAUDE.md`'s Conventions section for the write-time
 process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 
 ## [Unreleased]
+### Added
+- `/status`: each virtual model now reports what an agent pointing a custom model at vmr needs — `models` became a structured array (was a map keyed by the display string `"name [protocol]"`), one entry per virtual-model × protocol with `id`, `protocol`, `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and its `endpoints[]`, each endpoint carrying its live health plus its own `capabilities`/`max_context_tokens`. The dashboard (`/status.html`) shows both levels — unconstrained renders as that word, never as an empty badge — and `vmr status` prints the model-level lines
+- `/status`: `instance.base_urls` — the client-facing base URL per ingress protocol (`openai` / `anthropic` / `openai-responses`, all `<scheme>://<host>/v1/`), echoed from the request itself (Host header + whether TLS was used) rather than derived from `listen`: whatever address the caller reached `/status` at is exactly what it should point its client at
+
+### Changed
+- the human-readable model label `"<name> [<protocol>]"` is now defined once (`core.ModelLabel`); `vmr diagnose` route groups and `vmr status` output are byte-identical to before, just sourced from one place so the surfaces cannot drift apart
 
 ## [0.6.1] - 2026-08-25
 ### Added

@@ -487,3 +487,11 @@ func SortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// ModelLabel is the single human-readable label for a virtual model's
+// protocol face: "<name> [<protocol>]". Every surface that shows a model to
+// a person (vmr diagnose's route groups, vmr status, the /status dashboard)
+// renders this same format so a name is recognizable across surfaces.
+func ModelLabel(name, protocol string) string {
+	return name + " [" + protocol + "]"
+}

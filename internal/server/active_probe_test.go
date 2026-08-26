@@ -249,12 +249,16 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out struct {
-			Models map[string][]struct {
-				Endpoint      string    `json:"endpoint"`
-				Available     bool      `json:"available"`
-				Fails         int       `json:"consecutive_failures"`
-				LastError     string    `json:"last_error"`
-				CooldownUntil time.Time `json:"cooldown_until"`
+			Models []struct {
+				ID        string `json:"id"`
+				Protocol  string `json:"protocol"`
+				Endpoints []struct {
+					Endpoint      string    `json:"endpoint"`
+					Available     bool      `json:"available"`
+					Fails         int       `json:"consecutive_failures"`
+					LastError     string    `json:"last_error"`
+					CooldownUntil time.Time `json:"cooldown_until"`
+				} `json:"endpoints"`
 			} `json:"models"`
 		}
 		err = json.NewDecoder(statusResp.Body).Decode(&out)
@@ -262,9 +266,14 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, ep := range out.Models["vm [openai]"] {
-			if ep.Endpoint == "openai/p1/model-one" {
-				p1 = &out.Models["vm [openai]"][i]
+		for mi := range out.Models {
+			if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai" {
+				continue
+			}
+			for i, ep := range out.Models[mi].Endpoints {
+				if ep.Endpoint == "openai/p1/model-one" {
+					p1 = &out.Models[mi].Endpoints[i]
+				}
 			}
 		}
 		if p1 == nil {

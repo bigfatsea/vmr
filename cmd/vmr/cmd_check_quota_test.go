@@ -240,7 +240,7 @@ func TestCmdStatus_RendersQuotaLine(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"models": map[string]any{},
+			"models": []any{},
 			"concurrency": map[string]any{
 				"limit": 0, "in_flight": 0, "waiting": 0,
 			},
@@ -283,7 +283,7 @@ func TestCmdStatus_NoQuotaArray_NoQuotaLines(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"models":      map[string]any{},
+			"models":      []any{},
 			"concurrency": map[string]any{"limit": 0, "in_flight": 0, "waiting": 0},
 			"time":        "2026-08-07T12:00:00Z",
 		})
