@@ -25,7 +25,7 @@ func TestFailoverOn5xxAndModelRewrite(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -78,7 +78,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s (must fail over past the relay failure, not return it to the client)", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Errorf("endpoint=%s, want p2 (p1's relay failure must not stop the failover walk)", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -120,11 +120,11 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 		CooldownUntil time.Time `json:"cooldown_until"`
 	}
 	for mi := range out.Models {
-		if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai" {
+		if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai-completions" {
 			continue
 		}
 		for i, ep := range out.Models[mi].Endpoints {
-			if ep.Endpoint == "openai/p1/model-one" {
+			if ep.Endpoint == "openai-completions/p1/model-one" {
 				p1 = &out.Models[mi].Endpoints[i]
 			}
 		}
@@ -155,7 +155,7 @@ func TestVendorQuirkThoughtSignatureContinuesFailover(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s (must fail over past thought_signature 400 rejection)", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Errorf("endpoint=%s, want p2 (p1's thought_signature 400 must failover to p2)", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -180,7 +180,7 @@ func TestCooldownFiltersEndpointUntilRetryAfterExpires(t *testing.T) {
 
 	// 1st request: 429 on p1 → served by p2; p1 enters cooldown.
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("first request: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	// 2nd request immediately: p1 filtered by cooldown, p2 hit directly.
@@ -385,13 +385,13 @@ func TestModelsEndpointDedupesNameAcrossProtocols(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: oai, base_url: {openai: %s}, api_key: k0}
-  - {name: anth, base_url: {anthropic: %s}, api_key: k1}
+  - {name: oai, base_url: {openai-completions: %s}, api_key: k0}
+  - {name: anth, base_url: {anthropic-messages: %s}, api_key: k1}
 models:
   shared:
     endpoints:
-      - {protocol: openai, providers: [oai], models: [model-one]}
-      - {protocol: anthropic, providers: [anth], models: [model-two]}
+      - {protocol: openai-completions, providers: [oai], models: [model-one]}
+      - {protocol: anthropic-messages, providers: [anth], models: [model-two]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 
@@ -412,7 +412,7 @@ models:
 	if len(out.Data) != 1 {
 		t.Fatalf("expected exactly one deduped entry for %q, got %d: %+v", "shared", len(out.Data), out.Data)
 	}
-	if out.Data[0].ID != "shared" || out.Data[0].Protocol != "anthropic" {
+	if out.Data[0].ID != "shared" || out.Data[0].Protocol != "anthropic-messages" {
 		t.Errorf("data[0] = %+v, want id=shared vmr_protocol=anthropic (sorted-protocol-order tiebreak)", out.Data[0])
 	}
 }
@@ -476,7 +476,7 @@ func TestAdminStatus(t *testing.T) {
 		Fails     int    `json:"consecutive_failures"`
 	}
 	for _, m := range out.Models {
-		if m.ID == "vm" && m.Protocol == "openai" {
+		if m.ID == "vm" && m.Protocol == "openai-completions" {
 			eps = m.Endpoints
 		}
 	}
@@ -485,11 +485,11 @@ func TestAdminStatus(t *testing.T) {
 	}
 	for _, ep := range eps {
 		switch ep.Endpoint {
-		case "openai/p1/model-one":
+		case "openai-completions/p1/model-one":
 			if ep.Available || ep.Fails != 1 {
 				t.Errorf("p1 should be cooling down: %+v", ep)
 			}
-		case "openai/p2/model-two":
+		case "openai-completions/p2/model-two":
 			if !ep.Available {
 				t.Errorf("p2 should be available: %+v", ep)
 			}

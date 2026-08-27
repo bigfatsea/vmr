@@ -75,17 +75,17 @@ func TestRunProbe_ChatCompletionsProtocolUnaffected(t *testing.T) {
 listen: 127.0.0.1:0
 probe_timeout: 2s
 providers:
-  - {name: p1, base_url: {openai: `+upstream.URL+`}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: `+upstream.URL+`}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-one]}
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)
 	rt.Install(snap)
 	snap = rt.Snapshot()
-	ep := snap.Models["openai"]["vm"].Endpoints[0]
+	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
 
 	rt.runProbe(ep, snap)
 

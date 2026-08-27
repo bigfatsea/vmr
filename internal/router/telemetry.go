@@ -4,6 +4,8 @@ package router
 
 import (
 	"sync/atomic"
+
+	"vmr/internal/core"
 )
 
 // Telemetry holds process-lifetime in-memory traffic counters for /status.
@@ -50,11 +52,11 @@ func (t *Telemetry) RecordRequest(protocol string) {
 	}
 	t.requestsTotal.Add(1)
 	switch protocol {
-	case "openai":
+	case core.ProtocolOpenAICompletions:
 		t.reqOpenAI.Add(1)
-	case "anthropic":
+	case core.ProtocolAnthropicMessages:
 		t.reqAnthropic.Add(1)
-	case "openai-responses":
+	case core.ProtocolOpenAIResponses:
 		t.reqResponses.Add(1)
 	}
 }
@@ -108,15 +110,15 @@ func (t *Telemetry) RecordTokens(in, cacheWrite, cacheRead, reasoning, out int64
 func (t *Telemetry) Snapshot() TelemetrySnapshot {
 	var snap TelemetrySnapshot
 	if t == nil {
-		snap.Requests.ByProtocol = map[string]uint64{"openai": 0, "anthropic": 0, "openai-responses": 0}
+		snap.Requests.ByProtocol = map[string]uint64{core.ProtocolOpenAICompletions: 0, core.ProtocolAnthropicMessages: 0, core.ProtocolOpenAIResponses: 0}
 		snap.Requests.ByStatus = map[string]uint64{"ok": 0, "canceled": 0, "error": 0}
 		return snap
 	}
 	snap.Requests.Total = t.requestsTotal.Load()
 	snap.Requests.ByProtocol = map[string]uint64{
-		"openai":           t.reqOpenAI.Load(),
-		"anthropic":        t.reqAnthropic.Load(),
-		"openai-responses": t.reqResponses.Load(),
+		core.ProtocolOpenAICompletions: t.reqOpenAI.Load(),
+		core.ProtocolAnthropicMessages: t.reqAnthropic.Load(),
+		core.ProtocolOpenAIResponses:   t.reqResponses.Load(),
 	}
 	snap.Requests.ByStatus = map[string]uint64{
 		"ok":       t.reqStatusOK.Load(),

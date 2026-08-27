@@ -18,13 +18,13 @@ listen: 127.0.0.1:9900
 %s
 providers:
   - name: %s
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: sk-test-0123456789abcdef
 %s
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [%s]
         models: [%s]
 `
@@ -537,12 +537,12 @@ pricing:
   exchange_rate: {CNY: 7.1}
 providers:
   - name: plain
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: sk-test-0123456789abcdef
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [plain]
         models: [gpt-4o]
 `
@@ -582,12 +582,12 @@ pricing:
   exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: sk-test-0123456789abcdef
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `

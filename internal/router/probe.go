@@ -49,7 +49,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	// second, wrong-shaped probe body to the mix.
 	var body json.RawMessage
 	var nonce string
-	if ep.AdapterType == "openai-responses" {
+	if ep.AdapterType == core.ProtocolOpenAIResponses {
 		body, nonce = probe.ResponsesRequest(ep.Model)
 	} else {
 		body, nonce = probe.Request(ep.Model)

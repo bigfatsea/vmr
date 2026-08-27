@@ -100,11 +100,11 @@ func TestResponses_WrongProtocolHint(t *testing.T) {
 	ts := newRouterServer(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m]}
+      - {protocol: openai-completions, providers: [p1], models: [m]}
 `)
 	resp, body := postResponses(t, ts, simpleResponsesReq)
 	if resp.StatusCode != http.StatusNotFound {

@@ -23,22 +23,22 @@ const quotaStatusYAML = `
 listen: 127.0.0.1:18801
 providers:
   - name: p1
-    base_url: {openai: http://127.0.0.1:1}
+    base_url: {openai-completions: http://127.0.0.1:1}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 500}]
 models:
   vm:
-    endpoints: [{protocol: openai, providers: [p1], models: [m1]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m1]}]
 `
 
 const noQuotaYAML = `
 listen: 127.0.0.1:18802
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai, providers: [p1], models: [m1]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m1]}]
 `
 
 type quotaStatusRow struct {
@@ -82,7 +82,7 @@ func TestAdminStatus_QuotaSection_Present(t *testing.T) {
 	rt.Quota = quota.NewRegistry("")
 	rt.Install(snap)
 
-	l := snap.Models["openai"]["vm"].Endpoints[0].Quota.Limits[0]
+	l := snap.Models["openai-completions"]["vm"].Endpoints[0].Quota.Limits[0]
 	ps := quota.PeriodStart(l, time.Now())
 	rt.Quota.Charge("p1", "requests/1mo", ps, quota.Counters{Requests: 5}, 0)
 

@@ -246,7 +246,7 @@ func FuzzStream(f *testing.F) {
 		}
 
 		for _, isSSE := range []bool{true, false} {
-			for _, protocol := range []string{"openai", "anthropic", "openai-responses"} {
+			for _, protocol := range []string{"openai-completions", "anthropic-messages", "openai-responses"} {
 				for _, opaque := range []bool{true, false} {
 					opts := Options{
 						ClientModel:   "agent",

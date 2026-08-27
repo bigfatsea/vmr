@@ -27,7 +27,7 @@
 # beyond the shared floor); its own `max_context_tokens` *overrides* the
 # base instead when set (a single number can't be unioned). A virtual model
 # name can mix protocols: give it one endpoint-group entry with protocol:
-# openai and another with protocol: anthropic (or openai-responses), and it
+# openai and another with protocol: anthropic-messages (or openai-responses), and it
 # becomes reachable — with potentially different upstream candidates — from
 # every one of those ingress protocols at once (see the "agent" example
 # below). Mixing protocols within one endpoint-group entry has no syntax to
@@ -164,7 +164,7 @@ listen: 127.0.0.1:8800
 # candidate so this example doesn't also trip the "fallback duplicates an
 # endpoint already declared under this model" check `vmr check` runs.
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [openrouter2]
     models: [z-ai/glm-5.2]
     priority: 90              # required and must be > 0 on a fallback entry — see the header comment above
@@ -184,7 +184,7 @@ providers:
   # duplication). A models.<name> endpoint-group's own `protocol:` picks
   # which of these a given try-order entry actually uses.
   - name: minimax
-    base_url: {openai: https://api.minimaxi.com/v1, anthropic: https://api.minimaxi.com/anthropic/v1}
+    base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}
     # proxy: false               # not needed here — absent already means direct (domestic
     #                            # provider, no need to write this out).
@@ -274,7 +274,7 @@ providers:
   # cost-metric quota" section for the full write-up.
   # - name: anthropic              # naming the provider after its vendor helps the automatic model-name
   #                                 # resolution below find the standard table's matching entry
-  #   base_url: {anthropic: https://api.anthropic.com}
+  #   base_url: {anthropic-messages: https://api.anthropic.com}
   #   api_key: ${ANTHROPIC_API_KEY}
   #   quota:
   #     limits:
@@ -297,7 +297,7 @@ providers:
   # different windows never collide on the same bucket key; see the models:
   # comment further up for the general rule).
   # - name: plan-with-submodel-cap
-  #   base_url: {openai: https://api.example.com/v1}
+  #   base_url: {openai-completions: https://api.example.com/v1}
   #   api_key: ${EXAMPLE_API_KEY}
   #   quota:
   #     limits:
@@ -309,7 +309,7 @@ providers:
     # (Beta, as of this writing) Responses-compatible endpoint, forced
     # stateless: store:true / a non-null previous_response_id gets a 400
     # from OpenRouter itself, vmr doesn't intercept it.
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1, anthropic-messages: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
     # proxy: true                # per-provider switch: true = always go through
                                  # https_proxy/http_proxy above; absent/false = direct
@@ -322,7 +322,7 @@ providers:
                                  # together. YAML 1.2: write true/false, not on/off.
 
   - name: deepseek
-    base_url: {openai: https://api.deepseek.com/v1, anthropic: https://api.deepseek.com/anthropic/v1}
+    base_url: {openai-completions: https://api.deepseek.com/v1, anthropic-messages: https://api.deepseek.com/anthropic/v1}
     api_key: ${DEEPSEEK_API_KEY}
 
   # A second OpenRouter account — e.g. a team/backup key — kept here purely
@@ -332,7 +332,7 @@ providers:
   # provider entry like this when it actually has two accounts on the same
   # vendor.
   - name: openrouter2
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1, anthropic-messages: https://openrouter.ai/api/v1, openai-responses: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}   # a real second account would reference its own ${VAR} — reused
                                      # here only so this file keeps loading cleanly with one key set
 
@@ -344,7 +344,7 @@ providers:
   # to match automatically. A provider sets api_key: or api_keys:, never
   # both. See docs/UserGuide.md's "Several keys on one vendor" section.
   # - name: openrouter
-  #   base_url: {openai: https://openrouter.ai/api/v1}
+  #   base_url: {openai-completions: https://openrouter.ai/api/v1}
   #   api_keys:
   #     main: ${OPENROUTER_KEY_MAIN}
   #     backup: ${OPENROUTER_KEY_BACKUP}
@@ -361,7 +361,7 @@ providers:
   # them necessarily need the same rewrite. Only the specific roles listed
   # are affected; every other byte of the request is preserved.
   # - name: dashscope
-  #   base_url: {openai: https://dashscope.aliyuncs.com/compatible-mode/v1}
+  #   base_url: {openai-completions: https://dashscope.aliyuncs.com/compatible-mode/v1}
   #   api_key: ${DASHSCOPE_PLAN_KEY}
 
 models:
@@ -381,10 +381,10 @@ models:
     # per-endpoint override forms. Full reference: docs/UserGuide.md
     # "Condition-based routing" / "Sticky Model".
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [openrouter]
         models: [z-ai/glm-5.2]
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-v4-pro]
 
@@ -399,21 +399,21 @@ models:
                                   # strictly scoped to its own declared endpoints (omit to
                                   # inherit the default true, i.e. participate)
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         # capabilities: [image]        # this model has no base capabilities above, so this
         #                              # endpoint's effective set is exactly [image] alone
         # max_context_tokens: 1000000  # declare once you want vmr to skip this endpoint
         #                              # for requests it can't actually serve
-      - protocol: openai
+      - protocol: openai-completions
         providers: [openrouter]
         # A models: list with more than one name expands into that many
         # independent, individually health-tracked endpoints sharing this
         # entry's provider/protocol/capabilities/priority — tried in list
         # order (each still subject to its own failover/health state).
         models: [tencent/hy3-preview, qwen/qwen3-max]
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-v4-flash]
         # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
@@ -438,12 +438,12 @@ models:
     capabilities: [text, tools]
     max_context_tokens: 256000
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [openrouter, openrouter2]   # multi-account merge: outer loop over models,
         models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # inner over providers — openrouter then
         #                                                       # openrouter2 for gemini-3.6-flash-high,
         #                                                       # then the same pair for gemini-3.1-pro-high
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [minimax]
         models: [MiniMax-M3]
         max_context_tokens: 512000
@@ -456,15 +456,15 @@ models:
   # "claude" needs no openai-protocol entry — nothing on the openai side
   # references it, and a request for it over POST /v1/chat/completions
   # simply finds no route, since that ingress only ever looks at
-  # protocol: openai entries.
+  # protocol: openai-completions entries.
   claude:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [minimax]
         models: [MiniMax-M3]
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [deepseek]
         models: [deepseek-v4-pro]
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [openrouter]
         models: [minimax/minimax-m3] # any OpenRouter model, spoken over Anthropic protocol

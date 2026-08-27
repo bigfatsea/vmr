@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 
+	"vmr/internal/core"
 	"vmr/internal/jsonscan"
 )
 
@@ -43,7 +44,7 @@ var (
 // array, or the array is empty) — the caller should skip Sticky routing
 // for this request, not fail it.
 func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsgHash [16]byte, ok bool) {
-	if protocol == "openai-responses" {
+	if protocol == core.ProtocolOpenAIResponses {
 		return responsesSessionFingerprint(raw)
 	}
 
@@ -54,7 +55,7 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 	arrStart, arrEnd := msgsRanges[0][0], msgsRanges[0][1]
 
 	switch protocol {
-	case "anthropic":
+	case core.ProtocolAnthropicMessages:
 		// Anthropic's system prompt is an independent top-level field, never
 		// an element of "messages" — so messages[0] is always non-system.
 		if sysRanges, sok := jsonscan.TopLevelValues(raw, systemKeyLiteral); sok && len(sysRanges) > 0 {
@@ -65,7 +66,7 @@ func SessionFingerprint(raw json.RawMessage, protocol string) (sysHash, firstMsg
 			return sysHash, firstMsgHash, false
 		}
 		return sysHash, md5.Sum(first), true
-	case "openai":
+	case core.ProtocolOpenAICompletions:
 		// OpenAI carries system as leading role:"system" entries inside
 		// "messages" — walk only far enough to find the first non-system
 		// element, so cost is bounded by the leading system block's size,

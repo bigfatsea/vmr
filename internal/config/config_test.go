@@ -16,12 +16,12 @@ const validYAML = `
 listen: 127.0.0.1:9900
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: ${VMR_TEST_KEY}
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
         priority: 1
@@ -360,14 +360,14 @@ func TestPriorityOmittedUsesFileOrder(t *testing.T) {
 listen: 127.0.0.1:9901
 providers:
   - name: p
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k
 models:
   m:
     endpoints:
-      - {protocol: openai, providers: [p], models: [third]}
-      - {protocol: openai, providers: [p], models: [first]}
-      - {protocol: openai, providers: [p], models: [second]}
+      - {protocol: openai-completions, providers: [p], models: [third]}
+      - {protocol: openai-completions, providers: [p], models: [first]}
+      - {protocol: openai-completions, providers: [p], models: [second]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -417,12 +417,12 @@ func TestProviderServesBothProtocols(t *testing.T) {
 listen: 127.0.0.1:9903
 providers:
   - name: dual
-    base_url: {openai: https://api.example.com/v1, anthropic: https://api.example.com/anthropic/v1}
+    base_url: {openai-completions: https://api.example.com/v1, anthropic-messages: https://api.example.com/anthropic/v1}
     api_key: k1
 models:
   m:
     endpoints:
-      - {protocol: openai, providers: [dual], models: [x]}
+      - {protocol: openai-completions, providers: [dual], models: [x]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -432,7 +432,7 @@ models:
 	if !ok {
 		t.Fatal("provider not found")
 	}
-	if p.BaseURL["openai"] != "https://api.example.com/v1" || p.BaseURL["anthropic"] != "https://api.example.com/anthropic/v1" {
+	if p.BaseURL["openai-completions"] != "https://api.example.com/v1" || p.BaseURL["anthropic-messages"] != "https://api.example.com/anthropic/v1" {
 		t.Errorf("base_url map: %v", p.BaseURL)
 	}
 }
@@ -449,13 +449,13 @@ func TestSameVirtualModelNameBothProtocols(t *testing.T) {
 listen: 127.0.0.1:9902
 providers:
   - name: openrouter
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1, anthropic-messages: https://openrouter.ai/api/v1}
     api_key: k1
 models:
   coding:
     endpoints:
-      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}
-      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
+      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}
+      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -465,10 +465,10 @@ models:
 	if len(eps) != 2 {
 		t.Fatalf("want 2 endpoint groups, got %d", len(eps))
 	}
-	if eps[0].Protocol != "openai" || eps[0].Models[0] != "z-ai/glm-5.2" {
+	if eps[0].Protocol != "openai-completions" || eps[0].Models[0] != "z-ai/glm-5.2" {
 		t.Errorf("openai-protocol entry mismatch: %+v", eps[0])
 	}
-	if eps[1].Protocol != "anthropic" || eps[1].Models[0] != "minimax/minimax-m3" {
+	if eps[1].Protocol != "anthropic-messages" || eps[1].Models[0] != "minimax/minimax-m3" {
 		t.Errorf("anthropic-protocol entry mismatch: %+v", eps[1])
 	}
 }
@@ -477,7 +477,7 @@ func TestValidationErrors(t *testing.T) {
 	cases := []struct {
 		name, mutate, replacement, wantErr string
 	}{
-		{"bad base_url", "base_url: {openai: https://api.example.com/v1}", "base_url: {openai: not-a-url}", "invalid base_url"},
+		{"bad base_url", "base_url: {openai-completions: https://api.example.com/v1}", "base_url: {openai-completions: not-a-url}", "invalid base_url"},
 		{"unknown provider ref", "providers: [p1]", "providers: [ghost]", "unknown provider"},
 		{"empty models list", "models: [real-model]", "models: []", "at least one required"},
 	}
@@ -495,7 +495,7 @@ func TestValidationErrors(t *testing.T) {
 // TestUnknownProtocolKeyRejected covers a provider's base_url declaring a
 // protocol with no registered adapter (e.g. a typo).
 func TestUnknownProtocolKeyRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "base_url: {openai: https://api.example.com/v1}", "base_url: {nosuch: https://api.example.com/v1}", 1)
+	yaml := strings.Replace(validYAML, "base_url: {openai-completions: https://api.example.com/v1}", "base_url: {nosuch: https://api.example.com/v1}", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown adapter type") {
 		t.Errorf("want unknown adapter type error, got %v", err)
@@ -508,7 +508,7 @@ func TestUnknownProtocolKeyRejected(t *testing.T) {
 // protocol was implicit from map position rather than a value that could be
 // wrong.
 func TestUnknownEndpointProtocolRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "protocol: openai", "protocol: nosuch", 1)
+	yaml := strings.Replace(validYAML, "protocol: openai-completions", "protocol: nosuch", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Errorf("want unknown protocol error, got %v", err)
@@ -592,10 +592,10 @@ func TestExtraRedactHeadersEmptyEntryRejected(t *testing.T) {
 }
 
 func TestEmptySections(t *testing.T) {
-	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai, providers: [x], models: [y]}]}}")); err == nil {
+	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai-completions, providers: [x], models: [y]}]}}")); err == nil {
 		t.Error("want error for no providers")
 	}
-	if _, err := Parse([]byte("providers:\n  - {name: p, base_url: {openai: https://x.com}}")); err == nil {
+	if _, err := Parse([]byte("providers:\n  - {name: p, base_url: {openai-completions: https://x.com}}")); err == nil {
 		t.Error("want error for no models")
 	}
 }
@@ -828,7 +828,7 @@ models:
 }
 
 // TestOpenAIResponsesAndChatCompletionsCoexist locks in that one virtual
-// model name can mix protocol: openai and protocol: openai-responses
+// model name can mix protocol: openai-completions and protocol: openai-responses
 // endpoint groups — the same "one name, several independently-reachable
 // protocol faces" pattern already used for openai/anthropic (see
 // VirtualModel's doc comment); BuildSnapshot splits them into separate
@@ -840,12 +840,12 @@ func TestOpenAIResponsesAndChatCompletionsCoexist(t *testing.T) {
 listen: 127.0.0.1:9900
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1, openai-responses: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1, openai-responses: https://api.example.com/v1}
     api_key: ${VMR_TEST_KEY}
 models:
   agent:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
       - protocol: openai-responses

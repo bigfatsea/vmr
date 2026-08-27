@@ -22,7 +22,7 @@ listen: 127.0.0.1:0
 log_dir: %q
 providers:
   - name: p1
-    base_url: {openai: %q}
+    base_url: {openai-completions: %q}
     api_key: real-provider-key
     quota:
       limits:
@@ -30,7 +30,7 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `, dir, upstreamURL+"/v1", limitYAML)
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -222,11 +222,11 @@ func TestRun_NoQuotaConfigured_NoStateFileCreated(t *testing.T) {
 listen: 127.0.0.1:0
 log_dir: %q
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: real-provider-key}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: real-provider-key}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `, dir, upstream.URL+"/v1")
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {

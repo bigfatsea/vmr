@@ -21,12 +21,12 @@ pricing:
   exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
-    base_url: {anthropic: https://api.anthropic.com}
+    base_url: {anthropic-messages: https://api.anthropic.com}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
@@ -59,12 +59,12 @@ pricing:
   exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
-    base_url: {anthropic: https://api.anthropic.com}
+    base_url: {anthropic-messages: https://api.anthropic.com}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
@@ -101,12 +101,12 @@ pricing:
   exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
-    base_url: {anthropic: https://api.anthropic.com}
+    base_url: {anthropic-messages: https://api.anthropic.com}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)
@@ -134,12 +134,12 @@ func TestBuildPricing_DisplayCurrency_MissingRate_DegradesWithWarning(t *testing
 listen: 127.0.0.1:0
 providers:
   - name: anthropic
-    base_url: {anthropic: https://api.anthropic.com}
+    base_url: {anthropic-messages: https://api.anthropic.com}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `)

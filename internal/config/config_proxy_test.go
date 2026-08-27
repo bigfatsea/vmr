@@ -8,14 +8,14 @@ import (
 
 const proxyTestModels = `
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `
 
 func TestProxyConfigValidation(t *testing.T) {
 	base := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
 ` + proxyTestModels
 
 	if _, err := Parse([]byte("https_proxy: http://127.0.0.1:7890\n" + base)); err != nil {
@@ -36,7 +36,7 @@ func TestProxyConfigEnvExpansion(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: ${VMR_TEST_PROXY}
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
 ` + proxyTestModels))
 	if err != nil {
 		t.Fatal(err)
@@ -51,11 +51,11 @@ func TestProviderProxySwitchParsing(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: on, base_url: {openai: https://a.example}, api_key: k, proxy: true}
-  - {name: off, base_url: {openai: https://b.example}, api_key: k, proxy: false}
-  - {name: unset, base_url: {openai: https://c.example}, api_key: k}
+  - {name: on, base_url: {openai-completions: https://a.example}, api_key: k, proxy: true}
+  - {name: off, base_url: {openai-completions: https://b.example}, api_key: k, proxy: false}
+  - {name: unset, base_url: {openai-completions: https://c.example}, api_key: k}
 models:
-  m: {endpoints: [{protocol: openai, providers: [on], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [on], models: [x]}]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -123,16 +123,16 @@ providers:
 ` + proxyTestModels)
 	}
 	// proxy: true with no proxy URL at all → rejected at load.
-	if _, err := Parse(mk("", `base_url: {openai: https://a.example}, api_key: k, proxy: true`)); err == nil ||
+	if _, err := Parse(mk("", `base_url: {openai-completions: https://a.example}, api_key: k, proxy: true`)); err == nil ||
 		!strings.Contains(err.Error(), "proxy: true") {
 		t.Errorf("proxy: true without a proxy URL accepted (err=%v)", err)
 	}
 	// proxy: true with a matching proxy URL → fine.
-	if _, err := Parse(mk("https_proxy: http://127.0.0.1:7890", `base_url: {openai: https://a.example}, api_key: k, proxy: true`)); err != nil {
+	if _, err := Parse(mk("https_proxy: http://127.0.0.1:7890", `base_url: {openai-completions: https://a.example}, api_key: k, proxy: true`)); err != nil {
 		t.Errorf("proxy: true with https_proxy rejected: %v", err)
 	}
 	// proxy: true on an http base_url with only https_proxy set → still a contradiction.
-	if _, err := Parse(mk("https_proxy: http://127.0.0.1:7890", `base_url: {openai: http://10.0.0.9:8000}, api_key: k, proxy: true`)); err == nil {
+	if _, err := Parse(mk("https_proxy: http://127.0.0.1:7890", `base_url: {openai-completions: http://10.0.0.9:8000}, api_key: k, proxy: true`)); err == nil {
 		t.Error("proxy: true with a scheme-mismatched proxy accepted")
 	}
 }
@@ -145,7 +145,7 @@ func TestProxyDefaultOff(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: p1, base_url: {openai: https://a.example}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://a.example}, api_key: k}
 ` + proxyTestModels))
 	if err != nil {
 		t.Fatal(err)

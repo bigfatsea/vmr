@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"vmr/internal/core"
 	"vmr/internal/i18n"
 )
 
@@ -162,8 +163,8 @@ func endpointProtocol(endpoint string) string {
 }
 
 // protocolBuckets splits endpoint rows by protocol, preserving each row's
-// relative order within its bucket. "openai" sorts first, "anthropic"
-// second, any other protocol follows alphabetically — the fixed group order
+// relative order within its bucket. "openai-completions" sorts first,
+// "anthropic-messages" second, any other protocol follows alphabetically — the fixed group order
 // every §3/§4 by-protocol table renders in.
 func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	byProto := map[string][]EndpointRow{}
@@ -177,9 +178,9 @@ func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	}
 	rank := func(p string) int {
 		switch p {
-		case "openai":
+		case core.ProtocolOpenAICompletions:
 			return 0
-		case "anthropic":
+		case core.ProtocolAnthropicMessages:
 			return 1
 		default:
 			return 2

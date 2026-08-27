@@ -12,18 +12,18 @@ const apiKeysYAML = `
 listen: 127.0.0.1:9910
 providers:
   - name: openrouter
-    base_url: {openai: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1}
     api_keys:
       team_a: sk-aaaaaaaaaaaaaaaa
       team_b: sk-bbbbbbbbbbbbbbbb
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [openrouter]
         models: [real-model]
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [openrouter]
     models: [fallback-model]
     priority: 90
@@ -85,8 +85,8 @@ func TestProviderAPIKeys_RewritesEndpointAndFallbackReferences(t *testing.T) {
 }
 
 func TestProviderAPIKeys_BothAPIKeyAndAPIKeysRejected(t *testing.T) {
-	yaml := strings.Replace(apiKeysYAML, "base_url: {openai: https://openrouter.ai/api/v1}",
-		"base_url: {openai: https://openrouter.ai/api/v1}\n    api_key: sk-should-not-coexist", 1)
+	yaml := strings.Replace(apiKeysYAML, "base_url: {openai-completions: https://openrouter.ai/api/v1}",
+		"base_url: {openai-completions: https://openrouter.ai/api/v1}\n    api_key: sk-should-not-coexist", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "set either api_key or api_keys, not both") {
 		t.Errorf("want a mutual-exclusivity error, got %v", err)
@@ -119,7 +119,7 @@ func TestProviderAPIKeys_ListFormRejected(t *testing.T) {
 func TestProviderAPIKeys_ExpandedNameCollidesWithHandWrittenProvider(t *testing.T) {
 	yaml := strings.Replace(apiKeysYAML,
 		"      team_b: sk-bbbbbbbbbbbbbbbb\n",
-		"      team_b: sk-bbbbbbbbbbbbbbbb\n  - name: openrouter-team_a\n    base_url: {openai: https://example.com}\n    api_key: k\n", 1)
+		"      team_b: sk-bbbbbbbbbbbbbbbb\n  - name: openrouter-team_a\n    base_url: {openai-completions: https://example.com}\n    api_key: k\n", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), `duplicate provider name "openrouter-team_a"`) {
 		t.Errorf("want a duplicate provider name error, got %v", err)

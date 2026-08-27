@@ -258,9 +258,9 @@ func instanceBaseURLs(scheme, host string) map[string]string {
 	}
 	base := scheme + "://" + host + "/v1/"
 	return map[string]string{
-		"openai":           base,
-		"anthropic":        base,
-		"openai-responses": base,
+		core.ProtocolOpenAICompletions: base,
+		core.ProtocolAnthropicMessages: base,
+		core.ProtocolOpenAIResponses:   base,
 	}
 }
 

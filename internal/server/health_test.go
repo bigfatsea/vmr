@@ -24,11 +24,11 @@ const healthYAML = `
 listen: 127.0.0.1:18801
 api_keys: [test-key-0123456789]
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `
 
 func healthServer(t *testing.T) *Server {

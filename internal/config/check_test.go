@@ -23,9 +23,9 @@ func TestCheckCleanConfigHasNoIssues(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("clean config: Check() = %v, want empty", issues)
@@ -39,9 +39,9 @@ func TestCheckFlagsMissingAPIKey(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: ""}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Provider != "p1" || issues[0].Field != "api_key" {
@@ -59,9 +59,9 @@ listen: 127.0.0.1:0
 probe_timeout: 130s
 timeouts: {response_header: 120s}
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Field != "probe_timeout" {
@@ -85,9 +85,9 @@ func TestCheckFlagsNonLoopbackListenWithNoAPIKeys(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 0.0.0.0:8800
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Field != "listen" {
@@ -110,9 +110,9 @@ func TestCheckAllowsNonLoopbackListenWithAPIKeys(t *testing.T) {
 listen: 0.0.0.0:8800
 api_keys: [sixteen-plus-chars]
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("non-loopback listen with api_keys configured: Check() = %v, want empty", issues)
@@ -127,9 +127,9 @@ func TestCheckAllowsLoopbackListenWithNoAPIKeys(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:8800
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("loopback listen with no api_keys: Check() = %v, want empty", issues)
@@ -143,15 +143,15 @@ func TestCheckFlagsDuplicateEndpoint(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   m:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [x, x]}
+      - {protocol: openai-completions, providers: [p1], models: [x, x]}
 `)
 	issues := cfg.Check()
-	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai/p1/x" {
-		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai/p1/x", issues)
+	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
+		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions/p1/x", issues)
 	}
 }
 

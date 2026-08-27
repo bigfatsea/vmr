@@ -81,6 +81,7 @@ import (
 	"sync"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/core"
 	"vmr/internal/tokenutil"
 )
 
@@ -268,7 +269,7 @@ func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, pro
 		rs.applied = append(rs.applied, "opaque")
 	case !isSSE:
 		rs.mode = modeBuffered
-	case protocol == "openai-responses":
+	case protocol == core.ProtocolOpenAIResponses:
 		// The modeUndecided/classifyEvent machinery below exists purely to
 		// detect MiniMax's two thinking-mode shapes, both defined by
 		// inline text inside "content"/"text" fields. The Responses
@@ -658,22 +659,22 @@ func (s *stream) finalizeBuffered() {
 // didn't send its own. Anthropic streams have no [DONE] concept.
 //
 // Options.Protocol is the INGRESS adapter's registered type string, not a
-// family name: the three values that reach here are "openai", "anthropic",
-// and "openai-responses" (newStream switches on that last one too). The
-// comparison is deliberately exact rather than a prefix or a family
-// predicate — "openai-responses" starts with "openai" and must NOT get a
-// [DONE]. A future OpenAI-derived ingress (an azure-openai adapter, say)
-// therefore needs its own decision here rather than inheriting one: it is a
-// new registered protocol string, so it falls through to "no [DONE]" until
-// someone states otherwise, which is the safe default (adding a sentinel a
-// client doesn't expect corrupts a stream; omitting one only reaches a
-// client that already tolerates upstreams which never send it). Kept as a
-// literal comparison in the one place the decision is made rather than an
-// isProtocolRequiringDone helper — with three protocols and no translation
-// between them (CLAUDE.md's headline invariant), a predicate function would
-// add a layer without adding a decision.
+// family name: the three values that reach here are "openai-completions",
+// "anthropic-messages", and "openai-responses" (newStream switches on that
+// last one too). The comparison is deliberately exact rather than a prefix
+// or a family predicate — "openai-responses" must NOT get a [DONE] even
+// though it shares the "openai-" vendor prefix. A future OpenAI-derived
+// ingress (an azure-openai adapter, say) therefore needs its own decision
+// here rather than inheriting one: it is a new registered protocol string,
+// so it falls through to "no [DONE]" until someone states otherwise, which
+// is the safe default (adding a sentinel a client doesn't expect corrupts a
+// stream; omitting one only reaches a client that already tolerates
+// upstreams which never send it). Kept as a literal comparison in the one
+// place the decision is made rather than an isProtocolRequiringDone helper —
+// with three protocols and no translation between them (CLAUDE.md's headline
+// invariant), a predicate function would add a layer without adding a decision.
 func (s *stream) appendDone() {
-	if !s.isSSE || s.protocol != "openai" || s.sawDone {
+	if !s.isSSE || s.protocol != core.ProtocolOpenAICompletions || s.sawDone {
 		return
 	}
 	if !s.tailNL && len(s.out) > 0 {

@@ -14,11 +14,11 @@ func TestSessionFingerprint_Anthropic(t *testing.T) {
 	c := json.RawMessage(`{"model":"x","system":"you are Agent B","messages":[{"role":"user","content":"hi"}]}`)
 	d := json.RawMessage(`{"model":"x","system":"you are Agent A","messages":[{"role":"user","content":"bye"}]}`)
 
-	sysA, firstA, ok := SessionFingerprint(a, "anthropic")
+	sysA, firstA, ok := SessionFingerprint(a, "anthropic-messages")
 	if !ok {
 		t.Fatalf("expected ok=true for a")
 	}
-	sysB, firstB, ok := SessionFingerprint(b, "anthropic")
+	sysB, firstB, ok := SessionFingerprint(b, "anthropic-messages")
 	if !ok {
 		t.Fatalf("expected ok=true for b")
 	}
@@ -26,7 +26,7 @@ func TestSessionFingerprint_Anthropic(t *testing.T) {
 		t.Errorf("same system+first message across turns must fingerprint identically; a=(%x,%x) b=(%x,%x)", sysA, firstA, sysB, firstB)
 	}
 
-	sysC, firstC, ok := SessionFingerprint(c, "anthropic")
+	sysC, firstC, ok := SessionFingerprint(c, "anthropic-messages")
 	if !ok {
 		t.Fatalf("expected ok=true for c")
 	}
@@ -37,7 +37,7 @@ func TestSessionFingerprint_Anthropic(t *testing.T) {
 		t.Errorf("first message is identical between a and c, firstMsgHash should match: got firstA=%x firstC=%x", firstA, firstC)
 	}
 
-	sysD, firstD, ok := SessionFingerprint(d, "anthropic")
+	sysD, firstD, ok := SessionFingerprint(d, "anthropic-messages")
 	if !ok {
 		t.Fatalf("expected ok=true for d")
 	}
@@ -55,11 +55,11 @@ func TestSessionFingerprint_OpenAI_LeadingSystem(t *testing.T) {
 	multi := json.RawMessage(`{"model":"x","messages":[{"role":"system","content":"sys"},{"role":"system","content":"more sys"},{"role":"user","content":"hi"}]}`)
 	noSys := json.RawMessage(`{"model":"x","messages":[{"role":"user","content":"hi"}]}`)
 
-	sysS, firstS, ok := SessionFingerprint(single, "openai")
+	sysS, firstS, ok := SessionFingerprint(single, "openai-completions")
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	sysM, firstM, ok := SessionFingerprint(multi, "openai")
+	sysM, firstM, ok := SessionFingerprint(multi, "openai-completions")
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -70,7 +70,7 @@ func TestSessionFingerprint_OpenAI_LeadingSystem(t *testing.T) {
 		t.Errorf("first non-system message identical, firstMsgHash should match: got %x vs %x", firstS, firstM)
 	}
 
-	sysN, _, ok := SessionFingerprint(noSys, "openai")
+	sysN, _, ok := SessionFingerprint(noSys, "openai-completions")
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -82,10 +82,10 @@ func TestSessionFingerprint_OpenAI_LeadingSystem(t *testing.T) {
 
 func TestSessionFingerprint_NoMessages(t *testing.T) {
 	t.Parallel()
-	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x"}`), "anthropic"); ok {
+	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x"}`), "anthropic-messages"); ok {
 		t.Errorf("expected ok=false when there is no top-level messages array")
 	}
-	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x","messages":[]}`), "openai"); ok {
+	if _, _, ok := SessionFingerprint(json.RawMessage(`{"model":"x","messages":[]}`), "openai-completions"); ok {
 		t.Errorf("expected ok=false for an empty messages array")
 	}
 }

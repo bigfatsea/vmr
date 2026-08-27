@@ -24,10 +24,10 @@ func TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel(t *testing.T
 	u1 := msg("user", "investigate X")
 
 	r1 := mkRecWithUsage(at(0), []any{msg("system", "sys"), u1}, "ok1", 100, 10)
-	r1.Attempts = []audit.Attempt{{Endpoint: "openai:p1:model-a", Protocol: "openai", Provider: "p1", Model: "model-a"}}
+	r1.Attempts = []audit.Attempt{{Endpoint: "openai-completions:p1:model-a", Protocol: "openai-completions", Provider: "p1", Model: "model-a"}}
 
 	r2 := mkRecWithUsage(at(1), []any{msg("system", "sys"), u1, msg("assistant", "ok1"), msg("user", "continue")}, "ok2", 200, 20)
-	r2.Attempts = []audit.Attempt{{Endpoint: "openai:p1:model-b", Protocol: "openai", Provider: "p1", Model: "model-b"}}
+	r2.Attempts = []audit.Attempt{{Endpoint: "openai-completions:p1:model-b", Protocol: "openai-completions", Provider: "p1", Model: "model-b"}}
 
 	// Both records carry the SAME virtual model ("agent", set by mkRec) —
 	// the whole point of this test.
@@ -160,7 +160,7 @@ func TestStepUpstream_FallsBackToEndpointSplit(t *testing.T) {
 		wantProvider string
 		wantModel    string
 	}{
-		{"colon format", "openai:new-provider:new-model", "new-provider", "new-model"},
+		{"colon format", "openai-completions:new-provider:new-model", "new-provider", "new-model"},
 		{"slash format (legacy)", "openai/old-provider/old-model", "old-provider", "old-model"},
 		{"no attempts, unresolvable endpoint", "-", "", ""},
 	} {

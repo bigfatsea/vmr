@@ -17,6 +17,8 @@ import (
 	"html"
 	"net/http"
 	"strings"
+
+	"vmr/internal/core"
 )
 
 //go:embed help.html
@@ -37,8 +39,8 @@ var helpHTMLPage []byte
 // visitor's browser actually shows), which wins when a proxy rewrites Host.
 func (s *Server) helpPage(w http.ResponseWriter, r *http.Request) {
 	baseURLs := instanceBaseURLs(requestScheme(r), r.Host)
-	openai := strings.TrimSuffix(baseURLs["openai"], "/")
-	anthropic := strings.TrimSuffix(strings.TrimSuffix(baseURLs["anthropic"], "/"), "/v1")
+	openai := strings.TrimSuffix(baseURLs[core.ProtocolOpenAICompletions], "/")
+	anthropic := strings.TrimSuffix(strings.TrimSuffix(baseURLs[core.ProtocolAnthropicMessages], "/"), "/v1")
 	page := bytes.ReplaceAll(helpHTMLPage, []byte("{{BASE_URL_OPENAI}}"), []byte(html.EscapeString(openai)))
 	page = bytes.ReplaceAll(page, []byte("{{BASE_URL_ANTHROPIC}}"), []byte(html.EscapeString(anthropic)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

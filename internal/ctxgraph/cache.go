@@ -22,7 +22,9 @@ import (
 // parse), so bumping it is always safe: the cache is a fully re-derivable
 // artifact, and silently reusing output from retired logic is the failure
 // mode this constant exists to prevent, not the rebuild cost.
-const CacheSchemaVersion = 1
+// v2 (2026-08): protocol-name rename — cached Facts carry normalized
+// "openai-completions"/"anthropic-messages" protocol/endpoint values.
+const CacheSchemaVersion = 2
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

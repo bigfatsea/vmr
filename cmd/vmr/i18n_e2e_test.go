@@ -30,7 +30,7 @@ func e2eReportFixture(t *testing.T) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
 	rec := map[string]any{
-		"ts": "2026-07-08T10:00:00Z", "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"ts": "2026-07-08T10:00:00Z", "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{
 				"model": "agent",

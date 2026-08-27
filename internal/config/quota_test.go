@@ -18,14 +18,14 @@ const quotaBaseYAML = `
 listen: 127.0.0.1:9900
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: sk-test-0123456789abcdef
     quota:
 %s
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
 `

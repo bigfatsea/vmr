@@ -20,17 +20,17 @@ const multiProviderYAML = `
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://p1.example.com}
+    base_url: {openai-completions: https://p1.example.com}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-08-01, amount: 1000}]
   - name: p2
-    base_url: {openai: https://p2.example.com}
+    base_url: {openai-completions: https://p2.example.com}
     api_key: k2
 models:
   vm:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1, p2]
         models: [model-a, model-b]
         priority: 1
@@ -50,7 +50,7 @@ func TestBuildSnapshot_MultiProvider_ExpandsModelMajor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	type pm struct{ provider, model string }
 	want := []pm{{"p1", "model-a"}, {"p2", "model-a"}, {"p1", "model-b"}, {"p2", "model-b"}}
 	if len(eps) != len(want) {
@@ -60,7 +60,7 @@ func TestBuildSnapshot_MultiProvider_ExpandsModelMajor(t *testing.T) {
 		if eps[i].Provider != w.provider || eps[i].Model != w.model {
 			t.Errorf("endpoint[%d] = %s/%s, want %s/%s", i, eps[i].Provider, eps[i].Model, w.provider, w.model)
 		}
-		if eps[i].AdapterType != "openai" {
+		if eps[i].AdapterType != "openai-completions" {
 			t.Errorf("endpoint[%d].AdapterType = %q, want openai", i, eps[i].AdapterType)
 		}
 		if eps[i].Priority != 1 {
@@ -82,7 +82,7 @@ func TestBuildSnapshot_MultiProvider_BaseURLAndAPIKeyPerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ep := range snap.Models["openai"]["vm"].Endpoints {
+	for _, ep := range snap.Models["openai-completions"]["vm"].Endpoints {
 		switch ep.Provider {
 		case "p1":
 			if ep.BaseURL != "https://p1.example.com" || ep.APIKey != "k1" {
@@ -111,7 +111,7 @@ func TestBuildSnapshot_MultiProvider_QuotaPerProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	var p1Quota *core.QuotaSpec
-	for _, ep := range snap.Models["openai"]["vm"].Endpoints {
+	for _, ep := range snap.Models["openai-completions"]["vm"].Endpoints {
 		switch ep.Provider {
 		case "p1":
 			if ep.Quota == nil {
@@ -143,7 +143,7 @@ func TestBuildSnapshot_MultiProvider_HealthKeysAllDistinct(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	for _, ep := range snap.Models["openai"]["vm"].Endpoints {
+	for _, ep := range snap.Models["openai-completions"]["vm"].Endpoints {
 		key := ep.HealthKey()
 		if seen[key] {
 			t.Errorf("duplicate HealthKey %q for endpoint %s/%s", key, ep.Provider, ep.Model)
@@ -158,10 +158,10 @@ func TestBuildSnapshot_MultiProvider_HealthKeysAllDistinct(t *testing.T) {
 const fallbackSnapYAML = `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://p1.example.com, anthropic: https://p1.example.com}, api_key: k1}
-  - {name: fb, base_url: {openai: https://fb.example.com}, api_key: kfb}
+  - {name: p1, base_url: {openai-completions: https://p1.example.com, anthropic-messages: https://p1.example.com}, api_key: k1}
+  - {name: fb, base_url: {openai-completions: https://fb.example.com}, api_key: kfb}
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [fb]
     models: [fallback-model]
     priority: 90
@@ -170,14 +170,14 @@ models:
     capabilities: [text, tools]
     max_context_tokens: 128000
     endpoints:
-      - {protocol: openai, providers: [p1], models: [own-model]}
+      - {protocol: openai-completions, providers: [p1], models: [own-model]}
   anthropic_only:
     endpoints:
-      - {protocol: anthropic, providers: [p1], models: [own-model]}
+      - {protocol: anthropic-messages, providers: [p1], models: [own-model]}
   opted_out:
     fallback: false
     endpoints:
-      - {protocol: openai, providers: [p1], models: [own-model]}
+      - {protocol: openai-completions, providers: [p1], models: [own-model]}
 `
 
 func TestBuildSnapshot_Fallback_InjectedWhenProtocolMatches(t *testing.T) {
@@ -189,7 +189,7 @@ func TestBuildSnapshot_Fallback_InjectedWhenProtocolMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["openai_only"].Endpoints
+	eps := snap.Models["openai-completions"]["openai_only"].Endpoints
 	if len(eps) != 2 {
 		t.Fatalf("got %d endpoints, want 2 (own + injected fallback)", len(eps))
 	}
@@ -217,10 +217,10 @@ func TestBuildSnapshot_Fallback_NotInjectedOnMismatchedProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := snap.Models["openai"]["anthropic_only"]; ok {
+	if _, ok := snap.Models["openai-completions"]["anthropic_only"]; ok {
 		t.Fatalf("anthropic_only model must have no openai route at all")
 	}
-	eps := snap.Models["anthropic"]["anthropic_only"].Endpoints
+	eps := snap.Models["anthropic-messages"]["anthropic_only"].Endpoints
 	if len(eps) != 1 {
 		t.Fatalf("got %d endpoints, want 1 (own endpoint only, no fallback — fallback is openai-protocol)", len(eps))
 	}
@@ -235,7 +235,7 @@ func TestBuildSnapshot_Fallback_OptOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["opted_out"].Endpoints
+	eps := snap.Models["openai-completions"]["opted_out"].Endpoints
 	if len(eps) != 1 {
 		t.Fatalf("got %d endpoints, want 1 (fallback: false must suppress injection)", len(eps))
 	}
@@ -257,7 +257,7 @@ func TestBuildSnapshot_Fallback_InheritsModelCapabilitiesBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["openai_only"].Endpoints
+	eps := snap.Models["openai-completions"]["openai_only"].Endpoints
 	fb := eps[1]
 	if fb.MaxContextTokens != 128000 {
 		t.Errorf("fallback endpoint MaxContextTokens = %d, want 128000 (inherited from openai_only's base)", fb.MaxContextTokens)
@@ -278,14 +278,14 @@ func TestServe_FailoverIntoInjectedFallback(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: fb, base_url: {openai: %s}, api_key: kfb}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: fb, base_url: {openai-completions: %s}, api_key: kfb}
 fallback_endpoints:
-  - {protocol: openai, providers: [fb], models: [fallback-model], priority: 90}
+  - {protocol: openai-completions, providers: [fb], models: [fallback-model], priority: 90}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [own-model]}
+      - {protocol: openai-completions, providers: [p1], models: [own-model]}
 `, own.srv.URL, fb.srv.URL))
 
 	rt := New(nil)
@@ -295,8 +295,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/fb/fallback-model" {
-		t.Errorf("endpoint=%s, want openai/fb/fallback-model", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/fb/fallback-model" {
+		t.Errorf("endpoint=%s, want openai-completions/fb/fallback-model", got)
 	}
 	if own.hits != 1 || fb.hits != 1 {
 		t.Errorf("hits: own=%d fb=%d, want 1/1", own.hits, fb.hits)

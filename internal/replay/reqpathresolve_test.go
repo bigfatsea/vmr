@@ -26,11 +26,11 @@ func writeMinimalConfig(t *testing.T, dir, logDir string) string {
 listen: 127.0.0.1:0
 log_dir: ` + logDir + `
 providers:
-  - {name: p1, base_url: {openai: "http://127.0.0.1:1/v1"}, api_key: unused-key}
+  - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/v1"}, api_key: unused-key}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {

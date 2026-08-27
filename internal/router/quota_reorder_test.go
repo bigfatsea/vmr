@@ -24,7 +24,7 @@ func priorityDims(t *testing.T) []strategy.Dimension {
 
 func epWithLimit(t *testing.T, provider string, priority int, l *core.Limit) *core.Endpoint {
 	t.Helper()
-	ep := &core.Endpoint{Provider: provider, AdapterType: "openai", Model: provider + "-model", Priority: priority}
+	ep := &core.Endpoint{Provider: provider, AdapterType: "openai-completions", Model: provider + "-model", Priority: priority}
 	if l != nil {
 		ep.Quota = &core.QuotaSpec{Limits: []core.Limit{*l}}
 	}
@@ -212,7 +212,7 @@ func TestServe_QuotaReordering_MisalignedResetDays(t *testing.T) {
 	rt.Install(snap)
 
 	now := time.Now()
-	route := snap.Models["openai"]["vm"]
+	route := snap.Models["openai-completions"]["vm"]
 	lA := route.Endpoints[0].Quota.Limits[0]
 	lB := route.Endpoints[1].Quota.Limits[0]
 	lC := route.Endpoints[2].Quota.Limits[0]
@@ -234,8 +234,8 @@ func TestServe_QuotaReordering_MisalignedResetDays(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 	endpoint := w.Header().Get("X-VMR-Endpoint")
-	if endpoint != "openai/plan-c/mc" {
-		t.Fatalf("winning endpoint = %s, want openai/plan-c/mc (plan-c has the least time left relative to its usage)", endpoint)
+	if endpoint != "openai-completions/plan-c/mc" {
+		t.Fatalf("winning endpoint = %s, want openai-completions/plan-c/mc (plan-c has the least time left relative to its usage)", endpoint)
 	}
 	if got := w.Header().Get("X-VMR-Route-Reason"); got == "" || !containsSubstr(got, "pick=quota") {
 		t.Errorf("X-VMR-Route-Reason = %q, want it to show pick=quota", got)
@@ -271,26 +271,26 @@ func fmtQuotaCfg(urlA, urlB, urlC string) string {
 listen: 127.0.0.1:0
 providers:
   - name: plan-a
-    base_url: {openai: ` + urlA + `}
+    base_url: {openai-completions: ` + urlA + `}
     api_key: ka
     quota:
       limits: [{metric: requests, every: 1mo, since: ` + sinceA + `, amount: 1000}]
   - name: plan-b
-    base_url: {openai: ` + urlB + `}
+    base_url: {openai-completions: ` + urlB + `}
     api_key: kb
     quota:
       limits: [{metric: requests, every: 1mo, since: ` + sinceB + `, amount: 1000}]
   - name: plan-c
-    base_url: {openai: ` + urlC + `}
+    base_url: {openai-completions: ` + urlC + `}
     api_key: kc
     quota:
       limits: [{metric: requests, every: 1mo, since: ` + sinceC + `, amount: 1000}]
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [plan-a], models: [ma]}
-      - {protocol: openai, providers: [plan-b], models: [mb]}
-      - {protocol: openai, providers: [plan-c], models: [mc]}
+      - {protocol: openai-completions, providers: [plan-a], models: [ma]}
+      - {protocol: openai-completions, providers: [plan-b], models: [mb]}
+      - {protocol: openai-completions, providers: [plan-c], models: [mc]}
 `
 }
 
@@ -304,20 +304,20 @@ func TestServe_StickyOverridesQuotaReordering(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: `+u1.srv.URL+`}
+    base_url: {openai-completions: `+u1.srv.URL+`}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1mo, since: 2020-01-01, amount: 1000}]
   - name: p2
-    base_url: {openai: `+u2.srv.URL+`}
+    base_url: {openai-completions: `+u2.srv.URL+`}
     api_key: k2
     quota:
       limits: [{metric: requests, every: 1mo, since: 2020-01-01, amount: 1000}]
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)
@@ -325,14 +325,14 @@ models:
 	rt.Install(snap)
 
 	now := time.Now()
-	l1 := snap.Models["openai"]["vm"].Endpoints[0].Quota.Limits[0]
+	l1 := snap.Models["openai-completions"]["vm"].Endpoints[0].Quota.Limits[0]
 	// Exhaust p1 so quota reordering alone would push p2 to the front.
 	rt.Quota.Charge("p1", "requests/1mo", quota.PeriodStart(l1, now), quota.Counters{Requests: 1000}, 0)
 
 	// Prime the sticky pointer to p1 directly, bypassing a first real
 	// request (whose fingerprinting depends on request shape details this
 	// test doesn't need to reproduce).
-	ep1 := snap.Models["openai"]["vm"].Endpoints[0]
+	ep1 := snap.Models["openai-completions"]["vm"].Endpoints[0]
 	req := []byte(`{"model":"vm","messages":[{"role":"user","content":"hi"}]}`)
 	// First call establishes the sticky pointer (goes to whichever quota
 	// ranks first — p2, since p1 is exhausted).
@@ -344,7 +344,7 @@ models:
 	// to prove sticky, not quota, decides the next call. Replicates Serve's
 	// own stickyKey computation (clientKeyTag "" since serveReq passes a
 	// nil audit.Record) so the lookup actually hits.
-	sysHash, firstMsgHash, ok := adapter.SessionFingerprint(req, "openai")
+	sysHash, firstMsgHash, ok := adapter.SessionFingerprint(req, "openai-completions")
 	if !ok {
 		t.Fatal("SessionFingerprint failed on test request body")
 	}
@@ -355,7 +355,7 @@ models:
 	if w2.Code != 200 {
 		t.Fatalf("second call status=%d body=%s", w2.Code, w2.Body)
 	}
-	if got := w2.Header().Get("X-VMR-Endpoint"); got != "openai/p1/m1" {
-		t.Fatalf("second call endpoint = %s, want openai/p1/m1 (sticky must override quota's demotion)", got)
+	if got := w2.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p1/m1" {
+		t.Fatalf("second call endpoint = %s, want openai-completions/p1/m1 (sticky must override quota's demotion)", got)
 	}
 }

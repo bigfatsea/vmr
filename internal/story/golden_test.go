@@ -21,12 +21,12 @@ import (
 func goldenRec(ts time.Time, durMS int64, msgs []any, sseBody string) audit.Record {
 	body := map[string]any{"model": "agent", "stream": true, "messages": msgs}
 	return audit.Record{
-		TS: ts, DurMS: durMS, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: ts, DurMS: durMS, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: map[string][]string{}, Body: body},
 			Response: &audit.Message{Status: 200, Headers: map[string][]string{}, Body: sseBody},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:provider:agent", DurMS: durMS}},
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:provider:agent", DurMS: durMS}},
 	}
 }
 

@@ -20,8 +20,8 @@
 
 | 概念 | 职责 |
 | --- | --- |
-| **Virtual Model** | 对外暴露的模型名，代表能力而非厂商；对应一组 Endpoint-Group，每组自带协议标签，同一虚拟模型名可以同时挂 openai 面和 anthropic 面 |
-| **Provider** | 一个可复用的上游账号定义：`name` + 按协议分 key 的 `base_url` map（`{openai: ..., anthropic: ...}`，至少声明一个）+ 共享的 api_key/proxy；协议信息现在挂在 base_url 的 key 上，不再由 provider 在配置里的位置决定 |
+| **Virtual Model** | 对外暴露的模型名，代表能力而非厂商；对应一组 Endpoint-Group，每组自带协议标签，同一虚拟模型名可以同时挂 openai-completions 面和 anthropic-messages 面 |
+| **Provider** | 一个可复用的上游账号定义：`name` + 按协议分 key 的 `base_url` map（`{openai-completions: ..., anthropic-messages: ...}`，至少声明一个）+ 共享的 api_key/proxy；协议信息现在挂在 base_url 的 key 上，不再由 provider 在配置里的位置决定 |
 | **Endpoint** | 最小调度单位：Provider × 实际模型名 × 调度属性；一个 Endpoint-Group 的 `models:` 列表展开成多个独立 Endpoint，共享同一组 provider/protocol/capabilities |
 | **Adapter** | 协议插件：构造上游请求、转换响应、归类错误；声明自己的协议 |
 | **Strategy** | 候选排序器：健康与条件过滤后按维度序列做稳定多键排序 |
@@ -52,7 +52,7 @@ POST /v1/responses           OpenAI Responses 协议        → 只路由到该�
 
 已接入的厂商协议面（均实测）。同一账号的多个协议面现在共用同一条 provider 条目——`base_url` 是按协议分 key 的 map，各协议面各自一个 key，天然不冲突：
 
-| Provider 名 | base_url（openai 面 / anthropic 面 / openai-responses 面） |
+| Provider 名 | base_url（openai-completions 面 / anthropic-messages 面 / openai-responses 面） |
 | --- | --- |
 | minimax | `https://api.minimaxi.com/v1` / `https://api.minimaxi.com/anthropic/v1` / 未提供（[MiniMax-AI/MiniMax-M2#112](https://github.com/MiniMax-AI/MiniMax-M2/issues/112) 仍是 open 的 feature request） |
 | deepseek | `https://api.deepseek.com/v1` / `https://api.deepseek.com/anthropic/v1` / `https://api.deepseek.com`（Responses 面截至上线时只开放 `deepseek-v4-flash`，`deepseek-v4-pro` 待补；强制 `store:false`/`previous_response_id:null`，见下方「Responses 协议接入」） |
@@ -62,7 +62,7 @@ POST /v1/responses           OpenAI Responses 协议        → 只路由到该�
 
 OpenAI 官方力推的下一代协议（`POST /v1/responses`，[迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)），DeepSeek/OpenRouter 已提供 OpenAI 兼容实现。与 Chat Completions 的关键形状差异：请求体顶层是 `input`（字符串或 Item 数组）+ 可选 `instructions`（system/developer 指导，可选地也能以 `role:"system"`/`role:"developer"` 的 Item 出现在 `input` 数组里），不是 `messages`；响应是 `output[]`（`message`/`reasoning`/`function_call` 等 typed Item 混合数组），不是 `choices[]`；流式是**类型化 SSE 事件**（`response.output_text.delta`/`response.completed`/…），不是 `delta` chunk，也没有 `[DONE]` 哨兵——终止靠类型化的完成事件本身。
 
-**天然复用（协议无关，零改动）**：顶层 `model`/`stream` 字段解析（`CanonicalRequest`）、顶层 `model` 字节 splice 重写（`jsonscan.RewriteModel`）、响应侧 `model` 字段正则重写（全局字面量扫描，不区分嵌套层级，Responses 把 `model` 放在 `response.created`/`response.completed` 事件体内层同样命中）、`[DONE]` 追加策略（门槛是 `protocol=="openai"`，新协议字符串天然被排除）、顶层 `tools` 数组非空探测（`HasTools`）、按字节估算 token 的 `EstimatedTokens`、审计落盘（body 原样存，不关心内部字段形状）。
+**天然复用（协议无关，零改动）**：顶层 `model`/`stream` 字段解析（`CanonicalRequest`）、顶层 `model` 字节 splice 重写（`jsonscan.RewriteModel`）、响应侧 `model` 字段正则重写（全局字面量扫描，不区分嵌套层级，Responses 把 `model` 放在 `response.created`/`response.completed` 事件体内层同样命中）、`[DONE]` 追加策略（门槛是 `protocol == "openai-completions"`，新协议字符串天然被排除）、顶层 `tools` 数组非空探测（`HasTools`）、按字节估算 token 的 `EstimatedTokens`、审计落盘（body 原样存，不关心内部字段形状）。
 
 **协议专属实现（新写，不能套用 Chat Completions 的实现）**：
 
@@ -190,7 +190,7 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 
 ```go
 type Adapter interface {
-    Protocol() string          // "openai" | "anthropic"：该 Adapter 服务的入口协议
+    Protocol() string          // "openai-completions" | "anthropic-messages"：该 Adapter 服务的入口协议
     BuildRequest(ctx, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error)  // 第二个返回值 = 出站 body 字节，审计直接引用，省掉 GetBody+ReadAll 再拷一份
     ClassifyError(status int, body []byte) core.ErrorClass
 }
@@ -375,12 +375,12 @@ models:
     capabilities: [text, tools]          # 基线：下面每个端点都继承
     max_context_tokens: 128000           # 基线：同上
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]            # 叠加 -> 生效集合 text,image,tools
         max_context_tokens: 1000000      # 覆盖基线，只对这个端点生效
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]          # 两者都不声明 -> 原样继承基线
 ```
@@ -592,7 +592,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
   "dur_ms": 864,                          // 总耗时（含并发闸等待与流式全程）
   "ttft_ms": 120,                         // 首字延迟：到达 → 首个响应 body 字节写回客户端；未写出或 <1ms 本地拒绝时省略（0 值视为"无测量"）
   "model": "claude-failtest",             // Virtual Model；解析前被拒则为 ""
-  "protocol": "anthropic",                // 入口协议：openai | anthropic
+  "protocol": "anthropic-messages",                // 入口协议：openai-completions | anthropic-messages | openai-responses
   "stream": false,
   "outcome": "ok",                        // ok（客户端拿到 2xx）| error | canceled（未写出任何响应）
   "replay_of": "vmr-audit-2026-07-13.jsonl:42",  // 仅 `vmr replay --record` 产出的记录才有此字段：来源记录的 "路径:行号"；vmr 自身写入的记录永远没有这个字段
@@ -614,8 +614,8 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
   },
   "attempts": [                           // 第二层：vmr ↔ 上游，每次 failover 尝试一条，按序
     {
-      "endpoint": "anthropic:minimax_badkey:MiniMax-M3",   // 展示用标签，protocol:provider:实际模型（":" 分隔，见下方三段式说明）
-      "protocol": "anthropic", "provider": "minimax_badkey", "model": "MiniMax-M3",  // 同样三段，但结构化——读侧不必再解析 endpoint 字符串（历史日志没有这三个字段时，internal/report 的 attemptUpstream() 回退到按 "/" 切分旧版 endpoint，见「配置参考」的 Endpoint 讨论）
+      "endpoint": "anthropic-messages:minimax_badkey:MiniMax-M3",   // 展示用标签，protocol:provider:实际模型（":" 分隔，见下方三段式说明）
+      "protocol": "anthropic-messages", "provider": "minimax_badkey", "model": "MiniMax-M3",  // 同样三段，但结构化——读侧不必再解析 endpoint 字符串（历史日志没有这三个字段时，internal/report 的 attemptUpstream() 回退到按 "/" 切分旧版 endpoint，见「配置参考」的 Endpoint 讨论）
       "url": "https://api.minimaxi.com/anthropic/v1/messages",
       "dur_ms": 543,
       "request":  { "headers": {...}, "body": {...} },   // 出站请求（model 已改写）
@@ -624,8 +624,8 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
       "error_class": "auth"               // 与 error 同步设置的类型化枚举值，见下方约定 5
     },
     {
-      "endpoint": "anthropic:deepseek:deepseek-v4-flash",
-      "protocol": "anthropic", "provider": "deepseek", "model": "deepseek-v4-flash",
+      "endpoint": "anthropic-messages:deepseek:deepseek-v4-flash",
+      "protocol": "anthropic-messages", "provider": "deepseek", "model": "deepseek-v4-flash",
       "url": "https://api.deepseek.com/anthropic/v1/messages",
       "dur_ms": 320,
       "request":  { "headers": {...}, "body": {...} },
@@ -694,7 +694,7 @@ timeouts:
 
 providers:                       # "我有什么"——扁平列表，一个账号一条
   - name: <name>
-    base_url: {openai: https://..., anthropic: https://...}  # 按协议分 key 的 map，至少声明一个；
+    base_url: {openai-completions: https://..., anthropic-messages: https://...}  # 按协议分 key 的 map，至少声明一个；
                                  # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages
     api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串；两个协议面共享同一把 key
     proxy: false               # 可选布尔开关，缺省 false：true = 该 provider 走 http(s)_proxy（海外厂商的
@@ -709,7 +709,7 @@ providers:                       # "我有什么"——扁平列表，一个账�
 # priority 在这里例外地是必填项且必须 > 0（省略/0 会悄悄和模型自己的真实
 # 端点抢占同一档位）；一个虚拟模型可以用 fallback: false 完全不参与。
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [p1, p2]         # 见下面 endpoints[].providers 的说明——同一批可互换账号
     models: [<上游真实模型名>]
     priority: 98                # 必填且 > 0，这一点和普通 endpoint-group 不同
@@ -725,7 +725,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
     capabilities: [text, tools]   # 可选；这个虚拟模型下所有端点共享的能力基线，缺省 = 无基线（不限制）
     max_context_tokens: 128000    # 可选；同上，端点共享的上下文窗口基线，缺省/0 = 无基线（不限制）
     endpoints:
-      - protocol: openai        # openai | anthropic | openai-responses | 未来任何已注册的 adapter 名——引用的
+      - protocol: openai-completions        # openai-completions | anthropic-messages | openai-responses | 未来任何已注册的 adapter 名——引用的
                                  # provider 必须在这个协议下声明了 base_url；同一虚拟模型名可以再挂多条不同
                                  # protocol 的 entry，各入口各自独立可达（见「协议模型」§3）
         providers: [<name>, ...]  # 必须引用 providers 列表里已定义的账号名；始终是列表——单账号写
@@ -745,7 +745,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
                                  # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
 ```
 
-**扁平 provider 列表 + 按协议分 key 的 base_url，而不是两层 map**：早期版本按协议把 provider/model 分成两层 map（`providers.<protocol>.<name>`），协议就是配置里的位置；现在 provider 是扁平列表，`name` 是显式字段，`base_url` 改成按协议分 key 的 map，同一账号的两个协议面（如 MiniMax）合并成一条 provider 条目而不是重复两份。协议改为 endpoint-group 自带的 `protocol:` 字段：一个 model 的某条 endpoint-group 引用的 provider，必须在 `protocol:` 对应的 key 下声明了 base_url——跨协议引用不是配置写不出来，而是加载期"provider 没有这个协议的 base_url"错误。这带来的好处不变：同一账号一条 provider 条目自然覆盖两个协议面，不需要重复声明或后缀区分；同一个 virtual model 名下可以同时放一条 `protocol: openai` 和一条 `protocol: anthropic` 的 entry，两个入口各自独立可达（`router.BuildSnapshot` 按 entry 的 `protocol` 拆成两条独立路由，见 `internal/router/snapshot.go`）。`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）仍然是三段式 `<protocol>/<provider>/<model>`——即便现在只有一条 provider 条目，两个协议面用的是同一个 provider 名、同一个 API Key，两段式的 `provider/model` 键依然会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
+**扁平 provider 列表 + 按协议分 key 的 base_url，而不是两层 map**：早期版本按协议把 provider/model 分成两层 map（`providers.<protocol>.<name>`），协议就是配置里的位置；现在 provider 是扁平列表，`name` 是显式字段，`base_url` 改成按协议分 key 的 map，同一账号的两个协议面（如 MiniMax）合并成一条 provider 条目而不是重复两份。协议改为 endpoint-group 自带的 `protocol:` 字段：一个 model 的某条 endpoint-group 引用的 provider，必须在 `protocol:` 对应的 key 下声明了 base_url——跨协议引用不是配置写不出来，而是加载期"provider 没有这个协议的 base_url"错误。这带来的好处不变：同一账号一条 provider 条目自然覆盖两个协议面，不需要重复声明或后缀区分；同一个 virtual model 名下可以同时放一条 `protocol: openai-completions` 和一条 `protocol: anthropic-messages` 的 entry，两个入口各自独立可达（`router.BuildSnapshot` 按 entry 的 `protocol` 拆成两条独立路由，见 `internal/router/snapshot.go`）。`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint` 响应头、实时日志）仍然是三段式 `<protocol>/<provider>/<model>`——即便现在只有一条 provider 条目，两个协议面用的是同一个 provider 名、同一个 API Key，两段式的 `provider/model` 键依然会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
 
 **Priority 是可选的逃生舱，不是必填项**：`strategy.Sort` 用稳定排序，同优先级（含全员缺省的 0）保留配置文件顺序。日常写法是完全不写 `priority`，靠 endpoints 的列表顺序表达优先级；只有需要表达"这几个是同一档位、组内再按 weight/latency 等维度决胜"这类分层语义时才需要显式数字。`vmr check` 按实际生效顺序打印 `1. 2. 3.`（跑一遍 `strategy.Sort`），而不是回显原始 priority 数字，所以不管你写没写这个字段，看到的都是真实的尝试顺序。
 
@@ -840,7 +840,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者 |
 | Sticky Model 默认开启（`VirtualModel.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
 | `sticky_ttl`（全局与端点级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
-| Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai` | 复用 `protocol: openai` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai`/`anthropic` 命名同构 |
+| Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai`（现 `openai-completions`） | 复用 `protocol: openai` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai-completions`/`anthropic-messages` 命名同构 |
 | Responses 协议第一版归一化器不做任何 quirk 检测，直接短路到真流式 | 给 Responses 的 typed SSE 事件（如 `"delta":"..."`）也加一套 marker 表，复刻 Chat Completions 的"确认命中形态才缓冲"判定 | Responses 协议原生把 reasoning 做成独立 typed Item，从设计上就不会出现 MiniMax 那种"思考混进 content"的怪癖——没有已知怪癖形态可确认，猜测性地加 marker 表是无凭无据的过度设计；`newRespStream` 的协议短路（直接进 `modePassthrough`）与 `!isSSE` 那条已有短路是同一逻辑：没有已知怪癖就不等待判定 |
 | `previous_response_id`/`store:true` 不在 vmr 侧拦截，交给上游自然拒绝 | vmr 主动校验并拒绝这两个字段，或做特殊的 failover 保护逻辑 | 调研到 vmr 目前唯二提供 Responses 兼容面的上游（DeepSeek、OpenRouter）都在协议层强制无状态（`store:true`/非空 `previous_response_id` 直接 400），这个问题现状下并不存在；vmr 的"协议内透传、不替客户端做校验"原则决定了不该主动剥离或拦截客户端发送的字段——真正需要处理"有状态续接端点不可跨候选替换"这个第一性原理问题，要等接入一个真支持它的上游（如 OpenAI 官方账号）才有意义，到时候的方向是扩展 Sticky Model 的强度而不是发明新的错误分类规则 |
 
@@ -932,7 +932,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 1. **配置校验**：复用 `config.Load` + `router.BuildSnapshot`；失败直接退出，不进入后续阶段。
 2. **环境检查**（`envCheck`，每个 provider 一条结果）：DNS 解析 + TLS 握手（仅 https 且未配代理时），或代理可达性（配了代理时）；`api_key` 是否非空。**代理感知是关键**：`cfg.ProxySpecFor` 判定这个 provider 的真实流量是否经过代理——是的话跳过对目标 host 的直连检查（那条路径真实请求从不会走），只测代理本身；否则会把"只能通过代理访问"的健康 provider 系统性误报成故障。DNS 查询用 `(&net.Resolver{}).LookupHost(ctx, host)` 加 5 秒上限，不用不带超时的 `net.LookupHost`——诊断工具本身绝不能因为一次网络黑洞而无限挂起。
-3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `Adapter.BuildRequest` 拼一个最小请求，要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**探测请求的 role 按协议区分**：`protocol: anthropic` 的端点用 `internal/probe.Request`（单条 `role: "user"` 消息，两种协议共用的最小形态）；`protocol: openai` 的端点改用 `internal/probe.RoleCompatRequest(model, "developer")`——首条 `role: "developer"`（OpenAI o1/o3 系列引入、部分自称兼容 OpenAI 协议的 provider 实际拒收的那个 role），末条普通 `role: "user"` 带回显 nonce，同样走 `Adapter.BuildRequest`/`RoleMap` 那条流水线。**没有独立的第二次请求**：developer role 走不通，等价于这个端点连不通——不为它单开一个阶段或再打一次请求，直接算作这一条 `testEndpoint` 结果的失败，提示里按 `ep.RoleMap` 是否已配置给出对应建议（没配→提示加 `role_map: {developer: system}`；配了但仍失败→提示检查改写目标 role 名）。**两条消息而非一条**：如果只发一条非 `user` 的消息，部分 provider 会因为"消息数组只有一条且不是 user"这个形状问题直接拒收，跟"这个 provider 不认 developer role"是两个不同的失败原因，混在一起会把纯粹的请求形状问题错判成 role 不兼容；两条消息（角色消息 + 用户消息）也正是真实客户端的发送形态。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟运行时的半开端点后台探测共用同一个 `internal/probe.Request`/`Echoed`（运行时探测不区分 role，永远是 `Request` 的单条 `user` 消息——developer-role 探测只在 `vmr diagnose` 这个一次性诊断工具里做），但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。去重时若同一个 `(protocol, provider, model)` 三元组被多条不同 `role_map` 的 endpoint-group 引用，取第一个出现的——这是没打算特意处理的边界情况。
+3. **连通性测试**（`testEndpoint`，每个去重后的 `(protocol, provider, model)` 三元组一条结果）：用 `Adapter.BuildRequest` 拼一个最小请求，要求模型原样回显一份随请求生成的一次性 nonce，按状态码 + 回显结果归类给出可操作的提示（401/403→查 key，404→查 model 拼写，429→限流，5xx→上游故障；200 但 `probe.Echoed` 没在响应体里找到 nonce → 警告而非直接判通过——单纯的 200 状态码证明不了模型真的跑了，一个网关/中转层用缓存或兜底响应假装成功也会是 200，回显校验能把这类"看似健康实则可疑"的端点单独标出来）。**探测请求的 role 按协议区分**：`protocol: anthropic-messages` 的端点用 `internal/probe.Request`（单条 `role: "user"` 消息，两种协议共用的最小形态）；`protocol: openai-completions` 的端点改用 `internal/probe.RoleCompatRequest(model, "developer")`——首条 `role: "developer"`（OpenAI o1/o3 系列引入、部分自称兼容 OpenAI 协议的 provider 实际拒收的那个 role），末条普通 `role: "user"` 带回显 nonce，同样走 `Adapter.BuildRequest`/`RoleMap` 那条流水线。**没有独立的第二次请求**：developer role 走不通，等价于这个端点连不通——不为它单开一个阶段或再打一次请求，直接算作这一条 `testEndpoint` 结果的失败，提示里按 `ep.RoleMap` 是否已配置给出对应建议（没配→提示加 `role_map: {developer: system}`；配了但仍失败→提示检查改写目标 role 名）。**两条消息而非一条**：如果只发一条非 `user` 的消息，部分 provider 会因为"消息数组只有一条且不是 user"这个形状问题直接拒收，跟"这个 provider 不认 developer role"是两个不同的失败原因，混在一起会把纯粹的请求形状问题错判成 role 不兼容；两条消息（角色消息 + 用户消息）也正是真实客户端的发送形态。**只读，不写**：不碰 `internal/health`、不写审计日志——诊断是观察者不是参与者，这在架构上是自动成立的（诊断是独立的一次性进程，物理上碰不到一个正在跑的 `vmr start` 进程的内存态，`health.Registry` 从不跨进程共享）。这条判定规则跟运行时的半开端点后台探测共用同一个 `internal/probe.Request`/`Echoed`（运行时探测不区分 role，永远是 `Request` 的单条 `user` 消息——developer-role 探测只在 `vmr diagnose` 这个一次性诊断工具里做），但对"回显没对上"的处理不同——`vmr diagnose` 是给人看的报告，宁可多报一次警告让人自己判断；运行时探测则只要 2xx 就算恢复，回显缺失只记日志不惩罚，避免把偶尔不遵循指令的健康端点误判下线。去重时若同一个 `(protocol, provider, model)` 三元组被多条不同 `role_map` 的 endpoint-group 引用，取第一个出现的——这是没打算特意处理的边界情况。
 4. **路由预览**：对每个虚拟模型打印 `EffectiveOrder()` 排出的尝试顺序，用本轮连通性测试的结果标注每个端点。**不查活实例的实时健康状态**——`vmr status` 才是那个职责，二者边界刻意分开：`diagnose` 回答"现在直连会发生什么"，`status` 回答"那个正在跑的 vmr 现在什么状态"。
 
 阶段 2/3 都以 `checkConcurrency=8` 的有界并发执行（每个检查写自己预分配的结果槽位，无锁）。诊断恰好是"怀疑某个 provider 有问题"时才会跑的工具，顺序执行下几个同时不可达的 provider 会把等待时间线性放大到分钟级——精确发生在最需要快速给出结论的场景。

@@ -32,7 +32,7 @@ func TestCondition_ImageRoutesAwayFromNonCapableHigherPriority(t *testing.T) {
 		"\n        capabilities: [text, tools, image]"))
 
 	resp, _ := chat(t, ts, imageReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("image request: status=%d ep=%s, want p2 (only image-capable endpoint)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	if u1.hits.Load() != 0 {
@@ -47,7 +47,7 @@ func TestCondition_NonImageRequestUsesNormalPriority(t *testing.T) {
 		"\n        capabilities: [text, tools, image]"))
 
 	resp, _ := chat(t, ts, simpleReq, nil) // no image
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p1/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/model-one" {
 		t.Fatalf("plain text request: status=%d ep=%s, want p1 (priority 1, condition doesn't apply)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }
@@ -59,7 +59,7 @@ func TestCondition_UndeclaredCapabilitiesIsUnconstrained(t *testing.T) {
 	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL, "", ""))
 
 	resp, _ := chat(t, ts, imageReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p1/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/model-one" {
 		t.Fatalf("status=%d ep=%s, want p1 (undeclared capabilities = unconstrained)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }
@@ -71,7 +71,7 @@ func TestCondition_ToolsRoutesAwayFromNonCapable(t *testing.T) {
 		"\n        capabilities: [text, tools]"))
 
 	resp, _ := chat(t, ts, toolsReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("tools request: status=%d ep=%s, want p2", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }
@@ -108,7 +108,7 @@ func TestCondition_ContextLengthSkipsTooSmallEndpoint(t *testing.T) {
 		"\n        max_context_tokens: 1000000"))
 
 	resp, _ := chat(t, ts, bigReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("status=%d ep=%s, want p2 (p1's declared context is too small for this request)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	if u1.hits.Load() != 0 {
@@ -121,7 +121,7 @@ func TestCondition_ContextLengthUnconstrainedByDefault(t *testing.T) {
 	ts := newRouterServer(t, contextLenYAML(u1.srv.URL, u2.srv.URL, "", ""))
 
 	resp, _ := chat(t, ts, bigReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p1/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/model-one" {
 		t.Fatalf("status=%d ep=%s, want p1 (undeclared max_context_tokens = unconstrained, priority wins)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }
@@ -142,7 +142,7 @@ func TestCondition_ContextLengthFallbackNeverEmptiesCandidates(t *testing.T) {
 		t.Fatalf("status=%d, want 200 — an overestimate must never empty an otherwise-eligible candidate set", resp.StatusCode)
 	}
 	// Priority order still applies within the fallback set.
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (priority still decides among the fallback candidates)", got)
 	}
 }

@@ -51,7 +51,7 @@ type Record struct {
 	// measurement", which conveniently excludes those rejects from averages.
 	TTFTMS   int64     `json:"ttft_ms,omitempty"`
 	Model    string    `json:"model"`    // virtual model ("" if rejected before parsing)
-	Protocol string    `json:"protocol"` // ingress protocol: openai | anthropic | openai-responses | ...
+	Protocol string    `json:"protocol"` // ingress protocol: openai-completions | anthropic-messages | openai-responses | ...
 	Stream   bool      `json:"stream"`
 	Outcome  string    `json:"outcome"` // ok | error | canceled
 	Client   Exchange  `json:"client"`
@@ -84,6 +84,29 @@ type Record struct {
 	// matched at all, or (vmr replay) the record wasn't produced by a live
 	// authenticated request.
 	ClientKeyTag string `json:"client_key_tag,omitempty"`
+}
+
+// UnmarshalJSON normalizes legacy protocol names when reading historical
+// audit records: pre-2026-08 logs wrote "openai"/"anthropic" where the
+// current enum is "openai-completions"/"anthropic-messages". This is the
+// one compatibility chokepoint — the analytics half (report/story/reqdetail/
+// ctxgraph) decodes into audit.Record, so normalizing here covers every
+// analytics read path. Write paths construct Record directly and are
+// unaffected.
+//
+// TODO(2026-10): transitional — remove once pre-rename logs have aged out.
+// See docs/KNOWN_ISSUES_sonnet-5.md.
+func (r *Record) UnmarshalJSON(data []byte) error {
+	type recordAlias Record // shed UnmarshalJSON to avoid infinite recursion
+	if err := json.Unmarshal(data, (*recordAlias)(r)); err != nil {
+		return err
+	}
+	r.Protocol = core.CanonicalProtocol(r.Protocol)
+	for i := range r.Attempts {
+		r.Attempts[i].Protocol = core.CanonicalProtocol(r.Attempts[i].Protocol)
+		r.Attempts[i].Endpoint = core.NormalizeEndpointLabel(r.Attempts[i].Endpoint)
+	}
+	return nil
 }
 
 // OutcomeFor decides a Record's Outcome from the client-facing HTTP status
@@ -137,7 +160,7 @@ type Exchange struct {
 // client received.
 type Attempt struct {
 	Endpoint string   `json:"endpoint"`           // protocol:provider:model, human-readable label (see Protocol/Provider/Model for the structured form)
-	Protocol string   `json:"protocol,omitempty"` // == the endpoint's adapter type (openai | anthropic | openai-responses | ...)
+	Protocol string   `json:"protocol,omitempty"` // == the endpoint's adapter type (openai-completions | anthropic-messages | openai-responses | ...)
 	Provider string   `json:"provider,omitempty"` // provider name as configured
 	Model    string   `json:"model,omitempty"`    // real upstream model name (as opposed to Record.Model, the virtual name)
 	URL      string   `json:"url"`

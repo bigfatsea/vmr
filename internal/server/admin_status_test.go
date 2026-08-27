@@ -58,12 +58,12 @@ func TestAdminStatusModelsShapeContract(t *testing.T) {
 	const yaml = `
 listen: 127.0.0.1:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1, anthropic: http://127.0.0.1:1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1, anthropic-messages: http://127.0.0.1:1}, api_key: k}
 models:
   a:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: anthropic, providers: [p1], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: anthropic-messages, providers: [p1], models: [m2]}
 `
 	models := adminStatusModels(t, yaml)
 
@@ -74,7 +74,7 @@ models:
 	if id, _ := models[0]["id"].(string); id != "a" {
 		t.Errorf("models[0].id = %v, want a", models[0]["id"])
 	}
-	if proto, _ := models[0]["protocol"].(string); proto != "anthropic" {
+	if proto, _ := models[0]["protocol"].(string); proto != "anthropic-messages" {
 		t.Errorf("models[0].protocol = %v, want anthropic (protocols sorted)", models[0]["protocol"])
 	}
 
@@ -143,13 +143,13 @@ func TestAdminStatusModelsAggregateValues(t *testing.T) {
 	const yaml = `
 listen: 127.0.0.1:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
 models:
   vm:
     capabilities: [text]
     max_context_tokens: 128000
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1], capabilities: [vision], max_context_tokens: 200000}
+      - {protocol: openai-completions, providers: [p1], models: [m1], capabilities: [vision], max_context_tokens: 200000}
 `
 	models := adminStatusModels(t, yaml)
 	if len(models) != 1 {

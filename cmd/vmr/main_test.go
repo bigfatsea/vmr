@@ -22,12 +22,12 @@ const minimalConfigYAML = `
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
 `
@@ -70,9 +70,9 @@ func TestCmdCheck_ConsistencyIssueFails(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: ""}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: ""}
 models:
-  m1: {endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]}
+  m1: {endpoints: [{protocol: openai-completions, providers: [p1], models: [real-model]}]}
 `)
 	var err error
 	out := captureStdout(t, func() {
@@ -149,10 +149,10 @@ func TestCmdCheck_SingleProxyLinePerProvider(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1, anthropic: https://example.com/anthropic}
+    base_url: {openai-completions: https://example.com/v1, anthropic-messages: https://example.com/anthropic}
     api_key: test-key
 models:
-  m1: {endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]}
+  m1: {endpoints: [{protocol: openai-completions, providers: [p1], models: [real-model]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if strings.Contains(out, "proxy(openai)") || strings.Contains(out, "proxy(anthropic)") {
@@ -179,10 +179,10 @@ func TestCmdCheck_ProxyURLRedacted(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://user:pass@127.0.0.1:7890
 providers:
-  - {name: proxied, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
-  - {name: direct, base_url: {openai: https://b.example/v1}, api_key: k}
+  - {name: proxied, base_url: {openai-completions: https://a.example/v1}, api_key: k, proxy: true}
+  - {name: direct, base_url: {openai-completions: https://b.example/v1}, api_key: k}
 models:
-  m1: {endpoints: [{protocol: openai, providers: [proxied], models: [m]}]}
+  m1: {endpoints: [{protocol: openai-completions, providers: [proxied], models: [m]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, checkLine(0, "https_proxy", "http://user:xxxxx@127.0.0.1:7890")) {
@@ -211,19 +211,19 @@ func TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
 models:
   m1:
     capabilities: [text, tools]
     max_context_tokens: 128000
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [with-extra]
         capabilities: [image]
         max_context_tokens: 512000
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [plain]
 `)
@@ -256,11 +256,11 @@ listen: 127.0.0.1:0
 image_downscale: 1024
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
 models:
-  plain: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
-  custom: {image_downscale: 256, endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  plain: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  custom: {image_downscale: 256, endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, checkLine(2, "image_downscale", "256px")) {
@@ -278,11 +278,11 @@ func TestCmdCheck_BlankLineBetweenModels(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
 models:
-  a: {endpoints: [{protocol: openai, providers: [p1], models: [m1]}]}
-  b: {endpoints: [{protocol: openai, providers: [p1], models: [m2]}]}
+  a: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m1]}]}
+  b: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m2]}]}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, "- p=0. p1/m1:\n\nb:\n") {
@@ -366,7 +366,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
-	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
 	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 func TestCmdReport_DetailsOffByDefault(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
-	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
 	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestCmdReport_DetailsOffByDefault(t *testing.T) {
 func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
-	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
 	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -494,13 +494,13 @@ max_concurrency: 8
 image_downscale: 512
 audit_retention_days: 30
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: key-aaaa}
-  - {name: p2, base_url: {openai: https://b.example/v1}, api_key: key-bbbb, proxy: false}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: key-aaaa}
+  - {name: p2, base_url: {openai-completions: https://b.example/v1}, api_key: key-bbbb, proxy: false}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [real-a], priority: 1}
-      - {protocol: openai, providers: [p2], models: [real-b], priority: 2}
+      - {protocol: openai-completions, providers: [p1], models: [real-a], priority: 1}
+      - {protocol: openai-completions, providers: [p2], models: [real-b], priority: 2}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -539,7 +539,7 @@ models:
 	}
 
 	// Providers section: base_url + proxy lines per provider.
-	if !strings.Contains(out, "p1:\n") || !strings.Contains(out, checkLine(2, "base_url(openai)", "https://a.example/v1")) {
+	if !strings.Contains(out, "p1:\n") || !strings.Contains(out, checkLine(2, "base_url(openai-completions)", "https://a.example/v1")) {
 		t.Errorf("output missing p1 provider block:\n%s", out)
 	}
 	if !strings.Contains(out, checkLine(2, "proxy", "direct")) {
@@ -548,7 +548,7 @@ models:
 
 	// Models section: endpoints in try order, same "- p=N. provider/model:"
 	// label printModels uses.
-	if !strings.Contains(out, "vm:\n") || !strings.Contains(out, "openai:\n") {
+	if !strings.Contains(out, "vm:\n") || !strings.Contains(out, "openai-completions:\n") {
 		t.Errorf("output missing model group:\n%s", out)
 	}
 	if !strings.Contains(out, "- p=1. p1/real-a:") || !strings.Contains(out, "- p=2. p2/real-b:") {
@@ -565,9 +565,9 @@ func TestLogConfigSummary_IssuesThreadThrough(t *testing.T) {
 	yaml := `
 listen: 0.0.0.0:8800
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -608,12 +608,12 @@ func TestLogConfigSummary_NameGroupsAcrossProtocols(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:8800
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1, anthropic: https://a.example/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1, anthropic-messages: https://a.example/v1}, api_key: k}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m-openai]}
-      - {protocol: anthropic, providers: [p1], models: [m-anthropic]}
+      - {protocol: openai-completions, providers: [p1], models: [m-openai]}
+      - {protocol: anthropic-messages, providers: [p1], models: [m-anthropic]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -637,7 +637,7 @@ models:
 		t.Fatalf("missing \"agent:\" model group:\n%s", out)
 	}
 	rest := out[i:]
-	if !strings.Contains(rest, "openai:") || !strings.Contains(rest, "anthropic:") {
+	if !strings.Contains(rest, "openai-completions:") || !strings.Contains(rest, "anthropic-messages:") {
 		t.Errorf("both protocol faces must nest under the same agent: block, got:\n%s", rest)
 	}
 	if !strings.Contains(rest, "p1/m-openai") || !strings.Contains(rest, "p1/m-anthropic") {
@@ -655,9 +655,9 @@ func TestProviderProxyEntries_Direct(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -677,9 +677,9 @@ func TestProviderProxyEntries_ProxyFalse(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: false}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k, proxy: false}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -696,9 +696,9 @@ func TestProviderProxyEntries_ProxyURL(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://user:pass@127.0.0.1:7890
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -733,11 +733,11 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 			"models": []map[string]any{
 				{
 					"id":       "vm",
-					"protocol": "openai",
+					"protocol": "openai-completions",
 					"endpoints": []map[string]any{
 						{
-							"endpoint":             "openai/p1/m",
-							"protocol":             "openai",
+							"endpoint":             "openai-completions/p1/m",
+							"protocol":             "openai-completions",
 							"priority":             1,
 							"consecutive_failures": 0,
 							"available":            true,
@@ -754,9 +754,9 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -769,10 +769,10 @@ models:
 	if !strings.Contains(got, "concurrency: 2/8") {
 		t.Errorf("output should show concurrency 2/8: %q", got)
 	}
-	if !strings.Contains(got, "vm [openai]") {
+	if !strings.Contains(got, "vm [openai-completions]") {
 		t.Errorf("output should show model name: %q", got)
 	}
-	if !strings.Contains(got, "openai/p1/m") {
+	if !strings.Contains(got, "openai-completions/p1/m") {
 		t.Errorf("output should show endpoint: %q", got)
 	}
 	if !strings.Contains(got, "ok") {
@@ -794,11 +794,11 @@ func TestCmdStatus_HalfOpenRendersDistinctFromOK(t *testing.T) {
 			"models": []map[string]any{
 				{
 					"id":       "vm",
-					"protocol": "openai",
+					"protocol": "openai-completions",
 					"endpoints": []map[string]any{
 						{
-							"endpoint":             "openai/p1/m",
-							"protocol":             "openai",
+							"endpoint":             "openai-completions/p1/m",
+							"protocol":             "openai-completions",
 							"priority":             1,
 							"consecutive_failures": 3,
 							"last_error":           "transient",
@@ -817,9 +817,9 @@ func TestCmdStatus_HalfOpenRendersDistinctFromOK(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -842,9 +842,9 @@ func TestCmdStatus_ServerNotRunning(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:1
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	if err := cmdStatus([]string{"-c", path}); err == nil {
@@ -877,9 +877,9 @@ func TestCmdStatus_WithIssues(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -917,9 +917,9 @@ listen: %s
 api_keys:
   - %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String(), expectedKey)
 
 	path := writeTempFile(t, "config.yaml", yaml)

@@ -309,11 +309,11 @@
       </p>
       <table class="info-table" id="info-table">
         <tr>
-          <td class="label">Base URL <span class="badge badge-primary">OpenAI</span></td>
+          <td class="label">Base URL <span class="badge badge-primary">OpenAI Completions</span></td>
           <td class="value" id="dyn-base-url-openai">{{BASE_URL_OPENAI}}</td>
         </tr>
         <tr>
-          <td class="label">Base URL <span class="badge badge-anthropic">Anthropic</span></td>
+          <td class="label">Base URL <span class="badge badge-anthropic">Anthropic Messages</span></td>
           <td class="value" id="dyn-base-url-anthropic">{{BASE_URL_ANTHROPIC}}</td>
         </tr>
         <tr>
@@ -358,7 +358,7 @@
 
     <!-- ===== Anthropic Protocol Agents ===== -->
     <h3 style="color:var(--purple); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>Anthropic Protocol</span>
+      <span>Anthropic Messages Protocol</span>
       <span class="badge badge-anthropic">anthropic-messages</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
@@ -371,7 +371,7 @@
       <div class="agent-head">
         <h3>Claude Code</h3>
         <div class="badges">
-          <span class="badge badge-anthropic">anthropic</span>
+          <span class="badge badge-anthropic">anthropic-messages</span>
           <span class="badge badge-success">env var</span>
         </div>
       </div>
@@ -399,7 +399,7 @@ claude --model <span class="string">claude</span></code></pre>
 
     <!-- ===== OpenAI Protocol Agents ===== -->
     <h3 style="color:var(--accent); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>OpenAI Protocol</span>
+      <span>OpenAI Completions Protocol</span>
       <span class="badge badge-primary">openai-completions</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
@@ -412,7 +412,7 @@ claude --model <span class="string">claude</span></code></pre>
       <div class="agent-head">
         <h3>Pi Agent</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">models.json</span>
         </div>
       </div>
@@ -454,7 +454,7 @@ claude --model <span class="string">claude</span></code></pre>
       <div class="agent-head">
         <h3>Codex CLI</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">env var</span>
         </div>
       </div>
@@ -484,7 +484,7 @@ codex --model <span class="string">coding</span></code></pre>
       <div class="agent-head">
         <h3>Aider</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">env var</span>
           <span class="badge badge-warning">config</span>
         </div>
@@ -520,7 +520,7 @@ aider
       <div class="agent-head">
         <h3>OpenCode</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">config</span>
         </div>
       </div>
@@ -560,7 +560,7 @@ aider
       <div class="agent-head">
         <h3>OpenClaw</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">env var</span>
           <span class="badge badge-warning">config</span>
         </div>
@@ -596,7 +596,7 @@ openclaw
       <div class="agent-head">
         <h3>WorkBuddy</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">config</span>
         </div>
       </div>
@@ -627,7 +627,7 @@ openclaw
       <div class="agent-head">
         <h3>Hermes</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">env var</span>
         </div>
       </div>
@@ -657,7 +657,7 @@ hermes</code></pre>
       <div class="agent-head">
         <h3>OpenDesign</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">config</span>
         </div>
       </div>
@@ -687,7 +687,7 @@ hermes</code></pre>
       <div class="agent-head">
         <h3>Continue.dev</h3>
         <div class="badges">
-          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">config</span>
         </div>
       </div>
@@ -724,7 +724,7 @@ hermes</code></pre>
       <span class="badge badge-orange">openai-responses</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      Agents using the newer OpenAI Responses API. Configure the same base URL as the OpenAI protocol,
+      Agents using the newer OpenAI Responses API. Configure the same base URL as the OpenAI Completions protocol,
       but use an <code>openai-responses</code>-protocol virtual model.
     </p>
 
@@ -776,16 +776,16 @@ cursor --model <span class="string">responses-model</span></code></pre>
           </tr>
         </thead>
         <tbody>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Claude Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">anthropic</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: ANTHROPIC_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Pi Agent</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseUrl, apiKey, models[].id</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Codex CLI</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: OPENAI_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Aider</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.aider.conf.yml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_base, api_key</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenCode</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseURL, apiKey, model ID</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenClaw</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">WorkBuddy</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.workbuddy/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Hermes</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: HERMES_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenDesign</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Continue.dev</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">apiBase, apiKey, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Claude Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">anthropic-messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: ANTHROPIC_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Pi Agent</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseUrl, apiKey, models[].id</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Codex CLI</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: OPENAI_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Aider</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.aider.conf.yml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_base, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenCode</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseURL, apiKey, model ID</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenClaw</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">WorkBuddy</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.workbuddy/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Hermes</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: HERMES_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenDesign</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Continue.dev</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">apiBase, apiKey, model</td></tr>
           <tr><td style="padding:8px 12px; border-bottom:0;">Cursor CLI</td><td style="padding:8px 12px; border-bottom:0;"><span class="badge badge-orange">responses</span></td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">env: CURSOR_API_BASE</td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">api_base, api_key, model</td></tr>
         </tbody>
       </table>
@@ -861,8 +861,8 @@ cursor --model <span class="string">responses-model</span></code></pre>
       // Models
       if (data.models && data.models.length > 0) {
         const modelSpans = data.models.map(m => {
-          const proto = m.protocol || 'openai';
-          const badgeClass = proto === 'anthropic' ? 'badge-anthropic' : 'badge-primary';
+          const proto = m.protocol || 'openai-completions';
+          const badgeClass = proto === 'anthropic-messages' ? 'badge-anthropic' : 'badge-primary';
           return `<span class="badge ${badgeClass}" style="margin:2px;">${esc(m.id)}</span>`;
         });
         dynModels.innerHTML = modelSpans.join(' ');

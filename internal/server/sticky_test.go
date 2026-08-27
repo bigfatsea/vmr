@@ -34,13 +34,13 @@ func TestSticky_PinsToLastSuccessfulEndpoint(t *testing.T) {
 	ts := newRouterServer(t, stickyYAML(u1.srv.URL, u2.srv.URL, ""))
 
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("setup: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 
 	u1.status.Store(200) // priority alone would now prefer p1 again
 	resp, _ = chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Errorf("endpoint=%s, want p2 (sticky should keep the same conversation on its last successful endpoint)", got)
 	}
 	if u1.hits.Load() != 1 {
@@ -58,7 +58,7 @@ func TestSticky_DifferentConversationNotPinned(t *testing.T) {
 	u1.status.Store(200)
 	otherReq := `{"model":"vm","messages":[{"role":"user","content":"totally different first message"}]}`
 	resp, _ := chat(t, ts, otherReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (a different conversation has no sticky entry; priority should win)", got)
 	}
 }
@@ -76,14 +76,14 @@ func TestSticky_DifferentSystemPromptSameFirstMessageNotPinned(t *testing.T) {
 
 	agentA := `{"model":"vm","messages":[{"role":"system","content":"you are Agent A"},{"role":"user","content":"hi"}]}`
 	resp, _ := chat(t, ts, agentA, nil)
-	if resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("setup (Agent A) did not land on p2 as expected")
 	}
 
 	u1.status.Store(200)
 	agentB := `{"model":"vm","messages":[{"role":"system","content":"you are Agent B"},{"role":"user","content":"hi"}]}`
 	resp, _ = chat(t, ts, agentB, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (Agent B has a different system prompt; must not inherit Agent A's sticky pointer just because the opening user line matches)", got)
 	}
 }
@@ -98,16 +98,16 @@ func TestSticky_TTLExpiry(t *testing.T) {
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [model-one]
         priority: 1
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p2]
         models: [model-two]
         priority: 2
@@ -120,7 +120,7 @@ models:
 	time.Sleep(350 * time.Millisecond) // past sticky_ttl
 
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (the sticky entry should have expired)", got)
 	}
 }
@@ -131,7 +131,7 @@ func TestSticky_FailoverMovesThePointer(t *testing.T) {
 	ts := newRouterServer(t, stickyYAML(u1.srv.URL, u2.srv.URL, ""))
 
 	resp, _ := chat(t, ts, simpleReq, nil) // p1 flagged -> p2 succeeds, sticky now points at p2
-	if resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("setup did not land on p2 as expected")
 	}
 
@@ -140,14 +140,14 @@ func TestSticky_FailoverMovesThePointer(t *testing.T) {
 	u2.status.Store(403)
 	u2.errBody.Store(`{"error":{"message":"flagged"}}`)
 	resp, _ = chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p1/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/model-one" {
 		t.Fatalf("expected failover from sticky p2 (now flagged) to p1: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 
 	// The sticky pointer should have moved to p1 — p2 recovering shouldn't matter now.
 	u2.status.Store(200)
 	resp, _ = chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (sticky pointer should have followed the failover success)", got)
 	}
 }
@@ -161,7 +161,7 @@ func TestSticky_DisabledMeansNoAffinity(t *testing.T) {
 
 	u1.status.Store(200)
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p1/model-one" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p1/model-one" {
 		t.Errorf("endpoint=%s, want p1 (sticky: false — priority should decide, unaffected by the earlier p2 success)", got)
 	}
 }

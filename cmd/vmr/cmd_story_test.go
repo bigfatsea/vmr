@@ -54,7 +54,7 @@ func storyMsg(role, content string) map[string]any {
 func storyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 	body := map[string]any{"model": "agent", "stream": true, "messages": msgs}
 	return audit.Record{
-		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: map[string][]string{}, Body: body},
 			Response: &audit.Message{Status: 200, Headers: map[string][]string{}, Body: respBody},

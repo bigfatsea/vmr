@@ -102,7 +102,7 @@ func TestAnthropicIngressFailoverAndHeaders(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic/a2/real-b" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages/a2/real-b" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -149,13 +149,13 @@ func TestCrossProtocolProviderRefRejectedAtLoad(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: oai, base_url: {openai: https://x.example/v1}, api_key: k}
-  - {name: anth, base_url: {anthropic: https://y.example/v1}, api_key: k}
+  - {name: oai, base_url: {openai-completions: https://x.example/v1}, api_key: k}
+  - {name: anth, base_url: {anthropic-messages: https://y.example/v1}, api_key: k}
 models:
   bad:
     endpoints:
-      - {protocol: openai, providers: [oai], models: [a]}
-      - {protocol: openai, providers: [anth], models: [b]}
+      - {protocol: openai-completions, providers: [oai], models: [a]}
+      - {protocol: openai-completions, providers: [anth], models: [b]}
 `
 	_, err := config.Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "no base_url for protocol") {
@@ -173,25 +173,25 @@ func TestSameModelNameReachableUnderBothProtocols(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: oai, base_url: {openai: %s}, api_key: k0}
-  - {name: anth, base_url: {anthropic: %s}, api_key: ka}
+  - {name: oai, base_url: {openai-completions: %s}, api_key: k0}
+  - {name: anth, base_url: {anthropic-messages: %s}, api_key: ka}
 models:
   coding:
     endpoints:
-      - {protocol: openai, providers: [oai], models: [model-one]}
-      - {protocol: anthropic, providers: [anth], models: [real-a]}
+      - {protocol: openai-completions, providers: [oai], models: [model-one]}
+      - {protocol: anthropic-messages, providers: [anth], models: [real-a]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 
 	resp, _ := chat(t, ts, `{"model":"coding","messages":[{"role":"user","content":"hi"}]}`, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/oai/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/oai/model-one" {
 		t.Errorf("openai-face coding: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	resp, body := messages(t, ts, `{"model":"coding","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, nil)
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
 		t.Errorf("anthropic-face coding: status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic/anth/real-a" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages/anth/real-a" {
 		t.Errorf("anthropic-face endpoint: %s", got)
 	}
 }
@@ -236,7 +236,7 @@ func TestModelsMergedShape(t *testing.T) {
 	if out.Object != "list" || out.HasMore == nil || *out.HasMore {
 		t.Errorf("merged shape: %+v", out)
 	}
-	if len(out.Data) != 2 || out.Data[0].ID != "vm-anth" || out.Data[0].Type != "model" || out.Data[0].Protocol != "anthropic" {
+	if len(out.Data) != 2 || out.Data[0].ID != "vm-anth" || out.Data[0].Type != "model" || out.Data[0].Protocol != "anthropic-messages" {
 		t.Errorf("data: %+v", out.Data)
 	}
 }
@@ -264,11 +264,11 @@ func TestConcurrencyGate(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 2
 providers:
-  - {name: p, base_url: {openai: %s}, api_key: k}
+  - {name: p, base_url: {openai-completions: %s}, api_key: k}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p], models: [m]}
+      - {protocol: openai-completions, providers: [p], models: [m]}
 `, slow.URL))
 
 	var wg sync.WaitGroup
@@ -308,10 +308,10 @@ func TestConcurrencyWaiterCanceled(t *testing.T) {
 listen: 127.0.0.1:0
 max_concurrency: 1
 providers:
-  - {name: p, base_url: {openai: %s}, api_key: k}
+  - {name: p, base_url: {openai-completions: %s}, api_key: k}
 models:
   vm:
-    endpoints: [{protocol: openai, providers: [p], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p], models: [m]}]
 `, slow.URL))
 
 	// Occupy the only slot.

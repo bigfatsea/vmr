@@ -27,23 +27,23 @@ func FuzzSessionFingerprint(f *testing.F) {
 		raw      string
 		protocol string
 	}{
-		{`{"messages":[{"role":"system","content":"sp"},{"role":"user","content":"hi"}]}`, "openai"},
-		{`{"messages":[{"role":"user","content":"hi"}]}`, "openai"},
-		{`{"messages":[]}`, "openai"},
-		{`{"system":"sp","messages":[{"role":"user","content":"hi"}]}`, "anthropic"},
-		{`{"messages":[{"role":"user","content":"hi"}]}`, "anthropic"},
+		{`{"messages":[{"role":"system","content":"sp"},{"role":"user","content":"hi"}]}`, "openai-completions"},
+		{`{"messages":[{"role":"user","content":"hi"}]}`, "openai-completions"},
+		{`{"messages":[]}`, "openai-completions"},
+		{`{"system":"sp","messages":[{"role":"user","content":"hi"}]}`, "anthropic-messages"},
+		{`{"messages":[{"role":"user","content":"hi"}]}`, "anthropic-messages"},
 		{`{"instructions":"sp","input":[{"role":"developer","content":"d"},{"role":"user","content":"hi"}]}`, "openai-responses"},
 		{`{"input":"hello"}`, "openai-responses"},
 		{`{"input":[{"type":"function_call","name":"f","arguments":"{}"}]}`, "openai-responses"},
-		{`not json at all`, "openai"},
-		{`null`, "anthropic"},
+		{`not json at all`, "openai-completions"},
+		{`null`, "anthropic-messages"},
 		{`[]`, "openai-responses"},
-		{``, "openai"},
-		{`{"messages":[{"role":"system" `, "openai"},           // truncated element
-		{`{"messages":[{"role""x","content":"y"}]}`, "openai"}, // missing colon after key (the shape that hung skipJSONValue)
-		{`{"messages":[1,2,{"role":"user"}]}`, "openai"},       // non-object elements before the real one
+		{``, "openai-completions"},
+		{`{"messages":[{"role":"system" `, "openai-completions"},           // truncated element
+		{`{"messages":[{"role""x","content":"y"}]}`, "openai-completions"}, // missing colon after key (the shape that hung skipJSONValue)
+		{`{"messages":[1,2,{"role":"user"}]}`, "openai-completions"},       // non-object elements before the real one
 		{`{"input":[{"role""x"}]}`, "openai-responses"},
-		{`{"messages":[{"role":"system","content":"a"},{"role":"system","content":"b"},{"role":"user","content":"c"}]}`, "openai"},
+		{`{"messages":[{"role":"system","content":"a"},{"role":"system","content":"b"},{"role":"user","content":"c"}]}`, "openai-completions"},
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s.raw), s.protocol)

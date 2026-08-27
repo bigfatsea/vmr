@@ -73,7 +73,7 @@ func TestP1b1_ToolResultMisinterpretation(t *testing.T) {
 	// Step 1: tool call read_file
 	// Step 2: request has tool_result "404 Not Found", reasoning claims "Successfully read config"
 	r1 := audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "load config")},
@@ -83,7 +83,7 @@ data: [DONE]`},
 		},
 	}
 	r2 := audit.Record{
-		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{
@@ -145,7 +145,7 @@ func TestP1b2_SemanticOscillation(t *testing.T) {
 	queries := []string{"fix bug", "how to fix bug", "resolve bug issue"}
 	for i, q := range queries {
 		recs = append(recs, audit.Record{
-			TS: at(i), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+			TS: at(i), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 			Client: audit.Exchange{
 				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 					"model": "agent", "messages": []any{msg("user", "search")},
@@ -192,7 +192,7 @@ func TestP1b3_GoalDrift(t *testing.T) {
 	var msgs []any
 	msgs = append(msgs, msg("user", "Fix auth login bug in router.go"))
 	recs = append(recs, audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": msgs,
@@ -205,7 +205,7 @@ data: [DONE]`},
 	for i := 1; i <= 8; i++ {
 		msgs = append(msgs, msg("user", "continue"))
 		recs = append(recs, audit.Record{
-			TS: at(i), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+			TS: at(i), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 			Client: audit.Exchange{
 				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 					"model": "agent", "messages": msgs,
@@ -318,7 +318,7 @@ func TestP1b5_PlanExecutionMisalignment(t *testing.T) {
 	ssePlanBody := "data: " + string(ssePlan) + "\ndata: [DONE]\n"
 
 	r1 := audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "fix bug")},
@@ -327,7 +327,7 @@ func TestP1b5_PlanExecutionMisalignment(t *testing.T) {
 		},
 	}
 	r2 := audit.Record{
-		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "fix bug"), msg("assistant", planText), msg("user", "proceed")},
@@ -384,7 +384,7 @@ func TestP1b5_PlanExecutionMisalignment_DynamicReplan(t *testing.T) {
 	}
 
 	r1 := audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "fix db timeout")},
@@ -393,7 +393,7 @@ func TestP1b5_PlanExecutionMisalignment_DynamicReplan(t *testing.T) {
 		},
 	}
 	r2 := audit.Record{
-		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "fix db timeout"), msg("assistant", plan1), msg("user", "change of plans")},
@@ -402,7 +402,7 @@ func TestP1b5_PlanExecutionMisalignment_DynamicReplan(t *testing.T) {
 		},
 	}
 	r3 := audit.Record{
-		TS: at(2), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(2), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{
@@ -469,7 +469,7 @@ func TestP1b5_PlanExecutionMisalignment_DynamicReplan(t *testing.T) {
 func TestP1b6_UnverifiedCompletionClaim(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
 	r1 := audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "modify code and ensure it works")},
@@ -509,7 +509,7 @@ data: [DONE]`},
 func TestComputeLLMFindings_EndToEndAndFailOpen(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
 	r1 := audit.Record{
-		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "test")},

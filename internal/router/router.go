@@ -54,7 +54,7 @@ func New(logger *log.Logger) *Router {
 }
 
 // Serve routes one chat request through the failover loop. protocol is the
-// ingress protocol ("openai", "anthropic", "openai-responses", ...); a model
+// ingress protocol ("openai-completions", "anthropic-messages", "openai-responses", ...); a model
 // bound to a different protocol is rejected — VMR never converts between
 // protocols. rec (nilable) collects the per-attempt audit trail.
 func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
@@ -607,15 +607,15 @@ func otherProtocolFor(s *Snapshot, protocol, name string) string {
 // internal/replay's reconstructed Client.Request.Path) shares one mapping
 // instead of each keeping its own copy that could drift as protocols are
 // added. Falls back to the Chat Completions path for any protocol string
-// this doesn't recognize (including "openai" itself) — a third+ protocol
-// that reuses this default without adding a case here would misroute, so
-// every registered protocol must have its own explicit case, not rely on
-// falling through.
+// this doesn't recognize (including "openai-completions" itself) — a third+
+// protocol that reuses this default without adding a case here would
+// misroute, so every registered protocol must have its own explicit case,
+// not rely on falling through.
 func IngressPath(protocol string) string {
 	switch protocol {
-	case "anthropic":
+	case core.ProtocolAnthropicMessages:
 		return "/v1/messages"
-	case "openai-responses":
+	case core.ProtocolOpenAIResponses:
 		return "/v1/responses"
 	default:
 		return "/v1/chat/completions"

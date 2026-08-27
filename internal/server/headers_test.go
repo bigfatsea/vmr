@@ -339,11 +339,11 @@ func TestHeaders_AnthropicVersionNotDuplicated(t *testing.T) {
 	ts := newRouterServer(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {anthropic: `+u.srv.URL+`}, api_key: k1}
+  - {name: p1, base_url: {anthropic-messages: `+u.srv.URL+`}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: anthropic, providers: [p1], models: [upstream-model]}
+      - {protocol: anthropic-messages, providers: [p1], models: [upstream-model]}
 `)
 
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader([]byte(`{"model":"vm"}`)))

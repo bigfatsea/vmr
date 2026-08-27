@@ -309,7 +309,7 @@ func TestHasImageMarker(t *testing.T) {
 func TestDownscaleDisabledIsNoop(t *testing.T) {
 	raw := solidJPEG(t, 2000, 1000)
 	body := openAIReq(t, dataURI("image/jpeg", raw))
-	got, images := Downscale(body, "openai", Options{MaxPx: 0})
+	got, images := Downscale(body, "openai-completions", Options{MaxPx: 0})
 	if &got[0] != &body[0] {
 		t.Error("maxPx<=0 must return the exact same slice, not a copy")
 	}
@@ -327,7 +327,7 @@ func TestDownscaleDisabledIsNoop(t *testing.T) {
 
 func TestDownscaleNoMarkerIsNoop(t *testing.T) {
 	body := []byte(`{"model":"coding","messages":[{"role":"user","content":"just text"}]}`)
-	got, images := Downscale(body, "openai", Options{MaxPx: 512})
+	got, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if &got[0] != &body[0] {
 		t.Error("a request with no image marker must return the exact same slice")
 	}
@@ -351,7 +351,7 @@ func TestDownscaleTextMentioningMarkerIsNotAnImage(t *testing.T) {
 	if !HasImageMarker(body) {
 		t.Fatal("test setup: body must trip the cheap presence marker for this test to be meaningful")
 	}
-	got, images := Downscale(body, "openai", Options{MaxPx: 512})
+	got, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if &got[0] != &body[0] {
 		t.Error("a request with no real image block must return the exact same slice")
 	}
@@ -362,7 +362,7 @@ func TestDownscaleTextMentioningMarkerIsNotAnImage(t *testing.T) {
 
 func TestOpenAIImageAboveThresholdIsResized(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	img, format := extractOpenAIImage(t, out)
 	b := img.Bounds()
 	if format != "jpeg" {
@@ -375,7 +375,7 @@ func TestOpenAIImageAboveThresholdIsResized(t *testing.T) {
 
 func TestOpenAIImageBelowThresholdUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 300, 200)))
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("an image already within the pixel cap must not be rewritten")
 	}
@@ -383,7 +383,7 @@ func TestOpenAIImageBelowThresholdUntouched(t *testing.T) {
 
 func TestOpenAIRemoteURLNotFetched(t *testing.T) {
 	body := openAIReq(t, "https://example.com/some-huge-photo.jpg")
-	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	out, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("remote image URLs must never be fetched or rewritten")
 	}
@@ -444,7 +444,7 @@ func TestResponsesFileIDImageCounted(t *testing.T) {
 
 func TestAnthropicImageAboveThresholdIsResizedAndFlattened(t *testing.T) {
 	body := anthropicReq(t, "image/png", transparentPNG(t, 1200, 1200))
-	out, _ := Downscale(body, "anthropic", Options{MaxPx: 512})
+	out, _ := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
 	img, format, mediaType := extractAnthropicImage(t, out)
 	b := img.Bounds()
 	if format != "jpeg" || mediaType != "image/jpeg" {
@@ -463,7 +463,7 @@ func TestAnthropicImageAboveThresholdIsResizedAndFlattened(t *testing.T) {
 
 func TestAnthropicImageBelowThresholdUntouched(t *testing.T) {
 	body := anthropicReq(t, "image/png", transparentPNG(t, 100, 100))
-	out, _ := Downscale(body, "anthropic", Options{MaxPx: 512})
+	out, _ := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("an image already within the pixel cap must not be rewritten")
 	}
@@ -488,7 +488,7 @@ func TestAnthropicNonBase64SourceUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, images := Downscale(body, "anthropic", Options{MaxPx: 512})
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
 	if len(images) != 1 || !images[0].Remote {
 		t.Errorf("images = %+v, want one Remote=true entry", images)
 	}
@@ -499,7 +499,7 @@ func TestAnthropicNonBase64SourceUntouched(t *testing.T) {
 
 func TestAnimatedGIFUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/gif", animatedGIF(t, 1000, 1000)))
-	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	out, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("animated GIFs must be left untouched, not collapsed to a still frame")
 	}
@@ -516,7 +516,7 @@ func TestAnimatedGIFUntouched(t *testing.T) {
 // avoid (a small-canvas, many-frame GIF is a real decompression-bomb vector).
 func TestSingleFrameGIFUntouched(t *testing.T) {
 	body := openAIReq(t, dataURI("image/gif", singleFrameGIF(t, 1000, 1000)))
-	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	out, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("single-frame GIFs must be left untouched too — see processImage's format==\"gif\" comment")
 	}
@@ -527,7 +527,7 @@ func TestSingleFrameGIFUntouched(t *testing.T) {
 
 func TestCorruptImageDataFailsOpen(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", []byte("not actually an image")))
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("corrupt image data must fail open (leave request unchanged), not error out")
 	}
@@ -545,7 +545,7 @@ func TestCorruptImageDataFailsOpen(t *testing.T) {
 // doesn't declare image support.
 func TestUndecodableImageStillCounted(t *testing.T) {
 	openaiBody := openAIReq(t, dataURI("image/heic", []byte("not a format Go's image package can decode")))
-	out, images := Downscale(openaiBody, "openai", Options{MaxPx: 512})
+	out, images := Downscale(openaiBody, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, openaiBody) {
 		t.Error("an undecodable image must still fail open (leave request unchanged)")
 	}
@@ -560,7 +560,7 @@ func TestUndecodableImageStillCounted(t *testing.T) {
 	}
 
 	anthropicBody := anthropicReq(t, "image/heic", []byte("not a format Go's image package can decode"))
-	_, anthropicImages := Downscale(anthropicBody, "anthropic", Options{MaxPx: 512})
+	_, anthropicImages := Downscale(anthropicBody, "anthropic-messages", Options{MaxPx: 512})
 	if len(anthropicImages) != 1 {
 		t.Fatalf("anthropic images = %+v, want exactly one entry", anthropicImages)
 	}
@@ -569,7 +569,7 @@ func TestUndecodableImageStillCounted(t *testing.T) {
 func TestMalformedRequestBodyFailsOpen(t *testing.T) {
 	// Has the marker substring but isn't shaped like a real chat request at all.
 	body := []byte(`{"image_url_but_not_json_object`)
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("malformed JSON must fail open and return the input unchanged")
 	}
@@ -604,7 +604,7 @@ func TestScaledSize(t *testing.T) {
 
 func TestNoImageBlocksIsNoop(t *testing.T) {
 	body := []byte(`{"model":"coding","messages":[{"role":"user","content":[{"type":"text","text":"hi image lovers"}]}]}`)
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("a marker false-positive with no actual image block must leave the body unchanged")
 	}
@@ -632,7 +632,7 @@ func TestCacheHitReusesStoredBytesInsteadOfReprocessing(t *testing.T) {
 	body := openAIReq(t, dataURI("image/jpeg", raw))
 	opts := Options{MaxPx: 512, CacheDir: dir, CacheTTLDays: 7}
 
-	out1, images1 := Downscale(body, "openai", opts)
+	out1, images1 := Downscale(body, "openai-completions", opts)
 	img1, _ := extractOpenAIImage(t, out1)
 	if b := img1.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
 		t.Fatalf("first pass not downscaled as expected: %dx%d", b.Dx(), b.Dy())
@@ -652,7 +652,7 @@ func TestCacheHitReusesStoredBytesInsteadOfReprocessing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out2, images2 := Downscale(body, "openai", opts)
+	out2, images2 := Downscale(body, "openai-completions", opts)
 	img2, _ := extractOpenAIImage(t, out2)
 	if b := img2.Bounds(); b.Dx() != 64 || b.Dy() != 64 {
 		t.Errorf("second pass did not reuse the (poisoned) cache entry: got %dx%d, want 64x64 — image was reprocessed instead of read from cache", b.Dx(), b.Dy())
@@ -687,7 +687,7 @@ func TestMultipleImagesMixedOutcomes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, images := Downscale(body, "openai", Options{MaxPx: 512})
+	_, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if len(images) != 3 {
 		t.Fatalf("images = %d, want 3", len(images))
 	}
@@ -714,8 +714,8 @@ func TestCacheKeyDependsOnMaxPx(t *testing.T) {
 	raw := solidJPEG(t, 2000, 1000)
 	body := openAIReq(t, dataURI("image/jpeg", raw))
 
-	out256, _ := Downscale(body, "openai", Options{MaxPx: 256, CacheDir: dir})
-	out512, _ := Downscale(body, "openai", Options{MaxPx: 512, CacheDir: dir})
+	out256, _ := Downscale(body, "openai-completions", Options{MaxPx: 256, CacheDir: dir})
+	out512, _ := Downscale(body, "openai-completions", Options{MaxPx: 512, CacheDir: dir})
 
 	img256, _ := extractOpenAIImage(t, out256)
 	img512, _ := extractOpenAIImage(t, out512)
@@ -876,7 +876,7 @@ func TestCacheMissWithoutCacheDirNeverTouchesDisk(t *testing.T) {
 	// opts.CacheDir == "" must disable caching entirely, not just no-op
 	// lookups: no directory should be created as a side effect.
 	body := openAIReq(t, dataURI("image/jpeg", solidJPEG(t, 2000, 1000)))
-	out, _ := Downscale(body, "openai", Options{MaxPx: 512})
+	out, _ := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	img, _ := extractOpenAIImage(t, out)
 	if b := img.Bounds(); b.Dx() != 512 || b.Dy() != 256 {
 		t.Errorf("downscale without a cache dir should still work: got %dx%d", b.Dx(), b.Dy())
@@ -899,7 +899,7 @@ func init() {
 // (logging, not behavior).
 func TestDownscalePanicRecoveredFailsOpen(t *testing.T) {
 	body := openAIReq(t, dataURI("image/png", []byte("PANICFMT-then-garbage")))
-	out, images := Downscale(body, "openai", Options{MaxPx: 512})
+	out, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
 	if !bytes.Equal(out, body) {
 		t.Error("panic path must return the original bytes unmodified")
 	}

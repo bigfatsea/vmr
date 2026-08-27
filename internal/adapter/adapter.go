@@ -19,8 +19,8 @@ import (
 // response bodies flow back untouched (the router's normalizer handles the
 // few guarded quirk repairs; see internal/respnorm).
 type Adapter interface {
-	// Protocol names the ingress protocol this adapter speaks ("openai",
-	// "anthropic", "openai-responses"). Each endpoint-group under a virtual
+	// Protocol names the ingress protocol this adapter speaks
+	// ("openai-completions", "anthropic-messages", "openai-responses"). Each endpoint-group under a virtual
 	// model belongs to exactly one protocol; a name can mix several groups
 	// of different protocols to be reachable from more than one ingress.
 	Protocol() string

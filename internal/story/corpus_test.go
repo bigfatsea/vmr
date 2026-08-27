@@ -301,10 +301,10 @@ func TestComputeCorpusStats(t *testing.T) {
 	// since ComputeMetrics needs a fuller Step fixture than this field
 	// alone) — this only pins that the two stay wired together.
 	t.Run("protocol share is populated on real journeys", func(t *testing.T) {
-		journeys := []*Journey{buildTestJourney(t, 2, false)} // mkRec sets Protocol: "openai"
+		journeys := []*Journey{buildTestJourney(t, 2, false)} // mkRec sets Protocol: "openai-completions"
 		stats := ComputeCorpusStats(journeys)
-		if got, want := stats.ProtocolShare["openai"], 1.0; math.Abs(got-want) > 1e-9 {
-			t.Errorf("ProtocolShare[openai] = %v, want %v", got, want)
+		if got, want := stats.ProtocolShare["openai-completions"], 1.0; math.Abs(got-want) > 1e-9 {
+			t.Errorf("ProtocolShare[openai-completions] = %v, want %v", got, want)
 		}
 	})
 }
@@ -323,15 +323,15 @@ func TestProtocolShare(t *testing.T) {
 
 	t.Run("tallied across every step's manifest", func(t *testing.T) {
 		journeys := []*Journey{
-			mkJourney("openai", "openai", "openai"),
-			mkJourney("anthropic"),
+			mkJourney("openai-completions", "openai-completions", "openai-completions"),
+			mkJourney("anthropic-messages"),
 		}
 		share := protocolShare(journeys)
-		if got, want := share["openai"], 0.75; math.Abs(got-want) > 1e-9 {
-			t.Errorf("share[openai] = %v, want %v (3/4 steps)", got, want)
+		if got, want := share["openai-completions"], 0.75; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[openai-completions] = %v, want %v (3/4 steps)", got, want)
 		}
-		if got, want := share["anthropic"], 0.25; math.Abs(got-want) > 1e-9 {
-			t.Errorf("share[anthropic] = %v, want %v (1/4 steps)", got, want)
+		if got, want := share["anthropic-messages"], 0.25; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[anthropic-messages] = %v, want %v (1/4 steps)", got, want)
 		}
 	})
 
@@ -343,10 +343,10 @@ func TestProtocolShare(t *testing.T) {
 	})
 
 	t.Run("skips steps with a nil manifest", func(t *testing.T) {
-		j := &Journey{Tasks: []*Task{{Steps: []*Step{{Manifest: nil}, {Manifest: &ctxgraph.Manifest{Protocol: "openai"}}}}}}
+		j := &Journey{Tasks: []*Task{{Steps: []*Step{{Manifest: nil}, {Manifest: &ctxgraph.Manifest{Protocol: "openai-completions"}}}}}}
 		share := protocolShare([]*Journey{j})
-		if got, want := share["openai"], 1.0; math.Abs(got-want) > 1e-9 {
-			t.Errorf("share[openai] = %v, want %v (nil-manifest step excluded from the denominator)", got, want)
+		if got, want := share["openai-completions"], 1.0; math.Abs(got-want) > 1e-9 {
+			t.Errorf("share[openai-completions] = %v, want %v (nil-manifest step excluded from the denominator)", got, want)
 		}
 	})
 }
@@ -458,7 +458,7 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 	// anthropicOnlyCoverage's own doc comment for how they were found:
 	// isErrorMarker, not just ToolResult.IsError directly).
 	t.Run("anthropic coverage note fires on any non-100% Anthropic share", func(t *testing.T) {
-		mostlyOpenAI := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai": 0.995, "anthropic": 0.005}}
+		mostlyOpenAI := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.995, "anthropic-messages": 0.005}}
 		md := RenderCorpusMarkdown(mostlyOpenAI, i18n.EN)
 		for _, code := range []string{
 			string(FindingUnadaptedRetry), string(FindingUnverifiedSuccess), string(MetricErrorRecoveryCount),
@@ -473,13 +473,13 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		// a slice the disclosed signals are blind on — this is the exact
 		// case the old 1%-threshold cliff (at 1.2% Anthropic) silently
 		// suppressed.
-		mostlyAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai": 0.012, "anthropic": 0.988}}
+		mostlyAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.012, "anthropic-messages": 0.988}}
 		md2 := RenderCorpusMarkdown(mostlyAnthropic, i18n.EN)
 		if !strings.Contains(md2, string(FindingUnadaptedRetry)) {
 			t.Errorf("coverage note should still fire at 98.8%% Anthropic (not literally 100%%):\n%s", md2)
 		}
 
-		pureAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"anthropic": 1.0}}
+		pureAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"anthropic-messages": 1.0}}
 		md3 := RenderCorpusMarkdown(pureAnthropic, i18n.EN)
 		if strings.Contains(md3, string(FindingUnadaptedRetry)) {
 			t.Errorf("coverage note should not fire on a 100%% Anthropic corpus (nothing is blind):\n%s", md3)

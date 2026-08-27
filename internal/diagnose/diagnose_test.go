@@ -80,15 +80,15 @@ func TestEnvCheck_DNSFailure(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: "https://this-host-does-not-exist.invalid"}, api_key: k}
+  - {name: p1, base_url: {openai-completions: "https://this-host-does-not-exist.invalid"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
+	r := envCheck(context.Background(), cfg, "openai-completions", "p1", p1)
 	if r.Status != StatusFail {
 		t.Errorf("status = %s, want fail", r.Status)
 	}
@@ -107,15 +107,15 @@ func TestEnvCheck_UntrustedTLSFails(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
+	r := envCheck(context.Background(), cfg, "openai-completions", "p1", p1)
 	if r.Status != StatusFail || !strings.Contains(r.Detail, "tls:FAIL") {
 		t.Errorf("result = %+v, want fail with tls:FAIL", r)
 	}
@@ -127,15 +127,15 @@ func TestEnvCheck_EmptyAPIKeyWarns(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: ""}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
+	r := envCheck(context.Background(), cfg, "openai-completions", "p1", p1)
 	if r.Status != StatusWarn || !strings.Contains(r.Detail, "api_key:EMPTY") {
 		t.Errorf("result = %+v, want warn with api_key:EMPTY", r)
 	}
@@ -164,15 +164,15 @@ func TestEnvCheck_ProxyReachability(t *testing.T) {
 listen: 127.0.0.1:0
 http_proxy: "http://%s"
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k, proxy: true}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, openProxy.Addr().String(), upstream.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
+	r := envCheck(context.Background(), cfg, "openai-completions", "p1", p1)
 	if !strings.Contains(r.Detail, "proxy:yes") {
 		t.Errorf("detail = %q, want proxy:yes (this provider is configured to go through a proxy)", r.Detail)
 	}
@@ -206,15 +206,15 @@ func TestEnvCheck_ProxiedProviderSkipsDirectDNS(t *testing.T) {
 listen: 127.0.0.1:0
 http_proxy: "http://%s"
 providers:
-  - {name: p1, base_url: {openai: "http://this-host-does-not-exist.invalid"}, api_key: k, proxy: true}
+  - {name: p1, base_url: {openai-completions: "http://this-host-does-not-exist.invalid"}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, openProxy.Addr().String())))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	r := envCheck(context.Background(), cfg, "openai", "p1", p1)
+	r := envCheck(context.Background(), cfg, "openai-completions", "p1", p1)
 	if r.Status != StatusOK {
 		t.Errorf("status = %s, want ok (a proxy-only-reachable host must not fail on a direct DNS check it never needs); detail=%q", r.Status, r.Detail)
 	}
@@ -248,14 +248,14 @@ func TestTestEndpoint_StatusClassification(t *testing.T) {
 			cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			ep := mkEndpoint(cfg, "openai", "p1", "m")
+			ep := mkEndpoint(cfg, "openai-completions", "p1", "m")
 			r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 			if r.Status != tc.wantStatus {
 				t.Errorf("status = %s, want %s (detail=%q)", r.Status, tc.wantStatus, r.Detail)
@@ -295,14 +295,14 @@ func TestTestEndpoint_EchoVerification(t *testing.T) {
 			cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			ep := mkEndpoint(cfg, "openai", "p1", "m")
+			ep := mkEndpoint(cfg, "openai-completions", "p1", "m")
 			r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 			if r.Status != tc.wantStatus {
 				t.Errorf("status = %s, want %s (detail=%q)", r.Status, tc.wantStatus, r.Detail)
@@ -323,14 +323,14 @@ func TestTestEndpoint_NetworkError(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: "http://%s"}, api_key: k}
+  - {name: p1, base_url: {openai-completions: "http://%s"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, addr)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := mkEndpoint(cfg, "openai", "p1", "m")
+	ep := mkEndpoint(cfg, "openai-completions", "p1", "m")
 	r := testEndpoint(context.Background(), cfg, ep, 2*time.Second)
 	if r.Status != StatusFail || !strings.Contains(r.Detail, "network error") {
 		t.Errorf("result = %+v, want fail with network error", r)
@@ -389,14 +389,14 @@ func TestTestEndpoint_OpenAIDeveloperRole_FailsWithoutRoleMap(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := mkEndpoint(cfg, "openai", "p1", "m") // no RoleMap set
+	ep := mkEndpoint(cfg, "openai-completions", "p1", "m") // no RoleMap set
 	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 	if r.Status != StatusFail {
 		t.Fatalf("status = %s, want fail (detail=%q)", r.Status, r.Detail)
@@ -417,14 +417,14 @@ func TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m], role_map: {developer: system}}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m], role_map: {developer: system}}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := mkEndpoint(cfg, "openai", "p1", "m")
+	ep := mkEndpoint(cfg, "openai-completions", "p1", "m")
 	ep.RoleMap = map[string]string{"developer": "system"}
 	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 	if r.Status != StatusOK {
@@ -443,14 +443,14 @@ func TestTestEndpoint_AnthropicStillProbesWithUser(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {anthropic: %q}, api_key: k}
+  - {name: p1, base_url: {anthropic-messages: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: anthropic, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: anthropic-messages, providers: [p1], models: [m]}]}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := mkEndpoint(cfg, "anthropic", "p1", "m")
+	ep := mkEndpoint(cfg, "anthropic-messages", "p1", "m")
 	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 	if r.Status != StatusOK {
 		t.Fatalf("status = %s, want ok (detail=%q) — anthropic endpoints must never be probed with role \"developer\"", r.Status, r.Detail)
@@ -552,10 +552,10 @@ func TestRun_DeveloperRoleIsPlainConnectivityFailure(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q, anthropic: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q, anthropic-messages: %q}, api_key: k}
 models:
-  vm-openai: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
-  vm-anthropic: {endpoints: [{protocol: anthropic, providers: [p1], models: [m]}]}
+  vm-openai: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm-anthropic: {endpoints: [{protocol: anthropic-messages, providers: [p1], models: [m]}]}
 `, ts.URL, ts.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -568,10 +568,10 @@ models:
 		if r.Phase != "connect" {
 			continue
 		}
-		if strings.HasPrefix(r.Target, "openai/") {
+		if strings.HasPrefix(r.Target, "openai-completions/") {
 			connOpenAI = r
 		}
-		if strings.HasPrefix(r.Target, "anthropic/") {
+		if strings.HasPrefix(r.Target, "anthropic-messages/") {
 			connAnthropic = r
 		}
 		if r.Phase == "role" {
@@ -624,13 +624,13 @@ func TestRun_FullReport(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: good, base_url: {openai: %q}, api_key: k1}
-  - {name: bad, base_url: {openai: %q}, api_key: k2}
+  - {name: good, base_url: {openai-completions: %q}, api_key: k1}
+  - {name: bad, base_url: {openai-completions: %q}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [bad], models: [m], priority: 0}
-      - {protocol: openai, providers: [good], models: [m], priority: 1}
+      - {protocol: openai-completions, providers: [bad], models: [m], priority: 0}
+      - {protocol: openai-completions, providers: [good], models: [m], priority: 1}
 `, goodUp.URL, badUp.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -654,9 +654,9 @@ models:
 			if !strings.Contains(r.Detail, "virtual model(s)") {
 				t.Errorf("config detail = %q, want it to say \"virtual model(s)\"", r.Detail)
 			}
-		case r.Phase == "env" && r.Target == "openai/good":
+		case r.Phase == "env" && r.Target == "openai-completions/good":
 			haveEnvGood = true
-		case r.Phase == "env" && r.Target == "openai/bad":
+		case r.Phase == "env" && r.Target == "openai-completions/bad":
 			haveEnvBad = true
 		case r.Phase == "connect" && strings.Contains(r.Target, "/good/"):
 			haveConnGood = true
@@ -685,8 +685,8 @@ models:
 	if !strings.Contains(routeEntries[0].Target, "p=0. bad/m") {
 		t.Errorf("first route entry = %+v, want priority-0 (bad) endpoint first", routeEntries[0])
 	}
-	if routeEntries[0].Group != "vm [openai]" || routeEntries[1].Group != "vm [openai]" {
-		t.Errorf("route entries should share Group %q: got %q, %q", "vm [openai]", routeEntries[0].Group, routeEntries[1].Group)
+	if routeEntries[0].Group != "vm [openai-completions]" || routeEntries[1].Group != "vm [openai-completions]" {
+		t.Errorf("route entries should share Group %q: got %q, %q", "vm [openai-completions]", routeEntries[0].Group, routeEntries[1].Group)
 	}
 	if routeEntries[0].Status != StatusFail {
 		t.Errorf("route entry for the failing endpoint = %+v, want fail", routeEntries[0])
@@ -721,11 +721,11 @@ func TestRun_ConnectivityResultsSortedByProviderThenModel(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: zulu, base_url: {openai: %[1]q}, api_key: k1}
-  - {name: alpha, base_url: {openai: %[1]q}, api_key: k2}
+  - {name: zulu, base_url: {openai-completions: %[1]q}, api_key: k1}
+  - {name: alpha, base_url: {openai-completions: %[1]q}, api_key: k2}
 models:
-  vm-a: {endpoints: [{protocol: openai, providers: [zulu], models: [m1]}, {protocol: openai, providers: [alpha], models: [m2]}]}
-  vm-z: {endpoints: [{protocol: openai, providers: [alpha], models: [m1]}]}
+  vm-a: {endpoints: [{protocol: openai-completions, providers: [zulu], models: [m1]}, {protocol: openai-completions, providers: [alpha], models: [m2]}]}
+  vm-z: {endpoints: [{protocol: openai-completions, providers: [alpha], models: [m1]}]}
 `, up.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -739,7 +739,7 @@ models:
 		}
 	}
 	got := strings.Join(targets, ",")
-	want := "openai/alpha/m1,openai/alpha/m2,openai/zulu/m1"
+	want := "openai-completions/alpha/m1,openai-completions/alpha/m2,openai-completions/zulu/m1"
 	if got != want {
 		t.Errorf("connect targets = %q, want %q (provider-sorted, same provider's endpoints adjacent)", got, want)
 	}
@@ -754,10 +754,10 @@ func TestRun_MultiProviderEntry_TestsEveryNamedProvider(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %[1]q}, api_key: k1}
-  - {name: p2, base_url: {openai: %[1]q}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %[1]q}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %[1]q}, api_key: k2}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1, p2], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1, p2], models: [m]}]}
 `, up.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -771,7 +771,7 @@ models:
 		}
 	}
 	got := strings.Join(targets, ",")
-	want := "openai/p1/m,openai/p2/m"
+	want := "openai-completions/p1/m,openai-completions/p2/m"
 	if got != want {
 		t.Errorf("connect targets = %q, want %q (both providers on the shared entry must be tested)", got, want)
 	}
@@ -799,8 +799,8 @@ func TestRun_ChecksRunConcurrently(t *testing.T) {
 	var providers strings.Builder
 	var models strings.Builder
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(&providers, "  - {name: p%d, base_url: {openai: %q}, api_key: k}\n", i, slow.URL)
-		fmt.Fprintf(&models, "  vm%d: {endpoints: [{protocol: openai, providers: [p%d], models: [m]}]}\n", i, i)
+		fmt.Fprintf(&providers, "  - {name: p%d, base_url: {openai-completions: %q}, api_key: k}\n", i, slow.URL)
+		fmt.Fprintf(&models, "  vm%d: {endpoints: [{protocol: openai-completions, providers: [p%d], models: [m]}]}\n", i, i)
 	}
 	cfgPath := writeConfig(t, fmt.Sprintf("listen: 127.0.0.1:0\nproviders:\n%s\nmodels:\n%s", providers.String(), models.String()))
 
@@ -824,9 +824,9 @@ func TestRun_NoTestRoutingSkipsConnectivity(t *testing.T) {
 	cfgPath := writeConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: k}
+  - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: false})
 	if err != nil {
@@ -862,9 +862,9 @@ func TestRun_ConsistencyIssuesSkipEnvAndConnect(t *testing.T) {
 	cfgPath := writeConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: ""}
+  - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
 	if err != nil {
@@ -907,9 +907,9 @@ func TestRun_WarningOnlyConsistencyIssueDoesNotSkipEnvAndConnect(t *testing.T) {
 	cfgPath := writeConfig(t, `
 listen: 0.0.0.0:0
 providers:
-  - {name: p1, base_url: {openai: "http://127.0.0.1:1/unreachable"}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: k1}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
 	if err != nil {
@@ -981,11 +981,11 @@ func TestFormatTable_GroupedFixedWidth(t *testing.T) {
 	ranAt := time.Date(2026, 7, 19, 10, 42, 7, 0, time.UTC)
 	rep := &Report{RanAt: ranAt, Results: []Result{
 		{Phase: "config", Target: "config.yaml", Status: StatusOK, Detail: "1 provider(s), 1 model(s)"},
-		{Phase: "env", Target: "openai/short", Status: StatusOK, Detail: "dns:ok api_key:set"},
-		{Phase: "env", Target: "openai/a-much-longer-name", Status: StatusFail, Detail: "dns:FAIL"},
-		{Phase: "route", Group: "agent [openai]", Target: "1. p1/m1", Status: StatusOK},
-		{Phase: "route", Group: "agent [openai]", Target: "2. p2/a-longer-model-name", Status: StatusFail, Detail: "connectivity test: boom"},
-		{Phase: "route", Group: "coding [openai]", Target: "1. p3/m3", Status: StatusOK},
+		{Phase: "env", Target: "openai-completions/short", Status: StatusOK, Detail: "dns:ok api_key:set"},
+		{Phase: "env", Target: "openai-completions/a-much-longer-name", Status: StatusFail, Detail: "dns:FAIL"},
+		{Phase: "route", Group: "agent [openai-completions]", Target: "1. p1/m1", Status: StatusOK},
+		{Phase: "route", Group: "agent [openai-completions]", Target: "2. p2/a-longer-model-name", Status: StatusFail, Detail: "connectivity test: boom"},
+		{Phase: "route", Group: "coding [openai-completions]", Target: "1. p3/m3", Status: StatusOK},
 	}}
 	table := FormatTable(rep)
 	lines := strings.Split(strings.TrimRight(table, "\n"), "\n")
@@ -1008,26 +1008,26 @@ func TestFormatTable_GroupedFixedWidth(t *testing.T) {
 	}
 
 	// Both env rows must align: same target-column width within the
-	// section, computed from "openai/a-much-longer-name" (25 chars).
+	// section, computed from "openai-completions/a-much-longer-name" (36 chars).
 	envShort := lines[8]
 	envLong := lines[9]
-	if envShort != "  openai/short               ok    dns:ok api_key:set" {
+	if envShort != "  openai-completions/short               ok    dns:ok api_key:set" {
 		t.Errorf("env short row not padded to the section's longest target: %q", envShort)
 	}
-	if envLong != "  openai/a-much-longer-name  fail  dns:FAIL" {
+	if envLong != "  openai-completions/a-much-longer-name  fail  dns:FAIL" {
 		t.Errorf("env long row: %q", envLong)
 	}
 
-	if !strings.Contains(table, "\n\nRouting\n  agent [openai]\n") {
+	if !strings.Contains(table, "\n\nRouting\n  agent [openai-completions]\n") {
 		t.Errorf("route section must open with a blank line, the phase title, then the first Group header: %q", table)
 	}
 	if !strings.Contains(table, "    1. p1/m1") || !strings.Contains(table, "    2. p2/a-longer-model-name") {
 		t.Errorf("route rows under a Group must be indented one level deeper than ungrouped rows: %q", table)
 	}
-	if !strings.Contains(table, "  coding [openai]\n    1. p3/m3") {
+	if !strings.Contains(table, "  coding [openai-completions]\n    1. p3/m3") {
 		t.Errorf("a Group change must print a new sub-header: %q", table)
 	}
-	if strings.Count(table, "agent [openai]") != 1 {
+	if strings.Count(table, "agent [openai-completions]") != 1 {
 		t.Errorf("a Group header must print once, not once per row: %q", table)
 	}
 	if !strings.HasSuffix(table, "Summary: 4 ok, 0 warn, 2 fail (2026-07-19 15:42:07)\n") {
@@ -1045,9 +1045,9 @@ func TestRun_ProgressReportsPerCheck(t *testing.T) {
 	cfgPath := writeConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k1}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, up.URL))
 
 	var progress strings.Builder
@@ -1076,13 +1076,13 @@ models:
 	if !strings.Contains(out, "Environment: checking 1 provider(s)") {
 		t.Errorf("missing environment phase header: %q", out)
 	}
-	if !strings.Contains(out, "  Done  openai/p1\n") {
+	if !strings.Contains(out, "  Done  openai-completions/p1\n") {
 		t.Errorf("a successful per-check progress line must read Done, not ok: %q", out)
 	}
 	if !strings.Contains(out, "Connectivity: probing 1 endpoint(s)") {
 		t.Errorf("missing connectivity phase header: %q", out)
 	}
-	if !strings.Contains(out, "  Done  openai/p1/m\n") {
+	if !strings.Contains(out, "  Done  openai-completions/p1/m\n") {
 		t.Errorf("missing per-check connectivity progress line: %q", out)
 	}
 

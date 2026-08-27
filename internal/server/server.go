@@ -41,9 +41,9 @@ func New(rt *router.Router, auditLog *audit.Logger) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/chat/completions", s.chatHandler("openai"))
-	mux.HandleFunc("POST /v1/messages", s.chatHandler("anthropic"))
-	mux.HandleFunc("POST /v1/responses", s.chatHandler("openai-responses"))
+	mux.HandleFunc("POST /v1/chat/completions", s.chatHandler(core.ProtocolOpenAICompletions))
+	mux.HandleFunc("POST /v1/messages", s.chatHandler(core.ProtocolAnthropicMessages))
+	mux.HandleFunc("POST /v1/responses", s.chatHandler(core.ProtocolOpenAIResponses))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
@@ -332,8 +332,8 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 		Protocol string `json:"vmr_protocol"`
 	}
 	// A virtual model name can be registered under more than one ingress
-	// protocol at once (one openai-protocol endpoint group and one
-	// anthropic-protocol one sharing the same name, see config's
+	// protocol at once (one openai-completions endpoint group and one
+	// anthropic-messages one sharing the same name, see config's
 	// VirtualModel doc comment) — from a client's perspective that's still
 	// one addressable model (it always calls it by the one name it was
 	// configured with), so the id must appear exactly once here, not once

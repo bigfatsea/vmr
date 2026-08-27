@@ -23,11 +23,11 @@ import (
 const instanceYAML = `
 listen: 127.0.0.1:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `
 
 type configSubBlock struct {
@@ -182,7 +182,7 @@ func TestStatusInstanceBaseURLs(t *testing.T) {
 	resp.Body.Close()
 	want := "http://" + ts.Listener.Addr().String() + "/v1/"
 	baseURLs := fetchBaseURLs(body)
-	for _, proto := range []string{"openai", "anthropic", "openai-responses"} {
+	for _, proto := range []string{"openai-completions", "anthropic-messages", "openai-responses"} {
 		if got := baseURLs[proto]; got != want {
 			t.Errorf("base_urls[%s] = %q, want %q", proto, got, want)
 		}
@@ -193,7 +193,7 @@ func TestStatusInstanceBaseURLs(t *testing.T) {
 	req.Host = "localhost:8800"
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
-	if got := fetchBaseURLs(w.Body.Bytes())["openai"]; got != "http://localhost:8800/v1/" {
+	if got := fetchBaseURLs(w.Body.Bytes())["openai-completions"]; got != "http://localhost:8800/v1/" {
 		t.Errorf("base_urls[openai] = %q, want http://localhost:8800/v1/", got)
 	}
 
@@ -207,7 +207,7 @@ func TestStatusInstanceBaseURLs(t *testing.T) {
 	tlsBody, _ := io.ReadAll(tlsResp.Body)
 	tlsResp.Body.Close()
 	wantTLS := "https://" + tlsSrv.Listener.Addr().String() + "/v1/"
-	if got := fetchBaseURLs(tlsBody)["openai"]; got != wantTLS {
+	if got := fetchBaseURLs(tlsBody)["openai-completions"]; got != wantTLS {
 		t.Errorf("base_urls[openai] over TLS = %q, want %q", got, wantTLS)
 	}
 }
@@ -253,11 +253,11 @@ listen: 0.0.0.0:18800
 api_keys:
   - secret-token-12345678
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `
 	cfgAuthed, err := config.Parse([]byte(authedYAML))
 	if err != nil {
@@ -325,11 +325,11 @@ func TestStatusIssuesBlock(t *testing.T) {
 	exposedYAML := `
 listen: 0.0.0.0:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(exposedYAML))
 	if err != nil {
@@ -371,11 +371,11 @@ func TestStatusNoIssuesBlock(t *testing.T) {
 	cleanYAML := `
 listen: 127.0.0.1:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(cleanYAML))
 	if err != nil {
@@ -496,12 +496,12 @@ func TestStatus_ImageCacheEnabled_Semantics(t *testing.T) {
 	const perModelYAML = `
 listen: 127.0.0.1:18800
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
 models:
   vm:
     image_downscale: 256
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m]}
+      - {protocol: openai-completions, providers: [p1], models: [m]}
 `
 	cfg, err := config.Parse([]byte(perModelYAML))
 	if err != nil {

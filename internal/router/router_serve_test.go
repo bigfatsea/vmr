@@ -93,7 +93,7 @@ func newMockUpstream(t *testing.T, status int, body string) *mockUpstream {
 func serveReq(rt *Router, model string, body []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai", nil)
+	rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", nil)
 	return w
 }
 
@@ -107,15 +107,15 @@ func TestServe_MultiEndpointFailoverSequence(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-  - {name: p3, base_url: {openai: %s}, api_key: k3}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+  - {name: p3, base_url: {openai-completions: %s}, api_key: k3}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
-      - {protocol: openai, providers: [p3], models: [m3]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p3], models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)
@@ -125,8 +125,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p3/m3" {
-		t.Errorf("endpoint=%s, want openai/p3/m3", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p3/m3" {
+		t.Errorf("endpoint=%s, want openai-completions/p3/m3", got)
 	}
 	if got := w.Header().Get("X-VMR-Attempts"); got != "3" {
 		t.Errorf("attempts=%s, want 3", got)
@@ -142,9 +142,9 @@ func TestServe_ModelNotFound(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  real: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  real: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -181,11 +181,11 @@ func TestServe_WrongProtocolHint(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
-  - {name: p2, base_url: {anthropic: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
+  - {name: p2, base_url: {anthropic-messages: https://example.com/v1}, api_key: k}
 models:
-  coding: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
-  claude: {endpoints: [{protocol: anthropic, providers: [p2], models: [m]}]}
+  coding: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  claude: {endpoints: [{protocol: anthropic-messages, providers: [p2], models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -207,9 +207,9 @@ func TestServe_NoAvailableEndpoints(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -324,10 +324,10 @@ func TestParseRetryAfter(t *testing.T) {
 // --- IngressPath ---
 
 func TestIngressPath(t *testing.T) {
-	if got := IngressPath("openai"); got != "/v1/chat/completions" {
+	if got := IngressPath("openai-completions"); got != "/v1/chat/completions" {
 		t.Errorf("openai: got %q, want /v1/chat/completions", got)
 	}
-	if got := IngressPath("anthropic"); got != "/v1/messages" {
+	if got := IngressPath("anthropic-messages"); got != "/v1/messages" {
 		t.Errorf("anthropic: got %q, want /v1/messages", got)
 	}
 	if got := IngressPath("openai-responses"); got != "/v1/responses" {
@@ -348,9 +348,9 @@ func TestRedirect_NotFollowed(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, redirected.srv.URL))
 
 	rt := New(nil)
@@ -380,13 +380,13 @@ func TestServe_AllFailReturnsLastUpstreamError(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -412,13 +412,13 @@ func TestServe_ClientErrorDoesNotFailover(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -442,13 +442,13 @@ func TestServe_ContentFlagFailsOverWithoutCooldown(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -458,11 +458,11 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (content flag should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p2/m2" {
-		t.Errorf("endpoint=%s, want openai/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
+		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
 	}
 	// u1 must still be available (no cooldown applied for content flags).
-	endpoint := endpointFor(t, cfg, "openai", "vm")
+	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("u1 should still be available after a content flag (no cooldown)")
 	}
@@ -484,13 +484,13 @@ func TestServe_VendorQuirkFailsOverWithoutCooldown(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -500,11 +500,11 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (quirk rejection should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p2/m2" {
-		t.Errorf("endpoint=%s, want openai/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
+		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
 	}
 	// u1 must still be available (no cooldown applied for quirk rejections).
-	endpoint := endpointFor(t, cfg, "openai", "vm")
+	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("u1 should still be available after a quirk rejection (no cooldown)")
 	}
@@ -524,13 +524,13 @@ func TestServe_ContextLimitFailsOverWithoutCooldown(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -540,11 +540,11 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (context-limit rejection should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai/p2/m2" {
-		t.Errorf("endpoint=%s, want openai/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
+		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
 	}
 	// u1 must still be available (no cooldown applied for context-limit rejections).
-	endpoint := endpointFor(t, cfg, "openai", "vm")
+	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("u1 should still be available after a context-limit rejection (no cooldown)")
 	}
@@ -563,11 +563,11 @@ func TestServe_BuildErrorDoesNotCooldownEndpoint(t *testing.T) {
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -584,7 +584,7 @@ models:
 		t.Errorf("upstream hits=%d, want 0 (BuildRequest must fail before any HTTP call)", u.hits)
 	}
 
-	endpoint := endpointFor(t, cfg, "openai", "vm")
+	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
 	if !rt.Health.Available(endpoint.HealthKey(), time.Now()) {
 		t.Error("endpoint should still be available after a build error (no cooldown)")
 	}

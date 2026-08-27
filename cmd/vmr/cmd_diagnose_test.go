@@ -21,11 +21,11 @@ func diagnoseConfigYAML(t *testing.T, upstreamURL string) string {
 	return writeTempFile(t, "config.yaml", fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: test-key}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: test-key}
 models:
   m1:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [real-model]}
+      - {protocol: openai-completions, providers: [p1], models: [real-model]}
 `, upstreamURL))
 }
 

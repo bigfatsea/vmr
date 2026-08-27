@@ -120,11 +120,11 @@ func TestOpenClawScenario_TwentyFourRounds(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.srv.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -232,11 +232,11 @@ func TestOpenClawScenario_NonStreaming(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -304,11 +304,11 @@ func TestOpenClawScenario_AuditLogCapturesTransformedResponse(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.srv.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -400,11 +400,11 @@ func TestOpenClawScenario_ThinkingProcessStripped(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -494,13 +494,13 @@ func TestResponseNormalizer_FailoverStillWorks(t *testing.T) {
 	cfg, _ := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: bad, base_url: {openai: %s}, api_key: k1}
-  - {name: good, base_url: {openai: %s}, api_key: k2}
+  - {name: bad, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: good, base_url: {openai-completions: %s}, api_key: k2}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [bad], models: [MiniMax-M3], priority: 1}
-      - {protocol: openai, providers: [good], models: [MiniMax-M3], priority: 2}
+      - {protocol: openai-completions, providers: [bad], models: [MiniMax-M3], priority: 1}
+      - {protocol: openai-completions, providers: [good], models: [MiniMax-M3], priority: 2}
 `, bad.URL, good.srv.URL)))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)

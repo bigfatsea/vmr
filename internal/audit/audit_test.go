@@ -15,6 +15,37 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames locks in the one
+// backward-compat chokepoint: a pre-2026-08 audit line names its protocol
+// "openai"/"anthropic"; every analytics read path decodes into audit.Record
+// and must see the current enum instead.
+// TODO(2026-10): delete alongside core.CanonicalProtocol.
+func TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames(t *testing.T) {
+	const line = `{"ts":"2026-07-01T00:00:00Z","dur_ms":1,"model":"vm","protocol":"openai","outcome":"ok","stream":false,"client":{"request":{}},"attempts":[{"endpoint":"openai:acct:m","protocol":"openai","url":"u","dur_ms":1,"request":{}},{"endpoint":"anthropic/acct/m","protocol":"anthropic","url":"u","dur_ms":1,"request":{}}]}`
+	var r Record
+	if err := json.Unmarshal([]byte(line), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Protocol != "openai-completions" {
+		t.Errorf("Record.Protocol = %q, want openai-completions", r.Protocol)
+	}
+	if r.Attempts[0].Protocol != "openai-completions" || r.Attempts[0].Endpoint != "openai-completions:acct:m" {
+		t.Errorf("attempt[0] = %q / %q, want openai-completions", r.Attempts[0].Protocol, r.Attempts[0].Endpoint)
+	}
+	if r.Attempts[1].Protocol != "anthropic-messages" || r.Attempts[1].Endpoint != "anthropic-messages/acct/m" {
+		t.Errorf("attempt[1] = %q / %q, want anthropic-messages (legacy slash separator preserved)", r.Attempts[1].Protocol, r.Attempts[1].Endpoint)
+	}
+
+	// A current-enum line round-trips unchanged.
+	var r2 Record
+	if err := json.Unmarshal([]byte(strings.ReplaceAll(line, `"openai"`, `"openai-completions"`)), &r2); err != nil {
+		t.Fatal(err)
+	}
+	if r2.Protocol != "openai-completions" {
+		t.Errorf("current-enum line mangled: %q", r2.Protocol)
+	}
+}
+
 func TestRedactMasksCredentials(t *testing.T) {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer sk-secret-key-abcd")

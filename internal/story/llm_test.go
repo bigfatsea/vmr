@@ -63,9 +63,9 @@ func testPack(t *testing.T) EvidencePack {
 func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 	at1 := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	at2 := time.Date(2026, 7, 28, 0, 1, 0, 0, time.UTC)
-	rec1 := mkExtrasRec(at1, "sys", "调研任务", "openai:p:m", 100, 10, 0, "tool_calls",
+	rec1 := mkExtrasRec(at1, "sys", "调研任务", "openai-completions:p:m", 100, 10, 0, "tool_calls",
 		[]map[string]any{writeToolCall("exec", "", "")})
-	rec2 := mkExtrasRec(at2, "sys", "调研任务", "openai:p:m", 110, 10, 0, "stop", nil)
+	rec2 := mkExtrasRec(at2, "sys", "调研任务", "openai-completions:p:m", 110, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
 	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {

@@ -386,9 +386,9 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 	var probeBody json.RawMessage
 	var nonce string
 	switch ep.AdapterType {
-	case "openai":
+	case core.ProtocolOpenAICompletions:
 		probeBody, nonce = probe.RoleCompatRequest(ep.Model, "developer")
-	case "openai-responses":
+	case core.ProtocolOpenAIResponses:
 		// Responses-shaped body (top-level "input", not "messages") — see
 		// probe.ResponsesRequest's doc comment. No role-compat variant here:
 		// unlike Chat Completions' single-vs-two-message shape ambiguity
@@ -446,12 +446,12 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 		return Result{Phase: "connect", Target: target, Status: StatusFail,
 			Detail: fmt.Sprintf("%d upstream error (%s)", resp.StatusCode, latency)}
 	default:
-		// For an openai-protocol endpoint this default case is also where a
+		// For an openai-completions endpoint this default case is also where a
 		// rejected "developer" role lands (typically a 400) — add a role_map
 		// hint precisely when that's a plausible explanation, so the fix is
 		// obvious instead of just "some 400-something happened".
 		hint := ""
-		if ep.AdapterType == "openai" {
+		if ep.AdapterType == core.ProtocolOpenAICompletions {
 			if len(ep.RoleMap) == 0 {
 				hint = ` — no role_map configured; if this provider rejects the "developer" role, add role_map: {developer: system}`
 			} else {

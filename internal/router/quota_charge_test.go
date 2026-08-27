@@ -37,14 +37,14 @@ var chargeNow = time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
 func TestChargeQuota_NilSafe_NoRegistry(t *testing.T) {
 	rt := &Router{} // Quota left nil, exactly like router.New's real construction
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{requestsLimit(100)}}}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
 }
 
 func TestChargeQuota_NilSafe_NoEndpointQuota(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	ep := &core.Endpoint{Provider: "p1"} // Quota nil: no quota: configured
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow)
 	used, _ := rt.Quota.Used("p1", "requests/1mo", chargeNow)
 	if used.Requests != 0 {
@@ -55,7 +55,7 @@ func TestChargeQuota_NilSafe_NoEndpointQuota(t *testing.T) {
 func TestChargeQuota_NilSafe_EmptyLimits(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{}} // Limits: nil
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
 }
 
@@ -65,7 +65,7 @@ func TestChargeQuota_Requests_OnePerCall(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := requestsLimit(100)
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{l}}}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -90,7 +90,7 @@ func TestChargeQuota_Tokens_SniffedUsage_Buffered(t *testing.T) {
 	creq := &core.CanonicalRequest{}
 
 	body := `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":20}}}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestChargeQuota_Tokens_SniffedUsage_SSE(t *testing.T) {
 	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
 		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n" +
 		"data: [DONE]\n\n"
-	rs := respnorm.Wrap(strings.NewReader(sse), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: true, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(sse), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: true, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -159,7 +159,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 data: {"type":"message_stop"}
 
 `
-	rs := respnorm.Wrap(strings.NewReader(sse), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: true, Protocol: "anthropic", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(sse), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: true, Protocol: "anthropic-messages", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestChargeQuota_Tokens_TruncatedMidStream_Degrades(t *testing.T) {
 	// object — a real mid-stream drop, not a well-formed-but-usage-less body.
 	partial := `{"choices":[{"delta":{"content":"partial response before the connection d`
 	tr := &truncatingReader{data: []byte(partial), err: io.ErrUnexpectedEOF}
-	rs := respnorm.Wrap(tr, respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(tr, respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 
 	if _, copyErr := io.Copy(io.Discard, rs); copyErr == nil {
 		t.Fatal("expected a non-nil error propagated from the truncated read")
@@ -251,7 +251,7 @@ func TestChargeQuota_Tokens_DegradedEstimate_NoUsageField(t *testing.T) {
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 42}}
 
 	body := `{"choices":[{"message":{"content":"hello, this response has no usage field at all"}}]}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestChargeQuota_Tokens_OpaqueAlwaysDegrades(t *testing.T) {
 	// possibly-compressed bytes is exactly what opaque mode exists to avoid
 	// (see response.go's package doc comment).
 	body := `{"usage":{"prompt_tokens":999,"completion_tokens":999}}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: true})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: true})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestChargeQuota_IndependentProviders(t *testing.T) {
 	lr := requestsLimit(100)
 	epA := &core.Endpoint{Provider: "plan-a", Quota: &core.QuotaSpec{Limits: []core.Limit{lr}}}
 	epB := &core.Endpoint{Provider: "plan-b", Quota: &core.QuotaSpec{Limits: []core.Limit{lr}}}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(epA, rbody, creq, chargeNow)
@@ -339,26 +339,26 @@ func TestServe_EndToEnd_OnlySuccessfulAttemptCharges(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: %s}
+    base_url: {openai-completions: %s}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]
   - name: p2
-    base_url: {openai: %s}
+    base_url: {openai-completions: %s}
     api_key: k2
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]
   - name: p3
-    base_url: {openai: %s}
+    base_url: {openai-completions: %s}
     api_key: k3
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
-      - {protocol: openai, providers: [p3], models: [m3]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p3], models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)

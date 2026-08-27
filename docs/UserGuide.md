@@ -38,7 +38,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
 
 ### Config layout
 
-`providers` is a flat list — one entry per upstream account, however many of the three ingress protocols (`openai` / `anthropic` / `openai-responses`) it actually speaks. `base_url` is itself keyed by protocol, so one entry covers both faces of an account instead of declaring it twice. `models` is keyed by virtual-model name; each entry under `endpoints` carries its own `protocol` field, so one virtual model can mix an openai-protocol candidate list and an anthropic-protocol one under the same name — each independently reachable only from its own ingress. An endpoint-group's `models:` list can name more than one upstream model, each expanding into its own independently health-tracked candidate sharing the rest of that entry's fields:
+`providers` is a flat list — one entry per upstream account, however many of the three ingress protocols (`openai-completions` / `anthropic-messages` / `openai-responses`) it actually speaks. `base_url` is itself keyed by protocol, so one entry covers both faces of an account instead of declaring it twice. `models` is keyed by virtual-model name; each entry under `endpoints` carries its own `protocol` field, so one virtual model can mix an openai-completions candidate list and an anthropic-messages one under the same name — each independently reachable only from its own ingress. An endpoint-group's `models:` list can name more than one upstream model, each expanding into its own independently health-tracked candidate sharing the rest of that entry's fields:
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -67,22 +67,22 @@ listen: 127.0.0.1:8800
 
 providers:
   - name: openrouter
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1, anthropic-messages: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
     proxy: true              # go through https_proxy/http_proxy above — the recommended
                              # way to opt a foreign provider in (default: false, direct)
   - name: minimax
-    base_url: {openai: https://api.minimaxi.com/v1}
+    base_url: {openai-completions: https://api.minimaxi.com/v1}
     api_key: ${MINIMAX_API_KEY}
     # proxy: false           # not needed here — false is already the default
 
 models:
   coding:                      # openai protocol only → served via /v1/chat/completions
     endpoints:
-      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}   # no priority field: list order = try order
+      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}   # no priority field: list order = try order
   claude:                      # anthropic protocol only → served via /v1/messages
     endpoints:
-      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
+      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # openai-responses protocol only → served via /v1/responses
     endpoints:
       - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
@@ -130,15 +130,15 @@ Two config shapes exist purely to cut repetition in a try-order list that would 
 providers:
   - name: volcengine
     api_key: ${ARK_KEY_1}
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
   - name: volcengine2
     api_key: ${ARK_KEY_2}
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
 
 models:
   coding:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [volcengine, volcengine2]
         models: [deepseek-v4-pro]
         priority: 1
@@ -151,7 +151,7 @@ This expands into as many independent, individually health-tracked endpoints as 
 ```yaml
 providers:
   - name: volcengine
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
     api_keys:
       main: ${ARK_KEY_1}
       backup: ${ARK_KEY_2}
@@ -159,7 +159,7 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [volcengine]        # rewritten at load time to [volcengine-main, volcengine-backup]
         models: [deepseek-v4-pro]
         priority: 1
@@ -171,7 +171,7 @@ This is resolved entirely in `config.Parse`, before validation or `BuildSnapshot
 
 ```yaml
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [bai, sensenova]
     models: [deepseek-v4-flash]
     priority: 98
@@ -234,12 +234,12 @@ models:
     capabilities: [text, tools]        # base: every endpoint below inherits this
     max_context_tokens: 128000         # base: ditto
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]          # ADDED to the base -> effective: text, tools, image
         max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]        # declares neither -> inherits the base as-is
 ```
@@ -265,11 +265,11 @@ models:
     # sticky: true is the default — omit it. Only a genuinely one-shot
     # virtual model (no multi-turn value to protect) needs sticky: false.
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         # inherits the global 10-minute sticky_ttl
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]
         sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
@@ -290,7 +290,7 @@ If you're juggling several periodic usage plans (a "coding plan" or "token plan"
 ```yaml
 providers:
   - name: plan-a
-    base_url: {openai: https://example.invalid/v1}
+    base_url: {openai-completions: https://example.invalid/v1}
     api_key: ${PLAN_A_KEY}
     quota:
       limits:

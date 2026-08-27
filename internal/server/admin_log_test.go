@@ -128,11 +128,11 @@ func TestAdminLog_AuthEnforced(t *testing.T) {
 listen: 127.0.0.1:0
 api_keys: [test-key-0123456789]
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `
 	srv, _ := newTeeServer(t, yaml)
 

@@ -27,10 +27,10 @@
 真实来自内置示例 [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) —— 自己跑一遍 `./vmr report -o /tmp/out examples/sample-audit.jsonl` 对比即可。主端点悄悄内容拦截了请求，vmr 把同一条 payload 换到备用端点重试，客户端从头到尾只看到一个正常的 200 OK：
 
 ```
-### Attempt 1/2 · openai:coder-primary:coder-large · ❌ HTTP 403
+### Attempt 1/2 · openai-completions:coder-primary:coder-large · ❌ HTTP 403
 {"error": {"code": "content_flagged", "message": "This request was flagged by our safety guardrail and blocked.", "type": "guardrail_blocked"}}
 
-### Attempt 2/2 · openai:coder-backup:coder-large-mini · ✅ HTTP 200（耗时 2.5s）
+### Attempt 2/2 · openai-completions:coder-backup:coder-large-mini · ✅ HTTP 200（耗时 2.5s）
 ```
 
 ### 2. Agent 任务执行叙事与信息丢失 (`vmr story`)

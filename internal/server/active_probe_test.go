@@ -39,11 +39,11 @@ func TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic(t *testing.T) {
 listen: 127.0.0.1:0
 probe_timeout: 200ms
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-one]}
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
 `, u.srv.URL))
 	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired
 
@@ -86,7 +86,7 @@ func TestActiveProbe_RealTrafficUnaffectedByBackgroundProbeLatency(t *testing.T)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200 via p2", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Errorf("endpoint=%s, want p2 (p1 is half-open and must be skipped, not waited on)", got)
 	}
 	if elapsed > 200*time.Millisecond {
@@ -117,7 +117,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
 
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("setup: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	time.Sleep(1100 * time.Millisecond) // Retry-After: 1 → half-open now
@@ -127,7 +127,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	// traffic never touches a half-open endpoint directly, no matter how
 	// fast p1 would itself have answered.
 	resp, _ = chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Fatalf("endpoint=%s, want p2 (p1 must stay excluded until its background probe reports success)", got)
 	}
 
@@ -147,7 +147,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	for {
 		resp, _ = chat(t, ts, simpleReq, nil)
-		if resp.Header.Get("X-VMR-Endpoint") == "openai/p1/model-one" {
+		if resp.Header.Get("X-VMR-Endpoint") == "openai-completions/p1/model-one" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -169,7 +169,7 @@ func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 
 	u1.mode.Store("400") // ErrClient-classified: request-specific, no cooldown, but the probe slot must still be released
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Fatalf("endpoint=%s, want p2 while p1's probe is/was in flight", got)
 	}
 
@@ -187,7 +187,7 @@ func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	for {
 		resp, _ = chat(t, ts, simpleReq, nil)
-		if resp.Header.Get("X-VMR-Endpoint") == "openai/p1/model-one" {
+		if resp.Header.Get("X-VMR-Endpoint") == "openai-completions/p1/model-one" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -220,7 +220,7 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 
 	u1.mode.Store("console_go")
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
 		t.Fatalf("endpoint=%s, want p2 while p1's probe is/was in flight", got)
 	}
 
@@ -267,11 +267,11 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		for mi := range out.Models {
-			if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai" {
+			if out.Models[mi].ID != "vm" || out.Models[mi].Protocol != "openai-completions" {
 				continue
 			}
 			for i, ep := range out.Models[mi].Endpoints {
-				if ep.Endpoint == "openai/p1/model-one" {
+				if ep.Endpoint == "openai-completions/p1/model-one" {
 					p1 = &out.Models[mi].Endpoints[i]
 				}
 			}

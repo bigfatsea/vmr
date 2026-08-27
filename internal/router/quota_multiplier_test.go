@@ -26,7 +26,7 @@ func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 	l.ModelMultipliers = map[string]float64{"heavy-model": 9}
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "heavy-model", Quota: spec}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -43,7 +43,7 @@ func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 	l.ModelMultipliers = map[string]float64{"*": 3, "named-model": 9}
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "unnamed-model", Quota: spec}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -60,7 +60,7 @@ func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.
 	l.ModelMultipliers = map[string]float64{"named-model": 9}
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "other-model", Quota: spec}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -78,7 +78,7 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 	// configures it at all) — must behave identically to P1.
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}}
 	ep := &core.Endpoint{Provider: "p1", Model: "any-model", Quota: spec}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
@@ -106,7 +106,7 @@ func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 7}}
 
 	body := `{"choices":[{"message":{"content":"hi"}}]}` // no usage field -> degraded estimate path
-	rbody := respnorm.Wrap(bytes.NewReader([]byte(body)), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader([]byte(body)), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rbody); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	specB := &core.QuotaSpec{Limits: []core.Limit{lB}}
 	epA := &core.Endpoint{Provider: "plan-a", Model: "m", Quota: specA}
 	epB := &core.Endpoint{Provider: "plan-b", Model: "m", Quota: specB}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
 	rt.chargeQuota(epA, rbody, creq, chargeNow)
@@ -192,14 +192,14 @@ func TestServe_EndToEnd_ModelMultiplierAndTokenWeights(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: `+u.srv.URL+`}
+    base_url: {openai-completions: `+u.srv.URL+`}
     api_key: k1
     quota:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {cache_read: 0.1}, model_multipliers: {heavy: 2}}]
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [heavy]}
+      - {protocol: openai-completions, providers: [p1], models: [heavy]}
 `)
 	rt := New(nil)
 	rt.Quota = quota.NewRegistry("")
@@ -210,7 +210,7 @@ models:
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 
-	l := rt.Snapshot().Models["openai"]["vm"].Endpoints[0].Quota.Limits[0]
+	l := rt.Snapshot().Models["openai-completions"]["vm"].Endpoints[0].Quota.Limits[0]
 	ps := quota.PeriodStart(l, time.Now())
 	used, _ := rt.Quota.Used("p1", "tokens/1mo", ps)
 	// Raw usage: prompt_tokens=100 (fresh=100-50=50), cache_read=50, out=10.
@@ -239,17 +239,17 @@ func TestQuotaStatus_MetricTokens_EstimatedPctIgnoresTokenWeights(t *testing.T) 
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {out: 5.0}}]
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [real-model]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [real-model]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
-	l := snap.Models["openai"]["m1"].Endpoints[0].Quota.Limits[0]
+	l := snap.Models["openai-completions"]["m1"].Endpoints[0].Quota.Limits[0]
 	ps := quota.PeriodStart(l, time.Now())
 
 	// One fully-degraded charge: 100 raw tokens, all of them estimated.

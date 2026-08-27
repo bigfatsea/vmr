@@ -38,7 +38,7 @@
 
 ### 配置文件结构
 
-`providers` 是一个扁平列表——一个账号一条，不管它实际讲三种入口协议（`openai` / `anthropic` / `openai-responses`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai 协议的候选列表和一条 anthropic 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
+`providers` 是一个扁平列表——一个账号一条，不管它实际讲三种入口协议（`openai-completions` / `anthropic-messages` / `openai-responses`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai-completions 协议的候选列表和一条 anthropic-messages 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
 
 ```yaml
 listen: 127.0.0.1:8800
@@ -66,22 +66,22 @@ listen: 127.0.0.1:8800
 
 providers:
   - name: openrouter
-    base_url: {openai: https://openrouter.ai/api/v1, anthropic: https://openrouter.ai/api/v1}
+    base_url: {openai-completions: https://openrouter.ai/api/v1, anthropic-messages: https://openrouter.ai/api/v1}
     api_key: ${OPENROUTER_API_KEY}
     proxy: true              # 走 https_proxy/http_proxy——给海外 provider 开代理的
                              # 推荐写法（缺省 false，即直连）
   - name: minimax
-    base_url: {openai: https://api.minimaxi.com/v1}
+    base_url: {openai-completions: https://api.minimaxi.com/v1}
     api_key: ${MINIMAX_API_KEY}
     # proxy: false           # 这里不需要写——false 本来就是缺省值
 
 models:
   coding:                      # 只有 openai 协议 → 走 /v1/chat/completions
     endpoints:
-      - {protocol: openai, providers: [openrouter], models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
+      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
   claude:                      # 只有 anthropic 协议 → 走 /v1/messages
     endpoints:
-      - {protocol: anthropic, providers: [openrouter], models: [minimax/minimax-m3]}
+      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # 只有 openai-responses 协议 → 走 /v1/responses
     endpoints:
       - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
@@ -129,15 +129,15 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 providers:
   - name: volcengine
     api_key: ${ARK_KEY_1}
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
   - name: volcengine2
     api_key: ${ARK_KEY_2}
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
 
 models:
   coding:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [volcengine, volcengine2]
         models: [deepseek-v4-pro]
         priority: 1
@@ -150,7 +150,7 @@ models:
 ```yaml
 providers:
   - name: volcengine
-    base_url: {openai: https://ark.example.com/v3}
+    base_url: {openai-completions: https://ark.example.com/v3}
     api_keys:
       main: ${ARK_KEY_1}
       backup: ${ARK_KEY_2}
@@ -158,7 +158,7 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [volcengine]        # 加载时被改写为 [volcengine-main, volcengine-backup]
         models: [deepseek-v4-pro]
         priority: 1
@@ -170,7 +170,7 @@ models:
 
 ```yaml
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [bai, sensenova]
     models: [deepseek-v4-flash]
     priority: 98
@@ -233,12 +233,12 @@ models:
     capabilities: [text, tools]        # 基线：下面每个端点都继承这个
     max_context_tokens: 128000         # 基线：同上
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
         max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
 ```
@@ -264,11 +264,11 @@ models:
     # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
     # 才需要显式写 sticky: false
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
         # 继承全局的 10 分钟 sticky_ttl
-      - protocol: openai
+      - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]
         sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
@@ -289,7 +289,7 @@ models:
 ```yaml
 providers:
   - name: plan-a
-    base_url: {openai: https://example.invalid/v1}
+    base_url: {openai-completions: https://example.invalid/v1}
     api_key: ${PLAN_A_KEY}
     quota:
       limits:

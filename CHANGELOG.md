@@ -21,10 +21,12 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 ### Added
+- `GET /help` + `/help.html` — a static, unauthenticated agent configuration guide: per-tool setup snippets (Claude Code, Codex, Aider, OpenCode, …) with the instance's own base URLs baked in from the request Host, plus a live virtual-model list fetched client-side from `/status`. The `/status.html` dashboard gains a "Connect Your Agent" card linking to it
 - `/status` agent-facing model metadata: `models` became a structured array (was a map keyed by the display string `"name [protocol]"`) — one entry per virtual-model × protocol carrying `id`, `protocol`, `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and `endpoints[]` with live health plus each endpoint's own capabilities/context override. The dashboard (`/status.html`) renders both levels (unconstrained shows as that word, never an empty badge) and `vmr status` prints the model-level lines
 - `/status`: `instance.base_urls` — the client-facing base URL per ingress protocol (all `<scheme>://<host>/v1/`), echoed from the request itself (Host header + whether TLS was used) rather than derived from `listen`: whatever address the caller reached `/status` at is exactly what it should point its client at
 
 ### Changed
+- **Protocol enum renamed** to match ecosystem tools (Pi Agent et al.): `openai` → `openai-completions`, `anthropic` → `anthropic-messages` (`openai-responses` unchanged). Update `protocol:` values and `base_url` keys in your config — `vmr check` reports the old names as unknown adapter types. New audit logs write the new names; the analytics half (`vmr report`/`story`) transparently normalizes old names when reading pre-existing logs (transitional, to be removed ~2026-10). `vmr replay` reads new-format logs only
 - the human-readable model label `"<name> [<protocol>]"` is now defined once (`core.ModelLabel`); `vmr diagnose` route groups and `vmr status` output are byte-identical, just sourced from one place so the surfaces cannot drift apart
 
 ## [0.6.1] - 2026-08-25

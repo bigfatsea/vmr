@@ -69,7 +69,7 @@ func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 	creq := &core.CanonicalRequest{}
 
 	body := `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":1000000,"completion_tokens":1000000,"prompt_tokens_details":{"cached_tokens":500000}}}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange(t *tes
 	creq := &core.CanonicalRequest{}
 
 	body := `{"usage":{"prompt_tokens":1000000,"completion_tokens":1000000}}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 1_000_000}}
 
 	body := `{"choices":[{"message":{"content":"no usage field here"}}]}`
-	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rs := respnorm.Wrap(strings.NewReader(body), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	if _, err := io.Copy(io.Discard, rs); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestChargeCost_DoesNotConsultModelMultipliers(t *testing.T) {
 	spec := &core.QuotaSpec{Limits: []core.Limit{l}} // no ModelMultipliers configured — the only config.validate()-legal shape for a cost account
 	ep := &core.Endpoint{Provider: "p1", Model: "any-model", Quota: spec, PricingRate: fullRate()}
 	creq := &core.CanonicalRequest{}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 
 	rt.chargeQuota(ep, rbody, creq, chargeNow)
 
@@ -199,17 +199,17 @@ pricing:
   currency: USD
 providers:
   - name: anthropic
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 100}]
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
+    endpoints: [{protocol: openai-completions, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
-	ep := snap.Models["openai"]["m1"].Endpoints[0]
+	ep := snap.Models["openai-completions"]["m1"].Endpoints[0]
 	if ep.PricingRate == nil {
 		t.Fatal("PricingRate not resolved for a standard-table-covered model — config wiring broken")
 	}
@@ -244,13 +244,13 @@ pricing:
   currency: USD
 providers:
   - name: anthropic
-    base_url: {openai: `+u.srv.URL+`}
+    base_url: {openai-completions: `+u.srv.URL+`}
     api_key: k1
     quota:
       limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 1000}]
 models:
   vm:
-    endpoints: [{protocol: openai, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
+    endpoints: [{protocol: openai-completions, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
 `)
 	rt := New(nil)
 	rt.Quota = quota.NewRegistry("")
@@ -261,7 +261,7 @@ models:
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 
-	spec := rt.Snapshot().Models["openai"]["vm"].Endpoints[0].Quota
+	spec := rt.Snapshot().Models["openai-completions"]["vm"].Endpoints[0].Quota
 	ps := quota.PeriodStart(spec.Limits[0], time.Now())
 	used, _ := rt.Quota.Used("anthropic", "cost/1mo", ps)
 	if used.Cost <= 0 {

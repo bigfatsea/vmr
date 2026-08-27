@@ -324,11 +324,11 @@
         </p>
         <div class="stat-list" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
           <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">Base URL <span class="badge badge-primary">OpenAI</span></span>
+            <span class="stat-label">Base URL <span class="badge badge-primary">OpenAI Completions</span></span>
             <span class="stat-val" id="dash-base-url-openai">loading...</span>
           </div>
           <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">Base URL <span class="badge badge-anthropic">Anthropic</span></span>
+            <span class="stat-label">Base URL <span class="badge badge-anthropic">Anthropic Messages</span></span>
             <span class="stat-val" id="dash-base-url-anthropic">loading...</span>
           </div>
           <div class="stat-item" style="gap:8px; min-width:240px;">
@@ -408,7 +408,7 @@
           </div>
           <div class="stat-item">
             <span class="stat-label">By Protocol</span>
-            <span class="stat-val" id="metric-protocols" title="OpenAI / Anthropic / Responses">0 / 0 / 0</span>
+            <span class="stat-val" id="metric-protocols" title="OpenAI Completions / Anthropic Messages / OpenAI Responses">0 / 0 / 0</span>
           </div>
         </div>
       </div>
@@ -640,22 +640,22 @@
       // base_urls come from the request's own host, so they're correct for
       // whoever is actually looking at this dashboard.
       const baseURLs = inst.base_urls || {};
-      const openaiBase = baseURLs.openai ? baseURLs.openai.replace(/\/+$/, '') : '—';
-      const anthropicBase = baseURLs.anthropic
-        ? baseURLs.anthropic.replace(/\/v1\/+$/, '').replace(/\/+$/, '')
+      const openaiBase = baseURLs['openai-completions'] ? baseURLs['openai-completions'].replace(/\/+$/, '') : '—';
+      const anthropicBase = baseURLs['anthropic-messages']
+        ? baseURLs['anthropic-messages'].replace(/\/v1\/+$/, '').replace(/\/+$/, '')
         : '—';
       dom.dashBaseUrlOpenAI.textContent = openaiBase;
       dom.dashBaseUrlAnthropic.textContent = anthropicBase;
       const modelList = data.models || [];
       const protoSet = new Set();
       modelList.forEach(m => { if (m.protocol) protoSet.add(m.protocol); });
-      const protoNames = { 'openai': 'OpenAI', 'anthropic': 'Anthropic', 'openai-responses': 'Responses' };
+      const protoNames = { 'openai-completions': 'OpenAI Completions', 'anthropic-messages': 'Anthropic Messages', 'openai-responses': 'OpenAI Responses' };
       dom.dashProtocols.textContent = protoSet.size > 0
         ? Array.from(protoSet).map(p => protoNames[p] || p).join(' / ')
         : '—';
       dom.dashModels.innerHTML = modelList.length > 0
         ? modelList.map(m => {
-            const badgeClass = m.protocol === 'anthropic' ? 'badge-anthropic' : 'badge-primary';
+            const badgeClass = m.protocol === 'anthropic-messages' ? 'badge-anthropic' : 'badge-primary';
             return `<span class="badge ${badgeClass}" style="margin:2px;">${esc(m.id)}</span>`;
           }).join(' ')
         : '<span class="stat-val" style="color:var(--text-muted); font-size:12px;">(no models configured)</span>';
@@ -724,7 +724,7 @@
       dom.reqCancel.textContent = fmtNum(byStat.canceled || 0);
       dom.reqErr.textContent = fmtNum(byStat.error || 0);
       const byProto = reqs.by_protocol || {};
-      dom.protocols.textContent = `${fmtNum(byProto.openai || 0)} / ${fmtNum(byProto.anthropic || 0)} / ${fmtNum(byProto['openai-responses'] || 0)}`;
+      dom.protocols.textContent = `${fmtNum(byProto['openai-completions'] || 0)} / ${fmtNum(byProto['anthropic-messages'] || 0)} / ${fmtNum(byProto['openai-responses'] || 0)}`;
 
       // Tokens
       const totalToks = (toks.in || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0) + (toks.out || 0);

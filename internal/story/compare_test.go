@@ -43,7 +43,7 @@ func mkExtrasRec(ts time.Time, sysText, userText, endpoint string, in, out, cach
 		},
 	}
 	return audit.Record{
-		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai", Stream: false, Outcome: "ok",
+		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: false, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: map[string][]string{}, Body: body},
 			Response: &audit.Message{Status: 200, Headers: map[string][]string{}, Body: respBody},
@@ -75,7 +75,7 @@ func writeToolCall(name, path, content string) map[string]any {
 // cache ratios, and tool calls (one with a write-shaped call, one without).
 func TestComputeComparisonExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
-	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai:opencode:deepseek-v4-pro",
+	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai-completions:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	pathA := writeJSONL(t, []audit.Record{recA})
 	jA, err := Build(onlyLineage(t, pathA), taskseg.Generic, i18n.EN)
@@ -84,7 +84,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	}
 
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
-	recB := mkExtrasRec(atB, "system prompt B", "do the research", "openai:minimax:MiniMax-M3",
+	recB := mkExtrasRec(atB, "system prompt B", "do the research", "openai-completions:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
 	pathB := writeJSONL(t, []audit.Record{recB})
 	jB, err := Build(onlyLineage(t, pathB), taskseg.Generic, i18n.EN)
@@ -95,11 +95,11 @@ func TestComputeComparisonExtras(t *testing.T) {
 	ma, mb := ComputeMetrics(jA), ComputeMetrics(jB)
 	ex := ComputeComparisonExtras(jA, jB, ma, mb, taskseg.Generic)
 
-	if len(ex.Endpoints.A) != 1 || ex.Endpoints.A[0] != "openai:opencode:deepseek-v4-pro" {
-		t.Errorf("Endpoints.A = %v, want [openai:opencode:deepseek-v4-pro]", ex.Endpoints.A)
+	if len(ex.Endpoints.A) != 1 || ex.Endpoints.A[0] != "openai-completions:opencode:deepseek-v4-pro" {
+		t.Errorf("Endpoints.A = %v, want [openai-completions:opencode:deepseek-v4-pro]", ex.Endpoints.A)
 	}
-	if len(ex.Endpoints.B) != 1 || ex.Endpoints.B[0] != "openai:minimax:MiniMax-M3" {
-		t.Errorf("Endpoints.B = %v, want [openai:minimax:MiniMax-M3]", ex.Endpoints.B)
+	if len(ex.Endpoints.B) != 1 || ex.Endpoints.B[0] != "openai-completions:minimax:MiniMax-M3" {
+		t.Errorf("Endpoints.B = %v, want [openai-completions:minimax:MiniMax-M3]", ex.Endpoints.B)
 	}
 	if ex.Endpoints.Same {
 		t.Error("Endpoints.Same should be false: A and B used different endpoints")
@@ -159,7 +159,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 func TestInitialInstructionStats_ExcerptTruncation(t *testing.T) {
 	long := strings.Repeat("x", initialInstructionExcerptChars+500)
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
-	rec := mkExtrasRec(at, "sys", long, "openai:p:m", 100, 10, 0, "stop", nil)
+	rec := mkExtrasRec(at, "sys", long, "openai-completions:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
 	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestInitialInstructionStats_ExcerptTruncation(t *testing.T) {
 func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 	long := strings.Repeat("x", sysPromptExcerptChars+500)
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
-	rec := mkExtrasRec(at, long, "hi", "openai:p:m", 100, 10, 0, "stop", nil)
+	rec := mkExtrasRec(at, long, "hi", "openai-completions:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
 	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
 	if err != nil {
@@ -206,9 +206,9 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 	at1 := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	at2 := time.Date(2026, 7, 28, 0, 1, 0, 0, time.UTC)
-	rec1 := mkExtrasRec(at1, "sys", "go", "openai:p:m", 100, 10, 0, "tool_calls",
+	rec1 := mkExtrasRec(at1, "sys", "go", "openai-completions:p:m", 100, 10, 0, "tool_calls",
 		[]map[string]any{writeToolCall("write", "draft.md", "scratch draft")})
-	rec2 := mkExtrasRec(at2, "sys", "go", "openai:p:m", 110, 10, 0, "stop",
+	rec2 := mkExtrasRec(at2, "sys", "go", "openai-completions:p:m", 110, 10, 0, "stop",
 		[]map[string]any{writeToolCall("write", "final.md", "the real final content")})
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
 	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
@@ -427,14 +427,14 @@ func TestRenderComparisonMarkdown_EscapesTitles(t *testing.T) {
 // not hand-built fixture data.
 func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
-	recA := mkExtrasRec(atA, "system prompt A", "research", "openai:opencode:deepseek-v4-pro",
+	recA := mkExtrasRec(atA, "system prompt A", "research", "openai-completions:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
-	recB := mkExtrasRec(atB, "system prompt B", "research", "openai:minimax:MiniMax-M3",
+	recB := mkExtrasRec(atB, "system prompt B", "research", "openai-completions:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
 	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), taskseg.Generic, i18n.EN)
 	if err != nil {
@@ -448,7 +448,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 
 	md := RenderComparisonMarkdown(cmp, i18n.EN)
 	for _, want := range []string{
-		"## Model & Endpoint Check", "openai:opencode:deepseek-v4-pro", "openai:minimax:MiniMax-M3", "differ",
+		"## Model & Endpoint Check", "openai-completions:opencode:deepseek-v4-pro", "openai-completions:minimax:MiniMax-M3", "differ",
 		"## Prompt Cache Hit Rate", "80%",
 		"## System Prompt Size & Stability", "system prompt A", "system prompt B",
 		"## Final Deliverable Comparison", "findings here", "no comparable final deliverable identified",

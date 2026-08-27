@@ -15,7 +15,7 @@ import (
 	"vmr/internal/jsonscan"
 )
 
-func init() { adapter.Register("openai", OpenAI{}) }
+func init() { adapter.Register(core.ProtocolOpenAICompletions, OpenAI{}) }
 
 // chatCompletionsPath is the bare protocol path; base_url must already
 // carry the provider's own API version (see adapter.ResolveURL).
@@ -23,7 +23,7 @@ const chatCompletionsPath = "/chat/completions"
 
 type OpenAI struct{}
 
-func (OpenAI) Protocol() string { return "openai" }
+func (OpenAI) Protocol() string { return core.ProtocolOpenAICompletions }
 func (OpenAI) ResolveURL(baseURL string) string {
 	return adapter.ResolveURL(baseURL, chatCompletionsPath)
 }

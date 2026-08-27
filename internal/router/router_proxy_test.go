@@ -23,15 +23,15 @@ func TestProxyResolutionGrouping(t *testing.T) {
 listen: 127.0.0.1:0
 https_proxy: http://127.0.0.1:7890
 providers:
-  - {name: a, base_url: {openai: https://a.example/v1}, api_key: k, proxy: true}
-  - {name: b, base_url: {openai: https://b.example/v1}, api_key: k, proxy: false}
-  - {name: c, base_url: {openai: https://c.example/v1}, api_key: k, proxy: true}
+  - {name: a, base_url: {openai-completions: https://a.example/v1}, api_key: k, proxy: true}
+  - {name: b, base_url: {openai-completions: https://b.example/v1}, api_key: k, proxy: false}
+  - {name: c, base_url: {openai-completions: https://c.example/v1}, api_key: k, proxy: true}
 models:
   m:
     endpoints:
-      - {protocol: openai, providers: [a], models: [x]}
-      - {protocol: openai, providers: [b], models: [x]}
-      - {protocol: openai, providers: [c], models: [x]}
+      - {protocol: openai-completions, providers: [a], models: [x]}
+      - {protocol: openai-completions, providers: [b], models: [x]}
+      - {protocol: openai-completions, providers: [c], models: [x]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ models:
 	}
 	rt.Install(snap)
 
-	eps := snap.Models["openai"]["m"].Endpoints
+	eps := snap.Models["openai-completions"]["m"].Endpoints
 	ca, cb, cc := snap.clientFor(eps[0]), snap.clientFor(eps[1]), snap.clientFor(eps[2])
 	if ca == nil || cb == nil || cc == nil {
 		t.Fatal("clientFor returned nil")
@@ -96,11 +96,11 @@ func TestProxyEndToEnd(t *testing.T) {
 listen: 127.0.0.1:0
 http_proxy: %s
 providers:
-  - {name: viaproxy, base_url: {openai: http://upstream.invalid/v1}, api_key: k, proxy: true}
-  - {name: directp, base_url: {openai: %s/v1}, api_key: k, proxy: false}
+  - {name: viaproxy, base_url: {openai-completions: http://upstream.invalid/v1}, api_key: k, proxy: true}
+  - {name: directp, base_url: {openai-completions: %s/v1}, api_key: k, proxy: false}
 models:
-  m-proxy:  {endpoints: [{protocol: openai, providers: [viaproxy], models: [real]}]}
-  m-direct: {endpoints: [{protocol: openai, providers: [directp], models: [real]}]}
+  m-proxy:  {endpoints: [{protocol: openai-completions, providers: [viaproxy], models: [real]}]}
+  m-direct: {endpoints: [{protocol: openai-completions, providers: [directp], models: [real]}]}
 `, proxy.URL, upstream.URL))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ models:
 		body := []byte(`{"model":"` + model + `"}`)
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
 		w := httptest.NewRecorder()
-		rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai", nil)
+		rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", nil)
 		return w
 	}
 

@@ -12,15 +12,15 @@ const providerGroupYAML = `
 listen: 127.0.0.1:9902
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k1
   - name: p2
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k2
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1, p2]
         models: [real-model]
 `
@@ -56,10 +56,10 @@ func TestEndpointGroup_ProvidersList_UnknownNameRejected(t *testing.T) {
 
 func TestEndpointGroup_ProvidersList_MissingBaseURLForProtocolRejected(t *testing.T) {
 	yaml := strings.Replace(providerGroupYAML,
-		"  - name: p2\n    base_url: {openai: https://api.example.com/v1}\n    api_key: k2",
-		"  - name: p2\n    base_url: {anthropic: https://api.example.com/v1}\n    api_key: k2", 1)
+		"  - name: p2\n    base_url: {openai-completions: https://api.example.com/v1}\n    api_key: k2",
+		"  - name: p2\n    base_url: {anthropic-messages: https://api.example.com/v1}\n    api_key: k2", 1)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), `provider "p2" has no base_url for protocol "openai"`) {
+	if err == nil || !strings.Contains(err.Error(), `provider "p2" has no base_url for protocol "openai-completions"`) {
 		t.Errorf("want a no-base_url error naming p2/openai, got %v", err)
 	}
 }
@@ -68,20 +68,20 @@ const fallbackYAML = `
 listen: 127.0.0.1:9903
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k1
   - name: p2
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k2
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [p2]
     models: [fallback-model]
     priority: 90
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
 `
@@ -95,7 +95,7 @@ func TestFallbackEndpoints_Parses(t *testing.T) {
 		t.Fatalf("got %d fallback endpoints, want 1", len(cfg.FallbackEndpoints))
 	}
 	fb := cfg.FallbackEndpoints[0]
-	if fb.Protocol != "openai" || len(fb.Providers) != 1 || fb.Providers[0] != "p2" || fb.Priority != 90 {
+	if fb.Protocol != "openai-completions" || len(fb.Providers) != 1 || fb.Providers[0] != "p2" || fb.Priority != 90 {
 		t.Errorf("fallback endpoint = %+v, unexpected", fb)
 	}
 }
@@ -141,7 +141,7 @@ func TestFallbackEndpoints_ReuseEndpointGroupValidation(t *testing.T) {
 }
 
 func TestFallbackEndpoints_UnknownProtocolRejected(t *testing.T) {
-	yaml := strings.Replace(fallbackYAML, "protocol: openai\n    providers: [p2]", "protocol: nosuch\n    providers: [p2]", 1)
+	yaml := strings.Replace(fallbackYAML, "protocol: openai-completions\n    providers: [p2]", "protocol: nosuch\n    providers: [p2]", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Errorf("want unknown protocol error, got %v", err)
@@ -191,22 +191,22 @@ listen: 127.0.0.1:9904
 pricing: {currency: USD}
 providers:
   - name: p1
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k1
   - name: costy
-    base_url: {openai: https://api.example.com/v1}
+    base_url: {openai-completions: https://api.example.com/v1}
     api_key: k2
     quota:
       limits: [{metric: cost, every: 1mo, since: 2026-08-01, amount: 100}]
 fallback_endpoints:
-  - protocol: openai
+  - protocol: openai-completions
     providers: [costy]
     models: [totally-unpriceable-model-xyz]
     priority: 90
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
 `

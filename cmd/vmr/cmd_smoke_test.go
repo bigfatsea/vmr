@@ -33,13 +33,13 @@ func smokeServerYAML(t *testing.T, u1, u2 string) string {
 listen: 127.0.0.1:0
 api_keys: ["sk-vmr-smoke-test-key"]
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: key-a}
-  - {name: p2, base_url: {openai: %s}, api_key: key-b}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: key-a}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: key-b}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-a], priority: 1}
-      - {protocol: openai, providers: [p2], models: [model-b], priority: 2}
+      - {protocol: openai-completions, providers: [p1], models: [model-a], priority: 1}
+      - {protocol: openai-completions, providers: [p2], models: [model-b], priority: 2}
 `, u1, u2)
 }
 

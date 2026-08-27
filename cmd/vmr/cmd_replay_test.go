@@ -13,7 +13,7 @@ import (
 
 func replayAuditFile(t *testing.T) string {
 	t.Helper()
-	line := `{"model":"m1","protocol":"openai","stream":false,"client":{"request":{"headers":{},"body":{"model":"m1","messages":[{"role":"user","content":"hi"}]}}}}` + "\n"
+	line := `{"model":"m1","protocol":"openai-completions","stream":false,"client":{"request":{"headers":{},"body":{"model":"m1","messages":[{"role":"user","content":"hi"}]}}}}` + "\n"
 	return writeTempFile(t, "audit.jsonl", line)
 }
 
@@ -55,7 +55,7 @@ func TestCmdReplay_DryRun(t *testing.T) {
 
 func TestCmdReplay_TSFlag(t *testing.T) {
 	path := diagnoseConfigYAML(t, "http://127.0.0.1:1/unreachable")
-	line := `{"ts":"2026-07-13T15:30:42.123Z","model":"m1","protocol":"openai","stream":false,"client":{"request":{"headers":{},"body":{"model":"m1","messages":[{"role":"user","content":"hi"}]}}}}` + "\n"
+	line := `{"ts":"2026-07-13T15:30:42.123Z","model":"m1","protocol":"openai-completions","stream":false,"client":{"request":{"headers":{},"body":{"model":"m1","messages":[{"role":"user","content":"hi"}]}}}}` + "\n"
 	auditPath := writeTempFile(t, "audit.jsonl", line)
 	got := captureStdout(t, func() {
 		if err := cmdReplay([]string{"-c", path, "-provider", "p1", "-dry-run", "-ts", "2026-07-13T15:30:42.123Z", auditPath}); err != nil {

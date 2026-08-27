@@ -18,7 +18,7 @@ const quotaConfigYAML = `
 listen: 127.0.0.1:0
 providers:
   - name: plan-a
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
     quota:
       limits:
@@ -26,7 +26,7 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [plan-a]
         models: [real-model]
 `
@@ -74,12 +74,12 @@ pricing:
   currency: USD
 providers:
   - name: plan-a
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [plan-a]
         models: [real-model]
 `
@@ -119,7 +119,7 @@ pricing:
   currency: USD
 providers:
   - name: anthropic
-    base_url: {anthropic: https://example.com/v1}
+    base_url: {anthropic-messages: https://example.com/v1}
     api_key: test-key
     quota:
       limits:
@@ -130,7 +130,7 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic
+      - protocol: anthropic-messages
         providers: [anthropic]
         models: [claude-3-7-sonnet-20250219]
 `
@@ -174,7 +174,7 @@ pricing:
   currency: USD
 providers:
   - name: p1
-    base_url: {openai: https://example.com/v1}
+    base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
     pricing:
       overrides:
@@ -182,7 +182,7 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [other-model]
 `
@@ -203,11 +203,11 @@ func TestCmdCheck_ListenExposureWarningDoesNotFail(t *testing.T) {
 	yaml := `
 listen: 0.0.0.0:8800
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: test-key}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: test-key}
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [real-model]
 `
@@ -260,9 +260,9 @@ func TestCmdStatus_RendersQuotaLine(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -293,9 +293,9 @@ func TestCmdStatus_NoQuotaArray_NoQuotaLines(t *testing.T) {
 	yaml := fmt.Sprintf(`
 listen: %s
 providers:
-  - {name: p1, base_url: {openai: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)

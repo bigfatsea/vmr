@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/core"
 	"vmr/internal/jsonscan"
 
 	"golang.org/x/image/draw"
@@ -122,9 +123,9 @@ type ImageInfo struct {
 // opts.MaxPx, re-encoding them as JPEG scaled to fit within opts.MaxPx, and
 // always returns a description of every image it found (see ImageInfo) —
 // detection doesn't depend on opts.MaxPx being positive. protocol selects
-// which content-block shape to look for ("openai": content[].image_url.url
-// data URI; "anthropic": content[].source with type "base64"; "openai-
-// responses": content[].image_url as a flat data URI string, see
+// which content-block shape to look for ("openai-completions":
+// content[].image_url.url data URI; "anthropic-messages": content[].source
+// with type "base64"; "openai-responses": content[].image_url as a flat data URI string, see
 // rewriteResponsesImage). On any rewrite failure, or when nothing needed
 // resizing, the returned body is the original unchanged (same backing
 // array) — images is still populated.
@@ -178,7 +179,7 @@ func Downscale(body []byte, protocol string, opts Options) (result []byte, image
 // Completions' "content is a plain string" case, and rewriteBody correctly
 // no-ops rather than erroring.
 func containerKey(protocol string) string {
-	if protocol == "openai-responses" {
+	if protocol == core.ProtocolOpenAIResponses {
 		return "input"
 	}
 	return "messages"
@@ -275,11 +276,11 @@ func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Optio
 		return raw, false, nil, nil
 	}
 	switch {
-	case protocol == "openai" && typ == "image_url":
+	case protocol == core.ProtocolOpenAICompletions && typ == "image_url":
 		return rewriteOpenAIImage(msgIndex, raw, block, opts)
-	case protocol == "anthropic" && typ == "image":
+	case protocol == core.ProtocolAnthropicMessages && typ == "image":
 		return rewriteAnthropicImage(msgIndex, raw, block, opts)
-	case protocol == "openai-responses" && typ == "input_image":
+	case protocol == core.ProtocolOpenAIResponses && typ == "input_image":
 		return rewriteResponsesImage(msgIndex, raw, block, opts)
 	default:
 		return raw, false, nil, nil

@@ -23,21 +23,21 @@ import (
 	"vmr/internal/jsonscan"
 )
 
-func init() { adapter.Register("openai-responses", OpenAIResponses{}) }
+func init() { adapter.Register(core.ProtocolOpenAIResponses, OpenAIResponses{}) }
 
 // responsesPath is the bare protocol path; base_url must already carry the
 // provider's own API version (see adapter.ResolveURL). Distinct from
 // internal/adapter/openai's "/chat/completions" path even though several
 // providers (DeepSeek, OpenRouter) serve both from the same host — the two
 // are different endpoints with different request/response shapes, so they
-// get different Endpoint entries (protocol: openai vs protocol:
+// get different Endpoint entries (protocol: openai-completions vs protocol:
 // openai-responses) even when base_url is written identically under both
 // provider.base_url keys.
 const responsesPath = "/responses"
 
 type OpenAIResponses struct{}
 
-func (OpenAIResponses) Protocol() string { return "openai-responses" }
+func (OpenAIResponses) Protocol() string { return core.ProtocolOpenAIResponses }
 func (OpenAIResponses) ResolveURL(baseURL string) string {
 	return adapter.ResolveURL(baseURL, responsesPath)
 }

@@ -16,7 +16,7 @@ import (
 func selfTrafficFixtureRecords() []map[string]any {
 	mk := func(ts time.Time, tag string) map[string]any {
 		return map[string]any{
-			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 			"client_key_tag": tag,
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
@@ -29,7 +29,7 @@ func selfTrafficFixtureRecords() []map[string]any {
 					"usage": map[string]any{"prompt_tokens": 1000, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -100,7 +100,7 @@ func TestIngestRecord_NoExclusionByDefault(t *testing.T) {
 func TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak(t *testing.T) {
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	workloadWithTool := map[string]any{
-		"ts": t0.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"ts": t0.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 		"client_key_tag": "workload",
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{
@@ -116,10 +116,10 @@ func TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak(t *testing.T) {
 				"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 5},
 			}},
 		},
-		"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	selfTrafficWithTool := map[string]any{
-		"ts": t0.Add(time.Minute).Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"ts": t0.Add(time.Minute).Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 		"client_key_tag": "vmrstory",
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{
@@ -134,10 +134,10 @@ func TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak(t *testing.T) {
 				"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 5},
 			}},
 		},
-		"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	selfTrafficCompaction := map[string]any{
-		"ts": t0.Add(2 * time.Minute).Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"ts": t0.Add(2 * time.Minute).Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 		"client_key_tag": "vmrstory",
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{
@@ -154,7 +154,7 @@ func TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak(t *testing.T) {
 				"usage": map[string]any{"prompt_tokens": 500, "completion_tokens": 30},
 			}},
 		},
-		"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 
 	dir := t.TempDir()

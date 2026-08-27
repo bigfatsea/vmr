@@ -84,11 +84,11 @@ func TestResponse_NonStreamingNoDoneSentinel(t *testing.T) {
 	cfg, _ := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	rt := router.New(nil)
 	snap, _ := router.BuildSnapshot(cfg)
@@ -122,11 +122,11 @@ func TestResponse_NormalizedThroughVMR(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + up.srv.URL + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + up.srv.URL + `}, api_key: k1}
 models:
   agent:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [MiniMax-M3]}
+      - {protocol: openai-completions, providers: [p1], models: [MiniMax-M3]}
 `))
 	if err != nil {
 		t.Fatal(err)

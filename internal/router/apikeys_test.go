@@ -20,7 +20,7 @@ const apiKeysSnapYAML = `
 listen: 127.0.0.1:0
 providers:
   - name: openrouter
-    base_url: {openai: https://openrouter.example.com}
+    base_url: {openai-completions: https://openrouter.example.com}
     api_keys:
       team_a: sk-aaaaaaaaaaaaaaaa
       team_b: sk-bbbbbbbbbbbbbbbb
@@ -29,7 +29,7 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [openrouter]
         models: [model-a]
         priority: 1
@@ -47,7 +47,7 @@ func TestBuildSnapshot_APIKeys_ExpandsIntoDistinctEndpointsWithOwnCredentials(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	if len(eps) != 2 {
 		t.Fatalf("got %d endpoints, want 2 (one per api_keys entry)", len(eps))
 	}
@@ -84,7 +84,7 @@ func TestBuildSnapshot_APIKeys_QuotaAndHealthAreIndependentPerKey(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	if eps[0].Quota == nil || eps[1].Quota == nil {
 		t.Fatalf("both keys declared quota:, want both endpoints' Quota non-nil: %+v / %+v", eps[0].Quota, eps[1].Quota)
 	}

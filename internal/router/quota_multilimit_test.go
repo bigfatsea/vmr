@@ -163,18 +163,18 @@ func TestQuotaStatus_PerModelWildcard_OneRowPerActuallyChargedModel(t *testing.T
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1min, amount: 60, models: ["*"]}]
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [model-a, model-b]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-a, model-b]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
-	epA := snap.Models["openai"]["m1"].Endpoints[0]
-	epB := snap.Models["openai"]["m1"].Endpoints[1]
+	epA := snap.Models["openai-completions"]["m1"].Endpoints[0]
+	epB := snap.Models["openai-completions"]["m1"].Endpoints[1]
 	if epA.Model == "model-b" {
 		epA, epB = epB, epA
 	}
@@ -217,18 +217,18 @@ func TestQuotaStatus_PerModelRestrictedList_OnlyListedModelsCanProduceRows(t *te
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1d, amount: 200, models: [premium-model]}]
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [premium-model, other-model]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [premium-model, other-model]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
-	epPremium := snap.Models["openai"]["m1"].Endpoints[0]
-	epOther := snap.Models["openai"]["m1"].Endpoints[1]
+	epPremium := snap.Models["openai-completions"]["m1"].Endpoints[0]
+	epOther := snap.Models["openai-completions"]["m1"].Endpoints[1]
 	if epPremium.Model != "premium-model" {
 		epPremium, epOther = epOther, epPremium
 	}
@@ -250,7 +250,7 @@ func TestChargeQuota_MultiLimit_TokensOnlyFetchedWhenSomeLimitNeedsIt(t *testing
 	req := requestsLimit(1000) // metric: requests — never needs usage extraction
 	spec := &core.QuotaSpec{Limits: []core.Limit{req}}
 	ep := &core.Endpoint{Provider: "p1", Model: "m", Quota: spec}
-	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai", Opaque: false})
+	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 
 	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow)
 
@@ -275,7 +275,7 @@ func TestQuotaStatus_RoleIsPerModelNotGlobal(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: google
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits:
@@ -285,14 +285,14 @@ providers:
 models:
   m1:
     endpoints:
-      - {protocol: openai, providers: [google], models: [lite, flash]}
+      - {protocol: openai-completions, providers: [google], models: [lite, flash]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
 
 	// Charge once per model so each per-model Limit has a live row.
 	for _, m := range []string{"lite", "flash"} {
-		ep := &core.Endpoint{Provider: "google", Model: m, Quota: snap.Models["openai"]["m1"].Endpoints[0].Quota}
+		ep := &core.Endpoint{Provider: "google", Model: m, Quota: snap.Models["openai-completions"]["m1"].Endpoints[0].Quota}
 		ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, chargeNow)
 	}
 

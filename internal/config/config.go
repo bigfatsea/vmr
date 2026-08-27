@@ -115,8 +115,8 @@ type EndpointGroup struct {
 // represent that distinction (priority: model > global).
 //
 // A VirtualModel is reachable from whichever ingress protocol(s) its own
-// Endpoints declare — the same virtual model name can mix an openai-protocol
-// entry and an anthropic-protocol entry in one place, each independently
+// Endpoints declare — the same virtual model name can mix an openai-completions
+// entry and an anthropic-messages entry in one place, each independently
 // reachable only from its own protocol's ingress (POST /v1/chat/completions
 // vs POST /v1/messages); see BuildSnapshot.
 type VirtualModel struct {

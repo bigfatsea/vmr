@@ -107,7 +107,7 @@ func TestCmdReport_DefaultsToConfigLogDir(t *testing.T) {
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
 	if err := os.WriteFile(filepath.Join(logDir, "vmr-audit-2026-07-08.jsonl"), []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}

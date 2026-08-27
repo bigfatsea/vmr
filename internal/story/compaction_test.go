@@ -27,7 +27,7 @@ data: {"choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"promp
 		strconv.FormatInt(promptTokens, 10) + `,"completion_tokens":` + strconv.FormatInt(completionTokens, 10) + `}}
 data: [DONE]`
 	return audit.Record{
-		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: map[string][]string{}, Body: body},
 			Response: &audit.Message{Status: 200, Headers: map[string][]string{}, Body: sse},

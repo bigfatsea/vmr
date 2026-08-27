@@ -47,7 +47,7 @@ func TestErrorBodyStallStillFailsOver(t *testing.T) {
 
 	start := time.Now()
 	resp, body := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
 		t.Fatalf("expected failover to p2, got status=%d ep=%s body=%s",
 			resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"), body)
 	}
@@ -65,11 +65,11 @@ func TestNonSSEBodyStallAborts(t *testing.T) {
 listen: 127.0.0.1:0
 timeouts: {stream_idle: 300ms}
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-one]}
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
 `, u.URL)
 	ts := newRouterServer(t, yaml)
 

@@ -27,10 +27,10 @@ English | [简体中文](README.zh.md)
 Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) — run `./vmr report -o /tmp/out examples/sample-audit.jsonl` and compare. The primary endpoint silently content-blocks the request; vmr retries the same payload on the backup endpoint, so the client only sees a 200 OK:
 
 ```
-### Attempt 1/2 · openai:coder-primary:coder-large · ❌ HTTP 403
+### Attempt 1/2 · openai-completions:coder-primary:coder-large · ❌ HTTP 403
 {"error": {"code": "content_flagged", "message": "This request was flagged by our safety guardrail and blocked.", "type": "guardrail_blocked"}}
 
-### Attempt 2/2 · openai:coder-backup:coder-large-mini · ✅ HTTP 200 (2.5s)
+### Attempt 2/2 · openai-completions:coder-backup:coder-large-mini · ✅ HTTP 200 (2.5s)
 ```
 
 ### 2. Agent Execution Narrative & Context Loss (`vmr story`)

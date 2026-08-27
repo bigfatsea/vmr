@@ -15,21 +15,21 @@ const quotaSnapYAML = `
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits:
         - {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}
   - name: p2
-    base_url: {openai: https://example2.com}
+    base_url: {openai-completions: https://example2.com}
     api_key: k2
 models:
   m1:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [model-a, model-b]
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p2]
         models: [model-c]
 `
@@ -43,7 +43,7 @@ func TestBuildSnapshot_QuotaSpecAttachedAndSharedPerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := snap.Models["openai"]["m1"]
+	route := snap.Models["openai-completions"]["m1"]
 	var p1Endpoints, p2Endpoints []*core.Endpoint
 	for _, ep := range route.Endpoints {
 		switch ep.Provider {
@@ -82,10 +82,10 @@ func TestBuildSnapshot_NoQuotaAnywhere_AllEndpointsNil(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -95,7 +95,7 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ep := range snap.Models["openai"]["m1"].Endpoints {
+	for _, ep := range snap.Models["openai-completions"]["m1"].Endpoints {
 		if ep.Quota != nil {
 			t.Errorf("endpoint %s: Quota = %+v, want nil", ep.Name(), ep.Quota)
 		}

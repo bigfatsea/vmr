@@ -43,7 +43,7 @@ func TestRespStream_ModelFieldRewrite(t *testing.T) {
 		`data: {"id":"a","model":"MiniMax-M3","object":"chunk"}` + "\n\n" +
 			`data: {"id":"b","model":"MiniMax-M3","object":"chunk"}` + "\n\n",
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 
 	if strings.Contains(out, "MiniMax-M3") {
 		t.Errorf("upstream model name leaked: %q", out)
@@ -62,7 +62,7 @@ func TestRespStream_ThinkBlockStripped(t *testing.T) {
 			`<think>The user said hi, so I will respond with a greeting.</think>\n\n` +
 			`Hi there!"}}]}` + "\n\n",
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 
 	if strings.Contains(out, "<think>") {
 		t.Errorf("think block start leaked: %q", out)
@@ -85,7 +85,7 @@ func TestRespStream_ThinkBlockCrossChunk(t *testing.T) {
 		`data: {"choices":[{"delta":{"content":"<think>step 1. step 2. step` + "\n\n" +
 			`data: {"choices":[{"delta":{"content":" 3. step 4.</think>real"}}]}` + "\n\n",
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 
 	if strings.Contains(out, "step 1") {
 		t.Errorf("think content not stripped across SSE messages: %q", out)
@@ -105,7 +105,7 @@ func TestRespStream_DoneSentinel(t *testing.T) {
 	src := strings.NewReader(
 		`data: {"id":"x","choices":[],"model":"MiniMax-M3","object":"chunk"}` + "\n\n",
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 
 	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
 		t.Errorf("missing [DONE] sentinel, tail=%q", out)
@@ -121,7 +121,7 @@ func TestRespStream_NonStreamSingleObject(t *testing.T) {
 	src := strings.NewReader(
 		`{"id":"x","model":"MiniMax-M3","choices":[{"message":{"role":"assistant","content":"<think>hello</think>\n\nHi"}}]}`,
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 
 	if !strings.Contains(out, `"model":"agent"`) {
 		t.Errorf("non-stream model rewrite failed: %q", out)
@@ -142,7 +142,7 @@ func TestRespStream_NoThinkBlockPassthrough(t *testing.T) {
 	// Normal content without any think markers should be untouched.
 	// The trailing newlines in delta.content are preserved.
 	in := `data: {"choices":[{"delta":{"content":"plain reply"}}]}` + "\n\n"
-	out := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+	out := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false))
 	if !strings.Contains(out, "plain reply") {
 		t.Errorf("plain content lost: %q", out)
 	}
@@ -155,7 +155,7 @@ func TestRespStream_OneByteReads(t *testing.T) {
 	// bytes are chunked on the wire.
 	srcStr := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"` +
 		`<think>step 1. step 2. step 3.</think>result"}}]}` + "\n\n"
-	out := readAll(t, newStream(oneByteReader{src: strings.NewReader(srcStr)}, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(oneByteReader{src: strings.NewReader(srcStr)}, "agent", "", true, "openai-completions", false))
 
 	if strings.Contains(out, "MiniMax-M3") {
 		t.Errorf("upstream model name leaked under 1-byte reads: %q", out)
@@ -182,11 +182,11 @@ func TestStream_OutTokens_ChunkingIndependent(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat(`data: {"choices":[{"delta":{"content":"hello world, streamed SSE content"}}]}`+"\n\n", 50)
 
-	whole := newStream(strings.NewReader(body), "agent", "", true, "openai", false)
+	whole := newStream(strings.NewReader(body), "agent", "", true, "openai-completions", false)
 	readAll(t, whole)
 	wholeTokens := whole.OutTokens()
 
-	chunked := newStream(oneByteReader{src: strings.NewReader(body)}, "agent", "", true, "openai", false)
+	chunked := newStream(oneByteReader{src: strings.NewReader(body)}, "agent", "", true, "openai-completions", false)
 	readAll(t, chunked)
 	chunkedTokens := chunked.OutTokens()
 
@@ -395,7 +395,7 @@ func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
 	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
 	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
 	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed the reply\"}}\n\n"
-	out := readAll(t, newStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", "", true, "openai", false))
+	out := readAll(t, newStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", "", true, "openai-completions", false))
 
 	if !strings.HasSuffix(out, "\n\ndata: [DONE]\n\n") {
 		t.Errorf("[DONE] not separated from the last data line, tail=%q", out)
@@ -408,7 +408,7 @@ func TestRespStream_StripKeepsSSEFraming(t *testing.T) {
 func TestRespStream_EmptySource(t *testing.T) {
 	t.Parallel()
 	// Empty source: just the [DONE] sentinel should be emitted.
-	out := readAll(t, newStream(strings.NewReader(""), "agent", "", true, "openai", false))
+	out := readAll(t, newStream(strings.NewReader(""), "agent", "", true, "openai-completions", false))
 	if out != "data: [DONE]\n\n" {
 		t.Errorf("empty source produced %q, want only [DONE]", out)
 	}
@@ -430,7 +430,7 @@ func TestRespStream_NestedModelInDelta(t *testing.T) {
 		`data: {"id":"x","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant",` +
 			`"tool_calls":[{"function":{"name":"x","model":"nested-value"}}]}}]}` + "\n\n",
 	)
-	out := readAll(t, newStream(src, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
 	if got := strings.Count(out, `"model":"agent"`); got != 2 {
 		t.Errorf("expected both the top-level AND the nested model field rewritten to the client model (regex has no depth awareness), got %d rewrites in: %q", got, out)
 	}
@@ -453,7 +453,7 @@ func TestRespStream_ModelNameWithDollar(t *testing.T) {
 	t.Run("buffered", func(t *testing.T) {
 		t.Parallel()
 		src := strings.NewReader(`{"id":"x","model":"real-upstream-model"}`)
-		out := readAll(t, newStream(src, clientModel, "real-upstream-model", false, "openai", false))
+		out := readAll(t, newStream(src, clientModel, "real-upstream-model", false, "openai-completions", false))
 		if !strings.Contains(out, `"model":"gpt$4"`) {
 			t.Errorf("model field not rewritten to the full client model name, got: %q", out)
 		}
@@ -464,7 +464,7 @@ func TestRespStream_ModelNameWithDollar(t *testing.T) {
 		src := strings.NewReader(
 			`data: {"id":"x","model":"real-upstream-model","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n",
 		)
-		out := readAll(t, newStream(src, clientModel, "real-upstream-model", true, "openai", false))
+		out := readAll(t, newStream(src, clientModel, "real-upstream-model", true, "openai-completions", false))
 		if !strings.Contains(out, `"model":"gpt$4"`) {
 			t.Errorf("model field not rewritten to the full client model name, got: %q", out)
 		}
@@ -495,7 +495,7 @@ func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
 	ev1 := `data: {"id":"1","model":"MiniMax-M3","choices":[{"delta":{"content":"hello"}}]}` + "\n\n"
 	ev2 := `data: {"id":"1","model":"MiniMax-M3","choices":[{"finish_reason":"stop","delta":{}}]}` + "\n\n"
 	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
-	rs := newStream(sr, "agent", "", true, "openai", false)
+	rs := newStream(sr, "agent", "", true, "openai-completions", false)
 
 	buf := make([]byte, 64<<10)
 	n, err := rs.Read(buf)
@@ -570,7 +570,7 @@ func TestRespStream_NoDoubleDone(t *testing.T) {
 	// not append a second one.
 	in := `data: {"id":"1","model":"M","choices":[{"delta":{"content":"hi"}}]}` + "\n\n" +
 		"data: [DONE]\n\n"
-	out := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+	out := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false))
 	if c := strings.Count(out, "data: [DONE]"); c != 1 {
 		t.Errorf("expected exactly one [DONE], got %d in %q", c, out)
 	}
@@ -592,7 +592,7 @@ func TestRespStream_NoDoubleDone(t *testing.T) {
 func TestRespStream_DoneAppendNotDuplicatedAcrossFragmentedEventSep(t *testing.T) {
 	t.Parallel()
 	in := `"content":"0` + "\n\n\n"
-	out := readAll(t, newStream(oneByteReader{src: strings.NewReader(in)}, "agent", "", true, "openai", false))
+	out := readAll(t, newStream(oneByteReader{src: strings.NewReader(in)}, "agent", "", true, "openai-completions", false))
 	want := in + "data: [DONE]\n\n"
 	if out != want {
 		t.Errorf("fragmented delivery produced a different result than the bytes alone should:\ngot=  %q\nwant= %q", out, want)
@@ -600,7 +600,7 @@ func TestRespStream_DoneAppendNotDuplicatedAcrossFragmentedEventSep(t *testing.T
 	// Cross-check against the same bytes delivered in one shot — the two
 	// must agree; a divergence here is exactly the class of bug this test
 	// exists to catch.
-	wholeShot := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+	wholeShot := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false))
 	if out != wholeShot {
 		t.Errorf("fragmented and whole-shot delivery of the same bytes disagree:\nfragmented= %q\nwhole-shot= %q", out, wholeShot)
 	}
@@ -616,7 +616,7 @@ func TestRespStream_AnthropicNoDoneAppended(t *testing.T) {
 		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}` + "\n\n" +
 		`event: message_stop` + "\n" +
 		`data: {"type":"message_stop"}` + "\n\n"
-	out := readAll(t, newStream(strings.NewReader(in), "claude", "", true, "anthropic", false))
+	out := readAll(t, newStream(strings.NewReader(in), "claude", "", true, "anthropic-messages", false))
 	if strings.Contains(out, "[DONE]") {
 		t.Errorf("anthropic stream polluted with [DONE]: %q", out)
 	}
@@ -634,7 +634,7 @@ func TestRespStream_OpaquePassthrough(t *testing.T) {
 	// strip, no [DONE] — running transforms over compressed bytes can
 	// only corrupt them.
 	in := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"<think>x</think>hi"}}]}` + "\n\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", true)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", true)
 	out := readAll(t, rs)
 	if out != in {
 		t.Errorf("opaque body modified:\n got %q\nwant %q", out, in)
@@ -649,7 +649,7 @@ func TestRespStream_AppliedTracking(t *testing.T) {
 	// The applied list must name every transform that ran, so the audit
 	// log can explain any upstream/client byte difference.
 	in := `data: {"model":"MiniMax-M3","choices":[{"delta":{"content":"<think>reason</think>\n\nreply"}}]}` + "\n\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if !strings.Contains(out, "reply") {
 		t.Fatalf("content lost: %q", out)
@@ -684,7 +684,7 @@ func TestRespStream_ThinkingPatternDetectedOnGuardMiss(t *testing.T) {
 	content := "Reasoning Steps:\\n\\n1. " + pad + "\\n\\n2. " + pad + "\\n\\n3. " + pad + "\\n\\nHere is the actual final answer."
 	in := `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
 
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 
 	// Fail-open: nothing was stripped, the leaked outline reaches the client
@@ -718,7 +718,7 @@ func TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires(t *testing.T) {
 		"\\n\\nLooks good. Proceed\\n\\nactual final answer here"
 	in := `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
 
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 
 	if !strings.Contains(out, "actual final answer here") {
@@ -742,7 +742,7 @@ func TestRespStream_ThinkingPatternNotDoubleTaggedWhenStripFires(t *testing.T) {
 func TestRespStream_ThinkingPatternNotTaggedOnOrdinaryContent(t *testing.T) {
 	t.Parallel()
 	in := `data: {"choices":[{"delta":{"content":"Sure, here are the steps:\\n\\n1. First\\n\\n2. Second\\n\\nDone."}}]}` + "\n\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	readAll(t, rs)
 	for _, a := range rs.Applied() {
 		if a == "thinking_process_pattern_detected" {
@@ -759,7 +759,7 @@ func TestRespStream_ReasoningContentStreams(t *testing.T) {
 	ev1 := `data: {"model":"deepseek-v4","choices":[{"delta":{"reasoning_content":"thinking..."}}]}` + "\n\n"
 	ev2 := `data: {"model":"deepseek-v4","choices":[{"delta":{"content":"answer"}}]}` + "\n\n"
 	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
-	rs := newStream(sr, "agent", "", true, "openai", false)
+	rs := newStream(sr, "agent", "", true, "openai-completions", false)
 
 	buf := make([]byte, 64<<10)
 	n, err := rs.Read(buf)
@@ -782,7 +782,7 @@ func TestRespStream_ToolCallOnlyStreams(t *testing.T) {
 	ev1 := `data: {"model":"M","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":""}}]}}]}` + "\n\n"
 	ev2 := `data: {"model":"M","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"x\"}"}}]}}]}` + "\n\n"
 	sr := &scriptReader{chunks: [][]byte{[]byte(ev1), []byte(ev2)}}
-	rs := newStream(sr, "agent", "", true, "openai", false)
+	rs := newStream(sr, "agent", "", true, "openai-completions", false)
 
 	buf := make([]byte, 64<<10)
 	n, err := rs.Read(buf)
@@ -802,7 +802,7 @@ func TestRespStream_ThinkingProcessBuffered(t *testing.T) {
 	roleLine := "data: {\"delta\":{\"role\":\"assistant\"}}\n\n"
 	thinkingLine := "data: {\"delta\":{\"content\":\"Thinking Process:\\n\\n1. **Drafting**\"}}\n\n"
 	finalLine := "data: {\"delta\":{\"content\":\"    Looks good. Proceed the reply\"}}\n\n"
-	rs := newStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(roleLine+thinkingLine+finalLine), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if strings.Contains(out, "Thinking Process") || strings.Contains(out, "Looks good") {
 		t.Errorf("thinking leaked: %q", out)
@@ -829,7 +829,7 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 	ev3 := `data: {"model":"M","choices":[{"delta":{"content":" step 2.</think>\n\nanswer starts"}}]}` + "\n\n"
 	ev4 := `data: {"model":"M","choices":[{"delta":{"content":" and continues"}}]}` + "\n\n"
 	sr := &scriptReader{chunks: [][]byte{[]byte(ev1 + ev2), []byte(ev3), []byte(ev4)}}
-	rs := newStream(sr, "agent", "", true, "openai", false)
+	rs := newStream(sr, "agent", "", true, "openai-completions", false)
 
 	// Drive reads until the first output appears; remember how many
 	// source chunks had been consumed at that moment.
@@ -887,7 +887,7 @@ func TestRespStream_ResumesStreamingAfterThinkCloses(t *testing.T) {
 // event.
 func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 	t.Parallel()
-	rs := newStream(strings.NewReader(""), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(""), "agent", "", true, "openai-completions", false)
 	filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, contains no "\n\n"
 	for i := 0; i < 40 && !rs.opaque; i++ {    // loop caps at 40MB, well past bufferedCap (8MB); breaks early once opaque
 		rs.ingest(filler)
@@ -932,7 +932,7 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
 	t.Parallel()
 	in := "data: {\"model\":\"MiniMax-M3\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if !strings.Contains(out, `"model":"agent"`) {
 		t.Errorf("model not rewritten despite CRLF framing: %q", out)
@@ -959,7 +959,7 @@ func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
 // co-occur.
 func TestRespStream_CRLFFramingSuspectedOnOverflow(t *testing.T) {
 	t.Parallel()
-	rs := newStream(strings.NewReader(""), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(""), "agent", "", true, "openai-completions", false)
 	rs.ingest([]byte("data: {\"model\":\"MiniMax-M3\"}\r\n\r\n")) // the only CRLF boundary in the whole stream
 	filler := bytes.Repeat([]byte("x"), 1<<20)                    // 1MB, contains no "\n\n" or "\r\n\r\n"
 	for i := 0; i < 40 && !rs.opaque; i++ {                       // loop caps at 40MB, well past bufferedCap (8MB); breaks early once opaque
@@ -989,7 +989,7 @@ func TestRespStream_ManyPingsThenContent(t *testing.T) {
 		in.WriteString(`event: ping` + "\n" + `data: {"type":"ping"}` + "\n\n")
 	}
 	in.WriteString(`data: {"delta":{"content":"hello"}}` + "\n\n")
-	rs := newStream(oneByteReader{strings.NewReader(in.String())}, "agent", "", true, "openai", false)
+	rs := newStream(oneByteReader{strings.NewReader(in.String())}, "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if c := strings.Count(out, `{"type":"ping"}`); c != 500 {
 		t.Errorf("expected all 500 withheld pings released exactly once, got %d", c)
@@ -1024,7 +1024,7 @@ func (r *dataThenErrReader) Read(p []byte) (int, error) {
 func TestRespStream_DeliversBytesBeforeSrcError(t *testing.T) {
 	t.Parallel()
 	ev := "data: {\"delta\":{\"content\":\"hi\"}}\n\n"
-	rs := newStream(&dataThenErrReader{data: []byte(ev), err: errors.New("conn reset")}, "agent", "", true, "openai", false)
+	rs := newStream(&dataThenErrReader{data: []byte(ev), err: errors.New("conn reset")}, "agent", "", true, "openai-completions", false)
 
 	buf := make([]byte, 4096)
 	n, err := rs.Read(buf)
@@ -1045,7 +1045,7 @@ func TestRespStream_DeliversBytesBeforeSrcError(t *testing.T) {
 func TestSoftBlockDetected_NonStreaming(t *testing.T) {
 	t.Parallel()
 	in := `{"id":"1","input_sensitive":true,"choices":[{"message":{"role":"assistant","content":""}}],"model":"MiniMax-M3"}`
-	rs := newStream(strings.NewReader(in), "agent", "", false, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", false, "openai-completions", false)
 	out := readAll(t, rs)
 	if !strings.Contains(out, `"input_sensitive":true`) {
 		t.Errorf("soft-block marker must reach the client unchanged (detection-only), got %q", out)
@@ -1071,7 +1071,7 @@ func TestSoftBlockDetected_Streaming(t *testing.T) {
 	t.Parallel()
 	roleLine := `data: {"delta":{"role":"assistant"}}` + "\n\n"
 	textLine := `data: {"delta":{"content":"hi"},"output_sensitive":true}` + "\n\n"
-	rs := newStream(strings.NewReader(roleLine+textLine), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(roleLine+textLine), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if !strings.Contains(out, `"output_sensitive":true`) {
 		t.Errorf("soft-block marker must reach the client unchanged, got %q", out)
@@ -1092,7 +1092,7 @@ func TestSoftBlockDetected_Streaming(t *testing.T) {
 func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
 	t.Parallel()
 	in := `{"id":"1","choices":[{"message":{"content":"all good"}}],"model":"m"}`
-	rs := newStream(strings.NewReader(in), "agent", "", false, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", false, "openai-completions", false)
 	readAll(t, rs)
 	for _, a := range rs.Applied() {
 		if a == "soft_block_detected" {
@@ -1108,7 +1108,7 @@ func TestSoftBlockDetected_NoFalsePositive(t *testing.T) {
 func TestRespStream_ThinkQuotedMidTextUntouched(t *testing.T) {
 	t.Parallel()
 	in := `data: {"choices":[{"delta":{"content":"The tag format is <think>reasoning goes here</think> followed by the reply."}}]}` + "\n\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "openai", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
 	out := readAll(t, rs)
 	if !strings.Contains(out, "<think>reasoning goes here</think>") {
 		t.Errorf("quoted think block was stripped from a normal reply: %q", out)
@@ -1126,7 +1126,7 @@ func TestRespStream_ThinkQuotedMidTextUntouched(t *testing.T) {
 func TestRespStream_ThinkQuotedMidTextNonStreamUntouched(t *testing.T) {
 	t.Parallel()
 	in := `{"model":"M","choices":[{"message":{"role":"assistant","content":"Explanation: models emit <think>steps</think> before answering."}}]}`
-	out := readAll(t, newStream(strings.NewReader(in), "agent", "", false, "openai", false))
+	out := readAll(t, newStream(strings.NewReader(in), "agent", "", false, "openai-completions", false))
 	if !strings.Contains(out, "<think>steps</think>") {
 		t.Errorf("quoted think block stripped from JSON body: %q", out)
 	}
@@ -1138,7 +1138,7 @@ func TestRespStream_ThinkQuotedMidTextNonStreamUntouched(t *testing.T) {
 func TestRespStream_AnthropicTextThinkStripped(t *testing.T) {
 	t.Parallel()
 	in := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<think>internal</think>\n\nvisible"}}` + "\n\n"
-	rs := newStream(strings.NewReader(in), "agent", "", true, "anthropic", false)
+	rs := newStream(strings.NewReader(in), "agent", "", true, "anthropic-messages", false)
 	out := readAll(t, rs)
 	if strings.Contains(out, "internal") {
 		t.Errorf("anthropic-face think block leaked: %q", out)
@@ -1169,10 +1169,10 @@ func TestStream_ReadAfterEOFIsTerminal(t *testing.T) {
 		protocol string
 		opaque   bool
 	}{
-		{"openai sse passthrough", true, "openai", false},
-		{"anthropic sse passthrough", true, "anthropic", false},
-		{"non-sse buffered", false, "openai", false},
-		{"opaque", true, "openai", true},
+		{"openai sse passthrough", true, "openai-completions", false},
+		{"anthropic sse passthrough", true, "anthropic-messages", false},
+		{"non-sse buffered", false, "openai-completions", false},
+		{"opaque", true, "openai-completions", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1204,10 +1204,10 @@ func TestStream_IoCopyMatchesReadAll(t *testing.T) {
 	in := `data: {"choices":[{"delta":{"content":"hello"}}]}` + "\n\n" +
 		`data: {"choices":[{"finish_reason":"stop"}]}` + "\n\n"
 
-	want := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai", false))
+	want := readAll(t, newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false))
 
 	var got bytes.Buffer
-	if _, err := io.Copy(&got, newStream(strings.NewReader(in), "agent", "", true, "openai", false)); err != nil {
+	if _, err := io.Copy(&got, newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)); err != nil {
 		t.Fatalf("io.Copy: %v", err)
 	}
 	if got.String() != want {
@@ -1234,7 +1234,7 @@ func TestStream_ConcurrentReadAndInspection(t *testing.T) {
 		pw.Close()
 	}()
 
-	rs := newStream(pr, "agent", "virtual-model", true, "openai", false)
+	rs := newStream(pr, "agent", "virtual-model", true, "openai-completions", false)
 
 	done := make(chan struct{})
 	go func() {

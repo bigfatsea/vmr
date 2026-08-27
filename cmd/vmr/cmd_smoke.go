@@ -68,11 +68,11 @@ type smokeResult struct {
 // shared body builder outside the adapters.
 func smokeRequestBody(protocol, model string) []byte {
 	switch protocol {
-	case "anthropic":
+	case core.ProtocolAnthropicMessages:
 		return []byte(`{"model":"` + model + `","max_tokens":4,"messages":[{"role":"user","content":"hi"}]}`)
-	case "openai-responses":
+	case core.ProtocolOpenAIResponses:
 		return []byte(`{"model":"` + model + `","input":"hi","max_output_tokens":4}`)
-	default: // openai
+	default: // openai-completions
 		// max_tokens: 4 covers upstreams with a strict minimum bound (e.g.
 		// Bai/DeepSeek rejects max_tokens <= 2 with a 400 invalid_request_error).
 		return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hi"}],"max_tokens":4}`)

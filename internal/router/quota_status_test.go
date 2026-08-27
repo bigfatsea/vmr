@@ -16,10 +16,10 @@ func TestQuotaStatus_NilRegistry(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
 `)
 	rt.Install(mustSnapshot(t, cfg))
 	if got := rt.QuotaStatus(); got != nil {
@@ -42,22 +42,22 @@ func TestQuotaStatus_ReportsConfiguredProvidersOnly(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]
-  - {name: p2, base_url: {openai: https://example2.com}, api_key: k2}
+  - {name: p2, base_url: {openai-completions: https://example2.com}, api_key: k2}
 models:
   m1:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1a, m1b]}
-      - {protocol: openai, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p1], models: [m1a, m1b]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
 
 	// Charge 3 requests to p1 before checking status.
-	l := snap.Models["openai"]["m1"].Endpoints[0].Quota.Limits[0]
+	l := snap.Models["openai-completions"]["m1"].Endpoints[0].Quota.Limits[0]
 	ps := quota.PeriodStart(l, time.Now())
 	rt.Quota.Charge("p1", "requests/1mo", ps, quota.Counters{Requests: 3}, 0)
 
@@ -90,17 +90,17 @@ func TestQuotaStatus_EstimatedPct(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - name: p1
-    base_url: {openai: https://example.com}
+    base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 100000}]
 models:
   m1:
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
-	l := snap.Models["openai"]["m1"].Endpoints[0].Quota.Limits[0]
+	l := snap.Models["openai-completions"]["m1"].Endpoints[0].Quota.Limits[0]
 	ps := quota.PeriodStart(l, time.Now())
 	// 100 exact + 100 estimated = 200 total, 100 of it estimated -> 50%.
 	rt.Quota.Charge("p1", "tokens/1mo", ps, quota.Counters{Fresh: 100}, 0)

@@ -91,7 +91,7 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 	var atts []string
 	for _, a := range r.attempts {
 		ep := core.EndpointLabel("openai", provider, r.model)
-		fields := fmt.Sprintf(`"endpoint":%q,"protocol":"openai","provider":%q,"model":%q,"url":"https://example.com/v1","dur_ms":5,"request":{}`,
+		fields := fmt.Sprintf(`"endpoint":%q,"protocol":"openai-completions","provider":%q,"model":%q,"url":"https://example.com/v1","dur_ms":5,"request":{}`,
 			ep, provider, r.model)
 		switch {
 		case a.status == 0:
@@ -122,7 +122,7 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 	if r.estTokens > 0 {
 		facts = fmt.Sprintf(`,"facts":{"estimated_tokens":%d}`, r.estTokens)
 	}
-	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":"openai","outcome":%q%s,"client":{"request":{}%s},"attempts":[%s]}`,
+	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":%q%s,"client":{"request":{}%s},"attempts":[%s]}`,
 		ts.Format(time.RFC3339), outcome, facts, clientResp, strings.Join(atts, ","))
 }
 
@@ -151,7 +151,7 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 			if !a.forwarded() {
 				continue // the router only ever charges a forwarded response
 			}
-			ep := &core.Endpoint{AdapterType: "openai", Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
+			ep := &core.Endpoint{AdapterType: "openai-completions", Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
 			router.ChargeResponse(reg, ep, raw, estimated, now)
 		}
 	}

@@ -16,8 +16,8 @@ func TestTelemetry_Basic(t *testing.T) {
 	}
 
 	// Record requests
-	tel.RecordRequest("openai")
-	tel.RecordRequest("anthropic")
+	tel.RecordRequest("openai-completions")
+	tel.RecordRequest("anthropic-messages")
 	tel.RecordRequest("openai-responses")
 	tel.RecordOutcome(true, false)
 	tel.RecordOutcome(false, true)
@@ -30,7 +30,7 @@ func TestTelemetry_Basic(t *testing.T) {
 	if snap.Requests.Total != 3 {
 		t.Errorf("expected total=3, got %d", snap.Requests.Total)
 	}
-	if snap.Requests.ByProtocol["openai"] != 1 || snap.Requests.ByProtocol["anthropic"] != 1 || snap.Requests.ByProtocol["openai-responses"] != 1 {
+	if snap.Requests.ByProtocol["openai-completions"] != 1 || snap.Requests.ByProtocol["anthropic-messages"] != 1 || snap.Requests.ByProtocol["openai-responses"] != 1 {
 		t.Errorf("unexpected by_protocol: %+v", snap.Requests.ByProtocol)
 	}
 	if snap.Requests.ByStatus["ok"] != 1 || snap.Requests.ByStatus["canceled"] != 1 || snap.Requests.ByStatus["error"] != 1 {
@@ -44,7 +44,7 @@ func TestTelemetry_Basic(t *testing.T) {
 
 func TestTelemetry_NilSafe(t *testing.T) {
 	var tel *Telemetry
-	tel.RecordRequest("openai")
+	tel.RecordRequest("openai-completions")
 	tel.RecordOutcome(true, false)
 	tel.RecordTokens(100, 10, 20, 5, 50)
 	snap := tel.Snapshot()
@@ -63,11 +63,11 @@ func TestTelemetry_ServeOutcomeCoverage(t *testing.T) {
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: http://127.0.0.1:1}, api_key: k}
-  - {name: p2, base_url: {anthropic: https://example.com/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
+  - {name: p2, base_url: {anthropic-messages: https://example.com/v1}, api_key: k}
 models:
-  coding: {endpoints: [{protocol: openai, providers: [p1], models: [m]}]}
-  claude: {endpoints: [{protocol: anthropic, providers: [p2], models: [m]}]}
+  coding: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  claude: {endpoints: [{protocol: anthropic-messages, providers: [p2], models: [m]}]}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))

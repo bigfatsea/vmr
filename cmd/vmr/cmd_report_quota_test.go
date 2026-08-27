@@ -292,7 +292,7 @@ func TestCmdReport_QuotaSourceMetaWiredWhenSubTableRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	auditPath := filepath.Join(auditDir, "vmr-audit-2026-01-15.jsonl")
-	line := `{"ts":"2026-01-15T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai","outcome":"ok","client":{"request":{}}}` + "\n"
+	line := `{"ts":"2026-01-15T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
 	if err := os.WriteFile(auditPath, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -318,14 +318,14 @@ func TestCmdReport_QuotaSourceMetaWiredWhenSubTableRenders(t *testing.T) {
 }
 
 func quotaYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: requests, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai-completions\n        providers: [acct1]\n        models: [real-model]\n"
 }
 
 // tokensQuotaYAML is quotaYAML's tokens-metric sibling, needed to exercise
 // EstimatedPct wiring: metric: requests' EstimatedPct is always 0,
 // so testing the wiring requires a tokens (or cost) account instead.
 func tokensQuotaYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai-completions\n        providers: [acct1]\n        models: [real-model]\n"
 }
 
 // tokensMultiplierQuotaYAML is tokensQuotaYAML with a NON-INTEGER
@@ -336,7 +336,7 @@ func tokensQuotaYAML(logDir string) string {
 // scales the sniffed and the degraded halves separately, so a float factor
 // has two independent places to lose precision instead of one.
 func tokensMultiplierQuotaYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000, model_multipliers: {real-model: 2.5}}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000, model_multipliers: {real-model: 2.5}}]\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai-completions\n        providers: [acct1]\n        models: [real-model]\n"
 }
 
 // costParityYAML is the metric: cost sibling of quotaYAML/tokensQuotaYAML,
@@ -347,7 +347,7 @@ func tokensMultiplierQuotaYAML(logDir string) string {
 // expected value could shift under it every time the LiteLLM snapshot is
 // regenerated would be a flake, not a guard.
 func costParityYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\npricing:\n  currency: USD\nproviders:\n  - name: acct1\n    base_url: {openai: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 100}]\n    pricing:\n      overrides:\n        - {model: real-model, in_fresh: 3, cache_read: 0.3, cache_write: 3.75, out: 15}\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai\n        providers: [acct1]\n        models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\npricing:\n  currency: USD\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 100}]\n    pricing:\n      overrides:\n        - {model: real-model, in_fresh: 3, cache_read: 0.3, cache_write: 3.75, out: 15}\nmodels:\n  m1:\n    endpoints:\n      - protocol: openai-completions\n        providers: [acct1]\n        models: [real-model]\n"
 }
 
 // writeTokensQuotaJSON is writeQuotaJSON's tokens-metric sibling with a

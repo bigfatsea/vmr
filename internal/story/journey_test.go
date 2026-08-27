@@ -48,7 +48,7 @@ func mkRec(ts time.Time, trace string, msgs []any, respBody any) audit.Record {
 		h["Traceparent"] = []string{"00-" + trace + "-abcdef0123456789-01"}
 	}
 	return audit.Record{
-		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: h, Body: body},
 			Response: &audit.Message{Status: 200, Headers: map[string][]string{}, Body: respBody},

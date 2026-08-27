@@ -58,12 +58,12 @@ func mkRec(ts time.Time, trace string, msgs []any, tools []string, respBody any)
 		h.Set("Traceparent", "00-"+trace+"-abcdef0123456789-01")
 	}
 	rec := audit.Record{
-		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: h, Body: body},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: respBody},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:prov:real-1", Protocol: "openai", Provider: "prov", Model: "real-1", URL: "https://x/v1", DurMS: 90,
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:prov:real-1", Protocol: "openai-completions", Provider: "prov", Model: "real-1", URL: "https://x/v1", DurMS: 90,
 			Request:  audit.Message{Headers: http.Header{}},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}},
 			Norm:     []string{"model_rewrite"}}},
@@ -136,12 +136,12 @@ func fixture(t *testing.T) (string, []audit.Record) {
 			msg("user", "<conversation>\n[User]: 任务A开始：请调研 X 并输出报告\n[Assistant]: 好的,开工\n</conversation>"),
 		}}
 	comp := audit.Record{
-		TS: at(2, 0), DurMS: 50, Model: "agent", Protocol: "openai", Stream: true, Outcome: "ok",
+		TS: at(2, 0), DurMS: 50, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: compBody},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: sseText("## Goal 调研 X 的总结摘要")},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:prov:real-1", Protocol: "openai", Provider: "prov", Model: "real-1", Response: &audit.Message{Status: 200, Headers: http.Header{}}}},
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:prov:real-1", Protocol: "openai-completions", Provider: "prov", Model: "real-1", Response: &audit.Message{Status: 200, Headers: http.Header{}}}},
 	}
 
 	// session A2: continuation whose anchor embeds the compaction output.
@@ -300,7 +300,7 @@ func TestToolShapesAggregation(t *testing.T) {
 // used to also assert on was removed with the old `vmr report` command —
 // the current vmr-requests.md, tested elsewhere, covers that view now).
 func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
-	line := `{"ts":"2026-07-09T08:00:00+08:00","dur_ms":10,"model":"","protocol":"openai","outcome":"error","client":{"request":{"method":"POST","path":"/v1/chat/completions","body":null}}}` + "\n"
+	line := `{"ts":"2026-07-09T08:00:00+08:00","dur_ms":10,"model":"","protocol": "openai-completions","outcome":"error","client":{"request":{"method":"POST","path":"/v1/chat/completions","body":null}}}` + "\n"
 	dir := t.TempDir()
 	src := filepath.Join(dir, "audit.jsonl")
 	if err := os.WriteFile(src, []byte(line), 0o600); err != nil {
@@ -384,7 +384,7 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 		},
 		"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
 	}
-	rec := audit.Record{TS: ts, Model: "claude", Protocol: "anthropic", Outcome: "ok",
+	rec := audit.Record{TS: ts, Model: "claude", Protocol: "anthropic-messages", Outcome: "ok",
 		Client: audit.Exchange{
 			Request:  audit.Message{Headers: http.Header{}, Body: body},
 			Response: &audit.Message{Status: 200, Headers: http.Header{}, Body: resp},

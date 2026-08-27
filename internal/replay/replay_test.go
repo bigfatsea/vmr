@@ -36,20 +36,20 @@ func writeConfig(t *testing.T, dir, upstreamURL string, withModel bool) string {
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `
 	} else {
 		models = `
 models:
   other:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `
 	}
 	yaml := fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %q}, api_key: real-provider-key}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: real-provider-key}
 `, upstreamURL+"/v1") + models
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -82,7 +82,7 @@ func chatRecord(virtualModel, content string) *audit.Record {
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}]}`, virtualModel, content)
 	return &audit.Record{
 		Model:    virtualModel,
-		Protocol: "openai",
+		Protocol: "openai-completions",
 		Stream:   false,
 		Client: audit.Exchange{
 			Request: audit.Message{
@@ -375,7 +375,7 @@ func TestRun_RejectsNonObjectBody(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
 	rec := &audit.Record{
-		Model: "vm", Protocol: "openai",
+		Model: "vm", Protocol: "openai-completions",
 		Client: audit.Exchange{Request: audit.Message{Body: audit.EncodeBody([]byte("not-json-and-not-object"))}},
 	}
 	auditPath := writeAuditLine(t, dir, "audit.jsonl", rec)
@@ -413,18 +413,18 @@ func TestResolveModel_MatchesProviderWithinMultiProviderEntry(t *testing.T) {
 	cfg, err := config.Parse([]byte(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://a.example/v1}, api_key: k}
-  - {name: p2, base_url: {openai: https://b.example/v1}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
+  - {name: p2, base_url: {openai-completions: https://b.example/v1}, api_key: k}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1, p2], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1, p2], models: [upstream-model]}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, provider := range []string{"p1", "p2"} {
-		model, err := resolveModel(cfg, "openai", "vm", provider)
+		model, err := resolveModel(cfg, "openai-completions", "vm", provider)
 		if err != nil {
 			t.Errorf("provider %q: resolveModel() error = %v", provider, err)
 		}
@@ -432,7 +432,7 @@ models:
 			t.Errorf("provider %q: resolveModel() = %q, want upstream-model", provider, model)
 		}
 	}
-	if _, err := resolveModel(cfg, "openai", "vm", "ghost"); err == nil {
+	if _, err := resolveModel(cfg, "openai-completions", "vm", "ghost"); err == nil {
 		t.Error("provider not in the entry's providers list: want an error, got nil")
 	}
 }

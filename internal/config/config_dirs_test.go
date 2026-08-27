@@ -11,9 +11,9 @@ import (
 const dirsTestBody = `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
 models:
-  m: {endpoints: [{protocol: openai, providers: [p1], models: [x]}]}
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
 `
 
 func TestDirDefaultsResolveToPersistentHome(t *testing.T) {

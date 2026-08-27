@@ -39,16 +39,16 @@ func TestBuildSnapshotCarriesModelImageDownscaleOverride(t *testing.T) {
 listen: 127.0.0.1:0
 image_downscale: 1024
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   plain:
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
   overridden:
     image_downscale: 256
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
   disabled:
     image_downscale: 0
-    endpoints: [{protocol: openai, providers: [p1], models: [m]}]
+    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -68,7 +68,7 @@ models:
 		{"disabled", 0},     // explicit zero force-disables
 	}
 	for _, c := range cases {
-		route := snap.Models["openai"][c.model]
+		route := snap.Models["openai-completions"][c.model]
 		if got := route.EffectiveImageDownscaleMaxPx(cfg.ImageDownscaleMaxPx); got != c.want {
 			t.Errorf("model %q: effective image_downscale = %d, want %d", c.model, got, c.want)
 		}
@@ -86,13 +86,13 @@ func TestBuildSnapshotCarriesEndpointRoleMap(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: mapped, base_url: {openai: https://example.com}, api_key: k1}
-  - {name: plain, base_url: {openai: https://example.com}, api_key: k2}
+  - {name: mapped, base_url: {openai-completions: https://example.com}, api_key: k1}
+  - {name: plain, base_url: {openai-completions: https://example.com}, api_key: k2}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [mapped], models: [m1], role_map: {developer: system}}
-      - {protocol: openai, providers: [plain], models: [m2]}
+      - {protocol: openai-completions, providers: [mapped], models: [m1], role_map: {developer: system}}
+      - {protocol: openai-completions, providers: [plain], models: [m2]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -103,7 +103,7 @@ models:
 		t.Fatal(err)
 	}
 
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	mapped, plain := eps[0], eps[1]
 	if got := mapped.RoleMap["developer"]; got != "system" {
 		t.Errorf("mapped endpoint: RoleMap[developer] = %q, want %q", got, "system")
@@ -122,16 +122,16 @@ func TestBuildSnapshotCarriesConditionRoutingFields(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   vm:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [m1]
         capabilities: [text, image, tools]
         max_context_tokens: 200000
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [m2]
 `
@@ -143,7 +143,7 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	declared, undeclared := eps[0], eps[1]
 
 	if !declared.HasCapability("image") {
@@ -169,18 +169,18 @@ func TestBuildSnapshotMergesModelBaseWithEndpointExtra(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   vm:
     capabilities: [text, tools]
     max_context_tokens: 128000
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [extra]
         capabilities: [image]
         max_context_tokens: 512000
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [plain]
 `
@@ -192,7 +192,7 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	extra, plain := eps[0], eps[1]
 
 	for _, cap := range []string{"text", "tools", "image"} {
@@ -263,18 +263,18 @@ func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
 listen: 127.0.0.1:0
 sticky_ttl: 10m
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   defaulted:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
   disabled:
     sticky: false
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
   overridden:
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [m1]
         sticky_ttl: 2h
@@ -288,16 +288,16 @@ models:
 		t.Fatal(err)
 	}
 
-	if !snap.Models["openai"]["defaulted"].Sticky {
+	if !snap.Models["openai-completions"]["defaulted"].Sticky {
 		t.Error("Sticky should default to true when unset")
 	}
-	if snap.Models["openai"]["disabled"].Sticky {
+	if snap.Models["openai-completions"]["disabled"].Sticky {
 		t.Error("explicit sticky: false must resolve to false")
 	}
-	if got := snap.Models["openai"]["defaulted"].Endpoints[0].StickyTTL; got != 10*time.Minute {
+	if got := snap.Models["openai-completions"]["defaulted"].Endpoints[0].StickyTTL; got != 10*time.Minute {
 		t.Errorf("endpoint with no override: StickyTTL = %v, want the global 10m default", got)
 	}
-	if got := snap.Models["openai"]["overridden"].Endpoints[0].StickyTTL; got != 2*time.Hour {
+	if got := snap.Models["openai-completions"]["overridden"].Endpoints[0].StickyTTL; got != 2*time.Hour {
 		t.Errorf("endpoint with an override: StickyTTL = %v, want 2h", got)
 	}
 }
@@ -305,20 +305,20 @@ models:
 // TestBuildSnapshotSplitsVirtualModelByProtocol pins the new schema's
 // cross-protocol reuse: one virtual model name with endpoint-groups on both
 // protocols must resolve into two independent routes (Snapshot.Models
-// ["openai"]["vm"] and ["anthropic"]["vm"]), each carrying only its own
+// ["openai-completions"]["vm"] and ["anthropic-messages"]["vm"]), each carrying only its own
 // protocol's endpoints, sharing the model-level Sticky/Strategy/
 // ImageDownscaleMaxPx settings.
 func TestBuildSnapshotSplitsVirtualModelByProtocol(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://o.example, anthropic: https://a.example}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://o.example, anthropic-messages: https://a.example}, api_key: k1}
 models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m-openai]}
-      - {protocol: anthropic, providers: [p1], models: [m-anthropic]}
+      - {protocol: openai-completions, providers: [p1], models: [m-openai]}
+      - {protocol: anthropic-messages, providers: [p1], models: [m-anthropic]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -328,8 +328,8 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	openaiRoute := snap.Models["openai"]["vm"]
-	anthropicRoute := snap.Models["anthropic"]["vm"]
+	openaiRoute := snap.Models["openai-completions"]["vm"]
+	anthropicRoute := snap.Models["anthropic-messages"]["vm"]
 	if openaiRoute == nil || anthropicRoute == nil {
 		t.Fatal("expected a route on both protocols")
 	}
@@ -351,11 +351,11 @@ func TestBuildSnapshotExpandsModelsList(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: https://example.com}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-a, model-b, model-c]}
+      - {protocol: openai-completions, providers: [p1], models: [model-a, model-b, model-c]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -365,7 +365,7 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai"]["vm"].Endpoints
+	eps := snap.Models["openai-completions"]["vm"].Endpoints
 	want := []string{"model-a", "model-b", "model-c"}
 	if len(eps) != len(want) {
 		t.Fatalf("got %d endpoints, want %d", len(eps), len(want))
@@ -374,7 +374,7 @@ models:
 		if eps[i].Model != w {
 			t.Errorf("endpoint[%d].Model = %q, want %q", i, eps[i].Model, w)
 		}
-		if eps[i].Provider != "p1" || eps[i].AdapterType != "openai" {
+		if eps[i].Provider != "p1" || eps[i].AdapterType != "openai-completions" {
 			t.Errorf("endpoint[%d]: provider=%q adapterType=%q", i, eps[i].Provider, eps[i].AdapterType)
 		}
 	}

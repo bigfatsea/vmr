@@ -9,6 +9,7 @@ package story
 import (
 	"strings"
 
+	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
@@ -62,11 +63,11 @@ var anthropicOnlyCoverage = struct {
 // at 1.2% Anthropic printed nothing, silently reintroducing the exact
 // ambiguity this note exists to close) was cut for exactly this reason.
 func anthropicCoverageNote(protocolShare map[string]float64, t i18n.CorpusText) string {
-	if len(protocolShare) == 0 || protocolShare["anthropic"] > 1-1e-9 {
+	if len(protocolShare) == 0 || protocolShare[core.ProtocolAnthropicMessages] > 1-1e-9 {
 		return ""
 	}
 	names := anthropicOnlyCoverageNames(anthropicOnlyCoverage.CorpusSections)
-	return t.AnthropicOnlyCoverageNote(fmtutil.FmtPercent(protocolShare["anthropic"], 1), strings.Join(names, ", "))
+	return t.AnthropicOnlyCoverageNote(fmtutil.FmtPercent(protocolShare[core.ProtocolAnthropicMessages], 1), strings.Join(names, ", "))
 }
 
 // journeyAnthropicCoverageNote is anthropicCoverageNote's per-journey
@@ -79,7 +80,7 @@ func anthropicCoverageNote(protocolShare map[string]float64, t i18n.CorpusText) 
 // binary here, not a percentage.
 func journeyAnthropicCoverageNote(j *Journey, t i18n.SpineText) string {
 	share := protocolShare([]*Journey{j})
-	if len(share) == 0 || share["anthropic"] > 0 {
+	if len(share) == 0 || share[core.ProtocolAnthropicMessages] > 0 {
 		return ""
 	}
 	names := anthropicOnlyCoverageNames(anthropicOnlyCoverage.JourneySections)
@@ -109,7 +110,7 @@ func anthropicOnlyCoverageNames(sections []string) []string {
 // Protocol (shouldn't happen on real audit records, but cheaper to count
 // than to special-case) is tallied under "" like any other value; callers
 // that only care about "is this corpus Anthropic-only" read
-// share["anthropic"].
+// share["anthropic-messages"].
 func protocolShare(journeys []*Journey) map[string]float64 {
 	counts := map[string]int{}
 	total := 0

@@ -110,7 +110,7 @@ func TestClassifyError(t *testing.T) {
 }
 
 func TestProtocol(t *testing.T) {
-	if (Anthropic{}).Protocol() != "anthropic" {
+	if (Anthropic{}).Protocol() != "anthropic-messages" {
 		t.Error("protocol")
 	}
 }

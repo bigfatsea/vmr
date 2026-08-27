@@ -49,7 +49,7 @@ func benchSSEPayload(n int) []byte {
 // never buffering the whole body.
 func BenchmarkStream_PassthroughStreaming(b *testing.B) {
 	payload := benchSSEPayload(200) // ~200 token deltas, a realistic reply length
-	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai"}
+	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai-completions"}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -61,7 +61,7 @@ func BenchmarkStream_PassthroughStreaming(b *testing.B) {
 // normalized in one regex pass at EOF instead of per-event.
 func BenchmarkStream_Buffered(b *testing.B) {
 	payload := []byte(`{"choices":[{"message":{"content":"` + strings.Repeat("token ", 500) + `"}}]}`)
-	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: false, Protocol: "openai"}
+	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: false, Protocol: "openai-completions"}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -74,7 +74,7 @@ func BenchmarkStream_Buffered(b *testing.B) {
 // regex work at all, the cheapest of the three.
 func BenchmarkStream_OpaquePassthrough(b *testing.B) {
 	payload := benchSSEPayload(200)
-	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai", Opaque: true}
+	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai-completions", Opaque: true}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -21,14 +21,14 @@ func twoEndpointYAML(u1, u2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-one], priority: 1}
-      - {protocol: openai, providers: [p2], models: [model-two], priority: 2}
+      - {protocol: openai-completions, providers: [p1], models: [model-one], priority: 1}
+      - {protocol: openai-completions, providers: [p2], models: [model-two], priority: 2}
 `, extra, u1, u2)
 }
 
@@ -37,11 +37,11 @@ func oneProviderYAML(u string) string {
 	return `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: ` + u + `}, api_key: k1}
+  - {name: p1, base_url: {openai-completions: ` + u + `}, api_key: k1}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [upstream-model]}
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
 `
 }
 
@@ -52,17 +52,17 @@ func fourEndpointYAML(u1, u2, u3, u4, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
-  - {name: p3, base_url: {openai: %s}, api_key: k3}
-  - {name: p4, base_url: {openai: %s}, api_key: k4}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+  - {name: p3, base_url: {openai-completions: %s}, api_key: k3}
+  - {name: p4, base_url: {openai-completions: %s}, api_key: k4}
 models:
   vm:
     endpoints:
-      - {protocol: openai, providers: [p1], models: [m1]}
-      - {protocol: openai, providers: [p2], models: [m2]}
-      - {protocol: openai, providers: [p3], models: [m3]}
-      - {protocol: openai, providers: [p4], models: [m4]}
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      - {protocol: openai-completions, providers: [p3], models: [m3]}
+      - {protocol: openai-completions, providers: [p4], models: [m4]}
 `, extra, u1, u2, u3, u4)
 }
 
@@ -74,17 +74,17 @@ func capabilityYAML(u1, u2, declP1, declP2 string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     sticky: false
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [model-one]
         priority: 1%s
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p2]
         models: [model-two]
         priority: 2%s
@@ -97,17 +97,17 @@ func contextLenYAML(u1, u2 string, p1Max, p2Max string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     sticky: false
     endpoints:
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p1]
         models: [model-one]
         priority: 1%s
-      - protocol: openai
+      - protocol: openai-completions
         providers: [p2]
         models: [model-two]
         priority: 2%s
@@ -120,14 +120,14 @@ func stickyYAML(u1, u2, extraModelLines string) string {
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai: %s}, api_key: k1}
-  - {name: p2, base_url: {openai: %s}, api_key: k2}
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     %s
     endpoints:
-      - {protocol: openai, providers: [p1], models: [model-one], priority: 1}
-      - {protocol: openai, providers: [p2], models: [model-two], priority: 2}
+      - {protocol: openai-completions, providers: [p1], models: [model-one], priority: 1}
+      - {protocol: openai-completions, providers: [p2], models: [model-two], priority: 2}
 `, u1, u2, extraModelLines)
 }
 
@@ -136,16 +136,16 @@ func dualProtocolYAML(oai, anth1, anth2 string, extra string) string {
 listen: 127.0.0.1:0
 %s
 providers:
-  - {name: oai, base_url: {openai: %s}, api_key: k0}
-  - {name: a1, base_url: {anthropic: %s}, api_key: ka1}
-  - {name: a2, base_url: {anthropic: %s}, api_key: ka2}
+  - {name: oai, base_url: {openai-completions: %s}, api_key: k0}
+  - {name: a1, base_url: {anthropic-messages: %s}, api_key: ka1}
+  - {name: a2, base_url: {anthropic-messages: %s}, api_key: ka2}
 models:
   vm-openai:
     endpoints:
-      - {protocol: openai, providers: [oai], models: [model-one], priority: 1}
+      - {protocol: openai-completions, providers: [oai], models: [model-one], priority: 1}
   vm-anth:
     endpoints:
-      - {protocol: anthropic, providers: [a1], models: [real-a], priority: 1}
-      - {protocol: anthropic, providers: [a2], models: [real-b], priority: 2}
+      - {protocol: anthropic-messages, providers: [a1], models: [real-a], priority: 1}
+      - {protocol: anthropic-messages, providers: [a2], models: [real-b], priority: 2}
 `, extra, oai, anth1, anth2)
 }

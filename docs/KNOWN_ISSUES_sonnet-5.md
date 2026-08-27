@@ -121,7 +121,7 @@
   这是一个独立的、更早就存在的协议覆盖缺口，需要先确认 Responses API 流量在真实语料里的占比再决定值不值得投入。
 - **重新评估（2026-08-20）——本条自己提出的前置问题现在有答案了，答案是"占比为零"**：
   用本机全量语料生成的 `vmr-requests.json`（11253 条记录）按 `protocol` 字段统计：
-  **`openai` 11194（99.5%）、`anthropic` 59（0.5%）、Responses API（`openairesponses`）0 条（0.0%）**。
+  **`openai-completions` 11194（99.5%）、`anthropic-messages` 59（0.5%）、Responses API（`openairesponses`）0 条（0.0%）**。
   也就是说这个缺口在本项目的真实使用中**一次都没有被触发过**。按 YAGNI，**决定不做**，
   但保留登记，因为影响面已经比 P1 登记时更大（见下）。
 - **影响面的变化（P4 之后）**：P1 登记时的影响只是"脊柱不展示工具结果 + 三个 Finding 检测器无证据"，
@@ -197,6 +197,7 @@
 
 ### 2.2 配置与协议
 
+- **协议枚举值 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等生态工具对齐**：全链路（代码、配置、文档、测试、新审计日志）一步到位用新名，路由侧零兼容负担。**唯一的兼容咽喉点**是 `audit.Record.UnmarshalJSON`（`internal/audit/audit.go`）：读到旧名 `"openai"`/`"anthropic"` 时经 `core.CanonicalProtocol` 归一化为新枚举，`Attempts[].Endpoint` 标签的 protocol 段经 `core.NormalizeEndpointLabel` 一并归一化（只改前导 token，分隔符与其余字节原样）。这层只服务分析侧（report/story/reqdetail/ctxgraph 都解码进 `audit.Record`）读历史日志；`vmr replay` **不做兼容**，只认新枚举。`ctxgraph.CacheSchemaVersion` 已 1→2 使旧事实缓存失效重建。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件不像 CLI/Server 那样可随时一起升级，它们是不可变的既存事实。**TODO(2026-10)：过渡期约一个月，届时删除 `core.CanonicalProtocol`/`NormalizeEndpointLabel`/`Record.UnmarshalJSON` 及三处 `TODO(2026-10)` 标记的测试**（`internal/audit` 的 `TestRecordUnmarshalJSON_*`、`internal/report` 的 `TestBuild_LegacyProtocolNamesNormalized`）。
 - **CLI 与 Server 版本必须匹配，任何不一致造成的问题直接报错，不做兼容性处理**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`json.RawMessage` 式的兼容层只覆盖一个滚动升级窗口，却会永久留在代码里，违反 KISS。`vmr.sh ps` 的 `|| true` 退化为标注行是它自己的容错，不受此限；错误信息会明确提示"server and client vmr versions differ"。这条原则覆盖字段*新增*与形状*变更*两种情形：曾为"旧 server 缺失新 key"保留的 `serving` 字段 `*bool` 兜底，在 `instance.config` 由 string 改为 object 后实际已不可达（新 CLI 解析旧 server 响应时在 `config` 处即硬失败，永远走不到 `serving`），已作为死代码删除（2026-08-23，`vmr status` review P4 落地）——版本必须匹配的原则不再留任何字段级例外。`models` 从 `"name [protocol]"` 拼接键 map 改为结构化数组（2026-08-26，为携带模型级 capabilities/context）同受此原则覆盖。
 - **`/status` 的 `instance.base_urls` 回显请求自身的地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status`，就广告什么地址（`127.0.0.1` stays `127.0.0.1`，`localhost` stays `localhost`，局域网 IP 原样），这正是客户端该填进自己配置的值；反代场景下 Host 头恰好就是代理对外的地址，刻意不做 `X-Forwarded-Host` 解析。该字段纯展示、不参与鉴权或路由，Host 可伪造无安全影响；同一实例被不同地址访问时 `base_urls` 不同是设计意图，不要缓存/固定它。
 - **`/status` 的 `traffic.by_status` 在流式中途截断时记为 `error`，与审计顶层 `outcome` 对同一请求记 `ok` 口径不同（刻意保留，不做对齐）**：`forwardSuccess` 里 `RecordOutcome` 把 TRUNCATED 计入 `error`——它回答的问题是"客户端是否拿到了完整响应"；而审计侧对 HTTP 200 且非取消的请求顶层记 `ok`，截断信息记录在 attempt 的 `ErrorClass` 上——它回答的问题是"HTTP 交换是否在传输层正常完成"。两个账本回答的问题不同，各自口径内部自洽；强行对齐会让其中一个失去自己的语义。两处代码（`Telemetry.RecordOutcome` 的 doc comment 与 `forwardSuccess` 调用点）已互相指向本条。若未来有人对账时发现 `/status` 错误数与 `vmr report` 错误数不一致，先查这里再报 bug。

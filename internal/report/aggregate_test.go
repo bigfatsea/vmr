@@ -46,24 +46,24 @@ func smallAuditRecords() []map[string]any {
 				"response": map[string]any{"status": 200, "body": body},
 			},
 			"attempts": []map[string]any{
-				{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": dur, "error": "", "response": map[string]any{"status": 200}},
+				{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": dur, "error": "", "response": map[string]any{"status": 200}},
 			},
 		}
 		if outcome == "error" {
 			rec["client"].(map[string]any)["response"] = map[string]any{"status": 500, "body": map[string]any{"error": "boom"}}
 			rec["attempts"] = []map[string]any{
-				{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": dur, "error": "transient: boom", "error_class": "transient"},
+				{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": dur, "error": "transient: boom", "error_class": "transient"},
 			}
 		}
 		return rec
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	records := []map[string]any{
-		mkRecord(t0, "coding", "openai", "ok", 3000, 1000, 1000, 100, 800),
-		mkRecord(t0.Add(time.Minute), "coding", "openai", "ok", 3500, 1200, 1200, 150, 900),
-		mkRecord(t0.Add(2*time.Minute), "coding", "openai", "ok", 3200, 1100, 1100, 120, 950),
-		mkRecord(t0.Add(3*time.Minute), "agent", "openai", "ok", 4000, 1500, 500, 50, 0),
-		mkRecord(t0.Add(4*time.Minute), "agent", "openai", "error", 100, 80, 100, 10, 0),
+		mkRecord(t0, "coding", "openai-completions", "ok", 3000, 1000, 1000, 100, 800),
+		mkRecord(t0.Add(time.Minute), "coding", "openai-completions", "ok", 3500, 1200, 1200, 150, 900),
+		mkRecord(t0.Add(2*time.Minute), "coding", "openai-completions", "ok", 3200, 1100, 1100, 120, 950),
+		mkRecord(t0.Add(3*time.Minute), "agent", "openai-completions", "ok", 4000, 1500, 500, 50, 0),
+		mkRecord(t0.Add(4*time.Minute), "agent", "openai-completions", "error", 100, 80, 100, 10, 0),
 	}
 	return records
 }
@@ -85,6 +85,41 @@ func writeTempJSONL(t *testing.T, dir string, records []map[string]any) string {
 		f.Write([]byte{'\n'})
 	}
 	return path
+}
+
+// TestBuild_LegacyProtocolNamesNormalized is the analytics-side differential
+// for the protocol rename: a pre-2026-08 audit line ("openai" / an
+// "openai:acct:model" endpoint label) must aggregate under the current enum,
+// same as a fresh line would. Covers the audit.Record.UnmarshalJSON path
+// report relies on. TODO(2026-10): remove with core.CanonicalProtocol.
+func TestBuild_LegacyProtocolNamesNormalized(t *testing.T) {
+	dir := t.TempDir()
+	rec := map[string]any{
+		"ts": time.Now().Format(time.RFC3339Nano), "dur_ms": 100, "model": "vm",
+		"protocol": "openai", "outcome": "ok", "stream": true,
+		"client": map[string]any{
+			"request":  map[string]any{"body": map[string]any{"model": "vm", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
+			"response": map[string]any{"status": 200, "body": map[string]any{"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5}}},
+		},
+		"attempts": []map[string]any{{"endpoint": "openai:acct:real-model", "protocol": "openai", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+	}
+	path := writeTempJSONL(t, dir, []map[string]any{rec})
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range rep.EndpointsAll {
+		if e.Endpoint == "openai-completions:acct:real-model" {
+			found = true
+		}
+		if strings.HasPrefix(e.Endpoint, "openai:") {
+			t.Errorf("endpoint row kept legacy protocol name: %q", e.Endpoint)
+		}
+	}
+	if !found {
+		t.Errorf("no endpoint row under normalized label openai-completions:acct:real-model; got %+v", rep.EndpointsAll)
+	}
 }
 
 func TestFreshAndCacheEfficiency(t *testing.T) {
@@ -457,7 +492,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	}
 	mk := func(ts, clientKey, userMsg string) map[string]any {
 		return map[string]any{
-			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai",
+			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai-completions",
 			"outcome": "ok", "client_key_tag": clientKey,
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
@@ -470,7 +505,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite",
+			"attempts": []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite",
 				"dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
@@ -549,7 +584,7 @@ func failureSurfaceRecords() []map[string]any {
 	base := func(ts time.Time, outcome string, status int) map[string]any {
 		return map[string]any{
 			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent",
-			"protocol": "openai", "outcome": outcome,
+			"protocol": "openai-completions", "outcome": outcome,
 			"client": map[string]any{
 				"request":  map[string]any{"body": map[string]any{"model": "agent", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
 				"response": map[string]any{"status": status, "body": map[string]any{}},
@@ -558,19 +593,19 @@ func failureSurfaceRecords() []map[string]any {
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	ok := base(t0, "ok", 200)
-	ok["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}}}
+	ok["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}}}
 
 	failed := base(t0.Add(time.Minute), "error", 500)
-	failed["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "transient: boom", "error_class": "transient"}}
+	failed["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "transient: boom", "error_class": "transient"}}
 
 	canceled := base(t0.Add(2*time.Minute), "canceled", 0)
-	canceled["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "canceled by client", "error_class": "canceled"}}
+	canceled["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "canceled by client", "error_class": "canceled"}}
 
 	truncated := base(t0.Add(3*time.Minute), "ok", 200)
 	// Real shape: SetSuccessResponse commits the 2xx response first, then
 	// SetTruncated (mid-stream death) only sets error/error_class — Response
 	// stays as the already-committed 2xx.
-	truncated["attempts"] = []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "error": "truncated: EOF", "error_class": "truncated"}}
+	truncated["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "error": "truncated: EOF", "error_class": "truncated"}}
 
 	return []map[string]any{ok, failed, canceled, truncated}
 }
@@ -618,7 +653,7 @@ func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const wantEp = "openai:volcengine:doubao-seed-2.0-lite"
+	const wantEp = "openai-completions:volcengine:doubao-seed-2.0-lite"
 	rows := rep.RequestRows()
 	var truncatedRow *RequestRow
 	for i, r := range rows {
@@ -664,7 +699,7 @@ func quirkNormRecords() []map[string]any {
 	base := func(ts time.Time, endpoint string, norm []string) map[string]any {
 		return map[string]any{
 			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent",
-			"protocol": "openai", "outcome": "ok",
+			"protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request":  map[string]any{"body": map[string]any{"model": "agent", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
 				"response": map[string]any{"status": 200, "body": map[string]any{}},
@@ -675,7 +710,7 @@ func quirkNormRecords() []map[string]any {
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
-	const minimax, openrouter = "openai:minimax:m3", "openai:openrouter:gpt"
+	const minimax, openrouter = "openai-completions:minimax:m3", "openai-completions:openrouter:gpt"
 	return []map[string]any{
 		base(t0, minimax, []string{"model_rewrite", "soft_block_detected"}),
 		base(t0.Add(time.Minute), minimax, []string{"model_rewrite", "think_strip"}),
@@ -702,14 +737,14 @@ func TestEndpointNormCounts(t *testing.T) {
 	var minimax, openrouter *EndpointRow
 	for i, e := range rep.EndpointsAll {
 		switch e.Endpoint {
-		case "openai:minimax:m3":
+		case "openai-completions:minimax:m3":
 			minimax = &rep.EndpointsAll[i]
-		case "openai:openrouter:gpt":
+		case "openai-completions:openrouter:gpt":
 			openrouter = &rep.EndpointsAll[i]
 		}
 	}
 	if minimax == nil {
-		t.Fatal("no EndpointsAll entry for openai:minimax:m3")
+		t.Fatal("no EndpointsAll entry for openai-completions:minimax:m3")
 	}
 	if n := minimax.NormCounts["model_rewrite"]; n != 0 {
 		t.Errorf("model_rewrite must be filtered out (routine, not a quirk), got count %d", n)
@@ -725,7 +760,7 @@ func TestEndpointNormCounts(t *testing.T) {
 	}
 
 	if openrouter == nil {
-		t.Fatal("no EndpointsAll entry for openai:openrouter:gpt")
+		t.Fatal("no EndpointsAll entry for openai-completions:openrouter:gpt")
 	}
 	if len(openrouter.NormCounts) != 0 {
 		t.Errorf("openrouter saw no quirk markers, want empty NormCounts, got %v", openrouter.NormCounts)
@@ -748,7 +783,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	if !strings.Contains(md, "Quirk Fix × Endpoint") {
 		t.Fatalf("markdown missing the quirk-by-endpoint section:\n%s", md)
 	}
-	if !containsAll(md, []string{"openai:minimax:m3", "soft_block_detected", "think_strip"}) {
+	if !containsAll(md, []string{"openai-completions:minimax:m3", "soft_block_detected", "think_strip"}) {
 		t.Errorf("markdown missing expected endpoint/marker cells:\n%s", md)
 	}
 	if strings.Contains(md, "model_rewrite") {
@@ -877,7 +912,7 @@ func containsSub(s, sub string) bool {
 func tiedAuditRecords() []map[string]any {
 	mk := func(ts, clientKey, endpoint, userMsg string) map[string]any {
 		return map[string]any{
-			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai",
+			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai-completions",
 			"outcome": "ok", "client_key_tag": clientKey,
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
@@ -895,8 +930,8 @@ func tiedAuditRecords() []map[string]any {
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	return []map[string]any{
-		mk(t0.Format(time.RFC3339), "alice", "openai:provider-a:model-a", "alice's first message"),
-		mk(t0.Add(time.Minute).Format(time.RFC3339), "bob", "openai:provider-b:model-b", "bob's first message"),
+		mk(t0.Format(time.RFC3339), "alice", "openai-completions:provider-a:model-a", "alice's first message"),
+		mk(t0.Add(time.Minute).Format(time.RFC3339), "bob", "openai-completions:provider-b:model-b", "bob's first message"),
 	}
 }
 
@@ -953,7 +988,7 @@ func TestBuildIsDeterministic(t *testing.T) {
 func heartbeatDreamDiaryTiedRecords() []map[string]any {
 	mk := func(ts, userMsg string, fresh int) map[string]any {
 		return map[string]any{
-			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"ts": ts, "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
 					map[string]any{"role": "user", "content": userMsg},
@@ -966,7 +1001,7 @@ func heartbeatDreamDiaryTiedRecords() []map[string]any {
 						"prompt_tokens_details": map[string]any{"cached_tokens": 0}},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -1039,7 +1074,7 @@ func toolShapeTieRecords() []map[string]any {
 	}
 	mk := func(ts time.Time, names []string) map[string]any {
 		return map[string]any{
-			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "tools": toolsFor(names), "messages": []any{
 					map[string]any{"role": "user", "content": "hi " + names[0]},
@@ -1051,7 +1086,7 @@ func toolShapeTieRecords() []map[string]any {
 					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -1112,7 +1147,7 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 func modelFreshTieRecords() []map[string]any {
 	mk := func(ts time.Time, model string) map[string]any {
 		return map[string]any{
-			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": model, "protocol": "openai", "outcome": "ok",
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": model, "protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": model, "messages": []any{
 					map[string]any{"role": "user", "content": "hi from " + model},
@@ -1124,7 +1159,7 @@ func modelFreshTieRecords() []map[string]any {
 					"usage": map[string]any{"prompt_tokens": 500, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:" + model, "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:" + model, "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -1174,7 +1209,7 @@ func sessionGrowthTieRecords() []map[string]any {
 	mkTurn := func(ts time.Time, opening string, extra []any, promptTokens int) map[string]any {
 		msgs := append([]any{map[string]any{"role": "user", "content": opening}}, extra...)
 		return map[string]any{
-			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
 				"response": map[string]any{"status": 200, "body": map[string]any{
@@ -1184,7 +1219,7 @@ func sessionGrowthTieRecords() []map[string]any {
 					"usage": map[string]any{"prompt_tokens": promptTokens, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -1270,7 +1305,7 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 func contextGrowthContractFixture() []map[string]any {
 	mkTurn := func(ts time.Time, msgs []any, promptTokens int) map[string]any {
 		return map[string]any{
-			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 			"client": map[string]any{
 				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
 				"response": map[string]any{"status": 200, "body": map[string]any{
@@ -1280,7 +1315,7 @@ func contextGrowthContractFixture() []map[string]any {
 					"usage": map[string]any{"prompt_tokens": promptTokens, "completion_tokens": 5},
 				}},
 			},
-			"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 		}
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
@@ -1354,7 +1389,7 @@ func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	rec := map[string]any{
-		"ts": t0.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai", "outcome": "ok",
+		"ts": t0.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{
 				"model": "agent",
@@ -1370,7 +1405,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 				"usage": map[string]any{"prompt_tokens": 5000, "completion_tokens": 300},
 			}},
 		},
-		"attempts": []map[string]any{{"endpoint": "openai:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 
 	dir := t.TempDir()
@@ -1432,7 +1467,7 @@ func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 	rep := &Report2{
 		Overall: Row{TrafficStats: TrafficStats{Requests: 10, OK: 9, TokensIn: 100, TokensInCached: 90, TokensKnown: 10, CacheEfficiency: 0.9, RequestsWithDur: 10, DurMSP95: 500}},
 		EndpointsAll: []EndpointRow{
-			{Endpoint: "openai:p:m", Attempts: 10, OK: 9, Availability: 0.9, ErrorRate: 10,
+			{Endpoint: "openai-completions:p:m", Attempts: 10, OK: 9, Availability: 0.9, ErrorRate: 10,
 				ErrorClasses: map[string]int{"transient": 1}},
 		},
 	}
@@ -1482,7 +1517,7 @@ func TestBuildDateHourBucketsUseDisplayZone(t *testing.T) {
 	dir := t.TempDir()
 	ts := time.Date(2026, 7, 24, 23, 30, 0, 0, time.UTC)
 	record := map[string]any{
-		"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent", "protocol": "openai",
+		"ts": ts.Format(time.RFC3339Nano), "dur_ms": 100, "model": "agent", "protocol": "openai-completions",
 		"outcome": "ok", "stream": false,
 		"client": map[string]any{
 			"request": map[string]any{"body": map[string]any{"model": "agent", "messages": []any{
@@ -1494,7 +1529,7 @@ func TestBuildDateHourBucketsUseDisplayZone(t *testing.T) {
 				"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
 			}},
 		},
-		"attempts": []map[string]any{{"endpoint": "openai:volcengine:doubao-seed-2.0-lite",
+		"attempts": []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite",
 			"dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	path := writeTempJSONL(t, dir, []map[string]any{record})
@@ -1540,13 +1575,13 @@ func TestAddAttempt_ForwardedCountsTruncated(t *testing.T) {
 	// failure); such a record carries no "response" key, which is exactly what
 	// makes it neither OK nor Forwarded.
 	mk := func(ts time.Time, attemptErr string, status int) map[string]any {
-		att := map[string]any{"endpoint": "openai:acct1:m1", "dur_ms": 10, "error": attemptErr}
+		att := map[string]any{"endpoint": "openai-completions:acct1:m1", "dur_ms": 10, "error": attemptErr}
 		if status > 0 {
 			att["response"] = map[string]any{"status": status}
 		}
 		return map[string]any{
 			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 10, "model": "coding",
-			"protocol": "openai", "outcome": "ok",
+			"protocol": "openai-completions", "outcome": "ok",
 			"client":   map[string]any{"request": map[string]any{"body": map[string]any{"model": "coding"}}},
 			"attempts": []map[string]any{att},
 		}
@@ -1564,12 +1599,12 @@ func TestAddAttempt_ForwardedCountsTruncated(t *testing.T) {
 	}
 	var row *EndpointRow
 	for i := range rep.EndpointsAll {
-		if rep.EndpointsAll[i].Endpoint == "openai:acct1:m1" {
+		if rep.EndpointsAll[i].Endpoint == "openai-completions:acct1:m1" {
 			row = &rep.EndpointsAll[i]
 		}
 	}
 	if row == nil {
-		t.Fatalf("no endpoint row for openai:acct1:m1: %+v", rep.EndpointsAll)
+		t.Fatalf("no endpoint row for openai-completions:acct1:m1: %+v", rep.EndpointsAll)
 	}
 	if row.Attempts != 4 {
 		t.Errorf("Attempts = %d, want 4", row.Attempts)

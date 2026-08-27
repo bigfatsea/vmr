@@ -86,7 +86,7 @@ func TestAuditRecordsFailoverBothLayers(t *testing.T) {
 		t.Fatalf("records: %d", len(recs))
 	}
 	r := recs[0]
-	if r.Model != "vm" || r.Protocol != "openai" || r.Outcome != "ok" || r.Stream {
+	if r.Model != "vm" || r.Protocol != "openai-completions" || r.Outcome != "ok" || r.Stream {
 		t.Errorf("meta: %+v", r)
 	}
 	// Client layer: request body recorded as JSON, credential masked, response captured.
@@ -109,10 +109,10 @@ func TestAuditRecordsFailoverBothLayers(t *testing.T) {
 		t.Fatalf("attempts: %d", len(r.Attempts))
 	}
 	a1, a2 := r.Attempts[0], r.Attempts[1]
-	if a1.Endpoint != "openai:p1:model-one" || a1.Error != "transient" || a1.ErrorClass != "transient" || a1.Response == nil || a1.Response.Status != 500 || a1.Response.Body == nil {
+	if a1.Endpoint != "openai-completions:p1:model-one" || a1.Error != "transient" || a1.ErrorClass != "transient" || a1.Response == nil || a1.Response.Status != 500 || a1.Response.Body == nil {
 		t.Errorf("failed attempt: %+v", a1)
 	}
-	if a1.Protocol != "openai" || a1.Provider != "p1" || a1.Model != "model-one" {
+	if a1.Protocol != "openai-completions" || a1.Provider != "p1" || a1.Model != "model-one" {
 		t.Errorf("failed attempt protocol/provider/model: %+v", a1)
 	}
 	if got := a1.Request.Headers.Get("Authorization"); got != "Bearer ***" && !strings.HasPrefix(got, "Bearer ***") {
@@ -121,10 +121,10 @@ func TestAuditRecordsFailoverBothLayers(t *testing.T) {
 	if !strings.HasSuffix(a1.URL, "/chat/completions") {
 		t.Errorf("attempt url: %s", a1.URL)
 	}
-	if a2.Endpoint != "openai:p2:model-two" || a2.Error != "" || a2.ErrorClass != "" || a2.Response == nil || a2.Response.Status != 200 {
+	if a2.Endpoint != "openai-completions:p2:model-two" || a2.Error != "" || a2.ErrorClass != "" || a2.Response == nil || a2.Response.Status != 200 {
 		t.Errorf("success attempt: %+v", a2)
 	}
-	if a2.Protocol != "openai" || a2.Provider != "p2" || a2.Model != "model-two" {
+	if a2.Protocol != "openai-completions" || a2.Provider != "p2" || a2.Model != "model-two" {
 		t.Errorf("success attempt protocol/provider/model: %+v", a2)
 	}
 	if a2.Response.Body != nil {

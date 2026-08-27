@@ -16,7 +16,7 @@ import (
 	"vmr/internal/jsonscan"
 )
 
-func init() { adapter.Register("anthropic", Anthropic{}) }
+func init() { adapter.Register(core.ProtocolAnthropicMessages, Anthropic{}) }
 
 // messagesPath is the bare protocol path; base_url must already carry
 // the provider's own API version (see adapter.ResolveURL).
@@ -24,7 +24,7 @@ const messagesPath = "/messages"
 
 type Anthropic struct{}
 
-func (Anthropic) Protocol() string { return "anthropic" }
+func (Anthropic) Protocol() string { return core.ProtocolAnthropicMessages }
 func (Anthropic) ResolveURL(baseURL string) string {
 	return adapter.ResolveURL(baseURL, messagesPath)
 }
