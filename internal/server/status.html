@@ -87,6 +87,7 @@
       border: 1px solid transparent;
     }
     .badge-primary { background: rgba(88, 166, 255, 0.15); color: var(--accent); border-color: rgba(88, 166, 255, 0.3); }
+    .badge-anthropic { background: rgba(188, 140, 255, 0.15); color: #bc8cff; border-color: rgba(188, 140, 255, 0.3); }
     .badge-success { background: var(--green-bg); color: var(--green); border-color: rgba(63, 185, 80, 0.3); }
     .badge-warning { background: var(--yellow-bg); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
     .badge-danger { background: var(--red-bg); color: var(--red); border-color: rgba(248, 81, 73, 0.3); }
@@ -301,6 +302,7 @@
       </div>
       <div class="controls">
         <span class="badge badge-success" id="badge-uptime">uptime: ...</span>
+        <a href="/help.html" class="nav-link" title="Agent configuration guide">💡 Help</a>
         <a href="/log.html" class="nav-link" title="Live console log (tail -f)">💾 Log</a>
         <button id="btn-auth" title="Manage API Key">🔑 Key</button>
       </div>
@@ -308,6 +310,49 @@
 
     <!-- Banners Container -->
     <div id="banners-container"></div>
+
+    <!-- Connect Your Agent Card -->
+    <div class="card" id="card-connect" style="margin-bottom: 20px;">
+      <div class="card-title" style="cursor:pointer;" onclick="document.getElementById('card-connect-body').classList.toggle('hidden')">
+        🔌 Connect Your Agent
+        <span style="font-size:11px; text-transform:none; font-weight:400; color:var(--text-muted);">(click to toggle)</span>
+      </div>
+      <div id="card-connect-body">
+        <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
+          Use these values to configure any AI coding agent to route through this VMR instance.
+          The API Key is not shown here — ask your administrator.
+        </p>
+        <div class="stat-list" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+          <div class="stat-item" style="gap:8px; min-width:240px;">
+            <span class="stat-label">Base URL <span class="badge badge-primary">OpenAI</span></span>
+            <span class="stat-val" id="dash-base-url-openai">loading...</span>
+          </div>
+          <div class="stat-item" style="gap:8px; min-width:240px;">
+            <span class="stat-label">Base URL <span class="badge badge-anthropic">Anthropic</span></span>
+            <span class="stat-val" id="dash-base-url-anthropic">loading...</span>
+          </div>
+          <div class="stat-item" style="gap:8px; min-width:240px;">
+            <span class="stat-label">API Key</span>
+            <span class="stat-val" style="color:var(--text-muted);">(ask admin)</span>
+          </div>
+          <div class="stat-item" style="gap:8px; min-width:240px;">
+            <span class="stat-label">Protocol</span>
+            <span class="stat-val" id="dash-protocols">loading...</span>
+          </div>
+        </div>
+        <div class="stat-list" style="margin-bottom:12px;">
+          <div class="stat-item" style="gap:8px;">
+            <span class="stat-label">Virtual Models</span>
+            <span class="stat-val" id="dash-models" style="font-size:12px; font-weight:400;">loading...</span>
+          </div>
+        </div>
+        <div style="margin-top:4px; font-size:12px;">
+          <a href="/help.html" class="nav-link" style="display:inline-flex; align-items:center; gap:4px;" title="Detailed agent-specific configuration guides">
+            📖 Full Agent Configuration Guides →
+          </a>
+        </div>
+      </div>
+    </div>
 
     <!-- Core Metrics Grid -->
     <div class="grid-4">
@@ -565,6 +610,10 @@
       quotaSection: document.getElementById('quota-section'),
       quotaTbody: document.getElementById('quota-tbody'),
       quotaCount: document.getElementById('badge-quota-count'),
+      dashBaseUrlOpenAI: document.getElementById('dash-base-url-openai'),
+      dashBaseUrlAnthropic: document.getElementById('dash-base-url-anthropic'),
+      dashProtocols: document.getElementById('dash-protocols'),
+      dashModels: document.getElementById('dash-models'),
       btnAuth: document.getElementById('btn-auth'),
       authModal: document.getElementById('auth-modal'),
       inputApiKey: document.getElementById('input-api-key'),
@@ -584,6 +633,33 @@
 
       // Header
       dom.version.textContent = inst.version || 'unknown';
+
+      // Connect Your Agent card — the three values any client config needs:
+      // the per-protocol Base URL and the virtual-model list. The API Key is
+      // deliberately never rendered here (operator tells it out of band);
+      // base_urls come from the request's own host, so they're correct for
+      // whoever is actually looking at this dashboard.
+      const baseURLs = inst.base_urls || {};
+      const openaiBase = baseURLs.openai ? baseURLs.openai.replace(/\/+$/, '') : '—';
+      const anthropicBase = baseURLs.anthropic
+        ? baseURLs.anthropic.replace(/\/v1\/+$/, '').replace(/\/+$/, '')
+        : '—';
+      dom.dashBaseUrlOpenAI.textContent = openaiBase;
+      dom.dashBaseUrlAnthropic.textContent = anthropicBase;
+      const modelList = data.models || [];
+      const protoSet = new Set();
+      modelList.forEach(m => { if (m.protocol) protoSet.add(m.protocol); });
+      const protoNames = { 'openai': 'OpenAI', 'anthropic': 'Anthropic', 'openai-responses': 'Responses' };
+      dom.dashProtocols.textContent = protoSet.size > 0
+        ? Array.from(protoSet).map(p => protoNames[p] || p).join(' / ')
+        : '—';
+      dom.dashModels.innerHTML = modelList.length > 0
+        ? modelList.map(m => {
+            const badgeClass = m.protocol === 'anthropic' ? 'badge-anthropic' : 'badge-primary';
+            return `<span class="badge ${badgeClass}" style="margin:2px;">${esc(m.id)}</span>`;
+          }).join(' ')
+        : '<span class="stat-val" style="color:var(--text-muted); font-size:12px;">(no models configured)</span>';
+
       dom.pid.textContent = `PID: ${inst.pid || '-'}`;
       dom.listen.textContent = inst.listen || '-';
       dom.osarch.textContent = `${inst.os_arch || ''} (${inst.go_version || ''})`;

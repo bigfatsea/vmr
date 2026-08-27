@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-14, by Gemini -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR — Agent Configuration Guide</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --green-bg: rgba(63, 185, 80, 0.15);
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --cyan: #39c5cf;
+      --orange: #f0883e;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 24px 16px;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+
+    /* Header */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 20px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
+    .nav-link {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 4px 12px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: var(--card-border);
+      color: var(--text);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-link:hover { border-color: var(--text-muted); color: var(--text-bright); }
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--card-border);
+      border: 1px solid transparent;
+    }
+    .badge-primary { background: rgba(88, 166, 255, 0.15); color: var(--accent); border-color: rgba(88, 166, 255, 0.3); }
+    .badge-success { background: var(--green-bg); color: var(--green); border-color: rgba(63, 185, 80, 0.3); }
+    .badge-anthropic { background: rgba(188, 140, 255, 0.15); color: var(--purple); border-color: rgba(188, 140, 255, 0.3); }
+    .badge-warning { background: rgba(210, 153, 34, 0.15); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
+    .badge-orange { background: rgba(240, 136, 62, 0.15); color: var(--orange); border-color: rgba(240, 136, 62, 0.3); }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    /* Connection Info Table */
+    .info-table { width: 100%; border-collapse: collapse; }
+    .info-table td { padding: 8px 12px; border-bottom: 1px solid rgba(48, 54, 61, 0.5); vertical-align: top; }
+    .info-table tr:last-child td { border-bottom: none; }
+    .info-table .label { color: var(--text-muted); font-weight: 500; white-space: nowrap; width: 180px; }
+    .info-table .value { font-family: var(--font-mono); color: var(--text-bright); word-break: break-all; }
+    .info-table .value-muted { color: var(--text-muted); }
+
+    /* Auth Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+    }
+    .modal h2 { font-size: 18px; color: var(--text-bright); }
+    .modal p { font-size: 13px; color: var(--text-muted); }
+    .modal input {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .modal input:focus { border-color: var(--accent); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .modal-actions button {
+      font-family: inherit;
+      font-size: 13px;
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 6px 14px;
+      cursor: pointer;
+    }
+    .modal-actions button:hover { border-color: var(--text-muted); }
+    .modal-actions button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
+    .modal-actions button.primary:hover { background: var(--accent-hover); }
+    .auth-link {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(88, 166, 255, 0.5);
+    }
+    .auth-link:hover { color: var(--accent-hover); }
+
+    /* Section headings */
+    .section-head {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin: 32px 0 16px 0;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .section-desc {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    .section-desc code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: var(--card-bg);
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid var(--card-border);
+    }
+
+    /* Agent Card */
+    .agent-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .agent-head {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .agent-head h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .agent-head .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+    .agent-desc {
+      padding: 12px 18px 0 18px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .agent-desc a { color: var(--accent); text-decoration: none; }
+    .agent-desc a:hover { text-decoration: underline; }
+    .agent-config {
+      padding: 12px 18px 18px 18px;
+    }
+    .config-file {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Code Block */
+    .code-block {
+      position: relative;
+      background: #0d1117;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .code-block .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 12px;
+      background: #161b22;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .code-block .copy-btn {
+      font-family: inherit;
+      font-size: 11px;
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .code-block .copy-btn:hover {
+      border-color: var(--text-muted);
+      color: var(--text-bright);
+    }
+    .code-block .copy-btn.copied { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .code-block pre {
+      padding: 14px 16px;
+      margin: 0;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .code-block pre code { font-family: inherit; }
+    .code-block pre .comment { color: #8b949e; }
+    .code-block pre .key { color: #79c0ff; }
+    .code-block pre .string { color: #a5d6ff; }
+    .code-block pre .bool { color: #d2a8ff; }
+    .code-block pre .placeholder { color: #ffa657; }
+
+    @media (max-width: 768px) {
+      .agent-head { flex-direction: column; align-items: flex-start; }
+      .info-table .label { width: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <h1>⚙ Agent Configuration Guide</h1>
+      </div>
+      <div class="nav-links" style="display:flex; gap:8px; align-items:center;">
+        <a href="/status.html" class="nav-link">📊 Dashboard</a>
+        <a href="/log.html" class="nav-link">💾 Log</a>
+      </div>
+    </header>
+
+    <!-- Connection Info Card (dynamic) -->
+    <div class="card" id="connection-card">
+      <div class="card-title">🔌 Connection Information</div>
+      <p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">
+        Use these values to configure your AI coding agent to route through this VMR instance.
+        The <strong>API Key</strong> is not shown here — ask your administrator.
+      </p>
+      <table class="info-table" id="info-table">
+        <tr>
+          <td class="label">Base URL <span class="badge badge-primary">OpenAI</span></td>
+          <td class="value" id="dyn-base-url-openai">{{BASE_URL_OPENAI}}</td>
+        </tr>
+        <tr>
+          <td class="label">Base URL <span class="badge badge-anthropic">Anthropic</span></td>
+          <td class="value" id="dyn-base-url-anthropic">{{BASE_URL_ANTHROPIC}}</td>
+        </tr>
+        <tr>
+          <td class="label">API Key</td>
+          <td class="value-muted">(ask your administrator)</td>
+        </tr>
+        <tr>
+          <td class="label">Virtual Models</td>
+          <td class="value" id="dyn-models">loading...</td>
+        </tr>
+        <tr>
+          <td class="label">VMR Version</td>
+          <td class="value" id="dyn-version">loading...</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="help-auth-modal" class="modal-overlay hidden">
+      <div class="modal">
+        <h2>Authentication Required</h2>
+        <p>This VMR instance is protected with API Key authentication. Enter your API Key to see the live virtual model list and version:</p>
+        <input type="password" id="help-api-key" placeholder="Enter API Key (e.g. sk-...)" autocomplete="off">
+        <div id="help-auth-error" class="hidden" style="color:var(--red); font-size:12px;"></div>
+        <div class="modal-actions">
+          <button id="help-auth-cancel">Cancel</button>
+          <button class="primary" id="help-auth-save">Connect</button>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- Guide -->
+    <h2 class="section-head">📖 Agent Configuration Guides</h2>
+    <p class="section-desc">
+      Each guide below shows how to configure a specific AI coding agent to point at this VMR instance.
+      Three values are always needed: the <strong>Base URL</strong> (shown above), the <strong>API Key</strong>
+      (from your admin), and a <strong>Virtual Model Name</strong> (one of the models listed above).
+      Most agents support either the OpenAI Chat Completions protocol or the Anthropic Messages protocol —
+      pick the protocol section that matches your agent's native API.
+    </p>
+
+    <!-- ===== Anthropic Protocol Agents ===== -->
+    <h3 style="color:var(--purple); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
+      <span>Anthropic Protocol</span>
+      <span class="badge badge-anthropic">anthropic-messages</span>
+    </h3>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+      Agents that natively speak the Anthropic Messages API. Configure the base URL to point at VMR's
+      Anthropic-compatible endpoint. The API key is sent via the <code>x-api-key</code> header.
+    </p>
+
+    <!-- Claude Code -->
+    <div class="agent-card" id="agent-claude-code">
+      <div class="agent-head">
+        <h3>Claude Code</h3>
+        <div class="badges">
+          <span class="badge badge-anthropic">anthropic</span>
+          <span class="badge badge-success">env var</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        Anthropic's official terminal coding agent. Set environment variables to route through VMR.
+        Claude Code automatically detects <code>ANTHROPIC_BASE_URL</code> and uses it for all API calls.
+        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or prefix before <code>claude</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="claude-code-snippet">Copy</button>
+          </div>
+          <pre id="claude-code-snippet"><code><span class="comment"># Point Claude Code at VMR</span>
+<span class="key">export</span> ANTHROPIC_BASE_URL={{BASE_URL_ANTHROPIC}}
+<span class="key">export</span> ANTHROPIC_AUTH_TOKEN=<span class="string">YOUR_VMR_API_KEY</span>
+
+<span class="comment"># Start Claude Code (model: use one of the anthropic-protocol models above)</span>
+claude --model <span class="string">claude</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== OpenAI Protocol Agents ===== -->
+    <h3 style="color:var(--accent); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
+      <span>OpenAI Protocol</span>
+      <span class="badge badge-primary">openai-completions</span>
+    </h3>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+      Agents that natively speak the OpenAI Chat Completions API. Configure the base URL to point at
+      VMR's OpenAI-compatible endpoint. The API key is sent via the <code>Authorization: Bearer</code> header.
+    </p>
+
+    <!-- Pi Agent -->
+    <div class="agent-card" id="agent-pi">
+      <div class="agent-head">
+        <h3>Pi Agent</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">models.json</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        Pi is a terminal AI coding agent with multi-model support. Add VMR as a custom provider in
+        <code>~/.pi/agent/models.json</code>, then select models with <code>/model</code> or the
+        <code>--provider</code>/<code>--model</code> flags.
+        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>~/.pi/agent/models.json</code> (create if not exists)</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>JSON</span>
+            <button class="copy-btn" data-copy="pi-snippet">Copy</button>
+          </div>
+          <pre id="pi-snippet"><code>{
+  <span class="key">"providers"</span>: {
+    <span class="key">"vmr"</span>: {
+      <span class="key">"baseUrl"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
+      <span class="key">"api"</span>: <span class="string">"openai-completions"</span>,
+      <span class="key">"apiKey"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>,
+      <span class="key">"models"</span>: [
+        { <span class="key">"id"</span>: <span class="string">"coding"</span> },
+        { <span class="key">"id"</span>: <span class="string">"agent"</span> }
+      ]
+    }
+  }
+}</code></pre>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+          Then run <code>pi --provider vmr --model coding</code>, or use <code>/model</code> inside pi to select interactively.
+        </p>
+      </div>
+    </div>
+
+    <!-- Codex CLI -->
+    <div class="agent-card" id="agent-codex">
+      <div class="agent-head">
+        <h3>Codex CLI</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">env var</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        OpenAI's official terminal coding agent. Set <code>OPENAI_BASE_URL</code> to route through VMR.
+        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 Environment variables</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="codex-snippet">Copy</button>
+          </div>
+          <pre id="codex-snippet"><code><span class="comment"># Point Codex CLI at VMR</span>
+<span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
+<span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+
+<span class="comment"># Start Codex (model: use one of the openai-protocol models above)</span>
+codex --model <span class="string">coding</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Aider -->
+    <div class="agent-card" id="agent-aider">
+      <div class="agent-head">
+        <h3>Aider</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">env var</span>
+          <span class="badge badge-warning">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        AI pair programming in the terminal. Supports OpenAI-compatible API via environment variables
+        or <code>~/.aider.conf.yml</code>.
+        <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 Environment variables, or <code>~/.aider.conf.yml</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="aider-snippet">Copy</button>
+          </div>
+          <pre id="aider-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+<span class="key">export</span> AIDER_OPENAI_API_BASE={{BASE_URL_OPENAI}}
+<span class="key">export</span> AIDER_OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> AIDER_OPENAI_MODEL=<span class="string">coding</span>
+aider
+
+<span class="comment"># Option 2: ~/.aider.conf.yml</span>
+<span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
+<span class="key">openai-api-key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">model:</span> <span class="string">coding</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- OpenCode -->
+    <div class="agent-card" id="agent-opencode">
+      <div class="agent-head">
+        <h3>OpenCode</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        A terminal-based AI coding agent (<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>).
+        Configure a custom provider via <code>opencode.json</code> in your project or
+        <code>~/.config/opencode/opencode.json</code>.
+        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>opencode.json</code> (project root) or <code>~/.config/opencode/opencode.json</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>JSON</span>
+            <button class="copy-btn" data-copy="opencode-snippet">Copy</button>
+          </div>
+          <pre id="opencode-snippet"><code>{
+  <span class="key">"provider"</span>: {
+    <span class="key">"vmr"</span>: {
+      <span class="key">"name"</span>: <span class="string">"VMR"</span>,
+      <span class="key">"options"</span>: {
+        <span class="key">"baseURL"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
+        <span class="key">"apiKey"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>
+      },
+      <span class="key">"models"</span>: {
+        <span class="key">"coding"</span>: { <span class="key">"name"</span>: <span class="string">"Coding"</span> }
+      }
+    }
+  }
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- OpenClaw -->
+    <div class="agent-card" id="agent-openclaw">
+      <div class="agent-head">
+        <h3>OpenClaw</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">env var</span>
+          <span class="badge badge-warning">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        An open-source, Claude Code-compatible terminal agent. Supports OpenAI-compatible API endpoints.
+        Configure via environment variables or a <code>config.yaml</code> file.
+        <a href="https://github.com/bigfatsea/openclaw" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 Environment variables, or <code>~/.openclaw/config.yaml</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="openclaw-snippet">Copy</button>
+          </div>
+          <pre id="openclaw-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+<span class="key">export</span> OPENCLAW_BASE_URL={{BASE_URL_OPENAI}}
+<span class="key">export</span> OPENCLAW_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> OPENCLAW_MODEL=<span class="string">coding</span>
+openclaw
+
+<span class="comment"># Option 2: ~/.openclaw/config.yaml</span>
+<span class="key">base_url:</span> {{BASE_URL_OPENAI}}
+<span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">model:</span> <span class="string">coding</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- WorkBuddy -->
+    <div class="agent-card" id="agent-workbuddy">
+      <div class="agent-head">
+        <h3>WorkBuddy</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        A terminal-based AI coding assistant. Configure via <code>~/.workbuddy/config.yaml</code> or
+        <code>.workbuddy.yaml</code> in your project. Supports OpenAI-compatible API endpoints.
+        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>~/.workbuddy/config.yaml</code> or <code>.workbuddy.yaml</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>YAML</span>
+            <button class="copy-btn" data-copy="workbuddy-snippet">Copy</button>
+          </div>
+          <pre id="workbuddy-snippet"><code><span class="comment"># ~/.workbuddy/config.yaml</span>
+<span class="key">llm:</span>
+  <span class="key">provider:</span> <span class="string">openai</span>
+  <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
+  <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+  <span class="key">model:</span> <span class="string">coding</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hermes -->
+    <div class="agent-card" id="agent-hermes">
+      <div class="agent-head">
+        <h3>Hermes</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">env var</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        A fast, extensible terminal AI coding agent. Supports OpenAI-compatible endpoints via
+        environment variables.
+        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 Environment variables</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="hermes-snippet">Copy</button>
+          </div>
+          <pre id="hermes-snippet"><code><span class="comment"># Point Hermes at VMR</span>
+<span class="key">export</span> HERMES_BASE_URL={{BASE_URL_OPENAI}}
+<span class="key">export</span> HERMES_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> HERMES_MODEL=<span class="string">coding</span>
+hermes</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- OpenDesign -->
+    <div class="agent-card" id="agent-opendesign">
+      <div class="agent-head">
+        <h3>OpenDesign</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        An AI-powered design-to-code agent. Routes LLM calls through an OpenAI-compatible API.
+        <a href="https://github.com/bigfatsea/opendesign" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>~/.opendesign/config.yaml</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>YAML</span>
+            <button class="copy-btn" data-copy="opendesign-snippet">Copy</button>
+          </div>
+          <pre id="opendesign-snippet"><code><span class="comment"># ~/.opendesign/config.yaml</span>
+<span class="key">llm:</span>
+  <span class="key">provider:</span> <span class="string">openai</span>
+  <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
+  <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+  <span class="key">model:</span> <span class="string">coding</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Continue -->
+    <div class="agent-card" id="agent-continue">
+      <div class="agent-head">
+        <h3>Continue.dev</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai</span>
+          <span class="badge badge-success">config</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        An open-source AI code assistant for IDEs (VS Code, JetBrains). Add VMR as a model provider
+        in <code>~/.continue/config.json</code>.
+        <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 <code>~/.continue/config.json</code></div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>JSON</span>
+            <button class="copy-btn" data-copy="continue-snippet">Copy</button>
+          </div>
+          <pre id="continue-snippet"><code>{
+  <span class="key">"models"</span>: [
+    {
+      <span class="key">"title"</span>: <span class="string">"VMR"</span>,
+      <span class="key">"provider"</span>: <span class="string">"openai"</span>,
+      <span class="key">"model"</span>: <span class="string">"coding"</span>,
+      <span class="key">"apiBase"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
+      <span class="key">"apiKey"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Other Protocols ===== -->
+    <h3 style="color:var(--orange); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
+      <span>OpenAI Responses Protocol</span>
+      <span class="badge badge-orange">openai-responses</span>
+    </h3>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+      Agents using the newer OpenAI Responses API. Configure the same base URL as the OpenAI protocol,
+      but use an <code>openai-responses</code>-protocol virtual model.
+    </p>
+
+    <!-- Cursor (CLI Mode) -->
+    <div class="agent-card" id="agent-cursor">
+      <div class="agent-head">
+        <h3>Cursor CLI Mode</h3>
+        <div class="badges">
+          <span class="badge badge-orange">responses</span>
+          <span class="badge badge-success">env var</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        Cursor's terminal agent mode. Supports custom API endpoints via environment variables.
+        Note: Cursor's IDE mode uses its own internal provider and cannot be redirected to VMR.
+        <a href="https://docs.cursor.com/advanced/terminal" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">📄 Environment variables</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Shell</span>
+            <button class="copy-btn" data-copy="cursor-snippet">Copy</button>
+          </div>
+          <pre id="cursor-snippet"><code><span class="comment"># Point Cursor CLI at VMR</span>
+<span class="key">export</span> CURSOR_API_BASE={{BASE_URL_OPENAI}}
+<span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+
+<span class="comment"># Start Cursor CLI agent mode</span>
+cursor --model <span class="string">responses-model</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Quick Reference ===== -->
+    <h2 class="section-head">📋 Quick Reference</h2>
+    <p class="section-desc">
+      Which protocol to use, and where to configure it, at a glance.
+    </p>
+
+    <div class="card" style="overflow-x:auto;">
+      <table class="info-table" style="min-width:600px;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Agent</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Protocol</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Config Location</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Key Fields</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Claude Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">anthropic</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: ANTHROPIC_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Pi Agent</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseUrl, apiKey, models[].id</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Codex CLI</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: OPENAI_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Aider</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.aider.conf.yml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_base, api_key</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenCode</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseURL, apiKey, model ID</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenClaw</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">WorkBuddy</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.workbuddy/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Hermes</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: HERMES_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenDesign</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Continue.dev</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">apiBase, apiKey, model</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:0;">Cursor CLI</td><td style="padding:8px 12px; border-bottom:0;"><span class="badge badge-orange">responses</span></td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">env: CURSOR_API_BASE</td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">api_base, api_key, model</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Footer -->
+    <footer style="margin-top:40px; padding-top:16px; border-top:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
+      <div>Virtual Model Router (VMR) — Agent Configuration Guide</div>
+      <div>
+        <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+          <span>bigfatsea/vmr</span>
+          <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        </a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // --- Auth State ---
+    const Auth = {
+      getKey() { return localStorage.getItem('vmr_status_key') || ''; },
+      setKey(k) { localStorage.setItem('vmr_status_key', k.trim()); },
+    };
+
+    // --- DOM Refs ---
+    const dynOpenAI = document.getElementById('dyn-base-url-openai');
+    const dynAnthropic = document.getElementById('dyn-base-url-anthropic');
+    const dynModels = document.getElementById('dyn-models');
+    const dynVersion = document.getElementById('dyn-version');
+    const authModal = document.getElementById('help-auth-modal');
+    const helpKeyInput = document.getElementById('help-api-key');
+    const helpAuthError = document.getElementById('help-auth-error');
+    const helpAuthSave = document.getElementById('help-auth-save');
+    const helpAuthCancel = document.getElementById('help-auth-cancel');
+
+    // --- Auth State ---
+    const Auth = {
+      getKey() { return localStorage.getItem('vmr_status_key') || ''; },
+      setKey(k) { localStorage.setItem('vmr_status_key', k.trim()); },
+    };
+
+    // --- Connection Info ---
+    function setPlaceholder() {
+      // Derive the Base URLs from the URL this visitor actually used —
+      // window.location.origin is exactly "what I typed in the address bar",
+      // so no HOST:PORT mental substitution is ever needed. OpenAI-compatible
+      // endpoints take a /v1 suffix; Anthropic endpoints (e.g. Claude Code)
+      // take the bare origin. The server has already baked the same real
+      // values into the page (derived from the request's Host); this pass
+      // re-fills from the browser's own URL so a proxy that rewrites Host
+      // still resolves to what the user sees.
+      const origin = window.location.origin;
+      dynOpenAI.textContent = origin + '/v1';
+      dynAnthropic.textContent = origin;
+      dynModels.innerHTML = `<span class="value-muted">loading...</span>`;
+      dynVersion.textContent = 'loading...';
+      // Fill the same real values into every code snippet so a copy-paste is
+      // ready to go immediately, before any authentication. Only <pre> blocks
+      // are touched — a full-body innerHTML rewrite would detach the DOM
+      // references captured above and break the later /status pass.
+      document.querySelectorAll('pre').forEach(pre => {
+        pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));
+        pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_ANTHROPIC\}\}/g, esc(origin));
+      });
+    }
+
+    function replacePlaceholders(data) {
+      // Base URLs are deliberately NOT touched here: they were already filled
+      // from window.location.origin (and server-side from the request Host),
+      // which is the address this visitor's agent should point at. This pass
+      // only supplies the two facts only the auth-gated /status endpoint can.
+
+      // Models
+      if (data.models && data.models.length > 0) {
+        const modelSpans = data.models.map(m => {
+          const proto = m.protocol || 'openai';
+          const badgeClass = proto === 'anthropic' ? 'badge-anthropic' : 'badge-primary';
+          return `<span class="badge ${badgeClass}" style="margin:2px;">${esc(m.id)}</span>`;
+        });
+        dynModels.innerHTML = modelSpans.join(' ');
+      } else {
+        dynModels.innerHTML = `<span class="value-muted">(no models configured)</span>`;
+      }
+
+      // Version
+      const ver = data.instance && data.instance.version ? data.instance.version : 'unknown';
+      dynVersion.textContent = ver;
+    }
+
+    function showAuthPrompt() {
+      dynModels.innerHTML = `<a href="javascript:void(0)" class="auth-link" id="reveal-models-link">🔒 enter API key to reveal</a>`;
+      dynVersion.innerHTML = `<span class="value-muted">(enter API key to reveal)</span>`;
+      const link = document.getElementById('reveal-models-link');
+      if (link) link.addEventListener('click', openAuthModal);
+    }
+
+    function openAuthModal() {
+      helpKeyInput.value = Auth.getKey();
+      helpAuthError.classList.add('hidden');
+      authModal.classList.remove('hidden');
+      helpKeyInput.focus();
+    }
+
+    function closeAuthModal() {
+      authModal.classList.add('hidden');
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // --- Fetch Status ---
+    async function fetchStatus() {
+      const key = Auth.getKey();
+      const sentKey = key !== '';
+      const headers = {};
+      if (sentKey) headers['Authorization'] = 'Bearer ' + key;
+
+      try {
+        const resp = await fetch('/status', { headers });
+        if (resp.status === 401) {
+          if (sentKey) {
+            // A stored key exists but was rejected — open the modal with an
+            // error so the user can re-enter (same UX as the dashboard).
+            helpKeyInput.value = key;
+            helpAuthError.textContent = 'API Key is invalid or expired. Please re-enter:';
+            helpAuthError.classList.remove('hidden');
+            authModal.classList.remove('hidden');
+            helpKeyInput.focus();
+          } else {
+            showAuthPrompt();
+          }
+          return;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        replacePlaceholders(data);
+      } catch (err) {
+        dynModels.innerHTML = `<span class="value-muted">(vmr unreachable)</span>`;
+        dynVersion.textContent = '—';
+      }
+    }
+
+    // --- Modal Handlers ---
+    helpAuthCancel.addEventListener('click', closeAuthModal);
+
+    helpAuthSave.addEventListener('click', () => {
+      const val = helpKeyInput.value.trim();
+      if (val) {
+        Auth.setKey(val);
+      } else {
+        Auth.clearKey();
+      }
+      closeAuthModal();
+      fetchStatus();
+    });
+
+    helpKeyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        helpAuthSave.click();
+      }
+    });
+
+    // Close modal on overlay click
+    authModal.addEventListener('click', (e) => {
+      if (e.target === authModal) closeAuthModal();
+    });
+
+    // --- Copy Buttons ---
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-copy');
+        const pre = document.getElementById(id);
+        if (!pre) return;
+        const text = pre.textContent || pre.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 2000);
+        }).catch(() => {
+          // Fallback
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 2000);
+        });
+      });
+    });
+
+    // --- Init ---
+    setPlaceholder();
+    fetchStatus();
+  </script>
+</body>
+</html>
