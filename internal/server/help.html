@@ -350,7 +350,7 @@
       Three values are always needed: the <strong>Base URL</strong> (shown above), the <strong>API Key</strong>
       (from your admin), and a <strong>Virtual Model Name</strong> (one of the models listed above).
       Where supported by the agent, you can also configure <strong>Context Window</strong> (e.g. <code>200k</code>),
-      <strong>Reasoning / Thinking Effort</strong> (e.g. <code>medium</code>, <code>budget_tokens</code>), and
+      <strong>Reasoning / Thinking Effort</strong> (e.g. <code>high</code>, <code>budget_tokens</code>), and
       <strong>Vision</strong> capabilities (<code>image</code>) matching VMR's model metadata.
       Most agents support either the OpenAI Chat Completions protocol or the Anthropic Messages protocol —
       pick the protocol section that matches your agent's native API.
@@ -372,32 +372,45 @@
         <h3>Claude Code</h3>
         <div class="badges">
           <span class="badge badge-anthropic">anthropic-messages</span>
-          <span class="badge badge-success">env var</span>
-          <span class="badge badge-warning">thinking</span>
+          <span class="badge badge-success">env var / settings.json</span>
+          <span class="badge badge-warning">thinking & effort</span>
         </div>
       </div>
       <p class="agent-desc">
-        Anthropic's official terminal coding agent. Set environment variables to route through VMR.
-        Claude Code automatically detects <code>ANTHROPIC_BASE_URL</code> and uses it for all API calls.
-        Configure <code>MAX_THINKING_TOKENS</code> to tune reasoning budget.
+        Anthropic's official terminal coding agent. Route through VMR using environment variables or <code>~/.claude/settings.json</code>.
+        Claude Code automatically connects to <code>ANTHROPIC_BASE_URL</code>.
+        Tune reasoning budget with <code>MAX_THINKING_TOKENS</code> (fixed budget) or <code>CLAUDE_CODE_EFFORT_LEVEL</code> / <code>/effort</code> (adaptive reasoning).
         <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or prefix before <code>claude</code></div>
+        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or <code>~/.claude/settings.json</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="claude-code-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="claude-code-env-snippet">Copy</button>
           </div>
-          <pre id="claude-code-snippet"><code><span class="comment"># Point Claude Code at VMR</span>
+          <pre id="claude-code-env-snippet"><code><span class="comment"># Option 1: Shell Environment Variables</span>
 <span class="key">export</span> ANTHROPIC_BASE_URL={{BASE_URL_ANTHROPIC}}
 <span class="key">export</span> ANTHROPIC_AUTH_TOKEN=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> ANTHROPIC_MODEL=<span class="string">claude</span>
 
-<span class="comment"># Optional: Thinking budget in tokens for reasoning models (0 disables, e.g. 8192 / 16384)</span>
-<span class="key">export</span> MAX_THINKING_TOKENS=<span class="string">8192</span>
-
-<span class="comment"># Start Claude Code (model: use one of the anthropic-messages models above)</span>
-claude --model <span class="string">claude</span></code></pre>
+<span class="comment"># Reasoning budget: token budget (e.g. 8192, 0 disables) or effort level (low, medium, high, max)</span>
+<span class="key">export</span> MAX_THINKING_TOKENS=<span class="string">32768</span>
+<span class="key">export</span> CLAUDE_CODE_EFFORT_LEVEL=<span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>JSON (~/.claude/settings.json)</span>
+            <button class="copy-btn" data-copy="claude-code-json-snippet">Copy</button>
+          </div>
+          <pre id="claude-code-json-snippet"><code>{
+  <span class="key">"env"</span>: {
+    <span class="key">"ANTHROPIC_BASE_URL"</span>: <span class="string">"{{BASE_URL_ANTHROPIC}}"</span>,
+    <span class="key">"ANTHROPIC_AUTH_TOKEN"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>,
+    <span class="key">"MAX_THINKING_TOKENS"</span>: <span class="string">"32768"</span>
+  },
+  <span class="key">"model"</span>: <span class="string">"claude"</span>
+}</code></pre>
         </div>
       </div>
     </div>
@@ -418,21 +431,23 @@ claude --model <span class="string">claude</span></code></pre>
         <h3>Pi Agent</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
+          <span class="badge badge-anthropic">anthropic-messages</span>
           <span class="badge badge-success">models.json</span>
           <span class="badge badge-warning">context window</span>
           <span class="badge badge-warning">vision & reasoning</span>
         </div>
       </div>
       <p class="agent-desc">
-        Pi is a terminal AI coding agent with multi-model support. Add VMR as a custom provider in
-        <code>~/.pi/agent/models.json</code>, specifying <code>contextWindow</code>, <code>input</code> (vision), and <code>reasoning</code> flags.
+        Pi is a minimalist, extensible terminal AI coding agent (<a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">earendil-works/pi-mono</a>).
+        Add VMR as a custom provider in <code>~/.pi/agent/models.json</code>, specifying <code>contextWindow</code>, <code>maxTokens</code>, <code>input</code> (modalities), and <code>reasoning</code> flags.
+        Pi keys providers by API protocol, so VMR appears as <code>vmr-openai</code> and/or <code>vmr-anthropic</code> — both <code>openai-completions</code> and <code>anthropic-messages</code> are supported.
         <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
         <div class="config-file">📄 <code>~/.pi/agent/models.json</code> (create if not exists)</div>
         <div class="code-block">
           <div class="code-header">
-            <span>JSON</span>
+            <span>JSON (~/.pi/agent/models.json)</span>
             <button class="copy-btn" data-copy="pi-snippet">Copy</button>
           </div>
           <pre id="pi-snippet"><code>{
@@ -446,7 +461,7 @@ claude --model <span class="string">claude</span></code></pre>
           <span class="key">"id"</span>: <span class="string">"coding"</span>,
           <span class="key">"name"</span>: <span class="string">"Coding (VMR)"</span>,
           <span class="key">"contextWindow"</span>: <span class="bool">200000</span>,
-          <span class="key">"maxTokens"</span>: <span class="bool">8192</span>,
+          <span class="key">"maxTokens"</span>: <span class="bool">65536</span>,
           <span class="key">"input"</span>: [<span class="string">"text"</span>, <span class="string">"image"</span>],
           <span class="key">"reasoning"</span>: <span class="bool">false</span>
         },
@@ -454,7 +469,7 @@ claude --model <span class="string">claude</span></code></pre>
           <span class="key">"id"</span>: <span class="string">"agent"</span>,
           <span class="key">"name"</span>: <span class="string">"Agent Reasoning (VMR)"</span>,
           <span class="key">"contextWindow"</span>: <span class="bool">200000</span>,
-          <span class="key">"maxTokens"</span>: <span class="bool">16384</span>,
+          <span class="key">"maxTokens"</span>: <span class="bool">65536</span>,
           <span class="key">"input"</span>: [<span class="string">"text"</span>, <span class="string">"image"</span>],
           <span class="key">"reasoning"</span>: <span class="bool">true</span>
         }
@@ -463,9 +478,6 @@ claude --model <span class="string">claude</span></code></pre>
   }
 }</code></pre>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-          Then run <code>pi --provider vmr --model coding</code>, or use <code>/model</code> inside pi to select interactively.
-        </p>
       </div>
     </div>
 
@@ -475,31 +487,82 @@ claude --model <span class="string">claude</span></code></pre>
         <h3>Codex CLI</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
-          <span class="badge badge-warning">reasoning effort</span>
+          <span class="badge badge-success">env var / config.toml</span>
+          <span class="badge badge-warning">context & reasoning</span>
         </div>
       </div>
       <p class="agent-desc">
-        OpenAI's official terminal coding agent. Set <code>OPENAI_BASE_URL</code> to route through VMR.
-        Use <code>OPENAI_REASONING_EFFORT</code> for reasoning/thinking models.
+        OpenAI's official terminal coding agent. Route through VMR via environment variables or <code>~/.codex/config.toml</code>.
+        Configure <code>model_reasoning_effort</code> (minimal / low / medium / high / xhigh) and <code>model_context_window</code> in <code>config.toml</code> to manage memory and thinking depth.
         <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or <code>~/.codex/config.toml</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="codex-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="codex-env-snippet">Copy</button>
           </div>
-          <pre id="codex-snippet"><code><span class="comment"># Point Codex CLI at VMR</span>
+          <pre id="codex-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
-<span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>TOML (~/.codex/config.toml)</span>
+            <button class="copy-btn" data-copy="codex-toml-snippet">Copy</button>
+          </div>
+          <pre id="codex-toml-snippet"><code><span class="comment"># Model and reasoning defaults</span>
+<span class="key">model</span> = <span class="string">"coding"</span>
+<span class="key">model_reasoning_effort</span> = <span class="string">"high"</span>
+<span class="key">model_context_window</span> = <span class="bool">200000</span>
+<span class="key">model_auto_compact_token_limit</span> = <span class="bool">180000</span>
 
-<span class="comment"># Optional: Reasoning effort for thinking models (low, medium, high)</span>
-<span class="key">export</span> OPENAI_REASONING_EFFORT=<span class="string">medium</span>
+<span class="comment"># VMR custom provider</span>
+[<span class="key">model_providers.vmr</span>]
+<span class="key">name</span> = <span class="string">"VMR"</span>
+<span class="key">base_url</span> = <span class="string">"{{BASE_URL_OPENAI}}"</span>
+<span class="key">env_key</span> = <span class="string">"OPENAI_API_KEY"</span>
+<span class="key">wire_api</span> = <span class="string">"responses"</span></code></pre>
+        </div>
+      </div>
+    </div>
 
-<span class="comment"># Start Codex (model: use one of the openai-completions models above)</span>
-codex --model <span class="string">coding</span></code></pre>
+    <!-- Cline & Roo Code -->
+    <div class="agent-card" id="agent-cline">
+      <div class="agent-head">
+        <h3>Cline & Roo Code</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai-completions</span>
+          <span class="badge badge-anthropic">anthropic-messages</span>
+          <span class="badge badge-success">gui / settings</span>
+          <span class="badge badge-warning">context window</span>
+          <span class="badge badge-warning">vision & tools</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        Autonomous AI coding extensions for VS Code / VSCodium. In the extension settings (⚙️), select <code>OpenAI Compatible</code> (or <code>Anthropic Compatible</code>),
+        then configure the Base URL, API Key, Model ID, context window, and vision capabilities.
+        <a href="https://github.com/cline/cline" target="_blank" rel="noopener">Cline Docs →</a> · <a href="https://github.com/RooVetGit/Roo-Cline" target="_blank" rel="noopener">Roo Code Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">⚙️ Extension Settings panel (VS Code UI)</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Configuration (OpenAI Compatible)</span>
+            <button class="copy-btn" data-copy="cline-snippet">Copy</button>
+          </div>
+          <pre id="cline-snippet"><code><span class="comment"># Cline / Roo Code Settings UI:</span>
+<span class="key">API Provider:</span> <span class="string">OpenAI Compatible</span>
+<span class="key">Base URL:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
+<span class="key">API Key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">Model ID:</span> <span class="string">coding</span>
+
+<span class="comment"># Model Configuration (Advanced):</span>
+<span class="key">Context Window:</span> <span class="bool">200000</span>
+<span class="key">Max Output Tokens:</span> <span class="bool">65536</span>
+<span class="key">Include Images:</span> <span class="bool">Enabled</span> (supports image/screenshot input)
+<span class="key">Native Tool Calling:</span> <span class="bool">Enabled</span></code></pre>
         </div>
       </div>
     </div>
@@ -510,35 +573,57 @@ codex --model <span class="string">coding</span></code></pre>
         <h3>Aider</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
-          <span class="badge badge-warning">config</span>
-          <span class="badge badge-warning">model metadata</span>
+          <span class="badge badge-success">env var / conf.yml</span>
+          <span class="badge badge-warning">reasoning & metadata</span>
         </div>
       </div>
       <p class="agent-desc">
-        AI pair programming in the terminal. Supports OpenAI-compatible API via environment variables
-        or <code>~/.aider.conf.yml</code>. Use <code>model-metadata-file</code> to declare context window and vision support.
+        AI pair programming in the terminal. Route LLM requests to VMR via environment variables or <code>~/.aider.conf.yml</code>.
+        Declare custom context window limits and vision capabilities in <code>.aider.model.metadata.json</code>, and tune reasoning with <code>--reasoning-effort</code> or <code>--thinking-tokens</code>.
         <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables, or <code>~/.aider.conf.yml</code></div>
+        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, <code>~/.aider.conf.yml</code>, or <code>.aider.model.metadata.json</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="aider-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="aider-env-snippet">Copy</button>
           </div>
-          <pre id="aider-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+          <pre id="aider-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> AIDER_OPENAI_API_BASE={{BASE_URL_OPENAI}}
 <span class="key">export</span> AIDER_OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
-<span class="key">export</span> AIDER_OPENAI_MODEL=<span class="string">coding</span>
-aider --edit-format diff
+<span class="key">export</span> AIDER_MODEL=<span class="string">openai/coding</span>
 
-<span class="comment"># Option 2: ~/.aider.conf.yml (with context & edit settings)</span>
-<span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
+<span class="comment"># Optional: Reasoning depth and thinking budget</span>
+<span class="key">export</span> AIDER_REASONING_EFFORT=<span class="string">high</span>
+<span class="key">export</span> AIDER_THINKING_TOKENS=<span class="string">32768</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>YAML (~/.aider.conf.yml)</span>
+            <button class="copy-btn" data-copy="aider-yaml-snippet">Copy</button>
+          </div>
+          <pre id="aider-yaml-snippet"><code><span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
 <span class="key">openai-api-key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">openai/coding</span>
 <span class="key">edit-format:</span> <span class="string">diff</span>
-<span class="key">weak-model:</span> <span class="string">openai/coding</span></code></pre>
+<span class="key">weak-model:</span> <span class="string">openai/coding</span>
+<span class="key">reasoning-effort:</span> <span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>JSON (.aider.model.metadata.json - Context & Vision Metadata)</span>
+            <button class="copy-btn" data-copy="aider-meta-snippet">Copy</button>
+          </div>
+          <pre id="aider-meta-snippet"><code>{
+  <span class="key">"openai/coding"</span>: {
+    <span class="key">"max_input_tokens"</span>: <span class="bool">200000</span>,
+    <span class="key">"max_output_tokens"</span>: <span class="bool">65536</span>,
+    <span class="key">"input_cost_per_token"</span>: <span class="bool">0</span>,
+    <span class="key">"output_cost_per_token"</span>: <span class="bool">0</span>,
+    <span class="key">"supports_images"</span>: <span class="bool">true</span>
+  }
+}</code></pre>
         </div>
       </div>
     </div>
@@ -551,25 +636,27 @@ aider --edit-format diff
           <span class="badge badge-primary">openai-completions</span>
           <span class="badge badge-success">config</span>
           <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision</span>
+          <span class="badge badge-warning">vision & reasoning</span>
         </div>
       </div>
       <p class="agent-desc">
         A terminal-based AI coding agent (<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>).
-        Configure a custom provider in <code>opencode.json</code> with <code>contextWindow</code>, <code>maxTokens</code>, and <code>supportsImages</code>.
+        Configure a custom provider in <code>opencode.json</code> with <code>limit</code> (context & output), <code>modalities</code> (vision), and <code>reasoning</code> flags.
         <a href="https://opencode.ai/docs" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
         <div class="config-file">📄 <code>opencode.json</code> (project root) or <code>~/.config/opencode/opencode.json</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>JSON</span>
+            <span>JSON (opencode.json)</span>
             <button class="copy-btn" data-copy="opencode-snippet">Copy</button>
           </div>
           <pre id="opencode-snippet"><code>{
+  <span class="key">"$schema"</span>: <span class="string">"https://opencode.ai/config.json"</span>,
   <span class="key">"provider"</span>: {
     <span class="key">"vmr"</span>: {
       <span class="key">"name"</span>: <span class="string">"VMR"</span>,
+      <span class="key">"npm"</span>: <span class="string">"@ai-sdk/openai-compatible"</span>,
       <span class="key">"options"</span>: {
         <span class="key">"baseURL"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
         <span class="key">"apiKey"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>
@@ -577,16 +664,24 @@ aider --edit-format diff
       <span class="key">"models"</span>: {
         <span class="key">"coding"</span>: {
           <span class="key">"name"</span>: <span class="string">"Coding"</span>,
-          <span class="key">"contextWindow"</span>: <span class="bool">200000</span>,
-          <span class="key">"maxTokens"</span>: <span class="bool">8192</span>,
-          <span class="key">"supportsImages"</span>: <span class="bool">true</span>,
+          <span class="key">"limit"</span>: {
+            <span class="key">"context"</span>: <span class="bool">200000</span>,
+            <span class="key">"output"</span>: <span class="bool">65536</span>
+          },
+          <span class="key">"modalities"</span>: {
+            <span class="key">"input"</span>: [<span class="string">"text"</span>, <span class="string">"image"</span>]
+          },
           <span class="key">"reasoning"</span>: <span class="bool">false</span>
         },
         <span class="key">"agent"</span>: {
           <span class="key">"name"</span>: <span class="string">"Agent"</span>,
-          <span class="key">"contextWindow"</span>: <span class="bool">200000</span>,
-          <span class="key">"maxTokens"</span>: <span class="bool">16384</span>,
-          <span class="key">"supportsImages"</span>: <span class="bool">true</span>,
+          <span class="key">"limit"</span>: {
+            <span class="key">"context"</span>: <span class="bool">200000</span>,
+            <span class="key">"output"</span>: <span class="bool">65536</span>
+          },
+          <span class="key">"modalities"</span>: {
+            <span class="key">"input"</span>: [<span class="string">"text"</span>, <span class="string">"image"</span>]
+          },
           <span class="key">"reasoning"</span>: <span class="bool">true</span>
         }
       }
@@ -603,39 +698,45 @@ aider --edit-format diff
         <h3>OpenClaw</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
-          <span class="badge badge-warning">config</span>
+          <span class="badge badge-success">env var / config.yaml</span>
           <span class="badge badge-warning">thinking & vision</span>
         </div>
       </div>
       <p class="agent-desc">
         An open-source, Claude Code-compatible terminal agent. Supports OpenAI-compatible API endpoints.
-        Configure context window, vision, and thinking budget via environment variables or <code>config.yaml</code>.
-        <a href="https://github.com/bigfatsea/openclaw" target="_blank" rel="noopener">Official Docs →</a>
+        Configure context window, vision, reasoning effort, and thinking budget via environment variables or <code>config.yaml</code>.
+        <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables, or <code>~/.openclaw/config.yaml</code></div>
+        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or <code>~/.openclaw/config.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="openclaw-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="openclaw-env-snippet">Copy</button>
           </div>
-          <pre id="openclaw-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+          <pre id="openclaw-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENCLAW_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENCLAW_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> OPENCLAW_MODEL=<span class="string">coding</span>
-<span class="key">export</span> OPENCLAW_REASONING_EFFORT=<span class="string">medium</span>
-openclaw
-
-<span class="comment"># Option 2: ~/.openclaw/config.yaml</span>
-<span class="key">base_url:</span> {{BASE_URL_OPENAI}}
+<span class="key">export</span> OPENCLAW_CONTEXT_WINDOW=<span class="string">200000</span>
+<span class="key">export</span> OPENCLAW_MAX_TOKENS=<span class="string">65536</span>
+<span class="key">export</span> OPENCLAW_VISION=<span class="bool">true</span>
+<span class="key">export</span> OPENCLAW_REASONING_EFFORT=<span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>YAML (~/.openclaw/config.yaml)</span>
+            <button class="copy-btn" data-copy="openclaw-yaml-snippet">Copy</button>
+          </div>
+          <pre id="openclaw-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">coding</span>
 <span class="key">context_window:</span> <span class="bool">200000</span>
-<span class="key">max_tokens:</span> <span class="bool">8192</span>
+<span class="key">max_tokens:</span> <span class="bool">65536</span>
 <span class="key">vision:</span> <span class="bool">true</span>
+<span class="key">reasoning_effort:</span> <span class="string">high</span>
 <span class="key">thinking:</span>
-  <span class="key">budget_tokens:</span> <span class="bool">8192</span></code></pre>
+  <span class="key">budget_tokens:</span> <span class="bool">32768</span></code></pre>
         </div>
       </div>
     </div>
@@ -646,33 +747,44 @@ openclaw
         <h3>WorkBuddy</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">config</span>
+          <span class="badge badge-success">env var / config.yaml</span>
           <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision</span>
+          <span class="badge badge-warning">vision & reasoning</span>
         </div>
       </div>
       <p class="agent-desc">
-        A terminal-based AI coding assistant. Configure via <code>~/.workbuddy/config.yaml</code> or
-        <code>.workbuddy.yaml</code> in your project. Supports context length, max tokens, and vision input.
+        A terminal-based AI coding assistant. Configure via environment variables or <code>~/.workbuddy/config.yaml</code>.
+        Supports context length, max output tokens, vision input, and reasoning effort.
         <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
         <div class="config-file">📄 <code>~/.workbuddy/config.yaml</code> or <code>.workbuddy.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>YAML</span>
-            <button class="copy-btn" data-copy="workbuddy-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="workbuddy-env-snippet">Copy</button>
           </div>
-          <pre id="workbuddy-snippet"><code><span class="comment"># ~/.workbuddy/config.yaml</span>
-<span class="key">llm:</span>
+          <pre id="workbuddy-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+<span class="key">export</span> WORKBUDDY_BASE_URL={{BASE_URL_OPENAI}}
+<span class="key">export</span> WORKBUDDY_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> WORKBUDDY_MODEL=<span class="string">coding</span>
+<span class="key">export</span> WORKBUDDY_CONTEXT_WINDOW=<span class="string">200000</span>
+<span class="key">export</span> WORKBUDDY_REASONING_EFFORT=<span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>YAML (~/.workbuddy/config.yaml)</span>
+            <button class="copy-btn" data-copy="workbuddy-yaml-snippet">Copy</button>
+          </div>
+          <pre id="workbuddy-yaml-snippet"><code><span class="key">llm:</span>
   <span class="key">provider:</span> <span class="string">openai</span>
   <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
   <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
   <span class="key">model:</span> <span class="string">coding</span>
   <span class="key">context_window:</span> <span class="bool">200000</span>
-  <span class="key">max_output_tokens:</span> <span class="bool">8192</span>
+  <span class="key">max_output_tokens:</span> <span class="bool">65536</span>
   <span class="key">supports_vision:</span> <span class="bool">true</span>
-  <span class="key">reasoning_effort:</span> <span class="string">medium</span></code></pre>
+  <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
         </div>
       </div>
     </div>
@@ -683,33 +795,45 @@ openclaw
         <h3>Hermes</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">env var / config</span>
           <span class="badge badge-warning">context & vision</span>
         </div>
       </div>
       <p class="agent-desc">
         A fast, extensible terminal AI coding agent. Supports OpenAI-compatible endpoints with
-        configurable context window, max tokens, and vision flags via environment variables.
+        configurable context window, max tokens, reasoning depth, and vision flags.
         <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 Environment variables, or <code>~/.hermes/config.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="hermes-snippet">Copy</button>
+            <span>Shell (Environment Variables)</span>
+            <button class="copy-btn" data-copy="hermes-env-snippet">Copy</button>
           </div>
-          <pre id="hermes-snippet"><code><span class="comment"># Point Hermes at VMR</span>
+          <pre id="hermes-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> HERMES_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> HERMES_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> HERMES_MODEL=<span class="string">coding</span>
 
 <span class="comment"># Model parameters: context window, max output tokens, vision & reasoning</span>
 <span class="key">export</span> HERMES_CONTEXT_WINDOW=<span class="string">200000</span>
-<span class="key">export</span> HERMES_MAX_OUTPUT_TOKENS=<span class="string">8192</span>
+<span class="key">export</span> HERMES_MAX_OUTPUT_TOKENS=<span class="string">65536</span>
 <span class="key">export</span> HERMES_VISION=<span class="bool">true</span>
-<span class="key">export</span> HERMES_REASONING_EFFORT=<span class="string">medium</span>
-hermes</code></pre>
+<span class="key">export</span> HERMES_REASONING_EFFORT=<span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>YAML (~/.hermes/config.yaml)</span>
+            <button class="copy-btn" data-copy="hermes-yaml-snippet">Copy</button>
+          </div>
+          <pre id="hermes-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
+<span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">model:</span> <span class="string">coding</span>
+<span class="key">context_window:</span> <span class="bool">200000</span>
+<span class="key">max_tokens:</span> <span class="bool">65536</span>
+<span class="key">vision:</span> <span class="bool">true</span>
+<span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
         </div>
       </div>
     </div>
@@ -733,19 +857,19 @@ hermes</code></pre>
         <div class="config-file">📄 <code>~/.opendesign/config.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>YAML</span>
+            <span>YAML (~/.opendesign/config.yaml)</span>
             <button class="copy-btn" data-copy="opendesign-snippet">Copy</button>
           </div>
-          <pre id="opendesign-snippet"><code><span class="comment"># ~/.opendesign/config.yaml</span>
-<span class="key">llm:</span>
+          <pre id="opendesign-snippet"><code><span class="key">llm:</span>
   <span class="key">provider:</span> <span class="string">openai</span>
   <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
   <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
   <span class="key">model:</span> <span class="string">coding</span>
   <span class="key">context_tokens:</span> <span class="bool">200000</span>
-  <span class="key">max_output_tokens:</span> <span class="bool">8192</span>
+  <span class="key">max_output_tokens:</span> <span class="bool">65536</span>
   <span class="comment"># Vision capability enables UI screenshot & design token recognition</span>
-  <span class="key">vision:</span> <span class="bool">true</span></code></pre>
+  <span class="key">vision:</span> <span class="bool">true</span>
+  <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
         </div>
       </div>
     </div>
@@ -756,24 +880,44 @@ hermes</code></pre>
         <h3>Continue.dev</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">config</span>
+          <span class="badge badge-success">config.yaml / json</span>
           <span class="badge badge-warning">context length</span>
           <span class="badge badge-warning">capabilities</span>
         </div>
       </div>
       <p class="agent-desc">
         An open-source AI code assistant for IDEs (VS Code, JetBrains). Add VMR as a model provider
-        in <code>~/.continue/config.json</code> with <code>contextLength</code> and <code>capabilities</code> (tools, images).
+        in <code>~/.continue/config.yaml</code> (modern format) or <code>~/.continue/config.json</code>,
+        declaring <code>contextLength</code>, <code>maxTokens</code>, and <code>capabilities</code> (tool_use, image_input).
         <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">Official Docs →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>~/.continue/config.json</code></div>
+        <div class="config-file">📄 <code>~/.continue/config.yaml</code> (recommended) or <code>~/.continue/config.json</code></div>
         <div class="code-block">
           <div class="code-header">
-            <span>JSON</span>
-            <button class="copy-btn" data-copy="continue-snippet">Copy</button>
+            <span>YAML (~/.continue/config.yaml - Modern Format)</span>
+            <button class="copy-btn" data-copy="continue-yaml-snippet">Copy</button>
           </div>
-          <pre id="continue-snippet"><code>{
+          <pre id="continue-yaml-snippet"><code><span class="key">models:</span>
+  - <span class="key">name:</span> <span class="string">VMR Coding</span>
+    <span class="key">provider:</span> <span class="string">openai</span>
+    <span class="key">model:</span> <span class="string">coding</span>
+    <span class="key">apiBase:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
+    <span class="key">apiKey:</span> <span class="string">YOUR_VMR_API_KEY</span>
+    <span class="key">capabilities:</span>
+      - <span class="string">tool_use</span>
+      - <span class="string">image_input</span>
+    <span class="key">defaultCompletionOptions:</span>
+      <span class="key">contextLength:</span> <span class="bool">200000</span>
+      <span class="key">maxTokens:</span> <span class="bool">65536</span>
+      <span class="key">reasoningEffort:</span> <span class="string">high</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>JSON (~/.continue/config.json - Legacy Format)</span>
+            <button class="copy-btn" data-copy="continue-json-snippet">Copy</button>
+          </div>
+          <pre id="continue-json-snippet"><code>{
   <span class="key">"models"</span>: [
     {
       <span class="key">"title"</span>: <span class="string">"VMR Coding"</span>,
@@ -782,7 +926,9 @@ hermes</code></pre>
       <span class="key">"apiBase"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
       <span class="key">"apiKey"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>,
       <span class="key">"contextLength"</span>: <span class="bool">200000</span>,
-      <span class="key">"maxStopWords"</span>: <span class="bool">8192</span>,
+      <span class="key">"completionOptions"</span>: {
+        <span class="key">"maxTokens"</span>: <span class="bool">65536</span>
+      },
       <span class="key">"capabilities"</span>: [<span class="string">"tools"</span>, <span class="string">"uploadImage"</span>]
     }
   ]
@@ -791,48 +937,96 @@ hermes</code></pre>
       </div>
     </div>
 
-    <!-- ===== Other Protocols ===== -->
+    <!-- Cursor (IDE & CLI) -->
+    <div class="agent-card" id="agent-cursor">
+      <div class="agent-head">
+        <h3>Cursor (IDE & CLI Agent)</h3>
+        <div class="badges">
+          <span class="badge badge-primary">openai-completions</span>
+          <span class="badge badge-success">ide settings / env var</span>
+          <span class="badge badge-warning">custom models</span>
+        </div>
+      </div>
+      <p class="agent-desc">
+        Cursor supports routing AI requests to custom OpenAI-compatible endpoints directly from its IDE settings or terminal agent (<code>cursor-agent</code>).
+        In the IDE, override the OpenAI Base URL and add your VMR virtual model name.
+        <a href="https://docs.cursor.com" target="_blank" rel="noopener">Official Docs →</a>
+      </p>
+      <div class="agent-config">
+        <div class="config-file">⚙️ Cursor Settings (IDE) or Shell (CLI Agent)</div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Cursor IDE Settings (UI Configuration)</span>
+            <button class="copy-btn" data-copy="cursor-ide-snippet">Copy</button>
+          </div>
+          <pre id="cursor-ide-snippet"><code><span class="comment"># 1. Open Cursor Settings -> Models</span>
+<span class="comment"># 2. Under 'OpenAI API Key', enter:</span>
+<span class="key">OpenAI API Key:</span> <span class="string">YOUR_VMR_API_KEY</span>
+
+<span class="comment"># 3. Toggle ON 'Override OpenAI Base URL', and enter:</span>
+<span class="key">OpenAI Base URL:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
+
+<span class="comment"># 4. Under 'Model Names', click '+ Add Model' and enter your virtual model name:</span>
+<span class="key">Model:</span> <span class="string">coding</span>
+<span class="comment"># 5. Click 'Verify' to test connection</span></code></pre>
+        </div>
+        <div class="code-block" style="margin-top:10px;">
+          <div class="code-header">
+            <span>Terminal CLI (cursor-agent)</span>
+            <button class="copy-btn" data-copy="cursor-cli-snippet">Copy</button>
+          </div>
+          <pre id="cursor-cli-snippet"><code><span class="comment"># Point Cursor CLI agent at VMR</span>
+<span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
+<span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+<span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== OpenAI Responses Protocol ===== -->
     <h3 style="color:var(--orange); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
       <span>OpenAI Responses Protocol</span>
       <span class="badge badge-orange">openai-responses</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      Agents using the newer OpenAI Responses API. Configure the same base URL as the OpenAI Completions protocol,
-      but use an <code>openai-responses</code>-protocol virtual model.
+      Applications and SDKs calling the next-generation OpenAI Responses API (<code>/v1/responses</code>).
+      Configure the Base URL pointing at VMR, and use an <code>openai-responses</code>-protocol virtual model.
     </p>
 
-    <!-- Cursor (CLI Mode) -->
-    <div class="agent-card" id="agent-cursor">
+    <!-- OpenAI Responses SDK -->
+    <div class="agent-card" id="agent-responses">
       <div class="agent-head">
-        <h3>Cursor CLI Mode</h3>
+        <h3>OpenAI Responses API (SDK & Tools)</h3>
         <div class="badges">
           <span class="badge badge-orange">openai-responses</span>
-          <span class="badge badge-success">env var</span>
-          <span class="badge badge-warning">reasoning effort</span>
+          <span class="badge badge-success">python / curl / sdk</span>
+          <span class="badge badge-warning">responses api</span>
         </div>
       </div>
       <p class="agent-desc">
-        Cursor's terminal agent mode. Supports custom API endpoints via environment variables.
-        Use <code>CURSOR_REASONING_EFFORT</code> for reasoning/thinking models.
-        Note: Cursor's IDE mode uses its own internal provider and cannot be redirected to VMR.
-        <a href="https://docs.cursor.com/advanced/terminal" target="_blank" rel="noopener">Official Docs →</a>
+        Connect tools and SDKs that communicate via OpenAI's <code>/v1/responses</code> endpoint.
+        Virtual models configured under the <code>openai-responses</code> protocol in VMR will handle downstream translation and streaming.
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 Python SDK / API Call</div>
         <div class="code-block">
           <div class="code-header">
-            <span>Shell</span>
-            <button class="copy-btn" data-copy="cursor-snippet">Copy</button>
+            <span>Python (OpenAI SDK)</span>
+            <button class="copy-btn" data-copy="responses-py-snippet">Copy</button>
           </div>
-          <pre id="cursor-snippet"><code><span class="comment"># Point Cursor CLI at VMR</span>
-<span class="key">export</span> CURSOR_API_BASE={{BASE_URL_OPENAI}}
-<span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
+          <pre id="responses-py-snippet"><code><span class="key">from</span> openai <span class="key">import</span> OpenAI
 
-<span class="comment"># Optional: reasoning effort (low / medium / high) for thinking models</span>
-<span class="key">export</span> CURSOR_REASONING_EFFORT=<span class="string">medium</span>
+client = OpenAI(
+    base_url=<span class="string">"{{BASE_URL_OPENAI}}"</span>,
+    api_key=<span class="string">"YOUR_VMR_API_KEY"</span>,
+)
 
-<span class="comment"># Start Cursor CLI agent mode</span>
-cursor --model <span class="string">responses-model</span></code></pre>
+<span class="comment"># Calls POST {{BASE_URL_OPENAI}}/responses</span>
+response = client.responses.create(
+    model=<span class="string">"coding"</span>,
+    input=<span class="string">"Analyze and refactor the auth middleware in internal/server/auth.go"</span>,
+)
+print(response.output_text)</code></pre>
         </div>
       </div>
     </div>
@@ -850,21 +1044,23 @@ cursor --model <span class="string">responses-model</span></code></pre>
             <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Agent</th>
             <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Protocol</th>
             <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Config Location</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Key Fields</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Key Fields & Capabilities</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Claude Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">anthropic-messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: ANTHROPIC_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key, MAX_THINKING_TOKENS</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Pi Agent</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseUrl, apiKey, contextWindow, input, reasoning</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Codex CLI</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: OPENAI_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_key, OPENAI_REASONING_EFFORT</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Aider</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.aider.conf.yml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, api_base, api_key, edit-format</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenCode</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseURL, apiKey, contextWindow, supportsImages</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenClaw</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, context_window, vision</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">WorkBuddy</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.workbuddy/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, context_window, supports_vision</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Hermes</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env: HERMES_BASE_URL</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, HERMES_CONTEXT_WINDOW</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenDesign</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, vision: true</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Continue.dev</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">apiBase, apiKey, model, contextLength, capabilities</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:0;">Cursor CLI</td><td style="padding:8px 12px; border-bottom:0;"><span class="badge badge-orange">openai-responses</span></td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">env: CURSOR_API_BASE</td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">api_base, api_key, model, CURSOR_REASONING_EFFORT</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Claude Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">anthropic-messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.claude/settings.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">ANTHROPIC_BASE_URL, MAX_THINKING_TOKENS, CLAUDE_CODE_EFFORT_LEVEL</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Cline & Roo Code</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span> <span class="badge badge-anthropic">anthropic</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">VS Code Settings Panel</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">Base URL, API Key, Model ID, Context Window, Include Images</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Pi Agent</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span> <span class="badge badge-anthropic">anthropic</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseUrl, apiKey, contextWindow, maxTokens, input, reasoning</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Codex CLI</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.codex/config.toml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, base_url, wire_api, model_reasoning_effort, model_context_window</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Aider</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.aider.conf.yml / metadata</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">model, openai-api-base, reasoning-effort, max_input_tokens</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenCode</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">baseURL, apiKey, limit, modalities, reasoning</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenClaw</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.openclaw/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, context_window, vision, thinking</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">WorkBuddy</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.workbuddy/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, context_window, supports_vision</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Hermes</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env / ~/.hermes/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, HERMES_CONTEXT_WINDOW, vision</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">OpenDesign</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, context_tokens, vision: true</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Continue.dev</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.yaml (or .json)</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">apiBase, apiKey, model, contextLength, capabilities</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);">Cursor (IDE & CLI)</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">openai-completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">Settings -> Models / env</td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">Override OpenAI Base URL, API Key, Model Names</td></tr>
+          <tr><td style="padding:8px 12px; border-bottom:0;">OpenAI Responses SDK</td><td style="padding:8px 12px; border-bottom:0;"><span class="badge badge-orange">openai-responses</span></td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">OpenAI SDK client</td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">base_url, api_key, model, responses.create()</td></tr>
         </tbody>
       </table>
     </div>
@@ -1020,6 +1216,237 @@ cursor --model <span class="string">responses-model</span></code></pre>
       return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
+    // --- Live Snippet Fill ---
+    // Each Agent code block ships with static defaults (model "coding" /
+    // "claude", 200k context, 64k output, 32k thinking, high effort,
+    // YOUR_VMR_API_KEY) so a no-JS / pre-auth reader still sees a coherent
+    // config. Once GET /status is readable, single-model snippets have their
+    // model id, context window and token budgets swapped in place — the
+    // regexes are anchored to the highlight <span> wrappers the page was
+    // built with, so bare shell words (the `claude` command itself) are never
+    // touched. The four list-shaped configs (Pi, OpenCode, Continue, Aider
+    // metadata) are regenerated to enumerate EVERY virtual model of the
+    // matching protocol: a VMR operator typically wires all of them so they
+    // can switch per task. The operator's key, once entered, is injected too.
+    // Every render restarts from the cached original template, so clearing
+    // the key reverts cleanly to the defaults.
+    const snippetTpl = new Map();
+    function cacheSnippetTemplates() {
+      document.querySelectorAll('.code-block pre').forEach(pre => {
+        if (!snippetTpl.has(pre)) snippetTpl.set(pre, pre.innerHTML);
+      });
+    }
+
+    // Empirical output-token ceiling for a context window, in tiers: ~120k
+    // ctx -> 32k out, ~200k -> 64k out, >=480k (1M-class) -> 128k out.
+    // Anchored to Claude / GPT public limits; VMR carries no real max-output
+    // metadata. Clamped so it never exceeds the context window itself.
+    function maxOutFor(ctx) {
+      if (ctx >= 480000) return 131072;
+      if (ctx >= 200000) return 65536;
+      if (ctx >= 120000) return 32768;
+      return Math.min(16384, ctx);
+    }
+    function thinkFor(ctx) { return Math.min(maxOutFor(ctx) / 2, 32768); }
+
+    const HL = {
+      k: t => '<span class="key">' + esc(t) + '</span>',
+      s: t => '<span class="string">' + esc(t) + '</span>',
+      b: t => '<span class="bool">' + esc(t) + '</span>',
+    };
+
+    function snippetModels(data, proto) {
+      return ((data && data.models) || []).filter(m => m.protocol === proto).map(m => {
+        const caps = m.capabilities || [];
+        const ctx = m.max_context_tokens > 0 ? m.max_context_tokens : 200000;
+        // Empty capability set = unconstrained: assume the model reasons.
+        return { id: m.id, ctx, reasoning: caps.length === 0 || caps.indexOf('thinking') !== -1 };
+      });
+    }
+
+    function snippetValues(data) {
+      const oc = snippetModels(data, 'openai-completions');
+      const am = snippetModels(data, 'anthropic-messages');
+      const or = snippetModels(data, 'openai-responses');
+      const origin = window.location.origin;
+      const key = Auth.getKey();
+      const primary = oc[0] || am[0] || { id: 'coding', ctx: 200000 };
+      return {
+        oc, am, or,
+        baseOC: origin + '/v1',
+        baseAM: origin,
+        modelOC: (oc[0] || { id: 'coding' }).id,
+        modelAM: (am[0] || { id: 'claude' }).id,
+        modelOR: (or[0] || oc[0] || { id: 'coding' }).id,
+        ctx: primary.ctx,
+        apiKey: key || 'YOUR_VMR_API_KEY',
+      };
+    }
+
+    function fillSnippet(html, v, isResponses) {
+      const oc = isResponses ? v.modelOR : v.modelOC;
+      const out = String(maxOutFor(v.ctx));
+      const think = String(thinkFor(v.ctx));
+      const ctx = String(v.ctx);
+      const compact = String(Math.round(v.ctx * 0.9));
+      return html
+        .replace(/(<span class="string">"?)YOUR_VMR_API_KEY("?<\/span>)/g, (_, a, b) => a + esc(v.apiKey) + b)
+        .replace(/(<span class="string">openai\/)coding(<\/span>)/g, (_, a, b) => a + esc(oc) + b)
+        .replace(/(<span class="(?:string|key)">"?)coding("?<\/span>)/g, (_, a, b) => a + esc(oc) + b)
+        .replace(/(<span class="string">"?)claude("?<\/span>)/g, (_, a, b) => a + esc(v.modelAM) + b)
+        .replace(/(<span class="(?:bool|string)">"?)200000("?<\/span>)/g, (_, a, b) => a + ctx + b)
+        .replace(/(<span class="bool">)180000(<\/span>)/g, (_, a, b) => a + compact + b)
+        // every output-budget literal -> ctx-derived ceiling ...
+        .replace(/(<span class="(?:bool|string)">"?)(?:8192|16384|65536)("?<\/span>)/g, (_, a, b) => a + out + b)
+        // ... then re-target the thinking-budget fields by their var/key name
+        .replace(/([A-Z_]*THINKING_TOKENS(?:"<\/span>)?[=:]\s*<span class="(?:string|bool)">"?)\d+("?<\/span>)/g, (_, a, b) => a + think + b)
+        .replace(/(budget_tokens:<\/span>\s*<span class="bool">)\d+(<\/span>)/g, (_, a, b) => a + think + b);
+    }
+
+    function piModelBlock(m, indent, last) {
+      const p = ' '.repeat(indent);
+      return [
+        p + '{',
+        p + '  ' + HL.k('"id"') + ': ' + HL.s('"' + m.id + '"') + ',',
+        p + '  ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + ' (VMR)"') + ',',
+        p + '  ' + HL.k('"contextWindow"') + ': ' + HL.b(m.ctx) + ',',
+        p + '  ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
+        p + '  ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + '],',
+        p + '  ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
+        p + '}' + (last ? '' : ','),
+      ].join('\n');
+    }
+    function piProvider(name, api, base, key, models, indent) {
+      const p = ' '.repeat(indent);
+      return [
+        p + HL.k('"' + name + '"') + ': {',
+        p + '  ' + HL.k('"baseUrl"') + ': ' + HL.s('"' + base + '"') + ',',
+        p + '  ' + HL.k('"api"') + ': ' + HL.s('"' + api + '"') + ',',
+        p + '  ' + HL.k('"apiKey"') + ': ' + HL.s('"' + key + '"') + ',',
+        p + '  ' + HL.k('"models"') + ': [',
+        models.map((m, i) => piModelBlock(m, indent + 4, i === models.length - 1)).join('\n'),
+        p + '  ]',
+        p + '}',
+      ].join('\n');
+    }
+    function genPi(v) {
+      const provs = [];
+      if (v.oc.length) provs.push(piProvider('vmr-openai', 'openai-completions', v.baseOC, v.apiKey, v.oc, 4));
+      if (v.am.length) provs.push(piProvider('vmr-anthropic', 'anthropic-messages', v.baseAM, v.apiKey, v.am, 4));
+      if (!provs.length) return null;
+      return '{\n  ' + HL.k('"providers"') + ': {\n' + provs.join(',\n') + '\n  }\n}';
+    }
+
+    function ocModelEntry(m, last) {
+      return [
+        '        ' + HL.k('"' + m.id + '"') + ': {',
+        '          ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + '"') + ',',
+        '          ' + HL.k('"limit"') + ': {',
+        '            ' + HL.k('"context"') + ': ' + HL.b(m.ctx) + ',',
+        '            ' + HL.k('"output"') + ': ' + HL.b(maxOutFor(m.ctx)),
+        '          },',
+        '          ' + HL.k('"modalities"') + ': {',
+        '            ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + ']',
+        '          },',
+        '          ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
+        '        }' + (last ? '' : ','),
+      ].join('\n');
+    }
+    function genOpenCode(v) {
+      if (!v.oc.length) return null;
+      return [
+        '{',
+        '  ' + HL.k('"$schema"') + ': ' + HL.s('"https://opencode.ai/config.json"') + ',',
+        '  ' + HL.k('"provider"') + ': {',
+        '    ' + HL.k('"vmr"') + ': {',
+        '      ' + HL.k('"name"') + ': ' + HL.s('"VMR"') + ',',
+        '      ' + HL.k('"npm"') + ': ' + HL.s('"@ai-sdk/openai-compatible"') + ',',
+        '      ' + HL.k('"options"') + ': {',
+        '        ' + HL.k('"baseURL"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
+        '        ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"'),
+        '      },',
+        '      ' + HL.k('"models"') + ': {',
+        v.oc.map((m, i) => ocModelEntry(m, i === v.oc.length - 1)).join('\n'),
+        '      }',
+        '    }',
+        '  }',
+        '}',
+      ].join('\n');
+    }
+
+    function genContinueYaml(v) {
+      if (!v.oc.length) return null;
+      const lines = [HL.k('models:')];
+      v.oc.forEach(m => {
+        lines.push(
+          '  - ' + HL.k('name:') + ' ' + HL.s('VMR ' + m.id),
+          '    ' + HL.k('provider:') + ' ' + HL.s('openai'),
+          '    ' + HL.k('model:') + ' ' + HL.s(m.id),
+          '    ' + HL.k('apiBase:') + ' ' + HL.s(v.baseOC),
+          '    ' + HL.k('apiKey:') + ' ' + HL.s(v.apiKey),
+          '    ' + HL.k('capabilities:'),
+          '      - ' + HL.s('tool_use'),
+          '      - ' + HL.s('image_input'),
+          '    ' + HL.k('defaultCompletionOptions:'),
+          '      ' + HL.k('contextLength:') + ' ' + HL.b(m.ctx),
+          '      ' + HL.k('maxTokens:') + ' ' + HL.b(maxOutFor(m.ctx)),
+          '      ' + HL.k('reasoningEffort:') + ' ' + HL.s('high'),
+        );
+      });
+      return lines.join('\n');
+    }
+    function genContinueJson(v) {
+      if (!v.oc.length) return null;
+      const entries = v.oc.map((m, i) => [
+        '    {',
+        '      ' + HL.k('"title"') + ': ' + HL.s('"VMR ' + m.id + '"') + ',',
+        '      ' + HL.k('"provider"') + ': ' + HL.s('"openai"') + ',',
+        '      ' + HL.k('"model"') + ': ' + HL.s('"' + m.id + '"') + ',',
+        '      ' + HL.k('"apiBase"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
+        '      ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"') + ',',
+        '      ' + HL.k('"contextLength"') + ': ' + HL.b(m.ctx) + ',',
+        '      ' + HL.k('"completionOptions"') + ': {',
+        '        ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)),
+        '      },',
+        '      ' + HL.k('"capabilities"') + ': [' + HL.s('"tools"') + ', ' + HL.s('"uploadImage"') + ']',
+        '    }' + (i === v.oc.length - 1 ? '' : ','),
+      ].join('\n'));
+      return '{\n  ' + HL.k('"models"') + ': [\n' + entries.join('\n') + '\n  ]\n}';
+    }
+    function genAiderMeta(v) {
+      if (!v.oc.length) return null;
+      const entries = v.oc.map((m, i) => [
+        '  ' + HL.k('"openai/' + m.id + '"') + ': {',
+        '    ' + HL.k('"max_input_tokens"') + ': ' + HL.b(m.ctx) + ',',
+        '    ' + HL.k('"max_output_tokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
+        '    ' + HL.k('"input_cost_per_token"') + ': ' + HL.b(0) + ',',
+        '    ' + HL.k('"output_cost_per_token"') + ': ' + HL.b(0) + ',',
+        '    ' + HL.k('"supports_images"') + ': ' + HL.b('true'),
+        '  }' + (i === v.oc.length - 1 ? '' : ','),
+      ].join('\n'));
+      return '{\n' + entries.join('\n') + '\n}';
+    }
+
+    function setGen(id, code) {
+      if (code == null) return;
+      const pre = document.getElementById(id);
+      if (pre) pre.innerHTML = '<code>' + code + '</code>';
+    }
+
+    function renderSnippets(data) {
+      const v = snippetValues(data);
+      snippetTpl.forEach((tpl, pre) => {
+        pre.innerHTML = fillSnippet(tpl, v, pre.id === 'responses-py-snippet');
+      });
+      if (data && data.models && data.models.length) {
+        setGen('pi-snippet', genPi(v));
+        setGen('opencode-snippet', genOpenCode(v));
+        setGen('continue-yaml-snippet', genContinueYaml(v));
+        setGen('continue-json-snippet', genContinueJson(v));
+        setGen('aider-meta-snippet', genAiderMeta(v));
+      }
+    }
+
     // --- Fetch Status ---
     async function fetchStatus() {
       const key = Auth.getKey();
@@ -1046,6 +1473,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         replacePlaceholders(data);
+        renderSnippets(data);
       } catch (err) {
         helpModels.innerHTML = `<span class="connect-meta">(vmr unreachable)</span>`;
         dynVersion.textContent = '—';
@@ -1063,6 +1491,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
         Auth.clearKey();
       }
       closeAuthModal();
+      renderSnippets(null); // instant key swap; fetchStatus refines models next
       fetchStatus();
     });
 
@@ -1111,6 +1540,8 @@ cursor --model <span class="string">responses-model</span></code></pre>
 
     // --- Init ---
     setPlaceholder();
+    cacheSnippetTemplates();
+    renderSnippets(null);
     fetchStatus();
   </script>
 </body>

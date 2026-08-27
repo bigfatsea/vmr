@@ -219,6 +219,56 @@ func TestHelpZHPage_ServesHTML(t *testing.T) {
 	}
 }
 
+// TestHelpPage_SnippetFillEngine is a cheap build-time guard (not a JS test):
+// both language pages must carry the render engine + per-agent generators and
+// keep the static default literals a no-JS / pre-auth visitor relies on (the
+// JS only swaps these once /status is readable). JS behaviour itself is
+// verified by hand.
+func TestHelpPage_SnippetFillEngine(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+	srv := New(rt, nil)
+
+	for _, path := range []string{"/help.html", "/help.zh.html"} {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		body := w.Body.String()
+
+		for _, want := range []string{
+			"function renderSnippets(",
+			"function fillSnippet(",
+			"cacheSnippetTemplates()",
+			"function genPi(",
+			"function genOpenCode(",
+			`pre.id === 'responses-py-snippet'`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: snippet-fill engine missing %q", path, want)
+			}
+		}
+		// Static defaults must survive verbatim so a copy works before auth.
+		for _, want := range []string{
+			`<span class="string">YOUR_VMR_API_KEY</span>`,
+			`<span class="string">claude</span>`,
+			`<span class="bool">200000</span>`,
+			`<span class="string">high</span>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: static snippet default missing %q", path, want)
+			}
+		}
+	}
+}
+
 func TestHelpPage_404OnOtherPaths(t *testing.T) {
 	cfg, err := config.Parse([]byte(instanceYAML))
 	if err != nil {
