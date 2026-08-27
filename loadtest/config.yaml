@@ -27,49 +27,49 @@ providers:
   # entry covers what used to be separate providers.openai.mock /
   # providers.anthropic.mock declarations.
   - name: mock
-    base_url: {openai: http://127.0.0.1:9900/v1, anthropic: http://127.0.0.1:9900/v1, openai-responses: http://127.0.0.1:9900/v1}
+    base_url: {openai-completions: http://127.0.0.1:9900/v1, anthropic-messages: http://127.0.0.1:9900/v1, openai-responses: http://127.0.0.1:9900/v1}
     # every 127.0.0.1:9900 on this page must match loadtest/addr.Mock (YAML can't import the Go constant)
     api_key: sk-loadtest-mock-key
   - name: mock_fail1
-    base_url: {openai: http://127.0.0.1:9900/fail1/v1}   # loadtest/mockupstream always answers 500 on this path
+    base_url: {openai-completions: http://127.0.0.1:9900/fail1/v1}   # loadtest/mockupstream always answers 500 on this path
     api_key: sk-loadtest-mock-key
   - name: mock_fail2
-    base_url: {openai: http://127.0.0.1:9900/fail2/v1}   # same, second failing endpoint for the failover scenario
+    base_url: {openai-completions: http://127.0.0.1:9900/fail2/v1}   # same, second failing endpoint for the failover scenario
     api_key: sk-loadtest-mock-key
   - name: mock_ok
-    base_url: {openai: http://127.0.0.1:9900/ok/v1}      # succeeds — the failover scenario's third, winning endpoint
+    base_url: {openai-completions: http://127.0.0.1:9900/ok/v1}      # succeeds — the failover scenario's third, winning endpoint
     api_key: sk-loadtest-mock-key
 
 # One virtual model per scenario in docs/VirtualModelRouter_Design_v4_Core.md §12 —
 # doubles as the scenario label in `vmr report`'s per-model breakdown.
 models:
   baseline:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
   stream_normal:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:stream_normal"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:stream_normal"]}]
   thinking_leak:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:thinking_leak"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:thinking_leak"]}]
   think_tag:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:think_tag"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:think_tag"]}]
   big_response:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:big_response"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:big_response"]}]
   big_image:
     image_downscale: 512    # per-model override — global image_downscale stays off for every other scenario
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
   multi_image:
     image_downscale: 512
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
   gif:
     image_downscale: 512    # on, specifically to confirm GIF still skips the decode path even when downscaling is enabled
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
   long_history:
-    endpoints: [{protocol: openai, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
   failover:
     endpoints:
-      - {protocol: openai, providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
-      - {protocol: openai, providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
-      - {protocol: openai, providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
+      - {protocol: openai-completions, providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
+      - {protocol: openai-completions, providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
+      - {protocol: openai-completions, providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
   anthropic_baseline:
-    endpoints: [{protocol: anthropic, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: [{protocol: anthropic-messages, providers: [mock], models: ["scenario:baseline"]}]
   responses_baseline:
     endpoints: [{protocol: openai-responses, providers: [mock], models: ["scenario:baseline"]}]

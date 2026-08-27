@@ -456,24 +456,26 @@ func (r *Registry) Set(key, endpointKey string)  // 命中时刷新 mtime，用�
 sticky_ttl: 10m                     # 全局默认，覆盖 Anthropic/OpenAI/MiniMax 的典型区间；硬上限 24h
 
 models:
-  openai:
-    agent:                          # sticky 默认开启，不用写 sticky: true
-      endpoints:
-        - providers: [minimax]        # 跟随全局 10 分钟
-          model: MiniMax-M3
-          capabilities: [text, image, tools]
-          max_context_tokens: 1000000
-        - providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
-          model: deepseek-chat
-          sticky_ttl: 2h
-          capabilities: [text, tools]
-          max_context_tokens: 128000
+  agent:                            # sticky 默认开启，不用写 sticky: true
+    endpoints:
+      - protocol: openai-completions
+        providers: [minimax]        # 跟随全局 10 分钟
+        models: [MiniMax-M3]
+        capabilities: [text, image, tools]
+        max_context_tokens: 1000000
+      - protocol: openai-completions
+        providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
+        models: [deepseek-chat]
+        sticky_ttl: 2h
+        capabilities: [text, tools]
+        max_context_tokens: 128000
 
-    one-shot-summarizer:              # 单次摘要调用，没有多轮价值，显式关闭 sticky
-      sticky: false
-      endpoints:
-        - providers: [minimax]
-          model: MiniMax-M3
+  one-shot-summarizer:              # 单次摘要调用，没有多轮价值，显式关闭 sticky
+    sticky: false
+    endpoints:
+      - protocol: openai-completions
+        providers: [minimax]
+        models: [MiniMax-M3]
 ```
 
 Compaction（上下文压缩）场景下机制依然成立：压缩本身就会让 cache miss 一次，与 vmr 选哪个端点无关；压缩后的后续轮次共享新锚点，粘性照常生效；`system` prompt 在压缩前后通常不变，是锚点里更稳定的一段。

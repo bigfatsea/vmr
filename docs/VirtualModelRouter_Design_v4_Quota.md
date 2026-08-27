@@ -726,7 +726,7 @@ pricing:
 providers:
   # ── 类型 A：次数制 + 三层窗口 ────────────────────────────────
   - name: plan-a
-    base_url: {anthropic: https://example.invalid/anthropic}
+    base_url: {anthropic-messages: https://example.invalid/anthropic}
     api_key: ${PLAN_A_KEY}
     quota:
       limits:

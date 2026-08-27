@@ -122,7 +122,7 @@ func responsesSessionFingerprint(raw json.RawMessage) (sysHash, firstMsgHash [16
 	// input is an array of Items: walk past any leading role:"system"/
 	// role:"developer" message Items (folded into sysBytes alongside
 	// "instructions" above) to find the first Item that isn't one — same
-	// bounded-cost walk as the "openai" case's leadingSystemAndFirstOther,
+	// bounded-cost walk as the openai-completions case's leadingSystemAndFirstOther,
 	// generalized to Responses' extra "developer" role.
 	sys2, firstBytes, fok := leadingSystemAndFirstOtherResponses(raw, inStart, inEnd)
 	if !fok {

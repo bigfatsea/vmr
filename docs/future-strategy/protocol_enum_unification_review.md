@@ -504,3 +504,148 @@ const (
 
 - `dc75f42` feat(server): add /help agent configuration guide + dashboard Connect card（WIP 前置提交）
 - 改名主提交：112 文件，`internal/core/protocol.go` 新增，一个 commit。
+
+---
+
+## 7. 方案与落地情况全面 Review（基于 Commit #793912）
+
+<!-- Date: 2026-08-27 | Reviewer: Claude -->
+
+### 7.1 前期方案分析与问题真实性验证
+
+对比方案制定阶段的假设与实际代码实现，对前期指出的几个关键问题进行定性与复核：
+
+1. **事实缓存失效（CacheSchemaVersion 1→2）—— 结论：真实成立，执行到位**
+   - **分析**：`ctxgraph.recordFacts` 中持久化了 `Protocol` 和 `Endpoint` 字符串。历史事实缓存如果直接加载，会越过 `audit.Record.UnmarshalJSON`，导致分析侧直接读取到旧协议名。将 `CacheSchemaVersion` 提升至 2 强制全量重扫，彻底切断了旧缓存污染。
+
+2. **分析侧单点咽喉归一化（`audit.Record.UnmarshalJSON`）—— 结论：真实成立，设计精简有效**
+   - **分析**：`report`、`story`、`reqdetail` 和 `ctxgraph` 的日志反序列化全部依赖 `audit.Record`。在反序列化阶段对 `Protocol`、`Attempts[].Protocol` 和 `Attempts[].Endpoint` 进行归一化，既做到了对上层分析业务的透明兼容，又避免了在数十个分析文件中增加胶水代码。
+
+3. **`vmr replay` 历史记录兼容需求（原 Phase 10）—— 结论：业务假设不成立，已正确裁撤**
+   - **分析**：方案初期认为 `replay` 需要支持回放历史日志，拟增加归一化处理。实际业务定位中，`replay` 是在线重放与即时调试工具，无需承担老版本日志兼容的历史包袱。最终决定 `replay` 仅认新枚举值，裁撤 Phase 10 属于正确的收敛决策。
+
+4. **`respnorm.go` 前缀截断风险 —— 结论：风险不成立（误报）**
+   - **分析**：前期方案担忧 `openai-responses` 与 `openai-completions` 前缀重叠可能导致 `appendDone()` 等逻辑失效。实际审查代码发现，原代码使用 `protocol != "openai"` 精确比对，并不存在 `strings.HasPrefix` 等模糊匹配，改名后直接替换为常量比对即可，不存在隐式逻辑陷阱。
+
+5. **`internal/pricing/resolve.go:78` 协议名污染 —— 结论：不成立（误报）**
+   - **分析**：该文件中的 `"anthropic"` 字符串是模型供应商（Vendor）标识，用于计费匹配（与 `"deepseek"` 并列），并非 Ingress Protocol。维持现状不修改是正确的。
+
+---
+
+### 7.2 方案设计本身的漏洞与改进复盘
+
+1. **重大疏漏：遗漏 `internal/adapter/fingerprint.go` 的协议分发**
+   - **漏洞说明**：原始 Action Plan 列举的改造清单中完全遗漏了 `internal/adapter/fingerprint.go`。`SessionFingerprint` 内部通过 `switch protocol` 对 `"openai"`、`"anthropic"` 和 `"openai-responses"` 分流提取会话指纹。
+   - **严重性**：若未在落地前捕获此项，请求到达 `router.Serve` 时协议已变成 `openai-completions` / `anthropic-messages`，`SessionFingerprint` 会直接 fallthrough 返回空指纹，导致全站的 Prompt Cache 会话粘性（Sticky Routing）在改名后静默全面失效。
+   - **结论**：落地执行前补充该文件改动（改为引用 `core.Protocol*`），修复了这一隐蔽业务回归风险。
+
+2. **方案设计缺陷：`NormalizeEndpointLabel` 粗暴重构分隔符**
+   - **缺陷说明**：原方案设计的 `NormalizeEndpointLabel` 试图用 `SplitEndpointLabel` 解析后再用 `:` 重新拼装。但系统早期历史日志曾使用 `/` 作为标签分隔符（如 `openai/provider/model`）。原方案实现会导致旧日志中的 `/` 标签被强行改写为 `:`，破坏历史既有格式。
+   - **改进情况**：实际代码改为仅替换第一个分隔符（`:` 或 `/`）之前的协议名称 token，保留原有分隔符及后续字节不变，避免了数据二次污染。
+
+3. **测试字面量替换策略的务实调整**
+   - **方案偏离与权衡**：原计划要求将 65+ 测试文件中的测试字面量全部换成 `core.Protocol*` 常量。实际落地时，生产代码全量引用常量，而测试代码主要将字面量更新为 `"openai-completions"` 等具体新值。
+   - **评估**：这一调整是合理的。测试直接使用具体字符串字面量，能够更真实地验证配置文件解析与网络协议传输，同时避免为了短期过渡修改过多测试文件。
+
+---
+
+### 7.3 实现执行情况复核与遗留 Gap（漏网之鱼）
+
+经对 Commit #793912（涉及 114 个文件、1790 处插入 / 1122 处删除）的全量复核，代码质量与契约一致性整体很高，35 个包测试与 `-race` 检查均通过。但在细节上仍存在少量漏网之鱼与不一致之处：
+
+#### 1. 设计文档与用户手册中残留的旧协议写法（3 处）
+- **`docs/VirtualModelRouter_Design_v4_Core.md:459`**：在 Sticky Model 的配置示例中，依然残留了早期版本按协议分层的旧结构（`models:\n  openai:\n    agent:`），未更新为当前的扁平模型与 `protocol: openai-completions` 格式。
+- **`docs/VirtualModelRouter_Design_v4_Quota.md:729`**：配额设计文档示例中存在 `base_url: {anthropic: https://example.invalid/anthropic}`，遗漏了 `-messages` 后缀。
+- **`docs/UserGuide.md:168` 与 `docs/UserGuide.zh.md:167`**：正文说明中提到 audit trail 示例依然写作 `(openai:volcengine-main:deepseek-v4-pro)`，应更新为 `(openai-completions:volcengine-main:deepseek-v4-pro)`。
+
+#### 2. 前端 Help 页面速查表微小文本不一致（1 处）
+- **`internal/server/help.html:779`**：速查表表格中，Claude Code 标注为 `anthropic-messages`，Pi Agent/Codex 等标注为 `openai-completions`，但 Cursor CLI 这一行的 Protocol 徽章文本仍显示为 `<span class="badge badge-orange">responses</span>`（未统一为 `openai-responses`）。
+
+#### 3. 部分分析侧测试 Mock 数据仍使用旧前缀（非功能影响）
+- 在 `internal/report/provider_test.go`、`internal/report/clientendpoint_test.go`、`internal/report/providerquota_test.go`、`internal/report/section_endpoint_value_test.go`、`internal/report/cost_test.go` 等文件中，部分单元测试构造的 mock `EndpointRow` 仍写有 `Endpoint: "openai:acct1:m"`。
+- **说明**：这些测试属于内存级内部聚合计算，不经过 `audit.Record.UnmarshalJSON`，测试自身断言能够自洽跑通，不影响功能正确性；但测试夹具未完全与新协议格式统一。
+- 类似地，`internal/ctxgraph/manifest_test.go:16` 中仍保留了 `Protocol: "openai"`。
+
+#### 4. 技术债务生命周期管理
+- 兼容过渡逻辑（`core.CanonicalProtocol`、`core.NormalizeEndpointLabel`、`audit.Record.UnmarshalJSON`）及对应的单测均已显式标注 `TODO(2026-10)`，并在 `docs/KNOWN_ISSUES_sonnet-5.md` 进行了完整登记，具备清晰的下线生命周期。
+
+---
+
+### 7.4 Review 总结与后续建议
+
+| 维度 | 评估结论 |
+|---|---|
+| **方案设计** | 核心思路（全链路新枚举 + 分析侧反序列化单点兼容 + 缓存版本失效）清晰有效，且在执行中纠正了分隔符改写与 `SessionFingerprint` 遗漏问题。 |
+| **落地执行** | 生产代码 100% 使用 `core.Protocol*` 常量，HTTP 路由、遥测、流式规范化、图片处理及配置解析均完全对齐，架构测试与竞态检查全部绿灯。 |
+| **遗留小项** | 存在 3 处文档示例/正文旧写法、1 处 HTML 速查表徽章文本微小不一致，以及部分非反序列化测试的 Mock 标签残留。 |
+
+**建议改进清单（按需在后续维护时清理）：**
+1. 修正 `docs/VirtualModelRouter_Design_v4_Core.md:459`、`docs/VirtualModelRouter_Design_v4_Quota.md:729` 及 `UserGuide` 中 3 处旧协议示例文本。
+2. 将 `internal/server/help.html:779` 中 Cursor CLI 的协议徽章文本由 `responses` 改为 `openai-responses`。
+3. 待 2026-10 过渡期结束后，按 `KNOWN_ISSUES` 登记清单集中拆除 `audit.Record.UnmarshalJSON` 兼容垫片及相关测试。
+
+
+---
+
+## 8. 第二轮逐项核实与补漏（2026-08-27，by Sonnet 5）
+
+对 §7 提出的每一条按原码逐项核实，结论如下。
+
+### 8.1 §7.1 / §7.2 的问题定性 —— 全部核实为准确
+
+| §7 条目 | 核实结论 |
+|---|---|
+| CacheSchemaVersion 1→2 必要性 | ✅ 属实。`ctxgraph/manifest.go:105` `Protocol: rec.Protocol`、`report/factscache.go:151/175` 复用 `ctxgraph.CacheSchemaVersion` —— 旧事实缓存直接加载会越过 `UnmarshalJSON`。已到位。 |
+| `audit.Record.UnmarshalJSON` 单点咽喉 | ✅ 属实。`ctxgraph/scan.go:137`、`report/aggregate.go` 的 `scanAndCacheFile` 均解码进 `audit.Record`。 |
+| replay 裁撤 Phase 10 | ✅ 正确。`internal/replay` 独立结构体解码，用户明确不兼容。 |
+| respnorm 前缀风险（误报） | ✅ 确认误报。`respnorm.go:677` 是 `s.protocol != core.ProtocolOpenAICompletions` 精确比对，无 `HasPrefix`。 |
+| `pricing/resolve.go:78`（误报） | ✅ 确认误报。该 `"anthropic"` 在注释里与 `"deepseek"` 并列，是 vendor 名。 |
+| 漏 `adapter/fingerprint.go` | ✅ 属实且严重。已在落地时补（`SessionFingerprint` 三处分支改常量）。 |
+| `NormalizeEndpointLabel` 分隔符 | ✅ 属实。已改为只替换前导 token。 |
+
+### 8.2 §7.3 遗留 Gap 逐项核实
+
+| §7.3 条目 | 核实结论 | 处理 |
+|---|---|---|
+| **1a. `Design_v4_Core.md:459` Sticky 示例用旧两层结构 `models:\n openai:`** | ✅ 属实。该 YAML 块用了扁平化改造前的 `models.<protocol>.<name>` 层级 + 单数 `model:` + 无 `protocol:` 字段，与同文档 373 行的当前正确写法不一致。**注：这不是本次改名引入的，是 flat-provider 迁移时的历史遗漏。** | ✅ 已修：重写为当前扁平 schema（对齐 373 行），每条 endpoint 加 `protocol: openai-completions` |
+| **1b. `Design_v4_Quota.md:729` `base_url: {anthropic: ...}`** | ✅ 属实。**该文档整份不在原方案 Phase 8 清单里**（Phase 8 只列了 UserGuide + Core + Analytics），是方案范围漏项。全文仅此一处。 | ✅ 已修：`{anthropic-messages: ...}` |
+| **1c. `UserGuide.md:168` / `.zh.md:167` 审计示例 `openai:volcengine-main:deepseek-v4-pro`** | ✅ 属实。行内 `` `openai:volcengine-main:deepseek-v4-pro` `` 是 audit trail 端点标签示例，改名后真实日志产出 `openai-completions:...`。 | ✅ 已修（含反引号包裹，两个文件同步） |
+| **2. `help.html` Cursor CLI 徽章 `responses`（§7 说 779，实为 736 与 789 两处）** | ✅ 属实。同页 724/728 行标准化为 `openai-responses`，这两处 badge 仍写裸 `responses`。（改名 perl 只处理了 `badge-primary`/`badge-anthropic`，未覆盖 `badge-orange`。） | ✅ 已修：两处 → `openai-responses` |
+| **3. 分析侧测试 Mock 夹具仍写 `openai:acct1:m` / `Protocol: "openai"`（约 10 个文件，60+ 处）** | ✅ 属实但纯装饰。这些是 `rec2`/`EndpointRow`/直接构造的 `audit.Attempt`/`ctxgraph.Manifest` 结构体字面量，**不经 `UnmarshalJSON`**，测试断言自洽跑通。其中 `provider_test.go:72-73`、`reqdetail/detail_test.go:60-66` 是**故意**混用 `/` 与 `:` 两种分隔符测 `splitEndpoint` 解析。 | ⏸️ **需你拍板**，见 §8.4 |
+
+### 8.3 §7 未提及、本轮补充发现的漏项
+
+| 位置 | 问题 | 处理 |
+|---|---|---|
+| **`loadtest/config.yaml`**（git 跟踪，`vmr-loadtest.sh` 使用） | `protocol: openai` ×10、`protocol: anthropic` ×1、`base_url: {openai:...,anthropic:...}` ×4。**不在原方案任何清单里**。改名后 `./vmr check -c loadtest/config.yaml` 会 `unknown adapter type` 失败，压测流程中断。CI 不跑压测，故 CI 不会红。 | ✅ 已修 + `./vmr check -c loadtest/config.yaml` → `=== OK ===` |
+| `respnorm/respnorm.go:36` 包注释 "openai-protocol SSE responses" | 措辞不精确（实际判定是 `== openai-completions`，"openai-protocol" 可被读成含 responses） | ✅ 已修：→ "openai-completions SSE responses" |
+| `adapter/fingerprint.go:125` 注释 `the "openai" case's` | 分支已改常量，注释残留旧名 | ✅ 已修：→ `the openai-completions case's` |
+| `diagnose/diagnose.go:370` 注释 "An openai-protocol endpoint" | 同上（原方案 Phase 4 说 diagnose "注释" 要更新，落地时只改了 449 行漏了 370） | ✅ 已修：→ "An openai-completions endpoint" |
+
+**已核实确认无需处理的**：
+- `i18n/story_corpus.go` / `story_spine.go` 的 "Anthropic 协议" / "non-Anthropic protocol" 叙事文本 —— 自然语言显示名，`Anthropic` 是 `anthropic-messages` 的可读名，代码侧 key 判定已用常量。
+- `i18n/report_tokens.go` "Anthropic 缓存创建" —— vendor 的 prompt-cache 计费特性名，非协议。
+- `chatmsg/sse.go` / `usage.go` 注释 "openai chunk" / "anthropic events" —— 描述两家 wire format 形状的通用简写，与 ingress 协议命名无关。
+- `Design_v4_Analytics.md` —— 全文无协议枚举值残留（line 181 "openai 的 choices[] / anthropic 的顶层 content[]" 是 wire-format 简写，同段落也用 "Responses" 简写，风格一致）。
+- `pricing.example.yaml`、`.github/`、`vmr.sh`、`vmr-loadtest.sh`、`loadtest/*.go` —— 已 sweep，无协议枚举值。
+
+### 8.4 需你拍板：分析侧测试 Mock 夹具是否统一改名
+
+**现状**：约 10 个 `internal/report/*_test.go`、`internal/reqdetail/*_test.go`、`internal/ctxgraph/manifest_test.go` 里，结构体字面量仍写 `Endpoint: "openai:acct1:m"` / `Protocol: "openai"`（60+ 处）。这些**不经 `UnmarshalJSON`**、断言自洽、`go test ./...` 全绿。
+
+**选项 A（改）**：blanket `openai:` → `openai-completions:`、`Protocol: "openai"` → `"openai-completions"`。好处：全仓 grep `"openai:"` 归零，读代码不会误以为 `openai:` 还是合法当前值。代价：60+ 处纯夹具改动，且 `provider_test.go` / `detail_test.go` 里**故意**保留的 `/` vs `:` 分隔符测试用例需要小心不要误改语义。
+
+**选项 B（不改，推荐）**：保留现状。理由：这些字符串在对应测试里是**不透明的聚合 key**（测排序/上卷/分账，标签值本身无语义）；`splitEndpoint` 的 legacy 格式测试**需要**旧写法；一个月后兼容层拆除时这批夹具也不影响；改动面大、收益低。可只在 `manifest_test.go` 等 1-2 个"看起来像真实数据"的关键夹具上做示范性更新。
+
+§7 原作者也将此项列为"按需在后续维护时清理"（低优先）。
+
+### 8.5 本轮改动验收
+
+| 项 | 结果 |
+|---|---|
+| `go build ./...` / `gofmt -l` | ✅ 零错误 |
+| `go test ./...` | ✅ 全绿 |
+| `go test ./internal/archtest/...` | ✅ 通过 |
+| `./vmr check -c loadtest/config.yaml` | ✅ `=== OK ===`（之前会失败） |
+
+**本轮提交**：文档 4 处（Core Sticky 示例、Quota base_url、UserGuide ×2 审计示例）+ `help.html` 徽章 2 处 + `loadtest/config.yaml` + 3 处代码注释精确化。

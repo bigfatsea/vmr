@@ -367,7 +367,7 @@ func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p 
 // adapter.BuildRequest path vmr's own server uses, and classifies the
 // response the way a user configuring vmr would want explained.
 //
-// An openai-protocol endpoint is probed with role "developer" instead of
+// An openai-completions endpoint is probed with role "developer" instead of
 // "user" — OpenAI's o1/o3-series introduced that role, and some self-
 // described-OpenAI-compatible providers reject it outright (see
 // config.example.yaml's role_map). There is no separate check for this: a

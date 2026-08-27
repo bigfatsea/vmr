@@ -33,7 +33,7 @@
 // raw, no transforms — running regexes over compressed bytes can only
 // corrupt them.
 //
-// The [DONE] sentinel is appended only for openai-protocol SSE responses
+// The [DONE] sentinel is appended only for openai-completions SSE responses
 // where the upstream didn't send one (MiniMax closes the TCP stream
 // without it; the OpenAI SDK's terminator logic wants it). Anthropic SSE
 // has no [DONE] concept — never appended there. An upstream that already
