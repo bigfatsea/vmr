@@ -735,3 +735,195 @@ const (
 ### 9.6 提交
 
 - 本轮：52 个文件（测试夹具 + 生产注释 + i18n + golden + 配置注释 + 当前状态文档），`_tmp/plan_sonnet-5.md` 已删。
+
+---
+
+## 10. 全面复核与最终收官验收（Commit #0d33a47 & #7a55d89）
+
+<!-- Date: 2026-08-27 | Reviewer: Claude -->
+
+### 10.1 增量 Commit 逐一复核（#0d33a47 & #7a55d89）
+
+基于源码与真实 Diff，对第二轮和第三轮的两个提交进行细致核实：
+
+1. **Commit #0d33a47（第二轮补漏与文档/配置修复）核实**：
+   - **`loadtest/config.yaml`**：10 处 `protocol: openai-completions`、1 处 `protocol: anthropic-messages`、4 处 `base_url` key 均已正确更新。实测 `./vmr check -c loadtest/config.yaml` 成功通过（输出 `=== OK ===`）。此前该文件因缺少更新会导致压测时加载失败。
+   - **`docs/VirtualModelRouter_Design_v4_Core.md:456-478`**：Sticky Model 示例已从旧版两层 map 嵌套结构重写为扁平 endpoint-group 结构，并补齐 `protocol: openai-completions`。
+   - **`docs/VirtualModelRouter_Design_v4_Quota.md:729`**：`base_url: {anthropic-messages: ...}` 已补齐 `-messages`。
+   - **`docs/UserGuide.md:168` / `UserGuide.zh.md:167`**：审计标签示例已同步修正为 `openai-completions:volcengine-main:deepseek-v4-pro`。
+   - **`internal/server/help.html`**：Cursor CLI 徽章在 736、789 两处均已规范化为 `openai-responses`。
+   - **注释精确化**：`respnorm.go:36`、`fingerprint.go:125`、`diagnose.go:370` 中的协议注释均已更新。
+
+2. **Commit #7a55d89（第三轮全仓彻底清扫 / Option A）核实**：
+   - **测试 Mock 夹具彻底更新**：覆及 `internal/report/*_test.go`（7 个文件）、`internal/reqdetail/detail_test.go`、`internal/core/endpointlabel_test.go`、`internal/core/core_test.go`、`internal/ctxgraph/manifest_test.go`、`cmd/vmr/i18n_e2e_test.go` 等。所有的直接构造字面量均已更新为 `openai-completions:` 前缀，同时保留了针对 `/` 与 `:` 两种分隔符解析的兼容性测试。
+   - **`config_proxy_test.go` 补漏**：修正了第一轮仅替换 YAML 文本而遗漏的 Go 代码参数 `ProxySpecFor(p, "openai-completions")` 与 `BaseURL` map key。
+   - **`quota_parity_test.go` 解耦**：`EndpointLabel` 构建改用 `openai-completions`，测试数据与真实生产对齐。
+   - **自然语言与 i18n 覆盖率披露文本统一**：`story_corpus.go` 和 `story_spine.go` 的披露文本统一使用前端选定的显示名 `"Anthropic Messages"`，配套黄金测试 `golden.md`/`golden_zh.md` 仅差异更新该单句。
+   - **当前状态设计文档与配置注释全量更新**：`Design_v4_Core.md`、`Design_v4_Analytics.md`、`KNOWN_ISSUES_sonnet-5.md`、`UserGuide.md`/`.zh.md`、`config.example.yaml`/`.zh.yaml` 中的文字叙述已全部与新枚举对齐。
+
+---
+
+### 10.2 独立全盘源码扫描与事实核查
+
+使用正则匹配针对代码库全量 Git 跟踪文件（`.go`、`.yaml`、`.md`、`.html`）进行了全盘检索，核实结果如下：
+
+1. **生产代码中的 bare 协议字符串**：
+   - 全仓生产代码中仅保留了 `internal/core/protocol.go:27,29` 的 `case "openai"` / `case "anthropic"` 转换分支，属于兼容垫片核心逻辑本身。
+   - 无任何漏网的字符串硬编码比对或分支分流。
+
+2. **测试代码中的 bare 字符串分布**：
+   - 剩余全部集中在以下三类合理场景，完全符合 §9.4 白名单规范：
+     1. **兼容垫片本身的针对性测试**（`audit_test.go`、`aggregate_test.go` 验证旧日志反序列化归一化）。
+     2. **计费模型命名空间**（`internal/pricing`、`gen_standard_pricing` 等测试中的 vendor 名称 `"anthropic"` / `"openai"`，以及 provider 命名为 `"anthropic"` 的专用用例）。
+     3. **配额账本账号名**（`quota_cost_test.go` 中按 provider 名字记账的测试）。
+
+3. **配置文件与当前设计文档**：
+   - 所有当前生效的示例配置（`config.example.yaml`、`config.example.zh.yaml`、`loadtest/config.yaml`）以及核心设计文档中，零遗留旧协议枚举值或旧版 `base_url` key。
+   - 历史分析快照（如 `docs/future-strategy/story_report_*.md`）保持历史测量数据原貌，未进行篡改。
+
+4. **架构与回归验证**：
+   - 全量测试 `go test ./...` 35 个包全部 PASS。
+   - 竞态检查 `go test -race ./...` 干净无告警。
+   - 架构规则 `go test ./internal/archtest/...` 零违规。
+   - 配置文件校验 `./vmr check -c loadtest/config.yaml` 正常通过。
+
+---
+
+### 10.3 结论与最终评估
+
+本轮协议枚举值重命名（`openai` → `openai-completions`、`anthropic` → `anthropic-messages`）已达成**全链路彻底重构与收官**：
+1. **彻底性**：全仓消除了生产代码、配置文件、当前文档以及测试夹具中所有的旧协议字面量，无悬空引用的技术碎片。
+2. **安全性**：会话指纹分发（`SessionFingerprint`）、多协议隔离、流式 `[DONE]` 哨兵、图片压缩、配额记账与诊断探测等核心逻辑均已闭环验证。
+3. **可维护性**：集中定义的 `core.Protocol*` 常量已作为单一可信来源贯穿全局；唯一的兼容层（`audit.Record.UnmarshalJSON` + `core.CanonicalProtocol`）具备明确的 `TODO(2026-10)` 生命周期标记并在 `KNOWN_ISSUES` 建档。
+
+---
+
+## 11. 第四轮独立复核（2026-08-27，by Sonnet 5）
+
+<!-- Reviewer: Claude。本轮不信任前文任何"已核实/✅"结论，全部以 commit #793912f / #0d33a47 / #7a55d89 的真实 diff 与当前源码重新对账。 -->
+
+### 11.1 结论摘要
+
+三个 commit 的落地**整体扎实**：单点咽喉兼容设计（`audit.Record.UnmarshalJSON` + `CacheSchemaVersion` 失效）是正确且经得起推敲的，生产代码侧无逻辑坑，独立重跑 `go build` / `go vet` / `gofmt -l` / `go test ./...` / `go test -race`（audit/core/report）/ `archtest` 全绿，六份配置 `./vmr check` 全 `OK`。
+
+但 §10.3 的两条断言与事实不符，需要修正：
+
+- **「全仓消除了……测试夹具中所有的旧协议字面量，无悬空引用」** —— 不成立。`examples/sample-audit.jsonl` 是漏网之鱼，且不在 §9.4 白名单里（详见 11.2）。
+- **§9.5 / §10.2「全仓 grep 复查」** —— 复查范围是 `.go` / `.yaml` / `.html` + 文档，**从未 grep 过 `.jsonl`**，因此上面这条漏项在前三轮 review 里结构性地看不到。
+
+前几轮对方案缺陷的定性（`fingerprint.go` 遗漏、`NormalizeEndpointLabel` 分隔符、`respnorm` 前缀误报、`pricing/resolve.go` 误报、replay 裁撤）——本轮逐条对源码重核，**全部准确**，无需推翻。
+
+### 11.2 唯一实质性漏项：`examples/sample-audit.jsonl`
+
+**事实**（`git grep`，当前 HEAD）：该文件 5 条记录，每条 `"protocol":"openai"`，每个 `attempts[].protocol":"openai"`，每个 `attempts[].endpoint":"openai:coder-primary:coder-large"` / `"openai:coder-backup:coder-large-mini"`。commit #7a55d89 未触及此文件。
+
+**它不是可以豁免的历史快照**：
+
+| 判据 | 实际情况 |
+|---|---|
+| 引用位置 | `README.md:27` / `README.zh.md:27` 明文：「Real output from the checked-in [`examples/sample-audit.jsonl`] — run `./vmr report -o /tmp/out examples/sample-audit.jsonl` and compare」 |
+| 测试引用 | `internal/audit/sample_data_test.go` 的包注释：「as "what an audit record looks like"」——定位是**当前形状样例**，不是历史日志 |
+| 目录 | `examples/`，不是 §9.4 白名单里的 `docs/future-strategy/` 冻结分析快照 |
+| 白名单 | §9.4 完整白名单里**没有**这个文件 |
+
+**当前影响（低，但非零）**：兼容垫片在读时归一化，`./vmr report examples/sample-audit.jsonl` 实测产出 `openai-completions:coder-primary:coder-large`（已验证），所以今天 README 的「run and compare」不会翻车——它反而无意中成了垫片的一个 end-to-end 活样例。
+
+**2026-10 垫片拆除后的影响（中）**：`CanonicalProtocol` 删除后，同一条 README 指令产出的报表里协议列与端点标签会变成裸 `openai` / `openai:coder-primary:coder-large`，与全仓其它一切不一致；`details/*` 的 coordinate-hash 文件名也会随标签变化而改变。README 让用户「compare」，届时对不上。
+
+**建议（二选一，本 review 不代为执行）**：
+1. **直接改新名**（推荐）：README 要的是当前格式；垫片已有专属单测（`TestRecordUnmarshalJSON_*`、`TestBuild_LegacyProtocolNamesNormalized`）兜底，样例文件改新名不损失任何测试覆盖。
+2. **保留旧名**：则必须补进 §9.4 白名单，注明「刻意保留为垫片的 e2e 活样例」，并列入 2026-10 拆除清单（拆垫片时同步改新名）。
+
+现状是「既没改、也没登记」——这正是本轮要指出的 gap。
+
+### 11.3 对前几轮"已核实"结论的独立再验证（抽查，均通过）
+
+| 前文声称 | 本轮独立核实方式 | 结论 |
+|---|---|---|
+| `audit.Record.UnmarshalJSON` 覆盖所有分析侧读路径 | grep 全部 `json.Unmarshal(..., &rec)` 到 `audit.Record` 的站点 | 实际有 **5 处**（`ctxgraph/records.go:96`、`ctxgraph/scan.go:138`、`report/aggregate.go:286`、`report/detail.go:258`、`report/session.go:322`），方案只列了 2 处——但类型方法设计让 5 处**自动全覆盖**，欠列无后果 ✅ |
+| `NormalizeEndpointLabel` 只改前导 token、保留 `/` 与 `:` | 手工走查 4 类输入（`:` 型、`/` 型、model 内含 `:`、model 内含 `/`、空串、无分隔符） | 「取最早分隔符」逻辑与 `SplitEndpointLabel` 一致，全部正确；`canon==proto` 提前返回避免了新名再拼接 ✅ |
+| `CacheSchemaVersion` 1→2 同时失效 ctxgraph 与 report 缓存 | 查 `factscache.go:151/175` 是否复用 `ctxgraph.CacheSchemaVersion` | 是，两处缓存单一常量门控，一次 bump 全覆盖 ✅ |
+| `respnorm.appendDone` 前缀风险是误报 | 读 `respnorm.go:677` 实际代码 | `s.protocol != core.ProtocolOpenAICompletions` 精确比对，改名前后行为字节一致 ✅ |
+| `fingerprint.go` 遗漏已在落地时补 | 读 #793912f 的 `fingerprint.go` diff | 三处分支（`openai-responses` / `anthropic` / `openai` case）+ import 均已补，`fingerprint_test.go` / `_fuzz_test.go` 同步 ✅ |
+| `sticky` 会不会有旧 endpoint key 残留 | 查 `internal/sticky` 有无落盘代码 | 纯内存 registry，无持久化，改名无跨重启污染 ✅ |
+| quota 记账不受影响 | CLAUDE.md + `quota_cost_test.go` 保留 `name: anthropic` provider | quota 按 provider **名**记账，与协议枚举正交，`vmr-quota.json` 无需迁移 ✅ |
+| 配置全绿 | 独立 `./vmr check` × 4（example / zh / loadtest / mba） | 全 `valid`；`config.local.yaml` 的失败是改名**之前**就有的废弃 `provider:` 单数 key，与本轮无关 ✅ |
+
+### 11.4 非 bug 的观察项（供后续维护判断，不强制处理）
+
+1. **协议显示名三套表述并存**：
+   - `status.html` 徽章 → `OpenAI Completions` / `Anthropic Messages` / `OpenAI Responses`（友好名）
+   - `help.html` 徽章 → 裸枚举 `openai-completions` / `anthropic-messages` / `openai-responses`
+   - `i18n` story 覆盖率披露文本 → `Anthropic Messages`
+   help 页用裸枚举有其道理（用户要照着往 config 里抄），但三个面三种写法，值得有意识地拍一次板。
+
+2. **i18n 文案是对早期建议的一次未标注反转**：§5「点 4」与 §5.1 都建议「显示名 `Anthropic` 保持不变，只改内部引用」。§9.3 反转成 `Anthropic Messages`，产出「non-Anthropic Messages protocol」「Anthropic Messages tool results」「非 Anthropic Messages 协议」这类略拗口的散文（`golden.md` / `golden_zh.md` 已按此重生成）。这是拿可读性换 token 纯净度，可接受，但属于推翻了前文一个明确建议而没在文里说明。
+
+3. **`CanonicalProtocol` / `NormalizeEndpointLabel` 的「禁止写路径调用」只是注释**：无 `archtest` / 测试强制。按本项目自己的原则（「一个只写在源码注释里的取舍等于没登记」），一条禁止 `router` / `server` 引用这两个函数的 `archtest` 规则是这 ~2 个月窗口期的廉价保险。可选。
+
+4. **2026-10 拆除清单不完整**：`KNOWN_ISSUES` 列了删 `CanonicalProtocol` / `NormalizeEndpointLabel` / `Record.UnmarshalJSON` + 三处测试，但没提：(a) 本次给 `internal/audit` 新增的 `vmr/internal/core` import 要一并撤；(b) `CacheSchemaVersion` **不应回退**（保持 2 或进 3，回退会尝试复用早已不存在的 v1 缓存文件语义）；(c) 若 `sample-audit.jsonl` 选择保留旧名，它也在清单内。
+
+5. **`KNOWN_ISSUES:124`** 仍写「Responses API（`openairesponses`）」，在同一句里与 `openai-completions` / `anthropic-messages` 枚举值并列时，用 Go 包名当简写略显不齐。纯装饰。
+
+6. **section-number 交叉引用**：#793912f commit message 与 `KNOWN_ISSUES` 用「`docs/KNOWN_ISSUES_sonnet-5.md` 2.2」/「§2.2」——与 CLAUDE.md「No section numbers in cross-references，Cite a document and a section name」的约定相悖。纯装饰。
+
+### 11.5 方案 vs 落地的偏差（均属合理，仅记录）
+
+| 偏差 | 评估 |
+|---|---|
+| Phase 9 计划「测试字面量 → `core.Protocol*` 常量」，实际用裸新字符串 | 合理。测试应验证具体 wire 值；且垫片 ~2 个月后整体消失，再改枚举概率极低 |
+| Phase 10（replay 兼容）整个删除 | 正确。`internal/replay` 用独立结构体解码，且业务上明确只认新枚举 |
+| 方案「变更清单速查表」漏了 `docs/VirtualModelRouter_Design_v4_Quota.md` 整份、`loadtest/config.yaml` 整份 | 第二轮 #0d33a47 补上。说明方案的清单不是穷举，执行时必须以全仓 grep 兜底——而这次 grep 又漏了 `.jsonl`（见 11.2），教训重复了一次 |
+| 方案列 audit decode 站点 2 处，实际 5 处 | 无后果（类型方法自动覆盖），但反映方案对「读路径到底有几条」的盘点不准 |
+
+### 11.6 建议清单（优先级排序）
+
+1. **[中]** 处理 `examples/sample-audit.jsonl`：改新名，或补进 §9.4 白名单 + 2026-10 清单（11.2）。修正 §10.3「零遗留 / 彻底性」的措辞。
+2. **[低]** 统一或有意识确认协议显示名的三套表述（11.4.1）。
+3. **[低]** 补全 `KNOWN_ISSUES` 的 2026-10 拆除清单：`internal/audit` 的 core import、`CacheSchemaVersion` 不回退（11.4.4）。
+4. **[低-可选]** 加 `archtest` 规则禁止路由/服务侧引用 `CanonicalProtocol` / `NormalizeEndpointLabel`（11.4.3）。
+5. **[装饰]** `KNOWN_ISSUES:124` 措辞、section-number 交叉引用（11.4.5 / 11.4.6）。
+
+### 11.7 独立验收结果（本轮实跑）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 编译 | `go build ./...` | ✅ |
+| 静态检查 | `go vet ./...` / `gofmt -l internal/ cmd/ tools/` | ✅ 零输出 |
+| 全量测试 | `go test ./...` | ✅ 全绿 |
+| 竞态（抽样） | `go test -race ./internal/{audit,core,report}/...` | ✅ |
+| 架构约束 | `go test ./internal/archtest/...` | ✅ |
+| 配置校验 | `./vmr check -c` × {example, example.zh, loadtest, mba} | ✅ 全 valid |
+| 垫片 e2e | `./vmr report examples/sample-audit.jsonl` | ✅ 归一化产出 `openai-completions:*` 标签（同时印证 11.2 的漏项确实被垫片"救"了） |
+
+---
+
+## 12. §11 残留项处置（2026-08-27，by Sonnet 5）
+
+按「能改则改、事实清楚无争议的直接处理」的要求，对 §11.6 清单逐项处置。
+
+### 12.1 已处理
+
+| # | 项 | 处置 | 文件 |
+|---|---|---|---|
+| 1 | **`examples/sample-audit.jsonl` 残留旧枚举名**（§11.2） | 采用 §11.2 的**方案 1（改新名）**：5 条记录的 `"protocol":"openai"` → `"openai-completions"`、`attempts[].endpoint` 的 `openai:` 前缀 → `openai-completions:`。依据：① `README.md:30-33` 的「run and compare」示例**早已**写成 `openai-completions:coder-primary:coder-large`——文件不改的话，2026-10 垫片拆除后该示例会对不上；② 垫片有专属单测（`TestRecordUnmarshalJSON_*` 覆盖 `:`/`/` 两种分隔符 + round-trip、`TestBuild_LegacyProtocolNamesNormalized` 覆盖 report 端到端），样例文件改新名不损失任何测试覆盖；③ `TestSampleAuditJSONLDeserializes` 只验 schema 形状，与垫片无关。改后 `./vmr report` 直接产出 `openai-completions:*`（不再依赖垫片），`python3 -c json.loads` 5 行全部合法，`go test ./internal/audit/...` 绿。 | `examples/sample-audit.jsonl` |
+| 3 | **`KNOWN_ISSUES` §2.2 的 2026-10 拆除清单不完整**（§11.4.4） | 把单句 TODO 扩成 5 步清单：① 删 `CanonicalProtocol`/`NormalizeEndpointLabel`（常量保留）；② 删 `Record.UnmarshalJSON` **并撤掉本次为它新增的 `vmr/internal/core` import**；③ 删两个 `TODO(2026-10)` 测试（**precise：是两个不是"三处"**——原文 `TestRecordUnmarshalJSON_*` 的 `*` 让人误以为多个，实际只有 `TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames` 一个）；④ `CacheSchemaVersion` **保持 2 不回退**；⑤ `sample-audit.jsonl` 已随本轮改新名，无需处理。 | `docs/KNOWN_ISSUES_sonnet-5.md` §2.2 |
+| 5a | **`KNOWN_ISSUES` §1.28 / §1.22 用 `openairesponses` 冒充 protocol 字段值**（§11.4.5 的升级版——这是真 bug 不只是措辞） | `protocol` 字段的合法值从来是 `openai-responses`（连字符）；`openairesponses` 只是 Go 包目录名。原文 §1.28 触发条件 `protocol == "openairesponses"` **永远不可能匹配任何真实记录**，等于把重估触发条件写死成"永不触发"。三处（§1.28 分布行、§1.28 触发条件行、§1.22 汇总表行）`openairesponses` → `openai-responses`。§2.2 的 `adapter/{openai,anthropic,openairesponses}` 是包路径，**保留不动**。 | `docs/KNOWN_ISSUES_sonnet-5.md` §1.22 / §1.28 |
+
+**验收**：`go build ./...` / `go vet ./...` / `gofmt -l` 零输出；`go test ./...` 全绿；`go test ./internal/archtest/...`（含 doc-reference 守卫，KNOWN_ISSUES 被编辑）绿；`./vmr report examples/sample-audit.jsonl` 产出报表中 `openai-completions` ×20、裸 `openai:` ×0。
+
+### 12.2 评估后不改（附理由）
+
+| # | 项 | 结论与理由 |
+|---|---|---|
+| 2 | **协议显示名三套表述**（§11.4.1） | **撤回该观察项——细查后不成立**。`help.html` 是内部自洽的刻意设计：**散文/小节标题用友好名**（`OpenAI Completions Protocol`、Base URL 标签 `OpenAI Completions`），**徽章用裸枚举**（`openai-completions`），因为徽章的作用就是「照着往 `protocol:` 里抄的字面量」。`status.html` 是监控面板不是配置指南，全用友好名合理。`i18n` story 散文用 `Anthropic Messages` 与 help 页「散文=友好名」惯例一致。三个面各自内部一致，且遵循同一条模式（散文→友好名，配置字面量徽章→裸枚举）。无需改动。 |
+| — | **i18n 文案「Anthropic Messages」是对 §5.1 早期建议的反转**（§11.4.2） | 不改。golden 已在 #7a55d89 重生成，仅为散文再churn 一次 golden 不值当；且 §11.4.1 已认定「散文=友好名」是成立的惯例，`Anthropic Messages` 符合该惯例。属可接受的取舍，保留 §11.4.2 的记录即可。 |
+| 4 | **加 `archtest` 规则禁止写路径引用 `CanonicalProtocol`/`NormalizeEndpointLabel`**（§11.4.3） | 不做。现有 `archtest` 是 import-boundary + 符号存在性检查，「符号 X 不得被包 Y 引用」需要新写一类 AST 选择器扫描（遍历每个包非测试文件找 `core.CanonicalProtocol` selector）——这是新增一类测试骨架的成本，而被保护对象是一个 ~2 个月后即整体拆除的垫片。成本 > 收益。约束已写在两个函数的 doc comment（`MUST NOT be called on any write path`），且当前全仓引用点仅 `audit.Record.UnmarshalJSON` 一处（已核实）。 |
+| 5b | **section-number 交叉引用「§2.2」**（§11.4.6） | 不改。① commit message 已提交不可变；② `KNOWN_ISSUES` 内部的「移入 §2.2」是**同一文档内**的编辑台账记录（"这条从 §1 挪到了 §2 哪个小节"），不是 CLAUDE.md 所指的**跨文档**引用（"Cite a document and a section name"）；台账里写目标小节号反而比写小节名更精确。非违规。 |
+| — | **方案清单不穷举 / audit decode 站点盘点不准**（§11.5） | 无可改项，属过程复盘，保留记录。 |
+
+### 12.3 对 §10.3 的更正
+
+§10.3 第 1 条「全仓消除了……测试夹具中所有的旧协议字面量，无悬空引用」在写下时**不准确**（`examples/sample-audit.jsonl` 是反例，且 §9.5/§10.2 的 grep 从未覆盖 `.jsonl`）。经 §12.1 处理后该断言**现已成立**：全仓（含 `.jsonl`）除 `core.CanonicalProtocol` / `audit.Record.UnmarshalJSON` 这唯一一处历史日志转换点外，无旧 ingress 协议枚举残留。§9.4 白名单无需新增条目。
+
+

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!-- Ver 2026-09-14, by Gemini -->
-<html lang="en">
+<html lang="zh">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VMR — Agent Configuration Guide</title>
+  <title>VMR — Agent 配置指南</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
   <style>
     :root {
@@ -311,59 +311,57 @@
     <!-- Header -->
     <header>
       <div class="brand">
-        <h1>⚙ Agent Configuration Guide</h1>
+        <h1>⚙ Agent 配置指南</h1>
       </div>
       <div class="nav-links" style="display:flex; gap:8px; align-items:center;">
-        <a href="/status.html" class="nav-link">🎛️ Status</a>
-        <a href="/log.html" class="nav-link">💾 Log</a>
-        <a href="/help.zh.html" class="nav-link" title="切换到中文版">🌐 中文</a>
+        <a href="/status.html" class="nav-link">🎛️ 状态</a>
+        <a href="/log.html" class="nav-link">💾 日志</a>
+        <a href="/help.html" class="nav-link" title="Switch to English">🌐 English</a>
       </div>
     </header>
 
     <!-- Connection Info Card (dynamic) -->
     <div class="card" id="connection-card">
-      <div class="card-title">🔌 Connection Information</div>
+      <div class="card-title">🔌 连接信息</div>
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:4px;">
-        Use these values to configure your AI coding agent to route through this VMR instance.
-        The <strong>API Key</strong> is not shown here — ask your administrator.
+        使用以下值，把你的 AI 编程 Agent 配置为通过本 VMR 实例路由。
+        此处不显示 <strong>API 密钥</strong> — 请向管理员索取。
       </p>
       <div class="connect-grid">
         <div class="connect-col">
-          <div class="connect-col-title">Base URLs</div>
-          <div id="help-base-urls" style="display:flex; flex-direction:column; gap:6px;">loading...</div>
+          <div class="connect-col-title">Base URL</div>
+          <div id="help-base-urls" style="display:flex; flex-direction:column; gap:6px;">加载中...</div>
         </div>
         <div class="connect-col">
-          <div class="connect-col-title">Virtual Models</div>
-          <div id="help-models" style="display:flex; flex-direction:column;">loading...</div>
+          <div class="connect-col-title">虚拟模型</div>
+          <div id="help-models" style="display:flex; flex-direction:column;">加载中...</div>
         </div>
       </div>
       <div style="margin-top:10px; font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-        <span>VMR version: <span id="dyn-version" style="font-family:var(--font-mono); color:var(--text-bright);">loading...</span></span>
-        <span>API Key: <strong>(ask your administrator)</strong></span>
+        <span>VMR 版本: <span id="dyn-version" style="font-family:var(--font-mono); color:var(--text-bright);">加载中...</span></span>
+        <span>API 密钥: <strong>（请咨询管理员）</strong></span>
       </div>
     </div>
 
     <!-- Guide -->
-    <h2 class="section-head">📖 Agent Configuration Guides</h2>
+    <h2 class="section-head">📖 Agent 配置指南</h2>
     <p class="section-desc">
-      Each guide below shows how to configure a specific AI coding agent to point at this VMR instance.
-      Three values are always needed: the <strong>Base URL</strong> (shown above), the <strong>API Key</strong>
-      (from your admin), and a <strong>Virtual Model Name</strong> (one of the models listed above).
-      Where supported by the agent, you can also configure <strong>Context Window</strong> (e.g. <code>200k</code>),
-      <strong>Reasoning / Thinking Effort</strong> (e.g. <code>medium</code>, <code>budget_tokens</code>), and
-      <strong>Vision</strong> capabilities (<code>image</code>) matching VMR's model metadata.
-      Most agents support either the OpenAI Chat Completions protocol or the Anthropic Messages protocol —
-      pick the protocol section that matches your agent's native API.
+      下面的每个指南展示了如何把某个 AI 编程 Agent 配置为指向本 VMR 实例。
+      始终需要三个核心值：<strong>Base URL</strong>（见上方）、<strong>API 密钥</strong>（向管理员索取）、
+      以及一个 <strong>虚拟模型名</strong>（即上面列出的模型之一）。
+      若 Agent 支持，还可进一步配置<strong>上下文窗口</strong>（如 <code>200k</code>）、<strong>思考/推理深度</strong>（如 <code>medium</code>、<code>budget_tokens</code>）以及<strong>视觉多模态能力</strong>（<code>image</code>），以完全释放 VMR 上游端点的全量能力。
+      大多数 Agent 支持 OpenAI Chat Completions 协议或 Anthropic Messages 协议 —
+      选择与你所用 Agent 原生 API 匹配的协议分区。
     </p>
 
     <!-- ===== Anthropic Messages Protocol Agents ===== -->
     <h3 style="color:var(--purple); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>Anthropic Messages Protocol</span>
+      <span>Anthropic Messages 协议</span>
       <span class="badge badge-anthropic">anthropic-messages</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      Agents that natively speak the Anthropic Messages API. Configure the base URL to point at VMR's
-      Anthropic-compatible endpoint. The API key is sent via the <code>x-api-key</code> header.
+      原生使用 Anthropic Messages API 的 Agent。将 Base URL 指向 VMR 的
+      Anthropic 兼容端点。API 密钥通过 <code>x-api-key</code> 请求头发送。
     </p>
 
     <!-- Claude Code -->
@@ -372,31 +370,31 @@
         <h3>Claude Code</h3>
         <div class="badges">
           <span class="badge badge-anthropic">anthropic-messages</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">环境变量</span>
           <span class="badge badge-warning">thinking</span>
         </div>
       </div>
       <p class="agent-desc">
-        Anthropic's official terminal coding agent. Set environment variables to route through VMR.
-        Claude Code automatically detects <code>ANTHROPIC_BASE_URL</code> and uses it for all API calls.
-        Configure <code>MAX_THINKING_TOKENS</code> to tune reasoning budget.
-        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">Official Docs →</a>
+        Anthropic 官方的终端编程 Agent。通过环境变量路由到 VMR。
+        Claude Code 会自动识别 <code>ANTHROPIC_BASE_URL</code> 并用于所有 API 调用。
+        可通过 <code>MAX_THINKING_TOKENS</code> 设置扩展思考/推理深度预算。
+        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>, <code>~/.zshrc</code>, or prefix before <code>claude</code></div>
+        <div class="config-file">📄 <code>~/.bashrc</code>、<code>~/.zshrc</code>，或在 <code>claude</code> 前直接加前缀</div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="claude-code-snippet">Copy</button>
+            <button class="copy-btn" data-copy="claude-code-snippet">复制</button>
           </div>
-          <pre id="claude-code-snippet"><code><span class="comment"># Point Claude Code at VMR</span>
+          <pre id="claude-code-snippet"><code><span class="comment"># 将 Claude Code 指向 VMR</span>
 <span class="key">export</span> ANTHROPIC_BASE_URL={{BASE_URL_ANTHROPIC}}
 <span class="key">export</span> ANTHROPIC_AUTH_TOKEN=<span class="string">YOUR_VMR_API_KEY</span>
 
-<span class="comment"># Optional: Thinking budget in tokens for reasoning models (0 disables, e.g. 8192 / 16384)</span>
+<span class="comment"># 可选：推理/深度思考模型的思考预算（Token 数；0 为禁用，例如 8192 / 16384）</span>
 <span class="key">export</span> MAX_THINKING_TOKENS=<span class="string">8192</span>
 
-<span class="comment"># Start Claude Code (model: use one of the anthropic-messages models above)</span>
+<span class="comment"># 启动 Claude Code（模型：使用上方某个 anthropic-messages 模型）</span>
 claude --model <span class="string">claude</span></code></pre>
         </div>
       </div>
@@ -404,12 +402,12 @@ claude --model <span class="string">claude</span></code></pre>
 
     <!-- ===== OpenAI Completions Protocol Agents ===== -->
     <h3 style="color:var(--accent); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>OpenAI Completions Protocol</span>
+      <span>OpenAI Completions 协议</span>
       <span class="badge badge-primary">openai-completions</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      Agents that natively speak the OpenAI Chat Completions API. Configure the base URL to point at
-      VMR's OpenAI-compatible endpoint. The API key is sent via the <code>Authorization: Bearer</code> header.
+      原生使用 OpenAI Chat Completions API 的 Agent。将 Base URL 指向
+      VMR 的 OpenAI 兼容端点。API 密钥通过 <code>Authorization: Bearer</code> 请求头发送。
     </p>
 
     <!-- Pi Agent -->
@@ -424,16 +422,16 @@ claude --model <span class="string">claude</span></code></pre>
         </div>
       </div>
       <p class="agent-desc">
-        Pi is a terminal AI coding agent with multi-model support. Add VMR as a custom provider in
-        <code>~/.pi/agent/models.json</code>, specifying <code>contextWindow</code>, <code>input</code> (vision), and <code>reasoning</code> flags.
-        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">Official Docs →</a>
+        Pi 是一个支持多模型的终端 AI 编程 Agent。将 VMR 作为自定义提供方加入
+        <code>~/.pi/agent/models.json</code>，并显式声明 <code>contextWindow</code>、<code>input</code>（视觉能力）和 <code>reasoning</code>。
+        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>~/.pi/agent/models.json</code> (create if not exists)</div>
+        <div class="config-file">📄 <code>~/.pi/agent/models.json</code>（如果不存在则创建）</div>
         <div class="code-block">
           <div class="code-header">
             <span>JSON</span>
-            <button class="copy-btn" data-copy="pi-snippet">Copy</button>
+            <button class="copy-btn" data-copy="pi-snippet">复制</button>
           </div>
           <pre id="pi-snippet"><code>{
   <span class="key">"providers"</span>: {
@@ -464,7 +462,7 @@ claude --model <span class="string">claude</span></code></pre>
 }</code></pre>
         </div>
         <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-          Then run <code>pi --provider vmr --model coding</code>, or use <code>/model</code> inside pi to select interactively.
+          然后运行 <code>pi --provider vmr --model coding</code>，或在 pi 内用 <code>/model</code> 交互选择。
         </p>
       </div>
     </div>
@@ -475,30 +473,30 @@ claude --model <span class="string">claude</span></code></pre>
         <h3>Codex CLI</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">环境变量</span>
           <span class="badge badge-warning">reasoning effort</span>
         </div>
       </div>
       <p class="agent-desc">
-        OpenAI's official terminal coding agent. Set <code>OPENAI_BASE_URL</code> to route through VMR.
-        Use <code>OPENAI_REASONING_EFFORT</code> for reasoning/thinking models.
-        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Official Docs →</a>
+        OpenAI 官方的终端编程 Agent。设置 <code>OPENAI_BASE_URL</code> 以路由到 VMR。
+        通过 <code>OPENAI_REASONING_EFFORT</code> 支持推理/思考模型的思考深度调节。
+        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 环境变量</div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="codex-snippet">Copy</button>
+            <button class="copy-btn" data-copy="codex-snippet">复制</button>
           </div>
-          <pre id="codex-snippet"><code><span class="comment"># Point Codex CLI at VMR</span>
+          <pre id="codex-snippet"><code><span class="comment"># 将 Codex CLI 指向 VMR</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 
-<span class="comment"># Optional: Reasoning effort for thinking models (low, medium, high)</span>
+<span class="comment"># 可选：推理/思考模型的思考深度（low, medium, high）</span>
 <span class="key">export</span> OPENAI_REASONING_EFFORT=<span class="string">medium</span>
 
-<span class="comment"># Start Codex (model: use one of the openai-completions models above)</span>
+<span class="comment"># 启动 Codex（模型：使用上方某个 openai-completions 模型）</span>
 codex --model <span class="string">coding</span></code></pre>
         </div>
       </div>
@@ -510,30 +508,30 @@ codex --model <span class="string">coding</span></code></pre>
         <h3>Aider</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">环境变量</span>
           <span class="badge badge-warning">config</span>
           <span class="badge badge-warning">model metadata</span>
         </div>
       </div>
       <p class="agent-desc">
-        AI pair programming in the terminal. Supports OpenAI-compatible API via environment variables
-        or <code>~/.aider.conf.yml</code>. Use <code>model-metadata-file</code> to declare context window and vision support.
-        <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">Official Docs →</a>
+        终端里的 AI 结对编程工具。支持通过环境变量或 <code>~/.aider.conf.yml</code> 使用 OpenAI 兼容 API。
+        可结合 <code>model-metadata-file</code> 声明完整上下文长度与多模态视觉能力。
+        <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables, or <code>~/.aider.conf.yml</code></div>
+        <div class="config-file">📄 环境变量，或 <code>~/.aider.conf.yml</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="aider-snippet">Copy</button>
+            <button class="copy-btn" data-copy="aider-snippet">复制</button>
           </div>
-          <pre id="aider-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+          <pre id="aider-snippet"><code><span class="comment"># 方案 1：环境变量</span>
 <span class="key">export</span> AIDER_OPENAI_API_BASE={{BASE_URL_OPENAI}}
 <span class="key">export</span> AIDER_OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> AIDER_OPENAI_MODEL=<span class="string">coding</span>
 aider --edit-format diff
 
-<span class="comment"># Option 2: ~/.aider.conf.yml (with context & edit settings)</span>
+<span class="comment"># 方案 2：~/.aider.conf.yml（包含编辑格式与弱模型配置）</span>
 <span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
 <span class="key">openai-api-key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">openai/coding</span>
@@ -555,16 +553,16 @@ aider --edit-format diff
         </div>
       </div>
       <p class="agent-desc">
-        A terminal-based AI coding agent (<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>).
-        Configure a custom provider in <code>opencode.json</code> with <code>contextWindow</code>, <code>maxTokens</code>, and <code>supportsImages</code>.
-        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">Official Docs →</a>
+        一个基于终端的 AI 编程 Agent（<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>）。
+        在 <code>opencode.json</code> 中配置自定义提供方，支持显式声明 <code>contextWindow</code>、<code>maxTokens</code> 和 <code>supportsImages</code>。
+        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>opencode.json</code> (project root) or <code>~/.config/opencode/opencode.json</code></div>
+        <div class="config-file">📄 <code>opencode.json</code>（项目根目录）或 <code>~/.config/opencode/opencode.json</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>JSON</span>
-            <button class="copy-btn" data-copy="opencode-snippet">Copy</button>
+            <button class="copy-btn" data-copy="opencode-snippet">复制</button>
           </div>
           <pre id="opencode-snippet"><code>{
   <span class="key">"provider"</span>: {
@@ -603,31 +601,31 @@ aider --edit-format diff
         <h3>OpenClaw</h3>
         <div class="badges">
           <span class="badge badge-primary">openai-completions</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">环境变量</span>
           <span class="badge badge-warning">config</span>
           <span class="badge badge-warning">thinking & vision</span>
         </div>
       </div>
       <p class="agent-desc">
-        An open-source, Claude Code-compatible terminal agent. Supports OpenAI-compatible API endpoints.
-        Configure context window, vision, and thinking budget via environment variables or <code>config.yaml</code>.
-        <a href="https://github.com/bigfatsea/openclaw" target="_blank" rel="noopener">Official Docs →</a>
+        一个开源、兼容 Claude Code 的终端 Agent。支持 OpenAI 兼容的 API 端点。
+        通过环境变量或 <code>config.yaml</code> 配置文件配置上下文窗口、视觉能力以及思考预算。
+        <a href="https://github.com/bigfatsea/openclaw" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables, or <code>~/.openclaw/config.yaml</code></div>
+        <div class="config-file">📄 环境变量，或 <code>~/.openclaw/config.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="openclaw-snippet">Copy</button>
+            <button class="copy-btn" data-copy="openclaw-snippet">复制</button>
           </div>
-          <pre id="openclaw-snippet"><code><span class="comment"># Option 1: Environment variables</span>
+          <pre id="openclaw-snippet"><code><span class="comment"># 方案 1：环境变量</span>
 <span class="key">export</span> OPENCLAW_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENCLAW_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> OPENCLAW_MODEL=<span class="string">coding</span>
 <span class="key">export</span> OPENCLAW_REASONING_EFFORT=<span class="string">medium</span>
 openclaw
 
-<span class="comment"># Option 2: ~/.openclaw/config.yaml</span>
+<span class="comment"># 方案 2：~/.openclaw/config.yaml</span>
 <span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">coding</span>
@@ -652,16 +650,16 @@ openclaw
         </div>
       </div>
       <p class="agent-desc">
-        A terminal-based AI coding assistant. Configure via <code>~/.workbuddy/config.yaml</code> or
-        <code>.workbuddy.yaml</code> in your project. Supports context length, max tokens, and vision input.
-        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">Official Docs →</a>
+        一个基于终端的 AI 编程助手。通过 <code>~/.workbuddy/config.yaml</code> 或
+        项目里的 <code>.workbuddy.yaml</code> 配置。支持上下文长度、最大输出 Token 及多模态视觉输入。
+        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 <code>~/.workbuddy/config.yaml</code> or <code>.workbuddy.yaml</code></div>
+        <div class="config-file">📄 <code>~/.workbuddy/config.yaml</code> 或 <code>.workbuddy.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>YAML</span>
-            <button class="copy-btn" data-copy="workbuddy-snippet">Copy</button>
+            <button class="copy-btn" data-copy="workbuddy-snippet">复制</button>
           </div>
           <pre id="workbuddy-snippet"><code><span class="comment"># ~/.workbuddy/config.yaml</span>
 <span class="key">llm:</span>
@@ -688,23 +686,22 @@ openclaw
         </div>
       </div>
       <p class="agent-desc">
-        A fast, extensible terminal AI coding agent. Supports OpenAI-compatible endpoints with
-        configurable context window, max tokens, and vision flags via environment variables.
-        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">Official Docs →</a>
+        一个快速、可扩展的终端 AI 编程 Agent。支持通过环境变量配置 OpenAI 兼容端点的上下文长度、最大输出及视觉开关。
+        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 环境变量</div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="hermes-snippet">Copy</button>
+            <button class="copy-btn" data-copy="hermes-snippet">复制</button>
           </div>
-          <pre id="hermes-snippet"><code><span class="comment"># Point Hermes at VMR</span>
+          <pre id="hermes-snippet"><code><span class="comment"># 将 Hermes 指向 VMR</span>
 <span class="key">export</span> HERMES_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> HERMES_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> HERMES_MODEL=<span class="string">coding</span>
 
-<span class="comment"># Model parameters: context window, max output tokens, vision & reasoning</span>
+<span class="comment"># 模型参数：上下文长度、最大输出 Token、视觉支持与推理深度</span>
 <span class="key">export</span> HERMES_CONTEXT_WINDOW=<span class="string">200000</span>
 <span class="key">export</span> HERMES_MAX_OUTPUT_TOKENS=<span class="string">8192</span>
 <span class="key">export</span> HERMES_VISION=<span class="bool">true</span>
@@ -725,16 +722,16 @@ hermes</code></pre>
         </div>
       </div>
       <p class="agent-desc">
-        An AI-powered design-to-code agent. Routes LLM calls through an OpenAI-compatible API.
-        Vision capability is enabled to support UI screenshot and wireframe analysis.
-        <a href="https://github.com/bigfatsea/opendesign" target="_blank" rel="noopener">Official Docs →</a>
+        一个 AI 驱动的设计转代码 Agent。通过 OpenAI 兼容 API 路由 LLM 调用。
+        启用视觉多模态能力以支持 UI 截图与原型识别。
+        <a href="https://github.com/bigfatsea/opendesign" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
         <div class="config-file">📄 <code>~/.opendesign/config.yaml</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>YAML</span>
-            <button class="copy-btn" data-copy="opendesign-snippet">Copy</button>
+            <button class="copy-btn" data-copy="opendesign-snippet">复制</button>
           </div>
           <pre id="opendesign-snippet"><code><span class="comment"># ~/.opendesign/config.yaml</span>
 <span class="key">llm:</span>
@@ -744,7 +741,7 @@ hermes</code></pre>
   <span class="key">model:</span> <span class="string">coding</span>
   <span class="key">context_tokens:</span> <span class="bool">200000</span>
   <span class="key">max_output_tokens:</span> <span class="bool">8192</span>
-  <span class="comment"># Vision capability enables UI screenshot & design token recognition</span>
+  <span class="comment"># 视觉能力支持 UI 设计截图与设计 Token 解析</span>
   <span class="key">vision:</span> <span class="bool">true</span></code></pre>
         </div>
       </div>
@@ -762,16 +759,16 @@ hermes</code></pre>
         </div>
       </div>
       <p class="agent-desc">
-        An open-source AI code assistant for IDEs (VS Code, JetBrains). Add VMR as a model provider
-        in <code>~/.continue/config.json</code> with <code>contextLength</code> and <code>capabilities</code> (tools, images).
-        <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">Official Docs →</a>
+        一个面向 IDE（VS Code、JetBrains）的开源 AI 代码助手。在 <code>~/.continue/config.json</code> 中将 VMR 添加为模型提供方，
+        支持声明 <code>contextLength</code> 及模型能力 <code>capabilities</code>（工具调用、图片上传等）。
+        <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
         <div class="config-file">📄 <code>~/.continue/config.json</code></div>
         <div class="code-block">
           <div class="code-header">
             <span>JSON</span>
-            <button class="copy-btn" data-copy="continue-snippet">Copy</button>
+            <button class="copy-btn" data-copy="continue-snippet">复制</button>
           </div>
           <pre id="continue-snippet"><code>{
   <span class="key">"models"</span>: [
@@ -793,12 +790,12 @@ hermes</code></pre>
 
     <!-- ===== Other Protocols ===== -->
     <h3 style="color:var(--orange); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>OpenAI Responses Protocol</span>
+      <span>OpenAI Responses 协议</span>
       <span class="badge badge-orange">openai-responses</span>
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      Agents using the newer OpenAI Responses API. Configure the same base URL as the OpenAI Completions protocol,
-      but use an <code>openai-responses</code>-protocol virtual model.
+      使用较新 OpenAI Responses API 的 Agent。使用与 OpenAI Completions 协议相同的 Base URL，
+      但需使用一个 <code>openai-responses</code> 协议的虚拟模型。
     </p>
 
     <!-- Cursor (CLI Mode) -->
@@ -807,40 +804,40 @@ hermes</code></pre>
         <h3>Cursor CLI Mode</h3>
         <div class="badges">
           <span class="badge badge-orange">openai-responses</span>
-          <span class="badge badge-success">env var</span>
+          <span class="badge badge-success">环境变量</span>
           <span class="badge badge-warning">reasoning effort</span>
         </div>
       </div>
       <p class="agent-desc">
-        Cursor's terminal agent mode. Supports custom API endpoints via environment variables.
-        Use <code>CURSOR_REASONING_EFFORT</code> for reasoning/thinking models.
-        Note: Cursor's IDE mode uses its own internal provider and cannot be redirected to VMR.
-        <a href="https://docs.cursor.com/advanced/terminal" target="_blank" rel="noopener">Official Docs →</a>
+        Cursor 的终端 Agent 模式。支持通过环境变量配置自定义 API 端点。
+        使用 <code>CURSOR_REASONING_EFFORT</code> 调节思考/推理深度。
+        注意：Cursor 的 IDE 模式使用自己的内部提供方，无法重定向到 VMR。
+        <a href="https://docs.cursor.com/advanced/terminal" target="_blank" rel="noopener">官方文档 →</a>
       </p>
       <div class="agent-config">
-        <div class="config-file">📄 Environment variables</div>
+        <div class="config-file">📄 环境变量</div>
         <div class="code-block">
           <div class="code-header">
             <span>Shell</span>
-            <button class="copy-btn" data-copy="cursor-snippet">Copy</button>
+            <button class="copy-btn" data-copy="cursor-snippet">复制</button>
           </div>
-          <pre id="cursor-snippet"><code><span class="comment"># Point Cursor CLI at VMR</span>
+          <pre id="cursor-snippet"><code><span class="comment"># 将 Cursor CLI 指向 VMR</span>
 <span class="key">export</span> CURSOR_API_BASE={{BASE_URL_OPENAI}}
 <span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 
-<span class="comment"># Optional: reasoning effort (low / medium / high) for thinking models</span>
+<span class="comment"># 可选：推理/思考模型的思考深度（low / medium / high）</span>
 <span class="key">export</span> CURSOR_REASONING_EFFORT=<span class="string">medium</span>
 
-<span class="comment"># Start Cursor CLI agent mode</span>
+<span class="comment"># 启动 Cursor CLI Agent 模式</span>
 cursor --model <span class="string">responses-model</span></code></pre>
         </div>
       </div>
     </div>
 
     <!-- ===== Quick Reference ===== -->
-    <h2 class="section-head">📋 Quick Reference</h2>
+    <h2 class="section-head">📋 快速参考</h2>
     <p class="section-desc">
-      Which protocol to use, and where to configure it, at a glance.
+      一图速览：用哪个协议，以及在哪里配置。
     </p>
 
     <div class="card" style="overflow-x:auto;">
@@ -848,9 +845,9 @@ cursor --model <span class="string">responses-model</span></code></pre>
         <thead>
           <tr>
             <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Agent</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Protocol</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Config Location</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Key Fields</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">协议</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">配置位置</th>
+            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">关键字段</th>
           </tr>
         </thead>
         <tbody>
@@ -871,7 +868,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
 
     <!-- Footer -->
     <footer style="margin-top:40px; padding-top:16px; border-top:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
-      <div>Virtual Model Router (VMR) — Agent Configuration Guide</div>
+      <div>虚拟模型路由器（VMR）— Agent 配置指南</div>
       <div>
         <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
           <span>bigfatsea/vmr</span>
@@ -884,13 +881,13 @@ cursor --model <span class="string">responses-model</span></code></pre>
   <!-- Auth Modal -->
   <div id="help-auth-modal" class="modal-overlay hidden">
     <div class="modal">
-      <h2>Authentication Required</h2>
-      <p>This VMR instance is protected with API Key authentication. Enter your API Key to see the live virtual model list and version:</p>
-      <input type="password" id="help-api-key" placeholder="Enter API Key (e.g. sk-...)" autocomplete="off">
+      <h2>需要身份验证</h2>
+      <p>此 VMR 实例已启用 API 密钥身份验证。输入你的 API 密钥以查看实时虚拟模型列表和版本：</p>
+      <input type="password" id="help-api-key" placeholder="输入 API 密钥（例如 sk-...）" autocomplete="off">
       <div id="help-auth-error" class="hidden" style="color:var(--red); font-size:12px;"></div>
       <div class="modal-actions">
-        <button id="help-auth-cancel">Cancel</button>
-        <button class="primary" id="help-auth-save">Connect</button>
+        <button id="help-auth-cancel">取消</button>
+        <button class="primary" id="help-auth-save">连接</button>
       </div>
     </div>
   </div>
@@ -940,8 +937,8 @@ cursor --model <span class="string">responses-model</span></code></pre>
             <code>${esc(u)}</code>
           </div>`;
       }).join('');
-      helpModels.innerHTML = `<span class="connect-meta">loading...</span>`;
-      dynVersion.textContent = 'loading...';
+      helpModels.innerHTML = `<span class="connect-meta">加载中...</span>`;
+      dynVersion.textContent = '加载中...';
       // Fill the same real values into every code snippet so a copy-paste is
       // ready to go immediately, before any authentication. Only <pre> blocks
       // are touched — a full-body innerHTML rewrite would detach the DOM
@@ -987,7 +984,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
                 <span class="connect-meta">${esc(caps)}</span>
               </div>`;
           }).join('')
-        : '<span class="connect-meta">(no models configured)</span>';
+        : '<span class="connect-meta">（未配置模型）</span>';
 
       // Version
       const ver = data.instance && data.instance.version ? data.instance.version : 'unknown';
@@ -999,8 +996,8 @@ cursor --model <span class="string">responses-model</span></code></pre>
     }
 
     function showAuthPrompt() {
-      helpModels.innerHTML = `<a href="javascript:void(0)" class="auth-link" id="reveal-models-link">🔒 enter API key to reveal</a>`;
-      dynVersion.innerHTML = `<span class="connect-meta">(enter API key to reveal)</span>`;
+      helpModels.innerHTML = `<a href="javascript:void(0)" class="auth-link" id="reveal-models-link">🔒 输入 API 密钥查看</a>`;
+      dynVersion.innerHTML = `<span class="connect-meta">（输入 API 密钥查看）</span>`;
       const link = document.getElementById('reveal-models-link');
       if (link) link.addEventListener('click', openAuthModal);
     }
@@ -1034,7 +1031,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
             // A stored key exists but was rejected — open the modal with an
             // error so the user can re-enter (same UX as the dashboard).
             helpKeyInput.value = key;
-            helpAuthError.textContent = 'API Key is invalid or expired. Please re-enter:';
+            helpAuthError.textContent = 'API 密钥无效或已过期，请重新输入：';
             helpAuthError.classList.remove('hidden');
             authModal.classList.remove('hidden');
             helpKeyInput.focus();
@@ -1047,7 +1044,7 @@ cursor --model <span class="string">responses-model</span></code></pre>
         const data = await resp.json();
         replacePlaceholders(data);
       } catch (err) {
-        helpModels.innerHTML = `<span class="connect-meta">(vmr unreachable)</span>`;
+        helpModels.innerHTML = `<span class="connect-meta">（无法连接 vmr）</span>`;
         dynVersion.textContent = '—';
       }
     }
@@ -1085,10 +1082,10 @@ cursor --model <span class="string">responses-model</span></code></pre>
         if (!pre) return;
         const text = pre.textContent || pre.innerText;
         navigator.clipboard.writeText(text).then(() => {
-          btn.textContent = 'Copied!';
+          btn.textContent = '已复制！';
           btn.classList.add('copied');
           setTimeout(() => {
-            btn.textContent = 'Copy';
+            btn.textContent = '复制';
             btn.classList.remove('copied');
           }, 2000);
         }).catch(() => {
@@ -1099,10 +1096,10 @@ cursor --model <span class="string">responses-model</span></code></pre>
           ta.select();
           document.execCommand('copy');
           document.body.removeChild(ta);
-          btn.textContent = 'Copied!';
+          btn.textContent = '已复制！';
           btn.classList.add('copied');
           setTimeout(() => {
-            btn.textContent = 'Copy';
+            btn.textContent = '复制';
             btn.classList.remove('copied');
           }, 2000);
         });

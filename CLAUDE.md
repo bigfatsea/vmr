@@ -42,7 +42,7 @@ go test ./...              # add -race for anything touching health/audit/router
 ./vmr check -c config.yaml # validate config + print effective routing table (no network I/O)
 ./vmr start -c config.yaml # foreground
 ./vmr analyze              # full navigable analytics suite (macro report + task journeys)
-./vmr.sh {start|stop|restart|status|logs}  # dev supervisor; never builds, build first
+./vmr.sh {start|stop|restart|redeploy|status|logs}  # dev supervisor; redeploy stops+builds+starts
 ```
 
 No Makefile. CI (`.github/workflows/ci.yml`) runs `go vet`/`go build`/`go test -race` on an

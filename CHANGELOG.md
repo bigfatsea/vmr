@@ -21,13 +21,22 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 ### Added
-- `GET /help` + `/help.html` — a static, unauthenticated agent configuration guide: per-tool setup snippets (Claude Code, Codex, Aider, OpenCode, …) with the instance's own base URLs baked in from the request Host, plus a live virtual-model list fetched client-side from `/status`. The `/status.html` dashboard gains a "Connect Your Agent" card linking to it
+- `./vmr.sh redeploy` — dev supervisor shortcut: stops the running instance, rebuilds the binary from current source (`go build -o vmr ./cmd/vmr`), and starts it back up
+- `GET /help` + `/help.html` (English), `GET /help.zh` + `/help.zh.html` (中文) — a static, unauthenticated agent configuration guide: per-tool setup snippets (Claude Code, Codex, Aider, OpenCode, …) with the instance's own base URLs baked in from the request Host, plus a live virtual-model list fetched client-side from `/status`. Both language variants carry a top-right switcher link to the other; the `/status.html` dashboard gains a "Connect Your Agent" card linking to it
 - `/status` agent-facing model metadata: `models` became a structured array (was a map keyed by the display string `"name [protocol]"`) — one entry per virtual-model × protocol carrying `id`, `protocol`, `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and `endpoints[]` with live health plus each endpoint's own capabilities/context override. The dashboard (`/status.html`) renders both levels (unconstrained shows as that word, never an empty badge) and `vmr status` prints the model-level lines
 - `/status`: `instance.base_urls` — the client-facing base URL per ingress protocol (all `<scheme>://<host>/v1/`), echoed from the request itself (Host header + whether TLS was used) rather than derived from `listen`: whatever address the caller reached `/status` at is exactly what it should point its client at
 
 ### Changed
 - **Protocol enum renamed** to match ecosystem tools (Pi Agent et al.): `openai` → `openai-completions`, `anthropic` → `anthropic-messages` (`openai-responses` unchanged). Update `protocol:` values and `base_url` keys in your config — `vmr check` reports the old names as unknown adapter types. New audit logs write the new names; the analytics half (`vmr report`/`story`) transparently normalizes old names when reading pre-existing logs (transitional, to be removed ~2026-10). `vmr replay` reads new-format logs only
 - the human-readable model label `"<name> [<protocol>]"` is now defined once (`core.ModelLabel`); `vmr diagnose` route groups and `vmr status` output are byte-identical, just sourced from one place so the surfaces cannot drift apart
+- `/status.html` "Connect Your Agent" card redesigned: moved to the bottom (below the model topology), always expanded (no more click-to-toggle), now a two-column layout — left lists every protocol base URL, each prefixed with its protocol badge; right lists every virtual model (deduplicated across protocol groups) with its capabilities and context window
+- `/help.html` "Connection Information" card redesigned into the same two-column layout as `/status.html` (Base URLs on left, Virtual Models with capabilities/context on right), replacing the old static table
+- Header navigation polish: `/help.html` Dashboard link harmonized to `🎛️ Status` matching `/log.html`; `/log.html`'s Status link moved from the left to the right side alongside other controls; `/help.html` gains a `🌐 中文` language switcher, `/help.zh.html` an `🌐 English` one
+
+### Fixed
+- `/help.html` guide section width mismatch: a stray `</div>` prematurely closed the `.container`, rendering guide cards at full viewport width instead of matching the 960px connection card above it
+- `/help.html` auth modal was rendered open on first load — the stylesheet was missing the `.hidden { display: none !important; }` rule the modal (and its error line) rely on, so the "Authentication Required" dialog sat over the page whether or not the instance requires a key. The modal now starts hidden and only opens on a real `/status` 401 (or a click on the reveal link)
+- `/help.html` embedded script no longer redeclares `const Auth` — the duplicate declaration was a `SyntaxError` that killed the entire script, so base-URL/snippet placeholder filling never ran; `Auth` also gains the `clearKey()` it referenced but never defined
 
 ## [0.6.1] - 2026-08-25
 ### Added

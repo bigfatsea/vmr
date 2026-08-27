@@ -200,6 +200,28 @@
     }
     .model-name { font-size: 15px; font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
 
+    /* Connect Your Agent card */
+    .connect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 4px; }
+    .connect-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .connect-col-title {
+      font-size: 12px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding-bottom: 6px; border-bottom: 1px solid var(--card-border);
+    }
+    .connect-url {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-family: var(--font-mono); font-size: 12px;
+    }
+    .connect-url code { color: var(--text-bright); word-break: break-all; min-width: 0; }
+    .connect-model {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 0; border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+      font-size: 12px;
+    }
+    .connect-model:last-child { border-bottom: none; }
+    .connect-model .model-name { font-size: 13px; }
+    .connect-meta { color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
+
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
     th {
@@ -283,6 +305,7 @@
 
     @media (max-width: 768px) {
       .grid-4, .grid-2 { grid-template-columns: 1fr; }
+      .connect-grid { grid-template-columns: 1fr; }
       header { flex-direction: column; align-items: flex-start; }
     }
   </style>
@@ -310,49 +333,6 @@
 
     <!-- Banners Container -->
     <div id="banners-container"></div>
-
-    <!-- Connect Your Agent Card -->
-    <div class="card" id="card-connect" style="margin-bottom: 20px;">
-      <div class="card-title" style="cursor:pointer;" onclick="document.getElementById('card-connect-body').classList.toggle('hidden')">
-        🔌 Connect Your Agent
-        <span style="font-size:11px; text-transform:none; font-weight:400; color:var(--text-muted);">(click to toggle)</span>
-      </div>
-      <div id="card-connect-body">
-        <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
-          Use these values to configure any AI coding agent to route through this VMR instance.
-          The API Key is not shown here — ask your administrator.
-        </p>
-        <div class="stat-list" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
-          <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">Base URL <span class="badge badge-primary">OpenAI Completions</span></span>
-            <span class="stat-val" id="dash-base-url-openai">loading...</span>
-          </div>
-          <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">Base URL <span class="badge badge-anthropic">Anthropic Messages</span></span>
-            <span class="stat-val" id="dash-base-url-anthropic">loading...</span>
-          </div>
-          <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">API Key</span>
-            <span class="stat-val" style="color:var(--text-muted);">(ask admin)</span>
-          </div>
-          <div class="stat-item" style="gap:8px; min-width:240px;">
-            <span class="stat-label">Protocol</span>
-            <span class="stat-val" id="dash-protocols">loading...</span>
-          </div>
-        </div>
-        <div class="stat-list" style="margin-bottom:12px;">
-          <div class="stat-item" style="gap:8px;">
-            <span class="stat-label">Virtual Models</span>
-            <span class="stat-val" id="dash-models" style="font-size:12px; font-weight:400;">loading...</span>
-          </div>
-        </div>
-        <div style="margin-top:4px; font-size:12px;">
-          <a href="/help.html" class="nav-link" style="display:inline-flex; align-items:center; gap:4px;" title="Detailed agent-specific configuration guides">
-            📖 Full Agent Configuration Guides →
-          </a>
-        </div>
-      </div>
-    </div>
 
     <!-- Core Metrics Grid -->
     <div class="grid-4">
@@ -484,6 +464,30 @@
     </div>
     <div id="models-container"></div>
 
+    <!-- Connect Your Agent Card -->
+    <div class="card" id="card-connect" style="margin-bottom: 20px;">
+      <div class="card-title">🔌 Connect Your Agent</div>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:4px;">
+        Use these values to configure any AI coding agent to route through this VMR instance.
+        The API Key is not shown here — ask your administrator.
+      </p>
+      <div class="connect-grid">
+        <div class="connect-col">
+          <div class="connect-col-title">Base URLs</div>
+          <div id="connect-base-urls" style="display:flex; flex-direction:column; gap:6px;">loading...</div>
+        </div>
+        <div class="connect-col">
+          <div class="connect-col-title">Virtual Models</div>
+          <div id="connect-models" style="display:flex; flex-direction:column;">loading...</div>
+        </div>
+      </div>
+      <div style="margin-top:4px; font-size:12px;">
+        <a href="/help.html" class="nav-link" style="display:inline-flex; align-items:center; gap:4px;" title="Detailed agent-specific configuration guides">
+          📖 Full Agent Configuration Guides →
+        </a>
+      </div>
+    </div>
+
     <!-- Footer -->
     <footer style="margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted);">
       <div>Virtual Model Router (VMR)</div>
@@ -610,10 +614,8 @@
       quotaSection: document.getElementById('quota-section'),
       quotaTbody: document.getElementById('quota-tbody'),
       quotaCount: document.getElementById('badge-quota-count'),
-      dashBaseUrlOpenAI: document.getElementById('dash-base-url-openai'),
-      dashBaseUrlAnthropic: document.getElementById('dash-base-url-anthropic'),
-      dashProtocols: document.getElementById('dash-protocols'),
-      dashModels: document.getElementById('dash-models'),
+      connectBaseUrls: document.getElementById('connect-base-urls'),
+      connectModels: document.getElementById('connect-models'),
       btnAuth: document.getElementById('btn-auth'),
       authModal: document.getElementById('auth-modal'),
       inputApiKey: document.getElementById('input-api-key'),
@@ -634,31 +636,13 @@
       // Header
       dom.version.textContent = inst.version || 'unknown';
 
-      // Connect Your Agent card — the three values any client config needs:
-      // the per-protocol Base URL and the virtual-model list. The API Key is
-      // deliberately never rendered here (operator tells it out of band);
-      // base_urls come from the request's own host, so they're correct for
-      // whoever is actually looking at this dashboard.
-      const baseURLs = inst.base_urls || {};
-      const openaiBase = baseURLs['openai-completions'] ? baseURLs['openai-completions'].replace(/\/+$/, '') : '—';
-      const anthropicBase = baseURLs['anthropic-messages']
-        ? baseURLs['anthropic-messages'].replace(/\/v1\/+$/, '').replace(/\/+$/, '')
-        : '—';
-      dom.dashBaseUrlOpenAI.textContent = openaiBase;
-      dom.dashBaseUrlAnthropic.textContent = anthropicBase;
-      const modelList = data.models || [];
-      const protoSet = new Set();
-      modelList.forEach(m => { if (m.protocol) protoSet.add(m.protocol); });
-      const protoNames = { 'openai-completions': 'OpenAI Completions', 'anthropic-messages': 'Anthropic Messages', 'openai-responses': 'OpenAI Responses' };
-      dom.dashProtocols.textContent = protoSet.size > 0
-        ? Array.from(protoSet).map(p => protoNames[p] || p).join(' / ')
-        : '—';
-      dom.dashModels.innerHTML = modelList.length > 0
-        ? modelList.map(m => {
-            const badgeClass = m.protocol === 'anthropic-messages' ? 'badge-anthropic' : 'badge-primary';
-            return `<span class="badge ${badgeClass}" style="margin:2px;">${esc(m.id)}</span>`;
-          }).join(' ')
-        : '<span class="stat-val" style="color:var(--text-muted); font-size:12px;">(no models configured)</span>';
+      // Connect Your Agent card — the two values any client config needs: the
+      // per-protocol Base URL and the virtual-model list (name + capabilities
+      // + context window). The API Key is deliberately never rendered here
+      // (operator tells it out of band); base_urls come from the request's
+      // own host, so they're correct for whoever is actually looking at this
+      // dashboard.
+      renderConnect(inst.base_urls || {}, data.models || []);
 
       dom.pid.textContent = `PID: ${inst.pid || '-'}`;
       dom.listen.textContent = inst.listen || '-';
@@ -758,6 +742,68 @@
       } else {
         dom.quotaSection.classList.add('hidden');
       }
+    }
+
+    const PROTO_URLS = {
+      'openai-completions': { name: 'OpenAI Completions', badge: 'badge-primary', stripV1: false },
+      'anthropic-messages': { name: 'Anthropic Messages', badge: 'badge-anthropic', stripV1: true },
+      'openai-responses':   { name: 'OpenAI Responses',   badge: 'badge-primary', stripV1: false },
+    };
+
+    // Renders the Connect Your Agent card's two columns: every protocol base
+    // URL (each prefixed with its protocol badge) on the left, and the
+    // virtual-model list on the right — one row per model name, deduplicated
+    // across protocol groups (a single name registered under several ingress
+    // protocols is one addressable model), carrying its capabilities and
+    // context window. Empty caps / zero ctx read as "unconstrained", matching
+    // the model-card rendering below.
+    function renderConnect(baseURLs, models) {
+      const urlEl = dom.connectBaseUrls;
+      const urls = [];
+      for (const proto of Object.keys(PROTO_URLS)) {
+        const def = PROTO_URLS[proto];
+        let u = baseURLs[proto] || '';
+        if (!u) continue;
+        u = u.replace(/\/+$/, '');
+        if (def.stripV1) u = u.replace(/\/v1$/, '');
+        urls.push(`
+          <div class="connect-url">
+            <span class="badge ${def.badge}">${esc(def.name)}</span>
+            <code>${esc(u)}</code>
+          </div>`);
+      }
+      urlEl.innerHTML = urls.length
+        ? urls.join('')
+        : '<span class="stat-val" style="color:var(--text-muted); font-size:12px;">—</span>';
+
+      const byName = new Map();
+      (models || []).forEach(m => {
+        if (!byName.has(m.id)) {
+          byName.set(m.id, { id: m.id, protocols: new Set(), caps: new Set(), ctx: 0 });
+        }
+        const e = byName.get(m.id);
+        if (m.protocol) e.protocols.add(m.protocol);
+        (m.capabilities || []).forEach(c => e.caps.add(c));
+        if (m.max_context_tokens > e.ctx) e.ctx = m.max_context_tokens;
+      });
+      const entries = Array.from(byName.values());
+      dom.connectModels.innerHTML = entries.length
+        ? entries.map(m => {
+            const protoBadges = Array.from(m.protocols).map(p => {
+              const def = PROTO_URLS[p] || { name: p, badge: 'badge-primary' };
+              return `<span class="badge ${def.badge}">${esc(def.name)}</span>`;
+            }).join(' ');
+            const caps = m.caps.size ? Array.from(m.caps).join(' · ') : 'unconstrained';
+            const ctx = m.ctx > 0 ? `${fmtCtx(m.ctx)} tok` : 'unconstrained';
+            return `
+              <div class="connect-model">
+                <span class="model-name">${esc(m.id)}</span>
+                ${protoBadges}
+                <span class="connect-meta">${esc(ctx)}</span>
+                <span class="connect-meta">${esc(caps)}</span>
+              </div>`;
+          }).join('')
+        : '<span class="stat-val" style="color:var(--text-muted); font-size:12px;">(no models configured)</span>';
     }
 
     function renderModels(models) {

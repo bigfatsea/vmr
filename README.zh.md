@@ -101,7 +101,7 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 ./vmr start -c config.yaml           # 前台运行
 
 # 或后台 dev 模式：
-./vmr.sh start          # 另有 stop / restart / status / logs / ps
+./vmr.sh start          # 另有 stop / restart / redeploy / status / logs / ps
 
 # 或 OS 服务模式 (launchd / systemd)：
 ./vmr.sh service install     # 注册并启动

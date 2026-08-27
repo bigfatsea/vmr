@@ -121,7 +121,7 @@
   这是一个独立的、更早就存在的协议覆盖缺口，需要先确认 Responses API 流量在真实语料里的占比再决定值不值得投入。
 - **重新评估（2026-08-20）——本条自己提出的前置问题现在有答案了，答案是"占比为零"**：
   用本机全量语料生成的 `vmr-requests.json`（11253 条记录）按 `protocol` 字段统计：
-  **`openai-completions` 11194（99.5%）、`anthropic-messages` 59（0.5%）、Responses API（`openairesponses`）0 条（0.0%）**。
+  **`openai-completions` 11194（99.5%）、`anthropic-messages` 59（0.5%）、Responses API（`openai-responses`）0 条（0.0%）**。
   也就是说这个缺口在本项目的真实使用中**一次都没有被触发过**。按 YAGNI，**决定不做**，
   但保留登记，因为影响面已经比 P1 登记时更大（见下）。
 - **影响面的变化（P4 之后）**：P1 登记时的影响只是"脊柱不展示工具结果 + 三个 Finding 检测器无证据"，
@@ -129,7 +129,7 @@
   提取路径——一旦真的出现 Responses API 流量，**机读契约会静默地报告"这一步没有工具调用"**，
   而不是报告"这种形状我不认识"。展示层降级读者能看出来，机读契约降级读者看不出来。
 - **触发条件（量化，不再是"先确认占比"这种没有边界的话）**：任意一次 `vmr report` 的
-  `vmr-requests.json` 里出现 `protocol == "openairesponses"` 的记录，即重新排期；在那之前不投入。
+  `vmr-requests.json` 里出现 `protocol == "openai-responses"` 的记录，即重新排期；在那之前不投入。
 - **登记来源**：2026-08-19 P1 执行期间的独立代码审阅发现；2026-08-20 六阶段复盘用真实语料量化占比。
 
 ### 1.29 [低，暂不做] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
@@ -197,7 +197,7 @@
 
 ### 2.2 配置与协议
 
-- **协议枚举值 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等生态工具对齐**：全链路（代码、配置、文档、测试、新审计日志）一步到位用新名，路由侧零兼容负担。**唯一的兼容咽喉点**是 `audit.Record.UnmarshalJSON`（`internal/audit/audit.go`）：读到旧名 `"openai"`/`"anthropic"` 时经 `core.CanonicalProtocol` 归一化为新枚举，`Attempts[].Endpoint` 标签的 protocol 段经 `core.NormalizeEndpointLabel` 一并归一化（只改前导 token，分隔符与其余字节原样）。这层只服务分析侧（report/story/reqdetail/ctxgraph 都解码进 `audit.Record`）读历史日志；`vmr replay` **不做兼容**，只认新枚举。`ctxgraph.CacheSchemaVersion` 已 1→2 使旧事实缓存失效重建。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件不像 CLI/Server 那样可随时一起升级，它们是不可变的既存事实。**TODO(2026-10)：过渡期约一个月，届时删除 `core.CanonicalProtocol`/`NormalizeEndpointLabel`/`Record.UnmarshalJSON` 及三处 `TODO(2026-10)` 标记的测试**（`internal/audit` 的 `TestRecordUnmarshalJSON_*`、`internal/report` 的 `TestBuild_LegacyProtocolNamesNormalized`）。
+- **协议枚举值 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等生态工具对齐**：全链路（代码、配置、文档、测试、新审计日志）一步到位用新名，路由侧零兼容负担。**唯一的兼容咽喉点**是 `audit.Record.UnmarshalJSON`（`internal/audit/audit.go`）：读到旧名 `"openai"`/`"anthropic"` 时经 `core.CanonicalProtocol` 归一化为新枚举，`Attempts[].Endpoint` 标签的 protocol 段经 `core.NormalizeEndpointLabel` 一并归一化（只改前导 token，分隔符与其余字节原样）。这层只服务分析侧（report/story/reqdetail/ctxgraph 都解码进 `audit.Record`）读历史日志；`vmr replay` **不做兼容**，只认新枚举。`ctxgraph.CacheSchemaVersion` 已 1→2 使旧事实缓存失效重建。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件不像 CLI/Server 那样可随时一起升级，它们是不可变的既存事实。**TODO(2026-10)：过渡期约一个月，届时的完整拆除清单**：① 删 `core.CanonicalProtocol` / `core.NormalizeEndpointLabel`（`internal/core/protocol.go`，常量 `Protocol*` 保留）；② 删 `Record.UnmarshalJSON`（`internal/audit/audit.go`）**并同步撤掉本次为它新增的 `vmr/internal/core` import**（`internal/audit` 在此之前不依赖 `core`）；③ 删 `internal/audit` 的 `TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames` 与 `internal/report` 的 `TestBuild_LegacyProtocolNamesNormalized` 两个测试；④ `ctxgraph.CacheSchemaVersion` **保持 2 不回退**（回退会让分析侧重新接纳 schema v1 的旧事实缓存，正是当初 bump 要挡的）；⑤ `examples/sample-audit.jsonl` 已随本轮改用新枚举名，无需处理。
 - **CLI 与 Server 版本必须匹配，任何不一致造成的问题直接报错，不做兼容性处理**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`json.RawMessage` 式的兼容层只覆盖一个滚动升级窗口，却会永久留在代码里，违反 KISS。`vmr.sh ps` 的 `|| true` 退化为标注行是它自己的容错，不受此限；错误信息会明确提示"server and client vmr versions differ"。这条原则覆盖字段*新增*与形状*变更*两种情形：曾为"旧 server 缺失新 key"保留的 `serving` 字段 `*bool` 兜底，在 `instance.config` 由 string 改为 object 后实际已不可达（新 CLI 解析旧 server 响应时在 `config` 处即硬失败，永远走不到 `serving`），已作为死代码删除（2026-08-23，`vmr status` review P4 落地）——版本必须匹配的原则不再留任何字段级例外。`models` 从 `"name [protocol]"` 拼接键 map 改为结构化数组（2026-08-26，为携带模型级 capabilities/context）同受此原则覆盖。
 - **`/status` 的 `instance.base_urls` 回显请求自身的地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status`，就广告什么地址（`127.0.0.1` stays `127.0.0.1`，`localhost` stays `localhost`，局域网 IP 原样），这正是客户端该填进自己配置的值；反代场景下 Host 头恰好就是代理对外的地址，刻意不做 `X-Forwarded-Host` 解析。该字段纯展示、不参与鉴权或路由，Host 可伪造无安全影响；同一实例被不同地址访问时 `base_urls` 不同是设计意图，不要缓存/固定它。
 - **`/status` 的 `traffic.by_status` 在流式中途截断时记为 `error`，与审计顶层 `outcome` 对同一请求记 `ok` 口径不同（刻意保留，不做对齐）**：`forwardSuccess` 里 `RecordOutcome` 把 TRUNCATED 计入 `error`——它回答的问题是"客户端是否拿到了完整响应"；而审计侧对 HTTP 200 且非取消的请求顶层记 `ok`，截断信息记录在 attempt 的 `ErrorClass` 上——它回答的问题是"HTTP 交换是否在传输层正常完成"。两个账本回答的问题不同，各自口径内部自洽；强行对齐会让其中一个失去自己的语义。两处代码（`Telemetry.RecordOutcome` 的 doc comment 与 `forwardSuccess` 调用点）已互相指向本条。若未来有人对账时发现 `/status` 错误数与 `vmr report` 错误数不一致，先查这里再报 bug。
@@ -438,7 +438,7 @@
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
 | 1.13 | 额度燃尽看板 | 高 | 低 | 中 | **中** | 产品价值而非技术债，按产品路线排期，不与本表其他条目抢顺序 |
 | 1.18 | Phase 1b 六个 LLM 判别器未完成黄金样本校准 | 高 | 低 | 中 | **中** | 校准是人工标注投入（30–50 个 Journey 逐条判断 TP/FP），无法自动化；六个判别器在真实语料上已达 100% Evidence Anchor 有效率、人工抽查判断合理，当前没有观察到需要立即处理的误报模式，不构成阻塞性风险。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力投入的时间，不在代码**，这是它与本表其余"低 ROI、缺 profile/前置条件"条目的本质区别 |
-| 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 11253 条里 `openairesponses` **0 条**。触发条件量化为"`vmr-requests.json` 出现该 protocol"，在那之前不投入 |
+| 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 11253 条里 `openai-responses` **0 条**。触发条件量化为"`vmr-requests.json` 出现该 protocol"，在那之前不投入 |
 | 1.1 | `vmr report` 会话分析那一趟（`collect()`）仍未缓存（含原 1.23） | 中 | 中高 | 已证 | **中** | 聚合那一趟缓存后的实测已经证明缓存本身能把热耗时压到个位数秒量级（5.2×）；剩下这一趟触及会话/任务边界判定的正确性，风险高于聚合，需要单独配一套 cold/warm 一致性测试再动手，不是顺手就能扩展的收尾 |
 | 1.2 | 全内存聚合的记录量上限 | 中 | 中 | 未证 | **低→中** | 按日分桶释放依赖严格的时间单调递增保证——一个隐蔽的正确性前提。**"目标单机场景下内存完全可控"这条判据已被实测推翻**：11374 条记录峰值 RSS 1.38GB，而原文估的是"千万级约数百 MB"。重估触发条件下调为"单次分析超约 3 万条记录，或峰值 RSS 超 4GB" |
 | 1.3 | `chatmsg` 离线 `map[string]any` 分配 | 中 | 低 | 未知 | **低** | **前置条件未满足**：离线耗时由 I/O 与 zstd 主导，收益完全未测。先跑 benchmark 拿 profile |

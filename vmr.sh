@@ -7,6 +7,7 @@
 #   ./vmr.sh start      validate config, then run vmr in the background (nohup)
 #   ./vmr.sh stop       stop the running process
 #   ./vmr.sh restart    stop + start
+#   ./vmr.sh redeploy   stop + rebuild binary (go build) + start
 #   ./vmr.sh status     process state + endpoint health (vmr status)
 #   ./vmr.sh ps         every vmr instance on this machine: port + config
 #   ./vmr.sh logs       tail -f the server log
@@ -62,12 +63,15 @@ MATCH="$BIN start"                    # absolute path → unambiguous process ma
 # service-mode deployment routinely ships only the compiled binary.
 require_bin() {
   if [[ ! -x "$BIN" ]]; then
+    if [[ "${1:-}" == "redeploy" ]]; then
+      return 0
+    fi
     echo "vmr binary not found: $BIN" >&2
     echo "build it first: go build -o vmr ./cmd/vmr" >&2
     exit 1
   fi
 }
-require_bin   # resolve_log_dir below queries the binary, so it must exist first
+require_bin "${1:-}"   # resolve_log_dir below queries the binary, so it must exist first
 
 # warn_if_stale: a nudge, not a gate — prints one line if any source file
 # that actually feeds this binary is newer than it, but never blocks or
@@ -236,6 +240,16 @@ cmd_stop() {
     echo "vmr still running after SIGKILL — inspect manually: pgrep -f \"$MATCH\"" >&2
     exit 1
   fi
+}
+
+cmd_redeploy() {
+  cmd_stop
+  echo "building vmr (go build -o vmr ./cmd/vmr)..."
+  if ! go build -o "$BIN" ./cmd/vmr; then
+    echo "build failed; vmr was not started" >&2
+    exit 1
+  fi
+  cmd_start
 }
 
 cmd_status() {
@@ -594,15 +608,16 @@ svc_cmd() {
 }
 
 case "${1:-}" in
-  start)   cmd_start ;;
-  stop)    cmd_stop ;;
-  restart) cmd_stop; cmd_start ;;
-  status)  cmd_status ;;
-  ps)      cmd_ps ;;
-  logs)    resolve_log_dir; exec tail -f "$SERVER_LOG" ;;
-  service) shift; svc_cmd "$@" ;;
+  start)    cmd_start ;;
+  stop)     cmd_stop ;;
+  restart)  cmd_stop; cmd_start ;;
+  redeploy) cmd_redeploy ;;
+  status)   cmd_status ;;
+  ps)       cmd_ps ;;
+  logs)     resolve_log_dir; exec tail -f "$SERVER_LOG" ;;
+  service)  shift; svc_cmd "$@" ;;
   "")
-    echo "usage: $0 {start|stop|restart|status|ps|logs}                   # dev mode (you supervise)" >&2
+    echo "usage: $0 {start|stop|restart|redeploy|status|ps|logs}          # dev mode (you supervise)" >&2
     echo "       $0 service {install|uninstall|start|stop|restart|status|logs}   # init system supervises" >&2
     echo "       $0 <check|diagnose|report|replay|...> [args]         # forwarded to vmr (defaults -c $CFG)" >&2
     exit 2 ;;

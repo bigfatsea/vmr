@@ -61,13 +61,10 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	if !strings.Contains(body, `href="/log.html"`) {
 		t.Errorf("body missing cross-link to /log.html")
 	}
-	if !strings.Contains(body, "dash-base-url-openai") {
+	if !strings.Contains(body, "connect-base-urls") {
 		t.Errorf("body missing connection info card")
 	}
-	if !strings.Contains(body, "dash-base-url-anthropic") {
-		t.Errorf("body missing anthropic base URL")
-	}
-	if !strings.Contains(body, "dash-models") {
+	if !strings.Contains(body, "connect-models") {
 		t.Errorf("body missing model list")
 	}
 }
@@ -138,11 +135,14 @@ func TestHelpPage_ServesHTML(t *testing.T) {
 		if !strings.Contains(body, "Continue.dev") {
 			t.Errorf("%s: body missing 'Continue.dev' section", path)
 		}
-		if !strings.Contains(body, "dyn-base-url-openai") {
+		if !strings.Contains(body, "help-base-urls") {
 			t.Errorf("%s: body missing dynamic connection info section", path)
 		}
 		if !strings.Contains(body, `href="/status.html"`) {
 			t.Errorf("%s: body missing cross-link to /status.html", path)
+		}
+		if !strings.Contains(body, `href="/help.zh.html"`) {
+			t.Errorf("%s: body missing language toggle to /help.zh.html", path)
 		}
 
 		// Server-side base-URL injection: the page must carry the request's
@@ -167,6 +167,54 @@ func TestHelpPage_ServesHTML(t *testing.T) {
 		}
 		if !strings.Contains(body, `id="help-api-key"`) {
 			t.Errorf("%s: body missing API key input in modal", path)
+		}
+	}
+}
+
+func TestHelpZHPage_ServesHTML(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+	srv := New(rt, nil)
+
+	for _, path := range []string{"/help.zh", "/help.zh.html"} {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want %d", path, w.Code, http.StatusOK)
+		}
+
+		ct := w.Header().Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("%s: Content-Type = %q, want text/html", path, ct)
+		}
+
+		body := w.Body.String()
+		if !strings.Contains(body, "Agent 配置指南") {
+			t.Errorf("%s: body missing Chinese title 'Agent 配置指南'", path)
+		}
+		if !strings.Contains(body, "连接信息") {
+			t.Errorf("%s: body missing Chinese '连接信息'", path)
+		}
+		if !strings.Contains(body, `href="/help.html"`) {
+			t.Errorf("%s: body missing language toggle to English /help.html", path)
+		}
+		if !strings.Contains(body, "help-base-urls") {
+			t.Errorf("%s: body missing help-base-urls element", path)
+		}
+
+		// Server-side base-URL injection works on Chinese page too
+		if !strings.Contains(body, "http://example.com/v1") {
+			t.Errorf("%s: body missing injected OpenAI base URL", path)
 		}
 	}
 }

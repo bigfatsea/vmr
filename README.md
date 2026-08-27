@@ -101,7 +101,7 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 ./vmr start -c config.yaml           # foreground run
 
 # Or background dev mode via vmr.sh:
-./vmr.sh start          # also: stop / restart / status / logs / ps
+./vmr.sh start          # also: stop / restart / redeploy / status / logs / ps
 
 # Or OS init service mode (launchd / systemd):
 ./vmr.sh service install     # register + start
