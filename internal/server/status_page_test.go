@@ -67,6 +67,17 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	if !strings.Contains(body, "connect-models") {
 		t.Errorf("body missing model list")
 	}
+
+	// Topology view redesign (2026-08-28): protocol moved to a header tag and
+	// the per-row PROTOCOL column is gone.
+	for _, want := range []string{"model-header-left", "model-tags"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing topology-view element %q", want)
+		}
+	}
+	if strings.Contains(body, ">PROTOCOL</th>") {
+		t.Errorf("body still has the per-row PROTOCOL column (should be a header tag now)")
+	}
 }
 
 func TestHelpPage_ServesHTML(t *testing.T) {

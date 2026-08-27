@@ -92,6 +92,17 @@
     .badge-warning { background: var(--yellow-bg); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
     .badge-danger { background: var(--red-bg); color: var(--red); border-color: rgba(248, 81, 73, 0.3); }
 
+    /* Priority pill tiers: cool -> warm across 7 visually distinct steps.
+       Assigned by tier RANK within a model card, not the raw P-number
+       (see renderModels), so equal tiers line up in color across cards. */
+    .pri-0 { background: rgba(88, 166, 255, 0.15); color: #58a6ff; border-color: rgba(88, 166, 255, 0.35); }
+    .pri-1 { background: rgba(57, 197, 207, 0.15); color: #39c5cf; border-color: rgba(57, 197, 207, 0.35); }
+    .pri-2 { background: rgba(63, 185, 80, 0.15);  color: #3fb950; border-color: rgba(63, 185, 80, 0.35); }
+    .pri-3 { background: rgba(210, 169, 34, 0.16); color: #d2a922; border-color: rgba(210, 169, 34, 0.35); }
+    .pri-4 { background: rgba(232, 129, 58, 0.16); color: #e8813a; border-color: rgba(232, 129, 58, 0.35); }
+    .pri-5 { background: rgba(247, 120, 174, 0.16); color: #f778ba; border-color: rgba(247, 120, 174, 0.35); }
+    .pri-6 { background: rgba(248, 81, 73, 0.16);  color: #f85149; border-color: rgba(248, 81, 73, 0.35); }
+
     .controls { display: flex; align-items: center; gap: 10px; }
     button, input {
       font-family: inherit;
@@ -199,6 +210,8 @@
       align-items: center;
     }
     .model-name { font-size: 15px; font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
+    .model-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .model-tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 
     /* Connect Your Agent card */
     .connect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 4px; }
@@ -818,9 +831,23 @@
 
       list.forEach(m => {
         const endpoints = m.endpoints || [];
-        // Same "<name> [<protocol>]" label format as vmr status / vmr
-        // diagnose render (core.ModelLabel server-side).
-        const modelLabel = `${m.id} [${m.protocol}]`;
+        // Protocol as a colored tag using the same friendly label + badge
+        // class the Connect Your Agent card uses (PROTO_URLS), so the two
+        // surfaces name protocols identically.
+        const protoMeta = PROTO_URLS[m.protocol] || {};
+        const protoBadge = protoMeta.badge || 'badge-primary';
+        const protoLabel = protoMeta.name || m.protocol;
+
+        // Priority pill color by TIER RANK, not the raw P-number: the
+        // endpoints' distinct priorities, sorted ascending, map to pri-0,
+        // pri-1, … so the same tier position shares a color across cards
+        // whose numbers differ (one card's P0..P3 and another's P10..P13 get
+        // the same four colors). Clamped at pri-6 — 7 distinct steps is the
+        // ceiling that stays readable.
+        const priTier = {};
+        [...new Set(endpoints.map(ep => ep.priority))]
+          .sort((a, b) => a - b)
+          .forEach((p, i) => { priTier[p] = Math.min(i, 6); });
         // Empty capabilities / zero context mean unconstrained — say so,
         // never render a bare empty badge that reads as "supports nothing".
         const capsMeta = m.capabilities && m.capabilities.length > 0 ? m.capabilities.join(', ') : 'unconstrained';
@@ -828,20 +855,24 @@
         let html = `
           <div class="model-card">
             <div class="model-header">
-              <span class="model-name">${esc(modelLabel)}</span>
-              <span class="badge" title="capabilities (union across endpoints)">${esc(capsMeta)}</span>
-              <span class="badge" title="largest context window across endpoints">ctx: ${esc(ctxMeta)}</span>
-              <span class="badge">${endpoints.length} endpoints</span>
+              <div class="model-header-left">
+                <span class="model-name">${esc(m.id)}</span>
+                <span class="badge ${protoBadge}">${esc(protoLabel)}</span>
+              </div>
+              <span class="model-tags">
+                <span class="badge" title="capabilities (union across endpoints)">${esc(capsMeta)}</span>
+                <span class="badge" title="largest context window across endpoints">ctx: ${esc(ctxMeta)}</span>
+                <span class="badge">${endpoints.length} endpoints</span>
+              </span>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th style="width: 60px">PRI</th>
+                    <th style="width: 60px" title="color groups endpoints by priority tier — same color = same tier (failover tries a tier together before dropping to the next)">PRI</th>
                     <th>ENDPOINT</th>
-                    <th>PROTOCOL</th>
                     <th>STATUS</th>
-                    <th>FAILS</th>
+                    <th title="consecutive failures right now — resets to 0 on any success; drives failover backoff. For cumulative per-endpoint request / token accounting, use vmr analyze.">FAILS</th>
                     <th>CTX / CAPS</th>
                     <th>LAST ERROR</th>
                   </tr>
@@ -866,14 +897,23 @@
             statusBadge = `<span class="status-pill pill-cooldown">DOWN</span>`;
           }
 
+          // Strip the "<protocol>/" head off the endpoint name (e.g.
+          // "openai-completions/bai/model" -> "bai/model"): the protocol is
+          // already shown as the card header tag, and every endpoint name
+          // starts with its protocol (core.Endpoint.Name, no custom-name
+          // override exists). Guarded so a name that somehow doesn't start
+          // with the protocol is left untouched.
+          let epName = ep.endpoint;
+          if (ep.protocol && epName.startsWith(ep.protocol + '/')) {
+            epName = epName.slice(ep.protocol.length + 1);
+          }
           const epCtx = ep.max_context_tokens > 0 ? fmtCtx(ep.max_context_tokens) : '—';
           const epCaps = ep.capabilities && ep.capabilities.length > 0 ? ep.capabilities.join(',') : '—';
 
           html += `
             <tr>
-              <td><span class="badge">P${ep.priority}</span></td>
-              <td style="color:var(--text-bright)">${esc(ep.endpoint)}</td>
-              <td><span class="badge badge-primary">${esc(ep.protocol)}</span></td>
+              <td><span class="badge pri-${priTier[ep.priority] || 0}">P${ep.priority}</span></td>
+              <td style="color:var(--text-bright)">${esc(epName)}</td>
               <td>${statusBadge}</td>
               <td>${ep.consecutive_failures || 0}</td>
               <td style="color:var(--text-muted); font-size:12px; white-space:nowrap;">${esc(epCtx)} · ${esc(epCaps)}</td>
