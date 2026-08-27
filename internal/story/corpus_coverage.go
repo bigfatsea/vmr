@@ -54,7 +54,7 @@ var anthropicOnlyCoverage = struct {
 // hand-built CorpusStats, or protocolShare's own zero-Steps edge case:
 // asserting "Anthropic traffic is scarce" from data we don't actually have
 // would be exactly the kind of unearned claim §5.6's discipline rules out)
-// or this corpus is (up to floating-point noise) 100% Anthropic-protocol —
+// or this corpus is (up to floating-point noise) 100% anthropic-messages —
 // the only case where anthropicOnlyCoverage's signals are NOT structurally
 // blind on some slice of the data. No intermediate threshold: any non-
 // Anthropic share, however small, means a 0% hit rate or all-zero metric
@@ -74,7 +74,7 @@ func anthropicCoverageNote(protocolShare map[string]float64, t i18n.CorpusText) 
 // counterpart (P14.2 follow-up — an independent review, 2026-08-21, found
 // scoping this disclosure to -corpus only left it unreachable from the
 // default suite, the path most readers actually use). Fires only when j
-// has NO Anthropic-protocol Steps at all — unlike the corpus note's "not
+// has NO anthropic-messages Steps at all — unlike the corpus note's "not
 // literally 100%" rule, a single journey's traffic is normally not
 // mixed-protocol, so "any Anthropic Steps present" is the meaningful
 // binary here, not a percentage.

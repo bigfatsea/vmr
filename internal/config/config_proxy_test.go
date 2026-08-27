@@ -77,7 +77,7 @@ models:
 func TestProxySpecFor(t *testing.T) {
 	t.Parallel()
 	mkP := func(baseURL string, proxy bool) Provider {
-		return Provider{BaseURL: map[string]string{"openai": baseURL}, Proxy: proxy}
+		return Provider{BaseURL: map[string]string{"openai-completions": baseURL}, Proxy: proxy}
 	}
 	// There is no global default to inherit: each provider's own switch is
 	// the entire decision, false (the default) meaning direct.
@@ -95,7 +95,7 @@ func TestProxySpecFor(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mode, u := cfg.ProxySpecFor(c.p, "openai")
+			mode, u := cfg.ProxySpecFor(c.p, "openai-completions")
 			if mode != c.wantMode || u != c.wantURL {
 				t.Errorf("got (%s, %q), want (%s, %q)", mode, u, c.wantMode, c.wantURL)
 			}
@@ -104,12 +104,12 @@ func TestProxySpecFor(t *testing.T) {
 
 	// No config proxy → direct. There is no environment fallback.
 	empty := &Config{}
-	if mode, _ := empty.ProxySpecFor(mkP("https://x", false), "openai"); mode != ProxyDirect {
+	if mode, _ := empty.ProxySpecFor(mkP("https://x", false), "openai-completions"); mode != ProxyDirect {
 		t.Errorf("no config proxy: got %s, want %s", mode, ProxyDirect)
 	}
 	// https base with only http_proxy set, provider opted in → direct (scheme-matched).
 	onlyHTTP := &Config{HTTPProxy: "http://hp:1"}
-	if mode, _ := onlyHTTP.ProxySpecFor(mkP("https://x", true), "openai"); mode != ProxyDirect {
+	if mode, _ := onlyHTTP.ProxySpecFor(mkP("https://x", true), "openai-completions"); mode != ProxyDirect {
 		t.Errorf("scheme mismatch must mean direct, got %s", mode)
 	}
 }
@@ -151,7 +151,7 @@ providers:
 		t.Fatal(err)
 	}
 	p1, _ := cfg.ProviderByName("p1")
-	if mode, _ := cfg.ProxySpecFor(p1, "openai"); mode != ProxyDirect {
+	if mode, _ := cfg.ProxySpecFor(p1, "openai-completions"); mode != ProxyDirect {
 		t.Errorf("https_proxy set with no provider proxy:true: got %s, want %s (proxy default must stay off)", mode, ProxyDirect)
 	}
 }

@@ -55,7 +55,7 @@ var (
 )
 
 // thinkGuardMarkers are the payload fields whose value can carry MiniMax's
-// inline-think pathology: openai delta/message content and anthropic text.
+// inline-think pathology: openai-completions delta/message content and anthropic-messages text.
 // Dedicated reasoning fields (reasoning_content, thinking) are well-behaved
 // by construction and never guard-checked.
 var thinkGuardMarkers = [][]byte{contentFieldMarker, textFieldMarker}

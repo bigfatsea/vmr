@@ -361,10 +361,10 @@
     可见，仅 8 行有链接"变为 18/19 行全部可点（1 条 heartbeat 折叠）；全量语料默认渲染候选数从
     238 条增至约 370 条，`details/` 目录默认路径下仍为空（P13 的"批量不物化"纪律不受影响）。
     曾登记为 §1.42。
-40. **检测器/指标覆盖率披露：语料非 100% Anthropic 协议时，读者能分辨"检查过没问题"与"结构性
+40. **检测器/指标覆盖率披露：语料非 100% anthropic-messages 协议时，读者能分辨"检查过没问题"与"结构性
     测不出来"**（P14.2，`internal/story/corpus_coverage.go`（新增）、`render_corpus.go`、
     `render_spine.go`、`internal/i18n/story_corpus.go`/`story_spine.go`）：`chatmsg.ToolResult.
-    IsError` 只在 Anthropic 协议下有意义，实测全量语料协议分布 openai 99.48% / anthropic 0.52% ——
+    IsError` 只在 anthropic-messages 协议下有意义，实测全量语料协议分布 openai-completions 99.48% / anthropic-messages 0.52% ——
     依赖它的信号在 99.48% 的语料上结构性沉默，但产物里此前没有任何地方区分"沉默"与"干净"。
     首版实现只登记了 `error_retry_unadapted`/`error_recovery_count` 两项、只在 `-corpus` 报告
     披露，一次并行的独立审阅（gemini-3.7-flash，2026-08-21）当场发现两处遗漏并已核实修复：
@@ -373,13 +373,13 @@
       `FindingUnverifiedSuccess`（`error_then_unverified_success`）、决策脊柱自身的工具结果
       ❌ 徽标（`render_spine_step.go`）、`structure.json` 的 `ToolCalls[].ResultError`、以及
       `-corpus` 独有的 Context Rot／Tool Sequence 两个错误率栏目，同样经由这个文本标记判定，
-      同样在 OpenAI 协议上恒为假/恒为零。`anthropicOnlyCoverage` 现列出全部受影响项（Finding/
+      同样在 openai-completions 协议上恒为假/恒为零。`anthropicOnlyCoverage` 现列出全部受影响项（Finding/
       Metric 用类型化 code，两组 corpus-only/journey-only 的自由文本栏目分列）；
       `llm_findings.go` 的证据包构造未列入——那是 LLM 判断的弱化证据，不是规则层面的结构性沉默，
       性质不同。
     - **披露范围收窄至 `-corpus` 导致默认套件（`vmr analyze` 无选择器，读者最常用的路径）100%
       绕过**：`-corpus` 是一个低频变焦参数，默认套件从不调用它。现在单条 journey 报告
-      （`journey-<id>.md` 的"疑似问题"章节）在该 journey 全部 Step 都非 Anthropic 协议时同样
+      （`journey-<id>.md` 的"疑似问题"章节）在该 journey 全部 Step 都非 anthropic-messages 协议时同样
       披露——真实语料验证：07-15 单日默认 `vmr analyze` 渲染的 18 份 journey 报告全部正确携带
       该注记（黄金测试 `golden.md`/`golden_zh.md` 同步更新，仅新增这一处折叠块，无其它字节差异）。
     - **1% 断崖阈值本身是缺陷，非临时数字**：原设计低于 1% 才披露，但 1.2% Anthropic 的语料会

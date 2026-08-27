@@ -649,3 +649,89 @@ const (
 | `./vmr check -c loadtest/config.yaml` | ✅ `=== OK ===`（之前会失败） |
 
 **本轮提交**：文档 4 处（Core Sticky 示例、Quota base_url、UserGuide ×2 审计示例）+ `help.html` 徽章 2 处 + `loadtest/config.yaml` + 3 处代码注释精确化。
+
+---
+
+## 9. 第三轮：分析侧测试夹具彻底改名（Option A 落地，2026-08-27，by Sonnet 5）
+
+用户决策：§8.4 选 **Option A —— 改彻底,一处不留**。除 `audit.Record.UnmarshalJSON` +
+`core.CanonicalProtocol` 这唯一一处历史日志转换点（及其两个专属测试）外,全仓任何地方
+都不得再出现旧协议 token。
+
+### 9.1 任务规划与进度（`_tmp/plan_sonnet-5.md`）
+
+逐文件改 → 逐包 `go test -count=1` → 打勾。共 20 个文件：
+
+| 文件 | 改动 |
+|---|---|
+| `internal/core/endpointlabel_test.go` | blanket `openai` → `openai-completions`（含 `SplitEndpointLabel`/`EndpointLabel` 的输入、断言、Errorf 文案、注释、invalid-input cases） |
+| `internal/core/core_test.go` | `AdapterType:` 值 ×10 + `Name()` 断言 ×2 + 局部变量 `openai`/`anthropic` → `openaiEP`/`anthropicEP` + 修正 `TestHealthKeyProtocolPrefixAvoidsCollision` 注释里对已废弃 `providers.openai/providers.anthropic` 结构的引用 |
+| `internal/ctxgraph/manifest_test.go` | `Protocol: "openai"` |
+| `internal/sticky/sticky_test.go` | `Set` 值 + 断言（sticky registry 存的是 `Endpoint.Name()` 斜杠形式） |
+| `internal/story/modelusage_test.go` | `"openai/old-provider/old-model"` slash-format 用例（"legacy" 指分隔符不是协议名） |
+| `internal/reqdetail/detail_test.go` | `TestAttemptUpstreamFallback` 的 `Endpoint`/`Protocol` 输入 + `wantProtocol` 断言 + `TestRealModelFallback` |
+| `internal/reqdetail/ensure_test.go` | `Endpoint` ×2 |
+| `internal/router/router_serve_test.go` | `TestIngressPath` 的 Errorf label ×2 + `TestRedirect...` 的 `Contains(body,"anthropic")` → `"anthropic-messages"`（原来靠子串匹配侥幸通过） |
+| `cmd/vmr/i18n_e2e_test.go` | attempts fixture 的 `endpoint` |
+| `internal/report/*_test.go` ×7 | `section_client_endpoint`/`provider`/`providerquota`(~40处)/`sticky`/`clientendpoint`/`cost`/`section_endpoint_value` —— 所有 `EndpointRow.Endpoint` / `rec2.endpoint` / `stickyEntry.protocol` 字面量及配套断言。`provider_test.go` 与 `cost_test.go` 里**故意混用 `:` 与 `/` 分隔符**的解析测试保留两种分隔符、只换协议 token |
+| `internal/config/config_proxy_test.go` | `Provider.BaseURL` map key `{"openai":...}` + `ProxySpecFor(p, "openai")` 协议参数 ×5（第一轮只扫了 YAML 文本，漏了 Go map literal 与函数参数） |
+| `internal/config/config_test.go` | 两处注释（`TestProviderServesBothProtocols` / `TestOpenAIResponsesProtocolAccepted`） |
+| `cmd/vmr/quota_parity_test.go` | `core.EndpointLabel("openai", ...)` → `"openai-completions"` —— **原来该 parity 测试隐性依赖 `NormalizeEndpointLabel` 归一化才能对上号,现在不再依赖 compat shim**（2026-10 拆除后不会突然红） |
+
+### 9.2 明确保留旧字符串的位置（已逐一对源码核实：均非协议枚举，属 vendor / provider-name / pricing canonical key 命名空间）
+
+| 位置 | 为什么不是协议名 |
+|---|---|
+| `internal/audit/audit_test.go` `TestRecordUnmarshalJSON_*`、`internal/report/aggregate_test.go` `TestBuild_LegacyProtocolNamesNormalized` | **旧名是被测输入**——这两个测试的存在就是为了验证转换。删兼容层时一起删。 |
+| `tools/gen_standard_pricing/main.go` `primaryVendors` map、`main_test.go` 全部 | `"openai"`/`"anthropic"` 与 `"gemini"`/`"xai"`/`"cohere"` 并列,是**厂商名**,用于构建 `vendor/model` 定价键。 |
+| `internal/pricing/*_test.go`、`cmd/vmr/cmd_report_pricing_test.go` | `RateFor("anthropic", model)` / `Resolve("anthropic", ...)` / `"anthropic/claude-3-5-sonnet"` —— 定价解析的 **vendor 前缀 / canonical key**,不是 ingress protocol。 |
+| `internal/config/pricing_test.go` | provider **命名为** `"anthropic"` 是该测试的主题（行 43 注释明说"happens to match the standard table's vendor prefix"）——测的就是 provider 名撞 vendor 前缀时的解析路径。 |
+| `internal/router/quota_cost_test.go` | provider `name: anthropic` + model `claude-3-7-sonnet-20250219`——`metric: cost` 靠 provider 名当 vendor 前缀去标准表查 `anthropic/claude-3-7-sonnet-*` 的费率。改名 provider 会让 `PricingRate` 解析失败,测试直接 fail。`Quota.Charge/Used/AddEstimatedCost("anthropic",...)` 的第一个参数是 **provider 名**。 |
+| `internal/config/config_test.go:801`（已更新为新名后仍非枚举）、`i18n` 叙事文本、`chatmsg` wire-format 注释 | 见 §8.3 已核实清单。 |
+
+### 9.3 收尾扩展：全仓 grep 复查后又清掉的一批（不止测试夹具）
+
+第一遍改完 20 个测试文件后，逐类做全仓 `grep` 复查，发现"改彻底"必须覆盖的不止结构体字面量，还有：
+
+**生产代码注释 / 包文档**（wire-format 与协议族简写，逐条换成新枚举名）：
+- `internal/chatmsg/sse.go`、`internal/chatmsg/messages.go`：`// openai chunk` / `// anthropic: top-level content blocks` / `anthropic keeps system as top-level` 等
+- `internal/respnorm/respnorm.go`（`appendDone` 开头注释 `speaks the OpenAI protocol`、`pathology as openai content`）、`internal/respnorm/minimax.go`
+- `internal/server/facts.go`（`protocol-aware: openai content[].image_url`）、`internal/server/server.go`（`the Anthropic protocol headers`）
+- `internal/adapter/fingerprint.go`（`the "openai" case's`）、`internal/diagnose/diagnose.go`（`An openai-protocol endpoint`）
+- `internal/config/config.go`/`provider.go`、`internal/config/config_test.go` 多处注释里的 `openai-protocol`/`anthropic-protocol`/`providers.openai` 旧结构引用
+
+**测试里的 Errorf / 用例名 / 注释**：`anthropic_concurrency_test.go`、`server_test.go`、`diagnose_test.go`、`router/providergroup_test.go`、`router/router_serve_test.go`、`report/session_test.go`、`chatmsg/pairing_test.go`/`sse_test.go`、`reqdetail/detail_test.go`、`taskseg/segment_test.go` 等的 `openai-protocol` / `"openai shape"` / `Options.Protocol=anthropic` 等
+
+**i18n 用户可见输出**（`internal/i18n/story_corpus.go`、`story_spine.go`）：覆盖率披露注记里的"Anthropic 协议" / "non-Anthropic protocol" → 统一用**选定的显示名 "Anthropic Messages"**（`> ⚠️ 本 journey 全部请求均为非 Anthropic Messages 协议…`）。连带 `internal/story/testdata/golden{,_zh}.md` 用 `UPDATE_GOLDEN=1` 重生成，diff 仅这一句。
+
+**配置文件注释**：`config.yaml`/`config.mba.yaml`/`config.example.yaml`/`.zh.yaml`（`openai-protocol entry`、`用 Anthropic 协议来说话`、header 里的 `("openai" | "anthropic" | ...)` 枚举列表）、`config.local.yaml` header 的旧 schema 迁移注释、`loadtest/config.yaml`（第二轮已修 protocol 值，本轮无残留）
+
+**当前状态设计文档**（4 个 canonical + UserGuide + KNOWN_ISSUES + README）：所有"openai 协议 / openai protocol / Anthropic-protocol"散文表述 → 新枚举名（含 `Design_v4_Core.md` 决策表被否方案格、`Design_v4_Analytics.md` 的 `is_error` 覆盖率讨论、`KNOWN_ISSUES` §0/§40 的语料分布图例，冻结的百分比数字不动、只换协议标签）。
+
+### 9.4 明确保留旧字符串的完整白名单（逐一对源码核实：均非 ingress 协议枚举）
+
+| 命名空间 | 位置 | 为什么保留 |
+|---|---|---|
+| **兼容转换点本身** | `core/protocol.go` 的 `case "openai"/"anthropic"`、`audit.go` `UnmarshalJSON` doc、`audit_test.go` `TestRecordUnmarshalJSON_*`、`report/aggregate_test.go` `TestBuild_LegacyProtocolNamesNormalized` | 旧名是被测输入 / 转换逻辑本体。2026-10 一起删。 |
+| **pricing vendor / canonical key** | `internal/pricing/*`（`RateFor`/`Resolve`/`resolveCanonicalKey("anthropic",…)`、`"anthropic/claude-*"`、`"openai/gpt-*"`、`standard_price_generated.yaml`、`primaryVendors` map）、`tools/gen_standard_pricing/*`、`cmd/vmr/cmd_report_pricing_test.go`、`config/pricing_test.go` 的 `pricingCfgNamed(…,"anthropic",…)` + `ProviderByName("anthropic")`、`router/quota_cost_test.go` 的 `name: anthropic` provider + `Quota.*("anthropic",…)`、config.example/UserGuide 里 `- name: anthropic` + `anthropic/claude-*` 示例 | `"anthropic"` 是**上游厂商名**（与 `gemini`/`deepseek`/`xai` 并列），用于 `vendor/model` 定价键匹配。改成 `anthropic-messages` 会让费率解析失败。 |
+| **Go 包名** | `internal/adapter/openai` / `internal/adapter/anthropic` 目录名及所有对它们的引用（`adapter/{openai,anthropic,openairesponses}`、"the openai/anthropic adapters"） | Go 包名不能带连字符；`Register()` 传的是独立的 `core.Protocol*` 常量，与包名解耦。 |
+| **HTML 元素 id / CSS 类 / 模板占位符 / 选定显示名** | `help.html`/`status.html` 的 `dash-base-url-openai`、`badge-anthropic`、`{{BASE_URL_OPENAI}}`、`"Anthropic Messages"` 徽章文本 | id/class/占位符是标识符不是枚举值；`"Anthropic Messages"` 是第 6.2 节选定的前端显示名。 |
+| **第三方工具配置值** | `help.html:710` Continue.dev 的 `"provider": "openai"` | 这是 Continue.dev 自己 schema 的 provider-type 值，改了会让用户的 Continue.dev 配置失效。 |
+| **测试里的模型名 / 假 key / 生态术语** | `m-openai`/`vm-openai` 虚拟模型名、`"leaked-anthropic-key"` 脱敏测试用假 key、`"self-described-OpenAI-compatible providers"`（"OpenAI 兼容" 是行业通用术语，类比 "S3-compatible"）、`resolve_test.go` 的 `"my-openai-account"` provider 名、URL 路径 `api.deepseek.com/anthropic/v1` | 都是名字 / 术语 / 数据，不是 ingress 协议枚举。 |
+| **vendor 计费特性名** | `i18n/report_tokens.go` "Anthropic 缓存创建，溢价计费" | 指 Anthropic **公司**的 prompt-cache 计费模型，非协议。 |
+| **冻结分析快照** | `docs/future-strategy/story_report_*.md`、`docs/data/model_prices_and_context_window.json`（外部 litellm 数据） | 非 current-state 文档；其 `openai:` 标签是分析当时日志的原样，改了等于篡改历史测量。（`protocol_enum_unification_review.md` 本篇例外——它是本次迁移的记录。） |
+
+### 9.5 验收
+
+| 项 | 结果 |
+|---|---|
+| `go build ./...` / `go vet ./...` / `gofmt -l internal/ cmd/ tools/` | ✅ 零输出 |
+| `go test ./...` | ✅ 全绿（golden 已重生成；`TestCmdStory_JourneyWithRealLLM` 首跑 flaky——真实 LLM 端点，隔离重跑通过，与本改动无关） |
+| `go test ./internal/archtest/...` | ✅ 通过 |
+| `go test -race ./internal/{core,audit,router,report,story,sticky,ctxgraph,server,respnorm}/...` | ✅ 全绿 |
+| `./vmr check` × 6 份配置（含 `loadtest/config.yaml`） | ✅ 全 `=== OK ===` |
+| 全仓 grep 复查（`.go`/`.yaml`/`.html` + 7 份 current-state 文档） | ✅ 残留的 `"openai"`/`"anthropic"` 全部落在 §9.4 白名单内，零 ingress 协议枚举残留 |
+
+### 9.6 提交
+
+- 本轮：52 个文件（测试夹具 + 生产注释 + i18n + golden + 配置注释 + 当前状态文档），`_tmp/plan_sonnet-5.md` 已删。

@@ -44,7 +44,7 @@ func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endp
 // endpoint as StatusOK now that a bare 200 is no longer enough (see
 // TestTestEndpoint_EchoVerification). The nonce-bearing prompt is always the
 // LAST message: probe.Request sends one "user" message (last == first),
-// probe.RoleCompatRequest (what an openai-protocol testEndpoint now sends)
+// probe.RoleCompatRequest (what an openai-completions testEndpoint now sends)
 // sends a leading "developer" message followed by it.
 func echoUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -343,7 +343,7 @@ models:
 	}
 }
 
-// roleRejectingUpstream mimics a provider that speaks the OpenAI protocol
+// roleRejectingUpstream mimics a provider that speaks the openai-completions protocol
 // but 400s any request whose first message's role is "developer" — the
 // exact real-world failure mode role_map exists for (OpenAI's o1/o3-series
 // introduced that role; not every self-described-OpenAI-compatible provider
@@ -378,7 +378,7 @@ func roleRejectingUpstream(t *testing.T) *httptest.Server {
 }
 
 // TestTestEndpoint_OpenAIDeveloperRole_FailsWithoutRoleMap covers exactly the
-// config mistake this probe shape exists to catch: an openai-protocol
+// config mistake this probe shape exists to catch: an openai-completions
 // endpoint with no role_map, behind a provider that rejects the "developer"
 // role — the single connectivity check must itself fail, with a role_map
 // hint, not report StatusOK the way it would if testEndpoint still probed
@@ -433,7 +433,7 @@ models:
 }
 
 // TestTestEndpoint_AnthropicStillProbesWithUser locks in that only the
-// openai-protocol probe shape changed: an anthropic-protocol endpoint hitting
+// openai-completions probe shape changed: an anthropic-messages endpoint hitting
 // the same role-rejecting mock must still pass, because testEndpoint never
 // sends it anything but role "user" — "developer" is an OpenAI-only role, no
 // Anthropic client ever sends it, and there is nothing to check there.
@@ -541,7 +541,7 @@ models:
 }
 
 // TestRun_DeveloperRoleIsPlainConnectivityFailure locks in the merged design
-// end to end via Run: a missing role_map on an openai-protocol endpoint
+// end to end via Run: a missing role_map on an openai-completions endpoint
 // surfaces as an ordinary "connect" phase failure — there is no separate
 // phase or second request, "developer role doesn't work" simply IS
 // "connectivity doesn't work" for that endpoint.
@@ -579,10 +579,10 @@ models:
 		}
 	}
 	if connOpenAI.Status != StatusFail {
-		t.Errorf("openai connect result = %+v, want fail (no role_map, provider rejects developer)", connOpenAI)
+		t.Errorf("openai-completions connect result = %+v, want fail (no role_map, provider rejects developer)", connOpenAI)
 	}
 	if !strings.Contains(connOpenAI.Detail, "role_map") {
-		t.Errorf("openai connect detail = %q, want a role_map hint", connOpenAI.Detail)
+		t.Errorf("openai-completions connect detail = %q, want a role_map hint", connOpenAI.Detail)
 	}
 	if connAnthropic.Status != StatusOK {
 		t.Errorf("anthropic connect result = %+v, want ok (never probed with role \"developer\")", connAnthropic)

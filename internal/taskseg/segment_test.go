@@ -76,7 +76,7 @@ func TestPreviewIsIdempotent(t *testing.T) {
 }
 
 func TestIndexRealUsers_OffsetAlignment(t *testing.T) {
-	// off=1 mirrors the anthropic/responses shape: a synthesized system
+	// off=1 mirrors the anthropic-messages/openai-responses shape: a synthesized system
 	// message occupies msgs[0], so msgs[i] aligns to rawMsgs[i-1]. rawMsgs
 	// carries only the real "messages" array elements (no synthesized
 	// entry), so rawMsgs[0] here is the counterpart of msgs[1].

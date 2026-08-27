@@ -207,7 +207,7 @@ func buildUserPrompt[T evidencePackKind](pack T, lang i18n.Lang) (string, error)
 
 // LLMOptions configures the interpretation layer's one HTTP call — see this
 // file's package-level doc comment for why there is exactly one supported
-// endpoint shape (a manually-run VMR instance, OpenAI protocol only).
+// endpoint shape (a manually-run VMR instance, openai-completions protocol only).
 type LLMOptions struct {
 	Addr     string // "host:port" (or a full "http://..." base) of a running VMR instance; "" disables this layer entirely
 	Model    string // that instance's virtual model name, sent verbatim as "model" — no rewriting

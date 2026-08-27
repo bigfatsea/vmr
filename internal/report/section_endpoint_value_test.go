@@ -13,7 +13,7 @@ func f64(v float64) *float64 { return &v }
 
 func TestEndpointValueDerivesUnitCosts(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{{
-		Endpoint: "openai:p1:m1", RequestsOK: 10, TokensOut: 500_000,
+		Endpoint: "openai-completions:p1:m1", RequestsOK: 10, TokensOut: 500_000,
 		CostEstimate: f64(2.5), Failed: 2, WastedMS: 3000, Availability: 0.8,
 	}}}
 	rows := endpointValueRows(rep)
@@ -57,7 +57,7 @@ func TestEndpointValueSortsCheapestPerOutputFirst(t *testing.T) {
 func TestEndpointValueUnpricedRendersDashNotZero(t *testing.T) {
 	rep := &Report2{
 		Pricing:      &Pricing{Currency: "CNY"},
-		EndpointsAll: []EndpointRow{{Endpoint: "openai:p1:m1", RequestsOK: 3, TokensOut: 100}},
+		EndpointsAll: []EndpointRow{{Endpoint: "openai-completions:p1:m1", RequestsOK: 3, TokensOut: 100}},
 	}
 	var b strings.Builder
 	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep, i18n.EN)
@@ -88,7 +88,7 @@ func TestEndpointValueSkipsEndpointsWithNothingToReport(t *testing.T) {
 // where 80% was meant. Caught in review of this very section's output.
 func TestEndpointValueRendersAvailabilityAsPercent(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:p1:m1", RequestsOK: 4, TokensOut: 100, Availability: 0.8, Failed: 1},
+		{Endpoint: "openai-completions:p1:m1", RequestsOK: 4, TokensOut: 100, Availability: 0.8, Failed: 1},
 	}}
 	var b strings.Builder
 	renderEndpointValue(func(f string, a ...any) { b.WriteString(fmt.Sprintf(f, a...)) }, rep, i18n.EN)

@@ -52,7 +52,7 @@ func TestWrap_AnthropicProtocolNeverAppendsDone(t *testing.T) {
 	in := `data: {"type":"message_stop"}` + "\n\n"
 	out := readAll(t, Wrap(strings.NewReader(in), Options{ClientModel: "claude", IsSSE: true, Protocol: "anthropic-messages"}))
 	if strings.Contains(out, "[DONE]") {
-		t.Errorf("Options.Protocol=anthropic must never get [DONE] via Wrap: %q", out)
+		t.Errorf("Options.Protocol=anthropic-messages must never get [DONE] via Wrap: %q", out)
 	}
 }
 

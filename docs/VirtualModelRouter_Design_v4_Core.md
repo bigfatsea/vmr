@@ -224,7 +224,7 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 
 `ErrQuirk` 与前两者同属"按请求不按端点"的错误，处理完全一致（`ReportNeutral`，零冷却）：端点用自己专属的协议约束拒绝了这条请求的历史形态（DeepSeek 思考模式要求每轮把 reasoning_content 回传、Google 要求工具调用带 thought_signature），端点本身完全健康，换一个不执行该约束的候选常能成功。修复前的行为是归 `ErrEndpoint` 长冷却——一个健康的端点因为"别的会话没带对历史"被打下线 10 分钟。不复用 `ErrContextLimit`：两者成因不同（窗口大小 vs 协议约束），审计标签分开，分析侧的 error_classes 分桶才能区分这两种失败。
 
-分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic 的 529）。**必须做 body 嗅探**，因为实测/官方文档显示各家习惯不一：
+分类表两 Adapter 共享（`adapter.DefaultClassify`），差异点各自覆盖（如 anthropic-messages 的 529）。**必须做 body 嗅探**，因为实测/官方文档显示各家习惯不一：
 
 * MiniMax 未知模型返回 400（非 404）；内容违规错误码 1026/1027；
 * DeepSeek Anthropic 口对错模型名的措辞是 "The supported API model names are …"；内容风险走 400 + "risk" 类消息（其官方错误码表 400/401/402/422/429/500/503 中无内容专码）；思考模式口对缺上一轮 reasoning_content 的历史返回 400 "must be passed back"；
@@ -285,7 +285,7 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 | `"model"` 改写回虚拟名 | 事件/响应体中出现顶层 `"model":"…"`（JSON 转义的 `\"` 不会误命中 content 内文本） | `model_rewrite` |
 | 剥 `<think>...</think>` 块 + closer 后的 `\n` 填充（转义与真实换行都收） | **守卫：首个非空 `content`/`text` 值以 `<think>` 开头**（与 Thinking Process 的守卫对称）+ 缓冲模式且 regex 命中 | `think_strip` |
 | 剥 "Thinking Process:" 结构化思考 | **守卫：首个 `"content":"` 值以 `Thinking Process:` 开头**（前导转义空白可跳过）+ 存在 `Looks good. Pro(ceed)` 自认可标记；按 `\n\n` 切 data: line，弃中间思考行、末行从标记后截取；marker 即首行时原地截取不复制 | `thinking_process_strip` |
-| 追加 `data: [DONE]\n\n` | **仅 openai 协议 + SSE + 上游未发**（MiniMax 直接关流；上游已发绝不重复；Anthropic 协议无此哨兵，永不追加） | `done_appended` |
+| 追加 `data: [DONE]\n\n` | **仅 openai-completions 协议 + SSE + 上游未发**（MiniMax 直接关流；上游已发绝不重复；anthropic-messages 协议无此哨兵，永不追加） | `done_appended` |
 | 软拦截标记嗅探（**不改字节，仅记录**） | 响应体（buffered 整体或 passthrough 单个事件块）内出现 `"input_sensitive":true` 或 `"output_sensitive":true` | `soft_block_detected` |
 | CRLF 分帧嗅探（**不改字节，仅记录**） | `eventSep`（`\n\n`）全程未找到边界、退到整体缓冲兜底时，累积字节里出现 `\r\n\r\n` | `crlf_framing_suspected` |
 | Thinking Process 泄漏形态嗅探（**不改字节，仅记录**） | `thinking_process_strip` 未触发（首个 content/text 值没以字面量 `Thinking Process:` 开头），但累计响应内容里 `\n<数字>.` 编号小节标记命中 ≥3 次且总字节 >1KB——覆盖 passthrough 与 buffered 两条路径，因为该形态判定同时也是 `decide()` 选择 passthrough/buffered 的依据 | `thinking_process_pattern_detected` |
@@ -812,7 +812,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 请求侧 Header 默认透传 + 小型黑名单 | 严格白名单 | LLM SDK 发的 header 集合已知且无危险（不会发 Cookie / X-Forwarded-For），全杀掉反而丢 User-Agent / X-Stainless-* / Traceparent 这些上游做 cache 路由决策需要的元数据；白名单没能区分「协议实现内部白名单」与「代理透传黑名单」这两种不同职责。blocklist 只剥真正会出问题的几项（凭证、IP 欺骗、Go Transport 管理的几个），其余透传 |
 | 响应侧归一化：双模式——事件级透传缺省，确认命中思考形态才缓冲 | 全量缓冲单遍正则 / 字节级状态机 | 字节级状态机的复杂度病灶在切分粒度：carry 装不下超长思考块、状态半途丢字节、重入吐残留，这类 corner case 在字节粒度下几乎不可避免；全量缓冲单遍正则正确但假流式——TTFB=完整生成时长，逼近甚至触发客户端 SDK 的超时预算，且让不需要修复的 provider 也一并失去流式。以完整 SSE 事件为处理单位两头都占：事件内 JSON 完整、正则无跨界；think 缓冲在 closer 后恢复流式；失手时退化为直连行为，永不更差 |
 | 响应头默认透传 + hop-by-hop 黑名单 | 只转发 Content-Type | 与请求侧同一逻辑：白名单会丢 `Retry-After`（客户端 SDK 自身退避失效）、`x-ratelimit-*`、request id（找厂商排障的唯一凭据）。错误路径同样透传，全败时最后一次上游错误连头带体原样返回 |
-| [DONE] 仅 openai 协议且上游缺失时补 | 无条件追加 | 无条件追加会对已发 [DONE] 的上游（DeepSeek/OpenRouter）产生双哨兵、对 Anthropic 流注入协议外内容；条件化后与直连字节一致 |
+| [DONE] 仅 openai-completions 协议且上游缺失时补 | 无条件追加 | 无条件追加会对已发 [DONE] 的上游（DeepSeek/OpenRouter）产生双哨兵、对 anthropic-messages 流注入协议外内容；条件化后与直连字节一致 |
 | 归一化痕迹记入审计 `attempts[].norm` | 不记录 | 成功尝试不存 body 的约定建立在"透传恒等"上，归一化打破了恒等；norm 列表让"上游发的和客户端收的差在哪"在日志里自解释，debug 不用猜 |
 | Rewrite `"model"` 字段必须做 | 上游 model 名原样转发 | OpenAI JS SDK 假设 `response.model === request.model`，不一致会按 model 做 prompt cache 关联时**静默丢消息**。这是「代理」和「路由」概念被破坏的根——「我发了 agent 收的也必须是 agent」是虚拟模型抽象的根基 |
 | Strip `<think>` 标签必须做 | 原样转发 | MiniMax M3 thinking 模式下把推理放在 content 里。如果不剥，思考被持久化进 assistant message，下一轮 prompt 含上轮思考 → 模型陷入自我指涉的反馈循环：模型反复重试不存在的操作，prompt token 数逐轮暴涨，最终撞上下文上限而被截断 |
@@ -842,7 +842,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者 |
 | Sticky Model 默认开启（`VirtualModel.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
 | `sticky_ttl`（全局与端点级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
-| Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai`（现 `openai-completions`） | 复用 `protocol: openai` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai-completions`/`anthropic-messages` 命名同构 |
+| Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai-completions` | 复用 `protocol: openai-completions` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai-completions`/`anthropic-messages` 命名同构 |
 | Responses 协议第一版归一化器不做任何 quirk 检测，直接短路到真流式 | 给 Responses 的 typed SSE 事件（如 `"delta":"..."`）也加一套 marker 表，复刻 Chat Completions 的"确认命中形态才缓冲"判定 | Responses 协议原生把 reasoning 做成独立 typed Item，从设计上就不会出现 MiniMax 那种"思考混进 content"的怪癖——没有已知怪癖形态可确认，猜测性地加 marker 表是无凭无据的过度设计；`newRespStream` 的协议短路（直接进 `modePassthrough`）与 `!isSSE` 那条已有短路是同一逻辑：没有已知怪癖就不等待判定 |
 | `previous_response_id`/`store:true` 不在 vmr 侧拦截，交给上游自然拒绝 | vmr 主动校验并拒绝这两个字段，或做特殊的 failover 保护逻辑 | 调研到 vmr 目前唯二提供 Responses 兼容面的上游（DeepSeek、OpenRouter）都在协议层强制无状态（`store:true`/非空 `previous_response_id` 直接 400），这个问题现状下并不存在；vmr 的"协议内透传、不替客户端做校验"原则决定了不该主动剥离或拦截客户端发送的字段——真正需要处理"有状态续接端点不可跨候选替换"这个第一性原理问题，要等接入一个真支持它的上游（如 OpenAI 官方账号）才有意义，到时候的方向是扩展 Sticky Model 的强度而不是发明新的错误分类规则 |
 

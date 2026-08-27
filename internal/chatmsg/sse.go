@@ -46,7 +46,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 		if m, _ := obj["model"].(string); m != "" {
 			s.Model = m
 		}
-		// openai chunk: choices[0].delta / finish_reason
+		// openai-completions chunk: choices[0].delta / finish_reason
 		if choices, _ := obj["choices"].([]any); len(choices) > 0 {
 			ch, _ := choices[0].(map[string]any)
 			if fr, _ := ch["finish_reason"].(string); fr != "" {
@@ -155,7 +155,7 @@ type tcDelta struct {
 	args     string
 }
 
-// toolCallDeltas decodes one openai delta.tool_calls array.
+// toolCallDeltas decodes one openai-completions delta.tool_calls array.
 func toolCallDeltas(v any) []tcDelta {
 	arr, _ := v.([]any)
 	out := make([]tcDelta, 0, len(arr))
@@ -182,7 +182,7 @@ func FinalMessage(body any) (*StreamSummary, bool) {
 	}
 	s := &StreamSummary{}
 	s.Model, _ = obj["model"].(string)
-	// openai: choices[0].message
+	// openai-completions: choices[0].message
 	if choices, _ := obj["choices"].([]any); len(choices) > 0 {
 		ch, _ := choices[0].(map[string]any)
 		s.Finish, _ = ch["finish_reason"].(string)
@@ -192,7 +192,7 @@ func FinalMessage(body any) (*StreamSummary, bool) {
 		s.ToolCalls = ToolCallList(msg["tool_calls"])
 		return s, true
 	}
-	// anthropic: top-level content blocks
+	// anthropic-messages: top-level content blocks
 	if blocks, _ := obj["content"].([]any); blocks != nil {
 		s.Finish, _ = obj["stop_reason"].(string)
 		var content strings.Builder

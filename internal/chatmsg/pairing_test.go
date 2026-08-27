@@ -115,7 +115,7 @@ func TestCheckToolPairing_MixedProtocolsAndNonToolMessages(t *testing.T) {
 		t.Fatalf("want OK across mixed openai+anthropic shapes in one list, got %+v", r)
 	}
 	if r.Calls != 2 || r.Results != 2 {
-		t.Errorf("want 2/2 (one openai pair + one anthropic pair), got calls=%d results=%d", r.Calls, r.Results)
+		t.Errorf("want 2/2 (one openai-completions pair + one anthropic-messages pair), got calls=%d results=%d", r.Calls, r.Results)
 	}
 }
 

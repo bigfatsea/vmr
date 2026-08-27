@@ -47,7 +47,7 @@ func e2eReportFixture(t *testing.T) string {
 				"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 5},
 			}},
 		},
-		"attempts": []any{map[string]any{"endpoint": "openai:p:agent", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		"attempts": []any{map[string]any{"endpoint": "openai-completions:p:agent", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	raw, err := json.Marshal(rec)
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
 		{
-			Endpoint: "openai:volcengine2:deepseek-v4-flash",
+			Endpoint: "openai-completions:volcengine2:deepseek-v4-flash",
 			Attempts: 10, OK: 9, Failed: 1, ErrorClasses: map[string]int{"timeout": 1},
 			Requests: 9, RequestsOK: 8, WastedMS: 500,
 			TokensIn: 1000, TokensInCached: 400, TokensInFresh: 600, TokensOut: 200, TokensKnown: 9,
@@ -16,7 +16,7 @@ func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 			CostEstimate: f64(1.5),
 		},
 		{
-			Endpoint: "openai:volcengine2:doubao-mini",
+			Endpoint: "openai-completions:volcengine2:doubao-mini",
 			Attempts: 5, OK: 5, Failed: 0,
 			Requests: 5, RequestsOK: 5,
 			TokensIn: 500, TokensInCached: 100, TokensInFresh: 400, TokensOut: 100, TokensKnown: 5,
@@ -24,7 +24,7 @@ func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 			CostEstimate: f64(0.5),
 		},
 		{
-			Endpoint: "openai:volcengine:deepseek-v4-flash", // different account, same model name
+			Endpoint: "openai-completions:volcengine:deepseek-v4-flash", // different account, same model name
 			Attempts: 2, OK: 2,
 			Requests: 2, RequestsOK: 2,
 			TokensIn: 100, TokensInFresh: 100, TokensKnown: 2,
@@ -69,8 +69,8 @@ func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 
 func TestBuildProvidersHandlesBothEndpointLabelFormats(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:new-fmt:model-a", TokensIn: 10},
-		{Endpoint: "openai/old-fmt/model-b", TokensIn: 20},
+		{Endpoint: "openai-completions:new-fmt:model-a", TokensIn: 10},
+		{Endpoint: "openai-completions/old-fmt/model-b", TokensIn: 20},
 	}}
 	rows := buildProviders(rep, nil)
 	if len(rows) != 2 {
@@ -87,8 +87,8 @@ func TestBuildProvidersHandlesBothEndpointLabelFormats(t *testing.T) {
 
 func TestBuildProvidersQuotaRef(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:withquota:m", TokensIn: 10},
-		{Endpoint: "openai:noquota:m", TokensIn: 5},
+		{Endpoint: "openai-completions:withquota:m", TokensIn: 10},
+		{Endpoint: "openai-completions:noquota:m", TokensIn: 5},
 	}}
 	quotas := map[string][]ProviderQuotaRef{
 		"withquota": {{Metric: "tokens", Every: "1mo", Amount: 20000}},
@@ -111,8 +111,8 @@ func TestBuildProvidersQuotaRef(t *testing.T) {
 // byte-different vmr-report.json (TestBuildIsDeterministic's failure mode).
 func TestBuildProvidersDeterministicTieBreak(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:zeta:m", TokensIn: 100},
-		{Endpoint: "openai:alpha:m", TokensIn: 100},
+		{Endpoint: "openai-completions:zeta:m", TokensIn: 100},
+		{Endpoint: "openai-completions:alpha:m", TokensIn: 100},
 	}}
 	rows := buildProviders(rep, nil)
 	if len(rows) != 2 || rows[0].Provider != "alpha" || rows[1].Provider != "zeta" {

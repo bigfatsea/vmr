@@ -93,9 +93,9 @@ models:
 
 func TestResponses_WrongProtocolHint(t *testing.T) {
 	t.Parallel()
-	// A model that only exists on the openai (Chat Completions) protocol
+	// A model that only exists on the openai-completions (Chat Completions) protocol
 	// face must not be reachable via POST /v1/responses — same "wrong
-	// entry point" 404 the openai/anthropic pair already gets, extended to
+	// entry point" 404 the openai-completions/anthropic-messages pair already gets, extended to
 	// the third protocol (router.otherProtocolFor/IngressPath).
 	ts := newRouterServer(t, `
 listen: 127.0.0.1:0

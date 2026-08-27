@@ -17,7 +17,7 @@ type CorpusText struct {
 	FindingRateHeader string
 	NoFindings        string
 	// AnthropicOnlyCoverageNote is P14.2's disclosure line (KNOWN_ISSUES
-	// §1.43): printed only when this corpus has ~0% Anthropic-protocol
+	// §1.43): printed only when this corpus has ~0% Anthropic Messages
 	// traffic, naming the signals that read as absent/zero for structural
 	// reasons, not because nothing was found. anthropicPct is a
 	// pre-formatted percentage; codes is a comma-joined list.
@@ -59,7 +59,7 @@ func Corpus(lang Lang) CorpusText {
 			FindingRateHeader: "| Code | 命中率（至少一次） |\n|---|---|\n",
 			NoFindings:        "本批语料未检测到任何规则 Finding。\n\n",
 			AnthropicOnlyCoverageNote: func(anthropicPct, codes string) string {
-				return "> ⚠️ 本批语料仅 " + anthropicPct + " 为 Anthropic 协议请求。以下信号依赖仅 Anthropic 协议才会填充的字段（`chatmsg.ToolResult.IsError`），在非 Anthropic 请求上结构性无法触发——命中率为 0 或指标全为 0 代表\"测不出来\"，不代表\"检查过没问题\"：" + codes + "\n\n"
+				return "> ⚠️ 本批语料仅 " + anthropicPct + " 为 Anthropic Messages 协议请求。以下信号依赖仅 Anthropic Messages 协议才会填充的字段（`chatmsg.ToolResult.IsError`），在非 Anthropic Messages 请求上结构性无法触发——命中率为 0 或指标全为 0 代表\"测不出来\"，不代表\"检查过没问题\"：" + codes + "\n\n"
 			},
 
 			CorrelationTitle:  "## 指标相关性（|rho| ≥ 0.3，Spearman 秩相关，按 |rho| 降序取前 15）\n\n",
@@ -100,7 +100,7 @@ func Corpus(lang Lang) CorpusText {
 		FindingRateHeader: "| Code | Hit Rate (≥1 occurrence) |\n|---|---|\n",
 		NoFindings:        "No rule Findings were detected in this corpus.\n\n",
 		AnthropicOnlyCoverageNote: func(anthropicPct, codes string) string {
-			return "> ⚠️ Only " + anthropicPct + " of this corpus is Anthropic-protocol traffic. The following signals depend on a field only ever populated for Anthropic-protocol tool results (`chatmsg.ToolResult.IsError`) and structurally cannot fire on non-Anthropic requests — a 0% hit rate or all-zero metric here means \"couldn't be checked\", not \"checked, no issue found\": " + codes + "\n\n"
+			return "> ⚠️ Only " + anthropicPct + " of this corpus is Anthropic Messages traffic. The following signals depend on a field only ever populated for Anthropic Messages tool results (`chatmsg.ToolResult.IsError`) and structurally cannot fire on non-Anthropic Messages requests — a 0% hit rate or all-zero metric here means \"couldn't be checked\", not \"checked, no issue found\": " + codes + "\n\n"
 		},
 
 		CorrelationTitle:  "## Metric Correlations (|rho| ≥ 0.3, Spearman rank, top 15 by |rho|)\n\n",

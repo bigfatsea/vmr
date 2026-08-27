@@ -90,7 +90,7 @@ type parityRequest struct {
 func (r parityRequest) auditLine(ts time.Time, provider string) string {
 	var atts []string
 	for _, a := range r.attempts {
-		ep := core.EndpointLabel("openai", provider, r.model)
+		ep := core.EndpointLabel("openai-completions", provider, r.model)
 		fields := fmt.Sprintf(`"endpoint":%q,"protocol":"openai-completions","provider":%q,"model":%q,"url":"https://example.com/v1","dur_ms":5,"request":{}`,
 			ep, provider, r.model)
 		switch {

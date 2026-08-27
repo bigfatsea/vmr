@@ -161,7 +161,7 @@ func TestStepUpstream_FallsBackToEndpointSplit(t *testing.T) {
 		wantModel    string
 	}{
 		{"colon format", "openai-completions:new-provider:new-model", "new-provider", "new-model"},
-		{"slash format (legacy)", "openai/old-provider/old-model", "old-provider", "old-model"},
+		{"slash format (legacy)", "openai-completions/old-provider/old-model", "old-provider", "old-model"},
 		{"no attempts, unresolvable endpoint", "-", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

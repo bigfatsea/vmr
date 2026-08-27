@@ -293,7 +293,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 
 		// Pass client headers through unless on the blocklist — this
-		// includes the Anthropic protocol headers (anthropic-version,
+		// includes the anthropic-messages protocol headers (anthropic-version,
 		// anthropic-beta). The rationale is that LLM SDKs (OpenAI JS,
 		// Anthropic) only emit a known fixed set of headers and none of
 		// them are dangerous, so a strict whitelist is more brittle than

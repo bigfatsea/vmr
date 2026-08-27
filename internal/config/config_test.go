@@ -409,9 +409,9 @@ func TestModelsListExpandsToMultipleCandidates(t *testing.T) {
 }
 
 // TestProviderServesBothProtocols pins the new Provider shape: one account
-// entry declares base_url for both "openai" and "anthropic", sharing one
-// api_key/proxy setting, instead of the old format's two separately-keyed
-// provider entries under providers.openai/providers.anthropic.
+// entry declares base_url for both openai-completions and anthropic-messages,
+// sharing one api_key/proxy setting, instead of the old format's two
+// separately protocol-keyed provider entries.
 func TestProviderServesBothProtocols(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:9903
@@ -439,8 +439,8 @@ models:
 
 // TestSameVirtualModelNameBothProtocols is the new format's version of "the
 // same virtual model name is independently reachable from both ingress
-// protocols": one models.<name> entry mixes an openai-protocol endpoint
-// group and an anthropic-protocol one. Config-level this only needs to
+// protocols": one models.<name> entry mixes an openai-completions endpoint
+// group and an anthropic-messages one. Config-level this only needs to
 // confirm both entries parse with their own protocol/provider/models intact
 // — BuildSnapshot's split into two independent routes is covered in
 // internal/router.
@@ -466,10 +466,10 @@ models:
 		t.Fatalf("want 2 endpoint groups, got %d", len(eps))
 	}
 	if eps[0].Protocol != "openai-completions" || eps[0].Models[0] != "z-ai/glm-5.2" {
-		t.Errorf("openai-protocol entry mismatch: %+v", eps[0])
+		t.Errorf("openai-completions entry mismatch: %+v", eps[0])
 	}
 	if eps[1].Protocol != "anthropic-messages" || eps[1].Models[0] != "minimax/minimax-m3" {
-		t.Errorf("anthropic-protocol entry mismatch: %+v", eps[1])
+		t.Errorf("anthropic-messages entry mismatch: %+v", eps[1])
 	}
 }
 
@@ -798,8 +798,8 @@ func TestModelStickyExplicitFalse(t *testing.T) {
 // TestOpenAIResponsesProtocolAccepted locks in that a third protocol needs
 // zero config-package code changes to become valid config: base_url and
 // EndpointGroup.Protocol are both validated purely against the adapter
-// registry (adapter.Get), never a hardcoded "openai"/"anthropic" string
-// list — see config.go's validate(). Registering the new adapter (this
+// registry (adapter.Get), never a hardcoded "openai-completions"/"anthropic-messages"
+// string list — see config.go's validate(). Registering the new adapter (this
 // file's blank import above) is the only thing that made this YAML valid;
 // nothing in this package itself was touched to allow it.
 func TestOpenAIResponsesProtocolAccepted(t *testing.T) {
@@ -830,8 +830,8 @@ models:
 // TestOpenAIResponsesAndChatCompletionsCoexist locks in that one virtual
 // model name can mix protocol: openai-completions and protocol: openai-responses
 // endpoint groups — the same "one name, several independently-reachable
-// protocol faces" pattern already used for openai/anthropic (see
-// VirtualModel's doc comment); BuildSnapshot splits them into separate
+// protocol faces" pattern already used for openai-completions/anthropic-messages
+// (see VirtualModel's doc comment); BuildSnapshot splits them into separate
 // per-protocol routes (see internal/router/router_test.go's
 // TestBuildSnapshotSplitsVirtualModelByProtocol for the runtime-side
 // assertion of that split).

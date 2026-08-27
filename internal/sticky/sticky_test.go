@@ -13,12 +13,12 @@ func TestRegistry_SetPeek(t *testing.T) {
 	if _, _, ok := r.Peek("k"); ok {
 		t.Fatalf("expected no entry before Set")
 	}
-	r.Set("k", "openai/minimax/MiniMax-M3")
+	r.Set("k", "openai-completions/minimax/MiniMax-M3")
 	epKey, lastUsed, ok := r.Peek("k")
 	if !ok {
 		t.Fatalf("expected entry after Set")
 	}
-	if epKey != "openai/minimax/MiniMax-M3" {
+	if epKey != "openai-completions/minimax/MiniMax-M3" {
 		t.Errorf("epKey = %q", epKey)
 	}
 	if time.Since(lastUsed) > time.Second {

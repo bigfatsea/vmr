@@ -92,7 +92,7 @@ func TestFinalMessage_OpenAI(t *testing.T) {
 	}
 	s, ok := FinalMessage(body)
 	if !ok || s.Content != "hi" || s.Finish != "stop" {
-		t.Errorf("FinalMessage openai = %+v ok=%v", s, ok)
+		t.Errorf("FinalMessage openai-completions = %+v ok=%v", s, ok)
 	}
 }
 

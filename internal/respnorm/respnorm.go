@@ -777,8 +777,8 @@ func classifyEvent(ev []byte) verdict {
 	for _, m := range passthroughStringMarkers {
 		if v, ok := afterMarker(ev, m); ok {
 			if v = trimEscapedWS(v); len(v) > 0 && v[0] != '"' {
-				// anthropic text deltas can carry the same inline-think
-				// pathology as openai content; the dedicated reasoning
+				// anthropic-messages text deltas can carry the same inline-think
+				// pathology as openai-completions content; the dedicated reasoning
 				// fields (reasoning_content, thinking) cannot.
 				if bytes.Equal(m, textFieldMarker) && bytes.HasPrefix(v, thinkOpenMarker) {
 					return verdictBuffered

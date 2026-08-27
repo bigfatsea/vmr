@@ -123,15 +123,15 @@ func TestProtocolIsolation(t *testing.T) {
 	o, a1, a2 := newUpstream(t), newAnthUpstream(t), newAnthUpstream(t)
 	ts := newRouterServer(t, dualProtocolYAML(o.srv.URL, a1.srv.URL, a2.srv.URL, ""))
 
-	// Anthropic-protocol model via OpenAI ingress → rejected with guidance.
+	// anthropic-messages model via OpenAI ingress → rejected with guidance.
 	resp, body := chat(t, ts, `{"model":"vm-anth","messages":[]}`, nil)
 	if resp.StatusCode != 404 || !strings.Contains(body, "/v1/messages") {
-		t.Errorf("openai ingress must reject anthropic model: status=%d body=%s", resp.StatusCode, body)
+		t.Errorf("openai-completions ingress must reject anthropic-messages model: status=%d body=%s", resp.StatusCode, body)
 	}
-	// OpenAI-protocol model via Anthropic ingress → rejected with guidance.
+	// openai-completions model via Anthropic ingress → rejected with guidance.
 	resp, body = messages(t, ts, `{"model":"vm-openai","max_tokens":8,"messages":[]}`, nil)
 	if resp.StatusCode != 404 || !strings.Contains(body, "/v1/chat/completions") {
-		t.Errorf("anthropic ingress must reject openai model: status=%d body=%s", resp.StatusCode, body)
+		t.Errorf("anthropic-messages ingress must reject openai-completions model: status=%d body=%s", resp.StatusCode, body)
 	}
 	if a1.hits.Load() != 0 || a2.hits.Load() != 0 || o.hits.Load() != 0 {
 		t.Error("no upstream must be hit on protocol mismatch")
@@ -141,7 +141,7 @@ func TestProtocolIsolation(t *testing.T) {
 // TestCrossProtocolProviderRefRejectedAtLoad locks in the new schema's
 // equivalent guard: an endpoint-group's protocol must match one of its
 // referenced provider's declared base_url protocols. "anth" only declares
-// an anthropic base_url, so an openai-protocol entry referencing it is
+// an anthropic base_url, so an openai-completions entry referencing it is
 // rejected — the same "no valid syntax to express this" mismatch the old
 // protocol-nested schema caught via "unknown provider", now caught by
 // "provider has no base_url for protocol".
@@ -164,7 +164,7 @@ models:
 }
 
 // A model name can exist under both protocols at once — one models.<name>
-// entry mixes an openai-protocol endpoint-group and an anthropic-protocol
+// entry mixes an openai-completions endpoint-group and an anthropic-messages
 // one, and BuildSnapshot resolves them independently, no artificial "-a"
 // suffix needed to give one virtual model both an OpenAI and an Anthropic
 // face.
@@ -185,7 +185,7 @@ models:
 
 	resp, _ := chat(t, ts, `{"model":"coding","messages":[{"role":"user","content":"hi"}]}`, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/oai/model-one" {
-		t.Errorf("openai-face coding: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
+		t.Errorf("openai-completions-face coding: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	resp, body := messages(t, ts, `{"model":"coding","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, nil)
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {

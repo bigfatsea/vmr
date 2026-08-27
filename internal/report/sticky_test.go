@@ -9,7 +9,7 @@ import (
 
 // entry is a terse constructor for the table below.
 func stickyE(seq int, endpoint, model string, cached, fresh int64) stickyEntry {
-	return stickyEntry{seq: seq, endpoint: endpoint, model: model, protocol: "openai",
+	return stickyEntry{seq: seq, endpoint: endpoint, model: model, protocol: "openai-completions",
 		cached: cached, fresh: fresh, known: true}
 }
 

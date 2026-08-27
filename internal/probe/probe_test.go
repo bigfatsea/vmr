@@ -110,7 +110,7 @@ func TestEchoed(t *testing.T) {
 		body string
 		want bool
 	}{
-		{"openai shape", `{"choices":[{"message":{"role":"assistant","content":"VMR-PROBE-deadbeef"}}]}`, true},
+		{"openai-completions shape", `{"choices":[{"message":{"role":"assistant","content":"VMR-PROBE-deadbeef"}}]}`, true},
 		{"anthropic shape", `{"content":[{"type":"text","text":"Sure: VMR-PROBE-deadbeef"}]}`, true},
 		{"wrapped/paraphrased still matches", `{"content":[{"text":"here you go -> VMR-PROBE-deadbeef <-"}]}`, true},
 		{"missing entirely", `{"choices":[{"message":{"content":"I can't do that"}}]}`, false},

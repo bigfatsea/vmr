@@ -6,17 +6,18 @@ import (
 )
 
 // TestHealthKeyProtocolPrefixAvoidsCollision locks in the reason AdapterType
-// is part of HealthKey (see the doc comment on Endpoint.HealthKey): the same
-// provider short name can be reused across protocol groups (config.example.yaml
-// has "openrouter" under both providers.openai and providers.anthropic), so
-// two Endpoints that are genuinely different upstream targets must not share
-// a health-registry key just because Provider/Model/APIKey happen to match.
+// is part of HealthKey (see the doc comment on Endpoint.HealthKey): one
+// provider account can back endpoint-groups of different protocols at once
+// (config.example.yaml's "openrouter" declares base_url for both
+// openai-completions and anthropic-messages), so two Endpoints that are
+// genuinely different upstream targets must not share a health-registry key
+// just because Provider/Model/APIKey happen to match.
 func TestHealthKeyProtocolPrefixAvoidsCollision(t *testing.T) {
 	t.Parallel()
-	openai := &Endpoint{AdapterType: "openai", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
-	anthropic := &Endpoint{AdapterType: "anthropic", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
-	if openai.HealthKey() == anthropic.HealthKey() {
-		t.Errorf("endpoints differing only in AdapterType must not collide: %q", openai.HealthKey())
+	openaiEP := &Endpoint{AdapterType: "openai-completions", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
+	anthropicEP := &Endpoint{AdapterType: "anthropic-messages", Provider: "openrouter", Model: "gpt-5", APIKey: "sk-same"}
+	if openaiEP.HealthKey() == anthropicEP.HealthKey() {
+		t.Errorf("endpoints differing only in AdapterType must not collide: %q", openaiEP.HealthKey())
 	}
 }
 
@@ -25,8 +26,8 @@ func TestHealthKeyProtocolPrefixAvoidsCollision(t *testing.T) {
 // same provider) get distinct health state.
 func TestHealthKeyDiffersByAPIKey(t *testing.T) {
 	t.Parallel()
-	a := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "key-a"}
-	b := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "key-b"}
+	a := &Endpoint{AdapterType: "openai-completions", Provider: "acme", Model: "m", APIKey: "key-a"}
+	b := &Endpoint{AdapterType: "openai-completions", Provider: "acme", Model: "m", APIKey: "key-b"}
 	if a.HealthKey() == b.HealthKey() {
 		t.Errorf("endpoints with different API keys must not collide: %q", a.HealthKey())
 	}
@@ -38,8 +39,8 @@ func TestHealthKeyDiffersByAPIKey(t *testing.T) {
 // config must resolve to the same registry entry).
 func TestHealthKeyStableForSameFields(t *testing.T) {
 	t.Parallel()
-	a := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
-	b := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
+	a := &Endpoint{AdapterType: "anthropic-messages", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
+	b := &Endpoint{AdapterType: "anthropic-messages", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
 	if a.HealthKey() != b.HealthKey() {
 		t.Errorf("HealthKey must be deterministic: %q != %q", a.HealthKey(), b.HealthKey())
 	}
@@ -49,8 +50,8 @@ func TestHealthKeyStableForSameFields(t *testing.T) {
 // never leaks the credential, unlike HealthKey which folds in a fingerprint.
 func TestNameOmitsAPIKey(t *testing.T) {
 	t.Parallel()
-	e := &Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "sk-secret"}
-	if got, want := e.Name(), "openai/acme/m"; got != want {
+	e := &Endpoint{AdapterType: "openai-completions", Provider: "acme", Model: "m", APIKey: "sk-secret"}
+	if got, want := e.Name(), "openai-completions/acme/m"; got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
 	}
 }
@@ -63,11 +64,11 @@ func TestNameOmitsAPIKey(t *testing.T) {
 // not a correctness requirement.
 func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
 	t.Parallel()
-	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
+	e := &Endpoint{AdapterType: "anthropic-messages", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-x"}
 	if got, want := e.HealthKey(), e.computeHealthKey(); got != want {
 		t.Errorf("un-frozen HealthKey() = %q, want %q (computeHealthKey directly)", got, want)
 	}
-	if got, want := e.Name(), "anthropic/minimax/MiniMax-M3"; got != want {
+	if got, want := e.Name(), "anthropic-messages/minimax/MiniMax-M3"; got != want {
 		t.Errorf("un-frozen Name() = %q, want %q", got, want)
 	}
 }
@@ -79,7 +80,7 @@ func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
 func TestEndpointFreezeMatchesUnfrozen(t *testing.T) {
 	t.Parallel()
 	fields := func() Endpoint {
-		return Endpoint{AdapterType: "openai", Provider: "acme", Model: "m", APIKey: "sk-secret"}
+		return Endpoint{AdapterType: "openai-completions", Provider: "acme", Model: "m", APIKey: "sk-secret"}
 	}
 	unfrozen := fields()
 	frozen := fields()
@@ -131,7 +132,7 @@ func TestErrorClassString(t *testing.T) {
 // re-hashes APIKey with SHA-256 on every call unless Freeze() was called
 // once up front (router.BuildSnapshot does this for every real Endpoint).
 func BenchmarkHealthKey_Unfrozen(b *testing.B) {
-	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
+	e := &Endpoint{AdapterType: "anthropic-messages", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = e.HealthKey()
@@ -139,7 +140,7 @@ func BenchmarkHealthKey_Unfrozen(b *testing.B) {
 }
 
 func BenchmarkHealthKey_Frozen(b *testing.B) {
-	e := &Endpoint{AdapterType: "anthropic", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
+	e := &Endpoint{AdapterType: "anthropic-messages", Provider: "minimax", Model: "MiniMax-M3", APIKey: "sk-some-fairly-long-api-key-value"}
 	e.Freeze()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

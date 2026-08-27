@@ -190,12 +190,12 @@ models:
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
 
-	// Request "claude" via openai protocol — should hint at anthropic.
+	// Request "claude" via openai-completions protocol — should hint at anthropic-messages.
 	w := serveReq(rt, "claude", []byte(`{"model":"claude"}`))
 	if w.Code != 404 {
 		t.Fatalf("status=%d, want 404", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "anthropic") || !strings.Contains(w.Body.String(), "/v1/messages") {
+	if !strings.Contains(w.Body.String(), "anthropic-messages") || !strings.Contains(w.Body.String(), "/v1/messages") {
 		t.Errorf("body should hint at anthropic /v1/messages: %s", w.Body)
 	}
 }
@@ -325,10 +325,10 @@ func TestParseRetryAfter(t *testing.T) {
 
 func TestIngressPath(t *testing.T) {
 	if got := IngressPath("openai-completions"); got != "/v1/chat/completions" {
-		t.Errorf("openai: got %q, want /v1/chat/completions", got)
+		t.Errorf("openai-completions: got %q, want /v1/chat/completions", got)
 	}
 	if got := IngressPath("anthropic-messages"); got != "/v1/messages" {
-		t.Errorf("anthropic: got %q, want /v1/messages", got)
+		t.Errorf("anthropic-messages: got %q, want /v1/messages", got)
 	}
 	if got := IngressPath("openai-responses"); got != "/v1/responses" {
 		t.Errorf("openai-responses: got %q, want /v1/responses", got)

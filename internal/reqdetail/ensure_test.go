@@ -20,7 +20,7 @@ func minimalRec(ts time.Time) *audit.Record {
 		Client: audit.Exchange{
 			Request: audit.Message{Body: map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
 }
 
 func TestEnsureRendered_WritesOnce(t *testing.T) {
@@ -179,7 +179,7 @@ func recWithSysPrompt(ts time.Time) *audit.Record {
 				map[string]any{"role": "user", "content": "hi"},
 			}}},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
 }
 
 // TestEnsureRendered_RewritesOnEvidenceModeChange covers the fingerprint's

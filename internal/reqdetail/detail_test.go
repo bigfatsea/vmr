@@ -51,20 +51,20 @@ func TestAttemptUpstreamFallback(t *testing.T) {
 		wantProtocol, wantProv, wantModel string
 	}{
 		{"new log: structured fields used directly",
-			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3", Protocol: "openai", Provider: "minimax", Model: "MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
+			audit.Attempt{Endpoint: "openai-completions:minimax:MiniMax-M3", Protocol: "openai-completions", Provider: "minimax", Model: "MiniMax-M3"},
+			"openai-completions", "minimax", "MiniMax-M3"},
 		{"structured fields empty, ':'-joined Endpoint: falls back to splitting it",
-			audit.Attempt{Endpoint: "openai:minimax:MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
+			audit.Attempt{Endpoint: "openai-completions:minimax:MiniMax-M3"},
+			"openai-completions", "minimax", "MiniMax-M3"},
 		{"old log: falls back to splitting the '/'-joined Endpoint",
-			audit.Attempt{Endpoint: "openai/minimax/MiniMax-M3"},
-			"openai", "minimax", "MiniMax-M3"},
+			audit.Attempt{Endpoint: "openai-completions/minimax/MiniMax-M3"},
+			"openai-completions", "minimax", "MiniMax-M3"},
 		{"old log: model name itself contains '/' (OpenRouter-style), only first two separators are structural",
-			audit.Attempt{Endpoint: "openai/openrouter/z-ai/glm-5.2"},
-			"openai", "openrouter", "z-ai/glm-5.2"},
+			audit.Attempt{Endpoint: "openai-completions/openrouter/z-ai/glm-5.2"},
+			"openai-completions", "openrouter", "z-ai/glm-5.2"},
 		{"':'-joined Endpoint, model name itself contains '/' (OpenRouter-style)",
-			audit.Attempt{Endpoint: "openai:openrouter:z-ai/glm-5.2"},
-			"openai", "openrouter", "z-ai/glm-5.2"},
+			audit.Attempt{Endpoint: "openai-completions:openrouter:z-ai/glm-5.2"},
+			"openai-completions", "openrouter", "z-ai/glm-5.2"},
 		{"old log, unparseable endpoint: no crash, empty triple",
 			audit.Attempt{Endpoint: "not-a-real-endpoint"},
 			"", "", ""},
@@ -85,7 +85,7 @@ func TestAttemptUpstreamFallback(t *testing.T) {
 // string — the exact scenario that regressed detail filenames to "_none_"
 // for every historical record before AttemptUpstream's fallback was added.
 func TestRealModelFallback(t *testing.T) {
-	rec := &audit.Record{Attempts: []audit.Attempt{{Endpoint: "openai/minimax/MiniMax-M3"}}}
+	rec := &audit.Record{Attempts: []audit.Attempt{{Endpoint: "openai-completions/minimax/MiniMax-M3"}}}
 	if got := RealModel(rec); got != "MiniMax-M3" {
 		t.Errorf("RealModel = %q, want %q", got, "MiniMax-M3")
 	}
@@ -137,7 +137,7 @@ func TestFileName_DeterministicAndCoordinateUnique(t *testing.T) {
 func TestFileNameForRecord_MatchesFileName(t *testing.T) {
 	ts := time.Date(2026, 7, 9, 0, 31, 6, 804_000_000, time.FixedZone("CST", 8*3600))
 	rec := &audit.Record{TS: ts, Model: "agent", Outcome: "ok",
-		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
 	got := FileNameForRecord(rec, "vmr-audit-2026-07-08.jsonl", 42)
 	want := FileName(ts, "agent", "MiniMax-M3", "ok", ctxgraph.ReqCoord("vmr-audit-2026-07-08.jsonl", 42))
 	if got != want {
@@ -156,7 +156,7 @@ func TestFileNameForManifest_MatchesFileNameForRecord(t *testing.T) {
 		Client: audit.Exchange{
 			Request: audit.Message{Body: map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}},
 		},
-		Attempts: []audit.Attempt{{Endpoint: "openai:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
+		Attempts: []audit.Attempt{{Endpoint: "openai-completions:minimax:MiniMax-M3", Model: "MiniMax-M3"}}}
 	m, ok := ctxgraph.BuildManifest(rec, "vmr-audit-2026-07-08.jsonl", 42)
 	if !ok {
 		t.Fatal("BuildManifest returned ok=false")
@@ -257,7 +257,7 @@ func TestRenderBodyDiffExcludesResponsesConversationFields(t *testing.T) {
 }
 
 func TestRoleChars(t *testing.T) {
-	// openai shape: roles taken as-is, tool_calls counted to assistant.
+	// openai-completions shape: roles taken as-is, tool_calls counted to assistant.
 	openai := map[string]any{
 		"messages": []any{
 			map[string]any{"role": "system", "content": strings.Repeat("s", 10)},
@@ -360,7 +360,7 @@ func TestRender_RawPreStrip(t *testing.T) {
 				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Headers: http.Header{}, Body: map[string]any{}},
 			},
 			Attempts: []audit.Attempt{{
-				Endpoint: "openai/minimax/MiniMax-M3", URL: "https://x/v1",
+				Endpoint: "openai-completions/minimax/MiniMax-M3", URL: "https://x/v1",
 				Request:     audit.Message{Headers: http.Header{}},
 				Response:    &audit.Message{Status: 200, Headers: http.Header{}},
 				Norm:        []string{"buffered", "think_strip", "model_rewrite"},

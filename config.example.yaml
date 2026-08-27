@@ -4,7 +4,7 @@
 # and in which order to use it.
 #
 # providers is a flat list: one entry per upstream account, however many of
-# the three ingress protocols ("openai" | "anthropic" | "openai-responses")
+# the three ingress protocols ("openai-completions" | "anthropic-messages" | "openai-responses")
 # that account actually speaks — base_url is itself keyed by protocol, so
 # the same account (same api_key, same proxy policy) can back several
 # surfaces from one entry instead of being declared multiple times.
@@ -15,7 +15,7 @@
 # try-order candidate (see the "agent" example below). Each entry under a
 # model's `endpoints:` list is one try-order candidate: it names its own
 # protocol (which ingress can reach it — POST /v1/chat/completions for
-# "openai", POST /v1/messages for "anthropic", POST /v1/responses for
+# "openai-completions", POST /v1/messages for "anthropic-messages", POST /v1/responses for
 # "openai-responses"), one or more providers (resolved by name against the
 # providers list above — see providers[] below), and a `models:` list of
 # upstream model names that all share this entry's capabilities/
@@ -157,8 +157,8 @@ listen: 127.0.0.1:8800
 #                                   # doesn't exist is a load-time error, not a silent skip.
 
 # Global fallbacks: appended to the tail of every virtual model's try-order
-# that already has an openai-protocol entry (coding/cheap/agent below all
-# do — claude is anthropic-only, so this block never touches it, no
+# that already has an openai-completions entry (coding/cheap/agent below all
+# do — claude is anthropic-messages-only, so this block never touches it, no
 # `fallback: false` needed there). openrouter2 here is the second account
 # from providers[] below, used only as a distinct, not-already-declared
 # candidate so this example doesn't also trip the "fallback duplicates an
@@ -180,7 +180,7 @@ providers:
   #
   # base_url declares at least one protocol, up to both — MiniMax speaks
   # both surfaces on the same account, so one entry covers it instead of
-  # two (the old format's providers.openai.minimax / providers.anthropic.minimax
+  # two (the old format's two separately protocol-keyed minimax declarations
   # duplication). A models.<name> endpoint-group's own `protocol:` picks
   # which of these a given try-order entry actually uses.
   - name: minimax
@@ -420,8 +420,8 @@ models:
                             # override the global sticky_ttl for just this endpoint
 
   # "agent" mixes all three ingress protocols under one virtual model name:
-  # the openai-protocol entry is reachable only from POST /v1/chat/completions,
-  # the anthropic-protocol entry only from POST /v1/messages, the
+  # the openai-completions entry is reachable only from POST /v1/chat/completions,
+  # the anthropic-messages entry only from POST /v1/messages, the
   # openai-responses entry only from POST /v1/responses — a client on any of
   # the three can ask for "agent" and get its own independent try-order
   # list, sharing nothing but the name.
@@ -453,7 +453,7 @@ models:
         models: [gemini-3.6-flash-high]
 
   # Anthropic-only virtual model: reachable only via POST /v1/messages.
-  # "claude" needs no openai-protocol entry — nothing on the openai side
+  # "claude" needs no openai-completions entry — nothing on the openai-completions side
   # references it, and a request for it over POST /v1/chat/completions
   # simply finds no route, since that ingress only ever looks at
   # protocol: openai-completions entries.
@@ -467,4 +467,4 @@ models:
         models: [deepseek-v4-pro]
       - protocol: anthropic-messages
         providers: [openrouter]
-        models: [minimax/minimax-m3] # any OpenRouter model, spoken over Anthropic protocol
+        models: [minimax/minimax-m3] # any OpenRouter model, spoken over anthropic-messages protocol

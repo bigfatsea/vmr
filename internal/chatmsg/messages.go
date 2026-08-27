@@ -166,8 +166,8 @@ func RawArray(body map[string]any) []any {
 	return arr
 }
 
-// Messages extracts the conversation from a request body: anthropic keeps
-// system as a top-level field (rendered as message #0), openai carries it in
+// Messages extracts the conversation from a request body: anthropic-messages keeps
+// system as a top-level field (rendered as message #0), openai-completions carries it in
 // the messages list, openai-responses carries it in "instructions" (rendered
 // as message #0) plus a top-level "input" array or bare string in place of
 // "messages". Non-map bodies yield nil.
@@ -205,7 +205,7 @@ func Messages(body any) []Message {
 		if rc, _ := m["reasoning_content"].(string); rc != "" {
 			text = "🤔 [reasoning_content]\n" + rc + "\n" + text
 		}
-		if id, _ := m["tool_call_id"].(string); id != "" { // openai tool result
+		if id, _ := m["tool_call_id"].(string); id != "" { // openai-completions tool result
 			text = fmt.Sprintf("↩️ tool_call_id=%s\n%s", id, text)
 		}
 		for _, tc := range ToolCallList(m["tool_calls"]) {
@@ -280,7 +280,7 @@ type ToolCall struct {
 	ID, Name, Args string
 }
 
-// ToolCallList decodes an openai assistant-message tool_calls array.
+// ToolCallList decodes an openai-completions assistant-message tool_calls array.
 func ToolCallList(v any) []ToolCall {
 	arr, _ := v.([]any)
 	out := make([]ToolCall, 0, len(arr))
@@ -299,7 +299,7 @@ func ToolCallList(v any) []ToolCall {
 }
 
 // ToolNames lists the tool names declared in a request body (both shapes:
-// openai {"function":{"name":…}}, anthropic {"name":…}).
+// openai-completions {"function":{"name":…}}, anthropic-messages {"name":…}).
 func ToolNames(body any) []string {
 	obj, ok := body.(map[string]any)
 	if !ok {

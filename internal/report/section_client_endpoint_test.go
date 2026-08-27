@@ -23,9 +23,9 @@ func TestRenderClientEndpointEmptySkipsSection(t *testing.T) {
 
 func TestRenderClientEndpointGroupsByClient(t *testing.T) {
 	rep := &Report2{ClientEndpoints: []ClientEndpointRow{
-		{ClientKey: "agent-a", Endpoint: "openai:p2:m2", Requests: 3, TokensIn: 600, TokensInFresh: 500, TokensOut: 60},
-		{ClientKey: "agent-a", Endpoint: "openai:p1:m1", Requests: 2, TokensIn: 200, TokensInFresh: 150, TokensOut: 20},
-		{ClientKey: "agent-b", Endpoint: "openai:p1:m1", Requests: 1, TokensIn: 50, TokensInFresh: 50, TokensOut: 5},
+		{ClientKey: "agent-a", Endpoint: "openai-completions:p2:m2", Requests: 3, TokensIn: 600, TokensInFresh: 500, TokensOut: 60},
+		{ClientKey: "agent-a", Endpoint: "openai-completions:p1:m1", Requests: 2, TokensIn: 200, TokensInFresh: 150, TokensOut: 20},
+		{ClientKey: "agent-b", Endpoint: "openai-completions:p1:m1", Requests: 1, TokensIn: 50, TokensInFresh: 50, TokensOut: 5},
 	}}
 	out := renderClientEndpointStr(rep, i18n.EN)
 	if !strings.Contains(out, "**agent-a**") || !strings.Contains(out, "**agent-b**") {
@@ -45,7 +45,7 @@ func TestRenderClientEndpointGroupsByClient(t *testing.T) {
 
 func TestRenderClientEndpointZH(t *testing.T) {
 	rep := &Report2{ClientEndpoints: []ClientEndpointRow{
-		{ClientKey: "agent-a", Endpoint: "openai:p1:m1", Requests: 1, TokensIn: 10, TokensInFresh: 10},
+		{ClientKey: "agent-a", Endpoint: "openai-completions:p1:m1", Requests: 1, TokensIn: 10, TokensInFresh: 10},
 	}}
 	out := renderClientEndpointStr(rep, i18n.ZH)
 	if !strings.Contains(out, "§5.5 按客户端的上游归属") {

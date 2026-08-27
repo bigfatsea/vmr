@@ -53,7 +53,7 @@
 
 ## 疑似问题（候选清单，不是判决）
 
-> ⚠️ 本 journey 全部请求均为非 Anthropic 协议。以下信号依赖仅 Anthropic 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题：error_retry_unadapted, error_then_unverified_success, error_recovery_count, decision spine's tool-result ❌ badge, structure.json's ToolCalls[].ResultError
+> ⚠️ 本 journey 全部请求均为非 Anthropic Messages 协议。以下信号依赖仅 Anthropic Messages 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题：error_retry_unadapted, error_then_unverified_success, error_recovery_count, decision spine's tool-result ❌ badge, structure.json's ToolCalls[].ResultError
 
 未检测到规则可判定的疑似问题。
 

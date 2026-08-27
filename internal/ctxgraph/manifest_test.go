@@ -13,7 +13,7 @@ import (
 
 func mkAuditRec(ts time.Time, body map[string]any) audit.Record {
 	return audit.Record{
-		TS: ts, Model: "agent", Protocol: "openai", Outcome: "ok",
+		TS: ts, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
 		Client: audit.Exchange{
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: body},
 		},

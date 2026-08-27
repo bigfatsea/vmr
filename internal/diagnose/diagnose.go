@@ -374,7 +374,7 @@ func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p 
 // provider that can't handle the role real "developer"-role clients send
 // (or a missing role_map to rewrite it away first) is exactly as broken as
 // any other liveness failure, so it fails the one connectivity check
-// instead of a second one alongside it. Anthropic-protocol endpoints keep
+// instead of a second one alongside it. anthropic-messages endpoints keep
 // probing with plain "user" — "developer" is an OpenAI-only role, no
 // Anthropic client ever sends it.
 func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, timeout time.Duration) Result {

@@ -4,7 +4,7 @@
 # 按什么顺序去用它。
 #
 # providers 是一个平铺列表：每个上游账号一条，不管这个账号实际支持三种入口协议
-# （"openai" | "anthropic" | "openai-responses"）里的几种——base_url 本身按协议
+# （"openai-completions" | "anthropic-messages" | "openai-responses"）里的几种——base_url 本身按协议
 # 分 key，所以同一个账号（同一个 api_key、同一条代理策略）可以从一条记录同时
 # 支撑多个接入面，不需要重复声明多条。
 #
@@ -12,8 +12,8 @@
 # `max_context_tokens` 是它下面每个候选端点共享的*基线*——只写一次，不用在每个
 # try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型
 # `endpoints:` 列表下的每一条，是一个 try-order 候选：它自己声明协议（哪个入口
-# 能打到它——POST /v1/chat/completions 对应 "openai"，POST /v1/messages 对应
-# "anthropic"，POST /v1/responses 对应 "openai-responses"）、一个或多个 provider
+# 能打到它——POST /v1/chat/completions 对应 "openai-completions"，POST /v1/messages 对应
+# "anthropic-messages"，POST /v1/responses 对应 "openai-responses"）、一个或多个 provider
 # （按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
 # `models:` 上游模型名列表，这些模型名共享这一条的 capabilities/
 # max_context_tokens/role_map/sticky_ttl/priority——每个 (provider, model) 对
@@ -138,7 +138,7 @@ listen: 127.0.0.1:8800
 #                                   # 合并进来——canonical key 撞车时你的条目胜出。指向一个不存在
 #                                   # 的路径会在加载期报错，不会静默跳过。
 
-# 全局兜底：追加到每个已经有 openai 协议入口的虚拟模型 try-order 末尾（下面的
+# 全局兜底：追加到每个已经有 openai-completions 协议入口的虚拟模型 try-order 末尾（下面的
 # coding/cheap/agent 都有——claude 是纯 Anthropic 模型，这个块从不会碰到它，
 # 也就不需要给它写 `fallback: false`）。这里的 openrouter2 就是下面
 # providers[] 里的第二个账号，选它只是为了拿一个模型下还没声明过的候选，避免
@@ -158,7 +158,7 @@ providers:
   #
   # base_url 至少声明一种协议，最多两种都声明——MiniMax 在同一个账号下同时支持
   # 两种接入面，所以一条记录就够，不用像旧格式那样拆成
-  # providers.openai.minimax / providers.anthropic.minimax 两份重复声明。具体
+  # 两份按协议分开的 minimax 重复声明。具体
   # 某条 models.<name> 端点组用这里面的哪一个，由它自己的 `protocol:` 决定。
   - name: minimax
     base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
@@ -355,8 +355,8 @@ models:
         # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
                             # 只针对这一条端点覆盖全局 sticky_ttl
 
-  # "agent" 在同一个虚拟模型名下混合了全部三种入口协议：openai 协议的记录只能
-  # 从 POST /v1/chat/completions 到达，anthropic 协议的记录只能从
+  # "agent" 在同一个虚拟模型名下混合了全部三种入口协议：openai-completions 协议的记录只能
+  # 从 POST /v1/chat/completions 到达，anthropic-messages 协议的记录只能从
   # POST /v1/messages 到达，openai-responses 的记录只能从 POST /v1/responses
   # 到达——三种协议上的客户端都可以请求 "agent"，各自拿到自己独立的 try-order
   # 列表，彼此只共享一个名字，别无其他。
@@ -386,7 +386,7 @@ models:
         models: [gemini-3.6-flash-high]
 
   # 仅 Anthropic 的虚拟模型：只能通过 POST /v1/messages 到达。
-  # "claude" 不需要 openai 协议的记录——openai 那一侧没有任何地方引用它，通过
+  # "claude" 不需要 openai-completions 协议的记录——openai-completions 那一侧没有任何地方引用它，通过
   # POST /v1/chat/completions 请求它只会找不到路由，因为那个入口从来只看
   # protocol: openai-completions 的记录。
   claude:
@@ -399,4 +399,4 @@ models:
         models: [deepseek-v4-pro]
       - protocol: anthropic-messages
         providers: [openrouter]
-        models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 Anthropic 协议来说话
+        models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 anthropic-messages 协议来说话

@@ -43,7 +43,7 @@ func sseText(text string) string {
 	}, "\n")
 }
 
-// mkRec builds one openai-protocol audit record.
+// mkRec builds one openai-completions audit record.
 func mkRec(ts time.Time, trace string, msgs []any, tools []string, respBody any) audit.Record {
 	body := map[string]any{"model": "agent", "stream": true, "messages": msgs}
 	if tools != nil {

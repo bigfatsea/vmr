@@ -45,9 +45,9 @@ const (
 //
 // imageCount is NOT derived here from a body scan — it comes from the
 // caller's single imgprep.Downscale call (server.go), which walks the
-// actual message/content-block structure (protocol-aware: openai
-// content[].image_url, anthropic content[].source) rather than doing a raw
-// substring search. Threading the already-computed count through, instead
+// actual message/content-block structure (protocol-aware: openai-completions
+// content[].image_url, anthropic-messages content[].source) rather than doing
+// a raw substring search. Threading the already-computed count through, instead
 // of re-detecting images here, serves two purposes at once:
 //
 // 1. Correctness: HasImage (imageCount > 0) feeds a hard capability

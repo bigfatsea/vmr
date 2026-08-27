@@ -178,7 +178,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 
 `openai-responses` 的会话结构一样由这层负责归一化，不需要 `ctxgraph`/`story`/`report` 三方任何一方单独适配：`Messages` 把顶层 `instructions`（系统提示等价物）当作 anthropic `system` 的同类处理，把顶层 `input`（数组或裸字符串）当作 `messages` 的同类处理；`input` 数组里没有 `role` 字段的 Item（`function_call`/`function_call_output`/`reasoning`）各自映射到一个语义最接近的角色（分别是 assistant/tool/assistant）。`RawArray` 是这条改动新增的一个小导出函数——`messages`/`input` 两者中实际存在的那个数组，供 `ctxgraph.BuildManifest` 等需要按位置回取"这条消息的原始 JSON 编码"（而不是 `Messages` 渲染出的纯文本）的调用方使用，替代了 `ctxgraph`/`report`/`story` 五处调用点里各自硬编码的 `body["messages"].([]any)`——这正是本节开头强调的"不重复实现"原则本该覆盖、但第一版 Responses 协议接入时遗漏的一处：路由层（`internal/router`/`internal/diagnose`）当时已经完整支持了这个协议，`internal/chatmsg` 这一层却还只认 `messages` 字段，导致 `vmr report`/`vmr story` 对这类流量完全分不出会话/任务边界（详单页本身不受影响，因为它不依赖会话分组）。
 
-同一遍历（`internal/router`/`internal/diagnose` 先行，`internal/chatmsg` 请求侧解析后补）留下的第二个缺口在响应侧：`FinalMessage`（非流式 JSON 响应体）和 `ReassembleSSE`（SSE 流）在这次改动前只认 openai 的 `choices[]` 和 anthropic 的顶层 `content[]`，对 Responses 的 `output[]`（非流式）/`response.completed` 事件里嵌套的 `response.output[]`（流式）完全没有分支——不是"识别不出结构"降级，是两个函数压根没检查这个形状，`vmr report`/`vmr story` 对 Responses 流量的助手回复文本和 `reasoning` 摘要因此都是空的。已补上共享的 `responsesFinalMessage`（`FinalMessage` 直接调用；`ReassembleSSE` 在收到 `response.completed` 事件时调用同一个函数解析其嵌套的 `response` 对象），复用 `responsesItemMessage`/`reasoningSummaryText` 同一套 Item 分类逻辑，不重新发明。**只信任 `response.completed` 这一个终态事件，不逐个解析 delta 事件**：Responses 的分片事件字段名（`response.output_text.delta`/`response.function_call_arguments.delta`/…）还没有真实流量验证过，逐 delta 拼接猜错字段名的后果是静默拼错内容，比"暂时没有数据"更差；`response.completed` 携带完整最终对象、字段形状和非流式响应体完全一致，是唯一确定可信的来源。
+同一遍历（`internal/router`/`internal/diagnose` 先行，`internal/chatmsg` 请求侧解析后补）留下的第二个缺口在响应侧：`FinalMessage`（非流式 JSON 响应体）和 `ReassembleSSE`（SSE 流）在这次改动前只认 openai-completions 的 `choices[]` 和 anthropic-messages 的顶层 `content[]`，对 Responses 的 `output[]`（非流式）/`response.completed` 事件里嵌套的 `response.output[]`（流式）完全没有分支——不是"识别不出结构"降级，是两个函数压根没检查这个形状，`vmr report`/`vmr story` 对 Responses 流量的助手回复文本和 `reasoning` 摘要因此都是空的。已补上共享的 `responsesFinalMessage`（`FinalMessage` 直接调用；`ReassembleSSE` 在收到 `response.completed` 事件时调用同一个函数解析其嵌套的 `response` 对象），复用 `responsesItemMessage`/`reasoningSummaryText` 同一套 Item 分类逻辑，不重新发明。**只信任 `response.completed` 这一个终态事件，不逐个解析 delta 事件**：Responses 的分片事件字段名（`response.output_text.delta`/`response.function_call_arguments.delta`/…）还没有真实流量验证过，逐 delta 拼接猜错字段名的后果是静默拼错内容，比"暂时没有数据"更差；`response.completed` 携带完整最终对象、字段形状和非流式响应体完全一致，是唯一确定可信的来源。
 
 ### 3.4 `internal/story`：Journey 视图
 
@@ -254,7 +254,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | 模型/工具时间比 | 模型时间 / Agent 侧执行时间——瓶颈在推理还是在执行 |
 | 工具调用分布 | 按工具名的次数与 Args token 占比 |
 | 重复动作率 | 相同 `(工具名, 参数)` 对在同一 Journey 里重复出现的比例——是否在原地打转 |
-| 错误恢复次数 | 收到 `is_error` 标记的 tool_result 后仍发起工具调用的 Step 数（仅 Anthropic 协议有该标记，OpenAI 协议无对应标准字段，纯 OpenAI 语料下这项指标会偏低估——已知限制，不是 bug） |
+| 错误恢复次数 | 收到 `is_error` 标记的 tool_result 后仍发起工具调用的 Step 数（仅 anthropic-messages 协议有该标记，openai-completions 协议无对应标准字段，纯 openai-completions 语料下这项指标会偏低估——已知限制，不是 bug） |
 | 计划/执行比 | 无工具调用的纯文本 Step 占比 |
 | 上下文构成演化曲线 | 每个 Step 自己完整请求体的 token 数按角色（system/user/assistant/tool）拆分，逐 Step 记一个点——上下文预算的构成如何随任务推进变化，是曲线不是单值 |
 | 上下文有效利用率 | 非 system Event 里，其提取到的实体（文件路径/URL）后续被更晚的 Event 再次提到的 token 占比——低值意味着大量进入上下文的内容从未被再次引用 |
@@ -338,7 +338,7 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 - **总耗时 + 终止方式**：墙钟总时长（必须紧邻已有的"净工作时长"一起展示，并注明"不是效率指标"——design doc F10 已经点名"16 分钟 vs 7.5 分钟"这类单纯墙钟对比会误导）+ 双侧最后一个 Step 的 `Finish`，是 VMR 能看到的最接近"是否被类似 loop detection 机制打断"的代理信号；
 - **最终交付物对比**（本轮新增、经复核认为 ROI 最高的一项，两份此前的方案都未覆盖）：若任务的产出是通过一次"参数形状像文件写入"（有 path 类 + content 类字段，不锁定具体工具名）的工具调用落盘的，规则层扫描双侧最后几个 Step、按逆序取最后一次匹配，附上其内容节选（默认 6000 字符）——这是 VMR 唯一能直接看到"两边交付物本身差多少"而非"过程指标差多少"的证据，deepseek 报告里靠人工比较两份产出报告篇幅/章节数的那部分工作，本质上就是在读这份数据。
 
-在此基础上，`vmr story -compare` 新增一个可选、可降级的 LLM 解读层（`internal/story/llm.go`）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析故意只支持一种最简单的模式——手动指向一个已经在跑的 VMR 实例（不做 config.yaml 直连上游、不做健康检查/failover、不自动拉起进程），只认 OpenAI 协议，直接 `POST http://{addr}/v1/chat/completions`。喂给模型的证据包（`EvidencePack`）只含上述规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 一份逐轮"工具名+brief"索引，不塞完整 transcript；prompt 强约束"数字只能引用给定证据，文本节选的解读要明确标注是模型自己的阅读理解，且必须专门声明 VMR 看不到什么"。落盘缓存（`{outDir}/stories/.llm-cache/`，key 含 `model` 防止换模型误命中旧缓存）+ `-llm-dry-run`（只打印证据包大小估算、不调用）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json` 正常产出（三层分层原则：LLM 解读层永远可整体降级）。用两个真实 Journey（`j-openclaw-...8b175da9` 22 轮、`j-lobster-...d6b04665` 58 轮）实测验证，规则层复现的数字与 deepseek 报告手工核对出的数字一致（22 轮 vs 58 轮、缓存 18%→97% vs 82%→99%、system prompt 17.1K vs 20.5K token、双侧端点相同），最终交付物对比也正确识别出两侧 `write` 调用的真实报告内容。
+在此基础上，`vmr story -compare` 新增一个可选、可降级的 LLM 解读层（`internal/story/llm.go`）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析故意只支持一种最简单的模式——手动指向一个已经在跑的 VMR 实例（不做 config.yaml 直连上游、不做健康检查/failover、不自动拉起进程），只认 openai-completions 协议，直接 `POST http://{addr}/v1/chat/completions`。喂给模型的证据包（`EvidencePack`）只含上述规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 一份逐轮"工具名+brief"索引，不塞完整 transcript；prompt 强约束"数字只能引用给定证据，文本节选的解读要明确标注是模型自己的阅读理解，且必须专门声明 VMR 看不到什么"。落盘缓存（`{outDir}/stories/.llm-cache/`，key 含 `model` 防止换模型误命中旧缓存）+ `-llm-dry-run`（只打印证据包大小估算、不调用）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json` 正常产出（三层分层原则：LLM 解读层永远可整体降级）。用两个真实 Journey（`j-openclaw-...8b175da9` 22 轮、`j-lobster-...d6b04665` 58 轮）实测验证，规则层复现的数字与 deepseek 报告手工核对出的数字一致（22 轮 vs 58 轮、缓存 18%→97% vs 82%→99%、system prompt 17.1K vs 20.5K token、双侧端点相同），最终交付物对比也正确识别出两侧 `write` 调用的真实报告内容。
 
 **第一梯队修复（2026-07-30，两轮独立差距分析后落地）**：对同一对真实 Journey 逐条核对 `vmr story -compare` 的实际产出与那份人工/deepseek 报告后，发现并处理了三处高 ROI、不触碰任何架构边界的缺口：
 1. `sysPromptExcerptChars` 4000→20000（上一段已记）；
@@ -597,7 +597,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 | 项 | 现状 | 不动的理由 |
 | --- | --- | --- |
 | `stitch.go` 的 `stitchCompactionScore`/`stitchHeadPruneScore` 两档阈值 | 初始值，只在 2026-07-14..28 这批语料上验证过产生的分布是否合理 | `edit.go` 的 `contractLenRatio`/`forkCoverage` 已经过真实语料校准，这两个缝合阈值还没有；语料规模变大、或出现风格差异很大的新 Agent 框架时，应该重新跑一遍分布检查，而不是假定当前值继续成立 |
-| `Metrics.ErrorRecoveryCount` 在纯 OpenAI 语料上偏低估 | 只识别 Anthropic 协议的 `is_error` 内容块标记，OpenAI 协议没有对应的标准字段 | 强行在 OpenAI 响应体里猜"这是不是一次错误结果"就是 §3 反复强调的"宁可粗糙也不猜语义"的反例；等 OpenAI 一侧出现可靠的结构信号再补，不用启发式凑数 |
+| `Metrics.ErrorRecoveryCount` 在纯 openai-completions 语料上偏低估 | 只识别 anthropic-messages 协议的 `is_error` 内容块标记，openai-completions 协议没有对应的标准字段 | 强行在 openai-completions 响应体里猜"这是不是一次错误结果"就是 §3 反复强调的"宁可粗糙也不猜语义"的反例；等 openai-completions 一侧出现可靠的结构信号再补，不用启发式凑数 |
 | `report` 的独立 compaction 文本匹配（`linkCompactions`）用 200 字节子串比对，理论上存在误配对的可能 | 实测语料上未观测到一例误配对 | 提高比对长度/加校验会增加误报"没匹配上"的风险（真实摘要文本本身会被压缩改写）；现阶段的精度换取的是覆盖率，等真的观测到一例误配对再收紧 |
 | `vmr story` 对"跨 SessKey 桶、零字面重合的历史重写"没有兜底信号（§3.8） | `vmr report` 的独立文本匹配能覆盖一部分同类场景，`vmr story` 没有对应机制 | 两个产物的输入相同，但 `vmr story` 目前没有移植 `linkCompactions` 那一类文本匹配信号；这类 Journey 会渲染成一个诚实的断头而不是错误缝合，符合"宁可断开"的原则，不算 bug，只是覆盖率上限还没到 |
 

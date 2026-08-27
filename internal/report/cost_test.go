@@ -89,9 +89,9 @@ func TestSplitEndpointProviderModel(t *testing.T) {
 		endpoint                string
 		wantProvider, wantModel string
 	}{
-		{"openai:volcengine:doubao-seed-2.0-lite", "volcengine", "doubao-seed-2.0-lite"},
-		{"openai:openrouter:z-ai/glm-5.2", "openrouter", "z-ai/glm-5.2"},
-		{"openai:openrouter:vendor:sub-model", "openrouter", "vendor:sub-model"},
+		{"openai-completions:volcengine:doubao-seed-2.0-lite", "volcengine", "doubao-seed-2.0-lite"},
+		{"openai-completions:openrouter:z-ai/glm-5.2", "openrouter", "z-ai/glm-5.2"},
+		{"openai-completions:openrouter:vendor:sub-model", "openrouter", "vendor:sub-model"},
 		{"malformed", "", ""},
 	} {
 		p, m := splitEndpointProviderModel(tc.endpoint)

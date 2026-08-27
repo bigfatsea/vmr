@@ -46,8 +46,8 @@ func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T
 	lim := requestsLimit(1000)
 	lim.ModelMultipliers = map[string]float64{"heavy": 5}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:heavy", Requests: 3, Forwarded: 3},
-		{Endpoint: "openai:acct1:light", Requests: 2, Forwarded: 2},
+		{Endpoint: "openai-completions:acct1:heavy", Requests: 3, Forwarded: 3},
+		{Endpoint: "openai-completions:acct1:light", Requests: 2, Forwarded: 2},
 	}}
 	quotas := map[string][]ProviderQuotaRef{"acct1": {{Metric: "requests", Every: "1mo", Amount: 1000, Limit: &lim}}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -71,7 +71,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatche
 	lim := requestsLimit(100000)
 	lim.ModelMultipliers = map[string]float64{"deepseek-v4-pro": 5.5}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:volcengine:deepseek-v4-pro", Requests: 19, Forwarded: 19},
+		{Endpoint: "openai-completions:volcengine:deepseek-v4-pro", Requests: 19, Forwarded: 19},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("volcengine", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 104.5 {
@@ -91,7 +91,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testi
 	lim := requestsLimit(100000)
 	lim.ModelMultipliers = map[string]float64{"m": 5.5}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", Requests: 20, Forwarded: 12},
+		{Endpoint: "openai-completions:acct1:m", Requests: 20, Forwarded: 12},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 66 {
@@ -122,7 +122,7 @@ func derefOrNil(p *float64) any {
 func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", Requests: 7, Forwarded: 7, TokensKnown: 0,
+		{Endpoint: "openai-completions:acct1:m", Requests: 7, Forwarded: 7, TokensKnown: 0,
 			TokensInFreshEst: 400, TokensOutEst: 100, TokensEstimated: 7},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -142,7 +142,7 @@ func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *
 func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", Requests: 10, Forwarded: 10, TokensKnown: 6,
+		{Endpoint: "openai-completions:acct1:m", Requests: 10, Forwarded: 10, TokensKnown: 6,
 			TokensInFresh: 600, TokensOut: 150,
 			TokensInFreshEst: 200, TokensOutEst: 50, TokensEstimated: 4},
 	}}
@@ -163,7 +163,7 @@ func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
 func TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 800, TokensOut: 200},
+		{Endpoint: "openai-completions:acct1:m", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 800, TokensOut: 200},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowEstimatedPct != 0 {
@@ -189,8 +189,8 @@ func TestBuildProviderQuotaRows_TokensMetric_NoTrafficRendersRealZero(t *testing
 func TestBuildProviderQuotaRows_TokensMetric_PartialUsageStillSums(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Requests: 5, Forwarded: 5, TokensKnown: 0},
-		{Endpoint: "openai:acct1:m2", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 100, TokensOut: 20},
+		{Endpoint: "openai-completions:acct1:m1", Requests: 5, Forwarded: 5, TokensKnown: 0},
+		{Endpoint: "openai-completions:acct1:m2", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 100, TokensOut: 20},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 120 {
@@ -203,7 +203,7 @@ func TestBuildProviderQuotaRows_TokensMetric_AppliesWeightsAndMultiplier(t *test
 	lim.TokenWeights = core.TokenWeights{InFresh: 1, CacheRead: 0.1, CacheWrite: 1, Out: 4}
 	lim.ModelMultipliers = map[string]float64{"*": 2}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", TokensInFresh: 100, TokensInCached: 100, TokensOut: 10},
+		{Endpoint: "openai-completions:acct1:m1", TokensInFresh: 100, TokensInCached: 100, TokensOut: 10},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	// multiplier x2: Fresh=200, CacheRead=200, Out=20.
@@ -217,8 +217,8 @@ func TestBuildProviderQuotaRows_CostMetric_SkipsModelMultiplier(t *testing.T) {
 	lim := costLimit(100)
 	c1, c2 := 1.5, 2.5
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", CostEstimate: &c1},
-		{Endpoint: "openai:acct1:m2", CostEstimate: &c2},
+		{Endpoint: "openai-completions:acct1:m1", CostEstimate: &c1},
+		{Endpoint: "openai-completions:acct1:m2", CostEstimate: &c2},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 4.0 {
@@ -239,8 +239,8 @@ func TestBuildProviderQuotaRows_CostMetric_SkipsModelMultiplier(t *testing.T) {
 func TestBuildProviderQuotaRows_CostMetric_NoPricingAnywhereRendersNil(t *testing.T) {
 	lim := costLimit(100)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Requests: 3, CostEstimate: nil},
-		{Endpoint: "openai:acct1:m2", Requests: 2, CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:m1", Requests: 3, CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:m2", Requests: 2, CostEstimate: nil},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed != nil {
@@ -260,7 +260,7 @@ func TestBuildProviderQuotaRows_CostMetric_NoPricingAnywhereRendersNil(t *testin
 func TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero(t *testing.T) {
 	lim := costLimit(100)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:m1", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0 {
@@ -274,8 +274,8 @@ func TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero(t *t
 func TestBuildProviderQuotaRows_CostMetric_FailedSiblingDoesNotMaskUnpriced(t *testing.T) {
 	lim := costLimit(100)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:dead", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
-		{Endpoint: "openai:acct1:unpriced", Attempts: 2, Requests: 2, CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:dead", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:unpriced", Attempts: 2, Requests: 2, CostEstimate: nil},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed != nil {
@@ -303,8 +303,8 @@ func TestBuildProviderQuotaRows_CostMetric_PartiallyPricedSumsWhatItHas(t *testi
 	lim := costLimit(100)
 	c1 := 1.5
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:priced", CostEstimate: &c1},
-		{Endpoint: "openai:acct1:unpriced", CostEstimate: nil},
+		{Endpoint: "openai-completions:acct1:priced", CostEstimate: &c1},
+		{Endpoint: "openai-completions:acct1:unpriced", CostEstimate: nil},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 1.5 {
@@ -323,7 +323,7 @@ func TestBuildProviderQuotaRows_CostMetric_UnsniffedUsageCountsItsEstimate(t *te
 	lim := costLimit(100)
 	c1 := 0.024
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", CostEstimate: &c1, CostEstimateEst: c1},
+		{Endpoint: "openai-completions:acct1:m", CostEstimate: &c1, CostEstimateEst: c1},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0.024 {
@@ -343,8 +343,8 @@ func TestBuildProviderQuotaRows_CostMetric_MixedUsageIsFlagged(t *testing.T) {
 	lim := costLimit(100)
 	exact, mixed := 3.0, 1.0
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", CostEstimate: &exact},                       // fully sniffed
-		{Endpoint: "openai:acct1:m2", CostEstimate: &mixed, CostEstimateEst: 0.4}, // partly degraded
+		{Endpoint: "openai-completions:acct1:m1", CostEstimate: &exact},                       // fully sniffed
+		{Endpoint: "openai-completions:acct1:m2", CostEstimate: &mixed, CostEstimateEst: 0.4}, // partly degraded
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 4.0 {
@@ -363,7 +363,7 @@ func TestBuildProviderQuotaRows_CostMetric_FullySniffedIsNotFlagged(t *testing.T
 	lim := costLimit(100)
 	c1 := 2.0
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m", CostEstimate: &c1}, // CostEstimateEst left at its zero value
+		{Endpoint: "openai-completions:acct1:m", CostEstimate: &c1}, // CostEstimateEst left at its zero value
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowEstimatedPct != 0 {
@@ -474,8 +474,8 @@ func TestBuildProviderQuotaRows_MultiLimit_OneRowPerLimit(t *testing.T) {
 		{Limit: &monthlyUnscoped},
 	}}
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:premium-model", Requests: 3, Forwarded: 3},
-		{Endpoint: "openai:acct1:other-model", Requests: 5, Forwarded: 5},
+		{Endpoint: "openai-completions:acct1:premium-model", Requests: 3, Forwarded: 3},
+		{Endpoint: "openai-completions:acct1:other-model", Requests: 5, Forwarded: 5},
 	}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if len(rows) != 2 {
@@ -505,8 +505,8 @@ func TestBuildProviderQuotaRows_CostMetric_MixedPricedAndUnpricedIsFlagged(t *te
 	lim := costLimit(100)
 	priced := 3.0
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Requests: 60, CostEstimate: &priced},
-		{Endpoint: "openai:acct1:m2", Requests: 40}, // no rate resolved — CostEstimate nil
+		{Endpoint: "openai-completions:acct1:m1", Requests: 60, CostEstimate: &priced},
+		{Endpoint: "openai-completions:acct1:m2", Requests: 40}, // no rate resolved — CostEstimate nil
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 3.0 {
@@ -525,8 +525,8 @@ func TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged(t *testing.T)
 	lim := costLimit(100)
 	a, b := 1.0, 2.0
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Requests: 10, CostEstimate: &a},
-		{Endpoint: "openai:acct1:m2", Requests: 10, CostEstimate: &b},
+		{Endpoint: "openai-completions:acct1:m1", Requests: 10, CostEstimate: &a},
+		{Endpoint: "openai-completions:acct1:m2", Requests: 10, CostEstimate: &b},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowUnpricedPct != 0 {
@@ -540,7 +540,7 @@ func TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged(t *testing.T)
 func TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct(t *testing.T) {
 	lim := costLimit(100)
 	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai:acct1:m1", Requests: 25},
+		{Endpoint: "openai-completions:acct1:m1", Requests: 25},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed != nil {

@@ -206,8 +206,8 @@ func TestBuildSnapshot_Fallback_InjectedWhenProtocolMatches(t *testing.T) {
 
 // TestBuildSnapshot_Fallback_NotInjectedOnMismatchedProtocol pins the
 // "augments, never opens a new ingress" rule: a model with only an
-// anthropic-protocol entry gets no openai-protocol route at all, so the
-// openai-protocol fallback has nothing to attach to.
+// anthropic-messages entry gets no openai-completions route at all, so the
+// openai-completions fallback has nothing to attach to.
 func TestBuildSnapshot_Fallback_NotInjectedOnMismatchedProtocol(t *testing.T) {
 	cfg, err := config.Parse([]byte(fallbackSnapYAML))
 	if err != nil {
@@ -218,11 +218,11 @@ func TestBuildSnapshot_Fallback_NotInjectedOnMismatchedProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := snap.Models["openai-completions"]["anthropic_only"]; ok {
-		t.Fatalf("anthropic_only model must have no openai route at all")
+		t.Fatalf("anthropic_only model must have no openai-completions route at all")
 	}
 	eps := snap.Models["anthropic-messages"]["anthropic_only"].Endpoints
 	if len(eps) != 1 {
-		t.Fatalf("got %d endpoints, want 1 (own endpoint only, no fallback — fallback is openai-protocol)", len(eps))
+		t.Fatalf("got %d endpoints, want 1 (own endpoint only, no fallback — fallback is openai-completions)", len(eps))
 	}
 }
 
