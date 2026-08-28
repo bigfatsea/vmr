@@ -337,7 +337,7 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 		return fmt.Errorf("provider %q: %s: since: %w", providerName, fieldPrefix, err)
 	}
 	if !explicit {
-		since = quota.DefaultSince(now)
+		since = quota.DefaultSince(now, unit)
 	}
 	models, err := resolveModelsScope(providerName, fieldPrefix, lc.Models)
 	if err != nil {

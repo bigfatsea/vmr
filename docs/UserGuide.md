@@ -306,11 +306,12 @@ providers:
         - metric: requests
           every: 1mo             # the longest window here -> this one is the bucket
           since: 2026-08-01      # period anchor; every later period is derived
-                                  # automatically. Omit entirely to anchor at
-                                  # config load/reload time itself (no calendar
-                                  # alignment) — accepted forms: YYYY-MM-DD,
-                                  # RFC3339, or a bare hh:mm[:ss] for min/h
-                                  # Limits only
+                                  # automatically. Omit to anchor at the calendar
+                                  # boundary for the unit (midnight for min/h/d,
+                                  # Monday for w, the 1st for mo) so a hot-reload
+                                  # within a period keeps the count — accepted
+                                  # forms: YYYY-MM-DD, RFC3339, or a bare
+                                  # hh:mm[:ss] for min/h Limits only
           amount: 90000          # this window's cap, in vmr's OWN observed unit — see below
 ```
 

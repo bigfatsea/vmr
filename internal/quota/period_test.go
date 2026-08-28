@@ -191,18 +191,58 @@ func TestPeriodStartEnd_Invariant_Sweep(t *testing.T) {
 func TestDefaultSince(t *testing.T) {
 	loc := time.UTC
 	withDisplayZone(t, loc)
-	now := time.Date(2026, 8, 7, 15, 30, 12, 0, loc) // a Friday, mid-second
-	if got := DefaultSince(now); !got.Equal(now) {
-		t.Errorf("DefaultSince = %v, want now unchanged (%v)", got, now)
+	now := time.Date(2026, 8, 7, 15, 30, 12, 500, loc) // a Friday, mid-second
+	cases := []struct {
+		unit string
+		want time.Time
+	}{
+		{"min", time.Date(2026, 8, 7, 0, 0, 0, 0, loc)},
+		{"h", time.Date(2026, 8, 7, 0, 0, 0, 0, loc)},
+		{"d", time.Date(2026, 8, 7, 0, 0, 0, 0, loc)},
+		{"w", time.Date(2026, 8, 3, 0, 0, 0, 0, loc)}, // Monday of that week
+		{"mo", time.Date(2026, 8, 1, 0, 0, 0, 0, loc)},
+	}
+	for _, c := range cases {
+		if got := DefaultSince(now, c.unit); !got.Equal(c.want) {
+			t.Errorf("DefaultSince(%v, %q) = %v, want %v", now, c.unit, got, c.want)
+		}
 	}
 }
 
 func TestDefaultSince_ConvertsToDisplayZone(t *testing.T) {
 	withDisplayZone(t, time.UTC)
 	other := time.FixedZone("UTC+8", 8*3600)
-	now := time.Date(2026, 8, 7, 23, 30, 0, 0, other)
-	got := DefaultSince(now)
-	if !got.Equal(now) || got.Location() != time.UTC {
-		t.Fatalf("DefaultSince(%v) = %v, want same instant in DisplayZone (UTC)", now, got)
+	now := time.Date(2026, 8, 7, 23, 30, 0, 0, other) // 15:30 UTC — same UTC calendar day
+	got := DefaultSince(now, "h")
+	want := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) || got.Location() != time.UTC {
+		t.Fatalf("DefaultSince(%v, h) = %v, want %v in DisplayZone (UTC)", now, got, want)
+	}
+}
+
+// TestDefaultSince_SurvivesReload is the B2 regression: two config loads on
+// the same calendar day must resolve to the same anchor for every unit and
+// every N, so PeriodStart is identical and resetIfStaleLocked never fires on
+// a same-day hot reload.
+func TestDefaultSince_SurvivesReload(t *testing.T) {
+	withDisplayZone(t, time.UTC)
+	load1 := time.Date(2026, 8, 7, 2, 3, 0, 0, time.UTC)
+	load2 := time.Date(2026, 8, 7, 21, 47, 30, 0, time.UTC) // same day, ~20h later, crosses many hour boundaries
+	// charge and read at the same instant — the reload (anchor re-resolution)
+	// is the only variable, so any PeriodStart difference is a pure phase shift
+	at := time.Date(2026, 8, 7, 21, 40, 0, 0, time.UTC)
+	charge, read := at, at
+	for _, c := range []struct {
+		unit string
+		n    int
+	}{{"min", 1}, {"min", 5}, {"min", 7}, {"min", 45}, {"h", 1}, {"h", 2}, {"h", 5}, {"d", 1}, {"w", 1}, {"mo", 1}} {
+		l := core.Limit{EveryUnit: c.unit, EveryN: c.n}
+		l.Since = DefaultSince(load1, c.unit)
+		ps1 := PeriodStart(l, charge)
+		l.Since = DefaultSince(load2, c.unit)
+		ps2 := PeriodStart(l, read)
+		if !ps1.Equal(ps2) {
+			t.Errorf("every %d%s: PeriodStart moved across a same-day reload: %v -> %v", c.n, c.unit, ps1, ps2)
+		}
 	}
 }

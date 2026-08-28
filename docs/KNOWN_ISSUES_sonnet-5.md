@@ -17,9 +17,9 @@
 
 ## 0. 当前状态
 
-- **稳定性与安全性**：无数据丢失、凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。
+- **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 检查方法已全部实现互斥锁同步保护，`-race` 全绿且经端到端流式客户端断开集成测试守护。曾经的一处客户端可见数据丢失（buffered 模式上游中途断流时 `s.buf` 被丢弃、客户端收到干净空 200）已修复（见 §3 第 46 项 B1）——现在会把已收字节 flush 给客户端并主动 abort 连接，客户端 SDK 因此看到传输中断而非静默空成功。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件行数预算、函数长度预算与文档引用完整性。
-- **§1 分布**：**高危 0 项**、中危 2 项、低危 13 项，合计 **15 条**。`1.40`（工具 ID 归一化下沉 `chatmsg`）、`1.45`（Quota 孤儿 Key 修剪）与 `1.47`（Server 审计路径收敛）已全部完成落地并移入 §3；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15`、`1.27` 与 `1.46` 经重新分类后移入 §2；原 `1.23` 已并入 `1.1`。
+- **§1 分布**：**高危 0 项**、中危 2 项、低危 15 项，合计 **17 条**。`1.49`（imgprep 像素乘积 32-bit 溢出——非活跃，仅 32-bit）与 `1.50`（详单文件名 hash8 碰撞——潜在）为 2026-08 综合评审带入的低危登记（对应评审 B13/B14，B13 已在评审侧标"确定不做"）。`1.40`（工具 ID 归一化下沉 `chatmsg`）、`1.45`（Quota 孤儿 Key 修剪）与 `1.47`（Server 审计路径收敛）已全部完成落地并移入 §3；`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15`、`1.27` 与 `1.46` 经重新分类后移入 §2；原 `1.23` 已并入 `1.1`。
 - **不再有高危条目，也不再有 `[中低]` 条目**。`1.41`（曾经的第三项高危——它产出的不是多余内容而是**错误内容**，且是 `1.35`/`1.36` 的技术前置）已由 P12 修复；`1.35`/`1.36` 本身（体积纪律从未成立、详单内部约 93% 是重复拷贝）已由 P13 修复——默认 `vmr analyze` 真实语料实测从 47MB/253 份详单降到 3.0MB/0 份详单，`-render-all` 全量物化的详单体积降约 86%，详见 §3 第 38 项。`1.43`（唯一的 `[中低]` 条目——检测器覆盖率披露）已由 P14 修复，详见 §3 第 40 项。
 - **文件与函数行数守卫语义一致**：两者都是「全局默认 + 豁免表」，新写的文件/函数默认受约束，不依赖有没有人记得登记。
 
@@ -175,6 +175,19 @@
 - **触发条件**：全局词表继续增长并开始出现互相干扰/误命中（某条 marker 在另一家厂商的错误语境下
   被复用），或 sticky 重复往返在真实负载中可观测地拖慢中毒会话。
 
+### 1.49 [低，非活跃——仅 32-bit] `imgprep` 解压炸弹守卫的像素乘积在 32-bit `int` 平台可溢出
+
+- **现状**：`internal/imgprep/imgprep.go` 的 `processImage` 用 `cfg.Width*cfg.Height > maxDecodePixels`（64MP）挡解压炸弹（见 §1.17 的量纲讨论——那是另一回事）。`cfg.Width`/`cfg.Height` 是 `int`；在 32-bit 平台 `int` 是 32 位，两个都接近 `int32` 上限时乘积回绕成小值，绕过守卫。
+- **为什么非活跃**：Go 的 `image/png` 解码器把 IHDR 宽高钳在 `int32`（`w <= 0 || h <= 0` 检查前先转 `int32`），所以 `cfg.Width`/`cfg.Height` 恒 ≤ 2^31-1；在 **64-bit**（唯一 CI/目标平台，与 `disk_windows.go` 桩、"目标：macOS/Linux 单机"的口径一致）乘积 ≤ (2^31)² ≈ 4.6e18 < `int64` 上限，不可能溢出。BMP 等其他格式的 `DecodeConfig` 同理受各自解码器的尺寸校验约束。
+- **修法（触发时直接可用）**：`int64(cfg.Width) * int64(cfg.Height) > maxDecodePixels`，一行。
+- **触发条件**：32-bit 成为受支持的构建/部署目标。在此之前登记即可——2026-08 综合评审 B13 把它标为"确定不做"（当前无目标平台受影响）。
+
+### 1.50 [低，潜在] 详单文件名去重位 `md5(basename:line)[:4]`（32 bit）
+
+- **现状**：`internal/ctxgraph/reqcoord.go` 给详单文件名算一个 4 字节（32 位）hash 去重后缀。单个源文件接近 1 万条记录时，按生日界 hash8 碰撞概率约 1%；但要真正撞成同一个文件名还需同毫秒时间戳 + 同模型 + 同 outcome 三者一致，现实可忽略。
+- **恶化曲线**：与 §1.2 的"单次分析语料超过约 2–3 万条"同步线性恶化。
+- **为什么待定**：评审自身（B14）即判"登记即可，不值得现在动"。真出现碰撞时，把去重位从 hash8 提到 hash12/hash16，或改用递增序号消歧，都是局部改动。
+
 ## 2. 刻意取舍，不是缺陷
 
 > 以下条目基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已经论证过，不需要重新论证。**推翻其中任何一条是允许的，但必须先知道自己在推翻它，并给出新的理由。**
@@ -200,7 +213,7 @@
 - **协议枚举值 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等生态工具对齐**：全链路（代码、配置、文档、测试、新审计日志）一步到位用新名，路由侧零兼容负担。**唯一的兼容咽喉点**是 `audit.Record.UnmarshalJSON`（`internal/audit/audit.go`）：读到旧名 `"openai"`/`"anthropic"` 时经 `core.CanonicalProtocol` 归一化为新枚举，`Attempts[].Endpoint` 标签的 protocol 段经 `core.NormalizeEndpointLabel` 一并归一化（只改前导 token，分隔符与其余字节原样）。这层只服务分析侧（report/story/reqdetail/ctxgraph 都解码进 `audit.Record`）读历史日志；`vmr replay` **不做兼容**，只认新枚举。`ctxgraph.CacheSchemaVersion` 已 1→2 使旧事实缓存失效重建。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件不像 CLI/Server 那样可随时一起升级，它们是不可变的既存事实。**TODO(2026-10)：过渡期约一个月，届时的完整拆除清单**：① 删 `core.CanonicalProtocol` / `core.NormalizeEndpointLabel`（`internal/core/protocol.go`，常量 `Protocol*` 保留）；② 删 `Record.UnmarshalJSON`（`internal/audit/audit.go`）**并同步撤掉本次为它新增的 `vmr/internal/core` import**（`internal/audit` 在此之前不依赖 `core`）；③ 删 `internal/audit` 的 `TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames` 与 `internal/report` 的 `TestBuild_LegacyProtocolNamesNormalized` 两个测试；④ `ctxgraph.CacheSchemaVersion` **保持 2 不回退**（回退会让分析侧重新接纳 schema v1 的旧事实缓存，正是当初 bump 要挡的）；⑤ `examples/sample-audit.jsonl` 已随本轮改用新枚举名，无需处理。
 - **CLI 与 Server 版本必须匹配，任何不一致造成的问题直接报错，不做兼容性处理**：单二进制、可随时重启的项目里，`vmr status` 与 `vmr start` 理应始终是同一个版本——版本不一致说明升级流程没走完，报错（而不是降级渲染）正是在暴露这个没走完的升级。`json.RawMessage` 式的兼容层只覆盖一个滚动升级窗口，却会永久留在代码里，违反 KISS。`vmr.sh ps` 的 `|| true` 退化为标注行是它自己的容错，不受此限；错误信息会明确提示"server and client vmr versions differ"。这条原则覆盖字段*新增*与形状*变更*两种情形：曾为"旧 server 缺失新 key"保留的 `serving` 字段 `*bool` 兜底，在 `instance.config` 由 string 改为 object 后实际已不可达（新 CLI 解析旧 server 响应时在 `config` 处即硬失败，永远走不到 `serving`），已作为死代码删除（2026-08-23，`vmr status` review P4 落地）——版本必须匹配的原则不再留任何字段级例外。`models` 从 `"name [protocol]"` 拼接键 map 改为结构化数组（2026-08-26，为携带模型级 capabilities/context）同受此原则覆盖。
 - **`/status` 的 `instance.base_urls` 回显请求自身的地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status`，就广告什么地址（`127.0.0.1` stays `127.0.0.1`，`localhost` stays `localhost`，局域网 IP 原样），这正是客户端该填进自己配置的值；反代场景下 Host 头恰好就是代理对外的地址，刻意不做 `X-Forwarded-Host` 解析。该字段纯展示、不参与鉴权或路由，Host 可伪造无安全影响；同一实例被不同地址访问时 `base_urls` 不同是设计意图，不要缓存/固定它。
-- **`/status` 的 `traffic.by_status` 在流式中途截断时记为 `error`，与审计顶层 `outcome` 对同一请求记 `ok` 口径不同（刻意保留，不做对齐）**：`forwardSuccess` 里 `RecordOutcome` 把 TRUNCATED 计入 `error`——它回答的问题是"客户端是否拿到了完整响应"；而审计侧对 HTTP 200 且非取消的请求顶层记 `ok`，截断信息记录在 attempt 的 `ErrorClass` 上——它回答的问题是"HTTP 交换是否在传输层正常完成"。两个账本回答的问题不同，各自口径内部自洽；强行对齐会让其中一个失去自己的语义。两处代码（`Telemetry.RecordOutcome` 的 doc comment 与 `forwardSuccess` 调用点）已互相指向本条。若未来有人对账时发现 `/status` 错误数与 `vmr report` 错误数不一致，先查这里再报 bug。
+- **`/status` 的 `traffic.by_status` 在流式中途截断时记为 `error`，与审计顶层 `outcome` 对同一请求记 `ok` 口径不同（刻意保留，不做对齐）**：`forwardSuccess` 里 `RecordOutcome` 把 TRUNCATED 计入 `error`——它回答的问题是"客户端是否拿到了完整响应"；而审计侧对 HTTP 200 且非取消的请求顶层记 `ok`，截断信息记录在 attempt 的 `ErrorClass` 上——它回答的问题是"HTTP 交换是否在传输层正常完成"。两个账本回答的问题不同，各自口径内部自洽；强行对齐会让其中一个失去自己的语义。两处代码（`Telemetry.RecordOutcome` 的 doc comment 与 `forwardSuccess` 调用点）已互相指向本条。若未来有人对账时发现 `/status` 错误数与 `vmr report` 错误数不一致，先查这里再报 bug。**截断的客户端信号**（B1，见 §3 第 46 项）：TRUNCATED 时 `forwardSuccess` 在 `respnorm` 把可安全交付的已收字节 flush 给客户端之后 `panic(http.ErrAbortHandler)`——net/http 静默 abort 连接、不写终止 chunk，客户端 SDK 因此看到断掉的传输而非干净成功。此账本口径（`by_status=error` vs 审计 `outcome=ok`）不受影响。
 - **`/status` 端点项刻意不加端点级累计计数器（requests / ok / failed / tokens）**（2026-08-28，status.html 拓扑视图 review 复议后定案）：`consecutive_failures` 在 `/status` 里出现，是因为它是一个**当前健康状态**读数（此刻连续失败几次、在不在退避里）——属于 liveness 视图。而「每个端点累计请求多少、成功多少、失败多少、消费多少 token」是**分析半区**的职责，`internal/report` 的 `EndpointRow`（Attempts/OK/Forwarded/Failed/Availability/ErrorClasses/Requests/tokens/cost，含 by-date 与 cross-date）已经完整产出，数据源是可持久化、可按时间切片的审计日志。给 `/status` 再塞一份进程内、重启即失的实时副本：① 与分析半区重复计数（正是「一个分析数字复现一个路由数字必须差分测试锁定」那条不变式要防的负担）；② 做全（4–8 个计数器 × N 端点）等于给 `router.Telemetry` 加一张按端点的动态 map，破坏它「全固定原子、热路径零 map 零锁争用」的设计；③ 只做 `requests` 一个又与旁边的健康量表列语义打架、价值不大。结论：`FAILS` 列维持现状（健康量表），端点级累计账走 `vmr analyze` / `vmr report`。
 
 - **环境变量未定义时静默展开为空串，且不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值应在 YAML 里显式写出。
@@ -254,7 +267,7 @@
 - **聚合浮点字段在冷/热缓存两次运行间的 1 ULP 级差异不追查、不消除**（原 §1.24，2026-08-20 重新归类）：真实语料（34 文件/11374 条记录）上，`vmr-report.json` 的 `providers[].cost_estimate` 在冷启动与热缓存两次运行间出现过第 13 位有效数字的差异（`3.35415184208` vs `3.3541518420800003`），其余全部字段（含 11274 行的 `vmr-requests.json`）逐字节相同；两次**独立冷启动**之间无差异。这是浮点加法不满足结合律的教科书现象——不同累加顺序相差 1 ULP——**不是一个可以"修好"的缺陷，是浮点算术的性质**。它原先被登记在 §1（待定问题）里，是分类错误：待定意味着"以后要做点什么"，而这里唯一该做的事（差分/一致性测试用容差而不是逐字节相等）**已经是现状**（`internal/report/e2e_test.go` 用 `1e-6`、`cmd/vmr/quota_parity_test.go` 用 `1e-9*want`）。受影响字段是界面上会四舍五入显示的成本估算，`report.Pricing.Disclaimer()` 本来就声明它是估算。**唯一需要重新当作 bug 的情形**：差异大到影响判断（远超浮点精度量级），或开始出现在 `cost_estimate` 之外的字段上——那说明性质变了，不是这一条了。
 - **文件与函数行数预算线是提醒式绊线（Notification / Tripwire），非架构缺陷与必须提前预防的问题**（原 §1.5 重新归类，2026-08-23）：代码随着业务迭代增删而变长变短是自然演进。`internal/archtest` 中的文件行数与函数长度预算（全局默认 700 / 120 + 豁免表）本质上是轻量级的提醒机制（Notification），连 Warning 都算不上，绝非不可逾越的戒律。在未触线前完全无需提前焦虑、更不需要在常规 review 中逐个排查哪些文件接近上限并单列为 Issue；一旦触线，选择合适时机针对性处理即可——或按职责合理拆分重构（如 `detail.go` 拆为 `internal/reqdetail`、`config.go` 拆出 `apikeys.go`），或在逻辑内聚无需强行拆分时临时按实测 +15~20% 调高豁免让其通过。
 - **可维护性的核心在整体架构与设计复杂度，而非代码行数或文件长短**（原 §1.15 重新归类，2026-08-23）：单人可维护性取决于系统是否守住 First Principles、KISS/YAGNI，是否消除了不必要的过度设计、抽象包装和复杂分支，而非机械地度量代码行数或两半区的体量比例。代码长了简单拆成更多文件并不会降低真实理解与维护成本，只是形式上符合了数字标准，甚至可能增加概念跳转的间接性。评估系统健康度的真正重点在于「是否为了一个简单功能把问题搞复杂了、是否有更直接简单的解法」。对于探索性的新分析指标，优先用外部脚本消费稳定的 `vmr-report.json` / `journey-*.json` 数据契约进行验证，确认真实价值后再评估主库实现。
-- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：允许 LLM 判别器产出结构化 Finding，但必须强制标记 `Source: "llm_inferred"`、结构化离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` 置信度且具备直接证据锚点的项在报告中以 Finding（⚠️）呈现并在标题标注 `[AI推测]`；`MEDIUM`/`LOW` 仅降级为参考提示，不混入确定性规则事实。问法严格约束在有证据支撑的事实性问题上（如 E2 任务完成度重塑为"终步完成声明是否有验证动作支撑"的 `unverified_completion_claim`，拒绝开放式主观质量打分），守住"揭示事实与过程异常而非冒充裁判"的架构边界。
+- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：允许 LLM 判别器产出结构化 Finding，但必须强制标记 `Source: "llm_inferred"`、结构化离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` 置信度且具备直接证据锚点的项在报告中以 Finding（⚠️）呈现并在标题标注 `[AI推测]`；`MEDIUM`/`LOW` 仅降级为参考提示，不混入确定性规则事实。**锚点在运行期强制校验**（2026-08，B3，见 §3 第 46 项）：`ComputeLLMFindings` 收集完全部 detector 输出后，逐条按 `strings.Contains(真实 transcript, EvidenceAnchor)` 校验，锚点非逐字子串即丢弃——此前这个机械校验只存在于 `_eval/calibrate_p1b.go`，模型幻觉一个不存在的锚点就能晋升为 `HIGH` Finding 并被当既定事实喂给下一次单-Journey 解读。问法严格约束在有证据支撑的事实性问题上（如 E2 任务完成度重塑为"终步完成声明是否有验证动作支撑"的 `unverified_completion_claim`，拒绝开放式主观质量打分），守住"揭示事实与过程异常而非冒充裁判"的架构边界。
 
 ---
 
@@ -416,6 +429,17 @@
 44. **Server 审计日志路径单一真源收敛**：`internal/audit/audit.go` 导出 `ActiveLogPath`，`internal/server/admin.go` 的 `auditBlock` 统一复用，消除了命名知识与硬编码格式字符串的重复。曾登记为 §1.47。
 45. **错误分类词表补齐三类误判（新增 `ErrQuirk` 类 + `authHint` + 词条补充）**：vendor 专属协议约束拒绝（DeepSeek 思考模式 reasoning_content 回传、Google thought_signature）归 `ErrQuirk`（切换 + 零冷却，同 ErrContent/ErrContextLimit；不复用 ErrContextLimit 为保审计标签诚实性）；OAuth 标准错误码（`invalid_grant`/`invalid_token`/`token has expired`）归 `ErrAuth`；bai 的 "Input token exceed the limit"（可与 `quota_limit_reached` 同现）归 `ErrContextLimit`。此前三者均落入兜底 `ErrClient`（永不 failover）而中断重试。全量 quirk 模块方向延后，登记为 §1.48。
 
+46. **2026-08 综合评审 B1–B9 修复**（`docs/VMR_综合评审_2026-08_sonnet-5.md` §5.1，B10–B14 未做，逐项见该文档"9. 执行情况记录"）：
+    - **B1 · buffered 模式截断的客户端可见数据丢失**（`internal/respnorm/respnorm.go`、`internal/router/router.go`）：`Read` 在非 EOF 上游错误分支只置 `srcErr`，`s.buf`/`s.pending`（已收字节）从不 flush——所有非 SSE 200 与 MiniMax thinking 流走 buffered 模式，客户端已收到 `200 OK` + headers，于是看到一个格式良好的空 200。修法：新增 `flushRawOnError()`，错误分支先把**可安全交付**的已收字节（带模型名重写）flush 进 `s.out` 再置错；`forwardSuccess` 在 `status == "TRUNCATED"`（上游中途死、非客户端取消）时于全部计费/审计/日志记账之后 `panic(http.ErrAbortHandler)`——net/http 静默 abort 连接，客户端 SDK 看到断掉的传输而非静默空成功。**"可安全交付"的边界**（评审后按外部反馈收紧）：非 SSE 响应 flush `s.buf`（部分 JSON 对象——直连也是这个结果）；SSE 流只在 `modePassthrough` 时 flush 尾部，`modeUndecided`/`modeBuffered` 一律不 flush——SSE 进 `modeBuffered` 只可能是 MiniMax thinking 形态被扣住待剥离，`modeUndecided` 尾部可能是同形态的不完整事件，raw flush 会把未闭合的 `<think>` 泄漏给客户端（正是 buffered 模式要防的反馈循环），审计记 `truncated_withheld`。回归测试 `TestRespStream_BufferedTruncationFlushesReceivedBytes`、`TestRespStream_ThinkBufferedTruncationWithholds`、`TestBufferedTruncationAbortsAndFlushes`；`hang_test.go` 的 `TestNonSSEBodyStallAborts` 更新为接受 abort。
+    - **B2 · quota 缺省 `since` 每次加载/热重载清零计数**（`internal/quota/period.go`、`internal/config/quota.go`）：`DefaultSince` 曾直接返回 `now`；`LimitKey` 不含 `since` 故桶 key 稳定，但 `PeriodStart` 每次加载重算到加载时刻，`resetIfStaleLocked` 就地清零。修法：`DefaultSince(now, unit)` 把缺省锚点对齐到固定日历边界——min/h/d→当日午夜、w→周一 0 点、mo→月初。锚点定在午夜（不是"整点"）使周期栅格锁死到"日"：**同一自然日内的任意热重载都解析出同一锚点、对任意 `every` N 都 `PeriodStart` 恒等、计数存活**。残余收窄为：`every: Nh` 且 N∤24（如 `5h`）或 `every: Nmin` 且 N∤1440（如 `7min`），**且**热重载/重启跨过自然日——此时栅格可能相移一次、至多一次重置。显式写 `since` 可钉死。回归测试 `TestDefaultSince`、`TestDefaultSince_SurvivesReload`（同日跨 20h、跨多个整点重载，min/h/d/w/mo × 多种 N 全部不重置）、`TestRegistry_DefaultSinceReloadDoesNotReset`。Quota 设计文档"已评估并否决的改进提案"表里那条"未配 `since` 时的热重载锚点漂移问题"原判"非问题（撤回）"只论证了相位对齐、从未提清零后果，现已改为"已修复（B2）"。
+    - **B3 · LLM 推断 Finding 的 `EvidenceAnchor` 无运行期校验**（`internal/story/llm_findings.go`）：6 个 `detectLLM*` 只查 anchor 非空，"anchor 必须是真实 transcript 逐字子串"这个机械校验只存在于 `_eval/calibrate_p1b.go`。模型幻觉出一个不存在的 anchor 就会晋升为 `HIGH` + `[AI推测]` 的 Finding、并被当既定事实喂给下一次单-Journey 解读。修法：把 `_eval` 的 `transcriptPool` 逻辑搬进包内（`searchableTranscript`），`ComputeLLMFindings` 收集完全部 detector 输出后按 `strings.Contains(pool, anchor)` 逐条校验，不过关即丢弃（保持 fail-open）。回归测试 `TestComputeLLMFindings_AnchorVerification`（真锚点存活/假锚点丢弃）、`TestSearchableTranscript_CoversReconstructedAndRaw`。
+    - **B4 · `report` Markdown 渲染器不转义用户来源标题**（`internal/report/render_doc.go`、`section_sessions.go`、`requests.go`、`metrics.go`）：`story` 侧 P12.2/P12.3 修过的同类 bug，`report` 侧从未加。修法：`mdTable.row` 集中对每个 cell 走 `reqdetail.EscapeCell`（`|`/换行）；会话标题、任务标题引用块、context-growth Finding 里的标题额外走 `reqdetail.EscapeHTML`（未闭合 `<!--` 吞并）。回归测试 `TestMarkdownEscapesUserDerivedTitles`。至此两个分析命令的全部表格/引用块标题注入点统一处理完毕（承 §3 第 37 项）。
+    - **B5 · 热重载 `reload()` 闭包未串行化**（`cmd/vmr/cmd_start.go`）：fsnotify 的 `time.AfterFunc` goroutine 与 SIGHUP goroutine 可并发调 `rt.Install`，`installLimiter` 的非原子 load→check→store 可短暂翻倍有效并发。修法：一个 `sync.Mutex` 包 `reload` 闭包体。
+    - **B6 · `MetricCost` charge 把 token 计的 `estimated` 传进 `Charge`**（`internal/router/quota.go`）：`bucket.Estimated` 是 requests/tokens 账户专用累加器，cost 账户的估算信号是金额、经 `AddEstimatedCost` 单独记。修法：cost 分支给 `Charge` 传 `0`。回归测试更新 `TestChargeCost_DegradedEstimate_TracksEstimatedCost`。
+    - **B7 · `Install` 先 `Quota.Prune` 再 `snap.Swap`**（`internal/router/snapshot.go`）：两者之间持旧 snapshot 的 in-flight 请求可 `Charge` 进刚 prune 的桶。修法：调换顺序——先 Swap（新请求即用新 key），再 Prune（清掉旧 key），straggler 由下次热重载的 Prune 自愈。
+    - **B8 · quota 读路径重置桶但不置 `dirty`**（`internal/quota/quota.go`）：`Used()`/`EstimatedCostFor()` 经 `resetIfStaleLocked` 变更内存桶却从不 set `r.dirty`，只被读路径观测到的周期滚动不会被 flusher 持久化。修法：`resetIfStaleLocked` 返回是否重置，两个读方法据此置 dirty。回归测试 `TestRegistry_UsedResetMarksDirty`。
+    - **B9 · 每个 stitch 边界无条件开新 Task**（`internal/story/journey.go`）：`newTask := (ci==0 && i==0) || atStitchBoundary` 与 `taskseg.IsNewTask`（新 trace id 或真实新指令）矛盾——一次任务中途为回收上下文的压缩会被渲染成全新 Task，虚增 `len(j.Tasks)`、`plan_exec_ratio` 分母、per-Task 检测器、`-corpus` 分组。修法：stitch 边界只在 `newInstructionTitleAtStitch` 找到真实新指令时才开新 Task，否则沿用 `curTask`——该 Step 仍带 `StitchEdge`/`Compaction`，脊柱/Markdown 渲染器照常渲染"🧵 Stitched from an earlier fragment"+ 压缩摘要，无需新增 i18n 串。回归测试 `TestStitchedJourney_EndToEnd`（更新为断言单 Task）、`TestStitchedJourney_NewInstructionOpensTask`（新增）。
+
 ---
 
 ## 4. ROI 评估总表（针对 §1 的待定问题）
@@ -435,7 +459,7 @@
 
 ### 4.1 总表
 
-> **覆盖范围声明**：本表覆盖 §1 全部待评估条目（共 15 条，无遗漏）。`1.22` 已给出量化"不做"结论（本表一行）；`1.18` 正常列出；`1.29`（暂不做）已给出明确重估触发条件；原 `1.23` 已并入 `1.1`；原 `1.46`（版本错配）经评审确认"CLI 与 Server 版本必须匹配、直接报错"后移入 §2.2，不再列入本表；`1.40`、`1.45`、`1.47`、`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15` 与 `1.27` 重新归类为 §2 的工程惯例与架构哲学，均已移出本表。
+> **覆盖范围声明**：本表覆盖 §1 全部待评估条目（共 17 条，无遗漏）。`1.22`/`1.49`/`1.50` 已给出量化或明确前提的"不做"结论（各占本表一行）；`1.18` 正常列出；`1.29`（暂不做）已给出明确重估触发条件；原 `1.23` 已并入 `1.1`；原 `1.46`（版本错配）经评审确认"CLI 与 Server 版本必须匹配、直接报错"后移入 §2.2，不再列入本表；`1.40`、`1.45`、`1.47`、`1.21`/`1.28`/`1.31`（P7）、`1.19`（P8）、`1.30`/`1.33`/`1.34`（P9）、`1.39`（P11）、`1.41`/`1.37`（P12）、`1.35`/`1.36`（P13）、`1.38`/`1.42`/`1.43`（P14/P15）已修复并移入 §3；原 `1.24`、`1.5`、`1.15` 与 `1.27` 重新归类为 §2 的工程惯例与架构哲学，均已移出本表。
 
 | # | 问题 | 成本 | 风险 | 价值 | ROI | 判据 / 何时重估 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -453,6 +477,8 @@
 | 1.14 | 滑动时间窗限流模型 | 中高 | 低 | 低 | **低** | 当前日历对齐的近似对目标场景（月度/日度 token plan）够用。属产品路线 |
 | 1.17 | `imgprep` 解码闸门的阈值量纲 | 中 | 中低 | 未证 | **低** | 闸门已存在（`maxDecodePixels`，防炸弹），缺的只是一道按内存预算设的更低阈值。**前置条件未满足**：无任何实测显示该峰值造成过问题，而方案自带「用账单换内存」的取舍，不能替用户默认决定。零风险的一半（文档记账）已落地。**真实视觉负载观测到内存突刺时重估** |
 | 1.48 | 错误分类词表的长期形态：端点级 quirk 统一模块（含 sticky 降级） | 中 | 中 | 低→中 | **低** | 已知三类误判已被最小修复覆盖（§3 第 45 条），现在上机制是替一个不会自己举手的问题排队。触发条件：全局词表增长到出现互相干扰/误命中，或 sticky 重复往返在真实负载中可观测地拖慢中毒会话 |
+| 1.49 | imgprep 像素乘积在 32-bit `int` 溢出 | 极低（一行 `int64`） | 0 | 0（当前） | **不做** | 64-bit（唯一目标平台）不受影响，Go `image/png` 已把宽高钳在 `int32`。触发条件：32-bit 成为构建/部署目标。2026-08 评审 B13 已标"确定不做" |
+| 1.50 | 详单文件名 hash8 碰撞 | 低（提到 hash12/16 或改序号） | 低 | 极低 | **不做** | 需同文件近万条记录 + 同毫秒 + 同模型 + 同 outcome 才撞成同名，现实可忽略；随 §1.2 的语料上限线性恶化。评审 B14 自判"登记即可" |
 
 ### 4.2 分档结论
 
@@ -463,8 +489,9 @@
   兜底的条目——与"收益未经测量"的低 ROI 组本质不同；`1.18` 是校准投入而非代码工作、且当前无阻塞
   性误报信号，等黄金样本标注窗口再推进。原 `1.16`（并发竞态）、
   `1.4`（流式断开审计语义）与 `1.12`（图片缓存容量上限）均已完成修复闭环。
-- **明确不做（1 条）**：`1.22`——它自己提出的前置问题（Responses API 占比）已经用真实语料回答了，
-  答案是 0%。**一条给出了量化触发条件的"不做"，比一条无限期的"待定"更有价值**：前者有明确的
+- **明确不做（3 条）**：`1.22`——它自己提出的前置问题（Responses API 占比）已经用真实语料回答了，
+  答案是 0%；`1.49`（32-bit 像素乘积溢出）——无目标平台受影响；`1.50`（文件名 hash8 碰撞）——现实概率可忽略。
+  **一条给出了量化触发条件或明确前提的"不做"，比一条无限期的"待定"更有价值**：前者有明确的
   重开条件，后者只会被反复重新讨论。
 - **低 ROI（8 条，等触发条件）**：其中 `1.2`/`1.3`/`1.7`/`1.10`/`1.17` 的共同点是**收益未经测量**——它们不是"不值得做"，
   是"还不知道值不值得"，而先做优化再测量正是这个项目一贯拒绝的顺序。`1.6`/`1.8` 则是真实反馈或代码演进时自然触发的事。

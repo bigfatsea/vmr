@@ -1267,3 +1267,100 @@ func TestStream_ConcurrentReadAndInspection(t *testing.T) {
 		t.Errorf("Usage = %+v, ok = %v", u, ok)
 	}
 }
+
+// TestRespStream_BufferedTruncationFlushesReceivedBytes locks in B1: a
+// buffered-mode response (non-SSE 200) whose upstream connection dies
+// mid-body must hand the client the bytes it did receive — with the model
+// field rewritten — before surfacing the error, instead of dropping s.buf
+// and leaving the client with a clean empty 200.
+func TestRespStream_BufferedTruncationFlushesReceivedBytes(t *testing.T) {
+	t.Parallel()
+	partial := `{"id":"x","model":"upstream-real-model","choices":[{"message":{"content":"half a sen`
+	sr := &truncReader{data: []byte(partial), err: io.ErrUnexpectedEOF}
+	rs := newStream(sr, "agent", "upstream-real-model", false, "openai-completions", false)
+
+	var got bytes.Buffer
+	tmp := make([]byte, 4096)
+	var readErr error
+	for {
+		n, err := rs.Read(tmp)
+		got.Write(tmp[:n])
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+	if readErr != io.ErrUnexpectedEOF {
+		t.Fatalf("read error = %v, want io.ErrUnexpectedEOF surfaced after the flush", readErr)
+	}
+	if !strings.Contains(got.String(), "half a sen") {
+		t.Errorf("received bytes were dropped: %q", got.String())
+	}
+	if !strings.Contains(got.String(), `"model":"agent"`) {
+		t.Errorf("model field not rewritten on the flushed partial body: %q", got.String())
+	}
+	applied := rs.Applied()
+	if !containsStr(applied, "truncated_flush") {
+		t.Errorf("Applied() = %v, want it to contain truncated_flush", applied)
+	}
+}
+
+// TestRespStream_ThinkBufferedTruncationWithholds locks in the B1 follow-up:
+// a MiniMax thinking SSE stream that dies mid-<think> must NOT flush the
+// unclosed reasoning block to the client — buffered mode held it back to
+// strip it, and leaking a dangling <think> is the exact feedback-loop hazard
+// that buffering exists to prevent. The client gets nothing (+ the caller's
+// connection abort), and the error still surfaces.
+func TestRespStream_ThinkBufferedTruncationWithholds(t *testing.T) {
+	t.Parallel()
+	ev := `data: {"choices":[{"delta":{"content":"<think>let me reason about this half-w`
+	sr := &truncReader{data: []byte(ev), err: io.ErrUnexpectedEOF}
+	rs := newStream(sr, "agent", "", true, "openai-completions", false)
+
+	var got bytes.Buffer
+	tmp := make([]byte, 4096)
+	var readErr error
+	for {
+		n, err := rs.Read(tmp)
+		got.Write(tmp[:n])
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+	if readErr != io.ErrUnexpectedEOF {
+		t.Fatalf("read error = %v, want io.ErrUnexpectedEOF", readErr)
+	}
+	if got.Len() != 0 {
+		t.Errorf("client received withheld thinking content on truncation: %q", got.String())
+	}
+	if strings.Contains(strings.Join(rs.Applied(), ","), "truncated_flush") {
+		t.Errorf("Applied() = %v, must not report truncated_flush for a withheld think buffer", rs.Applied())
+	}
+	if !containsStr(rs.Applied(), "truncated_withheld") {
+		t.Errorf("Applied() = %v, want truncated_withheld", rs.Applied())
+	}
+}
+
+type truncReader struct {
+	data []byte
+	err  error
+}
+
+func (r *truncReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func containsStr(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}

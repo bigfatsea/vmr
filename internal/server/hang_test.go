@@ -76,12 +76,74 @@ models:
 	client := &http.Client{Timeout: 10 * time.Second}
 	start := time.Now()
 	resp, err := client.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(simpleReq))
-	if err != nil {
-		t.Fatalf("request itself failed: %v", err)
+	// After B1, a body that stalls mid-transfer is treated as a truncated
+	// response: respnorm flushes the bytes it has and the handler aborts the
+	// connection (http.ErrAbortHandler) so the client SDK sees a broken
+	// transfer rather than a clean partial 200. Either outcome is fine here —
+	// a connection error, or a 200 whose body ends early — as long as the
+	// request doesn't hang past ~stream_idle.
+	if err == nil {
+		io.Copy(io.Discard, resp.Body) // read to the (aborted) end; must not hang
+		resp.Body.Close()
 	}
-	io.Copy(io.Discard, resp.Body) // read to the (aborted) end; must not hang
-	resp.Body.Close()
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("stalled non-SSE body held the request for %s; want abort within ~stream_idle", elapsed)
+	}
+}
+
+// TestBufferedTruncationAbortsAndFlushes locks in B1 end-to-end: when a
+// buffered (non-SSE) 200's upstream connection dies mid-body, vmr must hand
+// the client the bytes it received and then abort the connection — the
+// client sees a broken transfer, not a clean empty/partial 200 — while the
+// audit trail records the attempt as truncated.
+func TestBufferedTruncationAbortsAndFlushes(t *testing.T) {
+	partial := `{"id":"x","model":"model-one","choices":[{"message":{"content":"half a sen`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		fmt.Fprint(w, partial)
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler) // kill the connection without a terminating chunk
+	}))
+	defer up.Close()
+
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+`, up.URL)
+	ts, al := newAuditedServer(t, yaml)
+
+	resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(simpleReq))
+	if err == nil {
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		// The flushed partial bytes must reach the client (not dropped, and
+		// with the model field rewritten to the virtual name)...
+		if !strings.Contains(string(body), "half a sen") {
+			t.Fatalf("flushed partial bytes missing: status=%d body=%q", resp.StatusCode, body)
+		}
+		if strings.Contains(string(body), "model-one") || !strings.Contains(string(body), `"model":"vm"`) {
+			t.Errorf("model field not rewritten on the flushed partial body: %q", body)
+		}
+		// ...and the truncation must be visible: an aborted chunked stream
+		// has no terminating chunk, so ReadAll reports an unexpected EOF
+		// rather than a clean end.
+		if readErr == nil {
+			t.Errorf("client read the aborted response to a clean EOF — truncation was invisible (B1)")
+		}
+	}
+
+	recs := readRecords(t, al)
+	if len(recs) == 0 {
+		t.Fatal("no audit record written")
+	}
+	r := recs[len(recs)-1]
+	if len(r.Attempts) == 0 || r.Attempts[len(r.Attempts)-1].Error == "" {
+		t.Errorf("expected the last attempt to carry a truncation error, got %+v", r.Attempts)
 	}
 }

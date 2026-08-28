@@ -837,7 +837,7 @@ providers:
 |---|---|---|
 | `metric` | `requests` \| `tokens` \| `cost` | 必填 |
 | `every` | `N{min,h,d,w,mo}`，覆盖"数分钟/数小时/数日/数周/数月" | 必填 |
-| `since` | 周期锚点时间，后续周期自动推算。三种写法：`YYYY-MM-DD`（当日 0 点）、RFC3339 完整时间戳（精确到秒+时区）、纯时间 `hh:mm[:ss]`（今天该时刻，**仅 `every: min/h` 合法**，`d/w/mo` 上用会在加载期报错——省得为了表达"每小时的第几分钟"硬凑一个无意义的日期） | 不写＝直接取配置加载/热重载那一刻的当前时间，不做任何日历对齐——不写本身就是"不关心精确对齐到哪一刻"的声明，真在意就显式写 `since` |
+| `since` | 周期锚点时间，后续周期自动推算。三种写法：`YYYY-MM-DD`（当日 0 点）、RFC3339 完整时间戳（精确到秒+时区）、纯时间 `hh:mm[:ss]`（今天该时刻，**仅 `every: min/h` 合法**，`d/w/mo` 上用会在加载期报错——省得为了表达"每小时的第几分钟"硬凑一个无意义的日期） | 不写＝取配置加载/热重载那一刻，**对齐到固定日历边界**（min/h/d→当日午夜、w→周一 0 点、mo→月初）。这个对齐是必需的：`LimitKey` 不含 `since`，桶 key 稳定，但缺省锚点若取原始 `now`，每次热重载都会把锚点挪到重载时刻、`resetIfStaleLocked` 随之清零账号累计消耗（B2）。锚点定在午夜使周期栅格锁死到"日"——**同一自然日内的任意热重载对任意 `every` N 都解析出同一锚点、计数存活**。残余收窄为：`every: Nh` 且 N∤24（如 `5h`）或 `every: Nmin` 且 N∤1440（如 `7min`），且热重载/重启跨过自然日——此时至多一次相移重置。需要精确相位就显式写 `since` |
 | `rolling` | 滚动窗口（分桶近似）；否则固定对齐窗口。**rolling 永不当桶**（§5.2）。仍是加载期"计划在后续批次支持"报错——见 §14.3「实际交付 vs 原始终态」，未随 P3 交付 | `false` |
 | `amount` | 该窗口上限（vmr 可观测口径；`cost` 档为 `pricing.currency` 的币种） | 必填，>0 |
 | `models` | 该 Limit 的 Scope，已随 P3 交付。**不写**＝所有模型共享一个池；写 **`["*"]`**＝规则适用全部模型，但每个模型各自独立开一个 bucket；写**具体列表**＝只有列出的模型适用，且同样各自独立。写不写这个字段，同时决定了"哪些模型适用"和"是否独立计数"——不需要额外的 `mode:` 字段。见 §12.1「Scope 的判定」一行 | 全部（共享） |
@@ -933,6 +933,9 @@ type Registry struct {                        // 形状对齐 health.Registry：
 **职责切分**：Registry 只存"消耗了多少"这个**事实**；`amount`/`token_weights` 这套**政策**
 始终从 Snapshot 现读，于是热重载改它们立刻生效、且不重置计数，无需任何迁移逻辑——
 这条对 `model_multipliers`/费率表不成立（见上），是上面那条修正的直接原因，不是这里的例外。
+"不重置计数"对**缺省 `since`** 的 Limit 同样成立，但依赖 `DefaultSince` 把缺省锚点对齐到
+日历边界（见上方 `since` 行、及"已评估并否决的改进提案"表的 B2 条目）——早先直接取 `now` 会让每次热重载
+经 `resetIfStaleLocked` 清零，那是一个真 bug，不是相位选择。
 
 > 存原始分量 token 而不是存折算后的数值，这条选择对 `token_weights`（读取时套用）与
 > `metric: cost`（`Fresh`/`CacheRead`/`CacheWrite`/`Out` 与计费时算好的 `Cost` 一起存，
@@ -1031,7 +1034,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Sticky | quota 重排先跑，sticky `moveToFront` 后跑并覆盖 | 会话黏性优先，明确不为省钱打断 cache |
 | Health | 额度耗尽**不**触发冷却；真正的耗尽信号是上游 402/429，由既有状态机处理 | 两套机制各管各的，不交叉 |
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
-| 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活；额度值现读现用，改配置立刻生效 |
+| 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活（缺省 `since` 亦然，依赖 `DefaultSince` 的日历对齐——见"已评估并否决的改进提案"表 B2）；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
 | `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `tokenutil.Estimate` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`docs/KNOWN_ISSUES_sonnet-5.md` 已有记录 |
@@ -1130,7 +1133,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | **新增 `mode: shared \| per_model` 枚举字段** | **否决** | 需求是三态（共享、全模型独立、限定模型独立），由 `models:` 字段（不写 / `["*"]` / `[name,...]`）单一字段直接表达更自然。引入独立的 `mode` 会产生 `mode: shared` 配合具体 `models` 列表等矛盾组合，增加不必要的配置面与校验复杂度 |
 | **支持 5 种显式时间格式（含空格分隔、纯时间、分钟级完整时间）** | **部分采纳** | 完整日期时间由 RFC3339 覆盖；纯日期由 `YYYY-MM-DD` 覆盖；空格分隔仅是排版偏好，无实质收益。**采纳纯时间 `hh:mm[:ss]` 格式**（仅限 `min`/`h` 周期），消除了短窗 RPM 速率闸为了对齐分钟而强凑假日期的啰嗦；严禁在 `d`/`w`/`mo` 上使用纯时间以防语义模糊 |
 | **Scope 模型名强制校验"是否在当前 Provider 路由表中"** | **否决（撤回）** | 路由表只代表"当前恰好路由了哪些模型"，而 Provider 实际能提供的模型是更宽的集合。强制校验会把预配置或临时摘除路由的模型误判为 typo；且系统没有全局权威的模型支持清单作为基准 |
-| **未配 `since` 时的热重载锚点漂移问题** | **非问题（撤回）** | 不显式配 `since` 本身就是声明"不在乎严格的相位对齐"。直接以配置加载那一刻 `now.In(DisplayZone)` 作为锚点，语义自洽且去除了五种时间单位的日历对齐分支复杂度 |
+| **未配 `since` 时的热重载锚点漂移问题**（B2） | **已修复（2026-08）** | 最初裁为"非问题（撤回）"，理由只覆盖了**相位对齐**——"不显式配 `since` 就是不在乎精确相位"。但真正的后果不是相位漂移，是数据丢失：`LimitKey` 不含 `since`，桶 key 稳定；缺省锚点取原始 `now` 时，每次 `config.Load`（启动 + 每次热重载）都把锚点挪到加载时刻，`PeriodStart` 随之改变，`resetIfStaleLocked` 就地清零该账号的累计消耗。这是一个真 bug，不是相位选择。修法：`DefaultSince(now, unit)` 对齐到固定日历边界（min/h/d→当日午夜、w→周一 0 点、mo→月初），**同一自然日内的任意热重载对任意 `every` N 都解析出同一锚点、计数存活**。此前"去除五种时间单位的日历对齐分支复杂度"这个理由被推翻——那点复杂度（`period.go` 已有全部日历原语，约 10 行的一个 switch）换的是子系统核心状态不被静默摧毁。残余收窄为：`every: Nh` 且 N∤24 或 `every: Nmin` 且 N∤1440，**且**热重载/重启跨过自然日——此时至多一次相移重置；显式写 `since` 可钉死。回归测试见 `internal/quota/period_test.go` / `quota_test.go`（`TestDefaultSince_SurvivesReload` / `TestRegistry_DefaultSinceReloadDoesNotReset`）。 |
 | **多 Limit 扁平打分 `Score = min(Score1, ...)`（不区分桶/闸）** | **否决** | 计费周期的未用额度是真实预付费（use-it-or-lose-it 成立，欠用 `raw > 1` 应主动加分争取流量）；而短窗速率闸（如 1min RPM）是防超频阀门，用不满无任何经济收益，若允许闸提升分数会导致短窗恰好空闲的账号虚高优先级。采纳桶/闸模型：桶可提升，闸 `min(1, raw)` 硬封顶 |
 
 其余反复出现过的路线选择，理据已在 §12.1 的"放弃的备选"列：SWRR、预先定义 `Source` 接口、

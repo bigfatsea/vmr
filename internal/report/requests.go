@@ -31,6 +31,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // RequestsIndex is vmr-requests.json's whole shape: one row per request.
@@ -514,7 +515,9 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessi
 			title = sessionTitle[g.id]
 		}
 		if title != "" {
-			w("> %s\n\n", title)
+			// Free-form user text in a blockquote: HTML-escape so an
+			// unclosed "<!--" can't swallow the rest of the file (B4).
+			w("> %s\n\n", reqdetail.EscapeHTML(title))
 		}
 		w("%s", t.TurnTableHeader)
 		for _, r := range trows {

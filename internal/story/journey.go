@@ -406,7 +406,15 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			var stepPrevManifest *ctxgraph.Manifest
 			var revisesHash *ctxgraph.Hash
 			deltaStart := 0
-			newTask := (ci == 0 && i == 0) || atStitchBoundary
+			// A stitch boundary is NOT automatically a new Task — only a
+			// genuinely new instruction bridged across it is (decided in the
+			// atStitchBoundary arm below). A mid-task compaction stays in
+			// curTask; its Step still carries StitchEdge/Compaction, which
+			// the renderers surface inline regardless of task position. This
+			// matches taskseg.IsNewTask's "new instruction or new trace"
+			// rule instead of inflating len(j.Tasks) with every compaction
+			// (B9).
+			newTask := ci == 0 && i == 0
 			// Default: true only for the Journey's very first step (every
 			// Journey opens on a real instruction, by construction). Both
 			// branches below override this for their
@@ -426,6 +434,9 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				prevManifest = predLineage.Manifests[len(predLineage.Manifests)-1]
 				if predRec := recs[ctxgraph.Loc{Path: prevManifest.Path, Line: prevManifest.Line}]; predRec != nil {
 					compaction = buildCompactionInfo(predRec, prevManifest, m, msgs)
+				}
+				if newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen) != "" {
+					newTask = true // a real new instruction bridged the stitch — see B9 note above
 				}
 				// deltaStart stays 0: Classify's structural LCP has no
 				// meaning across a stitch boundary, so the whole manifest

@@ -563,6 +563,18 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// Telemetry.RecordOutcome's doc comment.
 	rt.Telemetry.RecordOutcome(copyErr == nil && status != "CANCELED", status == "CANCELED")
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
+	if status == "TRUNCATED" {
+		// The upstream body died mid-stream after we already committed a
+		// 200 + headers. respnorm flushed whatever it was safe to deliver
+		// into the client response above (see flushRawOnError); abort the
+		// connection now (net/http recovers ErrAbortHandler silently,
+		// dropping the terminating chunk) so the client SDK sees a broken
+		// transfer instead of a clean empty/partial success. All
+		// bookkeeping above — quota charge, audit norm/usage, telemetry,
+		// the log line — has already run; server.chatHandler's deferred
+		// audit write still fires during the unwind.
+		panic(http.ErrAbortHandler)
+	}
 	return true, nil, true
 }
 

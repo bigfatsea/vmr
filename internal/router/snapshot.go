@@ -281,10 +281,17 @@ func (rt *Router) Install(s *Snapshot) {
 		}
 	}
 	rt.installLimiter(s.Cfg.MaxConcurrency)
+	old := rt.snap.Swap(s)
+	// Prune AFTER the swap, not before: once the new snapshot is live every
+	// new Charge keys buckets by the new config, so Prune removes exactly
+	// the stale keys. Pruning first left a window where an in-flight request
+	// on the old snapshot could rebuild a bucket that was just pruned; a
+	// straggler that still does so after the swap is cleaned by the next
+	// reload's Prune (B7).
 	if rt.Quota != nil {
 		rt.Quota.Prune(s.ProviderLimits())
 	}
-	if old := rt.snap.Swap(s); old != nil {
+	if old != nil {
 		// Release the previous pools' idle connections now instead of
 		// waiting for GC. In-flight requests still holding the old
 		// snapshot are unaffected — their connections are active.

@@ -10,6 +10,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // ---- §6 会话与任务 ----
@@ -97,7 +98,10 @@ func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
 		// anyone following a link.
 		id = s.Alias + " (" + s.ID + ")"
 	}
-	tbl.row(id, truncateTitle(s.Title, 28), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
+	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form
+	// user/model text, so an unclosed "<!--" would otherwise swallow the
+	// rest of the file in an HTML-aware renderer (B4).
+	tbl.row(id, reqdetail.EscapeHTML(truncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
 }

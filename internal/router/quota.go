@@ -119,7 +119,12 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			rate := pricing.EffectiveRate(ep.PricingRate)
 			d := raw
 			d.Cost = componentCost(d, rate)
-			reg.Charge(ep.Provider, limitKey, periodStart, d, estimated)
+			// estimated is token-denominated; on a cost Limit the estimate
+			// signal is money and is tracked via AddEstimatedCost below.
+			// Passing the token figure into Charge's `estimated` param would
+			// pollute bucket.Estimated (a requests/tokens-only accumulator)
+			// with a meaningless number (B6).
+			reg.Charge(ep.Provider, limitKey, periodStart, d, 0)
 			if estimated != 0 {
 				// The whole charge came from a degraded token estimate (see
 				// tokenCharge's doc comment: its degraded path always sets

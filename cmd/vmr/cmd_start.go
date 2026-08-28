@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -161,7 +162,10 @@ func cmdStart(args []string) error {
 	// especially so, since that's the one that needs a human's attention.
 	// The bar alone (through the normal timestamped logger, not a raw
 	// stderr write) is enough separation — no need for blank lines too.
+	var reloadMu sync.Mutex // serialize fsnotify vs SIGHUP reloads: concurrent rt.Install races installLimiter (B5)
 	reload := func(trigger string) {
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
 		bar := strings.Repeat("=", 50)
 		logger.Printf("%s", bar)
 		logger.Printf("CONFIG RELOAD  trigger=%s", trigger)

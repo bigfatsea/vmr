@@ -14,6 +14,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // mdTable collapses the "write a header row + separator row, then one row
@@ -57,7 +58,19 @@ func (t *mdTable) row(cells ...string) {
 	if len(cells) != t.cols {
 		panic(fmt.Sprintf("mdTable: row has %d cells, header has %d", len(cells), t.cols))
 	}
-	t.w("%s", "| "+strings.Join(cells, " | ")+" |\n")
+	// Every cell is escaped for table-cell safety (a raw "|" splits the row
+	// into extra columns, a literal newline breaks the one-row-per-line
+	// structure) — user-derived cells like session/task titles reach here
+	// verbatim (B4, the same bug class story fixed in P12.2/P12.3). No
+	// current caller passes intentional table markup in a cell. Cells that
+	// also carry free-form user/model text HTML-escape at the call site
+	// (see section_sessions.go) so an unclosed "<!--" can't swallow the
+	// rest of the document.
+	esc := make([]string, len(cells))
+	for i, c := range cells {
+		esc[i] = reqdetail.EscapeCell(c)
+	}
+	t.w("%s", "| "+strings.Join(esc, " | ")+" |\n")
 }
 
 // StoriesLinkInfo carries the "vmr-report.md → stories/vmr-stories.md"

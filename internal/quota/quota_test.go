@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"vmr/internal/core"
 )
 
 func TestRegistry_ChargeAndUsed(t *testing.T) {
@@ -53,6 +55,58 @@ func TestRegistry_LazyResetOnCharge(t *testing.T) {
 	// bucket back at p1's boundary, not the retained old value: this is
 	// documented behavior of the single-bucket-per-limitKey design (no
 	// history is kept), not a bug.
+}
+
+// TestRegistry_DefaultSinceReloadDoesNotReset is the B2 regression: a Limit
+// with no explicit `since` gets its anchor from DefaultSince at every config
+// load. A charge, then a simulated reload (fresh DefaultSince a few minutes
+// later, same calendar day), then a read — the accumulated count must
+// survive, because the calendar-aligned anchor makes PeriodStart identical
+// across the reload.
+func TestRegistry_DefaultSinceReloadDoesNotReset(t *testing.T) {
+	withDisplayZone(t, time.UTC)
+	load1 := time.Date(2026, 8, 7, 2, 3, 0, 0, time.UTC)
+	load2 := time.Date(2026, 8, 7, 20, 10, 0, 0, time.UTC) // hot reload, same day, ~18h later
+
+	for _, c := range []struct {
+		unit string
+		n    int
+	}{{"min", 5}, {"h", 1}, {"h", 5}, {"d", 1}, {"w", 1}, {"mo", 1}} {
+		r := NewRegistry("")
+		l := core.Limit{Metric: core.MetricTokens, EveryUnit: c.unit, EveryN: c.n}
+		l.Since = DefaultSince(load1, l.EveryUnit)
+		key := LimitKey(l, "")
+
+		r.Charge("plan-a", key, PeriodStart(l, load2), Counters{Fresh: 1000}, 0)
+
+		// Reload: re-resolve the anchor exactly as config.Load would.
+		l.Since = DefaultSince(load2, l.EveryUnit)
+		got, _ := r.Used("plan-a", key, PeriodStart(l, load2))
+		if got.Fresh != 1000 {
+			t.Errorf("every %d%s: after same-day reload, Used = %v, want 1000 retained (B2)", c.n, c.unit, got.Fresh)
+		}
+	}
+}
+
+// TestRegistry_UsedResetMarksDirty is the B8 regression: a period roll
+// observed only by the read path must still be persisted by the flusher.
+func TestRegistry_UsedResetMarksDirty(t *testing.T) {
+	r := NewRegistry("")
+	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p2 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", p1, Counters{Requests: 5}, 0)
+	r.mu.Lock()
+	r.dirty = false
+	r.mu.Unlock()
+
+	r.Used("plan-a", "requests/1mo", p2) // rolls the bucket via the read path
+
+	r.mu.Lock()
+	dirty := r.dirty
+	r.mu.Unlock()
+	if !dirty {
+		t.Fatal("Used() rolled the bucket to a new period but left dirty=false — the reset would never be persisted (B8)")
+	}
 }
 
 func TestRegistry_LazyResetOnUsedAlone(t *testing.T) {

@@ -90,8 +90,9 @@ type rec2 struct {
 // content quirk vmr silently worked around, not a routine transport/protocol
 // step every successful response goes through regardless of vendor
 // (model_rewrite fires on ~100% of them, done_appended/buffered/opaque/
-// resumed_stream/overflow_raw_passthrough/crlf_framing_suspected describe
-// vmr's own transport handling, not a vendor's content behavior). Kept here
+// resumed_stream/overflow_raw_passthrough/crlf_framing_suspected/
+// truncated_flush/truncated_withheld describe vmr's own transport handling,
+// not a vendor's content behavior). Kept here
 // rather than as an exported list in internal/router: the router package has
 // no reason to know which of its own marker strings a downstream analytics
 // consumer finds diagnostically interesting.

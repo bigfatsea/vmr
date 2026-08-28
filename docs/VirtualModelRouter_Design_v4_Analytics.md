@@ -234,7 +234,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
   └─ Event   一条消息在整个 Journey 里的首次出现（全局去重、按首次出现排序）
 ```
 
-`Build`/`BuildChain`/`BuildAll` 从一个 Lineage（或缝合链）构建 Journey：批量取回链上每个 manifest 对应的完整 `audit.Record`（`ctxgraph.FetchRecords`，按源文件分组，一次扫描服务多个候选），逐 manifest 判定任务边界（新 trace id，或 delta 里出现真实新指令）、系统提示词是否变化（`SysChanged`）、是否处于缝合边界（`StitchEdge` 非空——此时 `DeltaStart` 恒为 0，靠全局去重而非计算出的 delta 抑制已展示过的内容，因为 `Classify` 的结构化 LCP 在缝合边界两侧没有意义）。事件流按"新 blob 首次出现"逐 Step 累积，一条消息在整个 Journey 生命周期里只渲染一次。
+`Build`/`BuildChain`/`BuildAll` 从一个 Lineage（或缝合链）构建 Journey：批量取回链上每个 manifest 对应的完整 `audit.Record`（`ctxgraph.FetchRecords`，按源文件分组，一次扫描服务多个候选），逐 manifest 判定任务边界（新 trace id，或 delta 里出现真实新指令）、系统提示词是否变化（`SysChanged`）、是否处于缝合边界（`StitchEdge` 非空——此时 `DeltaStart` 恒为 0，靠全局去重而非计算出的 delta 抑制已展示过的内容，因为 `Classify` 的结构化 LCP 在缝合边界两侧没有意义）。**缝合边界与任务边界是两件事**：一次任务中途为回收上下文的压缩（缝合边界但没有新指令）不开新 Task，只在该 Step 内联渲染 compaction 标记；只有缝合边界处 `newInstructionTitleAtStitch` 找到一条不在 `seen` 里的真实新指令，才与普通 delta 一样开新 Task（2026-08 修正——此前每个缝合边界都被无条件当成新 Task，虚增 `len(j.Tasks)` 与 per-Task 检测器分母）。事件流按"新 blob 首次出现"逐 Step 累积，一条消息在整个 Journey 生命周期里只渲染一次。
 
 **Revision 关系**（`Event.Revises`）：一次 `Splice` 编辑的分岔点是一条消息被原地改写，不是巧合的新消息——不标注的话，全局去重会把改写后的版本渲染成一个全新的、无关的 Event，读起来像是"同一件事说了两遍"。
 

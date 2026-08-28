@@ -507,20 +507,80 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 
 // --- Main LLM Findings Entry Point ------------------------------------------
 
+// searchableTranscript concatenates a Journey's already-reconstructed text
+// (RespText, Reasoning, ToolCall args, every NewEvents message) plus each
+// Step's marshaled raw audit.Record into one blob — the "original text" an
+// LLM EvidenceAnchor must be a literal substring of. Mirrors
+// _eval/calibrate_p1b.go's transcriptPool: a streamed response's text
+// arrives as many small SSE delta fragments, so a faithfully-quoted phrase
+// survives contiguously only in the reassembled fields, while tool_result
+// text (delivered whole in the following request body) and raw tool-call
+// arguments are only visible in the marshaled record.
+func searchableTranscript(j *Journey) string {
+	var b strings.Builder
+	for _, t := range j.Tasks {
+		for _, s := range t.Steps {
+			b.WriteString(s.RespText)
+			b.WriteByte('\n')
+			b.WriteString(s.Reasoning)
+			b.WriteByte('\n')
+			for _, tc := range s.ToolCalls {
+				b.WriteString(tc.Args)
+				b.WriteByte('\n')
+			}
+			for _, ev := range s.NewEvents {
+				b.WriteString(ev.Msg.Text)
+				b.WriteByte('\n')
+			}
+			if s.Rec != nil {
+				if data, err := json.Marshal(s.Rec); err == nil {
+					b.Write(data)
+					b.WriteByte('\n')
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+// anchoredInTranscript reports whether f cites an EvidenceAnchor that appears
+// verbatim in pool. An LLM detector that fabricates an anchor (a plausible
+// quote that was never in the transcript) would otherwise be promoted to a
+// HIGH-confidence [AI推测] Finding and fed back as established fact into the
+// next single-Journey interpretation pass — the whole "only anchor-backed
+// claims are HIGH" safety contract rests on this check, which until B3 lived
+// only in _eval/calibrate_p1b.go and was never enforced at runtime.
+func anchoredInTranscript(f Finding, pool string) bool {
+	return f.EvidenceAnchor != "" && strings.Contains(pool, f.EvidenceAnchor)
+}
+
 // ComputeLLMFindings runs all Phase 1b LLM semantic detectors against j.
 // Fail-open: if LLM call fails or returns non-conforming output, errors are ignored
-// and only valid high-confidence findings are returned.
+// and only valid high-confidence findings are returned. Every surviving
+// finding's EvidenceAnchor is verified against the real transcript (B3) —
+// one that doesn't appear verbatim is dropped, however confident the model
+// claimed to be.
 func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) ([]Finding, error) {
 	if !opts.Enabled() {
 		return nil, nil
 	}
+	var raw []Finding
+	raw = append(raw, detectLLMToolResultMisinterpretation(ctx, j, opts, lang)...)
+	raw = append(raw, detectLLMSemanticOscillation(ctx, j, opts, lang)...)
+	raw = append(raw, detectLLMGoalDrift(ctx, j, opts, lang)...)
+	raw = append(raw, detectLLMConstraintDropped(ctx, j, opts, lang)...)
+	raw = append(raw, detectLLMPlanMisalignment(ctx, j, opts, lang)...)
+	raw = append(raw, detectLLMUnverifiedCompletionClaim(ctx, j, opts, lang)...)
+
 	var out []Finding
-	out = append(out, detectLLMToolResultMisinterpretation(ctx, j, opts, lang)...)
-	out = append(out, detectLLMSemanticOscillation(ctx, j, opts, lang)...)
-	out = append(out, detectLLMGoalDrift(ctx, j, opts, lang)...)
-	out = append(out, detectLLMConstraintDropped(ctx, j, opts, lang)...)
-	out = append(out, detectLLMPlanMisalignment(ctx, j, opts, lang)...)
-	out = append(out, detectLLMUnverifiedCompletionClaim(ctx, j, opts, lang)...)
+	if len(raw) > 0 {
+		pool := searchableTranscript(j)
+		for _, f := range raw {
+			if anchoredInTranscript(f, pool) {
+				out = append(out, f)
+			}
+		}
+	}
 
 	sort.SliceStable(out, func(a, b int) bool {
 		if out[a].StepSeq != out[b].StepSeq {

@@ -16,6 +16,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 // freshTokens returns in - cached - cacheWrite, floored at 0 — a thin
@@ -371,7 +372,7 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 	}
 	if worst != nil && worst.ContextGrowth >= 5 {
 		add(FindingContextGrowth, "context_growth", tx.ContextGrowthFinding(
-			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, worst.Title))
+			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, reqdetail.EscapeHTML(worst.Title)))
 	}
 
 	// provider quota exhaustion — see findings_quota.go.

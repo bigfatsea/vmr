@@ -147,8 +147,12 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 
 	used, estTokens := rt.Quota.Used("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
-	if estTokens == 0 {
-		t.Fatal("want a nonzero degraded token estimate")
+	if estTokens != 0 {
+		// bucket.Estimated is a requests/tokens-only accumulator; a cost
+		// Limit's degraded-estimate signal is money, tracked via
+		// EstimatedCostFor. The cost branch must not feed a token figure
+		// into Charge's `estimated` param (B6).
+		t.Fatalf("bucket.Estimated = %v, want 0 for a metric: cost charge", estTokens)
 	}
 	if used.Cost <= 0 {
 		t.Fatalf("Counters.Cost = %v, want > 0 (degraded estimate still charges a nonzero cost)", used.Cost)

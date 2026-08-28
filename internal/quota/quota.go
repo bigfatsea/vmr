@@ -273,12 +273,16 @@ func (r *Registry) getLocked(provider, limitKey string) *bucket {
 // b currently believes — the lazy-reset mechanism: no goroutine, no missed-
 // tick risk, and a process restart self-corrects the moment the first
 // Charge/Used after the gap runs, simply by comparing timestamps instead of
-// replaying missed ticks.
-func resetIfStaleLocked(b *bucket, periodStart time.Time) {
+// replaying missed ticks. Returns true when it actually reset, so a read
+// path (Used/EstimatedCostFor) can mark the Registry dirty — a period roll
+// observed only by a read still needs to reach vmr-quota.json (B8).
+func resetIfStaleLocked(b *bucket, periodStart time.Time) bool {
 	ps := periodStart.Unix()
 	if b.PeriodStart != ps {
 		*b = bucket{PeriodStart: ps}
+		return true
 	}
+	return false
 }
 
 // Charge adds d (already the caller's raw per-request observation — see
@@ -308,7 +312,9 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	resetIfStaleLocked(b, periodStart)
+	if resetIfStaleLocked(b, periodStart) {
+		r.dirty = true
+	}
 	return b.C, b.Estimated
 }
 
@@ -339,6 +345,8 @@ func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	resetIfStaleLocked(b, periodStart)
+	if resetIfStaleLocked(b, periodStart) {
+		r.dirty = true
+	}
 	return b.EstimatedCost
 }

@@ -544,6 +544,97 @@ data: [DONE]`},
 	})
 }
 
+// TestComputeLLMFindings_AnchorVerification is the B3 regression: a
+// detector finding whose EvidenceAnchor does not appear verbatim in the
+// Journey's real transcript must be dropped, no matter how confident the
+// model claimed to be; one with a real anchor survives.
+func TestComputeLLMFindings_AnchorVerification(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
+	r1 := audit.Record{
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{msg("user", "load config")},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"config.json\"}"}}]}}]}
+data: [DONE]`},
+		},
+	}
+	r2 := audit.Record{
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{
+					msg("user", "load config"),
+					map[string]any{"role": "assistant", "tool_calls": []any{
+						map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"config.json"}`}},
+					}},
+					map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "Error: 404 file not found"},
+				},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Done!","reasoning_content":"Successfully read config.json, proceeding to start service."}}]}
+data: [DONE]`},
+		},
+	}
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	tmpl := `[{"step_seq":1,"is_misinterpreted":true,"confidence":"HIGH","evidence_anchor":%q,"explanation":"x","suggested_action":"y"}]`
+
+	t.Run("fabricated anchor is dropped", func(t *testing.T) {
+		srv := mockLLMServer(t, fmt.Sprintf(tmpl, "this exact phrase was never in any transcript at all"))
+		defer srv.Close()
+		opts := LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}
+		res, err := ComputeLLMFindings(context.Background(), j, opts, i18n.ZH)
+		if err != nil {
+			t.Fatalf("fail-open contract: %v", err)
+		}
+		if len(res) != 0 {
+			t.Fatalf("fabricated-anchor finding survived: %+v", res)
+		}
+	})
+
+	t.Run("real anchor survives", func(t *testing.T) {
+		srv := mockLLMServer(t, fmt.Sprintf(tmpl, "Successfully read config.json"))
+		defer srv.Close()
+		opts := LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}
+		res, err := ComputeLLMFindings(context.Background(), j, opts, i18n.ZH)
+		if err != nil {
+			t.Fatalf("fail-open contract: %v", err)
+		}
+		if len(res) != 1 || res[0].Code != FindingToolResultMisinterpretation {
+			t.Fatalf("real-anchor finding did not survive: %+v", res)
+		}
+	})
+}
+
+func TestSearchableTranscript_CoversReconstructedAndRaw(t *testing.T) {
+	j := &Journey{Tasks: []*Task{{Steps: []*Step{{
+		RespText:  "the assistant said hello",
+		Reasoning: "internal chain of thought",
+		ToolCalls: []chatmsg.ToolCall{{Name: "grep", Args: `{"pattern":"needle"}`}},
+	}}}}}
+	pool := searchableTranscript(j)
+	for _, want := range []string{"the assistant said hello", "internal chain of thought", `{"pattern":"needle"}`} {
+		if !strings.Contains(pool, want) {
+			t.Errorf("pool missing %q", want)
+		}
+	}
+	if anchoredInTranscript(Finding{EvidenceAnchor: ""}, pool) {
+		t.Error("empty anchor must not count as anchored")
+	}
+	if !anchoredInTranscript(Finding{EvidenceAnchor: "assistant said hello"}, pool) {
+		t.Error("substring anchor should be recognized")
+	}
+	if anchoredInTranscript(Finding{EvidenceAnchor: "haystack"}, pool) {
+		t.Error("absent anchor must not be recognized")
+	}
+}
+
 func TestRenderSpine_InferredFindingRendering(t *testing.T) {
 	finding := Finding{
 		Code:           FindingToolResultMisinterpretation,

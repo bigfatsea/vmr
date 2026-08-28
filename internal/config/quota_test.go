@@ -75,10 +75,22 @@ func TestQuota_HappyPath_Tokens_DefaultSince(t *testing.T) {
 	if l.Metric != core.MetricTokens || l.EveryUnit != "w" {
 		t.Fatalf("resolved limit = %+v", l)
 	}
-	// Omitting since anchors the window at load time itself — no calendar
-	// alignment — so the resolved Since must fall within [before, after].
-	if l.Since.Before(before) || l.Since.After(after) {
-		t.Fatalf("default since = %v, want within [%v, %v] (load-time instant)", l.Since, before, after)
+	// Omitting since anchors the window at the natural calendar boundary for
+	// the unit (Monday 00:00 for `w`), truncated back from load time — so a
+	// reload within the same week keeps the same anchor and does not reset
+	// the account's usage counters (B2). The anchor must be at-or-before the
+	// load instant and no more than a week behind it.
+	if l.Since.After(after) {
+		t.Fatalf("default since = %v, want at-or-before load time %v", l.Since, after)
+	}
+	if before.Sub(l.Since) > 7*24*time.Hour {
+		t.Fatalf("default since = %v, want within one week before load time %v", l.Since, before)
+	}
+	if wd := l.Since.Weekday(); wd != time.Monday {
+		t.Errorf("default since = %v (weekday %v), want aligned to Monday", l.Since, wd)
+	}
+	if h, m, s := l.Since.Clock(); h != 0 || m != 0 || s != 0 {
+		t.Errorf("default since = %v, want midnight-aligned", l.Since)
 	}
 }
 

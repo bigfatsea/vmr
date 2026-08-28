@@ -196,10 +196,10 @@ providers:
     #     - metric: requests
     #       every: 1mo             # 这里周期最长——它是桶
     #       since: 2026-08-01      # 周期锚点；后续每个周期都会自动推算。完全不写
-    #                              # 就直接取配置加载/热重载那一刻的当前时间，
-    #                              # 不做任何日历对齐——可接受写法：YYYY-MM-DD、
-    #                              # RFC3339，或者纯时间 hh:mm[:ss]（仅限
-    #                              # every 是 min/h 的 Limit）
+    #                              # 就对齐到该单位的日历边界（min/h/d→当日午夜、
+    #                              # w→周一、mo→月初），使同周期内的热重载不清零
+    #                              # 计数——可接受写法：YYYY-MM-DD、RFC3339，或者
+    #                              # 纯时间 hh:mm[:ss]（仅限 every 是 min/h 的 Limit）
     #       amount: 90000          # 这个窗口的上限，单位是 vmr 自己观测到的口径
     #
     #       # token_weights（P2.1）：对 metric: tokens 档 Limit 的 base(tokens) 求和

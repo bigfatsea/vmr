@@ -1480,6 +1480,35 @@ func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 	}
 }
 
+// TestMarkdownEscapesUserDerivedTitles is the B4 regression: a session
+// title carrying a shell pipe or an unclosed HTML comment must not corrupt
+// the report — the pipe is escaped so it doesn't split the table row, the
+// "<!--" is escaped so an HTML-aware renderer doesn't swallow the rest of
+// the file.
+func TestMarkdownEscapesUserDerivedTitles(t *testing.T) {
+	rep := &Report2{
+		Overall: Row{TrafficStats: TrafficStats{Requests: 1, OK: 1}},
+		Sessions: []SessionRow{
+			{ID: "l-deadbeef", Class: "interactive", ClientKey: "cli", Tasks: 1,
+				TrafficStats: TrafficStats{Requests: 1},
+				Title:        "run `ps aux | grep vmr` <!-- unclosed"},
+		},
+	}
+	md := Markdown(rep, i18n.EN, nil)
+	if strings.Contains(md, "aux | grep") {
+		t.Errorf("raw pipe in a session title leaked into the table (row corruption):\n%s", md)
+	}
+	if !strings.Contains(md, `aux \| grep`) {
+		t.Errorf("session-title pipe was not escaped:\n%s", md)
+	}
+	if strings.Contains(md, "<!--") {
+		t.Errorf("unclosed HTML comment in a session title left unescaped:\n%s", md)
+	}
+	if !strings.Contains(md, "&lt;!--") {
+		t.Errorf("session-title '<!--' was not HTML-escaped:\n%s", md)
+	}
+}
+
 // TestTopErrorClassCountDeterministic locks in the fix for a second,
 // previously-undiscovered instance of the same non-determinism class
 // TestBuildIsDeterministic covers: topErrorClass/topErrorClassShort picked

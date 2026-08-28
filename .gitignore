@@ -31,6 +31,7 @@ coverage.html
 
 # Scratch
 /_tmp/
+/scratch_vmr
 
 # OS / editor
 .DS_Store

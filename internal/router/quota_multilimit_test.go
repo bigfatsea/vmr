@@ -10,6 +10,7 @@ package router
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"vmr/internal/core"
 	"vmr/internal/quota"
@@ -166,7 +167,7 @@ providers:
     base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
-      limits: [{metric: requests, every: 1min, amount: 60, models: ["*"]}]
+      limits: [{metric: requests, every: 1d, amount: 60, models: ["*"]}]
 models:
   m1:
     endpoints: [{protocol: openai-completions, providers: [p1], models: [model-a, model-b]}]
@@ -179,9 +180,15 @@ models:
 		epA, epB = epB, epA
 	}
 
-	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(rt.Quota, epB, quota.Counters{}, 0, chargeNow)
+	// QuotaStatus() reads at time.Now() internally, so charge at the same
+	// wall clock — a charge frozen at chargeNow (Jan 2026) and a read at
+	// real-now land in different periods and the read-path lazy reset would
+	// zero the bucket. `every: 1d` keeps charge and read in the same period
+	// as long as the test doesn't straddle local midnight.
+	now := time.Now()
+	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, now)
+	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, now)
+	ChargeResponse(rt.Quota, epB, quota.Counters{}, 0, now)
 
 	st := rt.QuotaStatus()
 	if len(st) != 2 {

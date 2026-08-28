@@ -40,6 +40,49 @@ func s231StyleFixture(t *testing.T) string {
 	return writeJSONL(t, recs)
 }
 
+// TestStitchedJourney_NewInstructionOpensTask is B9's other half: when the
+// stitch boundary DOES carry a genuinely new user instruction, it still
+// opens a new Task.
+func TestStitchedJourney_NewInstructionOpensTask(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 7, 16, 15, m, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "深入调研这个内存涨价这一波")
+
+	var recs []audit.Record
+	msgsList := []any{sys, u1}
+	for i := 0; i < 5; i++ {
+		recs = append(recs, mkRec(at(i), "", append([]any{}, msgsList...), sseText("ok")))
+		msgsList = append(msgsList, msg("assistant", "step reply"))
+	}
+	// Contract that also carries a brand-new instruction after the collapse.
+	recs = append(recs, mkRec(at(30), "",
+		[]any{msg("system", "sys v2"), u1, msg("assistant", "post-break reply"), msg("user", "now write the summary doc")},
+		sseText("continuing")))
+	path := writeJSONL(t, recs)
+
+	g, err := ctxgraph.Scan([]string{path})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	ctxgraph.StitchGraph(g)
+	byIdx := ctxgraph.LineageIndex(g)
+	chain := ctxgraph.ChainFrom(ListCandidates(g)[0], byIdx)
+	j, err := BuildChain(chain, taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("BuildChain: %v", err)
+	}
+	if len(j.Tasks) != 2 {
+		t.Fatalf("j.Tasks = %d, want 2 (a genuinely new instruction bridged the stitch)", len(j.Tasks))
+	}
+	last := j.Tasks[1].Steps[len(j.Tasks[1].Steps)-1]
+	if !last.HumanInitiated {
+		t.Error("the stitch-boundary step with a new instruction should be HumanInitiated")
+	}
+	if !strings.Contains(j.Tasks[1].Title, "summary doc") {
+		t.Errorf("new Task title = %q, want it to reflect the new instruction", j.Tasks[1].Title)
+	}
+}
+
 // TestStitchedJourney_EndToEnd is the full pipeline check for the stitching
 // acceptance criterion.
 func TestStitchedJourney_EndToEnd(t *testing.T) {
@@ -104,6 +147,13 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Error("the stitch-boundary step should not be HumanInitiated (no genuinely new instruction there)")
 	}
 
+	// B9: a mid-task compaction (stitch boundary with no genuinely new
+	// instruction) must NOT open a new Task — all 6 steps stay in the one
+	// Task the opening instruction started.
+	if len(j.Tasks) != 1 {
+		t.Fatalf("j.Tasks = %d, want 1 (the compaction stitch is not a new Task — no new instruction bridged it)", len(j.Tasks))
+	}
+
 	// Journey.Break must be nil — the chain's OWN head (first) opened its
 	// bucket cleanly, so after stitching there's no remaining unresolved
 	// break at the top of this Journey.
@@ -144,24 +194,16 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 
 	// The shared opening instruction naturally appears more than once
 	// (journey subtitle, t01's own task title) — that's normal rendering,
-	// not duplication. What must NOT happen is the stitch-boundary task
-	// (t02) showing it YET AGAIN: global seen-hash dedup must suppress it
-	// there (its manifest reappears in `second`'s opening, which scans the
-	// whole manifest since deltaStart=0 at a stitch boundary), and the task
-	// title must fall back to the stitch marker instead of re-quoting an
-	// instruction that wasn't actually asked again (see
-	// newInstructionTitleAtStitch). P5.1 removed the fact-layer's "## t02"
-	// heading — the decision spine's own Task line ("**t02 · ...**") is now
-	// the only per-Task marker, so that's what isolates the section.
-	t02Idx := strings.Index(md, "**t02")
-	if t02Idx < 0 {
-		t.Fatalf("could not find the t02 task line in the rendered Markdown:\n%s", md)
+	// not duplication. What must NOT happen is the stitch-boundary Step
+	// re-showing it YET AGAIN: global seen-hash dedup must suppress it there
+	// (its manifest reappears in `second`'s opening, which scans the whole
+	// manifest since deltaStart=0 at a stitch boundary). The section after
+	// the stitch marker is where a regression would surface.
+	stitchIdx := strings.Index(md, "Stitched from an earlier fragment")
+	if stitchIdx < 0 {
+		t.Fatalf("could not find the stitch marker in the rendered Markdown:\n%s", md)
 	}
-	stitchSection := md[t02Idx:]
-	if strings.Contains(stitchSection, "深入调研这个内存涨价这一波") {
-		t.Errorf("the stitch-boundary task re-shows the shared opening instruction — dedup should have suppressed it:\n%s", stitchSection)
-	}
-	if !strings.Contains(stitchSection, "stitched from an earlier fragment") {
-		t.Errorf("the stitch-boundary task title should fall back to the stitch marker (no genuinely new instruction there):\n%s", stitchSection)
+	if strings.Contains(md[stitchIdx:], "深入调研这个内存涨价这一波") {
+		t.Errorf("the stitch-boundary Step re-shows the shared opening instruction — dedup should have suppressed it:\n%s", md[stitchIdx:])
 	}
 }

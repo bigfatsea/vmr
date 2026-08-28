@@ -166,12 +166,44 @@ func daysInMonth(y int, m time.Month) int {
 
 // DefaultSince resolves the config-time default anchor for a Limit whose
 // `since` field was left empty (see config.LimitConfig.Since's doc comment):
-// the anchor is simply now, in fmtutil.DisplayZone — the moment config was
-// loaded/reloaded, with no per-unit calendar alignment. Omitting `since` is
-// itself the declaration "I don't care which exact minute/hour/day this
-// window's boundary falls on" (see the design doc's DefaultSince decision
-// note); a user who does care writes an explicit `since`. Evaluated once at
-// config-load time, not on the request hot path.
-func DefaultSince(now time.Time) time.Time {
-	return now.In(fmtutil.DisplayZone)
+// now, in fmtutil.DisplayZone, truncated back to a fixed calendar boundary —
+// midnight for min/h/d, Monday 00:00 for w, the 1st for mo.
+//
+// The alignment is what keeps a bucket alive across a config reload. The
+// bucket key (quota.LimitKey) deliberately omits `since`, so it is stable;
+// but PeriodStart is recomputed from the anchor on every load, and
+// resetIfStaleLocked zeroes a bucket whose stored period start no longer
+// matches. With a raw `now` anchor, every reload moved the anchor to the
+// reload instant and silently wiped the account's accumulated usage (B2 in
+// docs/VMR_综合评审_2026-08_sonnet-5.md). Anchoring to a fixed boundary
+// makes PeriodStart identical across all reloads within the same period, so
+// the count survives — matching the Quota design doc's "计数跨重载存活"
+// promise for the common (no explicit `since`) case too.
+//
+// Midnight (not top-of-hour) for min/h so the period grid stays fixed to the
+// day: two reloads on the same calendar day always resolve to the same
+// anchor regardless of `every` N, so any same-day hot reload is safe. The
+// grid can still shift on a reload that crosses midnight, and only for an N
+// that doesn't divide its unit's span of a day (min: N∤1440, h: N∤24) — e.g.
+// `every: 5h` or `every: 7min`. That residual is narrow (needs a cross-day
+// restart/reload AND an odd N) and self-corrects to at most one reset;
+// omitting `since` is still the declaration "I don't care about exact
+// phase", and a Limit that needs its window pinned writes an explicit
+// `since`. Evaluated once at config-load time, not on the request hot path.
+func DefaultSince(now time.Time, unit string) time.Time {
+	n := now.In(fmtutil.DisplayZone)
+	y, mo, d := n.Date()
+	loc := n.Location()
+	switch unit {
+	case "min", "h", "d":
+		return time.Date(y, mo, d, 0, 0, 0, 0, loc)
+	case "w":
+		// ISO week start: Monday. time.Weekday has Sunday==0.
+		back := (int(n.Weekday()) + 6) % 7
+		return time.Date(y, mo, d, 0, 0, 0, 0, loc).AddDate(0, 0, -back)
+	case "mo":
+		return time.Date(y, mo, 1, 0, 0, 0, 0, loc)
+	default:
+		return n
+	}
 }

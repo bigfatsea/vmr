@@ -344,10 +344,15 @@ func (s *stream) Read(p []byte) (int, error) {
 		s.finish()
 		s.done = true
 	} else if err != nil {
-		// Deliver whatever the ingest above made deliverable before
-		// surfacing the error (a direct connection would have handed the
-		// client those TCP-delivered bytes too); the error is returned on
-		// the next call once out is drained.
+		// Non-EOF upstream error mid-stream (connection reset, stream-idle
+		// watchdog close). Bytes received so far sit unemitted in s.buf/
+		// s.pending; without this the client — already holding a 200 +
+		// headers — would see a clean empty body, i.e. a successful empty
+		// completion. Flush what's safe to deliver raw (see flushRawOnError
+		// for what that excludes); the caller then aborts the connection so
+		// the transfer visibly breaks. The error surfaces on the next call
+		// once out is drained.
+		s.flushRawOnError()
 		s.srcErr = err
 	}
 
@@ -365,6 +370,46 @@ func (s *stream) Read(p []byte) (int, error) {
 	// Nothing deliverable yet (mid-event, or withheld pending a mode
 	// decision). Zero-length reads let the caller's idle watchdog tick.
 	return 0, nil
+}
+
+// flushRawOnError releases the bytes accumulated but not yet emitted after a
+// mid-stream upstream error, so a truncated response still hands the client
+// what it did receive instead of a clean empty 200. The model-field rewrite
+// is still applied — the virtual-model abstraction holds even on a partial
+// body — but no quirk repair runs (those need a complete response).
+//
+// For a non-SSE body "buffered" just means "the client waits for the whole
+// object anyway", so s.buf (a partial object — what a direct connection
+// would have delivered too) is flushed. For an SSE stream, only a
+// modePassthrough tail is flushed: still being in modeUndecided or
+// modeBuffered means this content was NEVER cleared as safe to stream as-is
+// — modeBuffered SSE is only ever a MiniMax thinking shape held back to be
+// stripped (a <think>… / "Thinking Process:" opener), and an undecided tail
+// can be an incomplete event of exactly that shape. Flushing either raw
+// would leak an unclosed <think> block, the feedback-loop hazard buffered
+// mode exists to prevent. The client gets nothing for the thinking phase
+// (as it would have anyway) plus the caller's connection abort.
+func (s *stream) flushRawOnError() {
+	var b []byte
+	switch {
+	case !s.isSSE:
+		b = s.buf
+	case s.mode == modePassthrough:
+		b = s.pending
+	case len(s.buf) > 0 || len(s.pending) > 0:
+		s.noteApplied("truncated_withheld")
+	}
+	s.buf, s.pending, s.scanned = nil, nil, 0
+	if len(b) == 0 {
+		return
+	}
+	if !s.opaque && modelFieldPattern.Match(b) {
+		s.noteUpstreamModel(b)
+		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
+		s.noteApplied("model_rewrite")
+	}
+	s.out = append(s.out, b...)
+	s.noteApplied("truncated_flush")
 }
 
 func (s *stream) ingest(b []byte) {
