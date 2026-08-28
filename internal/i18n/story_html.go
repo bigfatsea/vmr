@@ -1,0 +1,119 @@
+// Ver 2026-08-28, by Sonnet 5
+
+// Pairs with internal/story/render_html.go — the single-file HTML journey
+// renderer (`vmr analyze -journey <id> -html`). Fixed UI strings only; every
+// number and every piece of conversation content comes from the Journey
+// itself (or, under -redact, a length placeholder).
+package i18n
+
+import "fmt"
+
+// StoryHTMLText is render_html.go's chrome, in one language.
+type StoryHTMLText struct {
+	DocTitle       func(id string) string
+	Subtitle       func(tasks, steps int, from, to string) string
+	PartialBanner  string
+	BreakBanner    func(kind string) string
+	RedactedBanner string
+	TimelineTitle  string
+	TaskLabel      func(n int) string
+	StepLabel      func(n int) string
+	Instruction    string
+	InThisTurn     string
+	Response       string
+	Reasoning      string
+	ToolCall       string
+	ToolResult     string
+	NoReply        string
+	SysChanged     string
+	EditLabel      func(kind string) string
+	StitchLabel    func(kind string, score, confidence string) string
+	CompactionHdr  func(before, after int64) string
+	Swallowed      string
+	Survived       string
+	Attempts       func(n int) string
+	FailoverBadge  string
+	RoleLabel      func(role string) string
+	RedactedText   func(runes int) string
+	RedactedJSON   func(runes int) string
+	Empty          string
+	GeneratedNote  string
+}
+
+// StoryHTML returns the HTML chrome text for lang.
+func StoryHTML(lang Lang) StoryHTMLText {
+	if lang == ZH {
+		return StoryHTMLText{
+			DocTitle: func(id string) string { return "Journey " + id },
+			Subtitle: func(t, s int, from, to string) string {
+				return fmt.Sprintf("%d 个任务 · %d 个步骤 · %s – %s", t, s, from, to)
+			},
+			PartialBanner: "此 Journey 的开头被所加载的文件范围截断，展示的是可见部分。",
+			BreakBanner: func(k string) string {
+				return "此 Journey 的开头是一个未解析的断裂（" + k + "）——找不到更早的前驱。"
+			},
+			RedactedBanner: "脱敏模式：结构、指标、角色、token 数保留；所有正文替换为长度占位。",
+			TimelineTitle:  "时间轴",
+			TaskLabel:      func(n int) string { return fmt.Sprintf("任务 %d", n) },
+			StepLabel:      func(n int) string { return fmt.Sprintf("步骤 %d", n) },
+			Instruction:    "指令",
+			InThisTurn:     "本轮进入上下文",
+			Response:       "模型响应",
+			Reasoning:      "推理",
+			ToolCall:       "工具调用",
+			ToolResult:     "工具结果",
+			NoReply:        "本轮模型按约定未回复",
+			SysChanged:     "系统提示词已变化",
+			EditLabel:      func(k string) string { return "上下文编辑：" + k },
+			StitchLabel: func(k, sc, cf string) string {
+				return fmt.Sprintf("缝合边界：%s（覆盖率 %s，置信度 %s）", k, sc, cf)
+			},
+			CompactionHdr: func(b, a int64) string { return fmt.Sprintf("上下文压缩：%d → %d token", b, a) },
+			Swallowed:     "压缩后不再出现的实体",
+			Survived:      "压缩后仍保留的实体",
+			Attempts:      func(n int) string { return fmt.Sprintf("%d 次尝试", n) },
+			FailoverBadge: "failover",
+			RoleLabel:     func(r string) string { return r },
+			RedactedText:  func(n int) string { return fmt.Sprintf("‹text: %d chars›", n) },
+			RedactedJSON:  func(n int) string { return fmt.Sprintf("‹json: %d chars›", n) },
+			Empty:         "（空）",
+			GeneratedNote: "由 vmr analyze 生成 · 单文件自包含 · 零外部依赖",
+		}
+	}
+	return StoryHTMLText{
+		DocTitle: func(id string) string { return "Journey " + id },
+		Subtitle: func(t, s int, from, to string) string {
+			return fmt.Sprintf("%d tasks · %d steps · %s – %s", t, s, from, to)
+		},
+		PartialBanner: "This journey's beginning is truncated by the loaded file range; only the visible part is shown.",
+		BreakBanner: func(k string) string {
+			return "This journey opens on an unresolved break (" + k + ") — no earlier predecessor was found."
+		},
+		RedactedBanner: "Redacted: structure, metrics, roles and token counts kept; every body replaced with a length placeholder.",
+		TimelineTitle:  "Timeline",
+		TaskLabel:      func(n int) string { return fmt.Sprintf("Task %d", n) },
+		StepLabel:      func(n int) string { return fmt.Sprintf("Step %d", n) },
+		Instruction:    "Instruction",
+		InThisTurn:     "Entered context this turn",
+		Response:       "Model response",
+		Reasoning:      "Reasoning",
+		ToolCall:       "Tool call",
+		ToolResult:     "Tool result",
+		NoReply:        "The model deliberately did not reply this turn",
+		SysChanged:     "System prompt changed",
+		EditLabel:      func(k string) string { return "Context edit: " + k },
+		StitchLabel: func(k, sc, cf string) string {
+			return fmt.Sprintf("Stitch boundary: %s (coverage %s, confidence %s)", k, sc, cf)
+		},
+		CompactionHdr: func(b, a int64) string { return fmt.Sprintf("Context compaction: %d → %d tokens", b, a) },
+		Swallowed:     "Entities no longer mentioned after compaction",
+		Survived:      "Entities that survived compaction",
+		Attempts:      func(n int) string { return fmt.Sprintf("%d attempts", n) },
+		FailoverBadge: "failover",
+		RoleLabel:     func(r string) string { return r },
+		RedactedText:  func(n int) string { return fmt.Sprintf("‹text: %d chars›", n) },
+		RedactedJSON:  func(n int) string { return fmt.Sprintf("‹json: %d chars›", n) },
+		Empty:         "(empty)",
+		GeneratedNote: "Generated by vmr analyze · single self-contained file · zero external dependencies",
+	}
+}

@@ -321,7 +321,7 @@ func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 // dry-run/degrade contract compareJourneys' own LLM section follows: a
 // dry run never leaves a stories/ directory behind, and a call
 // failure only drops the LLM section, never fails the command.
-func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex) error {
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, htmlOn, redactOn bool) error {
 	t := i18n.CLI(lang)
 	chain := ctxgraph.ChainFrom(target, byIdx)
 	partial := story.IsPartialHead(chain, firstPath)
@@ -382,6 +382,19 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return err
 	}
 	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
+	if htmlOn {
+		htmlPath := filepath.Join(storiesDir, "journey-"+j.ID+".html")
+		if j.Partial {
+			htmlPath = filepath.Join(storiesDir, "journey-"+j.ID+"-partial.html")
+		}
+		// 0600: same sensitivity as the .md — the redacted variant still
+		// keeps structure and metrics, but the un-redacted one carries full
+		// conversation bodies.
+		if err := os.WriteFile(htmlPath, []byte(story.RenderHTML(j, m, findings, lang, redactOn)), 0o600); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s\n", htmlPath)
+	}
 	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.Base(outPath))
 	return saveStoryIndex(idx, outDir, lang)
 }

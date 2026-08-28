@@ -89,6 +89,12 @@ type analyzeRun struct {
 	exchangeRate    map[string]float64
 	selfTrafficTags []string
 	showUngrouped   bool
+	// htmlOn/redactOn (E1): -journey only, single match only — a
+	// self-contained HTML view of one journey, optionally with every
+	// conversation body swapped for a length placeholder. Same "one journey
+	// at a time" constraint as -llm-addr.
+	htmlOn   bool
+	redactOn bool
 }
 
 // validateAnalyzeModeFlags checks the mutual-exclusion rules across
@@ -160,6 +166,8 @@ func cmdAnalyze(args []string) error {
 	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them (equivalent to bare `vmr story`) — writes stories/vmr-stories.{md,json} listing every candidate, but no journey-*.md. Mutually exclusive with -journey/-compare/-corpus/-render-all/-macro-only/-story-only/-details")
 	storyOnlyFlag := fs.Bool("story-only", false, "default suite only: run just the story half, skipping the macro report — no vmr-report.{json,md}/vmr-requests* written. Composes with -render-all (equivalent to `vmr story -render-all`); alone, equivalent to `vmr story`'s default non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-corpus/-macro-only/-list-only")
 	// story-half flags.
+	htmlFlag := fs.Bool("html", false, "with a single-match -journey: also write a self-contained {out}/stories/journey-<id>.html — a sticky timeline + Step-card waterfall view, inline CSS/JS, zero external requests. No effect on any other mode")
+	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body (instructions, messages, responses, tool args/results) with a '‹text: N chars›' length placeholder — structure, roles, token counts and tool names stay. For sharing a journey outside the team")
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
 	includePartialFlag := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
@@ -204,6 +212,12 @@ func cmdAnalyze(args []string) error {
 	if llmAddrExplicit && (*corpusFlag || !hasSelector) {
 		return fmt.Errorf("-llm-addr is not supported with -corpus or the default suite (would fire one LLM call per journey) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
 	}
+	if *redactFlag && !*htmlFlag {
+		return fmt.Errorf("-redact only applies with -html")
+	}
+	if (*htmlFlag || *redactFlag) && *journeyArg == "" {
+		return fmt.Errorf("-html/-redact only apply with -journey (a single journey at a time)")
+	}
 
 	paths, err := resolveInputPaths(fs, *configPath)
 	if err != nil {
@@ -239,6 +253,8 @@ func cmdAnalyze(args []string) error {
 		exchangeRate:    rc.ExchangeRate,
 		selfTrafficTags: rc.SelfTrafficClientTags,
 		showUngrouped:   *showUngrouped,
+		htmlOn:          *htmlFlag,
+		redactOn:        *redactFlag,
 	})
 }
 
@@ -297,10 +313,13 @@ func dispatchAnalyze(r *analyzeRun) error {
 			if err != nil {
 				return err
 			}
-			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx)
+			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, r.htmlOn, r.redactOn)
 		}
 		if r.llmAddrExplicit {
 			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), r.journeyArg)
+		}
+		if r.htmlOn {
+			return fmt.Errorf("-html/-redact need a -journey selector that resolves to exactly one journey (%d matched by %q)", len(targets), r.journeyArg)
 		}
 		// true: a -journey selector naming several targets is still a
 		// user-named set, not the default suite's implicit batch (P13.1).
