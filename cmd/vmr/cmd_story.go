@@ -407,7 +407,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, htmlOn, redactOn bool) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -466,7 +466,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	llmSection := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
+	llmSection, llmResult := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
 
 	base := "compare-" + jA.ID + "-vs-" + jB.ID
 	if partialA || partialB {
@@ -489,16 +489,28 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
+	if htmlOn {
+		htmlPath := filepath.Join(storiesDir, base+".html")
+		// 0600: same sensitivity as the .md — the un-redacted variant carries
+		// full excerpt text.
+		if err := os.WriteFile(htmlPath, []byte(story.RenderComparisonHTML(cmp, llmResult, lang, redactOn)), 0o600); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s\n", htmlPath)
+	}
 	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), journeyBaseName(jA)+".md")
 	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), journeyBaseName(jB)+".md")
 	return saveStoryIndex(idx, outDir, lang)
 }
 
 // compareLLMSections runs the overall and divergence LLM interpretation
-// calls for -compare, degrading gracefully on failure without failing the command.
-func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
+// calls for -compare, degrading gracefully on failure without failing the
+// command. Returns both the Markdown section (for the .md report) and the
+// structured result (for the .html dashboard) from the same two calls.
+func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) (string, story.CompareLLMResult) {
+	result := story.CompareLLMResult{Model: llmOpts.Model}
 	if llmOpts.Addr == "" {
-		return ""
+		return "", result
 	}
 	var llmSection string
 	pack := story.BuildEvidencePack(jA, jB, cmp, lang)
@@ -508,6 +520,7 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 	} else {
+		result.Overall = res
 		llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
 	}
 
@@ -519,6 +532,7 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
+			result.Divergence, result.DivergenceUsed = divRes, true
 			divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
 			if llmSection != "" {
 				llmSection += "\n" + divSection
@@ -527,7 +541,7 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 			}
 		}
 	}
-	return llmSection
+	return llmSection, result
 }
 
 // renderBatchSize bounds how many candidates renderJourneys builds into

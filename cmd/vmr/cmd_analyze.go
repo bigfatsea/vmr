@@ -166,8 +166,8 @@ func cmdAnalyze(args []string) error {
 	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them (equivalent to bare `vmr story`) — writes stories/vmr-stories.{md,json} listing every candidate, but no journey-*.md. Mutually exclusive with -journey/-compare/-corpus/-render-all/-macro-only/-story-only/-details")
 	storyOnlyFlag := fs.Bool("story-only", false, "default suite only: run just the story half, skipping the macro report — no vmr-report.{json,md}/vmr-requests* written. Composes with -render-all (equivalent to `vmr story -render-all`); alone, equivalent to `vmr story`'s default non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-corpus/-macro-only/-list-only")
 	// story-half flags.
-	htmlFlag := fs.Bool("html", false, "with a single-match -journey: also write a self-contained {out}/stories/journey-<id>.html — a single-page dashboard (verdict · structure timeline · metrics with a sparkline · findings), per-step detail linked not inlined, inline CSS/JS, zero external requests. No effect on any other mode")
-	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links and finding text — structure, metrics, roles, token counts and tool names stay. For sharing a journey outside the team")
+	htmlFlag := fs.Bool("html", false, "with a single-match -journey or with -compare: also write a self-contained .html dashboard next to the .md ({out}/stories/journey-<id>.html or compare-<a>-vs-<b>.html) — verdict/structure/metrics/findings for a journey, sides/divergence/diff/LLM for a comparison; inline CSS/JS, zero external requests. No effect on any other mode")
+	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links, finding text and (for -compare) the LLM section — structure, metrics, roles, token counts and tool names stay. For sharing outside the team")
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
 	includePartialFlag := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
@@ -215,8 +215,8 @@ func cmdAnalyze(args []string) error {
 	if *redactFlag && !*htmlFlag {
 		return fmt.Errorf("-redact only applies with -html")
 	}
-	if (*htmlFlag || *redactFlag) && *journeyArg == "" {
-		return fmt.Errorf("-html/-redact only apply with -journey (a single journey at a time)")
+	if (*htmlFlag || *redactFlag) && *journeyArg == "" && *compareArg == "" {
+		return fmt.Errorf("-html/-redact only apply with -journey (a single journey) or -compare (a pair)")
 	}
 
 	paths, err := resolveInputPaths(fs, *configPath)
@@ -298,7 +298,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if err != nil {
 			return err
 		}
-		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx)
+		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, r.htmlOn, r.redactOn)
 	case r.journeyArg != "":
 		ids := make([]string, len(su.cands))
 		for i, ch := range su.chains {

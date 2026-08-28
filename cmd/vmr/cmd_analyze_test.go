@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -593,6 +594,82 @@ func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.md")); !os.IsNotExist(err) {
 		t.Errorf("-compare should not also run the report half; vmr-report.md stat = %v", err)
+	}
+}
+
+// TestCmdAnalyze_CompareHTML covers 12-D: -compare -html writes a
+// self-contained comparison dashboard (0600) with the three sections, and
+// -redact drops the excerpt bodies without leaking.
+func TestCmdAnalyze_CompareHTML(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	aU1 := storyMsg("user", "candidate A SECRET-A opening")
+	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("plan A"))
+	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+	bU1 := storyMsg("user", "candidate B SECRET-B opening")
+	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("plan B"))
+	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+
+	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	outDir := filepath.Join(t.TempDir(), "out")
+	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	if err != nil {
+		t.Fatalf("setupStoryRun: %v", err)
+	}
+	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+
+	run := func(args ...string) string {
+		if err := captureStdoutErr(t, func() error { return cmdAnalyze(args) }); err != nil {
+			t.Fatalf("cmdAnalyze %v: %v", args, err)
+		}
+		hs, _ := filepath.Glob(filepath.Join(outDir, "stories", "compare-*.html"))
+		if len(hs) != 1 {
+			t.Fatalf("want exactly one compare-*.html, got %v", hs)
+		}
+		info, err := os.Stat(hs[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("compare HTML mode = %v, want 0600", info.Mode().Perm())
+		}
+		data, err := os.ReadFile(hs[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	full := run("-o", outDir, "-compare", idA+","+idB, "-html", path)
+	for _, want := range []string{"<!doctype html>", `id="sides"`, `id="diff"`, "<table class=\"abtbl\"", "SECRET-A", "SECRET-B"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("compare dashboard missing %q", want)
+		}
+	}
+	if regexp.MustCompile(`(?:src|href)\s*=\s*"https?://`).FindString(full) != "" {
+		t.Error("compare dashboard references an external resource")
+	}
+
+	os.RemoveAll(filepath.Join(outDir, "stories"))
+	red := run("-o", outDir, "-compare", idA+","+idB, "-html", "-redact", path)
+	for _, secret := range []string{"SECRET-A", "SECRET-B"} {
+		if strings.Contains(red, secret) {
+			t.Errorf("redacted compare dashboard leaked %q", secret)
+		}
+	}
+	if !strings.Contains(red, "‹text:") {
+		t.Error("redacted compare dashboard has no length placeholders")
+	}
+}
+
+// TestCmdAnalyze_HTMLRejectedWithoutJourneyOrCompare covers the widened
+// flag rule (12-D): -html now needs -journey OR -compare.
+func TestCmdAnalyze_HTMLRejectedWithoutJourneyOrCompare(t *testing.T) {
+	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	err := cmdAnalyze([]string{"-o", filepath.Join(t.TempDir(), "o"), "-html", path})
+	if err == nil || !strings.Contains(err.Error(), "-journey") {
+		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
 	}
 }
 
