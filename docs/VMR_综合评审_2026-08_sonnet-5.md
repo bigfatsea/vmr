@@ -7,7 +7,11 @@
 > 语言：中文正文，技术术语 / 标识符 / 指标保留英文
 > 文档性质：一次性评审报告（历史记录，不受"docs 只留当前状态"规则约束）。**建议这是最后一份此类报告**，理由见 §6.4。
 >
-> **执行状态（2026-08-28 更新）**：**B1–B9 全部已修复**（含外部反馈两轮收窄），详见 §9。B10–B14、§5.2 DX、§5.3 S1–S12、§5.4 性能、§6 E1–E9、§7 分发动作**均未做**——本轮范围严格限定在 B1–B9。文中带 ✅ / ⬜ / ⛔ 标记的条目状态以标记为准。
+> **执行状态（2026-08-28 更新）**：
+> - 第一轮：**B1–B9 全部已修复**（含外部反馈两轮收窄），详见 §9。
+> - 第二轮：**§5.2 DX 3×P0、§5.4 2×P1、E1、E2 已落地**，详见 §10。**E3 本轮 hold**（用户决定）。
+> - **仍未做**：B10–B14、§5.3 S1–S12、§6 E4–E9、§7 分发动作、§5.5 文档专项的剩余项。
+> 文中带 ✅ / ⬜ / ⛔ 标记的条目状态以标记为准。
 
 ---
 
@@ -323,11 +327,13 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 ### 5.2 DX / 分发就绪（⑥号评审——首次配置体验与"零配置单二进制"营销之间有真实鸿沟）
 
+> **状态（2026-08-28 第二轮）**：**3×P0 已全部落地**（✅ 行，详见 §10.2）。P1/P2 行未做。
+
 | 项 | 成本 | 风险 | 价值 | ROI | 优先级 | 建议 |
 |---|:---:|:---:|:---:|:---:|:---:|---|
-| **`config.minimal.yaml`（~10 行）+ README Quick Start 改用它** | 0.5天 | 极低 | 高（消除最大摩擦点——当前唯一模板 470 行 83% 注释 + 投机模型名） | **高** | **P0** | 实测 9 行就能端到端跑通。`config.example.yaml` 顶部第一行改为"这是完整注解参考，只想跑起来用 minimal" |
-| **让"忘设 key"失败可读** | 1天 | 低（不碰成功路径 byte-faithful） | 高 | **高** | **P0** | `vmr start` 缺 key 打醒目 banner（非埋在 config dump 里的 WARN）；全 endpoint 无 key 的请求合成 vmr 侧错误（"all N endpoints for 'coding' have no API key — set ${...}"）而非透传上游 401 + Cloudflare 噪声 |
-| **README Quick Start 加 `vmr diagnose` 作为第 3 步** | 0.2天 | 0 | 高（它做 DNS+TLS+key+真实 echo+路由表一屏红绿灯 = 战略文档 §6.2 想要的演示素材，但 `grep -c diagnose README.md` = 0） | **高** | **P0** | 纯文档改动 |
+| ✅ **`config.minimal.yaml`（~10 行）+ README Quick Start 改用它** | 0.5天 | 极低 | 高（消除最大摩擦点——当前唯一模板 470 行 83% 注释 + 投机模型名） | **高** | **P0** | 实测 9 行就能端到端跑通。`config.example.yaml` 顶部第一行改为"这是完整注解参考，只想跑起来用 minimal" |
+| ✅ **让"忘设 key"失败可读** | 1天 | 低（不碰成功路径 byte-faithful） | 高 | **高** | **P0** | `vmr start` 缺 key 打醒目 banner（非埋在 config dump 里的 WARN）；全 endpoint 无 key 的请求合成 vmr 侧错误（"all N endpoints for 'coding' have no API key — set ${...}"）而非透传上游 401 + Cloudflare 噪声 |
+| ✅ **README Quick Start 加 `vmr diagnose` 作为第 3 步** | 0.2天 | 0 | 高（它做 DNS+TLS+key+真实 echo+路由表一屏红绿灯 = 战略文档 §6.2 想要的演示素材，但 `grep -c diagnose README.md` = 0） | **高** | **P0** | 纯文档改动 |
 | `vmr check -json` + `vmr diagnose`/`check`/`status` 三者 `-json` 齐全 + 一个 `doctor` 摘要 | 0.5-1天 | 低 | 中（演示素材；战略文档自列的 P0 未完成项） | 中 | P1 | |
 | `vmr service install` 做进二进制，砍 `vmr.sh` 的 service 模式（~150 行 launchd/systemd 渲染） | 2-3天 | 低 | 中高（更符合"单二进制"叙事；当前生产部署功能锁在不随 release 发的 dev 脚本里） | 中 | P1 | |
 | CLI 打磨：修 flag 渲染 bug、从 flag 帮助和日志清除 §-编号 + 内部术语、`-h` 退出 0 | 1天 | 低 | 中（B17；违反项目自己的 CLAUDE.md） | 中 | P1 | |
@@ -354,10 +360,12 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 ### 5.4 性能 / 正确性深化
 
+> **状态（2026-08-28 第二轮）**：**两项 P1 已落地**（✅ 行，详见 §10.3）。`analyze` 内存只做了 `stitch.go` blob 索引的最小动作（降常数，不改分桶前提）——按日分桶仍未做。P2/P3 行未做。
+
 | 项 | 成本 | 风险 | 价值 | ROI | 优先级 | 说明 |
 |---|:---:|:---:|:---:|:---:|:---:|---|
-| **`vmr analyze` 内存曲线压缩** | 中 | 中（按日分桶释放依赖"时间严格单调"隐蔽前提） | 高（用户第一次拿季度日志跑就会 OOM） | 中高 | **P1** | 实测 15,824 条 = **3.75GB RSS / 862s**。KNOWN_ISSUES 1.2 说触发点 3 万条/4GB——那是 `report` **单独**跑；组合 `analyze` 路径在 1.5 万条已 3.75GB，**触发点约 2 万条不是 3 万**。最小动作：`stitch.go:225` 的 `buildBlobLineageIndex` 里 `map[Hash]map[int]bool` 换成排序切片 / bitset |
-| `include_usage` 可见性告警 | 0.5天 | 0 | 高 | **高** | **P1** | `metric: tokens`/`cost` 在 openai-completions 流式端点上，客户端不发 `stream_options:{include_usage:true}` 时 vmr **永远看不到 usage**，100% 字节估算。vmr 不能注入（byte-faithful）。诚实做法：`vmr check` 告警 + `/status`/`report` 提示 `estimated_pct` 持续 ~100%。**目前全代码库零处提及 `include_usage`——最常见的真实精度失败且完全不可见** |
+| ✅（部分）**`vmr analyze` 内存曲线压缩** | 中 | 中（按日分桶释放依赖"时间严格单调"隐蔽前提） | 高（用户第一次拿季度日志跑就会 OOM） | 中高 | **P1** | 实测 15,824 条 = **3.75GB RSS / 862s**。KNOWN_ISSUES 1.2 说触发点 3 万条/4GB——那是 `report` **单独**跑；组合 `analyze` 路径在 1.5 万条已 3.75GB，**触发点约 2 万条不是 3 万**。**已做**：`stitch.go` `buildBlobLineageIndex` 的 `map[Hash]map[int]bool` → `map[Hash][]int`（去掉数百万单元素小 map 的头开销）。**未做**：按自然日分桶释放。 |
+| ✅ `include_usage` 可见性告警 | 0.5天 | 0 | 高 | **高** | **P1** | `metric: tokens`/`cost` 在 openai-completions 流式端点上，客户端不发 `stream_options:{include_usage:true}` 时 vmr **永远看不到 usage**，100% 字节估算。vmr 不能注入（byte-faithful）。**已做**：`config.Check()` 新增 `checkQuotaUsageVisibility`（SeverityWarning）+ `vmr status` / `vmr report` 在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示 + UserGuide/.zh 新增说明段。 |
 | `report` 第三趟扫描缓存（KNOWN_ISSUES 1.1） | 中 | 中高（`collect()` 触及会话/任务边界判定正确性） | 中（缓存收益已证 5.2×） | 中 | P2 | 先补 cold/warm 一致性测试基建再动 |
 | `story` golden 测试 fixture 加厚 | 中 | 低 | 中（当前 3 条合成记录，无 compaction/stitch/failover——价值和风险恰在这些路径） | 中 | P2 | 用 `t.TempDir()` 绕 jsonl gitignore 约束 |
 | `linkCompactions` 未命中率汇总成一行 summary（而非逐条刷 stderr）；`ExtractEntities` O(n²) span 包含过滤改单趟；慢 e2e 测试改 opt-in | 各小 | 低 | 低 | 中 | P3 | 交互体验糖 |
@@ -384,11 +392,13 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 **前置声明**：对一个 0 用户项目，"加功能"几乎都是错的方向。下表按"能否帮项目拿到第一个真实用户"排序。
 
+> **状态（2026-08-28 第二轮）**：**E1、E2 已落地**（✅ 行，详见 §10.4 / §10.5）。**E3 本轮 hold**（用户决定——见 §10.6 的说明与遗留判断）。E4–E9 未做。
+
 | # | 方向 | 成本 | 风险 | 价值 | ROI | 优先级 | 说明 |
 |---|---|:---:|:---:|:---:|:---:|:---:|---|
-| **E1** | **HTML 单文件渲染 + 脱敏**（设计文档 §8，未实现） | 中 | 低（纯渲染层，事实层不动） | **高** | **高** | **P1，唯一真心推荐的新增** | 171MB / 446 份 Markdown 是"内部工具"产物，含完整对话正文 + 用户 `~/.zshrc` + 内部路径。**脱敏是"能分享给团队外"的前置条件**，而"能分享"是这个项目从 3-star 走向有用户的唯一现实杠杆——"agent flight recorder"是核心壁垒，但壁垒锁在一个不能给别人看的产物里就不是壁垒。单文件自包含 HTML（内联 CSS/JS）+ 脱敏模式（结构和指标保留，正文替换为长度占位 + 类型标签） |
-| **E3** | **per-virtual-model 预算硬闸**（战略文档 P1，仍未做） | 1.5-2天（纯 token 版） | 低 | 高 | **高** | **P1** | 现在的健康机制全是事后反应。**一个进入死循环的 agent 可以一夜烧光整月额度，vmr 全程忠实转发一句话不说**——这是每个 bootstrap 用户的恐惧。内存态预算注册表（仿健康注册表），请求入口只查一次，触顶 = 明确拒绝 + 可解析错误（**绝不静默降级到便宜模型**），每日零点 + 进程重启都重置（"防呆不防欺诈"，不引入持久化）。快、安全、普适、能自我用审计日志验证 |
-| **E2** | **软屏蔽（2xx 但内容为空/被替换）升级为可 failover**（战略文档 P1，仍未做） | 2-3天 | 中高（清单里架构风险最高项——要把"2xx 即刻上报健康并开始转发"这个隐含前提拆开） | 高 | 中高 | P1（若走分发路线） | 国产厂商特有痛点，agent 无感知基于空回复继续跑，无人值守时比 429 更危险。**范围收窄到非流式（buffered）路径**（流式从第一个 payload event 起已在边转发，技术上做不到 failover）。判据收窄到"标记命中 **且** 有效内容为空/极短"。复用现有 `ErrContent`。**这是全竞品表唯一的能力，是中文文章选题的实际支撑** |
+| ✅ **E1** | **HTML 单文件渲染 + 脱敏**（设计文档 §8，未实现） | 中 | 低（纯渲染层，事实层不动） | **高** | **高** | **P1，唯一真心推荐的新增** | 171MB / 446 份 Markdown 是"内部工具"产物，含完整对话正文 + 用户 `~/.zshrc` + 内部路径。**脱敏是"能分享给团队外"的前置条件**，而"能分享"是这个项目从 3-star 走向有用户的唯一现实杠杆——"agent flight recorder"是核心壁垒，但壁垒锁在一个不能给别人看的产物里就不是壁垒。单文件自包含 HTML（内联 CSS/JS）+ 脱敏模式（结构和指标保留，正文替换为长度占位 + 类型标签）。**已落地为 `vmr analyze -journey <id> -html [-redact]`（仅单命中），完整瀑布 UI**。 |
+| ⏸ **E3** | **per-virtual-model 预算硬闸**（战略文档 P1，仍未做） | 1.5-2天（纯 token 版） | 低 | 高 | **高** | **P1** | 现在的健康机制全是事后反应。**一个进入死循环的 agent 可以一夜烧光整月额度，vmr 全程忠实转发一句话不说**——这是每个 bootstrap 用户的恐惧。内存态预算注册表（仿健康注册表），请求入口只查一次，触顶 = 明确拒绝 + 可解析错误（**绝不静默降级到便宜模型**），每日零点 + 进程重启都重置（"防呆不防欺诈"，不引入持久化）。快、安全、普适、能自我用审计日志验证。**本轮 hold（用户决定）**——见 §10.6。 |
+| ✅ **E2** | **软屏蔽（2xx 但内容为空/被替换）升级为可 failover**（战略文档 P1，仍未做） | 2-3天 | 中高（清单里架构风险最高项——要把"2xx 即刻上报健康并开始转发"这个隐含前提拆开） | 高 | 中高 | P1（若走分发路线） | 国产厂商特有痛点，agent 无感知基于空回复继续跑，无人值守时比 429 更危险。**范围收窄到非流式（buffered）路径**（流式从第一个 payload event 起已在边转发，技术上做不到 failover）。判据收窄到"标记命中 **且** 有效内容为空/极短"。复用现有 `ErrContent`。**已落地为 `soft_block_failover`（虚拟模型级 + endpoint 级两级开关，缺省关）**。 |
 | E8 | `vmr analyze` 与路由核心解耦，做成能吃 CCR / LiteLLM / Helicone 日志的"agent 运行分析器" | 中高 | 中（牺牲"字节忠实所以可信"论证——翻译型 gateway 的日志已被改写） | 高 | 中 | **战略选项，需用户决策** | 如果目标是让 Pillar B（事实层这块真资产）被人用到，这可能是唯一有量的分发路径——借它们已有的用户。与 E1 不冲突，但方向上是"承认独立分发走不通" |
 | E4 | rolling-window quota（Claude Code Pro/Max 严格滚动窗口） | 中（~200 行 + Ring 平滑） | 中 | 中（headline 用例但目前只近似） | 中 | P3（且应先有真用户要它） | 要么做，要么别在 README / Strategy 里当卖点讲（S12） |
 | E5 | 第 4 个 ingress 协议（gemini） | 中 | 低 | 视需求 | — | 按需 | 架构真的 ready：`BuildSnapshot`/`strategy`/`config`/`CanonicalRequest` 协议无关，`IngressPath`/`runProbe`/`diagnose` 已有 per-protocol case。"新包 + 1 blank import + 1 路由行 + probe body" |
@@ -556,3 +566,84 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 | **B3 池移除 `json.Marshal(s.Rec)`** | 外部反馈 1.3 | **确定不做**。当前校验池逐字对齐评审要求移植的 `_eval/calibrate_p1b.go` 参考实现。核实 `chatmsg.RenderContent`（经 `Step.NewEvents`）已无截断地覆盖 tool_result 正文，`json.Marshal` 主要是冗余 + 元数据；移除它换来的是极少的元数据串误放行 ↓、但极少的漏放行 ↑ + 更多代码，在 0 用户、评审已建议考虑冻结的可选功能上不划算。 |
 | **转义 `SessionRow.Alias`** | 外部反馈 1.2 | **确定不做（非真实问题）**。`Alias` 恒为 `fmt.Sprintf("s%02d", i+1)`，`ID` 恒为 `l-<hex>`，均机器生成、字符集固定、零用户内容。转义它防的是不存在的注入面。 |
 | **B3 的替代"直接冻结 LLM 层（S4）"** | 评审 §5.1 | 未采纳（选择"修"）。S4 本身（把 6 检测器缩到 2 个、其余移 `_eval/`）仍是一个独立的简化建议，本轮未做，留待后续。 |
+
+---
+
+## 10. 执行情况记录（§5.2 / §5.4 / E1 / E2，2026-08-28 第二轮，Sonnet 5）
+
+> 范围：§5.2 DX 的 3×P0、§5.4 的 2×P1、§6 的 E1 / E2。**E3 本轮 hold**（用户决定，§10.6）。
+> 其余（B10–B14、§5.3 S1–S12、E4–E9、§7 分发动作、§5.5 剩余项）**未做**。
+> 每个阶段一个 commit，落在分支 `feat/review-dx-perf-ext`（其父是已 ff-merge 进 main 的 B1–B9）。
+
+### 10.1 执行方式
+
+先通读上下文（CLAUDE.md、4 份 v4 设计文档相关章节、KNOWN_ISSUES、涉及源码），对 6 个任务项逐条回到源码复核根因与方案是否成立、有无改进空间——结论：方向全部成立，其中
+- E1 按用户选择做**完整瀑布 UI（仅 `-journey` 单命中）**，不是 MVP 样式化 HTML；
+- E2 按用户提议做**虚拟模型级 + endpoint 级两级开关**（评估：与既有 `capabilities` / `fallback` 的"模型基线 + endpoint 覆盖"惯例一致，合理，采用），并沿用评审已收窄的判据（非 SSE + 标记命中 AND 有效文本极短）+ 复用 `ErrContent`；
+- E3 hold（用户在澄清阶段判断闸/桶两模式已按周期长短自动判断，本轮不做）。
+
+开工前就 4 点向用户确认并获答复：E1 形态、E3 hold、E2 两级开关、提交粒度（先把 B1–B9 分支合并 main、再开新分支、每阶段一 commit）。
+
+### 10.2 §5.2 DX —— commit `feat(dx): minimal config, readable missing-key failure, diagnose in quickstart`
+
+| 项 | 改动 | 测试 |
+|---|---|---|
+| `config.minimal.yaml`（+ `.zh`） | 新增 ~15 行模板（1 provider `deepseek` + `coding`/`claude` 两个虚拟模型，覆盖 OpenAI 与 Anthropic 两个 ingress）；`config.example.yaml`/`.zh` 顶部加一行指路；README/`.zh` Quick Start step 2 改 `cp config.minimal.yaml` + `export DEEPSEEK_API_KEY` | `TestLoad_RepoMinimalConfig_Parses`（两个文件都 load/validate，防 bit-rot——B16 教训） |
+| 缺 key 可读 | `expandEnv` 改签名返回展开为空的 `${VAR}` 名列表 → `Config.EmptyEnvRefs`；`cmd_start` 的 `logConfigCheckIssues` 重写：`SeverityWarning` 仍是一行安静 WARN，`SeverityError`（缺 api_key）或有空 `${VAR}` → 打带框 `CONFIG PROBLEMS` banner 逐条列出；`router.Serve` 早期新增 `rejectIfAllKeyless`——某虚拟模型 `route.Endpoints` 全部 `APIKey==""` 时直接回 `vmr_no_api_key` 503（点名模型 + endpoint 数），不再让每 attempt 401 上游 + 10min 冷却 | `TestParseTracksEmptyEnvRefs`、`TestLogConfigCheckIssuesBanners{Errors,EmptyEnvRefs}`、`TestLogConfigCheckIssuesWarningStaysQuiet`、`TestServe_AllEndpointsKeyless`（断言上游 0 hits） |
+| README 加 diagnose | Quick Start 新增 **Verify** 步骤（`vmr diagnose`）介于 Run 与 Connect 之间，步骤重编号；`.zh` 同步 | 纯文档 |
+
+文档同步：`docs/UserGuide.md`/`.zh` 的"启动与热重载检查"段重写（banner + 空 env 名 + 运行期 `vmr_no_api_key`）；`CHANGELOG.md [Unreleased]`。
+`router.Serve` 因新增调用触及 archtest 函数长度预算（190 行豁免），已把 keyless 检查整体抽成 `rejectIfAllKeyless` 方法 + 压掉一个空行落回 190，未抬预算数字。
+
+### 10.3 §5.4 —— commit `perf(analyze): compact blob-lineage index; warn on invisible streaming usage`
+
+| 项 | 改动 | 测试 |
+|---|---|---|
+| analyze 内存（最小动作） | `ctxgraph/stitch.go` `buildBlobLineageIndex`：`map[Hash]map[int]bool` → `map[Hash][]int`（每个 hash 一条 posting list，去掉数百万个单元素小 map 的 header + bucket 开销）。去重不用 set：外层按 lineage 迭代、同一 `l.Idx` 的 append 连续，"末元素相等则跳过"即可；消费者 `resolveStitch` 只 `for _, idx := range`（它另建 overlap map，顺序无关） | `TestBuildBlobLineageIndex_DedupsWithinLineage`（同一 lineage 多个 manifest 重复 hash 只 post 一次；每个 hash 的 list 恰为持有它的不同 lineage） |
+| `include_usage` 可见性 | `config.Check()` 新增 `checkQuotaUsageVisibility`：某 provider 有 `metric: tokens`/`cost` limit 且在任一 `openai-completions` endpoint 上 → `SeverityWarning`（流式响应无 usage 块除非客户端发 `stream_options.include_usage:true`，vmr 不注入；预期 `estimated_pct` 贴近 100）。`vmr status`（`cmd_status_render.go`）与 `vmr report`（`section_provider.go` + `i18n/report_provider.go` 新增 `IncludeUsageFootnote` EN/ZH）在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示 | `TestCheckWarnsOnStreamingUsageInvisibility`（含 `HasErrors` 不受影响断言）、`TestCheckNoUsageWarningForAnthropic` |
+
+文档同步：`KNOWN_ISSUES §1.2` 触发点按 `analyze` 组合路径重标定为 ~2 万条 + 补记 blob 索引收窄；`KNOWN_ISSUES §3.47`；`UserGuide.md`/`.zh` 额度段新增 "include_usage gap" 说明；`CHANGELOG.md`。
+`stitch.go` 的 `map[Hash]map[int]bool` 表示是实现细节，未改 Analytics 设计文档（该文档只讲"倒排索引"这一层原理，不描述内部数据结构——符合 CLAUDE.md"principles not implementation detail"）。
+
+### 10.4 E2 软屏蔽 → failover —— commit `feat(router): opt-in soft-block failover`
+
+| 层 | 改动 |
+|---|---|
+| config | `VirtualModel.SoftBlockFailover *bool` + `EndpointGroup.SoftBlockFailover *bool`（缺省 nil = 关；endpoint 显式值覆盖模型级默认——与 `capabilities`/`fallback` 同款惯例） |
+| core / snapshot | `core.Endpoint.SoftBlockFailover bool`；`buildEndpoints` 解析 `eg.SoftBlockFailover ?? m.SoftBlockFailover ?? false` |
+| respnorm | `ContainsSoftBlockMarker([]byte) bool` 导出（包内已有 `containsSoftBlockMarker`——MiniMax `"input_sensitive":true` / `"output_sensitive":true` 字节子串） |
+| adapter | 新增 `internal/adapter/response.go` `ResponseAssistantText(protocol, body) (textRunes int, hasToolCall bool, ok bool)`——按 3 协议解析非流式 2xx body 的助手文本 rune 数 + 是否含 tool_call（`chatmsg` 属分析半区不能引，故放 adapter 协议域） |
+| router | 新增 `internal/router/softblock.go` `checkSoftBlock`：`tryOne` 在 2xx 且 `ep.SoftBlockFailover` 且非 SSE、非压缩时预读到 `softBlockPeekCap=64KB`——超过即断定非空屏蔽、恢复流式转发（`io.MultiReader`）；读满且 `ContainsSoftBlockMarker` && `ResponseAssistantText` 判定 `ok && !hasToolCall && textRunes ≤ 64` → 按 `handleErrorResponse` 的 `ErrContent` 分支处理（`ReportNeutral`、attempt 记 `content` 类、零冷却、`return done=false, uerr={200,hdr,body}`）。全候选耗尽时客户端原样收到最后一次响应（与 `ErrContent` 一致） |
+
+测试：`adapter/response_test.go`（3 协议 × 空/真实/tool_call/未知协议/不可解析/错误形状）、`router_serve_test.go` 的 `TestServe_SoftBlock{FailsOverWhenOptedIn,ForwardedWhenNotOptedIn,RealAnswerNotFailedOver,EndpointOptOutOverridesModel}`。
+`router.go` 因新方法触及文件行数预算（700），已把 `checkSoftBlock` + 两个常量 + `readCloser` 整体放独立文件 `softblock.go`。
+文档同步：`config.example.yaml`/`.zh`（`soft_block_failover` 注释，模型级 + endpoint 级两处）；Core 设计文档 §5.3 新增"可选：`soft_block_failover`"段 + §13.1 路线图措辞更新；`UserGuide.md`/`.zh` failover 段新增说明；`KNOWN_ISSUES §3.47`；`CHANGELOG.md`。
+
+### 10.5 E1 HTML 瀑布 + 脱敏 —— commit `feat(analyze): single-file HTML journey renderer with redaction`
+
+| 层 | 改动 |
+|---|---|
+| 渲染器 | 新增 `internal/story/render_html.go`（`RenderHTML(j, m, findings, lang, redact) string`——纯 view over 同一个 `*story.Journey`，不重解析、不新增判断）+ `render_html_assets.go`（内联 CSS + 一段内联 JS：`IntersectionObserver` 做时间轴滚动高亮；theme-aware `prefers-color-scheme`；零外部请求）。左侧粘性时间轴（Task/Step 锚点导航）+ 右侧 Step 卡片瀑布：卡片含 Step 号 / 时间 / 模型 / failover 徽章 + endpoint、指令、transition 标记（Edit / StitchEdge / SysChanged / Compaction 信息损失摘要含 swallowed/survived 实体）、"本轮进入上下文"（NewEvents 中非 assistant 角色）、"模型响应"（Reasoning 折叠 / RespText / ToolCalls 名+args 折叠 + 配对的 tool result / NoReply） |
+| i18n | 新增 `internal/i18n/story_html.go`（`StoryHTMLText` + `StoryHTML(lang)`，EN/ZH 全部固定串） |
+| CLI | `cmd_analyze.go` 新增 `-html` / `-redact` flag + `analyzeRun.htmlOn/redactOn`；校验：`-redact` 需 `-html`；`-html`/`-redact` 需 `-journey`；多命中 `-journey` + `-html` 报错（与 `-llm-addr` 同款"一次一个 Journey"约束）。`cmd_story.go` `renderJourney` 加 `htmlOn, redactOn` 参数，`writeJourneyFile` 之后写 `stories/journey-<id>.html`（`j.Partial` 时 `-partial.html`），**0600**（未脱敏版仍含完整正文） |
+| 脱敏 | `-redact` 时 `bodyText`/`jsonBody` 把每段正文（指令、消息、RespText、Reasoning、tool args/results、标题）替换为 `‹text: N chars›` / `‹json: N chars›`（N = rune 数）；角色、token 数、工具名、时间、compaction/stitch 标记全保留 |
+
+测试：`render_html_test.go`——`TestRenderHTML_Structure`（关键结构串 + 无外部资源引用断言）、`TestRenderHTML_RedactLeaksNothing`（构造含 `SECRET-LEAK`/`TOKEN=abc` 的合成 journey，断言脱敏输出零泄漏 + 结构存活 + 无 `<pre class="text/json">`）、`TestRenderHTML_ZHChrome`。另在 `examples/sample-audit.jsonl` 上端到端跑通、HTML5 解析器验证嵌套无误、给用户发了完整版 + 脱敏版预览。
+文档同步：Analytics 设计文档 §8 对应条目从"尚未实现"改为已实现并写清用法；`UserGuide.md`/`.zh` 的 journey 渲染段 + CLI 参考表加 `-html`/`-redact`；`KNOWN_ISSUES §3.47`；`CHANGELOG.md`。默认套件**不**出 HTML index（用户选"仅 -journey"）。
+
+### 10.6 遗留与留给用户判断
+
+- **E3（per-virtual-model 预算硬闸）本轮 hold**——用户在澄清阶段的判断是"闸/桶两种模式我们之前的方案里已经有了，只是按周期长短自动判断，先 hold"。
+  一点值得用户后续判断的差异：**quota 的 gate/bucket 是"配速"——它从不拒绝请求，只在同优先级梯队内重排端点**（Quota 文档"它不会做的事"节自陈：额度耗尽不触发降级、不拒绝，那是 health 的职责）。E3 想要的是**硬急停**——一个进死循环的 agent 触顶后请求被**明确拒绝**（可解析错误，绝不静默降级），每日零点 + 进程重启重置、无持久化。两者目标不同：配速降低"跑爆某个套餐"的概率，硬闸给"一夜烧光"设一个确定性上限。若未来要后者，仍需一个独立的内存态机制（仿 health 注册表，请求入口查一次），不是把 quota 的旋钮拧一下能得到的。**此判断留给用户**。
+- **E2 的行为变更**：仅对**显式开启 `soft_block_failover` 的端点**生效，默认关。开启后非流式软屏蔽响应从"客户端收到干净空 200"变为"failover 到下一候选；全失败则收到最后一次响应"。attempt 审计记 `content` 类（一个 200 被归类为内容拦截）——分析半区 `error_classes` 分桶会看到，是刻意的（评审要这类拦截可见）。
+- **E1 未覆盖**：默认套件不出 HTML index；`-compare` / `-corpus` 无 HTML；`-redact` 目前只作用于 `-html`（不脱敏 Markdown）。这些都是本轮范围的刻意边界，不是缺陷。
+- **未触碰**：§5.5 更宽的文档清单（CLAUDE.md "co-equal" 改写、`core.go` admission rule、Core §6.6 stale 等）、§5.3 的任何简化/删减建议、B10–B14。
+
+### 10.7 验收结果
+
+- `go build ./...`、`go vet ./...`、`gofmt -l internal cmd`（无输出）全部通过。
+- `go test ./...` 全绿（35 个包 ok，0 FAIL）。
+- `go test -race`（router / config / adapter / ctxgraph / story / i18n / report / cmd/vmr）全绿。
+- `go test ./internal/archtest/...` 全绿（`router.go` 文件预算与 `Serve` 函数预算两处触线，均以拆文件 / 拆函数解决，未抬预算数字）。
+- `vmr check` 对 `config.example.yaml` / `.zh` / `config.minimal.yaml` / `.zh` 四个文件均校验通过。
+- E1 在 `examples/sample-audit.jsonl` 上端到端生成完整版 + 脱敏版 HTML，脱敏版经断言确认零对话正文泄漏。
