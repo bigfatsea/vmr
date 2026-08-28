@@ -74,3 +74,6 @@ coverage.html
 # see loadtest/gentargets) is regenerated every run and deleted when the run
 # finishes — this only catches it if a run gets interrupted mid-way.
 /loadtest/targets*.json
+
+# alma agent tooling scratch state
+.alma-snapshots
