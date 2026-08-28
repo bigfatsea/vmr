@@ -321,9 +321,9 @@ func TestHashFile_MissingFile(t *testing.T) {
 // differently (a different cwd, absolute vs. relative). The cache key
 // already normalizes past this (CanonicalPath), but the cached Manifests'
 // own Path field must also follow the CURRENT run's spelling — it's what
-// BlobIndex.FetchAll/records.go's FetchRecords later os.Open to recover
-// original message content, so a stale Path from a prior run's cwd would
-// fail to open under the current one.
+// records.go's FetchRecords later os.Open to recover original message
+// content, so a stale Path from a prior run's cwd would fail to open under
+// the current one.
 func TestScanCached_HitRebindsManifestPathToCurrentInvocation(t *testing.T) {
 	t.Parallel()
 	path := writeJSONL(t, []audit.Record{

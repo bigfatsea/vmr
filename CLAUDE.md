@@ -146,6 +146,16 @@ root allowed to see both halves at once.
   paragraph on top of it. Git history already holds the story. The exceptions are documents
   whose whole purpose *is* the trail: review reports, `CHANGELOG.md`, and code comments
   recording why a superseded approach was wrong.
+- **No changelog-style revision — even inside review reports.** When revising a section
+  (whether asked to "rewrite" or to "review and refine" / "refine" / "polish"), state the
+  final reasoning once, as one coherent pass: the structure, the cause analysis, the
+  recommendation, the implementation detail — the whole thing told straight. Do NOT layer a
+  correction on top of the prior text ("originally we thought X; on 2026-08-28 review we
+  reconsidered and now think Y; a later pass narrowed it to Z"). "Rewrite" means replace the
+  whole section. "Refine" means locally rewrite the affected passages in place — often not a
+  full rewrite, but never a patch-on-patch dated note with the superseded paragraphs left
+  standing. A short "supersedes the earlier §N" pointer at the top is fine; a running
+  history of how the thinking evolved is not.
 - **No section numbers in cross-references.** Cite a document and a section *name*
   ("Part 1's Sticky Model section"), never `§6.5` — numbers renumber and then silently point
   at the wrong thing, while a name keeps resolving after a reorganization.

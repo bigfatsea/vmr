@@ -715,84 +715,193 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 ---
 
-## 12. 分析结论：报告格式与数据层策略（JSON / Markdown / HTML，2026-08-28）
+## 12. 分析结论：报告产物的数据层与展示层策略（2026-08-28 复核重写）
 
-> 背景：E1（§10.5）为 `-journey` 产出单文件 HTML 后，讨论"是否可全量以 HTML 取代 Markdown"。本节先修正一处易误解——**"只留 Markdown"不等于"删掉 JSON"**——再基于对 38 份实际报告、渲染器源码、LLM 解读层输入来源、以及日志索引现状的事实核对，给出结论。
+> 本节整体替换原第 12 章，以下为最终结论。输入是对渲染器源码（`render_html.go` / `render_md*.go` / `render_compare.go`）、LLM 解读层（`llm_findings.go` / `llm.go` / `BuildEvidencePack*`）、`.parse-cache` / `ScanCached` / `StitchGraph` / `setupStoryRun` 机制、`ctxgraph` 坐标层、`vmr-stories.json` / `vmr-requests.json` 行结构、git 历史（`b771043`）以及 `reports/` 真实产物的逐条核对。
+> 相对最初围绕"能否用 HTML 全量取代 Markdown"的讨论，本节确认三条方向、订正两条形态：**确认**数据层与展示层分离、展示层格式按主导消费场景选、`journey-*.md` 保持默认；**订正一**——不做 MD→HTML 迁移，HTML 不是 Markdown 的直译也不是它的超集，而是一份为分享与快速理解重新设计的看板，Journey 与 Compare 各需一份（§12.4）；**订正二**——不新增 `vmr-request-index.jsonl`，"渲染单个 journey 不重扫全量"靠给已有产物补字段 + 一条 warm path 实现（§12.5）。
 
-### 12.0 先立原则：JSON 决定数据，MD/HTML 决定展示
+### 12.0 结论提要
 
-- **数据层与展示层分离**。凡产物承载关键结构化数据 → **JSON（数据）与 MD/HTML（展示）双版本**，两者不是二选一。
-- **JSON 结构稳定、不可删**。JSON 是围绕它展开工作的数据契约，MD 的格式可以来回调、JSON 的结构相对稳定；即使加参数控制"是否同步输出展示层"，**JSON 输出也永远保留**。
-- **只留展示层、不产 JSON** 的仅有例外：该产物**没有独立原始数据**、纯粹是给人阅读的视图，其数据层在别处已有归属。
-- 格式选型（§12.3）只决定**展示层**用 MD 还是 HTML；**数据层 JSON 一律保留**，不参与"MD vs HTML"的取舍。
+- **审计 JSONL 是唯一权威数据层**。`vmr-report.json` / `vmr-requests.json` / `journey-<id>.json` / `compare-*.json` 都是它**可秒级重新生成的投影**——作为机读契约要守（降级要显式失败，不能静默变形），但不是需要与审计日志同等保护的原始事实。
+- **展示层格式按"谁、在什么环境里看"选，不按表达力上限选**。vmr 是 CLI-first 工具，宏观报表 / 请求索引 / stories / corpus / details / evidence 的主场景是终端 + 编辑器 + grep——**保持 Markdown**，换 HTML 只有成本没有收益。
+- **Journey / Compare 的 HTML 是分享看板，不是转写**。当前 `-html` 产出的"时间轴 + Step 卡片瀑布"是一份折叠版对话流：结构不凸显、细节全堆在页面上，分享价值有限。目标形态是单页滚动、分 3–5 个板块、结构与 Findings 前置、逐 Step 链回 `details/*.md`；Compare 同理需要一份对照看板（含 LLM 解读块）。用户已定为**第一批落地**（§12.7），做法是**替换**当前瀑布、不是把它补成 MD 超集（§12.4）。
+- **不新增索引产物**。索引本来就分三个高度——`.parse-cache`（file→manifests，内容哈希分片、增量）+ `vmr-stories.json`（journey→files/lineages）+ `vmr-requests.json`（request→坐标/session/task）——各已 ~90% 到位。真正的缺口是**一个字段**：`vmr-stories.json` 行补 `stitch_edges`，让"渲染单个 journey"能重放已扫结果、不重跑全量 `StitchGraph`（§12.5 场景 B）。P2–P3，随语料规模线性恶化。
+- **`request → 文件:行号` 不需要索引表**——`req` 坐标（`basename:line`）本身就是自描述的定位符，`vmr replay -req <coord>` / `vmr analyze -journey <id>` 已覆盖单条回捞与单 journey 下钻。
+- **`request → journey` 也不需要新字段**——`vmr-requests.json` 每行的 `session` 已经是 lineage id（`l-<hash8>`），`vmr-stories.json` 每行的 `lineages` 是 journey→lineage id 列表，两者做集合成员判断即得（P6.1 就是为此设计的）。denormalize 一个 `journey` 字段没有任何具名消费者。
+- **默认批量套件的 detail 死链接**：批量路径把 detail 目标渲染成行内坐标而非链接（复用 `report` 半区 P7.1 `detailCell` 同款解法），不是让默认套件也物化（§12.5 末 + §11.3 T1.2）。
 
-### 12.1 四个事实核对（推翻两个前提、澄清一个数据归属）
+### 12.1 事实核查（原 F1–F4 逐条复核）
 
-| # | 事实 | 结论 |
-|---|---|---|
-| **F1** | LLM 解读层**从不读任何渲染出的 `.md`**：`story/llm_findings.go:519` `searchableTranscript(j *Journey)` 从 Journey 结构体重建文本，`story/llm.go:145` `BuildEvidencePack(jA/jB/cmp)` 从结构化对象组装证据包 | "MD 留给 LLM 解读"这一论点在 vmr 里**不成立**——机器界面是 JSON/结构体，不是 MD。这恰好印证"JSON 才是数据层" |
-| **F2** | 当前 `journey-*.html` 是 MD 的**真子集**：`render_html.go:23` 注释自承 "MVP view uses j alone"——决策脊柱、Findings、LLM Findings、System Prompt 证据均未渲染；`render_md.go` 的 `renderDecisionSpine`/`renderFindingsSection` 只有 MD 有 | **不能先删 MD 再补 HTML**；必须先把 HTML 补成超集再删 MD，顺序反了会丢展示内容 |
-| **F3** | `details/*.md`（1522 个）是唯一无 JSON 孪生的产物；但每个 detail 本质是 `audit.Record` 的一条视图（`reqdetail` 是"纯函数 of one audit.Record"） | 其数据层就是 `logs/*.jsonl` 原始记录，**已天然存在**，故 details 是 §12.0 "只留展示层"的合法例外，无需另造 JSON |
-| **F4** | **索引"并没有丢"**：曾存在 `ctxgraph/blobindex.go` 的 `BlobIndex`（message-hash → 文件:行号:idx），commit `b771043`（2026-08-21 Phase 11 cleanup）作为 dead code 删除，功能被 Manifest 自带 `Path`/`Line`/`Req` 坐标取代；且 `vmr-requests.json` 每行 `req: 'vmr-audit-2026-08-22.jsonl:5'` 的 **request → 源文件:行号 映射一直都在**（实测 1522 行全部带坐标）；`vmr-stories.json` 的 `files` 字段给出 **journey → 涉及文件** | "索引找不到了"是**记忆偏差**：旧的 BlobIndex 实现被删，但 request→文件 与 journey→文件 两类映射**仍存在且可查**。真正的缺口见 §12.5 |
-
-### 12.2 第一性原理：格式跟随"主导消费场景"，而非"表达能力上限"
-
-"HTML 表达能力 ⊃ MD" 不构成替换理由。展示层格式应由该产物的**主导消费场景**决定：
-
-| 场景 | 消费方式 | 展示层格式 |
-|---|---|---|
-| 终端 / 编辑器 / grep（作者日常） | `less`、`grep -r`、编辑器跳转、git diff | **MD** |
-| 浏览器 / 交互 | 时间轴滚动高亮、折叠、脱敏分享 | **HTML** |
-| 机器 / LLM | 结构化消费 | **JSON（数据层，不参与取舍）** |
-
-vmr 是"本地运行、单二进制、CLI-first"工具（CLAUDE.md 自述），报告的主导消费场景是**终端/编辑器**——`vmr-report.md` 403 行表格、`vmr-requests.md` 1522 个 `details/` 链接在终端/编辑器里是纯文本结构，换成 HTML 后 `less`/`grep` 被样式噪声淹没、git diff 不可读。**HTML 在此处没有带来任何交互增益，只有成本**（新渲染器 + 新 i18n + 浏览器独占）。
-
-### 12.3 报告产物最终形态总表（数据层 + 展示层全量）
-
-> 读法：**数据层 JSON/JSONL 一律保留**（除非该行注明"数据在别处"）；展示层只写该产物实际应产出的那个格式。
-
-| 产物 | 数据层（永留） | 展示层（唯一格式） | 说明 |
+| # | 原判断 | 回源码复核 | 处置 |
 |---|---|---|---|
-| `vmr-report.{json,md}` | `vmr-report.json` | `vmr-report.md` | 403 行纯表格、零交互，MD 够用；HTML 版成本 ≈ Journey HTML 的 5 倍、收益为 0 |
-| `vmr-requests.{json,md}` | `vmr-requests.json`（含每行 `req` 文件:行号坐标） | `vmr-requests.md` | 请求索引，终端 grep 是主场景 |
-| `vmr-requests-<client>.md` | 无独立 JSON（数据源是 `vmr-requests.json` 的子集视图） | MD | 纯展示切片，数据层在 `vmr-requests.json` 已有归属 |
-| `vmr-requests-failed.{jsonl,md}` | `vmr-requests-failed.jsonl` | MD | 失败请求，JSONL 为数据层 |
-| `vmr-stories.{json,md}` | `vmr-stories.json`（含 `files`/`lineages`，journey→文件映射） | `vmr-stories.md` | journey 索引，纯表格 |
-| `vmr-story-corpus.{json,md}` | `vmr-story-corpus.json` | MD | 语料统计，纯表格 |
-| `journey-<id>.json` | `journey-<id>.json`（含 `structure.tasks[].steps[].req` 坐标） | **`journey-<id>.html`**（先补全 HTML 再删 MD，见 §12.4） | 唯一换 HTML 的：长叙事 + 时间轴 + 脱敏分享有真实增益 |
-| `details/*.md` | 无独立 JSON（**数据层是 `logs/*.jsonl` 原始记录**） | MD | §12.0 合法例外，纯视图；已用 HTML-in-MD `<details>` 折叠 |
-| `evidence/*.md` | 无独立 JSON（**数据层是审计记录里的 sysprompt 内容**） | MD | 同上，纯视图 |
+| **F1** | LLM 解读层从不读渲染出的 `.md` | **确认，且比原文更强**。`searchableTranscript(j *Journey)`（`llm_findings.go`）从 Journey 结构体字段 + `json.Marshal(s.Rec)` 重建文本；`BuildEvidencePack` / `BuildSingleJourneyEvidencePack` / `BuildDivergenceEvidencePack` 全部消费 `*Journey` 结构体并 `json.Marshal`。`llm.go` 注释明说"it's the same data journey-<id>.md already renders"——`.md` 与证据包是**同一个结构体的两个平行渲染**，不存在"MD 喂给 LLM"的管线 | 采纳。机器界面是结构体 / 其 JSON 编码，不是任何渲染文本 |
+| **F2** | `journey-*.html` 是 `journey-*.md` 的真子集 | **确认**。`render_html.go` 注释自承 "the MVP view uses j alone"；`RenderMarkdown` 调 `renderSystemPromptHeader` / `renderDecisionSpine` / `renderFindingsSection`，`RenderHTML` 一个都不渲染，LLM section 也不接（`RenderHTML` 拿到的 `findings` 参数目前完全没用上） | 采纳，但不再以"迁移前先补成超集"为目标：既然不迁移（§12.4），HTML 会被重写成一份刻意裁剪的看板，MD/JSON 仍是完整层，子集关系本身没问题。`RenderHTML` 连 `findings` 入参都没用上，正好并进看板重写 |
+| **F3** | `details/*.md` 是唯一无 JSON 孪生的产物，每个 detail 是 `audit.Record` 的一条视图 | **确认，一处订正**。`reqdetail` 包注释："Every function here is a pure function of (audit.Record[, its own/prior ctxgraph.Manifest, taskseg.Profile])"。但"唯一"不准确——`evidence/*.md`（sysprompt / tools）同样无 JSON 孪生，两者的数据层都是审计记录本身 | 采纳，措辞改为"details 与 evidence 都是纯视图" |
+| **F4** | 索引"并没有丢"：`ctxgraph/blobindex.go` 的 `BlobIndex` 在 `b771043`（2026-08-21）作为死代码删除；`vmr-requests.json` 的 `req` 坐标与 `vmr-stories.json` 的 `files` 一直都在 | **确认，三点补充**（见下） | 采纳并扩展 |
 
-**新增产物（§12.5）**：`vmr-request-index.jsonl`（一行一 request 的可增量索引）——见下。
+**F4 的三点补充**：
 
-### 12.4 实施建议（若采纳"Journey 展示层换 HTML"）
+1. **`BlobIndex` 是什么、被什么取代**：它是 `map[Hash]BlobRef`（消息内容哈希 → `Path/Line/MsgIdx`），用途是**渲染时按需回捞消息正文并按内容哈希去重**，不是"请求索引"。删除后由 `Manifest` 自带的 `Path`/`Line`/`Req`（每条记录一份）+ `records.go` 的 `FetchRecords`（按文件批量、每文件只开一次）承担。
+2. **增量索引基础设施其实已经存在**：`{outDir}/.parse-cache/<filehash>.json`——按文件内容哈希分片、`report` 与 `story` 共用、`ScanCached` 增量命中（文件没变就跳过解析，新文件自动补入，重压缩的文件一次性重解析）。设计文档"关键设计取舍"段的"绝不缩小参与图重建的文件集合"是对的——但它针对的是**新文件早于 / 穿插进已索引数据**（§12.5 场景 A2）；**新文件整段更晚**（A1，日常 append）与**语料不变、只渲染单个 journey**（场景 B）是另外两回事，见 §12.5。
+3. **`request → journey` 已经是现成的集合 join**：`vmr-requests.json` 每行的 `session` = 底层 lineage id，`vmr-stories.json` 每行的 `lineages` 是 journey→lineage id 列表，`session ∈ lineages` 即得（P6.1 的设计意图）。`cmd_report_stories_link.go`（P6.2c）已用它给渲染出的 `vmr-requests-<tag>.md` 会话行加了 journey 跳转链接。denormalize 成字段没有具名消费者，不做（§12.5）。
 
-**不是删 MD，而是"HTML 超集化 → 替换"**，顺序不可反；**数据层 `journey-<id>.json` 始终保留，不随 MD 删除**：
+### 12.2 第一性原理：一个数据层，三个消费者，互不替代
 
-1. **补 HTML 缺口**（约 1-2 天，按 archtest 预算拆文件）：决策脊柱（移植 `renderDecisionSpine`）、Findings + LLM Findings（`RenderHTML` 的 `findings []Finding` 参数终于用上）、System Prompt 证据 + evidence 链接；`-redact` 覆盖这些新区块（脱敏是分享前置）。
-2. **改导航**：`vmr-stories.md` → `journey-*.html`、`vmr-report.md` 的 journey 链接、detail 页 `← 返回` 链接改 `.html`（确定性文件名契约有测试锁着，改一处即可）。
-3. **`-details` 物化路径**：journey HTML 里的 detail 链接同步 `.html`。
-4. **删 journey-*.md 生成** + 更新 `cmd_story_report_crosscheck_test.go`（现读 `journey-*.md` 做双半区一致性核对，改读 `journey-*.json`——JSON 是权威层，正好顺理成章）。
-5. **文档同步**：Analytics 设计文档、UserGuide、CHANGELOG（按 CLAUDE.md 惯例 5 处 + `.zh`）。
+**数据层**：审计 JSONL 是唯一不可变、按时间有序、内容寻址的原始数据（设计文档："审计日志本身已经是内容寻址存储……只需要一个索引，不需要数据库"）。`vmr-report.json` / `vmr-requests.json` / `journey-<id>.json` / `compare-*.json` 是它的派生投影——有稳定 schema（作为机读契约要守，降级要显式失败而非静默变形），但**完全可重新生成**（`vmr-requests` 本身就从 `.jsonl` 改过成 `.json`），丢了几秒重跑。"JSON 结构稳定、不可删"应理解为"作为机读契约保留"，不是"像审计日志一样是原始事实"。
 
-**代价**：journey 展示层换 HTML 后，终端 `less journey-*.md`、跨 38 个 journey grep 的能力退化。缓解：`journey-<id>.json` 已存在（可 grep/less），且可保留一个 `-text` 纯文本渲染兜底（未来要时再加，不默认生成）。
+**三个消费者，各渲染一次，互不替代**：
 
-### 12.5 日志→request→journey 可增量索引（新增产物，方案）
+| 消费者 | 消费方式 | 渲染 |
+|---|---|---|
+| 终端 / 编辑器 / grep（作者日常，也是**当前唯一的用户**） | `less`、`grep -r`、编辑器跳转、`git diff` | **Markdown** |
+| 浏览器 / 对外分享 | 一眼看全结构、Findings、关键指标；脱敏 | **HTML 看板**（Journey + Compare，`-html` opt-in，§12.4） |
+| 机器 / LLM / 双半区交叉核对 | 结构化消费 | **JSON**（`journey-<id>.json` 的 `structure` 已是机读契约层，KNOWN_ISSUES 关于"展示层可降级、机读契约不能静默降级"那条已确立） |
 
-**缺口确认**（承接 F4）：现有三类映射分散在三个文件里——`vmr-requests.json`（request→文件:行号）、`vmr-stories.json`（journey→文件）、`journey-<id>.json`（step→文件:行号），且**都不是"以 request 为主键、一行一 request、可增量增补"的统一索引**。要"查某 journey / 某 request 只需读哪几个日志文件、不用重扫全量"，需要一个聚合索引。
+"凡承载关键结构化数据 → JSON 与 MD/HTML 双版本"既不是代码现状也不该是目标：`details/*.md`、`evidence/*.md`、`vmr-requests-<client>.md` 都只有一个渲染，因为它们的数据层是审计日志 / 上游 `vmr-requests.json`，本身不产生独立数据。**规则是**：一个投影按它的消费者渲染，需要几个就几个——Journey 三个（作者读 MD、分享用 HTML、机器读 JSON），宏观报表两个（人读 MD、机读 JSON），纯视图一个。
 
-**方案（JSONL，一行一 request，主键 = `req` 坐标）**：
+`vmr` 是"本地运行、单二进制、CLI-first"工具（CLAUDE.md 自述）。`vmr-report.md` 数百行表格、`vmr-requests.md` 一千余个 `details/` 链接，在终端 / 编辑器里是可 `grep` 可跳转的纯文本结构；换成 HTML 后 `less`/`grep` 被样式噪声淹没、`git diff` 不可读，且**没有任何交互增益**（这几份产物零折叠、零时间轴、零"滚动到哪高亮哪"）。
 
-- 文件 `vmr-request-index.jsonl`，每行一个 request，字段：`req`（`文件:行号`，主键，天然唯一）、`journey_id`（可为空——后台任务/未成 journey 的请求此列为空）、`session`（lineage ID）、`ts`、`model`、`protocol`、`outcome`、`detail_file`。**journey 归属 + 源文件 + 时间 三者在同一行**。
-- **增量增补**：启动时把既有 index 读入内存 `map[req]struct{}`；扫描新日志文件时，`req` 已存在则跳过（分析过的不重填），不存在则追加一行。新增文件自动补入，旧文件已分析的行不动。JSONL 天然避免"整体重写"。
-- **消费方式**：按 `journey_id` 或 `req` 前缀过滤，得到目标行 → 聚合出需读取的日志文件集合 → 只打开这几个文件即可定位/渲染，不再全量重扫。
-- **一个正确性边界要守住**：该索引用于**事后定位/渲染**（读哪几个文件），**绝不用于决定"哪些文件参与扫描/图重建"**——`ctxgraph` 的缝合无时间上限（用户可几天后再回同一锚点），按索引缩小参与重建的文件集合会漏掉跨文件续接，正是设计文档 §2.4 明写的正确性边界。**增量只增补"索引行"，扫描本身仍全量**。
+### 12.3 逐产物形态总表
+
+> 读法："权威数据层"列回答"这份产物的事实从哪来"；"渲染"列是它实际该产出的格式。
+
+| 产物 | 权威数据层 | 渲染 | 定位 |
+|---|---|---|---|
+| `vmr-report.{json,md}` | `vmr-report.json`（`report.Report2` 的公开 schema） | `.md` 纯表格 | 宏观聚合，零交互，MD 够用；HTML 版成本 ≈ Journey HTML 的数倍、收益 0 |
+| `vmr-requests.{json,md}` | `vmr-requests.json`（每行带 `req` 坐标 + `session`(=lineage id)/`task`/`turn` + `detail_file`） | `.md` 索引 | 请求索引，终端 grep 是主场景。`request → journey` 靠 `session ∈ stories.lineages` 集合判断，不加字段（§12.5） |
+| `vmr-requests-<client>.md` | `vmr-requests.json` 的子集视图 | `.md` | 纯展示切片，无独立数据 |
+| `vmr-requests-failed.{jsonl,md}` | `vmr-requests-failed.jsonl`（审计日志 `outcome != ok` 的过滤投影） | `.md` | 错误分析索引，JSONL 便于 grep |
+| `vmr-stories.{json,md}` | `vmr-stories.json`（`files` / `lineages` / `rendered`） | `.md` 表格 | journey 候选索引 **+ journey→文件/lineage 映射**——§12.5 warm-path 的数据源 |
+| `vmr-story-corpus.{json,md}` | `vmr-story-corpus.json` | `.md` 表格 | 语料统计（§5.3 S3 建议冻结，与本节无关） |
+| `journey-<id>.{json,md,html}` | **`journey-<id>.json`**（`structure.tasks[].steps[].req` + 九项指标 + Findings + llm_findings） | `.md`（默认，作者日常）· `.json`（机读权威）· `.html` 看板（`-html` opt-in，§12.4） | 中观叙事。§12.4 |
+| `compare-<a>-vs-<b>.{json,md,html}` | **`compare-*.json`**（`MetricDiff` 行 + `Extras`：分岔点 / endpoint / cache / sysprompt / deliverable） | `.md` · `.json`（机读权威）· `.html` 看板（`-html` opt-in，§12.4） | 差分分析。§12.4 |
+| `details/*.md` | **审计 `logs/*.jsonl` 原始记录**（`reqdetail` 是 `audit.Record` 的纯函数） | `.md`（已用 `<details>` 折叠） | 微观视图，无独立数据 |
+| `evidence/*.md`（sysprompt / tools） | **审计记录里的 sysprompt / tools 声明**（内容哈希去重） | `.md` | 同上 |
+
+**不新增产物**。唯一的缺口是给 `vmr-stories.json` 行补 `stitch_edges`（§12.5）。
+
+### 12.4 Journey 与 Compare 的 HTML：重新设计为分享看板
+
+**不做 MD→HTML 迁移**——`journey-*.md` 保持默认（作者日常消费面，grep / diff / less 可用），`journey-*.json` 保持机读权威层（`-compare` 输入 + 双半区一致性核对）。HTML 是**第三种、独立的渲染**：一份为"分享给团队外 / 让人快速理解发生了什么"重新设计的看板，不是 Markdown 的直译，也不是它的超集。
+
+**当前 `-html` 的问题**。`render_html.go`（~9KB + `render_html_assets.go` 内联 CSS/JS）产出的是"左侧粘性时间轴 + 右侧 Step 卡片瀑布"，每张卡片内联该 Step 的指令、本轮进入上下文的消息、模型响应（reasoning / resptext / tool calls + args + results，均 `<details>` 折叠）。它既不是 `journey-*.md` 的直译（不渲染决策脊柱、Findings、LLM Findings、sysprompt 证据——F2），也不是它的超集，而是**另一种子集：一份折叠版对话流**。分享一条 journey 时读者要的是"骨架 + 关键结论一眼看全"；当前形态是把对话正文重新排进卡片，一个 91 Step 的 journey 就是一屏一屏的折叠块，结构（几个 Task、每步调了什么工具、哪里压缩 / 缝合 / 系统提示变化、哪里命中 Finding）淹没在正文里——分享价值恰恰低在这。
+
+**Journey 看板的目标形态**：单页滚动，分 3–5 个板块（"页"是板块不是分页），结构与 Findings 前置，细节链接出去：
+
+1. **判定条**（首屏）：journey id / client / 时间范围 / Task 数 · Step 数 / 一句话标题；partial / break / redact 横幅；一行"结局"（最终写文件形状的 tool call，或终止方式）。
+2. **结构 / 时间轴**：Task→Step 骨架作为**可视流程**（不是卡片瀑布）。每个 Step 紧凑一行：序号 · 时间 · 模型 · 工具名 chips · failover 徽章 · 转换标记（压缩 ⚠ 带 before/after token、stitch edge、sys changed）· Finding 旗标。这是决策脊柱的可视化。点一个 Step → 它的 `details/<coord>.md`（存在时）或退化为坐标文本。
+3. **指标**：九项指标（时长 / token in·out / 缓存命中曲线 / 上下文增长 / 工具调用数 / 压缩次数 / 重复率…）作为紧凑 stat grid + 1–2 条内联 SVG sparkline（缓存命中率随 Step、上下文 token 随 Step），零外部依赖。
+4. **Findings**：规则层 + LLM 层的 Findings 前置、显眼，每条带 Step 锚点。
+
+**Compare 看板**（新，当前 `-compare` 只有 `.md` / `.json`）：单页滚动，3 板块：
+
+1. **两侧头**：A / B 的 id · 标题 · 时间；双侧初始指令（折叠）。
+2. **分岔 + 指标对照**：分岔点（工具使用结构首次不同的 Step 位置）大字标出；metric-by-metric A/B 表，notable 行星标；endpoint / cache / sysprompt 事实紧凑排。
+3. **LLM 解读**（给了 `-llm-addr` 时）：`RenderLLMSection` 的内容作为可读段落块渲染——用户明确要求 Compare 的 HTML 带上这块。两侧各链接回 `journey-<id>.md` / `.html`。
+
+**两份看板的共同约束**：内联 CSS + 极少 JS（时间轴 scroll-spy、theme-aware `prefers-color-scheme`），零外部请求；`-redact` 覆盖所有新板块——redact 模式下逐 Step 链接退化为惰性坐标（`details/*.md` 是 0600 未脱敏、不随 HTML 分享；脱敏内容本就没有可下钻的细节，看板即全部）；产物 0600。
+
+**为什么细节链接出去而不是内联**：内联细节正是当前瀑布的毛病。看板给结构与结论，`details/<coord>.md`（单 `-journey <id>` 渲染已自动物化，§12.5）给某一步的完整请求 / 响应。团队内部分享时读者手上有整个 `reports/` 目录、链接可达；团队外脱敏分享时脱敏内容无细节可钻，看板即全部。
+
+**落地方式**：新建 `render_html_dashboard.go`（或直接重写 `render_html.go`）+ `render_compare_html.go`，chrome 文案进 `i18n/story_html.go`（Compare 部分可与 Journey 共用）。**替换**当前瀑布而非在其上叠加；当前瀑布保留至替换落地（已付费、opt-in、零维护成本），不单独删。默认批量套件仍不出 HTML（维持 §10.5 用户决定）。
+
+**优先级**：用户已定为**第一批**（§12.7）。诚实标注：它是分发相关投入里 ROI 最高的一项（"可脱敏分享的 journey"就是这个分发杠杆的实体），但当前 0 用户 0 分发，把它排进第一批是用户主动选择在分发信号出现前先建能力——与 §11 "非分发投入边际价值近零"的默认判断有张力，是用户在知情下的取舍。
+
+### 12.5 增量索引：场景 A（语料增长）与场景 B（渲染单个 journey）
+
+原提案是**新增**一份 `vmr-request-index.jsonl`（一行一 request、`req` 主键、含 `journey_id`），用来"查某 journey / request 只读需要的日志文件、不重扫全量"。复核结论：**"不重扫"这个目标对场景 B 成立，形态错了**——要的索引基本已在盘上，缺的是让渲染路径去用它 + 补一个字段（`vmr-stories.json` 的 `stitch_edges`）。
+
+**先把索引拆成三个高度**（这是"要不要新建一份索引"的第一性回答）：
+
+| 高度 | 映射 | 归属 | 状态 |
+|---|---|---|---|
+| 文件 → manifests | 内容哈希 → 解析结果 | `.parse-cache/<filehash>.json`（`report` / `story` 共用） | 已有，`ScanCached` 增量命中 |
+| journey → {files, lineages, stitch 边, tasks/steps, rendered} | 内容寻址 journey id → 它依赖什么 | `vmr-stories.json` 行 | 已有 `files` / `lineages`；**缺 `stitch_edges`**（12-E） |
+| request → {坐标, session(=lineage id)/task/turn} | `req` → 它属于哪条 lineage | `vmr-requests.json` 行 | 已齐 |
+| request → journey | `session ∈ journey.lineages` | 上两行的集合 join（P6.1） | 已齐，两行代码，不 denormalize |
+| request → 文件:行号 | —— | `req` 坐标本身（`basename:line`） | 自描述，**不需要查找表** |
+
+一份新的 monolithic `vmr-request-index.jsonl` 会**重复"request→文件:行号"这行**（`req` 坐标已经是定位符）、**错配 journey 行**（渲染一个 journey 要它**全部**文件一起加载，per-request 行给不出这个粒度）、并新增 CLAUDE.md 惯例里的 5 处文档同步 + 一个 0600 文件 + 它自己的 append 增量语义（"`req` 已存在则跳过"严格弱于 `.parse-cache` 的内容哈希——发现不了坐标不变、内容变了的行）。
+
+#### 场景 A：语料在增长
+
+新日志文件到来要增量分析。按新文件相对已建索引的时间位置分两种：
+
+| | 情形 | 结论 |
+|---|---|---|
+| **A1** | 新文件**整段晚于**已索引数据（日常 append：`vmr-audit-2026-08-28.jsonl` 接在 `...-27.jsonl.zst` 后） | **增量是可靠的** |
+| **A2** | 新文件**早于或穿插进**已索引数据（回填历史归档、补一个漏掉的文件） | **必须全量重扫** |
+
+**A1 为什么可靠**（回源码核实）：`StitchGraph` 的 `resolveStitch` 只在"时间上先于本 lineage 起点"的候选里挑前驱（`if !predEnd.Before(b0.TS) { continue }`）。新增 lineage 整段更晚 ⇒ 不可能成为任何**已有** lineage 的前驱 ⇒ 已有 lineage 的 stitch 边不变。`l.Idx` 也不变：它在 `buildGraph` 里按 SessKey 在时间序中首次出现的顺序分配，只在末尾追加数据不改变已有 SessKey 的首次出现位置——因此连 `resolveStitch` 末级 tie-break（`idx < bestIdx`）对已有 lineage 都给相同答案。真正的新计算只有两件：① 新 lineage 各自往回找前驱；② 某条"看起来早定型"的旧 journey 可能被一条新 lineage 往后接一节（这会改变那条 journey 的 id，`ID(chain)` 含 `<end>` 分量——`MergeJourneyIndexRows` 已处理：旧 id 不在 fresh 行里 ⇒ 自然淘汰）。这正是设计文档"关键设计取舍"段（缝合搜索无时间上限）所指的场景，A1 没绕过它，只是新 lineage 的回溯搜索本来就要做。
+
+**A1 已经拿到的增量收益**：`.parse-cache` 让未变旧文件跳过解析；`MergeJourneyIndexRows` 让未变 journey id 继承 `Tasks` / `Steps` / `Rendered`。**还没拿到、但也省不掉的**：`buildBlobLineageIndex`（数百万 (hash, lineage) 对）+ 全量 Manifest 仍每次驻留重建——一条新 lineage 要发现它接在某条旧 journey 后面，blob 倒排索引里**必须**有那些旧 lineage 的哈希。跳过"重跑旧 lineage 的 `resolveStitch`"能省的只是几百次 map 遍历，不是内存。所以 **A1 不需要新的索引机制**——`.parse-cache` 对 append-later 这个常见情形已经是对的，对 A2 这个罕见情形已经是（正确地）保守全扫。KNOWN_ISSUES §1.2 的 RSS 天花板不是 A 的增量性问题，是"整个语料驻留"问题，它的解法是自然日分桶流式释放（§1.2 自己已 defer）或下面场景 B 的窄路径。
+
+**A1 唯一值得落的一步**（且它同时服务场景 B）：把 stitch 边持久化进 `vmr-stories.json` 行。既然 A1 已证明已有边不可变，持久化它们就是安全的——`JourneyIndexRow` 加一个 `stitch_edges`（每对 `lineageID → predLineageID` + `kind` + `score` + `confidence`），`saveStoryIndex` 写、warm path 读。这让**增量索引名副其实**（能重放，不只是缓存）。
+
+#### 场景 B：语料没变，只想渲染其中一个 journey
+
+**能只读部分文件**——journey id 内容寻址（`j-<client>-<start>-<end>-<hash8>`）：语料没变 ⇒ journey 没变 ⇒ 它依赖的文件集确定且 `vmr-stories.json` 已记（`files`）。`MergeJourneyIndexRows` 注释已在用这条性质。原提案针对的是 B，却套用了 A 的"不能缩小"结论。
+
+**代码里已有的**：`vmr-stories.json` 每行的 `files`（journey→日志文件）和 `lineages`（journey→链上 lineage id）；`story.SourceFiles(idx, id...)` 已在算这个窄文件集（今天只被 `-compare` 用来**显示**证据来源，没接到扫描上）；`.parse-cache/<filehash>.json` 存了每个文件的内容哈希，可做陈旧性检查。
+
+**缺的是 `setupStoryRun` 里一条 warm path**。它现在对每个模式（含 `-journey`）都无条件 `ScanCached(所有 paths)` + 整图 `buildGraph` + `StitchGraph` + `PreviewTitles(所有候选)`——warm cache 下仍付"每文件 `HashFile` 全字节读 + 整图重建 / 缝合 / 取全部标题"的代价（正是 KNOWN_ISSUES §1.2 里 ~2 万条 3.75GB 的来源），最后才渲染那一个 journey。要加的：
+
+1. **命中条件**：`-journey` 是精确 id 且在 prior `vmr-stories.json` 里有行（glob / prefix 选择器的候选列表本身也在 `vmr-stories.json` 里，匹配不必重建图）。
+2. **陈旧性闸**：日志目录无新文件、`files(X)` 里的文件未变（先比 size + mtime，必要时再 `HashFile`）。任一不满足 → 回落全量扫描。
+3. **窄重建**：`ScanCached(SourceFiles(prior, X), ...)` 只对这几个文件建图；**stitch 用持久化的 `stitch_edges` 重放**，按内容寻址的 `LineageID` 匹配（跨文件集稳定），不重跑 `StitchGraph`。
+
+**为什么 stitch 必须重放而不是窄重跑**：`resolveStitch` 末级 tie-break 是"`l.Idx` 更小者胜"，`l.Idx` 按当次加载的 manifest 集合分配——只加载 `files(X)` 时 lineage 数更少、编号不同，可能翻转一个"覆盖率和时间间隔都完全打平"的缝合决策（设计文档说这种精确打平"并不罕见"，且是靠"连跑 5 次比对 `PredIdx`"才发现的）。翻转会改变 journey X 的链 ⇒ 改变它的 id ⇒ warm path 产出一个索引里没有的 journey。持久化 `stitch_edges` + 按 `LineageID` 重放彻底避开这条——这就是 §场景 A 那一步同时服务 B 的地方。退而求其次的"糙"方案：窄重跑 `StitchGraph`，接受偶发 tie 翻转，但**始终校验产出的 journey id == 请求的 id**，不等即回落全量（可用，但偶尔做无谓全量扫描）。**推荐持久化。**
+
+#### detail 页按需补齐（Q1）
+
+单 `-journey <id>` 渲染**已经**实现了用户描述的算法——`renderJourney` 恒传 `materializeDetails=true`，`EnsureJourneyDetails` 逐 Step 调 `reqdetail.EnsureRendered`（P12 指纹幂等：文件在且指纹匹配 ⇒ 快速跳过，缺 / 陈旧 ⇒ 渲染并原子写）。`s.Rec` 已是内存里的完整 `audit.Record`（渲染脊柱本就需要），补 detail 只是"渲染字符串 + 写文件"，不重新回捞。warm path 保持这个行为：找到 journey 后照常物化它自己的 detail，只是省掉了"为找到它而全量扫描"。
+
+**默认批量套件**是另一回事——它渲染 370+ 条 journey，P13.1 让它不物化 detail（`materializeDetails=false`）以守体积纪律。它的脊柱"→ detail"链接目前无条件渲染成 Markdown 链接，默认套件下全指向不存在的文件（B10 / §11.3 T1.2）。**修法是批量路径把 detail 目标渲染成行内 `basename:line` 坐标而非链接**（复用 `report` 半区 P7.1 `detailCell` 的同款解法），不是让默认套件也物化。物化的成本比 P13.1 决策时已降不少（P13.2 / P13.3 把单份 detail 缩到约 1/8.6，全量语料默认物化的 `details/` 从 KNOWN_ISSUES §1.35 记的 160MB+ 估算降到 ~20MB 量级），但冷渲染那几千份文件的时间仍会压在 `vmr analyze` 这个最高频、DX 最敏感的命令上——坐标方案零额外磁盘 / 时间。下钻某一条时用 `vmr analyze -journey <id>`，它给完整物化。
+
+#### request → journey：不加字段
+
+`vmr-requests.json` 每行的 `session` 就是底层 `ctxgraph.Lineage.LineageID()`（`l-<hash8>`，`report/session.go` 的 `SessionInfo.ID`）。`vmr-stories.json` 每行的 `lineages` 是 journey→lineage id 列表。所以 `request → journey` 是一次集合成员判断（`request.session ∈ journey.lineages`）——P6.1 明确就是为这个设计的（"joinable by set membership instead of a cross-command hash-and-compare"）。
+
+给 `RequestRow` denormalize 一个 `journey` 字段能带来什么？核对下来：**没有具名消费者**。12-F warm path 走 journey→files，不需要它；`vmr-requests-<tag>.md` 的会话卡片已经对**已渲染** journey 渲染了跳转链接（`loadStoriesLink` 的 `lineageToJourney`），未渲染的 journey 没有 `journey-<id>.md` 可跳、渲染链接反而是死链；外部工具做这个 join 只是两行代码。所以这不是"顺带就做"，是"做了也没用"——**不做**。真有"从一条可疑请求跳到它所在 journey（哪怕没渲染过）"的导航需求出现时，那是 `vmr-requests.md` 会话卡片的渲染增强（把 journey id 作为文本提示、供 `vmr analyze -journey <id>` 用），不是数据层加字段。
+
+#### 优先级
+
+场景 B warm path + `stitch_edges` 字段：对 0 用户 + 当前语料规模是 **P2–P3**，随语料线性恶化——季度日志 ~4 万条时 warm `-journey` 会是"几十秒 + 多 GB RSS" vs 窄路径的"亚秒 + 几十 MB"。真启动分发、或作者在大语料上反复 `-journey` 调查时值得做。登记进 KNOWN_ISSUES 待触发。
 
 ### 12.6 一句话总结
 
-- **不要全量替换**。展示层格式选择标准不是"HTML 表达力更强"，而是"该产物主要给谁、在什么环境里看"。
-- **"只留 MD"从不是说删 JSON**：JSON 是数据层、永留，MD/HTML 只是展示层；唯一该把展示层换成 HTML 的是 Journey（先补全 HTML 再删 MD，顺序不能反）。
-- **宏观报表 / 请求索引 / stories / corpus / details / evidence 的展示层保持 MD**——主导场景是终端/编辑器/grep，MD 无表达力缺口，HTML 只有成本无收益；它们的 JSON 数据层不变。
-- **LLM 界面的答案既不是 MD 也不是 HTML，是 JSON**——且已全部存在（LLM 层现在读的就是结构体/JSON，从未读过 MD）。
-- **新增一个可增量索引** `vmr-request-index.jsonl`（一行一 request，`req` 坐标作主键，含 journey 归属 + 源文件），实现"查某 journey/request 只读需要的日志文件"；索引只用于定位，扫描仍全量。
+- **不做全量替换**。展示层格式按"谁、在什么环境里看"选，不按"HTML 表达力更强"选。
+- **审计 JSONL 是数据层**；派生的 `*-report.json` / `*-requests.json` / `journey-*.json` / `compare-*.json` 是可重新生成的机读投影，作为契约保留、但不神圣。
+- **LLM 界面是结构体 / JSON，且已全部存在**——解读层读的是 `*Journey` 结构体，从未读过 `.md`。
+- **Journey / Compare 的 HTML 重新设计为分享看板**（结构 + Findings 前置、细节链回 `details/*.md`、3–5 板块单页滚动），不是 MD 直译也不是它的超集；**替换**当前瀑布，当前瀑布保留到替换落地。用户已定为第一批。
+- **不新增索引产物**。三个高度的映射（`.parse-cache` / `vmr-stories.json` / `vmr-requests.json`）各已 ~90% 到位，唯一缺口是 `vmr-stories.json` 补 `stitch_edges`（让"渲染单个 journey"复用已扫结果 + 消除 stitch tie-break 不确定性）。`request → journey` 是现成的集合成员 join（`session ∈ lineages`），不加字段。场景 A 中 append-later 的常见情形 `.parse-cache` 已经处理对，backfill 的罕见情形已（正确地）保守全扫。P2–P3。
+- **默认批量套件的 detail 死链接**：批量渲染成行内坐标、不渲染成链接。
+
+### 12.7 建议落地计划
+
+三批，顺序即优先级。批内按依赖排。与 §11 三梯队的映射在每项注明——**这一节不另立优先级体系，只把第 12 章的结论切成可执行任务**。12-B 就是 §11.3 T1.2（第一梯队原有项）；12-C / 12-D 是用户本轮新决定的第一批项，性质上接近 §11.4 T2.3（分发工件），但用户选择在分发信号出现前先做。
+
+**第一批（现在做）**
+
+| # | 任务 | 涉及 | 依赖 | 与 §11 的关系 |
+|---|---|---|---|---|
+| **12-A** | Analytics 设计文档两处 `BlobIndex` 描述改为当前状态（`Manifest` 自带坐标 + `FetchRecords`） | `docs/VirtualModelRouter_Design_v4_Analytics.md`；顺带 `ctxgraph/cache_test.go` 一处同名 stale 注释 | 无 | §11.3 T1.4 同类。**本轮已随文档评审一并做掉**，零成本 |
+| **12-B** | 默认批量套件的 detail 死链接：脊柱"→ detail"在批量路径渲染成行内 `basename:line` 坐标而非链接（`report` 侧 P7.1 `detailCell` 同款）。同步修正 KNOWN_ISSUES §3 item 38 的"不产生死链接"表述 | `internal/story/render_spine_step.go`、`render_md_sysprompt.go`、`i18n/story_spine.go`、`cmd/vmr/cmd_story.go` | 无 | **就是 §11.3 T1.2**，第一梯队、约 0.5 人天 |
+| **12-C** | Journey HTML 看板重写（§12.4）：`render_html_dashboard.go`（判定条 / 可视时间轴 / 指标 grid + sparkline / Findings）替换当前瀑布；`-redact` 覆盖新板块；默认套件仍不出 HTML | `internal/story/render_html*.go`（重写）、`i18n/story_html.go` | 无（可与 12-B 并行） | 用户决定提前于分发信号；诚实标注见 §12.4 末。约 2–3 人天 |
+| **12-D** | Compare HTML 看板（§12.4）：`render_compare_html.go`（两侧头 / 分岔 + 指标对照 / LLM 解读块）；chrome 与 12-C 共用 | `internal/story/render_compare_html.go`（新）、`cmd/vmr/cmd_story.go` 的 `-html` 接到 `-compare`、`i18n` | 12-C（共用 chrome / 资产） | 同 12-C。约 1.5–2 人天 |
+
+**第二批（P2–P3，语料规模或调查频率触发；不满足触发条件则 Hold）**
+
+| # | 任务 | 涉及 | 依赖 | 触发条件 |
+|---|---|---|---|---|
+| **12-E** | `vmr-stories.json` 的 `JourneyIndexRow` 加 `stitch_edges`（每对 `lineageID → predLineageID` + `kind` / `score` / `confidence`，`BuildJourneyIndexRow` 从链的 `l.Stitch.Edge` 序列化，`PredIdx` 转成 predecessor 的内容寻址 `LineageID`），`saveStoryIndex` 持久化 | `internal/story/storyindex.go`、`cmd/vmr/cmd_story_setup.go` | 无 | 12-F 的前置；也可先落字段、后接 warm path |
+| **12-F** | `setupStoryRun` warm path（§12.5 场景 B）：精确 id 命中 + 陈旧性闸 + `ScanCached(SourceFiles)` 窄重建 + 按 `LineageID` 重放 `stitch_edges`（合成每条 lineage 的 `l.Stitch` 供 `BuildChain`）；任一闸不过回落全量。产出的 journey id 必须等于请求的 id | `cmd/vmr/cmd_story_setup.go`、`internal/story/storyindex.go`、`internal/ctxgraph`（可能需 `ChainFromEdges`） | 12-E | 语料 > ~3 万条，**或**作者在大语料上反复 `-journey` 调查。登记进 KNOWN_ISSUES 待触发 |
+
+**明确不做**
+
+- 新建 `vmr-request-index.jsonl`（§12.5：错配粒度 + 重复 `req` 坐标 + 5 处文档同步）。
+- `vmr-requests.json` 加 `journey` 字段（§12.5：`session ∈ lineages` 已是现成 join，denormalize 无具名消费者）。
+- 把当前 HTML 瀑布补成"MD 超集"（§12.4：方向错了——看板是刻意的裁剪视图）。
+- 默认套件自动物化 detail 或自动出 HTML（§12.5 / §10.5：写放大 + 冷渲染时间压在最高频命令上）。
+- 场景 A 的"只重扫增量部分"专用机制（§12.5：`.parse-cache` + `MergeJourneyIndexRows` 已拿到可靠增量收益，剩下的省不掉）。
 
