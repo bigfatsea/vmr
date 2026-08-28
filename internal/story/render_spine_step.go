@@ -142,7 +142,12 @@ func capFullWith(s string, tail func(more int) string) string {
 // Journey nor a Task with no tool calls disappears from the spine anymore
 // (P1.2; see this file's package comment). Ends with the Journey's final
 // deliverable section, when deliverableStats finds one.
-func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang) {
+// linkDetails: true renders each Step's "→ detail" as a Markdown link into
+// details/*.md (single -journey / -compare / -render-all, where those pages
+// are materialized); false renders an inline `file:line` coordinate instead
+// (the default batch suite, where P13.1's volume discipline keeps details
+// unmaterialized — a link there would 404, B10 / review §12.5).
+func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding, lang i18n.Lang, linkDetails bool) {
 	t := i18n.Spine(lang)
 	storyT := i18n.Story(lang)
 	hit := map[int]bool{}
@@ -165,13 +170,16 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 	}
 
 	w("%s", t.SpineTitle)
+	if !linkDetails {
+		w("%s", t.SpineCoordNote)
+	}
 	for ti, task := range j.Tasks {
 		w("%s", t.SpineTaskLine(ti+1, escapeHTML(task.Title)))
 		for si, s := range task.Steps {
 			if len(s.ToolCalls) > 0 {
-				renderSpineStep(w, steps, idxOf[s], si, repeat[s.Seq], hit[s.Seq], t, storyT)
+				renderSpineStep(w, steps, idxOf[s], si, repeat[s.Seq], hit[s.Seq], t, storyT, linkDetails)
 			} else {
-				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t, storyT)
+				renderSpineBriefStep(w, s, si, repeat[s.Seq], hit[s.Seq], t, storyT, linkDetails)
 			}
 		}
 	}
@@ -182,14 +190,13 @@ func renderDecisionSpine(w func(string, ...any), j *Journey, findings []Finding,
 // (tool-calling) and renderSpineBriefStep (everything else), so the two
 // forms stay visually consistent (same tag, same Finding flag) and a reader
 // scanning the spine sees one continuous Step sequence regardless of which
-// kind of Step each one is. Includes a "→ detail" link to this Step's own
-// record, computed purely from its Manifest (reqdetail.FileNameForManifest
-// — no I/O, correct whether or not the target file has actually been
-// written yet by EnsureJourneyDetails) — the link always renders (DevPlan
-// P5.2: "名称可算"), so it's never absent just because materialization
-// happened to fail for this one Step (see EnsureJourneyDetails' doc
-// comment on graceful degradation).
-func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
+// kind of Step each one is. Includes a "→ detail" pointer to this Step's
+// own record, computed purely from its Manifest (no I/O): a Markdown link
+// into details/*.md when linkDetails is set (those pages are materialized),
+// or an inline `file:line` coordinate (Manifest.Req) otherwise — the
+// pointer always renders (DevPlan P5.2: "名称可算"), it's just a link vs a
+// coordinate depending on whether the target exists on this path.
+func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText, linkDetails bool) string {
 	// s.Manifest is non-nil on every production path (journey.go's buildStep
 	// always sets it); the guard is for test fixtures that construct a Step
 	// by hand. It has to cover the timestamp too — the old form dereferenced
@@ -205,9 +212,23 @@ func spineStepHeader(s *Step, repeated, flagged bool, t i18n.SpineText) string {
 	}
 	header += "\n\n"
 	if s.Manifest != nil {
-		header += t.SpineDetailLink("../details/" + reqdetail.FileNameForManifest(s.Manifest))
+		if linkDetails {
+			header += t.SpineDetailLink("../details/" + reqdetail.FileNameForManifest(s.Manifest))
+		} else {
+			header += t.SpineDetailCoord(spineCoord(s.Manifest))
+		}
 	}
 	return header
+}
+
+// spineCoord is the inline `file:line` coordinate for a Step's record — the
+// same string vmr-requests.json publishes as "req" (Manifest.Req), with a
+// fallback compute for hand-built test fixtures that leave Req empty.
+func spineCoord(m *ctxgraph.Manifest) string {
+	if m.Req != "" {
+		return m.Req
+	}
+	return ctxgraph.ReqCoord(m.Path, m.Line)
 }
 
 // spineTransitionLines renders the cross-record analysis facts the deleted
@@ -255,9 +276,9 @@ func spineTransitionLines(w func(string, ...any), s *Step, storyT i18n.StoryText
 // call, so this path needs the same s.Instruction rendering
 // renderSpineBriefStep already has, or that instruction is invisible
 // whenever the Step that carries it also happens to call a tool.
-func renderSpineStep(w func(string, ...any), steps []*Step, i, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
+func renderSpineStep(w func(string, ...any), steps []*Step, i, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText, linkDetails bool) {
 	s := steps[i]
-	w("%s", spineStepHeader(s, repeated, flagged, t))
+	w("%s", spineStepHeader(s, repeated, flagged, t, linkDetails))
 	spineTransitionLines(w, s, storyT)
 	if taskStepIdx > 0 && s.Instruction != "" {
 		w("%s", t.SpineInstructionLine(escapeHTML(s.Instruction)))
@@ -357,8 +378,8 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 // NoReply Step) — "宁可粗糙也不猜语义": the header alone still keeps the Step
 // countable, and inventing a line where the record has nothing would be
 // worse than a gap.
-func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText) {
-	w("%s", spineStepHeader(s, repeated, flagged, t))
+func renderSpineBriefStep(w func(string, ...any), s *Step, taskStepIdx int, repeated, flagged bool, t i18n.SpineText, storyT i18n.StoryText, linkDetails bool) {
+	w("%s", spineStepHeader(s, repeated, flagged, t, linkDetails))
 	spineTransitionLines(w, s, storyT)
 	switch {
 	case taskStepIdx > 0 && s.Instruction != "":

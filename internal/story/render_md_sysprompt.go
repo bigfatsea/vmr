@@ -79,7 +79,11 @@ func sysPromptEraChars(e systemPromptEra) int {
 // evidenceDir/sysprompt-<hash>.md (reqdetail.EnsureSysPromptEvidence,
 // materialized by EnsureJourneyDetails before this renders) — the report
 // itself only ever holds the address, not the content.
-func renderSystemPromptHeader(w func(string, ...any), j *Journey, t i18n.StoryText) {
+// linkDetails: true links each era to its materialized evidence blob under
+// evidence/*.md; false names the blob and points at `vmr analyze -journey
+// <id>` instead (default batch suite — the blobs aren't materialized there,
+// P13.1, so a link would 404: B10 / review §12.5).
+func renderSystemPromptHeader(w func(string, ...any), j *Journey, t i18n.StoryText, linkDetails bool) {
 	eras := systemPromptEras(j)
 	if len(eras) == 0 {
 		return
@@ -94,7 +98,11 @@ func renderSystemPromptHeader(w func(string, ...any), j *Journey, t i18n.StoryTe
 			continue
 		}
 		filename := reqdetail.SysPromptEvidenceFileName(e.SysHash)
-		w("%s", t.SysPromptEraLink(e.FromSeq, e.ToSeq, sysPromptEraChars(e), "../evidence/"+filename))
+		if linkDetails {
+			w("%s", t.SysPromptEraLink(e.FromSeq, e.ToSeq, sysPromptEraChars(e), "../evidence/"+filename))
+		} else {
+			w("%s", t.SysPromptEraCoord(e.FromSeq, e.ToSeq, sysPromptEraChars(e), filename))
+		}
 	}
 	w("\n")
 }

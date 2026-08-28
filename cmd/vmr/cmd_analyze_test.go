@@ -295,19 +295,19 @@ func detailFileCount(t *testing.T, dir string) int {
 	return len(entries)
 }
 
-// TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails covers P13.1/P13.5
-// (KNOWN_ISSUES §1.35): the default suite (no selector, no -render-all)
-// must render every candidate's decision-spine "→ detail" links without
-// writing the target files — this discipline has been stated three times
-// before (P3.3 → P6.5 → P9.2) and regressed each time because nothing
-// asserted it as a standing test. -render-all opts back into full
-// materialization (an explicit "materialize everything" ask), and a
-// targeted -journey render always materializes its own journey regardless
-// of the default suite's batch scope.
-func TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails(t *testing.T) {
+// TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks covers P13.1/P13.5
+// (KNOWN_ISSUES §1.35) plus review §12.5's 12-B: the default suite (no
+// selector, no -render-all) must NOT materialize detail pages, and — since
+// it doesn't — its journey reports must render each Step's "→ detail"
+// pointer as an inline `file:line` coordinate, never a Markdown link that
+// would 404. This discipline has been stated four times before (P3.3 →
+// P6.5 → P9.2 → P13.1) and regressed each time because nothing asserted it;
+// P13.1's own "link always renders" phrasing left a real dead link (B10).
+// -render-all opts back into full materialization + real links.
+func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "P13.5 guard fixture opening instruction")
+	u1 := storyMsg("user", "12-B guard fixture opening instruction")
 	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
 	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
 	path := writeStoryJSONL(t, []audit.Record{r1, r2})
@@ -317,7 +317,7 @@ func TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails(t *testing.T) {
 		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
 	if n := detailFileCount(t, outDir); n != 0 {
-		t.Errorf("default suite materialized %d detail file(s), want 0 (batch mode should only link, not generate — P13.1)", n)
+		t.Errorf("default suite materialized %d detail file(s), want 0 (batch mode should only reference, not generate — P13.1)", n)
 	}
 	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
 	if len(got) != 1 {
@@ -327,18 +327,33 @@ func TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(md), "../details/") {
-		t.Errorf("journey report should still carry a decision-spine detail link (target need not exist yet), got:\n%s", md)
+	s := string(md)
+	if strings.Contains(s, "](../details/") {
+		t.Errorf("default-suite journey report has a dead ../details/ link (B10), want inline coordinates:\n%s", s)
+	}
+	if strings.Contains(s, "](../evidence/") {
+		t.Errorf("default-suite journey report has a dead ../evidence/ link (B10):\n%s", s)
+	}
+	if !strings.Contains(s, "`audit.jsonl:1`") {
+		t.Errorf("default-suite spine should reference Step 1 by its `file:line` coordinate:\n%s", s)
 	}
 
 	// -render-all is an explicit "materialize everything" ask — opts back
-	// into writing the detail files the default suite above skipped.
+	// into writing the detail files AND real Markdown links.
 	outDir2 := filepath.Join(t.TempDir(), "out2")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir2, "-render-all", path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -render-all: %v", err)
 	}
 	if n := detailFileCount(t, outDir2); n == 0 {
 		t.Error("-render-all should materialize detail files, got 0")
+	}
+	got2 := journeyFileNames(t, filepath.Join(outDir2, "stories"))
+	md2, err := os.ReadFile(filepath.Join(outDir2, "stories", got2[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md2), "](../details/") {
+		t.Errorf("-render-all journey report should carry real ../details/ links:\n%s", md2)
 	}
 }
 
@@ -427,8 +442,21 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	}
 	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
 
+	// Step 1b: those pre-existing journey-*.md carry inline coordinates, not
+	// links (default suite, 12-B).
+	preGot := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	preMD, err := os.ReadFile(filepath.Join(outDir, "stories", preGot[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(preMD), "](../details/") {
+		t.Fatalf("precondition failed: default-suite journey report already has ../details/ links")
+	}
+
 	// Step 2: -compare names two candidates whose journey-*.md ALREADY
-	// exists from step 1. Their details/ must still get materialized now.
+	// exists from step 1. Their details/ must still get materialized now,
+	// AND their journey-*.md must be re-rendered with real links (not left
+	// stale on coordinates) — ensureJourneyFile no longer early-returns.
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
 	}); err != nil {
@@ -436,6 +464,13 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	}
 	if n := detailFileCount(t, outDir); n == 0 {
 		t.Error("-compare left both named journeys' details/ empty even though their journey-*.md pre-existed (F-01 regression)")
+	}
+	postMD, err := os.ReadFile(filepath.Join(outDir, "stories", preGot[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(postMD), "](../details/") {
+		t.Errorf("-compare should have re-rendered the pre-existing journey report with real ../details/ links, got:\n%s", postMD)
 	}
 }
 

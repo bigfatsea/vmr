@@ -146,12 +146,39 @@ func TestRenderSystemPromptHeader_LinksNotInline(t *testing.T) {
 	}
 	var b strings.Builder
 	w := func(format string, args ...any) { b.WriteString(fmt.Sprintf(format, args...)) }
-	renderSystemPromptHeader(w, j, i18n.Story(i18n.EN))
+	renderSystemPromptHeader(w, j, i18n.Story(i18n.EN), true)
 	out := b.String()
 	if strings.Contains(out, "UNIQUE_SENTINEL_do_not_inline_this_text") {
 		t.Errorf("header should link to the evidence blob, not inline the system prompt text: %s", out)
 	}
 	if !strings.Contains(out, "../evidence/sysprompt-") {
 		t.Errorf("header should contain a link to ../evidence/sysprompt-<hash>.md, got: %s", out)
+	}
+}
+
+// TestRenderSystemPromptHeader_CoordMode covers 12-B: with linkDetails
+// false (the default batch suite, where evidence blobs aren't
+// materialized) the header names the blob and points at `vmr analyze
+// -journey <id>` instead of emitting a ../evidence/ link that would 404.
+func TestRenderSystemPromptHeader_CoordMode(t *testing.T) {
+	sys := msg("system", "COORD_MODE_SENTINEL")
+	u1 := msg("user", "hi")
+	recs := []audit.Record{mkRec(sysAt(0), "", []any{sys, u1}, sseText("ok"))}
+	j, err := Build(onlyLineage(t, writeJSONL(t, recs)), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var b strings.Builder
+	w := func(format string, args ...any) { b.WriteString(fmt.Sprintf(format, args...)) }
+	renderSystemPromptHeader(w, j, i18n.Story(i18n.EN), false)
+	out := b.String()
+	if strings.Contains(out, "](../evidence/") {
+		t.Errorf("linkDetails=false should not emit a ../evidence/ link, got: %s", out)
+	}
+	if !strings.Contains(out, "`sysprompt-") || !strings.Contains(out, "vmr analyze -journey") {
+		t.Errorf("linkDetails=false should name the blob + point at -journey, got: %s", out)
+	}
+	if strings.Contains(out, "COORD_MODE_SENTINEL") {
+		t.Errorf("still must not inline the system prompt text, got: %s", out)
 	}
 }

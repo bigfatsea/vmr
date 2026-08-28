@@ -31,7 +31,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
 
 	for _, want := range []string{
 		"# Journey j-",
@@ -44,6 +44,49 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)
 		}
+	}
+}
+
+// TestRenderMarkdown_LinkDetailsFalse_RendersCoordinatesNotLinks covers
+// 12-B (B10 / review §12.5): the default batch suite renders the decision
+// spine's "→ detail" pointer and the system-prompt header's evidence
+// pointer as inline `file:line` coordinates, not Markdown links that would
+// 404 because the target pages aren't materialized on that path.
+func TestRenderMarkdown_LinkDetailsFalse_RendersCoordinatesNotLinks(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "coordinate-mode fixture")
+	a1 := map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+		map[string]any{"id": "c1", "function": map[string]any{"name": "web_search", "arguments": "{}"}},
+	}}
+	t1 := map[string]any{"role": "tool", "tool_call_id": "c1", "content": "search results here"}
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("开工"))
+	r2 := mkRec(at(1), "", []any{sys, u1, a1, t1}, sseText("完成"))
+	j, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{r1, r2})), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	m, f := ComputeMetrics(j), ComputeFindings(j, i18n.EN)
+
+	coordMD := RenderMarkdown(j, m, f, i18n.EN, false, false)
+	if strings.Contains(coordMD, "](../details/") {
+		t.Errorf("linkDetails=false still emitted a ../details/ link:\n%s", coordMD)
+	}
+	if strings.Contains(coordMD, "](../evidence/") {
+		t.Errorf("linkDetails=false still emitted a ../evidence/ link:\n%s", coordMD)
+	}
+	for _, want := range []string{"→ `", ":1`", ":2`", "Batch suite output"} {
+		if !strings.Contains(coordMD, want) {
+			t.Errorf("linkDetails=false output missing %q:\n%s", want, coordMD)
+		}
+	}
+
+	linkMD := RenderMarkdown(j, m, f, i18n.EN, false, true)
+	if !strings.Contains(linkMD, "](../details/") {
+		t.Errorf("linkDetails=true should emit ../details/ links:\n%s", linkMD)
+	}
+	if strings.Contains(linkMD, "Batch suite output") {
+		t.Errorf("linkDetails=true should not emit the coordinate-mode note:\n%s", linkMD)
 	}
 }
 
@@ -66,7 +109,7 @@ func TestRenderMarkdown_EscapesJourneyTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
 
 	if strings.Contains(md, "<!--") {
 		t.Errorf("rendered Markdown leaked a raw HTML comment marker from the Journey title:\n%s", md)
@@ -113,7 +156,7 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
 
 	for _, want := range []string{
 		"🤔 I should read both files first.",
@@ -177,7 +220,7 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
 	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "context was sharply contracted") {
 		t.Errorf("rendered Markdown missing break warning:\n%s", md)
 	}
@@ -220,7 +263,7 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
 	if !strings.Contains(md, "content barely overlaps with the previous segment") {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}

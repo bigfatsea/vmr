@@ -27,7 +27,15 @@ import (
 // recomputed here, so the Markdown and JSON outputs for the same Journey
 // are guaranteed to agree on both. Purely a view over already-computed
 // facts — no judgment calls happen here, only formatting.
-func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists bool) string {
+//
+// linkDetails controls how the decision spine's per-Step "→ detail" pointer
+// and the system-prompt header's evidence pointer render: a Markdown link
+// into details/*.md / evidence/*.md when true (single -journey / -compare /
+// -render-all, where those files are materialized), an inline `file:line`
+// coordinate when false (the default batch suite keeps them unmaterialized
+// per P13.1 — a link there would 404, B10 / review §12.5). It tracks the
+// caller's own materializeDetails decision (cmd/vmr/cmd_story.go).
+func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists, linkDetails bool) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Story(lang)
@@ -49,10 +57,10 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 		w("%s", t.BreakWarning(j.Break.Edit.Kind.String(), breakReasonHint(j.Break.Edit.Kind, t), editStatsHint(j.Break.Edit, t)))
 	}
 
-	renderSystemPromptHeader(w, j, t)
+	renderSystemPromptHeader(w, j, t, linkDetails)
 	renderOverviewCard(w, j, m, lang)
 	renderModelUsage(w, m, lang)
-	renderDecisionSpine(w, j, findings, lang)
+	renderDecisionSpine(w, j, findings, lang, linkDetails)
 	renderToolTimeline(w, j, lang)
 	renderFindingsSection(w, j, findings, lang)
 	return b.String()

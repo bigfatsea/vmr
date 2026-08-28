@@ -26,8 +26,17 @@ type SpineText struct {
 	SpineTaskLine             func(idx int, title string) string
 	SpineFindingTag           string                      // appended to a spine Step header that hit a Finding
 	SpineValueTruncated       func(more int) string       // appended to a tool-call payload block capped at spineFullCap
-	SpineResultValueTruncated func(more int) string       // same, for a paired tool RESULT — points to the NEXT Step's detail link, not this one (the result's full text lives there)
-	SpineDetailLink           func(relPath string) string // "→ detail" link to this Step's own record, P5.2
+	SpineResultValueTruncated func(more int) string       // same, for a paired tool RESULT — the full text lives in the NEXT Step's record
+	SpineDetailLink           func(relPath string) string // "→ detail" link to this Step's own record, P5.2 (link mode)
+	// SpineDetailCoord is the coordinate form of the same "→ detail"
+	// pointer, used by the default batch suite where detail pages are not
+	// materialized (P13.1 volume discipline) — an inline `file:line`
+	// coordinate instead of a link that would 404 (B10 / review §12.5).
+	SpineDetailCoord func(coord string) string
+	// SpineCoordNote is the one-time explainer printed at the top of a
+	// coordinate-mode decision spine, so a reader knows why the Steps show
+	// coordinates rather than links and how to get the linked form.
+	SpineCoordNote string
 
 	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
@@ -92,12 +101,14 @@ func Spine(lang Lang) SpineText {
 			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 			SpineFindingTag: " ⚠️",
 			SpineValueTruncated: func(more int) string {
-				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见本 Step 的详情链接)"
+				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见本 Step 的详单)"
 			},
 			SpineResultValueTruncated: func(more int) string {
-				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下一步的详情链接)"
+				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下一步的详单)"
 			},
-			SpineDetailLink: func(relPath string) string { return "→ [详情](" + relPath + ")\n\n" },
+			SpineDetailLink:  func(relPath string) string { return "→ [详情](" + relPath + ")\n\n" },
+			SpineDetailCoord: func(coord string) string { return "→ `" + coord + "`\n\n" },
+			SpineCoordNote:   "> 批量套件产出：各 Step 只标源坐标（`文件:行`）。运行 `vmr analyze -journey <id>` 生成带完整详单链接的单条报告。\n\n",
 
 			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
 			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
@@ -161,12 +172,14 @@ func Spine(lang Lang) SpineText {
 		SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
 		SpineFindingTag: " ⚠️",
 		SpineValueTruncated: func(more int) string {
-			return "\n… (+" + strconv.Itoa(more) + " more chars — full value at this Step's detail link)"
+			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's detail page)"
 		},
 		SpineResultValueTruncated: func(more int) string {
-			return "\n… (+" + strconv.Itoa(more) + " more chars — full value at the next Step's detail link)"
+			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in the next Step's detail page)"
 		},
-		SpineDetailLink: func(relPath string) string { return "→ [detail](" + relPath + ")\n\n" },
+		SpineDetailLink:  func(relPath string) string { return "→ [detail](" + relPath + ")\n\n" },
+		SpineDetailCoord: func(coord string) string { return "→ `" + coord + "`\n\n" },
+		SpineCoordNote:   "> Batch suite output: each Step shows only its source coordinate (`file:line`). Run `vmr analyze -journey <id>` for a single-journey report with full detail links.\n\n",
 
 		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
 		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },

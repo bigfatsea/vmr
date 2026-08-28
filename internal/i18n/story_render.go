@@ -35,6 +35,11 @@ type StoryText struct {
 	// effective Step range, a char-count summary, and a link to the shared
 	// evidence blob (P5.3 — full text no longer inlines here).
 	SysPromptEraLink func(fromSeq, toSeq, chars int, relPath string) string
+	// SysPromptEraCoord is the coordinate form of the same line, used by the
+	// default batch suite where the evidence blob is not materialized
+	// (P13.1) — names the blob and points at `vmr analyze -journey <id>`
+	// rather than emitting a link that would 404 (B10 / review §12.5).
+	SysPromptEraCoord func(fromSeq, toSeq, chars int, blobName string) string
 	// SysPromptEraNoSys is the line for an era with no leading system
 	// block at all (HasSys == false) — rendered as-is, not silently
 	// skipped, so the effective-range list stays complete.
@@ -95,6 +100,13 @@ func Story(lang Lang) StoryText {
 					rangeLabel += "–" + strconv.Itoa(toSeq)
 				}
 				return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " 字符 · → [详情](" + relPath + ")\n"
+			},
+			SysPromptEraCoord: func(fromSeq, toSeq, chars int, blobName string) string {
+				rangeLabel := "Step " + strconv.Itoa(fromSeq)
+				if toSeq > fromSeq {
+					rangeLabel += "–" + strconv.Itoa(toSeq)
+				}
+				return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " 字符 · `" + blobName + "`（见 `vmr analyze -journey <id>`）\n"
 			},
 			SysPromptEraNoSys: func(fromSeq, toSeq int) string {
 				rangeLabel := "Step " + strconv.Itoa(fromSeq)
@@ -160,6 +172,13 @@ func Story(lang Lang) StoryText {
 				rangeLabel += "–" + strconv.Itoa(toSeq)
 			}
 			return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " chars · → [detail](" + relPath + ")\n"
+		},
+		SysPromptEraCoord: func(fromSeq, toSeq, chars int, blobName string) string {
+			rangeLabel := "Step " + strconv.Itoa(fromSeq)
+			if toSeq > fromSeq {
+				rangeLabel += "–" + strconv.Itoa(toSeq)
+			}
+			return "- " + rangeLabel + " · " + strconv.Itoa(chars) + " chars · `" + blobName + "` (see `vmr analyze -journey <id>`)\n"
 		},
 		SysPromptEraNoSys: func(fromSeq, toSeq int) string {
 			rangeLabel := "Step " + strconv.Itoa(fromSeq)

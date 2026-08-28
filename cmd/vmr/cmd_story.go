@@ -716,25 +716,18 @@ func journeyBaseName(j *story.Journey) string {
 	return strings.TrimSuffix(story.JourneyReportFile(j.ID, j.Partial), ".md")
 }
 
-// ensureJourneyFile checks if j's journey report markdown file exists in
-// storiesDir. If it does not exist, it renders and writes it (both .md and
-// .json) so that running `vmr story -compare` directly also produces the
-// individual journey reports. Either way it also ensures j's own Step
-// detail pages are materialized (P13.1 fix, caught by independent review
-// of this phase's ActionPlan): the .md existing is NOT proof its details
-// were ever materialized — the default suite (materializeDetails=false)
-// can have written this exact journey-<id>.md with none of its Step
-// details, and -compare naming that same journey later must not silently
-// leave every one of its "→ detail" links 404 forever. EnsureJourneyDetails
-// is cheap to call unconditionally here: EnsureRendered's fingerprint check
-// (P12) makes an already-materialized Step a fast skip, not a rewrite.
+// ensureJourneyFile (re)writes j's journey report (.md + .json) and
+// materializes its Step detail pages, so running `vmr analyze -compare`
+// directly also produces the individual journey reports with working
+// links. Unconditionally re-renders even when journey-<id>.md already
+// exists: the default suite (materializeDetails=false) can have written
+// this exact file with inline coordinates and no materialized details, and
+// -compare naming that same journey is a user-named target that must get
+// the linked form (P13.1 → review §12.5's 12-B). EnsureJourneyDetails and
+// the re-render are both cheap here — EnsureRendered's fingerprint check
+// (P12) makes an already-materialized Step a fast skip, and RenderMarkdown
+// is a pure string build.
 func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string) error {
-	base := journeyBaseName(j)
-	mdPath := filepath.Join(storiesDir, base+".md")
-	if _, err := os.Stat(mdPath); err == nil {
-		story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
-		return nil
-	}
 	m := story.ComputeMetrics(j)
 	findings := story.ComputeFindings(j, lang)
 	// true: both -compare sides are user-named targets, same as a single
@@ -782,7 +775,12 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 		story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
 	}
 	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(storiesDir), "vmr-report.md"))
-	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil)
+	// linkDetails == materializeDetails: this call just wrote (or skipped as
+	// already-current) this Journey's detail pages iff materializeDetails, so
+	// the spine's "→ detail" pointers link only when they will resolve; the
+	// default batch suite (materializeDetails=false) gets inline coordinates
+	// instead of 404 links (P13.1 / B10 / review §12.5).
+	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil, materializeDetails)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}

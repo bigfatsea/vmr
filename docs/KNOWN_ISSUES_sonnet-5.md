@@ -326,9 +326,9 @@
       （即使解析出多个目标，仍是用户点名，不是默认套件的隐式批量）恒传 `true`；`-render-all`
       （无论是 `vmr story -render-all` 的完整全量，还是 `vmr analyze -render-all` 把默认套件范围从
       task-only 扩到全部候选）也传 `true`——这是用户主动要求"我全都要"；只有无 selector 的默认套件
-      （`cmd_analyze.go` 的 `taskOnlyCandidates` 分支）传 `false`。脊柱的"→ detail"链接文本是
-      Manifest 的纯函数，与目标文件是否存在无关（`EnsureJourneyDetails` 自身 doc comment 已经这样
-      论证），所以批量模式下链接照常渲染，只是可能暂未物化，不产生死链接。
+      （`cmd_analyze.go` 的 `taskOnlyCandidates` 分支）传 `false`。**首版遗留的死链接**：脊柱"→ detail"
+      的目标名是 Manifest 的纯函数（可算），但 P13.1 把它无条件渲染成 Markdown **链接**，默认套件下
+      全部指向不存在的文件——"可算"不等于"可达"。由 P13.6（12-B）修复。
     - **P13.2**：`renderClientResponse` 的 `Details(t.RawSSEFull(...), codeFence(body))`
       （响应体原始 SSE 全文，`rec.Client.Response.Body` 的逐字复制）改为一行带 `ctxgraph.ReqCoord`
       坐标的取用提示（`RawSSERef`，指向 `vmr replay -print -req <coord>`）；`renderStreamSummary`
@@ -345,9 +345,16 @@
       判据）改为 `opts.detailsOn || detailDirHasFiles(detailDir)`（`detailsPresentFor`，
       `cmd_report.go`），在 `report.Markdown` 渲染前、`BuildCached` 之前检查——即报表半区自己的
       `-details` 写入尚未落盘时，也能看到 story 半区（P13.1 的 `-render-all` 路径）已经写下的文件。
-    - **P13.5**：新增 `TestCmdAnalyze_DefaultSuiteDoesNotMaterializeDetails`（默认套件 `details/`
-      为 0 或不存在、脊柱链接仍渲染；`-render-all` 材料化非空）——人为把 P13.1 的判断改回"无条件
-      物化"，测试当场失败，改回来后通过，不是只凭代码走查判定守卫有效。
+    - **P13.5**：常驻守卫测试（默认套件 `details/` 为 0 或不存在；`-render-all` 材料化非空）——
+      人为把 P13.1 的判断改回"无条件物化"，测试当场失败，改回来后通过，不是只凭代码走查判定守卫有效。
+      12-B 起并断言默认套件的脊柱/证据指针是行内坐标而非死链接（`TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks`）。
+    - **P13.6（12-B，综合评审 §12.5）**：默认批量套件不物化 detail，其 journey 报告的脊柱"→ detail"
+      与 system-prompt 证据指针改渲染为行内 `文件:行` 坐标（`SpineDetailCoord` / `SysPromptEraCoord`，
+      复用 `Manifest.Req`），不再输出会 404 的链接。`RenderMarkdown` 新增 `linkDetails bool`
+      （= 调用方的 `materializeDetails`）。`ensureJourneyFile` 去掉"`.md` 已存在即早退"分支——默认套件
+      写的坐标版 `.md` 被 `-compare` 点名后要重渲染成链接版。单 `-journey` / `-compare` / `-render-all`
+      路径不变（仍是真链接）。真实语料（07-15/07-16 两日 2209 条）：默认套件 `../details/` 与
+      `../evidence/` 链接双清零。
     - **真实语料验证**（本仓库 `logs/` 下 2026-07-15 单日 394 条记录、07-15 全量 34 文件 11353 条
       记录）：默认 `vmr analyze` 从 **47MB / 253 份详单 → 3.0MB / 0 份详单**；`-render-all` 从
       **49MB（`details/` 45MB）→ 10MB（`details/` 6.1MB）**，同一批 302 份详单体积降约 86%；

@@ -259,7 +259,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		j := journeyOfTasks(
 			&Task{Title: "t1", Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: "just talk"}}},
 		)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if !strings.Contains(out, et.SpineTitle) {
 			t.Errorf("expected the spine title even for a Journey with no tool calls, got %q", out)
@@ -272,13 +272,37 @@ func TestRenderDecisionSpine(t *testing.T) {
 		}
 	})
 
+	t.Run("linkDetails=false: Step pointers are inline coordinates, not links (12-B)", func(t *testing.T) {
+		m := &ctxgraph.Manifest{TS: at(0), Path: "logs/audit.jsonl", Line: 7, Req: "audit.jsonl:7"}
+		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{
+			{Seq: 1, Manifest: m, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"a"}`)}},
+		}})
+		wLink, bufLink := capture()
+		renderDecisionSpine(wLink, j, nil, i18n.EN, true)
+		if !strings.Contains(bufLink.String(), "](../details/") {
+			t.Errorf("linkDetails=true should render a ../details/ link, got %q", bufLink.String())
+		}
+		wCoord, bufCoord := capture()
+		renderDecisionSpine(wCoord, j, nil, i18n.EN, false)
+		out := bufCoord.String()
+		if strings.Contains(out, "](../details/") {
+			t.Errorf("linkDetails=false must not render a ../details/ link, got %q", out)
+		}
+		if !strings.Contains(out, "→ `audit.jsonl:7`") {
+			t.Errorf("linkDetails=false should render the inline `file:line` coordinate, got %q", out)
+		}
+		if !strings.Contains(out, et.SpineCoordNote) {
+			t.Errorf("linkDetails=false should print the one-time coordinate-mode note, got %q", out)
+		}
+	})
+
 	t.Run("mid-task instruction: HumanInitiated Step after the first gets an instruction line, not a report line", func(t *testing.T) {
 		w, buf := capture()
 		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
 		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: "actually also check b.go",
 			NewEvents: []*Event{{Msg: chatmsg.Message{Role: "user", Text: "actually also check b.go"}}}}
 		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		// s1 is the Task's own opening Step — HumanInitiated is skipped there
 		// (the Task title already carries the instruction), but it still gets
@@ -300,7 +324,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: "actually also check b.go",
 			ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"b.go"}`)}}
 		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		// s2 has a tool call, so it renders via renderSpineStep (not
 		// renderSpineBriefStep) — the instruction line must still appear;
@@ -315,7 +339,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0))}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		want := "**" + stepRoleTag(s, false, et) + " Step 1 · " + at(0).Format("15:04:05") + "**"
 		if !strings.Contains(out, want) {
@@ -331,7 +355,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)),
 			ToolCalls: []chatmsg.ToolCall{tc("write_file", `{"path":"report.md","content":"final answer"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if !strings.Contains(out, et.SpineFinalDeliverableTitle) {
 			t.Errorf("output = %q, want the final deliverable title", out)
@@ -345,7 +369,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, et.SpineFinalDeliverableTitle) {
 			t.Errorf("output = %q, must not render a final deliverable section when none was found", out)
@@ -360,7 +384,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		task2 := &Task{Title: "second task", Steps: []*Step{s2}}
 		j := journeyOfTasks(task1, task2)
 		findings := []Finding{{Code: FindingExactRepeatToolCall, StepSeq: 2}}
-		renderDecisionSpine(w, j, findings, i18n.EN)
+		renderDecisionSpine(w, j, findings, i18n.EN, true)
 		out := buf.String()
 
 		if !strings.Contains(out, et.SpineTaskLine(1, "first task")) {
@@ -391,7 +415,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		s := &Step{Seq: 5, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
 		findings := []Finding{{Code: FindingUnverifiedSuccess, StepSeq: 99, RelatedSeq: []int{5}}}
-		renderDecisionSpine(w, j, findings, i18n.EN)
+		renderDecisionSpine(w, j, findings, i18n.EN, true)
 		out := buf.String()
 		want := "**" + stepRoleTag(s, false, et) + " Step 5 · " + at(0).Format("15:04:05") + "**" + et.SpineFindingTag
 		if !strings.Contains(out, want) {
@@ -405,7 +429,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), ToolCalls: []chatmsg.ToolCall{tc("exec", `{"command":"go test"}`)}}
 		s3 := &Step{Seq: 3, Manifest: mkManifest(at(2)), ToolCalls: []chatmsg.ToolCall{tc("exec", `{"command":"go build"}`)}} // repeats Step 1
 		j := journeyOf(s1, s2, s3)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 
 		n := strings.Count(out, "Step 1 ·") + strings.Count(out, "Step 2 ·") + strings.Count(out, "Step 3 ·")
@@ -430,7 +454,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 			tc("web_search", `{"query":"b"}`),
 		}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Count(out, "Step 3 ·") != 1 {
 			t.Errorf("output = %q, want exactly one Step 3 header even though it made 3 tool calls", out)
@@ -447,7 +471,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: "先试试东方财富接口", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if !strings.Contains(out, "> 先试试东方财富接口\n\n") {
 			t.Errorf("output = %q, want the RespText why-line", out)
@@ -458,7 +482,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), Reasoning: "let me check the docs first", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if !strings.Contains(out, "> 🤔 let me check the docs first\n\n") {
 			t.Errorf("output = %q, want the Reasoning why-line", out)
@@ -469,7 +493,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: "stated plan", Reasoning: "inner reasoning", ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if !strings.Contains(out, "> stated plan\n\n") {
 			t.Errorf("output = %q, want RespText's why-line", out)
@@ -483,7 +507,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, ">") {
 			t.Errorf("output = %q, must not invent a why-line when the Step said nothing", out)
@@ -502,7 +526,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 	t.Run("task title is escaped", func(t *testing.T) {
 		w, buf := capture()
 		j := journeyOfTasks(&Task{Title: adversarial, Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: "ok"}}})
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, "<!--") {
 			t.Errorf("task title leaked a raw HTML comment marker: %q", out)
@@ -517,7 +541,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		s1 := &Step{Seq: 1, Manifest: mkManifest(at(0)), HumanInitiated: true, RespText: "sure"}
 		s2 := &Step{Seq: 2, Manifest: mkManifest(at(1)), HumanInitiated: true, Instruction: adversarial}
 		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{s1, s2}})
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, "<!--") {
 			t.Errorf("instruction line leaked a raw HTML comment marker: %q", out)
@@ -530,7 +554,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 	t.Run("brief Step's report line (RespText) is escaped", func(t *testing.T) {
 		w, buf := capture()
 		j := journeyOfTasks(&Task{Title: "t1", Steps: []*Step{{Seq: 1, Manifest: mkManifest(at(0)), RespText: adversarial}}})
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, "<!--") {
 			t.Errorf("report line leaked a raw HTML comment marker: %q", out)
@@ -544,7 +568,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), RespText: adversarial, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"x"}`)}}
 		j := journeyOf(s)
-		renderDecisionSpine(w, j, nil, i18n.EN)
+		renderDecisionSpine(w, j, nil, i18n.EN, true)
 		out := buf.String()
 		if strings.Contains(out, "<!--") {
 			t.Errorf("why-line leaked a raw HTML comment marker: %q", out)
