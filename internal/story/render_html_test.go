@@ -13,79 +13,119 @@ import (
 	"vmr/internal/taskseg"
 )
 
-func htmlTestJourney(t *testing.T) *Journey {
+// htmlTestJourney builds a small journey whose bodies carry sentinels
+// (SECRET-LEAK in the instruction, TOKEN=abc in a tool result) and whose
+// two identical read_file calls trip the exact-repeat Finding — enough to
+// exercise every dashboard section and the redaction path.
+func htmlTestJourney(t *testing.T) (*Journey, Metrics, []Finding) {
 	t.Helper()
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "sys")
 	u1 := msg("user", "audit the auth module for SECRET-LEAK issues")
 
-	r1 := mkRec(at(0), "", []any{sys, u1}, sseToolCalls([]any{
-		map[string]any{"id": "c1", "function": map[string]any{"name": "read_file", "arguments": `{"path":"auth.go"}`}},
-	}))
-	a1 := map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-		map[string]any{"id": "c1", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"auth.go"}`}},
-	}}
-	tr := map[string]any{"role": "tool", "tool_call_id": "c1", "content": "package auth // TOKEN=abc"}
-	r2 := mkRec(at(1), "", []any{sys, u1, a1, tr}, sseText("done reviewing"))
+	call := func(id string) any {
+		return map[string]any{"id": id, "function": map[string]any{"name": "read_file", "arguments": `{"path":"auth.go"}`}}
+	}
+	aCall := func(id string) map[string]any {
+		return map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+			map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"auth.go"}`}},
+		}}
+	}
+	res := func(id string) map[string]any {
+		return map[string]any{"role": "tool", "tool_call_id": id, "content": "package auth // TOKEN=abc"}
+	}
 
-	l := onlyLineage(t, writeJSONL(t, []audit.Record{r1, r2}))
+	r1 := mkRec(at(0), "", []any{sys, u1}, sseToolCalls([]any{call("c1")}))
+	r2 := mkRec(at(1), "", []any{sys, u1, aCall("c1"), res("c1")}, sseToolCalls([]any{call("c2")}))
+	r3 := mkRec(at(2), "", []any{sys, u1, aCall("c1"), res("c1"), aCall("c2"), res("c2")}, sseToolCalls([]any{call("c3")}))
+	r4 := mkRec(at(3), "", []any{sys, u1, aCall("c1"), res("c1"), aCall("c2"), res("c2"), aCall("c3"), res("c3")}, sseText("done reviewing"))
+
+	l := onlyLineage(t, writeJSONL(t, []audit.Record{r1, r2, r3, r4}))
 	j, err := Build(l, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	return j
+	m := ComputeMetrics(j)
+	f := ComputeFindings(j, i18n.EN)
+	return j, m, f
 }
 
-func TestRenderHTML_Structure(t *testing.T) {
-	j := htmlTestJourney(t)
-	out := RenderHTML(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false)
+func TestRenderHTML_DashboardStructure(t *testing.T) {
+	j, m, f := htmlTestJourney(t)
+	out := RenderHTML(j, m, f, i18n.EN, false)
 
 	for _, want := range []string{
 		"<!doctype html>",
 		"<title>Journey j-",
-		"<nav class=\"timeline\">",
-		"<main class=\"cards\">",
-		"id=\"step-1\"",
-		"audit the auth module", // instruction text present un-redacted
-		"read_file",             // tool name always shown
+		`id="structure"`,
+		`id="metrics"`,
+		`id="findings"`,
+		`id="step-1"`,
+		`class="stat"`,      // metrics grid
+		"<polyline",         // context sparkline
+		"read_file",         // tool chip
+		`href="../details/`, // per-step detail link (non-redact)
+		"audit the auth module",
 		"<style>",
-		"IntersectionObserver", // the inline script
+		"IntersectionObserver",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("HTML missing %q", want)
+			t.Errorf("dashboard HTML missing %q", want)
 		}
 	}
-	// self-contained: no external resource loads.
+	if len(f) == 0 {
+		t.Fatal("fixture should trip the exact-repeat Finding")
+	}
+	if !strings.Contains(out, string(f[0].Code)) {
+		t.Errorf("Findings section did not render finding code %q", f[0].Code)
+	}
 	if m := regexp.MustCompile(`(?:src|href)\s*=\s*"https?://`).FindString(out); m != "" {
-		t.Errorf("HTML references an external resource: %q", m)
+		t.Errorf("dashboard references an external resource: %q", m)
+	}
+	if strings.Contains(out, `<link rel="stylesheet"`) || strings.Contains(out, "<script src=") {
+		t.Error("dashboard loads an external stylesheet or script")
 	}
 }
 
-func TestRenderHTML_RedactLeaksNothing(t *testing.T) {
-	j := htmlTestJourney(t)
-	out := RenderHTML(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, true)
+func TestRenderHTML_DashboardRedactLeaksNothing(t *testing.T) {
+	j, m, f := htmlTestJourney(t)
+	out := RenderHTML(j, m, f, i18n.EN, true)
 
-	for _, secret := range []string{"SECRET-LEAK", "TOKEN=abc", "package auth", "starting", "done reviewing"} {
+	for _, secret := range []string{"SECRET-LEAK", "TOKEN=abc", "package auth", "done reviewing", "read_file\":", "auth.go"} {
 		if strings.Contains(out, secret) {
-			t.Errorf("redacted HTML leaked conversation content: %q", secret)
+			t.Errorf("redacted dashboard leaked content: %q", secret)
 		}
 	}
-	// structure survives redaction.
-	for _, want := range []string{"read_file", "‹text:", "id=\"step-1\"", "<nav class=\"timeline\">"} {
+	// structure + metrics survive; detail links do not.
+	for _, want := range []string{"read_file", "‹text:", `id="step-1"`, `class="stat"`, "<polyline"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("redacted HTML missing structural element %q", want)
+			t.Errorf("redacted dashboard missing structural element %q", want)
 		}
 	}
-	// no raw content <pre> blocks at all in redact mode.
-	if strings.Contains(out, `<pre class="text"`) || strings.Contains(out, `<pre class="json"`) {
-		t.Error("redact mode still emitted a raw content <pre> block")
+	if strings.Contains(out, `href="../details/`) {
+		t.Error("redact mode still linked to ../details/ (0600, not shared)")
+	}
+	if strings.Contains(out, "<pre>") {
+		t.Error("redact mode still emitted a raw <pre> content block")
+	}
+	// finding codes stay, finding narrative text does not.
+	if !strings.Contains(out, string(f[0].Code)) {
+		t.Error("redact mode should still show finding codes + step anchors")
+	}
+	if f[0].Finding != "" && strings.Contains(out, f[0].Finding) {
+		t.Errorf("redact mode leaked finding narrative text: %q", f[0].Finding)
 	}
 }
 
-func TestRenderHTML_ZHChrome(t *testing.T) {
-	j := htmlTestJourney(t)
-	out := RenderHTML(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.ZH, false)
-	if !strings.Contains(out, "<html lang=\"zh\">") || !strings.Contains(out, "时间轴") {
-		t.Error("ZH chrome not applied")
+func TestRenderHTML_DashboardZHChrome(t *testing.T) {
+	j, m, f := htmlTestJourney(t)
+	out := RenderHTML(j, m, f, i18n.ZH, false)
+	if !strings.Contains(out, `<html lang="zh">`) || !strings.Contains(out, "结构") || !strings.Contains(out, "指标") {
+		t.Errorf("ZH chrome not applied:\n%s", out[:min(len(out), 600)])
 	}
+}
+
+func TestRenderHTML_NoStepsDoesNotPanic(t *testing.T) {
+	j := &Journey{ID: "j-empty", Title: "x", From: time.Now(), To: time.Now()}
+	_ = RenderHTML(j, Metrics{}, nil, i18n.EN, false)
 }
