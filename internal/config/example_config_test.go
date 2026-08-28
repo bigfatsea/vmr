@@ -34,3 +34,19 @@ func TestLoad_RepoExampleConfig_Parses(t *testing.T) {
 		t.Fatal("config.example.yaml: no models parsed")
 	}
 }
+
+// TestLoad_RepoMinimalConfig_Parses guards config.minimal.yaml (and its .zh
+// sibling) the same way — the README Quick Start tells first-time users to
+// copy it, so a bit-rotted minimal template (the exact fate config.local.yaml
+// met, review B16) breaks onboarding silently.
+func TestLoad_RepoMinimalConfig_Parses(t *testing.T) {
+	for _, path := range []string{"../../config.minimal.yaml", "../../config.minimal.zh.yaml"} {
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("%s failed to load/validate: %v", path, err)
+		}
+		if len(cfg.Providers) == 0 || len(cfg.Models) == 0 {
+			t.Fatalf("%s: providers=%d models=%d, want both non-zero", path, len(cfg.Providers), len(cfg.Models))
+		}
+	}
+}

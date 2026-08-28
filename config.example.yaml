@@ -1,4 +1,6 @@
 # Ver 2026-08-02 13:30, by Sonnet 5
+# vmr config — the fully annotated reference. Just want to get running?
+# Copy config.minimal.yaml instead (~10 lines) and come back here for a knob.
 # vmr config — copy to config.yaml and adjust.
 # providers = what you have (a flat list of accounts); models = what clients see
 # and in which order to use it.

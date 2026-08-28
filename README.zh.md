@@ -96,7 +96,8 @@ go build -o vmr ./cmd/vmr
 ### 2. 运行
 
 ```bash
-cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
+cp config.minimal.yaml config.yaml   # ~10 行即可起步；完整注解参考见 config.example.yaml
+export DEEPSEEK_API_KEY=sk-...        # minimal 配置引用的 ${ENV}
 ./vmr check -c config.yaml           # 校验配置并打印路由表
 ./vmr start -c config.yaml           # 前台运行
 
@@ -107,7 +108,13 @@ cp config.example.yaml config.yaml   # api_key 支持 ${ENV} 展开
 ./vmr.sh service install     # 注册并启动
 ```
 
-### 3. 接入（零代码修改）
+### 3. 验证
+
+```bash
+./vmr diagnose -c config.yaml   # 一屏红绿灯：配置检查、DNS + TLS、每个端点一次真实 echo 请求、路由预览
+```
+
+### 4. 接入（零代码修改）
 
 将客户端的 Base URL 指向 vmr：
 
@@ -145,7 +152,7 @@ curl http://127.0.0.1:8800/status
 ```
 </details>
 
-### 4. 分析
+### 5. 分析
 
 ```bash
 ./vmr analyze -c config.yaml   # 一次调用、一个输出目录：聚合报表 + 每个任务 journey，互相链接

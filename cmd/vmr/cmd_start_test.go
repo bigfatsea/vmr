@@ -12,21 +12,55 @@ import (
 	"vmr/internal/logtee"
 )
 
-// TestLogConfigCheckIssuesEmitsWarnPerIssue locks in the fix for config.Check()
-// being skipped on the start/hot-reload paths: an empty api_key must show up
-// as a visible WARN line, not silently pass through to a config that 401s
-// every request.
-func TestLogConfigCheckIssuesEmitsWarnPerIssue(t *testing.T) {
+// TestLogConfigCheckIssuesBannersErrors locks in the fix for config.Check()
+// being skipped on the start/hot-reload paths: an empty api_key (a
+// SeverityError) must show up in the loud banner, not silently pass through
+// to a config that 401s every request.
+func TestLogConfigCheckIssuesBannersErrors(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
 
 	logConfigCheckIssues(logger, []config.Issue{
-		{Provider: "p1", Field: "api_key", Message: `provider "p1": api_key missing`},
-	})
+		{Provider: "p1", Field: "api_key", Message: `provider "p1": api_key missing`, Severity: config.SeverityError},
+	}, nil)
 
 	out := buf.String()
-	if !strings.Contains(out, "WARN") || !strings.Contains(out, `api_key missing`) {
-		t.Errorf("expected a WARN line mentioning the issue, got: %q", out)
+	if !strings.Contains(out, "CONFIG PROBLEMS") || !strings.Contains(out, `api_key missing`) {
+		t.Errorf("expected the CONFIG PROBLEMS banner mentioning the issue, got: %q", out)
+	}
+}
+
+// TestLogConfigCheckIssuesBannersEmptyEnvRefs: an unset ${VAR} the config
+// referenced is the most common "forgot the key" cause — it must reach the
+// banner even when Check() itself found nothing.
+func TestLogConfigCheckIssuesBannersEmptyEnvRefs(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+
+	logConfigCheckIssues(logger, nil, []string{"DEEPSEEK_API_KEY"})
+
+	out := buf.String()
+	if !strings.Contains(out, "CONFIG PROBLEMS") || !strings.Contains(out, "DEEPSEEK_API_KEY") {
+		t.Errorf("expected the banner to name the unset env var, got: %q", out)
+	}
+}
+
+// TestLogConfigCheckIssuesWarningStaysQuiet: a SeverityWarning is one WARN
+// line, no banner.
+func TestLogConfigCheckIssuesWarningStaysQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+
+	logConfigCheckIssues(logger, []config.Issue{
+		{Field: "listen", Message: "open proxy", Severity: config.SeverityWarning},
+	}, nil)
+
+	out := buf.String()
+	if strings.Contains(out, "CONFIG PROBLEMS") {
+		t.Errorf("a warning should not raise the banner, got: %q", out)
+	}
+	if !strings.Contains(out, "WARN config check: open proxy") {
+		t.Errorf("expected a quiet WARN line, got: %q", out)
 	}
 }
 
@@ -36,7 +70,7 @@ func TestLogConfigCheckIssuesNoIssuesNoOutput(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
 
-	logConfigCheckIssues(logger, nil)
+	logConfigCheckIssues(logger, nil, nil)
 
 	if buf.Len() != 0 {
 		t.Errorf("expected no output for zero issues, got: %q", buf.String())

@@ -54,6 +54,29 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	}
 }
 
+// TestParseTracksEmptyEnvRefs: a ${VAR} the config references that is unset
+// (or set to "") lands in Config.EmptyEnvRefs so cmd_start's banner can name
+// it — the most common "loads fine, 401s on the first request" cause.
+func TestParseTracksEmptyEnvRefs(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "") // referenced by validYAML, explicitly empty
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.EmptyEnvRefs) != 1 || cfg.EmptyEnvRefs[0] != "VMR_TEST_KEY" {
+		t.Fatalf("EmptyEnvRefs = %v, want [VMR_TEST_KEY]", cfg.EmptyEnvRefs)
+	}
+
+	t.Setenv("VMR_TEST_KEY", "sk-real")
+	cfg, err = Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.EmptyEnvRefs) != 0 {
+		t.Fatalf("EmptyEnvRefs = %v, want empty once the var is set", cfg.EmptyEnvRefs)
+	}
+}
+
 // TestParseRejectsEnvValueWithNewline pins the fix for a finding from the
 // 2026-08-12 review (VMR_项目全面Review报告 B5): expandEnv substitutes
 // ${VAR} into the raw YAML TEXT before parsing, so a value containing a

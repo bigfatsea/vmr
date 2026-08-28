@@ -1,0 +1,27 @@
+# Ver 2026-08-28, by Sonnet 5
+# Minimal working vmr config — copy to config.yaml, export one API key, run.
+# This is the "just get it running" template. For every knob (failover tuning,
+# quota pacing, sticky TTL, proxies, multi-account merge, per-endpoint
+# capabilities), see config.example.yaml — the fully annotated reference.
+
+listen: 127.0.0.1:8800
+
+providers:
+  - name: deepseek
+    base_url: {openai-completions: https://api.deepseek.com/v1, anthropic-messages: https://api.deepseek.com/anthropic/v1}
+    api_key: ${DEEPSEEK_API_KEY}   # export DEEPSEEK_API_KEY=sk-... before starting
+
+models:
+  # `coding` is reachable from any OpenAI-compatible client (POST /v1/chat/completions).
+  coding:
+    endpoints:
+      - protocol: openai-completions
+        providers: [deepseek]
+        models: [deepseek-v3.2-exp]
+
+  # `claude` is reachable from Anthropic-protocol clients like Claude Code (POST /v1/messages).
+  claude:
+    endpoints:
+      - protocol: anthropic-messages
+        providers: [deepseek]
+        models: [deepseek-v3.2-exp]

@@ -231,6 +231,34 @@ models:
 	}
 }
 
+// TestServe_AllEndpointsKeyless: a model whose every endpoint has an empty
+// api_key (a forgotten ${ENV_VAR}) answers with one clear vmr-side error
+// before any upstream attempt — not a raw upstream 401, not a cooldown.
+func TestServe_AllEndpointsKeyless(t *testing.T) {
+	u := newMockUpstream(t, 200, `{"ok":true}`)
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: ""}
+models:
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+`, u.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "vmr_no_api_key") {
+		t.Errorf("body should name vmr_no_api_key: %s", w.Body)
+	}
+	if u.hits != 0 {
+		t.Errorf("upstream should not have been contacted, hits=%d", u.hits)
+	}
+}
+
 // --- copyFlush: idle timeout ---
 
 func TestCopyFlush_IdleTimeout(t *testing.T) {

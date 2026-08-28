@@ -96,7 +96,8 @@ go build -o vmr ./cmd/vmr
 ### 2. Run
 
 ```bash
-cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
+cp config.minimal.yaml config.yaml   # ~10 lines to start; config.example.yaml is the full annotated reference
+export DEEPSEEK_API_KEY=sk-...        # the ${ENV} the minimal config references
 ./vmr check -c config.yaml           # validate config, print the routing table
 ./vmr start -c config.yaml           # foreground run
 
@@ -107,7 +108,13 @@ cp config.example.yaml config.yaml   # api_key supports ${ENV} expansion
 ./vmr.sh service install     # register + start
 ```
 
-### 3. Connect (Zero Code Changes)
+### 3. Verify
+
+```bash
+./vmr diagnose -c config.yaml   # one screen of red/green: config check, DNS + TLS, a real echo request per endpoint, routing preview
+```
+
+### 4. Connect (Zero Code Changes)
 
 Point your client's base URL at vmr:
 
@@ -145,7 +152,7 @@ curl http://127.0.0.1:8800/status
 ```
 </details>
 
-### 4. Analyze
+### 5. Analyze
 
 ```bash
 ./vmr analyze -c config.yaml   # one call, one output dir: aggregate report + every task journey, cross-linked

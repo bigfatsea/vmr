@@ -72,13 +72,41 @@ func logStart(logger *log.Logger, path string, listen string) {
 // fails once a real request 401s. Called on every path that can put a new
 // config into service without a human running `vmr check` by hand: initial
 // start, and every hot reload (fsnotify/SIGHUP), including the reloads a
-// service manager's restart triggers. Warnings only — a Check() issue is
-// "can run but may be wrong", not grounds to refuse a config validate()
-// already accepted.
-func logConfigCheckIssues(logger *log.Logger, issues []config.Issue) {
+// service manager's restart triggers. Never refuses a config validate()
+// already accepted — a Check() issue is "can run but may be wrong".
+//
+// SeverityWarning issues stay one quiet WARN line each. A SeverityError
+// issue (a missing api_key) or an unset ${VAR} the config referenced gets a
+// boxed banner instead: those are the "starts fine, every request fails"
+// cases, and a lone WARN line drowns in the config-summary dump right after
+// it.
+func logConfigCheckIssues(logger *log.Logger, issues []config.Issue, emptyEnvRefs []string) {
+	var errs, warns []string
 	for _, is := range issues {
-		logger.Printf("WARN config check: %s", is.Message)
+		if is.Severity == config.SeverityError {
+			errs = append(errs, is.Message)
+		} else {
+			warns = append(warns, is.Message)
+		}
 	}
+	for _, w := range warns {
+		logger.Printf("WARN config check: %s", w)
+	}
+	if len(errs) == 0 && len(emptyEnvRefs) == 0 {
+		return
+	}
+	bar := "!!" + strings.Repeat("=", 66) + "!!"
+	logger.Printf("%s", bar)
+	logger.Printf("  CONFIG PROBLEMS — vmr will start, but requests will likely fail")
+	logger.Printf("%s", bar)
+	for _, e := range errs {
+		logger.Printf("  - %s", e)
+	}
+	if len(emptyEnvRefs) > 0 {
+		logger.Printf("  - config references these env vars, but they are unset or empty: %s", strings.Join(emptyEnvRefs, ", "))
+	}
+	logger.Printf("  fix, then reload (SIGHUP) or restart — run `vmr check` / `vmr diagnose` for the full report")
+	logger.Printf("%s", bar)
 }
 
 // logStop prints one timestamped, greppable marker line on the way out —
@@ -112,7 +140,7 @@ func cmdStart(args []string) error {
 	}
 	logStart(logger, *path, cfg.Listen)
 	issues := cfg.Check()
-	logConfigCheckIssues(logger, issues)
+	logConfigCheckIssues(logger, issues, cfg.EmptyEnvRefs)
 
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
@@ -178,7 +206,7 @@ func cmdStart(args []string) error {
 			return
 		}
 		newIssues := newCfg.Check()
-		logConfigCheckIssues(logger, newIssues)
+		logConfigCheckIssues(logger, newIssues, newCfg.EmptyEnvRefs)
 		newSnap, err := router.BuildSnapshot(newCfg)
 		if err != nil {
 			logger.Printf("rejected, keeping current config: %v", err)

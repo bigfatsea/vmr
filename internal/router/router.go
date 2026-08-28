@@ -85,6 +85,9 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		return
 	}
 
+	if rt.rejectIfAllKeyless(w, creq, route.Endpoints) {
+		return
+	}
 	// Health filter (read-only) + stable multi-key sort.
 	//
 	// A half-open endpoint (fails>0, cooldown expired) never gets touched by
@@ -244,6 +247,30 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	}
 	rt.Telemetry.RecordOutcome(false, r.Context().Err() != nil)
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
+}
+
+// rejectIfAllKeyless answers a request for a model whose every endpoint has
+// an empty api_key — a forgotten or unset ${ENV_VAR} that loaded as valid
+// YAML — with one clear vmr-side error instead of letting each attempt 401
+// upstream (raw provider/CDN HTML to the client) and cool the endpoints down
+// for 10min+. Checked against the full endpoint set, not the health-filtered
+// one: an endpoint that already 401'd is in cooldown and would drop out,
+// turning this into a vaguer "no candidates" message. Returns true when it
+// handled the response.
+func (rt *Router) rejectIfAllKeyless(w http.ResponseWriter, creq *core.CanonicalRequest, eps []*core.Endpoint) bool {
+	if len(eps) == 0 {
+		return false
+	}
+	for _, ep := range eps {
+		if ep.APIKey != "" {
+			return false
+		}
+	}
+	rt.Telemetry.RecordOutcome(false, false)
+	WriteError(w, http.StatusServiceUnavailable, "vmr_no_api_key", fmt.Sprintf(
+		"all %d endpoint(s) for model %q have no api_key — set the provider api_key (or the ${ENV_VAR} it references) and reload",
+		len(eps), creq.Model))
+	return true
 }
 
 // findByHealthKey returns the endpoint in candidates whose HealthKey

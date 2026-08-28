@@ -1,0 +1,26 @@
+# Ver 2026-08-28, by Sonnet 5
+# 最小可用 vmr 配置 —— 复制为 config.yaml，导出一个 API key，即可运行。
+# 这是"先跑起来"的模板。所有旋钮（failover 调优、额度配速、sticky TTL、
+# 代理、多账号合并、按端点 capabilities）见 config.example.yaml —— 完整注解参考。
+
+listen: 127.0.0.1:8800
+
+providers:
+  - name: deepseek
+    base_url: {openai-completions: https://api.deepseek.com/v1, anthropic-messages: https://api.deepseek.com/anthropic/v1}
+    api_key: ${DEEPSEEK_API_KEY}   # 启动前先 export DEEPSEEK_API_KEY=sk-...
+
+models:
+  # `coding` 可被任意 OpenAI 兼容客户端访问（POST /v1/chat/completions）。
+  coding:
+    endpoints:
+      - protocol: openai-completions
+        providers: [deepseek]
+        models: [deepseek-v3.2-exp]
+
+  # `claude` 可被 Anthropic 协议客户端访问，如 Claude Code（POST /v1/messages）。
+  claude:
+    endpoints:
+      - protocol: anthropic-messages
+        providers: [deepseek]
+        models: [deepseek-v3.2-exp]

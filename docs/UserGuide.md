@@ -92,7 +92,9 @@ All fields and validation rules: Part 1 §10 of the design doc. Config edits hot
 
 ### Startup and reload checks
 
-Beyond the strict parsing above, vmr also runs a set of *operational* checks — the same ones `vmr check`/`vmr diagnose` print — on every start and every hot reload (fsnotify or SIGHUP, including the reload a service manager's auto-restart triggers), and logs each hit as a `WARN config check: ...` line. The main one worth knowing about: an empty `api_key` (a typo'd or unset `${ENV_VAR}`) is syntactically valid YAML, so it loads and hot-reloads without error — every request against that provider then 401s until someone notices. The warning is the only signal; it never blocks the start or reload, since a Check() issue by definition means "this can still run, but may be wrong."
+Beyond the strict parsing above, vmr also runs a set of *operational* checks — the same ones `vmr check`/`vmr diagnose` print — on every start and every hot reload (fsnotify or SIGHUP, including the reload a service manager's auto-restart triggers). A purely advisory issue (e.g. a non-loopback `listen` with no `api_keys`) logs one quiet `WARN config check: ...` line. A *breaking* one — a missing `api_key`, or a `${ENV_VAR}` the config referenced that is unset or empty — instead raises a boxed `CONFIG PROBLEMS` banner that names every offending item (unset env vars included), because those are the "starts fine, every request fails" cases and a lone WARN line drowns in the config-summary dump right after it. None of this blocks the start or reload — a Check() issue by definition means "this can still run, but may be wrong."
+
+If *every* endpoint behind a virtual model has an empty `api_key`, vmr doesn't even try upstream: the request gets one clear `vmr_no_api_key` 503 naming the model, instead of a raw upstream 401 (often wrapped in provider/CDN HTML) plus a 10-minute health cooldown on each keyless endpoint.
 
 ### Per-request memory budget
 

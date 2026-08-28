@@ -294,6 +294,14 @@ type Config struct {
 	// block anywhere, no metric: cost provider); PricingTable() computes a
 	// fresh one on demand in that case.
 	pricingTableCache *pricing.Table `yaml:"-"`
+
+	// EmptyEnvRefs is every ${NAME} the config text referenced that was unset
+	// or empty in the environment at load time, sorted. Not a yaml field —
+	// populated by Parse from expandEnv. Advisory only (a config can
+	// reference a var it doesn't need); cmd_start's startup banner surfaces
+	// it because a forgotten `api_key: ${VAR}` is the single most common
+	// "loads fine, 401s on the first request" failure.
+	EmptyEnvRefs []string `yaml:"-"`
 }
 
 // Load reads, expands, parses, defaults and validates the config file.
@@ -306,7 +314,7 @@ func Load(path string) (*Config, error) {
 }
 
 func Parse(raw []byte) (*Config, error) {
-	expanded, err := expandEnv(string(raw))
+	expanded, emptyRefs, err := expandEnv(string(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -326,6 +334,7 @@ func Parse(raw []byte) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	cfg.EmptyEnvRefs = emptyRefs
 	return &cfg, nil
 }
 
@@ -351,20 +360,33 @@ var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 // narrower and less common than the three checked here (needs flow-style
 // usage, which this codebase's own examples never write), left as a known
 // residual gap rather than hand-rolling a full YAML-metacharacter scanner.
-func expandEnv(s string) (string, error) {
+// The returned []string is every referenced ${NAME} that was unset or empty
+// at expansion time, sorted and deduped — the single most common "forgot to
+// set the key" cause (an api_key: ${VAR} whose VAR was never exported), which
+// otherwise loads as a valid-YAML empty string and only fails at the first
+// 401. Callers surface it (cmd_start's startup banner); it is advisory, never
+// a load error — a config can legitimately reference a var it doesn't need.
+func expandEnv(s string) (string, []string, error) {
 	var badVar string
+	empty := map[string]bool{}
 	out := envRe.ReplaceAllStringFunc(s, func(m string) string {
 		name := m[2 : len(m)-1]
-		v := os.Getenv(name)
+		v, ok := os.LookupEnv(name)
+		if !ok || v == "" {
+			empty[name] = true
+		}
 		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #")) {
 			badVar = name
 		}
 		return v
 	})
 	if badVar != "" {
-		return "", fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
+		return "", nil, fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
 	}
-	return out, nil
+	if len(empty) == 0 {
+		return out, nil, nil
+	}
+	return out, core.SortedKeys(empty), nil
 }
 
 // expandTilde resolves a leading "~/" (or a bare "~") to the user's home
