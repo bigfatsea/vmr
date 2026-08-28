@@ -73,6 +73,12 @@ type ProviderQuotaText struct {
 	// ProviderQuotaRow.WindowUnpricedPct). Distinct from "X% est.", which
 	// marks traffic that IS in the figure. Rendered only when a row has it.
 	UnpricedFootnote string
+	// IncludeUsageFootnote explains why a token/cost account can show a near-
+	// total estimated share: on streaming openai-completions the response
+	// carries no usage block unless the client sent
+	// stream_options.include_usage:true, and vmr never injects request
+	// fields. Rendered only when at least one such row is ≥95% estimated.
+	IncludeUsageFootnote string
 	// FormatEstimatedShare annotates an already-formatted consumption number
 	// with its degraded-estimate share, so consumption that came from a
 	// byte-count estimate never renders identically to consumption backed by
@@ -124,6 +130,9 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"◇ 的流量根本不在金额里。常见成因是审计日志比 config.yaml 更旧（模型改名或已从 models: 移除），" +
 				"因为 `metric: cost` 账户当前配置里的模型在加载期就被强制要求可完整定价。" +
 				"缺失比例见 `vmr-report.json` 的 `window_unpriced_pct`。\n",
+			IncludeUsageFootnote: "> 某个 tokens/cost 账户的\"估算\"占比接近 100%：多半是流式 `openai-completions` 调用方没发 " +
+				"`stream_options.include_usage:true`——此时上游响应里没有 usage 块，而 vmr 不会替客户端注入请求字段（字节透传）。" +
+				"让客户端带上该选项，或改用 `anthropic-messages`/`openai-responses`（两者总是回传 usage）。\n",
 			FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 				if estimatedPct > 0 {
 					return usedStr + "（" + pctHundredStr(estimatedPct) + " 估算）"
@@ -172,6 +181,10 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 			"outright. The usual cause is an audit log older than config.yaml (a model since renamed or dropped from `models:`), " +
 			"since a `metric: cost` account's currently-configured models are all required to price completely at load time. " +
 			"The missing share is `window_unpriced_pct` in `vmr-report.json`.\n",
+		IncludeUsageFootnote: "> A tokens/cost account showing a near-100% estimated share is usually a streaming `openai-completions` " +
+			"caller that didn't send `stream_options.include_usage:true` — without it the upstream response carries no usage block, " +
+			"and vmr never injects request fields (byte-faithful). Have the client send that option, or use `anthropic-messages` / " +
+			"`openai-responses` (both always report usage).\n",
 		FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 			if estimatedPct > 0 {
 				return usedStr + " (" + pctHundredStr(estimatedPct) + " est.)"

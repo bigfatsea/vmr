@@ -65,6 +65,13 @@ func printStatus(st *statusResponse) {
 		estNote := ""
 		if q.EstimatedPct > 0 {
 			estNote = fmt.Sprintf(", %.0f%% estimated", q.EstimatedPct)
+			if q.EstimatedPct >= 95 && (q.Metric == "tokens" || q.Metric == "cost") {
+				// A token/cost account metered almost entirely by byte
+				// estimate is the include_usage gap in the field: streaming
+				// openai-completions callers who didn't send
+				// stream_options.include_usage:true, which vmr can't inject.
+				estNote += " — likely missing stream_options.include_usage"
+			}
 		}
 		// metric: cost's used/amount are money, always rendered to 4dp so
 		// a $2.5000 balance never reads as a rounded "$2.5". requests/tokens

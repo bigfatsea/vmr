@@ -220,19 +220,25 @@ func StitchGraph(g *Graph) {
 }
 
 // buildBlobLineageIndex maps every message hash seen anywhere in the graph
-// to the set of lineages that ever carried it — the "blob 倒排索引" the
-// design doc calls for, built once and reused across every lineage's search.
-func buildBlobLineageIndex(g *Graph) map[Hash]map[int]bool {
-	idx := make(map[Hash]map[int]bool)
+// to the lineages that ever carried it — the "blob 倒排索引" the design doc
+// calls for, built once and reused across every lineage's search.
+//
+// The posting list is a []int, not a map[int]bool: on a real corpus this
+// index holds millions of (hash, lineage) pairs, and one tiny map per hash
+// (header + bucket array, ~100+ bytes even for a single entry) was a
+// measured chunk of `vmr analyze`'s peak RSS. Dedup without a set: the outer
+// loop finishes a whole lineage before moving to the next, so every append
+// for a given l.Idx is contiguous — skipping when it already equals the
+// slice tail is enough. Consumers only range over the list; order doesn't
+// matter (resolveStitch builds its own overlap map).
+func buildBlobLineageIndex(g *Graph) map[Hash][]int {
+	idx := make(map[Hash][]int)
 	for _, l := range g.Lineages {
 		for _, m := range l.Manifests {
 			for _, h := range m.Keys {
-				bucket := idx[h]
-				if bucket == nil {
-					bucket = map[int]bool{}
-					idx[h] = bucket
+				if b := idx[h]; len(b) == 0 || b[len(b)-1] != l.Idx {
+					idx[h] = append(b, l.Idx)
 				}
-				bucket[l.Idx] = true
 			}
 		}
 	}
@@ -241,7 +247,7 @@ func buildBlobLineageIndex(g *Graph) map[Hash]map[int]bool {
 
 // resolveStitch finds l's best-scoring temporally-preceding candidate via
 // the blob index, then classifies the match.
-func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash]map[int]bool) StitchResolution {
+func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]int) StitchResolution {
 	b0 := l.Manifests[0]
 
 	// No early return for len(b0.Keys) == 0 (a broken-away lineage whose
@@ -254,7 +260,7 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash]map
 	// the same path a real "zero overlap found" case already takes.
 	overlap := map[int]int{}
 	for _, h := range b0.Keys {
-		for idx := range blobLineages[h] {
+		for _, idx := range blobLineages[h] {
 			if idx != l.Idx {
 				overlap[idx]++
 			}

@@ -55,7 +55,12 @@
 - **为什么仍然待定（理由已换过一轮）**：不再是"内存完全可控"——而是**这个量级目前仍然跑得完**
   （1.38GB 在 16GB 机器上有余量），且分桶释放依赖"记录时间严格单调递增"这个隐蔽的正确性前提，
   一旦不成立就是静默算错而不是报错。**重估触发条件从"千万级记录"下调为"单次分析的语料超过约
-  3 万条记录，或峰值 RSS 超过 4GB"**——按实测斜率，这大约是三个月的历史日志。
+  3 万条记录，或峰值 RSS 超过 4GB"**——按实测斜率，这大约是三个月的历史日志。评审 §5.4 实测
+  `vmr analyze` 组合路径在 1.5 万条已到 3.75GB，故 `analyze` 路径的触发点约 **2 万条**，比 `report`
+  单独跑的 3 万条更早。
+- **已做的一处收窄（2026-08）**：`ctxgraph/stitch.go` 的 blob 倒排索引从 `map[Hash]map[int]bool`
+  改为 `map[Hash][]int`（每个 hash 一条 posting list 而非一个小 map），去掉了数百万个单元素小 map 的
+  头开销——这是 §5.4 点名的最小动作，不改分桶前提，只降常数。
 
 ### 1.3 [低] `chatmsg` 离线解析路径的 `map[string]any` 分配
 
@@ -439,6 +444,12 @@
     - **B7 · `Install` 先 `Quota.Prune` 再 `snap.Swap`**（`internal/router/snapshot.go`）：两者之间持旧 snapshot 的 in-flight 请求可 `Charge` 进刚 prune 的桶。修法：调换顺序——先 Swap（新请求即用新 key），再 Prune（清掉旧 key），straggler 由下次热重载的 Prune 自愈。
     - **B8 · quota 读路径重置桶但不置 `dirty`**（`internal/quota/quota.go`）：`Used()`/`EstimatedCostFor()` 经 `resetIfStaleLocked` 变更内存桶却从不 set `r.dirty`，只被读路径观测到的周期滚动不会被 flusher 持久化。修法：`resetIfStaleLocked` 返回是否重置，两个读方法据此置 dirty。回归测试 `TestRegistry_UsedResetMarksDirty`。
     - **B9 · 每个 stitch 边界无条件开新 Task**（`internal/story/journey.go`）：`newTask := (ci==0 && i==0) || atStitchBoundary` 与 `taskseg.IsNewTask`（新 trace id 或真实新指令）矛盾——一次任务中途为回收上下文的压缩会被渲染成全新 Task，虚增 `len(j.Tasks)`、`plan_exec_ratio` 分母、per-Task 检测器、`-corpus` 分组。修法：stitch 边界只在 `newInstructionTitleAtStitch` 找到真实新指令时才开新 Task，否则沿用 `curTask`——该 Step 仍带 `StitchEdge`/`Compaction`，脊柱/Markdown 渲染器照常渲染"🧵 Stitched from an earlier fragment"+ 压缩摘要，无需新增 i18n 串。回归测试 `TestStitchedJourney_EndToEnd`（更新为断言单 Task）、`TestStitchedJourney_NewInstructionOpensTask`（新增）。
+
+47. **2026-08 综合评审 §5.2 / §5.4 / §6 落地**（`docs/VMR_综合评审_2026-08_sonnet-5.md` §10）：
+    - **§5.2 DX 3×P0**：新增 `config.minimal.yaml`（+ `.zh`），README Quick Start 改用它并新增 `vmr diagnose` 的 Verify 步骤；`config.Parse` 记录展开为空的 `${VAR}`（`Config.EmptyEnvRefs`），缺 `api_key` 或空 `${VAR}` 在 start/reload 打带框 `CONFIG PROBLEMS` banner 而非一行淹没的 WARN；某虚拟模型全部端点无 key 时 `router.Serve` 直接回 `vmr_no_api_key` 503，不再让每个 attempt 401 上游 + 冷却。
+    - **§5.4-1 analyze 内存**：`ctxgraph/stitch.go` blob 倒排索引 `map[Hash]map[int]bool` → `map[Hash][]int`（见 §1.2 补记）。
+    - **§5.4-2 include_usage 可见性**：`config.Check()` 新增 `checkQuotaUsageVisibility`——token/cost 额度账户挂在 `openai-completions` 端点上时打 `SeverityWarning`（流式响应无 usage 块除非客户端发 `stream_options.include_usage:true`，vmr 不注入）；`vmr status` 与 `vmr report` 的额度段在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示。此前全代码库零处提及 `include_usage`。
+    - **E2 · 软屏蔽 → failover** 与 **E1 · HTML 单文件 journey 渲染 + 脱敏**：见 CHANGELOG、Core / Analytics 设计文档；E3（per-model 预算硬闸）本轮 hold（用户决定，理由见评审 §10）。
 
 ---
 

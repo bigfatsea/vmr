@@ -397,6 +397,43 @@ func TestStitchOutcome_String(t *testing.T) {
 	}
 }
 
+// TestBuildBlobLineageIndex_DedupsWithinLineage locks the []int posting-list
+// representation (replacing map[int]bool for the RSS win): a hash that
+// recurs across several manifests of the same lineage must appear once, and
+// each hash's list must carry exactly the distinct lineages that held it.
+func TestBuildBlobLineageIndex_DedupsWithinLineage(t *testing.T) {
+	t.Parallel()
+	hA, hB, hC := Hash{1}, Hash{2}, Hash{3}
+	g := &Graph{Lineages: []*Lineage{
+		{Idx: 0, Manifests: []*Manifest{
+			{Keys: []Hash{hA, hB}},
+			{Keys: []Hash{hA, hB, hC}}, // hA/hB recur — must not double-post
+		}},
+		{Idx: 1, Manifests: []*Manifest{
+			{Keys: []Hash{hB}},
+		}},
+	}}
+
+	idx := buildBlobLineageIndex(g)
+
+	want := map[Hash][]int{
+		hA: {0},
+		hB: {0, 1},
+		hC: {0},
+	}
+	for h, exp := range want {
+		got := idx[h]
+		if len(got) != len(exp) {
+			t.Fatalf("hash %v: posting list = %v, want %v", h, got, exp)
+		}
+		for i := range exp {
+			if got[i] != exp[i] {
+				t.Fatalf("hash %v: posting list = %v, want %v", h, got, exp)
+			}
+		}
+	}
+}
+
 // TestResolveStitch_EmptyOpeningKeysStillTriesSameChat is a regression test:
 // resolveStitch used to return NoPredecessorFound immediately whenever the
 // broken-away lineage's opening manifest had zero content-hash Keys (e.g. a
@@ -422,7 +459,7 @@ func TestResolveStitch_EmptyOpeningKeysStillTriesSameChat(t *testing.T) {
 	}
 	byIdx := map[int]*Lineage{0: pred, 1: l}
 
-	res := resolveStitch(l, byIdx, map[Hash]map[int]bool{})
+	res := resolveStitch(l, byIdx, map[Hash][]int{})
 
 	if res.Outcome != AmbiguousMatch {
 		t.Fatalf("Outcome = %v, want AmbiguousMatch (empty Keys must still fall through to findSameChatCandidate)", res.Outcome)

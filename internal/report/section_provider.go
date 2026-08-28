@@ -96,7 +96,13 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	}
 	tbl := newTable(w, t.Headers...)
 	anyNoOverlap, anyConfigChanged, anyOverQuota, anyUnpriced := false, false, false, false
+	anyHighEstimate := false
 	for _, r := range rep.ProviderQuotas {
+		if r.Metric == "tokens" || r.Metric == "cost" {
+			if (r.Live != nil && r.Live.EstimatedPct >= 95) || r.WindowEstimatedPct >= 95 {
+				anyHighEstimate = true
+			}
+		}
 		liveUsed, pct := "-", "-"
 		if r.Live != nil {
 			liveUsed = t.FormatEstimatedShare(numStr(r.Live.Used), r.Live.EstimatedPct)
@@ -173,6 +179,9 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	}
 	if anyUnpriced {
 		w("%s", t.UnpricedFootnote)
+	}
+	if anyHighEstimate {
+		w("%s", t.IncludeUsageFootnote)
 	}
 	w("\n")
 }

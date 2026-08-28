@@ -80,6 +80,7 @@ func (c *Config) Check() []Issue {
 	issues = append(issues, c.checkListenExposure()...)
 	issues = append(issues, c.checkProviders()...)
 	issues = append(issues, c.checkModels()...)
+	issues = append(issues, c.checkQuotaUsageVisibility()...)
 	return issues
 }
 
@@ -147,6 +148,52 @@ func (c *Config) checkProviders() []Issue {
 	for _, p := range c.Providers {
 		if p.APIKey == "" {
 			issues = append(issues, Issue{Provider: p.Name, Field: "api_key", Message: fmt.Sprintf("provider %q: api_key missing", p.Name)})
+		}
+	}
+	return issues
+}
+
+// checkQuotaUsageVisibility warns when a token/cost quota account backs an
+// openai-completions endpoint. On that protocol a streaming response carries
+// no usage block unless the client itself sent
+// stream_options.include_usage:true — and vmr never injects request fields
+// (byte-faithful passthrough). So quota accounting for that account silently
+// falls back to a byte-count estimate (estimated_pct climbs toward 100 on
+// /status and in vmr report) for every streaming caller that omits the flag.
+// A warning, not an error: non-streaming callers and clients that do send
+// the flag are metered exactly, and anthropic-messages / openai-responses
+// always report usage — nothing here is broken, it's a precision caveat the
+// operator can't see any other way (the flag appears nowhere else in vmr).
+func (c *Config) checkQuotaUsageVisibility() []Issue {
+	completionsProviders := map[string]bool{}
+	scan := func(groups []EndpointGroup) {
+		for _, eg := range groups {
+			if eg.Protocol != "openai-completions" {
+				continue
+			}
+			for _, pn := range eg.Providers {
+				completionsProviders[pn] = true
+			}
+		}
+	}
+	for _, name := range core.SortedKeys(c.Models) {
+		scan(c.Models[name].Endpoints)
+	}
+	scan(c.FallbackEndpoints)
+
+	var issues []Issue
+	for _, p := range c.Providers {
+		if p.Quota == nil || !completionsProviders[p.Name] {
+			continue
+		}
+		for _, lc := range p.Quota.Limits {
+			if lc.Metric != "tokens" && lc.Metric != "cost" {
+				continue
+			}
+			issues = append(issues, Issue{Provider: p.Name, Field: "quota", Severity: SeverityWarning, Message: fmt.Sprintf(
+				"provider %q: %s-metric quota on an openai-completions endpoint — a streaming response has no usage block unless the client sends stream_options.include_usage:true, which vmr won't inject (byte-faithful); expect quota accounting to fall back to a byte estimate (estimated_pct near 100) for those callers",
+				p.Name, lc.Metric)})
+			break // one line per provider is enough
 		}
 	}
 	return issues
