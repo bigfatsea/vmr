@@ -442,6 +442,9 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	if resp.StatusCode >= 400 {
 		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key)
 	}
+	if uerr, blocked := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key); blocked {
+		return false, uerr, false
+	}
 	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key)
 }
 

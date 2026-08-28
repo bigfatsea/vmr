@@ -164,6 +164,10 @@ type Endpoint struct {
 	// FallbackEndpoints rather than the model's own Endpoints —
 	// display-only (vmr check), no effect on health/sticky/quota/Sort.
 	FromFallback bool
+	// SoftBlockFailover is the resolved (endpoint-override-or-model-base)
+	// opt-in for treating a content-flagged empty 2xx as a failover-worthy
+	// ErrContent — see config.EndpointGroup.SoftBlockFailover. Default false.
+	SoftBlockFailover bool
 	// StickyTTL is how long a sticky preference for this endpoint stays
 	// valid, resolved at BuildSnapshot time from the endpoint's own
 	// config.EndpointConfig.StickyTTL override or, absent that, the global

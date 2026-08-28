@@ -21,6 +21,7 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 ### Added
+- `soft_block_failover` (per virtual model or per endpoint, off by default): a non-streaming 2xx that carries a vendor content-policy flag (MiniMax `input_sensitive`/`output_sensitive`) but no real answer now fails over like a content-policy 4xx, instead of reaching an unattended agent as a clean empty 200. Set it on `models.<name>` to cover every endpoint under it; an endpoint's own `soft_block_failover: false` opts back out
 - `config.minimal.yaml` (+ `config.minimal.zh.yaml`) — a ~10-line "just get running" template (one provider, `coding` + `claude` virtual models). README Quick Start now copies this; `config.example.yaml` stays the fully annotated reference
 - README Quick Start gained a **Verify** step: `vmr diagnose` (config check + DNS/TLS + a real echo request per endpoint + routing preview) between Run and Connect
 - `./vmr.sh redeploy` — dev supervisor shortcut: stops the running instance, rebuilds the binary from current source (`go build -o vmr ./cmd/vmr`), and starts it back up

@@ -172,6 +172,9 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m
 	if eg.MaxContextTokens > 0 {
 		effMaxContextTokens = eg.MaxContextTokens
 	}
+	// endpoint's own explicit value wins; else the model's base; else off.
+	effSoftBlockFailover := eg.SoftBlockFailover != nil && *eg.SoftBlockFailover ||
+		eg.SoftBlockFailover == nil && m.SoftBlockFailover != nil && *m.SoftBlockFailover
 	var eps []*core.Endpoint
 	for _, upstreamModel := range eg.Models {
 		for _, providerName := range eg.Providers {
@@ -197,6 +200,7 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m
 				MaxContextTokens:    effMaxContextTokens,
 				OwnMaxContextTokens: eg.MaxContextTokens,
 				FromFallback:        fromFallback,
+				SoftBlockFailover:   effSoftBlockFailover,
 				StickyTTL:           stickyTTL,
 				Quota:               quotaSpecs[providerName],
 				PricingRate:         cfg.ResolvedPricing[providerName+"\x00"+upstreamModel],

@@ -108,6 +108,12 @@ func containsSoftBlockMarker(b []byte) bool {
 	return false
 }
 
+// ContainsSoftBlockMarker is the exported entry point for
+// containsSoftBlockMarker: internal/router calls it on a fully buffered 2xx
+// body when an endpoint opted into soft_block_failover, to decide (together
+// with an empty-content check) whether to fail over instead of forwarding.
+func ContainsSoftBlockMarker(b []byte) bool { return containsSoftBlockMarker(b) }
+
 // stripThinkingProcess removes MiniMax M3's "Thinking Process:"
 // structured thinking section from a fully buffered response, preserving
 // the SSE framing of every other data: line. Returns b unchanged if the

@@ -496,6 +496,126 @@ models:
 	}
 }
 
+// --- Serve: soft-block failover (opt-in) ---
+
+const softBlockBody = `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"input_sensitive":true}`
+
+func TestServe_SoftBlockFailsOverWhenOptedIn(t *testing.T) {
+	u1 := newMockUpstream(t, 200, softBlockBody)
+	u2 := newMockUpstream(t, 200, `{"id":"ok","model":"m2","choices":[{"message":{"content":"real answer"}}]}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+models:
+  vm:
+    soft_block_failover: true
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+		t.Fatalf("status=%d endpoint=%s, want 200 via p2 (soft block should fail over)", w.Code, w.Header().Get("X-VMR-Endpoint"))
+	}
+	if !strings.Contains(w.Body.String(), "real answer") {
+		t.Errorf("body = %s, want the second endpoint's real answer", w.Body)
+	}
+	// No cooldown on the soft-blocked endpoint (ErrContent semantics).
+	ep := endpointFor(t, cfg, "openai-completions", "vm")
+	if !rt.Health.Available(ep.HealthKey(), time.Now()) {
+		t.Error("soft-blocked endpoint should not be cooled down")
+	}
+}
+
+func TestServe_SoftBlockForwardedWhenNotOptedIn(t *testing.T) {
+	u1 := newMockUpstream(t, 200, softBlockBody)
+	u2 := newMockUpstream(t, 200, `{"id":"ok","choices":[{"message":{"content":"real"}}]}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions/p1/m1" {
+		t.Fatalf("default (opt-out): soft block should pass through from p1, got status=%d endpoint=%s", w.Code, w.Header().Get("X-VMR-Endpoint"))
+	}
+	if u2.hits != 0 {
+		t.Errorf("second endpoint should not have been tried, hits=%d", u2.hits)
+	}
+}
+
+func TestServe_SoftBlockRealAnswerNotFailedOver(t *testing.T) {
+	// Marker present but a substantive answer — must NOT fail over.
+	body := `{"choices":[{"message":{"content":"Here is a detailed answer that runs well past the short-refusal threshold so the heuristic leaves it alone."}}],"input_sensitive":true}`
+	u1 := newMockUpstream(t, 200, body)
+	u2 := newMockUpstream(t, 200, `{"choices":[{"message":{"content":"other"}}]}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+models:
+  vm:
+    soft_block_failover: true
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Header().Get("X-VMR-Endpoint") != "openai-completions/p1/m1" || u2.hits != 0 {
+		t.Errorf("a real answer must be forwarded even with the marker present; endpoint=%s u2.hits=%d", w.Header().Get("X-VMR-Endpoint"), u2.hits)
+	}
+}
+
+func TestServe_SoftBlockEndpointOptOutOverridesModel(t *testing.T) {
+	u1 := newMockUpstream(t, 200, softBlockBody)
+	u2 := newMockUpstream(t, 200, `{"choices":[{"message":{"content":"real"}}]}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+models:
+  vm:
+    soft_block_failover: true
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1], soft_block_failover: false}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, u1.srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Header().Get("X-VMR-Endpoint") != "openai-completions/p1/m1" || u2.hits != 0 {
+		t.Errorf("endpoint opt-out (soft_block_failover: false) must win over the model default; endpoint=%s", w.Header().Get("X-VMR-Endpoint"))
+	}
+}
+
 // --- Serve: vendor protocol-quirk rejection fails over without cooldown ---
 
 // TestServe_VendorQuirkFailsOverWithoutCooldown pins the 2026-08-25

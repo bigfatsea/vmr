@@ -449,7 +449,9 @@
     - **§5.2 DX 3×P0**：新增 `config.minimal.yaml`（+ `.zh`），README Quick Start 改用它并新增 `vmr diagnose` 的 Verify 步骤；`config.Parse` 记录展开为空的 `${VAR}`（`Config.EmptyEnvRefs`），缺 `api_key` 或空 `${VAR}` 在 start/reload 打带框 `CONFIG PROBLEMS` banner 而非一行淹没的 WARN；某虚拟模型全部端点无 key 时 `router.Serve` 直接回 `vmr_no_api_key` 503，不再让每个 attempt 401 上游 + 冷却。
     - **§5.4-1 analyze 内存**：`ctxgraph/stitch.go` blob 倒排索引 `map[Hash]map[int]bool` → `map[Hash][]int`（见 §1.2 补记）。
     - **§5.4-2 include_usage 可见性**：`config.Check()` 新增 `checkQuotaUsageVisibility`——token/cost 额度账户挂在 `openai-completions` 端点上时打 `SeverityWarning`（流式响应无 usage 块除非客户端发 `stream_options.include_usage:true`，vmr 不注入）；`vmr status` 与 `vmr report` 的额度段在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示。此前全代码库零处提及 `include_usage`。
-    - **E2 · 软屏蔽 → failover** 与 **E1 · HTML 单文件 journey 渲染 + 脱敏**：见 CHANGELOG、Core / Analytics 设计文档；E3（per-model 预算硬闸）本轮 hold（用户决定，理由见评审 §10）。
+    - **E2 · 软屏蔽 → failover**（`internal/config`、`internal/core`、`internal/router/snapshot.go`、新增 `internal/router/softblock.go`、新增 `internal/adapter/response.go`、`internal/respnorm/minimax.go`）：新增 `soft_block_failover *bool`（`models.<name>` 与 `endpoints[]` 两级，endpoint 覆盖模型级，缺省关）。开启后 `tryOne` 对 eligible 2xx（非 SSE、非压缩）预读到 `softBlockPeekCap=64KB`，若命中 `respnorm.ContainsSoftBlockMarker` 且 `adapter.ResponseAssistantText` 判定有效文本 ≤64 rune 且无 tool_call，则按 `ErrContent` 分支 failover（`ReportNeutral`、attempt 记 `content` 类、零冷却）。文本抽取按协议放 `internal/adapter`（不引 `chatmsg`）。回归测试见 `router_serve_test.go` 的 `TestServe_SoftBlock*` 四例 + `adapter/response_test.go`。
+    - **E1 · HTML 单文件 journey 渲染 + 脱敏**：见本轮 Phase 4 / CHANGELOG / Analytics 设计文档 §8。
+    - E3（per-virtual-model 预算硬闸）本轮 **hold**（用户决定，理由见评审 §10）。
 
 ---
 

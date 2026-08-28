@@ -242,7 +242,9 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 
 `vendorQuirkHint`（厂商专属约束嗅探）与 `upstreamHint` 类似，针对单一供应商特有的非标协议约束（如 Google Gemini 的 `thought_signature` 强制校验、DeepSeek 思考模式的 reasoning_content 回传要求）。由于这类错误换其他候选端点（如 OpenRouter / DeepSeek）即可立即成功，且端点本身完全健康，归类为 `ErrQuirk`（切换 + 零冷却），避免被兜底误判为全局致命的 `ErrClient` 导致中断重试循环。判定顺序：内容词表 > 认证词表（OAuth 标准错误码）> 上下文超限词表（先排除 `maxOutputHint`）> 模型未知词表 > `upstreamHint` > `vendorQuirkHint` > 兜底 `ErrClient`，多者都命中同一段文本时按此顺序优先。
 
-**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，见下文「响应侧归一化」），但**仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康——这是先把频率变成可量化的数字，再决定要不要做请求预处理插件（见「路线图」）的第一阶段。把这类响应变成主动拦截或自动 failover 仍是未实现的未来方向。
+**已知边界**：个别厂商（如 MiniMax）会在 HTTP 200 响应内嵌合规标记（`input_sensitive`/`output_sensitive` 等字段）并可能返回空/替换内容。响应归一化器会嗅探这两个标记并记入审计 `norm`（`soft_block_detected`，见下文「响应侧归一化」）；**默认仅观测、不干预**：字节原样到达客户端，不触发 failover、不影响端点健康。
+
+**可选：`soft_block_failover`**（配在 `models.<name>` 或某个 `endpoints[]` 上，缺省关；endpoint 的显式值覆盖模型级默认）。开启后，一个 2xx 响应**同时满足**「命中软屏蔽标记」**且**「有效助手文本为空或极短（≤64 rune，且不含 tool_call）」时，按 `ErrContent` 处理——切换到下一候选、零健康惩罚，全部候选都这样时客户端原样收到最后一次响应。**仅非流式（非 SSE、非压缩）路径**：流式响应在能判定之前已逐事件转发出去，技术上无法回退。判定前 `router` 会把响应体缓冲到 `softBlockPeekCap`（64KB）为止——超过即断定不是空屏蔽，恢复流式转发；只有开启该开关的端点付这个缓冲成本。内容为空判定放 `internal/adapter`（协议域字段语义，不引入分析半区的 `chatmsg`）。**为什么仍需显式开启**：双条件已让误判接近不可能，但它终究是对一个已提交 2xx 的启发式判断，默认关更稳妥。请求侧的事前关键词过滤仍是未实现的未来方向（见「路线图」）。
 
 ### 5.4 请求侧 Header 透传策略
 
@@ -887,7 +889,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 ### 13.1 请求预处理插件（敏感词过滤，已规划未实现）
 
-目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）也是唯一的**事前**防线——响应侧现在能**事后观测**到这类拦截（`soft_block_detected`，见「Adapter 机制」），但不能阻止它发生，也不自动 failover。
+目标：请求发往上游前做关键词过滤/替换（外部词库），降低触发厂商内容合规拦截的概率；对 2xx 内嵌的"软拦截"（如 MiniMax `input_sensitive`）是唯一的**事前**防线。响应侧现在能**事后观测**这类拦截（`soft_block_detected`），且在开启 `soft_block_failover` 的端点上能把「标记命中 + 空回复」的非流式响应当 `ErrContent` 切换（见「Adapter 机制」的可选段）——但事前过滤仍是降低触发概率的唯一手段。
 
 **本轮明确不预留接口**。理由：插件的词库形态、替换策略、是否需要按 Provider 差异化都未定，先挖的接口大概率与真实插件对不上；预留即负债。待插件设计定型后与其一起实现。图片降采样已经证明这个接入点可用，但走的是直接函数调用而非插件注册表——两者不是同一套机制。
 

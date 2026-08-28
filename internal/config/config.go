@@ -107,6 +107,17 @@ type EndpointGroup struct {
 	// model (e.g. a fast in-memory cache vs. DeepSeek's disk cache) can
 	// each declare their own window. nil = inherit the global default.
 	StickyTTL *Duration `yaml:"sticky_ttl"`
+
+	// SoftBlockFailover, when true, lets a 2xx response that carries a
+	// vendor content-policy flag but no real answer (MiniMax's
+	// input_sensitive/output_sensitive) fail over to the next candidate,
+	// exactly like an ErrContent 4xx would. nil inherits
+	// VirtualModel.SoftBlockFailover; an explicit value overrides it (so a
+	// model can turn it on globally and one endpoint can still opt out).
+	// Off by default — the failover only triggers on marker + empty/near-
+	// empty content, but that judgement is still a heuristic on a committed
+	// 2xx, so it stays opt-in.
+	SoftBlockFailover *bool `yaml:"soft_block_failover"`
 }
 
 // ImageDownscaleMaxPx is a pointer so "unset" (inherit the global
@@ -151,6 +162,11 @@ type VirtualModel struct {
 	// defaults to true (same polarity as Sticky above). Explicit false opts
 	// out entirely — no partial opt-out of individual entries.
 	Fallback *bool `yaml:"fallback"`
+
+	// SoftBlockFailover sets the default for every endpoint under this
+	// model (see EndpointGroup.SoftBlockFailover). nil/false = off; an
+	// endpoint's own explicit value still wins over this.
+	SoftBlockFailover *bool `yaml:"soft_block_failover"`
 }
 
 // Duration accepts Go duration strings ("90s", "2m") in YAML.
