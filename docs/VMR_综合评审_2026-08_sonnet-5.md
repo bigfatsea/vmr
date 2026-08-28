@@ -881,14 +881,14 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 三批，顺序即优先级。批内按依赖排。与 §11 三梯队的映射在每项注明——**这一节不另立优先级体系，只把第 12 章的结论切成可执行任务**。12-B 就是 §11.3 T1.2（第一梯队原有项）；12-C / 12-D 是用户本轮新决定的第一批项，性质上接近 §11.4 T2.3（分发工件），但用户选择在分发信号出现前先做。
 
-**第一批（现在做）**
+**第一批（全部完成，2026-08-28/29，分支 `feat/analyze-html-dashboards`；执行情况见 §12.8）**
 
-| # | 任务 | 涉及 | 依赖 | 与 §11 的关系 |
-|---|---|---|---|---|
-| **12-A** | Analytics 设计文档两处 `BlobIndex` 描述改为当前状态（`Manifest` 自带坐标 + `FetchRecords`） | `docs/VirtualModelRouter_Design_v4_Analytics.md`；顺带 `ctxgraph/cache_test.go` 一处同名 stale 注释 | 无 | §11.3 T1.4 同类。**本轮已随文档评审一并做掉**，零成本 |
-| **12-B** | 默认批量套件的 detail 死链接：脊柱"→ detail"在批量路径渲染成行内 `basename:line` 坐标而非链接（`report` 侧 P7.1 `detailCell` 同款）。同步修正 KNOWN_ISSUES §3 item 38 的"不产生死链接"表述 | `internal/story/render_spine_step.go`、`render_md_sysprompt.go`、`i18n/story_spine.go`、`cmd/vmr/cmd_story.go` | 无 | **就是 §11.3 T1.2**，第一梯队、约 0.5 人天 |
-| **12-C** | Journey HTML 看板重写（§12.4）：`render_html_dashboard.go`（判定条 / 可视时间轴 / 指标 grid + sparkline / Findings）替换当前瀑布；`-redact` 覆盖新板块；默认套件仍不出 HTML | `internal/story/render_html*.go`（重写）、`i18n/story_html.go` | 无（可与 12-B 并行） | 用户决定提前于分发信号；诚实标注见 §12.4 末。约 2–3 人天 |
-| **12-D** | Compare HTML 看板（§12.4）：`render_compare_html.go`（两侧头 / 分岔 + 指标对照 / LLM 解读块）；chrome 与 12-C 共用 | `internal/story/render_compare_html.go`（新）、`cmd/vmr/cmd_story.go` 的 `-html` 接到 `-compare`、`i18n` | 12-C（共用 chrome / 资产） | 同 12-C。约 1.5–2 人天 |
+| # | 任务 | 涉及 | 状态 |
+|---|---|---|---|
+| **12-A** | Analytics 设计文档两处 `BlobIndex` 描述改为当前状态（`Manifest` 自带坐标 + `FetchRecords`） | `docs/VirtualModelRouter_Design_v4_Analytics.md`；`ctxgraph/cache_test.go` 一处同名 stale 注释 | ✅ 随 `f039275` |
+| **12-B** | 默认批量套件的 detail 死链接：脊柱"→ detail" / sysprompt evidence 在批量路径渲染成行内坐标而非链接（`report` 侧 P7.1 `detailCell` 同款）；同步修正 KNOWN_ISSUES §3 item 38 | `internal/story/render_spine_step.go`、`render_md_sysprompt.go`、`i18n/story_spine.go` + `story_render.go`、`cmd/vmr/cmd_story.go` | ✅ `87d114a` |
+| **12-C** | Journey HTML 看板重写（§12.4）：`render_html_dashboard.go`（判定条 / 可视时间轴 / 指标 grid + sparkline / Findings）替换当前瀑布；`-redact` 覆盖新板块；默认套件仍不出 HTML | `internal/story/render_html*.go`（重写）、`i18n/story_html.go` | ✅ `5766366` |
+| **12-D** | Compare HTML 看板（§12.4）：`render_compare_html.go`（两侧头 / 分岔 + 指标对照 / LLM 解读块，`mdlite.go` 渲 LLM markdown）；chrome 与 12-C 共用；`-html`/`-redact` 放开到 `-compare` | `internal/story/render_compare_html.go` + `mdlite.go`（新）、`i18n/story_compare_html.go`（新）、`cmd/vmr/cmd_story.go` + `cmd_analyze.go` | ✅ `60c3039` |
 
 **第二批（P2–P3，语料规模或调查频率触发；不满足触发条件则 Hold）**
 
@@ -904,4 +904,45 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 - 把当前 HTML 瀑布补成"MD 超集"（§12.4：方向错了——看板是刻意的裁剪视图）。
 - 默认套件自动物化 detail 或自动出 HTML（§12.5 / §10.5：写放大 + 冷渲染时间压在最高频命令上）。
 - 场景 A 的"只重扫增量部分"专用机制（§12.5：`.parse-cache` + `MergeJourneyIndexRows` 已拿到可靠增量收益，剩下的省不掉）。
+
+### 12.8 第一批执行情况记录（2026-08-28/29，Sonnet 5）
+
+分支 `feat/analyze-html-dashboards`（父 = main）。四个 commit，每个自带测试 + 文档同步。逐项：
+
+**`f039275` — 文档重写 + 12-A**
+- 第 12 章按"一次讲清"整体重写（非补丁式），新增 §12.7 落地计划。
+- 12-A：`docs/VirtualModelRouter_Design_v4_Analytics.md` 两处 `BlobIndex` 描述改为当前状态（`Manifest` 自带 `Path`/`Line`/`Req` + `records.go` 的 `FetchRecords`）；`internal/ctxgraph/cache_test.go` 一处 `BlobIndex.FetchAll` stale 注释清掉。
+- `CLAUDE.md` Conventions 新增 "No changelog-style revision — even inside review reports"。
+
+**`87d114a` — 12-B：默认套件 detail 死链接 → 行内坐标**
+- `RenderMarkdown` 加 `linkDetails bool`（= 调用方的 `materializeDetails`）。`true`（单 `-journey` / `-compare` / `-render-all`）渲染 Markdown 链接不变；`false`（默认批量套件）渲染行内 `文件:行` 坐标（`Manifest.Req`）+ 一行"运行 `vmr analyze -journey <id>` 看链接版"提示。新增 i18n `SpineDetailCoord` / `SpineCoordNote` / `SysPromptEraCoord`（EN/ZH），截断提示文案改中性。
+- `ensureJourneyFile` 去掉"`.md` 已存在即早退"分支——默认套件写的坐标版 `.md` 被 `-compare` 点名后无条件重渲染成链接版。
+- KNOWN_ISSUES §3 item 38：订正 P13.1 "不产生死链接" 的过度声称，新增 P13.6 记录本次修复。
+- 测试：改写 `TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks`、扩 `..._CompareMaterializesDetailsEvenIfReportAlreadyExists`、新 `TestRenderMarkdown_LinkDetailsFalse_...` / `TestRenderSystemPromptHeader_CoordMode` / 脊柱子测试。
+- 真实语料（07-15 / 07-16 两日 2209 条）：默认套件 `../details/` 与 `../evidence/` 链接双清零、0 详单物化；单 `-journey` / `-render-all` 仍是真链接。
+
+**`5766366` — 12-C：Journey HTML 看板重写**
+- `RenderHTML` 签名不变，输出从"时间轴 + Step 卡片瀑布"改为**单页看板**：判定条（id / 时间 / 结局，`deliverableStats` 提取）· 结构时间轴（Task→Step 一步一行：模型 / 工具 chip / failover 徽章 / 转换标记 / Finding 旗标，逐行链 `../details/*.md`）· 指标（14 格 stat grid + 内联 SVG sparkline 画每步上下文 token）· Findings（规则层 + LLM 层）。
+- 拆文件：`render_html.go`（149，骨架 + 判定条 + rail）、`render_html_dashboard.go`（289，结构 / 指标 / sparkline / Findings，新）、`render_html_assets.go`（132，看板 CSS/JS 重写）。`i18n.StoryHTMLText` 扩 ~35 字段（EN/ZH）+ 反射完整性测试。
+- `-redact`：正文 → `‹text: N chars›` 占位、逐步 detail 链接去掉（`details/*.md` 是 0600、不随分享）、Findings 只留代码 + Step 锚、compaction 实体名降级为计数。
+- 真实语料 30-step journey：完整版 47KB（旧瀑布同 journey 会大得多——内联全部对话）、脱敏版 26KB，HTML5 解析零嵌套错误。
+
+**`60c3039` — 12-D：Compare HTML 看板**
+- 新 `RenderComparisonHTML(cmp, CompareLLMResult, lang, redact)`：三块——两侧头 + 双侧初始指令 · 分岔点大字标出 + 逐指标 A/B 差异表（notable 行高亮）+ endpoint/cache/sysprompt/duration/deliverable 紧凑事实 · LLM 解读段落。复用 journey 看板的 `htmlStyle`/`htmlScript` + 小段 `compareExtraStyle`。
+- 新 `internal/story/mdlite.go`：极简 markdown→html（标题 / 段落 / 列表 / **GFM 竖线表格** / 粗体 / 行内代码，全部先转义），供 LLM 解读段渲染——`-compare` 的 LLM 提示词产出"候选根因 | 证据 | 置信度 | 修复"表格，必须支持表格。
+- `compareLLMSections` 改为返回 `(markdown string, story.CompareLLMResult)`——`.md` 路径字节不变，`.html` 拿结构化结果，两者来自同两次 `Interpret` 调用。
+- `-html` / `-redact` 的 flag 规则从"仅 `-journey`"放开到"`-journey` 或 `-compare`"。`-redact` 整块去掉 LLM 段（它逐字转述证据）。新 `i18n.CompareHTMLText`（EN/ZH）+ 完整性测试。
+- 真实语料对比看板：三块 + 16 行指标差异表 + 真实 LLM 表格渲染；脱敏版去 LLM 段、零泄漏。
+
+**验收（四个 commit 累计）**
+- `go build ./...`、`go vet ./...`、`gofmt -l internal cmd`（无输出）全绿。
+- `go test ./...` 全绿；`go test -race`（story / i18n / cmd/vmr）全绿。
+- `go test ./internal/archtest/...` 全绿——无文件 / 函数破预算（`cmd_story.go` 823/850）。
+- 真实语料端到端：默认套件死链接清零；journey / compare 看板完整版 + 脱敏版均生成、HTML5 合法、脱敏零泄漏、零外部资源引用。
+- `.zh` 同步：`docs/UserGuide.md` + `.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md [Unreleased]`。
+
+**遗留 / 边界**
+- Journey / Compare 看板都只在 `-journey`（单命中）/ `-compare` 下 opt-in；默认套件不出 HTML（维持 §10.5 用户决定）。
+- 旧的 Step 卡片瀑布**已被替换**（不是并存）——`render_html.go` 整体重写。
+- 第二批（12-E `stitch_edges` / 12-F warm path）未动，按 §12.7 触发条件 Hold。
 
