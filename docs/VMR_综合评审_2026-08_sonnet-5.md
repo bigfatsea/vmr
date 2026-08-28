@@ -10,7 +10,7 @@
 > **执行状态（2026-08-28 更新）**：
 > - 第一轮：**B1–B9 全部已修复**（含外部反馈两轮收窄），详见 §9。
 > - 第二轮：**§5.2 DX 3×P0、§5.4 2×P1、E1、E2 已落地**，详见 §10。**E3 本轮 hold**（用户决定）。
-> - **仍未做**：B10–B14、§5.3 S1–S12、§6 E4–E9、§7 分发动作、§5.5 文档专项的剩余项。
+> - **仍未做**：见 §11 重新评估后的三个梯队规划。
 > 文中带 ✅ / ⬜ / ⛔ 标记的条目状态以标记为准。
 
 ---
@@ -60,7 +60,7 @@
 
 若走方案 B（自用 + 作品集）：
   一次性   README 顶部明说"个人工具，无 roadmap，不做 SaaS / enterprise"
-           修 3 个 P0 bug + 文档修正（§7 表末）
+           修 3 个 P0 bug + 文档修正（§11 第一梯队）
   之后     只接受安全 / 正确性修复，停止一切特性与打磨
            设计文档冻结在当前状态（它们已经"写完了"）
 ```
@@ -410,55 +410,6 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 
 ---
 
-## 7. 优先级排序的行动建议
-
-### 7.1 无论走哪条路都要做（"过度供给止血" + P0 bug + 文档修正）
-
-| 优先级 | 动作 | 成本 | 状态 |
-|---|---|---|---|
-| P0 | 修 B1（buffered 截断）、B2（quota default-since 重置） | ~1.5天 | ✅ 已完成（连同 B3–B9，见 §9） |
-| P0 | S1 冻结 analytics 半区新增能力；S9 停写一次性大 review（本报告之后） | 0 | ⬜ 未做 |
-| P0 | S12 rolling-window quota 改"除非测到具体案例否则不做" | 0 | ⬜ 未做 |
-| P1 | §5.5 文档修正一次性清（含 CLAUDE.md "co-equal" 改写、`core` admission-rule、Core §6.6、Quota line 934/1034/1133、KNOWN_ISSUES §0/#38/1.2） | ~1天 | 🔸 部分完成——B1–B9 相关的三项已随本轮做（见 §5.5 标记），其余待后续文档专项 |
-| P1 | S2 删 `vmr report`/`vmr story` 别名；S3 冻结 `-corpus`；S5 删 respnorm 观测检测器；S6 删 `health.Available` | ~2天 | ⬜ 未做 |
-| P1 | `include_usage` 可见性告警 | 0.5天 | ⬜ 未做 |
-
-### 7.2 若走方案 A（限时采纳实验，8~10 周）
-
-在 7.1 基础上：
-
-| 顺序 | 动作 | 成本 |
-|---|---|---|
-| 1 | 3 个 DX P0：`config.minimal.yaml` + README 用它 / "忘设 key"可读 / README 加 `vmr diagnose` 第 3 步 | ~2天 |
-| 2 | B3 修（LLM anchor 校验）或 S4（LLM 层缩到 2 检测器） | ~1天 |
-| 3 | **E1 HTML + 脱敏渲染** | ~5天 |
-| 4 | **E3 per-model 预算硬闸**（快、安全、普适）——作为"一个新能力"锚点 | ~2天 |
-| 5 | §5.4 `analyze` 内存曲线压缩（`stitch.go` blobLineages 表示） | ~3天 |
-| 6 | 改名 + README/description 重定位（§7.4）+ 写 2 个具体工件（一张真实 bug 的 `vmr story` 分解截图 + 一篇 `vmr story -compare` 定位分岔点的技术长文） | ~4天 |
-| 7 | 发 linux.do → V2EX → 掘金 → Show HN（标题落在"字节级 + 可重放"，**不主打成本/failover/多模型**——全被追平） | 持续 |
-| — | **窗口内冻结**：quota 高级面、dashboard 打磨、协议改名类、E2 之外的所有新特性 | — |
-| Week 10 | **止损检查**：仍 0 外部 issue / <20 star → 转方案 B | — |
-
-若第 4 步后还有余力且走分发路线，**E2（软屏蔽 → failover）**是差异化最强的第二个锚点（但架构风险最高，需额外回归验证）。
-
-### 7.3 若走方案 B（自用 + 作品集）
-
-在 7.1 基础上：
-
-- README 顶部明说"个人工具，无 roadmap，不做 SaaS / enterprise 版"——对这类工具这是建立信任的方式，不是示弱。
-- 设计文档冻结在当前状态（它们已经"写完了"）。
-- 之后只接受安全 / 正确性修复。
-- `_eval/` + `TestArchitecture_EvalToolsCompile` + 未校准 LLM 判别器：要么删，要么明确标 experimental 移出默认路径。
-
-### 7.4 改名与重定位（方案 A 必做，成本近零）
-
-- **`vmr` 是明确的负资产**：搜索污染严重（Virtual Meeting Room / Video Mixing Renderer / variance-to-mean-ratio），且讽刺性冲突——`.vmr` 是飞行模拟器的"飞机模型匹配文件"，搜 "vmr flight" 直接撞飞行模拟器。"virtual model router" 不是任何人会输入的词组。
-- 保留 `vmr` 作**二进制名**（好敲），给项目一个可搜索的正式名 + tagline。方向：用一个具体动作命名（如 `bytewire` / `passthru` / `replayd` 类，需逐个核 GitHub / 商标），tagline 承担解释——"the local proxy that records your agent's runs byte-for-byte so you can replay the one that broke."
-- **GitHub description 和 README 头版必须含 "Claude Code"**——那是最高流量的入口搜索词。
-- 定位顺序反过来（战略文档 §4.2 已论证，零代码）：头版 = "agent 运行的黑匣子：那次失败，能查到上游到底收发了什么，还能原样重放" → 第二层 = 自动 failover → 第三层 = byte-faithful（作为"为什么可信"的依据，不是"这是什么"）。
-
----
-
 ## 8. 附录
 
 ### 8.1 竞品现状速查（2026-08-28 GitHub API 实测）
@@ -647,3 +598,118 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 - `go test ./internal/archtest/...` 全绿（`router.go` 文件预算与 `Serve` 函数预算两处触线，均以拆文件 / 拆函数解决，未抬预算数字）。
 - `vmr check` 对 `config.example.yaml` / `.zh` / `config.minimal.yaml` / `.zh` 四个文件均校验通过。
 - E1 在 `examples/sample-audit.jsonl` 上端到端生成完整版 + 脱敏版 HTML，脱敏版经断言确认零对话正文泄漏。
+
+---
+
+## 11. 基于当前状态重新评估的优先级规划（2026-08 最新版）
+
+> **说明**：本章完全替代原 §7。随着两轮工程修复（§9、§10）的完成，原先阻碍可用性的 P0 Bug、关键 DX 摩擦点以及最高价值的新能力（E1、E2）均已落地。
+> 本章基于当前真实代码库状态与第一性原理，重新梳理剩余事项的优先级。三个梯队**不是**一份"照做完"的工程 backlog——见 §11.2 前置。
+> §11.6 记录了本轮对初版 §11 的逐条回源码复核与订正（S5 撤销、S2 下调、B10/B17/§5.5 收窄、"co-equal" 已部分自愈）。
+
+---
+
+### 11.1 已闭环与落地成果（移出后续规划范围）
+
+以下事项已在第一轮（commit `74f8c79`）与第二轮（commit `94f539c`..`19b923e`）中全部完成并带有严格回归测试，**不再列入后续开发规划**：
+
+1. **全部 P0/P1/P2 代码缺陷（B1–B9）**：
+   - `B1` buffered 截断静默空 200 修复（flushRawOnError + `http.ErrAbortHandler` 信号）；
+   - `B2` quota 缺省 `since` 午夜日历对齐，彻底解决热重载/重启计数误清零；
+   - `B3` LLM Findings 运行期逐字证据锚点校验（`strings.Contains` 守卫）；
+   - `B4` `report` 侧 Markdown 标题与表格转义（防止 `|` 裂表与 `<!--` 吞噬内容）；
+   - `B5`–`B9` 热重载并发互斥、Cost 额度计数矫正、Snapshot Swap/Prune 调序、读路径脏标记、Stitch 任务边界判定纠偏。
+2. **DX 首次运行摩擦消除（3×P0）**：
+   - `config.minimal.yaml`（~15 行）+ README Quick Start 切换；
+   - 缺 API Key / 空 `${ENV}` 的带框 `CONFIG PROBLEMS` 醒目 Banner + 运行时秒级 503 拒绝；
+   - README Quick Start 引入 `vmr diagnose` 作为标准前置验证步骤。
+3. **关键性能与可见性（2×P1）**：
+   - `analyze` 内存优化：`stitch.go` 倒排索引从小 map 简化为 slice posting list；
+   - `include_usage` 流式额度不可见性告警与报表提示。
+4. **高价值扩展落地**：
+   - `E1` 单文件自包含 HTML Journey 渲染器（含 `-redact` 结构保留脱敏模式）；
+   - `E2` 非流式 2xx 软屏蔽的 `soft_block_failover` 两级开关与自动故障转移。
+5. **已明确否决/登记项**：
+   - `B13` 32-bit 图像溢出（非目标平台，确定不做）；
+   - `B14` 详单文件名 hash8 理论碰撞（发生概率极低，登记即闭环）；
+   - `E3` 虚拟模型预算硬闸（按用户决策保持 **Hold**）。
+
+---
+
+### 11.2 剩余问题的排序原则（第一性原理）
+
+**前置（承接 §4.5）**：本章不代替"vmr 到底为什么而做"这个决定。§4 的核心论断是——对一个 0 用户项目，**不服务于分发、也不降低作者自身复现/维护成本的纯工程动作，边际价值接近零**，继续投入正是 §4.3 标为"当前最大风险"的那条。因此下面的三个梯队并非一份"照着做完"的工程 backlog：只有第一梯队（零成本止血 + 卫生）是无条件的；第二梯队每一项都必须能指认出"降作者维护税"或"服务已启动的分发"之一，否则降入第三梯队。
+
+在当前 0 外部活跃用户的阶段：
+- **原则 1：元工作止血先于一切** —— 停止给不存在的维护团队生产文档、停止在无人使用的子系统上叠加维度、停写一次性大 review。这是零成本的，且直接对冲最大风险，排在任何工程动作之前。
+- **原则 2：杜绝"黑盒产物破损"** —— 用户产出的报表若含死链接或排版错乱，会瞬间击穿信任。这是唯一值得为它花工程时间的"卫生"类。
+- **原则 3：代码减法只在顺带时做** —— 删过渡别名 / 观测标记 / 兼容字段本身也消耗心智与文档扰动（§11.5 已就 S3/S4 如此判断）。除非某处正在被别的改动触及，否则"为删而删"不立项。**删之前先回源码确认它真的无消费者**——本轮复核推翻了 S5"零消费者"的前提（见 §11.6）。
+- **原则 4：严守 YAGNI** —— 任何未被真实生产环境 429 迫使、未被真实用户 Issue 催生的扩展，一律不予立项。
+
+---
+
+### 11.3 第一梯队：立即处理（零成本止血 + 首次使用信任摩擦）
+
+*建议工作量：合计约 1~1.5 人天，其中 T1.1 为零成本。顺序即优先级——先停止生产元工作，再清理它留下的坑。*
+
+| # | 事项 | 涉及文件 | 为什么第一优先 | 建议方案 |
+|---|---|---|---|---|
+| **T1.1** | **战略止血与预期管理 (S1, S9, S12)** | `docs/`, `CLAUDE.md`, `KNOWN_ISSUES` | 零成本，且直接对冲 §4.3 标为"当前最大风险"的"无人使用下持续投入耗尽动力"。必须排在任何工程动作之前。 | ① analytics 半区正式标 `v1-complete`，新增 section / detector / corpus 维度从默认冲动改为需理由的例外；② 停写一次性架构 review 大文档，本报告为最后一份，后续 review 写进 KNOWN_ISSUES 的 diff 而非新建文件；③ 文档把 rolling-window 从"planned"改为"除非实测到具体厂商套餐的密集 429 冲击否则不做"。 |
+| **T1.2** | **消除默认 analyze 产物的死链接 (B10)** | `internal/story/render_md.go`, `render_md_sysprompt.go`, `render_spine_step.go`, `cmd/vmr/cmd_story.go` | 已复核：默认套件（`materializeDetails=false`）下 `writeJourneyFile` 不调 `EnsureJourneyDetails`，但 `renderSystemPromptHeader`（`../evidence/sysprompt-*.md`）与 `renderDecisionSpine` 的 "→ detail"（`../details/*.md`）链接**无条件渲染**，400+ 份 Journey 报告全部含 404 链接。**这与 KNOWN_ISSUES §3 item 38（P13.1）白纸黑字的"不产生死链接"直接矛盾**——读 KNOWN_ISSUES 的人会以为此事已闭环。 | **复用 `report` 半区已有的解法**：KNOWN_ISSUES §3 item 27（P7.1）里 `report` 对同一问题的处理是默认模式把坐标渲染成行内代码而非链接（`detailCell(r, detailsOn)`）。给 `RenderMarkdown` 加一个 `linkDetails bool`，默认套件传 `false` 时把 detail/evidence 目标渲染为行内 `basename:line` 坐标 + 一行"运行 `vmr analyze -journey <id>` 查看详情"提示。**不选**"默认套件自动物化 sysprompt evidence"——那会重新打开 P13.1 刚关掉的体积纪律回归。同步修正 KNOWN_ISSUES item 38 的"不产生死链接"表述。 |
+| **T1.3** | **CLI 帮助与退出码收敛 (B17 收窄)** | `cmd/vmr/cmd_analyze.go:160`, `cmd_report.go:344`, `cmd/vmr/main.go` | 已复核确认的真实项：① `vmr -h` 退出 2、`vmr version -h` 退出 1（其余子命令 `-h` 退 0），不一致；② `-render-all` 的 flag usage 串含 `P14.1's story.IsNoiseCategory`、`-c` 的 usage 串含 `PricingTable's doc comment`——内部代号泄漏进 `-h` 输出。**不含**原 B17 ② 的"`vmr-report.md` 里的 §编号"：那是生成报告自身的目录编号（`§1 成本与 Token 经济` 等），是合法的文档内结构，不属 CLAUDE.md "no section numbers in cross-references"（跨文档引用）所禁。 | 纯文本 + flag 参数清理。`-list-only` flag 渲染 bug（反引号被 flag 包当占位符）一并修。 |
+| **T1.4** | **核心文档真实性纠偏 (§5.5 剩余项收窄)** | `internal/core/core.go`, `docs/VirtualModelRouter_Design_v4_Core.md` | 已复核确认的两处真实 stale：① CLAUDE.md `core` 行称"package doc states the admission rule"，但 `core.go` 包注释无此内容（`grep -i admission` 零命中）——一条指向不存在断言的交叉引用；② Core 设计文档"计量"段（line 499）仍写"多条 Limit 并存、按模型 `models:` 子额度仍未交付（P3），配置里写了会加载期报错"——实际 multi-limit + `models:` scope + cost metric **2026-08-22 已交付且不报错**，只有 `rolling` 仍报错。 | ① 给 `core.go` 包注释补一句 admission rule（"both halves must agree on it, zero deps"），或把 CLAUDE.md 那半句改软；② Core line 499 改为如实描述 P3 已交付形态。**"co-equal" 一项已无需处理**——CLAUDE.md 第一句现已明写 "the analytics half's production code is larger than the routing core's"，误导性的等量暗示已消除，仅剩措辞。`config.local.yaml`（B16）是 gitignored 的作者私有配置，修它不产生仓库变更，不是交付项。 |
+
+---
+
+### 11.4 第二梯队：仅在服务于"作者维护税↓"或"已启动分发"时才做
+
+*前置判断（§4.5 / §11.2）：不服务于分发、也不降低作者自身复现/维护成本的纯工程动作，对 0 用户项目边际价值接近零。下列各项逐一注明正当性来源；不满足的已下调至第三梯队。*
+
+| # | 事项 | 正当性来源 | 复核后的实际情况 | 建议 |
+|---|---|---|---|---|
+| **T2.1** | **配置与 `/help` 页面收敛 (S8, S11)** | 作者维护税（中） | `config.example.yaml` ~470 行堆砌小众 Quota 旋钮（rolling window 这个 headline 用例本就没实现）；`/help`+`.zh`（3,100 行双语 HTML）嵌入虚构/极小众 agent 片段。这两项确实是"每次改配置字段要同步的表面积"，降低它有真实的重入成本收益。 | 复杂配额旋钮移入 UserGuide "advanced"；`/help` 聚焦主流 Agent（Claude Code, Codex, Aider, OpenCode）。 |
+| **T2.2** | **加固 Responses usage 判别逻辑 (B12)** | 作者维护税（弱） | `usage.go:155` 靠 `input_tokens_details.cached_tokens` 是否存在区分 Responses 与 Anthropic，脆弱但**非已错**（Responses 占语料 0%，此时 cacheRead/Write 都是 0，`In` 结果碰巧仍对）。 | 改用顶层 `output_tokens_details` 或协议标记。低优先——0% 语料路径，触发面为零；真接入第 4 协议前不必动。 |
+| **T2.3** | **分发定位与工件就绪（若启动分发）** | 分发 | 保留 `vmr` 二进制名 + 精准副标题 + 1 个脱敏 HTML 真实案例。GitHub description / README 头版含 "Claude Code"。 | 分发启动时才做，否则搁置。 |
+| ~~S2 移除 `vmr report` / `vmr story` 别名~~ | — | **复核后下调至第三梯队**：`cmd_report.go`(388) / `cmd_story.go`(811) 承载的是 `dispatchAnalyze` 调用的共享 helper（`runReport` / `renderJourney` / `renderJourneys` / `corpusStats` / `compareJourneys` / `buildPricing` / `setupDetailWriter`…），只有 `cmdReport`（~46 行）+ `cmdStory`（~90 行）+ 两个 flag set + 等价性测试可删——实际约 200~350 行，**不是 "~1.2k 行"**。删后要改 README/.zh、UserGuide/.zh、CLAUDE.md 至少 5 处文档，比删 `-corpus` 的文档扰动更大，与 §11.5"删除本身也是元工作消耗"的原则冲突。0 用户下无人依赖、也无人困惑。**不单独做；等 analyze 改名彻底落定、正在整体修订文档时顺带做。** |
+| ~~S5 删 `respnorm` 观测标记~~ | — | **复核后撤销此项**：原判据"全仓零消费者"**经核实为假**。`crlf_framing_suspected` 与 `thinking_process_pattern_detected` 均被 `internal/reqdetail` 详单页逐条叙述（`i18n/reqdetail_detail.go:134-135`）；`thinking_process_pattern_detected` 另进 `internal/report` 的 `diagnosticNormMarker` → `EndpointRow.NormCounts`，作为"MiniMax `Thinking Process:` 剥离规则是否已失效"的跨请求频率信号。这是**在用的低成本预警机制，不是死代码**。 |
+| ~~S6 删 `health.Status.Available`~~ | — | **复核后下调 + 加注**：`health.go` 与 KNOWN_ISSUES §3 item 35 已明确为 `Registry.Available` **方法**辩护（"Do not read 'no production caller' as delete"，测试断言端点状态的唯一无副作用入口）。`Status.Available` **字段**是另一回事（`/status` JSON 输出），S6 的理由把它和已删除的 config 侧 `serving *bool` shim 混为一谈——那是配置弃用字段，这是 HTTP 响应契约字段。且 `Available`（cooldown 已过）与 `Serving`（会路由真实流量）编码的是**真实不同的状态**，`vmr status` 用两者一起解释"为什么这个半开端点没在被试"。**除非确认 `/status` JSON 无外部脚本消费，否则保留。** |
+
+---
+
+### 11.5 第三梯队：明确 Hold / 暂不执行（投机扩展、深层优化、等真需求驱动）
+
+以下事项**在出现真实用户明确反馈或实测崩溃之前，严禁开工**：
+
+1. **投机性架构扩展（坚决不做）**：
+   - `E5` 第 4 协议接入（Gemini 原生协议）：无真实需求，不扩大维护面。
+   - `E6` 路由多维度扩展（Weight / Latency / Cost Dimension）：当前优先级 + Quota Headroom 足以应对 99% 场景，多维排序纯属 YAGNI。
+   - `E7` 端点级 RPM / 细粒度并发限流：现有基于 429 的指数退避健康机制已能自愈。
+   - `E8` 分析半区独立解耦（吃 LiteLLM/CCR 日志）/ `E9` Subagent 树：高复杂度、未验证的投机设想。
+2. **代码减法（保持 Freeze，仅顺带时做）**：
+   - `S3`（彻底删除 `-corpus`）/ `S4`（精简 LLM 解读层）：相关代码已被 `B3` 守住底线，且均在非核心路径。**特意花时间去删除它们也是一种元工作消耗**，保持 Freeze 即可。
+   - `S2`（移除 `vmr report` / `vmr story` 别名）：见 §11.4 复核——可删代码远小于宣称、文档扰动大于收益，保持别名即可。
+   - `B11`（实体抽取规则重标定）：当前噪声水平不影响主流程，无需投入精力重跑评估。
+3. **深层性能优化（未达触发线）**：
+   - `1.1` Report 第三趟扫描缓存（`collect()` 缓存）：涉及复杂的任务边界判定，风险高于收益。
+   - `1.2` Analyze 自然日分桶内存释放：索引优化后单机已能承载 ~2 万条记录，未超 4GB RSS 前不碰分桶状态机。
+4. **配额与预算高级面**：
+   - `E3` 虚拟模型硬预算：维持用户决策，继续 **Hold**。留给用户后续判断的差异见 §10.6——quota 的 gate/bucket 是"配速"（从不拒绝请求），E3 想要的是"硬急停"（触顶明确拒绝），两者目标不同，若未来要后者仍需一个独立的内存态机制。
+   - `E4` 严格滑动窗口（Rolling Window）：除非遇到具体厂商套餐的密集 429 冲击，否则不做。
+
+---
+
+### 11.6 本轮复核订正记录（2026-08-28，Sonnet 5）
+
+对 §11 初版逐条回源码复核。本轮**不解决任何问题**，仅修正分析与优先级。以下为事实层订正：
+
+| 原文判断 | 回源码复核结论 | 处置 |
+|---|---|---|
+| §11.1 全部落地成果 | 逐一核实：`internal/router/softblock.go` / `internal/story/render_html.go` / `internal/adapter/response.go` / `config.minimal.yaml` / `router.rejectIfAllKeyless` / `config.EmptyEnvRefs` + `CONFIG PROBLEMS` banner / `stitch.go` 的 `map[Hash][]int` posting list / `config.checkQuotaUsageVisibility` 均存在且带回归测试。 | 无需改 |
+| T1.1（旧）B10 死链接"违背 KNOWN_ISSUES #38" | **属实**。默认套件 `writeJourneyFile` 不物化 detail，但 `renderSystemPromptHeader`（`render_md_sysprompt.go:97`）与 `render_spine_step.go:208` 的 detail 链接无条件渲染；KNOWN_ISSUES §3 item 38（P13.1）明写"不产生死链接"。 | 升为 T1.2；方案改为复用 `report` 侧 P7.1 的行内坐标解法（而非自动物化，避免重开 P13.1 的体积回归） |
+| T2.2（旧）/ S5 "观测标记全仓零消费者" | **为假**。`crlf_framing_suspected`、`thinking_process_pattern_detected` 均被 `reqdetail` 详单叙述；后者另进 `report` 的 `diagnosticNormMarker` 频率统计，是剥离规则的失效预警。 | 撤销 S5 |
+| T2.1（旧）/ S2 "直接减少 ~1.2k 行代码" | **夸大**。`cmd_report.go` / `cmd_story.go` 承载 `dispatchAnalyze` 依赖的共享 helper；实际可删约 200~350 行，且文档扰动大。 | S2 下调至第三梯队 |
+| T1.4（旧）"CLAUDE.md 仍写 co-equal（被 23.7k:14.5k 推翻）" | **部分过时**。CLAUDE.md 第一句已改为 "…built as two co-equal halves — the analytics half's production code is larger than the routing core's…"，误导性的等量暗示已消除。仅剩 "co-equal" 措辞。 | T1.4 收窄到 `core` admission-rule 交叉引用 + Core 文档 line 499 两处**确认为真**的 stale |
+| T1.2（旧）B17 "报表泄漏 §编号" | **部分误判**。`§1`…`§7` 是生成报告自身的目录编号（`i18n/report_*.go` 的 section title），合法。真实项：`-h` flag 帮助里的 `P14.1` / `PricingTable` 内部代号（`cmd_analyze.go:160`、`cmd_report.go:344`）+ `-h` 退出码不一致（`vmr -h`=2、`vmr version -h`=1、其余=0，均已实测）。 | T1.3 收窄到这两类 |
+| T1.2（旧）列入 `config.local.yaml`（B16） | 该文件 gitignored（作者私有配置），`vmr check` 确认仍 bit-rot（`field provider not found`），但修它不产生仓库变更。 | 从交付清单移除；它只是 §3.3"示例配置同步有真实维护成本"的旁证 |
+| T2.2（旧）/ S6 删 `health.Status.Available` | 理由把 config 侧 `serving *bool` shim 与 `/status` 契约字段混为一谈；`Available`（cooldown 已过）与 `Serving`（会路由真实流量）语义不同，`vmr status` 两者并用。`Registry.Available` 方法另有 KNOWN_ISSUES §3 item 35 专门辩护。 | 下调 + 加"确认 `/status` 无外部消费者"的前置条件 |
+
