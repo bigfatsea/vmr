@@ -713,3 +713,86 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 | T1.2（旧）列入 `config.local.yaml`（B16） | 该文件 gitignored（作者私有配置），`vmr check` 确认仍 bit-rot（`field provider not found`），但修它不产生仓库变更。 | 从交付清单移除；它只是 §3.3"示例配置同步有真实维护成本"的旁证 |
 | T2.2（旧）/ S6 删 `health.Status.Available` | 理由把 config 侧 `serving *bool` shim 与 `/status` 契约字段混为一谈；`Available`（cooldown 已过）与 `Serving`（会路由真实流量）语义不同，`vmr status` 两者并用。`Registry.Available` 方法另有 KNOWN_ISSUES §3 item 35 专门辩护。 | 下调 + 加"确认 `/status` 无外部消费者"的前置条件 |
 
+---
+
+## 12. 分析结论：报告格式与数据层策略（JSON / Markdown / HTML，2026-08-28）
+
+> 背景：E1（§10.5）为 `-journey` 产出单文件 HTML 后，讨论"是否可全量以 HTML 取代 Markdown"。本节先修正一处易误解——**"只留 Markdown"不等于"删掉 JSON"**——再基于对 38 份实际报告、渲染器源码、LLM 解读层输入来源、以及日志索引现状的事实核对，给出结论。
+
+### 12.0 先立原则：JSON 决定数据，MD/HTML 决定展示
+
+- **数据层与展示层分离**。凡产物承载关键结构化数据 → **JSON（数据）与 MD/HTML（展示）双版本**，两者不是二选一。
+- **JSON 结构稳定、不可删**。JSON 是围绕它展开工作的数据契约，MD 的格式可以来回调、JSON 的结构相对稳定；即使加参数控制"是否同步输出展示层"，**JSON 输出也永远保留**。
+- **只留展示层、不产 JSON** 的仅有例外：该产物**没有独立原始数据**、纯粹是给人阅读的视图，其数据层在别处已有归属。
+- 格式选型（§12.3）只决定**展示层**用 MD 还是 HTML；**数据层 JSON 一律保留**，不参与"MD vs HTML"的取舍。
+
+### 12.1 四个事实核对（推翻两个前提、澄清一个数据归属）
+
+| # | 事实 | 结论 |
+|---|---|---|
+| **F1** | LLM 解读层**从不读任何渲染出的 `.md`**：`story/llm_findings.go:519` `searchableTranscript(j *Journey)` 从 Journey 结构体重建文本，`story/llm.go:145` `BuildEvidencePack(jA/jB/cmp)` 从结构化对象组装证据包 | "MD 留给 LLM 解读"这一论点在 vmr 里**不成立**——机器界面是 JSON/结构体，不是 MD。这恰好印证"JSON 才是数据层" |
+| **F2** | 当前 `journey-*.html` 是 MD 的**真子集**：`render_html.go:23` 注释自承 "MVP view uses j alone"——决策脊柱、Findings、LLM Findings、System Prompt 证据均未渲染；`render_md.go` 的 `renderDecisionSpine`/`renderFindingsSection` 只有 MD 有 | **不能先删 MD 再补 HTML**；必须先把 HTML 补成超集再删 MD，顺序反了会丢展示内容 |
+| **F3** | `details/*.md`（1522 个）是唯一无 JSON 孪生的产物；但每个 detail 本质是 `audit.Record` 的一条视图（`reqdetail` 是"纯函数 of one audit.Record"） | 其数据层就是 `logs/*.jsonl` 原始记录，**已天然存在**，故 details 是 §12.0 "只留展示层"的合法例外，无需另造 JSON |
+| **F4** | **索引"并没有丢"**：曾存在 `ctxgraph/blobindex.go` 的 `BlobIndex`（message-hash → 文件:行号:idx），commit `b771043`（2026-08-21 Phase 11 cleanup）作为 dead code 删除，功能被 Manifest 自带 `Path`/`Line`/`Req` 坐标取代；且 `vmr-requests.json` 每行 `req: 'vmr-audit-2026-08-22.jsonl:5'` 的 **request → 源文件:行号 映射一直都在**（实测 1522 行全部带坐标）；`vmr-stories.json` 的 `files` 字段给出 **journey → 涉及文件** | "索引找不到了"是**记忆偏差**：旧的 BlobIndex 实现被删，但 request→文件 与 journey→文件 两类映射**仍存在且可查**。真正的缺口见 §12.5 |
+
+### 12.2 第一性原理：格式跟随"主导消费场景"，而非"表达能力上限"
+
+"HTML 表达能力 ⊃ MD" 不构成替换理由。展示层格式应由该产物的**主导消费场景**决定：
+
+| 场景 | 消费方式 | 展示层格式 |
+|---|---|---|
+| 终端 / 编辑器 / grep（作者日常） | `less`、`grep -r`、编辑器跳转、git diff | **MD** |
+| 浏览器 / 交互 | 时间轴滚动高亮、折叠、脱敏分享 | **HTML** |
+| 机器 / LLM | 结构化消费 | **JSON（数据层，不参与取舍）** |
+
+vmr 是"本地运行、单二进制、CLI-first"工具（CLAUDE.md 自述），报告的主导消费场景是**终端/编辑器**——`vmr-report.md` 403 行表格、`vmr-requests.md` 1522 个 `details/` 链接在终端/编辑器里是纯文本结构，换成 HTML 后 `less`/`grep` 被样式噪声淹没、git diff 不可读。**HTML 在此处没有带来任何交互增益，只有成本**（新渲染器 + 新 i18n + 浏览器独占）。
+
+### 12.3 报告产物最终形态总表（数据层 + 展示层全量）
+
+> 读法：**数据层 JSON/JSONL 一律保留**（除非该行注明"数据在别处"）；展示层只写该产物实际应产出的那个格式。
+
+| 产物 | 数据层（永留） | 展示层（唯一格式） | 说明 |
+|---|---|---|---|
+| `vmr-report.{json,md}` | `vmr-report.json` | `vmr-report.md` | 403 行纯表格、零交互，MD 够用；HTML 版成本 ≈ Journey HTML 的 5 倍、收益为 0 |
+| `vmr-requests.{json,md}` | `vmr-requests.json`（含每行 `req` 文件:行号坐标） | `vmr-requests.md` | 请求索引，终端 grep 是主场景 |
+| `vmr-requests-<client>.md` | 无独立 JSON（数据源是 `vmr-requests.json` 的子集视图） | MD | 纯展示切片，数据层在 `vmr-requests.json` 已有归属 |
+| `vmr-requests-failed.{jsonl,md}` | `vmr-requests-failed.jsonl` | MD | 失败请求，JSONL 为数据层 |
+| `vmr-stories.{json,md}` | `vmr-stories.json`（含 `files`/`lineages`，journey→文件映射） | `vmr-stories.md` | journey 索引，纯表格 |
+| `vmr-story-corpus.{json,md}` | `vmr-story-corpus.json` | MD | 语料统计，纯表格 |
+| `journey-<id>.json` | `journey-<id>.json`（含 `structure.tasks[].steps[].req` 坐标） | **`journey-<id>.html`**（先补全 HTML 再删 MD，见 §12.4） | 唯一换 HTML 的：长叙事 + 时间轴 + 脱敏分享有真实增益 |
+| `details/*.md` | 无独立 JSON（**数据层是 `logs/*.jsonl` 原始记录**） | MD | §12.0 合法例外，纯视图；已用 HTML-in-MD `<details>` 折叠 |
+| `evidence/*.md` | 无独立 JSON（**数据层是审计记录里的 sysprompt 内容**） | MD | 同上，纯视图 |
+
+**新增产物（§12.5）**：`vmr-request-index.jsonl`（一行一 request 的可增量索引）——见下。
+
+### 12.4 实施建议（若采纳"Journey 展示层换 HTML"）
+
+**不是删 MD，而是"HTML 超集化 → 替换"**，顺序不可反；**数据层 `journey-<id>.json` 始终保留，不随 MD 删除**：
+
+1. **补 HTML 缺口**（约 1-2 天，按 archtest 预算拆文件）：决策脊柱（移植 `renderDecisionSpine`）、Findings + LLM Findings（`RenderHTML` 的 `findings []Finding` 参数终于用上）、System Prompt 证据 + evidence 链接；`-redact` 覆盖这些新区块（脱敏是分享前置）。
+2. **改导航**：`vmr-stories.md` → `journey-*.html`、`vmr-report.md` 的 journey 链接、detail 页 `← 返回` 链接改 `.html`（确定性文件名契约有测试锁着，改一处即可）。
+3. **`-details` 物化路径**：journey HTML 里的 detail 链接同步 `.html`。
+4. **删 journey-*.md 生成** + 更新 `cmd_story_report_crosscheck_test.go`（现读 `journey-*.md` 做双半区一致性核对，改读 `journey-*.json`——JSON 是权威层，正好顺理成章）。
+5. **文档同步**：Analytics 设计文档、UserGuide、CHANGELOG（按 CLAUDE.md 惯例 5 处 + `.zh`）。
+
+**代价**：journey 展示层换 HTML 后，终端 `less journey-*.md`、跨 38 个 journey grep 的能力退化。缓解：`journey-<id>.json` 已存在（可 grep/less），且可保留一个 `-text` 纯文本渲染兜底（未来要时再加，不默认生成）。
+
+### 12.5 日志→request→journey 可增量索引（新增产物，方案）
+
+**缺口确认**（承接 F4）：现有三类映射分散在三个文件里——`vmr-requests.json`（request→文件:行号）、`vmr-stories.json`（journey→文件）、`journey-<id>.json`（step→文件:行号），且**都不是"以 request 为主键、一行一 request、可增量增补"的统一索引**。要"查某 journey / 某 request 只需读哪几个日志文件、不用重扫全量"，需要一个聚合索引。
+
+**方案（JSONL，一行一 request，主键 = `req` 坐标）**：
+
+- 文件 `vmr-request-index.jsonl`，每行一个 request，字段：`req`（`文件:行号`，主键，天然唯一）、`journey_id`（可为空——后台任务/未成 journey 的请求此列为空）、`session`（lineage ID）、`ts`、`model`、`protocol`、`outcome`、`detail_file`。**journey 归属 + 源文件 + 时间 三者在同一行**。
+- **增量增补**：启动时把既有 index 读入内存 `map[req]struct{}`；扫描新日志文件时，`req` 已存在则跳过（分析过的不重填），不存在则追加一行。新增文件自动补入，旧文件已分析的行不动。JSONL 天然避免"整体重写"。
+- **消费方式**：按 `journey_id` 或 `req` 前缀过滤，得到目标行 → 聚合出需读取的日志文件集合 → 只打开这几个文件即可定位/渲染，不再全量重扫。
+- **一个正确性边界要守住**：该索引用于**事后定位/渲染**（读哪几个文件），**绝不用于决定"哪些文件参与扫描/图重建"**——`ctxgraph` 的缝合无时间上限（用户可几天后再回同一锚点），按索引缩小参与重建的文件集合会漏掉跨文件续接，正是设计文档 §2.4 明写的正确性边界。**增量只增补"索引行"，扫描本身仍全量**。
+
+### 12.6 一句话总结
+
+- **不要全量替换**。展示层格式选择标准不是"HTML 表达力更强"，而是"该产物主要给谁、在什么环境里看"。
+- **"只留 MD"从不是说删 JSON**：JSON 是数据层、永留，MD/HTML 只是展示层；唯一该把展示层换成 HTML 的是 Journey（先补全 HTML 再删 MD，顺序不能反）。
+- **宏观报表 / 请求索引 / stories / corpus / details / evidence 的展示层保持 MD**——主导场景是终端/编辑器/grep，MD 无表达力缺口，HTML 只有成本无收益；它们的 JSON 数据层不变。
+- **LLM 界面的答案既不是 MD 也不是 HTML，是 JSON**——且已全部存在（LLM 层现在读的就是结构体/JSON，从未读过 MD）。
+- **新增一个可增量索引** `vmr-request-index.jsonl`（一行一 request，`req` 坐标作主键，含 journey 归属 + 源文件），实现"查某 journey/request 只读需要的日志文件"；索引只用于定位，扫描仍全量。
+
