@@ -33,7 +33,8 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go build -o vmr ./cmd/vmr
-          tar czf vmr_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz vmr README.md README.zh.md LICENSE \
+          tar czf vmr_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz vmr vmr.sh README.md README.zh.md LICENSE \
+            config.minimal.yaml config.minimal.zh.yaml \
             config.example.yaml config.example.zh.yaml \
             report.example.yaml report.example.zh.yaml \
             pricing.example.yaml pricing.example.zh.yaml

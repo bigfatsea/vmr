@@ -461,6 +461,14 @@
     - **E1 · HTML 单文件 journey 渲染 + 脱敏**（新增 `internal/story/render_html.go`、`render_html_assets.go`、`internal/i18n/story_html.go`；`cmd/vmr/cmd_analyze.go`/`cmd_story.go` 加 `-html`/`-redact`）：`vmr analyze -journey <id> -html` 额外写 `stories/journey-<id>.html`——单文件自包含（内联 CSS + 一段内联 JS，零外部请求，theme-aware），左侧粘性时间轴 + 右侧 Step 卡片瀑布，数据源是 `RenderMarkdown` 走的同一个 `*story.Journey`。`-redact`（需 `-html`）把每段正文替换为 `‹text: N chars›` 长度占位，保留结构/角色/token 数/工具名/时间/compaction 标记。仅 `-journey` 单命中（同 `-llm-addr` 约束）；产物 0600。回归测试 `render_html_test.go`（结构 + 脱敏无泄漏 + ZH chrome）。默认套件不出 HTML index（用户决定）。Analytics 设计文档 §8 对应条目从"尚未实现"改为已实现。
     - E3（per-virtual-model 预算硬闸）本轮 **hold**（用户决定，理由见评审 §10）。
 
+48. **2026-08 综合评审（全面重估）第一梯队落地**（`docs/VMR_综合评审_2026-08_全面重估.md` §10.1）：
+    - **NEW-BUG-1 · 软屏蔽 Peek 吞没超时/断流错误**（`internal/router/softblock.go`）：`checkSoftBlock` 预读 2xx body 用的 `peek, _ := io.ReadAll(...)` 把 watchdog 关连接或上游中途断流的错误吞掉，截断片段被当作完整 200 转发——B1「杜绝静默假成功」在 opt-in 路径里复活。修法：捕获 `readErr`，非 nil 时把 body 换成 `readCloser{io.MultiReader(bytes.NewReader(peek), errReader{readErr}), resp.Body}`，让 `forwardSuccess` 的 `copyFlush` 撞上错误走既有 `TRUNCATED` → `panic(http.ErrAbortHandler)` 分支。**刻意不做 failover**（此刻 checkSoftBlock 还没写客户端，理论上可换端点）：全失败分支会把 `last.status`（200）+ 残缺 body 原样写回，反而制造新的假成功；与正常流式路径「已收 2xx 就 commit」保持一致更简单。回归测试 `router_serve_test.go` 的 `TestServe_SoftBlockPeekTruncationIsNotSilentSuccess`（hijack upstream 声明大 Content-Length 后断流，断言 `panic(http.ErrAbortHandler)`）。
+    - **NEW-DX-1 · 发布包缺文件**（`.github/workflows/release.yml`）：tarball 补 `config.minimal.yaml`/`config.minimal.zh.yaml`（README Quick Start 让用户 `cp` 的文件）与 `vmr.sh`（README 记录的开发/服务管理脚本）。
+    - **CLI 帮助卫生**（`cmd/vmr/cmd_analyze.go`、`cmd_report.go`、`main.go`、`cmd_version.go`）：`-render-all` 去掉 `P14.1's story.IsNoiseCategory` 内部代号；`-c`（report）去掉 `PricingTable's doc comment` 引用；`-macro-only`/`-list-only`/`-story-only` 的 usage 串去掉反引号——Go `flag` 把首个反引号对当占位符名，渲染成 `-list-only vmr story` 这种带参错觉；`vmr -h` 与 `vmr version -h` 统一退出码 0（对齐其余子命令的 `flag.ExitOnError`），bare `vmr` 仍 2（用法错误非求助）。
+    - **文档事实纠偏**：Core 设计文档「计量」段（原 line 499）改为「multi-limit + `models:` 子额度已随 P3 交付，仅 `rolling` 报错」；`internal/core/core.go` 包注释补 admission rule（CLAUDE.md/AGENTS.md 及 `clientheaders.go`/`httpjson.go` 注释已引用但此前不存在）；Analytics 设计文档 §8 HTML 条目补 `-compare` 看板（此前只写 `-journey`）。
+    - **E10（`vmr share <id>` 一键分享命令）本轮不做**——评审自身定性为判断题，仅在确会用它对外分享 Journey 时才值得；未确认前不立项。
+    - **旧协议名迁移提示**（`internal/config/provider.go` 的 `unknownProtocolHint`，两处 `adapter.Get` 失败点调用）：config 仍带 2026-08 改名前的 `openai`/`anthropic` 时，加载错误直接点名要改成什么（`base_url` key 与 `protocol:` 值都要）。**刻意不做**：不在 parser 里接受旧名（违背 strict YAML）、不提供转换脚本（config.yaml 带注释/`${ENV}`，round-trip 会毁格式，为约 0 外部用户不值当）。旧名 canonical 映射与审计日志读取用的 `core.CanonicalProtocol` 各自独立——生命周期不同（审计 shim 2026-10 随旧日志过期删，config 提示按用户升级节奏），刻意不复用。
+
 ---
 
 ## 4. ROI 评估总表（针对 §1 的待定问题）

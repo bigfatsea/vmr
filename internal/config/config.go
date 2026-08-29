@@ -550,7 +550,7 @@ func (c *Config) validate() error {
 		}
 		for protocol, raw := range p.BaseURL {
 			if _, ok := adapter.Get(protocol); !ok {
-				return fmt.Errorf("provider %q: base_url.%s: unknown adapter type (available: %v)", p.Name, protocol, adapter.Names())
+				return fmt.Errorf("provider %q: base_url.%s: unknown adapter type (available: %v)%s", p.Name, protocol, adapter.Names(), unknownProtocolHint(protocol))
 			}
 			u, err := url.Parse(raw)
 			if err != nil || u.Scheme == "" || u.Host == "" {
@@ -609,7 +609,7 @@ func (c *Config) validate() error {
 // FallbackEndpoints so the two can't drift on what "valid" means.
 func (c *Config) validateEndpointGroup(ctx string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
 	if _, ok := adapter.Get(eg.Protocol); !ok {
-		return fmt.Errorf("%s: unknown protocol %q (available: %v)", ctx, eg.Protocol, adapter.Names())
+		return fmt.Errorf("%s: unknown protocol %q (available: %v)%s", ctx, eg.Protocol, adapter.Names(), unknownProtocolHint(eg.Protocol))
 	}
 	if len(eg.Providers) == 0 {
 		return fmt.Errorf("%s: providers: at least one required", ctx)

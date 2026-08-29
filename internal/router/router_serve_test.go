@@ -616,6 +616,54 @@ models:
 	}
 }
 
+// TestServe_SoftBlockPeekTruncationIsNotSilentSuccess pins NEW-BUG-1: on a
+// soft-block-eligible endpoint, checkSoftBlock pre-reads the 2xx body. If the
+// upstream dies mid-transfer (or the stream_idle watchdog trips), that read
+// returns a fragment plus an error — which must NOT be forwarded to the
+// client as a clean 200 (that is the B1 silent-success failure mode, in a
+// newer path). The client has to see a broken transfer instead.
+func TestServe_SoftBlockPeekTruncationIsNotSilentSuccess(t *testing.T) {
+	// Fragment carries no soft-block marker, so the only thing under test is
+	// how the swallowed read error is handled — not the block heuristic.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server must support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		// Declare far more body than we send, then drop the connection.
+		io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
+		io.WriteString(conn, `{"choices":[{"message":{"content":"a partial answer that never fin`)
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+models:
+  vm:
+    soft_block_failover: true
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+`, srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	defer func() {
+		if r := recover(); r != http.ErrAbortHandler {
+			t.Fatalf("recover() = %v, want http.ErrAbortHandler — a mid-peek truncation must abort the client connection, not forward a clean short body", r)
+		}
+	}()
+	serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	t.Fatal("checkSoftBlock swallowed the mid-peek read error and forwarded a truncated body as a clean success")
+}
+
 // --- Serve: vendor protocol-quirk rejection fails over without cooldown ---
 
 // TestServe_VendorQuirkFailsOverWithoutCooldown pins the 2026-08-25

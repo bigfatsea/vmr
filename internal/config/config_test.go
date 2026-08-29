@@ -538,6 +538,26 @@ func TestUnknownEndpointProtocolRejected(t *testing.T) {
 	}
 }
 
+// TestLegacyProtocolNameGivesRenameHint: the pre-2026-08 names ("openai",
+// "anthropic") stay hard load errors (config is strict YAML), but the error
+// must point at the exact rename rather than just listing valid names.
+func TestLegacyProtocolNameGivesRenameHint(t *testing.T) {
+	t.Run("base_url key", func(t *testing.T) {
+		yaml := strings.Replace(validYAML, "base_url: {openai-completions: https://api.example.com/v1}", "base_url: {openai: https://api.example.com/v1}", 1)
+		_, err := Parse([]byte(yaml))
+		if err == nil || !strings.Contains(err.Error(), `rename "openai" to "openai-completions"`) {
+			t.Errorf("want a rename hint for the legacy base_url key, got %v", err)
+		}
+	})
+	t.Run("endpoint protocol", func(t *testing.T) {
+		yaml := strings.Replace(validYAML, "protocol: openai-completions", "protocol: anthropic", 1)
+		_, err := Parse([]byte(yaml))
+		if err == nil || !strings.Contains(err.Error(), `rename "anthropic" to "anthropic-messages"`) {
+			t.Errorf("want a rename hint for the legacy protocol value, got %v", err)
+		}
+	})
+}
+
 func TestAPIKeysParsed(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
 		"listen: 127.0.0.1:9900\napi_keys:\n  - sk-vmr-team-alice\n  - sk-vmr-team-bobby", 1)

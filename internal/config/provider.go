@@ -5,6 +5,29 @@
 // change beyond the new field itself.
 package config
 
+import (
+	"fmt"
+
+	"vmr/internal/core"
+)
+
+// unknownProtocolHint appends a targeted fix when a rejected protocol name is
+// one of the two renamed in the 2026-08 enum unification ("openai" ->
+// "openai-completions", "anthropic" -> "anthropic-messages"). The old names
+// are deliberately NOT accepted as input (config is strict YAML); this only
+// makes the load error say what to change and where. Empty string for any
+// other unknown name.
+func unknownProtocolHint(name string) string {
+	canon := map[string]string{
+		"openai":    core.ProtocolOpenAICompletions,
+		"anthropic": core.ProtocolAnthropicMessages,
+	}[name]
+	if canon == "" {
+		return ""
+	}
+	return fmt.Sprintf(" — protocol names were unified in 2026-08: rename %q to %q here and update the matching base_url key", name, canon)
+}
+
 // Provider is a flat, protocol-agnostic account definition: one entry per
 // upstream account, however many of the registered ingress protocols
 // ("openai-completions"/"anthropic-messages"/"openai-responses"/...) it actually speaks. BaseURL

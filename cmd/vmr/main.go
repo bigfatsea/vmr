@@ -35,6 +35,12 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	// An explicit help request exits 0, matching every subcommand's own
+	// `-h` (Go's flag.ExitOnError does that for them). Bare `vmr` with no
+	// command stays exit 2 above — that is a usage error, not a help ask.
+	case "-h", "-help", "--help", "help":
+		usage()
+		return
 	case "start":
 		err = cmdStart(os.Args[2:])
 	case "check":

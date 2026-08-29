@@ -49,8 +49,20 @@ func (rt *Router) checkSoftBlock(resp *http.Response, creq *core.CanonicalReques
 	}
 
 	watchdog := time.AfterFunc(snap.Cfg.Timeouts.StreamIdle.D(), func() { resp.Body.Close() })
-	peek, _ := io.ReadAll(io.LimitReader(resp.Body, softBlockPeekCap+1))
+	peek, readErr := io.ReadAll(io.LimitReader(resp.Body, softBlockPeekCap+1))
 	watchdog.Stop()
+	if readErr != nil {
+		// Upstream broke mid-peek, or the stream_idle watchdog tripped. The
+		// bytes so far are a fragment, not a small complete body — never hand
+		// forwardSuccess a fragment as a finished response (that is exactly
+		// B1's silent-truncation failure, and this opt-in path must not
+		// reintroduce it). Give back a body that replays the fragment and
+		// then surfaces the error, so forwardSuccess's copyFlush aborts the
+		// client connection (http.ErrAbortHandler) the same way a mid-stream
+		// break on the normal path does.
+		resp.Body = readCloser{io.MultiReader(bytes.NewReader(peek), errReader{readErr}), resp.Body}
+		return nil, false
+	}
 	if len(peek) > softBlockPeekCap {
 		// Too large to be an empty block — hand forwardSuccess a body that
 		// replays what we consumed, then the rest of the live stream.
@@ -81,3 +93,11 @@ type readCloser struct {
 	io.Reader
 	io.Closer
 }
+
+// errReader yields a fixed error on every Read. Spliced after the peeked
+// bytes when the peek itself failed, so a broken or timed-out soft-block
+// probe reaches forwardSuccess as a truncated transfer, never a clean
+// short body.
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }

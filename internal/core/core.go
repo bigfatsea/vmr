@@ -2,6 +2,15 @@
 
 // Package core defines shared domain entities (Endpoint, CanonicalRequest, RequestFacts,
 // PricingSpec, QuotaSpec) and zero-dependency domain helpers used across routing and analytics.
+//
+// Admission rule: something belongs here only if it is a TYPE both halves
+// must agree on, or a pure helper over such a type, AND it has no real owner
+// elsewhere. Behavior with a natural home in one half (writing an HTTP
+// response, filtering client headers, classifying an upstream error) does
+// not qualify even when both halves happen to call it — it lives in that
+// half and the other half imports it. core carries no internal imports
+// (archtest's TestArchitecture_ZeroInternalDepPackages); a helper that would
+// need one is a sign it is behavior, not a shared type.
 package core
 
 import (

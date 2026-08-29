@@ -341,7 +341,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 // two independent implementations (KNOWN_ISSUES §1.38).
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block) — see PricingTable's doc comment for the no-config.yaml degrade")
+	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block); without a readable config, $ estimates fall back to the built-in standard price table")
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: report.yaml's details, or false — the requests index links to each record's detail filename regardless, computed without needing the file to exist; pass -details to materialize them all up front)")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
