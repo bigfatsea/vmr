@@ -32,8 +32,6 @@ models:
 	}
 }
 
-
-
 // TestCheckFlagsMissingAPIKey ensures an empty provider api_key is
 // reported — validate() accepts it (syntactically valid YAML), so this is
 // exactly the gap Check exists to cover.

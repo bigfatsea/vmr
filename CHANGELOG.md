@@ -19,7 +19,7 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 Sections before the most recent release are compressed summaries — the
 commits and design docs hold the full reasoning.
 
-## [Unreleased]
+## [0.6.3] - 2026-08-29
 
 ### Changed
 - Dashboard (`/status.html`): multiple configuration issue banners are now collapsed into a single summary bar (`⚠️ Config Issues (N)`) with an expandable details drawer, preventing banner stacking from pushing telemetry cards off-screen
