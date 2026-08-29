@@ -1270,3 +1270,44 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 		t.Error("the rule-layer report should still be complete despite the LLM failure")
 	}
 }
+
+// TestCmdStory_HTMLFlagParity covers the deprecated alias reaching the same
+// -html/-redact dashboards `vmr analyze` does — the flags were missing from
+// cmdStory's own FlagSet, so `vmr story -journey X -html` errored out with
+// "flag provided but not defined". Both the happy path (a dashboard file
+// lands next to the .md) and the same rejection rules cmdAnalyze enforces.
+func TestCmdStory_HTMLFlagParity(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", outDir, "-journey", idA, "-html", path})
+	}); err != nil {
+		t.Fatalf("vmr story -journey -html: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idA+".html")); err != nil {
+		t.Errorf("journey dashboard not written: %v", err)
+	}
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-html", "-redact", path})
+	}); err != nil {
+		t.Fatalf("vmr story -compare -html -redact: %v", err)
+	}
+	htmlData, err := os.ReadFile(filepath.Join(outDir, "stories", "compare-"+idA+"-vs-"+idB+".html"))
+	if err != nil {
+		t.Fatalf("compare dashboard not written: %v", err)
+	}
+	if strings.Contains(string(htmlData), `<a href="journey-`) {
+		t.Error("redacted compare dashboard links to the un-redacted per-journey report")
+	}
+
+	if err := cmdStory([]string{"-o", outDir, "-redact", "-journey", idA, path}); err == nil ||
+		!strings.Contains(err.Error(), "-html") {
+		t.Errorf("-redact without -html should be rejected, got %v", err)
+	}
+	if err := cmdStory([]string{"-o", outDir, "-html", path}); err == nil ||
+		!strings.Contains(err.Error(), "-journey") {
+		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
+	}
+}

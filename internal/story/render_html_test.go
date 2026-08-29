@@ -61,6 +61,8 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 		`id="metrics"`,
 		`id="findings"`,
 		`id="step-1"`,
+		`id="task-1"`,       // task anchor, observed by the scroll-spy
+		`.task[id]`,         // scroll-spy watches task containers, not just sections/steps
 		`class="stat"`,      // metrics grid
 		"<polyline",         // context sparkline
 		"read_file",         // tool chip

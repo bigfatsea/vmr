@@ -61,7 +61,7 @@ section.block { margin-bottom: 34px; scroll-margin-top: 14px; }
 section.block > h2 { font-size: 16px; border-bottom: 2px solid var(--line); padding-bottom: 6px; margin: 0 0 14px; }
 
 /* Structure timeline */
-.task { margin-bottom: 18px; }
+.task { margin-bottom: 18px; scroll-margin-top: 14px; }
 .task > h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
 .task > h3 .tt { text-transform: none; color: var(--fg); font-weight: 400; letter-spacing: 0; }
 .srow { border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 7px;
@@ -127,6 +127,6 @@ const htmlScript = `
       if (link) link.classList.toggle('active', e.isIntersecting);
     });
   }, { rootMargin: '-8% 0px -82% 0px' });
-  document.querySelectorAll('section.block, .srow[id]').forEach(function (el) { obs.observe(el); });
+  document.querySelectorAll('section.block, .task[id], .srow[id]').forEach(function (el) { obs.observe(el); });
 })();
 `

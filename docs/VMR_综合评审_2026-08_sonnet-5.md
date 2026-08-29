@@ -932,17 +932,30 @@ byte-faithful 让**路由核心**很小很稳（14.5k 行、p95 < 10ms），恰�
 - 新 `internal/story/mdlite.go`：极简 markdown→html（标题 / 段落 / 列表 / **GFM 竖线表格** / 粗体 / 行内代码，全部先转义），供 LLM 解读段渲染——`-compare` 的 LLM 提示词产出"候选根因 | 证据 | 置信度 | 修复"表格，必须支持表格。
 - `compareLLMSections` 改为返回 `(markdown string, story.CompareLLMResult)`——`.md` 路径字节不变，`.html` 拿结构化结果，两者来自同两次 `Interpret` 调用。
 - `-html` / `-redact` 的 flag 规则从"仅 `-journey`"放开到"`-journey` 或 `-compare`"。`-redact` 整块去掉 LLM 段（它逐字转述证据）。新 `i18n.CompareHTMLText`（EN/ZH）+ 完整性测试。
-- 真实语料对比看板：三块 + 16 行指标差异表 + 真实 LLM 表格渲染；脱敏版去 LLM 段、零泄漏。
+- 真实语料对比看板：三块 + 16 行指标差异表 + 真实 LLM 表格渲染；脱敏版去 LLM 段。脱敏"零泄漏"结论当时只对被测 fixture 成立——分岔标题的 task title 与两侧兄弟 journey 链接两处未被断言覆盖、实际随本 commit 泄漏，收尾修正见本节末"收尾修正"。
 
 **验收（四个 commit 累计）**
 - `go build ./...`、`go vet ./...`、`gofmt -l internal cmd`（无输出）全绿。
 - `go test ./...` 全绿；`go test -race`（story / i18n / cmd/vmr）全绿。
 - `go test ./internal/archtest/...` 全绿——无文件 / 函数破预算（`cmd_story.go` 823/850）。
-- 真实语料端到端：默认套件死链接清零；journey / compare 看板完整版 + 脱敏版均生成、HTML5 合法、脱敏零泄漏、零外部资源引用。
+- 真实语料端到端：默认套件死链接清零；journey / compare 看板完整版 + 脱敏版均生成、HTML5 合法、零外部资源引用。compare 脱敏泄漏两处见"收尾修正"。
 - `.zh` 同步：`docs/UserGuide.md` + `.zh`、`docs/VirtualModelRouter_Design_v4_Analytics.md`、`CHANGELOG.md [Unreleased]`。
 
 **遗留 / 边界**
 - Journey / Compare 看板都只在 `-journey`（单命中）/ `-compare` 下 opt-in；默认套件不出 HTML（维持 §10.5 用户决定）。
 - 旧的 Step 卡片瀑布**已被替换**（不是并存）——`render_html.go` 整体重写。
 - 第二批（12-E `stitch_edges` / 12-F warm path）未动，按 §12.7 触发条件 Hold。
+
+**收尾修正（独立复核，2026-08-29）**
+
+四个 commit 落地后发现的缺口，四项已修复，各自带测试：
+
+- **Compare 看板 `-redact` 两处泄漏**（`60c3039` 交付即存在）。① `chtmlDivergence` 的分岔标题行直接渲染 `DivergencePoint.TaskTitle`（`taskseg.TaskTitle` 派生的用户指令文本），`-redact` 下大字外泄；② `chtmlSide` 在 `-redact` 下仍输出 `<a href="journey-<id>.md">`，链到 0600、未脱敏、不随分享的兄弟报告。根因：`TestRenderComparisonHTML_RedactLeaksNothing` 的 fixture task title 是无秘密的 `"research"`，分岔标题位与兄弟链接位都没埋哨兵。修复：标题按 `t.Redacted(runes)` 脱敏（与 `chtmlSide` 的 `cbodyText` 同款）、`-redact` 下兄弟链接降级为 `<code>` 纯文本文件名；fixture 改 `"research SECRET-TASK"`，`_Structure` / `_RedactLeaksNothing` 各补断言（完整版含 `SECRET-TASK` + `<a href="journey-`、脱敏版两者都不得出现）。
+- **`vmr story` 别名从未拿到 `-html` / `-redact`**。`5766366` / `60c3039` 只把 flag 加进 `cmdAnalyze` 的 `FlagSet`；`cmdStory` 用自己的 `FlagSet`，`vmr story -journey X -html` 一直报 `flag provided but not defined`。违反项目自述"every flag here works identically under `vmr analyze`"的对齐义务。修复：`cmdStory` 补 `-html` / `-redact` flag + 同款门禁（`-redact` 需 `-html`；两者需 `-journey` 或 `-compare`）+ 转发进 `analyzeRun.htmlOn/redactOn`；新 `TestCmdStory_HTMLFlagParity`；`docs/UserGuide.md` + `.zh` 的 `vmr story` 行补 `[-html] [-redact]`。
+- **§12.8 "脱敏零泄漏"结论已随本次收尾订正**（上文 12-D 与验收两行）——该结论 commit 时只对被测 fixture 成立。
+- **Journey 看板 rail 的 Task 锚点不参与滚动定位/高亮**（`5766366` 交付即存在）。rail 出 `<a href="#task-N">`、看板出 `<div class="task" id="task-N">`，但 `IntersectionObserver` 只 observe `section.block, .srow[id]`，`.task` 也没 `scroll-margin-top`——点 Task 链接标题贴顶、rail 高亮不跟。修复：`.task` 加 `scroll-margin-top: 14px`、observer 集合补 `.task[id]`（与 `.srow[id]` 同款）；`TestRenderHTML_DashboardStructure` 补 `id="task-1"` / `.task[id]` 断言。
+
+未修（留给用户判断）：
+
+- **默认套件会"降级"先前有链接的 journey 文件**。`writeJourneyFile` 的 `linkDetails == materializeDetails` 是纯布尔——默认套件（`false`）无条件把 `journey-<id>.md` 覆盖成坐标版，即使同 `outDir` 里 `-journey` / `-render-all` 之前已物化详单、目标 `.md` 仍在盘上。自愈（再跑一次 `-journey <id>`）。复核认为独立评审建议的 `linkDetails = materializeDetails || detailDirHasFiles(...)` **不成立**：`detailDirHasFiles` 只判"目录里有没有文件"，不判"这条 journey 自己的 Step 详单页在不在"——details/ 里若只有别的 journey 的页，这个判据会让当前 journey 的脊柱渲染成链接、指向不存在的详单页，正好重新引入 12-B 刚修掉的死链接类。正确做法需要 story 侧照 `report` 的 `detailCell` 加逐 Step 存在性检查（按 Manifest 坐标哈希文件名查 detail file set），成本与 ch12 重写刻意要遏制的"数据层 / 展示层"复杂度同量级。0 用户 + 自愈 + 建议方案自带回归风险，暂不做。
 

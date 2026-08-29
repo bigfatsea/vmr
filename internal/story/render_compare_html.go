@@ -66,7 +66,7 @@ func RenderComparisonHTML(cmp Comparison, llm CompareLLMResult, lang i18n.Lang, 
 
 	w("<section class=\"block\" id=\"diff\">\n<h2>%s</h2>\n", che(t.SectionDiff))
 	if cmp.Extras != nil {
-		chtmlDivergence(w, cmp.Extras.Divergence, t)
+		chtmlDivergence(w, cmp.Extras.Divergence, t, redact)
 	}
 	chtmlMetricTable(w, cmp.Rows, t)
 	if len(cmp.Tools) > 0 {
@@ -103,7 +103,15 @@ func chtmlSide(w func(string, ...any), label string, ref JourneyRef, t i18n.Comp
 		che(ref.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")),
 		che(ref.To.In(fmtutil.DisplayZone).Format("15:04:05")))
 	if ref.ReportFile != "" {
-		w("<div class=\"absub\"><a href=\"%s\">%s</a></div>\n", che(ref.ReportFile), che(ref.ReportFile))
+		// -redact: the sibling journey-<id>.md carries full, un-redacted
+		// conversation bodies (0600, not for sharing) — same reason the
+		// journey dashboard drops its details/*.md links in redact mode.
+		// Keep the filename as a plain-text pointer, drop the anchor.
+		if redact {
+			w("<div class=\"absub\"><code>%s</code></div>\n", che(ref.ReportFile))
+		} else {
+			w("<div class=\"absub\"><a href=\"%s\">%s</a></div>\n", che(ref.ReportFile), che(ref.ReportFile))
+		}
 	}
 	w("</div>\n")
 }
@@ -118,13 +126,19 @@ func chtmlInitialInstruction(w func(string, ...any), f InitialInstructionFact, t
 	w("</details>\n")
 }
 
-func chtmlDivergence(w func(string, ...any), d DivergencePoint, t i18n.CompareHTMLText) {
+func chtmlDivergence(w func(string, ...any), d DivergencePoint, t i18n.CompareHTMLText, redact bool) {
 	w("<div class=\"divergence\">\n")
 	if !d.Found {
 		w("<div class=\"dv-none\">%s</div>\n</div>\n", che(t.DivergenceNone))
 		return
 	}
-	w("<div class=\"dv-h\">%s</div>\n", che(t.DivergenceHeadline(d.AStepSeq, d.BStepSeq, oneLineTruncate(cbodyPlain(d.TaskTitle, t), 70))))
+	// The task title is user-authored instruction text (taskseg.TaskTitle) —
+	// redact it like every other body, or -redact leaks it in the headline.
+	task := oneLineTruncate(cbodyPlain(d.TaskTitle, t), 70)
+	if redact && strings.TrimSpace(d.TaskTitle) != "" {
+		task = t.Redacted(len([]rune(d.TaskTitle)))
+	}
+	w("<div class=\"dv-h\">%s</div>\n", che(t.DivergenceHeadline(d.AStepSeq, d.BStepSeq, task)))
 	w("<div class=\"dv-row\"><span class=\"dv-l\">A</span> %s</div>\n", che(strings.Join(nonEmpty(d.ATools, t.NoTools), ", ")))
 	w("<div class=\"dv-row\"><span class=\"dv-l\">B</span> %s</div>\n", che(strings.Join(nonEmpty(d.BTools, t.NoTools), ", ")))
 	w("<div class=\"dv-note\">%s</div>\n</div>\n", che(t.DivergenceNote))

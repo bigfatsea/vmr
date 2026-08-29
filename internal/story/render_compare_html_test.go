@@ -16,14 +16,14 @@ import (
 func cmpFixture(t *testing.T) Comparison {
 	t.Helper()
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
-	recA := mkExtrasRec(atA, "system prompt A SECRET-A", "research", "openai-completions:opencode:deepseek-v4-pro",
+	recA := mkExtrasRec(atA, "system prompt A SECRET-A", "research SECRET-TASK", "openai-completions:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
-	recB := mkExtrasRec(atB, "system prompt B SECRET-B", "research", "openai-completions:minimax:MiniMax-M3",
+	recB := mkExtrasRec(atB, "system prompt B SECRET-B", "research SECRET-TASK", "openai-completions:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report SECRET-DELIV\nfindings here")})
 	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), taskseg.Generic, i18n.EN)
 	if err != nil {
@@ -43,7 +43,9 @@ func TestRenderComparisonHTML_Structure(t *testing.T) {
 	for _, want := range []string{
 		"<!doctype html>", `id="sides"`, `id="diff"`,
 		`<table class="abtbl"`, "deepseek-v4-pro", "MiniMax-M3",
-		"findings here", // un-redacted deliverable excerpt present
+		"findings here",        // un-redacted deliverable excerpt present
+		"research SECRET-TASK", // divergence headline shows the task title un-redacted
+		`<a href="journey-`,    // side card links out to the per-journey report
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("comparison dashboard missing %q", want)
@@ -88,13 +90,18 @@ func TestRenderComparisonHTML_RedactLeaksNothing(t *testing.T) {
 	llm := CompareLLMResult{Model: "agent", Overall: InterpretResult{Text: "SECRET-LLM analysis"}}
 	out := RenderComparisonHTML(cmp, llm, i18n.EN, true)
 
-	for _, secret := range []string{"SECRET-A", "SECRET-B", "SECRET-DELIV", "SECRET-LLM", "findings here"} {
+	for _, secret := range []string{"SECRET-A", "SECRET-B", "SECRET-DELIV", "SECRET-LLM", "SECRET-TASK", "findings here"} {
 		if strings.Contains(out, secret) {
 			t.Errorf("redacted comparison dashboard leaked %q", secret)
 		}
 	}
 	if strings.Contains(out, `id="llm"`) {
 		t.Error("redact mode must drop the LLM section entirely")
+	}
+	// The sibling journey-<id>.md is un-redacted (0600, not for sharing) —
+	// redact mode keeps the filename as text but must not link to it.
+	if strings.Contains(out, `<a href="journey-`) {
+		t.Error("redacted comparison dashboard links to the un-redacted per-journey report")
 	}
 	// metric numbers + structure survive
 	for _, want := range []string{`<table class="abtbl"`, "‹text:", "deepseek-v4-pro"} {

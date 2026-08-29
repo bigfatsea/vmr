@@ -334,13 +334,13 @@ func dispatchAnalyze(r *analyzeRun) error {
 		}
 		// materializeDetails = r.renderAllFlag (P13.1): -render-all is an
 		// explicit "materialize everything" ask; the default non-noise
-		// suite is not — it renders every spine's "→ detail" links (a
-		// pure function of each Step's own Manifest, see
-		// EnsureJourneyDetails' doc comment) without writing the target
-		// files, closing KNOWN_ISSUES §1.35 (the default suite's
-		// unconditional per-Step materialization that made every `vmr
-		// analyze` run write 160MB+/details regardless of whether anyone
-		// reads them).
+		// suite is not — it renders each spine's "→ detail" pointer as an
+		// inline `file:line` coordinate (a pure function of each Step's own
+		// Manifest, see EnsureJourneyDetails' doc comment) rather than a
+		// link, so no detail files are written, closing KNOWN_ISSUES §1.35
+		// (the default suite's unconditional per-Step materialization that
+		// made every `vmr analyze` run write 160MB+/details regardless of
+		// whether anyone reads them).
 		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}

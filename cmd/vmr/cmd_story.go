@@ -82,11 +82,22 @@ func cmdStory(args []string) error {
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
 	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
+	htmlFlag := fs.Bool("html", false, "with a single-match -journey or with -compare: also write a self-contained .html dashboard next to the .md ({out}/stories/journey-<id>.html or compare-<a>-vs-<b>.html) — verdict/structure/metrics/findings for a journey, sides/divergence/diff/LLM for a comparison; inline CSS/JS, zero external requests. No effect on any other mode")
+	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links, finding text and (for -compare) the LLM section — structure, metrics, roles, token counts and tool names stay. For sharing outside the team")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *corpus && (*compare != "" || *journeyArg != "" || *renderAll) {
 		return fmt.Errorf("-corpus is exclusive with -journey/-render-all/-compare — run it on its own")
+	}
+	// Same -html/-redact gate cmdAnalyze applies: -redact needs -html, and
+	// both apply only to a single -journey or a -compare pair (the only two
+	// shapes RenderHTML/RenderComparisonHTML cover).
+	if *redactFlag && !*htmlFlag {
+		return fmt.Errorf("-redact only applies with -html")
+	}
+	if (*htmlFlag || *redactFlag) && *journeyArg == "" && *compare == "" {
+		return fmt.Errorf("-html/-redact only apply with -journey (a single journey) or -compare (a pair)")
 	}
 	paths, err := resolveInputPaths(fs, *configPath)
 	if err != nil {
@@ -147,6 +158,8 @@ func cmdStory(args []string) error {
 		storyOnly:       *renderAll && !hasSelector,
 		selfTrafficTags: rc.SelfTrafficClientTags,
 		showUngrouped:   *showUngrouped,
+		htmlOn:          *htmlFlag,
+		redactOn:        *redactFlag,
 	})
 }
 
@@ -778,10 +791,10 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof
 // user-named target (single -journey, either -compare side) always passes
 // true; a batch render (-journey matching several, the default suite, or
 // -render-all) decides per-caller — see renderJourneys/renderAllJourneys'
-// own doc comments. When false, the spine's link text still renders (it's
-// a pure function of the Step's own Manifest — see EnsureJourneyDetails'
-// doc comment) and just points at a file that doesn't exist yet, the same
-// already-accepted failure mode a per-Step render error produces.
+// own doc comments. When false, RenderMarkdown's linkDetails is false too
+// (see the call below): the spine renders each Step's "→ detail" pointer as
+// an inline `file:line` coordinate instead of a link, so an unmaterialized
+// detail page is never linked (B10 / review §12.5's 12-B).
 func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, materializeDetails bool) (string, error) {
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")

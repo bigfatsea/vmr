@@ -307,7 +307,7 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 **共享基础设施**（`toolCallRepeats`，`metrics.go`）：Step 角色标注的 🔄、决策脊柱标题行同一个 🔄（两者是同一次 `stepRoleTag` 调用，不是两处独立判断）、时序图的 🔄、`exact_repeat_tool_call` Finding 四处都需要回答"这次调用是不是在重复更早的调用"，如果各自实现一遍，最现实的风险不是重复劳动，是判据不一致（比如某个 Step 被标了 🔄 但 Findings 列表里却找不到对应条目，看起来像产品 bug）。`toolCallRepeats(steps []*Step) []ToolCallOccurrence` 是这四处唯一的判据来源，`Metrics.DuplicateActionRate`（九项指标之一）也改成基于它计算，不再是独立实现。
 
-**渲染层与 JSON 输出共享同一份计算**：`cmd_story.go` 的 `writeJourneyFile` 先算一次 `Metrics`/`Findings`，再同时喂给 `RenderMarkdown(j, m, findings, lang)` 和（内部固定 `i18n.EN` 重算一次的）`Summarize(j)`——两次 `ComputeFindings` 调用的**选择逻辑**（挑中哪些 `Code`/`StepSeq`）必须与 `lang` 无关，只有展示文案随 `lang` 变化，`TestComputeFindingsIsDeterministic` 把这条前提锁成了可执行测试（同构于 `internal/report` 的 `TestBuildFindingsIsDeterministic`）——否则中文版 Markdown 和英文版 JSON 可能标出不同的 Finding 集合。
+**渲染层与 JSON 输出共享同一份计算**：`cmd_story.go` 的 `writeJourneyFile` 先算一次 `Metrics`/`Findings`，再同时喂给 `RenderMarkdown(j, m, findings, lang, reportMDExists, linkDetails)` 和（内部固定 `i18n.EN` 重算一次的）`Summarize(j)`——两次 `ComputeFindings` 调用的**选择逻辑**（挑中哪些 `Code`/`StepSeq`）必须与 `lang` 无关，只有展示文案随 `lang` 变化，`TestComputeFindingsIsDeterministic` 把这条前提锁成了可执行测试（同构于 `internal/report` 的 `TestBuildFindingsIsDeterministic`）——否则中文版 Markdown 和英文版 JSON 可能标出不同的 Finding 集合。
 
 ### 3.5c 单 Journey LLM 解读层（5.9，`llm_single.go`）
 
