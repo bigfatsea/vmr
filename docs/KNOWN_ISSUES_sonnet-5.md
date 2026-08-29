@@ -204,7 +204,7 @@
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
-- **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §1.19。
+- **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §1.51。
 - **`archtest` 的文档守卫不扩展到 review 报告类文档**：守卫只覆盖 `CLAUDE.md`、设计文档、本文件与用户指南。review 报告会正当地讨论已删除的文件与「建议新增的 XXX 函数」。真正的风险（一份陈旧 review 被当施工依据）**用定位而非机制解决**：权威的当前状态清单只有本文件。
 - **`archtest` 不加圈复杂度检查**：一次只加一个守卫。函数长度预算落地不久，确认不够用之前不引入第二个。
 - **`buildinfo` 只输出 VCS commit 哈希，不人工编造语义化版本**：如实反映构建来源。
@@ -288,7 +288,7 @@
     - **include_usage 可见性**：`config.Check()` 新增 `checkQuotaUsageVisibility`——token/cost 额度账户挂在 `openai-completions` 端点上时打 `SeverityWarning`（流式响应无 usage 块除非客户端发 `stream_options.include_usage:true`，vmr 不注入）；`vmr status` 与 `vmr report` 的额度段在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示。
     - **E2 · 软屏蔽 → failover**（新增 `internal/router/softblock.go`、`internal/adapter/response.go`）：`soft_block_failover *bool`（`models.<name>` 与 `endpoints[]` 两级，endpoint 覆盖模型级，缺省关）。开启后 `tryOne` 对 eligible 2xx（非 SSE、非压缩）预读到 `softBlockPeekCap=64KB`，命中 `respnorm.ContainsSoftBlockMarker` 且 `adapter.ResponseAssistantText` 判定有效文本 ≤64 rune 且无 tool_call → 按 `ErrContent` 分支 failover（`ReportNeutral`、attempt 记 `content` 类、零冷却）。文本抽取按协议放 `internal/adapter`（不引 `chatmsg`）。
     - **E1 · HTML 单文件 journey / compare 看板 + 脱敏**：`vmr analyze -journey <id> -html` / `-compare a,b -html` 各写一份单文件自包含 `.html`（内联 CSS/JS，零外部请求，theme-aware，0600）——单页看板（判定条 / Task→Step 结构时间轴 / 指标 grid + SVG sparkline / Findings；compare 为两侧头 + 分岔点 + A/B 指标差异 + LLM 解读段）。数据源是 Markdown 渲染器走的同一个 `*story.Journey`，不重解析。`-redact`（需 `-html`）把正文替换为 `‹text: N chars›` 占位、去掉逐步详单链接、Findings 只留代码 + Step 锚、compaction 实体名降级为计数；compare 下另整块去掉 LLM 段。仅 `-journey` 单命中 / `-compare` 时出，默认套件不出 HTML。
-    - **E3（per-virtual-model 预算硬闸）本轮 hold**（用户决定）——见 §1.15。
+    - **E3（per-virtual-model 预算硬闸）本轮 hold**（用户决定）——见 §1.52。
 48. **2026-08 评审第一梯队落地**：
     - **NEW-BUG-1 · 软屏蔽 Peek 吞没超时/断流错误**（`internal/router/softblock.go`）：`checkSoftBlock` 预读 2xx body 的 `peek, _ := io.ReadAll(...)` 把 watchdog 关连接或上游中途断流的错误吞掉，截断片段被当完整 200 转发——B1「杜绝静默假成功」在 opt-in 路径复活。修法：捕获 `readErr`，非 nil 时把 body 换成 `readCloser{io.MultiReader(bytes.NewReader(peek), errReader{readErr}), resp.Body}`，让 `forwardSuccess` 的 `copyFlush` 撞上错误走既有 `TRUNCATED` → `panic(http.ErrAbortHandler)` 分支。**刻意不做 failover**（此刻 checkSoftBlock 还没写客户端）：全失败分支会把 200 + 残缺 body 原样写回，反而制造新的假成功。回归测试 `TestServe_SoftBlockPeekTruncationIsNotSilentSuccess`。
     - **NEW-DX-1 · 发布包缺文件**（`.github/workflows/release.yml`）：tarball 补 `config.minimal.yaml`/`.zh` 与 `vmr.sh`。
