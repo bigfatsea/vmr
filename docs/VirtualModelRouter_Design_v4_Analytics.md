@@ -40,7 +40,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 `vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳），或者嵌进文件名（per-request `details/*.md`、报告/日志输出路径）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。
 
-`internal/story/journey.go` 的 `deriveID` 是唯一一处不走这条规则的地方，但也不是简单粗暴地强制 `.UTC()`——它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换）格式化，也就是记录写入那一刻服务器自身的本地偏移量。这个 id 同时也是 `journey-<id>.md`/`compare-<id>.vs-<id>.md` 的文件名，需要满足两个看似矛盾的诉求：①同一份审计数据不管在哪台机器（哪个时区）上跑 `vmr story`，都必须算出同一个 id 字符串（用于 `-journey <id>`/`-compare id1,id2` 精确匹配）；②文件名里的时间要是人一眼能看懂的本地墙钟时间，不需要心算时区。因为这个偏移量是数据本身的属性（写入时那台机器的时区），不随"现在是谁在读它"变化，两个诉求同时满足——不需要走 `DisplayZone`（那是读取机器的时区，会引入①想避免的不稳定性），也不需要强制 `UTC`（那会导致②要求的可读性问题，即用户实际踩到的坑）。详细排查过程与取舍分析见前期时区设计分析。
+`internal/story/journey.go` 的 `deriveID` 是唯一不走这条规则的地方：它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换，即写入那一刻服务器自身的本地偏移量）格式化。这个 id 同时是 `journey-<id>.md`/`compare-*.md` 的文件名，要同时满足①同一份审计数据不管在哪台机器上跑都算出同一个 id 字符串（`-journey`/`-compare` 精确匹配）②文件名里的时间是人一眼能看懂的本地墙钟时间。因为这个偏移量是数据本身的属性、不随读取者变化，两个诉求同时满足——走 `DisplayZone` 会引入①想避免的不稳定性，强制 `UTC` 会导致②的可读性问题。
 
 ---
 
@@ -92,29 +92,15 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 每条审计记录可以渲染成一个 Markdown 文件到 `{out}/details/`（`vmr report` 全部产物 0600/目录 0700，与审计文件同权限——详单承载完整对话正文）；曾经同名的 `.json` 副本（`json.MarshalIndent(&rec, ...)` 的逐字复制）已经删除——原始记录本来就能通过坐标从源审计日志直接取回（`internal/audit.LineAt`，CLI 入口是 `vmr replay -req COORD -print`），物化一份同构副本只多花磁盘不多加信息（见 P3 阶段的证据层瘦身）。
 
-**详单渲染机制与演进（P12–P13 治理）**：
-1. **渲染默认按需关闭与懒物化（Lazy Materialization, P13）**：在批量分析套件（`vmr analyze` 默认套件）下，索引表格与决策脊柱直接基于纯函数生成指向详单的相对链接（`internal/reqdetail.FileName`），**但不预先物化全量详单文件**；只有在用户单点钻取具体 Journey（`-journey`）、显式传入 `-details` 或 `-render-all` 时，才真正将详单渲染写盘。这使得默认套件的写盘体积与耗时大幅下降（实测从数百 MB 降至数 MB）。
-2. **模板指纹与版本感知重绘（`renderTemplateVersion`, P12）**：`internal/reqdetail` 引入了模板版本常量。当详单渲染结构、Markdown 转义规则或样式更新时递增版本号，`EnsureRendered` 在检查已存在的落盘文件时不仅核对指纹与前驱，还会比对模板版本，自动失效并重绘陈旧文件，保证渲染结果与当前代码逻辑完全一致。
-3. **单轮差分与坐标回溯（P13 证据层瘦身）**：详单页不再为每一轮请求重复全量内联跨轮累积的历史消息，而是展示本轮增量消息（Messages）与模型响应（LLM Response），并提供指向前驱轮次的坐标超链接；系统提示词与工具声明证据通过内容哈希命名（`sysHash`）全局去重（`EnsureSysPromptEvidence`）。
-4. **渲染防御与转义（P12）**：详单渲染与决策脊柱对全部已识别的原始文本输入点执行 HTML/Markdown 转义（`escapeHTML`/`escapeCell`），杜绝用户或模型原始输出中的未闭合注释（如 `<!--`）或表格分隔符（`|`）造成下游正文被静默吞噬或表格撕裂；具体覆盖点清单与两轮独立审阅发现遗漏点的演进过程见 `docs/KNOWN_ISSUES_sonnet-5.md` 的"已闭环"记录（P12.2/P12.3）。
+**详单渲染机制**：
+1. **懒物化**：默认套件下索引表格与决策脊柱基于纯函数生成指向详单的相对链接（`internal/reqdetail.FileName`），**不预先物化全量详单文件**；只在用户单点钻取（`-journey`）、`-details` 或 `-render-all` 时才写盘（默认套件写盘体积因此从数百 MB 降至数 MB）。
+2. **模板版本感知重绘**（`renderTemplateVersion`）：详单渲染结构 / 转义规则 / 样式更新时递增版本号，`EnsureRendered` 除了核对指纹与前驱还比对模板版本，自动失效并重绘陈旧文件。
+3. **单轮差分**：详单页只展示本轮增量消息（Messages）与模型响应（LLM Response），历史轮次给指向前驱的坐标超链接；系统提示词/工具声明证据按内容哈希（`sysHash`）全局去重（`EnsureSysPromptEvidence`）。
+4. **转义**：详单渲染与决策脊柱对全部原始文本输入点执行 `escapeHTML`/`escapeCell`，防未闭合 `<!--` 吞噬正文、`|` 撕裂表格（覆盖点清单见 `docs/KNOWN_ISSUES_sonnet-5.md` §3）。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 
-`vmr-requests.json`（此前是 `vmr-requests.jsonl`）是 `vmr-requests.md` 背后的数据层：`requests`
-字段是原来 `.jsonl` 每行一条的 `RequestRow` 列表。解析缓存不再嵌在这个文件里——`files` 段已经拆到
-独立的 `{outDir}/.parse-cache/<filehash>.json` 分片目录（`internal/ctxgraph` 的
-`LoadCacheDir`/`SaveCacheDir`），与 `internal/story` 的 `vmr-stories.json`（§3.4）共用同一个目录，
-索引文件本身回到人可读的规模（见 P3 阶段的证据层瘦身）。缓存条目现在也不再只装
-manifest 这一半：`AnalyzeSessionsCached` 把它喂给 `ctxgraph.ScanCached`（文件内容哈希 + schema
-版本都没变就跳过 `BuildManifest` 的 JSON 解析+逐消息哈希，复用缓存里的 Manifest），`Build`
-（`aggregate.go`）自己的第二遍扫描（每请求解析，产出 `ReqInfo`/`RequestRow` 那一趟）现在也查同一份
-缓存的 `facts` 字段（`internal/report/factscache.go`）——两趟都命中时，一次重跑不再重新打开、
-解码该文件。真实 34 文件/177MB 压缩语料上实测：全量冷启动 ~83.8s 不变，热缓存从 ~71.8s
-降到 ~16.2s（收益从 ~1.17× 提到 ~5.2×）；`vmr replay -req <坐标>` 之类的一次性读取因为不跑聚合，
-不受这条影响。`vmr-requests-failed.jsonl` 是 `RequestRow` 的一份过滤导出，不是独立缓存，继续保持
-逐行 JSONL 格式不变。`BuildCached`/`Build` 两个入口并存：前者接受一份先前的 `*ctxgraph.FileCache`
-并把更新后的缓存一并返回，`cmd_report.go` 用的是它；`Build` 是它的无缓存瘦封装，保留给全部既有
-调用方（含测试）用，行为完全不变。
+`vmr-requests.json` 是 `vmr-requests.md` 背后的数据层（`requests` 字段是 `RequestRow` 列表）。解析缓存不嵌在这个文件里——拆到 `{outDir}/.parse-cache/<filehash>.json` 分片目录（`ctxgraph.LoadCacheDir`/`SaveCacheDir`），与 `vmr-stories.json`（§3.4）共用同一个目录。缓存条目装两半：`ctxgraph.ScanCached` 命中时跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希；`Build` 自己的第二遍扫描（产出 `ReqInfo`/`RequestRow`）也查同一份缓存的 `facts` 字段（`internal/report/factscache.go`）——两趟都命中时一次重跑不再重新打开、解码该文件（实测 34 文件/177MB 压缩语料，热缓存耗时从 ~72s 降到 ~16s）。`BuildCached`（`cmd_report.go` 用，接受并返回 `*ctxgraph.FileCache`）与 `Build`（无缓存瘦封装，保留给既有调用方）两个入口并存。
 
 ### 2.6 Markdown 渲染：九个编号章节
 
@@ -150,7 +136,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 不含任何 Agent 特化知识——纯粹基于消息哈希与结构比较，不做模板匹配。依赖 `{audit, core, chatmsg}`，被 `internal/report`/`internal/story` 共同依赖，自身不依赖两者（`internal/archtest` 强制）。
 
 - **`Manifest`**（`manifest.go`）：一次请求的内容寻址快照——每条非前导 system 消息的哈希（`Keys []Hash`）、前导 system 块整体哈希（`SysHash`/`HasSys`/`LeadSys`）、`SessKey`（`metadata.user_id` 优先，否则 `"anchor:" + Keys[0]`）、`TS`/`Model`/`Usage` 等请求元数据。`Hash` 是消息规范化 JSON 编码的 md5（`encoding/json` 排序 map key，跨请求同一条消息哈希一致）。
-- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，因此每个文件只开一次、顺序扫描，与 `Scan`/`Build` 本身的两遍读取模式一致）。早期版本另维护过一份 `map[Hash]→位置` 的独立哈希索引（`blobindex.go`），2026-08 作为纯内部实现的死代码删除——`Manifest` 自带的坐标已覆盖同一职责。
+- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。
 - **编辑分类**（`edit.go`）：相邻 manifest 之间的转换归为五类之一，判据全部基于最长公共前缀（LCP）与集合覆盖率，O(n) 纯结构比较：
   | 编辑 | 判据 | 语义 |
   | --- | --- | --- |
@@ -164,21 +150,17 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 - **`Lineage`**（`lineage.go`）：同一 `SessKey` 桶内、由非分裂型编辑（`Append`/`ReplaceTail`/`Splice`）连成的最长链。`splitBucket` 按时间顺序遍历一个桶的 manifest，遇到 `Contract`/`Fork` 就切出新 Lineage，新 Lineage 的 `BrokeFrom` 记录触发切分的那条编辑证据。`RootHash()` 对首个 manifest 的系统哈希 + 全部消息哈希做内容寻址，是 Journey id 的身份来源（不是 `Keys[0]` 单独哈希——一次 Contract 编辑经常保留完全相同的开场白，只哈希首条消息会让两个真正不同的 lineage 被误判成同一个）。
 - **缝合**（`stitch.go`）：`StitchGraph` 为每个带 `BrokeFrom` 的 Lineage，用消息哈希倒排索引在全图范围内找最佳匹配前驱（不限于同一个桶——一次真正的历史重写后 `SessKey` 完全可能变化）。三态结果（`StitchOutcome`）：`Stitched`（找到足够证据的前驱，`StitchKind` 为 `StitchCompaction` 或 `StitchHeadPrune` 两者之一，区分依据是覆盖率 `stitchCompactionScore=0.5`/`stitchHeadPruneScore=0.15` 两档阈值）、`NoPredecessorFound`（穷尽搜索零重叠，是一个合法结论而非搜索失败）、`AmbiguousMatch`（只有 `SessKey` 相同 + 时间邻近但零内容重叠的"疑似同源"信号，标记但**不自动缝合**——`stitchSameChatWindow=24h`）。跨桶匹配额外受 `stitchCrossBucketMaxGap=6h` 约束（同桶匹配不受时间窗限制——用户可能几小时后回来追问同一个话题，Agent 只要保留了上下文就仍是同一个任务，这个判断不需要时间阈值）。**宁可断开，不要错连**：这是全系统唯一的可信度来源，置信度不够就显式渲染断裂标记，绝不静默缝合。**幂等可重跑**是与之并列的另一条硬约束——同一输入必须逐字节产出相同结果，包括在多个候选前驱评分相同的时候：`overlap` 用 map 实现，Go 每次运行都会随机化其遍历顺序，因此挑选最佳前驱不能依赖遍历到的第一个候选，而是显式三级排序——覆盖率高者胜出，覆盖率打平则时间间隔更短者胜出，再打平则 Lineage 索引更小者胜出（纯粹为了给出一个确定的全序，无业务含义）。真实语料上这个平局场景并不罕见（多个"疑似同源"候选覆盖率完全相同），漏掉这条兜底会让同一份日志跑两次得到不同的 Journey id——这个问题不是靠单元测试发现的（合成测试数据太小，凑不出真实平局），而是把 `StitchGraph` 对同一语料连跑 5 次、逐 Lineage 比对 `PredIdx` 发现的。`ChainFrom` 沿 `Stitch.Edge.PredIdx` 反向走出一条 Lineage 的完整缝合链（chain），是 `vmr story`/`vmr report` 后续构建 Journey/会话的实际消费单位。
 
-### 3.2 与 `vmr report` 共享：技术债已还清
+### 3.2 与 `vmr report` 共享
 
-历史上 `internal/report/session.go` 有自己的一套私有实现——每条记录自算消息哈希向量（`ReqInfo.keys`）、自己的最长公共前缀窗口搜索（`lcp()`）选父、只按 `SessKey` 分桶从不分裂——这与 `ctxgraph` 事实上是同一个概念的两份独立实现，而且报表这一份有一个真实缺陷：只按 `SessKey` 分桶意味着一次 Contract 型历史重置（开场白锚点保留，其余内容坍缩）不会被识别为两个不同的会话，会被静默粘成一个——这既让"下文生命周期"这类问题无法回答，也让 `context_growth`（末轮/首轮 token 比）这个指标在跨越一次隐藏重置时算出脏值（比如短短几轮却报出几百倍"膨胀"）。
+`internal/report/session.go` 的会话分组直接消费 `internal/ctxgraph.Lineage`/`Classify`（§2.1），不再有报表包私有的哈希向量 + LCP 搜索。一个 `SessionInfo` 严格对应一个 Lineage——`context_growth`（末轮/首轮 token 比）因此不可能再跨越一次隐藏的 Contract 型历史重置算出脏值（这曾是私有实现只按 `SessKey` 分桶、从不分裂导致的真实缺陷）。`internal/archtest` 允许 `internal/report` 单向依赖 `internal/ctxgraph`。
 
-现状：`internal/report/session.go` 的会话分组直接消费 `internal/ctxgraph.Lineage`/`Classify`（§2.1），私有的哈希向量与 LCP 搜索已删除。一个 `SessionInfo` 严格对应一个 Lineage，`context_growth` 因此不可能再跨越一次隐藏重置——这不是额外写的分段逻辑，是分组单位本身变了之后的自然结果。`internal/archtest` 的导入边界规则相应更新：`internal/report` 现在合法地、单向地依赖 `internal/ctxgraph`。
-
-`internal/report/session_conformance_test.go` 在这次迁移前后的证据权重发生了变化，值得记在这里：迁移前它交叉验证的是**两套独立实现**（报表私有的 `keys`/`lcp()` vs `ctxgraph.Manifest`/`Classify`）是否得出一致结论，能捕获两者行为分叉；迁移后 `session.go` 直接读 `ctxgraph.Manifest`，同一份测试验证的是"同一份数据被一致地读取"，不再是两个独立算法的交叉核验——仍然有用（能捕获接线错误、字段搬运时的疏漏），但保证强度比迁移前弱。之后再扩展分组逻辑（尤其是 §7 可选扩展里的 Subagent 树）时，这份测试给出的信心不能等同于"两套独立实现互相印证"。
+注意 `session_conformance_test.go` 的证据权重：迁移前它交叉验证两套独立实现是否得出一致结论；迁移后 `session.go` 直接读 `ctxgraph.Manifest`，同一份测试只验证"同一份数据被一致地读取"，保证强度弱于"两套独立实现互相印证"——之后扩展分组逻辑（尤其 §8 的 Subagent 树）时不能把它当成前者。
 
 ### 3.3 `internal/chatmsg`：消息解析共享层
 
 从 `internal/report` 下沉出来的纯函数集合，被 `ctxgraph`/`story`/`report` 三方共同依赖，是三者共享而不重复实现的最低公共点：`Messages`/`RenderContent`（三种协议的消息列表归一化解析）、`ReassembleSSE`/`FinalMessage`（响应体重组，JSON 或 SSE 两种形态）、`ExtractUsage`（token 用量提取）、`ToolCallList`/`CheckToolPairing`（工具调用列表解析 + F9 不变量断言）、`ExtractEntities`（文件路径/URL 的粗糙正则扫描，`vmr story` 的 compaction 信息损失与 `vmr report` 的 §6.7 章节共享同一份实现）。
 
-`openai-responses` 的会话结构一样由这层负责归一化，不需要 `ctxgraph`/`story`/`report` 三方任何一方单独适配：`Messages` 把顶层 `instructions`（系统提示等价物）当作 anthropic `system` 的同类处理，把顶层 `input`（数组或裸字符串）当作 `messages` 的同类处理；`input` 数组里没有 `role` 字段的 Item（`function_call`/`function_call_output`/`reasoning`）各自映射到一个语义最接近的角色（分别是 assistant/tool/assistant）。`RawArray` 是这条改动新增的一个小导出函数——`messages`/`input` 两者中实际存在的那个数组，供 `ctxgraph.BuildManifest` 等需要按位置回取"这条消息的原始 JSON 编码"（而不是 `Messages` 渲染出的纯文本）的调用方使用，替代了 `ctxgraph`/`report`/`story` 五处调用点里各自硬编码的 `body["messages"].([]any)`——这正是本节开头强调的"不重复实现"原则本该覆盖、但第一版 Responses 协议接入时遗漏的一处：路由层（`internal/router`/`internal/diagnose`）当时已经完整支持了这个协议，`internal/chatmsg` 这一层却还只认 `messages` 字段，导致 `vmr report`/`vmr story` 对这类流量完全分不出会话/任务边界（详单页本身不受影响，因为它不依赖会话分组）。
-
-同一遍历（`internal/router`/`internal/diagnose` 先行，`internal/chatmsg` 请求侧解析后补）留下的第二个缺口在响应侧：`FinalMessage`（非流式 JSON 响应体）和 `ReassembleSSE`（SSE 流）在这次改动前只认 openai-completions 的 `choices[]` 和 anthropic-messages 的顶层 `content[]`，对 Responses 的 `output[]`（非流式）/`response.completed` 事件里嵌套的 `response.output[]`（流式）完全没有分支——不是"识别不出结构"降级，是两个函数压根没检查这个形状，`vmr report`/`vmr story` 对 Responses 流量的助手回复文本和 `reasoning` 摘要因此都是空的。已补上共享的 `responsesFinalMessage`（`FinalMessage` 直接调用；`ReassembleSSE` 在收到 `response.completed` 事件时调用同一个函数解析其嵌套的 `response` 对象），复用 `responsesItemMessage`/`reasoningSummaryText` 同一套 Item 分类逻辑，不重新发明。**只信任 `response.completed` 这一个终态事件，不逐个解析 delta 事件**：Responses 的分片事件字段名（`response.output_text.delta`/`response.function_call_arguments.delta`/…）还没有真实流量验证过，逐 delta 拼接猜错字段名的后果是静默拼错内容，比"暂时没有数据"更差；`response.completed` 携带完整最终对象、字段形状和非流式响应体完全一致，是唯一确定可信的来源。
+`openai-responses` 的会话结构也由这层归一化，三方不需单独适配：`Messages` 把顶层 `instructions` 当 anthropic `system` 同类、顶层 `input`（数组或裸字符串）当 `messages` 同类，`input` 数组里无 `role` 的 Item（`function_call`/`function_call_output`/`reasoning`）映射到最接近的角色（assistant/tool/assistant）。`RawArray` 返回 `messages`/`input` 中实际存在的那个数组，供 `ctxgraph.BuildManifest` 等按位置回取原始 JSON 编码，替代五处硬编码的 `body["messages"].([]any)`。响应侧 `FinalMessage`/`ReassembleSSE` 通过共享的 `responsesFinalMessage` 解析 Responses 的 `output[]`（非流式）与 `response.completed` 事件里嵌套的 `response.output[]`（流式）。**只信任 `response.completed` 终态事件，不逐个解析 delta**——Responses 的分片事件字段名还没有真实流量验证过，猜错字段名会静默拼错内容，比"暂时没有数据"更差。
 
 ### 3.4 `internal/story`：Journey 视图
 
@@ -211,19 +193,9 @@ vmr story -corpus [-o dir] [file|glob]...
 
 **`vmr-stories.json`/`.md`——候选列表落盘，解析缓存另在别处**：无论带不带任何选择性 flag（无参数列表、`-journey`、`-render-all`、`-compare`、`-corpus`），每次运行都会在 `{out}/stories/` 下写一份 `vmr-stories.json`（纯数据，`journeys` 段，每行还带 `lineages`——该 Journey 链上每条 Lineage 的内容寻址 id，供 `report` 侧按集合成员关系 join，见上文会话分组一节；以及 `category`，见下）+ `vmr-stories.md`（纯人读索引表，字段与终端候选列表一致：id、client、时间范围、任务数、轮数、标题、若已渲染则给出 `journey-<id>.md` 的链接）——此前"无参数"模式只打印到终端，跑完就丢，找不到历史候选列表，这一版把它落盘。**候选分类与噪声折叠**（P6.3 + P14 统一判据 `story.IsNoiseCategory`）：按标题里的内容标记把候选分成 `task`/`cron`/`heartbeat`/`subagent` 四类（`[cron:...]` 前缀、`[OpenClaw heartbeat poll]`/`[Subagent Context]` 子串——字面量拼法已用真实语料核实）。经 P14 统一，**仅 `heartbeat`（高频无实质动作的心跳轮询）属于噪声并默认折叠进 `<details>` 块**；`cron`（定时长任务）与 `subagent`（子代理多步任务）均承载实质工作流，与 `task` 一同在主表平权展开并纳入默认套件的预渲染范围；`vmr-stories.json` 照常全量输出，不做取舍。
 
-解析缓存不嵌在这个文件里：`{outDir}/.parse-cache/<filehash>.json`，一个输入文件一个分片，与
-`vmr-requests.json`（§2.5）共用同一个目录（见 P3 阶段的证据层瘦身）。分片装的是
-`ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按
-`Path`/`Line` 回原始审计文件按需取，缓存本身体积很小），外加 schema 版本戳。下一次运行先加载这份
-缓存，对每个输入文件重新算一次内容哈希（`ctxgraph.HashFile`，对磁盘上原始字节做 sha256，不关心
-是否被 housekeeping 压缩过——一份文件从 `.jsonl` 压缩成 `.jsonl.zst` 后字节和路径都变了，天然被
-当成"没缓存过"重新解析一次，一次性代价，不是错误）：哈希与版本都命中的文件直接复用缓存的
-`manifests`，跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希（这是整个扫描过程里真正贵的部分）；
-未命中（内容变了、版本升级、或是全新文件）才重新解析。
+解析缓存：`{outDir}/.parse-cache/<filehash>.json`（一个输入文件一个分片，与 `vmr-requests.json` §2.5 共用同一目录、同一套 `ctxgraph.FileCache`/`ScanCached` 机制）。分片装 `ctxgraph.BuildManifest` 的输出（消息哈希向量 + 少量标量元数据，**不含消息正文**——正文永远按 `Path`/`Line` 回原始审计文件取）+ schema 版本戳。每次运行对每个输入文件重算内容哈希（`ctxgraph.HashFile`，sha256）：哈希与版本都命中就跳过 `BuildManifest` 的 JSON 解析 + 逐消息哈希（扫描过程里真正贵的部分）。一份文件从 `.jsonl` 压成 `.jsonl.zst` 后字节和路径都变，天然被当成"没缓存过"重解析一次（一次性代价）。
 
-**关键设计取舍：只缓存"文件 → Manifest 解析结果"这一层，绝不缩小参与图重建的文件集合**——`ctxgraph.ScanCached`（`internal/ctxgraph/cache.go`）拿到每个文件"命中缓存的旧 Manifest 或新解析的 Manifest"之后，永远把**全部**文件的 Manifest 合并成一份完整集合，再整体跑一遍分桶/拆 lineage/`StitchGraph`——从不因为某个文件"没变"或"是新出现的"就把它排除在图重建之外。这不是留在桌面上没做的优化，是刻意的正确性边界：`StitchGraph` 的同 SessKey 桶续接搜索**没有时间上限**（用户可以走开几天再回来同一个锚点，见 §3.3 的缝合小节），一个全新文件里的记录完全可能续接到一个"看起来早就定型"的旧 Journey 后面，把它的 ID（`<end>` 分量）往后推——如果只按"这个文件是否被某个已知 Journey 引用过"来决定要不要把它纳入图重建，一个全新文件永远查不到任何引用（它是新的），这条续接就会被静默漏掉。因为 Manifest 本身很轻（一条消息一个 16 字节哈希，不含正文），"整体重建图"这一步的开销正比于请求条数而不是原始字节数，缓存跳过昂贵的解析步骤之后，重建图这一步本身已经便宜到不需要再做更激进的局部/增量式图更新。
-
-`vmr-requests.json`（§2.5）用的是完全同一套 `ctxgraph.FileCache`/`ScanCached`/`.parse-cache/` 机制、同一条设计取舍——两个产物的解析缓存需求本质相通，实现上共用 `internal/ctxgraph` 这一层、共用同一个磁盘目录，不是分别发明两套缓存格式。
+**关键设计取舍：只缓存"文件 → Manifest 解析结果"，绝不缩小参与图重建的文件集合**——`ScanCached` 拿到每个文件的 Manifest（缓存的或新解析的）后，永远把**全部**文件的 Manifest 合并成完整集合再整体跑分桶/拆 lineage/`StitchGraph`。这是刻意的正确性边界：`StitchGraph` 的同 SessKey 桶续接搜索没有时间上限，一个全新文件里的记录完全可能续接到一个"看起来早就定型"的旧 Journey 后面、把它的 ID 往后推；只按"这个文件是否被某个已知 Journey 引用过"决定是否纳入图重建，一个全新文件永远查不到引用，续接就被静默漏掉。因为 Manifest 很轻（不含正文），"整体重建图"的开销正比于请求条数而非原始字节数，跳过昂贵的解析步骤之后已经便宜到不需要更激进的增量式图更新。
 
 **数据模型**（`journey.go`）：
 
@@ -240,9 +212,11 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **`internal/taskseg`：Agent 特化知识 + 会话/任务切分算法（`report`/`story` 共用）**：`ctxgraph` 全程不做模板匹配（§3.1），但"这条 user 消息是不是真实指令，还是路由信封/纯工具结果/心跳时间戳""这次回复是不是 Agent 框架约定的'本轮故意不回复'""chat_id 这类会话标识怎么从消息里抠出来"这三件事本质上依赖具体框架的约定，硬塞进 `ctxgraph` 会破坏它的框架无关性。`taskseg.Profile` 接口（`RealUserText`/`NoReply`/`ChatID`）就是这条边界——`story`（`journey.go` 的任务边界判定、标题提取、缝合边界处的"是否有新指令"判断）与 `report`（`session.go` 的会话/任务边界判定、chat_id 提取、NoReply 检测）都通过这个接口调用，从不各自硬编码某个框架的约定。目前只有两个实现：`OpenClawAware`（认 OpenClaw 已验证过的具体标记）与 `Generic`（模板无关的兜底）——刻意不做基于检测的 profile 注册表/自动选择：第二个真实 profile（另一款 Agent 框架）出现、且真实语料显示需要专属规则时才值得抽象，现在建一个只有两个成员的注册表是猜测未来需求。两个命令目前都用同一个默认（`OpenClawAware`），选择逻辑收在 `cmd/vmr` 的一个共用解析函数（`resolveTaskProfile`）里，不是两处各自判断。
 
-架构审查 B3 批之前，`report`/`session.go` 与 `story`/`journey.go` 各自还独立维护了一份"同一个概念"的切分算法——`responseSummary`、`taskTitle`、`preview`、判定 delta 里是否有新指令、挑出 delta 内最新指令这五对同名函数，加上任务边界判定这一行核心逻辑本身。两侧在细节上并不完全等价（`report` 侧依附 `*ReqInfo` 状态、`story` 侧是无状态纯函数），裁决以 `story` 侧为权威、`report` 侧适配，收敛进 `taskseg.go` 旁边的 `segment.go`：`RealUsers`/`IndexRealUsers`（一次请求只建一次"哪些消息是真实用户指令"的索引，正则只跑一次，`HasNewInstruction`/`LastInstruction`/缝合边界的标题挑选都消费这份索引而不重扫）、`HasNewInstruction`（delta 内是否有真实新指令，按内容哈希集合判定而非位置，避免历史裁剪把旧消息挤进窗口被误判为"新"）、`LastInstruction`（delta 内最新指令的预览文本）、`FirstInstruction`（同一份索引里最早的那条指令——会话/Journey 标题用；收敛前 `report` 的 `sessionTitle`、`story` 的 `deriveTitle` 与轻量 `titleFromRecord` 路径各自手写过一遍同样的"取最小下标"循环）、`ManifestKeySet`（给 `HasNewInstruction` 用的父级消息哈希集合）、`IsNewTask`（`traceChanged || (!prevNoReply && hasNewInstr)` 这一行任务边界规则的唯一实现）、`TaskTitle`（取新指令或调用方传入的兜底文案——不导入 `internal/i18n`，`report`/`story` 各自传自己的兜底串）、`ResponseSummary`、`Preview`。缝合边界特有的"跳过已在 seen 里的候选"逻辑（`story` 的 `newInstructionTitleAtStitch`）没有对应的 `report` 概念，留在 `story` 内，只是改吃 `RealUsers` 索引而不是重新扫描。`taskseg` 因此新增了对 `internal/ctxgraph` 的依赖（`Hash`/`Manifest` 类型）——`ctxgraph` 依赖 `{audit, core, chatmsg}`，不会成环。收敛前后用真实审计语料跑过 `vmr report`/`vmr story` 的完整对比：除 `vmr-report.json` 里必然变化的生成时间戳外，输出逐字节一致。
+`report`/`session.go` 与 `story`/`journey.go` 曾各自维护一份"同一个概念"的切分算法（`responseSummary`/`taskTitle`/`preview`/是否有新指令/挑最新指令这五对同名函数 + 任务边界规则本身）；已收敛进 `taskseg/segment.go`（裁决以 `story` 侧无状态纯函数为权威）：`RealUsers`/`IndexRealUsers`（一次请求只建一次"哪些消息是真实用户指令"的索引）、`HasNewInstruction`（按内容哈希集合判定而非位置，避免历史裁剪把旧消息挤进窗口误判为"新"）、`LastInstruction`/`FirstInstruction`、`IsNewTask`（`traceChanged || (!prevNoReply && hasNewInstr)` 的唯一实现）、`TaskTitle`、`ResponseSummary`、`Preview`。缝合边界特有的 `newInstructionTitleAtStitch` 无 `report` 对应概念，留在 `story` 内。`taskseg` 因此依赖 `internal/ctxgraph` 的 `Hash`/`Manifest` 类型（不成环）。
 
-**渲染**（`render_md.go`）：单文件自包含 Markdown，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（模型自己产出的内容：推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700，与 `vmr report` 的 `details/` 同等敏感度——正文含完整对话内容。每个 Step 的"→ detail"指针与 system-prompt 证据指针：单 `-journey` / `-compare` / `-render-all` 路径（详单已物化）渲染成指向 `details/*.md` / `evidence/*.md` 的链接；默认批量套件（不物化，见"证据层体积纪律"）渲染成行内 `文件:行` 坐标（即 `Manifest.Req`），不产生死链接。
+**Markdown 渲染**（`render_md.go`）：单文件自包含，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700——正文含完整对话内容。每个 Step 的"→ detail"指针与 system-prompt 证据指针：单 `-journey` / `-compare` / `-render-all` 路径渲染成指向 `details/*.md` / `evidence/*.md` 的链接；默认批量套件（不物化）渲染成行内 `文件:行` 坐标（`Manifest.Req`），不产生死链接。
+
+**HTML 单页看板 + 脱敏**（`-journey <id> -html` / `-compare a,b -html`，2026-08）：另写一份单文件自包含 `.html`（内联 CSS + 一小段 `IntersectionObserver` 滚动高亮 JS，零外部请求、theme-aware、0600）——**不是 Markdown 的转写，是一份为分享重新设计的看板**。Journey 看板一屏滚动分四块：判定条（id/时间/结局）· 结构时间轴（Task→Step 骨架，每步一行带模型/工具 chip/failover 徽章/转换标记/Finding 旗标，逐行链回 `details/*.md`）· 指标 grid + 一条内联 SVG sparkline · Findings（规则层 + LLM 层）。Compare 看板三块：两侧头 + 双侧初始指令 · 分岔点大字标出 + 逐指标 A/B 差异表 + endpoint/cache/sysprompt/duration/deliverable 事实 · LLM 解读段落（`res.Text` 经 `internal/story/mdlite.go` 极简 md→html 渲染）。数据源是 Markdown 渲染器走的同一个 `*story.Journey`/`Metrics`/`[]Finding`，不重解析。`-redact`（需 `-html`）把正文替换为 `‹text: N chars›` 占位、去掉逐步详单链接、Findings 只留代码 + Step 锚、compaction 实体名降级为计数，compare 下另整块去掉 LLM 段；结构/指标/角色/token 数/工具名/时间/compaction 标记均保留。渲染器 `render_html.go` + `render_html_dashboard.go` + `render_html_assets.go` + `render_compare_html.go`，chrome `i18n/story_html.go` + `story_compare_html.go`。仅 `-journey` 单命中 / `-compare` 时出，默认套件不出 HTML。
 
 ### 3.5 行为剖面：九项规则派生指标 + 模型使用/切换（`metrics.go`）
 
@@ -260,9 +234,9 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | 上下文有效利用率 | 非 system Event 里，其提取到的实体（文件路径/URL）后续被更晚的 Event 再次提到的 token 占比——低值意味着大量进入上下文的内容从未被再次引用 |
 | Compaction 次数与信息损失 | 见 §3.6，汇总到 Journey 级别 |
 
-`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + 模型使用/切换 + Journey 身份（id/标题/时间范围）+ 下面 §3.5a 的 Findings，是 §3.7 对比模块的直接输入，不需要重新解析 Markdown。此外还落盘一个 `structure` 字段（`internal/story/structure.go` 的 `BuildStructure`）——完整的 Task/Step/Event/ToolCall 骨架：每个 Step 带请求级坐标（`req`，§3.2/§7.x 坐标层）、单步性能与成本（端点、耗时、首字延迟、token 用量，均已在 `Manifest` 上无需额外 I/O）、与决策脊柱相同的图层级分析事实（编辑分类 `Edit`、缝合证据 `StitchEdge`、compaction 的 token 前后与实体吞噬/存活列表——这三者只能由跨记录/跨语料的图分析给出，`req` 坐标救不回来，所以必须在这里内联，不能等按需引用）、该 Step 自己的回复/推理/工具调用参数（有界截断，"本轮决策"）、以及工具调用是否配对上结果（`matched`/`result_error`，复用决策脊柱已信任的精确/归一化 ID 匹配，不含渲染层专用的位置推断）。**工具调用的结果正文本身不内联**——结果是对话历史，会被客户端原样回写进下一轮请求，因此已经作为下一个 Step 的 `NewEvents` 出现，内联等于同一份 blob 存两份地址。对话历史正文（`NewEvents`）同理**只给内容哈希与角色引用，不内联文本**——取用路径是该 Step 的 `req` 坐标，而不是把消息体在这份 JSON 里再存一份；这与本节其余九项标量指标不同，是"事件流"本身在机读层的落点——P5 已删除人读层的逐轮事实层（fact-layer），这份机读结构正是当时用来验证"删除后信息不丢失"的等价内容依据（`TestBuildStructure_LosslessReconstruction`）。
+`journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + 模型使用/切换 + Journey 身份 + §3.5a 的 Findings，是 §3.7 对比模块的直接输入。另落盘一个 `structure` 字段（`structure.go` 的 `BuildStructure`）——完整的 Task/Step/Event/ToolCall 骨架，每个 Step 带 `req` 坐标、单步性能/成本、与决策脊柱相同的图层级事实（`Edit`/`StitchEdge`/compaction 前后 token 与实体吞噬列表——这三者 `req` 坐标救不回来，必须内联）、该 Step 自己的回复/推理/工具调用参数（有界截断）、工具调用是否配对上结果（`matched`/`result_error`）。**工具结果正文与对话历史正文（`NewEvents`）不内联**——只给内容哈希与角色引用，取用路径是该 Step 的 `req` 坐标；这份机读结构是 P5 删除人读 fact-layer 时验证"信息不丢失"的等价依据（`TestBuildStructure_LosslessReconstruction`）。
 
-**模型使用与切换**（`modelusage.go`）：一个 Journey 用过哪些上游 `(provider, model)` 及各自的 Step 数/token，加上每一次相邻 Step 间上游发生变化的切换点（第几步、从哪换到哪）。**取值必须来自端点，不能取 `Manifest.Model`**——那是虚拟模型名（`audit.Record.Model`，如 `coding`/`agent`），一个 Journey 内客户端全程请求同一个，照它实现会得到一张永远显示"未换过模型"的空表；真实上游模型（token 归属、相邻 Step 切换点比较用的那一个）来自 `Step.Rec.Attempts` 最后一次 attempt 的结构化 `Provider`/`Model` 字段，为空（很旧的日志）才回退到切分 `Manifest.Endpoint`（先 `:` 后 `/`，`internal/story` 不能 import `internal/report` 复用其 `attemptUpstream`，这里是一份独立的小 helper）。**Step 数的计入范围更宽**（A.2-7 的"便宜的一半"修正）：一个 Step 只要有任意一次 attempt 命中某 `(provider, model)`，那个 pair 的 `Steps` 就加一——不只是最后成功的那一次；被 failover 掉的端点因此在表里可见（但不计 token，token 只归属最终解析出的那一个）。切换点带一个纯观察性标记 `OnFailoverStep`（= 该 Step 的 `len(Attempts) > 1`）——不断言切换的原因（failover、TTL 过期、路由策略变化事后不总能分辨），只陈述两者共同发生过；**Step 内部的 failover 切换本身仍不产生独立的切换记录**（切换点比较仍只看相邻 Step 之间的最终解析结果）——这是 A.2-7"完整的一半"（`WithinStep` 标记）待做的部分，本次未落地。这两个字段是列表型数据，**不进** §3.7 对比/语料统计的标量 diff/Spearman 机制（见下方两处说明）。
+**模型使用与切换**（`modelusage.go`）：一个 Journey 用过哪些上游 `(provider, model)` 及各自 Step 数/token + 相邻 Step 间上游变化的切换点。**取值必须来自端点，不能取 `Manifest.Model`**（那是虚拟模型名，一个 Journey 内全程不变，照它实现会得到一张永远"未换过模型"的空表）——从 `Step.Rec.Attempts` 最后一次 attempt 的结构化 `Provider`/`Model` 取，为空（很旧的日志）才回退到切分 `Manifest.Endpoint`。Step 数按"任意一次 attempt 命中即 +1"计（被 failover 掉的端点在表里可见，但不计 token）；切换点带纯观察性标记 `OnFailoverStep`（= `len(Attempts) > 1`），不断言切换原因。这两个字段是列表型数据，**不进** §3.7 的标量 diff/Spearman 机制。
 
 ### 3.5a Findings：规则派生的 Step 级"疑似问题"清单（`findings.go`）
 
@@ -286,32 +260,23 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 **I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`story.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
 
-**校准记录（2026-08-05，真实语料，两轮）**：
-
-*第一轮（Phase 1 提交前，约 130 个候选 Journey）*：`reasoning_action_mismatch` 初版对整段 `Reasoning+RespText` 做实体差集，假阳性率约 90%——原因有二：(a) 推理文本常常是"1. 查A 2. 查B 3. 查C"式的多步计划 narration，当前 Step 只做了其中一步，其余几步被误判为"没做"；(b) 同一个文件路径因为正则的词边界起点不同，在推理侧和参数侧被抽成两个不同的实体字符串。改成只扫推理的**最后一句** + 双向子串匹配后，命中数从 24 降到 5，人工抽查全部可信。`plan_execution_misalignment` 初版只扫描 `Steps[1:]`，把"计划和第一步动作同时出现在宣告计划的 Step 里"（很常见）误判成"第一项从未被执行"。编号列表项数超过 `maxPlanItems`（8）时"全部未匹配"开始压倒性地主导命中——人工核查后发现这类样本几乎都是长篇战略文档，加了这道上限。
-
-*第二轮（Phase 2 提交前 + 用真实 A 股新股打新调研双 Agent 对比案例复核，137 个候选 Journey）*：`unused_tool_result` 初版按**单个实体**判定（一次工具结果里任意一个文件名/URL 没被再提到就算一条 Finding），在真实语料上单个 Journey 命中数最高到 92 条——原因是目录列表/搜索结果类工具结果天然一次列出十几到几十个文件，Agent 按设计只会挑其中几个跟进，这是正常 triage，不是浪费。改成只在**整个结果的所有实体都没被再引用**时才触发后，命中数从 918 降到 297，人工抽查转为合理（多为单一实体、确实再未提及的结果）。`plan_execution_misalignment` 在这轮真实案例复核（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，同一个 A 股新股打新调研任务的两次独立执行）中暴露第二个缺陷：一段推理里如果先后出现两个独立的编号列表（先是"拆解一下这个请求"式的主题分解，再是"让我规划一下方法"式的真实执行计划），`FindAllStringSubmatch` 会把两段列表拼成一个 8 项"计划"，导致"6/8 项未匹配"这类虚高结论。`lastNumberedList` 改为只取**最后一段连续编号**（编号一旦不再递增——最典型是从 1 重新开始——就判定为进入了下一段列表），修复后同一条真实推理正确识别出"3/4 项未匹配"（只对应第二段、真正的执行计划）。四处修复全部固化成了 `findings_test.go`/`findings_toolresult_test.go` 里的具名回归测试，不是只留在这段校准记录里。
+**校准（真实语料，两轮，提交前跑而非理论设计后直接上线）**：四处假阳性/精度问题已发现并修复，固化为 `findings_test.go`/`findings_toolresult_test.go` 的具名回归测试——`reasoning_action_mismatch` 改为只扫推理**最后一句** + 双向子串匹配（原对整段做实体差集，假阳性约 90%）；`plan_execution_misalignment` 改为扫描含首个 Step 自己的 `tool_call`、且 `lastNumberedList` 只取**最后一段连续编号**（避免两段独立编号列表被拼成一个虚高的"计划"）、编号列表 > `maxPlanItems`（8）项直接跳过（多为长篇文档非可执行计划）；`unused_tool_result` 改为只在**整个结果的所有实体都没被再引用**时触发（原按单实体判定，目录列表类结果一次列几十个文件、Agent 只跟进几个是正常 triage）。
 
 ### 3.5b 决策脊柱与呈现层（`render_spine.go`）
 
-用户打开一条 trace 排查问题时，真正想问的是"哪里开始不对"，不是"Agent 做了什么"——这个诉求在 2026 年上半年被多个独立一线实践信源反复提出，统一称作"决策脊柱"（decision spine，见前期深挖分析 §4 的调研）。`Journey → Task → Step` 的数据模型天然具备构建它的结构基础，不需要新采集任何数据，纯粹是渲染层重新分层：
+用户排查一条 trace 时真正想问的是"哪里开始不对"，不是"Agent 做了什么"——`Journey → Task → Step` 的数据模型天然能构建这个"决策脊柱"，纯粹是渲染层重新分层，不新采集数据：
 
-- **概览卡**（`renderOverviewCard`，Journey 页顶部）：3–5 个关键节点（起始时间、首个错误标记、首个非 `Append`/缝合转折点、结束时间）+ 基于 `Metrics` 阈值的结构标签（工具密集型/重试多/上下文压缩）——全部现成数据，零新增计算。
-- **决策脊柱**（`renderDecisionSpine`）：按 Task 分组，一个 Step 一个块——一次请求可能有多个 `tool_call`（同一个模型响应里连续发起 web_fetch + 两次 web_search 很常见），所以分组单位是 Step 而不是拍平的 `tool_call` 列表，同一 Step 的所有调用聚在同一个块下，块与块之间的边界（哪次调用属于哪一轮）一眼可辨。每个块：
-  - **Step 标题行**（`renderSpineStep`）：复用 `stepRoleTag`（见下）；命中 §3.5a 任一 Finding 的标题再加一个 ⚠️；紧随其后是一条指向该 Step 自己完整记录的"→ detail"链接（`reqdetail.FileNameForManifest` 纯函数算出，渲染时按需生成，见 §2.5 的详单渲染入口）。P5 已删除人读层的逐轮事实层（fact-layer）——决策脊柱现在是唯一的人读 per-Step 内容层，`Edit`/`StitchEdge`/`SysChanged`/`Compaction`/`NoReply` 这五类跨记录分析事实（详单渲染器只吃单条记录+其 Lineage 内前驱，物理上无法重建它们，见 §2.5）原样搬进了这里。
-  - **"为什么"一行**（`spineWhyLine`）：模型这一轮自己说的话——`RespText`（有就用，真实语料里几乎总是一句简短、决策性的话，例如"akshare 1.18.79 可用！直接用 Python 获取数据。"，原样展示，不截断到看不出内容的程度）优先于 `Reasoning`（`RespText` 为空时才用，标 🤔 前缀以区分"模型自己说的"和"从内部推理摘的"，截得更短——那一段可能长达整段思维链，完整版本本来就在这个 Step 自己的 LLM Response 折叠区里）。两者都没有就不渲染这一行，不替记录发明一个理由。
-  - **每个 `tool_call`**（`toolCallLine`，`render_spine_args.go`）：不是"JSON 原文截断前 N 字符"——那样每次都在展示 `{"command": "` 这类信封语法和字段名，真正不同的内容反而被挤出预览窗口，一堆 `exec` 调用因此看起来像同一条命令，是本节这版之前的真实教训；也不是"摘一行代表全部"——那样虽然能让不同调用看起来不一样，但读者还是看不到命令到底是什么。改为按解出的值形状通用挑选展示方式，两种形状都是**完整**内容，不是摘要：字段全是短标量（如 `{"action":"poll","sessionId":"..."}`）就把每个字段紧凑列成 `key=value`；有一个字段扛着真正的负载（命令、路径、URL、查询词、文件内容、plan 数组……）就展示那一个字段的完整值——取值规则是"渲染后最长的顶层字段"（负载字段几乎总比其余标量参数长）——单行且不超过 `spineInlineLen`（120 字符）内联展示，否则（多行，或单行但更长，比如一条几百字符的 `curl` 命令或一段 heredoc 脚本）单独起一个代码块，完整展示到 `spineFullCap`（3000 字符）为止；真撞到这个上限（少见——一份贴进 `content` 字段的完整报告文本这种量级），会在截断处附一句本地化提示，指向该 Step 自己的详情链接（§2.5，从不截断的完整原文）——P5 之前这里指向的是同一 Step 下方 fact-layer 里那份保证完整的原文渲染，fact-layer 删除后改为指向详单页。全程不针对具体工具名建表，任何未见过的工具只要参数是 JSON 对象就能落进上述两种形状之一；解不出 JSON 对象时退化为原文本身（同样走"单行内联/多行或过长入代码块"的判断，同样不截断到 `spineFullCap` 之前）。一个纯问答、没有任何 `tool_call` 的 Journey 不渲染这一节，Journey 里没有 `tool_call` 的 Task 也照样跳过——没有"决策"可摘。
-- **Step 角色标注**（`stepRoleTag`，Step 标题行前缀）：7 类标签中挑一个优先级最高的——🧹压缩（缝合边界）> ⚠️错误（本 Step 新事件含错误标记）> 🔄重试（`toolCallRepeats` 标记为重复）> 🔧执行（有 `tool_call`）> 📋规划（无 `tool_call` 但文本含编号列表）> 💬汇报（有回复文本）> 👀观察（以上都不是）。纯渲染层启发式，复用已有结构信号，不新增判断逻辑。
-- **工具调用时序图**（`renderToolTimeline`，Journey 末尾）：每个工具名一行、每个 Step 一列的 ASCII 图，符号区分 `●` 正常/`🔄` 疑似重复/`❌` 本 Step 含错误标记——同一份 `toolCallRepeats` 结果，换一个横向布局，用于发现"这段时间某个工具在密集重试"这类线性阅读容易漏掉的模式。
-- **Findings 清单**（`renderFindingsSection`，紧邻时序图之后）：§3.5a 每条 Finding 的完整文案（决策脊柱只标 ⚠️，这里才是能看到"为什么"的地方）。
+- **概览卡**（`renderOverviewCard`）：3–5 个关键节点（起始时间、首个错误、首个非 `Append`/缝合转折点、结束时间）+ 基于 `Metrics` 阈值的结构标签。
+- **决策脊柱**（`renderDecisionSpine`）：按 Task 分组，一个 Step 一个块（同一 Step 的多个 `tool_call` 聚在一起）。每个块——**Step 标题行**（复用 `stepRoleTag`；命中 §3.5a Finding 加 ⚠️；一条"→ detail"指针）：P5 删除人读层的逐轮 fact-layer 后，决策脊柱是唯一的人读 per-Step 内容层，`Edit`/`StitchEdge`/`SysChanged`/`Compaction`/`NoReply` 五类跨记录事实（详单渲染器物理上无法重建）搬进了这里。**"为什么"一行**（`spineWhyLine`）：`RespText`（几乎总是一句简短的决策性的话，原样展示）优先于 `Reasoning`（标 🤔 前缀、截得更短，完整版在该 Step 的 LLM Response 折叠区）；两者都没有就不渲染。**每个 `tool_call`**（`toolCallLine`，`render_spine_args.go`）：不按 JSON 原文截断前 N 字符（那样只看到 `{"command": "` 信封语法），改为按解出的值形状通用挑选、展示**完整**内容——字段全是短标量就 `key=value` 紧凑列；有一个字段扛负载（"渲染后最长的顶层字段"）就展示那一个字段的完整值，单行 ≤ `spineInlineLen`（120）内联、否则起代码块展示到 `spineFullCap`（3000）为止，撞上限时附一句提示指向详情链接。不针对具体工具名建表，解不出 JSON 对象时退化为原文本身。纯问答 Journey / 无 `tool_call` 的 Task 跳过这一节。
+- **Step 角色标注**（`stepRoleTag`）：7 类标签取优先级最高的——🧹压缩 > ⚠️错误 > 🔄重试 > 🔧执行 > 📋规划 > 💬汇报 > 👀观察。
+- **工具调用时序图**（`renderToolTimeline`，Journey 末尾）：每个工具名一行、每个 Step 一列的 ASCII 图（`●` 正常/`🔄` 疑似重复/`❌` 含错误标记），用于发现线性阅读容易漏掉的密集重试。
+- **Findings 清单**（`renderFindingsSection`）：§3.5a 每条 Finding 的完整文案。
 
-**共享基础设施**（`toolCallRepeats`，`metrics.go`）：Step 角色标注的 🔄、决策脊柱标题行同一个 🔄（两者是同一次 `stepRoleTag` 调用，不是两处独立判断）、时序图的 🔄、`exact_repeat_tool_call` Finding 四处都需要回答"这次调用是不是在重复更早的调用"，如果各自实现一遍，最现实的风险不是重复劳动，是判据不一致（比如某个 Step 被标了 🔄 但 Findings 列表里却找不到对应条目，看起来像产品 bug）。`toolCallRepeats(steps []*Step) []ToolCallOccurrence` 是这四处唯一的判据来源，`Metrics.DuplicateActionRate`（九项指标之一）也改成基于它计算，不再是独立实现。
+**共享基础设施**：`toolCallRepeats(steps) []ToolCallOccurrence`（`metrics.go`）是"这次调用是不是在重复更早的调用"的唯一判据来源——Step 角色标注的 🔄、决策脊柱标题行、时序图、`exact_repeat_tool_call` Finding、`Metrics.DuplicateActionRate` 全部基于它，避免判据不一致（某 Step 标了 🔄 但 Findings 里找不到对应条目会像产品 bug）。**渲染层与 JSON 输出共享同一份 `ComputeFindings` 计算**，其**选择逻辑**（挑哪些 `Code`/`StepSeq`）必须与 `lang` 无关（只有展示文案随 `lang` 变），`TestComputeFindingsIsDeterministic` 锁定——否则中文 Markdown 和英文 JSON 可能标出不同的 Finding 集合。
 
-**渲染层与 JSON 输出共享同一份计算**：`cmd_story.go` 的 `writeJourneyFile` 先算一次 `Metrics`/`Findings`，再同时喂给 `RenderMarkdown(j, m, findings, lang, reportMDExists, linkDetails)` 和（内部固定 `i18n.EN` 重算一次的）`Summarize(j)`——两次 `ComputeFindings` 调用的**选择逻辑**（挑中哪些 `Code`/`StepSeq`）必须与 `lang` 无关，只有展示文案随 `lang` 变化，`TestComputeFindingsIsDeterministic` 把这条前提锁成了可执行测试（同构于 `internal/report` 的 `TestBuildFindingsIsDeterministic`）——否则中文版 Markdown 和英文版 JSON 可能标出不同的 Finding 集合。
+### 3.5c 单 Journey LLM 解读层（`llm_single.go`）
 
-### 3.5c 单 Journey LLM 解读层（5.9，`llm_single.go`）
-
-`-journey`（含 `-render-all` 不支持，见下）现在也能接 `-llm-addr`，复用 `llm.go` 已验证过的调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级）——这条链路原本硬编码给 `-compare` 的 `EvidencePack` 用，为了让 `SingleJourneyEvidencePack`（5.9）、`DivergenceEvidencePack`（6c，见 §3.7）复用同一套 `Interpret`/`cacheKey`/`buildUserPrompt`，`llm.go` 新增一个 `evidencePackKind` 接口（`promptSpec(lang) promptSpec`，返回该场景自己的 system prompt + 用户消息前后缀 + 缓存版本号），三个 pack 类型各自实现一次；`Interpret[T evidencePackKind]` 改成泛型函数后，**`-compare` 原有调用点一行都没有改**——Go 的类型推断让 `Interpret(ctx, opts, pack, lang)` 在三种场景下写法完全一致。`SingleJourneyEvidencePack` = Journey 的 `Metrics` + `[]Finding`（§2.3 当初设计 `Finding.StepSeq`/`RelatedSeq`/`Evidence` 三个字段就是为了这里直接拼证据包，不需要回头改形状）+ 逐轮工具索引；system prompt 的任务是对已有 Finding 做优先级排序/串联解读，明确禁止"自己发现清单之外的新问题"（除非明确标注"这是我自己的阅读判断，不是规则核实的 Finding"）。`-llm-addr` 不支持 `-render-all`/`-corpus`，也不支持解出不止一个匹配的 `-journey` 选择器（同样的道理：会对每个 Journey 各打一次 LLM 调用，费用不可控），只支持 `-compare` 以及解出恰好一个匹配的 `-journey`。
+解出恰好一个匹配的 `-journey` 也能接 `-llm-addr`（`-render-all`/`-corpus`/多命中 `-journey` 不支持——会对每个 Journey 各打一次 LLM 调用，费用不可控），复用 §3.7 描述的同一套 `Interpret`/`cacheKey`/`buildUserPrompt` 链路。`SingleJourneyEvidencePack` = Journey 的 `Metrics` + `[]Finding` + 逐轮工具索引；system prompt 的任务是对已有 Finding 做优先级排序/串联解读，禁止"自己发现清单之外的新问题"（除非明确标注是模型自己的阅读判断而非规则核实的 Finding）。
 
 ### 3.6 Compaction 三形态与信息损失（CCR N-4 的落地）
 
@@ -327,29 +292,17 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 ### 3.7 双 Journey 对比（`internal/story/compare.go`）
 
-两份已经算好的行为剖面（`JourneySummary`）逐项做差，是这个功能里最省钱、也最直接命中"横向对比不同 Agent 框架"这个原始动机的模块——不需要额外的数据采集，`Compare(a, b JourneySummary) Comparison` 纯粹是对 §3.5 九项指标的再加工——按模型的 token 拆分是列表型数据，不在这套只吃标量的 diff 机制里；"切换次数"（`len(Metrics.ModelSwitches)`）是唯一适合登记进来的标量，已作为第 13 项数值字段登记（`MetricModelSwitchCount`，见前期设计方案批 4）——它是**路由环境**变量，不是 Agent 行为变量，读作"这两个 Journey 的路由环境是否不同"，不能读成"Agent 行为不同"。同样是纯规则、零 LLM：每一行差值配一个"相对变化是否越过阈值"的布尔标记（`Notable`，同时要求相对变化 ≥ 30% 且绝对差值超过一个按指标类型定的噪声下限——避免"0 次调用 vs 1 次调用"这种理论上无穷大的相对变化被无意义地标红），不生成任何自由文本解读。每行同时带一个不随语言变化的稳定标识 `Metric`（`MetricCode`，如 `model_ms`），与展示用的 `Label` 分离——`Label` 随 `-lang` 变化，`Metric` 不变（§4.2）。工具调用分布额外做一次并集对比（各自调用过的工具、次数）。渲染成 `compare-<idA>-vs-<idB>.md` + 同名 JSON，与单 Journey 的 `.md`+`.json` 同一套惯例；任一方是断头 Journey 时同样受 `-include-partial` 门控，文件名同样带 `-partial` 后缀。加 `-html` 另写一张 `compare-<idA>-vs-<idB>.html` 对照看板——单页三块（两侧头 + 双侧初始指令 · 分岔点大字标出 + 逐指标 A/B 差异表 + endpoint/cache/sysprompt/duration/deliverable 紧凑事实 · LLM 解读段落，`res.Text` 经 `internal/story/mdlite.go` 的极简 md→html 渲染），复用 journey 看板的 `htmlStyle`/`htmlScript`。`-redact` 把节选正文替换为占位并**整块去掉 LLM 段**（它逐字转述证据）。渲染器 `internal/story/render_compare_html.go`，chrome `i18n/story_compare_html.go`。
+两份已算好的行为剖面（`JourneySummary`）逐项做差，`Compare(a, b JourneySummary, lang)` 纯粹是对 §3.5 九项指标的再加工，零 LLM、不额外采集数据。按模型的 token 拆分是列表型数据，不进这套只吃标量的 diff 机制；`len(Metrics.ModelSwitches)`（切换次数）作为第 13 项标量登记（`MetricModelSwitchCount`）——它是**路由环境**变量，读作"这两个 Journey 的路由环境是否不同"，不能读成"Agent 行为不同"。每行差值配一个 `Notable` 布尔（相对变化 ≥ 30% 且绝对差值超过按指标类型定的噪声下限），不生成自由文本。每行带稳定标识 `Metric`（`MetricCode`）与展示用 `Label` 分离（§4.2）。渲染成 `compare-<a>-vs-<b>.md` + 同名 JSON（断头 Journey 受 `-include-partial` 门控、文件名带 `-partial` 后缀）；`-html` 另写一份对照看板，见 §3.4 的 HTML 看板段。
 
-**4a 落地记录（compare 场景切片，2026-07-30）**：基于对一份人工分析报告（同一对真实 Journey 的双实例对比）的逐项复核，`Comparison` 新增一个可选字段 `Extras *ComparisonExtras`（`ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics)` 计算），全部零 LLM 成本、直接从 `ctxgraph.Manifest`/`Step` 已有字段派生，不是新的数据采集：
+**`Comparison.Extras *ComparisonExtras`**（`ComputeComparisonExtras`，零 LLM 成本、从 `ctxgraph.Manifest`/`Step` 已有字段派生）：模型与端点核查（双侧 distinct `Manifest.Endpoint` 集合是否相同）｜Prompt 缓存命中率（逐轮 `CacheRead/In` 曲线 + 首轮/稳态/最值）｜System Prompt 规模与稳定性（最后一次 `SysChanged` 所在 Step 的 token 数、变更次数，以及一段有边界的原文节选，默认 20000 字符——按真实样本倒推的覆盖量级，"加载了哪些项目上下文文件"这类关键声明常落在第 1.5 万字符处）｜末轮上下文构成（= `Metrics.ContextCurve` 末项）｜总耗时 + 终止方式（墙钟总时长必须紧邻"净工作时长"展示并注明"不是效率指标"；双侧最后一个 Step 的 `Finish` 是最接近"是否被 loop detection 打断"的代理信号）｜**最终交付物对比**（若产出是通过一次"参数形状像文件写入"的工具调用落盘的，逆序取最后一次匹配、附内容节选，默认 6000 字符——VMR 唯一能直接看到"两边交付物本身差多少"而非"过程指标差多少"的证据）｜`Sources []string`（本次对比实际读取的源审计文件路径，渲染成末尾"证据溯源"小节）。
 
-- **模型与端点核查**：双侧 distinct `Manifest.Endpoint` 集合是否相同；
-- **Prompt 缓存命中率**：逐轮 `CacheRead/In` 曲线 + 首轮值/稳态均值/最值；
-- **System Prompt 规模与稳定性**：取双侧最后一次 `SysChanged` 所在 Step（没变过就是第一个 Step）的 token 数、变更次数，以及一段有边界的原文节选（默认 20000 字符，截断并如实标注——最初是 4000，实测两个真实验证 Journey 的 system prompt 里"加载了哪些项目上下文文件"这类声明分别落在第 15734/13656 字符处，远超旧截断点，导致 LLM 解读层从未见过这段证据、给出的根因结论因此偏离了人工报告的头号发现；20000 是按这两个真实样本倒推出的覆盖量级，不是对任意长度 system prompt 的通用保证）；
-- **末轮上下文构成**：直接是 `Metrics.ContextCurve` 最后一项，零新增字段；
-- **总耗时 + 终止方式**：墙钟总时长（必须紧邻已有的"净工作时长"一起展示，并注明"不是效率指标"——design doc F10 已经点名"16 分钟 vs 7.5 分钟"这类单纯墙钟对比会误导）+ 双侧最后一个 Step 的 `Finish`，是 VMR 能看到的最接近"是否被类似 loop detection 机制打断"的代理信号；
-- **最终交付物对比**（本轮新增、经复核认为 ROI 最高的一项，两份此前的方案都未覆盖）：若任务的产出是通过一次"参数形状像文件写入"（有 path 类 + content 类字段，不锁定具体工具名）的工具调用落盘的，规则层扫描双侧最后几个 Step、按逆序取最后一次匹配，附上其内容节选（默认 6000 字符）——这是 VMR 唯一能直接看到"两边交付物本身差多少"而非"过程指标差多少"的证据，deepseek 报告里靠人工比较两份产出报告篇幅/章节数的那部分工作，本质上就是在读这份数据。
+**LLM 解读层**（`internal/story/llm.go`，可选、可整体降级）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析只支持一种最简单的模式——手动指向一个已在跑的 VMR 实例（不做直连上游/健康检查/failover），只认 openai-completions 协议。证据包（`EvidencePack`）只含规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 逐轮"工具名+brief"索引，不塞完整 transcript。system prompt 强约束：数字只能引用给定证据；文本节选的解读必须标注是模型自己的阅读理解；"节选里没提到"不能被当成"确实不存在"断言；必须专门声明 VMR 看不到什么。落盘缓存（`{outDir}/stories/.llm-cache/`，key 含 `model` 与 `promptVersion` 防误命中）+ `-llm-dry-run`（只估算证据包大小）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json`。
 
-在此基础上，`vmr story -compare` 新增一个可选、可降级的 LLM 解读层（`internal/story/llm.go`）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析故意只支持一种最简单的模式——手动指向一个已经在跑的 VMR 实例（不做 config.yaml 直连上游、不做健康检查/failover、不自动拉起进程），只认 openai-completions 协议，直接 `POST http://{addr}/v1/chat/completions`。喂给模型的证据包（`EvidencePack`）只含上述规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 一份逐轮"工具名+brief"索引，不塞完整 transcript；prompt 强约束"数字只能引用给定证据，文本节选的解读要明确标注是模型自己的阅读理解，且必须专门声明 VMR 看不到什么"。落盘缓存（`{outDir}/stories/.llm-cache/`，key 含 `model` 防止换模型误命中旧缓存）+ `-llm-dry-run`（只打印证据包大小估算、不调用）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json` 正常产出（三层分层原则：LLM 解读层永远可整体降级）。用两个真实 Journey（`j-openclaw-...8b175da9` 22 轮、`j-lobster-...d6b04665` 58 轮）实测验证，规则层复现的数字与 deepseek 报告手工核对出的数字一致（22 轮 vs 58 轮、缓存 18%→97% vs 82%→99%、system prompt 17.1K vs 20.5K token、双侧端点相同），最终交付物对比也正确识别出两侧 `write` 调用的真实报告内容。
+**分叉点检测（`computeDivergence`）**：两个 Journey 按位置对齐（`flattenWithTask` 展平成跨 Task 的 Step 序列，**不是**按 `Step.Seq`——两个独立 Journey 的 `Seq` 编号互不可比），逐位比较一个粗糙的结构签名（`toolSignature`：是否有 `tool_call` + 排序去重后的工具名集合），第一个不同的位置即候选分叉点。严重度：工具名集合不同（或一方有 tool_call 另一方没有）→ `DivergenceHeavy`；集合相同但参数不同 → `DivergenceLight`。产出是纯结构事实（`DivergencePoint`），渲染时紧跟免责声明"分叉点定位 ≠ 根因判定"——"为什么这个分叉更差"永远是解读层的可选推测。
 
-**第一梯队修复（2026-07-30，两轮独立差距分析后落地）**：对同一对真实 Journey 逐条核对 `vmr story -compare` 的实际产出与那份人工/deepseek 报告后，发现并处理了三处高 ROI、不触碰任何架构边界的缺口：
-1. `sysPromptExcerptChars` 4000→20000（上一段已记）；
-2. `ComparisonExtras` 新增 `Sources []string`（由 `cmd_story.go` 从 `resolveInputPaths` 的结果直接透传，`ComputeComparisonExtras` 本身不产出这个字段），渲染成报告末尾的"证据溯源"小节，列出本次对比实际读取的源审计文件路径；
-3. `llm.go` 的 `llmSystemPrompt` 升级到 v2（`promptVersion` 同步升到 `compare-llm-v2`，故意让新 prompt 的产出不会命中旧版本的磁盘缓存）：把原来扁平的"核心假设 + 证据支持/推测标签"改成一张"候选根因 | 直接证据 | 置信度（高/中/低）| 改进建议"表 + 一句话因果链，置信度分档规则写死在 prompt 里（能指认具体证据锚点才能标"高"）；同时把"节选是被截断的前缀"这条既有约束从泛泛的免责声明升级成一条具体规则——任何"节选里没提到"的判断都必须明确说明"不能排除节选之外仍存在"，不能被当成"确实不存在"来断言。三处改动都是`internal/story` 内部的常量/字段/prompt 文本层面调整，不新增依赖、不改变任何既有架构边界。
+**分叉点 LLM 解读层（`llm_divergence.go`）**：`-compare` given `-llm-addr` 且定位到分叉点时，额外发起第二次、单独缓存的 LLM 调用。证据包（`DivergenceEvidencePack`）只含分叉点本身 + 双侧各 2 步的简要信息。system prompt：分叉点本身是已确认的结构事实不需重新论证；"为什么分道扬镳"必须标注为推测；**绝不判断哪一方更好**（VMR 没有任务是否达成目标的信号）。两段解读落进同一份 `.md`，标题带 `scope` 后缀（整体对比 / 分叉点）以区分。
 
-被复核否决、明确不吸收的一条：另一份独立分析曾提出"可用工具集规模差异（如 46 vs 67 个工具）也因节选截断而不可见"——实测两侧完整工具清单分别在第 2039/3024 字符处结束，早已完整落在旧的 4000 字符节选窗口内，这条论断的前提不成立，未采纳。
-
-**分叉点检测（`computeDivergence`，2026-08-05 落地）**：`ComparisonExtras` 里九项指标 diff、`EndpointsFact`、`CacheFact` 这些都是"整体层面"的对比——真正定位"从哪一步开始两条轨迹走上不同的路"是三份独立分析（本仓库 `docs/future-strategy/` 下的深挖报告与两份交叉评审文档）唯一同时提出的方向，这次调研里交叉验证信号最强的一条。做法完全建立在已有原语上，不需要新数据采集：两个 Journey 按位置对齐（`flattenWithTask`，展平成一个跨 Task 的 Step 序列，**不是**按 `Step.Seq` 对齐——两个独立 Journey 的 `Seq` 编号互不可比），逐位比较一个粗糙的结构签名（`toolSignature`：是否有 `tool_call` + 排序去重后的工具名集合），取两侧较短一方的长度为界，第一个签名不同的位置即候选分叉点。严重度分两档：工具名集合本身不同（或一方有 `tool_call`、另一方没有）→ `DivergenceHeavy`；工具名集合相同但参数不同（`stepArgsEqual` 判定）→ `DivergenceLight`。产出是一个纯结构事实（`DivergencePoint`，含双侧各自的 `StepSeq`、涉及的工具名、严重度），渲染时紧跟一句免责声明："分叉点定位 ≠ 根因判定"——只陈述"从这里开始不同了"，"为什么这个分叉更差"永远是解读层的可选、可关闭的推测，不包装成确定性结论（详见前期深挖分析 §6 的边界讨论）。真实语料验证：同一个 A 股新股打新调研任务的两次独立重跑（`j-lobster-...-99aa3efe` vs `j-lobster-...-09a3158a`）正确定位到两侧第一步都调用了 `exec` 但目标不同（`DivergenceLight`）；另一对更具代表性的样本——两个**不同 Agent 框架**（openclaw vs lobster）跑同一个任务（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，即 `reports/compare-...json` 那份旧版基准报告分析过的同一对 Journey）——正确定位到第一步就是重度分叉：openclaw 先调用 `memory_search`+`read`（查已有上下文/记忆），lobster 直接 `web_fetch`（抓数据），是这次调研里两个 Agent 处理同一任务时最先出现的真实策略差异，旧版报告（人工/deepseek 逐项核对产出）完全没有这一层定位——只停留在"33 次 vs 64 次工具调用"这类聚合数字，本次是这份数据第一次被结构化地定位到具体分叉步骤。
-
-**分叉点 LLM 解读层（6c，`llm_divergence.go`）**：`-compare` given `-llm-addr` 且 6a/6b 定位到分叉点时，除了原有的整体对比解读，额外发起第二次、单独缓存的 LLM 调用，证据包（`DivergenceEvidencePack`）只含分叉点本身 + 双侧各 `divergenceContextWindow`（2）步的简要信息（工具名 + 回复摘要），不塞完整 transcript。System prompt 的核心约束：分叉点本身是已确认的结构事实，不需要 LLM 重新论证；"为什么在这里分道扬镳"必须标注为推测（高/中/低置信度）；**绝不判断哪一方更好**——VMR 没有任务是否真正达成目标的信号，这个判断超出证据能支持的范围（与 §2.6 及前期深挖分析 §6 的边界一致）。两次调用的渲染结果落进同一份 `.md`：`RenderLLMSection`（`llm.go`）的标题因此带一个 `scope` 参数——整体对比段是"## LLM 解读（模型：X · 整体对比）"，分叉点段是"## LLM 解读（模型：X · 分叉点）"（`i18n.LLMText.ScopeOverall`/`ScopeDivergence`），不是都用同一句"## LLM 解读（模型：X）"——那样文档大纲里会出现两个字面相同的标题，读者光看目录分不清是同一节被贴了两遍还是两个独立分析（`-journey` 单 Journey 场景一份文档只有一次 LLM 调用，不存在这个歧义，`scope` 传 `""` 保持原来的无后缀标题，不受影响）。
+`SingleJourneyEvidencePack` / `DivergenceEvidencePack` / `EvidencePack` 三个 pack 类型共享同一套 `Interpret`/`cacheKey`/`buildUserPrompt` 调用链路（`Interpret[T evidencePackKind]` 泛型化后 `-compare` 原有调用点一行没改）。
 
 ### 3.8 盲区（诚实声明，避免"没记录"被误读成"没发生"）
 
@@ -412,9 +365,7 @@ type EfficiencyText struct {
 
 ### 4.2 identity 与展示文案分离
 
-展示文案一度被当成 identity 用，且已经泄漏进 JSON——`internal/report/metrics.go` 的 `buildFindings` 产出的 `Finding{Finding: "工具 schema 浪费", ...}` 这个字符串本身既写进 `vmr-report.json` 的 `efficiency[].finding` 字段，又被 `aggregate_test.go` 直接当 identity 比较；`internal/story/compare.go` 的 `metricDiff("模型时间", ...)` 是同一个模式，14 个标签写进 `compare-*.json` 的 `rows[].label`，`compare_test.go` 同样按标签字符串断言。只要标题字符串还兼职 identity，语言一旦可配置，测试就会在切换语言时随机失败。
-
-修法：`Finding`/`MetricDiff` 各自新增一个不随语言变化的稳定编码字段——`Finding.Code`（`FindingCode`，如 `tool_schema_waste`）、`MetricDiff.Metric`（`MetricCode`，如 `model_ms`）——测试和任何未来的程序化消费者都只依赖编码，`Finding`/`Label` 变回纯展示文案。这一步在引入 `internal/i18n` 之前就独立完成、独立验证，把"改 identity"和"改语言"两件事的风险分开。
+`Finding` / `MetricDiff` 各带一个不随语言变化的稳定编码字段——`Finding.Code`（`FindingCode`，如 `tool_schema_waste`）、`MetricDiff.Metric`（`MetricCode`，如 `model_ms`）。测试与任何程序化消费者只依赖编码；`Finding.Finding` / `MetricDiff.Label` 是纯展示文案（曾经这两个字符串兼职 identity 并写进 JSON，语言一旦可配置测试就会随机失败）。
 
 ### 4.3 JSON 契约：叙述字段跟随 `-lang`，`Code`/`EvidenceAnchor` 是稳定机器锚点
 
@@ -426,47 +377,11 @@ type EfficiencyText struct {
 原文逐字摘录——它们从不参与本地化，`Code` 已经是"写一个脚本时不用先判断这次报告用了哪种语言"
 这句话的全部依据，叙述句子再额外锁死英文是重复保险，不是唯一防线。
 
-这条规则最早只对 `journey-<id>.json` 成立（修 phase1a/1b 复核问题 3-1 时的副产品），是一次没有
-配套决定的局部改动；`compare-*.json`/`vmr-report.json` 曾经维持相反的规则（叙述字段固定英文），
-两条规则在同一个项目里并存过一段时间，登记在 `docs/KNOWN_ISSUES_sonnet-5.md` 的"已闭环"记录里
-（P8，JSON 语言策略统一）。
-`docs/future-strategy/json_lang_policy_plan_sonnet-5.md` 论证了统一方向并给出实施大纲，
-P8 阶段按该方案落地，把 `compare-*.json`/`vmr-report.json` 也改成跟随 `-lang`，本节正文回填的就是落地后的最终状态。
+两个类型达成这条规则的**具体机制不同**：
+- **`MetricDiff.Label`**（14 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary, lang i18n.Lang)` 直接接收 `lang`，循环体调 `i18n.MetricLabel(lang, string(spec.Code))`（纯静态查表）算出 `Label` 写进 `Comparison.Rows`；`RenderComparisonMarkdown` 直接读 `cmp.Rows[].Label` 不重复查表。
+- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子）：`buildFindings(rep, lang)` 保留 `lang` 参数；`report.Build`/`BuildCached` 自身**不接收** `lang`（刻意保持语言无关），内部先算一份英文默认写进 `rep.Efficiency`，`cmd_report.go` 在写 JSON 前用 `report.LocalizeEfficiency(rep, lang)` 覆写。`section_efficiency.go` 的 Markdown 渲染路径**不读**被覆写的值，保留独立的 `buildFindings(rep, lang)` 调用——否则会引入一条隐藏的调用顺序契约（`Markdown()` 必须在 `LocalizeEfficiency()` 之后），未来新增调用点不遵守就会静默产出语言不一致的输出。给 `Build`/`BuildCached`（已有 6/9 个参数）加 `lang` 本可避免这个顺序依赖，但会牵动数十处测试，改动面大两个数量级，选后者——多付的成本只是一次内存内的纯函数重复调用。
 
-两个类型达成这条规则的**具体机制不完全相同**，原因是叙述内容的结构、以及各自函数签名要不要动
-的取舍不同：
-- **`MetricDiff.Label`**（14 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary, lang
-  i18n.Lang) Comparison` 直接接收 `lang`，循环体里对每一行调用
-  `i18n.MetricLabel(lang, string(spec.Code))`（一张纯静态查表，`internal/i18n/story_compare.go`）
-  算出本地化 `Label` 直接写进 `Comparison.Rows`。渲染 `compare-*.md` 时，
-  `RenderComparisonMarkdown(cmp, lang)` 直接读 `cmp.Rows[].Label`，不再重复查表——它已经是
-  `Compare` 用同一个 `lang` 算好的值。`MetricDiff.Label` 相关的纯计算机制（`MetricKind`/
-  `MetricDiff`/`MetricCode`/`metricSpec`/`metricSpecs`/`metricDiff`）拆到了独立文件
-  `internal/story/compare_metrics.go`（P8.1，为了给 `compare.go` 腾出行数预算）。
-- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子，如"gpt-tools-v2/12 请求"）：
-  不能只查一张标题表——`buildFindings(rep *Report2, lang i18n.Lang) []Finding` 保留 `lang`
-  参数，`report.Build`/`BuildCached` 自身**不接收** `lang`（刻意保持语言无关，见下段），内部仍然
-  通过不导出的包装函数 `buildFindingsForJSON(rep) { return buildFindings(rep, i18n.EN) }`
-  算出一份英文默认值写进 `rep.Efficiency`；`cmd_report.go` 在调用 `WriteJSON` 之前，用它已经
-  拿到手的 `lang` 调用新增的导出函数 `report.LocalizeEfficiency(rep, lang)`
-  （`rep.Efficiency = buildFindings(rep, lang)`）覆写这份默认值，`vmr-report.json` 因此落盘的
-  是按实际语言算出的版本。`section_efficiency.go` 的 `renderEfficiency`**不读**被覆写后的
-  `rep.Efficiency`，继续保留它自己独立调用 `buildFindings(rep, lang)` 的既有实现，理由见下段。
-
-**为什么 `story`/`report` 两侧选了不同的机制，而不是都给 `Build` 加 `lang` 参数**：`Compare`
-把 `lang` 直接做成函数参数，同一次调用产出的 `Label` 保证和调用时的 `lang` 一致，`RenderCompar
-isonMarkdown` 复用 `cmp.Rows[].Label` 没有额外的顺序依赖风险。`report` 这边选择的是"`Build()`
-之后由 `cmd_report.go` 按特定顺序覆写 `rep.Efficiency`"——如果 `renderEfficiency` 也去读被覆写后
-的值，就会引入一条隐藏的调用顺序契约（`Markdown()` 必须在 `LocalizeEfficiency()` 之后调用，
-否则读到英文默认值），任何未来新增的调用点（测试、脚本、`Markdown()` 的其它调用方）一旦不遵守
-这个顺序就会静默产出语言不一致的输出，且没有编译期或运行期报错。给 `Build`/`BuildCached`
-（分别已有 6/9 个参数）加 `lang` 参数本可以避免这个顺序依赖，但会牵动这两个已经很长的函数和
-`internal/report` 包内所有直接调用它们的测试（数十处），改动面比"新增一个下游覆写步骤 + 渲染层
-保持独立计算"大两个数量级，选后者是这次的权衡结果——多付出的成本只是一次内存内的纯函数重复
-调用（`buildFindings` 本身零 I/O），可忽略不计。
-
-`story.Interpret`（LLM 解读层）的 system prompt 本身明确指示模型"用 en/中文回答"，见 §4.5，
-从来不受这条规则约束、也不需要约束——它产出的是模型生成的自由文本，不是模板拼句。
+`story.Interpret` 的 system prompt 本身指示模型用 en/中文回答（§4.5），不受这条规则约束——它产出的是模型自由文本，不是模板拼句。
 
 ### 4.4 配置与命令行
 
@@ -539,17 +454,6 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 关键约束：中文报告配中文解读，英文报告配英文解读。`internal/story/llm.go` 的 system prompt 因此拆成 `i18n.LLM(lang).SystemPrompt`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
 
-### 4.6 实现中发现的三个真实问题
-
-逐文件核对"这个字符串是不是真的被 i18n 覆盖了"时，发现三类设计阶段的文本盘点漏掉的真实硬编码中文，全部已修复——发现方式一致：不是重读设计文档，而是迁移完每个文件后跑 `grep -P '[\x{4e00}-\x{9fff}]'` 对该文件独立复查一遍，全部迁移完成后又做了一次全仓库级扫描：
-
-1. `truncCell`/`renderMessageSection`（详单渲染的 Markdown 原语，P2 阶段随详单渲染整体下沉到
-   `internal/reqdetail`）——
-   详单页表格截断提示（"共 %d 字符"）和消息占位符（"(空)"）当时被归类成"纯格式化助手函数"，没算进
-   文案盘点；现在接收 `t i18n.DetailText` 参数。
-2. `internal/report/pricing.go` 的 `Disclaimer()`——定价免责声明是 `Pricing` 类型的一个方法，直接拼接中文字符串，不在任何一个 section 文件里，盘点时被漏掉；现在签名是 `Disclaimer(lang i18n.Lang) string`。
-3. 三处硬编码的中文顿号"、"——`renderFactsLine`（同上，现在在 `internal/reqdetail/detail.go`）、`story/render_md.go` 的 `renderCompactionInfo` 都用 `strings.Join(xs, "、")` 无条件拼接列表，跟语言设置无关，英文报告里也会显示中文顿号；两侧文本 struct 各加了一个 `ListSep` 字段（`、` vs `, `）。
-
 ### 4.7 扩展性
 
 新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的文本函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Workload(lang)` 等拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
@@ -588,7 +492,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 - **一次隐藏断裂案例**：某会话内部 20 轮纯追加（cover 0.60→0.97）之后突然 79 条消息骤降到 4 条（cover=0.25）——同一开场白锚点原样保留，是"anchor 存活型"Contract 编辑的真实样本，也是 §3.2 那条历史缺陷的实证来源。
 - **一致性验证**：752 个会话中 718 个与单个 lineage 一一对应，34 个被 `ctxgraph` 正确切成多段（对应上面的隐藏断裂类型）；lineage 缝合在同一语料上 68 个断裂中 62 个成功缝合、6 个正确识别为"疑似同源"未缝合、0 个跨桶时间窗违规。
 - **F9 因果配对不变量**：全语料 406534 个 `tool_call`/`tool_result` 配对，零孤儿。
-- **Journey/Story 深度化（Phase 1+2，2026-08-05，137 个候选 Journey）**：九条 Finding 检测器提交前均在真实语料上跑过校准（不是理论设计后直接上线），两轮共发现并修复四处真实假阳性/精度问题（详见 §3.5a 的校准记录）——最后一轮直接用真实双 Agent 对比案例（`j-openclaw-...-8b175da9` vs `j-lobster-...-d6b04665`，同一个 A 股新股打新调研任务）复核，`plan_execution_misalignment` 从"6/8 项未匹配"修到"3/4 项未匹配"（两段独立编号列表被错误拼接的 bug）；6a/6b 分叉点检测在同一案例上正确定位到两个 Agent 从第一步就选择了不同策略（openclaw 先查记忆/已有笔记，lobster 直接抓数据），是旧版人工/deepseek 报告完全没有的一层定位；语料级统计（§3.9）在同一批语料上验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
+- **Finding 检测器（137 个候选 Journey 校准）**：九条检测器提交前均在真实语料上跑过校准（§3.5a），修复四处真实假阳性/精度问题；语料级统计验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
 
 ## 7. 已知限制、暂不处理的事项
 
@@ -605,12 +509,8 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 以下模块设计上互不依赖，可以任意挑选、任意顺序实现，不阻塞彼此：
 
-- ~~LLM 解读层~~：已实现，见 §3.5c（5.9，单 Journey）、§3.7（原有的 `-compare` 整体解读 + 6c 的分叉点解读）——三条路径共享同一套 `Interpret`/`cacheKey`/`buildUserPrompt` 调用链路（磁盘缓存、`-llm-dry-run`、失败即整层降级），硬约束（三层不得混淆、LLM 不得生成数字、必须声明看不到什么）原样保留。语料级（corpus，§3.9）统计层面暂无对应的 LLM 叙述层——7.1/7.2 目前只输出规则派生的统计数字，"把统计上有支撑的模式翻译成人话"这一步（见前期深挖分析 §7 第 3 点）还没有做，算这条扩展里唯一还剩的部分。
-- ~~HTML 单文件渲染 + 脱敏~~：已实现（2026-08，重新设计为单页看板），`-journey` 与 `-compare` 两条路径都有各自的看板：
-  - `vmr analyze -journey <id> -html` 额外写一份 `stories/journey-<id>.html`——**单页看板**，不是 Markdown 的转写：一屏滚动、分四块（判定条：id/时间/结局 · 结构时间轴：Task→Step 骨架，每步一行带模型/工具 chip/failover 徽章/转换标记/Finding 旗标 · 指标：14 格 stat + 一条内联 SVG sparkline 画每步上下文 token · Findings：规则层 + LLM 层）。逐步的完整对话不内联——每个 Step 一行链到 `../details/*.md`（单 `-journey` 恒物化）。数据源就是 Markdown 渲染器走的同一个 `*story.Journey` / `Metrics` / `[]Finding`（不重解析、不引入新判断）。渲染器 `internal/story/render_html.go` + `render_html_dashboard.go` + `render_html_assets.go`，chrome 文案 `i18n/story_html.go`。仅 `-journey` 单命中时出（与 `-llm-addr` 同款"一次一个 Journey"约束）。
-  - `vmr analyze -compare id1,id2 -html` 额外写一份 `stories/compare-<idA>-vs-<idB>.html` 对照看板——单页三块（两侧头 + 双侧初始指令、分岔点大字标出 + 逐指标 A/B 差异表 + endpoint/cache/sysprompt/duration/deliverable 紧凑事实、LLM 解读段落），复用 journey 看板的 `htmlStyle`/`htmlScript`。渲染器 `internal/story/render_compare_html.go`，chrome `i18n/story_compare_html.go`。详见"双 Journey 对比"节。
-  - 两者都单文件自包含（内联 CSS + 一小段 `IntersectionObserver` 滚动高亮 JS，零外部请求、theme-aware），产物 0600（未脱敏版仍含完整正文），默认套件都不出 HTML（用户决定）。
-  - `-redact` 脱敏模式（与 `-html` 组合）对两者都生效：对话正文替换为 `‹text: N chars›` 占位、**去掉逐步详单链接**（`details/*.md` 是 0600 未脱敏、不随 HTML 分享）、Findings 只保留代码 + Step 锚、compaction 实体名降级为计数；`-compare` 下还**整块去掉 LLM 段**（它逐字转述证据）。结构、指标、角色、token 数、工具名、时间与 compaction/stitch 标记均保留。
-- **Subagent 树**：Event 模型已预留 `parent_step_id` 挂载点，渲染层预留分支，但识别信号（system blob 与主 Journey 同源、时间窗完整嵌套在某次工具调用/结果之间、其输出 blob 出现在主 Journey 后续的 tool_result 里）尚未验证过命中率。开工前应先跑一次采样脚本验证这三条信号在现有语料上是否成立，验证不过继续推迟——不预先假定这套判据有效。
+- ~~LLM 解读层~~：已实现（§3.5c 单 Journey、§3.7 `-compare` 整体解读 + 分叉点解读）。唯一还剩的部分：语料级统计（§3.9）暂无对应的 LLM 叙述层——"把统计上有支撑的模式翻译成人话"这一步还没做。
+- ~~HTML 单文件看板 + 脱敏~~：已实现（`-journey` / `-compare` 各一份单页看板），详见 §3.4 渲染段与 §3.7 的 compare 看板段。
+- **Subagent 树**：Event 模型已预留 `parent_step_id` 挂载点，渲染层预留分支，但识别信号（system blob 与主 Journey 同源、时间窗完整嵌套在某次工具调用之间、其输出 blob 出现在主 Journey 后续 tool_result 里）尚未验证过命中率。开工前先跑采样脚本验证这三条信号在现有语料上是否成立——不预先假定这套判据有效。
 
 ---
