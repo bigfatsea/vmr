@@ -19,7 +19,7 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 Sections before the most recent release are compressed summaries — the
 commits and design docs hold the full reasoning.
 
-## [Unreleased]
+## [0.6.2] - 2026-08-29
 ### Added
 - `vmr analyze -journey <id> -html` writes a self-contained `stories/journey-<id>.html` alongside the Markdown: a single-page dashboard — verdict line, the Task→Step structure as a one-row-per-step timeline (model, tool chips, failover/finding badges, transition markers), a metrics grid with an inline SVG context-token sparkline, and the findings. Per-step conversation is linked (to `details/*.md`), not inlined. Inline CSS + a small `IntersectionObserver` script, zero external requests, theme-aware. Add `-redact` for the shareable variant: conversation bodies become `‹text: N chars›` placeholders, per-step detail links are dropped, findings keep only code + step anchor, compaction entity names collapse to counts (structure, metrics, roles, token counts, tool names stay). Single-match `-journey` only; 0600
 - `vmr analyze -compare a,b -html` writes a `stories/compare-<a>-vs-<b>.html` comparison dashboard: the two sides + opening instructions, the divergence point called out big, the metric-by-metric A/B diff table (notable rows highlighted), the endpoint/cache/sysprompt/duration/deliverable facts, and — when `-llm-addr` was given — the LLM interpretation prose rendered from Markdown. `-redact` replaces excerpt bodies with placeholders and drops the LLM section entirely (it paraphrases evidence verbatim). Same shared chrome as the journey dashboard; 0600
