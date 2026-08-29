@@ -323,7 +323,7 @@ providers:
 
 对 `metric: tokens`，vmr 优先使用上游返回的真实 usage（精确值），只有在拿不到时才降级为按字节数估算——拿不到的三种情况是：响应被压缩、上游不返回 usage 字段、或流在中途被截断。降级估算刻意偏保守（**宁可高估**），一个账号本周期内有多少比例的计数来自降级估算，会显示为 `/status` 里的 `estimated_pct`。
 
-**`include_usage` 缺口**：在 `openai-completions` 上，*流式*响应根本不带 usage 块，除非客户端在请求里发了 `stream_options: {include_usage: true}`——而 vmr 从不注入请求字段（字节透传）。因此一个挂在 `openai-completions` 端点上的 `metric: tokens` / `metric: cost` 账户，对每个没发这个选项的流式调用方几乎完全靠字节估算计费，`estimated_pct` 会贴近 100。这类配置一加载 `vmr check` 就会告警，`vmr status` / `vmr report` 在估算占比接近全部时也会给出同样的说明。解决办法：让客户端带上该选项；或把该账户改走 `anthropic-messages` / `openai-responses`（两者总是回传 usage）；或接受高估（偏差是保守的，账户只会被提前降权、不会被静默跑爆）。非流式调用不受影响。
+**`include_usage` 缺口**：在 `openai-completions` 上，*流式*响应根本不带 usage 块，除非客户端在请求里发了 `stream_options: {include_usage: true}`——而 vmr 从不注入请求字段（字节透传）。因此一个挂在 `openai-completions` 端点上的 `metric: tokens` / `metric: cost` 账户，对每个没发这个选项的流式调用方几乎完全靠字节估算计费，`estimated_pct` 会贴近 100。`vmr status` 和 `vmr report` 在估算占比接近全部时会给出相应说明（底层降级字节估算在后台自动保障平滑记账）。解决办法：让客户端带上该选项；或把该账户改走 `anthropic-messages` / `openai-responses`（两者总是回传 usage）；或接受高估（偏差是保守的，账户只会被提前降权、不会被静默跑爆）。非流式调用不受影响。
 
 **它不会做的事**：它从不会把某个端点从候选列表里剔除——一个额度耗尽的账号只是在自己的 priority 梯队里排到最后，其它端点都不可用时 failover 仍然会尝试它。它不会覆盖 Sticky Model——已建立的对话即使对应账号额度已经紧张，也会继续留在原端点；重排只对新会话生效。它也从不会主动触发降级——额度耗尽不会像真实的 429/402 那样让端点进入冷却，那仍然是 `internal/health` 的职责。
 

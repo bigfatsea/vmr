@@ -133,6 +133,31 @@
     .banner-warning { background: var(--yellow-bg); border: 1px solid rgba(210, 153, 34, 0.4); color: var(--yellow); }
     .banner-danger { background: var(--red-bg); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--red); }
     .banner strong { font-weight: 600; }
+    details.banner { display: block; }
+    details.banner summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      user-select: none;
+      list-style: none;
+    }
+    details.banner summary::-webkit-details-marker { display: none; }
+    details.banner .banner-list {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    details.banner .banner-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 12.5px;
+    }
 
     /* Grid Layouts */
     .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
@@ -690,13 +715,38 @@
           </div>`;
       }
       if (cfg.issues && cfg.issues.length > 0) {
-        cfg.issues.forEach(iss => {
+        if (cfg.issues.length === 1) {
+          const iss = cfg.issues[0];
+          const isErr = (iss.severity === 'error' || iss.severity === 0);
           dom.banners.innerHTML += `
-            <div class="banner banner-warning">
-              <span>⚠️</span>
-              <div><strong>Config Issue [${esc(iss.severity || 'WARNING')}]:</strong> ${esc(iss.message)}</div>
+            <div class="banner ${isErr ? 'banner-danger' : 'banner-warning'}">
+              <span>${isErr ? '❌' : '⚠️'}</span>
+              <div><strong>Config Issue [${esc(iss.severity || 'warning')}]:</strong> ${esc(iss.message)}</div>
             </div>`;
-        });
+        } else {
+          const hasErr = cfg.issues.some(i => i.severity === 'error' || i.severity === 0);
+          const cls = hasErr ? 'banner-danger' : 'banner-warning';
+          const icon = hasErr ? '❌' : '⚠️';
+          dom.banners.innerHTML += `
+            <details class="banner ${cls}">
+              <summary>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span>${icon}</span>
+                  <strong>Config Issues (${cfg.issues.length}):</strong>
+                  <span style="opacity:0.85; font-size:12px;">Multiple configuration issues detected</span>
+                </div>
+                <span class="badge" style="cursor:pointer;">Expand ▾</span>
+              </summary>
+              <div class="banner-list">
+                ${cfg.issues.map(iss => `
+                  <div class="banner-item">
+                    <span>•</span>
+                    <div><strong>[${esc(iss.severity || 'warning')}]:</strong> ${esc(iss.message)}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </details>`;
+        }
       }
 
       // Concurrency

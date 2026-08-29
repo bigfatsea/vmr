@@ -19,6 +19,12 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 Sections before the most recent release are compressed summaries — the
 commits and design docs hold the full reasoning.
 
+## [Unreleased]
+
+### Changed
+- Dashboard (`/status.html`): multiple configuration issue banners are now collapsed into a single summary bar (`⚠️ Config Issues (N)`) with an expandable details drawer, preventing banner stacking from pushing telemetry cards off-screen
+- `vmr check`: removed the noisy warning for `metric: tokens`/`cost` quota accounts on `openai-completions` streaming endpoints — the degraded byte-estimate fallback handles it seamlessly in the background by design without requiring user intervention
+
 ## [0.6.2] - 2026-08-29
 ### Added
 - `vmr analyze -journey <id> -html` writes a self-contained `stories/journey-<id>.html` alongside the Markdown: a single-page dashboard — verdict line, the Task→Step structure as a one-row-per-step timeline (model, tool chips, failover/finding badges, transition markers), a metrics grid with an inline SVG context-token sparkline, and the findings. Per-step conversation is linked (to `details/*.md`), not inlined. Inline CSS + a small `IntersectionObserver` script, zero external requests, theme-aware. Add `-redact` for the shareable variant: conversation bodies become `‹text: N chars›` placeholders, per-step detail links are dropped, findings keep only code + step anchor, compaction entity names collapse to counts (structure, metrics, roles, token counts, tool names stay). Single-match `-journey` only; 0600

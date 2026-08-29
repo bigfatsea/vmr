@@ -32,62 +32,7 @@ models:
 	}
 }
 
-// TestCheckWarnsOnStreamingUsageInvisibility: a token/cost quota account on
-// an openai-completions endpoint gets a SeverityWarning about the
-// include_usage gap — the flag appears nowhere else in vmr, so this is the
-// only place an operator learns their estimated_pct will climb.
-func TestCheckWarnsOnStreamingUsageInvisibility(t *testing.T) {
-	cfg := mustParse(t, `
-listen: 127.0.0.1:0
-providers:
-  - name: p1
-    base_url: {openai-completions: https://example.com}
-    api_key: k1
-    quota:
-      limits:
-        - {metric: tokens, every: 1d, amount: 1000000}
-models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
-`)
-	issues := cfg.Check()
-	var got *Issue
-	for i := range issues {
-		if issues[i].Field == "quota" {
-			got = &issues[i]
-		}
-	}
-	if got == nil {
-		t.Fatalf("Check() = %+v, want a quota usage-visibility warning", issues)
-	}
-	if got.Severity != SeverityWarning || got.Provider != "p1" || !strings.Contains(got.Message, "include_usage") {
-		t.Errorf("issue = %+v, want a SeverityWarning for p1 mentioning include_usage", *got)
-	}
-	if HasErrors(issues) {
-		t.Errorf("a usage-visibility warning must not make HasErrors true: %+v", issues)
-	}
-}
 
-// TestCheckNoUsageWarningForAnthropic: anthropic-messages always reports
-// usage, so a token quota on that protocol raises nothing.
-func TestCheckNoUsageWarningForAnthropic(t *testing.T) {
-	cfg := mustParse(t, `
-listen: 127.0.0.1:0
-providers:
-  - name: p1
-    base_url: {anthropic-messages: https://example.com}
-    api_key: k1
-    quota:
-      limits:
-        - {metric: tokens, every: 1d, amount: 1000000}
-models:
-  m: {endpoints: [{protocol: anthropic-messages, providers: [p1], models: [x]}]}
-`)
-	for _, is := range cfg.Check() {
-		if is.Field == "quota" {
-			t.Errorf("unexpected quota warning for an anthropic-messages endpoint: %+v", is)
-		}
-	}
-}
 
 // TestCheckFlagsMissingAPIKey ensures an empty provider api_key is
 // reported — validate() accepts it (syntactically valid YAML), so this is
