@@ -1,9 +1,9 @@
 // Ver 2026-08-21, by Sonnet 5
 
-// P14.2's detector-coverage disclosure (KNOWN_ISSUES §1.43): split out of
-// corpus.go once this pushed that file over archtest's file-line budget —
-// same package, no new import boundary. See RenderCorpusMarkdown's call to
-// anthropicCoverageNote for where this actually surfaces.
+// The detector-coverage disclosure: split out of corpus.go once this
+// pushed that file over archtest's file-line budget — same package, no new
+// import boundary. See RenderCorpusMarkdown's call to anthropicCoverageNote
+// for where this actually surfaces.
 package story
 
 import (
@@ -20,7 +20,7 @@ import (
 // toolresults.go's doc comment: "always false for OpenAI-shaped results",
 // and metrics.go's isErrorMarker doc comment for the text-marker path
 // several of these route through instead of reading IsError directly).
-// KNOWN_ISSUES §2.4 already forecloses content-sniffing OpenAI's tool
+// KNOWN_ISSUES already forecloses content-sniffing OpenAI's tool
 // results to work around this (495,672 records scanned, the target JSON
 // shape appeared 0 times) — the only remaining gap was disclosure, not
 // detection, which this list exists to drive (see anthropicCoverageNote).
@@ -49,8 +49,8 @@ var anthropicOnlyCoverage = struct {
 	JourneySections: []string{"decision spine's tool-result ❌ badge", "structure.json's ToolCalls[].ResultError"},
 }
 
-// anthropicCoverageNote renders P14.2's disclosure line (KNOWN_ISSUES
-// §1.43), or "" when protocolShare is empty (never computed, e.g. a
+// anthropicCoverageNote renders the disclosure line, or "" when
+// protocolShare is empty (never computed, e.g. a
 // hand-built CorpusStats, or protocolShare's own zero-Steps edge case:
 // asserting "Anthropic traffic is scarce" from data we don't actually have
 // would be exactly the kind of unearned claim §5.6's discipline rules out)

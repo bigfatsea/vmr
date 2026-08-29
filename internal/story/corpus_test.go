@@ -296,7 +296,7 @@ func TestComputeCorpusStats(t *testing.T) {
 		}
 	})
 
-	// P14.2 (KNOWN_ISSUES §1.43): ComputeCorpusStats' ProtocolShare field is
+	// ComputeCorpusStats' ProtocolShare field is
 	// populated straight from protocolShare (tested in isolation below,
 	// since ComputeMetrics needs a fuller Step fixture than this field
 	// alone) — this only pins that the two stay wired together.
@@ -309,7 +309,7 @@ func TestComputeCorpusStats(t *testing.T) {
 	})
 }
 
-// P14.2 (KNOWN_ISSUES §1.43): protocolShare's denominator is Steps, not
+// protocolShare's denominator is Steps, not
 // journeys or requests — a Journey literal with bare Manifest.Protocol
 // values is enough here, no need for ComputeMetrics' fuller Step fixture.
 func TestProtocolShare(t *testing.T) {
@@ -448,10 +448,10 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		}
 	})
 
-	// P14.2 (KNOWN_ISSUES §1.43): the disclosure note fires on ANY non-100%
-	// Anthropic share — no intermediate cliff (an independent review,
-	// 2026-08-21, found the original 1% threshold silently went dark on a
-	// corpus at 1.2% Anthropic, reintroducing the exact ambiguity this note
+	// The disclosure note fires on ANY non-100%
+	// Anthropic share — no intermediate cliff (an earlier 1% threshold
+	// silently went dark on a corpus at 1.2% Anthropic, reintroducing the
+	// exact ambiguity this note
 	// exists to close) — and must name every affected code, including the
 	// ones a first cut of this feature missed (FindingUnverifiedSuccess,
 	// the ContextRot/ToolSequence error-rate sections — see

@@ -63,14 +63,13 @@ type Finding struct {
 	// EvidenceAnchor contains a verbatim excerpt from the transcript that triggered the finding.
 	EvidenceAnchor string `json:"evidence_anchor,omitempty"`
 	// Finding/Evidence/Action are narrative text, localized per the lang
-	// ComputeFindings was called with. As of 2026-08-17, journey-<id>.json
-	// and journey-<id>.md are both built from the same target-lang call
-	// (cmd/vmr/cmd_story.go's writeJourneyFile) — this diverges from
-	// report's Report2/vmr-report.json, which still fixes its JSON copy to
-	// i18n.EN. That asymmetry (and whether to resolve it by extending
-	// lang-following to report, or reverting story) is an open decision;
-	// see docs/future-strategy/json_lang_policy_plan_sonnet-5.md and
-	// KNOWN_ISSUES §1.19 before changing either side.
+	// ComputeFindings was called with. journey-<id>.json and
+	// journey-<id>.md are both built from the same target-lang call
+	// (cmd/vmr/cmd_story.go's writeJourneyFile); report's vmr-report.json
+	// matches, via cmd_report.go's report.LocalizeEfficiency call before
+	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
+	// do NOT follow lang — see docs/future-strategy/json_lang_policy_plan_sonnet-5.md
+	// for the reasoning.
 	Finding  string `json:"finding"`
 	Evidence string `json:"evidence,omitempty"`
 	Action   string `json:"action,omitempty"`

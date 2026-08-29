@@ -176,12 +176,12 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded locks in P14.1: cron and
-// subagent candidates stay in the main table alongside task (KNOWN_ISSUES
-// §1.42 — real-corpus measurement found both categories had double-digit-
-// request candidates, including the single largest journey in the corpus,
-// so folding them away as noise hid legitimate work); only heartbeat goes
-// into the collapsed block.
+// TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded: cron and
+// subagent candidates stay in the main table alongside task (real-corpus
+// measurement found both categories had double-digit-request candidates,
+// including the single largest journey in the corpus, so folding them away
+// as noise hid legitimate work); only heartbeat goes into the collapsed
+// block.
 func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 	rows := []JourneyIndexRow{
 		{ID: "j-task", Category: CategoryTask, Title: "task row", Requests: 1},
@@ -208,9 +208,8 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_EscapesTitle locks in a fix beyond
-// KNOWN_ISSUES §1.37's original scope, found during P12's independent
-// review: a Journey title containing a literal "|" written straight into
+// TestRenderStoryIndexMarkdown_EscapesTitle locks in a later-found fix:
+// a Journey title containing a literal "|" written straight into
 // this table's cells doesn't just lose content the way an unescaped
 // "<!--" does — it splits into extra columns and corrupts that row (and
 // visually, everything after it) in vmr-stories.md, the primary

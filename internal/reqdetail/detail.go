@@ -403,7 +403,7 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 			if linkEvidence && i < leadSys {
 				continue // already covered by the evidence link above
 			}
-			// P13.3 (KNOWN_ISSUES §1.36): messages before deltaStart are
+			// Messages before deltaStart are
 			// byte-identical to what prev's own detail page already
 			// rendered (deltaStart is exactly the point renderSessionHeader
 			// tags with the "🆕 rest is new" split) — folding them into one
@@ -565,7 +565,7 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record, path string, li
 		if s := chatmsg.ReassembleSSE(body); s != nil {
 			w("\n### %s\n\n", t.ModelOutputSSE(s.Events))
 			renderStreamSummary(b, s, t)
-			// P13.2 (KNOWN_ISSUES §1.36): the raw SSE bytes are a verbatim
+			// The raw SSE bytes are a verbatim
 			// copy of what renderStreamSummary just reassembled above —
 			// unlike that reassembly (reasoning/content/tool_calls, which
 			// IS interpretation), inlining the wire bytes a second time is

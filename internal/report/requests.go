@@ -489,8 +489,8 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessi
 		// Rendered) — vmr-requests-<tag>.md lives directly in {outDir},
 		// one level ABOVE stories/, so the relative link descends into
 		// it rather than climbing out (the opposite direction from
-		// details/'s and evidence/'s "../" links, KNOWN_ISSUES §1.26 —
-		// those two are siblings of stories/ under the same {outDir}).
+		// details/'s and evidence/'s "../" links — those two are
+		// siblings of stories/ under the same {outDir}).
 		w("%s", t.JourneyLinkLine("stories/"+journey))
 	}
 
@@ -636,11 +636,11 @@ func buildDetailFileSet(detailDir string) map[string]struct{} {
 
 // detailCell renders the "文件" column. detailSet (buildDetailFileSet) is
 // {outDir}/details' current contents, always computed regardless of
-// whether this run's -details flag was passed — the criterion (P13.4,
-// KNOWN_ISSUES §1.35/§2.3) is whether r.DetailFile actually exists right
-// now, not whether a flag was set: since `vmr analyze` runs the story half
-// (which may batch-materialize details for -render-all, P13.1) before the
-// report half, a flag-only check could claim "no details were written"
+// whether this run's -details flag was passed — the criterion is whether
+// r.DetailFile actually exists right now, not whether a flag was set:
+// since `vmr analyze` runs the story half (which may batch-materialize
+// details for -render-all) before the report half, a flag-only check
+// could claim "no details were written"
 // while 306 of them sit on disk, or the reverse. r.DetailFile itself is
 // always computed (session.go, a pure function of the record's identity)
 // whether or not anything was ever written to it — see FileName's own doc

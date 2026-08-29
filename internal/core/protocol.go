@@ -20,7 +20,8 @@ const (
 // registered names before the 2026-08 rename.
 //
 // TODO(2026-10): transitional shim for reading pre-rename audit logs only —
-// remove once historical logs have aged out. See docs/KNOWN_ISSUES_sonnet-5.md.
+// remove once historical logs have aged out. See the protocol-rename entry
+// in docs/KNOWN_ISSUES_sonnet-5.md's 配置与协议 section for the full removal list.
 // MUST NOT be called on any write path.
 func CanonicalProtocol(p string) string {
 	switch p {

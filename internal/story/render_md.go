@@ -161,11 +161,11 @@ func codeFence(s string) string {
 
 // escapeHTML neutralizes user/model-derived text before it enters raw
 // Markdown/HTML output. Re-exported from internal/reqdetail rather than
-// reimplemented: P12's review found this exact helper was the one piece
-// NOT copied when this package's folded-block rendering pattern (fence +
-// summary + escape) was duplicated from reqdetail — codeFence (just
-// above) came along, escapeHTML didn't, and that gap is what let content
-// silently disappear on real corpus data (KNOWN_ISSUES §1.37). Sharing
+// reimplemented: this exact helper was the one piece NOT copied when this
+// package's folded-block rendering pattern (fence + summary + escape) was
+// duplicated from reqdetail — codeFence (just above) came along,
+// escapeHTML didn't, and that gap is what let content silently disappear
+// on real corpus data. Sharing
 // the one three-line implementation removes this failure mode
 // structurally; codeFence stays duplicated on purpose (see its own doc
 // comment) because it can't drift the same way.

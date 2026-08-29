@@ -6,25 +6,25 @@
 > 发现新问题先在这里查一遍，再决定它是不是新的。
 >
 > **维护原则**
-> 1. **只记当前事实**，不堆「哪个批次改了什么」的过程流水账——那是 `CHANGELOG.md` 和 git history 的职责。
-> 2. **四类分区**：§1 待定问题（有优化空间，等真实负载/触发条件）｜§2 确定不修（连同 First Principles 决策逻辑，避免被反复重新提出）｜§3 已闭环（一句结论防重复立项）｜§4 ROI（给 §1 估成本/风险/价值）。
+> 1. **只记当前系统里还找得到的东西**：要么是待办（§1），要么是「看着像 bug、其实是有意为之」的取舍（§2）。**已修复的问题不进这里**——它已经不存在了，代码本身就是证明，留一条「已解决」记录毫无价值。那段历史在 `CHANGELOG.md` 和 git history 里。
+> 2. **三类分区**：§1 待定问题（有优化空间，等真实负载/触发条件）｜§2 确定不修（连同 First Principles 决策逻辑，避免被反复重新提出）｜§3 ROI（给 §1 估成本/风险/价值）。
 > 3. **每条都要能对源码核实**。核实不了的，说明已过期，删掉。
-> 4. **`§1.N`/`§2.N`/`§3 item N` 是稳定 ID**，被源码注释引用——压缩散文可以，重编号不行。
+> 4. **散文可压缩、可重组**；§1/§2 的编号只是文内导航，不承诺跨文件稳定。源码注释不靠编号回指本文档——每条注释自带完整理由，本文档只在「这个取舍值得被独立追踪」时补一条 §2。
 
 ---
 
 ## 0. 当前状态
 
-- **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。曾经 buffered 模式上游中途断流导致的客户端可见数据丢失（收到干净空 200）已修复（§3「B1」）。
+- **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 16，合计 19。无 `[中低]` 条目。§4 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
+- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 16，合计 19。无 `[中低]` 条目。§3 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
 
 ---
 
 ## 1. 待定与待解决问题
 
-> 标题方括号里是**严重程度**（现在有多糟），不是优先级。它与 §4 的 **ROI**（现在做有多划算）
-> 是两个正交轴，不该也不会一致。要排期看 §4，要判断「现在有多糟」看这里。
+> 标题方括号里是**严重程度**（现在有多糟），不是优先级。它与 §3 的 **ROI**（现在做有多划算）
+> 是两个正交轴，不该也不会一致。要排期看 §3，要判断「现在有多糟」看这里。
 
 ### 1.1 [低，已部分闭环] `vmr report` 多文件输入：会话分析那一趟（`collect()`）仍未缓存（含原 1.23）
 
@@ -105,7 +105,7 @@
 
 ### 1.48 [低] 错误分类词表的长期形态：端点级 quirk 统一模块（含 sticky 降级优化）未做
 
-- **现状**：vendor 知识散在 `DefaultClassify` 的全局词表里（`contentHint`/`contextLimitHint`/`upstreamHint`/`vendorQuirkHint`/`authHint`，约 30 词）。已知厂商专属误判已由 `ErrQuirk` 类 + 词条修复覆盖（§3「45」），词表之间尚未互相干扰。
+- **现状**：vendor 知识散在 `DefaultClassify` 的全局词表里（`contentHint`/`contextLimitHint`/`upstreamHint`/`vendorQuirkHint`/`authHint`，约 30 词）。已知厂商专属误判已由 `ErrQuirk` 类 + 词条修复覆盖（见 §2.1），词表之间尚未互相干扰。
 - **可能方案（升级时直接可用）**：每 vendor 一个编译期注册的 quirk profile，按 **model glob** 匹配（不按 provider 名——用户自起名，改名即静默失效），字段含 marker 表 / 建议分类 / sticky 策略；`DefaultClassify` 保留为兜底。**附带**：quirk 命中时对 sticky 会话降级（清粘性/降权），消除中毒会话每轮 ~1–2s 的重复失败往返。
 - **触发条件**：全局词表增长到出现互相干扰/误命中，或 sticky 重复往返在真实负载中可观测地拖慢中毒会话。
 
@@ -142,17 +142,20 @@
 ### 2.1 运行时与并发
 
 - **`health.Registry` 全局互斥锁不分片**：单机场景锁持有只是纳秒级 map 读写，分片增复杂度无吞吐收益。
+- **`health.Registry.Available` 无生产调用方，但不是死代码**：它是唯一无副作用的路由资格查询（`Acquire` 会占用 half-open 探针名额），`health` 与 `router` 的测试断言端点状态都靠它——用 `Acquire` 去查会改变被断言的状态。「无生产调用方」不等于「可删」。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
 - **`copyFlush` 的 goroutine + channel 流水线**：避免在底层连接层设全局 Deadline 破坏 TLS/Header 超时语义。
-- **客户端取消时不停止计费**：上游已生成的 token 厂商照收，路由侧照收才与账单对齐；改成不计费会让 `vmr report` 系统性低估消耗。取消的**传播**（中止上游连接）已通过 `BuildRequest(r.Context(), …)` 自动完成；取消的**检测/归类**（审计准确标 `canceled`，§3「13」）需 `copyFlush` select 一次 `ctx.Done()`。
+- **客户端取消时不停止计费**：上游已生成的 token 厂商照收，路由侧照收才与账单对齐；改成不计费会让 `vmr report` 系统性低估消耗。取消的**传播**（中止上游连接）已通过 `BuildRequest(r.Context(), …)` 自动完成；取消的**检测/归类**（`router` 标 attempt、`server` 标审计 `Outcome` 为 `canceled`，消除误计为成功）需 `copyFlush` select 一次 `ctx.Done()`。
 - **`respnorm.Read` 等待更多字节时返回 `(0, nil)`**：唯一消费方 `copyFlush` 显式处理；改成内部阻塞循环会让 idle 看门狗失去以读取为粒度的心跳。
 - **`respnorm` 的 usage sniffing 不外移为 `router` 侧装饰器**：装饰器要在转发热路径每 chunk 多付一次接口调用；当前实现搭 `ingest` 已有的 per-chunk 循环，零额外开销。理由在 `internal/respnorm` 包注释末尾。
 - **`respnorm` 的观测标记 `crlf_framing_suspected` / `thinking_process_pattern_detected` 不删**：字节未改动，只往审计 `norm` 串加一个标记，看似无消费者——实则被 `internal/reqdetail` 详单页逐条叙述，`thinking_process_pattern_detected` 另进 `internal/report` 的 `diagnosticNormMarker` → `EndpointRow.NormCounts`，作为「剥离规则是否失效」的跨请求频率预警。这是在用的低成本预警，不是死代码。
 - **`GET /health` 为存活探针而非就绪探针，永不因上游不可用返回非 200**：与上游健康绑定会让容器编排在所有供应商不可用时触发无休止重启，放大雪崩。需要就绪度的调用方消费 `/status` 的模型健康块。
 - **`/status` 的 `traffic.requests` 含未鉴权/被拒请求**：口径是「进程见过多少 HTTP 请求」，不是「成功路由了多少」。精确语义在审计日志。
 - **`traffic.by_status` 按请求（非 attempt）计数，且不保证 `ok+canceled+error == total`**：failover 中间 attempt 不计入，少数早断路径不记或记入 error。展示语义，非路由语义。
-- **`/status` 的 `traffic.by_status` 在流式中途截断时记 `error`，与审计顶层 `outcome` 记 `ok` 口径不同（刻意不对齐）**：前者答「客户端是否拿到完整响应」，后者答「HTTP 交换是否在传输层正常完成」，各自口径内部自洽。两处代码（`Telemetry.RecordOutcome` doc comment、`forwardSuccess` 调用点）互相指向本条。截断的客户端信号（§3「B1」）：TRUNCATED 时 `forwardSuccess` 在把可安全交付的已收字节 flush 给客户端后 `panic(http.ErrAbortHandler)`，此账本口径不受影响。
+- **`/status` 的 `traffic.by_status` 在流式中途截断时记 `error`，与审计顶层 `outcome` 记 `ok` 口径不同（刻意不对齐）**：前者答「客户端是否拿到完整响应」，后者答「HTTP 交换是否在传输层正常完成」，各自口径内部自洽（`Telemetry.RecordOutcome` doc comment、`forwardSuccess` 调用点各自写了自洽说明）。截断的客户端信号：TRUNCATED 时 `forwardSuccess` 在把可安全交付的已收字节 flush 给客户端后 `panic(http.ErrAbortHandler)`，此账本口径不受影响。
+- **buffered / undecided 模式的 SSE 在上游中途断流时一律不 flush 已缓冲尾部**：`respnorm.Read` 错误分支只把**可安全交付**的字节交出去——非 SSE 响应 flush 部分 JSON（直连也是这个结果），SSE 仅 `modePassthrough` flush 尾部；`modeUndecided` / `modeBuffered` 一律不 flush，避免把未闭合的 `<think>` 泄漏给客户端（审计记 `truncated_withheld`）。随后 `forwardSuccess` 于全部记账之后 `panic(http.ErrAbortHandler)`，客户端 SDK 看到断掉的传输而非格式良好的空 200。软屏蔽 opt-in 路径（`checkSoftBlock` 的 `io.ReadAll`）曾复发同一「吞掉断流错误、假成功」失效，已由 `readCloser` + `errReader` 包装引回同一 `TRUNCATED` 分支。这是「杜绝静默假成功」的硬要求，不是可优化的保守行为。
+- **厂商专属协议约束拒绝归 `core.ErrQuirk`，不复用 `ErrContextLimit`**：DeepSeek 思考模式要求回传 `reasoning_content`、Google 要求回传 `thought_signature` 这类「换个端点就好」的拒绝，`DefaultClassify` 归入专门的 `ErrQuirk`（切换 + 零冷却）。复用 `ErrContextLimit` 能得到相同的 failover 行为，但审计标签会说谎——这不是上下文超限。OAuth 标准错误码同理独立归 `ErrAuth`。此前三类都落进兜底 `ErrClient`（永不 failover）而中断重试。全量端点级 quirk 模块方向见 §1.48。
 - **`/status` 端点项刻意不加端点级累计计数器（requests / ok / failed / tokens）**：`consecutive_failures` 出现在 `/status` 因为它是**当前健康状态**读数（liveness 视图）。端点级累计账是**分析半区**职责——`internal/report` 的 `EndpointRow`（Attempts/OK/Forwarded/Failed/Availability/ErrorClasses/tokens/cost，含 by-date 与 cross-date）已完整产出，数据源是可持久化、可按时间切片的审计日志。给 `/status` 塞一份进程内、重启即失的实时副本：① 与分析半区双账本（正是「一个分析数字复现一个路由数字必须差分测试锁定」要防的负担）；② 做全（4–8 个计数器 × N 端点）等于给 `router.Telemetry` 加一张按端点的动态 map，破坏它「全固定原子、热路径零 map 零锁」的设计。
 - **`system.disk.free_space` 在 Windows 上是桩（恒 0）**：`syscall.Statfs` 无 Windows 等价物，而 Windows 不是目标部署平台。
 - **`/log` 慢订阅者以「丢行 + 标记」处理，永不让日志热路径阻塞**：每订阅者一条有界 channel（64 行），满则丢行插 `... dropped N lines ...` 标记；`log.html` 不做自动重连（只手动重试按钮），避免重启风暴下的重连洪水。
@@ -180,6 +183,7 @@
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
 - **`.parse-cache/` 不做分片孤儿回收 GC**（原 §1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr report`/`vmr story` 均可从空缓存目录冷启动。触发条件：`.parse-cache/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。
+- **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参——只有单条下钻、`-compare`、`-render-all` 传 `true`；默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标（`Manifest.Req` 的纯函数），不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`：`vmr analyze` 先跑 story 半区（可能已批量物化）再跑 report 半区，纯 flag 判据会谎报「没写详单」或反之——改查 `r.DetailFile` 是否真实存在（一次 `os.ReadDir` 建 set）。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」，人为改回无条件物化当场失败。这条纪律反复退化过四次，这次靠测试锁死。
 
 ### 2.4 包边界与依赖
 
@@ -205,6 +209,7 @@
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
 - **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §1.51。
+- **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
 - **`archtest` 的文档守卫不扩展到 review 报告类文档**：守卫只覆盖 `CLAUDE.md`、设计文档、本文件与用户指南。review 报告会正当地讨论已删除的文件与「建议新增的 XXX 函数」。真正的风险（一份陈旧 review 被当施工依据）**用定位而非机制解决**：权威的当前状态清单只有本文件。
 - **`archtest` 不加圈复杂度检查**：一次只加一个守卫。函数长度预算落地不久，确认不够用之前不引入第二个。
 - **`buildinfo` 只输出 VCS commit 哈希，不人工编造语义化版本**：如实反映构建来源。
@@ -212,96 +217,13 @@
 - **聚合浮点字段在冷/热缓存两次运行间的 1 ULP 级差异不追查、不消除**（原 §1.24）：浮点加法不满足结合律的教科书现象，不是可以「修好」的缺陷。唯一该做的事（差分/一致性测试用容差而非逐字节相等）**已经是现状**（`report/e2e_test.go` 用 `1e-6`、`quota_parity_test.go` 用 `1e-9*want`）。唯一需重新当作 bug 的情形：差异远超浮点精度量级，或开始出现在 `cost_estimate` 之外的字段上。
 - **文件与函数行数预算线是提醒式绊线，非架构缺陷**（原 §1.5）：`internal/archtest` 的文件/函数预算（默认 700 / 120 + 豁免表）是轻量提醒机制，连 Warning 都算不上。未触线前无需焦虑、不需在常规 review 里逐个排查；一旦触线，按职责拆分重构（如 `detail.go` → `internal/reqdetail`、`config.go` 拆出 `apikeys.go`），或逻辑内聚时临时按 +15~20% 调高豁免。
 - **可维护性的核心在整体架构与设计复杂度，而非代码行数**（原 §1.15）：单人可维护性取决于是否守住 First Principles / KISS / YAGNI、是否消除了不必要的过度设计与复杂分支，而非机械度量行数或两半区体量比。探索性新分析指标优先用外部脚本消费稳定的 `vmr-report.json` / `journey-*.json` 契约验证，确认真实价值后再评估主库实现。
-- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：LLM 判别器产出的 Finding 必须强制标记 `Source: "llm_inferred"`、离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` + 直接证据锚点的项以 Finding（⚠️）呈现并标 `[AI推测]`；`MEDIUM`/`LOW` 降级为参考提示。**锚点运行期强制校验**（§3「B3」）：`ComputeLLMFindings` 收完全部 detector 输出后逐条 `strings.Contains(真实 transcript, EvidenceAnchor)` 校验，非逐字子串即丢弃。问法严格约束在有证据支撑的事实性问题上（拒绝开放式主观质量打分），守住「揭示事实与过程异常而非冒充裁判」的边界。
+- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：LLM 判别器产出的 Finding 必须强制标记 `Source: "llm_inferred"`、离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` + 直接证据锚点的项以 Finding（⚠️）呈现并标 `[AI推测]`；`MEDIUM`/`LOW` 降级为参考提示。**锚点运行期强制校验**：`ComputeLLMFindings` 收完全部 detector 输出后逐条 `strings.Contains(真实 transcript, EvidenceAnchor)` 校验，非逐字子串即丢弃。问法严格约束在有证据支撑的事实性问题上（拒绝开放式主观质量打分），守住「揭示事实与过程异常而非冒充裁判」的边界。
 
 ---
 
-## 3. 已闭环，不再重复提出
+## 3. ROI 评估总表（针对 §1 的待定问题）
 
-以下架构问题曾经成立，现已彻底解决并有测试守护。一句结论防重复立项；括号里是历史 §1 ID（部分源码注释按旧 ID 引用）。
-
-1. **响应流正规化独立成包**（`internal/respnorm`）：在线状态机、模型名重写、厂商修复脱离 Router，可在纯 `io.Reader` 层 fuzz。
-2. **JSON 字节扫描引擎独立成包**（`internal/jsonscan`）：零内部依赖，消除重复扫描，fuzz 保障边界。
-3. **Agent 方言与任务分段收敛**（`internal/taskseg`）：`report` 与 `story` 共用方言识别、任务切分、真用户指令索引。
-4. **报表聚合与提取解耦**（`internal/report`）：共享 `TrafficStats`，单体大函数拆到 `ingest.go` / `recextract.go`。
-5. **公共叶子层职责净化**（`internal/core`、`internal/fmtutil`）：展示格式化下沉 `fmtutil`，`WriteJSON`/`WriteError`/`FilterClientHeaders` 回 `router`，`core` 准入规则写进包注释。
-6. **额度与定价引擎精简**（`internal/quota`、`internal/pricing`）：移除分时促销等冗余功能面，固化静态费率覆盖与三层解析。
-7. **架构与文档守卫可执行化**（`internal/archtest`）：包依赖边界、文件/函数行数预算、文档引用有效性全部变成会失败的测试。
-8. **文件行数守卫从白名单反转为「全局默认 700 + 豁免」**：与 `func_sizes_test.go` 语义对齐。默认 700 取自实际分布（p50 131 / p90 503），反转零新增登记。
-9. **`metric: cost` 混合定价端点的静默低估**：`ProviderQuotaRow.WindowUnpricedPct` + §2.5 的 `◇` 标记。「部分退化渲染成精确已知」这一失效模式的第四个也是最后一个实例。份额以**请求数**而非金额计。
-10. **`/status` 暴露 `config.Check()` 操作性告警**：非 loopback 暴露、探针超时超标等风险 `/status` 返回结构化 `issues` 数组，`vmr status` 同步渲染 WARNING。
-11. **`vmr report` §2 成本表口径提示脚注**：明确估算成本含未嗅探 usage 的降级估算部分，消除「估算成本 ÷ Token 反推单价偏高」的误导。
-12. **`respnorm` 查询方法并发安全与 `copyFlush` 生命周期同步**：`NormalizerStream` 所有导出查询方法统一互斥锁同步，消除客户端断开/超时提前返回时 reader goroutine 尾读的数据竞态。
-13. **客户端流式中途断开在审计日志中精确标注 `canceled`**：`router` 标 attempt 为 `canceled`，`server` 标审计 `Outcome` 为 `canceled`，消除误计为成功的统计失真。
-14. **图片降采样磁盘缓存容量上限**：TTL 清理基础上加 `defaultCacheCapBytes`（50MB）全局上限，按 mtime 淘汰最旧、与 TTL 开关解耦；清扫沿用「至多每天一次」节流，是最终收敛到 50MB 的上限而非任意时刻的硬顶。
-15. **Compare 报告「证据溯源」改为按 Journey 精确定位**（`internal/story/storyindex.go` 的 `SourceFiles`）：从 `vmr-stories.json` 已算好的每个 Journey 的 `Files` 取并集，无关文件从 9 个降到 0。
-16. **Compare 报告 LLM 解读标题层级**：两段 LLM 解读的三个子标题从与外层 `##` 平级改为 `###`（改在发给 LLM 的 prompt 文本里）。
-17. **决策脊柱多行/超长工具调用参数默认折叠**：`payloadBlock` 折叠，`<summary>` 放拉平截断预览。
-18. **决策脊柱 Step 的原始消息不再截断**（`foldWhyLine`）：`RespText`/`Reasoning` 超长改为折叠展示预览、展开为完整原文，永不丢内容。
-19. **决策脊柱 system prompt 移至文档头部、按出现顺序折叠一次**（`render_md_sysprompt.go`）。
-20. **决策脊柱工具调用结果配对改为三级降级**（精确 ID → 归一化 ID 去下划线 → 同 Step 内按位置）：OpenClaw 家族回写工具历史时去下划线导致精确配对成功率实测 0%；前两级仍可作 Finding 证据，第三级标注「按位置推测」。
-21. **决策脊柱覆盖补全至 100%**：每个 Step 都渲染，无工具调用的 Step 降级为一行摘要，脊柱末尾新增「最终交付物」小节。
-22. **Compare 报告开篇展示两侧完整初始 User Message**（`InitialInstructionFact`）：2000 字符为界折叠，随 `ComparisonExtras` 自动进入证据包。
-23. **LLM 解读小节标题层级渲染层兜底**（`downgradeH2Headings`）：`RenderLLMSection` 对返回文本做确定性降级——围栏外行首 `## ` 一律降 `### `，文档大纲不再依赖模型指令遵从度。
-24. **Journey 报告 fact-layer 删除，脊柱挂详单链接，系统提示词改为引用**（P5）：重复的 fact-layer 渲染函数整体删除；每个 Step 携一条「→ detail」链接（`reqdetail.FileNameForManifest`，渲染时按需生成）；`Edit`/`StitchEdge`/`SysChanged`/`Compaction`/`NoReply` 五类跨记录事实搬进脊柱本身。顺带修复：系统提示词版本分组改为直接按 `Manifest.HasSys`/`SysHash` 状态机分组（此前 lineage 内部的 sysprompt 变更检测不到）。真实语料 22 步样例报告从 ~312KB 降到 ~107KB。
-25. **`vmr replay -req` 免位置参数**（原 §1.25）：按坐标 basename 在当前目录 / `config.yaml` 的 `log_dir` 下自动定位（含 `.zst`）；从 `vmr-requests.json`/`journey-*.json` 复制的 `req` 字段可直接贴进命令行。
-26. **导航矩阵六条边补齐，会话身份改为内容寻址**（P6.1–P6.4，原 §1.26）：`report` 的 `SessionInfo.ID`/`SessionRow.ID` 从 run-scoped `s%02d` 改为 `ctxgraph.Lineage` 的内容寻址身份（`l-<hash8>`），与 `story` 的 `JourneyIndexRow.Lineages` 直接集合可 join，位置序号降级为人读 `alias`；六条导航边补齐、真实语料无死链接；`vmr-stories.md` 按标题标记分类、噪声类默认折叠；`vmr story -llm-addr` 自身产生的分析流量默认从成本统计与候选任务列表排除（`-include-self-traffic` 可关闭）。
-27. **默认 `vmr report` 产出的请求索引死链接清零**（P7.1，原 §1.31）：`detailCell(r, detailsOn)` 默认渲染 `r.Req` 坐标为行内代码，`-details` 模式保持 Markdown 链接。
-28. **决策脊柱指令展示的方言过滤漏洞补齐**（P7.2，原 §1.21）：裸消息（无信封）上的 `[timestamp]`/`[message_id: ...]` 脚手架前缀此前完全未剥离；新增窄范围正则（仅匹配 OpenClaw 日期前缀形状，不通配任意方括号——避免误伤 `[Bug] fix the crash`）循环剥离。脊柱「💬 指令」行改读 `buildFrom` 构建期已过滤的 `Step.Instruction`，并补齐 `renderSpineStep` 的渲染分支（此前该行只在无工具调用的 Step 上渲染，中途指令几乎不可见）。
-29. **`-llm-addr ''` 现在能真正关闭 LLM 调用**（P7.3，原 §1.28）：新增 `resolveStringExplicit`，显式传空串不再回退到 `report.yaml` 默认地址。
-30. **JSON 输出的语言策略统一**（P8，原 §1.19）：`journey-<id>.json`/`compare-*.json`/`vmr-report.json` 同一次 `-lang` 下语言一致。`story.Compare` 加 `lang i18n.Lang` 参数、循环体改用 `i18n.MetricLabel`（`metricSpec.Label` 字段删除）；`report` 侧不给 `Build`/`BuildCached` 加参数，改新增 `report.LocalizeEfficiency(rep, lang)` 在写 JSON 前覆写 `rep.Efficiency`，Markdown 渲染路径保留独立计算不依赖调用顺序。`Code`/`EvidenceAnchor` 是稳定机器锚点、不随 `-lang` 变。落地方向见 `docs/future-strategy/json_lang_policy_plan_sonnet-5.md`，回填进 Analytics 设计文档。
-31. **`vmr analyze` 大语料 SIGKILL 根治**（P9.2，原 §1.30/§1.32）：默认套件只物化 `category == task` 的候选，`-render-all` 保留全量；`cmd_story.go` 的 `renderJourneys` 改为按 `renderBatchSize`（20）分批调 `story.BuildAll`，每批写盘后可 GC（改动全在 `cmd/vmr`）。真实 34 文件语料默认套件从 SIGKILL（约 35.5GB 峰值）→ 正常退出（峰值 4.59GB）。**闭环的是 SIGKILL（原 §1.30）这一症状**；「默认路径仍写大量派生产物」的纪律问题重新登记为 §1.35（真根因是 `writeJourneyFile` 无条件 `EnsureJourneyDetails`，不区分单条下钻与批量渲染）→ 已由 §3「38」闭环。
-32. **`vmr report`/`vmr story` 降级为过渡别名，`vmr analyze` 成为单一分析入口**（P9.1/P9.3，原 §1.33）：`vmr analyze` 收敛为并集 flag 集合；`-journey`/`-compare`/`-corpus` 三个互斥变焦选择器各只跑对应 story 侧视图；不带选择器是默认套件（story 先、report 后，因 `report.Markdown` 挂链接需 `stories/vmr-stories.md` 已存在）。`cmd_report.go`/`cmd_story.go` 保留独立 `flag.NewFlagSet` 与默认值、产出逐字节相同，仅打一行迁移提示；`internal/report`/`internal/story` 零改动。
-33. **四处文档「先 report 后 story」执行顺序订正**（P9.4，原 §1.33）：UserGuide/.zh、Analytics 设计文档、CHANGELOG 均改为「story 先、report 后」；README/.zh 补 `vmr analyze` 快速上手示例。
-34. **自指流量识别规则的输入不对称随统一 flag 集合消失**（P9.5，原 §1.34）：`cmdAnalyze` 只解析一次 `llmKey`（`-llm-key` 或 `report.yaml`）同时喂两个半区。落地修复的连带缺陷：`resolveLLMOptions` 只在 `-journey`/`-compare` 分支按需调用，单独设 `-llm-key`（不带 `-llm-addr`，仅用于排除自指流量）不再在默认套件/`-corpus` 下报错退出。
-35. **P2/P3 遗留死代码清空，文档引用守卫扩展到源码注释**（P11，原 §1.39）：`story_report_full_review_opus-5.md` 列的六个「非缓存版/单条版」函数中五个判定为**错**（缓存正确性差分测试的参照实现 / 两个包几乎每个测试文件的公共 fixture 构造入口 / 被 `_eval/` 目录下的校准工具调用而 `go build` 的可达性分析看不到）；`health.Registry.Available` 同样移出待删名单（唯一无副作用的可用性查询方法，测试断言依赖它）——见 `health.go` 注释与本项。**实际删除的**：一个自我闭环的废弃索引子系统 + 六个真正零引用的小函数。`archtest` 的文档引用守卫扩展为常驻测试 `TestArchitecture_DocReferences_SourceComments`，覆盖 `internal/`+`cmd/` 全部非测试源文件注释。
-36. **详单跳过谓词从「假设」改为「校验」**（P12.1，原 §1.41）：`EnsureRendered` 曾经的跳过条件 `os.Stat(target) == nil` 把「文件名可算」误当「同名文件内容正确」——`Render` 输出还依赖文件名不携带的 `lang`/`linkEvidence`。改法：`Render` 首行写一行渲染时不可见的 HTML 注释指纹（`renderFingerprint`，含模板版本 / lang / evidence），`EnsureRendered` 有界读取目标首行比对，不匹配才重渲染原子覆盖；`renderTemplateVersion` 常量给「改输出形状不改文件名」预留第三个失效维度。外部审阅指出首版把 `linkEvidence` 分支放在指纹比对之后会漏掉 evidence 重建——已修（两个 `Ensure*Evidence` 调用挪到指纹比对之前，内容寻址幂等检查让命中仍是一次廉价 stat）。
-37. **`internal/story` 的原文注入点补齐转义**（P12.2/P12.3，原 §1.37）：`reqdetail` 的 `escapeHTML`/`escapeCell` 导出为 `EscapeHTML`/`EscapeCell`，`internal/story` 薄包装直接调用（不新增依赖边）。共 12 处原文注入点统一处理（截断/拉平在先、转义在后；`codeFence` 内不转义——CommonMark 不解析围栏内 HTML）。最严重的是 `storyindex.go` 索引表格的标题列：原文一个 `|`（如任务标题引用 `ps aux | grep vmr`）会被 GFM 解析成额外一列，撕裂 `vmr-stories.md`（首要导航入口）整行——用 `escapeCell(escapeHTML(...))` 两函数一起（单 `escapeCell` 挡不住 `<!--`，单 `escapeHTML` 挡不住 `|`）。
-38. **证据层体积纪律归位**（P13，原 §1.35/§1.36）：这条纪律第四次被提出（P3.3 → P6.5 → P9.2 → 本次），前三次都因没有守卫退化。
-    - `writeJourneyFile`/`renderJourneys`/`renderAllJourneys` 加 `materializeDetails` 入参——单条下钻、`-compare`、`-render-all` 传 `true`，无 selector 的默认套件传 `false`。
-    - `renderClientResponse` 的响应体原始 SSE 全文逐字复制改为一行带 `ctxgraph.ReqCoord` 坐标的取用提示（`RawSSERef`）。
-    - `renderClientRequest` 的历史消息渲染循环新增折叠分支——`haveDelta && i < deltaStart` 时只输出一行指向 `prev` 详单页的链接（`HistoryFoldedNote`）；`prev == nil`（lineage 首条/缝合边界）或 `deltaStart == 0` 时不折叠，链条有起点。`renderTemplateVersion` 从 1 提到 2 使旧详单过期重写。
-    - `internal/report` 的 `detailCell` 判据从「本次是否开了 `-details`」改为 `r.DetailFile` 是否真实存在（`vmr analyze` 的 story/report 两半区各自可能独立物化，纯 flag 判据不可靠）；`buildDetailFileSet` 一次 `os.ReadDir` 建 map 避免两万次以上 `os.Stat`。
-    - **P13.6（12-B）**：默认批量套件的脊柱「→ detail」与 sysprompt 证据指针改渲染为行内 `文件:行` 坐标（`SpineDetailCoord` / `SysPromptEraCoord`，复用 `Manifest.Req`），不再输出会 404 的链接。`RenderMarkdown` 加 `linkDetails bool`。
-    - 常驻守卫测试（默认套件 `details/` 为 0；`-render-all` 非空；默认套件脊柱/证据指针是坐标非链接）——人为改回「无条件物化」测试当场失败。
-    - 真实语料：默认 `vmr analyze` 从 47MB / 253 份详单 → 3.0MB / 0 份；`-render-all` 详单体积降约 86%；`vmr report -details` 与 `vmr analyze -render-all` 对同一批记录的详单逐字节相同。
-39. **索引「显示」与套件「渲染」两条噪声判据合一**（P14.1，原 §1.42）：只把 `heartbeat` 归为噪声——真实语料实测 107 条 heartbeat 无一达到 10 请求，而 cron（112 条里 44 条 ≥10）与 subagent（20 条里 16 条 ≥10，最长一条全语料最长）都不该折叠。`i18n/story_index.go` 的 `NoiseFoldSummary` 文案同步订正为只提 heartbeat。
-40. **检测器/指标覆盖率披露**（P14.2，原 §1.43）：`chatmsg.ToolResult.IsError` 只在 anthropic-messages 协议下有意义（实测语料 openai-completions 99.48% / anthropic-messages 0.52%），依赖它的信号在 99.48% 语料上结构性沉默，但产物里此前没有地方区分「沉默」与「干净」。`anthropicOnlyCoverage` 现列出全部受影响的 Finding/Metric（用类型化 code）+ corpus-only/journey-only 两组自由文本栏目。披露从 `-corpus`（低频变焦，默认套件从不调用）扩展到单条 journey 报告的「疑似问题」章节（该 journey 全部 Step 都非 anthropic-messages 时）。1% 断崖阈值本身是缺陷（1.2% Anthropic 的语料会整体噤声，剩余 98.8% 依然测不出来）——改为「非 100% Anthropic 即披露」。
-41. **CLI 入口完全收敛**（P15，原 §1.38）：`vmr analyze` 补齐 `-macro-only`（等价 `vmr report`）、`-list-only`（等价裸 `vmr story`）、`-story-only`（可与 `-render-all` 组合 = `vmr story -render-all` 的公开等价写法）；`cmdReport`/`cmdStory` 删除各自分派 `switch` 改为构造 `analyzeRun` 转发 `dispatchAnalyze`，`cmdReport` 新增 `-llm-key`。真实语料：`vmr report`/`vmr story` 五种调用形态与对应 `vmr analyze` 写法产物逐字节相同（除时间戳）。
-42. **工具调用 ID 归一化下沉至 `chatmsg`**（原 §1.40）：`chatmsg.NormalizeToolCallID` 导出，`internal/story` 统一复用，消除去下划线归一化逻辑的真源外移。
-43. **Quota 状态文件孤儿 `limitKey` 自动修剪**（原 §1.45）：`Registry.Prune` 配合 `Snapshot.ProviderLimits` 与 `rt.Install` 在装载/热重载时按配置白名单修剪废弃 Key，设 dirty 并在下次 Flush 持久化。
-44. **Server 审计日志路径单一真源收敛**（原 §1.47）：`audit.ActiveLogPath` 导出，`internal/server/admin.go` 的 `auditBlock` 统一复用。
-45. **错误分类词表补齐三类误判**（新增 `ErrQuirk` 类 + `authHint` + 词条）：vendor 专属协议约束拒绝（DeepSeek 思考模式 reasoning_content 回传、Google thought_signature）归 `ErrQuirk`（切换 + 零冷却，不复用 `ErrContextLimit` 为保审计标签诚实）；OAuth 标准错误码归 `ErrAuth`；bai 的 "Input token exceed the limit" 归 `ErrContextLimit`。此前三者均落入兜底 `ErrClient`（永不 failover）而中断重试。全量 quirk 模块方向延后（§1.48）。
-46. **2026-08 B1–B9 修复**：
-    - **B1 · buffered 模式截断的客户端可见数据丢失**（`internal/respnorm`、`internal/router`）：`Read` 非 EOF 错误分支只置 `srcErr`、`s.buf`/`s.pending` 从不 flush——客户端已收 `200 OK` + headers，于是看到格式良好的空 200。修法：`flushRawOnError()` 在错误分支先把**可安全交付**的已收字节 flush 进 `s.out` 再置错——非 SSE 响应 flush `s.buf`（部分 JSON，直连也是这个结果）；SSE 只在 `modePassthrough` 时 flush 尾部，`modeUndecided`/`modeBuffered` 一律不 flush（避免把未闭合 `<think>` 泄漏给客户端，审计记 `truncated_withheld`）。`forwardSuccess` 在 `status == "TRUNCATED"` 时于全部记账之后 `panic(http.ErrAbortHandler)`，客户端 SDK 看到断掉的传输而非静默空成功。回归测试 `TestRespStream_BufferedTruncationFlushesReceivedBytes` / `TestRespStream_ThinkBufferedTruncationWithholds` / `TestBufferedTruncationAbortsAndFlushes`。
-    - **B2 · quota 缺省 `since` 每次加载/热重载清零计数**（`internal/quota/period.go`、`internal/config/quota.go`）：`DefaultSince` 曾直接返回 `now`；`LimitKey` 不含 `since` 故桶 key 稳定，但 `PeriodStart` 每次加载重算到加载时刻、`resetIfStaleLocked` 就地清零。修法：`DefaultSince(now, unit)` 把缺省锚点对齐到固定日历边界——min/h/d→当日午夜、w→周一 0 点、mo→月初。午夜锚点使周期栅格锁死到「日」：同一自然日内任意热重载对任意 `every` N 都 `PeriodStart` 恒等、计数存活。残余收窄为 `every: Nh` 且 N∤24（如 `5h`）或 `every: Nmin` 且 N∤1440，**且**热重载/重启跨过自然日——至多一次相移重置。显式写 `since` 可钉死。回归测试 `TestDefaultSince` / `TestDefaultSince_SurvivesReload` / `TestRegistry_DefaultSinceReloadDoesNotReset`。
-    - **B3 · LLM 推断 Finding 的 `EvidenceAnchor` 无运行期校验**：见 §2.5 的 LLM 解读层准入契约。
-    - **B4 · `report` Markdown 渲染器不转义用户来源标题**（`render_doc.go`、`section_sessions.go`、`requests.go`、`metrics.go`）：`mdTable.row` 集中走 `reqdetail.EscapeCell`；会话/任务标题引用块、context-growth Finding 标题额外走 `reqdetail.EscapeHTML`。回归测试 `TestMarkdownEscapesUserDerivedTitles`。至此两个分析命令的全部表格/引用块标题注入点统一处理完毕（承 §3「37」）。
-    - **B5 · 热重载 `reload()` 闭包未串行化**（`cmd/vmr/cmd_start.go`）：fsnotify 与 SIGHUP 两条重载路径可并发调 `rt.Install`，`installLimiter` 非原子 load→check→store 可短暂翻倍有效并发。修法：一个 `sync.Mutex` 包 `reload` 闭包体。
-    - **B6 · `MetricCost` charge 把 token 计的 `estimated` 传进 `Charge`**（`internal/router/quota.go`）：`bucket.Estimated` 是 requests/tokens 账户专用，cost 账户估算信号是金额（经 `AddEstimatedCost` 单独记）。修法：cost 分支给 `Charge` 传 `0`。
-    - **B7 · `Install` 先 `Quota.Prune` 再 `snap.Swap`**（`internal/router/snapshot.go`）：中间持旧 snapshot 的 in-flight 请求可 `Charge` 进刚 prune 的桶。修法：调换顺序——先 Swap，再 Prune，straggler 由下次热重载的 Prune 自愈。
-    - **B8 · quota 读路径重置桶但不置 `dirty`**（`internal/quota/quota.go`）：`Used()`/`EstimatedCostFor()` 经 `resetIfStaleLocked` 变更内存桶却不 set `r.dirty`，只被读路径观测到的周期滚动不会被持久化。修法：`resetIfStaleLocked` 返回是否重置，两个读方法据此置 dirty。
-    - **B9 · 每个 stitch 边界无条件开新 Task**（`internal/story/journey.go`）：与 `taskseg.IsNewTask`（新 trace id 或真实新指令）矛盾——一次任务中途为回收上下文的压缩会被渲染成全新 Task，虚增 `len(j.Tasks)`、`plan_exec_ratio` 分母。修法：stitch 边界只在 `newInstructionTitleAtStitch` 找到真实新指令时才开新 Task，否则沿用 `curTask`（该 Step 仍带 `StitchEdge`/`Compaction`，渲染器照常渲染 "🧵 Stitched" + 压缩摘要）。
-47. **2026-08 DX / 内存 / E1 / E2 落地**：
-    - **DX 3×P0**：新增 `config.minimal.yaml`（+ `.zh`），README Quick Start 改用它并新增 `vmr diagnose` 的 Verify 步骤；`config.Parse` 记录展开为空的 `${VAR}`（`Config.EmptyEnvRefs`），缺 `api_key` 或空 `${VAR}` 在 start/reload 打带框 `CONFIG PROBLEMS` banner；某虚拟模型全部端点无 key 时 `router.Serve` 直接回 `vmr_no_api_key` 503。
-    - **analyze 内存**：`ctxgraph/stitch.go` blob 倒排索引 `map[Hash]map[int]bool` → `map[Hash][]int`（见 §1.2）。
-    - **include_usage 可见性**：`config.Check()` 新增 `checkQuotaUsageVisibility`——token/cost 额度账户挂在 `openai-completions` 端点上时打 `SeverityWarning`（流式响应无 usage 块除非客户端发 `stream_options.include_usage:true`，vmr 不注入）；`vmr status` 与 `vmr report` 的额度段在 `estimated_pct ≥ 95%` 且 metric∈{tokens,cost} 时追加同因提示。
-    - **E2 · 软屏蔽 → failover**（新增 `internal/router/softblock.go`、`internal/adapter/response.go`）：`soft_block_failover *bool`（`models.<name>` 与 `endpoints[]` 两级，endpoint 覆盖模型级，缺省关）。开启后 `tryOne` 对 eligible 2xx（非 SSE、非压缩）预读到 `softBlockPeekCap=64KB`，命中 `respnorm.ContainsSoftBlockMarker` 且 `adapter.ResponseAssistantText` 判定有效文本 ≤64 rune 且无 tool_call → 按 `ErrContent` 分支 failover（`ReportNeutral`、attempt 记 `content` 类、零冷却）。文本抽取按协议放 `internal/adapter`（不引 `chatmsg`）。
-    - **E1 · HTML 单文件 journey / compare 看板 + 脱敏**：`vmr analyze -journey <id> -html` / `-compare a,b -html` 各写一份单文件自包含 `.html`（内联 CSS/JS，零外部请求，theme-aware，0600）——单页看板（判定条 / Task→Step 结构时间轴 / 指标 grid + SVG sparkline / Findings；compare 为两侧头 + 分岔点 + A/B 指标差异 + LLM 解读段）。数据源是 Markdown 渲染器走的同一个 `*story.Journey`，不重解析。`-redact`（需 `-html`）把正文替换为 `‹text: N chars›` 占位、去掉逐步详单链接、Findings 只留代码 + Step 锚、compaction 实体名降级为计数；compare 下另整块去掉 LLM 段。仅 `-journey` 单命中 / `-compare` 时出，默认套件不出 HTML。
-    - **E3（per-virtual-model 预算硬闸）本轮 hold**（用户决定）——见 §1.52。
-48. **2026-08 评审第一梯队落地**：
-    - **NEW-BUG-1 · 软屏蔽 Peek 吞没超时/断流错误**（`internal/router/softblock.go`）：`checkSoftBlock` 预读 2xx body 的 `peek, _ := io.ReadAll(...)` 把 watchdog 关连接或上游中途断流的错误吞掉，截断片段被当完整 200 转发——B1「杜绝静默假成功」在 opt-in 路径复活。修法：捕获 `readErr`，非 nil 时把 body 换成 `readCloser{io.MultiReader(bytes.NewReader(peek), errReader{readErr}), resp.Body}`，让 `forwardSuccess` 的 `copyFlush` 撞上错误走既有 `TRUNCATED` → `panic(http.ErrAbortHandler)` 分支。**刻意不做 failover**（此刻 checkSoftBlock 还没写客户端）：全失败分支会把 200 + 残缺 body 原样写回，反而制造新的假成功。回归测试 `TestServe_SoftBlockPeekTruncationIsNotSilentSuccess`。
-    - **NEW-DX-1 · 发布包缺文件**（`.github/workflows/release.yml`）：tarball 补 `config.minimal.yaml`/`.zh` 与 `vmr.sh`。
-    - **CLI 帮助卫生**（`cmd/vmr/cmd_analyze.go`、`cmd_report.go`、`main.go`、`cmd_version.go`）：`-render-all` 去 `P14.1's story.IsNoiseCategory` 内部代号；`-c`（report）去 `PricingTable's doc comment`；`-macro-only`/`-list-only`/`-story-only` usage 串去反引号（Go `flag` 把首个反引号对当占位符名）；`vmr -h` 与 `vmr version -h` 统一退出码 0，bare `vmr` 仍 2。
-    - **文档事实纠偏**：Core 设计文档「计量」段改为「multi-limit + `models:` 子额度已随 P3 交付，仅 `rolling` 报错」；`internal/core/core.go` 包注释补 admission rule（`CLAUDE.md`/`AGENTS.md` 及 `clientheaders.go`/`httpjson.go` 注释已引用但此前不存在）；Analytics 设计文档 HTML 条目补 `-compare` 看板。
-    - **旧协议名迁移提示**（`internal/config/provider.go` 的 `unknownProtocolHint`）：见 §2.2。**刻意不做**：不在 parser 里接受旧名（strict YAML）、不提供转换脚本（config.yaml 带注释/`${ENV}`，round-trip 会毁格式）。
-    - **E10（`vmr share <id>` 一键分享命令）本轮不做**——判断题，仅在确会用它对外分享 Journey 时才值得。
-
----
-
-## 4. ROI 评估总表（针对 §1 的待定问题）
-
-> **只评 §1**。§2 是已论证过的刻意取舍，重新打分等于重新论证；§3 已闭环。
+> **只评 §1**。§2 是已论证过的刻意取舍，重新打分等于重新论证。
 >
 > **评分口径**：成本 = 工作量 + 长期复杂度｜风险 = 改错的爆炸半径（是否动契约、碰热路径、要同步几处）｜价值 = 真实痛点 + 长远架构收益｜ROI = 价值 ÷（成本 + 风险），三档不给数字分。
 >
@@ -323,7 +245,7 @@
 | 1.14 | 滑动时间窗限流模型 | 中高 | 低 | 低 | **低** | 日历对齐近似对目标场景够用。除非实测到密集 429 冲击 |
 | 1.17 | `imgprep` 解码闸门的阈值量纲 | 中 | 中低 | 未证 | **低** | 闸门已存在（防炸弹），缺的只是按内存预算的更低阈值。无实测显示造成过问题，且方案自带「用账单换内存」的取舍 |
 | 1.51 | `mdlite` 行内代码嵌套粗体 | 极低 | 极低 | 低 | **低** | 纯展示层瑕疵，无 XSS。真观察到 LLM 频繁触发再微调解析状态机 |
-| 1.48 | 错误分类词表的长期形态 | 中 | 中 | 低→中 | **低** | 三类误判已被最小修复覆盖（§3「45」）。触发：词表出现互相干扰，或 sticky 重复往返可观测拖慢中毒会话 |
+| 1.48 | 错误分类词表的长期形态 | 中 | 中 | 低→中 | **低** | 三类误判已被最小修复覆盖（§2.1 的 `ErrQuirk` 条目）。触发：词表出现互相干扰，或 sticky 重复往返可观测拖慢中毒会话 |
 | 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 `openai-responses` 0 条。触发：`vmr-requests.json` 出现该 protocol |
 | 1.29 | `journey-<id>.json` 无 schema 版本戳 | 极低 | 无 | 低 | **不做（暂）** | YAGNI + 已裁决「JSON 无外部脚本消费」。触发：出现第一个 `_eval/` 之外的程序化消费方 |
 | 1.49 | imgprep 像素乘积 32-bit 溢出 | 极低 | 0 | 0（当前） | **不做** | 64-bit（唯一目标平台）不受影响。触发：32-bit 成为目标 |

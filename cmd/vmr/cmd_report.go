@@ -173,7 +173,7 @@ func detailDirHasFiles(dir string) bool {
 	return err == nil && len(entries) > 0
 }
 
-// detailsPresentFor (P13.4, KNOWN_ISSUES §1.35/§2.3) is the criterion for
+// detailsPresentFor is the criterion for
 // Meta.DetailsEnabled: detailsOn alone covers this run's OWN -details
 // writer (guaranteed to finish by the time this command returns, even
 // though it hasn't flushed to disk yet at the point runReport reads this);
@@ -338,7 +338,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 // (cmd_analyze.go's -macro-only, P15.1) — the same call cmdAnalyze itself
 // makes for `-macro-only`, so "vmr report produces what vmr analyze
 // -macro-only produces" is structural, not a promise kept by hand across
-// two independent implementations (KNOWN_ISSUES §1.38).
+// two independent implementations.
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block); without a readable config, $ estimates fall back to the built-in standard price table")
@@ -348,13 +348,12 @@ func cmdReport(args []string) error {
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
 	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
 	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
-	// P15.3: cmd_analyze.go/cmd_story.go both resolve -llm-key for
+	// cmd_analyze.go/cmd_story.go both resolve -llm-key for
 	// self-traffic exclusion (it identifies PAST self-analysis traffic,
 	// independent of whether this run makes a new LLM call — see
 	// cmd_analyze.go's own comment on this) — cmdReport never had this
 	// flag, so `vmr report`'s self-traffic exclusion could only ever read
-	// report.yaml's llm_key, never override it per-call like its siblings
-	// (KNOWN_ISSUES §1.34/§1.38).
+	// report.yaml's llm_key, never override it per-call like its siblings.
 	llmKeyFlag := fs.String("llm-key", "", "identifies past self-analysis traffic to exclude from totals — not used to make a new LLM call (vmr report never does). Default: report.yaml's llm_key")
 	if err := fs.Parse(args); err != nil {
 		return err

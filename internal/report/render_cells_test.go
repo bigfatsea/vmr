@@ -33,8 +33,8 @@ func TestPctStr64_BeyondInt32Range(t *testing.T) {
 	}
 }
 
-// TestDetailCell_LinksOnlyWhenFileActuallyExists covers P13.4
-// (KNOWN_ISSUES §1.35/§2.3): the "文件" column's judgment is whether the
+// TestDetailCell_LinksOnlyWhenFileActuallyExists: the "文件" column's
+// judgment is whether the
 // target actually exists on disk right now, not whether some flag was
 // passed this run — since vmr analyze can have one half (story, batch
 // materializing under -render-all) write details/ while the report half's

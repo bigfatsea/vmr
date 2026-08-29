@@ -44,9 +44,9 @@ const (
 // IsNoiseCategory reports whether cat should be folded out of the primary
 // index view and excluded from the default suite's render scope — the one
 // judgment RenderStoryIndexMarkdown's display split and cmd/vmr's default
-// render scope both defer to (P14.1; before this they answered differently
-// for CategoryCron and CategorySubagent — KNOWN_ISSUES §1.42). Real-corpus
-// measurement is the only evidence this classification rests on: heartbeat
+// render scope both defer to — one place, so the two can't answer
+// differently for CategoryCron/CategorySubagent the way they once did.
+// Real-corpus measurement is the only evidence this classification rests on: heartbeat
 // topped out at 7 requests per candidate across 107 candidates (0 ever
 // reached 10); cron and subagent both had double-digit-request candidates,
 // including the single largest journey in the corpus (subagent, 91
@@ -245,14 +245,14 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 
 // RenderStoryIndexMarkdown renders vmr-stories.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
-// Rows are split by IsNoiseCategory (P14.1): task/cron/subagent are real
+// Rows are split by IsNoiseCategory: task/cron/subagent are real
 // work and stay in the main, always-expanded table; only heartbeat is
 // structural noise (real-corpus measurement: 0/107 heartbeat candidates
 // ever reached 10 requests, while cron and subagent both had double-digit
 // candidates — see IsNoiseCategory's doc comment) and goes in a collapsed
 // <details> block below it, so the landing page's first screen is
-// dominated by real work. Before P14.1 this split also folded subagent —
-// KNOWN_ISSUES §1.42 — which hid the single largest journey in the corpus.
+// dominated by real work. An earlier version of this split also folded
+// subagent, which hid the single largest journey in the corpus.
 // vmr-stories.json (the machine layer) is unaffected — it lists every row
 // with no such split, per this project's "machine layer never makes
 // editorial cuts" rule.

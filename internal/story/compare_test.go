@@ -403,11 +403,9 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 	}
 }
 
-// TestRenderComparisonMarkdown_EscapesTitles covers the injection point
-// found during P12's independent review, beyond KNOWN_ISSUES §1.37's
-// original scope: SideBlock's title is written into a blockquote, the same
-// class of defect as the decision spine's own unescaped points, just in a
-// file this stage's plan initially left out.
+// TestRenderComparisonMarkdown_EscapesTitles covers a later-found
+// injection point: SideBlock's title is written into a blockquote, the
+// same class of defect as the decision spine's own unescaped points.
 func TestRenderComparisonMarkdown_EscapesTitles(t *testing.T) {
 	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"
 	a := JourneySummary{ID: "j-a", Title: adversarial, From: time.Now(), To: time.Now()}

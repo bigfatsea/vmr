@@ -63,14 +63,13 @@ func (t *Telemetry) RecordRequest(protocol string) {
 
 // RecordOutcome registers request completion status.
 //
-// Semantics note (deliberate, registered in docs/KNOWN_ISSUES_sonnet-5.md
-// §2.2): a stream truncated mid-transfer counts here as error, while the
-// audit log's top-level outcome for the same request records ok (HTTP 200,
-// not canceled) — the truncation is visible there on the attempt's
-// ErrorClass instead. The two ledgers answer different questions (did the
-// client get an intact response vs did the exchange complete at the HTTP
-// layer); do not "fix" one to match the other without revisiting that
-// registration.
+// Semantics note (deliberate): a stream truncated mid-transfer counts here
+// as error, while the audit log's top-level outcome for the same request
+// records ok (HTTP 200, not canceled) — the truncation is visible there on
+// the attempt's ErrorClass instead. The two ledgers answer different
+// questions (did the client get an intact response vs did the exchange
+// complete at the HTTP layer); do not "fix" one to match the other. Also
+// noted in docs/KNOWN_ISSUES_sonnet-5.md's deliberate-tradeoffs section.
 func (t *Telemetry) RecordOutcome(ok, canceled bool) {
 	if t == nil {
 		return

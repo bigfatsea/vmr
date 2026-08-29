@@ -39,8 +39,8 @@ models:
 	return path
 }
 
-// TestRunPrint_ReqWithoutAuditPath_SearchesCWD covers KNOWN_ISSUES §1.25:
-// -req alone (no positional audit file argument) must locate the file by
+// TestRunPrint_ReqWithoutAuditPath_SearchesCWD: -req alone (no positional
+// audit file argument) must locate the file by
 // its coordinate's basename in the current working directory.
 func TestRunPrint_ReqWithoutAuditPath_SearchesCWD(t *testing.T) {
 	dir := t.TempDir()

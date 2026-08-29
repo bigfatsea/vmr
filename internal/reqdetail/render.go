@@ -40,8 +40,8 @@ func codeFence(s string) string {
 // Markdown/HTML output (a <summary> line, a bare paragraph) — unescaped
 // < > & get parsed as HTML, up to and including an unescaped <!-- that
 // silently swallows everything up to the next --> a renderer finds,
-// which real corpus content has actually triggered (see KNOWN_ISSUES
-// §1.37). Exported so internal/story can call this exact implementation
+// which real corpus content has actually triggered. Exported so
+// internal/story can call this exact implementation
 // instead of maintaining its own copy — see internal/story/render_md.go's
 // escapeHTML wrapper for why a second copy is the failure mode this
 // avoids. Content already inside a codeFence block never needs this:
@@ -60,10 +60,10 @@ func EscapeHTML(s string) string {
 // render logic) are unchanged. Bumping this is the mechanism a future
 // change (e.g. a content-volume reduction) uses to force EnsureRendered to
 // rewrite every existing page instead of introducing a fourth axis
-// alongside lang/linkEvidence — see renderFingerprint. Bumped to 2 by
-// P13.2/P13.3 (KNOWN_ISSUES §1.36): the raw SSE full-body block became a
-// coordinate reference, and history messages before deltaStart fold into a
-// link to the previous turn's own page instead of being re-rendered.
+// alongside lang/linkEvidence — see renderFingerprint. Bumped to 2 when
+// the raw SSE full-body block became a coordinate reference, and history
+// messages before deltaStart started folding into a link to the previous
+// turn's own page instead of being re-rendered.
 const renderTemplateVersion = 2
 
 // renderFingerprint is a one-line, machine-checkable summary of every input
@@ -74,8 +74,8 @@ const renderTemplateVersion = 2
 // readRenderFingerprint (ensure.go) — instead of re-rendering or reading
 // the whole page to decide whether a pre-existing file is still current.
 // This is what replaces the "same filename implies same content" assumption
-// KNOWN_ISSUES §1.41 documents as false (proven false on two real axes:
-// -lang and evidence linking) with an actual check.
+// (proven false on two real axes: -lang and evidence linking) with an
+// actual check.
 func renderFingerprint(lang i18n.Lang, linkEvidence bool) string {
 	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t -->\n", renderTemplateVersion, lang, linkEvidence)
 }

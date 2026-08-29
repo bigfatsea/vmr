@@ -514,8 +514,8 @@ func TestRenderDecisionSpine(t *testing.T) {
 		}
 	})
 
-	// The following lock in KNOWN_ISSUES §1.37/P12.2-3 for every raw-text
-	// insertion point in the spine that isn't already covered by
+	// The following lock in the raw-text escaping for every insertion
+	// point in the spine that isn't already covered by
 	// TestToolCallLine (render_spine_args_test.go): task titles, mid-task
 	// instructions, report lines and why-lines are all user/model-derived
 	// text written straight into the document body — real corpus content
@@ -579,7 +579,7 @@ func TestRenderDecisionSpine(t *testing.T) {
 	})
 }
 
-// --- foldWhyLine / toolResultLine escaping (KNOWN_ISSUES §1.37/P12.2-3) ---
+// --- foldWhyLine / toolResultLine escaping ---
 
 // TestFoldWhyLine_Escapes covers both of foldWhyLine's branches directly —
 // inline (short enough to stay on one line) and folded (<details><summary>,
@@ -618,7 +618,7 @@ func TestFoldWhyLine_Escapes(t *testing.T) {
 }
 
 // TestToolResultLine_EscapesSummary covers the one remaining <summary>
-// injection point named in KNOWN_ISSUES §1.37 that isn't reachable through
+// injection point that isn't reachable through
 // TestToolCallLine (which covers the call side, not the paired result).
 func TestToolResultLine_EscapesSummary(t *testing.T) {
 	et := i18n.Spine(i18n.EN)

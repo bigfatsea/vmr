@@ -22,14 +22,14 @@ import (
 // function of (rec.TS, rec.Model, RealModel(rec), rec.Outcome, req), but
 // Render is a pure function of (rec, m, prev, prof, lang, linkEvidence) —
 // two more axes the name doesn't carry. An existence-only check therefore
-// used to skip re-rendering a file that was actually stale (see
-// KNOWN_ISSUES §1.41: proven on real corpus data on both axes — a
-// language switch left old-language detail pages linked from a new-
-// language journey report, and deleting evidence/ then re-running left 45
-// links permanently dead because the "file exists" branch never got to
-// the evidence-write call below). Reading and comparing the fingerprint
+// used to skip re-rendering a file that was actually stale — proven on
+// real corpus data on both axes: a language switch left old-language
+// detail pages linked from a new-language journey report, and deleting
+// evidence/ then re-running left 45 links permanently dead because the
+// "file exists" branch never got to the evidence-write call below.
+// Reading and comparing the fingerprint
 // (readRenderFingerprint) replaces that assumption with an actual check,
-// while keeping the property P2 relies on — the filename itself needs no
+// while keeping the property the callers rely on — the filename itself needs no
 // I/O to compute — so this is what lets both `vmr report` (every record,
 // in one pass) and a future per-Journey caller (only the records it
 // touches) call this same function and never race or duplicate work.
@@ -45,8 +45,8 @@ import (
 // for later: evidence files are addressed by their own content hash, not
 // by this record's coordinate, so a detail page whose fingerprint already
 // matches (nothing to re-render) can still be pointing at an evidence file
-// that was separately deleted — the exact KNOWN_ISSUES §1.41 scenario
-// (delete evidence/, rerun) this function exists to fix. Running these
+// that was separately deleted — the exact (delete evidence/, rerun)
+// scenario this function exists to fix. Running these
 // calls only on the "must re-render" branch reproduces that same bug one
 // level down; running them unconditionally is what actually closes it,
 // and their own existence checks (EnsureSysPromptEvidence/

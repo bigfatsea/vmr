@@ -67,12 +67,12 @@ type Meta struct {
 	SlowThreshold    int      `json:"slow_threshold_ms"`
 	PercentileMethod string   `json:"percentile_method"` // documented in appendix
 	// DetailsEnabled records whether details/*.md has anything in it for
-	// this run's output — either this run's own -details write, or (P13.4,
-	// via `vmr analyze`) the story half having already batch-materialized
+	// this run's output — either this run's own -details write, or (via
+	// `vmr analyze`) the story half having already batch-materialized
 	// some under -render-all before the report half ran. Not simply the
 	// -details flag: a flag-only check goes stale the moment the two
 	// halves of one `vmr analyze` invocation can populate details/
-	// independently (KNOWN_ISSUES §1.35/§2.3). §8's link line (P6.2b)
+	// independently. §8's link line
 	// reads it to decide between "here are the links" and "here's how to
 	// fetch one on demand" (`vmr replay -print -req <coord>`); this is a
 	// directory-level approximation for that one summary sentence — the

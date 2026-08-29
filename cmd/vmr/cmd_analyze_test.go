@@ -216,8 +216,8 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent locks in P14.1
-// (KNOWN_ISSUES §1.42): before this, cron/subagent candidates appeared in
+// TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent: cron/subagent
+// candidates once appeared in
 // the index but the default suite never rendered them, so their index row
 // linked to a journey-*.md that was never written — real-corpus measurement
 // found both categories had double-digit-request candidates (subagent's
@@ -296,15 +296,13 @@ func detailFileCount(t *testing.T, dir string) int {
 	return len(entries)
 }
 
-// TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks covers P13.1/P13.5
-// (KNOWN_ISSUES §1.35) plus review §12.5's 12-B: the default suite (no
-// selector, no -render-all) must NOT materialize detail pages, and — since
-// it doesn't — its journey reports must render each Step's "→ detail"
-// pointer as an inline `file:line` coordinate, never a Markdown link that
-// would 404. This discipline has been stated four times before (P3.3 →
-// P6.5 → P9.2 → P13.1) and regressed each time because nothing asserted it;
-// P13.1's own "link always renders" phrasing left a real dead link (B10).
-// -render-all opts back into full materialization + real links.
+// TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks: the default
+// suite (no selector, no -render-all) must NOT materialize detail pages,
+// and — since it doesn't — its journey reports must render each Step's
+// "→ detail" pointer as an inline `file:line` coordinate, never a Markdown
+// link that would 404. This discipline regressed repeatedly before this
+// test existed because nothing asserted it. -render-all opts back into
+// full materialization + real links.
 func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
@@ -689,8 +687,8 @@ func TestCmdAnalyze_LLMAddrRejectedInDefaultSuite(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves covers P9.5:
-// KNOWN_ISSUES §1.34's "self-traffic input asymmetry" (cmd_story.go could
+// TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves: the
+// "self-traffic input asymmetry" (cmd_story.go could
 // take an explicit -llm-key override, cmd_report.go had no such flag and
 // only ever read report.yaml's llm_key) is closed by the unified flag set
 // — an -llm-key passed to `vmr analyze` (not present in report.yaml at

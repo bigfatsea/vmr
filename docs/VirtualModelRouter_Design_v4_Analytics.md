@@ -96,7 +96,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 1. **懒物化**：默认套件下索引表格与决策脊柱基于纯函数生成指向详单的相对链接（`internal/reqdetail.FileName`），**不预先物化全量详单文件**；只在用户单点钻取（`-journey`）、`-details` 或 `-render-all` 时才写盘（默认套件写盘体积因此从数百 MB 降至数 MB）。
 2. **模板版本感知重绘**（`renderTemplateVersion`）：详单渲染结构 / 转义规则 / 样式更新时递增版本号，`EnsureRendered` 除了核对指纹与前驱还比对模板版本，自动失效并重绘陈旧文件。
 3. **单轮差分**：详单页只展示本轮增量消息（Messages）与模型响应（LLM Response），历史轮次给指向前驱的坐标超链接；系统提示词/工具声明证据按内容哈希（`sysHash`）全局去重（`EnsureSysPromptEvidence`）。
-4. **转义**：详单渲染与决策脊柱对全部原始文本输入点执行 `escapeHTML`/`escapeCell`，防未闭合 `<!--` 吞噬正文、`|` 撕裂表格（覆盖点清单见 `docs/KNOWN_ISSUES_sonnet-5.md` §3）。
+4. **转义**：详单渲染与决策脊柱对全部原始文本输入点执行 `escapeHTML`/`escapeCell`，防未闭合 `<!--` 吞噬正文、`|` 撕裂表格（覆盖点由 `reqdetail.EscapeHTML`/`EscapeCell` 与 `render_spine_test.go` / `TestMarkdownEscapesUserDerivedTitles` 等回归测试锁定）。
 
 `vmr-requests.md` 是一份纯索引，按 Chat User（`client_key_tag`）分组，真正的 Session→Task→Turn 展开只存在于每个分组自己的文件（`vmr-requests-<tag>.md`）里；单发定时脚手架（heartbeat/dream_diary）归到独立的 `vmr-requests-cron-<class>.md`，不出现在任何 Chat User 分组下。
 

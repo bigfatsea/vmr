@@ -60,10 +60,10 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 // resolves its flags, then hands the result to dispatchAnalyze — the same
 // function cmdAnalyze itself calls — so `vmr story`'s five call shapes
 // (bare/-journey/-compare/-corpus/-render-all) can't drift from what `vmr
-// analyze` does for the equivalent flags the way they had (KNOWN_ISSUES
-// §1.38): resolveLLMOptions is now called lazily, through the same
+// analyze` does for the equivalent flags the way they once did:
+// resolveLLMOptions is now called lazily, through the same
 // resolveLLMOpts closure cmdAnalyze builds, instead of unconditionally up
-// front — matching the on-demand validation P9 already gave cmdAnalyze.
+// front — matching cmdAnalyze's own on-demand validation.
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
@@ -648,13 +648,13 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 }
 
 // renderAllJourneys renders every non-partial candidate journey — see
-// renderJourneys. materializeDetails (P13.1) distinguishes an explicit
+// renderJourneys. materializeDetails distinguishes an explicit
 // "render everything, details included" ask (vmr story -render-all, or
 // vmr analyze -render-all) from the default suite's implicit
 // category=task batch (cmd_analyze.go's dispatchAnalyze passes false
-// there) — the latter is exactly the unbounded-materialization case
-// KNOWN_ISSUES §1.35 diagnosed (238+ candidates' worth of Step detail
-// pages written on every run whether or not anyone reads them).
+// there) — the latter is exactly the unbounded-materialization case to
+// avoid (238+ candidates' worth of Step detail pages written on every run
+// whether or not anyone reads them).
 func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, materializeDetails bool) error {
 	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
 		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)", materializeDetails)

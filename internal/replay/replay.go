@@ -44,7 +44,7 @@ type Options struct {
 	// TS/Line. For Req it's optional: "" searches the current directory
 	// and config.yaml's log_dir for the coordinate's basename; a
 	// directory searches just that directory; an exact file path keeps
-	// the strict CanonicalPath consistency check (KNOWN_ISSUES §1.25).
+	// the strict CanonicalPath consistency check.
 	AuditPath  string
 	Line       int    // 1-based; 0 = the last parsable record in the file; mutually exclusive with TS/Req
 	TS         string // exact-enough match against the record's arrival timestamp (see loadRecordByTS); mutually exclusive with Line/Req
@@ -305,7 +305,7 @@ func statAuditPathArg(raw string) (path string, isDir bool, err error) {
 }
 
 // resolveReqAuditPath finds the file a -req coordinate's basename refers
-// to (KNOWN_ISSUES §1.25), searching — in order — dirHint (if given, from
+// to, searching — in order — dirHint (if given, from
 // a directory positional argument), the current directory (when dirHint
 // is empty, i.e. the positional argument was omitted entirely), and
 // config.yaml's log_dir; each directory is tried with both the bare
@@ -353,7 +353,7 @@ func selectRecord(opts Options) (rv *recordView, path string, line int, err erro
 	}
 
 	// -req is the one locator that carries its own file identity (the
-	// coordinate's basename) — see KNOWN_ISSUES §1.25: it alone can go
+	// coordinate's basename): it alone can go
 	// find its file when the positional argument is omitted or is a
 	// directory, rather than requiring it spelled out. -ts/-line have no
 	// such identity to search with, so they keep requiring an explicit

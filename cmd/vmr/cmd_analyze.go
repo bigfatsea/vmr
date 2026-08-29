@@ -29,14 +29,14 @@ import (
 )
 
 // renderableCandidates filters su.cands down to the non-noise rows
-// (P14.1's story.IsNoiseCategory, already computed by setupStoryRun's
-// BuildJourneyIndexRow call — no new classification logic here). Before
-// P14.1 this kept CategoryTask only (P9.2); KNOWN_ISSUES §1.42 found that
-// left cron/subagent candidates visible in the index but permanently
-// unrenderable by default, contradicting the index's own display split —
-// story.IsNoiseCategory is now the one place both answers come from. cands
-// and freshRows are parallel arrays (same index = same candidate), the
-// invariant setupStoryRun's own doc comment states and relies on.
+// (story.IsNoiseCategory, already computed by setupStoryRun's
+// BuildJourneyIndexRow call — no new classification logic here). An
+// earlier version kept CategoryTask only, which left cron/subagent
+// candidates visible in the index but permanently unrenderable by
+// default, contradicting the index's own display split — story.IsNoiseCategory
+// is now the one place both answers come from. cands and freshRows are
+// parallel arrays (same index = same candidate), the invariant
+// setupStoryRun's own doc comment states and relies on.
 func renderableCandidates(su *storySetup) []*ctxgraph.Lineage {
 	var out []*ctxgraph.Lineage
 	for i, l := range su.cands {
@@ -332,15 +332,14 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if !r.renderAllFlag {
 			scope = renderableCandidates(su)
 		}
-		// materializeDetails = r.renderAllFlag (P13.1): -render-all is an
+		// materializeDetails = r.renderAllFlag: -render-all is an
 		// explicit "materialize everything" ask; the default non-noise
 		// suite is not — it renders each spine's "→ detail" pointer as an
 		// inline `file:line` coordinate (a pure function of each Step's own
 		// Manifest, see EnsureJourneyDetails' doc comment) rather than a
-		// link, so no detail files are written, closing KNOWN_ISSUES §1.35
-		// (the default suite's unconditional per-Step materialization that
-		// made every `vmr analyze` run write 160MB+/details regardless of
-		// whether anyone reads them).
+		// link, so no detail files are written. This keeps the default
+		// suite from writing 160MB+/details on every `vmr analyze` run
+		// regardless of whether anyone reads them.
 		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}

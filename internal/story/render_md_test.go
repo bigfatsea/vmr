@@ -90,13 +90,12 @@ func TestRenderMarkdown_LinkDetailsFalse_RendersCoordinatesNotLinks(t *testing.T
 	}
 }
 
-// TestRenderMarkdown_EscapesJourneyTitle covers the injection point found
-// during P12's independent review, beyond KNOWN_ISSUES §1.37's original
-// scope: j.Title (deriveTitle, from the same raw first-user-message text
+// TestRenderMarkdown_EscapesJourneyTitle covers a later-found injection
+// point: j.Title (deriveTitle, from the same raw first-user-message text
 // as every other title in this package) is written into a top-level
 // blockquote, not a <details><summary> fold — the same class of defect as
-// the decision spine's own unescaped points, just in a file this stage's
-// plan initially left out.
+// the decision spine's own unescaped points, just in a file the initial
+// escaping pass left out.
 func TestRenderMarkdown_EscapesJourneyTitle(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "sys")

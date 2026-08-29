@@ -16,8 +16,8 @@ type CorpusText struct {
 	FindingRateTitle  string
 	FindingRateHeader string
 	NoFindings        string
-	// AnthropicOnlyCoverageNote is P14.2's disclosure line (KNOWN_ISSUES
-	// §1.43): printed only when this corpus has ~0% Anthropic Messages
+	// AnthropicOnlyCoverageNote is the detector-coverage disclosure line:
+	// printed only when this corpus has ~0% Anthropic Messages
 	// traffic, naming the signals that read as absent/zero for structural
 	// reasons, not because nothing was found. anthropicPct is a
 	// pre-formatted percentage; codes is a comma-joined list.

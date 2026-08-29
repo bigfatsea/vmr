@@ -496,8 +496,8 @@ data: {"choices":[{"index":0,"finish_reason":"stop","delta":{}}]}
 data: [DONE]`
 }
 
-// TestRenderClientResponse_RawSSEIsReferenceNotCopy covers P13.2
-// (KNOWN_ISSUES §1.36): the raw SSE wire body must no longer be inlined
+// TestRenderClientResponse_RawSSEIsReferenceNotCopy: the raw SSE wire body
+// must no longer be inlined
 // verbatim — only referenced by the record's own req coordinate — while
 // the reassembled model output (renderStreamSummary's job, not a copy of
 // the wire bytes) still renders in full.
@@ -569,8 +569,8 @@ func deltaFixture(t *testing.T, lcp0 bool) (curRec *audit.Record, curManifest, p
 	return curRec, curManifest, prevManifest
 }
 
-// TestRenderClientRequest_FoldsHistoryBeforeDelta covers P13.3
-// (KNOWN_ISSUES §1.36): messages before deltaStart (the shared prefix with
+// TestRenderClientRequest_FoldsHistoryBeforeDelta: messages before
+// deltaStart (the shared prefix with
 // prev) fold into one link to prev's own detail page instead of each
 // being re-rendered in full.
 func TestRenderClientRequest_FoldsHistoryBeforeDelta(t *testing.T) {

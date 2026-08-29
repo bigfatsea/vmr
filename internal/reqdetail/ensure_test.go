@@ -53,8 +53,8 @@ func TestEnsureRendered_WritesOnce(t *testing.T) {
 	}
 }
 
-// TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint locks in the
-// fix for KNOWN_ISSUES §1.41: a pre-existing file at the exact right name
+// TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint locks in
+// the fingerprint check: a pre-existing file at the exact right name
 // is NOT assumed correct anymore — its content is only trusted once its
 // first-line fingerprint (renderFingerprint) matches what the current call
 // would produce. A file with no fingerprint at all (pre-P12 detail pages,
@@ -91,8 +91,8 @@ func TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint(t *testing.T) {
 }
 
 // TestEnsureRendered_RewritesOnStaleTemplateVersion covers renderFingerprint's
-// third axis — renderTemplateVersion — the mechanism P13's planned content
-// reductions (KNOWN_ISSUES §1.36) rely on to invalidate every existing
+// third axis — renderTemplateVersion — the mechanism a later content
+// reduction relies on to invalidate every existing
 // detail page after a change to Render's output shape that doesn't touch
 // lang/evidence mode at all. Doesn't (and can't, without a settable
 // version seam) bump the real constant; instead writes a file whose first
@@ -229,7 +229,7 @@ func TestEnsureRendered_RewritesOnEvidenceModeChange(t *testing.T) {
 }
 
 // TestEnsureRendered_RebuildsDeletedEvidence is the direct regression test
-// for KNOWN_ISSUES §1.41's actual M9 scenario: evidence mode stays true
+// for the delete-evidence/-then-rerun scenario: evidence mode stays true
 // across both calls (the detail page's own fingerprint never changes), but
 // evidence/ gets deleted in between. An earlier version of this fix
 // checked the fingerprint before ensuring evidence existed, so a fingerprint

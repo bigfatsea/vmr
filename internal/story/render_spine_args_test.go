@@ -221,7 +221,7 @@ func TestToolCallLine(t *testing.T) {
 		}
 	})
 
-	// The following three lock in KNOWN_ISSUES §1.37/P12.2-3: real corpus
+	// The following three lock in the raw-text escaping: real corpus
 	// content (an HTML comment header, e.g. "<!-- Ver ... -->") landing in
 	// a tool call's arguments must render literally, never get parsed as
 	// HTML by whatever renders the Markdown — which is exactly what used

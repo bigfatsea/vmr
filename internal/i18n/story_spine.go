@@ -64,8 +64,8 @@ type SpineText struct {
 	FindingRelated  func(seqs string) string
 	FindingEvidence func(text string) string
 	FindingAction   func(text string) string
-	// AnthropicOnlyCoverageNote is P14.2's per-journey disclosure line
-	// (KNOWN_ISSUES §1.43) — same wording/role as story_corpus.go's field
+	// AnthropicOnlyCoverageNote is the per-journey detector-coverage
+	// disclosure line — same wording/role as story_corpus.go's field
 	// of the same name, printed when THIS journey has no Anthropic Messages
 	// Steps at all, naming the signals (Findings, the decision spine's own
 	// ❌/↩️ tool-result badge, structure.json's ToolCalls[].ResultError)

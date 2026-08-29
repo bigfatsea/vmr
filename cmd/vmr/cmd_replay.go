@@ -33,7 +33,7 @@ func cmdReplay(args []string) error {
 	}
 	// The positional audit-file argument is normally required, EXCEPT with
 	// -req: that locator carries its own file identity (a "basename:line"
-	// coordinate) and can search for the file itself (KNOWN_ISSUES §1.25)
+	// coordinate) and can search for the file itself
 	// — omit the argument entirely, or pass a directory to search instead
 	// of cwd/log_dir. replay.selectRecord enforces the actual requirement;
 	// this only bounds NArg so a typo'd extra argument still errors here

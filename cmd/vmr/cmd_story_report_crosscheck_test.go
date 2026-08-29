@@ -367,8 +367,8 @@ func TestCmdStory_MatchesAnalyzeEquivalent(t *testing.T) {
 	}
 }
 
-// TestCmdReport_LLMKeyMatchesAnalyzeMacroOnly covers P15.3 (KNOWN_ISSUES
-// §1.34/§1.38): before this, cmdReport had no -llm-key flag at all, so
+// TestCmdReport_LLMKeyMatchesAnalyzeMacroOnly: cmdReport once had no
+// -llm-key flag at all, so
 // `vmr report`'s self-traffic exclusion could only ever read report.yaml's
 // llm_key — never override it per-call like `vmr analyze`/`vmr story`
 // could. One record is tagged as if it came from an -llm-addr self-analysis
