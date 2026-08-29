@@ -85,3 +85,74 @@ jobs:
         with:
           files: dist/*
           body_path: release_notes.md
+
+      - name: Update Homebrew Formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_PAT }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set; skipping Homebrew tap update."
+            exit 0
+          fi
+
+          tag="${GITHUB_REF_NAME#v}"
+
+          darwin_arm64_sha=$(grep "vmr_darwin_arm64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          darwin_amd64_sha=$(grep "vmr_darwin_amd64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          linux_arm64_sha=$(grep "vmr_linux_arm64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          linux_amd64_sha=$(grep "vmr_linux_amd64.tar.gz" dist/checksums.txt | awk '{print $1}')
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/bigfatsea/homebrew-tap.git" tap
+          cd tap
+
+          cat <<EOF > Formula/vmr.rb
+          # Ver $(date -u +'%Y-%m-%d %H:%M'), by github-actions[bot]
+
+          class Vmr < Formula
+            desc "Local-first, single-binary LLM router for AI agents (byte-faithful passthrough, failover, flight-recorder audit log)"
+            homepage "https://github.com/bigfatsea/vmr"
+            version "${tag}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/bigfatsea/vmr/releases/download/v${tag}/vmr_darwin_arm64.tar.gz"
+                sha256 "${darwin_arm64_sha}"
+              else
+                url "https://github.com/bigfatsea/vmr/releases/download/v${tag}/vmr_darwin_amd64.tar.gz"
+                sha256 "${darwin_amd64_sha}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/bigfatsea/vmr/releases/download/v${tag}/vmr_linux_arm64.tar.gz"
+                sha256 "${linux_arm64_sha}"
+              else
+                url "https://github.com/bigfatsea/vmr/releases/download/v${tag}/vmr_linux_amd64.tar.gz"
+                sha256 "${linux_amd64_sha}"
+              end
+            end
+
+            def install
+              bin.install "vmr"
+            end
+
+            test do
+              system "#{bin}/vmr", "version"
+            end
+          end
+          EOF
+
+          sed -i 's/^          //' Formula/vmr.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/vmr.rb
+
+          if git diff --staged --quiet; then
+            echo "Formula is already up to date"
+          else
+            git commit -m "vmr ${tag}"
+            git push origin master
+          fi
