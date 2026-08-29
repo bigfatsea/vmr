@@ -145,7 +145,9 @@ root allowed to see both halves at once.
 - **Docs are current state, not changelogs.** Replace the stale part; don't append a dated
   paragraph on top of it. Git history already holds the story. The exceptions are documents
   whose whole purpose *is* the trail: review reports, `CHANGELOG.md`, and code comments
-  recording why a superseded approach was wrong.
+  recording why a superseded approach was wrong. But one-off comprehensive review reports
+  are no longer *produced* — a finding or decision worth keeping goes straight into
+  `docs/KNOWN_ISSUES_sonnet-5.md` (or the relevant design doc) as a current-state fact.
 - **No changelog-style revision — even inside review reports.** When revising a section
   (whether asked to "rewrite" or to "review and refine" / "refine" / "polish"), state the
   final reasoning once, as one coherent pass: the structure, the cause analysis, the

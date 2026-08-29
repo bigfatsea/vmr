@@ -174,11 +174,11 @@ func daysInMonth(y int, m time.Month) int {
 // but PeriodStart is recomputed from the anchor on every load, and
 // resetIfStaleLocked zeroes a bucket whose stored period start no longer
 // matches. With a raw `now` anchor, every reload moved the anchor to the
-// reload instant and silently wiped the account's accumulated usage (B2 in
-// docs/VMR_综合评审_2026-08_sonnet-5.md). Anchoring to a fixed boundary
-// makes PeriodStart identical across all reloads within the same period, so
-// the count survives — matching the Quota design doc's "计数跨重载存活"
-// promise for the common (no explicit `since`) case too.
+// reload instant and silently wiped the account's accumulated usage.
+// Anchoring to a fixed boundary makes PeriodStart identical across all
+// reloads within the same period, so the count survives — matching the
+// Quota design doc's "计数跨重载存活" promise for the common (no explicit
+// `since`) case too.
 //
 // Midnight (not top-of-hour) for min/h so the period grid stays fixed to the
 // day: two reloads on the same calendar day always resolve to the same
