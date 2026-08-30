@@ -71,7 +71,7 @@ func cmdStory(args []string) error {
 	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
 	journeyArg := fs.String("journey", "", "render this journey: an id or id-prefix, a comma-separated list of ids/prefixes/globs, and/or a shell-style glob (*, ?, [...]) matched against the full id — e.g. -journey j-a,j-b or -journey 'j-openclaw-*'. A selector resolving to exactly one journey renders as before (and alone supports -llm-addr); more than one batches like -render-all")
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
-	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id or id prefix)")
+	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id, id-prefix, or shell glob; first candidate matching each side wins)")
 	corpus := fs.Bool("corpus", false, "compute corpus-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey")
 	includePartialFlag := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
@@ -203,18 +203,19 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 }
 
 // resolveJourneyID finds the candidate chain whose ID (the content-addressed
-// j-<client>-<start>-<end>-<code>) starts with idPrefix —
-// shared by -journey and -compare, which all resolve a user-supplied id
-// prefix the same way (first match in candidate order, as printed by
-// running with no selector flag at all).
-func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idPrefix string) (*ctxgraph.Lineage, []*ctxgraph.Lineage, error) {
+// j-<client>-<start>-<end>-<code>) matches pat — a shell-style glob, or (absent
+// any glob character) an id prefix, per journeyPatternMatches. Used by -compare,
+// which needs exactly one match per side and keeps a "first match in candidate
+// order wins" contract (as printed by running with no selector flag at all);
+// -journey's set-valued selector goes through resolveJourneySelector instead.
+func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, pat string) (*ctxgraph.Lineage, []*ctxgraph.Lineage, error) {
 	for _, l := range cands {
 		chain := ctxgraph.ChainFrom(l, byIdx)
-		if strings.HasPrefix(story.ID(chain), idPrefix) {
+		if journeyPatternMatches(story.ID(chain), pat) {
 			return l, chain, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("no journey matching id prefix %q (run without -journey to list candidates)", idPrefix)
+	return nil, nil, fmt.Errorf("no journey matching %q (run without -journey to list candidates)", pat)
 }
 
 // journeyPatternMatches reports whether id satisfies pattern: a shell-style
@@ -817,7 +818,7 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	// the spine's "→ detail" pointers link only when they will resolve; the
 	// default batch suite (materializeDetails=false) gets inline coordinates
 	// instead of 404 links (P13.1 / B10 / review §12.5).
-	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil, materializeDetails)
+	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil, materializeDetails, cost)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}

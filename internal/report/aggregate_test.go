@@ -275,15 +275,21 @@ func TestToolWaste(t *testing.T) {
 		if len(tool.Declared) == 0 {
 			continue
 		}
-		util := float64(len(tool.Calls)) / float64(len(tool.Declared))
+		// distinct_called is declared-and-called (len(Declared) - NeverCalled),
+		// never the raw distinct-invocation count — see buildTools.
+		wantCalled := len(tool.Declared) - len(tool.NeverCalled)
+		if tool.DistinctCalled != wantCalled {
+			t.Fatalf("distinct_called want %d got %d", wantCalled, tool.DistinctCalled)
+		}
+		util := float64(wantCalled) / float64(len(tool.Declared))
 		if tool.DeclareUtilization != round2(util) {
 			t.Fatalf("declare_utilization want %.2f got %.2f", util, tool.DeclareUtilization)
 		}
 		if tool.SchemaBytesShipped != tool.DeclaredBytes*int64(tool.Requests) {
 			t.Fatalf("schema_bytes_shipped mismatch")
 		}
-		if tool.SchemaWasteBytes > tool.SchemaBytesShipped {
-			t.Fatalf("waste bytes cannot exceed shipped bytes")
+		if tool.SchemaWasteBytes > tool.SchemaBytesShipped || tool.SchemaWasteBytes < 0 {
+			t.Fatalf("waste bytes out of range: %d (shipped %d)", tool.SchemaWasteBytes, tool.SchemaBytesShipped)
 		}
 	}
 }

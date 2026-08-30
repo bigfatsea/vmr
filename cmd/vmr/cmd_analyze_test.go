@@ -595,6 +595,49 @@ func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
 	}
 }
 
+// TestCmdAnalyze_CompareWildcard covers F-2: -compare resolves each side
+// through journeyPatternMatches (same as -journey), so a shell glob that
+// pins a journey by its content-hash suffix — something a plain prefix can
+// never express — works on both sides.
+func TestCmdAnalyze_CompareWildcard(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 22, 9, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+
+	aU1 := storyMsg("user", "candidate A for -compare wildcard test")
+	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
+	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+
+	bU1 := storyMsg("user", "candidate B for -compare wildcard test")
+	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
+	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+
+	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	if err != nil {
+		t.Fatalf("setupStoryRun: %v", err)
+	}
+	if len(su.chains) != 2 {
+		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
+	}
+	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+	patA, patB := "*"+idA[len(idA)-8:], "*"+idB[len(idB)-8:]
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-compare", patA + "," + patB, path})
+	}); err != nil {
+		t.Fatalf("cmdAnalyze -compare (wildcard): %v", err)
+	}
+	compareFiles, err := filepath.Glob(filepath.Join(outDir, "stories", "compare-*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compareFiles) == 0 {
+		t.Error("expected a compare-*.md from a wildcard -compare selector")
+	}
+}
+
 // TestCmdAnalyze_CompareHTML covers 12-D: -compare -html writes a
 // self-contained comparison dashboard (0600) with the three sections, and
 // -redact drops the excerpt bodies without leaking.

@@ -80,7 +80,19 @@ func RenderToolWasteHTML(rep *Report2, lang i18n.Lang) string {
 }
 
 func twTable(w func(string, ...any), rows []ToolShapeRow, t i18n.ToolWasteText) {
-	shown := rows
+	// A waste card shows the wasteful shapes: drop the fully-used (zero-waste)
+	// rows the top-N would otherwise pad with. Keep all rows only in the
+	// degenerate "nothing is wasted" case, where the card has nothing better
+	// to show anyway.
+	shown := make([]ToolShapeRow, 0, len(rows))
+	for _, r := range rows {
+		if r.SchemaWasteBytes > 0 {
+			shown = append(shown, r)
+		}
+	}
+	if len(shown) == 0 {
+		shown = rows
+	}
 	if len(shown) > toolWasteTopN {
 		shown = shown[:toolWasteTopN]
 	}
@@ -93,7 +105,8 @@ func twTable(w func(string, ...any), rows []ToolShapeRow, t i18n.ToolWasteText) 
 		} else if usedFrac > 1 {
 			usedFrac = 1
 		}
-		w("<tr>\n<td class=\"shape\">%s</td>\n<td>%s</td>\n", twe(twShape(r.Shape)), twe(strconv.Itoa(r.Requests)))
+		w("<tr>\n<td class=\"shape\">%s<span class=\"sig\">%s</span></td>\n<td>%s</td>\n",
+			twe(twNeverCalled(r.NeverCalled, t)), twe(twSig(r.Shape)), twe(strconv.Itoa(r.Requests)))
 		w("<td><div class=\"bar\"><span style=\"width:%.1f%%\"></span></div><span class=\"bl\">%s</span></td>\n",
 			usedFrac*100, twe(t.UsedCalled(r.DistinctCalled, len(r.Declared))))
 		w("<td class=\"num\">%s<span class=\"tk\"> · ≈%s</span></td>\n</tr>\n",
@@ -118,10 +131,34 @@ func twTokens(bytes int64) string {
 	}
 }
 
-// twShape caps a shape identifier for the table cell — it can be a long
-// joined tool-name list.
-func twShape(s string) string {
-	const maxLen = 52
+// twNeverCalledShown bounds how many never-called tool names the shape cell
+// spells out before collapsing the rest to a "+K more" tail.
+const twNeverCalledShown = 4
+
+// twNeverCalled names the tools this shape declares but never calls — the
+// card's whole point, made concrete instead of hidden behind a hash. Empty
+// NeverCalled (a fully-used shape that still reached the top-N on raw shipped
+// bytes) renders the all-called note.
+func twNeverCalled(names []string, t i18n.ToolWasteText) string {
+	if len(names) == 0 {
+		return t.AllCalled
+	}
+	shown := names
+	if len(shown) > twNeverCalledShown {
+		shown = shown[:twNeverCalledShown]
+	}
+	s := strings.Join(shown, ", ")
+	if extra := len(names) - len(shown); extra > 0 {
+		s += " " + t.NeverCalledMore(extra)
+	}
+	return s
+}
+
+// twSig caps the deduplicated-declaration fingerprint (reqdetail.ToolsSig,
+// "tools:<N>/<hash>") shown small beneath the names — the key to this row's
+// full entry in vmr-report.json's tools[].
+func twSig(s string) string {
+	const maxLen = 40
 	r := []rune(s)
 	if len(r) <= maxLen {
 		return s
@@ -162,7 +199,8 @@ table { border-collapse:collapse; width:100%; font-size:12.5px; }
 th,td { padding:7px 9px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:middle; }
 th { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); }
 td.num, th.num { text-align:right; white-space:nowrap; }
-td.shape { font-size:11px; color:var(--ink-dim); word-break:break-all; }
+td.shape { font-size:11.5px; color:var(--ink); word-break:break-word; }
+td.shape .sig { display:block; margin-top:3px; font-size:10px; color:var(--ink-dim); }
 .tk { color:var(--ink-dim); }
 .bar { display:inline-block; width:96px; height:9px; border-radius:5px; background:var(--amber);
   overflow:hidden; vertical-align:middle; border:1px solid var(--rule); }

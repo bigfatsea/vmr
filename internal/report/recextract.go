@@ -255,7 +255,12 @@ func buildTools(sess *SessionAnalysis) []ToolShapeRow {
 			NeverCalled:   t.NeverCalled,
 		}
 		row.SchemaBytesShipped = t.DeclaredBytes * int64(t.Requests)
-		row.DistinctCalled = len(t.Calls)
+		// Declared tools that were actually called — NOT len(t.Calls), which
+		// also counts tools a response invoked without declaring them in this
+		// shape (a tool added mid-conversation, a client/vendor quirk). Letting
+		// those inflate the count pushed utilization past 100% and produced a
+		// negative "wasted bytes" figure on the shareable card.
+		row.DistinctCalled = len(t.Declared) - len(t.NeverCalled)
 		if len(t.Declared) > 0 {
 			row.DeclareUtilization = round2(float64(row.DistinctCalled) / float64(len(t.Declared)))
 		}

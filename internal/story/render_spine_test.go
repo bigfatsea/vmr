@@ -213,7 +213,7 @@ func TestRenderOverviewCard(t *testing.T) {
 	t.Run("zero Steps, zero-value Metrics: writes nothing, no panic", func(t *testing.T) {
 		w, buf := capture()
 		j := journeyOfTasks()
-		renderOverviewCard(w, j, Metrics{}, i18n.EN)
+		renderOverviewCard(w, j, Metrics{}, nil, i18n.EN)
 		if buf.Len() != 0 {
 			t.Errorf("expected no output, got %q", buf.String())
 		}
@@ -222,7 +222,7 @@ func TestRenderOverviewCard(t *testing.T) {
 	t.Run("tags alone (no Steps) still render the card", func(t *testing.T) {
 		w, buf := capture()
 		j := journeyOfTasks()
-		renderOverviewCard(w, j, Metrics{ToolCallCount: toolIntensiveThreshold}, i18n.EN)
+		renderOverviewCard(w, j, Metrics{ToolCallCount: toolIntensiveThreshold}, nil, i18n.EN)
 		et := i18n.Spine(i18n.EN)
 		out := buf.String()
 		if !strings.Contains(out, et.OverviewTitle) {
@@ -237,7 +237,7 @@ func TestRenderOverviewCard(t *testing.T) {
 		w, buf := capture()
 		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), Finish: "stop"}
 		j := journeyOf(s)
-		renderOverviewCard(w, j, Metrics{DuplicateActionRate: retryHeavyThreshold}, i18n.EN)
+		renderOverviewCard(w, j, Metrics{DuplicateActionRate: retryHeavyThreshold}, nil, i18n.EN)
 		et := i18n.Spine(i18n.EN)
 		out := buf.String()
 		if !strings.Contains(out, et.OverviewStart(at(0).Format("15:04:05"))) {
@@ -245,6 +245,25 @@ func TestRenderOverviewCard(t *testing.T) {
 		}
 		if !strings.Contains(out, et.TagRetryHeavy) {
 			t.Errorf("output missing TagRetryHeavy: %q", out)
+		}
+	})
+
+	t.Run("resolved cost adds the estimate line; nil/unresolved adds nothing", func(t *testing.T) {
+		s := &Step{Seq: 1, Manifest: mkManifest(at(0)), Finish: "stop"}
+		j := journeyOf(s)
+
+		w, buf := capture()
+		renderOverviewCard(w, j, Metrics{}, &CostFact{Resolved: true, TotalUSD: 4.2}, i18n.EN)
+		if got := buf.String(); !strings.Contains(got, "Estimated cost ≈ $4.20") {
+			t.Errorf("resolved cost should add the estimate line, got %q", got)
+		}
+
+		for _, c := range []*CostFact{nil, {Resolved: false, TotalUSD: 9}} {
+			w, buf := capture()
+			renderOverviewCard(w, j, Metrics{}, c, i18n.EN)
+			if strings.Contains(buf.String(), "Estimated cost") {
+				t.Errorf("cost=%+v should not render the estimate line, got %q", c, buf.String())
+			}
 		}
 	})
 }

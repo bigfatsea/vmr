@@ -61,6 +61,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 		renderCache(w, cmp.Extras.Cache, t)
 		renderSysPrompt(w, cmp.Extras.SysPrompt, t)
 		renderDeliverable(w, cmp.Extras.Deliverable, t)
+		renderCost(w, cmp.Extras.Cost, t)
 		renderSources(w, cmp.Extras.Sources, t)
 	}
 
@@ -226,11 +227,37 @@ func renderInitialInstruction(w func(string, ...any), f InitialInstructionFact, 
 // renderDeliverable renders the final-write-shaped tool call each side
 // produced, if any — the "result difference" dimension (design doc's four-
 // dimension breakdown in the plan doc's review banner), not just process
-// metrics.
+// metrics. Skipped whole when neither side produced one: plenty of task
+// pairs never write a single-file deliverable, and an "A none / B none"
+// section is noise, not a finding (F-6).
 func renderDeliverable(w func(string, ...any), d DeliverableFact, t i18n.CompareText) {
+	if !d.A.Found && !d.B.Found {
+		return
+	}
 	w("%s", t.DeliverableTitle)
 	renderDeliverableSide(w, "A", d.A, t)
 	renderDeliverableSide(w, "B", d.B, t)
+}
+
+// renderCost renders each side's estimated spend — the same CostPair the HTML
+// dashboard's tale-of-the-tape and facts strip already carry, kept off the
+// Markdown until now (口径对齐: .md now matches JSON/HTML). A "$X vs —" split
+// (exactly one side priced) draws a footnote so the blank isn't read as
+// "free" (F-3).
+func renderCost(w func(string, ...any), cp CostPair, t i18n.CompareText) {
+	w("%s", t.CostTitle)
+	if !cp.A.Resolved && !cp.B.Resolved {
+		w("%s", t.CostUnresolved)
+		return
+	}
+	w("%s", t.CostLine(totMoney(cp.A), totMoney(cp.B)))
+	if cp.A.Resolved != cp.B.Resolved {
+		side := "A"
+		if cp.A.Resolved {
+			side = "B"
+		}
+		w("%s", t.CostOneSideNote(side))
+	}
 }
 
 func renderDeliverableSide(w func(string, ...any), label string, s DeliverableStats, t i18n.CompareText) {

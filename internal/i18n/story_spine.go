@@ -21,6 +21,10 @@ type SpineText struct {
 	TagRetryHeavy       string
 	TagContextCompacted string
 	TagsLine            func(tags string) string
+	// OverviewCostLine is the overview card's estimated-spend bullet, rendered
+	// only when a price book resolved (same "$ only when priced, and labelled
+	// an estimate" discipline the HTML damage line and the macro report use).
+	OverviewCostLine func(money string) string
 
 	SpineTitle                string
 	SpineTaskLine             func(idx int, title string) string
@@ -96,6 +100,9 @@ func Spine(lang Lang) SpineText {
 			TagRetryHeavy:       "重试多",
 			TagContextCompacted: "上下文压缩",
 			TagsLine:            func(tags string) string { return "**标签**：" + tags + "\n\n" },
+			OverviewCostLine: func(money string) string {
+				return "估算成本 ≈ " + money + "（按标价估算，非实际账单）"
+			},
 
 			SpineTitle:      "## 决策脊柱\n\n",
 			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
@@ -167,6 +174,9 @@ func Spine(lang Lang) SpineText {
 		TagRetryHeavy:       "retry-heavy",
 		TagContextCompacted: "context-compacted",
 		TagsLine:            func(tags string) string { return "**Tags**: " + tags + "\n\n" },
+		OverviewCostLine: func(money string) string {
+			return "Estimated cost ≈ " + money + " (list-price estimate, not your bill)"
+		},
 
 		SpineTitle:      "## Decision Spine\n\n",
 		SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },

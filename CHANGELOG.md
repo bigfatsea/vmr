@@ -21,12 +21,21 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-30
+
 ### Added
 - `vmr analyze -journey <id> -html` is now an **incident report**: a `CRITICAL`/`WARNING`/`NOMINAL` severity verdict (from the highest-severity finding), a plain-language probable-cause line, a `N steps · Mm Ss · X tokens` damage tally (with `≈ $Y` when pricing resolves), and a **point-of-no-return** strip locating the earliest unrecoverable turn — a constraint-losing compaction (entity-diff rule or LLM excerpt reader), an unadapted retry loop, or a hard history contraction; a critical run whose failure was behavioral (a loop, drift, oscillation — no one decisive step) says so rather than claiming it stayed on its rails. Redact-safe — the verdict and turning point use counts/structure only. Restyled into a mono-dominant flight-recorder look (dark) / printed-report look (light)
-- `vmr analyze -compare a,b -html` gains a **tale-of-the-tape** scorecard header (model / steps / tool calls / wall time / cost per side, no winner declared) and a per-side cost row in the facts. Cost needs resolvable pricing; when none resolves the row is omitted and the facts say so
-- `vmr analyze` writes **`{out}/tool-waste.html`** whenever the report has tool data — a standalone one-screen card from the §7 numbers: the share of shipped tool-schema bytes that went to never-called tools, totals, estimated wasted tokens, and a per-shape table. Tool names + counts only, no conversation content, 0600
+- `vmr analyze -compare a,b -html` gains a **tale-of-the-tape** scorecard header (model / steps / tool calls / wall time / cost per side, no winner declared) and a per-side cost row in the facts. Cost needs resolvable pricing; when only one side resolves the other shows `—` with a "pricing not on file — blank ≠ free" footnote, when neither resolves the facts say so
+- `vmr analyze` writes **`{out}/tool-waste.html`** whenever the report has tool data — a standalone one-screen card from the §7 numbers: the share of shipped tool-schema bytes that went to never-called tools, totals, estimated wasted tokens, and a per-shape table that **names the never-called tools** (up to 4, then `+K more`) with the shape fingerprint shown small beneath for cross-reference to `vmr-report.json`. Tool names + counts only, no conversation content, 0600
 - `internal/pricing`: `Resolver.RateForEndpoint("protocol:provider:model")` — the endpoint-label lookup both the report (per record) and the story half (per journey step) now share
-- `journey-<id>.json` / `compare-*.json` gain a `cost` object (nil when no price book resolved — never a fake $0), computed through the same `pricing.Rate.Cost` formula the macro report uses. Present only on single `-journey` / `-compare` (pricing resolution is a zoom-in feature, like `-html` itself); the default suite's per-journey JSON carries no cost
+- `journey-<id>` / `compare-*` reports carry a **cost estimate** in all three formats — JSON `cost` object (nil when no price book resolved — never a fake $0), the HTML dashboard, and now the Markdown too (journey overview card / compare "Cost Estimate" section), all through the same `pricing.Rate.Cost` formula the macro report uses and labelled a list-price estimate. Present only on single `-journey` / `-compare` (pricing resolution is a zoom-in feature, like `-html` itself); the default suite's per-journey output carries no cost
+
+### Changed
+- `vmr analyze -compare` resolves each side's id through the same matcher as `-journey`: a shell glob (`*`, `?`, `[…]`) or, absent glob characters, an id prefix — first candidate matching each side wins
+- `vmr analyze -compare` omits the "Final deliverable" section (`.md` and `-html`) when neither side produced a single-file deliverable, instead of printing "A none / B none"
+
+### Fixed
+- Tool-waste (report §7 / `tool-waste.html` / `vmr-report.json` `tools[]`): a shape whose responses invoked more distinct tools than it declared (a tool added mid-conversation, a vendor quirk) reported `distinct_called` above the declared count, `declare_utilization` above 1.0, and a **negative** "wasted bytes" figure. `distinct_called` is now declared-and-called only (`declared − never_called`); utilization stays in `[0, 1]` and waste never goes negative
 
 ## [0.6.3] - 2026-08-29
 
@@ -169,7 +178,10 @@ commits and design docs hold the full reasoning.
 ## [0.1] - 2026-07-13
 First public release: local-first, single-binary LLM router behind one stable virtual model name — byte-faithful passthrough for the OpenAI and Anthropic protocols, error-class-aware failover (cooldowns, backoff, `Retry-After`, single-flight recovery probes), the JSONL flight-recorder audit log with auto-compression and expiry, `vmr report` usage/latency/session analytics, optional disk-cached inline-image downscaling.
 
-[Unreleased]: https://github.com/bigfatsea/vmr/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/bigfatsea/vmr/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/bigfatsea/vmr/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/bigfatsea/vmr/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/bigfatsea/vmr/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/bigfatsea/vmr/compare/v0.6...v0.6.1
 [0.6]: https://github.com/bigfatsea/vmr/compare/v0.5...v0.6
 [0.5]: https://github.com/bigfatsea/vmr/compare/v0.4...v0.5

@@ -35,7 +35,13 @@ import (
 // coordinate when false (the default batch suite keeps them unmaterialized
 // per P13.1 — a link there would 404, B10 / review §12.5). It tracks the
 // caller's own materializeDetails decision (cmd/vmr/cmd_story.go).
-func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists, linkDetails bool) string {
+//
+// cost, when non-nil and resolved, adds the estimated-spend line to the
+// overview card — same *pricing.Resolver-derived CostFact the JSON summary
+// and the HTML dashboard already carry, threaded in (not computed here) for
+// the same reason. nil (the default batch suite, which prices nothing) leaves
+// the line out, matching that suite's cost-free JSON.
+func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists, linkDetails bool, cost *CostFact) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Story(lang)
@@ -58,7 +64,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 	}
 
 	renderSystemPromptHeader(w, j, t, linkDetails)
-	renderOverviewCard(w, j, m, lang)
+	renderOverviewCard(w, j, m, cost, lang)
 	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang, linkDetails)
 	renderToolTimeline(w, j, lang)

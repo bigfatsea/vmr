@@ -36,6 +36,7 @@ type CompareHTMLText struct {
 	CostLabel          string
 	CostPairFact       func(a, b string) string
 	CostUnresolvedFact string
+	CostOneSideNote    func(side string) string // sub-line when exactly one side priced (F-3)
 
 	InitialInstruction string
 	DivergenceNone     string
@@ -92,6 +93,7 @@ func CompareHTML(lang Lang) CompareHTMLText {
 			CostLabel:          "成本估算",
 			CostPairFact:       func(a, b string) string { return fmt.Sprintf("A %s · B %s", a, b) },
 			CostUnresolvedFact: "无可解析的定价（Token-Plan / 订阅制账户常见）",
+			CostOneSideNote:    func(side string) string { return side + " 侧定价未收录 —— 空白不代表免费" },
 
 			InitialInstruction: "双侧初始指令",
 			DivergenceNone:     "对齐前缀内两侧工具使用结构一致。",
@@ -156,6 +158,7 @@ func CompareHTML(lang Lang) CompareHTMLText {
 		CostLabel:          "Cost estimate",
 		CostPairFact:       func(a, b string) string { return fmt.Sprintf("A %s · B %s", a, b) },
 		CostUnresolvedFact: "no resolvable pricing (common for Token-Plan / subscription accounts)",
+		CostOneSideNote:    func(side string) string { return side + ": pricing not on file — a blank does not mean free" },
 
 		InitialInstruction: "Opening instruction (both sides)",
 		DivergenceNone:     "Tool-use structure is identical across the aligned prefix.",

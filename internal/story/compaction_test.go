@@ -157,7 +157,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	// is the only thing a human (or the compare/LLM evidence pack) ever
 	// reads, so it needs its own assertion, not just CompactionInfo's field
 	// values.
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 	for _, want := range []string{"Information loss", "README.md", "AGENTS.md"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderMarkdown output missing %q for the compaction boundary step:\n%s", want, md)

@@ -199,6 +199,15 @@ func chtmlCostFact(w func(string, ...any), cp CostPair, t i18n.CompareHTMLText) 
 		return
 	}
 	chtmlFact(w, t.CostLabel, t.CostPairFact(totMoney(cp.A), totMoney(cp.B)))
+	// Exactly one side priced: the other renders as "—", which reads as
+	// "free" without this note (F-3).
+	if cp.A.Resolved != cp.B.Resolved {
+		side := "A"
+		if cp.A.Resolved {
+			side = "B"
+		}
+		w("<div class=\"fact sub\">%s</div>\n", che(t.CostOneSideNote(side)))
+	}
 }
 
 // --- tale of the tape --------------------------------------------------------
@@ -272,6 +281,11 @@ func chtmlFact(w func(string, ...any), label, val string) {
 }
 
 func chtmlDeliverable(w func(string, ...any), d DeliverableFact, t i18n.CompareHTMLText, redact bool) {
+	// Neither side wrote a single-file deliverable: skip the row rather than
+	// print "A none / B none" (F-6).
+	if !d.A.Found && !d.B.Found {
+		return
+	}
 	w("<div class=\"fact\"><span class=\"fk\">%s</span></div>\n", che(t.DeliverableLabel))
 	for _, s := range []struct {
 		label string

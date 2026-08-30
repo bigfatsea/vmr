@@ -90,16 +90,23 @@ errLoop:
 	return out
 }
 
-func renderOverviewCard(w func(string, ...any), j *Journey, m Metrics, lang i18n.Lang) {
+func renderOverviewCard(w func(string, ...any), j *Journey, m Metrics, cost *CostFact, lang i18n.Lang) {
 	t := i18n.Spine(lang)
 	nodes := timelineNodes(j, t)
 	tags := structuralTags(m, t)
-	if len(nodes) == 0 && len(tags) == 0 {
+	costLine := ""
+	if cost != nil && cost.Resolved {
+		costLine = t.OverviewCostLine(fmtMoney(*cost))
+	}
+	if len(nodes) == 0 && len(tags) == 0 && costLine == "" {
 		return
 	}
 	w("%s", t.OverviewTitle)
 	for _, n := range nodes {
 		w("- %s\n", n)
+	}
+	if costLine != "" {
+		w("- %s\n", costLine)
 	}
 	w("\n")
 	if len(tags) > 0 {

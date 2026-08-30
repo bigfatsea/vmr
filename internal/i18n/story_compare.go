@@ -27,6 +27,11 @@ type CompareText struct {
 	SourcesTitle string
 	SourcesIntro string
 
+	CostTitle       string
+	CostLine        func(a, b string) string
+	CostUnresolved  string
+	CostOneSideNote func(side string) string // footnote when exactly one side priced (F-3)
+
 	WallClockLine         func(aWall, bWall string) string
 	TerminationLine       func(aTerm, bTerm string) string
 	FinalContextTitle     string
@@ -88,6 +93,15 @@ func Compare(lang Lang) CompareText {
 
 			SourcesTitle: "## 证据溯源\n\n",
 			SourcesIntro: "本报告所有数字均计算自以下源审计文件：\n\n",
+
+			CostTitle: "## 成本估算\n\n",
+			CostLine: func(a, b string) string {
+				return "A " + a + " · B " + b + "（按标价估算，非实际账单）\n\n"
+			},
+			CostUnresolved: "两侧均无可解析定价（Token-Plan / 订阅制账户常见）。\n\n",
+			CostOneSideNote: func(side string) string {
+				return "> " + side + " 侧定价未收录（Token-Plan / 订阅制账户常见）—— 空白不代表免费。\n\n"
+			},
 
 			WallClockLine: func(aWall, bWall string) string {
 				return "总耗时（墙钟）：A " + aWall + " · B " + bWall + " —— 含人类空闲时间，不是效率指标，效率请看上表的\"净工作时长\"（设计文档 F10）。\n\n"
@@ -177,6 +191,13 @@ func Compare(lang Lang) CompareText {
 
 		SourcesTitle: "## Evidence Provenance\n\n",
 		SourcesIntro: "Every number in this report was computed from the following source audit files:\n\n",
+
+		CostTitle:      "## Cost Estimate\n\n",
+		CostLine:       func(a, b string) string { return "A " + a + " · B " + b + " (list-price estimate, not your bill)\n\n" },
+		CostUnresolved: "Neither side had resolvable pricing (common for Token-Plan / subscription accounts).\n\n",
+		CostOneSideNote: func(side string) string {
+			return "> " + side + ": pricing not on file (common for Token-Plan / subscription accounts) — a blank does not mean free.\n\n"
+		},
 
 		WallClockLine: func(aWall, bWall string) string {
 			return "Wall-clock total: A " + aWall + " · B " + bWall + " — includes human idle time, not an efficiency metric; for efficiency see \"Net Working Time\" in the table above (design doc F10).\n\n"

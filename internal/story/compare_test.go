@@ -403,6 +403,43 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 	}
 }
 
+// TestRenderComparisonMarkdown_CostLine covers the .md cost section (口径对齐
+// with JSON/HTML) plus F-3's one-sided-pricing footnote and F-6's skip of an
+// empty deliverable section.
+func TestRenderComparisonMarkdown_CostLine(t *testing.T) {
+	a := JourneySummary{ID: "j-a", Title: "A", From: time.Now(), To: time.Now()}
+	b := JourneySummary{ID: "j-b", Title: "B", From: time.Now(), To: time.Now()}
+
+	t.Run("one side priced: line plus footnote, deliverable section skipped", func(t *testing.T) {
+		cmp := Compare(a, b, i18n.EN)
+		cmp.Extras = &ComparisonExtras{Cost: CostPair{
+			A: CostFact{Resolved: true, TotalUSD: 3.5},
+			B: CostFact{Resolved: false},
+		}}
+		md := RenderComparisonMarkdown(cmp, i18n.EN)
+		for _, want := range []string{"## Cost Estimate", "A $3.50 · B —", "B: pricing not on file"} {
+			if !strings.Contains(md, want) {
+				t.Errorf("missing %q:\n%s", want, md)
+			}
+		}
+		if strings.Contains(md, "## Final Deliverable Comparison") {
+			t.Errorf("neither side has a deliverable — the section must be skipped (F-6):\n%s", md)
+		}
+	})
+
+	t.Run("neither side priced: the unresolved note, no footnote", func(t *testing.T) {
+		cmp := Compare(a, b, i18n.EN)
+		cmp.Extras = &ComparisonExtras{Cost: CostPair{}}
+		md := RenderComparisonMarkdown(cmp, i18n.EN)
+		if !strings.Contains(md, "Neither side had resolvable pricing") {
+			t.Errorf("missing the both-unresolved note:\n%s", md)
+		}
+		if strings.Contains(md, "pricing not on file") {
+			t.Errorf("both-unresolved must not draw the one-sided footnote:\n%s", md)
+		}
+	})
+}
+
 // TestRenderComparisonMarkdown_EscapesTitles covers a later-found
 // injection point: SideBlock's title is written into a blockquote, the
 // same class of defect as the decision spine's own unescaped points.

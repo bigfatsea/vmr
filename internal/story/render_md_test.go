@@ -31,7 +31,7 @@ func TestRenderMarkdown_BasicStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 
 	for _, want := range []string{
 		"# Journey j-",
@@ -68,7 +68,7 @@ func TestRenderMarkdown_LinkDetailsFalse_RendersCoordinatesNotLinks(t *testing.T
 	}
 	m, f := ComputeMetrics(j), ComputeFindings(j, i18n.EN)
 
-	coordMD := RenderMarkdown(j, m, f, i18n.EN, false, false)
+	coordMD := RenderMarkdown(j, m, f, i18n.EN, false, false, nil)
 	if strings.Contains(coordMD, "](../details/") {
 		t.Errorf("linkDetails=false still emitted a ../details/ link:\n%s", coordMD)
 	}
@@ -81,7 +81,7 @@ func TestRenderMarkdown_LinkDetailsFalse_RendersCoordinatesNotLinks(t *testing.T
 		}
 	}
 
-	linkMD := RenderMarkdown(j, m, f, i18n.EN, false, true)
+	linkMD := RenderMarkdown(j, m, f, i18n.EN, false, true, nil)
 	if !strings.Contains(linkMD, "](../details/") {
 		t.Errorf("linkDetails=true should emit ../details/ links:\n%s", linkMD)
 	}
@@ -108,7 +108,7 @@ func TestRenderMarkdown_EscapesJourneyTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 
 	if strings.Contains(md, "<!--") {
 		t.Errorf("rendered Markdown leaked a raw HTML comment marker from the Journey title:\n%s", md)
@@ -155,7 +155,7 @@ func TestRenderMarkdown_LLMResponseSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 
 	for _, want := range []string{
 		"🤔 I should read both files first.",
@@ -219,7 +219,7 @@ func TestRenderMarkdown_BreakWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "context was sharply contracted") {
 		t.Errorf("rendered Markdown missing break warning:\n%s", md)
 	}
@@ -262,7 +262,7 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true)
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, true, nil)
 	if !strings.Contains(md, "content barely overlaps with the previous segment") {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}

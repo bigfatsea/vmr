@@ -68,6 +68,29 @@ func TestRenderComparisonHTML_NoExtras(t *testing.T) {
 	}
 }
 
+// TestRenderComparisonHTML_CostFootnoteAndDeliverableSkip covers F-3 (a
+// one-sided-pricing footnote under the cost fact) and F-6 (no deliverable
+// fact row at all when neither side produced one).
+func TestRenderComparisonHTML_CostFootnoteAndDeliverableSkip(t *testing.T) {
+	cmp := cmpFixture(t)
+	cmp.Extras.Cost = CostPair{
+		A: CostFact{Resolved: true, TotalUSD: 3.5},
+		B: CostFact{Resolved: false},
+	}
+	cmp.Extras.Deliverable = DeliverableFact{} // both sides Found=false
+
+	out := RenderComparisonHTML(cmp, CompareLLMResult{}, i18n.EN, false)
+	if !strings.Contains(out, "A $3.50 · B —") {
+		t.Errorf("cost fact missing the one-priced-one-dash pair:\n%s", out)
+	}
+	if !strings.Contains(out, "pricing not on file") {
+		t.Errorf("one-sided pricing must draw the footnote (F-3):\n%s", out)
+	}
+	if strings.Contains(out, "Final deliverable") {
+		t.Errorf("neither side has a deliverable — the fact row must be skipped (F-6):\n%s", out)
+	}
+}
+
 func TestRenderComparisonHTML_LLMBlock(t *testing.T) {
 	cmp := cmpFixture(t)
 	llm := CompareLLMResult{
