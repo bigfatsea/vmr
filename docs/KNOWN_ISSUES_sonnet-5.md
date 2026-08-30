@@ -36,7 +36,7 @@
 ### 1.2 [中] `vmr report` / `vmr analyze` 全内存聚合的记录量上限
 
 - **现状**：`AnalyzeSessions` 常驻全部记录关键信息 + 原始耗时/延迟/Token 样本切片（算真实百分位）。实测万级记录即 GB 级 RSS（`report` 单跑约 1.4GB / 1.1 万条；`analyze` 组合路径约 3.75GB / 1.5 万条）——原文「千万级约数百 MB」是量级判断错误，已作废。
-- **story 半边曾是更大的来源，已消除**：`story.Step` 曾持有完整 `audit.Record`，让每 request 重发全历史的 O(N²) 原始字节钉在对象图里——`vmr analyze -corpus` 因此在全量语料上峰值约 43GB（16GB 机器 swap thrashing 假死）。2026-08 改动：`Step` 只保留 `buildFrom` 预提取的事实，不再持有记录；`-corpus`/`-render-all` 改为按 `Manifest.Bytes` 字节预算分批构建。实测（43 文件 / 约 12.4GB 解压）`-corpus` 峰值 RSS 从约 43GB 降到约 2.4GB、`-render-all` 从 4.1GB 到 1.9GB（详见 `CHANGELOG` [Unreleased] 与 `docs/ANALYZE_MEMORY_ACTIONPLAN_sonnet-5.md`）。全部 Journey 常驻只剩约 300MB，与语料量解耦。
+- **story 半边曾是更大的来源，已消除**：`story.Step` 曾持有完整 `audit.Record`，让每 request 重发全历史的 O(N²) 原始字节钉在对象图里——`vmr analyze -corpus` 因此在全量语料上峰值约 43GB（16GB 机器 swap thrashing 假死）。2026-08 改动：`Step` 只保留 `buildFrom` 预提取的事实，不再持有记录；`-corpus`/`-render-all` 改为按 `Manifest.Bytes` 字节预算分批构建。实测（43 文件 / 约 12.4GB 解压）`-corpus` 峰值 RSS 从约 43GB 降到约 2.4GB、`-render-all` 从 4.1GB 到 1.9GB（详见 `CHANGELOG` [Unreleased]）。全部 Journey 常驻只剩约 300MB，与语料量解耦。
 - **剩下的**：report 半边的 `AnalyzeSessions` 样本切片仍是全内存（未触及本次改动）。
 - **可能方案**：按审计日志的时间局部性分自然日分桶，跨日即时释放原始切片。
 - **为什么仍待定**：report 半边这个量级目前仍跑得完（约 1.6GB / 1.5 万条，16GB 机器有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错。**触发条件：单次 `report`/`analyze` 宏观半边语料 > 约 3 万条，或该半边峰值 RSS > 4GB**。
