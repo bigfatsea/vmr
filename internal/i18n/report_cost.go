@@ -10,6 +10,7 @@ type CostText struct {
 	PricingNote           func(disclaimer string) string
 	ByDateTitle           func(currency string) string
 	ByDateHeaders         [4]string // date, fresh, out, estimated cost
+	ByDatePartialNote     string    // rendered when some dates carried traffic but resolved no rate
 	ByModelTitle          func(currency string) string
 	ByModelHeaders        [5]string // model, protocol, fresh, out, estimated cost
 	ByEndpointTitle       func(currency string) string
@@ -30,6 +31,7 @@ func Cost(lang Lang) CostText {
 			PricingNote:           func(disclaimer string) string { return "> " + disclaimer + "\n\n" },
 			ByDateTitle:           func(cur string) string { return "**按日估算成本**（" + cur + "）" },
 			ByDateHeaders:         [4]string{"日期", "fresh", "out", "估算成本"},
+			ByDatePartialNote:     "> 仅列出存在可定价记录的日期；其余日期有请求流量，但其上游端点未解析出适用单价，当日成本未知（并非 0）。",
 			ByModelTitle:          func(cur string) string { return "**按模型估算成本**（" + cur + "）" },
 			ByModelHeaders:        [5]string{"模型", "协议", "fresh", "out", "估算成本"},
 			ByEndpointTitle:       func(cur string) string { return "**按端点估算成本**（" + cur + "，跨日合并）" },
@@ -50,6 +52,7 @@ func Cost(lang Lang) CostText {
 		PricingNote:           func(disclaimer string) string { return "> " + disclaimer + "\n\n" },
 		ByDateTitle:           func(cur string) string { return "**Estimated Cost by Date** (" + cur + ")" },
 		ByDateHeaders:         [4]string{"Date", "fresh", "out", "Est. Cost"},
+		ByDatePartialNote:     "> Only dates with at least one priced record are listed; other dates carried request traffic but their upstream endpoints resolved no applicable rate, so that day's cost is unknown (not zero).",
 		ByModelTitle:          func(cur string) string { return "**Estimated Cost by Model** (" + cur + ")" },
 		ByModelHeaders:        [5]string{"Model", "Protocol", "fresh", "out", "Est. Cost"},
 		ByEndpointTitle:       func(cur string) string { return "**Estimated Cost by Endpoint** (" + cur + ", merged across dates)" },

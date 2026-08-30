@@ -71,14 +71,55 @@ func renderSessions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 			continue
 		}
 		w("**%s**\n\n", ck)
+		head, tail := splitSessionLongTail(rows)
 		tbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
-		for _, s := range rows {
+		for _, s := range head {
 			renderSessionRow(tbl, s, t)
 		}
 		w("\n")
+		if len(tail) > 0 {
+			w("%s", t.LongTailOpen(len(tail), sessionsLongTailTurnCap))
+			ttbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
+			for _, s := range tail {
+				renderSessionRow(ttbl, s, t)
+			}
+			w("%s", t.LongTailClose)
+		}
 	}
 	// compaction chains: mermaid for chains ≥3 nodes
 	renderCompactionChains(w, rep, lang)
+}
+
+const (
+	// sessionsHeadRows is how many sessions per client render un-collapsed in
+	// §6 before the tail folds into a <details>. sessionsLongTailTurnCap is
+	// the turn count at or below which a tail session is "short" enough to
+	// fold. Real corpora put a few hundred near-identical low-turn cron
+	// sessions behind every client's handful of real conversations; without
+	// a fold §6 is ~45% of the whole macro report and its signal drowns.
+	sessionsHeadRows        = 20
+	sessionsLongTailTurnCap = 12
+)
+
+// splitSessionLongTail divides one client's session rows — already sorted by
+// Requests (turns) desc, the rep.Sessions order — into a head shown inline
+// and a tail folded into a <details>. The tail is only ever the run of short
+// (<= sessionsLongTailTurnCap turns) sessions past sessionsHeadRows: any
+// session above that turn count stays in the head even if it sorts past the
+// cutoff, so the fold never hides a substantial conversation. Returns
+// (rows, nil) when there is nothing worth folding.
+func splitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
+	if len(rows) <= sessionsHeadRows {
+		return rows, nil
+	}
+	split := sessionsHeadRows
+	for split < len(rows) && rows[split].Requests > sessionsLongTailTurnCap {
+		split++
+	}
+	if split >= len(rows) {
+		return rows, nil
+	}
+	return rows[:split], rows[split:]
 }
 
 func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {

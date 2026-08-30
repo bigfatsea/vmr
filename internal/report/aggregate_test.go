@@ -552,19 +552,20 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if strings.Contains(s, "Chat User: bob") {
 		t.Errorf("bob's only record is a single-shot heartbeat and must not get its own Chat User section:\n%s", s)
 	}
-	// 00:00 UTC on the first record must render as 05:00 in fmtutil.DisplayZone
-	// (TEST+05:00 above), not the source record's own (UTC) offset — footer
-	// table is still in the main index.
-	if !strings.Contains(s, "2026-07-24 05:00:00") {
-		t.Errorf("timestamps should be converted to fmtutil.DisplayZone:\n%s", s)
-	}
-
 	alice, err := os.ReadFile(filepath.Join(dir, "vmr-requests-alice.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(alice), "# Chat User: alice · 2 sessions 2 tasks 2 turns") {
 		t.Errorf("alice's sibling should carry the full Chat User detail card:\n%s", alice)
+	}
+	// 00:00 UTC on the first record must render as 05:00 in fmtutil.DisplayZone
+	// (TEST+05:00 above), not the source record's own (UTC) offset. The main
+	// index carries no per-request timestamps now (the flat "all requests"
+	// table is gone) — the session card in the per-tag sibling is where the
+	// converted timestamp shows.
+	if !strings.Contains(string(alice), "2026-07-24 05:00:00") {
+		t.Errorf("timestamps should be converted to fmtutil.DisplayZone:\n%s", alice)
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-bob.md")); !os.IsNotExist(err) {
@@ -817,8 +818,9 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 
 // TestWriteFailedIndex checks vmr-requests-failed.md/.jsonl: they must list
 // exactly the 3 failed rows (not the 1 plain-ok row), link to detail files,
-// and leave vmr-requests.md itself untouched (still carrying all 4 requests)
-// — the failed index is additive, not a move.
+// and leave the normal per-group detail untouched (the per-tag sibling still
+// renders every request, failed ones included) — the failed index is
+// additive, not a move.
 func TestWriteFailedIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
@@ -848,23 +850,21 @@ func TestWriteFailedIndex(t *testing.T) {
 		t.Fatalf("want 3 rows written to vmr-requests-failed.jsonl, got %d", n)
 	}
 
-	// The full index is unaffected: still every request, the plain ok one included.
+	// The per-group detail is unaffected: the per-tag sibling still renders
+	// every request, failed ones included (no client_key_tag on these
+	// records, so they land in vmr-requests-unresolved.md).
 	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
-	fullMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
+	unresolvedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-unresolved.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := string(fullMD)
-	if strings.Count(full, "❌") != 1 {
-		t.Errorf("vmr-requests.md should still carry the error row inline, unmoved:\n%s", full)
-	}
-	if !strings.Contains(full, "canceled") {
-		t.Errorf("vmr-requests.md should still carry the canceled row inline, unmoved:\n%s", full)
-	}
-	if !strings.Contains(full, "⚠️trunc") {
-		t.Errorf("vmr-requests.md should still carry the truncated ok row inline, unmoved:\n%s", full)
+	full := string(unresolvedMD)
+	for _, want := range []string{"❌transient", "❌canceled", "⚠️trunc"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("the per-group sibling should still carry %q inline, unmoved:\n%s", want, full)
+		}
 	}
 }
 

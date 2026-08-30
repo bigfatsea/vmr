@@ -35,13 +35,24 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("%s\n\n", t.ByDateTitle(cur))
 		h := t.ByDateHeaders
 		tbl := newTable(w, h[0], h[1], h[2], h[3])
+		unpricedDate := false
 		for _, d := range rep.ByDate {
 			if d.CostEstimate != nil {
 				tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut),
 					fmt.Sprintf("%.4f %s", *d.CostEstimate, cur))
+			} else {
+				// A ByDate row always has ≥1 record (aggregate.go keys it
+				// per-record); CostEstimate == nil means none of that day's
+				// records resolved a rate. Silently dropping the row reads
+				// as "this day is missing" to anyone cross-checking §5's
+				// daily activity — flag it instead.
+				unpricedDate = true
 			}
 		}
 		w("\n")
+		if unpricedDate {
+			w("%s\n\n", t.ByDatePartialNote)
+		}
 	}
 
 	hasModel := false

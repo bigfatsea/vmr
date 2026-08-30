@@ -7,11 +7,12 @@ import "strconv"
 
 // CorpusText is render_corpus.go's text, in one language.
 type CorpusText struct {
-	Title            string
-	JourneyCount     func(n int) string
-	NoJourneys       string
-	MetricDistTitle  string
-	MetricDistHeader string
+	Title              string
+	JourneyCount       func(n int) string
+	NoJourneys         string
+	MetricDistTitle    string
+	MetricDistHeader   string
+	MetricDistFootnote string
 
 	FindingRateTitle  string
 	FindingRateHeader string
@@ -52,8 +53,9 @@ func Corpus(lang Lang) CorpusText {
 			JourneyCount: func(n int) string { return "> 分析了 " + strconv.Itoa(n) + " 个 Journey\n\n" },
 			NoJourneys:   "没有可分析的 Journey。\n",
 
-			MetricDistTitle:  "## 指标分布\n\n",
-			MetricDistHeader: "| 指标 | 样本数 | 均值 | 中位数 | 最小值 | 最大值 | P90 |\n|---|---|---|---|---|---|---|\n",
+			MetricDistTitle:    "## 指标分布\n\n",
+			MetricDistHeader:   "| 指标 | 样本数 | 均值 | 中位数 | 最小值 | 最大值 | P90 |\n|---|---|---|---|---|---|---|\n",
+			MetricDistFootnote: "> 时间类指标的均值对少数超长 Journey 极其敏感——单个跨多日的 Journey（同一 lineage 内空闲间隔的累积）就能把均值抬到远高于典型值，甚至高于 P90。判断常见情况请优先看中位数与 P90，均值仅作总体负载的参考。\n\n",
 
 			FindingRateTitle:  "## Finding 命中率\n\n",
 			FindingRateHeader: "| Code | 命中率（至少一次） |\n|---|---|\n",
@@ -93,8 +95,9 @@ func Corpus(lang Lang) CorpusText {
 		JourneyCount: func(n int) string { return "> Analyzed " + strconv.Itoa(n) + " journeys\n\n" },
 		NoJourneys:   "No journeys to analyze.\n",
 
-		MetricDistTitle:  "## Metric Distributions\n\n",
-		MetricDistHeader: "| Metric | N | Mean | Median | Min | Max | P90 |\n|---|---|---|---|---|---|---|\n",
+		MetricDistTitle:    "## Metric Distributions\n\n",
+		MetricDistHeader:   "| Metric | N | Mean | Median | Min | Max | P90 |\n|---|---|---|---|---|---|---|\n",
+		MetricDistFootnote: "> Mean on the time-based metrics is very sensitive to a few long-lived journeys — a single journey spanning days of wall-clock (idle gaps accumulating within one lineage) can pull it well above the typical case, even above P90. Read Median and P90 for the common case; treat Mean only as a total-load signal.\n\n",
 
 		FindingRateTitle:  "## Finding Hit Rates\n\n",
 		FindingRateHeader: "| Code | Hit Rate (≥1 occurrence) |\n|---|---|\n",

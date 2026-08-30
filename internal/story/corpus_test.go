@@ -371,6 +371,14 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 				t.Errorf("rendered corpus report missing %q:\n%s", want, md)
 			}
 		}
+		// The distribution table always carries the "Mean is skewed by a few
+		// long-lived journeys" caveat — a raw Mean next to a tiny Median
+		// otherwise reads as "agent execution takes hours" to a non-
+		// statistical reader (see the 36-day Max case in the reports-
+		// generation review).
+		if !strings.Contains(md, i18n.Corpus(i18n.EN).MetricDistFootnote) {
+			t.Errorf("rendered corpus report missing the metric-distribution mean-skew footnote:\n%s", md)
+		}
 	})
 
 	t.Run("distribution table renders human units, not raw numbers (regression)", func(t *testing.T) {

@@ -8,20 +8,18 @@ import "strconv"
 
 // RequestsText is requests.go's text, in one language.
 type RequestsText struct {
-	ChatUserHeader         func(clientKey string, sessions, tasks, turns int) string
-	CronHeader             func(class string, n int) string
-	IndexTitle             string
-	GroupSummary           func(requests int, successPct, fresh, cached, out, cacheEffPct string) string
-	GroupDetailLink        func(file string) string
-	ChatUserLegend         string
-	ScheduledSummary       func(successPct, fresh, cached, out string) string
-	ScheduledTableHeader   string
-	FailedIndexTitle       string
-	FailedIndexIntro       func(n int) string
-	FailedTableHeader      string
-	AllRequestsTitle       string
-	AllRequestsTableHeader string
-	SessionCardHeader      func(label, ts string, tasks, requests int, classNote string) string
+	ChatUserHeader       func(clientKey string, sessions, tasks, turns int) string
+	CronHeader           func(class string, n int) string
+	IndexTitle           string
+	GroupSummary         func(requests int, successPct, fresh, cached, out, cacheEffPct string) string
+	GroupDetailLink      func(file string) string
+	ChatUserLegend       string
+	ScheduledSummary     func(successPct, fresh, cached, out string) string
+	ScheduledTableHeader string
+	FailedIndexTitle     string
+	FailedIndexIntro     func(n int) string
+	FailedTableHeader    string
+	SessionCardHeader    func(label, ts string, tasks, requests int, classNote string) string
 	// JourneyLinkLine is the "session row → journey" edge (P6.2c) — path
 	// is relative to the vmr-requests-<tag>.md this line is rendered into.
 	JourneyLinkLine func(path string) string
@@ -51,11 +49,9 @@ func Requests(lang Lang) RequestsText {
 			ScheduledTableHeader: "| 时间 | finish | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|\n",
 			FailedIndexTitle:     "VMR 失败请求索引",
 			FailedIndexIntro: func(n int) string {
-				return "专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，按时间排序，每条直链到对应的 details/*.md。不影响其他报表——这些记录在 vmr-requests.md 及其分组 sibling 文件里照常出现，本文件只是额外的索引。共 " + strconv.Itoa(n) + " 条。\n\n"
+				return "专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，按时间排序，每条直链到对应的 details/*.md。不影响其他报表——这些记录在各分组明细文件（vmr-requests-<tag>.md / -unresolved.md）里照常出现，本文件只是额外的索引。共 " + strconv.Itoa(n) + " 条。\n\n"
 			},
-			FailedTableHeader:      "| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n",
-			AllRequestsTitle:       "全部请求（时间序）",
-			AllRequestsTableHeader: "| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|---|---|\n",
+			FailedTableHeader: "| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n",
 			SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 				return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " 任务 " + strconv.Itoa(requests) + " 轮" + classNote + "\n\n"
 			},
@@ -86,11 +82,9 @@ func Requests(lang Lang) RequestsText {
 		ScheduledTableHeader: "| Time | finish | dur | fresh/cached/out | cache-eff⭐ | File |\n|---|---|---|---|---|---|\n",
 		FailedIndexTitle:     "VMR Failed Request Index",
 		FailedIndexIntro: func(n int) string {
-			return "Dedicated for error analysis: every request with outcome error / canceled, plus outcome=ok but truncated (stream broke mid-way), sorted by time, each linking straight to its details/*.md. Purely additive — these records still appear as usual in vmr-requests.md and its per-group sibling files; this file is just an extra index. " + strconv.Itoa(n) + " total.\n\n"
+			return "Dedicated for error analysis: every request with outcome error / canceled, plus outcome=ok but truncated (stream broke mid-way), sorted by time, each linking straight to its details/*.md. Purely additive — these records still appear as usual in the per-group detail files (vmr-requests-<tag>.md / -unresolved.md); this file is just an extra index. " + strconv.Itoa(n) + " total.\n\n"
 		},
-		FailedTableHeader:      "| Time | Session/Task | VM/API | outcome⭐ | dur | File |\n|---|---|---|---|---|---|\n",
-		AllRequestsTitle:       "All Requests (chronological)",
-		AllRequestsTableHeader: "| Time | Session/Task | VM/API | outcome⭐ | dur | fresh/cached/out | cache-eff⭐ | File |\n|---|---|---|---|---|---|---|---|\n",
+		FailedTableHeader: "| Time | Session/Task | VM/API | outcome⭐ | dur | File |\n|---|---|---|---|---|---|\n",
 		SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 			return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " tasks " + strconv.Itoa(requests) + " turns" + classNote + "\n\n"
 		},

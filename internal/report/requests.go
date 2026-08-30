@@ -115,9 +115,8 @@ type indexEntry struct {
 }
 
 // WriteRequestsIndex writes vmr-requests.md (a pure per-group index: header
-// + one-line summary + link to that group's sibling file, plus the full
-// "all requests, chronological" table) and one fully-detailed sibling per
-// group: vmr-requests-<tag>.md per real client_key_tag,
+// + one-line summary + link to that group's sibling file) and one
+// fully-detailed sibling per group: vmr-requests-<tag>.md per real client_key_tag,
 // vmr-requests-unresolved.md for sessions carrying no tag,
 // vmr-requests-cron-<tag>.md per scheduled class. Titles come from sess.
 // journeyLink (P6.2c) maps a session's id (now a Lineage's content-
@@ -202,8 +201,6 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 			pctStr(e.summary.cacheEff)))
 		w("%s", t.GroupDetailLink(e.file))
 	}
-	w("---\n\n")
-	writeAllRequestsFooter(w, rows, t, detailSet)
 	return os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(b.String()), 0o600)
 }
 
@@ -320,8 +317,8 @@ func groupSessions(rows []RequestRow, sessionMeta map[string]SessionRow) ([]stri
 // regardless of client; everything else — interactive sessions, any
 // multi-turn scheduled session, and any ungrouped row — is an individual
 // card grouped by Chat User (client_key, "(unresolved)" when empty). Shared
-// with Markdown() so its header/footer per-client link lists only ever
-// point at a client tag that actually got a vmr-requests-<tag>.md sibling
+// with WriteRequestsIndex so the index's per-client link list only ever
+// points at a client tag that actually got a vmr-requests-<tag>.md sibling
 // written — a client whose only traffic was single-shot scheduled requests
 // gets no sibling file at all.
 func partitionGroups(rows []RequestRow, sessionMeta map[string]SessionRow) (chatUser map[string][]*sessGroup, scheduled map[string][]RequestRow, scheduledOrder []string) {
@@ -447,22 +444,6 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
 	}
 	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
-}
-
-// writeAllRequestsFooter appends the flat "all requests, chronological"
-// table covering every row regardless of grouping — kept only in the main
-// index, since it's the one place a cross-group chronological view belongs.
-func writeAllRequestsFooter(w func(string, ...any), rows []RequestRow, t i18n.RequestsText, detailSet map[string]struct{}) {
-	w("# %s\n\n", t.AllRequestsTitle)
-	all := append([]RequestRow(nil), rows...)
-	sort.SliceStable(all, func(i, j int) bool { return all[i].TS < all[j].TS })
-	w("%s", t.AllRequestsTableHeader)
-	for _, r := range all {
-		w("| %s | %s | %s/%s | %s | %s | %s | %s | %s |\n",
-			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
-			outcomeCell(r), fmtDurMS(r.DurMS), freshCachedOut(r), cacheEffTurn(r), detailCell(r, detailSet))
-	}
-	w("\n")
 }
 
 // renderSessionCard renders one session card ("## sNN · ts · N tasks M
@@ -609,7 +590,7 @@ func cacheEffTurn(r RequestRow) string {
 // a set — detailCell's existence check (P13.4) would otherwise be one
 // os.Stat per row, and a full request index re-renders every row across
 // several tables (per-session cards, the scheduled rollup, the failed
-// index, the all-requests footer): a real full-corpus run (11k+ requests,
+// index): a real full-corpus run (11k+ requests,
 // story_report_full_review_opus-5.md's M12) would issue 20,000+ redundant
 // stat syscalls — most of them ENOENT lookups against an empty or
 // nonexistent directory on the common (default suite) path — for

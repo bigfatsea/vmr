@@ -104,9 +104,9 @@ section.block { margin-bottom: 36px; scroll-margin-top: 14px; }
 section.block > h2 { font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
   border-bottom: 1px solid var(--rule); padding-bottom: 7px; margin: 0 0 16px; color: var(--ink-dim); }
 
-/* Sequence of events */
-.task { margin-bottom: 18px; scroll-margin-top: 14px; }
-.task > h3 { font-size: 11px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .1em; margin: 14px 0 6px; }
+/* Sequence of events — Task heading sits on the rail, its Steps indent under it */
+.task { margin-bottom: 18px; scroll-margin-top: 14px; padding-left: 16px; border-left: 2px solid var(--rule); }
+.task > h3 { font-size: 11px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .1em; margin: 14px 0 6px -18px; }
 .task > h3 .tt { text-transform: none; color: var(--ink); font-weight: 400; letter-spacing: 0; font-family: var(--sans); }
 .srow { border: 1px solid var(--rule); border-left: 3px solid var(--rule); border-radius: 5px;
   padding: 8px 12px; margin: 6px 0; background: var(--panel); scroll-margin-top: 14px; }

@@ -33,6 +33,7 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 
 	w("%s", t.MetricDistTitle)
 	w("%s", t.MetricDistHeader)
+	metricRows := 0
 	for _, spec := range metricSpecs {
 		d, ok := stats.MetricDist[spec.Code]
 		if !ok {
@@ -41,8 +42,12 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 		w("| %s | %d | %s | %s | %s | %s | %s |\n",
 			i18n.MetricLabel(lang, string(spec.Code)), d.Count,
 			formatMetric(spec.Kind, d.Mean), formatMetric(spec.Kind, d.Median), formatMetric(spec.Kind, d.Min), formatMetric(spec.Kind, d.Max), formatMetric(spec.Kind, d.P90))
+		metricRows++
 	}
 	w("\n")
+	if metricRows > 0 {
+		w("%s", t.MetricDistFootnote)
+	}
 
 	if note := anthropicCoverageNote(stats.ProtocolShare, t); note != "" {
 		w("%s", note)
