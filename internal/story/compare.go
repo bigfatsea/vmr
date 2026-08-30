@@ -15,10 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
-	"vmr/internal/taskseg"
 	"vmr/internal/tokenutil"
 )
 
@@ -319,47 +317,31 @@ type InitialInstructionFact struct {
 	B InitialInstructionStats `json:"b"`
 }
 
-// initialInstructionStats finds j's opening instruction — dialect-aware,
-// the same extraction journey.go's deriveTitle uses for j.Title (prof.
-// RealUserText, scoped to the Journey's very first Step, matching
-// deriveTitle's own firstRu scope), just without the Preview() truncation
-// deriveTitle's short summary needs. This deliberately does NOT scan
-// j.Events for the first Role=="user" message: that stream isn't
-// dialect-filtered, and for an agent framework whose client injects
-// scaffold/heartbeat text as role="user" (OpenClawAware — see its
-// RealUserText doc comment), the first such Event can be transport noise,
-// not the real instruction the SideBlock title above this excerpt already
-// (correctly) shows — showing a DIFFERENT, unfiltered text underneath would
-// contradict it rather than expand on it.
-func initialInstructionStats(j *Journey, prof taskseg.Profile) InitialInstructionStats {
-	steps := journeySteps(j)
-	if len(steps) == 0 || steps[0].Rec == nil {
+// initialInstructionStats renders j's opening instruction — j.Initial-
+// Instruction, extracted in buildFrom by the same dialect-aware
+// prof.RealUserText scan over the Journey's first Step that deriveTitle
+// uses for j.Title, just kept raw here (deriveTitle Preview-truncates for
+// its short summary; this applies its own wider initialInstructionExcerpt-
+// Chars bound). Deliberately NOT j.Events' first Role=="user" message:
+// that stream isn't dialect-filtered, so for a client that injects
+// scaffold/heartbeat as role="user" the first such Event can be transport
+// noise, contradicting the (correct) SideBlock title above this excerpt.
+func initialInstructionStats(j *Journey) InitialInstructionStats {
+	if j.InitialInstruction == "" {
 		return InitialInstructionStats{}
 	}
-	body, _ := steps[0].Rec.Client.Request.Body.(map[string]any)
-	msgs := chatmsg.Messages(body)
-	rawMsgs := chatmsg.RawArray(body)
-	off := chatmsg.MsgOffset(body)
-	for i, m := range msgs {
-		if m.Role != "user" {
-			continue
-		}
-		if raw, ok := prof.RealUserText(m, rawMsgs, i-off); ok {
-			text, truncated := truncateText(raw, initialInstructionExcerptChars)
-			return InitialInstructionStats{Found: true, Text: text, Truncated: truncated}
-		}
-	}
-	return InitialInstructionStats{}
+	text, truncated := truncateText(j.InitialInstruction, initialInstructionExcerptChars)
+	return InitialInstructionStats{Found: true, Text: text, Truncated: truncated}
 }
 
 // ComputeComparisonExtras derives ComparisonExtras for jA/jB. ma/mb
 // are the same Metrics Compare(Summarize(jA), Summarize(jB)) already
 // computed — passed in rather than recomputed so a caller that already has
-// both JourneySummary values doesn't pay for ComputeMetrics twice. prof is
-// the SAME Profile both Journeys were already built with (cmd_story.go's
-// compareJourneys calls story.BuildChain(chain, prof, lang) for both sides)
-// — initialInstructionStats needs it for dialect-aware extraction.
-func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profile, res *pricing.Resolver, currency string) ComparisonExtras {
+// both JourneySummary values doesn't pay for ComputeMetrics twice. The
+// dialect-aware opening-instruction extraction both Journeys' Profile once
+// drove now lives in buildFrom (j.InitialInstruction), so no Profile is
+// threaded here any more.
+func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, res *pricing.Resolver, currency string) ComparisonExtras {
 	return ComparisonExtras{
 		Endpoints:          endpointsFact(jA, jB),
 		Cache:              CacheFact{A: cacheStats(jA), B: cacheStats(jB)},
@@ -367,7 +349,7 @@ func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profi
 		FinalContext:       finalContextFact(ma, mb),
 		Duration:           durationFact(jA, jB),
 		Deliverable:        DeliverableFact{A: deliverableStats(jA), B: deliverableStats(jB)},
-		InitialInstruction: InitialInstructionFact{A: initialInstructionStats(jA, prof), B: initialInstructionStats(jB, prof)},
+		InitialInstruction: InitialInstructionFact{A: initialInstructionStats(jA), B: initialInstructionStats(jB)},
 		Divergence:         computeDivergence(jA, jB),
 		Cost:               CostPair{A: ComputeJourneyCost(jA, res, currency), B: ComputeJourneyCost(jB, res, currency)},
 	}
@@ -460,34 +442,10 @@ func sysPromptStats(j *Journey) SysPromptStats {
 			target = s
 		}
 	}
-	texts := systemMessageTexts(target)
+	texts := j.SysText[target.Manifest.SysHash]
 	tokens := systemTokenCount(texts)
 	text, truncated := truncateText(strings.Join(texts, "\n\n"), sysPromptExcerptChars)
 	return SysPromptStats{Tokens: tokens, Changes: changes, Excerpt: text, Truncated: truncated}
-}
-
-// systemMessageTexts parses s's leading system-role message(s) (LeadSys of
-// them, mirroring how ctxgraph folds them for SysHash) exactly once — both
-// the token count (systemTokenCount) and the excerpt text sysPromptStats
-// builds derive from this same slice, instead of each independently
-// re-parsing s.Rec.Client.Request.Body (the previous shape of this code: a
-// contextTokensAt(j, seq) that re-walked journeySteps AND re-parsed the
-// body, plus a separate sysPromptText(s) that parsed the same body again).
-func systemMessageTexts(s *Step) []string {
-	if !s.Manifest.HasSys {
-		return nil
-	}
-	body, _ := s.Rec.Client.Request.Body.(map[string]any)
-	msgs := chatmsg.Messages(body)
-	n := s.Manifest.LeadSys
-	if n > len(msgs) {
-		n = len(msgs)
-	}
-	parts := make([]string, 0, n)
-	for i := 0; i < n; i++ {
-		parts = append(parts, msgs[i].Text)
-	}
-	return parts
 }
 
 // systemTokenCount sums tokenutil.EstimateText over texts — the same

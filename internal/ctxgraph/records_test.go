@@ -3,6 +3,8 @@
 package ctxgraph
 
 import (
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,5 +85,100 @@ func TestFetchRecords_EmptyLocs(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d", len(got))
+	}
+}
+
+func TestForEachRecord_MatchesFetchRecords(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	r1 := mkAuditRec(at, chatBody(sysMsg("sys"), userMsg("one")))
+	r2 := mkAuditRec(at.Add(time.Second), chatBody(sysMsg("sys"), userMsg("one"), assistantMsg("two")))
+	r3 := mkAuditRec(at.Add(2*time.Second), chatBody(sysMsg("sys"), userMsg("three")))
+	path := writeJSONL(t, []audit.Record{r1, r2, r3})
+
+	locs := []Loc{{Path: path, Line: 1}, {Path: path, Line: 3}}
+	want, err := FetchRecords(locs)
+	if err != nil {
+		t.Fatalf("FetchRecords: %v", err)
+	}
+
+	got := map[Loc]*audit.Record{}
+	var mu sync.Mutex
+	if err := ForEachRecord(locs, func(loc Loc, rec *audit.Record) {
+		mu.Lock()
+		got[loc] = rec
+		mu.Unlock()
+	}); err != nil {
+		t.Fatalf("ForEachRecord: %v", err)
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("ForEachRecord yielded %d records, FetchRecords %d", len(got), len(want))
+	}
+	for loc, w := range want {
+		g, ok := got[loc]
+		if !ok {
+			t.Errorf("%v missing from ForEachRecord", loc)
+			continue
+		}
+		wb, _ := w.Client.Request.Body.(map[string]any)
+		gb, _ := g.Client.Request.Body.(map[string]any)
+		if len(wb["messages"].([]any)) != len(gb["messages"].([]any)) {
+			t.Errorf("%v message count differs", loc)
+		}
+	}
+	if _, ok := got[Loc{Path: path, Line: 2}]; ok {
+		t.Error("line 2 should not be yielded (not requested)")
+	}
+}
+
+func TestForEachRecord_MissingFile(t *testing.T) {
+	t.Parallel()
+	err := ForEachRecord([]Loc{{Path: "/nonexistent", Line: 1}}, func(Loc, *audit.Record) {})
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestForEachRecord_EmptyLocs(t *testing.T) {
+	t.Parallel()
+	n := 0
+	if err := ForEachRecord(nil, func(Loc, *audit.Record) { n++ }); err != nil {
+		t.Fatalf("ForEachRecord(nil): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("callback fired %d times on empty input", n)
+	}
+}
+
+func TestScanFile_PopulatesManifestBytes(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	recs := []audit.Record{
+		mkAuditRec(at, chatBody(sysMsg("sys"), userMsg("short"))),
+		mkAuditRec(at.Add(time.Second), chatBody(sysMsg("sys"), userMsg(strings.Repeat("padding ", 500)))),
+	}
+	path := writeJSONL(t, recs)
+	g, err := Scan([]string{path})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	var seen int
+	for _, l := range g.Lineages {
+		for _, m := range l.Manifests {
+			seen++
+			if m.Bytes <= 0 {
+				t.Errorf("manifest line %d: Bytes = %d, want > 0", m.Line, m.Bytes)
+			}
+		}
+	}
+	for _, m := range g.Ungrouped {
+		seen++
+		if m.Bytes <= 0 {
+			t.Errorf("ungrouped manifest line %d: Bytes = %d, want > 0", m.Line, m.Bytes)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no manifests produced")
 	}
 }

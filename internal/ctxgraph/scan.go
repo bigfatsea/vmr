@@ -140,6 +140,7 @@ func scanFile(path string) fileScanResult {
 			return
 		}
 		if m, ok := BuildManifest(&rec, path, line); ok {
+			m.Bytes = len(lineBytes) // decompressed JSON line length — see Manifest.Bytes
 			out = append(out, m)
 		} else {
 			noBody++

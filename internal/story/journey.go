@@ -51,6 +51,18 @@ type Journey struct {
 	// ChainFrom would have included that predecessor, making IT Chain[0]).
 	Break *ctxgraph.BreakInfo
 	Chain []*ctxgraph.Lineage
+
+	// InitialInstruction is the raw (un-Preview'd) text of the Journey's
+	// opening real user instruction — compare.go's initialInstructionStats
+	// applies its own wider bound. "" when the first Step carried no real
+	// instruction the profile accepted. Extracted in buildFrom so it
+	// doesn't need steps[0]'s full Record.
+	InitialInstruction string
+	// SysText maps each leading-system-block SysHash the Journey used to
+	// that block's individual message texts — populated by fillStepFacts,
+	// deduped by hash. compare.go's sysPromptStats and
+	// render_md_sysprompt.go read it instead of re-parsing a Step's Record.
+	SysText map[ctxgraph.Hash][]string
 }
 
 // JourneyReportFile is the single source of truth for a journey report's
@@ -76,7 +88,6 @@ type Task struct {
 type Step struct {
 	Seq        int // 1-based, across the whole Journey
 	Manifest   *ctxgraph.Manifest
-	Rec        *audit.Record
 	Edge       *ctxgraph.Edit // nil for the Journey's first step, or at a stitch boundary
 	DeltaStart int            // absolute message index where this step's new content begins
 	NewEvents  []*Event       // events first introduced by this step, in order
@@ -145,6 +156,30 @@ type Step struct {
 	// absent, not when-a-provider-doesn't-support-it vs. empty-this-turn are
 	// not distinguished, same convention RespText already uses.
 	Reasoning string
+
+	// The four fields below are extracted once by fillStepFacts (see
+	// journey_stepfacts.go), so consumers don't reach back into a full
+	// audit.Record the Journey no longer holds.
+
+	// Context is this Step's own request body token composition by role —
+	// what metrics.go's contextCurve renders, one point per Step.
+	Context ContextPoint
+	// Attempts mirrors audit.Record.Attempts, trimmed to the (Provider,
+	// Model) pairs modelusage.go tallies plus the count render_html_
+	// dashboard.go's failover marker needs.
+	Attempts []AttemptFact
+	// NewToolResults is every tool_result this Step's own delta introduced —
+	// the results answering the PREVIOUS Step's tool calls (a well-formed
+	// turn can't advance without its pending calls answered first).
+	// findings_toolresult.go / render_spine_step.go match the calling
+	// Step's tool-call ids against the next Step's NewToolResults instead of
+	// re-scanning that Step's raw body.
+	NewToolResults []chatmsg.ToolResult
+	// SysChars is the rune length of this Step's leading system block (the
+	// text behind Manifest.SysHash) — render_md_sysprompt.go / compare.go
+	// show it per system-prompt era. 0 when the request had no leading
+	// system message.
+	SysChars int
 }
 
 // CompactionInfo is the information-loss summary attached to a stitch
@@ -241,16 +276,26 @@ func BuildChain(chain []*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang)
 // whole batch (matches BuildChain's own all-or-nothing contract for a
 // single chain).
 func BuildAll(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) ([]*Journey, error) {
+	js, _, err := BuildAllWithRecords(chains, prof, lang)
+	return js, err
+}
+
+// BuildAllWithRecords is BuildAll plus the batched record map it fetched —
+// for a caller that then materializes each Journey's detail pages
+// (cmd/vmr's renderJourneys) and would otherwise re-decompress the same
+// source files. The map is the batch's whole working set; drop the
+// reference once details are written so the next batch starts clean.
+func BuildAllWithRecords(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) ([]*Journey, map[ctxgraph.Loc]*audit.Record, error) {
 	if prof == nil {
-		return nil, errNilProfile
+		return nil, nil, errNilProfile
 	}
 	for _, chain := range chains {
 		if len(chain) == 0 {
-			return nil, errEmptyLineage
+			return nil, nil, errEmptyLineage
 		}
 		for _, l := range chain {
 			if len(l.Manifests) == 0 {
-				return nil, errEmptyLineage
+				return nil, nil, errEmptyLineage
 			}
 		}
 	}
@@ -263,7 +308,7 @@ func BuildAll(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang
 	}
 	recs, err := ctxgraph.FetchRecords(locs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	out := make([]*Journey, len(chains))
@@ -283,10 +328,10 @@ func BuildAll(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang
 
 	for _, e := range errs {
 		if e != nil {
-			return nil, e
+			return nil, nil, e
 		}
 	}
-	return out, nil
+	return out, recs, nil
 }
 
 // buildWorkerCount bounds Journey-construction concurrency the same way
@@ -380,17 +425,14 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			if rec == nil {
 				continue // defensive: FetchRecords silently drops a line it couldn't parse a second time
 			}
-			body, _ := rec.Client.Request.Body.(map[string]any)
-			msgs := chatmsg.Messages(body)
-			rawMsgs := chatmsg.RawArray(body)
-			off := chatmsg.MsgOffset(body)
-			// Built once per step and threaded into HasNewInstruction/
+			// ru is built once per step and threaded into HasNewInstruction/
 			// LastInstruction/newInstructionTitleAtStitch below instead of
 			// each re-scanning msgs itself — this manifest's real-instruction
 			// regex work used to run up to 2-3 times per step before B3.
-			ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
+			msgs, rawMsgs, off, ru := parseManifestBody(rec, prof)
 			if !firstRuSet {
 				firstRu, firstRuSet = ru, true
+				j.InitialInstruction = firstRealInstruction(prof, msgs, rawMsgs, off)
 			}
 
 			atStitchBoundary := ci > 0 && i == 0
@@ -464,6 +506,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 
 			seq++
 			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, instr, stepPrevManifest, prof)
+			fillStepFacts(j, step, rec, msgs, rawMsgs, off, deltaStart)
 			prevNoReply = step.NoReply
 			appendNewEvents(j, step, m, msgs, rawMsgs, off, deltaStart, revisesHash, seen)
 			curTask.Steps = append(curTask.Steps, step)
@@ -481,7 +524,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 // buildFrom purely to stay under the architecture review's function-length
 // budget, not because it's an independently meaningful step.
 func buildStep(seq int, m *ctxgraph.Manifest, rec *audit.Record, edge *ctxgraph.Edit, stitchEdge *ctxgraph.StitchEdge, sysChanged bool, compaction *CompactionInfo, deltaStart int, humanInitiated bool, instr string, prevManifest *ctxgraph.Manifest, prof taskseg.Profile) *Step {
-	step := &Step{Seq: seq, Manifest: m, Rec: rec, Edge: edge, StitchEdge: stitchEdge,
+	step := &Step{Seq: seq, Manifest: m, Edge: edge, StitchEdge: stitchEdge,
 		SysChanged: sysChanged, Compaction: compaction, DeltaStart: deltaStart,
 		HumanInitiated: humanInitiated, Instruction: instr, PrevManifest: prevManifest}
 	if rec.Client.Response != nil {

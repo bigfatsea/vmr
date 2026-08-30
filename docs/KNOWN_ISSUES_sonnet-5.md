@@ -17,7 +17,8 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 18，合计 21。无 `[中低]` 条目。§3 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
+- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 20，合计 23。无 `[中低]` 条目。§3 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
+- **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §1.2。
 
 ---
 
@@ -35,15 +36,18 @@
 ### 1.2 [中] `vmr report` / `vmr analyze` 全内存聚合的记录量上限
 
 - **现状**：`AnalyzeSessions` 常驻全部记录关键信息 + 原始耗时/延迟/Token 样本切片（算真实百分位）。实测万级记录即 GB 级 RSS（`report` 单跑约 1.4GB / 1.1 万条；`analyze` 组合路径约 3.75GB / 1.5 万条）——原文「千万级约数百 MB」是量级判断错误，已作废。
+- **story 半边曾是更大的来源，已消除**：`story.Step` 曾持有完整 `audit.Record`，让每 request 重发全历史的 O(N²) 原始字节钉在对象图里——`vmr analyze -corpus` 因此在全量语料上峰值约 43GB（16GB 机器 swap thrashing 假死）。2026-08 改动：`Step` 只保留 `buildFrom` 预提取的事实，不再持有记录；`-corpus`/`-render-all` 改为按 `Manifest.Bytes` 字节预算分批构建。实测（43 文件 / 约 12.4GB 解压）`-corpus` 峰值 RSS 从约 43GB 降到约 2.4GB、`-render-all` 从 4.1GB 到 1.9GB（详见 `CHANGELOG` [Unreleased] 与 `docs/ANALYZE_MEMORY_ACTIONPLAN_sonnet-5.md`）。全部 Journey 常驻只剩约 300MB，与语料量解耦。
+- **剩下的**：report 半边的 `AnalyzeSessions` 样本切片仍是全内存（未触及本次改动）。
 - **可能方案**：按审计日志的时间局部性分自然日分桶，跨日即时释放原始切片。
-- **为什么仍待定**：这个量级目前仍跑得完（4GB 在 16GB 机器上有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错。**触发条件：单次分析语料 > 约 2 万条（`analyze` 路径）/ 3 万条（`report` 单跑），或峰值 RSS > 4GB**——按实测斜率约三个月历史日志。
+- **为什么仍待定**：report 半边这个量级目前仍跑得完（约 1.6GB / 1.5 万条，16GB 机器有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错。**触发条件：单次 `report`/`analyze` 宏观半边语料 > 约 3 万条，或该半边峰值 RSS > 4GB**。
 - **一处已做的收窄**：`ctxgraph/stitch.go` blob 倒排索引 `map[Hash]map[int]bool` → `map[Hash][]int`（去掉数百万单元素小 map 头开销），只降常数、不改分桶前提。
 - **相关未做项（warm-path，登记待触发）**：语料不变、只渲染单个 journey 时，`setupStoryRun` 仍无条件全量 `ScanCached` + `buildGraph` + `StitchGraph`。窄路径需给 `vmr-stories.json` 的 `JourneyIndexRow` 补 `stitch_edges`（每条 lineage 的前驱边持久化，按内容寻址 `LineageID` 重放，避开 tie-break 不确定性）+ 一条陈旧性闸 warm path。触发条件同上（语料 > 约 3 万条，或大语料上反复 `-journey` 调查）。
 
-### 1.3 [低] `chatmsg` 离线解析路径的 `map[string]any` 分配
+### 1.3 [低，决定不做] `chatmsg` 离线解析路径的 `map[string]any` 分配
 
 - **现状**：`internal/chatmsg` 43 处 `map[string]any`，全在离线消息/SSE/usage 解析路径。转发热路径实测零命中。
-- **为什么待定**：离线路径耗时由磁盘 I/O 与 zstd 主导，改具体结构体的收益未经证明。先在真实审计日志跑 benchmark 拿 profile，没有 profile 数据前不动。
+- **决定不做**：2026-08 内存分析在真实语料上直接测了这一层——`audit.Record` 反序列化后的 live heap 相对原始 JSON 字节只放大 **1.40x**（审计记录绝大部分是长文本对话正文，`string` 只有 16 字节 header，结构开销被文本稀释）。把 `Body` 从 `any` 改成 `json.RawMessage` 延迟解析最多省 29%，不改变量级，却要改动 `story`/`report`/`reqdetail`/`chatmsg` 里几十处 `.(map[string]any)` 断言——投入产出比最差。story 半边的内存问题另有真因（见 §1.2），已单独解决。
+- **触发条件**：真实 profile 显示某个离线聚合路径的时间/内存确由 `map[string]any` 分配主导（当前证据相反）。
 
 ### 1.6 [低] §2.5 表格的标记符号已达四个
 
@@ -140,6 +144,19 @@
 
 - **现状**：`/help.html`（`internal/server` 里的 `help.html` + `help.zh.html` 双语内嵌页，各 ~1550 行）已有一键复制各 Agent 接入片段、鉴权弹窗、`fetch('/status')` 健康展示。增长战略文档提过「页内直接发一次测试请求看命中节点/延迟」——`X-VMR-Endpoint`/`X-VMR-Attempts`/`X-VMR-Route-Reason` 响应头已具备，技术上可行。
 - **为什么暂不做**：真实工作量约 1–1.5 人日（双语内嵌 HTML 锁步、真实计费请求、streaming、错误面、虚拟模型选择器、内嵌 JS 无 Go 测试）。这是 onboarding 漏斗功能，被 `vmr init`/`vmr connect`（战略文档第一梯队）完全压制——真做漏斗应先做那两个。战略文档里本就列在第三梯队。2026-08-30 增长打磨批次评估确认延后。
+
+### 1.55 [低，登记待触发] `story` 的 `BuildAll` 仍先把一批的全部记录物化成 map
+
+- **现状**：2026-08 改动让 `Step` 不再持有 `audit.Record`，全部 Journey 常驻降到约 300MB；但 `BuildAll` 内部仍 `FetchRecords` 把一批（字节预算 ~160MiB 原始）的记录一次性收进 `map[Loc]*audit.Record` 再 `buildFrom`，这个 map 是每批的瞬时峰值来源（约几百 MB）。
+- **可能方案**：全流式——`FetchRecords` 的 map 也不要，逐条喂给 builder。要求把 `buildFrom` 从「拿到全部记录后遍历」改成「按到达顺序 feed」，并处理并发扫文件的乱序（Event 的 `FirstStepSeq` 需按 seq 事后归并）。改动量比本次大一个量级。
+- **触发条件**：语料再涨约 5 倍，或需要在 8GB 以下机器上跑全量 `-corpus`/`-render-all`。
+
+### 1.56 [低，登记待触发] 一次 `vmr analyze` 至少把全量语料解压三遍
+
+- **现状**：`.parse-cache` 只覆盖 `ctxgraph` 的 manifest 扫描。`PreviewTitles`（全部候选根记录）、每批 `BuildAll` 的 `FetchRecords`、report 半边的 `analyzeFile`（§1.1）各自独立全量解压一遍——全量语料上是 `-render-all` 约 500s 耗时的主要来源。
+- **相关**：`FetchRecords` 的接口形状（返回全量 map）天然逼调用方驻留全部；`PreviewTitles` 是纯提取（读一条、取一句标题、丢弃），可顺手切 `ctxgraph.ForEachRecord`，消掉一个约 600MB 的瞬时峰值。
+- **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `story` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.parse-cache` 从几 MB 涨到约 160MB，且该 cache 是 report 半边共享的。跨包契约 + 双半边影响。
+- **触发条件**：内存不再是瓶颈后，时间成为首要痛点时单独立项。
 
 ## 2. 刻意取舍，不是缺陷
 

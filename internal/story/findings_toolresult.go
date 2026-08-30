@@ -19,14 +19,15 @@ import (
 )
 
 // toolResultsFor returns the ToolResult entries answering steps[i]'s own
-// ToolCalls. Looked up from the FOLLOWING step's request body rather than
-// steps[i]'s own — a well-formed protocol turn can't get a new response
-// without its pending tool_calls being answered first (the same causal
-// guarantee chatmsg.CheckToolPairing's F9 invariant rests on), so the
-// answering tool_results always show up as part of the next request's
-// history. Returns nil for a Step with no ToolCalls, or the Journey's last
-// Step (no following request to look in — its calls' results, if any,
-// aren't visible in what was recorded).
+// ToolCalls. Read from the FOLLOWING step's NewToolResults (the tool_results
+// that step's own delta introduced) rather than steps[i]'s own body — a
+// well-formed protocol turn can't get a new response without its pending
+// tool_calls being answered first (the same causal guarantee
+// chatmsg.CheckToolPairing's F9 invariant rests on), so the answering
+// tool_results always show up in the next request's new messages. Returns
+// nil for a Step with no ToolCalls, or the Journey's last Step (no
+// following request — its calls' results, if any, aren't in what was
+// recorded).
 //
 // Matches in two passes — exact id first, then chatmsg.NormalizeToolCallID's
 // underscore-stripped form — and, on a normalized-only match, rewrites the
@@ -37,7 +38,7 @@ import (
 // tc.ID, so this rewrite is what lets every one of them work unchanged: the
 // normalization is fully contained here.
 func toolResultsFor(steps []*Step, i int) []chatmsg.ToolResult {
-	if len(steps[i].ToolCalls) == 0 || i+1 >= len(steps) || steps[i+1].Rec == nil {
+	if len(steps[i].ToolCalls) == 0 || i+1 >= len(steps) {
 		return nil
 	}
 	exact := make(map[string]bool, len(steps[i].ToolCalls))
@@ -46,9 +47,12 @@ func toolResultsFor(steps []*Step, i int) []chatmsg.ToolResult {
 		exact[tc.ID] = true
 		byNorm[chatmsg.NormalizeToolCallID(tc.ID)] = tc.ID
 	}
-	body, _ := steps[i+1].Rec.Client.Request.Body.(map[string]any)
+	// The results answering step i's calls are exactly the tool_results the
+	// NEXT step's own delta introduced (a well-formed turn can't advance
+	// without its pending calls answered) — Step.NewToolResults, extracted
+	// at build time, instead of re-scanning steps[i+1]'s whole resent body.
 	var out []chatmsg.ToolResult
-	for _, r := range chatmsg.ToolResultList(chatmsg.RawArray(body)) {
+	for _, r := range steps[i+1].NewToolResults {
 		if exact[r.CallID] {
 			out = append(out, r)
 			continue

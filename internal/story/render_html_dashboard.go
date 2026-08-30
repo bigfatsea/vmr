@@ -53,12 +53,12 @@ func htmlStepRow(w func(string, ...any), s *Step, flagged bool, t i18n.StoryHTML
 	}
 	w("<article class=\"%s\" id=\"step-%d\">\n<div class=\"top\">\n", cls, s.Seq)
 	w("<span class=\"seq\">%s</span>\n", he(t.StepLabel(s.Seq)))
-	if s.Rec != nil {
-		w("<span class=\"ts\">%s</span>\n", he(s.Rec.TS.In(fmtutil.DisplayZone).Format("15:04:05")))
-		if s.Rec.Model != "" {
-			w("<span class=\"model\">%s</span>\n", he(s.Rec.Model))
+	if s.Manifest != nil {
+		w("<span class=\"ts\">%s</span>\n", he(s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05")))
+		if s.Manifest.Model != "" {
+			w("<span class=\"model\">%s</span>\n", he(s.Manifest.Model))
 		}
-		if n := len(s.Rec.Attempts); n > 1 {
+		if n := len(s.Attempts); n > 1 {
 			w("<span class=\"chip badge\">%s · %s</span>\n", he(t.FailoverBadge), he(t.Attempts(n)))
 		}
 	}

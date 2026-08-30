@@ -161,8 +161,8 @@ func htmlPointOfNoReturn(w func(string, ...any), p *PointOfNoReturn, allSteps []
 	}
 	ts := ""
 	for _, s := range allSteps {
-		if s.Seq == p.StepSeq && s.Rec != nil {
-			ts = s.Rec.TS.In(fmtutil.DisplayZone).Format("15:04:05")
+		if s.Seq == p.StepSeq && s.Manifest != nil {
+			ts = s.Manifest.TS.In(fmtutil.DisplayZone).Format("15:04:05")
 			break
 		}
 	}

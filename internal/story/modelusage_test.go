@@ -58,9 +58,9 @@ func TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel(t *testing.T
 func TestComputeModelUsage_SingleModelHasNoSwitches(t *testing.T) {
 	steps := []*Step{
 		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
-			Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
+			Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
 		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 200, Out: 20}},
-			Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
+			Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
 	}
 	stats, switches := computeModelUsage(steps)
 	if len(switches) != 0 {
@@ -75,11 +75,11 @@ func TestComputeModelUsage_SingleModelHasNoSwitches(t *testing.T) {
 // upstream attempt gets the observational OnFailoverStep marker.
 func TestComputeModelUsage_MarksOnFailoverStep(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{}, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
-		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Rec: &audit.Record{Attempts: []audit.Attempt{
-			{Provider: "p1", Model: "m1", Error: "rate_limit"}, // failed first attempt
-			{Provider: "p2", Model: "m2"},                      // succeeded on a different account
-		}}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{}, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
+		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Attempts: []AttemptFact{
+			{Provider: "p1", Model: "m1"}, // failed first attempt
+			{Provider: "p2", Model: "m2"}, // succeeded on a different account
+		}},
 	}
 	_, switches := computeModelUsage(steps)
 	if len(switches) != 1 || !switches[0].OnFailoverStep {
@@ -92,8 +92,8 @@ func TestComputeModelUsage_MarksOnFailoverStep(t *testing.T) {
 // Step's own attempt count, not "did some switch happen at all".
 func TestComputeModelUsage_NoFailoverMarkerOnSingleAttemptStep(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{}, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
-		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p2", Model: "m2"}}}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{}, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
+		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Attempts: []AttemptFact{{Provider: "p2", Model: "m2"}}},
 	}
 	_, switches := computeModelUsage(steps)
 	if len(switches) != 1 || switches[0].OnFailoverStep {
@@ -109,10 +109,10 @@ func TestComputeModelUsage_NoFailoverMarkerOnSingleAttemptStep(t *testing.T) {
 func TestComputeModelUsage_FailedOverFromEndpointIsVisible(t *testing.T) {
 	steps := []*Step{
 		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
-			Rec: &audit.Record{Attempts: []audit.Attempt{
-				{Provider: "p1", Model: "m1", Error: "rate_limit"}, // failed over away from
-				{Provider: "p2", Model: "m2"},                      // succeeded here
-			}}},
+			Attempts: []AttemptFact{
+				{Provider: "p1", Model: "m1"}, // failed over away from
+				{Provider: "p2", Model: "m2"}, // succeeded here
+			}},
 	}
 	stats, _ := computeModelUsage(steps)
 	byKey := map[string]ModelUsageStat{}
@@ -143,9 +143,9 @@ func TestComputeModelUsage_FailedOverFromEndpointIsVisible(t *testing.T) {
 // endpoint across many Steps). Every Step touching the same pair must add 1.
 func TestComputeModelUsage_RepeatedSameEndpointStepsAllCounted(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
-		{Seq: 2, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
-		{Seq: 3, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
+		{Seq: 1, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
+		{Seq: 2, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
+		{Seq: 3, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
 	}
 	stats, _ := computeModelUsage(steps)
 	if len(stats) != 1 || stats[0].Steps != 3 {
@@ -166,8 +166,7 @@ func TestStepUpstream_FallsBackToEndpointSplit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Step{
-				Manifest: &ctxgraph.Manifest{Endpoint: tc.endpoint},
-				Rec:      &audit.Record{}, // no structured Attempts fields -> must fall back
+				Manifest: &ctxgraph.Manifest{Endpoint: tc.endpoint}, // no Attempts -> must fall back to the endpoint split
 			}
 			provider, model := stepUpstream(s)
 			if provider != tc.wantProvider || model != tc.wantModel {
@@ -179,8 +178,8 @@ func TestStepUpstream_FallsBackToEndpointSplit(t *testing.T) {
 
 func TestComputeModelUsage_UnresolvableStepsContributeNothing(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{Endpoint: "-"}, Rec: &audit.Record{}},
-		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "p1", Model: "m1"}}}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{Endpoint: "-"}},
+		{Seq: 2, Manifest: &ctxgraph.Manifest{}, Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
 	}
 	stats, switches := computeModelUsage(steps)
 	if len(stats) != 1 {
@@ -197,9 +196,9 @@ func TestComputeModelUsage_UnresolvableStepsContributeNothing(t *testing.T) {
 func TestComputeModelUsage_DeterministicTieBreak(t *testing.T) {
 	steps := []*Step{
 		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100}},
-			Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "zeta", Model: "m"}}}},
+			Attempts: []AttemptFact{{Provider: "zeta", Model: "m"}}},
 		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100}},
-			Rec: &audit.Record{Attempts: []audit.Attempt{{Provider: "alpha", Model: "m"}}}},
+			Attempts: []AttemptFact{{Provider: "alpha", Model: "m"}}},
 	}
 	stats, _ := computeModelUsage(steps)
 	if len(stats) != 2 || stats[0].Provider != "alpha" || stats[1].Provider != "zeta" {

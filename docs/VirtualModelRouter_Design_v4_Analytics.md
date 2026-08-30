@@ -136,7 +136,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 不含任何 Agent 特化知识——纯粹基于消息哈希与结构比较，不做模板匹配。依赖 `{audit, core, chatmsg}`，被 `internal/report`/`internal/story` 共同依赖，自身不依赖两者（`internal/archtest` 强制）。
 
 - **`Manifest`**（`manifest.go`）：一次请求的内容寻址快照——每条非前导 system 消息的哈希（`Keys []Hash`）、前导 system 块整体哈希（`SysHash`/`HasSys`/`LeadSys`）、`SessKey`（`metadata.user_id` 优先，否则 `"anchor:" + Keys[0]`）、`TS`/`Model`/`Usage` 等请求元数据。`Hash` 是消息规范化 JSON 编码的 md5（`encoding/json` 排序 map key，跨请求同一条消息哈希一致）。
-- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。
+- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描），或由其流式孪生 `ForEachRecord` 逐条喂给回调、用完即弃（详情页渲染、LLM anchor 校验等「读一次」场景）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。**回捞结果不得被长寿命结构持有**：`story.Step` 只保存 `buildFrom` 从记录里提取好的事实（token 构成、attempt 的 provider/model、本步 delta 的 tool result、system 块字符数），不保存 `*audit.Record` 本身——否则 O(N²) 的原始字节（每轮重发全历史）会被钉在对象图里，把「按需回捞」变成「回捞后缓存」。`Manifest` 另带 `Bytes`（解压 JSON 行长），供 `cmd/vmr` 按字节预算分批构建时把每批的回捞工作集卡在数百 MB。
 - **编辑分类**（`edit.go`）：相邻 manifest 之间的转换归为五类之一，判据全部基于最长公共前缀（LCP）与集合覆盖率，O(n) 纯结构比较：
   | 编辑 | 判据 | 语义 |
   | --- | --- | --- |
@@ -206,7 +206,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
   └─ Event   一条消息在整个 Journey 里的首次出现（全局去重、按首次出现排序）
 ```
 
-`Build`/`BuildChain`/`BuildAll` 从一个 Lineage（或缝合链）构建 Journey：批量取回链上每个 manifest 对应的完整 `audit.Record`（`ctxgraph.FetchRecords`，按源文件分组，一次扫描服务多个候选），逐 manifest 判定任务边界（新 trace id，或 delta 里出现真实新指令）、系统提示词是否变化（`SysChanged`）、是否处于缝合边界（`StitchEdge` 非空——此时 `DeltaStart` 恒为 0，靠全局去重而非计算出的 delta 抑制已展示过的内容，因为 `Classify` 的结构化 LCP 在缝合边界两侧没有意义）。**缝合边界与任务边界是两件事**：一次任务中途为回收上下文的压缩（缝合边界但没有新指令）不开新 Task，只在该 Step 内联渲染 compaction 标记；只有缝合边界处 `newInstructionTitleAtStitch` 找到一条不在 `seen` 里的真实新指令，才与普通 delta 一样开新 Task（2026-08 修正——此前每个缝合边界都被无条件当成新 Task，虚增 `len(j.Tasks)` 与 per-Task 检测器分母）。事件流按"新 blob 首次出现"逐 Step 累积，一条消息在整个 Journey 生命周期里只渲染一次。
+`Build`/`BuildChain`/`BuildAll` 从一个 Lineage（或缝合链）构建 Journey：批量取回链上每个 manifest 对应的完整 `audit.Record`（`ctxgraph.FetchRecords`，按源文件分组，一次扫描服务多个候选），提取每个 Step 需要的事实后即把记录丢弃（Step 不持有它——见「源坐标与按需回捞」）；`BuildAllWithRecords` 是给随后要渲染详情页的调用方用的变体，额外返回那批已解压的记录，省掉二次解压。逐 manifest 判定任务边界（新 trace id，或 delta 里出现真实新指令）、系统提示词是否变化（`SysChanged`）、是否处于缝合边界（`StitchEdge` 非空——此时 `DeltaStart` 恒为 0，靠全局去重而非计算出的 delta 抑制已展示过的内容，因为 `Classify` 的结构化 LCP 在缝合边界两侧没有意义）。**缝合边界与任务边界是两件事**：一次任务中途为回收上下文的压缩（缝合边界但没有新指令）不开新 Task，只在该 Step 内联渲染 compaction 标记；只有缝合边界处 `newInstructionTitleAtStitch` 找到一条不在 `seen` 里的真实新指令，才与普通 delta 一样开新 Task（2026-08 修正——此前每个缝合边界都被无条件当成新 Task，虚增 `len(j.Tasks)` 与 per-Task 检测器分母）。事件流按"新 blob 首次出现"逐 Step 累积，一条消息在整个 Journey 生命周期里只渲染一次。
 
 **Revision 关系**（`Event.Revises`）：一次 `Splice` 编辑的分岔点是一条消息被原地改写，不是巧合的新消息——不标注的话，全局去重会把改写后的版本渲染成一个全新的、无关的 Event，读起来像是"同一件事说了两遍"。
 
@@ -236,7 +236,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 `journey-<id>.json`（`Summarize`，与 `.md` 同时写出）落盘这九项指标 + 模型使用/切换 + Journey 身份 + §3.5a 的 Findings，是 §3.7 对比模块的直接输入。另落盘一个 `structure` 字段（`structure.go` 的 `BuildStructure`）——完整的 Task/Step/Event/ToolCall 骨架，每个 Step 带 `req` 坐标、单步性能/成本、与决策脊柱相同的图层级事实（`Edit`/`StitchEdge`/compaction 前后 token 与实体吞噬列表——这三者 `req` 坐标救不回来，必须内联）、该 Step 自己的回复/推理/工具调用参数（有界截断）、工具调用是否配对上结果（`matched`/`result_error`）。**工具结果正文与对话历史正文（`NewEvents`）不内联**——只给内容哈希与角色引用，取用路径是该 Step 的 `req` 坐标；这份机读结构是 P5 删除人读 fact-layer 时验证"信息不丢失"的等价依据（`TestBuildStructure_LosslessReconstruction`）。
 
-**模型使用与切换**（`modelusage.go`）：一个 Journey 用过哪些上游 `(provider, model)` 及各自 Step 数/token + 相邻 Step 间上游变化的切换点。**取值必须来自端点，不能取 `Manifest.Model`**（那是虚拟模型名，一个 Journey 内全程不变，照它实现会得到一张永远"未换过模型"的空表）——从 `Step.Rec.Attempts` 最后一次 attempt 的结构化 `Provider`/`Model` 取，为空（很旧的日志）才回退到切分 `Manifest.Endpoint`。Step 数按"任意一次 attempt 命中即 +1"计（被 failover 掉的端点在表里可见，但不计 token）；切换点带纯观察性标记 `OnFailoverStep`（= `len(Attempts) > 1`），不断言切换原因。这两个字段是列表型数据，**不进** §3.7 的标量 diff/Spearman 机制。
+**模型使用与切换**（`modelusage.go`）：一个 Journey 用过哪些上游 `(provider, model)` 及各自 Step 数/token + 相邻 Step 间上游变化的切换点。**取值必须来自端点，不能取 `Manifest.Model`**（那是虚拟模型名，一个 Journey 内全程不变，照它实现会得到一张永远"未换过模型"的空表）——从 `Step.Attempts`（`buildFrom` 从记录 attempt 列表里预提取的 `(Provider, Model)`）取，为空（很旧的日志）才回退到切分 `Manifest.Endpoint`。Step 数按"任意一次 attempt 命中即 +1"计（被 failover 掉的端点在表里可见，但不计 token）；切换点带纯观察性标记 `OnFailoverStep`（= `len(Attempts) > 1`），不断言切换原因。这两个字段是列表型数据，**不进** §3.7 的标量 diff/Spearman 机制。
 
 ### 3.5a Findings：规则派生的 Step 级"疑似问题"清单（`findings.go`）
 
@@ -315,7 +315,7 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 
 ### 3.9 语料级统计（7.1/7.2，`corpus.go`）
 
-`vmr story -corpus [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建复用 `-render-all` 已有的 `story.BuildAll`（单次 `FetchRecords` 服务全部候选），产出 `vmr-story-corpus.md`/`.json`，落在同一个 `{out}/stories/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
+`vmr story -corpus [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建走和 `-render-all` 同一条按字节预算分批的路径（`cmd/vmr` 的 `batchByBytes`：每批累计 `Manifest.Bytes` ≤ ~160 MiB，一批的回捞工作集用完即释放，再取下一批）；每个构建好的 Journey 只剩约 1% 的叙事结构，几百个累积起来仍是数百 MB，全部交给 `ComputeCorpusStats`。产出 `vmr-story-corpus.md`/`.json`，落在同一个 `{out}/stories/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
 
 - **相关性只报效应量**：`ComputeCorpusStats` 对九项指标 + 模型切换次数共 13 个数值字段（按模型的 token 拆分仍不含在内——同样是列表型，进不了这套只吃标量的机制）两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
 - **无成功/失败标签**：VMR 零埋点前提意味着结构性拿不到任务是否真正达成目标的信号——`GroupComparison`（7.2，按 `Finding.Code` 分组比较净工作时长中位数）比较的是"耗时"这一个代理指标，不是效果；每处输出都明确写"不是确定性结论"。

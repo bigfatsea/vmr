@@ -153,12 +153,12 @@ func journeySteps(j *Journey) []*Step {
 // nothing rather than going negative and corrupting the totals.
 func computeTimeSplit(steps []*Step) (modelMS, agentMS, idleMS int64) {
 	for i, s := range steps {
-		modelMS += s.Rec.DurMS
+		modelMS += s.Manifest.DurMS
 		if i == 0 {
 			continue
 		}
 		prev := steps[i-1]
-		prevEnd := prev.Manifest.TS.Add(time.Duration(prev.Rec.DurMS) * time.Millisecond)
+		prevEnd := prev.Manifest.TS.Add(time.Duration(prev.Manifest.DurMS) * time.Millisecond)
 		gap := s.Manifest.TS.Sub(prevEnd).Milliseconds()
 		if gap <= 0 {
 			continue
@@ -300,29 +300,13 @@ func planExecRatio(steps []*Step) float64 {
 	return float64(plan) / float64(len(steps))
 }
 
-// contextCurve re-derives each Step's own full request body's role/token
-// composition — not persisted on Step itself (would duplicate data already
-// reachable via Rec), recomputed here the same way buildCompactionInfo
-// re-reads a predecessor's body on demand.
+// contextCurve is each Step's own request-body role/token composition, one
+// point per Step — extracted once at build time by fillStepFacts
+// (journey_stepfacts.go's stepContextPoint), collected here.
 func contextCurve(steps []*Step) []ContextPoint {
 	out := make([]ContextPoint, 0, len(steps))
 	for _, s := range steps {
-		body, _ := s.Rec.Client.Request.Body.(map[string]any)
-		p := ContextPoint{Seq: s.Seq}
-		for _, msg := range chatmsg.Messages(body) {
-			tk := tokenutil.EstimateText(msg.Text)
-			switch msg.Role {
-			case "system":
-				p.SystemTokens += tk
-			case "assistant":
-				p.AssistantTokens += tk
-			case "tool":
-				p.ToolTokens += tk
-			default: // "user" and any non-standard role (chatmsg.Messages' "?" fallback)
-				p.UserTokens += tk
-			}
-		}
-		out = append(out, p)
+		out = append(out, s.Context)
 	}
 	return out
 }

@@ -7,7 +7,6 @@
 package story
 
 import (
-	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/reqdetail"
@@ -55,18 +54,13 @@ func systemPromptEras(j *Journey) []systemPromptEra {
 	return eras
 }
 
-// sysPromptEraChars computes an era's leading-system-block char count from
-// the SAME text ctxgraph.Manifest.SysHash (and reqdetail's evidence blob)
-// are derived from — ctxgraph.LeadingSystemText applied to e.Owner's own
-// request body — so the number shown here can never disagree with what's
-// actually behind the link.
+// sysPromptEraChars is an era's leading-system-block rune count — the same
+// text ctxgraph.Manifest.SysHash (and reqdetail's evidence blob) are
+// derived from, extracted once at build time into Step.SysChars by
+// fillStepFacts, so the number shown here can never disagree with what's
+// behind the link.
 func sysPromptEraChars(e systemPromptEra) int {
-	body, ok := e.Owner.Rec.Client.Request.Body.(map[string]any)
-	if !ok {
-		return 0
-	}
-	text := ctxgraph.LeadingSystemText(chatmsg.Messages(body), e.Owner.Manifest.LeadSys)
-	return len([]rune(text))
+	return e.Owner.SysChars
 }
 
 // renderSystemPromptHeader renders one line per distinct system-prompt era

@@ -21,6 +21,11 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+### Changed
+- `vmr analyze -corpus` peak memory on a large corpus drops ~18x — from around 43GB, enough to swap-thrash a 16GB machine into a hang, to ~2.4GB (`-render-all` from 4.1GB to 1.9GB). The story-half narrative no longer holds each step's full audit record (every chat request resends the whole history, so that was O(N²) bytes pinned in memory); it keeps only the facts `buildFrom` already extracted. `-corpus` now builds in the same byte-budgeted batches `-render-all` uses. A full ~12GB-decompressed corpus `-corpus` run now completes on a 16GB machine. Output is byte-identical
+- `internal/ctxgraph`: new `ForEachRecord` (streaming twin of `FetchRecords` — one pass per file, record handed to a callback instead of accumulated) and `Manifest.Bytes` (decompressed line length, drives the batch budget). `CacheSchemaVersion` bumped to 3 — existing `.parse-cache` directories rebuild once on next run
+- `internal/story`: `Step` drops its `*audit.Record` field for pre-extracted facts (`Context`, `Attempts`, `NewToolResults`, `SysChars`); `Journey` gains `InitialInstruction` / `SysText`. New `BuildAllWithRecords` returns the batch's fetched records so detail-page rendering reuses them instead of re-decompressing
+
 ## [0.6.4] - 2026-08-30
 
 ### Added

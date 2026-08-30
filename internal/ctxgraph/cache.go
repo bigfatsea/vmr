@@ -24,7 +24,9 @@ import (
 // mode this constant exists to prevent, not the rebuild cost.
 // v2 (2026-08): protocol-name rename — cached Facts carry normalized
 // "openai-completions"/"anthropic-messages" protocol/endpoint values.
-const CacheSchemaVersion = 2
+// v3 (2026-08): Manifest gains Bytes (decompressed JSON line length), used
+// by cmd/vmr's byte-budget batching.
+const CacheSchemaVersion = 3
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

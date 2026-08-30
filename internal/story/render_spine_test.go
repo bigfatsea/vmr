@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
@@ -814,11 +813,13 @@ func TestRenderToolTimeline(t *testing.T) {
 // ever recover, paired by position ONLY when the unresolved-call count
 // equals the unclaimed-result count.
 func TestPositionalToolResults(t *testing.T) {
-	nextStepBody := map[string]any{"messages": []any{
-		map[string]any{"role": "tool", "tool_call_id": "exec1786691703864731", "content": "result A"},
-		map[string]any{"role": "tool", "tool_call_id": "exec1786691703864999", "content": "result B"},
+	// NewToolResults is what fillStepFacts extracts from a Step's own delta
+	// region — positionalToolResults reads it directly now, so these
+	// fixtures set it instead of a raw Rec body.
+	nextStep := &Step{NewToolResults: []chatmsg.ToolResult{
+		{CallID: "exec1786691703864731", Text: "result A"},
+		{CallID: "exec1786691703864999", Text: "result B"},
 	}}
-	nextStep := &Step{Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: nextStepBody}}}}
 
 	t.Run("same-count leftover pairs by position, in order", func(t *testing.T) {
 		tc1 := chatmsg.ToolCall{ID: "call_self_made_1", Name: "bash"}
@@ -865,51 +866,29 @@ func TestPositionalToolResults(t *testing.T) {
 		}
 	})
 
-	// TestPositionalToolResults_ScopedToDelta covers a real bug caught in
-	// review before this shipped: every chat API resends the FULL
-	// conversation on each turn, so steps[i+1]'s request body contains not
-	// just its own new messages but every earlier Step's tool results too.
-	// An unscoped scan would count an unrelated, already-resolved HISTORICAL
-	// result as "leftover" for the CURRENT Step's unresolved call — and if
-	// the counts happen to coincide, silently attribute that stale result
-	// to the wrong call. positionalToolResults must bound its scan to
-	// steps[i+1].DeltaStart onward (the messages THAT step actually
-	// introduced), not the whole cumulative body.
+	// The delta-scoping that keeps an earlier Step's already-resolved
+	// historical tool result out of "leftover" now lives in fillStepFacts
+	// (Step.NewToolResults is bounded by DeltaStart when it's built — see
+	// TestFillStepFacts_NewToolResultsScopedToDelta). positionalToolResults
+	// just consumes that pre-scoped slice.
 	t.Run("does not attribute an earlier Step's already-resolved historical result to this Step's unresolved call", func(t *testing.T) {
 		s1 := &Step{ToolCalls: []chatmsg.ToolCall{{ID: "self_made_x", Name: "bash"}}}
-		// steps[2].Rec is the cumulative request for the step AFTER s1 —
-		// index 0 is Step 0's own (already-resolved-elsewhere) historical
-		// tool result, index 1 is genuinely new content Step 1 introduced
-		// (no tool result at all — the client dropped answering
-		// self_made_x). DeltaStart=1 says "new content starts at index 1".
-		polluted := &Step{
-			DeltaStart: 1,
-			Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: map[string]any{
-				"messages": []any{
-					map[string]any{"role": "tool", "tool_call_id": "call_real_1", "content": "real answer from an earlier Step"},
-					map[string]any{"role": "user", "content": "continue"},
-				},
-			}}}},
-		}
+		// The next Step's delta introduced no tool result at all (the client
+		// dropped answering self_made_x) — its NewToolResults is empty even
+		// though its full body still carries older history.
+		polluted := &Step{NewToolResults: nil}
 		steps := []*Step{{}, s1, polluted}
 		got := positionalToolResults(steps, 1, map[string]chatmsg.ToolResult{})
 		if got != nil {
-			t.Errorf("got %v, want nil — the only leftover entry is HISTORICAL (outside the delta region), must not be guessed as self_made_x's answer", got)
+			t.Errorf("got %v, want nil — no in-delta leftover to guess self_made_x's answer from", got)
 		}
 	})
 
 	t.Run("still finds a genuinely new leftover result within the delta region, ignoring older history before it", func(t *testing.T) {
 		s1 := &Step{ToolCalls: []chatmsg.ToolCall{{ID: "self_made_2", Name: "bash"}}}
-		nextStep := &Step{
-			DeltaStart: 2, // new content (this Step's own answer) starts at index 2
-			Rec: &audit.Record{Client: audit.Exchange{Request: audit.Message{Body: map[string]any{
-				"messages": []any{
-					map[string]any{"role": "tool", "tool_call_id": "old_hist_result", "content": "stale historical result"},
-					map[string]any{"role": "assistant", "content": ""},
-					map[string]any{"role": "tool", "tool_call_id": "exec_new_result_id", "content": "fresh step-2 result"},
-				},
-			}}}},
-		}
+		nextStep := &Step{NewToolResults: []chatmsg.ToolResult{
+			{CallID: "exec_new_result_id", Text: "fresh step-2 result"},
+		}}
 		steps := []*Step{{}, s1, nextStep}
 		got := positionalToolResults(steps, 1, map[string]chatmsg.ToolResult{})
 		if len(got) != 1 {

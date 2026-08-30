@@ -618,7 +618,10 @@ func TestSearchableTranscript_CoversReconstructedAndRaw(t *testing.T) {
 		Reasoning: "internal chain of thought",
 		ToolCalls: []chatmsg.ToolCall{{Name: "grep", Args: `{"pattern":"needle"}`}},
 	}}}}}
-	pool := searchableTranscript(j)
+	pool, err := searchableTranscript(j)
+	if err != nil {
+		t.Fatalf("searchableTranscript: %v", err)
+	}
 	for _, want := range []string{"the assistant said hello", "internal chain of thought", `{"pattern":"needle"}`} {
 		if !strings.Contains(pool, want) {
 			t.Errorf("pool missing %q", want)

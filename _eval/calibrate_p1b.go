@@ -181,11 +181,23 @@ func transcriptPool(j *story.Journey) string {
 				b.WriteString(ev.Msg.Text)
 				b.WriteByte('\n')
 			}
-			if s.Rec != nil {
-				if data, err := json.Marshal(s.Rec); err == nil {
-					b.Write(data)
-					b.WriteByte('\n')
-				}
+		}
+	}
+	// story.Step no longer carries its Record; re-read each manifest's
+	// record and marshal it, mirroring story.searchableTranscript.
+	var locs []ctxgraph.Loc
+	for _, t := range j.Tasks {
+		for _, s := range t.Steps {
+			if s.Manifest != nil {
+				locs = append(locs, ctxgraph.Loc{Path: s.Manifest.Path, Line: s.Manifest.Line})
+			}
+		}
+	}
+	if recs, err := ctxgraph.FetchRecords(locs); err == nil {
+		for _, rec := range recs {
+			if data, err := json.Marshal(rec); err == nil {
+				b.Write(data)
+				b.WriteByte('\n')
 			}
 		}
 	}

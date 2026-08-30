@@ -9,9 +9,28 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
+
+// fetchStepRecords re-fetches every Step's audit.Record the same way
+// buildFrom did — Step no longer holds it, but the manifest coordinates
+// still resolve it.
+func fetchStepRecords(t *testing.T, j *Journey) map[ctxgraph.Loc]*audit.Record {
+	t.Helper()
+	var locs []ctxgraph.Loc
+	for _, task := range j.Tasks {
+		for _, step := range task.Steps {
+			locs = append(locs, ctxgraph.Loc{Path: step.Manifest.Path, Line: step.Manifest.Line})
+		}
+	}
+	recs, err := ctxgraph.FetchRecords(locs)
+	if err != nil {
+		t.Fatalf("FetchRecords: %v", err)
+	}
+	return recs
+}
 
 // manyToolCallRecords builds a lineage of n turns, each turn appending one
 // more tool_call/tool_result pair on top of the accumulated history —
@@ -44,11 +63,11 @@ func manyToolCallRecords(n int) []audit.Record {
 // ("Step 内部的因果结构是协议给定的精确事实，不是启发式") as an automated
 // regression, closing the gap that F9 had only ever been hand-verified
 // against one real record (57/57), never turned into a test that fails the
-// build if the invariant is ever violated. Runs chatmsg.CheckToolPairing over every
-// manifest a real Build() produces (not just the fixture's raw records
-// directly) — Step.Rec.Client.Request.Body is exactly the request body
-// `story.Build` fed into rendering, so this also guards against any future
-// change to Build/chatmsg accidentally introducing a mismatch.
+// build if the invariant is ever violated. Runs chatmsg.CheckToolPairing
+// over every manifest a real Build() produces (re-fetching each Step's
+// record by its manifest coordinate — the same body story.Build fed into
+// rendering), so this also guards against any future change to
+// Build/chatmsg accidentally introducing a mismatch.
 func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 	const turns = 20
 	recs := manyToolCallRecords(turns)
@@ -59,10 +78,18 @@ func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
+	// Step no longer carries its Record; re-fetch each manifest's body the
+	// same way Build did (ctxgraph.FetchRecords over the step manifests).
+	stepRecs := fetchStepRecords(t, j)
+
 	checked := 0
 	for _, task := range j.Tasks {
 		for _, step := range task.Steps {
-			body, ok := step.Rec.Client.Request.Body.(map[string]any)
+			rec := stepRecs[ctxgraph.Loc{Path: step.Manifest.Path, Line: step.Manifest.Line}]
+			if rec == nil {
+				t.Fatalf("step %d: could not re-fetch its record", step.Seq)
+			}
+			body, ok := rec.Client.Request.Body.(map[string]any)
 			if !ok {
 				t.Fatalf("step %d: request body is not a map[string]any", step.Seq)
 			}
@@ -85,7 +112,10 @@ func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 	// this test would also catch a regression that silently dropped pairs
 	// rather than mismatching them (report.OK() alone wouldn't distinguish
 	// "0 calls, 0 results" from "20 calls, 20 results").
-	lastBody, _ := j.Tasks[len(j.Tasks)-1].Steps[len(j.Tasks[len(j.Tasks)-1].Steps)-1].Rec.Client.Request.Body.(map[string]any)
+	lastSteps := j.Tasks[len(j.Tasks)-1].Steps
+	lastStep := lastSteps[len(lastSteps)-1]
+	lastRec := stepRecs[ctxgraph.Loc{Path: lastStep.Manifest.Path, Line: lastStep.Manifest.Line}]
+	lastBody, _ := lastRec.Client.Request.Body.(map[string]any)
 	lastReport := chatmsg.CheckToolPairing(lastBody["messages"].([]any))
 	if lastReport.Calls != turns || lastReport.Results != turns {
 		t.Fatalf("final step pairing count = %d/%d, want %d/%d", lastReport.Calls, lastReport.Results, turns, turns)

@@ -42,6 +42,15 @@ type Manifest struct {
 	Usage    chatmsg.Usage `json:"usage"`
 	UsageOK  bool          `json:"usage_ok,omitempty"`
 
+	// Bytes is this record's decompressed JSON line length — set by
+	// scanFile, not BuildManifest (only the scan loop has the raw line in
+	// scope). The byte-budget batching in cmd/vmr's story rendering sums
+	// this across a candidate's manifests to bound how much a single
+	// BuildAll batch will pull into memory (FetchRecords decodes ~this many
+	// bytes per wanted line), replacing an untuned "N candidates per batch"
+	// constant. 0 on a manifest that came from a pre-v3 parse cache.
+	Bytes int `json:"bytes,omitempty"`
+
 	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim — "" when
 	// auth was disabled or no key matched. internal/story's Journey id
 	// embeds the root manifest's tag so a directory listing groups (and

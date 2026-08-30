@@ -21,7 +21,7 @@ func TestEnsureJourneyDetails_MaterializesEveryStep(t *testing.T) {
 	evidenceDir := filepath.Join(dir, "evidence")
 
 	var warnings bytes.Buffer
-	EnsureJourneyDetails(&warnings, j, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
+	EnsureJourneyDetails(&warnings, j, nil, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
 	if warnings.Len() != 0 {
 		t.Fatalf("unexpected warnings: %s", warnings.String())
 	}
@@ -52,13 +52,58 @@ func TestEnsureJourneyDetails_MaterializesEveryStep(t *testing.T) {
 	// no-op for every already-written Step).
 	before, _ := os.ReadDir(detailDir)
 	warnings.Reset()
-	EnsureJourneyDetails(&warnings, j, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
+	EnsureJourneyDetails(&warnings, j, nil, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
 	if warnings.Len() != 0 {
 		t.Fatalf("unexpected warnings on repeat call: %s", warnings.String())
 	}
 	after, _ := os.ReadDir(detailDir)
 	if len(before) != len(after) {
 		t.Errorf("repeat call changed the file count: before=%d after=%d", len(before), len(after))
+	}
+}
+
+// TestEnsureJourneyDetails_UsesProvidedRecords locks in the batch path
+// (P-2): when the caller hands in the record map it already fetched
+// (BuildAllWithRecords), every detail page is rendered from that map and
+// the source files are never reopened. Proven by deleting the source
+// before the call — the streaming fallback would fail, the map path
+// doesn't touch it.
+func TestEnsureJourneyDetails_UsesProvidedRecords(t *testing.T) {
+	j := buildTestJourney(t, 3, false)
+	recs := fetchStepRecords(t, j)
+
+	for _, s := range journeySteps(j) {
+		if s.Manifest != nil {
+			_ = os.Remove(s.Manifest.Path) // same file for every step; later removes no-op
+		}
+	}
+
+	dir := t.TempDir()
+	detailDir := filepath.Join(dir, "details")
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	var warnings bytes.Buffer
+	EnsureJourneyDetails(&warnings, j, recs, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
+	if warnings.Len() != 0 {
+		t.Fatalf("unexpected warnings: %s", warnings.String())
+	}
+	for _, s := range journeySteps(j) {
+		want := reqdetail.FileNameForManifest(s.Manifest)
+		if _, err := os.Stat(filepath.Join(detailDir, want)); err != nil {
+			t.Errorf("step %d: expected detail file %s: %v", s.Seq, want, err)
+		}
+	}
+	if entries, _ := os.ReadDir(evidenceDir); len(entries) == 0 {
+		t.Error("expected at least one sysprompt evidence file, found none")
+	}
+
+	// The nil path on the same (now-unreadable) Journey must instead warn —
+	// confirming the two branches are genuinely different code, not a map
+	// that silently happened to be populated.
+	warnings.Reset()
+	EnsureJourneyDetails(&warnings, j, nil, filepath.Join(dir, "d2"), filepath.Join(dir, "e2"), taskseg.Generic, i18n.EN)
+	if warnings.Len() == 0 {
+		t.Error("nil recs against a deleted source should have warned")
 	}
 }
 
@@ -79,7 +124,7 @@ func TestEnsureJourneyDetails_GracefulDegradation(t *testing.T) {
 	evidenceDir := filepath.Join(dir, "evidence")
 
 	var warnings bytes.Buffer
-	EnsureJourneyDetails(&warnings, j, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
+	EnsureJourneyDetails(&warnings, j, nil, detailDir, evidenceDir, taskseg.Generic, i18n.EN)
 	if warnings.Len() == 0 {
 		t.Fatal("expected a warning when detailDir cannot be created, got none")
 	}

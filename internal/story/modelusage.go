@@ -2,7 +2,7 @@
 
 // Model usage & switches within a single Journey — which upstream
 // models/endpoints this task actually hit, and where it moved between them.
-// Deliberately reads upstream identity from the endpoint (Step.Rec.Attempts'
+// Deliberately reads upstream identity from the endpoint (Step.Attempts'
 // structured fields, falling back to splitting Manifest.Endpoint), NOT
 // Manifest.Model — that field is audit.Record.Model, the VIRTUAL model name
 // (e.g. "coding"/"agent"), which a client requests once and never changes
@@ -81,7 +81,7 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 		// invisible in this table even though the request genuinely
 		// routed there first.
 		seen := map[string]bool{}
-		for _, a := range s.Rec.Attempts {
+		for _, a := range s.Attempts {
 			if a.Provider == "" && a.Model == "" {
 				continue
 			}
@@ -126,7 +126,7 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 		if havePrev && key != prevKey {
 			switches = append(switches, ModelSwitch{
 				StepSeq: s.Seq, From: prevKey, To: key,
-				OnFailoverStep: len(s.Rec.Attempts) > 1,
+				OnFailoverStep: len(s.Attempts) > 1,
 			})
 		}
 		prevKey, havePrev = key, true
@@ -156,8 +156,8 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 // the cost analysis design's
 // §5.5 ②).
 func stepUpstream(s *Step) (provider, model string) {
-	if len(s.Rec.Attempts) > 0 {
-		a := s.Rec.Attempts[len(s.Rec.Attempts)-1]
+	if len(s.Attempts) > 0 {
+		a := s.Attempts[len(s.Attempts)-1]
 		if a.Provider != "" || a.Model != "" {
 			return a.Provider, a.Model
 		}

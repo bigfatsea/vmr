@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
@@ -394,7 +395,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	// true: a single named -journey target, not a batch scope (P13.1).
-	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, &cost, true)
+	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, &cost, true, nil)
 	if err != nil {
 		return err
 	}
@@ -449,7 +450,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB, lang)
-	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, prof, priceRes, ccy)
+	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, priceRes, ccy)
 	extras.Sources = story.SourceFiles(idx, jA.ID, jB.ID)
 	cmp.Extras = &extras
 
@@ -565,32 +566,9 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 	return llmSection, result
 }
 
-// renderBatchSize bounds how many candidates renderJourneys builds into
-// memory in a single story.BuildAll call. BuildAll does ONE combined
-// ctxgraph.FetchRecords across its whole input — a deliberate efficiency
-// choice for the common case (a handful to a few dozen candidates: shares
-// I/O instead of paying it once per candidate) that turns into an
-// unbounded-memory liability once the batch is large. Real-corpus
-// measurement (P9 ActionPlan §3's 收尾 run, 34 files/1638 lineages) found
-// this is what actually exhausts memory on a multi-day corpus — not
-// candidate *count* but candidate *volume*: P9.2's category=task default
-// still batches 234 candidates totaling 9259 requests in one BuildAll call
-// (the long real task conversations that make up "task" dominate total
-// volume; heartbeat/cron/subagent are mostly a handful of requests each),
-// and that alone drove peak memory footprint to ~35GB and got the process
-// killed — category filtering alone does not bound memory, only count.
-// Chunking bounds peak memory to one batch's worth regardless of how many
-// total candidates are being rendered; each batch's records/Journeys are
-// eligible for GC once its writes complete, before the next batch fetches.
-// Not exposed as a flag — an internal batching detail, not a semantic
-// knob; 20 is a conservative constant, not tuned against a target memory
-// budget (no per-request byte-size accounting exists to make a tighter,
-// principled bound cheap to compute here).
-const renderBatchSize = 20
-
 // renderJourneys renders every given candidate (skipping partial-head ones
-// unless includePartial), in batches of at most renderBatchSize (see its
-// own doc comment for why). Shared by renderAllJourneys (-render-all/the
+// unless includePartial), in byte-budgeted batches (see
+// renderBatchBudgetBytes for why). Shared by renderAllJourneys (-render-all/the
 // default suite's category=task scope, P9.2) and -journey's multi-match
 // dispatch (a comma-list/glob selector that resolved to more than one
 // journey) — the two differ only in which candidates they pass in, the
@@ -626,12 +604,9 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 	t := i18n.CLI(lang)
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	rendered := 0
-	for start := 0; start < len(toRender); start += renderBatchSize {
-		end := start + renderBatchSize
-		if end > len(toRender) {
-			end = len(toRender)
-		}
-		journeys, err := story.BuildAll(toRender[start:end], prof, lang)
+	for _, br := range batchByBytes(toRender, renderBatchBudgetBytes) {
+		start, end := br[0], br[1]
+		journeys, batchRecs, err := story.BuildAllWithRecords(toRender[start:end], prof, lang)
 		if err != nil {
 			return err
 		}
@@ -642,7 +617,9 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 			// Batch renders (default suite, -render-all, multi-match -journey)
 			// carry no cost: pricing resolution is a zoom-in feature, same as
 			// -html itself — only single -journey / -compare thread a resolver.
-			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, nil, materializeDetails)
+			// batchRecs: EnsureJourneyDetails reuses this batch's already-
+			// decompressed records instead of re-reading the source files.
+			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, nil, materializeDetails, batchRecs)
 			if err != nil {
 				return err
 			}
@@ -693,9 +670,17 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 		return saveStoryIndex(idx, outDir, lang)
 	}
 
-	journeys, err := story.BuildAll(toRender, prof, lang)
-	if err != nil {
-		return err
+	// Build in byte-budgeted batches (same bound renderJourneys uses): each
+	// batch's records are released before the next fetch, but the built
+	// Journeys are ~1% of that and all accumulate cheaply — the corpus
+	// stats need every one of them at once, and 586 of them is ~300 MB.
+	var journeys []*story.Journey
+	for _, br := range batchByBytes(toRender, renderBatchBudgetBytes) {
+		js, err := story.BuildAll(toRender[br[0]:br[1]], prof, lang)
+		if err != nil {
+			return err
+		}
+		journeys = append(journeys, js...)
 	}
 	stats := story.ComputeCorpusStats(journeys)
 
@@ -770,7 +755,7 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof
 	findings := story.ComputeFindings(j, lang)
 	// true: both -compare sides are user-named targets, same as a single
 	// -journey render (P13.1) — not a batch scope.
-	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true)
+	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true, nil)
 	return err
 }
 
@@ -806,11 +791,11 @@ func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof
 // (see the call below): the spine renders each Step's "→ detail" pointer as
 // an inline `file:line` coordinate instead of a link, so an unmaterialized
 // detail page is never linked (B10 / review §12.5's 12-B).
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact, materializeDetails bool) (string, error) {
+func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
 	base := journeyBaseName(j)
 	outPath := filepath.Join(storiesDir, base+".md")
 	if materializeDetails {
-		story.EnsureJourneyDetails(os.Stderr, j, detailDir, evidenceDir, prof, lang)
+		story.EnsureJourneyDetails(os.Stderr, j, recs, detailDir, evidenceDir, prof, lang)
 	}
 	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(storiesDir), "vmr-report.md"))
 	// linkDetails == materializeDetails: this call just wrote (or skipped as

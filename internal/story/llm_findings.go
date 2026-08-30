@@ -14,9 +14,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 
+	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 )
 
@@ -516,8 +520,16 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 // survives contiguously only in the reassembled fields, while tool_result
 // text (delivered whole in the following request body) and raw tool-call
 // arguments are only visible in the marshaled record.
-func searchableTranscript(j *Journey) string {
+//
+// The Journey no longer holds those records (Step.Rec is gone), so they are
+// streamed back in with ctxgraph.ForEachRecord — one pass over this
+// Journey's source files, discarded as marshaled. This is a single -journey
+// -llm-addr path, so the extra read costs nothing. A read error yields
+// what could be assembled plus the error; the caller treats a partial pool
+// as fail-open (an anchor that can't be verified is dropped, not trusted).
+func searchableTranscript(j *Journey) (string, error) {
 	var b strings.Builder
+	var locs []ctxgraph.Loc
 	for _, t := range j.Tasks {
 		for _, s := range t.Steps {
 			b.WriteString(s.RespText)
@@ -532,15 +544,23 @@ func searchableTranscript(j *Journey) string {
 				b.WriteString(ev.Msg.Text)
 				b.WriteByte('\n')
 			}
-			if s.Rec != nil {
-				if data, err := json.Marshal(s.Rec); err == nil {
-					b.Write(data)
-					b.WriteByte('\n')
-				}
+			if s.Manifest != nil {
+				locs = append(locs, ctxgraph.Loc{Path: s.Manifest.Path, Line: s.Manifest.Line})
 			}
 		}
 	}
-	return b.String()
+	var mu sync.Mutex
+	err := ctxgraph.ForEachRecord(locs, func(_ ctxgraph.Loc, rec *audit.Record) {
+		data, merr := json.Marshal(rec)
+		if merr != nil {
+			return
+		}
+		mu.Lock()
+		b.Write(data)
+		b.WriteByte('\n')
+		mu.Unlock()
+	})
+	return b.String(), err
 }
 
 // anchoredInTranscript reports whether f cites an EvidenceAnchor that appears
@@ -574,7 +594,10 @@ func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i
 
 	var out []Finding
 	if len(raw) > 0 {
-		pool := searchableTranscript(j)
+		pool, err := searchableTranscript(j)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: journey %s: anchor verification pool incomplete (%v) — unverifiable findings dropped\n", j.ID, err)
+		}
 		for _, f := range raw {
 			if anchoredInTranscript(f, pool) {
 				out = append(out, f)

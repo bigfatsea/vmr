@@ -79,15 +79,29 @@ func FetchRecords(locs []Loc) (map[Loc]*audit.Record, error) {
 }
 
 func fetchRecordsFromFile(path string, wantedLines map[int]bool) (map[Loc]*audit.Record, error) {
-	rc, err := audit.OpenLogFile(path)
+	out := map[Loc]*audit.Record{}
+	err := forEachRecordInFile(path, wantedLines, func(loc Loc, rec *audit.Record) {
+		out[loc] = rec
+	})
 	if err != nil {
 		return nil, err
 	}
+	return out, nil
+}
+
+// forEachRecordInFile is the one-streaming-pass core both fetchRecordsFromFile
+// and ForEachRecord share: open, scan once, hand each wanted line's decoded
+// record to fn. A line that won't parse a second time is silently skipped
+// (same as it was silently dropped on the manifest scan).
+func forEachRecordInFile(path string, wantedLines map[int]bool, fn func(Loc, *audit.Record)) error {
+	rc, err := audit.OpenLogFile(path)
+	if err != nil {
+		return err
+	}
 	defer rc.Close()
 
-	out := map[Loc]*audit.Record{}
 	line := 0
-	err = audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
+	return audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
 		line++
 		if !wantedLines[line] {
 			return
@@ -96,10 +110,51 @@ func fetchRecordsFromFile(path string, wantedLines map[int]bool) (map[Loc]*audit
 		if json.Unmarshal(lineBytes, &rec) != nil {
 			return
 		}
-		out[Loc{Path: path, Line: line}] = &rec
+		fn(Loc{Path: path, Line: line}, &rec)
 	}, func() { line++ })
-	if err != nil {
-		return nil, err
+}
+
+// ForEachRecord is FetchRecords' streaming twin: same per-file grouping and
+// one-pass-per-file access, same bounded worker pool, but each decoded
+// record is handed to fn instead of accumulated into a map — a caller that
+// only reads each record once (rendering a detail page, scanning for an
+// anchor substring) never has to hold them all at once. fn is called
+// concurrently from the per-file workers, so a fn touching shared state
+// must synchronize it itself. Loc order is not defined.
+func ForEachRecord(locs []Loc, fn func(Loc, *audit.Record)) error {
+	byPath := map[string]map[int]bool{}
+	for _, loc := range locs {
+		lines := byPath[loc.Path]
+		if lines == nil {
+			lines = map[int]bool{}
+			byPath[loc.Path] = lines
+		}
+		lines[loc.Line] = true
 	}
-	return out, nil
+
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+
+	errs := make([]error, len(paths))
+	sem := make(chan struct{}, scanWorkerCount(len(paths)))
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, path string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errs[i] = forEachRecordInFile(path, byPath[path], fn)
+		}(i, path)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

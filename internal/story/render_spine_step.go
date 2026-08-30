@@ -315,7 +315,7 @@ func renderSpineStep(w func(string, ...any), steps []*Step, i, taskStepIdx int, 
 // Finding detector, since a positional pairing is inference, not a fact.
 func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolResult) map[string]chatmsg.ToolResult {
 	s := steps[i]
-	if len(s.ToolCalls) == 0 || i+1 >= len(steps) || steps[i+1].Rec == nil {
+	if len(s.ToolCalls) == 0 || i+1 >= len(steps) {
 		return nil
 	}
 	knownNorm := make(map[string]bool, len(s.ToolCalls))
@@ -329,25 +329,12 @@ func positionalToolResults(steps []*Step, i int, byID map[string]chatmsg.ToolRes
 	if len(unresolved) == 0 {
 		return nil
 	}
-	body, _ := steps[i+1].Rec.Client.Request.Body.(map[string]any)
-	// steps[i+1]'s body carries the WHOLE conversation so far (every chat
-	// API resends full history), so scanning chatmsg.RawArray(body)
-	// unbounded would pull in every earlier Step's already-resolved tool
-	// results too — inflating the leftover count against every OTHER
-	// unresolved-call Step in the Journey, not just this one. DeltaStart
-	// ("absolute message index where this step's new content begins",
-	// journey.go) plus MsgOffset's index-base correction (RawArray excludes
-	// the synthetic leading system message Messages() prepends) bounds the
-	// scan to exactly the messages steps[i+1] introduced.
-	rawArr := chatmsg.RawArray(body)
-	deltaIdx := steps[i+1].DeltaStart - chatmsg.MsgOffset(body)
-	if deltaIdx > 0 && deltaIdx < len(rawArr) {
-		rawArr = rawArr[deltaIdx:]
-	} else if deltaIdx >= len(rawArr) {
-		rawArr = nil
-	}
+	// steps[i+1].NewToolResults is already scoped to just the messages that
+	// step introduced (fillStepFacts bounds it by DeltaStart) — scanning
+	// the whole resent body here would pull in every earlier Step's
+	// already-resolved results and inflate the leftover count.
 	var leftover []chatmsg.ToolResult
-	for _, r := range chatmsg.ToolResultList(rawArr) {
+	for _, r := range steps[i+1].NewToolResults {
 		if !knownNorm[chatmsg.NormalizeToolCallID(r.CallID)] {
 			leftover = append(leftover, r)
 		}
