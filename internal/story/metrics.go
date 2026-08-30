@@ -409,6 +409,12 @@ type JourneySummary struct {
 	// machine-readable counterpart to the human-readable fact-layer
 	// (render_md.go's renderStep), P4 (see structure.go's doc comment).
 	Structure JourneyStructure `json:"structure"`
+	// Cost is the estimated $ spend for this Journey (cost.go), nil when no
+	// price book was available at render time — never a fake $0. Every other
+	// field here is a pure function of the Journey; this one also needs a
+	// *pricing.Resolver, so it's threaded in by the caller rather than
+	// computed by Summarize.
+	Cost *CostFact `json:"cost,omitempty"`
 }
 
 // Summarize builds j's JourneySummary, computing Metrics and Findings
@@ -426,7 +432,7 @@ type JourneySummary struct {
 // Millisecond-scale waste, not worth a second entry point for; noted here
 // so it reads as a known, accepted cost rather than an oversight.
 func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
-	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil)
+	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil, nil)
 }
 
 // NewJourneySummary is JourneySummary's one constructor, shared by Summarize
@@ -442,10 +448,11 @@ func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
 // Summarize's literal and, for one build, silently left writeJourneyFile's
 // copy without it. One constructor is what keeps that from recurring the
 // next time JourneySummary gains a field.
-func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding) JourneySummary {
+func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, cost *CostFact) JourneySummary {
 	return JourneySummary{
 		ID: j.ID, Title: j.Title, From: j.From, To: j.To, Partial: j.Partial,
 		Metrics: m, Findings: findings, LLMFindings: llmFindings,
 		Structure: BuildStructure(j),
+		Cost:      cost,
 	}
 }

@@ -61,10 +61,17 @@ var forbiddenImports = map[string][]string{
 	// consumers remain independent of each other: story must not reach past
 	// this boundary just because report happens to have similar-looking
 	// helpers, and vice versa.
+	//
+	// story→pricing is deliberately NOT forbidden: cost.go takes a
+	// *pricing.Resolver for its per-journey $ estimate exactly the way
+	// report.Build already does, and pricing is a near-leaf (its only
+	// internal dependency is core). config stays out — the resolver is built
+	// in cmd/vmr and threaded in, same as the report half.
 	"vmr/internal/story": {
 		"vmr/internal/router",
 		"vmr/internal/server",
 		"vmr/internal/report",
+		"vmr/internal/config",
 	},
 	// adapter builds requests and classifies errors for both the live
 	// routing path (router) and the offline tools (diagnose/replay) that

@@ -93,7 +93,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	}
 
 	ma, mb := ComputeMetrics(jA), ComputeMetrics(jB)
-	ex := ComputeComparisonExtras(jA, jB, ma, mb, taskseg.Generic)
+	ex := ComputeComparisonExtras(jA, jB, ma, mb, taskseg.Generic, nil, "")
 
 	if len(ex.Endpoints.A) != 1 || ex.Endpoints.A[0] != "openai-completions:opencode:deepseek-v4-pro" {
 		t.Errorf("Endpoints.A = %v, want [openai-completions:opencode:deepseek-v4-pro]", ex.Endpoints.A)
@@ -191,7 +191,7 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic)
+	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic, nil, "")
 	if !ex.SysPrompt.A.Truncated {
 		t.Error("long system prompt should be marked Truncated")
 	}
@@ -216,7 +216,7 @@ func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic)
+	ex := ComputeComparisonExtras(j, j, m, m, taskseg.Generic, nil, "")
 	if !ex.Deliverable.A.Found || !strings.Contains(ex.Deliverable.A.Excerpt, "the real final content") {
 		t.Errorf("Deliverable should pick the LAST write-shaped call: got %+v", ex.Deliverable.A)
 	}
@@ -441,7 +441,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 
 	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
 	cmp := Compare(sa, sb, i18n.EN)
-	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, taskseg.Generic)
+	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, taskseg.Generic, nil, "")
 	cmp.Extras = &extras
 
 	md := RenderComparisonMarkdown(cmp, i18n.EN)

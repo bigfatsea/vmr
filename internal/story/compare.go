@@ -17,6 +17,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
+	"vmr/internal/pricing"
 	"vmr/internal/taskseg"
 	"vmr/internal/tokenutil"
 )
@@ -35,15 +36,25 @@ type ToolShareDiff struct {
 // to know what was compared, without re-embedding that Journey's entire
 // Metrics a second time (Rows already carries the numbers that matter).
 type JourneyRef struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
-	From       time.Time `json:"from"`
-	To         time.Time `json:"to"`
-	ReportFile string    `json:"report_file,omitempty"`
+	ID    string    `json:"id"`
+	Title string    `json:"title"`
+	From  time.Time `json:"from"`
+	To    time.Time `json:"to"`
+	// Steps/ToolCalls are the tale-of-the-tape's own row data — carried on
+	// the ref so RenderComparisonHTML doesn't need the full JourneySummary
+	// (it only ever gets a Comparison).
+	Steps      int    `json:"steps"`
+	ToolCalls  int    `json:"tool_calls"`
+	ReportFile string `json:"report_file,omitempty"`
 }
 
 func journeyRef(s JourneySummary) JourneyRef {
-	ref := JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To}
+	steps := 0
+	for _, tk := range s.Structure.Tasks {
+		steps += len(tk.Steps)
+	}
+	ref := JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To,
+		Steps: steps, ToolCalls: s.Metrics.ToolCallCount}
 	if s.ID != "" {
 		ref.ReportFile = JourneyReportFile(s.ID, s.Partial)
 	}
@@ -151,6 +162,12 @@ type ComparisonExtras struct {
 	FinalContext FinalContextFact `json:"final_context"`
 	Duration     DurationFact     `json:"duration"`
 	Deliverable  DeliverableFact  `json:"deliverable"`
+	// Cost is each side's estimated $ spend (cost.go). Like the crash-report
+	// dashboard's own cost line it needs a *pricing.Resolver, so
+	// ComputeComparisonExtras takes one; both sides are CostFact{Resolved:
+	// false} when no price book was reachable — the tale-of-the-tape then
+	// simply omits the cost row rather than showing "$0 vs $0".
+	Cost CostPair `json:"cost"`
 	// InitialInstruction is each side's opening user instruction, in full
 	// (bounded — see initialInstructionExcerptChars). A short summary
 	// (JourneyRef.Title, taskseg.Preview-truncated to ~80 runes) is already
@@ -280,6 +297,12 @@ type DeliverableFact struct {
 	B DeliverableStats `json:"b"`
 }
 
+// CostPair is each side's estimated spend — see CostFact (cost.go).
+type CostPair struct {
+	A CostFact `json:"a"`
+	B CostFact `json:"b"`
+}
+
 // InitialInstructionStats is one side's opening user instruction, bounded
 // to initialInstructionExcerptChars. Found is false only for a Journey with
 // no user-role Event at all — shouldn't happen in practice (every Journey
@@ -336,7 +359,7 @@ func initialInstructionStats(j *Journey, prof taskseg.Profile) InitialInstructio
 // the SAME Profile both Journeys were already built with (cmd_story.go's
 // compareJourneys calls story.BuildChain(chain, prof, lang) for both sides)
 // — initialInstructionStats needs it for dialect-aware extraction.
-func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profile) ComparisonExtras {
+func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profile, res *pricing.Resolver, currency string) ComparisonExtras {
 	return ComparisonExtras{
 		Endpoints:          endpointsFact(jA, jB),
 		Cache:              CacheFact{A: cacheStats(jA), B: cacheStats(jB)},
@@ -346,6 +369,7 @@ func ComputeComparisonExtras(jA, jB *Journey, ma, mb Metrics, prof taskseg.Profi
 		Deliverable:        DeliverableFact{A: deliverableStats(jA), B: deliverableStats(jB)},
 		InitialInstruction: InitialInstructionFact{A: initialInstructionStats(jA, prof), B: initialInstructionStats(jB, prof)},
 		Divergence:         computeDivergence(jA, jB),
+		Cost:               CostPair{A: ComputeJourneyCost(jA, res, currency), B: ComputeJourneyCost(jB, res, currency)},
 	}
 }
 

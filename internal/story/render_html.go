@@ -17,26 +17,33 @@ package story
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
-// RenderHTML renders j as one self-contained HTML dashboard in lang.
-func RenderHTML(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, redact bool) string {
+// RenderHTML renders j as one self-contained HTML incident report in lang.
+// cost is threaded in (not computed here) because it needs a
+// *pricing.Resolver — a zero CostFact{Resolved:false} is the "no price book"
+// case and simply drops the $ figure from the damage line.
+func RenderHTML(j *Journey, m Metrics, findings []Finding, cost CostFact, lang i18n.Lang, redact bool) string {
 	t := i18n.StoryHTML(lang)
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 
-	allSteps := flattenSteps(j)
+	allSteps := journeySteps(j)
+	ponr := ComputePointOfNoReturn(j, findings)
+	sev, sevDriver := JourneySeverity(findings)
 
 	w("<!doctype html>\n<html lang=%q>\n<head>\n<meta charset=\"utf-8\">\n", htmlLangAttr(lang))
 	w("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
 	w("<title>%s</title>\n<style>\n%s</style>\n</head>\n<body>\n<div class=\"wrap\">\n", he(t.DocTitle(j.ID)), htmlStyle)
 
-	htmlHeader(w, j, allSteps, t, redact)
+	htmlHeader(w, j, allSteps, m, findings, cost, sev, sevDriver, ponr, t, redact)
 
 	w("<div class=\"layout\">\n<div class=\"railwrap\">\n")
 	htmlRail(w, j, t)
@@ -60,14 +67,6 @@ func RenderHTML(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, redac
 	return b.String()
 }
 
-func flattenSteps(j *Journey) []*Step {
-	var out []*Step
-	for _, task := range j.Tasks {
-		out = append(out, task.Steps...)
-	}
-	return out
-}
-
 func htmlLangAttr(lang i18n.Lang) string {
 	if lang == i18n.ZH {
 		return "zh"
@@ -75,15 +74,31 @@ func htmlLangAttr(lang i18n.Lang) string {
 	return "en"
 }
 
-// htmlHeader renders the verdict screen: identity, title, banners, and a
-// one-line outcome (the final deliverable if deliverableStats found one,
-// else the termination finish reason).
-func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, t i18n.StoryHTMLText, redact bool) {
-	w("<header class=\"jhead\">\n<h1>%s</h1>\n", he(t.DocTitle(j.ID)))
+// htmlHeader renders the incident-report front page: the recorder bar, the
+// PROBABLE CAUSE verdict panel (severity stamp + the finding that drove it +
+// a one-line damage tally), the title/subtitle, banners, the point-of-no-
+// return strip, and the one-line outcome. Redact-safe: the verdict panel and
+// PONR strip use structure/counts only; the driver finding's narrative text
+// is shown under -redact as a bare code + step anchor, matching htmlFindings.
+func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics, findings []Finding, cost CostFact, sev string, sevDriver FindingCode, ponr *PointOfNoReturn, t i18n.StoryHTMLText, redact bool) {
+	w("<div class=\"recbar\"><span class=\"rl\">%s</span><span class=\"jid\">%s</span></div>\n",
+		he(t.RecorderBar), he(j.ID))
+	w("<header class=\"jhead\">\n")
+
+	w("<div class=\"verdict v-%s\">\n", he(sev))
+	w("<div class=\"vtop\"><span class=\"vlabel\">%s</span><span class=\"vstamp\">%s</span></div>\n",
+		he(t.VerdictProbableCause), he(t.VerdictStamp(sev)))
+	w("<div class=\"vcause\">%s</div>\n", verdictCause(findings, sevDriver, t, redact))
+	w("<div class=\"damage\">%s%s</div>\n", he(t.DamageLine(len(allSteps),
+		fmtSpan(time.Duration(m.NetWorkingMS)*time.Millisecond),
+		fmtutil.FmtTokens(journeyTokenTotal(m)))),
+		htmlDamageCost(cost, t))
+	w("</div>\n")
+
+	w("<h1>%s</h1>\n", htmlTitleText(j.Title, redact, t))
 	w("<p class=\"subtitle\">%s</p>\n", he(t.Subtitle(len(j.Tasks), len(allSteps),
 		j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"),
 		j.To.In(fmtutil.DisplayZone).Format("2006-01-02 15:04"))))
-	w("<blockquote>%s</blockquote>\n", bodyText(j.Title, redact, t))
 	if redact {
 		w("<div class=\"banner redact\">%s</div>\n", he(t.RedactedBanner))
 	}
@@ -94,6 +109,8 @@ func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, t i18n.Sto
 		w("<div class=\"banner warn\">%s</div>\n", he(t.BreakBanner(j.Break.Edit.Kind.String())))
 	}
 
+	htmlPointOfNoReturn(w, ponr, allSteps, sev, t)
+
 	w("<div class=\"outcome\"><span class=\"lbl\">%s</span> ", he(t.OutcomeLabel))
 	if d := deliverableStats(j); d.Found {
 		w("%s <code>%s</code>", he(t.OutcomeDeliverable(d.StepSeq)), he(d.ToolName))
@@ -103,6 +120,134 @@ func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, t i18n.Sto
 		w("%s", he(t.OutcomeUnknown))
 	}
 	w("</div>\n</header>\n")
+}
+
+// verdictCause renders the one finding that set the severity — its narrative
+// text when available, or (clean journey) the all-clear line, or (redact) a
+// bare code + step anchor.
+func verdictCause(findings []Finding, driver FindingCode, t i18n.StoryHTMLText, redact bool) string {
+	if driver == "" {
+		return "<span class=\"vclean\">" + he(t.VerdictClean) + "</span>"
+	}
+	var f *Finding
+	for i := range findings {
+		if findings[i].Code == driver {
+			f = &findings[i]
+			break
+		}
+	}
+	if redact || f == nil || f.Finding == "" {
+		step := 0
+		if f != nil {
+			step = f.StepSeq
+		}
+		return he(t.VerdictRedacted(string(driver), step))
+	}
+	return he(f.Finding)
+}
+
+// htmlPointOfNoReturn renders the turning-point strip. With no located turn:
+// a "stayed on the rails" note normally, but a "degraded gradually" note when
+// the verdict is critical — a behavioral failure (loop / drift / oscillation)
+// leaves no one decisive step, and reassurance would contradict the stamp.
+func htmlPointOfNoReturn(w func(string, ...any), p *PointOfNoReturn, allSteps []*Step, sev string, t i18n.StoryHTMLText) {
+	if p == nil {
+		if sev == SeverityCritical {
+			w("<div class=\"ponr ponr-diffuse\">%s</div>\n", he(t.DiffusePointOfNoReturn))
+		} else {
+			w("<div class=\"ponr ponr-none\">%s</div>\n", he(t.NoPointOfNoReturn))
+		}
+		return
+	}
+	ts := ""
+	for _, s := range allSteps {
+		if s.Seq == p.StepSeq && s.Rec != nil {
+			ts = s.Rec.TS.In(fmtutil.DisplayZone).Format("15:04:05")
+			break
+		}
+	}
+	var detail string
+	switch p.Kind {
+	case PONRCompaction:
+		// Both sizes only: the compaction-reconstruction layer sometimes
+		// can't measure one side (0), and "79.8K → 0 tokens" reads as broken.
+		before, after := "", ""
+		if p.TokensBefore > 0 && p.TokensAfter > 0 {
+			before, after = fmtutil.FmtTokens(p.TokensBefore), fmtutil.FmtTokens(p.TokensAfter)
+		}
+		detail = t.PONRCompaction(before, after, len(p.EntitiesDropped))
+	case PONRRetry:
+		detail = t.PONRRetry
+	default:
+		detail = t.PONRContract
+	}
+	w("<div class=\"ponr\">\n<div class=\"ponr-h\">%s</div>\n<div class=\"ponr-d\">%s</div>\n</div>\n",
+		he(t.PointOfNoReturnHead(p.StepSeq, ts)), he(detail))
+}
+
+// fmtSpan renders a duration in human units — "50m 55s" / "4m 12s" / "45s"
+// — for the shareable headlines (the crash report's damage line, the
+// tale-of-the-tape's wall-time row). fmtutil.FmtSeconds is fixed at bare
+// seconds, which the tight metrics grid wants but a headline doesn't.
+func fmtSpan(d time.Duration) string {
+	s := int(d.Seconds() + 0.5)
+	if s < 60 {
+		return strconv.Itoa(s) + "s"
+	}
+	m := s / 60
+	s %= 60
+	if m < 60 {
+		return fmt.Sprintf("%dm %02ds", m, s)
+	}
+	h := m / 60
+	m %= 60
+	return fmt.Sprintf("%dh %02dm", h, m)
+}
+
+// journeyTokenTotal is the run's total token traffic — every step's reported
+// input (cached included: still tokens that moved) plus output, summed from
+// the per-model usage table.
+func journeyTokenTotal(m Metrics) int64 {
+	var n int64
+	for _, u := range m.ModelUsage {
+		n += u.TokensIn + u.TokensOut
+	}
+	return n
+}
+
+// htmlDamageCost is the trailing " · ≈ $X" on the damage line — empty when
+// no price book resolved (never "$0"), a "+" suffix when only some steps
+// priced.
+func htmlDamageCost(c CostFact, t i18n.StoryHTMLText) string {
+	if !c.Resolved {
+		return ""
+	}
+	return he(t.DamageCost(fmtMoney(c)))
+}
+
+// fmtMoney formats c's total with its currency — "$4.80" for USD/blank,
+// "CNY 34.20" otherwise, a trailing "+" when the estimate is partial.
+func fmtMoney(c CostFact) string {
+	amt := strconv.FormatFloat(c.TotalUSD, 'f', moneyDecimals(c.TotalUSD), 64)
+	s := amt
+	if c.Currency == "" || c.Currency == "USD" {
+		s = "$" + amt
+	} else {
+		s = c.Currency + " " + amt
+	}
+	if c.Partial() {
+		s += "+"
+	}
+	return s
+}
+
+// moneyDecimals shows cents for small amounts, whole units past $100 where
+// the cents are noise on a shareable card.
+func moneyDecimals(v float64) int {
+	if v >= 100 {
+		return 0
+	}
+	return 2
 }
 
 func htmlLastFinish(steps []*Step) string {
@@ -147,3 +292,16 @@ func bodyText(s string, redact bool, t i18n.StoryHTMLText) string {
 }
 
 func he(s string) string { return html.EscapeString(s) }
+
+// htmlTitleText renders j.Title for the <h1> — a single-line instruction
+// preview, not a body block, so it escapes inline rather than wrapping in
+// <pre>. Redact swaps it for a length placeholder like every other body.
+func htmlTitleText(s string, redact bool, t i18n.StoryHTMLText) string {
+	if strings.TrimSpace(s) == "" {
+		return "<span class=\"empty\">" + he(t.Empty) + "</span>"
+	}
+	if redact {
+		return "<span class=\"placeholder\">" + he(t.RedactedText(utf8.RuneCountInString(s))) + "</span>"
+	}
+	return he(s)
+}

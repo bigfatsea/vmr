@@ -52,7 +52,7 @@ func htmlTestJourney(t *testing.T) (*Journey, Metrics, []Finding) {
 
 func TestRenderHTML_DashboardStructure(t *testing.T) {
 	j, m, f := htmlTestJourney(t)
-	out := RenderHTML(j, m, f, i18n.EN, false)
+	out := RenderHTML(j, m, f, CostFact{}, i18n.EN, false)
 
 	for _, want := range []string{
 		"<!doctype html>",
@@ -70,6 +70,16 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 		"audit the auth module",
 		"<style>",
 		"IntersectionObserver",
+		"FLIGHT RECORDER",   // recorder bar
+		"PROBABLE CAUSE",    // verdict panel
+		`class="verdict v-`, // severity class
+		"CRITICAL",          // fixture trips exact_repeat_tool_call
+		`class="damage"`,    // step/time/token tally
+		"tokens processed",  // damage line copy
+		// exact_repeat_tool_call is critical but not a structural PONR signal:
+		// the strip must NOT claim the run "stayed on its rails".
+		`class="ponr ponr-diffuse"`,
+		"degraded gradually",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dashboard HTML missing %q", want)
@@ -77,6 +87,9 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 	}
 	if len(f) == 0 {
 		t.Fatal("fixture should trip the exact-repeat Finding")
+	}
+	if strings.Contains(out, "stayed on its rails") {
+		t.Error("critical verdict must not also claim the run stayed on its rails")
 	}
 	if !strings.Contains(out, string(f[0].Code)) {
 		t.Errorf("Findings section did not render finding code %q", f[0].Code)
@@ -89,17 +102,69 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 	}
 }
 
+func TestRenderHTML_CostAndPointOfNoReturn(t *testing.T) {
+	j := journeyOf(
+		&Step{Seq: 1},
+		&Step{Seq: 2, Compaction: &CompactionInfo{TokensBefore: 64000, TokensAfter: 8000,
+			SwallowedEntities: []string{"internal/auth/policy.go", "docs/spec.md"}}},
+		&Step{Seq: 3},
+	)
+	m := Metrics{NetWorkingMS: 252000, ModelUsage: []ModelUsageStat{{TokensIn: 1_100_000, TokensOut: 90_000}}}
+	cost := CostFact{Currency: "USD", TotalUSD: 4.8, Resolved: true, PricedSteps: 3, TotalSteps: 3}
+
+	out := RenderHTML(j, m, nil, cost, i18n.EN, false)
+	for _, want := range []string{
+		"POINT OF NO RETURN", "Step 2", "64.0K", "8.0K", "2 named constraints dropped",
+		"≈ $4.80", "NOMINAL", // no findings -> clean verdict, but a fatal compaction still shows the PONR strip
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cost/PONR dashboard missing %q", want)
+		}
+	}
+
+	// redact keeps the PONR strip (counts only) and the $ figure (a number,
+	// not a body), drops nothing structural.
+	red := RenderHTML(j, m, nil, cost, i18n.EN, true)
+	for _, want := range []string{"POINT OF NO RETURN", "constraints dropped", "≈ $4.80"} {
+		if !strings.Contains(red, want) {
+			t.Errorf("redacted cost/PONR dashboard missing %q", want)
+		}
+	}
+	// entity names themselves must not leak even though the count does.
+	if strings.Contains(red, "policy.go") {
+		t.Error("redacted PONR strip leaked a dropped entity name")
+	}
+}
+
+// The compaction-reconstruction layer sometimes can't measure one side of a
+// boundary (a 0). The PONR strip must not then render "79.8K → 0 tokens".
+func TestRenderHTML_PointOfNoReturn_UnmeasuredCompactionSize(t *testing.T) {
+	j := journeyOf(
+		&Step{Seq: 1, Compaction: &CompactionInfo{TokensBefore: 79800, TokensAfter: 0,
+			SwallowedEntities: []string{"a.go", "b.go", "c.go"}}},
+	)
+	out := RenderHTML(j, Metrics{}, nil, CostFact{}, i18n.EN, false)
+	if !strings.Contains(out, "POINT OF NO RETURN") ||
+		!strings.Contains(out, "dropped 3 named constraints") {
+		t.Errorf("want the constraint-count phrasing, got:\n%s", out)
+	}
+	if strings.Contains(out, "→ 0 tokens") {
+		t.Error(`PONR strip rendered an unmeasured "→ 0 tokens"`)
+	}
+}
+
 func TestRenderHTML_DashboardRedactLeaksNothing(t *testing.T) {
 	j, m, f := htmlTestJourney(t)
-	out := RenderHTML(j, m, f, i18n.EN, true)
+	out := RenderHTML(j, m, f, CostFact{}, i18n.EN, true)
 
 	for _, secret := range []string{"SECRET-LEAK", "TOKEN=abc", "package auth", "done reviewing", "read_file\":", "auth.go"} {
 		if strings.Contains(out, secret) {
 			t.Errorf("redacted dashboard leaked content: %q", secret)
 		}
 	}
-	// structure + metrics survive; detail links do not.
-	for _, want := range []string{"read_file", "‹text:", `id="step-1"`, `class="stat"`, "<polyline"} {
+	// structure + metrics + verdict survive; detail links + finding prose do not.
+	for _, want := range []string{"read_file", "‹text:", `id="step-1"`, `class="stat"`, "<polyline",
+		"PROBABLE CAUSE", "CRITICAL", `class="damage"`, "text redacted"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("redacted dashboard missing structural element %q", want)
 		}
@@ -121,7 +186,7 @@ func TestRenderHTML_DashboardRedactLeaksNothing(t *testing.T) {
 
 func TestRenderHTML_DashboardZHChrome(t *testing.T) {
 	j, m, f := htmlTestJourney(t)
-	out := RenderHTML(j, m, f, i18n.ZH, false)
+	out := RenderHTML(j, m, f, CostFact{}, i18n.ZH, false)
 	if !strings.Contains(out, `<html lang="zh">`) || !strings.Contains(out, "结构") || !strings.Contains(out, "指标") {
 		t.Errorf("ZH chrome not applied:\n%s", out[:min(len(out), 600)])
 	}
@@ -129,5 +194,5 @@ func TestRenderHTML_DashboardZHChrome(t *testing.T) {
 
 func TestRenderHTML_NoStepsDoesNotPanic(t *testing.T) {
 	j := &Journey{ID: "j-empty", Title: "x", From: time.Now(), To: time.Now()}
-	_ = RenderHTML(j, Metrics{}, nil, i18n.EN, false)
+	_ = RenderHTML(j, Metrics{}, nil, CostFact{}, i18n.EN, false)
 }

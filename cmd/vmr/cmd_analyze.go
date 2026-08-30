@@ -298,7 +298,8 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if err != nil {
 			return err
 		}
-		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, r.htmlOn, r.redactOn)
+		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
 	case r.journeyArg != "":
 		ids := make([]string, len(su.cands))
 		for i, ch := range su.chains {
@@ -313,7 +314,8 @@ func dispatchAnalyze(r *analyzeRun) error {
 			if err != nil {
 				return err
 			}
-			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, r.htmlOn, r.redactOn)
+			priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
 		}
 		if r.llmAddrExplicit {
 			return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), r.journeyArg)

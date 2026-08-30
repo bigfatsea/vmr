@@ -98,6 +98,25 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	return resolver, summary
 }
 
+// resolvePricingForAnalyze builds the pricing resolver for the story-half
+// zoom views (-journey / -compare), which don't run the macro report half
+// and so never reach runReport's own buildPricing call. Same degrade-
+// gracefully contract: a missing/unreadable config.yaml just means the
+// embedded standard table with no account overrides. Progress lines are
+// discarded here (the story path has no report-style progress log); the $
+// figure showing up (or not) in the rendered dashboard is self-evident.
+// Returns the display currency alongside so the dashboard can label a
+// non-USD amount.
+func resolvePricingForAnalyze(configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
+	cfg, cfgErr := config.Load(configPath)
+	resolver, info := buildPricing(cfg, cfgErr, configPath, io.Discard, displayCCY, exchangeRate)
+	ccy := "USD"
+	if info != nil && info.Currency != "" {
+		ccy = info.Currency
+	}
+	return resolver, ccy
+}
+
 // allPathsOutsideDir reports whether EVERY entry in paths resolves
 // outside dir — used to flag "the live quota counter's log_dir doesn't
 // contain a single one of the audit logs this report is analyzing", the
@@ -226,16 +245,12 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		// two warnings naming the same unreadable file.
 		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides), §2.5 renders without quota references\n", opts.configPath, cfgErr)
 	}
-
 	pricingSrc, pricingInfo := buildPricing(cfg, cfgErr, opts.configPath, tw, opts.displayCCY, opts.exchangeRate)
 
 	// 0o700/0o600: report outputs embed full conversation bodies from the
-	// 0600 audit files - the derived copies must not loosen that. Created
-	// up front now (used to happen after Build succeeded): the detail
-	// writer below needs its output directory to exist before Build's
-	// aggregation pass starts feeding it records, since detail rendering
-	// now happens inside that same pass instead of as a separate step
-	// afterward.
+	// 0600 audit files - the derived copies must not loosen that. Created up
+	// front (the detail writer below needs its output directory to exist
+	// before Build's aggregation pass starts feeding it records).
 	if err := os.MkdirAll(opts.outDir, 0o700); err != nil {
 		return err
 	}
@@ -284,9 +299,11 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink)), 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n", rep.Meta.Records, rep.Meta.ParseErrors, len(paths))
-	fmt.Fprintf(tw, "%s\n", jsonPath)
-	fmt.Fprintf(tw, "%s\n", mdPath)
+	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+	if err := writeToolWasteCard(rep, opts.outDir, opts.lang, tw); err != nil {
+		return err
+	}
 
 	if dw != nil {
 		n, err := dw.Close()
@@ -328,6 +345,22 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		return fmt.Errorf("failed-requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests-failed.md"))
+	return nil
+}
+
+// writeToolWasteCard writes {out}/tool-waste.html — the standalone
+// shareable card — whenever the report has tool data. Carries only tool
+// names/counts/byte sizes (no conversation content), 0600 like every other
+// derived file. Skipped silently when nothing declared tools.
+func writeToolWasteCard(rep *report.Report2, outDir string, lang i18n.Lang, tw io.Writer) error {
+	if len(rep.Tools) == 0 {
+		return nil
+	}
+	twPath := filepath.Join(outDir, "tool-waste.html")
+	if err := os.WriteFile(twPath, []byte(report.RenderToolWasteHTML(rep, lang)), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(tw, "%s\n", twPath)
 	return nil
 }
 

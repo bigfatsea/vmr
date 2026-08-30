@@ -31,7 +31,7 @@ func cmpFixture(t *testing.T) Comparison {
 	}
 	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
 	cmp := Compare(sa, sb, i18n.EN)
-	ex := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, taskseg.Generic)
+	ex := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, taskseg.Generic, nil, "")
 	cmp.Extras = &ex
 	return cmp
 }

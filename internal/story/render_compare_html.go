@@ -14,6 +14,7 @@ package story
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 
 	"vmr/internal/fmtutil"
@@ -44,10 +45,12 @@ func RenderComparisonHTML(cmp Comparison, llm CompareLLMResult, lang i18n.Lang, 
 	w("<title>%s</title>\n<style>\n%s%s</style>\n</head>\n<body>\n<div class=\"wrap\">\n",
 		che(t.DocTitle), htmlStyle, compareExtraStyle)
 
-	w("<header class=\"jhead\">\n<h1>%s</h1>\n", che(t.DocTitle))
+	w("<div class=\"recbar\"><span class=\"rl\">%s</span></div>\n", che(t.RecorderBar))
+	w("<header class=\"jhead\">\n")
 	if redact {
 		w("<div class=\"banner redact\">%s</div>\n", che(t.RedactedBanner))
 	}
+	chtmlTaleOfTheTape(w, cmp, t, redact)
 	w("</header>\n<div class=\"layout\">\n<div class=\"railwrap\">\n<nav class=\"rail\">\n<ol>\n")
 	w("<li><a href=\"#sides\">%s</a></li>\n", che(t.SectionSides))
 	w("<li><a href=\"#diff\">%s</a></li>\n", che(t.SectionDiff))
@@ -186,7 +189,82 @@ func chtmlFacts(w func(string, ...any), ex *ComparisonExtras, t i18n.CompareHTML
 	chtmlFact(w, t.SysPromptLabel, t.SysPromptPair(fmtutil.FmtTokens(ex.SysPrompt.A.Tokens), ex.SysPrompt.A.Changes, fmtutil.FmtTokens(ex.SysPrompt.B.Tokens), ex.SysPrompt.B.Changes))
 	chtmlFact(w, t.DurationLabel, t.DurationPair(fmtutil.FmtSeconds(ex.Duration.AWall, 1), emptyOr(ex.Duration.ATermination, t.NoTermination), fmtutil.FmtSeconds(ex.Duration.BWall, 1), emptyOr(ex.Duration.BTermination, t.NoTermination)))
 	chtmlDeliverable(w, ex.Deliverable, t, redact)
+	chtmlCostFact(w, ex.Cost, t)
 	w("</div>\n")
+}
+
+func chtmlCostFact(w func(string, ...any), cp CostPair, t i18n.CompareHTMLText) {
+	if !cp.A.Resolved && !cp.B.Resolved {
+		chtmlFact(w, t.CostLabel, t.CostUnresolvedFact)
+		return
+	}
+	chtmlFact(w, t.CostLabel, t.CostPairFact(totMoney(cp.A), totMoney(cp.B)))
+}
+
+// --- tale of the tape --------------------------------------------------------
+
+// chtmlTaleOfTheTape renders the versus scorecard: the metric name centered,
+// each side's value flanking it — the iconic pre-fight format. No winner is
+// declared (see i18n.CompareHTMLText.TotNoWinner). Redact-safe: every value
+// here is a count, a duration, a model name or a $ figure, never body text.
+func chtmlTaleOfTheTape(w func(string, ...any), cmp Comparison, t i18n.CompareHTMLText, redact bool) {
+	w("<div class=\"tot\">\n<div class=\"tot-h\">%s</div>\n<table class=\"tot-tbl\"><tbody>\n", che(t.TaleOfTheTape))
+
+	aModel, bModel := "—", "—"
+	var dur DurationFact
+	var cost CostPair
+	div := t.TotAligned
+	if cmp.Extras != nil {
+		aModel = totModelLabel(cmp.Extras.Endpoints.A)
+		bModel = totModelLabel(cmp.Extras.Endpoints.B)
+		dur, cost = cmp.Extras.Duration, cmp.Extras.Cost
+		if cmp.Extras.Divergence.Found {
+			div = t.TotDivergeAt(cmp.Extras.Divergence.Index + 1)
+		}
+	}
+	totRow(w, aModel, t.TotModel, bModel)
+	totRow(w, strconv.Itoa(cmp.A.Steps), t.TotSteps, strconv.Itoa(cmp.B.Steps))
+	totRow(w, strconv.Itoa(cmp.A.ToolCalls), t.TotToolCalls, strconv.Itoa(cmp.B.ToolCalls))
+	if cmp.Extras != nil {
+		totRow(w, fmtSpan(dur.AWall), t.TotWallTime, fmtSpan(dur.BWall))
+		if cost.A.Resolved || cost.B.Resolved {
+			totRow(w, totMoney(cost.A), t.TotCost, totMoney(cost.B))
+		}
+	}
+	w("</tbody></table>\n")
+	w("<div class=\"tot-split\">%s</div>\n", che(div))
+	w("<div class=\"tot-note\">%s</div>\n</div>\n", che(t.TotNoWinner))
+}
+
+func totRow(w func(string, ...any), a, label, b string) {
+	w("<tr><td class=\"ta\">%s</td><td class=\"tm\">%s</td><td class=\"tb\">%s</td></tr>\n",
+		che(a), che(label), che(b))
+}
+
+// totModelLabel is the short "provider:model" for the scorecard — the
+// audit label's protocol prefix dropped, and a second distinct endpoint
+// collapsed to "(+N)" so a mid-run failover doesn't blow out the cell.
+func totModelLabel(endpoints []string) string {
+	if len(endpoints) == 0 {
+		return "—"
+	}
+	short := endpoints[0]
+	if parts := strings.SplitN(short, ":", 3); len(parts) == 3 {
+		short = parts[1] + ":" + parts[2]
+	}
+	if n := len(endpoints) - 1; n > 0 {
+		short += fmt.Sprintf(" (+%d)", n)
+	}
+	return short
+}
+
+// totMoney is fmtMoney (render_html.go) with an unresolved side rendered as
+// a dash rather than "$0".
+func totMoney(c CostFact) string {
+	if !c.Resolved {
+		return "—"
+	}
+	return fmtMoney(c)
 }
 
 func chtmlFact(w func(string, ...any), label, val string) {
@@ -274,32 +352,58 @@ func emptyOr(s, fallback string) string {
 	return s
 }
 
+// compareExtraStyle is appended after htmlStyle, so it inherits the same
+// "VMR Forensics" tokens (--ink / --panel / --rule / --amber / --trace ...);
+// it only adds the tale-of-the-tape scorecard and the A/B tables.
 const compareExtraStyle = `
-.abside { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 8px 0; background: var(--card); }
-.abtag { font-weight: 700; font-size: 12px; color: var(--accent); }
-.abid { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
-.abtitle { margin: 4px 0; }
-.absub { font-size: 12px; color: var(--muted); }
+/* Tale of the tape */
+.tot { border: 1px solid var(--rule); border-top: 4px solid var(--amber); border-radius: 4px;
+  background: var(--panel); padding: 14px 16px 12px; margin-bottom: 22px; }
+.tot-h { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim);
+  text-align: center; margin-bottom: 8px; }
+table.tot-tbl { border-collapse: collapse; width: 100%; }
+table.tot-tbl td { padding: 6px 10px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+table.tot-tbl tr:last-child td { border-bottom: none; }
+.tot-tbl .ta { text-align: right; width: 40%; color: var(--trace); font-weight: 700; }
+.tot-tbl .tb { text-align: left; width: 40%; color: var(--amber); font-weight: 700; }
+.tot-tbl .tm { text-align: center; width: 20%; font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-dim); font-weight: 400; }
+.tot-split { text-align: center; margin-top: 10px; font-size: 12px; letter-spacing: .04em;
+  color: var(--ink); font-family: var(--sans); }
+.tot-note { text-align: center; margin-top: 6px; font-size: 11px; color: var(--ink-dim); font-family: var(--sans); }
+
+/* A / B side cards + divergence + tables */
+.abside { border: 1px solid var(--rule); border-radius: 5px; padding: 12px 14px; margin: 8px 0; background: var(--panel); }
+.abtag { font-weight: 700; font-size: 12px; color: var(--trace); letter-spacing: .1em; }
+.abid { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); word-break: break-all; }
+.abtitle { margin: 4px 0; font-family: var(--sans); }
+.absub { font-size: 11px; color: var(--ink-dim); }
 .abinstr { margin: 10px 0; }
-.abinstr-side { margin: 6px 0; }
-.divergence { border: 1px solid var(--flag); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
-.dv-h { font-size: 15px; font-weight: 600; }
-.dv-row { margin-top: 4px; font-size: 13px; }
-.dv-l { display: inline-block; width: 18px; font-weight: 700; color: var(--muted); }
-.dv-none { color: var(--muted); }
-.dv-note { margin-top: 6px; font-size: 12px; color: var(--muted); }
-table.abtbl { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
-table.abtbl th, table.abtbl td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; }
-table.abtbl th { background: var(--card); font-size: 12px; }
-table.abtbl tr.notable td { background: var(--warn-bg); color: var(--warn-fg); }
+.abinstr-side { margin: 6px 0; font-family: var(--sans); font-size: 13px; }
+.divergence { border: 1px solid var(--rule); border-left: 3px solid var(--amber); border-radius: 5px;
+  padding: 12px 14px; margin: 10px 0; background: var(--panel); }
+.dv-h { font-size: 14px; font-weight: 700; font-family: var(--sans); }
+.dv-row { margin-top: 4px; font-size: 12.5px; }
+.dv-l { display: inline-block; width: 18px; font-weight: 700; color: var(--ink-dim); }
+.dv-none { color: var(--ink-dim); }
+.dv-note { margin-top: 6px; font-size: 11px; color: var(--ink-dim); font-family: var(--sans); }
+table.abtbl { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12.5px; }
+table.abtbl th, table.abtbl td { border: 1px solid var(--rule); padding: 5px 9px; text-align: left; }
+table.abtbl th { background: var(--code); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-dim); }
+table.abtbl tr.notable td { color: var(--amber); }
+table.abtbl tr.notable td:first-child { border-left: 2px solid var(--amber); }
 .facts { margin-top: 14px; }
-.fact { font-size: 13px; margin: 5px 0; }
-.fact.sub { margin-left: 16px; color: var(--muted); }
-.fact .fk { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: 6px; }
-.llm-disclaimer { font-size: 12px; color: var(--muted); background: var(--card); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
-.llm-part { margin: 10px 0; }
-.llm-part h3 { font-size: 14px; margin: 0 0 4px; }
+.fact { font-size: 12.5px; margin: 5px 0; font-family: var(--sans); }
+.fact.sub { margin-left: 16px; color: var(--ink-dim); }
+.fact .fk { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-dim); margin-right: 6px; font-family: var(--mono); }
+.llm-disclaimer { font-size: 11px; color: var(--ink-dim); border: 1px dashed var(--rule); border-radius: 4px; padding: 8px 10px; margin-bottom: 10px; font-family: var(--sans); }
+.llm-part { margin: 10px 0; font-family: var(--sans); }
+.llm-part h3 { font-size: 13px; margin: 0 0 4px; }
 table.mdlite { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; display: block; overflow-x: auto; }
-table.mdlite th, table.mdlite td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; vertical-align: top; }
-table.mdlite th { background: var(--card); }
+table.mdlite th, table.mdlite td { border: 1px solid var(--rule); padding: 4px 7px; text-align: left; vertical-align: top; }
+table.mdlite th { background: var(--code); }
+@media (max-width: 820px) {
+  .tot-tbl .ta, .tot-tbl .tb { width: 38%; }
+  .tot-tbl td { font-size: 13px; }
+}
 `

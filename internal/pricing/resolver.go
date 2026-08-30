@@ -3,6 +3,7 @@
 package pricing
 
 import (
+	"strings"
 	"sync"
 
 	"vmr/internal/core"
@@ -87,6 +88,25 @@ func (r *Resolver) RateFor(provider, model string) (Rate, bool) {
 		rate = rate.Scale(r.displayFactor)
 	}
 	return rate, true
+}
+
+// RateForEndpoint resolves the Rate for a "protocol:provider:model" audit-log
+// endpoint label (core.EndpointLabel's format) — the shape both
+// internal/report (per audit record) and internal/story (per journey step)
+// hold, so neither has to carry its own label split alongside a RateFor
+// call. Strict ":"-delimited SplitN(…, 3): the model segment may itself
+// contain ":" or "/" (e.g. "z-ai/glm-5.2") and is passed through whole.
+// ok=false for a malformed label (< 3 segments), the "-" no-endpoint
+// sentinel, or an unresolvable provider+model — same best-effort contract
+// as RateFor. Deliberately NOT core.SplitEndpointLabel, which also accepts
+// the legacy "/"-joined form: widening this would change the $ numbers
+// historical reports produce for old-format logs.
+func (r *Resolver) RateForEndpoint(label string) (Rate, bool) {
+	parts := strings.SplitN(label, ":", 3)
+	if len(parts) < 3 {
+		return Rate{}, false
+	}
+	return r.RateFor(parts[1], parts[2])
 }
 
 func (r *Resolver) resolve(provider, model string) (*core.PricingSpec, bool) {

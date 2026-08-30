@@ -19,6 +19,15 @@ process (write into `[Unreleased]` as you go, retitle it when cutting a tag).
 Sections before the most recent release are compressed summaries — the
 commits and design docs hold the full reasoning.
 
+## [Unreleased]
+
+### Added
+- `vmr analyze -journey <id> -html` is now an **incident report**: a `CRITICAL`/`WARNING`/`NOMINAL` severity verdict (from the highest-severity finding), a plain-language probable-cause line, a `N steps · Mm Ss · X tokens` damage tally (with `≈ $Y` when pricing resolves), and a **point-of-no-return** strip locating the earliest unrecoverable turn — a constraint-losing compaction (entity-diff rule or LLM excerpt reader), an unadapted retry loop, or a hard history contraction; a critical run whose failure was behavioral (a loop, drift, oscillation — no one decisive step) says so rather than claiming it stayed on its rails. Redact-safe — the verdict and turning point use counts/structure only. Restyled into a mono-dominant flight-recorder look (dark) / printed-report look (light)
+- `vmr analyze -compare a,b -html` gains a **tale-of-the-tape** scorecard header (model / steps / tool calls / wall time / cost per side, no winner declared) and a per-side cost row in the facts. Cost needs resolvable pricing; when none resolves the row is omitted and the facts say so
+- `vmr analyze` writes **`{out}/tool-waste.html`** whenever the report has tool data — a standalone one-screen card from the §7 numbers: the share of shipped tool-schema bytes that went to never-called tools, totals, estimated wasted tokens, and a per-shape table. Tool names + counts only, no conversation content, 0600
+- `internal/pricing`: `Resolver.RateForEndpoint("protocol:provider:model")` — the endpoint-label lookup both the report (per record) and the story half (per journey step) now share
+- `journey-<id>.json` / `compare-*.json` gain a `cost` object (nil when no price book resolved — never a fake $0), computed through the same `pricing.Rate.Cost` formula the macro report uses. Present only on single `-journey` / `-compare` (pricing resolution is a zoom-in feature, like `-html` itself); the default suite's per-journey JSON carries no cost
+
 ## [0.6.3] - 2026-08-29
 
 ### Changed
