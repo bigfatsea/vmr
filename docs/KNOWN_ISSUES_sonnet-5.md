@@ -17,7 +17,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 20，合计 23。无 `[中低]` 条目。§3 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
+- **§1 分布**：高危 0、中危 3（`1.2`/`1.17`/`1.18`）、低危 27，合计 30。无 `[中低]` 条目。§3 ROI 表结论：高 ROI 0 条——待办里没有「价值高、成本低、却一直没做」的异常。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §1.2。
 
 ---
@@ -158,6 +158,50 @@
 - **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `story` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.parse-cache` 从几 MB 涨到约 160MB，且该 cache 是 report 半边共享的。跨包契约 + 双半边影响。
 - **触发条件**：内存不再是瓶颈后，时间成为首要痛点时单独立项。
 
+### 1.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 corpus 均值
+
+- **现状**：`internal/story/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -corpus` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
+- **当前缓解**：`-corpus` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」（2026-08-31）。只是免责，没动根因。
+- **可能方案**：对单间隙设上限（如 > 1h 归 idle/unknown 而非 agent 执行）。需改指标语义 + 更新 Analytics 设计文档的时间拆分定义 + 差分测试。
+- **触发条件**：脚注被证明不够（读者仍据 Mean 下结论），或要把 `NetWorkingMS` / `ModelToToolRatio` 当硬指标用。
+
+### 1.58 [低] 宏观报表按日成本表的覆盖度隐性依赖当日端点是否在定价表内
+
+- **现状**：`internal/report/section_cost.go` 的按日成本表只列「当日至少有一条记录能解析出费率」的日期；高流量端点（如 `cliproxy`、`bai`）未定价时，整块日期从表里消失，读者看到的是「这些天没有成本」而非「这些天成本未知」。
+- **当前缓解**：`internal/i18n/report_cost.go` 的 `ByDatePartialNote` 脚注（「未列出的日期有流量但上游端点无适用费率，成本未知，非零」），当且仅当确有未定价日期时渲染（2026-08-31）。
+- **可能方案**：补齐高流量 provider 定价（`internal/pricing` supplement 或 config override），或在 §2.5 显式列出「未定价 provider 及其请求占比」。
+- **触发条件**：主力上游长期不在定价表内，按日成本表因此长期残缺。
+
+### 1.59 [低] `vmr analyze -compare` 两侧 system prompt / 初始指令逐字一致时未合并
+
+- **现状**：`internal/story/render_compare.go` 的 `renderSysPrompt` / `renderInitialInstruction` 无条件各渲 A、B 两份节选（`renderExcerpt` 调两次）。两侧同源（`Changes` 均为 0、节选逐字相同）时，同一段 system prompt 正文在 compare md 里贴两遍，实测占单份 compare 全文约 65%。
+- **可能方案**：只做精确相等合并（`sp.A.Excerpt == sp.B.Excerpt` / `f.A.Text == f.B.Text`）——渲一份，标注「两侧此节选一致（截断前缀，不代表完整文本逐字相同）」，A/B 的 tokens+Changes 对比行保留。相似度阈值合并不做（阈值主观）。
+- **触发条件**：界限清楚、随时可做；改动会给两个函数各加一个分支，注意 `archtest` per-function 行预算。
+
+### 1.60 [低，需独立设计] 缺跨时间窗对比分析
+
+- **现状**：`-journey` 单条、`-compare` 双条、`-corpus` 跨 journey 统计，宏观报表是单时间窗快照——没有「同一指标 7 月 vs 8 月」或「某改动实施后改进多少」的视图。§5 有按日活动、§2 有按日成本，原料在，缺的是双窗口并排 + 环比。
+- **可能方案**：`vmr analyze -compare-period A..B vs C..D`，复用现有 `report` 聚合跑两遍 + 一个 diff 渲染层（形态类似 `story` 的 compare）。「客户 × 月成本矩阵」是同一维度的子集。不要往宏观报表里塞趋势——会让本就长的报表更长。
+- **触发条件**：需要量化某次路由/配置改动的效果，或客户成本要按月分摊。立项前先写设计草案。
+
+### 1.61 [低，结构性缺口] 无「任务是否达成目标」信号
+
+- **现状**：VMR 零埋点前提结构性地拿不到「任务是否真正达成目标」，`GroupComparison` 只能拿「耗时」当代理（Analytics 设计文档已述为已知限制）。
+- **可能的弱代理**：最后一条 assistant 回复是否含完成确认措辞、是否有 deliverable 落盘（`DeliverableFact` 已在 compare 里算）、plan 的 checkbox 是否全 check（`plan_parse.go` 已解析）。拼起来可给「疑似完成 / 疑似未完成 / 无法判断」三态弱信号。
+- **为什么待定**：价值最高、也最容易做错——一个不准的「成功率」比没有更糟。要做需专门的设计任务先论证各代理信号的假阳/假阴代价，不能仓促上。
+
+### 1.62 [低，YAGNI 待触发] 无 CSV / 扁平表导出
+
+- **现状**：`vmr-report.json` / `vmr-requests.json` 是嵌套 schema，pandas / Excel 用户要先 flatten（`RequestRow` 本身已接近扁平）。
+- **可能方案**：`vmr analyze -format csv` 导出几张固定扁平表（`requests.csv` / `cost_by_client.csv` / `cost_by_date.csv` / `sessions.csv`），不做「万能 CSV」。
+- **触发条件**：出现真实的表格工具消费需求——与 §1.29 同口径，无消费者就没人需要。
+
+### 1.63 [低] 宏观报表 §0 top-line 把调度型 workload 计入总量
+
+- **现状**：§0 顶部的总请求数是全量加总，含 `heartbeat` / `dream_diary` / compaction 等调度型流量。想看「排除调度型后的真实交互规模」得自己去 §5「By Workload Class」找 `interactive` 行（`rep.Workloads` / `WorkloadRow.Class`，数据已具备）。
+- **可能方案**：不加 CLI flag，在 §0 Summary 表下补一行「其中 interactive：N 请求 / 成功率 / p95」。
+- **触发条件**：随时可做；调度型流量占比越高越值得。
+
 ## 2. 刻意取舍，不是缺陷
 
 > 以下基于项目核心哲学（KISS / YAGNI / 单二进制 / 零代码侵入）做出，已论证过，不需要重新论证。
@@ -275,6 +319,9 @@
 | 1.17 | `imgprep` 解码闸门的阈值量纲 | 中 | 中低 | 未证 | **低** | 闸门已存在（防炸弹），缺的只是按内存预算的更低阈值。无实测显示造成过问题，且方案自带「用账单换内存」的取舍 |
 | 1.51 | `mdlite` 行内代码嵌套粗体 | 极低 | 极低 | 低 | **低** | 纯展示层瑕疵，无 XSS。真观察到 LLM 频繁触发再微调解析状态机 |
 | 1.48 | 错误分类词表的长期形态 | 中 | 中 | 低→中 | **低** | 三类误判已被最小修复覆盖（§2.1 的 `ErrQuirk` 条目）。触发：词表出现互相干扰，或 sticky 重复往返可观测拖慢中毒会话 |
+| 1.57 | `computeTimeSplit` 单间隙无上限污染 corpus 均值 | 中 | 中 | 中 | **低** | 已加 Mean 偏斜脚注；根因修法要改指标语义 + 设计文档 + 差分测试。触发：脚注不够，或要把 NetWorking 当硬指标 |
+| 1.58 | 按日成本表覆盖度依赖当日端点定价 | 中 | 低 | 中 | **低** | 已加「成本未知≠零」脚注；治本是补 provider 定价。触发：主力上游长期无价 |
+| 1.59 | compare 两侧同源节选未合并 | 低 | 低 | 中 | **低** | 精确相等合并界限清楚、随时可做；相似度阈值合并不做（阈值主观） |
 | 1.22 | `chatmsg` 未覆盖 Responses API | 中 | 低 | **零（已量化）** | **不做** | 真实语料 `openai-responses` 0 条。触发：`vmr-requests.json` 出现该 protocol |
 | 1.29 | `journey-<id>.json` 无 schema 版本戳 | 极低 | 无 | 低 | **不做（暂）** | YAGNI + 已裁决「JSON 无外部脚本消费」。触发：出现第一个 `_eval/` 之外的程序化消费方 |
 | 1.49 | imgprep 像素乘积 32-bit 溢出 | 极低 | 0 | 0（当前） | **不做** | 64-bit（唯一目标平台）不受影响。触发：32-bit 成为目标 |
