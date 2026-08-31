@@ -92,6 +92,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 			resolver = resolver.WithDisplayFactor(factor)
 			summary.Currency = displayCCY
 		} else {
+			summary.RequestedCurrency = displayCCY
 			fmt.Fprintf(tw, "pricing: no exchange rate to convert %s -> %s for -currency, showing %s instead (add exchange_rate: {%s: <rate>} to config.yaml's pricing: block or report.yaml)\n", summary.Currency, displayCCY, summary.Currency, displayCCY)
 		}
 	}

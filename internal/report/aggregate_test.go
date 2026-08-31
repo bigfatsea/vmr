@@ -478,7 +478,7 @@ func TestWriteRequestsJSONL(t *testing.T) {
 // become two separate one-turn sessions (so "alice"'s Chat User header can
 // be checked for the "N 会话 N 任务 N 轮" count); one heartbeat-tagged
 // record under "bob" is a single-shot scheduled session and must collapse
-// into the top-level 定时任务 rollup (its own vmr-requests-cron-hartbeat.md,
+// into the top-level 定时任务 rollup (its own vmr-requests-cron-heartbeat.md,
 // linked from the main index) instead of getting its own Chat User section
 // or per-tag sibling — "bob" never had any interactive traffic, so no
 // vmr-requests-bob.md is written at all.
@@ -546,7 +546,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if !strings.Contains(s, "## Scheduled · heartbeat single-shot sessions × 1") {
 		t.Errorf("missing collapsed heartbeat rollup index entry:\n%s", s)
 	}
-	if !strings.Contains(s, "[vmr-requests-cron-hartbeat.md](vmr-requests-cron-hartbeat.md)") {
+	if !strings.Contains(s, "[vmr-requests-cron-heartbeat.md](vmr-requests-cron-heartbeat.md)") {
 		t.Errorf("missing link to heartbeat's cron detail sibling:\n%s", s)
 	}
 	if strings.Contains(s, "Chat User: bob") {
@@ -571,8 +571,8 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-bob.md")); !os.IsNotExist(err) {
 		t.Errorf("bob has no interactive traffic and should get no per-tag sibling")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-cron-hartbeat.md")); err != nil {
-		t.Errorf("missing scheduled-class sibling vmr-requests-cron-hartbeat.md: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-cron-heartbeat.md")); err != nil {
+		t.Errorf("missing scheduled-class sibling vmr-requests-cron-heartbeat.md: %v", err)
 	}
 	for _, legacy := range []string{"vmr-requests-index.md", "vmr-requests-index-alice.md"} {
 		if _, err := os.Stat(filepath.Join(dir, legacy)); !os.IsNotExist(err) {

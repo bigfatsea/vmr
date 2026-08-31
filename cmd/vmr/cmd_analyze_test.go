@@ -730,6 +730,22 @@ func TestCmdAnalyze_LLMAddrRejectedInDefaultSuite(t *testing.T) {
 	}
 }
 
+// TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite: an explicit
+// `-llm-addr ""` is how you suppress a report.yaml llm_addr for one run —
+// it resolves to the empty string, fires no LLM call, and so must NOT trip
+// the batch-mode rejection above (which gates on the resolved value being
+// non-empty, not merely on the flag having been typed).
+func TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite(t *testing.T) {
+	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	outDir := filepath.Join(t.TempDir(), "out")
+	err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-llm-addr", "", path})
+	})
+	if err != nil && strings.Contains(err.Error(), "-llm-addr") {
+		t.Fatalf("-llm-addr \"\" must not be rejected as a batch-mode LLM call, got: %v", err)
+	}
+}
+
 // TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves: the
 // "self-traffic input asymmetry" (cmd_story.go could
 // take an explicit -llm-key override, cmd_report.go had no such flag and

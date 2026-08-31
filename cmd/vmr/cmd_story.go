@@ -74,7 +74,7 @@ func cmdStory(args []string) error {
 	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
 	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id, id-prefix, or shell glob; first candidate matching each side wins)")
 	corpus := fs.Bool("corpus", false, "compute corpus-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey")
-	includePartialFlag := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
+	includePartialFlag := fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
 	llmAddrFlag := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -journey's or -compare's report (-compare also adds a second, divergence-point-scoped section when one was detected; not supported with -render-all/-corpus). Never auto-started; the instance must already be up. Default: report.yaml's llm_addr")
 	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
@@ -117,7 +117,10 @@ func cmdStory(args []string) error {
 	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")
 	llmAddrExplicit := flagPassed(fs, "llm-addr")
 	hasSelector := *compare != "" || *journeyArg != ""
-	if llmAddrExplicit && (*corpus || *renderAll || !hasSelector) {
+	// Gate on the resolved value: an explicit `-llm-addr ""` (suppress a
+	// report.yaml llm_addr for this run) must pass; a configured llm_addr
+	// with no flag stays silently ignored on these batch shapes.
+	if llmAddrExplicit && llmAddr != "" && (*corpus || *renderAll || !hasSelector) {
 		return fmt.Errorf("-llm-addr is not supported with -render-all, -corpus, or bare `vmr story` (would fire one LLM call per journey, or never be used at all) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
 	}
 

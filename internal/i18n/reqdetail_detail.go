@@ -146,7 +146,7 @@ func Detail(lang Lang) DetailText {
 			},
 
 			BackToIndexLine:  "← 返回 [vmr-requests.md](../vmr-requests.md)\n\n",
-			PrevTurnLink:     func(ts, file string) string { return " · 上一轮: [" + ts + "](./" + file + ")" },
+			PrevTurnLink:     func(ts, file string) string { return "上一轮: [" + ts + "](./" + file + ")\n\n" },
 			ThisTurnCalls:    "本轮调用: ",
 			TraceLabel:       "trace ",
 			ChatLabel:        "chat ",
@@ -166,13 +166,13 @@ func Detail(lang Lang) DetailText {
 			MessagesTitle:  func(n int) string { return "Messages (" + strconv.Itoa(n) + ")" },
 			RoleTokenShare: func(line string) string { return "角色 Token 估算占比：" + line + "\n\n" },
 			HistoryVsNewNote: func(deltaStart int) string {
-				return "#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文（↺）,#" + strconv.Itoa(deltaStart+1) + " 起为本轮新增（🆕）\n\n"
+				return "#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文（↺），#" + strconv.Itoa(deltaStart+1) + " 起为本轮新增（🆕）\n\n"
 			},
 			HistoryFoldedNote: func(n int, ts, file string) string {
 				return "↺ #1–#" + strconv.Itoa(n) + "（历史上下文）—— 见上一轮详单：[" + ts + "](./" + file + ")\n\n"
 			},
 			IncrementNote: func(n, deltaStart int) string {
-				return "\n🆕 **本轮增量（相对上一轮,+" + strconv.Itoa(n) + " 条,#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文）**\n"
+				return "\n🆕 **本轮增量（相对上一轮，+" + strconv.Itoa(n) + " 条，#1–#" + strconv.Itoa(deltaStart) + " 为历史上下文）**\n"
 			},
 
 			AttemptsTitle:    func(n int) string { return "② VMR → 上游（" + strconv.Itoa(n) + " 次尝试）" },
@@ -301,7 +301,7 @@ func Detail(lang Lang) DetailText {
 		},
 
 		BackToIndexLine:  "← Back to [vmr-requests.md](../vmr-requests.md)\n\n",
-		PrevTurnLink:     func(ts, file string) string { return " · previous turn: [" + ts + "](./" + file + ")" },
+		PrevTurnLink:     func(ts, file string) string { return "Previous turn: [" + ts + "](./" + file + ")\n\n" },
 		ThisTurnCalls:    "this turn's calls: ",
 		TraceLabel:       "trace ",
 		ChatLabel:        "chat ",

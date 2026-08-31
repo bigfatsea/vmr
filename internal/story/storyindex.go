@@ -312,7 +312,11 @@ func writeStoryIndexRow(b *strings.Builder, r JourneyIndexRow, t i18n.StoryIndex
 	if r.Partial {
 		title = "⚠ " + title
 	}
-	b.WriteString("| " + r.ID + " | " + r.Client + " | " +
+	client := r.Client
+	if client == "" {
+		client = t.UnresolvedClient
+	}
+	b.WriteString("| " + r.ID + " | " + client + " | " +
 		r.Start.In(fmtutil.DisplayZone).Format("01-02 15:04") + " → " + r.End.In(fmtutil.DisplayZone).Format("01-02 15:04") +
 		" | " + taskCol + " | " + stepCol + " | " + title + " | " + rendered + " |\n")
 }

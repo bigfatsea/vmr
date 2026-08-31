@@ -1078,7 +1078,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ### 第一组 · 建议马上处理
 
-#### 问题 1 · 附录 `%%` 未转义 + 英文报告混入中文全角括号
+#### 问题 1 · 附录 `%%` 未转义 + 英文报告混入中文全角括号 ✅ 已处理
 
 **梯队与评分**：第一组｜用户价值 中·开发成本 低·风险 低。
 
@@ -1133,7 +1133,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 4 · self-traffic 排除随 `llm_key` 有无静默切换，报告不留痕
+#### 问题 4 · self-traffic 排除随 `llm_key` 有无静默切换，报告不留痕 ⚠️ 报告附录已处理（`vmr-stories.md` 侧未加）
 
 **梯队与评分**：第一组｜用户价值 中高·开发成本 低·风险 低。
 
@@ -1144,6 +1144,8 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 **影响**：不只是成本表一行——整个候选集合的规模跟着变，`-corpus` 的统计分母、Finding 命中率、相关性样本量全受影响。
 
 **改法（就是一条）**：`vmr-report.md` 附录 + `vmr-stories.md` 固定输出一行，无论哪种情况都写：`self-traffic 排除：已启用（排除 N 条）` 或 `未启用（未配置 llm_key / self_traffic_client_tags）`。即把现有 `AppendixSelfTrafficExcluded` 从 `n > 0` 才渲染改成无条件渲染 + 一个 else 分支。
+
+**已落地部分**：`render_doc.go` 的 `renderAppendix` 已改成无条件渲染 + `AppendixSelfTrafficNotExcluded` else 分支（`i18n/report_doc.go` 新增该文案，中英各一句）。`vmr-stories.md` 侧尚未加——`RenderStoryIndexMarkdown(rows, lang)` 的签名里没有排除计数/状态，补这行要多穿一个参数（调用点 `cmd/vmr` + i18n 各一处），不是纯文案改动。
 
 **不需要新机制**：初稿"架构解耦批注"提议注入 `X-VMR-Self-Traffic` header + 审计日志加标记——① 那要改 `audit.Record` schema 和路由半区的 header 处理来服务一个纯分析需求，跨了两半区边界；② 它想要的"配置项解耦、不依赖 `llm_key`"能力**已经存在**：`report.yaml` 的 `self_traffic_client_tags: [...]`（`cmd/vmr/selftraffic.go`、`reportconfig.go:50`），与 `llm_key` 独立、UserGuide 也已写。用户在那份极简 sidecar 里补一行 `self_traffic_client_tags: [vmrstory]` 就能排除。所以这里唯一的缺口是"报告不声明当前口径"，加那行状态行即可。
 
@@ -1169,7 +1171,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 6 · compare 的「相对变化」列把所有大差异压平到 ±100%
+#### 问题 6 · compare 的「相对变化」列把所有大差异压平到 ±100% ⚠️ 标签部分已处理
 
 **梯队与评分**：第一组｜用户价值 高·开发成本 低·风险 低。
 
@@ -1189,13 +1191,15 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 产出示例：`156×` / `0.02×` / `+40%` / `新增` / `-100%` / `—`。golden 更新一次。
 
+**已落地部分（仅标签）**：只改了 `story_compare.go` 的列名与脚注——列名「相对变化」/「Relative Change」→「对称差」/「Symmetric Difference」，脚注补上分母 `(B-A)/max(|A|,|B|)` 的明确说明。`formatDeltaRel` → `formatDelta(a,b)` 的量级化渲染（`156×` 那套）属"一行级逻辑"，随 C 组 hold。选「对称差」而非 Part 4 建议的「变化」：前者点名了真实公式、不再让「相对变化」被误读成 `(B-A)/A`，是纯文案层能做到的最诚实命名；等 `formatDelta` 落地时再换「变化」。
+
 **为什么第一组**：一个函数（约 18 行）+ 一条 i18n 文案 + 两处调用点 + golden。不是计算 bug，是标签 bug——把 `+99%` 换成 `156×`，定性信息就传到了。
 
 第三部分对应：R5-1。
 
 ---
 
-#### 问题 7 · `-llm-addr ""` 不能用来关掉 `report.yaml` 里配置的 LLM 解读层
+#### 问题 7 · `-llm-addr ""` 不能用来关掉 `report.yaml` 里配置的 LLM 解读层 ✅ 已处理
 
 **梯队与评分**：第一组｜用户价值 中·开发成本 低（一行）·风险 低。
 
@@ -1203,9 +1207,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **根因**：`cmd/vmr/cmd_analyze.go:212` 的守卫 `llmAddrExplicit := flagPassed(fs, "llm-addr")` 判的是"这个 flag 有没有被敲"，不是"解析出来的地址是不是非空"。`resolveStringExplicit(true, "", rc.LLMAddr, "")` 确实返回 `""`。同一行还有个不自洽：`-corpus`/默认套件下 `report.yaml` 的 `llm_addr` 本来会被正常忽略（不报错），显式传空值反而报错。
 
-**改法**：守卫改判解析值——`if llmAddr != "" && (*corpusFlag || !hasSelector)`（`llmAddr` 是第 195 行已解析的值）。
+**改法（已落地）**：守卫加判解析值——`if llmAddrExplicit && llmAddr != "" && (*corpusFlag || !hasSelector)`（`llmAddr` 是第 195 行已解析的值）。注意保留 `llmAddrExplicit &&`：只去掉它、单判 `llmAddr != ""` 会引入回归——`report.yaml` 配了 `llm_addr`、命令行没敲 flag 时，`vmr analyze -corpus` / 裸 `vmr analyze` 会因此新报错，而这两种形态下 config 的 `llm_addr` 本来（也应当）被静默忽略。`cmd_story.go` 的同款守卫一并改。加了回归测试 `TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite`。
 
-**为什么第一组**：一行，且修掉一个行为不自洽。目前得靠换一份只有 `language:` 的 sidecar 配置绕过。
+**为什么第一组**：一行，且修掉一个行为不自洽。之前得靠换一份只有 `language:` 的 sidecar 配置绕过。
 
 第三部分对应：G-1。
 
@@ -1245,7 +1249,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 10 · HTML 看板系统性丢掉了 Markdown 里的认知谦逊
+#### 问题 10 · HTML 看板系统性丢掉了 Markdown 里的认知谦逊 ⚠️ 文案部分已处理
 
 **梯队与评分**：第二组｜用户价值 中高·开发成本 中·风险 低。
 
@@ -1375,7 +1379,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 18 · corpus 统计的三处自我限定不到位
+#### 问题 18 · corpus 统计的三处自我限定不到位 ⚠️ (c) 脚注已处理
 
 **梯队与评分**：第二组｜用户价值 中·开发成本 低中·风险 低。
 
@@ -1394,7 +1398,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 19 · `vmr-requests-cron-hartbeat.md`：文件名拼 `hartbeat`，内容拼 `heartbeat`
+#### 问题 19 · `vmr-requests-cron-hartbeat.md`：文件名拼 `hartbeat`，内容拼 `heartbeat` ✅ 已处理
 
 **梯队与评分**：第二组｜用户价值 中·开发成本 琐碎·风险 低。
 
@@ -1442,7 +1446,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低·风险 低。§4 已经把它们标成 `⚠️low-n` 了——既然已经判定"不足以解读"，就没有理由让它们和主力端点抢同样的视觉权重。**改法**：low-n 行折进 `<details><summary>另有 N 个低样本端点</summary>`。第三部分对应：R1-12。
 
-#### 问题 27 · §6.7 Compaction 还原表出现"保留比 >100%"的行，无解释
+#### 问题 27 · §6.7 Compaction 还原表出现"保留比 >100%"的行，无解释 ✅ 脚注已处理
 
 **评分**：价值 中·成本 低（脚注）到中（收紧检测）·风险 低。`internal/report/section_compaction.go:36` 的 `retentionRatio = tokens_out / tokens_in`，值 >100% 时代码注释自己写了"worth a second look at whether it's really a compaction rather than a heuristic false-positive — collect()'s Compaction detection is deliberately loose"。表里出现 `246 → 1.1K = 431.0%` 这种行，其余三列（压缩会话 / 续接会话 / 吞掉的实体）全是 `-`，不携带任何可行动信息；`l-77c20384 | - | 0 → 0 | - | ...` 还逐字重复出现 3 次。**改法**：加一句脚注说明 >100% 在什么情况下合法；或抑制"所有元数据列都空 + 保留比 >100%"的无信息行；或收紧 compaction 检测。第三部分对应：R1-7。
 
@@ -1450,7 +1454,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 中·风险 低。`vmr-requests-failed.md` 65 条失败里有 8 条挤在 2 分钟内、几乎全是 6ms 的即时失败——这显然是一次上游整体不可用引发的连环重试，而不是 8 个独立事故。表头只写"共 65 条"。**改法**：开头加一段聚类摘要（按时间邻近 + `error_class` 聚合），例如"65 条失败聚成 12 簇，最大一簇 8 条（08-16 04:00–04:02，network→error）"。第三部分对应：R2b-2。
 
-#### 问题 29 · 术语在首次出现处没有解释
+#### 问题 29 · 术语在首次出现处没有解释 ✅ 已处理
 
 **评分**：价值 中·成本 低（`i18n` 几行）·风险 低。`⭐`（§0 第 10 行就出现 4 次，解释在 2760 行外的附录）· `msgs`（累计消息数还是本轮新增，读者要看两行才能推出来）· `finish` 的取值（`tool_calls` / `stop`）· `⚠` 前缀（断头 journey，`vmr-stories.md` 图例没说）· `sNNN`（随输入范围重新编号，不是稳定标识，见问题 32）。**改法**：各在首次出现的表下加一行小字。第三部分对应：R1-15、R2-7、R6a-4。
 
@@ -1458,11 +1462,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低中·风险 低。`internal/report/section_workload.go:71` 的 daily 图用 `mermaidBarLabeled(labels…)`，44 个日期标签在任何渲染器里都会挤成一团；`xychart` 至今是 mermaid beta 特性，GitHub 与多数编辑器渲染不稳定；纯文本阅读（`less`/`cat`）时读者看到的是一行 44 个数字的数组。**改法**：daily 图下补一张紧凑表格或 ASCII sparkline 兜底，或直接把 daily 换成表格（hourly 的 24 标签可保留 mermaid）。第三部分对应：R1-14。
 
-#### 问题 31 · `-list-only` 下 `Tasks` / `Rendered` 两列 126/126 全是 `—`
+#### 问题 31 · `-list-only` 下 `Tasks` / `Rendered` 两列 126/126 全是 `—` ⚠️ 文案与图例已处理
 
 **评分**：价值 中·成本 低·风险 低。`internal/story/storyindex.go:298` 的 `writeStoryIndexRow` 没有模式感知——`-list-only` 不构建 Journey，所以 `r.Tasks == 0`、`r.Rendered == ""`，两列每行都渲成 `—`，读者看到的是"这俩字段坏了"。顺带同一函数里：`r.Client` 为 null 时渲成空白（宏观半区对同类记录用 `## Chat User: (unresolved)`，两半区不一致）；`⚠` 断头前缀没有图例。**改法**：`-list-only` 下不输出这两列，或表头加一句"本模式不构建 Journey"；null client 渲 `(unresolved)`；`⚠` 加图例。第三部分对应：R6a-1、R6a-3。
 
-#### 问题 32 · `sNNN` 会话序号随输入范围浮动，产物没说明
+#### 问题 32 · `sNNN` 会话序号随输入范围浮动，产物没说明 ✅ 已处理
 
 **评分**：价值 中·成本 低·风险 低。同一条 lobster 会话在 FULL 语料下是 `s432`，RECENT 下变成 `s03`。它看起来像 id，实际不能跨运行引用。`internal/report/section_sessions.go:135` 的代码注释自己知道它是 run-scoped（"never use it as a lookup key"），但产物里没写。**改法**：§6 / 索引里标注 `sNNN` 是"本次报告内的行号，不是稳定标识"；真正的 join key（`l-<hash8>`）已经在括号里给了。第三部分对应：R2-3、R6b-2。
 
@@ -1474,7 +1478,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低·风险 低。这次生成用了比 HEAD 落后一个提交的 `./vmr`，导致一度把已修复的 1.57 脚注报成"缺失"，也漏掉了 R2-4 已被修复的事实。`buildinfo` 已经输出 VCS commit 哈希。**改法**：`vmr.sh status`（或 `redeploy`）里比一下 `vmr version` 的 stamp 与 `git rev-parse HEAD`，不一致给个 warning。不用进 CI（`vmr.sh redeploy` 本就 stop+build+start，只有直接跑 `./vmr` 才会踩）。第三部分对应：3.3.6 第一条。
 
-#### 问题 35 · 一批琐碎项，一次 PR 扫掉
+#### 问题 35 · 一批琐碎项，一次 PR 扫掉 ⚠️ 文案/文档子项已处理，两个排序子项待做
+
+**已落地**：`[Ⓜ️ Markdown]` → 请求坐标（`detailCell` 用 `r.Req`，缺失时回退 `r.DetailFile`；`render_cells_test.go` 同步）；§1 两个百分比统一为「of in」（`section_tokens.go` 的 fresh 占比分母由 `fresh+cached` 改为 `o.TokensIn`，与 cached 行的 `CacheHitRate` 同分母，`OfFreshCachedSuffix` 文案字段删除、合并进 `OfInSuffix`）；`reqdetail` 详单页 `<strong>` 全部改 `**`、`PrevTurnLink` 去掉悬空 ` · ` 前缀并补段落空行、`HistoryVsNewNote`/`IncrementNote` 全角逗号（`IncrementNote` 保留 `#1–#` 区间写法，与两个同类文案一致）；`❌error` → `❌unclassified`；`-h` 去掉 "list/"（`cmd_analyze.go` + `cmd_story.go`）；`-currency` 无汇率降级在 §1/§2 的 Disclaimer 补一句（`Pricing.RequestedCurrency` 新字段）；`semantic_oscillation` 等 4 个 Phase 1b LLM 检测器登记进设计文档 §3.5a（并补了 Phase 1b 组的框架说明，把"全部零 LLM 成本"这句收紧到规则层九条）。
+
+**待做**：§5.5 按客户端分组的字母序 → 请求量降序（`section_workload.go`）、§6.6 端点性价比排序键（`section_endpoint_value.go`）——两个都是排序逻辑改动，归 C 组，本批 hold。
 
 **评分**：价值 低-中·成本 每条琐碎·风险 低。每条都是一行到几行的改动，价值密度低但清掉了碍眼：
 
@@ -1504,7 +1512,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 高·风险 高。**处置：不建议。** 已登记 1.61。vmr 结构上看不到任务结果；硬做要么引 LLM 判官（越过"揭示事实不当裁判"的边界）要么让用户标注。除非 corpus 分析反复因为缺这个信号得不出结论，否则不做。第三部分对应：3.3.2、1.61。
 
-#### 问题 39 · 「上下文有效利用率」是双峰退化的
+#### 问题 39 · 「上下文有效利用率」是双峰退化的 ✅ KNOWN_ISSUES 记账已处理
 
 **评分**：价值 低·成本 中-高·风险 高。**处置（定稿）：不改。`KNOWN_ISSUES` §2 记一条，别的都不加。**
 

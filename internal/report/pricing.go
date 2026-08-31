@@ -11,6 +11,9 @@ import (
 // data resolved anything at all (same "no $ column" degrade as before).
 type Pricing struct {
 	Currency string `json:"currency,omitempty"`
+	// RequestedCurrency is the display currency requested via -currency/report.yaml,
+	// if different from Currency when rate conversion failed.
+	RequestedCurrency string `json:"requested_currency,omitempty"`
 	// StandardGeneratedAt is the embedded standard table's generation date
 	// (internal/pricing.Table.GeneratedAt) — the "is this stale" signal
 	// the design doc's §4.2③ guardrail requires be visible somewhere.
@@ -38,5 +41,13 @@ func (p *Pricing) Disclaimer(lang i18n.Lang) string {
 	if cur == "" {
 		cur = "USD"
 	}
-	return i18n.Cost(lang).Disclaimer(asOf, cur)
+	disc := i18n.Cost(lang).Disclaimer(asOf, cur)
+	if p.RequestedCurrency != "" && p.RequestedCurrency != p.Currency {
+		if lang == i18n.ZH {
+			disc += "（请求以 " + p.RequestedCurrency + " 展示，因未配置汇率，降级以 " + cur + " 展示）"
+		} else {
+			disc += " (requested " + p.RequestedCurrency + " display, but no exchange rate configured; defaulted to " + cur + ")"
+		}
+	}
+	return disc
 }

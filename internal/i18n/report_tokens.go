@@ -13,7 +13,6 @@ type TokensText struct {
 	RowInputCached      string
 	OfInSuffix          func(pct string) string
 	RowInputFresh       string
-	OfFreshCachedSuffix func(pct string) string
 	RowInputCacheWrite  string
 	CacheWriteNote      string
 	RowOutput           string
@@ -41,7 +40,6 @@ func Tokens(lang Lang) TokensText {
 			RowInputCached:      "输入-缓存命中",
 			OfInSuffix:          func(pct string) string { return pct + " of in" },
 			RowInputFresh:       "输入-fresh ⭐",
-			OfFreshCachedSuffix: func(pct string) string { return pct + " of (fresh+cached)" },
 			RowInputCacheWrite:  "输入-cache_write",
 			CacheWriteNote:      "（Anthropic 缓存创建，溢价计费）",
 			RowOutput:           "输出",
@@ -67,7 +65,6 @@ func Tokens(lang Lang) TokensText {
 		RowInputCached:      "Input - cache hit",
 		OfInSuffix:          func(pct string) string { return pct + " of in" },
 		RowInputFresh:       "Input - fresh ⭐",
-		OfFreshCachedSuffix: func(pct string) string { return pct + " of (fresh+cached)" },
 		RowInputCacheWrite:  "Input - cache_write",
 		CacheWriteNote:      "(Anthropic cache creation, billed at a premium)",
 		RowOutput:           "Output",

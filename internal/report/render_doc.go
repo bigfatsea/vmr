@@ -142,12 +142,13 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 	h := t.SummaryHeaders
 	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4])
 	p95n := o.RequestsWithDur
-	tbl.row(fmt.Sprintf("%d（fallback %d / trunc %d）", o.Requests, o.Fallbacks, o.Truncated),
+	tbl.row(t.SummaryRequests(o.Requests, o.Fallbacks, o.Truncated),
 		pctStr2(o.OK, o.Requests),
 		fmtutil.FmtTokens(o.TokensInFresh),
 		cacheEffCell(o.CacheEfficiency, o.TokensKnown, o.Requests),
 		durCell(o.DurMSP95, p95n))
 	w("\n")
+	w("%s", t.SummaryStarNote)
 	w("%s\n", t.HighlightsAuto)
 	for _, h := range highlights(rep, lang) {
 		w("- %s\n", h)
@@ -270,6 +271,8 @@ func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	w("%s", t.AppendixSlowThresh(rep.Meta.SlowThreshold/1000))
 	if rep.Meta.SelfTrafficExcluded > 0 {
 		w("%s", t.AppendixSelfTrafficExcluded(rep.Meta.SelfTrafficExcluded))
+	} else {
+		w("%s", t.AppendixSelfTrafficNotExcluded)
 	}
 }
 

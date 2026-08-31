@@ -15,7 +15,9 @@ type DocText struct {
 	// edge (P6.2a) — path is relative to vmr-report.md itself.
 	StoriesLinkLine    func(path string, journeyCount int, from, to string) string
 	SummaryTitle       string
+	SummaryRequests    func(requests, fallbacks, truncated int) string
 	SummaryHeaders     [5]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration
+	SummaryStarNote    string
 	HighlightsAuto     string
 	NoAnomalies        string
 	CacheWarn          func(workload, cacheEffPct, freshTokens string) string
@@ -42,8 +44,9 @@ type DocText struct {
 	AppendixNoPricing   string
 	AppendixSlowThresh  func(sec int) string
 	// AppendixSelfTrafficExcluded (P6.4) reports how many records this
-	// run's self-traffic exclusion skipped — only rendered when > 0.
-	AppendixSelfTrafficExcluded func(n int) string
+	// run's self-traffic exclusion skipped.
+	AppendixSelfTrafficExcluded    func(n int) string
+	AppendixSelfTrafficNotExcluded string
 }
 
 // Doc returns render_doc.go's text for lang.
@@ -59,10 +62,14 @@ func Doc(lang Lang) DocText {
 			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
 			},
-			SummaryTitle:   "§0 摘要",
-			SummaryHeaders: [5]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时"},
-			HighlightsAuto: "**亮点 (auto):**",
-			NoAnomalies:    "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
+			SummaryTitle: "§0 摘要",
+			SummaryRequests: func(requests, fallbacks, truncated int) string {
+				return strconv.Itoa(requests) + "（fallback " + strconv.Itoa(fallbacks) + " / trunc " + strconv.Itoa(truncated) + "）"
+			},
+			SummaryHeaders:  [5]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时"},
+			SummaryStarNote: "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
+			HighlightsAuto:  "**亮点 (auto):**",
+			NoAnomalies:     "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
 			CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 				return "⚠️ **" + workload + " 工作负载缓存效率 " + cacheEffPct + "** - " + freshTokens + " fresh tokens（占该负载输入大头）"
 			},
@@ -97,7 +104,7 @@ func Doc(lang Lang) DocText {
 			},
 			AppendixPercentile: func(method string) string { return "- 百分位: " + method + "\n" },
 			AppendixNBase:      "- n 基准: 每个百分位标注 n（= ttft_known / requests_with_dur / stream_known）；n<20 标 ⚠️low-n。\n",
-			AppendixLowConf:    "- 比值低置信度: cache_efficiency 等比值指标的分母 / 总请求数 < 90%% 时标注脚注 ¹。\n",
+			AppendixLowConf:    "- 比值低置信度: cache_efficiency 等比值指标的分母 / 总请求数 < 90% 时标注脚注 ¹。\n",
 			AppendixStarMark:   "- ⭐ 标记: 该列为衍生/预估指标（非上游直接返回值），解读时请结合样本量与口径说明。\n",
 			AppendixBillingLine: func(suffix string) string {
 				return "- 计费口径: fresh + cache_write(溢价) + out；缓存命中按各厂免费/极低价。" + suffix + "\n"
@@ -107,6 +114,7 @@ func Doc(lang Lang) DocText {
 			AppendixSelfTrafficExcluded: func(n int) string {
 				return "- 自指流量: 已从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr story -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
 			},
+			AppendixSelfTrafficNotExcluded: "- 自指流量: 未启用排除（未配置排除标识 `llm_key` 或 `self_traffic_client_tags`）。\n",
 		}
 	}
 	return DocText{
@@ -119,10 +127,14 @@ func Doc(lang Lang) DocText {
 		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
 		},
-		SummaryTitle:   "§0 Summary",
-		SummaryHeaders: [5]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration"},
-		HighlightsAuto: "**Highlights (auto):**",
-		NoAnomalies:    "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
+		SummaryTitle: "§0 Summary",
+		SummaryRequests: func(requests, fallbacks, truncated int) string {
+			return strconv.Itoa(requests) + " (fallback " + strconv.Itoa(fallbacks) + " / trunc " + strconv.Itoa(truncated) + ")"
+		},
+		SummaryHeaders:  [5]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration"},
+		SummaryStarNote: "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
+		HighlightsAuto:  "**Highlights (auto):**",
+		NoAnomalies:     "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
 		CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 			return "⚠️ **" + workload + " workload cache efficiency " + cacheEffPct + "** - " + freshTokens + " fresh tokens (dominates this workload's input)"
 		},
@@ -157,7 +169,7 @@ func Doc(lang Lang) DocText {
 		},
 		AppendixPercentile: func(method string) string { return "- Percentile method: " + method + "\n" },
 		AppendixNBase:      "- n basis: each percentile is annotated with n (= ttft_known / requests_with_dur / stream_known); n<20 is marked ⚠️low-n.\n",
-		AppendixLowConf:    "- Ratio low confidence: cache_efficiency and similar ratio metrics get a ¹ footnote when their denominator / total requests < 90%%.\n",
+		AppendixLowConf:    "- Ratio low confidence: cache_efficiency and similar ratio metrics get a ¹ footnote when their denominator / total requests < 90%.\n",
 		AppendixStarMark:   "- ⭐ marker: this column is a derived/estimated metric (not a value returned directly by the upstream) — read it together with its sample size and basis note.\n",
 		AppendixBillingLine: func(suffix string) string {
 			return "- Billing basis: fresh + cache_write(premium) + out; cache hits are billed free/near-free by most providers. " + suffix + "\n"
@@ -167,5 +179,6 @@ func Doc(lang Lang) DocText {
 		AppendixSelfTrafficExcluded: func(n int) string {
 			return "- Self-traffic: excluded " + strconv.Itoa(n) + " analysis request(s) from `vmr story -llm-addr` itself from every total (disable with `-include-self-traffic`).\n"
 		},
+		AppendixSelfTrafficNotExcluded: "- Self-traffic: exclusion not active (no `llm_key` or `self_traffic_client_tags` configured).\n",
 	}
 }

@@ -21,11 +21,15 @@ func renderCostTokens(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 	h := t.ClassHeaders
 	tokTbl := newTable(w, h[0], h[1], h[2])
 	tokTbl.row(t.RowInputCached, fmtutil.FmtTokens(o.TokensInCached), t.OfInSuffix(pctStr(o.CacheHitRate)))
+	// Both this row and the cached row above are shares of the same
+	// denominator (o.TokensIn = fresh + cached + cache_write), so cached %,
+	// fresh % and the cache_write remainder add up to 100% — "of in" means
+	// the same thing on every input row.
 	freshShare := 0.0
-	if o.TokensInCached+o.TokensInFresh > 0 {
-		freshShare = float64(o.TokensInFresh) / float64(o.TokensInCached+o.TokensInFresh)
+	if o.TokensIn > 0 {
+		freshShare = float64(o.TokensInFresh) / float64(o.TokensIn)
 	}
-	tokTbl.row(t.RowInputFresh, fmtutil.FmtTokens(o.TokensInFresh), t.OfFreshCachedSuffix(pctStr(freshShare)))
+	tokTbl.row(t.RowInputFresh, fmtutil.FmtTokens(o.TokensInFresh), t.OfInSuffix(pctStr(freshShare)))
 	cw := ""
 	if o.TokensInCacheWrite > 0 {
 		cw = t.CacheWriteNote

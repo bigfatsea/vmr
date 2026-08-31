@@ -130,7 +130,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 					return "正常"
 				}
 			},
-			VerdictClean: "未命中任何行为检测器，本次运行平稳完成。",
+			VerdictClean: "未触发任何规则检测器（不等于运行无问题）。",
 			VerdictRedacted: func(code string, step int) string {
 				return fmt.Sprintf("检测器 %s @ 步骤 %d（正文已脱敏）", code, step)
 			},
@@ -244,7 +244,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 				return "NOMINAL"
 			}
 		},
-		VerdictClean: "No behavior detector fired — the run completed without tripping one.",
+		VerdictClean: "No behavior detector fired (does not imply the run was problem-free).",
 		VerdictRedacted: func(code string, step int) string {
 			return fmt.Sprintf("detector %s at Step %d (text redacted)", code, step)
 		},

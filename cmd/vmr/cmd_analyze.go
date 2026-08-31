@@ -170,7 +170,7 @@ func cmdAnalyze(args []string) error {
 	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links, finding text and (for -compare) the LLM section — structure, metrics, roles, token counts and tool names stay. For sharing outside the team")
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
-	includePartialFlag := fs.Bool("include-partial", false, "also list/render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
+	includePartialFlag := fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
 	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
 	llmAddrFlag := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -journey's or -compare's report (not supported with -corpus or the default suite). Never auto-started. Default: report.yaml's llm_addr")
 	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
@@ -208,8 +208,12 @@ func cmdAnalyze(args []string) error {
 	// one LLM call per journey, which makes no sense against a batch —
 	// -corpus or the default suite (this entry's equivalent of -render-all).
 	// -compare/a single-match -journey are the only two shapes that support it.
+	// Gate on the RESOLVED value, not just "was the flag typed": an explicit
+	// `-llm-addr ""` is the sanctioned way to suppress a report.yaml llm_addr
+	// for this run, so it must pass here; a report.yaml llm_addr with no flag
+	// stays silently ignored on these batch shapes (never consulted downstream).
 	llmAddrExplicit := flagPassed(fs, "llm-addr")
-	if llmAddrExplicit && (*corpusFlag || !hasSelector) {
+	if llmAddrExplicit && llmAddr != "" && (*corpusFlag || !hasSelector) {
 		return fmt.Errorf("-llm-addr is not supported with -corpus or the default suite (would fire one LLM call per journey) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
 	}
 	if *redactFlag && !*htmlFlag {

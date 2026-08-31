@@ -31,6 +31,7 @@ func renderCompactions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 			entitySample(c.SwallowedEntities))
 	}
 	w("\n")
+	w("%s", t.Footnote)
 }
 
 // retentionRatio renders tokens_out/tokens_in as a percentage — how much of

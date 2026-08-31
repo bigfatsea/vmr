@@ -244,7 +244,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **措辞纪律**：每条 Finding 都是"候选/嫌疑清单，不是判决"——文案统一是"检测到疑似 X，建议人工复核"，不是"Agent 在这里出错了"。这不是谦虚，是被学术证据逼出来的克制：Who&When（ICML 2025）/TRAIL（Patronus AI）两个独立数据集上，公开最好的自动根因定位方法 step 级准确率也只有 11%–14.2%——`vmr story` 不承诺、也不该承诺比这更高的确定性（详见前期 Journey 深挖分析 §3 的规则化边界表）。
 
-Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之上新增四个——后四个全部建立在 I1（`chatmsg.ToolResultList`，见下）之上，能精确定位"哪个 `tool_call` 的哪个 `tool_result`"，不再依赖 `Event.Msg.Text` 里拍扁的文本猜测。全部零 LLM 成本、纯规则/字符串匹配，每条都对应一个真实事故/issue 或学术失败分类法（MAST，Cemri et al. 2025）里的一个具名类别：
+规则层 Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之上新增四个——后四个全部建立在 I1（`chatmsg.ToolResultList`，见下）之上，能精确定位"哪个 `tool_call` 的哪个 `tool_result`"，不再依赖 `Event.Msg.Text` 里拍扁的文本猜测。这九条全部零 LLM 成本、纯规则/字符串匹配，每条都对应一个真实事故/issue 或学术失败分类法（MAST，Cemri et al. 2025）里的一个具名类别。表末四行是 Phase 1b 的 LLM 语义检测器，框架另述（见表后）：
 
 | `FindingCode` | 判据 | 依据 |
 | --- | --- | --- |
@@ -257,6 +257,12 @@ Phase 1 落地五个检测器，Phase 2（`findings_toolresult.go`）在此之�
 | `unused_tool_result`（Phase 2） | 一次 `tool_result` 提取到的实体，**全部**在此后没有任何 Step 再引用（不是"部分未引用"——见下方校准记录） | Step 级定位版的 `ContextUtilization`（九项指标） |
 | `unverified_entity_reference`（Phase 2） | 一次 `tool_result` 命中证伪信号（`falsificationRe`：ENOENT/404/not found 等），其实体在此后仍被引用 | 对应 Breunig 命名的 context poisoning 失败模式；措辞明确"仅基于字面证伪标记，不代表确认幻觉" |
 | `constraint_text_dropped_at_compaction`（Phase 2） | 缝合边界 Step 的 `Compaction.SwallowedEntities` 非空——直接复用 §3.6 已验证过的信息损失机制，不新增解析路径 | 对应 Governance Decay 论文命名、但论文本身未提出检测器的失败模式；措辞明确"未经验证的假设级检测" |
+| `tool_result_misinterpretation`（Phase 1b / LLM） | 模型回复内容与工具真实执行结果存在事实违背（如工具报错但模型宣称成功） | 依赖 `-llm-addr` 解读层语义推断（`llm_findings.go`） |
+| `semantic_oscillation`（Phase 1b / LLM） | 模型在多个方案/结论之间来回摇摆反弹，无法收敛 | 对应决策振荡失效模式 |
+| `goal_drift`（Phase 1b / LLM） | 当前执行偏离了任务初始目标或约束条件 | 对应目标漂移失效模式 |
+| `unverified_completion_claim`（Phase 1b / LLM） | 模型宣称已完成任务但缺乏任何工具执行或文件交付证据 | 对应乐观脑补/虚假交付失效模式 |
+
+**Phase 1b（LLM 语义检测器，`llm_findings.go`，可选）**：`ComputeLLMFindings` 共六个检测器——上表四行加两个复用规则层 `FindingCode` 的（`plan_execution_misalignment` / `constraint_text_dropped_at_compaction`，同码不同触发路径）。仅在 `-llm-addr` 解读层开启时运行；只有 HIGH 置信度、且 `EvidenceAnchor` 在真实 transcript 里逐字命中的才提升为 `Finding`（`SourceLLMInferred`），其余一律丢弃。这六个尚未完成规则层那种黄金样本校准，见 `KNOWN_ISSUES` 2.18。
 
 **I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`story.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
 
@@ -492,7 +498,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 - **一次隐藏断裂案例**：某会话内部 20 轮纯追加（cover 0.60→0.97）之后突然 79 条消息骤降到 4 条（cover=0.25）——同一开场白锚点原样保留，是"anchor 存活型"Contract 编辑的真实样本，也是 §3.2 那条历史缺陷的实证来源。
 - **一致性验证**：752 个会话中 718 个与单个 lineage 一一对应，34 个被 `ctxgraph` 正确切成多段（对应上面的隐藏断裂类型）；lineage 缝合在同一语料上 68 个断裂中 62 个成功缝合、6 个正确识别为"疑似同源"未缝合、0 个跨桶时间窗违规。
 - **F9 因果配对不变量**：全语料 406534 个 `tool_call`/`tool_result` 配对，零孤儿。
-- **Finding 检测器（137 个候选 Journey 校准）**：九条检测器提交前均在真实语料上跑过校准（§3.5a），修复四处真实假阳性/精度问题；语料级统计验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
+- **Finding 检测器（137 个候选 Journey 校准）**：九条规则层检测器提交前均在真实语料上跑过校准（§3.5a），修复四处真实假阳性/精度问题；语料级统计验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
 
 ## 7. 已知限制、暂不处理的事项
 

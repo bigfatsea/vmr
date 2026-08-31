@@ -284,19 +284,18 @@ func renderSessionHeader(b *strings.Builder, m, prev *ctxgraph.Manifest, f sessi
 	if prev != nil {
 		w("%s", t.PrevTurnLink(prev.TS.In(fmtutil.DisplayZone).Format("15:04:05.000"), FileNameForManifest(prev)))
 	}
-	w("\n")
 	var meta []string
 	if len(f.toolCalls) > 0 {
-		meta = append(meta, t.ThisTurnCalls+"<strong>"+callsCell(f.toolCalls)+"</strong>")
+		meta = append(meta, t.ThisTurnCalls+"**"+callsCell(f.toolCalls)+"**")
 	}
 	if f.traceID != "" {
-		meta = append(meta, t.TraceLabel+"<strong>"+fmtutil.CapStr(f.traceID, 16)+"</strong>")
+		meta = append(meta, t.TraceLabel+"**"+fmtutil.CapStr(f.traceID, 16)+"**")
 	}
 	if f.chatID != "" {
-		meta = append(meta, t.ChatLabel+"<strong>"+f.chatID+"</strong>")
+		meta = append(meta, t.ChatLabel+"**"+f.chatID+"**")
 	}
 	if f.toolsSig != "" {
-		meta = append(meta, "<strong>"+f.toolsSig+"</strong>")
+		meta = append(meta, "**"+f.toolsSig+"**")
 	}
 	// Tags are intentionally NOT shown in the header: per-record tags
 	// like "compacted_session" fire on every turn after compaction

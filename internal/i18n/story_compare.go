@@ -84,9 +84,9 @@ func Compare(lang Lang) CompareText {
 			InitialInstructionTitle:        "## 初始指令\n\n",
 			InitialInstructionExcerptLabel: func(side string) string { return side + " 的初始指令" },
 			ProfileTitle:                   "## 行为剖面对比\n\n",
-			ProfileTableHeader:             "| 指标 | A | B | 相对变化 |\n|---|---|---|---|\n",
+			ProfileTableHeader:             "| 指标 | A | B | 对称差 |\n|---|---|---|---|\n",
 			NotableFootnote: func(thresholdPct float64) string {
-				return "\n> ⚠️ = 相对变化 ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% 且绝对差值超过噪声阈值——一个规则性的\"值得看一眼\"标记，不代表已判断出原因。\n\n"
+				return "\n> ⚠️ = 对称差（(B-A)/max(|A|,|B|)）绝对值 ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% 且绝对差值超过噪声阈值——一个规则性的\"值得看一眼\"标记，不代表已判断出原因。\n\n"
 			},
 			ToolsTitle:       "## 工具调用对比\n\n",
 			ToolsTableHeader: "| 工具 | A 次数 | B 次数 |\n|---|---|---|\n",
@@ -182,9 +182,9 @@ func Compare(lang Lang) CompareText {
 		InitialInstructionTitle:        "## Initial Instruction\n\n",
 		InitialInstructionExcerptLabel: func(side string) string { return side + "'s initial instruction" },
 		ProfileTitle:                   "## Behavior Profile Comparison\n\n",
-		ProfileTableHeader:             "| Metric | A | B | Relative Change |\n|---|---|---|---|\n",
+		ProfileTableHeader:             "| Metric | A | B | Symmetric Difference |\n|---|---|---|---|\n",
 		NotableFootnote: func(thresholdPct float64) string {
-			return "\n> ⚠️ = relative change ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% and the absolute difference clears the noise floor — a rule-based \"worth a look\" flag, not a determined cause.\n\n"
+			return "\n> ⚠️ = symmetric difference ((B-A)/max(|A|,|B|)) magnitude ≥ " + strconv.FormatFloat(thresholdPct, 'f', 0, 64) + "% and the absolute difference clears the noise floor — a rule-based \"worth a look\" flag, not a determined cause.\n\n"
 		},
 		ToolsTitle:       "## Tool Call Comparison\n\n",
 		ToolsTableHeader: "| Tool | A Count | B Count |\n|---|---|---|\n",

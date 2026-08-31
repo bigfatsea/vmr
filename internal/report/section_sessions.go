@@ -32,6 +32,7 @@ func renderSessions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		renderCompactionChains(w, rep, lang)
 		return
 	}
+	w("%s", t.TableNote)
 
 	byClient := map[string][]SessionRow{}
 	var seenOrder []string

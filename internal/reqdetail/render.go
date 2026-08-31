@@ -151,7 +151,7 @@ func roleStatLine(chars map[string]int64, withChars, bold bool) string {
 			val = fmt.Sprintf("%s (%s)", fmtCount(int(chars[r])), share)
 		}
 		if bold {
-			val = "<strong>" + val + "</strong>"
+			val = "**" + val + "**"
 		}
 		parts = append(parts, fmt.Sprintf("%s %s", r, val))
 	}

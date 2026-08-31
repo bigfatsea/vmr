@@ -94,14 +94,8 @@ func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 }
 
 // cronFileTag maps a scheduled workload class to the suffix in its
-// vmr-requests-cron-<tag>.md filename. "heartbeat" keeps the exact spelling
-// the operator specified for this file ("hartbeat"); any other class
-// (dream_diary today, anything added later) uses its own name unchanged —
-// the general "vmr-requests-cron-<class>.md" pattern.
+// vmr-requests-cron-<class>.md filename.
 func cronFileTag(class string) string {
-	if class == "heartbeat" {
-		return "hartbeat"
-	}
 	return sanitize(class)
 }
 
@@ -633,7 +627,11 @@ func buildDetailFileSet(detailDir string) map[string]struct{} {
 func detailCell(r RequestRow, detailSet map[string]struct{}) string {
 	if r.DetailFile != "" {
 		if _, ok := detailSet[r.DetailFile]; ok {
-			return fmt.Sprintf("[Ⓜ️ Markdown](details/%s)", r.DetailFile)
+			label := r.Req
+			if label == "" {
+				label = r.DetailFile
+			}
+			return fmt.Sprintf("[%s](details/%s)", label, r.DetailFile)
 		}
 	}
 	if r.Req == "" {
@@ -664,7 +662,7 @@ func outcomeCell(r RequestRow) string {
 	default:
 		ec := r.ErrorClass
 		if ec == "" {
-			ec = "error"
+			ec = "unclassified"
 		}
 		return "❌" + ec
 	}

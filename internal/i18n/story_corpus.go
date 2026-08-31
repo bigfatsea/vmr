@@ -82,7 +82,7 @@ func Corpus(lang Lang) CorpusText {
 
 			ContextRotTitle:    "## Context 增长与质量拐点（Context Rot）\n\n",
 			ContextRotHeader:   "| 上下文区间 | Step 样本数 | Finding 总数 | Finding 密度 | 错误 Step 数 | 错误率 |\n|---|---|---|---|---|---|\n",
-			ContextRotFootnote: "> 按照 Step 输入 Token 大小分桶统计。高上下文区间下的 Finding 密度突增或错误率上升反映了注意力衰减（Context Rot）趋势。错误率基于协议原生错误标记统计。\n\n",
+			ContextRotFootnote: "> 按照 Step 输入 Token 大小分桶统计。若高上下文区间出现 Finding 密度突增或错误率上升，可作为注意力衰减（Context Rot）趋势的参考；若本批语料各区间分布平稳则未观测到该趋势。错误率基于协议原生错误标记统计。\n\n",
 
 			ToolSeqTitle:    "## 高频工具调用序列模式（N-gram）\n\n",
 			ToolSeqHeader:   "| 工具调用序列 | 出现频次 | 尾步错误率 |\n|---|---|---|\n",
@@ -124,7 +124,7 @@ func Corpus(lang Lang) CorpusText {
 
 		ContextRotTitle:    "## Context Window Scaling & Quality Inflection (Context Rot)\n\n",
 		ContextRotHeader:   "| Context Range | Step N | Finding N | Finding Density | Error Step N | Error Rate |\n|---|---|---|---|---|---|\n",
-		ContextRotFootnote: "> Bucket statistics by step input tokens. Increases in Finding density or error rate at larger context windows indicate context rot trends. Error rate is computed from protocol-level error markers.\n\n",
+		ContextRotFootnote: "> Bucket statistics by step input tokens. Increases in Finding density or error rate at larger context windows indicate potential context rot trends; a flat distribution indicates no such trend was observed in this batch. Error rate is computed from protocol-level error markers.\n\n",
 
 		ToolSeqTitle:    "## Frequent Tool Call Sequences (N-gram)\n\n",
 		ToolSeqHeader:   "| Tool Sequence | Occurrences | Tail Step Error Rate |\n|---|---|---|\n",

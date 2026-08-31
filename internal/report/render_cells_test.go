@@ -54,7 +54,7 @@ func TestDetailCell_LinksOnlyWhenFileActuallyExists(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, r.DetailFile), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	want := "[Ⓜ️ Markdown](details/" + r.DetailFile + ")"
+	want := "[" + r.Req + "](details/" + r.DetailFile + ")"
 	if got := detailCell(r, map[string]struct{}{r.DetailFile: {}}); got != want {
 		t.Errorf("once the file exists, want a link (%q), got %q", want, got)
 	}
