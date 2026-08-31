@@ -37,8 +37,8 @@ type StoryHTMLText struct {
 	// DiffusePointOfNoReturn replaces NoPointOfNoReturn when the verdict is
 	// critical but no single structural signal (compaction / contract /
 	// retry loop) marks the turn — a behavioral failure (loop, goal drift,
-	// oscillation) has no one decisive step, and "stayed on its rails" would
-	// contradict the CRITICAL stamp.
+	// oscillation) has no one decisive step, and a "no turning point" line
+	// would contradict the CRITICAL stamp.
 	DiffusePointOfNoReturn string
 
 	// Verdict (first screen). OutcomeDeliverable is a prefix — the renderer
@@ -159,7 +159,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 			},
 			PONRRetry:              "对失败的调用原样重试，未调整参数",
 			PONRContract:           "历史被重建、大幅缩小——被丢弃的部分已不可见",
-			NoPointOfNoReturn:      "未检测到不可逆的转折点——本次运行始终在轨。",
+			NoPointOfNoReturn:      "未检测到不可逆的转折点（不代表运行无问题）。",
 			DiffusePointOfNoReturn: "没有单一的不可逆转折点——失控是渐进的，而非某一步骤突变，详见下方 Findings。",
 
 			OutcomeLabel:       "结局",
@@ -273,7 +273,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 		},
 		PONRRetry:              "retried a failing call without changing the arguments",
 		PONRContract:           "history rebuilt much smaller — whatever was in the discarded tail is gone",
-		NoPointOfNoReturn:      "No unrecoverable turning point — the run stayed on its rails.",
+		NoPointOfNoReturn:      "No unrecoverable turning point detected (does not imply the run was problem-free).",
 		DiffusePointOfNoReturn: "No single point of no return — the run degraded gradually rather than at one decisive step. See the findings below.",
 
 		OutcomeLabel:       "Outcome",

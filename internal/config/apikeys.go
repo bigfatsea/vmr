@@ -17,7 +17,7 @@ import "fmt"
 // BuildQuotaSpecs keys by provider name, so each expanded entry — carrying
 // its own Name but the same *QuotaConfig pointer as its siblings — gets its
 // own independent core.QuotaSpec/counter bucket for free; there is no
-// shared-ledger case to reconcile. See docs/KNOWN_ISSUES_sonnet-5.md's
+// shared-ledger case to reconcile. See docs/KNOWN_ISSUES.md's
 // ProviderGroup entry for why this config-time-expansion shape (vs. a
 // runtime key pool) is the one that doesn't fight core.Endpoint's
 // construct-once/HealthKey-once invariant.

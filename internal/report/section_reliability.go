@@ -36,12 +36,8 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row, lang i18n.La
 			w("*%s*\n\n", p)
 			tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
 			for _, e := range byProto[p] {
-				marker := ""
-				if e.ErrorRate > 10 {
-					marker = " ⚠️"
-				}
 				tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
-					pctStr(e.Availability), pctHundred(e.ErrorRate)+marker,
+					pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
 					topErrorClassShort(e))
 			}
 			w("\n")
@@ -194,6 +190,20 @@ func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 		return order[i] < order[j]
 	})
 	return order, byProto
+}
+
+// errorRateMarker is the §3 endpoint-health error-rate cell suffix. Low-n
+// rows (same n<20 cutoff as render_cells.go's ppCell) get §4's ⚠️low-n
+// instead of the error-rate ⚠️: 50% off 2 attempts is not 50% off 300.
+func errorRateMarker(e EndpointRow) string {
+	switch {
+	case e.Attempts < 20:
+		return " ⚠️low-n"
+	case e.ErrorRate > 10:
+		return " ⚠️"
+	default:
+		return ""
+	}
 }
 
 func topErrorClassShort(e EndpointRow) string {

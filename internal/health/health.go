@@ -55,7 +55,7 @@ func (r *Registry) get(key string) *state {
 // package and internal/router assert endpoint state via this method
 // precisely because calling Acquire to check would itself change the
 // state being asserted. Do not read "no production caller" as "delete"
-// (also noted in docs/KNOWN_ISSUES_sonnet-5.md's deliberate-tradeoffs section).
+// (also noted in docs/KNOWN_ISSUES.md's deliberate-tradeoffs section).
 func (r *Registry) Available(key string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

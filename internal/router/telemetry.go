@@ -69,7 +69,7 @@ func (t *Telemetry) RecordRequest(protocol string) {
 // the attempt's ErrorClass instead. The two ledgers answer different
 // questions (did the client get an intact response vs did the exchange
 // complete at the HTTP layer); do not "fix" one to match the other. Also
-// noted in docs/KNOWN_ISSUES_sonnet-5.md's deliberate-tradeoffs section.
+// noted in docs/KNOWN_ISSUES.md's deliberate-tradeoffs section.
 func (t *Telemetry) RecordOutcome(ok, canceled bool) {
 	if t == nil {
 		return

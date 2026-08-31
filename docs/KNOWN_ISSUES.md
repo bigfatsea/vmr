@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§2 分布**：高危 0、中危 3（`2.2`/`2.17`/`2.18`）、低危 27，合计 30。无 `[中低]` 条目。
+- **§2 分布**：高危 0、中危 3（`2.2`/`2.17`/`2.18`）、低危 28，合计 31。无 `[中低]` 条目。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
 
 ---
@@ -185,8 +185,8 @@
 
 #### 2.58 [低] 宏观报表按日成本表的覆盖度隐性依赖当日端点是否在定价表内
 
-- **现状**：`internal/report/section_cost.go` 的按日成本表只列「当日至少有一条记录能解析出费率」的日期；高流量端点（如 `cliproxy`、`bai`）未定价时，整块日期从表里消失，读者看到的是「这些天没有成本」而非「这些天成本未知」。
-- **当前缓解**：`internal/i18n/report_cost.go` 的 `ByDatePartialNote` 脚注（「未列出的日期有流量但上游端点无适用费率，成本未知，非零」），当且仅当确有未定价日期时渲染（2026-08-31）。
+- **现状**：`internal/report/section_cost.go` 的按日成本表对当日无一条记录能解析出费率的日期，成本列渲染 `-`（2026-08-31 前是整行不渲染，读者看到的是「这些天没有成本」而非「这些天成本未知」）。剩余口径缺口：未定价日期的 fresh/out token 仍照常计入表，但没有一处把「哪几天、占多少流量」汇总出来。
+- **当前缓解**：未定价行渲染 `-` + `internal/i18n/report_cost.go` 的 `ByDatePartialNote` 脚注，当且仅当确有未定价日期时渲染。
 - **可能方案**：补齐高流量 provider 定价（`internal/pricing` supplement 或 config override），或在报表 §2.5（账户消耗与额度）显式列出「未定价 provider 及其请求占比」。
 - **触发条件**：主力上游长期不在定价表内，按日成本表因此长期残缺。
 
@@ -204,6 +204,12 @@
 - **当前缓解**：`vmr analyze -corpus` 统计时需结合分布形状（P10/P50/P90 及两端样本数）共同解读；暂不重定义指标语义以维护 v1-complete 稳定性。
 - **可能方案**：细化有效引用粒度（如按实体引用率加权或按 token 深度衰减）或按任务类别（含/不含工具调用）分桶展示。
 - **触发条件**：后续版本计划重构行为指标语义时统一评估。
+
+
+#### 2.65 [低，登记待触发] 依赖 anthropic-messages `is_error` 标记的信号从未在真实语料上被执行
+
+- **现状**：决策脊柱的 tool-result ❌ 徽章、`error_retry_unadapted` / `error_then_unverified_success` / `error_recovery_count` 等检测器、Context Rot 错误率、N-gram 尾步错误率，全部只在 Anthropic Messages 协议的 `is_error` 工具结果标记存在时才会填充（`internal/story/findings_toolresult.go` 等）。当前用于生成全形态样例报告与 Phase 1b 校准的语料 **0.0% 是 anthropic-messages**——`vmr-story-corpus.md` 顶部盲区声明已如实标注「命中率为 0 代表『测不出来』，不代表『检查过没问题』」，但这批信号至今没有一次在真实流量上执行过，正确性只有单测背书。
+- **触发条件**：任意一次 `vmr analyze` 的语料出现非零 anthropic-messages 占比，即可用真实数据核验这些检测器的命中/误报行为；在此之前，需专门准备一批 anthropic-messages 语料（真实或构造）才能推进，属独立任务。
 
 
 ### C. 分析半区 · LLM 解读层校准

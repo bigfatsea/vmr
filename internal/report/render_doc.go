@@ -103,8 +103,9 @@ func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo) string {
 
 	// ---- header ----
 	w("# %s\n\n", t.Title)
-	w("%s\n", t.MetaLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
+	w("%s\n", t.MetaLine(t.MetaInputSummary(len(rep.Meta.Inputs)), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors,
 		fmtDisplayFull(rep.Meta.From), fmtDisplayFull(rep.Meta.To)))
+	w("\n<details><summary>%s</summary>\n\n%s\n</details>\n\n", t.MetaInputListLabel, strings.Join(rep.Meta.Inputs, ", "))
 	w("%s", t.DetailLinkLine)
 	withSibling := clientsWithSiblingFile(rep)
 	for _, c := range rep.ByClient {

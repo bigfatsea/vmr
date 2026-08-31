@@ -27,7 +27,7 @@ file only orients; it does not restate them.
   reordering step between `strategy.Sort` and sticky pinning.
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` — the "why": positioning, competitive
   landscape, and what is deliberately out of scope. The only one of the four that isn't a "how".
-- `docs/KNOWN_ISSUES_sonnet-5.md` — the cross-cutting index of open issues and deliberate
+- `docs/KNOWN_ISSUES.md` — the cross-cutting index of open issues and deliberate
   non-fixes (the design docs' own tables hold the per-subsystem detail). Check it before
   reporting something as new — and **register there when you decide something too**: a
   tradeoff argued only in a source comment is not tracked. The next reviewer reads the
@@ -147,7 +147,7 @@ root allowed to see both halves at once.
   whose whole purpose *is* the trail: review reports, `CHANGELOG.md`, and code comments
   recording why a superseded approach was wrong. But one-off comprehensive review reports
   are no longer *produced* — a finding or decision worth keeping goes straight into
-  `docs/KNOWN_ISSUES_sonnet-5.md` (or the relevant design doc) as a current-state fact.
+  `docs/KNOWN_ISSUES.md` (or the relevant design doc) as a current-state fact.
 - **No changelog-style revision — even inside review reports.** When revising a section
   (whether asked to "rewrite" or to "review and refine" / "refine" / "polish"), state the
   final reasoning once, as one coherent pass: the structure, the cause analysis, the

@@ -37,17 +37,17 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		tbl := newTable(w, h[0], h[1], h[2], h[3])
 		unpricedDate := false
 		for _, d := range rep.ByDate {
+			// CostEstimate == nil: none of that day's records resolved a
+			// rate. Render "-" (§2.5's "unknown ≠ zero"), not a dropped row
+			// — a missing row reads as "no traffic" to anyone cross-checking
+			// §5's daily activity.
+			cost := "-"
 			if d.CostEstimate != nil {
-				tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut),
-					fmt.Sprintf("%.4f %s", *d.CostEstimate, cur))
+				cost = fmt.Sprintf("%.4f %s", *d.CostEstimate, cur)
 			} else {
-				// A ByDate row always has ≥1 record (aggregate.go keys it
-				// per-record); CostEstimate == nil means none of that day's
-				// records resolved a rate. Silently dropping the row reads
-				// as "this day is missing" to anyone cross-checking §5's
-				// daily activity — flag it instead.
 				unpricedDate = true
 			}
+			tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut), cost)
 		}
 		w("\n")
 		if unpricedDate {

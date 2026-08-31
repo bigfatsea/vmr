@@ -95,7 +95,7 @@ type Record struct {
 // unaffected.
 //
 // TODO(2026-10): transitional — remove once pre-rename logs have aged out.
-// See the protocol-rename entry in docs/KNOWN_ISSUES_sonnet-5.md's 配置与协议 section.
+// See the protocol-rename entry in docs/KNOWN_ISSUES.md's 配置与协议 section.
 func (r *Record) UnmarshalJSON(data []byte) error {
 	type recordAlias Record // shed UnmarshalJSON to avoid infinite recursion
 	if err := json.Unmarshal(data, (*recordAlias)(r)); err != nil {

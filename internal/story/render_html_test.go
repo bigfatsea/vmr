@@ -77,7 +77,7 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 		`class="damage"`,    // step/time/token tally
 		"tokens processed",  // damage line copy
 		// exact_repeat_tool_call is critical but not a structural PONR signal:
-		// the strip must NOT claim the run "stayed on its rails".
+		// the strip must NOT claim the run had no point of no return.
 		`class="ponr ponr-diffuse"`,
 		"degraded gradually",
 	} {
@@ -88,8 +88,8 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 	if len(f) == 0 {
 		t.Fatal("fixture should trip the exact-repeat Finding")
 	}
-	if strings.Contains(out, "stayed on its rails") {
-		t.Error("critical verdict must not also claim the run stayed on its rails")
+	if strings.Contains(out, i18n.StoryHTML(i18n.EN).NoPointOfNoReturn) {
+		t.Error("critical verdict must not also render the no-point-of-no-return line")
 	}
 	if !strings.Contains(out, string(f[0].Code)) {
 		t.Errorf("Findings section did not render finding code %q", f[0].Code)

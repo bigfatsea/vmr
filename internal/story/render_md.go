@@ -48,7 +48,16 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 
 	w("# Journey %s\n\n", j.ID)
 	w("> %s\n\n", escapeHTML(j.Title))
-	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), j.To.In(fmtutil.DisplayZone).Format("15:04:05")))
+	from := j.From.In(fmtutil.DisplayZone)
+	to := j.To.In(fmtutil.DisplayZone)
+	toLayout := "15:04:05"
+	if from.Format("2006-01-02") != to.Format("2006-01-02") {
+		// a journey that spans midnight: without the date the end time
+		// reads as earlier than the start (see story index, which already
+		// carries the date on both ends).
+		toLayout = "2006-01-02 15:04:05"
+	}
+	w("%s", t.JourneyMeta(len(j.Tasks), stepCount(j), from.Format("2006-01-02 15:04:05"), to.Format(toLayout)))
 	// Back links (P6.2d): vmr-stories.md is always safe to link — same
 	// directory, this run just wrote it. vmr-report.md is another
 	// command's product, existence-gated by the caller (reportMDExists)

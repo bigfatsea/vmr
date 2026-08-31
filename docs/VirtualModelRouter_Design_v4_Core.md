@@ -727,7 +727,7 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **多 Provider 端点组与全局 FallbackEndpoints——都是配置期展开，不改变运行时候选列表的结构**：`endpoints[].providers`（始终是列表）让一条 entry 代表好几个账号——`BuildSnapshot` 在既有展开循环外再套一层按 `eg.Providers` 的循环，每个 `core.Endpoint` 和手写独立 entry 完全一样（各自的 `HealthKey()`、Sticky 绑定、按 `Provider` 名读写的配额账本）。顶层 `fallback_endpoints:` 在处理完一个虚拟模型自己的 `endpoints` 后追加到每个已有对应 `protocol` 路由的模型末尾（模型可用 `fallback: false` 整体退出）。解决「同优先级多供应商 / 跨虚拟模型重复兜底」两类配置膨胀。
 
-**Provider 级 `api_keys:`（同账号多把 Key，与顶层鉴权 `api_keys` 无关）**：`providers[]` 条目可用 `api_keys: {label: key, ...}` 代替单把 `api_key:`（二选一）。`config.Parse` 里的纯配置期展开（`internal/config/apikeys.go`）：`name` 展开成 `<name>-<label>` 命名的独立 `Provider`，`base_url`/`proxy`/`quota`/`pricing` 共享，配置里对原名的引用自动改写。每把 Key 就是一个完全等价的独立 `Provider`——独立健康跟踪、独立 Sticky、独立配额账本。**展开顺序不保证**（`api_keys` 是普通 Go map）：没配 `quota:` 时排第一的是哪把 Key 不保证，但能从 `vmr check` 输出看到实际顺序；配了 `quota:` 则顺序无关，按各自额度水位打分。刻意不做——把多把物理 Key 合并进*一个* `core.Endpoint`（破坏 `Endpoint` 构造后不可变、`HealthKey()` 只算一次这条贯穿 health/sticky/quota 的假设），以及按错误类型分层的「Key 级降级 vs Provider 级跳过」Failover（`classify.go` 目前 402/404 同归 `ErrEndpoint`）——见 `docs/KNOWN_ISSUES_sonnet-5.md` §2.2 的 ProviderGroup 记录。
+**Provider 级 `api_keys:`（同账号多把 Key，与顶层鉴权 `api_keys` 无关）**：`providers[]` 条目可用 `api_keys: {label: key, ...}` 代替单把 `api_key:`（二选一）。`config.Parse` 里的纯配置期展开（`internal/config/apikeys.go`）：`name` 展开成 `<name>-<label>` 命名的独立 `Provider`，`base_url`/`proxy`/`quota`/`pricing` 共享，配置里对原名的引用自动改写。每把 Key 就是一个完全等价的独立 `Provider`——独立健康跟踪、独立 Sticky、独立配额账本。**展开顺序不保证**（`api_keys` 是普通 Go map）：没配 `quota:` 时排第一的是哪把 Key 不保证，但能从 `vmr check` 输出看到实际顺序；配了 `quota:` 则顺序无关，按各自额度水位打分。刻意不做——把多把物理 Key 合并进*一个* `core.Endpoint`（破坏 `Endpoint` 构造后不可变、`HealthKey()` 只算一次这条贯穿 health/sticky/quota 的假设），以及按错误类型分层的「Key 级降级 vs Provider 级跳过」Failover（`classify.go` 目前 402/404 同归 `ErrEndpoint`）——见 `docs/KNOWN_ISSUES.md` §2.2 的 ProviderGroup 记录。
 
 **校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoint-group 的 `protocol` 已注册、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints[]` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`sticky_ttl` 必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`image_downscale` / `audit_retention_days`）加载期钳为 0，`image_cache_ttl_days` 非正数钳为默认 7。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
 
@@ -878,7 +878,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 ## 14. 已识别、暂不落地的清理项
 
-判定"动它的收益低于扰动成本"的项。每项都不是 bug，改与不改行为一致；列在这里免得下次有人盯着它们犹豫时重新论证。分析半区的同类清单见 `docs/KNOWN_ISSUES_sonnet-5.md` §2。
+判定"动它的收益低于扰动成本"的项。每项都不是 bug，改与不改行为一致；列在这里免得下次有人盯着它们犹豫时重新论证。分析半区的同类清单见 `docs/KNOWN_ISSUES.md` §2。
 
 | 项 | 现状 | 不动的理由 |
 | --- | --- | --- |

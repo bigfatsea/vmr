@@ -95,6 +95,22 @@ warn_if_stale() {
   if [[ -n "$newer" ]]; then
     echo "warning: $BIN may be older than the current source (e.g. $newer changed since it was built)" >&2
     echo "  rebuild with: go build -o vmr ./cmd/vmr" >&2
+    return
+  fi
+
+  # A branch switch or rebase moves HEAD without touching any mtime, so the
+  # find above sees nothing stale. The binary stamps its own commit (Go's
+  # VCS build info, printed by `vmr version`) — exact where find only guesses.
+  command -v git >/dev/null 2>&1 || return
+  [[ -x "$BIN" ]] || return
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return
+  local bin_rev head_rev head_short
+  bin_rev="$("$BIN" version 2>/dev/null | sed -n 's/^vmr \([0-9a-f]\{7,\}\).*/\1/p' || true)"
+  head_rev="$(git rev-parse HEAD 2>/dev/null || true)"
+  head_short="$(git rev-parse --short=7 HEAD 2>/dev/null || true)"
+  if [[ -n "$bin_rev" && -n "$head_rev" && "$head_rev" != "$bin_rev"* ]]; then
+    echo "warning: $BIN was built from $bin_rev, but HEAD is now $head_short" >&2
+    echo "  rebuild with: go build -o vmr ./cmd/vmr" >&2
   fi
 }
 

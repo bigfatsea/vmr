@@ -14,7 +14,7 @@
 // detectors (the entity-diff rule AND the LLM excerpt reader), and only the
 // rule one populates SwallowedEntities. Scanning the field alone would let
 // an LLM-confirmed constraint loss set the verdict to CRITICAL while this
-// still reported "stayed on its rails".
+// still reported no point of no return.
 package story
 
 import "vmr/internal/ctxgraph"

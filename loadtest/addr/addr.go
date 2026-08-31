@@ -5,7 +5,7 @@
 // loadtest/config.yaml's `listen`/`base_url` fields still have to be kept
 // in sync by hand (YAML can't import a Go constant); this package only
 // removes two of the previously three manually-synced copies — see
-// docs/KNOWN_ISSUES_sonnet-5.md's §3 loadtest entry.
+// docs/KNOWN_ISSUES.md's §3 loadtest entry.
 //
 // Not part of the shipped vmr binary — `go build ./cmd/vmr` never touches
 // this directory.

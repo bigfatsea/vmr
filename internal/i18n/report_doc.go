@@ -8,9 +8,15 @@ import "strconv"
 
 // DocText is render_doc.go's text, in one language.
 type DocText struct {
-	Title          string
-	MetaLine       func(inputs string, format, records, parseErrors int, from, to string) string
-	DetailLinkLine string
+	Title    string
+	MetaLine func(inputs string, format, records, parseErrors int, from, to string) string
+	// MetaInputSummary / MetaInputListLabel keep the header's data-source
+	// line to one line: MetaLine gets "44 files" as its `inputs`, and the
+	// full path list folds into a <details> under that label. On a full
+	// corpus the raw list was ~1.7k chars twice (here and the appendix).
+	MetaInputSummary   func(n int) string
+	MetaInputListLabel string
+	DetailLinkLine     string
 	// StoriesLinkLine is the "vmr-report.md → stories/vmr-stories.md"
 	// edge (P6.2a) — path is relative to vmr-report.md itself.
 	StoriesLinkLine    func(path string, journeyCount int, from, to string) string
@@ -58,7 +64,9 @@ func Doc(lang Lang) DocText {
 				return "数据源: " + inputs + " · format " + strconv.Itoa(format) + " · " + strconv.Itoa(records) +
 					" 条记录（" + strconv.Itoa(parseErrors) + " 坏行）· " + from + " – " + to
 			},
-			DetailLinkLine: "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
+			MetaInputSummary:   func(n int) string { return strconv.Itoa(n) + " 个文件" },
+			MetaInputListLabel: "文件清单",
+			DetailLinkLine:     "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
 			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
 			},
@@ -123,7 +131,9 @@ func Doc(lang Lang) DocText {
 			return "Data source: " + inputs + " · format " + strconv.Itoa(format) + " · " + strconv.Itoa(records) +
 				" records (" + strconv.Itoa(parseErrors) + " bad rows) · " + from + " – " + to
 		},
-		DetailLinkLine: "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
+		MetaInputSummary:   func(n int) string { return strconv.Itoa(n) + " files" },
+		MetaInputListLabel: "File list",
+		DetailLinkLine:     "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
 		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
 		},

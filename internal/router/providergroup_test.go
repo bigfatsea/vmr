@@ -3,7 +3,7 @@
 // BuildSnapshot coverage for multi-provider endpoint groups
 // (endpoints[].providers) and global fallback endpoints
 // (Config.FallbackEndpoints). Deferred tiers (multi-key pooling, graduated
-// failover) and why: docs/KNOWN_ISSUES_sonnet-5.md's "配置与协议" section.
+// failover) and why: docs/KNOWN_ISSUES.md's "配置与协议" section.
 package router
 
 import (

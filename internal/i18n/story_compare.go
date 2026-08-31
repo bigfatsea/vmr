@@ -125,7 +125,7 @@ func Compare(lang Lang) CompareText {
 			CacheTitle:        "## Prompt 缓存命中率\n\n",
 			CacheNoData:       "两侧均未取得可用的 usage/缓存数据。\n\n",
 			CacheTableHeader:  "| | 首轮 | 稳态均值（除首轮） | 最小 | 最大 |\n|---|---|---|---|---|\n",
-			CacheCurveSummary: "<details><summary>逐轮曲线</summary>\n\n",
+			CacheCurveSummary: "<details><summary>逐轮曲线</summary>\n\n> 轮次编号只对能算出命中率的轮次连续标注；缺号表示该轮未返回 usage，不是编号错误。\n\n",
 			CacheCurveNoData:  "(无数据)",
 
 			SysPromptTitle:        "## System Prompt 规模与稳定性\n\n",
@@ -221,7 +221,7 @@ func Compare(lang Lang) CompareText {
 		CacheTitle:        "## Prompt Cache Hit Rate\n\n",
 		CacheNoData:       "Neither side has usable usage/cache data.\n\n",
 		CacheTableHeader:  "| | First Turn | Steady-State Mean (excl. first) | Min | Max |\n|---|---|---|---|---|\n",
-		CacheCurveSummary: "<details><summary>Per-turn curve</summary>\n\n",
+		CacheCurveSummary: "<details><summary>Per-turn curve</summary>\n\n> Turn numbers are shown only for turns with a computable hit rate; a gap means that turn returned no usage, not a numbering error.\n\n",
 		CacheCurveNoData:  "(no data)",
 
 		SysPromptTitle:        "## System Prompt Size & Stability\n\n",
