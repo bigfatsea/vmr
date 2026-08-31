@@ -27,7 +27,7 @@ file only orients; it does not restate them.
   reordering step between `strategy.Sort` and sticky pinning.
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` — the "why": positioning, competitive
   landscape, and what is deliberately out of scope. The only one of the four that isn't a "how".
-- `docs/KNOWN_ISSUES.md` — the cross-cutting index of open issues and deliberate
+- `KNOWN_ISSUES` — the cross-cutting index of open issues and deliberate
   non-fixes (the design docs' own tables hold the per-subsystem detail). Check it before
   reporting something as new — and **register there when you decide something too**: a
   tradeoff argued only in a source comment is not tracked. The next reviewer reads the
@@ -147,7 +147,7 @@ root allowed to see both halves at once.
   whose whole purpose *is* the trail: review reports, `CHANGELOG.md`, and code comments
   recording why a superseded approach was wrong. But one-off comprehensive review reports
   are no longer *produced* — a finding or decision worth keeping goes straight into
-  `docs/KNOWN_ISSUES.md` (or the relevant design doc) as a current-state fact.
+  `KNOWN_ISSUES` (or the relevant design doc) as a current-state fact.
 - **No changelog-style revision — even inside review reports.** When revising a section
   (whether asked to "rewrite" or to "review and refine" / "refine" / "polish"), state the
   final reasoning once, as one coherent pass: the structure, the cause analysis, the
@@ -158,9 +158,14 @@ root allowed to see both halves at once.
   full rewrite, but never a patch-on-patch dated note with the superseded paragraphs left
   standing. A short "supersedes the earlier §N" pointer at the top is fine; a running
   history of how the thinking evolved is not.
-- **No section numbers in cross-references.** Cite a document and a section *name*
-  ("Part 1's Sticky Model section"), never `§6.5` — numbers renumber and then silently point
-  at the wrong thing, while a name keeps resolving after a reorganization.
+- **Cross-references are generic, not pinned.** Name the document; never `§6.5` or "line 73" —
+  numbers renumber and silently point at the wrong thing, while a name keeps resolving after a
+  reorganization. Cite a section by *name* ("Part 1's Sticky Model section"). Refer to a file by
+  bare name with no suffix/extension (`design`, not `design_v2`/`design.md`) — the point is the
+  general rule: model, version and `extension` tokens on *any* filename churn and force a re-visit.
+  Prefer a phrase for the point over a location. And skip the cross-reference entirely when the
+  sentence already makes the point — a pointer pays only for itself if the reader needs the other
+  document's full reasoning.
 - **Comments: only non-obvious "why"** (hidden constraint, workaround, invariant). Match the
   existing terse style; don't add narration.
 - **Commit messages**: short, imperative, **no trailers at all** — including `Co-Authored-By`,

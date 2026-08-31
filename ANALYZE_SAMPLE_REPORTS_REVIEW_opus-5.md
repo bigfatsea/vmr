@@ -175,7 +175,7 @@ R1 之后每批读完立刻把发现追加到 3.2；3.3 是最后的用户视角
 
 ### 3.2 逐批发现
 
-约定：**[缺陷]** = 逻辑/正确性问题；**[缺口]** = 用户要的信息报告没给；**[布局]** = 信息在但不好读。方括号后标 `←1.NN` 表示与 `docs/KNOWN_ISSUES_sonnet-5.md` 已登记项相关。
+约定：**[缺陷]** = 逻辑/正确性问题；**[缺口]** = 用户要的信息报告没给；**[布局]** = 信息在但不好读。方括号后标 `←1.NN` 表示与 `KNOWN_ISSUES` 已登记项相关。
 
 ---
 
@@ -1028,9 +1028,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 #### 3.3.6 补充意见
 
 - **本次 review 自身的一处失误值得记下来**：我用仓库里现成的 `./vmr` 生成全部样例，它比 HEAD 落后一个提交，导致我一度把已修复的 1.57 脚注报成"缺失"。发现后重新编译并逐条复核（2.4 有对照表）。**建议在 `vmr.sh` 或 CI 里加一条检查**：`vmr version` 输出的 VCS stamp 与当前 `git rev-parse HEAD` 不一致时给出警告——这个坑任何人都会踩。
-- **建议登记进 `docs/KNOWN_ISSUES.md`** 的新条目：3.3.3 的 #1/#2/#3/#5/#6/#7/#14。（#13 `hartbeat` 拼写不必登记——UserGuide 双语已写明该拼写，见问题 19；要么直接统一成 `heartbeat`。）
+- **建议登记进 `KNOWN_ISSUES`** 的新条目：3.3.3 的 #1/#2/#3/#5/#6/#7/#14。（#13 `hartbeat` 拼写不必登记——UserGuide 双语已写明该拼写，见问题 19；要么直接统一成 `heartbeat`。）
 - **`_recheck/` 目录**保留了用 HEAD 二进制重跑的宏观报表与语料统计，可直接与 `01-macro/zh`、`13-corpus/zh` 做 diff 来看 `c13819a` 的实际效果。不需要了可以直接删。
-- **文中所有 `1.NN` 编号引用的是 `docs/KNOWN_ISSUES_sonnet-5.md`。** 写这份 review 期间（08-31 03:20）另有会话正在把它改名为 `docs/KNOWN_ISSUES.md`（两个文件当前并存，`loadtest/addr/addr.go` 里的引用也已改）——我没有动这两处，但后续若旧文件被删，本文的引用需要一并改名。
+- **文中所有 `1.NN` 编号引用的是 `KNOWN_ISSUES`。**
 - 本次未覆盖的面：`-show-ungrouped`、`-include-self-traffic`、`openai-responses` 协议的产物（本批语料只有 2 条该协议请求，且都失败），以及 Anthropic Messages 协议占比高的语料（本批 0.0%，导致 4 个检测器 + Context Rot 错误率 + N-gram 尾步错误率整体测不出来）。**如果要验证那 4 个检测器，需要专门准备一批 anthropic-messages 语料**——这是当前样例集最大的覆盖盲区。
 
 ---

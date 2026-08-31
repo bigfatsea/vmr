@@ -477,7 +477,7 @@ const (
 
 **Phase 8 — 文档**
 - `docs/UserGuide.md` / `.zh.md`、`docs/VirtualModelRouter_Design_v4_Core.md`（含设计决策表、审计日志示例、诊断章节）、`README.md` / `.zh.md`（报告示例端点标签）。
-- `docs/KNOWN_ISSUES_sonnet-5.md` §2.2 新增条目登记兼容取舍 + `TODO(2026-10)` 拆除清单；§0 语料构成图例更新。
+- `KNOWN_ISSUES` 新增条目登记兼容取舍 + `TODO(2026-10)` 拆除清单；语料构成图例更新。
 - `CHANGELOG.md` `[Unreleased]`：协议改名条目 + `/help` 页条目。
 
 **Phase 9 — 测试**（约 80 个 `_test.go` 文件，451 处字面量）
@@ -567,7 +567,7 @@ const (
 - 类似地，`internal/ctxgraph/manifest_test.go:16` 中仍保留了 `Protocol: "openai"`。
 
 #### 4. 技术债务生命周期管理
-- 兼容过渡逻辑（`core.CanonicalProtocol`、`core.NormalizeEndpointLabel`、`audit.Record.UnmarshalJSON`）及对应的单测均已显式标注 `TODO(2026-10)`，并在 `docs/KNOWN_ISSUES_sonnet-5.md` 进行了完整登记，具备清晰的下线生命周期。
+- 兼容过渡逻辑（`core.CanonicalProtocol`、`core.NormalizeEndpointLabel`、`audit.Record.UnmarshalJSON`）及对应的单测均已显式标注 `TODO(2026-10)`，并在 `KNOWN_ISSUES` 进行了完整登记，具备清晰的下线生命周期。
 
 ---
 
@@ -759,7 +759,7 @@ const (
    - **`config_proxy_test.go` 补漏**：修正了第一轮仅替换 YAML 文本而遗漏的 Go 代码参数 `ProxySpecFor(p, "openai-completions")` 与 `BaseURL` map key。
    - **`quota_parity_test.go` 解耦**：`EndpointLabel` 构建改用 `openai-completions`，测试数据与真实生产对齐。
    - **自然语言与 i18n 覆盖率披露文本统一**：`story_corpus.go` 和 `story_spine.go` 的披露文本统一使用前端选定的显示名 `"Anthropic Messages"`，配套黄金测试 `golden.md`/`golden_zh.md` 仅差异更新该单句。
-   - **当前状态设计文档与配置注释全量更新**：`Design_v4_Core.md`、`Design_v4_Analytics.md`、`KNOWN_ISSUES_sonnet-5.md`、`UserGuide.md`/`.zh.md`、`config.example.yaml`/`.zh.yaml` 中的文字叙述已全部与新枚举对齐。
+   - **当前状态设计文档与配置注释全量更新**：`Design_v4_Core.md`、`Design_v4_Analytics.md`、`KNOWN_ISSUES`、`UserGuide.md`/`.zh.md`、`config.example.yaml`/`.zh.yaml` 中的文字叙述已全部与新枚举对齐。
 
 ---
 
@@ -865,7 +865,7 @@ const (
 
 5. **`KNOWN_ISSUES:124`** 仍写「Responses API（`openairesponses`）」，在同一句里与 `openai-completions` / `anthropic-messages` 枚举值并列时，用 Go 包名当简写略显不齐。纯装饰。
 
-6. **section-number 交叉引用**：#793912f commit message 与 `KNOWN_ISSUES` 用「`docs/KNOWN_ISSUES_sonnet-5.md` 2.2」/「§2.2」——与 CLAUDE.md「No section numbers in cross-references，Cite a document and a section name」的约定相悖。纯装饰。
+6. **section-number 交叉引用**：#793912f commit message 与 `KNOWN_ISSUES` 用「`KNOWN_ISSUES` 2.2」/「§2.2」——与 CLAUDE.md「No section numbers in cross-references，Cite a document and a section name」的约定相悖。纯装饰。
 
 ### 11.5 方案 vs 落地的偏差（均属合理，仅记录）
 
@@ -907,8 +907,8 @@ const (
 | # | 项 | 处置 | 文件 |
 |---|---|---|---|
 | 1 | **`examples/sample-audit.jsonl` 残留旧枚举名**（§11.2） | 采用 §11.2 的**方案 1（改新名）**：5 条记录的 `"protocol":"openai"` → `"openai-completions"`、`attempts[].endpoint` 的 `openai:` 前缀 → `openai-completions:`。依据：① `README.md:30-33` 的「run and compare」示例**早已**写成 `openai-completions:coder-primary:coder-large`——文件不改的话，2026-10 垫片拆除后该示例会对不上；② 垫片有专属单测（`TestRecordUnmarshalJSON_*` 覆盖 `:`/`/` 两种分隔符 + round-trip、`TestBuild_LegacyProtocolNamesNormalized` 覆盖 report 端到端），样例文件改新名不损失任何测试覆盖；③ `TestSampleAuditJSONLDeserializes` 只验 schema 形状，与垫片无关。改后 `./vmr report` 直接产出 `openai-completions:*`（不再依赖垫片），`python3 -c json.loads` 5 行全部合法，`go test ./internal/audit/...` 绿。 | `examples/sample-audit.jsonl` |
-| 3 | **`KNOWN_ISSUES` §2.2 的 2026-10 拆除清单不完整**（§11.4.4） | 把单句 TODO 扩成 5 步清单：① 删 `CanonicalProtocol`/`NormalizeEndpointLabel`（常量保留）；② 删 `Record.UnmarshalJSON` **并撤掉本次为它新增的 `vmr/internal/core` import**；③ 删两个 `TODO(2026-10)` 测试（**precise：是两个不是"三处"**——原文 `TestRecordUnmarshalJSON_*` 的 `*` 让人误以为多个，实际只有 `TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames` 一个）；④ `CacheSchemaVersion` **保持 2 不回退**；⑤ `sample-audit.jsonl` 已随本轮改新名，无需处理。 | `docs/KNOWN_ISSUES_sonnet-5.md` §2.2 |
-| 5a | **`KNOWN_ISSUES` §1.28 / §1.22 用 `openairesponses` 冒充 protocol 字段值**（§11.4.5 的升级版——这是真 bug 不只是措辞） | `protocol` 字段的合法值从来是 `openai-responses`（连字符）；`openairesponses` 只是 Go 包目录名。原文 §1.28 触发条件 `protocol == "openairesponses"` **永远不可能匹配任何真实记录**，等于把重估触发条件写死成"永不触发"。三处（§1.28 分布行、§1.28 触发条件行、§1.22 汇总表行）`openairesponses` → `openai-responses`。§2.2 的 `adapter/{openai,anthropic,openairesponses}` 是包路径，**保留不动**。 | `docs/KNOWN_ISSUES_sonnet-5.md` §1.22 / §1.28 |
+| 3 | **`KNOWN_ISSUES` §2.2 的 2026-10 拆除清单不完整**（§11.4.4） | 把单句 TODO 扩成 5 步清单：① 删 `CanonicalProtocol`/`NormalizeEndpointLabel`（常量保留）；② 删 `Record.UnmarshalJSON` **并撤掉本次为它新增的 `vmr/internal/core` import**；③ 删两个 `TODO(2026-10)` 测试（**precise：是两个不是"三处"**——原文 `TestRecordUnmarshalJSON_*` 的 `*` 让人误以为多个，实际只有 `TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames` 一个）；④ `CacheSchemaVersion` **保持 2 不回退**；⑤ `sample-audit.jsonl` 已随本轮改新名，无需处理。 | `KNOWN_ISSUES` |
+| 5a | **`KNOWN_ISSUES` §1.28 / §1.22 用 `openairesponses` 冒充 protocol 字段值**（§11.4.5 的升级版——这是真 bug 不只是措辞） | `protocol` 字段的合法值从来是 `openai-responses`（连字符）；`openairesponses` 只是 Go 包目录名。原文 §1.28 触发条件 `protocol == "openairesponses"` **永远不可能匹配任何真实记录**，等于把重估触发条件写死成"永不触发"。三处（§1.28 分布行、§1.28 触发条件行、§1.22 汇总表行）`openairesponses` → `openai-responses`。§2.2 的 `adapter/{openai,anthropic,openairesponses}` 是包路径，**保留不动**。 | `KNOWN_ISSUES` |
 
 **验收**：`go build ./...` / `go vet ./...` / `gofmt -l` 零输出；`go test ./...` 全绿；`go test ./internal/archtest/...`（含 doc-reference 守卫，KNOWN_ISSUES 被编辑）绿；`./vmr report examples/sample-audit.jsonl` 产出报表中 `openai-completions` ×20、裸 `openai:` ×0。
 

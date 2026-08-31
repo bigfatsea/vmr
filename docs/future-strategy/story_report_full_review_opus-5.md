@@ -823,7 +823,7 @@ D4/D5 是防止这一类问题复发的那一半。
 | 7 | `chatmsg.PairingReport` 的 F9 doc comment 断言"100% pairing rate is an invariant of the data"，而架构文档 §5 已用五个真实日志文件证明 OpenClaw 家族客户端上精确匹配率是 0% | `internal/chatmsg/pairing.go:13` | 补写清楚：不变量成立于"记录下来的 id"，这个 checker 是严格形式（供 F9 合成 fixture 回归测试用），配对真实客户端流量的调用方要用两趟形式；并点名 `story.toolResultsFor` |
 | 8 | `i18n.DetailText.NoValue` 字段声明并赋值两次（EN/ZH），全仓零引用 | `internal/i18n/reqdetail_detail.go` | 删除字段与两处赋值 |
 | 9 | `CLAUDE.md` 的 `i18n` 行只提 `report`/`story`，未提 P2 新增的 `i18n/reqdetail_detail.go` | `CLAUDE.md` | 补齐三个 `i18n/*` 与其对应包的邻接关系 |
-| 10 | **`KNOWN_ISSUES` 的 `## 2` 章节标题完全缺失**——全文有 12 处引用 `§2`/`§2.x`，`§4` 的引言还专门写"§2 是已经论证过的刻意取舍"，但该章节只有引言和 `### 2.1`，没有二级标题 | `docs/KNOWN_ISSUES_sonnet-5.md` | 补上 `## 2. 刻意取舍，不是缺陷` |
+| 10 | **`KNOWN_ISSUES` 的 `## 2` 章节标题完全缺失**——全文有 12 处引用 `§2`/`§2.x`，`§4` 的引言还专门写"§2 是已经论证过的刻意取舍"，但该章节只有引言和 `### 2.1`，没有二级标题 | `KNOWN_ISSUES` | 补上 `## 2. 刻意取舍，不是缺陷` |
 
 （第 6 项涉及两个文件，故编号 10 项、表述 9 类。）
 
@@ -831,7 +831,7 @@ D4/D5 是防止这一类问题复发的那一半。
 
 登记 §2.6 的死代码条目时，条目正文里写了一句"三处引用已不存在的 `internal/report/render.go`"——
 `archtest` 的 `TestArchitecture_DocReferences` 立刻对**这句描述本身**报错，因为
-`KNOWN_ISSUES_sonnet-5.md` 在它的守卫范围内。
+`KNOWN_ISSUES` 在它的守卫范围内。
 
 这件事有两层意思，都值得记下来：
 

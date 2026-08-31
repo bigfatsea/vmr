@@ -262,7 +262,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | `goal_drift`（Phase 1b / LLM） | 当前执行偏离了任务初始目标或约束条件 | 对应目标漂移失效模式 |
 | `unverified_completion_claim`（Phase 1b / LLM） | 模型宣称已完成任务但缺乏任何工具执行或文件交付证据 | 对应乐观脑补/虚假交付失效模式 |
 
-**Phase 1b（LLM 语义检测器，`llm_findings.go`，可选）**：`ComputeLLMFindings` 共六个检测器——上表四行加两个复用规则层 `FindingCode` 的（`plan_execution_misalignment` / `constraint_text_dropped_at_compaction`，同码不同触发路径）。仅在 `-llm-addr` 解读层开启时运行；只有 HIGH 置信度、且 `EvidenceAnchor` 在真实 transcript 里逐字命中的才提升为 `Finding`（`SourceLLMInferred`），其余一律丢弃。这六个尚未完成规则层那种黄金样本校准，见 `KNOWN_ISSUES` 2.18。
+**Phase 1b（LLM 语义检测器，`llm_findings.go`，可选）**：`ComputeLLMFindings` 共六个检测器——上表四行加两个复用规则层 `FindingCode` 的（`plan_execution_misalignment` / `constraint_text_dropped_at_compaction`，同码不同触发路径）。仅在 `-llm-addr` 解读层开启时运行；只有 HIGH 置信度、且 `EvidenceAnchor` 在真实 transcript 里逐字命中的才提升为 `Finding`（`SourceLLMInferred`），其余一律丢弃。这六个尚未完成规则层那种黄金样本校准，见 `KNOWN_ISSUES` 的 Phase 1b 语义检测器校准条目。
 
 **I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`story.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
 

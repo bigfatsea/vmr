@@ -41,7 +41,7 @@
 - `internal/story/findings.go`：`ComputeFindings` 的文档注释、`Finding` 结构体里 `Finding`/`Evidence`/`Action` 三个字段的文档注释——原文断言"journey-<id>.json 恒为英文"，已改为如实描述现状（`journey-<id>.json` 目前跟随 `lang`），并指向本文档。
 - `internal/story/metrics.go`：`Summarize` 的文档注释补充一句指向本文档的说明，避免读者误以为这是完整、经过审慎决定的最终状态。
 - `docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3：加了一条更新提示，说明本节描述的规则目前只对 `compare-*.json`/`vmr-report.json` 仍然成立，`journey-<id>.json` 已偏离，指向本文档。**没有重写这一节的正文**——正文的重写要等方案真正统一实施完之后再做（见第 5 节）。
-- `docs/KNOWN_ISSUES_sonnet-5.md`：新增 1.19 条目，登记这个待决问题，指向本文档，避免它变成"只存在于某次会话记录里、下次没人知道"的暗知识。
+- `KNOWN_ISSUES`：新增条目，登记这个待决问题，指向本文档，避免它变成"只存在于某次会话记录里、下次没人知道"的暗知识。
 
 **明确没有做的事**：没有给 `internal/story/compare.go` 的 `Compare()` 加 `lang` 参数，没有碰 `internal/report` 任何代码，没有重写设计文档正文，没有反转任何现有测试的断言方向。这些都留给第 5 节说的"下一步"。
 
@@ -105,7 +105,7 @@
 ### 3.4 文档
 
 - **`docs/VirtualModelRouter_Design_v4_Analytics.md` §4.3**：需要整节重写（不是打补丁）。把"JSON 恒英文，本地化只发生在渲染层"的标题和论证方向，换成"叙述文本统一跟随 `-lang`，`Code`/`EvidenceAnchor` 才是稳定机器锚点"，论证内容基本可以从本文档第 2 节整理后并入。重写完成后，本文档可以归档（在文档开头加一行"已并入设计文档 §4.3，本文档仅作历史记录"），不需要删除。
-- **`docs/KNOWN_ISSUES_sonnet-5.md`**：1.19 条目在统一完成后需要移到"已闭环"（第 3 节）。
+- **`KNOWN_ISSUES`**：该条目在统一完成后需要移到"已闭环"。
 - **`CHANGELOG.md`**：如果统一实施，这是一次会改变已有 JSON 输出内容的行为变化（哪怕只是文本语言，不是结构），应该在 `[Unreleased]` 里用 `Changed` 记一条，说明"在 `-lang zh` 下，`vmr-report.json`/`compare-*.json` 的叙述字段现在会是中文，不再固定英文"，方便任何人（包括未来的自己）排查"为什么这次报告文本变了"。
 - **`docs/UserGuide.md`/`.zh`**：如果 2.4 节提到的"要不要显式声明 JSON 语言由生成命令决定"有了结论，同步写进用户文档。
 
