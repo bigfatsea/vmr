@@ -202,8 +202,9 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 
 	rep := &Report2{Meta: Meta{
 		Format: Format, GeneratedAt: now.Format(time.RFC3339), Inputs: paths,
-		SlowThreshold:    SlowThresholdMS,
-		PercentileMethod: "true per-bucket from raw dur_ms/ttft_ms/stream_ms; cross-day merges use pre-aggregated *_all/hours_of_day siblings",
+		SlowThreshold:              SlowThresholdMS,
+		SelfTrafficExclusionActive: len(excludeClientTags) > 0,
+		PercentileMethod:           "true per-bucket from raw dur_ms/ttft_ms/stream_ms; cross-day merges use pre-aggregated *_all/hours_of_day siblings",
 	}}
 
 	st := newAggState(rep, sess, pricingSrc, excludeClientTags)

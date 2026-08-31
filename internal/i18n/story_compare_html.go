@@ -46,6 +46,7 @@ type CompareHTMLText struct {
 
 	MetricCol string
 	ToolCol   string
+	DeltaNew  string // Δ-column value when a metric went 0 → positive
 
 	EndpointsLabel   string
 	EndpointsSame    string
@@ -105,6 +106,7 @@ func CompareHTML(lang Lang) CompareHTMLText {
 
 			MetricCol: "指标",
 			ToolCol:   "工具",
+			DeltaNew:  "新增",
 
 			EndpointsLabel:  "端点",
 			EndpointsSame:   "两侧一致",
@@ -170,6 +172,7 @@ func CompareHTML(lang Lang) CompareHTMLText {
 
 		MetricCol: "Metric",
 		ToolCol:   "Tool",
+		DeltaNew:  "new",
 
 		EndpointsLabel:  "Endpoints",
 		EndpointsSame:   "same on both",

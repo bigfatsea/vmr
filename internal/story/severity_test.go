@@ -48,4 +48,37 @@ func TestJourneySeverity(t *testing.T) {
 			t.Fatalf("driver not order-independent: %q vs %q", da, db)
 		}
 	})
+
+	t.Run("low-confidence finding does not headline over a specific one", func(t *testing.T) {
+		lvl, drv := JourneySeverity([]Finding{
+			{Code: FindingUnverifiedEntityReference, StepSeq: 2},
+			{Code: FindingReasoningActionMismatch, StepSeq: 8},
+		})
+		if lvl != SeverityWarning {
+			t.Fatalf("want warning, got %q", lvl)
+		}
+		if drv != FindingReasoningActionMismatch {
+			t.Fatalf("driver should skip the earlier low-confidence finding, got %q", drv)
+		}
+	})
+
+	t.Run("low-confidence finding still drives when it is the only one at that level", func(t *testing.T) {
+		_, drv := JourneySeverity([]Finding{
+			{Code: FindingUnverifiedEntityReference, StepSeq: 4},
+			{Code: FindingUnverifiedEntityReference, StepSeq: 1},
+		})
+		if drv != FindingUnverifiedEntityReference {
+			t.Fatalf("want unverified_entity_reference as sole driver, got %q", drv)
+		}
+	})
+
+	t.Run("a critical finding still outranks a low-confidence warning", func(t *testing.T) {
+		lvl, drv := JourneySeverity([]Finding{
+			{Code: FindingUnverifiedEntityReference, StepSeq: 1},
+			{Code: FindingGoalDrift, StepSeq: 20},
+		})
+		if lvl != SeverityCritical || drv != FindingGoalDrift {
+			t.Fatalf("want critical/goal_drift, got %q/%q", lvl, drv)
+		}
+	})
 }

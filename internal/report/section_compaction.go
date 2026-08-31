@@ -25,8 +25,15 @@ func renderCompactions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	h := t.Headers
 	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4], h[5])
 	for _, c := range rep.Compactions {
+		// TokensIn/TokensOut are only set when the call's usage parsed
+		// (buildCompactions); a real compaction always consumes input, so
+		// both-zero means "usage not captured", not a measured "0 → 0".
+		sizeDelta := "-"
+		if c.TokensIn != 0 || c.TokensOut != 0 {
+			sizeDelta = fmtutil.FmtTokens(c.TokensIn) + " → " + fmtutil.FmtTokens(c.TokensOut)
+		}
 		tbl.row(fmtDisplayFull(c.TS), orDash(c.Summarizes), orDash(c.ContinuesTo),
-			fmtutil.FmtTokens(c.TokensIn)+" → "+fmtutil.FmtTokens(c.TokensOut),
+			sizeDelta,
 			retentionRatio(c.TokensIn, c.TokensOut),
 			entitySample(c.SwallowedEntities))
 	}

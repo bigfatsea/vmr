@@ -104,6 +104,21 @@ type StoryIndex struct {
 	// vmr-stories.json (json:"-"): saveStoryIndex persists it separately,
 	// via ctxgraph.SaveCacheDir, at the same point it saves idx itself.
 	Cache *ctxgraph.FileCache `json:"-"`
+	// SelfTraffic records whether this run excluded vmr's own -llm-addr
+	// self-analysis traffic and how many candidates that removed — set in
+	// setupStoryRun, rendered as a one-line disclosure at the top of
+	// vmr-stories.md. Rides along on idx for the same reason Cache does.
+	// json:"-": a run-time fact about this invocation, not index content.
+	SelfTraffic *SelfTrafficStatus `json:"-"`
+}
+
+// SelfTrafficStatus is the "was self-traffic excluded" disclosure (P6.4).
+// Two runs with different report.yaml (one carrying llm_key, one not) list
+// different candidate populations; without this line a reader diffing two
+// vmr-stories.md files reads that as the data changing (问题 4 / R6a-2).
+type SelfTrafficStatus struct {
+	Active   bool // an exclusion tag set was configured and applied
+	Excluded int  // candidates dropped by it
 }
 
 // LoadStoryIndex reads path if present. A missing, unreadable, or corrupt
@@ -256,13 +271,40 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 // vmr-stories.json (the machine layer) is unaffected — it lists every row
 // with no such split, per this project's "machine layer never makes
 // editorial cuts" rule.
-func RenderStoryIndexMarkdown(rows []JourneyIndexRow, lang i18n.Lang) string {
+func RenderStoryIndexMarkdown(idx *StoryIndex, lang i18n.Lang) string {
 	t := i18n.StoryIndexT(lang)
+	var rows []JourneyIndexRow
+	if idx != nil {
+		rows = idx.Journeys
+	}
 	var b strings.Builder
 	b.WriteString("# " + t.Title + "\n\n")
+	if idx != nil && idx.SelfTraffic != nil {
+		if idx.SelfTraffic.Active {
+			b.WriteString(t.SelfTrafficActive(idx.SelfTraffic.Excluded))
+		} else {
+			b.WriteString(t.SelfTrafficInactive)
+		}
+	}
 	if len(rows) == 0 {
 		b.WriteString(t.NoCandidatesNote)
 		return b.String()
+	}
+	// -list-only / bare `vmr story`: no Journey was materialized this run,
+	// so Tasks/Rendered are blank for every row and Steps falls back to the
+	// request count. Say so once, up front, rather than leave a reader to
+	// read a column of "—" as missing data. A prior run's carried-forward
+	// values (MergeJourneyIndexRows) suppress the note — those columns
+	// aren't blank then.
+	anyRendered := false
+	for _, r := range rows {
+		if r.Rendered != "" || r.Tasks > 0 {
+			anyRendered = true
+			break
+		}
+	}
+	if !anyRendered {
+		b.WriteString(t.ListOnlyNote)
 	}
 	var visible, noisy []JourneyIndexRow
 	for _, r := range rows {

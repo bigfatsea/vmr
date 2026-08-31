@@ -80,6 +80,10 @@ func TestRenderHTML_DashboardStructure(t *testing.T) {
 		// the strip must NOT claim the run had no point of no return.
 		`class="ponr ponr-diffuse"`,
 		"degraded gradually",
+		// the fixture is all openai-completions, so the dashboard carries
+		// the same protocol-blind-spot disclosure the .md does (问题 10).
+		`class="coverage-note"`,
+		"non-Anthropic-Messages protocol",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dashboard HTML missing %q", want)

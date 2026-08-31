@@ -95,7 +95,11 @@ type StoriesLinkInfo struct {
 // section via that section's own Xxx(lang) bundle; nothing here or in any
 // section_*.go file hardcodes a language. stories is nil when this run's
 // output root has no vmr-stories.md to link to (see StoriesLinkInfo).
-func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo) string {
+// journeyLink is the same lineage-id → rendered-journey-filename map
+// WriteRequestsIndex already receives (loadStoriesLink builds it once);
+// §6's session table links each row to its journey narrative when matched,
+// nil/empty when `vmr story` hasn't rendered any in this output root (P6.2c).
+func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	o := rep.Overall
@@ -126,7 +130,7 @@ func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo) string {
 	renderLatency(w, rep, o, lang)
 	renderWorkload(w, rep, o, lang)
 	renderClientEndpoint(w, rep, lang)
-	renderSessions(w, rep, lang)
+	renderSessions(w, rep, journeyLink, lang)
 	renderStickyEffect(w, rep, lang)
 	renderEndpointValue(w, rep, lang)
 	renderCompactions(w, rep, lang)
@@ -157,6 +161,11 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 	w("\n")
 }
 
+// highlightWasteFloorBytes is the minimum absolute tool-schema waste for the
+// §0 auto-highlight — below ~8 MB across the whole window it isn't a
+// headline, whatever the utilization ratio.
+const highlightWasteFloorBytes = 8 << 20
+
 // highlights generates ≤3 auto highlights from the finished buckets.
 func highlights(rep *Report2, lang i18n.Lang) []string {
 	t := i18n.Doc(lang)
@@ -168,13 +177,17 @@ func highlights(rep *Report2, lang i18n.Lang) []string {
 			break
 		}
 	}
-	// 2. tool shape with low utilization
-	for _, tl := range rep.Tools {
-		if tl.Requests > 0 && tl.DeclareUtilization < 0.20 && tl.SchemaBytesShipped > 0 {
-			out = append(out, t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
-				pctStr(tl.DeclareUtilization), len(tl.NeverCalled)))
-			break
-		}
+	// 2. tool shape with the largest ABSOLUTE schema waste. rep.Tools is
+	// sorted by SchemaWasteBytes desc, so [0] is the worst — picking by
+	// absolute waste, not by lowest utilization: a 31%-utilized 499 MB
+	// shape wastes an order of magnitude more than a 12%-utilized 45 MB one,
+	// and the old "first shape under 20% utilization" filter dropped the
+	// former entirely (问题 3 / R1-8). Floored so a few MB of unavoidable
+	// slack doesn't manufacture a §0 highlight on a well-behaved corpus.
+	if len(rep.Tools) > 0 && rep.Tools[0].SchemaWasteBytes >= highlightWasteFloorBytes {
+		tl := rep.Tools[0]
+		out = append(out, t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
+			fmtBytesGB(tl.SchemaWasteBytes), pctStr(tl.DeclareUtilization), len(tl.NeverCalled)))
 	}
 	// 3. worst endpoint error rate
 	var worst *EndpointRow
@@ -270,7 +283,7 @@ func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	w("%s", t.AppendixStarMark)
 	w("%s", t.AppendixBillingLine(orDash2(rep.Pricing == nil, t.AppendixNoPricing, "")))
 	w("%s", t.AppendixSlowThresh(rep.Meta.SlowThreshold/1000))
-	if rep.Meta.SelfTrafficExcluded > 0 {
+	if rep.Meta.SelfTrafficExclusionActive {
 		w("%s", t.AppendixSelfTrafficExcluded(rep.Meta.SelfTrafficExcluded))
 	} else {
 		w("%s", t.AppendixSelfTrafficNotExcluded)

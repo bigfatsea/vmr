@@ -18,7 +18,7 @@ import (
 // heartbeat/dream_diary/… - live in vmr-requests.md's own 定时任务 rollups,
 // see requests.go); grouped by client (Chat User), matching vmr-requests.md's
 // grouping, so a "类" column would be redundant (every row is interactive).
-func renderSessions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+func renderSessions(w func(string, ...any), rep *Report2, journeyLink map[string]string, lang i18n.Lang) {
 	t := i18n.Sessions(lang)
 	w("## %s\n\n", t.Title)
 	var interactive []SessionRow
@@ -75,14 +75,14 @@ func renderSessions(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		head, tail := splitSessionLongTail(rows)
 		tbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
 		for _, s := range head {
-			renderSessionRow(tbl, s, t)
+			renderSessionRow(tbl, s, journeyLink, t)
 		}
 		w("\n")
 		if len(tail) > 0 {
 			w("%s", t.LongTailOpen(len(tail), sessionsLongTailTurnCap))
 			ttbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
 			for _, s := range tail {
-				renderSessionRow(ttbl, s, t)
+				renderSessionRow(ttbl, s, journeyLink, t)
 			}
 			w("%s", t.LongTailClose)
 		}
@@ -123,7 +123,7 @@ func splitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
 	return rows[:split], rows[split:]
 }
 
-func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
+func renderSessionRow(tbl *mdTable, s SessionRow, journeyLink map[string]string, t i18n.SessionsText) {
 	outcome := "ok"
 	if s.Errors > 0 {
 		outcome = t.OutcomeOKErrors(s.Errors)
@@ -139,6 +139,14 @@ func renderSessionRow(tbl *mdTable, s SessionRow, t i18n.SessionsText) {
 		// (also this row's join key against story's Journey index) for
 		// anyone following a link.
 		id = s.Alias + " (" + s.ID + ")"
+	}
+	// Link the row to its journey narrative when `vmr story` rendered one
+	// for this lineage in the same output root (问题 5 / P6.2c). journey is
+	// a bare "journey-<id>.md" name; vmr-report.md sits one level above
+	// stories/, so the link descends into it — same as the per-tag sibling
+	// files' "→ 任务叙事见" links (requests.go).
+	if journey := journeyLink[s.ID]; journey != "" {
+		id = "[" + id + "](stories/" + journey + ")"
 	}
 	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form
 	// user/model text, so an unclosed "<!--" would otherwise swallow the

@@ -165,7 +165,7 @@ func chtmlMetricTable(w func(string, ...any), rows []MetricDiff, t i18n.CompareH
 		}
 		w("<tr%s><td>%s%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 			cls, che(r.Label), mark,
-			che(formatMetric(r.Kind, r.A)), che(formatMetric(r.Kind, r.B)), che(formatDeltaRel(r.DeltaRel)))
+			che(formatMetric(r.Kind, r.A)), che(formatMetric(r.Kind, r.B)), che(formatDelta(r.A, r.B, t.DeltaNew)))
 	}
 	w("</tbody>\n</table>\n")
 }

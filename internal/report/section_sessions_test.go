@@ -28,8 +28,28 @@ func sessionRows(client string, turns ...int) []SessionRow {
 func renderSessionsString(t *testing.T, rep *Report2) string {
 	t.Helper()
 	var b strings.Builder
-	renderSessions(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }, rep, i18n.EN)
+	renderSessions(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }, rep, nil, i18n.EN)
 	return b.String()
+}
+
+// TestRenderSessions_JourneyLink: §6 rows link to the journey narrative
+// when `vmr story` rendered one for that lineage in this output root
+// (问题 5 / R1-5); unmatched rows stay plain.
+func TestRenderSessions_JourneyLink(t *testing.T) {
+	rep := &Report2{
+		Sessions: sessionRows("lobster", 8, 6),
+		ByClient: []ClientRow{{ClientKey: "lobster"}},
+	}
+	var b strings.Builder
+	renderSessions(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, rep,
+		map[string]string{"l-00000000": "journey-j-lobster-x.md"}, i18n.EN)
+	out := b.String()
+	if !strings.Contains(out, "[s0 (l-00000000)](stories/journey-j-lobster-x.md)") {
+		t.Errorf("matched session should link into stories/:\n%s", out)
+	}
+	if !strings.Contains(out, "| s1 (l-00000001) |") {
+		t.Errorf("unmatched session should stay a plain id cell:\n%s", out)
+	}
 }
 
 // TestRenderSessions_LongTailFold: past sessionsHeadRows, the run of

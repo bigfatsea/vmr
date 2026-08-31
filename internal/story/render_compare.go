@@ -38,7 +38,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 		if r.Notable {
 			mark = " ⚠️"
 		}
-		w("| %s%s | %s | %s | %s |\n", r.Label, mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDeltaRel(r.DeltaRel))
+		w("| %s%s | %s | %s | %s |\n", r.Label, mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew))
 	}
 	w("%s", t.NotableFootnote(notableRelThreshold*100))
 
@@ -296,10 +296,43 @@ func formatMetric(kind MetricKind, v float64) string {
 	}
 }
 
-// formatDeltaRel renders a signed relative change as a percentage with an
-// explicit sign — "+42%"/"-15%"/"0%" — 0% both when nothing changed and when
-// both sides were 0 (MetricDiff.DeltaRel doesn't distinguish those; the
-// side-by-side A/B columns already show the absolute values either way).
+// formatDelta renders the A→B change as direction plus rough magnitude —
+// "156×" / "0.02×" / "+40%" / newLabel / "-100%" / "—". A symmetric
+// relative percentage (the earlier formatDeltaRel) collapsed every large
+// "B ≫ A" gap toward ±100%: 1.6× and 156× both printed "+99%", so the
+// column the compare view exists to fill couldn't tell them apart (问题 6
+// / R5-1). newLabel is the localized "from nothing" word (a==0, b>0).
+// MetricDiff.DeltaRel — the machine-readable field — is unchanged; this is
+// display only.
+func formatDelta(a, b float64, newLabel string) string {
+	switch {
+	case a == 0 && b == 0:
+		return "—"
+	case a == 0:
+		return newLabel
+	case b == 0:
+		return "-100%"
+	}
+	r := b / a
+	switch {
+	case r >= 100:
+		return fmt.Sprintf("%.0f×", r)
+	case r >= 2:
+		return fmt.Sprintf("%.1f×", r)
+	case r > 0 && r <= 0.1:
+		return fmt.Sprintf("%.2f×", r)
+	case r > 0 && r <= 0.5:
+		return fmt.Sprintf("%.1f×", r)
+	default:
+		return fmt.Sprintf("%+.0f%%", (b-a)/a*100)
+	}
+}
+
+// formatDeltaRel renders a signed relative change as a percentage —
+// "+42%"/"-15%"/"0%". Still used by the corpus report's cache-hit vs
+// no-hit median table (render_corpus.go), where both sides are medians of
+// milliseconds and never 0, so the ±100% compression formatDelta was built
+// to avoid doesn't bite.
 func formatDeltaRel(rel float64) string {
 	sign := "+"
 	if rel < 0 {

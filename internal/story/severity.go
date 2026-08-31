@@ -37,9 +37,25 @@ func findingLevel(c FindingCode) string {
 	return SeverityWarning
 }
 
+// lowConfidenceFindings are detector codes too noisy to headline a Journey's
+// verdict on their own. unverified_entity_reference fires on ~34% of the
+// real corpus and its own detector doc comment hedges it as "a suspicious
+// signal anchored on a tool falsification, not a confirmed hallucination"
+// (it flags Go stdlib types and the project's own live endpoints as
+// "证伪"). It still counts toward the severity LEVEL; JourneySeverity just
+// skips it when choosing the driver unless it is the only finding at that
+// level, so the dashboard's "probable cause" headline points at a more
+// specific finding whenever one exists. See ANALYZE_SAMPLE_REPORTS_REVIEW
+// 问题 2 / 问题 11.
+var lowConfidenceFindings = map[FindingCode]bool{
+	FindingUnverifiedEntityReference: true,
+}
+
 // JourneySeverity returns the Journey's worst severity and the finding that
 // set it (earliest StepSeq at that level, then Code order — independent of
 // the findings slice's own order). driver is "" only when level is clean.
+// A lowConfidenceFindings code drives the verdict only when every finding
+// at the worst level is low-confidence.
 func JourneySeverity(findings []Finding) (level string, driver FindingCode) {
 	level = SeverityClean
 	for _, f := range findings {
@@ -52,14 +68,28 @@ func JourneySeverity(findings []Finding) (level string, driver FindingCode) {
 	if level == SeverityClean {
 		return SeverityClean, ""
 	}
+	if d, ok := pickDriver(findings, level, true); ok {
+		return level, d
+	}
+	d, _ := pickDriver(findings, level, false)
+	return level, d
+}
+
+// pickDriver returns the earliest-StepSeq finding at level (ties broken by
+// Code order). skipLowConf drops lowConfidenceFindings from consideration;
+// ok is false when that leaves nothing to pick.
+func pickDriver(findings []Finding, level string, skipLowConf bool) (driver FindingCode, ok bool) {
 	best := -1
 	for _, f := range findings {
 		if findingLevel(f.Code) != level {
+			continue
+		}
+		if skipLowConf && lowConfidenceFindings[f.Code] {
 			continue
 		}
 		if driver == "" || f.StepSeq < best || (f.StepSeq == best && f.Code < driver) {
 			driver, best = f.Code, f.StepSeq
 		}
 	}
-	return level, driver
+	return driver, driver != ""
 }

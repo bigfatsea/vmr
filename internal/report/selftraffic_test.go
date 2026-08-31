@@ -3,10 +3,12 @@
 package report
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
 
@@ -69,6 +71,36 @@ func TestIngestRecord_ExcludesSelfTraffic(t *testing.T) {
 		if c.ClientKey == "vmrstory" {
 			t.Errorf("ByClient still has an entry for the excluded tag: %+v", c)
 		}
+	}
+}
+
+// TestSelfTrafficExclusion_ConfiguredButNothingMatched pins the appendix
+// disclosure fix: an exclusion set that IS configured but matches 0 records
+// in this window must report "exclusion active" (SelfTrafficExclusionActive
+// == true), not fall back to the "not configured" line — which would be a
+// false statement and would contradict the story half's own disclosure on
+// the same run.
+func TestSelfTrafficExclusion_ConfiguredButNothingMatched(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, selfTrafficFixtureRecords())
+
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil,
+		taskseg.OpenClawAware, nil, nil, map[string]bool{"some-tag-not-in-this-log": true})
+	if err != nil {
+		t.Fatalf("BuildCached: %v", err)
+	}
+	if rep.Meta.SelfTrafficExcluded != 0 {
+		t.Fatalf("SelfTrafficExcluded = %d, want 0 (nothing in the fixture matches)", rep.Meta.SelfTrafficExcluded)
+	}
+	if !rep.Meta.SelfTrafficExclusionActive {
+		t.Fatal("SelfTrafficExclusionActive = false, want true (a non-empty exclusion set was passed)")
+	}
+	md := Markdown(rep, i18n.EN, nil, nil)
+	if !strings.Contains(md, "Self-traffic: exclusion active") {
+		t.Errorf("appendix should say exclusion is active:\n%s", md)
+	}
+	if strings.Contains(md, "exclusion not active") {
+		t.Errorf("appendix must not claim exclusion is not active when a set was configured:\n%s", md)
 	}
 }
 

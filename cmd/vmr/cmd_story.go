@@ -199,7 +199,7 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 	if err := idx.Save(filepath.Join(storiesDir, "vmr-stories.json")); err != nil {
 		return err
 	}
-	md := story.RenderStoryIndexMarkdown(idx.Journeys, lang)
+	md := story.RenderStoryIndexMarkdown(idx, lang)
 	if err := os.WriteFile(filepath.Join(storiesDir, "vmr-stories.md"), []byte(md), 0o600); err != nil {
 		return err
 	}

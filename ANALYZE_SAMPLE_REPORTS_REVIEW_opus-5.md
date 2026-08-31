@@ -1067,9 +1067,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ### 4.3 分组总览
 
+> **状态（2026-08-31）**：第一组 1–7 全部 ✅，另 10、11 重新调整进第一组一并完成 —— 执行记录见第五部分。二轮源码核查见第六部分（并修掉 `finishCell` / self-traffic 附录 / `-list-only` 空列 / compaction `0→0` 四处）。**剩余未解决项按依赖链重排后的分批建议见第七部分**——以下梯队划分保留作原始判断依据。
+
 | 梯队 | 问题编号 | 一句话 |
 | --- | --- | --- |
-| **第一组 · 马上做** | 1–7 | 价值高、成本一行到几十行、风险几乎为零；或正在毁掉最显眼产物的可信度 |
+| **第一组 · 马上做** | 1–7（+10、11）| 价值高、成本一行到几十行、风险几乎为零；或正在毁掉最显眼产物的可信度 |
 | **第二组 · 第二梯队** | 8–19 | 价值高但成本中等（多文件 / golden / 语料复校），或价值中而牵一发（正确性 / 对外产物 / 主产物完整性）|
 | **第三组 · 可等** | 20–35 | 价值中、成本低，随手碰到就清；不紧急、不阻塞 |
 | **第四组 · 不做 / 存疑 / 已过时** | 36–43 | 已解决、撞 v1-complete 红线、设计上出圈、或需专门语料/样例才能推进 |
@@ -1096,9 +1098,13 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 2 · HTML 看板的"主因判定"头条由误报率最高的检测器驱动
+#### 问题 2 · HTML 看板的"主因判定"头条由误报率最高的检测器驱动 ✅ 已处理（2026-08-31 · Sonnet 5）
 
 **梯队与评分**：第一组｜用户价值 高·开发成本 低（~10 行）·风险 低。
+
+**本轮落地**：`internal/story/severity.go` 加 `lowConfidenceFindings` 清单（含 `unverified_entity_reference`）；`JourneySeverity` 拆出 `pickDriver(findings, level, skipLowConf)`，先选非低可信度的 driver，只有该档 Finding 全是低可信度时才回退到含低可信度的选择——零检测行为变化、只改排序。`i18n/story_html.go` 的 zh `PointOfNoReturnHead` "死亡转折点"→"不可逆转折点"（与既有 `NoPointOfNoReturn` 文案统一；EN "POINT OF NO RETURN" 是标准习语，保留）。加了 4 条 `TestJourneySeverity` 子测试。D3：文档提的"全低可信度时 verdict 降级为仅次级信号"需 HTML verdict 渲染层改动，价值已由 driver 优选捕获，留待后续（第七部分 P2）。
+
+**核查（第六部分 6.1 #4）**：`lowConfidenceFindings` 目前仅 `unverified_entity_reference` 一项。是否把 `unused_tool_result`（语料 58% 命中）等粗筛检测器也纳入——判为**不据此扩清单**：`unverified_entity_reference` 有明确误报机理（把 Go 标准库类型/在跑端点判"证伪"）才降级；`unused_tool_result` 有收紧校准史、无已知误报机理、journey 级对应物 `ContextUtilization` 是别处头条指标。要动须先对其命中样本做人工采样误报审计（比照问题 11）。列入第七部分 P5。
 
 **现象**：对外分享的 Journey HTML 看板，最顶上的"主因判定 · 警告"条，内容是 `疑似引用了已被证伪的实体：工具结果显示 http.Handler, ResponseWriter, http.Request 不存在/未找到`——而这是一个 Go 项目在正常使用 Go 标准库类型。同一份看板另一处又宣布 `/health, /status` "不存在/未找到"，那是这个项目自己正在跑的真实端点。一个对外分享的看板，头条是一句自信的错误结论。另有附带现象：当没有更高优先级 Finding 时，verdict 会退回到最不可靠的 `constraint_text_dropped_at_compaction`（检测器自注释是 "hypothesis-level"），并被标题成 "死亡转折点 → 步骤 39"。
 
@@ -1114,9 +1120,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 3 · 工具浪费的四个总量数字只在 HTML 卡片里，主报表一个都没有
+#### 问题 3 · 工具浪费的四个总量数字只在 HTML 卡片里，主报表一个都没有 ✅ 已处理（2026-08-31 · Sonnet 5）
 
 **梯队与评分**：第一组｜用户价值 高·开发成本 低·风险 低。
+
+**本轮落地**：`internal/report/section_efficiency.go` 加 `renderToolWasteTotals`——§7 开头一行 top-line，把 `tool-waste.html` 那四块 stat（累计发出 / 其中死重(%) / ≈浪费 token / 工具集形态数）原样搬进 Markdown，复用 `i18n.ToolWaste(lang)` 的标签保证两处不漂移。`render_doc.go` 的 §0 highlight #2 分支从"第一个利用率 <20% 的形态"改为"`rep.Tools[0]`（已按 `SchemaWasteBytes` 降序，即绝对浪费最大的形态）"，加 8 MiB 地板（少量不可避免的 slack 不制造头条），`i18n.ToolWarn` 签名加 `wasteBytes` 参数、文案改为以浪费量领起。
 
 **现象**：`tool-waste.html` 一屏给出"累计发出 977 MB / 其中死重 661 MB / ≈ 浪费 1.65 亿 token / 68%"。这四个数——回答"我的 Agent 为从不调用的工具付了多少钱"这个产品最能打的问题——**在 `vmr-report.md` 里 `grep` 不到任何一个**。§7 只有逐工具集形态的行（最大单行 499 MB），没有合计。§0 自动亮点报的是"利用率最低"的那个形态（44 MB / 12%），不是浪费最多的（499 MB / 31%），更不是总量。
 
@@ -1133,9 +1141,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 4 · self-traffic 排除随 `llm_key` 有无静默切换，报告不留痕 ⚠️ 报告附录已处理（`vmr-stories.md` 侧未加）
+#### 问题 4 · self-traffic 排除随 `llm_key` 有无静默切换，报告不留痕 ✅ 已处理（2026-08-31 · Sonnet 5）
 
 **梯队与评分**：第一组｜用户价值 中高·开发成本 低·风险 低。
+
+**本轮落地（story 侧收尾）**：`story.StoryIndex` 加 `SelfTraffic *SelfTrafficStatus`（`json:"-"`，随 idx 搭车，与 `Cache` 同一先例）；`cmd_story_setup.go` 在过滤候选时算出 `{Active, Excluded}`；`RenderStoryIndexMarkdown` 签名由 `(rows, lang)` 改为 `(idx, lang)`，在标题下无条件输出一行"自指流量排除：已启用（排除 N 条）"或"未启用（未配置 llm_key / self_traffic_client_tags，或已通过 -include-self-traffic 关闭）"。`i18n/story_index.go` 新增两条文案，中英各一。报告附录侧 `c13819a`/前序 pass 已完成，本轮补齐 `vmr-stories.md` 侧。
 
 **现象**：同一条命令、同一批日志，只因为换了一份没有 `llm_key` 的 sidecar 配置，候选 Journey 数从 110 变成 126（多出来的 16 条全是 vmr 自己的 LLM 解读流量），成本表里也多了一行 `vmrstory`。两次运行的产物里**没有任何一个字**提示口径变了——拿两份报告对比的人会以为是数据本身变了。
 
@@ -1145,7 +1155,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **改法（就是一条）**：`vmr-report.md` 附录 + `vmr-stories.md` 固定输出一行，无论哪种情况都写：`self-traffic 排除：已启用（排除 N 条）` 或 `未启用（未配置 llm_key / self_traffic_client_tags）`。即把现有 `AppendixSelfTrafficExcluded` 从 `n > 0` 才渲染改成无条件渲染 + 一个 else 分支。
 
-**已落地部分**：`render_doc.go` 的 `renderAppendix` 已改成无条件渲染 + `AppendixSelfTrafficNotExcluded` else 分支（`i18n/report_doc.go` 新增该文案，中英各一句）。`vmr-stories.md` 侧尚未加——`RenderStoryIndexMarkdown(rows, lang)` 的签名里没有排除计数/状态，补这行要多穿一个参数（调用点 `cmd/vmr` + i18n 各一处），不是纯文案改动。
+**已落地部分**：`render_doc.go` 的 `renderAppendix` 无条件渲染口径行 + `AppendixSelfTrafficNotExcluded` else 分支（`i18n/report_doc.go` 新增该文案，中英各一句）。`vmr-stories.md` 侧由 story 半区收尾时补齐（`StoryIndex.SelfTraffic *SelfTrafficStatus{Active, Excluded}` 搭 idx 传入，`RenderStoryIndexMarkdown` 签名 `(rows, lang)` → `(idx, lang)`）。
+
+**核查更正（第六部分 6.1 #2）**：初版报告侧分支写的是 `if SelfTrafficExcluded > 0 ... else 未配置`——`Excluded == 0`（配置了 `llm_key` 但当前窗口无自指流量）会落进 else，打出"未配置"，与 story 半区自相矛盾。已改为 `Report2.Meta` 加 `SelfTrafficExclusionActive bool`（`buildInternal` 置 `len(excludeClientTags) > 0`），附录按"排除是否启用"分支，`Active && Excluded == 0` 输出"排除已启用；本次排除 0 条"。带 `TestSelfTrafficExclusion_ConfiguredButNothingMatched`。
 
 **不需要新机制**：初稿"架构解耦批注"提议注入 `X-VMR-Self-Traffic` header + 审计日志加标记——① 那要改 `audit.Record` schema 和路由半区的 header 处理来服务一个纯分析需求，跨了两半区边界；② 它想要的"配置项解耦、不依赖 `llm_key`"能力**已经存在**：`report.yaml` 的 `self_traffic_client_tags: [...]`（`cmd/vmr/selftraffic.go`、`reportconfig.go:50`），与 `llm_key` 独立、UserGuide 也已写。用户在那份极简 sidecar 里补一行 `self_traffic_client_tags: [vmrstory]` 就能排除。所以这里唯一的缺口是"报告不声明当前口径"，加那行状态行即可。
 
@@ -1155,9 +1167,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 5 · `vmr-report.md` §6 会话表到 journey 文件零链接
+#### 问题 5 · `vmr-report.md` §6 会话表到 journey 文件零链接 ✅ 已处理（2026-08-31 · Sonnet 5）
 
 **梯队与评分**：第一组｜用户价值 高·开发成本 低（~30 行）·风险 低。
+
+**本轮落地**：`report.Markdown` 签名加第 4 个参数 `journeyLink map[string]string`（`cmd_report.go` 已有的 `lineageToJourney`，`loadStoriesLink` 早已构建）；`renderDoc → renderSessions → renderSessionRow` 逐层多传一个 map；`renderSessionRow` 命中时把「会话」列渲成 `[s01 (l-xxxx)](stories/journey-<id>.md)`，未命中原样。`archtest` 的 `report ↛ story` 边界不受影响——join 在 `cmd/vmr` 做、传进去的是纯 `map[string]string`。
 
 **现象**：默认套件模式下，§6「会话与任务」列出上千个会话，隔壁 `stories/` 目录里躺着 200+ 个 `journey-*.md`，**§6 里一条链接都没有**（`grep -c "journey-j-" 宏观报表 = 0`）。在 §6 看到一个可疑会话想深挖，只能回命令行重新 `-list-only` 列一遍候选、再靠标题和时间人肉配对。设计文档把"变焦移动零成本"写成了这一半产品的核心主张。
 
@@ -1171,9 +1185,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 6 · compare 的「相对变化」列把所有大差异压平到 ±100% ⚠️ 标签部分已处理
+#### 问题 6 · compare 的「相对变化」列把所有大差异压平到 ±100% ✅ 已处理（2026-08-31 · Sonnet 5）
 
 **梯队与评分**：第一组｜用户价值 高·开发成本 低·风险 低。
+
+**本轮落地（formatDelta 收尾）**：D1——文档"已落地部分"把量级化 hold 到 C 组，但问题 6 在第一组且"为什么第一组"整段在论证 `156×`，判定文档内部矛盾，按第一组做。`render_compare.go` 新增 `formatDelta(a, b, newLabel)`：`a==0&&b==0`→`—`；`a==0`→本地化「新增」；`b==0`→`-100%`；否则 `r:=b/a`，`r≥100`→`%.0f×`、`r≥2`→`%.1f×`、`r≤0.1`→`%.2f×`、`r≤0.5`→`%.1f×`、中间段→`%+.0f%%`。md/html 两处调用点改传 `r.A, r.B`。列名「对称差」→「变化」/「Change」，脚注去掉分母公式、改说"给方向与量级、非比例精度"。`i18n` 加 `DeltaNew`（`CompareText` + `CompareHTMLText` 各一）。`MetricDiff.DeltaRel`（`delta_rel` 机读字段）与 `Notable` 判定完全不动。旧 `formatDeltaRel` 保留给 corpus 的 cache-hit 中位数表（那里两侧都是 ms 中位数、永不为 0）。加了 `TestFormatDelta`。实测 compare 产物：`5.0s→774.6s` 现渲染 `155×`（原 `+99%`）。
 
 **现象**：同一句指令的两次执行，A 用 5s 做完某步、B 用了 774.6s（155 倍），compare 报告的「相对变化」列显示 `+99%`——看起来像"差不多翻倍"。逐项核对：模型时间 27.8s→1261.0s 显示 `+98%`（真实 45.4×）、Agent 侧执行 5.0s→774.6s 显示 `+99%`（真实 155×）、工具调用 5→89 显示 `+94%`（真实 17.8×）。任何"B 远大于 A"的差异都收敛到 +9x%，读者无法区分 1.6× 和 155×。compare 模块存在的全部意义就是回答"差多少"。
 
@@ -1249,9 +1265,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 10 · HTML 看板系统性丢掉了 Markdown 里的认知谦逊 ⚠️ 文案部分已处理
+#### 问题 10 · HTML 看板系统性丢掉了 Markdown 里的认知谦逊 ✅ 基本处理（2026-08-31 · Sonnet 5）
 
-**梯队与评分**：第二组｜用户价值 中高·开发成本 中·风险 低。
+**梯队与评分**：第二组（本轮随问题 2 同批做掉）｜用户价值 中高·开发成本 中·风险 低。
+
+**本轮落地**：`corpus_coverage.go` 抽出语言无关的 `journeyAnthropicCoverageCodes(j) (codes, ok)`；`RenderHTML` 的 Findings 段在有 Finding / 无 Finding 两种情况下都先输出 `<blockquote class="coverage-note">` 协议盲区声明（对齐 `.md` 路径 `render_spine.go` 的行为）。`i18n/story_html.go` 加 `AnthropicCoverageNote func(codes) string`，中英各一。"死亡转折点"措辞随问题 2 一并软化。`VerdictClean` / `NoPointOfNoReturn` / `DiffusePointOfNoReturn` 文案软化在前序 pass 已完成。D4：指标 grid「错误恢复次数 0」在协议盲区下的单格特判（改成 `n/a`）留待后续，属问题 18/43 同类。
 
 **现象**：同一份 journey，`.md` 的 Findings 段开头有一句"以下信号依赖仅 Anthropic Messages 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题"，HTML 看板里**整段消失**，同时 HTML 的指标 grid 大大方方展示着 `错误恢复次数 0`（正是那段声明点名"结构性无法触发"的指标之一）。无 Finding 时，`.md` 写"未检测到规则可判定的疑似问题"，HTML 写"未检测到不可逆的转折点——**本次运行始终在轨**"（一个肯定性判断，依据只是"没有检测器触发"）。**对外分享的那份反而更不诚实，方向反了。**
 
@@ -1265,9 +1283,13 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 11 · `unverified_entity_reference` 检测器系统性误报
+#### 问题 11 · `unverified_entity_reference` 检测器系统性误报 ✅ 已处理（2026-08-31 · Sonnet 5）
 
-**梯队与评分**：第二组（但与问题 2 同批）｜用户价值 高·开发成本 低-中（改动约 20 行、局限在 `detectUnverifiedEntityReference` 一个函数）·风险 中（窗口过紧会翻成假阴性，需一轮语料校准）。
+**梯队与评分**：第二组→第一组（与问题 2 同批，review 4.5.3 明确"别拖到下一批"）｜用户价值 高·开发成本 低-中（改动约 20 行、局限在 `detectUnverifiedEntityReference` 一个函数）·风险 中（窗口过紧会翻成假阴性，已跑语料校准）。
+
+**本轮落地**：`chatmsg/entities.go` 重构——`ExtractEntities` 拆成 `collectEntitySpans`（七条规则扫描 + 去嵌套 + 排序）+ `entitiesFromSpans`（去重 + cap），行为逐字节不变；新增 `ExtractEntitiesNear(text, anchors [][]int, window int)`，只保留距任一 anchor 区间 window 字节内的实体 span。`detectUnverifiedEntityReference` 改为先 `falsificationRe.FindAllStringIndex` 拿到每处证伪词位置，再 `ExtractEntitiesNear(r.Text, anchors, 160)`——不再整段命中即整段抽实体。加了 `TestExtractEntitiesNear` 与检测器的"实体距证伪词 ~300 字节则不判证伪"回归子测试。
+
+**校准**（RECENT 语料 125 journey，新旧二进制各跑一次 `-corpus`）：`finding_rates.unverified_entity_reference` 0.336 → **0.272**（-19% 相对），**其余 7 个检测器的 rate 逐字节不变**（改动完全隔离）；finding-grouped 对比的 hit/no-hit 由 42/83 → 34/91。未观察到真阳性被误杀（"读到 → 后续引用 → 无复核"的核心链条不受位置窗口影响，被剔除的都是整段扫出来的无关 token）。
 
 **现象**：语料级 34% 的 journey 至少命中一次；某个 518 轮 journey 的 162 条 Finding 里 110 条（68%）来自它。被"证伪"的实体包括：这一步**成功读到的**文档、从设计文档正文里抽出的名词（`config.toml`、`api_key`、`os.replace`、`ChangeSet`）、Go 标准库类型（`http.Handler`、`ResponseWriter`）、项目自己正在跑的端点（`/health`、`/status`）。
 
@@ -1363,7 +1385,7 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 ---
 
-#### 问题 17 · §3 端点健康表对低样本照打 ⚠️，同一份报告三套低样本标准
+#### 问题 17 · §3 端点健康表对低样本照打 ⚠️，同一份报告三套低样本标准 ✅ 已处理
 
 **梯队与评分**：第二组｜用户价值 中·开发成本 低·风险 低。
 
@@ -1418,9 +1440,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 判据：价值中、成本低（一行到几十行），随手碰到就清；不紧急、不阻塞任何东西。每条一段自包含描述。
 
-#### 问题 20 · §2 按日成本表静默丢掉 11/44 天（含最忙的一天）
+#### 问题 20 · §2 按日成本表静默丢掉 11/44 天（含最忙的一天） ✅ 已处理
 
-**评分**：价值 中·成本 低·风险 低（完整价值依赖问题 16）。`internal/report/section_cost.go:39`：按日成本表 `for _, d := range rep.ByDate { if d.CostEstimate != nil { 渲染 } else { unpricedDate = true } }`——`CostEstimate == nil` 的行直接不渲染，只在表尾加一句"仅列出存在可定价记录的日期"。`c13819a` 已加这句脚注，但 33 行的事实没变：脚注没说是**哪 11 天**，更没说被省掉的里面包含全窗口请求量最高的 8-25（885 请求）——一个想回答"这个月哪天最烧钱"的读者，看到的表最后一行是 8-23，真正的峰值 8-24/8-25 连行都没有。代码注释自己都写了"Silently dropping the row reads as 'this day is missing'"。**改法**：这 11 行照常渲染，成本列填 `-`，脚注改成"11/44 天因当日端点不在定价表内无法估算，已渲染为 `-`"。第三部分对应：R1-1。
+**评分**：价值 中·成本 低·风险 低（完整价值依赖问题 16）。**已由 `d9ce2ce` 解决**（初稿基于过期二进制、描述的是旧行为）：`internal/report/section_cost.go` 的按日成本表现在对 `d.CostEstimate == nil` 的日期照常渲染整行、`估算成本` 列填 `-`，只在表尾保留"部分日期无可定价记录"脚注；代码注释明写"a missing row reads as 'no traffic' to anyone cross-checking §5's daily activity"。核实：`hasDate` 门槛仍在（至少一天可定价才渲染整张表），逐行 `cost := "-"` 兜底。按模型/端点/客户端三张表仍跳过 `nil` 行（问题 12 合计行落地时一并处理）。第三部分对应：R1-1。
 
 #### 问题 21 · compare 里 70% 的篇幅是两份几乎相同的 system prompt 全文
 
@@ -1434,11 +1456,11 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中高·成本 低·风险 低。`internal/report/section_sessions.go` 的 `renderSessionRow`：表头是「会话 / 标题 / 轮 / 任务 / fresh/cached/out / 结果」，没有时间。定位一个会话最自然的线索——它什么时候发生的——不在表里。`SessionRow.From` / `To` 已经在 JSON 里（`internal/report/rows.go`），只是没渲染到 Markdown。用户记得的是"上周三那个 SSH 的任务"，不是 `s1562`。`vmr-stories.md` 的候选索引反而有时间范围。**改法**：加一列时间范围。第三部分对应：R1-6。
 
-#### 问题 24 · journey 头部时间范围的结束时刻没有日期
+#### 问题 24 · journey 头部时间范围的结束时刻没有日期 ✅ 已处理
 
 **评分**：价值 中·成本 低·风险 低。`internal/story/render_md.go:51`：`j.To` 格式化成 `"15:04:05"`（无日期），于是一个跨 20 小时的 journey 头部写着 `39 任务 · 518 轮 · 2026-08-24 15:59:22 → 11:47:37`，`11:47:37` 早于 `15:59:22`，读者得自己推断"哦是第二天"。（story **索引** 有 `01-02 15:04`，是 journey **md 头**漏了。）**改法**：跨日时结束时刻补上日期。第三部分对应：R4-5。
 
-#### 问题 25 · 44 个输入文件路径在正文第 3 行和附录各铺一屏
+#### 问题 25 · 44 个输入文件路径在正文第 3 行和附录各铺一屏 ✅ 已处理
 
 **评分**：价值 中·成本 低·风险 低。标题下第三行就是 44 个 `logs/vmr-audit-*.jsonl.zst` 全路径连成的一整段（约 1726 字符），附录里再原样铺一遍。**改法**：正文写"44 个文件 · 2026-07-14 ~ 2026-08-28 · format 10 · 15825 条记录（0 坏行）"，完整清单折进 `<details>`。第三部分对应：R1-11。
 
@@ -1446,9 +1468,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低·风险 低。§4 已经把它们标成 `⚠️low-n` 了——既然已经判定"不足以解读"，就没有理由让它们和主力端点抢同样的视觉权重。**改法**：low-n 行折进 `<details><summary>另有 N 个低样本端点</summary>`。第三部分对应：R1-12。
 
-#### 问题 27 · §6.7 Compaction 还原表出现"保留比 >100%"的行，无解释 ✅ 脚注已处理
+#### 问题 27 · §6.7 Compaction 还原表出现"保留比 >100%"的行，无解释 ✅ 脚注已处理；`0 → 0` 渲染本轮补齐（第六部分 6.1 #5）
 
-**评分**：价值 中·成本 低（脚注）到中（收紧检测）·风险 低。`internal/report/section_compaction.go:36` 的 `retentionRatio = tokens_out / tokens_in`，值 >100% 时代码注释自己写了"worth a second look at whether it's really a compaction rather than a heuristic false-positive — collect()'s Compaction detection is deliberately loose"。表里出现 `246 → 1.1K = 431.0%` 这种行，其余三列（压缩会话 / 续接会话 / 吞掉的实体）全是 `-`，不携带任何可行动信息；`l-77c20384 | - | 0 → 0 | - | ...` 还逐字重复出现 3 次。**改法**：加一句脚注说明 >100% 在什么情况下合法；或抑制"所有元数据列都空 + 保留比 >100%"的无信息行；或收紧 compaction 检测。第三部分对应：R1-7。
+**评分**：价值 中·成本 低（脚注）到中（收紧检测）·风险 低。`internal/report/section_compaction.go` 的 `retentionRatio = tokens_out / tokens_in`，值 >100% 时代码注释自己写了"worth a second look at whether it's really a compaction rather than a heuristic false-positive — collect()'s Compaction detection is deliberately loose"。表里出现 `246 → 1.1K = 431.0%` 这种行，其余三列（压缩会话 / 续接会话 / 吞掉的实体）全是 `-`，不携带任何可行动信息。**已落地**：`i18n/report_compaction.go` 加脚注说明 retention ≥ 100% 何时合法（宽松检测假阳性 / 结构化扩展）。**本轮补齐**：`0 → 0`（`c.UsageOK == false`，usage 未解析）size 列改渲 `-`——`0 → 0` 读起来像"测得的空操作"。**判为不做**：对 `TokensIn == 0 && TokensOut == 0` 的行做去噪过滤——那些行带 `Summarizes` 链接和 swallowed entities，过滤会丢缝合关系信息；"重复 3 次"是 3 条独立 compaction 重试记录，去重同样丢信息。第三部分对应：R1-7。
 
 #### 问题 28 · 失败索引是纯时间序平铺，看不出"哪次是一场雪崩"
 
@@ -1462,9 +1484,9 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低中·风险 低。`internal/report/section_workload.go:71` 的 daily 图用 `mermaidBarLabeled(labels…)`，44 个日期标签在任何渲染器里都会挤成一团；`xychart` 至今是 mermaid beta 特性，GitHub 与多数编辑器渲染不稳定；纯文本阅读（`less`/`cat`）时读者看到的是一行 44 个数字的数组。**改法**：daily 图下补一张紧凑表格或 ASCII sparkline 兜底，或直接把 daily 换成表格（hourly 的 24 标签可保留 mermaid）。第三部分对应：R1-14。
 
-#### 问题 31 · `-list-only` 下 `Tasks` / `Rendered` 两列 126/126 全是 `—` ⚠️ 文案与图例已处理
+#### 问题 31 · `-list-only` 下 `Tasks` / `Rendered` 两列 126/126 全是 `—` ✅ 已处理（图例/`(unresolved)` 前序 pass；空列说明本轮，第六部分 6.1 #3）
 
-**评分**：价值 中·成本 低·风险 低。`internal/story/storyindex.go:298` 的 `writeStoryIndexRow` 没有模式感知——`-list-only` 不构建 Journey，所以 `r.Tasks == 0`、`r.Rendered == ""`，两列每行都渲成 `—`，读者看到的是"这俩字段坏了"。顺带同一函数里：`r.Client` 为 null 时渲成空白（宏观半区对同类记录用 `## Chat User: (unresolved)`，两半区不一致）；`⚠` 断头前缀没有图例。**改法**：`-list-only` 下不输出这两列，或表头加一句"本模式不构建 Journey"；null client 渲 `(unresolved)`；`⚠` 加图例。第三部分对应：R6a-1、R6a-3。
+**评分**：价值 中·成本 低·风险 低。`internal/story/storyindex.go` 的 `writeStoryIndexRow` 没有模式感知——`-list-only` 不构建 Journey，所以 `r.Tasks == 0`、`r.Rendered == ""`，两列每行都渲成 `—`，读者看到的是"这俩字段坏了"（`Steps` 列有 `r.Requests` 兜底，不受影响）。同一函数里：`r.Client` 为 null 时渲成空白（宏观半区对同类记录用 `## Chat User: (unresolved)`，两半区不一致）；`⚠` 断头前缀没有图例。**已落地**：`(unresolved)` 与 `⚠` 图例前序 pass 已处理；本轮 `RenderStoryIndexMarkdown` 在无任何行带 `Rendered`/`Tasks` 时（含 `MergeJourneyIndexRows` 未带回值），表格上方输出 `ListOnlyNote` 说明这两列留空、`轮数` 显示请求数。不做自适应删列（改表结构、动下游解析预期）。第三部分对应：R6a-1、R6a-3。
 
 #### 问题 32 · `sNNN` 会话序号随输入范围浮动，产物没说明 ✅ 已处理
 
@@ -1474,20 +1496,24 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 
 **评分**：价值 中·成本 低（但是 JSON 契约变更）·风险 低中。`internal/story/cost.go:35`：`CostFact.TotalUSD float64 json:"total_usd"`——`resolved: false` 时是 `0` 而不是 `null`/省略；且 `-currency CNY` 下这个 `_usd` 字段装的是 CNY。渲染层做对了（未解析时 damage 行不显示 0），问题只在机读契约：任何不检查 `resolved` 就读 `total_usd` 的消费方会得到"免费"。**改法**：`resolved: false` 时用 `omitempty` 或指针置 `null`；字段名去掉 `_usd`（`currency` 已经单独标了，叫 `total` 即可）。改前查 `_eval/` 消费方；契约文档说只有 `Code` / `EvidenceAnchor` 是稳定锚点。第三部分对应：R3b-4。
 
-#### 问题 34 · stale-binary 防呆
+#### 问题 34 · stale-binary 防呆 ✅ 已处理
 
 **评分**：价值 中·成本 低·风险 低。这次生成用了比 HEAD 落后一个提交的 `./vmr`，导致一度把已修复的 1.57 脚注报成"缺失"，也漏掉了 R2-4 已被修复的事实。`buildinfo` 已经输出 VCS commit 哈希。**改法**：`vmr.sh status`（或 `redeploy`）里比一下 `vmr version` 的 stamp 与 `git rev-parse HEAD`，不一致给个 warning。不用进 CI（`vmr.sh redeploy` 本就 stop+build+start，只有直接跑 `./vmr` 才会踩）。第三部分对应：3.3.6 第一条。
 
-#### 问题 35 · 一批琐碎项，一次 PR 扫掉 ⚠️ 文案/文档子项已处理，两个排序子项待做
+#### 问题 35 · 一批琐碎项，一次 PR 扫掉 ⚠️ 文案/文档子项已处理，§6.6 排序子项待做（`finishCell` 缺陷本轮新修，第六部分 6.1 #1）
 
 **已落地**：`[Ⓜ️ Markdown]` → 请求坐标（`detailCell` 用 `r.Req`，缺失时回退 `r.DetailFile`；`render_cells_test.go` 同步）；§1 两个百分比统一为「of in」（`section_tokens.go` 的 fresh 占比分母由 `fresh+cached` 改为 `o.TokensIn`，与 cached 行的 `CacheHitRate` 同分母，`OfFreshCachedSuffix` 文案字段删除、合并进 `OfInSuffix`）；`reqdetail` 详单页 `<strong>` 全部改 `**`、`PrevTurnLink` 去掉悬空 ` · ` 前缀并补段落空行、`HistoryVsNewNote`/`IncrementNote` 全角逗号（`IncrementNote` 保留 `#1–#` 区间写法，与两个同类文案一致）；`❌error` → `❌unclassified`；`-h` 去掉 "list/"（`cmd_analyze.go` + `cmd_story.go`）；`-currency` 无汇率降级在 §1/§2 的 Disclaimer 补一句（`Pricing.RequestedCurrency` 新字段）；`semantic_oscillation` 等 4 个 Phase 1b LLM 检测器登记进设计文档 §3.5a（并补了 Phase 1b 组的框架说明，把"全部零 LLM 成本"这句收紧到规则层九条）。
 
-**待做**：§5.5 按客户端分组的字母序 → 请求量降序（`section_workload.go`）、§6.6 端点性价比排序键（`section_endpoint_value.go`）——两个都是排序逻辑改动，归 C 组，本批 hold。
+**核查更正（2026-08-31 · Sonnet 5）**：R1-13"§5.5 按客户端用字母序"**与当前及 review 时源码均不符**——`internal/report/aggregate.go` 自 2026-07-26 起就有 `sort.Slice(rep.ByClient, Requests desc)`，§5「按客户端」表直接 range 已排好序的 `rep.ByClient`。该子项作废。
+
+**核查新发现并已修（第六部分 6.1 #1）**：`requests.go` 的 `finishCell` 旧逻辑仅在 `Outcome != "ok" && ErrorClass != ""` 时输出 `❌`，于是路由前被拒（缺 model / 非法 JSON / body 超限）或队列中被取消的失败轮次——`Outcome` 非 ok 但无 `ErrorClass`——在 `vmr-requests-<tag>.md` / `-cron-<tag>.md` 逐轮表里渲成一个无害的 `-`。已对齐 `outcomeCell` 的 `unclassified` 兜底。带 `TestFinishCell_UnclassifiedFailureIsNotABareDash`。
+
+**待做**：§6.6 端点性价比排序键（`section_endpoint_value.go`）——排序逻辑改动，本批 hold（见第七部分 P3）。
 
 **评分**：价值 低-中·成本 每条琐碎·风险 低。每条都是一行到几行的改动，价值密度低但清掉了碍眼：
 
 - **`[Ⓜ️ Markdown]` 链接文字重复 4851 次**（`internal/report/requests.go:636` `detailCell`）——链接文字对所有行相同、不携带信息。换成坐标（`vmr-audit-2026-08-16.jsonl:33`）或干脆「详单」。R2-5。
-- **§5.5 按客户端分组用字母序**（`internal/report/section_workload.go` 直接 range `rep.ByClient` 不排序）——隔壁 by-endpoint 表用 `sort.SliceStable(... Requests > ...)`（`:97`）。加同样的排序，两表对齐（§2 的按客户端成本表已经是按成本降序）。R1-13。
+- ~~**§5.5 按客户端分组用字母序**~~——**作废**：`rep.ByClient` 在 `aggregate.go` 已按请求量降序，§5「按客户端」表直接用该顺序。R1-13 的观察不成立（大概率是把某个其它表看串了）。
 - **§6.6 端点性价比排序键与洞察不匹配**——按「成本/1M out」升序，把真正的爆点（`minimax:MiniMax-M3` 失败耗时 6792.8s ≈ 1.9 小时、`bai:deepseek-v4-flash` 1678.5s）排到第 2 行和最后一行，无定价的 `-` 行沉底像是"最贵的"。让失败耗时这种爆点浮上来。R1-18。
 - **§1 同一张表两个百分比用两种分母写法**（`输入-缓存命中 … 90.0% of in` vs `输入-fresh … 10.5% of (fresh+cached)`，其实同一个分母）——统一成一种。R1-16。
 - **详单页 `<strong>` 与 `**` 混用**、悬空分隔符（"下一轮"链接缺席时留下的以 ` · 上一轮:` 开头的行）、中文句子里的半角逗号——`internal/reqdetail` 渲染层。R2-8。
@@ -1563,3 +1589,202 @@ pricing: no exchange rate to convert CNY -> JPY for -currency, showing CNY inste
 ### 4.6 一句话
 
 事实层（详单、diff、证据去重、审计溯源）扎实到可以当法证材料用；剖面层（指标、Finding）的**呈现层**欠账最多——数据算出来了但没渲染到人读产物里（问题 3 / 9 / 12），或者渲染了却被误报和压平的百分比毁掉可信度（问题 2 / 6 / 11）。第一组七条全是"一行到几十行、零风险"的，做完这套产物从"信息很全但要自己拼、且对外那份还挂着误报头条"变成"打开就能用"。
+
+---
+
+## 第五部分 · 第一梯队执行记录（Sonnet 5，2026-08-31）
+
+用户指令：逐条回源码核实第四部分的完成状态与标注准确性 → 修正不准确处 → 重新分组 → 直接处理第一梯队。以下是本轮实际改动。
+
+### 5.1 核查结论（基于当前 HEAD 源码，非文档说明）
+
+**✅ 标注准确**（逐个回源码验证）：问题 1（`report_doc.go` `90%`、`SummaryRequests` 入 i18n）、7（`cmd_analyze.go:216` guard 含 `llmAddr != ""` + 回归测试）、17（`errorRateMarker` 有 `Attempts<20` 门槛）、19（`cronFileTag` 无特例 + UserGuide 双语）、24（`render_md.go` 跨日补日期）、27（`report_compaction.go` retention≥100% 脚注）、29（⭐/msgs/finish/⚠/retention 首现处说明）、32（`report_sessions.go:TableNote`）、34（`vmr.sh:warn_if_stale`）、39（`KNOWN_ISSUES §2.64`）。
+
+**⚠️ partial 标注准确**：问题 4、6、10、18、31。
+
+**需要修正的标注（已改）**：
+- **问题 20**：标题 ✅ 现已准确（`d9ce2ce` 改 `section_cost.go` 渲染全部日期行、`-` 填成本列），但正文仍描述旧行为、把改法当待办 —— 已重写为完成态。
+- **问题 35 §5.5 子项**：**事实错误**。`rep.ByClient` 自 2026-07-26（`aggregate.go`）起即按 `Requests` 降序，§5「按客户端」表直接用该顺序。R1-13"字母序、aiscript 排第一"与当前及 review 时源码均不符 —— 已作废该子项，标题「两个排序子项」改为「§6.6 排序子项」。
+- **问题 25**：附录仍 join 完整清单一次（正文已折 `<details>`），残留但可接受 —— 保留 ✅。
+
+**未标注项确认确实未做**：2、3、5、8、9、11、12–16、21–23、26、28、30、33。
+
+### 5.2 本轮完成（第一梯队 + 重新调整进第一梯队）
+
+| 问题 | 状态 | 核心改动 | 验证 |
+| --- | --- | --- | --- |
+| **2** verdict 头条由误报驱动 | ✅ | `severity.go` 加 `lowConfidenceFindings` + `pickDriver(skipLowConf)`：非低可信度 driver 优先，全档低可信度才回退。zh "死亡转折点"→"不可逆转折点" | 4 条 `TestJourneySeverity` 子测试；实测大 journey verdict 改由 `constraint_text_dropped`（真实 critical）驱动 |
+| **3** 工具浪费四总量只在 HTML | ✅ | `section_efficiency.go:renderToolWasteTotals` —— §7 top-line 四总量（复用 `i18n.ToolWaste` 标签）；§0 highlight 改取 `rep.Tools[0]`（绝对浪费最大），`ToolWarn` 加 `wasteBytes` | `TestRenderToolWasteTotals`；实测 §7 `Total shipped 273.62 MB · Dead weight 218.84 MB (80%) · ≈ tokens wasted 54.7M · Tool-set shapes 6`，§0 `tools:67 wastes 183.26 MB` |
+| **4** self-traffic 口径不留痕（story 侧） | ✅ | `StoryIndex.SelfTraffic *SelfTrafficStatus`（`json:"-"`，随 idx 搭车）；`setupStoryRun` 算 `{Active, Excluded}`；`RenderStoryIndexMarkdown(idx, lang)` 顶部无条件输出口径行 | `TestRenderStoryIndexMarkdown_SelfTrafficLine`；实测 `> Self-traffic exclusion: not active (...)` |
+| **5** §6 会话表零 journey 链接 | ✅ | `report.Markdown` 加 `journeyLink` 参数（`cmd_report.go` 已有 `lineageToJourney`）；`renderSessions`/`renderSessionRow` 逐层传；命中行「会话」列变链接 | `TestRenderSessions_JourneyLink`；实测套件产物 **141 个 §6 行链到 `stories/journey-*.md`**（review 估 142） |
+| **6** compare「相对变化」压平到 ±100% | ✅ | `render_compare.go:formatDelta(a,b,newLabel)` 量级化（`156×`/`0.02×`/`+40%`/新增/`-100%`/`—`）；列名「对称差」→「变化」；脚注去公式；`i18n` 加 `DeltaNew`（两个 struct）。`DeltaRel` 机读字段与 `Notable` 判定不动。旧 `formatDeltaRel` 留给 corpus cache-hit 表 | `TestFormatDelta`（含 R5-1 的 `5.0s→774.6s` = `155×`） |
+| **10** HTML 看板丢认知谦逊 | ✅ 基本 | `RenderHTML` Findings 段输出 `<blockquote class="coverage-note">` 协议盲区声明（对齐 `.md`）；`i18n` 加 `AnthropicCoverageNote`。"死亡转折点"随问题 2 软化 | `TestRenderHTML_DashboardStructure` 加断言；实测 EN/ZH HTML 均含 coverage-note、无「死亡」 |
+| **11** `unverified_entity_reference` 系统性误报 | ✅ | `chatmsg.ExtractEntitiesNear(text, anchors, window)`（新，重构自 `ExtractEntities`，行为逐字节不变）；`detectUnverifiedEntityReference` 改为 `FindAllStringIndex` 取证伪词位置 + 160 字节窗口内抽实体 | `TestExtractEntitiesNear` + 检测器"实体距证伪词 ~300 字节则不判"回归子测试 |
+
+**问题 11 语料校准**（RECENT 125 journey，新旧二进制各跑 `-corpus`）：`finding_rates.unverified_entity_reference` **0.336 → 0.272**（-19% 相对），**其余 7 个检测器 rate 逐字节不变**（改动完全隔离）。大 journey `b0ebb0e4`（518 轮、缝合×8）：该 Finding 110 → 78（-29%），总 Finding 338 → 306。残留的 78 条里仍有假阳性（`~/.codex/config.toml not found` 后 agent 创建了它、`use/apply/diff/` 是 `dirPathRe` 过度匹配散文），属检测器自注释已承认的"实体可能被后续步骤创建" + `chatmsg.ExtractEntities` 精度问题，非窗口能解决 —— 位置窗口是明确的净改进（surgical、零 collateral、已校准），完整精度需另立项收紧 `ExtractEntities`（会牵动 `unused_tool_result` 与 compaction 段）。问题 2 已保证它不再当 verdict 头条，问题 15（Finding 按 Code 分组）会解决展示刷屏 —— 三者合起来是完整治理。
+
+### 5.3 决策记录（用户离开期间自主决定）
+
+- **D1**：问题 6 的 `formatDelta` 量级化，文档"已落地部分"曾 hold 到 C 组，但问题 6 在第一组且"为什么第一组"整段在论证 `156×` —— 判定文档内部矛盾，按第一组处理，实现之。列名「对称差」→「变化」（文档预告 formatDelta 落地时改）。
+- **D2**：问题 11 校准 —— 本机 `logs/` 有 47 个审计文件，跑了 RECENT 语料 `-corpus` 双版本对比，确认 -19% 且零 collateral 后采纳。
+- **D3**：问题 2"全部 Finding 都是低可信度时 verdict 降级为仅次级信号" —— 需 HTML verdict 渲染层 + i18n 改动，价值已由 driver 优选捕获。本轮只做 driver 优选，"降级"细化留后续。
+- **D4**：问题 10 的指标 grid「错误恢复次数 0」单格特判（→ `n/a`）留后续，属问题 18/43"图缺刻度"同类。
+- **D5**：问题 2"死亡转折点"→"不可逆转折点"（与既有 `NoPointOfNoReturn` 文案统一）；EN "POINT OF NO RETURN" 是标准习语，保留。
+- **执行失误自记**：首次渲染校验用的 `vmr.fix` 二进制构建于问题 2/11 改动之后、问题 3/4/5/6/7 改动之前，导致第一次目视校验 §7/§6/self-traffic 三处都"没出现"。重建 `vmr.fix2` 后全部正常 —— 与第二部分 2.4 同一类教训（二进制 ≠ 源码当前态），改动中途要重新 `go build`。
+
+### 5.4 测试与门禁
+
+`go build ./...` OK；`go test ./...` 全绿；`go test -race ./internal/{story,report,chatmsg,i18n,archtest} ./cmd/vmr` 全绿；`go test -count=1 ./internal/archtest/...` 全绿（无文件/函数行预算触发）；`gofmt -l` 干净。新增测试：`TestJourneySeverity` +4 子测试、`TestExtractEntitiesNear`、`TestDetectUnverifiedEntityReference` +1 子测试、`TestFormatDelta`、`TestRenderToolWasteTotals`、`TestRenderSessions_JourneyLink`、`TestRenderStoryIndexMarkdown_SelfTrafficLine`、`TestRenderHTML_DashboardStructure` +2 断言。
+
+CHANGELOG `[Unreleased]` 已加第三次 honesty pass 条目。
+
+### 5.5 未做（留待后续梯队，按原分组）
+
+第二组剩余：8（全失败 journey 报"未检测到"）、9（journey md 补指标节）、12（总成本数字）、13（Task 汇总行）、14（详单 tool_call args 转义 JSON）、15（Finding 按 Code 分组 —— 与问题 11 强相关，建议紧接着做）、16（补主力 provider 定价）、18（corpus 三处自我限定的 a/b 子项）。
+第三组：21–23、26、28、30、33、35 的 §6.6 排序子项。
+第四组维持不做。
+
+---
+
+## 第六部分 · 源码级二轮核查与未闭环/不匹配项清单（2026-08-31）
+
+> 基于第一性原理与当前 HEAD 源码，对第四章所有标注"已处理""基本处理""部分处理"的事项逐条做代码级实测核验。第一轮核查（下方 6.1）提出 5 项疑点；第二轮（Sonnet 5，同日）逐项回源码验证真伪，成立的当场修掉并标注，不成立的说明理由。
+
+### 6.1 五项疑点的核实与处置
+
+#### 1. `finishCell` 遗漏未分类失败 → 分组文件里失败轮次显示为 `-` ✅ 已处理（2026-08-31 · Sonnet 5）
+
+- **核实结论：成立。** `internal/report/requests.go` 的 `finishCell`（`vmr-requests-<tag>.md` / `-cron-<tag>.md` 的逐轮表、Scheduled 表都走它）旧逻辑是 `if r.Outcome != "ok" && r.ErrorClass != ""` 才输出 `❌<class>`。而 `Outcome == "error"` 且 `ErrorClass == ""` 的记录是真实存在的一类：`server.go` 的 `chatHandler` 在路由前就拒掉的请求——body 读失败 / body 超限 / 非法 JSON / 缺 `model` 字段——都走 `OutcomeFor(4xx, false) == "error"`，且 `rec.Attempts` 为空，`endpointInfo` 因 `len(Attempts) == 0` 返回 `errClass == ""`。这些记录带合法 `client_key_tag`，会落进对应 tag 的会话卡片，逐轮表里 `finishCell` 命中 `orDash(r.Finish)` 渲染成一个无害的 `-`。同类还有"在并发槽队列里等待时被客户端取消"（`Outcome == "canceled"`、无 attempt、无 class）。姊妹文件 `vmr-requests-failed.md` 走的 `outcomeCell` 已经有 `ec == "" → "unclassified"` 兜底——两个渲染器口径不一致。
+- **处置**：`finishCell` 错误分支对齐 `outcomeCell`：`r.Outcome != "ok"` 即输出 `❌<class 或 unclassified>`，truncated / 正常 finish 逻辑不变。新增 `internal/report/requests_test.go:TestFinishCell_UnclassifiedFailureIsNotABareDash` 覆盖 error/canceled/classified/truncated/正常 五种输入。既有 `TestWriteFailedIndex`（断言 `❌transient` / `❌canceled` / `⚠️trunc` 出现在 per-group sibling 里）仍绿。
+- **回到问题 35**：该子项此前标注 "⚠️ 文案/文档子项已处理，§6.6 排序子项待做"——`finishCell` 缺陷不在问题 35 已列的琐碎项清单里，属核查新发现，现已随本轮修掉。问题 35 剩余未做项仅 §6.6 端点性价比排序键一条，标注不变。
+
+#### 2. 宏观报表附录：排除已配置但排除 0 条时误报"未启用" ✅ 已处理（2026-08-31 · Sonnet 5）
+
+- **核实结论：成立，是一句肯定性的错误事实陈述。** `render_doc.go` 的 `renderAppendix` 旧逻辑 `if rep.Meta.SelfTrafficExcluded > 0` 才输出"已排除 N 条"，else 一律输出 `AppendixSelfTrafficNotExcluded`——"未启用排除（未配置 `llm_key` 或 `self_traffic_client_tags`）"。而 `SelfTrafficExcluded` 只在 `aggregate.go` 里"某条记录真的被匹配丢弃"时才 `++`。于是"用户在 `report.yaml` 配了 `llm_key`、但当前分析窗口恰好没有自指流量"这一常见情形（比如那次运行没开 LLM 解读层），附录会打出"未配置"——已配置却报未配置。且同一套产物里 `vmr-stories.md` 侧（问题 4 story 半区收尾时新增的 `SelfTrafficStatus{Active, Excluded}`）会正确报"已启用（排除 0 条）"，两份产物自相矛盾。
+- **处置**：`Report2.Meta` 加 `SelfTrafficExclusionActive bool`，`buildInternal` 里置为 `len(excludeClientTags) > 0`；附录改按该布尔分支——`Active` 即输出"排除已启用；本次排除 N 条"（N 可为 0），仅 `!Active` 才输出"未配置"。`i18n/report_doc.go` 的 `AppendixSelfTrafficExcluded` 文案调整为在 N=0 时也读得通。新增 `TestSelfTrafficExclusion_ConfiguredButNothingMatched`。
+- **回到问题 4**：问题 4 标注 "✅ 已处理"，但其正文"已落地部分"只说了 render_doc.go 改成"无条件渲染 + else 分支"——那个 else 分支正是这里的 bug 来源（`Excluded == 0` 落进 else）。问题 4 的完成态描述需更正：报告侧的口径行现在按"排除是否启用"分支，而非按"排除条数是否 > 0"。已在问题 4 正文补一句。
+
+#### 3. `-list-only` 下 `Tasks` / `Rendered` 两列整列 `—` ✅ 已处理（2026-08-31 · Sonnet 5）
+
+- **核实结论：成立（可读性问题，非正确性）。** `-list-only` / 裸 `vmr story` 不构建 Journey，`BuildJourneyIndexRow` 返回的行 `Tasks == 0`、`Rendered == ""`，`writeStoryIndexRow` 里 `Rendered` 列渲成 `—`、`Tasks` 列（`r.Tasks > 0 || r.Steps > 0` 为假）也渲成 `—`。`Steps` 列有 `r.Requests` 兜底，不是 `—`。所以准确说是 `Tasks` + `Rendered` 两列全 `—`，读者容易读成字段损坏。`—` 本身是准确信息（确实没渲染），缺的是一句说明。
+- **处置**：`RenderStoryIndexMarkdown` 在渲染表格前扫一遍——若没有任何行带 `Rendered` 或 `Tasks`（即本次没渲染、也没有上一轮 `MergeJourneyIndexRows` 带过来的值），在表格上方加一行说明"本次运行未渲染任何 Journey，`任务`/`已渲染` 两列留空，`轮数` 显示请求数，用 `-render-all` 或 `-journey <id>` 渲染后填充"。`i18n/story_index.go` 加 `ListOnlyNote`，中英各一。不做自适应删列——会改表结构、动下游解析预期，收益不抵成本。新增 `TestRenderStoryIndexMarkdown_ListOnlyNote`。
+- **回到问题 31**：问题 31 标注 "⚠️ 部分处理"，正文列的"改法"含"`-list-only` 下不输出这两列，或表头加一句说明"——本轮采纳后者。`(unresolved)` client、`⚠` 图例两个子项此前已处理。问题 31 现可从 "⚠️ 部分处理" 收敛为 "✅ 已处理"（空列已加说明）。已更新标注。
+
+#### 4. `lowConfidenceFindings` 清单目前只含 1 个检测器 —— 事实成立，但不据此扩清单
+
+- **核实结论：事实部分成立，据此扩清单的建议不采纳。** `severity.go` 的 `lowConfidenceFindings` 确实只有 `FindingUnverifiedEntityReference` 一项。疑点主张把 `unused_tool_result`（语料 58% 命中）也纳入，否则它仍可能当 HTML 看板主因头条。但两者不同质：
+  - `unverified_entity_reference` 有**明确的误报机理**——它把 Go 标准库类型、项目自己在跑的端点判成"证伪"，检测器自注释都承认是"a suspicious signal ... not a confirmed hallucination"。这是把它降级的依据。
+  - `unused_tool_result` 有一段**收紧校准史**（`findings_toolresult.go` 注释）：早期版本按 entity 触发、每 journey ~40 条，现版本只在"整个工具结果的实体后续一个都没再引用"时才触发，注释称这是"the original, meaningfully rare signal"。没有已知的系统性误报机理。
+  - 它的 journey 级对应物 `Metrics.ContextUtilization` 是别处的头条指标。58% 的命中率更可能反映"上下文膨胀型 workload 里 agent 确实经常整块丢弃工具结果"这一真实低效，而不是检测器噪声。把它塞进 `lowConfidenceFindings` 会让一个本该可行动的 driver 永远无法成为 verdict 头条。
+- **处置**：代码不动。要不要纳入分级，前提是先对 `unused_tool_result` 的命中样本做一次人工采样误报审计（就像问题 11 对 `unverified_entity_reference` 做的那样），有证据再谈。列入第七部分 P5"需证据方可动"。
+- **回到问题 2**：问题 2 标注 "✅ 已处理（driver 优选）"，6.2 表里给的是 "⚠️ 逻辑正确但范围局限"——后者准确。问题 2 的 D3（全低可信度时 verdict 降级渲染）本就记为"留待后续"，清单扩容与 D3 一并归入第七部分 P2/P5，问题 2 主标注不变。
+
+#### 5. §6.7 Compaction 表 `0 → 0` 无信息行 —— 主张不完全成立，按实际情况处置
+
+- **核实结论：疑点描述与语料事实不符，提议的过滤会丢信息，只采纳其中一条诚实性修正。** 疑点说这些行"会话元数据全为 `-`"并提议过滤掉 `TokensIn == 0 && TokensOut == 0` 的行。但第三部分 R1-7 记录的那个逐字重复 3 次的行是 `l-77c20384 | - | 0 → 0 | - | ~/ENV.md, TOOLS.md, ...(+27 more)`——它**带 `Summarizes` 链接、带 swallowed entities**，只有 token 数是 0。`buildCompactions` 里 `TokensIn/TokensOut` 仅在 `c.UsageOK` 时才填，`0 → 0` 的真实含义是"这次调用的 usage 没解析出来"，不是"测得为零"。按疑点的建议过滤，会把这条携带缝合关系 + 实体丢失信息的行一并删掉。而"重复 3 次"是 3 条独立的 compaction 审计记录（同一前驱、连续重试），逐条列出在排查 compaction 抖动时是有用的，不该去重。
+  - R1-7 的主症状——保留比 >100% 且其余列全空的行——是**另一批行**（`246 → 1.1K = 431%`，`TokensIn > 0`），问题 27 加的脚注针对的正是那批，已处理。
+- **处置**：不加行过滤、不去重。只做一条诚实性修正：`section_compaction.go` 里当 `TokensIn == 0 && TokensOut == 0`（usage 未解析），size 列渲成 `-` 而非字面 `0 → 0`——后者读起来像"测得的空操作"。`retentionRatio` 早已对 `in <= 0` 返回 `-`。新增 `TestRenderCompactionsZeroUsageIsNotAMeasuredZero`。
+- **回到问题 27**：问题 27 标注 "✅ 脚注已处理"，6.2 表给的 "⚠️ 脚注属实，有优化空间" 准确。本轮把"优化空间"里可安全落地的一条（`0 → 0` → `-`）做掉，去噪过滤那条明确判为不做（会丢信息）。已在问题 27 正文注明。
+
+### 6.2 第四章已标注项的源码核实总表
+
+| 编号 | 事项 | 文档标注 | 源码核实结论 | 事实细节与源码位置 |
+| :--- | :--- | :---: | :---: | :--- |
+| **1** | `%%` 转义 + 全角括号 | ✅ 已处理 | ✅ 完全属实 | `i18n/report_doc.go` 为 `90%`；`SummaryRequests` 在 zh/en 下分别处理括号。 |
+| **2** | 主因判定头条误报驱动 | ✅ 已处理 | ⚠️ 逻辑正确；清单范围是判断项 | `severity.go:lowConfidenceFindings` 实现 driver 优选；清单目前 1 项，是否扩容见 6.1 #4（需采样证据）。 |
+| **3** | 工具浪费四总量入 §7 | ✅ 已处理 | ✅ 完全属实 | `section_efficiency.go:renderToolWasteTotals` 汇总全局并输出 top-line；§0 highlight 改按绝对浪费量。 |
+| **4** | self-traffic 口径留痕 | ✅ 已处理 | ✅ 属实（本轮补一处缺陷） | Story 侧正确；**Report 侧"配置了但 0 条匹配"曾误报"未启用"，本轮加 `SelfTrafficExclusionActive` 修掉**。 |
+| **5** | §6 会话表 Journey 链接 | ✅ 已处理 | ✅ 完全属实 | `loadStoriesLink` → `report.Markdown` 传 `journeyLink`，140+ 会话行链到 `stories/`。 |
+| **6** | compare 相对变化量级化 | ✅ 已处理 | ✅ 完全属实 | `formatDelta` 输出 `155×`/`0.02×`/`+40%`/`新增`/`-100%`/`—`，MD/HTML 双端生效。 |
+| **7** | `-llm-addr ""` 关闭配置 | ✅ 已处理 | ✅ 完全属实 | `cmd_analyze.go` 与 `cmd_story.go` 守卫判定改为解析值非空，带回归测试。 |
+| **10** | HTML 看板认知谦逊 | ✅ 基本处理 | ✅ 完全属实 | Findings 段输出 `<blockquote class="coverage-note">`，文案已软化，D4 按计划延后。 |
+| **11** | 未验证实体引用误报校准 | ✅ 已处理 | ✅ 完全属实 | `chatmsg.ExtractEntitiesNear` 160 字节窗口生效，语料 Finding 率 -19% 且无 collateral。 |
+| **17** | §3 健康表低样本门槛 | ✅ 已处理 | ✅ 完全属实 | `section_reliability.go` 的 `Attempts < 20` 统一输出 `⚠️low-n`，与 §4 口径对齐。 |
+| **18** | Corpus 统计自我限定 (c) | ⚠️ 脚注已处理 | ✅ 完全属实 | `story_corpus.go` 脚注已补平稳无趋势说明；(a)(b) 按计划留待后续。 |
+| **19** | `hartbeat` 拼写统一 | ✅ 已处理 | ✅ 完全属实 | `cronFileTag` 移除特殊分支，UserGuide 双语同步为 `vmr-requests-cron-heartbeat.md`。 |
+| **20** | §2 日成本表补齐缺失行 | ✅ 已处理 | ✅ 完全属实 | `section_cost.go` 遍历全部日期，未定价日填 `-` 并保留表尾说明。 |
+| **24** | Journey 跨日补日期 | ✅ 已处理 | ✅ 完全属实 | `render_md.go` 在 `from` 与 `to` 跨日时切换为完整 `2006-01-02 15:04:05` 格式。 |
+| **25** | 44 输入文件路径折叠 | ✅ 已处理 | ✅ 完全属实 | 正文已折叠进 `<details>`，附录保留单行输入清单。 |
+| **27** | Compaction >100% 解释 | ✅ 脚注已处理 | ✅ 脚注属实（本轮补 `0→0` 渲染） | 脚注针对 >100% 行；`0 → 0`（usage 未解析）本轮改渲 `-`；去噪过滤判为不做（丢信息）。 |
+| **29** | 术语首次出现处解释 | ✅ 已处理 | ✅ 完全属实 | ⭐、msgs、finish、⚠、sNN 均已在首次出现的表格下方添加图例。 |
+| **31** | `-list-only` 下图例与字段 | ⚠️ 部分处理 → ✅ 已处理 | ✅ 完全属实 | `(unresolved)` 与 `⚠` 图例此前已落地；本轮 `RenderStoryIndexMarkdown` 加 `ListOnlyNote` 说明空列。 |
+| **32** | `sNNN` 序号 run-scoped 说明 | ✅ 已处理 | ✅ 完全属实 | §6 表下已添加 `TableNote` 说明其为本地别名，真实 ID 为 `l-...`。 |
+| **34** | `vmr.sh` stale-binary 防呆 | ✅ 已处理 | ✅ 完全属实 | `vmr.sh:warn_if_stale` 同时对比源码 mtime 与 `git rev-parse HEAD`。 |
+| **35** | 琐碎项批处理 | ⚠️ 文案已处理 | ✅ 属实（本轮补 `finishCell`） | 文案/文档子项已处理；`finishCell` 未分类失败渲成 `-` 属核查新发现，本轮修掉；剩 §6.6 排序键一条待做。 |
+| **36** | Requests 纯索引化 | ✅ 已解决 | ✅ 完全属实 | `writeAllRequestsFooter` 已在 `c13819a` 中完全移除。 |
+| **39** | 上下文利用率双峰说明 | ✅ 记账处理 | ✅ 完全属实 | `KNOWN_ISSUES` 已登记其双峰退化及统计解读建议。 |
+
+### 6.3 本轮测试与门禁
+
+`go build ./...` OK；`go test ./...` 全绿；`go test ./internal/archtest/...` 全绿（无文件/函数行预算触发，`aggregate.go` 598/600、`requests.go` 678/700）；`gofmt -l` 干净。新增测试 4 个：`TestFinishCell_UnclassifiedFailureIsNotABareDash`、`TestSelfTrafficExclusion_ConfiguredButNothingMatched`、`TestRenderStoryIndexMarkdown_ListOnlyNote`、`TestRenderCompactionsZeroUsageIsNotAMeasuredZero`。CHANGELOG `[Unreleased]` 已加"source-level second-pass fixes"条目。
+
+---
+
+## 第七部分 · 第四部分未解决项汇总与分批建议（Sonnet 5，2026-08-31）
+
+第一梯队（第五部分）+ 本轮核查（第六部分）之后，第四部分剩下的未解决项按**依赖链和主题**（而非原来的第二组/第三组梯队）重排如下。每个 P 组是一个建议的 PR 批次。
+
+### P1 · 成本叙事闭环（一个批次，强依赖，价值最高）
+
+review 全篇反复点名的最大缺口——一份叫"用量报告"的东西 top-line 没有钱。三项同主题，**问题 16 是前提**，缺定价则合计行也是残的。
+
+| 问题 | 内容 | 依赖 | 成本 |
+| :--- | :--- | :--- | :--- |
+| **16** | 为主力上游 provider（`volc_coding_plan` / `volc_token_plan` / `cliproxy` 等）补 `pricing.yaml` 条目；订阅/燃料点制用 `metric: cost` | 无（数据/配置工作，非代码） | 单条低，维护成本持续 |
+| **12** | §0 摘要加"估算成本"列；§2 四张成本表加合计行 + "其中 N 天/M 端点无定价未计入"旁注 | 16（否则合计残） | 低中 |
+| **33** | `journey-*.json` 的 `cost`：`resolved: false` 时 `total_usd` 用 `null`/`omitempty` 而非 `0`；字段名去掉 `_usd`（`currency` 已单标，叫 `total`）。改前查 `_eval/` 消费方 | 与 16/12 同主题一起做 | 低（JSON 契约变更） |
+
+### P2 · 叙事半区正确性 + Finding 治理收尾（一个批次）
+
+叙事半区是 review 判定"呈现层欠账最多"的地方。**问题 15 与已完成的问题 11 强相关，review 4.5.3 原文"别拖到下一批"——现在已经拖了一批，应最先做。**
+
+| 问题 | 内容 | 成本 · 风险 |
+| :--- | :--- | :--- |
+| **15** | `journey-*.md` Findings 段：按 Finding Code 分组 + 每组计数 + 按检测器可信度排序（高可信度在前）。目前 162 条平铺、前 6 条逐字雷同 | 低中 · 低 |
+| **2 D3** | 当某严重度档全是 low-confidence finding 时，HTML verdict 渲染降级为"仅次级信号、不给结论"（driver 优选已捕获主要价值，这是最后一块） | 低中（HTML verdict 层 + i18n） · 低 |
+| **8** | 100% 请求失败的 journey 被报"未检测到疑似问题"。`Step` 加 `Outcome` 字段（`fillStepFacts` 从 `rec.Outcome` 提取），`stepRoleTag` 纳入 `Outcome == "error"` 为 `⚠️错误`；概览加"N/M 步请求失败"行；区分 `canceled` 与 `error` | 中（动 `Step` 结构 + `structure.json` 契约 + golden） · 低中 |
+| **9** | `journey-*.md` 补 `## 行为指标` 节：17 项指标渲成表 + `context_composition_curve` 的 ASCII sparkline。数据（`Metrics`）现成，纯渲染层欠账 | 中（双语 i18n + 表渲染 + sparkline + golden） · 低 |
+
+### P3 · 单文件可读性（宏观半区，各自独立、低风险，可一个 PR 扫一批或搭车）
+
+无依赖、互不阻塞，每条一行到几十行。
+
+| 问题 | 内容 |
+| :--- | :--- |
+| **13** | `vmr-requests-<tag>.md` 的 `### tNN` Task 标题下补一行汇总（总耗时/总 token/成本/工具计数/finish 状态） |
+| **14** | 详单页 tool_call args 复用 `render_spine_args.go` 的"挑扛负载字段→代码块渲染真实换行"策略；`json.Marshal` 换 `Encoder` + `SetEscapeHTML(false)` |
+| **23** | §6 会话表加"时间范围"列（`SessionRow.From`/`To` 已在 JSON，只是没渲染到 MD） |
+| **26** | §3/§4 端点表：`⚠️low-n`（`Attempts < 20`）行折进 `<details><summary>另有 N 个低样本端点</summary>` |
+| **28** | `vmr-requests-failed.md` 开头加聚类摘要（按时间邻近 + `error_class` 聚合），例"65 条聚成 12 簇，最大一簇 8 条" |
+| **30** | 逐日活跃度图（`section_workload.go` 的 daily `mermaid xychart-beta`，44 个 x 标签）补 ASCII sparkline 或表格兜底；hourly 的 24 标签可保留 mermaid |
+| **35 §6.6** | 端点性价比排序键（`section_endpoint_value.go`）：当前按"成本/1M out"升序，把失败耗时爆点（`minimax:M3` 6792.8s）排到第 2 行、无定价 `-` 行沉底像"最贵"。让失败耗时这类爆点浮上来 |
+| **18 (a)(b)** | corpus 相关性 Top-15 维护"已知恒等关系"清单并剔除/单列；N-gram 排除自重复或改报 lift。（(c) 脚注已处理） |
+| **40** | §2 ByClient 表的 client 集合与 per-client 文件集合不一致时，附录输出一行对账（`成本表有、无 sibling 文件：obster（1 条单发 heartbeat）`）。非 bug，是两种口径呈现不一致 |
+
+### P4 · compare 视图重构（独立小批次）
+
+目前 compare 视图 ~70% 篇幅是两份 95% 相同的 system prompt 全文，且没有任何摘要。两项一起做，视图从"要自己拼"变"打开能用"。
+
+| 问题 | 内容 | 成本 |
+| :--- | :--- | :--- |
+| **22** | compare 报告开头加 3–5 行摘要卡（最大差异 Top-3 + 分叉点位置 + 端点是否不同 + 终止方式），措辞保持"陈述事实不判优劣" | 低中 |
+| **21** | `renderSysPrompt` 这一节改渲成两份 prompt 的 unified diff（"两侧相差 N 行，差异如下"），替代无条件各铺 20KB 全文 | 中（diff 渲染 + `mdlite` 支持） |
+
+### P5 · 记账 / 收尾 / 需证据方可动
+
+不单独排期，搭其它改动的车。
+
+- **问题 10 D4**：HTML 指标 grid「错误恢复次数 0」在协议盲区下改渲 `n/a`（单格特判）。与问题 18/43 同类。
+- **问题 43**：① 工具调用时序图每 50 步打一个横轴刻度行；② 模型切换记录旁接上宏观 §6.5 已证明的"换端点后缓存效率 93%→22%"（给出该 Step 前后 cached 比）；③ compare 逐轮缓存曲线的跳号（`R13`/`R22–23` 消失=那几轮无 usage）加一句说明，剧烈抖动的轮次提到上方"首轮/稳态/最值"表里。
+- **6.1 #4（新增）**：`unused_tool_result`（语料 58% 命中）等粗筛型检测器是否纳入 `lowConfidenceFindings`。**前提**：先对其命中样本做一次人工采样误报审计（比照问题 11 对 `unverified_entity_reference` 的做法）。无证据不动——它有收紧校准史、无已知误报机理、journey 级对应物是别处头条指标，贸然降级会压掉一个可行动 driver。
+
+### 维持不做（第四组，理由见第四部分对应条目）
+
+- **问题 37** 跨时间窗对比（`-compare-period`）：新维度，撞分析半区 v1-complete 红线（`KNOWN_ISSUES` §1.0），已登记。
+- **问题 38** 任务达成信号：vmr 结构上看不到任务结果，硬做要引 LLM 判官（越过"揭示不裁判"边界）或要用户标注，已登记。
+- **问题 41** anthropic-messages 语料覆盖盲区：验证债，需专门攒一批 anthropic-messages 语料验证 4 个测不出的检测器，独立任务，不阻塞发布。
+- **问题 42** 超大 journey 文件（1.88 MB md）：只有极少数 518 轮/缝合×8 的 journey 触发，等有人抱怨再拆 spine sibling。
+
+### 一句话
+
+P1（成本闭环）价值最高、依赖最硬，应作为下一个批次。P2（Finding 治理收尾 + 失败可见性）是叙事半区从"要去 JSON 里找 / 全失败还报没问题"变"打开能用"的关键，其中问题 15 已被 review 明确要求"别再拖"。P3/P4 无依赖，随时可做。

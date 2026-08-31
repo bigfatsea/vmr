@@ -4,6 +4,7 @@ package story
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,6 +310,34 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		for _, f := range got {
 			if f.Code == FindingUnverifiedEntityReference {
 				t.Fatalf("unexpected finding: entity was never referenced again: %+v", f)
+			}
+		}
+	})
+
+	t.Run("entity far from the not-found phrase is not falsified", func(t *testing.T) {
+		// "not found" is about missing.txt; internal/story/journey.go is
+		// mentioned ~300 bytes later in an unrelated sentence and must not
+		// be treated as falsified when a later step reads it (问题 11).
+		filler := strings.Repeat("the router forwards each request to the configured upstream and records the outcome in the audit log. ", 3)
+		longResult := map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "tu1",
+				"content": "ENOENT: missing.txt not found\n\n" + filler + "\nsee internal/story/journey.go for the Build entry point"},
+		}}
+		r1 := mkRec(at(0), "", []any{sys, u1}, sseToolCalls([]any{
+			map[string]any{"id": "tu1", "function": map[string]any{"name": "read", "arguments": `{"path":"missing.txt"}`}},
+		}))
+		r2 := mkRec(at(1), "", []any{sys, u1, toolUse, longResult}, sseToolCalls([]any{
+			map[string]any{"id": "tu2", "function": map[string]any{"name": "read", "arguments": `{"path":"internal/story/journey.go"}`}},
+		}))
+		path := writeJSONL(t, []audit.Record{r1, r2})
+		l := onlyLineage(t, path)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		for _, f := range ComputeFindings(j, i18n.EN) {
+			if f.Code == FindingUnverifiedEntityReference && strings.Contains(f.Finding, "journey.go") {
+				t.Fatalf("journey.go sat ~300 bytes from the not-found phrase, should not be falsified: %+v", f)
 			}
 		}
 	})

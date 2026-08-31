@@ -168,11 +168,54 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	chain := twoStepChain(t)
 	rows := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
 	rows[0].Tasks, rows[0].Steps, rows[0].Rendered = 1, 2, "journey-"+rows[0].ID+".md"
-	md := RenderStoryIndexMarkdown(rows, i18n.EN)
+	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN)
 	for _, want := range []string{rows[0].ID, "调研一下", rows[0].Rendered} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered markdown missing %q:\n%s", want, md)
 		}
+	}
+}
+
+// TestRenderStoryIndexMarkdown_ListOnlyNote: when no row has been rendered
+// (bare `vmr story` / -list-only), the index precedes its table with a note
+// that the Tasks/Rendered columns are deliberately blank — a reader
+// shouldn't have to guess whether a column of "—" is missing data (问题 31).
+// A run that did render (or carried prior Tasks/Rendered forward) omits it.
+func TestRenderStoryIndexMarkdown_ListOnlyNote(t *testing.T) {
+	chain := twoStepChain(t)
+
+	listOnly := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
+	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: listOnly}, i18n.EN)
+	if !strings.Contains(md, "This run rendered no journeys") {
+		t.Errorf("list-only index missing the blank-column note:\n%s", md)
+	}
+
+	rendered := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
+	rendered[0].Tasks, rendered[0].Steps, rendered[0].Rendered = 1, 2, "journey-x.md"
+	if got := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rendered}, i18n.EN); strings.Contains(got, "This run rendered no journeys") {
+		t.Errorf("note must not show once a Journey has been rendered:\n%s", got)
+	}
+}
+
+// TestRenderStoryIndexMarkdown_SelfTrafficLine: vmr-stories.md always
+// states whether self-traffic exclusion was active, so two runs with
+// different report.yaml are visibly not the same population (问题 4 / R6a-2).
+func TestRenderStoryIndexMarkdown_SelfTrafficLine(t *testing.T) {
+	rows := []JourneyIndexRow{BuildJourneyIndexRow(twoStepChain(t), "x", false)}
+
+	active := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{Active: true, Excluded: 16}}, i18n.EN)
+	if !strings.Contains(active, "Self-traffic exclusion: active (16 candidate(s) removed)") {
+		t.Errorf("active exclusion not disclosed:\n%s", active)
+	}
+
+	inactive := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{}}, i18n.EN)
+	if !strings.Contains(inactive, "Self-traffic exclusion: not active") {
+		t.Errorf("inactive exclusion not disclosed:\n%s", inactive)
+	}
+
+	// nil status (e.g. a prior index loaded from disk) → no line, no panic.
+	if strings.Contains(RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN), "Self-traffic") {
+		t.Error("nil SelfTraffic should emit no disclosure line")
 	}
 }
 
@@ -189,7 +232,7 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 		{ID: "j-subagent", Category: CategorySubagent, Title: "subagent row", Requests: 1},
 		{ID: "j-heartbeat", Category: CategoryHeartbeat, Title: "heartbeat row", Requests: 1},
 	}
-	md := RenderStoryIndexMarkdown(rows, i18n.EN)
+	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN)
 
 	beforeDetails := md
 	if i := strings.Index(md, "<details>"); i >= 0 {
@@ -217,7 +260,7 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 // ("ps aux | grep vmr") is a completely ordinary way to trigger this.
 func TestRenderStoryIndexMarkdown_EscapesTitle(t *testing.T) {
 	row := JourneyIndexRow{ID: "l-deadbeef", Title: "ps aux | grep vmr <!-- keywords -->", Requests: 1}
-	md := RenderStoryIndexMarkdown([]JourneyIndexRow{row}, i18n.EN)
+	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: []JourneyIndexRow{row}}, i18n.EN)
 
 	lines := strings.Split(md, "\n")
 	var rowLine string

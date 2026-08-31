@@ -79,12 +79,23 @@ func anthropicCoverageNote(protocolShare map[string]float64, t i18n.CorpusText) 
 // mixed-protocol, so "any Anthropic Steps present" is the meaningful
 // binary here, not a percentage.
 func journeyAnthropicCoverageNote(j *Journey, t i18n.SpineText) string {
-	share := protocolShare([]*Journey{j})
-	if len(share) == 0 || share[core.ProtocolAnthropicMessages] > 0 {
+	codes, ok := journeyAnthropicCoverageCodes(j)
+	if !ok {
 		return ""
 	}
-	names := anthropicOnlyCoverageNames(anthropicOnlyCoverage.JourneySections)
-	return t.AnthropicOnlyCoverageNote(strings.Join(names, ", "))
+	return t.AnthropicOnlyCoverageNote(codes)
+}
+
+// journeyAnthropicCoverageCodes returns the affected detector/metric list
+// when j has zero anthropic-messages Steps (ok=false otherwise) —
+// language-independent, so both the Markdown note above and the HTML
+// dashboard (render_html.go) wrap the same list in their own localized prose.
+func journeyAnthropicCoverageCodes(j *Journey) (codes string, ok bool) {
+	share := protocolShare([]*Journey{j})
+	if len(share) == 0 || share[core.ProtocolAnthropicMessages] > 0 {
+		return "", false
+	}
+	return strings.Join(anthropicOnlyCoverageNames(anthropicOnlyCoverage.JourneySections), ", "), true
 }
 
 // anthropicOnlyCoverageNames flattens anthropicOnlyCoverage's Finding/Metric

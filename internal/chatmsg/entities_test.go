@@ -90,3 +90,41 @@ func TestExtractEntitiesCapsAtMaxEntities(t *testing.T) {
 		t.Fatalf("ExtractEntities returned %d entities, want the MaxEntities cap of %d", len(got), MaxEntities)
 	}
 }
+
+func TestExtractEntitiesNear(t *testing.T) {
+	t.Parallel()
+	// "not found" is about config.toml; ChangeSet is ~120 bytes away in an
+	// unrelated clause, os.replace is ~300 bytes away.
+	text := "ENOENT: config.toml not found while loading. " +
+		"the loader then falls back to defaults and continues without a ChangeSet. " +
+		strings.Repeat("padding sentence with no entities at all here. ", 4) +
+		"later code calls os.replace to swap the file atomically."
+	anchors := [][]int{{7, 33}} // roughly the "config.toml not found" span
+
+	near := ExtractEntitiesNear(text, anchors, 60)
+	if !contains(near, "config.toml") {
+		t.Fatalf("config.toml should be within the window: %v", near)
+	}
+	if contains(near, "os.replace") {
+		t.Fatalf("os.replace is ~300 bytes away, should be excluded: %v", near)
+	}
+
+	if got := ExtractEntitiesNear(text, nil, 60); got != nil {
+		t.Fatalf("no anchors should return nil, got %v", got)
+	}
+
+	// Wide enough window pulls everything in — same set as ExtractEntities.
+	wide := ExtractEntitiesNear(text, anchors, 100000)
+	if len(wide) != len(ExtractEntities(text)) {
+		t.Fatalf("wide window = %v, want same as ExtractEntities = %v", wide, ExtractEntities(text))
+	}
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}

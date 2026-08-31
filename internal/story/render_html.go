@@ -58,6 +58,9 @@ func RenderHTML(j *Journey, m Metrics, findings []Finding, cost CostFact, lang i
 	w("</section>\n")
 
 	w("<section class=\"block\" id=\"findings\">\n<h2>%s</h2>\n", he(t.SectionFindings))
+	if codes, ok := journeyAnthropicCoverageCodes(j); ok {
+		w("<blockquote class=\"coverage-note\">%s</blockquote>\n", he(t.AnthropicCoverageNote(codes)))
+	}
 	htmlFindings(w, findings, t, redact)
 	w("</section>\n")
 

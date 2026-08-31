@@ -297,7 +297,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		return err
 	}
 	storiesLink, lineageToJourney := loadStoriesLink(opts.outDir)
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink)), 0o600); err != nil {
+	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink, lineageToJourney)), 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",

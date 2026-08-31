@@ -238,6 +238,15 @@ func detectUnusedToolResult(steps []*Step, tx i18n.StoryFindingsText) []Finding 
 // a not-found-shaped message does.
 var falsificationRe = regexp.MustCompile(`(?i)ENOENT|not found|404|no such file|does not exist|文件不存在|未找到|不存在`)
 
+// falsificationWindowBytes bounds how far from a not-found phrase an entity
+// may sit and still be treated as the thing that phrase reported missing —
+// roughly a line or two either side. Whole-result extraction (the earlier
+// behavior) turned any tool result whose text mentioned "not found"
+// anywhere — a design doc paragraph on 404 handling, a compiler diagnostic,
+// a grep that missed — into a falsification of every path/type/symbol in
+// the blob. See ANALYZE_SAMPLE_REPORTS_REVIEW 问题 11.
+const falsificationWindowBytes = 160
+
 // detectUnverifiedEntityReference flags an entity a tool result reported as
 // missing/not-found, that a LATER Step still refers to without any visible
 // re-verification in between — the design doc's own framing applies
@@ -250,10 +259,11 @@ func detectUnverifiedEntityReference(steps []*Step, tx i18n.StoryFindingsText) [
 	for i, s := range steps {
 		results := toolResultsFor(steps, i)
 		for _, r := range results {
-			if !falsificationRe.MatchString(r.Text) {
+			anchors := falsificationRe.FindAllStringIndex(r.Text, -1)
+			if len(anchors) == 0 {
 				continue
 			}
-			entities := extractEntities(r.Text)
+			entities := chatmsg.ExtractEntitiesNear(r.Text, anchors, falsificationWindowBytes)
 			if len(entities) == 0 {
 				continue
 			}

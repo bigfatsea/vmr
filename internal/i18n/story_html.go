@@ -99,6 +99,11 @@ type StoryHTMLText struct {
 	FindingActionLabel   string
 	NoFindings           string
 	RedactedFindingsNote string
+	// AnthropicCoverageNote is the protocol-blind-spot disclosure the
+	// Markdown Findings section already carries (spine.AnthropicOnlyCoverageNote)
+	// — shown here too so the shareable dashboard is not more confident than
+	// the .md it mirrors (问题 10). codes is the affected detector/metric list.
+	AnthropicCoverageNote func(codes string) string
 }
 
 // StoryHTML returns the dashboard chrome text for lang.
@@ -140,9 +145,9 @@ func StoryHTML(lang Lang) StoryHTMLText {
 			DamageCost: func(amount string) string { return " · 约 " + amount },
 			PointOfNoReturnHead: func(step int, ts string) string {
 				if ts == "" {
-					return fmt.Sprintf("死亡转折点 → 步骤 %d", step)
+					return fmt.Sprintf("不可逆转折点 → 步骤 %d", step)
 				}
-				return fmt.Sprintf("死亡转折点 → 步骤 %d @ %s", step, ts)
+				return fmt.Sprintf("不可逆转折点 → 步骤 %d @ %s", step, ts)
 			},
 			PONRCompaction: func(before, after string, dropped int) string {
 				if before == "" {
@@ -216,6 +221,9 @@ func StoryHTML(lang Lang) StoryHTMLText {
 			FindingActionLabel:   "建议",
 			NoFindings:           "未命中任何行为指标。",
 			RedactedFindingsNote: "脱敏模式：仅列出 Finding 代码与 Step 锚点，叙述文本与证据片段已隐去。",
+			AnthropicCoverageNote: func(codes string) string {
+				return "⚠️ 本 journey 全部请求均为非 Anthropic Messages 协议：以下规则信号依赖仅该协议才会填充的字段，未触发不代表已检查（" + codes + "）。"
+			},
 		}
 	}
 	return StoryHTMLText{
@@ -330,5 +338,8 @@ func StoryHTML(lang Lang) StoryHTMLText {
 		FindingActionLabel:   "action",
 		NoFindings:           "No behavior indicators fired.",
 		RedactedFindingsNote: "Redacted: finding codes and Step anchors only; narrative text and evidence excerpts removed.",
+		AnthropicCoverageNote: func(codes string) string {
+			return "⚠️ Every request in this journey used a non-Anthropic-Messages protocol: the rule signals below read a field only that protocol populates, so one not firing does not mean it was checked (" + codes + ")."
+		},
 	}
 }

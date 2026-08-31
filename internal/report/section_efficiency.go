@@ -28,6 +28,7 @@ import (
 func renderEfficiency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) {
 	t := i18n.Efficiency(lang)
 	w("## %s\n\n", t.Title)
+	renderToolWasteTotals(w, rep, lang)
 	findings := buildFindings(rep, lang)
 	if len(findings) > 0 {
 		h := t.TableHeaders
@@ -56,6 +57,32 @@ func renderEfficiency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 		}
 		w("%s", t.WindowNote)
 	}
+}
+
+// renderToolWasteTotals is §7's top-line: the four window totals
+// tool-waste.html leads with (bytes shipped, dead-weight bytes, wasted
+// tokens, tool-set shape count) — the report's headline efficiency figures,
+// which otherwise lived only in the HTML card (问题 3 / R3a-2). Reuses the
+// card's own i18n labels so the two can't disagree.
+func renderToolWasteTotals(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	if len(rep.Tools) == 0 {
+		return
+	}
+	var shipped, waste int64
+	for _, tl := range rep.Tools {
+		shipped += tl.SchemaBytesShipped
+		waste += tl.SchemaWasteBytes
+	}
+	pct := 0.0
+	if shipped > 0 {
+		pct = float64(waste) / float64(shipped) * 100
+	}
+	tw := i18n.ToolWaste(lang)
+	w("> **%s** %s · **%s** %s (%.0f%%) · **%s** %s · **%s** %d\n\n",
+		tw.StatShipped, fmtBytesGB(shipped),
+		tw.StatDead, fmtBytesGB(waste), pct,
+		tw.StatTokens, twTokens(waste),
+		tw.StatShapes, len(rep.Tools))
 }
 
 // renderToolShapeDetail lists, for one declared-tool-set shape, which tools

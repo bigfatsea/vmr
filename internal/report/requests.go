@@ -557,8 +557,17 @@ func msOrDash(v int64) string {
 }
 
 func finishCell(r RequestRow) string {
-	if r.Outcome != "ok" && r.ErrorClass != "" {
-		return "❌" + r.ErrorClass
+	if r.Outcome != "ok" {
+		// An error/canceled turn with no ErrorClass (pre-routing reject:
+		// unreadable/oversized body, missing model; or a cancel while
+		// queued for a slot — none of these ever reach an upstream, so
+		// nothing classifies them) would otherwise fall through to a bare
+		// "-" and read as a normal finish. Mirror outcomeCell's fallback.
+		ec := r.ErrorClass
+		if ec == "" {
+			ec = "unclassified"
+		}
+		return "❌" + ec
 	}
 	if r.Truncated {
 		return "⚠️trunc"

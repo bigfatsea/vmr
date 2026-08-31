@@ -27,7 +27,7 @@ type DocText struct {
 	HighlightsAuto     string
 	NoAnomalies        string
 	CacheWarn          func(workload, cacheEffPct, freshTokens string) string
-	ToolWarn           func(shape string, requests int, schemaBytes, utilPct string, neverCalled int) string
+	ToolWarn           func(shape string, requests int, schemaBytes, wasteBytes, utilPct string, neverCalled int) string
 	EndpointWarn       func(endpoint, errRatePct, topSuffix string) string
 	TopErrorSuffix     func(cls string, n int) string
 	RequestIndexTitle  string
@@ -49,8 +49,10 @@ type DocText struct {
 	AppendixBillingLine func(suffix string) string
 	AppendixNoPricing   string
 	AppendixSlowThresh  func(sec int) string
-	// AppendixSelfTrafficExcluded (P6.4) reports how many records this
-	// run's self-traffic exclusion skipped.
+	// AppendixSelfTrafficExcluded (P6.4) is shown whenever exclusion was
+	// configured and applied — n is how many records it skipped, and n == 0
+	// ("configured, nothing in this window matched") still takes this line,
+	// not AppendixSelfTrafficNotExcluded.
 	AppendixSelfTrafficExcluded    func(n int) string
 	AppendixSelfTrafficNotExcluded string
 }
@@ -81,8 +83,8 @@ func Doc(lang Lang) DocText {
 			CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 				return "⚠️ **" + workload + " 工作负载缓存效率 " + cacheEffPct + "** - " + freshTokens + " fresh tokens（占该负载输入大头）"
 			},
-			ToolWarn: func(shape string, requests int, schemaBytes, utilPct string, neverCalled int) string {
-				return "⚠️ **工具声明 " + shape + "** - 跨 " + strconv.Itoa(requests) + " 请求发送 " + schemaBytes +
+			ToolWarn: func(shape string, requests int, schemaBytes, wasteBytes, utilPct string, neverCalled int) string {
+				return "⚠️ **工具声明 " + shape + " 浪费 " + wasteBytes + "** - 跨 " + strconv.Itoa(requests) + " 请求发送 " + schemaBytes +
 					" schema，利用率 " + utilPct + "（" + strconv.Itoa(neverCalled) + " 个从未调用）"
 			},
 			EndpointWarn: func(endpoint, errRatePct, topSuffix string) string {
@@ -120,7 +122,7 @@ func Doc(lang Lang) DocText {
 			AppendixNoPricing:  "未配置定价时不显示 $。",
 			AppendixSlowThresh: func(sec int) string { return "- 慢请求阈值: " + strconv.Itoa(sec) + "s\n" },
 			AppendixSelfTrafficExcluded: func(n int) string {
-				return "- 自指流量: 已从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr story -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
+				return "- 自指流量: 排除已启用，本次从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr story -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
 			},
 			AppendixSelfTrafficNotExcluded: "- 自指流量: 未启用排除（未配置排除标识 `llm_key` 或 `self_traffic_client_tags`）。\n",
 		}
@@ -148,8 +150,8 @@ func Doc(lang Lang) DocText {
 		CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 			return "⚠️ **" + workload + " workload cache efficiency " + cacheEffPct + "** - " + freshTokens + " fresh tokens (dominates this workload's input)"
 		},
-		ToolWarn: func(shape string, requests int, schemaBytes, utilPct string, neverCalled int) string {
-			return "⚠️ **Tool declaration " + shape + "** - " + schemaBytes + " schema sent across " + strconv.Itoa(requests) +
+		ToolWarn: func(shape string, requests int, schemaBytes, wasteBytes, utilPct string, neverCalled int) string {
+			return "⚠️ **Tool declaration " + shape + " wastes " + wasteBytes + "** - " + schemaBytes + " schema sent across " + strconv.Itoa(requests) +
 				" requests, utilization " + utilPct + " (" + strconv.Itoa(neverCalled) + " never called)"
 		},
 		EndpointWarn: func(endpoint, errRatePct, topSuffix string) string {
@@ -187,7 +189,7 @@ func Doc(lang Lang) DocText {
 		AppendixNoPricing:  "No $ figures shown when pricing isn't configured.",
 		AppendixSlowThresh: func(sec int) string { return "- Slow-request threshold: " + strconv.Itoa(sec) + "s\n" },
 		AppendixSelfTrafficExcluded: func(n int) string {
-			return "- Self-traffic: excluded " + strconv.Itoa(n) + " analysis request(s) from `vmr story -llm-addr` itself from every total (disable with `-include-self-traffic`).\n"
+			return "- Self-traffic: exclusion active; " + strconv.Itoa(n) + " analysis request(s) from `vmr story -llm-addr` itself removed from every total (disable with `-include-self-traffic`).\n"
 		},
 		AppendixSelfTrafficNotExcluded: "- Self-traffic: exclusion not active (no `llm_key` or `self_traffic_client_tags` configured).\n",
 	}

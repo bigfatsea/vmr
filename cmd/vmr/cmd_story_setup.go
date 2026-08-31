@@ -67,8 +67,13 @@ func setupStoryRun(paths []string, outDir string, includeSelfTraffic bool, llmKe
 	prof := resolveTaskProfile()
 
 	cands := story.ListCandidates(g)
+	selfTraffic := &story.SelfTrafficStatus{}
 	if !includeSelfTraffic {
-		cands = filterSelfTrafficCandidates(cands, llmKey, selfTrafficTags)
+		if before := len(cands); len(selfTrafficExcludeTags(llmKey, selfTrafficTags)) > 0 {
+			cands = filterSelfTrafficCandidates(cands, llmKey, selfTrafficTags)
+			selfTraffic.Active = true
+			selfTraffic.Excluded = before - len(cands)
+		}
 	}
 
 	// One batched title fetch across every candidate (story.PreviewTitles
@@ -89,7 +94,7 @@ func setupStoryRun(paths []string, outDir string, includeSelfTraffic bool, llmKe
 		partial := story.IsPartialHead(chains[i], firstPath)
 		freshRows[i] = story.BuildJourneyIndexRow(chains[i], titles[l], partial)
 	}
-	idx := &story.StoryIndex{Cache: fileCache, Journeys: story.MergeJourneyIndexRows(freshRows, prior.Journeys)}
+	idx := &story.StoryIndex{Cache: fileCache, Journeys: story.MergeJourneyIndexRows(freshRows, prior.Journeys), SelfTraffic: selfTraffic}
 
 	return &storySetup{
 		g: g, byIdx: byIdx, cands: cands, chains: chains, freshRows: freshRows,

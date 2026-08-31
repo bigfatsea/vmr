@@ -85,6 +85,13 @@ type Meta struct {
 	// the workload actually being analyzed. Counted, never silently
 	// dropped; 0 when no exclusion tags were configured or none matched.
 	SelfTrafficExcluded int `json:"self_traffic_excluded,omitempty"`
+	// SelfTrafficExclusionActive is whether an exclusion tag set was
+	// configured and applied this run — distinct from SelfTrafficExcluded > 0,
+	// which also needs the window to actually contain matching records. The
+	// appendix disclosure keys off this so "configured, nothing matched"
+	// isn't reported as "not configured" (and doesn't contradict the story
+	// half's own disclosure on the same run).
+	SelfTrafficExclusionActive bool `json:"self_traffic_exclusion_active,omitempty"`
 
 	// QuotaJSONPath/QuotaInputOutsideLogDir are cmd_report.go's
 	// composition-root facts about §2.5's live-quota counter, set on rep

@@ -54,6 +54,36 @@ func trimPunctuation(s string) string {
 // ExtractEntities returns the de-duplicated, order-preserved list of
 // file paths, URLs, identifiers, and CLI commands found in text, capped at MaxEntities.
 func ExtractEntities(text string) []string {
+	return entitiesFromSpans(collectEntitySpans(text))
+}
+
+// ExtractEntitiesNear is ExtractEntities restricted to entities whose span
+// falls within window bytes of any [start,end) range in anchors. Detectors
+// that key off a specific phrase in a tool result (e.g. a "not found"
+// marker) use this so a token elsewhere in the same blob — a path named in
+// a design doc that merely discusses 404 handling, a stdlib type in an
+// unrelated code snippet — is not treated as the thing that phrase reported
+// missing. Empty anchors returns nil. See ANALYZE_SAMPLE_REPORTS_REVIEW 问题 11.
+func ExtractEntitiesNear(text string, anchors [][]int, window int) []string {
+	if len(anchors) == 0 {
+		return nil
+	}
+	spans := collectEntitySpans(text)
+	kept := spans[:0]
+	for _, sp := range spans {
+		for _, a := range anchors {
+			if sp.start < a[1]+window && sp.end > a[0]-window {
+				kept = append(kept, sp)
+				break
+			}
+		}
+	}
+	return entitiesFromSpans(kept)
+}
+
+// collectEntitySpans runs the seven rule scans, drops spans strictly
+// contained in a larger one, and returns what's left sorted by start index.
+func collectEntitySpans(text string) []rawSpan {
 	if len(text) == 0 {
 		return nil
 	}
@@ -142,11 +172,15 @@ func ExtractEntities(text string) []string {
 		}
 		return (outerSpans[i].end - outerSpans[i].start) > (outerSpans[j].end - outerSpans[j].start)
 	})
+	return outerSpans
+}
 
+// entitiesFromSpans de-duplicates by value, preserves order, and caps at
+// MaxEntities.
+func entitiesFromSpans(spans []rawSpan) []string {
 	seen := map[string]bool{}
 	var out []string
-
-	for _, sp := range outerSpans {
+	for _, sp := range spans {
 		if seen[sp.val] {
 			continue
 		}

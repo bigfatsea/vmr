@@ -602,3 +602,26 @@ func TestComputeDivergence(t *testing.T) {
 		}
 	})
 }
+
+func TestFormatDelta(t *testing.T) {
+	cases := []struct {
+		a, b float64
+		want string
+	}{
+		{0, 0, "—"},
+		{0, 5, "new"},
+		{5, 0, "-100%"},
+		{5.0, 774.6, "155×"},    // R5-1's "5s vs 774.6s" — was "+99%"
+		{27.8, 1261.0, "45.4×"}, // model time — was "+98%"
+		{5, 89, "17.8×"},        // tool calls 5→89 — was "+94%"
+		{100, 160, "+60%"},      // middle band: ordinary relative change
+		{100, 90, "-10%"},       // middle band, decrease
+		{100, 2, "0.02×"},       // steep drop
+		{100, 210, "2.1×"},      // just over the 2× line
+	}
+	for _, c := range cases {
+		if got := formatDelta(c.a, c.b, "new"); got != c.want {
+			t.Errorf("formatDelta(%v, %v) = %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}
