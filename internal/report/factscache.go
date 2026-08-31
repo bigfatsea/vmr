@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/reqdetail"
 )
@@ -111,7 +112,11 @@ func extractRecordFacts(arec *audit.Record, line int) recordFacts {
 	// irrelevant) — cheap relative to what caching it buys: a cache hit
 	// must never need arec again for any reason, or the whole point of
 	// caching this file is lost.
-	rf.EstInFresh, rf.EstOut = estimateDegradedTokens(arec)
+	var respBody any
+	if arec.Client.Response != nil {
+		respBody = arec.Client.Response.Body
+	}
+	rf.EstInFresh, rf.EstOut = chatmsg.EstimateDegradedTokens(arec.Facts, arec.Client.Request.Body, respBody)
 	rf.Attempts = attemptFactsFrom(arec.Attempts)
 	return rf
 }

@@ -148,6 +148,12 @@ root allowed to see both halves at once.
   recording why a superseded approach was wrong. But one-off comprehensive review reports
   are no longer *produced* — a finding or decision worth keeping goes straight into
   `KNOWN_ISSUES` (or the relevant design doc) as a current-state fact.
+- **Avoid volatile exact numbers in documentation and release notes.** Counts that naturally
+  fluctuate with periodic refreshes, standard table snapshots, model iterations, or dataset
+  sizes (e.g. exact alias counts, total pricing rows, exact model counts) must not be
+  hardcoded in user guides, design docs, or release notes as structural invariants. Describe
+  mechanisms, principles, and categories instead of volatile quantities, so documentation
+  does not silently turn into misleading technical debt upon routine data updates.
 - **No changelog-style revision — even inside review reports.** When revising a section
   (whether asked to "rewrite" or to "review and refine" / "refine" / "polish"), state the
   final reasoning once, as one coherent pass: the structure, the cause analysis, the

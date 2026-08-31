@@ -30,6 +30,18 @@ type Resolver struct {
 	// unaware — it just multiplies whatever four-component Rate this
 	// Resolver hands it against raw token counts.
 	displayFactor float64
+	// tableFactor is the USD -> accounting-currency factor — see NewResolver.
+	tableFactor float64
+	// currency is the accounting currency this Resolver resolves in
+	// (config.yaml's pricing.currency; "" when none was configured,
+	// matching internal/config's own Resolve call). Stamped onto every
+	// cached spec's Currency — vmr report's per-record RateFor path must
+	// carry the same label the config path stamps on its ResolvedPricing
+	// specs, or core.PricingSpec.Currency is populated in one consumer and
+	// empty in the other (a two-half contract inconsistency). Distinct from
+	// displayFactor: resolution happens in the accounting currency, and the
+	// display rescale only renumbers the Rate it returns.
+	currency string
 
 	mu    sync.Mutex
 	cache map[string]*core.PricingSpec // "provider\x00model" -> resolved spec, or an explicit nil entry caching a miss
@@ -38,22 +50,35 @@ type Resolver struct {
 // ProviderPolicy is one provider's map/overrides — the account-specific
 // half of ResolveOptions, without the shared Table (which NewResolver takes
 // once, separately, since every provider resolves against the SAME merged
-// standard(+supplement) table).
+// standard(+supplement) table) and without the USD -> accounting-currency
+// factor, which is global (config.yaml's pricing.currency/exchange_rate)
+// and lives on the Resolver for exactly that reason. Holding that factor
+// per provider was a real bug, not just redundancy: an audit log names
+// every provider that EVER ran, including ones since renamed or deleted,
+// and those resolved through a zero-value policy — factor 1.0 — so the same
+// canonical row rendered as USD for one provider and as CNY for another,
+// side by side in one table, off by the exchange rate.
 type ProviderPolicy struct {
-	Map                  map[string]string
-	Overrides            []OverrideRule
-	ExchangeRateToTarget float64
-	Currency             string
+	Map       map[string]string
+	Overrides []OverrideRule
 }
 
 // NewResolver builds a Resolver over table, with each named provider's own
-// policy (map/overrides/currency) — a provider with no entry in
-// perProvider resolves using the zero ProviderPolicy (no map, no
-// overrides, factor 1.0, no currency conversion): still useful, since the
-// standard table alone can resolve plenty of provider+model pairs on its
-// own (see resolveCanonicalKey's steps ②-④, none of which need a policy).
-func NewResolver(table *Table, perProvider map[string]ProviderPolicy) *Resolver {
-	return &Resolver{table: table, perProvider: perProvider, cache: map[string]*core.PricingSpec{}}
+// policy (map/overrides) — a provider with no entry in perProvider
+// resolves using the zero ProviderPolicy (no map, no overrides): still
+// useful, since the standard table alone can resolve plenty of
+// provider+model pairs on its own (see resolveCanonicalKey's steps ②-④,
+// none of which need a policy).
+// tableFactor converts one USD unit of table into the accounting currency
+// (config.yaml's pricing.currency) — 1, or 0 for "not configured", both
+// meaning no conversion. It applies to every provider alike, including one
+// that appears only in an audit log and has no entry in perProvider at all.
+// currency is that accounting currency's code ("" when none was
+// configured, matching internal/config's own Resolve call): stamped onto
+// every resolved spec's Currency field, so the offline path labels a
+// number it computed the same way the config path does.
+func NewResolver(table *Table, perProvider map[string]ProviderPolicy, tableFactor float64, currency string) *Resolver {
+	return &Resolver{table: table, perProvider: perProvider, tableFactor: tableFactor, currency: currency, cache: map[string]*core.PricingSpec{}}
 }
 
 // WithDisplayFactor returns a new Resolver that scales every RateFor result
@@ -66,7 +91,7 @@ func NewResolver(table *Table, perProvider map[string]ProviderPolicy) *Resolver 
 // empty cache is cheap here since callers always call this immediately
 // after NewResolver, before any RateFor call has populated it.
 func (r *Resolver) WithDisplayFactor(f float64) *Resolver {
-	nr := NewResolver(r.table, r.perProvider)
+	nr := NewResolver(r.table, r.perProvider, r.tableFactor, r.currency)
 	nr.displayFactor = f
 	return nr
 }
@@ -119,7 +144,7 @@ func (r *Resolver) resolve(provider, model string) (*core.PricingSpec, bool) {
 	policy := r.perProvider[provider]
 	spec, ok := Resolve(provider, model, ResolveOptions{
 		Table: r.table, Map: policy.Map, Overrides: policy.Overrides,
-		ExchangeRateToTarget: policy.ExchangeRateToTarget, Currency: policy.Currency,
+		ExchangeRateToTarget: r.tableFactor, Currency: r.currency,
 	})
 	if !ok {
 		r.cache[key] = nil

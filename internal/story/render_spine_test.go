@@ -252,12 +252,12 @@ func TestRenderOverviewCard(t *testing.T) {
 		j := journeyOf(s)
 
 		w, buf := capture()
-		renderOverviewCard(w, j, Metrics{}, &CostFact{Resolved: true, TotalUSD: 4.2}, i18n.EN)
+		renderOverviewCard(w, j, Metrics{}, &CostFact{Resolved: true, Total: fp(4.2)}, i18n.EN)
 		if got := buf.String(); !strings.Contains(got, "Estimated cost ≈ $4.20") {
 			t.Errorf("resolved cost should add the estimate line, got %q", got)
 		}
 
-		for _, c := range []*CostFact{nil, {Resolved: false, TotalUSD: 9}} {
+		for _, c := range []*CostFact{nil, {Resolved: false, Total: fp(9)}} {
 			w, buf := capture()
 			renderOverviewCard(w, j, Metrics{}, c, i18n.EN)
 			if strings.Contains(buf.String(), "Estimated cost") {

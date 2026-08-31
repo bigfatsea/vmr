@@ -231,7 +231,7 @@ func htmlDamageCost(c CostFact, t i18n.StoryHTMLText) string {
 // fmtMoney formats c's total with its currency — "$4.80" for USD/blank,
 // "CNY 34.20" otherwise, a trailing "+" when the estimate is partial.
 func fmtMoney(c CostFact) string {
-	amt := strconv.FormatFloat(c.TotalUSD, 'f', moneyDecimals(c.TotalUSD), 64)
+	amt := strconv.FormatFloat(c.TotalAmount(), 'f', moneyDecimals(c.TotalAmount()), 64)
 	s := amt
 	if c.Currency == "" || c.Currency == "USD" {
 		s = "$" + amt

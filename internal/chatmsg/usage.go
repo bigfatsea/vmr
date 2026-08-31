@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"vmr/internal/tokenutil"
 )
 
 // Usage is one record's extracted token usage, split by whether the input
@@ -163,4 +165,39 @@ func usageFromObj(m map[string]any) Usage {
 	u.Out = max(num(m["completion_tokens"]), num(m["output_tokens"]))
 	u.Reasoning = max(num(Nested(m, "completion_tokens_details", "reasoning_tokens")), num(Nested(m, "output_tokens_details", "reasoning_tokens")))
 	return u
+}
+
+// BodyRaw normalizes one audit-record body — which the JSONL decoder hands
+// back as a string, a map, or nil depending on how it was written — into
+// the raw JSON bytes every estimator and parser downstream wants. Lives
+// here, next to ExtractUsage (the other function that has to cope with that
+// same `any`), because THREE packages need it and the dependency graph only
+// admits one: internal/reqdetail imports internal/ctxgraph, so the helper
+// could not live in reqdetail and still be reachable from ctxgraph's
+// manifest build.
+func BodyRaw(body any) []byte {
+	switch b := body.(type) {
+	case nil:
+		return nil
+	case string:
+		return []byte(b)
+	default:
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return nil
+		}
+		return raw
+	}
+}
+
+// EstimateBodyTokens is BodyRaw + tokenutil.Estimate: the degraded
+// token estimate used wherever an upstream reported no usage at all. One
+// implementation, because the macro report's §2 total and a journey's own
+// cost line are supposed to be the same number for the same records — they
+// were not, and the divergence was invisible: both went through
+// pricing.Rate.Cost (the shared FORMULA), but fed it different BASES, which
+// is exactly the failure mode CLAUDE.md's "an analytics number that
+// reproduces another must be pinned, not commented" rule is about.
+func EstimateBodyTokens(body any) int64 {
+	return tokenutil.Estimate(BodyRaw(body))
 }

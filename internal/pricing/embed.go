@@ -43,5 +43,13 @@ func LoadStandard() (*Table, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedded standard_price_curated.yaml: %w", err)
 	}
-	return Merge(generated, curated), nil
+	merged := Merge(generated, curated)
+	// A curated alias naming a key the generated table dropped (a model
+	// retired upstream, a renamed canonical id) must fail here, at build/
+	// startup, not fall through to the suffix scan and land on some other
+	// vendor's number months later.
+	if err := merged.ValidateAliases(); err != nil {
+		return nil, fmt.Errorf("embedded standard_price_curated.yaml: %w", err)
+	}
+	return merged, nil
 }

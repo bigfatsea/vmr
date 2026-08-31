@@ -4,8 +4,6 @@
 package report
 
 import (
-	"strings"
-
 	"vmr/internal/pricing"
 )
 
@@ -27,8 +25,14 @@ func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, b
 	if pricingSrc == nil || rc.endpoint == "" {
 		return
 	}
-	provider, model := splitEndpointProviderModel(rc.endpoint)
-	pr, ok := pricingSrc.RateFor(provider, model)
+	// RateForEndpoint splits the label itself (strict ":", the same
+	// split core.SplitEndpointLabel accepts plus the legacy "/" form
+	// deliberately excluded here) — the one shared entry point story's
+	// ComputeJourneyCost also prices through, so the two halves can't
+	// drift on how a label becomes a provider+model. A legacy "/"-joined
+	// label still resolves to nothing and is silently skipped, exactly as
+	// before (see KNOWN_ISSUES: the strict split is a recorded non-fix).
+	pr, ok := pricingSrc.RateForEndpoint(rc.endpoint)
 	if !ok {
 		return
 	}
@@ -40,6 +44,9 @@ func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, b
 		addCost(&ea.CostEstimate, c)
 		if estimated {
 			ea.CostEstimateEst += c
+		}
+		if !pr.Complete() {
+			ea.CostRateIncomplete = true
 		}
 	}
 	if rc.clientKey != "" {
@@ -60,24 +67,4 @@ func addCost(p **float64, c float64) {
 		*p = new(float64)
 	}
 	**p += c
-}
-
-// splitEndpointProviderModel splits a "protocol:provider:model" endpoint
-// label into its provider and model segments — pricing is keyed by
-// provider+model only, protocol-agnostic (see internal/pricing's package
-// doc comment). SplitN(…, 3) rather than a plain Split: a real-world model
-// name can itself contain ":" or "/" (e.g. OpenRouter's "z-ai/glm-5.2"), so
-// this only ever isolates the first two colon-separated segments and
-// leaves the third — the model — exactly as-is, whatever it contains.
-//
-// Deliberately NOT replaced by core.SplitEndpointLabel, which also accepts
-// the legacy "/"-joined label: widening this one call site would change the $
-// numbers historical reports produce for old-format logs. See that function's
-// doc comment — this duplication is a recorded non-fix, not an oversight.
-func splitEndpointProviderModel(endpoint string) (provider, model string) {
-	parts := strings.SplitN(endpoint, ":", 3)
-	if len(parts) < 3 {
-		return "", ""
-	}
-	return parts[1], parts[2]
 }

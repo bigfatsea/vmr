@@ -39,8 +39,8 @@ import (
 // cost, when non-nil and resolved, adds the estimated-spend line to the
 // overview card — same *pricing.Resolver-derived CostFact the JSON summary
 // and the HTML dashboard already carry, threaded in (not computed here) for
-// the same reason. nil (the default batch suite, which prices nothing) leaves
-// the line out, matching that suite's cost-free JSON.
+// the same reason. nil or unresolved leaves the line out (e.g. no price
+// table resolvable for this journey's endpoints).
 func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, reportMDExists, linkDetails bool, cost *CostFact) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }

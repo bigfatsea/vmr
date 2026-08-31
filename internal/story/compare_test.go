@@ -413,7 +413,7 @@ func TestRenderComparisonMarkdown_CostLine(t *testing.T) {
 	t.Run("one side priced: line plus footnote, deliverable section skipped", func(t *testing.T) {
 		cmp := Compare(a, b, i18n.EN)
 		cmp.Extras = &ComparisonExtras{Cost: CostPair{
-			A: CostFact{Resolved: true, TotalUSD: 3.5},
+			A: CostFact{Resolved: true, Total: fp(3.5)},
 			B: CostFact{Resolved: false},
 		}}
 		md := RenderComparisonMarkdown(cmp, i18n.EN)

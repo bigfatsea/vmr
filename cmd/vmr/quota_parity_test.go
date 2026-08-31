@@ -366,7 +366,7 @@ func tokensParityFixture() []parityRequest {
 // only body in play. In production the router counts UPSTREAM bytes while the
 // report can only count the forwarded ones, so the two differ by whatever
 // response normalization rewrote — a residual documented on
-// report.estimateDegradedTokens and surfaced to users through
+// chatmsg.EstimateDegradedTokens and surfaced to users through
 // ProviderQuotaRow.WindowEstimatedPct, NOT something this test can or should
 // paper over. What it pins is the part that can silently drift: the formula
 // and the basis.

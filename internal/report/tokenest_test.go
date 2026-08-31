@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/tokenutil"
 )
@@ -20,7 +21,7 @@ func TestEstimateDegradedTokens_FactsPresent(t *testing.T) {
 			Response: &audit.Message{Body: "some response text"},
 		},
 	}
-	inEst, outEst := estimateDegradedTokens(arec)
+	inEst, outEst := chatmsg.EstimateDegradedTokens(arec.Facts, arec.Client.Request.Body, arec.Client.Response.Body)
 	if inEst != 4242 {
 		t.Errorf("inEst = %d, want Facts.EstimatedTokens (4242) verbatim", inEst)
 	}
@@ -45,12 +46,25 @@ func TestEstimateDegradedTokens_FactsNil(t *testing.T) {
 			Response: &audit.Message{Body: "some response text"},
 		},
 	}
-	inEst, _ := estimateDegradedTokens(arec)
+	inEst, _ := chatmsg.EstimateDegradedTokens(nil, arec.Client.Request.Body, arec.Client.Response.Body)
 	wantIn := tokenutil.Estimate([]byte(reqBody))
 	if inEst != wantIn {
 		t.Errorf("inEst = %d, want %d (tokenutil.Estimate over the raw request body, matching internal/replay's chargeReplay)", inEst, wantIn)
 	}
 	if inEst == 0 {
 		t.Error("inEst = 0: the pre-fix bug this test guards against — a nil Facts silently dropping the request-side estimate")
+	}
+}
+
+// TestEstimateDegradedTokens_NoResponse pins the nil-response branch: a
+// record with no client response at all (nothing was ever committed to the
+// client) contributes 0 on the output side, never a panic.
+func TestEstimateDegradedTokens_NoResponse(t *testing.T) {
+	inEst, outEst := chatmsg.EstimateDegradedTokens(nil, `{"model":"agent"}`, nil)
+	if inEst == 0 {
+		t.Error("inEst = 0: a body is present and must be estimated")
+	}
+	if outEst != 0 {
+		t.Errorf("outEst = %d, want 0 for a nil response", outEst)
 	}
 }

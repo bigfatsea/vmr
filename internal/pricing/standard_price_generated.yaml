@@ -18,8 +18,15 @@
 #
 # All amounts are USD per 1,000,000 tokens. A component absent from a row
 # means "unknown" (not "free") — see internal/pricing.Rate.Complete.
+#
+# Aliases are NOT written here. A bare model name -> canonical key mapping
+# is a resolution-semantic the hand-maintained standard_price_curated.yaml
+# owns (see that file's aliases: block) — a generated table must stay a pure
+# price list, or a regenerated snapshot would silently overwrite a hand
+# decision. Vendor precedence (LookupPreferredSuffix) already resolves most
+# bare names with no alias at all.
 currency: USD
-generated_at: "2026-08-11"
+generated_at: "2026-08-31"
 rates:
   - key: anthropic/claude-3-7-sonnet-20250219
     in_fresh: 3
@@ -61,6 +68,16 @@ rates:
     cache_read: 0.09999999999999999
     cache_write: 1.25
     out: 5
+  - key: anthropic/claude-mythos-5
+    in_fresh: 10
+    cache_read: 1
+    cache_write: 12.5
+    out: 50
+  - key: anthropic/claude-mythos-preview
+    in_fresh: 10
+    cache_read: 1
+    cache_write: 12.5
+    out: 50
   - key: anthropic/claude-opus-4-1
     in_fresh: 15
     cache_read: 1.5
@@ -162,6 +179,30 @@ rates:
   - key: cohere_chat/command-r7b-12-2024
     in_fresh: 0.0375
     out: 0.15
+  - key: dashscope/deepseek-v4-flash
+    in_fresh: 0.19999999999999998
+    cache_read: 0.04
+    out: 0.39999999999999997
+  - key: dashscope/deepseek-v4-flash-0731
+    in_fresh: 0.19999999999999998
+    cache_read: 0.04
+    out: 0.39999999999999997
+  - key: dashscope/deepseek-v4-pro
+    in_fresh: 2.4
+    cache_read: 0.19999999999999998
+    out: 4.8
+  - key: dashscope/glm-5.1
+    in_fresh: 1.4
+    cache_read: 0.26
+    out: 4.4
+  - key: dashscope/glm-5.2
+    in_fresh: 1.4
+    cache_read: 0.28
+    out: 4.4
+  - key: dashscope/kimi-k2.7-code
+    in_fresh: 0.95
+    cache_read: 0.19
+    out: 4
   - key: dashscope/qwen-coder
     in_fresh: 0.3
     out: 1.5
@@ -214,6 +255,10 @@ rates:
     in_fresh: 2.5
     cache_read: 0.5
     out: 7.5
+  - key: dashscope/qwen3.8-max
+    in_fresh: 2
+    cache_read: 0.25
+    out: 6
   - key: dashscope/qwq-plus
     in_fresh: 0.7999999999999999
     out: 2.4
@@ -240,15 +285,20 @@ rates:
     in_fresh: 0.28
     out: 0.39999999999999997
   - key: deepseek/deepseek-v4-flash
-    in_fresh: 0.14
-    cache_read: 0.0028
+    in_fresh: 0.44
+    cache_read: 0.014
     cache_write: 0
-    out: 0.28
+    out: 1.32
+  - key: deepseek/deepseek-v4-flash-vision-exp
+    in_fresh: 0.44
+    cache_read: 0.014
+    cache_write: 0
+    out: 1.32
   - key: deepseek/deepseek-v4-pro
-    in_fresh: 0.435
-    cache_read: 0.003625
+    in_fresh: 1.32
+    cache_read: 0.044
     cache_write: 0
-    out: 0.87
+    out: 3.9600000000000004
   - key: fireworks_ai/chronos-hermes-13b-v2
     in_fresh: 0.19999999999999998
     out: 0.19999999999999998
@@ -400,10 +450,18 @@ rates:
     in_fresh: 0.14
     cache_read: 0.028
     out: 0.28
+  - key: fireworks_ai/deepseek-v4-flash-0731
+    in_fresh: 0.22
+    cache_read: 0.007
+    out: 0.66
   - key: fireworks_ai/deepseek-v4-pro
     in_fresh: 1.74
     cache_read: 0.145
     out: 3.48
+  - key: fireworks_ai/deepseek-v4-pro-0813
+    in_fresh: 1.32
+    cache_read: 0.044
+    out: 3.9600000000000004
   - key: fireworks_ai/devstral-small-2505
     in_fresh: 0.8999999999999999
     out: 0.8999999999999999
@@ -492,6 +550,18 @@ rates:
     in_fresh: 1.4
     cache_read: 0.14
     out: 4.4
+  - key: fireworks_ai/glm-5p2-fast
+    in_fresh: 2.0999999999999996
+    cache_read: 0.21
+    out: 6.6000000000000005
+  - key: fireworks_ai/glm-5p2-fast-us
+    in_fresh: 2.0999999999999996
+    cache_read: 0.21
+    out: 6.6000000000000005
+  - key: fireworks_ai/glm-5p3
+    in_fresh: 1.4
+    cache_read: 0.26
+    out: 4.4
   - key: fireworks_ai/gpt-oss-120b
     in_fresh: 0.15
     cache_read: 0.015
@@ -556,6 +626,18 @@ rates:
     in_fresh: 1.9
     cache_read: 0.38
     out: 8
+  - key: fireworks_ai/kimi-k3
+    in_fresh: 3
+    cache_read: 0.3
+    out: 15
+  - key: fireworks_ai/kimi-k3-fast
+    in_fresh: 4.5
+    cache_read: 0.44999999999999996
+    out: 22.5
+  - key: fireworks_ai/kimi-k3-us
+    in_fresh: 3.3000000000000003
+    cache_read: 0.33
+    out: 16.5
   - key: fireworks_ai/llama-guard-2-8b
     in_fresh: 0.19999999999999998
     out: 0.19999999999999998
@@ -718,8 +800,20 @@ rates:
   - key: fireworks_ai/mixtral-8x7b-instruct-hf
     in_fresh: 0.5
     out: 0.5
+  - key: fireworks_ai/muse-glimmer-30b
+    in_fresh: 0.35
+    cache_read: 0.04
+    out: 1.5
   - key: fireworks_ai/mythomax-l2-13b
     in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: fireworks_ai/nemotron-3-ultra-nvfp4
+    in_fresh: 0.6
+    cache_read: 0.12
+    out: 2.4
+  - key: fireworks_ai/nemotron-lightning-3p5-30b-a3b
+    in_fresh: 0.049999999999999996
+    cache_read: 0.01
     out: 0.19999999999999998
   - key: fireworks_ai/nemotron-nano-v2-12b-vl
     in_fresh: 0.09999999999999999
@@ -977,6 +1071,10 @@ rates:
     in_fresh: 0.39999999999999997
     cache_read: 0.08
     out: 1.5999999999999999
+  - key: fireworks_ai/qwen3p8-max
+    in_fresh: 2
+    cache_read: 0.25
+    out: 6
   - key: fireworks_ai/qwq-32b
     in_fresh: 0.8999999999999999
     out: 0.8999999999999999
@@ -1054,33 +1152,33 @@ rates:
     out: 0.39999999999999997
   - key: gemini/gemini-2.5-flash-lite-preview-06-17
     in_fresh: 0.09999999999999999
-    cache_read: 0.024999999999999998
+    cache_read: 0.01
     out: 0.39999999999999997
   - key: gemini/gemini-2.5-flash-lite-preview-09-2025
     in_fresh: 0.09999999999999999
     cache_read: 0.01
     out: 0.39999999999999997
   - key: gemini/gemini-2.5-flash-native-audio-latest
-    in_fresh: 0.3
-    out: 2.5
+    in_fresh: 0.5
+    out: 2
   - key: gemini/gemini-2.5-flash-native-audio-preview-09-2025
-    in_fresh: 0.3
-    out: 2.5
+    in_fresh: 0.5
+    out: 2
   - key: gemini/gemini-2.5-flash-native-audio-preview-12-2025
-    in_fresh: 0.3
-    out: 2.5
+    in_fresh: 0.5
+    out: 2
   - key: gemini/gemini-2.5-flash-preview-09-2025
     in_fresh: 0.3
-    cache_read: 0.075
+    cache_read: 0.03
     out: 2.5
   - key: gemini/gemini-2.5-pro
     in_fresh: 1.25
     cache_read: 0.125
     out: 10
   - key: gemini/gemini-2.5-pro-preview-tts
-    in_fresh: 1.25
+    in_fresh: 1
     cache_read: 0.125
-    out: 10
+    out: 20
   - key: gemini/gemini-3-flash-preview
     in_fresh: 0.5
     cache_read: 0.049999999999999996
@@ -1116,10 +1214,17 @@ rates:
     in_fresh: 0.3
     cache_read: 0.03
     out: 2.5
+  - key: gemini/gemini-3.5-live-translate-preview
+    in_fresh: 3.5
+    out: 21
   - key: gemini/gemini-3.6-flash
-    in_fresh: 1.5
-    cache_read: 0.15
-    out: 7.5
+    in_fresh: 0.75
+    cache_read: 0.075
+    out: 3.75
+  - key: gemini/gemini-3.7-flash
+    in_fresh: 0.75
+    cache_read: 0.075
+    out: 3.75
   - key: gemini/gemini-exp-1114
     in_fresh: 0
     out: 0
@@ -1141,6 +1246,9 @@ rates:
   - key: gemini/gemini-gemma-2-9b-it
     in_fresh: 0.35
     out: 1.0499999999999998
+  - key: gemini/gemini-omni-1.1-flash
+    in_fresh: 1.5
+    out: 9
   - key: gemini/gemini-omni-flash-preview
     in_fresh: 1.5
     out: 9
@@ -1159,7 +1267,16 @@ rates:
     in_fresh: 2
     cache_read: 0.19999999999999998
     out: 10
+  - key: gemini/gemini-robotics-er-2-streaming-preview
+    in_fresh: 2
+    out: 10
   - key: gemini/gemma-3-27b-it
+    in_fresh: 0
+    out: 0
+  - key: gemini/gemma-4-26b-a4b-it
+    in_fresh: 0
+    out: 0
+  - key: gemini/gemma-4-31b-it
     in_fresh: 0
     out: 0
   - key: gemini/learnlm-1.5-pro-experimental
@@ -1205,35 +1322,47 @@ rates:
   - key: groq/llama-guard-4-12b
     in_fresh: 0.19999999999999998
     out: 0.19999999999999998
+  - key: groq/llama-prompt-guard-2-22m
+    in_fresh: 0.03
+    out: 0.03
+  - key: groq/llama-prompt-guard-2-86m
+    in_fresh: 0.04
+    out: 0.04
   - key: groq/qwen3-32b
     in_fresh: 0.29
     out: 0.59
-  - key: minimax/MiniMax-M2
+  - key: groq/qwen3.6-27b
+    in_fresh: 0.6
+    out: 3
+  - key: groq/qwen3.8-27b
+    in_fresh: 0.7999999999999999
+    out: 4
+  - key: minimax/minimax-m2
     in_fresh: 0.3
     cache_read: 0.03
     cache_write: 0.375
     out: 1.2
-  - key: minimax/MiniMax-M2.1
+  - key: minimax/minimax-m2.1
     in_fresh: 0.3
     cache_read: 0.03
     cache_write: 0.375
     out: 1.2
-  - key: minimax/MiniMax-M2.1-lightning
+  - key: minimax/minimax-m2.1-lightning
     in_fresh: 0.3
     cache_read: 0.03
     cache_write: 0.375
     out: 2.4
-  - key: minimax/MiniMax-M2.5
+  - key: minimax/minimax-m2.5
     in_fresh: 0.3
     cache_read: 0.03
     cache_write: 0.375
     out: 1.2
-  - key: minimax/MiniMax-M2.5-lightning
+  - key: minimax/minimax-m2.5-lightning
     in_fresh: 0.3
     cache_read: 0.03
     cache_write: 0.375
     out: 2.4
-  - key: minimax/MiniMax-M3
+  - key: minimax/minimax-m3
     in_fresh: 0.3
     cache_read: 0.06
     out: 1.2
@@ -1242,10 +1371,12 @@ rates:
     out: 3
   - key: mistral/codestral-2508
     in_fresh: 0.3
+    cache_read: 0.03
     out: 0.8999999999999999
   - key: mistral/codestral-latest
-    in_fresh: 1
-    out: 3
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 0.8999999999999999
   - key: mistral/codestral-mamba-latest
     in_fresh: 0.25
     out: 0.25
@@ -1270,9 +1401,19 @@ rates:
   - key: mistral/devstral-small-latest
     in_fresh: 0.09999999999999999
     out: 0.3
+  - key: mistral/glm-5-2
+    in_fresh: 1.4
+    cache_read: 0.14
+    out: 4.4
   - key: mistral/labs-devstral-small-2512
     in_fresh: 0.09999999999999999
     out: 0.3
+  - key: mistral/labs-leanstral-1-5
+    in_fresh: 0
+    out: 0
+  - key: mistral/labs-leanstral-1-5-1
+    in_fresh: 0
+    out: 0
   - key: mistral/magistral-medium-1-2-2509
     in_fresh: 2
     out: 5
@@ -1294,21 +1435,49 @@ rates:
   - key: mistral/magistral-small-latest
     in_fresh: 0.5
     out: 1.5
+  - key: mistral/ministral-14b-2512
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: mistral/ministral-14b-latest
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
   - key: mistral/ministral-3-14b-2512
     in_fresh: 0.19999999999999998
+    cache_read: 0.02
     out: 0.19999999999999998
   - key: mistral/ministral-3-3b-2512
     in_fresh: 0.09999999999999999
+    cache_read: 0.01
     out: 0.09999999999999999
   - key: mistral/ministral-3-8b-2512
     in_fresh: 0.15
+    cache_read: 0.015
     out: 0.15
+  - key: mistral/ministral-3b-2512
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: mistral/ministral-3b-latest
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
   - key: mistral/ministral-8b-2512
     in_fresh: 0.15
+    cache_read: 0.015
     out: 0.15
   - key: mistral/ministral-8b-latest
     in_fresh: 0.15
+    cache_read: 0.015
     out: 0.15
+  - key: mistral/mistral-code-agent-latest
+    in_fresh: 0.39999999999999997
+    out: 2
+  - key: mistral/mistral-code-fim-latest
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 0.8999999999999999
+  - key: mistral/mistral-code-latest
+    in_fresh: 0.3
+    cache_read: 0.03
+    out: 0.8999999999999999
   - key: mistral/mistral-large-2402
     in_fresh: 4
     out: 12
@@ -1320,12 +1489,15 @@ rates:
     out: 6
   - key: mistral/mistral-large-2512
     in_fresh: 0.5
+    cache_read: 0.049999999999999996
     out: 1.5
   - key: mistral/mistral-large-3
     in_fresh: 0.5
+    cache_read: 0.049999999999999996
     out: 1.5
   - key: mistral/mistral-large-latest
     in_fresh: 0.5
+    cache_read: 0.049999999999999996
     out: 1.5
   - key: mistral/mistral-medium
     in_fresh: 2.7
@@ -1341,28 +1513,55 @@ rates:
     out: 2
   - key: mistral/mistral-medium-2604
     in_fresh: 1.5
+    cache_read: 0.15
+    out: 7.5
+  - key: mistral/mistral-medium-3
+    in_fresh: 1.5
     out: 7.5
   - key: mistral/mistral-medium-3-1-2508
     in_fresh: 0.39999999999999997
     out: 2
   - key: mistral/mistral-medium-3-5
     in_fresh: 1.5
+    cache_read: 0.15
+    out: 7.5
+  - key: mistral/mistral-medium-3.5
+    in_fresh: 1.5
+    cache_read: 0.15
     out: 7.5
   - key: mistral/mistral-medium-latest
     in_fresh: 1.5
+    cache_read: 0.15
     out: 7.5
   - key: mistral/mistral-small
     in_fresh: 0.09999999999999999
     out: 0.3
+  - key: mistral/mistral-small-2603
+    in_fresh: 0.15
+    cache_read: 0.015
+    out: 0.6
   - key: mistral/mistral-small-3-2-2506
     in_fresh: 0.06
     out: 0.18
   - key: mistral/mistral-small-latest
-    in_fresh: 0.06
-    out: 0.18
+    in_fresh: 0.15
+    cache_read: 0.015
+    out: 0.6
   - key: mistral/mistral-tiny
     in_fresh: 0.25
     out: 0.25
+  - key: mistral/mistral-vibe-cli-fast
+    in_fresh: 0.15
+    cache_read: 0.015
+    out: 0.6
+  - key: mistral/mistral-vibe-cli-latest
+    in_fresh: 1.5
+    cache_read: 0.15
+    out: 7.5
+  - key: mistral/mistral-vibe-cli-with-tools
+    in_fresh: 1.5
+    cache_read: 0.15
+    out: 7.5
   - key: mistral/open-codestral-mamba
     in_fresh: 0.25
     out: 0.25
@@ -1390,6 +1589,16 @@ rates:
   - key: mistral/pixtral-large-latest
     in_fresh: 2
     out: 6
+  - key: mistral/voxtral-small-2507
+    in_fresh: 0.09999999999999999
+    out: 0.39999999999999997
+  - key: mistral/voxtral-small-latest
+    in_fresh: 0.09999999999999999
+    out: 0.39999999999999997
+  - key: mistral/zai-glm-5-2
+    in_fresh: 1.4
+    cache_read: 0.14
+    out: 4.4
   - key: moonshot/kimi-k2-0711-preview
     in_fresh: 0.6
     cache_read: 0.15
@@ -1418,6 +1627,14 @@ rates:
     in_fresh: 0.95
     cache_read: 0.16
     out: 4
+  - key: moonshot/kimi-k2.7-code
+    in_fresh: 0.95
+    cache_read: 0.19
+    out: 4
+  - key: moonshot/kimi-k3
+    in_fresh: 3
+    cache_read: 0.3
+    out: 15
   - key: moonshot/kimi-latest
     in_fresh: 2
     cache_read: 0.15
@@ -1468,9 +1685,23 @@ rates:
   - key: moonshot/moonshot-v1-auto
     in_fresh: 2
     out: 5
+  - key: openai/chat-latest
+    in_fresh: 5
+    cache_read: 0.5
+    out: 30
   - key: openai/chatgpt-4o-latest
     in_fresh: 5
     out: 15
+  - key: openai/daybreak-blue-latest
+    in_fresh: 4
+    cache_read: 0.39999999999999997
+    cache_write: 5
+    out: 20
+  - key: openai/daybreak-red-latest
+    in_fresh: 12.5
+    cache_read: 1.25
+    cache_write: 15.625
+    out: 75
   - key: openai/ft:gpt-3.5-turbo
     in_fresh: 3
     out: 6
@@ -1729,20 +1960,25 @@ rates:
     cache_read: 0.5
     out: 30
   - key: openai/gpt-5.6
-    in_fresh: 5
-    cache_read: 0.5
-    cache_write: 6.25
-    out: 30
+    in_fresh: 4
+    cache_read: 0.39999999999999997
+    cache_write: 5
+    out: 20
+  - key: openai/gpt-5.6-cyber
+    in_fresh: 12.5
+    cache_read: 1.25
+    cache_write: 15.625
+    out: 75
   - key: openai/gpt-5.6-luna
     in_fresh: 0.19999999999999998
     cache_read: 0.02
     cache_write: 0.25
     out: 1.2
   - key: openai/gpt-5.6-sol
-    in_fresh: 5
-    cache_read: 0.5
-    cache_write: 6.25
-    out: 30
+    in_fresh: 4
+    cache_read: 0.39999999999999997
+    cache_write: 5
+    out: 20
   - key: openai/gpt-5.6-terra
     in_fresh: 2
     cache_read: 0.19999999999999998
@@ -1843,6 +2079,11 @@ rates:
     cache_read: 0.5
     cache_write: 6.25
     out: 25
+  - key: openrouter/claude-opus-5
+    in_fresh: 5
+    cache_read: 0.5
+    cache_write: 6.25
+    out: 25
   - key: openrouter/claude-sonnet-4
     in_fresh: 3
     cache_read: 0.3
@@ -1879,6 +2120,12 @@ rates:
   - key: openrouter/deepseek-v3.2-exp
     in_fresh: 0.19999999999999998
     out: 0.39999999999999997
+  - key: openrouter/deepseek-v4-pro
+    in_fresh: 1.32
+    out: 3.9600000000000004
+  - key: openrouter/deepseek-v4-pro-0813
+    in_fresh: 1.32
+    out: 3.9600000000000004
   - key: openrouter/devstral-2512
     in_fresh: 0.15
     out: 0.6
@@ -2077,6 +2324,9 @@ rates:
   - key: openrouter/mythomax-l2-13b
     in_fresh: 1.875
     out: 1.875
+  - key: openrouter/nemotron-3.5-lightning
+    in_fresh: 0.049999999999999996
+    out: 0.19999999999999998
   - key: openrouter/o1
     in_fresh: 15
     cache_read: 7.5
@@ -2198,87 +2448,172 @@ rates:
   - key: perplexity/sonar-small-online
     in_fresh: 0
     out: 0.28
-  - key: together_ai/DeepSeek-R1
+  - key: together_ai/deepseek-r1
     in_fresh: 3
     out: 7
-  - key: together_ai/DeepSeek-R1-0528-tput
+  - key: together_ai/deepseek-r1-0528-tput
     in_fresh: 0.55
     out: 2.1900000000000004
-  - key: together_ai/DeepSeek-V3
+  - key: together_ai/deepseek-v3
     in_fresh: 1.25
     out: 1.25
-  - key: together_ai/DeepSeek-V3.1
+  - key: together_ai/deepseek-v3.1
     in_fresh: 0.6
     out: 1.7
-  - key: together_ai/GLM-4.5-Air-FP8
+  - key: together_ai/deepseek-v4-flash-0731
+    in_fresh: 0.14
+    cache_read: 0.03
+    out: 0.28
+  - key: together_ai/deepseek-v4-pro
+    in_fresh: 1.74
+    cache_read: 0.19999999999999998
+    out: 3.48
+  - key: together_ai/deepseek-v4-pro-0813
+    in_fresh: 1.32
+    cache_read: 0.13
+    out: 3.9600000000000004
+  - key: together_ai/gemma-3n-e4b-it
+    in_fresh: 0.06
+    out: 0.12
+  - key: together_ai/gemma-4-31b-it
+    in_fresh: 0.39
+    out: 0.9700000000000001
+  - key: together_ai/glm-4.5-air-fp8
     in_fresh: 0.19999999999999998
     out: 1.1
-  - key: together_ai/GLM-4.6
+  - key: together_ai/glm-4.6
     in_fresh: 0.6
     out: 2.2
-  - key: together_ai/GLM-4.7
+  - key: together_ai/glm-4.7
     in_fresh: 0.44999999999999996
     out: 2
-  - key: together_ai/Kimi-K2-Instruct
-    in_fresh: 1
-    out: 3
-  - key: together_ai/Kimi-K2-Instruct-0905
-    in_fresh: 1
-    out: 3
-  - key: together_ai/Kimi-K2.5
-    in_fresh: 0.5
-    out: 2.8
-  - key: together_ai/Llama-3.3-70B-Instruct-Turbo
-    in_fresh: 0.88
-    out: 0.88
-  - key: together_ai/Llama-3.3-70B-Instruct-Turbo-Free
-    in_fresh: 0
-    out: 0
-  - key: together_ai/Llama-4-Maverick-17B-128E-Instruct-FP8
-    in_fresh: 0.27
-    out: 0.85
-  - key: together_ai/Llama-4-Scout-17B-16E-Instruct
-    in_fresh: 0.18
-    out: 0.59
-  - key: together_ai/Meta-Llama-3.1-405B-Instruct-Turbo
-    in_fresh: 3.5
-    out: 3.5
-  - key: together_ai/Meta-Llama-3.1-70B-Instruct-Turbo
-    in_fresh: 0.88
-    out: 0.88
-  - key: together_ai/Meta-Llama-3.1-8B-Instruct-Turbo
-    in_fresh: 0.18
-    out: 0.18
-  - key: together_ai/Mixtral-8x7B-Instruct-v0.1
-    in_fresh: 0.6
-    out: 0.6
-  - key: together_ai/Qwen3-235B-A22B-Instruct-2507-tput
-    in_fresh: 0.19999999999999998
-    out: 6
-  - key: together_ai/Qwen3-235B-A22B-Thinking-2507
-    in_fresh: 0.65
-    out: 3
-  - key: together_ai/Qwen3-235B-A22B-fp8-tput
-    in_fresh: 0.19999999999999998
-    out: 0.6
-  - key: together_ai/Qwen3-Coder-480B-A35B-Instruct-FP8
-    in_fresh: 2
-    out: 2
-  - key: together_ai/Qwen3-Next-80B-A3B-Instruct
+  - key: together_ai/glm-5.2
+    in_fresh: 1.4
+    cache_read: 0.26
+    out: 4.4
+  - key: together_ai/glm-5.3
+    in_fresh: 1.4
+    cache_read: 0.26
+    out: 4.4
+  - key: together_ai/glm-5.3-flash
     in_fresh: 0.15
-    out: 1.5
-  - key: together_ai/Qwen3-Next-80B-A3B-Thinking
-    in_fresh: 0.15
-    out: 1.5
-  - key: together_ai/Qwen3.5-397B-A17B
-    in_fresh: 0.6
-    out: 3.5999999999999996
+    cache_read: 0.03
+    out: 0.5
   - key: together_ai/gpt-oss-120b
     in_fresh: 0.15
     out: 0.6
   - key: together_ai/gpt-oss-20b
     in_fresh: 0.049999999999999996
     out: 0.19999999999999998
+  - key: together_ai/inkling
+    in_fresh: 1
+    cache_read: 0.16999999999999998
+    out: 4.05
+  - key: together_ai/inkling-small
+    in_fresh: 0.5
+    cache_read: 0.09999999999999999
+    out: 1.2
+  - key: together_ai/kimi-k2-instruct
+    in_fresh: 1
+    out: 3
+  - key: together_ai/kimi-k2-instruct-0905
+    in_fresh: 1
+    out: 3
+  - key: together_ai/kimi-k2.5
+    in_fresh: 0.5
+    out: 2.8
+  - key: together_ai/kimi-k2.7-code
+    in_fresh: 0.95
+    cache_read: 0.19
+    out: 4
+  - key: together_ai/kimi-k3
+    in_fresh: 3
+    cache_read: 0.3
+    out: 15
+  - key: together_ai/llama-3.3-70b-instruct-turbo
+    in_fresh: 1.04
+    out: 1.04
+  - key: together_ai/llama-3.3-70b-instruct-turbo-free
+    in_fresh: 0
+    out: 0
+  - key: together_ai/llama-4-maverick-17b-128e-instruct-fp8
+    in_fresh: 0.27
+    out: 0.85
+  - key: together_ai/llama-4-scout-17b-16e-instruct
+    in_fresh: 0.18
+    out: 0.59
+  - key: together_ai/llama-guard-4-12b
+    in_fresh: 0.19999999999999998
+    out: 0.19999999999999998
+  - key: together_ai/meta-llama-3.1-405b-instruct-turbo
+    in_fresh: 3.5
+    out: 3.5
+  - key: together_ai/meta-llama-3.1-70b-instruct-turbo
+    in_fresh: 0.88
+    out: 0.88
+  - key: together_ai/meta-llama-3.1-8b-instruct-turbo
+    in_fresh: 0.18
+    out: 0.18
+  - key: together_ai/minimax-m3
+    in_fresh: 0.3
+    cache_read: 0.06
+    out: 1.2
+  - key: together_ai/mixtral-8x7b-instruct-v0.1
+    in_fresh: 0.6
+    out: 0.6
+  - key: together_ai/muse-glimmer-30b
+    in_fresh: 0.35
+    cache_read: 0.04
+    out: 1.5
+  - key: together_ai/nemotron-3-ultra-550b-a55b
+    in_fresh: 0.6
+    cache_read: 0.19999999999999998
+    out: 3.5999999999999996
+  - key: together_ai/qwen-2-1.5b-instruct
+    in_fresh: 0.09999999999999999
+    out: 0.09999999999999999
+  - key: together_ai/qwen3-235b-a22b-fp8-tput
+    in_fresh: 0.19999999999999998
+    out: 0.6
+  - key: together_ai/qwen3-235b-a22b-instruct-2507-tput
+    in_fresh: 0.19999999999999998
+    out: 6
+  - key: together_ai/qwen3-235b-a22b-thinking-2507
+    in_fresh: 0.65
+    out: 3
+  - key: together_ai/qwen3-coder-480b-a35b-instruct-fp8
+    in_fresh: 2
+    out: 2
+  - key: together_ai/qwen3-next-80b-a3b-instruct
+    in_fresh: 0.15
+    out: 1.5
+  - key: together_ai/qwen3-next-80b-a3b-thinking
+    in_fresh: 0.15
+    out: 1.5
+  - key: together_ai/qwen3.5-397b-a17b
+    in_fresh: 0.6
+    cache_read: 0.35
+    out: 3.5999999999999996
+  - key: together_ai/qwen3.5-9b
+    in_fresh: 0.16999999999999998
+    out: 0.25
+  - key: together_ai/qwen3.6-plus
+    in_fresh: 0.5
+    out: 3
+  - key: together_ai/qwen3.7-max
+    in_fresh: 2.5
+    cache_read: 0.5
+    out: 7.5
+  - key: together_ai/qwen3.7-plus
+    in_fresh: 0.32
+    out: 1.28
+  - key: together_ai/qwen3.8-2.4t-a95b
+    in_fresh: 2.5
+    cache_read: 0.5
+    out: 6.25
+  - key: together_ai/ternary-bonsai-27b
+    in_fresh: 0
+    out: 0
   - key: together_ai/together-ai-21.1b-41b
     in_fresh: 0.7999999999999999
     out: 0.7999999999999999
@@ -2306,121 +2641,126 @@ rates:
   - key: volcengine/kimi-k2-thinking-251104
     in_fresh: 0
     out: 0
-  - key: xai/grok-2
-    in_fresh: 2
-    out: 10
-  - key: xai/grok-2-1212
-    in_fresh: 2
-    out: 10
-  - key: xai/grok-2-latest
-    in_fresh: 2
-    out: 10
-  - key: xai/grok-2-vision
-    in_fresh: 2
-    out: 10
-  - key: xai/grok-2-vision-1212
-    in_fresh: 2
-    out: 10
-  - key: xai/grok-2-vision-latest
-    in_fresh: 2
-    out: 10
   - key: xai/grok-3
-    in_fresh: 3
-    cache_read: 0.75
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-beta
-    in_fresh: 3
-    cache_read: 0.75
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-fast-beta
-    in_fresh: 5
-    cache_read: 1.25
-    out: 25
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-fast-latest
-    in_fresh: 5
-    cache_read: 1.25
-    out: 25
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-latest
-    in_fresh: 3
-    cache_read: 0.75
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini
-    in_fresh: 0.3
-    cache_read: 0.075
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini-beta
-    in_fresh: 0.3
-    cache_read: 0.075
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini-fast
-    in_fresh: 0.6
-    cache_read: 0.15
-    out: 4
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini-fast-beta
-    in_fresh: 0.6
-    cache_read: 0.15
-    out: 4
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini-fast-latest
-    in_fresh: 0.6
-    cache_read: 0.15
-    out: 4
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-3-mini-latest
-    in_fresh: 0.3
-    cache_read: 0.075
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4
-    in_fresh: 3
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-0709
-    in_fresh: 3
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-1-fast
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-1-fast-non-reasoning
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-1-fast-non-reasoning-latest
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-1-fast-reasoning
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-1-fast-reasoning-latest
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-fast-non-reasoning
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-fast-reasoning
-    in_fresh: 0.19999999999999998
-    cache_read: 0.049999999999999996
-    out: 0.5
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4-latest
-    in_fresh: 3
-    out: 15
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.20
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.20-0309-non-reasoning
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4.20-0309-reasoning
-    in_fresh: 2
+    in_fresh: 1.25
     cache_read: 0.19999999999999998
-    out: 6
+    out: 2.5
   - key: xai/grok-4.20-beta-0309-non-reasoning
-    in_fresh: 2
+    in_fresh: 1.25
     cache_read: 0.19999999999999998
-    out: 6
+    out: 2.5
   - key: xai/grok-4.20-beta-0309-reasoning
-    in_fresh: 2
+    in_fresh: 1.25
     cache_read: 0.19999999999999998
-    out: 6
-  - key: xai/grok-4.20-multi-agent-beta-0309
-    in_fresh: 2
+    out: 2.5
+  - key: xai/grok-4.20-non-reasoning
+    in_fresh: 1.25
     cache_read: 0.19999999999999998
-    out: 6
+    out: 2.5
+  - key: xai/grok-4.20-non-reasoning-latest
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.20-reasoning
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
+  - key: xai/grok-4.20-reasoning-latest
+    in_fresh: 1.25
+    cache_read: 0.19999999999999998
+    out: 2.5
   - key: xai/grok-4.3
     in_fresh: 1.25
     cache_read: 0.19999999999999998
@@ -2431,27 +2771,29 @@ rates:
     out: 2.5
   - key: xai/grok-4.5
     in_fresh: 2
-    cache_read: 0.5
+    cache_read: 0.3
     out: 6
   - key: xai/grok-4.5-latest
     in_fresh: 2
+    cache_read: 0.3
+    out: 6
+  - key: xai/grok-4.6
+    in_fresh: 2
     cache_read: 0.5
     out: 6
-  - key: xai/grok-beta
-    in_fresh: 5
-    out: 15
+  - key: xai/grok-build-0.1
+    in_fresh: 1
+    cache_read: 0.19999999999999998
+    out: 2
   - key: xai/grok-code-fast
-    in_fresh: 0.19999999999999998
-    cache_read: 0.02
-    out: 1.5
+    in_fresh: 1
+    cache_read: 0.19999999999999998
+    out: 2
   - key: xai/grok-code-fast-1
-    in_fresh: 0.19999999999999998
-    cache_read: 0.02
-    out: 1.5
+    in_fresh: 1
+    cache_read: 0.19999999999999998
+    out: 2
   - key: xai/grok-code-fast-1-0825
-    in_fresh: 0.19999999999999998
-    cache_read: 0.02
-    out: 1.5
-  - key: xai/grok-vision-beta
-    in_fresh: 5
-    out: 15
+    in_fresh: 1
+    cache_read: 0.19999999999999998
+    out: 2

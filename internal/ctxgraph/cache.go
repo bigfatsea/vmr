@@ -26,7 +26,16 @@ import (
 // "openai-completions"/"anthropic-messages" protocol/endpoint values.
 // v3 (2026-08): Manifest gains Bytes (decompressed JSON line length), used
 // by cmd/vmr's byte-budget batching.
-const CacheSchemaVersion = 3
+// v4 (2026-08): Manifest gains EstIn/EstOut (degraded token estimate for
+// records whose upstream reported no usage), so internal/story prices the
+// same records internal/report has always priced.
+// v5 (2026-09): Manifest gains ServedEndpoint (the endpoint that actually
+// committed a < 400 response, per report's endpointInfo rule) — cost
+// attribution keys off it, so an early-canceled request is unpriced on
+// both halves and a mid-stream-canceled one stays priced. Cached v4
+// manifests would carry an empty ServedEndpoint and silently unprice
+// served traffic, hence the bump.
+const CacheSchemaVersion = 5
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

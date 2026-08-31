@@ -294,3 +294,96 @@ func TestBuildManifest_SessKey_EmptyWhenNoMessagesAndNoMetadata(t *testing.T) {
 		t.Errorf("SessKey = %q, want empty (no anchor, no metadata)", m.SessKey)
 	}
 }
+
+// TestBuildManifest_ServedEndpoint pins the cost-attribution field's rule —
+// the same one internal/report's endpointInfo applies (the duplication is
+// pinned from the other side by cmd/vmr's cost_basis_parity_test): prefer
+// the strictly successful attempt, fall back to the last attempt that got
+// a < 400 response header at all, empty when none did. Every fixture here
+// mirrors a real router shape: an early client cancel has attempts but no
+// responses; a soft-block failover leaves a 2xx attempt with an error set;
+// a 4xx-then-2xx failover serves from the second endpoint.
+func TestBuildManifest_ServedEndpoint(t *testing.T) {
+	t.Parallel()
+	const (
+		epA = "openai-completions:acme:a"
+		epB = "openai-completions:acme:b"
+	)
+	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+
+	t.Run("no attempts at all", func(t *testing.T) {
+		rec := mkAuditRec(time.Now(), body)
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.Endpoint != "-" || m.ServedEndpoint != "" {
+			t.Errorf("Endpoint=%q ServedEndpoint=%q, want \"-\"/\"\"", m.Endpoint, m.ServedEndpoint)
+		}
+	})
+	t.Run("early cancel: attempts but no response ever committed", func(t *testing.T) {
+		rec := mkAuditRec(time.Now(), body)
+		rec.Outcome = "canceled"
+		rec.Attempts = []audit.Attempt{
+			{Endpoint: epA, Protocol: "openai-completions", Provider: "acme", Model: "a"},
+		}
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.Endpoint != epA {
+			t.Errorf("Endpoint = %q, want the attempted %q", m.Endpoint, epA)
+		}
+		if m.ServedEndpoint != "" {
+			t.Errorf("ServedEndpoint = %q, want empty — nothing served, nothing to price", m.ServedEndpoint)
+		}
+	})
+	t.Run("mid-stream cancel: 2xx committed then client went away", func(t *testing.T) {
+		rec := mkAuditRec(time.Now(), body)
+		rec.Outcome = "canceled"
+		rec.Attempts = []audit.Attempt{
+			{Endpoint: epA, Protocol: "openai-completions", Provider: "acme", Model: "a",
+				Response: &audit.Message{Status: 200}, Error: "canceled"},
+		}
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.ServedEndpoint != epA {
+			t.Errorf("ServedEndpoint = %q, want %q — the committed 2xx served real bytes", m.ServedEndpoint, epA)
+		}
+	})
+	t.Run("4xx then 2xx failover serves from the second endpoint", func(t *testing.T) {
+		rec := mkAuditRec(time.Now(), body)
+		rec.Attempts = []audit.Attempt{
+			{Endpoint: epA, Protocol: "openai-completions", Provider: "acme", Model: "a",
+				Response: &audit.Message{Status: 429}, Error: "rate_limit"},
+			{Endpoint: epB, Protocol: "openai-completions", Provider: "acme", Model: "b",
+				Response: &audit.Message{Status: 200}},
+		}
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.Endpoint != epB || m.ServedEndpoint != epB {
+			t.Errorf("Endpoint=%q ServedEndpoint=%q, want both %q", m.Endpoint, m.ServedEndpoint, epB)
+		}
+	})
+	t.Run("soft-block 2xx then 5xx: served is the 2xx attempt though outcome is error", func(t *testing.T) {
+		rec := mkAuditRec(time.Now(), body)
+		rec.Outcome = "error"
+		rec.Attempts = []audit.Attempt{
+			{Endpoint: epA, Protocol: "openai-completions", Provider: "acme", Model: "a",
+				Response: &audit.Message{Status: 200}, Error: "content:soft_block"},
+			{Endpoint: epB, Protocol: "openai-completions", Provider: "acme", Model: "b",
+				Response: &audit.Message{Status: 500}, Error: "server:5xx"},
+		}
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.ServedEndpoint != epA {
+			t.Errorf("ServedEndpoint = %q, want %q (the only < 400 response)", m.ServedEndpoint, epA)
+		}
+	})
+	t.Run("strictly successful attempt preferred over a later error-bearing 2xx", func(t *testing.T) {
+		// Two < 400 attempts, the later one carrying an error string: the
+		// clean one wins, exactly like endpointInfo's successEp preference.
+		rec := mkAuditRec(time.Now(), body)
+		rec.Attempts = []audit.Attempt{
+			{Endpoint: epA, Protocol: "openai-completions", Provider: "acme", Model: "a",
+				Response: &audit.Message{Status: 200}},
+			{Endpoint: epB, Protocol: "openai-completions", Provider: "acme", Model: "b",
+				Response: &audit.Message{Status: 200}, Error: "truncated"},
+		}
+		m, _ := BuildManifest(&rec, "f", 1)
+		if m.ServedEndpoint != epA {
+			t.Errorf("ServedEndpoint = %q, want %q (the strictly successful attempt)", m.ServedEndpoint, epA)
+		}
+	})
+}

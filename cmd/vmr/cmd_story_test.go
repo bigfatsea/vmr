@@ -1311,3 +1311,74 @@ func TestCmdStory_HTMLFlagParity(t *testing.T) {
 		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
 	}
 }
+
+// TestCmdStory_BatchRendersIncludeCost pins Problem 3: default-suite,
+// -render-all and multi-target -journey batch rendering previously passed a
+// nil cost to writeJourneyFile (on the historical misconception that pricing
+// was a zoom-in only feature), leaving every batch-rendered journey-*.md/.json
+// without its estimated cost and creating a data gap between the macro
+// report and the journey cards. Batch rendering now threads the resolver,
+// and this test asserts both .md and .json carry resolved cost.
+func TestCmdStory_BatchRendersIncludeCost(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 9, 1, 10, min, 0, 0, time.UTC) }
+	sys := storyMsg("system", "sys")
+	u := storyMsg("user", "批量套件必须包含成本")
+
+	// Two turns against a standard-priced endpoint (claude-3-7-sonnet-20250219).
+	r1 := storyRec(at(0), []any{sys, u}, costParitySSE("第一步回答", true))
+	r1.Attempts = []audit.Attempt{{Endpoint: "anthropic-messages:anthropic:claude-3-7-sonnet-20250219", Protocol: "anthropic-messages", Provider: "anthropic", Model: "claude-3-7-sonnet-20250219", Response: &audit.Message{Status: 200}}}
+	r2 := storyRec(at(1), []any{sys, u, storyMsg("assistant", "第一步回答")}, costParitySSE("第二步回答", true))
+	r2.Attempts = []audit.Attempt{{Endpoint: "anthropic-messages:anthropic:claude-3-7-sonnet-20250219", Protocol: "anthropic-messages", Provider: "anthropic", Model: "claude-3-7-sonnet-20250219", Response: &audit.Message{Status: 200}}}
+
+	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-story-only", "-render-all", path})
+	}); err != nil {
+		t.Fatalf("cmdAnalyze batch render: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	if err != nil {
+		t.Fatalf("read stories dir: %v", err)
+	}
+	var mdPath, jsonPath string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
+			mdPath = filepath.Join(outDir, "stories", e.Name())
+		}
+		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".json") {
+			jsonPath = filepath.Join(outDir, "stories", e.Name())
+		}
+	}
+	if mdPath == "" || jsonPath == "" {
+		t.Fatalf("expected journey .md and .json in stories/, got: %v", entries)
+	}
+
+	mdContent, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mdContent), "Estimated cost ≈") {
+		t.Errorf("batch-rendered markdown missing overview cost line:\n%s", mdContent)
+	}
+
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary story.JourneySummary
+	if err := json.Unmarshal(jsonData, &summary); err != nil {
+		t.Fatalf("unmarshal journey json: %v", err)
+	}
+	if summary.Cost == nil {
+		t.Fatal("batch-rendered journey json has nil cost")
+	}
+	if !summary.Cost.Resolved || summary.Cost.Total == nil || *summary.Cost.Total <= 0 {
+		t.Errorf("summary.Cost not properly resolved: %+v", summary.Cost)
+	}
+	if summary.Cost.PricedSteps != 2 {
+		t.Errorf("summary.Cost.PricedSteps = %d, want 2", summary.Cost.PricedSteps)
+	}
+}

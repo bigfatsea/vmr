@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -121,11 +122,88 @@ type Table struct {
 	GeneratedAt string
 	entries     map[string]entry // lowercased key -> entry
 	order       []string         // insertion order, for Step ④'s deterministic "first ambiguous match wins... no, doesn't win" scan
+	// aliases maps a bare (vendor-prefix-free) model name to the canonical
+	// key that names its price — a REFERENCE, never a copied price, so a
+	// regenerated standard table moves every alias with it. Two jobs it
+	// alone can do (see resolveCanonicalKey's step ③): naming which
+	// vendor's row a locally-used bare model name means when several
+	// vendors carry it and vendor precedence can't decide (a first-party
+	// vendor reselling another first party, e.g. dashscope/deepseek-v4-flash
+	// vs deepseek/deepseek-v4-flash), and pointing a proxy's own invented
+	// model name at the first-party model it actually serves
+	// (gemini-3.7-flash-high -> gemini/gemini-3.7-flash). One hop only,
+	// by construction — an alias whose target is itself an alias key is
+	// rejected by ValidateAliases, so there is no chain to cycle.
+	aliases map[string]string // lowercased alias -> lowercased canonical key
 }
 
 // NewTable creates an empty Table — used by tests and as Merge's base case.
 func NewTable(currency string) *Table {
-	return &Table{Currency: currency, entries: map[string]entry{}}
+	return &Table{Currency: currency, entries: map[string]entry{}, aliases: map[string]string{}}
+}
+
+// putAlias inserts or overwrites one bare-name -> canonical-key alias.
+func (t *Table) putAlias(from, to string) {
+	if t.aliases == nil {
+		t.aliases = map[string]string{}
+	}
+	t.aliases[strings.ToLower(strings.TrimSpace(from))] = strings.ToLower(strings.TrimSpace(to))
+}
+
+// LookupAlias resolves one alias hop: the canonical key name names, if any.
+// Never chains — see Table.aliases' doc comment.
+func (t *Table) LookupAlias(name string) (string, bool) {
+	if t == nil {
+		return "", false
+	}
+	ck, ok := t.aliases[strings.ToLower(strings.TrimSpace(name))]
+	return ck, ok
+}
+
+// Aliases returns a copy of t's alias map (lowercased both sides) — for
+// `vmr check`'s pricing line and tests; the live map stays unexported so
+// nothing can mutate a loaded table.
+func (t *Table) Aliases() map[string]string {
+	if t == nil || len(t.aliases) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(t.aliases))
+	for k, v := range t.aliases {
+		out[k] = v
+	}
+	return out
+}
+
+// ValidateAliases reports the first alias that can never resolve: one whose
+// target has no priced row, or whose target is itself an alias key (a chain
+// — banned outright rather than followed, since a chain is the only way to
+// build a cycle and a one-hop rule has no case it can't express). Called at
+// load time (embed.go's LoadStandard, config's buildPricingContext) so a
+// typo is a startup error, not a rate that silently falls through to the
+// suffix scan and lands on some other vendor's number.
+func (t *Table) ValidateAliases() error {
+	if t == nil {
+		return nil
+	}
+	for _, from := range sortedAliasKeys(t.aliases) {
+		to := t.aliases[from]
+		if _, isAlias := t.aliases[to]; isAlias {
+			return fmt.Errorf("pricing alias %q -> %q: the target is itself an alias — aliases resolve in exactly one hop, point this one straight at the priced canonical key", from, to)
+		}
+		if _, ok := t.entries[to]; !ok {
+			return fmt.Errorf("pricing alias %q -> %q: no such key in the merged price table — fix the canonical key, or add the row it names", from, to)
+		}
+	}
+	return nil
+}
+
+func sortedAliasKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // put inserts or overwrites key's Rate — internal, used by ParseTable/Merge.
@@ -144,37 +222,107 @@ func (t *Table) Lookup(key string) (Rate, bool) {
 	if t == nil {
 		return Rate{}, false
 	}
-	e, ok := t.entries[strings.ToLower(key)]
+	e, ok := t.entries[strings.ToLower(strings.TrimSpace(key))]
 	return e.rate, ok
 }
 
-// LookupUniqueSuffix implements the design doc's §9.1 step ④: scan every
-// row for one whose canonical key ends in "/"+model (case-insensitive) —
-// e.g. a bare upstream model name "claude-3-5-sonnet-20241022" matching the
-// standard table's "anthropic/claude-3-5-sonnet-20241022" row. ok=false
-// covers both "no row ends that way" and "more than one does" — the design
-// doc is explicit that an ambiguous match must never be guessed at
-// ("有歧义不猜——猜错一个费率比没有费率危险得多").
-func (t *Table) LookupUniqueSuffix(model string) (Rate, bool) {
+// LookupRateOrAlias resolves key's Rate directly, or via t's aliases if key is
+// a bare alias name. Case-insensitive. Used by pricing.map resolution and
+// config validation so a mapping target can be either an exact canonical key
+// ("anthropic/claude-3-5-sonnet") or a standard bare alias ("claude-3-5-sonnet").
+func (t *Table) LookupRateOrAlias(key string) (Rate, bool) {
 	if t == nil {
 		return Rate{}, false
 	}
-	suffix := "/" + strings.ToLower(model)
-	var found Rate
-	matches := 0
-	for _, k := range t.order {
-		if strings.HasSuffix(k, suffix) {
-			matches++
-			if matches > 1 {
-				return Rate{}, false
-			}
-			found = t.entries[k].rate
-		}
+	if r, ok := t.Lookup(key); ok {
+		return r, true
 	}
-	if matches != 1 {
+	if target, ok := t.LookupAlias(key); ok {
+		return t.Lookup(target)
+	}
+	return Rate{}, false
+}
+
+// aggregatorVendors are canonical-key vendor prefixes that RESELL other
+// vendors' models rather than originate them. Measured, not assumed: every
+// bare model name carried by more than one vendor in the standard table is
+// a first-party-vs-reseller collision, never two first parties disagreeing
+// about their own model — so "the first-party row is the list price, a
+// reseller's is that reseller's markup" resolves the overwhelming majority
+// of them with no per-model configuration at all (51 of 78 collisions in
+// the 2026-08-31 snapshot, plus 6 more pinned outright by curated aliases;
+// the remaining 21 are reseller-only models, which genuinely have no
+// canonical list price and stay unresolved).
+//
+// Deliberately the SHORT list (resellers), not the long one (first
+// parties): a vendor this package has never heard of is far more likely to
+// be a new first party than a new aggregator, and ranking it first-party
+// costs nothing unless it collides. A platform that is first-party for its
+// own line but a reseller for others (dashscope for Qwen vs DeepSeek,
+// volcengine for Doubao vs DeepSeek) can't be captured by a per-VENDOR
+// rank at all — that split is per (vendor, model), which is exactly what
+// the curated alias table exists to express (see Table.aliases).
+var aggregatorVendors = map[string]bool{
+	"openrouter": true, "fireworks_ai": true, "together_ai": true,
+	"groq": true, "perplexity": true,
+}
+
+// IsAggregatorVendor reports whether vendor (a canonical-key prefix) resells
+// other vendors' models rather than originating its own — see
+// aggregatorVendors' own doc comment for the reasoning and the measured
+// basis. Exported so tools/gen_standard_pricing can compute the SAME
+// single-first-party-vendor alias set this package's own
+// LookupPreferredSuffix would resolve to, rather than an independent
+// classification the two could silently drift apart on.
+func IsAggregatorVendor(vendor string) bool { return aggregatorVendors[vendor] }
+
+// vendorOf returns the canonical key's vendor prefix ("gemini" for
+// "gemini/gemini-3.7-flash"), or "" for a bare key with no prefix.
+func vendorOf(key string) string {
+	if i := strings.Index(key, "/"); i >= 0 {
+		return key[:i]
+	}
+	return ""
+}
+
+// LookupPreferredSuffix implements the design doc's step ④: scan every row
+// for one whose canonical key ends in "/"+model (case-insensitive) — e.g. a
+// bare upstream model name "claude-3-5-sonnet-20241022" matching the
+// standard table's "anthropic/claude-3-5-sonnet-20241022" row.
+//
+// Several rows matching is the common case (a model sold by its maker and
+// resold by three aggregators), and it used to mean "no rate at all". The
+// tie is broken by vendor precedence, never by an arbitrary pick: a single
+// non-aggregator (first-party) match wins outright — its price IS the model's
+// list price, which is what an offline $ estimate means (see the design
+// doc's "套餐账号的 $ 含义"). ok=false when the highest occupied rank still
+// holds more than one candidate: two aggregators disagreeing about someone
+// else's model have no canonical answer between them, and the design doc is
+// explicit that an ambiguous match must never be guessed at ("有歧义不猜——
+// 猜错一个费率比没有费率危险得多"). A single match of any rank still wins,
+// exactly as before — this only ever widens what resolves, never changes
+// what a previously-unambiguous name resolved to.
+func (t *Table) LookupPreferredSuffix(model string) (Rate, bool) {
+	if t == nil {
 		return Rate{}, false
 	}
-	return found, true
+	suffix := "/" + strings.ToLower(strings.TrimSpace(model))
+	var all, firstParty []string
+	for _, k := range t.order {
+		if strings.HasSuffix(k, suffix) {
+			all = append(all, k)
+			if !aggregatorVendors[vendorOf(k)] {
+				firstParty = append(firstParty, k)
+			}
+		}
+	}
+	switch {
+	case len(firstParty) == 1:
+		return t.entries[firstParty[0]].rate, true
+	case len(firstParty) == 0 && len(all) == 1:
+		return t.entries[all[0]].rate, true
+	}
+	return Rate{}, false
 }
 
 // Merge returns a new Table containing every row of base, overlaid by every
@@ -202,10 +350,19 @@ func Merge(base, overlay *Table) *Table {
 		for _, k := range base.order {
 			out.put(k, base.entries[k].rate)
 		}
+		for _, k := range sortedAliasKeys(base.aliases) {
+			out.putAlias(k, base.aliases[k])
+		}
 	}
 	if overlay != nil {
 		for _, k := range overlay.order {
 			out.put(k, overlay.entries[k].rate)
+		}
+		// Aliases overlay per-name the same way rates overlay per-key: a
+		// user supplement can retarget (or, by pointing it at its own row,
+		// effectively replace) an alias the curated table shipped.
+		for _, k := range sortedAliasKeys(overlay.aliases) {
+			out.putAlias(k, overlay.aliases[k])
 		}
 	}
 	return out
@@ -227,6 +384,11 @@ type fileTable struct {
 	Currency    string     `yaml:"currency"`
 	GeneratedAt string     `yaml:"generated_at"`
 	Rates       []fileRate `yaml:"rates"`
+	// Aliases is this file's bare-model-name -> canonical-key map (see
+	// Table.aliases). A reference, not a price: it never carries numbers,
+	// so a regenerated standard table moves every alias's rate with it and
+	// nothing here goes stale on its own.
+	Aliases map[string]string `yaml:"aliases"`
 	// ExchangeRate is this file's OWN "1 USD = X <code>" map (same shape as
 	// config.yaml's pricing.exchange_rate), consulted BEFORE the rates
 	// argument parseTable was called with — a supplement/standard-override
@@ -386,10 +548,27 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 	// exactly as before this function existed.
 	t := NewTable("USD")
 	t.GeneratedAt = ft.GeneratedAt
+	for from, to := range ft.Aliases {
+		if strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
+			return nil, fmt.Errorf("parse pricing table: aliases: both sides must be non-empty (got %q -> %q)", from, to)
+		}
+		t.putAlias(from, to)
+	}
 	seen := map[string]bool{}
 	for i, r := range ft.Rates {
 		if r.Key == "" {
 			return nil, fmt.Errorf("parse pricing table: rates[%d]: key is required", i)
+		}
+		// Canonical keys are exactly "vendor/basename" (or a bare name). A
+		// deeper key — openrouter's forced "meta-llama/llama-3.3-70b-instruct",
+		// fireworks' "accounts/fireworks/models/..." — looks self-consistent
+		// but is invisible to bare-name and suffix resolution, which strip
+		// org prefixes via ModelBasename (see resolveCanonicalKey's fallback):
+		// it would silently split one physical model into two namespaces that
+		// can never see each other. Reject at load time so a hand-written
+		// supplement names the two-segment key instead.
+		if strings.Count(r.Key, "/") > 1 {
+			return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
 		}
 		lk := strings.ToLower(r.Key)
 		if seen[lk] {

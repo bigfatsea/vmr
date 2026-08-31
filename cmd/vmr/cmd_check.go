@@ -291,14 +291,15 @@ func printFallbackEndpoints(w io.Writer, cfg *config.Config) {
 }
 
 // pricingStaleAfter is how old the built-in standard price table may get
-// before `vmr check` says so out loud. The design doc's pricing guardrails
-// put "过期比缺失更危险" first: a stale-but-authoritative-looking table
-// silently produces wrong $ figures, where a missing one at least produces
-// none. Half a year is deliberately loose — list prices move, but not so
-// fast that a monthly nag would be anything but noise, and this is a
-// reminder (plain text, no ⚠️), never a validation failure: an out-of-date
-// reference price must not be able to stop a router from starting.
-const pricingStaleAfter = 180 * 24 * time.Hour
+// before `vmr check` says so out loud. Two months, not the six it used to
+// be: the 2026-08-31 refresh showed a 20-day-old snapshot already missing
+// list prices for four models this repo's own traffic was running on
+// (gemini-3.7-flash, deepseek-v4-flash-vision-exp, kimi-k3, and a renamed
+// glm row). A threshold that only fires after the table has been wrong for
+// half a year is not a guardrail. Refresh is one command with no arguments
+// (`go run ./tools/gen_standard_pricing -generated-at <today>` fetches
+// upstream itself), so the reminder is cheap to act on.
+const pricingStaleAfter = 60 * 24 * time.Hour
 
 // pricingTableLine describes the standard price table backing this config's
 // $ figures — its generation date, and whether that date is old enough to
@@ -319,7 +320,7 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 		gen, perr := time.ParseInLocation("2006-01-02", table.GeneratedAt, fmtutil.DisplayZone)
 		if perr == nil {
 			if age := time.Since(gen); age > pricingStaleAfter {
-				line += fmt.Sprintf(" — %d days old, list prices may have moved (regenerate: go run ./tools/gen_standard_pricing)", int(age.Hours()/24))
+				line += fmt.Sprintf(" — %d days old, list prices may have moved (regenerate: go run ./tools/gen_standard_pricing -generated-at $(date +%%F))", int(age.Hours()/24))
 			}
 		}
 	}
@@ -342,6 +343,14 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 		if cfg.Pricing.Standard != "" {
 			line += "; standard=" + cfg.Pricing.Standard
 		}
+	}
+	// Aliases silently redirect a bare model name to another vendor's row
+	// (see internal/pricing.Table.aliases). That is exactly the kind of
+	// resolution an operator should be able to see is in effect before
+	// trusting a $ column, so their count is stated even though the
+	// individual mappings are not.
+	if n := len(table.Aliases()); n > 0 {
+		line += fmt.Sprintf("; %d model alias(es)", n)
 	}
 	return line, true
 }

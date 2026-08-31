@@ -55,7 +55,7 @@ type rec2 struct {
 	usageOK                  bool
 	// estInFresh/estOut hold the degraded byte-count estimate when usage
 	// couldn't be sniffed (usageOK false); both 0 otherwise. See
-	// tokenest.go's estimateDegradedTokens.
+	// chatmsg.EstimateDegradedTokens.
 	estInFresh, estOut       int64
 	msgs                     int
 	bytesIn, bytesOut        int64

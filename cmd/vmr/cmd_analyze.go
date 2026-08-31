@@ -329,8 +329,9 @@ func dispatchAnalyze(r *analyzeRun) error {
 		}
 		// true: a -journey selector naming several targets is still a
 		// user-named set, not the default suite's implicit batch (P13.1).
+		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
 		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx,
-			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true)
+			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true, priceRes, ccy)
 	default:
 		// Default suite: story half (P14.1's non-noise scope unless
 		// -render-all) first, then the macro report half.
@@ -346,7 +347,12 @@ func dispatchAnalyze(r *analyzeRun) error {
 		// link, so no detail files are written. This keeps the default
 		// suite from writing 160MB+/details on every `vmr analyze` run
 		// regardless of whether anyone reads them.
-		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag); err != nil {
+		// priceRes/ccy: batch-rendered journey files carry the same cost
+		// data the single -journey zoom produces (same resolver source,
+		// same ComputeJourneyCost) — formerly a nil cost here left every
+		// default-suite journey-*.md/.json without its cost line.
+		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag, priceRes, ccy); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}
 		if r.storyOnly {

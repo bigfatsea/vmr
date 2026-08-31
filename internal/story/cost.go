@@ -19,24 +19,54 @@ import (
 )
 
 // ModelCost is one upstream endpoint's priced share of a Journey's spend.
-// Endpoint is the full "protocol:provider:model" label.
+// Endpoint is the full "protocol:provider:model" label; Amount is in
+// CostFact.Currency, which is NOT necessarily USD (the field was called
+// "usd" and carried CNY under -currency CNY).
 type ModelCost struct {
 	Endpoint string  `json:"endpoint"`
-	USD      float64 `json:"usd"`
+	Amount   float64 `json:"amount"`
 }
 
-// CostFact is a Journey's estimated cost — every step whose endpoint priced
-// and whose usage was reported, summed. Currency is whatever the resolver
-// resolved in (or was rescaled to via -currency). Resolved is false when the
-// resolver was nil or not one step priced; PricedSteps < TotalSteps means a
-// partial estimate (some steps had no resolvable price or no reported usage).
+// CostFact is a Journey's estimated cost — every step whose endpoint
+// resolved a rate, summed. Currency is whatever the resolver resolved in
+// (or was rescaled to via -currency). Resolved is false when the resolver
+// was nil or not one step priced; PricedSteps < TotalSteps means a partial
+// estimate (some steps' endpoints had no resolvable price).
+//
+// Total is a POINTER, and the field is not named "_usd": both were machine-
+// readable lies. `total_usd: 0` on an unresolved journey read as "this was
+// free" to any consumer that didn't first check `resolved` — the exact
+// unknown-vs-zero confusion internal/pricing is built to prevent — and the
+// `_usd` suffix contradicted the `currency` field sitting beside it. Now:
+// null (omitted) when nothing priced, and the unit is stated once, in
+// Currency.
 type CostFact struct {
-	Currency    string      `json:"currency,omitempty"`
-	TotalUSD    float64     `json:"total_usd"`
-	Resolved    bool        `json:"resolved"`
-	PricedSteps int         `json:"priced_steps"`
-	TotalSteps  int         `json:"total_steps"`
-	ByModel     []ModelCost `json:"by_model,omitempty"`
+	Currency    string   `json:"currency,omitempty"`
+	Total       *float64 `json:"total,omitempty"`
+	Resolved    bool     `json:"resolved"`
+	PricedSteps int      `json:"priced_steps"`
+	TotalSteps  int      `json:"total_steps"`
+	// EstimatedSteps is how many of PricedSteps were priced from a degraded
+	// token estimate (the upstream reported no usage) rather than real
+	// reported usage — the per-journey counterpart of the macro report's §2
+	// degraded-share note. Those steps are IN Total, as they always have
+	// been on the report side.
+	EstimatedSteps int `json:"estimated_steps,omitempty"`
+	// IncompleteSteps is how many of PricedSteps were priced through a rate
+	// missing at least one component (pricing.Rate.Complete is false) — nil
+	// components price as 0, so those steps' cost is a low bound (the
+	// per-journey counterpart of EndpointRow.CostRateIncomplete).
+	IncompleteSteps int         `json:"incomplete_steps,omitempty"`
+	ByModel         []ModelCost `json:"by_model,omitempty"`
+}
+
+// TotalAmount is Total dereferenced, 0 when unresolved — for renderers that
+// have already checked Resolved and just want the number.
+func (c CostFact) TotalAmount() float64 {
+	if c.Total == nil {
+		return 0
+	}
+	return *c.Total
 }
 
 // Partial reports whether the estimate covers only some of the Journey's
@@ -53,30 +83,61 @@ func ComputeJourneyCost(j *Journey, res *pricing.Resolver, currency string) Cost
 		return fact
 	}
 	byEndpoint := map[string]float64{}
+	var total float64
 	for _, s := range steps {
-		if s.Manifest == nil || !s.Manifest.UsageOK {
+		if s.Manifest == nil {
 			continue
 		}
-		rate, ok := res.RateForEndpoint(s.Manifest.Endpoint)
+		// Same attribution rule as internal/report's endpointInfo, carried on
+		// the manifest itself as ServedEndpoint (built by ctxgraph from the
+		// same attempts loop report runs): cost belongs to an endpoint that
+		// actually SERVED the client — one that committed a < 400 response
+		// header. A request canceled before any 2xx (or failed outright
+		// with network/4xx/5xx errors) is unpriced here AND on the report
+		// side (whose endpointInfo returns "" for the same record), so an
+		// early cancel can't make a journey's total exceed the macro
+		// report's; a canceled or truncated stream that DID commit a 2xx
+		// stays priced — the tokens were genuinely consumed. Note the
+		// attribution keys off the served endpoint, never the Outcome: an
+		// outcome:"error" record whose attempt still committed a 2xx (a
+		// soft-block failover) is priced exactly like report prices it.
+		ep := s.Manifest.ServedEndpoint
+		if ep == "" {
+			continue
+		}
+		rate, ok := res.RateForEndpoint(ep)
 		if !ok {
 			continue
 		}
+		// Same basis as internal/report/cost.go's costFor: real usage when
+		// the upstream reported it, the degraded estimate otherwise. Skipping
+		// the unsniffed steps (what this did until 2026-08-31) made a
+		// journey's total quietly lower than the macro report's for the very
+		// same records, with nothing in either product saying so.
 		u := s.Manifest.Usage
 		c := rate.Cost(u.Fresh(), u.CacheRead, u.CacheWrite, u.Out)
-		fact.TotalUSD += c
-		byEndpoint[s.Manifest.Endpoint] += c
+		if !s.Manifest.UsageOK {
+			c = rate.Cost(s.Manifest.EstIn, 0, 0, s.Manifest.EstOut)
+			fact.EstimatedSteps++
+		}
+		if !rate.Complete() {
+			fact.IncompleteSteps++
+		}
+		total += c
+		byEndpoint[ep] += c
 		fact.PricedSteps++
 	}
 	if fact.PricedSteps == 0 {
 		return fact
 	}
 	fact.Resolved = true
-	for ep, usd := range byEndpoint {
-		fact.ByModel = append(fact.ByModel, ModelCost{Endpoint: ep, USD: usd})
+	fact.Total = &total
+	for ep, amount := range byEndpoint {
+		fact.ByModel = append(fact.ByModel, ModelCost{Endpoint: ep, Amount: amount})
 	}
 	sort.Slice(fact.ByModel, func(a, b int) bool {
-		if fact.ByModel[a].USD != fact.ByModel[b].USD {
-			return fact.ByModel[a].USD > fact.ByModel[b].USD
+		if fact.ByModel[a].Amount != fact.ByModel[b].Amount {
+			return fact.ByModel[a].Amount > fact.ByModel[b].Amount
 		}
 		return fact.ByModel[a].Endpoint < fact.ByModel[b].Endpoint
 	})

@@ -53,11 +53,13 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	if loadErr != nil {
 		// cmdReport already printed one unified warning for cfgErr — a
 		// second, near-identical one here would just repeat it.
-		resolver = pricing.NewResolver(standard, nil)
+		resolver = pricing.NewResolver(standard, nil, 1, summary.Currency)
 	} else {
 		table := standard
+		factor := 1.0
 		if t, err := cfg.PricingTable(); err == nil && t != nil {
 			table = t
+			factor, _ = cfg.PricingAccounting()
 		}
 		perProvider := map[string]pricing.ProviderPolicy{}
 		overrideCount := 0
@@ -74,7 +76,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 		if overrideCount > 0 {
 			fmt.Fprintf(tw, "pricing: %d provider override rule(s) loaded from %s\n", overrideCount, configPath)
 		}
-		resolver = pricing.NewResolver(table, perProvider)
+		resolver = pricing.NewResolver(table, perProvider, factor, summary.Currency)
 	}
 	if summary.Currency == "" {
 		summary.Currency = "USD"
@@ -99,18 +101,18 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	return resolver, summary
 }
 
-// resolvePricingForAnalyze builds the pricing resolver for the story-half
-// zoom views (-journey / -compare), which don't run the macro report half
-// and so never reach runReport's own buildPricing call. Same degrade-
-// gracefully contract: a missing/unreadable config.yaml just means the
-// embedded standard table with no account overrides. Progress lines are
-// discarded here (the story path has no report-style progress log); the $
-// figure showing up (or not) in the rendered dashboard is self-evident.
-// Returns the display currency alongside so the dashboard can label a
-// non-USD amount.
+// resolvePricingForAnalyze builds the pricing resolver the story half needs
+// for zoom views (-journey / -compare), which don't run runReport. Same
+// degrade-gracefully contract: an unreadable config falls back to the embedded
+// standard table. Warnings go to stderr rather than being discarded, so
+// unresolvable supplement paths or missing exchange rates are visible.
 func resolvePricingForAnalyze(configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
+	tw := timestampWriter{w: os.Stderr}
 	cfg, cfgErr := config.Load(configPath)
-	resolver, info := buildPricing(cfg, cfgErr, configPath, io.Discard, displayCCY, exchangeRate)
+	if cfgErr != nil {
+		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no supplement, no account overrides)\n", configPath, cfgErr)
+	}
+	resolver, info := buildPricing(cfg, cfgErr, configPath, tw, displayCCY, exchangeRate)
 	ccy := "USD"
 	if info != nil && info.Currency != "" {
 		ccy = info.Currency

@@ -10,6 +10,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"vmr/internal/core"
@@ -216,7 +217,7 @@ type pricingContext struct {
 // "Every price this account uses is an explicit override, so no conversion
 // is needed" is expressible without lying about the currency: leave
 // pricing.currency unset, or give exchange_rate a 1.0 entry deliberately.
-func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
+func buildPricingContext(gc *PricingConfig, configDir string) (*pricingContext, error) {
 	standard, err := pricing.LoadStandard()
 	if err != nil {
 		return nil, fmt.Errorf("embedded standard pricing table: %w", err)
@@ -226,26 +227,34 @@ func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
 	}
 	table := standard
 	if gc.Standard != "" {
-		data, err := os.ReadFile(gc.Standard)
+		path := resolveConfigRelative(gc.Standard, configDir)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
+			return nil, fmt.Errorf("pricing.standard %s: %w", path, err)
 		}
 		override, err := pricing.ParseTableWithRates(data, gc.ExchangeRate)
 		if err != nil {
-			return nil, fmt.Errorf("pricing.standard %s: %w", gc.Standard, err)
+			return nil, fmt.Errorf("pricing.standard %s: %w", path, err)
 		}
 		table = override
 	}
 	if gc.Supplement != "" {
-		data, err := os.ReadFile(gc.Supplement)
+		path := resolveConfigRelative(gc.Supplement, configDir)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
+			return nil, fmt.Errorf("pricing.supplement %s: %w", path, err)
 		}
 		supp, err := pricing.ParseTableWithRates(data, gc.ExchangeRate)
 		if err != nil {
-			return nil, fmt.Errorf("pricing.supplement %s: %w", gc.Supplement, err)
+			return nil, fmt.Errorf("pricing.supplement %s: %w", path, err)
 		}
 		table = pricing.Merge(table, supp)
+	}
+	// Aliases only become checkable once every layer is merged: a curated
+	// alias may legitimately target a row a user supplement supplies, and a
+	// supplement may retarget one the curated table shipped.
+	if err := table.ValidateAliases(); err != nil {
+		return nil, err
 	}
 	currency := gc.Currency
 	factor := 1.0
@@ -260,6 +269,23 @@ func buildPricingContext(gc *PricingConfig) (*pricingContext, error) {
 		factor = f
 	}
 	return &pricingContext{table: table, exchangeRateToTarget: factor, currency: currency, rates: gc.ExchangeRate}, nil
+}
+
+// resolveConfigRelative interprets a pricing.supplement/pricing.standard
+// path relative to the CONFIG FILE's own directory, not the process working
+// directory. A config.yaml is a portable document that names its sidecars
+// relatively ("./pricing.yaml"); resolving those against wherever the
+// process happens to have been started makes the same config work from one
+// shell and fail from another. `vmr start` at least fails loudly; the
+// analytics half degraded to "standard table only, no supplement, no
+// account overrides" and, before this, said nothing at all. configDir ""
+// (a config supplied as bytes rather than a path, e.g. Parse in tests)
+// keeps the plain relative path.
+func resolveConfigRelative(path, configDir string) string {
+	if path == "" || configDir == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(configDir, path)
 }
 
 // resolvePricing is config.validate()'s pricing pass, run after both the
@@ -289,7 +315,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 	if !needsTable {
 		return nil
 	}
-	pctx, err := buildPricingContext(c.Pricing)
+	pctx, err := buildPricingContext(c.Pricing, c.configDir)
 	if err != nil {
 		return err
 	}
@@ -298,6 +324,8 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 	// the embedded standard table plus any supplement/standard override a
 	// second time.
 	c.pricingTableCache = pctx.table
+	c.pricingFactorCache = pctx.exchangeRateToTarget
+	c.pricingCurrencyCache = pctx.currency
 
 	c.ResolvedPricing = map[string]*core.PricingSpec{}
 	c.ProviderPricingPolicies = map[string]pricing.ProviderPolicy{}
@@ -307,7 +335,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 		if p.Pricing != nil {
 			mapping = p.Pricing.Map
 			for _, local := range core.SortedKeys(p.Pricing.Map) {
-				// An explicit map entry naming a canonical key the merged
+				// An explicit map entry naming a canonical key or alias the merged
 				// table doesn't contain is always a mistake (a typo, or a
 				// key that only exists in a supplement that isn't loaded) —
 				// and a silent one, because resolution would just fall
@@ -316,8 +344,8 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 				// situation is "猜错一个费率比没有费率危险得多"; failing at
 				// load time is how that rule is honored for a key the user
 				// wrote out by hand.
-				if _, ok := pctx.table.Lookup(p.Pricing.Map[local]); !ok {
-					return fmt.Errorf("provider %q: pricing.map[%q]: %q is not a key in the standard/supplement price table — fix the canonical key, add it via pricing.supplement, or drop the map entry and let automatic resolution try (see internal/pricing.resolveCanonicalKey)", p.Name, local, p.Pricing.Map[local])
+				if _, ok := pctx.table.LookupRateOrAlias(p.Pricing.Map[local]); !ok {
+					return fmt.Errorf("provider %q: pricing.map[%q]: %q is not a key or alias in the standard/supplement price table — fix the model name, add it via pricing.supplement, or drop the map entry and let automatic resolution try (see internal/pricing.resolveCanonicalKey)", p.Name, local, p.Pricing.Map[local])
 				}
 			}
 			for i, oc := range p.Pricing.Overrides {
@@ -332,18 +360,17 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 			}
 		}
 		// Stored for EVERY provider, not just ones with a pricing: block or
-		// a metric: cost Limit — the policy also carries the global
-		// currency/exchange-rate factor, and `vmr report` resolves rates
-		// for every provider that appears in an audit log, most of which
-		// have no pricing: block at all. Omitting them here would leave
-		// their standard-table (USD) prices unconverted while the report
-		// still labelled every number with pricing.currency: right label,
-		// wrong number. Only the completeness gate below is specific to
-		// metric: cost.
-		c.ProviderPricingPolicies[p.Name] = pricing.ProviderPolicy{
-			Map: mapping, Overrides: overrides,
-			ExchangeRateToTarget: pctx.exchangeRateToTarget, Currency: pctx.currency,
-		}
+		// a metric: cost Limit — `vmr report` resolves rates for every
+		// provider that appears in an audit log, and a provider with no
+		// pricing: block still needs an entry so its map/overrides are
+		// unambiguously empty rather than merely absent. The USD ->
+		// accounting-currency factor deliberately does NOT live here (see
+		// pricing.ProviderPolicy's doc comment): it is global, and holding
+		// it per provider left every audit-log-only provider name — one
+		// since renamed, deleted, or split by api_keys — converting at 1.0
+		// while the report labelled it pricing.currency. Only the
+		// completeness gate below is specific to metric: cost.
+		c.ProviderPricingPolicies[p.Name] = pricing.ProviderPolicy{Map: mapping, Overrides: overrides}
 		if !costProviders[p.Name] {
 			// A pricing: block on a non-cost provider is purely for vmr
 			// report's benefit — validated above for shape, but nothing
@@ -402,9 +429,26 @@ func (c *Config) PricingTable() (*pricing.Table, error) {
 	if c.pricingTableCache != nil {
 		return c.pricingTableCache, nil
 	}
-	pctx, err := buildPricingContext(c.Pricing)
+	pctx, err := buildPricingContext(c.Pricing, c.configDir)
 	if err != nil {
 		return nil, err
 	}
+	c.pricingTableCache = pctx.table
+	c.pricingFactorCache = pctx.exchangeRateToTarget
+	c.pricingCurrencyCache = pctx.currency
 	return pctx.table, nil
+}
+
+// PricingAccounting returns the USD -> accounting-currency factor that
+// PricingTable's rows must be scaled by, plus that currency's code ("" when
+// config.yaml sets no pricing.currency, meaning the table's own USD). One
+// global pair, not a per-provider one — see pricing.ProviderPolicy's doc
+// comment for the bug that being per-provider caused. Call PricingTable
+// first (or let validate() have run): this returns the cached values and
+// does not itself load anything.
+func (c *Config) PricingAccounting() (factor float64, currency string) {
+	if c.pricingFactorCache == 0 {
+		return 1, c.pricingCurrencyCache
+	}
+	return c.pricingFactorCache, c.pricingCurrencyCache
 }

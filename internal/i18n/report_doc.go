@@ -19,10 +19,13 @@ type DocText struct {
 	DetailLinkLine     string
 	// StoriesLinkLine is the "vmr-report.md → stories/vmr-stories.md"
 	// edge (P6.2a) — path is relative to vmr-report.md itself.
-	StoriesLinkLine    func(path string, journeyCount int, from, to string) string
-	SummaryTitle       string
-	SummaryRequests    func(requests, fallbacks, truncated int) string
-	SummaryHeaders     [5]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration
+	StoriesLinkLine func(path string, journeyCount int, from, to string) string
+	SummaryTitle    string
+	SummaryRequests func(requests, fallbacks, truncated int) string
+	SummaryHeaders  [6]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration, pay-as-you-go equivalent cost
+	// SummaryCostUnknown fills the cost cell when nothing priced at all —
+	// never "0", which reads as "this was free".
+	SummaryCostUnknown string
 	SummaryStarNote    string
 	HighlightsAuto     string
 	NoAnomalies        string
@@ -76,10 +79,11 @@ func Doc(lang Lang) DocText {
 			SummaryRequests: func(requests, fallbacks, truncated int) string {
 				return strconv.Itoa(requests) + "（fallback " + strconv.Itoa(fallbacks) + " / trunc " + strconv.Itoa(truncated) + "）"
 			},
-			SummaryHeaders:  [5]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时"},
-			SummaryStarNote: "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
-			HighlightsAuto:  "**亮点 (auto):**",
-			NoAnomalies:     "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
+			SummaryHeaders:     [6]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时", "按量计费等价成本⭐"},
+			SummaryCostUnknown: "未定价",
+			SummaryStarNote:    "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
+			HighlightsAuto:     "**亮点 (auto):**",
+			NoAnomalies:        "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
 			CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 				return "⚠️ **" + workload + " 工作负载缓存效率 " + cacheEffPct + "** - " + freshTokens + " fresh tokens（占该负载输入大头）"
 			},
@@ -143,10 +147,11 @@ func Doc(lang Lang) DocText {
 		SummaryRequests: func(requests, fallbacks, truncated int) string {
 			return strconv.Itoa(requests) + " (fallback " + strconv.Itoa(fallbacks) + " / trunc " + strconv.Itoa(truncated) + ")"
 		},
-		SummaryHeaders:  [5]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration"},
-		SummaryStarNote: "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
-		HighlightsAuto:  "**Highlights (auto):**",
-		NoAnomalies:     "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
+		SummaryHeaders:     [6]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration", "PAYG-Equivalent Cost⭐"},
+		SummaryCostUnknown: "unpriced",
+		SummaryStarNote:    "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
+		HighlightsAuto:     "**Highlights (auto):**",
+		NoAnomalies:        "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
 		CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 			return "⚠️ **" + workload + " workload cache efficiency " + cacheEffPct + "** - " + freshTokens + " fresh tokens (dominates this workload's input)"
 		},

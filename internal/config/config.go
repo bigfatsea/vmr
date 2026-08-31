@@ -7,7 +7,6 @@ package config
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -311,6 +310,19 @@ type Config struct {
 	// fresh one on demand in that case.
 	pricingTableCache *pricing.Table `yaml:"-"`
 
+	// pricingFactorCache / pricingCurrencyCache are the global USD ->
+	// pricing.currency factor and that currency's code, cached alongside
+	// pricingTableCache because they come from the same buildPricingContext
+	// pass and are meaningless apart from the table they scale — see
+	// PricingAccounting.
+	pricingFactorCache   float64 `yaml:"-"`
+	pricingCurrencyCache string  `yaml:"-"`
+
+	// configDir is the directory the config file was Load()ed from — the
+	// anchor for relative sidecar paths (see resolveConfigRelative). Empty
+	// for a config built from bytes via Parse.
+	configDir string `yaml:"-"`
+
 	// EmptyEnvRefs is every ${NAME} the config text referenced that was unset
 	// or empty in the environment at load time, sorted. Not a yaml field —
 	// populated by Parse from expandEnv. Advisory only (a config can
@@ -318,40 +330,6 @@ type Config struct {
 	// it because a forgotten `api_key: ${VAR}` is the single most common
 	// "loads fine, 401s on the first request" failure.
 	EmptyEnvRefs []string `yaml:"-"`
-}
-
-// Load reads, expands, parses, defaults and validates the config file.
-func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(raw)
-}
-
-func Parse(raw []byte) (*Config, error) {
-	expanded, emptyRefs, err := expandEnv(string(raw))
-	if err != nil {
-		return nil, err
-	}
-	var cfg Config
-	// KnownFields: a misspelled key (max_concurency, image_downscale_px, …)
-	// must be a load error, not a silently ignored no-op the user believes
-	// is in effect — the same fail-fast contract as the rest of validation.
-	dec := yaml.NewDecoder(strings.NewReader(expanded))
-	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil && err != io.EOF { // io.EOF = empty file; validate reports "no providers" below
-		return nil, fmt.Errorf("parse yaml: %w", err)
-	}
-	if err := cfg.expandProviderAPIKeys(); err != nil {
-		return nil, err
-	}
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	cfg.EmptyEnvRefs = emptyRefs
-	return &cfg, nil
 }
 
 var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)

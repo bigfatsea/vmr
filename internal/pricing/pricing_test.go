@@ -41,22 +41,22 @@ func TestTable_LookupCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestTable_LookupUniqueSuffix(t *testing.T) {
+func TestTable_LookupPreferredSuffix(t *testing.T) {
 	tbl := NewTable("USD")
 	tbl.put("anthropic/claude-3-5-sonnet", Rate{InFresh: f(3)})
-	if r, ok := tbl.LookupUniqueSuffix("claude-3-5-sonnet"); !ok || *r.InFresh != 3 {
+	if r, ok := tbl.LookupPreferredSuffix("claude-3-5-sonnet"); !ok || *r.InFresh != 3 {
 		t.Fatalf("unique suffix match failed: ok=%v r=%+v", ok, r)
 	}
-	if _, ok := tbl.LookupUniqueSuffix("nonexistent-model"); ok {
+	if _, ok := tbl.LookupPreferredSuffix("nonexistent-model"); ok {
 		t.Fatal("no row ends with this suffix, want ok=false")
 	}
 }
 
-func TestTable_LookupUniqueSuffix_AmbiguousNeverGuesses(t *testing.T) {
+func TestTable_LookupPreferredSuffix_AmbiguousNeverGuesses(t *testing.T) {
 	tbl := NewTable("USD")
 	tbl.put("vendor-a/shared-model", Rate{InFresh: f(1)})
 	tbl.put("vendor-b/shared-model", Rate{InFresh: f(2)})
-	if _, ok := tbl.LookupUniqueSuffix("shared-model"); ok {
+	if _, ok := tbl.LookupPreferredSuffix("shared-model"); ok {
 		t.Fatal("two rows share this suffix — must refuse to guess, want ok=false")
 	}
 }

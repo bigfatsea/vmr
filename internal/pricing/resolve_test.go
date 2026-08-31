@@ -30,6 +30,58 @@ func TestResolveCanonicalKey_MapExplicit(t *testing.T) {
 	}
 }
 
+func TestResolveCanonicalKey_MapPointsToAlias(t *testing.T) {
+	tbl := testTable()
+	tbl.putAlias("claude-3-5-sonnet", "anthropic/claude-3-5-sonnet")
+	// Target is the bare alias name instead of the canonical key
+	r, ok := resolveCanonicalKey("my-plan", "my-custom-alias", tbl, map[string]string{"my-custom-alias": "claude-3-5-sonnet"})
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("map targeting alias failed: ok=%v r=%+v", ok, r)
+	}
+}
+
+func TestResolveCanonicalKey_MapCaseInsensitive(t *testing.T) {
+	// Incoming request model is uppercase, mapping key is lowercase
+	r, ok := resolveCanonicalKey("my-plan", "MY-MODEL-X", testTable(), map[string]string{"my-model-x": "anthropic/claude-3-5-sonnet"})
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("map-explicit case-insensitive resolution failed: ok=%v r=%+v", ok, r)
+	}
+	// Incoming request model is lowercase, mapping key is uppercase
+	r, ok = resolveCanonicalKey("my-plan", "my-model-x", testTable(), map[string]string{"MY-MODEL-X": "anthropic/claude-3-5-sonnet"})
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("map-explicit case-insensitive resolution failed: ok=%v r=%+v", ok, r)
+	}
+}
+
+func TestResolveCanonicalKey_WhitespaceTrimmed(t *testing.T) {
+	tbl := testTable()
+	tbl.putAlias("claude-3-5-sonnet", "anthropic/claude-3-5-sonnet")
+
+	// 1. Map explicit with whitespace around model and canonical key
+	r, ok := resolveCanonicalKey("my-plan", "  my-model-x  ", tbl, map[string]string{" my-model-x ": " anthropic/claude-3-5-sonnet "})
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("map-explicit whitespace trimming failed: ok=%v r=%+v", ok, r)
+	}
+
+	// 2. Map pointing to alias with whitespace
+	r, ok = resolveCanonicalKey("my-plan", "  my-alias-model  ", tbl, map[string]string{"my-alias-model": " claude-3-5-sonnet "})
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("map targeting alias with whitespace failed: ok=%v r=%+v", ok, r)
+	}
+
+	// 3. Bare alias with whitespace
+	r, ok = resolveCanonicalKey("my-plan", "  claude-3-5-sonnet  ", tbl, nil)
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("alias resolution with whitespace failed: ok=%v r=%+v", ok, r)
+	}
+
+	// 4. Suffix match with whitespace
+	r, ok = resolveCanonicalKey("my-plan", "  claude-3-5-sonnet  ", testTable(), nil)
+	if !ok || *r.InFresh != 3 {
+		t.Fatalf("suffix match with whitespace failed: ok=%v r=%+v", ok, r)
+	}
+}
+
 func TestResolveCanonicalKey_ProviderSlashModel(t *testing.T) {
 	r, ok := resolveCanonicalKey("anthropic", "claude-3-5-sonnet", testTable(), nil)
 	if !ok || *r.InFresh != 3 {

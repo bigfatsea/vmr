@@ -155,8 +155,11 @@ listen: 127.0.0.1:8800
 #                                 # from this one. Write {CNY: 1.0} to state deliberately that no conversion applies.
 #   supplement: ./pricing.yaml    # optional: your own additions, same shape as the built-in table
 #                                   # (see pricing.example.yaml — copy it to pricing.yaml and adjust),
-#                                   # merged in — yours wins on a canonical-key clash. A path that
-#                                   # doesn't exist is a load-time error, not a silent skip.
+#                                   # merged in — yours wins on a canonical-key clash. Can also carry an
+#                                   # aliases: block (bare model name -> canonical key) for a gateway that
+#                                   # invented its own model id. A relative path is resolved against THIS
+#                                   # config file's directory, so it works from any working directory; a
+#                                   # path that doesn't exist is a load-time error, not a silent skip.
 
 # Global fallbacks: appended to the tail of every virtual model's try-order
 # that already has an openai-completions entry (coding/cheap/agent below all

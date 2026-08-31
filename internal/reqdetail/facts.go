@@ -20,7 +20,6 @@ package reqdetail
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -239,17 +238,4 @@ func BodyBytes(body any) int64 {
 // default branch is not a missed case; it is what keeps the two paths equal.
 // It is also not on any hot path: the production shape is map[string]any,
 // which has to be marshalled either way.
-func BodyRaw(body any) []byte {
-	switch b := body.(type) {
-	case nil:
-		return nil
-	case string:
-		return []byte(b)
-	default:
-		raw, err := json.Marshal(b)
-		if err != nil {
-			return nil
-		}
-		return raw
-	}
-}
+func BodyRaw(body any) []byte { return chatmsg.BodyRaw(body) }

@@ -170,3 +170,8 @@ func TestGenerateRows_DeterministicOutputOrder(t *testing.T) {
 		t.Fatalf("rows = %v, want sorted by canonical key", rows)
 	}
 }
+
+func gr(key string, inFresh float64) generatedRow {
+	f := inFresh
+	return generatedRow{Key: key, InFresh: &f}
+}

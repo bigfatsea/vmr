@@ -114,7 +114,7 @@ func TestRenderHTML_CostAndPointOfNoReturn(t *testing.T) {
 		&Step{Seq: 3},
 	)
 	m := Metrics{NetWorkingMS: 252000, ModelUsage: []ModelUsageStat{{TokensIn: 1_100_000, TokensOut: 90_000}}}
-	cost := CostFact{Currency: "USD", TotalUSD: 4.8, Resolved: true, PricedSteps: 3, TotalSteps: 3}
+	cost := CostFact{Currency: "USD", Total: fp(4.8), Resolved: true, PricedSteps: 3, TotalSteps: 3}
 
 	out := RenderHTML(j, m, nil, cost, i18n.EN, false)
 	for _, want := range []string{

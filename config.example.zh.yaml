@@ -137,8 +137,10 @@ listen: 127.0.0.1:8800
 #                                 # 也会查这张表。想明确表示"不需要换算"，就显式写 {CNY: 1.0}。
 #   supplement: ./pricing.yaml    # 可选：你自己补充的条目，格式和内置表相同
 #                                   # （参见 pricing.example.yaml——复制成 pricing.yaml 后按需修改），
-#                                   # 合并进来——canonical key 撞车时你的条目胜出。指向一个不存在
-#                                   # 的路径会在加载期报错，不会静默跳过。
+#                                   # 合并进来——canonical key 撞车时你的条目胜出。也可以带一个
+#                                   # aliases: 块（裸模型名 → canonical key），给自造了模型 id 的网关用。
+#                                   # 相对路径按**这份 config 文件所在目录**解析，因此从任何工作目录跑
+#                                   # 都成立；指向一个不存在的路径会在加载期报错，不会静默跳过。
 
 # 全局兜底：追加到每个已经有 openai-completions 协议入口的虚拟模型 try-order 末尾（下面的
 # coding/cheap/agent 都有——claude 是纯 Anthropic 模型，这个块从不会碰到它，

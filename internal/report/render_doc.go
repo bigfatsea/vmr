@@ -145,13 +145,14 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 	t := i18n.Doc(lang)
 	w("## %s\n\n", t.SummaryTitle)
 	h := t.SummaryHeaders
-	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4])
+	tbl := newTable(w, h[0], h[1], h[2], h[3], h[4], h[5])
 	p95n := o.RequestsWithDur
 	tbl.row(t.SummaryRequests(o.Requests, o.Fallbacks, o.Truncated),
 		pctStr2(o.OK, o.Requests),
 		fmtutil.FmtTokens(o.TokensInFresh),
 		cacheEffCell(o.CacheEfficiency, o.TokensKnown, o.Requests),
-		durCell(o.DurMSP95, p95n))
+		durCell(o.DurMSP95, p95n),
+		summaryCostCell(rep, o, t.SummaryCostUnknown))
 	w("\n")
 	w("%s", t.SummaryStarNote)
 	w("%s\n", t.HighlightsAuto)
@@ -159,6 +160,22 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 		w("- %s\n", h)
 	}
 	w("\n")
+}
+
+// summaryCostCell renders §0's headline money cell. "Unpriced" rather than
+// a number whenever nothing resolved a rate — never 0, which reads as
+// "this traffic was free" and is precisely the unknown-vs-zero confusion
+// internal/pricing is built to avoid. The figure is the pay-as-you-go
+// equivalent §2 explains in full; §0 only points at it.
+func summaryCostCell(rep *Report2, o Row, unknown string) string {
+	if rep.Pricing == nil || o.CostEstimate == nil {
+		return unknown
+	}
+	cur := rep.Pricing.Currency
+	if cur == "" {
+		cur = "USD"
+	}
+	return money(*o.CostEstimate, cur)
 }
 
 // highlightWasteFloorBytes is the minimum absolute tool-schema waste for the

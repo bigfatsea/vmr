@@ -70,26 +70,39 @@ rates:
     cache_read: 0.28169  # ¥2.00 / 7.1
     out: 14.08451        # ¥100.00 / 7.1
 
-  # Zhipu AI / GLM (bigmodel.cn) — no zhipu/zhipuai rows exist anywhere in
-  # standard_price_generated.yaml (the LiteLLM snapshot has no direct-vendor Zhipu
-  # coverage at all, only third-party reseller entries under fireworks_ai/).
-  # Source: https://bigmodel.cn/pricing (CNY per 1M tokens); cache-hit
-  # discount confirmed at https://docs.bigmodel.cn/cn/guide/capabilities/cache
-  # ("缓存费用" example: half the standard input price), explicitly named
-  # for the GLM-5.x series only — NOT extrapolated to other GLM generations.
-  # GLM-5.1's price is tiered by input length (bigmodel.cn/pricing shows
-  # [0,32K) vs >=32K rows); the [0,32K) tier is used here as the common
-  # case — an account whose traffic runs mostly above 32K input should add
-  # a providers[].pricing.overrides entry with the >=32K figures instead of
-  # relying on this row. cache_write: not published (no separate
-  # cache-creation fee documented for GLM's caching mechanism).
+  # Zhipu AI / GLM (bigmodel.cn) — standard_price_generated.yaml has no
+  # direct-vendor Zhipu rows, only reseller entries (fireworks_ai/glm-5p*,
+  # openrouter/glm-*, dashscope/glm-5.*), each at that reseller's own price.
+  # Source: https://bigmodel.cn/pricing, re-read 2026-08-31 (CNY per 1M
+  # tokens; columns are 输入 / 输出 / 缓存写入 / 缓存命中).
+  #
+  # cache_read comes from that page's own 缓存命中 column. It used to be
+  # written here as "50% of in_fresh", inferred from the cache doc's worked
+  # example — the published column says ¥1.3 for GLM-5.1 [0,32K) and ¥2 for
+  # GLM-5.2/5.3, i.e. the inference ran 2.3x and 2x HIGH. On this repo's own
+  # traffic (cache-hit rates of 70-99%) cache_read dominates the bill, so an
+  # inferred cache price is not a rounding error; every row here now carries
+  # a published figure or no figure at all.
+  #
+  # GLM-5.1's price is tiered by input length ([0,32K) vs >=32K); the
+  # [0,32K) tier is used here as the common case — an account whose traffic
+  # runs mostly above 32K input should add a providers[].pricing.overrides
+  # entry with the >=32K figures instead. GLM-5.2/5.3 have a single flat 1M
+  # tier. cache_write: the page says 限时免费 (free for a limited promotional
+  # window) — a promo, not a price, and this schema has no time dimension
+  # (see internal/pricing.OverrideRule), so it is OMITTED rather than
+  # written as 0.0: a promo that ends would silently under-price forever.
   - key: zhipu/glm-5.1
     in_fresh: 0.84507    # ¥6 / 7.1 ([0,32K) input tier)
-    cache_read: 0.42254  # 50% of in_fresh, per the cache-discount doc above
+    cache_read: 0.18310  # ¥1.3 / 7.1 ([0,32K) input tier, 缓存命中 column)
     out: 3.38028          # ¥24 / 7.1 ([0,32K) input tier)
   - key: zhipu/glm-5.2
     in_fresh: 1.12676    # ¥8 / 7.1 (flat — GLM-5.2 has a single 1M-context tier, no tiering caveat)
-    cache_read: 0.56338  # 50% of in_fresh, per the cache-discount doc above
+    cache_read: 0.28169  # ¥2 / 7.1 (缓存命中 column)
+    out: 3.94366          # ¥28 / 7.1
+  - key: zhipu/glm-5.3
+    in_fresh: 1.12676    # ¥8 / 7.1 (flat 1M context tier, same list price as GLM-5.2)
+    cache_read: 0.28169  # ¥2 / 7.1 (缓存命中 column)
     out: 3.94366          # ¥28 / 7.1
 
   # ByteDance Volcengine / Doubao (volcengine.com) — the existing
@@ -131,3 +144,49 @@ rates:
   - key: hunyuan/hunyuan-a13b
     in_fresh: 0.07042    # ¥0.5 / 7.1
     out: 0.28169          # ¥2 / 7.1
+
+# ---------------------------------------------------------------------------
+# Aliases: bare model name -> the canonical key whose price it means.
+#
+# A REFERENCE, never a copied number — regenerating standard_price_generated.yaml
+# moves every alias's rate with it, so nothing here goes stale on its own.
+# Exactly one hop (a target that is itself an alias is a load-time error, see
+# internal/pricing.Table.ValidateAliases), and consulted only at resolution
+# step ③: a provider that IS the vendor, or that has an exact supplement row
+# of its own, still wins.
+#
+# standard_price_generated.yaml is pure machine prices and writes NO aliases.
+# This file is the single source of truth for all built-in aliases.
+#
+# Precedence (LookupPreferredSuffix) resolves most bare names with no alias
+# at all (single first-party wins). An entry belongs here when:
+#   1. Two or more NON-reseller vendors carry the same bare name (dashscope
+#      reselling DeepSeek/Zhipu/Moonshot alongside Qwen — precedence cannot
+#      decide).
+#   2. The priced row is a CURATED addition (LiteLLM doesn't carry it).
+#   3. A gateway/proxy invented its own model id for a first-party model
+#      (thinking-effort tiers like -high).
+# ---------------------------------------------------------------------------
+aliases:
+
+  # (1) dashscope (阿里云百炼) resells DeepSeek/Zhipu/Moonshot alongside its
+  # own Qwen line — a split no per-vendor rank can express (see
+  # aggregatorVendors' doc comment: dashscope is first-party for Qwen,
+  # reseller for these).
+  deepseek-v4-flash: deepseek/deepseek-v4-flash
+  deepseek-v4-pro: deepseek/deepseek-v4-pro
+  glm-5.1: zhipu/glm-5.1
+  glm-5.2: zhipu/glm-5.2
+  kimi-k2.7-code: moonshot/kimi-k2.7-code
+
+  # (2) Rows this file adds that LiteLLM's snapshot doesn't carry at all.
+  glm-5.3: zhipu/glm-5.3
+  kimi-k2.7-code-highspeed: moonshot/kimi-k2.7-code-highspeed
+  doubao-seed-2.1-turbo: volcengine/doubao-seed-2.1-turbo
+  doubao-seed-2.1-pro: volcengine/doubao-seed-2.1-pro
+
+  # (3) Gateway-invented thinking-effort tiers (seen in this repo's own
+  # audit logs as cliproxy/sub2api model ids). The gateway's own margin is
+  # not knowable from here; the first-party list price is.
+  gemini-3.6-flash-high: gemini/gemini-3.6-flash
+  gemini-3.7-flash-high: gemini/gemini-3.7-flash

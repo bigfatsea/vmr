@@ -74,7 +74,7 @@ func TestRenderComparisonHTML_NoExtras(t *testing.T) {
 func TestRenderComparisonHTML_CostFootnoteAndDeliverableSkip(t *testing.T) {
 	cmp := cmpFixture(t)
 	cmp.Extras.Cost = CostPair{
-		A: CostFact{Resolved: true, TotalUSD: 3.5},
+		A: CostFact{Resolved: true, Total: fp(3.5)},
 		B: CostFact{Resolved: false},
 	}
 	cmp.Extras.Deliverable = DeliverableFact{} // both sides Found=false

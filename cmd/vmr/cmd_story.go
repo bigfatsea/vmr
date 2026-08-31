@@ -581,7 +581,14 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 // this function's callers in cmd_story.go/cmd_analyze.go pass true for it;
 // only renderAllJourneys' own default-suite caller (not -render-all) ever
 // passes false — see writeJourneyFile's doc comment for what false means.
-func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string, materializeDetails bool) error {
+//
+// priceRes/ccy thread the same pricing resolution the single-journey
+// renderJourney uses, so a batch-rendered journey-<id>.{md,json} is
+// byte-identical to what -journey <id> would have produced (same CostFact,
+// same overview cost line). priceRes may be nil (no pricing resolvable at
+// all) — ComputeJourneyCost then yields the documented unresolved fact,
+// exactly as the single-journey path would.
+func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
@@ -617,12 +624,14 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 			j.Partial = toRenderPartial[start+i]
 			m := story.ComputeMetrics(j)
 			findings := story.ComputeFindings(j, lang)
-			// Batch renders (default suite, -render-all, multi-match -journey)
-			// carry no cost: pricing resolution is a zoom-in feature, same as
-			// -html itself — only single -journey / -compare thread a resolver.
+			// Same cost computation as single -journey's renderJourney — the
+			// batch rendered the same journeys and must produce the same
+			// files (formerly a nil cost here: batch output silently lacked
+			// the cost line the zoomed-in render of the same journey had).
+			cost := story.ComputeJourneyCost(j, priceRes, ccy)
 			// batchRecs: EnsureJourneyDetails reuses this batch's already-
 			// decompressed records instead of re-reading the source files.
-			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, nil, materializeDetails, batchRecs)
+			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
 			if err != nil {
 				return err
 			}
@@ -646,9 +655,9 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 // there) — the latter is exactly the unbounded-materialization case to
 // avoid (238+ candidates' worth of Step detail pages written on every run
 // whether or not anyone reads them).
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, materializeDetails bool) error {
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
 	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
-		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)", materializeDetails)
+		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)", materializeDetails, priceRes, ccy)
 }
 
 // corpusStats builds every non-partial candidate journey (same

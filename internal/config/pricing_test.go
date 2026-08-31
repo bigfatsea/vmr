@@ -525,11 +525,34 @@ pricing:
 	}
 }
 
+func TestPricing_Map_PointsToAlias_Accepted(t *testing.T) {
+	// pricing.map targeting an alias (e.g. "deepseek-v4-flash" instead of
+	// "deepseek/deepseek-v4-flash") is accepted and resolves correctly.
+	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  map: {my-custom-deepseek: deepseek-v4-flash}`, "my-custom-deepseek")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	spec := cfg.ResolvedPricing["p1\x00my-custom-deepseek"]
+	if spec == nil {
+		t.Fatal("expected ResolvedPricing for p1/my-custom-deepseek")
+	}
+	rate := pricing.EffectiveRate(spec)
+	if rate.InFresh == nil || *rate.InFresh != 0.44 {
+		t.Errorf("InFresh = %v, want 0.44 (deepseek-v4-flash list price)", *rate.InFresh)
+	}
+}
+
 func TestPricing_ProviderPolicy_CoversProviderWithoutPricingBlock(t *testing.T) {
-	// The currency/exchange-rate factor must reach EVERY provider, not just
-	// ones with their own pricing: block — vmr report resolves standard
-	// table prices for all of them and labels the result with
-	// pricing.currency.
+	// Every provider gets a ProviderPolicy entry, even one with no pricing:
+	// block — vmr report resolves standard-table prices for all of them.
+	// The currency factor is deliberately NOT on the policy (it is global,
+	// see Config.PricingAccounting); this only pins that the entry exists
+	// and carries empty, not absent, map/overrides.
 	yaml := `
 listen: 127.0.0.1:9900
 pricing:
@@ -554,8 +577,11 @@ models:
 	if !ok {
 		t.Fatal("provider with no pricing: block got no ProviderPricingPolicies entry — its standard-table rates would stay unconverted while the report labels them CNY")
 	}
-	if policy.ExchangeRateToTarget != 7.1 || policy.Currency != "CNY" {
-		t.Errorf("policy = {factor %v, currency %q}, want {7.1, CNY}", policy.ExchangeRateToTarget, policy.Currency)
+	if len(policy.Map) != 0 || len(policy.Overrides) != 0 {
+		t.Errorf("policy = %+v, want an entry with no map and no overrides", policy)
+	}
+	if factor, currency := cfg.PricingAccounting(); factor != 7.1 || currency != "CNY" {
+		t.Errorf("PricingAccounting() = (%v, %q), want (7.1, \"CNY\")", factor, currency)
 	}
 }
 
@@ -599,21 +625,30 @@ models:
 	if err != nil {
 		t.Fatalf("PricingTable: %v", err)
 	}
-	resolver := pricing.NewResolver(table, cfg.ProviderPricingPolicies)
-	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
-	if !ok {
-		t.Fatal("RateFor: no rate resolved for a model the standard table covers")
-	}
-	if rate.InFresh == nil {
-		t.Fatal("rate.InFresh unexpectedly nil")
-	}
+	factor, _ := cfg.PricingAccounting()
+	resolver := pricing.NewResolver(table, cfg.ProviderPricingPolicies, factor, "")
 	// The standard table's USD list price for this model is 3.0/1M in_fresh
 	// (internal/pricing/standard_price_generated.yaml) — converted at 7.1 that
 	// must land on 21.3, not 3.0 (the bug's failure mode: computing in USD
 	// while the report labels the column CNY).
 	const wantUSD = 3.0
-	if got, want := *rate.InFresh, wantUSD*7.1; got < want-0.001 || got > want+0.001 {
-		t.Errorf("rate.InFresh = %v, want %v (= %v USD list price x 7.1 exchange rate) — got the unconverted USD figure instead?", got, want, wantUSD)
+	// "anthropic" is declared in config.yaml; "anthropic-old" is not — the
+	// shape an audit log always has, since it names every provider that ever
+	// ran, including ones since renamed, deleted, or split by api_keys. Both
+	// MUST convert: holding the factor per provider meant the second one
+	// silently resolved at 1.0, so one canonical row rendered as USD and as
+	// CNY in adjacent lines of the same table.
+	for _, provider := range []string{"anthropic", "anthropic-old"} {
+		rate, ok := resolver.RateFor(provider, "claude-3-7-sonnet-20250219")
+		if !ok {
+			t.Fatalf("RateFor(%q): no rate resolved for a model the standard table covers", provider)
+		}
+		if rate.InFresh == nil {
+			t.Fatalf("RateFor(%q): rate.InFresh unexpectedly nil", provider)
+		}
+		if got, want := *rate.InFresh, wantUSD*7.1; got < want-0.001 || got > want+0.001 {
+			t.Errorf("RateFor(%q).InFresh = %v, want %v (= %v USD list price x 7.1 exchange rate) — got the unconverted USD figure instead?", provider, got, want, wantUSD)
+		}
 	}
 }
 

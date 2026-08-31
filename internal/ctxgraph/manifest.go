@@ -31,16 +31,40 @@ type Manifest struct {
 	// re-deriving it.
 	Req string `json:"req,omitempty"`
 
-	TS       time.Time     `json:"ts"`
-	Model    string        `json:"model,omitempty"`
-	Protocol string        `json:"protocol,omitempty"`
-	Outcome  string        `json:"outcome,omitempty"`
-	Endpoint string        `json:"endpoint,omitempty"` // final attempt's "protocol:provider:model", "-" if none
-	Stream   bool          `json:"stream,omitempty"`
-	DurMS    int64         `json:"dur_ms,omitempty"`
-	TTFTMS   int64         `json:"ttft_ms,omitempty"`
-	Usage    chatmsg.Usage `json:"usage"`
-	UsageOK  bool          `json:"usage_ok,omitempty"`
+	TS       time.Time `json:"ts"`
+	Model    string    `json:"model,omitempty"`
+	Protocol string    `json:"protocol,omitempty"`
+	Outcome  string    `json:"outcome,omitempty"`
+	Endpoint string    `json:"endpoint,omitempty"` // final attempt's "protocol:provider:model", "-" if none
+	// ServedEndpoint is the endpoint that actually SERVED the client — the
+	// same attribution rule internal/report's endpointInfo applies: the last
+	// attempt that got a < 400 response header, preferring the strictly
+	// successful one (no attempt error). "" when no attempt ever committed
+	// a < 400 response (early client cancel, all attempts failing with
+	// network/4xx/5xx errors) — cost attribution keys off this field, not
+	// Endpoint, so an unserved request is never priced and a canceled
+	// stream that DID commit a 2xx still is, on the same basis report
+	// prices it (see internal/story/cost.go). "" (not "-") because unlike
+	// Endpoint this is a pricing-basis field, never rendered as a label.
+	ServedEndpoint string        `json:"served_endpoint,omitempty"`
+	Stream         bool          `json:"stream,omitempty"`
+	DurMS          int64         `json:"dur_ms,omitempty"`
+	TTFTMS         int64         `json:"ttft_ms,omitempty"`
+	Usage          chatmsg.Usage `json:"usage"`
+	UsageOK        bool          `json:"usage_ok,omitempty"`
+
+	// EstIn/EstOut are the DEGRADED token estimate, set only when UsageOK is
+	// false — the upstream reported no usage, so tokens are estimated from
+	// the router's own pre-routing count (audit.Facts.EstimatedTokens) or,
+	// failing that, from body size. Both zero when usage is known.
+	//
+	// They exist so a journey's $ line and the macro report's $ column price
+	// the same records: internal/report has always priced these estimated
+	// records (and says so in its §2 footnote), internal/story silently
+	// skipped them, and nothing said the two totals were on different bases.
+	// 0 on a manifest from a pre-v4 parse cache.
+	EstIn  int64 `json:"est_in,omitempty"`
+	EstOut int64 `json:"est_out,omitempty"`
 
 	// Bytes is this record's decompressed JSON line length — set by
 	// scanFile, not BuildManifest (only the scan loop has the raw line in
@@ -113,11 +137,28 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		Path: path, Line: line, Req: ReqCoord(path, line), TS: rec.TS,
 		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
 		Stream: rec.Stream, DurMS: rec.DurMS, TTFTMS: rec.TTFTMS,
-		Endpoint:     lastEndpoint(rec),
-		ClientKeyTag: rec.ClientKeyTag,
+		Endpoint:       lastEndpoint(rec),
+		ServedEndpoint: servedEndpoint(rec),
+		ClientKeyTag:   rec.ClientKeyTag,
 	}
 	if rec.Client.Response != nil {
 		m.Usage, m.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
+	}
+	if !m.UsageOK {
+		// Only computed when the upstream reported nothing: a manifest whose
+		// usage IS known must never carry a competing estimate that some
+		// later consumer picks up by accident. Shared implementation with
+		// report's own degraded estimate (Facts.EstimatedTokens when the
+		// router already computed one, a body-size estimate otherwise) —
+		// see chatmsg.EstimateDegradedTokens for why one function and not
+		// two: report and story must price the same record on the same
+		// basis, and a compile-time shared call is the only way that can't
+		// drift.
+		var respBody any
+		if rec.Client.Response != nil {
+			respBody = rec.Client.Response.Body
+		}
+		m.EstIn, m.EstOut = chatmsg.EstimateDegradedTokens(rec.Facts, rec.Client.Request.Body, respBody)
 	}
 	if tp := rec.Client.Request.Headers.Get("Traceparent"); tp != "" {
 		if parts := strings.Split(tp, "-"); len(parts) >= 2 {
@@ -192,4 +233,29 @@ func lastEndpoint(rec *audit.Record) string {
 		return "-"
 	}
 	return rec.Attempts[len(rec.Attempts)-1].Endpoint
+}
+
+// servedEndpoint applies the same attribution rule as internal/report's
+// endpointInfo — prefer the strictly successful attempt (no error, < 400),
+// fall back to the last attempt that got a < 400 response header at all —
+// duplicated rather than shared for the same reason lastEndpoint is: the
+// import boundary forbids ctxgraph -> report. The duplication is pinned by
+// cmd/vmr's cost_basis_parity_test, which prices the same canceled/error
+// fixtures through both halves and fails if the two rules ever disagree.
+// "" (not "-") when nothing served: consumers treat that as "no endpoint
+// to attribute to", exactly like report's empty-string endpoint.
+func servedEndpoint(rec *audit.Record) string {
+	var successEp, servedEp string
+	for _, a := range rec.Attempts {
+		if a.Response != nil && a.Response.Status < 400 {
+			servedEp = a.Endpoint
+			if a.Error == "" {
+				successEp = a.Endpoint
+			}
+		}
+	}
+	if successEp != "" {
+		return successEp
+	}
+	return servedEp
 }

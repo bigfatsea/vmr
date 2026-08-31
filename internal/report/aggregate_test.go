@@ -223,7 +223,7 @@ func TestMarkdownAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := Markdown(rep, i18n.EN, nil, nil)
-	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Cost Estimate", "## §8 Request Detail Index"}) {
+	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Pay-As-You-Go Equivalent Cost", "## §8 Request Detail Index"}) {
 		t.Fatalf("Markdown missing expected sections")
 	}
 	// JSON roundtrip preserves fields but not the unexported requests slice.
@@ -322,7 +322,7 @@ rates:
 		t.Fatalf("disclaimer should not be empty")
 	}
 
-	resolver := pricing.NewResolver(table, nil)
+	resolver := pricing.NewResolver(table, nil, 1, "")
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	rep, _, err := Build([]string{path}, time.Now(), nil, pricingInfo, resolver, nil)
 	if err != nil {
@@ -356,7 +356,7 @@ rates:
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := pricing.NewResolver(table, nil)
+	resolver := pricing.NewResolver(table, nil, 1, "")
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	rep, _, err := Build([]string{path}, time.Now(), nil, &Pricing{Currency: "CNY"}, resolver, nil)
 	if err != nil {

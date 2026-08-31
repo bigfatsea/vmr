@@ -71,19 +71,60 @@ type ResolveOptions struct {
 	Currency             string
 }
 
-// resolveCanonicalKey implements the design doc's §9.1 four-step automatic
-// resolution: ① opts.Map's explicit entry for model, ② "<provider>/<model>"
-// (provider here is vmr's OWN providers[].name — see the design doc's
-// literal wording; this only helps when a provider happens to be named
-// after its upstream vendor, e.g. "anthropic", "deepseek"), ③ the bare
-// model name as a canonical key on its own (the common shape for
-// directly-configured Western vendors in the standard table), ④ a UNIQUE
-// "*/model" suffix match across the whole table. Any step that doesn't
-// resolve falls through to the next; if none do, ok=false — "no rate", not
-// a guess (see Table.LookupUniqueSuffix's own doc comment on ambiguity).
+func lookupMapping(mapping map[string]string, model string) (string, bool) {
+	if len(mapping) == 0 {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(model)
+	if ck, ok := mapping[trimmed]; ok {
+		return strings.TrimSpace(ck), true
+	}
+	lower := strings.ToLower(trimmed)
+	for k, v := range mapping {
+		if strings.ToLower(strings.TrimSpace(k)) == lower {
+			return strings.TrimSpace(v), true
+		}
+	}
+	return "", false
+}
+
+// resolveCanonicalKey implements the design doc's four-step automatic
+// resolution: ① opts.Map's explicit entry for model (matched case-insensitively),
+// ② "<provider>/<model>" (provider here is vmr's OWN providers[].name — see the
+// design doc's literal wording; this only helps when a provider happens to be
+// named after its upstream vendor, e.g. "anthropic", "deepseek"), ③ the bare
+// model name — first as a canonical key on its own (the common shape for
+// directly-configured Western vendors in the standard table), then through
+// the table's alias map (one hop, see Table.aliases), ④ a "*/model" suffix
+// match resolved by vendor precedence (see Table.LookupPreferredSuffix).
+// Any step that doesn't resolve falls through to the next; if none do,
+// ok=false — "no rate", not a guess.
+//
+// When the request name carries a "/" and all four raw steps missed, one
+// basename retry follows: the whole resolution re-runs on
+// ModelBasename(model). The table's keys are org-stripped (see
+// ModelBasename), so an aggregator's forced org prefix
+// ("google/gemma-4-31b-it" on together) would otherwise never reach any
+// row. Re-running every step — not just the bare-name and suffix ones — is
+// what makes the retry byte-identical to what the bare name itself resolves
+// to: a provider named after its vendor answers its own
+// "<provider>/<basename>" row at step ② for the bare name today, and the
+// org-prefixed request must land on that same row (the serving vendor's own
+// price), not diverge to a first-party list price via the suffix scan alone.
+// The retry only ever WIDENS what resolves — every name a raw step answered
+// keeps that answer, including map entries pinned on the raw name. No new
+// pricing decision is introduced; this is not the retired generateAliases
+// mechanic (it pins nothing — it lowers an input form into the space the
+// existing four steps and vendor precedence already decide).
+//
+// The alias hop sits inside step ③ rather than ahead of step ②
+// deliberately: a provider that IS the vendor (deepseek/deepseek-v4-flash)
+// or that carries an exact supplement row of its own
+// (sub2api/gemini-3.6-flash-high) already has the more specific answer, and
+// a global alias must never override a per-provider one.
 func resolveCanonicalKey(provider, model string, table *Table, mapping map[string]string) (Rate, bool) {
-	if ck, ok := mapping[model]; ok {
-		if r, ok := table.Lookup(ck); ok {
+	if ck, ok := lookupMapping(mapping, model); ok {
+		if r, ok := table.LookupRateOrAlias(ck); ok {
 			return r, true
 		}
 		// An explicit map entry naming a key the table doesn't have is a
@@ -101,7 +142,31 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 	if r, ok := table.Lookup(model); ok {
 		return r, true
 	}
-	return table.LookupUniqueSuffix(model)
+	if ck, ok := table.LookupAlias(model); ok {
+		if r, ok := table.Lookup(ck); ok {
+			return r, true
+		}
+		// An alias naming a key the merged table doesn't have is a load-time
+		// error (Table.ValidateAliases, called by LoadStandard and config's
+		// buildPricingContext), so reaching here means a caller built a
+		// Table by hand without validating; falling through to step ④ is
+		// best-effort, never a silent mis-price.
+	}
+	if r, ok := table.LookupPreferredSuffix(model); ok {
+		return r, true
+	}
+	// Org-prefix fallback: the request name carries a path the generator
+	// stripped from every table key (see ModelBasename) — reduce it to the
+	// same space and re-run the whole resolution on the bare name. Recursing
+	// (rather than re-running only the bare/suffix steps) is what makes the
+	// result byte-identical to the bare name's own resolution. Terminates by
+	// construction: ModelBasename never contains a "/", so the recursive
+	// call's own fallback is unreachable. Runs only after all four raw steps
+	// missed, so nothing that resolved before changes.
+	if b := ModelBasename(model); b != model {
+		return resolveCanonicalKey(provider, b, table, mapping)
+	}
+	return Rate{}, false
 }
 
 // Resolve computes provider+model's PricingSpec: Base is the RAW

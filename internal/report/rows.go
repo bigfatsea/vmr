@@ -293,12 +293,12 @@ type EndpointRow struct {
 	// TokensInFreshEst/TokensOutEst/TokensEstimated cover the requests this
 	// endpoint served whose usage was NOT sniffable (the complement of
 	// TokensKnown): the degraded byte-count estimate the routing half charged
-	// for them, reproduced here by tokenest.go's estimateDegradedTokens.
+	// for them, reproduced here by chatmsg.EstimateDegradedTokens.
 	// TokensEstimated counts requests that CONTRIBUTED a non-zero estimate,
 	// not every request that missed a usage object — so TokensKnown +
 	// TokensEstimated is deliberately not expected to equal Requests. A
 	// request whose every attempt failed forwards nothing and is charged
-	// nothing (see estimateDegradedTokens' doc comment), so counting it here
+	// nothing (see chatmsg.EstimateDegradedTokens' doc comment), so counting it here
 	// would attribute a degraded token charge to a request the router never
 	// charged at all.
 	// Kept in SEPARATE fields rather than folded into TokensInFresh/TokensOut
@@ -350,6 +350,16 @@ type EndpointRow struct {
 	// CostEstimate is non-nil; 0 there means every priced request had
 	// sniffed usage.
 	CostEstimateEst float64 `json:"cost_estimate_est,omitempty"`
+	// CostRateIncomplete marks an endpoint priced through a rate that is
+	// missing at least one of its four components (pricing.Rate.Complete is
+	// false). pricing.Rate.Cost prices a nil component as 0 — deliberately,
+	// as a defensive floor — so such a row's $ figure is systematically LOW
+	// by however much traffic ran through the missing component, with
+	// nothing on the row itself to say so. On real traffic that is not a
+	// rounding error: a vendor that publishes no cache_read price, on an
+	// account running a 90% cache-hit rate, is unpriced for 90% of its
+	// input tokens.
+	CostRateIncomplete bool `json:"cost_rate_incomplete,omitempty"`
 
 	durs, ttfts, streamMS, inToks, outToks []int64
 }

@@ -117,7 +117,7 @@ func derefOrNil(p *float64) any {
 // number with no signal at all.
 //
 // Now the estimate is counted (same formula the router charges with, see
-// aggregate.go's estimateDegradedTokens) and its share is reported through
+// chatmsg.EstimateDegradedTokens) and its share is reported through
 // WindowEstimatedPct instead of being papered over with a "-".
 func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
 	lim := tokensLimit(1_000_000)

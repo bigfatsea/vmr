@@ -50,6 +50,15 @@
 # comment, same convention internal/pricing/standard_price_curated.yaml
 # follows).
 #
+# A key is "vendor/basename" or a bare name — at most one "/". Aggregator
+# API naming like "meta-llama/llama-3.3-70b-instruct" or
+# "accounts/fireworks/models/deepseek-v4-flash" is org/path noise, not model
+# identity: a key written that way is rejected at load time, because the
+# resolver strips those prefixes (pricing.ModelBasename) and a deeper key
+# would be invisible to it. Write the two-segment form; upstream model names
+# CONFIGURED with an org prefix still resolve fine — the resolver retries on
+# the basename automatically.
+#
 # This file is allowed to be entirely empty (or all comments) — that's a
 # valid, empty supplement, not an error. Delete the example rows below
 # before using this as your real pricing.yaml if you don't need them.
@@ -72,3 +81,30 @@ rates:
     cache_read: 0.71
     cache_write: 8.875
     out: 28.4
+
+# Aliases: a bare model name -> the canonical key whose price it means.
+# A REFERENCE, never a copied number — when the built-in table is refreshed,
+# the alias follows the new price automatically. Merged with the built-in
+# alias list; a name you declare here wins.
+#
+# Vendor precedence (the model's maker beats an aggregator reselling it)
+# already resolves most bare names with nothing configured, so you may never
+# need this block. But precedence is the safety net for the long tail, NOT
+# the mechanism to rely on for a model you actually route: a table refresh
+# that adds another first-party row flips it SILENTLY — the price just stops
+# resolving, with no error. An alias whose target disappears is a load-time
+# error instead, which is the failure mode you want. So:
+#
+#   1. Pin any model you depend on and price yourself here.
+#   2. Pin a bare name two NON-reseller vendors both carry — a platform that
+#      resells another first party alongside its own line; precedence has no
+#      answer for that at all.
+#   3. Point your gateway/proxy's invented model id (a thinking-effort tier
+#      suffix, a private label) at the first-party model it actually serves.
+#
+# One hop only: pointing an alias at another alias, or at a key that does
+# not exist, is a load-time error — not a silent fallback that could land on
+# some other vendor's price.
+aliases:
+  my-gateway-thinking-tier: gemini/gemini-3.7-flash
+  some-model-name: some-vendor/some-model

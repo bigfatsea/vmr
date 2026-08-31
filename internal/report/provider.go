@@ -96,13 +96,33 @@ func buildProviders(rep *Report2, quotas map[string][]ProviderQuotaRef) []Provid
 	return out
 }
 
+// splitEndpointProviderModel splits a "protocol:provider:model" endpoint
+// label into its provider and model segments. SplitN(…, 3) rather than a
+// plain Split: a real-world model name can itself contain ":" or "/" (e.g.
+// OpenRouter's "z-ai/glm-5.2"), so this only ever isolates the first two
+// colon-separated segments and leaves the third — the model — exactly as-is.
+//
+// Strict ":"-only on purpose, and the shared base for the tolerant twin
+// below: the pricing path splits via pricing.Resolver.RateForEndpoint
+// (internal/pricing), which uses the identical strict ":" rule, and
+// widening THIS one (like that one) to accept the legacy "/"-joined label
+// would change the $ numbers historical reports produce for old-format
+// logs — a recorded non-fix, see KNOWN_ISSUES.
+func splitEndpointProviderModel(endpoint string) (provider, model string) {
+	parts := strings.SplitN(endpoint, ":", 3)
+	if len(parts) < 3 {
+		return "", ""
+	}
+	return parts[1], parts[2]
+}
+
 // splitEndpointProviderModelAny is splitEndpointProviderModel's tolerant
 // twin: it accepts both the current "protocol:provider:model" label and the
 // "/"-joined format older audit logs used (see attemptUpstream, detail.go).
 // Deliberately NOT a change to splitEndpointProviderModel itself — that
-// function backs §2's $ estimates, and widening it would silently change
-// historical reports' cost numbers for old-format logs, an out-of-scope
-// behavior change (see the dev plan's risk table).
+// function is the strict base this variant falls back from, and widening it
+// would silently change historical reports' cost numbers for old-format
+// logs, an out-of-scope behavior change (see the dev plan's risk table).
 func splitEndpointProviderModelAny(endpoint string) (provider, model string) {
 	if provider, model = splitEndpointProviderModel(endpoint); provider != "" {
 		return provider, model
