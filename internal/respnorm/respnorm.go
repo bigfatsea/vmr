@@ -112,9 +112,18 @@ type NormalizerStream interface {
 	// ObservedModel is the upstream's own model value when it differed from
 	// the one vmr requested, else "".
 	ObservedModel() string
-	// Usage returns the token usage extracted from this response so far; ok is true
-	// only once at least one usage-bearing block has actually been parsed.
+	// Usage returns the token usage extracted from this response so far; ok is
+	// true once at least one usage-bearing block has actually been parsed —
+	// it is NOT the exact-vs-degraded billing signal: see UsageSides, which
+	// callers deciding how to charge must consult (see quota.go's
+	// tokenCharge for the fallback when a side is missing).
 	Usage() (chatmsg.Usage, bool)
+	// UsageSides reports which sides of the usage ledger have actually been
+	// parsed — the exact-vs-degraded decision needs the split, not the single
+	// Usage() bool: Anthropic's message_start carries the input counts plus a
+	// ~1 placeholder output, so a stream truncated after it has real input
+	// usage but no real output total.
+	UsageSides() (inSeen, outSeen bool)
 	// OutTokens returns the estimated token count of bytes emitted downstream so far —
 	// the degraded-estimate input when Usage() has nothing.
 	OutTokens() int64
@@ -172,13 +181,8 @@ var (
 	doneSentinel       = []byte("data: [DONE]")
 	eventSep           = []byte("\n\n")
 	crlfEventSepHint   = []byte("\r\n\r\n")
-	// usageFieldMarker is the cheap gate for Quota-Aware Routing's usage
-	// sniffing (see noteUsage below): almost every SSE token-delta event
-	// carries no "usage" key at all, so this bytes.Contains check skips a
-	// full JSON parse for the overwhelming majority of events — the same
-	// "cheap substring gate before an expensive parse" idiom modelFieldPattern
-	// and the other markers in this file already use.
-	usageFieldMarker = []byte(`"usage"`)
+	// usageFieldMarker and the usage-side state it guards live in
+	// usagesniff.go, next to the sniffing code they belong to.
 )
 
 var passthroughReasoningMarkers = [][]byte{
@@ -240,8 +244,11 @@ type stream struct {
 	rawPreStrip   []byte        // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
 	observedModel string        // what the upstream actually answered with, recorded only when it differs from upstreamModel
 	meter         outTokenMeter // classified across emitBlock/finalizeBuffered; EstimateFromStats' rounding is applied once, in OutTokens(), not per chunk
-	usage         chatmsg.Usage
-	usageSeen     bool
+
+	// usage-sniffing state, guarded by mu below; owned by usagesniff.go.
+	usage        chatmsg.Usage
+	usageInSeen  bool
+	usageOutSeen bool
 }
 
 func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *stream {
@@ -873,36 +880,8 @@ func (s *stream) countTokens(b []byte) {
 	s.mu.Unlock()
 }
 
-// noteUsage looks for a "usage" object in b and folds it into the running
-// total. Called from both emitBlock (streaming) and finalizeBuffered
-// (buffered) — the two paths never overlap for one response (see
-// response.go's package doc comment on transport modes), so this never
-// double-counts. The bytes.Contains gate means the overwhelming majority of
-// streamed events (plain content/tool-call deltas) cost one substring scan
-// and nothing else; only an event that actually mentions "usage" pays for a
-// JSON parse.
-func (s *stream) noteUsage(b []byte) {
-	if !bytes.Contains(b, usageFieldMarker) {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u := chatmsg.MergeUsageBytes(b, s.usage)
-	s.usage = u
-	if u.In > 0 || u.Out > 0 {
-		s.usageSeen = true
-	}
-}
-
-// Usage returns the token usage extracted from this response so far; ok is true
-// only once at least one usage-bearing block has actually been parsed —
-// see quota.go's tokenCharge for the fallback when ok is false. Safe to
-// call concurrently with an in-flight Read/ingest.
-func (s *stream) Usage() (chatmsg.Usage, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.usage, s.usageSeen
-}
+// Usage and the rest of the stream's usage-sniffing methods live in
+// usagesniff.go.
 
 // OutTokens returns the estimated token count over all response text countTokens has
 // classified so far — the degraded-estimate input when Usage() has nothing.

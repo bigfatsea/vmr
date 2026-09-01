@@ -387,3 +387,99 @@ models:
 		t.Fatalf("successful endpoint p3 charged %v, want 1", u3Used.Requests)
 	}
 }
+
+// --- metric: tokens, PARTIAL usage (R46): a stream truncated after
+// Anthropic's message_start has real input usage but only the ~1 placeholder
+// output — billing that as exact with estimated=0 would poison
+// estimated_pct, the operator's only trust signal. The In side stays exact;
+// the Out side degrades to the emitted-text estimate and is counted as
+// estimated. ---
+
+func TestChargeQuota_Tokens_PartialUsage_TruncatedAnthropic(t *testing.T) {
+	rt := &Router{Quota: quota.NewRegistry("")}
+	l := tokensLimit(1_000_000)
+	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{l}}}
+	creq := &core.CanonicalRequest{Facts: core.RequestFacts{EstimatedTokens: 15}}
+
+	// Truncated exactly the way a mid-stream drop after message_start looks:
+	// input usage present, no message_delta ever arrives.
+	sse := `data: {"type":"message_start","message":{"id":"msg1","usage":{"input_tokens":100,"cache_read_input_tokens":20,"output_tokens":1}}}
+
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial output that did make it to the client"}}
+
+`
+	tr := &truncatingReader{data: []byte(sse), err: io.ErrUnexpectedEOF}
+	rs := respnorm.Wrap(tr, respnorm.Options{ClientModel: "m", UpstreamModel: "claude-x", IsSSE: true, Protocol: "anthropic-messages", Opaque: false})
+	if _, copyErr := io.Copy(io.Discard, rs); copyErr == nil {
+		t.Fatal("expected a non-nil error propagated from the truncated read")
+	}
+	inSeen, outSeen := rs.UsageSides()
+	if !inSeen || outSeen {
+		t.Fatalf("UsageSides = (%v, %v), want (true, false)", inSeen, outSeen)
+	}
+
+	rt.chargeQuota(ep, rs, creq, chargeNow)
+	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
+	// In side was really sniffed: exact, cache components intact.
+	// Anthropic shape: input_tokens=100 excludes cache_read=20, so
+	// In=120 and Fresh = 120-20 = 100.
+	if used.Fresh != 100 || used.CacheRead != 20 {
+		t.Fatalf("Fresh/CacheRead = %v/%v, want 100/20 (input side was genuinely sniffed)", used.Fresh, used.CacheRead)
+	}
+	// Out side was never really reported: the placeholder 1 must never beat
+	// the emitted-text estimate, and the charge must be marked estimated.
+	if used.Out < 2 {
+		t.Fatalf("Out = %v, want the emitted-text estimate (>1), not message_start's placeholder", used.Out)
+	}
+	if est <= 0 {
+		t.Fatalf("estimated = %v, want > 0 — partial usage must not masquerade as precise", est)
+	}
+	if est >= used.Fresh+used.CacheRead+used.Out {
+		t.Fatalf("estimated = %v covers the whole charge %v — only the Out share is a guess", est, used.Fresh+used.CacheRead+used.Out)
+	}
+}
+
+// TestTokenCountersSides pins the exact-vs-degraded rule per side: complete
+// usage bills exact; a missing Out side falls back to max(u.Out, outEst) and
+// is honestly counted as estimated; nothing sniffed degrades fully.
+func TestTokenCountersSides(t *testing.T) {
+	u := chatmsg.Usage{In: 120, CacheRead: 20, Out: 25} // anthropic shape: Fresh=100
+
+	// Complete: exact, no estimated share.
+	c, est := TokenCountersSides(u, true, true, 999, 999)
+	if c.Fresh != 100 || c.CacheRead != 20 || c.CacheWrite != 0 || c.Out != 25 || est != 0 {
+		t.Fatalf("complete: counters = %+v est = %v, want exact charge with est=0", c, est)
+	}
+
+	// Partial (in seen, out missing): Out = max(placeholder 1, outEst 40),
+	// estimated covers exactly the Out share.
+	c, est = TokenCountersSides(chatmsg.Usage{In: 120, CacheRead: 20, Out: 1}, true, false, 999, 40)
+	if c.Fresh != 100 || c.CacheRead != 20 || c.Out != 40 || est != 40 {
+		t.Fatalf("partial: counters = %+v est = %v, want Fresh=100 CacheRead=20 Out=40 est=40", c, est)
+	}
+
+	// Partial, estimate smaller than the placeholder: the placeholder never
+	// lowers the charge below what was actually emitted... here nothing was
+	// emitted (outEst=0) and the placeholder wins, still marked estimated.
+	c, est = TokenCountersSides(chatmsg.Usage{In: 120, Out: 1}, true, false, 999, 0)
+	if c.Out != 1 || est != 1 {
+		t.Fatalf("partial-zero-est: counters = %+v est = %v, want Out=1 est=1", c, est)
+	}
+
+	// Nothing sniffed: fully degraded, everything estimated.
+	c, est = TokenCountersSides(chatmsg.Usage{}, false, false, 15, 7)
+	if c.Fresh != 15 || c.Out != 7 || est != 22 {
+		t.Fatalf("degraded: counters = %+v est = %v, want Fresh=15 Out=7 est=22", c, est)
+	}
+
+	// The legacy single-flag form drives the same implementation.
+	c2, est2 := TokenCounters(u, true, 999, 999)
+	complete := quota.Counters{Fresh: 100, CacheRead: 20, Out: 25}
+	if c2 != complete || est2 != 0 {
+		t.Fatalf("TokenCounters(complete) = %+v/%v, want %+v/0", c2, est2, complete)
+	}
+	c3, est3 := TokenCounters(chatmsg.Usage{}, false, 15, 7)
+	if c3 != c || est3 != 22 {
+		t.Fatalf("TokenCounters(degraded) = %+v/%v, want %+v/22", c3, est3, c)
+	}
+}
