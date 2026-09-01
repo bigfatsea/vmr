@@ -50,8 +50,8 @@ func (s *stream) noteUsage(b []byte) {
 		if !bytes.Contains(ev, usageFieldMarker) {
 			continue
 		}
-		du := chatmsg.MergeUsageBytes(ev, chatmsg.Usage{})
-		s.usage = chatmsg.MergeUsageBytes(ev, s.usage)
+		du := chatmsg.MergeUsageWithProtocol(ev, chatmsg.Usage{}, s.protocol)
+		s.usage = chatmsg.MergeUsageWithProtocol(ev, s.usage, s.protocol)
 		inSeen, outSeen := usageBlockSides(ev, s.protocol, du)
 		s.usageInSeen = s.usageInSeen || inSeen
 		s.usageOutSeen = s.usageOutSeen || outSeen

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"vmr/internal/core"
 	"vmr/internal/tokenutil"
 )
 
@@ -60,13 +61,28 @@ func (u Usage) Fresh() int64 {
 //
 // Streams without any usage-bearing event yield ok=false — byte counts are
 // the fallback measure there.
+//
+// This is the protocol-unknown form: the rule for whether reported input
+// tokens already include the cached portion is guessed from field presence
+// (see usageFromObj), which aggregated gateways can make guess wrong in
+// both directions. Callers that know the ingress protocol must use
+// ExtractUsageWithProtocol instead.
 func ExtractUsage(body any) (Usage, bool) {
+	return ExtractUsageWithProtocol(body, "")
+}
+
+// ExtractUsageWithProtocol is ExtractUsage with the record's ingress
+// protocol (core.Protocol* values; "" means unknown, falling back to the
+// field-presence guess). The protocol selects the In-additivity rule
+// outright — see usageFromObj — instead of leaving it to whether a
+// particular gateway happens to emit input_tokens_details.
+func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
 	var u Usage
 	switch b := body.(type) {
 	case map[string]any:
-		u = mergeUsage(b, u)
+		u = mergeUsage(b, u, protocol)
 	case string:
-		u = MergeUsageBytes([]byte(b), u)
+		u = MergeUsageWithProtocol([]byte(b), u, protocol)
 	}
 	return u, u.In > 0 || u.Out > 0
 }
@@ -81,12 +97,22 @@ func ExtractUsage(body any) (Usage, bool) {
 // exists to enforce (see CLAUDE.md's chatmsg invariant: it is the one
 // shared source of truth for message/usage parsing, so a router-side
 // re-implementation can't silently drift from this one).
+//
+// Protocol-unknown form: see MergeUsageWithProtocol — callers that know the
+// ingress protocol (respnorm's stream does) must use that instead.
 func MergeUsageBytes(b []byte, acc Usage) Usage {
+	return MergeUsageWithProtocol(b, acc, "")
+}
+
+// MergeUsageWithProtocol is MergeUsageBytes with the ingress protocol (see
+// ExtractUsageWithProtocol): the protocol selects the In-additivity rule
+// outright instead of the field-presence guess.
+func MergeUsageWithProtocol(b []byte, acc Usage, protocol string) Usage {
 	trimmed := bytes.TrimSpace(b)
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		var obj map[string]any
 		if json.Unmarshal(trimmed, &obj) == nil {
-			return mergeUsage(obj, acc)
+			return mergeUsage(obj, acc, protocol)
 		}
 	}
 	for _, line := range strings.Split(string(b), "\n") {
@@ -99,26 +125,34 @@ func MergeUsageBytes(b []byte, acc Usage) Usage {
 		if json.Unmarshal([]byte(strings.TrimSpace(data)), &obj) != nil {
 			continue
 		}
-		acc = mergeUsage(obj, acc)
+		acc = mergeUsage(obj, acc, protocol)
 	}
 	return acc
 }
 
 // mergeUsage folds usage found in obj (top-level or under "message", as in
-// Anthropic's message_start) into the running totals, keeping the maximum
-// seen per field — robust for cumulative streams and single final objects.
-func mergeUsage(obj map[string]any, u Usage) Usage {
+// Anthropic's message_start) into the running totals. The max is taken per
+// SIDE, not per field, and the fields of one side move as a GROUP: In,
+// CacheRead and CacheWrite are mutually constrained (Anthropic reports
+// In = fresh + cacheRead + cacheWrite; Usage.Fresh() depends on it), so
+// keeping In from one object and CacheRead from another fabricates a usage
+// no upstream ever reported (Fresh would silently absorb the difference).
+// Per-side — rather than whole-object — is deliberate: Anthropic's stream
+// never puts both sides in one object (message_start / message_delta), so
+// an object-level max would discard the In side entirely.
+func mergeUsage(obj map[string]any, u Usage, protocol string) Usage {
 	for _, holder := range []any{obj["usage"], Nested(obj, "message", "usage")} {
 		m, ok := holder.(map[string]any)
 		if !ok {
 			continue
 		}
-		o := usageFromObj(m)
-		u.In = max(u.In, o.In)
-		u.Out = max(u.Out, o.Out)
-		u.CacheRead = max(u.CacheRead, o.CacheRead)
-		u.CacheWrite = max(u.CacheWrite, o.CacheWrite)
-		u.Reasoning = max(u.Reasoning, o.Reasoning)
+		o := usageFromObj(m, protocol)
+		if o.In > u.In {
+			u.In, u.CacheRead, u.CacheWrite = o.In, o.CacheRead, o.CacheWrite
+		}
+		if o.Out > u.Out {
+			u.Out, u.Reasoning = o.Out, o.Reasoning
+		}
 	}
 	return u
 }
@@ -130,16 +164,25 @@ func mergeUsage(obj map[string]any, u Usage) Usage {
 // separate counters, so total In is their sum.
 // - OpenAI/DeepSeek: prompt_tokens is already the total; cached_tokens /
 // prompt_cache_hit_tokens is a subset carved out for display, not additive.
+// - openai-responses reuses Anthropic's input_tokens/output_tokens field
+// names but, like Chat Completions and unlike Anthropic, already includes
+// cached tokens in that total — it must NOT take the "+ cacheRead +
+// cacheWrite" branch.
 //
-// Presence of the "input_tokens" key (Anthropic's field name) selects which
-// rule applies.
-func usageFromObj(m map[string]any) Usage {
+// protocol (a core.Protocol* value; "" = unknown) selects that rule
+// outright. The field-presence tell ("does the object carry
+// input_tokens_details") is only the FALLBACK for protocol-unknown
+// callers: aggregated gateways routinely synthesize or drop details
+// objects, which would make the presence guess wrong in both
+// directions — and the router's quota metering runs on this same parse, so
+// a wrong guess mis-bills real quota, not just a report column.
+func usageFromObj(m map[string]any, protocol string) Usage {
 	var u Usage
 	cacheRead := num(m["cache_read_input_tokens"])
 	if v := Nested(m, "prompt_tokens_details", "cached_tokens"); v != nil {
 		cacheRead = max(cacheRead, num(v))
 	}
-	if v := Nested(m, "input_tokens_details", "cached_tokens"); v != nil { // openai-responses
+	if v := Nested(m, "input_tokens_details", "cached_tokens"); v != nil {
 		cacheRead = max(cacheRead, num(v))
 	}
 	if v, ok := m["prompt_cache_hit_tokens"]; ok {
@@ -148,17 +191,14 @@ func usageFromObj(m map[string]any) Usage {
 	cacheWrite := num(m["cache_creation_input_tokens"])
 	u.CacheRead, u.CacheWrite = cacheRead, cacheWrite
 
-	// openai-responses reuses Anthropic's input_tokens/output_tokens field
-	// names (unlike Chat Completions' prompt_tokens/completion_tokens) but,
-	// like Chat Completions and unlike Anthropic, already includes cached
-	// tokens in that total rather than counting them separately — so it
-	// must NOT take the "+ cacheRead + cacheWrite" branch below. Anthropic's
-	// own usage object never carries "input_tokens_details", so checking
-	// for that key is what tells the two apart.
 	switch {
-	case Nested(m, "input_tokens_details", "cached_tokens") != nil: // openai-responses
+	case protocol == core.ProtocolAnthropicMessages:
+		u.In = num(m["input_tokens"]) + cacheRead + cacheWrite
+	case protocol == core.ProtocolOpenAIResponses:
 		u.In = num(m["input_tokens"])
-	case m["input_tokens"] != nil: // anthropic
+	case Nested(m, "input_tokens_details", "cached_tokens") != nil: // responses-shaped, protocol unknown
+		u.In = num(m["input_tokens"])
+	case m["input_tokens"] != nil: // anthropic-shaped, protocol unknown
 		u.In = num(m["input_tokens"]) + cacheRead + cacheWrite
 	default:
 		u.In = num(m["prompt_tokens"])
