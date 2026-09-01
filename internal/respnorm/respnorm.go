@@ -63,14 +63,9 @@
 // respnorm_test.go's FuzzStream). router.go/quota.go call only Wrap and
 // NormalizerStream, never a stream field directly.
 //
-// Usage-sniffing placement is an acknowledged tradeoff, not an oversight:
-// Quota-Aware Routing's accumulators (noteUsage/countTokens, exposed as
-// Usage()/OutTokens()) live on stream, mixing "response normalization" with
-// "billing sniffing" in one package. The alternative — a decorator in
-// internal/router layered over Wrap's output — costs an interface call and
-// boundary check per streamed chunk on the hot forward path, which this
-// project does not spend (see CLAUDE.md's Invariants). Sniffing piggybacks on
-// ingest's existing per-chunk loop at zero added cost.
+// Usage-sniffing and token-metering live on stream, mixing "response normalization"
+// with "billing sniffing" in one package (see CLAUDE.md's Invariants). Sniffing
+// piggybacks on emitBlock/finalizeBuffered loops at zero added forward cost.
 package respnorm
 
 import (
@@ -242,9 +237,9 @@ type stream struct {
 	// inspection fields with mu ensures race-free reads in all paths.
 	mu            sync.Mutex
 	applied       []string
-	rawPreStrip   []byte              // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
-	observedModel string              // what the upstream actually answered with, recorded only when it differs from upstreamModel
-	outStats      tokenutil.CharStats // classified across every ingest() call; EstimateFromStats' rounding is applied once, in OutTokens(), not per chunk
+	rawPreStrip   []byte        // upstream bytes exactly as received, captured right before think_strip/thinking_process_strip rewrote them — nil unless one of those fired
+	observedModel string        // what the upstream actually answered with, recorded only when it differs from upstreamModel
+	meter         outTokenMeter // classified across emitBlock/finalizeBuffered; EstimateFromStats' rounding is applied once, in OutTokens(), not per chunk
 	usage         chatmsg.Usage
 	usageSeen     bool
 }
@@ -404,18 +399,12 @@ func (s *stream) flushRawOnError() {
 		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
 		s.noteApplied("model_rewrite")
 	}
+	s.countTokens(b)
 	s.out = append(s.out, b...)
 	s.noteApplied("truncated_flush")
 }
 
 func (s *stream) ingest(b []byte) {
-	// Every source byte flows through here exactly once, in every mode
-	// including opaque (see the P1 dev plan's baseline-facts table) — the
-	// one hook that
-	// can classify 100% of a response's bytes for the degraded token
-	// estimate (see OutTokens/tokenCharge in quota.go), unlike emitBlock/
-	// finalizeBuffered below which only ever see the non-opaque paths.
-	s.countTokens(b)
 	if s.opaque {
 		s.out = append(s.out, b...)
 		return
@@ -565,6 +554,7 @@ func (s *stream) emitBlock(block []byte) {
 	}
 	s.noteThinkingPatternIfSuspected(block)
 	s.noteUsage(block)
+	s.countTokens(block)
 	if modelFieldPattern.Match(block) {
 		s.noteUpstreamModel(block)
 		block = modelFieldPattern.ReplaceAll(block, s.modelRewriteRepl)
@@ -695,6 +685,7 @@ func (s *stream) finalizeBuffered() {
 	}
 	s.noteThinkingPatternIfSuspected(b)
 	s.noteUsage(b)
+	s.countTokens(b)
 	s.tailNL = len(b) == 0 || bytes.HasSuffix(b, eventSep)
 	s.out = append(s.out, b...)
 	s.appendDone()
@@ -850,21 +841,35 @@ func classifyEvent(ev []byte) verdict {
 	return classifyEventAcc(ev, &acc, &isContent)
 }
 
-// countTokens classifies the text in b with tokenutil.Analyze and folds it
-// into the running CharStats total — feeding Quota-Aware Routing's degraded
-// token estimate (see quota.go's tokenCharge) without buffering a whole
-// response body just to hand it to tokenutil.Estimate: this tallies
-// incrementally, once per Read. Deliberately does NOT call
-// tokenutil.Estimate/EstimateFromStats here — that formula ends in
-// math.Round, and rounding per chunk instead of once over the combined
-// total is not the same computation (many small chunks each round toward
-// zero, and real upstream SSE framing delivers plenty of those): OutTokens
-// applies EstimateFromStats exactly once, keeping this byte-for-byte
-// equivalent to running tokenutil.Estimate over the full concatenated body.
+// outTokenMeter accumulates token statistics for the degraded token estimate
+// over extracted response content (text, reasoning, tool calls), ignoring SSE
+// envelopes and JSON formatting.
+type outTokenMeter struct {
+	stats tokenutil.CharStats
+}
+
+func (m *outTokenMeter) addStats(s tokenutil.CharStats) {
+	m.stats.Add(s)
+}
+
+func (m *outTokenMeter) tokens() int64 {
+	return tokenutil.EstimateFromStats(m.stats)
+}
+
+// countTokens extracts the actual assistant response text from b and folds its
+// character statistics into meter under mu. Called from emitBlock (streaming)
+// and finalizeBuffered (buffered) — never from ingest on raw transport bytes.
 func (s *stream) countTokens(b []byte) {
-	stats := tokenutil.Analyze(b)
+	if len(b) == 0 || s.opaque {
+		return
+	}
+	text := chatmsg.ExtractResponseText(b)
+	if len(text) == 0 {
+		return
+	}
+	stats := tokenutil.Analyze([]byte(text))
 	s.mu.Lock()
-	s.outStats.Add(stats)
+	s.meter.addStats(stats)
 	s.mu.Unlock()
 }
 
@@ -899,8 +904,9 @@ func (s *stream) Usage() (chatmsg.Usage, bool) {
 	return s.usage, s.usageSeen
 }
 
-// OutTokens returns the estimated token count over all bytes countTokens has
+// OutTokens returns the estimated token count over all response text countTokens has
 // classified so far — the degraded-estimate input when Usage() has nothing.
+// Returns 0 when opaque mode is active (Content-Encoding present or raw overflow).
 // Applies tokenutil.EstimateFromStats' rounding exactly once, over the
 // accumulated CharStats total, so the result doesn't depend on how the
 // underlying reader happened to chunk its Read calls. Same concurrency
@@ -908,7 +914,10 @@ func (s *stream) Usage() (chatmsg.Usage, bool) {
 func (s *stream) OutTokens() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return tokenutil.EstimateFromStats(s.outStats)
+	if s.opaque {
+		return 0
+	}
+	return s.meter.tokens()
 }
 
 // afterMarker returns the bytes following the first occurrence of marker.

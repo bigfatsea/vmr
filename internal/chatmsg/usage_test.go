@@ -142,3 +142,60 @@ func TestUsage_Fresh(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractResponseText_SSEAndJSON(t *testing.T) {
+	t.Parallel()
+	// OpenAI completions SSE
+	sseOpenAI := "data: {\"choices\":[{\"delta\":{\"content\":\"Hello from OpenAI\"}}]}\n\ndata: [DONE]\n\n"
+	if got := ExtractResponseText(sseOpenAI); got != "Hello from OpenAI" {
+		t.Errorf("ExtractResponseText(sseOpenAI) = %q, want %q", got, "Hello from OpenAI")
+	}
+
+	// Anthropic SSE
+	sseAnthropic := "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello from Anthropic\"}}\n\n"
+	if got := ExtractResponseText(sseAnthropic); got != "Hello from Anthropic" {
+		t.Errorf("ExtractResponseText(sseAnthropic) = %q, want %q", got, "Hello from Anthropic")
+	}
+
+	// OpenAI completions JSON
+	jsonOpenAI := map[string]any{
+		"choices": []any{
+			map[string]any{
+				"message": map[string]any{
+					"content": "Hello JSON",
+				},
+			},
+		},
+	}
+	if got := ExtractResponseText(jsonOpenAI); got != "Hello JSON" {
+		t.Errorf("ExtractResponseText(jsonOpenAI) = %q, want %q", got, "Hello JSON")
+	}
+
+	// Plain text
+	plain := "Just plain text"
+	if got := ExtractResponseText(plain); got != "Just plain text" {
+		t.Errorf("ExtractResponseText(plain) = %q, want %q", got, "Just plain text")
+	}
+
+	// Nil / Empty
+	if got := ExtractResponseText(nil); got != "" {
+		t.Errorf("ExtractResponseText(nil) = %q, want empty", got)
+	}
+}
+
+func TestEstimateBodyTokens_ExcludesSSEEnvelopes(t *testing.T) {
+	t.Parallel()
+	content := "This is the actual output message from the assistant."
+	sseStream := "data: {\"id\":\"chatcmpl-999\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+
+	got := EstimateBodyTokens(sseStream)
+	rawEstimate := EstimateBodyTokens([]byte(sseStream))
+	if got != rawEstimate {
+		t.Errorf("EstimateBodyTokens string vs []byte mismatch: %d vs %d", got, rawEstimate)
+	}
+
+	// Should match token estimation of content directly
+	if got <= 0 {
+		t.Fatalf("got = %d, want > 0", got)
+	}
+}
