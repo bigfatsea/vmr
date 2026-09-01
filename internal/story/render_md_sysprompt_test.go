@@ -102,10 +102,14 @@ func TestSystemPromptEras_StitchBoundaryChange(t *testing.T) {
 	msgsList := []any{sysV1, u1}
 	for i := 0; i < 5; i++ {
 		recs = append(recs, mkRec(sysAt(i), "", append([]any{}, msgsList...), sseText("ok")))
-		msgsList = append(msgsList, msg("assistant", "step reply"))
+		msgsList = append(msgsList, msg("assistant", fmt.Sprintf("step reply %d", i)))
+		if i >= 2 {
+			msgsList = append(msgsList, msg("tool", fmt.Sprintf("tool output %d", i)))
+		}
 	}
 	// Contract with a NEW system prompt at the stitch boundary.
-	recs = append(recs, mkRec(sysAt(30), "", []any{sysV2, u1, msg("assistant", "post-break reply")}, sseText("continuing")))
+	recs = append(recs, mkRec(sysAt(30), "", []any{sysV2, u1, msg("assistant", "step reply 3"), msg("tool", "tool output 3"),
+		msg("assistant", "post-break reply")}, sseText("continuing")))
 
 	path := writeJSONL(t, recs)
 	g, err := ctxgraph.Scan([]string{path})

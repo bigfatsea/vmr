@@ -13,6 +13,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,12 +37,18 @@ func crossCheckFixture(t *testing.T) string {
 	msgsList := []any{sys, u1}
 	for i := 0; i < 5; i++ {
 		recs = append(recs, storyRec(at(i), append([]any{}, msgsList...), storySSE("ok")))
-		msgsList = append(msgsList, storyMsg("assistant", "step reply"))
+		msgsList = append(msgsList, storyMsg("assistant", fmt.Sprintf("step reply %d", i)))
+		if i >= 2 {
+			msgsList = append(msgsList, storyMsg("tool", fmt.Sprintf("tool output %d", i)))
+		}
 	}
-	// Contract: history collapses to just [sys v2, u1] — a stitch boundary
-	// with its OWN new system prompt, same shape TestSystemPromptEras_
-	// StitchBoundaryChange (internal/story) exercises.
-	recs = append(recs, storyRec(at(30), []any{storyMsg("system", "sys v2"), u1, storyMsg("assistant", "post-break reply")}, storySSE("continuing")))
+	// Contract: history collapses to [sys v2, u1, step reply 3, tool output 3]
+	// — 3 shared distinct keys, clearing stitchMinAbsOverlap, with its OWN
+	// new system prompt (same shape TestSystemPromptEras_StitchBoundaryChange
+	// in internal/story exercises).
+	recs = append(recs, storyRec(at(30), []any{storyMsg("system", "sys v2"), u1,
+		storyMsg("assistant", "step reply 3"), storyMsg("tool", "tool output 3"),
+		storyMsg("assistant", "post-break reply")}, storySSE("continuing")))
 	return writeStoryJSONL(t, recs)
 }
 

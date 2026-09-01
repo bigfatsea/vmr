@@ -94,14 +94,27 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	predMsgs := []any{sys, u1}
 	var recs []audit.Record
 	const preBreakTurns = 6
+	// Distinct per-turn replies: the ones restated in the successor's
+	// opening deliberately drop the README.md mention (only the early turns
+	// carry it), so README.md stays swallowed while AGENTS.md/the URL
+	// survive.
 	for i := 0; i < preBreakTurns; i++ {
 		recs = append(recs, mkRecWithUsage(at(i), predMsgs, "ok", 1000+int64(i)*100, 50))
-		predMsgs = append(predMsgs, msg("assistant", "checked AGENTS.md and README.md, see https://example.com/docs"))
+		if i >= 4 {
+			predMsgs = append(predMsgs, msg("assistant", "checked AGENTS.md and https://example.com/docs — step "+strconv.Itoa(i)))
+			predMsgs = append(predMsgs, msg("tool", "tool output "+strconv.Itoa(i)))
+		} else {
+			predMsgs = append(predMsgs, msg("assistant", "checked AGENTS.md and README.md, see https://example.com/docs — step "+strconv.Itoa(i)))
+		}
 	}
-	// Contract: keeps the opening instruction, drops everything else —
-	// including the mention of README.md (swallowed) but AGENTS.md/the URL
-	// survive because they're restated in the successor's own opening.
-	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "resuming — will re-check AGENTS.md and https://example.com/docs")}
+	// Contract: keeps the opening instruction plus the most recent
+	// no-README reply and its tool result (3 shared distinct keys), drops
+	// everything else — including the mention of README.md (swallowed) but
+	// AGENTS.md/the URL survive because they're restated in the successor's
+	// own opening.
+	succMsgs := []any{msg("system", "sys v2"), u1,
+		msg("assistant", "checked AGENTS.md and https://example.com/docs — step 4"),
+		msg("tool", "tool output 4")}
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)

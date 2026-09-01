@@ -5,6 +5,7 @@ package story
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,12 +91,17 @@ func TestHumanInitiated_StitchBoundaryWithGenuinelyNewInstruction(t *testing.T) 
 	predMsgs := []any{sys, u1}
 	for i := 0; i < 6; i++ {
 		recs = append(recs, mkRec(at(i), "", append([]any{}, predMsgs...), sseText("ok")))
-		predMsgs = append(predMsgs, msg("assistant", "checked stuff"))
+		predMsgs = append(predMsgs, msg("assistant", "checked stuff "+strconv.Itoa(i)))
+		if i >= 4 {
+			predMsgs = append(predMsgs, msg("tool", "tool output "+strconv.Itoa(i)))
+		}
 	}
-	// Stitch boundary: shared anchor u1 (dedup-suppressed, nothing new)
-	// PLUS a genuinely new instruction the predecessor never showed.
+	// Stitch boundary: shared anchor u1 plus the two most recent replies
+	// (3+ shared distinct keys) PLUS a genuinely new instruction the
+	// predecessor never showed.
 	newInstr := msg("user", "now also check the deployment logs")
-	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "resuming"), newInstr}
+	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "checked stuff 4"), msg("tool", "tool output 4"),
+		newInstr}
 	recs = append(recs, mkRec(at(30), "", succMsgs, sseText("continuing")))
 
 	path := writeJSONL(t, recs)
@@ -299,9 +305,13 @@ func TestComputeMetrics_CompactionTotals(t *testing.T) {
 	const preBreakTurns = 6
 	for i := 0; i < preBreakTurns; i++ {
 		recs = append(recs, mkRecWithUsage(at(i), predMsgs, "ok", 1000+int64(i)*100, 50))
-		predMsgs = append(predMsgs, msg("assistant", "checked stuff"))
+		predMsgs = append(predMsgs, msg("assistant", "checked stuff "+strconv.Itoa(i)))
+		if i >= 4 {
+			predMsgs = append(predMsgs, msg("tool", "tool output "+strconv.Itoa(i)))
+		}
 	}
-	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "resuming")}
+	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "checked stuff 4"), msg("tool", "tool output 4"),
+		msg("assistant", "resuming")}
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)

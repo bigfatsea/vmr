@@ -254,10 +254,13 @@ func TestP1b4_CompactionConstraintDropped(t *testing.T) {
 	var recs []audit.Record
 	for i := 0; i < 5; i++ {
 		recs = append(recs, mkRecWithUsage(at(i), predMsgs, "ok", 1000+int64(i)*100, 50))
-		predMsgs = append(predMsgs, msg("assistant", "step done"))
+		predMsgs = append(predMsgs, msg("assistant", fmt.Sprintf("step done %d", i)))
+		if i >= 3 {
+			predMsgs = append(predMsgs, msg("tool", fmt.Sprintf("tool output %d", i)))
+		}
 	}
 
-	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "resuming without rules")}
+	succMsgs := []any{msg("system", "sys v2"), u1, msg("assistant", "step done 3"), msg("tool", "tool output 3")}
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)
