@@ -175,7 +175,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		if ri := i - off; ri >= 0 && ri < len(rawMsgs) {
 			raw = rawMsgs[ri]
 		}
-		m.Keys = append(m.Keys, hashJSON(raw))
+		m.Keys = append(m.Keys, hashMsgJSON(raw))
 		m.MsgIdx = append(m.MsgIdx, i)
 	}
 	if m.LeadSys > 0 {

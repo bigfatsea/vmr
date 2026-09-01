@@ -35,7 +35,12 @@ import (
 // both halves and a mid-stream-canceled one stays priced. Cached v4
 // manifests would carry an empty ServedEndpoint and silently unprice
 // served traffic, hence the bump.
-const CacheSchemaVersion = 5
+// v6 (2026-09): Keys hashing strips Anthropic cache_control breakpoint
+// markers (see hashMsgJSON) — a client moving its breakpoint between
+// turns used to re-hash those messages and fracture lineages with
+// phantom edits. Cached v5 manifests carry marker-influenced Keys and
+// must not be reused, hence the bump.
+const CacheSchemaVersion = 6
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

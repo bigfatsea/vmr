@@ -28,6 +28,7 @@
 package report
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -198,11 +199,14 @@ func f6AnchorGluedFixture(t *testing.T) (string, int) {
 	const preBreakTurns = 8
 	for i := 0; i < preBreakTurns; i++ {
 		recs = append(recs, mkRec(at(i), "", append([]any{}, msgs...), nil, sseText("ok")))
-		msgs = append(msgs, msg("assistant", "step"))
+		msgs = append(msgs, msg("assistant", fmt.Sprintf("step %d", i)))
 	}
-	// Contract: history collapses to just [sys v2, u1] — same opening
-	// instruction survives verbatim, everything else is gone.
-	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1}, nil, sseText("continuing")))
+	// Contract: history collapses to [sys v2, u1, step5, step6] — the
+	// opening instruction plus the two most recent replies survive
+	// verbatim (3 shared distinct keys, all present in the predecessor's
+	// accumulated content — clearing stitchMinAbsOverlap), everything
+	// earlier is gone.
+	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1, msg("assistant", "step 5"), msg("assistant", "step 6")}, nil, sseText("continuing")))
 	return writeJSONL(t, recs), preBreakTurns + 1
 }
 
@@ -215,8 +219,9 @@ func f6AnchorGluedFixture(t *testing.T) (string, int) {
 // against the fixture's total (nothing lost, nothing double-counted), AND
 // (a capability added later — see linkStitchedLineages) the second
 // session's ContinuedFrom points back at the first, since ctxgraph resolves
-// this same-SessKey Contract break as a high-confidence Stitched
-// StitchCompaction (the surviving opening instruction is a 100% overlap).
+// this same-SessKey Contract break as a Stitched
+// StitchCompaction (the surviving opening + two recent replies give a
+// 100% overlap of 3 distinct keys, clearing stitchMinAbsOverlap).
 func TestConformance_F6AnchorGluedLineageSplitMatchesCtxgraph(t *testing.T) {
 	path, total := f6AnchorGluedFixture(t)
 	cmp := compareGrouping(t, []string{path})

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -69,7 +70,13 @@ const renderTemplateVersion = 2
 
 // renderFingerprint is a one-line, machine-checkable summary of every input
 // to Render's output shape that FileName does NOT capture: language,
-// evidence-link mode, and the template version itself. Written as the
+// evidence-link mode, the template version itself, and the identity of the
+// two caller-injected Manifests (their Req coordinates, "-" when nil).
+// m/prev are part of the fingerprint because Render's output depends on
+// them (delta highlight, history folding, the prev-turn link) while the
+// filename does not — the exact gap that let `vmr report` and `vmr story`
+// pass DIFFERENT m/prev for the same record and have whichever command ran
+// second silently skip, first-writer-wins. Written as the
 // page's first line (an HTML comment, invisible when rendered) so
 // EnsureRendered's existence check can read just this one line — via
 // readRenderFingerprint (ensure.go) — instead of re-rendering or reading
@@ -77,8 +84,16 @@ const renderTemplateVersion = 2
 // This is what replaces the "same filename implies same content" assumption
 // (proven false on two real axes: -lang and evidence linking) with an
 // actual check.
-func renderFingerprint(lang i18n.Lang, linkEvidence bool) string {
-	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t -->\n", renderTemplateVersion, lang, linkEvidence)
+func renderFingerprint(lang i18n.Lang, linkEvidence bool, m, prev *ctxgraph.Manifest) string {
+	mReq, prevReq := "-", "-"
+	if m != nil {
+		mReq = m.Req
+	}
+	if prev != nil {
+		prevReq = prev.Req
+	}
+	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t m=%s prev=%s -->\n",
+		renderTemplateVersion, lang, linkEvidence, mReq, prevReq)
 }
 
 // EscapeCell neutralizes a value for use inside a Markdown table cell: an

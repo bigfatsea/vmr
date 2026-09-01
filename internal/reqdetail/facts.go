@@ -3,11 +3,22 @@
 // Package reqdetail renders one audit record's detail page — the shared
 // microscopic-tier leaf both internal/report and internal/story sit on top
 // of (see docs/future-strategy/story_report_architecture_opus-5.md §7.6a).
-// Every function here is a pure function of (audit.Record[, its own/prior
-// ctxgraph.Manifest, taskseg.Profile]) — no session/task grouping state,
-// no cross-record aggregation. That purity is what lets the same record,
-// rendered via any two different code paths, produce byte-identical output
-// (see detail_test.go's cross-path consistency test).
+// Honesty note on purity, in two tiers:
+//
+//   - This file's per-record fact extraction functions ARE pure functions
+//     of one audit.Record (plus taskseg.Profile for the two dialect-aware
+//     judgments) — no session/task grouping state, no cross-record
+//     aggregation.
+//   - Detail RENDERING (detail.go's Render) is deliberately one notch less
+//     pure: it depends on the (rec, own Manifest, predecessor Manifest)
+//     TRIPLE. prev is caller-injected cross-record lineage context, not
+//     derivable from the record alone — which is exactly why
+//     EnsureRendered's fingerprint folds m/prev identity in: two commands
+//     passing different prev for the same record must re-render, not
+//     silently skip. Given the same triple, the page is still byte-
+//     identical from any code path (see detail_test.go's cross-path
+//     consistency test), and ensure.go/evidence.go do filesystem I/O only
+//     around that rendering, never inside it.
 //
 // This file holds the per-record fact extraction shared with
 // internal/report's own aggregation pass (session.go's collect(),

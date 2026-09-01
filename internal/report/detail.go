@@ -56,16 +56,19 @@ type detailJob struct {
 }
 
 // manifestsFor resolves j's own and lineage-predecessor Manifest from its
-// ReqInfo, when it has one. info.manifest/info.Parent are the same
-// correlated-during-session-analysis data attach() (session.go) already
-// established; this just hands them to reqdetail in its plain-argument
-// shape instead of the ReqInfo type reqdetail must not depend on.
+// ReqInfo, when it has one. info.manifest/info.prevManifest are correlated
+// during session analysis (group(), session.go) straight from ctxgraph's
+// lineage — the same prev internal/story's Step.PrevManifest carries, which
+// is what keeps the two commands' pages byte-identical. The Parent fallback
+// only covers callers that hand-built a ReqInfo without running group()'s
+// correlation (prevManifest nil but a parent attached).
 func (j detailJob) manifestsFor() (m, prev *ctxgraph.Manifest) {
 	if j.info == nil {
 		return nil, nil
 	}
 	m = j.info.manifest
-	if j.info.Parent != nil {
+	prev = j.info.prevManifest
+	if prev == nil && j.info.Parent != nil {
 		prev = j.info.Parent.manifest
 	}
 	return m, prev

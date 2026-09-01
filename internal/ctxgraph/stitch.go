@@ -98,11 +98,13 @@ func (o StitchOutcome) String() string {
 type StitchEdge struct {
 	Kind    StitchKind
 	PredIdx int // the predecessor Lineage.Idx
-	// Score is |B0.Keys ∩ predecessor's accumulated Keys| / |B0.Keys| — the
-	// same coverage-ratio shape edit.go's Coverage uses, just measured
-	// against a candidate predecessor lineage instead of the immediately
-	// preceding manifest. 0 for a pure same_chat match (no content
-	// overlap at all, only SessKey + time proximity).
+	// Score is |distinct(B0.Keys) ∩ predecessor's accumulated Keys| /
+	// |distinct(B0.Keys)| — the same coverage-ratio shape edit.go's
+	// Coverage uses (set semantics: a hash repeated in B0.Keys counts
+	// once, on both sides of the fraction), just measured against a
+	// candidate predecessor lineage instead of the immediately preceding
+	// manifest. 0 for a pure same_chat match (no content overlap at all,
+	// only SessKey + time proximity).
 	Score float64
 	// Confidence is informational, derived from Kind — not used for any
 	// further decision (design doc's per-kind stitch-confidence column).
@@ -122,9 +124,23 @@ type StitchResolution struct {
 // the 2026-07-14..28 corpus — tune here if a wider corpus disagrees).
 const (
 	// stitchCompactionScore: a Contract-origin break stitches as
-	// StitchCompaction when the successor's opening overlaps at least this
-	// fraction of a candidate predecessor's accumulated content.
+	// StitchCompaction when the successor's opening manifest shares at
+	// least this fraction of its OWN distinct keys with a candidate
+	// predecessor's accumulated content — the denominator is the
+	// successor's opening (B0) key count, never the predecessor's.
 	stitchCompactionScore = 0.5
+	// stitchMinAbsOverlap is the absolute floor on shared distinct keys,
+	// required ALONGSIDE the ratio thresholds: a tiny opening manifest
+	// (a compaction rebuild's first request is naturally short — system +
+	// summary + first instruction) clears any ratio on a single shared
+	// message, and that shared message is often the very anchor the
+	// SessKey itself was built from, so as evidence it carries no
+	// information (the evidence loop: it shares BECAUSE it's the same
+	// conversation's anchor, not because a compaction happened). Same
+	// argument family as edit.go's spliceMinTailMatch = 2. Failing the
+	// floor downgrades to AmbiguousMatch (the candidate stays visible for
+	// human review); it never eliminates the candidate.
+	stitchMinAbsOverlap = 3
 	// stitchHeadPruneScore: the floor for stitching at all (Fork-origin
 	// breaks, or a Contract that didn't clear stitchCompactionScore) —
 	// below this, a real overlap is downgraded to AmbiguousMatch rather
@@ -134,10 +150,25 @@ const (
 	// SessKey must be for a zero-overlap same_chat signal to be worth
 	// flagging at all (still never auto-stitched).
 	stitchSameChatWindow = 24 * time.Hour
+	// stitchSameKeyMaxGap is the same-bucket counterpart of
+	// stitchCrossBucketMaxGap. The old rule exempted same-SessKey
+	// candidates from any gap limit because "a user can walk away for
+	// days and resume the same anchor" — true for humans, but the traffic
+	// that piles up under one anchor SessKey is mostly recurring
+	// scheduled/heartbeat jobs: identical template openings, unrelated to
+	// each other, spanning hundreds of hours. That is the same failure
+	// mode that motivated stitchCrossBucketMaxGap (the 190+-hour
+	// scheduled-task boilerplate matches), just inside the bucket where
+	// the cross-bucket gate never applied. Candidates beyond this gap may
+	// still WIN the search (they carry the strongest content evidence),
+	// but a match they'd otherwise stitch is forced down to
+	// AmbiguousMatch — downgraded, not eliminated: the genuinely-human
+	// "walked away for days" case keeps its edge visible for review
+	// instead of disappearing into NoPredecessorFound.
+	stitchSameKeyMaxGap = 72 * time.Hour
 	// stitchCrossBucketMaxGap bounds content-score matches ACROSS different
-	// SessKeys only — same-SessKey candidates are never gap-limited ("Journey
-	// 边界 = manifest 编辑边界，与时间无关"; a user can
-	// walk away for days and resume the same anchor). Cross-bucket is a
+	// SessKeys only (same-SessKey candidates are bounded more leniently by
+	// stitchSameKeyMaxGap). Cross-bucket is a
 	// much bigger claim (two seemingly-different conversations are actually
 	// one), and real corpus evidence shows a genuine
 	// compaction link landing within tens of minutes, not days. Added after
@@ -205,6 +236,7 @@ func StitchedSuccessorSet(g *Graph) map[int]bool {
 // into each Lineage's own Stitch field. Call once after Scan.
 func StitchGraph(g *Graph) {
 	blobLineages := buildBlobLineageIndex(g)
+	sessBuckets := buildSessKeyIndex(g)
 	byIdx := make(map[int]*Lineage, len(g.Lineages))
 	for _, l := range g.Lineages {
 		byIdx[l.Idx] = l
@@ -214,9 +246,22 @@ func StitchGraph(g *Graph) {
 			l.Stitch = &StitchResolution{Outcome: NoBreak}
 			continue
 		}
-		res := resolveStitch(l, byIdx, blobLineages)
+		res := resolveStitch(l, byIdx, blobLineages, sessBuckets)
 		l.Stitch = &res
 	}
+}
+
+// buildSessKeyIndex buckets lineages by SessKey — the same one-index-per-
+// graph pattern as buildBlobLineageIndex, so findSameChatCandidate scans
+// one bucket instead of the whole graph (O(B×L) → O(bucket size)). Bucket
+// order follows g.Lineages', which is deterministic; the candidate choice
+// itself doesn't rely on it (explicit gap/Idx tie-break below).
+func buildSessKeyIndex(g *Graph) map[string][]*Lineage {
+	idx := make(map[string][]*Lineage)
+	for _, l := range g.Lineages {
+		idx[l.SessKey] = append(idx[l.SessKey], l)
+	}
+	return idx
 }
 
 // buildBlobLineageIndex maps every message hash seen anywhere in the graph
@@ -247,7 +292,7 @@ func buildBlobLineageIndex(g *Graph) map[Hash][]int {
 
 // resolveStitch finds l's best-scoring temporally-preceding candidate via
 // the blob index, then classifies the match.
-func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]int) StitchResolution {
+func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]int, sessBuckets map[string][]*Lineage) StitchResolution {
 	b0 := l.Manifests[0]
 
 	// No early return for len(b0.Keys) == 0 (a broken-away lineage whose
@@ -258,14 +303,29 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 	// means the loop below never populates `overlap`, so bestIdx naturally
 	// stays -1 and control falls through to the findSameChatCandidate call —
 	// the same path a real "zero overlap found" case already takes.
+	// Set-intersection semantics, not multiset: b0.Keys is the message
+	// SEQUENCE, so a content hash that repeats in it (recurring heartbeat
+	// prompts, identical tool results) must count once on both sides of
+	// the score fraction — otherwise a duplicated hash inflates the
+	// numerator (and the old multiset denominator together with it), and
+	// when the predecessor itself repeats that message too, overlap could
+	// even exceed len(b0.Keys) and push score past 1.0. blobLineages'
+	// posting lists are already lineage-deduped by buildBlobLineageIndex
+	// (documented there), so each (h, idx) pair contributes at most once.
+	seen := make(map[Hash]bool, len(b0.Keys))
 	overlap := map[int]int{}
 	for _, h := range b0.Keys {
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
 		for _, idx := range blobLineages[h] {
 			if idx != l.Idx {
 				overlap[idx]++
 			}
 		}
 	}
+	distinct := len(seen)
 
 	// bestIdx/bestScore/bestGap pick the winner deterministically despite
 	// `overlap` being a map (Go randomizes map iteration order every run):
@@ -280,8 +340,9 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 	// 5x over the real corpus and diffing PredIdx per lineage — not by any
 	// unit test (a synthetic fixture is too small to ever produce a real
 	// tie by chance).
-	bestIdx, bestScore := -1, -1.0
+	bestIdx, bestScore, bestN := -1, -1.0, 0
 	var bestGap time.Duration
+	bestOverGap := false
 	for idx, n := range overlap {
 		pred := byIdx[idx]
 		if pred == nil || len(pred.Manifests) == 0 {
@@ -294,51 +355,63 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 		if pred.SessKey != l.SessKey && b0.TS.Sub(predEnd) > stitchCrossBucketMaxGap {
 			continue // see stitchCrossBucketMaxGap's doc comment
 		}
-		score := float64(n) / float64(len(b0.Keys))
+		score := float64(n) / float64(distinct)
 		gap := b0.TS.Sub(predEnd)
+		overGap := pred.SessKey == l.SessKey && gap > stitchSameKeyMaxGap
 		switch {
 		case bestIdx < 0, score > bestScore:
-			bestScore, bestGap, bestIdx = score, gap, idx
+			bestScore, bestGap, bestIdx, bestN, bestOverGap = score, gap, idx, n, overGap
 		case score == bestScore && (gap < bestGap || (gap == bestGap && idx < bestIdx)):
-			bestGap, bestIdx = gap, idx
+			bestGap, bestIdx, bestN, bestOverGap = gap, idx, n, overGap
 		}
 	}
 
 	if bestIdx < 0 {
-		if edge := findSameChatCandidate(l, byIdx); edge != nil {
+		if edge := findSameChatCandidate(l, sessBuckets); edge != nil {
 			return StitchResolution{Outcome: AmbiguousMatch, Edge: edge}
 		}
 		return StitchResolution{Outcome: NoPredecessorFound}
 	}
 
+	res := StitchResolution{Outcome: AmbiguousMatch}
 	switch {
-	case l.BrokeFrom.Edit.Kind == Contract && bestScore >= stitchCompactionScore:
-		return StitchResolution{Outcome: Stitched, Edge: &StitchEdge{
+	case l.BrokeFrom.Edit.Kind == Contract && bestScore >= stitchCompactionScore && bestN >= stitchMinAbsOverlap:
+		res = StitchResolution{Outcome: Stitched, Edge: &StitchEdge{
 			Kind: StitchCompaction, PredIdx: bestIdx, Score: bestScore, Confidence: 0.8,
 		}}
-	case bestScore >= stitchHeadPruneScore:
-		return StitchResolution{Outcome: Stitched, Edge: &StitchEdge{
+	case bestScore >= stitchHeadPruneScore && bestN >= stitchMinAbsOverlap:
+		res = StitchResolution{Outcome: Stitched, Edge: &StitchEdge{
 			Kind: StitchHeadPrune, PredIdx: bestIdx, Score: bestScore, Confidence: 0.5,
 		}}
 	default:
-		return StitchResolution{Outcome: AmbiguousMatch, Edge: &StitchEdge{
+		res = StitchResolution{Outcome: AmbiguousMatch, Edge: &StitchEdge{
 			Kind: StitchSameChat, PredIdx: bestIdx, Score: bestScore, Confidence: 0.2,
 		}}
 	}
+	// A same-bucket winner beyond stitchSameKeyMaxGap never produces a
+	// Stitched outcome — see the constant's doc comment. The edge (its
+	// content kind and score intact) is kept at same_chat's informational
+	// confidence so a human can still follow the trail.
+	if res.Outcome == Stitched && bestOverGap {
+		res.Outcome = AmbiguousMatch
+		res.Edge.Confidence = 0.2
+	}
+	return res
 }
 
 // findSameChatCandidate looks for the closest-in-time, same-SessKey,
 // temporally-preceding lineage when content-overlap search found nothing
-// at all — the last resort before declaring NoPredecessorFound.
-func findSameChatCandidate(l *Lineage, byIdx map[int]*Lineage) *StitchEdge {
+// at all — the last resort before declaring NoPredecessorFound. sessBuckets
+// (buildSessKeyIndex) scopes the scan to l's own bucket.
+func findSameChatCandidate(l *Lineage, sessBuckets map[string][]*Lineage) *StitchEdge {
 	bestIdx := -1
 	var bestGap time.Duration
-	for idx, pred := range byIdx {
-		if idx == l.Idx || pred.SessKey != l.SessKey || len(pred.Manifests) == 0 {
+	b0TS := l.Manifests[0].TS
+	for _, pred := range sessBuckets[l.SessKey] {
+		if pred.Idx == l.Idx || len(pred.Manifests) == 0 {
 			continue
 		}
 		predEnd := pred.Manifests[len(pred.Manifests)-1].TS
-		b0TS := l.Manifests[0].TS
 		if !predEnd.Before(b0TS) {
 			continue
 		}
@@ -347,10 +420,10 @@ func findSameChatCandidate(l *Lineage, byIdx map[int]*Lineage) *StitchEdge {
 			continue
 		}
 		// Same determinism concern as resolveStitch's overlap loop above:
-		// byIdx is a map, so an exact gap tie needs an explicit smaller-Idx
-		// tie-break, not "whichever this random iteration visits first".
-		if bestIdx == -1 || gap < bestGap || (gap == bestGap && idx < bestIdx) {
-			bestIdx, bestGap = idx, gap
+		// an exact gap tie needs an explicit smaller-Idx tie-break, not
+		// "whichever this iteration order visits first".
+		if bestIdx == -1 || gap < bestGap || (gap == bestGap && pred.Idx < bestIdx) {
+			bestIdx, bestGap = pred.Idx, gap
 		}
 	}
 	if bestIdx == -1 {

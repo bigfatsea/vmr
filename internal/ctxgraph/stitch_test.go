@@ -3,6 +3,7 @@
 package ctxgraph
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,12 +25,16 @@ func TestStitchGraph_CompactionCase(t *testing.T) {
 
 	var recs []audit.Record
 	msgs := []map[string]any{sys, u1}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		recs = append(recs, mkAuditRec(at(i), chatBody(msgs...)))
-		msgs = append(msgs, assistantMsg("step reply"))
+		msgs = append(msgs, assistantMsg(fmt.Sprintf("step reply %d", i)))
 	}
+	// The break: a Contract whose opening keeps the anchor plus the two
+	// most recent replies verbatim — 3 shared distinct keys, exactly what
+	// stitchMinAbsOverlap demands of a rebuilt-but-preserved opening.
 	brokenSys := sysMsg("You are a personal assistant. [updated tool policy]")
-	recs = append(recs, mkAuditRec(at(30), chatBody(brokenSys, u1, assistantMsg("post-break reply"))))
+	recs = append(recs, mkAuditRec(at(30), chatBody(brokenSys, u1,
+		assistantMsg("step reply 3"), assistantMsg("step reply 4"))))
 
 	path := writeJSONL(t, recs)
 	g, err := Scan([]string{path})
@@ -152,17 +157,22 @@ func TestStitchGraph_HeadPruneCase(t *testing.T) {
 	sys := sysMsg("sys")
 	meta := func(uid string) map[string]any { return map[string]any{"user_id": uid} }
 
-	shared := userMsg("shared context message that survives")
-	body1 := chatBody(sys, userMsg("predecessor opening"), assistantMsg("predecessor reply"), shared)
+	sharedA := userMsg("shared context message A that survives")
+	sharedB := userMsg("shared context message B that survives")
+	sharedC := userMsg("shared context message C that survives")
+	body1 := chatBody(sys, userMsg("predecessor opening"), assistantMsg("predecessor reply"),
+		sharedA, assistantMsg("ack A"), sharedB, assistantMsg("ack B"), sharedC)
 	body1["metadata"] = meta("session_hp")
 	rec1 := mkAuditRec(at(0), body1)
 
-	// Successor's opening: 1 of 6 keys (the shared message) overlaps with
-	// the predecessor -> score = 1/6 ≈ 0.17, clears stitchHeadPruneScore
-	// (0.15) but not stitchCompactionScore (0.5).
-	body2 := chatBody(sys, shared,
-		userMsg("brand new sub-task A"), assistantMsg("ack A"),
-		userMsg("brand new sub-task B"), assistantMsg("ack B"))
+	// Successor's opening: 3 of 9 distinct keys overlap with the
+	// predecessor -> score = 3/9 ≈ 0.33, clears stitchHeadPruneScore
+	// (0.15) but not stitchCompactionScore (0.5), and meets
+	// stitchMinAbsOverlap (3) exactly.
+	body2 := chatBody(sys, sharedA, sharedB, sharedC,
+		userMsg("brand new sub-task A"), assistantMsg("new A"),
+		userMsg("brand new sub-task B"), assistantMsg("new B"),
+		userMsg("brand new sub-task C"), assistantMsg("new C"))
 	body2["metadata"] = meta("session_hp")
 	rec2 := mkAuditRec(at(5), body2)
 
@@ -261,11 +271,12 @@ func TestChainFrom_CompactionCase(t *testing.T) {
 	u1 := userMsg("深入调研这个内存涨价这一波")
 	var recs []audit.Record
 	msgs := []map[string]any{sys, u1}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		recs = append(recs, mkAuditRec(at(i), chatBody(msgs...)))
-		msgs = append(msgs, assistantMsg("step reply"))
+		msgs = append(msgs, assistantMsg(fmt.Sprintf("step reply %d", i)))
 	}
-	recs = append(recs, mkAuditRec(at(30), chatBody(sysMsg("sys v2"), u1, assistantMsg("post-break reply"))))
+	recs = append(recs, mkAuditRec(at(30), chatBody(sysMsg("sys v2"), u1,
+		assistantMsg("step reply 3"), assistantMsg("step reply 4"))))
 
 	path := writeJSONL(t, recs)
 	g, err := Scan([]string{path})
@@ -318,20 +329,22 @@ func TestStitchGraph_TiedScoreCandidatesPickDeterministicWinner(t *testing.T) {
 	sys := sysMsg("sys")
 	shared1 := userMsg("SHARED_ONE unique content")
 	shared2 := userMsg("SHARED_TWO unique content")
+	shared3 := userMsg("SHARED_THREE unique content")
 
-	// Defines the successor's own bucket anchor — a much weaker (0.25)
+	// Defines the successor's own bucket anchor — a much weaker (1/5)
 	// competing candidate the tie-break must NOT prefer just for being
 	// nearby in time.
 	openerRec := mkAuditRec(time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC),
 		chatBody(sys, userMsg("today's opening anchor"), assistantMsg("today's reply")))
 	closerRec := mkAuditRec(time.Date(2026, 7, 20, 7, 50, 0, 0, time.UTC),
-		chatBody(sys, userMsg("closer bucket anchor"), shared1, shared2))
+		chatBody(sys, userMsg("closer bucket anchor"), shared1, shared2, shared3))
 	fartherRec := mkAuditRec(time.Date(2026, 7, 20, 7, 0, 0, 0, time.UTC),
-		chatBody(sys, userMsg("farther bucket anchor"), shared1, shared2))
+		chatBody(sys, userMsg("farther bucket anchor"), shared1, shared2, shared3))
 	// Same bucket as openerRec (shares its first message) but forks away
-	// (low coverage) — BrokeFrom gets set, triggering resolveStitch.
+	// (low coverage) — BrokeFrom gets set, triggering resolveStitch. 3 of
+	// its 5 distinct keys match both tied candidates exactly.
 	succRec := mkAuditRec(time.Date(2026, 7, 20, 8, 5, 0, 0, time.UTC),
-		chatBody(sys, userMsg("today's opening anchor"), shared1, shared2, userMsg("brand new content A")))
+		chatBody(sys, userMsg("today's opening anchor"), shared1, shared2, shared3, userMsg("brand new content A")))
 
 	path := writeJSONL(t, []audit.Record{openerRec, closerRec, fartherRec, succRec})
 
@@ -458,13 +471,156 @@ func TestResolveStitch_EmptyOpeningKeysStillTriesSameChat(t *testing.T) {
 		Manifests: []*Manifest{{TS: predEnd.Add(5 * time.Minute)}},
 	}
 	byIdx := map[int]*Lineage{0: pred, 1: l}
+	sessBuckets := map[string][]*Lineage{"s1": {pred, l}}
 
-	res := resolveStitch(l, byIdx, map[Hash][]int{})
+	res := resolveStitch(l, byIdx, map[Hash][]int{}, sessBuckets)
 
 	if res.Outcome != AmbiguousMatch {
 		t.Fatalf("Outcome = %v, want AmbiguousMatch (empty Keys must still fall through to findSameChatCandidate)", res.Outcome)
 	}
 	if res.Edge == nil || res.Edge.Kind != StitchSameChat || res.Edge.PredIdx != 0 {
 		t.Errorf("Edge = %+v, want {Kind: StitchSameChat, PredIdx: 0}", res.Edge)
+	}
+}
+
+// TestResolveStitch_OverlapIsSetIntersectionNotMultiset pins R77: b0.Keys
+// is a message SEQUENCE, so a hash repeated in it (recurring boilerplate,
+// identical tool results) must count once on both sides of the score
+// fraction. Old behavior: overlap=2/3 = 0.667 (multiset counting); correct
+// set behavior: 1 distinct shared key over 2 distinct keys = 0.5. The
+// single shared key also fails stitchMinAbsOverlap, so the Contract-shaped
+// match must downgrade to AmbiguousMatch, never stitch.
+func TestResolveStitch_OverlapIsSetIntersectionNotMultiset(t *testing.T) {
+	t.Parallel()
+	hA, hB, hC := Hash{1}, Hash{2}, Hash{3}
+	ts0 := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	pred := &Lineage{Idx: 0, SessKey: "s", Manifests: []*Manifest{{TS: ts0, Keys: []Hash{hA, hC}}}}
+	l := &Lineage{
+		Idx: 1, SessKey: "s",
+		BrokeFrom: &BreakInfo{Edit: Edit{Kind: Fork}},
+		// hA repeats — the exact multiset trap.
+		Manifests: []*Manifest{{TS: ts0.Add(time.Minute), Keys: []Hash{hA, hA, hB}}},
+	}
+	byIdx := map[int]*Lineage{0: pred, 1: l}
+	blobLineages := map[Hash][]int{hA: {0, 1}, hB: {1}, hC: {0}}
+	sessBuckets := map[string][]*Lineage{"s": {pred, l}}
+
+	res := resolveStitch(l, byIdx, blobLineages, sessBuckets)
+
+	if res.Edge == nil {
+		t.Fatal("Edge = nil, want an AmbiguousMatch edge")
+	}
+	if res.Edge.Score != 0.5 {
+		t.Errorf("Score = %.3f, want 0.5 (1 distinct shared key / 2 distinct keys — multiset counting would give 0.667)", res.Edge.Score)
+	}
+	if res.Outcome != AmbiguousMatch {
+		t.Errorf("Outcome = %v, want AmbiguousMatch (1 shared key is below stitchMinAbsOverlap)", res.Outcome)
+	}
+}
+
+// TestResolveStitch_TinyOpeningBelowAbsoluteFloorDowngrades pins R73: a
+// Contract-origin break whose tiny opening shares exactly one message
+// scores a perfect ratio but must NOT stitch — the shared message is
+// typically the anchor the SessKey itself was built from, so the ratio
+// carries no information at this size.
+func TestResolveStitch_TinyOpeningBelowAbsoluteFloorDowngrades(t *testing.T) {
+	t.Parallel()
+	hA, hB, hC, hD := Hash{1}, Hash{2}, Hash{3}, Hash{4}
+	ts0 := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	pred := &Lineage{Idx: 0, SessKey: "s", Manifests: []*Manifest{{TS: ts0, Keys: []Hash{hA, hB, hC, hD}}}}
+	l := &Lineage{
+		Idx: 1, SessKey: "s",
+		BrokeFrom: &BreakInfo{Edit: Edit{Kind: Contract}},
+		Manifests: []*Manifest{{TS: ts0.Add(time.Minute), Keys: []Hash{hA}}},
+	}
+	byIdx := map[int]*Lineage{0: pred, 1: l}
+	blobLineages := map[Hash][]int{hA: {0, 1}, hB: {0}, hC: {0}, hD: {0}}
+	sessBuckets := map[string][]*Lineage{"s": {pred, l}}
+
+	res := resolveStitch(l, byIdx, blobLineages, sessBuckets)
+
+	if res.Outcome != AmbiguousMatch {
+		t.Errorf("Outcome = %v, want AmbiguousMatch (score=%.2f clears the ratio but n=1 is below stitchMinAbsOverlap=%d)",
+			res.Outcome, res.Edge.Score, stitchMinAbsOverlap)
+	}
+	if res.Edge == nil || res.Edge.PredIdx != 0 || res.Edge.Score != 1.0 {
+		t.Errorf("Edge = %+v, want {PredIdx: 0, Score: 1.0} — the candidate must stay visible, not be eliminated", res.Edge)
+	}
+}
+
+// TestStitchGraph_SameBucketBeyondMaxGapDowngraded pins R74: recurring
+// scheduled/heartbeat traffic under one metadata SessKey used to be
+// connectable across ARBITRARY time gaps (the cross-bucket window never
+// applied within a bucket). A same-bucket candidate beyond
+// stitchSameKeyMaxGap with strong content evidence must now downgrade to
+// AmbiguousMatch (edge kept) instead of stitching; the same shape within
+// the window must still stitch.
+func TestStitchGraph_SameBucketBeyondMaxGapDowngraded(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		gap        time.Duration
+		wantStitch bool
+	}{
+		{"within window stitches", 10 * time.Hour, true},
+		{"beyond window downgraded", 100 * time.Hour, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			at := func(min int) time.Time { return time.Date(2026, 7, 20, 8, min, 0, 0, time.UTC) }
+			meta := func(uid string) map[string]any { return map[string]any{"user_id": uid} }
+			sys := sysMsg("sys")
+			s1 := userMsg("shared context A")
+			s2 := userMsg("shared context B")
+			s3 := userMsg("shared context C")
+
+			// Predecessor lineage: two Append turns accumulating 7 keys.
+			p1 := chatBody(sys, userMsg("cron anchor"), s1, s2, s3)
+			p1["metadata"] = meta("cron-session")
+			p2 := chatBody(sys, userMsg("cron anchor"), s1, s2, s3,
+				assistantMsg("turn reply 1"), assistantMsg("turn reply 2"), assistantMsg("turn reply 3"))
+			p2["metadata"] = meta("cron-session")
+
+			// Successor: Contract (4 keys < 0.6*7), 3 of 4 keys shared with
+			// the predecessor — would stitch but for the gap.
+			succ := chatBody(sys, userMsg("rebuilt anchor"), s2, s3, assistantMsg("turn reply 3"))
+			succ["metadata"] = meta("cron-session")
+
+			path := writeJSONL(t, []audit.Record{
+				mkAuditRec(at(0), p1), mkAuditRec(at(1), p2),
+				mkAuditRec(at(1+int(tc.gap.Minutes())), succ),
+			})
+			g, err := Scan([]string{path})
+			if err != nil {
+				t.Fatalf("Scan: %v", err)
+			}
+			StitchGraph(g)
+
+			var pred, succLin *Lineage
+			for _, l := range g.Lineages {
+				if l.BrokeFrom == nil {
+					pred = l
+				} else {
+					succLin = l
+				}
+			}
+			if pred == nil || succLin == nil || len(g.Lineages) != 2 {
+				t.Fatalf("got %d lineages, want 2 (predecessor + Contract break)", len(g.Lineages))
+			}
+			if tc.wantStitch {
+				if succLin.Stitch.Outcome != Stitched || succLin.Stitch.Edge.Kind != StitchCompaction {
+					t.Fatalf("outcome = %v kind = %v, want Stitched/StitchCompaction within the same-key window",
+						succLin.Stitch.Outcome, succLin.Stitch.Edge.Kind)
+				}
+				return
+			}
+			if succLin.Stitch.Outcome != AmbiguousMatch {
+				t.Fatalf("outcome = %v, want AmbiguousMatch (same-bucket gap %.0fh > stitchSameKeyMaxGap %v)",
+					succLin.Stitch.Outcome, tc.gap.Hours(), stitchSameKeyMaxGap)
+			}
+			if succLin.Stitch.Edge == nil || succLin.Stitch.Edge.PredIdx != pred.Idx {
+				t.Fatalf("Edge = %+v, want a retained edge pointing at predecessor %d", succLin.Stitch.Edge, pred.Idx)
+			}
+		})
 	}
 }

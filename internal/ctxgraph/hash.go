@@ -67,3 +67,66 @@ func hashJSON(v any) Hash {
 	b, _ := json.Marshal(v)
 	return md5.Sum(b)
 }
+
+// hashMsgJSON is the per-message hashing BuildManifest uses, as opposed to
+// hashJSON's raw digest: Anthropic's cache_control breakpoint markers
+// (on the message itself or on individual content blocks) are client-side
+// cache-routing metadata, not conversation content — a client that moves
+// its breakpoint between turns changes which message carries the marker,
+// and hashing it raw turns that move into a phantom content "edit"
+// (Append misread as Contract/Splice), fracturing the lineage. The marker
+// is stripped deep before hashing, without mutating the caller's decoded
+// body (the record is shared with every other consumer). The
+// contains-check first keeps the no-marker case at hashJSON's exact cost.
+func hashMsgJSON(raw any) Hash {
+	if !containsCacheControl(raw) {
+		return hashJSON(raw)
+	}
+	return hashJSON(stripCacheControl(raw))
+}
+
+func containsCacheControl(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		if _, ok := t["cache_control"]; ok {
+			return true
+		}
+		for _, x := range t {
+			if containsCacheControl(x) {
+				return true
+			}
+		}
+	case []any:
+		for _, x := range t {
+			if containsCacheControl(x) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripCacheControl deep-copies v omitting every "cache_control" key at any
+// depth. Values without maps/slices are shared, not copied — only the
+// containers on a marker-bearing path get rebuilt.
+func stripCacheControl(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, x := range t {
+			if k == "cache_control" {
+				continue
+			}
+			out[k] = stripCacheControl(x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = stripCacheControl(x)
+		}
+		return out
+	default:
+		return v
+	}
+}
