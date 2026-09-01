@@ -5,6 +5,8 @@ package story
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -247,5 +249,72 @@ func TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness
 	const steps = 4
 	if diff > perStepOverhead*steps {
 		t.Errorf("SingleJourneyEvidencePack grew by %d chars when per-step tool-call args grew by 200000 bytes — want growth bounded by ~%d (step count only), not tracking conversation content size", diff, perStepOverhead*steps)
+	}
+}
+
+// TestEstimateLLMDryRun_ItemizesAllPacksAndTotals is the R90 regression: a
+// dry run must enumerate every pack the run would send — each detector
+// whose candidate filter fires plus the always-sent interpretation — and
+// the formatted total must equal the sum of the itemized sizes, with the
+// call count equal to the itemized count.
+func TestEstimateLLMDryRun_ItemizesAllPacksAndTotals(t *testing.T) {
+	// Six steps of the same tool with distinct args: enough for the
+	// oscillation candidate filter to fire; no tool results, so
+	// tool_result_misinterpretation stays silent.
+	var steps []*Step
+	for seq := 1; seq <= 6; seq++ {
+		steps = append(steps, &Step{
+			Seq:       seq,
+			RespText:  "working",
+			ToolCalls: []chatmsg.ToolCall{{Name: "grep", Args: fmt.Sprintf(`{"pattern":"p%d"}`, seq)}},
+		})
+	}
+	j := &Journey{ID: "j-dryrun", Tasks: []*Task{{Steps: steps}}}
+
+	est := EstimateLLMDryRun(j, Metrics{}, nil, i18n.EN)
+	if len(est) < 2 {
+		t.Fatalf("a journey with a firing detector must estimate >= 2 calls, got %d: %+v", len(est), est)
+	}
+	var names []string
+	total := 0
+	for _, e := range est {
+		names = append(names, e.Name)
+		total += e.Chars
+		if e.Chars <= 0 {
+			t.Errorf("pack %s has non-positive size %d", e.Name, e.Chars)
+		}
+	}
+	if !slices.Contains(names, "semantic_oscillation") {
+		t.Errorf("oscillation candidates should have fired, got packs %v", names)
+	}
+	if names[len(names)-1] != "journey_interpretation" {
+		t.Errorf("the interpretation pack must always be last, got %v", names)
+	}
+
+	out := FormatLLMDryRun(est)
+	if !strings.Contains(out, fmt.Sprintf("%d pack(s), %d chars", len(est), total)) {
+		t.Errorf("total line must show pack count and the sum of itemized sizes (%d):\n%s", total, out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("up to %d LLM call(s)", len(est))) {
+		t.Errorf("total line must state the maximum call count:\n%s", out)
+	}
+	for _, e := range est {
+		if !strings.Contains(out, e.Name) {
+			t.Errorf("output must itemize pack %s:\n%s", e.Name, out)
+		}
+	}
+}
+
+// TestEstimateLLMDryRun_MinimumIsTheInterpretationCall: even with no
+// detector candidates, a dry run reports exactly one call — the journey
+// interpretation, which is always sent.
+func TestEstimateLLMDryRun_MinimumIsTheInterpretationCall(t *testing.T) {
+	j := &Journey{ID: "j-min", Tasks: []*Task{{Steps: []*Step{{Seq: 1, ToolCalls: []chatmsg.ToolCall{{Name: "read", Args: `{}`}}}}}}}
+	est := EstimateLLMDryRun(j, Metrics{}, nil, i18n.EN)
+	if len(est) != 1 || est[0].Name != "journey_interpretation" || est[0].Chars <= 0 {
+		t.Fatalf("empty-detector journey must estimate exactly the interpretation call, got %+v", est)
+	}
+	if !strings.Contains(FormatLLMDryRun(est), "up to 1 LLM call(s)") {
+		t.Errorf("call count must be 1:\n%s", FormatLLMDryRun(est))
 	}
 }

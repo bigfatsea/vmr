@@ -52,11 +52,13 @@ var lowConfidenceFindings = map[FindingCode]bool{
 
 // JourneySeverity returns the Journey's worst severity and the finding that
 // set it (earliest StepSeq at that level, then Code order — independent of
-// the findings slice's own order). driver is "" only when level is clean.
+// the findings slice's own order). driver is "" when no rule-derived finding
+// at the worst level can headline it (see pickDriver — this includes the
+// all findings are LLM-inferred case, not just the clean case).
 // driverLowConf is true when the chosen driver is a low-confidence finding
-// (the only findings at the worst level are low-confidence — see 问题 2 D3).
-// A low-confidence driver renders the verdict in a degraded form ("仅次级信号"
-// instead of a confident conclusion).
+// (the only rule-derived findings at the worst level are low-confidence —
+// see 问题 2 D3). A low-confidence driver renders the verdict in a degraded
+// form ("仅次级信号" instead of a confident conclusion).
 func JourneySeverity(findings []Finding) (level string, driver FindingCode, driverLowConf bool) {
 	level = SeverityClean
 	for _, f := range findings {
@@ -72,16 +74,28 @@ func JourneySeverity(findings []Finding) (level string, driver FindingCode, driv
 	if d, ok := pickDriver(findings, level, true); ok {
 		return level, d, false
 	}
-	d, _ := pickDriver(findings, level, false)
-	return level, d, true
+	if d, ok := pickDriver(findings, level, false); ok {
+		return level, d, true
+	}
+	return level, "", false
 }
 
 // pickDriver returns the earliest-StepSeq finding at level (ties broken by
-// Code order). skipLowConf drops lowConfidenceFindings from consideration;
-// ok is false when that leaves nothing to pick.
+// Code order). SourceLLMInferred findings are always excluded: an LLM
+// finding's narrative text and EvidenceAnchor are influenceable by the very
+// transcript being analyzed (prompt injection — the transcript's author can
+// plant both the quoted anchor and the conclusion drawn from it, and
+// anchoredInTranscript cannot tell that apart from an honest quote), so an
+// LLM finding must never headline a verdict. skipLowConf drops
+// lowConfidenceFindings from consideration; ok is false when that leaves
+// nothing to pick — the caller renders a no-driver form, never falls back
+// to an LLM finding.
 func pickDriver(findings []Finding, level string, skipLowConf bool) (driver FindingCode, ok bool) {
 	best := -1
 	for _, f := range findings {
+		if f.Source == SourceLLMInferred {
+			continue
+		}
 		if findingLevel(f.Code) != level {
 			continue
 		}

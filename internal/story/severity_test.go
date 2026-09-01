@@ -81,4 +81,42 @@ func TestJourneySeverity(t *testing.T) {
 			t.Fatalf("want critical/goal_drift/false, got %q/%q/%v", lvl, drv, low)
 		}
 	})
+
+	// R88 stopgap: an LLM-inferred finding must never headline a verdict —
+	// its text and anchor are influenceable by the analyzed transcript
+	// (prompt injection), unlike rule findings' fixed detector prose.
+	t.Run("LLM-inferred finding never drives over a rule finding", func(t *testing.T) {
+		lvl, drv, low := JourneySeverity([]Finding{
+			{Code: FindingUnverifiedCompletionClaim, StepSeq: 0, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+			{Code: FindingUnusedToolResult, StepSeq: 9, Source: SourceRule},
+		})
+		if lvl != SeverityWarning || drv != FindingUnusedToolResult || low {
+			t.Fatalf("driver must be the rule finding even though the LLM finding has the earlier StepSeq: got %q/%q/%v", lvl, drv, low)
+		}
+	})
+
+	t.Run("all-LLM findings yield no driver at all", func(t *testing.T) {
+		findings := []Finding{
+			{Code: FindingUnverifiedCompletionClaim, StepSeq: 1, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+			{Code: FindingToolResultMisinterpretation, StepSeq: 3, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+		}
+		lvl, drv, _ := JourneySeverity(findings)
+		if lvl != SeverityWarning || drv != "" {
+			t.Fatalf("no rule finding means no driver: got %q/%q", lvl, drv)
+		}
+		if _, ok := pickDriver(findings, SeverityWarning, false); ok {
+			t.Error("pickDriver must report ok=false when every finding at the level is LLM-inferred")
+		}
+	})
+
+	t.Run("rule findings' driver selection is unchanged by the LLM exclusion", func(t *testing.T) {
+		lvl, drv, low := JourneySeverity([]Finding{
+			{Code: FindingGoalDrift, StepSeq: 7, Source: SourceRule},
+			{Code: FindingExactRepeatToolCall, StepSeq: 2, Source: SourceRule},
+			{Code: FindingGoalDrift, StepSeq: 0, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+		})
+		if lvl != SeverityCritical || drv != FindingExactRepeatToolCall || low {
+			t.Fatalf("earliest-step rule critical should drive (2 < 7, LLM step 0 ignored): got %q/%q/%v", lvl, drv, low)
+		}
+	})
 }

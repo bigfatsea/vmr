@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -237,27 +238,31 @@ func TestE2E_ReportConfigFileInvalidLanguageDegradesToEnglish(t *testing.T) {
 	}
 }
 
-// TestE2E_ReportExplicitConfigFileMissingWarns covers the case an explicit
+// TestE2E_ReportExplicitConfigFileMissingIsError covers the case an explicit
 // -report-config path doesn't exist: unlike the auto-detected ./report.yaml
-// (silently absent is normal there), a path the user typed themselves is
-// likely a typo, so it must warn even though the run still degrades to
-// English rather than failing outright.
-func TestE2E_ReportExplicitConfigFileMissingWarns(t *testing.T) {
+// (silently absent is normal there), a path the user typed themselves is a
+// hard error — R89 removed the old warn-and-degrade, which silently disabled
+// every configured setting on a typo'd path.
+func TestE2E_ReportExplicitConfigFileMissingIsError(t *testing.T) {
 	path := e2eReportFixture(t)
-	outDir := filepath.Join(t.TempDir(), "out")
 	rcPath := filepath.Join(t.TempDir(), "does-not-exist.yaml")
-	out := captureStdout(t, func() {
-		if err := cmdReport([]string{"-o", outDir, "-report-config", rcPath, path}); err != nil {
-			t.Fatalf("cmdReport: %v", err)
-		}
-	})
-	if !strings.Contains(out, "warning") || !strings.Contains(out, rcPath) {
-		t.Errorf("an explicit -report-config pointing at a missing file should warn by name, got:\n%s", out)
-	}
-	md := readReportMD(t, outDir)
-	if !strings.Contains(md, "# VMR Usage Report") {
-		t.Errorf("a missing explicit -report-config should degrade to English, not fail:\n%s", md)
-	}
+	origFatal := reportConfigFatal
+	defer func() { reportConfigFatal = origFatal }()
+	reportConfigFatal = func(_ io.Writer, err error) { panic(err) }
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Errorf("an explicit -report-config pointing at a missing file must fail the run, got a successful one")
+				return
+			}
+			err, ok := r.(error)
+			if !ok || !strings.Contains(err.Error(), rcPath) {
+				t.Errorf("fatal error should name the missing config path, got %v", r)
+			}
+		}()
+		_ = cmdReport([]string{"-o", filepath.Join(t.TempDir(), "out"), "-report-config", rcPath, path})
+	}()
 }
 
 // --- vmr story ---

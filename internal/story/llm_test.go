@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -447,5 +448,66 @@ func TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument(t *testing.
 	plainTitle := strings.SplitN(plain, "\n", 2)[0]
 	if strings.Contains(plainTitle, "·") {
 		t.Errorf("plain (scope-less) title = %q, must not carry a scope separator", plainTitle)
+	}
+}
+
+// TestInterpret_EmptyCacheFileTreatedAsMiss is the R93 regression: a 0-byte
+// (or whitespace-only) cache file must be treated as a miss — a hit is
+// served verbatim and never re-calls, so an empty entry would otherwise
+// surface as an "empty LLM response" on every later run, permanently.
+func TestInterpret_EmptyCacheFileTreatedAsMiss(t *testing.T) {
+	ts, calls, _, _ := mockChatServer(t, "real reply")
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	cacheDir := t.TempDir()
+	pack := testPack(t)
+	key, err := cacheKey("agent", pack, i18n.EN)
+	if err != nil {
+		t.Fatalf("cacheKey: %v", err)
+	}
+	for _, content := range []string{"", "   \n\t "} {
+		if err := os.WriteFile(cachePath(cacheDir, key), []byte(content), 0o600); err != nil {
+			t.Fatalf("seed corrupt cache: %v", err)
+		}
+		res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", CacheDir: cacheDir}, pack, i18n.EN)
+		if err != nil {
+			t.Fatalf("Interpret: %v", err)
+		}
+		if res.Cached || res.Text != "real reply" {
+			t.Errorf("corrupt cache (content=%q) must be a miss, got cached=%v text=%q", content, res.Cached, res.Text)
+		}
+		if *calls != 1 {
+			t.Errorf("server calls = %d, want 1 (corrupt cache must force a fresh call)", *calls)
+		}
+		// The fresh call overwrites the bad entry, and no temp file leaks.
+		data, err := os.ReadFile(cachePath(cacheDir, key))
+		if err != nil || string(data) != "real reply" {
+			t.Errorf("cache entry should now hold the fresh reply, got %q err=%v", data, err)
+		}
+		entries, _ := os.ReadDir(cacheDir)
+		for _, e := range entries {
+			if strings.Contains(e.Name(), ".tmp") {
+				t.Errorf("temp cache file %s leaked after successful write", e.Name())
+			}
+		}
+		*calls = 0
+	}
+}
+
+// TestInterpret_CacheWriteFailOpenWithWarning is the R93 fail-open
+// regression: an unusable cache directory must not fail (or panic) the
+// analysis — the reply still comes back uncached.
+func TestInterpret_CacheWriteFailOpenWithWarning(t *testing.T) {
+	ts, _, _, _ := mockChatServer(t, "uncached reply")
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent", CacheDir: filepath.Join(blocker, "cache")}, testPack(t), i18n.EN)
+	if err != nil {
+		t.Fatalf("cache write failure must stay fail-open, got error: %v", err)
+	}
+	if res.Cached || res.Text != "uncached reply" {
+		t.Errorf("unexpected result %+v", res)
 	}
 }

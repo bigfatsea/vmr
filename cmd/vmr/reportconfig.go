@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -72,17 +73,30 @@ const defaultReportConfigFile = "report.yaml"
 // -> empty, bare $ stays literal" contract internal/config's own expandEnv
 // applies to config.yaml — duplicated here rather than imported, since this
 // file's whole point is staying independent of internal/config (see the
-// package comment above). report.yaml is .gitignore'd (see report.example
-// .yaml), so llm_key doesn't need this to stay safe — it's here purely as a
-// convenience for whoever prefers referencing an already-set env var (e.g.
-// one shared with config.yaml's own provider keys) over duplicating the
-// literal secret into a second file.
+// package comment above). The injection guards are duplicated with it: a
+// value containing a newline, ": " or " #" is spliced in before YAML
+// parsing, so it could change the document's structure or silently truncate
+// the value at a YAML comment — report.yaml carries llm_key, so a " #"
+// suffix would cut a secret short with no error at all, surfacing only as a
+// mysterious 401. Same fail-fast rule config.yaml applies; same known
+// residual gap too (a value inside a flow collection could still inject via
+// a comma).
 var reportEnvRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-func expandReportEnv(s string) string {
-	return reportEnvRe.ReplaceAllStringFunc(s, func(m string) string {
-		return os.Getenv(m[2 : len(m)-1])
+func expandReportEnv(s string) (string, error) {
+	var badVar string
+	out := reportEnvRe.ReplaceAllStringFunc(s, func(m string) string {
+		name := m[2 : len(m)-1]
+		v := os.Getenv(name)
+		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #")) {
+			badVar = name
+		}
+		return v
 	})
+	if badVar != "" {
+		return "", fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into report.yaml could change the document's structure or silently truncate the value at a YAML comment; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
+	}
+	return out, nil
 }
 
 func loadReportConfig(path string) (reportConfig, error) {
@@ -90,8 +104,12 @@ func loadReportConfig(path string) (reportConfig, error) {
 	if err != nil {
 		return reportConfig{}, err
 	}
+	expanded, err := expandReportEnv(string(data))
+	if err != nil {
+		return reportConfig{}, err
+	}
 	var rc reportConfig
-	dec := yaml.NewDecoder(bytes.NewReader([]byte(expandReportEnv(string(data)))))
+	dec := yaml.NewDecoder(bytes.NewReader([]byte(expanded)))
 	dec.KnownFields(true) // same strict-YAML stance config.yaml itself takes: a typo'd key is a load error, not a silent no-op
 	if err := dec.Decode(&rc); err != nil && err != io.EOF {
 		return reportConfig{}, err
@@ -104,27 +122,49 @@ func loadReportConfig(path string) (reportConfig, error) {
 
 // resolveReportConfig loads report.yaml (or -report-config's path) exactly
 // once per command invocation — every resolve*/flagPassed call below shares
-// this one load rather than re-reading the file per field. Best-effort: a
-// missing file at the default path is silently a no-op (most runs have no
-// report.yaml at all, e.g. analyzing a log archive copied off-box); a
-// missing file at an explicitly-given -report-config path, or one that
-// fails to parse, prints a warning and degrades to an empty reportConfig —
-// every field then falls through to its own flag's built-in default.
+// this one load rather than re-reading the file per field. A missing file
+// at the default path is silently a no-op (most runs have no report.yaml
+// at all, e.g. analyzing a log archive copied off-box — that is "not
+// configured", a legitimate state). Everything else is a hard error that
+// exits: a file that exists but fails to parse would otherwise silently
+// disable ALL of report.yaml's settings — self-traffic exclusion, every
+// llm_* field, currency — with at most a warning mixed into normal output;
+// KnownFields strictness only pays for itself if the failure is loud. An
+// explicit -report-config path that doesn't exist is the user's own pointer
+// and errors too.
 func resolveReportConfig(reportConfigPath string, tw io.Writer) reportConfig {
+	rc, err := resolveReportConfigErr(reportConfigPath)
+	if err == nil {
+		return rc
+	}
+	reportConfigFatal(tw, err)
+	return reportConfig{} // unreachable
+}
+
+// reportConfigFatal terminates the process on an unusable report config. A
+// package-level func so tests can intercept the exit — there is no in-process
+// way to survive os.Exit.
+var reportConfigFatal = func(tw io.Writer, err error) {
+	fmt.Fprintf(tw, "error: %v\n", err)
+	os.Exit(1)
+}
+
+// resolveReportConfigErr is resolveReportConfig's testable core: it returns
+// the decision instead of exiting, so the hard-error policy can be asserted
+// without killing the test process.
+func resolveReportConfigErr(reportConfigPath string) (reportConfig, error) {
 	explicit := reportConfigPath != ""
 	if reportConfigPath == "" {
 		reportConfigPath = defaultReportConfigFile
 	}
 	rc, err := loadReportConfig(reportConfigPath)
-	if err != nil {
-		if explicit {
-			fmt.Fprintf(tw, "warning: -report-config %s not found or unreadable, ignoring it: %v\n", reportConfigPath, err)
-		} else if _, statErr := os.Stat(reportConfigPath); statErr == nil {
-			fmt.Fprintf(tw, "warning: found %s but failed to load it, ignoring it: %v\n", reportConfigPath, err)
-		}
-		return reportConfig{}
+	if err == nil {
+		return rc, nil
 	}
-	return rc
+	if !explicit && os.IsNotExist(err) {
+		return reportConfig{}, nil
+	}
+	return reportConfig{}, fmt.Errorf("report config %s: %w", reportConfigPath, err)
 }
 
 // resolveLanguage: -lang > report.yaml's language > i18n.EN. An explicit

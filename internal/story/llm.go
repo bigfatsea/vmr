@@ -368,7 +368,14 @@ func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T,
 		if err == nil {
 			key = k
 			if data, err := os.ReadFile(cachePath(opts.CacheDir, key)); err == nil {
-				return InterpretResult{Text: string(data), Cached: true}, nil
+				if text, ok := cacheResponseUsable(data); ok {
+					return InterpretResult{Text: text, Cached: true}, nil
+				}
+				// present but empty/whitespace-only: a corrupt entry
+				// (e.g. written by a process killed mid-write before the
+				// atomic-write change). Treated as a miss — it would
+				// otherwise be served as an "empty LLM response" forever,
+				// since a hit never re-calls — and overwritten below.
 			}
 		}
 	}
@@ -383,19 +390,66 @@ func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T,
 	}
 
 	// Both failure modes here are fail-open by design (the disk cache is an
-	// optimization, not a requirement) but are kept as two
-	// distinct, separately-named steps rather than one collapsed `if err ==
-	// nil { ... }`: a directory-creation failure (permissions, disk full) and
-	// a single-file write failure are different problems, and keeping them
+	// optimization, not a requirement) but warn rather than vanish silently:
+	// an unwritable cache looks to the user like an unexpectedly-billed
+	// repeat call on every run. They are kept as two distinct,
+	// separately-named steps rather than one collapsed `if err == nil { ... }`:
+	// a directory-creation failure (permissions, disk full) and a
+	// single-file write failure are different problems, and keeping them
 	// apart in the code is what makes it possible to add a diagnostic to
 	// just one of them later without re-deriving which branch is which.
 	if key != "" {
-		mkdirErr := os.MkdirAll(opts.CacheDir, 0o700)
-		if mkdirErr == nil {
-			_ = os.WriteFile(cachePath(opts.CacheDir, key), []byte(text), 0o600) // write failure: also fail-open, same reasoning
+		final := cachePath(opts.CacheDir, key)
+		if mkdirErr := os.MkdirAll(opts.CacheDir, 0o700); mkdirErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: LLM cache unusable, continuing without caching: %v\n", mkdirErr)
+		} else if err := writeCacheFileAtomic(opts.CacheDir, final, []byte(text)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: LLM cache write failed, continuing without caching: %v\n", err)
 		}
 	}
 	return InterpretResult{Text: text, Cached: false}, nil
+}
+
+// cacheResponseUsable gates the cache read: a 0-byte (or whitespace-only)
+// file is a corrupt entry, never a legitimate "the model said nothing"
+// response — callLLM itself rejects empty content, so an empty cache entry
+// could only have come from an interrupted write or corruption. Rejecting
+// it forces a fresh call that overwrites the bad entry.
+func cacheResponseUsable(data []byte) (string, bool) {
+	text := string(data)
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// writeCacheFileAtomic writes data to target via a temp file in target's
+// directory followed by a rename — the same temp-then-rename pattern every
+// other cache writer in this repo uses (ctxgraph, reqdetail, quota) — so a
+// process killed mid-write can never leave a truncated file that later runs
+// would serve as a valid LLM response (a hit short-circuits the call
+// permanently). 0600: cache files carry conversation-derived content, same
+// sensitivity as the audit log they were derived from.
+func writeCacheFileAtomic(dir, target string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, ".llm-cache-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, target)
 }
 
 // atxHeading reports whether line opens with an ATX heading marker (1-6
@@ -454,6 +508,33 @@ func downgradeHeadingLevels(text string) string {
 		}
 		if lvl, ok := atxHeading(line); ok && lvl >= 2 && lvl < 6 {
 			lines[i] = "#" + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sanitizeMDStruct neutralizes the characters an LLM-authored string can
+// use to break the structure of the Markdown document it is rendered into:
+// backticks (inline code spans / fences), pipes (table cells) and
+// line-leading ATX-heading / list / blockquote markers. Backslash escaping,
+// deliberately not HTML entities: the same finding text also renders
+// through the HTML dashboard, which applies its own HTML escaping —
+// entities here would double-escape there. Applied to every LLM-authored
+// finding component (explanations, suggested actions, evidence anchors) at
+// Finding-construction time in llm_findings.go — the render layer cannot do
+// it, because these strings also feed the HTML target and the JSON summary.
+// Ordinary prose without these characters passes through byte-identical.
+func sanitizeMDStruct(s string) string {
+	if s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if _, isHeading := atxHeading(ln); isHeading ||
+			strings.HasPrefix(ln, "- ") || strings.HasPrefix(ln, "> ") {
+			lines[i] = "\\" + ln
 		}
 	}
 	return strings.Join(lines, "\n")

@@ -745,3 +745,173 @@ func TestDetectOscillationCandidates_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestSanitizeMDStruct pins the Markdown-structure neutralization every
+// LLM-authored finding component passes through (R94): backticks, pipes and
+// line-leading heading/list/quote markers get backslash-escaped — ordinary
+// prose, including mid-line '#', must survive byte-identical.
+func TestSanitizeMDStruct(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain text", "plain text"},
+		{"", ""},
+		{"a|b", `a\|b`},
+		{"`x`", "\\`x\\`"},
+		{"# heading", `\# heading`},
+		{"###### deep", `\###### deep`},
+		{"####### seven is not a heading", "####### seven is not a heading"},
+		{"- item", `\- item`},
+		{"-item", "-item"},
+		{"> quote", `\> quote`},
+		{"mid-line # is not structural", "mid-line # is not structural"},
+		{"first\n# injected\nlast", "first\n\\# injected\nlast"},
+		{"<script>alert(1)</script>", "<script>alert(1)</script>"}, // HTML is the HTML render's job, not this one
+	}
+	for _, c := range cases {
+		if got := sanitizeMDStruct(c.in); got != c.want {
+			t.Errorf("sanitizeMDStruct(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestComputeLLMFindings_StepSeqBoundsChecked is the R88 step-2 regression:
+// an LLM-reported StepSeq outside the Journey's real step numbering must
+// kill the finding outright (never clamped — clamping would map an
+// attacker-chosen sequence onto a legitimate step).
+func TestComputeLLMFindings_StepSeqBoundsChecked(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
+	r1 := audit.Record{
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{msg("user", "load config")},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"config.json\"}"}}]}}]}
+data: [DONE]`},
+		},
+	}
+	r2 := audit.Record{
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{
+					msg("user", "load config"),
+					map[string]any{"role": "assistant", "tool_calls": []any{
+						map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"config.json"}`}},
+					}},
+					map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "Error: 404 file not found"},
+				},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Done!","reasoning_content":"Successfully read config.json, proceeding to start service."}}]}
+data: [DONE]`},
+		},
+	}
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	tmpl := `[{"step_seq":%d,"is_misinterpreted":true,"confidence":"HIGH","evidence_anchor":"Successfully read config.json","explanation":"x"}]`
+	for _, seq := range []int{-1, 0, 3, 99} {
+		srv := mockLLMServer(t, fmt.Sprintf(tmpl, seq))
+		res, err := ComputeLLMFindings(context.Background(), j, LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}, i18n.ZH)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("fail-open contract: %v", err)
+		}
+		if len(res) != 0 {
+			t.Fatalf("step_seq %d must be dropped (journey has steps 1-2), got %+v", seq, res)
+		}
+	}
+
+	for _, seq := range []int{1, 2} {
+		srv := mockLLMServer(t, fmt.Sprintf(tmpl, seq))
+		res, err := ComputeLLMFindings(context.Background(), j, LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}, i18n.ZH)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("fail-open contract: %v", err)
+		}
+		if len(res) != 1 || res[0].StepSeq != seq {
+			t.Fatalf("a valid step_seq (%d) must survive, got %+v", seq, res)
+		}
+	}
+}
+
+// TestComputeLLMFindings_LLMTextStructurallyNeutralized is the R94
+// regression: hostile content in LLM-authored finding fields must reach
+// neither the Markdown nor the HTML artifact in structure-breaking form.
+func TestComputeLLMFindings_LLMTextStructurallyNeutralized(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
+	r1 := audit.Record{
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{msg("user", "load config")},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"config.json\"}"}}]}}]}
+data: [DONE]`},
+		},
+	}
+	r2 := audit.Record{
+		TS: at(1), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": []any{
+					msg("user", "load config"),
+					map[string]any{"role": "assistant", "tool_calls": []any{
+						map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"config.json"}`}},
+					}},
+					map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "Error: 404 file not found"},
+				},
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Done!","reasoning_content":"Successfully read config.json, proceeding to start service."}}]}
+data: [DONE]`},
+		},
+	}
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	payload := `[{"step_seq":1,"is_misinterpreted":true,"confidence":"HIGH","evidence_anchor":"Successfully read config.json",` +
+		`"explanation":"col | pipe ` + "`" + `code` + "`" + `\n# injected heading\n- injected item",` +
+		`"suggested_action":"> quoted\n| a | b |"}]`
+	srv := mockLLMServer(t, payload)
+	defer srv.Close()
+	res, err := ComputeLLMFindings(context.Background(), j, LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}, i18n.ZH)
+	if err != nil {
+		t.Fatalf("fail-open contract: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected the hostile finding to survive verification (the anchor is real), got %+v", res)
+	}
+	f := res[0]
+	for _, hostile := range []string{"\n> quoted", "\n| a | b |"} {
+		if strings.Contains(f.Action, hostile) {
+			t.Errorf("Action still carries structure-breaking content %q: %q", hostile, f.Action)
+		}
+	}
+	if strings.Contains(f.Evidence, "col | pipe") || strings.Contains(f.Evidence, "`code`") {
+		t.Errorf("Evidence still carries raw pipes/backticks: %q", f.Evidence)
+	}
+
+	// Markdown artifact: the findings section must not gain a heading, list
+	// item or table row out of the model's text.
+	var md strings.Builder
+	renderFindingsSection(func(format string, args ...any) { md.WriteString(fmt.Sprintf(format, args...)) }, j, res, i18n.ZH)
+	for _, raw := range []string{"\n# injected heading", "\n- injected item", "| a | b |"} {
+		if strings.Contains(md.String(), raw) {
+			t.Errorf("Markdown artifact carries structure-breaking LLM content %q:\n%s", raw, md.String())
+		}
+	}
+
+	// HTML artifact: no active tag may survive.
+	var html strings.Builder
+	htmlFindings(func(format string, args ...any) { html.WriteString(fmt.Sprintf(format, args...)) }, res, i18n.StoryHTML(i18n.ZH), false)
+	if strings.Contains(html.String(), "<script>") || strings.Contains(html.String(), "<h") {
+		t.Errorf("HTML artifact carries active markup from LLM content:\n%s", html.String())
+	}
+}

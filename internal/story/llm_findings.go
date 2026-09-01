@@ -24,65 +24,26 @@ import (
 	"vmr/internal/i18n"
 )
 
-func parseJSONFromLLM[T any](text string, out *T) error {
-	trimmed := strings.TrimSpace(text)
-	if strings.HasPrefix(trimmed, "```") {
-		lines := strings.Split(trimmed, "\n")
-		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") {
-			lines = lines[1:]
-		}
-		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-			lines = lines[:len(lines)-1]
-		}
-		trimmed = strings.TrimSpace(strings.Join(lines, "\n"))
-	}
-
-	startObj := strings.Index(trimmed, "{")
-	startArr := strings.Index(trimmed, "[")
-	start := -1
-	if startObj >= 0 && startArr >= 0 {
-		if startObj < startArr {
-			start = startObj
-		} else {
-			start = startArr
-		}
-	} else if startObj >= 0 {
-		start = startObj
-	} else if startArr >= 0 {
-		start = startArr
-	}
-
-	endObj := strings.LastIndex(trimmed, "}")
-	endArr := strings.LastIndex(trimmed, "]")
-	end := -1
-	if endObj >= 0 && endArr >= 0 {
-		if endObj > endArr {
-			end = endObj
-		} else {
-			end = endArr
-		}
-	} else if endObj >= 0 {
-		end = endObj
-	} else if endArr >= 0 {
-		end = endArr
-	}
-
-	if start >= 0 && end > start {
-		trimmed = trimmed[start : end+1]
-	}
-
-	return json.Unmarshal([]byte(trimmed), out)
-}
-
 // --- P1b.1: Tool Result Misinterpretation (E3) ------------------------------
 
-func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+// buildToolMisinterpretationPack assembles the detector's evidence pack from
+// j's suspicious tool pairs — nil when the candidate filter finds none (the
+// same builders the detectors themselves call, so -llm-dry-run's estimate
+// enumerates exactly the calls a real run would make).
+func buildToolMisinterpretationPack(j *Journey) *ToolMisinterpretationEvidencePack {
 	pairs := extractSuspiciousToolPairs(j)
 	if len(pairs) == 0 {
 		return nil
 	}
-	pack := ToolMisinterpretationEvidencePack{SuspiciousPairs: pairs}
-	res, err := Interpret(ctx, opts, pack, lang)
+	return &ToolMisinterpretationEvidencePack{SuspiciousPairs: pairs}
+}
+
+func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack := buildToolMisinterpretationPack(j)
+	if pack == nil {
+		return nil
+	}
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -95,14 +56,14 @@ func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts 
 	for _, item := range items {
 		if item.IsMisinterpreted && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
 			tool := ""
-			for _, p := range pairs {
+			for _, p := range pack.SuspiciousPairs {
 				if p.StepSeq == item.StepSeq {
 					tool = p.ToolName
 					break
 				}
 			}
-			fText := tx.ToolResultMisinterpretation(tool, item.Explanation)
-			action := item.SuggestedAction
+			fText := tx.ToolResultMisinterpretation(tool, sanitizeMDStruct(item.Explanation))
+			action := sanitizeMDStruct(item.SuggestedAction)
 			if action == "" {
 				action = fText.Action
 			}
@@ -190,14 +151,22 @@ func detectOscillationCandidates(steps []*Step) []OscillationCandidate {
 	return out
 }
 
-func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
-	steps := journeySteps(j)
-	cands := detectOscillationCandidates(steps)
+// buildOscillationPack assembles the oscillation detector's evidence pack
+// from j's candidate windows — nil when none fire.
+func buildOscillationPack(j *Journey) *SemanticOscillationEvidencePack {
+	cands := detectOscillationCandidates(journeySteps(j))
 	if len(cands) == 0 {
 		return nil
 	}
-	pack := SemanticOscillationEvidencePack{Candidates: cands}
-	res, err := Interpret(ctx, opts, pack, lang)
+	return &SemanticOscillationEvidencePack{Candidates: cands}
+}
+
+func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack := buildOscillationPack(j)
+	if pack == nil {
+		return nil
+	}
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -210,7 +179,7 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 	for _, item := range items {
 		if item.IsOscillating && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
 			tool := ""
-			for _, c := range cands {
+			for _, c := range pack.Candidates {
 				for _, call := range c.Calls {
 					if call.StepSeq == item.StepSeq {
 						tool = c.ToolName
@@ -218,8 +187,8 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 					}
 				}
 			}
-			fText := tx.SemanticOscillation(tool, item.Explanation)
-			action := item.SuggestedBreakout
+			fText := tx.SemanticOscillation(tool, sanitizeMDStruct(item.Explanation))
+			action := sanitizeMDStruct(item.SuggestedBreakout)
 			if action == "" {
 				action = fText.Action
 			}
@@ -240,7 +209,10 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 
 // --- P1b.3: Long-term Goal Drift (E5) ----------------------------------------
 
-func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+// buildGoalDriftPack assembles the drift detector's evidence pack from j's
+// checkpoints — nil when j has no stated root intent, is too short to audit,
+// or would present fewer than two checkpoints.
+func buildGoalDriftPack(j *Journey) *GoalDriftEvidencePack {
 	intent := extractRootUserIntent(j)
 	if intent == "" {
 		return nil
@@ -271,11 +243,18 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	if len(checkpts) < 2 {
 		return nil
 	}
-	pack := GoalDriftEvidencePack{
+	return &GoalDriftEvidencePack{
 		RootUserIntent: intent,
 		Checkpoints:    checkpts,
 	}
-	res, err := Interpret(ctx, opts, pack, lang)
+}
+
+func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack := buildGoalDriftPack(j)
+	if pack == nil {
+		return nil
+	}
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -285,8 +264,8 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	}
 	if item.DriftDetected && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" && item.DriftStepSeq > 0 {
 		tx := i18n.StoryFindings(lang)
-		fText := tx.GoalDrift(item.DriftStepSeq, item.DriftExplanation)
-		action := item.SuggestedAction
+		fText := tx.GoalDrift(item.DriftStepSeq, sanitizeMDStruct(item.DriftExplanation))
+		action := sanitizeMDStruct(item.SuggestedAction)
 		if action == "" {
 			action = fText.Action
 		}
@@ -311,10 +290,11 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 
 // --- P1b.4: Compaction Constraint Dropped (E7) ------------------------------
 
-func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
-	steps := journeySteps(j)
+// buildConstraintPack assembles the compaction-constraint detector's
+// evidence pack from j's compaction excerpts — nil when there are none.
+func buildConstraintPack(j *Journey) *CompactionConstraintEvidencePack {
 	var excerpts []CompactionExcerpt
-	for _, s := range steps {
+	for _, s := range journeySteps(j) {
 		if s.Compaction != nil && s.Compaction.PredecessorTextExcerpt != "" {
 			excerpts = append(excerpts, CompactionExcerpt{
 				StepSeq:            s.Seq,
@@ -325,8 +305,15 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 	if len(excerpts) == 0 {
 		return nil
 	}
-	pack := CompactionConstraintEvidencePack{Excerpts: excerpts}
-	res, err := Interpret(ctx, opts, pack, lang)
+	return &CompactionConstraintEvidencePack{Excerpts: excerpts}
+}
+
+func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack := buildConstraintPack(j)
+	if pack == nil {
+		return nil
+	}
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -338,9 +325,9 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 	var findings []Finding
 	for _, item := range items {
 		if item.ConstraintLost && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
-			fText := tx.LLMConstraintDropped(item.EvidenceAnchor)
-			evidence := item.Explanation
-			action := item.SuggestedAction
+			fText := tx.LLMConstraintDropped(sanitizeMDStruct(item.EvidenceAnchor))
+			evidence := sanitizeMDStruct(item.Explanation)
+			action := sanitizeMDStruct(item.SuggestedAction)
 			if action == "" {
 				action = fText.Action
 			}
@@ -361,10 +348,15 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 
 // --- P1b.5: Plan Execution Misalignment (PCPC) ------------------------------
 
-func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+// buildPlanAuditPack assembles the plan-misalignment detector's evidence
+// pack — the plan baseline found in j's text plus the tool index to audit
+// against — and the seq of the Step where the baseline plan was announced
+// (the Finding's StepSeq). Pack is nil when no plan with enough items is
+// announced anywhere.
+func buildPlanAuditPack(j *Journey, lang i18n.Lang) (*PlanAuditEvidencePack, int) {
 	steps := journeySteps(j)
 	if len(steps) < 2 {
-		return nil
+		return nil, 0
 	}
 	var planItems []PlanItemAudit
 	var planStepSeq int
@@ -405,14 +397,20 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 		}
 	}
 	if len(planItems) == 0 {
+		return nil, 0
+	}
+	return &PlanAuditEvidencePack{
+		PlanItems:    planItems,
+		ActionsTaken: buildToolIndex(j, lang),
+	}, planStepSeq
+}
+
+func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack, planStepSeq := buildPlanAuditPack(j, lang)
+	if pack == nil {
 		return nil
 	}
-	toolIdx := buildToolIndex(j, lang)
-	pack := PlanAuditEvidencePack{
-		PlanItems:    planItems,
-		ActionsTaken: toolIdx,
-	}
-	res, err := Interpret(ctx, opts, pack, lang)
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -422,12 +420,12 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 	}
 	if item.HasMisalignment && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
 		tx := i18n.StoryFindings(lang)
-		fText := tx.PlanExecutionMisalignment(len(item.UnfulfilledItems), len(planItems))
-		evidence := item.Explanation
+		fText := tx.PlanExecutionMisalignment(len(item.UnfulfilledItems), len(pack.PlanItems))
+		evidence := sanitizeMDStruct(item.Explanation)
 		if evidence == "" {
 			evidence = fText.Evidence
 		}
-		action := item.SuggestedAction
+		action := sanitizeMDStruct(item.SuggestedAction)
 		if action == "" {
 			action = fText.Action
 		}
@@ -447,7 +445,11 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 
 // --- P1b.6: Unverified Completion Claim (E2) --------------------------------
 
-func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+// buildCompletionClaimPack assembles the unverified-completion-claim
+// detector's evidence pack from the final step's outcome plus the
+// verification/error trail — nil when there is no final response text to
+// audit.
+func buildCompletionClaimPack(j *Journey) *CompletionClaimEvidencePack {
 	steps := journeySteps(j)
 	if len(steps) == 0 {
 		return nil
@@ -474,13 +476,22 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 	}
 	truncOutcome, _ := truncateText(outcome, 2000)
 	truncReasoning, _ := truncateText(lastStep.Reasoning, 1000)
-	pack := CompletionClaimEvidencePack{
+	return &CompletionClaimEvidencePack{
 		FinalOutcome:          truncOutcome,
 		FinalReasoning:        truncReasoning,
 		VerificationCommands:  verifCmds,
 		UnresolvedErrorEvents: errEvents,
 	}
-	res, err := Interpret(ctx, opts, pack, lang)
+}
+
+func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) []Finding {
+	pack := buildCompletionClaimPack(j)
+	if pack == nil {
+		return nil
+	}
+	steps := journeySteps(j)
+	lastStepSeq := steps[len(steps)-1].Seq
+	res, err := Interpret(ctx, opts, *pack, lang)
 	if err != nil {
 		return nil
 	}
@@ -490,19 +501,20 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 	}
 	if strings.ToUpper(item.ClaimStatus) == "CLAIM_WITHOUT_VERIFICATION" && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
 		tx := i18n.StoryFindings(lang)
-		fText := tx.UnverifiedCompletionClaim(item.MissingVerification)
-		action := item.SuggestedAction
+		missing := sanitizeMDStruct(item.MissingVerification)
+		fText := tx.UnverifiedCompletionClaim(missing)
+		action := sanitizeMDStruct(item.SuggestedAction)
 		if action == "" {
 			action = fText.Action
 		}
 		return []Finding{{
 			Code:           FindingUnverifiedCompletionClaim,
-			StepSeq:        lastStep.Seq,
+			StepSeq:        lastStepSeq,
 			Source:         SourceLLMInferred,
 			Confidence:     ConfidenceHigh,
 			EvidenceAnchor: item.EvidenceAnchor,
 			Finding:        fText.Finding,
-			Evidence:       item.MissingVerification,
+			Evidence:       missing,
 			Action:         action,
 		}}
 	}
@@ -564,12 +576,22 @@ func searchableTranscript(j *Journey) (string, error) {
 }
 
 // anchoredInTranscript reports whether f cites an EvidenceAnchor that appears
-// verbatim in pool. An LLM detector that fabricates an anchor (a plausible
-// quote that was never in the transcript) would otherwise be promoted to a
-// HIGH-confidence [AI推测] Finding and fed back as established fact into the
-// next single-Journey interpretation pass — the whole "only anchor-backed
-// claims are HIGH" safety contract rests on this check, which until B3 lived
-// only in _eval/calibrate_p1b.go and was never enforced at runtime.
+// verbatim in pool. It is an anti-hallucination check and nothing more: it
+// proves the model quoted the transcript instead of inventing a plausible
+// quote. It is NOT an injection defense and must not be relied on as one —
+// the transcript's own author can plant the quoted text, so a verifying
+// anchor proves provenance, not trustworthiness. Injection containment
+// lives in ComputeLLMFindings' StepSeq bounds check and pickDriver's
+// SourceLLMInferred exclusion, never here.
+//
+// The pool also deliberately mixes authorship classes — model output, tool
+// results, tool-call arguments and (through the marshaled records it
+// appends) raw user input — because a streamed response's text survives
+// contiguously only in the reassembled fields while tool_result text is
+// visible only in the marshaled record. An anchor can therefore be
+// satisfied by user-authored text; narrowing the pool to
+// model-output/tool-result spans would require role-aware re-parsing of
+// those records and is not done — a documented limitation, not a guarantee.
 func anchoredInTranscript(f Finding, pool string) bool {
 	return f.EvidenceAnchor != "" && strings.Contains(pool, f.EvidenceAnchor)
 }
@@ -579,7 +601,11 @@ func anchoredInTranscript(f Finding, pool string) bool {
 // and only valid high-confidence findings are returned. Every surviving
 // finding's EvidenceAnchor is verified against the real transcript (B3) —
 // one that doesn't appear verbatim is dropped, however confident the model
-// claimed to be.
+// claimed to be. A finding whose StepSeq is not one of the Journey's real
+// step numbers is dropped too (never clamped — clamping would map an
+// attacker-chosen sequence onto a legitimate step), and every LLM-authored
+// text component is passed through sanitizeMDStruct before the Finding is
+// handed to any renderer.
 func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) ([]Finding, error) {
 	if !opts.Enabled() {
 		return nil, nil
@@ -594,12 +620,22 @@ func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i
 
 	var out []Finding
 	if len(raw) > 0 {
+		validStep := map[int]bool{}
+		for _, s := range journeySteps(j) {
+			validStep[s.Seq] = true
+		}
 		pool, err := searchableTranscript(j)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: journey %s: anchor verification pool incomplete (%v) — unverifiable findings dropped\n", j.ID, err)
 		}
 		for _, f := range raw {
+			if !validStep[f.StepSeq] {
+				continue
+			}
 			if anchoredInTranscript(f, pool) {
+				// only after verification: sanitizing first would break
+				// the anchor's verbatim-transcript match
+				f.EvidenceAnchor = sanitizeMDStruct(f.EvidenceAnchor)
 				out = append(out, f)
 			}
 		}
