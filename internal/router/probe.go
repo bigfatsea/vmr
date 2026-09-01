@@ -14,6 +14,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/core"
 	"vmr/internal/probe"
+	"vmr/internal/quota"
 )
 
 // probeBodyCap bounds how much of a probe's response body gets read — small
@@ -23,12 +24,14 @@ import (
 const probeBodyCap = 32 << 10
 
 // runProbe sends one probe.Request to ep and reports the outcome to the
-// health registry, exactly the way tryOne reports a real attempt's outcome.
-// The caller (Serve's candidate-building loop) has already claimed the
-// single-flight slot via Health.Acquire before launching this as a
+// health registry, exactly the way tryOne reports a real attempt's outcome
+// — except that a probe's 2xx is the weaker ReportProbeSuccess (decay, not
+// clear): see internal/health's ReportProbeSuccess for why. The caller
+// (Serve's candidate-building loop, via Classify's needsProbe return) has
+// already claimed the single-flight slot before launching this as a
 // goroutine — runProbe's only job is to make sure that claim always resolves
-// via ReportSuccess/ReportFailure/ReportNeutral, whatever happens, or the
-// endpoint would stay locked in "probing" forever (see Acquire's doc
+// via ReportProbeSuccess/ReportFailure/ReportNeutral, whatever happens, or
+// the endpoint would stay locked in "probing" forever (see Acquire's doc
 // comment in internal/health/health.go).
 func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	key := ep.HealthKey()
@@ -86,6 +89,13 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		return
 	}
 	defer resp.Body.Close()
+	// A probe consumes one real upstream request; charge it so request-
+	// metered accounts don't accrue usage the local ledger never sees.
+	// Token/cost limits get zero counters: the probe's usage is not parsed
+	// here (its whole response is capped at probeBodyCap), and undercounting
+	// a few dozen tokens is the honest bound. nil-safe when no quota
+	// Registry is wired up or the endpoint carries no quota, like chargeQuota.
+	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, time.Now())
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, probeBodyCap))
 
 	if resp.StatusCode >= 400 {
@@ -107,12 +117,15 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		return
 	}
 
-	// 2xx: the endpoint answered — that alone is enough to mark it healthy
-	// again. Whether it echoed the nonce is logged for observability only;
-	// it never turns a reachable, responding endpoint back into a failure.
-	// Deliberately more lenient than `vmr diagnose`, which does warn on a
-	// missing echo — diagnose is a one-shot human check, this is a
-	// background health signal that must not flap on a borderline vendor.
-	rt.Health.ReportSuccess(key)
+	// 2xx: the endpoint answered — that alone is enough to let it out of
+	// cooldown, but only as probe-evidence: ReportProbeSuccess decays fails
+	// by one instead of clearing, so a flapping endpoint's backoff survives
+	// the small request that passes where real traffic fails. Whether it
+	// echoed the nonce is logged for observability only; it never turns a
+	// reachable, responding endpoint back into a failure. Deliberately more
+	// lenient than `vmr diagnose`, which does warn on a missing echo —
+	// diagnose is a one-shot human check, this is a background health signal
+	// that must not flap on a borderline vendor.
+	rt.Health.ReportProbeSuccess(key)
 	rt.logf("%s, status=%d, echoed=%v, dur=%s", logPrefix, resp.StatusCode, probe.Echoed(respBody, nonce), fmtDur(dur))
 }

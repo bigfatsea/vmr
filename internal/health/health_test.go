@@ -2,6 +2,7 @@
 package health
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,33 +11,36 @@ import (
 
 var t0 = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
 
+// wantJitter asserts d is within backoff's ±10% jitter bounds around want.
+// backoff is deliberately jittered (R12), so cooldown assertions must be
+// ranges, never exact values.
+func wantJitter(t *testing.T, what string, d, want time.Duration) {
+	t.Helper()
+	if d < want-want/10 || d > want+want/10 {
+		t.Errorf("%s: got %v, want %v ±10%%", what, d, want)
+	}
+}
+
 func TestTransientBackoffCurve(t *testing.T) {
 	t.Parallel()
 	r := New()
 	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	for i, w := range want {
-		if got := r.ReportFailure("e", core.ErrTransient, 0, t0); got != w {
-			t.Errorf("failure #%d: cooldown %v, want %v", i+1, got, w)
-		}
+		got := r.ReportFailure("e", core.ErrTransient, 0, t0)
+		wantJitter(t, fmt.Sprintf("failure #%d", i+1), got, w)
 	}
 	// Cap at 5min.
 	for i := 0; i < 20; i++ {
 		r.ReportFailure("e", core.ErrTransient, 0, t0)
 	}
-	if got := r.ReportFailure("e", core.ErrTransient, 0, t0); got != 5*time.Minute {
-		t.Errorf("cap: %v", got)
-	}
+	wantJitter(t, "cap", r.ReportFailure("e", core.ErrTransient, 0, t0), 5*time.Minute)
 }
 
 func TestAuthAndEndpointLongCooldown(t *testing.T) {
 	t.Parallel()
 	r := New()
-	if got := r.ReportFailure("a", core.ErrAuth, 0, t0); got != 10*time.Minute {
-		t.Errorf("auth cooldown: %v", got)
-	}
-	if got := r.ReportFailure("b", core.ErrEndpoint, 0, t0); got != 10*time.Minute {
-		t.Errorf("endpoint cooldown: %v", got)
-	}
+	wantJitter(t, "auth cooldown", r.ReportFailure("a", core.ErrAuth, 0, t0), 10*time.Minute)
+	wantJitter(t, "endpoint cooldown", r.ReportFailure("b", core.ErrEndpoint, 0, t0), 10*time.Minute)
 }
 
 func TestRetryAfterHonored(t *testing.T) {
@@ -70,9 +74,7 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 	}
 
 	// Probe fails → deeper cooldown, probe slot released.
-	if got := r.ReportFailure("e", core.ErrTransient, 0, after); got != 4*time.Second {
-		t.Errorf("probe failure should deepen backoff: %v", got)
-	}
+	wantJitter(t, "probe failure deepens backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
 	if r.Acquire("e", after.Add(1*time.Second)) {
 		t.Error("must be cooling down again after failed probe")
 	}
@@ -146,9 +148,7 @@ func TestReportNeutralReleasesProbeOnly(t *testing.T) {
 	}
 	// …and failure count was not deepened: a subsequent failure backs off to
 	// 4s (fails=2), not 8s (which fails=3 would give).
-	if got := r.ReportFailure("e", core.ErrTransient, 0, after); got != 4*time.Second {
-		t.Errorf("neutral must not deepen backoff: %v", got)
-	}
+	wantJitter(t, "neutral must not deepen backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
 }
 
 func TestSuccessResets(t *testing.T) {
@@ -158,9 +158,7 @@ func TestSuccessResets(t *testing.T) {
 		r.ReportFailure("e", core.ErrTransient, 0, t0)
 	}
 	r.ReportSuccess("e")
-	if got := r.ReportFailure("e", core.ErrTransient, 0, t0); got != 2*time.Second {
-		t.Errorf("backoff should reset after success: %v", got)
-	}
+	wantJitter(t, "backoff should reset after success", r.ReportFailure("e", core.ErrTransient, 0, t0), 2*time.Second)
 }
 
 func TestStatus(t *testing.T) {
@@ -240,5 +238,187 @@ func TestRetryAfterCappedAtOneHour(t *testing.T) {
 	}
 	if !r.Available("e", t0.Add(time.Hour+time.Second)) {
 		t.Error("should be half-open after the capped cooldown expires")
+	}
+}
+
+// TestCurveSwitchResetsFailureDepth pins R04: fails counts consecutive
+// failures under the *current* backoff curve. Five transient failures leave
+// the transient curve at depth 5 (32s), but the first auth failure must
+// start the long curve at its base — the old shared counter took that 401
+// at depth 6, straight to the 1h cap. Same in the other direction.
+func TestCurveSwitchResetsFailureDepth(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for i := 0; i < 5; i++ {
+		r.ReportFailure("e", core.ErrTransient, 0, t0)
+	}
+	wantJitter(t, "first auth after 5 transient failures", r.ReportFailure("e", core.ErrAuth, 0, t0), 10*time.Minute)
+	if got := r.ReportFailure("e", core.ErrAuth, 0, t0); got >= time.Hour {
+		t.Errorf("auth run should deepen from 10min, not start near the cap: %v", got)
+	}
+	wantJitter(t, "first transient after auth run", r.ReportFailure("e", core.ErrTransient, 0, t0), 2*time.Second)
+}
+
+// TestSameCurveStillDeepens is the regression half of R04: within one curve
+// the depth is preserved across the switch-reset change.
+func TestSameCurveStillDeepens(t *testing.T) {
+	t.Parallel()
+	r := New()
+	wantJitter(t, "fail 1", r.ReportFailure("e", core.ErrAuth, 0, t0), 10*time.Minute)
+	wantJitter(t, "fail 2", r.ReportFailure("e", core.ErrAuth, 0, t0), 20*time.Minute)
+	wantJitter(t, "fail 3", r.ReportFailure("e", core.ErrEndpoint, 0, t0), 40*time.Minute)
+}
+
+// TestProbeSuccessDecaysNotClears pins R05: a probe's 2xx is weaker
+// evidence than real traffic completing, so it decays fails by one instead
+// of zeroing them; only a real ReportSuccess clears.
+func TestProbeSuccessDecaysNotClears(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for i := 0; i < 3; i++ {
+		r.ReportFailure("e", core.ErrTransient, 0, t0)
+	}
+	r.ReportProbeSuccess("e")
+	if st := r.Status("e", t0); st.Fails != 2 {
+		t.Fatalf("probe success must decay fails to 2, got %d", st.Fails)
+	}
+	// The endpoint left cooldown but stays half-open: real traffic still
+	// isn't served until the count reaches zero.
+	if st := r.Status("e", t0); st.Serving {
+		t.Error("decayed endpoint must stay half-open (Serving=false)")
+	}
+	r.ReportSuccess("e")
+	if st := r.Status("e", t0); st.Fails != 0 || !st.Serving {
+		t.Fatalf("real success must clear fails: %+v", st)
+	}
+}
+
+// TestFlappingEndpointKeepsBackoff pins R05's acceptance scenario: with
+// probe successes and real failures alternating, the depth never returns to
+// zero (no real success ever lands), so the cooldown never falls back to
+// the shallowest step. The old clear-on-probe behavior reset a flapping
+// endpoint to 2s forever.
+func TestFlappingEndpointKeepsBackoff(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for i := 0; i < 3; i++ {
+		r.ReportFailure("e", core.ErrTransient, 0, t0)
+	}
+	for i := 0; i < 5; i++ {
+		r.ReportProbeSuccess("e")
+		if st := r.Status("e", t0); st.Fails < 1 {
+			t.Fatalf("iter %d: probe success cleared the failure depth", i)
+		}
+		got := r.ReportFailure("e", core.ErrTransient, 0, t0)
+		if got < 4*time.Second {
+			t.Fatalf("iter %d: cooldown %v fell back to the shallowest step", i, got)
+		}
+	}
+}
+
+// TestReleaseProbeReturnsSlotWithoutVerdict pins ReleaseProbe's contract:
+// the slot is handed back, but the pending failure depth and cooldown are
+// untouched — no verdict was implied.
+func TestReleaseProbeReturnsSlotWithoutVerdict(t *testing.T) {
+	t.Parallel()
+	r := New()
+	r.ReportFailure("e", core.ErrTransient, 0, t0) // fails=1, 2s cooldown
+	after := t0.Add(3 * time.Second)               // half-open
+	if !r.Acquire("e", after) {
+		t.Fatal("should win probe slot")
+	}
+	r.ReleaseProbe("e")
+	if st := r.Status("e", after); st.Probing {
+		t.Error("probe slot must be released")
+	}
+	if st := r.Status("e", after); st.Fails != 1 {
+		t.Errorf("ReleaseProbe must not touch fails, got %d", st.Fails)
+	}
+	if r.Available("e", t0.Add(1*time.Second)) {
+		t.Error("ReleaseProbe must not clear the cooldown")
+	}
+	// A later verdict still lands on the untouched state: this failure
+	// deepens to 4s (fails=2), not 8s (which a phantom extra failure would
+	// give) — and it's not a curve switch, since nothing re-classified.
+	wantJitter(t, "failure after released probe", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
+}
+
+// TestAllDeclaredErrorClassesHaveExplicitCurve pins S4's enumeration: every
+// ErrorClass declared in core is asserted against its curve. A class added
+// to core must be added to both this list and ReportFailure's explicit
+// switch — the switch's default branch is out-of-enum values only.
+func TestAllDeclaredErrorClassesHaveExplicitCurve(t *testing.T) {
+	t.Parallel()
+	long := map[core.ErrorClass]bool{core.ErrAuth: true, core.ErrEndpoint: true}
+	for _, class := range []core.ErrorClass{
+		core.ErrClient,
+		core.ErrAuth,
+		core.ErrRateLimit,
+		core.ErrEndpoint,
+		core.ErrTransient,
+		core.ErrContent,
+		core.ErrContextLimit,
+		core.ErrQuirk,
+	} {
+		r := New()
+		got := r.ReportFailure("e", class, 0, t0)
+		if long[class] && got < 10*time.Minute-10*time.Minute/10 {
+			t.Errorf("%v: cooldown %v, want the long curve", class, got)
+		}
+		if !long[class] && got > 5*time.Minute+5*time.Minute/10 {
+			t.Errorf("%v: cooldown %v, want the transient curve", class, got)
+		}
+	}
+}
+
+// TestPruneRemovesOrphans pins health.Registry.Prune: state for keys not in
+// keep is dropped, kept keys survive untouched.
+func TestPruneRemovesOrphans(t *testing.T) {
+	t.Parallel()
+	r := New()
+	r.ReportFailure("keep", core.ErrRateLimit, time.Minute, t0)
+	r.ReportFailure("drop", core.ErrRateLimit, time.Minute, t0)
+	if n := r.Prune(map[string]bool{"keep": true}); n != 1 {
+		t.Fatalf("pruned=%d, want 1", n)
+	}
+	if r.Available("keep", t0) {
+		t.Error("kept key must survive prune with its cooldown")
+	}
+	if !r.Available("drop", t0) || r.Status("drop", t0).Fails != 0 {
+		t.Error("pruned key must behave like never-seen")
+	}
+	if n := r.Prune(map[string]bool{"keep": true}); n != 0 {
+		t.Errorf("second prune removed %d, want 0", n)
+	}
+}
+
+// TestMonotonicClockSemantics locks S3's three properties: cooldown
+// arithmetic goes through the monotonic clock (ReportFailure's now.Add
+// preserves the reading, Before compares monotonically), and a zero-value
+// cooldownUntil never blocks — even against a wall-clock-only timestamp far
+// in the past.
+func TestMonotonicClockSemantics(t *testing.T) {
+	t.Parallel()
+	r := New()
+	now := time.Now() // carries a monotonic reading
+	r.ReportFailure("e", core.ErrRateLimit, 20*time.Millisecond, now)
+	if r.Available("e", now) {
+		t.Error("cooldown must be active at the failure instant itself")
+	}
+	if r.Available("e", time.Now()) {
+		t.Error("cooldown must still be active immediately after")
+	}
+	time.Sleep(30 * time.Millisecond)
+	if !r.Available("e", time.Now()) {
+		t.Error("cooldown must expire by monotonic time")
+	}
+	r.ReportSuccess("e")
+	// t0 is a wall-clock-only timestamp in the past; a zero cooldownUntil
+	// must never compare as "in the future" against anything.
+	if !r.Available("e", t0) {
+		t.Error("zero cooldownUntil must never block")
+	}
+	if st := r.Status("e", t0); !st.Available || !st.CooldownUntil.IsZero() {
+		t.Errorf("zero cooldownUntil must not surface in Status: %+v", st)
 	}
 }

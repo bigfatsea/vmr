@@ -464,11 +464,16 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 // response normalizer. From the first byte written the response is
 // committed — no failover past this point, so this always returns
 // done=true, success=true.
+//
+// The half-open probe slot is released up front (ReleaseProbe), and the
+// health verdict itself waits until the stream's true outcome is known
+// (reportStreamOutcome): a 200 header followed by a mid-stream cut is the
+// relay layer's most common failure shape, and reporting success before the
+// first byte made it invisible to the health state machine entirely.
 func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *http.Response, creq *core.CanonicalRequest,
 	ep *core.Endpoint, att *audit.Attempt, logPrefix string, snap *Snapshot, attempt int, start time.Time, key string, healthReported *bool) (done bool, uerr *upstreamError, success bool) {
 
-	rt.Health.ReportSuccess(key)
-	*healthReported = true
+	rt.Health.ReleaseProbe(key)
 	// Body omitted: the client-facing response body is recorded by the
 	// server layer, and this attempt records only the headers. It is not
 	// byte-identical to the upstream's — model rewrite, [DONE] completion
@@ -527,6 +532,8 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 		status = "TRUNCATED" // upstream died mid-stream; the response is already committed
 		att.SetTruncated(copyErr)
 	}
+	rt.reportStreamOutcome(key, status)
+	*healthReported = true
 	// Charged here regardless of copyErr — a truncated response still
 	// consumed whatever tokens actually reached the client (see
 	// chargeQuota's doc comment); nil-safe when no quota.Registry is wired
@@ -561,6 +568,23 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 		panic(http.ErrAbortHandler)
 	}
 	return true, nil, true
+}
+
+// reportStreamOutcome turns a finished (or aborted) stream's outcome into
+// the health verdict forwardSuccess deferred until the stream ended: a full
+// response is a real success; a mid-stream cut is transient-failure
+// evidence even though the 200 was already committed and failover can no
+// longer react to it; a client-side cancel says nothing about the endpoint
+// and must not deepen the backoff.
+func (rt *Router) reportStreamOutcome(key, status string) {
+	switch status {
+	case "OK":
+		rt.Health.ReportSuccess(key)
+	case "TRUNCATED":
+		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+	default: // CANCELED
+		rt.Health.ReportNeutral(key)
+	}
 }
 
 func parseRetryAfter(h http.Header) time.Duration {
