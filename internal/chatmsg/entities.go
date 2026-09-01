@@ -63,7 +63,7 @@ func ExtractEntities(text string) []string {
 // marker) use this so a token elsewhere in the same blob — a path named in
 // a design doc that merely discusses 404 handling, a stdlib type in an
 // unrelated code snippet — is not treated as the thing that phrase reported
-// missing. Empty anchors returns nil. See ANALYZE_SAMPLE_REPORTS_REVIEW 问题 11.
+// missing. Empty anchors returns nil.
 func ExtractEntitiesNear(text string, anchors [][]int, window int) []string {
 	if len(anchors) == 0 {
 		return nil

@@ -244,7 +244,7 @@ var falsificationRe = regexp.MustCompile(`(?i)ENOENT|not found|404|no such file|
 // behavior) turned any tool result whose text mentioned "not found"
 // anywhere — a design doc paragraph on 404 handling, a compiler diagnostic,
 // a grep that missed — into a falsification of every path/type/symbol in
-// the blob. See ANALYZE_SAMPLE_REPORTS_REVIEW 问题 11.
+// the blob.
 const falsificationWindowBytes = 160
 
 // detectUnverifiedEntityReference flags an entity a tool result reported as

@@ -45,8 +45,7 @@ func findingLevel(c FindingCode) string {
 // "证伪"). It still counts toward the severity LEVEL; JourneySeverity just
 // skips it when choosing the driver unless it is the only finding at that
 // level, so the dashboard's "probable cause" headline points at a more
-// specific finding whenever one exists. See ANALYZE_SAMPLE_REPORTS_REVIEW
-// 问题 2 / 问题 11.
+// specific finding whenever one exists.
 var lowConfidenceFindings = map[FindingCode]bool{
 	FindingUnverifiedEntityReference: true,
 }
