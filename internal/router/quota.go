@@ -166,19 +166,27 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 // estimated_pct, the one signal /status gives an operator for how
 // much to trust a token-metered account's numbers.
 func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
-	u, sniffed := rbody.Usage()
+	// Usage() ok alone is not the exact-vs-degraded signal: a stream
+	// truncated after Anthropic's message_start has real INPUT usage but
+	// only the ~1 placeholder output — billing that as exact would write
+	// out≈1 into the ledger with estimated=0, poisoning estimated_pct, the
+	// operator's only trust signal. The per-side flags decide (R46).
+	u, _ := rbody.Usage()
+	inSniffed, outSniffed := rbody.UsageSides()
 	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
 	// server/facts.go — zero extra cost here); response-side comes from
 	// rbody.OutTokens() (respnorm.go), which returns 0 for opaque responses.
-	return TokenCounters(u, sniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
+	return TokenCountersSides(u, inSniffed, outSniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
 }
 
-// TokenCounters turns one response's usage into the raw four-component
-// counters ChargeResponse charges, plus how much of that total came from a
-// degraded estimate (0 when exact). sniffed reports whether u came from an
-// actual upstream usage object; when it didn't, inEst/outEst — token
-// estimates the caller derived however it can — are charged instead.
+// TokenCounters turns one response's COMPLETE usage into the raw four-
+// component counters ChargeResponse charges, plus how much of that total
+// came from a degraded estimate (0 when exact). sniffed reports whether u is
+// a complete upstream usage object — BOTH sides of the ledger present; a
+// caller that can only say "some usage was seen" must use TokenCountersSides
+// instead, because partial usage (real input, placeholder output) billed as
+// exact is precisely the failure TokenCountersSides exists to prevent.
 //
 // Exported, and factored out of tokenCharge, because this exact-vs-degraded
 // decision had grown THREE independent implementations: this one,
@@ -189,13 +197,23 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 // format and quota.BaseAmount were each collapsed to one implementation to
 // avoid — and it is specifically what cmd/vmr/quota_parity_test.go exists to
 // catch, so that test must drive THIS function rather than re-deriving it.
-//
-// The degraded branch charges everything to Fresh/Out: it cannot tell cache
-// hits apart, and assuming none is the safe direction — it overestimates
-// consumption rather than silently crediting a cache discount that may not
-// have happened (see the design doc's Metering section).
 func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
-	if sniffed {
+	return TokenCountersSides(u, sniffed, sniffed, inEst, outEst)
+}
+
+// TokenCountersSides is TokenCounters' side-aware form — the canonical
+// implementation of the exact-vs-degraded rule. inSniffed/outSniffed report
+// whether each side of the usage ledger was actually parsed; a missing side
+// falls back to the caller's estimate for that side (max'd with whatever the
+// usage object did claim — a placeholder must never beat real emitted-text
+// evidence), and the estimated share is reported honestly as the portion of
+// the charge that came from an estimate, never 0 just because SOME usage was
+// seen. The degraded In side charges everything to Fresh: it cannot tell
+// cache hits apart, and assuming none is the safe direction — it
+// overestimates consumption rather than silently crediting a cache discount
+// that may not have happened (see the design doc's Metering section).
+func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outEst int64) (quota.Counters, float64) {
+	if inSniffed && outSniffed {
 		return quota.Counters{
 			Fresh:      float64(u.Fresh()),
 			CacheRead:  float64(u.CacheRead),
@@ -203,7 +221,24 @@ func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Co
 			Out:        float64(u.Out),
 		}, 0
 	}
-	return quota.Counters{Fresh: float64(inEst), Out: float64(outEst)}, float64(inEst + outEst)
+	var c quota.Counters
+	var est float64
+	if inSniffed {
+		c.Fresh = float64(u.Fresh())
+		c.CacheRead = float64(u.CacheRead)
+		c.CacheWrite = float64(u.CacheWrite)
+	} else {
+		c.Fresh = float64(inEst)
+		est += float64(inEst)
+	}
+	if outSniffed {
+		c.Out = float64(u.Out)
+	} else {
+		out := max(u.Out, outEst)
+		c.Out = float64(out)
+		est += float64(out)
+	}
+	return c, est
 }
 
 // QuotaProviderStatus is one (provider, Limit) pair's live state, for
