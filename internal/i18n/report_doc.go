@@ -16,7 +16,12 @@ type DocText struct {
 	// corpus the raw list was ~1.7k chars twice (here and the appendix).
 	MetaInputSummary   func(n int) string
 	MetaInputListLabel string
-	DetailLinkLine     string
+	// MetaReportConfig names the report.yaml this run applied, or says
+	// plainly that none was loaded — the "no file" case is the one worth
+	// printing: a report.yaml the run never found looks exactly like a run
+	// that was never meant to have one.
+	MetaReportConfig func(path string) string
+	DetailLinkLine   string
 	// StoriesLinkLine is the "vmr-report.md → stories/vmr-stories.md"
 	// edge (P6.2a) — path is relative to vmr-report.md itself.
 	StoriesLinkLine func(path string, journeyCount int, from, to string) string
@@ -72,7 +77,13 @@ func Doc(lang Lang) DocText {
 			},
 			MetaInputSummary:   func(n int) string { return strconv.Itoa(n) + " 个文件" },
 			MetaInputListLabel: "文件清单",
-			DetailLinkLine:     "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
+			MetaReportConfig: func(path string) string {
+				if path == "" {
+					return "配置: 未加载 report.yaml（全部取命令行/内置默认值，自流量排除未启用）"
+				}
+				return "配置: " + path
+			},
+			DetailLinkLine: "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
 			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
 			},
@@ -143,7 +154,13 @@ func Doc(lang Lang) DocText {
 		},
 		MetaInputSummary:   func(n int) string { return strconv.Itoa(n) + " files" },
 		MetaInputListLabel: "File list",
-		DetailLinkLine:     "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
+		MetaReportConfig: func(path string) string {
+			if path == "" {
+				return "Config: no report.yaml loaded (flag/built-in defaults only; self-traffic exclusion off)"
+			}
+			return "Config: " + path
+		},
+		DetailLinkLine: "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
 		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
 		},

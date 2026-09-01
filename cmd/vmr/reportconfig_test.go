@@ -150,6 +150,13 @@ func TestResolveReportConfig_EmptyDefaultFileIsSilent(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	rc := resolveReportConfig("", &buf)
+	// SourcePath is provenance, not a setting: an empty report.yaml that
+	// exists WAS the applied config, and the report header says so. Every
+	// actual setting must still be zero.
+	if rc.SourcePath != defaultReportConfigFile {
+		t.Errorf("SourcePath = %q, want %q — an empty file that exists is still the applied config", rc.SourcePath, defaultReportConfigFile)
+	}
+	rc.SourcePath = ""
 	if !reflect.DeepEqual(rc, reportConfig{}) {
 		t.Errorf("expected zero-value reportConfig for an empty report.yaml, got %+v", rc)
 	}

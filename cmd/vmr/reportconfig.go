@@ -62,6 +62,12 @@ type reportConfig struct {
 	// is meant to stand alone); when config.yaml IS reachable, entries here
 	// win over its pricing.exchange_rate on a matching key.
 	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
+
+	// SourcePath is the file these settings came from, empty when no
+	// report.yaml was loaded at all. Not a YAML key — resolveReportConfig
+	// fills it so the report can name its own configuration source (see
+	// report.Meta.ReportConfigPath).
+	SourcePath string `yaml:"-"`
 }
 
 // defaultReportConfigFile is the cwd-relative path auto-loaded when
@@ -159,6 +165,7 @@ func resolveReportConfigErr(reportConfigPath string) (reportConfig, error) {
 	}
 	rc, err := loadReportConfig(reportConfigPath)
 	if err == nil {
+		rc.SourcePath = reportConfigPath
 		return rc, nil
 	}
 	if !explicit && os.IsNotExist(err) {

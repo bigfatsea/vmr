@@ -222,6 +222,7 @@ type reportRunOpts struct {
 	displayCCY        string
 	exchangeRate      map[string]float64
 	excludeClientTags map[string]bool
+	reportConfigPath  string
 }
 
 // runReport executes vmr report's full pipeline — session analysis,
@@ -291,6 +292,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 		rep.Meta.QuotaJSONPath = quotaJSONPath
 		rep.Meta.QuotaInputOutsideLogDir = allPathsOutsideDir(paths, cfg.LogDir)
 	}
+	rep.Meta.ReportConfigPath = opts.reportConfigPath
 	rep.Meta.DetailsEnabled = detailsPresentFor(opts.detailsOn, detailDir) // see its own doc comment
 	report.LocalizeEfficiency(rep, opts.lang)
 	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
@@ -419,5 +421,6 @@ func cmdReport(args []string) error {
 		displayCCY:         resolveString(*currencyFlag, rc.Currency, ""),
 		exchangeRate:       rc.ExchangeRate,
 		selfTrafficTags:    rc.SelfTrafficClientTags,
+		reportConfigSource: rc.SourcePath,
 	})
 }

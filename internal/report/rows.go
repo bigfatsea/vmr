@@ -93,6 +93,16 @@ type Meta struct {
 	// half's own disclosure on the same run).
 	SelfTrafficExclusionActive bool `json:"self_traffic_exclusion_active,omitempty"`
 
+	// ReportConfigPath is the report.yaml (or -report-config) file whose
+	// settings this run actually applied, empty when none was loaded — the
+	// same kind of composition-root fact as QuotaJSONPath below, set on rep
+	// after Build returns. A report.yaml that was never found (run from the
+	// wrong cwd, or a stale -report-config path) is otherwise invisible:
+	// the run just falls back to flag defaults, and self-traffic exclusion
+	// in particular fails open with nothing on the durable artifact to say
+	// so. stderr can't carry this — the report is what gets kept and read
+	// later.
+	ReportConfigPath string `json:"report_config_path,omitempty"`
 	// QuotaJSONPath/QuotaInputOutsideLogDir are cmd_report.go's
 	// composition-root facts about §2.5's live-quota counter, set on rep
 	// AFTER Build/BuildCached returns (report itself never imports config,

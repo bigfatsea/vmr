@@ -2,10 +2,12 @@
 package report
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
 )
 
 // TestFmtDisplayFullConvertsToDisplayZone proves fmtDisplayFull (used by
@@ -56,5 +58,25 @@ func TestFmtDisplayFullUsesSpaceSeparator(t *testing.T) {
 	got := fmtDisplayFull(in)
 	if got != want {
 		t.Errorf("fmtDisplayFull(%q) = %q, want %q (space separator, not RFC3339 T)", in, got, want)
+	}
+}
+
+// The report is the durable artifact; stderr is not. A run that never found
+// its report.yaml (wrong cwd, stale -report-config) otherwise looks exactly
+// like a run that was never meant to have one — and the difference matters,
+// because self-traffic exclusion silently fails open in the first case.
+func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
+	base := &Report2{Meta: Meta{Format: Format, Inputs: []string{"a.jsonl"}}}
+	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
+		loaded := *base
+		loaded.Meta.ReportConfigPath = "/etc/vmr/report.yaml"
+		if md := Markdown(&loaded, lang, nil, nil); !strings.Contains(md, "/etc/vmr/report.yaml") {
+			t.Errorf("lang=%v: loaded report.yaml path missing from the meta header", lang)
+		}
+		absent := *base
+		md := Markdown(&absent, lang, nil, nil)
+		if strings.Contains(md, "report.yaml)") || !strings.Contains(md, i18n.Doc(lang).MetaReportConfig("")) {
+			t.Errorf("lang=%v: 'no report.yaml loaded' must still say so explicitly:\n%s", lang, md)
+		}
 	}
 }

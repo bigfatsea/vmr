@@ -88,7 +88,11 @@ type analyzeRun struct {
 	displayCCY      string
 	exchangeRate    map[string]float64
 	selfTrafficTags []string
-	showUngrouped   bool
+	// reportConfigSource is the report.yaml these settings came from, empty
+	// when none was loaded — carried through so the macro report can name
+	// its own configuration source (report.Meta.ReportConfigPath).
+	reportConfigSource string
+	showUngrouped      bool
 	// htmlOn/redactOn (E1): -journey only, single match only — a
 	// self-contained HTML view of one journey, optionally with every
 	// conversation body swapped for a length placeholder. Same "one journey
@@ -245,20 +249,21 @@ func cmdAnalyze(args []string) error {
 			llmOpts.CacheDir = llmCacheDir
 			return llmOpts, nil
 		},
-		corpusFlag:      *corpusFlag,
-		compareArg:      *compareArg,
-		journeyArg:      *journeyArg,
-		renderAllFlag:   *renderAllFlag,
-		macroOnly:       *macroOnlyFlag,
-		listOnly:        *listOnlyFlag,
-		storyOnly:       *storyOnlyFlag,
-		detailsOn:       resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
-		displayCCY:      resolveString(*currencyFlag, rc.Currency, ""),
-		exchangeRate:    rc.ExchangeRate,
-		selfTrafficTags: rc.SelfTrafficClientTags,
-		showUngrouped:   *showUngrouped,
-		htmlOn:          *htmlFlag,
-		redactOn:        *redactFlag,
+		corpusFlag:         *corpusFlag,
+		compareArg:         *compareArg,
+		journeyArg:         *journeyArg,
+		renderAllFlag:      *renderAllFlag,
+		macroOnly:          *macroOnlyFlag,
+		listOnly:           *listOnlyFlag,
+		storyOnly:          *storyOnlyFlag,
+		detailsOn:          resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
+		displayCCY:         resolveString(*currencyFlag, rc.Currency, ""),
+		exchangeRate:       rc.ExchangeRate,
+		selfTrafficTags:    rc.SelfTrafficClientTags,
+		reportConfigSource: rc.SourcePath,
+		showUngrouped:      *showUngrouped,
+		htmlOn:             *htmlFlag,
+		redactOn:           *redactFlag,
 	})
 }
 
@@ -379,6 +384,7 @@ func runReportHalf(r *analyzeRun) error {
 		displayCCY:        r.displayCCY,
 		exchangeRate:      r.exchangeRate,
 		excludeClientTags: excludeClientTags,
+		reportConfigPath:  r.reportConfigSource,
 	}); err != nil {
 		return fmt.Errorf("analyze (report half): %w", err)
 	}
