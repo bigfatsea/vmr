@@ -21,6 +21,30 @@ import (
 // about a record's degraded tokens at compile time, not by a comment's
 // promise.
 //
+// Degraded basis rule — the one authority for both sides' fallbacks:
+// estimate content tokens from the most faithful representation available;
+// degrade fidelity, never kind. Bytes that measure something other than
+// content (SSE envelopes, compressed or mangled opaque bodies) must yield
+// 0 — a wrong quantity is worse than no estimate — and each side must
+// mirror the basis the router actually charged. Applied to the two sides'
+// different information states this yields a deliberate FALLBACK ASYMMETRY:
+//
+//   - Request side (EstimateBodyTokens): raw-byte fallback is correct. The
+//     client's plain JSON IS the content plus scaffolding, and the router's
+//     input charge (Facts.EstimatedTokens, see internal/server/facts.go) is
+//     raw-bytes based — falling back to 0 would make reports diverge from
+//     what quota actually deducted.
+//   - Response side (EstimateResponseBodyTokens): no raw fallback, 0
+//     instead. The router's outTokenMeter never counted envelope bytes, and
+//     for truncated/opaque responses the raw bytes measure transport, not
+//     generation — the Q04 71x inflation. Falling back to raw would
+//     reintroduce it.
+//
+// The asymmetry is behavior, pinned by
+// TestEstimateDegradedBasis_FallbackAsymmetry; do not "unify" it without
+// overturning this rule. The aligned cases (extractable text on both sides,
+// opaque on both sides) are pinned by TestQuotaParity_StreamingSSE_DegradedEstimateBasis.
+//
 // respBody is the client-side response body, or nil when there is no
 // response to estimate from (a response with no usage still has a body to
 // estimate over; a nil response contributes 0). The output side mirrors the

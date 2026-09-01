@@ -20,7 +20,7 @@ import (
 )
 
 // selfTrafficExcludeTags builds the exclusion set: audit.KeyTag(llmKey) —
-// the SAME transform internal/server's authenticate() applies to every
+// the SAME transform internal/server's authenticateWithSnap() applies to every
 // configured api_keys entry, so this reproduces exactly the client_key_tag
 // a self-analysis call carries in the audit log — plus any explicitly
 // configured report.yaml self_traffic_client_tags (for the edge case where

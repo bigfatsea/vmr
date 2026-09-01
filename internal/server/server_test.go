@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"vmr/internal/router"
 )
 
 func TestFailoverOn5xxAndModelRewrite(t *testing.T) {
@@ -493,6 +495,23 @@ func TestAdminStatus(t *testing.T) {
 			if !ep.Available {
 				t.Errorf("p2 should be available: %+v", ep)
 			}
+		}
+	}
+}
+
+// P1: the auth middleware guards the non-chat endpoints and is the outermost
+// layer that dereferences the snapshot there — a nil snapshot (router.New
+// before the first Install) must 503 at this layer, not panic one frame
+// deeper in authenticateWithSnap. Mirrors chatHandler's entry defense (Q15).
+// 503, not 401: the credential isn't the problem, the router isn't up yet.
+func TestAuth_NilSnapshotReturns503(t *testing.T) {
+	srv := New(router.New(nil), nil)
+	for _, path := range []string{"/v1/models", "/status", "/log"} {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("GET %s with nil snapshot = %d, want 503", path, w.Code)
 		}
 	}
 }

@@ -292,14 +292,10 @@ func extractResponseTextFromString(s string) string {
 	return s
 }
 
-// EstimateBodyTokens computes the degraded token estimate for a REQUEST body
-// by extracting only the actual content/text (message content, reasoning,
-// tool calls) and excluding protocol envelopes, SSE prefixes ("data:"), and
-// JSON structural framing. The raw-byte fallback matches the router side's
-// request basis (Facts.EstimatedTokens is Estimate over the raw request
-// bytes, see internal/server/facts.go). Response bodies estimate through
-// EstimateResponseBodyTokens instead — their router-side basis is extracted
-// text only, so the raw fallback would count bytes the router never metered.
+// EstimateBodyTokens computes the degraded token estimate for a REQUEST body:
+// the actual content/text (message content, reasoning, tool calls) when
+// extraction succeeds, the raw request bytes otherwise — the request-side
+// branch of the degraded basis rule documented on EstimateDegradedTokens.
 func EstimateBodyTokens(body any) int64 {
 	text := ExtractResponseText(body)
 	if text == "" {
@@ -313,18 +309,18 @@ func EstimateBodyTokens(body any) int64 {
 }
 
 // EstimateResponseBodyTokens computes the degraded output-token estimate for
-// a recorded response body, mirroring the router side's basis exactly
-// (respnorm's outTokenMeter; pinned by cmd/vmr/quota_parity_test.go):
-// extracted assistant text only — never raw transport bytes. There is
-// deliberately no raw-byte fallback: for response shapes whose text
-// extraction fails (truncated SSE, unparseable JSON remnants), counting
-// envelope bytes would reintroduce the inflated pre-degate-basis estimate.
-// Opaque (compressed passthrough) responses survive the audit JSONL
-// round-trip as strings with U+FFFD runs where invalid bytes were replaced;
-// the router charges 0 for them (OutTokens returns 0), so this returns 0
-// rather than estimating over mangled bytes. A body legitimately containing
-// U+FFFD in its text is rare and already corrupted, so under-counting it to
-// zero is the acceptable side of the tradeoff.
+// a recorded response body: extracted assistant text only, 0 when none is
+// usable — the response-side branch of the degraded basis rule documented on
+// EstimateDegradedTokens. There is deliberately no raw-byte fallback: for
+// response shapes whose text extraction fails (truncated SSE, unparseable
+// JSON remnants), counting envelope bytes would reintroduce the inflated
+// pre-degrade-basis estimate. Opaque (compressed passthrough) responses
+// survive the audit JSONL round-trip as strings with U+FFFD runs where
+// invalid bytes were replaced; the router charges 0 for them (OutTokens
+// returns 0), so this returns 0 rather than estimating over mangled bytes.
+// A body legitimately containing U+FFFD in its text is rare and already
+// corrupted, so under-counting it to zero is the acceptable side of the
+// tradeoff.
 func EstimateResponseBodyTokens(body any) int64 {
 	switch b := body.(type) {
 	case nil:

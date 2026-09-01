@@ -5,6 +5,8 @@ package chatmsg
 import (
 	"testing"
 	"unicode/utf8"
+
+	"vmr/internal/tokenutil"
 )
 
 func TestExtractUsage_OpenAIJSON(t *testing.T) {
@@ -241,5 +243,41 @@ func TestEstimateResponseBodyTokens_EmptyAndNil(t *testing.T) {
 	}
 	if got := EstimateResponseBodyTokens(""); got != 0 {
 		t.Errorf("EstimateResponseBodyTokens(empty) = %d, want 0", got)
+	}
+}
+
+// TestEstimateDegradedBasis_FallbackAsymmetry pins the deliberate fallback
+// asymmetry of the degraded basis rule (see EstimateDegradedTokens): when
+// text extraction yields nothing, the request side falls back to the raw
+// request bytes (mirroring Facts.EstimatedTokens' raw basis) while the
+// response side returns 0 (raw response bytes measure transport, not
+// generation — the Q04 inflation). Unifying either side breaks parity with
+// what the router charged; this test makes such a unification fail loudly.
+func TestEstimateDegradedBasis_FallbackAsymmetry(t *testing.T) {
+	t.Parallel()
+
+	// Request side: valid JSON, but not a chat-request shape — extraction
+	// must fail, forcing the raw-byte fallback with the raw basis.
+	reqBody := map[string]any{"foo": "bar"}
+	inEst := EstimateBodyTokens(reqBody)
+	wantIn := tokenutil.Estimate([]byte(`{"foo":"bar"}`))
+	if wantIn <= 0 {
+		t.Fatalf("wantIn = %d, want > 0", wantIn)
+	}
+	if inEst != wantIn {
+		t.Errorf("inEst = %d, want raw-byte estimate %d (fallback must mirror Facts.EstimatedTokens' raw basis)", inEst, wantIn)
+	}
+
+	// Response side: opaque after the audit JSONL round-trip — mangled
+	// bytes carry no usable content representation, must estimate 0.
+	respBody := "data: \ufffd\ufffd\ufffd"
+	if outEst := EstimateResponseBodyTokens(respBody); outEst != 0 {
+		t.Errorf("outEst = %d, want 0 (no raw-byte fallback on the response side)", outEst)
+	}
+
+	// Both through the shared degraded entry point.
+	inDeg, outDeg := EstimateDegradedTokens(nil, reqBody, respBody)
+	if inDeg != wantIn || outDeg != 0 {
+		t.Errorf("EstimateDegradedTokens = (%d, %d), want (%d, 0)", inDeg, outDeg, wantIn)
 	}
 }

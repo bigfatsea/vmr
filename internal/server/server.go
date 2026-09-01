@@ -91,8 +91,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authenticate enforces the router's own optional API keys and reports
-// which one matched. Both credential conventions are accepted:
+// authenticateWithSnap enforces the router's own optional API keys and
+// reports which one matched. Both credential conventions are accepted:
 // Authorization: Bearer (OpenAI) and x-api-key (Anthropic SDKs send only
 // this). tag is audit.KeyTag(the matched Cfg.APIKeys entry) — "" when auth
 // is disabled entirely or (ok == false) nothing matched at all. api_keys is
@@ -107,14 +107,12 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 // can identify itself to `vmr report` just by ending its own
 // Authorization/x-api-key value in "-<label>", with zero vmr-side config.
 // A client sending nothing still gets "".
-func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
-	return s.authenticateWithSnap(r, s.rt.Snapshot())
-}
-
-// authenticateWithSnap is authenticate with an already-loaded snapshot, so
-// the chat request path loads the routing table exactly once per request and
-// passes the same instance through authentication, body handling, and routing
-// (Q14) — a hot reload in between must not give one request two views.
+//
+// The caller loads the snapshot once per request and passes the same
+// instance through authentication, body handling, and routing (Q14) — a hot
+// reload in between must not give one request two views. snap must be
+// non-nil; both entry points that dereference it (chatHandler, auth) nil-
+// check at their own outermost layer (Q15) before calling in.
 func (s *Server) authenticateWithSnap(r *http.Request, snap *router.Snapshot) (tag string, ok bool) {
 	cfg := snap.Cfg
 	got := trimBearerPrefix(r.Header.Get("Authorization"))
@@ -145,16 +143,22 @@ func trimBearerPrefix(auth string) string {
 	return auth
 }
 
-// checkAuth is the tag-less wrapper for endpoints that only need a pass/
-// fail decision, not the caller's identity.
-func (s *Server) checkAuth(r *http.Request) bool {
-	_, ok := s.authenticate(r)
-	return ok
-}
-
+// auth guards the non-chat endpoints (/v1/models, /status, /log): these
+// handlers don't route, so the single-load rule (Q14) doesn't apply and
+// loading the snapshot here is fine. This middleware is the outermost layer
+// that dereferences the snapshot for everything it guards, so it carries the
+// same nil-snapshot defense as chatHandler's entry (Q15) — without it a nil
+// snapshot (router.New before the first Install) would panic one frame
+// deeper, in authenticateWithSnap. 503, not 401: the credential isn't the
+// problem, the router isn't up yet.
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.checkAuth(r) {
+		snap := s.rt.Snapshot()
+		if snap == nil {
+			router.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
+			return
+		}
+		if _, ok := s.authenticateWithSnap(r, snap); !ok {
 			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}

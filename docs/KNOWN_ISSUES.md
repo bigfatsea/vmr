@@ -89,7 +89,10 @@
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **`core.StickyBackstopTTL` 不迁回 `internal/sticky`**：迁回制造一条 `config` → `sticky` 的新依赖边，仅用于读一个常量；不做这个校验则 `sticky_ttl` 超过 backstop 的配置会「看起来被接受、实际静默失效」。
-- **`adapter` 的协议字段字面量（`"model"`/`"stream"`/`"messages"`/`"input"`）不从 `jsonscan` 导出复用**：它们是不可变字节常量而非共享状态；「知道这些字段名的含义」正是把 `SessionFingerprint`/`TopLevelProbe` 留在 `adapter` 的领域知识，也是「需要具体字段名的函数不属于 `jsonscan`」这条规则的由来。
+- **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：降级估算的统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（Q04 的 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
+- **`adapter` 的协议字段字面量（`"model"`/`"stream"`/`"messages"`/`"input"`）不从 `jsonscan` 导出复用**：它们是不可变字节常量而非共享状态；「知道这些字段名的含义」正是把 `SessionFingerprint`/`TopLevelProbe` 留在 `adapter` 的领域知识。（`jsonscan` 自身的准入措辞 2026-09 已重写，见下条。）
+- **`jsonscan` 的 `RewriteModel`/`RewriteRoles`/`RewriteInputRoles` 留在 `jsonscan`，不迁 `adapter`**（2026-09 Q17 收敛）：原评审指出「同批协议字面量在 `jsonscan` 包文档与 `adapter` 得出两个相反归属结论」，最终以重写 `jsonscan` 包文档的边界规则消除，而非移动代码——「字节级扫描与 splice 改写引擎」整体归 `jsonscan`（含带协议字段字面量的改写函数，fuzz 覆盖在此包），「协议路由语义、适配器构造、错误分类」归 `adapter` 及以上。旧表述「需要具体字段名的函数不属于 `jsonscan`」已废止，**不要再提案移动这批改写函数或恢复旧措辞**。
+- **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 与 `ModelLabel` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`、`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）；其余符号在 `core` 包注释中以例外条款显式豁免。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的 26 个微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
