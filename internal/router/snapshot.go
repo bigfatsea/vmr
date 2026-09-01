@@ -303,6 +303,9 @@ func (rt *Router) Install(s *Snapshot) {
 	if rt.Quota != nil {
 		rt.Quota.Prune(s.ProviderLimits())
 	}
+	if rt.Health != nil {
+		rt.Health.Prune(s.HealthKeys())
+	}
 	if old != nil {
 		// Release the previous pools' idle connections now instead of
 		// waiting for GC. In-flight requests still holding the old
@@ -314,6 +317,25 @@ func (rt *Router) Install(s *Snapshot) {
 }
 
 // ProviderLimits returns a map of provider name -> configured Limits from this snapshot.
+// HealthKeys is the set of endpoint health keys this snapshot can route to —
+// the "keep" set for health.Registry.Prune, so an endpoint dropped from the
+// config stops carrying its failure state (and its /status row) across a hot
+// reload. Same reason ProviderLimits exists for the quota registry.
+func (s *Snapshot) HealthKeys() map[string]bool {
+	if s == nil {
+		return nil
+	}
+	keep := map[string]bool{}
+	for _, byName := range s.Models {
+		for _, route := range byName {
+			for _, ep := range route.Endpoints {
+				keep[ep.HealthKey()] = true
+			}
+		}
+	}
+	return keep
+}
+
 func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
 	if s == nil || s.Cfg == nil {
 		return nil

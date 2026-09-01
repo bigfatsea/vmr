@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"vmr/internal/core"
 )
 
 // The field that carries the whole feature: a rejected reload must not
@@ -76,5 +79,60 @@ func TestConfigStale(t *testing.T) {
 	// flash a warning at whoever runs status right then.
 	if stale, got := ConfigStale(filepath.Join(dir, "gone.yaml"), mtime); stale || !got.IsZero() {
 		t.Errorf("missing file: stale=%v mtime=%v, want false/zero", stale, got)
+	}
+}
+
+// A hot reload that drops an endpoint must drop its health state with it —
+// otherwise a stale failure count and cooldown keep showing up in /status
+// for an endpoint the config no longer knows about, and would apply again
+// if the endpoint were ever re-added. Same contract Quota.Prune already had.
+func TestInstallPrunesHealthOfRemovedEndpoints(t *testing.T) {
+	const base = `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: https://example.com/v1}, api_key: k2}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`
+	const shrunk = `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+`
+	rt := New(nil)
+	snap := mustSnapshot(t, mustConfig(t, base))
+	rt.Install(snap)
+
+	keys := snap.HealthKeys()
+	if len(keys) != 2 {
+		t.Fatalf("HealthKeys = %v, want both endpoints", keys)
+	}
+	var kept, dropped string
+	for k := range keys {
+		if strings.Contains(k, "p1") {
+			kept = k
+		} else {
+			dropped = k
+		}
+	}
+	now := time.Now()
+	rt.Health.ReportFailure(kept, core.ErrTransient, 0, now)
+	rt.Health.ReportFailure(dropped, core.ErrTransient, 0, now)
+
+	rt.Install(mustSnapshot(t, mustConfig(t, shrunk)))
+
+	if st := rt.Health.Status(kept, now); st.Fails == 0 {
+		t.Errorf("still-configured endpoint %q lost its health state: %+v", kept, st)
+	}
+	if st := rt.Health.Status(dropped, now); st.Fails != 0 {
+		t.Errorf("removed endpoint %q kept health state after reload: %+v", dropped, st)
 	}
 }

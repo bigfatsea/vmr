@@ -279,7 +279,7 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		if p1 == nil {
 			t.Fatal("p1 missing from /status")
 		}
-		if !p1.Available && p1.Fails >= 2 && p1.LastError == "endpoint" {
+		if !p1.Available && p1.Fails >= 1 && p1.LastError == "endpoint" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -289,12 +289,15 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	// fails must have grown past the initial rate-limit failure (proves
-	// ReportFailure ran, not ReportNeutral, which would have left fails
-	// untouched or reset by an intervening success) and last_error must be
-	// "endpoint" (core.ErrEndpoint.String()), not "client".
-	if p1.Available || p1.Fails < 2 || p1.LastError != "endpoint" {
-		t.Errorf("p1 health = %+v, want cooling down, fails>=2, last_error=endpoint", p1)
+	// last_error must be "endpoint" (core.ErrEndpoint.String()), not
+	// "client": only ReportFailure records a class, so this is what proves
+	// ReportFailure ran rather than ReportNeutral. fails is NOT a useful
+	// proxy for that here — the setup's first failure is a rate limit
+	// (transient curve) and the probe's is ErrEndpoint (long curve), and
+	// switching curves resets the depth to 1 on purpose (fails means
+	// "consecutive failures on the current backoff curve").
+	if p1.Available || p1.Fails < 1 || p1.LastError != "endpoint" {
+		t.Errorf("p1 health = %+v, want cooling down, fails>=1, last_error=endpoint", p1)
 	}
 	if wantMin := time.Now().Add(5 * time.Minute); p1.CooldownUntil.Before(wantMin) {
 		t.Errorf("p1 cooldown_until=%s, want at least 5min out (ErrEndpoint's long cooldown — a short one would mean the probe's failure was misclassified or under-penalized)", p1.CooldownUntil)
