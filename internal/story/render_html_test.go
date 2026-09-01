@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -199,4 +200,36 @@ func TestRenderHTML_DashboardZHChrome(t *testing.T) {
 func TestRenderHTML_NoStepsDoesNotPanic(t *testing.T) {
 	j := &Journey{ID: "j-empty", Title: "x", From: time.Now(), To: time.Now()}
 	_ = RenderHTML(j, Metrics{}, nil, CostFact{}, i18n.EN, false)
+}
+
+func TestRenderHTML_FailedStep(t *testing.T) {
+	j := &Journey{
+		ID:    "j-failed",
+		Title: "failed task",
+		From:  time.Now(),
+		To:    time.Now(),
+		Tasks: []*Task{
+			{
+				Title: "task 1",
+				Steps: []*Step{
+					{
+						Seq:        1,
+						Outcome:    "error",
+						ErrorClass: "network",
+						Manifest: &ctxgraph.Manifest{
+							TS:    time.Now(),
+							Model: "gpt-4",
+						},
+					},
+				},
+			},
+		},
+	}
+	out := RenderHTML(j, Metrics{}, nil, CostFact{}, i18n.EN, false)
+	if !strings.Contains(out, "❌ network") {
+		t.Errorf("rendered HTML missing error badge for single failed step:\n%s", out)
+	}
+	if !strings.Contains(out, "Request failed") {
+		t.Errorf("rendered HTML missing OutcomeError for journey ending in failure:\n%s", out)
+	}
 }

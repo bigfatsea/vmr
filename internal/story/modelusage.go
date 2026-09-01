@@ -52,6 +52,11 @@ type ModelSwitch struct {
 	// upstream attempt. failover/TTL-expiry/routing-policy/sticky-off are
 	// indistinguishable after the fact — this only says the two co-occurred.
 	OnFailoverStep bool `json:"on_failover_step"`
+
+	// Cache telemetry around the switch point (问题 43 ②).
+	HasCacheData   bool    `json:"has_cache_data,omitempty"`
+	PrevCacheRatio float64 `json:"prev_cache_ratio,omitempty"`
+	CurCacheRatio  float64 `json:"cur_cache_ratio,omitempty"`
 }
 
 // computeModelUsage walks steps in Seq order and returns the per-(provider,
@@ -67,6 +72,7 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 	stats := map[string]*ModelUsageStat{}
 	var switches []ModelSwitch
 	prevKey, havePrev := "", false
+	var prevStep *Step
 
 	for _, s := range steps {
 		provider, model := stepUpstream(s)
@@ -124,12 +130,21 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 		}
 
 		if havePrev && key != prevKey {
-			switches = append(switches, ModelSwitch{
-				StepSeq: s.Seq, From: prevKey, To: key,
+			sw := ModelSwitch{
+				StepSeq:        s.Seq,
+				From:           prevKey,
+				To:             key,
 				OnFailoverStep: len(s.Attempts) > 1,
-			})
+			}
+			if prevStep != nil && prevStep.Manifest != nil && prevStep.Manifest.UsageOK && prevStep.Manifest.Usage.In > 0 &&
+				s.Manifest != nil && s.Manifest.UsageOK && s.Manifest.Usage.In > 0 {
+				sw.HasCacheData = true
+				sw.PrevCacheRatio = float64(prevStep.Manifest.Usage.CacheRead) / float64(prevStep.Manifest.Usage.In)
+				sw.CurCacheRatio = float64(s.Manifest.Usage.CacheRead) / float64(s.Manifest.Usage.In)
+			}
+			switches = append(switches, sw)
 		}
-		prevKey, havePrev = key, true
+		prevKey, havePrev, prevStep = key, true, s
 	}
 
 	out := make([]ModelUsageStat, 0, len(stats))

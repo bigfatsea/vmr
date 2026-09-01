@@ -111,6 +111,7 @@ section.block > h2 { font-size: 12px; letter-spacing: .16em; text-transform: upp
 .srow { border: 1px solid var(--rule); border-left: 3px solid var(--rule); border-radius: 5px;
   padding: 8px 12px; margin: 6px 0; background: var(--panel); scroll-margin-top: 14px; }
 .srow.flagged { border-left-color: var(--amber); }
+.srow.error { border-left-color: var(--alert); }
 .srow .top { display: flex; flex-wrap: wrap; gap: 5px 10px; align-items: baseline; font-size: 12px; }
 .srow .seq { font-weight: 700; color: var(--trace); }
 .srow .ts { color: var(--ink-dim); font-size: 11px; }
@@ -119,6 +120,7 @@ section.block > h2 { font-size: 12px; letter-spacing: .16em; text-transform: upp
   background: var(--code); border: 1px solid var(--rule); }
 .chip.tool { color: var(--go); }
 .chip.badge { border-color: var(--amber); color: var(--amber); background: transparent; font-weight: 700; }
+.chip.badge.error { border-color: var(--alert); color: var(--alert); }
 .chip.flag { background: transparent; border-color: var(--amber); color: var(--amber); }
 .srow .markers { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--ink-dim); }
 .srow .marker { padding: 1px 7px; border-radius: 3px; background: var(--code); border-left: 2px solid var(--ink-dim); }

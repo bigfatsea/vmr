@@ -29,19 +29,7 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row, lang i18n.La
 
 	// endpoint health (6 cols) - use EndpointsAll for cross-date view, split by protocol
 	if len(rep.EndpointsAll) > 0 {
-		w("%s\n\n", t.EndpointHealthTitle)
-		protocols, byProto := protocolBuckets(rep.EndpointsAll)
-		eh := t.EndpointHeaders
-		for _, p := range protocols {
-			w("*%s*\n\n", p)
-			tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
-			for _, e := range byProto[p] {
-				tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
-					pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
-					topErrorClassShort(e))
-			}
-			w("\n")
-		}
+		renderEndpointHealth(w, rep, t)
 	}
 
 	// error class × endpoint (only non-zero), split by protocol
@@ -145,6 +133,52 @@ func renderReliability(w func(string, ...any), rep *Report2, o Row, lang i18n.La
 		}
 		if peakN > 0 {
 			w("%s", t.PeakHourNote(peakH, peakN))
+		}
+	}
+}
+
+func renderEndpointHealth(w func(string, ...any), rep *Report2, t i18n.ReliabilityText) {
+	w("%s\n\n", t.EndpointHealthTitle)
+	protocols, byProto := protocolBuckets(rep.EndpointsAll)
+	eh := t.EndpointHeaders
+	for _, p := range protocols {
+		w("*%s*\n\n", p)
+		var mainRows, lowNRows []EndpointRow
+		for _, e := range byProto[p] {
+			if e.Attempts >= 20 {
+				mainRows = append(mainRows, e)
+			} else {
+				lowNRows = append(lowNRows, e)
+			}
+		}
+		if len(mainRows) > 0 {
+			tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
+			for _, e := range mainRows {
+				tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
+					pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
+					topErrorClassShort(e))
+			}
+			w("\n")
+		}
+		if len(lowNRows) > 0 {
+			if len(mainRows) > 0 {
+				w("%s", t.LowSampleOpen(len(lowNRows)))
+				tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
+				for _, e := range lowNRows {
+					tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
+						pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
+						topErrorClassShort(e))
+				}
+				w("%s", t.LowSampleClose)
+			} else {
+				tbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4], eh[5])
+				for _, e := range lowNRows {
+					tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
+						pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
+						topErrorClassShort(e))
+				}
+				w("\n")
+			}
 		}
 	}
 }

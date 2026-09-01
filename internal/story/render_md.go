@@ -74,6 +74,8 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 
 	renderSystemPromptHeader(w, j, t, linkDetails)
 	renderOverviewCard(w, j, m, cost, lang)
+	_, isNonAnthropic := journeyAnthropicCoverageCodes(j)
+	renderBehaviorIndicators(w, m, isNonAnthropic, lang)
 	renderModelUsage(w, m, lang)
 	renderDecisionSpine(w, j, findings, lang, linkDetails)
 	renderToolTimeline(w, j, lang)

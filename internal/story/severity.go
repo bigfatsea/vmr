@@ -54,9 +54,11 @@ var lowConfidenceFindings = map[FindingCode]bool{
 // JourneySeverity returns the Journey's worst severity and the finding that
 // set it (earliest StepSeq at that level, then Code order — independent of
 // the findings slice's own order). driver is "" only when level is clean.
-// A lowConfidenceFindings code drives the verdict only when every finding
-// at the worst level is low-confidence.
-func JourneySeverity(findings []Finding) (level string, driver FindingCode) {
+// driverLowConf is true when the chosen driver is a low-confidence finding
+// (the only findings at the worst level are low-confidence — see 问题 2 D3).
+// A low-confidence driver renders the verdict in a degraded form ("仅次级信号"
+// instead of a confident conclusion).
+func JourneySeverity(findings []Finding) (level string, driver FindingCode, driverLowConf bool) {
 	level = SeverityClean
 	for _, f := range findings {
 		if findingLevel(f.Code) == SeverityCritical {
@@ -66,13 +68,13 @@ func JourneySeverity(findings []Finding) (level string, driver FindingCode) {
 		level = SeverityWarning
 	}
 	if level == SeverityClean {
-		return SeverityClean, ""
+		return SeverityClean, "", false
 	}
 	if d, ok := pickDriver(findings, level, true); ok {
-		return level, d
+		return level, d, false
 	}
 	d, _ := pickDriver(findings, level, false)
-	return level, d
+	return level, d, true
 }
 
 // pickDriver returns the earliest-StepSeq finding at level (ties broken by

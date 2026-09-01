@@ -305,6 +305,16 @@ func renderAppendix(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	} else {
 		w("%s", t.AppendixSelfTrafficNotExcluded)
 	}
+	withSibling := clientsWithSiblingFile(rep)
+	var missingSiblings []string
+	for _, c := range rep.ByClient {
+		if c.ClientKey != "" && !withSibling[c.ClientKey] {
+			missingSiblings = append(missingSiblings, c.ClientKey)
+		}
+	}
+	if len(missingSiblings) > 0 {
+		w("%s", t.AppendixClientReconciliation(strings.Join(missingSiblings, ", ")))
+	}
 }
 
 // ---- cell/format helpers ----

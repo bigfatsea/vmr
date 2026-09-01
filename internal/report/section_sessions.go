@@ -7,6 +7,7 @@ package report
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
@@ -73,14 +74,14 @@ func renderSessions(w func(string, ...any), rep *Report2, journeyLink map[string
 		}
 		w("**%s**\n\n", ck)
 		head, tail := splitSessionLongTail(rows)
-		tbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
+		tbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5], th[6])
 		for _, s := range head {
 			renderSessionRow(tbl, s, journeyLink, t)
 		}
 		w("\n")
 		if len(tail) > 0 {
 			w("%s", t.LongTailOpen(len(tail), sessionsLongTailTurnCap))
-			ttbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5])
+			ttbl := newTable(w, th[0], th[1], th[2], th[3], th[4], th[5], th[6])
 			for _, s := range tail {
 				renderSessionRow(ttbl, s, journeyLink, t)
 			}
@@ -123,6 +124,31 @@ func splitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
 	return rows[:split], rows[split:]
 }
 
+// formatSessionTimeRange produces a compact "08-16 02:39 → 02:42" or
+// "08-16 02:39 → 08-17 11:47" display in fmtutil.DisplayZone (问题 23).
+func formatSessionTimeRange(fromStr, toStr string) string {
+	if fromStr == "" && toStr == "" {
+		return "-"
+	}
+	fromT, err1 := time.Parse(time.RFC3339, fromStr)
+	toT, err2 := time.Parse(time.RFC3339, toStr)
+	if err1 != nil && err2 != nil {
+		return "-"
+	}
+	if err1 != nil {
+		return toT.In(fmtutil.DisplayZone).Format("01-02 15:04")
+	}
+	if err2 != nil {
+		return fromT.In(fmtutil.DisplayZone).Format("01-02 15:04")
+	}
+	f := fromT.In(fmtutil.DisplayZone)
+	to := toT.In(fmtutil.DisplayZone)
+	if f.Format("2006-01-02") == to.Format("2006-01-02") {
+		return f.Format("01-02 15:04") + " → " + to.Format("15:04")
+	}
+	return f.Format("01-02 15:04") + " → " + to.Format("01-02 15:04")
+}
+
 func renderSessionRow(tbl *mdTable, s SessionRow, journeyLink map[string]string, t i18n.SessionsText) {
 	outcome := "ok"
 	if s.Errors > 0 {
@@ -148,10 +174,11 @@ func renderSessionRow(tbl *mdTable, s SessionRow, journeyLink map[string]string,
 	if journey := journeyLink[s.ID]; journey != "" {
 		id = "[" + id + "](stories/" + journey + ")"
 	}
+	timeRange := formatSessionTimeRange(s.From, s.To)
 	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form
 	// user/model text, so an unclosed "<!--" would otherwise swallow the
 	// rest of the file in an HTML-aware renderer (B4).
-	tbl.row(id, reqdetail.EscapeHTML(truncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
+	tbl.row(id, timeRange, reqdetail.EscapeHTML(truncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
 }

@@ -396,50 +396,6 @@ func renderScheduledDoc(header string, occ []RequestRow, t i18n.RequestsText, de
 	return b.String()
 }
 
-// FailedRequestRows filters rows down to the error-analysis surface: outcome
-// "error" (upstream/vmr rejected the request), "canceled" (client hung up
-// mid-request), and "ok" rows with Truncated==true (client got a 2xx but the
-// stream broke off mid-response — a usable response was still not fully
-// delivered).
-func FailedRequestRows(rows []RequestRow) []RequestRow {
-	var out []RequestRow
-	for _, r := range rows {
-		if r.Outcome == "error" || r.Outcome == "canceled" || (r.Outcome == "ok" && r.Truncated) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// WriteFailedIndex writes vmr-requests-failed.md: a flat, time-ordered index
-// of every failed request (FailedRequestRows), each row's "文件" column a
-// detailCell (a details/*.md link when the target actually exists on disk,
-// else the req coordinate — see detailCell's own doc comment, P13.4). This
-// is a dedicated error-analysis index — it does not remove or alter failed
-// requests anywhere else; vmr-requests.md and every per-group sibling keep
-// listing them exactly as before.
-func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir string) error {
-	detailSet := buildDetailFileSet(detailDir)
-	t := i18n.Requests(lang)
-	failed := FailedRequestRows(rows)
-	sort.SliceStable(failed, func(i, j int) bool { return failed[i].TS < failed[j].TS })
-
-	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-	w("# %s\n\n", t.FailedIndexTitle)
-	w("%s", t.FailedIndexIntro(len(failed)))
-	if len(failed) == 0 {
-		return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
-	}
-	w("%s", t.FailedTableHeader)
-	for _, r := range failed {
-		w("| %s | %s | %s/%s | %s | %s | %s |\n",
-			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
-			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
-	}
-	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
-}
-
 // renderSessionCard renders one session card ("## sNN · ts · N tasks M
 // turns"): one task sub-header per task, each followed by a one-line quote
 // of the task's opening message and its per-turn table.
@@ -485,6 +441,19 @@ func renderSessionCard(w func(string, ...any), g *sessGroup, sessionTitle, sessi
 			tLabel = t.Unrouted
 		}
 		w("%s", t.TaskHeader(tLabel, fmtDisplayFull(trows[0].TS), len(trows)))
+		var totDurMS, fresh, cached, out int64
+		lastFin := "-"
+		for _, r := range trows {
+			totDurMS += r.DurMS
+			fresh += r.TokensInFresh
+			cached += r.TokensInCached
+			out += r.TokensOut
+			if r.Finish != "" {
+				lastFin = r.Finish
+			}
+		}
+		w("%s", t.TaskSummary(len(trows), fmtutil.FmtSeconds(time.Duration(totDurMS)*time.Millisecond, 1),
+			fmtutil.FmtTokens(fresh), fmtutil.FmtTokens(cached), fmtutil.FmtTokens(out), lastFin))
 		title := taskTitle[g.id+"\x00"+tk]
 		if title == "" {
 			title = sessionTitle[g.id]

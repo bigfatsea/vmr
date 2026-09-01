@@ -39,15 +39,49 @@ func renderLatency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 			rows := append([]EndpointRow(nil), byProto[p]...)
 			sort.SliceStable(rows, func(i, j int) bool { return rows[i].TokOutPerSec > rows[j].TokOutPerSec })
 			w("*%s*\n\n", p)
-			epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4])
+			var mainRows, lowNRows []EndpointRow
 			for _, e := range rows {
-				epTbl.row(e.Endpoint,
-					ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),
-					ppCell(e.DurMSP50, e.DurMSP95, e.DurMSMax, e.RequestsWithDur),
-					strconv.Itoa(e.SlowRequests),
-					tokPerSec(e.TokOutPerSec))
+				if e.Requests >= 20 || e.Attempts >= 20 {
+					mainRows = append(mainRows, e)
+				} else {
+					lowNRows = append(lowNRows, e)
+				}
 			}
-			w("\n")
+			if len(mainRows) > 0 {
+				epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4])
+				for _, e := range mainRows {
+					epTbl.row(e.Endpoint,
+						ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),
+						ppCell(e.DurMSP50, e.DurMSP95, e.DurMSMax, e.RequestsWithDur),
+						strconv.Itoa(e.SlowRequests),
+						tokPerSec(e.TokOutPerSec))
+				}
+				w("\n")
+			}
+			if len(lowNRows) > 0 {
+				if len(mainRows) > 0 {
+					w("%s", t.LowSampleOpen(len(lowNRows)))
+					epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4])
+					for _, e := range lowNRows {
+						epTbl.row(e.Endpoint,
+							ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),
+							ppCell(e.DurMSP50, e.DurMSP95, e.DurMSMax, e.RequestsWithDur),
+							strconv.Itoa(e.SlowRequests),
+							tokPerSec(e.TokOutPerSec))
+					}
+					w("%s", t.LowSampleClose)
+				} else {
+					epTbl := newTable(w, eh[0], eh[1], eh[2], eh[3], eh[4])
+					for _, e := range lowNRows {
+						epTbl.row(e.Endpoint,
+							ppCell(e.TTFTMSP50, e.TTFTMSP95, 0, e.TTFTKnown),
+							ppCell(e.DurMSP50, e.DurMSP95, e.DurMSMax, e.RequestsWithDur),
+							strconv.Itoa(e.SlowRequests),
+							tokPerSec(e.TokOutPerSec))
+					}
+					w("\n")
+				}
+			}
 		}
 	}
 }

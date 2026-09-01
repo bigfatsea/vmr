@@ -42,6 +42,16 @@ func parseManifestBody(rec *audit.Record, prof taskseg.Profile) (msgs []chatmsg.
 // text table (deduped, so a 500-step Journey on one system prompt stores
 // it once).
 func fillStepFacts(j *Journey, step *Step, rec *audit.Record, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) {
+	step.Outcome = rec.Outcome
+	if rec.Outcome == "error" {
+		for _, a := range rec.Attempts {
+			if a.ErrorClass != "" {
+				step.ErrorClass = a.ErrorClass
+				break
+			}
+		}
+	}
+
 	if len(rec.Attempts) > 0 {
 		step.Attempts = make([]AttemptFact, len(rec.Attempts))
 		for i, a := range rec.Attempts {

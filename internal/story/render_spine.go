@@ -98,12 +98,26 @@ func renderOverviewCard(w func(string, ...any), j *Journey, m Metrics, cost *Cos
 	if cost != nil && cost.Resolved {
 		costLine = t.OverviewCostLine(fmtMoney(*cost))
 	}
-	if len(nodes) == 0 && len(tags) == 0 && costLine == "" {
+	allSteps := journeySteps(j)
+	failedSteps := 0
+	for _, s := range allSteps {
+		if s.Outcome == "error" {
+			failedSteps++
+		}
+	}
+	var failedLine string
+	if failedSteps > 0 {
+		failedLine = t.OverviewFailedStepsLine(failedSteps, len(allSteps))
+	}
+	if len(nodes) == 0 && len(tags) == 0 && costLine == "" && failedLine == "" {
 		return
 	}
 	w("%s", t.OverviewTitle)
 	for _, n := range nodes {
 		w("- %s\n", n)
+	}
+	if failedLine != "" {
+		w("- %s\n", failedLine)
 	}
 	if costLine != "" {
 		w("- %s\n", costLine)
@@ -140,6 +154,9 @@ func oneLineTruncate(s string, n int) string {
 func stepRoleTag(s *Step, isRepeat bool, t i18n.SpineText) string {
 	if s.StitchEdge != nil {
 		return t.StepTagCompaction
+	}
+	if s.Outcome == "error" {
+		return t.StepTagError
 	}
 	for _, ev := range s.NewEvents {
 		if strings.Contains(ev.Msg.Text, isErrorMarker) {
@@ -228,6 +245,20 @@ func renderToolTimeline(w func(string, ...any), j *Journey, lang i18n.Lang) {
 
 	w("%s", t.TimelineLegend)
 	var b strings.Builder
+	if len(steps) >= 20 {
+		b.WriteString(padRight("Step", maxNameLen))
+		b.WriteString(" ")
+		for i := 1; i <= len(steps); i++ {
+			if i%50 == 0 {
+				b.WriteString("╎")
+			} else if i%10 == 0 {
+				b.WriteString(strconv.Itoa((i / 10) % 10))
+			} else {
+				b.WriteString("·")
+			}
+		}
+		b.WriteByte('\n')
+	}
 	for _, n := range names {
 		b.WriteString(padRight(n, maxNameLen))
 		b.WriteString(" ")
@@ -258,6 +289,23 @@ func joinInts(ns []int) string {
 	return strings.Join(ss, ", ")
 }
 
+// findingTrustTier ranks a FindingCode for display grouping (问题 15):
+// critical codes (real failure modes) read first, low-confidence codes
+// (unverified_entity_reference — see lowConfidenceFindings) last, everything
+// else in between. Mirrors severity.go's criticalFindings/lowConfidenceFindings
+// so the group order and the verdict weighting can never disagree about which
+// codes are trustworthy. Tier ties within the same rank break by earliest
+// StepSeq — deterministic, independent of findings-slice order.
+func findingTrustTier(c FindingCode) int {
+	if criticalFindings[c] {
+		return 0
+	}
+	if lowConfidenceFindings[c] {
+		return 2
+	}
+	return 1
+}
+
 // renderFindingsSection renders findings.go's candidate list — the one
 // place in the document every Finding's full text (not just the ⚠️ mark
 // the decision spine adds) is shown. j is used only for the per-journey
@@ -275,17 +323,49 @@ func renderFindingsSection(w func(string, ...any), j *Journey, findings []Findin
 		w("%s", t.FindingsNone)
 		return
 	}
-	for i, f := range findings {
-		w("%s", formatFindingHeader(i, f, findings, t))
-		if len(f.RelatedSeq) > 0 {
-			w("%s", t.FindingRelated(joinInts(f.RelatedSeq)))
+	// Group by detector Code: a 162-item flat list of near-identical
+	// unverified_entity_reference hits reads as 162 distinct problems, so
+	// the reader gives up by item 20 (问题 15 — the same failure mode
+	// report's own §7 provider_quota_exhaustion argument already makes).
+	// Group order is by findingTrustTier (critical first, low-confidence
+	// last), ties by earliest StepSeq; within a group, findings keep the
+	// slice's own StepSeq order.
+	type group struct {
+		code     FindingCode
+		findings []Finding
+	}
+	byCode := map[FindingCode]*group{}
+	var order []FindingCode
+	for _, f := range findings {
+		if byCode[f.Code] == nil {
+			byCode[f.Code] = &group{code: f.Code}
+			order = append(order, f.Code)
 		}
-		if evStr := formatFindingEvidence(f, t); evStr != "" {
-			w("%s", evStr)
+		byCode[f.Code].findings = append(byCode[f.Code].findings, f)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		ti, tj := findingTrustTier(order[i]), findingTrustTier(order[j])
+		if ti != tj {
+			return ti < tj
 		}
-		if f.Action != "" {
-			w("%s", t.FindingAction(f.Action))
+		// earliest StepSeq of each group breaks the tie
+		return byCode[order[i]].findings[0].StepSeq < byCode[order[j]].findings[0].StepSeq
+	})
+	for _, code := range order {
+		g := byCode[code]
+		w("%s", t.FindingGroupTitle(string(code), len(g.findings), g.findings[0].StepSeq))
+		for i, f := range g.findings {
+			w("%s", formatFindingHeader(i, f, g.findings, t))
+			if len(f.RelatedSeq) > 0 {
+				w("%s", t.FindingRelated(joinInts(f.RelatedSeq)))
+			}
+			if evStr := formatFindingEvidence(f, t); evStr != "" {
+				w("%s", evStr)
+			}
+			if f.Action != "" {
+				w("%s", t.FindingAction(f.Action))
+			}
+			w("\n")
 		}
-		w("\n")
 	}
 }

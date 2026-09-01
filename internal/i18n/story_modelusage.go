@@ -8,12 +8,13 @@ import "strconv"
 
 // ModelUsageText is render_modelusage.go's text, in one language.
 type ModelUsageText struct {
-	Title          string
-	UsageHeader    string // header+separator row: model, steps, in, cached, out
-	NoSwitches     string
-	SwitchTitle    string
-	SwitchLine     func(seq int, from, to string) string
-	OnFailoverNote string
+	Title           string
+	UsageHeader     string // header+separator row: model, steps, in, cached, out
+	NoSwitches      string
+	SwitchTitle     string
+	SwitchLine      func(seq int, from, to string) string
+	OnFailoverNote  string
+	CacheImpactNote func(prevRatio, curRatio string) string
 }
 
 func ModelUsage(lang Lang) ModelUsageText {
@@ -27,6 +28,9 @@ func ModelUsage(lang Lang) ModelUsageText {
 				return "- 第 " + strconv.Itoa(seq) + " 步：" + from + " → " + to
 			},
 			OnFailoverNote: "（这次切换发生在一个触发过 failover 的 Step 上）",
+			CacheImpactNote: func(prevRatio, curRatio string) string {
+				return " [缓存命中率 " + prevRatio + " → " + curRatio + "]"
+			},
 		}
 	}
 	return ModelUsageText{
@@ -38,5 +42,8 @@ func ModelUsage(lang Lang) ModelUsageText {
 			return "- Step " + strconv.Itoa(seq) + ": " + from + " → " + to
 		},
 		OnFailoverNote: " (this switch occurred on a Step that also triggered a failover)",
+		CacheImpactNote: func(prevRatio, curRatio string) string {
+			return " [cache hit rate " + prevRatio + " → " + curRatio + "]"
+		},
 	}
 }

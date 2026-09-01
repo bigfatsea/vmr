@@ -7,7 +7,7 @@ package i18n
 type SessionsText struct {
 	Title               string
 	NoInteractive       string
-	TableHeaders        [6]string // session, title, turns, tasks, fresh/cached/out, outcome
+	TableHeaders        [7]string // session, time range, title, turns, tasks, fresh/cached/out, outcome
 	TableNote           string
 	OutcomeOKErrors     func(errs int) string
 	OutcomeFallback     func(n int) string
@@ -23,7 +23,7 @@ func Sessions(lang Lang) SessionsText {
 		return SessionsText{
 			Title:           "§6 会话与任务",
 			NoInteractive:   "（无 interactive 会话）\n\n",
-			TableHeaders:    [6]string{"会话", "标题", "轮", "任务", "fresh/cached/out", "结果"},
+			TableHeaders:    [7]string{"会话", "时间范围", "标题", "轮", "任务", "fresh/cached/out", "结果"},
 			TableNote:       "> 会话标识形如 s01 (l-...)：sNN 仅为本次报告内行号别名，括号内 l-<hash8> 为稳定内容寻址 ID。\n\n",
 			OutcomeOKErrors: func(errs int) string { return "ok (" + itoa64(int64(errs)) + " error)" },
 			OutcomeFallback: func(n int) string { return " · " + itoa64(int64(n)) + " fallback" },
@@ -39,7 +39,7 @@ func Sessions(lang Lang) SessionsText {
 	return SessionsText{
 		Title:           "§6 Sessions & Tasks",
 		NoInteractive:   "(no interactive sessions)\n\n",
-		TableHeaders:    [6]string{"Session", "Title", "Turns", "Tasks", "fresh/cached/out", "Outcome"},
+		TableHeaders:    [7]string{"Session", "Time Range", "Title", "Turns", "Tasks", "fresh/cached/out", "Outcome"},
 		TableNote:       "> Session labels like s01 (l-...): sNN is a report-local row alias; l-<hash8> is the stable content-addressed ID.\n\n",
 		OutcomeOKErrors: func(errs int) string { return "ok (" + itoa64(int64(errs)) + " error)" },
 		OutcomeFallback: func(n int) string { return " · " + itoa64(int64(n)) + " fallback" },

@@ -26,6 +26,17 @@ type patternStats struct {
 	errorCount int
 }
 
+// isSelfRepeat reports whether all tool names in names are identical (e.g. exec -> exec).
+// Excluded from N-gram pattern mining so genuine cross-tool workflows surface (问题 18b).
+func isSelfRepeat(names []string) bool {
+	for i := 1; i < len(names); i++ {
+		if names[i] != names[0] {
+			return false
+		}
+	}
+	return true
+}
+
 // computeToolSequences extracts frequent 2-gram and 3-gram tool call patterns across all journeys.
 func computeToolSequences(journeys []*Journey) []ToolSequencePattern {
 	statsMap := map[string]*patternStats{}
@@ -57,6 +68,9 @@ func computeToolSequences(journeys []*Journey) []ToolSequencePattern {
 					names := make([]string, n)
 					for k := 0; k < n; k++ {
 						names[k] = window[k].name
+					}
+					if isSelfRepeat(names) {
+						continue
 					}
 					key := strings.Join(names, " \u2192 ")
 					if statsMap[key] == nil {

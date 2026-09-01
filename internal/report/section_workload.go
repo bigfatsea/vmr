@@ -57,7 +57,7 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang)
 			mermaidHourBar(reqTitle, reqAxis, vol),
 			mermaidTokenHourBar(t.HourlyTokChart, tokIn))
 	}
-	// by date: mermaid only - request volume + input tokens
+	// by date: mermaid + folded table fallback
 	if len(rep.ByDate) > 0 {
 		labels := make([]string, len(rep.ByDate))
 		vol := make([]int64, len(rep.ByDate))
@@ -72,6 +72,14 @@ func renderWorkload(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang)
 			t.DailyTitle,
 			mermaidBarLabeled(dayTitle, dayAxis, labels, vol),
 			mermaidTokenBarLabeled(t.DailyTokChart, labels, tokIn))
+		w(t.DailyTableOpen, len(rep.ByDate))
+		dth := t.DailyTableHeaders
+		dtbl := newTable(w, dth[0], dth[1], dth[2], dth[3])
+		for _, d := range rep.ByDate {
+			dtbl.row(d.Date, strconv.Itoa(d.Requests), pctStr2(d.OK, d.Requests),
+				fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensInCached), fmtutil.FmtTokens(d.TokensOut)))
+		}
+		w("%s", t.DailyTableClose)
 	}
 	// by client (8)
 	if len(rep.ByClient) > 0 {

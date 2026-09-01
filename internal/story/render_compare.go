@@ -25,6 +25,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	t := i18n.Compare(lang)
 
 	w("%s", t.Title)
+	renderComparisonSummaryCard(w, cmp, t)
 	w("%s", t.SideBlock("A", cmp.A.ID, escapeHTML(cmp.A.Title), cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
 	w("%s", t.SideBlock("B", cmp.B.ID, escapeHTML(cmp.B.Title), cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
 	if cmp.Extras != nil {
@@ -124,6 +125,99 @@ func emptyDash(s string, t i18n.CompareText) string {
 	return s
 }
 
+func renderComparisonSummaryCard(w func(string, ...any), cmp Comparison, t i18n.CompareText) {
+	var items []string
+	var notableTop []string
+	for _, r := range cmp.Rows {
+		if r.Notable {
+			notableTop = append(notableTop, fmt.Sprintf("%s: %s → %s (%s)", r.Label, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew)))
+			if len(notableTop) >= 3 {
+				break
+			}
+		}
+	}
+	if len(notableTop) > 0 && t.SummaryNotableTop != nil {
+		items = append(items, t.SummaryNotableTop(strings.Join(notableTop, "; ")))
+	}
+	if cmp.Extras != nil {
+		if cmp.Extras.Divergence.Found && t.SummaryDivergence != nil {
+			items = append(items, t.SummaryDivergence(cmp.Extras.Divergence.Index+1, cmp.Extras.Divergence.AStepSeq, cmp.Extras.Divergence.BStepSeq))
+		}
+		if cmp.Extras.Endpoints.Same {
+			items = append(items, t.SummaryEndpointsSame)
+		} else {
+			items = append(items, t.SummaryEndpointsDiff)
+		}
+		if (cmp.Extras.Duration.ATermination != "" || cmp.Extras.Duration.BTermination != "") && t.SummaryTermination != nil {
+			items = append(items, t.SummaryTermination(emptyDash(cmp.Extras.Duration.ATermination, t), emptyDash(cmp.Extras.Duration.BTermination, t)))
+		}
+	}
+	if len(items) > 0 && t.SummaryCard != nil {
+		w("%s", t.SummaryCard(items))
+	}
+}
+
+// simpleLineDiff generates a compact unified diff string between a and b
+// using longest-common-subsequence (LCS) dynamic programming, preventing
+// line insertions/deletions from triggering cascade mismatches.
+func simpleLineDiff(a, b string) (diff string, diffCount int) {
+	aLines := strings.Split(a, "\n")
+	bLines := strings.Split(b, "\n")
+	n, m := len(aLines), len(bLines)
+
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < m; j++ {
+			if aLines[i] == bLines[j] {
+				dp[i+1][j+1] = dp[i][j] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i+1][j+1] = dp[i+1][j]
+			} else {
+				dp[i+1][j+1] = dp[i][j+1]
+			}
+		}
+	}
+
+	type diffLine struct {
+		op   byte
+		line string
+	}
+	var ops []diffLine
+	i, j := n, m
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && aLines[i-1] == bLines[j-1] {
+			ops = append(ops, diffLine{' ', aLines[i-1]})
+			i--
+			j--
+		} else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) {
+			ops = append(ops, diffLine{'+', bLines[j-1]})
+			j--
+		} else if i > 0 && (j == 0 || dp[i][j-1] < dp[i-1][j]) {
+			ops = append(ops, diffLine{'-', aLines[i-1]})
+			i--
+		}
+	}
+
+	for k := 0; k < len(ops)/2; k++ {
+		opp := len(ops) - 1 - k
+		ops[k], ops[opp] = ops[opp], ops[k]
+	}
+
+	var out strings.Builder
+	out.WriteString("--- A\n+++ B\n")
+	for _, op := range ops {
+		if op.op == ' ' {
+			continue
+		}
+		diffCount++
+		out.WriteString(fmt.Sprintf("%c %s\n", op.op, op.line))
+	}
+	return out.String(), diffCount
+}
+
 // renderDivergence renders 6a/6b: the first Step position (in the two
 // Journeys' shared aligned prefix) where their tool-use structure first
 // differs — a structural fact only, never a root-cause claim (see
@@ -206,8 +300,15 @@ func renderSysPrompt(w func(string, ...any), sp SysPromptFact, t i18n.CompareTex
 	w("%s", t.SysPromptTableHeader)
 	w("| A | %s | %d |\n", fmtutil.FmtTokens(sp.A.Tokens), sp.A.Changes)
 	w("| B | %s | %d |\n\n", fmtutil.FmtTokens(sp.B.Tokens), sp.B.Changes)
-	renderExcerpt(w, t.SysPromptExcerptLabel("A"), sp.A.Excerpt, sp.A.Truncated, t)
-	renderExcerpt(w, t.SysPromptExcerptLabel("B"), sp.B.Excerpt, sp.B.Truncated, t)
+	if sp.A.Excerpt == sp.B.Excerpt && sp.A.Excerpt != "" {
+		w("%s", t.SysPromptIdentical(fmtutil.FmtTokens(sp.A.Tokens)))
+	} else if sp.A.Excerpt != "" && sp.B.Excerpt != "" {
+		diff, count := simpleLineDiff(sp.A.Excerpt, sp.B.Excerpt)
+		w("<details><summary>%s</summary>\n\n````diff\n%s````\n</details>\n\n", t.SysPromptDiffSummary(count), diff)
+	} else {
+		renderExcerpt(w, t.SysPromptExcerptLabel("A"), sp.A.Excerpt, sp.A.Truncated, t)
+		renderExcerpt(w, t.SysPromptExcerptLabel("B"), sp.B.Excerpt, sp.B.Truncated, t)
+	}
 }
 
 // renderInitialInstruction renders both sides' opening user instruction, in

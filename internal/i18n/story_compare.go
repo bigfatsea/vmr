@@ -10,11 +10,21 @@
 // string(diff.Metric).
 package i18n
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // CompareText is render_compare.go's text, in one language.
 type CompareText struct {
 	Title                          string
+	SummaryCard                    func(items []string) string
+	SummaryNotableTop              func(items string) string
+	SummaryDivergence              func(index, aSeq, bSeq int) string
+	SummaryEndpointsSame           string
+	SummaryEndpointsDiff           string
+	SummaryTermination             func(aTerm, bTerm string) string
 	SideBlock                      func(label, id, title, from, to, file string) string
 	InitialInstructionTitle        string
 	InitialInstructionExcerptLabel func(side string) string
@@ -57,6 +67,8 @@ type CompareText struct {
 	SysPromptTitle        string
 	SysPromptTableHeader  string
 	SysPromptExcerptLabel func(side string) string
+	SysPromptIdentical    func(tokens string) string
+	SysPromptDiffSummary  func(diffCount int) string
 
 	DeliverableTitle        string
 	DeliverableNotFound     func(side string) string
@@ -77,6 +89,26 @@ func Compare(lang Lang) CompareText {
 	if lang == ZH {
 		return CompareText{
 			Title: "# Journey 对比：A vs B\n\n",
+			SummaryCard: func(items []string) string {
+				var b strings.Builder
+				b.WriteString("> **对比摘要**：\n")
+				for _, it := range items {
+					b.WriteString("> - " + it + "\n")
+				}
+				b.WriteString("\n")
+				return b.String()
+			},
+			SummaryNotableTop: func(items string) string {
+				return "显著差异 Top: " + items
+			},
+			SummaryDivergence: func(index, aSeq, bSeq int) string {
+				return fmt.Sprintf("分叉点: 对齐位置 %d (Step A%d / B%d)", index, aSeq, bSeq)
+			},
+			SummaryEndpointsSame: "端点一致: 两侧模型/端点完全相同",
+			SummaryEndpointsDiff: "端点不同: 两侧模型/端点存在差异",
+			SummaryTermination: func(aTerm, bTerm string) string {
+				return fmt.Sprintf("终止状态: A finish=%s · B finish=%s", aTerm, bTerm)
+			},
 			SideBlock: func(label, id, title, from, to, file string) string {
 				idPart := id
 				if file != "" {
@@ -135,6 +167,12 @@ func Compare(lang Lang) CompareText {
 			SysPromptTitle:        "## System Prompt 规模与稳定性\n\n",
 			SysPromptTableHeader:  "| | tokens | 变更次数 |\n|---|---|---|\n",
 			SysPromptExcerptLabel: func(side string) string { return side + " 的 system prompt 节选" },
+			SysPromptIdentical: func(tokens string) string {
+				return "> 两侧 System Prompt 逐字完全一致（" + tokens + " token）。\n\n"
+			},
+			SysPromptDiffSummary: func(diffCount int) string {
+				return "两侧 System Prompt 差异（约 " + strconv.Itoa(diffCount) + " 行不同）"
+			},
 
 			DeliverableTitle: "## 最终交付物对比\n\n",
 			DeliverableNotFound: func(side string) string {
@@ -176,6 +214,26 @@ func Compare(lang Lang) CompareText {
 	}
 	return CompareText{
 		Title: "# Journey Comparison: A vs B\n\n",
+		SummaryCard: func(items []string) string {
+			var b strings.Builder
+			b.WriteString("> **Comparison Summary**:\n")
+			for _, it := range items {
+				b.WriteString("> - " + it + "\n")
+			}
+			b.WriteString("\n")
+			return b.String()
+		},
+		SummaryNotableTop: func(items string) string {
+			return "Notable differences (Top): " + items
+		},
+		SummaryDivergence: func(index, aSeq, bSeq int) string {
+			return fmt.Sprintf("Divergence point: aligned position %d (Step A%d / B%d)", index, aSeq, bSeq)
+		},
+		SummaryEndpointsSame: "Endpoints: identical models/endpoints on both sides",
+		SummaryEndpointsDiff: "Endpoints: models/endpoints differ between sides",
+		SummaryTermination: func(aTerm, bTerm string) string {
+			return fmt.Sprintf("Termination: A finish=%s · B finish=%s", aTerm, bTerm)
+		},
 		SideBlock: func(label, id, title, from, to, file string) string {
 			idPart := id
 			if file != "" {
@@ -232,6 +290,12 @@ func Compare(lang Lang) CompareText {
 		SysPromptTitle:        "## System Prompt Size & Stability\n\n",
 		SysPromptTableHeader:  "| | tokens | Changes |\n|---|---|---|\n",
 		SysPromptExcerptLabel: func(side string) string { return side + "'s system prompt excerpt" },
+		SysPromptIdentical: func(tokens string) string {
+			return "> Both sides' System Prompts are verbatim identical (" + tokens + " tokens).\n\n"
+		},
+		SysPromptDiffSummary: func(diffCount int) string {
+			return "System Prompt Diff (approx. " + strconv.Itoa(diffCount) + " lines changed)"
+		},
 
 		DeliverableTitle: "## Final Deliverable Comparison\n\n",
 		DeliverableNotFound: func(side string) string {

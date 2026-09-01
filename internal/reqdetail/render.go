@@ -3,6 +3,7 @@
 package reqdetail
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -102,13 +103,17 @@ func truncCell(s string, n int, t i18n.DetailText) string {
 	return string(r[:n]) + t.TruncSuffix(len(r))
 }
 
-// jsonIndent pretty-prints any decoded JSON value.
+// jsonIndent pretty-prints any decoded JSON value with SetEscapeHTML(false)
+// so HTML characters (<, >, &) are not mangled into \u003c, \u003e, \u0026 (问题 14).
 func jsonIndent(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
 		return fmt.Sprintf("%v", v)
 	}
-	return string(b)
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 // roleOrder fixes the display order of the well-known roles; anything else

@@ -69,13 +69,15 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 		w("%s", t.NoCorrelations)
 	} else {
 		w("%s", t.CorrelationHeader)
-		// Top-N by |rho| — the full list (routinely dozens of pairs once
-		// weakly-correlated ones clear the 0.3 floor, many of them
-		// mechanically implied by a metric's own formula, e.g.
-		// NetWorkingMS = ModelMS + AgentExecMS) always lands in the JSON;
-		// the Markdown table stays scannable the same way internal/report's
-		// "Tool Shape Waste Top-5" table already does.
-		shown := stats.Correlations
+		// Top-N by |rho| — filter out known mechanical identities (问题 18a)
+		// so empirical patterns surface; full list lands in the JSON.
+		var empirical []CorrelationRow
+		for _, c := range stats.Correlations {
+			if !isMechanicalCorrelation(c.MetricA, c.MetricB) {
+				empirical = append(empirical, c)
+			}
+		}
+		shown := empirical
 		if len(shown) > corpusCorrelationsShown {
 			shown = shown[:corpusCorrelationsShown]
 		}
@@ -83,7 +85,7 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 			w("| %s | %s | %.2f | %d |\n", i18n.MetricLabel(lang, string(c.MetricA)), i18n.MetricLabel(lang, string(c.MetricB)), c.Rho, c.N)
 		}
 		w("\n")
-		if extra := len(stats.Correlations) - len(shown); extra > 0 {
+		if extra := len(empirical) - len(shown); extra > 0 {
 			w("%s", t.CorrelationMore(extra))
 		}
 	}

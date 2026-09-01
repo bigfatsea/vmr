@@ -94,6 +94,29 @@ type CorrelationRow struct {
 	N       int        `json:"n"`
 }
 
+// mechanicalCorrelationPairs marks metric pairs whose correlation is
+// mathematically or definitionally guaranteed by their formulas (问题 18a).
+// They remain present in machine-readable JSON stats but are filtered from
+// the human Markdown Top-15 ranking so genuine empirical patterns surface.
+var mechanicalCorrelationPairs = map[[2]MetricCode]bool{
+	{MetricNetWorkingMS, MetricModelMS}:                 true,
+	{MetricModelMS, MetricNetWorkingMS}:                 true,
+	{MetricNetWorkingMS, MetricAgentExecMS}:             true,
+	{MetricAgentExecMS, MetricNetWorkingMS}:             true,
+	{MetricToolCallCount, MetricContextUtilization}:     true,
+	{MetricContextUtilization, MetricToolCallCount}:     true,
+	{MetricToolCallCount, MetricPlanExecRatio}:          true,
+	{MetricPlanExecRatio, MetricToolCallCount}:          true,
+	{MetricCompactionCount, MetricCompactionLossTokens}: true,
+	{MetricCompactionLossTokens, MetricCompactionCount}: true,
+	{MetricPlanExecRatio, MetricContextUtilization}:     true,
+	{MetricContextUtilization, MetricPlanExecRatio}:     true,
+}
+
+func isMechanicalCorrelation(a, b MetricCode) bool {
+	return mechanicalCorrelationPairs[[2]MetricCode{a, b}]
+}
+
 // corpusMinCorrelationN/corpusMinCorrelationRho: below N, a correlation
 // coefficient is noise dressed up as a number; below |rho|, it's not worth
 // a reader's attention even if computed. Both are triage bars, not

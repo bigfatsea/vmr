@@ -26,6 +26,11 @@ type StoryHTMLText struct {
 	VerdictProbableCause string
 	VerdictStamp         func(level string) string // level ∈ critical|warning|clean
 	VerdictClean         string
+	// VerdictLowConfidence is the degraded verdict line when the only
+	// findings at the worst severity level are low-confidence — the verdict
+	// stamp says "warning" but the cause line defers to "secondary signal
+	// only" instead of asserting a confident conclusion (问题 2 D3).
+	VerdictLowConfidence func(code string) string
 	VerdictRedacted      func(code string, step int) string
 	DamageLine           func(steps int, dur, tokens string) string
 	DamageCost           func(amount string) string
@@ -46,6 +51,7 @@ type StoryHTMLText struct {
 	OutcomeLabel       string
 	OutcomeDeliverable func(step int) string
 	OutcomeTermination func(finish string) string
+	OutcomeError       string
 	OutcomeUnknown     string
 
 	// Section headings + left-rail labels
@@ -136,6 +142,9 @@ func StoryHTML(lang Lang) StoryHTMLText {
 				}
 			},
 			VerdictClean: "未触发任何规则检测器（不等于运行无问题）。",
+			VerdictLowConfidence: func(code string) string {
+				return "仅次级信号（" + code + "）——该检测器低可信度，不作结论"
+			},
 			VerdictRedacted: func(code string, step int) string {
 				return fmt.Sprintf("检测器 %s @ 步骤 %d（正文已脱敏）", code, step)
 			},
@@ -170,6 +179,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 			OutcomeLabel:       "结局",
 			OutcomeDeliverable: func(step int) string { return fmt.Sprintf("Step %d 产出最终文件，工具", step) },
 			OutcomeTermination: func(finish string) string { return "终止：finish=" + finish },
+			OutcomeError:       "请求失败（上游/网络错误）",
 			OutcomeUnknown:     "终止方式未知",
 
 			SectionStructure: "结构",
@@ -253,6 +263,9 @@ func StoryHTML(lang Lang) StoryHTMLText {
 			}
 		},
 		VerdictClean: "No behavior detector fired (does not imply the run was problem-free).",
+		VerdictLowConfidence: func(code string) string {
+			return "Secondary signal only (" + code + ") — low-confidence detector, not a conclusion"
+		},
 		VerdictRedacted: func(code string, step int) string {
 			return fmt.Sprintf("detector %s at Step %d (text redacted)", code, step)
 		},
@@ -287,6 +300,7 @@ func StoryHTML(lang Lang) StoryHTMLText {
 		OutcomeLabel:       "Outcome",
 		OutcomeDeliverable: func(step int) string { return fmt.Sprintf("Final file written at Step %d via", step) },
 		OutcomeTermination: func(finish string) string { return "Ended: finish=" + finish },
+		OutcomeError:       "Request failed (upstream/network error)",
 		OutcomeUnknown:     "Termination mode unknown",
 
 		SectionStructure: "Structure",

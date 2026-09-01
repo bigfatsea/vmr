@@ -16,6 +16,9 @@ type WorkloadText struct {
 	DailyTitle        string
 	DailyReqChart     func() (title, axis string)
 	DailyTokChart     string
+	DailyTableOpen    string
+	DailyTableClose   string
+	DailyTableHeaders [4]string // date, requests, ok rate, fresh/cached/out
 	ByClientTitle     string
 	ByClientHeaders   [8]string
 	ByEndpointTitle   string
@@ -36,6 +39,9 @@ func Workload(lang Lang) WorkloadText {
 			DailyTitle:        "**按日期活跃度**",
 			DailyReqChart:     func() (string, string) { return "请求量 / 天", "请求" },
 			DailyTokChart:     "输入Token / 天",
+			DailyTableOpen:    "<details><summary>+ 逐日活跃度明细表（共 %d 天）</summary>\n\n",
+			DailyTableClose:   "\n</details>\n\n",
+			DailyTableHeaders: [4]string{"日期", "请求", "成功率", "fresh/cached/out"},
 			ByClientTitle:     "**按客户端** ⭐",
 			ByClientHeaders:   [8]string{"client_key", "请求", "成功率", "fresh/cached/out(reasoning)", "缓存效率", "dur p50/p95", "In(p50/p95)", "Out(p50/p95)"},
 			ByEndpointTitle:   "**按端点** ⭐（跨日合并）",
@@ -54,6 +60,9 @@ func Workload(lang Lang) WorkloadText {
 		DailyTitle:        "**Daily Activity**",
 		DailyReqChart:     func() (string, string) { return "Requests / day", "Requests" },
 		DailyTokChart:     "Input Tokens / day",
+		DailyTableOpen:    "<details><summary>+ Daily Activity Table (%d days)</summary>\n\n",
+		DailyTableClose:   "\n</details>\n\n",
+		DailyTableHeaders: [4]string{"Date", "Requests", "Success Rate", "fresh/cached/out"},
 		ByClientTitle:     "**By Client** ⭐",
 		ByClientHeaders:   [8]string{"client_key", "Requests", "Success Rate", "fresh/cached/out(reasoning)", "Cache Eff.", "dur p50/p95", "In(p50/p95)", "Out(p50/p95)"},
 		ByEndpointTitle:   "**By Endpoint** ⭐ (merged across dates)",

@@ -26,6 +26,10 @@ type SpineText struct {
 	// an estimate" discipline the HTML damage line and the macro report use).
 	OverviewCostLine func(money string) string
 
+	// OverviewFailedStepsLine is rendered in the overview card when any
+	// requests in this Journey failed at the HTTP/upstream layer (问题 8).
+	OverviewFailedStepsLine func(failed, total int) string
+
 	SpineTitle                string
 	SpineTaskLine             func(idx int, title string) string
 	SpineFindingTag           string                      // appended to a spine Step header that hit a Finding
@@ -62,12 +66,16 @@ type SpineText struct {
 	TimelineLegend string
 	TimelineNoData string
 
-	FindingsTitle   string
-	FindingsNone    string
-	FindingHeader   func(idx int, code string, stepSeq int) string
-	FindingRelated  func(seqs string) string
-	FindingEvidence func(text string) string
-	FindingAction   func(text string) string
+	FindingsTitle string
+	FindingsNone  string
+	// FindingGroupTitle is the per-detector group header rendered above a
+	// set of findings sharing one Code — "*N* hits of this detector", so a
+	// 162-item flat list stops reading as 162 distinct problems (问题 15).
+	FindingGroupTitle func(code string, count int, firstStep int) string
+	FindingHeader     func(idx int, code string, stepSeq int) string
+	FindingRelated    func(seqs string) string
+	FindingEvidence   func(text string) string
+	FindingAction     func(text string) string
 	// AnthropicOnlyCoverageNote is the per-journey detector-coverage
 	// disclosure line — same wording/role as story_corpus.go's field
 	// of the same name, printed when THIS journey has no Anthropic Messages
@@ -102,6 +110,9 @@ func Spine(lang Lang) SpineText {
 			TagsLine:            func(tags string) string { return "**标签**：" + tags + "\n\n" },
 			OverviewCostLine: func(money string) string {
 				return "估算成本 ≈ " + money + "（按标价估算，非实际账单）"
+			},
+			OverviewFailedStepsLine: func(failed, total int) string {
+				return strconv.Itoa(failed) + "/" + strconv.Itoa(total) + " 步请求失败（HTTP/上游错误）"
 			},
 
 			SpineTitle:      "## 决策脊柱\n\n",
@@ -141,6 +152,9 @@ func Spine(lang Lang) SpineText {
 
 			FindingsTitle: "## 疑似问题（候选清单，不是判决）\n\n",
 			FindingsNone:  "未检测到规则可判定的疑似问题。\n\n",
+			FindingGroupTitle: func(code string, count, firstStep int) string {
+				return "### " + code + " · 命中 " + strconv.Itoa(count) + " 条（最早 Step " + strconv.Itoa(firstStep) + "）\n\n"
+			},
 			FindingHeader: func(idx int, code string, stepSeq int) string {
 				return strconv.Itoa(idx) + ". **" + code + "** · Step " + strconv.Itoa(stepSeq) + "\n"
 			},
@@ -176,6 +190,9 @@ func Spine(lang Lang) SpineText {
 		TagsLine:            func(tags string) string { return "**Tags**: " + tags + "\n\n" },
 		OverviewCostLine: func(money string) string {
 			return "Estimated cost ≈ " + money + " (list-price estimate, not your bill)"
+		},
+		OverviewFailedStepsLine: func(failed, total int) string {
+			return strconv.Itoa(failed) + "/" + strconv.Itoa(total) + " steps failed (HTTP/upstream error)"
 		},
 
 		SpineTitle:      "## Decision Spine\n\n",
@@ -215,6 +232,9 @@ func Spine(lang Lang) SpineText {
 
 		FindingsTitle: "## Suspected Issues (candidate list, not a verdict)\n\n",
 		FindingsNone:  "No rule-detectable suspected issues.\n\n",
+		FindingGroupTitle: func(code string, count, firstStep int) string {
+			return "### " + code + " · " + strconv.Itoa(count) + " hits (earliest Step " + strconv.Itoa(firstStep) + ")\n\n"
+		},
 		FindingHeader: func(idx int, code string, stepSeq int) string {
 			return strconv.Itoa(idx) + ". **" + code + "** · Step " + strconv.Itoa(stepSeq) + "\n"
 		},

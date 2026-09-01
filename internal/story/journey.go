@@ -157,9 +157,16 @@ type Step struct {
 	// not distinguished, same convention RespText already uses.
 	Reasoning string
 
-	// The four fields below are extracted once by fillStepFacts (see
+	// The fields below are extracted once by fillStepFacts (see
 	// journey_stepfacts.go), so consumers don't reach back into a full
 	// audit.Record the Journey no longer holds.
+
+	// Outcome is this Step's request outcome ("ok", "error", "canceled")
+	// from audit.Record.Outcome.
+	Outcome string
+	// ErrorClass is the failure classification (e.g. "auth", "quota",
+	// "network", "transient", "unclassified") when Outcome == "error".
+	ErrorClass string
 
 	// Context is this Step's own request body token composition by role —
 	// what metrics.go's contextCurve renders, one point per Step.

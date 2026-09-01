@@ -51,6 +51,9 @@ func htmlStepRow(w func(string, ...any), s *Step, flagged bool, t i18n.StoryHTML
 	if flagged {
 		cls += " flagged"
 	}
+	if s.Outcome == "error" {
+		cls += " error"
+	}
 	w("<article class=\"%s\" id=\"step-%d\">\n<div class=\"top\">\n", cls, s.Seq)
 	w("<span class=\"seq\">%s</span>\n", he(t.StepLabel(s.Seq)))
 	if s.Manifest != nil {
@@ -58,7 +61,13 @@ func htmlStepRow(w func(string, ...any), s *Step, flagged bool, t i18n.StoryHTML
 		if s.Manifest.Model != "" {
 			w("<span class=\"model\">%s</span>\n", he(s.Manifest.Model))
 		}
-		if n := len(s.Attempts); n > 1 {
+		if s.Outcome == "error" {
+			errText := "error"
+			if s.ErrorClass != "" {
+				errText = s.ErrorClass
+			}
+			w("<span class=\"chip badge error\">❌ %s</span>\n", he(errText))
+		} else if n := len(s.Attempts); n > 1 {
 			w("<span class=\"chip badge\">%s · %s</span>\n", he(t.FailoverBadge), he(t.Attempts(n)))
 		}
 	}
@@ -180,7 +189,7 @@ func bodyOrPlaceholder(title string, redact bool, t i18n.StoryHTMLText) string {
 
 // --- Metrics ---
 
-func htmlMetrics(w func(string, ...any), m Metrics, t i18n.StoryHTMLText) {
+func htmlMetrics(w func(string, ...any), m Metrics, isNonAnthropic bool, t i18n.StoryHTMLText) {
 	var in, cached, out int64
 	for _, u := range m.ModelUsage {
 		in += u.TokensIn
@@ -189,6 +198,11 @@ func htmlMetrics(w func(string, ...any), m Metrics, t i18n.StoryHTMLText) {
 	}
 	stat := func(k, v string) {
 		w("<div class=\"stat\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>\n", he(k), he(v))
+	}
+
+	errRecVal := strconv.Itoa(m.ErrorRecoveryCount)
+	if isNonAnthropic && m.ErrorRecoveryCount == 0 {
+		errRecVal = "n/a"
 	}
 
 	w("<div class=\"stats\">\n")
@@ -202,7 +216,7 @@ func htmlMetrics(w func(string, ...any), m Metrics, t i18n.StoryHTMLText) {
 	stat(t.MetricCompactions, strconv.Itoa(m.CompactionCount))
 	stat(t.MetricDupActionRate, pctStr(m.DuplicateActionRate))
 	stat(t.MetricOutputRepeat, pctStr(m.OutputRepetitionRate))
-	stat(t.MetricErrorRecovery, strconv.Itoa(m.ErrorRecoveryCount))
+	stat(t.MetricErrorRecovery, errRecVal)
 	stat(t.MetricPlanExecRatio, pctStr(m.PlanExecRatio))
 	stat(t.MetricModelSwitches, strconv.Itoa(len(m.ModelSwitches)))
 	stat(t.MetricContextUtil, pctStr(m.ContextUtilization))

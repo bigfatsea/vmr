@@ -37,13 +37,13 @@ func RenderHTML(j *Journey, m Metrics, findings []Finding, cost CostFact, lang i
 
 	allSteps := journeySteps(j)
 	ponr := ComputePointOfNoReturn(j, findings)
-	sev, sevDriver := JourneySeverity(findings)
+	sev, sevDriver, sevDriverLowConf := JourneySeverity(findings)
 
 	w("<!doctype html>\n<html lang=%q>\n<head>\n<meta charset=\"utf-8\">\n", htmlLangAttr(lang))
 	w("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
 	w("<title>%s</title>\n<style>\n%s</style>\n</head>\n<body>\n<div class=\"wrap\">\n", he(t.DocTitle(j.ID)), htmlStyle)
 
-	htmlHeader(w, j, allSteps, m, findings, cost, sev, sevDriver, ponr, t, redact)
+	htmlHeader(w, j, allSteps, m, findings, cost, sev, sevDriver, sevDriverLowConf, ponr, t, redact)
 
 	w("<div class=\"layout\">\n<div class=\"railwrap\">\n")
 	htmlRail(w, j, t)
@@ -54,7 +54,8 @@ func RenderHTML(j *Journey, m Metrics, findings []Finding, cost CostFact, lang i
 	w("</section>\n")
 
 	w("<section class=\"block\" id=\"metrics\">\n<h2>%s</h2>\n", he(t.SectionMetrics))
-	htmlMetrics(w, m, t)
+	_, isNonAnthropic := journeyAnthropicCoverageCodes(j)
+	htmlMetrics(w, m, isNonAnthropic, t)
 	w("</section>\n")
 
 	w("<section class=\"block\" id=\"findings\">\n<h2>%s</h2>\n", he(t.SectionFindings))
@@ -83,7 +84,7 @@ func htmlLangAttr(lang i18n.Lang) string {
 // return strip, and the one-line outcome. Redact-safe: the verdict panel and
 // PONR strip use structure/counts only; the driver finding's narrative text
 // is shown under -redact as a bare code + step anchor, matching htmlFindings.
-func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics, findings []Finding, cost CostFact, sev string, sevDriver FindingCode, ponr *PointOfNoReturn, t i18n.StoryHTMLText, redact bool) {
+func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics, findings []Finding, cost CostFact, sev string, sevDriver FindingCode, sevDriverLowConf bool, ponr *PointOfNoReturn, t i18n.StoryHTMLText, redact bool) {
 	w("<div class=\"recbar\"><span class=\"rl\">%s</span><span class=\"jid\">%s</span></div>\n",
 		he(t.RecorderBar), he(j.ID))
 	w("<header class=\"jhead\">\n")
@@ -91,7 +92,7 @@ func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics,
 	w("<div class=\"verdict v-%s\">\n", he(sev))
 	w("<div class=\"vtop\"><span class=\"vlabel\">%s</span><span class=\"vstamp\">%s</span></div>\n",
 		he(t.VerdictProbableCause), he(t.VerdictStamp(sev)))
-	w("<div class=\"vcause\">%s</div>\n", verdictCause(findings, sevDriver, t, redact))
+	w("<div class=\"vcause\">%s</div>\n", verdictCause(findings, sevDriver, sevDriverLowConf, t, redact))
 	w("<div class=\"damage\">%s%s</div>\n", he(t.DamageLine(len(allSteps),
 		fmtSpan(time.Duration(m.NetWorkingMS)*time.Millisecond),
 		fmtutil.FmtTokens(journeyTokenTotal(m)))),
@@ -119,6 +120,8 @@ func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics,
 		w("%s <code>%s</code>", he(t.OutcomeDeliverable(d.StepSeq)), he(d.ToolName))
 	} else if fin := htmlLastFinish(allSteps); fin != "" {
 		w("%s", he(t.OutcomeTermination(fin)))
+	} else if len(allSteps) > 0 && allSteps[len(allSteps)-1].Outcome == "error" {
+		w("%s", he(t.OutcomeError))
 	} else {
 		w("%s", he(t.OutcomeUnknown))
 	}
@@ -127,10 +130,15 @@ func htmlHeader(w func(string, ...any), j *Journey, allSteps []*Step, m Metrics,
 
 // verdictCause renders the one finding that set the severity — its narrative
 // text when available, or (clean journey) the all-clear line, or (redact) a
-// bare code + step anchor.
-func verdictCause(findings []Finding, driver FindingCode, t i18n.StoryHTMLText, redact bool) string {
+// bare code + step anchor. A driver that is itself low-confidence (every
+// finding at the worst level was — 问题 2 D3) degrades the verdict to a
+// "secondary signal only" line instead of asserting a confident cause.
+func verdictCause(findings []Finding, driver FindingCode, driverLowConf bool, t i18n.StoryHTMLText, redact bool) string {
 	if driver == "" {
 		return "<span class=\"vclean\">" + he(t.VerdictClean) + "</span>"
+	}
+	if driverLowConf {
+		return "<span class=\"vlow\">" + he(t.VerdictLowConfidence(string(driver))) + "</span>"
 	}
 	var f *Finding
 	for i := range findings {

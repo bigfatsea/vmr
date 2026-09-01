@@ -18,6 +18,7 @@ type RequestsText struct {
 	ScheduledTableHeader string
 	FailedIndexTitle     string
 	FailedIndexIntro     func(n int) string
+	FailedClusterSummary func(totalRows, clusters, maxClusterRows int, maxClusterSpan, maxClusterClasses string) string
 	FailedTableHeader    string
 	SessionCardHeader    func(label, ts string, tasks, requests int, classNote string) string
 	// JourneyLinkLine is the "session row → journey" edge (P6.2c) — path
@@ -25,6 +26,7 @@ type RequestsText struct {
 	JourneyLinkLine func(path string) string
 	Unrouted        string
 	TaskHeader      func(label, ts string, turns int) string
+	TaskSummary     func(turns int, dur, fresh, cached, out, lastFinish string) string
 	TurnTableHeader string
 }
 
@@ -51,6 +53,9 @@ func Requests(lang Lang) RequestsText {
 			FailedIndexIntro: func(n int) string {
 				return "专供错误分析：outcome 为 error / canceled，以及 outcome=ok 但 truncated（流中途断了）的全部请求，按时间排序，每条直链到对应的 details/*.md。不影响其他报表——这些记录在各分组明细文件（vmr-requests-<tag>.md / -unresolved.md）里照常出现，本文件只是额外的索引。共 " + strconv.Itoa(n) + " 条。\n\n"
 			},
+			FailedClusterSummary: func(totalRows, clusters, maxClusterRows int, maxClusterSpan, maxClusterClasses string) string {
+				return "> **故障聚类**：" + strconv.Itoa(totalRows) + " 条失败聚成 " + strconv.Itoa(clusters) + " 簇（时间间隔 ≤ 2 分钟），最大一簇 " + strconv.Itoa(maxClusterRows) + " 条（" + maxClusterSpan + " · " + maxClusterClasses + "）。\n\n"
+			},
 			FailedTableHeader: "| 时间 | 会话/任务 | VM/API | outcome⭐ | dur | 文件 |\n|---|---|---|---|---|---|\n",
 			SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 				return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " 任务 " + strconv.Itoa(requests) + " 轮" + classNote + "\n\n"
@@ -59,6 +64,13 @@ func Requests(lang Lang) RequestsText {
 			Unrouted:        "（未分组）",
 			TaskHeader: func(label, ts string, turns int) string {
 				return "### " + label + " · " + ts + " · " + strconv.Itoa(turns) + " 轮\n\n"
+			},
+			TaskSummary: func(turns int, dur, fresh, cached, out, lastFinish string) string {
+				fin := ""
+				if lastFinish != "" && lastFinish != "-" {
+					fin = " · 结束于 " + lastFinish
+				}
+				return "> " + strconv.Itoa(turns) + " 轮 · 耗时 " + dur + " · fresh " + fresh + " / cached " + cached + " / out " + out + fin + "\n\n"
 			},
 			TurnTableHeader: "| 轮 | 时间 | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | 文件 |\n|---|---|---|---|---|---|---|---|---|\n",
 		}
@@ -84,6 +96,9 @@ func Requests(lang Lang) RequestsText {
 		FailedIndexIntro: func(n int) string {
 			return "Dedicated for error analysis: every request with outcome error / canceled, plus outcome=ok but truncated (stream broke mid-way), sorted by time, each linking straight to its details/*.md. Purely additive — these records still appear as usual in the per-group detail files (vmr-requests-<tag>.md / -unresolved.md); this file is just an extra index. " + strconv.Itoa(n) + " total.\n\n"
 		},
+		FailedClusterSummary: func(totalRows, clusters, maxClusterRows int, maxClusterSpan, maxClusterClasses string) string {
+			return "> **Incident Clusters**: " + strconv.Itoa(totalRows) + " failures grouped into " + strconv.Itoa(clusters) + " clusters (inter-failure gap ≤ 2m); largest cluster carries " + strconv.Itoa(maxClusterRows) + " requests (" + maxClusterSpan + " · " + maxClusterClasses + ").\n\n"
+		},
 		FailedTableHeader: "| Time | Session/Task | VM/API | outcome⭐ | dur | File |\n|---|---|---|---|---|---|\n",
 		SessionCardHeader: func(label, ts string, tasks, requests int, classNote string) string {
 			return "## " + label + " · " + ts + " · " + strconv.Itoa(tasks) + " tasks " + strconv.Itoa(requests) + " turns" + classNote + "\n\n"
@@ -92,6 +107,13 @@ func Requests(lang Lang) RequestsText {
 		Unrouted:        "(ungrouped)",
 		TaskHeader: func(label, ts string, turns int) string {
 			return "### " + label + " · " + ts + " · " + strconv.Itoa(turns) + " turns\n\n"
+		},
+		TaskSummary: func(turns int, dur, fresh, cached, out, lastFinish string) string {
+			fin := ""
+			if lastFinish != "" && lastFinish != "-" {
+				fin = " · ended on " + lastFinish
+			}
+			return "> " + strconv.Itoa(turns) + " turns · " + dur + " · fresh " + fresh + " / cached " + cached + " / out " + out + fin + "\n\n"
 		},
 		TurnTableHeader: "| Turn | Time | msgs | finish | dur | ttft | fresh/cached/out | cache-eff⭐ | File |\n|---|---|---|---|---|---|---|---|---|\n",
 	}

@@ -31,7 +31,11 @@ func renderModelUsage(w func(string, ...any), m Metrics, lang i18n.Lang) {
 	}
 	w("%s", t.SwitchTitle)
 	for _, sw := range m.ModelSwitches {
-		w("%s", t.SwitchLine(sw.StepSeq, sw.From, sw.To))
+		line := t.SwitchLine(sw.StepSeq, sw.From, sw.To)
+		if sw.HasCacheData && t.CacheImpactNote != nil {
+			line += t.CacheImpactNote(pctStr(sw.PrevCacheRatio), pctStr(sw.CurCacheRatio))
+		}
+		w("%s", line)
 		if sw.OnFailoverStep {
 			w("%s", t.OnFailoverNote)
 		}

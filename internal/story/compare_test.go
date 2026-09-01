@@ -483,6 +483,8 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 
 	md := RenderComparisonMarkdown(cmp, i18n.EN)
 	for _, want := range []string{
+		"Comparison Summary", "Endpoints: models/endpoints differ between sides",
+		"Termination: A finish=tool_calls · B finish=stop",
 		"## Model & Endpoint Check", "openai-completions:opencode:deepseek-v4-pro", "openai-completions:minimax:MiniMax-M3", "differ",
 		"## Prompt Cache Hit Rate", "80%",
 		"## System Prompt Size & Stability", "system prompt A", "system prompt B",
@@ -491,6 +493,11 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered comparison (with Extras) missing %q:\n%s", want, md)
+		}
+	}
+	for _, unwanted := range []string{"显著差异", "分叉点", "端点不同", "终止状态"} {
+		if strings.Contains(md, unwanted) {
+			t.Errorf("rendered comparison in English contains unlocalized Chinese text %q:\n%s", unwanted, md)
 		}
 	}
 	// Sources wasn't set on this Extras (ComputeComparisonExtras never sets
@@ -599,6 +606,45 @@ func TestComputeDivergence(t *testing.T) {
 		d := computeDivergence(a, b)
 		if d.Found {
 			t.Fatalf("comparison should stop at B's shorter length without ever reaching A's second Task: %+v", d)
+		}
+	})
+}
+
+func TestSimpleLineDiff(t *testing.T) {
+	t.Run("identical", func(t *testing.T) {
+		diff, count := simpleLineDiff("line 1\nline 2", "line 1\nline 2")
+		if count != 0 {
+			t.Errorf("count = %d, want 0", count)
+		}
+		if diff != "--- A\n+++ B\n" {
+			t.Errorf("diff = %q, want empty diff header", diff)
+		}
+	})
+
+	t.Run("leading insertion does not trigger cascade diff", func(t *testing.T) {
+		a := "line 1\nline 2\nline 3\nline 4"
+		b := "inserted header\nline 1\nline 2\nline 3\nline 4"
+		diff, count := simpleLineDiff(a, b)
+		if count != 1 {
+			t.Errorf("count = %d, want 1 (only the inserted line, no cascade)", count)
+		}
+		if !strings.Contains(diff, "+ inserted header") {
+			t.Errorf("diff missing inserted line:\n%s", diff)
+		}
+		if strings.Contains(diff, "- line 1") || strings.Contains(diff, "- line 2") {
+			t.Errorf("cascade mismatch detected in diff:\n%s", diff)
+		}
+	})
+
+	t.Run("middle line replacement", func(t *testing.T) {
+		a := "line 1\nline 2 old\nline 3"
+		b := "line 1\nline 2 new\nline 3"
+		diff, count := simpleLineDiff(a, b)
+		if count != 2 {
+			t.Errorf("count = %d, want 2 (- old, + new)", count)
+		}
+		if !strings.Contains(diff, "- line 2 old") || !strings.Contains(diff, "+ line 2 new") {
+			t.Errorf("diff missing expected changes:\n%s", diff)
 		}
 	})
 }

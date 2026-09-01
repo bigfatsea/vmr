@@ -11,6 +11,8 @@ type LatencyText struct {
 	SummaryNote     func(p95, max string) string
 	StreamNote      string
 	ByEndpointTitle string
+	LowSampleOpen   func(n int) string
+	LowSampleClose  string
 }
 
 func Latency(lang Lang) LatencyText {
@@ -28,6 +30,10 @@ func Latency(lang Lang) LatencyText {
 			},
 			StreamNote:      "> 若 coding 的慢主要来自长流式输出，而非首字延迟，参见每模型的 ttft vs dur 差值。\n\n",
 			ByEndpointTitle: "**按端点**（跨日合并）",
+			LowSampleOpen: func(n int) string {
+				return "<details><summary>+ 另有 " + itoa64(int64(n)) + " 个低样本端点（样本 < 20）</summary>\n\n"
+			},
+			LowSampleClose: "\n</details>\n\n",
 		}
 	}
 	return LatencyText{
@@ -43,5 +49,9 @@ func Latency(lang Lang) LatencyText {
 		},
 		StreamNote:      "> If coding's slowness mostly comes from a long stream rather than time-to-first-token, check the ttft vs dur gap per model.\n\n",
 		ByEndpointTitle: "**By Endpoint** (merged across dates)",
+		LowSampleOpen: func(n int) string {
+			return "<details><summary>+ " + itoa64(int64(n)) + " more low-sample endpoints (n < 20)</summary>\n\n"
+		},
+		LowSampleClose: "\n</details>\n\n",
 	}
 }
