@@ -261,7 +261,7 @@ ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 rea
 | 上游不发 `data: [DONE]` | 客户端 SDK 的 stream 终止逻辑靠 EOF 而非 `[DONE]`，正常路径没问题，**边界条件下触发 `APIUserAbortError`** | MiniMax 直接关 TCP |
 | MiniMax thinking=medium 下以纯文本 `Thinking Process:` + 编号小节 1-5 + `Final Polish` 草稿输出思考 | 思考+草稿直接展示给用户（`Reasoning: off` 是 UI 开关，**不影响模型行为**） | 模型在 thinking=medium 下不写 `<think>` 标签 |
 
-**指导原则：直连等价**。客户端经 VMR 收到的字节应与直连上游一致，仅有的偏离是（a）`model` 字段改回虚拟名（虚拟模型抽象的根基），（b）两个 MiniMax-M3 专属修复——且只在**确认命中其确切形态**时才触发，失手时的行为=直连行为，永不更差。
+**指导原则：直连等价**。客户端经 VMR 收发的数据应与直连上游保持字节级一致。全链路仅有 5 项法定偏离：请求侧的 model 改写、role_map 重映射、图片降采样（imgprep），以及响应侧的 vendor quirk 修复（如 MiniMax-M3 思考剥离，失手时=直连行为）与 openai-completions SSE 的 `[DONE]` 哨兵补发。
 
 **双传输模式**（按响应逐个决定）：
 

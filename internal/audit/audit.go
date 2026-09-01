@@ -101,10 +101,10 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, (*recordAlias)(r)); err != nil {
 		return err
 	}
-	r.Protocol = core.CanonicalProtocol(r.Protocol)
+	r.Protocol = CanonicalProtocol(r.Protocol)
 	for i := range r.Attempts {
-		r.Attempts[i].Protocol = core.CanonicalProtocol(r.Attempts[i].Protocol)
-		r.Attempts[i].Endpoint = core.NormalizeEndpointLabel(r.Attempts[i].Endpoint)
+		r.Attempts[i].Protocol = CanonicalProtocol(r.Attempts[i].Protocol)
+		r.Attempts[i].Endpoint = NormalizeEndpointLabel(r.Attempts[i].Endpoint)
 	}
 	return nil
 }

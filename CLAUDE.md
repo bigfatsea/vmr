@@ -57,7 +57,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
 | `tokenutil` | Fast zero-allocation token estimation: `Estimate`, `EstimateText`, `Analyze`, `EstimateFromStats` |
-| `jsonscan` | JSON byte-range scan/splice engine: `RewriteModel`/`RewriteStream`/`RewriteRoles` and the structural primitives behind them. Fuzz-tested. A function belongs here only if it needs no specific field or role name — otherwise it belongs in `adapter` |
+| `jsonscan` | JSON byte-range scan/splice engine: low-level structural byte scanning (`TopLevelValues`, `WalkArrayElements`, `Skip*` primitives) and zero-allocation byte-splice rewrites (`RewriteModel`, `RewriteStream`, `RewriteRoles`, `RewriteInputRoles`). Fuzz-tested. Zero internal dependencies |
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, `i18n/story_*.go` next to `internal/story`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
 
@@ -104,9 +104,10 @@ root allowed to see both halves at once.
 ## Invariants to not accidentally break
 
 - **Byte-faithful passthrough.** No canonical IR, no cross-protocol translation. Exactly
-  three sanctioned deviations: model-name rewrite, `respnorm`'s evidence-based quirk repairs
-  (each behind a content guard, fail-open to "unmodified" on any doubt), and `imgprep`'s
-  image downscale (the largest — a real unmarshal/rewrite/re-marshal, not a byte splice).
+  five sanctioned deviations: model-name rewrite, role-map remapping, `imgprep`'s
+  image downscale (the largest — a real unmarshal/rewrite/re-marshal), `respnorm`'s
+  evidence-based quirk repairs (each behind a content guard, fail-open to "unmodified" on
+  any doubt), and `respnorm`'s `[DONE]` delimiter completion.
 - **Two halves, one contract.** `report`/`story`/`ctxgraph`/`taskseg`/`chatmsg`/`reqdetail` never
   import `router`/`server`/`config`; the JSONL audit record is the only coupling. `archtest`-enforced.
 - **`ctxgraph`/`chatmsg` are the single source of truth** for message hashing and message
