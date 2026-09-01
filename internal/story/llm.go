@@ -459,6 +459,33 @@ func downgradeHeadingLevels(text string) string {
 	return strings.Join(lines, "\n")
 }
 
+// sanitizeMDStruct neutralizes the characters an LLM-authored string can
+// use to break the structure of the Markdown document it is rendered into:
+// backticks (inline code spans / fences), pipes (table cells) and
+// line-leading ATX-heading / list / blockquote markers. Backslash escaping,
+// deliberately not HTML entities: the same finding text also renders
+// through the HTML dashboard, which applies its own HTML escaping —
+// entities here would double-escape there. Applied to every LLM-authored
+// finding component (explanations, suggested actions, evidence anchors) at
+// Finding-construction time in llm_findings.go — the render layer cannot do
+// it, because these strings also feed the HTML target and the JSON summary.
+// Ordinary prose without these characters passes through byte-identical.
+func sanitizeMDStruct(s string) string {
+	if s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if _, isHeading := atxHeading(ln); isHeading ||
+			strings.HasPrefix(ln, "- ") || strings.HasPrefix(ln, "> ") {
+			lines[i] = "\\" + ln
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
 // with the "this is interpretation, not fact" banner — always rendered as
 // its own clearly separated section, never blended into the fact-layer
