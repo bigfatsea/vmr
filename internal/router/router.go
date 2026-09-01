@@ -5,7 +5,6 @@
 package router
 
 import (
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,9 +40,10 @@ type Router struct {
 
 	snap atomic.Pointer[Snapshot]
 
-	limiter  atomic.Pointer[limiter] // nil = unlimited
-	inFlight atomic.Int64
-	waiting  atomic.Int64
+	installMu sync.Mutex              // guards Install (see Install's doc comment)
+	limiter   atomic.Pointer[limiter] // nil = unlimited
+	inFlight  atomic.Int64
+	waiting   atomic.Int64
 
 	reloads reloadTracker // see reload.go: last hot-reload outcome, for /status
 
@@ -57,14 +58,26 @@ func New(logger *log.Logger) *Router {
 // ingress protocol ("openai-completions", "anthropic-messages", "openai-responses", ...); a model
 // bound to a different protocol is rejected — VMR never converts between
 // protocols. rec (nilable) collects the per-attempt audit trail.
+//
+// Serve loads the routing snapshot itself and delegates to ServeWithSnap;
+// the server layer uses ServeWithSnap directly with the snapshot it already
+// loaded once for the whole request (Q14) so a hot reload cannot tear one
+// request across two views.
 func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, rec *audit.Record) {
+	rt.ServeWithSnap(w, r, creq, protocol, rt.snap.Load(), rec)
+}
+
+// ServeWithSnap is Serve with an already-loaded snapshot: the caller (the
+// server layer) loads the routing table once per request and passes the same
+// instance through authentication, body handling, and routing (Q14).
+func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, protocol string, snap *Snapshot, rec *audit.Record) {
 	start := time.Now()
-	snap := rt.snap.Load()
 	if snap == nil {
 		// Only reachable if a caller invokes Serve before Install ever ran -
 		// the real cmd_start.go startup sequence always calls Install with
 		// the first BuildSnapshot before the HTTP server starts listening,
-		// so this never fires in production. A defensive 503 here is strictly
+		// so this never fires in production; the server layer also checks
+		// nil before calling in. A defensive 503 here is strictly
 		// better than the nil-pointer panic snap.Models would otherwise be.
 		rt.Telemetry.RecordOutcome(false, false)
 		WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
@@ -88,113 +101,20 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 	if rt.rejectIfAllKeyless(w, creq, route.Endpoints) {
 		return
 	}
-	// Health filter (read-only) + stable multi-key sort.
-	//
-	// A half-open endpoint (fails>0, cooldown expired) never gets touched by
-	// real traffic at all — instead the first caller to notice it's unprobed
-	// claims the single-flight slot (Acquire, same method the per-candidate
-	// loop below uses) and hands it to a background probe goroutine, then
-	// treats the endpoint as unavailable for THIS request exactly as if
-	// Acquire had failed. Real requests never wait on that probe and are
-	// never diverted for as long as it takes to resolve — only for as long
-	// as it takes to notice it needs to run.
+
 	now := time.Now()
-	healthOK := make([]*core.Endpoint, 0, len(route.Endpoints))
-	for _, ep := range route.Endpoints {
-		available, needsProbe := rt.Health.Classify(ep.HealthKey(), now)
-		if needsProbe {
-			go rt.runProbe(ep, snap)
-		}
-		if available {
-			healthOK = append(healthOK, ep)
-		}
-	}
+	cs := rt.buildCandidates(snap, protocol, creq, route, r, now)
+	w.Header().Set("X-VMR-Route-Reason", cs.reason.String())
 
-	// Hard capability conditions (image/tools/…, see internal/strategy) are
-	// certainties — a request either needs a capability or it doesn't, an
-	// endpoint either declares it or doesn't — so rejecting every candidate
-	// here is a correct "give up" signal, not a bug.
-	hardFiltered := make([]*core.Endpoint, 0, len(healthOK))
-	for _, ep := range healthOK {
-		if strategy.Eligible(ep, creq.Facts) {
-			hardFiltered = append(hardFiltered, ep)
-		}
-	}
-
-	// Context length is an estimate, not a certainty (see
-	// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
-	// section), so it never gets to
-	// empty a non-empty hardFiltered set on its own — if every declared
-	// max_context_tokens looks too small, fall back to hardFiltered and let
-	// a real attempt (backed by the ordinary failover loop once the
-	// upstream returns a real 400) make the call instead of refusing on a
-	// guess.
-	candidates := make([]*core.Endpoint, 0, len(hardFiltered))
-	for _, ep := range hardFiltered {
-		if strategy.WithinContext(ep, creq.Facts) {
-			candidates = append(candidates, ep)
-		}
-	}
-	reason := routeReason{total: len(route.Endpoints), healthOK: len(healthOK), afterCond: len(hardFiltered)}
-	if len(candidates) == 0 && len(hardFiltered) > 0 {
-		candidates = hardFiltered
-		reason.ctxFallback = true
-	}
-
-	// Pinned routing (X-VMR-Provider / X-VMR-Target-Model): narrow the
-	// candidates to the requested provider/target model before sorting, so
-	// the pin wins over priority/order — that is the entire point (see
-	// pin.go). A pin matching nothing leaves an empty candidate set, which
-	// fails below exactly like any other no-available-endpoint request,
-	// with the pin named in the message. No pin headers = no-op.
-	candidates, reason.pin = applyPinToCandidates(candidates, r)
-	strategy.Sort(candidates, route.Dims)
-
-	// Quota-Aware Routing: within each priority tier Sort just established,
-	// move quota-bearing endpoints to the front in headroom-score order —
-	// see internal/router/quota.go's reorderByQuota and
-	// docs/VirtualModelRouter_Design_v4_Quota.md's Scheduling Flow
-	// section for why this sits exactly here (after Sort, before Sticky).
-	// nil-safe: a no-op returning false when rt.Quota is nil (no
-	// quota.Registry wired up).
-	reason.quota = reorderByQuota(candidates, route.Dims, rt.Quota, now)
-
-	// Sticky Model: prefer whichever endpoint most recently, successfully
-	// served this same conversation, so the upstream prompt cache stays
-	// warm (docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model
-	// section). Only ever
-	// reorders within the already-filtered candidates — an endpoint that's
-	// unhealthy or fails a hard condition this turn is never resurrected
-	// just because it was the sticky pick last time.
-	var stickyKey string
-	if route.Sticky {
-		if sysHash, firstMsgHash, ok := adapter.SessionFingerprint(creq.Raw, protocol); ok {
-			var clientKeyTag string
-			if rec != nil {
-				clientKeyTag = rec.ClientKeyTag
-			}
-			stickyKey = clientKeyTag + ":" + hex.EncodeToString(sysHash[:]) + ":" + hex.EncodeToString(firstMsgHash[:])
-			if epKey, lastUsed, found := rt.Sticky.Peek(stickyKey); found {
-				if ep := findByHealthKey(candidates, epKey); ep != nil && time.Since(lastUsed) < ep.StickyTTL {
-					moveToFront(candidates, ep)
-					reason.sticky = true
-				}
-			}
-		}
-	}
-
-	// Failover walks the whole candidate sequence: keep trying until one
-	// endpoint succeeds or every available endpoint has been tried once.
-	// max_attempts (>0) optionally caps the walk to bound tail latency.
+	// Failover walks the whole candidate sequence	// max_attempts (>0) optionally caps the walk to bound tail latency.
 	// Set once, up front: w.Header() is just a map until something calls
 	// WriteHeader, and every path that does so (forwardSuccess,
 	// handleErrorResponse, the all-failed branch below) runs after this.
-	w.Header().Set("X-VMR-Route-Reason", reason.String())
 
 	attempts := 0
 	var last *upstreamError
 	var trail failoverTrail
-	for _, ep := range candidates {
+	for _, ep := range cs.endpoints {
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
@@ -211,11 +131,11 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		trail.apply(w.Header()) // failures so far — the attempt about to run writes the headers itself if it succeeds
 		done, uerr, success := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
 		if done {
-			if success && stickyKey != "" {
+			if success && cs.stickyKey != "" {
 				// Every successful completion moves the pointer — including
 				// a failover success — so it always follows wherever the
 				// conversation's cache is actually warm.
-				rt.Sticky.Set(stickyKey, ep.HealthKey())
+				rt.Sticky.Set(cs.stickyKey, ep.HealthKey())
 			}
 			return
 		}
@@ -243,7 +163,7 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		w.Write(last.body)
 	} else {
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
-		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(creq, reason, attempts, healthOK))
+		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(creq, cs.reason, attempts, cs.healthOK))
 	}
 	rt.Telemetry.RecordOutcome(false, r.Context().Err() != nil)
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
@@ -585,6 +505,17 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	copyErr := copyFlush(r.Context(), w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
 	status := "OK"
 	if r.Context().Err() != nil {
+		status = "CANCELED"
+		att.SetCanceled()
+	} else if isClientWriteError(copyErr) {
+		// The client disconnected (or its connection died) mid-transfer: the
+		// context cancellation can trail the write failure by a few
+		// microseconds, so this branch catches what the ctx check above would
+		// miss. Count it as a client-side cancel, not an upstream TRUNCATED —
+		// the supplier didn't fail, its output just stopped being deliverable.
+		// The response is already committed (headers + partial body), so
+		// there's nothing more to write; skip the ErrAbortHandler abort below
+		// because the connection is already gone.
 		status = "CANCELED"
 		att.SetCanceled()
 	} else if copyErr != nil {

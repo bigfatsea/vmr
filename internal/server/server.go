@@ -107,7 +107,15 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 // Authorization/x-api-key value in "-<label>", with zero vmr-side config.
 // A client sending nothing still gets "".
 func (s *Server) authenticate(r *http.Request) (tag string, ok bool) {
-	cfg := s.rt.Snapshot().Cfg
+	return s.authenticateWithSnap(r, s.rt.Snapshot())
+}
+
+// authenticateWithSnap is authenticate with an already-loaded snapshot, so
+// the chat request path loads the routing table exactly once per request and
+// passes the same instance through authentication, body handling, and routing
+// (Q14) — a hot reload in between must not give one request two views.
+func (s *Server) authenticateWithSnap(r *http.Request, snap *router.Snapshot) (tag string, ok bool) {
+	cfg := snap.Cfg
 	got := trimBearerPrefix(r.Header.Get("Authorization"))
 	if got == "" {
 		got = r.Header.Get("x-api-key")
@@ -156,31 +164,27 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.rt.Telemetry.RecordRequest(protocol)
+		// Load the routing snapshot exactly once, at the request's entry
+		// point, and pass the same instance through authentication, body
+		// handling, and routing — a hot reload mid-request must not tear
+		// one request across two config views (Q14). The nil check lives
+		// here, at the outermost layer that actually dereferences it,
+		// instead of buried in Serve where the server would have panicked
+		// first (Q15).
+		snap := s.rt.Snapshot()
+		if snap == nil {
+			s.rt.Telemetry.RecordOutcome(false, false)
+			router.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
+			return
+		}
 		var rec *audit.Record
-		if s.audit != nil {
-			rec = &audit.Record{
-				TS:       time.Now(),
-				Protocol: protocol,
-				Client: audit.Exchange{
-					Addr:    r.RemoteAddr,
-					Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
-				},
-			}
-			rw := newRecorder(w, rec.TS)
-			w = rw
-			defer func() {
-				rec.DurMS = time.Since(rec.TS).Milliseconds()
-				rec.TTFTMS = rw.ttftMS
-				rec.Client.Response = rw.message()
-				canceled := r.Context().Err() != nil
-				rec.Outcome = audit.OutcomeFor(rw.status, canceled)
-				if err := s.audit.Write(rec); err != nil {
-					s.rt.Logf("audit: %v", err)
-				}
-			}()
+		var done func()
+		rec, w, done = s.beginAudit(w, protocol, r)
+		if done != nil {
+			defer done()
 		}
 
-		tag, authed := s.authenticate(r)
+		tag, authed := s.authenticateWithSnap(r, snap)
 		if rec != nil {
 			rec.ClientKeyTag = tag
 		}
@@ -189,8 +193,6 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}
-
-		snap := s.rt.Snapshot()
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxRequestBodyBytes()))
@@ -242,56 +244,14 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 		defer release()
 
-		// Request-only image downscaling: shrinks oversized inline
-		// attachments before routing so vision-token cost doesn't scale
-		// with screenshot resolution. Response bodies are never touched.
-		// The effective cap is the virtual model's own override if it set
-		// one (even 0, which force-disables it for that model), else the
-		// global default. Detection (format/dimensions/count) always
-		// runs regardless of that cap (n<=0 just skips the resize/cache path
-		// inside imgprep) — a plain-text request with no image marker at all
-		// still costs only one cheap substring scan (imgprep.HasImageMarker)
-		// before Downscale returns.
-		//
-		// This one call is the single source of truth for "does this request
-		// have images": len(images) feeds rec.Images below AND
-		// computeRequestFacts' imageCount, which drives RequestFacts.HasImage
-		// and the image portion of EstimatedTokens. One detection pass per
-		// request, reused three ways — see computeRequestFacts' doc comment
-		// (facts.go) for why the structural answer, not a byte-scan, is what
-		// the routing Condition needs. That dependency is also why this call
-		// cannot be skipped when rec==nil && n<=0: routing correctness, not
-		// just audit metadata, now rests on it.
-		// Skip the work for a model name Serve is about to 404 anyway (same
-		// snap.Models lookup Serve repeats below) — no point decoding/scaling/
-		// caching images for a request that never reaches routing.
-		route := snap.Models[protocol][probeModel]
-		var images []imgprep.ImageInfo
-		if route != nil {
-			n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
-			body, images = imgprep.Downscale(body, protocol, imgprep.Options{
-				MaxPx:        n,
-				CacheDir:     snap.Cfg.ImageCacheDir,
-				CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
-			})
-		}
+		// Request-only image downscaling (see downscaleImages). The returned
+		// images list is the single source of truth for "does this request
+		// have images" — it feeds rec.Images here AND computeRequestFacts'
+		// imageCount below, so the call cannot be skipped when auditing is off
+		// even if the effective cap is 0.
+		body, images := downscaleImages(body, protocol, snap, snap.Models[protocol][probeModel])
 		if rec != nil && len(images) > 0 {
-			rec.Images = make([]audit.ImageInfo, len(images))
-			for i, img := range images {
-				rec.Images[i] = audit.ImageInfo{
-					MessageIndex:     img.MessageIndex,
-					Format:           img.Format,
-					Bytes:            img.Bytes,
-					Width:            img.Width,
-					Height:           img.Height,
-					Remote:           img.Remote,
-					Downscaled:       img.Downscaled,
-					DownscaledWidth:  img.DownscaledWidth,
-					DownscaledHeight: img.DownscaledHeight,
-					DownscaledBytes:  img.DownscaledBytes,
-					CacheHit:         img.CacheHit,
-				}
-			}
+			rec.Images = toAuditImages(images)
 		}
 
 		// Pass client headers through unless on the blocklist — this
@@ -314,11 +274,90 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.Facts = &facts
 		}
 
-		s.rt.Serve(w, r, &core.CanonicalRequest{
+		s.rt.ServeWithSnap(w, r, &core.CanonicalRequest{
 			Model: probeModel, Stream: probeStream, Raw: body, Header: hdr,
-			Facts: facts,
-		}, protocol, rec)
+			Facts: facts, ClientKeyTag: tag,
+		}, protocol, snap, rec)
 	}
+}
+
+// beginAudit creates the audit record and recorder for one chat request.
+// Returns (nil, w, nil) when auditing is disabled, so the caller does:
+//
+//	rec, w, done := s.beginAudit(w, protocol, r)
+//	if done != nil {
+//		defer done()
+//	}
+//
+// The returned http.ResponseWriter wraps the original with a recorder that
+// captures the response status and body for the audit trail.
+func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request) (rec *audit.Record, ww http.ResponseWriter, done func()) {
+	if s.audit == nil {
+		return nil, w, nil
+	}
+	rec = &audit.Record{
+		TS:       time.Now(),
+		Protocol: protocol,
+		Client: audit.Exchange{
+			Addr:    r.RemoteAddr,
+			Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
+		},
+	}
+	rw := newRecorder(w, rec.TS)
+	return rec, rw, func() {
+		rec.DurMS = time.Since(rec.TS).Milliseconds()
+		rec.TTFTMS = rw.ttftMS
+		rec.Client.Response = rw.message()
+		canceled := r.Context().Err() != nil
+		rec.Outcome = audit.OutcomeFor(rw.status, canceled)
+		if err := s.audit.Write(rec); err != nil {
+			s.rt.Logf("audit: %v", err)
+		}
+	}
+}
+
+// downscaleImages shrinks oversized inline images before routing, using the
+// virtual model's own override if it set one (even 0, which force-disables it
+// for that model), else the global default. When route is nil (unknown model
+// that Serve will 404 anyway), the body is returned as-is — no point decoding
+// images for a request that will never reach routing. This is the single
+// source of truth for "does this request have images": the return value feeds
+// both the audit trail and computeRequestFacts' imageCount, so the call cannot
+// be skipped even when auditing is off (routing correctness depends on it).
+func downscaleImages(body []byte, protocol string, snap *router.Snapshot, route *router.ModelRoute) ([]byte, []imgprep.ImageInfo) {
+	if route == nil {
+		return body, nil
+	}
+	n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
+	return imgprep.Downscale(body, protocol, imgprep.Options{
+		MaxPx:        n,
+		CacheDir:     snap.Cfg.ImageCacheDir,
+		CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+	})
+}
+
+// toAuditImages converts imgprep's image descriptors to their audit-log
+// representation — a pure field copy, extracted from chatHandler so the
+// request handler reads as the request lifecycle, not this mechanical
+// translation (Q37).
+func toAuditImages(images []imgprep.ImageInfo) []audit.ImageInfo {
+	out := make([]audit.ImageInfo, len(images))
+	for i, img := range images {
+		out[i] = audit.ImageInfo{
+			MessageIndex:     img.MessageIndex,
+			Format:           img.Format,
+			Bytes:            img.Bytes,
+			Width:            img.Width,
+			Height:           img.Height,
+			Remote:           img.Remote,
+			Downscaled:       img.Downscaled,
+			DownscaledWidth:  img.DownscaledWidth,
+			DownscaledHeight: img.DownscaledHeight,
+			DownscaledBytes:  img.DownscaledBytes,
+			CacheHit:         img.CacheHit,
+		}
+	}
+	return out
 }
 
 // models lists all virtual models in a merged shape both OpenAI clients

@@ -65,12 +65,16 @@ var funcLineExemptions = map[string]int{
 	// other direction).
 	"cmd/vmr/cmd_report.go:runReport": 121,
 
-	// internal/router/router.go's Serve is the failover loop itself — the
-	// design doc's own budget for it is the FILE (see file_sizes_test.go), on
-	// principle that the sequence health→condition→sort→quota→sticky→retry
-	// reads as one thing. Bounded here so it can't quietly absorb more.
-	"internal/router/router.go:Serve":       190,
-	"internal/server/server.go:chatHandler": 175,
+	// internal/router's failover loop was split (Q37): Serve is now a thin
+	// wrapper that loads the snapshot and delegates to ServeWithSnap, and
+	// the candidate-selection pipeline moved to buildCandidates
+	// (candidates.go). Neither needs an entry here — they sit under the
+	// 120-line default. chatHandler kept a modest exemption because it
+	// remains a linear request-lifecycle composition (auth → body → probe →
+	// gate → downscale → facts → route) even after its audit/recorder and
+	// image-conversion blocks were extracted into beginAudit/toAuditImages/
+	// downscaleImages.
+	"internal/server/server.go:chatHandler": 130,
 
 	"internal/report/section_reliability.go:renderReliability": 135,
 

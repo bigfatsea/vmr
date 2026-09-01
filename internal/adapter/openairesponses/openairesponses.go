@@ -13,9 +13,7 @@
 package openairesponses
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 
 	"vmr/internal/adapter"
@@ -43,36 +41,11 @@ func (OpenAIResponses) ResolveURL(baseURL string) string {
 }
 
 func (OpenAIResponses) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
-	body, err := jsonscan.RewriteModel(req.Raw, ep.Model)
-	if err != nil {
-		return nil, nil, fmt.Errorf("rewrite model: %w", err)
-	}
 	// Responses' role-bearing array is the top-level "input" (not
 	// "messages") — RewriteInputRoles is the protocol-specific counterpart
 	// to internal/adapter/openai's RewriteRoles, sharing the same byte-splice
 	// scanner underneath (see jsonscan's unexported rewriteRolesInTopLevelArray).
-	if body, err = jsonscan.RewriteInputRoles(body, ep.RoleMap); err != nil {
-		return nil, nil, fmt.Errorf("rewrite roles: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, err
-	}
-	// Copy the protocol+passthrough headers assembled by the server layer
-	// (see chatHandler) — same as the openai/anthropic adapters.
-	for k, vs := range req.Header {
-		for _, v := range vs {
-			httpReq.Header.Add(k, v)
-		}
-	}
-	// Content-Type and Authorization must come from the adapter, not the
-	// client — see internal/adapter/openai for the same reasoning (the
-	// client's Authorization is the VMR credential, not the upstream's).
-	httpReq.Header.Set("Content-Type", "application/json")
-	if ep.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+ep.APIKey)
-	}
-	return httpReq, body, nil
+	return adapter.BuildUpstreamRequest(ctx, ep, req, jsonscan.RewriteInputRoles, "Authorization", "Bearer "+ep.APIKey)
 }
 
 func (OpenAIResponses) ClassifyError(status int, body []byte) core.ErrorClass {

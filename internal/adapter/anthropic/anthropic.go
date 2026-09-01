@@ -6,9 +6,7 @@
 package anthropic
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 
 	"vmr/internal/adapter"
@@ -30,38 +28,12 @@ func (Anthropic) ResolveURL(baseURL string) string {
 }
 
 func (Anthropic) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
-	body, err := jsonscan.RewriteModel(req.Raw, ep.Model)
-	if err != nil {
-		return nil, nil, fmt.Errorf("rewrite model: %w", err)
-	}
-	if body, err = jsonscan.RewriteRoles(body, ep.RoleMap); err != nil {
-		return nil, nil, fmt.Errorf("rewrite roles: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.FullURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, err
-	}
-	// Copy the protocol+passthrough headers assembled by the server
-	// layer (see chatHandler). These include the Anthropic version
-	// negotiation headers plus any other client metadata that wasn't
-	// on the blocklist.
-	for k, vs := range req.Header {
-		for _, v := range vs {
-			httpReq.Header.Add(k, v)
-		}
-	}
-	// Content-Type and x-api-key must come from the adapter, not the
-	// client — see OpenAI adapter for the same reasoning.
-	httpReq.Header.Set("Content-Type", "application/json")
-	if ep.APIKey != "" {
-		httpReq.Header.Set("x-api-key", ep.APIKey)
-	}
 	// No default anthropic-version: a client that omits it gets exactly
 	// what a direct connection to the provider would see — the provider's
 	// own default, not one vmr picks on its behalf. Forwarding nothing
 	// here is a deliberate passthrough choice (see the design doc's
 	// header-passthrough policy), not an oversight.
-	return httpReq, body, nil
+	return adapter.BuildUpstreamRequest(ctx, ep, req, jsonscan.RewriteRoles, "x-api-key", ep.APIKey)
 }
 
 func (Anthropic) ClassifyError(status int, body []byte) core.ErrorClass {

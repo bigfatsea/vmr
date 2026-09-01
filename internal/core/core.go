@@ -33,6 +33,13 @@ type CanonicalRequest struct {
 	Raw    json.RawMessage
 	Header http.Header // client headers after the server's blocklist filter (credentials removed)
 	Facts  RequestFacts
+
+	// ClientKeyTag is the authenticated caller's identity tag (empty when
+	// no key matched or auth is disabled). Set by the server layer once,
+	// then read by the sticky model to scope the session fingerprint — so
+	// the sticky bucket is identical whether or not auditing is enabled
+	// (Q30).
+	ClientKeyTag string
 }
 
 // RequestFacts holds request-derived signals computed once per request for condition-based routing.
@@ -230,10 +237,10 @@ func (e *Endpoint) Freeze() {
 // StickyBackstopTTL bounds internal/sticky's Registry memory growth,
 // independent of any per-endpoint validity TTL (Endpoint.StickyTTL above),
 // which can range from minutes to days — see the design doc's Sticky Model
-// section.
-//
-// Deprecated: canonical definition lives in internal/sticky.BackstopTTL.
-// Kept in core as a compatibility alias during transition.
+// section. The canonical value lives here so internal/config can validate a
+// configured sticky_ttl against it without importing internal/sticky just to
+// read one constant; internal/sticky.BackstopTTL is this same value, kept
+// there as an alias for callers that already spell it that way.
 const StickyBackstopTTL = 24 * time.Hour
 
 // HasCapability reports whether e declares support for name. An endpoint

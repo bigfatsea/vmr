@@ -9,12 +9,14 @@
 // coincidence of an identical opening line.
 //
 // Every test forces the initial p1→p2 failover with a content-policy flag
-// (403 + "flagged" body): internal/adapter/classify.go classifies that as
-// core.ErrContent, which carries zero cooldown (see classify.go's
-// contentHint). That isolates the sticky mechanism from health/cooldown
-// side effects — without it, p1 would still be excluded by its own
-// cooldown on the second call, and these tests couldn't tell "sticky kept
-// it on p2" apart from "p1 just hadn't recovered yet".
+// (403 + "was flagged" body): internal/adapter/classify.go classifies that
+// as core.ErrContent, which carries zero cooldown (see classify.go's
+// contentHint — Q06 replaced the bare single word "flagged" with the phrase
+// "was flagged", matching how OpenRouter words it). That isolates the
+// sticky mechanism from health/cooldown side effects — without it, p1 would
+// still be excluded by its own cooldown on the second call, and these tests
+// couldn't tell "sticky kept it on p2" apart from "p1 just hadn't recovered
+// yet".
 package server
 
 import (
@@ -25,7 +27,7 @@ import (
 
 func flagP1(u1 *upstream) {
 	u1.status.Store(403)
-	u1.errBody.Store(`{"error":{"message":"flagged"}}`)
+	u1.errBody.Store(`{"error":{"message":"Your input was flagged"}}`)
 }
 
 func TestSticky_PinsToLastSuccessfulEndpoint(t *testing.T) {
@@ -138,7 +140,7 @@ func TestSticky_FailoverMovesThePointer(t *testing.T) {
 	// Flip which endpoint is flagged: now p2 is flagged, p1 has recovered.
 	u1.status.Store(200)
 	u2.status.Store(403)
-	u2.errBody.Store(`{"error":{"message":"flagged"}}`)
+	u2.errBody.Store(`{"error":{"message":"Your input was flagged"}}`)
 	resp, _ = chat(t, ts, simpleReq, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/model-one" {
 		t.Fatalf("expected failover from sticky p2 (now flagged) to p1: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))

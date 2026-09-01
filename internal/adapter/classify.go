@@ -2,6 +2,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"strings"
 
 	"vmr/internal/core"
@@ -21,14 +22,72 @@ import (
 // - Google Gemini rejects multi-turn tool calls lacking thought_signature as
 // 400 INVALID_ARGUMENT;
 //
-// classifySnippetBytes bounds the body sniff. Some vendors attach verbose
-// debug payloads to 4xx bodies; a marker past the cutoff would misclassify a
-// failover-able error as ErrClient (which never fails over), so lean large —
-// a 32 KB lowercase+scan is nanosecond-scale and off the happy path.
-const classifySnippetBytes = 32 << 10
+// classifySnippetBytes bounds the raw-body sniff used when the error body is
+// NOT structured JSON (plain-text gateway errors). Structured bodies are
+// matched against their extracted error.message/error.type fields instead —
+// see errorSnippet — so this window only ever sees small plain-text bodies.
+// 4 KB is generous for those; it stays small because the same body may echo
+// the client's own prompt back at us (an "Invalid value for messages[2].content:
+// …" 400 that quotes the offending message), and a wide window would let
+// ordinary words from that echo trip content keywords (Q06).
+const classifySnippetBytes = 4 << 10
+
+// errorSnippet reduces a 4xx body to the text hint matching should actually
+// look at. Structured vendor errors are almost always
+// {"error":{"message":…,"type":…}} (or a top-level message/type); extracting
+// those fields means keywords match the error itself, not whatever verbose
+// debug payload the vendor attached around it. When the body isn't JSON (or
+// carries no recognizable field), falls back to a bounded raw scan of the
+// first classifySnippetBytes — small plain-text errors fit entirely.
+func errorSnippet(body []byte) string {
+	raw := func() string {
+		return strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))
+	}
+	if len(body) == 0 || body[0] != '{' {
+		return raw()
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return raw()
+	}
+	var parts []string
+	add := func(v json.RawMessage) {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil && s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if raw, ok := m["error"]; ok {
+		// error may be a string (OpenAI/Anthropic both allow it) or an
+		// object with message/type (the common case).
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			parts = append(parts, s)
+		} else {
+			var obj struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			}
+			if err := json.Unmarshal(raw, &obj); err == nil {
+				if obj.Message != "" {
+					parts = append(parts, obj.Message)
+				}
+				if obj.Type != "" {
+					parts = append(parts, obj.Type)
+				}
+			}
+		}
+	}
+	add(m["message"])
+	add(m["type"])
+	if len(parts) == 0 {
+		return raw()
+	}
+	return strings.ToLower(strings.Join(parts, " "))
+}
 
 func DefaultClassify(status int, body []byte) core.ErrorClass {
-	snippet := strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))
+	snippet := errorSnippet(body)
 	switch {
 	case status == 451: // unavailable for legal reasons
 		return core.ErrContent

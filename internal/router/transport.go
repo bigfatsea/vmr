@@ -70,6 +70,26 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 // unblocks the reader. Inspection methods on NormalizerStream (Applied, RawPreStrip,
 // ObservedModel, Usage, OutTokens) are protected by a mutex, guaranteeing safe,
 // race-free reads even if a trailing read executes concurrently.
+//
+// Write errors from the client side are returned as *clientWriteError so the
+// caller can distinguish a client disconnect from an upstream read failure
+// (Q08).
+
+// clientWriteError wraps a write-to-client failure so forwardSuccess can
+// distinguish it from an upstream read error — a client that disconnected
+// before the response completed should not be counted as an upstream
+// TRUNCATED.
+type clientWriteError struct{ err error }
+
+func (e *clientWriteError) Error() string { return "write to client: " + e.err.Error() }
+func (e *clientWriteError) Unwrap() error { return e.err }
+
+// isClientWriteError reports whether err is a *clientWriteError, possibly
+// wrapped (errors.As semantics).
+func isClientWriteError(err error) bool {
+	var cwe *clientWriteError
+	return errors.As(err, &cwe)
+}
 func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)
 	type chunk struct {
@@ -106,7 +126,7 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 		case c := <-ch:
 			if len(c.data) > 0 {
 				if _, werr := w.Write(c.data); werr != nil {
-					return werr
+					return &clientWriteError{werr}
 				}
 				if flusher != nil {
 					flusher.Flush()

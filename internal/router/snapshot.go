@@ -268,7 +268,15 @@ func mergeCapabilities(base, extra []string) []string {
 // One http.Client is built per distinct proxy resolution (direct, or a config
 // proxy URL) and shared by every provider that resolves the same way — the
 // per-provider proxy switch never costs a per-request check.
+//
+// Atomicity is self-contained: installMu serializes the installLimiter +
+// snapshot swap + quota prune sequence so a concurrent Install (a second hot
+// reload racing the first, or any future admin caller) can never interleave
+// the three steps — a caller must not need its own external lock to call
+// Install safely.
 func (rt *Router) Install(s *Snapshot) {
+	rt.installMu.Lock()
+	defer rt.installMu.Unlock()
 	byResolution := map[string]*http.Client{}
 	s.clients = map[string]*http.Client{}
 	for _, p := range s.Cfg.Providers {

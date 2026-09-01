@@ -11,10 +11,12 @@ import (
 func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 	t.Parallel()
 	// Vendors may attach verbose debug payloads before the actual error
-	// message; a marker several KB into the body must still be sniffed
-	// within the snippet cutoff — a miss classifies as ErrClient, which
-	// never fails over.
-	padding := strings.Repeat(`{"debug":"xxxxxxxxxxxxxxxx"},`, 200) // ~5.6 KB
+	// message; a marker deep in the body must still be sniffed. errorSnippet
+	// extracts the structured error field regardless of where it sits in the
+	// body — strictly stronger than the old bounded raw scan. The padding
+	// must stay valid JSON (no trailing comma) or the whole body fails to
+	// parse and falls back to the raw window.
+	padding := strings.TrimSuffix(strings.Repeat(`{"debug":"xxxxxxxxxxxxxxxx"},`, 200), ",") // ~5.6 KB
 	cases := []struct {
 		name string
 		body string
@@ -31,7 +33,7 @@ func TestDefaultClassify_MarkerDeepInBody(t *testing.T) {
 			}
 		})
 	}
-	// Beyond the 32 KB bound the marker is invisible by design.
+	// Beyond the snippet bound the marker is invisible by design.
 	huge := strings.Repeat("x", classifySnippetBytes) + "model not found"
 	if got := DefaultClassify(400, []byte(huge)); got != core.ErrClient {
 		t.Errorf("marker past bound: got %v, want %v", got, core.ErrClient)
@@ -267,6 +269,71 @@ func TestDefaultClassify_BalanceExhausted(t *testing.T) {
 			t.Parallel()
 			if got := DefaultClassify(tc.status, []byte(tc.body)); got != tc.want {
 				t.Errorf("status=%d body=%s: got %v, want %v", tc.status, tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDefaultClassify_EchoedPromptNoFalseContentFlag locks in the Q06 fix: a
+// 400 that echoes the client's own prompt back (e.g. "Invalid value for
+// messages[2].content: …") must not misclassify as ErrContent just because an
+// ordinary word from that echo — "case-sensitive", "guardrail", "flagged" —
+// matches a content keyword. The old single-word contentHint (sensitive/
+// flagged/guardrail/inappropriate) tripped exactly this. Phrases survive;
+// bare words don't.
+func TestDefaultClassify_EchoedPromptNoFalseContentFlag(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		// A parameter error quoting the offending content, which happens to
+		// contain programming-common "case-sensitive".
+		{
+			"case-sensitive in echoed content",
+			`{"error":{"message":"Invalid value for messages[2].content: the field ` + "`case-sensitive`" + ` flag is not a string"}}`,
+			core.ErrClient,
+		},
+		// "guardrail" in ordinary prose about API usage, not a moderation block.
+		{
+			"guardrail in echoed prose",
+			`{"error":{"message":"Invalid value for messages[3].content: please follow the guardrail about code formatting"}}`,
+			core.ErrClient,
+		},
+		// "flagged" used generically in a validation message.
+		{
+			"flagged in echoed prose",
+			`{"error":{"message":"invalid parameters: the flagged row index is out of bounds"}}`,
+			core.ErrClient,
+		},
+		// Sanity: the phrase forms still classify as ErrContent.
+		{
+			"sensitive content phrase still flagged",
+			`{"error":{"message":"Your message contains sensitive content and cannot be processed"}}`,
+			core.ErrContent,
+		},
+		{
+			"was flagged phrase still flagged",
+			`{"error":{"message":"Your input was flagged by moderation"}}`,
+			core.ErrContent,
+		},
+		{
+			"blocked by guardrail phrase still flagged",
+			`{"error":{"message":"Request blocked by guardrail: prompt-injection"}}`,
+			core.ErrContent,
+		},
+		{
+			"inappropriate content phrase still flagged",
+			`{"error":{"message":"output may contain inappropriate content (1027)"}}`,
+			core.ErrContent,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v (body=%s)", got, tc.want, tc.body)
 			}
 		})
 	}

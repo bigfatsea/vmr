@@ -82,14 +82,21 @@ func maxOutputHint(snippet string) bool {
 }
 
 // contentHint spots content-policy rejections across vendors (EN + ZH wording).
-// A false positive only costs one harmless extra failover; a miss either stops
-// failover (400) or wrongly cools a healthy endpoint (403) — so lean wide.
+// Single words that could appear in an echoed user prompt (sensitive, flagged,
+// guardrail, inappropriate) are matched as phrases only — the review's Q06
+// finding: a vendor echoing a "case-sensitive" or "guardrail" mention back
+// would otherwise misclassify a parameter error as content-blocked. Chinese
+// single words (敏感, 违规, 合规) are kept as-is: they are far less likely to
+// appear by accident in an echoed prompt.
 func contentHint(snippet string) bool {
 	return containsAny(snippet,
 		"content_filter", "content_policy", "content policy", "content management policy",
-		"moderation", "flagged", "guardrail", "inappropriate",
-		"exists risk", "content risk", "data_inspection",
-		"(1026)", "(1027)", "sensitive", "敏感", "违规", "合规")
+		"moderation", "was flagged", "flagged_input", "flagged as",
+		"blocked by guardrail", "guardrail blocked", "guardrail:",
+		"inappropriate content", "exists risk", "content risk", "data_inspection",
+		"(1026)", "(1027)",
+		"sensitive content", "content sensitive", "sensitive words", "sensitive topic", "sensitive data",
+		"敏感", "违规", "合规")
 }
 
 func containsAny(s string, subs ...string) bool {
