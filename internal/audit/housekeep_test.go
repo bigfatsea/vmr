@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,6 +179,66 @@ func TestHousekeep_RetentionWithInterruptedCompressResume(t *testing.T) {
 	if !strings.Contains(string(stderr), "removed vmr-audit-2026-05-01.jsonl.zst") {
 		t.Errorf("expected exactly one successful removal log line, got stderr: %s", stderr)
 	}
+}
+
+func TestCompressOne_ConcurrentSameSrcProducesValidArchive(t *testing.T) {
+	dir := t.TempDir()
+	name := "vmr-audit-2026-07-06.jsonl"
+	content := strings.Repeat(`{"model":"m"}`+"\n", 1000)
+	writeFile(t, dir, name, content)
+
+	// Two concurrent compresses of the same archive model two vmr processes
+	// housekeeping one log_dir. With a fixed dst+".tmp" their two zstd
+	// streams interleaved into one file and the rename made the corruption
+	// permanent; with unique temp names every interleaving ends in a
+	// complete archive and no temp litter.
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			compressOne(dir, name)
+		}()
+	}
+	wg.Wait()
+
+	mustNotExist(t, filepath.Join(dir, name))
+	if got := decompress(t, filepath.Join(dir, name+".zst")); got != content {
+		t.Errorf("archive corrupted by concurrent compress: len=%d, want %d", len(got), len(content))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if isCompressTemp(e.Name()) {
+			t.Errorf("temp litter left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestHousekeep_CleansStaleCompressTemps: unique temp names mean a crashed
+// process leaves its temp behind (a fixed name used to be overwritten by the
+// next sweep); the next sweep reclaims it once it can't be a live compress.
+func TestHousekeep_CleansStaleCompressTemps(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, ".audit-compress-123.tmp")
+	if err := os.WriteFile(stale, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(dir, ".audit-compress-456.tmp")
+	if err := os.WriteFile(fresh, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	housekeep(dir, time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC))
+
+	mustNotExist(t, stale)
+	mustExist(t, fresh)
 }
 
 func TestCompressFile_RoundTrip(t *testing.T) {

@@ -8,10 +8,23 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+// compressTempPattern is the temp file compressOne writes its zstd stream
+// into. A unique name, not dst+".tmp": two concurrent compresses of the same
+// archive must not interleave their streams into one fixed file and rename
+// the wreck over the destination — with two vmr processes sharing a log_dir
+// that is unrecoverable archive corruption. Same mechanism as every other
+// atomic write site in the repo.
+const compressTempPattern = ".audit-compress-*.tmp"
+
+func isCompressTemp(name string) bool {
+	return strings.HasPrefix(name, ".audit-compress-") && strings.HasSuffix(name, ".tmp")
+}
 
 // auditFileRE matches this package's own filename shape, plain or already
 // compressed: vmr-audit-YYYY-MM-DD.jsonl[.zst]. Anything else in the audit
@@ -47,6 +60,18 @@ func housekeep(dir string, today time.Time) {
 
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		// compressOne's temp, left behind by a crashed process: removable
+		// once it can't be a live compress (a sweep finishes in minutes; the
+		// 24h bound is what keeps this from racing one on a platform without
+		// the dir lock — see lock_windows.go).
+		if isCompressTemp(e.Name()) {
+			if info, err := e.Info(); err == nil && info.ModTime().Before(today.Add(-24*time.Hour)) {
+				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+					fmt.Fprintf(os.Stderr, "audit: housekeeping: remove stale temp %s: %v\n", e.Name(), err)
+				}
+			}
 			continue
 		}
 		m := auditFileRE.FindStringSubmatch(e.Name())
@@ -91,15 +116,21 @@ func compressOne(dir, name string) bool {
 		}
 		return true
 	}
-	tmp := dst + ".tmp"
-	if err := compressFile(src, tmp); err != nil {
-		fmt.Fprintf(os.Stderr, "audit: compress %s: %v\n", name, err)
-		os.Remove(tmp)
+	tmp, err := os.CreateTemp(dir, compressTempPattern)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "audit: compress %s: temp: %v\n", name, err)
 		return false
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	tmpName := tmp.Name()
+	tmp.Close()
+	if err := compressFile(src, tmpName); err != nil {
+		fmt.Fprintf(os.Stderr, "audit: compress %s: %v\n", name, err)
+		os.Remove(tmpName)
+		return false
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
 		fmt.Fprintf(os.Stderr, "audit: compress %s: rename: %v\n", name, err)
-		os.Remove(tmp)
+		os.Remove(tmpName)
 		return false
 	}
 	if err := os.Remove(src); err != nil {

@@ -188,6 +188,12 @@ providers:
   # two (the old format's two separately protocol-keyed minimax declarations
   # duplication). A models.<name> endpoint-group's own `protocol:` picks
   # which of these a given try-order entry actually uses.
+  #
+  # Never embed credentials in base_url — no user:pass@host userinfo, no
+  # ?api_key=…/?token=… query parameter: base_url is recorded verbatim in
+  # the audit log and its derived reports, so such a credential would sit
+  # there in cleartext, and vmr rejects a config like that at load. Keep
+  # credentials in api_key (a ${ENV} reference works).
   - name: minimax
     base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}

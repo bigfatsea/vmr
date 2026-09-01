@@ -491,6 +491,7 @@ type Logger struct {
 	dir    string
 	date   string
 	f      *os.File
+	lock   *os.File         // dir's exclusive advisory lock (nil on windows, or after Close)
 	closed bool             // set by Close; late Writes are dropped, never reopen a file
 	now    func() time.Time // injectable for tests
 
@@ -506,7 +507,11 @@ func New(dir string) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	l := &Logger{dir: dir, now: time.Now}
+	lock, err := acquireDirLock(dir)
+	if err != nil {
+		return nil, err
+	}
+	l := &Logger{dir: dir, now: time.Now, lock: lock}
 	// Catch up on anything left uncompressed/unpurged by a previous run
 	// (crash, restart, or simply not having been up when a day rolled over).
 	l.scheduleHousekeeping()
@@ -614,6 +619,10 @@ func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.closed = true
+	if l.lock != nil {
+		l.lock.Close() // releases the dir lock; nothing to do with an error here
+		l.lock = nil
+	}
 	if l.f != nil {
 		err := l.f.Close()
 		l.f = nil

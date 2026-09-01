@@ -317,7 +317,14 @@ func TestWriteAfterCloseIsRefusedAndNeverReopens(t *testing.T) {
 		t.Error("post-Close Write modified the audit file")
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
-		t.Errorf("post-Close Write created extra files: %d entries", len(entries))
+	n := 0
+	for _, e := range entries {
+		if e.Name() == lockFileName {
+			continue // dir's own lock file, not a reopened audit file
+		}
+		n++
+	}
+	if n != 1 {
+		t.Errorf("post-Close Write created extra files: %d entries", n)
 	}
 }

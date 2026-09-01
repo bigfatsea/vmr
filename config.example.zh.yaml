@@ -164,6 +164,11 @@ providers:
   # 两种接入面，所以一条记录就够，不用像旧格式那样拆成
   # 两份按协议分开的 minimax 重复声明。具体
   # 某条 models.<name> 端点组用这里面的哪一个，由它自己的 `protocol:` 决定。
+  #
+  # 绝不要把凭据写进 base_url——不要用 user:pass@host 形式的 userinfo，也不要
+  # 拼 ?api_key=… / ?token=… 之类的查询参数：base_url 会原样进入审计日志及其
+  # 派生报告，凭据会以明文落在里面，vmr 在加载期就会直接拒绝这类配置。凭据请
+  # 放在 api_key 字段里（支持 ${ENV} 引用）。
   - name: minimax
     base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}

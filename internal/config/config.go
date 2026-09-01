@@ -535,6 +535,9 @@ func (c *Config) validate() error {
 			if err != nil || u.Scheme == "" || u.Host == "" {
 				return fmt.Errorf("provider %q: invalid base_url.%s %q", p.Name, protocol, raw)
 			}
+			if err := checkBaseURLCredentials(p.Name, protocol, raw); err != nil {
+				return err
+			}
 			// proxy: true with nothing to follow is a contradiction the
 			// config states entirely on its own (no environment involved),
 			// so it is rejected here rather than warned about at startup.

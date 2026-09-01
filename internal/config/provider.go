@@ -7,6 +7,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
+	"sort"
+	"strings"
 
 	"vmr/internal/core"
 )
@@ -72,4 +75,45 @@ type Provider struct {
 	// only sharpens vmr report's $ estimates. See ProviderPricingConfig's
 	// doc comment (pricing.go).
 	Pricing *ProviderPricingConfig `yaml:"pricing"`
+}
+
+// baseURLCredentialKeys is the fixed blacklist of query-parameter names whose
+// value IS a credential. Deliberately not a heuristic: vmr must not
+// second-guess legitimate gateway query parameters (Azure's api-version and
+// friends), only reject the keys the config author spelled as credentials.
+// Matched case-insensitively.
+var baseURLCredentialKeys = map[string]bool{
+	"api_key": true, "apikey": true, "key": true,
+	"access_token": true, "refresh_token": true, "token": true,
+	"password": true, "passwd": true, "pwd": true,
+	"secret": true, "client_secret": true,
+}
+
+// checkBaseURLCredentials rejects a base_url that embeds credentials —
+// userinfo (user:pass@host) or a credential-bearing query key. base_url is
+// recorded verbatim in the audit trail (Attempt.URL) and its derived report
+// artifacts, and the audit redaction layer only covers headers, so a
+// credential in the URL would land in cleartext in files users copy and
+// share. Killed at the source — a load-time error — rather than by
+// attempting runtime redaction (an unmatchable blacklist chase). Only the
+// parameter names are ever echoed in the error, never their values.
+func checkBaseURLCredentials(provider, protocol, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil // validate()'s own scheme/host check reports unparseable URLs
+	}
+	if u.User != nil {
+		return fmt.Errorf("provider %q: base_url.%s embeds credentials in its userinfo (user:pass@host) — put the credential in the provider's api_key field (${ENV} references work), not the URL", provider, protocol)
+	}
+	var leaked []string
+	for k := range u.Query() {
+		if baseURLCredentialKeys[strings.ToLower(k)] {
+			leaked = append(leaked, k)
+		}
+	}
+	if len(leaked) > 0 {
+		sort.Strings(leaked)
+		return fmt.Errorf("provider %q: base_url.%s carries credentials in its query parameters (%s) — put the credential in the provider's api_key field (${ENV} references work), not the URL", provider, protocol, strings.Join(leaked, ", "))
+	}
+	return nil
 }
