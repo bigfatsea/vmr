@@ -18,7 +18,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"sort"
 	"time"
 )
 
@@ -493,21 +492,6 @@ type PricingSpec struct {
 // on.
 type QuotaSpec struct {
 	Limits []Limit
-}
-
-// SortedKeys returns m's keys in sorted order. A recurring need across
-// packages that print or iterate a map deterministically (config summaries,
-// adapter/model registries, header tables).
-//
-// Deprecated: canonical implementation moved to internal/fmtutil.SortedKeys.
-// Retained in core as a convenience helper during transition.
-func SortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // ModelLabel is the single human-readable label for a virtual model's

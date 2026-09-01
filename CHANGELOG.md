@@ -32,6 +32,12 @@ commits and design docs hold the full reasoning.
 - `vmr-report.md` Appendix now outputs client reconciliation notes when clients exist in cost/workload tables without standalone sibling files (e.g. single-shot cron traffic)
 
 ### Changed
+- Degraded token metering basis: when an upstream reports no usage, the response-side estimate is now computed over the extracted assistant text instead of raw transport bytes (SSE envelopes inflated the estimate by an order of magnitude); opaque (compressed) responses estimate 0. Routing quota charges and the analytics halves' degraded estimates share one basis, pinned by a parity test
+- `/status` metrics (disk free, log/image dir sizes, memory) are served from a 30s TTL cache with runtime/metrics-based memory reads — dashboard polling no longer triggers stop-the-world pauses or recursive directory walks on the request path
+- Failover classification: relays reporting exhausted balance/credit/quota as 400/403 ("insufficient balance", "余额不足", …) now fail over with a cooldown like real endpoint errors instead of surfacing as client errors; content-policy matching no longer misfires on single words that can appear in an echoed prompt ("case-sensitive"), matching phrases and structured error fields instead
+- Upstream connection pooling: `MaxIdleConnsPerHost` scales with `max_concurrency` instead of being fixed at 16, eliminating connection churn above 16 concurrent streams
+- One routing snapshot per request: a config hot-reload can no longer tear a single request across two config views (auth vs body limits vs routing)
+- A client disconnect during streaming is no longer recorded as an upstream truncation, keeping endpoint reliability stats honest
 - `journey-*.md` Findings section now groups findings by detector `FindingCode`, with hit counts, earliest step indicators, and trust-tier sorting (critical failure modes first, low-confidence detectors last) instead of flat un-scannable 100+ lists
 - `journey-*.html` dashboard verdict headline gracefully degrades to "secondary signal only" (`仅次级信号`) when only low-confidence detectors fired, avoiding misleading confident verdicts on unconfirmed signals
 - `journey-*.html` metrics grid renders `n/a` for Error Recovery Count when running on non-Anthropic Messages protocols where error recovery is structurally undetectable, avoiding misleading `0` counts
@@ -46,6 +52,11 @@ commits and design docs hold the full reasoning.
 - `journey-*.html` timeline now visually highlights single-attempt failed steps (`❌ error/class` badge + red border) and displays an explicit failure outcome status for journeys terminating in error, aligning with Markdown's decision spine
 
 ### Fixed
+- MiniMax thinking-mode repairs: only the first `<think>…</think>` block is stripped — a thinking answer that *discusses* `<think>` in its body no longer has those blocks erased; the guard also works when the tag is split across SSE chunks, and leakage that escapes repair now leaves a `think_pattern_detected` marker in the audit trail
+- `[DONE]` sentinel: detection is now line-exact, so response text containing the literal `data: [DONE]` no longer suppresses the stream-terminating sentinel append (clients relying on `[DONE]` no longer hang)
+- Router stability: a panic in a background health probe no longer kills the whole process; a half-open probe slot is always released even if a handler panics, so an endpoint can no longer stay locked out in "probing" until restart
+- Sticky session affinity no longer depends on auditing being enabled: with `log_dir` unset, client-key buckets stay identical to the audited configuration
+- `413 Request Entity Too Large` now closes the underlying connection promptly (the audit ResponseWriter wrapper implements `Unwrap()`)
 - `vmr analyze -compare`: Comparison Summary card now fully respects English language mode (`-lang en`), eliminating hardcoded Chinese text and dead struct fields (`SummaryCardTitle`) in `internal/i18n`
 - `vmr analyze -compare`: System Prompt diff (`simpleLineDiff`) now uses LCS dynamic programming alignment, eliminating false cascade mismatches when prompts have leading/middle line insertions
 - `vmr-requests-failed.md`: Failure incident clustering now robustly handles corrupt or missing timestamps without decoupling the state machine from the loop index or injecting uninitialized zero-value clusters, and enforces proper convex interval tracking across differing timezone offsets

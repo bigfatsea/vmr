@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 )
 
@@ -334,7 +335,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 		var overrides []pricing.OverrideRule
 		if p.Pricing != nil {
 			mapping = p.Pricing.Map
-			for _, local := range core.SortedKeys(p.Pricing.Map) {
+			for _, local := range fmtutil.SortedKeys(p.Pricing.Map) {
 				// An explicit map entry naming a canonical key or alias the merged
 				// table doesn't contain is always a mistake (a typo, or a
 				// key that only exists in a supplement that isn't loaded) —
@@ -383,7 +384,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 			return fmt.Errorf("provider %q: has a metric: cost quota limit but pricing.currency is not set — cost accounting needs a currency to charge in", p.Name)
 		}
 		factor := pctx.exchangeRateToTarget
-		models := core.SortedKeys(providerModels[p.Name])
+		models := fmtutil.SortedKeys(providerModels[p.Name])
 		for _, model := range models {
 			spec, ok := pricing.Resolve(p.Name, model, pricing.ResolveOptions{
 				Table: pctx.table, Map: mapping, Overrides: overrides,

@@ -266,7 +266,7 @@ func printProviders(w io.Writer, cfg *config.Config) {
 		} else {
 			fmt.Fprintln(w, checkLine(2, "api_key", maskAPIKey(p.APIKey)))
 		}
-		protocols := core.SortedKeys(p.BaseURL)
+		protocols := fmtutil.SortedKeys(p.BaseURL)
 		for _, protocol := range protocols {
 			fmt.Fprintln(w, checkLine(2, fmt.Sprintf("base_url(%s)", protocol), p.BaseURL[protocol]))
 		}
@@ -394,7 +394,7 @@ func printProviderPricing(w io.Writer, cfg *config.Config, p config.Provider) {
 	// the raw declaration instead of silently dropping it, since it's
 	// explicit config a human wrote and may expect to see confirmed.
 	fmt.Fprintln(w, "  pricing: (declared; not resolved — no routed endpoint references this provider)")
-	for _, local := range core.SortedKeys(p.Pricing.Map) {
+	for _, local := range fmtutil.SortedKeys(p.Pricing.Map) {
 		fmt.Fprintln(w, checkLine(4, "map", local+" -> "+p.Pricing.Map[local]))
 	}
 	for i, oc := range p.Pricing.Overrides {
@@ -458,7 +458,7 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		}
 		if len(l.ModelMultipliers) > 0 {
 			parts := make([]string, 0, len(l.ModelMultipliers))
-			for _, model := range core.SortedKeys(l.ModelMultipliers) {
+			for _, model := range fmtutil.SortedKeys(l.ModelMultipliers) {
 				parts = append(parts, fmt.Sprintf("%s=%g", model, l.ModelMultipliers[model]))
 			}
 			fmt.Fprintln(w, checkLine(6, "model_multipliers", strings.Join(parts, " ")))
@@ -491,7 +491,7 @@ func providerProxyLine(p config.Provider, protocols []string, descFor map[string
 
 func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues []config.Issue) {
 	fmt.Fprintln(w, "=== Models ===")
-	for i, name := range core.SortedKeys(cfg.Models) {
+	for i, name := range fmtutil.SortedKeys(cfg.Models) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
@@ -520,7 +520,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			fallbackOK := m.Fallback == nil || *m.Fallback
 			fmt.Fprintln(w, checkLine(2, "fallback", fmt.Sprintf("%v", fallbackOK)))
 		}
-		for _, protocol := range core.SortedKeys(snap.Models) {
+		for _, protocol := range fmtutil.SortedKeys(snap.Models) {
 			route, ok := snap.Models[protocol][name]
 			if !ok {
 				continue
@@ -537,7 +537,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 				}
 				if len(ep.RoleMap) > 0 {
 					rm := make([]string, 0, len(ep.RoleMap))
-					for _, from := range core.SortedKeys(ep.RoleMap) {
+					for _, from := range fmtutil.SortedKeys(ep.RoleMap) {
 						rm = append(rm, from+"->"+ep.RoleMap[from])
 					}
 					parts = append(parts, "role_map="+strings.Join(rm, ","))

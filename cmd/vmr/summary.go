@@ -12,7 +12,7 @@ import (
 	"sort"
 
 	"vmr/internal/config"
-	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/router"
 )
 
@@ -79,7 +79,7 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 	providers := append([]config.Provider(nil), cfg.Providers...)
 	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
 	for _, p := range providers {
-		for _, protocol := range core.SortedKeys(p.BaseURL) {
+		for _, protocol := range fmtutil.SortedKeys(p.BaseURL) {
 			desc := "direct"
 			if mode, proxyURL := cfg.ProxySpecFor(p, protocol); mode == config.ProxyURL {
 				desc = redactProxyURL(proxyURL)

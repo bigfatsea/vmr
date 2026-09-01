@@ -19,6 +19,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/health"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
@@ -468,8 +469,12 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 
 	rt.Health.ReportSuccess(key)
 	*healthReported = true
-	// Body omitted: passthrough makes it byte-identical to the client
-	// response body, which the server layer records.
+	// Body omitted: the client-facing response body is recorded by the
+	// server layer, and this attempt records only the headers. It is not
+	// byte-identical to the upstream's — model rewrite, [DONE] completion
+	// and quirk repairs may have changed bytes — so any deviation is
+	// traceable through the response normalizer's Norm markers, RawPreStrip
+	// and ObservedModel.
 	att.SetSuccessResponse(resp.StatusCode, resp.Header)
 	body := resp.Body
 	defer body.Close()
@@ -575,7 +580,7 @@ func parseRetryAfter(h http.Header) time.Duration {
 }
 
 func modelNames(s *Snapshot, protocol string) []string {
-	return core.SortedKeys(s.Models[protocol])
+	return fmtutil.SortedKeys(s.Models[protocol])
 }
 
 // otherProtocolFor reports which protocol group (other than protocol) defines

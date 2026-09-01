@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 )
 
 // Adapter carries requests to one provider protocol family and back.
@@ -93,7 +94,7 @@ func Names() []string {
 	if cur == nil {
 		return nil
 	}
-	return core.SortedKeys(*cur)
+	return fmtutil.SortedKeys(*cur)
 }
 
 // ResolveURL joins baseURL and suffix into the complete upstream URL.

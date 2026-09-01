@@ -107,8 +107,8 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry) (models []modelStatus) {
-	for _, p := range core.SortedKeys(snap.Models) {
-		for _, name := range core.SortedKeys(snap.Models[p]) {
+	for _, p := range fmtutil.SortedKeys(snap.Models) {
+		for _, name := range fmtutil.SortedKeys(snap.Models[p]) {
 			route := snap.Models[p][name]
 			eps, seen, caps, maxTokens := make([]endpointStatus, len(route.Endpoints)), map[string]bool{}, []string{}, int64(0)
 			for i, ep := range route.Endpoints {

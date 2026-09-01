@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"net"
 
-	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 )
 
 // Severity distinguishes an Issue that should fail `vmr check` and gate
@@ -162,7 +162,7 @@ func (c *Config) checkProviders() []Issue {
 // duplicate that wouldn't actually be injected.
 func (c *Config) checkModels() []Issue {
 	var issues []Issue
-	for _, name := range core.SortedKeys(c.Models) {
+	for _, name := range fmtutil.SortedKeys(c.Models) {
 		m := c.Models[name]
 		seen := map[string]bool{}
 		protocols := map[string]bool{}

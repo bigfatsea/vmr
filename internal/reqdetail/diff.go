@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"vmr/internal/chatmsg"
-	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
@@ -25,7 +24,7 @@ func headerTable(h http.Header, t i18n.DetailText) string {
 	if len(h) == 0 {
 		return t.HeaderTableEmpty
 	}
-	keys := core.SortedKeys(h)
+	keys := fmtutil.SortedKeys(h)
 	var b strings.Builder
 	fmt.Fprintf(&b, "| %s | %s |\n|---|---|\n", t.HeaderColumn, t.ValueColumn)
 	for _, k := range keys {
@@ -44,7 +43,7 @@ func diffHeaderTable(base, other http.Header, t i18n.DetailText) (string, int) {
 	for k := range other {
 		keys[k] = true
 	}
-	sorted := core.SortedKeys(keys)
+	sorted := fmtutil.SortedKeys(keys)
 
 	var b strings.Builder
 	changed := 0

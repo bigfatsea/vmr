@@ -17,6 +17,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/imgprep"
 	"vmr/internal/logtee"
 	"vmr/internal/router"
@@ -384,8 +385,8 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 	// iteration order happened to visit first.
 	seen := make(map[string]bool)
 	var list []model
-	for _, protocol := range core.SortedKeys(snap.Models) {
-		for _, name := range core.SortedKeys(snap.Models[protocol]) {
+	for _, protocol := range fmtutil.SortedKeys(snap.Models) {
+		for _, name := range fmtutil.SortedKeys(snap.Models[protocol]) {
 			if seen[name] {
 				continue
 			}

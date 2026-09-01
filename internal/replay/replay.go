@@ -23,6 +23,7 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
@@ -550,7 +551,7 @@ func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte)
 	fmt.Fprintf(w, "DRY-RUN  protocol=%s provider=%s model=%s\n", ep.AdapterType, ep.Provider, ep.Model)
 	fmt.Fprintf(w, "-> %s %s\n", req.Method, req.URL)
 	redacted := audit.Redact(req.Header)
-	for _, k := range core.SortedKeys(redacted) {
+	for _, k := range fmtutil.SortedKeys(redacted) {
 		for _, v := range redacted[k] {
 			fmt.Fprintf(w, "   %s: %s\n", k, v)
 		}

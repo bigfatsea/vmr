@@ -350,7 +350,7 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 	if lc.TokenWeights != nil && lc.Resolved.Metric != core.MetricTokens {
 		return fmt.Errorf("provider %q: %s.token_weights is configured but this Limit's metric is %q, not \"tokens\" — token_weights only affects tokens accounting", providerName, fieldPrefix, lc.Metric)
 	}
-	for _, model := range core.SortedKeys(lc.ModelMultipliers) {
+	for _, model := range fmtutil.SortedKeys(lc.ModelMultipliers) {
 		if !positiveFinite(lc.ModelMultipliers[model]) {
 			return fmt.Errorf("provider %q: %s.model_multipliers[%q]: must be a finite number > 0 (got %v)", providerName, fieldPrefix, model, lc.ModelMultipliers[model])
 		}

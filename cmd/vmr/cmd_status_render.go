@@ -98,7 +98,7 @@ func printStatus(st *statusResponse) {
 		}
 		if len(q.ModelMultipliers) > 0 {
 			parts := make([]string, 0, len(q.ModelMultipliers))
-			for _, model := range core.SortedKeys(q.ModelMultipliers) {
+			for _, model := range fmtutil.SortedKeys(q.ModelMultipliers) {
 				parts = append(parts, fmt.Sprintf("%s=%g", model, q.ModelMultipliers[model]))
 			}
 			fmt.Printf("  model_multipliers: %s\n", strings.Join(parts, " "))

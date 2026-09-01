@@ -19,6 +19,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 	"vmr/internal/rundir"
 )
@@ -380,7 +381,7 @@ func expandEnv(s string) (string, []string, error) {
 	if len(empty) == 0 {
 		return out, nil, nil
 	}
-	return out, core.SortedKeys(empty), nil
+	return out, fmtutil.SortedKeys(empty), nil
 }
 
 // expandTilde resolves a leading "~/" (or a bare "~") to the user's home

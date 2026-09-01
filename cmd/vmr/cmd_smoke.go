@@ -35,6 +35,7 @@ import (
 
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/router"
 )
 
@@ -91,7 +92,7 @@ func smokeRequestBody(protocol, model string) []byte {
 func smokeTargets(cfg *config.Config) []smokeTarget {
 	var out []smokeTarget
 	seen := map[string]bool{}
-	for _, name := range core.SortedKeys(cfg.Models) {
+	for _, name := range fmtutil.SortedKeys(cfg.Models) {
 		m := cfg.Models[name]
 		for _, eg := range m.Endpoints {
 			for _, prov := range eg.Providers {

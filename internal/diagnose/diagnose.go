@@ -190,7 +190,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	providers := append([]config.Provider(nil), cfg.Providers...)
 	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
 	for _, p := range providers {
-		for _, protocol := range core.SortedKeys(p.BaseURL) {
+		for _, protocol := range fmtutil.SortedKeys(p.BaseURL) {
 			providerChecks = append(providerChecks, providerCheck{protocol, p.Name, p})
 		}
 	}
@@ -225,7 +225,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		// same rewrite real traffic would get and, on failure, to word its
 		// hint correctly.
 		seen := map[epKey]map[string]string{}
-		for _, name := range core.SortedKeys(cfg.Models) {
+		for _, name := range fmtutil.SortedKeys(cfg.Models) {
 			for _, eg := range cfg.Models[name].Endpoints {
 				for _, pn := range eg.Providers {
 					for _, mn := range eg.Models {
@@ -275,8 +275,8 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 
 	// Phase 4: static route preview per virtual model, annotated with
 	// whatever Phase 3 found for each endpoint in *this* run.
-	for _, protocol := range core.SortedKeys(snap.Models) {
-		for _, name := range core.SortedKeys(snap.Models[protocol]) {
+	for _, protocol := range fmtutil.SortedKeys(snap.Models) {
+		for _, name := range fmtutil.SortedKeys(snap.Models[protocol]) {
 			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
 			group := core.ModelLabel(name, protocol)
