@@ -3,6 +3,9 @@
 package quota
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -120,6 +123,57 @@ func TestRegistry_LazyResetOnUsedAlone(t *testing.T) {
 	c, _ := r.Used("plan-a", "requests/1mo", p2)
 	if c.Requests != 0 {
 		t.Fatalf("Used() alone across a period boundary = %v, want 0 (reset without any Charge)", c.Requests)
+	}
+}
+
+// TestRegistry_ClockRollback_KeepsCountsAndWarns pins R49: the lazy reset is
+// direction-sensitive. A backward periodStart (NTP correction, VM snapshot
+// restore, TZ change) must KEEP the current period's counts and warn once,
+// not zero the whole period — a one-way wipe that a later Flush would make
+// permanent.
+func TestRegistry_ClockRollback_KeepsCountsAndWarns(t *testing.T) {
+	r := NewRegistry("")
+	var buf bytes.Buffer
+	r.SetLogger(log.New(&buf, "", 0))
+	key := "requests/1mo"
+	p1 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	p0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	r.Charge("plan-a", key, p1, Counters{Requests: 5}, 0)
+
+	// Forward movement still resets (regression — the pre-R49 behavior).
+	p2 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	if c, _ := r.Used("plan-a", key, p2); c.Requests != 0 {
+		t.Fatalf("forward period roll = %v, want 0 (reset still works)", c.Requests)
+	}
+	r.Charge("plan-a", key, p2, Counters{Requests: 3}, 0)
+
+	// Backward: counts must be KEPT, and a WARN emitted once.
+	c, _ := r.Used("plan-a", key, p0)
+	if c.Requests != 3 {
+		t.Fatalf("count after clock rollback = %v, want 3 retained", c.Requests)
+	}
+	if !strings.Contains(buf.String(), "clock moved backward") {
+		t.Fatalf("expected a clock-rollback WARN, got log=%q", buf.String())
+	}
+	// Dedup: a second rollback must not log again.
+	buf.Reset()
+	r.Used("plan-a", key, p0)
+	if buf.Len() != 0 {
+		t.Fatalf("second rollback produced another WARN: %q", buf.String())
+	}
+}
+
+// TestRegistry_SamePeriod_NoReset pins the equal-period leg of R49: an equal
+// periodStart must not touch the bucket (regression).
+func TestRegistry_SamePeriod_NoReset(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 2}, 0)
+	c, _ := r.Used("plan-a", "requests/1mo", ps)
+	if c.Requests != 3 {
+		t.Fatalf("same-period charges = %v, want 3 (equal period must not reset)", c.Requests)
 	}
 }
 

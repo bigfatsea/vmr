@@ -3,6 +3,7 @@
 package quota
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -222,6 +223,11 @@ type Registry struct {
 	accounts map[string]map[string]*bucket // provider name -> limitKey -> bucket
 	path     string
 	dirty    bool
+	logger   *log.Logger
+	// rollbackWarned dedups the clock-rollback WARN (R49): during a rollback
+	// every Charge/Used hits resetIfStaleLocked, and a persistent rollback
+	// must not spam the log — one line per process lifetime covers it.
+	rollbackWarned bool
 }
 
 // NewRegistry creates a Registry that persists to path (see store.go).
@@ -229,6 +235,15 @@ type Registry struct {
 // call Load/Flush) — Charge/Used still work purely in memory.
 func NewRegistry(path string) *Registry {
 	return &Registry{accounts: map[string]map[string]*bucket{}, path: path}
+}
+
+// SetLogger wires a logger for the clock-rollback WARN (R49). Nil (the
+// default) silences it. Takes r.mu because resetIfStaleLocked reads the
+// field under it.
+func (r *Registry) SetLogger(l *log.Logger) {
+	r.mu.Lock()
+	r.logger = l
+	r.mu.Unlock()
 }
 
 // Keys returns every limitKey currently on record for provider — including
@@ -269,18 +284,29 @@ func (r *Registry) getLocked(provider, limitKey string) *bucket {
 	return b
 }
 
-// resetIfStaleLocked zeroes b in place when periodStart has moved past what
-// b currently believes — the lazy-reset mechanism: no goroutine, no missed-
-// tick risk, and a process restart self-corrects the moment the first
-// Charge/Used after the gap runs, simply by comparing timestamps instead of
-// replaying missed ticks. Returns true when it actually reset, so a read
-// path (Used/EstimatedCostFor) can mark the Registry dirty — a period roll
-// observed only by a read still needs to reach vmr-quota.json (B8).
-func resetIfStaleLocked(b *bucket, periodStart time.Time) bool {
+// resetIfStaleLocked advances b in place when periodStart has moved FORWARD
+// past what b currently believes — the lazy-reset mechanism: no goroutine,
+// no missed-tick risk, and a process restart self-corrects the moment the
+// first Charge/Used after the gap runs, simply by comparing timestamps
+// instead of replaying missed ticks. Returns true when it actually reset, so
+// a read path (Used/EstimatedCostFor) can mark the Registry dirty — a period
+// roll observed only by a read still needs to reach vmr-quota.json (B8).
+//
+// A backward move (ps < b.PeriodStart) is a clock rollback — NTP
+// correction, VM snapshot restore, TZ change — NOT a new period: the bucket
+// is kept and the event warned about once per process (every Charge/Used
+// during a rollback would otherwise re-hit the same condition). (R49)
+func (r *Registry) resetIfStaleLocked(b *bucket, periodStart time.Time) bool {
 	ps := periodStart.Unix()
-	if b.PeriodStart != ps {
+	if ps > b.PeriodStart {
 		*b = bucket{PeriodStart: ps}
 		return true
+	}
+	if ps < b.PeriodStart && !r.rollbackWarned {
+		r.rollbackWarned = true
+		if r.logger != nil {
+			r.logger.Printf("WARN quota: clock moved backward (stored period_start %d > now %d); keeping the current period's counters", b.PeriodStart, ps)
+		}
 	}
 	return false
 }
@@ -295,7 +321,7 @@ func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Co
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	resetIfStaleLocked(b, periodStart)
+	r.resetIfStaleLocked(b, periodStart)
 	b.C = b.C.Add(d)
 	b.Estimated += estimated
 	r.dirty = true
@@ -312,7 +338,7 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	if resetIfStaleLocked(b, periodStart) {
+	if r.resetIfStaleLocked(b, periodStart) {
 		r.dirty = true
 	}
 	return b.C, b.Estimated
@@ -332,7 +358,7 @@ func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	resetIfStaleLocked(b, periodStart)
+	r.resetIfStaleLocked(b, periodStart)
 	b.EstimatedCost += amount
 	r.dirty = true
 }
@@ -345,7 +371,7 @@ func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
-	if resetIfStaleLocked(b, periodStart) {
+	if r.resetIfStaleLocked(b, periodStart) {
 		r.dirty = true
 	}
 	return b.EstimatedCost

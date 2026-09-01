@@ -48,10 +48,20 @@ type Rate struct {
 }
 
 // Complete reports whether every one of Rate's four components is set
-// (explicitly, even if to 0.0) — the gate config.validate() applies to any
-// provider+model a metric: cost Limit will actually charge.
+// (explicitly, even if to 0.0) and is a finite non-negative number — the
+// gate config.validate() applies to any provider+model a metric: cost Limit
+// will actually charge. A nil, NaN, Inf, or negative component makes a rate
+// unusable, matching the parse-time numeric gate in parseTable (R42).
 func (r Rate) Complete() bool {
-	return r.InFresh != nil && r.CacheRead != nil && r.CacheWrite != nil && r.Out != nil
+	if r.InFresh == nil || r.CacheRead == nil || r.CacheWrite == nil || r.Out == nil {
+		return false
+	}
+	for _, v := range []*float64{r.InFresh, r.CacheRead, r.CacheWrite, r.Out} {
+		if math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // MissingComponents names r's unset fields, in a fixed order, for error
@@ -586,6 +596,28 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 				return nil, fmt.Errorf("parse pricing table: rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
 			}
 			rate = rate.Scale(factor)
+		}
+		// Reject NaN, Inf, and negative rates — a hand-written supplement
+		// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons
+		// every downstream consumer (Counters.Cost, ScoreForLimits, Flush).
+		// Each component is checked individually so the error message names
+		// the exact field the user needs to fix.
+		for _, comp := range []struct {
+			name string
+			val  *float64
+		}{{"in_fresh", rate.InFresh}, {"cache_read", rate.CacheRead}, {"cache_write", rate.CacheWrite}, {"out", rate.Out}} {
+			if comp.val == nil {
+				continue
+			}
+			if math.IsNaN(*comp.val) {
+				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is NaN", i, r.Key, comp.name)
+			}
+			if math.IsInf(*comp.val, 0) {
+				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is Inf", i, r.Key, comp.name)
+			}
+			if *comp.val < 0 {
+				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is negative (%v)", i, r.Key, comp.name, *comp.val)
+			}
 		}
 		t.put(r.Key, rate)
 	}

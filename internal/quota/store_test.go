@@ -3,8 +3,14 @@
 package quota
 
 import (
+	"bytes"
+	"errors"
+	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,7 +177,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	ps := time.Now()
 	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 
-	stop := r.StartFlusher(20 * time.Millisecond)
+	stop := r.StartFlusher(20*time.Millisecond, nil)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, err := os.Stat(path); err == nil {
@@ -204,8 +210,167 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 
 func TestStore_EmptyPathFlusherIsNoOp(t *testing.T) {
 	r := NewRegistry("")
-	stop := r.StartFlusher(10 * time.Millisecond)
+	stop := r.StartFlusher(10*time.Millisecond, nil)
 	stop() // must return promptly, not block forever
+}
+
+// TestStore_FlushFailure_KeepsDirtyAndReports pins R47's first half: a Flush
+// that fails (here a NaN counter makes json.MarshalIndent fail — the exact
+// R42 poisoning trigger) must (a) return the error, (b) NOT swallow dirty, so
+// the next tick retries instead of dropping the unsaved state forever.
+func TestStore_FlushFailure_KeepsDirtyAndReports(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	r := NewRegistry(path)
+	ps := time.Now()
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Cost: math.NaN()}, 0) // NaN poisons marshal
+
+	if err := r.Flush(); err == nil {
+		t.Fatal("Flush with a NaN counter returned nil, want an error")
+	}
+	// dirty must survive the failure so the next tick retries.
+	r.mu.Lock()
+	dirty := r.dirty
+	r.mu.Unlock()
+	if !dirty {
+		t.Fatal("dirty was cleared after a failed Flush — the unsaved state would never be retried")
+	}
+	// And the file must not exist (failure happened before any rename).
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("failed Flush left a file behind: %v", err)
+	}
+}
+
+// TestStore_Flusher_ReportsFailures pins R47's second half: StartFlusher must
+// surface repeated Flush failures to its logger instead of dropping them.
+func TestStore_Flusher_ReportsFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	r := NewRegistry(path)
+	ps := time.Now()
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Cost: math.NaN()}, 0) // every tick's Flush fails
+
+	// The flusher goroutine writes through the logger while this test reads,
+	// so the buffer needs its own lock (go test -race catches the raw kind).
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	logger := log.New(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Write(p)
+	}), "", 0)
+	stop := r.StartFlusher(10*time.Millisecond, logger)
+	defer stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Len() == 0
+	}() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(buf.String(), "quota flush") {
+		t.Fatalf("flusher never logged the Flush failure; log=%q", buf.String())
+	}
+}
+
+// writerFunc adapts a func to io.Writer without a named type per call site.
+type writerFunc func(p []byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// TestFlushLog_Dedup pins R47's throttling: identical consecutive failures
+// log on the first and every 10th occurrence, not on every tick.
+func TestFlushLog_Dedup(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	fl := &flushLog{logger: logger}
+	boom := errors.New("disk full")
+	for i := 0; i < 25; i++ {
+		fl.Error(boom)
+	}
+	// 25 identical failures: exactly 3 lines (1st, 10th, 20th).
+	if n := strings.Count(buf.String(), "\n"); n != 3 {
+		t.Fatalf("25 identical failures logged %d lines, want 3 (dedup broken)", n)
+	}
+	if !strings.Contains(buf.String(), "10 consecutive") || !strings.Contains(buf.String(), "20 consecutive") {
+		t.Fatalf("repeated-failure lines must carry the consecutive count: %q", buf.String())
+	}
+}
+
+// TestStore_LoadFile_NullBucketRejected pins R43: a null bucket decodes fine
+// (a zero value), so only an explicit nil-bucket check can reject it — a
+// null must fail the load, not panic later in the response path.
+func TestStore_LoadFile_NullBucketRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"accounts":{"acct":{"requests/1mo":null}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := LoadFile(path); err == nil {
+		t.Fatal("LoadFile accepted a null bucket, want an error (and no panic)")
+	}
+}
+
+// TestStore_LoadFile_WrongVersionRejected pins R66: a version stamp that is
+// never validated is worse than none — refuse to adopt an unknown shape.
+func TestStore_LoadFile_WrongVersionRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	if err := os.WriteFile(path, []byte(`{"version":99,"accounts":{"acct":{"requests/1mo":{"period_start":0,"counters":{}}}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := LoadFile(path); err == nil {
+		t.Fatal("LoadFile accepted version 99, want an error")
+	}
+}
+
+// TestStore_LoadFile_ValidFileLoaded pins the LoadFile happy path that the
+// R43/R66 rejection must not break.
+func TestStore_LoadFile_ValidFileLoaded(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	r := NewRegistry(path)
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 7}, 0)
+	if err := r.Flush(); err != nil {
+		t.Fatalf("seed flush: %v", err)
+	}
+	accounts, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile on a valid file: %v", err)
+	}
+	if accounts["plan-a"]["requests/1mo"].C.Requests != 7 {
+		t.Fatalf("LoadFile returned wrong data: %+v", accounts)
+	}
+}
+
+// TestStore_Load_StructurallyCorrupt_RegistryUsable pins the R43 end-to-end
+// contract: a structurally corrupt file (null bucket) makes Load fail, but
+// the Registry must still start from zero and remain usable — the same
+// "corrupt file must never stall routing" contract as syntax corruption.
+func TestStore_Load_StructurallyCorrupt_RegistryUsable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"accounts":{"acct":{"requests/1mo":null}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	r := NewRegistry(path)
+	if err := r.Load(); err == nil {
+		t.Fatal("Load accepted a null bucket, want an error")
+	}
+	// Must behave like a fresh registry: no panic, counts work.
+	c, _ := r.Used("acct", "requests/1mo", time.Now())
+	if c.Requests != 0 {
+		t.Fatalf("registry after failed structural Load = %+v, want zero value", c)
+	}
+	r.Charge("acct", "requests/1mo", time.Now(), Counters{Requests: 1}, 0)
+	if err := r.Flush(); err != nil {
+		t.Fatalf("Flush after failed structural Load: %v", err)
+	}
 }
 
 func TestStore_PruneOrphanKeys(t *testing.T) {

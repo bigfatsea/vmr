@@ -168,11 +168,12 @@ func cmdStart(args []string) error {
 
 	// Quota registry lives on Router (surviving hot reloads). Load errors are non-fatal (logged).
 	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
+	qreg.SetLogger(logger)
 	if err := qreg.Load(); err != nil {
 		logger.Printf("WARN quota state: %v (starting from zero)", err)
 	}
 	rt.Quota = qreg
-	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
+	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval, logger)
 	defer func() { stopQuotaFlush(); qreg.Flush() }()
 
 	snap, err := router.BuildSnapshot(cfg)
