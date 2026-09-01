@@ -42,8 +42,9 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 	//
 	// A half-open endpoint (fails>0, cooldown expired) never gets touched by
 	// real traffic at all — instead the first caller to notice it's unprobed
-	// claims the single-flight slot (Acquire, same method the per-candidate
-	// loop below uses) and hands it to a background probe goroutine, then
+	// claims the single-flight slot (Classify's needsProbe return, which sets
+	// probing itself — the per-candidate loop's Acquire below is only a race
+	// guard) and hands it to a background probe goroutine, then
 	// treats the endpoint as unavailable for THIS request exactly as if
 	// Acquire had failed. Real requests never wait on that probe and are
 	// never diverted for as long as it takes to resolve — only for as long

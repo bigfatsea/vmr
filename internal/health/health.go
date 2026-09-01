@@ -2,13 +2,17 @@
 
 // Package health implements the failure-driven health state machine:
 // cooldown with exponential backoff and single-flight half-open recovery
-// (Acquire/ReportSuccess/ReportFailure/ReportNeutral). It knows nothing
+// (Acquire/ReportSuccess/ReportFailure/ReportNeutral, plus ReleaseProbe for
+// call sites that return the probe slot before any verdict exists, and
+// ReportProbeSuccess for the weaker probe-evidence success — see those
+// methods). It knows nothing
 // about *how* a half-open endpoint gets re-verified — that policy (a
 // decoupled background probe, see internal/router/probe.go) lives entirely
 // in internal/router.
 package health
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
@@ -94,7 +98,7 @@ func (r *Registry) Acquire(key string, now time.Time) bool {
 // flags, client cancellation, ErrClient responses — that say nothing about
 // the endpoint's health: the probe neither confirms recovery nor deepens
 // the backoff. Every acquired probe must end in exactly one of Success /
-// Failure / Neutral, or the endpoint stays locked out forever.
+// Failure / Neutral / ReleaseProbe, or the endpoint stays locked out forever.
 func (r *Registry) ReportNeutral(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,6 +107,27 @@ func (r *Registry) ReportNeutral(key string) {
 	}
 }
 
+// ReleaseProbe returns a half-open probe slot without reporting any health
+// verdict. Behaviorally identical to ReportNeutral, but a distinct method on
+// purpose: Neutral is a *final* outcome ("this result carries no health
+// information"), while ReleaseProbe says "the slot's single-flight job is
+// done, the verdict — if any — comes later" (forwardSuccess releases before
+// streaming a 200 and only reports once the stream's true outcome is known;
+// a mid-stream panic then leaves the slot released with no verdict, which is
+// the intended fallback). Merging the two would make every call site read as
+// a final verdict and the report-once audit could no longer tell the
+// deferred case apart.
+func (r *Registry) ReleaseProbe(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.m[key]; ok {
+		s.probing = false
+	}
+}
+
+// ReportSuccess records a completed real-traffic response: fully healthy.
+// A background probe's success is weaker evidence (a small echo request
+// passes where a full-size request may not) — ReportProbeSuccess below.
 func (r *Registry) ReportSuccess(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -112,43 +137,102 @@ func (r *Registry) ReportSuccess(key string) {
 	s.probing = false
 }
 
+// ReportProbeSuccess records a background probe's success: decay, not
+// clear. The probe is a max_tokens-300 echo — against a rate-limited or
+// context-pressured endpoint it passes systematically more often than real
+// traffic, so letting it zero fails would let the weakest signal disarm the
+// backoff exactly where the endpoint needs it most. Fails drops by one and
+// the endpoint leaves cooldown, but it stays half-open (Classify keeps
+// dispatching probes instead of real traffic) until a real request
+// completes and ReportSuccess zeroes the count.
+func (r *Registry) ReportProbeSuccess(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.get(key)
+	if s.fails > 0 {
+		s.fails--
+	}
+	s.cooldownUntil = time.Time{}
+	s.probing = false
+}
+
 // ReportFailure records a failure, deepens the backoff and returns the cooldown applied.
+// fails counts consecutive failures under the *current* backoff curve:
+// switching between the transient and long curves resets it to 1, so a run
+// of cheap 5xx retries cannot inflate the first 401's long curve to its
+// hour cap (and a long outage cannot over-deepen the first transient
+// failure after recovery).
 func (r *Registry) ReportFailure(key string, class core.ErrorClass, retryAfter time.Duration, now time.Time) time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.get(key)
 	s.probing = false
-	s.fails++
+	long := class == core.ErrAuth || class == core.ErrEndpoint
+	if long != (s.lastClass == core.ErrAuth || s.lastClass == core.ErrEndpoint) {
+		s.fails = 1
+	} else {
+		s.fails++
+	}
 	s.lastClass = class
 
 	var d time.Duration
 	switch class {
 	case core.ErrAuth, core.ErrEndpoint:
 		d = backoff(longBase, longCap, s.fails)
+	case core.ErrClient, core.ErrRateLimit, core.ErrTransient, core.ErrContent, core.ErrContextLimit, core.ErrQuirk:
+		d = retryAfterCooldown(retryAfter, s.fails)
 	default:
-		// Retry-After is honored beyond 429: OpenRouter sends it on 503 too.
-		// Capped at longCap: it is upstream-controlled input, and a bogus
-		// huge value must not lock an endpoint out until process restart —
-		// the same "recovery promptness over precision" call as ErrEndpoint.
-		if retryAfter > 0 {
-			d = min(retryAfter, longCap)
-		} else {
-			d = backoff(transientBase, transientCap, s.fails)
-		}
+		// Out-of-enum value only — every declared ErrorClass has an explicit
+		// case above; a class added to core must be added here too.
+		d = retryAfterCooldown(retryAfter, s.fails)
 	}
 	s.cooldownUntil = now.Add(d)
 	return d
 }
 
-func backoff(base, cap time.Duration, fails int) time.Duration {
+func retryAfterCooldown(retryAfter time.Duration, fails int) time.Duration {
+	// Retry-After is honored beyond 429: OpenRouter sends it on 503 too.
+	// Capped at longCap: it is upstream-controlled input, and a bogus
+	// huge value must not lock an endpoint out until process restart —
+	// the same "recovery promptness over precision" call as ErrEndpoint.
+	if retryAfter > 0 {
+		return min(retryAfter, longCap)
+	}
+	return backoff(transientBase, transientCap, fails)
+}
+
+func backoff(base, ceiling time.Duration, fails int) time.Duration {
 	d := base
 	for i := 1; i < fails; i++ {
 		d *= 2
-		if d >= cap {
-			return cap
+		if d >= ceiling {
+			d = ceiling
+			break
 		}
 	}
-	return d
+	// ±10% jitter: endpoints knocked down by one provider-level failure
+	// would otherwise all compute the same cooldown, expire together and
+	// re-probe in a synchronized volley. Applied after the cap too — a
+	// capped volley would otherwise re-sync at every expiry — so the
+	// jittered value may exceed the nominal ceiling by up to 10%.
+	return d + time.Duration(float64(d)*(0.2*rand.Float64()-0.1))
+}
+
+// Prune deletes state for keys not in keep — the health counterpart of
+// quota.Registry.Prune, to be called after a config hot-reload so endpoints
+// removed from config don't leave orphan cooldown entries behind. Returns
+// the number of entries removed.
+func (r *Registry) Prune(keep map[string]bool) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for k := range r.m {
+		if !keep[k] {
+			delete(r.m, k)
+			n++
+		}
+	}
+	return n
 }
 
 // Classify answers the router's per-candidate health-filter question in one

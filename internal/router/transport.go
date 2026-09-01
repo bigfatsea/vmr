@@ -8,6 +8,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -100,6 +101,19 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				// respnorm's state machine runs on this goroutine over bytes
+				// fully controlled by the upstream; a malformed-stream panic
+				// here must not kill the process. Surface it as an upstream
+				// read failure (a non-clientWriteError) so the caller takes
+				// the TRUNCATED path, never a silent clean success.
+				select {
+				case ch <- chunk{err: fmt.Errorf("upstream stream panic: %v", p)}:
+				case <-done:
+				}
+			}
+		}()
 		buf := make([]byte, 32<<10)
 		for {
 			n, err := body.Read(buf)

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -15,8 +16,10 @@ import (
 // channel (an exhausted inotify handle, the watched directory disappearing,
 // …) — without it, the watch goroutine used to just read the error and drop
 // it, so hot reload could stop working with zero signal to the operator;
-// SIGHUP would still work, but nothing said so. onError runs on the same
-// internal goroutine as onChange, so it must not block.
+// SIGHUP would still work, but nothing said so. It is also called if the
+// watch goroutine itself panics (recovered there) — the goroutine cannot be
+// revived, so that report means hot reload is down until restart. onError
+// runs on the same internal goroutine as onChange, so it must not block.
 func Watch(path string, onChange func(), onError func(error)) (func() error, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -31,6 +34,16 @@ func Watch(path string, onChange func(), onError func(error)) (func() error, err
 		return nil, err
 	}
 	go func() {
+		defer func() {
+			// A watcher goroutine that dies silently leaves hot reload broken
+			// with zero signal (SIGHUP still works). Nothing here is expected
+			// to panic, but if it does, surface it through the same channel
+			// fsnotify errors use — and note the goroutine is gone for good:
+			// hot reload stays down until restart.
+			if p := recover(); p != nil && onError != nil {
+				onError(fmt.Errorf("hot-reload watcher panicked; hot reload is down until restart: %v", p))
+			}
+		}()
 		var timer *time.Timer
 		for {
 			select {
