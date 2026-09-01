@@ -173,7 +173,7 @@ func cmdStart(args []string) error {
 		logger.Printf("WARN quota state: %v (starting from zero)", err)
 	}
 	rt.Quota = qreg
-	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval, logger)
+	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
 	defer func() { stopQuotaFlush(); qreg.Flush() }()
 
 	snap, err := router.BuildSnapshot(cfg)

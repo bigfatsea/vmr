@@ -278,21 +278,23 @@ func validateLoadedShape[T any](version int, accounts map[string]map[string]*T) 
 }
 
 // StartFlusher launches a background goroutine that calls Flush every
-// interval, and returns a stop function. logger (may be nil) receives Flush
-// errors, deduplicated so a persistent failure (full disk, permission
-// change) logs once plus every 10th repeat instead of one line per tick
-// (R47). stop signals the goroutine to exit and BLOCKS until it has
+// interval, and returns a stop function. Flush errors go to the logger
+// SetLogger wired (none if unset), deduplicated so a persistent failure
+// (full disk, permission change) logs once plus every 10th repeat instead
+// of one line per tick (R47). stop signals the goroutine to exit and BLOCKS until it has
 // actually done so — cmd_start.go's shutdown sequence calls stop() and then
 // one final Flush(); if stop() returned before the goroutine's own
 // possibly-in-flight Flush had finished, the two could race on the same
 // file (both doing CreateTemp+Write+Rename concurrently). Safe to call
 // stop() more than once. A no-op stop when Registry has no path — nothing
 // was ever started.
-func (r *Registry) StartFlusher(interval time.Duration, logger *log.Logger) (stop func()) {
+func (r *Registry) StartFlusher(interval time.Duration) (stop func()) {
 	if r.path == "" {
 		return func() {}
 	}
-	fl := &flushLog{logger: logger}
+	r.mu.Lock()
+	fl := &flushLog{logger: r.logger}
+	r.mu.Unlock()
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	go func() {

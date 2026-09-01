@@ -177,7 +177,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	ps := time.Now()
 	r.Charge("plan-a", "requests/1mo", ps, Counters{Requests: 1}, 0)
 
-	stop := r.StartFlusher(20*time.Millisecond, nil)
+	stop := r.StartFlusher(20 * time.Millisecond)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, err := os.Stat(path); err == nil {
@@ -210,7 +210,7 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 
 func TestStore_EmptyPathFlusherIsNoOp(t *testing.T) {
 	r := NewRegistry("")
-	stop := r.StartFlusher(10*time.Millisecond, nil)
+	stop := r.StartFlusher(10 * time.Millisecond)
 	stop() // must return promptly, not block forever
 }
 
@@ -259,7 +259,8 @@ func TestStore_Flusher_ReportsFailures(t *testing.T) {
 		defer mu.Unlock()
 		return buf.Write(p)
 	}), "", 0)
-	stop := r.StartFlusher(10*time.Millisecond, logger)
+	r.SetLogger(logger)
+	stop := r.StartFlusher(10 * time.Millisecond)
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
