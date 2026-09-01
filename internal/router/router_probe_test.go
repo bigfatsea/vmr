@@ -7,14 +7,46 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"vmr/internal/adapter"
+	"vmr/internal/core"
 
 	_ "vmr/internal/adapter/openairesponses"
 )
+
+// panicAdapter is a test-only adapter that panics on demand — used to verify
+// runProbe/tryOne recover an unexpected panic and still release the half-open
+// probe slot (Q02/Q03), instead of crashing the process or locking the
+// endpoint into "probing" forever.
+type panicAdapter struct {
+	panicIn string // "build" = panic in BuildRequest, "classify" = panic in ClassifyError
+}
+
+func (p panicAdapter) Protocol() string { return "openai-completions" }
+
+func (p panicAdapter) ResolveURL(baseURL string) string { return baseURL + "/v1/chat/completions" }
+
+func (p panicAdapter) BuildRequest(ctx context.Context, ep *core.Endpoint, req *core.CanonicalRequest) (*http.Request, []byte, error) {
+	if p.panicIn == "build" {
+		panic("panicAdapter: injected BuildRequest panic")
+	}
+	r, err := http.NewRequest(http.MethodPost, ep.FullURL, nil)
+	return r, nil, err
+}
+
+func (p panicAdapter) ClassifyError(int, []byte) core.ErrorClass {
+	if p.panicIn == "classify" {
+		panic("panicAdapter: injected ClassifyError panic")
+	}
+	return core.ErrTransient
+}
 
 // recordingUpstream captures the raw body of every request it receives and
 // answers with a fixed 200 JSON body — enough for runProbe to record a
@@ -30,6 +62,54 @@ func recordingUpstream(t *testing.T, captured *[]byte, respBody string) *httptes
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestRunProbe_PanicRecovery(t *testing.T) {
+	t.Parallel()
+	// Unique name per run: the adapter registry has no unregister, so a
+	// fixed name would panic on a second Register (e.g. -count=2).
+	panicAdapterName := fmt.Sprintf("test-panic-probe-%d", time.Now().UnixNano())
+	adapter.Register(panicAdapterName, panicAdapter{panicIn: "build"})
+
+	var captured []byte
+	upstream := recordingUpstream(t, &captured, `{}`)
+
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+probe_timeout: 2s
+providers:
+  - {name: p1, base_url: {openai-completions: `+upstream.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+`)
+	// Override the endpoint's adapter type to the panic adapter.
+	snap := mustSnapshot(t, cfg)
+	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
+	ep.AdapterType = panicAdapterName
+
+	rt := New(nil)
+	rt.Install(snap)
+	snap = rt.Snapshot()
+
+	key := ep.HealthKey()
+
+	// Simulate a half-open probing state: ReportFailure at a past time so
+	// the cooldown is already expired, then Acquire to claim the probe slot.
+	rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now().Add(-10*time.Second))
+	if !rt.Health.Acquire(key, time.Now()) {
+		t.Fatal("Acquire should succeed after expired cooldown")
+	}
+
+	// runProbe must recover the panic, call ReportNeutral, and release the slot.
+	// The panic is caught inside runProbe, so calling it synchronously is safe.
+	rt.runProbe(ep, snap)
+
+	// After recover + ReportNeutral, the endpoint should be available again.
+	if !rt.Health.Available(key, time.Now()) {
+		t.Error("endpoint should be available after panic recovery (probing slot released)")
+	}
 }
 
 func TestRunProbe_ResponsesProtocolSendsResponsesShapedBody(t *testing.T) {

@@ -377,6 +377,17 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 
 	key := ep.HealthKey()
 	attemptStart := time.Now()
+	// A half-open probe slot held by this attempt must always resolve via
+	// exactly one of ReportSuccess/ReportFailure/ReportNeutral. Every normal
+	// path reports (and marks healthReported); this defer is the panic
+	// backstop — a handler panic that net/http recovers would otherwise
+	// leave probing=true and lock the endpoint out until process restart.
+	healthReported := false
+	defer func() {
+		if !healthReported {
+			rt.Health.ReportNeutral(key)
+		}
+	}()
 	// logPrefix carries the fields every log line in this attempt shares
 	// (client tag, virtual model -> physical endpoint, capabilities) so
 	// each call site below only spells out what actually differs about its
@@ -399,6 +410,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok { // validated at config load; defensive only
+		healthReported = true
 		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		return false, nil, false
 	}
@@ -411,6 +423,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 		// endpoint down: a single malformed client request would otherwise
 		// lock out every other client's traffic to it via a bogus transient
 		// cooldown.
+		healthReported = true
 		rt.Health.ReportNeutral(key)
 		rt.logf("%s, %s, error=build:%v, attempt=%d", logPrefix, tokenEst, err, attempt)
 		att.SetBuildError(err)
@@ -428,11 +441,13 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 			// But DO release a half-open probe slot if this attempt held one:
 			// without this, a client canceling mid-probe leaves probing=true
 			// forever and the endpoint is locked out until process restart.
+			healthReported = true
 			rt.Health.ReportNeutral(key)
 			att.SetCanceled()
 			rt.Telemetry.RecordOutcome(false, true)
 			return true, nil, false
 		}
+		healthReported = true
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("%s, %s, error=network:%v, cooldown=%s, attempt=%d", logPrefix, tokenEst, err, cd, attempt)
 		att.SetNetworkError(err)
@@ -440,12 +455,12 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	}
 
 	if resp.StatusCode >= 400 {
-		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key)
+		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key, &healthReported)
 	}
-	if uerr, blocked := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key); blocked {
+	if uerr, blocked := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key, &healthReported); blocked {
 		return false, uerr, false
 	}
-	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key)
+	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key, &healthReported)
 }
 
 // handleErrorResponse reads, classifies, and records a >=400 upstream
@@ -454,7 +469,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 // comments below; everything else reports failure and lets the caller's
 // failover loop move to the next candidate.
 func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response, ad adapter.Adapter, att *audit.Attempt,
-	logPrefix, tokenEst string, snap *Snapshot, attempt int, start time.Time, key string) (done bool, uerr *upstreamError, success bool) {
+	logPrefix, tokenEst string, snap *Snapshot, attempt int, start time.Time, key string, healthReported *bool) (done bool, uerr *upstreamError, success bool) {
 
 	// The error body is read with a deadline: ResponseHeaderTimeout only
 	// covers the headers, and an upstream that stalls after sending error
@@ -496,6 +511,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		// but leave the endpoint's health untouched; only release a probe
 		// slot if held.
 		rt.Health.ReportNeutral(key)
+		*healthReported = true
 		rt.logf("%s, %s, status=%d, class=%s, attempt=%d (no cooldown)", logPrefix, tokenEst, resp.StatusCode, class, attempt)
 		return false, uerr, false
 	}
@@ -504,6 +520,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		// Says nothing about the endpoint's health — release a probe slot
 		// if this attempt held one (same lockout hazard as client cancel).
 		rt.Health.ReportNeutral(key)
+		*healthReported = true
 		copyRespHeaders(w.Header(), uerr.header)
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
 		w.WriteHeader(uerr.status)
@@ -517,6 +534,7 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 		return true, nil, false
 	}
 	cd := rt.Health.ReportFailure(key, class, parseRetryAfter(resp.Header), time.Now())
+	*healthReported = true
 	rt.logf("%s, %s, status=%d, class=%s, cooldown=%s, attempt=%d", logPrefix, tokenEst, resp.StatusCode, class, cd, attempt)
 	return false, uerr, false
 }
@@ -526,9 +544,10 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 // committed — no failover past this point, so this always returns
 // done=true, success=true.
 func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *http.Response, creq *core.CanonicalRequest,
-	ep *core.Endpoint, att *audit.Attempt, logPrefix string, snap *Snapshot, attempt int, start time.Time, key string) (done bool, uerr *upstreamError, success bool) {
+	ep *core.Endpoint, att *audit.Attempt, logPrefix string, snap *Snapshot, attempt int, start time.Time, key string, healthReported *bool) (done bool, uerr *upstreamError, success bool) {
 
 	rt.Health.ReportSuccess(key)
+	*healthReported = true
 	// Body omitted: passthrough makes it byte-identical to the client
 	// response body, which the server layer records.
 	att.SetSuccessResponse(resp.StatusCode, resp.Header)

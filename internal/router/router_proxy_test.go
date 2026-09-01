@@ -136,3 +136,34 @@ models:
 		t.Error("proxy: false provider leaked through the proxy")
 	}
 }
+
+// TestNewUpstreamClient_MaxIdleConnsDynamic locks in Q34: MaxIdleConnsPerHost
+// dynamically scales with max_concurrency so high-concurrency configurations
+// do not suffer from idle connection churn.
+func TestNewUpstreamClient_MaxIdleConnsDynamic(t *testing.T) {
+	cases := []struct {
+		name           string
+		maxConcurrency int
+		wantMaxIdle    int
+	}{
+		{"default/zero uses minimum 16", 0, 16},
+		{"small concurrency uses minimum 16", 8, 16},
+		{"exact 16 uses minimum 16", 16, 16},
+		{"higher concurrency scales MaxIdleConnsPerHost", 64, 64},
+		{"large concurrency scales MaxIdleConnsPerHost", 128, 128},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{MaxConcurrency: tc.maxConcurrency}
+			p := config.Provider{Name: "test", BaseURL: map[string]string{"openai-completions": "http://127.0.0.1:8000"}}
+			client := NewUpstreamClient(cfg, p, "openai-completions")
+			tr, ok := client.Transport.(*http.Transport)
+			if !ok {
+				t.Fatalf("expected *http.Transport, got %T", client.Transport)
+			}
+			if tr.MaxIdleConnsPerHost != tc.wantMaxIdle {
+				t.Errorf("MaxIdleConnsPerHost = %d, want %d", tr.MaxIdleConnsPerHost, tc.wantMaxIdle)
+			}
+		})
+	}
+}

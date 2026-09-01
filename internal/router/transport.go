@@ -36,13 +36,17 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 			proxyFn = http.ProxyURL(u)
 		}
 	}
+	maxIdle := 16
+	if cfg.MaxConcurrency > maxIdle {
+		maxIdle = cfg.MaxConcurrency
+	}
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy:                 proxyFn,
 			DialContext:           (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
 			TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
 			ResponseHeaderTimeout: cfg.Timeouts.ResponseHeader.D(),
-			MaxIdleConnsPerHost:   16,
+			MaxIdleConnsPerHost:   maxIdle,
 			IdleConnTimeout:       90 * time.Second, // zero would keep idle conns forever
 		},
 		// Never follow upstream redirects: POST 301/302/303 would be
@@ -115,7 +119,10 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 				return c.err
 			}
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			timer.Reset(idle)
 		case <-timer.C:

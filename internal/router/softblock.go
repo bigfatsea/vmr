@@ -40,7 +40,7 @@ const softBlockMaxTextRunes = 64
 // otherwise resp.Body has been restored to a re-readable reader and
 // forwardSuccess proceeds unchanged.
 func (rt *Router) checkSoftBlock(resp *http.Response, creq *core.CanonicalRequest, ep *core.Endpoint, att *audit.Attempt,
-	logPrefix, tokenEst string, snap *Snapshot, attempt int, key string) (uerr *upstreamError, blocked bool) {
+	logPrefix, tokenEst string, snap *Snapshot, attempt int, key string, healthReported *bool) (uerr *upstreamError, blocked bool) {
 
 	ct := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
@@ -82,6 +82,7 @@ func (rt *Router) checkSoftBlock(resp *http.Response, creq *core.CanonicalReques
 	// Same treatment as handleErrorResponse's ErrContent branch: fail over,
 	// no health penalty, only release a probe slot if held.
 	rt.Health.ReportNeutral(key)
+	*healthReported = true
 	att.SetErrorResponse(resp.Header, peek, resp.StatusCode, core.ErrContent)
 	rt.logf("%s, %s, status=%d, class=soft_block, attempt=%d (no cooldown)", logPrefix, tokenEst, resp.StatusCode, attempt)
 	return &upstreamError{resp.StatusCode, resp.Header, peek}, true

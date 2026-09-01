@@ -32,6 +32,14 @@ const probeBodyCap = 32 << 10
 // comment in internal/health/health.go).
 func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	key := ep.HealthKey()
+	logPrefix := tagCol("probe") + epLabel(ep)
+	defer func() {
+		if r := recover(); r != nil {
+			rt.Health.ReportNeutral(key)
+			rt.logf("%s, panic=%v", logPrefix, r)
+		}
+	}()
+
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok { // validated at config load; defensive only, mirrors tryOne
 		rt.Health.ReportNeutral(key)
@@ -57,13 +65,6 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body}
 	ctx, cancel := context.WithTimeout(context.Background(), snap.Cfg.ProbeTimeout.D())
 	defer cancel()
-
-	// logPrefix mirrors tryOne's: shared fields once, per-outcome fields at
-	// each call site, comma-separated the same way — one punctuation style
-	// across every live-log line, not just the ones sharing this function.
-	// No req= size here — probe.Request's body is a fixed few dozen tokens,
-	// never worth reporting per-probe.
-	logPrefix := tagCol("probe") + epLabel(ep)
 
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {
