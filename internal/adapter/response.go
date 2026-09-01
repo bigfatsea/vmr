@@ -5,6 +5,8 @@ package adapter
 import (
 	"encoding/json"
 	"unicode/utf8"
+
+	"vmr/internal/core"
 )
 
 // ResponseAssistantText inspects a fully buffered NON-STREAMING upstream 2xx
@@ -24,11 +26,11 @@ import (
 // the caller must not draw any conclusion from textRunes.
 func ResponseAssistantText(protocol string, body []byte) (textRunes int, hasToolCall bool, ok bool) {
 	switch protocol {
-	case "openai-completions":
+	case core.ProtocolOpenAICompletions:
 		return openaiCompletionText(body)
-	case "anthropic-messages":
+	case core.ProtocolAnthropicMessages:
 		return anthropicMessageText(body)
-	case "openai-responses":
+	case core.ProtocolOpenAIResponses:
 		return responsesOutputText(body)
 	default:
 		return 0, false, false

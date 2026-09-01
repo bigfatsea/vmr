@@ -19,7 +19,7 @@ import (
 // backward-compat chokepoint: a pre-2026-08 audit line names its protocol
 // "openai"/"anthropic"; every analytics read path decodes into audit.Record
 // and must see the current enum instead.
-// TODO(2026-10): delete alongside core.CanonicalProtocol.
+// TODO(2026-10): delete alongside audit.CanonicalProtocol.
 func TestRecordUnmarshalJSON_NormalizesLegacyProtocolNames(t *testing.T) {
 	const line = `{"ts":"2026-07-01T00:00:00Z","dur_ms":1,"model":"vm","protocol":"openai","outcome":"ok","stream":false,"client":{"request":{}},"attempts":[{"endpoint":"openai:acct:m","protocol":"openai","url":"u","dur_ms":1,"request":{}},{"endpoint":"anthropic/acct/m","protocol":"anthropic","url":"u","dur_ms":1,"request":{}}]}`
 	var r Record

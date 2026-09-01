@@ -206,3 +206,28 @@ func TestCapStrNonPositiveN(t *testing.T) {
 		t.Errorf("CapStr(\"\", -1) = %q, want empty string", got)
 	}
 }
+
+func TestSortedKeys(t *testing.T) {
+	t.Parallel()
+	m := map[string]int{
+		"zebra":  1,
+		"apple":  2,
+		"mango":  3,
+		"banana": 4,
+	}
+	got := SortedKeys(m)
+	want := []string{"apple", "banana", "mango", "zebra"}
+	if len(got) != len(want) {
+		t.Fatalf("SortedKeys len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SortedKeys[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	empty := map[string]string{}
+	if gotEmpty := SortedKeys(empty); len(gotEmpty) != 0 {
+		t.Errorf("SortedKeys(empty) = %v, want empty", gotEmpty)
+	}
+}

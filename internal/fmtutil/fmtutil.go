@@ -10,6 +10,7 @@ package fmtutil
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -166,4 +167,16 @@ func CapStr(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// SortedKeys returns m's keys in sorted order. A recurring need across
+// packages that print or iterate a map deterministically (config summaries,
+// adapter/model registries, header tables).
+func SortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

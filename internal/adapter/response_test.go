@@ -2,7 +2,11 @@
 
 package adapter
 
-import "testing"
+import (
+	"testing"
+
+	"vmr/internal/core"
+)
 
 func TestResponseAssistantText(t *testing.T) {
 	cases := []struct {
@@ -15,47 +19,47 @@ func TestResponseAssistantText(t *testing.T) {
 	}{
 		{
 			name:     "openai empty content (soft block shape)",
-			protocol: "openai-completions",
+			protocol: core.ProtocolOpenAICompletions,
 			body:     `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"input_sensitive":true}`,
 			wantOK:   true,
 		},
 		{
 			name:      "openai real answer",
-			protocol:  "openai-completions",
+			protocol:  core.ProtocolOpenAICompletions,
 			body:      `{"choices":[{"message":{"role":"assistant","content":"the capital of France is Paris"}}]}`,
 			wantRunes: len("the capital of France is Paris"),
 			wantOK:    true,
 		},
 		{
 			name:     "openai tool call, null content",
-			protocol: "openai-completions",
+			protocol: core.ProtocolOpenAICompletions,
 			body:     `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","function":{"name":"x"}}]}}]}`,
 			wantTool: true,
 			wantOK:   true,
 		},
 		{
 			name:     "anthropic empty text",
-			protocol: "anthropic-messages",
+			protocol: core.ProtocolAnthropicMessages,
 			body:     `{"type":"message","content":[{"type":"text","text":""}]}`,
 			wantOK:   true,
 		},
 		{
 			name:      "anthropic real answer",
-			protocol:  "anthropic-messages",
+			protocol:  core.ProtocolAnthropicMessages,
 			body:      `{"type":"message","content":[{"type":"text","text":"hello there"}]}`,
 			wantRunes: len("hello there"),
 			wantOK:    true,
 		},
 		{
 			name:     "anthropic tool use",
-			protocol: "anthropic-messages",
+			protocol: core.ProtocolAnthropicMessages,
 			body:     `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"x","input":{}}]}`,
 			wantTool: true,
 			wantOK:   true,
 		},
 		{
 			name:      "responses output text",
-			protocol:  "openai-responses",
+			protocol:  core.ProtocolOpenAIResponses,
 			body:      `{"output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}`,
 			wantRunes: len("answer"),
 			wantOK:    true,
@@ -68,13 +72,13 @@ func TestResponseAssistantText(t *testing.T) {
 		},
 		{
 			name:     "unparseable",
-			protocol: "openai-completions",
+			protocol: core.ProtocolOpenAICompletions,
 			body:     `not json`,
 			wantOK:   false,
 		},
 		{
 			name:     "wrong shape (no choices)",
-			protocol: "openai-completions",
+			protocol: core.ProtocolOpenAICompletions,
 			body:     `{"error":{"message":"nope"}}`,
 			wantOK:   false,
 		},

@@ -230,11 +230,10 @@ func (e *Endpoint) Freeze() {
 // StickyBackstopTTL bounds internal/sticky's Registry memory growth,
 // independent of any per-endpoint validity TTL (Endpoint.StickyTTL above),
 // which can range from minutes to days — see the design doc's Sticky Model
-// section. Lives here
-// rather than in internal/sticky itself so internal/config can validate a
-// configured sticky_ttl against it without importing the sticky package
-// just to read one constant. internal/sticky.BackstopTTL is this same
-// value, kept as an alias for callers that already spell it that way.
+// section.
+//
+// Deprecated: canonical definition lives in internal/sticky.BackstopTTL.
+// Kept in core as a compatibility alias during transition.
 const StickyBackstopTTL = 24 * time.Hour
 
 // HasCapability reports whether e declares support for name. An endpoint
@@ -492,6 +491,9 @@ type QuotaSpec struct {
 // SortedKeys returns m's keys in sorted order. A recurring need across
 // packages that print or iterate a map deterministically (config summaries,
 // adapter/model registries, header tables).
+//
+// Deprecated: canonical implementation moved to internal/fmtutil.SortedKeys.
+// Retained in core as a convenience helper during transition.
 func SortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
