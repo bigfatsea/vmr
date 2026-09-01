@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
 
@@ -794,6 +795,62 @@ models:
 	}
 	if u.hits != 1 {
 		t.Errorf("upstream hits=%d, want 1 (second request should reach the upstream)", u.hits)
+	}
+}
+
+// TestTryOne_PanicReleasesHalfOpenSlot locks in Q03: if tryOne encounters an
+// unexpected panic before health reporting (e.g. during an adapter or parsing
+// edge case), the deferred ReportNeutral backstop must release the half-open
+// single-flight slot, preventing the endpoint from staying locked in "probing"
+// forever until process restart.
+func TestTryOne_PanicReleasesHalfOpenSlot(t *testing.T) {
+	panicAdapterName := fmt.Sprintf("test-panic-tryone-%d", time.Now().UnixNano())
+	adapter.Register(panicAdapterName, panicAdapter{panicIn: "build"})
+
+	u := newMockUpstream(t, 200, `{"id":"ok"}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+`, u.srv.URL))
+
+	snap := mustSnapshot(t, cfg)
+	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
+	ep.AdapterType = panicAdapterName
+
+	rt := New(nil)
+	rt.Install(snap)
+	snap = rt.Snapshot()
+
+	key := ep.HealthKey()
+
+	// Simulate half-open state: failed previously, cooldown expired, acquired for tryOne.
+	rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now().Add(-10*time.Second))
+	if !rt.Health.Acquire(key, time.Now()) {
+		t.Fatal("Acquire should succeed after expired cooldown")
+	}
+
+	// Call tryOne directly with a recover around it — BuildRequest will panic.
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic from panicAdapter")
+			}
+		}()
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader([]byte(`{}`)))
+		w := httptest.NewRecorder()
+		rt.tryOne(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+	}()
+
+	// After the panic, tryOne's defer func should have called ReportNeutral,
+	// releasing the probing state so the endpoint is Available again.
+	if !rt.Health.Available(key, time.Now()) {
+		t.Error("endpoint should be available after tryOne panic recovery (probing slot released)")
 	}
 }
 

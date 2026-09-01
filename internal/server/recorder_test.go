@@ -67,3 +67,11 @@ func TestRecorderCapsAuditBodyButNotClientBody(t *testing.T) {
 		t.Errorf("audit body missing truncation marker, tail = %q", body[len(body)-min(len(body), 80):])
 	}
 }
+
+func TestRecorderUnwrap(t *testing.T) {
+	under := httptest.NewRecorder()
+	rw := newRecorder(under, time.Now())
+	if got := rw.Unwrap(); got != under {
+		t.Errorf("Unwrap() = %v, want %v", got, under)
+	}
+}

@@ -171,6 +171,15 @@ func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 		{"451 unavailable for legal reasons", 451, `{}`, core.ErrContent},
 		{"429 exceeded quota treated as ErrEndpoint", 429, `{"error":{"message":"you have exceeded your quota"}}`, core.ErrEndpoint},
 		{"429 insufficient balance treated as ErrEndpoint", 429, `{"error":{"message":"insufficient balance"}}`, core.ErrEndpoint},
+		{"400 insufficient balance (relay)", 400, `{"error":{"message":"Insufficient balance"}}`, core.ErrEndpoint},
+		{"400 insufficient credit (relay)", 400, `{"error":{"message":"insufficient credit"}}`, core.ErrEndpoint},
+		{"400 insufficient quota (relay)", 400, `{"error":{"message":"insufficient quota"}}`, core.ErrEndpoint},
+		{"400 quota exhausted (relay)", 400, `{"error":{"message":"quota exhausted"}}`, core.ErrEndpoint},
+		{"400 out of credit (relay)", 400, `{"error":{"message":"out of credit"}}`, core.ErrEndpoint},
+		{"400 balance exhausted Chinese 余额不足", 400, `{"error":{"message":"账户余额不足，请充值"}}`, core.ErrEndpoint},
+		{"400 quota exhausted Chinese 额度不足", 400, `{"error":{"message":"当前额度不足"}}`, core.ErrEndpoint},
+		{"400 account in arrears Chinese 账户欠费", 400, `{"error":{"message":"您的账户欠费，无法继续调用"}}`, core.ErrEndpoint},
+		{"403 insufficient balance", 403, `{"error":{"message":"Insufficient balance"}}`, core.ErrEndpoint},
 		{"500 internal server error", 500, `{}`, core.ErrTransient},
 		{"502 bad gateway", 502, `{}`, core.ErrTransient},
 		{"503 service unavailable", 503, `{}`, core.ErrTransient},
@@ -229,6 +238,35 @@ func TestDefaultClassify_VendorQuirks(t *testing.T) {
 			t.Parallel()
 			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
 				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultClassify_BalanceExhausted(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   core.ErrorClass
+	}{
+		{"400 Insufficient balance standard JSON", 400, `{"error":{"message":"Insufficient balance"}}`, core.ErrEndpoint},
+		{"400 insufficient credit", 400, `{"error":{"message":"insufficient credit"}}`, core.ErrEndpoint},
+		{"400 insufficient quota", 400, `{"error":{"message":"insufficient quota"}}`, core.ErrEndpoint},
+		{"400 quota exhausted", 400, `{"error":{"message":"quota exhausted"}}`, core.ErrEndpoint},
+		{"400 out of credit", 400, `{"error":{"message":"out of credit"}}`, core.ErrEndpoint},
+		{"400 余额不足", 400, `{"error":{"message":"当前账户余额不足"}}`, core.ErrEndpoint},
+		{"400 额度不足", 400, `{"error":{"message":"接口调用额度不足"}}`, core.ErrEndpoint},
+		{"400 账户欠费", 400, `{"error":{"message":"账户欠费，服务已暂停"}}`, core.ErrEndpoint},
+		{"403 余额不足", 403, `{"error":{"message":"insufficient balance"}}`, core.ErrEndpoint},
+		{"403 content flag beats balance", 403, `{"error":{"message":"content policy violation: insufficient balance"}}`, core.ErrContent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(tc.status, []byte(tc.body)); got != tc.want {
+				t.Errorf("status=%d body=%s: got %v, want %v", tc.status, tc.body, got, tc.want)
 			}
 		})
 	}

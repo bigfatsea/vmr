@@ -74,6 +74,10 @@ func (r *recorder) Flush() {
 	}
 }
 
+func (r *recorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 // message renders what was sent to the client; nil if nothing was written.
 func (r *recorder) message() *audit.Message {
 	if r.status == 0 {
