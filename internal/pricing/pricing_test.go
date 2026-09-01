@@ -3,10 +3,71 @@ package pricing
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
 func f(v float64) *float64 { return &v }
+
+func TestRate_Complete_RejectsNonFiniteOrNegative(t *testing.T) {
+	nan := f(math.NaN())
+	neg := f(-1)
+	nanRate := Rate{InFresh: f(1), CacheRead: nan, CacheWrite: f(2), Out: f(4)}
+	if nanRate.Complete() {
+		t.Fatal("rate with a NaN component must not be Complete (R42)")
+	}
+	negRate := Rate{InFresh: f(1), CacheRead: f(0), CacheWrite: f(2), Out: neg}
+	if negRate.Complete() {
+		t.Fatal("rate with a negative component must not be Complete (R42)")
+	}
+	// 0.0 is an explicitly-free price, still usable — Complete must keep it.
+	zero := Rate{InFresh: f(0), CacheRead: f(0), CacheWrite: f(0), Out: f(0)}
+	if !zero.Complete() {
+		t.Fatal("all-zero rate must be Complete (free model)")
+	}
+}
+
+// TestParseTable_RejectsNonFiniteOrNegativeRates pins R42: a hand-written
+// supplement/standard file with a NaN, Inf, or negative rate is a load-time
+// hard error naming the offending key, not a silently accepted poison that
+// corrupts Counters.Cost and stalls quota persistence.
+func TestParseTable_RejectsNonFiniteOrNegativeRates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		comp string // one YAML component literal inside a rates row
+	}{
+		{"nan", "in_fresh: .nan"},
+		{"inf", "cache_read: .inf"},
+		{"neg-inf", "out: -.inf"},
+		{"negative", "cache_write: -5.0"},
+	} {
+		data := []byte("currency: USD\nrates:\n  - {key: vendor/broken-model, " + tc.comp + "}\n")
+		if _, err := ParseTable(data); err == nil {
+			t.Errorf("%s: ParseTable accepted %s, want a load-time error", tc.name, tc.comp)
+			continue
+		} else if !strings.Contains(err.Error(), "vendor/broken-model") {
+			t.Errorf("%s: error must name the offending key, got: %v", tc.name, err)
+		}
+	}
+}
+
+// TestParseTable_ZeroComponentsStillAllowed pins the boundary the R42 gate
+// must NOT cross: a legitimately free model (all four components explicitly
+// 0.0) and a partial row with a zero component must keep loading.
+func TestParseTable_ZeroComponentsStillAllowed(t *testing.T) {
+	data := []byte(`currency: USD
+rates:
+  - {key: free/model, in_fresh: 0, cache_read: 0, cache_write: 0, out: 0}
+  - {key: partial/model, in_fresh: 0}
+`)
+	tbl, err := ParseTable(data)
+	if err != nil {
+		t.Fatalf("ParseTable rejected a zero-valued table: %v", err)
+	}
+	if r, ok := tbl.Lookup("free/model"); !ok || !r.Complete() {
+		t.Fatalf("all-zero rate must load and stay Complete: ok=%v r=%+v", ok, r)
+	}
+}
 
 func TestRate_Complete(t *testing.T) {
 	full := Rate{InFresh: f(1), CacheRead: f(0), CacheWrite: f(2), Out: f(4)}
