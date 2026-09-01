@@ -39,6 +39,12 @@
 
 - **`health.Registry` 全局互斥锁不分片**：单机场景锁持有只是纳秒级 map 读写，分片增复杂度无吞吐收益。
 - **`health.Registry.Available` 无生产调用方，但不是死代码**：它是唯一无副作用的路由资格查询（`Acquire` 会占用 half-open 探针名额），`health` 与 `router` 的测试断言端点状态都靠它——用 `Acquire` 去查会改变被断言的状态。「无生产调用方」不等于「可删」。
+- **`fails` 的语义是「当前退避曲线下的连续失败深度」，跨曲线切换重置为 1**：`ErrAuth`/`ErrEndpoint` 走 10min 起的 long 曲线，其余走 2s 起的 transient 曲线——两条曲线基数差 300 倍，共用一个深度计数器会让一串 5xx（transient 才退到 32s）后的一次 401 直接顶到 1h 封顶。**适用于**：判断"这个端点在当前故障模式下连续失败了几次"。**不适用于**：当作"这个端点历史上一共失败了多少次"的累计量——它不是，也从不是。`internal/server/active_probe_test.go` 因此不能再用 `fails >= 2` 当"走的是 ReportFailure 不是 ReportNeutral"的代理判据，只有 `last_error` 能区分两者。
+- **`ReleaseProbe` 与 `ReportNeutral` 行为相同但保留为两个方法**：前者是"名额先还、健康结论稍后再报"（`forwardSuccess` 在流真正跑完前用它），后者是"这次结果对健康没有信息量，到此为止"。合一会让 `forwardSuccess` 的调用点读起来像已经下了终局结论，而它恰恰还没有。
+- **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→2s 冷却→探针成功→满额流量→429 的循环成因。**已知均衡态**：探针成功与真实失败交替时深度在两档间振荡（如 2↔3），不是单调加深；钉死的保证是"没有真实成功就永不归零、永不回到最浅档"。
+- **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
+- **后台探针按 requests 口径计 1，对 token/cost 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token/cost 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
+- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果在 Windows 上依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
 - **`copyFlush` 的 goroutine + channel 流水线**：避免在底层连接层设全局 Deadline 破坏 TLS/Header 超时语义。
@@ -60,9 +66,12 @@
 
 ### 1.2 配置与协议
 
-- **协议枚举 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等对齐**：全链路一步到位用新名，路由侧零兼容负担。**唯一兼容咽喉点**是 `audit.Record.UnmarshalJSON`：读到旧名经 `audit.CanonicalProtocol` / `audit.NormalizeEndpointLabel` 归一化，只服务分析侧读历史日志；`vmr replay` 不做兼容。`ctxgraph.CacheSchemaVersion` 已 1→2 使旧事实缓存失效。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件是不可变的既存事实。config 仍带旧名时加载错误直接点名要改成什么（`internal/config/provider.go` 的 `unknownProtocolHint`），但 parser 不接受旧名（strict YAML）。**TODO(2026-10)**：过渡期约一个月后拆除 `audit.CanonicalProtocol` / `audit.NormalizeEndpointLabel`（`internal/audit/legacy_protocol.go`，常量保留在 `internal/core`）、`Record.UnmarshalJSON` 及其为此新增的 `internal/core` import、两个 legacy-name 归一化测试；`ctxgraph.CacheSchemaVersion` 保持 2 不回退。
+- **协议枚举 2026-08 重命名为 `openai-completions` / `anthropic-messages`（`openai-responses` 不变），与 Pi Agent 等对齐**：全链路一步到位用新名，路由侧零兼容负担。**唯一兼容咽喉点**是 `audit.Record.UnmarshalJSON`：读到旧名经 `audit.CanonicalProtocol` / `audit.NormalizeEndpointLabel` 归一化，只服务分析侧读历史日志；`vmr replay` 不做兼容。重命名当次一并 bump 了 `ctxgraph.CacheSchemaVersion` 使旧事实缓存失效（该常量此后又因别的形状变更继续前进，只增不回退）。**这是「版本必须匹配、不做兼容」原则的唯一刻意例外**——历史审计文件是不可变的既存事实。config 仍带旧名时加载错误直接点名要改成什么（`internal/config/provider.go` 的 `unknownProtocolHint`），但 parser 不接受旧名（strict YAML）。**拆除条件是事实，不是日期**：审计日志的默认保留策略是永不删除（`retention_days: 0`），所以旧协议名的记录**不会随时间自然老化消失**——按日期排期拆除必然误伤。拆除前提改为：对当前全部审计语料 grep 旧协议名（`openai` / `anthropic` 的裸旧拼写）**零命中**，且用户已确认没有离线归档需要再解析。满足后拆除 `audit.CanonicalProtocol` / `audit.NormalizeEndpointLabel`（`internal/audit/legacy_protocol.go`，常量保留在 `internal/core`）、`Record.UnmarshalJSON` 及其为此新增的 `internal/core` import、两个 legacy-name 归一化测试。**适用于**：只跑本机、语料可完整枚举的单用户部署。**不适用于**：把审计日志投递到外部归档、或从别的机器拷入历史日志的场景——那里旧名可能在任何时候重新出现，兼容层应当永久保留。
 - **CLI 与 Server 版本必须匹配，不一致直接报错不做兼容**：单二进制、可随时重启，`vmr status` 与 `vmr start` 理应同版本——不一致说明升级没走完，报错正是暴露它。`json.RawMessage` 式兼容层只覆盖一个滚动升级窗口却永久留在代码里，违反 KISS。曾为「旧 server 缺失新 key」保留的 `serving *bool` 兜底已作为死代码删除（`instance.config` 由 string 改 object 后即不可达）——版本必须匹配的原则不再留任何字段级例外。
 - **`/status` 的 `instance.base_urls` 回显请求自身地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status` 就广告什么地址，这正是客户端该填的值。纯展示、不参与鉴权或路由，Host 可伪造无安全影响；刻意不做 `X-Forwarded-Host` 解析。
+- **`base_url` 内嵌凭据在加载期报错，而不是在审计侧脱敏**：`base_url` 是自由字符串，`https://u:p@host` 或 `?api_key=...` 会原样进 `Attempt.URL` 落盘——审计脱敏只覆盖 header，这是脱敏模型的唯一旁路。在源头消灭比运行期脱敏正确：脱敏是永远追不全的黑名单。**适用于**：固定的凭据键名清单（`api_key`/`token`/`secret`/`password` 等）与 userinfo 段。**不适用于**：自定义网关用非常规键名承载凭据的情形——刻意不做"值看起来像 key"的启发式判断，那会误杀 `api-version` 这类合法参数。错误信息只回显键名，绝不回显值。
+- **价目表的数值防线建在 `pricing.parseTable`，不下沉到 `internal/config`**：`parseTable` 是 supplement/standard/curated 三类手写文件的唯一解析入口，config.yaml 的 overrides 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关，config 不重复校验 pricing 的解析结果。NaN/±Inf/负费率一律加载期硬错误：它们会让 `Counters.Cost` 中毒，进而让 `UsedFrac`/`Headroom`/`ScoreForLimits` 全部失效、评分永久停在最大余量，把该账号变成流量磁铁。
+- **`report.yaml` 解析失败是硬错误退出，文件不存在才是静默 no-op**：严格解析（`KnownFields`）配上软降级是最坏组合——一个键名笔误会静默关掉**全部** report.yaml 设置，包括自流量排除（分析工具自己的开销于是混进被分析的工作负载）。文件不存在是合法的"未配置"（多数运行本就没有 report.yaml）；显式 `-report-config` 指向的文件不存在则报错，那是用户自己给的指针。报表头另有一行写明本次实际应用的配置文件路径（`Meta.ReportConfigPath`）——"没找到 report.yaml"和"本来就没有"在产物上必须可区分。
 - **环境变量未定义时静默展开为空串，不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值在 YAML 里显式写出。
 - **`internal/config` 的三层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但这是 Quota 设计文档决策表明文选定的方案——「只让 report 一侧解析、`metric: cost` 另开一条运行时校验路径」是同一行里已否决的备选（两份实现容易漂移）。后置还会摧毁「`metric: cost` 费率不齐 = **加载期**错误」这条硬要求。
 - **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的命名形态不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.map`/`overrides` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `map`/别名先钉（优先级更高）。
@@ -78,6 +87,9 @@
 - **看板（`/status.html` / `/log.html`）把 API key 存 `localStorage`，静态外壳免鉴权直出**：外壳不含数据，数据请求走 `s.auth()`；key 只在浏览器本地持久化，不进 URL、不进服务端日志。所有配置派生字符串内插进 `innerHTML` 前均 `esc()` HTML 转义。`/log` 输出 `text/plain` 而非 SSE/JSONL（源头已是格式化文本）；无查询参数（回放窗口固定 512 行缓冲）。
 - **`/help.html` / `/help.zh.html` 的 Agent 配置片段在浏览器就地装配，不做服务端模板渲染**：`/help` 按架构必须公开免鉴权，服务端渲染会逼它强制鉴权、或让服务端拿不到用户 Key。API Key 复用 `localStorage['vmr_status_key']`。服务端下发的 HTML 保留写死默认值（`coding` / `claude`、200k context、`high` effort），保证无 JS / 未鉴权时也自洽。四点取舍：max-output 预算按 context 分档经验估计（VMR 无模型级元数据）；片段一律 vision-on（空 capabilities = 不受约束）；四个列表型生成器只枚举 `openai-completions` 模型；无浏览器 JS 测试基建，`TestHelpPage_SnippetFillEngine` 只做构建期字符串守卫。
 - **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
+- **持续性故障的日志按"错误文本相同"去重，不做事件级审计**：quota flush 失败（磁盘满、权限变更）与时钟回退都是持续性的，10 秒一次刷屏会淹没日志。flush 侧按错误文本去重（首次 + 每 10 次，附连续失败计数），时钟回退侧每进程最多一条 WARN。**已知代价**：两种错误交替出现时 flush 侧不去重（每 tick 一条——但交替本身就是有效信号）；时钟"回退→恢复→再回退"的第二次不再 WARN。**边界**：需要回退事件级审计的话，这里要换成带去抖窗口的计数器。
+- **`vmr-quota.json` 的结构损坏整文件拒绝，绝不部分采纳**：静默丢掉一个 provider 的账本比报错更危险。版本戳不匹配、nil account map、null bucket 三者任一即视为损坏，由调用方 WARN + 从零开始——与既有的语法损坏路径同构。`version` 字段从"写而不校验"改为真正的门：有版本戳却不校验比没有更危险，下一个人会以为"有版本号所以安全"。
+- **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而"不等即重置"会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
 - **`.parse-cache/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr report`/`vmr story` 均可从空缓存目录冷启动。触发条件：`.parse-cache/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。
@@ -87,6 +99,8 @@
 
 - **`imgprep.ImageInfo` → `audit.ImageInfo` 的字段拷贝**：换 `imgprep` 不依赖 `audit`，保住公共工具包零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
+- **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/story/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
+- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：同一份文本要进 Markdown 与 HTML 两种产物，而 HTML 侧的转义早已由 `story/mdlite.go` 在渲染时全量完成（`<script>` 从来进不去）。真正没人管的是 Markdown **结构**破坏（反引号、竖线、行首 `#`/`-`/`>`），而它在 `i18n` 模板层修不了——模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹。
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **`core.StickyBackstopTTL` 不迁回 `internal/sticky`**：迁回制造一条 `config` → `sticky` 的新依赖边，仅用于读一个常量；不做这个校验则 `sticky_ttl` 超过 backstop 的配置会「看起来被接受、实际静默失效」。
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：降级估算的统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（Q04 的 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
@@ -112,6 +126,10 @@
 - **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；HTML 看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
 - **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §2.51。
 - **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
+- **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
+- **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗降级不淘汰**：旧规则豁免同桶候选的理由是"用户可以走开几天再回来接同一个 anchor"——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。**适用于**：机器生成的周期性流量。**不适用于**：真的走开三天回来接着聊的人——所以是降级为 `AmbiguousMatch` 保留边供人查看，不是让它消失进 `NoPredecessorFound`。
+- **消息内容哈希剥离 Anthropic 的 `cache_control` 标记**：`cache_control` 是缓存控制元数据，不是对话内容；客户端逐轮移动缓存断点会改变哈希，把一次纯 Append 误判成内容编辑，整条 lineage 谱系失真。**证据状态要如实说**：机制已从代码确认（`hashJSON` 对原始消息对象全字段哈希，标记确实进哈希输入），但本机语料太小（36KB / 1 条 anthropic 记录 / 0 条 `cache_control` 命中），**按协议拆 Append 比例无法产生统计意义，未能从语料实证**。剥离本身严格更正确，故仍实施。**已知副作用**：消息内容载荷里键名恰为 `cache_control` 的（如工具结果回显）也会被剥离——只影响哈希与 lineage 判定，不影响存储内容与渲染。
+- **详情页在 `report` 与 `story` 之间字节一致，靠的是两侧传入同一个 `(record, manifest, prev)` 三元组 + 指纹携带 `m`/`prev` 身份**：只做其中一半都不够。`report` 侧曾在 `group()` 里对 compaction 记录先 `continue` 再赋值 manifest，于是它的 manifest 恒为 nil，而 `story` 侧传的是真实 manifest；渲染指纹只含 lang/evidence，于是同名文件**先写者赢**——用户拿到哪个版本取决于先跑 `vmr report` 还是 `vmr story`。补上 manifest 消除差异源，指纹折入身份防同类复发。
 - **`archtest` 的文档守卫不扩展到 review 报告类文档**：守卫只覆盖 `CLAUDE.md`、设计文档、本文件与用户指南。review 报告会正当地讨论已删除的文件与「建议新增的 XXX 函数」。真正的风险（一份陈旧 review 被当施工依据）**用定位而非机制解决**：权威的当前状态清单只有本文件。
 - **`archtest` 不加圈复杂度检查**：一次只加一个守卫。函数长度预算落地不久，确认不够用之前不引入第二个。
 - **`buildinfo` 只输出 VCS commit 哈希，不人工编造语义化版本**：如实反映构建来源。
@@ -119,7 +137,7 @@
 - **聚合浮点字段在冷/热缓存两次运行间的 1 ULP 级差异不追查、不消除**（原 1.24）：浮点加法不满足结合律的教科书现象，不是可以「修好」的缺陷。唯一该做的事（差分/一致性测试用容差而非逐字节相等）**已经是现状**（`report/e2e_test.go` 用 `1e-6`、`quota_parity_test.go` 用 `1e-9*want`）。唯一需重新当作 bug 的情形：差异远超浮点精度量级，或开始出现在 `cost_estimate` 之外的字段上。
 - **文件与函数行数预算线是提醒式绊线，非架构缺陷**（原 1.5）：`internal/archtest` 的文件/函数预算（默认 700 / 120 + 豁免表）是轻量提醒机制，连 Warning 都算不上。未触线前无需焦虑、不需在常规 review 里逐个排查；一旦触线，按职责拆分重构（如 `detail.go` → `internal/reqdetail`、`config.go` 拆出 `apikeys.go`），或逻辑内聚时临时按 +15~20% 调高豁免。
 - **可维护性的核心在整体架构与设计复杂度，而非代码行数**（原 1.15）：单人可维护性取决于是否守住 First Principles / KISS / YAGNI、是否消除了不必要的过度设计与复杂分支，而非机械度量行数或两半区体量比。探索性新分析指标优先用外部脚本消费稳定的 `vmr-report.json` / `journey-*.json` 契约验证，确认真实价值后再评估主库实现。
-- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：LLM 判别器产出的 Finding 必须强制标记 `Source: "llm_inferred"`、离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` + 直接证据锚点的项以 Finding（⚠️）呈现并标 `[AI推测]`；`MEDIUM`/`LOW` 降级为参考提示。**锚点运行期强制校验**：`ComputeLLMFindings` 收完全部 detector 输出后逐条 `strings.Contains(真实 transcript, EvidenceAnchor)` 校验，非逐字子串即丢弃。问法严格约束在有证据支撑的事实性问题上（拒绝开放式主观质量打分），守住「揭示事实与过程异常而非冒充裁判」的边界。
+- **LLM 解读层生成结构化 Finding 的准入与置信度契约**：LLM 判别器产出的 Finding 必须强制标记 `Source: "llm_inferred"`、离散置信度（`HIGH/MEDIUM/LOW`）与原文 `EvidenceAnchor`。仅 `HIGH` + 直接证据锚点的项以 Finding（⚠️）呈现并标 `[AI推测]`；`MEDIUM`/`LOW` 降级为参考提示。**锚点运行期强制校验**：`ComputeLLMFindings` 收完全部 detector 输出后逐条 `strings.Contains(真实 transcript, EvidenceAnchor)` 校验，非逐字子串即丢弃——但这是**防幻觉**检查，**不是防注入**：注入方就是转录本的作者，他能同时植入被引用的锚点和结论，`Contains` 必然命中。注入面靠另外两道闸收口：LLM 来源的 Finding **一律不参与 `pickDriver`**（仪表盘顶部判词只可能来自规则产出），且 `StepSeq` 不在本 Journey 真实步号范围内的 Finding **直接丢弃而不是 clamp**（clamp 会把攻击者选的序号映射到一个合法步）。问法严格约束在有证据支撑的事实性问题上（拒绝开放式主观质量打分），守住「揭示事实与过程异常而非冒充裁判」的边界。
 
 
 ## 2. 待定与待解决问题（分组；组内按用户价值 × ROI 排序）
@@ -231,6 +249,19 @@
 - **可能方案**：细化有效引用粒度（如按实体引用率加权或按 token 深度衰减）或按任务类别（含/不含工具调用）分桶展示。
 - **触发条件**：后续版本计划重构行为指标语义时统一评估。
 
+
+#### 2.66 [中] 分析半区的 usage 解析仍靠字段存在性猜协议，只有在线计费改准了
+
+- **现状**：`chatmsg.usageFromObj` 现在接受 `protocol` 参数，按协议直接选 "input 是否已含 cached" 的规则——但只有 `respnorm`/`router` 这条**在线计费**路径把 protocol 传了下去。`internal/report`、`ctxgraph`、`reqdetail`、`replay` 仍调用 protocol-unknown 的 `ExtractUsage`/`MergeUsageBytes` 包装，退回字段存在性判据（`input_tokens_details` 是否存在）。
+- **后果**：聚合网关补齐或省略 `input_tokens_details` 时，报表的 In / CacheRead 列仍可能**双向**失真——Anthropic 被当成 responses 会少算 `cacheRead + cacheWrite`，反向会重复计入。真金白银的配额误算已经消除，剩下的是报表失真。
+- **为什么没一起做**：这四个包不在当时那批修改的白名单内。迁移本身是每个调用点一行（把 `rec` 已经持有的 protocol 传进去）。
+- **顺带**：`router.go` 的 telemetry 记账仍以 `Usage()` 的 ok（任一侧见过 usage）为准，截断流会记录占位 `Out≈1`；`replay` 的 `chargeReplay` 仍走完整语义的 `TokenCounters`，重放带部分 usage 的截断响应时按精确计费。两者量级都小，随本条一并迁移即可。
+- **验收建议**：迁移的同时给 parity 测试补一个 anthropic 夹具——当前 parity 只有 openai-completions 夹具，而那种协议下两套规则结果恰好一致，所以它对这个缺陷天然失明。
+
+#### 2.67 [低] Anthropic 侧的 usage 侧别判定对不吐 `message_start` 类型标记的兼容网关 fail-open
+
+- **现状**：`respnorm` 现在按 SSE 事件分别记录 in/out 两侧的 usage 是否见过（截断流不再把占位 `output_tokens≈1` 当精确值计费）。侧别判定依赖事件里的 `"type":"message_start"` 标记——含该标记的事件只记 in 侧。
+- **边界**：不吐这个标记的 anthropic 兼容网关退回通用判定（占位 Out=1 记为 out 侧见过），即该形态下回到修复前的行为。刻意 fail-open：宁可退回旧行为，也不因为识别不出网关方言就把整条流判成无 usage。
 
 #### 2.65 [低，登记待触发] 依赖 anthropic-messages `is_error` 标记的信号从未在真实语料上被执行
 
