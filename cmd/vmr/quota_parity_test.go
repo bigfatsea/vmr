@@ -30,6 +30,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,7 +138,7 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 // catch, one level down.
 func (r parityRequest) tokenCharge() (quota.Counters, float64) {
 	u, sniffed := chatmsg.ExtractUsage(r.respBody)
-	return router.TokenCounters(u, sniffed, r.estTokens, chatmsg.EstimateBodyTokens(r.respBody))
+	return router.TokenCounters(u, sniffed, r.estTokens, chatmsg.EstimateResponseBodyTokens(r.respBody))
 }
 
 // routerCharged replays the same requests through internal/router's REAL
@@ -514,10 +516,12 @@ func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
 
 // TestQuotaParity_StreamingSSE_DegradedEstimateBasis verifies that for streaming
 // SSE responses without upstream usage, both the router side (respnorm.Wrap /
-// OutTokens) and the analytics side (chatmsg.EstimateBodyTokens) estimate tokens
-// strictly from the extracted text content, ignoring SSE envelopes (data: prefixes,
-// JSON formatting, chunk headers). It also verifies that opaque streams return 0
-// output tokens.
+// OutTokens) and the analytics side (chatmsg.EstimateResponseBodyTokens) estimate
+// tokens strictly from the extracted text content, ignoring SSE envelopes (data:
+// prefixes, JSON formatting, chunk headers). It also verifies that opaque (compressed
+// passthrough) streams yield 0 output tokens on BOTH sides: the router returns 0
+// from OutTokens, and the analytics side must not estimate over the binary-mangled
+// body the audit JSONL actually holds.
 func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 	content := "The quick brown fox jumps over the lazy dog."
 	wantTokens := tokenutil.EstimateText(content)
@@ -538,7 +542,7 @@ func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 	routerTokens1 := rs1.OutTokens()
 
 	// Analytics side
-	analyticsTokens1 := chatmsg.EstimateBodyTokens(sseSingle)
+	analyticsTokens1 := chatmsg.EstimateResponseBodyTokens(sseSingle)
 
 	if routerTokens1 != wantTokens {
 		t.Errorf("routerTokens1 = %d, want %d (content-only estimate)", routerTokens1, wantTokens)
@@ -568,7 +572,7 @@ func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 		t.Fatalf("drain rs2: %v", err)
 	}
 	routerTokens2 := rs2.OutTokens()
-	analyticsTokens2 := chatmsg.EstimateBodyTokens(sseMulti)
+	analyticsTokens2 := chatmsg.EstimateResponseBodyTokens(sseMulti)
 
 	if routerTokens2 != wantTokens {
 		t.Errorf("routerTokens2 (multi-chunk) = %d, want %d", routerTokens2, wantTokens)
@@ -589,6 +593,32 @@ func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 	}
 	if got := rsOpaque.OutTokens(); got != 0 {
 		t.Errorf("rsOpaque.OutTokens() = %d, want 0", got)
+	}
+
+	// Analytics side for the same opaque traffic: what the audit JSONL actually
+	// holds is the recorder's capture of the compressed bytes, mangled by the
+	// JSONL round-trip (every invalid byte replaced with U+FFFD). Estimating
+	// over that would be garbage; it must read 0, matching the router side.
+	var gz bytes.Buffer
+	gw := gzip.NewWriter(&gz)
+	if _, err := gw.Write([]byte(sseSingle)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	// Round-trip through JSON exactly as audit write/read would, so the test
+	// input is the string chatmsg actually sees in production.
+	jb, err := json.Marshal(string(gz.Bytes()))
+	if err != nil {
+		t.Fatalf("marshal opaque body: %v", err)
+	}
+	var storedBody any
+	if err := json.Unmarshal(jb, &storedBody); err != nil {
+		t.Fatalf("unmarshal opaque body: %v", err)
+	}
+	if got := chatmsg.EstimateResponseBodyTokens(storedBody); got != 0 {
+		t.Errorf("analytics opaque estimate = %d, want 0 (router side charges 0)", got)
 	}
 }
 

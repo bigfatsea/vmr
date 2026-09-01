@@ -52,6 +52,7 @@ commits and design docs hold the full reasoning.
 - `journey-*.html` timeline now visually highlights single-attempt failed steps (`❌ error/class` badge + red border) and displays an explicit failure outcome status for journeys terminating in error, aligning with Markdown's decision spine
 
 ### Fixed
+- Degraded output-token estimates for opaque (compressed passthrough) responses now read 0 on the analytics side too, matching what the router charges; response-side estimates no longer fall back to raw-byte counting over SSE/JSON remnants or mangled binary bodies, with the opaque case pinned on both sides by the quota parity test
 - MiniMax thinking-mode repairs: only the first `<think>…</think>` block is stripped — a thinking answer that *discusses* `<think>` in its body no longer has those blocks erased; the guard also works when the tag is split across SSE chunks, and leakage that escapes repair now leaves a `think_pattern_detected` marker in the audit trail
 - `[DONE]` sentinel: detection is now line-exact, so response text containing the literal `data: [DONE]` no longer suppresses the stream-terminating sentinel append (clients relying on `[DONE]` no longer hang)
 - Router stability: a panic in a background health probe no longer kills the whole process; a half-open probe slot is always released even if a handler panics, so an endpoint can no longer stay locked out in "probing" until restart

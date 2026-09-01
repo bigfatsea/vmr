@@ -2,7 +2,10 @@
 
 package chatmsg
 
-import "testing"
+import (
+	"testing"
+	"unicode/utf8"
+)
 
 func TestExtractUsage_OpenAIJSON(t *testing.T) {
 	t.Parallel()
@@ -197,5 +200,46 @@ func TestEstimateBodyTokens_ExcludesSSEEnvelopes(t *testing.T) {
 	// Should match token estimation of content directly
 	if got <= 0 {
 		t.Fatalf("got = %d, want > 0", got)
+	}
+}
+
+// EstimateResponseBodyTokens mirrors the router side's metering basis: text
+// only, 0 for binary/opaque bodies, and never a raw-byte fallback.
+func TestEstimateResponseBodyTokens_OpaqueBinaryIsZero(t *testing.T) {
+	t.Parallel()
+	// A compressed passthrough body as the audit JSONL round-trip delivers it:
+	// invalid bytes already replaced with U+FFFD, so the string is valid UTF-8
+	// but the content is mangled binary.
+	opaque := string([]byte{0x1f, 0x8b}) + "\ufffd\ufffd binary garbage \ufffd"
+	if got := EstimateResponseBodyTokens(opaque); got != 0 {
+		t.Errorf("EstimateResponseBodyTokens(opaque string) = %d, want 0", got)
+	}
+	raw := []byte{0x1f, 0x8b, 0x00, 0xff, 0xfe}
+	if utf8.Valid(raw) {
+		t.Fatalf("test setup: raw bytes must be invalid UTF-8")
+	}
+	if got := EstimateResponseBodyTokens(raw); got != 0 {
+		t.Errorf("EstimateResponseBodyTokens(opaque bytes) = %d, want 0", got)
+	}
+}
+
+func TestEstimateResponseBodyTokens_PlainTextErrorBody(t *testing.T) {
+	t.Parallel()
+	// Non-JSON, non-SSE plain text still estimates from the text itself —
+	// there is no envelope to strip.
+	body := "Upstream is temporarily unavailable, please retry later."
+	got := EstimateResponseBodyTokens(body)
+	if got <= 0 {
+		t.Errorf("EstimateResponseBodyTokens(plain text) = %d, want > 0", got)
+	}
+}
+
+func TestEstimateResponseBodyTokens_EmptyAndNil(t *testing.T) {
+	t.Parallel()
+	if got := EstimateResponseBodyTokens(nil); got != 0 {
+		t.Errorf("EstimateResponseBodyTokens(nil) = %d, want 0", got)
+	}
+	if got := EstimateResponseBodyTokens(""); got != 0 {
+		t.Errorf("EstimateResponseBodyTokens(empty) = %d, want 0", got)
 	}
 }

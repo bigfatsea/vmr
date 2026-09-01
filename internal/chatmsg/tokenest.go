@@ -23,7 +23,10 @@ import (
 //
 // respBody is the client-side response body, or nil when there is no
 // response to estimate from (a response with no usage still has a body to
-// estimate over; a nil response contributes 0).
+// estimate over; a nil response contributes 0). The output side mirrors the
+// router's metering basis through EstimateResponseBodyTokens — extracted
+// text only, 0 for opaque/binary bodies — while the input side keeps the
+// raw-byte basis the router's Facts.EstimatedTokens uses.
 func EstimateDegradedTokens(facts *core.RequestFacts, reqBody, respBody any) (inEst, outEst int64) {
 	if facts != nil {
 		inEst = facts.EstimatedTokens
@@ -31,7 +34,7 @@ func EstimateDegradedTokens(facts *core.RequestFacts, reqBody, respBody any) (in
 		inEst = EstimateBodyTokens(reqBody)
 	}
 	if respBody != nil {
-		outEst = EstimateBodyTokens(respBody)
+		outEst = EstimateResponseBodyTokens(respBody)
 	}
 	return inEst, outEst
 }

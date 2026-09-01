@@ -11,6 +11,20 @@
 // half and the other half imports it. core carries no internal imports
 // (archtest's TestArchitecture_ZeroInternalDepPackages); a helper that would
 // need one is a sign it is behavior, not a shared type.
+//
+// Documented exceptions — symbols that press on the rule but stay here on
+// purpose; the list is the single place a reviewer needs to check (each
+// declaration carries the full rationale):
+//   - Endpoint.HealthKey / Name / Freeze: pure computations over Endpoint's
+//     own fields with no single owning half — HealthKey is the identity the
+//     health registry, quota, probes, and /status all key on; Name is the
+//     display form deliberately kept separate from EndpointLabel (the audit
+//     format); Freeze memoizes those two for snapshot construction.
+//   - StickyBackstopTTL: canonical value kept here so config can validate
+//     against it without importing internal/sticky; sticky re-exports it.
+//
+// A new symbol needing similar treatment extends this list instead of
+// resting its case in a lone function comment.
 package core
 
 import (
