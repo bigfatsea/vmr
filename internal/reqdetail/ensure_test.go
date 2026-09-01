@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -85,7 +86,7 @@ func TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint(t *testing.T) {
 	if string(data) == string(sentinel) {
 		t.Errorf("EnsureRendered kept a fingerprint-less pre-existing file instead of rewriting it — a file with no matching fingerprint must never be trusted")
 	}
-	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false)) {
+	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil)) {
 		t.Errorf("rewritten file missing the expected fingerprint line, got:\n%s", data)
 	}
 }
@@ -120,7 +121,7 @@ func TestEnsureRendered_RewritesOnStaleTemplateVersion(t *testing.T) {
 	if strings.Contains(string(data), "stale content from a lower template version") {
 		t.Errorf("a fingerprint naming an older template version was not treated as stale, got:\n%s", data)
 	}
-	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false)) {
+	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil)) {
 		t.Errorf("rewritten file missing the current fingerprint, got:\n%s", data)
 	}
 }
@@ -280,5 +281,66 @@ func TestEnsureRendered_NoLeftoverTempFiles(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("dir has %d entries, want exactly 1 (the .md, no leftover .tmp): %v", len(entries), entries)
+	}
+}
+
+// TestEnsureRendered_RewritesWhenManifestIdentityChanges is the R72
+// regression guard: Render's output depends on m/prev (delta highlight,
+// history folding, prev-turn link), but the filename doesn't — so before
+// the fingerprint folded m/prev identity in, `vmr report` and `vmr story`
+// passing DIFFERENT m/prev for the same record made whichever command ran
+// second silently skip, first-writer-wins. Same rec, different (m, prev)
+// must therefore RE-render; identical args must keep skipping (idempotent
+// short-circuit preserved).
+func TestEnsureRendered_RewritesWhenManifestIdentityChanges(t *testing.T) {
+	dir := t.TempDir()
+	ts := time.Date(2026, 7, 9, 0, 31, 6, 0, time.UTC)
+	rec := minimalRec(ts)
+
+	m1 := &ctxgraph.Manifest{Req: "audit.jsonl:1"}
+	m2 := &ctxgraph.Manifest{Req: "audit.jsonl:2"}
+
+	name, err := EnsureRendered(dir, rec, "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	// Same args again → skip (mtime unchanged).
+	fi1, err := os.Stat(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureRendered(dir, rec, "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, ""); err != nil {
+		t.Fatal(err)
+	}
+	fi2, err := os.Stat(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi1.ModTime().Equal(fi2.ModTime()) {
+		t.Fatal("identical args must keep the idempotent skip, got a re-render")
+	}
+
+	// Different m identity → re-render, content carries the new fingerprint.
+	if _, err := EnsureRendered(dir, rec, "audit.jsonl", 1, m1, nil, taskseg.OpenClawAware, i18n.EN, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, nil)) {
+		t.Errorf("re-render with m=%s did not land, got:\n%s", m1.Req, read())
+	}
+
+	// Different prev identity → re-render again.
+	if _, err := EnsureRendered(dir, rec, "audit.jsonl", 1, m1, m2, taskseg.OpenClawAware, i18n.EN, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, m2)) {
+		t.Errorf("re-render with prev=%s did not land, got:\n%s", m2.Req, read())
 	}
 }

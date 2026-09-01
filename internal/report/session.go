@@ -112,7 +112,15 @@ type ReqInfo struct {
 	// wasn't a parseable chat object — same case collect() already bails
 	// out of early, see the body-parse guard below).
 	manifest *ctxgraph.Manifest
-	tailPrev []string // previews of the last tailPrevKeep messages
+	// prevManifest is the manifest immediately preceding this record's own
+	// within its ctxgraph.Lineage (nil at a lineage's first manifest) —
+	// the same "prev" internal/story's Step.PrevManifest carries, so both
+	// commands hand reqdetail the identical (m, prev) pair and render the
+	// byte-identical page. Derived from the lineage directly, NOT from
+	// the attached-record chain: a compaction-tagged record excluded from
+	// s.Recs still counts here, exactly as it does on story's side.
+	prevManifest *ctxgraph.Manifest
+	tailPrev     []string // previews of the last tailPrevKeep messages
 	// realUsers: absolute msg idx → previewed real user instruction. Held for
 	// every record in the corpus (SessionAnalysis keeps all ReqInfo), which is
 	// why taskseg stores the preview rather than the raw text — see
@@ -543,11 +551,15 @@ type recLoc struct {
 func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 	manifestByLoc := make(map[recLoc]*ctxgraph.Manifest)
 	lineageByLoc := make(map[recLoc]*ctxgraph.Lineage)
+	prevByLoc := make(map[recLoc]*ctxgraph.Manifest)
 	for _, l := range g.Lineages {
-		for _, m := range l.Manifests {
+		for i, m := range l.Manifests {
 			loc := recLoc{m.Path, m.Line}
 			manifestByLoc[loc] = m
 			lineageByLoc[loc] = l
+			if i > 0 {
+				prevByLoc[loc] = l.Manifests[i-1]
+			}
 		}
 	}
 	for _, m := range g.Ungrouped {
@@ -563,13 +575,20 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 	// in this run's iteration order.
 	var orderLineage []*ctxgraph.Lineage
 	for _, r := range a.Recs {
+		loc := recLoc{r.Path, r.Line}
+		m := manifestByLoc[loc]
+		r.manifest = m // nil when the body never parsed as a chat object
+		// Compaction-tagged records keep their report-only, body-sniffed
+		// treatment (a.Compactions, excluded from session grouping) but
+		// still get their own manifest and lineage prev: detail rendering
+		// depends on both, and internal/story renders the same record with
+		// the same pair — leaving these nil here used to make the two
+		// commands render DIFFERENT pages for the same record.
+		r.prevManifest = prevByLoc[loc]
 		if r.Compaction {
 			a.Compactions = append(a.Compactions, r)
 			continue
 		}
-		loc := recLoc{r.Path, r.Line}
-		m := manifestByLoc[loc]
-		r.manifest = m // nil when the body never parsed as a chat object
 		if m == nil || m.SessKey == "" {
 			a.Ungrouped = append(a.Ungrouped, r)
 			continue

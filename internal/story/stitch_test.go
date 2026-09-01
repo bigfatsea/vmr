@@ -11,6 +11,7 @@
 package story
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +32,17 @@ func s231StyleFixture(t *testing.T) string {
 	msgsList := []any{sys, u1}
 	for i := 0; i < 5; i++ {
 		recs = append(recs, mkRec(at(i), "", append([]any{}, msgsList...), sseText("ok")))
-		msgsList = append(msgsList, msg("assistant", "step reply"))
+		msgsList = append(msgsList, msg("assistant", fmt.Sprintf("step reply %d", i)))
+		if i >= 2 {
+			msgsList = append(msgsList, msg("tool", fmt.Sprintf("tool output %d", i)))
+		}
 	}
-	// Contract: history collapses, but the exact opening instruction
-	// survives verbatim — the real s231 shape.
-	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1, msg("assistant", "post-break reply")}, sseText("continuing")))
+	// Contract: history collapses, but the opening instruction plus the
+	// most recent assistant reply and tool result survive verbatim (3
+	// shared distinct keys, clearing stitchMinAbsOverlap).
+	recs = append(recs, mkRec(at(30), "", []any{msg("system", "sys v2"), u1,
+		msg("assistant", "step reply 3"), msg("tool", "tool output 3"),
+		msg("assistant", "post-break reply")}, sseText("continuing")))
 
 	return writeJSONL(t, recs)
 }
@@ -52,11 +59,15 @@ func TestStitchedJourney_NewInstructionOpensTask(t *testing.T) {
 	msgsList := []any{sys, u1}
 	for i := 0; i < 5; i++ {
 		recs = append(recs, mkRec(at(i), "", append([]any{}, msgsList...), sseText("ok")))
-		msgsList = append(msgsList, msg("assistant", "step reply"))
+		msgsList = append(msgsList, msg("assistant", fmt.Sprintf("step reply %d", i)))
+		if i >= 2 {
+			msgsList = append(msgsList, msg("tool", fmt.Sprintf("tool output %d", i)))
+		}
 	}
 	// Contract that also carries a brand-new instruction after the collapse.
 	recs = append(recs, mkRec(at(30), "",
-		[]any{msg("system", "sys v2"), u1, msg("assistant", "post-break reply"), msg("user", "now write the summary doc")},
+		[]any{msg("system", "sys v2"), u1, msg("assistant", "step reply 3"), msg("tool", "tool output 3"),
+			msg("user", "now write the summary doc")},
 		sseText("continuing")))
 	path := writeJSONL(t, recs)
 

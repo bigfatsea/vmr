@@ -1330,17 +1330,27 @@ func contextGrowthContractFixture() []map[string]any {
 
 	var recs []map[string]any
 	msgs := []any{sys, u1}
-	for i, tok := range []int{100, 500, 8000} { // pre-contract growth: honest 80x peak
+	// 6 pre-contract turns with distinct assistant steps so the accumulated
+	// key set reaches 7 distinct keys — enough for a Contract opening that
+	// preserves 3 distinct keys (anchor + the two most recent steps) and
+	// still strictly satisfies len(cur) < 0.6 * len(prev_last).
+	for i, tok := range []int{100, 500, 2000, 4000, 6000, 8000} {
 		recs = append(recs, mkTurn(t0.Add(time.Duration(i)*time.Minute), append([]any{}, msgs...), tok))
-		msgs = append(msgs, map[string]any{"role": "assistant", "content": "step"})
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": "step " + strconv.Itoa(i)})
 	}
-	// Contract: history collapses to [sys v2, u1] — same opening instruction
-	// survives verbatim (the Contract pattern) — small post-compaction token count.
+	// Contract: history collapses to [sys v2, u1, step3, step4] — the
+	// opening instruction plus the two most recent replies survive
+	// verbatim, clearing stitchMinAbsOverlap (3 shared distinct keys).
 	recs = append(recs, mkTurn(t0.Add(10*time.Minute),
-		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1}, 150))
+		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1,
+			map[string]any{"role": "assistant", "content": "step 3"},
+			map[string]any{"role": "assistant", "content": "step 4"}}, 150))
 	// Post-contract growth continues independently, to its own honest 6x peak.
 	recs = append(recs, mkTurn(t0.Add(11*time.Minute),
-		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1, map[string]any{"role": "assistant", "content": "continuing"}}, 900))
+		[]any{map[string]any{"role": "system", "content": "sys v2"}, u1,
+			map[string]any{"role": "assistant", "content": "step 3"},
+			map[string]any{"role": "assistant", "content": "step 4"},
+			map[string]any{"role": "assistant", "content": "continuing"}}, 900))
 	return recs
 }
 
