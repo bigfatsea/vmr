@@ -328,6 +328,31 @@ func TestDefaultClassify_EchoedPromptNoFalseContentFlag(t *testing.T) {
 			`{"error":{"message":"output may contain inappropriate content (1027)"}}`,
 			core.ErrContent,
 		},
+		// Noun+flagged compounds (F-N01): relays that word the block without
+		// "was" — the bare-word trap stays closed, these compound phrases
+		// don't appear in ordinary echoed prose.
+		{
+			"request flagged without was",
+			`{"error":{"message":"Request flagged by our safety system"}}`,
+			core.ErrContent,
+		},
+		{
+			"content flagged without was",
+			`{"error":{"message":"Content flagged: violence"}}`,
+			core.ErrContent,
+		},
+		{
+			"prompt flagged without was",
+			`{"error":{"message":"Prompt flagged, cannot proceed"}}`,
+			core.ErrContent,
+		},
+		// But an echoed prompt that merely contains "flagged" (not as a
+		// noun+flagged compound) must stay ErrClient — the Q06 trap.
+		{
+			"flagged as part of an echoed field name",
+			`{"error":{"message":"Invalid value for messages[4].content: unknown enum value for flagged_mode"}}`,
+			core.ErrClient,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

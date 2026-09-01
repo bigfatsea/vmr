@@ -96,6 +96,10 @@ func contentHint(snippet string) bool {
 		"inappropriate content", "exists risk", "content risk", "data_inspection",
 		"(1026)", "(1027)",
 		"sensitive content", "content sensitive", "sensitive words", "sensitive topic", "sensitive data",
+		// Noun+flagged compounds: cover relays that word the block without
+		// "was" ("Request flagged", "Content flagged") without reopening the
+		// bare-word false-positive trap Q06 closed.
+		"request flagged", "content flagged", "input flagged", "message flagged", "prompt flagged",
 		"敏感", "违规", "合规")
 }
 

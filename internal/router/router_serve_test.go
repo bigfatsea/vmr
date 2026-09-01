@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,6 +177,47 @@ func TestServe_NoSnapshotInstalled(t *testing.T) {
 	}
 }
 
+// TestInstall_ConcurrentAtomicity locks in Q13: Install's atomicity must be
+// self-contained (installMu serializes the installLimiter + snapshot swap +
+// quota-prune sequence) rather than borrowed from the caller's reloadMu. N
+// concurrent Installs with distinct snapshots must each land atomically —
+// the live snapshot is always exactly one of the installed instances, never
+// a torn mix — and the whole exercise must be race-clean under `-race`.
+func TestInstall_ConcurrentAtomicity(t *testing.T) {
+	const n = 16
+	snaps := make([]*Snapshot, n)
+	for i := range snaps {
+		cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p%d, base_url: {openai-completions: https://example.com/v1}, api_key: k}
+models:
+  vm: {endpoints: [{protocol: openai-completions, providers: [p%d], models: [m]}]}
+`, i, i))
+		snaps[i] = mustSnapshot(t, cfg)
+	}
+
+	rt := New(nil)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(s *Snapshot) {
+			defer wg.Done()
+			rt.Install(s)
+		}(snaps[i])
+	}
+	wg.Wait()
+
+	// The final live snapshot must be exactly one of the installed ones.
+	got := rt.Snapshot()
+	for _, s := range snaps {
+		if got == s {
+			return
+		}
+	}
+	t.Fatalf("live snapshot is not one of the installed instances (torn install)")
+}
+
 // --- Serve: wrong protocol hint ---
 
 func TestServe_WrongProtocolHint(t *testing.T) {
@@ -313,6 +355,61 @@ func (ew *errorWriter) Write(p []byte) (int, error) {
 	return 0, errors.New("connection reset by peer")
 }
 func (ew *errorWriter) Flush() {}
+
+// chunkedReader yields data in small chunks with a delay between them,
+// mimicking a slow streaming upstream whose delivery cadence races the
+// copyFlush idle watchdog.
+type chunkedReader struct {
+	chunks [][]byte
+	idx    int
+	delay  time.Duration
+}
+
+func (cr *chunkedReader) Read(p []byte) (int, error) {
+	if cr.idx >= len(cr.chunks) {
+		return 0, io.EOF
+	}
+	if cr.delay > 0 {
+		time.Sleep(cr.delay)
+	}
+	c := cr.chunks[cr.idx]
+	cr.idx++
+	return copy(p, c), nil
+}
+
+// TestCopyFlush_TimerResetStress locks in Q09: the timer reset in
+// copyFlush must drain a fired timer non-blockingly (the old bare
+// `if !timer.Stop() { <-timer.C }` could wedge when the fired value had
+// already been consumed). Delivering chunks at a cadence slightly slower
+// than the idle timeout makes the select race the data branch against the
+// timeout branch on every chunk; the outcome is a full delivery or a
+// legitimate idle-timeout error — never a hang. Bounded by a context
+// deadline so a regression fails loudly instead of wedging the suite.
+func TestCopyFlush_TimerResetStress(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		chunks := make([][]byte, 8)
+		for j := range chunks {
+			chunks[j] = []byte(fmt.Sprintf("chunk-%d-", j))
+		}
+		src := &chunkedReader{chunks: chunks, delay: 2 * time.Millisecond}
+		w := httptest.NewRecorder()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		done := make(chan error, 1)
+		go func() { done <- copyFlush(ctx, w, src, time.Millisecond) }()
+		select {
+		case err := <-done:
+			cancel()
+			if err != nil && !strings.Contains(err.Error(), "idle") && !strings.Contains(err.Error(), "timeout") {
+				t.Fatalf("iteration %d: unexpected error: %v", i, err)
+			}
+			// A full delivery and an idle timeout are both legal outcomes;
+			// a hang (no return) is the Q09 regression.
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatalf("iteration %d: copyFlush did not return within 2s — deadlock", i)
+		}
+	}
+}
 
 // --- parseRetryAfter ---
 

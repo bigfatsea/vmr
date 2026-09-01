@@ -98,6 +98,32 @@ func TestRespStream_ThinkBlockCrossChunk(t *testing.T) {
 	}
 }
 
+// TestRespStream_ThinkStrip_OnlyFirstBlock locks in Q01: a response that
+// STARTS with a genuine <think> block (so the strip fires) but then
+// mentions <think> again later in the body must keep that later mention.
+// Before Q01, thinkPattern.ReplaceAll erased every occurrence globally —
+// this test pins the "first block only" scope of stripFirstThink.
+func TestRespStream_ThinkStrip_OnlyFirstBlock(t *testing.T) {
+	t.Parallel()
+	// First event starts a real think block (triggers buffered mode and
+	// the strip); the second event's body mentions <think> again.
+	src := strings.NewReader(
+		`data: {"choices":[{"delta":{"content":"<think>step one.</think>done"}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{"content":" Now, about the <think> tag from the docs"}}]}` + "\n\n",
+	)
+	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
+
+	if strings.Contains(out, "step one") {
+		t.Errorf("first think block should be stripped, got: %q", out)
+	}
+	if !strings.Contains(out, "<think> tag from the docs") {
+		t.Errorf("later <think> mention was erased by an over-broad strip: %q", out)
+	}
+	if !strings.Contains(out, "Now, about the") {
+		t.Errorf("post-think content missing: %q", out)
+	}
+}
+
 func TestRespStream_DoneSentinel(t *testing.T) {
 	t.Parallel()
 	// Upstream closes without [DONE]. The processor must append one
