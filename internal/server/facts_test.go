@@ -2,7 +2,11 @@
 
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"vmr/internal/tokenutil"
+)
 
 func TestComputeRequestFacts_PlainText(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":"hello there"}]}`)
@@ -122,5 +126,75 @@ func TestComputeRequestFacts_ResponsesInputFile(t *testing.T) {
 	docFacts := computeRequestFacts(withDoc, 0, false)
 	if docFacts.EstimatedTokens <= base {
 		t.Errorf("a Responses input_file block's file_data payload should raise the token estimate: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
+	}
+}
+
+// b64Payload returns n bytes of deterministic base64-alphabet payload — the
+// stand-in for a real inline image/document body in the attachment tests.
+func b64Payload(n int) []byte {
+	p := make([]byte, n)
+	for i := range p {
+		p[i] = "QUJD"[i%4] // Q,U,J,D repeat — valid base64 alphabet bytes
+	}
+	return p
+}
+
+// TestComputeRequestFacts_ImageBase64NotCountedAsText pins R60: an inline
+// image's base64 payload must NOT also be counted as message text on top of
+// imageCount*imageTokenEstimate. Before the fix, tokenutil.Estimate ran over
+// the whole (imgprep-rewritten) body, so a 500KB inline JPEG contributed
+// ~100K phantom "text" tokens — and router/quota.go's degraded In-side
+// charge reused that inflated number as-is, writing it to the quota ledger.
+// The image's own contribution must stay at the imageTokenEstimate scale.
+func TestComputeRequestFacts_ImageBase64NotCountedAsText(t *testing.T) {
+	payload := b64Payload(500_000)
+	anthropicImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"text","text":"Describe this image."},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + string(payload) + `"}}]}]}`)
+	openAIImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"text","text":"Describe this image."},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` + string(payload) + `"}}]}]}`)
+	responsesImg := []byte(`{"model":"agent","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this image."},{"type":"input_image","image_url":"data:image/jpeg;base64,` + string(payload) + `"}]}]}`)
+
+	for name, body := range map[string][]byte{
+		"anthropic": anthropicImg,
+		"openai":    openAIImg,
+		"responses": responsesImg,
+	} {
+		withImg := computeRequestFacts(body, 1, false)
+		textOnly := computeRequestFacts(body, 0, false)
+		diff := withImg.EstimatedTokens - textOnly.EstimatedTokens
+		// The delta must be the flat per-image estimate (plus rounding
+		// noise from excluding the payload bytes), NOT the ~100K-token
+		// scale of the base64 bytes counted as text.
+		if diff <= 0 || diff > 2*imageTokenEstimate {
+			t.Errorf("%s: image delta = %d, want within (0, %d] — a value near the payload's text-token scale (~100K) means attachment bytes are being double-counted (R60)", name, diff, 2*imageTokenEstimate)
+		}
+	}
+}
+
+// TestComputeRequestFacts_PDFBase64NotCountedAsText is the document twin of
+// the image test: a PDF payload's bytes are accounted by
+// estimateDocumentTokens (bytes/documentBytesPerToken); they must not ALSO
+// enter the text estimate.
+func TestComputeRequestFacts_PDFBase64NotCountedAsText(t *testing.T) {
+	payload := b64Payload(300_000)
+	withDoc := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(payload) + `"}}]}]}`)
+	facts := computeRequestFacts(withDoc, 0, false)
+
+	wantDoc := int64(300_000 / documentBytesPerToken) // 15000
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"Summarize this document."}]}`), 0, false)
+	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
+	if diff < wantDoc/2 || diff > 2*wantDoc {
+		t.Errorf("document delta = %d, want within [%d, %d] — outside means the payload bytes leaked into (or vanished from) the estimate", diff, wantDoc/2, 2*wantDoc)
+	}
+}
+
+// TestComputeRequestFacts_UnterminatedPayloadNotCountedAsText covers the
+// truncated-request edge: a payload value with no closing quote is spanned
+// to end-of-body (still attachment bytes), not estimated as text.
+func TestComputeRequestFacts_UnterminatedPayloadNotCountedAsText(t *testing.T) {
+	payload := b64Payload(100_000)
+	truncated := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(payload))
+	facts := computeRequestFacts(truncated, 0, false)
+	if facts.EstimatedTokens > 4*int64(100_000/documentBytesPerToken) {
+		t.Errorf("truncated payload estimate = %d, want at the document-token scale (~%d), not the ~%d text-token scale of the raw bytes",
+			facts.EstimatedTokens, 100_000/documentBytesPerToken, tokenutil.Estimate(truncated))
 	}
 }
