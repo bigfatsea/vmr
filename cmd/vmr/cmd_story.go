@@ -80,7 +80,7 @@ func cmdStory(args []string) error {
 	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
 	llmKeyFlag := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key (typically \"${SOME_ENV_VAR}\")")
 	llmCacheDirFlag := fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever (no implicit default path)")
-	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
+	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything")
 	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
 	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
 	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
@@ -356,9 +356,11 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	findings := story.ComputeFindings(j, lang)
 
 	if llmOpts.Addr != "" && llmOpts.DryRun {
-		pack := story.BuildSingleJourneyEvidencePack(j, m, findings, lang)
-		chars := pack.EstimateChars()
-		fmt.Printf("evidence pack: %d chars (~%d tokens estimated) — dry run, no request sent\n", chars, chars/4)
+		// Every pack the run would send — each detector whose candidate
+		// filter fires, plus the always-sent interpretation — not just the
+		// interpretation pack (R90: the old single-pack estimate understated
+		// the call count by up to 7x).
+		fmt.Print(story.FormatLLMDryRun(story.EstimateLLMDryRun(j, m, findings, lang)))
 		return nil
 	}
 

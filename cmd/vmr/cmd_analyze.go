@@ -176,7 +176,7 @@ func cmdAnalyze(args []string) error {
 	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
 	llmKeyFlag := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key")
 	llmCacheDirFlag := fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever")
-	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print the evidence-pack size estimate and exit without calling anything")
+	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

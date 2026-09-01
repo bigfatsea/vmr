@@ -1,9 +1,17 @@
 // Ver 2026-08-16 23:10, by gemini-3.7-flash
 
-// Evidence pack types and LLM result payload definitions for Phase 1b semantic detectors.
+// Evidence pack types and LLM result payload definitions for Phase 1b semantic
+// detectors — plus the two things those payloads flow through: parsing a
+// detector reply out of raw LLM text, and the -llm-dry-run pack enumeration.
 package story
 
-import "vmr/internal/i18n"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"vmr/internal/i18n"
+)
 
 // --- P1b.1: Tool Result Misinterpretation (E3) Types ------------------------
 
@@ -188,4 +196,130 @@ type completionClaimResult struct {
 	EvidenceAnchor      string `json:"evidence_anchor"`
 	MissingVerification string `json:"missing_verification"`
 	SuggestedAction     string `json:"suggested_action"`
+}
+
+func parseJSONFromLLM[T any](text string, out *T) error {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "```") {
+		lines := strings.Split(trimmed, "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			lines = lines[:len(lines)-1]
+		}
+		trimmed = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+
+	startObj := strings.Index(trimmed, "{")
+	startArr := strings.Index(trimmed, "[")
+	start := -1
+	if startObj >= 0 && startArr >= 0 {
+		if startObj < startArr {
+			start = startObj
+		} else {
+			start = startArr
+		}
+	} else if startObj >= 0 {
+		start = startObj
+	} else if startArr >= 0 {
+		start = startArr
+	}
+
+	endObj := strings.LastIndex(trimmed, "}")
+	endArr := strings.LastIndex(trimmed, "]")
+	end := -1
+	if endObj >= 0 && endArr >= 0 {
+		if endObj > endArr {
+			end = endObj
+		} else {
+			end = endArr
+		}
+	} else if endObj >= 0 {
+		end = endObj
+	} else if endArr >= 0 {
+		end = endArr
+	}
+
+	if start >= 0 && end > start {
+		trimmed = trimmed[start : end+1]
+	}
+
+	return json.Unmarshal([]byte(trimmed), out)
+}
+
+// --- Detector pack enumeration (shared with -llm-dry-run) --------------------
+
+// llmDetectorPack pairs one detector's would-be evidence pack with the
+// stable name -llm-dry-run's per-call breakdown displays for it.
+type llmDetectorPack struct {
+	name string
+	pack evidencePackKind
+}
+
+// buildLLMDetectorPacks assembles every detector's evidence pack whose
+// candidate filter fires — the same builders the detectors themselves use,
+// so a dry run enumerates exactly the calls a real run would make; the
+// filters are pure local computation and building a pack sends nothing.
+func buildLLMDetectorPacks(j *Journey, lang i18n.Lang) []llmDetectorPack {
+	var out []llmDetectorPack
+	if p := buildToolMisinterpretationPack(j); p != nil {
+		out = append(out, llmDetectorPack{"tool_result_misinterpretation", *p})
+	}
+	if p := buildOscillationPack(j); p != nil {
+		out = append(out, llmDetectorPack{"semantic_oscillation", *p})
+	}
+	if p := buildGoalDriftPack(j); p != nil {
+		out = append(out, llmDetectorPack{"goal_drift", *p})
+	}
+	if p := buildConstraintPack(j); p != nil {
+		out = append(out, llmDetectorPack{"constraint_dropped", *p})
+	}
+	if p, _ := buildPlanAuditPack(j, lang); p != nil {
+		out = append(out, llmDetectorPack{"plan_misalignment", *p})
+	}
+	if p := buildCompletionClaimPack(j); p != nil {
+		out = append(out, llmDetectorPack{"completion_claim", *p})
+	}
+	return out
+}
+
+// --- -llm-dry-run pack enumeration ------------------------------------------
+
+// LLMDryRunEstimate is one LLM call a single-journey run would make, as
+// reported by -llm-dry-run: the pack's stable name and its serialized size.
+type LLMDryRunEstimate struct {
+	Name  string
+	Chars int
+}
+
+// EstimateLLMDryRun enumerates every LLM call a single-journey run would
+// make: one per detector whose candidate filter fires (building a pack sends
+// nothing) plus the journey interpretation itself, which is always sent.
+// len(result) is therefore the maximum number of calls a real run would
+// issue — the number "should I even run this" has to be judged against, not
+// just the interpretation pack's size.
+func EstimateLLMDryRun(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) []LLMDryRunEstimate {
+	var out []LLMDryRunEstimate
+	for _, dp := range buildLLMDetectorPacks(j, lang) {
+		out = append(out, LLMDryRunEstimate{Name: dp.name, Chars: packChars(dp.pack)})
+	}
+	pack := BuildSingleJourneyEvidencePack(j, m, findings, lang)
+	return append(out, LLMDryRunEstimate{Name: "journey_interpretation", Chars: packChars(pack)})
+}
+
+// FormatLLMDryRun renders the estimate list as -llm-dry-run's stdout block:
+// one line per call, then a total line. The total is the sum of the itemized
+// sizes and the call count the itemized count, so the output cannot
+// understate the spend it exists to preview.
+func FormatLLMDryRun(est []LLMDryRunEstimate) string {
+	var b strings.Builder
+	total := 0
+	for _, e := range est {
+		fmt.Fprintf(&b, "%s: %d chars (~%d tokens estimated)\n", e.Name, e.Chars, e.Chars/4)
+		total += e.Chars
+	}
+	fmt.Fprintf(&b, "%d pack(s), %d chars (~%d tokens estimated) total — up to %d LLM call(s) — dry run, no request sent\n",
+		len(est), total, total/4, len(est))
+	return b.String()
 }
