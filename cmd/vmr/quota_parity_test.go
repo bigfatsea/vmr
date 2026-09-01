@@ -32,6 +32,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -43,6 +44,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/quota"
 	"vmr/internal/report"
+	"vmr/internal/respnorm"
 	"vmr/internal/router"
 	"vmr/internal/tokenutil"
 )
@@ -134,7 +136,7 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 // catch, one level down.
 func (r parityRequest) tokenCharge() (quota.Counters, float64) {
 	u, sniffed := chatmsg.ExtractUsage(r.respBody)
-	return router.TokenCounters(u, sniffed, r.estTokens, tokenutil.Estimate([]byte(r.respBody)))
+	return router.TokenCounters(u, sniffed, r.estTokens, chatmsg.EstimateBodyTokens(r.respBody))
 }
 
 // routerCharged replays the same requests through internal/router's REAL
@@ -507,6 +509,86 @@ func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
 	// on the cost metric instead of just the tokens one.
 	if row.WindowEstimatedPct <= 0 || row.WindowEstimatedPct >= 100 {
 		t.Errorf("WindowEstimatedPct = %v, want strictly between 0 and 100 for a mixed window", row.WindowEstimatedPct)
+	}
+}
+
+// TestQuotaParity_StreamingSSE_DegradedEstimateBasis verifies that for streaming
+// SSE responses without upstream usage, both the router side (respnorm.Wrap /
+// OutTokens) and the analytics side (chatmsg.EstimateBodyTokens) estimate tokens
+// strictly from the extracted text content, ignoring SSE envelopes (data: prefixes,
+// JSON formatting, chunk headers). It also verifies that opaque streams return 0
+// output tokens.
+func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
+	content := "The quick brown fox jumps over the lazy dog."
+	wantTokens := tokenutil.EstimateText(content)
+	if wantTokens <= 0 {
+		t.Fatalf("wantTokens = %d, want > 0", wantTokens)
+	}
+
+	// 1. Single chunk SSE stream with realistic envelope overhead
+	sseSingle := fmt.Sprintf("data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n", content)
+
+	// Router side streaming
+	rs1 := respnorm.Wrap(strings.NewReader(sseSingle), respnorm.Options{
+		ClientModel: "agent", UpstreamModel: "gpt-4o", IsSSE: true, Protocol: "openai-completions",
+	})
+	if _, err := io.Copy(io.Discard, rs1); err != nil {
+		t.Fatalf("drain rs1: %v", err)
+	}
+	routerTokens1 := rs1.OutTokens()
+
+	// Analytics side
+	analyticsTokens1 := chatmsg.EstimateBodyTokens(sseSingle)
+
+	if routerTokens1 != wantTokens {
+		t.Errorf("routerTokens1 = %d, want %d (content-only estimate)", routerTokens1, wantTokens)
+	}
+	if analyticsTokens1 != wantTokens {
+		t.Errorf("analyticsTokens1 = %d, want %d (content-only estimate)", analyticsTokens1, wantTokens)
+	}
+	if routerTokens1 != analyticsTokens1 {
+		t.Errorf("parity mismatch: routerTokens1 = %d != analyticsTokens1 = %d", routerTokens1, analyticsTokens1)
+	}
+
+	rawEnvelopeTokens := tokenutil.Estimate([]byte(sseSingle))
+	if routerTokens1 >= rawEnvelopeTokens {
+		t.Errorf("routerTokens1 = %d should be strictly less than raw envelope estimate %d", routerTokens1, rawEnvelopeTokens)
+	}
+
+	// 2. Multi-chunk fragmented SSE stream
+	chunk1 := "data: {\"choices\":[{\"delta\":{\"content\":\"The quick brown fox \"}}]}\n\n"
+	chunk2 := "data: {\"choices\":[{\"delta\":{\"content\":\"jumps over the lazy dog.\"}}]}\n\n"
+	chunk3 := "data: [DONE]\n\n"
+	sseMulti := chunk1 + chunk2 + chunk3
+
+	rs2 := respnorm.Wrap(strings.NewReader(sseMulti), respnorm.Options{
+		ClientModel: "agent", UpstreamModel: "gpt-4o", IsSSE: true, Protocol: "openai-completions",
+	})
+	if _, err := io.Copy(io.Discard, rs2); err != nil {
+		t.Fatalf("drain rs2: %v", err)
+	}
+	routerTokens2 := rs2.OutTokens()
+	analyticsTokens2 := chatmsg.EstimateBodyTokens(sseMulti)
+
+	if routerTokens2 != wantTokens {
+		t.Errorf("routerTokens2 (multi-chunk) = %d, want %d", routerTokens2, wantTokens)
+	}
+	if analyticsTokens2 != wantTokens {
+		t.Errorf("analyticsTokens2 (multi-chunk) = %d, want %d", analyticsTokens2, wantTokens)
+	}
+	if routerTokens2 != analyticsTokens2 {
+		t.Errorf("parity mismatch multi-chunk: routerTokens2 = %d != analyticsTokens2 = %d", routerTokens2, analyticsTokens2)
+	}
+
+	// 3. Opaque stream must yield OutTokens == 0
+	rsOpaque := respnorm.Wrap(strings.NewReader(sseSingle), respnorm.Options{
+		ClientModel: "agent", UpstreamModel: "gpt-4o", IsSSE: true, Protocol: "openai-completions", Opaque: true,
+	})
+	if _, err := io.Copy(io.Discard, rsOpaque); err != nil {
+		t.Fatalf("drain rsOpaque: %v", err)
+	}
+	if got := rsOpaque.OutTokens(); got != 0 {
+		t.Errorf("rsOpaque.OutTokens() = %d, want 0", got)
 	}
 }
 

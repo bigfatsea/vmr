@@ -157,11 +157,12 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 
 // tokenCharge computes one response's token consumption: the upstream's own
 // reported usage when respnorm.NormalizerStream managed to sniff it (exact),
-// degrading to a byte-count estimate when it didn't (opaque response, no
+// degrading to a token estimate when it didn't (opaque response, no
 // usage field, or a stream truncated before any usage-bearing block
-// arrived) — see the design doc's Metering section. estimated equals the
-// full charged total exactly when this is a degraded estimate, 0 when it's
-// exact — accumulated by quota.Registry into each account's running
+// arrived) — see the design doc's Metering section. For opaque responses,
+// rbody.OutTokens() returns 0 (compressed bytes cannot be estimated).
+// estimated equals the full charged total exactly when this is a degraded estimate,
+// 0 when it's exact — accumulated by quota.Registry into each account's running
 // estimated_pct, the one signal /status gives an operator for how
 // much to trust a token-metered account's numbers.
 func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
@@ -169,8 +170,7 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
 	// server/facts.go — zero extra cost here); response-side comes from
-	// rbody.OutTokens() (respnorm.go), through the exact same formula tokenutil.Estimate
-	// itself uses.
+	// rbody.OutTokens() (respnorm.go), which returns 0 for opaque responses.
 	return TokenCounters(u, sniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
 }
 

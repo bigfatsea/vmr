@@ -190,14 +190,119 @@ func BodyRaw(body any) []byte {
 	}
 }
 
-// EstimateBodyTokens is BodyRaw + tokenutil.Estimate: the degraded
-// token estimate used wherever an upstream reported no usage at all. One
-// implementation, because the macro report's §2 total and a journey's own
-// cost line are supposed to be the same number for the same records — they
-// were not, and the divergence was invisible: both went through
-// pricing.Rate.Cost (the shared FORMULA), but fed it different BASES, which
-// is exactly the failure mode CLAUDE.md's "an analytics number that
-// reproduces another must be pinned, not commented" rule is about.
+// ExtractResponseText extracts the assistant response text (content, reasoning,
+// tool calls) from a response body (SSE stream string, non-streaming JSON
+// response object/string, or byte slice), excluding SSE envelopes and JSON structure.
+// Returns "" when body is nil, empty, or not a recognized response shape.
+func ExtractResponseText(body any) string {
+	switch b := body.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		if s, ok := FinalMessage(b); ok {
+			return summaryText(s)
+		}
+		return ""
+	case string:
+		return extractResponseTextFromString(b)
+	case []byte:
+		return extractResponseTextFromString(string(b))
+	default:
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return ""
+		}
+		return extractResponseTextFromString(string(raw))
+	}
+}
+
+func summaryText(s *StreamSummary) string {
+	if s == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(s.Content)
+	sb.WriteString(s.Reasoning)
+	for _, tc := range s.ToolCalls {
+		sb.WriteString(tc.Name)
+		sb.WriteString(tc.Args)
+	}
+	return sb.String()
+}
+
+var (
+	contentMarker          = []byte(`"content":"`)
+	textMarker             = []byte(`"text":"`)
+	reasoningContentMarker = []byte(`"reasoning_content":"`)
+	thinkingMarker         = []byte(`"thinking":"`)
+	deltaTextMarker        = []byte(`"delta":"`)
+)
+
+func extractTruncatedText(raw []byte) string {
+	var sb strings.Builder
+	for _, m := range [][]byte{contentMarker, textMarker, reasoningContentMarker, thinkingMarker, deltaTextMarker} {
+		rem := raw
+		for {
+			i := bytes.Index(rem, m)
+			if i < 0 {
+				break
+			}
+			val := rem[i+len(m):]
+			end := bytes.IndexByte(val, '"')
+			if end < 0 {
+				sb.Write(val)
+				rem = nil
+				break
+			}
+			sb.Write(val[:end])
+			rem = val[end+1:]
+		}
+	}
+	return sb.String()
+}
+
+func extractResponseTextFromString(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	if strings.Contains(s, "data:") {
+		if sum := ReassembleSSE(s); sum != nil {
+			return summaryText(sum)
+		}
+		if t := extractTruncatedText([]byte(s)); len(t) > 0 {
+			return t
+		}
+		return ""
+	}
+	if trimmed[0] == '{' {
+		var obj map[string]any
+		if json.Unmarshal([]byte(trimmed), &obj) == nil {
+			if sum, ok := FinalMessage(obj); ok {
+				return summaryText(sum)
+			}
+			return ""
+		}
+		if t := extractTruncatedText([]byte(trimmed)); len(t) > 0 {
+			return t
+		}
+		return ""
+	}
+	return s
+}
+
+// EstimateBodyTokens computes the degraded token estimate for a response body
+// (or request body fallback) by extracting only the actual content/text
+// (message content, reasoning, tool calls) and excluding protocol envelopes,
+// SSE prefixes ("data:"), and JSON structural framing.
 func EstimateBodyTokens(body any) int64 {
-	return tokenutil.Estimate(BodyRaw(body))
+	text := ExtractResponseText(body)
+	if text == "" {
+		raw := BodyRaw(body)
+		if len(raw) == 0 {
+			return 0
+		}
+		return tokenutil.Estimate(raw)
+	}
+	return tokenutil.EstimateText(text)
 }

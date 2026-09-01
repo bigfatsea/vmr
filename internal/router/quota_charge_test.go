@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
-	"vmr/internal/tokenutil"
 )
 
 func tokensLimit(amount float64) core.Limit {
@@ -229,13 +229,13 @@ func TestChargeQuota_Tokens_TruncatedMidStream_Degrades(t *testing.T) {
 
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
-	wantOutInt := tokenutil.Estimate([]byte(partial))
+	wantOutInt := chatmsg.EstimateBodyTokens(partial)
 	wantOut := float64(wantOutInt)
 	if used.Fresh != 15 {
 		t.Fatalf("Fresh = %v, want 15 (creq.Facts.EstimatedTokens)", used.Fresh)
 	}
 	if used.Out != wantOut {
-		t.Fatalf("Out = %v, want %v (byte count of whatever partial bytes actually arrived)", used.Out, wantOut)
+		t.Fatalf("Out = %v, want %v (content token estimate of whatever partial bytes actually arrived)", used.Out, wantOut)
 	}
 	if est != 15+wantOut {
 		t.Fatalf("estimated = %v, want %v", est, 15+wantOut)
@@ -262,13 +262,13 @@ func TestChargeQuota_Tokens_DegradedEstimate_NoUsageField(t *testing.T) {
 	rt.chargeQuota(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 
-	wantOutInt := tokenutil.Estimate([]byte(body))
+	wantOutInt := chatmsg.EstimateBodyTokens(body)
 	wantOut := float64(wantOutInt)
 	if used.Fresh != 42 {
 		t.Fatalf("Fresh = %v, want 42 (creq.Facts.EstimatedTokens)", used.Fresh)
 	}
 	if used.Out != wantOut {
-		t.Fatalf("Out = %v, want %v (byte-count estimate of the response body)", used.Out, wantOut)
+		t.Fatalf("Out = %v, want %v (content token estimate of the response body)", used.Out, wantOut)
 	}
 	if est != 42+wantOut {
 		t.Fatalf("estimated = %v, want %v (the whole degraded charge)", est, 42+wantOut)
