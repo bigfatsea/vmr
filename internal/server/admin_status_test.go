@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -166,5 +168,39 @@ models:
 	}
 	if ctx, _ := m["max_context_tokens"].(float64); ctx != 200000 {
 		t.Errorf("max_context_tokens = %v, want 200000 (max across endpoints)", ctx)
+	}
+}
+
+// TestAdminStatus_MetricsCaching verifies that directory size and disk free space
+// are cached for 30 seconds rather than rescanned on every request.
+func TestAdminStatus_MetricsCaching(t *testing.T) {
+	logDir := t.TempDir()
+	f1 := filepath.Join(logDir, "audit1.log")
+	if err := os.WriteFile(f1, []byte("12345"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	size1 := cachedDirTotalSize(logDir)
+	if size1 != 5 {
+		t.Fatalf("cachedDirTotalSize(logDir) = %d, want 5", size1)
+	}
+
+	// Write another file immediately
+	f2 := filepath.Join(logDir, "audit2.log")
+	if err := os.WriteFile(f2, []byte("67890"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Within 30s TTL, it should still return the cached size (5)
+	size2 := cachedDirTotalSize(logDir)
+	if size2 != 5 {
+		t.Errorf("cachedDirTotalSize(logDir) after new file = %d, want cached value 5", size2)
+	}
+
+	// Disk free space caching
+	free1 := cachedDiskFreeSpace(logDir)
+	free2 := cachedDiskFreeSpace(logDir)
+	if free1 != free2 {
+		t.Errorf("cachedDiskFreeSpace changed within TTL: %d vs %d", free1, free2)
 	}
 }

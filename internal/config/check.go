@@ -104,7 +104,7 @@ func HasErrors(issues []Issue) bool {
 // A host that fails to parse as an IP (a hostname, or an empty host like
 // ":8800") is treated as exposed too — erring toward the warning, since the
 // common cases this actually needs to catch (0.0.0.0, a LAN IP, empty host)
-// all fail the loopback check the same way admin.go's own loopback gate does.
+// all fail the loopback check.
 func (c *Config) checkListenExposure() []Issue {
 	if len(c.APIKeys) > 0 {
 		return nil
