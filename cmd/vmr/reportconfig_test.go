@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"vmr/internal/i18n"
@@ -14,6 +15,11 @@ import (
 
 func TestExpandReportEnv(t *testing.T) {
 	t.Setenv("VMR_TEST_REPORTCONFIG_KEY", "secret-value")
+	t.Setenv("VMR_TEST_REPORTCONFIG_SAFE", "plain-value")
+	t.Setenv("VMR_TEST_REPORTCONFIG_NEWLINE", "line1\nline2")
+	t.Setenv("VMR_TEST_REPORTCONFIG_COLONSPACE", "a: b")
+	t.Setenv("VMR_TEST_REPORTCONFIG_COMMENT", "trailing # here")
+	t.Setenv("VMR_TEST_REPORTCONFIG_HASHMID", "trailing#here")
 	os.Unsetenv("VMR_TEST_REPORTCONFIG_UNSET")
 
 	cases := []struct {
@@ -24,12 +30,41 @@ func TestExpandReportEnv(t *testing.T) {
 		{"known var", "llm_key: \"${VMR_TEST_REPORTCONFIG_KEY}\"", "llm_key: \"secret-value\""},
 		{"unset var expands to empty", "llm_key: \"${VMR_TEST_REPORTCONFIG_UNSET}\"", "llm_key: \"\""},
 		{"bare dollar stays literal", "note: cost is $5", "note: cost is $5"},
+		{"hash not followed by space is fine", "llm_key: \"${VMR_TEST_REPORTCONFIG_HASHMID}\"", "llm_key: \"trailing#here\""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := expandReportEnv(c.in)
+			got, err := expandReportEnv(c.in)
+			if err != nil {
+				t.Fatalf("expandReportEnv(%q): %v", c.in, err)
+			}
 			if got != c.want {
 				t.Errorf("expandReportEnv(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestExpandReportEnv_RejectsYAMLStructureBreakers is the R67 regression:
+// expansion happens before YAML parsing, so a value carrying a newline, ": "
+// or " #" could change the document's structure or silently truncate the
+// value at a comment (report.yaml carries llm_key — a " #" suffix would cut
+// a secret short with no error, surfacing only as a mysterious 401). The
+// same guards internal/config's expandEnv applies must hold here.
+func TestExpandReportEnv_RejectsYAMLStructureBreakers(t *testing.T) {
+	t.Setenv("VMR_TEST_REPORTCONFIG_NEWLINE", "line1\nline2")
+	t.Setenv("VMR_TEST_REPORTCONFIG_COLONSPACE", "a: b")
+	t.Setenv("VMR_TEST_REPORTCONFIG_COMMENT", "trailing # here")
+	cases := []struct {
+		name string
+		env  string
+	}{{"newline", "VMR_TEST_REPORTCONFIG_NEWLINE"}, {": ", "VMR_TEST_REPORTCONFIG_COLONSPACE"}, {" #", "VMR_TEST_REPORTCONFIG_COMMENT"}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := "llm_key: \"${" + c.env + "}\""
+			_, err := expandReportEnv(in)
+			if err == nil {
+				t.Errorf("expandReportEnv(%q) = nil error, want a hard load error", in)
 			}
 		})
 	}
@@ -133,6 +168,34 @@ func TestLoadReportConfig_UnknownFieldIsError(t *testing.T) {
 	}
 }
 
+// TestResolveReportConfigErr_UnknownKeyIsHardError is the R89 regression: a
+// single typo'd key must fail the load, not silently disable ALL of
+// report.yaml's settings (self-traffic exclusion, every llm_* field) behind
+// a warning. The error must name the file, the line and the key.
+func TestResolveReportConfigErr_UnknownKeyIsHardError(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultReportConfigFile, []byte("language: zh\nlanguague: zh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := resolveReportConfigErr("")
+	if err == nil {
+		t.Fatalf("a typo'd key must be a hard error, got config %+v", rc)
+	}
+	for _, want := range []string{"report.yaml", "languague"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Errorf("error %q should carry the YAML line number", err.Error())
+	}
+}
+
 func TestResolveReportConfig_MissingDefaultPathIsSilent(t *testing.T) {
 	dir := t.TempDir()
 	wd, _ := os.Getwd()
@@ -150,14 +213,27 @@ func TestResolveReportConfig_MissingDefaultPathIsSilent(t *testing.T) {
 	}
 }
 
-func TestResolveReportConfig_MissingExplicitPathWarns(t *testing.T) {
-	var buf bytes.Buffer
-	rc := resolveReportConfig(filepath.Join(t.TempDir(), "does-not-exist.yaml"), &buf)
-	if !reflect.DeepEqual(rc, reportConfig{}) {
-		t.Errorf("expected zero-value reportConfig on load failure, got %+v", rc)
+// TestResolveReportConfig_MissingExplicitPathIsError: an explicitly-given
+// -report-config path that doesn't exist is the user's own pointer — a hard
+// error, not a degrade-to-empty (R89 regression).
+func TestResolveReportConfig_MissingExplicitPathIsError(t *testing.T) {
+	_, err := resolveReportConfigErr(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if err == nil {
+		t.Error("expected a hard error when an explicitly-given -report-config path is missing")
 	}
-	if buf.Len() == 0 {
-		t.Error("expected a warning when an explicitly-given -report-config path is missing")
+}
+
+// TestLoadReportConfig_EnvExpansionGuardIsLoadError: an env var whose value
+// would break YAML structure must fail the whole load (R67 through
+// loadReportConfig), not produce a quietly-truncated llm_key.
+func TestLoadReportConfig_EnvExpansionGuardIsLoadError(t *testing.T) {
+	t.Setenv("VMR_TEST_REPORTCONFIG_BADKEY", "sk-real # trailing comment")
+	path := filepath.Join(t.TempDir(), "report.yaml")
+	if err := os.WriteFile(path, []byte(`llm_key: "${VMR_TEST_REPORTCONFIG_BADKEY}"`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadReportConfig(path); err == nil {
+		t.Error("expected a load error for an env value carrying ' #', got nil")
 	}
 }
 
