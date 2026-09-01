@@ -186,12 +186,7 @@ var (
 	usageFieldMarker = []byte(`"usage"`)
 )
 
-// passthroughStringMarkers / passthroughTokenMarkers are event contents
-// that prove the response carries well-behaved payload: reasoning in a
-// dedicated field, anthropic text/thinking deltas, or tool-call
-// arguments. Any of these settles the stream into passthrough mode.
-var passthroughStringMarkers = [][]byte{
-	textFieldMarker, // same literal as thinkGuardMarkers' entry — reused, not retyped
+var passthroughReasoningMarkers = [][]byte{
 	[]byte(`"reasoning_content":"`),
 	[]byte(`"thinking":"`),
 }
@@ -233,6 +228,7 @@ type stream struct {
 	upstreamModel     string // the real model name vmr ASKED this endpoint for (ep.Model)
 	modelSeen         bool   // the observed value is captured once per response, not once per SSE chunk
 	thinkTriggered    bool   // buffering was caused by an inline <think> block
+	thinkMarkerSeen   bool   // observation only: output contains <think> or </think> marker
 	thinkPatternBytes int    // observation only: cumulative content bytes scanned for the leaked-thinking-process shape
 	thinkPatternHits  int    // cumulative "\n<N>." numbered-marker hits found in those bytes
 	scratch           []byte // reused read buffer; lazily allocated once per response (a stack array here would be re-zeroed on every Read call)
@@ -439,11 +435,11 @@ func (s *stream) ingest(b []byte) {
 				if bytes.Contains(block, thinkCloseMarker) {
 					tail := append([]byte(nil), s.buf[i+len(eventSep):]...)
 					s.buf = nil
-					if thinkPattern.Match(block) {
+					if stripped, ok := stripFirstThink(block); ok {
 						s.mu.Lock()
 						s.rawPreStrip = block
 						s.mu.Unlock()
-						block = thinkPattern.ReplaceAll(block, nil)
+						block = stripped
 						s.noteApplied("think_strip")
 					}
 					s.mode = modePassthrough
@@ -505,19 +501,20 @@ func (s *stream) noteCRLFFramingIfSuspected(b []byte) {
 // and empty-content chunks don't decide; they stay withheld (a few tiny
 // events at most) and are released or buffered with everything else.
 func (s *stream) decide() {
-	rest := s.pending[s.scanned:]
+	var acc []byte
+	var isContent bool
+	off := s.scanned
 	for {
-		i := bytes.Index(rest, eventSep)
+		i := bytes.Index(s.pending[off:], eventSep)
 		if i < 0 {
-			// No more complete events; remember how far classification got
-			// so the next chunk resumes here instead of rescanning every
-			// already-undecided event from the start of pending.
-			s.scanned = len(s.pending) - len(rest)
+			if len(acc) == 0 {
+				s.scanned = off
+			}
 			return
 		}
-		ev := rest[:i]
-		rest = rest[i+len(eventSep):]
-		switch classifyEvent(ev) {
+		ev := s.pending[off : off+i]
+		nextOff := off + i + len(eventSep)
+		switch classifyEventAcc(ev, &acc, &isContent) {
 		case verdictBuffered:
 			s.mode = modeBuffered
 			s.scanned = 0
@@ -533,6 +530,11 @@ func (s *stream) decide() {
 			s.scanned = 0
 			s.emitComplete()
 			return
+		case verdictUndecided:
+			if len(acc) == 0 {
+				s.scanned = nextOff
+			}
+			off = nextOff
 		}
 	}
 }
@@ -555,7 +557,7 @@ func (s *stream) emitBlock(block []byte) {
 	if len(block) == 0 {
 		return
 	}
-	if !s.sawDone && bytes.Contains(block, doneSentinel) {
+	if !s.sawDone && containsDoneEvent(block) {
 		s.sawDone = true
 	}
 	if containsSoftBlockMarker(block) {
@@ -667,15 +669,14 @@ func (s *stream) finalizeBuffered() {
 		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
 		s.noteApplied("model_rewrite")
 	}
-	// Guarded like the streaming path: only a response whose first non-empty
-	// content/text value STARTS with <think> is the MiniMax thinking shape;
-	// a body that merely quotes the tag mid-text passes through untouched.
-	if thinkShapeGuard(b) && thinkPattern.Match(b) {
-		s.mu.Lock()
-		s.rawPreStrip = raw
-		s.mu.Unlock()
-		b = thinkPattern.ReplaceAll(b, nil)
-		s.noteApplied("think_strip")
+	if thinkShapeGuard(b) {
+		if stripped, ok := stripFirstThink(b); ok {
+			s.mu.Lock()
+			s.rawPreStrip = raw
+			s.mu.Unlock()
+			b = stripped
+			s.noteApplied("think_strip")
+		}
 	}
 	if stripped := stripThinkingProcess(b); !bytes.Equal(stripped, b) {
 		s.mu.Lock()
@@ -686,7 +687,7 @@ func (s *stream) finalizeBuffered() {
 		b = stripped
 		s.noteApplied("thinking_process_strip")
 	}
-	if bytes.Contains(b, doneSentinel) {
+	if containsDoneEvent(b) {
 		s.sawDone = true
 	}
 	if containsSoftBlockMarker(b) {
@@ -730,6 +731,22 @@ func (s *stream) appendDone() {
 	s.noteApplied("done_appended")
 }
 
+func containsDoneEvent(b []byte) bool {
+	for len(b) > 0 {
+		var line []byte
+		if i := bytes.IndexByte(b, '\n'); i >= 0 {
+			line, b = b[:i], b[i+1:]
+		} else {
+			line, b = b, nil
+		}
+		line = bytes.TrimRight(line, "\r")
+		if bytes.HasPrefix(line, []byte("data:")) && bytes.Equal(bytes.TrimSpace(line[5:]), []byte("[DONE]")) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *stream) noteApplied(step string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -753,29 +770,30 @@ func (s *stream) noteApplied(step string) {
 func (s *stream) noteThinkingPatternIfSuspected(b []byte) {
 	s.thinkPatternBytes += len(b)
 	s.thinkPatternHits += len(thinkingProcessNumberedMarker.FindAll(b, -1))
+	if !s.thinkMarkerSeen && (bytes.Contains(b, thinkOpenMarker) || bytes.Contains(b, thinkCloseMarker)) {
+		s.thinkMarkerSeen = true
+	}
 }
 
-// stripFired reports whether either MiniMax thinking-mode repair actually
-// rewrote this response's bytes.
-func (s *stream) stripFired() bool {
+func (s *stream) hasApplied(step string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, a := range s.applied {
-		if a == "think_strip" || a == "thinking_process_strip" {
+		if a == step {
 			return true
 		}
 	}
 	return false
 }
 
-// notePatternDetectedIfSuspected makes the final call at EOF: this response
-// looked like MiniMax's leaked thinking-mode outline (enough numbered-marker
-// hits over enough content bytes) but neither actual strip fired for it —
-// stripThinkingProcess's literal "Thinking Process:" prefix guard (which
-// also decides passthrough vs. buffered mode up in decide()) may have gone
-// blind to a wording change. Tags the audit trail only; never touches a byte
-// of the response and never affects failover/health.
+func (s *stream) stripFired() bool {
+	return s.hasApplied("think_strip") || s.hasApplied("thinking_process_strip")
+}
+
 func (s *stream) notePatternDetectedIfSuspected() {
+	if !s.hasApplied("think_strip") && s.thinkMarkerSeen {
+		s.noteApplied("think_pattern_detected")
+	}
 	if s.stripFired() {
 		return
 	}
@@ -792,52 +810,44 @@ const (
 	verdictPassthrough
 )
 
-// classifyEvent inspects one complete SSE event and reports whether it
-// proves the response needs buffering (MiniMax thinking shapes), proves
-// it can stream through untouched, or proves nothing yet. Both thinking
-// shapes are detected by the same rule — the first non-empty content/text
-// value STARTS with the shape's marker — so a reply that merely mentions
-// <think> or "Thinking Process:" mid-text streams through untouched.
-//
-// Why only <think> is checked in BOTH "content" (openai) and "text"
-// (anthropic), while "Thinking Process:" is checked in "content" alone: the
-// <think> repair (thinkPattern) is a field-agnostic regexp that works on
-// either event shape, but stripThinkingProcess is structurally openai-shaped —
-// its own trigger guard and its surviving-content splice both key off
-// contentFieldMarker. Buffering an anthropic response on a "text" value that
-// opened with "Thinking Process:" would cost the whole stream's latency and
-// then strip nothing. Widening this needs the repair rewritten for the
-// anthropic event shape first, and evidence that MiniMax thinking mode is
-// actually reachable over /v1/messages — neither exists today.
-func classifyEvent(ev []byte) verdict {
-	if v, ok := afterMarker(ev, contentFieldMarker); ok {
-		v = trimEscapedWS(v)
-		if len(v) > 0 && v[0] != '"' { // non-empty content value
-			if bytes.HasPrefix(v, thinkOpenMarker) || bytes.HasPrefix(v, thinkingProcessPrefix) {
-				return verdictBuffered
-			}
-			return verdictPassthrough
-		}
-	}
-	for _, m := range passthroughStringMarkers {
-		if v, ok := afterMarker(ev, m); ok {
-			if v = trimEscapedWS(v); len(v) > 0 && v[0] != '"' {
-				// anthropic-messages text deltas can carry the same inline-think
-				// pathology as openai-completions content; the dedicated reasoning
-				// fields (reasoning_content, thinking) cannot.
-				if bytes.Equal(m, textFieldMarker) && bytes.HasPrefix(v, thinkOpenMarker) {
-					return verdictBuffered
-				}
-				return verdictPassthrough
-			}
-		}
-	}
+func classifyEventAcc(ev []byte, acc *[]byte, isContent *bool) verdict {
 	for _, m := range passthroughTokenMarkers {
 		if bytes.Contains(ev, m) {
 			return verdictPassthrough
 		}
 	}
-	return verdictUndecided
+	for _, m := range passthroughReasoningMarkers {
+		if v, ok := afterMarker(ev, m); ok {
+			if v = trimEscapedWS(v); len(v) > 0 && v[0] != '"' {
+				return verdictPassthrough
+			}
+		}
+	}
+	val, ok := afterMarker(ev, contentFieldMarker)
+	isContentField := true
+	if !ok {
+		val, ok = afterMarker(ev, textFieldMarker)
+		isContentField = false
+	}
+	if !ok {
+		return verdictUndecided
+	}
+	if len(*acc) == 0 {
+		val = trimEscapedWS(val)
+		*isContent = isContentField
+	}
+	strVal := extractJSONStringPrefix(val)
+	if len(strVal) == 0 {
+		return verdictUndecided
+	}
+	*acc = append(*acc, strVal...)
+	return matchThinkingPrefix(*acc, *isContent)
+}
+
+func classifyEvent(ev []byte) verdict {
+	var acc []byte
+	var isContent bool
+	return classifyEventAcc(ev, &acc, &isContent)
 }
 
 // countTokens classifies the text in b with tokenutil.Analyze and folds it

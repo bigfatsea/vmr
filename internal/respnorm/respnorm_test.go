@@ -1364,3 +1364,137 @@ func containsStr(ss []string, want string) bool {
 	}
 	return false
 }
+
+// TestRespStream_ThinkStripPreservesMidTextQuotes verifies that think_strip
+// only strips the opening reasoning block and preserves any subsequent <think>
+// tags quoted or discussed in the body text (both streaming and non-streaming).
+func TestRespStream_ThinkStripPreservesMidTextQuotes(t *testing.T) {
+	t.Parallel()
+
+	// Streaming case
+	streamIn := `data: {"choices":[{"delta":{"content":"<think>reasoning</think>\n\nUse <think>tag</think>"}}]}` + "\n\n"
+	streamRs := newStream(strings.NewReader(streamIn), "agent", "", true, "openai-completions", false)
+	streamOut := readAll(t, streamRs)
+
+	if strings.Contains(streamOut, "reasoning") {
+		t.Errorf("streaming think reasoning leaked: %q", streamOut)
+	}
+	if !strings.Contains(streamOut, "Use <think>tag</think>") {
+		t.Errorf("streaming quoted think tag in body was wrongly stripped: %q", streamOut)
+	}
+	if !containsStr(streamRs.Applied(), "think_strip") {
+		t.Errorf("streaming Applied() = %v, want think_strip", streamRs.Applied())
+	}
+
+	// Non-streaming JSON case
+	jsonIn := `{"model":"M","choices":[{"message":{"role":"assistant","content":"<think>reasoning</think>\n\nUse <think>tag</think>"}}]}`
+	jsonRs := newStream(strings.NewReader(jsonIn), "agent", "", false, "openai-completions", false)
+	jsonOut := readAll(t, jsonRs)
+
+	if strings.Contains(jsonOut, "reasoning") {
+		t.Errorf("non-streaming think reasoning leaked: %q", jsonOut)
+	}
+	if !strings.Contains(jsonOut, "Use <think>tag</think>") {
+		t.Errorf("non-streaming quoted think tag in body was wrongly stripped: %q", jsonOut)
+	}
+	if !containsStr(jsonRs.Applied(), "think_strip") {
+		t.Errorf("non-streaming Applied() = %v, want think_strip", jsonRs.Applied())
+	}
+}
+
+// TestRespStream_ThinkChunkedAcrossSSEEvents tests that when <think> is split
+// across SSE chunks (e.g. "<th" + "ink>secret</think>answer"), the normalizer
+// stays undecided on the partial prefix, buffers when the tag completes, and
+// strips the reasoning block.
+func TestRespStream_ThinkChunkedAcrossSSEEvents(t *testing.T) {
+	t.Parallel()
+
+	chunk1 := `data: {"choices":[{"delta":{"content":"<th"}}]}` + "\n\n"
+	chunk2 := `data: {"choices":[{"delta":{"content":"ink>secret</think>answer"}}]}` + "\n\n"
+	in := chunk1 + chunk2
+
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
+	out := readAll(t, rs)
+
+	if strings.Contains(out, "secret") {
+		t.Errorf("reasoning content leaked across split chunks: %q", out)
+	}
+	if strings.Contains(out, "<think>") || strings.Contains(out, "</think>") {
+		t.Errorf("think markers leaked across split chunks: %q", out)
+	}
+	if !strings.Contains(out, "answer") {
+		t.Errorf("expected post-think answer missing: %q", out)
+	}
+	applied := rs.Applied()
+	if !containsStr(applied, "buffered") || !containsStr(applied, "think_strip") {
+		t.Errorf("Applied() = %v, want buffered + think_strip", applied)
+	}
+}
+
+// TestRespStream_ThinkPatternDetectedWhenNotStripped verifies that when a response
+// contains <think> or </think> markers but think_strip did not fire (e.g. quoted mid-text),
+// the audit trail records think_pattern_detected.
+func TestRespStream_ThinkPatternDetectedWhenNotStripped(t *testing.T) {
+	t.Parallel()
+
+	in := `data: {"choices":[{"delta":{"content":"Here is how you quote <think> tags in markdown"}}]}` + "\n\n"
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
+	out := readAll(t, rs)
+
+	if !strings.Contains(out, "Here is how you quote <think> tags in markdown") {
+		t.Errorf("content corrupted: %q", out)
+	}
+	applied := rs.Applied()
+	if containsStr(applied, "think_strip") {
+		t.Errorf("think_strip should not fire for mid-text quotes, applied = %v", applied)
+	}
+	if !containsStr(applied, "think_pattern_detected") {
+		t.Errorf("Applied() = %v, want think_pattern_detected", applied)
+	}
+}
+
+// TestRespStream_DoneLiteralInContentDoesNotSuppressDoneAppend verifies that
+// a literal "data: [DONE]" string inside delta content does not falsely set sawDone,
+// ensuring [DONE] is still appended when upstream does not send it.
+func TestRespStream_DoneLiteralInContentDoesNotSuppressDoneAppend(t *testing.T) {
+	t.Parallel()
+
+	in := `data: {"choices":[{"delta":{"content":"Here is how you send data: [DONE] in SSE"}}]}` + "\n\n"
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
+	out := readAll(t, rs)
+
+	if !strings.Contains(out, "Here is how you send data: [DONE] in SSE") {
+		t.Errorf("body content corrupted: %q", out)
+	}
+	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
+		t.Errorf("expected [DONE] appended at end of stream, got tail: %q", out)
+	}
+	applied := rs.Applied()
+	if !containsStr(applied, "done_appended") {
+		t.Errorf("Applied() = %v, want done_appended", applied)
+	}
+}
+
+// TestRespStream_DoneLiteralInContentWithRealDone verifies that if delta content
+// mentions "data: [DONE]" AND upstream also sends real "data: [DONE]", no duplicate
+// [DONE] is appended.
+func TestRespStream_DoneLiteralInContentWithRealDone(t *testing.T) {
+	t.Parallel()
+
+	in := `data: {"choices":[{"delta":{"content":"Here is how you send data: [DONE] in SSE"}}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
+	out := readAll(t, rs)
+
+	if !strings.Contains(out, "Here is how you send data: [DONE] in SSE") {
+		t.Errorf("body content corrupted: %q", out)
+	}
+	if strings.Count(out, "data: [DONE]") != 2 { // 1 in content JSON, 1 as SSE sentinel
+		t.Errorf("expected exactly 2 occurrences of 'data: [DONE]' (1 in content, 1 as sentinel), got %d in %q",
+			strings.Count(out, "data: [DONE]"), out)
+	}
+	applied := rs.Applied()
+	if containsStr(applied, "done_appended") {
+		t.Errorf("Applied() = %v, must not append done when upstream already sent it", applied)
+	}
+}
