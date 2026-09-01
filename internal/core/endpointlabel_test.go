@@ -62,13 +62,3 @@ func TestSplitEndpointLabel_InvalidInput(t *testing.T) {
 		}
 	}
 }
-
-// ModelLabel is the one place the "<name> [<protocol>]" format lives; every
-// human-facing surface (vmr diagnose route groups, vmr status, the /status
-// dashboard) renders it, so the exact bytes are part of a cross-surface
-// contract, not a local style choice.
-func TestModelLabel(t *testing.T) {
-	if got := ModelLabel("vm", "openai-completions"); got != "vm [openai-completions]" {
-		t.Errorf("ModelLabel = %q, want %q", got, "vm [openai-completions]")
-	}
-}

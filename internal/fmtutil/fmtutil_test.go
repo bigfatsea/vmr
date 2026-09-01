@@ -231,3 +231,13 @@ func TestSortedKeys(t *testing.T) {
 		t.Errorf("SortedKeys(empty) = %v, want empty", gotEmpty)
 	}
 }
+
+// TestModelLabel pins the exact bytes of the "<name> [<protocol>]" format:
+// vmr diagnose route groups and vmr status both render it, so the format is
+// a cross-surface contract, not a local style choice.
+func TestModelLabel(t *testing.T) {
+	t.Parallel()
+	if got := ModelLabel("vm", "openai-completions"); got != "vm [openai-completions]" {
+		t.Errorf("ModelLabel = %q, want %q", got, "vm [openai-completions]")
+	}
+}

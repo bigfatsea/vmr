@@ -180,3 +180,12 @@ func SortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// ModelLabel is the one place the human-readable label for a virtual model's
+// protocol face lives: "<name> [<protocol>]". vmr diagnose's route groups and
+// vmr status render it, so the exact bytes are a cross-surface contract, not
+// a local style choice. (/status deliberately does not use it: it emits
+// ID/Protocol as structured JSON and leaves presentation to the dashboard.)
+func ModelLabel(name, protocol string) string {
+	return name + " [" + protocol + "]"
+}

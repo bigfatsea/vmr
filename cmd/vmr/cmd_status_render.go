@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 )
 
@@ -105,7 +104,7 @@ func printStatus(st *statusResponse) {
 		}
 	}
 	for _, m := range st.Models {
-		fmt.Println(core.ModelLabel(m.ID, m.Protocol))
+		fmt.Println(fmtutil.ModelLabel(m.ID, m.Protocol))
 		if len(m.Capabilities) > 0 {
 			fmt.Printf("  capabilities: %s\n", strings.Join(m.Capabilities, ", "))
 		}

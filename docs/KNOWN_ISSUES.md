@@ -92,7 +92,7 @@
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：降级估算的统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（Q04 的 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
 - **`adapter` 的协议字段字面量（`"model"`/`"stream"`/`"messages"`/`"input"`）不从 `jsonscan` 导出复用**：它们是不可变字节常量而非共享状态；「知道这些字段名的含义」正是把 `SessionFingerprint`/`TopLevelProbe` 留在 `adapter` 的领域知识。（`jsonscan` 自身的准入措辞 2026-09 已重写，见下条。）
 - **`jsonscan` 的 `RewriteModel`/`RewriteRoles`/`RewriteInputRoles` 留在 `jsonscan`，不迁 `adapter`**（2026-09 Q17 收敛）：原评审指出「同批协议字面量在 `jsonscan` 包文档与 `adapter` 得出两个相反归属结论」，最终以重写 `jsonscan` 包文档的边界规则消除，而非移动代码——「字节级扫描与 splice 改写引擎」整体归 `jsonscan`（含带协议字段字面量的改写函数，fuzz 覆盖在此包），「协议路由语义、适配器构造、错误分类」归 `adapter` 及以上。旧表述「需要具体字段名的函数不属于 `jsonscan`」已废止，**不要再提案移动这批改写函数或恢复旧措辞**。
-- **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 与 `ModelLabel` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`、`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）；其余符号在 `core` 包注释中以例外条款显式豁免。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
+- **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`；`ModelLabel` 也下沉 `fmtutil`（2026-09 复核：其签名不含任何 core 类型，是纯展示格式化，两个调用方本就 import `fmtutil`，无依赖两难，不构成例外）；`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的 26 个微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
@@ -103,7 +103,7 @@
 - **不向 Clean Architecture 四层同心圆靠拢做整体重构**：要把横跨环边界的包「归位」就得为满足图示而拆包插接口，代价是新的包边界与一层不解决任何真实问题的间接性。项目已有更强且**可执行**的架构模型（两半区 + `archtest`）。反证：`internal/config` import `internal/adapter`（校验期需知道协议注册表）按 CA 是「外环依赖内环」的合法边——CA 本就不是这个项目合适的透镜。
 - **不对 OpenAI 工具返回做 `error:` 关键字模糊嗅探**：实测全量生产语料 495,672 条 OpenAI 工具调用结果，结构化 JSON 错误字段 0 条（0.00%），全部是自由文本 stdout/stderr。子串模糊嗅探会引入海量代码输出/测试用例的假阳性。只对协议原生结构化错误标记（如 Anthropic `is_error`）做确定性统计。
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
-- **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `core.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
+- **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `fmtutil.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
 
 ### 1.5 产出与工程惯例
 

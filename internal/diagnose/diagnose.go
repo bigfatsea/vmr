@@ -279,7 +279,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		for _, name := range fmtutil.SortedKeys(snap.Models[protocol]) {
 			route := snap.Models[protocol][name]
 			ordered := route.EffectiveOrder()
-			group := core.ModelLabel(name, protocol)
+			group := fmtutil.ModelLabel(name, protocol)
 			for _, ep := range ordered {
 				target := fmt.Sprintf("- p=%d. %s/%s", ep.Priority, ep.Provider, ep.Model)
 				status, detail := StatusOK, ""
