@@ -174,6 +174,33 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+// TestBackoffJitterIsGenuinelyRandom locks R12's jitter in from the
+// opposite direction than wantJitter: wantJitter asserts each draw lands
+// inside the ±10% envelope, which a jitter-less backoff also satisfies
+// (the nominal value sits at the envelope's center) — so a deleted rand
+// term passes every wantJitter check. This test instead asserts the
+// jitter term actually varies: 256 draws of the same nominal backoff must
+// produce at least two distinct values. Without the ±10% term they are
+// all byte-identical and this fails; with it, the chance of 256 identical
+// draws of a continuous distribution is effectively zero (not quite zero,
+// so the bar is deliberately "2 distinct values", not "all distinct").
+func TestBackoffJitterIsGenuinelyRandom(t *testing.T) {
+	t.Parallel()
+	var first time.Duration
+	seen := 0
+	for i := 0; i < 256; i++ {
+		d := backoff(transientBase, transientCap, 1)
+		if i == 0 {
+			first = d
+		} else if d != first {
+			seen++
+		}
+	}
+	if seen == 0 {
+		t.Error("256 draws of the same nominal backoff were all identical — the jitter term is missing or degenerate")
+	}
+}
+
 func TestStatusReportsProbing(t *testing.T) {
 	t.Parallel()
 	r := New()
