@@ -208,8 +208,8 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 	// history reset the way it used to (the dirty ContextGrowth value case)
 	// — see TestContextGrowthDoesNotCrossContractBreak.
 	if info != nil && len(info.Recs) >= 2 {
-		first := info.Recs[0].Usage.In
-		last := info.Recs[len(info.Recs)-1].Usage.In
+		first := contextGrowthIn(info.Recs[0])
+		last := contextGrowthIn(info.Recs[len(info.Recs)-1])
 		if first > 0 {
 			s.ContextGrowth = round2(float64(last) / float64(first))
 		}
@@ -219,6 +219,28 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 		s.RoleChars = nil
 	}
 	s.ttfts = nil
+}
+
+// contextGrowthIn returns a session-turn's tokens_in for the ContextGrowth
+// ratio: the upstream-reported usage when it exists, else the degraded
+// byte-count estimate (manifest.EstIn, computed by ctxgraph on the same
+// EstimateDegradedTokens basis report's own cost path uses). Without the
+// fallback, a session whose opening turn's upstream reported no usage
+// (opaque response, no usage field, or a stream truncated before any
+// usage-bearing block) would keep ContextGrowth at 0 forever — the ratio
+// would read "no growth" when it really means "no first baseline" (review
+// P-06). Mixing one sniffed and one estimated figure across the ratio is
+// the same tradeoff the degraded-cost path already makes: the estimate is
+// the closest available proxy for the true input count, and a calibrated
+// ratio is strictly more informative than a silent 0.
+func contextGrowthIn(r *ReqInfo) int64 {
+	if r.UsageOK {
+		return r.Usage.In
+	}
+	if r.manifest != nil {
+		return r.manifest.EstIn
+	}
+	return 0
 }
 
 // freshestModel returns the ByModel row with the most fresh (cache-missed)

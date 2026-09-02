@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
@@ -1690,5 +1692,123 @@ func TestClientEndpointScale(t *testing.T) {
 	}
 	if clients, rows := clientEndpointScale(nil); clients != 0 || rows != 0 {
 		t.Errorf("empty input: got %d x %d, want 0 x 0", clients, rows)
+	}
+}
+
+// TestContextGrowthInFallback pins review P-06: finishSession's
+// ContextGrowth ratio must fall back to the degraded estimate when the
+// session's first turn's upstream reported no usage — otherwise a session
+// that opens with an opaque/usage-less response reads "no growth" (0)
+// forever even though later turns DO report usage. The fallback uses
+// manifest.EstIn (ctxgraph's EstimateDegradedTokens on the same basis
+// report's cost path uses) — see contextGrowthIn's doc comment.
+func TestContextGrowthInFallback(t *testing.T) {
+	cases := []struct {
+		name   string
+		r      *ReqInfo
+		want   int64
+	}{
+		{
+			name: "usage known wins",
+			r: &ReqInfo{
+				UsageOK: true,
+				Usage:   chatmsg.Usage{In: 1200},
+				manifest: &ctxgraph.Manifest{EstIn: 999}, // must be ignored
+			},
+			want: 1200,
+		},
+		{
+			name: "no usage falls back to manifest estimate",
+			r: &ReqInfo{
+				UsageOK:  false,
+				manifest: &ctxgraph.Manifest{EstIn: 3400},
+			},
+			want: 3400,
+		},
+		{
+			name: "no usage and no manifest is zero",
+			r: &ReqInfo{
+				UsageOK:  false,
+				manifest: nil,
+			},
+			want: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contextGrowthIn(tc.r); got != tc.want {
+				t.Errorf("contextGrowthIn = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestContextGrowthFallsBackToEstimateEndToEnd drives the same fallback
+// through a full Build: a two-turn session whose FIRST turn's response has
+// no usage block (so UsageOK is false and the ratio must use the degraded
+// estimate as its denominator) and whose second turn reports real usage.
+// Before the fix this produced ContextGrowth 0; now it must produce
+// last/est-first, proving the session-level metric no longer silently
+// reports "no growth" for a session whose first turn just lacked usage
+// (review P-06).
+func TestContextGrowthFallsBackToEstimateEndToEnd(t *testing.T) {
+	// mkNoUsageTurn builds a turn whose response body has no "usage" key.
+	mkNoUsageTurn := func(ts time.Time, msgs []any, msg string) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": msg}}},
+					// no "usage" key at all
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	// mkUsageTurn reports real usage.
+	mkUsageTurn := func(ts time.Time, msgs []any, msg string, prompt int64) map[string]any {
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": msg}}},
+					"usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	u1 := map[string]any{"role": "user", "content": "first instruction"}
+	// Turn 1: response has NO usage — ratio denominator must come from the
+	// degraded estimate. Turn 2: real usage (9000).
+	recs := []map[string]any{
+		mkNoUsageTurn(t0, []any{u1}, "step one"),
+		mkUsageTurn(t0.Add(time.Minute), []any{u1, map[string]any{"role": "assistant", "content": "step one"}, map[string]any{"role": "user", "content": "continue"}}, "step two", 9000),
+	}
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, recs)
+	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (a two-turn same-lineage session)", len(rep.Sessions))
+	}
+	if rep.Sessions[0].ContextGrowth == 0 {
+		t.Fatal("ContextGrowth = 0: the fallback did not engage — the session's first turn has no usage, so the ratio must use the degraded estimate as its denominator (review P-06)")
+	}
+	// The estimate of the first turn's tiny request body is a small number
+	// while the last turn reports 9000 real usage tokens, so the ratio is
+	// large — the assertion that matters is that it is no longer silently
+	// 0 and that it reflects genuine growth (last > first baseline).
+	if rep.Sessions[0].ContextGrowth <= 1 {
+		t.Errorf("ContextGrowth = %v, want > 1 (last turn's real usage / first turn's estimated baseline)", rep.Sessions[0].ContextGrowth)
 	}
 }
