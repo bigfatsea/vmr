@@ -548,6 +548,59 @@ func TestResolveStitch_TinyOpeningBelowAbsoluteFloorDowngrades(t *testing.T) {
 	}
 }
 
+// TestResolveStitch_OverGapCandidateCannotShadowInWindowWinner is a
+// regression test for the pre-filter change: an over-gap (>
+// stitchSameKeyMaxGap) same-bucket candidate with the HIGHER score used to
+// win the search outright and only then get downgraded to AmbiguousMatch,
+// shadowing a slightly-lower-scoring in-window candidate that would have
+// stitched legitimately. The in-window candidate must now win; the
+// over-gap one must not even be considered while a legal candidate exists.
+func TestResolveStitch_OverGapCandidateCannotShadowInWindowWinner(t *testing.T) {
+	t.Parallel()
+	hA, hB, hC, hD, hE, hF, hG, hH :=
+		Hash{1}, Hash{2}, Hash{3}, Hash{4}, Hash{5}, Hash{6}, Hash{7}, Hash{8}
+	breakTS := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	l := &Lineage{
+		Idx: 2, SessKey: "s",
+		BrokeFrom: &BreakInfo{Edit: Edit{Kind: Fork}},
+		Manifests: []*Manifest{{TS: breakTS, Keys: []Hash{hA, hB, hC, hD, hE, hF, hG, hH}}},
+	}
+	// A: over the 72h same-key gap, 5/8 = 0.625 overlap — the strongest
+	// content evidence, and under the old rule the (then-downgraded) winner.
+	overGap := &Lineage{
+		Idx: 0, SessKey: "s",
+		Manifests: []*Manifest{{TS: breakTS.Add(-100 * time.Hour), Keys: []Hash{hA, hB, hC, hD, hE}}},
+	}
+	// B: within the gap, 3/8 = 0.375 — a weaker score, but a legal
+	// predecessor that clears stitchHeadPruneScore and
+	// stitchMinAbsOverlap exactly.
+	inWindow := &Lineage{
+		Idx: 1, SessKey: "s",
+		Manifests: []*Manifest{{TS: breakTS.Add(-time.Hour), Keys: []Hash{hA, hB, hC}}},
+	}
+	byIdx := map[int]*Lineage{0: overGap, 1: inWindow, 2: l}
+	blobLineages := map[Hash][]int{
+		hA: {0, 1, 2}, hB: {0, 1, 2}, hC: {0, 1, 2}, hD: {0, 2}, hE: {0, 2},
+		hF: {2}, hG: {2}, hH: {2},
+	}
+	sessBuckets := map[string][]*Lineage{"s": {overGap, inWindow, l}}
+
+	res := resolveStitch(l, byIdx, blobLineages, sessBuckets)
+
+	if res.Outcome != Stitched {
+		t.Fatalf("Outcome = %v, want Stitched (the in-window candidate B must win, not be shadowed by over-gap A)", res.Outcome)
+	}
+	if res.Edge.PredIdx != inWindow.Idx {
+		t.Errorf("PredIdx = %d, want %d (the in-window candidate B, not the over-gap A)", res.Edge.PredIdx, inWindow.Idx)
+	}
+	if res.Edge.Score != 0.375 {
+		t.Errorf("Score = %.3f, want 0.375 (B's weaker-but-legal coverage)", res.Edge.Score)
+	}
+	if res.Edge.Kind != StitchHeadPrune {
+		t.Errorf("Kind = %v, want StitchHeadPrune (Fork-origin, sub-compaction score)", res.Edge.Kind)
+	}
+}
+
 // TestStitchGraph_SameBucketBeyondMaxGapDowngraded pins R74: recurring
 // scheduled/heartbeat traffic under one metadata SessKey used to be
 // connectable across ARBITRARY time gaps (the cross-bucket window never

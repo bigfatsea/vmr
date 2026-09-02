@@ -159,12 +159,14 @@ const (
 	// each other, spanning hundreds of hours. That is the same failure
 	// mode that motivated stitchCrossBucketMaxGap (the 190+-hour
 	// scheduled-task boilerplate matches), just inside the bucket where
-	// the cross-bucket gate never applied. Candidates beyond this gap may
-	// still WIN the search (they carry the strongest content evidence),
-	// but a match they'd otherwise stitch is forced down to
-	// AmbiguousMatch — downgraded, not eliminated: the genuinely-human
-	// "walked away for days" case keeps its edge visible for review
-	// instead of disappearing into NoPredecessorFound.
+	// the cross-bucket gate never applied. Candidates beyond this gap are
+	// pre-filtered before scoring — they never compete for the win, so a
+	// high-scoring stale match cannot shadow a slightly-lower-scoring
+	// in-window candidate. They are still remembered: when NO in-window
+	// candidate exists, the strongest over-gap match falls back and is
+	// forced down to AmbiguousMatch — downgraded, not eliminated — so the
+	// genuinely-human "walked away for days" case keeps its edge visible
+	// for review instead of disappearing into NoPredecessorFound.
 	stitchSameKeyMaxGap = 72 * time.Hour
 	// stitchCrossBucketMaxGap bounds content-score matches ACROSS different
 	// SessKeys only (same-SessKey candidates are bounded more leniently by
@@ -327,44 +329,7 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 	}
 	distinct := len(seen)
 
-	// bestIdx/bestScore/bestGap pick the winner deterministically despite
-	// `overlap` being a map (Go randomizes map iteration order every run):
-	// higher score wins outright; an exact score tie (real on this corpus —
-	// several same_chat/compaction candidates share identical coverage)
-	// falls back to the smaller time gap, then to the smaller Idx as a
-	// final total-ordering tie-break. Without this, two runs over the same
-	// input could pick different predecessors among equally-scored
-	// candidates — silently violating "idempotent, same input -> same
-	// output" (an explicit invariant) and, downstream,
-	// story's content-addressed Journey ids. Caught by running StitchGraph
-	// 5x over the real corpus and diffing PredIdx per lineage — not by any
-	// unit test (a synthetic fixture is too small to ever produce a real
-	// tie by chance).
-	bestIdx, bestScore, bestN := -1, -1.0, 0
-	var bestGap time.Duration
-	bestOverGap := false
-	for idx, n := range overlap {
-		pred := byIdx[idx]
-		if pred == nil || len(pred.Manifests) == 0 {
-			continue
-		}
-		predEnd := pred.Manifests[len(pred.Manifests)-1].TS
-		if !predEnd.Before(b0.TS) {
-			continue // a predecessor must temporally precede the break
-		}
-		if pred.SessKey != l.SessKey && b0.TS.Sub(predEnd) > stitchCrossBucketMaxGap {
-			continue // see stitchCrossBucketMaxGap's doc comment
-		}
-		score := float64(n) / float64(distinct)
-		gap := b0.TS.Sub(predEnd)
-		overGap := pred.SessKey == l.SessKey && gap > stitchSameKeyMaxGap
-		switch {
-		case bestIdx < 0, score > bestScore:
-			bestScore, bestGap, bestIdx, bestN, bestOverGap = score, gap, idx, n, overGap
-		case score == bestScore && (gap < bestGap || (gap == bestGap && idx < bestIdx)):
-			bestGap, bestIdx, bestN, bestOverGap = gap, idx, n, overGap
-		}
-	}
+	bestIdx, bestScore, bestN, bestOverGap := pickPredecessor(l, b0, overlap, distinct, byIdx)
 
 	if bestIdx < 0 {
 		if edge := findSameChatCandidate(l, sessBuckets); edge != nil {
@@ -388,15 +353,77 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 			Kind: StitchSameChat, PredIdx: bestIdx, Score: bestScore, Confidence: 0.2,
 		}}
 	}
-	// A same-bucket winner beyond stitchSameKeyMaxGap never produces a
-	// Stitched outcome — see the constant's doc comment. The edge (its
-	// content kind and score intact) is kept at same_chat's informational
-	// confidence so a human can still follow the trail.
+	// An over-gap same-bucket fallback — now the only way a winner can
+	// carry bestOverGap — never produces a Stitched outcome; see the
+	// constant's doc comment. The edge (its content kind and score
+	// intact) is kept at same_chat's informational confidence so a human
+	// can still follow the trail.
 	if res.Outcome == Stitched && bestOverGap {
 		res.Outcome = AmbiguousMatch
 		res.Edge.Confidence = 0.2
 	}
 	return res
+}
+
+// pickPredecessor selects the winning candidate predecessor from the
+// overlap tally — deterministically despite `overlap` being a map (Go
+// randomizes map iteration order every run): higher score wins outright; an
+// exact score tie (real on this corpus — several same_chat/compaction
+// candidates share identical coverage) falls back to the smaller time gap,
+// then to the smaller Idx as a final total-ordering tie-break. Without
+// this, two runs over the same input could pick different predecessors
+// among equally-scored candidates — silently violating "idempotent, same
+// input -> same output" (an explicit invariant) and, downstream, story's
+// content-addressed Journey ids. Caught by running StitchGraph 5x over the
+// real corpus and diffing PredIdx per lineage — not by any unit test (a
+// synthetic fixture is too small to ever produce a real tie by chance).
+//
+// Over-gap same-bucket candidates are pre-filtered out of the win entirely
+// (letting them win on score and only then downgrading shadowed a
+// slightly-lower-scoring in-window candidate — see stitchSameKeyMaxGap's
+// doc comment), but the strongest of them is still tracked separately:
+// when NO in-window candidate exists, it is returned (bestOverGap=true) so
+// the downgrade in resolveStitch keeps its diagnostic AmbiguousMatch edge
+// visible instead of reporting NoPredecessorFound.
+func pickPredecessor(l *Lineage, b0 *Manifest, overlap map[int]int, distinct int, byIdx map[int]*Lineage) (bestIdx int, bestScore float64, bestN int, bestOverGap bool) {
+	var bestGap time.Duration
+	overIdx, overScore, overN := -1, -1.0, 0
+	var overGap time.Duration
+	for idx, n := range overlap {
+		pred := byIdx[idx]
+		if pred == nil || len(pred.Manifests) == 0 {
+			continue
+		}
+		predEnd := pred.Manifests[len(pred.Manifests)-1].TS
+		if !predEnd.Before(b0.TS) {
+			continue // a predecessor must temporally precede the break
+		}
+		score := float64(n) / float64(distinct)
+		gap := b0.TS.Sub(predEnd)
+		if pred.SessKey != l.SessKey {
+			if gap > stitchCrossBucketMaxGap {
+				continue // see stitchCrossBucketMaxGap's doc comment
+			}
+		} else if gap > stitchSameKeyMaxGap {
+			switch {
+			case overIdx < 0, score > overScore:
+				overScore, overGap, overIdx, overN = score, gap, idx, n
+			case score == overScore && (gap < overGap || (gap == overGap && idx < overIdx)):
+				overGap, overIdx, overN = gap, idx, n
+			}
+			continue // see stitchSameKeyMaxGap's doc comment
+		}
+		switch {
+		case bestIdx < 0, score > bestScore:
+			bestScore, bestGap, bestIdx, bestN = score, gap, idx, n
+		case score == bestScore && (gap < bestGap || (gap == bestGap && idx < bestIdx)):
+			bestGap, bestIdx, bestN = gap, idx, n
+		}
+	}
+	if bestIdx < 0 && overIdx >= 0 {
+		return overIdx, overScore, overN, true
+	}
+	return bestIdx, bestScore, bestN, false
 }
 
 // findSameChatCandidate looks for the closest-in-time, same-SessKey,

@@ -60,18 +60,16 @@ func BuildSingleJourneyEvidencePack(j *Journey, m Metrics, findings []Finding, l
 	}
 }
 
+// extractRootUserIntent returns the Journey's opening real user
+// instruction — j.InitialInstruction, which buildFrom already extracted via
+// firstRealInstruction through the taskseg.Profile's agent-dialect filter.
+// Scanning Tasks[*].Steps[*].NewEvents for the first user-role message here
+// instead would bypass that filter: OpenClaw-class clients inject system
+// scaffolding masquerading as user role, and the first such event would
+// pose as the intent.
 func extractRootUserIntent(j *Journey) string {
-	for _, t := range j.Tasks {
-		for _, s := range t.Steps {
-			for _, ev := range s.NewEvents {
-				if ev.Msg.Role == "user" && ev.Msg.Text != "" {
-					t, _ := truncateText(ev.Msg.Text, 2000)
-					return t
-				}
-			}
-		}
-	}
-	return ""
+	t, _ := truncateText(j.InitialInstruction, 2000)
+	return t
 }
 
 func extractFinalOutcome(j *Journey) string {
