@@ -5,19 +5,30 @@ package story
 import (
 	"fmt"
 	"strings"
+
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 )
 
 // ContextRotBucket summarizes step count, finding count, and error rate
 // within a specific context window size range (measured in tokens).
+// The special Range value "usage unknown" (contextRotUnknownRange) marks a
+// pseudo-bucket that carries steps excluded from every range because their
+// manifest had no in-token usage data.
 type ContextRotBucket struct {
-	Range          string  `json:"range"` // "0-32k", "32k-64k", "64k-128k", "128k-256k", "256k+"
+	Range          string  `json:"range"` // "0-32k", "32k-64k", "64k-128k", "128k-256k", "256k+", "usage unknown"
 	StepCount      int     `json:"step_count"`
 	FindingCount   int     `json:"finding_count"`
 	FindingDensity float64 `json:"finding_density"` // finding_count / step_count
 	ErrorStepCount int     `json:"error_step_count"`
 	ErrorRate      float64 `json:"error_rate"` // error_step_count / step_count
 }
+
+// contextRotUnknownRange is the Range value for the pseudo-bucket appended
+// by computeContextRot when steps have no in-token usage data (Manifest==nil
+// or !UsageInOK). renderContextRotSection skips it as a table row and
+// instead renders the note "N step(s) excluded: no in-token usage data".
+const contextRotUnknownRange = "usage unknown"
 
 var contextRotRanges = []struct {
 	name string
@@ -62,16 +73,22 @@ func computeContextRot(journeys []*Journey, findingsPerJourney [][]Finding) []Co
 	for i, r := range contextRotRanges {
 		buckets[i].Range = r.name
 	}
+	excluded := 0
 
 	for idx, j := range journeys {
 		stepBucket := map[int]int{}
 		for _, t := range j.Tasks {
 			for _, s := range t.Steps {
-				var tokens int64
-				if s.Manifest != nil {
-					tokens = s.Manifest.Usage.In
+				// Steps with no in-token usage data (nil manifest or
+				// UsageInOK false) would previously fall through with
+				// tokens=0 and pollute the "0-32k" bucket's error rate.
+				// Now they are excluded from every range and counted in
+				// the "usage unknown" pseudo-bucket (S-2).
+				if s.Manifest == nil || !s.Manifest.UsageInOK {
+					excluded++
+					continue
 				}
-				bIdx := bucketIndexForTokens(tokens)
+				bIdx := bucketIndexForTokens(s.Manifest.Usage.In)
 				stepBucket[s.Seq] = bIdx
 
 				buckets[bIdx].StepCount++
@@ -101,6 +118,9 @@ func computeContextRot(journeys []*Journey, findingsPerJourney [][]Finding) []Co
 		}
 	}
 
+	if excluded > 0 {
+		buckets = append(buckets, ContextRotBucket{Range: contextRotUnknownRange, StepCount: excluded})
+	}
 	return buckets
 }
 
@@ -109,24 +129,49 @@ func renderContextRotSection(b *strings.Builder, buckets []ContextRotBucket, lan
 	if len(buckets) == 0 {
 		return
 	}
-	hasData := false
+
+	// Separate real context-range buckets from the "usage unknown"
+	// pseudo-bucket (S-2: steps excluded for missing in-token usage data).
+	var excluded int
+	realBuckets := make([]ContextRotBucket, 0, len(buckets))
 	for _, bk := range buckets {
+		if bk.Range == contextRotUnknownRange {
+			excluded = bk.StepCount
+		} else {
+			realBuckets = append(realBuckets, bk)
+		}
+	}
+
+	hasData := false
+	for _, bk := range realBuckets {
 		if bk.StepCount > 0 {
 			hasData = true
 			break
 		}
 	}
-	if !hasData {
+	if !hasData && excluded == 0 {
 		return
 	}
 
 	t := i18n.Corpus(lang)
-	b.WriteString(t.ContextRotTitle)
-	b.WriteString(t.ContextRotHeader)
-	for _, bk := range buckets {
-		fmt.Fprintf(b, "| %s | %d | %d | %.2f | %d | %s |\n",
-			bk.Range, bk.StepCount, bk.FindingCount, bk.FindingDensity, bk.ErrorStepCount, pctStr(bk.ErrorRate))
+	if hasData {
+		b.WriteString(t.ContextRotTitle)
+		b.WriteString(t.ContextRotHeader)
+		for _, bk := range realBuckets {
+			fmt.Fprintf(b, "| %s | %d | %d | %.2f | %d | %s |\n",
+				bk.Range, bk.StepCount, bk.FindingCount, bk.FindingDensity, bk.ErrorStepCount, pctStr(bk.ErrorRate))
+		}
+		b.WriteString("\n")
+		b.WriteString(t.ContextRotFootnote)
 	}
-	b.WriteString("\n")
-	b.WriteString(t.ContextRotFootnote)
+
+	// S-2 disclosures: excluded steps with no usage data, and unrecognized
+	// shape counts from chatmsg. Both are hardcoded English because
+	// internal/i18n is outside this worker's whitelist (S-2).
+	if excluded > 0 {
+		fmt.Fprintf(b, "> %d step(s) excluded: no in-token usage data\n", excluded)
+	}
+	if parts, holders := chatmsg.UnrecognizedShapeCounts(); parts > 0 || holders > 0 {
+		fmt.Fprintf(b, "> %d unrecognized content part(s), %d unrecognized usage holder(s)\n", parts, holders)
+	}
 }
