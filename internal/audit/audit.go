@@ -197,6 +197,20 @@ type Attempt struct {
 	// virtual name back destroys it, and a successful attempt's body is
 	// not stored — so it is captured at the only moment it exists.
 	UpstreamModel string `json:"upstream_model,omitempty"`
+	// Forwarded is true when this attempt's response was actually forwarded
+	// to the client — the upstream returned a 2xx, the response was committed
+	// to the client, and the router charged quota for it. The ONLY setter is
+	// router.forwardSuccess: softblock paths (checkSoftBlock), >=400 error
+	// paths (handleErrorResponse), and build/network failures never set it.
+	// A truncated stream (SetTruncated after SetSuccessResponse) still has
+	// Forwarded=true — the response headers were already committed and quota
+	// was charged.
+	//
+	// Historical JSONL records (pre-v4) lack this field, so its zero value
+	// (false) does NOT mean "not forwarded" for those records. Consumers
+	// must use the IsForwarded predicate (see audit.IsForwarded) which
+	// handles the compatibility case.
+	Forwarded bool `json:"forwarded,omitempty"`
 }
 
 type Message struct {
@@ -283,6 +297,38 @@ func (a *Attempt) SetSuccessResponse(status int, header http.Header) {
 		return
 	}
 	a.Response = &Message{Status: status, Headers: Redact(header)}
+}
+
+// SetForwarded records that this attempt's response was actually forwarded
+// to the client. router.forwardSuccess is the ONLY caller — see the
+// Forwarded field's own doc comment for what it means and which paths
+// never set it.
+func (a *Attempt) SetForwarded() {
+	if a == nil {
+		return
+	}
+	a.Forwarded = true
+}
+
+// IsForwarded is the analytics-side predicate for "was this attempt's
+// response actually forwarded (and charged) to the client". It exists
+// because the Forwarded field was added after historical JSONL was already
+// written: pre-v4 records lack it, so its zero value (false) is ambiguous
+// — it means "not forwarded" on new records but "field absent" on old
+// ones. The rule: a true Forwarded is authoritative; a false one falls
+// back to the old-format signal (a < 400 response with no error class),
+// which new-format softblock records never satisfy (checkSoftBlock writes
+// ErrorClass "content" alongside its < 400 response). Do not re-derive
+// this decision at each call site — it is the single compatibility
+// chokepoint for the field.
+func (a *Attempt) IsForwarded() bool {
+	if a == nil {
+		return false
+	}
+	if a.Forwarded {
+		return true
+	}
+	return a.Response != nil && a.Response.Status < 400 && a.ErrorClass == ""
 }
 
 // SetTruncated records that the upstream connection died mid-stream, after

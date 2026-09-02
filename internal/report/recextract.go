@@ -171,11 +171,16 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
 	var successEp, servedEp string
 	for _, a := range arec.Attempts {
-		if a.Response != nil && a.Response.Status < 400 {
-			servedEp = a.Endpoint
-			if a.Error == "" {
-				successEp = a.Endpoint
-			}
+		// Same predicate as EndpointRow.Forwarded / report's
+		// providerquota.go basis — see audit.Attempt.IsForwarded's doc
+		// comment for the historical-format compat rule. softblock paths
+		// (ErrorClass="content" on a < 400 response) are excluded.
+		if !a.IsForwarded() {
+			continue
+		}
+		servedEp = a.Endpoint
+		if a.Error == "" {
+			successEp = a.Endpoint
 		}
 	}
 	if successEp == "" {

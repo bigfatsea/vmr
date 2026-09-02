@@ -139,11 +139,14 @@ func (h *HourRow) Ingest(rc *rec2) {
 // already.
 func (e *EndpointRow) IngestAttempt(a attemptFacts) {
 	e.Attempts++
-	// Forwarded is OK's condition WITHOUT `Error == ""` — see its own
-	// doc comment (rows.go): a truncated 2xx still got forwarded and
-	// still got charged, so only this count reproduces the router's
-	// requests-metric quota charging exactly.
-	if a.HasResponse && a.Status < 400 {
+	// Forwarded is the router's exact "I charged quota for this" signal —
+	// see Attempt.IsForwarded's doc comment. The predicate handles the
+	// pre-v4 historical format (no Forwarded field, so fall back to a < 400
+	// response with no error class) AND the new format's authoritative
+	// boolean. Do not re-derive the condition here: that is exactly the
+	// softblock / truncated-stream / null-response double-counting bug this
+	// field was added to fix.
+	if a.IsForwarded() {
 		e.Forwarded++
 	}
 	if a.Error == "" && a.HasResponse && a.Status < 400 {

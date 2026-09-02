@@ -506,6 +506,13 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// traceable through the response normalizer's Norm markers, RawPreStrip
 	// and ObservedModel.
 	att.SetSuccessResponse(resp.StatusCode, resp.Header)
+	// SetForwarded is the single point that flips Attempt.Forwarded on. Every
+	// other path (checkSoftBlock, handleErrorResponse, SetBuildError,
+	// SetNetworkError, SetCanceled) leaves it false; a later SetTruncated
+	// (mid-stream cut AFTER the 200 was committed) does NOT undo it, so the
+	// field is the exact reproduction basis for the router's per-forwarded-
+	// attempt quota charging. See Attempt.Forwarded's own doc comment.
+	att.SetForwarded()
 	body := resp.Body
 	defer body.Close()
 
