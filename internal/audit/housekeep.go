@@ -26,6 +26,29 @@ func isCompressTemp(name string) bool {
 	return strings.HasPrefix(name, ".audit-compress-") && strings.HasSuffix(name, ".tmp")
 }
 
+// staleTempPrefixes are the atomic-write temp prefixes this package's sweep
+// reclaims: compressOne's own .audit-compress-* (see compressTempPattern) and
+// quota's .vmr-quota-* (internal/quota writes vmr-quota.json through
+// os.CreateTemp — a crashed process leaves its temp behind exactly like a
+// crashed compress does). The quota prefix is kept as a local copy rather than
+// imported from internal/quota: audit is a leaf that must not couple to
+// quota's internals for a three-word filename convention.
+var staleTempPrefixes = []string{".audit-compress-", ".vmr-quota-"}
+
+// isStaleTemp reports whether name is a temp file this sweep may reclaim —
+// any process' atomic-write temp, audit's or quota's.
+func isStaleTemp(name string) bool {
+	if !strings.HasSuffix(name, ".tmp") {
+		return false
+	}
+	for _, p := range staleTempPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // auditFileRE matches this package's own filename shape, plain or already
 // compressed: vmr-audit-YYYY-MM-DD.jsonl[.zst]. Anything else in the audit
 // directory (vmr.log, a config file, a stray artifact) is left alone.
@@ -62,11 +85,12 @@ func housekeep(dir string, today time.Time) {
 		if e.IsDir() {
 			continue
 		}
-		// compressOne's temp, left behind by a crashed process: removable
-		// once it can't be a live compress (a sweep finishes in minutes; the
-		// 24h bound is what keeps this from racing one on a platform without
-		// the dir lock — see lock_windows.go).
-		if isCompressTemp(e.Name()) {
+		// An atomic-write temp left behind by a crashed process (audit's
+		// compressOne or quota's store): removable once it can't be a live
+		// writer (a sweep finishes in minutes; the 24h bound is what keeps
+		// this from racing one on a platform without the dir lock — see
+		// lock_windows.go).
+		if isStaleTemp(e.Name()) {
 			if info, err := e.Info(); err == nil && info.ModTime().Before(today.Add(-24*time.Hour)) {
 				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
 					fmt.Fprintf(os.Stderr, "audit: housekeeping: remove stale temp %s: %v\n", e.Name(), err)

@@ -134,6 +134,40 @@ func TestDefaultClassify_ContextLimit(t *testing.T) {
 	}
 }
 
+// TestDefaultClassify_FastAPIDetailField covers FastAPI-style gateways, which
+// answer {"detail": "…"} on every 4xx without the error/message/type fields
+// the classic vendor shapes carry. Before the fix these bodies fell back to
+// the raw snippet window and only classified when the message happened to sit
+// in the first 4 KB with nothing verbose attached.
+func TestDefaultClassify_FastAPIDetailField(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		{"detail insufficient balance", `{"detail":"Insufficient balance"}`, core.ErrEndpoint},
+		{"detail model not found", `{"detail":"model gpt-x not found"}`, core.ErrEndpoint},
+		{"detail unknown model", `{"detail":"invalid params, unknown model 'x'"}`, core.ErrEndpoint},
+		{"detail content moderation", `{"detail":"request rejected by content moderation"}`, core.ErrContent},
+		{"detail sensitive content Chinese", `{"detail":"输入包含敏感内容，请修改后重试"}`, core.ErrContent},
+		{"detail context window", `{"detail":"input exceeds the model's context window"}`, core.ErrContextLimit},
+		{"detail invalid parameter stays ErrClient", `{"detail":"invalid temperature"}`, core.ErrClient},
+		// A body carrying BOTH the classic fields and a detail string must not
+		// double-count anything harmful; the fields are joined, message wins
+		// the order, classification reads the same merged snippet.
+		{"detail plus error.message agree", `{"detail":"balance insufficient","error":{"message":"invalid temperature"}}`, core.ErrClient},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v (body=%s)", got, tc.want, tc.body)
+			}
+		})
+	}
+}
+
 func TestDefaultClassify_StatusCodesAndVendors(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

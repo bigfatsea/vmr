@@ -58,14 +58,15 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 // CLI convergence — same flags, same defaults, including -render-all always
 // meaning "every candidate", with no P9.2/P14.1 category filtering — that
 // filtering is a `vmr analyze`-only default, not a change to what
-// -render-all itself means). It no longer dispatches on its own: it
-// resolves its flags, then hands the result to dispatchAnalyze — the same
-// function cmdAnalyze itself calls — so `vmr story`'s five call shapes
-// (bare/-journey/-compare/-corpus/-render-all) can't drift from what `vmr
-// analyze` does for the equivalent flags the way they once did:
+// -render-all itself means) and no longer runs its own resolution/dispatch.
+// It parses its flags in-place, then hands the result to dispatchAnalyzeFrom
+// — the same helper cmdReport routes through, so `vmr story`'s five call
+// shapes (bare/-journey/-compare/-corpus/-render-all) can't drift from what
+// `vmr analyze` does for the equivalent flags the way they once did:
 // resolveLLMOptions is now called lazily, through the same
-// resolveLLMOpts closure cmdAnalyze builds, instead of unconditionally up
-// front — matching cmdAnalyze's own on-demand validation.
+// resolveLLMOpts closure dispatchAnalyzeFrom builds, instead of
+// unconditionally up front — matching cmdAnalyze's own on-demand validation
+// (IS-25).
 func cmdStory(args []string) error {
 	fs := flag.NewFlagSet("story", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
@@ -92,37 +93,23 @@ func cmdStory(args []string) error {
 	if *corpus && (*compare != "" || *journeyArg != "" || *renderAll) {
 		return fmt.Errorf("-corpus is exclusive with -journey/-render-all/-compare — run it on its own")
 	}
-	// Same -html/-redact gate cmdAnalyze applies: -redact needs -html, and
-	// both apply only to a single -journey or a -compare pair (the only two
-	// shapes RenderHTML/RenderComparisonHTML cover).
+	// Same -html/-redact gate dispatchAnalyzeFrom applies: -redact needs
+	// -html, and both apply only to a single -journey or a -compare pair
+	// (the only two shapes RenderHTML/RenderComparisonHTML cover).
 	if *redactFlag && !*htmlFlag {
 		return fmt.Errorf("-redact only applies with -html")
 	}
 	if (*htmlFlag || *redactFlag) && *journeyArg == "" && *compare == "" {
 		return fmt.Errorf("-html/-redact only apply with -journey (a single journey) or -compare (a pair)")
 	}
-	paths, err := resolveInputPaths(fs, *configPath)
-	if err != nil {
-		return err
-	}
-
-	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
-	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
-	if err != nil {
-		return err
-	}
-	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *llmAddrFlag, rc.LLMAddr, "")
-	llmModel := resolveString(*llmModelFlag, rc.LLMModel, "")
-	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
-	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")
+	// The shared helper's llm-addr/selector mode gate is more general
+	// (covers `-llm-addr "..."` on bare/render-all/corpus), so cmdStory's
+	// own LLM validation collapses to a one-line read here. The explicit
+	// flag check (flagPassed) plus the resolved address both have to be
+	// passed through unchanged; dispatchAnalyzeFrom resolves the address
+	// against report.yaml's llm_addr using resolveStringExplicit.
 	llmAddrExplicit := flagPassed(fs, "llm-addr")
 	hasSelector := *compare != "" || *journeyArg != ""
-	// Gate on the resolved value: an explicit `-llm-addr ""` (suppress a
-	// report.yaml llm_addr for this run) must pass; a configured llm_addr
-	// with no flag stays silently ignored on these batch shapes.
-	if llmAddrExplicit && llmAddr != "" && (*corpus || *renderAll || !hasSelector) {
-		return fmt.Errorf("-llm-addr is not supported with -render-all, -corpus, or bare `vmr story` (would fire one LLM call per journey, or never be used at all) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
-	}
 
 	// -journey/-compare/-corpus/-render-all all carry over to `vmr analyze`
 	// unchanged (same flag, same output). Bare `vmr story` (no selector) is
@@ -133,38 +120,36 @@ func cmdStory(args []string) error {
 	// `-list-only` (P15.1) is bare `vmr story`'s real equivalent.
 	fmt.Fprintln(os.Stderr, "vmr story: alias for `vmr analyze` with -list-only (bare) or -journey/-compare/-corpus/-render-all (unchanged) — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
 
-	return dispatchAnalyze(&analyzeRun{
-		paths:              paths,
+	return dispatchAnalyzeFrom(analyzeAliasRun{
+		fsAlias:            fs,
 		configPath:         *configPath,
-		outDir:             resolveString(*outDirFlag, rc.Output, "reports"),
-		lang:               lang,
-		includePartial:     resolveBool(flagPassed(fs, "include-partial"), *includePartialFlag, rc.IncludePartial),
+		reportConfigPath:   *reportConfigPath,
+		outDirFlag:         *outDirFlag,
+		langFlag:           *langFlag,
 		includeSelfTraffic: *includeSelfTraffic,
-		llmKey:             llmKey,
-		llmAddrExplicit:    llmAddrExplicit,
-		resolveLLMOpts: func() (llmCLIOptions, error) {
-			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *llmDryRun)
-			if err != nil {
-				return llmCLIOptions{}, err
-			}
-			llmOpts.CacheDir = llmCacheDir
-			return llmOpts, nil
-		},
-		corpusFlag:    *corpus,
-		compareArg:    *compare,
-		journeyArg:    *journeyArg,
-		renderAllFlag: *renderAll,
-		listOnly:      !hasSelector && !*corpus && !*renderAll,
+		includePartialSet:  flagPassed(fs, "include-partial"),
+		includePartialFlag: *includePartialFlag,
+		llmAddr:            *llmAddrFlag,
+		llmAddrSet:         llmAddrExplicit,
+		llmModel:           *llmModelFlag,
+		llmKey:             *llmKeyFlag,
+		llmCacheDir:        *llmCacheDirFlag,
+		llmDryRun:          *llmDryRun,
+		corpusFlag:         *corpus,
+		compareArg:         *compare,
+		journeyArg:         *journeyArg,
+		renderAllFlag:      *renderAll,
+		listOnly:           !hasSelector && !*corpus && !*renderAll,
 		// storyOnly (a real cmdAnalyze flag, -story-only — see analyzeRun's
 		// own doc comment): `vmr story -render-all` alone never ran the
 		// report half, and `vmr analyze -story-only -render-all` is now its
 		// exact, publicly-reachable equivalent — not an internal-only field
 		// only this forwarder could set.
-		storyOnly:       *renderAll && !hasSelector,
-		selfTrafficTags: rc.SelfTrafficClientTags,
-		showUngrouped:   *showUngrouped,
-		htmlOn:          *htmlFlag,
-		redactOn:        *redactFlag,
+		storyOnly:     *renderAll && !hasSelector,
+		showUngrouped: *showUngrouped,
+		htmlOn:        *htmlFlag,
+		redactOn:      *redactFlag,
+		aliasName:     "story",
 	})
 }
 

@@ -35,11 +35,12 @@ const classifySnippetBytes = 4 << 10
 
 // errorSnippet reduces a 4xx body to the text hint matching should actually
 // look at. Structured vendor errors are almost always
-// {"error":{"message":…,"type":…}} (or a top-level message/type); extracting
-// those fields means keywords match the error itself, not whatever verbose
-// debug payload the vendor attached around it. When the body isn't JSON (or
-// carries no recognizable field), falls back to a bounded raw scan of the
-// first classifySnippetBytes — small plain-text errors fit entirely.
+// {"error":{"message":…,"type":…}} (or a top-level message/type); FastAPI
+// gateways instead answer {"detail":…} on every failure. Extracting those
+// fields means keywords match the error itself, not whatever verbose debug
+// payload the vendor attached around it. When the body isn't JSON (or carries
+// no recognizable field), falls back to a bounded raw scan of the first
+// classifySnippetBytes — small plain-text errors fit entirely.
 func errorSnippet(body []byte) string {
 	raw := func() string {
 		return strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))
@@ -82,6 +83,7 @@ func errorSnippet(body []byte) string {
 	}
 	add(m["message"])
 	add(m["type"])
+	add(m["detail"]) // FastAPI gateways ({"detail": "…"}) — no error/message/type fields at all
 	if len(parts) == 0 {
 		return raw()
 	}

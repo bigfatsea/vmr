@@ -217,6 +217,31 @@ func TestCompressOne_ConcurrentSameSrcProducesValidArchive(t *testing.T) {
 	}
 }
 
+// TestHousekeep_CleansStaleQuotaTemps: internal/quota writes vmr-quota.json
+// atomically through os.CreateTemp(".vmr-quota-*.tmp"); a crashed process
+// leaves that temp behind exactly like a crashed compress does, and the same
+// sweep must reclaim it once it can't be a live write.
+func TestHousekeep_CleansStaleQuotaTemps(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, ".vmr-quota-123.tmp")
+	if err := os.WriteFile(stale, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(dir, ".vmr-quota-456.tmp")
+	if err := os.WriteFile(fresh, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	housekeep(dir, time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC))
+
+	mustNotExist(t, stale)
+	mustExist(t, fresh)
+}
+
 // TestHousekeep_CleansStaleCompressTemps: unique temp names mean a crashed
 // process leaves its temp behind (a fixed name used to be overwritten by the
 // next sweep); the next sweep reclaims it once it can't be a live compress.

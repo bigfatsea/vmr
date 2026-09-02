@@ -370,13 +370,13 @@ func writeToolWasteCard(rep *report.Report2, outDir string, lang i18n.Lang, tw i
 }
 
 // cmdReport is `vmr report`'s own flag set (P15.2: unchanged from before the
-// CLI convergence — same flags, same defaults, same resolution helpers) —
-// but no longer runs its own dispatch. It resolves its flags exactly as it
-// always has, then hands the result to dispatchAnalyze with macroOnly: true
+// CLI convergence — same flags, same defaults, same resolution helpers) and
+// no longer runs its own resolution/dispatch. It parses its flags in-place,
+// then hands the result to dispatchAnalyzeFrom with macroOnly: true
 // (cmd_analyze.go's -macro-only, P15.1) — the same call cmdAnalyze itself
 // makes for `-macro-only`, so "vmr report produces what vmr analyze
 // -macro-only produces" is structural, not a promise kept by hand across
-// two independent implementations.
+// two independent implementations (IS-25).
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block); without a readable config, $ estimates fall back to the built-in standard price table")
@@ -396,31 +396,20 @@ func cmdReport(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	paths, err := resolveInputPaths(fs, *configPath)
-	if err != nil {
-		return err
-	}
-
-	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
-	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
-	if err != nil {
-		return err
-	}
-	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
 
 	fmt.Fprintln(os.Stderr, "vmr report: alias for `vmr analyze -macro-only` — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
-	return dispatchAnalyze(&analyzeRun{
-		paths:              paths,
+	return dispatchAnalyzeFrom(analyzeAliasRun{
+		fsAlias:            fs,
 		configPath:         *configPath,
-		outDir:             resolveString(*outDirFlag, rc.Output, "reports"),
-		lang:               lang,
+		reportConfigPath:   *reportConfigPath,
+		outDirFlag:         *outDirFlag,
+		langFlag:           *langFlag,
 		includeSelfTraffic: *includeSelfTraffic,
-		llmKey:             llmKey,
+		llmKey:             *llmKeyFlag,
+		detailsOn:          *detailsFlag,
+		detailsSet:         flagPassed(fs, "details"),
+		displayCCY:         *currencyFlag,
 		macroOnly:          true,
-		detailsOn:          resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
-		displayCCY:         resolveString(*currencyFlag, rc.Currency, ""),
-		exchangeRate:       rc.ExchangeRate,
-		selfTrafficTags:    rc.SelfTrafficClientTags,
-		reportConfigSource: rc.SourcePath,
+		aliasName:          "report",
 	})
 }

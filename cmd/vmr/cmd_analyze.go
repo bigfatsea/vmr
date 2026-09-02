@@ -390,3 +390,149 @@ func runReportHalf(r *analyzeRun) error {
 	}
 	return nil
 }
+
+// analyzeAliasRun bundles the inputs cmdReport and cmdStory have already
+// resolved (their own flag sets differ, so they parse them in-place and
+// then call dispatchAnalyzeFrom with this struct) — the shared post-parse
+// path that IS the convergence. Naming the fields after the flag they
+// came from keeps the alias bodies mechanical to read: each alias does its
+// own flag.NewFlagSet+Parse, its own per-mode validation, then hands the
+// results here unchanged.
+type analyzeAliasRun struct {
+	// fsAlias is the alias's own flag.FlagSet (already parsed) — the shared
+	// helper threads it into resolveInputPaths to read positional args. Each
+	// alias has a different flag set, but positional args follow the same
+	// "<audit.jsonl|glob>..." convention the helper already understands.
+	fsAlias *flag.FlagSet
+	// configPath, reportConfigPath, outDir, langFlag, includeSelfTraffic:
+	// plain string/bool values resolved by the alias's own flag.NewFlagSet
+	// before handing off.
+	configPath         string
+	reportConfigPath   string
+	outDirFlag         string
+	langFlag           string
+	includeSelfTraffic bool
+	// includePartialSet: flagPassed("include-partial") — whether the user
+	// typed the flag at all (includePartial lives in *bool on reportConfig,
+	// so the alias must distinguish "absent" from "explicitly false").
+	// includePartialFlag is the bool's own resolved value (false when
+	// absent). Only cmdStory exposes this flag; cmdReport passes false.
+	includePartialSet  bool
+	includePartialFlag bool
+	// LLM fields, all "" / false for cmdReport (its forwarder never makes
+	// an LLM call). The shared helper still threads them so an alias can
+	// safely pass through cmdAnalyze's exact resolveLLMOpts closure.
+	llmAddr     string
+	llmAddrSet  bool // flagPassed("llm-addr")
+	llmModel    string
+	llmKey      string
+	llmCacheDir string
+	llmDryRun   bool
+	// analyzeRun-shaped fields the alias fills directly, because every
+	// alias passes through to the same dispatch — these ARE the bits that
+	// used to be a hand-maintained mapping in each alias's body.
+	corpusFlag    bool
+	compareArg    string
+	journeyArg    string
+	renderAllFlag bool
+	macroOnly     bool
+	listOnly      bool
+	storyOnly     bool
+	detailsOn     bool
+	detailsSet    bool // flagPassed("details")
+	displayCCY    string
+	// htmlOn/redactOn: passed through to dispatchAnalyze's html/redact
+	// handling. The -html/-redact validation itself stays in the alias
+	// bodies (cmdStory validates it before handing off; cmdReport has no
+	// such flags), preserving each command's historical error precedence.
+	htmlOn   bool
+	redactOn bool
+	// showUngrouped: cmdReport doesn't have it (purely a story-half flag);
+	// the alias passes false to keep the shared helper honest.
+	showUngrouped bool
+	// aliasName is the forwarder's own name — "report" or "story" — used
+	// in the stderr alias hint dispatchAnalyzeFrom prints.
+	aliasName string
+}
+
+// dispatchAnalyzeFrom is the convergence point (IS-25): every
+// post-flag-parse step cmdReport and cmdStory used to duplicate — input
+// path resolution, report.yaml load + language resolve, the llm-addr scope
+// gate, the analyzeRun build, and the final dispatchAnalyze call — lives
+// here once. Each alias does its own flag.NewFlagSet+Parse (their flag
+// lists are genuinely different) and its own per-mode validation (the
+// corpus-selector and -html/-redact rules are alias-specific and checked
+// before handing off, so the error precedence each command always had is
+// preserved), then hands the result to this helper. `vmr report` and `vmr
+// story` remain thin forwarders: their per-alias flag declarations + one
+// call to this helper, no second resolution/dispatch path to keep in sync.
+func dispatchAnalyzeFrom(a analyzeAliasRun) error {
+	paths, err := resolveInputPaths(a.fsAlias, a.configPath)
+	if err != nil {
+		return err
+	}
+	rc := resolveReportConfig(a.reportConfigPath, os.Stdout)
+	lang, err := resolveLanguage(a.langFlag, rc, os.Stdout)
+	if err != nil {
+		return err
+	}
+	outDir := resolveString(a.outDirFlag, rc.Output, "reports")
+	llmKey := resolveString(a.llmKey, rc.LLMKey, "")
+	llmCacheDir := resolveString(a.llmCacheDir, rc.LLMCacheDir, "")
+	// llmModel follows the same plain-flag merge (no explicit-empty case in
+	// resolveLLMOptions, just "if addr then model required"): the alias's
+	// own -llm-model flag wins, else report.yaml's llm_model.
+	llmModel := resolveString(a.llmModel, rc.LLMModel, "")
+	// llmAddr follows resolveStringExplicit: an explicit -llm-addr flag
+	// (even when set to "") wins over report.yaml's llm_addr, which in
+	// turn wins over the empty default — the same merge order the
+	// -llm-addr's "explicit -llm-addr '' suppresses a configured
+	// llm_addr" behavior depends on (cmd_analyze.go's own docstring).
+	llmAddr := resolveStringExplicit(a.llmAddrSet, a.llmAddr, rc.LLMAddr, "")
+	// Gate on the resolved value (mirrors cmdAnalyze's rule): an explicit
+	// `-llm-addr ""` (suppress a report.yaml llm_addr for this run) must
+	// pass; a configured llm_addr with no flag stays silently ignored on
+	// the batch shapes (never consulted downstream). The flag-vs-mode
+	// combination check is the alias's own responsibility — cmdStory's
+	// specific "-llm-addr is not supported with -render-all/-corpus/
+	// bare `vmr story`" message has to be more specific than cmdAnalyze's
+	// general one, so the alias gates before calling here.
+	hasSelector := a.journeyArg != "" || a.compareArg != ""
+	if a.llmAddrSet && llmAddr != "" && (a.corpusFlag || a.renderAllFlag || !hasSelector) {
+		return fmt.Errorf("-llm-addr is not supported with -render-all, -corpus, or bare `vmr %s` (would fire one LLM call per journey, or never be used at all) — use -journey to interpret one at a time, or -compare for a pairwise interpretation", a.aliasName)
+	}
+
+	return dispatchAnalyze(&analyzeRun{
+		paths:              paths,
+		configPath:         a.configPath,
+		outDir:             outDir,
+		lang:               lang,
+		includePartial:     resolveBool(a.includePartialSet, a.includePartialFlag, rc.IncludePartial),
+		includeSelfTraffic: a.includeSelfTraffic,
+		llmKey:             llmKey,
+		llmAddrExplicit:    a.llmAddrSet,
+		resolveLLMOpts: func() (llmCLIOptions, error) {
+			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, a.llmDryRun)
+			if err != nil {
+				return llmCLIOptions{}, err
+			}
+			llmOpts.CacheDir = llmCacheDir
+			return llmOpts, nil
+		},
+		corpusFlag:         a.corpusFlag,
+		compareArg:         a.compareArg,
+		journeyArg:         a.journeyArg,
+		renderAllFlag:      a.renderAllFlag,
+		macroOnly:          a.macroOnly,
+		listOnly:           a.listOnly,
+		storyOnly:          a.storyOnly,
+		detailsOn:          resolveBool(a.detailsSet, a.detailsOn, rc.Details),
+		displayCCY:         resolveString(a.displayCCY, rc.Currency, ""),
+		exchangeRate:       rc.ExchangeRate,
+		selfTrafficTags:    rc.SelfTrafficClientTags,
+		reportConfigSource: rc.SourcePath,
+		showUngrouped:      a.showUngrouped,
+		htmlOn:             a.htmlOn,
+		redactOn:           a.redactOn,
+	})
+}

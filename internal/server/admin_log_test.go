@@ -103,6 +103,38 @@ func TestAdminLog_ReplayThenFollow(t *testing.T) {
 	}
 }
 
+// TestAdminLog_WriteErrorOnDisconnect exercises the IS-20 fix: a write to the
+// response body after the client has hung up returns an error, and the server
+// must return immediately (triggering defer cancel()) rather than continuing
+// to the next select iteration and waiting for the heartbeat timeout or
+// context-done path to clean up the subscriber.
+func TestAdminLog_WriteErrorOnDisconnect(t *testing.T) {
+	srv, tee := newTeeServer(t, oneProviderYAML("http://127.0.0.1:1"))
+	tee.Write([]byte("history-1\n"))
+
+	rd, stop := logStream(t, srv.Handler(), nil)
+	assertLogLine(t, rd, "history-1")
+	if got := tee.Subscribers(); got != 1 {
+		t.Fatalf("Subscribers while connected = %d, want 1", got)
+	}
+
+	// Disconnect the client and immediately write to the tee. The server is
+	// blocked on <-ch waiting for a new line; when the client disconnect
+	// propagates (the write fails), the server must exit quickly.
+	stop()
+	// Give the server a moment to detect the disconnect.
+	time.Sleep(50 * time.Millisecond)
+	tee.Write([]byte("after-disconnect\n"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for tee.Subscribers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := tee.Subscribers(); got != 0 {
+		t.Fatalf("Subscribers after disconnect + write = %d, want 0", got)
+	}
+}
+
 func TestAdminLog_ClientDisconnectCleansUp(t *testing.T) {
 	srv, tee := newTeeServer(t, oneProviderYAML("http://127.0.0.1:1"))
 	tee.Write([]byte("history-1\n"))

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"vmr/internal/config"
@@ -209,11 +210,18 @@ func cmdStatus(args []string) error {
 	return nil
 }
 
-// dialHost rewrites a wildcard bind address into a loopback one. cfg.Listen
-// is routinely "0.0.0.0:8800" and lsof reports the same socket as "*:8800";
-// neither is a destination you can portably connect to, so the local address
-// to dial is 127.0.0.1.
+// dialHost rewrites a wildcard bind address into a loopback one, and strips
+// any http:// or https:// scheme prefix so a user passing -addr
+// http://127.0.0.1:8800 does not produce a doubled scheme when the caller
+// prepends "http://" again. cfg.Listen is routinely "0.0.0.0:8800" and lsof
+// reports the same socket as "*:8800"; neither is a destination you can
+// portably connect to, so the local address to dial is 127.0.0.1.
 func dialHost(addr string) string {
+	// Strip scheme prefix first — dialHost callers (fetchStatus, runSmoke)
+	// always prepend "http://" to the result, so a user-supplied -addr value
+	// like "http://127.0.0.1:8800" must not produce a doubled scheme.
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return addr // not host:port at all — pass it through and let the dial fail with the real reason

@@ -67,7 +67,9 @@ func (s *Server) adminLog(w http.ResponseWriter, r *http.Request) {
 	replay, ch, cancel := s.logTee.Follow()
 	defer cancel()
 	for _, line := range replay {
-		io.WriteString(w, line+"\n")
+		if _, err := io.WriteString(w, line+"\n"); err != nil {
+			return
+		}
 	}
 	flusher.Flush()
 	timer := time.NewTimer(logHeartbeat)
@@ -77,11 +79,15 @@ func (s *Server) adminLog(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case line := <-ch:
-			io.WriteString(w, line+"\n")
+			if _, err := io.WriteString(w, line+"\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 			timer.Reset(logHeartbeat)
 		case <-timer.C:
-			io.WriteString(w, "\n")
+			if _, err := io.WriteString(w, "\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 			timer.Reset(logHeartbeat)
 		}
