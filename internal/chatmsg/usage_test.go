@@ -171,6 +171,45 @@ func TestExtractUsage_NoUsage(t *testing.T) {
 	}
 }
 
+// TestExtractUsage_ResponsesNestedUsage locks in the openai-responses
+// shape: the usage object lives under "response" (response.completed SSE
+// event / the JSON response envelope), not at the top level like Chat
+// Completions or under "message" like Anthropic's message_start — without
+// the Nested(obj, "response", "usage") probe, a Responses stream yielded
+// ok=false and the record fell back to the degraded byte-count estimate.
+func TestExtractUsage_ResponsesNestedUsage(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"response": map[string]any{
+			"id": "resp_1",
+			"usage": map[string]any{
+				"input_tokens":  float64(1200),
+				"output_tokens": float64(300),
+				"input_tokens_details": map[string]any{
+					"cached_tokens": float64(900),
+				},
+				"output_tokens_details": map[string]any{
+					"reasoning_tokens": float64(120),
+				},
+			},
+		},
+	}
+	u, ok := ExtractUsage(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	// Responses semantics: input_tokens already includes cached tokens.
+	if u.In != 1200 || u.Out != 300 || u.CacheRead != 900 || u.Reasoning != 120 {
+		t.Errorf("usage = %+v, want In=1200 (inclusive of cache) Out=300 CacheRead=900 Reasoning=120", u)
+	}
+
+	// The same shape through the SSE byte path (what respnorm feeds in).
+	sse := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":300}}}\n\n"
+	if got := MergeUsageWithProtocol([]byte(sse), Usage{}, ""); got.In != 1200 || got.Out != 300 {
+		t.Errorf("SSE nested usage = %+v, want In=1200 Out=300", got)
+	}
+}
+
 // TestUsage_Fresh pins the one formula this type's own doc comment states
 // ("In - CacheRead - CacheWrite is the fresh portion") — previously
 // hand-written at four independent call sites (internal/router/quota.go,

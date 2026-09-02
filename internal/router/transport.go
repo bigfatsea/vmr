@@ -43,8 +43,13 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 	}
 	return &http.Client{
 		Transport: &http.Transport{
-			Proxy:                 proxyFn,
-			DialContext:           (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
+			Proxy:       proxyFn,
+			DialContext: (&net.Dialer{Timeout: cfg.Timeouts.Connect.D()}).DialContext,
+			// ForceAttemptHTTP2 is required because we set a custom DialContext:
+			// Go's http.Transport silently disables its automatic HTTP/2
+			// upgrade whenever any of DialContext/Proxy/TLSClientConfig are
+			// overridden, and LLM providers overwhelmingly default to h2.
+			ForceAttemptHTTP2:     true,
 			TLSHandshakeTimeout:   10 * time.Second, // zero = unbounded; a stalled handshake isn't covered by the dial timeout
 			ResponseHeaderTimeout: cfg.Timeouts.ResponseHeader.D(),
 			MaxIdleConnsPerHost:   maxIdle,

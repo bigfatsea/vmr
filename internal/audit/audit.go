@@ -596,7 +596,18 @@ func (l *Logger) Write(rec *Record) error {
 	// json.Marshal + a manual append(line, '\n'), which reallocates and
 	// copies the whole (potentially multi-MB) record just to add one byte,
 	// since Marshal's returned slice has no spare capacity.
-	if err := json.NewEncoder(buf).Encode(rec); err != nil {
+	//
+	// SetEscapeHTML(false) preserves byte-faithful fidelity to the
+	// request/response body the audit captures. The encoder defaults to
+	// escaping <, > and & as \u003c/\u003e/\u0026 — fine for a JSON
+	// payload meant for HTML embedding, but it corrupts line-for-line
+	// comparison of an audit record against the live request/response
+	// (CLAUDE.md's byte-faithful-passthrough invariant), and a payload that
+	// legitimately contains "<foo & \"bar\">" would never survive a
+	// round-trip unaltered.
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(rec); err != nil {
 		return fmt.Errorf("audit marshal: %w", err)
 	}
 	l.mu.Lock()

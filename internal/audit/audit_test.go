@@ -238,6 +238,50 @@ func TestNilLoggerNoop(t *testing.T) {
 	}
 }
 
+// TestWriteNoHTMLEscape locks in the SetEscapeHTML(false) contract of
+// Logger.Write: the audit log is a wire-fidelity record, not an HTML
+// embedding payload, so a body containing <, > or & must round-trip as the
+// raw bytes the client actually sent/received — never as the encoder's
+// default \u003c / \u003e / \u0026 escapes.
+func TestWriteNoHTMLEscape(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	l.hkWG.Wait()
+
+	const payload = `<foo & "bar">`
+	rec := &Record{Model: "m", Client: Exchange{Request: Message{Path: "/v1/chat/completions", Body: payload}}}
+	if err := l.Write(rec); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(l.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `\u003c`) || strings.Contains(string(data), `\u003e`) || strings.Contains(string(data), `\u0026`) {
+		t.Errorf("audit line HTML-escaped the payload:\n%s", data)
+	}
+	// The quotes inside the payload are JSON-escaped on the wire, so check
+	// the un-escapable half literally and leave the full round-trip to the
+	// decode below.
+	if !strings.Contains(string(data), `<foo & `) {
+		t.Errorf("audit line lost the raw payload %q:\n%s", payload, data)
+	}
+
+	// Round-trips back through Record intact.
+	line := strings.TrimRight(string(data), "\n")
+	var got Record
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("round-trip: %v (%s)", err, line)
+	}
+	if body, ok := got.Client.Request.Body.(string); !ok || body != payload {
+		t.Errorf("round-trip body = %#v, want %q", got.Client.Request.Body, payload)
+	}
+}
+
 // TestWriteConcurrentGoroutinesProduceValidJSONL is the correctness property
 // the sync.Pool-based rewrite of Write actually depends on: each goroutine
 // encodes into its own pooled buffer with no cross-goroutine sharing, so N

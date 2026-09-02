@@ -84,6 +84,10 @@ func RenderPart(m map[string]any) string {
 		mt, _ := Nested(m, "source", "media_type").(string)
 		data, _ := Nested(m, "source", "data").(string)
 		return fmt.Sprintf("🖼 [image %s ~%s]", mt, fmtutil.FmtBytes(int64(base64.StdEncoding.DecodedLen(len(data)))))
+	case "document": // anthropic — same source shape as "image" above, but carries PDFs/text: a multi-MB base64 blob must never reach the rendered text
+		mt, _ := Nested(m, "source", "media_type").(string)
+		data, _ := Nested(m, "source", "data").(string)
+		return fmt.Sprintf("📄 [document %s ~%s]", mt, fmtutil.FmtBytes(int64(base64.StdEncoding.DecodedLen(len(data)))))
 	case "input_image": // openai-responses — image_url is a FLAT string field here, not nested like openai chat completions
 		if u, _ := m["image_url"].(string); u != "" {
 			return ImagePlaceholder(u)
