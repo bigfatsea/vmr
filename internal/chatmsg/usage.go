@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 	"vmr/internal/tokenutil"
 )
 
@@ -115,14 +116,24 @@ func MergeUsageWithProtocol(b []byte, acc Usage, protocol string) Usage {
 			return mergeUsage(obj, acc, protocol)
 		}
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		data, found := strings.CutPrefix(line, "data:")
+	rem := b
+	for len(rem) > 0 {
+		var line []byte
+		if idx := bytes.IndexByte(rem, '\n'); idx >= 0 {
+			line = rem[:idx]
+			rem = rem[idx+1:]
+		} else {
+			line = rem
+			rem = nil
+		}
+		line = bytes.TrimSpace(line)
+		data, found := bytes.CutPrefix(line, []byte("data:"))
 		if !found {
 			continue
 		}
+		data = bytes.TrimSpace(data)
 		var obj map[string]any
-		if json.Unmarshal([]byte(strings.TrimSpace(data)), &obj) != nil {
+		if json.Unmarshal(data, &obj) != nil {
 			continue
 		}
 		acc = mergeUsage(obj, acc, protocol)
@@ -289,7 +300,7 @@ func extractTruncatedText(raw []byte) string {
 				break
 			}
 			val := rem[i+len(m):]
-			end := bytes.IndexByte(val, '"')
+			end := jsonscan.IndexUnescapedQuote(val)
 			if end < 0 {
 				sb.Write(val)
 				rem = nil

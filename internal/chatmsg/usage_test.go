@@ -281,3 +281,54 @@ func TestEstimateDegradedBasis_FallbackAsymmetry(t *testing.T) {
 		t.Errorf("EstimateDegradedTokens = (%d, %d), want (%d, 0)", inDeg, outDeg, wantIn)
 	}
 }
+
+func TestExtractTruncatedText_EscapedQuotes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "truncated JSON content with escaped quotes",
+			input: `{"choices":[{"message":{"content":"say \"hello world\" to everyone`,
+			want:  `say \"hello world\" to everyone`,
+		},
+		{
+			name:  "truncated JSON text with unescaped closing quote",
+			input: `{"text":"echo \"hello world\" completed"`,
+			want:  `echo \"hello world\" completed`,
+		},
+		{
+			name:  "truncated SSE data with escaped quotes",
+			input: `data: {"delta":{"content":"code block: \"hello world\" truncated`,
+			want:  `code block: \"hello world\" truncated`,
+		},
+		{
+			name:  "truncated reasoning_content with escaped quotes",
+			input: `{"choices":[{"delta":{"reasoning_content":"reasoning with \"quoted phrase\" here`,
+			want:  `reasoning with \"quoted phrase\" here`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractResponseText(tc.input)
+			if got != tc.want {
+				t.Errorf("ExtractResponseText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergeUsageWithProtocol_CursorScanMultiLine(t *testing.T) {
+	t.Parallel()
+	raw := "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n" +
+		": heartbeat\n" +
+		"data: {\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":15}}\n" +
+		"data: [DONE]\n"
+	u := MergeUsageWithProtocol([]byte(raw), Usage{}, "")
+	if u.In != 20 || u.Out != 15 {
+		t.Errorf("MergeUsageWithProtocol = %+v, want In=20 Out=15", u)
+	}
+}
+

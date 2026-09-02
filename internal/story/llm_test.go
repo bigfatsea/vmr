@@ -511,3 +511,140 @@ func TestInterpret_CacheWriteFailOpenWithWarning(t *testing.T) {
 		t.Errorf("unexpected result %+v", res)
 	}
 }
+
+func TestCallLLM_RetryOn429WithRetryAfter(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"rate limit"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "success after retry"}},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN)
+	if err != nil {
+		t.Fatalf("Interpret: %v", err)
+	}
+	if res.Text != "success after retry" {
+		t.Errorf("res.Text = %q, want 'success after retry'", res.Text)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+}
+
+func TestCallLLM_RetryOn5xx(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("service unavailable"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "recovered"}},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	res, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN)
+	if err != nil {
+		t.Fatalf("Interpret: %v", err)
+	}
+	if res.Text != "recovered" {
+		t.Errorf("res.Text = %q, want 'recovered'", res.Text)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+}
+
+func TestCallLLM_NonRetryable401DoesNotRetry(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer ts.Close()
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	_, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN)
+	if err == nil {
+		t.Fatal("expected error on 401")
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (non-retryable 401 should not retry)", calls)
+	}
+}
+
+func TestCallLLM_MaxRetriesExhausted(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer ts.Close()
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	_, err := Interpret(context.Background(), LLMOptions{Addr: addr, Model: "agent"}, testPack(t), i18n.EN)
+	if err == nil {
+		t.Fatal("expected error after max retries")
+	}
+	// Initial + 2 retries = 3 calls
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (1 initial + 2 retries)", calls)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+	h := http.Header{}
+	if d := parseRetryAfter(h); d != 0 {
+		t.Errorf("empty header = %v, want 0", d)
+	}
+
+	h.Set("Retry-After", "10")
+	if d := parseRetryAfter(h); d != 10*time.Second {
+		t.Errorf("parseRetryAfter(10) = %v, want 10s", d)
+	}
+
+	h.Set("Retry-After", "0")
+	if d := parseRetryAfter(h); d != 0 {
+		t.Errorf("parseRetryAfter(0) = %v, want 0", d)
+	}
+
+	h.Set("Retry-After", "invalid")
+	if d := parseRetryAfter(h); d != 0 {
+		t.Errorf("parseRetryAfter(invalid) = %v, want 0", d)
+	}
+
+	future := time.Now().Add(5 * time.Second).UTC().Format(http.TimeFormat)
+	h.Set("Retry-After", future)
+	if d := parseRetryAfter(h); d <= 0 || d > 6*time.Second {
+		t.Errorf("parseRetryAfter(HTTP-date) = %v, want ~5s", d)
+	}
+}
+

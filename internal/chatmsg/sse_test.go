@@ -214,3 +214,27 @@ func TestReassembleSSE_ResponsesCompletedEvent(t *testing.T) {
 		t.Errorf("a response.output_text.delta event must not be parsed for content: %q", s.Content)
 	}
 }
+
+func TestReassembleSSE_CursorScanLargeStream(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	b.WriteString("data: {\"model\":\"agent-large\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+	const chunks = 500
+	for i := 0; i < chunks; i++ {
+		b.WriteString("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"chunk\"}}]}\n\n")
+	}
+	b.WriteString("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}]}\n\n")
+	b.WriteString("data: [DONE]\n")
+
+	s := ReassembleSSE(b.String())
+	if s == nil {
+		t.Fatal("ReassembleSSE returned nil for large stream")
+	}
+	if s.Model != "agent-large" || s.Finish != "stop" {
+		t.Errorf("Model/Finish = %q/%q, want agent-large/stop", s.Model, s.Finish)
+	}
+	if s.Content != strings.Repeat("chunk", chunks) {
+		t.Errorf("Content length = %d, want %d", len(s.Content), chunks*len("chunk"))
+	}
+}
+
