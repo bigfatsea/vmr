@@ -1704,15 +1704,15 @@ func TestClientEndpointScale(t *testing.T) {
 // report's cost path uses) — see contextGrowthIn's doc comment.
 func TestContextGrowthInFallback(t *testing.T) {
 	cases := []struct {
-		name   string
-		r      *ReqInfo
-		want   int64
+		name string
+		r    *ReqInfo
+		want int64
 	}{
 		{
 			name: "usage known wins",
 			r: &ReqInfo{
-				UsageOK: true,
-				Usage:   chatmsg.Usage{In: 1200},
+				UsageOK:  true,
+				Usage:    chatmsg.Usage{In: 1200},
 				manifest: &ctxgraph.Manifest{EstIn: 999}, // must be ignored
 			},
 			want: 1200,

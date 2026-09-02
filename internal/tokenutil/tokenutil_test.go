@@ -159,4 +159,3 @@ func BenchmarkEstimateText(b *testing.B) {
 		_ = EstimateText(s)
 	}
 }
-

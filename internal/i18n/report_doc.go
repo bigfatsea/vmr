@@ -37,17 +37,17 @@ type DocText struct {
 	// requests figure includes everything; this note gives the reader a
 	// quick sense of how much of the traffic is user-facing. (review P-07)
 	SummaryInteractiveNote func(total, interactive int, pct string) string
-	SummaryStarNote    string
-	HighlightsAuto     string
-	NoAnomalies        string
-	CacheWarn          func(workload, cacheEffPct, freshTokens string) string
-	ToolWarn           func(shape string, requests int, schemaBytes, wasteBytes, utilPct string, neverCalled int) string
-	EndpointWarn       func(endpoint, errRatePct, topSuffix string) string
-	TopErrorSuffix     func(cls string, n int) string
-	RequestIndexTitle  string
-	RequestIndexBody   string
-	PerClientLabel     string
-	DetailsCaptureBody string
+	SummaryStarNote        string
+	HighlightsAuto         string
+	NoAnomalies            string
+	CacheWarn              func(workload, cacheEffPct, freshTokens string) string
+	ToolWarn               func(shape string, requests int, schemaBytes, wasteBytes, utilPct string, neverCalled int) string
+	EndpointWarn           func(endpoint, errRatePct, topSuffix string) string
+	TopErrorSuffix         func(cls string, n int) string
+	RequestIndexTitle      string
+	RequestIndexBody       string
+	PerClientLabel         string
+	DetailsCaptureBody     string
 	// DetailsOnDemandBody is DetailsCaptureBody's counterpart for the
 	// default (-details=false) run, where details/*.md was never
 	// materialized (P6.2b) — example is a real "basename:line" coordinate
@@ -102,9 +102,9 @@ func Doc(lang Lang) DocText {
 			SummaryInteractiveNote: func(total, interactive int, pct string) string {
 				return "其中 interactive 工作负载占 " + pct + "（" + strconv.Itoa(interactive) + "/" + strconv.Itoa(total) + "）\n"
 			},
-			SummaryStarNote:    "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
-			HighlightsAuto:     "**亮点 (auto):**",
-			NoAnomalies:        "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
+			SummaryStarNote: "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
+			HighlightsAuto:  "**亮点 (auto):**",
+			NoAnomalies:     "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
 			CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 				return "⚠️ **" + workload + " 工作负载缓存效率 " + cacheEffPct + "** - " + freshTokens + " fresh tokens（占该负载输入大头）"
 			},
@@ -182,9 +182,9 @@ func Doc(lang Lang) DocText {
 		SummaryInteractiveNote: func(total, interactive int, pct string) string {
 			return "of which the interactive workload accounts for " + pct + " (" + strconv.Itoa(interactive) + "/" + strconv.Itoa(total) + ")\n"
 		},
-		SummaryStarNote:    "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
-		HighlightsAuto:     "**Highlights (auto):**",
-		NoAnomalies:        "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
+		SummaryStarNote: "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
+		HighlightsAuto:  "**Highlights (auto):**",
+		NoAnomalies:     "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",
 		CacheWarn: func(workload, cacheEffPct, freshTokens string) string {
 			return "⚠️ **" + workload + " workload cache efficiency " + cacheEffPct + "** - " + freshTokens + " fresh tokens (dominates this workload's input)"
 		},
