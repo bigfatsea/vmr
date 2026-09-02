@@ -66,13 +66,21 @@ func (s *Server) WithInstance(configPath string, startedAt time.Time) *Server {
 
 func getCached(key string, fetch func() uint64) uint64 {
 	metricsMu.Lock()
-	defer metricsMu.Unlock()
-	e, ok := statusMetrics[key]
-	if !ok || time.Since(e.at) >= statusMetricsTTL {
-		e = metricSample{time.Now(), fetch()}
-		statusMetrics[key] = e
+	if e, ok := statusMetrics[key]; ok && time.Since(e.at) < statusMetricsTTL {
+		metricsMu.Unlock()
+		return e.val
 	}
-	return e.val
+	metricsMu.Unlock()
+
+	val := fetch()
+
+	metricsMu.Lock()
+	defer metricsMu.Unlock()
+	if e, ok := statusMetrics[key]; ok && time.Since(e.at) < statusMetricsTTL {
+		return e.val
+	}
+	statusMetrics[key] = metricSample{at: time.Now(), val: val}
+	return val
 }
 
 func cachedDirTotalSize(dir string) int64 {

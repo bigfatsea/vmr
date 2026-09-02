@@ -452,3 +452,80 @@ func TestStore_PruneOrphanKeys(t *testing.T) {
 		t.Errorf("active-p2 gpt-4o = %v, want 3", c.Requests)
 	}
 }
+
+// TestStore_ConcurrentChargeAndFlush verifies data consistency and lack of race
+// conditions when online Charge calls happen concurrently with background Flush calls.
+func TestStore_ConcurrentChargeAndFlush(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	r := NewRegistry(path)
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	const (
+		numGoroutines = 10
+		opsPerRoutine = 50
+	)
+
+	var wg sync.WaitGroup
+	stopFlush := make(chan struct{})
+
+	// Goroutines repeatedly flushing in the background
+	var flushWG sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		flushWG.Add(1)
+		go func() {
+			defer flushWG.Done()
+			for {
+				select {
+				case <-stopFlush:
+					return
+				default:
+					_ = r.Flush()
+					time.Sleep(1 * time.Millisecond)
+				}
+			}
+		}()
+	}
+
+	// Goroutines concurrently charging
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < opsPerRoutine; j++ {
+				r.Charge("provider-concurrent", "tokens/1mo", ps, Counters{
+					Fresh:     10,
+					CacheRead: 5,
+					Out:       2,
+					Requests:  1,
+				}, 1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(stopFlush)
+	flushWG.Wait()
+
+	// Final flush to ensure all charges are persisted
+	if err := r.Flush(); err != nil {
+		t.Fatalf("final Flush: %v", err)
+	}
+
+	r2 := NewRegistry(path)
+	if err := r2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	c, est := r2.Used("provider-concurrent", "tokens/1mo", ps)
+	wantFresh := float64(numGoroutines * opsPerRoutine * 10)
+	wantCacheRead := float64(numGoroutines * opsPerRoutine * 5)
+	wantOut := float64(numGoroutines * opsPerRoutine * 2)
+	wantRequests := float64(numGoroutines * opsPerRoutine * 1)
+	wantEst := float64(numGoroutines * opsPerRoutine * 1)
+
+	if c.Fresh != wantFresh || c.CacheRead != wantCacheRead || c.Out != wantOut || c.Requests != wantRequests || est != wantEst {
+		t.Fatalf("counters mismatch after concurrent charge/flush: got Fresh=%v CacheRead=%v Out=%v Requests=%v est=%v; want Fresh=%v CacheRead=%v Out=%v Requests=%v est=%v",
+			c.Fresh, c.CacheRead, c.Out, c.Requests, est, wantFresh, wantCacheRead, wantOut, wantRequests, wantEst)
+	}
+}

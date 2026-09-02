@@ -38,6 +38,10 @@ import (
 // ships.
 const BackstopTTL = core.StickyBackstopTTL
 
+// MaxEntries is the upper bound on active session affinity records kept
+// in memory to prevent unbounded growth in high-turnover short-session environments.
+const MaxEntries = 10000
+
 // sweepInterval throttles the opportunistic sweep so Set doesn't walk the
 // whole map on every call — same event-triggered-and-throttled shape as
 // the image downscale cache housekeeping, not an
@@ -51,13 +55,35 @@ type entry struct {
 
 // Registry is safe for concurrent use.
 type Registry struct {
-	mu        sync.Mutex
-	entries   map[string]entry
-	lastSweep time.Time
+	mu         sync.Mutex
+	entries    map[string]entry
+	lastSweep  time.Time
+	maxEntries int
 }
 
 func New() *Registry {
-	return &Registry{entries: make(map[string]entry)}
+	return &Registry{
+		entries:    make(map[string]entry),
+		maxEntries: MaxEntries,
+	}
+}
+
+// NewBounded creates a Registry with a custom maximum capacity (used in tests or resource-constrained setups).
+func NewBounded(maxEntries int) *Registry {
+	if maxEntries <= 0 {
+		maxEntries = MaxEntries
+	}
+	return &Registry{
+		entries:    make(map[string]entry),
+		maxEntries: maxEntries,
+	}
+}
+
+func (r *Registry) limit() int {
+	if r.maxEntries <= 0 {
+		return MaxEntries
+	}
+	return r.maxEntries
 }
 
 // Peek returns the endpoint key and last-used time recorded for key, if
@@ -67,6 +93,9 @@ func New() *Registry {
 func (r *Registry) Peek(key string) (endpointKey string, lastUsed time.Time, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.entries == nil {
+		return "", time.Time{}, false
+	}
 	e, found := r.entries[key]
 	if !found {
 		return "", time.Time{}, false
@@ -83,16 +112,44 @@ func (r *Registry) Set(key, endpointKey string) {
 	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.entries[key] = entry{endpointKey: endpointKey, lastUsed: now}
-	if now.Sub(r.lastSweep) < sweepInterval {
-		return
+	if r.entries == nil {
+		r.entries = make(map[string]entry)
 	}
-	r.lastSweep = now
-	for k, e := range r.entries {
-		if now.Sub(e.lastUsed) > BackstopTTL {
-			delete(r.entries, k)
+
+	maxCap := r.limit()
+	_, exists := r.entries[key]
+
+	// Opportunistic TTL sweep: triggered when at capacity for a new key, or when sweepInterval has elapsed.
+	if (!exists && len(r.entries) >= maxCap) || now.Sub(r.lastSweep) >= sweepInterval {
+		r.lastSweep = now
+		for k, e := range r.entries {
+			if now.Sub(e.lastUsed) > BackstopTTL {
+				delete(r.entries, k)
+			}
 		}
 	}
+
+	// Hard capacity bound: if still at capacity for a new key, evict the oldest entry.
+	if !exists {
+		for len(r.entries) >= maxCap {
+			var oldestKey string
+			var oldestTime time.Time
+			first := true
+			for k, e := range r.entries {
+				if first || e.lastUsed.Before(oldestTime) {
+					oldestKey = k
+					oldestTime = e.lastUsed
+					first = false
+				}
+			}
+			if first {
+				break
+			}
+			delete(r.entries, oldestKey)
+		}
+	}
+
+	r.entries[key] = entry{endpointKey: endpointKey, lastUsed: now}
 }
 
 // Len reports the current entry count — for /status or tests, not on

@@ -561,6 +561,11 @@ func (l *Logger) Path() string {
 	return ActiveLogPath(l.dir, l.now())
 }
 
+// maxPooledWriteBufCap bounds the capacity of buffers returned to writeBufPool
+// to prevent oversized buffers (e.g. from multi-MB multimodal or large-context
+// payloads) from lingering in memory indefinitely.
+const maxPooledWriteBufCap = 1 << 20 // 1MB
+
 // writeBufPool pools the *bytes.Buffer used to encode a Record before it's
 // written to disk. Deliberately NOT a single buffer field on Logger: audit
 // records can run to several MB for a long agent conversation, and encoding
@@ -582,7 +587,11 @@ func (l *Logger) Write(rec *Record) error {
 	}
 	buf := writeBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	defer writeBufPool.Put(buf)
+	defer func() {
+		if buf.Cap() <= maxPooledWriteBufCap {
+			writeBufPool.Put(buf)
+		}
+	}()
 	// json.NewEncoder.Encode appends its own trailing '\n' — unlike
 	// json.Marshal + a manual append(line, '\n'), which reallocates and
 	// copies the whole (potentially multi-MB) record just to add one byte,

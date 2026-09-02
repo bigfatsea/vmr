@@ -128,15 +128,23 @@ func (r *Registry) Flush() (err error) {
 		r.mu.Unlock()
 		return nil
 	}
-	ff := fileFormat{Version: fileVersion, Accounts: r.accounts}
-	data, err := json.MarshalIndent(&ff, "", "  ")
-	// Snapshot and dirty-clearing are atomic under the lock, so a Charge
-	// racing the write re-sets dirty on its own and the next tick persists
-	// it. On any failure below the defer restores dirty, so a transient
-	// write error (full disk, permission change, NaN value) is retried on
-	// the next tick instead of silently dropping the unsaved state (R47).
+	// Take a structural snapshot of accounts under the lock, then release
+	// immediately so json.MarshalIndent and disk I/O run outside the critical
+	// section without blocking online Charge calls or availability scoring.
+	accounts := make(map[string]map[string]*bucket, len(r.accounts))
+	for prov, limits := range r.accounts {
+		limitCopy := make(map[string]*bucket, len(limits))
+		for k, b := range limits {
+			if b != nil {
+				bCopy := *b
+				limitCopy[k] = &bCopy
+			}
+		}
+		accounts[prov] = limitCopy
+	}
 	r.dirty = false
 	r.mu.Unlock()
+
 	defer func() {
 		if err != nil {
 			r.mu.Lock()
@@ -144,6 +152,9 @@ func (r *Registry) Flush() (err error) {
 			r.mu.Unlock()
 		}
 	}()
+
+	ff := fileFormat{Version: fileVersion, Accounts: accounts}
+	data, err := json.MarshalIndent(&ff, "", "  ")
 	if err != nil {
 		return err
 	}

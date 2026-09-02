@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -326,5 +327,50 @@ func TestWriteAfterCloseIsRefusedAndNeverReopens(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("post-Close Write created extra files: %d entries", n)
+	}
+}
+
+// TestWriteBufPool_OversizedBufferNotRecycled ensures that buffers exceeding
+// maxPooledWriteBufCap (1MB) after encoding large requests are dropped rather
+// than recycled back into writeBufPool to avoid permanent memory retention.
+func TestWriteBufPool_OversizedBufferNotRecycled(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	l.hkWG.Wait()
+
+	// Drain any existing buffers in pool for this goroutine
+	drained := make([]*bytes.Buffer, 0, 10)
+	for i := 0; i < 10; i++ {
+		b := writeBufPool.Get().(*bytes.Buffer)
+		drained = append(drained, b)
+	}
+	for _, b := range drained {
+		writeBufPool.Put(b)
+	}
+
+	// Write a record with a >1.5MB body
+	largePayload := strings.Repeat("a", 1500000)
+	rec := &Record{
+		Model: "large-test",
+		Client: Exchange{
+			Request: Message{
+				Path: "/v1/chat/completions",
+				Body: largePayload,
+			},
+		},
+	}
+	if err := l.Write(rec); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Check the buffer returned from the pool: it should never exceed 1MB capacity
+	buf := writeBufPool.Get().(*bytes.Buffer)
+	defer writeBufPool.Put(buf)
+	if buf.Cap() > maxPooledWriteBufCap {
+		t.Errorf("writeBufPool contained oversized buffer with cap %d, want <= %d", buf.Cap(), maxPooledWriteBufCap)
 	}
 }
