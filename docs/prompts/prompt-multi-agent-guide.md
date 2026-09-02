@@ -81,6 +81,7 @@ git branch -d feat/<task-name>
 3. **保持线性历史 (Clean History)**：对于无冲突的正交分支，优先使用 Fast-Forward 或结构明确的 Merge Commit。
 4. **共享文件由主控独占**：CHANGELOG.md / KNOWN_ISSUES.md / 设计文档进所有 Worker 的禁改清单；Worker 把待登记项写进不提交的 NOTES_FOR_LEAD.md。多批并行能否零冲突，这一条是主因。
 5. **验收必须独立复跑**：不能只看 Worker 自述。Worker 的最终验收命令可能未跑完就退出，主控必须独立复跑确认。"Worker 说全绿"和"主控看到全绿"是两件事。
+6. **最终汇总前事实核查**：主控在回收所有子 Agent 的反馈和输出、汇总成最终结果之前，对其中关键事项进行事实核查，避免盲信文档中或子 Agent 反馈中所声称的结论。
 
 ---
 
