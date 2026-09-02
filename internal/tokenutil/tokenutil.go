@@ -110,6 +110,28 @@ func Analyze(body []byte) CharStats {
 	return stats
 }
 
+// AnalyzeString counts character categories in s rune-by-rune with zero heap allocations.
+func AnalyzeString(s string) CharStats {
+	var stats CharStats
+	for _, r := range s {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			stats.EnglishLetters++
+		case r >= '0' && r <= '9':
+			stats.Digits++
+		case IsEnglishSymbol(r):
+			stats.EnglishSymbols++
+		case IsCJK(r):
+			stats.CJKChars++
+		case unicode.IsSpace(r):
+			stats.Spaces++
+		default:
+			stats.OtherChars++
+		}
+	}
+	return stats
+}
+
 // Estimate returns the estimated token count for the given raw bytes
 // using the linear regression character classification formula.
 func Estimate(body []byte) int64 {
@@ -119,7 +141,7 @@ func Estimate(body []byte) int64 {
 
 // EstimateText returns the estimated token count for the given string.
 func EstimateText(s string) int64 {
-	return Estimate([]byte(s))
+	return EstimateFromStats(AnalyzeString(s))
 }
 
 // EstimateFromStats applies the linear regression formula to pre-tallied

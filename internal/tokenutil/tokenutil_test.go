@@ -117,3 +117,46 @@ func TestAnalyze(t *testing.T) {
 		t.Errorf("others = %d, want 1", stats.OtherChars)
 	}
 }
+
+func TestAnalyzeString_MatchesAnalyze(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{
+		"",
+		"Hello, World!",
+		"0123456789",
+		"你好，世界！",
+		"Hi! 123 你好 🚀🎉",
+		"混合 text with CJK 汉字, digits 456, symbols !@#, spaces   and emojis 🌟.",
+	}
+	for _, text := range cases {
+		fromBytes := Analyze([]byte(text))
+		fromString := AnalyzeString(text)
+		if fromBytes != fromString {
+			t.Errorf("AnalyzeString(%q) = %+v, want %+v (Analyze)", text, fromString, fromBytes)
+		}
+		if estBytes, estStr := Estimate([]byte(text)), EstimateText(text); estBytes != estStr {
+			t.Errorf("EstimateText(%q) = %d, want %d (Estimate)", text, estStr, estBytes)
+		}
+	}
+}
+
+func TestEstimateText_ZeroAlloc(t *testing.T) {
+	s := "Hello, 世界! 123 你好，测试 🚀🎉 more text here to verify zero heap allocations."
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = EstimateText(s)
+	})
+	if allocs != 0 {
+		t.Errorf("EstimateText allocated %v allocs/op, want 0", allocs)
+	}
+}
+
+func BenchmarkEstimateText(b *testing.B) {
+	s := "Hello, 世界! 123 你好，测试 🚀🎉 more text here to test token estimation performance."
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = EstimateText(s)
+	}
+}
+

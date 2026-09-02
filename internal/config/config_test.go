@@ -117,6 +117,23 @@ func TestParseRejectsEnvValueWithHashComment(t *testing.T) {
 	}
 }
 
+// TestParseRejectsEnvValueWithLeadingHash covers an expanded value starting
+// with "#": in YAML, a line starting with "#" becomes a comment, silently
+// turning the key's value into an empty string without any parse error.
+func TestParseRejectsEnvValueWithLeadingHash(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "#secret-api-key")
+	_, err := Parse([]byte(validYAML))
+	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
+		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+	}
+
+	t.Setenv("VMR_TEST_KEY", "  #secret-with-leading-spaces")
+	_, err = Parse([]byte(validYAML))
+	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
+		t.Fatalf("want a rejection naming VMR_TEST_KEY for leading-whitespace comment, got %v", err)
+	}
+}
+
 // TestParseAllowsOrdinaryEnvValues is the negative case: a plain API key
 // (no newline, no ": ") must keep loading exactly as before — the check
 // above must not false-positive on ordinary secrets.
@@ -330,14 +347,19 @@ func TestImageCacheTTLDaysNonPositiveClampsToDefault(t *testing.T) {
 	}
 }
 
-func TestMaxConcurrencyNegativeClampsToUnlimited(t *testing.T) {
-	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nmax_concurrency: -3", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
+func TestMaxAttemptsNegativeRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nmax_attempts: -1", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "max_attempts must be >= 0") {
+		t.Errorf("want max_attempts rejection error, got %v", err)
 	}
-	if cfg.MaxConcurrency != 0 {
-		t.Errorf("negative max_concurrency must clamp to 0 (unlimited), got %d", cfg.MaxConcurrency)
+}
+
+func TestMaxConcurrencyNegativeRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nmax_concurrency: -3", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "max_concurrency must be >= 0") {
+		t.Errorf("want max_concurrency rejection error, got %v", err)
 	}
 }
 
@@ -362,14 +384,11 @@ func TestAuditRetentionDaysConfig(t *testing.T) {
 	}
 }
 
-func TestAuditRetentionDaysNegativeClampsToDisabled(t *testing.T) {
+func TestAuditRetentionDaysNegativeRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\naudit_retention_days: -5", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.AuditRetentionDays != 0 {
-		t.Errorf("negative audit_retention_days must clamp to 0 (disabled), got %d", cfg.AuditRetentionDays)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "audit_retention_days must be >= 0") {
+		t.Errorf("want audit_retention_days rejection error, got %v", err)
 	}
 }
 
