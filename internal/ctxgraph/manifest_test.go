@@ -442,8 +442,10 @@ func TestBuildManifest_UsageProtocolAware(t *testing.T) {
 		},
 	}
 	mAnthropic, ok := BuildManifest(&recAnthropic, "f", 1)
-	if !ok || !mAnthropic.UsageOK || mAnthropic.Usage.In != 150 {
-		t.Errorf("anthropic manifest usage In=%d (want 150, 100+50)", mAnthropic.Usage.In)
+	// The fixture reports no output_tokens at all, so the Out side is
+	// honestly unknown (UsageOutOK false) even though In is real.
+	if !ok || !mAnthropic.UsageInOK || mAnthropic.UsageOutOK || mAnthropic.Usage.In != 150 {
+		t.Errorf("anthropic manifest usage In=%d (want 150, 100+50), inOK/outOK=%v/%v (want true/false — no output reported)", mAnthropic.Usage.In, mAnthropic.UsageInOK, mAnthropic.UsageOutOK)
 	}
 
 	recResponses := audit.Record{
@@ -454,7 +456,7 @@ func TestBuildManifest_UsageProtocolAware(t *testing.T) {
 		},
 	}
 	mResponses, ok := BuildManifest(&recResponses, "f", 2)
-	if !ok || !mResponses.UsageOK || mResponses.Usage.In != 100 {
-		t.Errorf("responses manifest usage In=%d (want 100, inclusive)", mResponses.Usage.In)
+	if !ok || !mResponses.UsageInOK || mResponses.UsageOutOK || mResponses.Usage.In != 100 {
+		t.Errorf("responses manifest usage In=%d (want 100, inclusive), inOK/outOK=%v/%v (want true/false — no output reported)", mResponses.Usage.In, mResponses.UsageInOK, mResponses.UsageOutOK)
 	}
 }

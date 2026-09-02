@@ -91,7 +91,13 @@ type ReqInfo struct {
 	Finish         string
 	Truncated      bool
 	Usage          chatmsg.Usage
-	UsageOK        bool
+	// UsageInOK/UsageOutOK report which sides of the usage ledger the
+	// upstream actually reported (see chatmsg.ExtractUsageSides for the
+	// side rule). The old single UsageOK bool conflated the two; consumers
+	// pick their side (In-side stats gate on UsageInOK, Out-side on
+	// UsageOutOK).
+	UsageInOK  bool
+	UsageOutOK bool
 
 	DetailFile string // deterministic detail filename (assigned in ts order)
 
@@ -347,7 +353,7 @@ func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
 // to keep function length maintainable, not
 // because it's an independently meaningful step.
 func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
-	r.Usage, r.UsageOK = chatmsg.ExtractUsageWithProtocol(resp.Body, r.Protocol)
+	r.Usage, r.UsageInOK, r.UsageOutOK = chatmsg.ExtractUsageSides(resp.Body, r.Protocol)
 	s := taskseg.ResponseSummary(resp.Body)
 	if s == nil {
 		return

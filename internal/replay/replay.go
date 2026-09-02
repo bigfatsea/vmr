@@ -19,7 +19,6 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/audit"
-	"vmr/internal/chatmsg"
 	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/ctxgraph"
@@ -27,7 +26,6 @@ import (
 	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
-	"vmr/internal/tokenutil"
 )
 
 // Options configures one replay run. There are three ways to pick which
@@ -72,7 +70,21 @@ type recordView struct {
 	Model    string `json:"model"`
 	Protocol string `json:"protocol"`
 	Stream   bool   `json:"stream"`
-	Client   struct {
+	// Facts carries audit.Record.Facts — vmr's own pre-routing analysis of
+	// the request (see core.RequestFacts). Replay decodes just the one
+	// field it needs: EstimatedTokens, the router's pre-routing input-token
+	// estimate, the SAME number live tokenCharge reads off
+	// creq.Facts.EstimatedTokens (server/facts.go). Using it for the
+	// degraded In charge makes a replayed request meter on the same basis
+	// live traffic metered it, instead of re-estimating from raw bytes
+	// (which would silently disagree with what the router actually charged
+	// the first time). nil when the original record never computed facts
+	// (rejected/auth-failed requests), in which case chargeReplay falls
+	// back to a raw-byte estimate.
+	Facts *struct {
+		EstimatedTokens int64 `json:"estimated_tokens"`
+	} `json:"facts,omitempty"`
+	Client struct {
 		Request struct {
 			Headers http.Header     `json:"headers"`
 			Body    json.RawMessage `json:"body"`
@@ -263,7 +275,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	// sent were genuinely consumed (same reasoning chargeQuota's own doc
 	// comment gives for the live path).
 	if resp.StatusCode < 400 {
-		chargeReplay(qreg, ep, protocol, rv.Client.Request.Body, respBuf.Bytes(), time.Now())
+		chargeReplay(qreg, ep, protocol, rv.Client.Request.Body, respBuf.Bytes(), inEstFor(rv), time.Now())
 	}
 
 	if opts.RecordPath != "" {
@@ -272,32 +284,6 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		}
 	}
 	return nil
-}
-
-// chargeReplay meters one successful replay's consumption against ep's
-// provider quota (a no-op when ep.Quota is nil, i.e. -provider has no
-// quota: configured) and hands it to router.ChargeResponse — the same
-// metric-dispatch/model-multiplier/cost-pricing pipeline chargeQuota uses
-// for live traffic (see that function's doc comment). It differs from
-// chargeQuota only in how usage is obtained: live traffic sniffs it
-// incrementally off a streaming respnorm.NormalizerStream, but replay already
-// has the complete request/response bytes in hand (reqBody/respBody), so
-// chatmsg.MergeUsageWithProtocol — the exact function respnorm's own usage
-// sniffing calls — reads it directly from the buffered bytes instead, and
-// the degraded estimate comes from tokenutil.Estimate over the raw
-// request/response bytes rather than from an incremental byte tally.
-//
-// Everything after "how usage was obtained" is router.TokenCounters, not a
-// second copy of the exact-vs-degraded rule — see that function's doc comment
-// for why all three call sites had to converge on one implementation.
-func chargeReplay(reg *quota.Registry, ep *core.Endpoint, protocol string, reqBody, respBody []byte, now time.Time) {
-	if ep.Quota == nil {
-		return
-	}
-	u := chatmsg.MergeUsageWithProtocol(respBody, chatmsg.Usage{}, protocol)
-	raw, estimated := router.TokenCounters(u, u.In > 0 || u.Out > 0,
-		tokenutil.Estimate(reqBody), tokenutil.Estimate(respBody))
-	router.ChargeResponse(reg, ep, raw, estimated, now)
 }
 
 // statAuditPathArg classifies the raw AuditPath argument -req needs to

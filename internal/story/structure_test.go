@@ -102,8 +102,8 @@ func TestBuildStructure_GraphLevelFactsCarried(t *testing.T) {
 	// Per-step performance/cost facts, already resident on Step.Manifest,
 	// must be inlined (fact-layer's header line shows all four today).
 	for i, ss := range ssteps {
-		if !ss.UsageOK {
-			t.Errorf("step %d: UsageOK = false, want true (mkRecWithUsage sets a usage block)", i+1)
+		if !ss.UsageInOK || !ss.UsageOutOK {
+			t.Errorf("step %d: UsageInOK/UsageOutOK = %v/%v, want true/true (mkRecWithUsage sets a usage block)", i+1, ss.UsageInOK, ss.UsageOutOK)
 		}
 		if ss.Usage.In == 0 && ss.Usage.Out == 0 {
 			t.Errorf("step %d: Usage is zero-valued, want the mkRecWithUsage tokens", i+1)

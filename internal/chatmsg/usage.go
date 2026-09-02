@@ -88,6 +88,152 @@ func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
 	return u, u.In > 0 || u.Out > 0
 }
 
+// messageStartMarker identifies Anthropic's message_start SSE event, whose
+// usage object is the INPUT side of the ledger plus a placeholder output
+// count (see ExtractUsageSides for why that placeholder must never mark
+// the output side seen). Same byte sequence as respnorm's
+// messageStartMarker — kept in sync because the side-classification rule
+// is the single shared concept, but the predicate itself lives only here:
+// respnorm now delegates to ExtractUsageSides rather than carrying its
+// own copy. See internal/archtest's chatmsg-isolation rule.
+var messageStartMarker = []byte(`"type":"message_start"`)
+
+// ExtractUsageSides is the side-aware form of ExtractUsageWithProtocol:
+// returns (usage, inOK, outOK) where each bool reports whether THAT side
+// of the usage ledger was actually parsed, not a merged "saw anything".
+// The router/quota side needs this split rather than the single-bool
+// form because a stream truncated after Anthropic's message_start carries
+// real input usage but only the ~1 placeholder output count — billing
+// that as authoritative (estimated=0) is precisely the partial-usage
+// masquerading as precise failure this split exists to prevent
+// (see router.TokenCountersSides's doc comment).
+//
+// Rule (the unique source of truth for "did this side actually get
+// reported", mirrored from respnorm/usagesniff.go's previous
+// usageBlockSides):
+//
+//   - Anthropic SSE message_start event: inOK = (parsed In > 0),
+//     outOK = false (the output_tokens field is a placeholder).
+//   - Everything else: inOK = (parsed In > 0), outOK = (parsed Out > 0).
+//
+// body is either a map[string]any (a JSON object body) or a string
+// (raw bytes of an SSE stream, as audit.EncodeBody stores non-JSON
+// bodies). Matches ExtractUsageWithProtocol's two input shapes.
+//
+// Used by router.live tokenCharge (via rbody.UsageSides, set by
+// respnorm) and by replay.chargeReplay, both of which now go through
+// this single function rather than each holding its own copy of the
+// side rule.
+func ExtractUsageSides(body any, protocol string) (u Usage, inOK, outOK bool) {
+	switch b := body.(type) {
+	case map[string]any:
+		u, inOK, outOK = usageObjectSides(b, protocol)
+	case string:
+		u, inOK, outOK = usageStreamSides([]byte(b), protocol)
+	case []byte:
+		u, inOK, outOK = usageStreamSides(b, protocol)
+	}
+	return
+}
+
+// usageObjectSides applies the side rule to a single parsed JSON object
+// (one usage-bearing event, or a whole non-SSE body). For non-Anthropic
+// message_start shapes the side rule reduces to "side present iff
+// parsed value > 0".
+func usageObjectSides(obj map[string]any, protocol string) (u Usage, inOK, outOK bool) {
+	u = mergeUsage(obj, u, protocol)
+	inOK = u.In > 0
+	outOK = u.Out > 0
+	// Anthropic message_start: the object carries a ~1 placeholder for
+	// output_tokens that is NOT a real generation count. The body shape
+	// (a parsed JSON object) cannot tell us whether this object was a
+	// message_start or some other Anthropic event, but the protocol
+	// is anthropic-messages — and the same message_start gate
+	// (messageStartMarker byte sequence) is the rule. We only get a
+	// raw object here, not a byte slice, so we apply the conservative
+	// form: the object MUST carry the message_start type marker to
+	// qualify (rare on a JSON object body — this is a streamed-event
+	// rule mirrored defensively for safety).
+	if protocol == core.ProtocolAnthropicMessages {
+		if isAnthropicMessageStart(obj) {
+			outOK = false
+		}
+	}
+	return
+}
+
+// usageStreamSides applies the side rule to one byte buffer: a complete
+// JSON object body first (the non-SSE transport shape), else an SSE
+// stream, event by event, accumulating usage and ORing the per-event
+// side decisions. Mirrors the per-event loop respnorm's noteUsage uses;
+// the per-event merge takes the max per side (the same max rule as
+// mergeUsage), so the side booleans are simply the OR of every event's
+// "this side is real".
+func usageStreamSides(b []byte, protocol string) (u Usage, inOK, outOK bool) {
+	// Same shape dispatch MergeUsageWithProtocol uses: a leading '{' is a
+	// complete JSON object body (non-SSE transport), everything else is
+	// scanned as SSE "data:" lines. respnorm's splitEvents hands non-SSE
+	// bodies through as one whole "event", so this branch is what the
+	// live non-SSE path actually hits.
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var obj map[string]any
+		if json.Unmarshal(trimmed, &obj) == nil {
+			return usageObjectSides(obj, protocol)
+		}
+	}
+	rem := b
+	for len(rem) > 0 {
+		var line []byte
+		if idx := bytes.IndexByte(rem, '\n'); idx >= 0 {
+			line = rem[:idx]
+			rem = rem[idx+1:]
+		} else {
+			line = rem
+			rem = nil
+		}
+		line = bytes.TrimSpace(line)
+		data, found := bytes.CutPrefix(line, []byte("data:"))
+		if !found {
+			continue
+		}
+		data = bytes.TrimSpace(data)
+		var obj map[string]any
+		if json.Unmarshal(data, &obj) != nil {
+			continue
+		}
+		evU, evInOK, evOutOK := usageObjectSides(obj, protocol)
+		// mergeUsage per side: take the larger In/CacheRead/CacheWrite and
+		// the larger Out/Reasoning from each event, so the same "max per
+		// side" rule mergeUsage enforces is honored. Side flags are
+		// ORed across ALL events, not just the winner: once any event
+		// reported a real In/Out, the stream has, regardless of which
+		// event's numeric value ends up being the max in the merged Usage.
+		if evU.In > u.In {
+			u.In = evU.In
+			u.CacheRead = evU.CacheRead
+			u.CacheWrite = evU.CacheWrite
+		}
+		if evU.Out > u.Out {
+			u.Out = evU.Out
+			u.Reasoning = evU.Reasoning
+		}
+		inOK = inOK || evInOK
+		outOK = outOK || evOutOK
+	}
+	return
+}
+
+// isAnthropicMessageStart reports whether the parsed object carries the
+// SSE message_start type marker. Used by usageObjectSides to suppress
+// the placeholder output_tokens as a real count.
+func isAnthropicMessageStart(obj map[string]any) bool {
+	if t, _ := obj["type"].(string); t == "message_start" {
+		return true
+	}
+	return false
+}
+
 // MergeUsageWithProtocol extracts usage from b (a complete JSON object body
 // or SSE text, depending on which transport mode is in play — see
 // internal/respnorm's doc comment) and folds it into acc, returning the

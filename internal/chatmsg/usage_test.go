@@ -422,3 +422,143 @@ func TestMergeUsageWithProtocol_CursorScanMultiLine(t *testing.T) {
 		t.Errorf("MergeUsageWithProtocol = %+v, want In=20 Out=15", u)
 	}
 }
+
+// TestExtractUsageSides_AnthropicMessageStart pins the side rule the whole
+// exact-vs-degraded billing decision rests on: Anthropic's message_start
+// event carries the real INPUT side plus a ~1 placeholder output_tokens —
+// the placeholder must NOT mark the output side seen, or a stream
+// truncated after message_start bills out≈1 as an exact count with
+// estimated=0 (the partial-usage-masquerading-as-precise failure
+// TokenCountersSides exists to prevent). Must work through BOTH input
+// shapes the audit JSONL round-trip produces (map for JSON bodies, string
+// for SSE) and through the raw []byte form respnorm's noteUsage feeds in.
+func TestExtractUsageSides_AnthropicMessageStart(t *testing.T) {
+	t.Parallel()
+	start := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":20,\"output_tokens\":1}}}\n\n"
+
+	// SSE string (the audit-recorded shape).
+	u, inOK, outOK := ExtractUsageSides(start, core.ProtocolAnthropicMessages)
+	if !inOK {
+		t.Errorf("inOK = false, want true (real input side reported)")
+	}
+	if outOK {
+		t.Errorf("outOK = true, want false — message_start's output_tokens is a placeholder, never a real generation total")
+	}
+	if u.In != 120 || u.Out != 1 || u.CacheRead != 20 {
+		t.Errorf("usage = %+v, want In=120 (100+20 cache) Out=1 (placeholder, kept for reference) CacheRead=20", u)
+	}
+
+	// []byte (the form respnorm's noteUsage feeds in).
+	if _, inOK, outOK := ExtractUsageSides([]byte(start), core.ProtocolAnthropicMessages); !inOK || outOK {
+		t.Errorf("[]byte form: inOK/outOK = %v/%v, want true/false", inOK, outOK)
+	}
+
+	// map form (a parsed JSON object carrying the message_start marker).
+	obj := map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"usage": map[string]any{
+				"input_tokens": float64(100), "cache_read_input_tokens": float64(20), "output_tokens": float64(1),
+			},
+		},
+	}
+	if _, inOK, outOK := ExtractUsageSides(obj, core.ProtocolAnthropicMessages); !inOK || outOK {
+		t.Errorf("map form: inOK/outOK = %v/%v, want true/false", inOK, outOK)
+	}
+
+	// The same marker with a DIFFERENT protocol degrades to the generic
+	// rule (the protocol selects the message_start suppression, matching
+	// the old usageBlockSides's byte-gate behavior).
+	if _, inOK, outOK := ExtractUsageSides(obj, core.ProtocolOpenAICompletions); !inOK || !outOK {
+		t.Errorf("non-anthropic protocol: inOK/outOK = %v/%v, want true/true (generic rule)", inOK, outOK)
+	}
+}
+
+// TestExtractUsageSides_CompleteAnthropicStream pins the regression half:
+// message_delta carries the cumulative REAL output, so a stream that
+// reached it has BOTH sides.
+func TestExtractUsageSides_CompleteAnthropicStream(t *testing.T) {
+	t.Parallel()
+	sse := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":20,\"output_tokens\":1}}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":25}}\n\n"
+	u, inOK, outOK := ExtractUsageSides(sse, core.ProtocolAnthropicMessages)
+	if !inOK || !outOK {
+		t.Fatalf("inOK/outOK = %v/%v, want true/true for a complete two-stage stream", inOK, outOK)
+	}
+	if u.In != 120 || u.Out != 25 || u.CacheRead != 20 {
+		t.Errorf("usage = %+v, want In=120 Out=25 CacheRead=20", u)
+	}
+}
+
+// TestExtractUsageSides_OpenAIJSONAndSSE covers the OpenAI family (both
+// sides in one object / one final usage chunk) through both input shapes,
+// and the protocol-unknown fallback.
+func TestExtractUsageSides_OpenAIJSONAndSSE(t *testing.T) {
+	t.Parallel()
+	obj := map[string]any{
+		"usage": map[string]any{
+			"prompt_tokens": float64(500), "completion_tokens": float64(50),
+			"prompt_tokens_details": map[string]any{"cached_tokens": float64(100)},
+		},
+	}
+	u, inOK, outOK := ExtractUsageSides(obj, core.ProtocolOpenAICompletions)
+	if !inOK || !outOK {
+		t.Fatalf("JSON: inOK/outOK = %v/%v, want true/true", inOK, outOK)
+	}
+	if u.In != 500 || u.Out != 50 || u.CacheRead != 100 {
+		t.Errorf("JSON usage = %+v, want In=500 Out=50 CacheRead=100", u)
+	}
+
+	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n" +
+		"data: [DONE]\n\n"
+	u, inOK, outOK = ExtractUsageSides(sse, "")
+	if !inOK || !outOK {
+		t.Fatalf("SSE: inOK/outOK = %v/%v, want true/true", inOK, outOK)
+	}
+	if u.In != 10 || u.Out != 5 {
+		t.Errorf("SSE usage = %+v, want In=10 Out=5", u)
+	}
+}
+
+// TestExtractUsageSides_NoUsage: nothing parsed, nothing seen — the
+// side-aware counterpart of TestExtractUsage_NoUsage.
+func TestExtractUsageSides_NoUsage(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]any{
+		"map":    map[string]any{"foo": "bar"},
+		"string": "data: {\"choices\":[{\"delta\":{\"content\":\"plain\"}}]}\n\ndata: [DONE]\n\n",
+		"nil":    nil,
+	} {
+		if u, inOK, outOK := ExtractUsageSides(body, ""); inOK || outOK || u != (Usage{}) {
+			t.Errorf("%s: = (%+v, %v, %v), want zero/false/false", name, u, inOK, outOK)
+		}
+	}
+}
+
+// TestExtractUsageSides_AgreesWithExtractUsageWithProtocol pins that the
+// side-aware form's merged Usage matches the plain form's Usage for every
+// fixture in this file's corpus, and that the single-bool ok is exactly
+// inOK || outOK — the two entry points share one parser, so they can
+// never disagree about the numbers (only the side split is new).
+func TestExtractUsageSides_AgreesWithExtractUsageWithProtocol(t *testing.T) {
+	t.Parallel()
+	fixtures := []any{
+		map[string]any{"usage": map[string]any{"prompt_tokens": float64(10), "completion_tokens": float64(2)}},
+		map[string]any{},
+		"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":50,\"output_tokens\":1}}}\n\n",
+		"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n",
+		"",
+	}
+	for i, body := range fixtures {
+		wantU, wantOK := ExtractUsageWithProtocol(body, core.ProtocolAnthropicMessages)
+		gotU, inOK, outOK := ExtractUsageSides(body, core.ProtocolAnthropicMessages)
+		if gotU != wantU {
+			t.Errorf("fixture %d: ExtractUsageSides usage = %+v, ExtractUsageWithProtocol = %+v", i, gotU, wantU)
+		}
+		if (inOK || outOK) != wantOK {
+			t.Errorf("fixture %d: (inOK||outOK) = %v, ExtractUsageWithProtocol ok = %v", i, inOK || outOK, wantOK)
+		}
+	}
+}

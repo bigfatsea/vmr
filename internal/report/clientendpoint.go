@@ -35,13 +35,16 @@ func (c *clientEndpointCollector) add(rc *rec2) {
 		c.byKey[key] = row
 	}
 	row.Requests++
-	if !rc.usageOK {
-		return
+	// Cache efficiency is an In-side ratio (cached/fresh), so the In-side
+	// sample is what gates the row's token columns; Out adds when known.
+	if rc.usageInOK {
+		row.TokensIn += rc.usage.In
+		row.TokensInCached += rc.usage.CacheRead
+		row.TokensInFresh += rc.usage.Fresh()
 	}
-	row.TokensIn += rc.usage.In
-	row.TokensInCached += rc.usage.CacheRead
-	row.TokensInFresh += rc.usage.Fresh()
-	row.TokensOut += rc.usage.Out
+	if rc.usageOutOK {
+		row.TokensOut += rc.usage.Out
+	}
 }
 
 // clientEndpointScale reports how many distinct clients and how many rows

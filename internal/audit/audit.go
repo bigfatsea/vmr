@@ -197,6 +197,20 @@ type Attempt struct {
 	// virtual name back destroys it, and a successful attempt's body is
 	// not stored — so it is captured at the only moment it exists.
 	UpstreamModel string `json:"upstream_model,omitempty"`
+	// Forwarded is true when this attempt's response was actually forwarded
+	// to the client — the upstream returned a 2xx, the response was committed
+	// to the client, and the router charged quota for it. The ONLY setter is
+	// router.forwardSuccess: softblock paths (checkSoftBlock), >=400 error
+	// paths (handleErrorResponse), and build/network failures never set it.
+	// A truncated stream (SetTruncated after SetSuccessResponse) still has
+	// Forwarded=true — the response headers were already committed and quota
+	// was charged.
+	//
+	// Historical JSONL records (pre-v4) lack this field, so its zero value
+	// (false) does NOT mean "not forwarded" for those records. Consumers
+	// must use the IsForwarded predicate (see audit.IsForwarded) which
+	// handles the compatibility case.
+	Forwarded bool `json:"forwarded,omitempty"`
 }
 
 type Message struct {

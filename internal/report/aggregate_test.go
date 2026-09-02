@@ -602,7 +602,7 @@ func failureSurfaceRecords() []map[string]any {
 	}
 	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	ok := base(t0, "ok", 200)
-	ok["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}}}
+	ok["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "forwarded": true}}
 
 	failed := base(t0.Add(time.Minute), "error", 500)
 	failed["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "error": "transient: boom", "error_class": "transient"}}
@@ -613,8 +613,9 @@ func failureSurfaceRecords() []map[string]any {
 	truncated := base(t0.Add(3*time.Minute), "ok", 200)
 	// Real shape: SetSuccessResponse commits the 2xx response first, then
 	// SetTruncated (mid-stream death) only sets error/error_class — Response
-	// stays as the already-committed 2xx.
-	truncated["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "error": "truncated: EOF", "error_class": "truncated"}}
+	// stays as the already-committed 2xx, and Forwarded stays true (the
+	// router charged it).
+	truncated["attempts"] = []map[string]any{{"endpoint": "openai-completions:volcengine:doubao-seed-2.0-lite", "dur_ms": 100, "response": map[string]any{"status": 200}, "error": "truncated: EOF", "error_class": "truncated", "forwarded": true}}
 
 	return []map[string]any{ok, failed, canceled, truncated}
 }
@@ -1643,6 +1644,13 @@ func TestAddAttempt_ForwardedCountsTruncated(t *testing.T) {
 		if status > 0 {
 			att["response"] = map[string]any{"status": status}
 		}
+		// A 2xx that was forwarded carries the authoritative Forwarded flag
+		// (router.forwardSuccess sets it); only the truncated one also has an
+		// Error, and its Forwarded must stay true — that is exactly the
+		// difference this test pins.
+		if status > 0 && status < 400 {
+			att["forwarded"] = true
+		}
 		return map[string]any{
 			"ts": ts.Format(time.RFC3339Nano), "dur_ms": 10, "model": "coding",
 			"protocol": "openai-completions", "outcome": "ok",
@@ -1711,16 +1719,15 @@ func TestContextGrowthInFallback(t *testing.T) {
 		{
 			name: "usage known wins",
 			r: &ReqInfo{
-				UsageOK:  true,
-				Usage:    chatmsg.Usage{In: 1200},
-				manifest: &ctxgraph.Manifest{EstIn: 999}, // must be ignored
+				UsageInOK: true,
+				Usage:     chatmsg.Usage{In: 1200},
+				manifest:  &ctxgraph.Manifest{EstIn: 999}, // must be ignored
 			},
 			want: 1200,
 		},
 		{
 			name: "no usage falls back to manifest estimate",
 			r: &ReqInfo{
-				UsageOK:  false,
 				manifest: &ctxgraph.Manifest{EstIn: 3400},
 			},
 			want: 3400,
@@ -1728,7 +1735,6 @@ func TestContextGrowthInFallback(t *testing.T) {
 		{
 			name: "no usage and no manifest is zero",
 			r: &ReqInfo{
-				UsageOK:  false,
 				manifest: nil,
 			},
 			want: 0,
@@ -1745,7 +1751,7 @@ func TestContextGrowthInFallback(t *testing.T) {
 
 // TestContextGrowthFallsBackToEstimateEndToEnd drives the same fallback
 // through a full Build: a two-turn session whose FIRST turn's response has
-// no usage block (so UsageOK is false and the ratio must use the degraded
+// no usage block (so the In side is unknown and the ratio must use the degraded
 // estimate as its denominator) and whose second turn reports real usage.
 // Before the fix this produced ContextGrowth 0; now it must produce
 // last/est-first, proving the session-level metric no longer silently

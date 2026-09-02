@@ -234,7 +234,10 @@ func finishSession(s *SessionRow, info *SessionInfo) {
 // the closest available proxy for the true input count, and a calibrated
 // ratio is strictly more informative than a silent 0.
 func contextGrowthIn(r *ReqInfo) int64 {
-	if r.UsageOK {
+	// In-side gate: the ratio measures the input baseline, so only the In
+	// side of the usage ledger counts as known (see
+	// chatmsg.ExtractUsageSides for the side rule).
+	if r.UsageInOK {
 		return r.Usage.In
 	}
 	if r.manifest != nil {

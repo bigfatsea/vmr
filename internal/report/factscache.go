@@ -35,6 +35,27 @@ type attemptFacts struct {
 	ErrorClass  string   `json:"error_class,omitempty"`
 	Norm        []string `json:"norm,omitempty"`
 	DurMS       int64    `json:"dur_ms,omitempty"`
+	// Forwarded is the router's authoritative "I charged quota for this"
+	// signal (audit.Attempt.Forwarded, set by router.forwardSuccess). On
+	// new-format records this is the only signal IsForwarded needs; on
+	// pre-v4 records (cache entries written before this field existed) the
+	// legacy rule (Response present, Status<400, ErrorClass=="") is the
+	// fallback — see IsForwarded's doc comment for why.
+	Forwarded bool `json:"forwarded,omitempty"`
+}
+
+// IsForwarded mirrors audit.Attempt.IsForwarded's exact-vs-legacy rule:
+// a true Forwarded is authoritative; a false one falls back to the
+// pre-v4 fallback (a < 400 response with no error class). New-format
+// softblock records (ErrorClass=="content" on a < 400 response) never
+// satisfy the fallback, so they are correctly excluded. Do not re-derive
+// this condition at each call site — the predicate exists exactly to
+// keep that decision in one place.
+func (a attemptFacts) IsForwarded() bool {
+	if a.Forwarded {
+		return true
+	}
+	return a.HasResponse && a.Status < 400 && a.ErrorClass == ""
 }
 
 // recordFacts is one audit.Record's cache-worthy extraction result: every
@@ -108,7 +129,7 @@ func extractRecordFacts(arec *audit.Record, line int) recordFacts {
 			}
 		}
 	}
-	// Computed unconditionally (buildRec2 decides whether usageOK makes it
+	// Computed unconditionally (buildRec2 decides which sides need it
 	// irrelevant) — cheap relative to what caching it buys: a cache hit
 	// must never need arec again for any reason, or the whole point of
 	// caching this file is lost.
@@ -130,6 +151,12 @@ func attemptFactsFrom(attempts []audit.Attempt) []attemptFacts {
 		af := attemptFacts{
 			Endpoint: a.Endpoint, Error: a.Error,
 			ErrorClass: reqdetail.AttemptErrorClass(a), Norm: a.Norm, DurMS: a.DurMS,
+			// Forwarded carries the router's authoritative signal forward
+			// into the cache so a cache hit reproduces the same Forwarded
+			// count without having to re-derive from the legacy fallback.
+			// pre-v4 cache entries (no Forwarded field) fall back to
+			// IsForwarded's legacy rule at read time.
+			Forwarded: a.Forwarded,
 		}
 		if a.Response != nil {
 			af.HasResponse = true

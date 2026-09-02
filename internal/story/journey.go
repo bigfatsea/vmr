@@ -590,10 +590,12 @@ func extractEntities(text string) []string { return chatmsg.ExtractEntities(text
 // stopped appearing here versus which survived.
 func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgraph.Manifest, curMsgs []chatmsg.Message) *CompactionInfo {
 	info := &CompactionInfo{}
-	if predManifest.UsageOK {
+	// Token counts are In-side quantities (context size before/after), so
+	// they gate on the In side of the usage ledger.
+	if predManifest.UsageInOK {
 		info.TokensBefore = predManifest.Usage.In
 	}
-	if curManifest.UsageOK {
+	if curManifest.UsageInOK {
 		info.TokensAfter = curManifest.Usage.In
 	}
 

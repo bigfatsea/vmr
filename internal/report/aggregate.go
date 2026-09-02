@@ -52,9 +52,10 @@ type rec2 struct {
 	streamMS                 int64
 	streamOK                 bool
 	usage                    chatmsg.Usage
-	usageOK                  bool
-	// estInFresh/estOut hold the degraded byte-count estimate when usage
-	// couldn't be sniffed (usageOK false); both 0 otherwise. See
+	usageInOK, usageOutOK    bool
+	// estInFresh/estOut hold the degraded byte-count estimate for the side
+	// whose usage couldn't be sniffed (usageInOK/usageOutOK false on that
+	// side); both 0 on a fully-sniffed record. See
 	// chatmsg.EstimateDegradedTokens.
 	estInFresh, estOut       int64
 	msgs                     int

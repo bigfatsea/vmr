@@ -13,7 +13,6 @@ import (
 	"bytes"
 
 	"vmr/internal/chatmsg"
-	"vmr/internal/core"
 )
 
 // usageFieldMarker is the cheap gate for Quota-Aware Routing's usage
@@ -23,11 +22,6 @@ import (
 // "cheap substring gate before an expensive parse" idiom modelFieldPattern
 // and the other markers in this package already use.
 var usageFieldMarker = []byte(`"usage"`)
-
-// messageStartMarker identifies Anthropic's message_start SSE event, whose
-// usage object is the INPUT side of the ledger plus a placeholder output
-// count (see usageBlockSides for why that placeholder must never mark the
-// output side seen).
 var messageStartMarker = []byte(`"type":"message_start"`)
 
 // noteUsage looks for a "usage" object in b and folds it into the running
@@ -40,6 +34,16 @@ var messageStartMarker = []byte(`"type":"message_start"`)
 // nothing else; only an event that actually mentions "usage" pays for a
 // JSON parse — here two, one block-local (for side classification) and one
 // folded into the accumulator.
+//
+// The per-block side classification is delegated to chatmsg's
+// ExtractUsageSides (the single source of truth for the "did this side
+// actually get reported" rule, including the Anthropic message_start
+// placeholder suppression) rather than re-deriving it here. The merged
+// accumulator still uses MergeUsageWithProtocol — its per-side max rule
+// (see mergeUsage's doc comment) is what keeps the two sides from leaking
+// across events; the side booleans ride the same event-local parse
+// ExtractUsageSides performed, so Usage() and UsageSides() can never
+// disagree about whether a side was seen.
 func (s *stream) noteUsage(b []byte) {
 	if !bytes.Contains(b, usageFieldMarker) {
 		return
@@ -50,11 +54,10 @@ func (s *stream) noteUsage(b []byte) {
 		if !bytes.Contains(ev, usageFieldMarker) {
 			continue
 		}
-		du := chatmsg.MergeUsageWithProtocol(ev, chatmsg.Usage{}, s.protocol)
+		_, evInOK, evOutOK := chatmsg.ExtractUsageSides(ev, s.protocol)
 		s.usage = chatmsg.MergeUsageWithProtocol(ev, s.usage, s.protocol)
-		inSeen, outSeen := usageBlockSides(ev, s.protocol, du)
-		s.usageInSeen = s.usageInSeen || inSeen
-		s.usageOutSeen = s.usageOutSeen || outSeen
+		s.usageInSeen = s.usageInSeen || evInOK
+		s.usageOutSeen = s.usageOutSeen || evOutOK
 	}
 }
 
@@ -81,28 +84,6 @@ func splitEvents(b []byte) [][]byte {
 		}
 		b = b[i+len(eventSep):]
 	}
-}
-
-// usageBlockSides classifies which sides of the usage ledger ONE
-// usage-bearing SSE event (or a whole non-SSE body) actually carries, from
-// the event-local parse (du) and the event's own structure. Anthropic's
-// stream splits the two sides across events: message_start holds the input
-// counts plus a placeholder
-// output_tokens (~1) that is not a real generation total, while
-// message_delta holds the cumulative real output. Marking the output side
-// seen from message_start would let a stream truncated before the first
-// message_delta bill its ~1 output as an exact count with estimated=0 —
-// exactly the "partial usage masquerading as precise" failure this split
-// exists to prevent (see UsageSides). Every other shape — full non-SSE
-// bodies (both sides in one usage object) and the OpenAI family (a final
-// usage chunk carrying both totals) — is classified from the parsed values;
-// a gateway that omits the message_start type marker degrades to that same
-// generic rule, i.e. the pre-split behavior.
-func usageBlockSides(b []byte, protocol string, du chatmsg.Usage) (inSeen, outSeen bool) {
-	if protocol == core.ProtocolAnthropicMessages && bytes.Contains(b, messageStartMarker) {
-		return du.In > 0, false
-	}
-	return du.In > 0, du.Out > 0
 }
 
 // Usage returns the token usage extracted from this response so far; ok is

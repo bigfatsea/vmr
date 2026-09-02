@@ -175,7 +175,11 @@ type StepStructure struct {
 	DurMS    int64         `json:"dur_ms,omitempty"`
 	TTFTMS   int64         `json:"ttft_ms,omitempty"`
 	Usage    chatmsg.Usage `json:"usage"`
-	UsageOK  bool          `json:"usage_ok,omitempty"`
+	// Per-side usage-ledger flags (see chatmsg.ExtractUsageSides) — the
+	// old single usage_ok conflated a real output total with Anthropic's
+	// message_start placeholder.
+	UsageInOK  bool `json:"usage_in_ok,omitempty"`
+	UsageOutOK bool `json:"usage_out_ok,omitempty"`
 
 	Edit       *EditRef       `json:"edit,omitempty"`
 	StitchEdge *StitchRef     `json:"stitch_edge,omitempty"`
@@ -256,7 +260,8 @@ func buildStepStructure(steps []*Step, i int, s *Step) StepStructure {
 		ss.DurMS = s.Manifest.DurMS
 		ss.TTFTMS = s.Manifest.TTFTMS
 		ss.Usage = s.Manifest.Usage
-		ss.UsageOK = s.Manifest.UsageOK
+		ss.UsageInOK = s.Manifest.UsageInOK
+		ss.UsageOutOK = s.Manifest.UsageOutOK
 	}
 	if s.Edge != nil {
 		ss.Edit = &EditRef{Kind: s.Edge.Kind.String(), LCP: s.Edge.LCP, Coverage: s.Edge.Coverage}

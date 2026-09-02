@@ -40,7 +40,12 @@ import (
 // turns used to re-hash those messages and fracture lineages with
 // phantom edits. Cached v5 manifests carry marker-influenced Keys and
 // must not be reused, hence the bump.
-const CacheSchemaVersion = 6
+// v7 (2026-09): Manifest's single UsageOK splits into UsageInOK/UsageOutOK
+// (per-side usage-ledger tracking; see chatmsg.ExtractUsageSides) and
+// EstIn/EstOut become per-side fills. A cached v6 manifest decodes with
+// both OK flags false and would silently degrade every side to the
+// estimate, so cached v6 entries must not be reused — hence the bump.
+const CacheSchemaVersion = 7
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

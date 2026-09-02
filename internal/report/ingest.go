@@ -24,13 +24,19 @@ func (s *TrafficStats) Ingest(rc *rec2) {
 	default:
 		s.Errors++
 	}
-	if rc.usageOK {
+	// In-side sums gate on usageInOK, Out-side on usageOutOK (see
+	// chatmsg.ExtractUsageSides for the side rule); TokensKnown is the
+	// cache-efficiency basis, and cache efficiency is an In-side ratio —
+	// so it counts In-side-known records.
+	if rc.usageInOK {
 		s.TokensIn += rc.usage.In
 		s.TokensInCached += rc.usage.CacheRead
 		s.TokensInCacheWrite += rc.usage.CacheWrite
+		s.TokensKnown++
+	}
+	if rc.usageOutOK {
 		s.TokensOut += rc.usage.Out
 		s.TokensReasoning += rc.usage.Reasoning
-		s.TokensKnown++
 	}
 	if rc.durMS > 0 {
 		s.RequestsWithDur++
@@ -71,7 +77,7 @@ func (r *Row) Ingest(rc *rec2) {
 		if rc.durMS > r.DurMSMax {
 			r.DurMSMax = rc.durMS
 		}
-		if rc.usageOK {
+		if rc.usageOutOK {
 			r.tokDurMS += rc.durMS
 		}
 	}
@@ -139,11 +145,14 @@ func (h *HourRow) Ingest(rc *rec2) {
 // already.
 func (e *EndpointRow) IngestAttempt(a attemptFacts) {
 	e.Attempts++
-	// Forwarded is OK's condition WITHOUT `Error == ""` — see its own
-	// doc comment (rows.go): a truncated 2xx still got forwarded and
-	// still got charged, so only this count reproduces the router's
-	// requests-metric quota charging exactly.
-	if a.HasResponse && a.Status < 400 {
+	// Forwarded is the router's exact "I charged quota for this" signal —
+	// see Attempt.IsForwarded's doc comment. The predicate handles the
+	// pre-v4 historical format (no Forwarded field, so fall back to a < 400
+	// response with no error class) AND the new format's authoritative
+	// boolean. Do not re-derive the condition here: that is exactly the
+	// softblock / truncated-stream / null-response double-counting bug this
+	// field was added to fix.
+	if a.IsForwarded() {
 		e.Forwarded++
 	}
 	if a.Error == "" && a.HasResponse && a.Status < 400 {
@@ -180,22 +189,30 @@ func (e *EndpointRow) IngestRequest(rc *rec2) {
 	if rc.outcome == "ok" {
 		e.RequestsOK++
 	}
-	if rc.usageOK {
+	if rc.usageInOK {
 		e.TokensIn += rc.usage.In
 		e.TokensInCached += rc.usage.CacheRead
 		e.TokensInCacheWrite += rc.usage.CacheWrite
+		e.inToks = append(e.inToks, rc.usage.In)
+	}
+	if rc.usageOutOK {
 		e.TokensOut += rc.usage.Out
 		e.TokensReasoning += rc.usage.Reasoning
-		e.TokensKnown++
-		e.inToks = append(e.inToks, rc.usage.In)
 		e.outToks = append(e.outToks, rc.usage.Out)
-	} else if rc.estInFresh > 0 || rc.estOut > 0 {
-		// Usage was never sniffed: carry the same degraded estimate the
-		// router charged, in its own fields (see EndpointRow's doc
-		// comment for why these must not merge into TokensIn*/TokensOut).
+	}
+	if rc.usageInOK {
+		e.TokensKnown++
+	}
+	if !rc.usageInOK || !rc.usageOutOK {
+		// Usage was never sniffed on at least one side: carry the same
+		// degraded estimate the router charged for that side, in its own
+		// fields (see EndpointRow's doc comment for why these must not
+		// merge into TokensIn*/TokensOut).
 		e.TokensInFreshEst += rc.estInFresh
 		e.TokensOutEst += rc.estOut
-		e.TokensEstimated++
+		if rc.estInFresh > 0 || rc.estOut > 0 {
+			e.TokensEstimated++
+		}
 	}
 	if rc.ttftMS > 0 {
 		e.TTFTKnown++
@@ -225,8 +242,12 @@ func (e *EndpointRow) IngestRequest(rc *rec2) {
 // slice on every streaming/timed record for no reader.
 func (c *ClientRow) Ingest(rc *rec2) {
 	c.TrafficStats.Ingest(rc)
-	if rc.usageOK {
+	// Percentile samples are per side, so each side's sample joins only
+	// when that side is known (see chatmsg.ExtractUsageSides).
+	if rc.usageInOK {
 		c.inToks = append(c.inToks, rc.usage.In)
+	}
+	if rc.usageOutOK {
 		c.outToks = append(c.outToks, rc.usage.Out)
 	}
 }

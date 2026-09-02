@@ -214,7 +214,8 @@ type EndpointsFact struct {
 }
 
 // CachePoint is one Step's prompt-cache hit ratio (CacheRead/In); 0 when In
-// is 0 or usage wasn't reported (UsageOK false) for that step.
+// is 0 or the In side of the usage ledger wasn't reported
+// (UsageInOK false) for that step.
 type CachePoint struct {
 	Seq   int     `json:"seq"`
 	Ratio float64 `json:"ratio"`
@@ -396,8 +397,9 @@ func sameSet(a, b []string) bool {
 func cacheStats(j *Journey) CacheStats {
 	var series []CachePoint
 	for _, s := range journeySteps(j) {
+		// Cache ratios are In-side quantities (cacheRead/In).
 		u := s.Manifest.Usage
-		if !s.Manifest.UsageOK || u.In <= 0 {
+		if !s.Manifest.UsageInOK || u.In <= 0 {
 			continue
 		}
 		series = append(series, CachePoint{Seq: s.Seq, Ratio: float64(u.CacheRead) / float64(u.In)})

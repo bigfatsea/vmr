@@ -16,7 +16,7 @@ func rf(v float64) *float64 { return &v }
 // now produce a strictly higher $ figure than the same usage priced with
 // cache_read excluded.
 func TestCostFor_IncludesCacheRead(t *testing.T) {
-	rc := &rec2{usageOK: true}
+	rc := &rec2{usageInOK: true, usageOutOK: true}
 	rc.usage.In = 1_000_000
 	rc.usage.CacheRead = 500_000
 	rc.usage.Out = 100_000
@@ -41,7 +41,7 @@ func TestCostFor_IncludesCacheRead(t *testing.T) {
 }
 
 func TestCostFor_MissingRateComponent_TreatedAsZero(t *testing.T) {
-	rc := &rec2{usageOK: true}
+	rc := &rec2{usageInOK: true, usageOutOK: true}
 	rc.usage.In = 1_000_000
 	rate := pricing.Rate{InFresh: rf(2.0)} // everything else nil
 	got, _ := costFor(rate, rc)
@@ -58,7 +58,7 @@ func TestCostFor_MissingRateComponent_TreatedAsZero(t *testing.T) {
 // it prices the same degraded byte-count estimate (rc.estInFresh/rc.estOut)
 // internal/router/quota.go's tokenCharge degraded branch charges.
 func TestCostFor_NoUsage_PricesDegradedEstimate(t *testing.T) {
-	rc := &rec2{usageOK: false, estInFresh: 1_000_000, estOut: 500_000}
+	rc := &rec2{estInFresh: 1_000_000, estOut: 500_000}
 	rate := pricing.Rate{InFresh: rf(2.0), CacheRead: rf(0.5), CacheWrite: rf(1.0), Out: rf(4.0)}
 	got, estimated := costFor(rate, rc)
 	if !estimated {
@@ -73,7 +73,7 @@ func TestCostFor_NoUsage_PricesDegradedEstimate(t *testing.T) {
 }
 
 func TestCostFor_NoUsageNoEstimate_ReturnsZero(t *testing.T) {
-	rc := &rec2{usageOK: false} // estInFresh/estOut both zero: e.g. a replay record with no response at all
+	rc := &rec2{} // estInFresh/estOut both zero: e.g. a replay record with no response at all
 	rate := pricing.Rate{InFresh: rf(999)}
 	got, estimated := costFor(rate, rc)
 	if !estimated {
