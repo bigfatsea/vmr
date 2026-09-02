@@ -316,6 +316,24 @@ func TestStore_LoadFile_NullBucketRejected(t *testing.T) {
 	}
 }
 
+// TestStore_LoadFile_NilAccountsRejected pins the top-level half of
+// validateLoadedShape: `accounts: null` (or the key missing entirely) is
+// also structural damage, not an empty ledger to silently adopt — Flush
+// never writes either shape (the field has no omitempty), so a nil
+// top-level map can only come from a hand-edited or damaged file.
+func TestStore_LoadFile_NilAccountsRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	for _, body := range []string{`{"version":1,"accounts":null}`, `{"version":1}`} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", body, err)
+		}
+		if _, err := LoadFile(path); err == nil {
+			t.Errorf("LoadFile accepted %s, want an error", body)
+		}
+	}
+}
+
 // TestStore_LoadFile_WrongVersionRejected pins R66: a version stamp that is
 // never validated is worse than none — refuse to adopt an unknown shape.
 func TestStore_LoadFile_WrongVersionRejected(t *testing.T) {
