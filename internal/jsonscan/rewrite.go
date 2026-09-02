@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"strconv"
 )
 
 var (
@@ -30,7 +29,17 @@ var (
 // syntax problem) fall back to the generic parse-and-rebuild path, which
 // handles those shapes the same way, including adding the key when absent.
 func RewriteModel(raw json.RawMessage, model string) ([]byte, error) {
-	mv := strconv.AppendQuote(make([]byte, 0, len(model)+2), model)
+	// MarshalNoEscape, NOT strconv.AppendQuote: the latter is a Go string
+	// literal escaper and emits sequences like \xba / \a for non-ASCII
+	// control bytes, which RFC 8259 JSON explicitly disallows. The
+	// downstream "rewritten bytes" are then spliced into a real JSON request
+	// body, so producing Go-literal-but-not-JSON escapes there would make
+	// the whole request body malformed and trigger an upstream 400. This
+	// was the failure mode FuzzRewriteModel caught in 2026-09 (review P-01).
+	mv, err := MarshalNoEscape(model)
+	if err != nil {
+		return nil, err
+	}
 	ranges, ok := TopLevelValues(raw, modelKeyLiteral)
 	if !ok || len(ranges) == 0 {
 		return rewriteModelGeneric(raw, mv)
