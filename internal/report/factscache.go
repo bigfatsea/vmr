@@ -129,7 +129,7 @@ func extractRecordFacts(arec *audit.Record, line int) recordFacts {
 			}
 		}
 	}
-	// Computed unconditionally (buildRec2 decides whether usageOK makes it
+	// Computed unconditionally (buildRec2 decides which sides need it
 	// irrelevant) — cheap relative to what caching it buys: a cache hit
 	// must never need arec again for any reason, or the whole point of
 	// caching this file is lost.

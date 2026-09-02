@@ -48,8 +48,11 @@ func (sc *stickyCollector) add(rc *rec2) {
 	}
 	sc.bySession[rc.sessionID] = append(sc.bySession[rc.sessionID], stickyEntry{
 		seq: rc.sessSeq, endpoint: rc.endpoint, model: rc.model, protocol: rc.protocol,
+		// Sticky/cache-efficiency is entirely an In-side metric (cached/
+		// fresh/cacheWrite are all In-side ledger fields), so `known`
+		// gates on the In side only.
 		cached: rc.usage.CacheRead, fresh: rc.usage.Fresh(), cacheWrite: rc.usage.CacheWrite,
-		known: rc.usageOK,
+		known: rc.usageInOK,
 	})
 }
 

@@ -8,12 +8,25 @@ import (
 )
 
 // costFor computes an estimated cost for a record using pricing.Rate.Cost.
-// Falls back to estimating based on input/output token byte counts when exact usage was not reported.
+// Per-side basis, mirroring router.TokenCountersSides: a side the upstream
+// reported is priced from its real value; a missing side falls back to the
+// degraded estimate (In charged entirely to Fresh, Out max'd with the
+// placeholder the usage object may still carry). `estimated` is true when
+// ANY side came from an estimate — mixed-basis pricing says so, it does
+// not masquerade as exact.
 func costFor(pr pricing.Rate, rc *rec2) (c float64, estimated bool) {
-	if rc.usageOK {
-		return pr.Cost(rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite, rc.usage.Out), false
+	var fresh, cacheRead, cacheWrite, out int64
+	if rc.usageInOK {
+		fresh, cacheRead, cacheWrite = rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite
+	} else {
+		fresh = rc.estInFresh
 	}
-	return pr.Cost(rc.estInFresh, 0, 0, rc.estOut), true
+	if rc.usageOutOK {
+		out = rc.usage.Out
+	} else {
+		out = max(rc.usage.Out, rc.estOut)
+	}
+	return pr.Cost(fresh, cacheRead, cacheWrite, out), !rc.usageInOK || !rc.usageOutOK
 }
 
 // accumulateCost prices rc against every CostEstimate bucket it applies to

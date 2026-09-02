@@ -103,9 +103,12 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 		case a.status >= 400:
 			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"upstream %d","error_class":"rate_limit"`, a.status, a.status)
 		case a.truncated:
-			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"truncated: unexpected EOF","error_class":"truncated"`, a.status)
+			// New-format real shape: forwardSuccess sets Forwarded BEFORE
+			// SetTruncated runs, so a mid-stream-cut 2xx keeps forwarded:true
+			// (and the router charged it — see parityAttempt.forwarded).
+			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"truncated: unexpected EOF","error_class":"truncated","forwarded":true`, a.status)
 		default:
-			fields += fmt.Sprintf(`,"response":{"status":%d}`, a.status)
+			fields += fmt.Sprintf(`,"response":{"status":%d},"forwarded":true`, a.status)
 		}
 		atts = append(atts, "{"+fields+"}")
 	}

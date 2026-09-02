@@ -57,9 +57,9 @@ func TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel(t *testing.T
 
 func TestComputeModelUsage_SingleModelHasNoSwitches(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
 			Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
-		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 200, Out: 20}},
+		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 200, Out: 20}},
 			Attempts: []AttemptFact{{Provider: "p1", Model: "m1"}}},
 	}
 	stats, switches := computeModelUsage(steps)
@@ -108,7 +108,7 @@ func TestComputeModelUsage_NoFailoverMarkerOnSingleAttemptStep(t *testing.T) {
 // up with Steps counted, even though it contributed no tokens.
 func TestComputeModelUsage_FailedOverFromEndpointIsVisible(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 100, Out: 10}},
 			Attempts: []AttemptFact{
 				{Provider: "p1", Model: "m1"}, // failed over away from
 				{Provider: "p2", Model: "m2"}, // succeeded here
@@ -195,9 +195,9 @@ func TestComputeModelUsage_UnresolvableStepsContributeNothing(t *testing.T) {
 // byte-different journey-<id>.json/.md.
 func TestComputeModelUsage_DeterministicTieBreak(t *testing.T) {
 	steps := []*Step{
-		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100}},
+		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 100}},
 			Attempts: []AttemptFact{{Provider: "zeta", Model: "m"}}},
-		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageOK: true, Usage: chatmsg.Usage{In: 100}},
+		{Seq: 2, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 100}},
 			Attempts: []AttemptFact{{Provider: "alpha", Model: "m"}}},
 	}
 	stats, _ := computeModelUsage(steps)

@@ -44,12 +44,14 @@ func buildRequestRow(rc *rec2) RequestRow {
 		Path:       rc.path,
 		Line:       rc.line,
 	}
-	if rc.usageOK {
+	if rc.usageInOK {
 		rr.TokensIn = rc.usage.In
 		rr.TokensInCached = rc.usage.CacheRead
 		rr.TokensInFresh = rc.usage.Fresh()
-		rr.TokensOut = rc.usage.Out
 		rr.CacheEff = cacheEff(rc.usage.CacheRead, rr.TokensInFresh)
+	}
+	if rc.usageOutOK {
+		rr.TokensOut = rc.usage.Out
 	}
 	return rr
 }
@@ -132,7 +134,8 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 	// join ReqInfo (grouping + expensive features it already computed)
 	if ri != nil {
 		r.usage = ri.Usage
-		r.usageOK = ri.UsageOK
+		r.usageInOK = ri.UsageInOK
+		r.usageOutOK = ri.UsageOutOK
 		r.finish = ri.Finish
 		r.truncated = r.truncated || ri.Truncated
 		r.fallbacks = ri.Fallbacks
@@ -154,8 +157,17 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 		r.newInstruction = ri.NewInstruction
 		r.workloadClass = workloadClassOf(ri)
 	}
-	if !r.usageOK && r.endpoint != "" {
-		r.estInFresh, r.estOut = rf.EstInFresh, rf.EstOut
+	// Per-side degraded estimate: fill only the side whose usage is
+	// missing, and only when an endpoint actually served the request (same
+	// gate as before — nothing served means nothing was charged).
+	if r.endpoint != "" {
+		estIn, estOut := rf.EstInFresh, rf.EstOut
+		if !r.usageInOK {
+			r.estInFresh = estIn
+		}
+		if !r.usageOutOK {
+			r.estOut = estOut
+		}
 	}
 	return r
 }
@@ -235,8 +247,11 @@ func buildCompactions(sess *SessionAnalysis) []CompactionRow {
 		row := CompactionRow{
 			TS: c.TS.Format(time.RFC3339), Summarizes: c.Summarizes, ContinuesTo: c.ContinuesTo,
 		}
-		if c.UsageOK {
-			row.TokensIn, row.TokensOut = c.Usage.In, c.Usage.Out
+		if c.UsageInOK {
+			row.TokensIn = c.Usage.In
+		}
+		if c.UsageOutOK {
+			row.TokensOut = c.Usage.Out
 		}
 		survived := map[string]bool{}
 		for _, e := range chatmsg.ExtractEntities(c.respText) {

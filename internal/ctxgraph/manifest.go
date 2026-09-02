@@ -53,12 +53,25 @@ type Manifest struct {
 	DurMS          int64         `json:"dur_ms,omitempty"`
 	TTFTMS         int64         `json:"ttft_ms,omitempty"`
 	Usage          chatmsg.Usage `json:"usage"`
-	UsageOK        bool          `json:"usage_ok,omitempty"`
+	// UsageInOK/UsageOutOK report which SIDES of the usage ledger the
+	// upstream actually reported (see chatmsg.ExtractUsageSides for the
+	// side rule — Anthropic's message_start output_tokens is a ~1
+	// placeholder that must never count as a real output total). The old
+	// single UsageOK bool conflated the two: a stream truncated after
+	// message_start has real input usage and no output usage, and any
+	// whole-record flag either bills the placeholder as exact (flag true)
+	// or discards the real input counts (flag false). Consumers price
+	// per side: side ok → that side's Usage value; side missing → that
+	// side's Est value.
+	UsageInOK  bool `json:"usage_in_ok,omitempty"`
+	UsageOutOK bool `json:"usage_out_ok,omitempty"`
 
-	// EstIn/EstOut are the DEGRADED token estimate, set only when UsageOK is
-	// false — the upstream reported no usage, so tokens are estimated from
-	// the router's own pre-routing count (audit.Facts.EstimatedTokens) or,
-	// failing that, from body size. Both zero when usage is known.
+	// EstIn/EstOut are the DEGRADED token estimate, set per side only
+	// when THAT side's usage is missing (UsageInOK/UsageOutOK false) —
+	// the upstream reported nothing on that side, so tokens are
+	// estimated from the router's own pre-routing count
+	// (audit.Facts.EstimatedTokens) or, failing that, from body size.
+	// The missing side's estimate is 0 when usage for that side is known.
 	//
 	// They exist so a journey's $ line and the macro report's $ column price
 	// the same records: internal/report has always priced these estimated
@@ -144,23 +157,29 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		ClientKeyTag:   rec.ClientKeyTag,
 	}
 	if rec.Client.Response != nil {
-		m.Usage, m.UsageOK = chatmsg.ExtractUsageWithProtocol(rec.Client.Response.Body, rec.Protocol)
+		m.Usage, m.UsageInOK, m.UsageOutOK = chatmsg.ExtractUsageSides(rec.Client.Response.Body, rec.Protocol)
 	}
-	if !m.UsageOK {
-		// Only computed when the upstream reported nothing: a manifest whose
-		// usage IS known must never carry a competing estimate that some
-		// later consumer picks up by accident. Shared implementation with
-		// report's own degraded estimate (Facts.EstimatedTokens when the
-		// router already computed one, a body-size estimate otherwise) —
-		// see chatmsg.EstimateDegradedTokens for why one function and not
-		// two: report and story must price the same record on the same
-		// basis, and a compile-time shared call is the only way that can't
-		// drift.
+	if !m.UsageInOK || !m.UsageOutOK {
+		// Only computed for the sides the upstream reported nothing: a
+		// manifest whose usage IS known on a side must never carry a
+		// competing estimate that some later consumer picks up by accident.
+		// Shared implementation with report's own degraded estimate
+		// (Facts.EstimatedTokens when the router already computed one, a
+		// body-size estimate otherwise) — see chatmsg.EstimateDegradedTokens
+		// for why one function and not two: report and story must price the
+		// same record on the same basis, and a compile-time shared call is
+		// the only way that can't drift.
 		var respBody any
 		if rec.Client.Response != nil {
 			respBody = rec.Client.Response.Body
 		}
-		m.EstIn, m.EstOut = chatmsg.EstimateDegradedTokens(rec.Facts, rec.Client.Request.Body, respBody)
+		estIn, estOut := chatmsg.EstimateDegradedTokens(rec.Facts, rec.Client.Request.Body, respBody)
+		if !m.UsageInOK {
+			m.EstIn = estIn
+		}
+		if !m.UsageOutOK {
+			m.EstOut = estOut
+		}
 	}
 	if tp := rec.Client.Request.Headers.Get("Traceparent"); tp != "" {
 		if parts := strings.Split(tp, "-"); len(parts) >= 2 {

@@ -82,7 +82,7 @@ func TestManifestJSONGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"path":"vmr-audit-2026-09-02.jsonl","line":7,"req":"vmr-audit-2026-09-02.jsonl:7","ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","endpoint":"anthropic-messages:prov-a:model-a","served_endpoint":"anthropic-messages:prov-a:model-a","stream":true,"dur_ms":1234,"ttft_ms":210,"usage":{"In":100,"Out":42,"CacheRead":0,"CacheWrite":0,"Reasoning":0},"usage_ok":true,"client_key_tag":"k1","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","sys_hash":"41bb0151b24cb51793b08c05ba006c6f","has_sys":true,"lead_sys":1,"keys":["9a0bc12dd8f3a89551a7916ec9dde591","53d72162da0600d52f2e7bd974a05b79","223496d5d1ce6299c719cf35c17d60c4"],"msg_idx":[1,2,3],"sess_key":"meta:session_abc123"}`
+	want := `{"path":"vmr-audit-2026-09-02.jsonl","line":7,"req":"vmr-audit-2026-09-02.jsonl:7","ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","endpoint":"anthropic-messages:prov-a:model-a","served_endpoint":"anthropic-messages:prov-a:model-a","stream":true,"dur_ms":1234,"ttft_ms":210,"usage":{"In":100,"Out":42,"CacheRead":0,"CacheWrite":0,"Reasoning":0},"usage_in_ok":true,"usage_out_ok":true,"client_key_tag":"k1","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","sys_hash":"41bb0151b24cb51793b08c05ba006c6f","has_sys":true,"lead_sys":1,"keys":["9a0bc12dd8f3a89551a7916ec9dde591","53d72162da0600d52f2e7bd974a05b79","223496d5d1ce6299c719cf35c17d60c4"],"msg_idx":[1,2,3],"sess_key":"meta:session_abc123"}`
 	if string(got) != want {
 		t.Fatalf(`serialized Manifest shape changed:
 

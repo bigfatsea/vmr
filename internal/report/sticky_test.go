@@ -61,7 +61,7 @@ func TestStickyFirstRequestOfEachSessionIsExcluded(t *testing.T) {
 // "it switched".
 func TestStickyUngroupedRecordsAreCountedNotClassified(t *testing.T) {
 	sc := newStickyCollector()
-	sc.add(&rec2{endpoint: "epA", model: "coding", usageOK: true})
+	sc.add(&rec2{endpoint: "epA", model: "coding", usageInOK: true, usageOutOK: true})
 	sc.bySession["s1"] = []stickyEntry{stickyE(1, "epA", "coding", 0, 1), stickyE(2, "epA", "coding", 5, 5)}
 	got := sc.result()
 	if got.Ungrouped != 1 {
@@ -89,7 +89,7 @@ func TestStickySkipsRecordsWithNoServingEndpoint(t *testing.T) {
 func TestStickyFreshNeverNegative(t *testing.T) {
 	sc := newStickyCollector()
 	sc.add(&rec2{
-		endpoint: "epA", sessionID: "s1", model: "coding", usageOK: true,
+		endpoint: "epA", sessionID: "s1", model: "coding", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 10, CacheRead: 100, CacheWrite: 50},
 	})
 	if got := sc.bySession["s1"][0].fresh; got != 0 {

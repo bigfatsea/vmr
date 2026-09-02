@@ -38,7 +38,7 @@ rates:
 }
 
 func costStep(seq int, endpoint string, usageOK bool, u chatmsg.Usage) *Step {
-	return &Step{Seq: seq, Manifest: &ctxgraph.Manifest{Endpoint: endpoint, ServedEndpoint: endpoint, UsageOK: usageOK, Usage: u}}
+	return &Step{Seq: seq, Manifest: &ctxgraph.Manifest{Endpoint: endpoint, ServedEndpoint: endpoint, UsageInOK: usageOK, UsageOutOK: usageOK, Usage: u}}
 }
 
 // estStep is a step whose upstream reported NO usage — ctxgraph.BuildManifest

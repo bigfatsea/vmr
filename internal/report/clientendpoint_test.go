@@ -9,13 +9,13 @@ import (
 
 func TestClientEndpointCollectorGroupsAndSorts(t *testing.T) {
 	c := newClientEndpointCollector()
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageOK: true,
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 100, Out: 10}})
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p2:m2", usageOK: true,
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p2:m2", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 500, Out: 50}})
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageOK: true,
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 100, Out: 10}})
-	c.add(&rec2{clientKey: "agent-b", endpoint: "openai-completions:p1:m1", usageOK: true,
+	c.add(&rec2{clientKey: "agent-b", endpoint: "openai-completions:p1:m1", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 50, Out: 5}})
 	rows := c.result()
 	if len(rows) != 3 {
@@ -43,8 +43,8 @@ func TestClientEndpointCollectorGroupsAndSorts(t *testing.T) {
 // that distinction.
 func TestClientEndpointCollectorKeysByFullEndpointNotModel(t *testing.T) {
 	c := newClientEndpointCollector()
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:volcengine:deepseek-v4-flash", usageOK: true, usage: chatmsg.Usage{In: 10}})
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:volcengine2:deepseek-v4-flash", usageOK: true, usage: chatmsg.Usage{In: 20}})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:volcengine:deepseek-v4-flash", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 10}})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:volcengine2:deepseek-v4-flash", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 20}})
 	rows := c.result()
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (same model, two distinct accounts must not merge)", len(rows))
@@ -53,8 +53,8 @@ func TestClientEndpointCollectorKeysByFullEndpointNotModel(t *testing.T) {
 
 func TestClientEndpointCollectorSkipsEmptyKeys(t *testing.T) {
 	c := newClientEndpointCollector()
-	c.add(&rec2{clientKey: "", endpoint: "openai-completions:p1:m1", usageOK: true, usage: chatmsg.Usage{In: 10}})
-	c.add(&rec2{clientKey: "agent-a", endpoint: "", usageOK: true, usage: chatmsg.Usage{In: 10}})
+	c.add(&rec2{clientKey: "", endpoint: "openai-completions:p1:m1", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 10}})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 10}})
 	if rows := c.result(); len(rows) != 0 {
 		t.Errorf("rows = %+v, want empty (both records missing a grouping key)", rows)
 	}
@@ -64,7 +64,7 @@ func TestClientEndpointCollectorSkipsEmptyKeys(t *testing.T) {
 // (client, endpoint) pair — it just contributes no tokens.
 func TestClientEndpointCollectorUsageNotOKCountsRequestOnly(t *testing.T) {
 	c := newClientEndpointCollector()
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageOK: false})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:p1:m1", usageInOK: false, usageOutOK: false})
 	rows := c.result()
 	if len(rows) != 1 || rows[0].Requests != 1 || rows[0].TokensIn != 0 {
 		t.Errorf("rows = %+v, want 1 request, 0 tokens", rows)
@@ -73,8 +73,8 @@ func TestClientEndpointCollectorUsageNotOKCountsRequestOnly(t *testing.T) {
 
 func TestClientEndpointCollectorDeterministicTieBreak(t *testing.T) {
 	c := newClientEndpointCollector()
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:zeta:m", usageOK: true, usage: chatmsg.Usage{In: 100}})
-	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:alpha:m", usageOK: true, usage: chatmsg.Usage{In: 100}})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:zeta:m", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 100}})
+	c.add(&rec2{clientKey: "agent-a", endpoint: "openai-completions:alpha:m", usageInOK: true, usageOutOK: true, usage: chatmsg.Usage{In: 100}})
 	rows := c.result()
 	if len(rows) != 2 || rows[0].Endpoint != "openai-completions:alpha:m" || rows[1].Endpoint != "openai-completions:zeta:m" {
 		t.Errorf("order = %v, want alpha before zeta on a token tie", rows)

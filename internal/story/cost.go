@@ -109,15 +109,33 @@ func ComputeJourneyCost(j *Journey, res *pricing.Resolver, currency string) Cost
 		if !ok {
 			continue
 		}
-		// Same basis as internal/report/cost.go's costFor: real usage when
-		// the upstream reported it, the degraded estimate otherwise. Skipping
-		// the unsniffed steps (what this did until 2026-08-31) made a
-		// journey's total quietly lower than the macro report's for the very
-		// same records, with nothing in either product saying so.
+		// Same basis as internal/report/cost.go's costFor: per side — a
+		// side the upstream reported prices from its real value, a missing
+		// side falls back to the degraded estimate (In charged entirely to
+		// Fresh, Out max'd with the placeholder the usage object may still
+		// carry). Skipping the unsniffed steps (what this did until
+		// 2026-08-31) made a journey's total quietly lower than the macro
+		// report's for the very same records; a whole-record flag would
+		// either bill the Anthropic message_start output placeholder as
+		// exact or discard the real input counts (see
+		// chatmsg.ExtractUsageSides for the side rule). A step with one
+		// real and one estimated side is honest mixed-basis pricing and
+		// counts in EstimatedSteps — the estimated side is never rendered
+		// as exact.
 		u := s.Manifest.Usage
-		c := rate.Cost(u.Fresh(), u.CacheRead, u.CacheWrite, u.Out)
-		if !s.Manifest.UsageOK {
-			c = rate.Cost(s.Manifest.EstIn, 0, 0, s.Manifest.EstOut)
+		var fresh, cacheRead, cacheWrite, out int64
+		if s.Manifest.UsageInOK {
+			fresh, cacheRead, cacheWrite = u.Fresh(), u.CacheRead, u.CacheWrite
+		} else {
+			fresh = s.Manifest.EstIn
+		}
+		if s.Manifest.UsageOutOK {
+			out = u.Out
+		} else {
+			out = max(u.Out, s.Manifest.EstOut)
+		}
+		c := rate.Cost(fresh, cacheRead, cacheWrite, out)
+		if !s.Manifest.UsageInOK || !s.Manifest.UsageOutOK {
 			fact.EstimatedSteps++
 		}
 		if !rate.Complete() {

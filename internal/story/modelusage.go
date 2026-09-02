@@ -29,10 +29,11 @@ type ModelUsageStat struct {
 	// endpoint invisible in this table entirely (only the last attempt was
 	// ever read); it now counts here too, even though it contributed no
 	// tokens (see the TokensIn/TokensInCached/TokensOut fields below,
-	// attributed only to the Step's final resolved pair and gated on
-	// Manifest.UsageOK). Read this as "how many Steps touched this
-	// upstream", not "how many Steps succeeded on it" — a Step can appear
-	// under more than one ModelUsageStat when it failed over mid-Step.
+	// attributed only to the Step's final resolved pair and gated per side
+	// on Manifest.UsageInOK/UsageOutOK). Read this as "how many Steps
+	// touched this upstream", not "how many Steps succeeded on it" — a
+	// Step can appear under more than one ModelUsageStat when it failed
+	// over mid-Step.
 	Steps int `json:"steps"`
 
 	TokensIn       int64 `json:"tokens_in"`
@@ -122,11 +123,17 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 		}
 		// Token attribution stays exactly as before: ONLY the Step's final
 		// resolved pair, never a failed-over-away-from attempt — a failed
-		// attempt has no usage to attribute.
-		if s.Manifest != nil && s.Manifest.UsageOK {
-			st.TokensIn += s.Manifest.Usage.In
-			st.TokensInCached += s.Manifest.Usage.CacheRead
-			st.TokensOut += s.Manifest.Usage.Out
+		// attempt has no usage to attribute. Per side: In counts when the
+		// In side was reported, Out when the Out side was (see
+		// chatmsg.ExtractUsageSides).
+		if s.Manifest != nil {
+			if s.Manifest.UsageInOK {
+				st.TokensIn += s.Manifest.Usage.In
+				st.TokensInCached += s.Manifest.Usage.CacheRead
+			}
+			if s.Manifest.UsageOutOK {
+				st.TokensOut += s.Manifest.Usage.Out
+			}
 		}
 
 		if havePrev && key != prevKey {
@@ -136,8 +143,9 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 				To:             key,
 				OnFailoverStep: len(s.Attempts) > 1,
 			}
-			if prevStep != nil && prevStep.Manifest != nil && prevStep.Manifest.UsageOK && prevStep.Manifest.Usage.In > 0 &&
-				s.Manifest != nil && s.Manifest.UsageOK && s.Manifest.Usage.In > 0 {
+			// Cache ratios are In-side quantities (cacheRead/In).
+			if prevStep != nil && prevStep.Manifest != nil && prevStep.Manifest.UsageInOK && prevStep.Manifest.Usage.In > 0 &&
+				s.Manifest != nil && s.Manifest.UsageInOK && s.Manifest.Usage.In > 0 {
 				sw.HasCacheData = true
 				sw.PrevCacheRatio = float64(prevStep.Manifest.Usage.CacheRead) / float64(prevStep.Manifest.Usage.In)
 				sw.CurCacheRatio = float64(s.Manifest.Usage.CacheRead) / float64(s.Manifest.Usage.In)
