@@ -216,3 +216,44 @@ func TestMessages_NonMapBody(t *testing.T) {
 		t.Errorf("ToolNames(non-map) = %v, want nil", got)
 	}
 }
+
+// TestRenderPart_AnthropicDocument locks in the "document" case: an
+// Anthropic PDF/document attachment carries a multi-MB base64 payload in
+// source.data — it must render as a compact placeholder, never fall into
+// the default branch's full JSON dump.
+func TestRenderPart_AnthropicDocument(t *testing.T) {
+	t.Parallel()
+	big := strings.Repeat("QUFB", 4096) // 16KB of base64 in the payload
+	doc := map[string]any{
+		"type": "document",
+		"source": map[string]any{
+			"type":       "base64",
+			"media_type": "application/pdf",
+			"data":       big,
+		},
+	}
+	got := RenderPart(doc)
+	if !strings.Contains(got, "application/pdf") {
+		t.Errorf("document media_type missing: %q", got)
+	}
+	if !strings.Contains(got, "~12.0KB") {
+		t.Errorf("decoded size missing: %q", got)
+	}
+	if strings.Contains(got, "QUFB") {
+		t.Errorf("base64 payload leaked into the render: %q", got)
+	}
+	if strings.Contains(got, "\n{\n") {
+		t.Errorf("document fell into the default JSON dump: %q", got)
+	}
+
+	// Through the full Messages walk: the document part renders as the
+	// compact placeholder, not the raw blob.
+	msgs := Messages(map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": []any{doc}},
+		},
+	})
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "[document application/pdf") {
+		t.Errorf("Messages with document part: %+v", msgs)
+	}
+}

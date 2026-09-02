@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1554,5 +1555,64 @@ func TestRespStream_PartialReadPreservesCapacity(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
 		t.Errorf("expected [DONE] appended at end of stream, got tail: %q", out)
+	}
+}
+
+// TestStream_OpaqueOverflowRace pins the lock for s.opaque: an ingest path
+// that flips s.opaque to true on overflow must NOT race with concurrent
+// inspection methods (OutTokens, Applied) reading it. Run with -race to
+// catch the unguarded-write/locked-read hazard this exists to prevent —
+// without the mu guards added around the two s.opaque = true sites in
+// ingest(), the writer goroutine in this test races against OutTokens()
+// running in a parallel goroutine.
+func TestStream_OpaqueOverflowRace(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		isSSE bool
+	}{
+		{"buffered overflow", false},
+		{"undecided overflow", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rs := newStream(strings.NewReader(""), "agent", "", tc.isSSE, "openai-completions", false)
+			filler := bytes.Repeat([]byte("x"), 1<<20) // 1MB, no event separator
+
+			stop := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						_ = rs.OutTokens()
+						_ = rs.Applied()
+					}
+				}
+			}()
+
+			// Drive past bufferedCap from this goroutine; this is the writer
+			// that flips s.opaque = true. Run inside the inspector loop's
+			// lifetime so the two paths overlap.
+			for i := 0; i < 40 && !rs.opaque; i++ {
+				rs.ingest(filler)
+			}
+			if !rs.opaque {
+				close(stop)
+				wg.Wait()
+				t.Fatal("expected opaque after crossing bufferedCap")
+			}
+			close(stop)
+			wg.Wait()
+
+			if got := rs.OutTokens(); got != 0 {
+				t.Errorf("OutTokens after opaque flip = %d, want 0", got)
+			}
+		})
 	}
 }

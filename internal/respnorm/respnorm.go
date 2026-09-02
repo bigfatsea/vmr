@@ -456,7 +456,9 @@ func (s *stream) ingest(b []byte) {
 		if len(s.buf) > bufferedCap {
 			// Runaway stream: give up on normalization, flush raw and
 			// degrade to opaque passthrough (= direct behavior).
+			s.mu.Lock()
 			s.opaque = true
+			s.mu.Unlock()
 			s.noteApplied("overflow_raw_passthrough")
 			s.out = append(s.out, s.buf...)
 			s.buf = nil
@@ -471,7 +473,9 @@ func (s *stream) ingest(b []byte) {
 		// as that overflow path: give up on normalization, flush raw.
 		if s.mode == modeUndecided && len(s.pending) > bufferedCap {
 			s.noteCRLFFramingIfSuspected(s.pending)
+			s.mu.Lock()
 			s.opaque = true
+			s.mu.Unlock()
 			s.noteApplied("overflow_raw_passthrough")
 			s.out = append(s.out, s.pending...)
 			s.pending = nil

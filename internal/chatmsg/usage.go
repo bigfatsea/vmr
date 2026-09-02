@@ -141,8 +141,9 @@ func MergeUsageWithProtocol(b []byte, acc Usage, protocol string) Usage {
 	return acc
 }
 
-// mergeUsage folds usage found in obj (top-level or under "message", as in
-// Anthropic's message_start) into the running totals. The max is taken per
+// mergeUsage folds usage found in obj (top-level, under "message", as in
+// Anthropic's message_start, or under "response", as in openai-responses'
+// response.completed SSE event) into the running totals. The max is taken per
 // SIDE, not per field, and the fields of one side move as a GROUP: In,
 // CacheRead and CacheWrite are mutually constrained (Anthropic reports
 // In = fresh + cacheRead + cacheWrite; Usage.Fresh() depends on it), so
@@ -152,7 +153,7 @@ func MergeUsageWithProtocol(b []byte, acc Usage, protocol string) Usage {
 // never puts both sides in one object (message_start / message_delta), so
 // an object-level max would discard the In side entirely.
 func mergeUsage(obj map[string]any, u Usage, protocol string) Usage {
-	for _, holder := range []any{obj["usage"], Nested(obj, "message", "usage")} {
+	for _, holder := range []any{obj["usage"], Nested(obj, "message", "usage"), Nested(obj, "response", "usage")} {
 		m, ok := holder.(map[string]any)
 		if !ok {
 			continue
