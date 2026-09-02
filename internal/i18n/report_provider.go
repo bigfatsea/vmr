@@ -11,6 +11,14 @@ type ProviderText struct {
 	Intro   string
 	Headers []string // provider, models, requests, success rate, fresh/cached/out, cache eff, dur mean, error rate, top error class — +cost appended conditionally
 	CostHdr func(cur string) string
+	// SkippedAttemptsNote renders the P-5-2 line under §2.5: some
+	// EndpointsAll rows carried a provider name not found in the quotas
+	// map (traffic that contributed nothing to the window recomputation).
+	// names is the first-3 unknown provider names joined by ", " (or all
+	// of them when there are 3 or fewer); more is the count of names
+	// beyond the first 3 (0 when 3 or fewer). The line is omitted by
+	// build (call sites should pre-check lastSkippedAttempts).
+	SkippedAttemptsNote func(total int, names string, more int) string
 }
 
 func Provider(lang Lang) ProviderText {
@@ -20,6 +28,12 @@ func Provider(lang Lang) ProviderText {
 			Intro:   "按上游账户（config.yaml 的 providers[].name）上卷的跨模型汇总——回答\"这个账户整体消耗多少、可靠性如何\"，而不是逐个模型手动相加。\n\n",
 			Headers: []string{"账户", "模型数", "请求", "成功率", "fresh/cached/out", "缓存效率", "均值耗时", "错误率", "主要错误类"},
 			CostHdr: func(cur string) string { return "$ 估算" + cur },
+			SkippedAttemptsNote: func(total int, names string, more int) string {
+				if more > 0 {
+					return "> 有 " + strconv.Itoa(total) + " 次请求在重算中跳过（未知账户: " + names + "，… 另有 " + strconv.Itoa(more) + " 个）"
+				}
+				return "> 有 " + strconv.Itoa(total) + " 次请求在重算中跳过（未知账户: " + names + "）"
+			},
 		}
 	}
 	return ProviderText{
@@ -27,6 +41,12 @@ func Provider(lang Lang) ProviderText {
 		Intro:   "Cross-model roll-up by upstream account (config.yaml's providers[].name) — answers \"how much did this account consume overall, and how reliable was it\" without manually summing its endpoint rows.\n\n",
 		Headers: []string{"Provider", "Models", "Requests", "Success Rate", "fresh/cached/out", "Cache Eff.", "Dur. Mean", "Error Rate", "Top Error"},
 		CostHdr: func(cur string) string { return "$ Estimate" + cur },
+		SkippedAttemptsNote: func(total int, names string, more int) string {
+			if more > 0 {
+				return "> " + strconv.Itoa(total) + " attempts skipped (unknown provider: " + names + ", … +" + strconv.Itoa(more) + " more)"
+			}
+			return "> " + strconv.Itoa(total) + " attempts skipped (unknown provider: " + names + ")"
+		},
 	}
 }
 

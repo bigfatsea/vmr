@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 )
 
 func TestBuildProviderQuotaRows_Empty(t *testing.T) {
@@ -617,7 +618,7 @@ func TestRenderSkippedAttemptsNote(t *testing.T) {
 	lastSkippedAttempts = 2
 	lastSkippedProviders = []string{"ghost-a", "ghost-b"}
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
 	want := "> 2 attempts skipped (unknown provider: ghost-a, ghost-b)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -631,7 +632,7 @@ func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
 	lastSkippedAttempts = 9
 	lastSkippedProviders = []string{"p1", "p2", "p3", "p4", "p5"}
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
 	want := "> 9 attempts skipped (unknown provider: p1, p2, p3, … +2 more)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -643,7 +644,7 @@ func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
 func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
 	resetSkipInfo()
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
 	if b.Len() != 0 {
 		t.Fatalf("no-skips note = %q, want empty", b.String())
 	}

@@ -167,11 +167,11 @@ func renderContextRotSection(b *strings.Builder, buckets []ContextRotBucket, lan
 
 	// S-2 disclosures: excluded steps with no usage data, and unrecognized
 	// shape counts from chatmsg. Both are hardcoded English because
-	// internal/i18n is outside this worker's whitelist (S-2).
+	// internal/i18n is the source of truth for both lines.
 	if excluded > 0 {
-		fmt.Fprintf(b, "> %d step(s) excluded: no in-token usage data\n", excluded)
+		fmt.Fprintf(b, "%s\n", i18n.Corpus(lang).ContextRotExcludedNote(excluded))
 	}
 	if parts, holders := chatmsg.UnrecognizedShapeCounts(); parts > 0 || holders > 0 {
-		fmt.Fprintf(b, "> %d unrecognized content part(s), %d unrecognized usage holder(s)\n", parts, holders)
+		fmt.Fprintf(b, "%s\n", i18n.Corpus(lang).UnrecognizedShapeNote(int(parts), int(holders)))
 	}
 }

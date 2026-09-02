@@ -71,6 +71,7 @@ func renderProviders(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	}
 
 	renderProviderQuotaTable(w, rep, lang)
+	renderSkippedAttemptsNote(w, lang)
 }
 
 // renderProviderQuotaTable  is §2.5's "额度与消耗对照" sub-table —

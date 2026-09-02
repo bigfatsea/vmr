@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"vmr/internal/core"
+	"vmr/internal/i18n"
 	"vmr/internal/quota"
 )
 
@@ -223,18 +224,20 @@ var (
 // after the table itself; stores the data here (package-level) so the
 // renderer in section_provider.go can read it without needing to re-parse
 // the rows — see renderSkippedAttemptsNote's own doc comment.
-func renderSkippedAttemptsNote(w func(string, ...any)) {
+func renderSkippedAttemptsNote(w func(string, ...any), lang i18n.Lang) {
 	if lastSkippedAttempts == 0 {
 		return
 	}
 	names := lastSkippedProviders
+	var namesStr string
+	more := 0
 	if len(names) > 3 {
-		w("> %d attempts skipped (unknown provider: %s, %s, %s, … +%d more)\n",
-			lastSkippedAttempts, names[0], names[1], names[2], len(names)-3)
+		namesStr = strings.Join(names[:3], ", ")
+		more = len(names) - 3
 	} else {
-		w("> %d attempts skipped (unknown provider: %s)\n",
-			lastSkippedAttempts, strings.Join(names, ", "))
+		namesStr = strings.Join(names, ", ")
 	}
+	w("%s\n", i18n.Provider(lang).SkippedAttemptsNote(lastSkippedAttempts, namesStr, more))
 }
 
 // accumulateQuotaWindow folds rep.EndpointsAll into per-ref totals in each

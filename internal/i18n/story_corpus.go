@@ -39,6 +39,16 @@ type CorpusText struct {
 	ContextRotTitle    string
 	ContextRotHeader   string
 	ContextRotFootnote string
+	// ContextRotExcludedNote appears under the Context Rot table when some
+	// steps were excluded from all buckets because their in-token usage is
+	// unknown (UsageInOK=false — S-2). These would otherwise pile into the
+	// smallest "0-32k" bucket and pollute its error rate.
+	ContextRotExcludedNote func(n int) string
+	// UnrecognizedShapeNote discloses the chatmsg counter snapshot when
+	// chatmsg hit an unrecognized content part type or usage holder shape
+	// during this run (S-2 "let the silence speak"); both 0 = line omitted
+	// by the call site.
+	UnrecognizedShapeNote func(parts, holders int) string
 
 	ToolSeqTitle    string
 	ToolSeqHeader   string
@@ -83,6 +93,12 @@ func Corpus(lang Lang) CorpusText {
 			ContextRotTitle:    "## Context 增长与质量拐点（Context Rot）\n\n",
 			ContextRotHeader:   "| 上下文区间 | Step 样本数 | Finding 总数 | Finding 密度 | 错误 Step 数 | 错误率 |\n|---|---|---|---|---|---|\n",
 			ContextRotFootnote: "> 按照 Step 输入 Token 大小分桶统计。若高上下文区间出现 Finding 密度突增或错误率上升，可作为注意力衰减（Context Rot）趋势的参考；若本批语料各区间分布平稳则未观测到该趋势。错误率基于协议原生错误标记统计。\n\n",
+			ContextRotExcludedNote: func(n int) string {
+				return "> " + strconv.Itoa(n) + " 个 Step 被排除：缺少入 Token 用量数据"
+			},
+			UnrecognizedShapeNote: func(parts, holders int) string {
+				return "> " + strconv.Itoa(parts) + " 处未识别的内容块、 " + strconv.Itoa(holders) + " 处未识别的 usage 载体"
+			},
 
 			ToolSeqTitle:    "## 高频工具调用序列模式（N-gram）\n\n",
 			ToolSeqHeader:   "| 工具调用序列 | 出现频次 | 尾步错误率 |\n|---|---|---|\n",
@@ -122,9 +138,13 @@ func Corpus(lang Lang) CorpusText {
 		},
 		GroupCompFootnote: "> ⚠️ = relative change ≥ 30% and the absolute difference clears the noise floor — a rule-based \"worth a look\" flag, not a determined \"this Finding caused longer duration\" conclusion; VMR has no task-success label, so this compares duration as a proxy, not outcome.\n\n",
 
-		ContextRotTitle:    "## Context Window Scaling & Quality Inflection (Context Rot)\n\n",
-		ContextRotHeader:   "| Context Range | Step N | Finding N | Finding Density | Error Step N | Error Rate |\n|---|---|---|---|---|---|\n",
-		ContextRotFootnote: "> Bucket statistics by step input tokens. Increases in Finding density or error rate at larger context windows indicate potential context rot trends; a flat distribution indicates no such trend was observed in this batch. Error rate is computed from protocol-level error markers.\n\n",
+		ContextRotTitle:        "## Context Window Scaling & Quality Inflection (Context Rot)\n\n",
+		ContextRotHeader:       "| Context Range | Step N | Finding N | Finding Density | Error Step N | Error Rate |\n|---|---|---|---|---|---|\n",
+		ContextRotFootnote:     "> Bucket statistics by step input tokens. Increases in Finding density or error rate at larger context windows indicate potential context rot trends; a flat distribution indicates no such trend was observed in this batch. Error rate is computed from protocol-level error markers.\n\n",
+		ContextRotExcludedNote: func(n int) string { return "> " + strconv.Itoa(n) + " step(s) excluded: no in-token usage data" },
+		UnrecognizedShapeNote: func(parts, holders int) string {
+			return "> " + strconv.Itoa(parts) + " unrecognized content part(s), " + strconv.Itoa(holders) + " unrecognized usage holder(s)"
+		},
 
 		ToolSeqTitle:    "## Frequent Tool Call Sequences (N-gram)\n\n",
 		ToolSeqHeader:   "| Tool Sequence | Occurrences | Tail Step Error Rate |\n|---|---|---|\n",
