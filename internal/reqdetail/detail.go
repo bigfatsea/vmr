@@ -231,7 +231,7 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 		oh[0], oh[1], oh[2], oh[3], oh[4], oh[5], oh[6], oh[7], oh[8])
 	w("| %s | %s | %s | %s | %s | %d | %s | %s | %s |\n\n",
 		EscapeCell(DisplayModel(rec)), EscapeCell(LastEndpoint(rec)), outcomeMark(rec.Outcome),
-		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, rec.Client.Addr)
+		ms(rec.DurMS), ttft, len(rec.Attempts), stream, tok, EscapeCell(rec.Client.Addr))
 	renderFactsLine(&b, rec, t)
 
 	renderClientRequest(&b, rec, m, prev, f, t, linkEvidence)

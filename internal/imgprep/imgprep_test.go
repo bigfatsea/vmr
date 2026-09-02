@@ -576,15 +576,26 @@ func TestMalformedRequestBodyFailsOpen(t *testing.T) {
 }
 
 func TestDecompressionBombGuard(t *testing.T) {
-	// 30000x30000 = 900M declared pixels, far past maxDecodePixels, but the
-	// "file" itself is a few dozen bytes — DecodeConfig reads only IHDR.
-	huge := fakePNGHeader(t, 30000, 30000)
-	out, mime, changed, info := processImage(huge, Options{MaxPx: 512})
-	if changed || out != nil || mime != "" {
-		t.Errorf("declared-oversized image must be left alone: changed=%v", changed)
+	// Declared dimensions exceeding maxDecodePixels (16MP) must be left alone.
+	// The "file" itself is a few dozen bytes — DecodeConfig reads only IHDR.
+	cases := []struct {
+		name string
+		w, h uint32
+	}{
+		{"huge 30000x30000", 30000, 30000},
+		{"just above 16MP threshold 4001x4000", 4001, 4000},
 	}
-	if info.Downscaled {
-		t.Errorf("info = %+v, want Downscaled=false (guard fired before any resize)", info)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			huge := fakePNGHeader(t, tc.w, tc.h)
+			out, mime, changed, info := processImage(huge, Options{MaxPx: 512})
+			if changed || out != nil || mime != "" {
+				t.Errorf("declared-oversized image must be left alone: changed=%v", changed)
+			}
+			if info.Downscaled {
+				t.Errorf("info = %+v, want Downscaled=false (guard fired before any resize)", info)
+			}
+		})
 	}
 }
 

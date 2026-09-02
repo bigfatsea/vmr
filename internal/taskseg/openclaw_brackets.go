@@ -10,7 +10,7 @@ import (
 // openClawEnvelopeRe matches OpenClaw's "Conversation info (untrusted
 // metadata)" / "Sender (untrusted metadata)" JSON blocks glued onto the
 // front of real inbound messages.
-var openClawEnvelopeRe = regexp.MustCompile(`(?s)(?:Conversation info|Sender) \(untrusted metadata\):\s*` + "```" + `(?:json)?\n.*?` + "```" + `\s*`)
+var openClawEnvelopeRe = regexp.MustCompile(`(?s)(?:Conversation info|Sender)\s*\(untrusted metadata\):\s*` + "```" + `[^\r\n]*\r?\n.*?` + "```" + `\s*`)
 
 func stripOpenClawEnvelope(text string) string {
 	return strings.TrimSpace(openClawEnvelopeRe.ReplaceAllString(text, ""))

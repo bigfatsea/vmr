@@ -56,7 +56,7 @@ import (
 // adversarial image can declare huge dimensions while its encoded bytes stay
 // tiny (e.g. a flat-color PNG). Anything above this is left untouched rather
 // than decoded into memory.
-const maxDecodePixels = 64_000_000 // ~64MP, comfortably above any real screenshot/photo
+const maxDecodePixels = 16_000_000 // ~16MP, comfortably above any real screenshot/photo
 
 // jpegQuality is fixed rather than configurable: the feature's whole point is
 // "good enough to read, small enough to be cheap" — a quality knob would be a
