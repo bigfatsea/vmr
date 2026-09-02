@@ -28,7 +28,16 @@ func ReassembleSSE(raw string) *StreamSummary {
 	var reasoning, content strings.Builder
 	tools := map[int]*ToolCall{}
 	parsed := 0
-	for _, line := range strings.Split(raw, "\n") {
+	rem := raw
+	for len(rem) > 0 {
+		var line string
+		if idx := strings.IndexByte(rem, '\n'); idx >= 0 {
+			line = rem[:idx]
+			rem = rem[idx+1:]
+		} else {
+			line = rem
+			rem = ""
+		}
 		data, found := strings.CutPrefix(strings.TrimSpace(line), "data:")
 		if !found {
 			continue
@@ -43,96 +52,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 			continue
 		}
 		parsed++
-		if m, _ := obj["model"].(string); m != "" {
-			s.Model = m
-		}
-		// openai-completions chunk: choices[0].delta / finish_reason
-		if choices, _ := obj["choices"].([]any); len(choices) > 0 {
-			ch, _ := choices[0].(map[string]any)
-			if fr, _ := ch["finish_reason"].(string); fr != "" {
-				s.Finish = fr
-			}
-			delta, _ := ch["delta"].(map[string]any)
-			if t, _ := delta["content"].(string); t != "" {
-				content.WriteString(t)
-			}
-			if t, _ := delta["reasoning_content"].(string); t != "" {
-				reasoning.WriteString(t)
-			}
-			for _, raw := range toolCallDeltas(delta["tool_calls"]) {
-				tc := tools[raw.idx]
-				if tc == nil {
-					tc = &ToolCall{}
-					tools[raw.idx] = tc
-				}
-				if raw.id != "" {
-					tc.ID = raw.id
-				}
-				if raw.name != "" {
-					tc.Name = raw.name
-				}
-				tc.Args += raw.args
-			}
-			continue
-		}
-		// anthropic events, keyed by "type"
-		switch obj["type"] {
-		case "message_start":
-			if m, _ := Nested(obj, "message", "model").(string); m != "" {
-				s.Model = m
-			}
-		case "content_block_start":
-			idx := int(num(obj["index"]))
-			if cb, _ := obj["content_block"].(map[string]any); cb != nil && cb["type"] == "tool_use" {
-				name, _ := cb["name"].(string)
-				id, _ := cb["id"].(string)
-				tools[idx] = &ToolCall{ID: id, Name: name}
-			}
-		case "content_block_delta":
-			idx := int(num(obj["index"]))
-			switch d, _ := obj["delta"].(map[string]any); d["type"] {
-			case "text_delta":
-				t, _ := d["text"].(string)
-				content.WriteString(t)
-			case "thinking_delta":
-				t, _ := d["thinking"].(string)
-				reasoning.WriteString(t)
-			case "input_json_delta":
-				t, _ := d["partial_json"].(string)
-				if tc := tools[idx]; tc != nil {
-					tc.Args += t
-				}
-			}
-		case "message_delta":
-			if sr, _ := Nested(obj, "delta", "stop_reason").(string); sr != "" {
-				s.Finish = sr
-			}
-		case "response.completed":
-			// openai-responses: unlike the openai/anthropic branches above,
-			// this doesn't accumulate per-delta events — Responses' delta
-			// event field names (response.output_text.delta, .../
-			// function_call_arguments.delta, ...) aren't confirmed against
-			// real traffic yet, and guessing them risks silently
-			// mis-assembling content (worse than not trying). "completed" is
-			// the one terminal event guaranteed present and self-contained:
-			// it carries the full final Response object (nested under
-			// "response"), same "output" typed-Item array shape FinalMessage
-			// already parses for the non-streaming case — so this reuses
-			// responsesFinalMessage instead of a second implementation.
-			if resp, _ := obj["response"].(map[string]any); resp != nil {
-				if rs, ok := responsesFinalMessage(resp); ok {
-					if rs.Model != "" {
-						s.Model = rs.Model
-					}
-					if rs.Finish != "" {
-						s.Finish = rs.Finish
-					}
-					content.WriteString(rs.Content)
-					reasoning.WriteString(rs.Reasoning)
-					s.ToolCalls = append(s.ToolCalls, rs.ToolCalls...)
-				}
-			}
-		}
+		processSSEEvent(obj, s, &content, &reasoning, tools)
 	}
 	if parsed == 0 {
 		return nil
@@ -147,6 +67,99 @@ func ReassembleSSE(raw string) *StreamSummary {
 		s.ToolCalls = append(s.ToolCalls, *tools[i])
 	}
 	return s
+}
+
+func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *strings.Builder, tools map[int]*ToolCall) {
+	if m, _ := obj["model"].(string); m != "" {
+		s.Model = m
+	}
+	// openai-completions chunk: choices[0].delta / finish_reason
+	if choices, _ := obj["choices"].([]any); len(choices) > 0 {
+		ch, _ := choices[0].(map[string]any)
+		if fr, _ := ch["finish_reason"].(string); fr != "" {
+			s.Finish = fr
+		}
+		delta, _ := ch["delta"].(map[string]any)
+		if t, _ := delta["content"].(string); t != "" {
+			content.WriteString(t)
+		}
+		if t, _ := delta["reasoning_content"].(string); t != "" {
+			reasoning.WriteString(t)
+		}
+		for _, raw := range toolCallDeltas(delta["tool_calls"]) {
+			tc := tools[raw.idx]
+			if tc == nil {
+				tc = &ToolCall{}
+				tools[raw.idx] = tc
+			}
+			if raw.id != "" {
+				tc.ID = raw.id
+			}
+			if raw.name != "" {
+				tc.Name = raw.name
+			}
+			tc.Args += raw.args
+		}
+		return
+	}
+	// anthropic events, keyed by "type"
+	switch obj["type"] {
+	case "message_start":
+		if m, _ := Nested(obj, "message", "model").(string); m != "" {
+			s.Model = m
+		}
+	case "content_block_start":
+		idx := int(num(obj["index"]))
+		if cb, _ := obj["content_block"].(map[string]any); cb != nil && cb["type"] == "tool_use" {
+			name, _ := cb["name"].(string)
+			id, _ := cb["id"].(string)
+			tools[idx] = &ToolCall{ID: id, Name: name}
+		}
+	case "content_block_delta":
+		idx := int(num(obj["index"]))
+		switch d, _ := obj["delta"].(map[string]any); d["type"] {
+		case "text_delta":
+			t, _ := d["text"].(string)
+			content.WriteString(t)
+		case "thinking_delta":
+			t, _ := d["thinking"].(string)
+			reasoning.WriteString(t)
+		case "input_json_delta":
+			t, _ := d["partial_json"].(string)
+			if tc := tools[idx]; tc != nil {
+				tc.Args += t
+			}
+		}
+	case "message_delta":
+		if sr, _ := Nested(obj, "delta", "stop_reason").(string); sr != "" {
+			s.Finish = sr
+		}
+	case "response.completed":
+		// openai-responses: unlike the openai/anthropic branches above,
+		// this doesn't accumulate per-delta events — Responses' delta
+		// event field names (response.output_text.delta, .../
+		// function_call_arguments.delta, ...) aren't confirmed against
+		// real traffic yet, and guessing them risks silently
+		// mis-assembling content (worse than not trying). "completed" is
+		// the one terminal event guaranteed present and self-contained:
+		// it carries the full final Response object (nested under
+		// "response"), same "output" typed-Item array shape FinalMessage
+		// already parses for the non-streaming case — so this reuses
+		// responsesFinalMessage instead of a second implementation.
+		if resp, _ := obj["response"].(map[string]any); resp != nil {
+			if rs, ok := responsesFinalMessage(resp); ok {
+				if rs.Model != "" {
+					s.Model = rs.Model
+				}
+				if rs.Finish != "" {
+					s.Finish = rs.Finish
+				}
+				content.WriteString(rs.Content)
+				reasoning.WriteString(rs.Reasoning)
+				s.ToolCalls = append(s.ToolCalls, rs.ToolCalls...)
+			}
+		}
+	}
 }
 
 type tcDelta struct {

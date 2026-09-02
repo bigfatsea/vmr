@@ -25,9 +25,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -284,11 +286,82 @@ type chatCompletionResponse struct {
 	} `json:"choices"`
 }
 
-// callLLM sends one non-streaming chat-completions request to opts' address
-// and returns the assistant message's content. No retry, no failover, no
-// health check — a single best-effort call; the caller decides what "it
-// failed" means for the rest of the report (design doc C.7: the whole layer
-// degrades away, it never fails the command).
+func parseRetryAfter(h http.Header) time.Duration {
+	v := h.Get("Retry-After")
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func llmRetryDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		return min(retryAfter, 60*time.Second)
+	}
+	base := 100 * time.Millisecond
+	d := base * (1 << attempt)
+	jitter := time.Duration(float64(d) * (0.4*rand.Float64() - 0.2))
+	d += jitter
+	if d < 10*time.Millisecond {
+		d = 10 * time.Millisecond
+	}
+	return d
+}
+
+func doLLMRequest(ctx context.Context, client *http.Client, opts LLMOptions, data []byte) (string, time.Duration, bool, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.chatURL(), bytes.NewReader(data))
+	if err != nil {
+		return "", 0, false, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if opts.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+opts.APIKey)
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", 0, false, fmt.Errorf("request to %s: %w", opts.chatURL(), err)
+		}
+		return "", 0, true, fmt.Errorf("request to %s: %w", opts.chatURL(), err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", 0, false, fmt.Errorf("read response: %w", err)
+		}
+		return "", 0, true, fmt.Errorf("read response: %w", err)
+	}
+
+	retryAfter := parseRetryAfter(resp.Header)
+	if resp.StatusCode != http.StatusOK {
+		isRetryable := resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599)
+		return "", retryAfter, isRetryable, fmt.Errorf("%s returned %d: %s", opts.chatURL(), resp.StatusCode, truncateForError(body))
+	}
+
+	var out chatCompletionResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", 0, false, fmt.Errorf("parse response: %w", err)
+	}
+	if len(out.Choices) == 0 || out.Choices[0].Message.Content == "" {
+		return "", 0, false, fmt.Errorf("%s returned no message content", opts.chatURL())
+	}
+	return out.Choices[0].Message.Content, 0, false, nil
+}
+
+// callLLM sends a non-streaming chat-completions request to opts' address
+// with up to 2 retries on transient network errors, 429 rate limits, and 5xx
+// server errors, honoring Retry-After when supplied by the upstream.
 func callLLM(ctx context.Context, opts LLMOptions, systemPrompt, userPrompt string) (string, error) {
 	reqBody := chatCompletionRequest{
 		Model:  opts.Model,
@@ -303,38 +376,26 @@ func callLLM(ctx context.Context, opts LLMOptions, systemPrompt, userPrompt stri
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.chatURL(), bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if opts.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+opts.APIKey)
-	}
-
 	client := &http.Client{Timeout: llmHTTPTimeout}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("request to %s: %w", opts.chatURL(), err)
+	const maxRetries = 2
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		content, retryAfter, retryable, err := doLLMRequest(ctx, client, opts, data)
+		if err == nil {
+			return content, nil
+		}
+		lastErr = err
+		if !retryable || attempt == maxRetries {
+			break
+		}
+		delay := llmRetryDelay(attempt, retryAfter)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(delay):
+		}
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s returned %d: %s", opts.chatURL(), resp.StatusCode, truncateForError(body))
-	}
-
-	var out chatCompletionResponse
-	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
-	}
-	if len(out.Choices) == 0 || out.Choices[0].Message.Content == "" {
-		return "", fmt.Errorf("%s returned no message content", opts.chatURL())
-	}
-	return out.Choices[0].Message.Content, nil
+	return "", lastErr
 }
 
 func truncateForError(b []byte) string {
