@@ -768,6 +768,21 @@ func TestSanitizeMDStruct(t *testing.T) {
 		{"mid-line # is not structural", "mid-line # is not structural"},
 		{"first\n# injected\nlast", "first\n\\# injected\nlast"},
 		{"<script>alert(1)</script>", "<script>alert(1)</script>"}, // HTML is the HTML render's job, not this one
+		// R94: ordered-list markers, asterisk/plus bullets, blockquote no-space, thematic break
+		{"* item", `\* item`},
+		{"*item", "*item"}, // no space = not a list
+		{"+ item", `\+ item`},
+		{"1. item", `\1. item`},
+		{"42) item", `\42) item`},
+		{"2026. not a list item", "\\2026. not a list item"}, // digit+'.'+' ' at line start = ordered list marker, escapes safely with same visual
+		{"\n1. \n2. ", "\n\\1. \n\\2. "},
+		{">text", `\>text`},
+		{">50%", `\>50%`},
+		{"---", `\---`},
+		{"- - -", `\- - -`},
+		{"***", `\***`},
+		{"___", `\___`},
+		{"--", "--"}, // under 3 = not a break
 	}
 	for _, c := range cases {
 		if got := sanitizeMDStruct(c.in); got != c.want {

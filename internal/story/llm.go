@@ -516,13 +516,15 @@ func downgradeHeadingLevels(text string) string {
 // sanitizeMDStruct neutralizes the characters an LLM-authored string can
 // use to break the structure of the Markdown document it is rendered into:
 // backticks (inline code spans / fences), pipes (table cells) and
-// line-leading ATX-heading / list / blockquote markers. Backslash escaping,
-// deliberately not HTML entities: the same finding text also renders
-// through the HTML dashboard, which applies its own HTML escaping —
-// entities here would double-escape there. Applied to every LLM-authored
-// finding component (explanations, suggested actions, evidence anchors) at
-// Finding-construction time in llm_findings.go — the render layer cannot do
-// it, because these strings also feed the HTML target and the JSON summary.
+// line-leading structural markers — ATX headings, bullet items (- * +),
+// ordered-list items (1. ), blockquotes (> with or without a following
+// space) and thematic breaks (---). Backslash escaping, deliberately not
+// HTML entities: the same finding text also renders through the HTML
+// dashboard, which applies its own HTML escaping — entities here would
+// double-escape there. Applied to every LLM-authored finding component
+// (explanations, suggested actions, evidence anchors) at Finding-
+// construction time in llm_findings.go — the render layer cannot do it,
+// because these strings also feed the HTML target and the JSON summary.
 // Ordinary prose without these characters passes through byte-identical.
 func sanitizeMDStruct(s string) string {
 	if s == "" {
@@ -533,11 +535,61 @@ func sanitizeMDStruct(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
 		if _, isHeading := atxHeading(ln); isHeading ||
-			strings.HasPrefix(ln, "- ") || strings.HasPrefix(ln, "> ") {
+			mdListItem(ln) || mdBlockquote(ln) || mdThematicBreak(ln) {
 			lines[i] = "\\" + ln
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// mdListItem reports whether ln opens a CommonMark list item: a bullet
+// marker (-, *, +) followed by space, or an ordered marker (1-9 digits,
+// then . or ), then space). The space is required — a line like "-item"
+// or "*item" is ordinary prose, not a list.
+func mdListItem(ln string) bool {
+	if strings.HasPrefix(ln, "- ") || strings.HasPrefix(ln, "* ") || strings.HasPrefix(ln, "+ ") {
+		return true
+	}
+	i := 0
+	for i < len(ln) && i < 9 && ln[i] >= '0' && ln[i] <= '9' {
+		i++
+	}
+	if i == 0 || i+2 > len(ln) {
+		return false
+	}
+	return (ln[i] == '.' || ln[i] == ')') && ln[i+1] == ' '
+}
+
+// mdBlockquote reports whether ln opens a CommonMark blockquote. The
+// leading > is the marker with or without a following space — ">text" is
+// a quote just as "> text" is, so only the bare prefix is checked.
+func mdBlockquote(ln string) bool {
+	return strings.HasPrefix(ln, ">")
+}
+
+// mdThematicBreak reports whether ln is entirely a CommonMark thematic
+// break: three or more of the same one of - * _, with optional
+// interior spaces. A single "---" injected between findings would
+// otherwise render as a horizontal rule (or a setext underline).
+func mdThematicBreak(ln string) bool {
+	marker := byte(0)
+	n := 0
+	for i := 0; i < len(ln); i++ {
+		switch c := ln[i]; c {
+		case ' ', '\t':
+			continue
+		case '-', '*', '_':
+			if marker == 0 {
+				marker = c
+			} else if c != marker {
+				return false
+			}
+			n++
+		default:
+			return false
+		}
+	}
+	return n >= 3
 }
 
 // RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
