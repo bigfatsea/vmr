@@ -11,6 +11,31 @@
 //	       + 0.507 * CJKChars
 //	       + 0.043 * Spaces
 //	       + 1.830 * OtherChars
+//
+// # Coefficient provenance
+//
+// The six coefficients are a least-squares linear fit of true tokenizer
+// output against the per-category counts above. The exact fitting corpus
+// and tokenizer are no longer recoverable — the original calibration
+// script and its sample set were not preserved, so the provenance below
+// is what can still be stated honestly: the sample text was mixed
+// English/CJK chat traffic (the category split itself — English symbols
+// vs. letters vs. CJK including fullwidth punctuation — exists to model
+// that traffic), and the target tokenizer was a cl100k-class BPE of the
+// kind the routed models use. Treat the numbers as a point-in-time
+// empirical fit, not a derived constant: they carry no theoretical
+// guarantee and drift with every upstream tokenizer change.
+//
+// # Recalibration
+//
+// Re-fit the coefficients against recent ground truth rather than
+// hand-tuning them. The suggested path is a script under tools/ (not yet
+// implemented) that walks the routing half's JSONL audit log, selects the
+// records whose reported usage is trustworthy (usage_ok=true —
+// provider-reported token counts, see ctxgraph.Manifest.UsageOK), runs
+// Analyze over each request/response body, and regresses the reported
+// counts against the category counts to measure the current error
+// distribution and produce updated coefficients.
 package tokenutil
 
 import (
