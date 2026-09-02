@@ -281,8 +281,8 @@ type msgHashCacheShard struct {
 }
 
 const (
-	msgHashShardCount   = 16
-	maxMsgHashPerShard  = 1024
+	msgHashShardCount  = 16
+	maxMsgHashPerShard = 1024
 )
 
 var msgHashShards [msgHashShardCount]msgHashCacheShard

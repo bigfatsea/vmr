@@ -647,4 +647,3 @@ func TestParseRetryAfter(t *testing.T) {
 		t.Errorf("parseRetryAfter(HTTP-date) = %v, want ~5s", d)
 	}
 }
-

@@ -237,4 +237,3 @@ func TestReassembleSSE_CursorScanLargeStream(t *testing.T) {
 		t.Errorf("Content length = %d, want %d", len(s.Content), chunks*len("chunk"))
 	}
 }
-

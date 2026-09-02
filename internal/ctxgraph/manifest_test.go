@@ -424,4 +424,3 @@ func TestBuildManifest_HashCache(t *testing.T) {
 		t.Errorf("cached assistant message hash mismatch: %v vs %v", m1.Keys[1], m2.Keys[1])
 	}
 }
-

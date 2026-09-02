@@ -331,4 +331,3 @@ func TestMergeUsageWithProtocol_CursorScanMultiLine(t *testing.T) {
 		t.Errorf("MergeUsageWithProtocol = %+v, want In=20 Out=15", u)
 	}
 }
-
