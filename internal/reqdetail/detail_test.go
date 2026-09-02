@@ -679,3 +679,22 @@ func TestRenderClientRequest_ZeroLCPRendersFullHistory(t *testing.T) {
 		t.Errorf("with deltaStart == 0, the sole message should still carry the 🆕 prefix, got:\n%s", got)
 	}
 }
+
+// TestRenderOverviewClientAddrEscaped verifies that special characters
+// (e.g. pipes, newlines) in Client.Addr are escaped so the Markdown
+// table structure remains intact.
+func TestRenderOverviewClientAddrEscaped(t *testing.T) {
+	rec := &audit.Record{
+		TS:      time.Now(),
+		Model:   "agent",
+		Outcome: "ok",
+		Client: audit.Exchange{
+			Addr:    "10.0.0.1:1234 | bad\npipe",
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{}},
+		},
+	}
+	got := Render(rec, "audit.jsonl", 1, nil, nil, taskseg.OpenClawAware, i18n.EN, false)
+	if !strings.Contains(got, `10.0.0.1:1234 \| bad pipe`) {
+		t.Errorf("overview table must escape pipe and newline in client addr, got:\n%s", got)
+	}
+}

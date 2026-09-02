@@ -245,3 +245,60 @@ func TestOpenClawAware_ChatID_EnvelopeBeyondHeadWindowMissed(t *testing.T) {
 		t.Errorf("ChatID = %q, want empty (envelope trigger phrase starts past the 200-byte head window)", got)
 	}
 }
+
+// TestOpenClawAware_CRLFEnvelopeStripping verifies that OpenClaw metadata
+// envelopes formatted with CRLF (\r\n) newlines and whitespace variants
+// are stripped cleanly without corrupting the real instruction.
+func TestOpenClawAware_CRLFEnvelopeStripping(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantOK  bool
+		wantTxt string
+	}{
+		{
+			name: "both Conversation info and Sender envelopes with CRLF",
+			input: "[Thu 2026-07-09 06:48 GMT+8]\r\nConversation info (untrusted metadata):\r\n" +
+				"```json\r\n{\"chat_id\":\"user:ou_crlf\"}\r\n```\r\n\r\n" +
+				"Sender (untrusted metadata):\r\n```json\r\n{\"id\":\"ou_crlf\"}\r\n```\r\n\r\n" +
+				"请帮我排查网络故障",
+			wantOK:  true,
+			wantTxt: "请帮我排查网络故障",
+		},
+		{
+			name: "code fence without json language tag and with CRLF",
+			input: "Conversation info (untrusted metadata):\r\n" +
+				"```\r\n{\"chat_id\":\"user:ou_bare\"}\r\n```\r\n\r\n" +
+				"执行自动化测试",
+			wantOK:  true,
+			wantTxt: "执行自动化测试",
+		},
+		{
+			name: "spaces around metadata header and CRLF",
+			input: "Sender  (untrusted metadata):  \r\n" +
+				"```json\r\n{\"id\":\"ou_spaced\"}\r\n```\r\n\r\n" +
+				"重构该模块",
+			wantOK:  true,
+			wantTxt: "重构该模块",
+		},
+		{
+			name: "CRLF pure envelope without user text rejected",
+			input: "[Thu 2026-07-09 06:48 GMT+8]\r\nConversation info (untrusted metadata):\r\n" +
+				"```json\r\n{\"chat_id\":\"user:ou_crlf\"}\r\n```\r\n",
+			wantOK:  false,
+			wantTxt: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: tc.input}, nil, -1)
+			if ok != tc.wantOK {
+				t.Fatalf("RealUserText ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && got != tc.wantTxt {
+				t.Errorf("RealUserText = %q, want %q", got, tc.wantTxt)
+			}
+		})
+	}
+}

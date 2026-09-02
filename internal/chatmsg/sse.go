@@ -83,7 +83,7 @@ func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *s
 		if t, _ := delta["content"].(string); t != "" {
 			content.WriteString(t)
 		}
-		if t, _ := delta["reasoning_content"].(string); t != "" {
+		if t := ExtractReasoning(delta); t != "" {
 			reasoning.WriteString(t)
 		}
 		for _, raw := range toolCallDeltas(delta["tool_calls"]) {
@@ -201,7 +201,7 @@ func FinalMessage(body any) (*StreamSummary, bool) {
 		s.Finish, _ = ch["finish_reason"].(string)
 		msg, _ := ch["message"].(map[string]any)
 		s.Content = RenderContent(msg["content"])
-		s.Reasoning, _ = msg["reasoning_content"].(string)
+		s.Reasoning = ExtractReasoning(msg)
 		s.ToolCalls = ToolCallList(msg["tool_calls"])
 		return s, true
 	}

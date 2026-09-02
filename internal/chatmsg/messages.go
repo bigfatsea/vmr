@@ -202,7 +202,7 @@ func Messages(body any) []Message {
 			continue
 		}
 		text := RenderContent(m["content"])
-		if rc, _ := m["reasoning_content"].(string); rc != "" {
+		if rc := ExtractReasoning(m); rc != "" {
 			text = "🤔 [reasoning_content]\n" + rc + "\n" + text
 		}
 		if id, _ := m["tool_call_id"].(string); id != "" { // openai-completions tool result
@@ -272,6 +272,24 @@ func reasoningSummaryText(m map[string]any) string {
 		return "[encrypted reasoning, no summary]"
 	}
 	return "[reasoning, no summary]"
+}
+
+// ExtractReasoning extracts the reasoning/thinking text from a decoded message
+// or delta map, probing keys in precedence order: reasoning_content -> reasoning -> thought.
+func ExtractReasoning(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
+	if s, _ := m["reasoning_content"].(string); s != "" {
+		return s
+	}
+	if s, _ := m["reasoning"].(string); s != "" {
+		return s
+	}
+	if s, _ := m["thought"].(string); s != "" {
+		return s
+	}
+	return ""
 }
 
 // ToolCall is one decoded tool invocation (openai tool_calls entry or
