@@ -94,8 +94,13 @@ type Record struct {
 // analytics read path. Write paths construct Record directly and are
 // unaffected.
 //
-// TODO(2026-10): transitional — remove once pre-rename logs have aged out.
-// See the protocol-rename entry in docs/KNOWN_ISSUES.md's 配置与协议 section.
+// Transitional — removal is condition-based, not date-based: strip this
+// only once the fact-triggered condition in the protocol-rename entry in
+// docs/KNOWN_ISSUES.md's 配置与协议 section holds (zero grep hits for the
+// old names across the whole corpus AND confirmation that no offline
+// archive will ever need re-parsing). The default retention policy never
+// deletes audit logs, so old names do NOT age out on their own — a date-
+// based schedule here would misfire.
 func (r *Record) UnmarshalJSON(data []byte) error {
 	type recordAlias Record // shed UnmarshalJSON to avoid infinite recursion
 	if err := json.Unmarshal(data, (*recordAlias)(r)); err != nil {
@@ -537,6 +542,11 @@ func (l *Logger) scheduleHousekeeping() {
 	go func() {
 		defer l.hkWG.Done()
 		defer l.housekeeping.Store(false)
+		defer func() {
+			if p := recover(); p != nil {
+				fmt.Fprintf(os.Stderr, "audit: housekeeping panicked; skipped this round: %v\n", p)
+			}
+		}()
 		housekeep(dir, now)
 	}()
 }

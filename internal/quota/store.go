@@ -264,6 +264,9 @@ func validateLoadedShape[T any](version int, accounts map[string]map[string]*T) 
 	if version != fileVersion {
 		return fmt.Errorf("quota state version %d != expected %d (refusing to adopt an unknown on-disk shape)", version, fileVersion)
 	}
+	if accounts == nil {
+		return fmt.Errorf("quota state: accounts map is nil")
+	}
 	for provider, byLimit := range accounts {
 		if byLimit == nil {
 			return fmt.Errorf("quota state: account %q has a nil bucket map", provider)
@@ -299,6 +302,11 @@ func (r *Registry) StartFlusher(interval time.Duration) (stop func()) {
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
+		defer func() {
+			if p := recover(); p != nil {
+				fl.Error(fmt.Errorf("quota flusher panicked: %v", p))
+			}
+		}()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {

@@ -4,6 +4,7 @@ package imgprep
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -106,7 +107,14 @@ func maybeSweepCache(dir string, ttlDays int, now time.Time) {
 	}
 	st.lastDate = today
 	st.mu.Unlock()
-	go sweepCacheDir(dir, ttlDays, now)
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				fmt.Fprintf(os.Stderr, "imgprep: cache sweep panicked; skipped: %v\n", p)
+			}
+		}()
+		sweepCacheDir(dir, ttlDays, now)
+	}()
 }
 
 // DefaultCacheCapBytes is the total size cap (50MB) for the image cache
