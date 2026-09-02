@@ -135,7 +135,7 @@ func extractSessionFeatures(rec *audit.Record, prof taskseg.Profile) sessionFeat
 		f.chatID = prof.ChatID(msgs)
 	}
 	if rec.Client.Response != nil {
-		f.usage, f.usageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
+		f.usage, f.usageOK = chatmsg.ExtractUsageWithProtocol(rec.Client.Response.Body, rec.Protocol)
 		if s := taskseg.ResponseSummary(rec.Client.Response.Body); s != nil {
 			f.finish = s.Finish
 			for _, tc := range s.ToolCalls {

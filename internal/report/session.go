@@ -346,7 +346,7 @@ func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
 // to keep function length maintainable, not
 // because it's an independently meaningful step.
 func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
-	r.Usage, r.UsageOK = chatmsg.ExtractUsage(resp.Body)
+	r.Usage, r.UsageOK = chatmsg.ExtractUsageWithProtocol(resp.Body, r.Protocol)
 	s := taskseg.ResponseSummary(resp.Body)
 	if s == nil {
 		return

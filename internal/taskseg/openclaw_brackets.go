@@ -35,3 +35,17 @@ var timestampBracketRe = regexp.MustCompile(`^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(
 // messageIDBracketRe matches OpenClaw's "[message_id: ...]" bracket, seen
 // glued after the timestamp bracket on bare messages.
 var messageIDBracketRe = regexp.MustCompile(`^\[message_id:[^\]]*\]\s*`)
+
+// stripLeadingBrackets peels timestamp and message_id brackets off the front
+// in a loop, order-agnostic.
+func stripLeadingBrackets(text string) string {
+	for {
+		stripped := timestampBracketRe.ReplaceAllString(text, "")
+		stripped = messageIDBracketRe.ReplaceAllString(stripped, "")
+		if stripped == text {
+			break
+		}
+		text = stripped
+	}
+	return text
+}

@@ -150,28 +150,23 @@ func collectEntitySpans(text string) []rawSpan {
 		return nil
 	}
 
-	// Filter out spans that are strictly contained within larger spans
-	var outerSpans []rawSpan
-	for i, sp := range spans {
-		contained := false
-		for j, other := range spans {
-			if i != j && other.start <= sp.start && other.end >= sp.end && (other.end-other.start) > (sp.end-sp.start) {
-				contained = true
-				break
-			}
+	// Sort spans by start index ASC, then by end index DESC so larger spans come first.
+	sort.SliceStable(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
 		}
-		if !contained {
+		return spans[i].end > spans[j].end
+	})
+
+	// Filter out spans that are strictly contained within larger spans in O(N).
+	var outerSpans []rawSpan
+	maxEnd := -1
+	for _, sp := range spans {
+		if sp.end > maxEnd {
 			outerSpans = append(outerSpans, sp)
+			maxEnd = sp.end
 		}
 	}
-
-	// Sort spans by start index ASC
-	sort.SliceStable(outerSpans, func(i, j int) bool {
-		if outerSpans[i].start != outerSpans[j].start {
-			return outerSpans[i].start < outerSpans[j].start
-		}
-		return (outerSpans[i].end - outerSpans[i].start) > (outerSpans[j].end - outerSpans[j].start)
-	})
 	return outerSpans
 }
 

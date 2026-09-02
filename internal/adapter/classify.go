@@ -2,6 +2,7 @@
 package adapter
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -43,11 +44,12 @@ func errorSnippet(body []byte) string {
 	raw := func() string {
 		return strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))
 	}
-	if len(body) == 0 || body[0] != '{' {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return raw()
 	}
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal(body, &m); err != nil {
+	if err := json.Unmarshal(trimmed, &m); err != nil {
 		return raw()
 	}
 	var parts []string

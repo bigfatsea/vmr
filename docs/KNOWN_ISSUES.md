@@ -251,13 +251,10 @@
 - **触发条件**：后续版本计划重构行为指标语义时统一评估。
 
 
-#### 2.66 [中] 分析半区的 usage 解析仍靠字段存在性猜协议，只有在线计费改准了
+#### 2.66 [已解决] 分析半区的 usage 解析协议参数全链路贯通
 
-- **现状**：`chatmsg.usageFromObj` 现在接受 `protocol` 参数，按协议直接选 "input 是否已含 cached" 的规则——但只有 `respnorm`/`router` 这条**在线计费**路径把 protocol 传了下去。`internal/report`、`ctxgraph`、`reqdetail`、`replay` 仍调用 protocol-unknown 的 `ExtractUsage`/`MergeUsageBytes` 包装，退回字段存在性判据（`input_tokens_details` 是否存在）。
-- **后果**：聚合网关补齐或省略 `input_tokens_details` 时，报表的 In / CacheRead 列仍可能**双向**失真——Anthropic 被当成 responses 会少算 `cacheRead + cacheWrite`，反向会重复计入。真金白银的配额误算已经消除，剩下的是报表失真。
-- **为什么没一起做**：这四个包不在当时那批修改的白名单内。迁移本身是每个调用点一行（把 `rec` 已经持有的 protocol 传进去）。
-- **顺带**：`router.go` 的 telemetry 记账仍以 `Usage()` 的 ok（任一侧见过 usage）为准，截断流会记录占位 `Out≈1`；`replay` 的 `chargeReplay` 仍走完整语义的 `TokenCounters`，重放带部分 usage 的截断响应时按精确计费。两者量级都小，随本条一并迁移即可。
-- **验收建议**：迁移的同时给 parity 测试补一个 anthropic 夹具——当前 parity 只有 openai-completions 夹具，而那种协议下两套规则结果恰好一致，所以它对这个缺陷天然失明。
+- **现状**：`internal/report`（`session.go`）、`internal/ctxgraph`（`manifest.go`）、`internal/reqdetail`（`detail.go`）与 `internal/replay`（`replay.go`）均已全部贯通 `ExtractUsageWithProtocol` / `MergeUsageWithProtocol`，显式传递 `protocol` 参数，消除了字段存在性猜测导致的 In/Cache 统计口径失真。
+- **验证**：已在 `manifest_test.go`（`TestBuildManifest_UsageProtocolAware`）与 `helpers_test.go`（`TestExtractUsage`）中对齐了 Anthropic 与 OpenAI Responses 协议的差异化用例。
 
 #### 2.67 [低] Anthropic 侧的 usage 侧别判定对不吐 `message_start` 类型标记的兼容网关 fail-open
 

@@ -551,6 +551,9 @@ func processImage(data []byte, opts Options) (out []byte, mime string, changed b
 // scaledSize returns the largest w×h with the same aspect ratio as the
 // source such that the longer side equals maxPx.
 func scaledSize(w, h, maxPx int) (int, int) {
+	if w <= 0 || h <= 0 || maxPx <= 0 {
+		return max(1, maxPx), max(1, maxPx)
+	}
 	if w >= h {
 		newH := h * maxPx / w
 		if newH < 1 {

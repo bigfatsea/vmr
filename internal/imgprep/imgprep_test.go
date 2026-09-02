@@ -593,6 +593,11 @@ func TestScaledSize(t *testing.T) {
 		{2000, 1000, 512, 512, 256},
 		{1000, 2000, 512, 256, 512},
 		{1000, 1000, 512, 512, 512},
+		{0, 0, 512, 512, 512},
+		{-10, 100, 512, 512, 512},
+		{100, 0, 512, 512, 512},
+		{100, 100, 0, 1, 1},
+		{100, 100, -5, 1, 1},
 	}
 	for _, c := range cases {
 		w, h := scaledSize(c.w, c.h, c.maxPx)
@@ -837,6 +842,25 @@ func TestSweepCacheDirRemovesStrayTempFiles(t *testing.T) {
 
 	if _, err := os.Stat(stray); !os.IsNotExist(err) {
 		t.Errorf("a stale leftover .tmp- file from a crashed write should be cleaned up, stat err=%v", err)
+	}
+}
+
+func TestSweepCacheDirRemovesStrayTempFilesEvenWithTTLDisabled(t *testing.T) {
+	dir := t.TempDir()
+	stray := filepath.Join(dir, ".deadbeef-100.jpg.tmp-12345")
+	if err := os.WriteFile(stray, []byte("half-written"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(stray, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// ttlDays = 0 (disabled), but stale .tmp- (>1h) must still be cleaned up
+	sweepCacheDir(dir, 0, time.Now())
+
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("stale .tmp- file must be cleaned up even when ttlDays=0, stat err=%v", err)
 	}
 }
 

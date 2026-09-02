@@ -59,11 +59,12 @@ func TestModelMultiplier_ExactWildcardDefault(t *testing.T) {
 
 func TestApplyModelMultiplier_ExactMultiplyNoRounding(t *testing.T) {
 	l := core.Limit{ModelMultipliers: map[string]float64{"m": 1.5}}
-	d, est := ApplyModelMultiplier(l, "m", Counters{Fresh: 3, Out: 1, Requests: 1}, 5)
+	d, est := ApplyModelMultiplier(l, "m", Counters{Fresh: 3, Out: 1, Requests: 1, Cost: 2.5}, 5)
 	// Exact multiplication, no rounding in either direction — see
 	// quota.Counters' doc comment for why: 3*1.5=4.5, 1*1.5=1.5, 5*1.5=7.5.
-	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || est != 7.5 {
-		t.Fatalf("ApplyModelMultiplier scaling = %+v est=%v, want Fresh=4.5 Out=1.5 Requests=1.5 est=7.5", d, est)
+	// Cost is preserved without scaling.
+	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || d.Cost != 2.5 || est != 7.5 {
+		t.Fatalf("ApplyModelMultiplier scaling = %+v est=%v, want Fresh=4.5 Out=1.5 Requests=1.5 Cost=2.5 est=7.5", d, est)
 	}
 }
 

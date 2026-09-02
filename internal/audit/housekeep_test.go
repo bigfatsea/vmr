@@ -118,8 +118,8 @@ func TestHousekeep_RetentionDeletesOldFiles(t *testing.T) {
 	housekeep(dir, today)
 
 	mustNotExist(t, filepath.Join(dir, "vmr-audit-2026-05-01.jsonl.zst"))
-	// The too-old plain file gets compressed *and* immediately purged by the
-	// same sweep — end state is "gone", not "compressed and kept".
+	// The too-old plain file gets directly purged without compression —
+	// end state is "gone", not "compressed and kept".
 	mustNotExist(t, filepath.Join(dir, "vmr-audit-2026-06-01.jsonl"))
 	mustNotExist(t, filepath.Join(dir, "vmr-audit-2026-06-01.jsonl.zst"))
 	mustExist(t, filepath.Join(dir, "vmr-audit-2026-06-20.jsonl.zst"))

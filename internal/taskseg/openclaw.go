@@ -51,18 +51,12 @@ func (openClawAware) RealUserText(m chatmsg.Message, rawMsgs []any, rawIdx int) 
 		if leadingBracketRe.ReplaceAllString(text, "") == "" {
 			return "", false // just a timestamp bracket, nothing real left
 		}
+		text = stripLeadingBrackets(text)
 	} else {
 		// Bare message: peel timestamp/message_id brackets off the front
 		// in a loop, order-agnostic — not a generic "strip any leading
 		// bracket" rule (misfires on a message that opens with one).
-		for {
-			stripped := timestampBracketRe.ReplaceAllString(text, "")
-			stripped = messageIDBracketRe.ReplaceAllString(stripped, "")
-			if stripped == text {
-				break
-			}
-			text = stripped
-		}
+		text = stripLeadingBrackets(text)
 		if strings.TrimSpace(text) == "" {
 			return "", false // only scaffolding brackets, nothing real left
 		}

@@ -27,6 +27,23 @@ func TestRate_Complete_RejectsNonFiniteOrNegative(t *testing.T) {
 	}
 }
 
+func TestRate_MissingComponents_IdentifiesNonFiniteOrNegative(t *testing.T) {
+	nan := f(math.NaN())
+	neg := f(-1.0)
+	inf := f(math.Inf(1))
+	r := Rate{InFresh: nan, CacheRead: neg, CacheWrite: inf, Out: nil}
+	missing := r.MissingComponents()
+	want := []string{"in_fresh", "cache_read", "cache_write", "out"}
+	if len(missing) != len(want) {
+		t.Fatalf("MissingComponents() = %v, want %v", missing, want)
+	}
+	for i, name := range want {
+		if missing[i] != name {
+			t.Errorf("missing[%d] = %s, want %s", i, missing[i], name)
+		}
+	}
+}
+
 // TestParseTable_RejectsNonFiniteOrNegativeRates pins R42: a hand-written
 // supplement/standard file with a NaN, Inf, or negative rate is a load-time
 // hard error naming the offending key, not a silently accepted poison that

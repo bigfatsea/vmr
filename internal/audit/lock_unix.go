@@ -36,9 +36,27 @@ func acquireDirLock(dir string) (*os.File, error) {
 		return nil, fmt.Errorf("audit: log_dir %s is held by another vmr process (pid %s) — two processes must not share one log_dir; give this instance its own log_dir", dir, occupierPid(path))
 	}
 	if err := f.Truncate(0); err == nil {
+		f.Seek(0, 0)
 		fmt.Fprintf(f, "%d\n", os.Getpid())
 	}
 	return f, nil
+}
+
+// DirLockOccupier reports whether dir is currently locked by another active vmr
+// process (e.g. vmr start), and returns (true, pid). When the lock is unheld,
+// it returns (false, "").
+func DirLockOccupier(dir string) (bool, string) {
+	path := filepath.Join(dir, lockFileName)
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return false, ""
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true, occupierPid(path)
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false, ""
 }
 
 // occupierPid reads the pid the lock holder wrote into path; "unknown" when

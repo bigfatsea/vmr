@@ -52,6 +52,19 @@ func TestOpenClawAware_TimestampOnlyAfterStrip(t *testing.T) {
 	}
 }
 
+func TestOpenClawAware_EnvelopeFollowedByScaffoldingBrackets(t *testing.T) {
+	wrapped := "[Thu 2026-07-09 06:48 GMT+8] Conversation info (untrusted metadata):\n" +
+		"```json\n{\"chat_id\":\"user:ou_x\"}\n```\n\n" +
+		"[message_id: 12345] [Fri 2026-07-10 10:00 GMT+8] 帮我修个 bug"
+	text, ok := OpenClawAware.RealUserText(chatmsg.Message{Role: "user", Text: wrapped}, nil, -1)
+	if !ok {
+		t.Fatal("wrapped instruction not recognized")
+	}
+	if text != "帮我修个 bug" {
+		t.Errorf("got %q, want %q (scaffolding brackets stripped after envelope)", text, "帮我修个 bug")
+	}
+}
+
 // TestOpenClawAware_SenderEnvelopeAloneStripped pins the fix for a head-check/
 // regex mismatch: openClawEnvelopeRe matches EITHER "Conversation info" or
 // "Sender" (untrusted metadata) headers, but the 200-byte trigger check used

@@ -48,6 +48,31 @@ func TestNew_DirLockRejectsSecondInstance(t *testing.T) {
 	l3.Close()
 }
 
+// TestDirLockOccupier reports whether the directory is actively held.
+func TestDirLockOccupier(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on windows")
+	}
+	dir := t.TempDir()
+	held, _ := DirLockOccupier(dir)
+	if held {
+		t.Fatal("empty dir should not be locked")
+	}
+	l1, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l1.Close()
+
+	held, pid := DirLockOccupier(dir)
+	if !held {
+		t.Fatal("dir with active audit.Logger should be reported as held")
+	}
+	if pid == "" {
+		t.Fatal("held dir should report non-empty pid")
+	}
+}
+
 // TestNew_DirLockIndependentDirs: separate log_dirs never interfere.
 func TestNew_DirLockIndependentDirs(t *testing.T) {
 	l1, err := New(t.TempDir())

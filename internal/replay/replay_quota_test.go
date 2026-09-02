@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"vmr/internal/audit"
 )
 
 // writeQuotaConfig is writeConfig plus a quota: block on provider p1, and an
@@ -243,5 +245,39 @@ models:
 
 	if _, err := os.Stat(filepath.Join(dir, "vmr-quota.json")); !os.IsNotExist(err) {
 		t.Errorf("a provider with no quota: configured must never create vmr-quota.json, stat err = %v", err)
+	}
+}
+
+func TestRun_QuotaWithActiveAuditLock_DoesNotOverwriteState(t *testing.T) {
+	dir := t.TempDir()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"r","model":"upstream-model","choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+	}))
+	defer upstream.Close()
+
+	// Simulate active router daemon holding audit lock
+	logger, err := audit.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logger.Close()
+
+	cfgPath := writeQuotaConfig(t, dir, upstream.URL, "{metric: requests, every: 1d, amount: 100}")
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+
+	var out bytes.Buffer
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1",
+	}, &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Should note that daemon is active and not flush state file
+	if !bytes.Contains(out.Bytes(), []byte("router daemon is active")) {
+		t.Errorf("expected notice about active daemon, got output: %s", out.String())
+	}
+	// vmr-quota.json should not have been created by replay because daemon was active
+	if _, err := os.Stat(filepath.Join(dir, "vmr-quota.json")); !os.IsNotExist(err) {
+		t.Errorf("active daemon lock must suppress replay's Flush(), but vmr-quota.json exists")
 	}
 }

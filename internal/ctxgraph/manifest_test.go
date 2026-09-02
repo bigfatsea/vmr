@@ -424,3 +424,37 @@ func TestBuildManifest_HashCache(t *testing.T) {
 		t.Errorf("cached assistant message hash mismatch: %v vs %v", m1.Keys[1], m2.Keys[1])
 	}
 }
+
+func TestBuildManifest_UsageProtocolAware(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	usageMap := map[string]any{
+		"usage": map[string]any{
+			"input_tokens":            float64(100),
+			"cache_read_input_tokens": float64(50),
+		},
+	}
+	recAnthropic := audit.Record{
+		Protocol: "anthropic-messages",
+		Client: audit.Exchange{
+			Request:  audit.Message{Body: body},
+			Response: &audit.Message{Body: usageMap},
+		},
+	}
+	mAnthropic, ok := BuildManifest(&recAnthropic, "f", 1)
+	if !ok || !mAnthropic.UsageOK || mAnthropic.Usage.In != 150 {
+		t.Errorf("anthropic manifest usage In=%d (want 150, 100+50)", mAnthropic.Usage.In)
+	}
+
+	recResponses := audit.Record{
+		Protocol: "openai-responses",
+		Client: audit.Exchange{
+			Request:  audit.Message{Body: body},
+			Response: &audit.Message{Body: usageMap},
+		},
+	}
+	mResponses, ok := BuildManifest(&recResponses, "f", 2)
+	if !ok || !mResponses.UsageOK || mResponses.Usage.In != 100 {
+		t.Errorf("responses manifest usage In=%d (want 100, inclusive)", mResponses.Usage.In)
+	}
+}

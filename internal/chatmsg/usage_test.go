@@ -188,15 +188,15 @@ func TestExtractResponseText_SSEAndJSON(t *testing.T) {
 	}
 }
 
-func TestEstimateBodyTokens_ExcludesSSEEnvelopes(t *testing.T) {
+func TestEstimateResponseBodyTokens_ExcludesSSEEnvelopes(t *testing.T) {
 	t.Parallel()
 	content := "This is the actual output message from the assistant."
 	sseStream := "data: {\"id\":\"chatcmpl-999\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
 
-	got := EstimateBodyTokens(sseStream)
-	rawEstimate := EstimateBodyTokens([]byte(sseStream))
+	got := EstimateResponseBodyTokens(sseStream)
+	rawEstimate := EstimateResponseBodyTokens([]byte(sseStream))
 	if got != rawEstimate {
-		t.Errorf("EstimateBodyTokens string vs []byte mismatch: %d vs %d", got, rawEstimate)
+		t.Errorf("EstimateResponseBodyTokens string vs []byte mismatch: %d vs %d", got, rawEstimate)
 	}
 
 	// Should match token estimation of content directly
@@ -259,7 +259,7 @@ func TestEstimateDegradedBasis_FallbackAsymmetry(t *testing.T) {
 	// Request side: valid JSON, but not a chat-request shape — extraction
 	// must fail, forcing the raw-byte fallback with the raw basis.
 	reqBody := map[string]any{"foo": "bar"}
-	inEst := EstimateBodyTokens(reqBody)
+	inEst := EstimateRequestBodyTokens(reqBody)
 	wantIn := tokenutil.Estimate([]byte(`{"foo":"bar"}`))
 	if wantIn <= 0 {
 		t.Fatalf("wantIn = %d, want > 0", wantIn)

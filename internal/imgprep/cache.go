@@ -174,7 +174,9 @@ func sweepCacheDirWithCap(dir string, ttlDays int, now time.Time, capBytes int64
 		}
 		path := filepath.Join(dir, name)
 		if strings.Contains(name, ".tmp-") {
-			if ttlEnabled && info.ModTime().Before(cutoff) {
+			// Orphaned temp files from interrupted downscales are swept if older than 1h,
+			// regardless of whether TTL expiry is enabled for valid cache items.
+			if info.ModTime().Before(now.Add(-1 * time.Hour)) {
 				os.Remove(path)
 			}
 			continue

@@ -159,11 +159,16 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	// missing/corrupt state file is never fatal (mirrors cmd_start.go's own
 	// handling): quota is a statistics helper, replaying must not fail
 	// because of it.
+	online, pid := audit.DirLockOccupier(cfg.LogDir)
 	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
 	if err := qreg.Load(); err != nil {
 		fmt.Fprintf(stdout, "WARN quota state: %v (starting from zero)\n", err)
 	}
-	defer qreg.Flush()
+	if online {
+		fmt.Fprintf(stdout, "NOTE router daemon is active in %s (pid %s); quota charged in-memory only (will not overwrite on-disk state)\n", cfg.LogDir, pid)
+	} else {
+		defer qreg.Flush()
+	}
 	rv, path, line, err := selectRecord(opts)
 	if err != nil {
 		return err
@@ -251,7 +256,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	// sent were genuinely consumed (same reasoning chargeQuota's own doc
 	// comment gives for the live path).
 	if resp.StatusCode < 400 {
-		chargeReplay(qreg, ep, rv.Client.Request.Body, respBuf.Bytes(), time.Now())
+		chargeReplay(qreg, ep, protocol, rv.Client.Request.Body, respBuf.Bytes(), time.Now())
 	}
 
 	if opts.RecordPath != "" {
@@ -278,11 +283,11 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 // Everything after "how usage was obtained" is router.TokenCounters, not a
 // second copy of the exact-vs-degraded rule — see that function's doc comment
 // for why all three call sites had to converge on one implementation.
-func chargeReplay(reg *quota.Registry, ep *core.Endpoint, reqBody, respBody []byte, now time.Time) {
+func chargeReplay(reg *quota.Registry, ep *core.Endpoint, protocol string, reqBody, respBody []byte, now time.Time) {
 	if ep.Quota == nil {
 		return
 	}
-	u := chatmsg.MergeUsageBytes(respBody, chatmsg.Usage{})
+	u := chatmsg.MergeUsageWithProtocol(respBody, chatmsg.Usage{}, protocol)
 	raw, estimated := router.TokenCounters(u, u.In > 0 || u.Out > 0,
 		tokenutil.Estimate(reqBody), tokenutil.Estimate(respBody))
 	router.ChargeResponse(reg, ep, raw, estimated, now)

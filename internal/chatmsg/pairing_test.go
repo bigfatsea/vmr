@@ -58,6 +58,35 @@ func TestCheckToolPairing_OpenAI_OrphanResult(t *testing.T) {
 	}
 }
 
+func TestCheckToolPairing_OpenAIResponses_AllMatched(t *testing.T) {
+	t.Parallel()
+	msgs := []any{
+		map[string]any{"type": "function_call", "call_id": "call_1", "name": "exec", "arguments": `{"cmd":"ls"}`},
+		map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "file1\nfile2"},
+	}
+	r := CheckToolPairing(msgs)
+	if !r.OK() {
+		t.Fatalf("want OK for Responses function_call/output pair, got %+v", r)
+	}
+	if r.Calls != 1 || r.Results != 1 {
+		t.Errorf("want 1/1, got calls=%d results=%d", r.Calls, r.Results)
+	}
+}
+
+func TestCheckToolPairing_OpenAIResponses_OrphanCall(t *testing.T) {
+	t.Parallel()
+	msgs := []any{
+		map[string]any{"type": "function_call", "call_id": "call_1", "name": "exec", "arguments": `{"cmd":"ls"}`},
+	}
+	r := CheckToolPairing(msgs)
+	if r.OK() {
+		t.Fatal("want orphan call detected, got OK")
+	}
+	if len(r.OrphanCalls) != 1 || r.OrphanCalls[0] != "call_1" {
+		t.Errorf("want OrphanCalls=[call_1], got %v", r.OrphanCalls)
+	}
+}
+
 func TestCheckToolPairing_Anthropic_AllMatched(t *testing.T) {
 	t.Parallel()
 	msgs := []any{

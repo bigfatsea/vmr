@@ -95,11 +95,20 @@ func RealModel(rec *audit.Record) string {
 // (modelusage.go's stepUpstream) on the same record for no reason other
 // than the two having separately hand-rolled the same parse.
 func AttemptUpstream(a audit.Attempt) (protocol, provider, model string) {
-	if a.Protocol != "" || a.Provider != "" || a.Model != "" {
+	if a.Protocol != "" && a.Provider != "" && a.Model != "" {
 		return a.Protocol, a.Provider, a.Model
 	}
-	protocol, provider, model, _ = core.SplitEndpointLabel(a.Endpoint)
-	return protocol, provider, model
+	p, pv, m, _ := core.SplitEndpointLabel(a.Endpoint)
+	if a.Protocol != "" {
+		p = a.Protocol
+	}
+	if a.Provider != "" {
+		pv = a.Provider
+	}
+	if a.Model != "" {
+		m = a.Model
+	}
+	return p, pv, m
 }
 
 // DisplayModel is rec's virtual model name, "(rejected)" when empty (a

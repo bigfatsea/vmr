@@ -343,20 +343,15 @@ func extractResponseTextFromString(s string) string {
 	return s
 }
 
-// EstimateBodyTokens computes the degraded token estimate for a REQUEST body:
-// the actual content/text (message content, reasoning, tool calls) when
-// extraction succeeds, the raw request bytes otherwise — the request-side
-// branch of the degraded basis rule documented on EstimateDegradedTokens.
-func EstimateBodyTokens(body any) int64 {
-	text := ExtractResponseText(body)
-	if text == "" {
-		raw := BodyRaw(body)
-		if len(raw) == 0 {
-			return 0
-		}
-		return tokenutil.Estimate(raw)
+// EstimateRequestBodyTokens computes the degraded token estimate for a REQUEST body:
+// the raw request bytes — the request-side branch of the degraded basis rule
+// documented on EstimateDegradedTokens.
+func EstimateRequestBodyTokens(body any) int64 {
+	raw := BodyRaw(body)
+	if len(raw) == 0 {
+		return 0
 	}
-	return tokenutil.EstimateText(text)
+	return tokenutil.Estimate(raw)
 }
 
 // EstimateResponseBodyTokens computes the degraded output-token estimate for

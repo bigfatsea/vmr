@@ -68,6 +68,12 @@ func TestAttemptUpstreamFallback(t *testing.T) {
 		{"old log, unparseable endpoint: no crash, empty triple",
 			audit.Attempt{Endpoint: "not-a-real-endpoint"},
 			"", "", ""},
+		{"partial structured: Protocol only, falls back to splitting Endpoint for Provider and Model",
+			audit.Attempt{Endpoint: "openai-completions:minimax:MiniMax-M3", Protocol: "openai-completions"},
+			"openai-completions", "minimax", "MiniMax-M3"},
+		{"partial structured: Provider only, falls back to splitting Endpoint for Protocol and Model",
+			audit.Attempt{Endpoint: "openai-completions:minimax:MiniMax-M3", Provider: "minimax"},
+			"openai-completions", "minimax", "MiniMax-M3"},
 		{"no attempt at all", audit.Attempt{}, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

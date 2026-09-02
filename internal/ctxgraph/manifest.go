@@ -144,7 +144,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		ClientKeyTag:   rec.ClientKeyTag,
 	}
 	if rec.Client.Response != nil {
-		m.Usage, m.UsageOK = chatmsg.ExtractUsage(rec.Client.Response.Body)
+		m.Usage, m.UsageOK = chatmsg.ExtractUsageWithProtocol(rec.Client.Response.Body, rec.Protocol)
 	}
 	if !m.UsageOK {
 		// Only computed when the upstream reported nothing: a manifest whose

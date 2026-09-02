@@ -143,7 +143,8 @@ func (r *Registry) ReportSuccess(key string) {
 // traffic, so letting it zero fails would let the weakest signal disarm the
 // backoff exactly where the endpoint needs it most. Fails drops by one and
 // the endpoint leaves cooldown, but it stays half-open (Classify keeps
-// dispatching probes instead of real traffic) until a real request
+// dispatching probes instead of real traffic) until consecutive probes decay
+// fails to 0 (where Classify re-allows real traffic) or a real request
 // completes and ReportSuccess zeroes the count.
 func (r *Registry) ReportProbeSuccess(key string) {
 	r.mu.Lock()

@@ -11,6 +11,12 @@ import "os"
 // side therefore forgoes cross-instance exclusion and relies on
 // compressOne's unique temp names alone — two processes sharing a log_dir
 // there still corrupt interleaved JSONL appends, just not the archives.
+// acquireDirLock on Windows is a deliberate no-op.
 func acquireDirLock(dir string) (*os.File, error) {
 	return nil, nil
+}
+
+// DirLockOccupier on Windows is a deliberate no-op.
+func DirLockOccupier(dir string) (bool, string) {
+	return false, ""
 }

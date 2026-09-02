@@ -81,20 +81,16 @@ func housekeep(dir string, today time.Time) {
 		date, compressed := m[1], m[2] != ""
 		name := e.Name()
 
-		// A file that gets compressed in this same pass is immediately
-		// eligible for the retention check below too (a file dated past the
-		// cutoff shouldn't wait a whole extra day just because it also
-		// happened to need its first compression) — track the name it now
-		// has on disk rather than the one it was listed under.
-		if !compressed && date != todayDate {
-			if compressOne(dir, name) {
-				name += ".zst"
-			}
-		}
+		// Expired files are purged directly without wasting CPU/IO compressing
+		// them first. Only retained past days get compressed.
 		if retention > 0 {
 			if t, err := time.Parse("2006-01-02", date); err == nil && t.Before(cutoff) {
 				purgeOne(dir, name, retention)
+				continue
 			}
+		}
+		if !compressed && date != todayDate {
+			compressOne(dir, name)
 		}
 	}
 }

@@ -9,7 +9,7 @@ import (
 // EstimateDegradedTokens computes the input/output token estimates a record
 // gets when the upstream reported no usage at all: the router's own
 // Facts.EstimatedTokens when it was computed, a body-size estimate
-// otherwise (see EstimateBodyTokens for why body estimates share one
+// otherwise (see EstimateRequestBodyTokens for why body estimates share one
 // implementation). One shared function because two copies already drifted:
 // internal/report priced unsniffed records from a byte estimate while
 // internal/story skipped them entirely, and the divergence was invisible —
@@ -29,7 +29,7 @@ import (
 // mirror the basis the router actually charged. Applied to the two sides'
 // different information states this yields a deliberate FALLBACK ASYMMETRY:
 //
-//   - Request side (EstimateBodyTokens): raw-byte fallback is correct. The
+//   - Request side (EstimateRequestBodyTokens): raw-byte fallback is correct. The
 //     client's plain JSON IS the content plus scaffolding, and the router's
 //     input charge (Facts.EstimatedTokens, see internal/server/facts.go) is
 //     raw-bytes based — falling back to 0 would make reports diverge from
@@ -55,7 +55,7 @@ func EstimateDegradedTokens(facts *core.RequestFacts, reqBody, respBody any) (in
 	if facts != nil {
 		inEst = facts.EstimatedTokens
 	} else {
-		inEst = EstimateBodyTokens(reqBody)
+		inEst = EstimateRequestBodyTokens(reqBody)
 	}
 	if respBody != nil {
 		outEst = EstimateResponseBodyTokens(respBody)

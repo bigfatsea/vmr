@@ -73,7 +73,7 @@ func (r Rate) MissingComponents() []string {
 		name string
 		val  *float64
 	}{{"in_fresh", r.InFresh}, {"cache_read", r.CacheRead}, {"cache_write", r.CacheWrite}, {"out", r.Out}} {
-		if f.val == nil {
+		if f.val == nil || math.IsNaN(*f.val) || math.IsInf(*f.val, 0) || *f.val < 0 {
 			missing = append(missing, f.name)
 		}
 	}

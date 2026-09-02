@@ -25,6 +25,24 @@ func TestToolResultList_OpenAI(t *testing.T) {
 	}
 }
 
+func TestToolResultList_OpenAIResponses(t *testing.T) {
+	t.Parallel()
+	msgs := []any{
+		map[string]any{"type": "function_call", "call_id": "c1", "name": "exec", "arguments": `{"cmd":"ls"}`},
+		map[string]any{"type": "function_call_output", "call_id": "c1", "output": "file1\nfile2"},
+	}
+	got := ToolResultList(msgs)
+	if len(got) != 1 {
+		t.Fatalf("got %d results, want 1", len(got))
+	}
+	if got[0].CallID != "c1" || got[0].Text != "file1\nfile2" {
+		t.Errorf("got %+v", got[0])
+	}
+	if got[0].IsError {
+		t.Error("Responses-shaped results have no error field — must decode as IsError=false")
+	}
+}
+
 func TestToolResultList_Anthropic(t *testing.T) {
 	t.Parallel()
 	msgs := []any{

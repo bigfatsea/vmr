@@ -56,6 +56,12 @@ func ToolResultList(rawMsgs []any) []ToolResult {
 			isErr, _ := pm["is_error"].(bool)
 			out = append(out, ToolResult{CallID: id, Text: RenderContent(pm["content"]), IsError: isErr})
 		}
+		// OpenAI Responses: function_call_output Item at top level.
+		if m["type"] == "function_call_output" {
+			if id, _ := m["call_id"].(string); id != "" {
+				out = append(out, ToolResult{CallID: id, Text: RenderContent(m["output"])})
+			}
+		}
 	}
 	return out
 }

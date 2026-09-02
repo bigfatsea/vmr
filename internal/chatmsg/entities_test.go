@@ -77,6 +77,34 @@ func TestExtractEntities_NegativeCases(t *testing.T) {
 	}
 }
 
+func TestCollectEntitySpans_ContainedSpansFiltered(t *testing.T) {
+	t.Parallel()
+	// "internal/report/session.go" contains "session.go", "internal/report", etc.
+	// Only the outermost span should survive.
+	text := "Check internal/report/session.go for details."
+	spans := collectEntitySpans(text)
+	if len(spans) == 0 {
+		t.Fatal("expected at least 1 span")
+	}
+	if spans[0].val != "internal/report/session.go" {
+		t.Errorf("spans[0].val = %q, want %q", spans[0].val, "internal/report/session.go")
+	}
+}
+
+func BenchmarkCollectEntitySpans_LargeOutput(b *testing.B) {
+	var sb strings.Builder
+	for i := 0; i < 1000; i++ {
+		sb.WriteString("src/component/module_")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString(".go:42 in ClassName.MethodName with /etc/config.json and https://example.com/api\n")
+	}
+	text := sb.String()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = collectEntitySpans(text)
+	}
+}
+
 func TestExtractEntitiesCapsAtMaxEntities(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder

@@ -91,6 +91,17 @@ func CheckToolPairing(rawMsgs []any) PairingReport {
 				}
 			}
 		}
+		// OpenAI Responses: function_call / function_call_output flat Items
+		switch m["type"] {
+		case "function_call":
+			if id, _ := m["call_id"].(string); id != "" {
+				seenCall(id)
+			}
+		case "function_call_output":
+			if id, _ := m["call_id"].(string); id != "" {
+				seenResult(id)
+			}
+		}
 	}
 
 	report := PairingReport{Calls: len(calls), Results: len(results)}

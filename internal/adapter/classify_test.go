@@ -363,3 +363,18 @@ func TestDefaultClassify_EchoedPromptNoFalseContentFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultClassify_LeadingWhitespaceInJSON(t *testing.T) {
+	t.Parallel()
+	// Leading whitespace or newlines from proxies must not degrade JSON into raw snippet scan
+	body := "\r\n  \t{\"error\":{\"message\":\"model gpt-x not found\"}}"
+	if got := DefaultClassify(400, []byte(body)); got != core.ErrEndpoint {
+		t.Errorf("got %v, want ErrEndpoint", got)
+	}
+
+	// Echoed prompt in raw debug info should not trigger false positives if error.message is clean
+	debugBody := "\n\n{\"error\":{\"message\":\"Invalid request format\"},\"debug\":{\"echo\":\"context length exceeded or quota balance\"}}"
+	if got := DefaultClassify(400, []byte(debugBody)); got != core.ErrClient {
+		t.Errorf("got %v, want ErrClient", got)
+	}
+}

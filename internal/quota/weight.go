@@ -83,6 +83,7 @@ func ApplyModelMultiplier(l core.Limit, model string, d Counters, estimated floa
 		CacheWrite: d.CacheWrite * mult,
 		Out:        d.Out * mult,
 		Requests:   d.Requests * mult,
+		Cost:       d.Cost,
 	}, estimated * mult
 }
 
