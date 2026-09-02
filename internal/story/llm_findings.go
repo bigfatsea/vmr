@@ -262,7 +262,16 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	if err := parseJSONFromLLM(res.Text, &item); err != nil {
 		return nil
 	}
-	if item.DriftDetected && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" && item.DriftStepSeq > 0 {
+	// Step 1 IS the root intent by construction (extractRootUserIntent
+	// returns the first user message's text) — any "drift anchored at
+	// step 1" verdict is a contradiction in terms, and the observed
+	// failure mode (LLM occasionally returns DriftStepSeq:1, see review
+	// P-09 / KNOWN_ISSUES §2.53) is exactly that category mistake. The
+	// evidence pack's first checkpoint is Step 1 by buildGoalDriftPack's
+	// own loop, so this guard also keeps "first checkpoint" and "drift
+	// anchor" on different steps and prevents the same step from being
+	// cited as both the root and the departure from it.
+	if item.DriftDetected && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" && item.DriftStepSeq > 1 {
 		tx := i18n.StoryFindings(lang)
 		fText := tx.GoalDrift(item.DriftStepSeq, sanitizeMDStruct(item.DriftExplanation))
 		action := sanitizeMDStruct(item.SuggestedAction)

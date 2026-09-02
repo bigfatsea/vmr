@@ -245,6 +245,69 @@ data: [DONE]`},
 	}
 }
 
+// TestP1b3_GoalDrift_AnchoredAtStep1IsRejected pins review P-09
+// (KNOWN_ISSUES §2.53): the LLM occasionally returns DriftStepSeq:1,
+// which is a category error — Step 1 is the root intent by construction
+// (see extractRootUserIntent), so any "drift anchored at step 1" verdict
+// is a contradiction in terms. The detector must reject it silently
+// rather than emit a finding that points to the root as its own
+// departure, which renders the finding page nonsensical.
+func TestP1b3_GoalDrift_AnchoredAtStep1IsRejected(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
+	var recs []audit.Record
+	var msgs []any
+	msgs = append(msgs, msg("user", "Fix auth login bug in router.go"))
+	recs = append(recs, audit.Record{
+		TS: at(0), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{
+			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+				"model": "agent", "messages": msgs,
+			}},
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Starting bug fix."}}]}
+data: [DONE]`},
+		},
+	})
+	msgs = append(msgs, msg("assistant", "Starting bug fix."))
+	for i := 1; i <= 8; i++ {
+		msgs = append(msgs, msg("user", "continue"))
+		recs = append(recs, audit.Record{
+			TS: at(i), DurMS: 100, Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+			Client: audit.Exchange{
+				Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
+					"model": "agent", "messages": msgs,
+				}},
+				Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Refactoring Makefile."}}]}
+data: [DONE]`},
+			},
+		})
+		msgs = append(msgs, msg("assistant", "Refactoring Makefile."))
+	}
+
+	path := writeJSONL(t, recs)
+	l := onlyLineage(t, path)
+	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	canned := `{
+  "drift_detected": true,
+  "drift_step_seq": 1,
+  "confidence": "HIGH",
+  "evidence_anchor": "初始目标本身就是偏离，跳过该检测",
+  "drift_explanation": "与根意图冲突",
+  "suggested_action": "丢弃此判定"
+}`
+	srv := mockLLMServer(t, canned)
+	defer srv.Close()
+
+	opts := LLMOptions{Addr: srv.Listener.Addr().String(), Model: "agent"}
+	findings := detectLLMGoalDrift(context.Background(), j, opts, i18n.ZH)
+	if len(findings) != 0 {
+		t.Fatalf("DriftStepSeq=1 must be rejected as a category error, got %d finding(s): %#v", len(findings), findings)
+	}
+}
+
 func TestP1b4_CompactionConstraintDropped(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 16, 10, m, 0, 0, time.UTC) }
 	sys := msg("system", "Strict Rule: Never modify schema.sql under any circumstances.")
