@@ -30,7 +30,8 @@ skills-lock.json
 coverage.html
 
 # Scratch
-/_tmp/
+_tmp
+_review
 /scratch_vmr
 
 # OS / editor
