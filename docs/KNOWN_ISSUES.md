@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§2 分布**：高危 0、中危 3（`2.2`/`2.17`/`2.18`）、低危 26，合计 29。无 `[中低]` 条目。
+- **§2 分布**：高危 0、中危 3（`2.2`/`2.17`/`2.18`）、低危 38，合计 41。无 `[中低]` 条目。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
 
 ---
@@ -77,6 +77,9 @@
 - **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的命名形态不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.map`/`overrides` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `map`/别名先钉（优先级更高）。
 - **多协议适配器（`adapter/{openai,anthropic,openairesponses}`）保持独立子包**：三协议底层已有真实分叉（Anthropic 529 特判、Responses 顶层 `input` 数组与 `RewriteInputRoles`、`x-api-key` vs `Authorization`）；独立子包支持编译期 `init()` 注册与独立单测，新增协议零侵入。合并成参数化结构体只是把多态改写为字符串 `if` 分支。
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
+- **`TopLevelProbe` 的契约是「探测」不是「校验」，不检查尾随字节**：它回答「这团字节是不是某个协议的对话请求」（结构探测，供 `RequestFacts` 与 sticky 指纹用），不承诺「字节流在探针返回的结构之后没有尾随垃圾」。
+  加尾随检查会背离字节保真透传：透传层本就把原样字节直送上游，多余的校验只会把合法流量拦下来。
+  **适用于**：判断「能不能按协议语义解析出会话形状」。**不适用于**：把它当请求合法性校验器（那不是它的职责）。
 - **不合并 `Dimension`（排序）与 `Condition`（淘汰）**：淘汰依赖请求事实，排序只比较端点属性，职责分离保证接口纯粹。
 - **ProviderGroup 的多 Key（`api_keys:`）已实现，运行时均衡与分级 Failover 仍不做**：早先设想的运行时 KeyPool（请求期在池内随机选 Key）会违反 `core.Endpoint` 「构造后不可变、`HealthKey()` 只算一次」这条贯穿 health/sticky/quota 的不变式。实际落地是「配置期展开成多个独立 `core.Endpoint`」：`Provider.APIKeys`（`{label: key}`）在 `config.Parse` 里展开成 `<name>-<label>` 命名的独立 `Provider` 并就地重写引用，下游全部按 `Provider.Name` 字符串解析、零改动。当初设想的三处工作，前两处被这个展开形状架构性绕开（均衡：谁排第一不可预先指定，只能读 `vmr check` 的实际展开结果，没配 quota 时排第一的吃全部流量；配额聚合：每把 key 独立 Provider 名、独立 quota 池，对齐难题不存在了），第三处（分级 Failover：402 跳 Key / 5xx 跳 Provider）维持原判，留到看到真实需求。
 
@@ -94,7 +97,8 @@
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
 - **`.parse-cache/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr report`/`vmr story` 均可从空缓存目录冷启动。触发条件：`.parse-cache/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。
-- **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参——只有单条下钻、`-compare`、`-render-all` 传 `true`；默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标（`Manifest.Req` 的纯函数），不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`：`vmr analyze` 先跑 story 半区（可能已批量物化）再跑 report 半区，纯 flag 判据会谎报「没写详单」或反之——改查 `r.DetailFile` 是否真实存在（一次 `os.ReadDir` 建 set）。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」，人为改回无条件物化当场失败。这条纪律反复退化过四次，这次靠测试锁死。
+- **`.parse-cache/` 分片文件名是内容哈希、cache key 是内嵌 `CanonicalPath`，两者刻意不对齐**：文件名=内容哈希使同名冲突天然不可能（两份不同内容各得各的分片），代价是「从审计文件路径反查分片」必须遍历读内嵌字段——`LoadCacheDir` 本就是 best-effort 全扫描，这个代价在契约内。运维侧想按路径定位分片时 grep `CanonicalPath` 即可，不要改成路径哈希命名（会重新引入内容冲突的命名空间问题）。
+- **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参--只有单条下钻、`-compare`、`-render-all` 传 `true`;默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标(`Manifest.Req` 的纯函数),不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`:`vmr analyze` 先跑 story 半区(可能已批量物化)再跑 report 半区,纯 flag 判据会谎报「没写详单」或反之--改查 `r.DetailFile` 是否真实存在(一次 `os.ReadDir` 建 set)。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」,人为改回无条件物化当场失败。这条纪律反复退化过四次,这次靠测试锁死。
 
 ### 1.4 包边界与依赖
 
@@ -108,6 +112,7 @@
 - **`adapter` 的协议字段字面量（`"model"`/`"stream"`/`"messages"`/`"input"`）不从 `jsonscan` 导出复用**：它们是不可变字节常量而非共享状态；「知道这些字段名的含义」正是把 `SessionFingerprint`/`TopLevelProbe` 留在 `adapter` 的领域知识。（`jsonscan` 自身的准入措辞 2026-09 已重写，见下条。）
 - **`jsonscan` 的 `RewriteModel`/`RewriteRoles`/`RewriteInputRoles` 留在 `jsonscan`，不迁 `adapter`**（2026-09 Q17 收敛）：原评审指出「同批协议字面量在 `jsonscan` 包文档与 `adapter` 得出两个相反归属结论」，最终以重写 `jsonscan` 包文档的边界规则消除，而非移动代码——「字节级扫描与 splice 改写引擎」整体归 `jsonscan`（含带协议字段字面量的改写函数，fuzz 覆盖在此包），「协议路由语义、适配器构造、错误分类」归 `adapter` 及以上。旧表述「需要具体字段名的函数不属于 `jsonscan`」已废止，**不要再提案移动这批改写函数或恢复旧措辞**。
 - **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`；`ModelLabel` 也下沉 `fmtutil`（2026-09 复核：其签名不含任何 core 类型，是纯展示格式化，两个调用方本就 import `fmtutil`，无依赖两难，不构成例外）；`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
+- **`archtest` 的包边界守卫是单向的，与规则本身同构**：CLAUDE.md 的不变量「分析半区不 import 路由半区」是单向禁令，`import_boundaries_test` 只需要守这一半；「audit JSONL 记录是唯一耦合」那半句是**数据流事实**，不是另一条可机检的 import 规则，不存在对应护栏也不需要有。不要因为「只守了一半」提案加反向守卫——反向（路由 import 分析）本来就是合法的依赖方向。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的 26 个微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
@@ -128,7 +133,7 @@
 - **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §2.51。
 - **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
 - **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
-- **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗降级不淘汰**：旧规则豁免同桶候选的理由是"用户可以走开几天再回来接同一个 anchor"——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。**适用于**：机器生成的周期性流量。**不适用于**：真的走开三天回来接着聊的人——所以是降级为 `AmbiguousMatch` 保留边供人查看，不是让它消失进 `NoPredecessorFound`。
+- **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗候选预过滤出局，最强者仅作诊断兜底**：旧规则豁免同桶候选的理由是“用户可以走开几天再回来接同一个 anchor”——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。2026-09 收敛为**淘汰优先于排序**（与 `strategy` 包 `Condition`/`Dimension` 分离同型）：超窗候选不参与赢家竞争，避免「高分超窗者先赢再降级」遮蔽窗内合法前驱；仅当过滤后无任何窗内候选时，最强超窗者作为降级 `AmbiguousMatch` 边保留供人查看——真的走开三天回来接着聊的人不会消失进 `NoPredecessorFound`。
 - **消息内容哈希剥离 Anthropic 的 `cache_control` 标记**：`cache_control` 是缓存控制元数据，不是对话内容；客户端逐轮移动缓存断点会改变哈希，把一次纯 Append 误判成内容编辑，整条 lineage 谱系失真。**证据状态要如实说**：机制已从代码确认（`hashJSON` 对原始消息对象全字段哈希，标记确实进哈希输入），但本机语料太小（36KB / 1 条 anthropic 记录 / 0 条 `cache_control` 命中），**按协议拆 Append 比例无法产生统计意义，未能从语料实证**。剥离本身严格更正确，故仍实施。**已知副作用**：消息内容载荷里键名恰为 `cache_control` 的（如工具结果回显）也会被剥离——只影响哈希与 lineage 判定，不影响存储内容与渲染。
 - **详情页在 `report` 与 `story` 之间字节一致，靠的是两侧传入同一个 `(record, manifest, prev)` 三元组 + 指纹携带 `m`/`prev` 身份**：只做其中一半都不够。`report` 侧曾在 `group()` 里对 compaction 记录先 `continue` 再赋值 manifest，于是它的 manifest 恒为 nil，而 `story` 侧传的是真实 manifest；渲染指纹只含 lang/evidence，于是同名文件**先写者赢**——用户拿到哪个版本取决于先跑 `vmr report` 还是 `vmr story`。补上 manifest 消除差异源，指纹折入身份防同类复发。
 - **`archtest` 的文档守卫不扩展到 review 报告类文档**：守卫只覆盖 `CLAUDE.md`、设计文档、本文件与用户指南。review 报告会正当地讨论已删除的文件与「建议新增的 XXX 函数」。真正的风险（一份陈旧 review 被当施工依据）**用定位而非机制解决**：权威的当前状态清单只有本文件。
@@ -195,6 +200,12 @@
 - **现状**：`internal/chatmsg` 43 处 `map[string]any`，全在离线消息/SSE/usage 解析路径。转发热路径实测零命中。
 - **决定不做**：2026-08 内存分析在真实语料上直接测了这一层——`audit.Record` 反序列化后的 live heap 相对原始 JSON 字节只放大 **1.40x**（审计记录绝大部分是长文本对话正文，`string` 只有 16 字节 header，结构开销被文本稀释）。把 `Body` 从 `any` 改成 `json.RawMessage` 延迟解析最多省 29%，不改变量级，却要改动 `story`/`report`/`reqdetail`/`chatmsg` 里几十处 `.(map[string]any)` 断言——投入产出比最差。story 半边的内存问题另有真因（见 §2.2），已单独解决。
 - **触发条件**：真实 profile 显示某个离线聚合路径的时间/内存确由 `map[string]any` 分配主导（当前证据相反）。
+
+#### 2.69 [低，登记待触发] `searchableTranscript` 大语料下 O(N²) 全量物化
+
+- **现状**：`internal/story/llm_findings.go` 的 `searchableTranscript` 为每次锚点校验把 Journey 的转录本整体拼接成字符串。校验次数 × 转录本长度是乘积关系，大语料下是分析半区唯一的复杂度悬崖。
+- **可能方案**：校验改在已分片文本上逐段 `Contains`（锚点语义不变），或对超长 Journey 截断校验域并明示。
+- **触发条件**：`vmr analyze -llm` 在真实大语料上出现可感知的耗时占比（当前无实测瓶颈）。
 
 
 ### B. 分析半区 · 指标与口径正确性
@@ -264,6 +275,12 @@
 - **现状**：`cmd/vmr/cmd_story_report_crosscheck_test.go` 的夹具里没有 summarization（compaction）请求，因此“report 与 story 对同一条 compaction 记录渲染逐字节相同的 detail 页”（R72）在该端到端测试里没有直擦形态的覆盖——实际由 report 侧单元测试（`session_compaction_manifest_test.go`）加指纹机制（`renderFingerprint` 折入 m/prev 身份）间接保证。
 - **触发条件**：语料出现真实的 compaction 记录后，往 crosscheck 夹具补一条 body-sniffed summarization 记录，让字节一致性有端到端直证。在那之前不构成已知失真——两条直接测试已钉住机制本身。
 
+#### 2.70 [低，登记待触发] `buildRec2` 的 (path, line) join 依赖审计日志追加不变性，无时间戳交叉校验
+
+- **现状**：`internal/report/recextract.go` 把 parse-cache 的 `recordFacts` 与会话分析的 `ReqInfo` 按 (path, line) 配对。审计日志是追加型的（压缩轮转生成新 path、哈希变化自然 miss），常规运维下两侧永不错位；但手工编辑/拼接历史日志会让同一 (path, line) 指向不同记录，配错完全静默。
+- **可能方案**：join 前对 `rf.TS` 与 `ri.TS` 做阈值校验（如差 > 1s 记 warning 并跳过 join）。
+- **触发条件**：出现「对已归档日志做手工编辑」的运维形态，或用户报告无法解释的指标错乱。在那之前这是加固项，不是缺陷。
+
 
 ### C. 分析半区 · LLM 解读层校准
 
@@ -311,6 +328,25 @@
 - **现状**：`.parse-cache/` 有 `CacheSchemaVersion`，`journey-<id>.json` 无等价机制——P4 前后生成的旧/新文件字段名相同、形状不同，消费者无法仅凭文件本身分辨。
 - **为什么暂不做**：YAGNI + 已裁决「JSON 无外部脚本消费」——`journey-<id>.json` 至今唯一已知程序化消费方是 `_eval/calibrate_p1b.go`（只读 `EvidenceAnchor`）。没有消费者，就没有人需要探测版本。
 - **触发条件**：出现第一个 `_eval/` 之外的程序化消费方。加 `schema_version int` 成本接近零，但改在下次新增字段时最便宜。
+
+#### 2.71 [低，预防项] `renderFingerprint` 未折入 `taskseg.Profile` 身份
+
+- **现状**：详单渲染指纹（`reqdetail/render.go`）折入 lang 与 `(m, prev)` 身份，但不折入 `Profile`。当前两个 Profile（`OpenClawAware`/`Generic`）恰好不产生渲染差异，指纹缺失无后果；一旦某个 Profile 的措辞进入渲染输出，同坐标不同 Profile 的两次运行会因指纹相同而跳过重写，留下旧版页面。
+- **可能方案**：指纹加 Profile 名，一行；或维持现状并依赖「渲染输出变了指纹必须跟着变」的 review 纪律。
+- **触发条件**：任何 Profile 差异开始影响详单字节。在那之前是登记，不是缺陷。
+
+#### 2.72 [低] `FileNameForRecord` 与 `FileNameForManifest` 的 `realModel` 来源不同，同一记录可能产生两个文件名
+
+- **现状**：两个命名入口对 `realModel` 的取源不一致（一个取 Attempt 上报值、一个取 Manifest），Attempt 未上报 upstream model 的记录两条路径产出不同坐标哈希，`details/` 里可能出现同记录双页。
+- **当前缓解**：UpstreamModel 仅在与请求名不同时才记录（绝大多数记录不携带），实际触发面极窄；文件名仅是坐标容器，内容仍各自正确。
+- **可能方案**：统一取源（以 audit Attempt 为准），或在文件名冲突检测中兼容双坐标。
+- **触发条件**：实际观察到 `details/` 出现同记录双页，或文件名要做外部契约。
+
+#### 2.73 [低-中，暂不做] LLM 自由文本的 `<`/`>` 未净化即进 `.md` 产物
+
+- **现状**：`sanitizeMDStruct`（`story/llm.go`）只处理 Markdown **结构**破坏（反引号/竖线/行首标记），不处理 `<`/`>`。LLM 判别器输出的类 HTML 片段会原样进入 `.md` 文件。
+- **为什么暂不做**：产物是本地文件，不是 web 渲染面（HTML 侧转义已由 `mdlite` 全量覆盖，`<script>` 进不去）；Markdown 阅读器对裸 `<...>` 的降级仅是显示瑕疵。
+- **触发条件**：产物开始被 web 化渲染，或出现把 `.md` 直接转 HTML 的新消费方——届时在转换层做 HTML 转义，而不是提前在数据层碰文本。
 
 
 ### E. 分析半区 · 新能力（视图 / 导出 / 信号）
@@ -388,6 +424,37 @@
 - **为什么非活跃**：Go `image/png` 把 IHDR 宽高钳在 `int32`，64-bit（唯一 CI/目标平台）乘积 ≤ (2³¹)² < `int64` 上限，不可能溢出。
 - **修法（触发时）**：`int64(cfg.Width) * int64(cfg.Height)`，一行。**触发条件**：32-bit 成为受支持的构建/部署目标。
 
+#### 2.74 [低] `attachmentSpans` 对大 body 重复扫描
+
+- **现状**：`internal/server/facts.go` 的 `attachmentSpans` 每次调用线性扫描全 body；同一请求的 facts 提取路径上存在多次扫描的形态，大 body（多图/长文）下重复开销。
+- **为什么待定**：这是性能项而非安全项——本地单用户运行，客户端即操作员；无超时风险敞口。
+- **触发条件**：profile 显示 facts 提取在真实负载耗时中占比可感知。
+
+#### 2.75 [低] 配置 hot-reload 在高频写入下可乱序
+
+- **现状**：`internal/config/watch.go` 的 reload 管线在高频连续写入时，事件到达顺序不保证与写入顺序一致，存在短暂加载到「新产物与旧校验交错」的混合态窗口。
+- **当前缓解**：触发面窄（需要亚秒级连续改写 config.yaml），且混合态每次都会重新走完整校验，不是「未校验状态上线」。
+- **可能方案**：reload 合并与去抖（debounce）+ 序号丢弃过期事件。
+- **触发条件**：出现外部自动化高频改写 config.yaml 的运维形态。
+
+#### 2.76 [低] 空 `api_key` 定级为 `SeverityError`，某些自建上游属合法形态
+
+- **现状**：`internal/config/check.go` 的 `checkProviders` 对空 `api_key` 发 `Issue`（零值即 SeverityError），会 fail `vmr check` 并跳过 `diagnose` 网络阶段。但无鉴权的自建上游（内网 vLLM/llama.cpp）空 key 是合法配置，不是遗漏。
+- **可能方案**：按 `base_url` 形态分级——公网地址空 key 保持 Error，内网/localhost 降为 Warning。
+- **触发条件**：真实用户被这条 Error 挡住诊断流程。
+
+#### 2.77 [低，加固项] 评分层无 NaN 纵深防御
+
+- **现状**：`quota` 评分路径的输入由加载期与写入期校验挡住（NaN/±Inf 进不来），评分本身无二次防御。当前不可达。
+- **可能方案**：评分入口加 `math.IsNaN`/`IsInf` 兜底归零。
+- **触发条件**：出现绕过既有校验层直接构造 Counters 的新调用方（如未来的导入/迁移工具）。
+
+#### 2.78 [低] `imgprep` anthropic 分支的解码失败静默丢弃原图
+
+- **现状**：`imgprep` 处理失败时的 `recover` 回退分支按设计不可修（防炸弹的最后防线）；但 anthropic 消息分支的解码失败会静默丢弃附件、不记 warning，操作员无法从日志得知上游收到了一份「没有图」的请求。
+- **可能方案**：该分支失败时记一条 warning（不影响透传语义——原图字节不动，仅提示降维未生效）。
+- **触发条件**：实际排查一次「上游说没收到图」的工单时顺手修。
+
 
 ### G. 工程工具与运维入口
 
@@ -402,6 +469,19 @@
 - **现状**：`funcLineExemptions` 以 `文件:函数名` 为键，同文件重名方法共用一条（如 `report/ingest.go` 6 个 `Ingest`）。今天全部远低于默认限额，无影响；一旦为其一登记豁免，其余会一并放宽。
 - **可能方案**：键改 `文件:接收者类型.函数名`（`ast.FuncDecl.Recv` 已有类型信息）。
 - **为什么待定**：需真的出现一个必须豁免的重名方法才有意义。
+
+#### 2.79 [低] 弃用别名 `vmr story` 的 flag 校验宽于 `vmr analyze`
+
+- **现状**：迁移期别名 `vmr report`/`vmr story` 与主入口 `vmr analyze` 的 flag 集合存在漂移，个别 flag 别名仍接受而主入口已收紧——方向反了：别名应窄于或等于主入口，否则用户按别名写死的脚本在迁移后会突然不可用。
+- **可能方案**：别名入口复用主入口的同一套 flag 解析，差异只在弃用提示。
+- **触发条件**：下一次碰 CLI flag 层时顺带对齐；单独排期不值。
+
+#### 2.80 [低] `sysinfo` 把系统调用失败折叠成 0，违反「missing is not zero」
+
+- **现状**：`internal/sysinfo` 的 `DirTotalSize`/`DiskFreeBytes` 在目录不可读或调用失败时返回 0——与「磁盘真的满/目录真的为空」在返回值上不可区分，状态看板可能把「读不到」显示成「用量为零」。
+- **为什么待定**：消费方是本地状态展示，错误折叠的误导面小；真正「missing is not zero」的纪律挂在会进报表与配额决策的数字上。
+- **可能方案**：返回 `(value, ok)` 并让消费方显式展示 unknown。
+- **触发条件**：状态看板数字开始参与任何自动决策（而不仅是人看）。
 
 
 ---
