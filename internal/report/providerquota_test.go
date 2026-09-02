@@ -2,6 +2,8 @@
 package report
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -548,5 +550,101 @@ func TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct(t *tes
 	}
 	if rows[0].WindowUnpricedPct != 0 {
 		t.Errorf("WindowUnpricedPct = %v, want 0 — the nil WindowConsumed already says everything", rows[0].WindowUnpricedPct)
+	}
+}
+
+// TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider pins
+// P-5-2's accumulation: an EndpointsAll row whose provider is not in the
+// quotas map is counted (per row) and its provider name recorded, so the
+// §2.5 renderer can surface traffic that contributed nothing to the window
+// recomputation. Rows that DO resolve are never counted.
+func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing.T) {
+	resetSkipInfo()
+	lim := requestsLimit(1000)
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai-completions:acct1:m", Requests: 3, Forwarded: 3},
+		{Endpoint: "openai-completions:ghost-account:m2", Requests: 5, Forwarded: 5},
+		{Endpoint: "anthropic-messages:ghost-account:m3", Requests: 2, Forwarded: 2},
+	}}
+	buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if lastSkippedAttempts != 2 {
+		t.Fatalf("lastSkippedAttempts = %d, want 2 (one EndpointsAll row per unknown provider)", lastSkippedAttempts)
+	}
+	// Both unknown rows carry the same provider name (ghost-account), so the
+	// name list has one entry — the count-descending sort renders it first.
+	if len(lastSkippedProviders) != 1 || lastSkippedProviders[0] != "ghost-account" {
+		t.Fatalf("lastSkippedProviders = %v, want [ghost-account]", lastSkippedProviders)
+	}
+}
+
+// TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders sorts the
+// unknown-provider list by descending row count (ties by name) — the order
+// renderSkippedAttemptsNote takes its first three from.
+func TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders(t *testing.T) {
+	resetSkipInfo()
+	lim := requestsLimit(1000)
+	rep := &Report2{EndpointsAll: []EndpointRow{
+		{Endpoint: "openai-completions:acct1:m", Requests: 1, Forwarded: 1},
+		{Endpoint: "openai-completions:z-rare:m2", Requests: 1, Forwarded: 1},
+		{Endpoint: "openai-completions:a-common:m3", Requests: 5, Forwarded: 5},
+		{Endpoint: "openai-completions:a-common:m4", Requests: 2, Forwarded: 2},
+	}}
+	buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
+	if lastSkippedAttempts != 3 {
+		t.Fatalf("lastSkippedAttempts = %d, want 3", lastSkippedAttempts)
+	}
+	want := []string{"a-common", "z-rare"} // a-common has 2 rows, z-rare has 1
+	if len(lastSkippedProviders) != 2 || lastSkippedProviders[0] != want[0] || lastSkippedProviders[1] != want[1] {
+		t.Fatalf("lastSkippedProviders = %v, want %v", lastSkippedProviders, want)
+	}
+}
+
+// resetSkipInfo zeroes the package-level skip-info vars (set by
+// buildProviderQuotaRows, read by renderSkippedAttemptsNote) so each test
+// starts from a clean slate — tests in this file are not parallel, so plain
+// assignment is safe.
+func resetSkipInfo() {
+	lastSkippedAttempts = 0
+	lastSkippedProviders = nil
+}
+
+// TestRenderSkippedAttemptsNote renders the P-5-2 note line from the
+// package-level skip info set by buildProviderQuotaRows. The exact format is
+// pinned here so the renderer (section_provider.go's renderProviderQuotaTable,
+// wired by the lead) stays byte-stable.
+func TestRenderSkippedAttemptsNote(t *testing.T) {
+	resetSkipInfo()
+	lastSkippedAttempts = 2
+	lastSkippedProviders = []string{"ghost-a", "ghost-b"}
+	var b strings.Builder
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	want := "> 2 attempts skipped (unknown provider: ghost-a, ghost-b)\n"
+	if b.String() != want {
+		t.Fatalf("note = %q, want %q", b.String(), want)
+	}
+}
+
+// TestRenderSkippedAttemptsNote_MoreThanThreeNames caps the name list at
+// three, with a "+N more" tail — the format the task pins.
+func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
+	resetSkipInfo()
+	lastSkippedAttempts = 9
+	lastSkippedProviders = []string{"p1", "p2", "p3", "p4", "p5"}
+	var b strings.Builder
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	want := "> 9 attempts skipped (unknown provider: p1, p2, p3, … +2 more)\n"
+	if b.String() != want {
+		t.Fatalf("note = %q, want %q", b.String(), want)
+	}
+}
+
+// TestRenderSkippedAttemptsNote_NoSkipsRendersNothing: a clean window (no
+// unknown providers) must not add a note line under the §2.5 table.
+func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
+	resetSkipInfo()
+	var b strings.Builder
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) })
+	if b.Len() != 0 {
+		t.Fatalf("no-skips note = %q, want empty", b.String())
 	}
 }

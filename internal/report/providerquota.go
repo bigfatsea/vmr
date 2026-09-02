@@ -52,6 +52,10 @@ func refMatchesModel(ref ProviderQuotaRef, model string) bool {
 // empty — the common "no account declares quota:" case, so the caller (and
 // the renderer) can treat "no sub-table" and "nil" the same way.
 func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, now, windowFrom, windowTo time.Time) []ProviderQuotaRow {
+	// Reset the package-level skip info so a quota-less report (nil rows)
+	// doesn't carry stale state from a previous run in the same process.
+	lastSkippedAttempts = 0
+	lastSkippedProviders = nil
 	if len(quotas) == 0 {
 		return nil
 	}
@@ -149,7 +153,34 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 		}
 		return strings.Join(a.Models, ",") < strings.Join(b.Models, ",")
 	})
+	// Expose the accumulated skip info for renderSkippedAttemptsNote
+	// (P-5-2): package-level so the renderer can read it without changing
+	// buildProviderQuotaRows' signature (called from aggregate.go, which is
+	// outside this change's whitelist). The report build is single-threaded
+	// (aggregate.go's finishBuckets) and completes before any renderer runs.
+	lastSkippedAttempts = acc.skippedAttempts
+	lastSkippedProviders = sortedSkippedProviders(acc.unknownProviders)
 	return rows
+}
+
+// sortedSkippedProviders flattens the unknown-provider map into a
+// deterministic name list, ordered by descending row count (ties broken by
+// name) — the order renderSkippedAttemptsNote takes its first three from.
+func sortedSkippedProviders(m map[string]int) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if m[names[i]] != m[names[j]] {
+			return m[names[i]] > m[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	return names
 }
 
 // quotaWindow is buildProviderQuotaRows' per-ref fan-in, keyed by refKey
@@ -164,6 +195,46 @@ type quotaWindow struct {
 	costAnyPriced       map[string]bool
 	costReqs            map[string]int
 	costUnpricedReqs    map[string]int
+
+	// skippedAttempts counts EndpointsAll rows whose provider name is not
+	// found in the quotas map — traffic from accounts not tracked by any
+	// quota window. These rows contribute nothing to the recomputed
+	// consumption figures and were previously silently dropped (P-5-2).
+	skippedAttempts int
+	// unknownProviders maps each unknown provider name to the number of
+	// EndpointsAll rows that carried it, collected during the same loop.
+	unknownProviders map[string]int
+}
+
+// lastSkippedAttempts and lastSkippedProviders hold the skip info from the
+// most recent buildProviderQuotaRows call, set at the end of that function.
+// Accessed by renderSkippedAttemptsNote — the renderer section_provider.go's
+// renderProviderQuotaTable calls when the host block is wired (P-5-2).
+var (
+	lastSkippedAttempts  int
+	lastSkippedProviders []string
+)
+
+// renderSkippedAttemptsNote writes a single line under the §2.5 quota table
+// when some EndpointsAll rows carried a provider name not found in the
+// quotas map — traffic that contributed nothing to the window recomputation
+// (P-5-2). The format lists the first 3 unknown provider names plus a
+// remaining count when there are more. Called from renderProviderQuotaTable
+// after the table itself; stores the data here (package-level) so the
+// renderer in section_provider.go can read it without needing to re-parse
+// the rows — see renderSkippedAttemptsNote's own doc comment.
+func renderSkippedAttemptsNote(w func(string, ...any)) {
+	if lastSkippedAttempts == 0 {
+		return
+	}
+	names := lastSkippedProviders
+	if len(names) > 3 {
+		w("> %d attempts skipped (unknown provider: %s, %s, %s, … +%d more)\n",
+			lastSkippedAttempts, names[0], names[1], names[2], len(names)-3)
+	} else {
+		w("> %d attempts skipped (unknown provider: %s)\n",
+			lastSkippedAttempts, strings.Join(names, ", "))
+	}
 }
 
 // accumulateQuotaWindow folds rep.EndpointsAll into per-ref totals in each
@@ -183,6 +254,7 @@ func accumulateQuotaWindow(rep *Report2, quotas map[string][]ProviderQuotaRef) q
 		costAnyPriced:       map[string]bool{},
 		costReqs:            map[string]int{},
 		costUnpricedReqs:    map[string]int{},
+		unknownProviders:    map[string]int{},
 	}
 	// windowEstimated/windowCostEstimated: the share of windowSums that came
 	// from the degraded estimate rather than sniffed usage — same numerator
@@ -203,6 +275,8 @@ func accumulateQuotaWindow(rep *Report2, quotas map[string][]ProviderQuotaRef) q
 		provider, model := splitEndpointProviderModelAny(e.Endpoint)
 		refs, ok := quotas[provider]
 		if !ok {
+			acc.skippedAttempts++
+			acc.unknownProviders[provider]++
 			continue
 		}
 		for _, ref := range refs {
