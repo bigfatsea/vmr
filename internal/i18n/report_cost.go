@@ -38,6 +38,10 @@ type CostText struct {
 	// IncompleteRateNote states how many endpoints were priced through a
 	// rate missing at least one component — their $ figure is low, not wrong.
 	IncompleteRateNote func(n int) string
+	// CurrencyFallbackNote is appended to Disclaimer when a display
+	// currency was requested but the rate to it was never configured, so
+	// the figures stayed in the computation currency.
+	CurrencyFallbackNote func(requested, actual string) string
 }
 
 func Cost(lang Lang) CostText {
@@ -72,6 +76,9 @@ func Cost(lang Lang) CostText {
 			IncompleteRateNote: func(n int) string {
 				return fmt.Sprintf("> 有 %d 个端点的单价缺分量（如厂商未公布 cache_read/cache_write）：缺失分量按 0 计价，这些端点的成本是**系统性偏低**的下界，不是准确值。", n)
 			},
+			CurrencyFallbackNote: func(requested, actual string) string {
+				return "（请求以 " + requested + " 展示，因未配置汇率，降级以 " + actual + " 展示）"
+			},
 		}
 	}
 	return CostText{
@@ -103,6 +110,9 @@ func Cost(lang Lang) CostText {
 		},
 		IncompleteRateNote: func(n int) string {
 			return fmt.Sprintf("> %d endpoint(s) were priced through a rate missing at least one component (a vendor that publishes no cache_read/cache_write price). A missing component prices as 0, so those endpoints' cost is a systematically LOW bound, not an accurate figure.", n)
+		},
+		CurrencyFallbackNote: func(requested, actual string) string {
+			return " (requested " + requested + " display, but no exchange rate configured; defaulted to " + actual + ")"
 		},
 	}
 }

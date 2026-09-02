@@ -280,10 +280,12 @@ var aggregatorVendors = map[string]bool{
 // IsAggregatorVendor reports whether vendor (a canonical-key prefix) resells
 // other vendors' models rather than originating its own — see
 // aggregatorVendors' own doc comment for the reasoning and the measured
-// basis. Exported so tools/gen_standard_pricing can compute the SAME
-// single-first-party-vendor alias set this package's own
-// LookupPreferredSuffix would resolve to, rather than an independent
-// classification the two could silently drift apart on.
+// basis. No production caller today: the shared criterion is
+// Table.Ambiguities, which tools/gen_standard_pricing consumes and whose
+// implementation consults aggregatorVendors directly — this func only
+// re-exposes that set. Deleting it also requires retiring its citation in
+// docs/VirtualModelRouter_Design_v4_Quota.md, so it stays until that edit
+// and this one can land together.
 func IsAggregatorVendor(vendor string) bool { return aggregatorVendors[vendor] }
 
 // vendorOf returns the canonical key's vendor prefix ("gemini" for

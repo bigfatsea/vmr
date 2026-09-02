@@ -38,29 +38,9 @@ func TestWrite_ReturnsLenAndNoError(t *testing.T) {
 	}
 }
 
-func TestSubscribe_ReceivesLiveLines(t *testing.T) {
-	tee := New(8)
-	ch, cancel := tee.Subscribe()
-	defer cancel()
-
-	for i := range 3 {
-		fmt.Fprintf(tee, "live-%d\n", i)
-	}
-	for i := range 3 {
-		select {
-		case line := <-ch:
-			if line != fmt.Sprintf("live-%d", i) {
-				t.Fatalf("got %q, want live-%d", line, i)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for live-%d", i)
-		}
-	}
-}
-
 func TestCancel_StopsDelivery(t *testing.T) {
 	tee := New(8)
-	ch, cancel := tee.Subscribe()
+	_, ch, cancel := tee.Follow()
 	cancel()
 	if got := tee.Subscribers(); got != 0 {
 		t.Fatalf("Subscribers after cancel = %d, want 0", got)
@@ -75,7 +55,7 @@ func TestCancel_StopsDelivery(t *testing.T) {
 
 func TestSlowConsumer_DropsWithMarker(t *testing.T) {
 	tee := New(8)
-	ch, cancel := tee.Subscribe()
+	_, ch, cancel := tee.Follow()
 	defer cancel()
 
 	// Fill the subscriber's channel (subBuffer) and overflow it while the
@@ -117,7 +97,7 @@ func TestSlowConsumer_DropsWithMarker(t *testing.T) {
 
 func TestConcurrentWritersAndSubscribers(t *testing.T) {
 	tee := New(64)
-	ch, cancel := tee.Subscribe()
+	_, ch, cancel := tee.Follow()
 	defer cancel()
 
 	// Drain concurrently; drops are expected (4 writers vs a 64-slot

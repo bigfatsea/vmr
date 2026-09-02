@@ -43,11 +43,7 @@ func (p *Pricing) Disclaimer(lang i18n.Lang) string {
 	}
 	disc := i18n.Cost(lang).Disclaimer(asOf, cur)
 	if p.RequestedCurrency != "" && p.RequestedCurrency != p.Currency {
-		if lang == i18n.ZH {
-			disc += "（请求以 " + p.RequestedCurrency + " 展示，因未配置汇率，降级以 " + cur + " 展示）"
-		} else {
-			disc += " (requested " + p.RequestedCurrency + " display, but no exchange rate configured; defaulted to " + cur + ")"
-		}
+		disc += i18n.Cost(lang).CurrencyFallbackNote(p.RequestedCurrency, cur)
 	}
 	return disc
 }

@@ -55,10 +55,12 @@ func TestExpandReportEnv_RejectsYAMLStructureBreakers(t *testing.T) {
 	t.Setenv("VMR_TEST_REPORTCONFIG_NEWLINE", "line1\nline2")
 	t.Setenv("VMR_TEST_REPORTCONFIG_COLONSPACE", "a: b")
 	t.Setenv("VMR_TEST_REPORTCONFIG_COMMENT", "trailing # here")
+	t.Setenv("VMR_TEST_REPORTCONFIG_LEADINGHASH", "#injected comment")
+	t.Setenv("VMR_TEST_REPORTCONFIG_PADDEDHASH", "  # padded comment")
 	cases := []struct {
 		name string
 		env  string
-	}{{"newline", "VMR_TEST_REPORTCONFIG_NEWLINE"}, {": ", "VMR_TEST_REPORTCONFIG_COLONSPACE"}, {" #", "VMR_TEST_REPORTCONFIG_COMMENT"}}
+	}{{"newline", "VMR_TEST_REPORTCONFIG_NEWLINE"}, {": ", "VMR_TEST_REPORTCONFIG_COLONSPACE"}, {" #", "VMR_TEST_REPORTCONFIG_COMMENT"}, {"leading #", "VMR_TEST_REPORTCONFIG_LEADINGHASH"}, {"indented leading #", "VMR_TEST_REPORTCONFIG_PADDEDHASH"}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			in := "llm_key: \"${" + c.env + "}\""
@@ -67,6 +69,24 @@ func TestExpandReportEnv_RejectsYAMLStructureBreakers(t *testing.T) {
 				t.Errorf("expandReportEnv(%q) = nil error, want a hard load error", in)
 			}
 		})
+	}
+}
+
+// TestExpandReportEnv_CommentLinesStayComments is the other half of the
+// leading-# guard: a report.yaml comment line may interpolate a var, and —
+// same fail-fast rule as internal/config's expandEnv — the danger is the
+// var's VALUE, not the ${...} spelling itself. A comment line whose var is
+// unset expands to empty and stays a comment; a value containing "#" is
+// rejected above, never silently truncated.
+func TestExpandReportEnv_CommentLinesStayComments(t *testing.T) {
+	os.Unsetenv("VMR_TEST_REPORTCONFIG_UNSET")
+	got, err := expandReportEnv("# llm_key: ${VMR_TEST_REPORTCONFIG_UNSET}\nllm_key: \"plain\"\n")
+	if err != nil {
+		t.Fatalf("expandReportEnv: %v", err)
+	}
+	want := "# llm_key: \nllm_key: \"plain\"\n"
+	if got != want {
+		t.Errorf("expandReportEnv = %q, want %q", got, want)
 	}
 }
 
