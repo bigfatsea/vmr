@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"vmr/internal/core"
 	"vmr/internal/tokenutil"
 )
 
@@ -97,6 +98,57 @@ func TestExtractUsage_ResponsesJSONNoCacheDetails(t *testing.T) {
 	}
 	if u.In != 5 || u.Out != 1 {
 		t.Errorf("usage = %+v, want In=5 Out=1", u)
+	}
+}
+
+// TestExtractUsage_OpenAICompletionsGatewayDoubleCount pins the explicit
+// openai-completions protocol branch: an aggregated gateway (Cloudflare AI
+// Gateway, LiteLLM, a relay) can answer an OpenAI-protocol request with an
+// Anthropic-shaped usage object — input_tokens present, input_tokens_details
+// absent — and prompt_tokens is ALREADY the total including cache hits.
+// Without the protocol branch the code fell into the "anthropic-shaped,
+// protocol unknown" case and added cacheRead+cacheWrite on top, billing
+// 1800 for a 1000-token input (the field-presence guess has no
+// input_tokens_details to save it). The explicit branch takes
+// max(prompt_tokens, input_tokens) and never adds the cache components.
+func TestExtractUsage_OpenAICompletionsGatewayDoubleCount(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"usage": map[string]any{
+			"input_tokens":            float64(1000),
+			"output_tokens":           float64(200),
+			"prompt_cache_hit_tokens": float64(800),
+		},
+	}
+	u, ok := ExtractUsageWithProtocol(body, core.ProtocolOpenAICompletions)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if u.In != 1000 || u.CacheRead != 800 {
+		t.Errorf("usage = %+v, want In=1000 (not 1000+800 — cache already included) CacheRead=800", u)
+	}
+}
+
+// TestExtractUsage_OpenAICompletionsPrompTokens pins that the same explicit
+// branch also reads a normal OpenAI-shaped object (prompt_tokens only, no
+// input_tokens alias) without inventing a second count.
+func TestExtractUsage_OpenAICompletionsPrompTokens(t *testing.T) {
+	t.Parallel()
+	body := map[string]any{
+		"usage": map[string]any{
+			"prompt_tokens":     float64(500),
+			"completion_tokens": float64(50),
+			"prompt_tokens_details": map[string]any{
+				"cached_tokens": float64(100),
+			},
+		},
+	}
+	u, ok := ExtractUsageWithProtocol(body, core.ProtocolOpenAICompletions)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if u.In != 500 || u.CacheRead != 100 {
+		t.Errorf("usage = %+v, want In=500 CacheRead=100 (no double-add of the cached subset)", u)
 	}
 }
 

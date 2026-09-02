@@ -238,6 +238,83 @@ func TestAnalyzeSessionsGrouping(t *testing.T) {
 // must stay unlinked AND each miss must be logged, so triage can tell
 // "no relation" apart from "the needle missed" instead of seeing the same
 // silent blank field either way.
+// TestReleaseTextBuffersPreservesSessionFirstAndCompaction verifies that
+// after AnalyzeSessionsCached, the large per-request text buffers on
+// intermediate records (non-Recs[0], non-compaction) have been released to
+// avoid OOM in large corpora, while the records that still need them (each
+// session's first record, and every compaction record) keep them intact.
+func TestReleaseTextBuffersPreservesSessionFirstAndCompaction(t *testing.T) {
+	path, _ := fixture(t)
+	a, err := AnalyzeSessions([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Session A: r1 (Recs[0], firstText kept), r2 (intermediate, cleared), r3 (intermediate, cleared)
+	// Compaction: comp (firstText+respText kept)
+	// Session A2: r4 (Recs[0], firstText kept), r5 (intermediate, cleared)
+
+	sA := a.Sessions[0]
+	r1 := sA.Recs[0]
+	r2 := sA.Recs[1]
+	r3 := sA.Recs[2]
+
+	// Recs[0] must keep its firstText (sessionTitle reads it).
+	if r1.firstText == "" {
+		t.Error("r1 (Recs[0]): firstText was cleared, but session first record must keep it")
+	}
+	// r1's respText may be empty or non-empty depending on the fixture
+	// (the opening record's response carries content). It's fine either way.
+	// The task spec says to keep both, so just verify nothing broke.
+
+	// r2 (intermediate, non-Recs[0], non-compaction) must have firstText cleared.
+	if r2.firstText != "" {
+		t.Errorf("r2 (intermediate): firstText = %q, want cleared (empty string)", r2.firstText)
+	}
+	if r2.respText != "" {
+		t.Errorf("r2 (intermediate): respText = %q, want cleared (empty string)", r2.respText)
+	}
+
+	// r3 (intermediate, non-Recs[0], non-compaction) must have firstText cleared.
+	if r3.firstText != "" {
+		t.Errorf("r3 (intermediate): firstText = %q, want cleared (empty string)", r3.firstText)
+	}
+	if r3.respText != "" {
+		t.Errorf("r3 (intermediate): respText = %q, want cleared (empty string)", r3.respText)
+	}
+
+	// Compaction record must keep both firstText and respText
+	// (recextract.buildCompactions reads both).
+	if len(a.Compactions) != 1 {
+		t.Fatalf("compactions = %d, want 1", len(a.Compactions))
+	}
+	c := a.Compactions[0]
+	if c.firstText == "" {
+		t.Error("compaction: firstText was cleared, but compaction records must keep it")
+	}
+	if c.respText == "" {
+		t.Error("compaction: respText was cleared, but compaction records must keep it")
+	}
+
+	// Session A2: r4 (Recs[0], firstText kept), r5 (intermediate, cleared)
+	if len(a.Sessions) < 2 {
+		t.Fatalf("sessions = %d, want at least 2", len(a.Sessions))
+	}
+	sA2 := a.Sessions[1]
+	r4 := sA2.Recs[0]
+	r5 := sA2.Recs[1]
+
+	if r4.firstText == "" {
+		t.Error("r4 (Recs[0]): firstText was cleared, but session first record must keep it")
+	}
+	if r5.firstText != "" {
+		t.Errorf("r5 (intermediate): firstText = %q, want cleared (empty string)", r5.firstText)
+	}
+	if r5.respText != "" {
+		t.Errorf("r5 (intermediate): respText = %q, want cleared (empty string)", r5.respText)
+	}
+}
+
 func TestLinkCompactionsLogsMiss(t *testing.T) {
 	var buf bytes.Buffer
 	orig := log.Writer()

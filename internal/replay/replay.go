@@ -118,6 +118,13 @@ func buildReplayEndpoint(cfg *config.Config, opts Options, rv *recordView) (ad a
 		BaseURL:     baseURL,
 		APIKey:      providerCfg.APIKey,
 		Model:       model,
+		// The matching EndpointGroup's role_map must reach BuildRequest the
+		// same way it does on live traffic: BuildSnapshot is what copies
+		// RoleMap onto a live Endpoint, but ep is hand-assembled here and
+		// never goes through it — without this line a configured
+		// role_map (e.g. {"developer":"system"}) would be silently dropped
+		// and the replayed request rejected upstream for an unrewritten role.
+		RoleMap: resolveRoleMap(cfg, protocol, rv.Model, opts.Provider),
 		// chargeReplay needs these resolved directly, the same as above.
 		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
 		PricingRate: cfg.ResolvedPricing[opts.Provider+"\x00"+model],
@@ -550,6 +557,31 @@ func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (
 	default:
 		return "", fmt.Errorf("provider %q has %d candidate models under virtual model %q (%v); pass -model to pick one", provider, len(candidates), virtualModel, candidates)
 	}
+}
+
+// resolveRoleMap returns the RoleMap of the EndpointGroup whose
+// protocol/provider match the record's virtual model — the same match
+// resolveModel makes above — so BuildRequest's role rewrite sees the same
+// mapping live traffic does. buildReplayEndpoint assembles ep by hand and
+// never goes through BuildSnapshot (the one place live Endpoints get their
+// RoleMap copied on), so this lookup reproduces that here. nil when the
+// group declares no role_map, or no group matches.
+func resolveRoleMap(cfg *config.Config, protocol, virtualModel, provider string) map[string]string {
+	vm, ok := cfg.Models[virtualModel]
+	if !ok {
+		return nil
+	}
+	for _, eg := range vm.Endpoints {
+		if eg.Protocol != protocol {
+			continue
+		}
+		for _, pn := range eg.Providers {
+			if pn == provider {
+				return eg.RoleMap
+			}
+		}
+	}
+	return nil
 }
 
 func printDryRun(w io.Writer, ep *core.Endpoint, req *http.Request, body []byte) {

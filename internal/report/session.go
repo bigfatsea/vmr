@@ -284,6 +284,7 @@ func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof tasks
 	assignNames(a.Recs)
 	group(a, g)
 	linkCompactions(a)
+	releaseTextBuffers(a)
 	return a, cache, nil
 }
 
@@ -832,4 +833,31 @@ func stripBracketPrefix(s string) string {
 		}
 	}
 	return s
+}
+
+// releaseTextBuffers drops the per-request text buffers (firstText capped at
+// 512KiB, respText at 256KiB) that have already served every consumer by the
+// time AnalyzeSessionsCached returns, keeping only the records that still
+// need them afterwards: each session's first record (sessionTitle reads its
+// firstText) and every compaction record (recextract.buildCompactions reads
+// both texts). Everything else — the tens of thousands of intermediate
+// requests in a large corpus — has no remaining reader, and each holds up to
+// ~0.75MB of heap; leaving them resident is how a multi-GB spike becomes an
+// OOM. linkCompactions (the last consumer of intermediate records' texts)
+// has already run by the time this is called, so nothing is released early.
+func releaseTextBuffers(a *SessionAnalysis) {
+	keep := make(map[*ReqInfo]bool, len(a.Sessions)+len(a.Compactions))
+	for _, s := range a.Sessions {
+		if len(s.Recs) > 0 {
+			keep[s.Recs[0]] = true
+		}
+	}
+	for _, c := range a.Compactions {
+		keep[c] = true
+	}
+	for _, r := range a.Recs {
+		if !keep[r] {
+			r.firstText, r.respText = "", ""
+		}
+	}
 }

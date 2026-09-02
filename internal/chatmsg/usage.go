@@ -179,6 +179,13 @@ func mergeUsage(obj map[string]any, u Usage, protocol string) Usage {
 // names but, like Chat Completions and unlike Anthropic, already includes
 // cached tokens in that total — it must NOT take the "+ cacheRead +
 // cacheWrite" branch.
+// - openai-completions takes the same inclusive rule outright: an aggregated
+// gateway (Cloudflare AI Gateway, LiteLLM, a relay) may surface an
+// Anthropic-shaped object (input_tokens present, input_tokens_details
+// absent) even on an OpenAI-protocol request, and prompt_tokens is then
+// ALREADY the total including cache hits — adding cacheRead/cacheWrite here
+// would double-count them. So the protocol branch takes
+// max(prompt_tokens, input_tokens) and never adds the cache components.
 //
 // protocol (a core.Protocol* value; "" = unknown) selects that rule
 // outright. The field-presence tell ("does the object carry
@@ -205,6 +212,8 @@ func usageFromObj(m map[string]any, protocol string) Usage {
 	switch {
 	case protocol == core.ProtocolAnthropicMessages:
 		u.In = num(m["input_tokens"]) + cacheRead + cacheWrite
+	case protocol == core.ProtocolOpenAICompletions:
+		u.In = max(num(m["prompt_tokens"]), num(m["input_tokens"]))
 	case protocol == core.ProtocolOpenAIResponses:
 		u.In = num(m["input_tokens"])
 	case Nested(m, "input_tokens_details", "cached_tokens") != nil: // responses-shaped, protocol unknown
