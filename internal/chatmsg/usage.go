@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"vmr/internal/core"
@@ -30,6 +31,37 @@ type Usage struct {
 	// reports it (usage.completion_tokens_details.reasoning_tokens); 0 when
 	// absent — consumers treat 0 as "not reported".
 	Reasoning int64
+}
+
+// Shape counters (S-2 "make the silence loud"): package-level atomics that
+// count how many times chatmsg met a response/request shape it does not
+// recognize — an unknown content-part type (RenderPart's default branch,
+// messages.go) or a usage holder that is present but not an object
+// (mergeUsage's type-assertion failure below). Both were previously dropped
+// silently; the counts let `vmr analyze` surface the unknown-shape lineage
+// to an operator.
+//
+// Increment happens only on the unrecognized branch — the routing half's hot
+// path (respnorm's per-SSE-event MergeUsageWithProtocol/ExtractUsageSides)
+// parses recognized shapes exclusively, so it never pays for the counter.
+var (
+	unrecognizedPartTypes    atomic.Int64
+	unrecognizedUsageHolders atomic.Int64
+)
+
+// UnrecognizedShapeCounts returns how many unrecognized content-part types
+// and how many unrecognized usage holders chatmsg has met since process
+// start (or since the last ResetUnrecognizedShapeCounts). Read by vmr
+// analyze's corpus renderer for its shape-lineage disclosure line.
+func UnrecognizedShapeCounts() (parts, holders int64) {
+	return unrecognizedPartTypes.Load(), unrecognizedUsageHolders.Load()
+}
+
+// ResetUnrecognizedShapeCounts zeroes both shape counters — for tests and
+// for an analyze run that wants to measure one bounded input set.
+func ResetUnrecognizedShapeCounts() {
+	unrecognizedPartTypes.Store(0)
+	unrecognizedUsageHolders.Store(0)
 }
 
 // Fresh returns In - CacheRead - CacheWrite, floored at 0 — the non-cached
@@ -291,6 +323,14 @@ func mergeUsage(obj map[string]any, u Usage, protocol string) Usage {
 	for _, holder := range []any{obj["usage"], Nested(obj, "message", "usage"), Nested(obj, "response", "usage")} {
 		m, ok := holder.(map[string]any)
 		if !ok {
+			// A holder that exists but isn't an object is an unrecognized
+			// usage-holder shape (e.g. "usage": "raw-string") — previously
+			// silently dropped, now counted so analyze can surface the
+			// unknown shape lineage (S-2). nil holders (the field absent) are
+			// the normal case on every request and never counted.
+			if holder != nil {
+				unrecognizedUsageHolders.Add(1)
+			}
 			continue
 		}
 		o := usageFromObj(m, protocol)

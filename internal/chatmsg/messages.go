@@ -125,6 +125,10 @@ func RenderPart(m map[string]any) string {
 		}
 		return fmt.Sprintf("↩️ tool_result (id=%s)%s\n%s", id, status, RenderContent(m["content"]))
 	default:
+		// Unrecognized content part type — previously silently rendered as raw
+		// JSON; now also counted so vmr analyze can surface the unknown-shape
+		// lineage to an operator (S-2).
+		unrecognizedPartTypes.Add(1)
 		return jsonIndent(m)
 	}
 }
