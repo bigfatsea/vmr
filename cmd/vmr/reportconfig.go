@@ -80,10 +80,11 @@ const defaultReportConfigFile = "report.yaml"
 // applies to config.yaml — duplicated here rather than imported, since this
 // file's whole point is staying independent of internal/config (see the
 // package comment above). The injection guards are duplicated with it: a
-// value containing a newline, ": " or " #" is spliced in before YAML
-// parsing, so it could change the document's structure or silently truncate
-// the value at a YAML comment — report.yaml carries llm_key, so a " #"
-// suffix would cut a secret short with no error at all, surfacing only as a
+// value containing a newline, ": ", " #" or starting with "#" is spliced in
+// before YAML parsing, so it could change the document's structure or
+// silently truncate the value at a YAML comment (a leading "#" turns the
+// whole line into one) — report.yaml carries llm_key, so a " #" suffix
+// would cut a secret short with no error at all, surfacing only as a
 // mysterious 401. Same fail-fast rule config.yaml applies; same known
 // residual gap too (a value inside a flow collection could still inject via
 // a comma).
@@ -94,13 +95,13 @@ func expandReportEnv(s string) (string, error) {
 	out := reportEnvRe.ReplaceAllStringFunc(s, func(m string) string {
 		name := m[2 : len(m)-1]
 		v := os.Getenv(name)
-		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #")) {
+		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #") || strings.HasPrefix(strings.TrimSpace(v), "#")) {
 			badVar = name
 		}
 		return v
 	})
 	if badVar != "" {
-		return "", fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into report.yaml could change the document's structure or silently truncate the value at a YAML comment; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
+		return "", fmt.Errorf("environment variable %q's value contains a newline, \": \", \" #\", or starts with \"#\" — expanding it into report.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
 	}
 	return out, nil
 }

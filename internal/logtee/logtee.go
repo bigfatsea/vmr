@@ -119,7 +119,8 @@ func (t *Tee) append(line string) {
 
 // Recent returns up to n buffered lines in chronological order (oldest
 // first); n <= 0 means everything currently buffered. At most capLines can
-// come back — the replay window is the buffer, by design.
+// come back — the replay window is the buffer, by design. No production
+// caller (/log replays via Follow); kept for test introspection.
 func (t *Tee) Recent(n int) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -133,29 +134,12 @@ func (t *Tee) Recent(n int) []string {
 	return out
 }
 
-// Subscribe registers a new live follower. It receives every line written
-// from now on, buffered up to subBuffer — a slower consumer gets drops with
-// an inserted "... dropped N lines ..." marker instead of blocking the
-// writer. The returned cancel unregisters: after it returns, no further
-// sends reach the channel.
-func (t *Tee) Subscribe() (<-chan string, func()) {
-	s := &sub{ch: make(chan string, subBuffer)}
-	t.mu.Lock()
-	t.subs[s] = struct{}{}
-	t.mu.Unlock()
-	cancel := func() {
-		t.mu.Lock()
-		delete(t.subs, s)
-		t.mu.Unlock()
-	}
-	return s.ch, cancel
-}
-
-// Follow is Subscribe plus an atomic snapshot of the current buffer: the
-// registry write and the ring read happen under one lock acquisition, so a
-// line written while a consumer connects lands in exactly one of the two —
-// never lost between a Recent call and a Subscribe call. This is what /log
-// opens with; the returned slice is the replay prefix, oldest first.
+// Follow registers a live follower and atomically snapshots the current
+// buffer: the registry write and the ring read happen under one lock
+// acquisition, so a line written while a consumer connects lands in exactly
+// one of the two — never lost between the ring read and the registry write.
+// This is what /log opens with; the returned slice is the replay prefix,
+// oldest first.
 func (t *Tee) Follow() ([]string, <-chan string, func()) {
 	s := &sub{ch: make(chan string, subBuffer)}
 	t.mu.Lock()

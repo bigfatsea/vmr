@@ -65,11 +65,14 @@ func docHasInternalPaths(docRel string) bool {
 }
 
 // docHasSymbols marks the docs that describe current state and therefore
-// must not name a Go symbol that does not exist. Deliberately NOT extended
-// to .go source files the way docHasInternalPaths is: Go doc comments
-// backtick-quote all sorts of things (parameter names, stdlib types) in a
-// `pkg.Symbol`-like shape that would make repo-wide symbol checking noisy
-// far beyond what this task set out to guard — path references only.
+// must not name a Go symbol that does not exist. .go source files are held
+// to this too, but effectively only for the packages this repo owns: the
+// check loop below skips every package outside w.symbols, which is what
+// keeps the `pkg.Symbol`-shaped noise in Go doc comments (parameter names,
+// stdlib types) silent without enumerating exceptions — a bare `t.Helper`
+// or `time.Duration` mention can never trip, while a stale citation of a
+// deleted internal symbol (the dead-code shape: a comment quoting a func
+// that no longer exists) trips exactly like a doc citing a moved file.
 func docHasSymbols(docRel string) bool {
 	return docRel == "CLAUDE.md" ||
 		strings.HasPrefix(docRel, "docs/VirtualModelRouter_Design_v4_") ||
@@ -169,7 +172,7 @@ func checkDocRefs(w docWorld, docRel, content string) []string {
 		}
 	}
 
-	if docHasSymbols(docRel) {
+	if docHasSymbols(docRel) || strings.HasSuffix(docRel, ".go") {
 		for _, m := range reSymbol.FindAllStringSubmatch(content, -1) {
 			pkg, sym := m[1], m[2]
 			// Only packages this repo owns are checkable; `time.Duration`
@@ -375,6 +378,12 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"missing symbol in a design doc", "docs/VirtualModelRouter_Design_v4_Core.md", "`router.NoSuchFuncX`"},
 		{"missing symbol in a README", "README.md", "`report.NoSuchRowX`"},
 		// The .go-source-comment branch: same checkDocRefs, a source file
+		// docRel instead of a doc's. An owned-package symbol cited in a
+		// source comment must resolve — the dead-code shape this closes is a
+		// comment quoting a func that no longer exists.
+		{"missing owned symbol in a .go comment", "internal/report/detail.go", "call `core.NoSuchSymbolX` first"},
+		{"dead symbol cited in its own package's comment", "internal/report/detail.go", "the removed `report.NoSuchDeadRowX` helper"},
+		// The .go-source-comment branch: same checkDocRefs, a source file
 		// docRel instead of a doc's.
 		{"missing source file in a .go comment", "internal/report/detail.go", "see internal/report/nosuchfile.go"},
 		{"missing future-strategy doc in a .go comment", "internal/report/detail.go", "see docs/future-strategy/nosuch_xyz.md"},
@@ -398,11 +407,12 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"CLAUDE.md", "`time.Duration` and `json.RawMessage` are out of scope"},
 		{"internal/report/detail.go", "see docs/future-strategy/story_report_architecture_opus-5.md"},
 		{"internal/report/detail.go", "moved to internal/reqdetail/render.go"},
-		// A .go source comment is NOT held to docHasSymbols (too noisy —
-		// see docHasSymbols' doc comment), so a bogus `pkg.Symbol` mention
-		// in one must stay silent even though the same text would trip in
-		// CLAUDE.md/a README above.
-		{"internal/report/detail.go", "`core.NoSuchSymbolX` is unrelated prose"},
+		// Symbol noise in a .go comment stays silent: only packages this repo
+		// owns are checkable, so parameter-shaped mentions and stdlib types
+		// can never trip — while the identical owned-package citation does
+		// trip above.
+		{"internal/report/detail.go", "`t.Helper` and `time.Duration` are out of scope"},
+		{"internal/report/detail.go", "`i18n.Cost(lang).Disclaimer` renders the note"},
 		// Markdown-link syntax in a .go file is i18n/render text describing
 		// a *generated* artifact's own links, not a repo cross-reference —
 		// see docHasMarkdownLinks. This must stay silent even though the
