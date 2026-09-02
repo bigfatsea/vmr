@@ -34,6 +34,15 @@ func parseManifestBody(rec *audit.Record, prof taskseg.Profile) (msgs []chatmsg.
 	return
 }
 
+func parseManifestBodyIncremental(rec *audit.Record, prof taskseg.Profile, deltaStart int, state *stepFactState) (msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers) {
+	body, _ := rec.Client.Request.Body.(map[string]any)
+	msgs = chatmsg.Messages(body)
+	rawMsgs = chatmsg.RawArray(body)
+	off = chatmsg.MsgOffset(body)
+	ru = state.computeRU(prof, msgs, rawMsgs, off, deltaStart)
+	return
+}
+
 // fillStepFacts extracts everything a Step's downstream consumers used to
 // read back off Step.Rec, so the Record itself doesn't have to outlive
 // buildFrom. Called once per Step, right after buildStep, with the
@@ -41,7 +50,7 @@ func parseManifestBody(rec *audit.Record, prof taskseg.Profile) (msgs []chatmsg.
 // one Journey-level fact derived per Step: the SysHash -> leading-system
 // text table (deduped, so a 500-step Journey on one system prompt stores
 // it once).
-func fillStepFacts(j *Journey, step *Step, rec *audit.Record, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) {
+func fillStepFacts(j *Journey, step *Step, rec *audit.Record, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int, state *stepFactState) {
 	step.Outcome = rec.Outcome
 	if rec.Outcome == "error" {
 		for _, a := range rec.Attempts {
@@ -59,19 +68,11 @@ func fillStepFacts(j *Journey, step *Step, rec *audit.Record, msgs []chatmsg.Mes
 		}
 	}
 
-	step.Context = stepContextPoint(step.Seq, msgs)
+	step.Context = state.updateContext(step.Seq, msgs, deltaStart)
 
 	step.NewToolResults = chatmsg.ToolResultList(deltaRawMsgs(rawMsgs, off, deltaStart))
 
-	if step.Manifest.HasSys {
-		step.SysChars = len([]rune(ctxgraph.LeadingSystemText(msgs, step.Manifest.LeadSys)))
-		if _, seen := j.SysText[step.Manifest.SysHash]; !seen {
-			if j.SysText == nil {
-				j.SysText = map[ctxgraph.Hash][]string{}
-			}
-			j.SysText[step.Manifest.SysHash] = leadingSystemParts(msgs, step.Manifest.LeadSys)
-		}
-	}
+	step.SysChars = state.updateSysChars(j, step, msgs)
 }
 
 // leadingSystemParts is the individual text of msgs[:leadSys] — compare.go's
@@ -98,18 +99,104 @@ func stepContextPoint(seq int, msgs []chatmsg.Message) ContextPoint {
 	p := ContextPoint{Seq: seq}
 	for _, msg := range msgs {
 		tk := tokenutil.EstimateText(msg.Text)
-		switch msg.Role {
-		case "system":
-			p.SystemTokens += tk
-		case "assistant":
-			p.AssistantTokens += tk
-		case "tool":
-			p.ToolTokens += tk
-		default: // "user" and any non-standard role (chatmsg.Messages' "?" fallback)
-			p.UserTokens += tk
-		}
+		accumulateContextToken(&p, msg.Role, tk)
 	}
 	return p
+}
+
+type roleTokens struct {
+	role   string
+	tokens int64
+}
+
+// stepFactState maintains incremental extraction state across steps in a
+// lineage to avoid repeating O(N^2) token estimation and real-user parsing
+// over unedited message history prefixes.
+type stepFactState struct {
+	prevRu       taskseg.RealUsers
+	prevTokens   []roleTokens
+	prevSysChars int
+}
+
+func (s *stepFactState) computeRU(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) taskseg.RealUsers {
+	if deltaStart <= 0 || len(s.prevRu) == 0 {
+		ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
+		s.prevRu = ru
+		return ru
+	}
+	ru := make(taskseg.RealUsers, len(s.prevRu)+(len(msgs)-deltaStart))
+	for k, v := range s.prevRu {
+		if k < deltaStart {
+			ru[k] = v
+		}
+	}
+	for i := deltaStart; i < len(msgs); i++ {
+		m := msgs[i]
+		if m.Role != "user" {
+			continue
+		}
+		if text, ok := prof.RealUserText(m, rawMsgs, i-off); ok {
+			ru[i] = taskseg.Preview(text)
+		}
+	}
+	s.prevRu = ru
+	return ru
+}
+
+func (s *stepFactState) updateContext(seq int, msgs []chatmsg.Message, deltaStart int) ContextPoint {
+	curTokens := make([]roleTokens, len(msgs))
+	p := ContextPoint{Seq: seq}
+	copyLen := deltaStart
+	if copyLen > len(s.prevTokens) {
+		copyLen = len(s.prevTokens)
+	}
+	if copyLen < 0 {
+		copyLen = 0
+	}
+	for i := 0; i < copyLen; i++ {
+		curTokens[i] = s.prevTokens[i]
+		accumulateContextToken(&p, curTokens[i].role, curTokens[i].tokens)
+	}
+	for i := copyLen; i < len(msgs); i++ {
+		tk := tokenutil.EstimateText(msgs[i].Text)
+		curTokens[i] = roleTokens{role: msgs[i].Role, tokens: tk}
+		accumulateContextToken(&p, curTokens[i].role, tk)
+	}
+	s.prevTokens = curTokens
+	return p
+}
+
+func accumulateContextToken(p *ContextPoint, role string, tk int64) {
+	switch role {
+	case "system":
+		p.SystemTokens += tk
+	case "assistant":
+		p.AssistantTokens += tk
+	case "tool":
+		p.ToolTokens += tk
+	default:
+		p.UserTokens += tk
+	}
+}
+
+func (s *stepFactState) updateSysChars(j *Journey, step *Step, msgs []chatmsg.Message) int {
+	if !step.Manifest.HasSys {
+		return 0
+	}
+	var chars int
+	if !step.SysChanged && s.prevSysChars > 0 {
+		chars = s.prevSysChars
+	} else {
+		chars = len([]rune(ctxgraph.LeadingSystemText(msgs, step.Manifest.LeadSys)))
+		s.prevSysChars = chars
+	}
+	if _, seen := j.SysText[step.Manifest.SysHash]; !seen {
+		if j.SysText == nil {
+			j.SysText = map[ctxgraph.Hash][]string{}
+		}
+		j.SysText[step.Manifest.SysHash] = leadingSystemParts(msgs, step.Manifest.LeadSys)
+	}
+	return chars
 }
 
 // deltaRawMsgs is the slice of a decoded body's raw "messages" array that

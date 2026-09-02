@@ -7,7 +7,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"vmr/internal/adapter"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
@@ -463,175 +461,21 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
-	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
-		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
-	}
-	// quotaNow anchors every provider's unset `since` default (see
-	// validateQuota/LimitConfig.validate) to the same instant — one
-	// config.Parse call resolving every Limit's default anchor consistently,
-	// rather than each one reading a slightly different time.Now().
-	quotaNow := time.Now()
-	// core.StickyBackstopTTL is the internal/sticky Registry's own memory-
-	// eviction window — an entry idle longer than that is dropped from the
-	// map regardless of what any endpoint's own StickyTTL says, so a
-	// configured sticky_ttl above it would look accepted but silently stop
-	// taking effect once a conversation goes quiet for longer than the
-	// backstop (see core.StickyBackstopTTL's doc comment). Caught here, at
-	// load time, instead of surfacing as "sticky mysteriously stopped
-	// working" in production.
-	if c.StickyTTL.D() > core.StickyBackstopTTL {
-		return fmt.Errorf("sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-			c.StickyTTL.D(), core.StickyBackstopTTL, c.StickyTTL.D(), core.StickyBackstopTTL)
-	}
-	for i, k := range c.APIKeys {
-		if len(k) < minAPIKeyLen {
-			return fmt.Errorf("api_keys[%d]: too short (min %d characters) — its tail becomes a report label (see audit.KeyTag), so short keys would expose the whole key", i, minAPIKeyLen)
-		}
-	}
-	for i, h := range c.ExtraRedactHeaders {
-		if strings.TrimSpace(h) == "" {
-			return fmt.Errorf("extra_redact_headers[%d]: empty header name", i)
-		}
-	}
-	// A slice, not a map: map iteration order is randomized, and a name+value
-	// pair here is only ever checked for "is this one URL valid" — nothing
-	// depends on the order between http_proxy and https_proxy, but the error
-	// message when validation fails should still be deterministic.
-	for _, proxy := range [...]struct{ name, val string }{
-		{"http_proxy", c.HTTPProxy},
-		{"https_proxy", c.HTTPSProxy},
-	} {
-		if proxy.val == "" {
-			continue
-		}
-		u, err := url.Parse(proxy.val)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("invalid %s %q (want e.g. http://127.0.0.1:7890)", proxy.name, proxy.val)
-		}
-	}
-	if len(c.Providers) == 0 {
-		return fmt.Errorf("no providers defined")
-	}
-	if len(c.Models) == 0 {
-		return fmt.Errorf("no models defined")
-	}
-	seenProvider := map[string]bool{}
-	for i, p := range c.Providers {
-		if p.Name == "" {
-			return fmt.Errorf("providers[%d]: missing name", i)
-		}
-		if seenProvider[p.Name] {
-			return fmt.Errorf("providers[%d]: duplicate provider name %q", i, p.Name)
-		}
-		seenProvider[p.Name] = true
-		if len(p.BaseURL) == 0 {
-			return fmt.Errorf("provider %q: base_url: at least one protocol required", p.Name)
-		}
-		for protocol, raw := range p.BaseURL {
-			if _, ok := adapter.Get(protocol); !ok {
-				return fmt.Errorf("provider %q: base_url.%s: unknown adapter type (available: %v)%s", p.Name, protocol, adapter.Names(), unknownProtocolHint(protocol))
-			}
-			u, err := url.Parse(raw)
-			if err != nil || u.Scheme == "" || u.Host == "" {
-				return fmt.Errorf("provider %q: invalid base_url.%s %q", p.Name, protocol, raw)
-			}
-			if err := checkBaseURLCredentials(p.Name, protocol, raw); err != nil {
-				return err
-			}
-			// proxy: true with nothing to follow is a contradiction the
-			// config states entirely on its own (no environment involved),
-			// so it is rejected here rather than warned about at startup.
-			if p.Proxy {
-				if mode, _ := c.ProxySpecFor(p, protocol); mode != ProxyURL {
-					return fmt.Errorf("provider %q: proxy: true but no matching proxy is configured for %s base_urls (set https_proxy/http_proxy; ${VAR} expansion works)", p.Name, u.Scheme)
-				}
-			}
-		}
-		if err := validateQuota(p.Name, p.Quota, quotaNow); err != nil {
-			return err
-		}
-	}
-	// providerModels collects, per provider, every upstream model name any
-	// virtual model's endpoint group (or a FallbackEndpoints entry) actually
-	// configures it to serve — resolvePricing (called after this loop)
-	// needs this to know which models a metric: cost provider must have
-	// complete pricing for; no other validation step needed this set.
-	providerModels := map[string]map[string]bool{}
-	for name, m := range c.Models {
-		if len(m.Endpoints) == 0 {
-			return fmt.Errorf("model %q: no endpoints", name)
-		}
-		if m.MaxContextTokens < 0 {
-			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)
-		}
-		for i, eg := range m.Endpoints {
-			if err := c.validateEndpointGroup(fmt.Sprintf("model %q endpoint group #%d", name, i+1), eg, providerModels); err != nil {
-				return err
-			}
-		}
-	}
-	for i, fb := range c.FallbackEndpoints {
-		// See FallbackEndpoints' doc comment for why this is mandatory here.
-		if fb.Priority <= 0 {
-			return fmt.Errorf("fallback_endpoints[%d]: priority must be set and > 0 (an unset priority defaults to 0, which could silently outrank a model's own endpoints)", i)
-		}
-		if err := c.validateEndpointGroup(fmt.Sprintf("fallback_endpoints[%d]", i), fb, providerModels); err != nil {
-			return err
-		}
-	}
-	if err := c.resolvePricing(providerModels); err != nil {
+	if err := c.validateBasic(); err != nil {
 		return err
 	}
-	return nil
-}
-
-// validateEndpointGroup validates one EndpointGroup (ctx names its context
-// for error messages) and records its (provider, model) pairs into
-// providerModels. Shared by both models.<name>.endpoints[] and
-// FallbackEndpoints so the two can't drift on what "valid" means.
-func (c *Config) validateEndpointGroup(ctx string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
-	if _, ok := adapter.Get(eg.Protocol); !ok {
-		return fmt.Errorf("%s: unknown protocol %q (available: %v)%s", ctx, eg.Protocol, adapter.Names(), unknownProtocolHint(eg.Protocol))
+	quotaNow := time.Now()
+	if err := c.validateProviders(quotaNow); err != nil {
+		return err
 	}
-	if len(eg.Providers) == 0 {
-		return fmt.Errorf("%s: providers: at least one required", ctx)
+	providerModels := map[string]map[string]bool{}
+	if err := c.validateModels(providerModels); err != nil {
+		return err
 	}
-	for _, pn := range eg.Providers {
-		p, ok := c.ProviderByName(pn)
-		if !ok {
-			return fmt.Errorf("%s: unknown provider %q", ctx, pn)
-		}
-		if _, ok := p.BaseURL[eg.Protocol]; !ok {
-			return fmt.Errorf("%s: provider %q has no base_url for protocol %q", ctx, pn, eg.Protocol)
-		}
+	if err := c.validateFallbackEndpoints(providerModels); err != nil {
+		return err
 	}
-	if len(eg.Models) == 0 {
-		return fmt.Errorf("%s: models: at least one required", ctx)
-	}
-	for j, mn := range eg.Models {
-		if mn == "" {
-			return fmt.Errorf("%s: models[%d]: empty", ctx, j)
-		}
-		for _, pn := range eg.Providers {
-			if providerModels[pn] == nil {
-				providerModels[pn] = map[string]bool{}
-			}
-			providerModels[pn][mn] = true
-		}
-	}
-	if eg.MaxContextTokens < 0 {
-		return fmt.Errorf("%s: max_context_tokens must be >= 0", ctx)
-	}
-	if eg.StickyTTL != nil {
-		if eg.StickyTTL.D() <= 0 {
-			return fmt.Errorf("%s: sticky_ttl must be positive", ctx)
-		}
-		if eg.StickyTTL.D() > core.StickyBackstopTTL {
-			return fmt.Errorf("%s: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-				ctx, eg.StickyTTL.D(), core.StickyBackstopTTL, eg.StickyTTL.D(), core.StickyBackstopTTL)
-		}
-	}
-	return nil
+	return c.resolvePricing(providerModels)
 }
 
 // ProviderByName looks up a provider by its declared name. Providers is a

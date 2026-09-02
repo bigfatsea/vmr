@@ -4,7 +4,9 @@ package ctxgraph
 
 import (
 	"crypto/md5"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"vmr/internal/audit"
@@ -175,7 +177,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		if ri := i - off; ri >= 0 && ri < len(rawMsgs) {
 			raw = rawMsgs[ri]
 		}
-		m.Keys = append(m.Keys, hashMsgJSON(raw))
+		m.Keys = append(m.Keys, hashMsgJSONCached(raw))
 		m.MsgIdx = append(m.MsgIdx, i)
 	}
 	if m.LeadSys > 0 {
@@ -258,4 +260,119 @@ func servedEndpoint(rec *audit.Record) string {
 		return successEp
 	}
 	return servedEp
+}
+
+// --- Message hash cache ---
+//
+// In multi-turn agent conversations, consecutive requests resend the full
+// accumulated message history. Computing hashMsgJSON via json.Marshal for
+// every message on every turn produces O(N^2) serialization work, especially
+// when early turns carry large base64 images or long file contents.
+// hashMsgJSONCached computes a fast, non-allocating 128-bit fingerprint over
+// raw message structures and caches the resulting Hash in a bounded, sharded map.
+
+type rawDigestKey struct {
+	h1, h2 uint64
+}
+
+type msgHashCacheShard struct {
+	sync.RWMutex
+	entries map[rawDigestKey]Hash
+}
+
+const (
+	msgHashShardCount   = 16
+	maxMsgHashPerShard  = 1024
+)
+
+var msgHashShards [msgHashShardCount]msgHashCacheShard
+
+func init() {
+	for i := 0; i < msgHashShardCount; i++ {
+		msgHashShards[i].entries = make(map[rawDigestKey]Hash, 256)
+	}
+}
+
+func hashMsgJSONCached(raw any) Hash {
+	h1, h2 := fastRawDigest(raw)
+	k := rawDigestKey{h1: h1, h2: h2}
+	idx := h1 % msgHashShardCount
+
+	shard := &msgHashShards[idx]
+	shard.RLock()
+	h, hit := shard.entries[k]
+	shard.RUnlock()
+	if hit {
+		return h
+	}
+
+	h = hashMsgJSON(raw)
+
+	shard.Lock()
+	if len(shard.entries) >= maxMsgHashPerShard {
+		shard.entries = make(map[rawDigestKey]Hash, maxMsgHashPerShard)
+	}
+	shard.entries[k] = h
+	shard.Unlock()
+	return h
+}
+
+func fastRawDigest(v any) (uint64, uint64) {
+	switch t := v.(type) {
+	case string:
+		return hashString128(t)
+	case map[string]any:
+		var totH1, totH2 uint64
+		count := 0
+		for k, val := range t {
+			if k == "cache_control" {
+				continue
+			}
+			kh1, kh2 := hashString128(k)
+			vh1, vh2 := fastRawDigest(val)
+			totH1 += kh1 ^ (vh1 * 0x517cc1b727220a95)
+			totH2 += kh2 ^ (vh2 * 0x9e3779b97f4a7c15)
+			count++
+		}
+		totH1 ^= uint64(count) * 0xbf58476d1ce4e5b9
+		totH2 ^= uint64(count) * 0x94d049bb133111eb
+		return totH1, totH2
+	case []any:
+		var totH1, totH2 uint64
+		for i, elem := range t {
+			eh1, eh2 := fastRawDigest(elem)
+			totH1 = (totH1 * 31) ^ eh1 ^ uint64(i)
+			totH2 = (totH2 * 37) ^ eh2
+		}
+		return totH1, totH2
+	case float64:
+		b := math.Float64bits(t)
+		return b * 0x517cc1b727220a95, b * 0x9e3779b97f4a7c15
+	case bool:
+		if t {
+			return 0x811c9dc5e73f477e, 0xcbf29ce484222325
+		}
+		return 0x27d4eb2f165667c5, 0x100000001b3
+	case nil:
+		return 0x4f1bbcdcbfa54005, 0x9e3779b97f4a7c15
+	case int:
+		b := uint64(t)
+		return b * 0x517cc1b727220a95, b * 0x9e3779b97f4a7c15
+	case int64:
+		b := uint64(t)
+		return b * 0x517cc1b727220a95, b * 0x9e3779b97f4a7c15
+	default:
+		return 0xdeadbeefcafebabe, 0x0123456789abcdef
+	}
+}
+
+func hashString128(s string) (uint64, uint64) {
+	var h1 uint64 = 0x811c9dc5e73f477e
+	var h2 uint64 = 0xcbf29ce484222325
+	for i := 0; i < len(s); i++ {
+		c := uint64(s[i])
+		h1 = (h1 ^ c) * 0x100000001b3
+		h2 = (h2 * 31) ^ c
+	}
+	return h1, h2
 }

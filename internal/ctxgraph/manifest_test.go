@@ -4,6 +4,7 @@ package ctxgraph
 
 import (
 	"crypto/md5"
+	"strings"
 	"testing"
 	"time"
 
@@ -387,3 +388,40 @@ func TestBuildManifest_ServedEndpoint(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildManifest_HashCache(t *testing.T) {
+	t.Parallel()
+	largeContent := strings.Repeat("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", 100)
+	body1 := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": largeContent},
+			map[string]any{"role": "assistant", "content": "turn 1 reply"},
+		},
+	}
+	body2 := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": largeContent},
+			map[string]any{"role": "assistant", "content": "turn 1 reply"},
+			map[string]any{"role": "user", "content": "turn 2 question"},
+		},
+	}
+	rec1 := mkAuditRec(time.Now(), body1)
+	rec2 := mkAuditRec(time.Now(), body2)
+
+	m1, ok1 := BuildManifest(&rec1, "f", 1)
+	m2, ok2 := BuildManifest(&rec2, "f", 2)
+	if !ok1 || !ok2 {
+		t.Fatalf("BuildManifest failed: ok1=%v ok2=%v", ok1, ok2)
+	}
+
+	if len(m1.Keys) != 2 || len(m2.Keys) != 3 {
+		t.Fatalf("unexpected keys length: m1=%d m2=%d", len(m1.Keys), len(m2.Keys))
+	}
+	if m1.Keys[0] != m2.Keys[0] {
+		t.Errorf("cached large message hash mismatch: %v vs %v", m1.Keys[0], m2.Keys[0])
+	}
+	if m1.Keys[1] != m2.Keys[1] {
+		t.Errorf("cached assistant message hash mismatch: %v vs %v", m1.Keys[1], m2.Keys[1])
+	}
+}
+
