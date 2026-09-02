@@ -62,6 +62,19 @@ func TestSummaryRendersInteractiveNote(t *testing.T) {
 	if strings.Contains(b.String(), "interactive") || strings.Contains(b.String(), "工作负载占") {
 		t.Errorf("empty Workloads must skip the note, got: %q", b.String())
 	}
+
+	// ZH positive assertion (verification L-3): the EN assertion above
+	// would still pass if a future edit silently broke the Chinese string
+	// — both languages' templates must be covered symmetrically.
+	b.Reset()
+	renderSummary(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }, mk(), Row{TrafficStats: TrafficStats{Requests: 50}}, i18n.ZH)
+	zhOut := b.String()
+	if !strings.Contains(zhOut, "其中 interactive 工作负载占 80.0%") {
+		t.Errorf("ZH note missing: %q", zhOut)
+	}
+	if !strings.Contains(zhOut, "（40/50）") {
+		t.Errorf("ZH note missing raw counts: %q", zhOut)
+	}
 }
 
 // TestFmtDisplayFullConvertsToDisplayZone proves fmtDisplayFull (used by
