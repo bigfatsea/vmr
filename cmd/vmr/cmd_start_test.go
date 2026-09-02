@@ -90,7 +90,8 @@ func TestLoggerWiring_TeeReceivesStampedLine(t *testing.T) {
 	if !strings.Contains(stderr.String(), "route test line 42") {
 		t.Fatalf("stderr = %q, missing logged text", stderr.String())
 	}
-	lines := tee.Recent(0)
+	lines, _, cancel := tee.Follow()
+	defer cancel()
 	if len(lines) != 1 {
 		t.Fatalf("tee buffered %d lines, want 1", len(lines))
 	}

@@ -206,7 +206,7 @@ charge(L) = base(L.Metric, L.TokenWeights) × L.ModelMultipliers[model]
 
 **`aliases:` 只有一层，全在 `standard_price_curated.yaml`（生成器永不写别名）**。2026-08-31 快照共 **11 条**，只钉三类：① 两个非转售厂商共用同一裸名（per (厂商, 模型) 的分裂，per-vendor 排序原理上装不下，见上文 dashscope 例）；② 目标行本身是 curated 手工加的（LiteLLM 快照没有）；③ 网关自造的模型 id（压根不是任何厂商发布的名字）。曾经有过“生成器每次刷新自动给全表裸名钉别名”的设计（`generateAliases`，2026-08-31 覆盖 342 条），已彻底移除：生成表是纯机器价目表，“谁钉谁、钉向哪里”是人工决策，自动钉别名把这两层边界重新模糊掉；且单一厂商的裸名本就由厂商优先级无歧义解析、不需要别名免疫——刷新引入新的撞车时，靠 `tools/gen_standard_pricing` 每次跑完打印的歧义报告显式亮出来，而不是让一个 342 条的自动别名集悄悄兜底。
 
-别名与厂商优先级共用**同一条判据**（`pricing.IsAggregatorVendor`）：`tools/gen_standard_pricing` 的歧义报告与运行时解析器都走 `Table.Ambiguities` 的同一份实现，不会各自推断而漂移。
+别名与厂商优先级共用**同一条判据**（`internal/pricing` 的 `aggregatorVendors` 集合，经 `Table.Ambiguities` 体现）：`tools/gen_standard_pricing` 的歧义报告与运行时解析器都走 `Table.Ambiguities` 的同一份实现，不会各自推断而漂移。
 
 **优先级不再沉默**：`tools/gen_standard_pricing` 每次刷新后打印一份歧义报告——哪些裸名撞车、各自被别名钉住还是交给优先级、优先级判给了谁、哪些打平未解析。两次刷新的输出一 diff，就是"这次刷新改变了我们用谁家的价"的答案。报告与解析器共用 `Table` 的数据和 `LookupPreferredSuffix` 的规则（`Table.Ambiguities`），不另起一套推断——否则报告本身就会和现实漂移。
 
@@ -851,7 +851,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活（缺省 `since` 亦然，依赖 `DefaultSince` 的日历对齐——见"已评估并否决的改进提案"表 B2）；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageBytes` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `tokenutil.Estimate` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
+| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageWithProtocol` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `tokenutil.Estimate` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`KNOWN_ISSUES` 已有记录 |
 | 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 

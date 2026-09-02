@@ -88,26 +88,15 @@ func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
 	return u, u.In > 0 || u.Out > 0
 }
 
-// MergeUsageBytes parses usage out of b and folds it into acc, returning the
-// merged result — the byte-oriented entry point internal/respnorm needs (a
-// normalizer block can be either a complete JSON object body or SSE text,
-// depending on which transport mode is in play; see that package's doc
-// comment), auto-detecting which shape b is. This and ExtractUsage's
-// string case share this one implementation rather than each parsing SSE
-// lines independently — the same "one parser, not two" rule this package
-// exists to enforce (see CLAUDE.md's chatmsg invariant: it is the one
-// shared source of truth for message/usage parsing, so a router-side
-// re-implementation can't silently drift from this one).
-//
-// Protocol-unknown form: see MergeUsageWithProtocol — callers that know the
-// ingress protocol (respnorm's stream does) must use that instead.
-func MergeUsageBytes(b []byte, acc Usage) Usage {
-	return MergeUsageWithProtocol(b, acc, "")
-}
-
-// MergeUsageWithProtocol is MergeUsageBytes with the ingress protocol (see
-// ExtractUsageWithProtocol): the protocol selects the In-additivity rule
-// outright instead of the field-presence guess.
+// MergeUsageWithProtocol extracts usage from b (a complete JSON object body
+// or SSE text, depending on which transport mode is in play — see
+// internal/respnorm's doc comment) and folds it into acc, returning the
+// merged result. This and ExtractUsage's string case share this one
+// implementation rather than each parsing SSE lines independently — the
+// same "one parser, not two" rule this package exists to enforce (see
+// CLAUDE.md's chatmsg invariant: it is the one shared source of truth for
+// message/usage parsing, so a router-side re-implementation can't silently
+// drift from this one).
 func MergeUsageWithProtocol(b []byte, acc Usage, protocol string) Usage {
 	trimmed := bytes.TrimSpace(b)
 	if len(trimmed) > 0 && trimmed[0] == '{' {

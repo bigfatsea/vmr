@@ -117,23 +117,6 @@ func (t *Tee) append(line string) {
 	t.head = (t.head + 1) % cap
 }
 
-// Recent returns up to n buffered lines in chronological order (oldest
-// first); n <= 0 means everything currently buffered. At most capLines can
-// come back — the replay window is the buffer, by design. No production
-// caller (/log replays via Follow); kept for test introspection.
-func (t *Tee) Recent(n int) []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]string, 0, t.count)
-	for i := range t.count {
-		out = append(out, t.buf[(t.head+i)%len(t.buf)])
-	}
-	if n > 0 && len(out) > n {
-		out = out[len(out)-n:]
-	}
-	return out
-}
-
 // Follow registers a live follower and atomically snapshots the current
 // buffer: the registry write and the ring read happen under one lock
 // acquisition, so a line written while a consumer connects lands in exactly

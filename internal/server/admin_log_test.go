@@ -98,7 +98,9 @@ func TestAdminLog_ReplayThenFollow(t *testing.T) {
 	assertLogLine(t, rd, "live-after-connect")
 
 	// And it must be in the buffer for the *next* connection's replay.
-	if got := strings.Join(tee.Recent(0), ","); !strings.Contains(got, "live-after-connect") {
+	replay, _, cancelReplay := tee.Follow()
+	defer cancelReplay()
+	if got := strings.Join(replay, ","); !strings.Contains(got, "live-after-connect") {
 		t.Fatalf("buffer = %q, missing live-after-connect", got)
 	}
 }

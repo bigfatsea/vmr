@@ -282,8 +282,8 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 // chargeQuota only in how usage is obtained: live traffic sniffs it
 // incrementally off a streaming respnorm.NormalizerStream, but replay already
 // has the complete request/response bytes in hand (reqBody/respBody), so
-// chatmsg.MergeUsageBytes — the exact function respnorm's own usage sniffing
-// calls internally — reads it directly from the buffered bytes instead, and
+// chatmsg.MergeUsageWithProtocol — the exact function respnorm's own usage
+// sniffing calls — reads it directly from the buffered bytes instead, and
 // the degraded estimate comes from tokenutil.Estimate over the raw
 // request/response bytes rather than from an incremental byte tally.
 //

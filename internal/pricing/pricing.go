@@ -272,21 +272,14 @@ func (t *Table) LookupRateOrAlias(key string) (Rate, bool) {
 // volcengine for Doubao vs DeepSeek) can't be captured by a per-VENDOR
 // rank at all — that split is per (vendor, model), which is exactly what
 // the curated alias table exists to express (see Table.aliases).
+// No exported wrapper exists for this set: IsAggregatorVendor once was one,
+// but its only claimed caller (tools/gen_standard_pricing) actually consumes
+// Table.Ambiguities below, which reads the map directly — the wrapper was
+// dead code kept alive by its own doc comment.
 var aggregatorVendors = map[string]bool{
 	"openrouter": true, "fireworks_ai": true, "together_ai": true,
 	"groq": true, "perplexity": true,
 }
-
-// IsAggregatorVendor reports whether vendor (a canonical-key prefix) resells
-// other vendors' models rather than originating its own — see
-// aggregatorVendors' own doc comment for the reasoning and the measured
-// basis. No production caller today: the shared criterion is
-// Table.Ambiguities, which tools/gen_standard_pricing consumes and whose
-// implementation consults aggregatorVendors directly — this func only
-// re-exposes that set. Deleting it also requires retiring its citation in
-// docs/VirtualModelRouter_Design_v4_Quota.md, so it stays until that edit
-// and this one can land together.
-func IsAggregatorVendor(vendor string) bool { return aggregatorVendors[vendor] }
 
 // vendorOf returns the canonical key's vendor prefix ("gemini" for
 // "gemini/gemini-3.7-flash"), or "" for a bare key with no prefix.

@@ -11,19 +11,19 @@ import (
 	"time"
 )
 
+// TestRecent_RingOrder locks in Follow's replay-prefix ordering: the
+// returned slice is the ring's chronological content, oldest first, capped
+// at ring size.
 func TestRecent_RingOrder(t *testing.T) {
 	tee := New(4)
 	for i := range 6 {
 		fmt.Fprintf(tee, "line-%d\n", i)
 	}
-	got := strings.Join(tee.Recent(0), ",")
+	got, _, cancel := tee.Follow()
+	defer cancel()
 	want := "line-2,line-3,line-4,line-5"
-	if got != want {
-		t.Fatalf("Recent = %q, want %q", got, want)
-	}
-	last2 := tee.Recent(2)
-	if len(last2) != 2 || last2[0] != "line-4" || last2[1] != "line-5" {
-		t.Fatalf("Recent(2) = %v, want [line-4 line-5]", last2)
+	if strings.Join(got, ",") != want {
+		t.Fatalf("replay = %q, want %q", got, want)
 	}
 }
 
@@ -33,7 +33,9 @@ func TestWrite_ReturnsLenAndNoError(t *testing.T) {
 	if n != 6 || err != nil {
 		t.Fatalf("Write = %d, %v; want 6, nil", n, err)
 	}
-	if got := tee.Recent(0); len(got) != 1 || got[0] != "hello" {
+	got, _, cancel := tee.Follow()
+	defer cancel()
+	if len(got) != 1 || got[0] != "hello" {
 		t.Fatalf("buffered = %v, want [hello]", got)
 	}
 }
@@ -132,7 +134,9 @@ func TestConcurrentWritersAndSubscribers(t *testing.T) {
 	if received.Load() == 0 {
 		t.Fatal("subscriber received nothing")
 	}
-	if got := len(tee.Recent(0)); got != 64 {
+	buffered, _, cancelBuf := tee.Follow()
+	cancelBuf()
+	if got := len(buffered); got != 64 {
 		t.Fatalf("buffered = %d, want ring cap 64", got)
 	}
 }

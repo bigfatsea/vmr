@@ -87,7 +87,7 @@ func needsTokenCharge(limits []core.Limit, model string) bool {
 // respnorm.NormalizerStream can drive the exact same pipeline instead of
 // reimplementing it — currently `vmr replay` (internal/replay), which
 // extracts usage from an already fully-buffered response via
-// chatmsg.MergeUsageBytes; see docs/VirtualModelRouter_Design_v4_Quota.md's
+// chatmsg.MergeUsageWithProtocol; see docs/VirtualModelRouter_Design_v4_Quota.md's
 // known-gap entry ② on `vmr replay` not charging quota. nil-safe: reg==nil
 // or ep.Quota==nil/no Limits is a silent no-op, the same contract
 // chargeQuota has always had.
