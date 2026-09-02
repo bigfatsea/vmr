@@ -320,9 +320,7 @@ func (s *stream) RawPreStrip() []byte {
 // a promise: don't rely on it, route new consumers through copyFlush.
 func (s *stream) Read(p []byte) (int, error) {
 	if len(s.out) > 0 {
-		n := copy(p, s.out)
-		s.out = s.out[n:]
-		return n, nil
+		return s.drainOut(p), nil
 	}
 	if s.srcErr != nil {
 		return 0, s.srcErr
@@ -355,9 +353,7 @@ func (s *stream) Read(p []byte) (int, error) {
 	}
 
 	if len(s.out) > 0 {
-		n := copy(p, s.out)
-		s.out = s.out[n:]
-		return n, nil
+		return s.drainOut(p), nil
 	}
 	if s.srcErr != nil {
 		return 0, s.srcErr
@@ -368,6 +364,17 @@ func (s *stream) Read(p []byte) (int, error) {
 	// Nothing deliverable yet (mid-event, or withheld pending a mode
 	// decision). Zero-length reads let the caller's idle watchdog tick.
 	return 0, nil
+}
+
+func (s *stream) drainOut(p []byte) int {
+	n := copy(p, s.out)
+	if n == len(s.out) {
+		s.out = s.out[:0]
+	} else {
+		copy(s.out, s.out[n:])
+		s.out = s.out[:len(s.out)-n]
+	}
+	return n
 }
 
 // flushRawOnError releases the bytes accumulated but not yet emitted after a

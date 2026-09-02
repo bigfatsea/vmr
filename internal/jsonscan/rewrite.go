@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strconv"
 )
 
 var (
@@ -29,10 +30,7 @@ var (
 // syntax problem) fall back to the generic parse-and-rebuild path, which
 // handles those shapes the same way, including adding the key when absent.
 func RewriteModel(raw json.RawMessage, model string) ([]byte, error) {
-	mv, err := MarshalNoEscape(model)
-	if err != nil {
-		return nil, err
-	}
+	mv := strconv.AppendQuote(make([]byte, 0, len(model)+2), model)
 	ranges, ok := TopLevelValues(raw, modelKeyLiteral)
 	if !ok || len(ranges) == 0 {
 		return rewriteModelGeneric(raw, mv)

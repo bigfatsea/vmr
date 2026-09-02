@@ -1524,3 +1524,35 @@ func TestRespStream_DoneLiteralInContentWithRealDone(t *testing.T) {
 		t.Errorf("Applied() = %v, must not append done when upstream already sent it", applied)
 	}
 }
+
+// TestRespStream_PartialReadPreservesCapacity verifies that reading in smaller chunks
+// than len(s.out) correctly delivers all bytes while preserving slice capacity.
+func TestRespStream_PartialReadPreservesCapacity(t *testing.T) {
+	t.Parallel()
+
+	in := `data: {"choices":[{"delta":{"content":"abcdefghijklmnopqrstuvwxyz"}}]}` + "\n\n"
+	rs := newStream(strings.NewReader(in), "agent", "", true, "openai-completions", false)
+
+	var buf bytes.Buffer
+	p := make([]byte, 7) // read in 7-byte chunks (partial consumption)
+	for {
+		n, err := rs.Read(p)
+		if n > 0 {
+			buf.Write(p[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("unexpected read error: %v", err)
+		}
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "abcdefghijklmnopqrstuvwxyz") {
+		t.Errorf("content corrupted during partial reads: %q", out)
+	}
+	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
+		t.Errorf("expected [DONE] appended at end of stream, got tail: %q", out)
+	}
+}

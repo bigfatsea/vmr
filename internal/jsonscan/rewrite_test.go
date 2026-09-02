@@ -559,3 +559,28 @@ func TestMarshalNoEscapeSkipsHTMLEscaping(t *testing.T) {
 		t.Errorf("got %q, want no \\u003c-style escaping", out)
 	}
 }
+
+func TestRewriteModel_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"old-model","messages":[]}`)
+	cases := []struct {
+		name      string
+		target    string
+		wantModel string
+	}{
+		{"slashes and colons", "provider/group/model:v2", `"provider/group/model:v2"`},
+		{"quotes escaped", `custom"model"name`, `"custom\"model\"name"`},
+		{"unicode characters", "模型-v1", `"模型-v1"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := RewriteModel(raw, tc.target)
+			if err != nil {
+				t.Fatalf("RewriteModel failed: %v", err)
+			}
+			if !strings.Contains(string(out), `"model":`+tc.wantModel) {
+				t.Errorf("got %s, want model field %s", out, tc.wantModel)
+			}
+		})
+	}
+}

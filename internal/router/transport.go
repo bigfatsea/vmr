@@ -94,12 +94,19 @@ func isClientWriteError(err error) bool {
 func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)
 	type chunk struct {
-		data []byte
-		err  error
+		buf []byte
+		n   int
+		err error
 	}
 	ch := make(chan chunk)
 	done := make(chan struct{})
 	defer close(done)
+
+	const bufSize = 32 << 10
+	bufPool := make(chan []byte, 2)
+	bufPool <- make([]byte, bufSize)
+	bufPool <- make([]byte, bufSize)
+
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -114,15 +121,16 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 				}
 			}
 		}()
-		buf := make([]byte, 32<<10)
 		for {
-			n, err := body.Read(buf)
-			var data []byte
-			if n > 0 {
-				data = append([]byte(nil), buf[:n]...)
-			}
+			var buf []byte
 			select {
-			case ch <- chunk{data, err}:
+			case buf = <-bufPool:
+			case <-done:
+				return
+			}
+			n, err := body.Read(buf)
+			select {
+			case ch <- chunk{buf: buf, n: n, err: err}:
 			case <-done:
 				return
 			}
@@ -138,12 +146,18 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 		case <-ctx.Done():
 			return ctx.Err()
 		case c := <-ch:
-			if len(c.data) > 0 {
-				if _, werr := w.Write(c.data); werr != nil {
+			if c.n > 0 {
+				if _, werr := w.Write(c.buf[:c.n]); werr != nil {
 					return &clientWriteError{werr}
 				}
 				if flusher != nil {
 					flusher.Flush()
+				}
+			}
+			if c.buf != nil {
+				select {
+				case bufPool <- c.buf[:cap(c.buf)]:
+				default:
 				}
 			}
 			if c.err != nil {

@@ -81,3 +81,26 @@ func BenchmarkStream_OpaquePassthrough(b *testing.B) {
 		benchDrain(b, Wrap(bytes.NewReader(payload), opts))
 	}
 }
+
+// BenchmarkStream_ChunkedReadPartial exercises partial drains on s.out
+// where the caller's read buffer is smaller than the SSE event size,
+// ensuring capacity preservation avoids repeated slice reallocation.
+func BenchmarkStream_ChunkedReadPartial(b *testing.B) {
+	payload := benchSSEPayload(200)
+	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai-completions"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s := Wrap(bytes.NewReader(payload), opts)
+		buf := make([]byte, 32)
+		for {
+			_, err := s.Read(buf)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				b.Fatalf("read error: %v", err)
+			}
+		}
+	}
+}

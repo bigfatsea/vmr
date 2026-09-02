@@ -289,3 +289,39 @@ models:
 		t.Error("probe slot left held after runProbe")
 	}
 }
+
+type chunkReader struct {
+	chunks int
+	data   []byte
+}
+
+func (cr *chunkReader) Read(p []byte) (int, error) {
+	if cr.chunks <= 0 {
+		return 0, io.EOF
+	}
+	cr.chunks--
+	n := copy(p, cr.data)
+	return n, nil
+}
+
+type nopFlushingWriter struct{}
+
+func (nopFlushingWriter) Header() http.Header         { return http.Header{} }
+func (nopFlushingWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (nopFlushingWriter) WriteHeader(int)             {}
+func (nopFlushingWriter) Flush()                      {}
+
+// BenchmarkCopyFlush verifies that long streams incur minimal allocations
+// per chunk thanks to the double-buffering pool.
+func BenchmarkCopyFlush(b *testing.B) {
+	chunk := bytes.Repeat([]byte("a"), 1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := &chunkReader{chunks: 500, data: chunk}
+		w := &nopFlushingWriter{}
+		if err := copyFlush(context.Background(), w, r, 5*time.Second); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
