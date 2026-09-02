@@ -20,6 +20,15 @@ func (c *Config) validateBasic() error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
 	}
+	if c.MaxAttempts < 0 {
+		return fmt.Errorf("max_attempts must be >= 0 (got %d)", c.MaxAttempts)
+	}
+	if c.MaxConcurrency < 0 {
+		return fmt.Errorf("max_concurrency must be >= 0 (got %d)", c.MaxConcurrency)
+	}
+	if c.AuditRetentionDays < 0 {
+		return fmt.Errorf("audit_retention_days must be >= 0 (got %d)", c.AuditRetentionDays)
+	}
 	if c.StickyTTL.D() > core.StickyBackstopTTL {
 		return fmt.Errorf("sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
 			c.StickyTTL.D(), core.StickyBackstopTTL, c.StickyTTL.D(), core.StickyBackstopTTL)

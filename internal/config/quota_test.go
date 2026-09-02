@@ -474,6 +474,41 @@ func TestQuota_HappyPath_PureTimeSince_MinAndH(t *testing.T) {
 	}
 }
 
+func TestQuota_PureTimeSince_AnchorsToProvidedNow(t *testing.T) {
+	anchor := time.Date(2025, 4, 15, 10, 20, 30, 0, time.UTC)
+	qc := &QuotaConfig{
+		Limits: []LimitConfig{
+			{Metric: "requests", Every: "1h", Since: "09:30", Amount: 100},
+			{Metric: "requests", Every: "1min", Since: "18:45:12", Amount: 50},
+		},
+	}
+	if err := validateQuota("p1", qc, anchor); err != nil {
+		t.Fatalf("validateQuota: %v", err)
+	}
+
+	l0 := qc.Limits[0].Resolved
+	y0, m0, d0 := l0.Since.Date()
+	h0, min0, s0 := l0.Since.Clock()
+	anchorInZone := anchor.In(l0.Since.Location())
+	ay, am, ad := anchorInZone.Date()
+	if y0 != ay || m0 != am || d0 != ad {
+		t.Errorf("limit[0] date = %04d-%02d-%02d, want anchor date %04d-%02d-%02d", y0, m0, d0, ay, am, ad)
+	}
+	if h0 != 9 || min0 != 30 || s0 != 0 {
+		t.Errorf("limit[0] clock = %02d:%02d:%02d, want 09:30:00", h0, min0, s0)
+	}
+
+	l1 := qc.Limits[1].Resolved
+	y1, m1, d1 := l1.Since.Date()
+	h1, min1, s1 := l1.Since.Clock()
+	if y1 != ay || m1 != am || d1 != ad {
+		t.Errorf("limit[1] date = %04d-%02d-%02d, want anchor date %04d-%02d-%02d", y1, m1, d1, ay, am, ad)
+	}
+	if h1 != 18 || min1 != 45 || s1 != 12 {
+		t.Errorf("limit[1] clock = %02d:%02d:%02d, want 18:45:12", h1, min1, s1)
+	}
+}
+
 func TestQuota_Reject_PureTimeSince_OnNonMinH(t *testing.T) {
 	for _, every := range []string{"1d", "1w", "1mo"} {
 		yaml := withQuotaBlock(fmt.Sprintf(`limits:

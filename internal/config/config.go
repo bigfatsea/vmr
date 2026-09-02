@@ -338,16 +338,18 @@ var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 //
 // This runs on the raw YAML text BEFORE parsing (see Parse) — a text-layer
 // substitution, not a per-scalar one. A substituted value containing a
-// newline, ": ", or " #" doesn't just fill in the scalar it was written
-// into: a newline or ": " can restructure the document (a new top-level
-// key, a value that swallows the rest of the line), and " #" starts a YAML
-// comment mid-scalar — silently truncating the value with no parse error at
-// all (confirmed: `api_key: sk-real${SUFFIX}` with SUFFIX containing
-// " #..." parses cleanly with api_key holding only the text before the
-// space). No config author intends either outcome, so both are hard load
-// errors rather than a silent misinterpretation — the same fail-fast rule
-// this package applies to every other "config that would look like it works
-// but doesn't" case (see e.g. resolvePricing's currency-factor check).
+// newline, ": ", " #", or starting with "#" doesn't just fill in the scalar it
+// was written into: a newline or ": " can restructure the document (a new
+// top-level key, a value that swallows the rest of the line), and " #" or a
+// leading "#" starts a YAML comment — silently truncating the value with no
+// parse error at all (confirmed: `api_key: sk-real${SUFFIX}` with SUFFIX
+// containing " #..." parses cleanly with api_key holding only the text before
+// the space, and `api_key: ${KEY}` with KEY starting with "#" turns the line
+// into a comment, silently expanding to ""). No config author intends either
+// outcome, so both are hard load errors rather than a silent
+// misinterpretation — the same fail-fast rule this package applies to every
+// other "config that would look like it works but doesn't" case (see e.g.
+// resolvePricing's currency-factor check).
 // Not exhaustive: a value used inside a YAML flow collection (e.g.
 // `api_keys: [${VAR}]`) could still inject an extra element via a comma —
 // narrower and less common than the three checked here (needs flow-style
@@ -368,13 +370,13 @@ func expandEnv(s string) (string, []string, error) {
 		if !ok || v == "" {
 			empty[name] = true
 		}
-		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #")) {
+		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #") || strings.HasPrefix(strings.TrimSpace(v), "#")) {
 			badVar = name
 		}
 		return v
 	})
 	if badVar != "" {
-		return "", nil, fmt.Errorf("environment variable %q's value contains a newline, \": \", or \" #\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
+		return "", nil, fmt.Errorf("environment variable %q's value contains a newline, \": \", \" #\", or starts with \"#\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
 	}
 	if len(empty) == 0 {
 		return out, nil, nil
@@ -402,23 +404,14 @@ func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1:8800"
 	}
-	if c.MaxAttempts < 0 {
-		c.MaxAttempts = 0
-	}
 	if c.ProbeTimeout <= 0 {
 		c.ProbeTimeout = Duration(DefaultProbeTimeout)
-	}
-	if c.MaxConcurrency < 0 {
-		c.MaxConcurrency = 0
 	}
 	if c.ImageDownscaleMaxPx < 0 {
 		c.ImageDownscaleMaxPx = 0
 	}
 	if c.ImageCacheTTLDays <= 0 {
 		c.ImageCacheTTLDays = DefaultImageCacheTTLDays
-	}
-	if c.AuditRetentionDays < 0 {
-		c.AuditRetentionDays = 0
 	}
 	if c.StickyTTL.D() <= 0 {
 		c.StickyTTL = Duration(DefaultStickyTTL)

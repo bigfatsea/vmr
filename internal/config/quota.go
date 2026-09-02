@@ -199,7 +199,7 @@ var pureTimePattern = regexp.MustCompile(`^([0-9]{1,2}):([0-9]{2})(?::([0-9]{2})
 // nil error means the field was empty — the caller applies the default
 // (quota.DefaultSince) in that case, not this function, which has no
 // access to "now".
-func parseSince(s, unit string) (t time.Time, ok bool, err error) {
+func parseSince(s, unit string, now time.Time) (t time.Time, ok bool, err error) {
 	if s == "" {
 		return time.Time{}, false, nil
 	}
@@ -225,8 +225,8 @@ func parseSince(s, unit string) (t time.Time, ok bool, err error) {
 				return time.Time{}, false, fmt.Errorf("invalid since %q: second out of range", s)
 			}
 		}
-		now := time.Now().In(fmtutil.DisplayZone)
-		y, mo, d := now.Date()
+		nowInZone := now.In(fmtutil.DisplayZone)
+		y, mo, d := nowInZone.Date()
 		return time.Date(y, mo, d, hh, mm, ss, 0, fmtutil.DisplayZone), true, nil
 	}
 	return time.Time{}, false, fmt.Errorf("invalid since %q (want YYYY-MM-DD, RFC3339, or hh:mm[:ss] for min/h Limits)", s)
@@ -332,7 +332,7 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 	if !positiveFinite(lc.Amount) {
 		return fmt.Errorf("provider %q: %s: amount must be a finite number > 0 (got %v)", providerName, fieldPrefix, lc.Amount)
 	}
-	since, explicit, err := parseSince(lc.Since, unit)
+	since, explicit, err := parseSince(lc.Since, unit, now)
 	if err != nil {
 		return fmt.Errorf("provider %q: %s: since: %w", providerName, fieldPrefix, err)
 	}
