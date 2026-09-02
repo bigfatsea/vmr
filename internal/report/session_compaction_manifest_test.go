@@ -98,14 +98,12 @@ func TestDetailJob_ManifestsForPrefersLineagePrev(t *testing.T) {
 	}
 	m, prev := (detailJob{info: info}).manifestsFor()
 	if m != own || prev != lineagePrev {
-		t.Errorf("manifestsFor = (%p, %p), want (%p, %p) — prevManifest must win over Parent.manifest",
-			m, prev, own, lineagePrev)
+		t.Errorf("manifestsFor = (%p, %p), want (%p, %p)", m, prev, own, lineagePrev)
 	}
-	// Regression: ReqInfo without group()'s correlation still falls back to
-	// the Parent chain (hand-built callers), and nil stays nil.
+	// Nil prevManifest (lineage head) stays nil regardless of Parent.
 	info2 := &ReqInfo{manifest: own, Parent: &ReqInfo{manifest: parentM}}
-	if _, prev2 := (detailJob{info: info2}).manifestsFor(); prev2 != parentM {
-		t.Errorf("fallback prev = %p, want Parent.manifest %p", prev2, parentM)
+	if _, prev2 := (detailJob{info: info2}).manifestsFor(); prev2 != nil {
+		t.Errorf("nil prevManifest should give nil prev even with Parent, got %p", prev2)
 	}
 	if _, prev3 := (detailJob{info: &ReqInfo{manifest: own}}).manifestsFor(); prev3 != nil {
 		t.Errorf("nil prevManifest and nil Parent should give nil prev, got %p", prev3)

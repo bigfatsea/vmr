@@ -851,7 +851,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | Failover | quota 只重排不淘汰，候选集大小不变 | failover 语义零改动 |
 | 热重载 | Registry 挂 Router、不在 Snapshot 里 | 计数跨重载存活（缺省 `since` 亦然，依赖 `DefaultSince` 的日历对齐——见"已评估并否决的改进提案"表 B2）；额度值现读现用，改配置立刻生效 |
 | 并发 | `Charge` 每次成功响应一次，`score` 每个新会话一次 | 普通 `sync.Mutex` 足够（对比一次 HTTP 往返，锁竞争不值一提），沿用 `health.Registry` 形状 |
-| `vmr replay` | **已计费**（2026-08-11 交付）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 来自 `chatmsg.MergeUsageWithProtocol` 读取已完整缓冲的响应体（而非 `internal/respnorm` 的增量嗅探），退化路径复用 `tokenutil.Estimate` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；见文末「现状与后续计划」一节 |
+| `vmr replay` | **已计费**（2026-08-11 交付，2026-09 升级）——一次性 `quota.Registry` 加载 + 成功响应后计费 + 退出前 flush，不需要后台 flusher；usage 走 `chatmsg.ExtractUsageSides` 返回 `(inOK, outOK)`，再调 `router.TokenCountersSides(u, inOK, outOK, facts.EstimatedTokens, tokenutil.Estimate(respBody))`——拆侧后 Anthropic 截断流的 `out=1` 占位永不以 `estimated=0` 计入；`inEst` 优先取记录自身的 `facts.EstimatedTokens`（剔除内联 base64 图后的估算基，与 live 侧 `server/facts.go:81-85` 同源），缺失才回退 `tokenutil.Estimate(reqBody)` | 计费管线（metric 分发 + model_multiplier + cost 定价）从 `chargeQuota` 抽成 `router.ChargeResponse`，供 `internal/replay` 与 `router` 共用同一实现；`>=400` 响应不计费，`-dry-run` 不触碰状态文件；live↔replay 两路等价由 `cmd/vmr/quota_parity_test.go` 钉住；见文末「现状与后续计划」一节 |
 | 后台探针 `probe` | 消耗少量额度，但不走 `forwardSuccess` | 不计费。与审计不记探针是同一口径，`KNOWN_ISSUES` 已有记录 |
 | 上游"额度耗尽"的硬信号 | `internal/adapter/classify.go` 已把 429 响应体里的 `quota`/`balance`/`credit` 关键词归类为 `ErrEndpoint` | 即**长冷却**（10 分钟起，指数退避到 1 小时）+ 切走。这正是"不做硬熔断"所依赖的既有机制，无需新增 |
 
