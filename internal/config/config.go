@@ -407,9 +407,6 @@ func (c *Config) applyDefaults() {
 	if c.ProbeTimeout <= 0 {
 		c.ProbeTimeout = Duration(DefaultProbeTimeout)
 	}
-	if c.ImageDownscaleMaxPx < 0 {
-		c.ImageDownscaleMaxPx = 0
-	}
 	if c.ImageCacheTTLDays <= 0 {
 		c.ImageCacheTTLDays = DefaultImageCacheTTLDays
 	}
@@ -440,11 +437,6 @@ func (c *Config) applyDefaults() {
 		changed := false
 		if len(m.Strategy) == 0 {
 			m.Strategy = []string{"priority"}
-			changed = true
-		}
-		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
-			zero := 0
-			m.ImageDownscaleMaxPx = &zero
 			changed = true
 		}
 		if changed {

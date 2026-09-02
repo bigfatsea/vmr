@@ -216,6 +216,14 @@ func workloadClassOf(ri *ReqInfo) string {
 // Entity loss reuses chatmsg.ExtractEntities, the same rough file-path/URL
 // scan internal/story's own CompactionInfo uses (sunk to chatmsg so both
 // packages share one implementation).
+// IMPORTANT — caller contract: this function reads c.firstText and c.respText
+// on every compaction ReqInfo in sess.Compactions, so callers must populate
+// sess.Compactions (linkCompactions is what does it, in session.go) BEFORE
+// this is called AND must NOT release those fields on compaction records
+// in between. session.go's releaseTextBuffers keeps them alive only on
+// per-session first records and compaction records for exactly this reason
+// — if a future refactor reorders the two passes, compaction rows will be
+// silently empty.
 func buildCompactions(sess *SessionAnalysis) []CompactionRow {
 	out := make([]CompactionRow, 0, len(sess.Compactions))
 	for _, c := range sess.Compactions {

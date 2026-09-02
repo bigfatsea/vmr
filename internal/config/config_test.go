@@ -239,14 +239,11 @@ func TestImageDownscaleConfig(t *testing.T) {
 	}
 }
 
-func TestImageDownscaleNegativeClampsToDisabled(t *testing.T) {
+func TestImageDownscaleNegativeRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_downscale: -1", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ImageDownscaleMaxPx != 0 {
-		t.Errorf("negative image_downscale must clamp to 0 (disabled), got %d", cfg.ImageDownscaleMaxPx)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "image_downscale must be >= 0") {
+		t.Errorf("want image_downscale rejection error, got %v", err)
 	}
 }
 
@@ -296,15 +293,11 @@ func TestModelImageDownscaleExplicitZeroDiffersFromUnset(t *testing.T) {
 	}
 }
 
-func TestModelImageDownscaleNegativeClampsToZero(t *testing.T) {
+func TestModelImageDownscaleNegativeRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "    endpoints:", "    image_downscale: -1\n    endpoints:", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := cfg.Models["m1"].ImageDownscaleMaxPx
-	if got == nil || *got != 0 {
-		t.Errorf("negative per-model image_downscale must clamp to 0 (force-disabled), got %v", got)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "image_downscale must be >= 0") {
+		t.Errorf("want per-model image_downscale rejection error, got %v", err)
 	}
 }
 

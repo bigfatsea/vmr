@@ -29,6 +29,9 @@ func (c *Config) validateBasic() error {
 	if c.AuditRetentionDays < 0 {
 		return fmt.Errorf("audit_retention_days must be >= 0 (got %d)", c.AuditRetentionDays)
 	}
+	if c.ImageDownscaleMaxPx < 0 {
+		return fmt.Errorf("image_downscale must be >= 0 (got %d; 0 = disabled)", c.ImageDownscaleMaxPx)
+	}
 	if c.StickyTTL.D() > core.StickyBackstopTTL {
 		return fmt.Errorf("sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
 			c.StickyTTL.D(), core.StickyBackstopTTL, c.StickyTTL.D(), core.StickyBackstopTTL)
@@ -112,6 +115,9 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 		}
 		if m.MaxContextTokens < 0 {
 			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)
+		}
+		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
+			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)
 		}
 		for i, eg := range m.Endpoints {
 			if err := c.validateEndpointGroup(fmt.Sprintf("model %q endpoint group #%d", name, i+1), eg, providerModels); err != nil {
