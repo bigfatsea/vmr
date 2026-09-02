@@ -12,9 +12,11 @@ import (
 // audit record to the current enum value. "openai" and "anthropic" were the
 // registered names before the 2026-08 rename.
 //
-// TODO(2026-10): transitional shim for reading pre-rename audit logs only —
-// remove once historical logs have aged out. See the protocol-rename entry
-// in docs/KNOWN_ISSUES.md's 配置与协议 section for the full removal list.
+// Transitional shim for reading pre-rename audit logs only. Removal is
+// condition-based, not date-based — the default retention policy never
+// deletes audit logs, so old names do not age out on their own. See the
+// protocol-rename entry in docs/KNOWN_ISSUES.md's 配置与协议 section for
+// the full removal list and the fact-triggered condition.
 // MUST NOT be called on any write path.
 func CanonicalProtocol(p string) string {
 	switch p {

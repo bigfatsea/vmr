@@ -89,7 +89,8 @@
 - **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
 - **持续性故障的日志按"错误文本相同"去重，不做事件级审计**：quota flush 失败（磁盘满、权限变更）与时钟回退都是持续性的，10 秒一次刷屏会淹没日志。flush 侧按错误文本去重（首次 + 每 10 次，附连续失败计数），时钟回退侧每进程最多一条 WARN。**已知代价**：两种错误交替出现时 flush 侧不去重（每 tick 一条——但交替本身就是有效信号）；时钟"回退→恢复→再回退"的第二次不再 WARN。**边界**：需要回退事件级审计的话，这里要换成带去抖窗口的计数器。
 - **`vmr-quota.json` 的结构损坏整文件拒绝，绝不部分采纳**：静默丢掉一个 provider 的账本比报错更危险。版本戳不匹配、nil account map、null bucket 三者任一即视为损坏，由调用方 WARN + 从零开始——与既有的语法损坏路径同构。`version` 字段从"写而不校验"改为真正的门：有版本戳却不校验比没有更危险，下一个人会以为"有版本号所以安全"。
-- **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而"不等即重置"会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
+- **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而“不等即重置”会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
+- **原子写只做文件级 Sync，不做目录 fsync**：全仓的 CreateTemp+Rename 站点（quota 账本、audit 压缩、ctxgraph `.parse-cache`、reqdetail 证据、story LLM 缓存）都不 fsync 父目录——掉电时 rename 的目录项可能未持久化，最近一次落盘可能丢失或回退。刻意取舍：丢失代价分别是“统计计数回退到上次 flush”（quota，文件级 Sync 已做）与“缓存 miss 重算”（其余站点，多数连文件级 Sync 都没做，靠读取侧的哈希/schema 校验把半写内容兜成 miss），全部落在各自 best-effort 契约内；而目录 fsync 每次落盘多一次系统调用，换来的只是把丢失窗口从“最近一个 flush 间隔”缩到零。若未来某站点升级为“不许丢”的契约（如计费级账本），在该站点单独补目录 fsync，而不是全仓统一加。
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
 - **`.parse-cache/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr report`/`vmr story` 均可从空缓存目录冷启动。触发条件：`.parse-cache/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。
@@ -100,7 +101,7 @@
 - **`imgprep.ImageInfo` → `audit.ImageInfo` 的字段拷贝**：换 `imgprep` 不依赖 `audit`，保住公共工具包零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
 - **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/story/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
-- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：同一份文本要进 Markdown 与 HTML 两种产物，而 HTML 侧的转义早已由 `story/mdlite.go` 在渲染时全量完成（`<script>` 从来进不去）。真正没人管的是 Markdown **结构**破坏（反引号、竖线、行首 `#`/`-`/`>`），而它在 `i18n` 模板层修不了——模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹。
+- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：同一份文本要进 Markdown 与 HTML 两种产物，而 HTML 侧的转义早已由 `story/mdlite.go` 在渲染时全量完成（`<script>` 从来进不去）。真正没人管的是 Markdown **结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`（含无空格形态）、主题分隔线 `---`）——而它在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **`core.StickyBackstopTTL` 不迁回 `internal/sticky`**：迁回制造一条 `config` → `sticky` 的新依赖边，仅用于读一个常量；不做这个校验则 `sticky_ttl` 超过 backstop 的配置会「看起来被接受、实际静默失效」。
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：降级估算的统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（Q04 的 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
@@ -267,6 +268,11 @@
 
 - **现状**：决策脊柱的 tool-result ❌ 徽章、`error_retry_unadapted` / `error_then_unverified_success` / `error_recovery_count` 等检测器、Context Rot 错误率、N-gram 尾步错误率，全部只在 Anthropic Messages 协议的 `is_error` 工具结果标记存在时才会填充（`internal/story/findings_toolresult.go` 等）。当前用于生成全形态样例报告与 Phase 1b 校准的语料 **0.0% 是 anthropic-messages**——`vmr-story-corpus.md` 顶部盲区声明已如实标注「命中率为 0 代表『测不出来』，不代表『检查过没问题』」，但这批信号至今没有一次在真实流量上执行过，正确性只有单测背书。
 - **触发条件**：任意一次 `vmr analyze` 的语料出现非零 anthropic-messages 占比，即可用真实数据核验这些检测器的命中/误报行为；在此之前，需专门准备一批 anthropic-messages 语料（真实或构造）才能推进，属独立任务。
+
+#### 2.68 [低，登记待触发] crosscheck 夹具没有 body-sniffed 的 compaction 记录，字节一致性靠指纹机制间接保证
+
+- **现状**：`cmd/vmr/cmd_story_report_crosscheck_test.go` 的夹具里没有 summarization（compaction）请求，因此“report 与 story 对同一条 compaction 记录渲染逐字节相同的 detail 页”（R72）在该端到端测试里没有直擦形态的覆盖——实际由 report 侧单元测试（`session_compaction_manifest_test.go`）加指纹机制（`renderFingerprint` 折入 m/prev 身份）间接保证。
+- **触发条件**：语料出现真实的 compaction 记录后，往 crosscheck 夹具补一条 body-sniffed summarization 记录，让字节一致性有端到端直证。在那之前不构成已知失真——两条直接测试已钉住机制本身。
 
 
 ### C. 分析半区 · LLM 解读层校准
