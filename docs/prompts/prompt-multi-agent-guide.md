@@ -24,6 +24,9 @@
    - ❌ 严禁修改：白名单以外的任何文件！
 3. 代码风格与架构门禁：[声明依赖限制、行数预算限制等]
 4. Git 规范：[指定 Commit Message 格式，严禁随意添加 trailer]
+5. 共享文件禁改：CHANGELOG.md / KNOWN_ISSUES.md / 设计文档由主控独占，Worker 严禁修改；待登记项写入不提交的 NOTES_FOR_LEAD.md
+6. 语义变更预警：若改动可能引发语义变更，说明书须预告会打红的白名单外测试，并声明期望的处理方式（交回主控 / 允许修改 fixture 数据但不得削弱断言、逐条记录于 NOTES_FOR_LEAD.md）
+7. 忽略目录：`_tmp/`、`archived/` 以及临时编译产物目录视为不存在，严禁读取或修改
 
 ## 二、具体修复任务清单 (Action Plan)
 ### 任务 1: [问题标题]
@@ -50,7 +53,7 @@ git worktree add -b feat/<task-name> ../<worktree-dir> main
 cp <task-spec-source.md> ../<worktree-dir>/TASK_SPEC.md   # 源为 docs/tasks/ 下的真实 spec 文件，如 TASK_SPEC_R2_G3.md
 
 # 2. 派发执行阶段 (后台非交互式)
-(cd ../<worktree-dir> && pi -p "@TASK_SPEC.md" "请严格按照 TASK_SPEC.md 要求执行并 commit。" > /tmp/agent.log 2>&1) &
+(cd ../<worktree-dir> && pi -p --approve @TASK_SPEC.md "请严格按照 TASK_SPEC.md 要求执行并 commit。" > /tmp/agent.log 2>&1) &
 PID=$!
 
 # 3. 监控阶段 (检查 session 日志与 git 状态)
@@ -65,12 +68,19 @@ git worktree remove --force ../<worktree-dir>
 git branch -d feat/<task-name>
 ```
 
+> **派发命令注意事项**：
+> - `@file` 必须是独立 argv 项，写进引号里会被整串当成文件名导致派发空转。正确形式：`pi -p --approve @A.md @B.md "<指令>"`。
+> - 未跟踪的参考文档（如各类审阅/评审产物，主仓库中可能未被 git 跟踪）不会通过 `git worktree add` 进入工作树。主控必须显式 `cp` 进 worktree 目录，并在说明书里点明"这些路径在你的 worktree 中不存在，不要去找"。
+> - Pi Agent 的 CLI 命令可直接运行，其模型 Provider 配置已预先配好（本环境指向远端 VMR 服务），Worker 无需自行配置。
+
 ---
 
 ### 6.4 主控 Agent (Lead Orchestrator) 的质量收敛守则
 1. **不要盲信 Git Merge 成功**：Git 文本合并成功并不代表编译能通过或逻辑自洽。主控必须在合并后在根目录下统一跑全局测试套件（`-race` + `archtest`）。
 2. **审查 Commit 洁净度**：检查 Worker Agent 是否不小心提交了临时测试脚本、配置文件或未追踪的产物。
 3. **保持线性历史 (Clean History)**：对于无冲突的正交分支，优先使用 Fast-Forward 或结构明确的 Merge Commit。
+4. **共享文件由主控独占**：CHANGELOG.md / KNOWN_ISSUES.md / 设计文档进所有 Worker 的禁改清单；Worker 把待登记项写进不提交的 NOTES_FOR_LEAD.md。多批并行能否零冲突，这一条是主因。
+5. **验收必须独立复跑**：不能只看 Worker 自述。Worker 的最终验收命令可能未跑完就退出，主控必须独立复跑确认。"Worker 说全绿"和"主控看到全绿"是两件事。
 
 ---
 
@@ -82,3 +92,20 @@ git branch -d feat/<task-name>
 | **测试中注册同名组件** | 测试并发运行时因重复 Register 触发 panic | 动态生成带随机时间戳的测试组件名称（如 `test-probe-${timestamp}`） |
 | **Timer 阻塞与通道死锁** | 流式转发在极端超时时阻塞 | 重置 Timer 时使用非阻塞 select：`if !t.Stop() { select { case <-t.C: default: } }` |
 | **Worktree 删除报错** | Worktree 包含未跟踪的 `TASK_SPEC.md` 导致 `git worktree remove` 失败 | 使用 `--force` 强制删除已完成的工作树目录 |
+| **未跟踪参考文档没进 Worktree** | Worker 找不到审阅/评审文档，无从下手或自行猜测 | 主控显式 `cp` 进 Worktree，并在说明书里声明"这些路径在你的 worktree 中不存在，不要去找" |
+| **共享文件被 Worker 改动** | 登记项与文档状态失控、跨批冲突 | 共享文件由主控独占，Worker 的待登记项写进不提交的 NOTES_FOR_LEAD.md |
+| **语义变更打红白名单外测试** | Worker 措手不及，擅自改测试或静默忽略 | 说明书预先预告会打红的测试，并声明期望处理方式（交回主控 / 改 fixture 不削弱断言并逐条记录） |
+| **验收只信 Worker 自述** | Worker 的验收命令提前退出，实际未全绿 | 主控独立复跑最终验收命令，"worker 说全绿"≠"主控看到全绿" |
+
+---
+
+### 6.6 Worker 执行纪律与独立判断
+
+1. **第一性原理与独立判断（敢于挑战历史定论）**：
+   - 切勿盲从项目设计文档、代码注释中记录的历史定论、历史决策或既有取舍（如文档中的 decisions、decided-not-to-fix 等声明）——那些均属于特定历史阶段的背景产物。
+   - 评估代码与既有结论时，必须**回归第一性原理与高阶设计原则**，立足于代码现状进行客观、独立的批判性审视。只要有理有据，应**敢于挑战旧有假设与既定结论**，指出因系统演进而暴露出的新瓶颈、假设失效或潜在坏味道。
+2. **忽略目录**：严禁读取或修改 `_tmp/`、`archived/` 以及临时编译产物目录，视其不存在。
+3. **资源与耗时**：长耗时任务可按需持续占用计算资源，直至所有阶段执行完毕。
+4. **Token 与效率控制**：
+   - 思考（Thinking）与响应（Response）保持紧凑精炼、逻辑直接，避免空话与冗余客套。
+   - 工具调用尽量批量化合并处理；所有结论必须有具体的源码位置作为事实支撑。
