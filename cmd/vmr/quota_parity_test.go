@@ -53,16 +53,22 @@ import (
 
 // parityAttempt is one upstream try in a synthetic request: the status the
 // upstream returned (0 = never got a response at all, e.g. a network error)
-// and whether the forwarded 2xx then broke mid-copy.
+// and whether the forwarded 2xx then broke mid-copy or was a soft-block
+// (content-policy 2xx that the router never charges).
 type parityAttempt struct {
 	status    int
 	truncated bool
+	softblock bool // 2xx with content-policy flag: not charged, not forwarded
 }
 
 // forwarded mirrors internal/router's own decision to call chargeQuota:
 // forwardSuccess runs for any response with status < 400, and charges
-// "regardless of copyErr" — so a truncated 2xx is charged too.
-func (a parityAttempt) forwarded() bool { return a.status > 0 && a.status < 400 }
+// "regardless of copyErr" — so a truncated 2xx is charged, but a
+// softblock 2xx (ErrorClass="content") is NOT (checkSoftBlock exits
+// the attempt before forwardSuccess runs).
+func (a parityAttempt) forwarded() bool {
+	return a.status > 0 && a.status < 400 && !a.softblock
+}
 
 // parityRequest is one synthetic client request and the attempts it took.
 //
@@ -77,6 +83,7 @@ func (a parityAttempt) forwarded() bool { return a.status > 0 && a.status < 400 
 // equality instead of approximately.
 type parityRequest struct {
 	model    string // real upstream model — picks the model_multiplier
+	protocol string // ingress protocol ("openai-completions", "anthropic-messages", "openai-responses"); "" defaults to openai-completions
 	attempts []parityAttempt
 	// respBody is the recorded client-side response. Include a usage object
 	// to exercise the exact path; omit it to exercise the degraded one.
@@ -92,16 +99,26 @@ type parityRequest struct {
 // the shape internal/report parses. The final attempt is the one the report
 // treats as having served the client (rc.endpoint).
 func (r parityRequest) auditLine(ts time.Time, provider string) string {
+	proto := r.protocol
+	if proto == "" {
+		proto = "openai-completions"
+	}
 	var atts []string
 	for _, a := range r.attempts {
-		ep := core.EndpointLabel("openai-completions", provider, r.model)
-		fields := fmt.Sprintf(`"endpoint":%q,"protocol":"openai-completions","provider":%q,"model":%q,"url":"https://example.com/v1","dur_ms":5,"request":{}`,
-			ep, provider, r.model)
+		ep := core.EndpointLabel(proto, provider, r.model)
+		fields := fmt.Sprintf(`"endpoint":%q,"protocol":%q,"provider":%q,"model":%q,"url":"https://example.com/v1","dur_ms":5,"request":{}`,
+			ep, proto, provider, r.model)
 		switch {
 		case a.status == 0:
 			fields += `,"error":"network: dial tcp: refused","error_class":"transient"`
 		case a.status >= 400:
 			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"upstream %d","error_class":"rate_limit"`, a.status, a.status)
+		case a.softblock:
+			// Softblock: checkSoftBlock writes SetErrorResponse with
+			// ErrorClass="content" before returning blocked=true — the
+			// attempt NEVER reaches forwardSuccess, so Forwarded is never
+			// set and quota is never charged.
+			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"content","error_class":"content"`, a.status)
 		case a.truncated:
 			// New-format real shape: forwardSuccess sets Forwarded BEFORE
 			// SetTruncated runs, so a mid-stream-cut 2xx keeps forwarded:true
@@ -129,19 +146,28 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 	if r.estTokens > 0 {
 		facts = fmt.Sprintf(`,"facts":{"estimated_tokens":%d}`, r.estTokens)
 	}
-	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":%q%s,"client":{"request":{}%s},"attempts":[%s]}`,
-		ts.Format(time.RFC3339), outcome, facts, clientResp, strings.Join(atts, ","))
+	return fmt.Sprintf(`{"ts":%q,"dur_ms":5,"model":"m1","protocol":%q,"outcome":%q%s,"client":{"request":{}%s},"attempts":[%s]}`,
+		ts.Format(time.RFC3339), proto, outcome, facts, clientResp, strings.Join(atts, ","))
 }
 
 // tokenChargeFor reproduces what internal/router computed for this request by
-// calling the router's OWN exported entry point (router.TokenCounters — the
-// same function the live path's tokenCharge and `vmr replay`'s chargeReplay
-// both go through). Nothing about the exact-vs-degraded rule is restated
-// here: restating it is precisely the failure mode this whole file exists to
-// catch, one level down.
+// calling the router's OWN exported entry point (router.TokenCountersSides —
+// the same function the live path's tokenCharge and `vmr replay`'s
+// chargeReplay both go through). The per-side flags come from
+// chatmsg.ExtractUsageSides, the single authority for the side rule, so
+// the exact-vs-degraded decision is the same one the router's live path
+// makes (and the old single-bool disjunction would have gotten wrong for
+// Anthropic's truncated-after-message_start shape).
 func (r parityRequest) tokenCharge() (quota.Counters, float64) {
-	u, sniffed := chatmsg.ExtractUsage(r.respBody)
-	return router.TokenCounters(u, sniffed, r.estTokens, chatmsg.EstimateResponseBodyTokens(r.respBody))
+	u, inOK, outOK := chatmsg.ExtractUsageSides(r.respBody, r.protocolOrDefault())
+	return router.TokenCountersSides(u, inOK, outOK, r.estTokens, chatmsg.EstimateResponseBodyTokens(r.respBody))
+}
+
+func (r parityRequest) protocolOrDefault() string {
+	if r.protocol != "" {
+		return r.protocol
+	}
+	return core.ProtocolOpenAICompletions
 }
 
 // routerCharged replays the same requests through internal/router's REAL
@@ -154,11 +180,12 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 	reg := quota.NewRegistry("")
 	for _, r := range reqs {
 		raw, estimated := r.tokenCharge()
+		proto := r.protocolOrDefault()
 		for _, a := range r.attempts {
 			if !a.forwarded() {
 				continue // the router only ever charges a forwarded response
 			}
-			ep := &core.Endpoint{AdapterType: "openai-completions", Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
+			ep := &core.Endpoint{AdapterType: proto, Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
 			router.ChargeResponse(reg, ep, raw, estimated, now)
 		}
 	}
@@ -337,10 +364,37 @@ func sseNoUsage() string {
 		"data: [DONE]\n\n"
 }
 
+// anthropicUsageJSON is a non-SSE JSON response body with both sides of the
+// usage ledger reported (Anthropic's input_tokens excludes cache, so the
+// total is input_tokens + cache_read_input_tokens).
+func anthropicUsageJSON(in, cacheRead, cacheWrite, out int) string {
+	return fmt.Sprintf(`{"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d,"cache_creation_input_tokens":%d}}`,
+		in, out, cacheRead, cacheWrite)
+}
+
+// anthropicTruncatedSSE is an SSE stream truncated after message_start —
+// the real input counts plus a ~1 placeholder output. The per-side rule
+// says outOK=false for this shape.
+func anthropicTruncatedSSE(in, cacheRead, cacheWrite int) string {
+	return fmt.Sprintf("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":%d,\"cache_read_input_tokens\":%d,\"cache_creation_input_tokens\":%d,\"output_tokens\":1}}}\n\n",
+		in, cacheRead, cacheWrite)
+}
+
+// responsesUsageJSON is an openai-responses non-SSE JSON response body
+// (input_tokens already includes cached tokens as a subset).
+func responsesUsageJSON(in, out int) string {
+	return fmt.Sprintf(`{"usage":{"input_tokens":%d,"output_tokens":%d}}`, in, out)
+}
+
+// softblockResp is a short content-policy refusal body — the router never
+// charges for it (checkSoftBlock exits before forwardSuccess).
+const softblockResp = `{"error":{"type":"content_policy"}}`
+
 // tokensParityFixture is the shared corpus for the tokens and cost parity
 // tests: a MIXED window — some responses carry a usage object (charged
 // exactly), some don't (charged as a degraded byte estimate) — plus traffic
-// the router never charges at all.
+// the router never charges at all, now expanded across all three protocols
+// plus the softblock case.
 //
 // The mix is the whole point. Before B0, `vmr report` counted only the
 // sniffed half and rendered the result as a precise number; the all-or-
@@ -348,7 +402,7 @@ func sseNoUsage() string {
 // fired on a window like this one, which is also the window real traffic
 // produces.
 func tokensParityFixture() []parityRequest {
-	return []parityRequest{
+	openAI := []parityRequest{
 		// exact: usage sniffed off the response
 		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(1000, 200, 50, 300), estTokens: 900},
 		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(500, 0, 0, 120), estTokens: 480},
@@ -363,7 +417,41 @@ func tokensParityFixture() []parityRequest {
 		// every attempt failed: nothing forwarded, nothing charged
 		{model: "real-model", attempts: []parityAttempt{{status: 429}, {status: 500}}},
 		{model: "real-model", attempts: []parityAttempt{{status: 0}}},
+		// softblock: 2xx with content-policy error — NOT charged
+		{model: "real-model", attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
 	}
+
+	anthropic := []parityRequest{
+		// exact: non-SSE JSON with both sides
+		{model: "real-model", protocol: "anthropic-messages",
+			attempts: []parityAttempt{{status: 200}},
+			respBody: anthropicUsageJSON(1000, 200, 50, 300), estTokens: 900},
+		// truncated after message_start: input real, output placeholder
+		{model: "real-model", protocol: "anthropic-messages",
+			attempts: []parityAttempt{{status: 200, truncated: true}},
+			respBody: anthropicTruncatedSSE(1000, 200, 50), estTokens: 900},
+		// failed: nothing charged
+		{model: "real-model", protocol: "anthropic-messages",
+			attempts: []parityAttempt{{status: 429}}},
+		// softblock
+		{model: "real-model", protocol: "anthropic-messages",
+			attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+	}
+
+	responses := []parityRequest{
+		// exact: non-SSE JSON with both sides
+		{model: "real-model", protocol: "openai-responses",
+			attempts: []parityAttempt{{status: 200}},
+			respBody: responsesUsageJSON(1000, 300), estTokens: 900},
+		// failed: nothing charged
+		{model: "real-model", protocol: "openai-responses",
+			attempts: []parityAttempt{{status: 429}, {status: 500}}},
+		// softblock
+		{model: "real-model", protocol: "openai-responses",
+			attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+	}
+
+	return append(append(openAI, anthropic...), responses...)
 }
 
 // TestQuotaParity_TokensMetric_ReportMatchesRouter is the N2 regression net.
@@ -626,3 +714,153 @@ func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 }
 
 func f64p(v float64) *float64 { return &v }
+
+// replayChargeFor reproduces internal/replay.chargeReplay's exact call
+// sequence (internal/replay/replay.go) — the same one-router entry points
+// live traffic's tokenCharge goes through, driven by the same per-side
+// rule. It deliberately uses chargeReplay's OWN estimate basis (the
+// record's Facts.EstimatedTokens on the In side, raw bytes on the Out
+// side — see that function's doc comment), so the two halves of this file
+// disagree only where the deployed code deliberately does.
+func (r parityRequest) replayChargeFor() (quota.Counters, float64) {
+	u, inOK, outOK := chatmsg.ExtractUsageSides(r.respBody, r.protocolOrDefault())
+	return router.TokenCountersSides(u, inOK, outOK, r.estTokens, tokenutil.Estimate([]byte(r.respBody)))
+}
+
+// TestQuotaParity_ReplayAndLiveChargeAgree is the replay↔router corner:
+// for the SAME fixture, the live path (router.TokenCountersSides fed by
+// the live tokenCharge) and the replay path (internal/replay.chargeReplay's
+// exact sequence) must agree on the exact-vs-degraded DECISION, and on the
+// raw counters and resulting account charge whenever the estimate basis
+// can't make them differ (i.e. when both sides of the usage ledger were
+// sniffed).
+//
+// The anthropic truncated-after-message_start row is the load-bearing
+// case: replay's chargeReplay used to feed TokenCounters the single
+// `u.In > 0 || u.Out > 0` disjunction, which bills the ~1 placeholder
+// output as EXACT (estimated=0). Both halves now use the per-side rule, so
+// the Out side must be estimated on BOTH sides — the exact thing the old
+// disjunction got wrong.
+//
+// The softblock rows are the other load-bearing case: checkSoftBlock exits
+// before forwardSuccess, so the router never charges them. Neither half's
+// ChargeResponse loop ever runs for a softblock attempt (it is not
+// forwarded), so the account stays at zero on both sides.
+func TestQuotaParity_ReplayAndLiveChargeAgree(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000,
+		TokenWeights: core.NewTokenWeights()}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+
+	reqs := []parityRequest{
+		// exact, both sides sniffed: estimate bases unused, so raw counters
+		// and the account charge must be identical between halves
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseWithUsage(1000, 200, 50, 300), estTokens: 900},
+		{model: "real-model", protocol: "anthropic-messages", attempts: []parityAttempt{{status: 200}},
+			respBody: anthropicUsageJSON(1000, 200, 50, 300), estTokens: 900},
+		// anthropic truncated after message_start: In real, Out placeholder —
+		// BOTH halves must treat Out as estimated (the old disjunction didn't)
+		{model: "real-model", protocol: "anthropic-messages", attempts: []parityAttempt{{status: 200, truncated: true}},
+			respBody: anthropicTruncatedSSE(1000, 200, 50), estTokens: 900},
+		// degraded: no usage at all — both halves estimate, but the Out
+		// estimate basis differs (text-only live vs raw-bytes replay), so
+		// only the DECISION and the In side are pinned
+		{model: "real-model", attempts: []parityAttempt{{status: 200}}, respBody: sseNoUsage(), estTokens: 700},
+		// softblock: never charged by either half
+		{model: "real-model", attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+	}
+
+	anthropicTruncated := func(r parityRequest) bool {
+		return strings.Contains(r.respBody, "message_start") && !strings.Contains(r.respBody, "message_delta")
+	}
+	isSoftblock := func(r parityRequest) bool { return r.attempts[0].softblock }
+
+	for i, r := range reqs {
+		liveRaw, liveEst := r.tokenCharge()
+		replayRaw, replayEst := r.replayChargeFor()
+
+		if isSoftblock(r) {
+			// The charge never happens: softblock is not forwarded, so
+			// neither half's ChargeResponse loop runs. What matters is the
+			// attempt is classified as never-forwarded — the computed
+			// counters (whatever they are) are never applied.
+			if r.attempts[0].forwarded() {
+				t.Fatalf("row %d: softblock attempt reported as forwarded — softblock is never charged", i)
+			}
+			continue
+		}
+
+		// The exact-vs-degraded decision is the shared per-side rule — it
+		// must never differ between live and replay (that IS the fix).
+		if (liveEst > 0) != (replayEst > 0) {
+			t.Errorf("row %d: live estimated=%v replay estimated=%v — the per-side exact-vs-degraded decision diverged between halves", i, liveEst, replayEst)
+		}
+
+		if anthropicTruncated(r) {
+			// Regression anchor: the old single-bool disjunction billed the
+			// ~1 placeholder as exact on the replay side.
+			if replayEst == 0 {
+				t.Errorf("row %d: anthropic truncated-after-message_start charged with estimated=0 — the ~1 placeholder output must never bill as exact", i)
+			}
+			if liveEst == 0 {
+				t.Errorf("row %d: live path billed the anthropic placeholder output as exact — side rule regressed", i)
+			}
+		}
+
+		// End-to-end through ChargeResponse for both halves, into two
+		// registries — the two must charge the account identically. Only
+		// asserted when both sides were sniffed: on degraded rows the
+		// response-side estimate basis differs (text-only live vs raw bytes
+		// replay — the documented residual, see the fixture comment above),
+		// so the Out counters legitimately differ there.
+		bothExact := liveEst == 0 && replayEst == 0
+		if bothExact {
+			if liveRaw != replayRaw {
+				t.Errorf("row %d: exact-path raw counters differ — live %+v replay %+v", i, liveRaw, replayRaw)
+			}
+			liveReg, replayReg := quota.NewRegistry(""), quota.NewRegistry("")
+			ep := &core.Endpoint{AdapterType: r.protocolOrDefault(), Provider: "acct1", Model: r.model, Quota: spec}
+			router.ChargeResponse(liveReg, ep, liveRaw, liveEst, now)
+			router.ChargeResponse(replayReg, ep, replayRaw, replayEst, now)
+			lu, _ := liveReg.Used("acct1", "tokens/1mo", quota.PeriodStart(lim, now))
+			rp, _ := replayReg.Used("acct1", "tokens/1mo", quota.PeriodStart(lim, now))
+			if lu != rp {
+				t.Errorf("row %d: live registry used %+v, replay registry used %+v — replay and live charge the account differently", i, lu, rp)
+			}
+		}
+	}
+}
+
+// TestQuotaParity_SoftblockNeverCharged pins the softblock side of the
+// Forwarded field end to end: a 2xx content-policy response is a softblock
+// (ErrorClass="content", Forwarded never set) on which the router charges
+// NOTHING, and the report's §2.5 recomputed column must reproduce that
+// zero. This is the exact mis-accounting the old `a.HasResponse &&
+// a.Status < 400` forward test caused — it counted the softblock as a
+// forwarded attempt and invented a phantom charge.
+func TestQuotaParity_SoftblockNeverCharged(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	reqs := []parityRequest{
+		{model: "real-model", attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+		{model: "real-model", protocol: "anthropic-messages", attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+		{model: "real-model", protocol: "openai-responses", attempts: []parityAttempt{{status: 200, softblock: true}}, respBody: softblockResp, estTokens: 700},
+	}
+
+	// Router: every attempt is a softblock, so no ChargeResponse ever runs.
+	lim := core.Limit{Metric: core.MetricTokens, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
+		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 1_000_000,
+		TokenWeights: core.NewTokenWeights()}
+	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
+	if want := routerCharged(t, reqs, "acct1", spec, nil, now); want != 0 {
+		t.Errorf("router charged %v for a softblock-only window — must be 0", want)
+	}
+
+	// Report: the recomputed column must also be 0 (Forwarded stays 0).
+	row := reportQuotaRow(t, reqs, "acct1", ts, tokensQuotaYAML)
+	if row.WindowConsumed == nil || *row.WindowConsumed != 0 {
+		t.Errorf("§2.5 window consumed = %v, want 0 for a softblock-only window (nothing forwarded, nothing charged)", row.WindowConsumed)
+	}
+}

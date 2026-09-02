@@ -159,14 +159,19 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 	}
 	// Per-side degraded estimate: fill only the side whose usage is
 	// missing, and only when an endpoint actually served the request (same
-	// gate as before — nothing served means nothing was charged).
+	// gate as before — nothing served means nothing was charged). The Out
+	// side uses max(placeholder, degradedEstimate) to mirror the router's
+	// TokenCountersSides max(u.Out, outEst) rule — the Anthropic
+	// message_start placeholder (~1) is not a real generation total, but
+	// the router still charges whichever is larger between that and the
+	// byte estimate, and the report must reproduce that same total.
 	if r.endpoint != "" {
 		estIn, estOut := rf.EstInFresh, rf.EstOut
 		if !r.usageInOK {
 			r.estInFresh = estIn
 		}
 		if !r.usageOutOK {
-			r.estOut = estOut
+			r.estOut = max(r.usage.Out, estOut)
 		}
 	}
 	return r
