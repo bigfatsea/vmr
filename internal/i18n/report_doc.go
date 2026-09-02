@@ -31,6 +31,12 @@ type DocText struct {
 	// SummaryCostUnknown fills the cost cell when nothing priced at all —
 	// never "0", which reads as "this was free".
 	SummaryCostUnknown string
+	// SummaryInteractiveNote is a line below the §0 summary table noting
+	// what fraction of total requests belong to the "interactive" workload
+	// class (as opposed to heartbeat/dream_diary/compaction). The total
+	// requests figure includes everything; this note gives the reader a
+	// quick sense of how much of the traffic is user-facing. (review P-07)
+	SummaryInteractiveNote func(total, interactive int, pct string) string
 	SummaryStarNote    string
 	HighlightsAuto     string
 	NoAnomalies        string
@@ -93,6 +99,9 @@ func Doc(lang Lang) DocText {
 			},
 			SummaryHeaders:     [6]string{"请求", "成功率", "计费输入(fresh)⭐", "缓存效率⭐", "p95 耗时", "按量计费等价成本⭐"},
 			SummaryCostUnknown: "未定价",
+			SummaryInteractiveNote: func(total, interactive int, pct string) string {
+				return "其中 interactive 工作负载占 " + pct + "（" + strconv.Itoa(interactive) + "/" + strconv.Itoa(total) + "）\n"
+			},
 			SummaryStarNote:    "> ⭐ = 衍生/预估指标（非上游直接返回值），完整口径见附录。\n\n",
 			HighlightsAuto:     "**亮点 (auto):**",
 			NoAnomalies:        "（无明显异常：缓存效率、工具利用率、端点错误率均在正常区间）",
@@ -170,6 +179,9 @@ func Doc(lang Lang) DocText {
 		},
 		SummaryHeaders:     [6]string{"Requests", "Success Rate", "Billed Input (fresh)⭐", "Cache Efficiency⭐", "p95 Duration", "PAYG-Equivalent Cost⭐"},
 		SummaryCostUnknown: "unpriced",
+		SummaryInteractiveNote: func(total, interactive int, pct string) string {
+			return "of which the interactive workload accounts for " + pct + " (" + strconv.Itoa(interactive) + "/" + strconv.Itoa(total) + ")\n"
+		},
 		SummaryStarNote:    "> ⭐ = derived/estimated metric (not direct upstream value), see Appendix for basis.\n\n",
 		HighlightsAuto:     "**Highlights (auto):**",
 		NoAnomalies:        "(No notable anomalies: cache efficiency, tool utilization, and endpoint error rates are all in the normal range)",

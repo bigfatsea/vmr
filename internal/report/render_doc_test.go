@@ -2,6 +2,7 @@
 package report
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,59 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
+
+// TestSummaryInteractiveShare locks P-07's computation: total - interactive
+// is exactly the scheduled/compaction overhead, and an empty Workloads
+// (no buckets at all) reports -1 so the caller skips the note.
+func TestSummaryInteractiveShare(t *testing.T) {
+	rep := &Report2{
+		Workloads: []WorkloadRow{
+			{Class: "interactive", TrafficStats: TrafficStats{Requests: 40}},
+			{Class: "heartbeat", TrafficStats: TrafficStats{Requests: 5}},
+			{Class: "compaction", TrafficStats: TrafficStats{Requests: 3}},
+		},
+	}
+	if n := summaryInteractiveShare(rep); n != 40 {
+		t.Errorf("interactive share = %d, want 40", n)
+	}
+	if n := summaryInteractiveShare(&Report2{}); n != -1 {
+		t.Errorf("empty Workloads = %d, want -1", n)
+	}
+	if n := summaryInteractiveShare(nil); n != -1 {
+		t.Errorf("nil Report2 = %d, want -1", n)
+	}
+}
+
+// TestSummaryRendersInteractiveNote drives the note through renderSummary:
+// a report whose Workloads mix interactive and scheduled traffic must emit
+// the interactive-share line after the summary table; one with no
+// Workloads at all must not (avoid a "0/0" or "N/0" footnote on a report
+// whose records never reached workload bucketing).
+func TestSummaryRendersInteractiveNote(t *testing.T) {
+	mk := func() *Report2 {
+		return &Report2{
+			Workloads: []WorkloadRow{
+				{Class: "interactive", TrafficStats: TrafficStats{Requests: 40}},
+				{Class: "heartbeat", TrafficStats: TrafficStats{Requests: 10}},
+			},
+		}
+	}
+	var b strings.Builder
+	renderSummary(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }, mk(), Row{TrafficStats: TrafficStats{Requests: 50}}, i18n.EN)
+	out := b.String()
+	if !strings.Contains(out, "interactive workload accounts for 80.0%") {
+		t.Errorf("EN note missing: %q", out)
+	}
+	if !strings.Contains(out, "(40/50)") {
+		t.Errorf("EN note missing raw counts: %q", out)
+	}
+
+	b.Reset()
+	renderSummary(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }, &Report2{}, Row{TrafficStats: TrafficStats{Requests: 10}}, i18n.ZH)
+	if strings.Contains(b.String(), "interactive") || strings.Contains(b.String(), "工作负载占") {
+		t.Errorf("empty Workloads must skip the note, got: %q", b.String())
+	}
+}
 
 // TestFmtDisplayFullConvertsToDisplayZone proves fmtDisplayFull (used by
 // Markdown's header/appendix "period" lines via rep.Meta.From/rep.Meta.To,

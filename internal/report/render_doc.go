@@ -155,6 +155,14 @@ func renderSummary(w func(string, ...any), rep *Report2, o Row, lang i18n.Lang) 
 		durCell(o.DurMSP95, p95n),
 		summaryCostCell(rep, o, t.SummaryCostUnknown))
 	w("\n")
+	// P-07: the §0 top-line request figure includes every workload class
+	// (heartbeat / dream_diary / compaction land in their own buckets), so a
+	// report reader comparing "total requests" against a workload table
+	// gets no sense of how much traffic is actually user-facing. This line
+	// names the interactive share explicitly.
+	if n := summaryInteractiveShare(rep); n >= 0 && o.Requests > 0 {
+		w("%s", t.SummaryInteractiveNote(o.Requests, n, pctStr(float64(n)/float64(o.Requests))))
+	}
 	w("%s", t.SummaryStarNote)
 	w("%s\n", t.HighlightsAuto)
 	for _, h := range highlights(rep, lang) {
@@ -177,6 +185,25 @@ func summaryCostCell(rep *Report2, o Row, unknown string) string {
 		cur = "USD"
 	}
 	return money(*o.CostEstimate, cur)
+}
+
+// summaryInteractiveShare returns how many of rep's total requests belong
+// to the "interactive" workload class, or -1 when rep.Workloads is empty
+// (a signal the caller should skip the note). Every record lands in exactly
+// one workload bucket — workloadClassOf defaults to "interactive" — so the
+// sum is authoritative and total - interactive is exactly the scheduled/
+// compaction overhead figure the reader is being alerted to. (P-07)
+func summaryInteractiveShare(rep *Report2) int {
+	if rep == nil || len(rep.Workloads) == 0 {
+		return -1
+	}
+	n := 0
+	for i := range rep.Workloads {
+		if rep.Workloads[i].Class == "interactive" {
+			n += rep.Workloads[i].Requests
+		}
+	}
+	return n
 }
 
 // highlightWasteFloorBytes is the minimum absolute tool-schema waste for the
