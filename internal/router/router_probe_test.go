@@ -176,3 +176,98 @@ models:
 		t.Errorf("the existing Chat Completions probe shape must be unchanged: %s", captured)
 	}
 }
+
+func TestRunProbe_ContextCanceledDuringInFlight(t *testing.T) {
+	t.Parallel()
+	blockUpstream := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blockUpstream
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+	defer close(blockUpstream)
+
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+probe_timeout: 5s
+providers:
+  - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+`)
+	snap := mustSnapshot(t, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	rt := New(nil).WithContext(ctx)
+	rt.Install(snap)
+	snap = rt.Snapshot()
+	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
+	key := ep.HealthKey()
+
+	rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now().Add(-10*time.Second))
+	if !rt.Health.Acquire(key, time.Now()) {
+		t.Fatal("Acquire should succeed after expired cooldown")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		rt.runProbe(ep, snap)
+		close(done)
+	}()
+
+	// Wait briefly so probe begins HTTP request, then cancel router context.
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Succeeded in aborting probe without waiting for full 5s probe_timeout.
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProbe did not return promptly when router context was canceled")
+	}
+
+	// Probe slot must be released via ReportNeutral, and endpoint available again.
+	if !rt.Health.Available(key, time.Now()) {
+		t.Error("endpoint should be available after probe canceled by router shutdown")
+	}
+}
+
+func TestRunProbe_ContextAlreadyCanceled(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream should not be reached when context is already canceled")
+	}))
+	defer srv.Close()
+
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+probe_timeout: 2s
+providers:
+  - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+`)
+	snap := mustSnapshot(t, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	rt := New(nil).WithContext(ctx)
+	rt.Install(snap)
+	snap = rt.Snapshot()
+	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
+	key := ep.HealthKey()
+
+	rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now().Add(-10*time.Second))
+	if !rt.Health.Acquire(key, time.Now()) {
+		t.Fatal("Acquire should succeed after expired cooldown")
+	}
+
+	rt.runProbe(ep, snap)
+
+	if !rt.Health.Available(key, time.Now()) {
+		t.Error("endpoint should be available after probe canceled on entry")
+	}
+}

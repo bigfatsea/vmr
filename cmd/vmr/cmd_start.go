@@ -164,7 +164,10 @@ func cmdStart(args []string) error {
 	// "restart required" instead of silently keeping the old directory.
 	auditDirInUse := cfg.LogDir
 
-	rt := router.New(logger)
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	rt := router.New(logger).WithContext(rootCtx)
 
 	// Quota registry lives on Router (surviving hot reloads). Load errors are non-fatal (logged).
 	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
@@ -185,12 +188,6 @@ func cmdStart(args []string) error {
 	logConfigSummary(logger, cfg, snap, issues)
 
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
-	// Every attempt — rejected or not — gets the same banner treatment (same
-	// idiom logStop uses for its own marker) so a reload is never lost in
-	// the steady drip of per-request log lines around it; a rejected reload
-	// especially so, since that's the one that needs a human's attention.
-	// The bar alone (through the normal timestamped logger, not a raw
-	// stderr write) is enough separation — no need for blank lines too.
 	var reloadMu sync.Mutex // serialize fsnotify vs SIGHUP reloads: concurrent rt.Install races installLimiter (B5)
 	reload := func(trigger string) {
 		reloadMu.Lock()
@@ -214,10 +211,10 @@ func cmdStart(args []string) error {
 			rt.RecordReload(trigger, err)
 			return
 		}
-		rt.Install(newSnap)
-		rt.RecordReload(trigger, nil)
 		audit.SetRetentionDays(newCfg.AuditRetentionDays)
 		audit.SetExtraRedactHeaders(newCfg.ExtraRedactHeaders)
+		rt.Install(newSnap)
+		rt.RecordReload(trigger, nil)
 		if newCfg.LogDir != auditDirInUse {
 			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
 				auditDirInUse, newCfg.LogDir)
@@ -248,12 +245,7 @@ func cmdStart(args []string) error {
 	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(cfg.Models))
 
-	// vmr.sh (and systemd/launchd) stop the process with SIGTERM; Go doesn't
-	// catch that by default, so without this the process just dies mid-request
-	// with no trace in the log. Catching it here buys a graceful drain (existing
-	// requests finish, srv.Shutdown waits for them) and — the point of this
-	// function — a "VMR STOP" marker so the log file shows exactly when and why
-	// the process went away, matching every "VMR START" with a corresponding stop.
+	// Graceful shutdown on SIGINT/SIGTERM with drain timeout and log marker.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	serveErr := make(chan error, 1)
@@ -261,6 +253,7 @@ func cmdStart(args []string) error {
 
 	select {
 	case sig := <-sigCh:
+		rootCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
@@ -269,6 +262,7 @@ func cmdStart(args []string) error {
 		logStop(logger, sig.String(), time.Since(startTime))
 		return nil
 	case err := <-serveErr:
+		rootCancel()
 		if err != nil && err != http.ErrServerClosed {
 			logStop(logger, "error: "+err.Error(), time.Since(startTime))
 			return err

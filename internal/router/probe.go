@@ -43,6 +43,11 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		}
 	}()
 
+	if rt.Context().Err() != nil {
+		rt.Health.ReportNeutral(key)
+		return
+	}
+
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok { // validated at config load; defensive only, mirrors tryOne
 		rt.Health.ReportNeutral(key)
@@ -66,7 +71,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		body, nonce = probe.Request(ep.Model)
 	}
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body}
-	ctx, cancel := context.WithTimeout(context.Background(), snap.Cfg.ProbeTimeout.D())
+	ctx, cancel := context.WithTimeout(rt.Context(), snap.Cfg.ProbeTimeout.D())
 	defer cancel()
 
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
@@ -84,6 +89,11 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	resp, err := snap.clientFor(ep).Do(req)
 	dur := time.Since(start)
 	if err != nil {
+		if rt.Context().Err() != nil {
+			rt.Health.ReportNeutral(key)
+			rt.logf("%s, probe canceled: router context closed", logPrefix)
+			return
+		}
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("%s, error=network:%v, dur=%s, cooldown=%s", logPrefix, err, fmtDur(dur), cd)
 		return

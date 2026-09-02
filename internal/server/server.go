@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"vmr/internal/adapter"
@@ -22,6 +23,21 @@ import (
 	"vmr/internal/logtee"
 	"vmr/internal/router"
 )
+
+// defaultBodyReadTimeout bounds the time allowed to read the full incoming request body.
+// Defends against Slowloris-style slow body delivery holding connections and goroutines open.
+var bodyReadTimeout atomic.Int64 // nanoseconds; 0 means default 60s
+
+func getBodyReadTimeout() time.Duration {
+	if d := bodyReadTimeout.Load(); d > 0 {
+		return time.Duration(d)
+	}
+	return 60 * time.Second
+}
+
+func setBodyReadTimeout(d time.Duration) {
+	bodyReadTimeout.Store(int64(d))
+}
 
 type Server struct {
 	rt     *router.Router
@@ -200,7 +216,10 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(getBodyReadTimeout()))
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxRequestBodyBytes()))
+		_ = rc.SetReadDeadline(time.Time{})
 		if rec != nil {
 			rec.Client.Request.Body = audit.EncodeBody(body)
 		}

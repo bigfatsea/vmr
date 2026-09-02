@@ -5,6 +5,7 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -41,6 +42,8 @@ type Router struct {
 
 	snap atomic.Pointer[Snapshot]
 
+	ctx context.Context
+
 	installMu sync.Mutex              // guards Install (see Install's doc comment)
 	limiter   atomic.Pointer[limiter] // nil = unlimited
 	inFlight  atomic.Int64
@@ -52,7 +55,29 @@ type Router struct {
 }
 
 func New(logger *log.Logger) *Router {
-	return &Router{Health: health.New(), Sticky: sticky.New(), Logger: logger}
+	return &Router{Health: health.New(), Sticky: sticky.New(), Logger: logger, ctx: context.Background()}
+}
+
+// WithContext returns the router with the given root context set for graceful shutdown.
+func (rt *Router) WithContext(ctx context.Context) *Router {
+	rt.SetContext(ctx)
+	return rt
+}
+
+// SetContext sets the router's root lifecycle context.
+func (rt *Router) SetContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rt.ctx = ctx
+}
+
+// Context returns the router's root context, defaulting to context.Background().
+func (rt *Router) Context() context.Context {
+	if rt.ctx != nil {
+		return rt.ctx
+	}
+	return context.Background()
 }
 
 // Serve routes one chat request through the failover loop. protocol is the
