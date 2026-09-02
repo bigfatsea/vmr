@@ -426,23 +426,26 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 	// RealUserText a second time over it.
 	var firstRu taskseg.RealUsers
 	firstRuSet := false
+	var factState stepFactState
 	for ci, l := range chain {
 		for i, m := range l.Manifests {
 			rec := recs[ctxgraph.Loc{Path: m.Path, Line: m.Line}]
 			if rec == nil {
 				continue // defensive: FetchRecords silently drops a line it couldn't parse a second time
 			}
-			// ru is built once per step and threaded into HasNewInstruction/
-			// LastInstruction/newInstructionTitleAtStitch below instead of
-			// each re-scanning msgs itself — this manifest's real-instruction
-			// regex work used to run up to 2-3 times per step before B3.
-			msgs, rawMsgs, off, ru := parseManifestBody(rec, prof)
+			atStitchBoundary := ci > 0 && i == 0
+			deltaStart := 0
+			if !atStitchBoundary && i > 0 {
+				deltaStart = m.LeadSys + l.Edges[i-1].LCP
+			}
+			// ru is built incrementally across steps in the same lineage,
+			// reusing prefix real-user text from prior steps up to deltaStart.
+			msgs, rawMsgs, off, ru := parseManifestBodyIncremental(rec, prof, deltaStart, &factState)
 			if !firstRuSet {
 				firstRu, firstRuSet = ru, true
 				j.InitialInstruction = firstRealInstruction(prof, msgs, rawMsgs, off)
 			}
 
-			atStitchBoundary := ci > 0 && i == 0
 			var edge *ctxgraph.Edit
 			var stitchEdge *ctxgraph.StitchEdge
 			var compaction *CompactionInfo
@@ -454,7 +457,6 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			// doc comment for why.
 			var stepPrevManifest *ctxgraph.Manifest
 			var revisesHash *ctxgraph.Hash
-			deltaStart := 0
 			// A stitch boundary is NOT automatically a new Task — only a
 			// genuinely new instruction bridged across it is (decided in the
 			// atStitchBoundary arm below). A mid-task compaction stays in
@@ -513,7 +515,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 
 			seq++
 			step := buildStep(seq, m, rec, edge, stitchEdge, sysChanged, compaction, deltaStart, humanInitiated, instr, stepPrevManifest, prof)
-			fillStepFacts(j, step, rec, msgs, rawMsgs, off, deltaStart)
+			fillStepFacts(j, step, rec, msgs, rawMsgs, off, deltaStart, &factState)
 			prevNoReply = step.NoReply
 			appendNewEvents(j, step, m, msgs, rawMsgs, off, deltaStart, revisesHash, seen)
 			curTask.Steps = append(curTask.Steps, step)
