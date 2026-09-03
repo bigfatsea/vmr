@@ -217,8 +217,12 @@ func sortedAliasKeys(m map[string]string) []string {
 }
 
 // put inserts or overwrites key's Rate — internal, used by ParseTable/Merge.
+// Key is TrimSpace'd before storage so it matches Lookup's contract: a
+// hand-written supplement row "  gpt-4o  " and a hand-written lookup "gpt-4o"
+// both reach the same entry rather than silently falling through to the
+// suffix scan with a key the scan can't disambiguate.
 func (t *Table) put(key string, r Rate) {
-	lk := strings.ToLower(key)
+	lk := strings.ToLower(strings.TrimSpace(key))
 	if _, exists := t.entries[lk]; !exists {
 		t.order = append(t.order, lk)
 	}
@@ -561,60 +565,75 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 	}
 	seen := map[string]bool{}
 	for i, r := range ft.Rates {
-		if r.Key == "" {
-			return nil, fmt.Errorf("parse pricing table: rates[%d]: key is required", i)
+		lk, rate, err := parseRateRow(r, i, defaultCCY, effectiveRates)
+		if err != nil {
+			return nil, err
 		}
-		// Canonical keys are exactly "vendor/basename" (or a bare name). A
-		// deeper key — openrouter's forced "meta-llama/llama-3.3-70b-instruct",
-		// fireworks' "accounts/fireworks/models/..." — looks self-consistent
-		// but is invisible to bare-name and suffix resolution, which strip
-		// org prefixes via ModelBasename (see resolveCanonicalKey's fallback):
-		// it would silently split one physical model into two namespaces that
-		// can never see each other. Reject at load time so a hand-written
-		// supplement names the two-segment key instead.
-		if strings.Count(r.Key, "/") > 1 {
-			return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
-		}
-		lk := strings.ToLower(r.Key)
 		if seen[lk] {
 			return nil, fmt.Errorf("parse pricing table: rates[%d]: duplicate key %q", i, r.Key)
 		}
 		seen[lk] = true
-		rowCCY := strings.ToUpper(strings.TrimSpace(r.Currency))
-		if rowCCY == "" {
-			rowCCY = defaultCCY
-		}
-		rate := Rate{InFresh: r.InFresh, CacheRead: r.CacheRead, CacheWrite: r.CacheWrite, Out: r.Out}
-		if rowCCY != "USD" {
-			factor, ok := FactorBetween(rowCCY, "USD", effectiveRates)
-			if !ok {
-				return nil, fmt.Errorf("parse pricing table: rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
-			}
-			rate = rate.Scale(factor)
-		}
-		// Reject NaN, Inf, and negative rates — a hand-written supplement
-		// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons
-		// every downstream consumer (Counters.Cost, ScoreForLimits, Flush).
-		// Each component is checked individually so the error message names
-		// the exact field the user needs to fix.
-		for _, comp := range []struct {
-			name string
-			val  *float64
-		}{{"in_fresh", rate.InFresh}, {"cache_read", rate.CacheRead}, {"cache_write", rate.CacheWrite}, {"out", rate.Out}} {
-			if comp.val == nil {
-				continue
-			}
-			if math.IsNaN(*comp.val) {
-				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is NaN", i, r.Key, comp.name)
-			}
-			if math.IsInf(*comp.val, 0) {
-				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is Inf", i, r.Key, comp.name)
-			}
-			if *comp.val < 0 {
-				return nil, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is negative (%v)", i, r.Key, comp.name, *comp.val)
-			}
-		}
-		t.put(r.Key, rate)
+		t.put(lk, rate)
 	}
 	return t, nil
+}
+
+// parseRateRow validates one rates[] row's key and converts/validates its
+// Rate against the table's default currency and the effective exchange-rate
+// map, returning the normalized (lowercased, whitespace-trimmed) key and the
+// USD-denominated rate. TrimSpace on the key so "x" and " x" are the same key
+// (both name one model, see put's doc comment) rather than two rows only one
+// lookup form can ever reach; the duplicate check against the already-seen
+// set stays with the caller, which owns that set.
+func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64) (string, Rate, error) {
+	if strings.TrimSpace(r.Key) == "" {
+		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key is required", i)
+	}
+	// Canonical keys are exactly "vendor/basename" (or a bare name). A
+	// deeper key — openrouter's forced "meta-llama/llama-3.3-70b-instruct",
+	// fireworks' "accounts/fireworks/models/..." — looks self-consistent
+	// but is invisible to bare-name and suffix resolution, which strip
+	// org prefixes via ModelBasename (see resolveCanonicalKey's fallback):
+	// it would silently split one physical model into two namespaces that
+	// can never see each other. Reject at load time so a hand-written
+	// supplement names the two-segment key instead.
+	if strings.Count(r.Key, "/") > 1 {
+		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
+	}
+	lk := strings.ToLower(strings.TrimSpace(r.Key))
+	rowCCY := strings.ToUpper(strings.TrimSpace(r.Currency))
+	if rowCCY == "" {
+		rowCCY = defaultCCY
+	}
+	rate := Rate{InFresh: r.InFresh, CacheRead: r.CacheRead, CacheWrite: r.CacheWrite, Out: r.Out}
+	if rowCCY != "USD" {
+		factor, ok := FactorBetween(rowCCY, "USD", rates)
+		if !ok {
+			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
+		}
+		rate = rate.Scale(factor)
+	}
+	// Reject NaN, Inf, and negative rates — a hand-written supplement
+	// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons
+	// every downstream consumer (Counters.Cost, ScoreForLimits, Flush).
+	// Each component is checked individually so the error message names
+	// the exact field the user needs to fix.
+	for _, comp := range []struct {
+		name string
+		val  *float64
+	}{{"in_fresh", rate.InFresh}, {"cache_read", rate.CacheRead}, {"cache_write", rate.CacheWrite}, {"out", rate.Out}} {
+		if comp.val == nil {
+			continue
+		}
+		if math.IsNaN(*comp.val) {
+			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is NaN", i, r.Key, comp.name)
+		}
+		if math.IsInf(*comp.val, 0) {
+			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is Inf", i, r.Key, comp.name)
+		}
+		if *comp.val < 0 {
+			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is negative (%v)", i, r.Key, comp.name, *comp.val)
+		}
+	}
+	return lk, rate, nil
 }

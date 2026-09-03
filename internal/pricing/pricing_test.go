@@ -262,6 +262,49 @@ func TestParseTable_UnknownFieldRejected(t *testing.T) {
 	}
 }
 
+// TestParseTable_WhitespaceKeyMatchesLookup pins VD3: a hand-written
+// supplement row whose key carries leading/trailing whitespace ("  gpt-4o  ")
+// must land in the same entry a trimmed Lookup("gpt-4o") reads. Before this
+// fix, put stored the untrimmed key while Lookup trimmed its argument, so the
+// row silently fell through to the suffix scan and could resolve to a
+// different rate (or none at all).
+func TestParseTable_WhitespaceKeyMatchesLookup(t *testing.T) {
+	data := []byte("currency: USD\nrates:\n  - {key: \"  gpt-4o  \", in_fresh: 1.5, cache_read: 3, cache_write: 6, out: 15}\n")
+	tbl, err := ParseTable(data)
+	if err != nil {
+		t.Fatalf("ParseTable rejected a whitespace-padded key: %v", err)
+	}
+	r, ok := tbl.Lookup("gpt-4o")
+	if !ok {
+		t.Fatalf("Lookup(\"gpt-4o\") miss — a trimmed key must hit the row stored with surrounding whitespace")
+	}
+	if *r.InFresh != 1.5 {
+		t.Fatalf("InFresh = %v, want 1.5", *r.InFresh)
+	}
+}
+
+// TestParseTable_WhitespaceVariantIsDuplicate pins that "x" and " x" are the
+// same key (both name one model), so a table containing both must be a
+// duplicate-key load error rather than silently keeping two rows that only
+// one lookup form will ever reach.
+func TestParseTable_WhitespaceVariantIsDuplicate(t *testing.T) {
+	data := []byte("currency: USD\nrates:\n  - {key: gpt-4o, in_fresh: 1}\n  - {key: \" gpt-4o\", in_fresh: 2}\n")
+	if _, err := ParseTable(data); err == nil {
+		t.Fatal("want a duplicate-key error for \"gpt-4o\" and \" gpt-4o\"")
+	}
+}
+
+// TestParseTable_WhitespaceOnlyKeyRejected pins that a key consisting solely
+// of whitespace is the same as an empty key — a placeholder row naming no
+// model should be a "key is required" load error, not a silently-padded empty
+// string that then aliases every suffix scan.
+func TestParseTable_WhitespaceOnlyKeyRejected(t *testing.T) {
+	data := []byte("currency: USD\nrates:\n  - {key: \"   \", in_fresh: 1}\n")
+	if _, err := ParseTable(data); err == nil {
+		t.Fatal("want a key-is-required error for an all-whitespace key")
+	}
+}
+
 func TestLoadStandard_EmbeddedTablesParseAndMerge(t *testing.T) {
 	tbl, err := LoadStandard()
 	if err != nil {

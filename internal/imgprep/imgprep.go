@@ -406,7 +406,15 @@ func rewriteAnthropicImage(msgIndex int, raw json.RawMessage, block map[string]j
 	}
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return raw, false, nil, nil
+		// Same reasoning as the header-decode-failure branch below: the
+		// block is already a structurally-confirmed base64 image reference
+		// (type=="image", source.type=="base64", a string payload present)
+		// — only its bytes failed to decode. It must still count toward
+		// len(images)/HasImage rather than vanish and get misrouted to a
+		// non-image endpoint. Bytes is len(b64), the best measure we have
+		// (the decoded data is nil). See Downscale's doc comment on why
+		// "detected" must never depend on "decodable".
+		return raw, false, &ImageInfo{MessageIndex: msgIndex, Bytes: int64(len(b64))}, nil
 	}
 	newData, newMime, changed, info := processImage(data, opts)
 	if info.Format == "" {

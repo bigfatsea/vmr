@@ -566,6 +566,53 @@ func TestUndecodableImageStillCounted(t *testing.T) {
 	}
 }
 
+// TestAnthropicCorruptBase64StillCounted locks in VB4/NF-2: an Anthropic
+// image block whose type=="image" and source.type=="base64" but whose base64
+// payload is undecodable ("!!!not-valid-base64!!!") must still contribute an
+// ImageInfo entry — it is a structurally-confirmed image reference, and
+// len(images) must count it so RequestFacts.HasImage stays true. Before this
+// fix, the decode failure made the block vanish from images, silently
+// misrouting a request that genuinely carries an image to an endpoint with no
+// image capability.
+func TestAnthropicCorruptBase64StillCounted(t *testing.T) {
+	body := []byte(`{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"!!!not-valid-base64!!!"}}]}]}`)
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("undecodable base64 must fail open (leave the request unchanged)")
+	}
+	if len(images) != 1 {
+		t.Fatalf("images = %d, want 1 — an undecodable-but-structural base64 image must still be counted", len(images))
+	}
+	img := images[0]
+	if img.MessageIndex != 0 {
+		t.Errorf("images[0].MessageIndex = %d, want 0 (single message)", img.MessageIndex)
+	}
+	if img.Bytes == 0 {
+		t.Errorf("images[0].Bytes = %d, want > 0 (record the base64 payload length even though decode failed)", img.Bytes)
+	}
+	if img.Remote || img.Downscaled {
+		t.Errorf("images[0] = %+v, want Remote/Downscaled both false", img)
+	}
+}
+
+// TestAnthropicNonStringDataNotCounted pins the NF-2 judgment boundary: a
+// source.data that is present but not a JSON string (e.g. a number) stays
+// uncounted (no ImageInfo). This mirrors rewriteOpenAIImage's non-string-url
+// branch, which also returns nil — the two protocols keep the same
+// "payload must at least be a string before we call it an image reference"
+// line, and the task's regression rule forbids changing the OpenAI side to
+// match a widened Anthropic one.
+func TestAnthropicNonStringDataNotCounted(t *testing.T) {
+	body := []byte(`{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":123}}]}]}`)
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("non-string source.data must fail open (leave the request unchanged)")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %+v, want none — a non-string payload is not a recognizable image reference (see NOTES_FOR_LEAD.md NF-2)", images)
+	}
+}
+
 func TestMalformedRequestBodyFailsOpen(t *testing.T) {
 	// Has the marker substring but isn't shaped like a real chat request at all.
 	body := []byte(`{"image_url_but_not_json_object`)
