@@ -10,7 +10,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-// TestJourneyIndicatorSets_MatchMDAndHTML pins §2.81: the single-journey
+// TestJourneyIndicatorSets_MatchMDAndHTML pins the shared-list contract: the single-journey
 // behavior-indicator block must show the SAME set of metrics in Markdown
 // and HTML. Both renderers iterate the shared journeyMetrics slice
 // (compare_metrics.go); if one side ever hand-rolls its list again, the

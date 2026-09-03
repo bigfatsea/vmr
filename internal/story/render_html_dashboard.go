@@ -192,7 +192,7 @@ func bodyOrPlaceholder(title string, redact bool, t i18n.StoryHTMLText) string {
 // set comes from journeyMetrics (compare_metrics.go) — the same slice
 // renderBehaviorIndicators (Markdown) iterates — so the two formats can
 // never drift apart about which metrics a journey view shows; this
-// function only decides how one HTML stat cell is rendered (§2.81).
+// function only decides how one HTML stat cell is rendered — the shared metricSpecs list decides which.
 func htmlMetrics(w func(string, ...any), m Metrics, isNonAnthropic bool, lang i18n.Lang, t i18n.StoryHTMLText) {
 	stat := func(k, v string) {
 		w("<div class=\"stat\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>\n", he(k), he(v))

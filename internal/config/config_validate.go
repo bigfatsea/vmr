@@ -72,7 +72,7 @@ func (c *Config) validateBasic() error {
 // segment of the protocol:provider:model audit label (see core.EndpointLabel):
 // a ':' turns SplitEndpointLabel's three-field split into a mis-parse (the
 // provider tail gets folded into the model segment, corrupting every analysis-
-// half grouping/detail/file name that keyed off it — KNOWN_ISSUES §2.72), and
+// half grouping/detail/file name that keyed off it), and
 // a '/' collides with the path-ish separators used downstream. Shared by
 // provider names (validateProviders) and api_keys labels
 // (expandProviderAPIKeys), since both are concatenated into that segment.

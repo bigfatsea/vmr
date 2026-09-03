@@ -215,7 +215,7 @@ type tagSummaryData struct {
 	// outKnown=true, or vice versa. Splitting them is what stops the old
 	// shared `tokensKnown` gate from silently including an estimated
 	// TokensOut in the output-token sum while excluding a measured one
-	// (or the mirror) — §2.84.
+	// (or the mirror) — the output side has its own OK flag.
 	inKnown  int
 	outKnown int
 }

@@ -345,7 +345,7 @@ func TestEnsureRendered_RewritesWhenManifestIdentityChanges(t *testing.T) {
 	}
 }
 
-// TestRenderFingerprint_DiffersByProfile pins the §2.71 fix: the render
+// TestRenderFingerprint_DiffersByProfile pins the fix: the render
 // fingerprint (and therefore EnsureRendered's skip-vs-rewrite decision) must
 // react to a change in taskseg.Profile, so an existing page rendered for one
 // profile gets rewritten when the caller switches profiles even with every

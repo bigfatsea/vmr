@@ -148,7 +148,7 @@ func abs(f float64) float64 {
 // metric universe as metricSpecs above, plus the journey-view formatting
 // rule. renderBehaviorIndicators (Markdown) and htmlMetrics (HTML) both
 // iterate this one slice, so the two formats can never again disagree about
-// WHICH metrics a journey view shows (§2.81): the difference between them
+// WHICH metrics a journey view shows: the difference between them
 // is only how one row is rendered, never which rows exist. Label is NOT
 // stored here — i18n.MetricLabel resolves it, the same single source
 // Compare uses.

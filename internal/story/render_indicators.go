@@ -14,7 +14,7 @@ import (
 // human-readable Markdown (问题 9). The row set comes from journeyMetrics
 // (compare_metrics.go) — the same slice htmlMetrics iterates — so the two
 // formats can never drift apart about which metrics a journey view shows;
-// this function only decides how one Markdown row is rendered (§2.81).
+// this function only decides how one Markdown row is rendered — the shared metricSpecs list decides which.
 func renderBehaviorIndicators(w func(string, ...any), m Metrics, isNonAnthropic bool, lang i18n.Lang) {
 	t := i18n.Indicators(lang)
 	w("%s", t.Title)

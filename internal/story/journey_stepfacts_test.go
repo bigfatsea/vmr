@@ -186,7 +186,7 @@ func TestFillStepFacts_NewToolResultsScopedToDelta(t *testing.T) {
 	}
 }
 
-// TestComputeRU_ResetsOnSysChanged pins §2.83: when a step's leading
+// TestComputeRU_ResetsOnSysChanged pins the sys-change reset: when a step's leading
 // system block changes (sysChanged true OR curLeadSys diverges from the
 // prior step's prevLeadSys), computeRU must NOT reuse the prior prefix —
 // absolute message indices shift, and copying prevRu[k] into ru[k] for

@@ -141,7 +141,7 @@ func TestTagSummary_UsageInOKGate(t *testing.T) {
 	}
 }
 
-// TestTagSummary_UsageOutOKGate pins §2.84: the output-token sum is gated
+// TestTagSummary_UsageOutOKGate pins the split-side gate: the output-token sum is gated
 // on UsageOutOK, NOT on UsageInOK. A row with UsageInOK=false (input
 // unknown) but UsageOutOK=true (output measured) must contribute its real
 // TokensOut to s.out; a row with UsageInOK=true but UsageOutOK=false must
