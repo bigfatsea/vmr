@@ -23,6 +23,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/imgprep"
 	"vmr/internal/jsonscan"
 	"vmr/internal/quota"
 	"vmr/internal/router"
@@ -219,6 +220,22 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		stream = *opts.Stream
 	}
 
+	// The audit trail stores the client's ORIGINAL request body (server.go
+	// records rec.Client.Request.Body before downscaleImages runs), while live
+	// traffic sends the downscaled bytes upstream — replaying without this
+	// step would ship the pre-downscale original (several MB, possibly even
+	// rejected by the upstream's own body limit) instead of the bytes vmr
+	// actually forwarded. MaxPx resolves the same way live does (see
+	// effectiveImageDownscaleMaxPx below); no-image bodies pay only
+	// imgprep's own substring pre-check. rv is updated in place — the same
+	// pattern the -stream rewrite above uses — so the outbound request and
+	// the -record audit line both see the bytes actually sent.
+	rv.Client.Request.Body, _ = imgprep.Downscale(rv.Client.Request.Body, protocol, imgprep.Options{
+		MaxPx:        effectiveImageDownscaleMaxPx(cfg, rv.Model),
+		CacheDir:     cfg.ImageCacheDir,
+		CacheTTLDays: cfg.ImageCacheTTLDays,
+	})
+
 	creq := &core.CanonicalRequest{
 		Model:  rv.Model, // virtual name — BuildRequest rewrites it to ep.Model, same as live traffic
 		Stream: stream,
@@ -284,6 +301,20 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// effectiveImageDownscaleMaxPx reproduces, for a replayed record, the MaxPx
+// resolution live traffic gets from route.EffectiveImageDownscaleMaxPx (see
+// server.downscaleImages): the record's virtual model's own image_downscale
+// override when it declared one (even 0, which force-disables downscaling for
+// that model), else the global config default — 0 always means off, never a
+// built-in default. The record's virtual model may be absent from the loaded
+// config (e.g. replaying with -model against a config that no longer defines
+// it); a missing entry then yields no override and the global value wins —
+// the same answer a nil route produces on live traffic.
+func effectiveImageDownscaleMaxPx(cfg *config.Config, virtualModel string) int {
+	route := router.ModelRoute{ImageDownscaleMaxPx: cfg.Models[virtualModel].ImageDownscaleMaxPx}
+	return route.EffectiveImageDownscaleMaxPx(cfg.ImageDownscaleMaxPx)
 }
 
 // statAuditPathArg classifies the raw AuditPath argument -req needs to

@@ -4,8 +4,12 @@ package replay
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1023,5 +1027,271 @@ func TestRun_ReplayRecordIsByteFaithful(t *testing.T) {
 	}
 	if rec.Outcome != "ok" {
 		t.Errorf("Outcome = %q, want ok", rec.Outcome)
+	}
+}
+
+// --- image downscale on replay ---
+
+// bigImageDataURL renders a solid w×h JPEG (deterministic content, real
+// decodable header) and returns it as a "data:image/jpeg;base64,..." URI —
+// the inline shape openai-completions requests carry in an image_url block.
+func bigImageDataURL(t *testing.T, w, h int) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			img.Set(x, y, color.RGBA{R: uint8(x % 256), G: uint8(y % 256), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// imageRecord is an openai-completions audit record whose body carries one
+// inline image block (plus a text block, so the message is multimodal the
+// way real vision requests are).
+func imageRecord(t *testing.T, virtualModel, dataURL string) *audit.Record {
+	t.Helper()
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":%q}}]}]}`,
+		virtualModel, dataURL)
+	rec := chatRecord(virtualModel, "ignored")
+	rec.Client.Request.Body = audit.EncodeBody([]byte(body))
+	return rec
+}
+
+// upstreamImageURL extracts the image data URL the upstream actually
+// received from a replayed request body.
+func upstreamImageURL(t *testing.T, body map[string]any) string {
+	t.Helper()
+	msgs, _ := body["messages"].([]any)
+	if len(msgs) == 0 {
+		t.Fatal("upstream body has no messages")
+	}
+	content, _ := msgs[0].(map[string]any)["content"].([]any)
+	for _, b := range content {
+		block, _ := b.(map[string]any)
+		if block["type"] == "image_url" {
+			iu, _ := block["image_url"].(map[string]any)
+			u, _ := iu["url"].(string)
+			return u
+		}
+	}
+	t.Fatal("upstream body has no image_url block")
+	return ""
+}
+
+// TestRun_DownscalesImagesLikeLivePath locks in the fix: the audit trail
+// stores the client's ORIGINAL body (server.go records it before
+// downscaleImages runs), so a replay that forwarded it verbatim shipped the
+// pre-downscale multi-megabyte image live traffic never sent. Replay must
+// apply the same downscaling, with the same MaxPx resolution, so what the
+// upstream receives is byte-comparable to what the original request sent.
+func TestRun_DownscalesImagesLikeLivePath(t *testing.T) {
+	dir := t.TempDir()
+	dataURL := bigImageDataURL(t, 300, 150) // long side 300, global cap below is 100
+
+	var gotURL string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		gotURL = upstreamImageURL(t, body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"r","model":"upstream-model","choices":[]}`)
+	}))
+	defer upstream.Close()
+
+	cfgPath := filepath.Join(dir, "config.yaml")
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+image_downscale: 100
+providers:
+  - {name: p1, base_url: {openai-completions: %q}, api_key: real-provider-key}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+`, upstream.URL)
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", imageRecord(t, "vm", dataURL))
+	recordPath := filepath.Join(dir, "replay-out.jsonl")
+
+	var out bytes.Buffer
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", RecordPath: recordPath,
+	}, &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The upstream must receive a downscaled JPEG, not the original image.
+	if !strings.HasPrefix(gotURL, "data:image/jpeg;base64,") {
+		t.Fatalf("upstream image url = %.80q..., want a data:image/jpeg data URI", gotURL)
+	}
+	payload := gotURL[len("data:image/jpeg;base64,"):]
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("upstream image payload does not decode as base64: %v", err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(decoded))
+	if err != nil {
+		t.Fatalf("upstream image payload is not a decodable image (got %s): %v", format, err)
+	}
+	long := cfg.Width
+	if cfg.Height > long {
+		long = cfg.Height
+	}
+	if long > 100 {
+		t.Errorf("upstream image long side = %d, want <= 100 (the configured image_downscale cap)", long)
+	}
+	if len(decoded) >= len(dataURL) {
+		t.Errorf("downscaled image (%d bytes) not smaller than the original data URI (%d bytes)", len(decoded), len(dataURL))
+	}
+	// The original (pre-downscale) bytes must not leak anywhere downstream:
+	// neither to the upstream nor into the -record replay audit line, which
+	// mirrors what was actually sent (same in-place rv update the -stream
+	// rewrite uses).
+	recorded, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(recorded), dataURL) {
+		t.Error("-record client body carries the ORIGINAL image bytes; rv was not updated in place")
+	}
+	if !strings.Contains(string(recorded), "image/jpeg") {
+		t.Errorf("-record client body missing the downscaled image: %s", recorded)
+	}
+}
+
+// TestRun_ModelOverrideZeroDisablesDownscale pins the MaxPx resolution
+// replay must reproduce from live traffic: a virtual model's explicit
+// image_downscale: 0 force-disables downscaling for that model even when the
+// global setting is on — a replay honoring only the global value would ship
+// bytes live traffic never sent.
+func TestRun_ModelOverrideZeroDisablesDownscale(t *testing.T) {
+	dir := t.TempDir()
+	dataURL := bigImageDataURL(t, 300, 150)
+
+	var gotURL string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		gotURL = upstreamImageURL(t, body)
+		fmt.Fprint(w, `{"id":"r","model":"upstream-model","choices":[]}`)
+	}))
+	defer upstream.Close()
+
+	cfgPath := filepath.Join(dir, "config.yaml")
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+image_downscale: 100
+providers:
+  - {name: p1, base_url: {openai-completions: %q}, api_key: real-provider-key}
+models:
+  vm:
+    image_downscale: 0
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+`, upstream.URL)
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", imageRecord(t, "vm", dataURL))
+
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1",
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if gotURL != dataURL {
+		t.Errorf("override image_downscale: 0 must force-disable downscaling (global 100 must not win); got url == original: %v", gotURL == dataURL)
+	}
+}
+
+// TestRun_NoImageRecordUnaffected pins the zero-cost promise: a record with
+// no image marker passes through imgprep untouched — the upstream receives
+// the original body, changed only by the sanctioned model-name rewrite.
+func TestRun_NoImageRecordUnaffected(t *testing.T) {
+	dir := t.TempDir()
+	var gotBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody = nil
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		fmt.Fprint(w, `{"id":"r","model":"upstream-model","choices":[]}`)
+	}))
+	defer upstream.Close()
+
+	cfgPath := filepath.Join(dir, "config.yaml")
+	yaml := fmt.Sprintf(`
+listen: 127.0.0.1:0
+image_downscale: 100
+providers:
+  - {name: p1, base_url: {openai-completions: %q}, api_key: real-provider-key}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+`, upstream.URL)
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "plain text"))
+
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1",
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	msgs, _ := gotBody["messages"].([]any)
+	if len(msgs) != 1 {
+		t.Fatalf("upstream messages = %v, want the single original message", msgs)
+	}
+	if c, _ := msgs[0].(map[string]any)["content"].(string); c != "plain text" {
+		t.Errorf("upstream content = %q, want the original untouched content", c)
+	}
+	if m, _ := gotBody["model"].(string); m != "upstream-model" {
+		t.Errorf("upstream model = %q, want the sanctioned model rewrite only", m)
+	}
+}
+
+// TestEffectiveImageDownscaleMaxPx unit-pins the MaxPx resolution replay
+// shares with server.downscaleImages via the same
+// ModelRoute.EffectiveImageDownscaleMaxPx call: model override (even 0)
+// wins, absent override inherits the global value, unknown model falls back
+// to global, and 0 always means "off", never a built-in default.
+func TestEffectiveImageDownscaleMaxPx(t *testing.T) {
+	zero, global, override := 0, 100, 512
+	cfg := &config.Config{
+		ImageDownscaleMaxPx: global,
+		Models: map[string]config.VirtualModel{
+			"vm-force-off":   {ImageDownscaleMaxPx: &zero},
+			"vm-override":    {ImageDownscaleMaxPx: &override},
+			"vm-no-override": {},
+		},
+	}
+	for _, tc := range []struct {
+		model string
+		want  int
+	}{
+		{"vm-override", 512},    // model override wins over global
+		{"vm-force-off", 0},     // explicit 0 force-disables despite global 100
+		{"vm-no-override", 100}, // no override inherits global
+		{"ghost", 100},          // unknown model falls back to global (nil-route behavior live)
+	} {
+		if got := effectiveImageDownscaleMaxPx(cfg, tc.model); got != tc.want {
+			t.Errorf("effectiveImageDownscaleMaxPx(%q) = %d, want %d", tc.model, got, tc.want)
+		}
+	}
+	// Global 0 = downscaling off entirely; nothing can turn it on except a
+	// model override.
+	cfg.ImageDownscaleMaxPx = 0
+	if got := effectiveImageDownscaleMaxPx(cfg, "vm-no-override"); got != 0 {
+		t.Errorf("global 0 with no override = %d, want 0 (0 = disabled, not a built-in default)", got)
+	}
+	if got := effectiveImageDownscaleMaxPx(cfg, "vm-override"); got != 512 {
+		t.Errorf("global 0 with model override = %d, want 512 (model override still wins)", got)
 	}
 }
