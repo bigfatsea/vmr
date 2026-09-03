@@ -199,6 +199,7 @@ commits and design docs hold the full reasoning.
 - `vmr replay` now downscales inline images exactly as live traffic does before sending: the audit trail stores the pre-downscale original body, so a multimodal replay previously shipped the oversized original (and could be rejected upstream) instead of the bytes vmr actually forwarded. MaxPx resolves through the same virtual-model override path live uses (`internal/replay/replay.go`)
 - Journey severity: `JourneySeverity` now excludes `SourceLLMInferred` findings from the severity level, not just the driver — an injected LLM `goal_drift` could previously escalate the verdict to a red CRITICAL stamp while `pickDriver` found no rule-level cause and the headline rendered a contradictory green "no detector triggered" (`internal/story/severity.go`)
 - Error classification: the Chinese content-policy hint no longer matches the bare word `合规`, which misclassified gateway parameter-validation 400s ("参数不合规", "输入不合规") as content rejections and triggered a no-cooldown failover storm; only compound phrases naming the content or the review/block itself count now (`internal/adapter/classify_hints.go`)
+- Architecture invariants: `internal/buildinfo`, `internal/rundir`, and `internal/sysinfo` are now registered in `zeroInternalDepPackages` (`internal/archtest/import_boundaries_test.go`), enforcing zero-internal-dependency boundaries across all shared leaf packages
 
 ## [0.6.4] - 2026-08-30
 

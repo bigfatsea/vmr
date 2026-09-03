@@ -119,7 +119,7 @@
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的 26 个微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
 - **`i18n` 的 `type XxxText` + `if lang == ZH` 样板不改写成 `map[Lang]T` + 泛型 `pick`**：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉，还新引入泛型 helper 与「key 缺失怎么办」。收益为负。
-- **`internal/probe` / `rundir` / `buildinfo` 不登记进 `zeroInternalDepPackages`**：那张表的语义是「**承诺**永远零依赖」，不是「当前碰巧零依赖的都登记」。`probe` 独立成包是为避免 `diagnose`→`router` import cycle，未来 import `core` 完全合理。（对照：`internal/tokenutil` 承诺永不依赖内部包，已如实登记。）
+- **`internal/probe` 不登记进 `zeroInternalDepPackages`**：那张表的语义是「**承诺**永远零依赖」，不是「当前碰巧零依赖的都登记」。`probe` 独立成包是为避免 `diagnose`→`router` import cycle，未来 import `core` 完全合理。（`rundir` / `buildinfo` / `sysinfo` 与 `tokenutil` 均作为基础叶子包登记守卫。）
 - **`internal/core/core.go` 不按领域拆成 `endpoint.go`/`quota.go`/`pricing.go`**：同包拆文件不改变任何编译依赖，是代码导航整理不是架构重构。真正解决「core 会不会长成上帝包」的是准入规则，已写在包注释里并对存量逐条复核过。
 - **`imgprep` 的 `map[string]json.RawMessage` 不与 `jsonscan` 的字节扫描统一**：图片降采样要重算尺寸并重编码，是深度结构化重写，字节 splice 做不到。这是三个 sanctioned deviation 里最大的一个。
 - **不向 Clean Architecture 四层同心圆靠拢做整体重构**：要把横跨环边界的包「归位」就得为满足图示而拆包插接口，代价是新的包边界与一层不解决任何真实问题的间接性。项目已有更强且**可执行**的架构模型（两半区 + `archtest`）。反证：`internal/config` import `internal/adapter`（校验期需知道协议注册表）按 CA 是「外环依赖内环」的合法边——CA 本就不是这个项目合适的透镜。

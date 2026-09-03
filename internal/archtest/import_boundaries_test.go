@@ -188,11 +188,14 @@ var forbiddenImports = map[string][]string{
 // silently going stale every time a new internal package is added elsewhere
 // in the tree.
 var zeroInternalDepPackages = []string{
+	"vmr/internal/buildinfo",
 	"vmr/internal/core",
 	"vmr/internal/fmtutil",
 	"vmr/internal/i18n",
 	"vmr/internal/jsonscan",
 	"vmr/internal/logtee",
+	"vmr/internal/rundir",
+	"vmr/internal/sysinfo",
 	"vmr/internal/tokenutil",
 }
 

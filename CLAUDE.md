@@ -96,7 +96,7 @@ Shared guards:
 | Package | Owns |
 | --- | --- |
 | `archtest` | Executable architecture invariants: import boundaries, per-file line budgets, per-function line budgets, and documentation-reference integrity |
-| `buildinfo`, `rundir` | Build identity from Go's VCS stamp; default runtime dir resolution (`~/.vmr` → temp → cwd) |
+| `buildinfo`, `rundir`, `sysinfo` | Build identity from Go's VCS stamp; default runtime dir resolution (`~/.vmr` → temp → cwd); OS/runtime metrics |
 
 `cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand, and the only composition
 root allowed to see both halves at once.
