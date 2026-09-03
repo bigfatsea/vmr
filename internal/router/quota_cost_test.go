@@ -163,6 +163,30 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	}
 }
 
+// TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide pins VD1: a charge
+// where the input side was sniffed exact but the output side degraded must
+// record only the output side's price as estimated, not the whole cost —
+// EstimatedCostFor drives /status's estimated_pct, and inflating it to ~100%
+// for a mostly-exact cost account defeats the one signal it exists to give.
+func TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide(t *testing.T) {
+	rt := &Router{Quota: quota.NewRegistry("")}
+	l := costLimit(1000)
+	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{l}}, PricingRate: fullRate()}
+	raw := quota.Counters{Fresh: 200_000, Out: 10} // input sniffed, output a degraded estimate
+	ChargeResponse(rt.Quota, ep, raw, 10, true /*inSniffed*/, false /*outSniffed*/, chargeNow)
+
+	ps := quota.PeriodStart(l, chargeNow)
+	used, _ := rt.Quota.Used("p1", "cost/1mo", ps)
+	estCost := rt.Quota.EstimatedCostFor("p1", "cost/1mo", ps)
+	wantEst := 10.0 / 1e6 * 4.0 // fullRate Out is 4.0/1M; the input side is exact
+	if d := estCost - wantEst; d > 1e-12 || d < -1e-12 {
+		t.Fatalf("EstimatedCost = %v, want %v (output side only)", estCost, wantEst)
+	}
+	if estCost >= used.Cost*0.01 {
+		t.Errorf("EstimatedCost %v should be a tiny fraction of the total charge %v", estCost, used.Cost)
+	}
+}
+
 // --- ChargeResponse's MetricCost branch never applies model_multipliers (config validation forbids configuring both, but pin the mechanism too) ---
 
 func TestChargeCost_DoesNotConsultModelMultipliers(t *testing.T) {

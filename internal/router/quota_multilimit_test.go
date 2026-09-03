@@ -28,7 +28,7 @@ func TestChargeResponse_MultiLimit_ChargesEveryApplicableLimit(t *testing.T) {
 	spec := &core.QuotaSpec{Limits: []core.Limit{short, long}}
 	ep := &core.Endpoint{Provider: "p1", Model: "m", Quota: spec}
 
-	ChargeResponse(reg, ep, quota.Counters{}, 0, chargeNow)
+	ChargeResponse(reg, ep, quota.Counters{}, 0, true, true, chargeNow)
 
 	usedShort, _ := reg.Used("p1", quota.LimitKey(short, ""), quota.PeriodStart(short, chargeNow))
 	usedLong, _ := reg.Used("p1", quota.LimitKey(long, ""), quota.PeriodStart(long, chargeNow))
@@ -55,8 +55,8 @@ func TestChargeResponse_Scope_OnlyMatchingModelCharged(t *testing.T) {
 	epPremium := &core.Endpoint{Provider: "p1", Model: "premium-model", Quota: spec}
 	epOther := &core.Endpoint{Provider: "p1", Model: "other-model", Quota: spec}
 
-	ChargeResponse(reg, epPremium, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(reg, epOther, quota.Counters{}, 0, chargeNow)
+	ChargeResponse(reg, epPremium, quota.Counters{}, 0, true, true, chargeNow)
+	ChargeResponse(reg, epOther, quota.Counters{}, 0, true, true, chargeNow)
 
 	usedScoped, _ := reg.Used("p1", quota.LimitKey(scoped, "premium-model"), quota.PeriodStart(scoped, chargeNow))
 	if usedScoped.Requests != 1 {
@@ -139,9 +139,9 @@ func TestChargeResponse_PerModelWildcard_IndependentBuckets(t *testing.T) {
 
 	epA := &core.Endpoint{Provider: "p1", Model: "model-a", Quota: spec}
 	epB := &core.Endpoint{Provider: "p1", Model: "model-b", Quota: spec}
-	ChargeResponse(reg, epA, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(reg, epA, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(reg, epB, quota.Counters{}, 0, chargeNow)
+	ChargeResponse(reg, epA, quota.Counters{}, 0, true, true, chargeNow)
+	ChargeResponse(reg, epA, quota.Counters{}, 0, true, true, chargeNow)
+	ChargeResponse(reg, epB, quota.Counters{}, 0, true, true, chargeNow)
 
 	usedA, _ := reg.Used("p1", quota.LimitKey(l, "model-a"), quota.PeriodStart(l, chargeNow))
 	usedB, _ := reg.Used("p1", quota.LimitKey(l, "model-b"), quota.PeriodStart(l, chargeNow))
@@ -186,9 +186,9 @@ models:
 	// zero the bucket. `every: 1d` keeps charge and read in the same period
 	// as long as the test doesn't straddle local midnight.
 	now := time.Now()
-	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, now)
-	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, now)
-	ChargeResponse(rt.Quota, epB, quota.Counters{}, 0, now)
+	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, true, true, now)
+	ChargeResponse(rt.Quota, epA, quota.Counters{}, 0, true, true, now)
+	ChargeResponse(rt.Quota, epB, quota.Counters{}, 0, true, true, now)
 
 	st := rt.QuotaStatus()
 	if len(st) != 2 {
@@ -240,8 +240,8 @@ models:
 		epPremium, epOther = epOther, epPremium
 	}
 
-	ChargeResponse(rt.Quota, epPremium, quota.Counters{}, 0, chargeNow)
-	ChargeResponse(rt.Quota, epOther, quota.Counters{}, 0, chargeNow) // must not produce a row — out of Scope
+	ChargeResponse(rt.Quota, epPremium, quota.Counters{}, 0, true, true, chargeNow)
+	ChargeResponse(rt.Quota, epOther, quota.Counters{}, 0, true, true, chargeNow) // must not produce a row — out of Scope
 
 	st := rt.QuotaStatus()
 	if len(st) != 1 {
@@ -300,7 +300,7 @@ models:
 	// Charge once per model so each per-model Limit has a live row.
 	for _, m := range []string{"lite", "flash"} {
 		ep := &core.Endpoint{Provider: "google", Model: m, Quota: snap.Models["openai-completions"]["m1"].Endpoints[0].Quota}
-		ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, chargeNow)
+		ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, true, true, chargeNow)
 	}
 
 	st := rt.QuotaStatus()

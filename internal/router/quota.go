@@ -58,10 +58,11 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream
 	}
 	var raw quota.Counters
 	var estimated float64
+	inSniffed, outSniffed := true, true
 	if needsTokenCharge(ep.Quota.Limits, ep.Model) {
-		raw, estimated = tokenCharge(rbody, creq)
+		raw, estimated, inSniffed, outSniffed = tokenCharge(rbody, creq)
 	}
-	ChargeResponse(rt.Quota, ep, raw, estimated, now)
+	ChargeResponse(rt.Quota, ep, raw, estimated, inSniffed, outSniffed, now)
 }
 
 // needsTokenCharge reports whether any of limits that actually apply to
@@ -104,7 +105,7 @@ func needsTokenCharge(limits []core.Limit, model string) bool {
 // so applyModelMultiplier never runs on the cost path — deliberately: it
 // rebuilds a fresh quota.Counters that would silently zero out the Cost
 // field this branch just set.
-func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated float64, now time.Time) {
+func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated float64, inSniffed, outSniffed bool, now time.Time) {
 	if reg == nil || ep.Quota == nil {
 		return
 	}
@@ -125,12 +126,22 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			// pollute bucket.Estimated (a requests/tokens-only accumulator)
 			// with a meaningless number (B6).
 			reg.Charge(ep.Provider, limitKey, periodStart, d, 0)
-			if estimated != 0 {
-				// The whole charge came from a degraded token estimate (see
-				// tokenCharge's doc comment: its degraded path always sets
-				// estimated to exactly Fresh+Out, never a partial value), so
-				// the $ amount computed from it is entirely an estimate too.
-				reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, d.Cost)
+			if !inSniffed || !outSniffed {
+				// Only the un-sniffed side of the ledger is an estimate — the
+				// sniffed side priced from real reported usage is exact. Price
+				// a Counters holding just the degraded components to get the
+				// estimated portion of d.Cost, so a request with real input
+				// usage and only a degraded output side reports ~1% estimated,
+				// not 100%. estimated_pct is the operator's calibration signal;
+				// inflating it to 100% for a mostly-exact account defeats it.
+				var estC quota.Counters
+				if !inSniffed {
+					estC.Fresh, estC.CacheRead, estC.CacheWrite = d.Fresh, d.CacheRead, d.CacheWrite
+				}
+				if !outSniffed {
+					estC.Out = d.Out
+				}
+				reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, componentCost(estC, rate))
 			}
 		case core.MetricTokens:
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, raw, estimated)
@@ -164,20 +175,24 @@ func componentCost(d quota.Counters, rate pricing.Rate) float64 {
 // estimated equals the full charged total exactly when this is a degraded estimate,
 // 0 when it's exact — accumulated by quota.Registry into each account's running
 // estimated_pct, the one signal /status gives an operator for how
-// much to trust a token-metered account's numbers.
-func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (quota.Counters, float64) {
+// much to trust a token-metered account's numbers. inSniffed/outSniffed are
+// returned alongside so a metric: cost charge can price only the un-sniffed
+// side as an estimate (a request with real input usage but a degraded output
+// side is 99% exact, not 100% estimated).
+func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (raw quota.Counters, estimated float64, inSniffed, outSniffed bool) {
 	// Usage() ok alone is not the exact-vs-degraded signal: a stream
 	// truncated after Anthropic's message_start has real INPUT usage but
 	// only the ~1 placeholder output — billing that as exact would write
 	// out≈1 into the ledger with estimated=0, poisoning estimated_pct, the
 	// operator's only trust signal. The per-side flags decide (R46).
 	u, _ := rbody.Usage()
-	inSniffed, outSniffed := rbody.UsageSides()
+	inSniffed, outSniffed = rbody.UsageSides()
 	// Request-side degraded estimate reuses the cheap pre-routing number every
 	// request already has (creq.Facts.EstimatedTokens, computed once in
 	// server/facts.go — zero extra cost here); response-side comes from
 	// rbody.OutTokens() (respnorm.go), which returns 0 for opaque responses.
-	return TokenCountersSides(u, inSniffed, outSniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
+	raw, estimated = TokenCountersSides(u, inSniffed, outSniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
+	return
 }
 
 // TokenCounters turns one response's COMPLETE usage into the raw four-

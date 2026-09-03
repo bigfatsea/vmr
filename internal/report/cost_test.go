@@ -24,13 +24,13 @@ func TestCostFor_IncludesCacheRead(t *testing.T) {
 	withCacheRead := pricing.Rate{InFresh: rf(1.0), CacheRead: rf(0.5), CacheWrite: rf(1.0), Out: rf(4.0)}
 	withoutCacheRead := pricing.Rate{InFresh: rf(1.0), CacheRead: nil, CacheWrite: rf(1.0), Out: rf(4.0)}
 
-	got, estimated := costFor(withCacheRead, rc)
+	got, estCost := costFor(withCacheRead, rc)
 	gotExcluded, _ := costFor(withoutCacheRead, rc)
 	if got <= gotExcluded {
 		t.Fatalf("costFor with a priced cache_read (%v) should exceed costFor with cache_read excluded (%v)", got, gotExcluded)
 	}
-	if estimated {
-		t.Error("costFor with sniffed usage must report estimated=false")
+	if estCost != 0 {
+		t.Errorf("costFor with both sides sniffed must report estCost=0, got %v", estCost)
 	}
 
 	// fresh = In - CacheRead - CacheWrite = 1,000,000 - 500,000 - 0 = 500,000.
@@ -60,27 +60,48 @@ func TestCostFor_MissingRateComponent_TreatedAsZero(t *testing.T) {
 func TestCostFor_NoUsage_PricesDegradedEstimate(t *testing.T) {
 	rc := &rec2{estInFresh: 1_000_000, estOut: 500_000}
 	rate := pricing.Rate{InFresh: rf(2.0), CacheRead: rf(0.5), CacheWrite: rf(1.0), Out: rf(4.0)}
-	got, estimated := costFor(rate, rc)
-	if !estimated {
-		t.Error("costFor with no sniffed usage must report estimated=true")
-	}
+	got, estCost := costFor(rate, rc)
 	// No cache components: the degraded estimate can't tell cache hits
 	// apart from a fresh token, same as the router's own degraded branch.
 	want := (1_000_000.0/1e6)*2.0 + (500_000.0/1e6)*4.0
 	if got != want {
 		t.Fatalf("costFor = %v, want %v (Fresh/Out only, no cache components)", got, want)
 	}
+	if estCost != got {
+		t.Errorf("both sides degraded: estCost (%v) must equal the whole cost (%v)", estCost, got)
+	}
+}
+
+// TestCostFor_SplitSide pins VD1: a record with real input usage but a
+// degraded output side prices its cost almost entirely from the exact input,
+// so estCost must be only the small output-side portion — not the whole
+// figure, which would inflate WindowEstimatedPct toward 100% for an account
+// that is in fact ~99% exactly billed.
+func TestCostFor_SplitSide(t *testing.T) {
+	rc := &rec2{usageInOK: true, usageOutOK: false, estOut: 10}
+	rc.usage.In = 200_000
+	rate := pricing.Rate{InFresh: rf(3.0), Out: rf(15.0)}
+	got, estCost := costFor(rate, rc)
+	near := func(a, b float64) bool { d := a - b; return d < 1e-9 && d > -1e-9 }
+	wantTotal := (200_000.0/1e6)*3.0 + (10.0/1e6)*15.0
+	wantEst := (10.0 / 1e6) * 15.0
+	if !near(got, wantTotal) {
+		t.Fatalf("costFor total = %v, want %v", got, wantTotal)
+	}
+	if !near(estCost, wantEst) {
+		t.Fatalf("costFor estCost = %v, want %v (output side only)", estCost, wantEst)
+	}
+	if estCost >= got {
+		t.Errorf("estCost (%v) must be a small fraction of the total (%v)", estCost, got)
+	}
 }
 
 func TestCostFor_NoUsageNoEstimate_ReturnsZero(t *testing.T) {
 	rc := &rec2{} // estInFresh/estOut both zero: e.g. a replay record with no response at all
 	rate := pricing.Rate{InFresh: rf(999)}
-	got, estimated := costFor(rate, rc)
-	if !estimated {
-		t.Error("costFor with no sniffed usage must report estimated=true even when the degraded estimate itself is zero")
-	}
-	if got != 0 {
-		t.Fatalf("costFor = %v, want 0", got)
+	got, estCost := costFor(rate, rc)
+	if got != 0 || estCost != 0 {
+		t.Fatalf("costFor = (%v, %v), want (0, 0) — no usage, no estimate, nothing to attribute", got, estCost)
 	}
 }
 

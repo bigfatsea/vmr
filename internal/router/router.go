@@ -195,9 +195,7 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
 }
 
-// rejectIfAllKeyless answers a request for a model whose every endpoint has
-// an empty api_key — see keyless.go, where it lives with its host-shape
-// rejectIfAllKeyless is documented and implemented in keyless.go.
+// rejectIfAllKeyless (with its host-shape helper) lives in keyless.go.
 
 // findByHealthKey returns the endpoint in candidates whose HealthKey
 // matches key, or nil if none does — e.g. a sticky pointer recorded before

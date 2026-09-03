@@ -59,5 +59,5 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, protocol string, reqBo
 	u, inOK, outOK := chatmsg.ExtractUsageSides(respBody, protocol)
 	raw, estimated := router.TokenCountersSides(u, inOK, outOK,
 		inEst, tokenutil.Estimate(respBody))
-	router.ChargeResponse(reg, ep, raw, estimated, now)
+	router.ChargeResponse(reg, ep, raw, estimated, inOK, outOK, now)
 }

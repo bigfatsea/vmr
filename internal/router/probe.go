@@ -130,7 +130,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	// probeBodyCap), and undercounting a few dozen tokens is the honest
 	// bound. nil-safe when no quota Registry is wired up or the endpoint
 	// carries no quota, like chargeQuota.
-	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, time.Now())
+	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, true, true, time.Now())
 
 	// 2xx: the endpoint answered — that alone is enough to let it out of
 	// cooldown, but only as probe-evidence: ReportProbeSuccess decays fails

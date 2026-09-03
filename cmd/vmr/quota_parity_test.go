@@ -158,9 +158,10 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 // the exact-vs-degraded decision is the same one the router's live path
 // makes (and the old single-bool disjunction would have gotten wrong for
 // Anthropic's truncated-after-message_start shape).
-func (r parityRequest) tokenCharge() (quota.Counters, float64) {
+func (r parityRequest) tokenCharge() (raw quota.Counters, estimated float64, inSniffed, outSniffed bool) {
 	u, inOK, outOK := chatmsg.ExtractUsageSides(r.respBody, r.protocolOrDefault())
-	return router.TokenCountersSides(u, inOK, outOK, r.estTokens, chatmsg.EstimateResponseBodyTokens(r.respBody))
+	raw, estimated = router.TokenCountersSides(u, inOK, outOK, r.estTokens, chatmsg.EstimateResponseBodyTokens(r.respBody))
+	return raw, estimated, inOK, outOK
 }
 
 func (r parityRequest) protocolOrDefault() string {
@@ -179,14 +180,14 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 	t.Helper()
 	reg := quota.NewRegistry("")
 	for _, r := range reqs {
-		raw, estimated := r.tokenCharge()
+		raw, estimated, inSniffed, outSniffed := r.tokenCharge()
 		proto := r.protocolOrDefault()
 		for _, a := range r.attempts {
 			if !a.forwarded() {
 				continue // the router only ever charges a forwarded response
 			}
 			ep := &core.Endpoint{AdapterType: proto, Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
-			router.ChargeResponse(reg, ep, raw, estimated, now)
+			router.ChargeResponse(reg, ep, raw, estimated, inSniffed, outSniffed, now)
 		}
 	}
 	l := spec.Limits[0]
@@ -722,9 +723,10 @@ func f64p(v float64) *float64 { return &v }
 // record's Facts.EstimatedTokens on the In side, raw bytes on the Out
 // side — see that function's doc comment), so the two halves of this file
 // disagree only where the deployed code deliberately does.
-func (r parityRequest) replayChargeFor() (quota.Counters, float64) {
+func (r parityRequest) replayChargeFor() (raw quota.Counters, estimated float64, inSniffed, outSniffed bool) {
 	u, inOK, outOK := chatmsg.ExtractUsageSides(r.respBody, r.protocolOrDefault())
-	return router.TokenCountersSides(u, inOK, outOK, r.estTokens, tokenutil.Estimate([]byte(r.respBody)))
+	raw, estimated = router.TokenCountersSides(u, inOK, outOK, r.estTokens, tokenutil.Estimate([]byte(r.respBody)))
+	return raw, estimated, inOK, outOK
 }
 
 // TestQuotaParity_ReplayAndLiveChargeAgree is the replay↔router corner:
@@ -777,8 +779,8 @@ func TestQuotaParity_ReplayAndLiveChargeAgree(t *testing.T) {
 	isSoftblock := func(r parityRequest) bool { return r.attempts[0].softblock }
 
 	for i, r := range reqs {
-		liveRaw, liveEst := r.tokenCharge()
-		replayRaw, replayEst := r.replayChargeFor()
+		liveRaw, liveEst, _, _ := r.tokenCharge()
+		replayRaw, replayEst, _, _ := r.replayChargeFor()
 
 		if isSoftblock(r) {
 			// The charge never happens: softblock is not forwarded, so
@@ -821,8 +823,9 @@ func TestQuotaParity_ReplayAndLiveChargeAgree(t *testing.T) {
 			}
 			liveReg, replayReg := quota.NewRegistry(""), quota.NewRegistry("")
 			ep := &core.Endpoint{AdapterType: r.protocolOrDefault(), Provider: "acct1", Model: r.model, Quota: spec}
-			router.ChargeResponse(liveReg, ep, liveRaw, liveEst, now)
-			router.ChargeResponse(replayReg, ep, replayRaw, replayEst, now)
+			// bothExact here means both sides were sniffed for both halves.
+			router.ChargeResponse(liveReg, ep, liveRaw, liveEst, true, true, now)
+			router.ChargeResponse(replayReg, ep, replayRaw, replayEst, true, true, now)
 			lu, _ := liveReg.Used("acct1", "tokens/1mo", quota.PeriodStart(lim, now))
 			rp, _ := replayReg.Used("acct1", "tokens/1mo", quota.PeriodStart(lim, now))
 			if lu != rp {

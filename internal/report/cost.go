@@ -8,25 +8,31 @@ import (
 )
 
 // costFor computes an estimated cost for a record using pricing.Rate.Cost.
-// Per-side basis, mirroring router.TokenCountersSides: a side the upstream
-// reported is priced from its real value; a missing side falls back to the
-// degraded estimate (In charged entirely to Fresh, Out max'd with the
-// placeholder the usage object may still carry). `estimated` is true when
-// ANY side came from an estimate — mixed-basis pricing says so, it does
-// not masquerade as exact.
-func costFor(pr pricing.Rate, rc *rec2) (c float64, estimated bool) {
+// Per-side basis, mirroring router.TokenCountersSides / router.ChargeResponse:
+// a side the upstream reported is priced from its real value; a missing side
+// falls back to the degraded estimate (In charged entirely to Fresh, Out
+// max'd with the placeholder the usage object may still carry). estCost is
+// the portion of c attributable to a degraded side only — 0 when both sides
+// were sniffed, the full c when both degraded, and just the un-sniffed
+// side's price when one side is real. It feeds EndpointRow.CostEstimateEst /
+// WindowEstimatedPct, the operator's calibration signal: a request with real
+// input usage and a degraded output side is ~1% estimated, not 100%.
+func costFor(pr pricing.Rate, rc *rec2) (c, estCost float64) {
 	var fresh, cacheRead, cacheWrite, out int64
+	var eFresh, eOut int64 // components attributable to a degraded side
 	if rc.usageInOK {
 		fresh, cacheRead, cacheWrite = rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite
 	} else {
 		fresh = rc.estInFresh
+		eFresh = fresh
 	}
 	if rc.usageOutOK {
 		out = rc.usage.Out
 	} else {
 		out = max(rc.usage.Out, rc.estOut)
+		eOut = out
 	}
-	return pr.Cost(fresh, cacheRead, cacheWrite, out), !rc.usageInOK || !rc.usageOutOK
+	return pr.Cost(fresh, cacheRead, cacheWrite, out), pr.Cost(eFresh, 0, 0, eOut)
 }
 
 // accumulateCost prices rc against every CostEstimate bucket it applies to
@@ -49,15 +55,13 @@ func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, b
 	if !ok {
 		return
 	}
-	c, estimated := costFor(pr, rc)
+	c, estCost := costFor(pr, rc)
 	addCost(&rep.Overall.CostEstimate, c)
 	addCost(&mr.CostEstimate, c)
 	addCost(&dr.CostEstimate, c)
 	if ea := epsAll[rc.endpoint]; ea != nil {
 		addCost(&ea.CostEstimate, c)
-		if estimated {
-			ea.CostEstimateEst += c
-		}
+		ea.CostEstimateEst += estCost
 		if !pr.Complete() {
 			ea.CostRateIncomplete = true
 		}
