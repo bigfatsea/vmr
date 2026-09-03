@@ -398,6 +398,79 @@ func TestDefaultClassify_EchoedPromptNoFalseContentFlag(t *testing.T) {
 	}
 }
 
+// TestDefaultClassify_ChineseHeGuiNotABareWord locks in the W4 fix (the Chinese
+// counterpart of the Q06 fix): bare 合规 was removed from contentHint because
+// gateway parameter-validation wording ("参数不合规", "输入不合规") is common
+// 400 prose — matching it misclassified those as ErrContent and triggered a
+// no-cooldown failover storm. Only compound phrases whose subject is the
+// content itself, or that name the review/block explicitly, count now.
+// 敏感/违规 stay bare: they specifically name moderation.
+func TestDefaultClassify_ChineseHeGuiNotABareWord(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want core.ErrorClass
+	}{
+		// Parameter-validation "X不合规" must NOT hit contentHint.
+		{
+			"参数不合规 is a parameter error",
+			`{"error":{"message":"参数不合规：temperature 取值超出范围"}}`,
+			core.ErrClient,
+		},
+		{
+			"输入不合规 is a parameter error",
+			`{"error":{"message":"输入不合规，请检查请求字段"}}`,
+			core.ErrClient,
+		},
+		// Content-rejection wording still classifies as ErrContent.
+		{
+			"内容不合规 still flagged",
+			`{"error":{"message":"该内容不合规，已被拒绝处理"}}`,
+			core.ErrContent,
+		},
+		{
+			"合规审查 failure still flagged",
+			`{"error":{"message":"该内容经合规审查未通过"}}`,
+			core.ErrContent,
+		},
+		{
+			"合规拦截 still flagged",
+			`{"error":{"message":"请求被合规拦截：涉政敏感词"}}`,
+			core.ErrContent,
+		},
+		{
+			"合规风险 still flagged",
+			`{"error":{"message":"检测到内容存在合规风险"}}`,
+			core.ErrContent,
+		},
+		{
+			"内容合规 policy mention still flagged",
+			`{"error":{"message":"您的请求违反内容合规要求"}}`,
+			core.ErrContent,
+		},
+		// 敏感/违规 keep their bare-word behavior.
+		{
+			"敏感 bare word still flagged",
+			`{"error":{"message":"消息中包含敏感词"}}`,
+			core.ErrContent,
+		},
+		{
+			"违规 bare word still flagged",
+			`{"error":{"message":"请求内容违规"}}`,
+			core.ErrContent,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultClassify(400, []byte(tc.body)); got != tc.want {
+				t.Errorf("got %v, want %v (body=%s)", got, tc.want, tc.body)
+			}
+		})
+	}
+}
+
 func TestDefaultClassify_LeadingWhitespaceInJSON(t *testing.T) {
 	t.Parallel()
 	// Leading whitespace or newlines from proxies must not degrade JSON into raw snippet scan

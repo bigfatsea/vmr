@@ -87,8 +87,14 @@ func maxOutputHint(snippet string) bool {
 // guardrail, inappropriate) are matched as phrases only — the review's Q06
 // finding: a vendor echoing a "case-sensitive" or "guardrail" mention back
 // would otherwise misclassify a parameter error as content-blocked. Chinese
-// single words (敏感, 违规, 合规) are kept as-is: they are far less likely to
-// appear by accident in an echoed prompt.
+// 敏感/违规 are kept as single words: they specifically name moderation, so
+// they are far less likely to appear by accident in an echoed prompt.
+// 合规 is NOT kept as a single word — gateway parameter-validation wording
+// ("参数不合规", "输入不合规") is common 400 prose, and a bare 合规 match
+// misclassifies those as ErrContent, triggering a no-cooldown failover storm
+// (the Chinese counterpart of the Q06 English fix). Only compound phrases
+// whose subject is the content itself ("内容不合规") or that name the
+// review/block explicitly ("合规审查", "合规拦截", "合规风险") count.
 func contentHint(snippet string) bool {
 	return containsAny(snippet,
 		"content_filter", "content_policy", "content policy", "content management policy",
@@ -101,7 +107,8 @@ func contentHint(snippet string) bool {
 		// "was" ("Request flagged", "Content flagged") without reopening the
 		// bare-word false-positive trap Q06 closed.
 		"request flagged", "content flagged", "input flagged", "message flagged", "prompt flagged",
-		"敏感", "违规", "合规")
+		"敏感", "违规",
+		"内容合规", "内容不合规", "合规审查", "合规拦截", "合规风险")
 }
 
 func containsAny(s string, subs ...string) bool {
