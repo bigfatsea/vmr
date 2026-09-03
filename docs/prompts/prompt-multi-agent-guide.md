@@ -49,12 +49,15 @@
 主控 Agent 编排流水线标准脚本结构：
 
 ```bash
+# 0. 连通性快速验证（可选；确认输出即可，无需探究配置）
+pi -p "ping" < /dev/null
+
 # 1. 准备阶段
 git worktree add -b feat/<task-name> ../<worktree-dir> main
 cp <task-spec-source.md> ../<worktree-dir>/TASK_SPEC.md   # 源为 docs/tasks/ 下的真实 spec 文件，如 TASK_SPEC_R2_G3.md
 
 # 2. 派发执行阶段 (后台非交互式)
-(cd ../<worktree-dir> && pi -p --approve @TASK_SPEC.md "请严格按照 TASK_SPEC.md 要求执行并 commit。" > /tmp/agent.log 2>&1) &
+(cd ../<worktree-dir> && pi -p --approve @TASK_SPEC.md "请严格按照 TASK_SPEC.md 要求执行并 commit。" < /dev/null > /tmp/agent.log 2>&1) &
 PID=$!
 
 # 3. 监控阶段 (跟踪 session 日志、git 状态与任务进度)
@@ -75,7 +78,10 @@ git branch -d feat/<task-name>
 > - **同步记录 PID**：通过 CLI 后台启动子 Agent 时，必须同步记录其进程号（`PID=$!`）并登记入跟踪账本。系统内可能同时存在多个同名 CLI 进程，严禁凭进程名盲杀（如 `pkill`、`killall`），必须依托精准 PID 实施定向监控与终止，以免混淆或误杀其他并发任务。
 > - `@file` 必须是独立 argv 项，写进引号里会被整串当成文件名导致派发空转。正确形式：`pi -p --approve @A.md @B.md "<指令>"`。
 > - 未跟踪的参考文档（如各类审阅/评审产物，主仓库中可能未被 git 跟踪）不会通过 `git worktree add` 进入工作树。主控必须显式 `cp` 进 worktree 目录，并在说明书里点明"这些路径在你的 worktree 中不存在，不要去找"。
-> - Pi Agent 的 CLI 命令可直接运行，其模型 Provider 配置已预先配好（本环境指向远端 VMR 服务），Worker 无需自行配置。
+> - **Pi Agent CLI 开箱即用（严禁多余配置）**：Pi CLI 的模型与 Provider 已预先配置就绪且完全打通（已绑定远端 VMR 服务），直接启动运行即可。**主控及协同 Agent 无需也严禁额外配置或研究其模型设定**。如需确认可用性，执行单行指令快速验证即可：
+>   ```bash
+>   pi -p "ping" < /dev/null  # 收到 pong 即代表完全连通，切勿探究内部配置
+>   ```
 
 ---
 
