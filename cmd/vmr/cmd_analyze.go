@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"vmr/internal/chatmsg"
+	"vmr/internal/config"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/story"
@@ -93,7 +94,15 @@ type analyzeRun struct {
 	// when none was loaded — carried through so the macro report can name
 	// its own configuration source (report.Meta.ReportConfigPath).
 	reportConfigSource string
-	showUngrouped      bool
+	// cfg/cfgErr: the single config.Load for this analyze run, set at the
+	// top of dispatchAnalyze and shared by the story half's pricing
+	// resolver and the report half — a second independent Load could
+	// observe a different file if an edit lands mid-run (P-7-7). cfgErr is
+	// non-fatal: every consumer degrades on its own (pricing falls back to
+	// the standard table, the quota section skips).
+	cfg           *config.Config
+	cfgErr        error
+	showUngrouped bool
 	// htmlOn/redactOn (E1): -journey only, single match only — a
 	// self-contained HTML view of one journey, optionally with every
 	// conversation body swapped for a length placeholder. Same "one journey
@@ -277,6 +286,13 @@ func dispatchAnalyze(r *analyzeRun) error {
 	// a daemon's accumulated total.
 	chatmsg.ResetUnrecognizedShapeCounts()
 
+	// One config.Load for the whole run: both halves need the effective
+	// config (pricing overrides, quota windows), and two independent loads
+	// could disagree if an edit lands between them (P-7-7). resolveInputPaths
+	// does its own earlier load purely for the log_dir path fallback — a
+	// separate concern that never feeds the cost/quota basis.
+	r.cfg, r.cfgErr = config.Load(r.configPath)
+
 	// -macro-only is handled before setupStoryRun runs at all (P15.1): bare
 	// `vmr report` never scans/stitches the story-half candidate graph or
 	// touches stories/.parse-cache, so running setupStoryRun first and
@@ -313,7 +329,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if err != nil {
 			return err
 		}
-		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+		priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
 		return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
 	case r.journeyArg != "":
 		ids := make([]string, len(su.cands))
@@ -329,7 +345,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 			if err != nil {
 				return err
 			}
-			priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+			priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
 			return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
 		}
 		if r.llmAddrExplicit {
@@ -340,7 +356,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 		}
 		// true: a -journey selector naming several targets is still a
 		// user-named set, not the default suite's implicit batch (P13.1).
-		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+		priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
 		return renderJourneys(targets, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx,
 			"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true, priceRes, ccy)
 	default:
@@ -362,7 +378,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 		// data the single -journey zoom produces (same resolver source,
 		// same ComputeJourneyCost) — formerly a nil cost here left every
 		// default-suite journey-*.md/.json without its cost line.
-		priceRes, ccy := resolvePricingForAnalyze(r.configPath, r.displayCCY, r.exchangeRate)
+		priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
 		if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag, priceRes, ccy); err != nil {
 			return fmt.Errorf("analyze (story half): %w", err)
 		}
@@ -384,6 +400,8 @@ func runReportHalf(r *analyzeRun) error {
 	}
 	if err := runReport(r.paths, timestampWriter{w: os.Stdout}, reportRunOpts{
 		configPath:        r.configPath,
+		cfg:               r.cfg,
+		cfgErr:            r.cfgErr,
 		outDir:            r.outDir,
 		detailsOn:         r.detailsOn,
 		lang:              r.lang,

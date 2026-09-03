@@ -102,13 +102,14 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 }
 
 // resolvePricingForAnalyze builds the pricing resolver the story half needs
-// for zoom views (-journey / -compare), which don't run runReport. Same
+// for zoom views (-journey / -compare), which don't run runReport. cfg/cfgErr
+// come from dispatchAnalyze's single config.Load (P-7-7) — shared with
+// runReport so both halves price against one config view. Same
 // degrade-gracefully contract: an unreadable config falls back to the embedded
 // standard table. Warnings go to stderr rather than being discarded, so
 // unresolvable supplement paths or missing exchange rates are visible.
-func resolvePricingForAnalyze(configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
+func resolvePricingForAnalyze(cfg *config.Config, cfgErr error, configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
 	tw := timestampWriter{w: os.Stderr}
-	cfg, cfgErr := config.Load(configPath)
 	if cfgErr != nil {
 		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no supplement, no account overrides)\n", configPath, cfgErr)
 	}
@@ -215,7 +216,12 @@ func detailsPresentFor(detailsOn bool, detailDir string) bool {
 // set's resolution, instead of the pre-P9 approach of re-serializing
 // resolved values into a []string and having cmdReport re-parse them.
 type reportRunOpts struct {
-	configPath        string
+	configPath string
+	// cfg/cfgErr: config.Load already done once by the caller (cmdAnalyze),
+	// shared with the story half's pricing resolver — runReport must not
+	// load a second time (P-7-7). cfgErr is non-fatal here; see below.
+	cfg               *config.Config
+	cfgErr            error
 	outDir            string
 	detailsOn         bool
 	lang              i18n.Lang
@@ -233,15 +239,14 @@ type reportRunOpts struct {
 // different caller (cmdAnalyze, see cmd_analyze.go) can now reach it without
 // going through vmr report's own flag.FlagSet.
 func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
-	// Single config.Load, shared by buildPricing and
-	// buildProviderQuotas below — see either function's own doc comment for
-	// why splitting this into two independent loads would be a consistency
-	// bug (a config edit landing between them), not just a wasted read. A
-	// load failure here is NOT fatal to `vmr report`: both callees degrade
-	// independently (pricing falls back to the embedded standard table;
-	// the quota section simply doesn't render) — see cfgErr's threading
-	// below, never returned as this function's own error.
-	cfg, cfgErr := config.Load(opts.configPath)
+	// cfg/cfgErr come pre-loaded from cmdAnalyze — one config.Load per
+	// analyze run, shared with the story half (P-7-7). buildPricing and
+	// buildProviderQuotas below both consume it; a load failure is NOT
+	// fatal to `vmr report` — both callees degrade independently (pricing
+	// falls back to the embedded standard table; the quota section simply
+	// doesn't render) — see cfgErr's threading below, never returned as
+	// this function's own error.
+	cfg, cfgErr := opts.cfg, opts.cfgErr
 	if cfgErr != nil {
 		// One unified warning for both degrade paths — buildPricing
 		// and buildProviderQuotas used to each print their own near-
