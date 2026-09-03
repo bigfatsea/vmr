@@ -77,11 +77,6 @@ var funcLineExemptions = map[string]int{
 	"internal/server/server.go:chatHandler": 130,
 
 	"internal/report/section_reliability.go:renderReliability": 135,
-
-	// One config-validation pass with many independent checks, and one SSE
-	// reassembly state machine.
-	"internal/config/config.go:validate":    145,
-	"internal/chatmsg/sse.go:ReassembleSSE": 125,
 }
 
 // funcBudgetRoots are the trees this test governs: the shipped binary's own
