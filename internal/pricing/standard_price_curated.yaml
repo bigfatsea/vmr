@@ -445,7 +445,7 @@ aliases:
 # ---------------------------------------------------------------------------
 # Rates
 # ---------------------------------------------------------------------------
-# rates:
+rates:
   # Moonshot AI / Kimi (platform.kimi.com) — these three model ids postdate
   # the tools/gen_standard_pricing LiteLLM snapshot (2026-08-07) and have no
   # row there at all. Source: https://platform.kimi.com/docs/pricing/chat-k27-code
@@ -515,14 +515,14 @@ aliases:
   # cache-HIT price only. cache_write: no separate per-token creation fee
   # published (only the hourly storage fee above, which this schema can't
   # represent).
-  # - key: volcengine/doubao-seed-2.1-pro
-  #   in_fresh: 0.84507    # ¥6.00 / 7.1
-  #   cache_read: 0.16901  # ¥1.20 / 7.1
-  #   out: 4.22535          # ¥30.00 / 7.1
-  # - key: volcengine/doubao-seed-2.1-turbo
-  #   in_fresh: 0.42254    # ¥3.00 / 7.1
-  #   cache_read: 0.08451  # ¥0.60 / 7.1
-  #   out: 2.11268          # ¥15.00 / 7.1
+  - key: volcengine/doubao-seed-2.1-pro
+    in_fresh: 0.84507    # ¥6.00 / 7.1
+    cache_read: 0.16901  # ¥1.20 / 7.1
+    out: 4.22535          # ¥30.00 / 7.1
+  - key: volcengine/doubao-seed-2.1-turbo
+    in_fresh: 0.42254    # ¥3.00 / 7.1
+    cache_read: 0.08451  # ¥0.60 / 7.1
+    out: 2.11268          # ¥15.00 / 7.1
 
   # Tencent Hunyuan (cloud.tencent.com) — no hunyuan/* rows exist anywhere
   # in standard_price_generated.yaml. Source:
