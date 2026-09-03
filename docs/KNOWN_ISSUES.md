@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`go test ./...` 与 `go test -race ./...` 全绿；`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性。
-- **§2 分布**：高危 0、中危 3（`2.2`/`2.17`/`2.18`）、低危 38，合计 41。无 `[中低]` 条目。
+- **§2 分布**：高危 0；中危 3（`2.2`/`2.17`/`2.18`），其余均为低危（含一条 `[低-中]`）。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
 
 ---
@@ -57,6 +57,7 @@
 - **`traffic.by_status` 按请求（非 attempt）计数，且不保证 `ok+canceled+error == total`**：failover 中间 attempt 不计入，少数早断路径不记或记入 error。展示语义，非路由语义。
 - **`/status` 的 `traffic.by_status` 在流式中途截断时记 `error`，与审计顶层 `outcome` 记 `ok` 口径不同（刻意不对齐）**：前者答「客户端是否拿到完整响应」，后者答「HTTP 交换是否在传输层正常完成」，各自口径内部自洽（`Telemetry.RecordOutcome` doc comment、`forwardSuccess` 调用点各自写了自洽说明）。截断的客户端信号：TRUNCATED 时 `forwardSuccess` 在把可安全交付的已收字节 flush 给客户端后 `panic(http.ErrAbortHandler)`，此账本口径不受影响。
 - **buffered / undecided 模式的 SSE 在上游中途断流时一律不 flush 已缓冲尾部**：`respnorm.Read` 错误分支只把**可安全交付**的字节交出去——非 SSE 响应 flush 部分 JSON（直连也是这个结果），SSE 仅 `modePassthrough` flush 尾部；`modeUndecided` / `modeBuffered` 一律不 flush，避免把未闭合的 `<think>` 泄漏给客户端（审计记 `truncated_withheld`）。随后 `forwardSuccess` 于全部记账之后 `panic(http.ErrAbortHandler)`，客户端 SDK 看到断掉的传输而非格式良好的空 200。软屏蔽 opt-in 路径（`checkSoftBlock` 的 `io.ReadAll`）曾复发同一「吞掉断流错误、假成功」失效，已由 `readCloser` + `errReader` 包装引回同一 `TRUNCATED` 分支。这是「杜绝静默假成功」的硬要求，不是可优化的保守行为。
+- **`respnorm` 缓冲区超 `bufferedCap`（当前 8 MiB）即放弃规范化，转 opaque 原样透传**：`modeBuffered` / `modeUndecided` 缓冲越过上限时置 `s.opaque = true`、审计 `norm` 串加 `overflow_raw_passthrough`，把已缓冲字节原样 flush、后续字节直通。**已知代价**：这条路径不再走重写循环（`emitBlock`），因此**虚拟模型名改写（sanctioned deviation 之一）在本条响应上不发生**——响应体留的是上游真实模型名。刻意取舍：失控流（缺 `[DONE]`、无限增长的 `<think>`）继续攒内存、或对超大 body 强行 splice，都比「这一条响应模型名没改写」更糟；opaque 透传正是直连的等价行为。`respnorm` 的 `TestStream_Overflow*` 反向锁死这条降级不再经重写路径。触发面：单条响应体量到 MiB 级且带 `model` 字段——正常聊天/Agent 流量下不出现。
 - **厂商专属协议约束拒绝归 `core.ErrQuirk`，不复用 `ErrContextLimit`**：DeepSeek 思考模式要求回传 `reasoning_content`、Google 要求回传 `thought_signature` 这类「换个端点就好」的拒绝，`DefaultClassify` 归入专门的 `ErrQuirk`（切换 + 零冷却）。复用 `ErrContextLimit` 能得到相同的 failover 行为，但审计标签会说谎——这不是上下文超限。OAuth 标准错误码同理独立归 `ErrAuth`。此前三类都落进兜底 `ErrClient`（永不 failover）而中断重试。全量端点级 quirk 模块方向见 §2.48。
 - **`/status` 端点项刻意不加端点级累计计数器（requests / ok / failed / tokens）**：`consecutive_failures` 出现在 `/status` 因为它是**当前健康状态**读数（liveness 视图）。端点级累计账是**分析半区**职责——`internal/report` 的 `EndpointRow`（Attempts/OK/Forwarded/Failed/Availability/ErrorClasses/tokens/cost，含 by-date 与 cross-date）已完整产出，数据源是可持久化、可按时间切片的审计日志。给 `/status` 塞一份进程内、重启即失的实时副本：① 与分析半区双账本（正是「一个分析数字复现一个路由数字必须差分测试锁定」要防的负担）；② 做全（4–8 个计数器 × N 端点）等于给 `router.Telemetry` 加一张按端点的动态 map，破坏它「全固定原子、热路径零 map 零锁」的设计。
 - **审计响应方向上游原始 Body 不单独落盘（改动由 `norm`/`raw_pre_strip`/`observed_model` 精确记录）**：为大幅节约磁盘占用（避免在长文本与 Agent 多轮交互中为每请求存储两份几乎完全相同的全量响应体），`audit.Attempt` 响应方向默认不存储上游原始 Body（`Body` 为空），而由 `Client.Response.Body` 统一记录交付给客户端的响应体。上游与客户端之间的所有改动（虚拟模型名改写、MiniMax `<think>` 标签剥离、思考过程剥离等）均由 `Attempt` 的 `Norm`（改写步骤列表）、`RawPreStrip`（发生剥离前的原始未改写片段）以及 `ObservedModel`（上游实际返回的模型名）精确记录，足以完整复现与审计上游真实响应。
@@ -265,10 +266,12 @@
 - **现状**：`respnorm` 现在按 SSE 事件分别记录 in/out 两侧的 usage 是否见过（截断流不再把占位 `output_tokens≈1` 当精确值计费）。侧别判定依赖事件里的 `"type":"message_start"` 标记——含该标记的事件只记 in 侧。
 - **边界**：不吐这个标记的 anthropic 兼容网关退回通用判定（占位 Out=1 记为 out 侧见过），即该形态下回到修复前的行为。刻意 fail-open：宁可退回旧行为，也不因为识别不出网关方言就把整条流判成无 usage。
 
-#### 2.65 [低，登记待触发] 依赖 anthropic-messages `is_error` 标记的信号从未在真实语料上被执行
+#### 2.65 [低] `story` 侧 `isErrorMarker` 是 `chatmsg` 渲染字面量的无守卫跨包硬编码副本，且这批信号从未在真实语料上执行
 
-- **现状**：决策脊柱的 tool-result ❌ 徽章、`error_retry_unadapted` / `error_then_unverified_success` / `error_recovery_count` 等检测器、Context Rot 错误率、N-gram 尾步错误率，全部只在 Anthropic Messages 协议的 `is_error` 工具结果标记存在时才会填充（`internal/story/findings_toolresult.go` 等）。当前用于生成全形态样例报告与 Phase 1b 校准的语料 **0.0% 是 anthropic-messages**——`vmr-story-corpus.md` 顶部盲区声明已如实标注「命中率为 0 代表『测不出来』，不代表『检查过没问题』」，但这批信号至今没有一次在真实流量上执行过，正确性只有单测背书。
-- **触发条件**：任意一次 `vmr analyze` 的语料出现非零 anthropic-messages 占比，即可用真实数据核验这些检测器的命中/误报行为；在此之前，需专门准备一批 anthropic-messages 语料（真实或构造）才能推进，属独立任务。
+- **现状**：`internal/story/metrics.go` 定义 `const isErrorMarker = "❌ is_error"`，是 `chatmsg` 把 anthropic-messages `is_error` 工具结果渲染成人读文本时嵌入的那段字面量（`chatmsg.RenderPart`，`internal/chatmsg/messages.go`）的子串副本。`story` 有 7 处靠 `strings.Contains(ev.Msg.Text, isErrorMarker)` 判「这是个错误工具结果」：决策脊柱 ❌ 徽章、`error_retry_unadapted` / `error_then_unverified_success` / `error_recovery_count`（`internal/story/findings_toolresult.go` 等）、Context Rot 错误率、N-gram 尾步错误率、一个 LLM finding 的证据裁剪。**耦合无守卫**：`chatmsg` 侧没有任何测试断言 `RenderPart` 对 `is_error` 结果的输出含这个串，`story` 侧相关测试又全部用 `isErrorMarker` 常量自造事件、不经 `chatmsg` 真实渲染——`chatmsg` 一旦改这段文案（换 emoji、去前导空格、本地化），7 处会静默全部失配，没有一个测试会红。
+- **叠加盲区**：当前用于全形态样例与 Phase 1b 校准的语料 **0.0% 是 anthropic-messages**（`vmr-story-corpus.md` 顶部盲区声明：「命中率为 0 代表『测不出来』，不代表『检查过没问题』」），这批信号至今没在真实流量上执行过一次。耦合可能断裂 + 零真实覆盖叠加 = 「看起来在跑、其实测不出对错」。
+- **可能方案**：`chatmsg` 导出这个标记常量供 `story` 引用同一份定义；或加一对钉死测试（`chatmsg` 侧断言 `RenderPart` 对 `is_error` 结果的输出、`story` 侧断言 `isErrorMarker` 是其子串），把跨包耦合锁住。
+- **触发条件**：改 `chatmsg` 的工具结果渲染文案时必查此条；或任意一次 `vmr analyze` 的语料出现非零 anthropic-messages 占比（届时可用真实数据核验命中/误报）。
 
 #### 2.68 [低，登记待触发] crosscheck 夹具没有 body-sniffed 的 compaction 记录，字节一致性靠指纹机制间接保证
 
@@ -281,6 +284,20 @@
 - **可能方案**：join 前对 `rf.TS` 与 `ri.TS` 做阈值校验（如差 > 1s 记 warning 并跳过 join）。
 - **触发条件**：出现「对已归档日志做手工编辑」的运维形态，或用户报告无法解释的指标错乱。在那之前这是加固项，不是缺陷。
 
+#### 2.83 [低] `story` 逐步事实的前缀复用假设 `LeadSys` 跨步不变，系统提示词中途变化时 `RealUsers` 索引错位
+
+- **现状**：`internal/story/journey_stepfacts.go` 的 `computeRU` 为省重解析，对 `k < deltaStart` 的消息索引直接复用上一步的 `s.prevRu[k]`（`taskseg.RealUsers`，按消息索引 key）。`deltaStart = LeadSys + LCP`（`internal/story/journey.go`），含**当前步**的前导系统块长度。`stepFactState` 没有 `prevLeadSys`，不比较 `LeadSys` 是否跨步变了——系统提示词中途增删（`step.SysChanged`）会让同一条对话消息在前后两步落在不同绝对索引上，而复用把 `prevRu[k]` 原样搬到新 `ru[k]`，复用段的「真实用户消息」判定整体错位。
+- **影响面**：`RealUsers` 喂任务边界检测（`taskseg.HasNewInstruction` / `taskseg.LastInstruction`）与上下文曲线的角色占比。错位后可能把某步的新指令归错步、或角色占比偏移。当前样例语料里系统提示词中途变化的 journey 少，未见明显失真。
+- **可能方案**：`computeRU` 的复用分支加 `!step.SysChanged` 门；或存 `prevLeadSys`，变了就整段重算。
+- **触发条件**：出现系统提示词在单个 journey 中途变化、且该 journey 的任务边界 / 上下文曲线被重点解读时。
+
+#### 2.84 [低] `tagSummary` 的输出 token 合计门控在输入侧 `UsageInOK` 上，分侧 usage 不对称时口径偏移
+
+- **现状**：`internal/report/requests.go` 的 `tagSummary` 逐 tag 汇总里，`s.out += r.TokensOut` 与 `s.fresh` / `s.cached` / `tokensKnown` 一起包在 `if r.UsageInOK` 块内。按分侧口径这是跨侧耦合：`UsageInOK == false` 但 `UsageOutOK == true` 的请求，其真实输出 token 被漏出合计；`UsageInOK == true` 但 `UsageOutOK == false` 的请求，其 `TokensOut`（降级估算或 0）仍被计入。`RequestRow` 现已带 `UsageOutOK` 字段，分侧判据齐了，只是 `tagSummary` 没按它拆。
+- **影响面**：仅 tag 级摘要行的输出 token 数与缓存效率分母；主表逐行数值不受影响。分侧 usage 不对称的请求在真实语料里占少数，偏移量小。
+- **可能方案**：`s.out` 的累加改门控在 `r.UsageOutOK`；或显式接受「`tagSummary` 以输入侧已知为准」并在注释里写死理由。属 `tagSummary` 分侧聚合的一次小重构。
+- **触发条件**：tag 级摘要被用于精确的吞吐 / 成本核对；或分侧 usage 口径做统一收口时一并处理。
+
 
 ### C. 分析半区 · LLM 解读层校准
 
@@ -288,6 +305,13 @@
 
 - **现状**：`internal/story/llm_findings.go` 六个判别器已实现、单测覆盖、且用 `_eval/calibrate_p1b.go` 对真实生产日志跑过真实模型验证（6 个真实 Journey 上机械核验 Evidence Anchor 有效率 100%，人工抽查合理）。但不是正式合入门禁——那需 30~50 个 Journey、每模块 ≥6 正/负例的系统性黄金样本集 + 人工标注 Ground Truth 算真实 Precision/Recall。
 - **为什么待定**：黄金样本挑选与人工标注是需实际投入时间的判断性工作，无法自动化；当前抽样规模下无需立即处理的误报模式，不构成阻塞。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力时间，不在代码**。
+
+#### 2.82 [低] Phase 1b LLM findings 六个 detector 串行执行，无总时间预算、无部分失败降级
+
+- **现状**：`internal/story/llm_findings.go` 的 `ComputeLLMFindings` 串行调用 6 个 detector，每个内部做 1 次 `Interpret`（`internal/story/llm.go`，`http.Client` 的 `Timeout` 即 `llmHTTPTimeout`，单次 120s）。`cmd/vmr/cmd_story.go` 传 `context.Background()`，全程无 deadline。慢或无响应的 `-llm-addr` 下最坏 6×120s ≈ 12min/journey（多 journey 累加），期间无进度反馈，也没有「先出已完成的、丢没跑完的」降级——detector 出错只是各自返回空，静默少几条 finding。
+- **不是 §2.18**：那条是黄金样本校准（判别质量），这条是执行编排（挂多久、失败怎么办），两者正交。
+- **可能方案**：给整个 `ComputeLLMFindings` 一个 `context.WithTimeout` 总预算；或 6 个 detector 并发跑（`Interpret` 是纯 HTTP 调用，天然可并行）并对未完成项显式标注「本次跳过」。
+- **触发条件**：用户实际用了慢的或不可达的 `-llm-addr` 并报告 `vmr analyze` 长时间无输出；或 journey 批量大到累加时长不可接受。
 
 
 ### D. 分析半区 · 展示与产出契约
@@ -335,18 +359,26 @@
 - **可能方案**：指纹加 Profile 名，一行；或维持现状并依赖「渲染输出变了指纹必须跟着变」的 review 纪律。
 - **触发条件**：任何 Profile 差异开始影响详单字节。在那之前是登记，不是缺陷。
 
-#### 2.72 [低] `FileNameForRecord` 与 `FileNameForManifest` 的 `realModel` 来源不同，同一记录可能产生两个文件名
+#### 2.72 [低] `FileNameForRecord` 与 `FileNameForManifest` 对同一记录的 realModel 取法不同，provider 名含 `:` 时产生两个文件名
 
-- **现状**：两个命名入口对 `realModel` 的取源不一致（一个取 Attempt 上报值、一个取 Manifest），Attempt 未上报 upstream model 的记录两条路径产出不同坐标哈希，`details/` 里可能出现同记录双页。
-- **当前缓解**：UpstreamModel 仅在与请求名不同时才记录（绝大多数记录不携带），实际触发面极窄；文件名仅是坐标容器，内容仍各自正确。
-- **可能方案**：统一取源（以 audit Attempt 为准），或在文件名冲突检测中兼容双坐标。
-- **触发条件**：实际观察到 `details/` 出现同记录双页，或文件名要做外部契约。
+- **现状**：`FileNameForRecord` 经 `reqdetail.RealModel` → `reqdetail.AttemptUpstream` 取**最后一次 attempt 的结构化 `Model` 字段**；`FileNameForManifest` 只有 Manifest 在手，用 `core.SplitEndpointLabel` 从端点标签（`protocol:provider:model`）里切第三段。标签由 `core.EndpointLabel` 拼成、`SplitEndpointLabel` 用 `SplitN(":", 3)` 切——**provider 名里有 `:`**（config 不禁止）时第三段会把 provider 尾巴带进来，两条路径于是得到不同的 realModel，`details/` 里同一记录出现文件名不同的两页（末尾坐标哈希仍相同，分叉的只是文件名里那段装饰性 model）。
+- **不是**：早先写的「Attempt 未上报 upstream model 的记录」——那种情形 `AttemptUpstream` 回退用的恰恰就是 `SplitEndpointLabel`，两条路径反而一致。分叉只发生在结构化 `Model` 已上报（新日志恒成立）且标签里 provider/protocol 段含 `:` 时。
+- **当前缓解**：provider 名基本不会带冒号，实际触发面极窄；文件名只是坐标容器，末段哈希仍唯一，两页内容各自正确。
+- **可能方案**：两处统一以 attempt 结构化字段为准；或 config 加载期拒绝 provider 名里的 `:`（在源头消灭比在命名层兼容简单）。
+- **触发条件**：真观察到 `details/` 同记录双页，或文件名要做外部契约。
 
 #### 2.73 [低-中，暂不做] LLM 自由文本的 `<`/`>` 未净化即进 `.md` 产物
 
 - **现状**：`sanitizeMDStruct`（`story/llm.go`）只处理 Markdown **结构**破坏（反引号/竖线/行首标记），不处理 `<`/`>`。LLM 判别器输出的类 HTML 片段会原样进入 `.md` 文件。
 - **为什么暂不做**：产物是本地文件，不是 web 渲染面（HTML 侧转义已由 `mdlite` 全量覆盖，`<script>` 进不去）；Markdown 阅读器对裸 `<...>` 的降级仅是显示瑕疵。
 - **触发条件**：产物开始被 web 化渲染，或出现把 `.md` 直接转 HTML 的新消费方——届时在转换层做 HTML 转义，而不是提前在数据层碰文本。
+
+#### 2.81 [低] journey 展示层的行为指标清单在 md 与 html 两处各手抄一份，已彼此漂移
+
+- **现状**：`internal/story/compare_metrics.go` 的 `metricSpecs` 注释自称「唯一权威」的指标清单，但只有 `-compare` 用它。单个 journey 报告的行为指标区：md 侧 `renderBehaviorIndicators`（`internal/story/render_indicators.go`）与 html 侧 `htmlMetrics`（`internal/story/render_html_dashboard.go`）各自把指标一行行手写，既不走 `metricSpecs` 也不互相共享。两份手抄已经漂移——md 渲染的指标集合里有 html 没渲染的项（如 human idle time、model/tool 比、compaction 损耗）。
+- **影响**：同一个 journey 的 md 报告和 html 看板给出的行为指标不是同一组，读者对照两边会发现对不上；加新指标要记得改多个地方，漏一个不会有测试红。
+- **可能方案**：md/html 两处都改成遍历 `metricSpecs`（或一个共享的 spec 列表）渲染，差异只留在「怎么显示」不留在「显示哪些」。注意 `archtest` 的 per-function 行预算。
+- **触发条件**：随时可做；本质是展示契约一致性。真要动时先对齐两份的当前差集。
 
 
 ### E. 分析半区 · 新能力（视图 / 导出 / 信号）

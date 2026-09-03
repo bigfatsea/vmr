@@ -117,7 +117,11 @@ root allowed to see both halves at once.
   test, not a comment.** Sharing the formula is only half of it; the *basis* is chosen
   independently on each side, and a wrong basis reads exactly like a right one. See
   `cmd/vmr/quota_parity_test.go` — the router side must call the router's own exported
-  entry points, never restate their formulas.
+  entry points, never restate their formulas. And when the routing half can stamp the basis
+  as a fact where it acts — a field on the audit record — record it instead of having the
+  analytics half reverse-derive it: the differential test pins the formula, the recorded
+  field pins the basis. `Attempt.IsForwarded` is the pattern — a stamped `forwarded` is
+  authoritative, the pre-field heuristic only a fallback.
 - **No provider SDKs**, and **compile-time plugin registration only** (blank import) — never
   a runtime plugin system.
 - **Config is strict YAML** (`KnownFields`): unknown keys are load errors, not warnings.
