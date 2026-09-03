@@ -438,9 +438,23 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			if !atStitchBoundary && i > 0 {
 				deltaStart = m.LeadSys + l.Edges[i-1].LCP
 			}
+
+			// prevManifest is needed BOTH for sysChanged (gate on
+			// computeRU prefix-reuse; a mid-journey system prompt
+			// insertion/deletion shifts every absolute message index) and
+			// for buildStep below. Resolve it here, up front, so the
+			// SysChanged gate can travel with the parseManifestBodyIncremental
+			// call rather than recomputing after the fact.
+			prevManifest := stepPredecessorManifest(chain, ci, i, atStitchBoundary)
+			sysChanged := manifestSysChanged(m, prevManifest)
+
 			// ru is built incrementally across steps in the same lineage,
 			// reusing prefix real-user text from prior steps up to deltaStart.
-			msgs, rawMsgs, off, ru := parseManifestBodyIncremental(rec, prof, deltaStart, &factState)
+			// Gating prefix reuse on sysChanged + curLeadSys equality is
+			// what stops a mid-journey system prompt that grows/shrinks
+			// from silently re-aligning real-user boundaries to the wrong
+			// absolute indices.
+			msgs, rawMsgs, off, ru := parseManifestBodyIncremental(rec, prof, deltaStart, m.LeadSys, sysChanged, &factState)
 			if !firstRuSet {
 				firstRu, firstRuSet = ru, true
 				j.InitialInstruction = firstRealInstruction(prof, msgs, rawMsgs, off)
@@ -449,7 +463,6 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			var edge *ctxgraph.Edit
 			var stitchEdge *ctxgraph.StitchEdge
 			var compaction *CompactionInfo
-			var prevManifest *ctxgraph.Manifest
 			// stepPrevManifest becomes Step.PrevManifest — unlike
 			// prevManifest above (which sysChanged/buildCompactionInfo
 			// legitimately want compared across a stitch boundary too),
@@ -465,13 +478,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			// matches taskseg.IsNewTask's "new instruction or new trace"
 			// rule instead of inflating len(j.Tasks) with every compaction
 			// (B9).
-			newTask := ci == 0 && i == 0
-			// Default: true only for the Journey's very first step (every
-			// Journey opens on a real instruction, by construction). Both
-			// branches below override this for their
-			// own cases; a plain tool-loop continuation (neither branch
-			// fires) correctly stays false.
-			humanInitiated := ci == 0 && i == 0
+			newTask, humanInitiated := stepBoundaryFlags(ci, i)
 			// instr becomes Step.Instruction — stays "" for the Journey's
 			// first step and at a stitch boundary (both cases' instruction
 			// is already shown via the Task title, see Step.Instruction's
@@ -480,15 +487,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 
 			switch {
 			case atStitchBoundary:
-				stitchEdge = l.Stitch.Edge
-				predLineage := chain[ci-1]
-				prevManifest = predLineage.Manifests[len(predLineage.Manifests)-1]
-				if predRec := recs[ctxgraph.Loc{Path: prevManifest.Path, Line: prevManifest.Line}]; predRec != nil {
-					compaction = buildCompactionInfo(predRec, prevManifest, m, msgs)
-				}
-				if newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen) != "" {
-					newTask = true // a real new instruction bridged the stitch — see B9 note above
-				}
+				stitchEdge, compaction, newTask = applyStitchBoundary(l, recs, prevManifest, m, msgs, rawMsgs, off, ru, seen)
 				// deltaStart stays 0: Classify's structural LCP has no
 				// meaning across a stitch boundary, so the whole manifest
 				// is scanned — the global seen-hash dedup below (not a
@@ -498,9 +497,10 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				edge, deltaStart, prevManifest, newTask, humanInitiated, instr, revisesHash =
 					stepContinuation(l, i, m, ru, msgs, prevNoReply)
 				stepPrevManifest = prevManifest
+				// stepContinuation re-resolves prevManifest to the actual
+				// content-predecessor; recompute against it for accuracy.
+				sysChanged = manifestSysChanged(m, prevManifest)
 			}
-			sysChanged := prevManifest != nil &&
-				(m.HasSys != prevManifest.HasSys || (m.HasSys && prevManifest.HasSys && m.SysHash != prevManifest.SysHash))
 
 			if newTask || curTask == nil {
 				var title string

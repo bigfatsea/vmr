@@ -45,6 +45,15 @@ type Message struct {
 // shape, not agent-dialect knowledge.
 const NewUserWindow = 8
 
+// ErrorResultMarker is the literal text RenderPart embeds for an Anthropic
+// tool_result content block whose `is_error` field is true. Exported so
+// downstream consumers (internal/story) that scan rendered message text for
+// the marker reference this single source of truth instead of keeping an
+// unguarded hardcoded copy that silently desynchronizes the moment the
+// wording changes. The marker has no leading separator — callers compose
+// it into surrounding text with their own spacing (e.g. " ❌ is_error\n").
+const ErrorResultMarker = "❌ is_error"
+
 // RenderContent flattens a message "content" value (string, or a list of
 // typed parts in either protocol's shape) into display text. Base64 images
 // become placeholders — never dumped.
@@ -121,7 +130,7 @@ func RenderPart(m map[string]any) string {
 		id, _ := m["tool_use_id"].(string)
 		status := ""
 		if isErr, _ := m["is_error"].(bool); isErr {
-			status = " ❌ is_error"
+			status = " " + ErrorResultMarker
 		}
 		return fmt.Sprintf("↩️ tool_result (id=%s)%s\n%s", id, status, RenderContent(m["content"]))
 	default:

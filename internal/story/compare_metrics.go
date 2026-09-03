@@ -2,6 +2,14 @@
 
 package story
 
+import (
+	"fmt"
+	"strconv"
+	"time"
+
+	"vmr/internal/fmtutil"
+)
+
 // MetricKind tags how a MetricDiff's A/B/values should be rendered — kept as
 // a string tag (not a formatting closure) so Comparison stays a plain,
 // JSON-serializable value.
@@ -134,4 +142,75 @@ func abs(f float64) float64 {
 		return -f
 	}
 	return f
+}
+
+// journeyMetric is one single-journey behavior-indicator row — the same
+// metric universe as metricSpecs above, plus the journey-view formatting
+// rule. renderBehaviorIndicators (Markdown) and htmlMetrics (HTML) both
+// iterate this one slice, so the two formats can never again disagree about
+// WHICH metrics a journey view shows (§2.81): the difference between them
+// is only how one row is rendered, never which rows exist. Label is NOT
+// stored here — i18n.MetricLabel resolves it, the same single source
+// Compare uses.
+type journeyMetric struct {
+	Code  MetricCode
+	Value func(Metrics) float64
+	// Format renders one row's value. It receives the whole Metrics rather
+	// than just the extracted scalar because two rows' display rules depend
+	// on context the scalar doesn't carry: ModelToolRatio renders "—" when
+	// AgentExecMS is 0 (no agent-side gap was observed anywhere, so 0.00×
+	// would read as a measurement rather than an absence), and
+	// ErrorRecoveryCount renders "n/a" for a non-Anthropic journey with
+	// zero recoveries (the is_error marker it counts has no OpenAI
+	// equivalent — see Metrics.ErrorRecoveryCount's doc comment).
+	Format func(m Metrics, v float64, nonAnthropic bool) string
+}
+
+// journeyMetrics' order is both renderers' row order — fixed, not sorted by
+// magnitude, so the same Journey renders byte-identically run to run.
+var journeyMetrics = []journeyMetric{
+	{MetricNetWorkingMS, func(m Metrics) float64 { return float64(m.NetWorkingMS) }, fmtJourneyMillis},
+	{MetricModelMS, func(m Metrics) float64 { return float64(m.ModelMS) }, fmtJourneyMillis},
+	{MetricAgentExecMS, func(m Metrics) float64 { return float64(m.AgentExecMS) }, fmtJourneyMillis},
+	{MetricHumanIdleMS, func(m Metrics) float64 { return float64(m.HumanIdleMS) }, fmtJourneyMillis},
+	{MetricModelToolRatio, func(m Metrics) float64 { return m.ModelToToolRatio }, fmtJourneyModelToolRatio},
+	{MetricToolCallCount, func(m Metrics) float64 { return float64(m.ToolCallCount) }, fmtJourneyCount},
+	{MetricDuplicateActionRate, func(m Metrics) float64 { return m.DuplicateActionRate }, fmtJourneyPct},
+	{MetricOutputRepetitionRate, func(m Metrics) float64 { return m.OutputRepetitionRate }, fmtJourneyPct},
+	{MetricErrorRecoveryCount, func(m Metrics) float64 { return float64(m.ErrorRecoveryCount) }, fmtJourneyErrorRecovery},
+	{MetricPlanExecRatio, func(m Metrics) float64 { return m.PlanExecRatio }, fmtJourneyPct},
+	{MetricContextUtilization, func(m Metrics) float64 { return m.ContextUtilization }, fmtJourneyPct},
+	{MetricCompactionCount, func(m Metrics) float64 { return float64(m.CompactionCount) }, fmtJourneyCount},
+	{MetricCompactionLossTokens, func(m Metrics) float64 { return float64(m.CompactionLossTokens) }, fmtJourneyTokens},
+	{MetricModelSwitchCount, func(m Metrics) float64 { return float64(len(m.ModelSwitches)) }, fmtJourneyCount},
+}
+
+func fmtJourneyMillis(_ Metrics, v float64, _ bool) string {
+	return fmtutil.FmtSeconds(time.Duration(int64(v))*time.Millisecond, 1)
+}
+
+func fmtJourneyCount(_ Metrics, v float64, _ bool) string {
+	return strconv.Itoa(int(v))
+}
+
+func fmtJourneyPct(_ Metrics, v float64, _ bool) string {
+	return pctStr(v)
+}
+
+func fmtJourneyTokens(_ Metrics, v float64, _ bool) string {
+	return fmtutil.FmtTokens(int64(v))
+}
+
+func fmtJourneyModelToolRatio(m Metrics, v float64, _ bool) string {
+	if m.AgentExecMS == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.2f×", v)
+}
+
+func fmtJourneyErrorRecovery(_ Metrics, v float64, nonAnthropic bool) string {
+	if nonAnthropic && int(v) == 0 {
+		return "n/a"
+	}
+	return strconv.Itoa(int(v))
 }

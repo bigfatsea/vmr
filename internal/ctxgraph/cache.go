@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // CacheSchemaVersion gates every CachedFile's freshness alongside its
@@ -242,6 +243,19 @@ func LoadCacheDir(dir string) *FileCache {
 		return nil
 	}
 	fc := &FileCache{Files: map[string]CachedFile{}}
+	// Orphan-shard tie-breaker: shards are content-addressed by Hash, so
+	// an audit-log append changes the canonical-path hash and writes a
+	// fresh shard, while the old shard is deliberately not GC'd (see
+	// SaveCacheDir's comment). When two shards share a CanonicalPath
+	// (same audit file, different hashes), os.ReadDir returns them in
+	// filename (= hash) lexicographic order; a later-sorted stale shard
+	// would overwrite the fresh one in fc.Files and produce a phantom
+	// cache miss on the next scan (~50% probability, see NOTES_FOR_LEAD).
+	// Keep the shard with the newer mtime — the audit log is append-only,
+	// so the most recently written shard encodes the current content hash.
+	// When Info() errors or mtimes are equal, fall back to last-writer
+	// wins (the existing ReadDir order) rather than skipping the entry.
+	seenMTime := map[string]time.Time{}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -253,6 +267,16 @@ func LoadCacheDir(dir string) *FileCache {
 		var cf CachedFile
 		if err := json.Unmarshal(data, &cf); err != nil || cf.CanonicalPath == "" {
 			continue
+		}
+		if existing, ok := fc.Files[cf.CanonicalPath]; ok {
+			mtNew := seenMTime[cf.CanonicalPath]
+			if info, err := e.Info(); err == nil {
+				mtNew = info.ModTime()
+			}
+			if info, err := os.Stat(filepath.Join(dir, existing.Hash+".json")); err == nil && info.ModTime().After(mtNew) {
+				continue // existing shard is newer; keep it
+			}
+			seenMTime[cf.CanonicalPath] = mtNew
 		}
 		fc.Files[cf.CanonicalPath] = cf
 	}

@@ -201,13 +201,23 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 // tagSummaryData is the one-line blockquote's basis: request count, success
 // rate, fresh/cached/out tokens, and cache efficiency over one group's rows.
 type tagSummaryData struct {
-	requests    int
-	ok          int
-	fresh       int64
-	cached      int64
-	out         int64
-	cacheEff    float64
-	tokensKnown int
+	requests int
+	ok       int
+	fresh    int64
+	cached   int64
+	out      int64
+	cacheEff float64
+	// inKnown is the count of rows where UsageInOK was true (the input-side
+	// token totals are measured, not estimated). outKnown is the analogous
+	// count for UsageOutOK. The two can diverge per-row: a partial
+	// usage block (e.g. OpenAI stream that streamed TokensOut but lost the
+	// cached_tokens field on the final usage event) is inKnown=false but
+	// outKnown=true, or vice versa. Splitting them is what stops the old
+	// shared `tokensKnown` gate from silently including an estimated
+	// TokensOut in the output-token sum while excluding a measured one
+	// (or the mirror) — §2.84.
+	inKnown  int
+	outKnown int
 }
 
 func tagSummary(rows []RequestRow) tagSummaryData {
@@ -220,11 +230,14 @@ func tagSummary(rows []RequestRow) tagSummaryData {
 		if r.UsageInOK {
 			s.fresh += r.TokensInFresh
 			s.cached += r.TokensInCached
+			s.inKnown++
+		}
+		if r.UsageOutOK {
 			s.out += r.TokensOut
-			s.tokensKnown++
+			s.outKnown++
 		}
 	}
-	if s.tokensKnown > 0 {
+	if s.inKnown > 0 {
 		s.cacheEff = cacheEff(s.cached, s.fresh)
 	}
 	return s

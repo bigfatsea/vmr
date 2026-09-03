@@ -619,13 +619,7 @@ func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	if !opts.Enabled() {
 		return nil, nil
 	}
-	var raw []Finding
-	raw = append(raw, detectLLMToolResultMisinterpretation(ctx, j, opts, lang)...)
-	raw = append(raw, detectLLMSemanticOscillation(ctx, j, opts, lang)...)
-	raw = append(raw, detectLLMGoalDrift(ctx, j, opts, lang)...)
-	raw = append(raw, detectLLMConstraintDropped(ctx, j, opts, lang)...)
-	raw = append(raw, detectLLMPlanMisalignment(ctx, j, opts, lang)...)
-	raw = append(raw, detectLLMUnverifiedCompletionClaim(ctx, j, opts, lang)...)
+	raw := runDetectorsConcurrently(ctx, j, opts, lang)
 
 	var out []Finding
 	if len(raw) > 0 {

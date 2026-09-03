@@ -21,18 +21,18 @@
 |---|---|
 | Net Working Time | 10.2s |
 | Model Time | 9.7s |
-| Agent Execution Time | 0.5s |
+| Agent-Side Execution Time | 0.5s |
 | Human Idle Time | 0.8s |
-| Model-to-Tool Ratio | 19.40× |
+| Model/Tool Time Ratio | 19.40× |
 | Tool Call Count | 0 |
 | Duplicate Action Rate | 0% |
 | Output Repetition Rate | 2% |
 | Error Recovery Count | n/a |
-| Plan-to-Execution Ratio | 100% |
+| Plan/Execution Ratio | 100% |
 | Context Utilization | 0% |
 | Compaction Count | 0 |
-| Compaction Loss Tokens | 0 |
-| Model Switches | 0 |
+| Compaction Information Loss | 0 |
+| Model Switch Count | 0 |
 
 **Context Token Trajectory**: ` ▅█` (start 11 tok → end 81 tok)
 

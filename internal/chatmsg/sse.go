@@ -27,6 +27,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 	s := &StreamSummary{}
 	var reasoning, content strings.Builder
 	tools := map[int]*ToolCall{}
+	argBuilders := map[int]*strings.Builder{}
 	parsed := 0
 	rem := raw
 	for len(rem) > 0 {
@@ -52,7 +53,7 @@ func ReassembleSSE(raw string) *StreamSummary {
 			continue
 		}
 		parsed++
-		processSSEEvent(obj, s, &content, &reasoning, tools)
+		processSSEEvent(obj, s, &content, &reasoning, tools, argBuilders)
 	}
 	if parsed == 0 {
 		return nil
@@ -64,12 +65,16 @@ func ReassembleSSE(raw string) *StreamSummary {
 	}
 	sort.Ints(idxs)
 	for _, i := range idxs {
-		s.ToolCalls = append(s.ToolCalls, *tools[i])
+		tc := *tools[i]
+		if b := argBuilders[i]; b != nil {
+			tc.Args = b.String()
+		}
+		s.ToolCalls = append(s.ToolCalls, tc)
 	}
 	return s
 }
 
-func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *strings.Builder, tools map[int]*ToolCall) {
+func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *strings.Builder, tools map[int]*ToolCall, argBuilders map[int]*strings.Builder) {
 	if m, _ := obj["model"].(string); m != "" {
 		s.Model = m
 	}
@@ -98,7 +103,14 @@ func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *s
 			if raw.name != "" {
 				tc.Name = raw.name
 			}
-			tc.Args += raw.args
+			if raw.args != "" {
+				b := argBuilders[raw.idx]
+				if b == nil {
+					b = &strings.Builder{}
+					argBuilders[raw.idx] = b
+				}
+				b.WriteString(raw.args)
+			}
 		}
 		return
 	}
@@ -114,6 +126,9 @@ func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *s
 			name, _ := cb["name"].(string)
 			id, _ := cb["id"].(string)
 			tools[idx] = &ToolCall{ID: id, Name: name}
+			if _, ok := argBuilders[idx]; !ok {
+				argBuilders[idx] = &strings.Builder{}
+			}
 		}
 	case "content_block_delta":
 		idx := int(num(obj["index"]))
@@ -126,8 +141,13 @@ func processSSEEvent(obj map[string]any, s *StreamSummary, content, reasoning *s
 			reasoning.WriteString(t)
 		case "input_json_delta":
 			t, _ := d["partial_json"].(string)
-			if tc := tools[idx]; tc != nil {
-				tc.Args += t
+			if t != "" {
+				b := argBuilders[idx]
+				if b == nil {
+					b = &strings.Builder{}
+					argBuilders[idx] = b
+				}
+				b.WriteString(t)
 			}
 		}
 	case "message_delta":

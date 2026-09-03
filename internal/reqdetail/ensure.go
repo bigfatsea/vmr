@@ -75,7 +75,7 @@ func EnsureRendered(dir string, rec *audit.Record, path string, line int, m, pre
 	if err != nil {
 		return "", err
 	}
-	if got == renderFingerprint(lang, linkEvidence, m, prev) {
+	if got == renderFingerprint(lang, linkEvidence, m, prev, prof) {
 		return filename, nil
 	}
 

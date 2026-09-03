@@ -34,12 +34,12 @@ func parseManifestBody(rec *audit.Record, prof taskseg.Profile) (msgs []chatmsg.
 	return
 }
 
-func parseManifestBodyIncremental(rec *audit.Record, prof taskseg.Profile, deltaStart int, state *stepFactState) (msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers) {
+func parseManifestBodyIncremental(rec *audit.Record, prof taskseg.Profile, deltaStart, curLeadSys int, sysChanged bool, state *stepFactState) (msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers) {
 	body, _ := rec.Client.Request.Body.(map[string]any)
 	msgs = chatmsg.Messages(body)
 	rawMsgs = chatmsg.RawArray(body)
 	off = chatmsg.MsgOffset(body)
-	ru = state.computeRU(prof, msgs, rawMsgs, off, deltaStart)
+	ru = state.computeRU(prof, msgs, rawMsgs, off, deltaStart, curLeadSys, sysChanged)
 	return
 }
 
@@ -111,17 +111,24 @@ type roleTokens struct {
 
 // stepFactState maintains incremental extraction state across steps in a
 // lineage to avoid repeating O(N^2) token estimation and real-user parsing
-// over unedited message history prefixes.
+// over unedited message history prefixes. prevLeadSys is the previous
+// step's leading-system-message count; computeRU compares it to the
+// current step's curLeadSys and gates prefix reuse on equality — a
+// mid-journey system prompt that grows/shrinks shifts every absolute
+// message index, so reusing the prior prefix verbatim would mis-classify
+// real-user boundaries and silently inflate HasNewInstruction hits.
 type stepFactState struct {
 	prevRu       taskseg.RealUsers
 	prevTokens   []roleTokens
 	prevSysChars int
+	prevLeadSys  int
 }
 
-func (s *stepFactState) computeRU(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart int) taskseg.RealUsers {
-	if deltaStart <= 0 || len(s.prevRu) == 0 {
+func (s *stepFactState) computeRU(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs []any, off, deltaStart, curLeadSys int, sysChanged bool) taskseg.RealUsers {
+	if deltaStart <= 0 || len(s.prevRu) == 0 || sysChanged || curLeadSys != s.prevLeadSys {
 		ru := taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
 		s.prevRu = ru
+		s.prevLeadSys = curLeadSys
 		return ru
 	}
 	ru := make(taskseg.RealUsers, len(s.prevRu)+(len(msgs)-deltaStart))
@@ -140,6 +147,7 @@ func (s *stepFactState) computeRU(prof taskseg.Profile, msgs []chatmsg.Message, 
 		}
 	}
 	s.prevRu = ru
+	s.prevLeadSys = curLeadSys
 	return ru
 }
 
@@ -232,4 +240,57 @@ func firstRealInstruction(prof taskseg.Profile, msgs []chatmsg.Message, rawMsgs 
 		}
 	}
 	return ""
+}
+
+// stepPredecessorManifest resolves the manifest the current step (chain[ci],
+// position i) is measured against: across a stitch boundary it's the
+// predecessor lineage's last manifest (buildCompactionInfo wants the
+// comparison there too), within a lineage it's the previous manifest, and
+// for the Journey's very first step there is none (nil).
+func stepPredecessorManifest(chain []*ctxgraph.Lineage, ci, i int, atStitchBoundary bool) *ctxgraph.Manifest {
+	if atStitchBoundary {
+		pred := chain[ci-1]
+		return pred.Manifests[len(pred.Manifests)-1]
+	}
+	if i > 0 {
+		return chain[ci].Manifests[i-1]
+	}
+	return nil
+}
+
+// manifestSysChanged reports whether cur's leading system block differs
+// from prev's — both the Step.SysChanged fact and the computeRU
+// prefix-reuse gate (a mid-journey system prompt insertion/deletion shifts
+// every absolute message index, so incremental real-user extraction must
+// not carry the prior prefix across it).
+func manifestSysChanged(cur, prev *ctxgraph.Manifest) bool {
+	return prev != nil &&
+		(cur.HasSys != prev.HasSys || (cur.HasSys && prev.HasSys && cur.SysHash != prev.SysHash))
+}
+
+// stepBoundaryFlags defaults the per-step task-boundary flags: only the
+// Journey's very first step starts a Task and counts as human-initiated
+// (every Journey opens on a real instruction, by construction). Both
+// branches of buildFrom's switch override these for their own cases; a
+// plain tool-loop continuation (neither branch fires) correctly stays
+// false.
+func stepBoundaryFlags(ci, i int) (newTask, humanInitiated bool) {
+	return ci == 0 && i == 0, ci == 0 && i == 0
+}
+
+// applyStitchBoundary fills the step facts that only exist at a stitch
+// boundary: the stitch edge, the compaction info measured against the
+// predecessor lineage's last record, and whether a genuinely new
+// instruction bridged the stitch — which is what makes a boundary a Task
+// boundary (B9), not the stitch itself.
+func applyStitchBoundary(l *ctxgraph.Lineage, recs map[ctxgraph.Loc]*audit.Record, prevManifest, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers, seen map[ctxgraph.Hash]*Event) (*ctxgraph.StitchEdge, *CompactionInfo, bool) {
+	stitchEdge := l.Stitch.Edge
+	var compaction *CompactionInfo
+	if predRec := recs[ctxgraph.Loc{Path: prevManifest.Path, Line: prevManifest.Line}]; predRec != nil {
+		compaction = buildCompactionInfo(predRec, prevManifest, m, msgs)
+	}
+	if newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen) != "" {
+		return stitchEdge, compaction, true
+	}
+	return stitchEdge, compaction, false
 }

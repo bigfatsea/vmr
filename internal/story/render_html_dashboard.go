@@ -9,7 +9,6 @@ package story
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
@@ -189,37 +188,21 @@ func bodyOrPlaceholder(title string, redact bool, t i18n.StoryHTMLText) string {
 
 // --- Metrics ---
 
-func htmlMetrics(w func(string, ...any), m Metrics, isNonAnthropic bool, t i18n.StoryHTMLText) {
-	var in, cached, out int64
-	for _, u := range m.ModelUsage {
-		in += u.TokensIn
-		cached += u.TokensInCached
-		out += u.TokensOut
-	}
+// htmlMetrics renders the metrics block of the journey dashboard. The row
+// set comes from journeyMetrics (compare_metrics.go) — the same slice
+// renderBehaviorIndicators (Markdown) iterates — so the two formats can
+// never drift apart about which metrics a journey view shows; this
+// function only decides how one HTML stat cell is rendered (§2.81).
+func htmlMetrics(w func(string, ...any), m Metrics, isNonAnthropic bool, lang i18n.Lang, t i18n.StoryHTMLText) {
 	stat := func(k, v string) {
 		w("<div class=\"stat\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>\n", he(k), he(v))
 	}
 
-	errRecVal := strconv.Itoa(m.ErrorRecoveryCount)
-	if isNonAnthropic && m.ErrorRecoveryCount == 0 {
-		errRecVal = "n/a"
-	}
-
 	w("<div class=\"stats\">\n")
-	stat(t.MetricNetTime, fmtutil.FmtSeconds(time.Duration(m.NetWorkingMS)*time.Millisecond, 1))
-	stat(t.MetricModelTime, fmtutil.FmtSeconds(time.Duration(m.ModelMS)*time.Millisecond, 1))
-	stat(t.MetricAgentTime, fmtutil.FmtSeconds(time.Duration(m.AgentExecMS)*time.Millisecond, 1))
-	stat(t.MetricTokensIn, fmtutil.FmtTokens(in))
-	stat(t.MetricTokensCached, fmtutil.FmtTokens(cached))
-	stat(t.MetricTokensOut, fmtutil.FmtTokens(out))
-	stat(t.MetricToolCalls, strconv.Itoa(m.ToolCallCount))
-	stat(t.MetricCompactions, strconv.Itoa(m.CompactionCount))
-	stat(t.MetricDupActionRate, pctStr(m.DuplicateActionRate))
-	stat(t.MetricOutputRepeat, pctStr(m.OutputRepetitionRate))
-	stat(t.MetricErrorRecovery, errRecVal)
-	stat(t.MetricPlanExecRatio, pctStr(m.PlanExecRatio))
-	stat(t.MetricModelSwitches, strconv.Itoa(len(m.ModelSwitches)))
-	stat(t.MetricContextUtil, pctStr(m.ContextUtilization))
+	for _, jm := range journeyMetrics {
+		v := jm.Value(m)
+		stat(i18n.MetricLabel(lang, string(jm.Code)), jm.Format(m, v, isNonAnthropic))
+	}
 	w("</div>\n")
 
 	htmlContextSparkline(w, m.ContextCurve, t)

@@ -257,3 +257,34 @@ func TestRenderPart_AnthropicDocument(t *testing.T) {
 		t.Errorf("Messages with document part: %+v", msgs)
 	}
 }
+
+// TestRenderPart_AnthropicToolResultErrorMarker pins §2.65: an anthropic
+// tool_result content block whose `is_error` field is true must render a
+// line containing chatmsg.ErrorResultMarker. The marker is the single
+// source of truth for the literal text internal/story's metrics.go scans
+// for; changing the wording here is what would otherwise silently
+// desynchronize seven downstream call sites without any test failing.
+func TestRenderPart_AnthropicToolResultErrorMarker(t *testing.T) {
+	t.Parallel()
+	part := map[string]any{
+		"type":        "tool_result",
+		"tool_use_id": "tu1",
+		"is_error":    true,
+		"content":     "the tool blew up",
+	}
+	got := RenderPart(part)
+	if !strings.Contains(got, ErrorResultMarker) {
+		t.Errorf("RenderPart(is_error=true) = %q, missing ErrorResultMarker %q", got, ErrorResultMarker)
+	}
+	// Sanity: a non-error tool_result must NOT carry the marker, so the
+	// downstream string-match can't misfire on the success path.
+	partOK := map[string]any{
+		"type":        "tool_result",
+		"tool_use_id": "tu1",
+		"is_error":    false,
+		"content":     "ok",
+	}
+	if strings.Contains(RenderPart(partOK), ErrorResultMarker) {
+		t.Errorf("RenderPart(is_error=false) leaked ErrorResultMarker, got %q", RenderPart(partOK))
+	}
+}

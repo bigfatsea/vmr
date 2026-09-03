@@ -131,12 +131,50 @@ func TestTagSummary_UsageInOKGate(t *testing.T) {
 	}
 
 	s := tagSummary([]RequestRow{rowKnownZeroIn, rowUnknownWithIn})
-	if s.tokensKnown != 1 {
-		t.Errorf("tokensKnown = %d, want 1 (only the UsageInOK row)", s.tokensKnown)
+	if s.inKnown != 1 {
+		t.Errorf("inKnown = %d, want 1 (only the UsageInOK row)", s.inKnown)
 	}
 	// fresh/cached must come from rowKnownZeroIn (3/2). Under the old
 	// `TokensIn > 0` proxy the counted row would be rowUnknownWithIn -> 5/0.
 	if s.fresh != 3 || s.cached != 2 {
 		t.Errorf("fresh=%d cached=%d, want 3/2 — gate counted the wrong row", s.fresh, s.cached)
+	}
+}
+
+// TestTagSummary_UsageOutOKGate pins §2.84: the output-token sum is gated
+// on UsageOutOK, NOT on UsageInOK. A row with UsageInOK=false (input
+// unknown) but UsageOutOK=true (output measured) must contribute its real
+// TokensOut to s.out; a row with UsageInOK=true but UsageOutOK=false must
+// NOT contribute its (possibly estimated) TokensOut. The pre-fix code
+// shared both totals under a single `UsageInOK` gate, so the second case
+// silently leaked estimates and the first silently dropped measured
+// values.
+func TestTagSummary_UsageOutOKGate(t *testing.T) {
+	// Row A: UsageInOK true, UsageOutOK false, TokensOut=999 (estimated;
+	// proxy MUST NOT count it).
+	rowA := RequestRow{
+		Outcome: "ok", UsageInOK: true, UsageOutOK: false,
+		TokensInFresh: 10, TokensInCached: 1, TokensOut: 999,
+	}
+	// Row B: UsageInOK false, UsageOutOK true, TokensOut=42 (measured;
+	// proxy MUST count it).
+	rowB := RequestRow{
+		Outcome: "ok", UsageInOK: false, UsageOutOK: true,
+		TokensOut: 42,
+	}
+
+	s := tagSummary([]RequestRow{rowA, rowB})
+	if s.out != 42 {
+		t.Errorf("s.out = %d, want 42 (only row B counted under UsageOutOK gate)", s.out)
+	}
+	if s.outKnown != 1 {
+		t.Errorf("s.outKnown = %d, want 1 (only row B)", s.outKnown)
+	}
+	if s.inKnown != 1 {
+		t.Errorf("s.inKnown = %d, want 1 (only row A)", s.inKnown)
+	}
+	// row A still drives fresh/cached through the in-side gate.
+	if s.fresh != 10 || s.cached != 1 {
+		t.Errorf("fresh=%d cached=%d, want 10/1 (row A's input-side totals)", s.fresh, s.cached)
 	}
 }

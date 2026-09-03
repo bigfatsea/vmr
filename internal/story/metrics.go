@@ -262,9 +262,11 @@ func duplicateActionRate(steps []*Step) float64 {
 	return float64(dup) / float64(len(occ))
 }
 
-// isErrorMarker is the literal text chatmsg.RenderPart embeds for an
-// Anthropic tool_result content block whose is_error field is true.
-const isErrorMarker = "❌ is_error"
+// isErrorMarker references chatmsg.ErrorResultMarker so a wording change in
+// chatmsg.RenderPart's anthropic-messages is_error rendering cannot
+// silently desynchronize the seven places below that scan rendered message
+// text for the marker.
+const isErrorMarker = chatmsg.ErrorResultMarker
 
 // errorRecoveryCount counts Steps that both received an error-marked
 // tool_result among their NewEvents and went on to issue a tool call of

@@ -237,3 +237,72 @@ func TestReassembleSSE_CursorScanLargeStream(t *testing.T) {
 		t.Errorf("Content length = %d, want %d", len(s.Content), chunks*len("chunk"))
 	}
 }
+
+// TestReassembleSSE_OpenAIToolCallManyDeltas pins the §2.66 fix: a single
+// tool call arriving as many small `arguments` chunks must reassemble into
+// exactly the concatenated JSON string (the public ToolCall.Args shape
+// downstream pairing/render code reads). The string-builder migration in
+// sse.go only changed the ACCUMULATION path — output shape is unchanged —
+// so this test asserts the equality that downstream code depends on.
+// Chunks use only letters/digits/braces/colons so each SSE event stays
+// valid JSON, and the concatenated result is also valid JSON.
+func TestReassembleSSE_OpenAIToolCallManyDeltas(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		`{abc`, `:2,`, `de`, `f:3,`, `ghi`, `:4,`, `jkl`, `mn:5`, `}`,
+	}
+	var b strings.Builder
+	b.WriteString(`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}],"model":"agent"}` + "\n\n")
+	b.WriteString(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"search","arguments":""}}]}}]}` + "\n\n")
+	for _, c := range chunks {
+		b.WriteString(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"` + c + `"}}]}}]}` + "\n\n")
+	}
+	b.WriteString(`data: {"choices":[{"index":0,"finish_reason":"tool_calls","delta":{}}]}` + "\n\n")
+	b.WriteString("data: [DONE]\n")
+
+	s := ReassembleSSE(b.String())
+	if s == nil {
+		t.Fatal("nil")
+	}
+	if len(s.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls = %+v", s.ToolCalls)
+	}
+	want := `{abc:2,def:3,ghi:4,jklmn:5}`
+	if s.ToolCalls[0].Args != want {
+		t.Errorf("Args = %q, want %q", s.ToolCalls[0].Args, want)
+	}
+	if s.ToolCalls[0].Name != "search" || s.ToolCalls[0].ID != "c1" {
+		t.Errorf("Name/ID = %q/%q", s.ToolCalls[0].Name, s.ToolCalls[0].ID)
+	}
+}
+
+// TestReassembleSSE_AnthropicToolCallManyDeltas is the Anthropic-shaped
+// counterpart: many `input_json_delta` chunks across `content_block_delta`
+// events must also reassemble into the same concatenated JSON string. The
+// builders map is indexed by content_block index, not by anything visible in
+// the event itself.
+func TestReassembleSSE_AnthropicToolCallManyDeltas(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		`{a`, `rg1`, `:v1,`, `arg`, `2:v`, `2,fi`, `nal:`, `true}`,
+	}
+	var b strings.Builder
+	b.WriteString(`data: {"type":"message_start","message":{"model":"claude"}}` + "\n\n")
+	b.WriteString(`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"do"}}` + "\n\n")
+	for _, c := range chunks {
+		b.WriteString(`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"` + c + `"}}` + "\n\n")
+	}
+	b.WriteString(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}` + "\n\n")
+
+	s := ReassembleSSE(b.String())
+	if s == nil {
+		t.Fatal("nil")
+	}
+	if len(s.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls = %+v", s.ToolCalls)
+	}
+	want := `{arg1:v1,arg2:v2,final:true}`
+	if s.ToolCalls[0].Args != want {
+		t.Errorf("Args = %q, want %q", s.ToolCalls[0].Args, want)
+	}
+}

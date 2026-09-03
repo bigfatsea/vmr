@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -182,5 +183,82 @@ func TestFillStepFacts_NewToolResultsScopedToDelta(t *testing.T) {
 	}
 	if len(steps[1].NewToolResults) != 1 || steps[1].NewToolResults[0].CallID != "c1" {
 		t.Errorf("step 2 NewToolResults = %+v, want only c1", steps[1].NewToolResults)
+	}
+}
+
+// TestComputeRU_ResetsOnSysChanged pins §2.83: when a step's leading
+// system block changes (sysChanged true OR curLeadSys diverges from the
+// prior step's prevLeadSys), computeRU must NOT reuse the prior prefix —
+// absolute message indices shift, and copying prevRu[k] into ru[k] for
+// k < deltaStart silently mis-classifies real-user boundaries. The
+// same-LeadSys/SysChanged=false path stays identical to before so
+// unchanged journeys keep their existing behavior.
+func TestComputeRU_ResetsOnSysChanged(t *testing.T) {
+	t.Parallel()
+	prof := taskseg.OpenClawAware
+	// Step 1: single system + one user. LeadSys=1.
+	msgs1 := []chatmsg.Message{{Role: "system", Text: "sysA"}, {Role: "user", Text: "u1"}}
+	raw1 := []any{map[string]any{"role": "system", "content": "sysA"}, map[string]any{"role": "user", "content": "u1"}}
+	var s stepFactState
+	ru1 := s.computeRU(prof, msgs1, raw1, 0, 0, 1, false)
+	if _, ok := ru1[1]; !ok {
+		t.Fatalf("step 1 ru missing index 1: %+v", ru1)
+	}
+	// Step 2: SAME lead sys, just one new user message at idx 2. deltaStart=2, prevLeadSys==curLeadSys, sysChanged=false -> prefix reuse.
+	msgs2 := []chatmsg.Message{{Role: "system", Text: "sysA"}, {Role: "user", Text: "u1"}, {Role: "user", Text: "u2"}}
+	raw2 := []any{
+		map[string]any{"role": "system", "content": "sysA"},
+		map[string]any{"role": "user", "content": "u1"},
+		map[string]any{"role": "user", "content": "u2"},
+	}
+	ru2 := s.computeRU(prof, msgs2, raw2, 0, 2, 1, false)
+	if _, ok := ru2[1]; !ok {
+		t.Errorf("step 2 (reuse path) lost prefix ru[1]: %+v", ru2)
+	}
+	if _, ok := ru2[2]; !ok {
+		t.Errorf("step 2 missing ru[2] (the new u2 instruction): %+v", ru2)
+	}
+	// Step 3: system prompt GROWS by one block. curLeadSys=2 (now
+	// has [sysA, sysA2]), sysChanged=true. Even if deltaStart still
+	// targets the same absolute messages the prior step covered, we
+	// must NOT reuse prevRu — the absolute-index alignment has shifted.
+	msgs3 := []chatmsg.Message{
+		{Role: "system", Text: "sysA"},
+		{Role: "system", Text: "sysA2"},
+		{Role: "user", Text: "u1"},
+		{Role: "user", Text: "u2"},
+		{Role: "user", Text: "u3"},
+	}
+	raw3 := []any{
+		map[string]any{"role": "system", "content": "sysA"},
+		map[string]any{"role": "system", "content": "sysA2"},
+		map[string]any{"role": "user", "content": "u1"},
+		map[string]any{"role": "user", "content": "u2"},
+		map[string]any{"role": "user", "content": "u3"},
+	}
+	want := taskseg.IndexRealUsers(prof, msgs3, raw3, 0)
+	ru3 := s.computeRU(prof, msgs3, raw3, 0, 3, 2, true)
+	// Compare key-by-key to verify the SysChanged gate took the
+	// "recompute everything" branch (no prefix reuse).
+	if len(ru3) != len(want) {
+		t.Errorf("step 3 ru len = %d, want %d (SysChanged gate): %+v vs %+v", len(ru3), len(want), ru3, want)
+	}
+	for k, v := range want {
+		if got, ok := ru3[k]; !ok || got != v {
+			t.Errorf("step 3 ru[%d] = %q (ok=%v), want %q", k, got, ok, v)
+		}
+	}
+	// Step 4: same sys as step 3 (LeadSys=2), one new user at idx 5.
+	// Reuse path should re-engage now that the gate aligns again.
+	msgs4 := append([]chatmsg.Message{}, msgs3...)
+	msgs4 = append(msgs4, chatmsg.Message{Role: "user", Text: "u4"})
+	raw4 := append([]any{}, raw3...)
+	raw4 = append(raw4, map[string]any{"role": "user", "content": "u4"})
+	ru4 := s.computeRU(prof, msgs4, raw4, 0, 5, 2, false)
+	if _, ok := ru4[4]; !ok {
+		t.Errorf("step 4 missing ru[4] (new u3 after reuse resumed): %+v", ru4)
+	}
+	if _, ok := ru4[5]; !ok {
+		t.Errorf("step 4 missing ru[5] (new u4): %+v", ru4)
 	}
 }

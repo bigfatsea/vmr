@@ -84,16 +84,19 @@ const renderTemplateVersion = 2
 // This is what replaces the "same filename implies same content" assumption
 // (proven false on two real axes: -lang and evidence linking) with an
 // actual check.
-func renderFingerprint(lang i18n.Lang, linkEvidence bool, m, prev *ctxgraph.Manifest) string {
-	mReq, prevReq := "-", "-"
+func renderFingerprint(lang i18n.Lang, linkEvidence bool, m, prev *ctxgraph.Manifest, prof taskseg.Profile) string {
+	mReq, prevReq, profName := "-", "-", "-"
 	if m != nil {
 		mReq = m.Req
 	}
 	if prev != nil {
 		prevReq = prev.Req
 	}
-	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t m=%s prev=%s -->\n",
-		renderTemplateVersion, lang, linkEvidence, mReq, prevReq)
+	if prof != nil {
+		profName = prof.Name()
+	}
+	return fmt.Sprintf("<!-- reqdetail:v%d lang=%s evidence=%t m=%s prev=%s prof=%s -->\n",
+		renderTemplateVersion, lang, linkEvidence, mReq, prevReq, profName)
 }
 
 // EscapeCell neutralizes a value for use inside a Markdown table cell: an

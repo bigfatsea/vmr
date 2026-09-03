@@ -203,7 +203,7 @@ func callsCell(calls []string) string {
 // linking uses this).
 func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest, prof taskseg.Profile, lang i18n.Lang, linkEvidence bool) string {
 	var b strings.Builder
-	b.WriteString(renderFingerprint(lang, linkEvidence, m, prev))
+	b.WriteString(renderFingerprint(lang, linkEvidence, m, prev, prof))
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	t := i18n.Detail(lang)
 	f := extractSessionFeatures(rec, prof)

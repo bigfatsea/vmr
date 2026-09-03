@@ -483,3 +483,49 @@ func TestLoadCacheDir_CorruptShardIsSkipped(t *testing.T) {
 		t.Errorf("loaded %d entries, want exactly 1 (the corrupt shard must be skipped, not partially decoded)", len(loaded.Files))
 	}
 }
+
+// TestLoadCacheDir_OrphanShardMtimeWins pins §1.3's follow-up: two shards
+// sharing a CanonicalPath (one stale "orphan" from an earlier audit-log
+// hash, one current) must resolve to the newer shard, regardless of which
+// sort-order position ReadDir yields. A pure last-writer-wins on
+// CanonicalPath would here pick the lexicographically-later shard
+// (`h2.json` after `h1.json`) even though its content is stale — a phantom
+// cache miss on the next scan. The audit log is append-only, so the most
+// recently written shard encodes the current content hash.
+func TestLoadCacheDir_OrphanShardMtimeWins(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	canon := "/tmp/audit/identity.jsonl"
+	old := CachedFile{Hash: "h1", CanonicalPath: canon}
+	new := CachedFile{Hash: "h2", CanonicalPath: canon}
+	oldBytes, _ := json.Marshal(old)
+	newBytes, _ := json.Marshal(new)
+	if err := os.WriteFile(filepath.Join(dir, old.Hash+".json"), oldBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, new.Hash+".json"), newBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Make h1 strictly older than h2 by 2s — amply larger than the
+	// filesystem mtime granularity on every supported OS.
+	oldTime := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "h1.json"), oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	newTime := time.Now()
+	if err := os.Chtimes(filepath.Join(dir, "h2.json"), newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadCacheDir(dir)
+	if loaded == nil {
+		t.Fatal("LoadCacheDir returned nil")
+	}
+	got, ok := loaded.Files[canon]
+	if !ok {
+		t.Fatalf("missing entry for %s, have %+v", canon, loaded.Files)
+	}
+	if got.Hash != "h2" {
+		t.Errorf("LoadCacheDir kept the older shard: Hash = %q, want %q (newer mtime wins on CanonicalPath tie)", got.Hash, "h2")
+	}
+}

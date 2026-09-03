@@ -86,7 +86,7 @@ func TestEnsureRendered_RewritesAFileWithoutAMatchingFingerprint(t *testing.T) {
 	if string(data) == string(sentinel) {
 		t.Errorf("EnsureRendered kept a fingerprint-less pre-existing file instead of rewriting it — a file with no matching fingerprint must never be trusted")
 	}
-	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil)) {
+	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil, taskseg.OpenClawAware)) {
 		t.Errorf("rewritten file missing the expected fingerprint line, got:\n%s", data)
 	}
 }
@@ -121,7 +121,7 @@ func TestEnsureRendered_RewritesOnStaleTemplateVersion(t *testing.T) {
 	if strings.Contains(string(data), "stale content from a lower template version") {
 		t.Errorf("a fingerprint naming an older template version was not treated as stale, got:\n%s", data)
 	}
-	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil)) {
+	if !strings.Contains(string(data), renderFingerprint(i18n.EN, false, nil, nil, taskseg.OpenClawAware)) {
 		t.Errorf("rewritten file missing the current fingerprint, got:\n%s", data)
 	}
 }
@@ -332,7 +332,7 @@ func TestEnsureRendered_RewritesWhenManifestIdentityChanges(t *testing.T) {
 	if _, err := EnsureRendered(dir, rec, "audit.jsonl", 1, m1, nil, taskseg.OpenClawAware, i18n.EN, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, nil)) {
+	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, nil, taskseg.OpenClawAware)) {
 		t.Errorf("re-render with m=%s did not land, got:\n%s", m1.Req, read())
 	}
 
@@ -340,7 +340,30 @@ func TestEnsureRendered_RewritesWhenManifestIdentityChanges(t *testing.T) {
 	if _, err := EnsureRendered(dir, rec, "audit.jsonl", 1, m1, m2, taskseg.OpenClawAware, i18n.EN, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, m2)) {
+	if !strings.Contains(read(), renderFingerprint(i18n.EN, false, m1, m2, taskseg.OpenClawAware)) {
 		t.Errorf("re-render with prev=%s did not land, got:\n%s", m2.Req, read())
+	}
+}
+
+// TestRenderFingerprint_DiffersByProfile pins the §2.71 fix: the render
+// fingerprint (and therefore EnsureRendered's skip-vs-rewrite decision) must
+// react to a change in taskseg.Profile, so an existing page rendered for one
+// profile gets rewritten when the caller switches profiles even with every
+// other fingerprint axis held constant.
+func TestRenderFingerprint_DiffersByProfile(t *testing.T) {
+	openclaw := renderFingerprint(i18n.EN, false, nil, nil, taskseg.OpenClawAware)
+	generic := renderFingerprint(i18n.EN, false, nil, nil, taskseg.Generic)
+	if openclaw == generic {
+		t.Fatalf("renderFingerprint must differ by profile, got identical strings:\n%s", openclaw)
+	}
+	if !strings.Contains(openclaw, "prof=openclaw") {
+		t.Errorf("openclaw fingerprint missing prof=openclaw: %q", openclaw)
+	}
+	if !strings.Contains(generic, "prof=generic") {
+		t.Errorf("generic fingerprint missing prof=generic: %q", generic)
+	}
+	nilCase := renderFingerprint(i18n.EN, false, nil, nil, nil)
+	if !strings.Contains(nilCase, "prof=-") {
+		t.Errorf("nil profile must render as prof=-, got %q", nilCase)
 	}
 }
