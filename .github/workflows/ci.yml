@@ -58,4 +58,7 @@ jobs:
       # (vmr.sh + vmr-loadtest.sh) that had zero static-analysis coverage
       # before this job existed.
       - name: shellcheck
-        run: shellcheck vmr.sh vmr-loadtest.sh
+        run: shellcheck vmr.sh vmr-loadtest.sh scripts/check-vmrsh-config-whitelist.sh
+
+      - name: vmr.sh -c whitelist matches cmd/vmr subcommands
+        run: bash scripts/check-vmrsh-config-whitelist.sh

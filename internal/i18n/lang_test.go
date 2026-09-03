@@ -1,9 +1,14 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-03 11:30, by Sonnet 5
 
 package i18n
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -52,29 +57,97 @@ func TestLangString(t *testing.T) {
 // checks — a function field itself can never be "empty", only unset/nil,
 // which the nil check below already covers).
 var bundleConstructors = map[string]func(Lang) any{
-	"Doc":           func(l Lang) any { return Doc(l) },
-	"Tokens":        func(l Lang) any { return Tokens(l) },
-	"Cost":          func(l Lang) any { return Cost(l) },
-	"Reliability":   func(l Lang) any { return Reliability(l) },
-	"Latency":       func(l Lang) any { return Latency(l) },
-	"Workload":      func(l Lang) any { return Workload(l) },
-	"Sessions":      func(l Lang) any { return Sessions(l) },
-	"Sticky":        func(l Lang) any { return Sticky(l) },
-	"EndpointValue": func(l Lang) any { return EndpointValue(l) },
-	"Compaction":    func(l Lang) any { return Compaction(l) },
-	"Efficiency":    func(l Lang) any { return Efficiency(l) },
-	"Requests":      func(l Lang) any { return Requests(l) },
-	"Detail":        func(l Lang) any { return Detail(l) },
-	"Story":         func(l Lang) any { return Story(l) },
-	"Compare":       func(l Lang) any { return Compare(l) },
-	"LLM":           func(l Lang) any { return LLM(l) },
-	"CLI":           func(l Lang) any { return CLI(l) },
+	"Doc":            func(l Lang) any { return Doc(l) },
+	"Tokens":         func(l Lang) any { return Tokens(l) },
+	"Cost":           func(l Lang) any { return Cost(l) },
+	"Reliability":    func(l Lang) any { return Reliability(l) },
+	"Latency":        func(l Lang) any { return Latency(l) },
+	"Workload":       func(l Lang) any { return Workload(l) },
+	"Sessions":       func(l Lang) any { return Sessions(l) },
+	"Sticky":         func(l Lang) any { return Sticky(l) },
+	"EndpointValue":  func(l Lang) any { return EndpointValue(l) },
+	"Compaction":     func(l Lang) any { return Compaction(l) },
+	"Efficiency":     func(l Lang) any { return Efficiency(l) },
+	"Requests":       func(l Lang) any { return Requests(l) },
+	"Detail":         func(l Lang) any { return Detail(l) },
+	"Story":          func(l Lang) any { return Story(l) },
+	"Compare":        func(l Lang) any { return Compare(l) },
+	"LLM":            func(l Lang) any { return LLM(l) },
+	"CLI":            func(l Lang) any { return CLI(l) },
+	"ClientEndpoint": func(l Lang) any { return ClientEndpoint(l) },
+	"CompareHTML":    func(l Lang) any { return CompareHTML(l) },
+	"Corpus":         func(l Lang) any { return Corpus(l) },
+	"Indicators":     func(l Lang) any { return Indicators(l) },
+	"ModelUsage":     func(l Lang) any { return ModelUsage(l) },
+	"Provider":       func(l Lang) any { return Provider(l) },
+	"ProviderQuota":  func(l Lang) any { return ProviderQuota(l) },
+	"Spine":          func(l Lang) any { return Spine(l) },
+	"StoryFindings":  func(l Lang) any { return StoryFindings(l) },
+	"StoryHTML":      func(l Lang) any { return StoryHTML(l) },
+	"StoryIndexT":    func(l Lang) any { return StoryIndexT(l) },
+	"ToolWaste":      func(l Lang) any { return ToolWaste(l) },
 }
 
 func TestBundlesHaveNoEmptyStrings(t *testing.T) {
 	for name, ctor := range bundleConstructors {
 		for _, lang := range []Lang{EN, ZH} {
 			checkNoEmpty(t, name+"("+lang.String()+")", reflect.ValueOf(ctor(lang)))
+		}
+	}
+}
+
+// TestBundleConstructorsCompleteness uses AST inspection over internal/i18n/*.go
+// to ensure that every top-level constructor func Xxx(lang Lang) ...Text is
+// registered in bundleConstructors. This guarantees the bundle registry cannot
+// quietly drift when new report/story sections or text bundles are added.
+func TestBundleConstructorsCompleteness(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir(.): %v", err)
+	}
+	fset := token.NewFileSet()
+	found := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, e.Name(), nil, 0)
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v", e.Name(), err)
+		}
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Type == nil {
+				continue
+			}
+			// Must have exactly one parameter of type Lang
+			if fd.Type.Params == nil || fd.Type.Params.NumFields() != 1 || len(fd.Type.Params.List) != 1 {
+				continue
+			}
+			paramIdent, ok := fd.Type.Params.List[0].Type.(*ast.Ident)
+			if !ok || paramIdent.Name != "Lang" {
+				continue
+			}
+			// Must have exactly one return value of type identifier ending with "Text"
+			if fd.Type.Results == nil || fd.Type.Results.NumFields() != 1 || len(fd.Type.Results.List) != 1 {
+				continue
+			}
+			retIdent, ok := fd.Type.Results.List[0].Type.(*ast.Ident)
+			if !ok || !strings.HasSuffix(retIdent.Name, "Text") {
+				continue
+			}
+			found[fd.Name.Name] = true
+		}
+	}
+
+	for name := range found {
+		if _, ok := bundleConstructors[name]; !ok {
+			t.Errorf("bundleConstructors is missing %q; add it to bundleConstructors in internal/i18n/lang_test.go", name)
+		}
+	}
+	for name := range bundleConstructors {
+		if !found[name] {
+			t.Errorf("bundleConstructors has stale entry %q (not found as func(Lang) ...Text in internal/i18n/*.go); remove it from bundleConstructors", name)
 		}
 	}
 }
@@ -97,7 +170,11 @@ func checkNoEmpty(t *testing.T, path string, v reflect.Value) {
 		for i := 0; i < v.NumField(); i++ {
 			checkNoEmpty(t, path+"."+v.Type().Field(i).Name, v.Field(i))
 		}
-	case reflect.Array:
+	case reflect.Array, reflect.Slice:
+		if v.Kind() == reflect.Slice && v.Len() == 0 {
+			t.Errorf("%s: empty slice", path)
+			return
+		}
 		for i := 0; i < v.Len(); i++ {
 			checkNoEmpty(t, path+"[]", v.Index(i))
 		}
