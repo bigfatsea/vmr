@@ -52,13 +52,7 @@ func TestChatmsgProtocolCoverage(t *testing.T) {
 		t.Run(prot, func(t *testing.T) {
 			cases, ok := shapes[prot]
 			if !ok {
-				// Unknown future protocol: at least verify no panic and
-				// sane behavior with a generic empty body.
-				u, ok := chatmsg.ExtractUsageWithProtocol(map[string]any{}, prot)
-				if ok {
-					t.Errorf("empty body should not parse as usage, got %+v", u)
-				}
-				return
+				t.Fatalf("protocol %q has no coverage fixture — add one to buildProtocolShapes", prot)
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
@@ -204,6 +198,22 @@ func buildProtocolShapes() map[string][]protocolCoverageShape {
 				name: "error_4xx",
 				body: map[string]any{
 					"error": map[string]any{"message": "rate limited", "type": "rate_limit_error"},
+				},
+				protocol: rsp, wantIn: 0, wantOut: 0, wantOK: false,
+			},
+			{
+				name: "softblock_sensitive",
+				body: map[string]any{
+					"output": []any{
+						map[string]any{
+							"type": "message",
+							"role": "assistant",
+							"content": []any{
+								map[string]any{"type": "output_text", "text": "I cannot answer that"},
+							},
+						},
+					},
+					"status": "completed",
 				},
 				protocol: rsp, wantIn: 0, wantOut: 0, wantOK: false,
 			},

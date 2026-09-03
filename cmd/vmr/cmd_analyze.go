@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/story"
@@ -271,6 +272,11 @@ func cmdAnalyze(args []string) error {
 // -journey, -list-only, or the default suite — see cmd_analyze.go's package
 // comment for the "pure CLI routing" constraint this implements.
 func dispatchAnalyze(r *analyzeRun) error {
+	// S-2 shape counters are process-global atomics; zero them at the start of
+	// each analyze run so the Context Rot section reports this run's count, not
+	// a daemon's accumulated total.
+	chatmsg.ResetUnrecognizedShapeCounts()
+
 	// -macro-only is handled before setupStoryRun runs at all (P15.1): bare
 	// `vmr report` never scans/stitches the story-half candidate graph or
 	// touches stories/.parse-cache, so running setupStoryRun first and
