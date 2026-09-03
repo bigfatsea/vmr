@@ -33,8 +33,26 @@ func Watch(path string, onChange func(), onError func(error)) (func() error, err
 		watcher.Close()
 		return nil, err
 	}
+	// done lets the returned stop function halt the debounce timer itself.
+	// The timer runs onChange on its own goroutine (time.AfterFunc), so
+	// watcher.Close() alone can't cancel an armed timer — a write event in
+	// the ~300ms window after stop would still run the reload callback once
+	// after the caller already shut down. Closing done makes the watch
+	// goroutine stop the timer and exit on its next select iteration.
+	done := make(chan struct{})
 	go func() {
+		var timer *time.Timer
 		defer func() {
+			// Stop any armed debounce timer on every exit path. The `case
+			// <-done` branch below covers the normal shutdown, but after
+			// watcher.Close() both done and Events(ok=false) can be ready at
+			// once — select picks between ready cases at random, and the !ok
+			// return would otherwise leave a pending reload callback to fire
+			// after stop() returned. (AfterFunc timers have no channel to
+			// drain, so Stop's return value is irrelevant here.)
+			if timer != nil {
+				timer.Stop()
+			}
 			// A watcher goroutine that dies silently leaves hot reload broken
 			// with zero signal (SIGHUP still works). Nothing here is expected
 			// to panic, but if it does, surface it through the same channel
@@ -44,7 +62,6 @@ func Watch(path string, onChange func(), onError func(error)) (func() error, err
 				onError(fmt.Errorf("hot-reload watcher panicked; hot reload is down until restart: %v", p))
 			}
 		}()
-		var timer *time.Timer
 		for {
 			select {
 			case ev, ok := <-watcher.Events:
@@ -68,8 +85,13 @@ func Watch(path string, onChange func(), onError func(error)) (func() error, err
 				if onError != nil {
 					onError(err)
 				}
+			case <-done:
+				return
 			}
 		}
 	}()
-	return watcher.Close, nil
+	return func() error {
+		close(done)
+		return watcher.Close()
+	}, nil
 }

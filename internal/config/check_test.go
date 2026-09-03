@@ -49,6 +49,85 @@ models:
 	}
 }
 
+// --- VA4: empty api_key is a Warning for loopback/private upstreams ---
+
+// TestCheckEmptyAPIKey_LoopbackIsWarning covers the spec's headline
+// acceptance: a localhost upstream with no api_key is the legitimate
+// self-hosted-Ollama/vLLM/llama.cpp shape — must NOT fail `vmr check`
+// (SeverityWarning), only surface the "is this intentional" question.
+func TestCheckEmptyAPIKey_LoopbackIsWarning(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: "http://localhost:11434/v1"}, api_key: ""}
+models:
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+`)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Provider != "p1" || issues[0].Field != "api_key" {
+		t.Fatalf("Check() = %+v, want exactly one api_key issue for p1", issues)
+	}
+	if issues[0].Severity != SeverityWarning {
+		t.Errorf("loopback empty api_key severity = %v, want SeverityWarning — self-hosted upstreams must not fail `vmr check`", issues[0].Severity)
+	}
+	if HasErrors(issues) {
+		t.Errorf("HasErrors must be false for a warning-only issue set, got true from %+v", issues)
+	}
+}
+
+// TestCheckEmptyAPIKey_PrivateIPIsWarning covers 192.168.x.x — a private
+// LAN address on the same loopback-or-private rule. Other RFC1918 ranges
+// (10/8, 172.16/12) follow from the same IsPrivate call and don't need
+// separate coverage.
+func TestCheckEmptyAPIKey_PrivateIPIsWarning(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: "http://192.168.1.50:8000/v1"}, api_key: ""}
+models:
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+`)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning {
+		t.Errorf("private-IP empty api_key issues = %+v, want one Warning", issues)
+	}
+}
+
+// TestCheckEmptyAPIKey_PublicIsStillError is the negative half: a public
+// host with no api_key is exactly the typo'd ${ENV_VAR} situation, and
+// stays SeverityError so `vmr check` still fails it.
+func TestCheckEmptyAPIKey_PublicIsStillError(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://api.example.com}, api_key: ""}
+models:
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+`)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Severity != SeverityError {
+		t.Errorf("public-host empty api_key severity = %v, want SeverityError", issues[0].Severity)
+	}
+}
+
+// TestCheckEmptyAPIKey_MixedHostsIsError covers the spec's "混合" rule:
+// one provider with two protocol base_urls, one internal and one public,
+// must NOT be downgraded — "any public host means the empty key is
+// definitely a mistake" is more conservative and that's what we want.
+func TestCheckEmptyAPIKey_MixedHostsIsError(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: "http://localhost:11434/v1", anthropic-messages: https://api.example.com}, api_key: ""}
+models:
+  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+`)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Severity != SeverityError {
+		t.Errorf("mixed internal+public empty api_key severity = %v, want SeverityError (one public host means the key is definitely missing)", issues[0].Severity)
+	}
+}
+
 // TestCheckFlagsProbeTimeoutNotUnderResponseHeader locks in the
 // background-probe budget invariant from DefaultProbeTimeout's doc comment:
 // a probe_timeout at or above response_header defeats the "never make real

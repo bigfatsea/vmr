@@ -49,6 +49,9 @@ func (c *Config) expandProviderAPIKeys() error {
 			if label == "" {
 				return fmt.Errorf("provider %q: api_keys: label must not be empty", p.Name)
 			}
+			if err := validateIdentSegment(label); err != nil {
+				return fmt.Errorf("provider %q: api_keys: label %w", p.Name, err)
+			}
 			child := p
 			child.Name = p.Name + "-" + label
 			child.APIKey = key

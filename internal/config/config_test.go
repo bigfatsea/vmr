@@ -916,3 +916,83 @@ models:
 		t.Fatalf("expected 2 endpoint groups, got %d", len(cfg.Models["agent"].Endpoints))
 	}
 }
+
+// --- VE2: reject ':' and '/' in provider names and api_keys labels ---
+
+// TestProviderNameWithColonRejected covers the headline VE2 case: a ':'
+// in a provider name folds the trailing fields into SplitEndpointLabel's
+// model segment, corrupting every audit-label consumer downstream (see
+// core.EndpointLabel's contract). Must be a hard load error at validate().
+// The spec uses "providers[0]" because provider-name validation runs
+// inside validateProviders, which uses array indices, while api_keys label
+// validation uses the provider name in the error message (see
+// TestProviderAPIKeysLabelWithColonRejected).
+func TestProviderNameWithColonRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "name: p1", `name: "a:b"`, 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "':'") || !strings.Contains(err.Error(), `providers[0]`) {
+		t.Fatalf("want error naming providers[0] and ':', got %v", err)
+	}
+}
+
+// TestProviderNameWithSlashRejected: the same invariant for '/'. Less
+// acute than ':' (the audit label is colon-separated, not slash), but
+// '/' collides with the path-ish separators used downstream by report
+// and pricing lookups, so the rule stays the same.
+func TestProviderNameWithSlashRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "name: p1", `name: "a/b"`, 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "'/'") {
+		t.Fatalf("want error naming '/', got %v", err)
+	}
+}
+
+// TestProviderNameLegalCharsAccepted is the negative counterpart: every
+// provider name valid in current fixtures (with - _ .) still loads.
+func TestProviderNameLegalCharsAccepted(t *testing.T) {
+	for _, name := range []string{"my-provider", "vllm_local", "gpt.4", "a", "abc123"} {
+		// Replace both the providers entry AND the matching endpoint
+		// reference in the model, so the name stays self-consistent.
+		yaml := strings.Replace(validYAML, "name: p1", "name: "+name, 1)
+		yaml = strings.Replace(yaml, "providers: [p1]", "providers: ["+name+"]", 1)
+		if _, err := Parse([]byte(yaml)); err != nil {
+			t.Errorf("provider name %q should still validate: %v", name, err)
+		}
+	}
+}
+
+// --- VE4: validate model strategy names at load time ---
+
+// TestModelStrategyUnknownDimensionRejected pins the load-time strategy
+// check: a typo'd dimension name parses cleanly, but the snapshot-build
+// path (which used to be the only thing catching it) is bypassed by
+// `vmr check`'s no-network validate-only path, so a typo could silently
+// load and only surface when the snapshot builder trips. Now caught here.
+func TestModelStrategyUnknownDimensionRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "    endpoints:", "    strategy: [prioity]\n    endpoints:", 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), `model "m1"`) || !strings.Contains(err.Error(), `"prioity"`) {
+		t.Fatalf("want error naming the model and the bad dimension, got %v", err)
+	}
+}
+
+// TestModelStrategyValidDimensionAccepted: explicit ["priority"] still
+// loads (it was the documented default, applied by applyDefaults when
+// unset; explicit declaration must round-trip identically).
+func TestModelStrategyValidDimensionAccepted(t *testing.T) {
+	yaml := strings.Replace(validYAML, "    endpoints:", "    strategy: [priority]\n    endpoints:", 1)
+	if _, err := Parse([]byte(yaml)); err != nil {
+		t.Fatalf("explicit strategy: [priority] should still validate: %v", err)
+	}
+}
+
+// TestModelStrategyUnsetInheritsDefault covers the spec's third
+// acceptance bullet — `m.strategy: []` (omitted) keeps the existing
+// default behavior. The existing TestParseDefaultsAndEnvExpansion already
+// pins this at the parsed-Struct level; this one is the
+// load-doesn't-error reading of the same fact.
+func TestModelStrategyUnsetInheritsDefault(t *testing.T) {
+	if _, err := Parse([]byte(validYAML)); err != nil {
+		t.Fatalf("default (omitted) strategy should keep validating: %v", err)
+	}
+}

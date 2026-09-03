@@ -13,6 +13,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 
 	"vmr/internal/fmtutil"
 )
@@ -136,18 +137,57 @@ func (c *Config) checkTimeouts() []Issue {
 	return nil
 }
 
+// isLoopbackOrPrivateHost reports whether host is a loopback (127.0.0.0/8,
+// ::1) or RFC1918/ULA private address (10/8, 172.16/12, 192.168/16,
+// fc00::/7), or the literal "localhost" — the hosts where a self-hosted
+// upstream legitimately needs no auth. Used by checkProviders to decide
+// whether a keyless provider is a safe internal endpoint (warning) or a
+// public one that's certainly broken (error).
+func isLoopbackOrPrivateHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}
+
 // checkProviders flags an empty api_key — validate() never checks this (an
 // empty upstream credential is syntactically valid YAML), so a typo'd or
 // forgotten ${ENV_VAR} silently loads as "no key" and only fails once a
-// real request 401s. (Provider.Proxy has no global default to inherit — a
-// provider's proxy: true with no matching proxy URL is already a hard
-// validate() error, not a Check-time gap.)
+// real request 401s. But a self-hosted upstream that truly needs no auth
+// (localhost/private-network vLLM, llama.cpp, Ollama, …) is legitimate
+// config, so the severity is graded by the upstream host: one provider can
+// declare several protocol base_urls — the issue is only downgraded to a
+// warning when EVERY one is on a loopback/private host, because "all
+// internal" is what makes a keyless upstream plausibly intentional; any
+// public host means the empty key is a typo'd or forgotten credential, and
+// that must stay a hard error. (Provider.Proxy has no global default to
+// inherit — a provider's proxy: true with no matching proxy URL is already a
+// hard validate() error, not a Check-time gap.)
 func (c *Config) checkProviders() []Issue {
 	var issues []Issue
 	for _, p := range c.Providers {
-		if p.APIKey == "" {
-			issues = append(issues, Issue{Provider: p.Name, Field: "api_key", Message: fmt.Sprintf("provider %q: api_key missing", p.Name)})
+		if p.APIKey != "" {
+			continue
 		}
+		allInternal := true
+		for _, raw := range p.BaseURL {
+			u, err := url.Parse(raw)
+			if err != nil {
+				allInternal = false // unreachable post-validate; stay conservative either way
+				break
+			}
+			if !isLoopbackOrPrivateHost(u.Hostname()) {
+				allInternal = false
+				break
+			}
+		}
+		issue := Issue{Provider: p.Name, Field: "api_key", Message: fmt.Sprintf("provider %q: api_key missing", p.Name)}
+		if allInternal {
+			issue.Severity = SeverityWarning
+			issue.Message = fmt.Sprintf("provider %q: no api_key — self-hosted upstream with no auth, fine if it truly needs none", p.Name)
+		}
+		issues = append(issues, issue)
 	}
 	return issues
 }

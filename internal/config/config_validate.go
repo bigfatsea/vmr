@@ -11,6 +11,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/strategy"
 )
 
 // validateBasic performs structural and top-level scalar validation: listen
@@ -67,6 +68,21 @@ func (c *Config) validateBasic() error {
 	return nil
 }
 
+// validateIdentSegment rejects a name that would serve as the provider
+// segment of the protocol:provider:model audit label (see core.EndpointLabel):
+// a ':' turns SplitEndpointLabel's three-field split into a mis-parse (the
+// provider tail gets folded into the model segment, corrupting every analysis-
+// half grouping/detail/file name that keyed off it — KNOWN_ISSUES §2.72), and
+// a '/' collides with the path-ish separators used downstream. Shared by
+// provider names (validateProviders) and api_keys labels
+// (expandProviderAPIKeys), since both are concatenated into that segment.
+func validateIdentSegment(name string) error {
+	if strings.ContainsAny(name, ":/") {
+		return fmt.Errorf("name %q must not contain ':' or '/' (breaks the protocol:provider:model audit label — see core.EndpointLabel)", name)
+	}
+	return nil
+}
+
 // validateProviders checks provider declarations: non-empty distinct names,
 // valid adapter protocols, URL credentials, proxy settings, and quota limits.
 func (c *Config) validateProviders(quotaNow time.Time) error {
@@ -74,6 +90,9 @@ func (c *Config) validateProviders(quotaNow time.Time) error {
 	for i, p := range c.Providers {
 		if p.Name == "" {
 			return fmt.Errorf("providers[%d]: missing name", i)
+		}
+		if err := validateIdentSegment(p.Name); err != nil {
+			return fmt.Errorf("providers[%d]: %w", i, err)
 		}
 		if seenProvider[p.Name] {
 			return fmt.Errorf("providers[%d]: duplicate provider name %q", i, p.Name)
@@ -112,6 +131,15 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 	for name, m := range c.Models {
 		if len(m.Endpoints) == 0 {
 			return fmt.Errorf("model %q: no endpoints", name)
+		}
+		// Reject an unknown strategy dimension at load time, not later at
+		// snapshot-build (strategy.Build is the single source of truth for
+		// what's registered), symmetric with pricing rate resolution being
+		// strict at load. A typo'd dimension name otherwise parses cleanly
+		// and only fails once `vmr start` builds the routing table — a load
+		// error here catches it in `vmr check`'s no-network validate path too.
+		if _, err := strategy.Build(m.Strategy); err != nil {
+			return fmt.Errorf("model %q: %w", name, err)
 		}
 		if m.MaxContextTokens < 0 {
 			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)

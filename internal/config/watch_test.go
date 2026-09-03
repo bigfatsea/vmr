@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -121,4 +122,39 @@ func TestWatchOnErrorNotCalledDuringNormalOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitChange(t, ch, "in-place write")
+}
+
+// TestWatchStopCancelsArmedTimer pins the lifecycle fix: a write event that
+// arms the debounce timer followed IMMEDIATELY by stop() must leave onChange
+// unfired — the timer runs on its own goroutine, so without the stop function
+// cancelling it, a reload callback would still run once after the caller had
+// already shut down (a stray reload after the routing table was torn down).
+// The race-free shape: write arms the timer asynchronously; whether the
+// goroutine has armed it before or after stop() runs, the ~300ms debounce
+// means the stop-side timer.Stop() always lands first, so onChange cannot
+// fire. A longer sleep (400ms, past the debounce window) then proves nothing
+// fired.
+func TestWatchStopCancelsArmedTimer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("a: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var fired int32
+	stop, err := Watch(path, func() { atomic.AddInt32(&fired, 1) }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("a: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Stop immediately — while the debounce timer (if armed) is still pending.
+	if err := stop(); err != nil {
+		t.Fatalf("stop(): %v", err)
+	}
+	// Outlive the 300ms debounce: a stray onChange would have fired by now.
+	time.Sleep(400 * time.Millisecond)
+	if n := atomic.LoadInt32(&fired); n != 0 {
+		t.Errorf("onChange fired %d time(s) after stop(), want 0 — the debounce timer must be cancelled by stop", n)
+	}
 }

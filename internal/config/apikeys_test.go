@@ -116,6 +116,45 @@ func TestProviderAPIKeys_ListFormRejected(t *testing.T) {
 	}
 }
 
+// TestProviderAPIKeysLabelWithColonRejected: the second half of VE2. A
+// label with ':' would flow straight into the expanded provider name
+// (parent_name + "-" + label), reintroducing the same audit-label
+// breakage the provider-name check guards against. Caught by
+// expandProviderAPIKeys (which runs before validate()), so the error
+// message names the parent provider, not an index.
+func TestProviderAPIKeysLabelWithColonRejected(t *testing.T) {
+	yaml := strings.Replace(apiKeysYAML, "team_a:", `"x:y":`, 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "':'") || !strings.Contains(err.Error(), `provider "openrouter"`) {
+		t.Fatalf("want error naming the parent provider and ':', got %v", err)
+	}
+}
+
+// TestProviderAPIKeysLabelWithSlashRejected: same shape as the colon
+// test, for the '/' half of the rule.
+func TestProviderAPIKeysLabelWithSlashRejected(t *testing.T) {
+	yaml := strings.Replace(apiKeysYAML, "team_a:", `"x/y":`, 1)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "'/'") {
+		t.Fatalf("want error naming '/', got %v", err)
+	}
+}
+
+// TestProviderAPIKeysLegalLabelAccepted: a label with - _ . still
+// expands fine.
+func TestProviderAPIKeysLegalLabelAccepted(t *testing.T) {
+	for _, label := range []string{"team-a", "team_b", "v1.0"} {
+		// Replace BOTH api_keys entries in one go, not just the first
+		// (yaml.v3 rejects duplicate keys, and apiKeysYAML already has
+		// team_a + team_b).
+		yaml := strings.Replace(apiKeysYAML, "      team_a: sk-aaaaaaaaaaaaaaaa\n      team_b: sk-bbbbbbbbbbbbbbbb",
+			"      "+label+": sk-aaaaaaaaaaaaaaaa\n      other-key: sk-bbbbbbbbbbbbbbbb", 1)
+		if _, err := Parse([]byte(yaml)); err != nil {
+			t.Errorf("api_keys label %q should still validate: %v", label, err)
+		}
+	}
+}
+
 func TestProviderAPIKeys_ExpandedNameCollidesWithHandWrittenProvider(t *testing.T) {
 	yaml := strings.Replace(apiKeysYAML,
 		"      team_b: sk-bbbbbbbbbbbbbbbb\n",
