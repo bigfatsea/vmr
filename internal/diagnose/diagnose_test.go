@@ -854,7 +854,8 @@ models:
 
 // TestRun_ConsistencyIssuesSkipEnvAndConnect locks in the check-gates-
 // diagnose wiring: a config that's structurally valid (BuildSnapshot
-// succeeds) but fails config.Check (here: a missing provider api_key)
+// succeeds) but fails config.Check (here: a missing api_key on a PUBLIC
+// provider — an empty key on a loopback/private upstream is only a warning)
 // must skip both Phase 2 (env) and Phase 3 (connect) — real network I/O —
 // entirely, surfacing the issue as its own "check" phase result instead,
 // while the static route preview (no network) still renders.
@@ -862,7 +863,7 @@ func TestRun_ConsistencyIssuesSkipEnvAndConnect(t *testing.T) {
 	cfgPath := writeConfig(t, `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: ""}
+  - {name: p1, base_url: {openai-completions: "http://provider.invalid:1/unreachable"}, api_key: ""}
 models:
   vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
 `)
