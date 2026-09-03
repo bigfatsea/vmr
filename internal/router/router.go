@@ -381,7 +381,19 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	if resp.StatusCode >= 400 {
 		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key, &healthReported)
 	}
-	if uerr, blocked := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key, &healthReported); blocked {
+	uerr, blocked, peekErr := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key, &healthReported)
+	if peekErr != nil {
+		// The soft-block peek hit a broken/timed-out upstream before any byte
+		// reached the client — same shape as a transport error, so treat it
+		// as one and let the failover loop move on.
+		resp.Body.Close()
+		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+		healthReported = true
+		rt.logf("%s, %s, error=network:%v, cooldown=%s, attempt=%d", logPrefix, tokenEst, peekErr, cd, attempt)
+		att.SetNetworkError(peekErr)
+		return false, nil, false
+	}
+	if blocked {
 		return false, uerr, false
 	}
 	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key, &healthReported)
@@ -403,9 +415,22 @@ func (rt *Router) handleErrorResponse(w http.ResponseWriter, resp *http.Response
 	// under 8KB; a few — e.g. Anthropic-shaped errors[] arrays — run
 	// longer, hence the headroom over the read itself being cheap).
 	watchdog := time.AfterFunc(snap.Cfg.Timeouts.StreamIdle.D(), func() { resp.Body.Close() })
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap+1)) // +1 to detect truncation without reading past the cap
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, errBodyCap+1)) // +1 to detect truncation without reading past the cap
 	watchdog.Stop()
 	resp.Body.Close()
+	if readErr != nil {
+		// Upstream stalled after the error headers and the watchdog (or a
+		// mid-body break) killed the read. Whatever came back is a fragment,
+		// not a classifiable error body — an empty/garbled one would classify
+		// as ErrClient and be returned to the client as-is, when really this
+		// attempt never delivered a verdict. Treat as a transport failure and
+		// keep failing over.
+		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+		*healthReported = true
+		rt.logf("%s, %s, error=network:%v, cooldown=%s, attempt=%d", logPrefix, tokenEst, readErr, cd, attempt)
+		att.SetNetworkError(readErr)
+		return false, nil, false
+	}
 	truncated := len(body) > errBodyCap
 	if truncated {
 		body = body[:errBodyCap]

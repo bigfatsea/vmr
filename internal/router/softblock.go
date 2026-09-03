@@ -38,46 +38,46 @@ const softBlockMaxTextRunes = 64
 // is possible. blocked=true means the caller should treat this as a
 // zero-cooldown content rejection (fail over, no health penalty);
 // otherwise resp.Body has been restored to a re-readable reader and
-// forwardSuccess proceeds unchanged.
+// forwardSuccess proceeds unchanged. readErr != nil means the peek itself
+// failed (upstream broke mid-peek, or the stream_idle watchdog tripped) —
+// the caller must fail over, since nothing has been committed to the client
+// yet.
 func (rt *Router) checkSoftBlock(resp *http.Response, creq *core.CanonicalRequest, ep *core.Endpoint, att *audit.Attempt,
-	logPrefix, tokenEst string, snap *Snapshot, attempt int, key string, healthReported *bool) (uerr *upstreamError, blocked bool) {
+	logPrefix, tokenEst string, snap *Snapshot, attempt int, key string, healthReported *bool) (uerr *upstreamError, blocked bool, readErr error) {
 
 	ct := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
 	if !ep.SoftBlockFailover || isSSE || resp.Header.Get("Content-Encoding") != "" {
-		return nil, false
+		return nil, false, nil
 	}
 
 	watchdog := time.AfterFunc(snap.Cfg.Timeouts.StreamIdle.D(), func() { resp.Body.Close() })
-	peek, readErr := io.ReadAll(io.LimitReader(resp.Body, softBlockPeekCap+1))
+	peek, err := io.ReadAll(io.LimitReader(resp.Body, softBlockPeekCap+1))
 	watchdog.Stop()
-	if readErr != nil {
+	if err != nil {
 		// Upstream broke mid-peek, or the stream_idle watchdog tripped. The
-		// bytes so far are a fragment, not a small complete body — never hand
-		// forwardSuccess a fragment as a finished response (that is exactly
-		// B1's silent-truncation failure, and this opt-in path must not
-		// reintroduce it). Give back a body that replays the fragment and
-		// then surfaces the error, so forwardSuccess's copyFlush aborts the
-		// client connection (http.ErrAbortHandler) the same way a mid-stream
-		// break on the normal path does.
-		resp.Body = readCloser{io.MultiReader(bytes.NewReader(peek), errReader{readErr}), resp.Body}
-		return nil, false
+		// bytes so far are a fragment, not a small complete body — and nothing
+		// has been written to the client yet, so the caller can still fail
+		// over instead of committing a truncated 200 (that is exactly B1's
+		// silent-truncation failure, and this opt-in path must not
+		// reintroduce it).
+		return nil, false, err
 	}
 	if len(peek) > softBlockPeekCap {
 		// Too large to be an empty block — hand forwardSuccess a body that
 		// replays what we consumed, then the rest of the live stream.
 		resp.Body = readCloser{io.MultiReader(bytes.NewReader(peek), resp.Body), resp.Body}
-		return nil, false
+		return nil, false, nil
 	}
 	resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(peek))
 
 	if !respnorm.ContainsSoftBlockMarker(peek) {
-		return nil, false
+		return nil, false, nil
 	}
 	textRunes, hasToolCall, ok := adapter.ResponseAssistantText(ep.AdapterType, peek)
 	if !ok || hasToolCall || textRunes > softBlockMaxTextRunes {
-		return nil, false
+		return nil, false, nil
 	}
 	// Same treatment as handleErrorResponse's ErrContent branch: fail over,
 	// no health penalty, only release a probe slot if held.
@@ -85,7 +85,7 @@ func (rt *Router) checkSoftBlock(resp *http.Response, creq *core.CanonicalReques
 	*healthReported = true
 	att.SetErrorResponse(resp.Header, peek, resp.StatusCode, core.ErrContent)
 	rt.logf("%s, %s, status=%d, class=soft_block, attempt=%d (no cooldown)", logPrefix, tokenEst, resp.StatusCode, attempt)
-	return &upstreamError{resp.StatusCode, resp.Header, peek}, true
+	return &upstreamError{resp.StatusCode, resp.Header, peek}, true, nil
 }
 
 // readCloser splices a Reader onto a separate Closer — used to rebuild an
@@ -94,11 +94,3 @@ type readCloser struct {
 	io.Reader
 	io.Closer
 }
-
-// errReader yields a fixed error on every Read. Spliced after the peeked
-// bytes when the peek itself failed, so a broken or timed-out soft-block
-// probe reaches forwardSuccess as a truncated transfer, never a clean
-// short body.
-type errReader struct{ err error }
-
-func (e errReader) Read([]byte) (int, error) { return 0, e.err }

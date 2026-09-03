@@ -801,12 +801,12 @@ models:
 // TestServe_SoftBlockPeekTruncationIsNotSilentSuccess pins NEW-BUG-1: on a
 // soft-block-eligible endpoint, checkSoftBlock pre-reads the 2xx body. If the
 // upstream dies mid-transfer (or the stream_idle watchdog trips), that read
-// returns a fragment plus an error — which must NOT be forwarded to the
-// client as a clean 200 (that is the B1 silent-success failure mode, in a
-// newer path). The client has to see a broken transfer instead.
+// returns a fragment plus an error — which must fail over to the next
+// candidate (nothing has been committed to the client yet), NOT be forwarded
+// as a clean 200 or an aborted transfer.
 func TestServe_SoftBlockPeekTruncationIsNotSilentSuccess(t *testing.T) {
 	// Fragment carries no soft-block marker, so the only thing under test is
-	// how the swallowed read error is handled — not the block heuristic.
+	// how the mid-peek read error is handled — not the block heuristic.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -822,28 +822,86 @@ func TestServe_SoftBlockPeekTruncationIsNotSilentSuccess(t *testing.T) {
 		conn.Close()
 	}))
 	t.Cleanup(srv.Close)
+	u2 := newMockUpstream(t, 200, `{"id":"ok","choices":[{"message":{"content":"real answer"}}]}`)
 
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
   vm:
     soft_block_failover: true
     endpoints:
       - {protocol: openai-completions, providers: [p1], models: [m1]}
-`, srv.URL))
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, srv.URL, u2.srv.URL))
 
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
 
-	defer func() {
-		if r := recover(); r != http.ErrAbortHandler {
-			t.Fatalf("recover() = %v, want http.ErrAbortHandler — a mid-peek truncation must abort the client connection, not forward a clean short body", r)
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+		t.Fatalf("status=%d endpoint=%s, want 200 via p2 (mid-peek break must fail over, not commit a truncated 200)", w.Code, w.Header().Get("X-VMR-Endpoint"))
+	}
+	if !strings.Contains(w.Body.String(), "real answer") {
+		t.Errorf("body = %s, want the second endpoint's answer", w.Body)
+	}
+	// The broken endpoint reported a transient failure, unlike the
+	// zero-cooldown content rejection a real soft block gets.
+	ep := endpointFor(t, cfg, "openai-completions", "vm")
+	if rt.Health.Available(ep.HealthKey(), time.Now()) {
+		t.Error("broken endpoint should be cooled down after the transient failure")
+	}
+}
+
+// TestServe_ErrorBodyReadFailureFailsOver pins the handleErrorResponse
+// counterpart of NEW-BUG-1: an upstream that sends 4xx headers but then
+// stalls (or breaks) mid-body yields a fragment whose read error, if
+// discarded, would classify as ErrClient and be returned to the client
+// as-is — no failover. A never-delivered verdict is a transport failure, so
+// this must report transient and move on.
+func TestServe_ErrorBodyReadFailureFailsOver(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server must support hijacking")
 		}
-	}()
-	serveReq(rt, "vm", []byte(`{"model":"vm"}`))
-	t.Fatal("checkSoftBlock swallowed the mid-peek read error and forwarded a truncated body as a clean success")
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		// 4xx headers declaring far more body than we send, then drop.
+		io.WriteString(conn, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
+		io.WriteString(conn, `{"error":{"message":"par`)
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	u2 := newMockUpstream(t, 200, `{"id":"ok","choices":[{"message":{"content":"real answer"}}]}`)
+
+	cfg := mustConfig(t, fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+models:
+  vm:
+    endpoints:
+      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      - {protocol: openai-completions, providers: [p2], models: [m2]}
+`, srv.URL, u2.srv.URL))
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+		t.Fatalf("status=%d endpoint=%s, want 200 via p2 (a broken error body must fail over, not return as ErrClient)", w.Code, w.Header().Get("X-VMR-Endpoint"))
+	}
+	ep := endpointFor(t, cfg, "openai-completions", "vm")
+	if rt.Health.Available(ep.HealthKey(), time.Now()) {
+		t.Error("endpoint with a stalled error body should be cooled down after the transient failure")
+	}
 }
 
 // --- Serve: vendor protocol-quirk rejection fails over without cooldown ---
