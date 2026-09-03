@@ -16,6 +16,7 @@ func authHint(snippet string) bool {
 func balanceExhaustedHint(snippet string) bool {
 	return containsAny(snippet,
 		"insufficient balance", "insufficient credit", "insufficient quota",
+		"insufficient_balance", "insufficient_quota", // OpenAI machine-code underscore forms (error.code on non-429 statuses)
 		"quota exhausted", "out of credit",
 		"余额不足", "额度不足", "账户欠费")
 }

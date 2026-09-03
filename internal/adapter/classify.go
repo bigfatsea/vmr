@@ -40,7 +40,10 @@ const classifySnippetBytes = 4 << 10
 // fields means keywords match the error itself, not whatever verbose debug
 // payload the vendor attached around it. When the body isn't JSON (or carries
 // no recognizable field), falls back to a bounded raw scan of the first
-// classifySnippetBytes — small plain-text errors fit entirely.
+// classifySnippetBytes — small plain-text errors fit entirely. The machine-
+// stable error.code (OpenAI) is extracted too: a gateway that genericizes or
+// empties message still leaves code, which carries the exact keyword the
+// hints below search for (context_length_exceeded, insufficient_quota, ...).
 func errorSnippet(body []byte) string {
 	raw := func() string {
 		return strings.ToLower(string(body[:min(len(body), classifySnippetBytes)]))
@@ -62,14 +65,15 @@ func errorSnippet(body []byte) string {
 	}
 	if raw, ok := m["error"]; ok {
 		// error may be a string (OpenAI/Anthropic both allow it) or an
-		// object with message/type (the common case).
+		// object with message/type/code (the common case).
 		var s string
 		if err := json.Unmarshal(raw, &s); err == nil {
 			parts = append(parts, s)
 		} else {
 			var obj struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
+				Message string          `json:"message"`
+				Type    string          `json:"type"`
+				Code    json.RawMessage `json:"code"`
 			}
 			if err := json.Unmarshal(raw, &obj); err == nil {
 				if obj.Message != "" {
@@ -78,11 +82,21 @@ func errorSnippet(body []byte) string {
 				if obj.Type != "" {
 					parts = append(parts, obj.Type)
 				}
+				// code is machine-stable but vendors also type it numerically
+				// (Gemini code:400) — parse leniently so a numeric code can't
+				// throw the whole object back to the raw window.
+				if len(obj.Code) > 0 {
+					var code string
+					if err := json.Unmarshal(obj.Code, &code); err == nil && code != "" {
+						parts = append(parts, code)
+					}
+				}
 			}
 		}
 	}
 	add(m["message"])
 	add(m["type"])
+	add(m["code"])   // some gateways carry the code at top level instead
 	add(m["detail"]) // FastAPI gateways ({"detail": "…"}) — no error/message/type fields at all
 	if len(parts) == 0 {
 		return raw()
