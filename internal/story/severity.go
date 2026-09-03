@@ -52,16 +52,23 @@ var lowConfidenceFindings = map[FindingCode]bool{
 
 // JourneySeverity returns the Journey's worst severity and the finding that
 // set it (earliest StepSeq at that level, then Code order — independent of
-// the findings slice's own order). driver is "" when no rule-derived finding
-// at the worst level can headline it (see pickDriver — this includes the
-// all findings are LLM-inferred case, not just the clean case).
-// driverLowConf is true when the chosen driver is a low-confidence finding
-// (the only rule-derived findings at the worst level are low-confidence —
-// see 问题 2 D3). A low-confidence driver renders the verdict in a degraded
-// form ("仅次级信号" instead of a confident conclusion).
+// the findings slice's own order). SourceLLMInferred findings are excluded
+// from BOTH the level and the driver: an LLM finding's narrative text and
+// EvidenceAnchor are influenceable by the very transcript being analyzed, so
+// LLM findings contribute nothing to the severity — when all findings are
+// LLM-inferred the Journey is clean, matching the contract that the
+// headline verdict comes only from rule-detector output. driver is "" when
+// no rule-derived finding at the worst level can headline it (see
+// pickDriver). driverLowConf is true when the chosen driver is a
+// low-confidence finding (the only rule-derived findings at the worst level
+// are low-confidence — see 问题 2 D3). A low-confidence driver renders the
+// verdict in a degraded form ("仅次级信号" instead of a confident conclusion).
 func JourneySeverity(findings []Finding) (level string, driver FindingCode, driverLowConf bool) {
 	level = SeverityClean
 	for _, f := range findings {
+		if f.Source == SourceLLMInferred {
+			continue
+		}
 		if findingLevel(f.Code) == SeverityCritical {
 			level = SeverityCritical
 			break

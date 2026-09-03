@@ -95,17 +95,40 @@ func TestJourneySeverity(t *testing.T) {
 		}
 	})
 
-	t.Run("all-LLM findings yield no driver at all", func(t *testing.T) {
+	t.Run("all-LLM findings are clean with no driver", func(t *testing.T) {
 		findings := []Finding{
 			{Code: FindingUnverifiedCompletionClaim, StepSeq: 1, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
 			{Code: FindingToolResultMisinterpretation, StepSeq: 3, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
 		}
 		lvl, drv, _ := JourneySeverity(findings)
-		if lvl != SeverityWarning || drv != "" {
-			t.Fatalf("no rule finding means no driver: got %q/%q", lvl, drv)
+		if lvl != SeverityClean || drv != "" {
+			t.Fatalf("LLM findings must not set the level: got %q/%q", lvl, drv)
 		}
 		if _, ok := pickDriver(findings, SeverityWarning, false); ok {
 			t.Error("pickDriver must report ok=false when every finding at the level is LLM-inferred")
+		}
+	})
+
+	// An LLM-inferred critical finding (e.g. an injected goal_drift) must not
+	// escalate the level either — otherwise the level reads critical while
+	// pickDriver (which excludes LLM sources) finds nothing at that level and
+	// renders a contradictory "no detector fired" cause next to a red stamp.
+	t.Run("a lone LLM-inferred critical finding is clean", func(t *testing.T) {
+		lvl, drv, low := JourneySeverity([]Finding{
+			{Code: FindingGoalDrift, StepSeq: 0, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+		})
+		if lvl != SeverityClean || drv != "" || low {
+			t.Fatalf("want clean/\"\"/false, got %q/%q/%v", lvl, drv, low)
+		}
+	})
+
+	t.Run("LLM-inferred critical does not bury a real rule warning", func(t *testing.T) {
+		lvl, drv, low := JourneySeverity([]Finding{
+			{Code: FindingGoalDrift, StepSeq: 0, Source: SourceLLMInferred, Confidence: ConfidenceHigh},
+			{Code: FindingUnusedToolResult, StepSeq: 4, Source: SourceRule},
+		})
+		if lvl != SeverityWarning || drv != FindingUnusedToolResult || low {
+			t.Fatalf("rule warning must set level and drive: got %q/%q/%v", lvl, drv, low)
 		}
 	})
 
