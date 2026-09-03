@@ -22,12 +22,14 @@ var headerBlocklist = map[string]struct{}{
 	"transfer-encoding":   {}, // Go Transport manages
 	"connection":          {}, // Go Transport manages
 	// Forwarding the client's Accept-Encoding disables Go Transport's
-	// transparent gzip: the upstream may then answer compressed, the
-	// response normalizer (internal/respnorm) would run its
-	// regexes over gzip bytes, and the client would receive them without a
-	// Content-Encoding header (only Content-Type is forwarded back).
-	// Blocking it lets the Transport negotiate gzip itself and hand every
-	// layer plaintext.
+	// transparent gzip: the upstream may then answer compressed. That is
+	// fine today — the response normalizer (internal/respnorm) runs in
+	// opaque mode for a compressed body, forwarding it byte-faithful along
+	// with its Content-Encoding header, so the client can decompress what
+	// it asked for. Note for any future change to opaque handling: with
+	// this header no longer blocked, an upstream compressed body that got
+	// un-opaqued (regex-normalized) without carrying its Content-Encoding
+	// through would reach the client as undecodable bytes.
 	"accept-encoding": {},
 	// Internal routing-pin headers (vmr smoke, manual debugging): consumed
 	// by router.Serve via r.Header (see pin.go) and never forwarded — an

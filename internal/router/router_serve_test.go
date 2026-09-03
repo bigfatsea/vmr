@@ -275,9 +275,38 @@ models:
 }
 
 // TestServe_AllEndpointsKeyless: a model whose every endpoint has an empty
-// api_key (a forgotten ${ENV_VAR}) answers with one clear vmr-side error
-// before any upstream attempt — not a raw upstream 401, not a cooldown.
+// api_key AND targets a public upstream answers with one clear vmr-side
+// error before any upstream attempt — not a raw upstream 401, not a
+// cooldown. (Keyless endpoints that all target loopback/private upstreams
+// are legitimate and allowed through — see TestServe_AllEndpointsKeyless
+// _LoopbackUpstreamAllowed.)
 func TestServe_AllEndpointsKeyless(t *testing.T) {
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://api.example.com/v1}, api_key: ""}
+models:
+  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+`)
+
+	rt := New(nil)
+	rt.Install(mustSnapshot(t, cfg))
+
+	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "vmr_no_api_key") {
+		t.Errorf("body should name vmr_no_api_key: %s", w.Body)
+	}
+}
+
+// TestServe_AllEndpointsKeyless_LoopbackUpstreamAllowed: a keyless virtual
+// model whose every endpoint targets a loopback upstream (a no-auth
+// self-hosted vLLM/Ollama) is a legitimate config — the request goes
+// through the failover loop and reaches the upstream, instead of being
+// 503'd as a forgotten ${ENV_VAR}.
+func TestServe_AllEndpointsKeyless_LoopbackUpstreamAllowed(t *testing.T) {
 	u := newMockUpstream(t, 200, `{"ok":true}`)
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
@@ -290,15 +319,68 @@ models:
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
 
-	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d, want 503", w.Code)
+	w := serveReq(rt, "vm", []byte(`{"model":"vm","messages":[{"role":"user","content":"hi"}]}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200 (loopback keyless upstream must be allowed through): %s", w.Code, w.Body)
 	}
-	if !strings.Contains(w.Body.String(), "vmr_no_api_key") {
-		t.Errorf("body should name vmr_no_api_key: %s", w.Body)
+	if u.hits != 1 {
+		t.Errorf("upstream hits=%d, want 1", u.hits)
 	}
-	if u.hits != 0 {
-		t.Errorf("upstream should not have been contacted, hits=%d", u.hits)
+}
+
+// TestRejectIfAllKeyless_GradedByHostShape pins the decision table directly:
+// all-loopback/private keyless sets pass, one public host rejects, one keyed
+// endpoint short-circuits to pass.
+func TestRejectIfAllKeyless_GradedByHostShape(t *testing.T) {
+	ep := func(url, key string) *core.Endpoint {
+		return &core.Endpoint{FullURL: url, APIKey: key}
+	}
+	cases := []struct {
+		name string
+		eps  []*core.Endpoint
+		want bool // true = rejected with 503
+	}{
+		{"all loopback", []*core.Endpoint{
+			ep("http://localhost:11434/v1/chat/completions", ""),
+			ep("http://127.0.0.1:8080/v1/chat/completions", ""),
+		}, false},
+		{"all private ipv4", []*core.Endpoint{
+			ep("http://192.168.1.10:8000/v1/chat/completions", ""),
+			ep("http://10.0.0.5:8000/v1/chat/completions", ""),
+		}, false},
+		{"private ipv4 + ipv6 loopback", []*core.Endpoint{
+			ep("http://172.16.0.3:8000/v1/chat/completions", ""),
+			ep("http://[::1]:8000/v1/chat/completions", ""),
+		}, false},
+		{"private ipv6 (fc00::/7)", []*core.Endpoint{
+			ep("http://[fd00::5]:8000/v1/chat/completions", ""),
+		}, false},
+		{"one public host rejects", []*core.Endpoint{
+			ep("http://192.168.1.10:8000/v1/chat/completions", ""),
+			ep("https://api.example.com/v1/chat/completions", ""),
+		}, true},
+		{"unparseable url counts as public", []*core.Endpoint{
+			ep("http://localhost:11434/v1", ""),
+			ep("://not a url", ""),
+		}, true},
+		{"one keyed endpoint passes", []*core.Endpoint{
+			ep("https://api.example.com/v1/chat/completions", ""),
+			ep("https://api.other.com/v1/chat/completions", "sk-live"),
+		}, false},
+		{"empty endpoint set passes", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rt := New(nil)
+			w := httptest.NewRecorder()
+			got := rt.rejectIfAllKeyless(w, &core.CanonicalRequest{Model: "vm"}, c.eps)
+			if got != c.want {
+				t.Fatalf("rejected=%v, want %v (body: %s)", got, c.want, w.Body)
+			}
+			if got && w.Code != http.StatusServiceUnavailable {
+				t.Errorf("rejected but status=%d, want 503", w.Code)
+			}
+		})
 	}
 }
 
@@ -459,9 +541,11 @@ func TestIngressPath(t *testing.T) {
 	if got := IngressPath("openai-responses"); got != "/v1/responses" {
 		t.Errorf("openai-responses: got %q, want /v1/responses", got)
 	}
-	// Unknown protocol defaults to the OpenAI path.
-	if got := IngressPath("unknown"); got != "/v1/chat/completions" {
-		t.Errorf("unknown: got %q, want /v1/chat/completions", got)
+	// Unknown/unregistered protocols return "" — no silently wrong path.
+	for _, p := range []string{"unknown", "gemini-whatever", ""} {
+		if got := IngressPath(p); got != "" {
+			t.Errorf("IngressPath(%q): got %q, want \"\"", p, got)
+		}
 	}
 }
 

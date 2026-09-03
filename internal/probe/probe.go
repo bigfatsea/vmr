@@ -20,11 +20,16 @@ import (
 // verify against the raw response. The shape (model/messages/max_tokens) is
 // recognized by every OpenAI- and Anthropic-compatible provider vmr targets.
 //
-// Asking for an echo (rather than just checking the HTTP status) catches a
-// class of failure a bare 200 can't: a relay/gateway layer answering with a
-// cached or canned response while the real model never ran. A plain
-// substring match on the raw response body is enough to verify it — see
-// Echoed.
+// The nonce enables an echo check that a bare 200 can't: a relay/gateway
+// layer answering with a cached or canned response while the real model
+// never ran. Enforcement lives with `vmr diagnose` (internal/diagnose),
+// which warns when the echo is missing — a one-shot human check can afford
+// strictness. The runtime background health probe (internal/router's
+// runProbe) deliberately does NOT judge on it: it only logs whether the
+// nonce came back (see probe.Echoed), because a reachable, responding
+// endpoint that swallowed the echo is still one real traffic can use —
+// see runProbe's 2xx comment for that leniency call. Echoed does the
+// substring match itself.
 func Request(model string) (body json.RawMessage, nonce string) {
 	nonce = newNonce()
 	b, err := json.Marshal(map[string]any{

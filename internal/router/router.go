@@ -196,28 +196,8 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 }
 
 // rejectIfAllKeyless answers a request for a model whose every endpoint has
-// an empty api_key — a forgotten or unset ${ENV_VAR} that loaded as valid
-// YAML — with one clear vmr-side error instead of letting each attempt 401
-// upstream (raw provider/CDN HTML to the client) and cool the endpoints down
-// for 10min+. Checked against the full endpoint set, not the health-filtered
-// one: an endpoint that already 401'd is in cooldown and would drop out,
-// turning this into a vaguer "no candidates" message. Returns true when it
-// handled the response.
-func (rt *Router) rejectIfAllKeyless(w http.ResponseWriter, creq *core.CanonicalRequest, eps []*core.Endpoint) bool {
-	if len(eps) == 0 {
-		return false
-	}
-	for _, ep := range eps {
-		if ep.APIKey != "" {
-			return false
-		}
-	}
-	rt.Telemetry.RecordOutcome(false, false)
-	WriteError(w, http.StatusServiceUnavailable, "vmr_no_api_key", fmt.Sprintf(
-		"all %d endpoint(s) for model %q have no api_key — set the provider api_key (or the ${ENV_VAR} it references) and reload",
-		len(eps), creq.Model))
-	return true
-}
+// an empty api_key — see keyless.go, where it lives with its host-shape
+// rejectIfAllKeyless is documented and implemented in keyless.go.
 
 // findByHealthKey returns the endpoint in candidates whose HealthKey
 // matches key, or nil if none does — e.g. a sticky pointer recorded before
@@ -659,18 +639,20 @@ func otherProtocolFor(s *Snapshot, protocol, name string) string {
 // protocol's ingress route (this package's own 404 redirect message, and
 // internal/replay's reconstructed Client.Request.Path) shares one mapping
 // instead of each keeping its own copy that could drift as protocols are
-// added. Falls back to the Chat Completions path for any protocol string
-// this doesn't recognize (including "openai-completions" itself) — a third+
-// protocol that reuses this default without adding a case here would
-// misroute, so every registered protocol must have its own explicit case,
-// not rely on falling through.
+// added. Every registered protocol has its own explicit case; an
+// unregistered protocol returns "" — replay then rebuilds a visibly broken
+// Client.Request.Path instead of silently misrouting it onto another
+// protocol's path (a loud wrong answer beats a quiet right-looking one;
+// a panic would be worse — replay must not die mid-report).
 func IngressPath(protocol string) string {
 	switch protocol {
+	case core.ProtocolOpenAICompletions:
+		return "/v1/chat/completions"
 	case core.ProtocolAnthropicMessages:
 		return "/v1/messages"
 	case core.ProtocolOpenAIResponses:
 		return "/v1/responses"
 	default:
-		return "/v1/chat/completions"
+		return ""
 	}
 }

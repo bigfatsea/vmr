@@ -458,10 +458,10 @@ func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, r
 
 // reorderByQuota reorders cands in place: within each tier that dims'
 // Dimension chain considers equal (a full tie across every Dimension.
-// Compare — priority, or any future dimension), quota-bearing endpoints
-// move to the front of that tier in descending headroom-score order;
-// endpoints with no quota configured (or whose provider's quota has no
-// Limit applicable to that endpoint's own model — see applicableLimits)
+// Compare — priority, or any future dimension), quota-bearing endpoints are
+// reordered in place across the slots they already occupy, by headroom-score
+// descending; non-quota endpoints (or endpoints whose provider's quota has
+// no Limit applicable to that endpoint's own model — see applicableLimits)
 // keep their exact position. Called from Serve right after strategy.Sort
 // and before the Sticky Model block — see router.go's Serve. Reports
 // whether the very first candidate actually changed, purely for

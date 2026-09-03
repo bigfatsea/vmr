@@ -99,13 +99,6 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		return
 	}
 	defer resp.Body.Close()
-	// A probe consumes one real upstream request; charge it so request-
-	// metered accounts don't accrue usage the local ledger never sees.
-	// Token/cost limits get zero counters: the probe's usage is not parsed
-	// here (its whole response is capped at probeBodyCap), and undercounting
-	// a few dozen tokens is the honest bound. nil-safe when no quota
-	// Registry is wired up or the endpoint carries no quota, like chargeQuota.
-	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, time.Now())
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, probeBodyCap))
 
 	if resp.StatusCode >= 400 {
@@ -126,6 +119,18 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		rt.logf("%s, status=%d, class=%s, dur=%s, cooldown=%s", logPrefix, resp.StatusCode, class, fmtDur(dur), cd)
 		return
 	}
+
+	// A probe is charged for one real upstream request ONLY when it
+	// actually got a 2xx — the same basis as live traffic, where only
+	// forwardSuccess ever reaches chargeQuota (see chargeQuota's doc
+	// comment). An error response (429/5xx) is not billed by most
+	// request-metered providers, so charging it here would overstate local
+	// usage the account never sees. Token/cost limits get zero counters:
+	// the probe's usage is not parsed here (its whole response is capped at
+	// probeBodyCap), and undercounting a few dozen tokens is the honest
+	// bound. nil-safe when no quota Registry is wired up or the endpoint
+	// carries no quota, like chargeQuota.
+	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, time.Now())
 
 	// 2xx: the endpoint answered — that alone is enough to let it out of
 	// cooldown, but only as probe-evidence: ReportProbeSuccess decays fails
