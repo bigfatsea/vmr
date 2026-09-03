@@ -649,7 +649,12 @@ func writeReplayRecord(path string, rv *recordView, ep *core.Endpoint, req *http
 			Response: attemptResp,
 		}},
 	}
-	line, err := json.Marshal(&rec)
+	// Use MarshalNoEscape so < > & in the record's request/response bodies
+	// (json.RawMessage from audit.EncodeBody) hit the file byte-faithfully:
+	// json.Marshal would rewrite them to \uXXXX, breaking the same invariant
+	// audit.Write upholds. jsonscan.MarshalNoEscape trims Encoder's trailing
+	// newline, so the manual '\n' append below still produces one line per record.
+	line, err := jsonscan.MarshalNoEscape(&rec)
 	if err != nil {
 		return err
 	}

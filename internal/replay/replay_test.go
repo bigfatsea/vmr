@@ -962,3 +962,66 @@ func TestRun_StreamOverrideRewritesBody(t *testing.T) {
 		t.Errorf(`upstream body "stream" = %v, want false`, gotBody["stream"])
 	}
 }
+
+// TestRun_ReplayRecordIsByteFaithful locks in the fix for P-2-1's replay
+// half: writeReplayRecord must serialize the record with
+// SetEscapeHTML(false), the same audit.Write does, so < > & in a
+// request/response body land on disk as literal bytes rather than the
+// \uXXXX forms json.Marshal would otherwise produce. The chatmsg-typing-
+// tests' bodies routinely contain comparisons like `1 < 2 && 3 > 2`, and a
+// recorded body that has been escape-mangled no longer equals the bytes
+// the upstream actually received, breaking the same byte-faithful invariant
+// CLAUDE.md requires of every other vmr→disk write.
+func TestRun_ReplayRecordIsByteFaithful(t *testing.T) {
+	dir := t.TempDir()
+	// The JSON-encoded form of the body — what we expect to see verbatim on disk.
+	// The interior quotes of `"ok"` are escaped by JSON's encoder to `\"ok\"`,
+	// so that's what we look for, not the bare string.
+	const lit = `if 1 < 2 && 3 > 2 then \"ok\"`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Wrap the literal in a valid JSON body so audit.EncodeBody treats
+		// it as a JSON object (the struct path falls back to string-y
+		// storage and bypasses the no-escape rewrite). The content field
+		// itself is what we want preserved byte-for-byte on disk.
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":"r","model":"upstream-model","choices":[{"message":{"role":"assistant","content":%q}}]}`, `if 1 < 2 && 3 > 2 then "ok"`)
+	}))
+	defer upstream.Close()
+	cfgPath := writeConfig(t, dir, upstream.URL, true)
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", chatRecord("vm", "hi"))
+	recordPath := filepath.Join(dir, "replay-out.jsonl")
+
+	if err := Run(context.Background(), Options{
+		ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", RecordPath: recordPath,
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// < > & must appear literally in the file — exactly what audit.Write
+	// would have written. json.Marshal would have rewritten them to
+	// \u003c / \u003e / \u0026, so a raw byte check catches the bug.
+	if !strings.Contains(string(data), lit) {
+		t.Errorf("replay record must preserve literal <, >, & in response body (byte-faithful passthrough broken):\n%s", data)
+	}
+	// json.Marshal's default would rewrite these to \u003c / \u003e /
+	// \u0026 — assert none of those escape forms leaked in, since the file
+	// IS supposed to carry literal < > &.
+	for _, esc := range []string{`\u003c`, `\u003e`, `\u0026`} {
+		if strings.Contains(string(data), esc) {
+			t.Errorf("replay record HTML-escaped %s — byte-faithful passthrough broken:\n%s", esc, data)
+		}
+	}
+
+	// Still valid JSON, still reports ok.
+	var rec audit.Record
+	if err := json.Unmarshal(bytes.TrimSpace(data), &rec); err != nil {
+		t.Fatalf("replay record is not valid JSON after no-escape write: %v\n%s", err, data)
+	}
+	if rec.Outcome != "ok" {
+		t.Errorf("Outcome = %q, want ok", rec.Outcome)
+	}
+}
