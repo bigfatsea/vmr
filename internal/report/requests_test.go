@@ -117,25 +117,26 @@ func TestBuildRequestRow_UsageFlags(t *testing.T) {
 }
 
 func TestTagSummary_UsageInOKGate(t *testing.T) {
-	// rowKnownZeroIn: Usage is known on the in-side, but TokensIn is 0.
-	// TokensIn > 0 gate would have skipped counting this known record.
+	// Usage known on the in-side but TokensIn == 0: the old `TokensIn > 0`
+	// proxy skipped these known-zero records; the UsageInOK gate must count them.
 	rowKnownZeroIn := RequestRow{
-		Outcome:        "ok",
-		UsageInOK:      true,
-		TokensIn:       0,
-		TokensInFresh:  0,
-		TokensInCached: 0,
+		Outcome: "ok", UsageInOK: true,
+		TokensIn: 0, TokensInFresh: 3, TokensInCached: 2,
 	}
-	// rowUnknownWithIn: Defensive case: UsageInOK is false, but TokensIn > 0.
-	// Must not be counted in tokensKnown.
+	// UsageInOK false but TokensIn > 0 (shouldn't happen, defensive): the old
+	// proxy would have counted it; the UsageInOK gate must not.
 	rowUnknownWithIn := RequestRow{
-		Outcome:   "ok",
-		UsageInOK: false,
-		TokensIn:  5,
+		Outcome: "ok", UsageInOK: false,
+		TokensIn: 5, TokensInFresh: 5,
 	}
 
-	summary := tagSummary([]RequestRow{rowKnownZeroIn, rowUnknownWithIn})
-	if summary.tokensKnown != 1 {
-		t.Errorf("tagSummary.tokensKnown = %d, want 1", summary.tokensKnown)
+	s := tagSummary([]RequestRow{rowKnownZeroIn, rowUnknownWithIn})
+	if s.tokensKnown != 1 {
+		t.Errorf("tokensKnown = %d, want 1 (only the UsageInOK row)", s.tokensKnown)
+	}
+	// fresh/cached must come from rowKnownZeroIn (3/2). Under the old
+	// `TokensIn > 0` proxy the counted row would be rowUnknownWithIn -> 5/0.
+	if s.fresh != 3 || s.cached != 2 {
+		t.Errorf("fresh=%d cached=%d, want 3/2 — gate counted the wrong row", s.fresh, s.cached)
 	}
 }
