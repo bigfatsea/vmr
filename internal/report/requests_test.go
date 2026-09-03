@@ -95,3 +95,47 @@ func TestClusterFailedRequests_CorruptedTimestamps(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildRequestRow_UsageFlags(t *testing.T) {
+	rc := &rec2{
+		usageInOK:  true,
+		usageOutOK: false,
+	}
+	rr := buildRequestRow(rc)
+	if !rr.UsageInOK || rr.UsageOutOK {
+		t.Errorf("got UsageInOK=%v, UsageOutOK=%v, want true, false", rr.UsageInOK, rr.UsageOutOK)
+	}
+
+	rc2 := &rec2{
+		usageInOK:  false,
+		usageOutOK: true,
+	}
+	rr2 := buildRequestRow(rc2)
+	if rr2.UsageInOK || !rr2.UsageOutOK {
+		t.Errorf("got UsageInOK=%v, UsageOutOK=%v, want false, true", rr2.UsageInOK, rr2.UsageOutOK)
+	}
+}
+
+func TestTagSummary_UsageInOKGate(t *testing.T) {
+	// rowKnownZeroIn: Usage is known on the in-side, but TokensIn is 0.
+	// TokensIn > 0 gate would have skipped counting this known record.
+	rowKnownZeroIn := RequestRow{
+		Outcome:        "ok",
+		UsageInOK:      true,
+		TokensIn:       0,
+		TokensInFresh:  0,
+		TokensInCached: 0,
+	}
+	// rowUnknownWithIn: Defensive case: UsageInOK is false, but TokensIn > 0.
+	// Must not be counted in tokensKnown.
+	rowUnknownWithIn := RequestRow{
+		Outcome:   "ok",
+		UsageInOK: false,
+		TokensIn:  5,
+	}
+
+	summary := tagSummary([]RequestRow{rowKnownZeroIn, rowUnknownWithIn})
+	if summary.tokensKnown != 1 {
+		t.Errorf("tagSummary.tokensKnown = %d, want 1", summary.tokensKnown)
+	}
+}

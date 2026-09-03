@@ -371,6 +371,7 @@ type EndpointRow struct {
 	// input tokens.
 	CostRateIncomplete bool `json:"cost_rate_incomplete,omitempty"`
 
+	tokDurMS                               int64 // duration accumulated only for usageOutOK records — TokOutPerSec denominator, same basis as numerator
 	durs, ttfts, streamMS, inToks, outToks []int64
 }
 
@@ -546,6 +547,8 @@ type RequestRow struct {
 	TokensInCached int64   `json:"tokens_in_cached,omitempty"`
 	TokensInFresh  int64   `json:"tokens_in_fresh,omitempty"`
 	TokensOut      int64   `json:"tokens_out,omitempty"`
+	UsageInOK      bool    `json:"usage_in_ok,omitempty"`
+	UsageOutOK     bool    `json:"usage_out_ok,omitempty"`
 	CacheEff       float64 `json:"cache_eff,omitempty"`
 	Fallbacks      int     `json:"fallbacks,omitempty"`
 	Truncated      bool    `json:"truncated,omitempty"`

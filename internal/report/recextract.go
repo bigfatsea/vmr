@@ -53,6 +53,8 @@ func buildRequestRow(rc *rec2) RequestRow {
 	if rc.usageOutOK {
 		rr.TokensOut = rc.usage.Out
 	}
+	rr.UsageInOK = rc.usageInOK
+	rr.UsageOutOK = rc.usageOutOK
 	return rr
 }
 

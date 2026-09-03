@@ -217,7 +217,7 @@ func tagSummary(rows []RequestRow) tagSummaryData {
 		if r.Outcome == "ok" {
 			s.ok++
 		}
-		if r.TokensIn > 0 {
+		if r.UsageInOK {
 			s.fresh += r.TokensInFresh
 			s.cached += r.TokensInCached
 			s.out += r.TokensOut

@@ -222,6 +222,9 @@ func (e *EndpointRow) IngestRequest(rc *rec2) {
 		e.RequestsWithDur++
 		e.durs = append(e.durs, rc.durMS)
 		e.DurMSSum += rc.durMS
+		if rc.usageOutOK {
+			e.tokDurMS += rc.durMS
+		}
 		if rc.durMS > e.DurMSMax {
 			e.DurMSMax = rc.durMS
 		}

@@ -172,8 +172,8 @@ func finishEndpoint(e *EndpointRow) {
 	if e.Requests > 0 {
 		e.SuccessRate = round2(float64(e.RequestsOK) / float64(e.Requests))
 	}
-	if e.DurMSSum > 0 {
-		e.TokOutPerSec = round2(float64(e.TokensOut) / (float64(e.DurMSSum) / 1000))
+	if e.tokDurMS > 0 {
+		e.TokOutPerSec = round2(float64(e.TokensOut) / (float64(e.tokDurMS) / 1000))
 	}
 	if len(e.ErrorClasses) == 0 {
 		e.ErrorClasses = nil
