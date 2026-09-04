@@ -322,6 +322,12 @@ raw(L)            = (1 - used_frac) / max(time_left_frac, ε)
 套餐费按最长周期收取，只有这个周期的未用额度才对应到真实浪费。该规则在每一个观察到的套餐上都成立
 （类型 A：月=桶，周/时=闸；类型 B：周=桶，滚动短窗=闸；只配一条 tumbling 时它自己就是桶）。
 
+周期时长**并列**时以次级裁决保证确定性，角色永不依赖 YAML 书写顺序（该情形不常用，但角色由书写顺序决定
+没有任何原理支撑，纯属实现偶然）。第一性依据：共享池（非 per-model）优先为桶——它会被该账号的全部流量消耗，
+只有当桶，它的消耗才能转化为平滑衰减的评分信号（当闸则烧断前全程静默、只剩一个阶跃）；同类的两条并列时
+`amount` 大者为桶——紧的是更好的保险丝（先烧断，这正是闸的全部职能），松的才是更好的容量刻度。全平局
+（同类且等额）保持配置书写顺序，作为文档化的最终兜底。
+
 **rolling 窗口永远不能当桶**——这是必须显式写死的一条边界，否则会静默算错：
 滚动窗口的额度是持续再生的，不存在"到期作废"，因此 use-it-or-lose-it 对它不成立。
 而且它的 `time_left_frac ≡ 1`，`raw` 恒 ≤ 1，当桶时永远给不出 `> 1` 的提升信号，
@@ -833,9 +839,10 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 **定价解析结果的挂点不一样，因为它的粒度不一样**：`QuotaSpec` 是账号级、同一 Provider 下所有
 `core.Endpoint` 共享一个指针是对的——额度本来就按账号记账。但价格是**按模型分化**的（§4.2⑦已论证，
 市场数据也证实 Credits 折算率逐模型标注），账号级挂一份单一费率装不下多模型账号，所以
-`PricingRate`（`internal/pricing.Resolve` 的产物）挂在 `core.Endpoint.PricingRate` 上——
-`BuildSnapshot` 对每个 `provider+model` 组合各自解析一次，不像 `QuotaSpec` 那样整个账号共享。
-`nil` 表示该端点没有解析出费率；一个配了 `metric: cost` 的账号若有端点解析不出费率，
+`PricingRate`（`internal/pricing.Resolve` 的产物经 `pricing.FoldSpec` **预折叠成单个 `core.Rate`**）挂在
+`core.Endpoint.PricingRate` 上——`BuildSnapshot` 对每个 `provider+model` 组合各自折叠一次，不像
+`QuotaSpec` 那样整个账号共享；热路径读它是纯字段直读，override 链解析永不进实时路由（§9.1 加载期
+已一次性做完）。`nil` 表示该端点没有解析出费率；一个配了 `metric: cost` 的账号若有端点解析不出费率，
 在校验阶段就已经报错（§9.1 校验清单），不会留到运行时才发现 `nil`。
 
 **实现落点**：`every`/`since` 保持普通 `string` 字段，解析与报错都在 `validate()` 里一次性做完、产出写进 `LimitConfig.Resolved core.Limit`（`yaml:"-"`，对 `KnownFields` 隐身）——不用自定义 `UnmarshalYAML`，符合 KISS，`PricingConfig`/`PricingOverride` 同理。`quota.LimitKey` 对 per-model Limit 带 `#model=<name>` 后缀（一条 `models: ["*"]`/具体列表的 Limit 给每个实际命中的模型各开一个独立 bucket，不共享计数器）。rolling 窗口未交付（§15.2 #4），`Registry` 因此是简单的 `map[string]map[string]*bucket`（provider name → `LimitKey` → bucket）、每个 bucket 是惰性重置的单一计数器，从 P1 沿用至今；等真交付 rolling 再把 `bucket` 换成能装下 `Ring` 的类型，不现在为一个还没有真实需求的功能预留骨架。
