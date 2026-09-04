@@ -53,10 +53,6 @@ func refMatchesModel(ref ProviderQuotaRef, model string) bool {
 // empty — the common "no account declares quota:" case, so the caller (and
 // the renderer) can treat "no sub-table" and "nil" the same way.
 func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, now, windowFrom, windowTo time.Time) []ProviderQuotaRow {
-	// Reset the package-level skip info so a quota-less report (nil rows)
-	// doesn't carry stale state from a previous run in the same process.
-	lastSkippedAttempts = 0
-	lastSkippedProviders = nil
 	if len(quotas) == 0 {
 		return nil
 	}
@@ -154,13 +150,12 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 		}
 		return strings.Join(a.Models, ",") < strings.Join(b.Models, ",")
 	})
-	// Expose the accumulated skip info for renderSkippedAttemptsNote
-	// (P-5-2): package-level so the renderer can read it without changing
-	// buildProviderQuotaRows' signature (called from aggregate.go, which is
-	// outside this change's whitelist). The report build is single-threaded
-	// (aggregate.go's finishBuckets) and completes before any renderer runs.
-	lastSkippedAttempts = acc.skippedAttempts
-	lastSkippedProviders = sortedSkippedProviders(acc.unknownProviders)
+	// Skip info lands on rep (part of the JSON contract, read by
+	// renderSkippedAttemptsNote) rather than a package-level global —
+	// buildProviderQuotaRows already received rep for exactly this kind of
+	// cross-stage carry.
+	rep.ProviderQuotaSkippedAttempts = acc.skippedAttempts
+	rep.ProviderQuotaSkippedProviders = sortedSkippedProviders(acc.unknownProviders)
 	return rows
 }
 
@@ -207,28 +202,17 @@ type quotaWindow struct {
 	unknownProviders map[string]int
 }
 
-// lastSkippedAttempts and lastSkippedProviders hold the skip info from the
-// most recent buildProviderQuotaRows call, set at the end of that function.
-// Accessed by renderSkippedAttemptsNote — the renderer section_provider.go's
-// renderProviderQuotaTable calls when the host block is wired (P-5-2).
-var (
-	lastSkippedAttempts  int
-	lastSkippedProviders []string
-)
-
 // renderSkippedAttemptsNote writes a single line under the §2.5 quota table
 // when some EndpointsAll rows carried a provider name not found in the
 // quotas map — traffic that contributed nothing to the window recomputation
-// (P-5-2). The format lists the first 3 unknown provider names plus a
-// remaining count when there are more. Called from renderProviderQuotaTable
-// after the table itself; stores the data here (package-level) so the
-// renderer in section_provider.go can read it without needing to re-parse
-// the rows — see renderSkippedAttemptsNote's own doc comment.
-func renderSkippedAttemptsNote(w func(string, ...any), lang i18n.Lang) {
-	if lastSkippedAttempts == 0 {
+// (P-5-2). Reads the stats buildProviderQuotaRows wrote onto rep. The format
+// lists the first 3 unknown provider names plus a remaining count when there
+// are more.
+func renderSkippedAttemptsNote(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+	if rep == nil || rep.ProviderQuotaSkippedAttempts == 0 {
 		return
 	}
-	names := lastSkippedProviders
+	names := rep.ProviderQuotaSkippedProviders
 	var namesStr string
 	more := 0
 	if len(names) > 3 {
@@ -237,7 +221,7 @@ func renderSkippedAttemptsNote(w func(string, ...any), lang i18n.Lang) {
 	} else {
 		namesStr = strings.Join(names, ", ")
 	}
-	w("%s\n", i18n.Provider(lang).SkippedAttemptsNote(lastSkippedAttempts, namesStr, more))
+	w("%s\n", i18n.Provider(lang).SkippedAttemptsNote(rep.ProviderQuotaSkippedAttempts, namesStr, more))
 }
 
 // accumulateQuotaWindow folds rep.EndpointsAll into per-ref totals in each

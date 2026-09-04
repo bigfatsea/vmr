@@ -2,6 +2,7 @@
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,8 +13,13 @@ import (
 )
 
 func TestBuildProviderQuotaRows_Empty(t *testing.T) {
-	if got := buildProviderQuotaRows(&Report2{}, nil, time.Now(), time.Time{}, time.Time{}); got != nil {
+	rep := &Report2{}
+	if got := buildProviderQuotaRows(rep, nil, time.Now(), time.Time{}, time.Time{}); got != nil {
 		t.Fatalf("empty quotas must return nil, got %+v", got)
+	}
+	if rep.ProviderQuotaSkippedAttempts != 0 || rep.ProviderQuotaSkippedProviders != nil {
+		t.Fatalf("empty quotas must leave the skip fields untouched, got %d/%v",
+			rep.ProviderQuotaSkippedAttempts, rep.ProviderQuotaSkippedProviders)
 	}
 }
 
@@ -560,7 +566,6 @@ func TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct(t *tes
 // §2.5 renderer can surface traffic that contributed nothing to the window
 // recomputation. Rows that DO resolve are never counted.
 func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing.T) {
-	resetSkipInfo()
 	lim := requestsLimit(1000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 3, Forwarded: 3},
@@ -568,13 +573,13 @@ func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing
 		{Endpoint: "anthropic-messages:ghost-account:m3", Requests: 2, Forwarded: 2},
 	}}
 	buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if lastSkippedAttempts != 2 {
-		t.Fatalf("lastSkippedAttempts = %d, want 2 (one EndpointsAll row per unknown provider)", lastSkippedAttempts)
+	if rep.ProviderQuotaSkippedAttempts != 2 {
+		t.Fatalf("ProviderQuotaSkippedAttempts = %d, want 2 (one EndpointsAll row per unknown provider)", rep.ProviderQuotaSkippedAttempts)
 	}
 	// Both unknown rows carry the same provider name (ghost-account), so the
 	// name list has one entry — the count-descending sort renders it first.
-	if len(lastSkippedProviders) != 1 || lastSkippedProviders[0] != "ghost-account" {
-		t.Fatalf("lastSkippedProviders = %v, want [ghost-account]", lastSkippedProviders)
+	if len(rep.ProviderQuotaSkippedProviders) != 1 || rep.ProviderQuotaSkippedProviders[0] != "ghost-account" {
+		t.Fatalf("ProviderQuotaSkippedProviders = %v, want [ghost-account]", rep.ProviderQuotaSkippedProviders)
 	}
 }
 
@@ -582,7 +587,6 @@ func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing
 // unknown-provider list by descending row count (ties by name) — the order
 // renderSkippedAttemptsNote takes its first three from.
 func TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders(t *testing.T) {
-	resetSkipInfo()
 	lim := requestsLimit(1000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 1, Forwarded: 1},
@@ -591,34 +595,24 @@ func TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders(t *testing.T) 
 		{Endpoint: "openai-completions:a-common:m4", Requests: 2, Forwarded: 2},
 	}}
 	buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if lastSkippedAttempts != 3 {
-		t.Fatalf("lastSkippedAttempts = %d, want 3", lastSkippedAttempts)
+	if rep.ProviderQuotaSkippedAttempts != 3 {
+		t.Fatalf("ProviderQuotaSkippedAttempts = %d, want 3", rep.ProviderQuotaSkippedAttempts)
 	}
 	want := []string{"a-common", "z-rare"} // a-common has 2 rows, z-rare has 1
-	if len(lastSkippedProviders) != 2 || lastSkippedProviders[0] != want[0] || lastSkippedProviders[1] != want[1] {
-		t.Fatalf("lastSkippedProviders = %v, want %v", lastSkippedProviders, want)
+	got := rep.ProviderQuotaSkippedProviders
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("ProviderQuotaSkippedProviders = %v, want %v", got, want)
 	}
 }
 
-// resetSkipInfo zeroes the package-level skip-info vars (set by
-// buildProviderQuotaRows, read by renderSkippedAttemptsNote) so each test
-// starts from a clean slate — tests in this file are not parallel, so plain
-// assignment is safe.
-func resetSkipInfo() {
-	lastSkippedAttempts = 0
-	lastSkippedProviders = nil
-}
-
-// TestRenderSkippedAttemptsNote renders the P-5-2 note line from the
-// package-level skip info set by buildProviderQuotaRows. The exact format is
-// pinned here so the renderer (section_provider.go's renderProviderQuotaTable,
-// wired by the lead) stays byte-stable.
+// TestRenderSkippedAttemptsNote renders the P-5-2 note line from the skip
+// stats buildProviderQuotaRows wrote onto rep. The exact format is pinned
+// here so the renderer (renderProviderQuotaTable, which owns the note now)
+// stays byte-stable.
 func TestRenderSkippedAttemptsNote(t *testing.T) {
-	resetSkipInfo()
-	lastSkippedAttempts = 2
-	lastSkippedProviders = []string{"ghost-a", "ghost-b"}
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) },
+		&Report2{ProviderQuotaSkippedAttempts: 2, ProviderQuotaSkippedProviders: []string{"ghost-a", "ghost-b"}}, i18n.EN)
 	want := "> 2 attempts skipped (unknown provider: ghost-a, ghost-b)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -628,11 +622,9 @@ func TestRenderSkippedAttemptsNote(t *testing.T) {
 // TestRenderSkippedAttemptsNote_MoreThanThreeNames caps the name list at
 // three, with a "+N more" tail — the format the task pins.
 func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
-	resetSkipInfo()
-	lastSkippedAttempts = 9
-	lastSkippedProviders = []string{"p1", "p2", "p3", "p4", "p5"}
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) },
+		&Report2{ProviderQuotaSkippedAttempts: 9, ProviderQuotaSkippedProviders: []string{"p1", "p2", "p3", "p4", "p5"}}, i18n.EN)
 	want := "> 9 attempts skipped (unknown provider: p1, p2, p3, … +2 more)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -642,10 +634,30 @@ func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
 // TestRenderSkippedAttemptsNote_NoSkipsRendersNothing: a clean window (no
 // unknown providers) must not add a note line under the §2.5 table.
 func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
-	resetSkipInfo()
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, i18n.EN)
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, &Report2{}, i18n.EN)
 	if b.Len() != 0 {
 		t.Fatalf("no-skips note = %q, want empty", b.String())
+	}
+}
+
+// TestProviderQuotaSkippedJSON pins the JSON contract: the skip stats ride
+// on vmr-report.json as omitempty fields — present when there is something
+// to disclose, absent (not zero) when there is not.
+func TestProviderQuotaSkippedJSON(t *testing.T) {
+	withSkip, err := json.Marshal(&Report2{ProviderQuotaSkippedAttempts: 3, ProviderQuotaSkippedProviders: []string{"ghost"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(withSkip), `"provider_quota_skipped_attempts":3`) ||
+		!strings.Contains(string(withSkip), `"provider_quota_skipped_providers":["ghost"]`) {
+		t.Fatalf("serialized report must carry the skip fields, got: %s", withSkip)
+	}
+	noSkip, err := json.Marshal(&Report2{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(noSkip), "provider_quota_skipped") {
+		t.Fatalf("omitempty violated: skip fields must be absent when zero, got: %s", noSkip)
 	}
 }

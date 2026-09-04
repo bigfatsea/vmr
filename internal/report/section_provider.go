@@ -71,7 +71,6 @@ func renderProviders(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	}
 
 	renderProviderQuotaTable(w, rep, lang)
-	renderSkippedAttemptsNote(w, lang)
 }
 
 // renderProviderQuotaTable  is §2.5's "额度与消耗对照" sub-table —
@@ -184,6 +183,10 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	if anyHighEstimate {
 		w("%s", t.IncludeUsageFootnote)
 	}
+	// The skipped-attempts note belongs to this sub-table (it describes what
+	// the window recomputation above ignored), so it lives and dies with it —
+	// not rendered when there is no quota table to annotate.
+	renderSkippedAttemptsNote(w, rep, lang)
 	w("\n")
 }
 
