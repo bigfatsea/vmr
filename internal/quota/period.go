@@ -103,30 +103,40 @@ func findK(step stepper, since, now time.Time, unit string, everyN int) int {
 	return k
 }
 
-// PeriodStart returns the start of the tumbling period containing now, for
-// Limit l. Computed in fmtutil.DisplayZone — period boundaries are a
+// PeriodBounds returns [start, end) of the tumbling period containing now
+// for Limit l — one findK, so the two boundaries are always same-k
+// consistent. Computed in fmtutil.DisplayZone — period boundaries are a
 // human-facing concept (CLAUDE.md's timezone invariant: everything
-// human-facing renders through DisplayZone), not raw request data. now at or
-// before l.Since returns l.Since itself: the first period starts at the
-// anchor even when now is earlier (a Limit staged ahead of its account's
-// actual start date).
-func PeriodStart(l core.Limit, now time.Time) time.Time {
+// human-facing renders through DisplayZone), not raw request data. N4: a
+// zero l.Since (never valid from config, but guard the pure function
+// anyway) is anchored to DefaultSince(now, l.EveryUnit) rather than fed to
+// findK, whose elapsed-since-year-1 arithmetic overflows.
+func PeriodBounds(l core.Limit, now time.Time) (start, end time.Time) {
+	if l.Since.IsZero() {
+		l.Since = DefaultSince(now, l.EveryUnit)
+	}
 	since := l.Since.In(fmtutil.DisplayZone)
 	now = now.In(fmtutil.DisplayZone)
 	step := stepFor(l.EveryUnit, l.EveryN)
 	k := findK(step, since, now, l.EveryUnit, l.EveryN)
-	return step(since, k)
+	return step(since, k), step(since, k+1)
+}
+
+// PeriodStart returns the start of the tumbling period containing now, for
+// Limit l. now at or before l.Since returns l.Since itself: the first
+// period starts at the anchor even when now is earlier (a Limit staged
+// ahead of its account's actual start date).
+func PeriodStart(l core.Limit, now time.Time) time.Time {
+	start, _ := PeriodBounds(l, now)
+	return start
 }
 
 // PeriodEnd returns the (exclusive) end of the tumbling period containing
 // now — always PeriodStart's next boundary, derived from the same k so the
 // two can never disagree about where a period ends.
 func PeriodEnd(l core.Limit, now time.Time) time.Time {
-	since := l.Since.In(fmtutil.DisplayZone)
-	now = now.In(fmtutil.DisplayZone)
-	step := stepFor(l.EveryUnit, l.EveryN)
-	k := findK(step, since, now, l.EveryUnit, l.EveryN)
-	return step(since, k+1)
+	_, end := PeriodBounds(l, now)
+	return end
 }
 
 // addMonthsClamped advances t by months calendar months, clamping the day

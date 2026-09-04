@@ -416,8 +416,10 @@ func limitRoleForModel(limits []core.Limit, l core.Limit, model string) string {
 // answer here, not "which models could this Limit ever cover".
 func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, role string, now time.Time) QuotaProviderStatus {
 	limitKey := quota.LimitKey(l, model)
-	periodStart := quota.PeriodStart(l, now)
-	periodEnd := quota.PeriodEnd(l, now)
+	// One PeriodBounds: start and end are same-k consistent, and the Snapshot
+	// below reads counters+estimates under one lock — a /status row must not
+	// straddle a period roll mid-render (F4/F9).
+	periodStart, periodEnd := quota.PeriodBounds(l, now)
 	c, estimated, estimatedCost := reg.Snapshot(provider, limitKey, periodStart)
 	used := quota.BaseAmount(l, c)
 	var pct float64

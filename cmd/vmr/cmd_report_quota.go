@@ -97,10 +97,11 @@ func quotaRefFor(lim core.Limit, model string, providerLive map[string]quota.Buc
 	// §5.2's stale-period trap: quota.Registry resets lazily, so a bucket
 	// still on disk from a period the process wasn't running through must
 	// NOT be rendered as "this period's usage" — only a bucket whose stored
-	// PeriodStart matches what PeriodStart(lim, now) computes for right now
-	// qualifies as Live.
+	// PeriodStart matches what PeriodBounds(lim, now) computes for right
+	// now qualifies as Live. One PeriodBounds: start and end are same-k
+	// consistent, so the rendered PeriodEndsAt is that same period's end.
 	limitKey := quota.LimitKey(lim, model)
-	periodStart := quota.PeriodStart(lim, now)
+	periodStart, periodEnd := quota.PeriodBounds(lim, now)
 	if b, ok := providerLive[limitKey]; ok && b.PeriodStartTime().Equal(periodStart) {
 		used := quota.BaseAmount(lim, b.C)
 		var pct float64
@@ -109,7 +110,7 @@ func quotaRefFor(lim core.Limit, model string, providerLive map[string]quota.Buc
 		}
 		ref.Live = &report.LiveQuota{
 			Used: used, Pct: pct,
-			PeriodStart: periodStart, PeriodEndsAt: quota.PeriodEnd(lim, now),
+			PeriodStart: periodStart, PeriodEndsAt: periodEnd,
 			EstimatedPct: quota.EstimatedPct(lim.Metric, b.C, b.Estimated, b.EstimatedCost),
 		}
 	} else if _, exists := providerLive[limitKey]; !exists && len(providerLive) > 0 {
