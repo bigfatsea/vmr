@@ -17,11 +17,13 @@ import (
 // (internal/audit/housekeep.go's auditFileRE) and is independent of
 // whether the caller passed an absolute or relative path.
 //
-// This is an identity string only — cache keys, published coordinates,
-// filenames — never the string to pass to os.Open/audit.OpenLogFile, which
+// This is an identity string only — published coordinates, filenames,
+// diagnostics — never the string to pass to os.Open/audit.OpenLogFile, which
 // need the real, resolvable (possibly relative, possibly absolute) path.
 // Callers that need both keep the original path around for I/O and only
-// normalize the copy used for identity.
+// normalize the copy used for identity. The shared parse cache does not key
+// by this either (FileCache.Files keys by content hash); CanonicalPath
+// survives there only as a diagnostic stamp on each entry.
 func CanonicalPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".zst")
 }

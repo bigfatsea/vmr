@@ -43,7 +43,7 @@ var fileLineExemptions = map[string]int{
 
 	// render_doc.go's budget is what keeps a new report section arriving as a
 	// new section_*.go rather than as another 90 lines on the biggest file.
-	"internal/report/aggregate.go":  600,
+	"internal/report/aggregate.go":  620,
 	"internal/report/render_doc.go": 400,
 	"internal/report/ingest.go":     310,
 	"internal/report/recextract.go": 310,

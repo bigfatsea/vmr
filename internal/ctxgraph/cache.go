@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 // CacheSchemaVersion gates every CachedFile's freshness alongside its
@@ -57,12 +56,13 @@ const CacheSchemaVersion = 7
 type CachedFile struct {
 	Hash          string `json:"hash"`
 	SchemaVersion int    `json:"schema_version,omitempty"`
-	// CanonicalPath is this entry's FileCache.Files map key (CanonicalPath
-	// of whatever path spelling produced it), stored redundantly with the
-	// map key itself so a sharded on-disk copy (see LoadCacheDir —
-	// SaveCacheDir names each shard by Hash, not by this) can be loaded
-	// back into the map without needing a separate index file: read every
-	// shard, key it by its own embedded CanonicalPath.
+	// CanonicalPath is diagnostic only: this run's CanonicalPath spelling
+	// of the source file (see reqcoord.go). It is no longer the map key —
+	// FileCache.Files keys by Hash — and is kept only so a sharded on-disk
+	// copy (see LoadCacheDir — SaveCacheDir names each shard by Hash, not
+	// by this) still says which audit file it was built from. It goes stale
+	// the moment the same content is re-scanned under a different path
+	// spelling, so nothing may branch on it.
 	CanonicalPath string      `json:"canonical_path,omitempty"`
 	Manifests     []*Manifest `json:"manifests,omitempty"`
 	NoBody        int         `json:"no_body,omitempty"`
@@ -77,9 +77,14 @@ type CachedFile struct {
 	Facts json.RawMessage `json:"facts,omitempty"`
 }
 
-// FileCache is a persisted, content-hash-keyed store of every audit file's
-// CachedFile, indexed by path. It is never authoritative on its own — a
-// missing or stale entry (path absent, or present with a different Hash)
+// FileCache is a persisted store of every audit file's CachedFile: Files
+// maps HashFile(path)'s hex sha256 to that file's entry. Keying by content
+// — not by path spelling, and not by mtime — is what makes a cp -r/backup
+// restore unable to poison the cache: a stale shard hashes differently and
+// gets its own key, so it can never shadow the current content's entry (the
+// mtime disambiguation this keying replaced degenerated to a coin flip when
+// mtimes were equal, and picked the wrong winner when a restore inverted
+// them). It is never authoritative on its own — a missing or stale entry
 // just means ScanCached falls back to parsing that one file fresh, exactly
 // as Scan always has. Persisted as one file per entry under a shared
 // .parse-cache/ directory — see LoadCacheDir/SaveCacheDir — so
@@ -112,8 +117,11 @@ func HashFile(path string) (string, error) {
 
 // fileCacheResult is one path's ScanCached outcome — parsed fresh or
 // reused from prior — before merging into the run's full Manifest set.
+// path is kept alongside the hash key: the merge loop needs the real path
+// (for Manifest.Path rebinding), not just the cache key.
 type fileCacheResult struct {
 	path  string
+	hash  string
 	entry CachedFile
 	err   error
 }
@@ -132,11 +140,12 @@ type fileCacheResult struct {
 // per-file parse step, never any file from the graph itself.
 //
 // prior may be nil (no cache yet — everything is a miss, identical to
-// calling Scan). The returned FileCache is prior's map with every path in
-// this call's paths list overwritten (hit: same value; miss: the freshly
-// computed one) — entries for paths NOT in this call are carried forward
-// untouched, so a cache built from a wider (or different) file set doesn't
-// lose those entries just because this call loaded fewer files.
+// calling Scan). The returned FileCache is prior's map with one entry per
+// distinct content hash among this call's paths overwritten (hit: same
+// value; miss: the freshly computed one) — entries whose hash is not among
+// this call's files are carried forward untouched, so a cache built from a
+// wider (or different) file set doesn't lose those entries just because
+// this call loaded fewer files.
 func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
 	if err := CheckPathCollisions(paths); err != nil {
 		return nil, nil, err
@@ -168,9 +177,26 @@ func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
 		if res.err != nil {
 			return nil, nil, res.err
 		}
+		// Rebind each cached Manifest's I/O path to this run's own path
+		// spelling — a cache hit loaded from a prior run's persisted cache
+		// carries whatever path spelling THAT run used (absolute, relative,
+		// a different cwd...), and records.go's FetchRecords later opens
+		// Manifest.Path directly to recover original record content. Done
+		// here in the serial merge loop, not in the parallel scan: two
+		// same-content paths share one hash key/entry, and each goroutine
+		// rebinding the shared Manifests in place would be a data race plus
+		// a cross-path mis-binding. Identical content reads back identically
+		// through either path, so the last-writer binding is functionally
+		// correct; a fresh parse already carries its own real path, so this
+		// rebinding is a harmless no-op for it. Req is untouched: it's
+		// already CanonicalPath(path)-based (see ReqCoord), so it's
+		// identical under any path spelling and never needs rebinding.
+		for _, m := range res.entry.Manifests {
+			m.Path = res.path
+		}
 		all = append(all, res.entry.Manifests...)
 		noBody += res.entry.NoBody
-		next.Files[res.path] = res.entry
+		next.Files[res.hash] = res.entry
 	}
 	return buildGraph(all, noBody), next, nil
 }
@@ -184,40 +210,33 @@ func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
 // every element, so a nil here would panic the whole scan instead of
 // costing one file's worth of re-parse.
 func scanCachedFile(path string, prior *FileCache) fileCacheResult {
-	// key is the FileCache's identity for this file — CanonicalPath(path),
-	// never the raw path used for I/O below: two runs of the same log file
-	// invoked with an absolute path once and a relative path another time
-	// must land in the same cache slot, or the cache accumulates duplicate
-	// entries for what is, on disk, one file (see reqcoord.go's doc
-	// comment). hash/scanFile still take the real path — they open it.
-	key := CanonicalPath(path)
+	// key is the FileCache's identity for this file: HashFile's hex sha256
+	// of the on-disk bytes — content, not path spelling and not mtime. Two
+	// invocations of the same file under different path spellings hash the
+	// same bytes and share one slot; a cp -r/backup-restored stale copy
+	// hashes different bytes and gets its own slot instead of shadowing
+	// the current content's entry. hash/scanFile still take the real path
+	// — they open it.
 	hash, err := HashFile(path)
 	if err != nil {
-		return fileCacheResult{path: key, err: err}
+		return fileCacheResult{path: path, err: err}
 	}
 	if prior != nil {
-		if cached, ok := prior.Files[key]; ok && cached.Hash == hash && cached.SchemaVersion == CacheSchemaVersion && !hasNilManifest(cached.Manifests) {
-			// Rebind each Manifest's I/O path to this run's own path string
-			// — a cache hit loaded from a prior run's persisted
-			// vmr-requests.json/vmr-stories.json carries whatever path
-			// spelling THAT run used (absolute, relative, a different
-			// cwd...), and records.go's FetchRecords later opens
-			// Manifest.Path directly to recover original record content.
-			// Req is untouched: it's already
-			// CanonicalPath(path)-based (see ReqCoord), so it's identical
-			// under any path spelling and never needs rebinding.
-			for _, m := range cached.Manifests {
-				m.Path = path
-			}
-			cached.CanonicalPath = key
-			return fileCacheResult{path: key, entry: cached}
+		if cached, ok := prior.Files[hash]; ok && cached.SchemaVersion == CacheSchemaVersion && !hasNilManifest(cached.Manifests) {
+			// Manifest.Path rebinding happens in ScanCached's serial merge
+			// loop, not here — same-content paths share this entry, and
+			// rebinding the shared Manifests from a parallel goroutine
+			// would race. cached is a map-value copy, so stamping the
+			// diagnostic CanonicalPath here touches nothing shared.
+			cached.CanonicalPath = CanonicalPath(path)
+			return fileCacheResult{path: path, hash: hash, entry: cached}
 		}
 	}
 	res := scanFile(path)
 	if res.err != nil {
-		return fileCacheResult{path: key, err: res.err}
+		return fileCacheResult{path: path, hash: hash, err: res.err}
 	}
-	return fileCacheResult{path: key, entry: CachedFile{Hash: hash, SchemaVersion: CacheSchemaVersion, CanonicalPath: key, Manifests: res.manifests, NoBody: res.noBody}}
+	return fileCacheResult{path: path, hash: hash, entry: CachedFile{Hash: hash, SchemaVersion: CacheSchemaVersion, CanonicalPath: CanonicalPath(path), Manifests: res.manifests, NoBody: res.noBody}}
 }
 
 func hasNilManifest(ms []*Manifest) bool {
@@ -231,31 +250,23 @@ func hasNilManifest(ms []*Manifest) bool {
 
 // LoadCacheDir reads dir (a shared .parse-cache/ directory — see
 // FileCache's doc comment) into a FileCache: one CachedFile per <hash>.json
-// shard, keyed by each shard's own embedded CanonicalPath rather than by
-// the shard's filename. Best-effort the same way report's own now-removed
-// file-cache loader used to be: a missing dir, or a shard that fails to
-// parse, is skipped rather than failing the whole load — the cache is a
-// fully re-derivable artifact, so a corrupt shard just costs that one
-// file's worth of re-parse on the next scan, not a hard error.
+// shard, keyed by each shard's own embedded Hash — the same key SaveCacheDir
+// names the shard file by, so the map and the directory stay aligned.
+// Best-effort the same way report's own now-removed file-cache loader used
+// to be: a missing dir, or a shard that fails to parse, is skipped rather
+// than failing the whole load — the cache is a fully re-derivable artifact,
+// so a corrupt shard just costs that one file's worth of re-parse on the
+// next scan, not a hard error. No cross-shard disambiguation is needed (or
+// performed): shards never share a Hash key, so an orphan shard left behind
+// by a cp -r/backup restore simply loads as its own entry and can never
+// shadow the current content's shard — the worst an orphan can cause is a
+// hash miss (one re-parse), not a poisoned hit.
 func LoadCacheDir(dir string) *FileCache {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	fc := &FileCache{Files: map[string]CachedFile{}}
-	// Orphan-shard tie-breaker: shards are content-addressed by Hash, so
-	// an audit-log append changes the canonical-path hash and writes a
-	// fresh shard, while the old shard is deliberately not GC'd (see
-	// SaveCacheDir's comment). When two shards share a CanonicalPath
-	// (same audit file, different hashes), os.ReadDir returns them in
-	// filename (= hash) lexicographic order; a later-sorted stale shard
-	// would overwrite the fresh one in fc.Files and produce a phantom
-	// cache miss on the next scan (~50% probability, see NOTES_FOR_LEAD).
-	// Keep the shard with the newer mtime — the audit log is append-only,
-	// so the most recently written shard encodes the current content hash.
-	// When Info() errors or mtimes are equal, fall back to last-writer
-	// wins (the existing ReadDir order) rather than skipping the entry.
-	seenMTime := map[string]time.Time{}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -265,20 +276,10 @@ func LoadCacheDir(dir string) *FileCache {
 			continue
 		}
 		var cf CachedFile
-		if err := json.Unmarshal(data, &cf); err != nil || cf.CanonicalPath == "" {
+		if err := json.Unmarshal(data, &cf); err != nil || cf.Hash == "" {
 			continue
 		}
-		if existing, ok := fc.Files[cf.CanonicalPath]; ok {
-			mtNew := seenMTime[cf.CanonicalPath]
-			if info, err := e.Info(); err == nil {
-				mtNew = info.ModTime()
-			}
-			if info, err := os.Stat(filepath.Join(dir, existing.Hash+".json")); err == nil && info.ModTime().After(mtNew) {
-				continue // existing shard is newer; keep it
-			}
-			seenMTime[cf.CanonicalPath] = mtNew
-		}
-		fc.Files[cf.CanonicalPath] = cf
+		fc.Files[cf.Hash] = cf
 	}
 	if len(fc.Files) == 0 {
 		return nil
