@@ -3,7 +3,7 @@
 
 # 定价 · 计费 · 配额 专题 Review（agent · 2026-09-03）
 
-> **落地状态（2026-09-04）**：本报告经外部 Agent 独立复核（含挑战本报告"复核批注"自身的断言）+ ROI 裁决后，F1 / F7 / F2 / F4 / F9 / F3 / F8 / 备注B 及复核新发现的 N1 / N6 / N7 已实施合并进 `main`（分三支 `fix/pqb-{p,q,r}` 并行落地，`go test -race ./...` 全绿）。复核过程与逐条 ROI 见 `ISSUE_RESOLUTION_REPORT.md`。**缓做 / 需裁决**：N2 加载期折叠费率、N5 等长 Limit 顺序依赖、**N3（`ScoreForLimits` 闸封顶——用户裁为本轮不碰）**、N9 —— 均登记进 `KNOWN_ISSUES`（§2.88–2.91）。**驳回**：复核 RB 的"nil Facts panic"（`core.CanonicalRequest.Facts` 是值类型，类型混淆）。F5 / F6 / 裁决A 已落为文档（`UserGuide` EN/ZH + `config.example` EN/ZH + 本设计族的 Quota 篇）。
+> **落地状态(2026-09-04,本轮复核重构)**:F1-F9 + 备注 A/B + 裁决 A 全部落地或确认维持,四轮独立终审后又做了一轮分歧收口(`ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`:F9 在 `report` 侧的收口逃逸补齐、`AddEstimatedCost`/`EstimatedCostFor` 死代码删除、`TokenCountersSides` 注释订正、N3 补只读基线测试)。本轮(三份文档交叉核对 + 逐条源码抽样验证)确认原始清单在本专题范围内技术债已清零,据此把阶段五按"已解决只留标题 + 状态标签"重构,四段式正文与复核细节移入 `ISSUE_RESOLUTION_REPORT.md`。**尚未解决**（全部为复核过程新发现，见“阶段五·附”）：N2 / N5 / N9（触发驱动，均已登记 `KNOWN_ISSUES`；N2 的 `core.go` 注释误导部分已订正，条目只剩 `BuildSnapshot` 折叠本身）。**N3 已裁决落地**（2026-09-04，采纳“闸 = 带安全余量的保险丝”二值语义，见“阶段五·附” N3 条目）。**L2 已裁决落地**（2026-09-04：`router.TokenCounters` 删除、单标志合并入口不复提供——合并信号正是 partial-as-exact bug 类，见“阶段五·附” L2 条目）。**驳回**:N8「nil Facts panic」--`core.CanonicalRequest.Facts` 是值类型,类型混淆。
 
 > **定位**：一次范围严格限定在"定价 / 计费 / 配额"的系统级架构 Review。方法沿用 full-review 五阶段；但**覆盖范围收窄**为定价、计费、配额相关的模块、代码、功能（`internal/pricing`、`internal/quota`、`internal/config` 的 pricing/quota 部分、路由半区计费路径 `internal/router/quota.go`、分析半区配额/成本消费面 `internal/report/{cost,providerquota,findings_quota,pricing}.go`、`cmd/vmr` 配额入口、`core` 的 `QuotaSpec`/`PricingSpec`/`Limit` 契约）。
 > 前身文档 `Billing_Quota_Pricing_2026-09` 的全部有效内容（P1–P6、配额周期时区裁决、`every` 语法备注、优先级矩阵与依赖关系）已在下文逐条合并吸收，状态更新为"本轮源码复核结论"；确认吸收完整后，前身文档被删除。
@@ -176,8 +176,8 @@ sequenceDiagram
 - 一处可改进：`pricing.Rate.Cost`（`pricing.go:158-174`）对 nil 分量贡献 0，注释自认"防御性底线，非文档化降级路径"——在报表 best-effort 语境里这**就是**降级路径，见 F7。
 
 ### 5. 冗余与失效代码
-- 本专题范围内**没有确认的失效代码**：`resolveChain` 的递归经实测可达（F1 的复核批注）。
-- `PricingSpec.Base`"不能折叠"的论证成立且与现实一致；可折叠的是**整条链的结果**（一个已解析 `Rate`），不是 `Base` 本身 —— 两者不是一回事，见 F1 的正交简化项。
+- 本专题范围内**没有确认的失效代码**：`resolveChain` 的递归经实测可达（F1 已核实并落地）。
+- `PricingSpec.Base`"不能折叠"的论证成立且与现实一致；可折叠的是**整条链的结果**（一个已解析 `Rate`），不是 `Base` 本身 —— 两者不是一回事，见阶段五·附 N2。
 
 ### 6. 可演进性与改动成本
 - 计费口径若改动：需要同时改 `router.TokenCountersSides`、`report.costFor`、`report/recextract.go`、外加跑 `quota_parity_test.go`——**跨 4 处**，正是 F2 的结构隐患。
@@ -187,204 +187,112 @@ sequenceDiagram
 
 ## 阶段五：问题清单（四段式）与演进路线图
 
-### 按 ROI 排序、按 Domain 分组的系统性清单
+> **2026-09-04 复核重构说明**：F1–F9 + 备注 A/B + 裁决 A 经三支 `fix/pqb-{p,q,r}` 落地、四轮独立终审、一轮分歧收口后全部关闭或确认维持。本轮复核（三份文档逐条交叉核对 + 对当前工作区源码抽样验证）确认原始清单在本专题范围内的技术债已清零，据此把"已解决 / 已确认"项压成"标题 + 状态标签"；四段式正文、复核过程与逐条 ROI 裁决的权威记录移到 `ISSUE_RESOLUTION_REPORT.md`（Phase 1 复核 + ROI 裁决 + Phase 2 落地账本）与 `ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`（四轮终审后的分歧收口）。复核过程新发现的问题单列"阶段五·附"，同样按已解决 / 未解决分组。
 
-#### F1 · 折扣叠加：递归解析是活的，被加载校验单方面误杀 【D2 定价域 × D1 配置域 · 前身 P1 · ROI 中高】
+### 一、原始问题清单（F1–F9 + 备注 / 裁决）
 
-> **[复核批注]** 原判断（"`resolveChain` 是死抽象、合法配置链深恒 ≤1、多层叠加 100% 不可达"）经源码 + 实测**不成立**，本条已按事实重写。实测三种形态：① `[{model: X, discount: 0.5}, {model: "*", <显式四要素>}]` —— 加载通过，`EffectiveRate(X)` = 0.5 × 显式费率（递归下钻到的是另一条 Override，不是 Base）；② `[{model: X, discount: 0.5}, {model: "*", discount: 0.8}]` —— 加载通过，`EffectiveRate(X)` = 0.4 × Base，两层折扣真实叠加；③ 只有"通配折扣在前 + 具体规则在后"被 `firstDeadOverride` 拒绝。即：递归链在 `metric: cost` 热路径上真实生效，删掉它是行为回归。
+#### 已解决 / 已确认
 
-- **问题描述**：
-  *底层矛盾*：`resolveChain`（`internal/pricing/resolve.go`）的语义是"折扣型规则**不终结匹配**，向下继续解析再缩放"；而配置校验 `firstDeadOverride`（`internal/config/pricing.go`）建模的是纯 first-match-wins —— 只要前面出现过 `"*"`，其后所有规则一律判死，不区分该通配是 Explicit 还是 Discount。于是 `[{model: "*", discount: 0.8}, {model: gpt-4o, <显式四要素>}]` 在解析器看来正是 0.8 × 专属价（设计文档"通配折扣叠在具体费率之上"的原意），却被校验器以 `model "gpt-4o" can never activate ... first-match-wins always picks that one first` 拒绝启动 —— 这句提示本身断言了一个解析器并不实现的语义。
-  *实际影响*：
-  - **不改**："全账号 8 折 + 个别模型专属价"这一需求**无法表达**。唯一能通过校验的近似写法是把专属价写在前、通配折扣写在后，但它对被专属定价的模型根本不打折 —— 用户很容易据此以为折扣已生效，而 `metric: cost` 会按未打折的价格实扣配额。
-  - **改了**：折扣型通配不再终结后续规则，上述写法直接可用；校验器与解析器对"折扣"的语义重新一致。
-- **根因**：时间维度（P0-A）被砍后，校验器加严清理"重复规则"时按 first-match-wins 一刀切建模，未区分 Explicit / Discount 两种规则形态；`resolveChain` 的下钻语义没有同步进校验器。前身 P1 把这个"校验器单方面收窄"误读成了"运行期能力失效"。
-- **建议方案**：收窄 `firstDeadOverride` —— `seenWildcard` 仅在通配规则为 **Explicit** 形态时置位（折扣型通配不终结匹配，其后规则仍可达）；同 model 重复的判死同理只在前一条为 Explicit 时成立。错误文案同步改写。**不要删除 `resolveChain`**。
-- **可选的正交简化（与上面独立排期）**：`EffectiveRate` 无时间维度、是 spec 的纯函数，因此可在加载期折叠成单个已解析 `Rate` 挂到 `core.Endpoint` 上，热路径变一次字段直读，`core.PricingSpec` 的 `Base+Overrides` 可收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）。但这是结构简化，不是"删死代码"：`resolveChain` 只是从每请求移到每次加载/每次 memo miss，仍然必须存在；热路径省下的是一次 ≤3 元素切片遍历，量级可忽略，不要拿它当收益。
-- **ROI**：Return 中高（修一个真实的配置误杀 + 消除校验器与解析器的语义分裂）；Investment 低（校验器一处分支 + 文案 + 测试）。**本迭代做**。折叠优化优先级低于误杀修复，可缓做。
+| 编号 | 标题 | 状态 |
+| --- | --- | --- |
+| **F1** | 折扣叠加：递归解析是活的，被加载校验单方面误杀 | 已落地 |
+| **F2** | 计费口径双份维护：权威实现被困路由包，报表复刻一份 | 已落地 |
+| **F3** | 报表包全局变量退化 + 聚合文件贴死行数预算 | 已落地 |
+| **F4** | 配额子系统并发模型（单锁 + cost 双锁 + `/status` 双锁） | 已落地 |
+| **F5** | token_weights / model_multipliers 多条 Limit 重复配置 | 已落地（文档） |
+| **F6** | `pricing` 字段名语义模糊（计费 vs 报表） | 已落地（文档） |
+| **F7** | 报表把"未完全解析 / 折扣悬空"费率当已定价处理 | 已落地 |
+| **F8** | §7 配额耗尽 Finding 对模型级配额信息缺失 | 已落地 |
+| **F9** | `PeriodStart` 与 `PeriodEnd` 在评分热路径双重冗余计算 | 已落地 |
+| **备注 B** | `ScoreForLimits` 空 slice 返回最大余量（脚枪） | 已落地 |
+| **裁决 A** | 配额周期边界走本地时区 | 确认维持 |
+| **备注 A** | `every` 自创后缀语法（d / w / mo） | 确认维持 |
 
-#### F2 · 计费口径双份维护：权威实现被困路由包，报表复刻一份 【D4 路由计费域 × D5 报表消费域 · 前身 P2 · ROI 中高】
+#### 尚未解决
 
-> **[复核批注]** 结论与方案成立（`report` 允许 import `quota`，入参改纯标量后不破坏叶包边界，已对 archtest 的 `forbiddenImports` 核过）。两处失实需更正：① 历史事故不是"路由层修复失败重试的扣费口径、报表层漏改"——真实事故见 commit `66006f1`：§2.5 的 tokens 列对无 usage 对象的请求记 0，而路由按字节估算真实扣了配额（同批还修了一个 api_keys 间 failover 导致端点行重复计数的 basis bug）；② 真正的口径复刻点是 `cost.go` 的 `costFor` 与 `recextract.go` 的 est 填充**两处**，`accumulateQuotaWindow` 只是把已拆好的字段相加、不含降级判定，迁移时不必动它。
+原始清单本轮无独立残留待办。两处"部分落地"的尾巴已转入"阶段五·附"跟踪，不在此重复：
 
-- **问题描述**：
-  *典型业务场景*：流式请求返回时，若服务商的响应头或分块数据中未返回精确的缓存命中量（部分字段缺失），系统必须决定降级策略——“未嗅探到的分量是用本地估算替代还是按 0 计算，以及输出 token 是取 upstream 报的还是本地估算的最大值 `max(u.Out, outEst)`”。
-  *底层失效矛盾*：这套决定“这笔请求到底算多少钱”的核心折算口径，目前权威实现在路由包的 `TokenCountersSides`（`internal/router/quota.go`）；但由于架构分层严格禁止报表包（`internal/report`）引用路由包，报表在成本聚合（`cost.go`）与记录提取（`recextract.go`）中**全凭人工记忆又硬编码复刻了一模一样的降级逻辑**。
-  *改与不改的实际影响*：
-  - **不改**：历史提交中已经发生过一次真实漂移事故（路由层修复了失败重试的扣费口径，报表层却漏改，导致控制台看到的扣除配额与报表账单对不上数），全凭一份脆弱的跨包差分测试（`quota_parity_test.go`）在兜底。未来任何人微调计费降级规则，都必须在两个隔离包里同时手改 3 处。
-  - **改了**：将核心折算函数下沉至共享的底层配额包（`internal/quota`），路由与报表共同调用同一个权威实现，从根源上消灭口径撕裂的物理可能。
-- **根因**：该函数本质是"用量折算语义"，应归配额包（`quota`，接收纯标量或 `quota.Counters`，避免跨包耦合 `chatmsg.Usage`）；只因第一个调用方在路由器，就写在了那儿。同批其他公式（基础用量 `BaseAmount`、模型倍率 `ApplyModelMultiplier`）已下沉 `quota` 共享，这是漏网的最后一个。
-- **建议方案**：迁到 `internal/quota`（入参重构为纯标量或基础计数，解耦上层 `chatmsg.Usage`），路由与报表都调这一个实现；`replay` 继续用；差分测试继续保留作为锁定两半区统计基准（Basis）一致性的防御护栏。迁移时把 `report` 侧复刻点（`costFor`、`recextract`、`accumulateQuotaWindow`）统一改为调用它。
-- **ROI**：Return 中高（计费正确性结构性隐患）；Investment 中。**本迭代做**。与 F4(c)、F7 同属计费/口径路径，可顺路原子化。
+- F1 的"加载期把 `EffectiveRate` 折叠为静态 `Rate` 挂 `Endpoint`"可选正交优化 → **N2**。
+- F4 的 `rollbackWarned` 进程级 latch 残留（F4 已消除其主要误触发源）→ **N9**。
 
-#### F3 · 报表包全局变量退化 + 聚合文件贴死行数预算 【D5 报表消费域 · 前身 P3 · ROI 中】
+### 二、架构健康度评估（更新）
 
-> **[复核批注]** 事实核对无误（`buildProviderQuotaRows` 已持有 `rep *Report2`；`aggregate.go` 599 行 / 预算 600；渲染侧 `renderProviderQuotaTable` 同样已拿到 `rep`，改签名成本为零）。一处夸大："顺序或并发生成两份报表导致提示丢失"当前**不可触发**——`report.BuildCached` 全仓只有 `cmd/vmr/cmd_report.go` 一个调用点且单线程。真实收益是 JSON 契约补齐 + 消除包级全局与测试对全局的直接读写，不是修一个现存的正确性 bug。
-
-- **问题描述**：
-  *典型业务场景*：离线分析日志时，若日志中包含未在当前 `config.yaml` 中注册的第三方服务商请求，报表在聚合阶段会跳过这些记录，并在最终控制台与 Markdown 输出中提示用户：“本次分析跳过了 N 次未知 provider 的请求”。
-  *底层失效矛盾*：为了在“数据聚合”和“报表渲染”两个先后阶段之间传递“跳过了多少条记录”这一统计数字，代码在 `internal/report/providerquota.go` 中声明了包级全局变量。当时是因为主聚合文件 `aggregate.go` 代码行数已逼近 600 行的架构门禁上限，开发者为了逃避改签名会占用行数的错觉，直接用全局变量走捷径绕过门禁。
-  *改与不改的实际影响*：
-  - **不改**：一旦外部出现顺序分析两份日志或并发生成报表，后一份运行会直接抹零全局变量，导致前一份报告的跳过提示静默丢失；且全局变量的数据无法导出到结构化 JSON 报表中，破坏了 JSON 作为唯一事实源的契约。
-  - **改了**：函数调用处其实早已传入了 `Report2` 结构体，只需在该结构体上加两个 skip 字段并在聚合时就地写入，零签名改动、零行数压力，彻底清除全局变量并补齐 JSON 报表数据。
-- **根因**：两阶段数据交换缺一个结构体承载；行预算压力逼出全局变量。
-- **建议方案**：直接处理：`aggregate.go` 调用处已传入 `rep *Report2`，只需在 `rows.go` 的 `Report2` 结构体中增加 skip 字段并在 `buildProviderQuotaRows` 内部就地写入 `rep`（信息自然进 JSON、补契约缺口、删掉测试对全局的直接操作），无需修改任何函数签名，零行数预算压力。同时把"Worker 因范围白名单采取的临时方案，合并时须被识别并当场修正或显式登记"记为流程教训。
-- **ROI**：Return 中（架构退化消除 + 隐性正确性 bug + JSON 契约补齐）；Investment 中低。**本迭代做**。与 F2 同在 report 包，可同批。
-
-#### F4 · 配额子系统并发模型 【D3 配额域 · 前身 P4 · ROI 中低 · 机会性】
-
-> **[复核批注]** `/status` 每行两次加锁（`Used` + `EstimatedCostFor`）属实；但 `AddEstimatedCost` 只在存在未嗅探侧时才调用（`ChargeResponse` 的 `if !inSniffed || !outSniffed`），全嗅探的 cost 请求只有一次加锁——"每次请求双倍锁开销"不成立。裂缝的真实危害也不是"时钟回退误判"本身，而是：两次调用之间若另一 goroutine 触发了周期滚动，后到的 `AddEstimatedCost` 因携带旧 `periodStart` 会被 `resetIfStaleLocked` 判为时钟回退（误报一次 WARN），并把估算额记进已清零的新周期。(c) 的原子合并方向正确，这条才是它的论据。
-
-- **问题描述**：
-  *典型业务场景*：线上运行金额配额控制（`metric: cost`）时，每个请求成功后系统需要扣减配额并标记估算成本；与此同时，外部正在通过 `/status` 接口监控配额使用率，调度器也在对多个候选端点进行余量打分。
-  *底层失效矛盾*：路由层在计费时，先获取一次全局锁调用 `Charge`，释放锁；紧接着又获取一次全局锁调用 `AddEstimatedCost`。两次加锁之间存在可观测的时间裂缝；此外，`/status` 监控接口在组装配额状态时，对每条 Limit 也是先锁一次查已用额度，再锁一次查估算成本。
-  *改与不改的实际影响*：
-  - **不改**：在高并发请求下，读者有概率在微小裂缝中读到“扣费已发生、但估算成本未就绪”的中间割裂态，若恰逢自然月/自然日周期边界，理论上存在跨周期时钟回退误判风险；同时每次请求和每次监控查询都承受了双倍的锁竞争开销。
-  - **改了**：维持单一互斥锁（Go 读写锁不支持原子升级且配额读取伴随惰性重置，单锁更安全轻量）；将扣费与估算标记合并为一次锁内原子调用，监控读取侧提供快照接口一次性读出，消灭观测裂缝并减半锁争用。
-- **根因**：单锁最简单，但把"读"与"写"、把"计数"与"估算标记"绑在同一次互斥；`EstimatedCost` 为省一次方法重载被拆成独立 call。
-- **建议方案**：维持单一 `sync.Mutex`（Go `sync.RWMutex` 不支持原子锁升级，且 `Used` 含周期重置变异，单锁在此处开销更轻更安全）；优先落实 (c) 将 cost 估算并进 `Charge` 一次锁内原子更新（或让 `AddEstimatedCost` 与 `Charge` 合并为单锁调用）；读侧提供快照接口，消除 `/status` 对每条 Limit 连续调用 `Used` 与 `EstimatedCostFor` 的双重加锁；落盘保持单 flusher（必要性低）。
-- **ROI**：Return 中、Investment 低到中。**机会性做，优先 (c) 原子合并**（与 F2 同属计费路径，顺路）。.
-
-#### F5 · token_weights / model_multipliers 多条 Limit 重复配置 【D1 配置域 · 前身 P5 · ROI 中（设计选择）】
-
-> **[复核批注]** 锚点方案已实测：`KnownFields(true)` 严格模式下 YAML merge key（`<<: *anchor`）能正常展开进 `LimitConfig`，"零代码"成立。（示例里两条 Limit 共享同一 `amount` 只是写法示意，实际应各自覆盖。）
-
-- **问题描述**：
-  *典型业务场景*：用户为一个提供商同时配置多级复合配额（例如 `1d` 限制 100 万 token、`1w` 限制 500 万 token、`1mo` 限制 2000 万 token），且需要为 Prompt Caching 指定四分量权重（如 `cache_read: 0.1, cache_write: 1.25`）。
-  *底层设计取舍*：目前这套权重必须在 `1d`、`1w`、`1mo` 每条 Limit 内部各写一遍，无法在 Provider 顶层写一份自动继承。这是系统刻意支持的分层设计——短周期速率闸按原始次数等权拦截、长周期账单桶按四分量精确折算，强行放顶层会导致两者无法独立表达。
-  *改与不改的实际影响*：
-  - **改代码（不推荐）**：在 Go 配置解析层硬做多层默认值继承树，会大幅增加校验复杂度与配置二义性。
-  - **利用已有特性（推荐）**：用户直接使用 YAML 原生锚点（`&tw_default` 与 `*tw_default`）即可一行实现多窗口复用，零代码侵入。保持现状是最佳工程选择。
-- **根因**：无——是刻意分层。分层事实（均已 fail-fast）：`model_multipliers` 对 `cost` 报错（`config/quota.go`，cost 走 `pricing.overrides`）；对 `requests/tokens` 合法；`token_weights` 仅 `metric: tokens` 合法（`config/quota.go`）。
-- **建议方案**：优先 **YAML 锚点**（零代码）：
-
-  ```yaml
-  quota:
-    limits:
-      - &tw_default
-        metric: tokens
-        every: 1d
-        amount: 1000000
-        token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-      - <<: *tw_default
-        every: 1w
-      - <<: *tw_default
-        every: 1mo
-  ```
-  仅当真实场景出现"三条以上 Limit 共享同一份"且用户嫌锚点丑，再上 **defaults 继承**（`Provider.QuotaDefaults *TokenWeightsConfig`，Limit 留空回退；与 `ImageDownscaleMaxPx` 的 global-default/per-model-override 同构，`*int/*bool/*Duration` 指针三态已有先例）。`token_weights` 与 `model_multipliers` 同步处理。
-- **ROI**：Return 中（消除重复），Investment 锚点零代码 / defaults 继承中。**锚点随文档更新；defaults 继承由真实场景触发**。
-
-#### F6 · `pricing` 字段名语义模糊（计费 vs 报表） 【D1 配置域 · 前身 P6 · ROI 低】
-
-- **问题描述**：
-  *典型业务场景*：用户在编写 `config.yaml` 时看到 `providers[].pricing` 配置块。
-  *用户困惑与设计现实*：配了 `metric: cost` 配额时，该块是必填的计费依据；但在没有配置任何配额控制时，用户依然可以填写该块，它完全不影响线上路由，纯粹是为了让离线分析工具 `vmr report` 输出准确的金额花费。同一个字段名承载了“在线强制配额约束”与“离线报表估算辅助”双重语义，初学者单看 YAML 无法分辨。
-  *改与不改的实际影响*：
-  - **改代码**：如果把字段强行改名为 `billing:` 或拆成两套配置，会直接破坏已有线上配置的向后兼容性。
-  - **改文档**：仅在文档和示例配置中加入两行清晰注释说明双重用途，零代码成本消灭理解混淆。
-- **根因**：字段命名承载了两种职责。
-- **建议方案**：改名 `billing:`（破坏向后兼容）或仅在文档/示例注释显式说明"没配 `metric: cost` 时，pricing 块只影响报表 $ 估算精度"。
-- **ROI**：价值低、成本极低。**仅文档说明**。
-
-#### F7 · 报表把"未完全解析/折扣悬空"费率当已定价处理 【D2 定价域 × D5 报表消费域 · 本轮新发现 · ROI 中低】
-
-> **[复核批注]** 机制核实成立（`Resolve` 在 `!tableHit` 且只匹配到折扣时返回 `ok=true` + 全空 `Rate`，`Rate.Cost` 得 0，`accumulateCost` 据此分配 `CostEstimate`）。一处需收窄：§2 成本章并非全无标记——`pr.Complete()` 为假会置 `EndpointRow.CostRateIncomplete`，`section_cost.go` 会渲染一条"费率不完整"的计数提示（但表格行内仍是精确的 `$0.00`）。**完全没有标记的是 §2.5**：`costAnyPriced` 把全空费率算作"已定价"，`WindowUnpricedPct` 因此保持 0。方案 (1)(2) 成立；(1) 的判据等价于"链必然终止在某条 Explicit 上"，因为 `resolveChain` 只会穿过折扣、停在第一条 Explicit。
-
-- **问题描述**：
-  *典型业务场景*：用户在配置中写了一条全通配打折规则 `pricing.overrides: [{model: "*", discount: 0.8}]`，但该模型是一个未收录在官方标准定价表中的小众或自建模型（在表里完全查不到基准价格）。
-  *底层失效矛盾与严重后果*：费率解析引擎在标准表查无此模型的情况下，仅凭匹配到了这条打折规则，就误报“解析成功”，拿 0.8 乘空 Base 算出了全空的费率值。报表在计算费用时，全空费率算出的金额恰好是 `$0.00`，报表便误以为该模型已被有效定价，将 `$0.00` 记入配额窗口，并在报表窗口消耗列渲染出绿色的精确金额 `0.00`。
-  *改与不改的实际影响*：
-  - **不改**：运维人员看到一个模型明明产生了成千上万次调用，报表却显示花费 `$0.00`，造成“该模型完全免费”的严重财务误导，绕过了原本对未定价模型应显示的 `-`（未知费率标记）。
-  - **改了**：在源头拦截无基准价的纯折扣悬空规则，并在消费侧增加空费率检查，报表忠实展示 `-`，捍卫“宁可显示未知，绝不谎报为零（missing beats wrong）”的最高准则；同时完全保留缺失 prompt cache 费率的主流模型的正常降级估算能力。
-- **根因**：`pricing.Resolve` 在 `!tableHit` 时只要匹配到 override 就虚假返回 `ok=true`，若 override 全为折扣则折算为全空 `Rate{}`；而 `pricing.Rate.Cost` 对 nil 分量按 0 处理，全空 Rate 算得 `0.0`，导致 `accumulateCost` 误将 `$0.00` 赋值给 `CostEstimate` 指针，绕过了未定价检查。
-- **影响**：仅 `vmr report`（离线口径）。`metric: cost` 在线路径不受影响——`Complete` 硬门槛挡住（`internal/config/pricing.go`）。
-- **建议方案**：源头治理 + 消费侧兜底。(1) `pricing.Resolve` 在 `!tableHit` 时，必须确保匹配规则中至少有一条显式 `Explicit` 规则，否则视为悬空折扣直接返回 `nil, false`；(2) `pricing.Rate` 增加 `IsEmpty() bool`（四分量全空），报表 `accumulateCost` 仅在 `!pr.IsEmpty()` 时才分配 `CostEstimate`。保留部分定价模型（`CostRateIncomplete`）的正常降级估算，精准杜绝悬空折扣产生的全 0 虚假定价。`F7` 与 F2 同批修最省。
-- **ROI**：Return 中低（报表计费正确性/不可信的 0）；Investment 低（两处简单判定 + 测试）。**随 F2 一并处理**。
-
-#### F8 · §7 配额耗尽 Finding 对模型级配额（Scope/per-model）信息缺失，告警指向失真 【D5 报表消费域 · 本轮新发现 · ROI 中】
-
-- **问题描述**：
-  *典型业务场景*：用户在某个服务商下设置了复合限额，账号整体配置了充裕的月度总限额，但为了防止某昂贵旗舰模型被突发脚本打穿，专门对它设置了严格的模型级限额（如 `models: [gpt-4o]`，日配额较紧）。
-  *底层失效矛盾*：当该旗舰模型在短时间内被频繁调用、配额耗尽触发熔断时，报表引擎在 §7“问题与异常（Findings）”中生成了耗尽告警。但由于告警生成函数只接收了 Provider 名称，导致报告中赫然写着：`Implicated: openai`，完全丢失了具体触发耗尽的模型 `gpt-4o`。
-  *改与不改的实际影响*：
-  - **不改**：运维人员收到告警后，误以为整个 OpenAI 账号额度耗尽挂掉，可能会盲目去充值主账号，或者错误地将其他所有便宜模型（如 mini）的流量全量切走。
-  - **改了**：告警文本精准显示受限模型范围（如 `openai (gpt-4o)`），运维人员一眼即可看清是子模型单点耗尽还是全局账号耗尽，排障决策零偏差。
-- **根因**：P3 引入模型作用域（Scope/Per-Model Limit）后，报表行结构 `ProviderQuotaRow` 增加了 `Models` 字段，但 `findings_quota.go` 及对应 i18n 文本模板未同步扩展，仍沿用 P1/P2 时期仅包含 provider 的入参。
-- **建议方案**：
-  1. 扩展 `ProviderQuotaExhaustionFinding` 的签名，传入 `models []string`；
-  2. 若 `len(models) > 0`，在 `Implicated` 或 `Value` 中显式标明模型范围（如 `openai (gpt-4o)` 或在 Value 中增加 `· gpt-4o`）；
-  3. 同步调整 `internal/i18n/report_efficiency.go` 的中英文模板与对应单元测试。
-- **ROI**：Return 中（消除多模型配额场景下的告警误导）；Investment 低（修改 1 处调用与 2 处 i18n 模板）。建议本迭代顺路完成。
-
-#### F9 · `PeriodStart` 与 `PeriodEnd` 在评分热路径存在双重冗余计算 【D3 配额域 · 本轮新发现 · ROI 中低】
-
-> **[复核批注]** 冗余属实，且比描述的更多：`scoreForEndpoint` 每条 Limit 实跑**三次** `findK`（`Used` 用的 `PeriodStart`，加 `ScoreForLimit` 内的 `PeriodStart`/`PeriodEnd`）。但 `findK` 是"除法定种子 + 常数步走查"，单次纳秒量级，相对一次上游 HTTP 请求可忽略——"热路径 CPU 开销"撑不起收益，真正理由只有 API 自洽（周期起止本就该一次取回）。Return 宜降为低，仍值得顺手做。
-
-- **问题描述**：
-  *典型业务场景*：每个线上请求进入路由核心时，调度器都要对候选列表中的所有可用端点，按当前配额余量（Headroom）进行实时的评分与动态重排。
-  *底层失效矛盾*：余量打分函数需要知道配额周期的起点与终点。现有代码先调用 `PeriodStart` 执行了一遍完整的日历算法（查找当前时间步长、处理自然月月末 28/30/31 天自适应钳制），接着立刻调用 `PeriodEnd`，以完全相同的入参把这套复杂的日历算法**从头到尾重复执行了一遍**。
-  *改与不改的实际影响*：
-  - **不改**：在线请求调度热路径上，候选列表里的每个端点、每条 Limit 都在做两倍的日历查找与时间运算，存在冗余的 CPU 开销。
-  - **改了**：抽象出一个原子函数 `PeriodBounds`，一次日历定位同时返回起止时间 `(start, end)`，API 语义更自然，且彻底消除热路径上的重复日历换算。
-- **根因**：API 设计时仅暴露了独立的 `PeriodStart` 与 `PeriodEnd`，未提供成对获取周期边界的原子函数 `PeriodBounds(l core.Limit, now time.Time) (start, end time.Time)`。
-- **建议方案**：在 `internal/quota/period.go` 中实现 `PeriodBounds`，一次 `findK` 同时返回 `step(since, k)` 和 `step(since, k+1)`；`ScoreForLimit`、`QuotaStatus`（`router/quota.go`）和 `providerquota.go` 均改为调用 `PeriodBounds`。`PeriodStart` 与 `PeriodEnd` 保留为调用 `PeriodBounds` 并取其一的轻量包装。
-- **ROI**：Return 中低（消除热路径重复日历计算，代码更自洽）；Investment 低（不到 15 行代码）。建议机会性或下迭代完成。
-
-#### 备注 B · `ScoreForLimits` 空 slice 返回最大余量 （D3 配额域 · 脚枪）
-- `internal/quota/score.go` 中 `ScoreForLimits` 初始设为 `HeadroomCap`（5.0），空 `limits` 原样返回。调用方（`reorderTier`/`scoreForEndpoint`）都先有非空前置保护，故生产不触发。
-- *严重误区纠偏与改动影响*：Headroom 余量评分算法的取值区间是 0.0 ~ 5.0。其中 **0.0 代表配额已 100% 耗尽**（惩罚最低分，会被直接降级压制）；而 **1.0 才是用量与时间步调一致的中性基准分**；5.0 是完全无消耗的最大余量分。原文档曾提议“空 slice 显式返回 0（中性）”，这是一个极其危险的逻辑倒挂——若真返回 0，未配置配额的端点会被误判为“配额已耗尽”而被调度器打入冷宫。做防御性重构时，空输入只应返回 1.0（中性不奖不惩）或保持 5.0（无配额即无约束），**绝对不能返回 0**。
-
-#### 裁决 A · 配额周期边界走本地时区（维持现状，记耦合注记） 【D3 配额域 × D6 契约域】
-- 曾有报告"跨时区月末错位"。复核：配额周期按**本地时区**计算是明确论证过的决策（"本地时区最贴近运维者心智模型"，`internal/quota/period.go` 中引用 `fmtutil.DisplayZone`），所述锚点日偏移是已知边界，非缺陷。**维持现状**。耦合注记：`quota`（会计概念）为周期边界使用 `fmtutil.DisplayZone`（展示概念）——`DisplayZone` 是进程级固定，若其值在两次运行间改变，`PeriodStart` 平移会触发 `resetIfStaleLocked` 的"新周期"判定、清空计数。这是隐性耦合；可在文档补一句"显式 `since` 建议用本地时区偏移书写"以降低误读。精确说：只有 `DisplayZone` 变化导致 `PeriodStart` **前移**才会命中 `resetIfStaleLocked` 的清零分支；后移被当作时钟回退处理（保留计数 + 一次 WARN），不清零。
-
-#### 备注 A · `every` 自创后缀语法（维持，可复用）
-- `quota.limits[].every` 的 `1d/1w/1mo` 是自创语法，因 Go `time.ParseDuration` 无 d/w/mo（`internal/config/quota.go` 的 `parseEvery`）。**合理，勿"统一"掉**。若日后统一全配置时间字段（`*_days → Duration`），`config.Duration` 的 parser 可直接复用 `parseEvery`；且二者已在同一文件（`quota.go`）相邻，改造成本低。该统一属跨字段一致性问题，不在本专题展开。
-
----
-
-### 架构健康度评估
-
-**优势与坚守的不变量**：
-- "nil=未知、0=免费"从 `Rate`（`core`/`pricing`）一路贯彻到配置校验与报表降级——本项目最一致的语义。
+**优势与坚守的不变量**（维持不变）：
+- "nil=未知、0=免费"从 `Rate`（`core` / `pricing`）一路贯彻到配置校验与报表降级——本项目最一致的语义。
 - 三层费率解析（账号 override → 表 → ×汇率到币种）干净分层；`metric: cost` 加载期硬门槛是真"fail-fast"。
 - Period 数学严谨（月末钳制、O(1) findK、重载幸存）——全工程最易错处反而做得最扎实。
 - `quota` 按 provider **名称**记数（轮换 key 不清零）是防 bug 的正确决策，注释作为反"再协调"护栏明确存在。
-- 两域共享叶（`pricing.Rate.Cost`/`quota.BaseAmount`/`ApplyModelMultiplier`）已经收敛，方向正确。
+- 两域共享叶（`pricing.Rate.Cost` / `quota.BaseAmount` / `ApplyModelMultiplier`）已经收敛，方向正确。
 
-**当前薄弱点**：
-1. 精确/降级口径的权威实现困在路由包，报表被迫复刻（F2）——本专题最突出的 SSOT 裂缝。
-2. 配置校验比解析器更严，误杀了"通配折扣叠在具体费率之上"这一唯一写法（F1）—— 校验器与解析器对同一语义各建一套模型。
-3. 报表建模退化为包级全局（F3）——范围白名单泄漏 + 行预算双重压力源。
-4. 报表"已定价"判定与"可完全解析"不同构（F7）——`missing beats wrong` 被绕过。
-5. `quota` 单锁 + cost 双锁成习惯，非 bug 但仍值得一次原子化收敛（F4）。
-6. §7 配额耗尽 Finding 对多模型独立配额（Per-Model Limit）丢失作用域信息，引发误判（F8）。
-7. 配额周期边界计算在热路径存在重复的 `findK` 冗余开销（F9）。
+**原"当前薄弱点"7 条的现状**：F2（口径 SSOT 裂缝）、F1（校验器 / 解析器语义分裂）、F3（包级可变全局退化）、F7（`missing beats wrong` 被绕过）、F4（单锁 + cost 双锁积习）、F8（Finding 丢作用域）、F9（热路径重复 `findK`）已于 2026-09-04 全部闭合。落地后残留的架构自洽项收敛为"阶段五·附"的 N2 / N5 / N9（N3 已于同日裁决落地，见其条目）。
 
-### 中长期架构演进路线图
+### 三、中长期架构演进路线图（更新）
 
-```mermaid
-gantt
-  title 定价/计费/配额 演进路线（依赖关系见路线图下方说明）
-  dateFormat  YYYY-MM
-  section 本迭代
-    修复-F1-折扣通配误杀      :d1, 2026-09, 1M
-    迁移-F2-计费口径下移      :d2, after d1, 1M
-    打包-F3-全局变量+行预算    :d3, after d1, 1M
-    原子化-F4c-计费单锁更新    :d4, after d2, 1M
-    修复-F8-配额耗尽Finding模型:d5, after d3, 1M
-  section 下迭代
-    简化-F1-加载期折叠费率(可选) :f1, after d2, 2M
-    修复-F7-虚假定价源头收紧  :f7, after d2, 1M
-    优化-F9-周期边界原子计算   :f9, after d2, 1M
-  section 触发驱动
-    继承-F5-配额defaults       :milestone, after d1
-    说明-F6-pricing命名        :milestone, after d2
-    加固-备注B-空slice中性守卫 :milestone, after d1
-```
+原路线图"本迭代 / 下迭代 / 触发驱动"各项已全部落地或转为登记项，原 gantt 作废。本专题（定价 / 计费 / 配额）原始范围内的技术债已清零；剩余工作全部来自复核过程新发现：
 
-**依赖关系**：F1 与 F7 同在 `internal/pricing` 的规则匹配路径上（一个收窄校验器、一个收紧 `Resolve` 的 `ok` 判据），宜同批；F2→F4(c)→F7 同属计费/口径路径，强相关，建议一条流水线（F2 下移口径后，F4(c) 的单锁更新与 F7 的 `Resolve` 源头收紧顺路做）；F3 与 F8 同在 report 包，可并行、同批合入。
+| 项 | 类型 | 触发条件 / 待办 |
+| --- | --- | --- |
+| N2 | 触发驱动 | `core` / `router` 有其它改动时，顺路把预解析 `Rate` 折叠进 `Endpoint`；不单独排期 |
+| N5 | 触发驱动 | 真实配置出现等长复合 Limit 且用户报告桶 / 闸角色不符预期 |
+| N9 | 触发驱动 | F4 之后仍观察到本该有的时钟回退 WARN 缺失 |
+| N3 | **已裁决落地（2026-09-04）** | 采纳二值保险丝语义，见"阶段五·附" N3 条目 |
+| L2 | **已裁决落地（2026-09-04）** | 删 `router.TokenCounters`，单标志合并入口不复活（见“阶段五·附” L2 条目） |
 
-**"不建议做 / 缓做"结论**：F5 的 defaults 继承、F6 的 `billing` 改名、F1 的加载期折叠优化——均在真实场景触发前不做，避免为不存在的需求加复杂度；配额周期时区（裁决 A）明确维持现状；备注 B 严禁改为返回 0。
+---
+
+## 阶段五·附 — 复核与落地过程新发现问题
+
+> N1–N9 来自 Phase 1 五路并行只读复核；分歧 #1 / #3 / #4 与 L2 来自四轮独立终审后的分歧收口。逐条源码取证见 `ISSUE_RESOLUTION_REPORT.md` 的复核结论合并表与 `ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md` 的逐项取证。
+
+### 一、已解决 / 已驳回
+
+| 编号 | 标题 | 状态 |
+| --- | --- | --- |
+| **N1** | `parseRateRow` 接受四分量全空的费率行（`tableHit=true` 绕过 F7 的 `!tableHit` 防御） | 已落地（随 F7） |
+| **N4** | `Limit.Since` 零值致 `findK` 巨大 k / 潜在死循环 | 已落地（`PeriodBounds` 入口 guard） |
+| **N6** | §2.5 配额子表格完全缺 Scope / Model 列，同 provider 多 Limit 行在 Markdown 里不可辨 | 已落地 |
+| **N7** | `renderSkippedAttemptsNote` 在表格 guard 外被无条件调用，skip 统计随表格空而静默消失 | 已落地（随 F3） |
+| **分歧 #1** | F9 在 `internal/report/providerquota.go` 仍成对调用 `PeriodStart` / `PeriodEnd`，未收敛到 `PeriodBounds` | 已落地（收口到单次 `PeriodBounds`） |
+| **分歧 #3** | `Registry.AddEstimatedCost` / `EstimatedCostFor` 是仅 `store_test.go` 保活的 deprecated 包装 | 已落地（删除，测试改调 `ChargeCost` / `Snapshot`） |
+| **分歧 #4** | `router.TokenCountersSides` doc 注释把在线主调用方 `tokenCharge` 漏成"仅 replay / 测试" | 已落地（注释 + CHANGELOG 订正） |
+| **N3** | `ScoreForLimits` 闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效 | 已裁决落地 |
+| **L2** | `router.TokenCounters`（非 sides 形式）疑似仅测试保活 | 已裁决落地（删除） |
+| **N8** | ~~`tokenCharge` 裸解引用 `creq.Facts.EstimatedTokens` 致 nil panic~~ | 驳回·类型混淆 |
+
+> N8 驳回依据：`core.CanonicalRequest.Facts` 是值类型（`RequestFacts`，非指针），复核 Agent 混淆了 `audit.Record.Facts`（`*RequestFacts`，`replay` 侧才需判空）。四轮终审 + 分歧收口两次独立复核一致确认驳回正确。
+
+### 二、尚未解决
+
+#### N2 · `core.Endpoint.PricingRate` 持 `*PricingSpec`，`metric: cost` 热路径每笔请求重跑一次链式解析 【D6 契约域 × D4 路由计费域 · 已登记 `KNOWN_ISSUES` · ROI 低】
+
+- **问题描述**：
+  *典型业务场景*：每笔 `metric: cost` 请求成功后，路由计费尾部要把端点定价规格折算成实际费率来扣减金额配额。
+  *底层矛盾*：`core.Endpoint` 挂的是 `*core.PricingSpec`（`Base + Overrides` 未折叠），而非一个已解析的 `Rate`。`router.ChargeResponse` 的 cost 分支每请求都 `pricing.EffectiveRate(ep.PricingRate)` 重跑一次 `resolveChain`（≤3 元素切片的递归折扣下钻）。
+  *改与不改*：不改——`resolveChain` 每请求跑一次是纳秒级、相对一次上游 HTTP 可忽略，**不是性能问题**；真正的代价是它构成"让价目表进实时路由热路径"这条架构红线（`KNOWN_ISSUES` §1.0）的一处轻微越界，且 `core.go` 注释把"Resolve 阶段不能提前折叠 `Base` 与 `Override`"偷换成了"加载完成后也不能折叠为静态 `Rate`"的误导。改了——热路径变一次字段直读，架构红线不再被越界，注释误导消除。
+- **根因**：`EffectiveRate` 移除时间维（P0-A）后是 spec 的纯静态确定性函数，但 `core.Endpoint` 的定价挂载点设计成持规格而非持已解析费率；`BuildSnapshot` 端点已细化到唯一 upstream model，却没有"把 `Rate` 折叠好挂上去"这一步。本项即 F1 复核时从误杀修复里剥离出的"可缓做的正交简化"部分（见 `ISSUE_RESOLUTION_REPORT.md`）。
+- **建议方案**：`BuildSnapshot` 折叠预解析 `Rate` 挂 `Endpoint`，热路径字段直读；`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）；同步订正 `core.go` 注释。
+- **ROI**：Return 低（性能收益可忽略，价值在消除架构红线越界 + 注释误导 + 架构自洽）；Investment 中（`core.PricingSpec` 迁移面较大，触及 `core` / `config` / `router` / `pricing` 四包）。**触发驱动**：`core` / `router` 有其它改动时顺路做，不为它单独排期。
+- **收口订正（2026-09-04）**：`core.go` 的 `PricingSpec` 注释已改写——把「不能折叠」约束限定为 Resolve 期逐规则折叠（折进 `Base` 又留在 `Overrides` 会双重计算），并明示 P0-A 后 spec 全静态、`EffectiveRate(spec)` 是纯函数、整链可折叠为单个 `Rate` 在 `BuildSnapshot` 挂 `Endpoint`（回指本条）。注释误导消除，剩余 `BuildSnapshot` 折叠本身仍触发驱动。
+
+#### N5 · 周期长度相同的多条 Limit，`BucketIndex` 的桶 / 闸角色取决于 YAML 书写顺序 【D3 配额域 · 已登记 `KNOWN_ISSUES` · ROI 低】
+
+- **问题描述**：
+  *典型业务场景*：一个 provider 同时配了共享池 `every: 1mo` 和某模型专属池 `every: 1mo`（合法共存）。
+  *底层矛盾*：`internal/quota/score.go` `BucketIndex` 用名义周期时长严格大于挑最长周期作桶。两条 Limit 名义时长相等时，排在配置数组前面的被选为桶（无闸封顶），后面的被选为闸——仅仅上下颠倒两行 YAML 就会互换桶 / 闸角色，缺确定性仲裁。
+  *改与不改*：不改——当前靠规范书写规避，属边缘场景；改了——等长时加次级裁决，角色不再依赖书写顺序。
+- **根因**：`BucketIndex` 只有"最长周期"一个判据，周期时长并列时无 tie-break。
+- **建议方案**：周期时长并列时加次级裁决——共享池优先为桶（`!PerModel` 优于 `PerModel`），同类则 `Amount` 大者为桶。
+- **ROI**：Return 低（边缘场景，可靠规范书写即可规避）；Investment 低。**触发驱动**：真实配置出现等长复合 Limit 且用户报告角色不符预期。
+
+#### N9 · `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默 【D3 配额域 · 已登记 `KNOWN_ISSUES` · F4 后已缓解 · ROI 低】
+
+- **问题描述**：
+  *典型业务场景*：宿主机发生真实时钟回退（NTP 阶跃、快照回滚、时区误配），配额周期计数本应打一条 WARN 提示运维。
+  *底层矛盾*：`internal/quota/quota.go` `resetIfStaleLocked` 的 `rollbackWarned` 是进程级一次性 bool，一旦置位便无重置机会。F4 落地前，周期切换瞬间晚到的估算写可能携旧 `periodStart` 误触发一次时钟回退分支，此后真实回退永久静默。
+  *改与不改*：F4（`ChargeCost` 单锁原子）已消除那条跨锁裂缝，spurious trip 的主要来源没了——本条已大幅缓解；彻底修需把去抖从进程生命周期改为按 `limitKey` 或时间窗去重抑制。
+- **根因**：告警去抖用了进程级一次性 latch 而非窗口化去重。
+- **建议方案**：按 `limitKey` 或时间窗去重抑制，而非进程生命周期一次性 latch。
+- **ROI**：Return 低（F4 后已缓解）；Investment 低。**触发驱动**：F4 之后仍观察到本该有的时钟回退 WARN 缺失。
 
 ---
 

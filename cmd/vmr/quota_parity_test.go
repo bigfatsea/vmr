@@ -739,10 +739,10 @@ func (r parityRequest) replayChargeFor() (raw quota.Counters, estimated float64,
 // sniffed).
 //
 // The anthropic truncated-after-message_start row is the load-bearing
-// case: replay's chargeReplay used to feed TokenCounters the single
-// `u.In > 0 || u.Out > 0` disjunction, which bills the ~1 placeholder
-// output as EXACT (estimated=0). Both halves now use the per-side rule, so
-// the Out side must be estimated on BOTH sides — the exact thing the old
+// case: replay's chargeReplay used to feed the fold a single merged
+// `u.In > 0 || u.Out > 0` flag, which bills the ~1 placeholder output as
+// EXACT (estimated=0). Both halves now use the per-side rule, so the Out
+// side must be estimated on BOTH sides — the exact thing the old merged
 // disjunction got wrong.
 //
 // The softblock rows are the other load-bearing case: checkSoftBlock exits

@@ -199,29 +199,23 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	return
 }
 
-// TokenCounters turns one response's COMPLETE usage into the raw four-
-// component counters ChargeResponse charges, plus how much of that total
-// came from a degraded estimate (0 when exact). sniffed reports whether u is
-// a complete upstream usage object — BOTH sides of the ledger present; a
-// caller that can only say "some usage was seen" must use TokenCountersSides
-// instead, because partial usage (real input, placeholder output) billed as
-// exact is precisely the failure TokenCountersSides exists to prevent.
+// TokenCountersSides is the router half's one translation layer from
+// chatmsg.Usage to quota.TokenUsage, wrapping the canonical exact-vs-
+// degraded fold in quota.TokenCountersSides (see that function's doc
+// comment in internal/quota for the rule itself); u.Fresh() floors In to
+// non-negative as the scalar fold expects.
+// tokenCharge on the live billing path is the primary caller — it is not a
+// replay-only shim; it stays exported because internal/replay and cmd/vmr's
+// quota parity test drive this router-named entry point rather than
+// reaching past it into quota.
 //
-// A thin wrapper over quota.TokenCountersSides — the canonical implementation
-// lives in internal/quota (report needs the same fold and can't import
-// router, so the rule must live below both halves); this form just
-// translates chatmsg.Usage in, Fresh() flooring In to non-negative as the
-// scalar fold expects.
-func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
-	return TokenCountersSides(u, sniffed, sniffed, inEst, outEst)
-}
-
-// TokenCountersSides is TokenCounters' side-aware form — a thin wrapper over
-// quota.TokenCountersSides, the canonical implementation of the exact-vs-
-// degraded rule (see that function's doc comment in internal/quota for the
-// rule itself). Kept as an exported symbol because internal/replay and
-// cmd/vmr's quota parity test drive the router-named entry point; the body
-// is not here.
+// There is deliberately no single-flag (non-sides) wrapper: a merged "some
+// usage was seen" signal cannot tell a complete ledger from partial usage
+// (real input, placeholder output), and billing partial as exact is the
+// failure this function exists to prevent — replay's chargeReplay once did
+// exactly that with a merged u.In > 0 || u.Out > 0 flag until commit
+// ba6b0b3 moved it to per-side flags. A caller must always decide each side
+// separately.
 func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outEst int64) (quota.Counters, float64) {
 	return quota.TokenCountersSides(quota.TokenUsage{
 		Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,

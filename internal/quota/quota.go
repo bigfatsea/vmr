@@ -344,25 +344,6 @@ func (r *Registry) ChargeCost(provider, limitKey string, periodStart time.Time, 
 	r.dirty = true
 }
 
-// AddEstimatedCost bumps provider's limitKey bucket's running EstimatedCost
-// in its own locked section. Deprecated: a standalone estimated-cost write
-// is exactly the two-lock shape F4 removed — ChargeCost is the atomic form
-// and the only remaining production caller. Kept only because this
-// package's own store_test.go (persistence coverage, outside this change's
-// scope) still drives it.
-func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.Time, amount float64) {
-	r.ChargeCost(provider, limitKey, periodStart, Counters{}, amount)
-}
-
-// EstimatedCostFor returns provider's limitKey bucket's running
-// EstimatedCost as of periodStart. Deprecated: Snapshot returns all three
-// per-row values in one locked read — /status uses that; this wrapper
-// remains only for this package's own store_test.go.
-func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.Time) float64 {
-	_, _, cost := r.Snapshot(provider, limitKey, periodStart)
-	return cost
-}
-
 // Used returns provider's limitKey bucket as of periodStart, lazily
 // resetting first if the stored period has gone stale — so a read-only
 // caller (the router's per-request scoring path) sees a correctly-zeroed

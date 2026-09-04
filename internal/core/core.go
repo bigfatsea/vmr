@@ -484,11 +484,18 @@ type PricingOverride struct {
 // ("定价解析结果的挂点不一样") for why this couldn't be shared the way
 // QuotaSpec is.
 //
-// Why Base can't just collapse into a single resolved core.Rate at
-// config-load time: a wildcard catch-all Override (e.g. a blanket account
-// discount) can be layered above a model-specific Explicit override, and
-// EffectiveRate needs the full Base+Overrides chain to compose that
-// correctly — see internal/pricing.EffectiveRate.
+// Base and Overrides stay deliberately un-folded as a chain: a wildcard
+// catch-all Override (e.g. a blanket account discount) can sit above a
+// model-specific Explicit override, and EffectiveRate composes a discount
+// against whatever resolves BELOW it in the chain — folding an override
+// into Base at Resolve time while also keeping it in Overrides would
+// double-apply it. That constraint is on this structure's shape, not on
+// when resolution happens: P0-A made a spec fully static, so
+// EffectiveRate(spec) is a pure function of it, and the whole chain could
+// be pre-resolved to one Rate at BuildSnapshot time and cached on the
+// Endpoint — the router's per-charge re-resolution is a tracked,
+// trigger-driven follow-up (KNOWN_ISSUES §2.89), not a semantic
+// requirement.
 type PricingSpec struct {
 	Base      Rate
 	Overrides []PricingOverride

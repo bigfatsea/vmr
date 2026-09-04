@@ -149,9 +149,9 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	used, estTokens := rt.Quota.Used("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
 	if estTokens != 0 {
 		// bucket.Estimated is a requests/tokens-only accumulator; a cost
-		// Limit's degraded-estimate signal is money, tracked via
-		// EstimatedCostFor. The cost branch must not feed a token figure
-		// into Charge's `estimated` param (B6).
+		// Limit's degraded-estimate signal is money, tracked as the bucket's
+		// EstimatedCost (ChargeCost in, Snapshot out). The cost branch must not
+		// feed a token figure into Charge's `estimated` param (B6).
 		t.Fatalf("bucket.Estimated = %v, want 0 for a metric: cost charge", estTokens)
 	}
 	if used.Cost <= 0 {
@@ -166,8 +166,9 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 // TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide pins VD1: a charge
 // where the input side was sniffed exact but the output side degraded must
 // record only the output side's price as estimated, not the whole cost —
-// EstimatedCostFor drives /status's estimated_pct, and inflating it to ~100%
-// for a mostly-exact cost account defeats the one signal it exists to give.
+// the bucket's EstimatedCost drives /status's estimated_pct, and inflating
+// it to ~100% for a mostly-exact cost account defeats the one signal it
+// exists to give.
 func TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := costLimit(1000)

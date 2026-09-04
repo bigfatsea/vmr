@@ -130,6 +130,8 @@
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
 - **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `fmtutil.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
 
+- **用量折算（精确 vs 降级）的跨包入口刻意只有一条，没有单标志合并形式**：`quota.TokenCountersSides`（纯标量入参）是唯一权威实现，`router.TokenCountersSides` 是 `chatmsg.Usage`→`quota.TokenUsage` 的唯一翻译层（`report` 直接调 `quota` 侧，`archtest` 禁它 import `router`）。2026-09-04 删除 router 侧的单标志退化形式（router.TokenCounters，已不存在——零生产调用方、仅自身测试保活）——合并的“some usage was seen”信号无法区分完整账本与部分账本，把 partial 当 exact 记账正是 sides 拆分要消灭的 bug 类（`replay` 的 `chargeReplay` 曾把截断流的 ~1 占位 out 计成 exact，commit `ba6b0b3`）。**不要以“API 对称”或“给未来消费者留入口”名义复活单标志包装**——只能给单比特的调用方本就该逐侧决策。
+
 ### 1.5 产出与工程惯例
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
@@ -392,7 +394,7 @@
 #### 2.89 [低，登记待触发] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
 
 - **现状**（2026-09-04 review 发现）：`core.Endpoint` 挂 `*core.PricingSpec` 而非折叠好的 `Rate`，`router.ChargeResponse` 的 cost 分支每笔请求 `pricing.EffectiveRate(ep.PricingRate)` 重跑一次 `resolveChain`（≤3 元素切片的递归下钻）。P0-A 移除时间维后 `EffectiveRate(spec)` 对给定 spec 是纯静态确定性函数，`BuildSnapshot` 时端点已细化到唯一 upstream model，完全可在加载期折叠为一个已解析 `Rate` 挂到端点上、热路径变字段直读。
-- **性质**：`resolveChain` 是纳秒级、相对一次上游 HTTP 可忽略——不是性能问题，是「让价目表进实时路由热路径」这条架构红线（§1.0）的一处轻微越界 + `core.go` 注释把「Resolve 阶段不能提前折叠 Base 与 Override」偷换成了「加载完成后也不能折叠为静态 Rate」的误导。
+- **性质**：`resolveChain` 是纳秒级、相对一次上游 HTTP 可忽略——不是性能问题，是「让价目表进实时路由热路径」这条架构红线（§1.0）的一处轻微越界。（曾叠加 `core.go` 注释「加载完成后也不能折叠为静态 Rate」的误导，2026-09-04 随 review 收口订正——「不能折叠」只约束 Resolve 期逐规则折叠，P0-A 后 spec 全静态、`EffectiveRate(spec)` 是纯函数，整链本可在 `BuildSnapshot` 预折叠为单个 `Rate` 挂 `Endpoint`；本条只剩折叠本身。）
 - **可能方案**：`BuildSnapshot` 折叠预解析 `Rate` 挂 `Endpoint`；`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）。
 - **触发条件**：`core` / `router` 有其它改动顺路做，或 profiling 真的把它标出来（不太可能）。
 

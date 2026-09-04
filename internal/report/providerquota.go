@@ -89,8 +89,9 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 			if windowConsumed != nil && acc.costReqs[key] > 0 {
 				windowUnpricedPct = float64(acc.costUnpricedReqs[key]) / float64(acc.costReqs[key]) * 100
 			}
-			periodStart := quota.PeriodStart(*ref.Limit, now)
-			periodEnd := quota.PeriodEnd(*ref.Limit, now)
+			// One PeriodBounds (one findK, same-k boundaries) — F9, the form
+			// router.quotaStatusRow and cmd_report_quota already use.
+			periodStart, periodEnd := quota.PeriodBounds(*ref.Limit, now)
 			// [windowFrom, windowTo] and [periodStart, periodEnd] overlap
 			// iff windowFrom <= periodEnd && periodStart <= windowTo — the
 			// standard interval-intersection test. Skipped (never flagged)

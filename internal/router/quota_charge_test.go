@@ -472,14 +472,4 @@ func TestTokenCountersSides(t *testing.T) {
 		t.Fatalf("degraded: counters = %+v est = %v, want Fresh=15 Out=7 est=22", c, est)
 	}
 
-	// The legacy single-flag form drives the same implementation.
-	c2, est2 := TokenCounters(u, true, 999, 999)
-	complete := quota.Counters{Fresh: 100, CacheRead: 20, Out: 25}
-	if c2 != complete || est2 != 0 {
-		t.Fatalf("TokenCounters(complete) = %+v/%v, want %+v/0", c2, est2, complete)
-	}
-	c3, est3 := TokenCounters(chatmsg.Usage{}, false, 15, 7)
-	if c3 != c || est3 != 22 {
-		t.Fatalf("TokenCounters(degraded) = %+v/%v, want %+v/22", c3, est3, c)
-	}
 }
