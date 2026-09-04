@@ -382,6 +382,27 @@ func TestRenderProviderQuotaTable_ZH(t *testing.T) {
 	}
 }
 
+// TestRenderProviderQuotaTable_ModelScopeInProviderCell is the N6 lock-in:
+// rows carry no model column (the 8-column header is deliberately
+// untouched), so a per-model Limit's scope is suffixed to the provider cell
+// — without it, a provider's shared and per-model rows render as several
+// indistinguishable identical-provider lines.
+func TestRenderProviderQuotaTable_ModelScopeInProviderCell(t *testing.T) {
+	rep := &Report2{
+		ProviderQuotas: []ProviderQuotaRow{
+			{Provider: "openai", Metric: "tokens", Every: "1mo", Amount: 1000, WindowConsumed: f64(5)},
+			{Provider: "openai", Models: []string{"gpt-4o"}, Metric: "tokens", Every: "1d", Amount: 100, WindowConsumed: f64(3)},
+		},
+	}
+	out := renderProvidersStr(rep, i18n.EN)
+	if !strings.Contains(out, "| openai | tokens | 5 |") {
+		t.Errorf("the shared-Limit row must render the bare provider name:\n%s", out)
+	}
+	if !strings.Contains(out, "| openai (gpt-4o) | tokens | 3 |") {
+		t.Errorf("the per-model row must render provider (model):\n%s", out)
+	}
+}
+
 // TestRenderProviderQuotaTable_SkippedNoteInsideTable is the N7 lock-in: the
 // skipped-attempts note is part of the sub-table — rendered when the table
 // is, and absent when the table is absent (even with skip stats set).
