@@ -289,7 +289,7 @@ func (r *Registry) getLocked(provider, limitKey string) *bucket {
 // no missed-tick risk, and a process restart self-corrects the moment the
 // first Charge/Used after the gap runs, simply by comparing timestamps
 // instead of replaying missed ticks. Returns true when it actually reset, so
-// a read path (Used/EstimatedCostFor) can mark the Registry dirty — a period
+// a read path (Used/Snapshot) can mark the Registry dirty — a period
 // roll observed only by a read still needs to reach vmr-quota.json (B8).
 //
 // A backward move (ps < b.PeriodStart) is a clock rollback — NTP
@@ -327,6 +327,42 @@ func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Co
 	r.dirty = true
 }
 
+// ChargeCost applies a cost-metric charge and its degraded-estimate $ amount
+// in ONE locked section — the atomic form ChargeResponse's cost branch needs
+// so a concurrent period roll can't land the two halves in different periods
+// (was: Charge + a separate AddEstimatedCost, whose inter-lock gap let a
+// late estimate carrying the old periodStart misfire the clock-rollback WARN
+// and pollute the new period's EstimatedCost). estimatedCost is 0 for an
+// exact (both-sides-sniffed) charge.
+func (r *Registry) ChargeCost(provider, limitKey string, periodStart time.Time, d Counters, estimatedCost float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.getLocked(provider, limitKey)
+	r.resetIfStaleLocked(b, periodStart)
+	b.C = b.C.Add(d)
+	b.EstimatedCost += estimatedCost
+	r.dirty = true
+}
+
+// AddEstimatedCost bumps provider's limitKey bucket's running EstimatedCost
+// in its own locked section. Deprecated: a standalone estimated-cost write
+// is exactly the two-lock shape F4 removed — ChargeCost is the atomic form
+// and the only remaining production caller. Kept only because this
+// package's own store_test.go (persistence coverage, outside this change's
+// scope) still drives it.
+func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.Time, amount float64) {
+	r.ChargeCost(provider, limitKey, periodStart, Counters{}, amount)
+}
+
+// EstimatedCostFor returns provider's limitKey bucket's running
+// EstimatedCost as of periodStart. Deprecated: Snapshot returns all three
+// per-row values in one locked read — /status uses that; this wrapper
+// remains only for this package's own store_test.go.
+func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.Time) float64 {
+	_, _, cost := r.Snapshot(provider, limitKey, periodStart)
+	return cost
+}
+
 // Used returns provider's limitKey bucket as of periodStart, lazily
 // resetting first if the stored period has gone stale — so a read-only
 // caller (the router's per-request scoring path) sees a correctly-zeroed
@@ -344,35 +380,16 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 	return b.C, b.Estimated
 }
 
-// AddEstimatedCost  bumps provider's limitKey bucket's running
-// EstimatedCost — the metric: cost analogue of Charge's estimated float64
-// parameter, kept as a separate method rather than overloading Charge's
-// signature: Counters already has a Cost field (Charge/Add sum it exactly
-// like every other component, so a cost charge's $ amount is recorded via
-// an ordinary Charge call with d.Cost set), but the ESTIMATE signal for a
-// cost-metric account is denominated in money, not tokens, and doesn't fit
-// Charge's existing token-denominated estimated parameter. Call this
-// alongside Charge, not instead of it, when a charge came from a degraded
-// (non-usage-sniffed) token estimate priced through the resolved rate.
-func (r *Registry) AddEstimatedCost(provider, limitKey string, periodStart time.Time, amount float64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	b := r.getLocked(provider, limitKey)
-	r.resetIfStaleLocked(b, periodStart)
-	b.EstimatedCost += amount
-	r.dirty = true
-}
-
-// EstimatedCostFor returns provider's limitKey bucket's running
-// EstimatedCost as of periodStart (lazily resetting first, same as Used) —
-// a small dedicated accessor rather than growing Used's return shape,
-// since only /status's cost-metric rendering needs it.
-func (r *Registry) EstimatedCostFor(provider, limitKey string, periodStart time.Time) float64 {
+// Snapshot returns provider+limitKey's counters, token-estimate total and
+// cost-estimate total as of periodStart in ONE locked read (lazily resetting
+// a stale period once, same as Used) — /status renders all three per row and
+// must not see a mid-roll split between them.
+func (r *Registry) Snapshot(provider, limitKey string, periodStart time.Time) (Counters, float64, float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b := r.getLocked(provider, limitKey)
 	if r.resetIfStaleLocked(b, periodStart) {
 		r.dirty = true
 	}
-	return b.EstimatedCost
+	return b.C, b.Estimated, b.EstimatedCost
 }

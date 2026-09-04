@@ -121,11 +121,11 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			d := raw
 			d.Cost = componentCost(d, rate)
 			// estimated is token-denominated; on a cost Limit the estimate
-			// signal is money and is tracked via AddEstimatedCost below.
-			// Passing the token figure into Charge's `estimated` param would
-			// pollute bucket.Estimated (a requests/tokens-only accumulator)
-			// with a meaningless number (B6).
-			reg.Charge(ep.Provider, limitKey, periodStart, d, 0)
+			// signal is money and is passed to ChargeCost below. Passing the
+			// token figure into Charge's `estimated` param would pollute
+			// bucket.Estimated (a requests/tokens-only accumulator) with a
+			// meaningless number (B6).
+			var estCostAmount float64
 			if !inSniffed || !outSniffed {
 				// Only the un-sniffed side of the ledger is an estimate — the
 				// sniffed side priced from real reported usage is exact. Price
@@ -141,8 +141,12 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 				if !outSniffed {
 					estC.Out = d.Out
 				}
-				reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, componentCost(estC, rate))
+				estCostAmount = componentCost(estC, rate)
 			}
+			// One locked charge: the cost and its estimate must land in the
+			// same period even if another goroutine rolls the bucket in
+			// between (F4).
+			reg.ChargeCost(ep.Provider, limitKey, periodStart, d, estCostAmount)
 		case core.MetricTokens:
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, raw, estimated)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
@@ -414,13 +418,12 @@ func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, r
 	limitKey := quota.LimitKey(l, model)
 	periodStart := quota.PeriodStart(l, now)
 	periodEnd := quota.PeriodEnd(l, now)
-	c, estimated := reg.Used(provider, limitKey, periodStart)
+	c, estimated, estimatedCost := reg.Snapshot(provider, limitKey, periodStart)
 	used := quota.BaseAmount(l, c)
 	var pct float64
 	if l.Amount > 0 {
 		pct = used / l.Amount * 100
 	}
-	estimatedCost := reg.EstimatedCostFor(provider, limitKey, periodStart)
 	estPct := quota.EstimatedPct(l.Metric, c, estimated, estimatedCost)
 	models := l.Models
 	if model != "" {

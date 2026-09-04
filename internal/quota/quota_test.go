@@ -27,6 +27,74 @@ func TestRegistry_ChargeAndUsed(t *testing.T) {
 	}
 }
 
+// TestRegistry_ChargeCost_UpdatesCostAndEstimatedCost: ChargeCost applies
+// the $ charge and its degraded-estimate share in one locked section — read
+// back through Snapshot and both must be there together.
+func TestRegistry_ChargeCost_UpdatesCostAndEstimatedCost(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.ChargeCost("plan-a", "cost/1mo", ps, Counters{Fresh: 100, Out: 50, Cost: 1.5}, 0.5)
+	c, est, estCost := r.Snapshot("plan-a", "cost/1mo", ps)
+	if c.Cost != 1.5 || c.Fresh != 100 || est != 0 || estCost != 0.5 {
+		t.Fatalf("after ChargeCost: counters=%+v est=%v estCost=%v, want Cost=1.5 Fresh=100 est=0 estCost=0.5", c, est, estCost)
+	}
+	// A second, exact (non-degraded) charge must not touch EstimatedCost.
+	r.ChargeCost("plan-a", "cost/1mo", ps, Counters{Cost: 2.5}, 0)
+	c, _, estCost = r.Snapshot("plan-a", "cost/1mo", ps)
+	if c.Cost != 4 || estCost != 0.5 {
+		t.Fatalf("after exact ChargeCost: Cost=%v estCost=%v, want 4 / 0.5 (estimate share unchanged)", c.Cost, estCost)
+	}
+}
+
+// TestRegistry_ChargeCost_PeriodRollResetsBoth pins the F4 atomicity: a
+// period roll zeroes Cost and EstimatedCost together — never one half in the
+// old period and the other leaked into the new one, the shape the old
+// Charge-then-AddEstimatedCost sequence could produce.
+func TestRegistry_ChargeCost_PeriodRollResetsBoth(t *testing.T) {
+	r := NewRegistry("")
+	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p2 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	r.ChargeCost("plan-a", "cost/1mo", p1, Counters{Cost: 10}, 5)
+	r.ChargeCost("plan-a", "cost/1mo", p2, Counters{Cost: 1}, 0.5)
+	c, est, estCost := r.Snapshot("plan-a", "cost/1mo", p2)
+	if c.Cost != 1 || est != 0 || estCost != 0.5 {
+		t.Fatalf("after period roll: Cost=%v est=%v estCost=%v, want 1/0/0.5 — both halves reset together", c.Cost, est, estCost)
+	}
+}
+
+// TestRegistry_Snapshot_LazyReset: the read side of the same invariant —
+// Snapshot's three values are always from ONE period, even when the call
+// itself rolls a stale bucket forward.
+func TestRegistry_Snapshot_LazyReset(t *testing.T) {
+	r := NewRegistry("")
+	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p2 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	r.Charge("plan-a", "cost/1mo", p1, Counters{Cost: 10}, 1)
+	r.Charge("plan-a", "cost/1mo", p1, Counters{Cost: 0}, 9)
+	c, est, estCost := r.Snapshot("plan-a", "cost/1mo", p2)
+	if c.Cost != 0 || est != 0 || estCost != 0 {
+		t.Fatalf("Snapshot across a period roll = (%+v, %v, %v), want all zeroed (new period)", c, est, estCost)
+	}
+}
+
+func TestRegistry_ConcurrentChargeCost_Race(t *testing.T) {
+	r := NewRegistry("")
+	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.ChargeCost("plan-a", "cost/1mo", ps, Counters{Requests: 1, Cost: 1}, 0.5)
+		}()
+	}
+	wg.Wait()
+	c, _, estCost := r.Snapshot("plan-a", "cost/1mo", ps)
+	if c.Requests != 50 || c.Cost != 50 || estCost != 25 {
+		t.Fatalf("concurrent ChargeCost: Requests=%v Cost=%v estCost=%v, want 50/50/25 (totals must be conserved)", c.Requests, c.Cost, estCost)
+	}
+}
+
 func TestRegistry_EstimatedAccumulates(t *testing.T) {
 	r := NewRegistry("")
 	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
