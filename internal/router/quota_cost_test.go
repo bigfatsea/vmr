@@ -85,7 +85,7 @@ func TestChargeCost_SniffedUsage_ComputesExactCost(t *testing.T) {
 	if estTokens != 0 {
 		t.Fatalf("estimated tokens = %v, want 0 (usage was sniffed, exact)", estTokens)
 	}
-	if estCost := rt.Quota.EstimatedCostFor("p1", "cost/1mo", quota.PeriodStart(l, chargeNow)); estCost != 0 {
+	if _, _, estCost := rt.Quota.Snapshot("p1", "cost/1mo", quota.PeriodStart(l, chargeNow)); estCost != 0 {
 		t.Fatalf("EstimatedCost = %v, want 0 (exact charge)", estCost)
 	}
 }
@@ -157,7 +157,7 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	if used.Cost <= 0 {
 		t.Fatalf("Counters.Cost = %v, want > 0 (degraded estimate still charges a nonzero cost)", used.Cost)
 	}
-	estCost := rt.Quota.EstimatedCostFor("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
+	_, _, estCost := rt.Quota.Snapshot("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
 	if estCost != used.Cost {
 		t.Fatalf("EstimatedCost = %v, want it to equal the full charged Cost (%v) — the whole charge was degraded", estCost, used.Cost)
 	}
@@ -177,7 +177,7 @@ func TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide(t *testing.T) {
 
 	ps := quota.PeriodStart(l, chargeNow)
 	used, _ := rt.Quota.Used("p1", "cost/1mo", ps)
-	estCost := rt.Quota.EstimatedCostFor("p1", "cost/1mo", ps)
+	_, _, estCost := rt.Quota.Snapshot("p1", "cost/1mo", ps)
 	wantEst := 10.0 / 1e6 * 4.0 // fullRate Out is 4.0/1M; the input side is exact
 	if d := estCost - wantEst; d > 1e-12 || d < -1e-12 {
 		t.Fatalf("EstimatedCost = %v, want %v (output side only)", estCost, wantEst)
@@ -216,7 +216,7 @@ func TestBaseAmount_MetricCost_ReturnsStoredCost(t *testing.T) {
 	}
 }
 
-// --- QuotaStatus: EstimatedPct for a cost account uses EstimatedCostFor, not the token-estimate counter ---
+// --- QuotaStatus: EstimatedPct for a cost account uses EstimatedCost (read via Snapshot), not the token-estimate counter ---
 
 func TestQuotaStatus_MetricCost_EstimatedPctIsCostDenominated(t *testing.T) {
 	rt := New(nil)
@@ -247,7 +247,7 @@ models:
 	// 10 exact + 10 estimated cost = 20 total Cost, half of it estimated.
 	rt.Quota.Charge("anthropic", "cost/1mo", ps, quota.Counters{Cost: 10}, 0)
 	rt.Quota.Charge("anthropic", "cost/1mo", ps, quota.Counters{Cost: 10}, 0)
-	rt.Quota.AddEstimatedCost("anthropic", "cost/1mo", ps, 10)
+	rt.Quota.ChargeCost("anthropic", "cost/1mo", ps, quota.Counters{}, 10)
 
 	st := rt.QuotaStatus()
 	if len(st) != 1 {

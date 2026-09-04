@@ -95,8 +95,7 @@ func Headroom(usedFrac, timeLeftFrac float64) float64 {
 // exactly one Limit (P1/P2's shape) or when the role has already been
 // decided elsewhere.
 func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
-	start := PeriodStart(l, now)
-	end := PeriodEnd(l, now)
+	start, end := PeriodBounds(l, now)
 	return Headroom(UsedFrac(used, l.Amount), TimeLeftFrac(now, start, end))
 }
 
@@ -107,7 +106,8 @@ func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 // Limit is tumbling and this always resolves to a real index for a
 // non-empty slice — the "all-rolling has no bucket" branch §5.2 also
 // describes doesn't apply until rolling windows exist. len(limits)==0
-// returns -1 (unreachable from ScoreForLimits, which guards it first).
+// returns -1; ScoreForLimits guards the empty slice (neutral 1.0) before
+// calling this, so its callers never see the -1.
 func BucketIndex(limits []core.Limit) int {
 	if len(limits) == 0 {
 		return -1
@@ -149,7 +149,15 @@ func BucketIndex(limits []core.Limit) int {
 // trivially both the longest and the only one, so it always gets bucket
 // treatment (no gate cap) — byte-identical to P1/P2's single-Limit
 // behavior, which is the "zero regression for existing configs" property.
+//
+// An empty limits slice returns 1.0 — neutral: no quota configured is
+// neither exhausted (0.0) nor a maximally-underused bucket (HeadroomCap),
+// and BucketIndex's comment about the guard is now true because of this
+// one.
 func ScoreForLimits(limits []core.Limit, used []float64, now time.Time) float64 {
+	if len(limits) == 0 {
+		return 1.0 // no quota configured == neutral: neither penalise (0.0 = exhausted) nor boost (>1 = underused bucket)
+	}
 	bi := BucketIndex(limits)
 	score := HeadroomCap
 	for i, l := range limits {

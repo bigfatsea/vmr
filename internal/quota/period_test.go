@@ -188,6 +188,71 @@ func TestPeriodStartEnd_Invariant_Sweep(t *testing.T) {
 	}
 }
 
+// TestPeriodBounds_MatchesPeriodStartEnd pins F9: PeriodBounds is the
+// single-findK source the two wrappers now delegate to, so its two returns
+// must equal PeriodStart/PeriodEnd across the calendar shapes that matter
+// (monthly clamping, cross-year, DST, week alignment).
+func TestPeriodBounds_MatchesPeriodStartEnd(t *testing.T) {
+	loc := mustLoc(t, "America/New_York")
+	withDisplayZone(t, loc)
+	cases := []struct {
+		name  string
+		limit core.Limit
+		now   time.Time
+	}{
+		{"monthly", core.Limit{EveryUnit: "mo", EveryN: 1, Since: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)},
+			time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC)},
+		{"cross-year", core.Limit{EveryUnit: "mo", EveryN: 1, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+			time.Date(2027, 1, 5, 0, 0, 0, 0, time.UTC)},
+		{"dst", core.Limit{EveryUnit: "d", EveryN: 1, Since: time.Date(2026, 3, 1, 0, 0, 0, 0, loc)},
+			time.Date(2026, 3, 9, 12, 0, 0, 0, loc)},
+		// 2026-01-05 is a Monday; 2026-02-18 a Wednesday — the start must
+		// land on the Monday-aligned boundary, not the anchor's raw phase.
+		// Times in loc, not UTC: PeriodBounds converts into DisplayZone.
+		{"weekly-monday", core.Limit{EveryUnit: "w", EveryN: 1, Since: time.Date(2026, 1, 5, 0, 0, 0, 0, loc)},
+			time.Date(2026, 2, 18, 12, 0, 0, 0, loc)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			start, end := PeriodBounds(c.limit, c.now)
+			wantStart, wantEnd := PeriodStart(c.limit, c.now), PeriodEnd(c.limit, c.now)
+			if !start.Equal(wantStart) || !end.Equal(wantEnd) {
+				t.Fatalf("PeriodBounds = (%v, %v), PeriodStart/End = (%v, %v) — the three must agree (same-k)",
+					start, end, wantStart, wantEnd)
+			}
+			if (!start.Before(c.now) && !start.Equal(c.now)) || !c.now.Before(end) {
+				t.Fatalf("now %v not within [start=%v, end=%v)", c.now, start, end)
+			}
+			if c.name == "weekly-monday" && start.Weekday() != time.Monday {
+				t.Fatalf("weekly start = %v (%v), want a Monday", start, start.Weekday())
+			}
+		})
+	}
+}
+
+// TestPeriodBounds_ZeroSince pins N4: a zero-value Since (never valid from
+// config) must be anchored to DefaultSince rather than fed to findK, whose
+// elapsed-since-year-1 arithmetic overflows — the pre-guard failure mode was
+// a near-infinite boundary walk (CPU hang), not a clean answer. Also asserts
+// the call returns promptly with sane bounds.
+func TestPeriodBounds_ZeroSince(t *testing.T) {
+	withDisplayZone(t, time.UTC)
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	for _, unit := range []string{"min", "h", "d", "w", "mo"} {
+		l := core.Limit{EveryUnit: unit, EveryN: 1} // Since left zero
+		start, end := PeriodBounds(l, now)
+		l.Since = DefaultSince(now, unit)
+		wantStart, wantEnd := PeriodBounds(l, now)
+		if !start.Equal(wantStart) || !end.Equal(wantEnd) {
+			t.Errorf("unit %s: zero-Since bounds (%v, %v), want the DefaultSince-anchored (%v, %v)",
+				unit, start, end, wantStart, wantEnd)
+		}
+		if now.Before(start) || !now.Before(end) {
+			t.Errorf("unit %s: zero-Since bounds don't contain now: [%v, %v)", unit, start, end)
+		}
+	}
+}
+
 func TestDefaultSince(t *testing.T) {
 	loc := time.UTC
 	withDisplayZone(t, loc)

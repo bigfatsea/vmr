@@ -169,6 +169,20 @@ func TestScoreForLimits_GateNeverBoosts(t *testing.T) {
 	}
 }
 
+// TestScoreForLimits_EmptySetIsNeutral pins 备注B: no quota configured is
+// neither exhausted (0.0 = the penalty score) nor a maximally-underused
+// bucket (HeadroomCap = 5.0, what the pre-guard code returned while
+// BucketIndex's comment claimed a guard existed) — it's the neutral 1.0.
+func TestScoreForLimits_EmptySetIsNeutral(t *testing.T) {
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	if got := ScoreForLimits(nil, nil, now); got != 1.0 {
+		t.Errorf("ScoreForLimits(nil, nil) = %v, want 1.0 (neutral)", got)
+	}
+	if got := ScoreForLimits([]core.Limit{}, nil, now); got != 1.0 {
+		t.Errorf("ScoreForLimits(empty, nil) = %v, want 1.0 (neutral)", got)
+	}
+}
+
 // TestScoreForLimits_DegeneratesToScoreForLimit pins zero regression for
 // existing single-Limit configs (P1/P2's only shape): with one Limit, it is
 // trivially both the longest and the only one, so it always gets bucket

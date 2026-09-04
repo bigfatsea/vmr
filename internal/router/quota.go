@@ -121,11 +121,11 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			d := raw
 			d.Cost = componentCost(d, rate)
 			// estimated is token-denominated; on a cost Limit the estimate
-			// signal is money and is tracked via AddEstimatedCost below.
-			// Passing the token figure into Charge's `estimated` param would
-			// pollute bucket.Estimated (a requests/tokens-only accumulator)
-			// with a meaningless number (B6).
-			reg.Charge(ep.Provider, limitKey, periodStart, d, 0)
+			// signal is money and is passed to ChargeCost below. Passing the
+			// token figure into Charge's `estimated` param would pollute
+			// bucket.Estimated (a requests/tokens-only accumulator) with a
+			// meaningless number (B6).
+			var estCostAmount float64
 			if !inSniffed || !outSniffed {
 				// Only the un-sniffed side of the ledger is an estimate — the
 				// sniffed side priced from real reported usage is exact. Price
@@ -141,8 +141,12 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 				if !outSniffed {
 					estC.Out = d.Out
 				}
-				reg.AddEstimatedCost(ep.Provider, limitKey, periodStart, componentCost(estC, rate))
+				estCostAmount = componentCost(estC, rate)
 			}
+			// One locked charge: the cost and its estimate must land in the
+			// same period even if another goroutine rolls the bucket in
+			// between (F4).
+			reg.ChargeCost(ep.Provider, limitKey, periodStart, d, estCostAmount)
 		case core.MetricTokens:
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, raw, estimated)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
@@ -203,57 +207,25 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 // instead, because partial usage (real input, placeholder output) billed as
 // exact is precisely the failure TokenCountersSides exists to prevent.
 //
-// Exported, and factored out of tokenCharge, because this exact-vs-degraded
-// decision had grown THREE independent implementations: this one,
-// internal/replay's chargeReplay, and internal/report's own reproduction of
-// it for `vmr report`'s §2.5 recomputed column. Three copies of "if usage was
-// sniffed charge it exactly, otherwise charge a byte estimate and mark the
-// whole thing estimated" is the same class of drift risk the audit-log label
-// format and quota.BaseAmount were each collapsed to one implementation to
-// avoid — and it is specifically what cmd/vmr/quota_parity_test.go exists to
-// catch, so that test must drive THIS function rather than re-deriving it.
+// A thin wrapper over quota.TokenCountersSides — the canonical implementation
+// lives in internal/quota (report needs the same fold and can't import
+// router, so the rule must live below both halves); this form just
+// translates chatmsg.Usage in, Fresh() flooring In to non-negative as the
+// scalar fold expects.
 func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
 	return TokenCountersSides(u, sniffed, sniffed, inEst, outEst)
 }
 
-// TokenCountersSides is TokenCounters' side-aware form — the canonical
-// implementation of the exact-vs-degraded rule. inSniffed/outSniffed report
-// whether each side of the usage ledger was actually parsed; a missing side
-// falls back to the caller's estimate for that side (max'd with whatever the
-// usage object did claim — a placeholder must never beat real emitted-text
-// evidence), and the estimated share is reported honestly as the portion of
-// the charge that came from an estimate, never 0 just because SOME usage was
-// seen. The degraded In side charges everything to Fresh: it cannot tell
-// cache hits apart, and assuming none is the safe direction — it
-// overestimates consumption rather than silently crediting a cache discount
-// that may not have happened (see the design doc's Metering section).
+// TokenCountersSides is TokenCounters' side-aware form — a thin wrapper over
+// quota.TokenCountersSides, the canonical implementation of the exact-vs-
+// degraded rule (see that function's doc comment in internal/quota for the
+// rule itself). Kept as an exported symbol because internal/replay and
+// cmd/vmr's quota parity test drive the router-named entry point; the body
+// is not here.
 func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outEst int64) (quota.Counters, float64) {
-	if inSniffed && outSniffed {
-		return quota.Counters{
-			Fresh:      float64(u.Fresh()),
-			CacheRead:  float64(u.CacheRead),
-			CacheWrite: float64(u.CacheWrite),
-			Out:        float64(u.Out),
-		}, 0
-	}
-	var c quota.Counters
-	var est float64
-	if inSniffed {
-		c.Fresh = float64(u.Fresh())
-		c.CacheRead = float64(u.CacheRead)
-		c.CacheWrite = float64(u.CacheWrite)
-	} else {
-		c.Fresh = float64(inEst)
-		est += float64(inEst)
-	}
-	if outSniffed {
-		c.Out = float64(u.Out)
-	} else {
-		out := max(u.Out, outEst)
-		c.Out = float64(out)
-		est += float64(out)
-	}
-	return c, est
+	return quota.TokenCountersSides(quota.TokenUsage{
+		Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,
+	}, inSniffed, outSniffed, inEst, outEst)
 }
 
 // QuotaProviderStatus is one (provider, Limit) pair's live state, for
@@ -444,15 +416,16 @@ func limitRoleForModel(limits []core.Limit, l core.Limit, model string) string {
 // answer here, not "which models could this Limit ever cover".
 func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, role string, now time.Time) QuotaProviderStatus {
 	limitKey := quota.LimitKey(l, model)
-	periodStart := quota.PeriodStart(l, now)
-	periodEnd := quota.PeriodEnd(l, now)
-	c, estimated := reg.Used(provider, limitKey, periodStart)
+	// One PeriodBounds: start and end are same-k consistent, and the Snapshot
+	// below reads counters+estimates under one lock — a /status row must not
+	// straddle a period roll mid-render (F4/F9).
+	periodStart, periodEnd := quota.PeriodBounds(l, now)
+	c, estimated, estimatedCost := reg.Snapshot(provider, limitKey, periodStart)
 	used := quota.BaseAmount(l, c)
 	var pct float64
 	if l.Amount > 0 {
 		pct = used / l.Amount * 100
 	}
-	estimatedCost := reg.EstimatedCostFor(provider, limitKey, periodStart)
 	estPct := quota.EstimatedPct(l.Metric, c, estimated, estimatedCost)
 	models := l.Models
 	if model != "" {
