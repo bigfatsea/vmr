@@ -8,9 +8,10 @@
 // more tumbling Limits per provider, P3's bucket-vs-gate multi-window
 // merge; rolling windows remain undelivered).
 //
-// Depends only on core + the standard library — no I/O beyond store.go's
-// file persistence, and the period/score math here is pure functions, fully
-// unit-testable without a Registry.
+// Depends only on core, internal/fmtutil (DisplayZone — period boundaries
+// are a human-facing concept, see the timezone invariant), and the standard
+// library — no I/O beyond store.go's file persistence, and the period/score
+// math here is pure functions, fully unit-testable without a Registry.
 package quota
 
 import (

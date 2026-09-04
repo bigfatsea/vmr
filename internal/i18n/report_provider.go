@@ -16,8 +16,8 @@ type ProviderText struct {
 	// map (traffic that contributed nothing to the window recomputation).
 	// names is the first-3 unknown provider names joined by ", " (or all
 	// of them when there are 3 or fewer); more is the count of names
-	// beyond the first 3 (0 when 3 or fewer). The line is omitted by
-	// build (call sites should pre-check lastSkippedAttempts).
+	// beyond the first 3 (0 when 3 or fewer). renderSkippedAttemptsNote
+	// only calls this when Report2.ProviderQuotaSkippedAttempts > 0.
 	SkippedAttemptsNote func(total int, names string, more int) string
 }
 
