@@ -64,6 +64,14 @@ func (r Rate) Complete() bool {
 	return true
 }
 
+// IsEmpty reports whether all four components are nil — "no pricing at
+// all", the complement of Complete (all four set and finite); anything
+// between is partial pricing. The gate Resolver.RateFor applies so an
+// all-nil rate can't flow downstream as a priced $0.00.
+func (r Rate) IsEmpty() bool {
+	return r.InFresh == nil && r.CacheRead == nil && r.CacheWrite == nil && r.Out == nil
+}
+
 // MissingComponents names r's unset fields, in a fixed order, for error
 // messages — config.validate() uses this to say exactly which component is
 // missing rather than just "incomplete".
@@ -612,6 +620,12 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
 		}
 		rate = rate.Scale(factor)
+	}
+	// A row naming a key but carrying no rate component would make every
+	// lookup of that key a tableHit with an all-nil (unpriced) Rate —
+	// bypassing the "no rate at all" contract upstream callers rely on.
+	if rate.IsEmpty() {
+		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: at least one of in_fresh/cache_read/cache_write/out must be set", i, r.Key)
 	}
 	// Reject NaN, Inf, and negative rates — a hand-written supplement
 	// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons

@@ -29,17 +29,28 @@ func TestResolver_RateFor_PerProviderPolicy(t *testing.T) {
 	}, 1, "")
 	// "totally-unknown-model" has no table entry under any resolution step
 	// (unlike claude-3-5-sonnet, which testTable() would resolve via the
-	// unique-suffix step) — a wildcard discount override still counts as
-	// "something to go on" (ok=true, matching Resolve's own documented
-	// contract), but scaling an empty Base produces an empty (all-nil)
-	// Rate — report's costFor treats every nil component as 0, so this
-	// degrades to "no cost estimate", not an error.
-	rate, ok := r.RateFor("my-plan", "totally-unknown-model")
-	if !ok {
-		t.Fatal("a matching override, even with nothing to discount, still counts as ok=true")
+	// unique-suffix step) — the only matching rule is a discount with
+	// nothing beneath it to scale. A dangling discount is "unpriced", not
+	// "free": RateFor must return ok=false so report's cost aggregation
+	// records "no $ estimate" instead of a fake $0.00.
+	if _, ok := r.RateFor("my-plan", "totally-unknown-model"); ok {
+		t.Fatal("want ok=false: a dangling discount over an empty Base is unpriced, not $0.00")
 	}
-	if rate.InFresh != nil {
-		t.Fatalf("rate = %+v, want all-nil (discount scaling an empty Base stays empty)", rate)
+}
+
+// TestResolver_RateFor_DanglingDiscountOverExplicitAnchor: the same policy
+// shape with an Explicit rule below the discount — now the chain anchors
+// and RateFor returns the composed rate.
+func TestResolver_RateFor_DanglingDiscountOverExplicitAnchor(t *testing.T) {
+	r := NewResolver(testTable(), map[string]ProviderPolicy{
+		"my-plan": {Overrides: []OverrideRule{
+			{Model: "*", Discount: f(0.8)},
+			{Model: "totally-unknown-model", Explicit: Rate{InFresh: f(2), CacheRead: f(0.2), CacheWrite: f(2), Out: f(8)}},
+		}},
+	}, 1, "")
+	rate, ok := r.RateFor("my-plan", "totally-unknown-model")
+	if !ok || rate.InFresh == nil || !almostEqual(*rate.InFresh, 2*0.8) {
+		t.Fatalf("RateFor = %+v ok=%v, want InFresh=1.6 (explicit x 0.8)", rate, ok)
 	}
 }
 

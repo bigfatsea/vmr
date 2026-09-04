@@ -214,6 +214,46 @@ func TestResolve_NothingMatches_OkFalse(t *testing.T) {
 	}
 }
 
+// TestResolve_DanglingDiscountOnly_OkFalse pins the "dangling discount"
+// gate: a matching discount with NO table hit and no Explicit override has
+// nothing to scale — the chain would resolve all-nil, which downstream
+// consumers would read as a priced $0.00 rather than "unpriced".
+func TestResolve_DanglingDiscountOnly_OkFalse(t *testing.T) {
+	_, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{
+		Table: testTable(), Currency: "USD",
+		Overrides: []OverrideRule{{Model: "*", Discount: f(0.8)}},
+	})
+	if ok {
+		t.Fatal("want ok=false: a discount over an empty Base resolves nothing, not a $0.00 rate")
+	}
+}
+
+// TestResolve_DanglingDiscountOverExplicitAnchor_OkTrue: the same shape
+// with one Explicit rule further down the chain — now the discount has an
+// anchor, Resolve succeeds, and EffectiveRate composes 0.8 x explicit.
+func TestResolve_DanglingDiscountOverExplicitAnchor_OkTrue(t *testing.T) {
+	explicit := Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}
+	spec, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{
+		Table: testTable(), Currency: "USD",
+		Overrides: []OverrideRule{
+			{Model: "*", Discount: f(0.8)},
+			{Model: "totally-unknown", Explicit: explicit},
+		},
+	})
+	if !ok {
+		t.Fatal("want ok=true: the Explicit rule anchors the chain")
+	}
+	got := EffectiveRate(spec)
+	for name, tc := range map[string][2]*float64{
+		"in_fresh": {got.InFresh, explicit.InFresh}, "cache_read": {got.CacheRead, explicit.CacheRead},
+		"cache_write": {got.CacheWrite, explicit.CacheWrite}, "out": {got.Out, explicit.Out},
+	} {
+		if tc[0] == nil || tc[1] == nil || !almostEqual(*tc[0], *tc[1]*0.8) {
+			t.Errorf("%s = %v, want %v (explicit x 0.8)", name, tc[0], tc[1])
+		}
+	}
+}
+
 func TestResolve_OverrideModelPatternFiltering(t *testing.T) {
 	spec, ok := Resolve("plan-b", "other-model", ResolveOptions{
 		Table: testTable(), Currency: "USD",

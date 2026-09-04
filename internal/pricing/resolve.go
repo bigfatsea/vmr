@@ -179,8 +179,12 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 // written order, unmodified; EffectiveRate is the only place that ever
 // combines Base with an Override.
 //
-// ok=false means neither the table nor any override supplies so much as a
-// partial rate for this provider+model — genuinely nothing to go on. A
+// ok=false means the chain has no anchor: neither the table nor any
+// Explicit override supplies so much as a partial rate for this
+// provider+model. A matching set of ONLY discount-form overrides with no
+// table hit also resolves ok=false — scaling an all-nil Base yields an
+// all-nil Rate, which downstream consumers would read as a priced $0.00
+// rather than "unpriced" (see Resolver.RateFor's gate). A
 // partial/incomplete Base (some components nil) still resolves with
 // ok=true; whether that's fatal is the CALLER's decision — see Complete,
 // which config.validate() uses to decide.
@@ -201,8 +205,21 @@ func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bo
 		}
 	}
 
-	if !tableHit && len(matching) == 0 {
-		return nil, false
+	if !tableHit {
+		// Without a table hit the chain's floor is spec.Base — empty. If no
+		// matching override is Explicit either, resolveChain has no rate to
+		// stop at and the whole chain resolves all-nil: "unpriced", not a
+		// discount over nothing.
+		hasExplicit := false
+		for _, o := range matching {
+			if o.Discount == nil {
+				hasExplicit = true
+				break
+			}
+		}
+		if !hasExplicit {
+			return nil, false
+		}
 	}
 
 	spec := &core.PricingSpec{Base: base.toCore(), Currency: opts.Currency}
