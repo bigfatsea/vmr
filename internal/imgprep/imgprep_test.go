@@ -989,3 +989,274 @@ func TestDownscalePanicRecoveredFailsOpen(t *testing.T) {
 		t.Errorf("panic path must not report image metadata, got %v", images)
 	}
 }
+
+// --- Anthropic tool_result nested images ---
+
+// anthropicToolResultReq builds the shape computer-use/vision agents actually
+// produce: an assistant tool_use turn, then a user tool_result whose content
+// array carries the screenshot — the image sits one level below the message
+// content, not as a direct child block.
+func anthropicToolResultReq(t *testing.T, toolResultBlocks []any) []byte {
+	t.Helper()
+	req := map[string]any{
+		"model":      "claude",
+		"max_tokens": 64,
+		"messages": []any{
+			map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{"type": "tool_use", "id": "toolu-1", "name": "screenshot", "input": map[string]any{}},
+				},
+			},
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "tool_result", "tool_use_id": "toolu-1", "content": toolResultBlocks},
+				},
+			},
+		},
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func anthropicImageBlock(mime string, data []byte) map[string]any {
+	return map[string]any{
+		"type": "image",
+		"source": map[string]any{
+			"type":       "base64",
+			"media_type": mime,
+			"data":       base64.StdEncoding.EncodeToString(data),
+		},
+	}
+}
+
+// extractToolResultImage pulls the image payload back out of a rewritten
+// tool_result body (nested block at idx), decoding it into an image.Image.
+func extractToolResultImage(t *testing.T, body []byte, idx int) (image.Image, string) {
+	t.Helper()
+	var req struct {
+		Messages []struct {
+			Content []struct {
+				Type    string `json:"type"`
+				Content []struct {
+					Type   string `json:"type"`
+					Source struct {
+						Data string `json:"data"`
+					} `json:"source"`
+				} `json:"content"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	nested := req.Messages[1].Content[0].Content[idx]
+	if nested.Type != "image" {
+		t.Fatalf("nested block type = %q, want image", nested.Type)
+	}
+	data, err := base64.StdEncoding.DecodeString(nested.Source.Data)
+	if err != nil {
+		t.Fatalf("decode base64: %v", err)
+	}
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode rewritten image: %v", err)
+	}
+	return img, format
+}
+
+// TestAnthropicToolResultNestedImageResized is the original bug trigger: a
+// screenshot that exists only inside a tool_result's content array was
+// completely invisible to the flat block dispatch, leaving HasImage=false —
+// routing a vision request to a text-only endpoint. The nested image must be
+// detected, downscaled, and have its bytes replaced in place, with
+// MessageIndex pointing at the outer message (audit has no sub-block
+// coordinates).
+func TestAnthropicToolResultNestedImageResized(t *testing.T) {
+	body := anthropicToolResultReq(t, []any{anthropicImageBlock("image/png", transparentPNG(t, 2000, 1000))})
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if len(images) != 1 {
+		t.Fatalf("images = %+v, want exactly one entry for the nested screenshot", images)
+	}
+	img := images[0]
+	if img.MessageIndex != 1 {
+		t.Errorf("images[0].MessageIndex = %d, want 1 (the outer user message, not sub-block coordinates)", img.MessageIndex)
+	}
+	if img.Format != "png" || !img.Downscaled {
+		t.Errorf("images[0] = %+v, want Format=png Downscaled=true", img)
+	}
+	if bytes.Equal(out, body) {
+		t.Fatal("the nested image's base64 data must be replaced in the rewritten body")
+	}
+	nested, format := extractToolResultImage(t, out, 0)
+	b := nested.Bounds()
+	if format != "jpeg" {
+		t.Errorf("rewritten format = %q, want jpeg", format)
+	}
+	if b.Dx() != 512 || b.Dy() != 256 {
+		t.Errorf("resized to %dx%d, want 512x256 (aspect-preserved)", b.Dx(), b.Dy())
+	}
+}
+
+// TestAnthropicToolResultDetectedNotDecodable locks in that the nested path
+// inherits rewriteAnthropicImage's detected ≠ decodable contract: every
+// structurally-confirmed image reference inside a tool_result counts toward
+// len(images)/HasImage regardless of whether its bytes can be read — Remote
+// url sources, undecodable base64, and non-image payloads each still get an
+// entry, and the body passes through byte-for-byte unchanged.
+func TestAnthropicToolResultDetectedNotDecodable(t *testing.T) {
+	t.Run("url source counted as Remote", func(t *testing.T) {
+		body := anthropicToolResultReq(t, []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "https://example.com/x.png"}},
+		})
+		out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+		if len(images) != 1 || !images[0].Remote || images[0].Bytes != 0 {
+			t.Errorf("images = %+v, want one Remote=true entry with no size", images)
+		}
+		if !bytes.Equal(out, body) {
+			t.Error("a url-sourced nested image must never be fetched or rewritten")
+		}
+	})
+	t.Run("corrupt base64 still counted", func(t *testing.T) {
+		b64 := "!!!not-valid-base64!!!"
+		body := anthropicToolResultReq(t, []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": b64}},
+		})
+		out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+		if len(images) != 1 {
+			t.Fatalf("images = %+v, want 1", images)
+		}
+		if images[0].Bytes != int64(len(b64)) {
+			t.Errorf("images[0].Bytes = %d, want %d (the undecodable payload's length)", images[0].Bytes, len(b64))
+		}
+		if images[0].Remote || images[0].Downscaled {
+			t.Errorf("images[0] = %+v, want Remote/Downscaled both false", images[0])
+		}
+		if !bytes.Equal(out, body) {
+			t.Error("undecodable base64 must fail open (leave the request unchanged)")
+		}
+	})
+	t.Run("valid base64 non-image magic still counted", func(t *testing.T) {
+		body := anthropicToolResultReq(t, []any{anthropicImageBlock("image/png", []byte("valid base64, not an image"))})
+		out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+		if len(images) != 1 || images[0].Format != "" {
+			t.Errorf("images = %+v, want one entry with empty Format (genuinely unknown)", images)
+		}
+		if !bytes.Equal(out, body) {
+			t.Error("a non-image payload must fail open (leave the request unchanged)")
+		}
+	})
+}
+
+// TestAnthropicToolResultStringContentUntouched covers the pass-through side
+// of the new branch: a tool_result whose content is a plain string (the
+// common non-screenshot case) parses as no content array at all. The body
+// deliberately mentions "image_path" so HasImageMarker fires and the string
+// content actually reaches the new unmarshal, not the cheap early return.
+func TestAnthropicToolResultStringContentUntouched(t *testing.T) {
+	req := map[string]any{
+		"model":      "claude",
+		"max_tokens": 64,
+		"messages": []any{
+			map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{"type": "tool_use", "id": "toolu-1", "name": "screenshot", "input": map[string]any{}},
+				},
+			},
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "tool_result", "tool_use_id": "toolu-1", "content": `saved to "image_path" under /tmp`},
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !HasImageMarker(body) {
+		t.Fatal("test setup: body must trip the cheap presence marker for this test to be meaningful")
+	}
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("a string-content tool_result must pass through byte-for-byte unchanged")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %+v, want none", images)
+	}
+}
+
+// TestAnthropicToolResultMixedSubBlocksRewritesOnlyImage covers the recursion
+// reusing the same dispatch: a text sibling sits next to the image inside the
+// tool_result content array, and only the image block gets rewritten.
+func TestAnthropicToolResultMixedSubBlocksRewritesOnlyImage(t *testing.T) {
+	body := anthropicToolResultReq(t, []any{
+		map[string]any{"type": "text", "text": "screenshot captured, 2000x1000"},
+		anthropicImageBlock("image/png", transparentPNG(t, 2000, 1000)),
+	})
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if len(images) != 1 {
+		t.Fatalf("images = %+v, want exactly one (the image sub-block only)", images)
+	}
+	if bytes.Equal(out, body) {
+		t.Fatal("the nested image's base64 data must be replaced in the rewritten body")
+	}
+	var req struct {
+		Messages []struct {
+			Content []struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(out, &req); err != nil {
+		t.Fatal(err)
+	}
+	subs := req.Messages[1].Content[0].Content
+	if subs[0].Type != "text" || subs[0].Text != "screenshot captured, 2000x1000" {
+		t.Errorf("text sibling = %+v, want it preserved untouched", subs[0])
+	}
+	if _, format := extractToolResultImage(t, out, 1); format != "jpeg" {
+		t.Errorf("rewritten image format = %q, want jpeg", format)
+	}
+}
+
+// TestAnthropicToolResultNotDrilledInOpenAI pins the protocol isolation:
+// tool_result is not an OpenAI Completions shape, so the same block arriving
+// under that protocol falls through the default branch — no drill-down, no
+// detection, no rewrite.
+func TestAnthropicToolResultNotDrilledInOpenAI(t *testing.T) {
+	body := anthropicToolResultReq(t, []any{anthropicImageBlock("image/png", transparentPNG(t, 2000, 1000))})
+	out, images := Downscale(body, "openai-completions", Options{MaxPx: 512})
+	if !bytes.Equal(out, body) {
+		t.Error("tool_result must not be drilled into under the OpenAI protocol")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %+v, want none", images)
+	}
+}
+
+// TestToolResultOnlyImageDetectedWithoutDownscale is the HasImage end-to-end
+// regression: an image that exists ONLY inside a tool_result must come out of
+// the Downscale top-level entry with a non-empty images list even when
+// nothing needed resizing — RequestFacts.HasImage is sourced from
+// len(images), so an empty list here is exactly the misroute this whole fix
+// exists to prevent.
+func TestToolResultOnlyImageDetectedWithoutDownscale(t *testing.T) {
+	body := anthropicToolResultReq(t, []any{anthropicImageBlock("image/png", transparentPNG(t, 100, 100))})
+	out, images := Downscale(body, "anthropic-messages", Options{MaxPx: 512})
+	if len(images) != 1 {
+		t.Fatalf("images = %+v, want 1 — a below-threshold nested screenshot is still a real image reference", images)
+	}
+	if !bytes.Equal(out, body) {
+		t.Error("a below-threshold image must not be rewritten")
+	}
+}

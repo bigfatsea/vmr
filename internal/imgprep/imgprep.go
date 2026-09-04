@@ -241,10 +241,8 @@ func rewriteMessage(msgIndex int, raw json.RawMessage, protocol string, opts Opt
 	changed := false
 	var images []ImageInfo
 	for i, b := range blocks {
-		nb, bChanged, info, err := rewriteBlock(msgIndex, b, protocol, opts)
-		if info != nil {
-			images = append(images, *info)
-		}
+		nb, bChanged, infos, err := rewriteBlock(msgIndex, b, protocol, opts)
+		images = append(images, infos...)
 		if err != nil || !bChanged {
 			continue
 		}
@@ -266,7 +264,7 @@ func rewriteMessage(msgIndex int, raw json.RawMessage, protocol string, opts Opt
 	return out, true, images, nil
 }
 
-func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
+func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, []ImageInfo, error) {
 	var block map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &block); err != nil {
 		return raw, false, nil, nil
@@ -277,14 +275,65 @@ func rewriteBlock(msgIndex int, raw json.RawMessage, protocol string, opts Optio
 	}
 	switch {
 	case protocol == core.ProtocolOpenAICompletions && typ == "image_url":
-		return rewriteOpenAIImage(msgIndex, raw, block, opts)
+		return oneImage(rewriteOpenAIImage(msgIndex, raw, block, opts))
 	case protocol == core.ProtocolAnthropicMessages && typ == "image":
-		return rewriteAnthropicImage(msgIndex, raw, block, opts)
+		return oneImage(rewriteAnthropicImage(msgIndex, raw, block, opts))
+	case protocol == core.ProtocolAnthropicMessages && typ == "tool_result":
+		return rewriteAnthropicToolResult(msgIndex, raw, block, protocol, opts)
 	case protocol == core.ProtocolOpenAIResponses && typ == "input_image":
-		return rewriteResponsesImage(msgIndex, raw, block, opts)
+		return oneImage(rewriteResponsesImage(msgIndex, raw, block, opts))
 	default:
 		return raw, false, nil, nil
 	}
+}
+
+// oneImage lifts a single-image rewrite helper's result into rewriteBlock's
+// slice-shaped return — every block except tool_result yields at most one
+// image.
+func oneImage(raw json.RawMessage, changed bool, info *ImageInfo, err error) (json.RawMessage, bool, []ImageInfo, error) {
+	if info == nil {
+		return raw, changed, nil, err
+	}
+	return raw, changed, []ImageInfo{*info}, err
+}
+
+// rewriteAnthropicToolResult drills into a tool_result block's content array
+// — computer-use/vision agents return their screenshots as nested image
+// blocks here, and missing them would report HasImage=false for exactly the
+// requests most likely to need a vision endpoint. Sub-blocks recurse through
+// rewriteBlock, so non-image children (tool_use, text) fall through the same
+// dispatch untouched; msgIndex stays the outer message's — audit metadata has
+// no notion of sub-block coordinates. A string content (or any shape that
+// doesn't parse as an array) passes through untouched, like the default branch.
+func rewriteAnthropicToolResult(msgIndex int, raw json.RawMessage, block map[string]json.RawMessage, protocol string, opts Options) (json.RawMessage, bool, []ImageInfo, error) {
+	var subs []json.RawMessage
+	if err := json.Unmarshal(block["content"], &subs); err != nil {
+		return raw, false, nil, nil
+	}
+	changed := false
+	var images []ImageInfo
+	for i, b := range subs {
+		nb, bChanged, infos, err := rewriteBlock(msgIndex, b, protocol, opts)
+		images = append(images, infos...)
+		if err != nil || !bChanged {
+			continue
+		}
+		subs[i] = nb
+		changed = true
+	}
+	if !changed {
+		return raw, false, images, nil
+	}
+	newContent, err := jsonscan.MarshalNoEscape(subs)
+	if err != nil {
+		return raw, false, images, err
+	}
+	block["content"] = newContent
+	out, err := jsonscan.MarshalNoEscape(block)
+	if err != nil {
+		return raw, false, images, err
+	}
+	return out, true, images, nil
 }
 
 func rewriteOpenAIImage(msgIndex int, raw json.RawMessage, block map[string]json.RawMessage, opts Options) (json.RawMessage, bool, *ImageInfo, error) {
