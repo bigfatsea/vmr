@@ -220,6 +220,10 @@ providers:
     #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，改用带
     #       # pricing: 块的 metric: cost（见下面 plan-e/plan-f）。
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #       # 想在多条窗口间复用同一套，就在第一次出现处锚定、后面别名引用（优先
+    #       # 用它，别用整条目 `<<: *entry` 合并键——那会把 amount/every 也带过去）：
+    #       #   token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #       #   # ...后面某条 Limit 上：  token_weights: *tw
     #
     #       # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
     #       # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。P3

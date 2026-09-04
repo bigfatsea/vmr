@@ -256,6 +256,11 @@ providers:
     #       # metric: cost with a pricing: block instead (see plan-e/plan-f
     #       # below).
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #       # To reuse one set across several windows, anchor the field on its
+    #       # first use and alias it later (prefer this over a whole-entry
+    #       # `<<: *entry` merge key, which also copies amount/every):
+    #       #   token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #       #   # ...then on a later Limit:  token_weights: *tw
     #
     #       # model_multipliers (P2.1): per-model scaling applied to EVERY
     #       # component of a charge (including requests), at the moment the

@@ -339,6 +339,19 @@ A Limit's `every:` sets its counting window. Supported units: `1min` (or any `Nm
 
 - **`token_weights`** rescales a `metric: tokens` Limit's four components when computing headroom and `/status`'s `used`/`pct` — **per-Limit** (each `limits:` entry has its own; a provider with several windows writes it separately on each one it should affect, since observed plans don't always weight every window the same way), defaults to `1.0` on every component you don't mention, and only takes effect on a Limit whose own `metric` is `tokens` (configuring it on a `requests`/`cost` Limit is a load-time error). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model*, use `metric: cost` with a `pricing:` block instead (see below), because a price that differs per model can't be expressed as one shared ratio.
 - **`model_multipliers`** scales EVERY component of a charge (including requests) by a per-model multiplier at charge time — **per-Limit** (same as `token_weights`). Set it when a provider bills one model at a different tier than another (e.g. Claude 3.5 Sonnet costs 3x Haiku on requests, or a heavier coding model burns tokens faster). `"*"` is a wildcard fallback for unlisted models; omitting both a named model and `"*"` leaves that model unscaled (`1.0`). Valid on `metric: requests` and `metric: tokens` — for `metric: cost`, model pricing lives in the `pricing:` block instead (configuring both on the same Limit is a load-time error).
+- **Reusing one weight set across windows.** `token_weights`/`model_multipliers` are deliberately per-Limit — a short rate gate and a long billing bucket rarely weight usage the same way — so there is no provider-level default to inherit. When several Limits genuinely do share one set, anchor the field in place rather than retyping it:
+  ```yaml
+  limits:
+    - metric: tokens
+      every: 1d
+      amount: 1000000
+      token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    - metric: tokens
+      every: 1mo
+      amount: 20000000
+      token_weights: *tw
+  ```
+  Prefer a field-level anchor over a whole-entry merge key (`<<: *entry`): the merge key also copies `amount`/`every`, and a forgotten override then caps the wrong window at the wrong number. (Strict-YAML rejects unknown top-level keys, so you can't stage anchors in a `_anchors:` block — anchor on first use.)
 - **`models` (Scope)** decides BOTH which upstream models a Limit applies to AND whether they share one pool or each get an independent one:
   - **Omitted** (the default): every model on this provider shares one pool. Unchanged from P2.
   - **`models: ["*"]`**: every model on this provider gets its OWN independent pool — e.g. an account-level 60/min RPM limit where each model has its own 60/min gate instead of fighting over a shared 60/min.
@@ -348,7 +361,7 @@ A Limit's `every:` sets its counting window. Supported units: `1min` (or any `Nm
 
 **Bucket vs. gate, when a provider carries more than one Limit.** The Limit with the *longest* period is the account's "bucket" — its unused headroom really is being wasted if it isn't spent ("use it or lose it"), so an underused bucket actively boosts the score. Every other, shorter Limit is a "gate" — a rate limiter the vendor uses to smooth load, with no economic value in maxing it out, so a gate can only ever suppress the score toward its own saturation and never boost it above what the bucket alone would give. The provider's score is the tightest (minimum) of all its Limits' scores. With a single Limit (the common case), it's simply the account's bucket and this degenerates to exactly the P1/P2 behavior described above.
 
-Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying.
+Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying. Write `since` as `YYYY-MM-DD` (anchored to local-timezone midnight) or an RFC3339 stamp carrying an explicit local offset (`…+08:00`) — a `Z`/UTC stamp anchors every later boundary to that UTC instant, so `2026-08-01T00:00:00Z` resets at 08:00 local in UTC+8, not at midnight.
 
 #### Making the numbers precise: `token_weights` and `model_multipliers` (P2.1, per-Limit since P3)
 
@@ -402,7 +415,7 @@ providers:
 
 `metric: cost` charges an account in real money instead of a request/token count — the right choice for a Credits-style plan whose price-per-token differs *by model*, which `token_weights`' single shared ratio can't express. Pricing comes from two layers: a **standard price list built into the binary** (no configuration needed — sourced from a public LiteLLM-format snapshot, MIT licensed, refreshed periodically) and, on top of it, whatever your own `config.yaml` says is different about your account.
 
-**Recommended default: most deployments need none of this.** If you don't use `metric: cost` anywhere (plain `requests`/`tokens` limits don't touch pricing at all), skip the whole `pricing:` block. If you do use it and you're fine accounting in USD, all you need is `pricing: {currency: USD}` — `exchange_rate` stays empty, and every `providers[].pricing.overrides` rate below can just be written in USD directly. Reach for `exchange_rate` only once an account's real quota cap is denominated in a currency other than USD — a domestic vendor's CNY-priced plan, say.
+**Recommended default: most deployments need none of this.** If you don't use `metric: cost` anywhere you can skip the whole `pricing:` block — plain `requests`/`tokens` limits never consult it at load time. It stays optional-but-useful even then: `vmr report`/`vmr story` price their `$` columns from this same block, so an account on a `requests`/`tokens` plan can still declare `pricing.overrides` purely to make those estimates match its real invoice. The difference is enforcement — a `metric: cost` limit makes the block a hard load-time gate (every model it charges must resolve a complete rate); without one it only sharpens an offline estimate and degrades gracefully. If you do use it and you're fine accounting in USD, all you need is `pricing: {currency: USD}` — `exchange_rate` stays empty, and every `providers[].pricing.overrides` rate below can just be written in USD directly. Reach for `exchange_rate` only once an account's real quota cap is denominated in a currency other than USD — a domestic vendor's CNY-priced plan, say.
 
 ```yaml
 pricing:

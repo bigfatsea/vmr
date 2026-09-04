@@ -3,6 +3,8 @@
 
 # 定价 · 计费 · 配额 专题 Review（agent · 2026-09-03）
 
+> **落地状态（2026-09-04）**：本报告经外部 Agent 独立复核（含挑战本报告"复核批注"自身的断言）+ ROI 裁决后，F1 / F7 / F2 / F4 / F9 / F3 / F8 / 备注B 及复核新发现的 N1 / N6 / N7 已实施合并进 `main`（分三支 `fix/pqb-{p,q,r}` 并行落地，`go test -race ./...` 全绿）。复核过程与逐条 ROI 见 `ISSUE_RESOLUTION_REPORT.md`。**缓做 / 需裁决**：N2 加载期折叠费率、N5 等长 Limit 顺序依赖、**N3（`ScoreForLimits` 闸封顶——用户裁为本轮不碰）**、N9 —— 均登记进 `KNOWN_ISSUES`（§2.88–2.91）。**驳回**：复核 RB 的"nil Facts panic"（`core.CanonicalRequest.Facts` 是值类型，类型混淆）。F5 / F6 / 裁决A 已落为文档（`UserGuide` EN/ZH + `config.example` EN/ZH + 本设计族的 Quota 篇）。
+
 > **定位**：一次范围严格限定在"定价 / 计费 / 配额"的系统级架构 Review。方法沿用 full-review 五阶段；但**覆盖范围收窄**为定价、计费、配额相关的模块、代码、功能（`internal/pricing`、`internal/quota`、`internal/config` 的 pricing/quota 部分、路由半区计费路径 `internal/router/quota.go`、分析半区配额/成本消费面 `internal/report/{cost,providerquota,findings_quota,pricing}.go`、`cmd/vmr` 配额入口、`core` 的 `QuotaSpec`/`PricingSpec`/`Limit` 契约）。
 > 前身文档 `Billing_Quota_Pricing_2026-09` 的全部有效内容（P1–P6、配额周期时区裁决、`every` 语法备注、优先级矩阵与依赖关系）已在下文逐条合并吸收，状态更新为"本轮源码复核结论"；确认吸收完整后，前身文档被删除。
 > 仅审业务代码；测试代码本体不审，但差分测试（`cmd/vmr/quota_parity_test.go`）作为机制在阶段三评估。
