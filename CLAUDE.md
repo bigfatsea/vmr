@@ -139,8 +139,9 @@ root allowed to see both halves at once.
 - **`internal/report` is coupled to `audit.Record`'s shape at compile time** — changing the
   record structure means updating `report` and its tests in the same change.
 - **Run `go test ./internal/archtest/...`** after any package-boundary change, any `router`
-  change, or any edit that grows a function. When it trips, split the file/function; raising
-  the number in the table is what the failure message tells you not to do.
+  change, or any edit that grows a function. Line budgets are soft caps: in ordinary tasks,
+  don't contort a change to fit them — raise the number in the table as needed. Refactoring
+  oversized files (splitting, reorganizing) gets scheduled as its own dedicated task.
 
 ## Conventions
 
