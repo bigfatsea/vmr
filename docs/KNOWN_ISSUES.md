@@ -18,9 +18,11 @@
 ## 0. 当前状态
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
-- **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 当前**非全绿**——约 43 个测试因 §2.87（`standard_price_curated.yaml` 别名指向空 key）失败，是数据文件维护问题、非代码缺陷；修复后本注与 §2.87 一并删除。
-- **§2 分布**：高危 0；中危 5（`2.2`/`2.17`/`2.18`/`2.85`/`2.87`），其余均为低危。
+- **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
+- **§2 分布**：高危 0；中危 5（`2.2`/`2.17`/`2.18`/`2.85`/`2.88`），其余均为低危。
+- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.88（闸封顶，需裁决）/ §2.89 / §2.90 / §2.91。
 - **2026-09-03 已闭环**：一批三方 review 核实后的小修（错误分类补 `error.code`、config 加载期禁 provider 名冒号 / 校验 strategy、keyless 自建上游按地址分级、探针仅 2xx 扣配额、anthropic 损坏图片仍计入 `HasImage`、`.parse-cache` mtime 消歧、md/html 行为指标统一、LLM detector 并发限时、`metric:cost` estimated 口径分侧等），详见 `CHANGELOG` `[Unreleased]`。删除的 §2 条目：`2.65`/`2.71`/`2.72`/`2.76`/`2.78`/`2.81`/`2.82`/`2.83`/`2.84`。
+- **2026-09（早于本轮）已闭环**：`standard_price_curated.yaml` 别名指向空 key 致 `LoadStandard` 失败（原 §2.87，commit `2e5d9cd` 恢复 `rates:` 段）。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
 
 ---
@@ -386,11 +388,32 @@
 - **触发条件**：真实用户报告「用某慢上游时流式响应假死后被客户端超时切断」。
 
 
-#### 2.87 [中，transient——用户 WIP，非架构取舍] `standard_price_curated.yaml` 的别名组指向不存在的 canonical key，`LoadStandard` 失败
+#### 2.88 [中，需调度语义 owner 裁决] `ScoreForLimits` 的闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效
 
-- **现状**（2026-09-03 发现，随 commit `9edf3ae` 引入）：该文件被重构为 aliases-only（删掉了 `rates:` 段），但 `(1)`/`(2)` 别名组指向的 `zhipu/*` / `volcengine/*` / `moonshot/*-highspeed` canonical key **在合并价目表（curated + generated）里都不存在**。`Table.ValidateAliases` 拒绝 → `LoadStandard` 返回 error。`go build ./...` 仍绿（`LoadStandard` 只在测试/运行时跑），但 `go test ./...` 有约 43 个测试红（`internal/pricing` / `internal/config` 的 `metric: cost` 校验 / `internal/router` 的 MetricCost / `cmd/vmr` 的 cost parity——全同一根因）。
-- **修法**：给这些别名补 `rates:` 行（curated 文件重新引入 `rates:` 段，或把行加进 `pricing.supplement`），或删掉指向空 key 的别名组。属数据文件维护，不是代码缺陷。
-- **触发条件**：已触发——`go test ./...` 当前非全绿即由此。修复后删除本条。
+- **现状**（2026-09-04 定价/配额专题 review 发现，源码已核实）：`internal/quota/score.go` `ScoreForLimits` 的合并式是 `score := 5.0; 对每条 Limit: h = raw; if 非桶 && h > 1 { h = 1 }; if h < score { score = h }`。于是**只要一个 provider 配了哪怕一条 `raw ≥ 1` 的健康空闲速率闸，整个账号的综合评分就被 `min` 焊死在 ≤ 1.0**——月度预付费桶的 use-it-or-lose-it 抢跑加分（`raw > 1` 时主动提分争流量）永久拿不到。
+- **矛盾点**：设计文档 §5.2 散文说「闸只应该在接近饱和时压制流量，绝不应该提升流量」，读作「空闲闸不该压制」→ 是 bug；但同段公式 `综合 = min over L of headroom(L)`、`headroom(闸) = min(1, raw)` 又精确对应当前实现 → 是 as-designed。`internal/quota/score_test.go` 三个用例无一覆盖「桶 raw > 1 且闸空闲」这条正向抢跑路径。
+- **两种收法**：(a) 判为 bug —— `score := 桶raw; 对每条闸: if 闸raw < 1 && 闸raw < score { score = 闸raw }`（空闲闸不参与），补正向抢跑单测；(b) 判为 as-designed —— 在 `score.go` 注释 + 设计文档 §5.2 写死「任何闸都会把综合分压到 ≤ 1（保守取舍：不为长周期欠用而突破短周期节奏）」，消除散文歧义。
+- **为什么待定**：改动 (a) 会改变线上端点重排行为，属核心调度语义，需项目 owner 拍板。2026-09-04 已就此征询用户，裁为「本轮不碰，登记此条留待调度语义 owner 专门评审」。
+
+#### 2.89 [低，登记待触发] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
+
+- **现状**（2026-09-04 review 发现）：`core.Endpoint` 挂 `*core.PricingSpec` 而非折叠好的 `Rate`，`router.ChargeResponse` 的 cost 分支每笔请求 `pricing.EffectiveRate(ep.PricingRate)` 重跑一次 `resolveChain`（≤3 元素切片的递归下钻）。P0-A 移除时间维后 `EffectiveRate(spec)` 对给定 spec 是纯静态确定性函数，`BuildSnapshot` 时端点已细化到唯一 upstream model，完全可在加载期折叠为一个已解析 `Rate` 挂到端点上、热路径变字段直读。
+- **性质**：`resolveChain` 是纳秒级、相对一次上游 HTTP 可忽略——不是性能问题，是「让价目表进实时路由热路径」这条架构红线（§1.0）的一处轻微越界 + `core.go` 注释把「Resolve 阶段不能提前折叠 Base 与 Override」偷换成了「加载完成后也不能折叠为静态 Rate」的误导。
+- **可能方案**：`BuildSnapshot` 折叠预解析 `Rate` 挂 `Endpoint`；`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）。
+- **触发条件**：`core` / `router` 有其它改动顺路做，或 profiling 真的把它标出来（不太可能）。
+
+#### 2.90 [低] 周期长度相同的多条 Limit，`BucketIndex` 的桶/闸角色取决于 YAML 书写顺序
+
+- **现状**（2026-09-04 review 发现）：`internal/quota/score.go` `BucketIndex` 用 `nominalUnitHours` 严格大于挑最长周期。一个 provider 同时配了共享池 `every: 1mo` 和某模型专属池 `every: 1mo`（合法共存）时，两者名义时长相等，排在配置数组前面的被选为桶、后面的被选为闸——仅仅上下颠倒两行就会互换角色，缺确定性仲裁。
+- **可能方案**：周期时长并列时加次级裁决——共享池优先为桶（`!PerModel` 优于 `PerModel`），同类则 `Amount` 大者为桶。
+- **触发条件**：真实配置出现等长复合 Limit 且用户报告角色不符预期。当前可靠规范书写规避。
+
+#### 2.91 [低，F4 修复后已缓解] `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默
+
+- **现状**（2026-09-04 review 发现）：`internal/quota/quota.go` `resetIfStaleLocked` 的 `rollbackWarned` 一旦置位便无重置机会。F4（`ChargeCost` 单锁原子）落地前，周期切换瞬间晚到的估算写可能携旧 `periodStart` 误触发一次时钟回退分支，此后宿主机真实 NTP 阶跃/快照回滚/时区误配都不再有 WARN。
+- **现状缓解**：F4 已消除那条跨锁裂缝，spurious trip 的主要来源没了。
+- **可能方案**：按 `limitKey` 或时间窗去重抑制，而非进程生命周期一次性 latch。
+- **触发条件**：F4 之后仍观察到本该有的时钟回退 WARN 缺失。
 
 
 #### 2.17 [中] `imgprep` 解码闸门按「防炸弹」设定，其内存上界与单请求内存预算差一个数量级
