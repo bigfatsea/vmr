@@ -165,29 +165,39 @@ func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[
 }
 
 // firstDeadOverride returns the index of the first rule in rules (already
-// validated, in written order) that first-match-wins can never reach: an
-// earlier "*" wildcard matches every model including this rule's own, or an
-// earlier rule already named this exact model. Returns -1 when every rule
-// is reachable. This is only a meaningful, unconditional mistake now that
-// P0-A dropped the date/hour time dimension — two rules sharing a model
-// pattern used to legitimately differ by active time window (a promo
-// stacked over a standing rate); with no time axis left, a repeated model
-// pattern has no way to ever differ in outcome, so it is always dead
-// config, not a deliberate pairing.
+// validated, in written order) that first-match-wins can never reach. Only
+// an EXPLICIT rule (a rate, not a discount) terminates matching —
+// resolveChain (internal/pricing) drills through a Discount to whatever
+// resolves below it — so only an Explicit rule shadows later rules in its
+// match domain: an earlier Explicit "*" wildcard makes every later rule
+// unreachable, and an earlier Explicit rule for a model makes a later rule
+// for that same model unreachable. A Discount-form rule (wildcard or not)
+// shadows nothing: it composes multiplicatively with everything below it,
+// so "[wildcard discount, specific explicit rate]" and stacked discounts on
+// one model are both live, legal configs. Returns -1 when every rule is
+// reachable. This is only a meaningful, unconditional mistake now that
+// P0-A dropped the date/hour time dimension — two Explicit rules sharing a
+// model pattern used to legitimately differ by active time window (a promo
+// stacked over a standing rate); with no time axis left, a repeated
+// Explicit pattern has no way to ever differ in outcome, so it is always
+// dead config, not a deliberate pairing.
 func firstDeadOverride(rules []pricing.OverrideRule) int {
-	seenWildcard := false
-	seenModel := map[string]bool{}
+	seenExplicitWildcard := false
+	seenExplicitModel := map[string]bool{}
 	for i, r := range rules {
-		if seenWildcard {
+		if seenExplicitWildcard {
 			return i
 		}
 		key := strings.ToLower(r.Model)
-		if seenModel[key] {
+		if key != "*" && seenExplicitModel[key] {
 			return i
 		}
-		seenModel[key] = true
-		if r.Model == "*" {
-			seenWildcard = true
+		if r.Discount == nil { // only an Explicit rule terminates matching
+			if key == "*" {
+				seenExplicitWildcard = true
+			} else {
+				seenExplicitModel[key] = true
+			}
 		}
 	}
 	return -1
@@ -357,7 +367,7 @@ func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error
 				overrides = append(overrides, rule)
 			}
 			if idx := firstDeadOverride(overrides); idx >= 0 {
-				return fmt.Errorf("provider %q: pricing.overrides[%d]: model %q can never activate — an earlier rule in this list already matches every request this one would (either the exact same model, or an earlier \"*\" wildcard) and first-match-wins always picks that one first; drop this rule or reorder the list", p.Name, idx, overrides[idx].Model)
+				return fmt.Errorf("provider %q: pricing.overrides[%d]: model %q can never activate — an earlier Explicit rule (a rate, not a discount) in this list already matches every request this one would (either the exact same model, or an earlier \"*\" wildcard) and an Explicit rule terminates first-match-wins; a discount composes down the chain instead, so only an Explicit rule can shadow — drop this rule or reorder the list", p.Name, idx, overrides[idx].Model)
 			}
 		}
 		// Stored for EVERY provider, not just ones with a pricing: block or

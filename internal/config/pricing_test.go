@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -372,39 +373,114 @@ pricing:
 }
 
 // TestPricing_Override_DuplicateModelPattern_Rejected covers
-// firstDeadOverride: with no time dimension left to differentiate two rules
-// sharing the same model pattern, the second is always dead config
-// (first-match-wins never reaches it) — see that function's doc comment.
+// firstDeadOverride: two EXPLICIT rules sharing the same model pattern, no
+// time dimension left to differentiate them — first-match-wins never
+// reaches the second, so it is dead config (see that function's doc
+// comment). Two DISCOUNT rules on one model stay legal: a discount
+// terminates nothing, so they compose multiplicatively
+// (TestPricing_Override_SameModelDiscounts_Compose).
 func TestPricing_Override_DuplicateModelPattern_Rejected(t *testing.T) {
 	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}
 pricing:
   overrides:
-    - {model: gpt-4o, discount: 0.5}
-    - {model: gpt-4o, discount: 0.25}`, "gpt-4o")
+    - {model: gpt-4o, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
+    - {model: gpt-4o, in_fresh: 2.58, cache_read: 1.32, cache_write: 2.58, out: 19.54}`, "gpt-4o")
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "can never activate") {
 		t.Errorf("want a dead-override rejection, got %v", err)
 	}
 }
 
-// TestPricing_Override_WildcardBeforeSpecific_Rejected covers the other
-// firstDeadOverride shape: an earlier "*" wildcard shadows every later
-// rule regardless of that rule's own model — the design doc's old
-// promo-over-standing-rate pattern relied on a time window to make this
-// ordering meaningful; without one, it is simply dead config.
-func TestPricing_Override_WildcardBeforeSpecific_Rejected(t *testing.T) {
+// TestPricing_Override_ExplicitWildcardBeforeSpecific_Rejected covers the
+// other firstDeadOverride shape: an earlier EXPLICIT "*" wildcard
+// terminates matching for every model, so a later rule — no matter its own
+// model — is unreachable dead config. (A wildcard DISCOUNT does not
+// shadow: it composes down the chain, see
+// TestPricing_Override_WildcardDiscountOverSpecificExplicit_Resolves.)
+func TestPricing_Override_ExplicitWildcardBeforeSpecific_Rejected(t *testing.T) {
 	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
   limits:
     - {metric: cost, every: 1mo, amount: 100}
 pricing:
   overrides:
-    - {model: "*", discount: 0.25}
+    - {model: "*", in_fresh: 1.0, cache_read: 0.5, cache_write: 1.0, out: 5.0}
     - {model: gpt-4o, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}`, "gpt-4o")
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "can never activate") {
 		t.Errorf("want a dead-override rejection, got %v", err)
+	}
+}
+
+// TestPricing_Override_WildcardDiscountOverSpecificExplicit_Resolves pins
+// the legal shape firstDeadOverride must NOT reject: an account-wide
+// wildcard DISCOUNT first, a model-specific EXPLICIT rate after. A discount
+// drills down the chain instead of terminating, so the gpt-4o rule stays
+// reachable and the composed rate is 0.8 x the explicit four components.
+func TestPricing_Override_WildcardDiscountOverSpecificExplicit_Resolves(t *testing.T) {
+	yaml := pricingCfg("pricing:\n  currency: USD\n", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: "*", discount: 0.8}
+    - {model: gpt-4o, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}`, "gpt-4o")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse rejected a wildcard-discount-over-specific-explicit list: %v", err)
+	}
+	spec := cfg.ResolvedPricing["p1\x00gpt-4o"]
+	if spec == nil {
+		t.Fatal("gpt-4o not resolved")
+	}
+	rate := pricing.EffectiveRate(spec)
+	for _, tc := range []struct {
+		name string
+		have *float64
+		want float64
+	}{{"in_fresh", rate.InFresh, 1.58 * 0.8}, {"cache_read", rate.CacheRead, 0.32 * 0.8},
+		{"cache_write", rate.CacheWrite, 1.58 * 0.8}, {"out", rate.Out, 9.54 * 0.8}} {
+		// Tolerance, not ==: the composed value is a runtime float multiply,
+		// the expected one a compile-time constant.
+		if tc.have == nil || math.Abs(*tc.have-tc.want) > 1e-9 {
+			t.Errorf("%s = %v, want %v (explicit x 0.8)", tc.name, tc.have, tc.want)
+		}
+	}
+}
+
+// TestPricing_Override_SameModelDiscounts_Compose pins the other shape the
+// narrowed firstDeadOverride legalizes: two DISCOUNT rules (stacked here on
+// one model; the same holds for a specific discount above a wildcard
+// discount) terminate nothing and compose multiplicatively against the
+// table's Base.
+func TestPricing_Override_SameModelDiscounts_Compose(t *testing.T) {
+	yaml := pricingCfgNamed("pricing:\n  currency: USD\n", "anthropic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}
+pricing:
+  overrides:
+    - {model: claude-3-7-sonnet-20250219, discount: 0.5}
+    - {model: "*", discount: 0.8}`, "claude-3-7-sonnet-20250219")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse rejected stacked discounts: %v", err)
+	}
+	spec := cfg.ResolvedPricing["anthropic\x00claude-3-7-sonnet-20250219"]
+	if spec == nil {
+		t.Fatal("claude-3-7-sonnet-20250219 not resolved")
+	}
+	rate := pricing.EffectiveRate(spec)
+	base := []struct {
+		name string
+		have *float64
+		want *float64
+	}{{"in_fresh", rate.InFresh, spec.Base.InFresh}, {"cache_read", rate.CacheRead, spec.Base.CacheRead},
+		{"cache_write", rate.CacheWrite, spec.Base.CacheWrite}, {"out", rate.Out, spec.Base.Out}}
+	for _, tc := range base {
+		if tc.have == nil || tc.want == nil || *tc.have != *tc.want*0.5*0.8 {
+			t.Errorf("%s = %v, want %v (Base x 0.5 x 0.8)", tc.name, tc.have, tc.want)
+		}
 	}
 }
 
