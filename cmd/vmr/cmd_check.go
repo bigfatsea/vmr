@@ -15,6 +15,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
+	"vmr/internal/quota"
 	"vmr/internal/router"
 )
 
@@ -434,8 +435,25 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		return
 	}
 	fmt.Fprintln(w, "  quota:")
-	for _, lc := range p.Quota.Limits {
+	// Provider-level bucket/gate roles (quota.BucketIndex, tie-broken — see
+	// preferBucket): correct as printed for a shared Limit. A per-model
+	// Limit's role is judged among the Limits applicable to each specific
+	// model and can differ per model — /status and `vmr status` render the
+	// live per-model roles, so a trailing note points there instead of
+	// printing a per-model role that would only be right for some models.
+	resolved := make([]core.Limit, len(p.Quota.Limits))
+	anyPerModel := false
+	for i, lc := range p.Quota.Limits {
+		resolved[i] = lc.Resolved
+		anyPerModel = anyPerModel || quota.PerModel(lc.Resolved)
+	}
+	bi := quota.BucketIndex(resolved)
+	for i, lc := range p.Quota.Limits {
 		l := lc.Resolved
+		role := "gate"
+		if i == bi {
+			role = "bucket"
+		}
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
 		amount := fmt.Sprintf("%g", l.Amount)
 		// A cost-metric amount is denominated in cfg.Pricing.Currency
@@ -444,7 +462,7 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
 			amount += " " + cfg.Pricing.Currency
 		}
-		detail := fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)
+		detail := fmt.Sprintf("role=%s every=%s since=%s amount=%s", role, l.EveryText, since, amount)
 		if len(l.Models) > 0 {
 			detail += " models=" + strings.Join(l.Models, ",")
 		}
@@ -463,6 +481,9 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 			}
 			fmt.Fprintln(w, checkLine(6, "model_multipliers", strings.Join(parts, " ")))
 		}
+	}
+	if anyPerModel {
+		fmt.Fprintln(w, checkLine(4, "note", "per-model Limits' role is judged per applicable model — /status and vmr status show the live roles"))
 	}
 }
 

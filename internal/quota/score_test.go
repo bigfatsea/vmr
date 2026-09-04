@@ -123,6 +123,50 @@ func TestBucketIndex_LongestTumblingWins(t *testing.T) {
 	}
 }
 
+// TestBucketIndex_EqualPeriods_SharedBeatsPerModel pins the §2.90 tie-break's
+// first rule: two Limits with EQUAL nominal periods resolve by class, not by
+// YAML written order — the shared pool is the bucket in BOTH orders, because
+// only as the bucket does the shared pool's drain produce the smooth
+// declining-score signal reordering needs (as a gate it stays silent until
+// it blows).
+func TestBucketIndex_EqualPeriods_SharedBeatsPerModel(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricTokens, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 90_000_000}
+	perModel := core.Limit{Metric: core.MetricTokens, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 5_000_000, Models: []string{"claude-x"}}
+	if got := BucketIndex([]core.Limit{shared, perModel}); got != 0 {
+		t.Errorf("BucketIndex([shared, perModel]) = %v, want 0 (shared pool is the bucket)", got)
+	}
+	if got := BucketIndex([]core.Limit{perModel, shared}); got != 1 {
+		t.Errorf("BucketIndex([perModel, shared]) = %v, want 1 (shared pool is the bucket regardless of written order)", got)
+	}
+}
+
+// TestBucketIndex_EqualPeriodsSameClass_LargerAmountWins pins the §2.90
+// tie-break's second rule: two same-class equal-period Limits resolve by
+// Amount — the tighter constraint is the better fuse (it trips first, all a
+// gate is for), the looser pool the better capacity gauge.
+func TestBucketIndex_EqualPeriodsSameClass_LargerAmountWins(t *testing.T) {
+	small := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "w", EveryText: "1w", Amount: 100}
+	large := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "w", EveryText: "1w", Amount: 90_000}
+	if got := BucketIndex([]core.Limit{small, large}); got != 1 {
+		t.Errorf("BucketIndex([small, large]) = %v, want 1 (larger Amount is the bucket)", got)
+	}
+	if got := BucketIndex([]core.Limit{large, small}); got != 0 {
+		t.Errorf("BucketIndex([large, small]) = %v, want 0 (larger Amount is the bucket regardless of written order)", got)
+	}
+}
+
+// TestBucketIndex_FullTie_KeepsConfigOrder pins the tie-break's documented
+// final fallback: identical class AND Amount keeps the earlier-configured
+// Limit — config order is only ever consulted when nothing else
+// distinguishes the candidates.
+func TestBucketIndex_FullTie_KeepsConfigOrder(t *testing.T) {
+	a := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 1000}
+	b := a
+	if got := BucketIndex([]core.Limit{a, b}); got != 0 {
+		t.Errorf("BucketIndex([a, a]) = %v, want 0 (full tie keeps config order)", got)
+	}
+}
+
 // TestScoreForLimits_TypeA is the design doc's §5.2 worked example, pinned
 // as a numeric assertion: a 5h gate at 5500/6000 used with 1h left is LIVE
 // (used < amount), and a live gate doesn't touch the score at all — the

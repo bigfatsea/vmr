@@ -42,6 +42,51 @@ func TestCmdCheck_PrintsQuotaConfig(t *testing.T) {
 	}
 }
 
+// TestCmdCheck_PrintsBucketGateRoles pins the role annotation on vmr check's
+// quota section: the single Limit is the bucket ("role=bucket"), and adding
+// a shorter window marks it "role=gate" — a resolved role an operator can
+// see instead of one that only emerges from scoring at runtime.
+func TestCmdCheck_PrintsBucketGateRoles(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", quotaConfigYAML)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "role=bucket") {
+		t.Fatalf("output missing role=bucket for the single-Limit provider:\n%s", out)
+	}
+
+	twoLimits := strings.Replace(quotaConfigYAML,
+		"limits:", "limits:\n        - {metric: requests, every: 1min, amount: 60}", 1)
+	path = writeTempFile(t, "config.yaml", twoLimits)
+	out = captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "every=1min") && !strings.Contains(line, "role=gate") {
+			t.Fatalf("the 1min Limit should be role=gate:\n%s", out)
+		}
+		if strings.Contains(line, "every=1mo") && !strings.Contains(line, "role=bucket") {
+			t.Fatalf("the 1mo Limit should be role=bucket:\n%s", out)
+		}
+	}
+}
+
+// TestCmdCheck_EqualPeriods_RoleNotWrittenOrder pins the §2.90 tie-break at
+// the check layer: a shared 1mo pool and a per-model 1mo pool must resolve
+// the shared pool to the bucket regardless of the order the two limits:
+// entries appear in the YAML.
+func TestCmdCheck_EqualPeriods_RoleNotWrittenOrder(t *testing.T) {
+	yaml := strings.Replace(quotaConfigYAML,
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}",
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}\n        - {metric: tokens, every: 1mo, amount: 5000000, models: [real-model]}", 1)
+	path := writeTempFile(t, "config.yaml", yaml)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "models=real-model") && !strings.Contains(line, "role=gate") {
+			t.Fatalf("the per-model equal-period Limit should be role=gate (shared pool wins the tie):\n%s", out)
+		}
+	}
+	if !strings.Contains(out, "per-model Limits' role is judged per applicable model") {
+		t.Fatalf("a per-model Limit in the config should produce the note pointing at /status:\n%s", out)
+	}
+}
+
 func TestCmdCheck_PrintsEffectiveTimezone(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })

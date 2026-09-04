@@ -100,7 +100,11 @@ func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 
 // BucketIndex returns the index of limits' bucket Limit — the longest
 // tumbling period among them (see the design doc's §5.2 bucket-vs-gate
-// rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). This package
+// rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). Equal nominal periods
+// break deterministically, never by YAML written order (KNOWN_ISSUES §2.90):
+// a shared (non-per-model) pool beats a per-model one, and within the same
+// class the larger Amount wins — see preferBucket; a full tie keeps the
+// earlier-configured Limit as the documented final fallback. This package
 // carries no rolling windows yet (see core.Limit's doc comment), so every
 // Limit is tumbling and this always resolves to a real index for a
 // non-empty slice — the "all-rolling has no bucket" branch §5.2 also
@@ -115,11 +119,32 @@ func BucketIndex(limits []core.Limit) int {
 	bh := nominalUnitHours(limits[0].EveryUnit, limits[0].EveryN)
 	for i := 1; i < len(limits); i++ {
 		h := nominalUnitHours(limits[i].EveryUnit, limits[i].EveryN)
-		if h > bh {
+		if h > bh || (h == bh && preferBucket(limits[i], limits[bi])) {
 			bi, bh = i, h
 		}
 	}
 	return bi
+}
+
+// preferBucket breaks the tie between two Limits whose nominal periods are
+// EQUAL — the case the longest-period rule alone leaves to YAML written
+// order (KNOWN_ISSUES §2.90). First principles, not convention: a shared
+// pool beats a per-model one because the shared pool's headroom is the
+// scarcity EVERY model's traffic draws down — only as the bucket does its
+// drain produce the smooth declining-score signal quota-aware reordering
+// needs; as a gate it stays silent until it blows, an abrupt step instead
+// of a gradient. Within the same class, the larger Amount wins: the tighter
+// constraint is the better fuse (it trips first, which is all a gate is
+// for), the looser pool the better capacity gauge. Strictly-better only —
+// a full tie (same class AND same Amount) reports false, keeping the
+// earlier-configured Limit, so config order remains the final, documented
+// fallback.
+func preferBucket(a, b core.Limit) bool {
+	pa, pb := PerModel(a), PerModel(b)
+	if pa != pb {
+		return !pa
+	}
+	return a.Amount > b.Amount
 }
 
 // ScoreForLimits composes a whole provider's score across every one of its
