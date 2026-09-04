@@ -27,6 +27,25 @@ func TestRate_Complete_RejectsNonFiniteOrNegative(t *testing.T) {
 	}
 }
 
+// TestRate_IsEmpty pins the "no pricing at all" predicate next to its
+// complement: Empty = all four nil, Complete = all four set and finite,
+// and a partially-set rate is neither.
+func TestRate_IsEmpty(t *testing.T) {
+	if !(Rate{}).IsEmpty() {
+		t.Fatal("the zero Rate (all four components nil) must be Empty")
+	}
+	partial := Rate{InFresh: f(0)}
+	if partial.IsEmpty() {
+		t.Fatal("a rate with one component set is not Empty")
+	}
+	// A partial rate is neither Empty nor Complete — that middle ground is
+	// exactly the distinction the two predicates exist to draw.
+	half := Rate{Out: f(4)}
+	if half.IsEmpty() || half.Complete() {
+		t.Fatal("a half-set rate must be neither Empty nor Complete")
+	}
+}
+
 func TestRate_MissingComponents_IdentifiesNonFiniteOrNegative(t *testing.T) {
 	nan := f(math.NaN())
 	neg := f(-1.0)
@@ -83,6 +102,24 @@ rates:
 	}
 	if r, ok := tbl.Lookup("free/model"); !ok || !r.Complete() {
 		t.Fatalf("all-zero rate must load and stay Complete: ok=%v r=%+v", ok, r)
+	}
+}
+
+// TestParseTable_EmptyRateRow_Rejected pins the N1 gate: a rates[] row
+// naming a key but carrying no rate component would make every lookup of
+// that key a tableHit with an all-nil (unpriced) Rate, defeating the
+// "no rate at all" contract upstream (see Rate.IsEmpty). A row with at
+// least one component (even 0.0, even on its own) stays legal.
+func TestParseTable_EmptyRateRow_Rejected(t *testing.T) {
+	data := []byte("currency: USD\nrates:\n  - {key: vendor/stub-model}\n")
+	if _, err := ParseTable(data); err == nil {
+		t.Fatal("want an error for a rate row with no components")
+	} else if !strings.Contains(err.Error(), "at least one of in_fresh/cache_read/cache_write/out") {
+		t.Fatalf("error should name the required components, got: %v", err)
+	}
+	ok := []byte("currency: USD\nrates:\n  - {key: vendor/partial-model, in_fresh: 1.5}\n")
+	if _, err := ParseTable(ok); err != nil {
+		t.Fatalf("a row with one component must still load, got: %v", err)
 	}
 }
 

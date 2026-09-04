@@ -98,17 +98,21 @@ func (r *Resolver) WithDisplayFactor(f float64) *Resolver {
 
 // RateFor resolves provider+model's Rate — Resolve (memoized) then
 // EffectiveRate, composed into the single call shape a per-record
-// aggregation loop wants. ok=false when nothing resolves at all (no table
-// entry, no override) for this provider+model; a resolved-but-incomplete
-// Rate still returns ok=true (best-effort — vmr report degrades gracefully
-// on partial data the way it always has, unlike metric: cost's load-time
-// hard gate).
+// aggregation loop wants. ok=false when nothing resolves at all — no table
+// entry, no override, or a dangling discount over an empty Base (an
+// all-nil Rate is "unpriced", not "free": best-effort reports drop the $
+// column rather than report $0.00). A resolved-but-incomplete Rate still
+// returns ok=true (best-effort — vmr report degrades gracefully on partial
+// data the way it always has, unlike metric: cost's load-time hard gate).
 func (r *Resolver) RateFor(provider, model string) (Rate, bool) {
 	spec, ok := r.resolve(provider, model)
 	if !ok {
 		return Rate{}, false
 	}
 	rate := EffectiveRate(spec)
+	if rate.IsEmpty() {
+		return Rate{}, false
+	}
 	if r.displayFactor != 0 && r.displayFactor != 1 {
 		rate = rate.Scale(r.displayFactor)
 	}
